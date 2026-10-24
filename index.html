@@ -6366,6 +6366,7 @@ function stepSub(sb, dt) {
     sb.drag = (sb.drag || 0) + Math.abs(sb.vx) * dt * 0.08;
     while (sb.drag >= 1) { sb.drag -= 1; kickDust(sb.x - Math.sign(sb.vx || 1) * SUB_L * rnd(0.1, 0.45), 18, clamp(Math.abs(sb.vx) / 50, 0.25, 0.8)); }
   }
+  subVsWrecks(sb, dt);                                  // (the wrecks on the way: solid)
   // fish don't stay near a moving submarine
   sb.scareT = (sb.scareT || 0) - dt;
   if (sb.scareT <= 0 && sb.y > WATER_Y + 6) { sb.scareT = 0.35; scareFish(sb.x, sb.y, SUB_L * (Math.abs(sb.vx) > 4 || Math.abs(sb.vy) > 4 ? 1.3 : 0.9)); }
@@ -6442,7 +6443,13 @@ function stepSubWreck(sb, dt) {
   if (sb.scareT <= 0 && sb.sinkT < 20) { sb.scareT = 0.4; const q = (sb.parts && sb.parts[0]) || sb; scareFish(q.x, q.y, SUB_L * 1.1); }
   let all = true;
   for (const q of sb.parts || []) {
-    if (q.rest) { if (Math.random() < dt * 0.6) addBubble(q.x + rnd(-10, 10), q.y - 6, 0, -rnd(15, 30), rnd(0.8, 1.6)); continue; }
+    if (q.rest) {
+      if (Math.random() < dt * 0.6) addBubble(q.x + rnd(-10, 10), q.y - 6, 0, -rnd(15, 30), rnd(0.8, 1.6));
+      // what it lay on blown away (or moved off): it goes on down
+      q.chk = (q.chk || 0) - dt;
+      if (q.chk <= 0) { q.chk = 0.3; if (partFloor(sb, q) > q.y + 2) { q.rest = false; q.vy = 0; } }
+      if (q.rest) continue;
+    }
     all = false;
     // each half sinks on its own, tipping toward its broken end, bleeding bubbles from the break
     q.vx *= 1 - 0.8 * dt;
@@ -6453,16 +6460,215 @@ function stepSubWreck(sb, dt) {
     const half = (q.s1 - q.s0) / SUB_SECTIONS * SUB_L / 2, brokenEnd = q.s0 === 0 ? 1 : -1;
     while (q.leak >= 1) { q.leak -= 1; addBubble(q.x + brokenEnd * half * rnd(0.6, 1), q.y + rnd(-8, 6), rnd(-8, 8), -rnd(20, 50), rnd(0.8, 3)); }
     // it ploughs into the sand: the keel ends up buried a little under the seabed
-    const bed = Math.min(seabedY(q.x), SEABED_TOP + 45 * SEABED_K) - (SUB_KEEL_ROW - SUB_WL_ROW) * SUB_K + 4;   // keel ploughed into the visible sand
+    // (or onto a wreck already down there: it piles on top of it)
+    const sand = partSand(q), bed = partFloor(sb, q);
     if (q.y >= bed) {
-      q.y = bed; q.rest = true;
-      kickDust(q.x, half * 1.3, 1); scatterBed(q.x, half * 1.8, 1);
-      shock(q.x, bed, 0.7, true, half * 2);
-      sfxCrash(q.x, 0.4);
-      shakeAt(4, q.x);
+      const v = q.vy;
+      q.y = bed; q.rest = true; q.chk = 0.3;
+      if (bed < sand - 2) {
+        if (v > 4) crashFx(q.x, bed + SUB_DN, v);
+      } else {
+        kickDust(q.x, half * 1.3, 1); scatterBed(q.x, half * 1.8, 1);
+        shock(q.x, bed, 0.7, true, half * 2);
+        sfxCrash(q.x, 0.4);
+        shakeAt(4, q.x);
+      }
     }
   }
   if (all && sb.state === 'sinking') sb.state = 'wreck';
+}
+/* ---------------- Wrecks: what has gone down is still there (user Oct 24) ----------------
+   A sinking or sunk hull - a battleship's broken pieces, a submarine's halves - can still be hit: a shell, a torpedo
+   or a depth charge blows it further apart. And it's solid: a submarine can't pass through it (she crashes into it, or
+   settles on top of it), a wreck going down lands on whatever lies below (a second sub piles on the first), and one
+   going down onto a submarine holes her. */
+let SUB_TOPS = null;
+function subTops() {
+  if (SUB_TOPS) return SUB_TOPS;
+  const m = img.subMask, W = SUB_SRC_W, H = m.length / W, t = new Int16Array(W);
+  for (let c = 0; c < W; c++) { let r = 0; while (r < H && !m[r * W + c]) r++; t[c] = r; }
+  return (SUB_TOPS = t);
+}
+const SUB_UP = (SUB_WL_ROW - SUB_DECK_ROW) * SUB_K, SUB_DN = (SUB_KEEL_ROW - SUB_WL_ROW) * SUB_K, SUB_SAIL_UP = (SUB_WL_ROW - SUB_SAIL[1]) * SUB_K;
+const pieceDn = () => (img.shipH - SHIP_WL_ROW) * SHIP_K * 0.6;
+const wreckHalf = (o, sb) => sb ? (o.s1 - o.s0) / SUB_SECTIONS * SUB_L / 2 : o.hl;
+// every wreck: f(o, sb) for each (sb: the submarine a half belongs to, null for a battleship's piece); true stops
+function eachWreck(f) {
+  for (let i = pieces.length - 1; i >= 0; i--) if (f(pieces[i], null)) return;
+  for (const sb of subs) if (sb && sb.parts && (sb.state === 'sinking' || sb.state === 'wreck')) for (const q of sb.parts) if (f(q, sb)) return;
+  for (const sb of oldSubs) if (sb && sb.parts) for (const q of sb.parts) if (f(q, sb)) return;
+}
+function wreckSpan(o, sb) { const h = wreckHalf(o, sb) * Math.abs(Math.cos(o.a)); return [o.x - h, o.x + h]; }
+// the top of a wreck at x (its outline: a turret, the sub's sail), or null where there's none of it
+function wreckTop(o, sb, x) {
+  const ca = Math.cos(o.a), lx = (x - o.x) / ca;
+  if (Math.abs(lx) > wreckHalf(o, sb)) return null;
+  if (sb) {
+    const W = SUB_SRC_W, dc = (o.s0 + o.s1) / 2 / SUB_SECTIONS * W + lx / SUB_K, c = clamp(Math.round(sb.facing > 0 ? W - 1 - dc : dc), 0, W - 1);
+    const r = subTops()[c];
+    if (r >= img.subMask.length / W) return null;
+    return o.y + lx * Math.tan(o.a) + (r - SUB_WL_ROW) * SUB_K;
+  }
+  const cS = (SECTION_FR[o.s0] + SECTION_FR[o.s1]) / 2 * SHIP_SRC_W, col = clamp(Math.round(o.facing < 0 ? cS + lx / SHIP_K : cS - lx / SHIP_K), 0, SHIP_SRC_W - 1);
+  const sec = clamp(sectionOfCol(col), o.s0, o.s1 - 1), r = Math.min((o.dead[sec] ? img.topD : img.topI)[col], SHIP_WL_ROW);
+  return o.y + lx * Math.sin(o.a) + (r - SHIP_WL_ROW) * SHIP_K * ca;
+}
+function wreckBottom(o, sb, x) { const lx = (x - o.x) / Math.cos(o.a); return sb ? o.y + lx * Math.tan(o.a) + SUB_DN : o.y + lx * Math.sin(o.a) + pieceDn(); }
+// is the point inside the wreck's steel?
+function wreckHas(o, sb, x, y) {
+  if (Math.abs(y - o.y) > 60) return false;
+  if (sb) {
+    const lx = (x - o.x) / Math.cos(o.a);
+    if (Math.abs(lx) > wreckHalf(o, sb) + 1) return false;
+    const W = SUB_SRC_W, H = img.subMask.length / W, dc = (o.s0 + o.s1) / 2 / SUB_SECTIONS * W + lx / SUB_K;
+    const c0 = o.s0 / SUB_SECTIONS * W, c1 = o.s1 / SUB_SECTIONS * W, row = Math.round((y - o.y - lx * Math.tan(o.a)) / SUB_K + SUB_WL_ROW);
+    for (let oy = -3; oy <= 3; oy += 3) for (let ox = -3; ox <= 3; ox += 3) {
+      const d = Math.round(dc) + ox, r = row + oy;
+      if (d < c0 || d >= c1 || r < 0 || r >= H) continue;
+      const c = sb.facing > 0 ? W - 1 - d : d;
+      if (img.subMask[r * W + c]) return true;
+    }
+    return false;
+  }
+  const dx = x - o.x, dy = y - o.y, ca = Math.cos(o.a), sa = Math.sin(o.a), lx = dx * ca + dy * sa, ly = -dx * sa + dy * ca;
+  if (Math.abs(lx) > o.hl + 1) return false;
+  const cS = (SECTION_FR[o.s0] + SECTION_FR[o.s1]) / 2 * SHIP_SRC_W, col = Math.round(o.facing < 0 ? cS + lx / SHIP_K : cS - lx / SHIP_K), row = Math.round(SHIP_WL_ROW + ly / SHIP_K);
+  const c0 = SECTION_FR[o.s0] * SHIP_SRC_W, c1 = SECTION_FR[o.s1] * SHIP_SRC_W;
+  for (let d2 = -2; d2 <= 2; d2 += 2) for (let e2 = -2; e2 <= 2; e2 += 2) {
+    const c = col + e2, r = row + d2;
+    if (c < c0 || c >= c1 || r < 0 || r >= img.shipH) continue;
+    const sec = clamp(sectionOfCol(c), o.s0, o.s1 - 1), m = o.dead[sec] ? img.maskD : img.maskI;
+    if (m[r * SHIP_SRC_W + c]) return true;
+  }
+  return false;
+}
+// the wreck a point is in: [o, sb], or null
+function wreckAt(x, y) {
+  let hit = null;
+  eachWreck((o, sb) => { const [a, b] = wreckSpan(o, sb); if (x < a - 3 || x > b + 3 || !wreckHas(o, sb, x, y)) return false; hit = [o, sb]; return true; });
+  return hit;
+}
+// the highest wreck top at x that's not above yb (what a wreck whose underside is at yb would land on)
+function wreckTopBelow(x, self, yb) {
+  let best = 1e9;
+  eachWreck((o, sb) => { if (o === self) return false; const t = wreckTop(o, sb, x); if (t != null && t >= yb - 10 && t < best) best = t; return false; });
+  return best;
+}
+// a blast on a wreck: it goes off on the steel and blows it further apart
+function blowWreck(o, sb, x, y, power, vx) {
+  const under = y > surfaceY(x) + 3;
+  if (under) {
+    underwaterBlast(x, y, 0.8 * power); sfxExplosion(x, 0.55 + 0.25 * power); shock(x, y, 0.9);
+    killFishNear(x, y, 50); scareFish(x, y, 200);
+    for (let i = 0; i < 26; i++) addBubble(x + rnd(-10, 10), y + rnd(-6, 6), rnd(-25, 25), -rnd(20, 60), rnd(0.8, 2.8));
+  } else sectionBlast(x, y, 0.6 * power, vx || 0);
+  spawnDebris(x, y, 8, vx || 0);
+  shakeAt(4 + 3 * power, x);
+  if (sb) splitPart(sb, o, x, y); else splitPiece(o, x, y, under);
+}
+function splitPiece(p, x, y, under) {
+  const ca = Math.cos(p.a), sa = Math.sin(p.a), lx = (x - p.x) * ca + (y - p.y) * sa;
+  const cS = (SECTION_FR[p.s0] + SECTION_FR[p.s1]) / 2 * SHIP_SRC_W, c0 = SECTION_FR[p.s0] * SHIP_SRC_W, c1 = SECTION_FR[p.s1] * SHIP_SRC_W;
+  const col = clamp(p.facing < 0 ? cS + lx / SHIP_K : cS - lx / SHIP_K, c0, c1 - 1), sec = clamp(sectionOfCol(Math.round(col)), p.s0, p.s1 - 1);
+  p.dead[sec] = true; p.sprite = null;
+  p.settled = false; p.rest = 0; p.contactT = 0;
+  p.vy -= under ? 10 : 4; p.w += Math.sign(lx || 1) * rnd(0.04, 0.1);
+  if (p.s1 - p.s0 < 2) return;
+  // it parts at the section joint nearer the blast
+  const fr = col / SHIP_SRC_W, cands = [sec, sec + 1].filter(c => c > p.s0 && c < p.s1);
+  const cut = cands.sort((a, b) => Math.abs(SECTION_FR[a] - fr) - Math.abs(SECTION_FR[b] - fr))[0];
+  const i = pieces.indexOf(p);
+  if (i < 0) return;
+  const lowEndIsBow = p.facing < 0;
+  const two = [[p.s0, cut], [cut, p.s1]].map(([s0, s1]) => {
+    const cS2 = (SECTION_FR[s0] + SECTION_FR[s1]) / 2 * SHIP_SRC_W, l2 = (p.facing < 0 ? cS2 - cS : cS - cS2) * SHIP_K, away = Math.sign(l2) || 1;
+    return Object.assign({}, p, {
+      s0, s1, hl: (SECTION_FR[s1] - SECTION_FR[s0]) / 2 * SHIP_SRC_W * SHIP_K, x: p.x + l2 * ca, y: p.y + l2 * sa,
+      vx: p.vx + away * rnd(8, 18), vy: p.vy - rnd(2, 8), w: p.w + away * rnd(0.04, 0.12), dead: p.dead.slice(), sprite: null, spriteL: 0,
+      brokenL: lowEndIsBow ? s0 > 0 : s1 < SECTIONS, brokenR: lowEndIsBow ? s1 < SECTIONS : s0 > 0, leakT: 0, leakAcc: 0, junkAcc: 0,
+    });
+  });
+  pieces.splice(i, 1, ...two);
+  while (pieces.length > 60) pieces.shift();
+}
+function splitPart(sb, q, x, y) {
+  const half = wreckHalf(q, sb), lx = clamp((x - q.x) / Math.cos(q.a), -half, half);
+  const u = (q.s0 + q.s1) / 2 / SUB_SECTIONS + lx / SUB_L;
+  // the steel is charred where it struck
+  sb.scorch = sb.scorch || [];
+  sb.scorch.push({ u: clamp(u, 0.02, 0.98), row: clamp((y - q.y - lx * Math.tan(q.a)) / SUB_K + SUB_WL_ROW, 30, 140), r: rnd(55, 85) });
+  if (sb.scorch.length > 14) sb.scorch.shift();
+  rebuildSubArt(sb);
+  q.rest = false; q.vy -= 8; q.tilt = clamp(q.tilt + rnd(-0.15, 0.15), -0.45, 0.45);
+  if (q.s1 - q.s0 < 2) return;
+  const cut = clamp(Math.round(u * SUB_SECTIONS), q.s0 + 1, q.s1 - 1), i = sb.parts.indexOf(q);
+  if (i < 0) return;
+  const two = [[q.s0, cut], [cut, q.s1]].map(([s0, s1], k) => {
+    const off = ((s0 + s1) / 2 - (q.s0 + q.s1) / 2) / SUB_SECTIONS * SUB_L, away = k ? 1 : -1;
+    return { s0, s1, x: q.x + off * Math.cos(q.a), y: q.y + off * Math.sin(q.a), a: q.a, vx: q.vx + away * rnd(5, 12), vy: q.vy - rnd(4, 10), w: 0, tilt: clamp(q.tilt + away * rnd(0.08, 0.2), -0.45, 0.45), rest: false, leak: 0 };
+  });
+  sb.parts.splice(i, 1, ...two);
+}
+// steel on steel under the water
+function crashFx(cx, cy, speed) {
+  sfxCrash(cx, Math.min(1, speed / 30));
+  spawnSparks(cx, cy, 20, 180);
+  flashes.push({ x: cx, y: cy, r: 9, life: 0, max: 0.08 });
+  for (let i = 0; i < 40; i++) addBubble(cx + rnd(-24, 24), cy + rnd(-6, 6), rnd(-30, 30), -rnd(15, 60), rnd(0.8, 3));
+  shock(cx, cy, 0.9, false, SUB_L * 0.4);
+  scareFish(cx, cy, 200);
+  shakeAt(7, cx);
+}
+// a submarine out at sea meets a wreck: she can't go through it. She settles on top of it, or is stopped by its end,
+// or (one sinking onto her) pushed down under it - or, with the sand under her, it rests on her. Hard enough, she's holed.
+function subVsWrecks(sb, dt) {
+  sb.blockT = Math.max(0, (sb.blockT || 0) - dt);
+  if (sb.state !== 'out' || sb.gate) return;
+  const half = SUB_L / 2 * (sb.turn ? TURN_W[subTurnFrame(sb)] : 1) * 0.94, sx0 = sb.x - half, sx1 = sb.x + half;
+  const hits = [];
+  eachWreck((o, w) => { const [a, b] = wreckSpan(o, w); if (b > sx0 && a < sx1) hits.push([o, w]); return false; });
+  for (const [o, w] of hits) {
+    const [a, b] = wreckSpan(o, w), ox0 = Math.max(sx0, a), ox1 = Math.min(sx1, b);
+    if (ox1 <= ox0) continue;
+    let top = 1e9, bot = -1e9, any = false;
+    for (let i = 0; i <= 6; i++) { const x = ox0 + (ox1 - ox0) * i / 6, t = wreckTop(o, w, x); if (t == null) continue; any = true; top = Math.min(top, t); bot = Math.max(bot, wreckBottom(o, w, x)); }
+    if (!any) continue;
+    const keel = sb.y + SUB_DN, subTop = sb.y - (ox0 < sb.x + 12 && ox1 > sb.x - 12 ? SUB_SAIL_UP : SUB_UP);
+    if (keel <= top || subTop >= bot) continue;
+    const penUp = keel - top, penDown = bot - subTop, penSide = ox1 - ox0, side = Math.sign(sb.x - o.x) || 1;
+    const wv = (w ? o.rest : o.settled) ? 0 : o.vy || 0;
+    let speed = 0, cx = (ox0 + ox1) / 2, cy, hard = 12;          // (hard: how fast it has to be to hole her)
+    if (penUp <= Math.min(penSide, penDown) + 2) {
+      // on top of it
+      speed = Math.max(0, sb.vy - wv); sb.y -= penUp; sb.vy = Math.min(sb.vy, wv); cy = top; hard = 22;   // (settling gently onto it is fine; diving hard into it isn't)
+    } else if (penDown <= penSide) {
+      cy = bot;
+      if (sb.y + penDown <= subMaxY(sb.x)) { speed = Math.max(0, wv - sb.vy); sb.y += penDown; sb.vy = Math.max(sb.vy, wv); }
+      else { speed = Math.max(0, wv); o.y -= penDown; o.vy = Math.min(o.vy || 0, 0); }   // the sand under her: it rests on her
+    } else {
+      // end on: she's stopped
+      if (sb.vx * side < 0) { speed = Math.abs(sb.vx); sb.vx = 0; }
+      sb.x += side * penSide; cx = side > 0 ? b : a; cy = sb.y;
+      sb.blockT = 1; sb.blockTop = top; hard = 22;
+    }
+    if (speed > hard && !((sb.bumpT || 0) > 0)) {
+      sb.bumpT = 1.4;
+      const u = clamp((cx - (sb.x - SUB_L / 2)) / SUB_L, 0, 0.999);
+      hitSub(sb, Math.floor(u * SUB_SECTIONS), cx, cy, true);
+      crashFx(cx, cy, speed);
+    }
+  }
+}
+// where a sub's half comes to rest: its keel ploughed into the visible sand, or on top of a wreck under it
+function partSand(q) { return Math.min(seabedY(q.x), SEABED_TOP + 45 * SEABED_K) - SUB_DN + 4; }
+function partFloor(sb, q) {
+  let f = partSand(q);
+  const half = wreckHalf(q, sb), tn = Math.tan(q.a), ca = Math.cos(q.a);
+  for (const l of [-0.85, -0.4, 0, 0.4, 0.85]) {
+    const lx = l * half, x = q.x + lx * ca, yb = q.y + lx * tn + SUB_DN, t = wreckTopBelow(x, q, yb);
+    if (t < 1e8) f = Math.min(f, t - SUB_DN - lx * tn);
+  }
+  return f;
 }
 // the broken halves of a sunk submarine (drawn before the sand in front, so they sit buried in it)
 function drawSubParts(sb) {
@@ -6661,6 +6867,13 @@ function stepTorps(dt) {
       tp.x += tp.vx * dt; tp.y += tp.vy * dt;
       tp.ang += (0.45 - tp.ang) * 0.5 * dt;                    // settles nose-down, whichever way it was running
       if (Math.random() < 3 * dt) addBubble(tp.x, tp.y - 1, rnd(-3, 3), -rnd(6, 14), rnd(0.6, 1.1));
+      // its warhead hasn't gone off: sinking onto an enemy sub or a wreck, it does (user Oct 24)
+      {
+        let gone = false;
+        for (const sb of subs) { if (sb.id === tp.owner) continue; const sec = subHitTest(sb, tp.x, tp.y); if (sec >= 0) { hitSub(sb, sec, tp.x, tp.y); gone = true; break; } }
+        if (!gone) { const w = wreckAt(tp.x, tp.y); if (w) { blowWreck(w[0], w[1], tp.x, tp.y, 1, 0); gone = true; } }
+        if (gone) { torps.splice(i, 1); tp.dead = true; continue; }
+      }
       const bed = seabedY(tp.x) - 1;
       if (tp.y >= bed || inQuay(tp.x, tp.y)) {
         torps.splice(i, 1); tp.dead = true;
@@ -6691,6 +6904,7 @@ function stepTorps(dt) {
     if (!hit) for (const b of sailboats) if ((b.state === 'sail' || b.state === 'sinking') && Math.abs(tp.x - b.x) < sailHalf(b) + wide && tp.y < b.y + b.sink + 12 && tp.y > b.y - 40) { hit = ['sail', b]; break; }
     if (!hit) for (const b of buoys) if (b.state === 'float' && b.player !== tp.owner && Math.abs(tp.x - b.x) < 8 + wide && tp.y < surfaceY(b.x) + 12) { hit = ['buoy', b]; break; }
     if (!hit) for (const d of docks) if (d.player !== tp.owner) { const pi = pillarAt(d, tp.x, tp.y); if (pi >= 0) { hit = ['pillar', d, pi]; break; } }
+    if (!hit && tp.t > 0.25) { const w = wreckAt(tp.x, tp.y); if (w) hit = ['wreck', w]; }
     const sy = surfaceY(tp.x);
     if (!hit && tp.t > TORP_RUN && tp.y > sy + 1) {
       // run out without finding anything: no blast, the motor stops and it goes to the bottom
@@ -6704,6 +6918,7 @@ function stepTorps(dt) {
     torps.splice(i, 1); tp.dead = true;
     if (hit && hit[0] === 'sub') { hitSub(hit[1], hit[2], tp.x, tp.y); continue; }
     if (hit && hit[0] === 'pillar') { breakPillar(hit[1], hit[2], tp.x, tp.y); continue; }
+    if (hit && hit[0] === 'wreck') { blowWreck(hit[1][0], hit[1][1], tp.x, tp.y, 1.2, tp.vx); continue; }
     if (hit && (hit[0] === 'sail' || hit[0] === 'buoy')) {
       const b = hit[1];
       underwaterBlast(tp.x, tp.y + 2, 0.8); sfxExplosion(tp.x, 0.7); splash(tp.x, 0, -500); shakeAt(6, tp.x);
@@ -6927,6 +7142,7 @@ function stepDcharges(dt) {
     let boom = c.y >= c.fuse || c.y >= seabedY(c.x) - 2;
     // a proximity fuse too: it goes off right beside a submarine
     for (const sb of subs) if (!boom && sb.id !== c.owner && (sb.state === 'out' || sb.state === 'docked') && Math.abs(c.x - sb.x) < SUB_L / 2 + 6 && Math.abs(c.y - sb.y) < 22) boom = true;
+    if (!boom && wreckAt(c.x, c.y + 3)) boom = true;                       // (landing on a wreck: it goes off there)
     if (boom) { dcharges.splice(i, 1); detonateCharge(c); }
   }
 }
@@ -6957,6 +7173,9 @@ function detonateCharge(c) {
       hitSub(sb, Math.floor(u * SUB_SECTIONS), clamp(x, sb.x - SUB_L * 0.45, sb.x + SUB_L * 0.45), sb.y);
     }
   }
+  // the wrecks in reach of it are blown further apart (the nearest point of each)
+  { const near = []; eachWreck((o, sb) => { const [a, b] = wreckSpan(o, sb), hx = clamp(x, a, b), ty = wreckTop(o, sb, hx); if (ty != null && Math.hypot(hx - x, (ty + wreckBottom(o, sb, hx)) / 2 - y) < DC_RADIUS * 0.8) near.push([o, sb, hx, ty + 4]); return false; });
+    for (const [o, sb, hx, hy] of near) blowWreck(o, sb, hx, hy, 0.6, 0); }
   // and anything else in reach of it: an enemy hull overhead, a yacht, a buoy
   for (const sh of ships) {
     if (sh.state !== 'afloat' || sh.id === c.owner) continue;
@@ -8373,11 +8592,14 @@ function stepShells(dt) {
       // still carrying its speed, it rips a white trail of foam through the water
       if (s.ut < 0.6 && Math.hypot(s.vx, s.vy) > 60) streaks.push({ x1: ox, y1: oy, x2: s.x, y2: s.y, life: 0, max: rnd(0.9, 1.4) * (1 - s.ut) + 0.3 });
       if (Math.random() < 0.7 * Math.exp(-s.ut * 0.5)) addBubble(s.x, s.y, rnd(-6, 6), -rnd(20, 40), rnd(0.8, 1.8));
-      // once in the sea it's harmless to a submarine (deep down she's safe from shells): only the enemy's pier
-      // pillars, just under the surface, can still be broken by one
+      // it hasn't gone off yet, so it still can (user Oct 24): all the way down it bursts on whatever it meets - an
+      // enemy submarine or hull, a wreck, the enemy's pier pillars
       {
         let hitS = false;
-        if (s.ut < 0.8) for (const d of docks) if (d.player !== s.owner) { const pi = pillarAt(d, s.x, s.y); if (pi >= 0) { breakPillar(d, pi, s.x, s.y); hitS = true; break; } }
+        for (const d of docks) if (d.player !== s.owner) { const pi = pillarAt(d, s.x, s.y); if (pi >= 0) { breakPillar(d, pi, s.x, s.y); hitS = true; break; } }
+        if (!hitS) for (const sb of subs) { if (sb.id === s.owner) continue; const sec = subHitTest(sb, s.x, s.y); if (sec >= 0) { hitSub(sb, sec, s.x, s.y); hitS = true; break; } }
+        if (!hitS) for (const sh of ships) { if (sh.state !== 'afloat' || sh.id === s.owner) continue; const sec = hitTest(sh, s.x, s.y); if (sec >= 0) { shellHit(s, sh, sec); hitS = true; break; } }
+        if (!hitS) { const w = wreckAt(s.x, s.y); if (w) { blowWreck(w[0], w[1], s.x, s.y, 1, s.vx); hitS = true; } }
         if (hitS) { shells.splice(i, 1); continue; }
       }
       const bed = seabedY(s.x) - 1;
@@ -8451,6 +8673,8 @@ function stepShells(dt) {
     if (!done && s.age > 0.35) for (const sb of sailboats) if (sb.state === 'sail' && sailHit(sb, s.x, s.y)) { sinkSailboat(sb, s.x, s.y, s.vx); done = true; break; }
     if (!done && s.age > 0.35) for (const sb of sailboats) if (sailWreckHit(sb, s.x, s.y)) { smashSailboat(sb, s.x, s.y, 2); impact(s.x, s.y); done = true; break; }
     if (!done) for (const b of buoys) if (b.player !== s.owner && buoyHit(b, s.x, s.y)) { destroyBuoy(b, s.x, s.y); done = true; break; }   // (your own buoy your shells pass)
+    // a ship going down can still be hit: she's blown further apart (user Oct 24)
+    if (!done && s.age > 0.35 && s.y > WATER_Y - 60) { const w = wreckAt(s.x, s.y); if (w) { blowWreck(w[0], w[1], s.x, s.y, 1, s.vx); done = true; } }
     if (done) { guysNear(s.x, s.y, 30); shells.splice(i, 1); continue; }
     const sy = surfaceY(s.x);
     if (s.y >= sy) { splash(s.x, s.vx, s.vy); guysNear(s.x, sy, 22); s.under = true; s.y = sy + 2; mapMark(s.x, s.owner); continue; }
@@ -8828,10 +9052,24 @@ function wreckBubbles(p, dt) {
   }
 }
 const LIGHT_JUNK = ['#c9b48a', '#a88a5a', '#e2d8c0', '#8a6a42', '#d0c8b4'];
+// where a battleship's piece rests at x (its waterline point): just into the sand, or on a wreck under it
+function pieceFloor(p, x, yNow) {
+  const sand = seabedY(x) + 3, t = wreckTopBelow(x, p, yNow + pieceDn());
+  return t < 1e8 ? Math.min(sand, t - pieceDn()) : sand;
+}
 function stepPiece(p, dt) {
   if (p.hitBottom) p.rust = Math.min(1, (p.rust || 0) + dt / 120);
   if (p.y > WATER_Y + 12) wreckBubbles(p, dt);
-  if (p.settled) return;
+  if (p.settled) {
+    // what it lay on blown away: it goes on down
+    p.chk = (p.chk || 0) - dt;
+    if (p.chk <= 0) {
+      p.chk = 0.3;
+      const ca = Math.cos(p.a), sa = Math.sin(p.a);
+      if ([-p.hl, -p.hl / 2, 0, p.hl / 2, p.hl].every(l => pieceFloor(p, p.x + l * ca, p.y + l * sa) > p.y + l * sa + 2)) { p.settled = false; p.rest = 0; }
+    }
+    if (p.settled) return;
+  }
   p.t += dt;
   const ca = Math.cos(p.a), sa = Math.sin(p.a);
   const D0 = 9, DMAX = 26, KB = K_HEAVE;
@@ -8853,13 +9091,17 @@ function stepPiece(p, dt) {
   p.x += p.vx * dt; p.y += p.vy * dt; p.a += p.w * dt;
   let contact = false;
   const ca2 = Math.cos(p.a), sa2 = Math.sin(p.a);
-  for (const l of [-p.hl, 0, p.hl]) {
-    const pen = p.y + l * sa2 - (seabedY(p.x + l * ca2) + 3);
+  let onWreck = false;
+  const vy0 = p.vy;
+  for (const l of [-p.hl, -p.hl / 2, 0, p.hl / 2, p.hl]) {
+    const x = p.x + l * ca2, sand = seabedY(x) + 3, fl = pieceFloor(p, x, p.y + l * sa2), pen = p.y + l * sa2 - fl;
     if (pen <= 0) continue;
     contact = true;
-    if (l === 0) p.y -= pen; else { p.y -= pen * 0.5; p.a -= Math.sign(l) * (pen / p.hl) * 0.5; }
+    if (fl < sand - 2) onWreck = true;
+    if (l === 0) p.y -= pen; else { const k = Math.abs(l) / p.hl; p.y -= pen * (1 - 0.5 * k); p.a -= Math.sign(l) * (pen / p.hl) * 0.5 * k; }
     p.vy = Math.min(p.vy, 0) * 0.3; p.vx *= 0.9; p.w *= 0.85;
   }
+  if (onWreck && vy0 > 6 && !p.hitBottom) crashFx(p.x, p.y, vy0);
   if (contact) {
     p.w -= Math.sin(2 * p.a) * 3.2 * dt;
     p.contactT = (p.contactT || 0) + dt;
@@ -14707,6 +14949,12 @@ function cpuTower(B, dt) {
   cpuCannon(B, dt, g, mx, my, 0, tw.facing, true, tgt, tgt.y - 6, g.reload <= 0, () => fireTower(tw, false));
 }
 function cpuSub(B, dt) {
+  cpuSub0(B, dt);
+  // stopped by a wreck on the bottom: up and over it
+  const sb = B.unit || subs[B.p];
+  if (sb && sb.state === 'out' && sb.blockT > 0) sb.depthT = clamp(Math.min(sb.depthT, sb.blockTop - SUB_DN - 12), WATER_Y, subMaxY(sb.x));
+}
+function cpuSub0(B, dt) {
   const p = B.p, sb = B.unit || subs[p], d = homeDock[p], T = B.T, E = cpuEnemy(p);
   if (sb.state !== 'out' || sb.gate) return;
   // hurt, or out of torpedoes: home (a raider never goes home)
@@ -15585,7 +15833,7 @@ async function start(data) {
     towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
-    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { CPU_LEVEL = lv; cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), hud: p => hudLayout(p), get time() { return time; }, get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips,
+    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { CPU_LEVEL = lv; cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), hud: p => hudLayout(p), get time() { return time; }, get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
     follow, gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, get worldW() { return WORLD_W; }, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, consoles, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
