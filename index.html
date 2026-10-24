@@ -170,6 +170,7 @@ const COUPLE = 8, BOW_K = 1.7, BOW_W = 26, STERN_K = 1.1, STERN_W = 36, THRUST_K
 const RELOAD = 5, TOWER_RELOAD = 1.5, SHELL_G = 300, SHELL_V0 = 260, SHELL_VPOW = 640;
 const ELEV_MIN = 0, ELEV_MAX = 90;
 const MG_RATE = 0.085, MG_SPEED = 900, MG_HOLD = 0.3;
+const MG_LIVE = 1.85;                // seconds a round flies at full strength (user Oct 24: twice the old reach, about 1900 units)
 
 const REDUCED = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -2558,6 +2559,7 @@ function specTry(p, k) {
   const c = crew[p];
   if (!c || c.dead || (c.mode !== 'dock' && c.mode !== 'gone') || !takenByOther(p, k)) return false;
   c.spec = c.spec === k ? null : k; c.look = null;
+  if (c.spec) showToast('YOUR TEAMMATE IS IN IT: WATCHING');
   sfxClick(gunCtl[p]);
   return true;
 }
@@ -3404,6 +3406,8 @@ function drawHudIn(p) {
   }
   drawHudTabs(p, Lh);
   drawCaptains(p, Lh);
+  // watching a teammate (online): say so, and how to get back to playing
+  if (crew[p].spec) drawText(ug, 'WATCHING YOUR TEAMMATE - PICK A FREE VEHICLE TO PLAY', Math.round((Lh.tabs[0].x + Lh.tabs[Lh.tabs.length - 1].x + Lh.tabs[Lh.tabs.length - 1].w) / 2), Lh.bottom + 8, '#ffd23a', 1, 'center');
   ug.restore();
 }
 function drawWeaponBtn(p, it, k, y, down) {
@@ -4208,11 +4212,13 @@ function setSlider(h, ux) {
 
 // Menu
 function menuLayout() {
-  const w = 440, h = 200, x = (ubw - w) >> 1, y = Math.max(6, (ubh - h) >> 1);
+  const w = 440, h = 250, x = (ubw - w) >> 1, y = Math.max(6, (ubh - h) >> 1);
   return {
     x, y, w, h,
     vol: [x + 140, y + 56, 274],
     mute: [x + 394, y + 96, 26, 26],
+    // the controls screens (user Oct 24)
+    pad: [x + 30, y + 146, 180, 34], kb: [x + w - 210, y + 146, 180, 34],
     close: [x + ((w - 180) >> 1), y + h - 50, 180, 34],
   };
 }
@@ -4243,7 +4249,120 @@ function drawMenu() {
   };
   drawText(ug, 'MUTE', M.x + 20, M.y + 104, '#ffffff', 2);
   box(M.mute, MUTED);
+  drawText(ug, 'CONTROLS', M.x + 20, M.y + 132, '#ffffff', 2);
+  modeButton(...M.pad, 'CONTROLLER', false); modeButton(...M.kb, 'KEYBOARD', false);
   modeButton(...M.close, 'BACK', true);
+}
+/* ---------------- The controls screens (user Oct 24): the controller and the keyboard, pixel art in the style
+   of the user's reference (a dark violet board, a cyan pad with pink grips, white leader lines to the labels),
+   opened from OPTIONS. Drawn on a grid of art pixels scaled to the screen, so it's crisp at any size. ---------------- */
+const CTRLS = { W: 214, H: 124 };
+function controlsLayout() {
+  const s = Math.max(1, Math.floor(Math.min(ubw / CTRLS.W, ubh / CTRLS.H))), w = CTRLS.W * s, h = CTRLS.H * s;
+  const ox = (ubw - w) >> 1, oy = (ubh - h) >> 1;
+  const A = (x, y, w2, h2) => [ox + x * s, oy + y * s, w2 * s, h2 * s];
+  return { s, ox, oy, w, h, ls: Math.max(1, Math.round(s * 0.45)),
+    tabPad: A(64, 17, 40, 9), tabKb: A(110, 17, 40, 9), back: A(89, 111, 36, 10) };
+}
+function controlsHit(ux, uy) {
+  const L = controlsLayout(), inR = r => ux >= r[0] && ux <= r[0] + r[2] && uy >= r[1] && uy <= r[1] + r[3];
+  if (inR(L.tabPad)) return 'pad';
+  if (inR(L.tabKb)) return 'kb';
+  if (inR(L.back)) return 'back';
+  return null;
+}
+function drawControls() {
+  if (!ui.controls) return;
+  const L = controlsLayout(), s = L.s, ls = L.ls;
+  const X = x => L.ox + Math.round(x * s), Y = y => L.oy + Math.round(y * s);
+  const R = (x, y, w, h, c) => { ug.fillStyle = c; ug.fillRect(X(x), Y(y), Math.max(1, Math.round(w * s)), Math.max(1, Math.round(h * s))); };
+  const disc = (cx, cy, r, c) => { for (let y = -r; y <= r; y++) { const hw = Math.floor(Math.sqrt(r * r - y * y + r * 0.8)); R(cx - hw, cy + y, hw * 2 + 1, 1, c); } };
+  const T = (str, x, y, c, sc, al) => drawText(ug, str, X(x), Y(y), c, sc || ls, al || 'left');
+  // a thin leader line from a label to the thing it names, with a dot at the label's end
+  const line = (x0, y0, x1, y1) => {
+    const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * 2, t = Math.max(1, Math.round(s / 3));
+    ug.fillStyle = '#e8ecff';
+    for (let i = 0; i <= n; i++) { const u = i / n; ug.fillRect(Math.round(X(x0 + (x1 - x0) * u)), Math.round(Y(y0 + (y1 - y0) * u)), t, t); }
+    ug.fillRect(X(x0) - t, Y(y0) - t, t * 3, t * 3);
+  };
+  // the board: deep violet, a faint diamond pattern, a darker frame
+  ug.fillStyle = '#05040c'; ug.fillRect(0, 0, ubw, ubh);
+  R(0, 0, CTRLS.W, CTRLS.H, '#1c1730');
+  for (let y = 6; y < CTRLS.H; y += 16) for (let x = (y / 16 % 2) * 8 + 6; x < CTRLS.W; x += 16) { R(x, y - 2, 1, 5, '#251f3f'); R(x - 2, y, 5, 1, '#251f3f'); }
+  R(0, 0, CTRLS.W, 1, '#3a2f63'); R(0, CTRLS.H - 1, CTRLS.W, 1, '#3a2f63'); R(0, 0, 1, CTRLS.H, '#3a2f63'); R(CTRLS.W - 1, 0, 1, CTRLS.H, '#3a2f63');
+  // the title, pink with a dark drop shadow
+  drawText(ug, 'CONTROLS', X(107) + s, Y(4) + s, '#5a1650', ls * 3, 'center');
+  drawText(ug, 'CONTROLS', X(107), Y(4), '#ff5fd2', ls * 3, 'center');
+  const tab = (r, label, on) => {
+    ug.fillStyle = on ? '#4fd6f2' : '#2a2448'; ug.fillRect(r[0], r[1], r[2], r[3]);
+    ug.fillStyle = on ? '#a8f0ff' : '#3c3466'; ug.fillRect(r[0], r[1], r[2], Math.max(1, Math.round(s / 2)));
+    drawText(ug, label, r[0] + r[2] / 2, r[1] + Math.round((r[3] - 5 * ls) / 2), on ? '#102030' : '#c9c2ee', ls, 'center');
+  };
+  tab(L.tabPad, 'CONTROLLER', ui.controls === 'pad'); tab(L.tabKb, 'KEYBOARD', ui.controls === 'kb');
+  tab(L.back, 'BACK', false);
+  if (ui.controls === 'pad') drawPadArt(R, disc, T, line); else drawKeysArt(R, T, line);
+}
+function drawPadArt(R, disc, T, line) {
+  const cx = 107;
+  // the grips (pink) under the body (cyan), the shoulders on top
+  disc(cx - 21, 77, 8, '#b03c8a'); disc(cx + 21, 77, 8, '#b03c8a'); disc(cx - 21, 76, 7, '#ff6ec7'); disc(cx + 21, 76, 7, '#ff6ec7');
+  R(cx - 30, 47, 14, 3, '#9aa7b8'); R(cx + 16, 47, 14, 3, '#9aa7b8');                 // LT RT
+  R(cx - 29, 50, 14, 3, '#e8f4ff'); R(cx + 15, 50, 14, 3, '#e8f4ff');                 // LB RB
+  R(cx - 31, 53, 62, 21, '#1b5d7a'); R(cx - 30, 52, 60, 23, '#1b5d7a');
+  R(cx - 30, 53, 60, 21, '#4fd6f2'); R(cx - 29, 53, 58, 2, '#a8f0ff');
+  R(cx - 24, 72, 48, 4, '#3fb3d0');
+  // the d-pad, the small buttons, the face buttons, the sticks
+  disc(cx - 19, 61, 5, '#1d2a4a'); R(cx - 20, 57, 3, 9, '#f4f8ff'); R(cx - 23, 60, 9, 3, '#f4f8ff');
+  R(cx - 6, 57, 4, 2, '#f4f8ff'); R(cx + 2, 57, 4, 2, '#f4f8ff'); disc(cx, 62, 2, '#a8f0ff');
+  const fb = [[0, -4, '#ffd23a', 'Y'], [-4, 0, '#5aa8ff', 'X'], [4, 0, '#ff5a5a', 'B'], [0, 4, '#4ce27a', 'A']];
+  for (const [dx, dy, c] of fb) { disc(cx + 19 + dx, 61 + dy, 2, '#123044'); disc(cx + 19 + dx, 61 + dy, 1, c); }
+  for (const sx of [cx - 9, cx + 9]) { disc(sx, 68, 5, '#123044'); disc(sx, 68, 4, '#cfd8e8'); disc(sx, 68, 3, '#f4f8ff'); }
+  // the labels: the left side right-aligned, the right side left-aligned
+  const left = [[40, 'LT  CANNON - BOMB - UP TORPEDO', cx - 23, 48], [47, 'LB  PREVIOUS VEHICLE', cx - 22, 51], [61, 'D-PAD  ZOOM', cx - 24, 61]];
+  const right = [[40, 'RT  MACHINE GUN', cx + 23, 48], [47, 'RB  NEXT VEHICLE', cx + 22, 51], [54, 'Y  SMOKE SCREEN', cx + 19, 57],
+    [60, 'X  DEPTH CHARGE', cx + 15, 61], [66, 'B  CANNON - BOMB - UP TORPEDO', cx + 23, 61], [72, 'A  MACHINE GUN - TORPEDO', cx + 19, 65]];
+  for (const [y, s0, fx, fy] of left) { T(s0, 70, y - 2, '#ffffff', 0, 'right'); line(72, y, fx, fy); }
+  for (const [y, s0, fx, fy] of right) { T(s0, 144, y - 2, '#ffffff', 0, 'left'); line(142, y, fx, fy); }
+  T('START  MENU', cx + 4, 31, '#ffffff', 0, 'left'); line(cx + 4, 34, cx + 4, 56);
+  // the sticks, under the pad
+  T('LEFT STICK', cx - 22, 88, '#4fd6f2', 0, 'right'); line(cx - 20, 90, cx - 9, 73);
+  T('DRIVE LEFT OR RIGHT - CLIMB - DIVE', cx - 22, 93, '#ffffff', 0, 'right');
+  T('PRESS IT IN: STOP', cx - 22, 98, '#ffd23a', 0, 'right');
+  T('RIGHT STICK', cx + 22, 88, '#4fd6f2', 0, 'left'); line(cx + 20, 90, cx + 9, 73);
+  T('ANGLE UP DOWN - POWER LEFT RIGHT', cx + 22, 93, '#ffffff', 0, 'left');
+  T('IN THE TOWER: BOTH STICKS', cx + 22, 98, '#ffd23a', 0, 'left');
+  T('LB RB PICK A VEHICLE - A LAUNCHES IT    NOT DRIVING: THE LEFT STICK LOOKS AROUND', cx, 104, '#a99fd6', 0, 'center');
+}
+function drawKeysArt(R, T, line) {
+  const used = new Set(['ESC', '1', '2', '3', '4', 'Q', 'W', 'E', 'A', 'S', 'D', 'F', 'G', 'Z', 'X', 'C', 'SPACE']);
+  const rows = [
+    [40, [['ESC', 12], ...'1234567890'.split('').map(k => [k, 9])]],
+    [49, [['TAB', 14], ...'QWERTYUIOP'.split('').map(k => [k, 9])]],
+    [58, [['CAPS', 16], ...'ASDFGHJKL'.split('').map(k => [k, 9])]],
+    [67, [['SHIFT', 20], ...'ZXCVBNM'.split('').map(k => [k, 9])]],
+    [76, [['CTRL', 12], ['ALT', 10], ['SPACE', 52], ['ALT', 10], ['CTRL', 12]]],
+  ];
+  const x0 = 51, at = {}, caps = [];
+  for (const [y, keys] of rows) {
+    let x = x0;
+    for (const [k, w] of keys) { caps.push([k, x, y, w]); if (!at[k]) at[k] = [x + w / 2, y + 4]; x += w + 1; }
+  }
+  const drawCaps = () => {
+    for (const [k, x, y, w] of caps) {
+      const on = used.has(k);
+      R(x, y, w, 8, on ? '#1b5d7a' : '#46507a'); R(x, y, w, 7, on ? '#4fd6f2' : '#2a2f4a');
+      if (on) R(x, y, w, 1, '#a8f0ff');
+      T(k, x + w / 2, y + 1.5, on ? '#102030' : '#7d86ad', 0, 'center');
+    }
+  };
+  const left = [[36, 'ESC  MENU', 'ESC'], [46, 'Q E  ZOOM OUT - IN', 'Q'], [53, 'W S  AIM - CLIMB - DIVE', 'W'], [62, 'A D  DRIVE LEFT - RIGHT', 'A'], [71, 'Z C  POWER', 'Z']];
+  const right = [[36, '1 2 3 4  TOWER SHIP SUB PLANE', '4'], [53, 'F  MACHINE GUN', 'F'], [62, 'G  SMOKE SCREEN', 'G'], [71, 'X  DEPTH CHARGE - BOMB - UP TORPEDO', 'X'], [82, 'SPACE  FIRE', 'SPACE']];
+  for (const [y, s0, k] of left) { T(s0, 47, y - 2, '#ffffff', 0, 'right'); line(48, y, at[k][0], at[k][1]); }
+  for (const [y, s0, k] of right) { T(s0, 167, y - 2, '#ffffff', 0, 'left'); line(165, y, at[k][0], at[k][1]); }
+  drawCaps();                                            // (over the lines: they end under the keys they name)
+  T('SPACE FIRES THE CANNON - THE TORPEDO - THE PLANE GUN    A D TAPPED AGAIN: STOP', 107, 90, '#a99fd6', 0, 'center');
+  T('PLAYER 2 ON THE SAME KEYBOARD: ARROWS  ENTER  RIGHT SHIFT  7 8 9 0', 107, 96, '#a99fd6', 0, 'center');
+  T('MOUSE OR TOUCH: TAP THE BUTTONS ON THE SCREEN', 107, 102, '#a99fd6', 0, 'center');
 }
 // The flag picker: big flags with room between them for fingers, scrolled by dragging
 function pickerLayout() {
@@ -4302,6 +4421,8 @@ function menuHit(ux, uy) {
   const inR = (r) => r && ux >= r[0] && ux <= r[0] + r[2] && uy >= r[1] && uy <= r[1] + r[3];
   { const r = M.mute; if (inR([r[0] - 8, r[1] - 8, r[2] + 16, r[3] + 16])) return { act: 'mute' }; }
   if (inR(M.close)) return { act: 'close' };
+  if (inR(M.pad)) return { act: 'ctlPad' };
+  if (inR(M.kb)) return { act: 'ctlKb' };
   const [vx, vy, vw] = M.vol;
   if (ux >= vx - 10 && ux <= vx + vw + 10 && uy >= vy - 12 && uy <= vy + 22) return { act: 'vol', vx, vw };
   if (ux < M.x || ux > M.x + M.w || uy < M.y || uy > M.y + M.h) return { act: 'close' };
@@ -4709,6 +4830,8 @@ window.addEventListener('pointerdown', e => {
     return;
   }
   const [ux, uy] = toUI(e.clientX, e.clientY);
+  if (e.isTrusted) ui.padNav = false;                     // (a mouse or a finger: the controller's focus box goes)
+  if (ui.controls) { const h = controlsHit(ux, uy); if (h === 'back') ui.controls = null; else if (h) ui.controls = h; return; }
   if (ui.winner != null) {
     const B = winLayout().btn;
     if (ui.winT > 1.2 && ux >= B[0] - 6 && ux <= B[0] + B[2] + 6 && uy >= B[1] - 6 && uy <= B[1] + B[3] + 6) restartGame();
@@ -4728,6 +4851,8 @@ window.addEventListener('pointerdown', e => {
     const h = menuHit(ux, uy);
     if (h.act === 'mute') { MUTED = !MUTED; savePrefs(); }
     else if (h.act === 'close') setMenu(false);
+    else if (h.act === 'ctlPad') ui.controls = 'pad';
+    else if (h.act === 'ctlKb') ui.controls = 'kb';
     else if (h.act === 'vol') { env.volume = clamp((ux - h.vx) / h.vw, 0, 1); pointers.set(e.pointerId, { kind: 'vol', h }); }
     return;
   }
@@ -4890,6 +5015,13 @@ const P2_AS_P1 = { ShiftRight: 'KeyF', ControlRight: 'KeyX', ControlLeft: 'KeyX'
 const keyCode = e => (ONEVIEW() && !ui.title && ui.winner == null && P2_AS_P1[e.code]) || e.code;
 window.addEventListener('keydown', e => {
   const code = keyCode(e);
+  // the controls screens: Esc (or B) back, left / right between the two
+  if (ui.controls) {
+    if (code === 'Escape' || code === 'Backspace') ui.controls = null;
+    else if (code === 'ArrowLeft' || code === 'KeyA') ui.controls = 'pad';
+    else if (code === 'ArrowRight' || code === 'KeyD') ui.controls = 'kb';
+    e.preventDefault(); return;
+  }
   if (ui.winner != null) { if ((code === 'Enter' || code === 'Space') && ui.winT > 1.2) restartGame(); e.preventDefault(); return; }
   if (ui.title) {
     if (LINK.state === 'lobby') {                            // (the room: the arrows pick a side, Enter starts)
@@ -4983,6 +5115,110 @@ function vehOut(p, k) {
   if (v.gate) return true;                                       // (on her way out or in: she's out there)
   return k === 'ship' ? v.state === 'afloat' && v.moored !== true : v.state === 'out';
 }
+/* ---------------- The menus with a controller (user Oct 24: the whole of them) ----------------
+   The stick or the d-pad moves a yellow focus box from button to button (to the nearest one that way); A presses
+   the one in the box, as a tap on it would; B goes back (as Esc); Start plays or resumes (as Enter). On the volume
+   slider left and right turn it down and up; in the flag picker they move through the flags. A tap or a click
+   hides the box until the controller's used again. */
+const padMenu = { on: false, st: {}, rep: {}, focus: null, pickK: -1, pickFor: -1 };
+const padMenuOn = () => ui.title || ui.menu || !!ui.controls || ui.winner != null;
+function padTargets() {
+  const T = [], add = (id, r, extra) => { if (r) T.push(Object.assign({ id, r }, extra)); };
+  if (ui.controls) { const L = controlsLayout(); add('cpad', L.tabPad); add('ckb', L.tabKb); add('cback', L.back); return T; }
+  if (ui.winner != null) { add('again', winLayout().btn); return T; }
+  if (ui.menu) { const M = menuLayout(); add('vol', [M.vol[0], M.vol[1] - 6, M.vol[2], 22], { adj: true }); add('mute', M.mute); add('opad', M.pad); add('okb', M.kb); add('close', M.close); return T; }
+  if (!ui.title) return T;
+  const L = titleLayout();
+  if (LINK.state === 'lobby') { add('side0', L.lobby.pick[0]); add('side1', L.lobby.pick[1]); if (LINK.hosting) { add('start', L.lobby.start); add('leave', L.lobby.leave); } else add('leave', L.linkBtn); return T; }
+  if (linkPanelUp()) { if (LINK.state === 'choose') { add('host', L.hostBtn); add('joinb', L.joinBtn); } if (LINK.state === 'enter') add('go', L.goBtn); add('lback', L.linkBtn); return T; }
+  menuModes().forEach((m, i) => add('mode' + i, L.modes[i]));
+  if (menuSel.mode === 'story') L.levels.forEach((r, i) => add('lv' + i, r));
+  for (const S0 of L.sides) {
+    const s = S0.s;
+    add('flag' + s, [S0.flag[0], S0.flag[1], FLAG_W, FLAG_H]);
+    if (!mPickable(s)) continue;
+    if (mCtlChoices(s).length > 1) { add('cl' + s, S0.left); add('cr' + s, S0.right); }
+    if (mCtlFor(s) === 'cpu') S0.lv.forEach((r, k) => add('cpu' + s + k, r));
+  }
+  add('play', L.play); add('resume', L.restart); add('opts', L.opts);
+  if (typeof Peer === 'function') add('online', L.join);
+  return T;
+}
+function padFocusOf(T) {
+  let f = T.find(t => t.id === padMenu.focus);
+  if (!f) f = T.find(t => t.id === 'resume') || T.find(t => t.id === 'play') || T.find(t => t.id === 'again') || T[0];
+  if (f) padMenu.focus = f.id;
+  return f;
+}
+function padNavDir(k) {
+  const dx = k === 'left' ? -1 : k === 'right' ? 1 : 0, dy = k === 'up' ? -1 : k === 'down' ? 1 : 0;
+  const shown = ui.padNav; ui.padNav = true;
+  if (ui.picker >= 0 && !ui.controls) {                    // the flags: a cursor through the grid
+    const P = pickerLayout();
+    if (padMenu.pickFor !== ui.picker || padMenu.pickK < 0) { padMenu.pickFor = ui.picker; padMenu.pickK = flagPick[ui.picker]; }
+    if (shown) padMenu.pickK = clamp(padMenu.pickK + dx + dy * P.cols, 0, FLAG_COUNT - 1);
+    scrollPickerTo(padMenu.pickK);
+    return;
+  }
+  const T = padTargets(), cur = padFocusOf(T);
+  if (!cur || !shown) return;                              // (the first press only shows where the box is)
+  if (cur.adj && dx) { env.volume = clamp(Math.round((env.volume + dx * 0.1) * 10) / 10, 0, 1); savePrefs(); return; }
+  const c = r => [r[0] + r[2] / 2, r[1] + r[3] / 2], [x0, y0] = c(cur.r);
+  let best = null, bd = 1e9;
+  for (const t of T) {
+    if (t === cur) continue;
+    const [x, y] = c(t.r), along = (x - x0) * dx + (y - y0) * dy, side = Math.abs((x - x0) * dy) + Math.abs((y - y0) * dx);
+    if (along <= 2) continue;
+    const d = along + side * 2.2;
+    if (d < bd) { bd = d; best = t; }
+  }
+  if (best) { padMenu.focus = best.id; sfxClick(gunCtl[0]); }
+}
+// A: the focused button pressed, exactly as a tap on it
+function padNavPress() {
+  if (!ui.padNav) { ui.padNav = true; return; }
+  if (ui.picker >= 0 && !ui.controls) {
+    if (padMenu.pickK < 0) padMenu.pickK = flagPick[ui.picker];
+    flagPick[ui.picker] = padMenu.pickK; ui.picker = -1; savePrefs(); buildTeamArt(); padMenu.pickK = -1;
+    return;
+  }
+  const f = padFocusOf(padTargets());
+  if (!f || f.adj) return;
+  const k = PIXU / dpr, cx = (f.r[0] + f.r[2] / 2) * k, cy = (f.r[1] + f.r[3] / 2) * k;
+  for (const type of ['pointerdown', 'pointerup']) { try { window.dispatchEvent(new PointerEvent(type, { clientX: cx, clientY: cy, pointerId: 91, bubbles: true, cancelable: true })); } catch (e) {} }
+}
+function padMenuPoll(pads, dt) {
+  const b = i => pads.some(gp => gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.4));
+  const ax = i => { let v = 0; for (const gp of pads) { const a = gp.axes[i] || 0; if (Math.abs(a) > Math.abs(v)) v = a; } return v; };
+  const now = { up: b(12) || ax(1) < -0.5, down: b(13) || ax(1) > 0.5, left: b(14) || ax(0) < -0.5, right: b(15) || ax(0) > 0.5, a: b(0), b: b(1), start: b(9) };
+  const S = padMenu.st;
+  if (!padMenu.on) { Object.assign(S, now); padMenu.on = true; return; }   // (what was already held when the menu came up doesn't count)
+  for (const k of ['up', 'down', 'left', 'right']) {
+    if (!now[k]) { S[k] = false; continue; }
+    if (!S[k]) { S[k] = true; padMenu.rep[k] = 0.42; padNavDir(k); }
+    else if ((padMenu.rep[k] -= dt) <= 0) { padMenu.rep[k] = 0.12; padNavDir(k); }
+  }
+  const edge = k => { const was = S[k]; S[k] = now[k]; return now[k] && !was; };
+  if (edge('a')) padNavPress();
+  if (edge('b')) { padKey('Escape', true); padKey('Escape', false); }
+  if (edge('start')) { padKey('Enter', true); padKey('Enter', false); }
+}
+// the focus box, pulsing yellow, over whatever menu is showing
+function drawPadFocus() {
+  if (!ui.padNav || !PADS_SEEN || !padMenuOn()) return;
+  let r = null;
+  if (ui.picker >= 0 && !ui.controls) {
+    const P = pickerLayout(), k = padMenu.pickK >= 0 ? padMenu.pickK : flagPick[ui.picker];
+    const padX = (P.cell - P.fw) >> 1, padY = (P.cellH - P.fh) >> 1;
+    r = [P.gx + (k % P.cols) * P.cell + padX, P.gy + Math.floor(k / P.cols) * P.cellH + padY - Math.round(ui.pickScroll || 0), P.fw, P.fh];
+  } else { const f = padFocusOf(padTargets()); r = f && f.r; }
+  if (!r) return;
+  const m = 5, t = 3, a = 0.6 + 0.4 * Math.abs(Math.sin(time * 5));
+  ug.globalAlpha = a; ug.fillStyle = '#ffd23a';
+  ug.fillRect(r[0] - m, r[1] - m, r[2] + m * 2, t); ug.fillRect(r[0] - m, r[1] + r[3] + m - t, r[2] + m * 2, t);
+  ug.fillRect(r[0] - m, r[1] - m, t, r[3] + m * 2); ug.fillRect(r[0] + r[2] + m - t, r[1] - m, t, r[3] + m * 2);
+  ug.globalAlpha = 1;
+}
 function padCycle(p, d) {
   const c = crew[p], free = c.mode === 'dock' || c.mode === 'gone';      // (not driving: a teammate's can be watched)
   const list = hudVeh().filter(k => k === c.mode || canTake(p, k) || (free && takenByOther(p, k)));
@@ -5004,24 +5240,28 @@ function pollPads(dt) {
   let pads;
   try { pads = Array.from(navigator.getGamepads() || []).filter(Boolean); } catch (e) { return; }
   PADS_SEEN = pads.length;
+  if (padMenuOn()) padMenuPoll(pads, dt); else padMenu.on = false;
   for (let p = 0; p < 2; p++) {
     const gi = padOf(p), gp = gi >= 0 ? pads[gi] : null, st = padState[p], K = PAD_KEYS[p];
     const want = {};
     const btn = i => !!(gp && gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.4));
     const edge = (name, on) => { const was = !!st[name]; st[name] = on; return on && !was ? 1 : !on && was ? -1 : 0; };
-    if (gp && (ui.title || ui.winner != null)) {
-      // the menus: A or Start to play
-      if (edge('mA', btn(0) || btn(9)) === 1) padKey('Enter', true), padKey('Enter', false);
-      if (LINK.state === 'lobby') {                                  // (an online room: left or right picks the side)
-        const lx = gp.axes[0] || 0;
-        if (edge('mL', lx < -0.5 || btn(14)) === 1) lobbyPick(0);
-        if (edge('mR', lx > 0.5 || btn(15)) === 1) lobbyPick(1);
-      }
-      st.start = btn(9); st.w1 = btn(0) || btn(7);
+    if (gp && padMenuOn()) {
+      // the menus are driven by any controller (padMenuPoll, below): here only what's held is noted, so nothing
+      // fires or opens the moment you're back in the round
+      st.start = btn(9); st.w1 = btn(0) || btn(7); st.pa = btn(0); st.w2 = btn(1) || btn(6); st.w3 = btn(2); st.w4 = btn(3);
+      st.lb = btn(4); st.rb = btn(5); st.l3 = btn(10); st.dl = st.dr = false;
     } else if (gp && p < 2 && !brains[p] && crew[p].mode !== 'gone') {
       const ax = i => { const v = gp.axes[i] || 0; return Math.abs(v) < 0.25 ? 0 : v; };
       const lx = ax(0), ly = ax(1), m = crew[p].mode;
-      want.left = lx < -0.5; want.right = lx > 0.5;
+      // left / right: in a vehicle, full ahead that way at once (it turns round), never a stop on the way - the
+      // stick pressed in (L3) stops (user Oct 24). Not driving: they look around. The tower: see the sticks below
+      const drives = m === 'ship' || m === 'sub' || m === 'plane' || m === 'sail';
+      if (drives && !ui.menu) {
+        const dl = edge('dl', lx < -0.5), dr = edge('dr', lx > 0.5);
+        if (dl === 1) { if (m === 'plane') act(p, 'planeDir', -1); else act(p, 'drive', 0); }
+        if (dr === 1) { if (m === 'plane') act(p, 'planeDir', 1); else act(p, 'drive', 6); }
+      } else if (m !== 'tower') { want.left = lx < -0.5; want.right = lx > 0.5; st.dl = st.dr = false; }
       // up / down: the sub's depth and the plane's climb
       if (m === 'sub' || m === 'plane' || looking(p)) { want.up = ly < -0.5; want.down = ly > 0.5; }   // (and looking around)
       if (edge('start', btn(9)) === 1) padKey('Escape', true);
@@ -5031,6 +5271,8 @@ function pollPads(dt) {
         const aE = edge('pa', btn(0));
         if (aE === 1 && padPick[p]) { padLaunch(p); st.aEaten = true; }
         if (!btn(0)) st.aEaten = false;
+        // the left stick pressed in (L3): STOP - the plane circles on the spot, a boat stops (user Oct 24)
+        if (edge('l3', btn(10)) === 1) { const m2 = crew[p].mode; if (m2 === 'plane') act(p, 'planeDir', 0); else if (m2 === 'ship' || m2 === 'sub' || m2 === 'sail') act(p, 'drive', 3); }
         const e1 = edge('w1', (btn(0) && !st.aEaten) || btn(7)), e2 = edge('w2', btn(1) || btn(6)), e3 = edge('w3', btn(2));
         if (e1) padWeapon(p, 1, e1 > 0);
         if (e2) padWeapon(p, 2, e2 > 0);
@@ -5042,8 +5284,9 @@ function pollPads(dt) {
         const z = (btn(12) || btn(15) ? 1 : 0) - (btn(13) || btn(14) ? 1 : 0);
         if (!z) st.zT = 0;
         else if ((st.zT = (st.zT || 0) - dt) <= 0 && !zoomLocked(p)) { crew[p].zoomHold = false; setScope(p, scopes[p].level + z); st.zT = 0.28; }
-        // the right stick: power (left / right) and angle (up / down), smoothly
-        const rx = ax(2), ry = ax(3);
+        // the right stick: power (left / right) and angle (up / down), smoothly; in the tower the left stick as
+        // well (user Oct 24: it has nothing else to do there)
+        const rx = ax(2) || (m === 'tower' ? lx : 0), ry = ax(3) || (m === 'tower' ? ly : 0);
         if ((rx || ry) && hasGuns(p)) {
           const g = activeGun(p);
           if (ry) g.elev = clamp(g.elev - ry * 55 * dt, elevMin(p), elevMax(p));
@@ -6819,7 +7062,7 @@ function planeCrash(pl) {
   const pts = [[pl.x, pl.y + 5], [pl.x + ux * 30, pl.y + uy * 30 + 2], [pl.x - ux * 26, pl.y - uy * 26]];
   let what = null, X = pl.x, Y = pl.y;
   for (const [x, y] of pts) {
-    for (const tw of towers) if (!what && tw.player !== p && towerHit(tw, x, y)) { what = 'land'; if (tw.hp > 0) { tw.hp -= 1; noteHit(tw.player, 'tower'); if (tw.hp <= 0) crumbleTower(tw); } }   // (one hit, like a shell)
+    for (const tw of towers) if (!what && tw.player !== p && towerHit(tw, x, y)) { what = 'land'; towerScorch(tw, x, y, 17); if (tw.hp > 0) { tw.hp -= 1; noteHit(tw.player, 'tower'); if (tw.hp <= 0) crumbleTower(tw); } }   // (one hit, like a shell)
     for (const sh of ships) if (!what && sh.state === 'afloat' && sh.id !== p) {
       const sec = hitTest(sh, x, y);
       if (sec >= 0) { what = 'boat'; damageSection(sh, sec, 1, x, y); damageSection(sh, sec, 1, x, y); sh.vy += 10; sh.vx += pl.vx * 0.01; }
@@ -8055,6 +8298,7 @@ function stepShells(dt) {
         if (tw.hp > 0) {
           tw.hp -= 1;                                    // ten shells bring a tower down
           noteHit(tw.player, 'tower');
+          towerScorch(tw, s.x, s.y, 10);
           sectionBlast(s.x, s.y, 0.8, 0);
           spawnDebris(s.x, s.y, 8, 0);
           if (tw.hp <= 0) crumbleTower(tw);
@@ -8099,9 +8343,9 @@ function stepShells(dt) {
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
     b.age += dt; b.vy += 120 * dt;
-    // a round loses its strength after a second or so (about 900 units): slowing, it's spent and gone, so a plane
-    // climbing high enough gets out of reach of the guns below
-    if (!b.uw && b.age > 0.8) { const k = Math.exp(-2.6 * dt); b.vx *= k; b.vy *= k; if (b.vx * b.vx + b.vy * b.vy < 320 * 320) { bullets.splice(i, 1); continue; } }
+    // a round loses its strength after a couple of seconds (about 1900 units): slowing, it's spent and gone, so a
+    // plane climbing high enough gets out of reach of the guns below
+    if (!b.uw && b.age > MG_LIVE) { const k = Math.exp(-2.6 * dt); b.vx *= k; b.vy *= k; if (b.vx * b.vx + b.vy * b.vy < 320 * 320) { bullets.splice(i, 1); continue; } }
     b.px = b.x; b.py = b.y;
     b.x += b.vx * dt; b.y += b.vy * dt;
     if (b.uw) {
@@ -8138,6 +8382,7 @@ function stepShells(dt) {
     if (!done) for (const tw of towers) if (tw.player !== b.owner && towerHit(tw, b.x, b.y)) {
       spawnSparks(b.x, b.y, 5, 110);
       if (tw.hp > 0) { tw.marks = tw.marks || []; tw.marks.push([b.x - tw.x, b.y, Math.random()]); if (tw.marks.length > 60) tw.marks.shift(); }
+      if ((tw.soot = (tw.soot || 0) + 1) % 4 === 0) towerScorch(tw, b.x, b.y, 3.2);      // (and a smudge of soot every few rounds)
       done = true; break;
     }
     if (!done) for (const d of docks) if (d.player !== b.owner && harbourHit(d, b.x, b.y)) { spawnSparks(b.x, b.y, 3, 100); done = true; break; }
@@ -11340,7 +11585,10 @@ function renderSky() {
       if (qx < 0 || qy < 0 || qx >= sc.width || qy >= sc.height) continue;
       if (spr.code[Math.floor(qy / k2) * spr.w + Math.floor(qx / k2)]) { pl.cloudT = time; const lut = cloudCache.luts[v]; if (lut) pl.cloudCol = lut[spr.code[Math.floor(qy / k2) * spr.w + Math.floor(qx / k2)]]; }
     }
-    if (c.front) { fronts.push([sc, px, py, a]); if (a > 0.5) spans.push([px, px + sc.width, c.p]); continue; }
+    // (a front heap hanging low enough to meet a tower is drawn behind the world instead, user Oct 24: clouds go
+    // behind the towers, never across them)
+    if (c.front && !towerScreens().some(r => px < r[1] && px + sc.width > r[0] && py + sc.height > r[2])) { fronts.push([sc, px, py, a]); if (a > 0.5) spans.push([px, px + sc.width, c.p]); continue; }
+    if (c.front) { C.globalAlpha = a; blit(sc, px, py); C.globalAlpha = 1; if (a > 0.5) spans.push([px, px + sc.width, c.p]); continue; }
     // (the distant ones, under the deck: hazier the nearer the horizon they sit)
     const low = c.y + spr.h * c.s > CLOUD_DECK + 8 ? clamp((c.y + spr.h * c.s - CLOUD_DECK) / (WATER_Y - 21 - CLOUD_DECK), 0, 1) : 0;
     C.globalAlpha = a * (1 - 0.6 * low); blit(sc, px, py); C.globalAlpha = 1;
@@ -11354,6 +11602,12 @@ function renderSky() {
   st = sema('skDetail', st);
 }
 const cloudSpans = [[], []], frontClouds = [[], []], planeLamps = [[], []];
+// the towers on this view's screen: [left, right, top] (with the flag on top), for keeping clouds behind them
+function towerScreens() {
+  const out = [];
+  for (const tw of towers) if (tw && tw.hp > 0) out.push([PX(tw.x - TW.FW * TW.K * 0.6), PX(tw.x + TW.FW * TW.K * 0.6), PY(TW.BASE - TW.FH * TW.K - 24)]);
+  return out;
+}
 // the planes' blinking red tail lamps, over the night's darkening: a bright core and a soft red glow
 function drawPlaneLamps() {
   const L = planeLamps[viewIdx];
@@ -12675,6 +12929,38 @@ function drawPieceOld(p) {
   C.globalAlpha = 1;
   C.restore();
 }
+// Burn marks on a tower (user Oct 24: a plane going off against it, shells, a stream of bullets): black smudges
+// baked into a copy of its picture, kept for the round (towers are never repaired)
+function towerScorch(tw, x, y, r) {
+  if (!tw || tw.hp <= 0) return;
+  tw.scorch = tw.scorch || [];
+  tw.scorch.push({ dx: x - tw.x, y, r: r * rnd(0.85, 1.2), seed: Math.random() * 100 });
+  if (tw.scorch.length > 40) tw.scorch.splice(tw.scorch.findIndex(q => q.r < 5) >= 0 ? tw.scorch.findIndex(q => q.r < 5) : 0, 1);
+  tw.scorchN = (tw.scorchN || 0) + 1;
+}
+function towerArt(tw, src) {
+  if (!tw.scorch || !tw.scorch.length) return src;
+  const key = towerFrame(tw) + '|' + tw.facing + '|' + tw.scorchN;
+  if (tw._art && tw._art.key === key) return tw._art.c;
+  const c = copyCanvas(src), x = c.getContext('2d');
+  x.globalCompositeOperation = 'source-atop';
+  for (const s of tw.scorch) {
+    const sx = TW.FW / 2 + s.dx / TW.K, sy = TW.FH - (TW.BASE - s.y) / TW.K, R = s.r / TW.K;
+    const blot = (bx, by, r, a) => {
+      const gr = x.createRadialGradient(bx, by, 0, bx, by, r);
+      gr.addColorStop(0, `rgba(12,8,6,${a})`); gr.addColorStop(0.55, `rgba(22,15,10,${a * 0.6})`); gr.addColorStop(1, 'rgba(22,15,10,0)');
+      x.fillStyle = gr; x.fillRect(bx - r, by - r, r * 2, r * 2);
+    };
+    blot(sx, sy, R, R > 12 ? 0.92 : 0.7);
+    if (R > 12) for (let k = 0; k < 5; k++) {
+      const ang = hash(s.seed * 7.1 + k * 3.3) * 6.28, d = R * (0.45 + 0.45 * hash(s.seed * 3.7 + k));
+      blot(sx + Math.cos(ang) * d, sy + Math.sin(ang) * d * 1.2 - R * 0.3, R * (0.3 + 0.25 * hash(s.seed + k * 9.1)), 0.75);   // (and smoke-streaked upward)
+    }
+  }
+  if (tw._art && tw._art.c && tw._art.c._px) for (const v of [...tw._art.c._px.values()]) scaledDrop(v);   // (its zoomed copies go with it)
+  tw._art = { key, c };
+  return c;
+}
 function drawTower(tw) {
   const s = TW.K * SV;
   if (tw.hp <= 0) {
@@ -12683,7 +12969,7 @@ function drawTower(tw) {
     return;
   }
   drawTowerGun(tw);                                   // the barrel slides out from behind the mantlet
-  const sp = scaled(img.towers[towerFrame(tw)][tw.facing], s, true);
+  const sp = scaled(towerArt(tw, img.towers[towerFrame(tw)][tw.facing]), s, true);
   C.drawImage(sp, PX(tw.x) - Math.round(sp.width / 2), PY(TW.BASE) - sp.height);
   // machine-gun pock marks: little black chips in the concrete
   if (tw.marks) for (const [dx, y, r] of tw.marks) {
@@ -14001,7 +14287,7 @@ function render() {
   SURF.on = false;
   ug.clearRect(0, 0, ubw, ubh);
   ug.imageSmoothingEnabled = false;
-  if (ui.title) { drawTitle(); if (ui.picker < 0) drawFullscreenBtn(); drawToast(); return; }
+  if (ui.title) { drawTitle(); if (ui.picker < 0) drawFullscreenBtn(); drawControls(); drawPadFocus(); drawToast(); return; }
   if (!ui.settings) {
   layoutConsoles();
   tt = lap('hudpre', tt);
@@ -14019,6 +14305,7 @@ function render() {
   drawStoryBanner();
   drawWinner();
   drawMenu();
+  drawControls(); drawPadFocus();
   tt = lap('end', tt);
   if (ui.menu && ui.picker < 0) drawFullscreenBtn();
   drawToast();
@@ -14240,7 +14527,7 @@ function cpuShip(B, dt) {
     cpuDrive(B, tgtShip && Math.abs(E.ship.x - sh.x) < R * 0.7 ? 0 : Math.abs(dx) > 45 ? Math.sign(dx) : 0);
   } else cpuDrive(B, 0);
   // a plane close by: the machine gun; otherwise the cannon at the enemy battleship or their tower
-  if (E.plane && Math.hypot(E.plane.x - sh.x, E.plane.y - sh.y) < 700 && gunWorks(sh, 0) + gunWorks(sh, 1)) {
+  if (E.plane && Math.hypot(E.plane.x - sh.x, E.plane.y - sh.y) < 1400 && gunWorks(sh, 0) + gunWorks(sh, 1)) {
     const [mx, my] = muzzlePoint(sh, 0);
     cpuMG(B, dt, g, mx, my, sh.facing, E.plane); return;
   }
@@ -14256,7 +14543,7 @@ function cpuTower(B, dt) {
   if (!towerUsable(tw)) return;
   const [px, py] = towerPivot(tw);
   // a plane in reach of the machine gun first, then the cannon at the nearest boat in its reach
-  if (E.plane && Math.hypot(E.plane.x - px, E.plane.y - py) < 750 && (E.plane.x - px) * tw.facing > -40) { cpuMG(B, dt, g, px, py, tw.facing, E.plane); return; }
+  if (E.plane && Math.hypot(E.plane.x - px, E.plane.y - py) < 1500 && (E.plane.x - px) * tw.facing > -40) { cpuMG(B, dt, g, px, py, tw.facing, E.plane); return; }
   mgHold[p] = false;
   const R = gunReach(true) * 0.97, cand = [E.ship, E.sub && E.sub.y < surfaceY(E.sub.x) + 6 ? E.sub : null].filter(v => v && (v.x - tw.x) * tw.facing > 30 && Math.abs(v.x - tw.x) < R);
   if (!cand.length) return;
@@ -14355,7 +14642,7 @@ function cpuPlane(B, dt) {
   // the machine gun: when the target sits on the nose line, close enough
   if ((kind === 'dog' || kind === 'strafe') && !pl.turn) {
     const dx = (tx - pl.x) * pl.facing;
-    if (dx > 30 && dx < 650) {
+    if (dx > 30 && dx < 1300) {
       const lineY = pl.y + Math.tan(pl.pitch) * dx, off = ty - lineY;
       pl.mg = Math.abs(off) < T.mgTol + 6 && Math.random() < T.mg + 0.3;
       if (pl.mg) cpuCount(p, 'mg');
@@ -14722,10 +15009,12 @@ function sfxMG(x) {
   const kx = Math.round(x / 150), now = SFX.ctx.currentTime;
   if (now - (mgHeard.get(kx) || -1) < 0.055) return;
   mgHeard.set(kx, now); if (mgHeard.size > 64) mgHeard.clear();
-  const out = sfxOut(x, 0.35); if (!out) return;
+  const out = sfxOut(x, 0.42); if (!out) return;
   const t = SFX.ctx.currentTime;
+  // (user Oct 24: more humph) the crack, a chesty low punch under it, and a short body of low noise
   noiseShot(out, t, 0.07, 'bandpass', 2200, 1500, 1.5, 0.5, 0.002);
-  thump(out, t, 140, 70, 0.06, 0.4);
+  thump(out, t, 120, 46, 0.11, 0.85);
+  noiseShot(out, t, 0.09, 'lowpass', 900, 220, 0.8, 0.55, 0.002);
 }
 // a whoosh that rides along with each shell until it lands
 function sfxWhoosh(s) {
@@ -15143,7 +15432,7 @@ async function start(data) {
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
     set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { CPU_LEVEL = lv; cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), hud: p => hudLayout(p), get time() { return time; }, get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
-    follow, gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => linkStartRound(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; menuApply(); linkHost(); }, startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, get worldW() { return WORLD_W; }, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, consoles, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
+    follow, gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => linkStartRound(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; menuApply(); linkHost(); }, startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, get worldW() { return WORLD_W; }, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, consoles, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
   };
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
