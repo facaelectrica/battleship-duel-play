@@ -2804,6 +2804,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
+const BUILD = 'OCT 24 19:59';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -2868,6 +2869,8 @@ function roomOpen() {
     if (e && e.type === 'unavailable-id' && ++LINK.tries < 4) setTimeout(roomOpen, 300);      // (that code's taken: another)
   });
 }
+// (the host) its page hidden - an iPad put to sleep, another app in front: the game stops here, so tell the guests
+document.addEventListener('visibilitychange', () => { if (LINK.hosting) for (const g of linkGuests()) linkTo(g, { t: 'away', on: document.hidden }); });
 // the session's invite link, to the clipboard (the code in the menu's title, tapped)
 function copyInvite() {
   if (!LINK.hosting || !LINK.link) return;
@@ -2941,7 +2944,7 @@ function dropSeat(g, quiet) {
 // (the host) a new round for everyone: the people here as the menu has them, and every guest on a side
 function linkStartRound() {
   LINK.starting = true; try { restartGame(); } finally { LINK.starting = false; }
-  for (const g of linkGuests()) { g.seat = null; if (g.side === 0 || g.side === 1) { if (roomSideOk(g.side)) seatJoin(g); else g.side = null; } }
+  for (const g of linkGuests()) { g.seat = null; if (g.side === 0 || g.side === 1) { if (roomSideOk(g.side)) seatJoin(g); else { g.side = null; linkTo(g, { t: 'stop' }); } } }
   if (!NET.seats.some(st => !st.local)) NET.role = 'local';
   linkLobby();
 }
@@ -2976,6 +2979,12 @@ function linkFromGuest(g, m) {
     linkLobby();
     return;
   }
+  // (a guest playing, sending its controls, that has no seat here - this screen started a new round, say: back in,
+  // or back to the session's menu if its side isn't in this game; user Oct 24: a guest got no updates at all)
+  if (!g.seat && (m.t === 'ctl' || m.t === 'act') && roundLive()) {
+    if ((g.side === 0 || g.side === 1) && roomSideOk(g.side)) seatJoin(g); else { g.side = null; linkTo(g, { t: 'stop' }); linkLobby(); }
+    return;
+  }
   if (!g.seat || NET.role !== 'host') return;
   // (only the commands a player has, and only for the guest's own seat on its own team)
   const st = g.seat;
@@ -3003,6 +3012,7 @@ function linkReceive(m) {
     return;
   }
   if (m.t === 'stop') { guestOut(); return; }
+  if (m.t === 'away') { LINK.away = !!m.on; return; }
   if (m.t === 'start') {
     NET.role = 'guest'; NET.me = 0; NET.worldW = m.worldW | 0; NET.send = linkSend; NET.side = m.side === 1 ? 1 : 0; NET.taken = null;
     if (Array.isArray(m.flags)) { flagPick[0] = m.flags[0]; flagPick[1] = m.flags[1]; }
@@ -3015,7 +3025,7 @@ function linkReceive(m) {
     return;
   }
   if (m.t === 'snap' && NET.role === 'guest' && m.s) {
-    NETST.snapIn++; NETST.lastSnap = performance.now();
+    NETST.snapIn++; NETST.lastSnap = performance.now(); LINK.away = false;
     try { if (m.you) m.s.you = m.you; NET.taken = Array.isArray(m.taken) ? m.taken : null; netApply(m.s); } catch (e) { console.error(e); }
     return;
   }
@@ -3034,9 +3044,10 @@ function linkPump(dt) {
   LINK.acc += dt;
   if (LINK.acc < 1 / 15) return;
   LINK.acc = 0;
-  if (NET.role === 'host') {
+  if (LINK.hosting && (NET.role === 'host' || linkGuests().some(g => g.seat))) {
     const gs = linkGuests().filter(g => g.seat);
     if (!gs.length) return;
+    NET.role = 'host';                                   // (guests in the round: this screen is their host)
     // one snapshot for each team (the other team's swapped round), with what each guest and its teammates are in
     const ev = NET.events.splice(0), sky = (NET.snapN = (NET.snapN || 0) + 1) % 15 === 1, S = [null, null];
     for (const g of gs) {
@@ -3074,7 +3085,8 @@ function linkClose(msg) {
 // the control state: what's held and where the gun is pointed (the guest sends it to the host a few times a second)
 function ctlState(p) {
   const m = crew[p].mode, g = hasGuns(p) ? activeGun(p) : null, pl = planes[p];
-  return { m, e: g ? +g.elev.toFixed(2) : null, w: g ? +g.power.toFixed(3) : null, d: diveHold[p] || 0, mg: m === 'plane' ? !!(pl && pl.mg) : !!mgHold[p], z: m === 'sub' ? Math.round(subs[p].depthT) : null, cl: hiddenPlane(pl) };
+  // (d: the climb / dive held - the plane's keys too, user Oct 24: a guest's plane couldn't go up or down)
+  return { m, e: g ? +g.elev.toFixed(2) : null, w: g ? +g.power.toFixed(3) : null, d: m === 'plane' ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : diveHold[p] || 0, mg: m === 'plane' ? !!(pl && pl.mg) : !!mgHold[p], z: m === 'sub' ? Math.round(subs[p].depthT) : null, cl: hiddenPlane(pl) };
 }
 function setCtlState(p, s) {
   if (s && s.cl && planes[p] && planes[p].state === 'fly') planes[p].cloudT = time;   // (in a cloud on its own player's screen)
@@ -3415,7 +3427,9 @@ function hudLayout(p) {
   }
   // the vehicle buttons along the top, centred in your half (one player: on the screen), clear of the menu
   // buttons (two players: stacked in the middle of the screen; one player: in the top left corner)
-  const mid = left + W / 2, room = one ? Math.min(W / 2 - 116, W / 2 - 8) : Math.min(W / 2 - 8, W / 2 - 30);
+  // (one view against another team: the top laid out as for two, each team's over its own side of the sea)
+  const bar2 = one && TWOBAR(), oneT = one && !bar2, WT = bar2 ? hw : W, leftT = bar2 ? SIDE(p) * hw : left;
+  const mid = leftT + WT / 2, room = oneT ? Math.min(WT / 2 - 116, WT / 2 - 8) : Math.min(WT / 2 - 8, WT / 2 - 30);
   const nT0 = hudVeh().length, g = Math.max(3, Math.round(7 * u)), tw = Math.min(130 * u, (2 * room - (nT0 - 1) * g) / nT0);
   const tk = tw / img.hud.tabSteel.width, th = img.hud.tabSteel.height * tk;
   const x0 = mid - (tw * nT0 + g * (nT0 - 1)) / 2;
@@ -3427,7 +3441,7 @@ function hudLayout(p) {
   if (useCaptains() && captains[p] && captains[p].length) {
     const n = captains[p].length, gap = Math.max(2, Math.round(3 * u0));
     // (42: one screen pixel per pixel of the heads' art, crisp; smaller only if eight won't fit)
-    const hs = Math.round(Math.min(42, ((one ? W - 8 : W - 64) / n) - gap));   // (split: clear of the menu button in the middle)
+    const hs = Math.round(Math.min(42, ((oneT ? WT - 8 : WT - 64) / n) - gap));   // (split: clear of the menu button in the middle)
     const cy = Math.round(ui.top + 4 + th + Math.max(6, 9 * u0)), cx0 = Math.round(mid - (n * hs + (n - 1) * gap) / 2);
     caps = captains[p].map((c, i) => ({ id: 'cap:' + i, cap: i, x: cx0 + i * (hs + gap), y: cy, w: hs, h: hs }));
     capB = cy + hs;
@@ -3639,34 +3653,16 @@ function redTint(c) {
 }
 // the row of captains' heads, just the heads (no box): alive (ashore, or out in a vehicle: its little picture in
 // the corner), the one who died last wounded, the ones before skulls. They go out in order, left to right.
-/* The other team at a glance, in the top right corner when there's one view (user Oct 24: "I also obviously need
-   to see the other team remaining characters and ship damage"): each of their vehicles filled across with its life,
-   lit where one of them is out in it, and their captains - the dead under a red X. */
-function drawEnemyStrip(q) {
-  if (!captains[q] || !img.hud || !img.hud.icShip) return;
-  const L0 = hudLayout(0), last = L0.tabs[L0.tabs.length - 1], right = ubw - 8, room = right - (last ? last.x + last.w : ubw / 2) - 16;
-  const VS = hudVeh().filter(v => v !== 'sail'), n = captains[q].length;
-  const hs = Math.max(12, Math.min(22, Math.floor((room - 4) / Math.max(n, 1)) - 2)), W = n * (hs + 2) - 2;
-  if (room < Math.min(120, W)) return;                 // (no room beside the buttons: a narrow screen)
-  const iw = Math.floor((W - (VS.length - 1) * 4) / VS.length), y0 = Math.round(ui.top + 6);
-  ug.save(); ug.imageSmoothingEnabled = false;
-  if (room >= W + 44) drawText(ug, 'ENEMY', right - W - 6, y0 + 4, '#ffffff', 1, 'right');
-  VS.forEach((v, i) => {
-    const ic = img.hud[HUD_TABICON[v]], k = Math.min(iw / ic.width, 16 / ic.height), w = Math.round(ic.width * k), h = Math.round(ic.height * k);
-    const sp = scaled(ic, w / ic.width, true), x = Math.round(right - W + i * (iw + 4) + (iw - w) / 2), y = y0 + Math.round((16 - h) / 2);
-    const life = clamp(vehLife(q, v), 0, 1), on = crew[q] && crew[q].mode === v;
-    ug.globalAlpha = 0.3; ug.drawImage(sp, x, y, w, h);
-    ug.globalAlpha = 1;
-    const lw = Math.round(w * life), sw = Math.max(1, Math.round(sp.width * life));
-    if (lw > 0) ug.drawImage(life < 0.34 ? redTint(sp) : sp, 0, 0, sw, sp.height, x, y, lw, h);
-    if (on) { ug.fillStyle = '#ffd23a'; ug.fillRect(x, y + h + 2, w, 2); }      // (one of them is out in it)
-  });
-  const T = captArt(q), flip = SIDE(q) === 1, cy = y0 + 22;
-  captains[q].forEach((c, i) => {
-    const b = { x: right - W + i * (hs + 2), y: cy, w: hs, h: hs }, dead = c.state === 'bones' || c.state === 'dead';
-    drawCapHead(q, T, c, b, flip);
-    if (dead) drawRedX(b, 1);
-  });
+/* The other team's vehicle buttons and captains, with one view (user Oct 24: "the enemy UI is the same size and
+   shape as yours... just like when 2 players share a screen, just no middle line"): the top of the screen is laid
+   out as for two players, each team's buttons over its own half of the sea; the other team's are only to look at. */
+const TWOBAR = () => PLAYERS === 2 && !TEST && ONEVIEW() && !ui.title;
+function drawEnemyBar(q) {
+  if (!captains[q] || crew[q] == null) return;
+  const Lh = hudLayout(q);
+  ug.save();
+  noStandIn++;
+  try { drawHudTabs(q, Lh); drawCaptains(q, Lh); } finally { noStandIn--; }
   ug.restore();
 }
 function drawCaptains(p, Lh) {
@@ -3880,6 +3876,15 @@ function redX(w) {
 // when each of a player's vehicles was last hit (to flag one under attack while you're elsewhere)
 const hitAlert = [{}, {}];
 function noteHit(p, k) { if (p === 0 || p === 1) hitAlert[p][k] = time; }
+// a team's vehicle buttons, their glass in its colour (made when first needed, and again when the flags change)
+function tabArt(p) {
+  const col = img.teamCol && img.teamCol[p];
+  if (!col) return img.hud;
+  img.tabP = img.tabP || [];
+  const t = img.tabP[p];
+  if (t && t.col === col) return t;
+  return (img.tabP[p] = { col, tabSteel: tintGlass(img.hud.tabSteel, col), tabGold: tintGlass(img.hud.tabGold, col) });
+}
 function drawHudTabs(p, Lh) {
   const cur = crew[p].mode, blink = Math.floor(time * 4) % 2;
   const danger = cur === 'ship' ? ships[p].state === 'afloat' && nearSink(ships[p]) : cur === 'sub' ? subs[p].state === 'out' && subHits(subs[p]) >= SUB_HITS - 1 : cur === 'tower' ? towers[p].hp <= 2 : false;
@@ -3890,7 +3895,7 @@ function drawHudTabs(p, Lh) {
     const on = cur === t.veh || crew[p].spec === t.veh, taken = !on && takenByOther(p, t.veh);
     const ok = canTake(p, t.veh), down = (hudPress[p][t.id] || 0) > 0, picked = padPick[p] === t.veh;
     ug.globalAlpha = (ok || on) && !picked ? 1 : picked ? 0.62 : taken ? 0.8 : 0.55;
-    const fr = img.hud[on ? 'tabGold' : 'tabSteel'], fw = Math.round(fr.width * t.k), fh = Math.round(fr.height * t.k);
+    const fr = tabArt(p)[on ? 'tabGold' : 'tabSteel'], fw = Math.round(fr.width * t.k), fh = Math.round(fr.height * t.k);
     const fx = Math.round(t.x + t.w / 2 - fw / 2), fy = t.y + t.h - fh + (down ? 1 : 0);
     ug.drawImage(scaled(fr, fw / fr.width, true), fx, fy);
     // the picture, filled across with its life (the rest of it dim)
@@ -4135,7 +4140,7 @@ function topLayout() {
   const cx = ubw >> 1, y = ui.top;
   // in a game the vehicle buttons have the top of each half: two players, these stack down the middle;
   // one player, they sit in the top left corner (the title keeps them side by side in the middle)
-  const stack = !ui.title && !ONEVIEW(), corner = !ui.title && ONEVIEW();
+  const stack = !ui.title && (!ONEVIEW() || TWOBAR()), corner = !ui.title && ONEVIEW() && !TWOBAR();
   return {
     gear: stack ? [cx - 21, y] : corner ? [8, y] : [cx - 48, y], menu: stack ? [cx - 21, y + 48] : corner ? [56, y] : [cx + 6, y],
     play: stack ? [cx - 21, y + 96] : corner ? [104, y] : [cx - 102, y],
@@ -4821,6 +4826,7 @@ function drawTitle() {
   else glassButton(...T.play, 'PLAY');
   if (T.restart) glassButton(...T.restart, 'RESUME');
   modeButton(...T.opts, 'OPTIONS', false);
+  drawText(ug, 'BUILD ' + BUILD, T.x + T.w - 8, T.y + T.h - 12, 'rgba(255,255,255,0.55)', 1, 'right');
   if (linkPanelUp()) drawLinkPanel(T);
 }
 const linkPanelUp = () => LINK.state === 'joining' || LINK.state === 'msg' || LINK.state === 'enter';
@@ -7438,6 +7444,19 @@ function tintRed(src, col) {
   }
   x.putImageData(id, 0, 0); return c;
 }
+// the vehicle buttons' dark blue glass, in a team's colour (user Oct 24): each pixel keeps its brightness
+function tintGlass(src, col) {
+  const c = copyCanvas(src), x = c.getContext('2d'), id = x.getImageData(0, 0, c.width, c.height), d = id.data;
+  const lc = 0.3 * col[0] + 0.59 * col[1] + 0.11 * col[2] || 1;
+  for (let i = 0; i < d.length; i += 4) {
+    if (!d[i + 3]) continue;
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    if (!(b > r * 1.18 && b >= g * 0.98 && b - r > 12)) continue;                 // blue, and clearly so (the steel stays grey)
+    const l = (0.3 * r + 0.59 * g + 0.11 * b) / lc;
+    d[i] = clamp(col[0] * l, 0, 255); d[i + 1] = clamp(col[1] * l, 0, 255); d[i + 2] = clamp(col[2] * l, 0, 255);
+  }
+  x.putImageData(id, 0, 0); return c;
+}
 let teamKey = '';
 function buildTeamArt() {
   if (!img.base || !img.planeSheet) return;
@@ -7604,7 +7623,9 @@ function stepPlanes(dt) {
     let stick = mine ? clamp(diveHold[p] + diveKeys[p], -1, 1) : sd ? clamp(sd.dive + (sd.local ? diveKeys[sd.slot] : 0), -1, 1) : pl.raid ? pl.aiStick || 0 : 0;
     if (pl.recoverT > 0) { pl.recoverT -= dt; stick = 0; }                         // (just restarted: it levels by itself)
     pl.holdT = stick && Math.sign(stick) === pl.holdS ? pl.holdT + dt : 0; pl.holdS = Math.sign(stick);
-    const rate = 0.22 + 0.55 * Math.min(1, pl.holdT / 2);
+    // (pulling out of a dive - or a climb - comes round twice as fast as pitching into one, user Oct 24: "it should
+    // take half the time")
+    const rate = (0.22 + 0.55 * Math.min(1, pl.holdT / 2)) * (stick * pl.pitch < 0 ? 2 : 1);
     let want = stick ? clamp(pl.pitch + stick * rate * dt, -PLANE_PITCH, PLANE_PITCH) : 0, forced = false;
     if (pl.auto === 'home') { want = clamp((HANGAR_TOP - 110 - pl.y) / 200, -0.4, 0.4); forced = true; }
     if (pl.y < SKY_TOP + 90 && want < 0.15) { want = 0.15; forced = true; }          // the ceiling
@@ -7625,7 +7646,7 @@ function stepPlanes(dt) {
       if (over && pl.y > roof) { want = Math.min(want, -0.8 * clamp((pl.y - roof) / 50, 0.45, 1)); forced = true; }
     }
     if (stick && !forced) pl.pitch = want;                                     // held: it keeps pitching
-    else pl.pitch += clamp(want - pl.pitch, -1, 1) * Math.min(1, dt * (forced ? 2.6 : 1.1));
+    else pl.pitch += clamp(want - pl.pitch, -1, 1) * Math.min(1, dt * (forced ? 2.6 : 2.2));
     // a dive gathers speed and a climb loses it, and it keeps what it's got: levelled out, it only drifts back
     // toward its cruising speed slowly, so two planes level side by side can be flying at different speeds
     // (the steeper the climb the more it loses; it never stalls, it just slows to its slowest)
@@ -14799,7 +14820,12 @@ function render() {
   layoutConsoles();
   tt = lap('hudpre', tt);
   for (let v = 0; v < HUMANS(); v++) asSlot(v, p => { drawHud(p); if (crew[p].mode === 'boat') drawBoatCtl(p); });
-  if (PLAYERS === 2 && ONEVIEW() && !TEST && ui.winner == null) drawEnemyStrip(1);
+  if (TWOBAR() && ui.winner == null) drawEnemyBar(1);
+  // (a guest the host has stopped updating: say so, rather than a frozen game)
+  if (NET.role === 'guest' && NETST.lastSnap && performance.now() - NETST.lastSnap > 2000) {
+    const t = LINK.away ? "THE HOST'S SCREEN IS ASLEEP - WAKE IT UP" : 'WAITING FOR THE HOST...';
+    drawText(ug, t, ubw / 2 + 2, Math.round(ubh * 0.42) + 2, '#04070f', 3, 'center'); drawText(ug, t, ubw / 2, Math.round(ubh * 0.42), '#ffd23a', 3, 'center');
+  }
   if (probe.on) probeFlush(ug);
   tt = lap('console', tt);
 
@@ -15944,7 +15970,7 @@ async function start(data) {
     towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
-    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { CPU_LEVEL = lv; cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), hud: p => hudLayout(p), get time() { return time; }, get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
+    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { CPU_LEVEL = lv; cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), hud: p => hudLayout(p), get time() { return time; }, get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
     follow, gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, get worldW() { return WORLD_W; }, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, consoles, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
