@@ -2804,6 +2804,15 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const PEER_PREFIX = 'battleship-duel-v1-';
+// how two screens find a way to each other through home routers and phone networks: several public STUN servers
+// (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
+// never got past JOINING)
+const PEER_CFG = { config: { iceServers: [
+  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] },
+  { urls: 'stun:stun.cloudflare.com:3478' },
+  { urls: ['turn:eu-0.turn.peerjs.com:3478', 'turn:us-0.turn.peerjs.com:3478'], username: 'peerjs', credential: 'peerjsp' },
+], sdpSemantics: 'unified-plan' } };
+const peerOpts = () => window.__PEER_OPTS || PEER_CFG;
 const ROOM_MAX = 6, SIDE_MAX = 3;
 function linkCode() {
   const A = 'ABCDEFGHJKLPRSTUVXYZ'.split('').filter(ch => FONT[ch]).join(''), r = new Uint32Array(4);   // (no I, O, Q, M, N or W: easy to misread in the pixel font)
@@ -2839,7 +2848,7 @@ function roomOpen() {
   LINK.hosting = true; LINK.nextId = LINK.nextId || 1; LINK.conns.clear();
   LINK.code = linkCode(); LINK.state = 'opening';
   let peer;
-  try { peer = LINK.peer = new Peer(PEER_PREFIX + LINK.code, window.__PEER_OPTS); } catch (e) { LINK.state = 'off'; LINK.peer = null; return; }   // (__PEER_OPTS: a test server)
+  try { peer = LINK.peer = new Peer(PEER_PREFIX + LINK.code, peerOpts()); } catch (e) { LINK.state = 'off'; LINK.peer = null; return; }   // (__PEER_OPTS: a test server)
   peer.on('open', () => {
     LINK.state = 'open'; LINK.tries = 0;
     try { const u = new URL(location.href); u.search = '?join=' + LINK.code; u.hash = ''; LINK.link = u.toString(); } catch (e) { LINK.link = ''; }
@@ -2873,10 +2882,14 @@ function linkJoin(code) {
   linkDrop();
   LINK.code = code; LINK.state = 'joining'; LINK.msg = 'JOINING ' + code + '...'; LINK.hosting = false; LINK.players = []; LINK.myId = 0;
   ui.title = true; ui.menu = false; ui.picker = -1;
-  const peer = LINK.peer = window.__PEER_OPTS ? new Peer(window.__PEER_OPTS) : new Peer();
+  const peer = LINK.peer = new Peer(peerOpts());
+  // (the session found, but no way through to it: don't wait forever)
+  const tries = LINK.joinTry = (LINK.joinTry || 0) + 1;
+  setTimeout(() => { if (LINK.state === 'joining' && LINK.joinTry === tries) linkClose('NO LINK TO ' + code + ' - SAME WI-FI WORKS BEST'); }, 20000);
   peer.on('open', () => {
+    LINK.msg = 'LINKING TO ' + code + '...';             // (the session's there: now the way through to it)
     const conn = LINK.conn = peer.connect(PEER_PREFIX + code, { reliable: true });
-    conn.on('open', () => linkSend({ t: 'hello', flag: flagPick[0], v: 3 }));
+    conn.on('open', () => { LINK.msg = 'JOINING ' + code + '...'; linkSend({ t: 'hello', flag: flagPick[0], v: 3 }); });
     conn.on('data', m => linkReceive(m));
     conn.on('close', () => linkClose(LINK.state === 'joining' ? 'NO SESSION ' + code : 'THE HOST LEFT'));
     conn.on('error', () => linkClose('THE LINK BROKE'));
