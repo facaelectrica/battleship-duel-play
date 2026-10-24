@@ -606,7 +606,7 @@ let homeDock = [];       // each player's own harbour; in one player, player 2's
    right (and in STORY) the sides swap, SWAP, and player 0's harbour is the one on the right. */
 const PREFS0 = (() => { try { return JSON.parse(localStorage.getItem('battleship-duel.prefs')) || {}; } catch (e) { return {}; } })();
 let MODE = ['story', 'chill', 'duel', 'test'].includes(PREFS0.mode) ? PREFS0.mode : PREFS0.test ? 'test' : PREFS0.players === 1 ? 'chill' : 'duel';
-const CTLS = ['kb', 'pad1', 'pad2', 'cpu', 'net'], CTL_NAMES = { kb: 'KEYBOARD', pad1: 'CONTROLLER 1', pad2: 'CONTROLLER 2', cpu: 'CPU', net: 'ONLINE FRIEND' };
+const CTLS = ['kb', 'kb2', 'pad1', 'pad2', 'touch', 'cpu', 'net', 'none'], CTL_NAMES = { kb: 'KEYBOARD', kb2: 'ARROW KEYS', pad1: 'CONTROLLER 1', pad2: 'CONTROLLER 2', touch: 'TOUCH', cpu: 'CPU', net: 'ONLINE FRIEND', none: 'NOBODY' };
 const ctlPick = [0, 1].map(i => CTLS.includes((PREFS0.ctl || [])[i]) ? PREFS0.ctl[i] : i === 1 && PREFS0.vscpu ? 'cpu' : 'kb');   // per side: left, right
 const cpuLvSide = [0, 1].map(i => { const v = (PREFS0.cpuLv || [])[i]; return v === 0 || v === 2 ? v : v === 1 ? 1 : PREFS0.cpuLevel === 0 || PREFS0.cpuLevel === 2 ? PREFS0.cpuLevel : 1; });
 let STORY_LV = PREFS0.storyLv === 0 || PREFS0.storyLv === 2 ? PREFS0.storyLv : 1;
@@ -619,21 +619,40 @@ const padsSeen = () => PADS_SEEN;
 window.addEventListener('gamepadconnected', countPads); window.addEventListener('gamepaddisconnected', countPads);
 // who plays a side: only 1 VS 1 has a CPU side, and a controller that isn't there plays as the keyboard
 // (the pick is kept, so plugging the pad back in brings it back)
-const ctlFor = s => { const c = ctlPick[s]; if (c === 'cpu' || c === 'net') return MODE === 'duel' && (c === 'cpu' || s === 1) ? c : 'kb'; if (c === 'pad1' && padsSeen() < 1) return 'kb'; if (c === 'pad2' && padsSeen() < 2) return 'kb'; return c; };
+const ctlFor = s => { const c = ctlPick[s]; if (c === 'net' || c === 'none') return c; if (c === 'cpu') return MODE === 'duel' ? c : 'kb'; if (c === 'pad1' && padsSeen() < 1) return 'kb'; if (c === 'pad2' && padsSeen() < 2) return 'kb'; return c; };
+// a person at this screen (rather than the CPU, someone online, or nobody)
+const LOCALC = c => c === 'kb' || c === 'kb2' || c === 'pad1' || c === 'pad2' || c === 'touch';
+/* The people playing at this screen, one slot each (user Oct 24: two can share a side): slot 0 is player 0, at
+   its own team's index; a second player on the other side is player 1; a second player on the SAME side is a
+   seat on that team (NET.seats, marked local) and everything of theirs - their half of the screen, their
+   buttons, their zoom, their camera - is run through asSlot(1, ...), which stands them in at their team's index.
+   EXTRA: that second same-side player from the menu's roster ({ dev, side }), or null. */
+const SLOTS = [];
+let EXTRA = null;
+const TOUCH0 = (window.matchMedia && matchMedia('(pointer: coarse)').matches) || ('ontouchstart' in window);
 // online play (see 'Player commands' further down): 'local', 'host', 'guest', or 'loop' (the tools' loopback)
 const NET = { role: window.__NET_ROLE || 'local', me: 0, send: null, log: null, lag: window.__NET_LAG != null ? window.__NET_LAG : 0.1, q: [], worldW: window.__NET_WORLDW || 0, events: [], lists: {}, side: window.__NET_ROLE === 'guest' ? 1 : 0 };   // (side: online, the side of the sea this screen's player is on)   // (__NET_ROLE: the test tools' loopback)
 function applyMode() {
   PLAYERS = MODE === 'chill' || MODE === 'story' ? 1 : 2;
   TEST = MODE === 'test'; STORY = MODE === 'story';
-  SWAP = NET.role === 'host' || NET.role === 'guest' ? MODE === 'duel' && NET.side === 1   // (online: your harbour on the side you picked)
-    : STORY || (MODE === 'duel' && ctlFor(0) === 'cpu' && ctlFor(1) !== 'cpu');
+  // player 0 is a person when there is one: their harbour's side is SIDE(0) (online, a guest's is the side it picked)
+  SWAP = NET.role === 'guest' ? NET.side === 1 : STORY || (PLAYERS === 2 && !LOCALC(ctlFor(0)) && LOCALC(ctlFor(1)));
+  SLOTS.length = 0;
+  const add = (dev, team, extra) => SLOTS.push({ dev, team, extra: !!extra });
+  if (NET.role === 'guest') add(LOCALC(ctlFor(SIDE(0))) ? ctlFor(SIDE(0)) : TOUCH0 ? 'touch' : 'kb', 0);
+  else if (PLAYERS === 1) { const d = ctlFor(SIDE(0)); add(LOCALC(d) ? d : TOUCH0 ? 'touch' : 'kb', 0); if (EXTRA) add(EXTRA.dev, 0, true); }
+  else {
+    for (let p = 0; p < 2; p++) { const d = ctlFor(SIDE(p)); if (LOCALC(d)) add(d, p); }
+    if (EXTRA && SLOTS.length === 1) add(EXTRA.dev, SLOTS[0].team, true);
+  }
+  if (SLOTS.length === 2 && SLOTS[0].dev === 'kb' && SLOTS[1].dev === 'kb') SLOTS[1].dev = 'kb2';   // (two at one keyboard: the second has the arrows)
 }
-applyMode();
 const SIDE = p => SWAP ? 1 - p : p;                   // which side of the sea a player's harbour is on: 0 left, 1 right
+applyMode();
 const flagOf = p => flagPick[SIDE(p)];                // (the flags on the menu are by side)
-const isCpu = p => PLAYERS === 2 && !TEST && NET.role !== 'host' && NET.role !== 'guest' && ctlFor(SIDE(p)) === 'cpu';   // (online: people on both sides)
-const HUMANS = () => PLAYERS === 1 || NET.role === 'host' || NET.role === 'guest' ? 1 : (isCpu(0) ? 0 : 1) + (isCpu(1) ? 0 : 1);   // (online: the one at this screen)   // how many players are people at the controls
-const ONEVIEW = () => PLAYERS === 1 || HUMANS() === 1;        // one screen (yours) rather than the split screen
+const isCpu = p => PLAYERS === 2 && !TEST && NET.role !== 'guest' && ctlFor(SIDE(p)) === 'cpu';   // (a guest's world is the host's: no CPU of its own)
+const HUMANS = () => SLOTS.length;                            // how many people play at this screen (each has a slot)
+const ONEVIEW = () => HUMANS() <= 1;                          // one screen (yours) rather than the split screen
 const VSCPU_ = () => PLAYERS === 2 && !TEST && HUMANS() === 1;
 const ships = [];
 let time = 0, frameDt = 1 / 60, paused = false;
@@ -671,7 +690,7 @@ const followPref = [false, false];
 let stopPref = false;
 // MUTE: every sound off (the volume slider keeps its place)
 let MUTED = loadPrefs().mute === true;
-function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ flags: flagPick.slice(), mode: MODE, ctl: ctlPick.slice(), cpuLv: cpuLvSide.slice(), storyLv: STORY_LV, mute: MUTED })); } catch (e) { } }
+function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ flags: flagPick.slice(), mode: MODE, ctl: ctlPick.slice(), cpuLv: cpuLvSide.slice(), storyLv: STORY_LV, mute: MUTED, roster: typeof menuSel === 'object' ? menuSel.roster : PREFS0.roster })); } catch (e) { } }
 { const pr = loadPrefs(); if (Array.isArray(pr.flags)) pr.flags.forEach((f, i) => { if (i < 2 && Number.isInteger(f) && f >= 0) flagPick[i] = f; }); }
 
 function makeShip(id, x, facing, dock) {
@@ -1009,6 +1028,7 @@ function buildWorld(restore) {
     runCtl[p].v = 0; runCtl[p].drag = false;
   }
   if (PLAYERS === 1) { crew[1].mode = 'gone'; crew[1].dead = true; }
+  syncLocalSeat();                                     // (a second player on the same side: their own seat, fresh)
   if (TEST) for (let p = 0; p < 2; p++) { testSpawn(p, 'ship'); testSpawn(p, 'sub'); crew[p].mode = 'dock'; takeOver(p, 'ship'); }
   buildSmokeGrid();
   cam.mode = 'split'; cam.merge = 0;
@@ -2060,7 +2080,7 @@ function releaseFire(p) { holding[p] = null; }
 function updateHolds(dt) {
   for (const g of guns) if (g && g.safeT > 0) g.safeT -= dt;
   for (let p = 0; p < 2; p++) holdsFor(p, dt);
-  for (const st of NET.seats) asSeat(st, () => holdsFor(st.team, dt));     // (online teammates: their own triggers)
+  for (const st of NET.seats) viaSeat(st, q => holdsFor(q, dt));     // (teammates: their own triggers)
 }
 function holdsFor(p, dt) {
   {
@@ -2399,7 +2419,7 @@ const vehInside = (p, k) => { const v = vehOf(p, k); return !!v && (v.moored ===
 // one house button: for the boat you're in, unless she's already home or on her way
 const canSendHome = (p, k) => !TEST && stopPref && k !== 'tower' && crew[p].mode === k && canTake(p, k) && !vehInside(p, k) && !vehHoming(p, k);
 function switcherLayout(p) {
-  const c = consoles[p], half = ubw / 2, left = ONEVIEW() ? 0 : p * half;
+  const c = consoles[p], half = ubw / 2, left = ONEVIEW() ? 0 : (HUD_HALF != null ? HUD_HALF : p) * half;
   const gap = Math.max(4, Math.round(6 * c.k)), m = Math.max(6, Math.round(10 * c.k));
   let sz = Math.max(40, Math.round(62 * c.k)), hs = Math.max(30, Math.round(sz * 0.6));
   const tiles = [], homes = [];
@@ -2533,12 +2553,39 @@ function makeSeat(id, team) {
 }
 function asSeat(st, fn) {
   const p = st.team, keep = [crew[p], telegraphs[p], mgHold[p], holding[p], diveHold[p], NET.remote];
-  crew[p] = st.crew; telegraphs[p] = st.tele; mgHold[p] = st.mg; holding[p] = st.holding; diveHold[p] = st.dive; NET.remote = true;
+  crew[p] = st.crew; telegraphs[p] = st.tele; mgHold[p] = st.mg; holding[p] = st.holding; diveHold[p] = st.dive; NET.remote = !st.local;   // (a seat at this screen zooms as anyone here does)
   try { return fn(); } finally {
     st.mg = mgHold[p]; st.holding = holding[p]; st.dive = diveHold[p];
     crew[p] = keep[0]; telegraphs[p] = keep[1]; mgHold[p] = keep[2]; holding[p] = keep[3]; diveHold[p] = keep[4]; NET.remote = keep[5];
   }
 }
+// the second player at this screen on the same side as the first: a seat of their own on that team, made fresh with
+// each round (and whenever the roster changes)
+function syncLocalSeat() {
+  for (let i = NET.seats.length - 1; i >= 0; i--) if (NET.seats[i].local) NET.seats.splice(i, 1);
+  for (const S of SLOTS) S.seat = null;
+  const S = SLOTS[1];
+  if (S && S.extra) { const st = makeSeat('L1', S.team); st.local = true; st.slot = 1; NET.seats.push(st); S.seat = st; }
+}
+// a slot's own things at this screen (its half, buttons, zoom, camera), swapped in at its team's index by asSlot
+const UI_PER = () => [consoles, gunCtl, scopes, runCtl, hudPress, scopeHold, padPick, camOverride, follow, followPref, diveKeys, powerNotch, cam.zt, cam.za, cam.spd, cam.pan, cam.panHeld];
+let HUD_HALF = null, SLOT_IN = null;
+// run fn(p) for local slot v: p is the team index to use. Slot 0 and a second player on the other side are at their
+// own index already; a second player on the same side is stood in for (their seat's crew, their half of the screen)
+function asSlot(v, fn) {
+  const S = SLOTS[v];
+  if (!S || !S.extra || !S.seat) return fn(v);
+  if (SLOT_IN != null) return fn(SLOT_IN === v ? S.team : v);   // (already stood in)
+  const tm = S.team, A = UI_PER();
+  const swap = () => { for (const a of A) { const x = a[tm]; a[tm] = a[v]; a[v] = x; } };
+  swap();
+  const fixed = [consoles, gunCtl, scopes, runCtl].map(a => { const o = a[tm], k = 'p' in o ? 'p' : 'player', was = o[k]; o[k] = tm; return [o, k, was]; });
+  HUD_HALF = v; SLOT_IN = v;
+  try { return asSeat(S.seat, () => fn(tm)); }
+  finally { HUD_HALF = null; SLOT_IN = null; for (const [o, k, was] of fixed) o[k] = was; swap(); }
+}
+// a seat's things done the right way: a local one through its slot, an online one through its seat
+const viaSeat = (st, fn) => st.local ? asSlot(st.slot, fn) : asSeat(st, () => fn(st.team));
 // everyone on side p who could be driving something: the player at this screen (or the CPU) and the seats
 function crewsOf(p) { const home = NET.home ? NET.home[p] : crew[p]; return [home, ...NET.seats.filter(st => st.team === p).map(st => st.crew)]; }
 // someone else on that side is driving it
@@ -2546,11 +2593,11 @@ const takenByOther = (p, k) => k !== 'sail' && (crewsOf(p).some(c => c !== crew[
 // a vehicle lost, or home: whoever was driving it (here or a seat) is ashore
 function lostVeh(p, x, k) {
   if (crew[p].mode === k) lostUnit(p, x, k);
-  for (const st of NET.seats) if (st.team === p && st.crew.mode === k) asSeat(st, () => lostUnit(p, x, k));
+  for (const st of NET.seats) if (st.team === p && st.crew.mode === k) viaSeat(st, q => lostUnit(q, x, k));
 }
 function homeVeh(p, k) {
   if (crew[p].mode === k) stepAshore(p, k);
-  for (const st of NET.seats) if (st.team === p && st.crew.mode === k) asSeat(st, () => stepAshore(p, k));
+  for (const st of NET.seats) if (st.team === p && st.crew.mode === k) viaSeat(st, q => stepAshore(q, k));
 }
 const seatDriving = (p, k) => NET.seats.find(st => st.team === p && st.crew.mode === k);
 // online, not driving anything: a vehicle a teammate is in can't be taken, but its button watches it (user Oct 24);
@@ -2812,7 +2859,10 @@ function linkHost() {
     LINK.conns.set(conn, g);
     conn.on('data', m => linkFromGuest(g, m));
     conn.on('close', () => linkGuestGone(g));
-    conn.on('error', () => linkGuestGone(g));
+    // (an error on a link isn't the end of it: WebRTC reports passing trouble too, and dropping the player then
+    // left them playing a world nobody answered - user Oct 24, the iPad guest who couldn't take her tower or
+    // drive her boat. A guest goes when the link closes, or after 12 s without a word: linkPump)
+    conn.on('error', e => { try { console.warn('link error', e && e.type); } catch (x) {} });
   });
   peer.on('error', e => linkClose(e && e.type === 'unavailable-id' ? 'THAT ROOM IS TAKEN: TRY AGAIN' : 'COULD NOT OPEN A ROOM'));
 }
@@ -2830,7 +2880,7 @@ function linkJoin(code) {
     conn.on('open', () => linkSend({ t: 'hello', flag: flagPick[0], v: 2 }));
     conn.on('data', m => linkReceive(m));
     conn.on('close', () => linkClose(LINK.state === 'joining' ? 'NO ROOM ' + code : 'THE HOST LEFT'));
-    conn.on('error', () => linkClose('THE LINK BROKE'));
+    conn.on('error', e => { try { console.warn('link error', e && e.type); } catch (x) {} });   // (see the host's)
   });
   peer.on('error', e => linkClose(e && e.type === 'peer-unavailable' ? 'NO ROOM ' + code : 'COULD NOT CONNECT'));
 }
@@ -2839,6 +2889,8 @@ function linkStartRound() {
   const gs = linkGuests().filter(g => g.side === 0 || g.side === 1);
   NET.role = 'host'; NET.me = 0; NET.send = null; NET.worldW = 0; NET.side = LINK.side;
   const f = lobbyFlags(); flagPick[0] = f[0]; flagPick[1] = f[1];
+  // (the host at this screen on its side, everyone else online)
+  ctlPick[LINK.side] = TOUCH0 ? 'touch' : 'kb'; ctlPick[1 - LINK.side] = 'net'; EXTRA = null;
   MODE = 'duel'; applyMode(); buildTeamArt();
   NET.seats.length = 0;
   LINK.state = 'playing'; LINK.msg = '';
@@ -2862,6 +2914,7 @@ function linkToLobby(msg) {
 // (the host) what a guest sends
 function linkFromGuest(g, m) {
   if (!m || typeof m !== 'object') return;
+  g.heard = performance.now();
   if (m.t === 'hello') {
     if (g.id) return;
     const why = LINK.state === 'playing' ? 'THAT GAME HAS ALREADY STARTED' : LINK.state !== 'lobby' ? 'THAT ROOM IS CLOSED' : 1 + linkGuests().length >= ROOM_MAX ? 'THAT ROOM IS FULL' : '';
@@ -2905,16 +2958,18 @@ function linkReceive(m) {
     return;
   }
   if (m.t === 'start') {
-    NET.role = 'guest'; NET.me = 0; NET.worldW = m.worldW | 0; NET.send = linkSend; NET.side = m.side === 1 ? 1 : 0; NET.taken = null;
+    NET.role = 'guest'; NET.me = 0; NET.worldW = m.worldW | 0; NET.send = linkSend; NET.side = m.side === 1 ? 1 : 0; NET.taken = null; LINK.heard = performance.now();
     if (Array.isArray(m.flags)) { flagPick[0] = m.flags[0]; flagPick[1] = m.flags[1]; }
     MODE = 'duel'; applyMode();
     LINK.state = 'playing'; LINK.msg = '';
     held.clear(); ui.title = false; ui.resume = false; ui.menu = false; paused = false;
     builtViewW = 0; resize(); buildTeamArt();
     crew[0].spec = null; crew[0].look = null;
+    brains[0] = brains[1] = null;                      // (Oct 24: a CPU left over from this screen's own last round drove the guest's vehicles)
     if (Array.isArray(m.clouds)) { clouds.length = 0; for (const c of m.clouds) clouds.push(c); }   // (the host's sky, cloud for cloud)
     return;
   }
+  if (m.t === 'snap') LINK.heard = performance.now();
   if (m.t === 'snap' && NET.role === 'guest' && m.s) {
     try { if (m.you) m.s.you = m.you; NET.taken = Array.isArray(m.taken) ? m.taken : null; netApply(m.s); } catch (e) { console.error(e); }
     return;
@@ -2926,7 +2981,9 @@ function linkPump(dt) {
   LINK.acc += dt;
   if (LINK.acc < 1 / 15) return;
   LINK.acc = 0;
+  const now = performance.now();
   if (NET.role === 'host') {
+    for (const g of linkGuests()) if (g.seat && now - (g.heard || now) > 12000) { try { g.conn.close(); } catch (e) {} linkGuestGone(g); }
     const gs = linkGuests().filter(g => g.seat);
     if (!gs.length) return;
     // one snapshot for each team (the other team's swapped round), with what each guest and its teammates are in
@@ -2937,7 +2994,10 @@ function linkPump(dt) {
       const taken = crewsOf(t).filter(c => c !== st.crew && c.mode !== 'dock' && c.mode !== 'gone').map(c => c.mode);
       linkTo(g, { t: 'snap', s: S[t], you: { mode: st.crew.mode, dead: !!st.crew.dead }, taken });
     }
-  } else if (NET.role === 'guest' && LINK.conn) linkSend({ t: 'ctl', s: ctlState(0) });
+  } else if (NET.role === 'guest' && LINK.conn) {
+    linkSend({ t: 'ctl', s: ctlState(0) });
+    if (now - (LINK.heard || now) > 15000) linkClose('THE HOST STOPPED ANSWERING');
+  }
 }
 function linkDrop() {
   try { if (LINK.conn) LINK.conn.close(); } catch (e) {}
@@ -3047,7 +3107,7 @@ function drawConsole(p) {
   const jx = c.shakeT > 0 ? Math.round(rnd(-2, 2)) : 0, jy = c.shakeT > 0 ? Math.round(rnd(-2, 2)) : 0;
   ug.save();
   if (ONEVIEW()) ug.beginPath(), ug.rect(0, 0, ubw, ubh), ug.clip();                     // one player: the whole screen is yours
-  else { ug.beginPath(); ug.rect(Math.round(p * ubw / 2), 0, Math.ceil(ubw / 2), ubh); ug.clip(); }     // each desk stays in its own half
+  else { ug.beginPath(); ug.rect(Math.round((HUD_HALF != null ? HUD_HALF : p) * ubw / 2), 0, Math.ceil(ubw / 2), ubh); ug.clip(); }     // each desk stays in its own half
   ug.translate(jx, jy);
   // the desk: worse for wear the more damage your boat (or tower) has taken
   const life = c.life, st = life > 0.97 ? 0 : life > 0.6 ? 1 : life > 0.3 ? 2 : 3;   // pristine until the first hit
@@ -3276,7 +3336,7 @@ function hudKit(p) {
   return null;
 }
 function hudLayout(p) {
-  const one = ONEVIEW(), hw = ubw / 2, left = one ? 0 : p * hw, W = one ? ubw : hw;
+  const one = ONEVIEW(), hw = ubw / 2, left = one ? 0 : (HUD_HALF != null ? HUD_HALF : p) * hw, W = one ? ubw : hw;   // (HUD_HALF: a slot stood in by asSlot)
   let u0 = Math.min(hw / 697, ubh / 873);
   if (!IS_TOUCH) u0 *= 0.85;                       // a computer: a little smaller (the mouse is precise)
   // a phone on its side: fitting the iPad's tall half-screen would leave the buttons far too small for a thumb,
@@ -3384,7 +3444,7 @@ function drawHudIn(p) {
   if (p >= HUMANS() || crew[p].dead || crew[p].mode === 'gone' || ui.winner != null) return;
   const Lh = hudLayout(p), k = Lh.k, pr = hudPress[p];
   ug.save();
-  if (!ONEVIEW()) { ug.beginPath(); ug.rect(Math.round(p * ubw / 2), 0, Math.ceil(ubw / 2), ubh); ug.clip(); }
+  if (!ONEVIEW()) { ug.beginPath(); ug.rect(Math.round((HUD_HALF != null ? HUD_HALF : p) * ubw / 2), 0, Math.ceil(ubw / 2), ubh); ug.clip(); }
   for (const it of Lh.items) {
     const down = (pr[it.id] || 0) > 0 || (it.id === 'up' && diveHold[p] < 0) || (it.id === 'down' && diveHold[p] > 0);
     const y = it.y + (down ? Math.max(1, Math.round(2 * k)) : 0);
@@ -3420,8 +3480,11 @@ function drawWeaponBtn(p, it, k, y, down) {
     const gb = scaled(img.hud.gbtn, w / img.hud.gbtn.width, true);
     x.drawImage(gb, 0, 0);
     const off = HUDI.spots[it.weapon === 'torp' ? 'shell' : it.weapon === 'torpUp' || it.weapon === 'bomb' ? 'torpUp' : it.weapon === 'mg' ? 'bullets' : it.weapon] || [0, -h / k / 2];
-    const iw = Math.round(icon.width * k), ih = Math.round(icon.height * k), ic = scaled(icon, iw / icon.width, true);
-    x.drawImage(ic, Math.round(w / 2 + off[0] * k - iw / 2), Math.round(h + off[1] * k - ih / 2));
+    // (the picture shrunk pixel for pixel: a smooth shrink with its edge cut lost thin icons on small buttons -
+    // a split screen's - entirely)
+    const iw = Math.max(1, Math.round(icon.width * k)), ih = Math.max(1, Math.round(icon.height * k)), ic = iw < icon.width * 0.6 ? icon : scaled(icon, iw / icon.width, true);
+    x.imageSmoothingEnabled = false;
+    x.drawImage(ic, Math.round(w / 2 + off[0] * k - iw / 2), Math.round(h + off[1] * k - ih / 2), iw, ih);
     // (kept only when built from the real pictures: a quick blocky copy made while short of time is redone later.
     // Oct 24: buttons cached from a blank stand-in showed only their small icons, or nothing)
     if (!gb._tmp && !ic._tmp) cvCache.set(key, c);
@@ -3436,7 +3499,7 @@ function drawWeaponBtn(p, it, k, y, down) {
   if (down) { ug.fillStyle = 'rgba(0,0,0,0.22)'; ug.fillRect(it.x, y, w, h); }
   // rounds left: a small plate in the corner
   if (st.n >= 0) {
-    const sc = clamp(Math.floor(h * 0.3 / 7), 2, k > 0.7 ? 6 : 4), s = String(st.n), bw = (textWidth(s) + 2) * sc + 2, bh = 7 * sc;   // (small enough to leave the button showing)
+    const sc = clamp(Math.floor(h * 0.3 / 7), h < 34 ? 1 : 2, k > 0.7 ? 6 : 4), s = String(st.n), bw = (textWidth(s) + 2) * sc + 2, bh = 7 * sc;   // (small enough to leave the button showing)
     const bx = it.x + w - bw - Math.round(6 * k), by = y + Math.round(6 * k);
     ug.fillStyle = '#04070f'; ug.fillRect(bx, by, bw, bh);
     drawText(ug, s, bx + bw / 2, by + sc, st.n > 0 ? '#ffd23a' : '#ff4a3a', sc, 'center');
@@ -3828,11 +3891,15 @@ function drawHudTabs(p, Lh) {
 }
 // --- touch ---
 function hudAt(ux, uy) {
-  for (let p = 0; p < HUMANS(); p++) {
-    if (crew[p].dead || crew[p].mode === 'gone' || ui.winner != null) continue;
-    const L = hudLayout(p), m = Math.round(4 * L.u);
-    for (const t of L.tabs) if (inRect(ux, uy, t.x - 2, t.y - 4, t.w + 4, t.h + 8)) return { p, it: t, L };
-    for (const it of L.items) if (inRect(ux, uy, it.x - m, it.y - m, it.w + 2 * m, it.h + 2 * m)) return { p, it, L };
+  for (let v = 0; v < HUMANS(); v++) {
+    const hit = asSlot(v, p => {
+      if (crew[p].dead || crew[p].mode === 'gone' || ui.winner != null) return null;
+      const L = hudLayout(p), m = Math.round(4 * L.u);
+      for (const t of L.tabs) if (inRect(ux, uy, t.x - 2, t.y - 4, t.w + 4, t.h + 8)) return { p: v, it: t, L };
+      for (const it of L.items) if (inRect(ux, uy, it.x - m, it.y - m, it.w + 2 * m, it.h + 2 * m)) return { p: v, it, L };
+      return null;
+    });
+    if (hit) return hit;                                 // (p: the slot; hudPressAt runs it as the slot's team)
   }
   return null;
 }
@@ -4212,13 +4279,15 @@ function setSlider(h, ux) {
 
 // Menu
 function menuLayout() {
-  const w = 440, h = 250, x = (ubw - w) >> 1, y = Math.max(6, (ubh - h) >> 1);
+  const w = 440, h = 300, x = (ubw - w) >> 1, y = Math.max(6, (ubh - h) >> 1);
   return {
     x, y, w, h,
     vol: [x + 140, y + 56, 274],
     mute: [x + 394, y + 96, 26, 26],
     // the controls screens (user Oct 24)
     pad: [x + 30, y + 146, 180, 34], kb: [x + w - 210, y + 146, 180, 34],
+    // the weapons range (TEST), here rather than among the modes (user Oct 24)
+    test: [x + ((w - 220) >> 1), y + 196, 220, 34],
     close: [x + ((w - 180) >> 1), y + h - 50, 180, 34],
   };
 }
@@ -4251,6 +4320,7 @@ function drawMenu() {
   box(M.mute, MUTED);
   drawText(ug, 'CONTROLS', M.x + 20, M.y + 132, '#ffffff', 2);
   modeButton(...M.pad, 'CONTROLLER', false); modeButton(...M.kb, 'KEYBOARD', false);
+  modeButton(...M.test, 'TEST RANGE', false);
   modeButton(...M.close, 'BACK', true);
 }
 /* ---------------- The controls screens (user Oct 24): the controller and the keyboard, pixel art in the style
@@ -4422,6 +4492,7 @@ function menuHit(ux, uy) {
   { const r = M.mute; if (inR([r[0] - 8, r[1] - 8, r[2] + 16, r[3] + 16])) return { act: 'mute' }; }
   if (inR(M.close)) return { act: 'close' };
   if (inR(M.pad)) return { act: 'ctlPad' };
+  if (inR(M.test)) return { act: 'testRange' };
   if (inR(M.kb)) return { act: 'ctlKb' };
   const [vx, vy, vw] = M.vol;
   if (ux >= vx - 10 && ux <= vx + vw + 10 && uy >= vy - 12 && uy <= vy + 22) return { act: 'vol', vx, vw };
@@ -4444,26 +4515,70 @@ function glassButton(x, y, w, h, label) {
 // flags are drawn 4:3, each of the 9x9 flag pixels a little wider than tall
 const FLAG_W = 72, FLAG_H = 54;
 // (on a phone only the one-screen modes: there's no room for a split screen - user)
-const menuModes = () => PHONE() ? ['story', 'chill'] : MODES;
-const MODES = ['story', 'chill', 'duel', 'test'], GAME_MODE_NAMES = { story: 'STORY', chill: 'CHILL', duel: '1 VS 1', test: 'TEST' };
+const menuModes = () => PHONE() ? ['story', 'chill'] : MENU_MODES;
+const MODES = ['story', 'chill', 'duel', 'test'], GAME_MODE_NAMES = { story: 'STORY', chill: 'CHILL', duel: 'BATTLE', test: 'TEST' };
 // which sides the menu shows: CHILL one flag (yours); the rest two, left and right
 const titleSides = () => MODE === 'chill' ? [0] : [0, 1];
 /* What the main menu has picked - the mode, who plays each side, the levels - is its own until PLAY (user: picking
    modes in the menu must not touch the round behind it). PLAY makes it real and starts a new round; RESUME
    (a round in progress) drops it and goes back to that round. */
-const menuSel = { mode: 'duel', ctl: ['kb', 'kb'], cpuLv: [1, 1], storyLv: 1 };
+const menuSel = { mode: 'duel', ctl: ['kb', 'kb'], cpuLv: [1, 1], storyLv: 1,
+  // the people at this screen and the side each has joined (user Oct 24: every side starts as the CPU; you press
+  // JOIN under a side to play it, with whatever you pressed it with - two of you can share a side)
+  roster: (Array.isArray(PREFS0.roster) ? PREFS0.roster : []).filter(q => q && ['kb', 'kb2', 'pad1', 'pad2', 'touch'].includes(q.dev) && (q.side === 0 || q.side === 1)).slice(0, 2) };
+// the modes on the menu (TEST is in OPTIONS now, user Oct 24); a side you can join in each, and everyone's side there
+const MENU_MODES = ['story', 'chill', 'duel'];
+const mJoinable = s => menuSel.mode === 'story' ? s === 1 : menuSel.mode === 'chill' ? s === 0 : true;
+const mSideOf = q => menuSel.mode === 'story' ? 1 : menuSel.mode === 'chill' ? 0 : q.side;   // (STORY, CHILL: all on the one side)
+const mOn = s => menuSel.roster.filter(q => mSideOf(q) === s);
+const DEV_NAMES = { kb: 'KEYBOARD', kb2: 'ARROW KEYS', pad1: 'CONTROLLER 1', pad2: 'CONTROLLER 2', touch: 'TOUCH' };
+// JOIN under side s, pressed with dev: you join it; pressed again on your own side, you leave it
+function menuJoin(s, dev) {
+  if (!mJoinable(s) || !dev) return;
+  const R = menuSel.roster, cur = R.find(q => q.dev === dev);
+  if (cur && mSideOf(cur) === s) { R.splice(R.indexOf(cur), 1); savePrefs(); return; }
+  if (mOn(s).length >= 3) { showToast('THAT SIDE IS FULL'); return; }
+  if (cur) { cur.side = s; savePrefs(); return; }
+  if (R.length >= (PHONE() ? 1 : 2)) { showToast(PHONE() ? 'ONE PLAYER ON A PHONE' : 'TWO PLAYERS AT ONE SCREEN AT MOST'); return; }
+  R.push({ dev, side: s }); savePrefs();
+}
+// what pressed JOIN: a controller (the menus' focus box), a finger, or the mouse - the keyboard player (a second
+// keyboard player, on the other side, has the arrow keys)
+let joinDev = null;
+function pressDev(s, e) {
+  if (joinDev) return joinDev;
+  if (e && e.pointerType === 'touch') return 'touch';
+  const R = menuSel.roster, kb = R.find(q => q.dev === 'kb'), kb2 = R.find(q => q.dev === 'kb2');
+  if (kb && mSideOf(kb) === s) return 'kb';
+  if (kb2 && mSideOf(kb2) === s) return 'kb2';
+  return !kb ? 'kb' : 'kb2';
+}
 function menuFromLive() { menuSel.mode = MODE; menuSel.ctl = [ctlPick[0] === 'net' ? 'kb' : ctlPick[0], ctlPick[1] === 'net' ? 'kb' : ctlPick[1]]; menuSel.cpuLv = cpuLvSide.slice(); menuSel.storyLv = STORY_LV; }
 const mSides = () => menuSel.mode === 'chill' ? [0] : [0, 1];
 const mPickable = s => !(menuSel.mode === 'story' && s === 0);
 const mCtlFor = s => { const c = menuSel.ctl[s]; if (c === 'cpu') return menuSel.mode === 'duel' ? c : 'kb'; if (c === 'pad1' && padsSeen() < 1) return 'kb'; if (c === 'pad2' && padsSeen() < 2) return 'kb'; return c; };
 const mCtlChoices = s => ['kb', ...['pad1', 'pad2'].slice(0, padsSeen()), ...(menuSel.mode === 'duel' ? ['cpu'] : [])];
 function menuApply() {
-  MODE = menuSel.mode; ctlPick[0] = menuSel.ctl[0]; ctlPick[1] = menuSel.ctl[1];
+  MODE = menuSel.mode;
+  // who plays each side, from the roster: its first person, or the CPU (BATTLE) or nobody; a second person on a side
+  // is EXTRA (their own seat on that team)
+  const R = menuSel.roster.filter(q => mJoinable(mSideOf(q)));
+  EXTRA = null;
+  for (let s = 0; s < 2; s++) {
+    const on = R.filter(q => mSideOf(q) === s);
+    ctlPick[s] = on.length ? on[0].dev : MODE === 'duel' ? 'cpu' : 'none';
+    if (on.length > 1) EXTRA = { dev: on[1].dev, side: s };
+  }
   cpuLvSide[0] = menuSel.cpuLv[0]; cpuLvSide[1] = menuSel.cpuLv[1]; STORY_LV = menuSel.storyLv;
   applyMode(); savePrefs();
 }
 // PLAY: a new round as the menu has it
-function menuPlay() { if (NET.role === 'host' || NET.role === 'guest') linkClose(''); menuApply(); ui.resume = false; restartGame(); }
+function menuPlay() { if (NET.role === 'host' || NET.role === 'guest') linkClose(''); menuApply(); ui.resume = false; freshWeather(); restartGame(); }
+// a new game from the menu starts on a fair morning (user Oct 24): no rain or fog carried over, the clock back to nine
+function freshWeather() {
+  W.rain = null; W.fog = null; W.frozen = false; W.manual = {};
+  env.time = 9; W.lastHour = 9; env.rain = 0; env.fog = 0;
+}
 // RESUME: back to the round in progress, as it was
 function menuResume() { menuFromLive(); startGame(); }
 // can this side's controls be picked? (STORY: only yours, the right; the left is the enemy)
@@ -4475,23 +4590,24 @@ function titleLayout() {
   const cmp = ubh < 430;
   const w = 480, h = cmp ? 322 : 412;
   const x = (ubw - w) >> 1, y = Math.max(4, (ubh - h) >> 1);
-  const fy = y + (cmp ? 130 : 162);
-  const sides = mSides(), cxs = sides.length === 1 ? [x + (w >> 1)] : [x + Math.round(w * 0.25), x + Math.round(w * 0.75)];
-  const MM = menuModes(), mw = 108, mg = 8, m0 = x + ((w - (mw * MM.length + mg * (MM.length - 1))) >> 1);
+  const fy = y + (cmp ? 130 : 162), FH = FLAG_H;
+  const sides = [0, 1], cxs = [x + Math.round(w * 0.25), x + Math.round(w * 0.75)];
+  // the modes, and JOIN (another screen's session) as one more button the same size (user Oct 24)
+  const MM = menuModes(), nB = MM.length + 1, mw = 108, mg = 8, m0 = x + ((w - (mw * nB + mg * (nB - 1))) >> 1);
+  const mb = i => [m0 + i * (mw + mg), y + (cmp ? 40 : 50), mw, cmp ? 34 : 38];
   return { x, y, w, h,
     // the modes; under them, STORY's level
-    modes: MM.map((m, i) => [m0 + i * (mw + mg), y + (cmp ? 40 : 50), mw, cmp ? 34 : 38]),
+    modes: MM.map((m, i) => mb(i)), join: mb(MM.length),
     levels: [84, 190, 296].map(dx => [x + dx, y + (cmp ? 80 : 96), 100, cmp ? 24 : 28]), cmp,
     hint: y + (cmp ? 254 : 296),
-    // each side: its flag; under it, who plays it ("< KEYBOARD >"); under that, a CPU side's level
+    // each side: TEAM and its flag; under it, the people on it (or the CPU and its level); under that, JOIN
     sides: sides.map((sd, i) => {
-      const cx = cxs[i], sw = 212;
-      return { s: sd, cx, flag: [cx - (FLAG_W >> 1), fy], sel: [cx - (sw >> 1), fy + FLAG_H + 12, sw, 26],
-        left: [cx - (sw >> 1), fy + FLAG_H + 12, 26, 26], right: [cx + (sw >> 1) - 26, fy + FLAG_H + 12, 26, 26],
-        lv: [0, 1, 2].map(k => [cx - 102 + k * 70, fy + FLAG_H + 44, 64, 22]) };
+      const cx = cxs[i], rh = cmp ? 11 : 15, r0 = fy + FH + (cmp ? 6 : 8);
+      return { s: sd, cx, flag: [cx - (FLAG_W >> 1), fy], rows: [0, 1, 2].map(k => r0 + k * rh), rs: cmp ? 1 : 2,
+        sel: [cx - 106, fy + FH + 12, 212, 26],
+        lv: [0, 1, 2].map(k => [cx - 102 + k * 70, r0 + rh + 2, 64, cmp ? 18 : 22]),
+        joinB: [cx - 60, fy + FH + (cmp ? 40 : 54), 120, 22] };
     }),
-    // joining a friend's room (any mode: the friend's game decides), and the link's own panel and button
-    join: [x + w - 84, y + 6, 76, 22],
     linkBtn: [x + (w >> 1) - 60, y + h - 70, 120, 40],
     hostBtn: [x + 40, y + 120, w - 80, 46], joinBtn: [x + 40, y + 190, w - 80, 46],
     codeRect: [x + (w >> 1) - 90, y + 110, 180, 52], goBtn: [x + (w >> 1) - 60, y + 184, 120, 40],
@@ -4530,31 +4646,32 @@ function drawTitle() {
   if (!menuModes().includes(menuSel.mode)) menuSel.mode = 'chill';  // (a phone: a split-screen mode saved from elsewhere)
   const T = titleLayout();
   glassPanel(T.x, T.y, T.w, T.h);
-  drawText(ug, 'BATTLESHIP DUEL', T.x + T.w / 2, T.y + 13, '#ffffff', 3, 'center');
+  // the session's code, for anyone who wants to join this screen's game (user Oct 24)
+  drawText(ug, 'SESSION CODE ' + (LINK.hosting && LINK.code ? LINK.code : '----'), T.x + T.w / 2, T.y + 13, '#ffffff', 3, 'center');
   menuModes().forEach((m, i) => modeButton(...T.modes[i], GAME_MODE_NAMES[m], menuSel.mode === m));
+  modeButton(...T.join, 'JOIN', false);
   if (menuSel.mode === 'story') T.levels.forEach((r, i) => modeButton(...r, CPU_NAMES[i], menuSel.storyLv === i));
   for (const S0 of T.sides) {
-    const s = S0.s, [fx, fy] = S0.flag;
-    const label = menuSel.mode === 'chill' ? 'YOUR FLAG' : menuSel.mode === 'story' ? (s ? 'YOU' : 'ENEMY') : 'PLAYER ' + (s + 1);
+    const s = S0.s, [fx, fy] = S0.flag, can = mJoinable(s), on = mOn(s);
+    const label = can ? 'TEAM' : menuSel.mode === 'story' ? 'ENEMY' : 'OPEN SEA';
     drawText(ug, label, S0.cx, fy - 20, '#ffffff', 3, 'center');
+    ug.globalAlpha = can || menuSel.mode === 'story' ? 1 : 0.4;
     ug.drawImage(img.flag[flagPick[s]], fx, fy, FLAG_W, FLAG_H);      // the flag is the button: tap to change it
-    if (!mPickable(s)) { drawText(ug, 'THE WAVES', S0.cx, S0.sel[1] + 8, '#cfe0f0', 2, 'center'); continue; }
-    // who plays this side: < KEYBOARD >
-    const c = mCtlFor(s);
-    const one = mCtlChoices(s).length < 2;                       // (only the keyboard: nothing to step through)
-    // on a touch screen with no controller there's only touch to play with: no picker at all (user), except in
-    // 1 VS 1 where a side can still be the CPU (< TOUCH > / < CPU >)
-    if (one && IS_TOUCH) continue;
-    solidArrow(...S0.left, -1, one); solidArrow(...S0.right, 1, one);
-    drawText(ug, c === 'kb' && IS_TOUCH ? 'TOUCH' : CTL_NAMES[c], S0.cx, S0.sel[1] + 8, '#ffffff', 2, 'center');
-    if (c === 'cpu') S0.lv.forEach((r, k) => modeButton(...r, CPU_NAMES[k], menuSel.cpuLv[s] === k, 1));
+    ug.globalAlpha = 1;
+    // who's on it: the people who joined; nobody, the CPU (BATTLE, with its level) or nobody at all
+    const rs = S0.rs, row = i => S0.rows[i] + (rs === 2 ? 2 : 2);
+    if (!can) { drawText(ug, menuSel.mode === 'story' ? 'THE WAVES' : 'NOBODY', S0.cx, row(0), '#cfe0f0', rs, 'center'); continue; }
+    if (on.length) on.forEach((q, i) => drawText(ug, DEV_NAMES[q.dev] || q.dev, S0.cx, row(i), '#ffd23a', rs, 'center'));
+    else if (menuSel.mode === 'duel') { drawText(ug, 'CPU', S0.cx, row(0), '#cfe0f0', rs, 'center'); S0.lv.forEach((r, k) => modeButton(...r, CPU_NAMES[k], menuSel.cpuLv[s] === k, 1)); }
+    else drawText(ug, 'NOBODY YET', S0.cx, row(0), '#cfe0f0', rs, 'center');
+    modeButton(...S0.joinB, 'JOIN', false, T.cmp ? 1 : 2);
   }
   // (a browser only shows a controller once one of its buttons has been pressed)
-  if (!padsSeen() && !IS_TOUCH) drawText(ug, 'CONTROLLER: PRESS ANY OF ITS BUTTONS TO USE IT', T.x + T.w / 2, T.hint, '#cfe0f0', 1, 'center');
+  const hint = !padsSeen() && !IS_TOUCH ? 'CONTROLLER: PRESS ANY OF ITS BUTTONS TO USE IT' : 'JOIN A SIDE TO PLAY IT - TWO OF YOU CAN SHARE ONE';
+  drawText(ug, hint, T.x + T.w / 2, T.hint, '#cfe0f0', 1, 'center');
   glassButton(...T.play, 'PLAY');
   if (T.restart) glassButton(...T.restart, 'RESUME');
   modeButton(...T.opts, 'OPTIONS', false);
-  if (typeof Peer === 'function') modeButton(...T.join, 'ONLINE', false, 1);
   if (linkPanelUp()) drawLinkPanel(T);
 }
 const linkPanelUp = () => LINK.state === 'lobby' || LINK.state === 'hosting' || LINK.state === 'waiting' || LINK.state === 'joining' || LINK.state === 'msg' || LINK.state === 'choose' || LINK.state === 'enter';
@@ -4661,7 +4778,7 @@ function titleHit(ux, uy) {
     if (LINK.state === 'enter' && inR(T.goBtn, 6)) return { act: 'go' };
     return { act: 'none' };
   }
-  if (typeof Peer === 'function' && inR(T.join, 4)) return { act: 'online' };
+  if (inR(T.join, 4)) return { act: 'online' };
   if (inR(T.play, 6)) return { act: 'play' };
   if (T.restart && inR(T.restart, 6)) return { act: 'resume' };
   if (inR(T.opts, 4)) return { act: 'options' };
@@ -4670,10 +4787,9 @@ function titleHit(ux, uy) {
   if (menuSel.mode === 'story') for (let i = 0; i < 3; i++) if (inR(T.levels[i])) return { act: 'story', n: i };
   for (const S0 of T.sides) {
     const s = S0.s;
-    if (mPickable(s) && !(IS_TOUCH && mCtlChoices(s).length < 2)) {
-      if (inR(S0.left, 8)) return { act: 'ctl', s, d: -1 };
-      if (inR(S0.right, 8)) return { act: 'ctl', s, d: 1 };
-      if (mCtlFor(s) === 'cpu') for (let k = 0; k < 3; k++) if (inR(S0.lv[k], 2)) return { act: 'level', s, n: k };
+    if (mJoinable(s)) {
+      if (inR(S0.joinB, 4)) return { act: 'joinSide', s };
+      if (menuSel.mode === 'duel' && !mOn(s).length) for (let k = 0; k < 3; k++) if (inR(S0.lv[k], 2)) return { act: 'level', s, n: k };
     }
     const [fx, fy] = S0.flag;
     if (inRect(ux, uy, fx - 16, fy - 26, FLAG_W + 32, FLAG_H + 32)) return { act: 'flag', p: s };
@@ -4792,7 +4908,7 @@ function startPinch(half) {
   const ids = pinchPointers(half);
   if (ids.length < 2) { pinch[half] = null; return; }
   const a = pointers.get(ids[0]), b = pointers.get(ids[1]);
-  pinch[half] = { a: ids[0], b: ids[1], d0: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), z0: zoomTarget(half) };
+  pinch[half] = { a: ids[0], b: ids[1], d0: Math.max(20, Math.hypot(a.x - b.x, a.y - b.y)), z0: asSlot(half, q => zoomTarget(q)) };
 }
 // Where a screen point lands in the world (through whichever half of the screen it's in)
 function screenToWorld(clientX, clientY) {
@@ -4852,6 +4968,7 @@ window.addEventListener('pointerdown', e => {
     if (h.act === 'mute') { MUTED = !MUTED; savePrefs(); }
     else if (h.act === 'close') setMenu(false);
     else if (h.act === 'ctlPad') ui.controls = 'pad';
+    else if (h.act === 'testRange') { setMenu(false); menuSel.mode = 'test'; if (NET.role === 'host' || NET.role === 'guest') linkClose(''); menuApply(); ui.resume = false; freshWeather(); restartGame(); }
     else if (h.act === 'ctlKb') ui.controls = 'kb';
     else if (h.act === 'vol') { env.volume = clamp((ux - h.vx) / h.vw, 0, 1); pointers.set(e.pointerId, { kind: 'vol', h }); }
     return;
@@ -4871,6 +4988,7 @@ window.addEventListener('pointerdown', e => {
     else if (h.act === 'lobbyStart') { if (LINK.hosting && lobbyReady()) linkStartRound(); }
     else if (h.act === 'story') menuSel.storyLv = h.n;
     else if (h.act === 'ctl') stepCtl(h.s, h.d);
+    else if (h.act === 'joinSide') menuJoin(h.s, pressDev(h.s, e));
     else if (h.act === 'level') menuSel.cpuLv[h.s] = h.n;
     else if (h.act === 'flag') { ui.picker = h.p; scrollPickerTo(flagPick[h.p]); }
     return;
@@ -4890,7 +5008,7 @@ window.addEventListener('pointerdown', e => {
   if (ui.settings) { ui.settings = false; return; }      // a tap anywhere else closes the weather panel
   // the controls (buttons, the angle tape, the power slider, the vehicle buttons); or the lifeboat's throttle
   const hh = hudAt(ux, uy);
-  if (hh) { const d = hudPressAt(hh, ux); if (d) pointers.set(e.pointerId, d); return; }
+  if (hh) { asSlot(hh.p, q => { const d = hudPressAt({ ...hh, p: q }, ux); if (d) { d.slot = hh.p; pointers.set(e.pointerId, d); } }); return; }
   const bl = boatLeverAt(ux, uy);
   if (bl) { setBoatLeverFrom(bl, ux, uy); pointers.set(e.pointerId, { kind: 'boatlever', b: bl }); return; }
   {
@@ -4901,7 +5019,13 @@ window.addEventListener('pointerdown', e => {
   }
 }, { passive: false });
 
+// a drag on a control of a slot stood in by asSlot (a second player on the same side) runs as that slot
 window.addEventListener('pointermove', e => {
+  const p = pointers.get(e.pointerId);
+  if (p && p.slot != null && SLOT_IN == null && SLOTS[p.slot] && SLOTS[p.slot].extra) { asSlot(p.slot, () => pointerMove(e)); return; }
+  pointerMove(e);
+}, { passive: true });
+function pointerMove(e) {
   const p = pointers.get(e.pointerId);
   if (!p) return;
   if (p.kind === 'pan') {
@@ -4939,19 +5063,24 @@ window.addEventListener('pointermove', e => {
   }
   if (p.kind !== 'pinch') return;
   // one finger dragged over the world, not driving anything: the view slides with it
-  if (!pinch[p.half] && looking(p.half) && p.x !== undefined) {
+  if (!pinch[p.half] && p.x !== undefined) {
     const z = cam.view[p.half].z, perPx = dpr / PIXW / (S * z);
-    lookBy(p.half, -(e.clientX - p.x) * perPx, -(e.clientY - p.y) * perPx);
+    asSlot(p.half, q => { if (looking(q)) lookBy(q, -(e.clientX - p.x) * perPx, -(e.clientY - p.y) * perPx); });
   }
   p.x = e.clientX; p.y = e.clientY;
   const pz = pinch[p.half];
   if (pz && (pz.a === e.pointerId || pz.b === e.pointerId)) {
     const a = pointers.get(pz.a), b = pointers.get(pz.b);
-    if (a && b) setZoom(p.half, pz.z0 * Math.hypot(a.x - b.x, a.y - b.y) / pz.d0);
+    if (a && b) asSlot(p.half, q => setZoom(q, pz.z0 * Math.hypot(a.x - b.x, a.y - b.y) / pz.d0));
   }
-}, { passive: true });
+}
 
 function endPointer(e) {
+  const p = pointers.get(e.pointerId);
+  if (p && p.slot != null && SLOT_IN == null && SLOTS[p.slot] && SLOTS[p.slot].extra) return asSlot(p.slot, () => endPointer0(e));
+  return endPointer0(e);
+}
+function endPointer0(e) {
   const p = pointers.get(e.pointerId);
   if (!p) return;
   pointers.delete(e.pointerId);
@@ -4974,7 +5103,7 @@ function endPointer(e) {
   const now = performance.now();
   const isTap = !wasPinch && now - p.t0 < 280 && Math.hypot(p.x - p.x0, p.y - p.y0) < 14;
   if (isTap) {
-    if (now - lastTap[p.half] < 340) { if (!zoomLocked(p.half)) setScope(p.half, 1); lastTap[p.half] = 0; }
+    if (now - lastTap[p.half] < 340) { asSlot(p.half, q => { if (!zoomLocked(q)) setScope(q, 1); }); lastTap[p.half] = 0; }
     else lastTap[p.half] = now;
   }
 }
@@ -4992,7 +5121,7 @@ window.addEventListener('wheel', e => {
   if (ui.menu) return;
   const half = ONEVIEW() || e.clientX < window.innerWidth / 2 ? 0 : 1;
   const k = e.ctrlKey ? 0.012 : 0.0016;
-  setZoom(half, zoomTarget(half) * Math.exp(-e.deltaY * k));
+  asSlot(half, q => setZoom(q, zoomTarget(q) * Math.exp(-e.deltaY * k)));
 }, { passive: false });
 
 // Keyboard.
@@ -5012,7 +5141,19 @@ const held = new Set();
 const scopeHold = [0, 0];
 // one player: the arrows, Enter and the rest of player 2's keys work for player 1 too
 const P2_AS_P1 = { ShiftRight: 'KeyF', ControlRight: 'KeyX', ControlLeft: 'KeyX', Digit8: 'Digit1', Digit9: 'Digit2', Digit0: 'Digit3', Digit7: 'Digit4', Backslash: 'KeyG', ArrowLeft: 'KeyA', ArrowRight: 'KeyD', ArrowUp: 'KeyW', ArrowDown: 'KeyS', Enter: 'Space', NumpadEnter: 'Space', Slash: 'KeyX', Comma: 'KeyQ', Period: 'KeyE', Quote: 'KeyC', Semicolon: 'KeyZ' };
-const keyCode = e => (ONEVIEW() && !ui.title && ui.winner == null && P2_AS_P1[e.code]) || e.code;
+// (one person at the keyboard: the arrows and the rest of the second set work for them too)
+const keyCode = e => (e.isTrusted !== false && !SLOTS.some(s => s.dev === 'kb2') && !ui.title && ui.winner == null && P2_AS_P1[e.code]) || e.code;
+// which slot a set of keys plays: set 0 (WASD and the rest) the keyboard player, set 1 (the arrows) the second
+// keyboard player, or the first one when there's only one
+function kbSlot(set) {
+  const i = SLOTS.findIndex(s => s.dev === (set ? 'kb2' : 'kb'));
+  if (i >= 0) return i;
+  if (set) return kbSlot(0);
+  const tc = SLOTS.findIndex(s => s.dev === 'touch');
+  return tc >= 0 ? tc : SLOTS.length ? 0 : -1;
+}
+// a key's action for the slot its set plays: f(p) with p the team index to use
+function keyDo(set, f) { const v = kbSlot(set); if (v >= 0) asSlot(v, f); }
 window.addEventListener('keydown', e => {
   const code = keyCode(e);
   // the controls screens: Esc (or B) back, left / right between the two
@@ -5036,33 +5177,41 @@ window.addEventListener('keydown', e => {
     else if (code === 'Escape' && ui.menu) setMenu(false);
     else if (code === 'Escape' && ui.resume) menuResume();              // Esc again: back to the round
     else if ((code === 'Enter' || code === 'Space') && ui.picker < 0 && !ui.menu) { if (ui.resume) menuResume(); else menuPlay(); }
-    else if ((code === 'Digit1' || code === 'Digit2' || code === 'Digit3' || code === 'Digit4') && ui.picker < 0) menuSel.mode = MODES[+code.slice(5) - 1];
+    else if ((code === 'Digit1' || code === 'Digit2' || code === 'Digit3') && ui.picker < 0 && menuModes()[+code.slice(5) - 1]) menuSel.mode = menuModes()[+code.slice(5) - 1];
     e.preventDefault(); return;
   }
   if (code === 'Escape') { openMainMenu(); e.preventDefault(); return; }
   // G / backslash: the battleship's smoke screen
-  if (code === 'KeyG' || code === 'Backslash') { e.preventDefault(); const p = code === 'KeyG' ? 0 : 1; if (!ui.menu && !e.repeat && p < HUMANS() && crew[p].mode === 'ship') act(p, 'smoke'); return; }
-  if (code in SWITCH_KEYS) { e.preventDefault(); const [p, k] = SWITCH_KEYS[code]; if (!ui.menu && !e.repeat && p < HUMANS()) pressSwitcher({ p, k, home: false }); return; }
-  if (code in MG_KEYS) { e.preventDefault(); const p = MG_KEYS[code]; if (!ui.menu && p < HUMANS()) { if (crew[p].mode === 'plane') planes[p].mg = true; else mgHold[p] = true; } return; }
-  if (code in DC_KEYS && crew[DC_KEYS[code]].mode === 'plane') { e.preventDefault(); if (!ui.menu && !e.repeat) act(DC_KEYS[code], 'bomb'); return; }
-  if (code in DC_KEYS) { e.preventDefault(); if (!ui.menu && !e.repeat && crew[DC_KEYS[code]].mode === 'ship') act(DC_KEYS[code], 'dc'); else if (!ui.menu && !e.repeat && crew[DC_KEYS[code]].mode === 'sub') act(DC_KEYS[code], 'torp', true); return; }
+  if (code === 'KeyG' || code === 'Backslash') { e.preventDefault(); if (!ui.menu && !e.repeat) keyDo(code === 'KeyG' ? 0 : 1, p => { if (crew[p].mode === 'ship') act(p, 'smoke'); }); return; }
+  if (code in SWITCH_KEYS) { e.preventDefault(); const [s, k] = SWITCH_KEYS[code]; if (!ui.menu && !e.repeat) keyDo(s, p => pressSwitcher({ p, k, home: false })); return; }
+  if (code in MG_KEYS) { e.preventDefault(); if (!ui.menu) keyDo(MG_KEYS[code], p => { if (crew[p].mode === 'plane') planes[p].mg = true; else mgHold[p] = true; }); return; }
+  if (code in DC_KEYS) {
+    e.preventDefault();
+    if (!ui.menu && !e.repeat) keyDo(DC_KEYS[code], p => { const m = crew[p].mode; if (m === 'plane') act(p, 'bomb'); else if (m === 'ship') act(p, 'dc'); else if (m === 'sub') act(p, 'torp', true); });
+    return;
+  }
   if (LEVER_KEYS[code] || HOLD_KEYS.has(code) || code in FIRE_KEYS) e.preventDefault(); else return;
   if (ui.menu) return;
   if (HOLD_KEYS.has(code)) { held.add(code); return; }
   if (e.repeat) return;
   if (code in FIRE_KEYS) {
-    const p = FIRE_KEYS[code], c = crew[p];
-    if (c.mode === 'sub') { act(p, 'torp', false); return; }
-    if (c.mode === 'plane') { planes[p].mg = true; return; }
-    act(p, 'fire'); return;
+    keyDo(FIRE_KEYS[code], p => {
+      const c = crew[p];
+      if (c.mode === 'sub') { act(p, 'torp', false); return; }
+      if (c.mode === 'plane') { planes[p].mg = true; return; }
+      act(p, 'fire');
+    });
+    return;
   }
-  const [p, d] = LEVER_KEYS[code];
+  const [s, d] = LEVER_KEYS[code];
   held.add(code);
-  const c = crew[p];
-  if (c.mode === 'plane') { act(p, 'planeDir', d); return; }
-  if (c.mode !== 'ship' && c.mode !== 'sub' && c.mode !== 'sail') return;
-  const t = telegraphs[p];
-  if (!t.drag) act(p, 'drive', clamp(Math.round(t.idx / 3) + d, 0, 2) * 3);      // left, stop, right
+  keyDo(s, p => {
+    const c = crew[p];
+    if (c.mode === 'plane') { act(p, 'planeDir', d); return; }
+    if (c.mode !== 'ship' && c.mode !== 'sub' && c.mode !== 'sail') return;
+    const t = telegraphs[p];
+    if (!t.drag) act(p, 'drive', clamp(Math.round(t.idx / 3) + d, 0, 2) * 3);      // left, stop, right
+  });
 });
 const runKeys = [0, 0];
 /* ---------------- Gamepads ----------------
@@ -5080,12 +5229,11 @@ const padState = [{}, {}];
 function padKey(code, down) { try { window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code, key: code, bubbles: true })); } catch (e) {} }
 // which pad (its place in the list of connected pads) drives player p; -1: none. Picked under the flags
 // (CONTROLLER 1 / 2); if nobody has picked a controller, the first pad plays player 1 and the second player 2
-function padOf(p) {
-  if (NET.role === 'host' || NET.role === 'guest') return p === 0 ? (ctlPick.includes('pad2') && !ctlPick.includes('pad1') ? 1 : 0) : -1;   // (online: the one at this screen)
-  const picks = titleSides().filter(sidePickable).map(s => ctlFor(s));
-  if (!picks.includes('pad1') && !picks.includes('pad2')) return p < HUMANS() ? p : -1;
-  const c = ctlFor(SIDE(p));
-  return c === 'pad1' ? 0 : c === 'pad2' ? 1 : -1;
+function padOf(v) {
+  const S = SLOTS[v];
+  if (!S) return -1;
+  if (!SLOTS.some(s => s.dev === 'pad1' || s.dev === 'pad2')) return v;   // (nobody picked a controller: pad 1 plays slot 1, pad 2 slot 2)
+  return S.dev === 'pad1' ? 0 : S.dev === 'pad2' ? 1 : -1;
 }
 // the weapon slots: 1 the machine gun (the sub's torpedo), 2 the missile, 3 the depth charge
 function padWeapon(p, slot, down) {
@@ -5126,22 +5274,22 @@ function padTargets() {
   const T = [], add = (id, r, extra) => { if (r) T.push(Object.assign({ id, r }, extra)); };
   if (ui.controls) { const L = controlsLayout(); add('cpad', L.tabPad); add('ckb', L.tabKb); add('cback', L.back); return T; }
   if (ui.winner != null) { add('again', winLayout().btn); return T; }
-  if (ui.menu) { const M = menuLayout(); add('vol', [M.vol[0], M.vol[1] - 6, M.vol[2], 22], { adj: true }); add('mute', M.mute); add('opad', M.pad); add('okb', M.kb); add('close', M.close); return T; }
+  if (ui.menu) { const M = menuLayout(); add('vol', [M.vol[0], M.vol[1] - 6, M.vol[2], 22], { adj: true }); add('mute', M.mute); add('opad', M.pad); add('okb', M.kb); add('test', M.test); add('close', M.close); return T; }
   if (!ui.title) return T;
   const L = titleLayout();
   if (LINK.state === 'lobby') { add('side0', L.lobby.pick[0]); add('side1', L.lobby.pick[1]); if (LINK.hosting) { add('start', L.lobby.start); add('leave', L.lobby.leave); } else add('leave', L.linkBtn); return T; }
   if (linkPanelUp()) { if (LINK.state === 'choose') { add('host', L.hostBtn); add('joinb', L.joinBtn); } if (LINK.state === 'enter') add('go', L.goBtn); add('lback', L.linkBtn); return T; }
   menuModes().forEach((m, i) => add('mode' + i, L.modes[i]));
+  add('online', L.join);
   if (menuSel.mode === 'story') L.levels.forEach((r, i) => add('lv' + i, r));
   for (const S0 of L.sides) {
     const s = S0.s;
     add('flag' + s, [S0.flag[0], S0.flag[1], FLAG_W, FLAG_H]);
-    if (!mPickable(s)) continue;
-    if (mCtlChoices(s).length > 1) { add('cl' + s, S0.left); add('cr' + s, S0.right); }
-    if (mCtlFor(s) === 'cpu') S0.lv.forEach((r, k) => add('cpu' + s + k, r));
+    if (!mJoinable(s)) continue;
+    if (menuSel.mode === 'duel' && !mOn(s).length) S0.lv.forEach((r, k) => add('cpu' + s + k, r));
+    add('join' + s, S0.joinB);
   }
   add('play', L.play); add('resume', L.restart); add('opts', L.opts);
-  if (typeof Peer === 'function') add('online', L.join);
   return T;
 }
 function padFocusOf(T) {
@@ -5185,7 +5333,9 @@ function padNavPress() {
   const f = padFocusOf(padTargets());
   if (!f || f.adj) return;
   const k = PIXU / dpr, cx = (f.r[0] + f.r[2] / 2) * k, cy = (f.r[1] + f.r[3] / 2) * k;
-  for (const type of ['pointerdown', 'pointerup']) { try { window.dispatchEvent(new PointerEvent(type, { clientX: cx, clientY: cy, pointerId: 91, bubbles: true, cancelable: true })); } catch (e) {} }
+  joinDev = 'pad' + (Math.min(1, padMenu.aPad || 0) + 1);       // (a JOIN pressed with a controller joins that controller)
+  try { for (const type of ['pointerdown', 'pointerup']) { try { window.dispatchEvent(new PointerEvent(type, { clientX: cx, clientY: cy, pointerId: 91, bubbles: true, cancelable: true })); } catch (e) {} } }
+  finally { joinDev = null; }
 }
 function padMenuPoll(pads, dt) {
   const b = i => pads.some(gp => gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.4));
@@ -5199,6 +5349,7 @@ function padMenuPoll(pads, dt) {
     else if ((padMenu.rep[k] -= dt) <= 0) { padMenu.rep[k] = 0.12; padNavDir(k); }
   }
   const edge = k => { const was = S[k]; S[k] = now[k]; return now[k] && !was; };
+  if (now.a && !S.a) padMenu.aPad = Math.max(0, pads.findIndex(gp => gp.buttons[0] && (gp.buttons[0].pressed || gp.buttons[0].value > 0.4)));
   if (edge('a')) padNavPress();
   if (edge('b')) { padKey('Escape', true); padKey('Escape', false); }
   if (edge('start')) { padKey('Enter', true); padKey('Enter', false); }
@@ -5241,8 +5392,8 @@ function pollPads(dt) {
   try { pads = Array.from(navigator.getGamepads() || []).filter(Boolean); } catch (e) { return; }
   PADS_SEEN = pads.length;
   if (padMenuOn()) padMenuPoll(pads, dt); else padMenu.on = false;
-  for (let p = 0; p < 2; p++) {
-    const gi = padOf(p), gp = gi >= 0 ? pads[gi] : null, st = padState[p], K = PAD_KEYS[p];
+  for (let v = 0; v < 2; v++) {
+    const gi = padOf(v), gp = gi >= 0 ? pads[gi] : null, st = padState[v];
     const want = {};
     const btn = i => !!(gp && gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.4));
     const edge = (name, on) => { const was = !!st[name]; st[name] = on; return on && !was ? 1 : !on && was ? -1 : 0; };
@@ -5251,8 +5402,9 @@ function pollPads(dt) {
       // fires or opens the moment you're back in the round
       st.start = btn(9); st.w1 = btn(0) || btn(7); st.pa = btn(0); st.w2 = btn(1) || btn(6); st.w3 = btn(2); st.w4 = btn(3);
       st.lb = btn(4); st.rb = btn(5); st.l3 = btn(10); st.dl = st.dr = false;
-    } else if (gp && p < 2 && !brains[p] && crew[p].mode !== 'gone') {
-      const ax = i => { const v = gp.axes[i] || 0; return Math.abs(v) < 0.25 ? 0 : v; };
+    } else if (gp && v < HUMANS()) asSlot(v, p => {                // (each slot's pad plays as that slot: see asSlot)
+      if (brains[p] || crew[p].mode === 'gone') return;
+      const ax = i => { const a = gp.axes[i] || 0; return Math.abs(a) < 0.25 ? 0 : a; };
       const lx = ax(0), ly = ax(1), m = crew[p].mode;
       // left / right: in a vehicle, full ahead that way at once (it turns round), never a stop on the way - the
       // stick pressed in (L3) stops (user Oct 24). Not driving: they look around. The tower: see the sticks below
@@ -5294,18 +5446,15 @@ function pollPads(dt) {
           g.aimShow = 1.6;
         }
       }
-    }
-    for (const k of ['left', 'right', 'up', 'down']) {
-      const w = !!want[k];
-      if (w !== !!st[k]) { padKey(K[k], w); st[k] = w; }
-    }
+    });
+    padHeld[v] = want;                                    // (the stick held: applyHeldKeys reads it for this slot)
   }
 }
 window.addEventListener('keyup', e => {
   const code = keyCode(e);
   held.delete(code); held.delete(e.code); if (P2_AS_P1[e.code]) held.delete(P2_AS_P1[e.code]);
-  if (code in FIRE_KEYS) { act(FIRE_KEYS[code], 'release'); const pl = planes[FIRE_KEYS[code]]; if (pl && crew[FIRE_KEYS[code]].mode === 'plane') pl.mg = false; }
-  if (code in MG_KEYS) { const p = MG_KEYS[code]; mgHold[p] = false; if (planes[p] && crew[p].mode === 'plane') planes[p].mg = false; }
+  if (code in FIRE_KEYS) keyDo(FIRE_KEYS[code], p => { act(p, 'release'); const pl = planes[p]; if (pl && crew[p].mode === 'plane') pl.mg = false; });
+  if (code in MG_KEYS) keyDo(MG_KEYS[code], p => { mgHold[p] = false; if (planes[p] && crew[p].mode === 'plane') planes[p].mg = false; });
   const lk = LEVER_KEYS[code];
   if (lk && runKeys[lk[0]] === lk[1]) runKeys[lk[0]] = 0;
 });
@@ -5319,42 +5468,38 @@ function lookBy(p, dx, dy) {
   c.look.x = clamp(c.look.x + dx, VIS_L, VIS_R);
   c.look.y = clamp(c.look.y + dy, SKY_TOP + 600, SEABED_Y - 150);
 }
+// what's held, for each person at this screen: their keys (set 0 or 1, see kbSlot) and their controller's left
+// stick (padHeld, set in pollPads), run as their slot
+const padHeld = [{}, {}];
+const HELD_K = [['KeyA', 'KeyD', 'KeyW', 'KeyS', 'KeyQ', 'KeyE', 'KeyZ', 'KeyC'], ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Comma', 'Period', 'Semicolon', 'Quote']];
 function applyHeldKeys(dt) {
-  // not driving: the drive keys (and a controller's left stick, which sends them) look around
-  for (const [p, L, R, U, D] of [[0, 'KeyA', 'KeyD', 'KeyW', 'KeyS'], [1, 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']]) {
-    if (!looking(p)) continue;
-    const ax = (held.has(R) ? 1 : 0) - (held.has(L) ? 1 : 0), ay = (held.has(D) ? 1 : 0) - (held.has(U) ? 1 : 0);
-    if (ax || ay) { const sp = 1.3 * halfWorldW(cam.zt[p] || 1); lookBy(p, ax * sp * dt, ay * sp * 0.7 * dt); }
+  diveKeys[0] = diveKeys[1] = 0;
+  for (let v = 0; v < HUMANS(); v++) {
+    const sets = [0, 1].filter(s => kbSlot(s) === v), ph = padHeld[v] || {};
+    const h = i => sets.some(s => held.has(HELD_K[s][i]));
+    const k = { L: h(0) || !!ph.left, R: h(1) || !!ph.right, U: h(2) || !!ph.up, D: h(3) || !!ph.down, zout: h(4), zin: h(5), pd: h(6), pu: h(7) };
+    asSlot(v, p => heldFor(p, dt, k));
   }
-  // W/S and Up/Down: the gun's elevation (in the submarine, the dive planes)
-  diveKeys[0] = (held.has('KeyS') ? 1 : 0) - (held.has('KeyW') ? 1 : 0);
-  diveKeys[1] = (held.has('ArrowDown') ? 1 : 0) - (held.has('ArrowUp') ? 1 : 0);
-  // the keys turn the console wheel: up raises the guns (or brings the sub up), down lowers them (dives)
-  for (let p = 0; p < 2; p++) if (diveKeys[p] && (crew[p].mode === 'sub' || hasGuns(p))) {
+}
+function heldFor(p, dt, k) {
+  const ax = (k.R ? 1 : 0) - (k.L ? 1 : 0), ay = (k.D ? 1 : 0) - (k.U ? 1 : 0);
+  // not driving: the drive keys (and a controller's left stick) look around
+  if (looking(p) && (ax || ay)) { const sp = 1.3 * halfWorldW(cam.zt[p] || 1); lookBy(p, ax * sp * dt, ay * sp * 0.7 * dt); }
+  // up / down: the gun's elevation (in the submarine, the dive planes; in the plane, the climb)
+  diveKeys[p] = ay;
+  if (ay && (crew[p].mode === 'sub' || hasGuns(p))) {
     const sgn = consoles[p].mirror ? -1 : 1;
-    if (crew[p].mode === 'sub') turnWheel(p, sgn * diveKeys[p] * 360 * 60 / CON.SUB_TURN * dt);
-    else { const g = activeGun(p); g.elev = clamp(g.elev - diveKeys[p] * 60 * dt, elevMin(p), elevMax(p)); g.aimShow = 1.6; }
+    if (crew[p].mode === 'sub') turnWheel(p, sgn * ay * 360 * 60 / CON.SUB_TURN * dt);
+    else { const g = activeGun(p); g.elev = clamp(g.elev - ay * 60 * dt, elevMin(p), elevMax(p)); g.aimShow = 1.6; }
   }
-  // Q/E (left player) and , . (right player) zoom out and in, one step at a time
-  for (const [code, p, d] of [['KeyE', 0, 1], ['KeyQ', 0, -1], ['Period', 1, 1], ['Comma', 1, -1]]) {
-    if (!held.has(code)) continue;
-    scopeHold[p] = (scopeHold[p] || 0) - dt;
-    if (scopeHold[p] <= 0 && !zoomLocked(p)) { crew[p].zoomHold = false; setScope(p, scopes[p].level + d); scopeHold[p] = 0.28; }
-  }
-  if (!held.has('KeyQ') && !held.has('KeyE')) scopeHold[0] = 0;
-  if (!held.has('Comma') && !held.has('Period')) scopeHold[1] = 0;
-  // A/D and the arrows walk the sailor (or row the lifeboat) while held
-  const rk = [(held.has('KeyD') ? 1 : 0) - (held.has('KeyA') ? 1 : 0), (held.has('ArrowRight') ? 1 : 0) - (held.has('ArrowLeft') ? 1 : 0)];
-  for (let p = 0; p < 2; p++) {
-    if (runCtl[p].drag || crew[p].mode !== 'boat') continue;
-    runCtl[p].v = clamp(runCtl[p].v + rk[p] * dt * 1.6, -1, 1);   // keys nudge the boat's throttle
-  }
-  const aim = (p, d) => { const g = activeGun(p); g.elev = clamp(g.elev + d * 60 * dt, elevMin(p), elevMax(p)); g.aimShow = 1.6; };
-  const pow = (p, d) => { const g = activeGun(p); g.power = clamp(g.power + d * 0.6 * dt, 0, 1); g.aimShow = 1.6; powerClick(p, g.power); };
-  if (held.has('KeyC')) pow(0, 1);
-  if (held.has('KeyZ')) pow(0, -1);
-  if (held.has('Quote')) pow(1, 1);
-  if (held.has('Semicolon')) pow(1, -1);
+  // zoom out and in, one step at a time while held
+  const zd = k.zin ? 1 : k.zout ? -1 : 0;
+  if (zd) { scopeHold[p] = (scopeHold[p] || 0) - dt; if (scopeHold[p] <= 0 && !zoomLocked(p)) { crew[p].zoomHold = false; setScope(p, scopes[p].level + zd); scopeHold[p] = 0.28; } }
+  else scopeHold[p] = 0;
+  // left / right row the lifeboat while held
+  if (!runCtl[p].drag && crew[p].mode === 'boat') runCtl[p].v = clamp(runCtl[p].v + ax * dt * 1.6, -1, 1);
+  // the power, up and down
+  if ((k.pu || k.pd) && hasGuns(p)) { const g = activeGun(p); g.power = clamp(g.power + (k.pu ? 1 : -1) * 0.6 * dt, 0, 1); g.aimShow = 1.6; powerClick(p, g.power); }
 }
 ['gesturestart', 'gesturechange', 'dblclick', 'contextmenu', 'selectstart'].forEach(t =>
   document.addEventListener(t, e => e.preventDefault(), { passive: false }));
@@ -7131,7 +7276,7 @@ function stepPlanes(dt) {
     if (pl.eng === 'off') { stepPlaneStall(pl, dt); if (planeCrash(pl)) continue; planeSmoke(pl, dt); continue; }
     // held, the nose comes round slowly at first, then faster; let go, it settles back to level unhurried
     const sd = !mine && i < 2 ? seatDriving(p, 'plane') : null;                // (a teammate online flying it)
-    let stick = mine ? clamp(diveHold[p] + diveKeys[p], -1, 1) : sd ? clamp(sd.dive, -1, 1) : pl.raid ? pl.aiStick || 0 : 0;
+    let stick = mine ? clamp(diveHold[p] + diveKeys[p], -1, 1) : sd ? clamp(sd.dive + (sd.local ? diveKeys[sd.slot] : 0), -1, 1) : pl.raid ? pl.aiStick || 0 : 0;
     if (pl.recoverT > 0) { pl.recoverT -= dt; stick = 0; }                         // (just restarted: it levels by itself)
     pl.holdT = stick && Math.sign(stick) === pl.holdS ? pl.holdT + dt : 0; pl.holdS = Math.sign(stick);
     const rate = 0.22 + 0.55 * Math.min(1, pl.holdT / 2);
@@ -8048,7 +8193,7 @@ function stepCrew(dt) {
     if (c.mode === 'dock' && !hasForces(p)) killCaptain(p);
   }
   // a teammate online in a tower that's coming down: ashore
-  for (const st of NET.seats) if (st.crew.mode === 'tower') { const tw = towers[st.team]; tw.inUse = true; if (!towerUsable(tw)) asSeat(st, () => lostUnit(st.team, tw.x, 'tower')); }
+  for (const st of NET.seats) if (st.crew.mode === 'tower') { const tw = towers[st.team]; tw.inUse = true; if (!towerUsable(tw)) viaSeat(st, q => lostUnit(q, tw.x, 'tower')); }
   for (const tw of towers) {
     const cc = crew[tw.player];
     if (cc.mode !== 'tower') tw.inUse = false;
@@ -9857,7 +10002,7 @@ function vehFocus(i, m) {
 function updateCamera(dt, snap) {
   const k = rate => (snap ? 1 : 1 - Math.exp(-dt * rate));
   if (ONEVIEW()) cam.zt[1] = cam.zt[0];            // one player: both halves are one screen with one zoom
-  const F = [camFocus(0), ONEVIEW() ? null : camFocus(1)];
+  const F = [camFocus(0), ONEVIEW() ? null : asSlot(1, q => camFocus(q))];
   if (!F[1]) F[1] = F[0];
   // a view being dragged with the right mouse button looks where it's dragged (no look-ahead, no keeping the
   // unit in frame); let go and the drag eases back to nothing
@@ -14291,7 +14436,7 @@ function render() {
   if (!ui.settings) {
   layoutConsoles();
   tt = lap('hudpre', tt);
-  for (let p = 0; p < 2; p++) { drawHud(p); if (crew[p].mode === 'boat') drawBoatCtl(p); }
+  for (let v = 0; v < HUMANS(); v++) asSlot(v, p => { drawHud(p); if (crew[p].mode === 'boat') drawBoatCtl(p); });
   if (probe.on) probeFlush(ug);
   tt = lap('console', tt);
 
@@ -15432,7 +15577,7 @@ async function start(data) {
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
     set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { CPU_LEVEL = lv; cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), hud: p => hudLayout(p), get time() { return time; }, get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
-    follow, gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => linkStartRound(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; menuApply(); linkHost(); }, startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, get worldW() { return WORLD_W; }, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, consoles, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
+    follow, gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => linkStartRound(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; menuApply(); linkHost(); }, startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, get worldW() { return WORLD_W; }, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, consoles, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
   };
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
