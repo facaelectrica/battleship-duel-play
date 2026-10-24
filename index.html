@@ -641,7 +641,7 @@ function applyMode() {
   SWAP = NET.role === 'guest' ? NET.side === 1 : STORY || (PLAYERS === 2 && !LOCALC(ctlFor(0)) && LOCALC(ctlFor(1)));
   SLOTS.length = 0;
   const add = (dev, team, extra) => SLOTS.push({ dev, team, extra: !!extra });
-  if (NET.role === 'guest') add(LOCALC(ctlFor(SIDE(0))) ? ctlFor(SIDE(0)) : TOUCH0 ? 'touch' : 'kb', 0);
+  if (NET.role === 'guest') add(NET.dev ? NET.dev : TOUCH0 ? 'touch' : 'kb', 0);   // (what it pressed JOIN with)
   else if (PLAYERS === 1) { const d = ctlFor(SIDE(0)); add(LOCALC(d) ? d : TOUCH0 ? 'touch' : 'kb', 0); if (EXTRA) add(EXTRA.dev, 0, true); }
   else {
     for (let p = 0; p < 2; p++) { const d = ctlFor(SIDE(p)); if (LOCALC(d)) add(d, p); }
@@ -692,7 +692,8 @@ const followPref = [false, false];
 let stopPref = false;
 // MUTE: every sound off (the volume slider keeps its place)
 let MUTED = loadPrefs().mute === true;
-function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ flags: flagPick.slice(), mode: MODE, ctl: ctlPick.slice(), cpuLv: cpuLvSide.slice(), storyLv: STORY_LV, mute: MUTED, roster: typeof menuSel === 'object' ? menuSel.roster : PREFS0.roster })); } catch (e) { } }
+let SHOW_STATS = loadPrefs().stats !== false;          // the frame counter and, online, the network numbers (OPTIONS)
+function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ flags: flagPick.slice(), mode: MODE, ctl: ctlPick.slice(), cpuLv: cpuLvSide.slice(), storyLv: STORY_LV, mute: MUTED, stats: SHOW_STATS, roster: typeof menuSel === 'object' ? menuSel.roster : PREFS0.roster })); } catch (e) { } }
 { const pr = loadPrefs(); if (Array.isArray(pr.flags)) pr.flags.forEach((f, i) => { if (i < 2 && Number.isInteger(f) && f >= 0) flagPick[i] = f; }); }
 
 function makeShip(id, x, facing, dock) {
@@ -2896,10 +2897,16 @@ function linkJoin(code) {
   });
   peer.on('error', e => linkClose(e && e.type === 'peer-unavailable' ? 'NO SESSION ' + code : 'COULD NOT CONNECT'));
 }
-// (a guest) pick a side of the session (pressed again on your own side: leave it)
-function lobbyPick(s) {
-  if (LINK.hosting || LINK.state !== 'joined') { menuJoin(s, TOUCH0 ? 'touch' : 'kb'); return; }
+// (a guest) what pressed JOIN: a controller, a finger, or the keyboard and mouse - it's what this screen plays with
+// (user Oct 24: on a PC, joining with the controller)
+function guestDev(e) { return joinDev || (e && e.pointerType === 'touch' ? 'touch' : 'kb'); }
+// (a guest) pick a side of the session (pressed again on your own side with the same thing: leave it; with
+// something else - the controller rather than the keyboard - play with that instead)
+function lobbyPick(s, dev) {
+  if (LINK.hosting || LINK.state !== 'joined') { menuJoin(s, dev || (TOUCH0 ? 'touch' : 'kb')); return; }
   const me = LINK.players.find(q => q.id === LINK.myId);
+  if (me && me.side === s && dev && dev !== NET.dev) { NET.dev = dev; if (NET.role === 'guest') applyMode(); showToast('YOU PLAY WITH ' + (DEV_NAMES[dev] || dev)); return; }
+  if (dev) NET.dev = dev;
   linkSend({ t: 'side', side: me && me.side === s ? null : s });
 }
 const lobbyReady = () => true;
@@ -3008,6 +3015,7 @@ function linkReceive(m) {
     return;
   }
   if (m.t === 'snap' && NET.role === 'guest' && m.s) {
+    NETST.snapIn++; NETST.lastSnap = performance.now();
     try { if (m.you) m.s.you = m.you; NET.taken = Array.isArray(m.taken) ? m.taken : null; netApply(m.s); } catch (e) { console.error(e); }
     return;
   }
@@ -3022,6 +3030,7 @@ function guestOut() {
 }
 // each frame: the host's snapshots, the guest's control state, ~15 a second
 function linkPump(dt) {
+  netStatsTick();
   LINK.acc += dt;
   if (LINK.acc < 1 / 15) return;
   LINK.acc = 0;
@@ -3036,6 +3045,7 @@ function linkPump(dt) {
       const taken = crewsOf(t).filter(c => c !== st.crew && c.mode !== 'dock' && c.mode !== 'gone').map(c => c.mode);
       linkTo(g, { t: 'snap', s: S[t], you: { mode: st.crew.mode, dead: !!st.crew.dead }, taken });
     }
+    NETST.snapOut++;
   } else if (NET.role === 'guest' && LINK.conn && !paused) linkSend({ t: 'ctl', s: ctlState(0) });
 }
 function linkDrop() {
@@ -3629,6 +3639,36 @@ function redTint(c) {
 }
 // the row of captains' heads, just the heads (no box): alive (ashore, or out in a vehicle: its little picture in
 // the corner), the one who died last wounded, the ones before skulls. They go out in order, left to right.
+/* The other team at a glance, in the top right corner when there's one view (user Oct 24: "I also obviously need
+   to see the other team remaining characters and ship damage"): each of their vehicles filled across with its life,
+   lit where one of them is out in it, and their captains - the dead under a red X. */
+function drawEnemyStrip(q) {
+  if (!captains[q] || !img.hud || !img.hud.icShip) return;
+  const L0 = hudLayout(0), last = L0.tabs[L0.tabs.length - 1], right = ubw - 8, room = right - (last ? last.x + last.w : ubw / 2) - 16;
+  const VS = hudVeh().filter(v => v !== 'sail'), n = captains[q].length;
+  const hs = Math.max(12, Math.min(22, Math.floor((room - 4) / Math.max(n, 1)) - 2)), W = n * (hs + 2) - 2;
+  if (room < Math.min(120, W)) return;                 // (no room beside the buttons: a narrow screen)
+  const iw = Math.floor((W - (VS.length - 1) * 4) / VS.length), y0 = Math.round(ui.top + 6);
+  ug.save(); ug.imageSmoothingEnabled = false;
+  if (room >= W + 44) drawText(ug, 'ENEMY', right - W - 6, y0 + 4, '#ffffff', 1, 'right');
+  VS.forEach((v, i) => {
+    const ic = img.hud[HUD_TABICON[v]], k = Math.min(iw / ic.width, 16 / ic.height), w = Math.round(ic.width * k), h = Math.round(ic.height * k);
+    const sp = scaled(ic, w / ic.width, true), x = Math.round(right - W + i * (iw + 4) + (iw - w) / 2), y = y0 + Math.round((16 - h) / 2);
+    const life = clamp(vehLife(q, v), 0, 1), on = crew[q] && crew[q].mode === v;
+    ug.globalAlpha = 0.3; ug.drawImage(sp, x, y, w, h);
+    ug.globalAlpha = 1;
+    const lw = Math.round(w * life), sw = Math.max(1, Math.round(sp.width * life));
+    if (lw > 0) ug.drawImage(life < 0.34 ? redTint(sp) : sp, 0, 0, sw, sp.height, x, y, lw, h);
+    if (on) { ug.fillStyle = '#ffd23a'; ug.fillRect(x, y + h + 2, w, 2); }      // (one of them is out in it)
+  });
+  const T = captArt(q), flip = SIDE(q) === 1, cy = y0 + 22;
+  captains[q].forEach((c, i) => {
+    const b = { x: right - W + i * (hs + 2), y: cy, w: hs, h: hs }, dead = c.state === 'bones' || c.state === 'dead';
+    drawCapHead(q, T, c, b, flip);
+    if (dead) drawRedX(b, 1);
+  });
+  ug.restore();
+}
 function drawCaptains(p, Lh) {
   if (!Lh.caps.length || !img.captains || !img.hats) return;
   const T = captArt(p), flip = SIDE(p) === 1;   // (the right-hand side's face left)
@@ -4141,6 +4181,7 @@ function knobIcon(s) {
 // frame rate); over half a second, so a single hitch shows up too
 const fpsMeter = { n: 0, t0: 0, v: 0 };
 function drawFps() {
+  if (!SHOW_STATS) return;
   const now = performance.now();
   if (!fpsMeter.t0) fpsMeter.t0 = now;
   fpsMeter.n++;
@@ -4152,6 +4193,56 @@ function drawFps() {
   drawText(ug, txt, x + 1, y + 1, '#04070f', 2, 'right');
   drawText(ug, txt, x, y, col, 2, 'right');
   if (ui.perfPanel) drawPerfPanel(x, y + 18);
+  else drawNetStats(x, y + 18);
+}
+/* The network numbers, under the frame counter while online (user Oct 24: "to clearly see if there are issues"):
+   for each link, the round trip (ping), how it's made (LAN: straight across your own network; DIRECT: across the
+   internet; RELAY: through a relay server, slower), the game updates a second and the data each way. A guest also
+   sees how long since the host's last update - over half a second, the host's screen is struggling or the link is. */
+const NETST = { t: 0, snapIn: 0, snapOut: 0, rate: 0, lastSnap: 0, links: new Map() };
+function netLinks() { return LINK.hosting ? linkGuests().map(g => [g.conn, 'P' + (g.id + 1)]) : LINK.conn ? [[LINK.conn, 'HOST']] : []; }
+function netStatsTick() {
+  const now = performance.now();
+  if (now - NETST.t < 1000) return;
+  const secs = NETST.t ? (now - NETST.t) / 1000 : 1;
+  NETST.t = now;
+  NETST.rate = Math.round((LINK.hosting ? NETST.snapOut : NETST.snapIn) / secs); NETST.snapIn = 0; NETST.snapOut = 0;
+  for (const [conn, name] of netLinks()) {
+    const pc = conn && conn.peerConnection;
+    if (!pc || !pc.getStats) continue;
+    pc.getStats().then(rep => {
+      let pair = null; const by = new Map();
+      rep.forEach(r => { by.set(r.id, r); if (r.type === 'transport' && r.selectedCandidatePairId) pair = r.selectedCandidatePairId; });
+      let cp = pair && by.get(pair);
+      if (!cp) rep.forEach(r => { if (r.type === 'candidate-pair' && (r.selected || (r.nominated && r.state === 'succeeded'))) cp = r; });
+      const o = NETST.links.get(conn) || { name };
+      o.name = name;
+      if (cp) {
+        o.rtt = cp.currentRoundTripTime != null ? Math.round(cp.currentRoundTripTime * 1000) : o.rtt;
+        const lc = by.get(cp.localCandidateId), rc = by.get(cp.remoteCandidateId), tp = [lc, rc].map(c => c && (c.candidateType || c.type));
+        o.kind = tp.includes('relay') ? 'RELAY' : tp[0] === 'host' && tp[1] === 'host' ? 'LAN' : 'DIRECT';
+        const t = performance.now();
+        if (o.t) { const dt = (t - o.t) / 1000; o.inK = (cp.bytesReceived - o.br) / 1024 / dt; o.outK = (cp.bytesSent - o.bs) / 1024 / dt; }
+        o.t = t; o.br = cp.bytesReceived || 0; o.bs = cp.bytesSent || 0;
+      } else o.kind = pc.iceConnectionState ? String(pc.iceConnectionState).toUpperCase() : '?';
+      NETST.links.set(conn, o);
+    }).catch(() => {});
+  }
+  for (const c of [...NETST.links.keys()]) if (!netLinks().some(([k]) => k === c)) NETST.links.delete(c);
+}
+function drawNetStats(x, y) {
+  if (!LINK.conn && !(LINK.hosting && linkGuests().length)) return;
+  const rows = [], k = v => v == null ? '-' : v < 10 ? v.toFixed(1) : Math.round(v);
+  for (const [conn, name] of netLinks()) {
+    const o = NETST.links.get(conn) || {};
+    rows.push([name + ' ' + (o.rtt != null ? o.rtt + 'MS' : '--') + ' ' + (o.kind || (conn.open ? '...' : 'LINKING')), o.rtt == null ? '#cfe0f0' : o.rtt < 60 ? '#9dff8a' : o.rtt < 150 ? '#ffd36b' : '#ff7a6a']);
+    rows.push(['IN ' + k(o.inK) + 'KBPS  OUT ' + k(o.outK) + 'KBPS', '#cfe0f0']);
+  }
+  if (NET.role === 'guest') {
+    const age = NETST.lastSnap ? Math.round(performance.now() - NETST.lastSnap) : null;
+    rows.push([NETST.rate + ' UPDATES A SEC  LAST ' + (age == null ? '-' : age + 'MS'), age == null || age > 500 || NETST.rate < 8 ? '#ff7a6a' : age > 200 || NETST.rate < 12 ? '#ffd36b' : '#9dff8a']);
+  } else if (LINK.hosting && NET.role === 'host') rows.push([NETST.rate + ' UPDATES A SEC SENT', NETST.rate < 8 ? '#ff7a6a' : NETST.rate < 12 ? '#ffd36b' : '#9dff8a']);
+  rows.forEach(([t, c], i) => { drawText(ug, t, x + 1, y + i * 11 + 1, '#04070f', 1, 'right'); drawText(ug, t, x, y + i * 11, c, 1, 'right'); });
 }
 // Tap the frame counter: where each frame's time goes, to find what's slow on a given device
 function fpsRect() { return [ubw - 120, ui.title ? ui.top + 18 : hudTop() + 4, 120, 30]; }
@@ -4328,7 +4419,9 @@ function menuLayout() {
     // the controls screens (user Oct 24)
     pad: [x + 30, y + 146, 180, 34], kb: [x + w - 210, y + 146, 180, 34],
     // the weapons range (TEST), here rather than among the modes (user Oct 24)
-    test: [x + ((w - 220) >> 1), y + 196, 220, 34],
+    test: [x + 30, y + 196, 180, 34],
+    // the frame counter and the network numbers on or off (user Oct 24)
+    stats: [x + w - 210, y + 196, 180, 34],
     close: [x + ((w - 180) >> 1), y + h - 50, 180, 34],
   };
 }
@@ -4362,6 +4455,7 @@ function drawMenu() {
   drawText(ug, 'CONTROLS', M.x + 20, M.y + 132, '#ffffff', 2);
   modeButton(...M.pad, 'CONTROLLER', false); modeButton(...M.kb, 'KEYBOARD', false);
   modeButton(...M.test, 'TEST RANGE', false);
+  modeButton(...M.stats, SHOW_STATS ? 'STATS: ON' : 'STATS: OFF', SHOW_STATS);
   modeButton(...M.close, 'BACK', true);
 }
 /* ---------------- The controls screens (user Oct 24): the Xbox and the PlayStation controller (the user's
@@ -4525,6 +4619,7 @@ function menuHit(ux, uy) {
   if (inR(M.close)) return { act: 'close' };
   if (inR(M.pad)) return { act: 'ctlPad' };
   if (inR(M.test)) return { act: 'testRange' };
+  if (inR(M.stats)) return { act: 'stats' };
   if (inR(M.kb)) return { act: 'ctlKb' };
   const [vx, vy, vw] = M.vol;
   if (ux >= vx - 10 && ux <= vx + vw + 10 && uy >= vy - 12 && uy <= vy + 22) return { act: 'vol', vx, vw };
@@ -4773,7 +4868,7 @@ function drawLinkPanel(T) {
 const joinedRoom = () => !LINK.hosting && LINK.state === 'joined';
 // who's on side s, as the menu shows it: the people here and the guests (the host), or the session's list (a guest)
 function sideNames(s) {
-  if (joinedRoom()) return LINK.players.filter(q => q.side === s).map(q => ({ name: q.id === LINK.myId ? 'YOU' : q.name, me: q.id === LINK.myId }));
+  if (joinedRoom()) return LINK.players.filter(q => q.side === s).map(q => ({ name: q.id === LINK.myId ? 'YOU: ' + (DEV_NAMES[NET.dev || (TOUCH0 ? 'touch' : 'kb')] || '') : q.name, me: q.id === LINK.myId }));
   return [...mOn(s).map(q => ({ name: DEV_NAMES[q.dev] || q.dev, me: true })), ...(LINK.hosting ? linkGuests().filter(g => g.side === s).map(g => ({ name: 'PLAYER ' + (g.id + 1), me: false })) : [])];
 }
 function titleHit(ux, uy) {
@@ -4985,6 +5080,7 @@ window.addEventListener('pointerdown', e => {
     else if (h.act === 'ctlPad') ui.controls = 'pad';
     else if (h.act === 'testRange') { if (NET.role === 'guest' || joinedRoom()) return; setMenu(false); menuSel.mode = 'test'; menuApply(); ui.resume = false; freshWeather(); restartGame(); }
     else if (h.act === 'ctlKb') ui.controls = 'kb';
+    else if (h.act === 'stats') { SHOW_STATS = !SHOW_STATS; savePrefs(); }
     else if (h.act === 'vol') { env.volume = clamp((ux - h.vx) / h.vw, 0, 1); pointers.set(e.pointerId, { kind: 'vol', h }); }
     return;
   }
@@ -5000,7 +5096,7 @@ window.addEventListener('pointerdown', e => {
     else if (h.act === 'invite') copyInvite();
     else if (h.act === 'joinPick') { LINK.state = 'enter'; LINK.msg = ''; codeBox(true); }
     else if (h.act === 'go') linkJoin(codeInput.value);
-    else if (h.act === 'lobbySide') lobbyPick(h.s);
+    else if (h.act === 'lobbySide') lobbyPick(h.s, guestDev(e));
     else if (h.act === 'lobbyStart') { if (LINK.hosting && lobbyReady()) linkStartRound(); }
     else if (h.act === 'story') menuSel.storyLv = h.n;
     else if (h.act === 'ctl') stepCtl(h.s, h.d);
@@ -5284,7 +5380,7 @@ function padTargets() {
   const T = [], add = (id, r, extra) => { if (r) T.push(Object.assign({ id, r }, extra)); };
   if (ui.controls) { const L = controlsLayout(); add('cxb', L.tabs.xb); add('cps', L.tabs.ps); add('ckb', L.tabs.kb); add('cback', L.back); return T; }
   if (ui.winner != null) { add('again', winLayout().btn); return T; }
-  if (ui.menu) { const M = menuLayout(); add('vol', [M.vol[0], M.vol[1] - 6, M.vol[2], 22], { adj: true }); add('mute', M.mute); add('opad', M.pad); add('okb', M.kb); add('test', M.test); add('close', M.close); return T; }
+  if (ui.menu) { const M = menuLayout(); add('vol', [M.vol[0], M.vol[1] - 6, M.vol[2], 22], { adj: true }); add('mute', M.mute); add('opad', M.pad); add('okb', M.kb); add('test', M.test); add('stats', M.stats); add('close', M.close); return T; }
   if (!ui.title) return T;
   const L = titleLayout();
   if (linkPanelUp()) { if (LINK.state === 'enter') add('go', L.goBtn); add('lback', L.linkBtn); return T; }
@@ -14703,6 +14799,7 @@ function render() {
   layoutConsoles();
   tt = lap('hudpre', tt);
   for (let v = 0; v < HUMANS(); v++) asSlot(v, p => { drawHud(p); if (crew[p].mode === 'boat') drawBoatCtl(p); });
+  if (PLAYERS === 2 && ONEVIEW() && !TEST && ui.winner == null) drawEnemyStrip(1);
   if (probe.on) probeFlush(ug);
   tt = lap('console', tt);
 
@@ -15847,7 +15944,7 @@ async function start(data) {
     towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
-    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { CPU_LEVEL = lv; cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), hud: p => hudLayout(p), get time() { return time; }, get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
+    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { CPU_LEVEL = lv; cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), hud: p => hudLayout(p), get time() { return time; }, get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
     follow, gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, get worldW() { return WORLD_W; }, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, consoles, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
