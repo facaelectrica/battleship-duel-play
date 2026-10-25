@@ -2159,7 +2159,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 12:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 12:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -2196,7 +2196,7 @@ const sideCount = s => roomPlayers().filter(q => q.side === s).length;
 function linkLobby() {
   if (!LINK.hosting) return;
   const players = roomPlayers().map(q => ({ id: q.id, side: q.side, name: q.name })), mode = liveMode();
-  const cpu = [0, 1].map(s => mode === 'duel' && !players.some(q => q.side === s));
+  const cpu = [0, 1].map(s => VERSUS(mode) && !players.some(q => q.side === s) && (roundLive() ? ctlPick[s] === 'cpu' : menuSel.cpu[s]));
   for (const g of linkGuests()) linkTo(g, { t: 'lobby', code: LINK.code, players, you: g.id, flags: flagPick.slice(), mode, live: roundLive(), cpu, msg: g.msg || '' });
 }
 // this screen's own session: opened at the start, and again after leaving someone else's
@@ -2291,7 +2291,8 @@ function dropSeat(g, quiet) {
   if (i >= 0) NET.seats.splice(i, 1);
   g.seat = null;
   if (!quiet && roundLive() && (s === 0 || s === 1) && !sidePeople(s)) {
-    if (MODE === 'duel') { ctlPick[s] = 'cpu'; const team = teamOfSide(s); brains[team] = makeBrain(team, cpuLvSide[s]); }
+    // (user Oct 25: the CPU doesn't take a side by itself - only if it had been added to it)
+    if (VERSUS(MODE) && menuSel.cpu[s]) { ctlPick[s] = 'cpu'; const team = teamOfSide(s); brains[team] = makeBrain(team, cpuLvSide[s]); }
     else ctlPick[s] = 'none';
   }
   if (!NET.seats.some(st => !st.local)) NET.role = 'local';
@@ -2322,6 +2323,10 @@ function linkFromGuest(g, m) {
     return;
   }
   if (!g.id) return;
+  // (user Oct 25: anyone in the session can change a team's flag, and everyone sees it)
+  if (m.t === 'flag') { if ((m.s === 0 || m.s === 1) && Number.isInteger(m.k) && m.k >= 0 && m.k < FLAG_COUNT) setFlag(m.s, m.k); return; }
+  // (user Oct 25: someone pausing pauses the game for everyone)
+  if (m.t === 'pause') { if (roundLive()) { if (m.on && !ui.title) { openMainMenu(true); showToast('PLAYER ' + (g.id + 1) + ' PAUSED'); } else if (!m.on && ui.title && ui.resume) menuResume(true); netPause(!!m.on, g); } return; }
   if (m.t === 'side') {
     g.msg = '';
     const s = m.side;
@@ -2329,7 +2334,7 @@ function linkFromGuest(g, m) {
     if (s !== 0 && s !== 1) return;
     if (!roomSideOk(s)) { g.msg = liveMode() === 'story' ? 'STORY CANNOT BE PLAYED ONLINE YET' : 'THAT SIDE IS NOT IN THIS GAME'; linkLobby(); return; }
     if (g.side !== s && sideCount(s) >= SIDE_MAX) { g.msg = 'THAT SIDE IS FULL'; linkLobby(); return; }
-    g.side = s;
+    g.side = s; menuSel.cpu[s] = false;                 // (the CPU makes way for a person)
     if (roundLive()) seatJoin(g);
     linkLobby();
     return;
@@ -2354,6 +2359,18 @@ function linkGuestGone(g) {
   dropSeat(g);
   if (g.id && LINK.hosting) { showToast('PLAYER ' + (g.id + 1) + ' LEFT'); linkLobby(); }
 }
+// a team's flag picked here: kept, the art repainted, and shared with the session (the host tells everyone; a guest
+// asks the host, who tells everyone)
+function setFlag(s, k) {
+  flagPick[s] = k; savePrefs(); buildTeamArt();
+  if (LINK.hosting) linkLobby(); else if (joinedRoom()) linkSend({ t: 'flag', s, k });
+}
+// a pause (or the end of it) here in an online round: the host tells every guest playing (but the one it came from);
+// a guest tells the host, who pauses and tells the rest
+function netPause(on, from) {
+  if (LINK.hosting) { for (const g of linkGuests()) if (g !== from && g.seat) linkTo(g, { t: 'pause', on }); }
+  else if (NET.role === 'guest') linkSend({ t: 'pause', on });
+}
 // (a guest) what the host sends
 function linkReceive(m) {
   if (!m || typeof m !== 'object' || LINK.hosting) return;
@@ -2363,11 +2380,12 @@ function linkReceive(m) {
     LINK.flags = Array.isArray(m.flags) ? m.flags : null; LINK.msg = m.msg || ''; LINK.mode = m.mode || 'duel'; LINK.live = !!m.live;
     LINK.cpu = Array.isArray(m.cpu) ? m.cpu : [false, false];
     if (LINK.msg) showToast(LINK.msg);
-    if (NET.role !== 'guest' && LINK.flags) { flagPick[0] = LINK.flags[0]; flagPick[1] = LINK.flags[1]; buildTeamArt(); }
+    if (LINK.flags && (flagPick[0] !== LINK.flags[0] || flagPick[1] !== LINK.flags[1])) { flagPick[0] = LINK.flags[0]; flagPick[1] = LINK.flags[1]; buildTeamArt(); }
     return;
   }
   if (m.t === 'stop') { guestOut(); return; }
   if (m.t === 'away') { LINK.away = !!m.on; return; }
+  if (m.t === 'pause' && NET.role === 'guest') { if (m.on && !ui.title) { openMainMenu(true); showToast('GAME PAUSED'); } else if (!m.on && ui.title && ui.resume) menuResume(true); return; }
   if (m.t === 'start') {
     NET.role = 'guest'; NET.me = 0; NET.worldW = m.worldW | 0; NET.send = linkSend; NET.side = m.side === 1 ? 1 : 0; NET.taken = null;
     if (Array.isArray(m.flags)) { flagPick[0] = m.flags[0]; flagPick[1] = m.flags[1]; }
@@ -3889,7 +3907,9 @@ const GAME_MODE_NAMES = { story: 'STORY', chill: 'CHILL', duel: 'BATTLE', test: 
 /* What the main menu has picked - the mode, who plays each side, the levels - is its own until PLAY (user: picking
    modes in the menu must not touch the round behind it). PLAY makes it real and starts a new round; RESUME
    (a round in progress) drops it and goes back to that round. */
-const menuSel = { mode: 'duel', ctl: ['kb', 'kb'], cpuLv: [1, 1], storyLv: 1,
+// (cpu: the CPU added to a side by hand - user Oct 25, it isn't put on a side by itself any more; it shows on its side
+// with an X, and anyone joining that side takes its place)
+const menuSel = { mode: 'duel', ctl: ['kb', 'kb'], cpuLv: [1, 1], storyLv: 1, cpu: [false, false],
   // the people at this screen and the side each has joined (user Oct 24: every side starts as the CPU; you press
   // JOIN under a side to play it, with whatever you pressed it with - two of you can share a side)
   roster: (Array.isArray(PREFS0.roster) ? PREFS0.roster : []).filter(q => q && ['kb', 'kb2', 'pad1', 'pad2', 'touch', 'touch2'].includes(q.dev) && (q.side === 0 || q.side === 1)).slice(0, 2) };
@@ -3903,6 +3923,7 @@ const DEV_NAMES = { kb: 'KEYBOARD', kb2: 'ARROW KEYS', pad1: 'CONTROLLER 1', pad
 // JOIN under side s, pressed with dev: you join it; pressed again on your own side, you leave it
 function menuJoin(s, dev) {
   if (!mJoinable(s) || !dev) return;
+  menuSel.cpu[s] = false;
   const R = menuSel.roster, cur = R.find(q => q.dev === dev);
   if (cur && mSideOf(cur) === s) { R.splice(R.indexOf(cur), 1); savePrefs(); return; }
   if (mOn(s).length >= 3) { showToast('THAT SIDE IS FULL'); return; }
@@ -3924,7 +3945,7 @@ function menuApply() {
   EXTRA = null;
   for (let s = 0; s < 2; s++) {
     const on = R.filter(q => mSideOf(q) === s);
-    ctlPick[s] = on.length ? on[0].dev : VERSUS(MODE) ? 'cpu' : 'none';
+    ctlPick[s] = on.length ? on[0].dev : VERSUS(MODE) && menuSel.cpu[s] ? 'cpu' : 'none';   // (the CPU only where it was added)
     if (on.length > 1) EXTRA = { dev: on[1].dev, side: s };
     // (nobody here on it, but someone online: theirs - not the CPU's)
     if (!on.length && LINK.hosting && linkGuests().some(g => g.side === s) && roomSideOk(s)) ctlPick[s] = 'net';
@@ -3935,8 +3956,10 @@ function menuApply() {
 // PLAY: a new round as the menu has it
 function menuPlay() {
   if (NET.role === 'guest' || joinedRoom()) return;
-  // (BATTLE: someone here who joined hasn't picked a side yet)
-  if (VERSUS(menuSel.mode) && menuSel.roster.some(q => q.side !== 0 && q.side !== 1)) { showToast('LEFT OR RIGHT TO PICK A SIDE'); return; }
+  // (BATTLE: nobody here or online has picked a side - it would be the CPU against itself. Anyone left in the middle
+  // just sits this one out: user Oct 25, the keyboard showed in the middle and the game wouldn't start)
+  const someone = menuSel.roster.some(q => q.side === 0 || q.side === 1) || (LINK.hosting && linkGuests().some(g => g.side === 0 || g.side === 1)) || menuSel.cpu[0] || menuSel.cpu[1];
+  if (VERSUS(menuSel.mode) && !someone) { showToast(menuSel.roster.length ? 'LEFT OR RIGHT TO PICK A SIDE' : 'PRESS A KEY OR BUTTON TO JOIN'); return; }
   menuApply(); ui.resume = false; freshWeather(); restartGame(); }
 // the JOIN panel closed (BACK, Esc, OK): back to the menu, this screen's session as it was
 function linkPanelClose() {
@@ -3951,7 +3974,7 @@ function freshWeather() {
   env.time = 9; W.lastHour = 9; env.rain = 0; env.fog = 0;
 }
 // RESUME: back to the round in progress, as it was
-function menuResume() { menuFromLive(); startGame(); }
+function menuResume(fromNet) { menuFromLive(); startGame(); if (!fromNet) netPause(false); }
 // can this side's controls be picked? (STORY: only yours, the right; the left is the enemy)
 // the menu offers only what's there: the keyboard, each controller it can see, and (1 VS 1) the CPU
 const ctlChoices = s => ['kb', ...['pad1', 'pad2'].slice(0, padsSeen()), ...(VERSUS(MODE) ? ['cpu'] : [])];
@@ -3988,7 +4011,8 @@ function lobbyMove(dev, dir) {
   const q = menuSel.roster.find(r => r.dev === dev), s = q.side === 0 || q.side === 1 ? q.side : null, to = step(s);
   if (to === s) return true;
   if (to != null && sideCount(to) >= SIDE_MAX) { showToast('THAT SIDE IS FULL'); return true; }
-  q.side = to; savePrefs(); linkLobby(); menuClick();
+  q.side = to; if (to != null) menuSel.cpu[to] = false;   // (someone on the side: the CPU makes way)
+  savePrefs(); linkLobby(); menuClick();
   return true;
 }
 // B: off its side, back to the middle; from the middle (or in STORY and CHILL), out of the lobby
@@ -4027,7 +4051,11 @@ function lobbyRows() {
     for (const q of menuSel.roster) put(one ? lobbyFlagSide() : (q.side === 0 || q.side === 1 ? q.side : null), { name: DEV_NAMES[q.dev] || q.dev, dev: q.dev, me: true });
     if (LINK.hosting) for (const g of linkGuests()) if (!one || g.side === lobbyFlagSide()) put(one ? lobbyFlagSide() : g.side, { name: 'PLAYER ' + (g.id + 1) });
     free = menuSel.roster.length < LOCAL_MAX();
+    // (1 VS 1) the CPU: on a side it was added to, with an X to take it off; on a side nobody's on, + CPU to add it
+    if (!one) for (const s of [0, 1]) { if (menuSel.cpu[s]) S[s].push({ name: 'CPU  X', cpu: s, on: true }); else if (!S[s].length) S[s].push({ name: '+ CPU', cpu: s, on: false }); }
   }
+  // (someone else's session: the CPU on a side, as the host has it)
+  if (joinedRoom() && !one) for (const s of [0, 1]) if (LINK.cpu && LINK.cpu[s]) S[s].push({ name: 'CPU' });
   if (free) mid.unshift({ free: true });
   return { S, mid };
 }
@@ -4123,7 +4151,7 @@ function drawTitle() {
       return;
     }
     const t = one && e.dev ? e.name + '  X' : e.name;
-    drawText(ug, t, cx, y, e.dev ? '#ffd23a' : '#ffffff', rs, 'center');
+    drawText(ug, t, cx, y, e.cpu != null ? (e.on ? '#ff9a7a' : '#9fb4c8') : e.dev ? '#ffd23a' : '#ffffff', rs, 'center');
   };
   for (const S0 of T.sides) {
     const s = S0.s, [fx, fy] = S0.flag;
@@ -4138,7 +4166,7 @@ function drawTitle() {
   { const fr = LR.mid[0] && LR.mid[0].free ? 1 : 0;
     if (fr) rowText(LR.mid[0], T.mid.cx, T.mid.rows[0], 2, true);
     LR.mid.slice(fr, fr + 5).forEach((e, i) => rowText(e, T.mid.cx, T.mid.rows[i + 1] + 2, T.mid.rs, true)); }
-  const hint = one ? 'PRESS ANY KEY OR BUTTON TO JOIN - B OR BACKSPACE TO LEAVE' : 'PRESS ANY KEY OR BUTTON TO JOIN - THEN LEFT OR RIGHT FOR A TEAM - A TEAM NOBODY PICKS IS THE CPU';
+  const hint = one ? 'PRESS ANY KEY OR BUTTON TO JOIN - B OR BACKSPACE TO LEAVE' : 'PRESS ANY KEY OR BUTTON TO JOIN - THEN LEFT OR RIGHT FOR A TEAM - + CPU TO PLAY THE COMPUTER';
   drawText(ug, hint, T.x + T.w / 2, T.hint, '#cfe0f0', 1, 'center');
   if (J) { if (!T.restart) drawText(ug, LINK.live ? 'PICK A SIDE TO JUMP IN' : 'THE HOST STARTS THE GAME', T.play[0] + T.play[2] / 2, T.play[1] + 14, '#ffffff', 2, 'center'); }
   else glassButton(...T.play, 'NEW GAME');            // (user Oct 24 night: PLAY was confusing next to RESUME)
@@ -4200,6 +4228,7 @@ function lobbyHit(ux, uy, T) {
       const e = list[i];
       if (!inRect(ux, uy, cx - rw / 2, rows[i] - (mid ? 7 : 2), rw, rh + (mid ? 11 : 1))) continue;   // (the middle's big arrows)
       if (e.free) return { act: 'lAdd' };
+      if (e.cpu != null && !mid) return { act: 'cpuToggle', s: e.cpu };
       if (!e.dev) return { act: 'none' };
       if (mid) { const dx = ux - cx; return Math.abs(dx) < rw * 0.18 ? { act: 'lBack', dev: e.dev } : { act: 'lMove', dev: e.dev, dir: Math.sign(dx) }; }
       return { act: 'lBack', dev: e.dev };
@@ -4222,10 +4251,11 @@ function titleHit(ux, uy) {
   }
   if (inR(T.join, 4)) return { act: joinedRoom() ? 'leaveRoom' : 'online' };
   if (inRect(ux, uy, T.code[0] - 4, T.code[1] - 8, 220, 22)) return { act: 'invite' };   // (the session code: copies the invite link)
+  const flagHit = () => { for (const S0 of T.sides) { const [fx, fy] = S0.flag; if (S0.show && inRect(ux, uy, fx - 16, fy - 26, FLAG_W + 32, FLAG_H + 32)) return { act: 'flag', p: S0.s }; } return null; };
   if (joinedRoom()) {                                     // (in someone else's session: their game, their modes)
     if (T.restart && inR(T.restart, 6)) return { act: 'resume' };
     if (inR(T.opts, 4)) return { act: 'options' };
-    return lobbyHit(ux, uy, T) || { act: 'none' };
+    return lobbyHit(ux, uy, T) || flagHit() || { act: 'none' };   // (anyone in the session can change a flag, user Oct 25)
   }
   if (inR(T.play, 6)) return { act: 'play' };
   if (T.restart && inR(T.restart, 6)) return { act: 'resume' };
@@ -4319,7 +4349,7 @@ function drawWinner() {
 // ui.menu is the OPTIONS panel, opened from the main menu (it doesn't pause anything itself)
 function setMenu(open) { ui.menu = open; ui.picker = -1; for (let p = 0; p < 2; p++) holding[p] = null; }
 // the menu button (or Esc) in a round: back to the main menu with the round paused behind it; PLAY carries on
-function openMainMenu() { held.clear(); setMenu(false); menuFromLive(); ui.title = true; ui.picker = -1; ui.resume = true; paused = true; for (let p = 0; p < 2; p++) holding[p] = null; }
+function openMainMenu(fromNet) { held.clear(); setMenu(false); menuFromLive(); ui.title = true; ui.picker = -1; ui.resume = true; paused = true; for (let p = 0; p < 2; p++) holding[p] = null; if (!fromNet) netPause(true); }
 function restartGame() {
   if (NET.role === 'guest') { linkSend({ t: 'again' }); return; }            // (online: the host starts the next round for everyone)
   if (LINK.hosting && !LINK.starting && linkGuests().some(g => g.side === 0 || g.side === 1)) { linkStartRound(); return; }
@@ -4449,6 +4479,7 @@ window.addEventListener('pointerdown', e => {
     else if (h.act === 'lBack') lobbyBack(h.dev);
     else if (h.act === 'unjoin') { const R = menuSel.roster, i = R.findIndex(q => q.dev === h.dev); if (i >= 0) { R.splice(i, 1); savePrefs(); linkLobby(); } }
     else if (h.act === 'level') menuSel.cpuLv[h.s] = h.n;
+    else if (h.act === 'cpuToggle') { menuSel.cpu[h.s] = !menuSel.cpu[h.s]; menuClick(); linkLobby(); }
     else if (h.act === 'flag') { ui.picker = h.p; scrollPickerTo(flagPick[h.p]); }
     return;
   }
@@ -4531,7 +4562,7 @@ function endPointer0(e) {
   if (p.kind === 'pan') { cam.panHeld[p.half] = false; return; }
   if (p.kind === 'slider') { ui.dragSlider = null; return; }
   if (p.kind === 'pick') {
-    if (!p.moved && ui.picker >= 0) { const h = pickerHit(p.ux, p.uy); if (h.act === 'pick') { flagPick[ui.picker] = h.k; ui.picker = -1; savePrefs(); buildTeamArt(); } }
+    if (!p.moved && ui.picker >= 0) { const h = pickerHit(p.ux, p.uy); if (h.act === 'pick') { setFlag(ui.picker, h.k); ui.picker = -1; } }
     return;
   }
   if (p.kind === 'cbtn') { act(p.p, 'release'); return; }
@@ -4715,14 +4746,13 @@ function padTargets() {
   if (!ui.title) return T;
   const L = titleLayout();
   if (linkPanelUp()) { if (LINK.state === 'enter') add('go', L.goBtn); add('lback', L.linkBtn); return T; }
+  for (const S0 of L.sides) if (S0.show) add('flag' + S0.s, [S0.flag[0], S0.flag[1], FLAG_W, FLAG_H]);
   if (joinedRoom()) { add('online', L.join); add('resume', L.restart); add('opts', L.opts); return T; }
+  // (1 VS 1: + CPU / CPU X under each flag)
+  { const LR = lobbyRows(); for (const S0 of L.sides) LR.S[S0.s].slice(0, 3).forEach((e, i) => { if (e.cpu != null) add('cpu' + S0.s, [S0.cx - 50, S0.rows[i] - 2, 100, 16]); }); }
   menuModes().forEach((m, i) => add('mode' + i, L.modes[i]));
   add('online', L.join);
   if (menuSel.mode === 'story') L.levels.forEach((r, i) => add('lv' + i, r));
-  for (const S0 of L.sides) {
-    const s = S0.s;
-    add('flag' + s, [S0.flag[0], S0.flag[1], FLAG_W, FLAG_H]);
-  }
   add('play', L.play); add('resume', L.restart); add('opts', L.opts);
   return T;
 }
@@ -4761,7 +4791,7 @@ function padNavPress() {
   if (!ui.padNav) { ui.padNav = true; return; }
   if (ui.picker >= 0 && !ui.controls) {
     if (padMenu.pickK < 0) padMenu.pickK = flagPick[ui.picker];
-    flagPick[ui.picker] = padMenu.pickK; ui.picker = -1; savePrefs(); buildTeamArt(); padMenu.pickK = -1;
+    setFlag(ui.picker, padMenu.pickK); ui.picker = -1; padMenu.pickK = -1;
     return;
   }
   const f = padFocusOf(padTargets());
@@ -17404,7 +17434,7 @@ async function start(data) {
     damage: (p, i, d) => damageSection(ships[p], i, d), kill: p => killGuy(p),
     get layout() { return { bw, bh, PIXW, ubw, ubh, PIXU, dpr }; },
     scope: p => scopes[p], tg: p => telegraphs[p], perf, probe, probeStart, fillTest, runFillTest, get batch() { return getMode(); }, get gl() { return GLR.on; }, glStats: () => GLR.shown, renderN: n => { for (let i = 0; i < n; i++) render(); glEndFrame(); }, GLR, set batch(v) { setMode(v === true ? 2 : v === false ? 0 : v); BATCH_AUTO = false; }, get paused() { return paused; }, set paused(v) { paused = v; }, set hold(v) { holdFrames = v; }, stepFixed: (dt, n) => { const was = paused; paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } paused = true; return was; },
-    towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
+    towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, setFlag: (sd, k) => setFlag(sd, k), menuPlayNow: () => menuPlay(), openMenu: () => openMainMenu(), resumeMenu: () => menuResume(), titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
     set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
