@@ -2155,7 +2155,11 @@ function netApply(S) {
     // wrecks still falling or sinking: kept in step (a falling plane can still bring something down)
     netList(oldPlanes, S.oldPlanes, 'oldPlanes', null, false); netList(oldShips, S.oldShips, 'oldShips', null, false); netList(oldSubs, S.oldSubs, 'oldSubs', null, false);
     // the yachts and the buoys: in the same places, gone down when the host's went down
-    S.sails.forEach((d, i) => { const b = sailboats[i]; if (!b) return; if (b.state === 'sail' && d.state === 'sinking') sinkSailboat(b, b.x, b.y - 4, 0); netMerge(b, d); });
+    // (CHILL: yachts launched from a harbour are new to the guest - made here; yachts gone for good are dropped)
+    if (sailboats.length > S.sails.length) sailboats.length = S.sails.length;
+    S.sails.forEach((d, i) => { let b = sailboats[i]; if (!b) b = sailboats[i] = newSailboat(d.kind || 0, d.x); if (b.state === 'sail' && d.state === 'sinking') sinkSailboat(b, b.x, b.y - 4, 0); netMerge(b, d); });
+    // (the yacht each side is sailing: the last one of theirs still afloat)
+    for (let q = 0; q < 2; q++) if (crew[q].mode === 'sail') { let k = -1; sailboats.forEach((b, n) => { if (b.player === q && b.state === 'sail') k = n; }); if (k >= 0) crew[q].yacht = k; }
     S.buoys.forEach((d, i) => { const b = buoys[i]; if (!b) return; if (b.state === 'float' && d.state !== 'float') destroyBuoy(b, b.x, surfaceY(b.x) - 8); netMerge(b, d); });
     if (S.clouds && S.clouds.length === clouds.length) S.clouds.forEach((x, i) => { clouds[i].x = x; });
     // what happened in between (a lightning strike)
@@ -2179,7 +2183,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 15:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 16:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -5431,7 +5435,7 @@ function stepGates(d, dt) {
     const v = k === 'ship' ? ships[d.player] : subs[d.player];
     let want = 0;
     if (v && v.gate && (v.gate === 'in' || intoGate(v) > -6)) want = 1;     // coming in: open as she sets off
-    if (k === 'ship' && sailboats.some(b => b.launch === d && b.state === 'sail')) want = 1;   // (CHILL: a new yacht coming out)
+    if (k === 'ship' && sailboats.some(b => b.launch && homeDock[b.player] === d && b.state === 'sail')) want = 1;   // (CHILL: a new yacht coming out)
     const was = d.gates[k];
     d.gates[k] = clamp(was + (want ? 1 : -1) * dt / GATE_T, 0, 1);
     if ((was === 0 && d.gates[k] > 0) || (was === 1 && d.gates[k] < 1)) sfxDoor(k === 'ship' ? d.shipGate[0] : d.subGate[0]);
@@ -7842,7 +7846,7 @@ function takeOver(p, k) {
     let b = yachtOf(p);
     if (!b) {
       b = newSailboat(p ? 2 : 0, d.berth);
-      Object.assign(b, { player: p, launch: d, face: -d.dir, drive: 0, own: true, vx: 0 });
+      Object.assign(b, { player: p, launch: true, face: -d.dir, drive: 0, own: true, vx: 0 });   // (launch: from her owner's harbour - a flag, so it goes in an online snapshot)
       sailboats.push(b); c.yacht = sailboats.length - 1;
       sfxClick(gunCtl[p]);
     }
@@ -8015,9 +8019,9 @@ function stepSailboats(dt) {
     // the sails lean away from the wind and flutter when it drops
     const flap = Math.sin(b.ph * 7.3) * 0.15 * clamp(1 - Math.abs(wind) / 25, 0, 1);
     b.lean += (clamp(wind / 55, -1.1, 1.1) * (b.state === 'sail' ? 1 : 0.4) + flap - b.lean) * Math.min(1, dt * 2.5);
-    if (b.state === 'sail' && b.launch) {
+    if (b.state === 'sail' && b.launch && homeDock[b.player]) {
       // (CHILL) a new yacht coming out of her hangar: once the gate's up she motors out past the pier's end and stops
-      const d = b.launch, out = d.shipOut;
+      const d = homeDock[b.player], out = d.shipOut;
       sailRide(b, dt);
       if (d.gates.ship > 0.7) {
         const dx = out - b.x, want = Math.sign(dx) * Math.min(34, Math.abs(dx) * 1.2 + 4);
@@ -14401,7 +14405,7 @@ function drawSailboat(b, mode) {
   const W = sp.width, Hh = sp.height, split = Math.round(art.split * s), wl = Math.round(art.wl * s);
   // (CHILL: a new yacht still in her hangar shows only seaward of the gate, as the battleship does)
   let clip = false;
-  if (b.launch) { const d = b.launch, X = PX(d.shipGate[1]); C.save(); C.beginPath(); if (d.dir > 0) C.rect(-SHX - 20, -SHY - 20, X + SHX + 20, bh + 40); else C.rect(X, -SHY - 20, VWP - X + SHX + 20, bh + 40); C.clip(); clip = true; }
+  if (b.launch && homeDock[b.player]) { const d = homeDock[b.player], X = PX(d.shipGate[1]); C.save(); C.beginPath(); if (d.dir > 0) C.rect(-SHX - 20, -SHY - 20, X + SHX + 20, bh + 40); else C.rect(X, -SHY - 20, VWP - X + SHX + 20, bh + 40); C.clip(); clip = true; }
   // pitched with the waves around the waterline
   C.save();
   C.translate(PX(b.x), PY(b.y + b.sink));
