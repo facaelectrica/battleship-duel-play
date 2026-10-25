@@ -2129,7 +2129,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 00:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 00:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10187,6 +10187,7 @@ vec4 tx(int s, vec2 uv) {
   return s == 6 ? textureLod(u_t6, uv, 0.0) : textureLod(u_t7, uv, 0.0);
 }
 void main() {
+  vec2 ddx = dFdx(v_uv), ddy = dFdy(v_uv);              // (taken before any branch: a scaled sprite's footprint)
   if (v_mode == 0) { o = v_col; return; }
   if (v_mode == 1) { o = tx(v_slot, v_uv) * v_col; return; }
   if (v_mode == 4) {
@@ -10196,6 +10197,21 @@ void main() {
     vec4 t = tx(v_slot, v_uv), m = v_mul;
     if (v_mul.a > 0.5) { if (t.a <= 0.0) { o = vec4(0.0); return; } o = vec4(t.rgb / t.a * m.rgb + v_add.rgb, 1.0) * v_col; }
     else o = vec4(t.rgb * m.rgb + v_add.rgb * t.a, t.a) * v_col;
+    return;
+  }
+  if (v_mode == 5) {
+    // a sprite drawn smaller or bigger than its picture (what scaled() copies were for): n x n samples spread
+    // over the screen pixel's footprint and averaged (a box filter, so a big picture shrunk keeps its detail),
+    // then, hard, the alpha cut at 110/255 so the edge stays crisp pixel art; then its tint, if any
+    int q = int(v_k + 0.5), n = q & 7;
+    vec4 acc = vec4(0.0);
+    for (int j = 0; j < 4; j++) { if (j >= n) break;
+      for (int i = 0; i < 4; i++) { if (i >= n) break;
+        acc += tx(v_slot, v_uv + ddx * ((float(i) + 0.5) / float(n) - 0.5) + ddy * ((float(j) + 0.5) / float(n) - 0.5)); } }
+    vec4 t = acc / float(n * n);
+    if ((q & 8) != 0) { if (t.a < 0.4314) { o = vec4(0.0); return; } t = vec4(t.rgb / t.a, 1.0); }
+    t.rgb = t.rgb * v_mul.rgb + v_add.rgb * t.a;
+    o = t * v_col;
     return;
   }
   float t = v_mode == 2 ? v_uv.x : length(v_uv) - v_k;
@@ -10789,8 +10805,9 @@ class GLCtx {
   }
   drawImage(src, a, b, c, d, e, f, g, h) {
     if (GLR.lost || !src || src === this.target) return;
-    let T = null;
+    let T = null, G = null;
     if (src._tp) { T = src; src = src.src; if (!src) return; }      // (a tinted stand-in: its picture, tinted as it's drawn)
+    if (src._gs) { G = src; src = src.src; if (!src) return; }      // (a scaled one: its picture, scaled as it's drawn)
     const W = src.isGLTarget ? src._w : (src.naturalWidth || src.width), H = src.isGLTarget ? src._h : (src.naturalHeight || src.height);
     if (!W || !H) return;
     let sx, sy, sw, sh, dx, dy, dw, dh;
@@ -10798,6 +10815,7 @@ class GLCtx {
     if (n <= 3) { sx = 0; sy = 0; sw = W; sh = H; dx = a; dy = b; dw = W; dh = H; }
     else if (n <= 5) { sx = 0; sy = 0; sw = W; sh = H; dx = a; dy = b; dw = c; dh = d; }
     else { sx = a; sy = b; sw = c; sh = d; dx = e; dy = f; dw = g; dh = h; }
+    if (G && n > 5) { const kx = W / G.width, ky = H / G.height; sx *= kx; sw *= kx; sy *= ky; sh *= ky; }
     if (sw < 0) { sx += sw; sw = -sw; } if (sh < 0) { sy += sh; sh = -sh; }
     if (dw < 0) { dx += dw; dw = -dw; } if (dh < 0) { dy += dh; dh = -dh; }
     if (!(sw > 0 && sh > 0 && dw > 0 && dh > 0)) return;
@@ -10813,13 +10831,19 @@ class GLCtx {
     glBegin(this, s.op);
     const E = glSrc(src);
     if (!E) return;
-    const slot = glSlot(E.tex, s.sm);
+    // (scaled down: smooth samples; up: the nearest pixel, as the copies were made)
+    const slot = glSlot(E.tex, G ? G.down : s.sm);
     const u0 = (E.ox + sx) / E.tw, u1 = (E.ox + sx + sw) / E.tw;
     let v0 = (E.oy + sy) / E.th, v1 = (E.oy + sy + sh) / E.th;
     if (E.flip) { v0 = 1 - v0; v1 = 1 - v1; }
     this._corners(dx, dy, dw, dh);
     const X = GLC4.x, Y = GLC4.y;
-    if (T) glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 4 + 8 * slot, 0, T.mul, T.add);
+    if (G) {
+      // taps a side: as many as source pixels fall in a screen pixel, up to 4
+      const tpp = Math.max(sw / Math.max(1e-6, Math.abs(dw * Math.hypot(this.s.m[0], this.s.m[1]))), sh / Math.max(1e-6, Math.abs(dh * Math.hypot(this.s.m[2], this.s.m[3]))));
+      const nt = G.down ? Math.min(4, Math.max(1, Math.ceil(tpp - 0.05))) : 1;
+      glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 5 + 8 * slot, nt + (G.hard ? 8 : 0), T ? T.mul : 0xffffffff, T ? T.add : 0);
+    } else if (T) glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 4 + 8 * slot, 0, T.mul, T.add);
     else glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 1 + 8 * slot, 0);
   }
   // premultiplied pixels (a Uint32Array, w x h) straight onto the target: the game's own pixel buffers (fire)
@@ -11252,7 +11276,26 @@ function scaledTrim(map) {
     scaledDrop(c);
   }
 }
+/* GPU scaling (step 2 of the land plan): under WebGL, while the world is drawn (GPU_SCALE), a sprite isn't copied
+   at each size any more - scaled() hands back a stand-in with the size it would have had, and the renderer
+   samples the picture down (or up) as it draws it, with the same hard alpha cut. ?gs=0 keeps the copies (to
+   compare). The HUD, drawn on a plain canvas, still gets real copies. */
+let GPU_SCALE = false;
+const GS_OFF = /[?&]gs=0/.test(location.search);
+function gpuScaled(src, scale, hard) {
+  const w = Math.max(1, Math.round(src.width * scale)), h = Math.max(1, Math.round(src.height * scale));
+  const m = src._gsp || (src._gsp = new Map()), key = w * 2 + (hard ? 1 : 0);
+  let g = m.get(key);
+  if (!g) { if (m.size > 6) m.clear(); g = { _gs: true, src, width: w, height: h, hard: !!hard, down: scale < 1, scale }; m.set(key, g); }
+  return g;
+}
+// a real copy of what a stand-in stands for (the moonlit rims need its pixels)
+const realScaled = g => g && g._gs ? scaledCopy(g.src, g.scale, g.hard) : g;
 function scaled(src, scale, hard) {
+  if (GPU_SCALE) return gpuScaled(src, scale, hard);
+  return scaledCopy(src, scale, hard);
+}
+function scaledCopy(src, scale, hard) {
   const w = Math.max(1, Math.round(src.width * scale)), h = Math.max(1, Math.round(src.height * scale));
   const cache = src._px || (src._px = new Map());
   let c = cache.get(w);
@@ -11328,6 +11371,7 @@ function darkArt(src) {
 //   'mL'  a pale rim on the edges facing a moon up to the left, fading toward the far end; 'mR' moon right
 const MOON_RIM = '#bfe4f6';
 function moonArt(src, mode) {
+  if (src && src._gs) { if (mode === 'mB') return atopTint(src, 'mB', [70, 108, 170], 0.5); src = realScaled(src); }
   const st = src._stamp || 0;
   let m = src._moon;
   if (!m || m.stamp !== st) {
@@ -14769,6 +14813,7 @@ function render() {
   SURF.on = true;
   plSize();
   glBeginFrame();
+  GPU_SCALE = GLR.on && !GS_OFF;                         // (the world: GPU-scaled sprites; off again for the HUD)
   probeCalibrate();
   computeEnv();
   const half = Math.floor(bw / 2);
@@ -14814,6 +14859,7 @@ function render() {
     g.fillStyle = '#04070f'; g.fillRect(half - (w >> 1), 0, w, bh);
   }
   glEndFrame();
+  GPU_SCALE = false;
   SURF.on = false;
   ug.clearRect(0, 0, ubw, ubh);
   ug.imageSmoothingEnabled = false;
