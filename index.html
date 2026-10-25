@@ -731,6 +731,10 @@ function layoutDock(d) {
   d.viewEdge = d.shipGate[1] + d.dir * 25;
   d.shipOut = d.quay - d.dir * (SHIP_L / 2 + 10);
   d.subOut = d.quay - d.dir * (SUB_L / 2 + 10);
+  // coming home you keep the helm right in, past the pier's end, until the bow is about to touch the tower and
+  // the stone (user Oct 24 night); only there does the harbour take her in through her gate
+  d.shipIn = d.blockFace - d.dir * (SHIP_L / 2 + 6);
+  d.subIn = d.blockFace - d.dir * (SUB_L / 2 + 6);
   d.lamps = BASE.LAMPS.map(([c, r]) => [ax(c), DOCK_TOP_Y + r * BASE.K]);
   d.gates = { ship: 0, sub: 0 };                                // how far open (0 shut, 1 open)
   d.door = 0; d.flag = 1; d.job = 0;
@@ -970,6 +974,7 @@ function buildWorld(restore) {
   if (restore && !restore.ships) restore = null;          // hot-reload data without a saved round is a fresh start
   mgHold[0] = mgHold[1] = false;   // (no trigger held over from the last round)
   sfxNewRound();                   // (nor any of its sounds: a siren, a blast, a shell's whoosh)
+  vehZoom[0] = {}; vehZoom[1] = {};  // (each vehicle's zoom: the defaults again)
   padPick[0] = padPick[1] = null;
   WORLD_W = NET.worldW || Math.round(VIEW_W * (TEST ? 3 : 5));   // (an online guest: the host's world, whatever its screen)  // five screens: plenty of open ocean between the harbours (the test range: three)
   builtViewW = VIEW_W;
@@ -1010,7 +1015,7 @@ function buildWorld(restore) {
   subs.push(makeSub(0, homeDock[0]), makeSub(1, homeDock[1]));
   if (PLAYERS === 1) { ships[1].state = 'gone'; subs[1].state = 'gone'; }    // player 2's boats never take to the water
   for (let p = 0; p < 2; p++) { fleet[p].ship = PLAYERS === 1 && p ? 0 : FLEET.ship; fleet[p].sub = PLAYERS === 1 && p ? 0 : FLEET.sub; fleet[p].plane = PLAYERS === 1 && p ? 0 : FLEET.plane; fleetWait[p].ship = fleetWait[p].sub = 0; }
-  planes.length = 0; planes.push(makePlane(0), makePlane(1)); planeTrails.length = 0; planeWisps.length = 0;
+  planes.length = 0; planes.push(makePlane(0), makePlane(1)); planeTrails.length = 0; planeWisps.length = 0; iceBits.length = 0;
   if (PLAYERS === 1) planes[1].state = 'gone', planes[1].wait = -1e9;
   oldShips.length = 0; oldSubs.length = 0; oldPlanes.length = 0;
   chunks.length = 0;
@@ -1390,7 +1395,13 @@ function bedDrop(x) {
   const half = (BED_B - BED_A) / 2;
   if (!(half > BED_SHELF)) return 0;
   const d = half - Math.abs(x - (BED_A + BED_B) / 2);            // from the nearer shore
-  return BED_EXTRA * smoothstep(BED_SHELF, half, d);
+  const drop = BED_EXTRA * smoothstep(BED_SHELF, half, d);
+  // (not a smooth slope, user Oct 24 night: ups and downs, zigzagging - straight stretches between random heights,
+  // a long swell of them and a shorter, sharper one on top; none on the harbour's shelf, more the deeper it gets)
+  const r = smoothstep(BED_SHELF, BED_SHELF + 500, d) * (0.55 + 0.45 * drop / BED_EXTRA);
+  if (r <= 0) return drop;
+  const zz = (cell, i0) => { const u = x / cell, i = Math.floor(u), f = u - i; return hash(i * 1.37 + i0) * (1 - f) + hash((i + 1) * 1.37 + i0) * f - 0.5; };
+  return Math.max(0, drop + r * (110 * zz(310, 11.3) + 42 * zz(85, 57.1)));
 }
 function seabedY(x) { return SEABED_Y + bedDrop(x) + 1.5 * Math.sin(x * 0.013) + Math.sin(x * 0.041 + 1); }
 
@@ -1665,6 +1676,10 @@ function scopeZoom(p) {
   return ZOOM_LEVELS[lv - 1];
 }
 function setScope(p, lv) { if (NET.remote) return; scopes[p].level = clamp(lv, 1, ZN); cam.zt[p] = scopeZoom(p); }
+// each vehicle remembers the zoom you last picked in it (keys, pad, pinch, wheel), for the rest of the round (user Oct
+// 24 night): back in it, the view comes back as you had it
+const vehZoom = [{}, {}];
+function noteVehZoom(p) { const m = crew[p] && crew[p].mode; if (m === 'ship' || m === 'sub' || m === 'tower' || m === 'plane' || m === 'sail') vehZoom[p][m] = scopes[p].level; }
 
 /* ================================================================
    Run slider: once you step off the ship at the dock, the speed
@@ -2108,7 +2123,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 24 22:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 24 22:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -2531,9 +2546,10 @@ function weaponState(p, wk) {
   if (m === 'tower') return wk === 'mg' ? { f: 0, off: !towerUsable(towers[p]), n: -1 } : { f: tguns[p].reload / TOWER_RELOAD, off: !towerUsable(towers[p]), n: -1 };
   if (m === 'plane') {
     const pl = planes[p];
-    if (wk === 'bomb') return { f: pl.bk / BOMB_RELOAD, off: pl.bombs <= 0, n: pl.bombs };
-    if (wk === 'rocket') return { f: (pl.rk || 0) / ROCKET_RELOAD, off: pl.state !== 'fly' || (pl.rockets || 0) <= 0, n: pl.rockets || 0 };
-    return { f: 0, off: pl.state !== 'fly', n: -1 };
+    const frz = pl.state === 'fly' && planeFrozen(pl);                  // (iced up: nothing fires)
+    if (wk === 'bomb') return { f: pl.bk / BOMB_RELOAD, off: pl.bombs <= 0 || frz, n: pl.bombs };
+    if (wk === 'rocket') return { f: (pl.rk || 0) / ROCKET_RELOAD, off: pl.state !== 'fly' || (pl.rockets || 0) <= 0 || frz, n: pl.rockets || 0 };
+    return { f: 0, off: pl.state !== 'fly' || frz, n: -1 };
   }
   return { f: 0, off: true, n: -1 };
 }
@@ -2558,6 +2574,14 @@ function weaponIcon(p, wk) {
   if (wk === 'bomb') return img.hud.bomb;
   if (wk === 'torpUp') return img.hud.torpUp;
   return fc > 0 ? img.hud.shellR : img.hud.shell;   // the shell (or torpedo) points the way she faces
+}
+// a button's picture in black, its own outline (for the pressed shade)
+function hudShade(name) {
+  img.hudShade = img.hudShade || {};
+  if (img.hudShade[name]) return img.hudShade[name];
+  const src = img.hud[name], c = makeCanvas(src.width, src.height), x = c.getContext('2d');
+  x.drawImage(src, 0, 0); x.globalCompositeOperation = 'source-in'; x.fillStyle = '#000'; x.fillRect(0, 0, c.width, c.height);
+  return (img.hudShade[name] = c);
 }
 // --- drawing ---
 function hudImg(name, x, y, w, h) { const s = img.hud[name]; ug.drawImage(scaled(s, w / s.width, true), x, y); }
@@ -2586,7 +2610,9 @@ function drawHudIn(p) {
       const lw = Math.round(LW * k), lh = Math.round(LH * k);
       hudImg(lit ? 'litLamp' : 'offLamp', Math.round(it.x + lx * k - lw / 2), Math.round(y + ly * k - lh / 2), lw, lh);
     }
-    if (down) { ug.globalAlpha = 0.22; ug.fillStyle = '#000'; ug.fillRect(it.x, y, it.w, it.h); }
+    // pressed: the button itself darkened, its own shape (user Oct 24 night: a dark square round the round rise /
+    // dive buttons showed against a bright sky)
+    if (down) { ug.globalAlpha = 0.22; ug.drawImage(scaled(hudShade(it.art), it.w / img.hud[it.art].width, true), it.x, y, it.w, it.h); }
     ug.globalAlpha = 1;
   }
   drawHudTabs(p, Lh);
@@ -3010,14 +3036,20 @@ function drawHudTabs(p, Lh) {
       drawCapHead(p, captArt(p), captains[p][capI], { x: fx + fw - sz - Math.round(fw * 0.05), y: fy + fh - sz - Math.round(fh * 0.1), w: sz, h: sz }, SIDE(p) === 1);
       ug.globalAlpha = ga2;
     }
-    // one of yours under attack: its button's outline blinks red; the tower's blinks
-    // orange while an enemy is past your buoy
+    // one of yours under attack: its button's outline blinks red
     // (the one you're in too, user Oct 24 night)
     const hitBlink = time - (hitAlert[p][t.veh] || -9) < 2.5, buoyBlink = t.veh === 'tower' && towers[p].hp > 0 && enemyPastBuoy(p);
-    if ((hitBlink || buoyBlink) && Math.floor(time * 6) % 2) {
+    if (hitBlink && Math.floor(time * 6) % 2) {
       const lw2 = Math.max(2, Math.round(3 * t.k));
-      ug.fillStyle = hitBlink ? '#ff2a1a' : '#ff9a1a';
+      ug.fillStyle = '#ff2a1a';
       ug.fillRect(fx, fy, fw, lw2); ug.fillRect(fx, fy + fh - lw2, fw, lw2); ug.fillRect(fx, fy, lw2, fh); ug.fillRect(fx + fw - lw2, fy, lw2, fh);
+    }
+    // an enemy in reach of your tower (past your buoy): its button's glass blinks yellow inside (user Oct 24 night: no
+    // rectangle round it)
+    if (buoyBlink && Math.floor(time * 3) % 2) {
+      const ga3 = ug.globalAlpha; ug.globalAlpha = 0.42; ug.fillStyle = '#ffd23a';
+      ug.fillRect(Math.round(fx + fw * 0.07), Math.round(fy + fh * 0.2), Math.round(fw * 0.86), Math.round(fh * 0.66));
+      ug.globalAlpha = ga3;
     }
     // picked with the gamepad's shoulder buttons, not launched yet: a pulsing white outline and the words
     if (picked) {
@@ -4224,6 +4256,7 @@ function setZoom(half, z) {
   let best = 1;
   for (let k = 1; k <= ZN; k++) if (Math.abs(ZOOM_LEVELS[k - 1] - cam.zt[half]) < Math.abs(ZOOM_LEVELS[best - 1] - cam.zt[half])) best = k;
   scopes[half].level = best;
+  noteVehZoom(half);
 }
 const pointers = new Map();
 const pinch = [null, null];
@@ -4424,7 +4457,7 @@ function endPointer0(e) {
   const now = performance.now();
   const isTap = !wasPinch && now - p.t0 < 280 && Math.hypot(p.x - p.x0, p.y - p.y0) < 14;
   if (isTap) {
-    if (now - lastTap[p.half] < 340) { asSlot(p.half, q => { if (!zoomLocked(q)) setScope(q, ZOLD + 1); }); lastTap[p.half] = 0; }
+    if (now - lastTap[p.half] < 340) { asSlot(p.half, q => { if (!zoomLocked(q)) { setScope(q, ZOLD + 1); noteVehZoom(q); } }); lastTap[p.half] = 0; }
     else lastTap[p.half] = now;
   }
 }
@@ -4777,7 +4810,7 @@ function pollPads(dt) {
         // the D-pad zooms, a step at a time while held
         const z = (btn(12) || btn(15) ? 1 : 0) - (btn(13) || btn(14) ? 1 : 0);
         if (!z) st.zT = 0;
-        else if ((st.zT = (st.zT || 0) - dt) <= 0 && !zoomLocked(p)) { crew[p].zoomHold = false; setScope(p, scopes[p].level + z); st.zT = 0.28; }
+        else if ((st.zT = (st.zT || 0) - dt) <= 0 && !zoomLocked(p)) { crew[p].zoomHold = false; setScope(p, scopes[p].level + z); noteVehZoom(p); st.zT = 0.28; }
         // the right stick: power (left / right) and angle (up / down), smoothly; in the tower the left stick as
         // well (user Oct 24: it has nothing else to do there)
         const rx = ax(2) || (m === 'tower' ? lx : 0), ry = ax(3) || (m === 'tower' ? ly : 0);
@@ -4835,7 +4868,7 @@ function heldFor(p, dt, k) {
   }
   // zoom out and in, one step at a time while held
   const zd = k.zin ? 1 : k.zout ? -1 : 0;
-  if (zd) { scopeHold[p] = (scopeHold[p] || 0) - dt; if (scopeHold[p] <= 0 && !zoomLocked(p)) { crew[p].zoomHold = false; setScope(p, scopes[p].level + zd); scopeHold[p] = 0.28; } }
+  if (zd) { scopeHold[p] = (scopeHold[p] || 0) - dt; if (scopeHold[p] <= 0 && !zoomLocked(p)) { crew[p].zoomHold = false; setScope(p, scopes[p].level + zd); noteVehZoom(p); scopeHold[p] = 0.28; } }
   else scopeHold[p] = 0;
   // left / right row the lifeboat while held
   if (!runCtl[p].drag && crew[p].mode === 'boat') runCtl[p].v = clamp(runCtl[p].v + ax * dt * 1.6, -1, 1);
@@ -4919,8 +4952,10 @@ function stepShip(sh, dt) {
     sh.vx += (fx - DRAG_L * sh.vx - DRAG_Q * sh.vx * Math.abs(sh.vx)) * dt;
     // a gale leans on the superstructure
     sh.vx += (E.windU - sh.vx) * 0.004 * Math.abs(env.wind) * dt * 10;
-    let dist = (sh.x - d.shipOut) * -d.dir, vToward = sh.vx * d.dir;
-    if (sh.auto === 'home' && dist < DOCK_ZONE && vToward > 0) {
+    // (coming in, sent home or under your own helm, she slows smoothly to where she's taken in - user Oct 24 night:
+    // no dead stop from full speed)
+    let dist = (sh.x - d.shipIn) * -d.dir, vToward = sh.vx * d.dir;
+    if (dist < DOCK_ZONE && vToward > 0 && (sh.auto === 'home' || (sh.input || 0) * d.dir > 0.2)) {
       const vmax = Math.sqrt(2 * DOCK_DECEL * Math.max(dist, 0)) + 6;
       if (vToward > vmax) { vToward += (vmax - vToward) * Math.min(1, 5 * dt); sh.vx = vToward * d.dir; }
     }
@@ -4931,8 +4966,8 @@ function stepShip(sh, dt) {
       if ((sh.x - lim) * ed > 0) { sh.x = lim; if (sh.vx * ed > 0) sh.vx = 0; }
     }
     // her own harbour: reaching the end of the pier heading in takes her home through her gate
-    if ((sh.x - d.shipOut) * d.dir >= -0.5 && (sh.auto === 'home' || sh.vx * d.dir > 0)) {
-      sh.x = d.shipOut - d.dir * 0.5;
+    if ((sh.x - d.shipIn) * d.dir >= -0.5 && (sh.auto === 'home' || sh.vx * d.dir > 0)) {
+      sh.x = d.shipIn - d.dir * 0.5;
       if (sh.auto === 'home') bringIn(sh);
       else { if (sh.vx * d.dir > 0) sh.vx = 0; if ((crew[sh.id].mode === 'ship' || !stopPref) && (sh.input || 0) * d.dir > 0.2 && sh.throttle * d.dir > 0.2) bringIn(sh); }   // sailed home: in she goes
     }
@@ -5659,16 +5694,16 @@ function stepSub(sb, dt) {
     sb.vx += (sb.throttle * SUB_ACC - SUB_DRAG_L * sb.vx - SUB_DRAG_Q * sb.vx * Math.abs(sb.vx)) * dt;
     if (sb.turn) sb.vx *= 1 - 1.4 * dt;
     // sent home she eases in to the end of her pier
-    const dist = (sb.x - d.subOut) * -d.dir, vToward = sb.vx * d.dir;
-    if (sb.auto === 'home' && dist < DOCK_ZONE && vToward > 0) {
+    const dist = (sb.x - d.subIn) * -d.dir, vToward = sb.vx * d.dir;
+    if (dist < DOCK_ZONE && vToward > 0 && (sb.auto === 'home' || (sb.input || 0) * d.dir > 0.2)) {
       const vmax = Math.sqrt(2 * DOCK_DECEL * Math.max(dist, 0)) + 6;
       if (vToward > vmax) sb.vx += (vmax * d.dir - sb.vx) * Math.min(1, 5 * dt);
     }
     sb.x = clamp(sb.x + sb.vx * dt, 30, WORLD_W - 30);
     { const lim = enemyLimit(sb.id, SUB_L / 2), ed = homeDock[1 - sb.id].dir; if ((sb.x - lim) * ed > 0) { sb.x = lim; if (sb.vx * ed > 0) sb.vx = 0; } }
     // her own harbour: reaching the end of the pier heading in takes her home through her gate
-    if ((sb.x - d.subOut) * d.dir >= -0.5 && (sb.auto === 'home' || sb.vx * d.dir > 0)) {
-      sb.x = d.subOut - d.dir * 0.5;
+    if ((sb.x - d.subIn) * d.dir >= -0.5 && (sb.auto === 'home' || sb.vx * d.dir > 0)) {
+      sb.x = d.subIn - d.dir * 0.5;
       if (sb.auto === 'home') bringIn(sb);
       else { if (sb.vx * d.dir > 0) sb.vx = 0; if ((driving || !stopPref) && (sb.input || 0) * d.dir > 0.2 && sb.throttle * d.dir > 0.2) { sb.depthT = SUB_GATE_Y; bringIn(sb); } }
     }
@@ -6685,8 +6720,8 @@ function tintRed(src, col) {
 }
 // the vehicle buttons' dark blue glass, in a team's colour (user Oct 24): each pixel keeps its brightness
 // (only the glass inside the frame, user Oct 24 night: the frame keeps its own steel or gold, as its colour says
-// things - picked, under attack. The glass is the blue reached from the middle of the button without crossing the
-// frame's dark outline; the steel frame is bluish too, so a colour test alone took it as well)
+// things - picked, under attack. The glass is the blue inside the frame's black inner outline, found by filling
+// from the middle of the button up to that outline; the steel frame is bluish too, so a colour test alone took it)
 function tintGlass(src, col) {
   const c = copyCanvas(src), x = c.getContext('2d'), W = c.width, H = c.height, id = x.getImageData(0, 0, W, H), d = id.data;
   const lc = 0.3 * col[0] + 0.59 * col[1] + 0.11 * col[2] || 1;
@@ -6697,13 +6732,15 @@ function tintGlass(src, col) {
     const q = stack.pop();
     if (seen[q]) continue;
     seen[q] = 1;
-    if (!blue(q * 4)) continue;
+    // (bounded by the frame's black inner outline: the fill stops at it and takes only the blue inside it)
+    const i4 = q * 4;
+    if (!d[i4 + 3] || 0.3 * d[i4] + 0.59 * d[i4 + 1] + 0.11 * d[i4 + 2] < 16) continue;
     const px = q % W, py = (q / W) | 0;
     if (px > 0) stack.push(q - 1); if (px < W - 1) stack.push(q + 1); if (py > 0) stack.push(q - W); if (py < H - 1) stack.push(q + W);
     seen[q] = 2;
   }
   for (let q = 0; q < W * H; q++) {
-    if (seen[q] !== 2) continue;
+    if (seen[q] !== 2 || !blue(q * 4)) continue;
     const i = q * 4, l = (0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]) / lc;
     d[i] = clamp(col[0] * l, 0, 255); d[i + 1] = clamp(col[1] * l, 0, 255); d[i + 2] = clamp(col[2] * l, 0, 255);
   }
@@ -6737,9 +6774,9 @@ function makePlane(p) {
     ice: 0, strand: null, cover: [[], []], lampPh: Math.random(), wings: 0, splat: [], eng: 'on', offT: 0, recoverT: 0, holdT: 0, holdS: 0 };
 }
 function planeHome(p) { return SIDE(p) ? VIS_R + 30 : VIS_L - 30; }            // your edge of the world: home
-function planeEdge(p) { return SIDE(p) ? VIS_L + 40 : VIS_R - 40; }            // the furthest it can go toward the enemy's edge
+function planeEdge(p) { return SIDE(p) ? VIS_L + 12 : VIS_R - 12; }   // (right up to it: you can turn at the last minute, user Oct 24 night)            // the furthest it can go toward the enemy's edge
 // how far it travels toward where it was heading while it turns round (a half cosine of its speed)
-function planeTurnRoom(pl) { return pl.spd * PLANE_TURN_T / Math.PI + 30; }
+function planeTurnRoom(pl) { return pl.spd * PLANE_TURN_T / Math.PI + 4; }
 const allPlanes = () => oldPlanes.length ? planes.concat(oldPlanes) : planes;
 const planeUp = pl => pl && (pl.state === 'fly' || pl.state === 'down');
 function launchPlane(pl) {
@@ -6937,7 +6974,7 @@ function stepPlanes(dt) {
       } }
     // the cold up high: ice builds near the ceiling (the engine coughs first) and melts low down
     if (pl.y < PLANE_ICE) pl.ice = Math.min(1, pl.ice + dt / 5);
-    else if (pl.y > PLANE_THAW) pl.ice = Math.max(0, pl.ice - dt / 3);
+    else if (pl.y > PLANE_THAW && pl.ice > 0) { const was = pl.ice; pl.ice = Math.max(0, pl.ice - dt / 3); iceShed(pl, was - pl.ice); }
     if (pl.ice > 0.12 && time > (pl.coughT || 0)) { pl.coughT = time + rnd(1.4, 2.4) * (1.4 - pl.ice); engineCough(pl, 2); }
     if (pl.ice >= 1) { pl.eng = 'off'; pl.offT = 0; pl.mg = false; engineCough(pl, 3); sfxEngineDie(pl.x); }
     for (const b of birds) if (birdLive(b) && Math.abs(b.x - pl.x) < 38 && Math.abs(b.y - pl.y) < 12) {
@@ -6956,7 +6993,8 @@ function stepPlanes(dt) {
       continue;
     }
     // the machine gun, held: rounds straight out along the nose
-    if (pl.mg && !pl.turn) {
+    if (pl.mg && !pl.turn && planeFrozen(pl)) { if (!(pl.frzT > time)) { sfxEmpty(pl.x); pl.frzT = time + 0.5; } pl.mgT = 0; }
+    else if (pl.mg && !pl.turn) {
       pl.mgT -= dt;
       while (pl.mgT <= 0) {
         pl.mgT += PLANE_MG_RATE;
@@ -7004,7 +7042,7 @@ function stepPlaneStall(pl, dt) {
   if (pl.y > PLANE_THAW) pl.ice = Math.max(0, pl.ice - dt / 3);
   if (pl.offT > 2.3 && !pl.cranking) { pl.cranking = true; engineCough(pl, 3); sfxRestart(pl.x); }
   if (pl.offT > 3) {
-    pl.eng = 'on'; pl.cranking = false; pl.recoverT = 2.2; pl.ice = Math.min(pl.ice, 0.55); pl.coughT = time + 3;
+    pl.eng = 'on'; pl.cranking = false; pl.recoverT = 2.2; { const was = pl.ice; pl.ice = Math.min(pl.ice, 0.55); iceShed(pl, was - pl.ice); } pl.coughT = time + 3;
     pl.pitch = clamp(pl.pitch, -PLANE_PITCH, PLANE_PITCH);
     engineCough(pl, 2);
   }
@@ -7019,7 +7057,46 @@ function trailPoint(pl, w, a, jit, col, life) {
   if (q && Math.abs(tx - q.x) + Math.abs(ty - q.y) < 4) return;
   s.pts.push({ x: tx, y: ty + rnd(-jit, jit), age: 0, max: life * rnd(0.85, 1.1), w: w * rnd(0.85, 1.15), a });
 }
+// frozen (user Oct 24 night): iced up past three quarters, or the engine stopped, its guns, rails and bomb
+// shackles won't work
+const planeFrozen = pl => pl.eng === 'off' || pl.ice >= 0.75;
+// the ice coming off as it thaws (user Oct 24 night): flakes cracking off and tumbling away behind it, with a
+// little crackle now and then
+const iceBits = [];
+function iceShed(pl, amt) {
+  pl.iceAcc = (pl.iceAcc || 0) + amt * 70;
+  while (pl.iceAcc >= 1 && iceBits.length < 260) {
+    pl.iceAcc -= 1;
+    const along = rnd(-34, 30), up = rnd(-12, 9);
+    iceBits.push({ x: pl.x + along * pl.facing, y: pl.y + up, vx: pl.vx * rnd(0.55, 0.85) + rnd(-25, 25), vy: pl.vy * 0.6 + rnd(-30, 25), life: 0, max: rnd(0.9, 1.8), s: Math.random() < 0.3 ? 2 : 1, tw: Math.random() * 6 });
+  }
+  if (amt > 0 && Math.random() < amt * 25) sfxIceCrack(pl.x);
+}
+function stepIceBits(dt) {
+  for (let i = iceBits.length - 1; i >= 0; i--) {
+    const b = iceBits[i];
+    b.life += dt; b.vx *= 1 - 1.4 * dt; b.vy += 260 * dt; b.x += b.vx * dt; b.y += b.vy * dt;
+    if (b.life > b.max || b.y > surfaceY(b.x)) iceBits.splice(i, 1);
+  }
+}
+function drawIceBits(x0, x1) {
+  for (const b of iceBits) {
+    if (b.x < x0 - 10 || b.x > x1 + 10) continue;
+    const a = 1 - b.life / b.max, flash = Math.sin(time * 18 + b.tw) > 0.6;
+    C.globalAlpha = Math.max(0, a); C.fillStyle = flash ? '#ffffff' : '#cfe8f6';
+    C.fillRect(Math.floor(PX(b.x) / PB) * PB, Math.floor(PY(b.y) / PB) * PB, PB * b.s, PB * b.s);
+  }
+  C.globalAlpha = 1;
+}
+function sfxIceCrack(x) {
+  if (!SFX.ctx) return;
+  const out = sfxOut(x, 0.35); if (!out) return;
+  const t = SFX.ctx.currentTime;
+  noiseShot(out, t, 0.025, 'highpass', 5200, 3500, 2, 0.4, 0.001);
+  noiseShot(out, t + 0.03, 0.02, 'highpass', 6500, 4500, 2, 0.25, 0.001);
+}
 function stepPlaneTrails(dt) {
+  stepIceBits(dt);
   let total = 0;
   for (let i = planeTrails.length - 1; i >= 0; i--) {
     const s = planeTrails[i], P = s.pts;
@@ -7104,7 +7181,13 @@ function blitPlane(src, key, side, deg, cx, cy, only) {
   const s = PLANE_K * SV, w = Math.round(src.width * s), h = Math.round(src.height * s);
   let im, x, y;
   if (Math.abs(deg) < 1.5) { im = scaled(src, s, true); x = cx - (im.width >> 1); y = cy - (im.height >> 1); }
-  else { im = rotated(src, key + '|' + side, w, h, deg, w / 2, h / 2); x = cx - im.R; y = cy - im.R; }
+  else {
+    im = rotated(src, key + '|' + side, w, h, deg, w / 2, h / 2);
+    // (a stand-in from another zoom, while the zoom moves: drawn at this zoom's size, never at its own - user Oct 24
+    // night, zoomed out a crashing plane showed as one giant picture)
+    if (im.w0 && im.w0 !== w) { const R = im.R * w / im.w0; x = cx - R; y = cy - R; if (!only) C.drawImage(im, x, y, R * 2, R * 2); return { im, x, y, sz: R * 2 }; }
+    x = cx - im.R; y = cy - im.R;
+  }
   if (!only) C.drawImage(im, x, y);
   return { im, x, y };
 }
@@ -7166,6 +7249,7 @@ function drawPlanesAir(x0, x1) {
       pixLine(PX(a.x), PY(a.y), PX(b.x), PY(b.y), Math.max(PB, Math.round(a.w * sprd * SV / PB) * PB));
     }
   }
+  drawIceBits(x0, x1);
   // streaks of air rushing past
   for (const w of planeWisps) {
     if (w.x < x0 - 40 || w.x > x1 + 40) continue;
@@ -7180,6 +7264,7 @@ function drawPlanesAir(x0, x1) {
     if (!planeUp(pl) || pl.x < x0 - 80 || pl.x > x1 + 80) continue;
     const P = planePose(pl), cx = PX(pl.x), cy = PY(pl.y);
     const G = blitPlane(P.fr[P.side], P.key, P.side, P.deg, cx, cy);
+    if (pl.state === 'fly' && P.side0 && !pl.turn) drawWingRockets(pl, P, nightK);
     // hit: the back of it darkens, more with every hit
     const dmgK = pl.state === 'down' ? 1 : clamp((pl.hits + pl.dmg) / PLANE_HITS * 1.2, 0, 1);
     if (dmgK > 0.03 && P.fr.R) { C.globalAlpha = dmgK; blitPlane(P.fr.R[P.side], P.key + 'R', P.side, P.deg, cx, cy); C.globalAlpha = 1; }
@@ -7198,12 +7283,12 @@ function drawPlanesAir(x0, x1) {
       const G0 = blitPlane(P.fr[P.side], P.key, P.side, P.deg, cx, cy, true);
       if (moonK > 0.04) {
         const mxs = moonXs[viewIdx], side = (mxs > -1e8 ? mxs < cx : lightLean(mxs) > 0) ? 'mL' : 'mR';
-        C.globalAlpha = 0.25 * moonK; C.drawImage(moonArt(G0.im, 'mB'), G0.x, G0.y);
-        C.globalAlpha = Math.min(1, 1.3 * moonK); C.drawImage(moonArt(G0.im, side), G0.x, G0.y);
+        C.globalAlpha = 0.25 * moonK; { const M = moonArt(G0.im, 'mB'); if (G0.sz) C.drawImage(M, G0.x, G0.y, G0.sz, G0.sz); else C.drawImage(M, G0.x, G0.y); }
+        C.globalAlpha = Math.min(1, 1.3 * moonK); { const M = moonArt(G0.im, side); if (G0.sz) C.drawImage(M, G0.x, G0.y, G0.sz, G0.sz); else C.drawImage(M, G0.x, G0.y); }
       }
       if (sunK > 0.04) {
         const sxs = sunXs[viewIdx], side = sxs > -1e8 && sxs < cx ? 'sL' : 'sR';
-        C.globalAlpha = Math.min(1, 1.4 * sunK); C.drawImage(moonArt(G0.im, side), G0.x, G0.y);
+        C.globalAlpha = Math.min(1, 1.4 * sunK); { const M = moonArt(G0.im, side); if (G0.sz) C.drawImage(M, G0.x, G0.y, G0.sz, G0.sz); else C.drawImage(M, G0.x, G0.y); }
       }
     }
     C.globalAlpha = 1;
@@ -7228,7 +7313,7 @@ function drawPlanesAir(x0, x1) {
     }
     // in a near cloud: a flat shape a little darker than the cloud, where the cloud covers it
     const cov = pl.cover[viewIdx];
-    if (cov && cov.length) planeInCloud(pl, G, cov);
+    if (cov && cov.length && !G.sz) planeInCloud(pl, G, cov);   // (not with a zoom stand-in: a frame or two)
   }
 }
 // a line of pixel blocks from one point to another, th thick
@@ -7284,16 +7369,54 @@ function sfxBombDrop(x) {
 // a missile: off the rail under the wing and straight out along the nose, much faster than the plane
 function fireRocket(pl) {
   if (!pl || pl.state !== 'fly') return;
-  if (pl.turn || (pl.rockets || 0) <= 0 || (pl.rk || 0) > 0) { sfxEmpty(pl.x); return; }
+  if (pl.turn || (pl.rockets || 0) <= 0 || (pl.rk || 0) > 0 || planeFrozen(pl)) { sfxEmpty(pl.x); return; }
+  // (user Oct 24 night: it unclips from under the wing, drops a moment with the plane's speed, and only then does its
+  // motor light and it shoots off; the one let go is the last of the row hanging under the wing)
+  const n = pl.rockets, slot = rocketSlot(n - 1);
   pl.rockets--; pl.rk = ROCKET_RELOAD;
-  const ux = Math.cos(pl.pitch) * pl.facing, uy = Math.sin(pl.pitch), sp = pl.spd + ROCKET_V;
-  const x = pl.x + ux * 14 - uy * pl.facing * 6, y = pl.y + uy * 14 + 6;
-  const s = { x, y, vx: ux * sp, vy: uy * sp, owner: pl.id, from: 'rocket', burn: ROCKET_BURN, age: 0, trail: 0, under: false, ut: 0 };
+  const ux = Math.cos(pl.pitch) * pl.facing, uy = Math.sin(pl.pitch);
+  // (its spot under the wing, turned with the plane as planeSpot turns it)
+  const [ox, oy] = slot, a = pl.pitch * pl.facing, ex = -ox * pl.facing;
+  const cx = pl.x + ex * Math.cos(a) - oy * Math.sin(a), cy = pl.y + ex * Math.sin(a) + oy * Math.cos(a);
+  const s = { x: cx, y: cy, vx: pl.vx, vy: pl.vy + 15, ux, uy, owner: pl.id, from: 'rocket', burn: ROCKET_BURN, drop: ROCKET_DROP, age: 0, trail: 0, under: false, ut: 0 };
   shells.push(s);
-  sfxRocket(x); sfxWhoosh(s);
-  flashes.push({ x: x - ux * 4, y: y - uy * 4, r: 6, life: 0, max: 0.07 });
-  // the launch puff, like a gun's but smaller: it hangs where the missile left the rail
-  for (let i = 0; i < 5; i++) spawnSmoke(x - ux * rnd(0, 10), y - uy * rnd(0, 10), { mist: true, keep: true, r: rnd(3, 5), grow: rnd(1.2, 2), rmax: rnd(8, 12), lift: 3, vx: pl.vx * 0.12 + rnd(-6, 6), vy: pl.vy * 0.12 + rnd(-4, 4), life: rnd(3, 5), alpha: 0.5 });
+  sfxRocketRelease(cx);
+}
+// where missile k hangs under the wing (the plane's own units: back from the middle toward the tail, down from it);
+// the even ones under the near wing, the odd ones under the far wing (drawn behind the fuselage)
+const ROCKET_DROP = 0.32, ROCKET_ACC = 2600;   // (the drop before it lights; how hard it surges once lit)
+function rocketSlot(k) { const i = k >> 1; return [-12 + i * 3.2, (k & 1 ? 8.6 : 10.4) + i * 0.5]; }
+// the motor lights, a moment after it was let go: the launch puff, a flash, the roar
+function rocketIgnite(s) {
+  const ux = s.ux, uy = s.uy;
+  s.ia = s.age;
+  sfxRocket(s.x); sfxWhoosh(s);
+  flashes.push({ x: s.x - ux * 6, y: s.y - uy * 6, r: 6, life: 0, max: 0.07 });
+  for (let i = 0; i < 5; i++) spawnSmoke(s.x - ux * rnd(2, 12), s.y - uy * rnd(2, 12), { mist: true, keep: true, r: rnd(3, 5), grow: rnd(1.2, 2), rmax: rnd(8, 12), lift: 3, vx: s.vx * 0.12 + rnd(-6, 6), vy: s.vy * 0.12 + rnd(-4, 4), life: rnd(3, 5), alpha: 0.5 });
+}
+// the release: a metallic clunk of the rail's catch
+function sfxRocketRelease(x) {
+  if (!SFX.ctx) return;
+  const out = sfxOut(x, 0.5); if (!out) return;
+  const t = SFX.ctx.currentTime;
+  noiseShot(out, t, 0.03, 'bandpass', 2200, 1300, 3, 0.35, 0.001);
+  thump(out, t, 160, 80, 0.06, 0.3);
+}
+// the missiles still hanging under the wings, drawn over the plane while it's seen from the side
+function drawWingRockets(pl, P, nightK) {
+  const n = pl.rockets || 0;
+  if (!n) return;
+  const dk = 1 - 0.85 * nightK, col = (c, k) => rgbs(c.map(v => v * dk * k));
+  for (let pass = 1; pass >= 0; pass--) {                 // (the far wing's first, darker, then the near wing's)
+    for (let k = pass; k < n; k += 2) {
+      const [ox, oy] = rocketSlot(k), sh = pass ? 0.62 : 1;
+      const [ax, ay] = planeSpot(pl, P, ox - 5, oy), [bx, by] = planeSpot(pl, P, ox + 5, oy);
+      C.fillStyle = col([200, 204, 212], sh); pixLine(ax, ay, bx, by, PB);
+      C.fillStyle = col([200, 40, 30], sh); pixLine(ax, ay, ax + (bx - ax) * 0.18, ay + (by - ay) * 0.18, PB);   // (a red nose)
+      const [fx, fy] = planeSpot(pl, P, ox + 5, oy + 1.3);
+      C.fillStyle = col([70, 74, 82], sh); C.fillRect(Math.floor(fx / PB) * PB, Math.floor(fy / PB) * PB, PB, PB);   // (a fin)
+    }
+  }
 }
 function sfxRocket(x) {
   if (!SFX.ctx) return;
@@ -7306,7 +7429,7 @@ function sfxRocket(x) {
 }
 function dropBomb(pl) {
   if (!pl || pl.state !== 'fly') return;
-  if (pl.bombs <= 0 || pl.bk > 0) { sfxEmpty(pl.x); return; }
+  if (pl.bombs <= 0 || pl.bk > 0 || planeFrozen(pl)) { sfxEmpty(pl.x); return; }
   pl.bombs--; pl.bk = BOMB_RELOAD;
   // it falls away carrying the plane's whole momentum, then only gravity and the air act on it
   sfxBombDrop(pl.x);
@@ -7344,7 +7467,7 @@ function watchPos(w) {
     if (v.state !== 'hangar') { w.x = v.x; w.y = v.y; }
     return [w.x, Math.max(SKY_TOP + 600, Math.min(FOCUS_Y, (w.y === undefined ? FOCUS_Y : w.y) + 110))];
   }
-  if (w.kind === 'sub') { w.x = v.x; return [v.x, clamp(FOCUS_Y + (v.y - WATER_Y) * 0.75, FOCUS_Y, seabedY(v.x) - 150)]; }
+  if (w.kind === 'sub') { w.x = v.x; return [v.x, Math.max(FOCUS_Y, v.y)]; }
   w.x = v.x; return [v.x, FOCUS_Y];
 }
 // Taking over a boat: one at home (or anywhere in the harbour) is brought out through her gate first and is
@@ -7363,7 +7486,7 @@ function takeOver(p, k) {
   const notchOf = v => Math.abs(v) < 0.3 ? 3 : v < 0 ? 0 : 6;     // full speed or stopped: nothing in between
   if (k === 'tower') {
     if (!towerUsable(towers[p])) return false;
-    c.mode = 'tower'; setScope(p, ZOLD + 1); return true;
+    c.mode = 'tower'; setScope(p, vehZoom[p].tower || ZOLD + 1); return true;
   }
   if (k === 'plane') {
     const pl = planes[p];
@@ -7371,7 +7494,7 @@ function takeOver(p, k) {
     if (pl.state === 'hangar') launchPlane(pl);           // (one in the air carries on as it was)
     boardCaptain(p, pl, 'plane');
     pl.mg = false;
-    c.mode = 'plane'; setScope(p, ZOLD + 2); return true;
+    c.mode = 'plane'; setScope(p, vehZoom[p].plane || ZOLD + 2); return true;
   }
   const v = k === 'ship' ? ships[p] : subs[p];
   if (k === 'ship' ? v.state !== 'afloat' : v.state !== 'out' && v.state !== 'docked') return false;
@@ -7382,7 +7505,7 @@ function takeOver(p, k) {
   if (!v.gate && (v.moored === true || v.state === 'docked')) { launchOut(v); setOrder(t, 3); }
   else if (v.gate) setOrder(t, 3);
   else { const keep = v.input || 0; setOrder(t, notchOf(keep)); v.input = keep; }
-  setScope(p, ZOLD + 2);
+  setScope(p, vehZoom[p][k] || ZOLD + 2);
   return true;
 }
 // the switcher: step into the tower, the battleship or the sub, wherever it is. A boat you leave carries on
@@ -7395,6 +7518,7 @@ function switchTo(p, k) {
   sfxClick(gunCtl[p]);
   c.mode = 'dock'; c.watch = null; c.look = null;
   if (!takeOver(p, k)) dockZoom(p);
+  cutTo(p);                                        // (straight to it: a cut, not a glide - user Oct 24 night)
 }
 // The house button: the boat you're in sails home and is taken in through her gate, and you're straight into
 // the tower (or your other boat), so you're never left with nothing to do.
@@ -8023,9 +8147,15 @@ function stepShells(dt) {
       continue;
     }
     // a missile under power flies straight, shrugging off the wind and its weight; burnt out, it falls like a shell
-    const powered = s.burn > 0;
+    // a missile just let go: it falls clear of the wing with the plane's speed, then its motor lights
+    // (gravity acts on it below, as on any unpowered shell)
+    if (s.drop > 0) { s.drop -= dt; if (s.drop <= 0) rocketIgnite(s); }
+    const powered = s.burn > 0 && !(s.drop > 0);
     if (powered) {
       s.burn -= dt;
+      // (lit: it surges up to its full speed along the way the plane was pointing)
+      { const sp = s.vx * s.ux + s.vy * s.uy, want = Math.hypot(s.vx, s.vy) < 1 ? ROCKET_V : Math.max(sp, 0) + ROCKET_ACC * dt, top = (s.top || (s.top = sp + ROCKET_V));
+        const v = Math.min(top, want); s.vx = s.ux * v; s.vy = s.uy * v; }
       // the motor's fire: a short tongue of flame streaming out of the tail
       if (!SIM_ONLY) { const sp = Math.hypot(s.vx, s.vy) || 1, ux = s.vx / sp, uy = s.vy / sp;
         for (let k = 0; k < 2; k++) { spawnFlame(s.x - ux * rnd(7, 12), s.y - uy * rnd(7, 12), -ux * rnd(60, 140) + rnd(-15, 15), -uy * rnd(60, 140) + rnd(-15, 15), 1.1, rnd(1.4, 2.4), rnd(7, 10)); flames[flames.length - 1].clean = true; } }
@@ -8045,7 +8175,7 @@ function stepShells(dt) {
     // (a missile's white trail starts half a second out, user Oct 24: the launch puff stays by the plane, the flame
     // alone leads it away; and it ends when the motor burns out)
     // (a bomb leaves no trail at all, user Oct 24 night: it only falls, carried by the plane's speed)
-    if (s.from === 'bomb' || (s.from === 'rocket' && (!powered || s.age < 0.5))) { /* no trail (yet, or any more) */ }
+    if (s.from === 'bomb' || (s.from === 'rocket' && (!powered || s.age - (s.ia || 0) < 0.5))) { /* no trail (yet, or any more) */ }
     else if (seg && Math.hypot(s.x - seg.p1.x, s.y - seg.p1.y) < 34) { seg.p2.x = s.x; seg.p2.y = s.y; }
     else {
       if (trails.length >= 700) { const o = trails.shift(); if (o.next) o.next.root = true; }          // drop the oldest, faintest piece, never the new one
@@ -9391,7 +9521,9 @@ function drawBirds(x0, x1) {
     const gull = b.kind === 'gull';
     // gulls at half their old size: the full sprite once it's at least a pixel per pixel, a small one below that
     const gs = 0.375 * SV, mini = gull && gs < 0.75;
-    const s = gull ? (mini ? 1 : Math.max(1, Math.round(gs))) : Math.max(1, Math.round(0.65 * SV));
+    // (zoomed out they keep shrinking with the view, user Oct 24 night: the small sprite is drawn at the size the big
+    // one would have, not stuck at one pixel a pixel)
+    let s = gull ? (mini ? 1 : Math.max(1, Math.round(gs))) : pixK(0.65);
     let set;
     if (b.state === 'perch') set = gull ? (mini ? img.birds.gullMiniPerch : img.birds.gullPerch) : img.birds.swiftPerch;
     else if (gull) {
@@ -9400,7 +9532,8 @@ function drawBirds(x0, x1) {
       set = (mini ? img.birds.gullMini : img.birds.gull)[fr];
     } else set = img.birds.swift[Math.floor(b.ph * (b.scared > 0 ? 14 : 9)) % 2];
     const sp = b.face > 0 ? set.r : set.l;
-    const w = sp.width * s, h = sp.height * s;
+    if (mini) { const full = img.birds.gull[1].r.width * gs; s = Math.min(1, full / sp.width); }
+    const w = Math.max(1, Math.round(sp.width * s)), h = Math.max(1, Math.round(sp.height * s));
     const px = PX(b.x) - (w >> 1), py = b.state === 'perch' ? PY(b.y) - h : PY(b.y) - (h >> 1);
     if (b.state === 'dead' || b.state === 'sink' || b.state === 'bed') {
       C.save(); C.translate(PX(b.x), PY(b.y)); C.rotate(Math.round(b.rot * 2) / 2); C.drawImage(sp, -(w >> 1), -(h >> 1), w, h); C.restore();
@@ -9636,14 +9769,15 @@ function vehFocus(i, m) {
   if (m === 'plane') {
     // up with the plane: the view climbs into the sky with it (low down, the sea stays in view)
     const pl = planes[i], hz = 0.5 * VIEW_H / (cam.zt[i] || 1);
-    // (high up the plane stays in the middle of the view, right up to the ceiling: the sky goes on above it)
-    const lift = 110 * clamp((pl.y - (SKY_TOP + 700)) / 600, 0, 1);
-    const y = Math.max(SKY_TOP - hz * 0.2, Math.min(FOCUS_Y, pl.y + lift));
+    // (the plane in the middle of the view at every zoom, user Oct 24 night: it used to sit a fixed distance above
+    // the middle, which zoomed in put it up under the buttons; right up to the ceiling, the sky going on above it)
+    const y = Math.max(SKY_TOP - hz * 0.2, Math.min(FOCUS_Y, pl.y));
     return [pl.x, y, pl.vx, 0, [pl.x, 40]];                 // (the plane in the middle of the view: no look-ahead, user)
   }
   if (m === 'sub') {
     // the camera dips with her as she dives, so both the surface and the boat stay in view
-    const y = clamp(FOCUS_Y + (sb.y - WATER_Y) * 0.75, FOCUS_Y, seabedY(sb.x) - 150);
+    // (centred on her at every zoom, user Oct 24 night; at the surface the view stays at the waterline)
+    const y = Math.max(FOCUS_Y, sb.y);
     const escaping = sb.vx * sb.facing < -4;
     return [sb.x, y, sb.vx, !escaping ? sb.facing * 0.3 : 0, [sb.x, SUB_L * 0.52]];
   }
@@ -9653,8 +9787,16 @@ function vehFocus(i, m) {
   return [sh.x, FOCUS_Y, sh.state === 'afloat' ? sh.vx : 0, sh.state === 'afloat' && !escaping ? sh.facing * 0.3 : 0, [sh.x, SHIP_L * 0.52]];
 }
 
+// a cut (user Oct 24 night): switching vehicle jumps that view straight to the new one - no glide, no zoom easing
+cam.cut = [false, false];
+function cutTo(p) {
+  if (ONEVIEW()) { cam.cut[0] = cam.cut[1] = true; return; }
+  const v = SLOT_IN != null ? SLOT_IN : SLOTS.findIndex(q => q.team === p && !q.extra);
+  cam.cut[v >= 0 ? v : p] = true;
+}
 function updateCamera(dt, snap) {
-  const k = rate => (snap ? 1 : 1 - Math.exp(-dt * rate));
+  const k = rate => (snap || (ONEVIEW() && cam.cut[0]) ? 1 : 1 - Math.exp(-dt * rate));
+  const kv = (i, rate) => (snap || cam.cut[i] ? 1 : 1 - Math.exp(-dt * rate));
   if (ONEVIEW()) cam.zt[1] = cam.zt[0];            // one player: both halves are one screen with one zoom
   const F = [camFocus(0), ONEVIEW() ? null : asSlot(1, q => camFocus(q))];
   if (!F[1]) F[1] = F[0];
@@ -9665,8 +9807,8 @@ function updateCamera(dt, snap) {
     if (cam.pan[i]) F[i] = [F[i][0] + cam.pan[i], F[i][1], 0, 0, null];
   }
   for (let i = 0; i < 2; i++) {
-    cam.spd[i] += (clamp(Math.abs(F[i][2]) / 110, 0, 1) - cam.spd[i]) * k(1.5);
-    cam.za[i] += (cam.zt[i] - cam.za[i]) * k(5);
+    cam.spd[i] += (clamp(Math.abs(F[i][2]) / 110, 0, 1) - cam.spd[i]) * kv(i, 1.5);
+    cam.za[i] += (cam.zt[i] - cam.za[i]) * kv(i, 5);
   }
   const zEff = i => cam.za[i] * (1 - 0.16 * cam.spd[i]);
   const z0 = zEff(0), z1 = zEff(1);
@@ -9699,16 +9841,16 @@ function updateCamera(dt, snap) {
     cam.cs += (clamp(c, VIS_L + hwS, VIS_R - hwS) - cam.cs) * k(snap ? 1 : 3.6);
   } else cam.cs += (clamp((F[0][0] + F[1][0]) / 2, VIS_L + hwS, VIS_R - hwS) - cam.cs) * k(6);
   cam.cs = clamp(cam.cs, VIS_L + hwS, VIS_R - hwS);
-  cam.fy = cam.fy === undefined || snap ? (F[0][1] + F[1][1]) / 2 : cam.fy + ((F[0][1] + F[1][1]) / 2 - cam.fy) * k(4);
+  cam.fy = cam.fy === undefined || snap || (ONEVIEW() && cam.cut[0]) ? (F[0][1] + F[1][1]) / 2 : cam.fy + ((F[0][1] + F[1][1]) / 2 - cam.fy) * k(4);
   cam.fyi = cam.fyi || [F[0][1], F[1][1]];
   for (let i = 0; i < 2; i++) {
     const z = zEff(i), hw = halfWorldW(z);
     cam.leadS = cam.leadS || [0, 0];
     const want = (F[i][3] !== undefined ? F[i][3] * hw : clamp(F[i][2] * 0.9, -hw * 0.26, hw * 0.26)) * leadK(z);
-    cam.leadS[i] += (want - cam.leadS[i]) * k(1.2);
+    cam.leadS[i] += (want - cam.leadS[i]) * kv(i, 1.2);
     const lead = cam.leadS[i];
     const key = i ? 'c2' : 'c1';
-    cam[key] += (clamp(F[i][0] + lead, VIS_L + hw / 2, VIS_R - hw / 2) - cam[key]) * k(3.6);
+    cam[key] += (clamp(F[i][0] + lead, VIS_L + hw / 2, VIS_R - hw / 2) - cam[key]) * kv(i, 3.6);
     // never let the thing you control slide out of frame (zooming in, or switching ship -> tower)
     const obj = F[i][4];
     if (obj) {
@@ -9716,7 +9858,7 @@ function updateCamera(dt, snap) {
       cam[key] = clamp(cam[key], obj[0] - hw / 2 + m, obj[0] + hw / 2 - m);
     }
     cam[key] = clamp(cam[key], VIS_L + hw / 2, VIS_R - hw / 2);
-    cam.fyi[i] += (F[i][1] - cam.fyi[i]) * k(4);
+    cam.fyi[i] += (F[i][1] - cam.fyi[i]) * kv(i, 4);
   }
   const mm = smooth01(cam.merge);
   for (let i = 0; i < 2; i++) {
@@ -9734,6 +9876,7 @@ function updateCamera(dt, snap) {
     // which slid the boat down under the buttons; past the sea floor there's just the dark ground)
     v.ref = i ? v.l : v.l + hw;
   }
+  cam.cut[0] = cam.cut[1] = false;
   const decay = Math.exp(-Math.max(0, dt) * 8);
   const tt = performance.now() / 1000;
   for (let i = 0; i < 2; i++) {
@@ -10810,7 +10953,7 @@ function rotated(src, key, w, h, deg, px, py) {
   x.translate(R, R); x.rotate(a * Math.PI / 180);
   if (HARD_F) hardDraw(x, src, -px, -py, w, h);
   else { x.drawImage(src, -px, -py, w, h); x.setTransform(1, 0, 0, 1, 0, 0); hardenCPU(x); }
-  r.R = R;
+  r.R = R; r.w0 = w;                                   // (w0: the width it was built for, to scale a stand-in)
   rotCache.set(id, r); rotNear.set(key + '|' + a, r);
   if (rotCache.size > 260) { const k0 = rotCache.keys().next().value, r0 = rotCache.get(k0); rotCache.delete(k0); if (r0 !== r) { for (const [k, v] of rotNear) if (v === r0) rotNear.delete(k); glFreeSrc(r0); r0.width = r0.height = 0; } }
   return r;
@@ -11728,6 +11871,9 @@ function surfaceLine(yOff) {
 }
 function fillAboveSurface(yOff, top) { surfacePath(yOff, top); C.fill(); }
 
+// bubble colours by depth band: their rim, their highlight, a small one
+const BUBBLE_COLS = [0, 1, 2, 3, 4, 5].map(i => { const k = i / 5 * 0.72, m = c => rgbs(mix3(c, [22, 52, 104], k));
+  return ['rgba(' + mix3([190, 232, 255], [22, 52, 104], k).map(Math.round).join(',') + ',0.85)', m([244, 252, 255]), 'rgba(' + mix3([214, 242, 255], [22, 52, 104], k).map(Math.round).join(',') + ',0.9)']; });
 function renderObjects() {
   const x0 = CAMPX / SV, x1 = x0 + VWW;
   const ema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
@@ -11836,13 +11982,14 @@ function renderObjects() {
     C.fillRect(px + 1, py + 1, s, s);                  // shows as a dark pixel down and to the right
   }
   fsLast = null;
+  // (darker the deeper they are, user Oct 24 night: the light doesn't reach down there)
   for (const b of bubbles) {
     if (b.x < x0 - 5 || b.x > x1 + 5) continue;
-    const px = PX(b.x), py = PY(b.y);
+    const px = PX(b.x), py = PY(b.y), dc = BUBBLE_COLS[clamp(Math.floor((b.y - WATER_Y) / (SEABED_DEEP - WATER_Y) * 6), 0, 5)];
     if (b.r > 1.9) {
-      fs1('rgba(190,232,255,0.85)'); C.fillRect(px, py, 2, 2);
-      fs1('#f4fcff'); C.fillRect(px, py, 1, 1);
-    } else { fs1('rgba(214,242,255,0.9)'); C.fillRect(px, py, 1, 1); }
+      fs1(dc[0]); C.fillRect(px, py, 2, 2);
+      fs1(dc[1]); C.fillRect(px, py, 1, 1);
+    } else { fs1(dc[2]); C.fillRect(px, py, 1, 1); }
   }
   fsLast = null;
   // under the wake: churned, aerated water, dense and white just under the surface, thinning with depth and age
@@ -12320,20 +12467,24 @@ function drawRays(overlay) {
   if (rayShade.size > 400) rayShade.clear();
 }
 
+// a sprite's blow-up at this zoom: whole pixels while it's at least its own size, but smaller than that it keeps
+// shrinking with the zoom (user Oct 24 night: zoomed far out, fish and birds stuck at one pixel a pixel and so
+// looked bigger and bigger)
+const pixK = px => px * SV >= 1 ? Math.round(px * SV) : px * SV;
 function drawSeaLife() {
   const vl = CAMPX / SV;
   // stunned fish: belly up, drifting to the surface (they're drawn flipped upside down)
   for (const f of deadFish) {
     if (f.x < vl - 30 || f.x > vl + VWW + 30) continue;
     const def = img.fish[f.type], sp = f.dir > 0 ? def.r : def.l;
-    const k = Math.max(1, Math.round(def.px * SV)), w = sp.width * k, h = sp.height * k;
+    const k = pixK(def.px), w = Math.max(1, Math.round(sp.width * k)), h = Math.max(1, Math.round(sp.height * k));
     C.save(); C.translate(PX(f.x), PY(f.y)); C.rotate(f.rot); C.scale(1, -1);
     C.globalAlpha = f.fade; C.drawImage(sp, -(w >> 1), -(h >> 1), w, h); C.restore();
   }
   for (const s of schools) {
     const def = img.fish[s.type];
     const sp = s.dir > 0 ? def.r : def.l;
-    const k = Math.max(1, Math.round(def.px * SV)), w = sp.width * k, h = sp.height * k;
+    const k = pixK(def.px), w = Math.max(1, Math.round(sp.width * k)), h = Math.max(1, Math.round(sp.height * k));
     const spread = 1 + 0.6 * Math.min(1, s.flee);
     for (const f of s.fish) {
       const x = s.x + f.dx * 0.6 * spread + Math.sin(time * 0.7 + f.ph) * 3, y = s.y + f.dy * 0.6 * spread + Math.sin(time * 1.3 + f.ph) * 1.5;
@@ -12350,7 +12501,7 @@ function drawSeaLife() {
       set = t < 0.18 ? img.shark.swim[0] : t < 0.4 ? img.shark.turn[0] : t < 0.6 ? img.shark.turn[1] : t < 0.82 ? img.shark.turn[0] : img.shark.swim[0];
     } else set = img.shark.swim[[0, 1, 0, 2][Math.floor(time * 3 + s.ph) % 4]];
     const sp = s.dir > 0 ? set.r : set.l;
-    const k = Math.max(1, Math.round(img.shark.px * SV)), w = sp.width * k, h = sp.height * k;
+    const k = pixK(img.shark.px), w = Math.max(1, Math.round(sp.width * k)), h = Math.max(1, Math.round(sp.height * k));
     C.drawImage(sp, PX(s.x) - (w >> 1), PY(s.y) - (h >> 1) + Math.round(Math.sin(time * 1.4 + s.ph) * k), w, h);
   }
 }
@@ -13705,7 +13856,7 @@ function renderOverlays() {
       C.fillStyle = s.under ? '#1d2a3c' : '#c9ccd2';
       blkLine(hx - ux * L, hy - uy * L, hx, hy);
       if (!s.under) { C.fillStyle = '#3a3e46'; blkPx(hx, hy, 1); }
-      if (s.burn > 0 && !s.under) {
+      if (s.burn > 0 && !s.under && !(s.drop > 0)) {
         const fl = L * (0.45 + 0.35 * hash(Math.floor(time * 30) + s.x));
         C.fillStyle = '#ffd36b'; blkLine(hx - ux * L, hy - uy * L, hx - ux * (L + fl * 0.5), hy - uy * (L + fl * 0.5));
         C.fillStyle = '#ff8a2a'; blkPx(hx - ux * (L + fl), hy - uy * (L + fl), 1);
