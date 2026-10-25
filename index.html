@@ -1682,7 +1682,8 @@ function holdsFor(p, dt) {
     if (mgHold[p] && (m === 'ship' || m === 'tower' || m === 'tank') && (!ui.menu || NET.remote)) {
       const g = m === 'ship' || m === 'tank' ? guns[p] : tguns[p];
       g.mgT = (g.mgT || 0) - dt;
-      while (g.mgT <= 0) { g.mgT += MG_RATE; if (m === 'ship') shipMG(ships[p]); else if (m === 'tank') tankMG(tanks[p]); else { fireTower(towers[p], true); firePierGun(towers[p]); } }
+      // (the tower's guns fire half as many rounds again, user Oct 25: they should feel powerful)
+      while (g.mgT <= 0) { g.mgT += m === 'tower' ? MG_RATE / 1.5 : MG_RATE; if (m === 'ship') shipMG(ships[p]); else if (m === 'tank') tankMG(tanks[p]); else { fireTower(towers[p], true); firePierGun(towers[p]); } }
     } else { if ((m === 'ship' || m === 'tank') && guns[p]) guns[p].mgT = 0; if (m === 'tower' && tguns[p]) tguns[p].mgT = 0; if (m !== 'ship' && m !== 'tower' && m !== 'tank' && m !== 'heli') mgHold[p] = false; }
     const h = holding[p];
     if (!h) return;
@@ -2178,7 +2179,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 15:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 15:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7318,7 +7319,8 @@ function stepPlanes(dt) {
     pl.x += pl.vx * dt; pl.y += pl.vy * dt;
     if ((pl.x - planeEdge(p)) * enemy > 0) pl.x = planeEdge(p);
     // skimming the sea: the prop wash whips up spray and foam behind it and dents the water under it
-    { const hgt = surfaceY(pl.x) - pl.y;
+    if (LAND) planeLandWash(pl, dt);                   // (LAND TEST, user Oct 25: dust off the ground, the grass blown flat)
+    else { const hgt = surfaceY(pl.x) - pl.y;
       if (hgt > 0 && hgt < 64 && !SIM_ONLY) {
         const k = (1 - hgt / 64) * clamp(pl.spd / PLANE_V, 0.6, 1.6);
         pl.washT = (pl.washT || 0) + dt * 160 * k;
@@ -15216,10 +15218,21 @@ function drawTrails(x0, x1) {
 function drawAim() {
   for (let p = 0; p < 2; p++) {
     const mode = controlling(p), gun = activeGun(p);
-    if (gun.aimShow <= 0 || (mode !== 'tower' && mode !== 'ship')) continue;
+    if (gun.aimShow <= 0 || (mode !== 'tower' && mode !== 'ship' && mode !== 'tank' && mode !== 'heli')) continue;
     let x, y, vx, vy;
     const el = gun.elev * Math.PI / 180, sp = SHELL_V0 + gun.power * SHELL_VPOW;
-    if (mode === 'tower') { [x, y] = towerMuzzle(towers[p], el); vx = Math.cos(el) * sp * towers[p].facing; vy = -Math.sin(el) * sp; }
+    // (LAND TEST, user Oct 25: the tank's missile's arc, and the helicopter's nose gun's line, as the others have)
+    if (mode === 'heli') {
+      const h = helis[p]; if (!h || (h.state !== 'fly' && h.state !== 'landed')) continue;
+      const [mx, my] = heliPoint(h, heliHalf() * 0.9, 8), e2 = clamp(gun.elev, -80, 25) * Math.PI / 180, ux = Math.cos(e2) * h.facing, uy = -Math.sin(e2), a = Math.min(1, gun.aimShow);
+      for (let i = 2; i <= 40; i++) { const qx = mx + ux * i * 9, qy = my + uy * i * 9; if (landSolid(qx, qy)) break; C.fillStyle = `rgba(255,255,255,${(a * (1 - i / 44)).toFixed(3)})`; C.fillRect(PX(qx), PY(qy), 2, 2); }
+      continue;
+    }
+    if (mode === 'tank') {
+      const t = tanks[p]; if (!t || t.state !== 'alive') continue;
+      const [px, py] = tankPivot(t), [ux, uy] = tankBarrel(t);
+      x = px + ux * 30; y = py + uy * 30; vx = ux * sp + t.vx; vy = uy * sp;
+    } else if (mode === 'tower') { [x, y] = towerMuzzle(towers[p], el); vx = Math.cos(el) * sp * towers[p].facing; vy = -Math.sin(el) * sp; }
     else {
       const sh = ships[p];
       if (sh.state !== 'afloat') continue;
@@ -15232,7 +15245,7 @@ function drawAim() {
     // the first stretch of the shell's path, three times as many dots as it once had, so the line reads at a glance
     for (let i = 1; i <= 48; i++) {
       vy += SHELL_G * 0.02; x += vx * 0.02; y += vy * 0.02;
-      if (y > surfaceY(x)) break;
+      if (LAND ? landSolid(x, y) : y > surfaceY(x)) break;
       C.fillStyle = `rgba(255,255,255,${(a * (1 - i / 54)).toFixed(3)})`;
       C.fillRect(PX(x), PY(y), 2, 2);
     }
@@ -15854,7 +15867,7 @@ function cpuHeliFly(B, h, tx, alt, dt) {
   // the ground ahead and under: never lower than clears it
   let clear = landTop(h.x);
   for (const o of [-1, 1, 2, 3]) clear = Math.min(clear, landTop(h.x + o * 60 * (Math.sign(h.vx) || h.facing)));
-  const yWant = Math.min(alt, clear - 70);
+  const yWant = Math.min(alt, clear - (B.low ? 30 : 70));   // (closing on a tank it comes down low, to fire level)
   const dy = yWant - h.y;
   diveHold[p] = Math.abs(dy) < 8 ? 0 : clamp(dy / 60, -1, 1);
   const idx = Math.abs(dx) < 30 ? 3 : Math.abs(dx) < 160 ? (dx > 0 ? 5 : 1) : dx > 0 ? 6 : 0;
@@ -15881,10 +15894,12 @@ function cpuHeli(B, dt) {
     return;
   }
   const tg = E.heli || E.tank || E.heliDown;
+  B.low = false;
   if (!tg) { cpuHeliFly(B, h, (h.x + WORLD_W / 2) / 2, landTop(h.x) - 160, dt); cpuSetMG(B, false); return; }
   const dx = tg.x - h.x, dir = Math.sign(dx) || 1, dist = Math.abs(dx);
   // stand off at a range, low over a tank (level with a helicopter); come round if it's past
-  const stand = tg === E.heli ? 300 : 340 - 60 * B.level, alt = tg === E.heli ? tg.y : tg.y - 46;
+  const stand = tg === E.heli ? 300 : 340 - 60 * B.level, alt = tg === E.heli ? tg.y : tg.y - 26;
+  B.low = tg !== E.heli && dist < 700;
   cpuHeliFly(B, h, tg.x - dir * stand, dist < 700 ? alt : landTop(h.x) - 160, dt);
   // the gun: pointed where it'll be, fired while it's on
   const [mx, my] = heliPoint(h, heliHalf() * 0.9, 8), facing = h.turn ? -h.turn.from : h.facing;
@@ -16349,8 +16364,8 @@ function buildLandBg() {
   // blue with the air between, and the clouds pass in front of them)
   land.bg = [
     { s: mountains, p: 0.06, q: 0.22, k: 2, base: WATER_Y - 95 - 20, haze: 0.4 },
-    { s: trees(1000, 130, 40, 50, 120, 11, 0.06), p: 0.32, q: 0.6, k: 1.2, base: WATER_Y - 95 - 40, haze: 0.3 },
-    { s: trees(1000, 250, 14, 90, 240, 12, 0.03), p: 0.62, q: 0.86, k: 1.25, base: WATER_Y - 95 - 30, haze: 0.06, under: [42, 71, 75], near: true },
+    { s: trees(1000, 130, 40, 50, 120, 11, 0.06), p: 0.32, q: 0.6, k: 1.2, base: WATER_Y - 95 - 40, haze: 0.3, tree: 0.5 },
+    { s: trees(1000, 250, 14, 90, 240, 12, 0.03), p: 0.62, q: 0.86, k: 1.25, base: WATER_Y - 95 - 30, haze: 0.06, under: [42, 71, 75], near: true, tree: 1 },
   ];
 }
 // each strip drawn tiled across the view at its own depth, its foot standing on its base line (which hangs from
@@ -16365,10 +16380,15 @@ function drawLandBg(near) {
     const i0 = Math.floor(layerX(0, L, Sl) / tileW) - 1, i1 = Math.ceil(layerX(VWP, L, Sl) / tileW) + 1;
     const h = Math.round(im.height * L.k * Sl), y = Math.round(PY(L.base)) - h;
     const t = GLR.on ? glTint(im, 'land' + L.q, fx.map(v => v * (1 - L.haze)), hz.map(v => v * L.haze / 255), false) : im;
+    // (the trees sway with the wind, user Oct 25: each tile leans a little about its foot, a slow gusting rock;
+    // the far ones less, the mountains not at all)
+    const wnd = clamp((E.windU || 0) / 60, -1, 1), sw = L.tree ? (wnd * 0.035 + Math.sin(time * 1.1) * 0.012 * (0.3 + Math.abs(wnd))) * L.tree : 0;
     for (let i = i0; i <= i1; i++) {
       const X = Math.round(layerPivX + Sl * (i * tileW - L.p * layerRefX)), X2 = Math.round(layerPivX + Sl * ((i + 1) * tileW - L.p * layerRefX));
       if (X2 < -2 || X > VWP + 2) continue;
-      C.drawImage((i & 1) && !GLR.on ? L.s.flip : t, X, y, X2 - X, h);
+      if (!sw) { C.drawImage((i & 1) && !GLR.on ? L.s.flip : t, X, y, X2 - X, h); continue; }
+      const s2 = sw * (1 + 0.3 * Math.sin(time * 0.7 + i * 1.9));
+      C.save(); C.translate(0, y + h); C.transform(1, 0, -s2, 1, 0, 0); C.drawImage((i & 1) && !GLR.on ? L.s.flip : t, X, -h, X2 - X, h); C.restore();
     }
     // (under the nearest trees, down to the ground: their shade, so a low valley shows no sky under them)
     if (L.under) { C.fillStyle = css3(L.under.map((v, j) => (v * (1 - L.haze) + hz[j] * L.haze) * fx[j])); C.fillRect(-SHX - 2, y + h - 1, VWP + 4, bh - y - h + 1); }
@@ -16430,9 +16450,22 @@ function cutTuft(t, vx, hard) {
 }
 // every frame: tanks flatten what they drive through, a helicopter's skids too as it lands; ground dug away under
 // a clump takes it
-function stepTufts() {
+// a gust along the ground at x (a rotor's downdraft, a low plane's wash): the grass within reach is laid over -
+// away from x when dir is 0, or that way when it's -1 or 1
+function landWind(x, gy, reach, k, dir) {
   if (!land.tufts) return;
   for (const t of land.tufts) {
+    if (!t.alive || Math.abs(t.x - x) > reach) continue;
+    const d = Math.abs(t.x - x) / reach, s = dir || Math.sign(t.x - x) || 1, want = s * k * (1 - d * 0.7) * 1.4;
+    if (Math.abs(want) > Math.abs(t.push || 0)) t.push = want;
+  }
+}
+function stepTufts(dt) {
+  if (!land.tufts) return;
+  for (const t of land.tufts) {
+    // (the gust eases off; the clump springs back)
+    t.bend = (t.bend || 0) + ((t.push || 0) - (t.bend || 0)) * Math.min(1, (dt || 1 / 60) * 8);
+    t.push = (t.push || 0) * Math.max(0, 1 - (dt || 1 / 60) * 5);
     if (!t.alive) continue;
     const half = (9 + (t.k % 4) * 4) * TUFT_PX * t.s / 2;
     for (const tk of tanks) if (tk && tk.state === 'alive' && Math.abs(t.x - tk.x) < TANK_L * 0.45 + half && Math.abs(landTop(t.x) - tk.y) < 14) { cutTuft(t, tk.vx, false); break; }
@@ -16461,7 +16494,7 @@ function drawTufts(x0, x1) {
     }
     const im = tuftArt[t.k], k = TUFT_PX * t.s * SV, w = Math.round(im.width * k), h = Math.round(im.height * k);
     const X = Math.round(PX(t.x) - w / 2), Y = Math.round(PY(top + 1.5)) - h;
-    const sk = (sway * 0.25 + Math.sin(time * 1.7 + t.ph) * 0.08 * (0.4 + Math.abs(sway)));
+    const sk = clamp(sway * 0.25 + Math.sin(time * 1.7 + t.ph) * 0.08 * (0.4 + Math.abs(sway)) + (t.bend || 0) * 0.8, -1.1, 1.1);
     C.save(); C.translate(X + w / 2, Y + h); C.transform(1, 0, -sk, 1, 0, 0);
     if (t.flip) C.scale(-1, 1);
     C.drawImage(scaled(im, k, true), -w / 2, -h, w, h);
@@ -16780,6 +16813,7 @@ function stepHeli(h, dt) {
     else { h.y = landBelow(h.x, h.y - 4) - heliSkid(); h.tilt += (0 - h.tilt) * Math.min(1, dt * 6); }
     if (onOwnGround(p, h.x)) { h.fixT += dt; if (h.fixT > 1) { h.fixT = 0; if (h.hp < HELI_HP) h.hp++; else if (h.rockets < HELI_ROCKETS) h.rockets++; } } else h.fixT = 0;
     if (h.hp <= 1) heliSmoke(h, dt);
+    if (h.spin > 0.5) rotorWash(h, dt);
     return;
   }
   // flying: the lever sets the way and speed across, the stick climbs and sinks; it eases to them
@@ -16806,14 +16840,90 @@ function stepHeli(h, dt) {
   if (foot >= gm) {
     h.y = gm - heliSkid(); h.state = 'landed'; h.vy = 0; h.vx = 0; kickLandDust(h.x, gm, 6);
   }
-  // rotor wash: dust kicked up off the ground under it when it's low
-  if (Math.random() < dt * 20 && gm - foot < 60) kickLandDust(h.x + rnd(-30, 30), gm, 1);
+  rotorWash(h, dt);
   // the nose gun, held
   if (mine && mgHold[p] && !h.turn) {
     h.mgT -= dt;
     while (h.mgT <= 0) { h.mgT += 0.07; heliMG(h); }
   } else h.mgT = 0;
   if (h.hp <= 1) heliSmoke(h, dt);
+}
+/* ---- rotor wash (user Oct 25, their picture): the downdraft under the rotor hits the ground and rolls OUT both
+   ways along it - dust and bits of earth fanning out low, never billowing up over the helicopter. It pushes the
+   smoke in the air under and round the rotor the same way (through the smoke's own air flow, so the smoke keeps its
+   look), lays the grass over outward, and tears leaves off the trees behind as it lifts off ---- */
+function rotorWash(h, dt) {
+  const gm = landBelow(h.x, h.y), foot = h.y + heliSkid(), H = Math.max(0, gm - foot), sp = h.spin || 0;
+  const k = sp * clamp(1 - H / 160, 0, 1);
+  // the air: down through the rotor, then out along the ground
+  if (sp > 0.3) gridImpulse(h.x, h.y + 18, h.vx * 0.3, 240 * sp, 2.2);
+  if (k > 0.03) { gridImpulse(h.x - 34, gm - 10, -230 * k, -12, 2); gridImpulse(h.x + 34, gm - 10, 230 * k, -12, 2); }
+  if (k > 0.03) landWind(h.x, gm, 150, k, 0);
+  if (SIM_ONLY || k < 0.05) return;
+  h.washT = (h.washT || 0) + dt * 46 * k;
+  while (h.washT >= 1) {
+    h.washT -= 1;
+    const side = Math.random() < 0.5 ? -1 : 1, x0 = h.x + side * rnd(0, 22), gy = landBelow(x0, gm - 12);
+    spawnSmoke(x0, gy - rnd(1, 4), { mist: true, fam: groundAt(x0, gy) === 'sand' ? 'sand' : 'dust', r: rnd(2.5, 4.5), grow: rnd(3, 5), rmax: rnd(14, 20), lift: 1, vx: side * rnd(80, 190) * k + h.vx * 0.3, vy: -rnd(2, 12), life: rnd(1.6, 3), alpha: rnd(0.4, 0.6) });
+    // bits of earth and grass skittering out
+    if (Math.random() < 0.7) earthGrains.push({ x: x0, y: gy - 1, vx: side * rnd(90, 230) * k, vy: -rnd(20, 90) * k, c: Math.random() < 0.6 ? '#5a4030' : '#6f8a3c', light: false, big: false, t: 0, rest: 0, life: rnd(1.2, 2.4) });
+  }
+  // the trees behind lose leaves to it near the ground
+  if (Math.random() < dt * 30 * k) leafFly(h.x + rnd(-120, 120), gm - rnd(20, 90), (Math.random() < 0.5 ? -1 : 1) * rnd(40, 110) * k, -rnd(10, 60) * k);
+}
+// a low plane over land: its prop wash raises a trail of dust behind it and blows the grass
+function planeLandWash(pl, dt) {
+  const gm = landTop(clamp(pl.x, 0, WORLD_W - 1)), H = gm - pl.y;
+  if (H <= 0 || H > 90 || pl.state !== 'fly') return;
+  const k = (1 - H / 90) * clamp(pl.spd / PLANE_V, 0.6, 1.6);
+  landWind(pl.x - pl.facing * 20, gm, 110, k, pl.facing);
+  gridImpulse(pl.x - pl.facing * 30, gm - 12, -pl.vx * 0.4, -20, 2);
+  if (SIM_ONLY) return;
+  pl.washT = (pl.washT || 0) + dt * 70 * k;
+  while (pl.washT >= 1) {
+    pl.washT -= 1;
+    const x0 = pl.x - pl.facing * rnd(0, 70), gy = landBelow(x0, gm - 12);
+    spawnSmoke(x0, gy - rnd(1, 4), { mist: true, fam: groundAt(x0, gy) === 'sand' ? 'sand' : 'dust', r: rnd(2.5, 5), grow: rnd(3, 5), rmax: rnd(14, 22), lift: 2, vx: pl.vx * rnd(0.05, 0.25) + rnd(-25, 25), vy: -rnd(6, 26) * k, life: rnd(2, 3.5), alpha: rnd(0.35, 0.55) });
+    if (Math.random() < 0.3) leafFly(x0 + rnd(-60, 60), gy - rnd(20, 80), pl.vx * rnd(0.15, 0.35), -rnd(10, 50));
+  }
+}
+/* ---- leaves (user Oct 25): torn off the trees behind by a helicopter or a low plane, and blown about now and then
+   by the wind - small pixels in the trees' own greens, fluttering as they drift and settling on the ground ---- */
+const leaves = [];
+const LEAF_COLS = ['#54724e', '#8ba34f', '#2a474b', '#6f8c47'];
+function leafFly(x, y, vx, vy) {
+  if (SIM_ONLY || leaves.length > 260) return;
+  leaves.push({ x, y, vx, vy, ph: Math.random() * 6, c: LEAF_COLS[(Math.random() * 4) | 0], t: 0, life: rnd(5, 9), rest: 0 });
+}
+function stepLeaves(dt) {
+  const wind = E.windU || 0;
+  // the wind itself takes a leaf now and then from the trees in view
+  if (Math.abs(wind) > 8 && Math.random() < dt * Math.min(6, Math.abs(wind) / 8)) {
+    const v = cam.view[Math.random() < 0.5 ? 0 : 1], x = v.l + Math.random() * halfWorldW(v.z);
+    leafFly(x, landTop(clamp(x, 0, WORLD_W - 1)) - rnd(40, 140), wind * 0.4, rnd(-10, 10));
+  }
+  for (let i = leaves.length - 1; i >= 0; i--) {
+    const f = leaves[i];
+    f.t += dt;
+    if (f.t > f.life) { leaves.splice(i, 1); continue; }
+    if (f.rest) continue;
+    f.ph += dt * 6;
+    f.vx += (wind * 0.5 - f.vx) * dt * 0.9 + Math.sin(f.ph) * 30 * dt;
+    f.vy += (16 - f.vy) * dt * 1.5 + Math.cos(f.ph * 1.3) * 26 * dt;     // (a slow fluttering fall)
+    f.x += f.vx * dt; f.y += f.vy * dt;
+    if (landSolid(f.x, f.y)) { f.rest = 1; f.y = landBelow(f.x, f.y - 6) - 0.5; f.life = Math.min(f.life, f.t + 3); }
+  }
+}
+function drawLeaves(x0, x1) {
+  if (!leaves.length) return;
+  const s = Math.max(1, Math.round(1.25 * SV));
+  for (const f of leaves) {
+    if (f.x < x0 - 10 || f.x > x1 + 10) continue;
+    C.globalAlpha = Math.min(1, (f.life - f.t) / 1.5); C.fillStyle = f.c;
+    const wide = Math.abs(Math.sin(f.ph)) > 0.5;                       // (it turns as it flutters)
+    C.fillRect(Math.floor(PX(f.x) / s) * s, Math.floor(PY(f.y) / s) * s, wide ? s * 2 : s, s);
+  }
+  C.globalAlpha = 1;
 }
 function heliSmoke(h, dt) {
   h.smokeT -= dt;
@@ -16852,7 +16962,6 @@ function heliHurt(h, amt, x, y) {
   if (amt >= 1) { spawnSparks(x, y, 12, 220); sfxImpact(x); }
   if (h.hp <= 0) { if (h.state === 'landed') blowHeli(h); else { h.state = 'down'; h.spinV = rnd(3, 5) * (Math.random() < 0.5 ? -1 : 1); heliLost(h); } }
 }
-function crashHeli(h) { heliLost(h); blowHeli(h); }
 function heliLost(h) {
   if (h.lostDone) return;
   h.lostDone = true;
@@ -16918,7 +17027,8 @@ function stepLandUnits(dt) {
   }
   stepLandSand(dt);
   stepSpikeBursts(dt);
-  stepTufts();
+  stepLeaves(dt);
+  stepTufts(dt);
 }
 
 /* ---- a plane into the ground (user Oct 25, their photo): a small crater with the broken plane in it, a fireball
@@ -17050,7 +17160,63 @@ function groundFlash(x, y, power) {
   for (let i = 0; i < 26 * power; i++) { const a = -Math.PI / 2 + rnd(-1.3, 1.3), sp = Math.pow(Math.random(), 0.6) * 120 * power; spawnFlame(x + rnd(-4, 4), y - rnd(0, 5), Math.cos(a) * sp, Math.sin(a) * sp - 20, rnd(1.2, 1.5), rnd(3, 5.5) * (0.7 + 0.3 * power), rnd(1.8, 2.6)); flames[flames.length - 1].clean = true; }
   spawnSparks(x, y - 3, 10 * power, 240);
 }
+const earthGrains = [];
+function shedSpike(B, S) {
+  if (SIM_ONLY) return;
+  const g = S.g, P = B.P;
+  let n = 0;
+  for (let k = 0; k < g.length - 1 && n < 110; k++) {
+    const a = g[k], b = g[k + 1];
+    if (a.down && b.down) continue;
+    const L = Math.hypot(b.x - a.x, b.y - a.y), steps = Math.max(1, Math.round(L / 1.8)), w = Math.max(1.2, S.w * Math.pow(1 - a.f, 0.9));
+    for (let j = 0; j < steps && n < 110; j++) {
+      const t = j / steps, across = Math.max(1, Math.round(w / 3.5));
+      for (let c = 0; c < across; c++) {
+        if (earthGrains.length > 3200) earthGrains.splice(0, 200);
+        const ff = S.dark ? a.f * 0.55 : a.f, tip = ff > 0.55, col = ff < 0.2 ? P.foot : ff < 0.55 ? P.mid : P.tip;
+        const k2 = 0.85 + 0.3 * Math.random();
+        earthGrains.push({ x: a.x + (b.x - a.x) * t + (Math.random() - 0.5) * w, y: a.y + (b.y - a.y) * t, vx: (a.vx + (b.vx - a.vx) * t) * 0.55 + rnd(-30, 30), vy: (a.vy + (b.vy - a.vy) * t) * 0.55 + rnd(-30, 20),
+          c: 'rgb(' + Math.round(col[0] * k2) + ',' + Math.round(col[1] * k2) + ',' + Math.round(col[2] * k2) + ')', light: tip && Math.random() < 0.75, big: ff < 0.25 && Math.random() < 0.35, t: 0, rest: 0, life: tip ? rnd(1.2, 2.6) : rnd(7, 12) });
+        n++;
+      }
+    }
+  }
+}
+function stepEarthGrains(dt) {
+  if (!earthGrains.length) return;
+  const wind = windAt(WATER_Y - 200) * 0.6;
+  for (let i = earthGrains.length - 1; i >= 0; i--) {
+    const q = earthGrains[i];
+    q.t += dt;
+    if (q.t > q.life) { earthGrains.splice(i, 1); continue; }
+    if (q.rest) continue;
+    const dr = Math.exp(-(q.light ? 2.6 : 0.7) * dt);
+    q.vx = (q.vx - wind) * dr + wind; q.vy = q.vy * dr + (q.light ? 110 : 380) * dt;
+    const nx = q.x + q.vx * dt, ny = q.y + q.vy * dt;
+    if (q.vy > 0 && landSolid(nx, ny)) {
+      // (it lands: a heavy one may hop once, then it lies on the ground)
+      if (!q.light && q.vy > 140 && !q.hop) { q.hop = true; q.vy *= -0.22; q.vx *= 0.5; continue; }
+      q.y = landBelow(nx, ny - 6) - 0.6; q.x = nx; q.rest = 1; q.life = Math.max(q.life, q.t + (q.light ? 0.6 : rnd(5, 10)));
+      continue;
+    }
+    q.x = nx; q.y = ny;
+  }
+}
+function drawEarthGrains(x0, x1) {
+  if (!earthGrains.length) return;
+  const PBw = Math.max(1, Math.round(1.25 * SV));
+  for (const q of earthGrains) {
+    if (q.x < x0 - 10 || q.x > x1 + 10) continue;
+    const left = q.life - q.t, a = q.light ? Math.min(1, left / 1.2) * 0.85 : Math.min(1, left / 2);
+    if (a <= 0.02) continue;
+    C.globalAlpha = a; C.fillStyle = q.c;
+    const s = q.big ? PBw * 3 : q.light ? PBw : PBw * 2;
+    C.fillRect(Math.floor(PX(q.x) / PBw) * PBw, Math.floor(PY(q.y) / PBw) * PBw - (q.rest ? s - PBw : 0), s, s);
+  }
+  C.globalAlpha = 1;
+}
 function stepSpikeBursts(dt) {
+  stepEarthGrains(dt);
   for (let i = spikeBursts.length - 1; i >= 0; i--) {
     const B = spikeBursts[i];
     B.t += dt;
@@ -17061,6 +17227,9 @@ function stepSpikeBursts(dt) {
       q.x += q.vx * dt; q.y += q.vy * dt;
       if (q.vy > 0 && landSolid(q.x, q.y)) { q.down = true; q.y = landBelow(q.x, q.y - 6); }
     }
+    // (user Oct 25: once a streak has made its shape it comes apart into real grains of earth - each falls on its
+    // own, the dark heavy ones to the ground where they lie a while, the pale dusty ones drifting and thinning out)
+    for (const S of B.spikes) if (!S.shed && B.t > S.life * 0.42) { S.shed = true; shedSpike(B, S); }
     // the dust: as the burst tops out and falls back, a low cloud rolls out both ways along the ground and settles
     if (!B.dustDone && B.t > 0.35) {
       B.dustDone = true;
@@ -17083,6 +17252,7 @@ function drawSpikeBursts(x0, x1) {
     if (B.x < x0 - 300 || B.x > x1 + 300) continue;
     const P = B.P;
     for (const S of B.spikes) {
+      if (S.shed) continue;                              // (come apart into grains: see drawEarthGrains)
       const age = B.t, fade = clamp(1 - (age - S.life * 0.55) / (S.life * 0.6), 0, 1);
       if (fade <= 0) continue;
       const g = S.g;
@@ -17234,9 +17404,11 @@ function renderLandObjects() {
   drawLandGround(x0, x1);
   for (const d of debris) if (d.state === 2) drawDebris(d, x0, x1);
   drawFire(x0, x1, true);
+  drawLeaves(x0, x1);
   drawLandUnits(x0, x1);
   drawTufts(x0, x1);                                   // (in front: a tank drives through them)
   drawSpikeBursts(x0, x1);
+  drawEarthGrains(x0, x1);
   drawPlanes(x0, x1);
   for (const d of debris) if (d.state === 0) drawDebris(d, x0, x1);
   drawBirds(x0, x1);
