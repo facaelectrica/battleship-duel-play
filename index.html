@@ -1025,7 +1025,7 @@ function buildWorld(restore) {
   shocks.length = 0;
   storm.bolts.length = 0; storm.flash = 0; storm.next = 3;
   mapTracks[0] = mapTracks[1] = null;
-  for (const arr of [screens, weedBits, torps, torpWrecks, gasBalls, jets, streaks, blastRings, deadFish, wclouds, dcharges, welds, spray, bubbles, foam, wakes, debris, sparks, flashes, shells, bullets, smoke, pieces, flames, embers, rings, trails, dust, grains, ash, blood, duds]) arr.length = 0;
+  for (const arr of [screens, weedBits, torps, torpWrecks, gasBalls, jets, streaks, blastRings, deadFish, wclouds, dcharges, mines, welds, spray, bubbles, foam, wakes, debris, sparks, flashes, shells, bullets, smoke, pieces, flames, embers, rings, trails, dust, grains, ash, blood, duds]) arr.length = 0;
   for (let p = 0; p < 2; p++) {
     Object.assign(crew[p], freshCrew());               // the round opens with the captain in his hangar, choosing
     Object.assign(guns[p], { reload: 0, rk: [0, 0], pk: [0, 0], press: 0, ammo: SHELLS_MAX, dcAmmo: DC_MAX, dk: 0, resupT: 0, smokeAmmo: SMOKE_MAX, smokeK: 0 });
@@ -1860,6 +1860,7 @@ const ACTS = {
   bomb: p => dropBomb(planes[p]),
   rocket: p => fireRocket(planes[p]),
   torp: (p, up) => fireTorpedo(subs[p], !!up),
+  mine: p => layMine(subs[p]),
   smoke: p => dropSmoke(ships[p]),
   // the plane: -1 / 1 head left / right, 0 circle on the spot
   planeDir: (p, d) => {
@@ -1996,7 +1997,7 @@ function netSnapshot(sw, o = {}) {
     t: +time.toFixed(3), env: { time: env.time, weather: env.weather, fog: env.fog, rain: env.rain, sea: env.sea, wind: env.wind }, Wt: W.t,
     ships: two(ships).map(veh), subs: two(subs).map(veh), planes: two(planes).map(veh),
     towers: two(towers).map(o => P(o, 2)), guns: two(guns).map(o => P(o, 2)), tguns: two(tguns).map(o => P(o, 2)),
-    shells: list(shells), torps: list(torps), bullets: list(bullets), dcharges: list(dcharges),
+    shells: list(shells), torps: list(torps), bullets: list(bullets), dcharges: list(dcharges), mines: list(mines),
     caps: two(captains).map(cs => cs.map(c => ({ face: c.face, state: c.state, veh: c.veh, t: c.t, blood: +(c.blood || 0).toFixed(2), band: c.band || 0 }))),
     crew: two(crew).map(c => ({ mode: c.mode, dead: !!c.dead })),
     docks: two(homeDock).map(d => ({ gates: P(d.gates, 2), pillars: d.pillars.map(q => !!q.broken), pierGone: !!d.pierGone })),
@@ -2064,6 +2065,7 @@ const netShot = {
   torps: o => sfxImpact(o.x),
   bullets: o => sfxMG(o.x),
   dcharges: o => sfxSplash(o.x, 0.3),
+  mines: o => sfxSplash(o.x, 0.12),
 };
 function netApply(S) {
   NET.applying = true;
@@ -2098,6 +2100,7 @@ function netApply(S) {
     }
     netList(shells, S.shells, 'shells', netShot.shells); netList(torps, S.torps, 'torps', netShot.torps);
     netList(bullets, S.bullets, 'bullets', netShot.bullets); netList(dcharges, S.dcharges, 'dcharges', netShot.dcharges);
+    if (S.mines) netList(mines, S.mines, 'mines', netShot.mines);
     netList(screens, S.screens, 'screens');
     // wrecks still falling or sinking: kept in step (a falling plane can still bring something down)
     netList(oldPlanes, S.oldPlanes, 'oldPlanes', null, false); netList(oldShips, S.oldShips, 'oldShips', null, false); netList(oldSubs, S.oldSubs, 'oldSubs', null, false);
@@ -2126,7 +2129,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 24 23:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 24 23:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -2448,6 +2451,22 @@ function makeSailIcon() {
   x.globalCompositeOperation = 'source-in'; x.fillStyle = 'rgb(' + top + ')'; x.fillRect(0, 0, W, H);
   img.hud.icSail = c; HUDI.spots.icSail = HUDI.spots.icShip;
 }
+// the mine's picture for its button: a horned ball in the cream of the other pictures
+function mineIcon() {
+  if (img.hud.mineIc) return img.hud.mineIc;
+  const ref = img.hud.torpUp, H = Math.round(ref.height * 0.62), W = H, c = makeCanvas(W, H), x = c.getContext('2d');
+  const d = img.hud.shell.getContext('2d').getImageData(0, 0, img.hud.shell.width, img.hud.shell.height).data, n = {};
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 200) { const kk = d[i] + ',' + d[i + 1] + ',' + d[i + 2]; n[kk] = (n[kk] || 0) + 1; }
+  x.fillStyle = 'rgb(' + (Object.keys(n).sort((a, b) => n[b] - n[a])[0] || '243,230,196') + ')';
+  const o = W / 2, r = W * 0.3, hw = Math.max(2, Math.round(W * 0.07));
+  for (let k = 0; k < 8; k++) {                       // the horns
+    const a = k / 8 * Math.PI * 2 + Math.PI / 8;
+    for (let t = r; t <= W * 0.47; t += 1) x.fillRect(Math.round(o + Math.cos(a) * t - hw / 2), Math.round(o + Math.sin(a) * t - hw / 2), hw, hw);
+  }
+  for (let yy = 0; yy < H; yy++) for (let xx = 0; xx < W; xx++) if (Math.hypot(xx + 0.5 - o, yy + 0.5 - o) <= r) x.fillRect(xx, yy, 1, 1);
+  img.hud.mineIc = c;
+  return c;
+}
 // the yacht a player sails (CHILL): the one picked, while she's still afloat
 function yachtOf(p) { const b = sailboats[crew[p].yacht]; return b && b.state === 'sail' ? b : null; }
 const hudPress = [{}, {}];                         // a button pressed a moment ago: drawn pushed in
@@ -2466,7 +2485,7 @@ function hudKit(p) {
   const m = crew[p].mode;
   const home = !TEST && stopPref;                    // (with the boats carrying on, you sail them home yourself)
   if (m === 'ship') return { drive: true, home, dive: false, aim: true, weapons: ['mg', 'shell', 'dc', 'smoke'] };
-  if (m === 'sub') return { drive: true, home, dive: true, aim: false, weapons: ['torp', 'torpUp'] };
+  if (m === 'sub') return { drive: true, home, dive: true, aim: false, weapons: ['torp', 'torpUp', 'mine'] };   // (the mine: user Oct 24 night)
   if (m === 'tower') return { drive: false, home: false, dive: false, aim: true, weapons: ['mg', 'shell'] };
   if (m === 'plane') return { drive: true, home, dive: true, aim: false, weapons: ['mg', 'rocket', 'bomb'] };   // (the bomb in the depth charge's slot: it is one, under water)
   if (m === 'sail') return { drive: true, home: false, dive: false, aim: false, weapons: [] };
@@ -2545,7 +2564,11 @@ function weaponState(p, wk) {
     const f = shipGunReady(sh, g) >= 0 || !works.length ? 0 : Math.min(...works.map(k => g.rk[k])) / RELOAD;
     return { f, off: out || !works.length || g.ammo <= 0, n: g.ammo };
   }
-  if (m === 'sub') { const sb = subs[p]; return { f: sb.tk / TORP_RELOAD, off: sb.torps <= 0, n: wk === 'torp' ? sb.torps : -1 }; }
+  if (m === 'sub') {
+    const sb = subs[p];
+    if (wk === 'mine') return { f: (sb.mk || 0) / MINE_RELOAD, off: (sb.mines || 0) <= 0 || sb.state !== 'out', n: sb.mines || 0 };
+    return { f: sb.tk / TORP_RELOAD, off: sb.torps <= 0, n: wk === 'torp' ? sb.torps : -1 };
+  }
   if (m === 'tower') return wk === 'mg' ? { f: 0, off: !towerUsable(towers[p]), n: -1 } : { f: tguns[p].reload / TOWER_RELOAD, off: !towerUsable(towers[p]), n: -1 };
   if (m === 'plane') {
     const pl = planes[p];
@@ -2576,6 +2599,7 @@ function weaponIcon(p, wk) {
   if (wk === 'mg') return img.hud.bullets;
   if (wk === 'bomb') return img.hud.bomb;
   if (wk === 'torpUp') return img.hud.torpUp;
+  if (wk === 'mine') return mineIcon();
   return fc > 0 ? img.hud.shellR : img.hud.shell;   // the shell (or torpedo) points the way she faces
 }
 // a button's picture in black, its own outline (for the pressed shade)
@@ -2980,11 +3004,15 @@ function vehDeployed(p, k) {
 }
 function tabLamp(p, k, on, fx, fy, s) {
   const hit = time - (hitAlert[p][k] || -9) < 2.5, dep = on || vehDeployed(p, k);
-  if (!dep && !hit) return;
+  // an enemy in reach of your tower (past your buoy): the tower's lamp blinks yellow (user Oct 24 night: the little
+  // light on top, not the glass) - with green between while you're in it
+  const warn = k === 'tower' && !hit && towers[p].hp > 0 && enemyPastBuoy(p), wOn = Math.floor(time * 3) % 2 === 0;
+  if (warn && !wOn && !on) return;
+  if (!dep && !hit && !warn) return;
   // under attack: a ragged flicker, not a steady blink
   if (hit && hash(Math.floor(time * 14) + k.length * 7.3) < 0.45) { if (!on) return; }
   const [lx, ly, lw, lh] = TAB_LAMP[on ? 'gold' : 'steel'], x = Math.round(fx + lx * s), y = Math.round(fy + ly * s), w = Math.max(3, Math.round(lw * s)), h = Math.max(2, Math.round(lh * s));
-  const lit = hit && on && hash(Math.floor(time * 14) + 3.1) < 0.45 ? [60, 40, 20] : on ? [70, 230, 90] : [255, 210, 58];
+  const lit = hit && on && hash(Math.floor(time * 14) + 3.1) < 0.45 ? [60, 40, 20] : warn && wOn ? [255, 210, 58] : on ? [70, 230, 90] : [255, 210, 58];
   const r = Math.max(1, Math.round(h * 0.35));
   ug.fillStyle = rgbs(lit.map(v => v * 0.55)); ug.fillRect(x + r, y, w - 2 * r, h); ug.fillRect(x, y + r, w, h - 2 * r);
   ug.fillStyle = rgbs(lit); ug.fillRect(x + r, y + 1, w - 2 * r, h - 2); ug.fillRect(x + 1, y + r, w - 2, h - 2 * r);
@@ -3041,18 +3069,11 @@ function drawHudTabs(p, Lh) {
     }
     // one of yours under attack: its button's outline blinks red
     // (the one you're in too, user Oct 24 night)
-    const hitBlink = time - (hitAlert[p][t.veh] || -9) < 2.5, buoyBlink = t.veh === 'tower' && towers[p].hp > 0 && enemyPastBuoy(p);
+    const hitBlink = time - (hitAlert[p][t.veh] || -9) < 2.5;
     if (hitBlink && Math.floor(time * 6) % 2) {
       const lw2 = Math.max(2, Math.round(3 * t.k));
       ug.fillStyle = '#ff2a1a';
       ug.fillRect(fx, fy, fw, lw2); ug.fillRect(fx, fy + fh - lw2, fw, lw2); ug.fillRect(fx, fy, lw2, fh); ug.fillRect(fx + fw - lw2, fy, lw2, fh);
-    }
-    // an enemy in reach of your tower (past your buoy): its button's glass blinks yellow inside (user Oct 24 night: no
-    // rectangle round it)
-    if (buoyBlink && Math.floor(time * 3) % 2) {
-      const ga3 = ug.globalAlpha; ug.globalAlpha = 0.42; ug.fillStyle = '#ffd23a';
-      ug.fillRect(Math.round(fx + fw * 0.07), Math.round(fy + fh * 0.2), Math.round(fw * 0.86), Math.round(fh * 0.66));
-      ug.globalAlpha = ga3;
     }
     // picked with the gamepad's shoulder buttons, not launched yet: a pulsing white outline and the words
     if (picked) {
@@ -3123,6 +3144,7 @@ function hudPressAt(hit, ux) {
     if (it.weapon === 'rocket') { act(p, 'rocket'); return null; }
     if (it.weapon === 'smoke') { act(p, 'smoke'); return null; }
     if (it.weapon === 'dc') act(p, 'dc');
+    else if (it.weapon === 'mine') act(p, 'mine');
     else if (it.weapon === 'torp' || it.weapon === 'torpUp') act(p, 'torp', it.weapon === 'torpUp');
     else { act(p, 'fire'); return { kind: 'cbtn', p }; }
     sfxClick(gunCtl[p]);
@@ -3591,13 +3613,13 @@ const PAD_ART = {
     ['LT', 'CANNON - MISSILE - UP TORPEDO', 112, 6, 'l'], ['LB', 'PREVIOUS VEHICLE', 150, 16, 'l'], ['D-PAD', 'ZOOM', 188, 175, 'l'],
     ['LEFT STICK', 'DRIVE - CLIMB - DIVE', 128, 92, 'l'], ['PRESS IT IN', 'STOP', 128, 104, 'l'], ['VIEW', 'MENU', 215, 100, 'l'],
     ['RT', 'MACHINE GUN', 398, 6, 'r'], ['RB', 'NEXT VEHICLE', 360, 16, 'r'], ['MENU', 'MENU', 292, 100, 'r'],
-    ['Y', 'SMOKE SCREEN', 380, 66, 'r'], ['B', 'CANNON - MISSILE - UP TORPEDO', 418, 100, 'r'], ['X', 'DEPTH CHARGE - BOMB', 347, 100, 'r'],
+    ['Y', 'SMOKE SCREEN', 380, 66, 'r'], ['B', 'CANNON - MISSILE - UP TORPEDO', 418, 100, 'r'], ['X', 'DEPTH CHARGE - BOMB - MINE', 347, 100, 'r'],
     ['A', 'MACHINE GUN - TORPEDO - LAUNCH', 380, 132, 'r'], ['RIGHT STICK', 'ANGLE AND POWER', 320, 172, 'r']] },
   ps: { img: () => img.padPs, labels: [
     ['L2', 'CANNON - MISSILE - UP TORPEDO', 150, 6, 'l'], ['L1', 'PREVIOUS VEHICLE', 175, 20, 'l'], ['D-PAD', 'ZOOM', 165, 135, 'l'],
     ['SHARE', 'MENU', 250, 50, 'l'], ['LEFT STICK', 'DRIVE - CLIMB - DIVE', 280, 235, 'l'], ['PRESS IT IN', 'STOP', 280, 250, 'l'],
     ['R2', 'MACHINE GUN', 620, 6, 'r'], ['R1', 'NEXT VEHICLE', 595, 20, 'r'], ['OPTIONS', 'MENU', 520, 50, 'r'],
-    ['TRIANGLE', 'SMOKE SCREEN', 605, 88, 'r'], ['CIRCLE', 'CANNON - MISSILE - UP TORPEDO', 655, 133, 'r'], ['SQUARE', 'DEPTH CHARGE - BOMB', 555, 133, 'r'],
+    ['TRIANGLE', 'SMOKE SCREEN', 605, 88, 'r'], ['CIRCLE', 'CANNON - MISSILE - UP TORPEDO', 655, 133, 'r'], ['SQUARE', 'DEPTH CHARGE - BOMB - MINE', 555, 133, 'r'],
     ['CROSS', 'MACHINE GUN - TORPEDO - LAUNCH', 605, 183, 'r'], ['RIGHT STICK', 'ANGLE AND POWER', 490, 235, 'r']] },
 };
 // the controller's kind, from what the browser calls it (a PlayStation pad, or anything else as an Xbox pad)
@@ -3683,7 +3705,7 @@ function drawKeysArt(L0) {
     ['MENU', 'ESC', 'ESC'], ['TOWER SHIP SUB PLANE', '1 2 3 4', '8 9 0 7'], ['DRIVE LEFT - RIGHT', 'A D', 'LEFT RIGHT'],
     ['AIM - CLIMB - DIVE', 'W S', 'UP DOWN'], ['ZOOM OUT - IN', 'Q E', ', .'], ['POWER', 'Z C', "; '"],
     ['FIRE - MISSILE - TORPEDO', 'SPACE', 'ENTER'], ['DEPTH CHARGE - BOMB - UP TORPEDO', 'X', '/ OR CTRL'],
-    ['MACHINE GUN', 'F', 'RIGHT SHIFT'], ['SMOKE SCREEN', 'G', '\\'],
+    ['MACHINE GUN - MINE', 'F', 'RIGHT SHIFT'], ['SMOKE SCREEN', 'G', '\\'],
   ];
   const ts = aw > 520 && ah > 300 ? 2 : 1, rh = ts * 5 + (ts === 2 ? 6 : 4);
   const tableH = (tableRows.length + 1) * rh + 18;
@@ -3978,7 +4000,7 @@ function titleLayout() {
         show: !(one && sd === 1 && lobbyMode() !== 'story'), enemy: one && sd === 1 };
     }),
     // the middle: PRESS TO JOIN level with TEAM, then the ones that pressed, each between its two arrows
-    mid: { cx: x + (w >> 1), rows: [0, 1, 2, 3, 4, 5].map(k => fy - 20 + (k ? 10 : 0) + k * (rh + 4)), rs, rw: 190 },
+    mid: { cx: x + (w >> 1), rows: [0, 1, 2, 3, 4, 5].map(k => fy - 20 + (k ? 14 : 0) + k * (rh + 10)), rs, rw: 230 },
     linkBtn: [x + (w >> 1) - 60, y + h - 70, 120, 40],
     hostBtn: [x + 40, y + 120, w - 80, 46], joinBtn: [x + 40, y + 190, w - 80, 46],
     codeRect: [x + (w >> 1) - 90, y + 110, 180, 52], goBtn: [x + (w >> 1) - 60, y + 184, 120, 40],
@@ -4006,9 +4028,10 @@ function modeButton(x, y, w, h, label, on, sc = 2) {
   drawText(ug, label, x + w / 2, y + (h >> 1) - (sc === 2 ? 5 : 3), on ? '#1b2a3a' : '#ffffff', sc, 'center');
 }
 // a small solid arrow (the side picker's), its point at (x, y), pointing left (d -1) or right (d 1)
+// (user Oct 24: twice as big - 14 wide, 27 tall)
 function menuArrow(x, y, d, col = '#ffd23a') {
   ug.fillStyle = col;
-  for (let k = 0; k < 7; k++) { const hh = k; ug.fillRect(Math.round(x - d * k) - (d > 0 ? 1 : 0), y - hh, 1, 2 * hh + 1); }
+  for (let k = 0; k < 14; k++) ug.fillRect(Math.round(x - d * k) - (d > 0 ? 1 : 0), y - k, 1, 2 * k + 1);
 }
 // a click for every press on the menus (user Oct 24: every button press makes a sound, the iPad too)
 function menuClick() { audioInit(); sfxClick(gunCtl[0]); }
@@ -4035,7 +4058,7 @@ function drawTitle() {
     if (mid && e.dev) {
       // the sketch's picker: the controller's name between two solid arrows, left and right to pick a team
       const tw = drawText(ug, e.name, cx, y, '#ffd23a', rs, 'center'), ax = (tw >> 1) + 12;
-      menuArrow(cx - ax - 6, y + 4, -1); menuArrow(cx + ax + 6, y + 4, 1);
+      menuArrow(cx - ax - 13, y + 4, -1); menuArrow(cx + ax + 13, y + 4, 1);
       return;
     }
     const t = one && e.dev ? e.name + '  X' : e.name;
@@ -4114,7 +4137,7 @@ function lobbyHit(ux, uy, T) {
   const test = (list, cx, rows, rw, mid) => {
     for (let i = 0; i < Math.min(list.length, rows.length); i++) {
       const e = list[i];
-      if (!inRect(ux, uy, cx - rw / 2, rows[i] - 2, rw, rh + 1)) continue;
+      if (!inRect(ux, uy, cx - rw / 2, rows[i] - (mid ? 7 : 2), rw, rh + (mid ? 11 : 1))) continue;   // (the middle's big arrows)
       if (e.free) return { act: 'lAdd' };
       if (!e.dev) return { act: 'none' };
       if (mid) { const dx = ux - cx; return Math.abs(dx) < rw * 0.18 ? { act: 'lBack', dev: e.dev } : { act: 'lMove', dev: e.dev, dir: Math.sign(dx) }; }
@@ -4539,7 +4562,7 @@ window.addEventListener('keydown', e => {
   // G / backslash: the battleship's smoke screen
   if (code === 'KeyG' || code === 'Backslash') { e.preventDefault(); if (!ui.menu && !e.repeat) keyDo(code === 'KeyG' ? 0 : 1, p => { if (crew[p].mode === 'ship') act(p, 'smoke'); }); return; }
   if (code in SWITCH_KEYS) { e.preventDefault(); const [s, k] = SWITCH_KEYS[code]; if (!ui.menu && !e.repeat) keyDo(s, p => pressSwitcher({ p, k, home: false })); return; }
-  if (code in MG_KEYS) { e.preventDefault(); if (!ui.menu) keyDo(MG_KEYS[code], p => { if (crew[p].mode === 'plane') planes[p].mg = true; else mgHold[p] = true; }); return; }
+  if (code in MG_KEYS) { e.preventDefault(); if (!ui.menu) keyDo(MG_KEYS[code], p => { if (crew[p].mode === 'plane') planes[p].mg = true; else if (crew[p].mode === 'sub') { if (!e.repeat) act(p, 'mine'); } else mgHold[p] = true; }); return; }
   if (code in DC_KEYS) {
     e.preventDefault();
     if (!ui.menu && !e.repeat) keyDo(DC_KEYS[code], p => { const m = crew[p].mode; if (m === 'plane') act(p, 'bomb'); else if (m === 'ship') act(p, 'dc'); else if (m === 'sub') act(p, 'torp', true); });
@@ -4600,6 +4623,7 @@ function padWeapon(p, slot, down) {
     else if (m === 'sub') act(p, 'torp', true);
     else if (m === 'ship' || m === 'tower') act(p, 'fire');
   } else if (slot === 3 && down && m === 'ship') act(p, 'dc');
+  else if (slot === 3 && down && m === 'sub') act(p, 'mine');
   else if (slot === 3 && down && m === 'plane') act(p, 'bomb');
   else if (slot === 4 && down && m === 'ship') act(p, 'smoke');
 }
@@ -5492,7 +5516,7 @@ const SUB_ACC = 84, SUB_DRAG_L = 0.42, SUB_DRAG_Q = 0.0016, SUB_VZ = 38;
 function makeSub(id, d) {
   return {
     id, dock: d, facing: -d.dir, x: d.subBerth, y: SUB_GATE_Y, vx: 0, vy: 0, a: 0, throttle: 0, input: 0, dive: 0, depthT: SUB_GATE_Y,
-    state: 'docked', lvl: new Array(SUB_SECTIONS).fill(0), away: false, rising: false, autoDive: 0, scorch: [], art: null, parts: null, turn: null, torps: TORP_MAX, tk: 0, resupT: 0,
+    state: 'docked', lvl: new Array(SUB_SECTIONS).fill(0), away: false, rising: false, autoDive: 0, scorch: [], art: null, parts: null, turn: null, torps: TORP_MAX, tk: 0, resupT: 0, mines: MINE_MAX, mk: 0,
     bubbleAcc: 0, fixIdx: -1, sinkT: 0, weld: 0, leak: 0, rest: 0, ventAcc: 0,
   };
 }
@@ -5731,7 +5755,8 @@ function stepSub(sb, dt) {
   }
   sb.tk = Math.max(0, sb.tk - dt);
   // resupplied while berthed
-  if (sb.state === 'docked' && sb.torps < TORP_MAX && (sb.resupT += dt) > 2) { sb.resupT = 0; sb.torps++; }
+  if (sb.state === 'docked' && (sb.torps < TORP_MAX || (sb.mines || 0) < MINE_MAX) && (sb.resupT += dt) > 2) { sb.resupT = 0; if (sb.torps < TORP_MAX) sb.torps++; else sb.mines = (sb.mines || 0) + 1; }
+  if (sb.mk > 0) sb.mk = Math.max(0, sb.mk - dt);
   // depth: the console wheel sets the depth she makes for; she steers there and holds it
   sb.depthT = clamp(sb.depthT === undefined ? WATER_Y : sb.depthT, WATER_Y, subMaxY(sb.x));
   const goalY = harboured ? SUB_GATE_Y : sb.depthT;
@@ -6581,6 +6606,7 @@ function detonateCharge(c) {
   }
   for (const b of sailboats) if ((b.state === 'sail' || b.state === 'sinking') && Math.hypot(Math.max(0, Math.abs(x - b.x) - sailHalf(b)), y - b.y) < DC_RADIUS) { if (b.state === 'sail') sinkSailboat(b, b.x, b.y - 4, 0); else smashSailboat(b, b.x, b.y, 3); }
   for (const b of buoys) if (b.state === 'float' && b.player !== c.owner && Math.hypot(x - b.x, y - surfaceY(b.x)) < DC_RADIUS) destroyBuoy(b, b.x, surfaceY(b.x) - 6);
+  mineChain(x, y, DC_RADIUS * 0.9);                       // (mines nearby go up with it)
   // the nearest of the enemy pier's pillars, if it's close enough
   for (const d of docks) {
     if (d.player === c.owner || d.pierGone) continue;
@@ -6617,6 +6643,133 @@ function drawDcharges(x0, x1) {
       C.fillStyle = 'rgba(255,80,60,0.35)'; C.fillRect(-Math.round(r / 2) - r, -h / 2 - r * 2, r * 3, r * 3);
     }
     C.restore();
+  }
+}
+
+/* ---------------- Mines (user Oct 24 night): the submarine's third weapon ----------------
+   Laid off her stern, a mine floats up and stays bobbing on the surface until anything touches it: a battleship, a
+   sub, a yacht, a plane skimming the water or falling into it, a shell, a missile, a bomb, machine-gun rounds, a
+   torpedo, another blast. Each sub carries three (more at her pier). Contact sets it off as a depth charge going off
+   right at the surface, with a heavier blow to whatever touched it; nearby mines go up with it. For the first
+   moments its own sub can't set it off (she's laying it); after that it's anybody's - yours too. */
+const mines = [], MINE_MAX = 3, MINE_RELOAD = 2.5, MINE_ARM = 2, MINE_R = 7;
+function layMine(sb) {
+  if (!sb || sb.state !== 'out') return;
+  if ((sb.mk || 0) > 0) return;
+  if (!subClear(sb) || (sb.mines || 0) <= 0) { sfxEmpty(sb.x); return; }   // (in the harbour: safety on)
+  sb.mines--; sb.mk = MINE_RELOAD;
+  const face = sb.turn ? sb.turn.from : sb.facing, x = sb.x - face * SUB_L * 0.5;
+  mines.push({ x, y: sb.y + 2, vx: sb.vx * 0.3 - face * 10, vy: 6, owner: sb.id, t: 0, float: false, boomT: 0, ph: Math.random() * 6 });
+  sfxClink(telegraphs[sb.id]); sfxSubPlanes(x, 1);
+  for (let k = 0; k < 6; k++) addBubble(x + rnd(-4, 4), sb.y + rnd(-3, 3), rnd(-10, 10), -rnd(20, 40), rnd(0.8, 1.8));
+}
+// the point on the segment a..b nearest to (px, py): how far it is
+function segDist(ax, ay, bx, by, px, py) {
+  const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy, u = L > 0 ? clamp(((px - ax) * dx + (py - ay) * dy) / L, 0, 1) : 0;
+  return Math.hypot(ax + dx * u - px, ay + dy * u - py);
+}
+// whatever is touching mine m right now: [kind, thing] or null
+function mineContact(m, dt) {
+  const armed = m.t > MINE_ARM, R = MINE_R;
+  for (const sh of ships) {
+    if (!sh || sh.state !== 'afloat') continue;
+    if (Math.abs(m.x - sh.x) > SHIP_L * 0.6) continue;
+    for (const [ox, oy] of [[0, -R], [-R, 0], [R, 0], [0, 0], [0, R * 0.6]]) { const sec = hitTest(sh, m.x + ox, m.y + oy); if (sec >= 0) return ['ship', sh, sec]; }
+  }
+  for (const sb of subs) {
+    if (!sb || (sb.state !== 'out' && sb.state !== 'docked')) continue;
+    if (sb.id === m.owner && !armed) continue;
+    if (Math.abs(m.x - sb.x) > SUB_L * 0.6 || Math.abs(m.y - sb.y) > 40) continue;
+    for (const [ox, oy] of [[0, -R], [-R, 0], [R, 0], [0, R], [0, 0]]) { const sec = subHitTest(sb, m.x + ox, m.y + oy); if (sec >= 0) return ['sub', sb, sec]; }
+  }
+  for (const b of sailboats) if (b.state === 'sail' && Math.abs(m.x - b.x) < sailHalf(b) + R && (sailHullHit(b, m.x - R, m.y) || sailHullHit(b, m.x + R, m.y) || sailHullHit(b, m.x, m.y - R))) return ['sail', b];
+  for (const pl of planes.concat(oldPlanes)) {
+    if (!pl || (pl.state !== 'fly' && pl.state !== 'down')) continue;
+    if (Math.hypot(pl.x - m.x, pl.y - m.y) < (pl.state === 'down' ? 16 : 0) || (pl.state === 'fly' && planeHitTest(pl, m.x, m.y - R))) return ['plane', pl];
+  }
+  // shots: each one's path this frame (fast ones would jump straight over it)
+  const shot = (arr, kind, r) => {
+    for (let i = arr.length - 1; i >= 0; i--) {
+      const s = arr[i];
+      if (s.x < m.x - 80 || s.x > m.x + 80) continue;
+      if (segDist(s.x - (s.vx || 0) * dt, s.y - (s.vy || 0) * dt, s.x, s.y, m.x, m.y) < R + r) { arr.splice(i, 1); return [kind, s]; }
+    }
+    return null;
+  };
+  return shot(shells, 'shell', 2) || shot(bullets, 'bullet', 1.5) || shot(torps, 'torp', 3) || null;
+}
+function stepMines(dt) {
+  for (let i = mines.length - 1; i >= 0; i--) {
+    const m = mines[i];
+    m.t += dt; m.ph += dt;
+    if (m.boomT > 0) { m.boomT -= dt; if (m.boomT <= 0) { mines.splice(i, 1); detonateMine(m, null); } continue; }
+    const sy = surfaceY(m.x) - 2;                      // (afloat it rides high: its horns and lamp above the water)
+    if (!m.float) {
+      // up she comes, buoyant, swaying a little, with a few bubbles
+      m.vy += (-38 - m.vy) * 1.5 * dt; m.vx *= 1 - 1.5 * dt;
+      m.x += m.vx * dt + Math.sin(m.ph * 2.2) * 3 * dt; m.y += m.vy * dt;
+      if (Math.random() < dt * 5) addBubble(m.x, m.y - 3, rnd(-3, 3), -rnd(15, 30), rnd(0.5, 1.1));
+      if (m.y <= sy) { m.float = true; m.y = sy; spawnFoam(m.x, rnd(0.8, 1.4)); sfxSplash(m.x, 0.08); }
+    } else {
+      // afloat: it rides the swell where it came up, drifting a hair
+      m.vx *= 1 - 0.8 * dt; m.x += m.vx * dt; m.y += (sy - m.y) * Math.min(1, 8 * dt);
+    }
+    const hit = mineContact(m, dt);
+    if (hit) { mines.splice(i, 1); detonateMine(m, hit); }
+  }
+}
+function detonateMine(m, hit) {
+  // a depth charge going off right under the surface, everyone's (owner -1): ships, subs, yachts, buoys, pillars
+  detonateCharge({ x: m.x, y: m.y + 2, owner: -1 });
+  for (let k = 0; k < 10; k++) flames.length < 600 && spawnFlame(m.x + rnd(-6, 6), m.y - rnd(0, 6), rnd(-30, 30), -rnd(40, 120), 1, rnd(2, 4), 0.7);
+  flashes.push({ x: m.x, y: m.y - 4, r: 22, life: 0, max: 0.14 });
+  // and a harder blow to whatever touched it
+  if (hit && !netGuestHold()) {
+    const [kind, o, sec] = hit;
+    if (kind === 'ship') damageSection(o, sec, 1, m.x, m.y);           // (with the blast's own: two steps - badly holed, not sunk outright)
+    else if (kind === 'sub') hitSub(o, sec, m.x, m.y);
+    else if (kind === 'plane' && o.state === 'fly') downPlane(o);
+  }
+  // planes low over it are caught in the blast
+  if (!netGuestHold()) for (const pl of planes) if (pl && pl.state === 'fly' && Math.hypot(pl.x - m.x, pl.y - m.y) < 45) hitPlane(pl, 1, pl.x, pl.y);
+}
+// another blast near a mine sets it off a moment later (not in the same instant: they go up one after another)
+function mineChain(x, y, r) {
+  for (const m of mines) if (!m.boomT && Math.hypot(m.x - x, m.y - y) < r) m.boomT = 0.12 + Math.random() * 0.15;
+}
+// the mine: a dark steel ball with horns, half in the water; armed, a red lamp blinks on top
+let mineArt = null;
+function buildMineArt() {
+  const N = 17, c = makeCanvas(N, N), g = c.getContext('2d'), o = 8;
+  const px = (x, y, col) => { g.fillStyle = col; g.fillRect(x, y, 1, 1); };
+  // the horns first (they stick out past the ball)
+  for (let k = 0; k < 8; k++) {
+    const a = k / 8 * Math.PI * 2 + Math.PI / 8, ux = Math.cos(a), uy = Math.sin(a);
+    for (let r = 5; r <= 7; r++) px(Math.round(o + ux * r), Math.round(o + uy * r), r === 7 ? '#8a9099' : '#1c1f24');
+  }
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const d = Math.hypot(x - o, y - o);
+    if (d > 5.6) continue;
+    const lit = (x - o) * -0.5 + (y - o) * -0.7;
+    px(x, y, d > 4.7 ? '#121418' : lit > 2.4 ? '#7e8892' : lit > 0.6 ? '#4c545e' : lit > -1.8 ? '#353b43' : '#24282e');
+  }
+  px(o - 2, o - 3, '#c4ccd4');
+  mineArt = c;
+}
+const MINE_K = 1.05;                                // world units a pixel of its drawing (about 18 across, horns and all)
+function drawMines(x0, x1) {
+  if (!mines.length) return;
+  if (!mineArt) buildMineArt();
+  const k = MINE_K * SV, s = scaled(mineArt, k, true);
+  for (const m of mines) {
+    if (m.x < x0 - 20 || m.x > x1 + 20) continue;
+    const X = Math.round(PX(m.x) - s.width / 2), Y = Math.round(PY(m.y + (m.float ? Math.sin(m.ph * 1.7) * 0.6 : 0)) - s.height / 2);
+    C.drawImage(s, X, Y);
+    if (m.t > MINE_ARM && Math.floor((time + m.ph) * 2.4) % 2 === 0) {
+      const r = Math.max(1, Math.round(1.2 * SV));
+      C.fillStyle = '#ff3324'; C.fillRect(Math.round(PX(m.x)) - (r >> 1), Y + Math.round(3 * k) - r, r, r);
+      C.fillStyle = 'rgba(255,80,60,0.3)'; C.fillRect(Math.round(PX(m.x)) - (r >> 1) - r, Y + Math.round(2 * k) - 2 * r, r * 3, r * 3);
+    }
   }
 }
 
@@ -6748,7 +6901,9 @@ function tintRed(src, col) {
 function tintGlass(src, col) {
   const c = copyCanvas(src), x = c.getContext('2d'), W = c.width, H = c.height, id = x.getImageData(0, 0, W, H), d = id.data;
   const lc = 0.3 * col[0] + 0.59 * col[1] + 0.11 * col[2] || 1;
-  const blue = i => { const r = d[i], g = d[i + 1], b = d[i + 2]; return d[i + 3] > 0 && b > r * 1.18 && b >= g * 0.98 && b - r > 12; };
+  // (the glass is a deep blue, b/r about 2.5; the steel frame is a grey with a little blue in it, b/r about 1.3 - user
+  // Oct 24 night: the frame kept being tinted, so only the strongly blue pixels take the team's colour)
+  const blue = i => { const r = d[i], g = d[i + 1], b = d[i + 2]; return d[i + 3] > 0 && b > r * 1.6 && b >= g * 0.98 && b - r > 12; };
   const seen = new Uint8Array(W * H), stack = [];
   for (let sx = Math.round(W * 0.2); sx <= Math.round(W * 0.8); sx += 4) stack.push(Math.round(H * 0.55) * W + sx);
   while (stack.length) {
@@ -7687,6 +7842,14 @@ function stepSailboats(dt) {
         if (!sh || sh.state !== 'afloat') continue;
         const ahead = (sh.x - b.x) * b.face, gap = Math.abs(sh.x - b.x) - SHIP_L / 2 - sailHalf(b);
         if (ahead > 0 && gap < 70) { b.face = -b.face; b.hold = rnd(10, 20); b.vx *= 0.4; b.avoid = 6; break; }
+      }
+      // mines (user Oct 24 night): she goes about rather than sail onto one - unless there's one each side of her,
+      // close: then there's nowhere to go, and she runs onto one of them
+      if (b.avoid <= 0 && mines.length) {
+        let gl = 1e9, gr = 1e9;
+        for (const m of mines) { const g = Math.abs(m.x - b.x) - sailHalf(b); if (m.x < b.x) gl = Math.min(gl, g); else gr = Math.min(gr, g); }
+        const trapped = gl < 120 && gr < 120, ahead = b.face > 0 ? gr : gl;
+        if (!trapped && ahead < 80) { b.face = -b.face; b.hold = rnd(10, 20); b.vx *= 0.3; b.avoid = 3; }
       }
       const downwind = Math.sign(wind) === b.face;
       const want = b.face * (5 + Math.abs(wind) * (downwind ? 0.3 : 0.12));
@@ -9221,6 +9384,7 @@ function physics(dt) {
   stepFleet(dt);
   stepChunks(dt);
   stepDcharges(dt);
+  stepMines(dt);
   stepScreens(dt);
   stepTorps(dt);
   stepSailboats(dt);
@@ -11955,7 +12119,7 @@ function renderObjects() {
   for (const sb of oldSubs) if (sb.parts) drawSubParts(sb);
   for (const sb of subs) if (sb.parts) drawSubParts(sb);
   drawRockForms(x0, x1);                                  // (standing in the sand: its foot is hidden under it)
-  drawTiles(img.seabed, img.seabedFlip, 1, SEABED_TOP, SEABED_K, '#3a3122');   // (and the ground under the sand)
+  drawTiles(img.seabed, img.seabedFlip, 1, SEABED_TOP, SEABED_K, '#54463a');   // (and the ground under the sand)
   drawReefItems(reef, x0, x1);                            // (boulders, corals, sponges)
   drawAlgae(x0, x1);
   // spent shells half-sunk in the sand
@@ -11988,6 +12152,7 @@ function renderObjects() {
   for (const sb of subs) { const cl = harbourClip(sb); drawSub(sb); if (cl) C.restore(); }
   for (const k of chunks) if (k.x > x0 - 60 && k.x < x1 + 60) drawChunk(k);
   drawDcharges(x0, x1);
+  drawMines(x0, x1);
   drawTorps(x0, x1);
   drawPlanes(x0, x1);
   for (let p = 0; p < 2; p++) if (crew[p].mode === 'boat') drawBoat(p);
@@ -12021,6 +12186,7 @@ function renderObjects() {
   fillBelowSurface(0, Bt);
   ot = ema('obOver', ot);
   drawDeepWater();
+  drawFgRocks();                                          // (the near-black rocks in front of the floor - after the water's tint, so they stay black: user Oct 24 night)
   drawShipShadows(x0, x1);
   ot = ema('obShade', ot);
   drawShocks(x0, x1);
@@ -12852,7 +13018,7 @@ function buildReef() {
     reef.push({ kind, x, sp: paintCoral(kind, R), s: 0.8 + R() * 0.7, sink: 1 });
   }
   reef.sort((a, b) => a.x - b.x); coastFront.sort((a, b) => a.x - b.x);
-  reefStrips = null;                                   // (the ridges behind: made again for this world's light)
+  reefStrips = null; fgStrip = null;                   // (the ridges behind: made again for this world's light)
 }
 // the sprites, standing on the floor (rocks sunk into the sand a little), drawn as pixels at this zoom
 function drawReefItems(list, x0, x1) {
@@ -12874,7 +13040,7 @@ function drawRockForms(x0, x1) {
 }
 /* The deep beyond: three ridges of rock, each further off a little bluer and fainter, each its own tileable strip
    of mesas, spires and broken slopes (no smooth waves), drawn in parallax and sinking with the floor in front. */
-const REEF_STRIPS = [[0.45, 118, 72, 0.78], [0.6, 84, 56, 0.64], [0.72, 52, 42, 0.5]];   // [parallax, how far above the floor its base is, height, how much of the water's blue]
+const REEF_STRIPS = [[0.45, 150, 150, 0.8], [0.6, 96, 110, 0.66], [0.72, 54, 70, 0.52]];   // [parallax, how far above the floor its base is, height, how much of the water's blue]
 function buildReefStrips() {
   const water = [30, 88, 170], R = seededRng(4242);
   reefStrips = REEF_STRIPS.map(([p, above, hU, tone], li) => {
@@ -12891,6 +13057,42 @@ function buildReefStrips() {
     // the strip's colours, taken right down to its bottom row: under it, the same as its foot
     return { p, above, sp, flip: flipCanvas(sp), k: REEF_K };
   });
+}
+/* The foreground (user Oct 24 night, with a picture): in front of everything on the floor, a near-black skyline of
+   rocks and weed, a little lower than the sand the sub sits on (that stays a clear plane: it's her collision), scrolling
+   faster than the world so it reads as nearer, and black right down below it. */
+const FG_P = 1.3, FG_K = REEF_K * 1.25, FG_COL = [10, 15, 30], FG_RIM = [24, 34, 60], FG_WEED = [16, 30, 30];
+let fgStrip = null;
+function buildFgStrip() {
+  const R = seededRng(777), W = 1000, H = 120, top = new Float32Array(W).fill(H - 6);
+  // a tileable run of rock clusters with low ground (and the sand behind) between them
+  const lump = (cx, ww, hh) => { for (let j = -Math.ceil(ww); j <= ww; j++) { const c = ((Math.round(cx) + j) % W + W) % W, u = j / ww, t = H - 6 - hh * Math.pow(Math.max(0, 1 - u * u), 0.5) * (0.94 + 0.06 * Math.cos(j * 0.45 + cx)); if (t < top[c]) top[c] = t; } };
+  for (let x = 0; x < W - 40;) {
+    const cw = 24 + R() * 110, n = 1 + Math.floor(cw / 28 + R() * 2), peak = H * (0.3 + R() * 0.62);
+    for (let k = 0; k < n; k++) { const u = (k + 0.5) / n; lump(x + u * cw, 6 + R() * cw * 0.32, peak * (0.35 + 0.65 * Math.sin(u * Math.PI)) * (0.7 + R() * 0.3)); }
+    x += cw + 10 + R() * 70;
+  }
+  for (let c = 0; c < W; c++) top[c] = Math.round(Math.max(3, top[c]));
+  const c = makeCanvas(W, H), g = c.getContext('2d');
+  g.fillStyle = css3(FG_COL);
+  for (let x = 0; x < W; x++) g.fillRect(x, top[x], 1, H - top[x]);
+  // a faint rim where the light from above catches the tops, and a few lit specks
+  g.fillStyle = css3(FG_RIM);
+  for (let x = 0; x < W; x++) { const l = top[(x + W - 1) % W], r = top[(x + 1) % W]; if (top[x] <= l + 1 && top[x] <= r + 1) g.fillRect(x, top[x], 1, 1); if (R() < 0.05) g.fillRect(x, top[x] + 2 + Math.floor(R() * 6), 1, 1); }
+  // weed: dark strands standing up out of the rocks
+  g.fillStyle = css3(FG_WEED);
+  for (let i = 0; i < 26; i++) {
+    const x = Math.floor(R() * W), y = top[x] + 2;
+    const len = 10 + R() * 26, lean = (R() - 0.5) * 0.5;
+    for (let k = 0; k < len; k++) { const xx = Math.round(x + Math.sin(k * 0.35 + i) * 1.5 + k * lean); g.fillRect(((xx % W) + W) % W, Math.round(y - k), 1, 1); }
+  }
+  let hi = H; for (let x = 0; x < W; x++) hi = Math.min(hi, top[x]);
+  fgStrip = { sp: c, flip: flipCanvas(c), hi };
+}
+function drawFgRocks() {
+  if (!fgStrip) buildFgStrip();
+  // its tallest tops come up to just under the sand line (whole blocks at this zoom)
+  drawTiles(fgStrip.sp, fgStrip.flip, FG_P, SEABED_Y + 12 - fgStrip.hi * FG_K, FG_K, css3(FG_COL));
 }
 function drawReefStrips() {
   if (!reefStrips) buildReefStrips();
@@ -13262,15 +13464,25 @@ function drawSub(sb) {
   const fk = subTurnFrame(sb), seq = TURN_SEQ[fk];
   if (sb.turn && seq >= 0) {
     // part way round: one of the turning drawings, the bow swinging toward us and out the other side
-    const F = subTurnOf(sb)[seq], dmg = sb.lvl.some(l => l > 0), side = fk < 3 ? sb.turn.from : sb.turn.to;
+    // (section by section, as side-on: a holed bow shows holed, the rest of her stays whole - user Oct 24 night;
+    // the sections run across the drawing left to right, as her hit box does mid-turn)
+    const F = subTurnOf(sb)[seq], side = fk < 3 ? sb.turn.from : sb.turn.to;
     const s = Math.round(SUB_K * SV * 160) / 160;
     const nightK = clamp(E.night * 1.1 + E.sunset * 0.3, 0, 0.92);
-    for (const set of nightK > 0.02 ? [dmg ? F.D : F.I, dmg ? F.KD : F.KI] : [dmg ? F.D : F.I]) {
-      const fr = set[side], sp = scaled(fr.c, s, true);
-      if (set === F.KD || set === F.KI) C.globalAlpha = nightK;
-      C.drawImage(sp, PX(sb.x) - Math.round(fr.ax * s), PY(sb.y) - Math.round(fr.ay * s));
-      C.globalAlpha = 1;
+    for (const [Iset, Dset, k] of nightK > 0.02 ? [[F.I, F.D, 1], [F.KI, F.KD, nightK]] : [[F.I, F.D, 1]]) {
+      C.globalAlpha = k;
+      const fi = Iset[side], fd = Dset[side], si = scaled(fi.c, s, true), sd = scaled(fd.c, s, true);
+      const xi = PX(sb.x) - Math.round(fi.ax * s), yi = PY(sb.y) - Math.round(fi.ay * s);
+      const xd = PX(sb.x) - Math.round(fd.ax * s), yd = PY(sb.y) - Math.round(fd.ay * s);
+      for (let q = 0; q < SUB_SECTIONS; q++) {
+        // (the cuts are made in the whole drawing's columns, on screen, so the holed one lines up with it)
+        const dm = sb.lvl[q] > 0, sp = dm ? sd : si, X = dm ? xd : xi, Y = dm ? yd : yi;
+        const sa = xi + (q ? Math.round(q * si.width / SUB_SECTIONS) : -9999), sb2 = xi + (q < SUB_SECTIONS - 1 ? Math.round((q + 1) * si.width / SUB_SECTIONS) : 99999);
+        const ca = Math.max(0, sa - X), cb = Math.min(sp.width, sb2 - X);
+        if (cb > ca) C.drawImage(sp, ca, 0, cb - ca, sp.height, X + ca, Y, cb - ca, sp.height);
+      }
     }
+    C.globalAlpha = 1;
     return;
   }
   const s = Math.round(SUB_K * SV * 160) / 160;
@@ -14805,6 +15017,9 @@ function cpuSub0(B, dt) {
     const rise = Math.max(0.3, (sb.y - WATER_Y) / 140), tx = E.ship.x + E.ship.vx * rise * T.lead, dx = tx - sb.x;
     cpuDrive(B, Math.abs(dx) > 14 ? Math.sign(dx) : 0);
     if (Math.abs(dx) < T.subTol && sb.y > WATER_Y + 35 && sb.tk <= 0 && !sb.turn && Math.random() < dt * (2 + 4 * B.level)) { fireTorpedo(sb, true); cpuCount(p, 'torp'); }
+    // a mine in her path: the battleship coming this way, still well off (and not off its own pier)
+    { const gap = Math.abs(E.ship.x - sb.x), coming = Math.sign(E.ship.vx) === Math.sign(sb.x - E.ship.x) && Math.abs(E.ship.vx) > 8;
+      if (coming && gap > 180 && gap < 650 && (sb.mines || 0) > 0 && !(sb.mk > 0) && subClear(sb) && Math.random() < dt * 0.15 * (1 + B.level)) { layMine(sb); cpuCount(p, 'mine'); } }
     return;
   }
   if (E.sub) {
@@ -15721,7 +15936,7 @@ async function start(data) {
     towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
-    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
+    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), fgDump: () => { if (!fgStrip) buildFgStrip(); return fgStrip.sp.toDataURL(); }, reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
     gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
