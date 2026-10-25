@@ -2129,7 +2129,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 00:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 00:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10160,20 +10160,22 @@ layout(location=0) in vec2 a_pos;
 layout(location=1) in vec2 a_uv;
 layout(location=2) in vec4 a_col;
 layout(location=3) in vec2 a_aux;
+layout(location=4) in vec4 a_mul;
+layout(location=5) in vec4 a_add;
 uniform vec2 u_size;
-out vec2 v_uv; out vec4 v_col;
+out vec2 v_uv; out vec4 v_col; out vec4 v_mul; out vec4 v_add;
 flat out int v_mode; flat out int v_slot; flat out float v_row; flat out float v_k;
 void main() {
   vec2 p = a_pos / u_size;
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-  v_uv = a_uv; v_col = a_col;
+  v_uv = a_uv; v_col = a_col; v_mul = a_mul; v_add = a_add;
   int q = int(a_aux.x + 0.5);
   v_mode = q & 7; v_slot = (q >> 3) & 15; v_row = float(q >> 7); v_k = a_aux.y;
 }`;
 const GL_FS = `#version 300 es
 precision highp float; precision highp int;
 uniform sampler2D u_t0, u_t1, u_t2, u_t3, u_t4, u_t5, u_t6, u_t7, u_grad;
-in vec2 v_uv; in vec4 v_col;
+in vec2 v_uv; in vec4 v_col; in vec4 v_mul; in vec4 v_add;
 flat in int v_mode; flat in int v_slot; flat in float v_row; flat in float v_k;
 out vec4 o;
 vec4 tx(int s, vec2 uv) {
@@ -10187,6 +10189,15 @@ vec4 tx(int s, vec2 uv) {
 void main() {
   if (v_mode == 0) { o = v_col; return; }
   if (v_mode == 1) { o = tx(v_slot, v_uv) * v_col; return; }
+  if (v_mode == 4) {
+    // a tinted sprite (the copies darkArt / warmed / fogged / coastTinted / moonArt 'mB' made on canvases):
+    // colour x mul + add, the add laid over the shape as 'source-atop' would; mul.a set: every pixel of the
+    // shape made opaque first (the coast's recolouring did that)
+    vec4 t = tx(v_slot, v_uv), m = v_mul;
+    if (v_mul.a > 0.5) { if (t.a <= 0.0) { o = vec4(0.0); return; } o = vec4(t.rgb / t.a * m.rgb + v_add.rgb, 1.0) * v_col; }
+    else o = vec4(t.rgb * m.rgb + v_add.rgb * t.a, t.a) * v_col;
+    return;
+  }
   float t = v_mode == 2 ? v_uv.x : length(v_uv) - v_k;
   t = clamp(t, 0.0, 1.0);
   o = textureLod(u_grad, vec2((t * 255.0 + 0.5) / 256.0, (v_row + 0.5) / 256.0), 0.0) * v_col.a;
@@ -10225,14 +10236,17 @@ function glSetup() {
   for (let i = 0; i < 8; i++) gl.uniform1i(gl.getUniformLocation(p, 'u_t' + i), i);
   gl.uniform1i(gl.getUniformLocation(p, 'u_grad'), 8);
   GLR.uSize = gl.getUniformLocation(p, 'u_size');
-  // the quad batch: 4 vertices a quad, 7 numbers a vertex (x, y, u, v, colour as 4 bytes, mode, k)
-  GLR.ab = new ArrayBuffer(GLR.MAXQ * 4 * 28); GLR.f32 = new Float32Array(GLR.ab); GLR.u32 = new Uint32Array(GLR.ab);
+  // the quad batch: 4 vertices a quad, 9 numbers a vertex (x, y, u, v, colour as 4 bytes, mode, k, and a tint's
+  // multiply and add as 4 bytes each)
+  GLR.ab = new ArrayBuffer(GLR.MAXQ * 4 * 36); GLR.f32 = new Float32Array(GLR.ab); GLR.u32 = new Uint32Array(GLR.ab);
   GLR.vao = gl.createVertexArray(); gl.bindVertexArray(GLR.vao);
   GLR.vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, GLR.vbo); gl.bufferData(gl.ARRAY_BUFFER, GLR.ab.byteLength, gl.STREAM_DRAW);
-  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 28, 0);
-  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 28, 8);
-  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, 28, 16);
-  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 28, 20);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 36, 0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 36, 8);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, 36, 16);
+  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 36, 20);
+  gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, 36, 28);
+  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.UNSIGNED_BYTE, true, 36, 32);
   const idx = new Uint16Array(GLR.MAXQ * 6);
   for (let i = 0, v = 0; i < idx.length; i += 6, v += 4) { idx[i] = v; idx[i + 1] = v + 1; idx[i + 2] = v + 2; idx[i + 3] = v; idx[i + 4] = v + 2; idx[i + 5] = v + 3; }
   GLR.ibo = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, GLR.ibo); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
@@ -10558,7 +10572,7 @@ function glFlush() {
   if (GLR.cur.prog !== 1) { gl.useProgram(GLR.prog); GLR.cur.prog = 1; }
   if (GLR.cur.vao !== 1) { gl.bindVertexArray(GLR.vao); GLR.cur.vao = 1; }
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.vbo);
-  gl.bufferData(gl.ARRAY_BUFFER, GLR.f32, gl.STREAM_DRAW, 0, n * 28);
+  gl.bufferData(gl.ARRAY_BUFFER, GLR.f32, gl.STREAM_DRAW, 0, n * 36);
   const sl = GLR.slots;
   for (let i = 0; i < sl.length; i++) {
     if (GLR.unit[i] !== sl[i].tex) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, sl[i].tex); GLR.unit[i] = sl[i].tex; }
@@ -10587,14 +10601,14 @@ function glBegin(ctx, blend) {
   if (clip && t.stencilClip !== s.clip) glBuildClip(t, s.clip);
   if (GLR.n >= GLR.MAXQ) glFlush();
 }
-function glQuad(x0, y0, x1, y1, x2, y2, x3, y3, u0, v0, u1, v1, u2, v2, u3, v3, col, aux, k) {
+function glQuad(x0, y0, x1, y1, x2, y2, x3, y3, u0, v0, u1, v1, u2, v2, u3, v3, col, aux, k, mul = 0, add = 0) {
   if (GLR.n >= GLR.MAXQ) glFlush();
   const f = GLR.f32, u = GLR.u32;
-  let o = GLR.n * 28;
-  f[o] = x0; f[o + 1] = y0; f[o + 2] = u0; f[o + 3] = v0; u[o + 4] = col; f[o + 5] = aux; f[o + 6] = k;
-  f[o + 7] = x1; f[o + 8] = y1; f[o + 9] = u1; f[o + 10] = v1; u[o + 11] = col; f[o + 12] = aux; f[o + 13] = k;
-  f[o + 14] = x2; f[o + 15] = y2; f[o + 16] = u2; f[o + 17] = v2; u[o + 18] = col; f[o + 19] = aux; f[o + 20] = k;
-  f[o + 21] = x3; f[o + 22] = y3; f[o + 23] = u3; f[o + 24] = v3; u[o + 25] = col; f[o + 26] = aux; f[o + 27] = k;
+  const o = GLR.n * 36;
+  f[o] = x0; f[o + 1] = y0; f[o + 2] = u0; f[o + 3] = v0; u[o + 4] = col; f[o + 5] = aux; f[o + 6] = k; u[o + 7] = mul; u[o + 8] = add;
+  f[o + 9] = x1; f[o + 10] = y1; f[o + 11] = u1; f[o + 12] = v1; u[o + 13] = col; f[o + 14] = aux; f[o + 15] = k; u[o + 16] = mul; u[o + 17] = add;
+  f[o + 18] = x2; f[o + 19] = y2; f[o + 20] = u2; f[o + 21] = v2; u[o + 22] = col; f[o + 23] = aux; f[o + 24] = k; u[o + 25] = mul; u[o + 26] = add;
+  f[o + 27] = x3; f[o + 28] = y3; f[o + 29] = u3; f[o + 30] = v3; u[o + 31] = col; f[o + 32] = aux; f[o + 33] = k; u[o + 34] = mul; u[o + 35] = add;
   GLR.n++;
 }
 // a quad with the context's fill style: corners in user space (ux, uy) and on the target (dx, dy)
@@ -10775,6 +10789,8 @@ class GLCtx {
   }
   drawImage(src, a, b, c, d, e, f, g, h) {
     if (GLR.lost || !src || src === this.target) return;
+    let T = null;
+    if (src._tp) { T = src; src = src.src; if (!src) return; }      // (a tinted stand-in: its picture, tinted as it's drawn)
     const W = src.isGLTarget ? src._w : (src.naturalWidth || src.width), H = src.isGLTarget ? src._h : (src.naturalHeight || src.height);
     if (!W || !H) return;
     let sx, sy, sw, sh, dx, dy, dw, dh;
@@ -10803,7 +10819,8 @@ class GLCtx {
     if (E.flip) { v0 = 1 - v0; v1 = 1 - v1; }
     this._corners(dx, dy, dw, dh);
     const X = GLC4.x, Y = GLC4.y;
-    glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 1 + 8 * slot, 0);
+    if (T) glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 4 + 8 * slot, 0, T.mul, T.add);
+    else glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 1 + 8 * slot, 0);
   }
   // premultiplied pixels (a Uint32Array, w x h) straight onto the target: the game's own pixel buffers (fire)
   drawPixels(px, w, hgt, dx, dy, dw, dh) {
@@ -11282,7 +11299,22 @@ function reuseCanvas(c, w, h) {
   else { const x = c.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.globalCompositeOperation = 'source-over'; x.clearRect(0, 0, w, h); }
   return c;
 }
+/* Under WebGL a tint is put on as the sprite is drawn (the renderer's tinted mode), not made as a copy: these
+   return a small stand-in carrying the picture and its tint (colour x mul + add over the shape, as a 'source-atop'
+   fill does; opaque: the shape's pixels made solid first). Canvas 2D (?gl=0) still makes the copies. */
+const tintB = v => Math.round(clamp(v, 0, 1) * 255);
+function glTint(src, key, mul, add, opaque) {
+  const m = src._tps || (src._tps = {});
+  const t = m[key] || (m[key] = { _tp: true, src, mul: 0, add: 0, width: 0, height: 0 });
+  t.width = src.width; t.height = src.height;
+  t.mul = (tintB(mul[0]) | tintB(mul[1]) << 8 | tintB(mul[2]) << 16 | (opaque ? 255 : 0) << 24) >>> 0;
+  t.add = (tintB(add[0]) | tintB(add[1]) << 8 | tintB(add[2]) << 16) >>> 0;
+  return t;
+}
+// a 'source-atop' fill of colour c (0..255) at alpha a: mul 1 - a, add c x a
+const atopTint = (src, key, c, a) => glTint(src, key, [1 - a, 1 - a, 1 - a], [c[0] / 255 * a, c[1] / 255 * a, c[2] / 255 * a], false);
 function darkArt(src) {
+  if (GLR.on) return atopTint(src, 'dark', [0x1c, 0x12, 0x0c], 1);
   const st = src._stamp || 0;
   if (src._dark && src._dark.stamp === st) return src._dark.c;
   const c = reuseCanvas(src._dark && src._dark.c, src.width, src.height), x = c.getContext('2d');
@@ -11304,6 +11336,7 @@ function moonArt(src, mode) {
     m = src._moon = { stamp: st, pool };
   }
   if (m[mode]) return m[mode];
+  if (mode === 'mB' && GLR.on) return atopTint(src, 'mB', [70, 108, 170], 0.5);
   const w = src.width, h = src.height, c = reuseCanvas(m.pool[mode], w, h), x = c.getContext('2d');
   m.pool[mode] = null;
   x.imageSmoothingEnabled = false;
@@ -11331,6 +11364,7 @@ function moonArt(src, mode) {
   return c;
 }
 function warmed(src) {
+  if (GLR.on) return atopTint(src, 'warm', [255, 190, 110], 0.28);
   if (src._warm && src._warmStamp === (src._stamp || 0)) return src._warm;
   const c = reuseCanvas(src._warm, src.width, src.height), x = c.getContext('2d');
   x.drawImage(src, 0, 0);
@@ -11923,6 +11957,21 @@ function prepCoasts() {
 function coastTinted(co) {
   const fx = E.fx, hz = E.skyHor, haze = clamp(0.4 + 0.22 * E.overcast + 0.45 * E.fog, 0, 0.92);
   const key = [...fx.map(v => Math.round(v * 40)), ...hz.map(v => Math.round(v / 6)), Math.round(haze * 40)].join(',');
+  // (under WebGL the coast is recoloured as it's drawn; only the strip its reflected foot is made from is
+  // recoloured here, a third of it)
+  if (GLR.on) {
+    const t = glTint(co.src, 'coast', fx.map(v => v * (1 - haze)), hz.map(v => v * haze / 255), true);
+    if (co.key === key && co.foot) return t;
+    co.key = key;
+    const RH = Math.round(co.H * 0.32), y0 = co.H - RH, st = co.footSrc || (co.footSrc = makeCanvas(co.W, RH)), sx = st.getContext('2d'), id = sx.createImageData(co.W, RH), d = id.data, s0 = co.data;
+    for (let i = 0, j = y0 * co.W * 4; i < d.length; i += 4, j += 4) {
+      if (!s0[j + 3]) continue;
+      d[i] = s0[j] * fx[0] * (1 - haze) + hz[0] * haze; d[i + 1] = s0[j + 1] * fx[1] * (1 - haze) + hz[1] * haze; d[i + 2] = s0[j + 2] * fx[2] * (1 - haze) + hz[2] * haze; d[i + 3] = 255;
+    }
+    sx.putImageData(id, 0, 0);
+    coastFoot(co, st, 0, fx, hz);
+    return t;
+  }
   if (co.key === key && co.tint) return co.tint;
   co.key = key;
   const c = co.tint || makeCanvas(co.W, co.H), x = c.getContext('2d'), id = x.createImageData(co.W, co.H), d = id.data, s0 = co.data;
@@ -11935,11 +11984,16 @@ function coastTinted(co) {
   }
   x.putImageData(id, 0, 0);
   co.tint = c;
-  // the land doesn't just stop at the horizon: its foot carries on below as a dark band (its shadow and
-  // reflection on the water), which shows when big waves open up the view under the horizon line
+  coastFoot(co, c, co.H - Math.round(co.H * 0.32), fx, hz);
+  return c;
+}
+// the land doesn't just stop at the horizon: its foot carries on below as a dark band (its shadow and reflection
+// on the water), which shows when big waves open up the view under the horizon line. (from the recoloured coast
+// c, its rows from sy0 down)
+function coastFoot(co, c, sy0, fx, hz) {
   const RH = Math.round(co.H * 0.32), r = co.foot || (co.foot = makeCanvas(co.W, RH)), rx = r.getContext('2d');
   rx.clearRect(0, 0, co.W, RH);
-  rx.save(); rx.translate(0, RH); rx.scale(1, -1); rx.drawImage(c, 0, co.H - RH, co.W, RH, 0, 0, co.W, RH); rx.restore();
+  rx.save(); rx.translate(0, RH); rx.scale(1, -1); rx.drawImage(c, 0, sy0, co.W, RH, 0, 0, co.W, RH); rx.restore();
   rx.globalCompositeOperation = 'source-atop';
   rx.fillStyle = rgbs(mix3(hz.map(v => v * 0.42), [24 * fx[0], 40 * fx[1], 70 * fx[2]], 0.5), 0.85); rx.fillRect(0, 0, co.W, RH);
   rx.globalCompositeOperation = 'destination-in';
@@ -13256,6 +13310,7 @@ function rusted(src, level) {
 const SEA_FOG = [18, 62, 146];
 function fogFor(y) { return clamp((y - WATER_Y - 60) / (SEABED_Y - WATER_Y - 40), 0, 1) * 0.62; }
 function fogged(src) {
+  if (GLR.on) return atopTint(src, 'fog', SEA_FOG, 1);
   if (src._fog && src._fogStamp === (src._stamp || 0)) return src._fog;
   const c = reuseCanvas(src._fog, src.width, src.height), x = c.getContext('2d');
   x.drawImage(src, 0, 0);
