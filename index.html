@@ -2108,7 +2108,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 24 22:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 24 22:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -3119,11 +3119,16 @@ function setPowerAt(d, ux) {
 // the power slider ratchets: a click every twentieth of its travel
 const powerNotch = [-1, -1];
 function powerClick(p, v) { const n = Math.round(v * 20); if (n !== powerNotch[p]) { if (powerNotch[p] >= 0) sfxClick(gunCtl[p]); powerNotch[p] = n; } }
+const subDivePrev = [0, 0];
 function stepHud(dt) {
   for (const pr of hudPress) for (const k in pr) pr[k] = Math.max(0, pr[k] - dt);
   for (let p = 0; p < 2; p++) {
     // rise / dive, held: the depth she's going for moves while the button is down
     if (diveHold[p] && crew[p].mode === 'sub') { const sb = subs[p]; sb.depthT = clamp(sb.depthT + diveHold[p] * 90 * dt, WATER_Y, subMaxY(sb.x)); }
+    // the dive planes thud as rise or dive is pressed (button, keys or stick)
+    const dv = crew[p].mode === 'sub' && subs[p] && subs[p].state === 'out' ? Math.sign(clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1)) : 0;
+    if (dv && dv !== subDivePrev[p]) sfxSubPlanes(subs[p].x, dv);
+    subDivePrev[p] = dv;
     if (crew[p].mode !== 'sub' && crew[p].mode !== 'plane') diveHold[p] = 0;
   }
 }
@@ -6444,7 +6449,7 @@ function dropDepthCharge(sh) {
 }
 // a plane's bomb gone into the sea: a depth charge with no set depth (it sinks quicker than a drum, nose down)
 function bombToCharge(s) {
-  dcharges.push({ x: s.x, y: s.y, vx: s.vx * 0.25, vy: clamp(s.vy * 0.4, 60, 160), a: Math.atan2(s.vy, s.vx), w: 0, owner: s.owner, under: true, fuse: 1e9, t: 0, bomb: true });
+  dcharges.push({ x: s.x, y: s.y, vx: s.vx * 0.25, vy: clamp(s.vy * 0.4, 60, 160), a: (s.face || Math.sign(s.vx) || 1) < 0 ? Math.PI : 0, w: 0, owner: s.owner, under: true, fuse: 1e9, t: 0, bomb: true, face: s.face || Math.sign(s.vx) || 1 });
 }
 function stepDcharges(dt) {
   for (let i = dcharges.length - 1; i >= 0; i--) {
@@ -6463,9 +6468,9 @@ function stepDcharges(dt) {
       continue;
     }
     if (c.bomb) {
-      // a bomb: nose down, finned, it sinks straight and fast, trailing bubbles
+      // a bomb: level, as it fell, sinking straight and fast, trailing bubbles (a slow rock as it goes down)
       c.vy += (BOMB_SINK - c.vy) * 1.6 * dt; c.vx *= 1 - 2.4 * dt;
-      c.a += (Math.atan2(c.vy, c.vx) - c.a) * Math.min(1, 3 * dt);
+      c.a = (c.face < 0 ? Math.PI : 0) + 0.08 * Math.sin(c.t * 2.1);
       c.x += c.vx * dt; c.y += c.vy * dt;
     } else {
       // sinking: a slow, wobbling fall trailing a few bubbles
@@ -6528,8 +6533,8 @@ function detonateCharge(c) {
 }
 // a plane's bomb sinking: a dark finned body along its fall, with the same blinking lamp as a depth charge
 function drawSunkBomb(c) {
-  const px = PX(c.x), py = PY(c.y), L = Math.max(PB * 2, Math.round(6 * SV)), ux = Math.cos(c.a), uy = Math.sin(c.a);
-  C.fillStyle = '#1c1f24'; blkLine(px - ux * L, py - uy * L, px, py);
+  const px = PX(c.x) + Math.round(Math.cos(c.a) * Math.max(PB * 3, Math.round(7 * SV)) / 2), py = PY(c.y), L = Math.max(PB * 3, Math.round(7 * SV)), ux = Math.cos(c.a), uy = Math.sin(c.a);
+  C.fillStyle = '#1c1f24'; blkLine(px - ux * L, py - uy * L, px, py); blkLine(px - ux * L, py - uy * L + PB, px, py + PB);
   C.fillStyle = '#4a5058'; blkPx(px - ux * L * 0.4, py - uy * L * 0.4, 1);
   C.fillStyle = '#1c1f24'; blkPx(px - ux * L - uy * PB, py - uy * L + ux * PB, 1); blkPx(px - ux * L + uy * PB, py - uy * L - ux * PB, 1);   // the fins
   if (Math.floor((time + c.t * 0.37) * 3.2) % 2 === 0) {
@@ -6569,12 +6574,12 @@ function drawDcharges(x0, x1) {
 const PLANEI = {"CW": 160, "CH": 148, "rows": [[[150, 48], [130, 65], [138, 79], [146, 71]], [[150, 55], [130, 62], [133, 89], [156, 78]], [[150, 63], [133, 72], [140, 99], [158, 79]], [[139, 146], [141, 130], [150, 63], [135, 131], [129, 140]]]};
 const PLANE_PITCH = 60 * Math.PI / 180;         // the steepest climb or dive
 const PLANE_K = 0.5, PLANE_V = 330, PLANE_VMIN = 170, PLANE_VMAX = 580, PLANE_TURN_T = 1.25, PLANE_HITS = 3, PLANE_BOMBS = 4, BOMB_RELOAD = 0.7, PLANE_MG_RATE = 0.075;
-const SKY_TOP = WATER_Y - 2600;                // the top of the world: three screens of sky over the sea
+const SKY_H = 3600, SKY_TOP = WATER_Y - SKY_H;  // the top of the world: four screens of sky over the sea (one more, user Oct 24 night)
 const SKY_PAR = 0.14;
 const PLANE_UNSEEN_Y = WATER_Y - 380;            // above the clouds: the buoy's watchers can't see a plane up there                          // climbing, the sky (sun, moon, stars) sinks a little: you see you're going up
-const PLANE_COLD = WATER_Y - 2600 * 2 / 3;     // above two thirds of the way up the air is so cold the plane always leaves a trail
-const PLANE_ICE = WATER_Y - 2600 * 0.88;       // up under the ceiling it ices up...
-const PLANE_THAW = WATER_Y - 1300;             // ...and the ice only melts again down here
+const PLANE_COLD = WATER_Y - SKY_H * 2 / 3;     // above two thirds of the way up the air is so cold the plane always leaves a trail
+const PLANE_ICE = WATER_Y - SKY_H * 0.88;       // up under the ceiling it ices up...
+const PLANE_THAW = WATER_Y - SKY_H / 2;            // ...and the ice only melts again down here
 // the missiles (user Oct 24): straight out along the nose under power, a thin smoke trail that's soon gone; when the
 // motor burns out they fall like a shell
 const PLANE_ROCKETS = 6, ROCKET_RELOAD = 0.8, ROCKET_V = 620, ROCKET_BURN = 1.5;
@@ -7305,7 +7310,9 @@ function dropBomb(pl) {
   pl.bombs--; pl.bk = BOMB_RELOAD;
   // it falls away carrying the plane's whole momentum, then only gravity and the air act on it
   sfxBombDrop(pl.x);
-  shells.push({ x: pl.x + pl.facing * 2, y: pl.y + 9, vx: pl.vx, vy: pl.vy, owner: pl.id, from: 'bomb', age: 0, trail: 0, under: false, ut: 0 });
+  const b = { x: pl.x + pl.facing * 2, y: pl.y + 9, vx: pl.vx, vy: pl.vy, owner: pl.id, from: 'bomb', age: 0, trail: 0, under: false, ut: 0, face: pl.facing };
+  shells.push(b);
+  sfxWhoosh(b);                                     // (its whistle: rising as it gathers speed, heard near it)
 }
 
 /* ---------------- The captain: one life, in the tower, a boat or ashore in the harbour ---------------- */
@@ -8037,7 +8044,8 @@ function stepShells(dt) {
     const seg = s.seg;
     // (a missile's white trail starts half a second out, user Oct 24: the launch puff stays by the plane, the flame
     // alone leads it away; and it ends when the motor burns out)
-    if ((s.from === 'bomb' && s.age < 1) || (s.from === 'rocket' && (!powered || s.age < 0.5))) { /* no trail yet (or any more) */ }
+    // (a bomb leaves no trail at all, user Oct 24 night: it only falls, carried by the plane's speed)
+    if (s.from === 'bomb' || (s.from === 'rocket' && (!powered || s.age < 0.5))) { /* no trail (yet, or any more) */ }
     else if (seg && Math.hypot(s.x - seg.p1.x, s.y - seg.p1.y) < 34) { seg.p2.x = s.x; seg.p2.y = s.y; }
     else {
       if (trails.length >= 700) { const o = trails.shift(); if (o.next) o.next.root = true; }          // drop the oldest, faintest piece, never the new one
@@ -13682,6 +13690,15 @@ function renderOverlays() {
   for (const s of shells) {
     if (s.x < x0 - 10 || s.x > x1 + 10) continue;
     const sp = Math.hypot(s.vx, s.vy) || 1, ux = s.vx / sp, uy = s.vy / sp;
+    if (s.from === 'bomb' && !s.under) {
+      // a bomb falls level, as it was carried (user Oct 24 night): a fat dark body, its nose the way it was going,
+      // fins at its tail
+      const L = Math.max(PB * 3, Math.round(7 * SV)), d = s.face || Math.sign(s.vx) || 1, hx = PX(s.x), hy = PY(s.y);
+      C.fillStyle = '#23262c'; C.fillRect(Math.round(hx - L / 2), hy - PB, L, PB * 2);
+      C.fillStyle = '#4a5058'; C.fillRect(Math.round(hx - L / 2 + PB), hy - PB, Math.max(PB, L - PB * 3), PB);
+      C.fillStyle = '#23262c'; const tx = Math.round(hx - d * L / 2) - (d > 0 ? PB : 0); C.fillRect(tx, hy - PB * 2, PB, PB * 4);
+      continue;
+    }
     if (s.from === 'rocket') {
       // a missile: a long pale body, and while its motor burns a flickering flame out of the tail
       const L = Math.max(PB * 3, Math.round(9 * SV)), hx = PX(s.x), hy = PY(s.y);
@@ -14709,7 +14726,16 @@ function audioInit() {
     const echo = ctx.createDelay(1.5), fb = ctx.createGain(), eLP = ctx.createBiquadFilter(), eIn = ctx.createGain(), eG = ctx.createGain();
     echo.delayTime.value = 0.42; fb.gain.value = 0.58; eLP.type = 'lowpass'; eLP.frequency.value = 1300; eIn.gain.value = 1; eG.gain.value = 0;
     eIn.connect(echo); echo.connect(eLP); eLP.connect(fb); fb.connect(echo); eLP.connect(eG); eIn.connect(eG); eG.connect(SFX.world);
-    SFX.under = { g, hum, k: 0, pingT: 3, popAcc: 0, creakT: 6, clankT: 9, echoIn: eIn, echoG: eG };
+    // and the water all round (user Oct 24 night: the classic underwater echo): two longer, darker, washier delays
+    // crossing into each other, so everything aboard rolls away into the deep
+    const wA = ctx.createDelay(2), wB = ctx.createDelay(2), wLP = ctx.createBiquadFilter(), wFb = ctx.createGain(), wX = ctx.createGain();
+    wA.delayTime.value = 0.63; wB.delayTime.value = 0.97; wLP.type = 'lowpass'; wLP.frequency.value = 650; wFb.gain.value = 0.5; wX.gain.value = 0.55;
+    eIn.connect(wA); wA.connect(wLP); wLP.connect(wB); wB.connect(wFb); wFb.connect(wA); wLP.connect(wX); wB.connect(wX); wX.connect(eG);
+    // a slow wash of water past the hull, swelling and fading (the bubbling bed under everything)
+    const wash = loopNoise(SFX.noise), washBP = ctx.createBiquadFilter(), washG = ctx.createGain();
+    washBP.type = 'bandpass'; washBP.frequency.value = 380; washBP.Q.value = 3; washG.gain.value = 0;
+    wash.connect(washBP); washBP.connect(washG); washG.connect(eIn);
+    SFX.under = { g, hum, k: 0, popAcc: 0, burstT: 2, creakT: 6, clankT: 9, echoIn: eIn, echoG: eG, washBP, washG };
   }
 }
 function loopNoise(buf) {
@@ -14778,6 +14804,19 @@ function sfxNewRound() {
   if (old) { try { old.gain.setTargetAtTime(0, SFX.ctx.currentTime, 0.01); } catch (e) {} setTimeout(() => { try { old.disconnect(); } catch (e) {} }, 120); }
   for (const w of SFX.whoosh) { try { w.src.stop(); } catch (e) {} try { w.pan.node.disconnect(); } catch (e) {} }
   SFX.whoosh.length = 0;
+}
+// the sub's dive planes worked (user Oct 24 night): a low thud of the machinery as rise or dive is pressed, a
+// clack of the gear, and the ballast - air blown out to rise, vented with a gurgle to dive
+function sfxSubPlanes(x, dir) {
+  if (!SFX.ctx) return;
+  const out = sfxOut(x, 0.8); if (!out) return;
+  const t0 = SFX.ctx.currentTime;
+  thump(out, t0, 78, 34, 0.32, 0.75);
+  thump(out, t0 + 0.01, 140, 70, 0.08, 0.25);
+  noiseShot(out, t0, 0.05, 'bandpass', 900, 500, 2, 0.25, 0.002);
+  if (dir < 0) noiseShot(out, t0 + 0.12, 0.7, 'bandpass', 1500, 700, 1.2, 0.1, 0.08);    // (rise: the tanks blown)
+  else noiseShot(out, t0 + 0.12, 0.6, 'lowpass', 500, 220, 1, 0.12, 0.05);              // (dive: flooding)
+  if (SFX.under && SFX.under.k > 0.05) thump(SFX.under.echoIn, t0, 70, 36, 0.3, 0.5 * SFX.under.k);
 }
 function sfxLetGo(ms, ...nodes) { setTimeout(() => { for (const n of nodes) try { n.disconnect(); } catch (e) {} }, ms); }
 function sfxOut(x, gain) {
@@ -15055,18 +15094,35 @@ function audioUpdate(dt) {
     e.wbp.frequency.setTargetAtTime(500 + 500 * sp + 900 * diveK, t, 0.25);
     e.wg.gain.setTargetAtTime(flying ? (0.02 * sp * sp + 0.07 * diveK) / Math.sqrt(L.length) : 0.03 * diveK * h.att, t, 0.25);
   }
-  // under the sea in a dived sub: the hum and rumble, bubbles ticking past the hull, a creak now and then and,
-  // every so often, the ping of her sonar
+  // under the sea in a dived sub: the hum and rumble, water washing and bubbling past the hull, all of it rolling
+  // away in the echo of the water round her, a creak and a clank now and then (no sonar ping any more: user Oct 24
+  // night, it was irritating)
   const U = SFX.under;
   U.k += (underK - U.k) * Math.min(1, dt * 2);
   U.g.gain.setTargetAtTime(0.085 * U.k, t, 0.2);
-  if (U.k <= 0.05) U.echoG.gain.setTargetAtTime(0, t, 0.2);
+  if (U.k <= 0.05) { U.echoG.gain.setTargetAtTime(0, t, 0.2); U.washG.gain.setTargetAtTime(0, t, 0.2); }
   if (U.k > 0.05) {
     const sb = L.map(p => subs[p]).find(v => v && v.state === 'out' && crew[v.id].mode === 'sub');
     if (sb) U.hum.frequency.setTargetAtTime(46 + 20 * Math.abs(sb.throttle || 0), t, 0.3);
     U.echoG.gain.setTargetAtTime(0.9 * U.k, t, 0.2);
-    // now and then a low gurgle past the hull (not the light drip it was)
-    U.popAcc += dt * 0.6 * U.k;
+    // the wash: its pitch and swell drifting slowly, a little more with her speed
+    const spd = sb ? Math.min(1, Math.abs(sb.vx) / 40) : 0;
+    U.washG.gain.setTargetAtTime((0.05 + 0.05 * spd) * U.k * (0.6 + 0.4 * Math.sin(time * 0.37) * Math.sin(time * 0.23 + 1)), t, 0.4);
+    U.washBP.frequency.setTargetAtTime(300 + 140 * Math.sin(time * 0.17) + 160 * spd, t, 0.5);
+    // bubbles: little trains of them rising past the hull, each a quick upward 'blip', in bursts
+    if ((U.burstT -= dt) <= 0) {
+      U.burstT = rnd(0.5, 1.8) / (0.7 + spd);
+      const n = 3 + Math.floor(Math.random() * 7), base = rnd(380, 900);
+      for (let i = 0; i < n; i++) {
+        const t0 = t + i * rnd(0.03, 0.09) + Math.random() * 0.02, f0 = base * rnd(0.7, 1.4), d = rnd(0.04, 0.09);
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sine'; o.frequency.setValueAtTime(f0, t0); o.frequency.exponentialRampToValueAtTime(f0 * rnd(1.8, 2.6), t0 + d);
+        g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.022 * U.k, t0 + 0.006); g.gain.exponentialRampToValueAtTime(0.0004, t0 + d);
+        o.connect(g); g.connect(U.echoIn); o.onended = () => { o.disconnect(); g.disconnect(); }; o.start(t0); o.stop(t0 + d + 0.02);
+      }
+    }
+    // now and then a low gurgle past the hull
+    U.popAcc += dt * 0.9 * U.k;
     while (U.popAcc >= 1) {
       U.popAcc -= 1;
       const o = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter(), t0 = t + Math.random() * 0.2, f0 = rnd(110, 170);
@@ -15074,17 +15130,6 @@ function audioUpdate(dt) {
       lp.type = 'lowpass'; lp.frequency.value = 500;
       envGain(g, t0, 0.03 * U.k, 0.02, 0.18);
       o.connect(lp); lp.connect(g); g.connect(U.echoIn); o.onended = () => { o.disconnect(); lp.disconnect(); g.disconnect(); }; o.start(t0); o.stop(t0 + 0.25);
-    }
-    // the sonar: a deep ping that rings through the hull and comes back off the water, fainter each time
-    if ((U.pingT -= dt) <= 0) {
-      U.pingT = rnd(6, 9);
-      const t0 = t, o = ctx.createOscillator(), o2 = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'sine'; o.frequency.setValueAtTime(820, t0); o.frequency.exponentialRampToValueAtTime(790, t0 + 1.4);
-      o2.type = 'sine'; o2.frequency.value = 1645;
-      const g2 = ctx.createGain(); g2.gain.value = 0.25; o2.connect(g2); g2.connect(g);
-      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.06 * U.k, t0 + 0.012); g.gain.exponentialRampToValueAtTime(0.0008, t0 + 1.6);
-      o.connect(g); g.connect(U.echoIn);
-      o.onended = () => { o.disconnect(); o2.disconnect(); g.disconnect(); g2.disconnect(); }; o.start(t0); o2.start(t0); o.stop(t0 + 1.7); o2.stop(t0 + 1.7);
     }
     // a clank somewhere aboard: a dull knock that the steel rings with
     if ((U.clankT -= dt) <= 0) {
@@ -15113,6 +15158,15 @@ function audioUpdate(dt) {
       continue;
     }
     const sp = Math.hypot(s.vx, s.vy), h = hear(s.x);
+    if (s.from === 'bomb') {
+      // a falling bomb: a buzzing whistle that climbs and swells as it gathers speed (user Oct 24 night)
+      const fall = Math.max(0, s.vy);
+      w.bp.Q.value = 7;
+      w.bp.frequency.setTargetAtTime(260 + fall * 2.2, t, 0.05);
+      w.g.gain.setTargetAtTime(0.32 * clamp(fall / 450, 0, 1) * h.att, t, 0.05);
+      w.pan.set(h.pan);
+      continue;
+    }
     // falling shells whistle higher as they come down
     w.bp.frequency.setTargetAtTime(380 + sp * 0.75 + Math.max(0, s.vy) * 1.4, t, 0.05);
     w.g.gain.setTargetAtTime(Math.min(1, w.life * 3) * 0.16 * h.att, t, 0.05);
