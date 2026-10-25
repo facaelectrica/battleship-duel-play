@@ -1907,6 +1907,7 @@ const ACTS = {
   release: p => releaseFire(p),
   dc: p => dropDepthCharge(ships[p]),
   bomb: p => dropBomb(planes[p]),
+  magnet: p => heliMagnet(helis[p]),                // (LAND TEST: the helicopter's magnet, user Oct 25)
   rocket: p => crew[p].mode === 'heli' ? heliRocket(helis[p]) : fireRocket(planes[p]),
   torp: (p, up) => fireTorpedo(subs[p], !!up),
   mine: p => layMine(subs[p]),
@@ -2183,7 +2184,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 17:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 17:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -2575,6 +2576,7 @@ function prepHudArt() {
   }
   img.hud.shellR = flipCanvas(img.hud.shell);       // the shell / torpedo pointing right
   { const u = img.hud.torpUp, c = makeCanvas(u.width, u.height), x = c.getContext('2d'); x.translate(0, u.height); x.scale(1, -1); x.drawImage(u, 0, 0); img.hud.bomb = c; }   // a bomb: nose down
+  img.hud.magnet = makeMagnetArt(img.hud.home);     // (the helicopter's magnet button)
 }
 // what the vehicle you're in has: the drive buttons, rise and dive, aim and power, and its weapons
 function hudKit(p) {
@@ -2586,7 +2588,7 @@ function hudKit(p) {
   if (m === 'plane') return { drive: true, home, dive: true, aim: false, weapons: ['mg', 'rocket', 'bomb'] };   // (the bomb in the depth charge's slot: it is one, under water)
   if (m === 'sail') return { drive: true, home: false, dive: false, aim: false, weapons: [] };
   if (m === 'tank') return { drive: true, home: false, dive: false, aim: true, weapons: ['mg', 'shell'] };       // (LAND TEST)
-  if (m === 'heli') return { drive: true, home: false, dive: true, aim: true, weapons: ['mg', 'rocket'] };
+  if (m === 'heli') return { drive: true, home: false, magnet: true, dive: true, aim: true, weapons: ['mg', 'rocket'] };   // (the magnet in the home button's place: user Oct 25)
   return null;
 }
 function hudLayout(p) {
@@ -2608,6 +2610,7 @@ function hudLayout(p) {
     const Rc = left + W - 40 * u0 - dialW / 2;              // (always in the same place, whatever you're in)
     const at = (dx, dy) => [L + (dx - 95) * u, B + (dy - 853) * u];
     if (kit.home) put('home', 'home', ...at(126.5, 686.5));
+    if (kit.magnet && img.hud.magnet) put('magnet', 'magnet', ...at(126.5, 686.5));
     if (kit.dive) { put('up', 'up', ...at(201, 685.5)); put('down', 'down', ...at(201, 823)); }
     if (kit.drive) { put('left', 'left', ...at(126.5, 757.5)); if (!kit.noStop) put('stop', 'stop', ...at(200, 757.5)); put('right', 'right', ...at(273.5, 757.5)); }
     if (kit.aim) { put('dial', 'dial', Rc, B + (685 - 853) * u); put('power', 'power', Rc, B + (760 - 853) * u); }
@@ -2731,7 +2734,7 @@ function drawHudIn(p) {
   ug.save();
   if (!ONEVIEW()) { ug.beginPath(); ug.rect(Math.round((HUD_HALF != null ? HUD_HALF : p) * ubw / 2), 0, Math.ceil(ubw / 2), ubh); ug.clip(); }
   for (const it of Lh.items) {
-    const down = (pr[it.id] || 0) > 0 || (it.id === 'up' && diveHold[p] < 0) || (it.id === 'down' && diveHold[p] > 0);
+    const down = (pr[it.id] || 0) > 0 || (it.id === 'magnet' && helis[p] && helis[p].rope && helis[p].rope.mode === 'out') || (it.id === 'up' && diveHold[p] < 0) || (it.id === 'down' && diveHold[p] > 0);
     const y = it.y + (down ? Math.max(1, Math.round(2 * k)) : 0);
     if (it.id === 'dial') { drawAngleDial(p, it, k); continue; }
     if (it.id === 'power') { drawPowerSlider(p, it, k); continue; }
@@ -3241,6 +3244,7 @@ function hudPressAt(hit, ux) {
   const { p, it, L } = hit, pr = hudPress[p], m = crew[p].mode;
   if (it.veh) { pr[it.id] = 0.15; act(p, 'switch', it.veh); return null; }
   if (it.id === 'home') { pr.home = 0.15; act(p, 'home', m); return null; }
+  if (it.id === 'magnet') { pr.magnet = 0.15; act(p, 'magnet'); return null; }
   if (it.id === 'left' || it.id === 'stop' || it.id === 'right') {
     if (m === 'plane') { pr[it.id] = 0.15; act(p, 'planeDir', it.id === 'left' ? -1 : it.id === 'stop' ? 0 : 1); return null; }
     if (m !== 'ship' && m !== 'sub' && m !== 'sail' && m !== 'tank' && m !== 'heli') return null;   // (LAND TEST's tank and helicopter too: user Oct 25)
@@ -4713,7 +4717,7 @@ window.addEventListener('keydown', e => {
   if (code in MG_KEYS) { e.preventDefault(); if (!ui.menu) keyDo(MG_KEYS[code], p => { if (crew[p].mode === 'plane') planes[p].mg = true; else if (crew[p].mode === 'sub') { if (!e.repeat) act(p, 'mine'); } else mgHold[p] = true; }); return; }
   if (code in DC_KEYS) {
     e.preventDefault();
-    if (!ui.menu && !e.repeat) keyDo(DC_KEYS[code], p => { const m = crew[p].mode; if (m === 'plane') act(p, 'bomb'); else if (m === 'ship') act(p, 'dc'); else if (m === 'sub') act(p, 'torp', true); });
+    if (!ui.menu && !e.repeat) keyDo(DC_KEYS[code], p => { const m = crew[p].mode; if (m === 'plane') act(p, 'bomb'); else if (m === 'ship') act(p, 'dc'); else if (m === 'sub') act(p, 'torp', true); else if (m === 'heli') act(p, 'magnet'); });
     return;
   }
   if (LEVER_KEYS[code] || HOLD_KEYS.has(code) || code in FIRE_KEYS) e.preventDefault(); else return;
@@ -4773,6 +4777,7 @@ function padWeapon(p, slot, down) {
   } else if (slot === 3 && down && m === 'ship') act(p, 'dc');
   else if (slot === 3 && down && m === 'sub') act(p, 'mine');
   else if (slot === 3 && down && m === 'plane') act(p, 'bomb');
+  else if (slot === 3 && down && m === 'heli') act(p, 'magnet');
   else if (slot === 4 && down && m === 'ship') act(p, 'smoke');
 }
 // the shoulder buttons: the next vehicle you can take, left or right along the row of vehicle buttons
@@ -15933,6 +15938,159 @@ function cpuHeli(B, dt) {
   if (Math.random() < dt * 0.3) B.nE = gauss() * T.aimE;
 }
 
+/* ---- the helicopter's magnet (LAND TEST; user Oct 25, their picture) ----
+   The red button (where the boats' "home" button sat) lets a rope down from the helicopter's belly with a heavy
+   electromagnet on its end. The rope is a chain of points (verlet), the magnet much heavier than the rope so it
+   hangs straight and swings slowly instead of whipping about. Brought close to your own tank, the magnet takes
+   hold of it at once (it's generous: arcade-like). The tank then hangs under the magnet and the helicopter feels
+   it: slower across, a slow climb, and the swing tugging it. Pressed again: it lets the tank go
+   (it drops and lands unhurt) and winds the rope back in; with nothing on the hook, it just winds in. Used to lift
+   the tank over what it can't drive over. */
+const ROPE_N = 14, ROPE_L = 150, ROPE_OUT = 190, ROPE_IN = 230;
+const MAG_W = 22, MAG_H = 7, MAG_GRAB = 26, TANK_TOPH = 19;      // (TANK_TOPH: the turret's roof above the tank's foot)
+// the rope's top: the helicopter's belly, turned with it
+function ropeAnchor(h) { return heliPoint(h, 0, heliSkid() * 0.5); }
+function heliMagnet(h) {
+  if (!h || (h.state !== 'fly' && h.state !== 'landed')) return;
+  const R = h.rope;
+  if (!R || R.mode === 'in') {
+    if (!R) { const [ax, ay] = ropeAnchor(h); h.rope = { len: 0, mode: 'out', hold: -1, pull: 0, air: false, dt: 1 / 60, n: Array.from({ length: ROPE_N + 1 }, () => [ax, ay, ax, ay]) }; }
+    else R.mode = 'out';
+  } else { ropeRelease(h); R.mode = 'in'; }
+  sfxClink(telegraphs[h.id]);
+}
+// let the tank go: it keeps the magnet's way and speed, and lands unhurt (arcade)
+function ropeRelease(h) {
+  const R = h.rope; if (!R || R.hold < 0) return;
+  const t = tanks[R.hold], e = R.n[ROPE_N];
+  if (t && t.carry === h.id) {
+    t.carry = null; t.dropT = 3;
+    t.vy = clamp((e[1] - e[3]) / R.dt, -60, 260); t.vx = clamp((e[0] - e[2]) / R.dt, -TANK_V, TANK_V);
+    sfxClink(telegraphs[h.id]);
+  }
+  R.hold = -1; R.air = false;
+}
+// how much a helicopter is carrying: 0 nothing, 1 a tank (for its flying)
+const heliLoad = h => h && h.rope && h.rope.hold >= 0 ? 1 : 0;
+function stepRope(h, dt) {
+  const R = h.rope; if (!R) return;
+  if (h.state !== 'fly' && h.state !== 'landed') { ropeRelease(h); h.rope = null; return; }
+  R.dt = Math.max(1e-3, dt);
+  R.len = R.mode === 'out' ? Math.min(ROPE_L, R.len + ROPE_OUT * dt) : Math.max(0, R.len - ROPE_IN * dt);
+  if (R.mode === 'in' && R.len <= 0) { h.rope = null; return; }
+  let t = R.hold >= 0 ? tanks[R.hold] : null;
+  if (t && !(t.state === 'alive' && t.carry === h.id)) { R.hold = -1; t = null; }
+  const [ax, ay] = ropeAnchor(h), P = R.n, N = ROPE_N, seg = Math.max(0.3, R.len / N);
+  // move: each point keeps its way (a little damped: the air), and falls
+  const damp = Math.pow(0.55, dt), G = 900 * dt * dt;
+  for (let i = 1; i <= N; i++) {
+    const q = P[i], vx = (q[0] - q[2]) * damp, vy = (q[1] - q[3]) * damp;
+    q[2] = q[0]; q[3] = q[1]; q[0] += vx; q[1] += vy + G;
+  }
+  P[0][0] = P[0][2] = ax; P[0][1] = P[0][3] = ay;
+  // the rope's length: it can go slack, never stretch. The magnet is heavy (the tank much heavier), the rope light,
+  // the helicopter doesn't give
+  const wEnd = t ? 1 / 60 : 1 / 14, under = t ? MAG_H + TANK_TOPH : MAG_H;
+  // (where the load meets the ground: the magnet's face, or the tank's tracks along its length)
+  const floorAt = x => t ? Math.min(landBelow(x - TANK_L * 0.4, P[N][1] - 30), landBelow(x, P[N][1] - 30), landBelow(x + TANK_L * 0.4, P[N][1] - 30)) : landBelow(x, P[N][1] - 20);
+  let grounded = false;
+  for (let it = 0; it < 14; it++) {
+    for (let i = 0; i < N; i++) {
+      const a = P[i], b = P[i + 1], wa = i === 0 ? 0 : 1, wb = i + 1 === N ? wEnd : 1;
+      const dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1e-6;
+      if (d <= seg) continue;
+      const k = (d - seg) / d / (wa + wb);
+      a[0] += dx * k * wa; a[1] += dy * k * wa; b[0] -= dx * k * wb; b[1] -= dy * k * wb;
+    }
+    const e = P[N], gy = floorAt(e[0]);
+    if (e[1] + under > gy) { e[1] = gy - under; grounded = true; }
+  }
+  // the ground: the rope lies on it, the load rests on it and drags (it doesn't skate)
+  for (let i = 1; i < N; i++) { const q = P[i], gy = landBelow(q[0], q[1] - 8); if (q[1] > gy - 1) { q[1] = gy - 1; q[2] += (q[0] - q[2]) * 0.6; } }
+  const e = P[N];
+  if (grounded) { e[2] += (e[0] - e[2]) * (t ? 0.85 : 0.5); if (e[3] > e[1]) e[3] = e[1]; }
+  R.air = !!t && !grounded;
+  // the swing tugs the helicopter toward the load (user: we should feel the tank's weight)
+  const L = Math.max(20, Math.hypot(e[0] - ax, e[1] - ay));
+  R.pull = t ? clamp((e[0] - ax) / L, -1, 1) * (R.air ? 110 : 60) : 0;
+  // got hold of the tank: your own, close enough to the magnet's face (generous), the rope well out
+  if (!t && R.mode === 'out' && R.len > 30) {
+    const t0 = tanks[h.id];
+    if (t0 && t0.state === 'alive' && t0.carry == null && Math.hypot(e[0] - t0.x, e[1] + MAG_H - (t0.y - TANK_TOPH)) < MAG_GRAB) {
+      R.hold = h.id; t0.carry = h.id; t0.vx = 0; t0.vy = 0; t = t0;
+      e[0] = e[2] = t0.x; e[1] = e[3] = t0.y - TANK_TOPH - MAG_H;
+      spawnSparks(t0.x, t0.y - TANK_TOPH, 8, 120); sfxImpact(t0.x);
+      if (crew[h.id].mode === 'heli') showToast('TANK ON THE HOOK - PRESS AGAIN TO DROP IT');
+    }
+  }
+  // the tank hangs under the magnet, leaning with the swing (on the ground: with the ground)
+  if (t) {
+    const tx = e[0], ty = e[1] + MAG_H + TANK_TOPH;
+    t.x = clamp(tx, 40, WORLD_W - 40); t.y = ty;
+    let a;
+    if (grounded) { const G2 = tankGround(t, t.x); a = Math.atan2(G2.front - G2.back, TANK_L * 0.84); }
+    else a = clamp((e[0] - P[N - 1][0]) / Math.max(1, seg) * -0.35 + (e[0] - e[2]) / R.dt * 0.002, -0.35, 0.35);
+    t.a += (a - t.a) * Math.min(1, dt * 5);
+  }
+}
+// the helicopter carrying: how it flies (called from stepHeli with the stick's wanted speeds; returns them changed)
+function heliLoadFly(h, tvx, tvy, stick) {
+  if (!heliLoad(h)) return [tvx, tvy];
+  const air = h.rope.air;
+  // (slower across, half the climb; let go of the stick it still holds its height: arcade-easy)
+  return [tvx * (air ? 0.65 : 0.8), stick < 0 ? tvy * (air ? 0.5 : 0.6) : tvy];
+}
+
+/* ---- drawing ---- */
+function drawHeliRope(h) {
+  const R = h.rope; if (!R) return;
+  const P = R.n, th = Math.max(1, Math.round(1.3 * SV));
+  C.fillStyle = '#1b1c1e';
+  // (the rope: a pixel line, point to point)
+  for (let i = 0; i < ROPE_N; i++) {
+    const x0 = PX(P[i][0]), y0 = PY(P[i][1]), x1 = PX(P[i + 1][0]), y1 = PY(P[i + 1][1]);
+    const n = Math.max(1, Math.ceil(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) / th));
+    for (let k = 0; k < n; k++) { const u = k / n; C.fillRect(Math.round(x0 + (x1 - x0) * u - th / 2), Math.round(y0 + (y1 - y0) * u - th / 2), th, th); }
+  }
+  // the magnet: a flat round electromagnet seen from the side - a domed cap with the rope's shackle, a dark slab,
+  // a pale rim round its face
+  const e = P[ROPE_N], q = P[ROPE_N - 1], a = R.hold >= 0 ? (tanks[R.hold] ? tanks[R.hold].a : 0) : clamp(Math.atan2(-(e[0] - q[0]), e[1] - q[1] + 0.01) * 0.6, -0.5, 0.5);
+  const s = SV, F = (x, y, w, hh, c) => { C.fillStyle = c; C.fillRect(Math.round(x * s), Math.round(y * s), Math.max(1, Math.round(w * s)), Math.max(1, Math.round(hh * s))); };
+  C.save(); C.translate(PX(e[0]), PY(e[1])); C.rotate(a);
+  const w = MAG_W, hw = w / 2;
+  F(-1.5, -2, 3, 2.5, '#2a2b2e');                       // the shackle
+  F(-hw * 0.45, 0, w * 0.45, 2, '#4a4d53');             // the cap
+  F(-hw * 0.45, 0, w * 0.45, 0.7, '#7a7e86');
+  F(-hw, 2, w, 4, '#3a3c41');                           // the slab
+  F(-hw, 2, w, 1, '#80848c');                           // its top edge, catching the light
+  F(-hw, 5, w, 2, '#24262a');                           // the face
+  F(-hw + 1, 6.3, w - 2, 0.7, '#9aa0a8');               // its rim
+  if (R.hold >= 0 && Math.random() < 0.15) F(rnd(-hw, hw - 2), 6.5, 1.5, 1.5, '#cfe8ff');   // a spark where it grips
+  C.restore();
+}
+// the button's picture: the old red "home" button with a horseshoe magnet on it instead of the house
+function makeMagnetArt(home) {
+  const c = copyCanvas(home), x = c.getContext('2d'), W = c.width, H = c.height, id = x.getImageData(0, 0, W, H), d = id.data;
+  const kx = W / 103, ky = H / 96;
+  // the house painted out in the button's red
+  for (let y = Math.round(12 * ky); y < Math.round(83 * ky); y++) for (let xx = Math.round(14 * kx); xx < Math.round(90 * kx); xx++) {
+    const i = (y * W + xx) * 4;
+    if (d[i] > 200 && d[i + 1] > 170) { const r = ((xx * 7 + y * 13) % 5) < 2 ? [213, 3, 19] : [239, 4, 25]; d[i] = r[0]; d[i + 1] = r[1]; d[i + 2] = r[2]; }
+  }
+  // the magnet: an arch over two legs, a gap, then the poles
+  const cx = 51.5 * kx, cy = 38 * ky, Ro = 25 * kx, Ri = 12.5 * kx;
+  for (let y = Math.round(12 * ky); y < Math.round(80 * ky); y++) for (let xx = Math.round(20 * kx); xx < Math.round(84 * kx); xx++) {
+    const dx = xx + 0.5 - cx, dy = y + 0.5 - cy, r = Math.hypot(dx, dy), ady = Math.abs(dx);
+    let on = dy <= 0 ? r >= Ri && r <= Ro : ady >= Ri && ady <= Ro && y < 76 * ky;
+    if (on && dy > 0 && y >= 59 * ky && y < 63 * ky) on = false;            // the line between the arch and the poles
+    if (!on) continue;
+    const i = (y * W + xx) * 4;
+    d[i] = 249; d[i + 1] = 234; d[i + 2] = 194; d[i + 3] = 255;
+  }
+  x.putImageData(id, 0, 0);
+  return c;
+}
+
 /* ================================================================
    LAND TEST (user Oct 25): a level that is all land - the ground
    The land is a grid of chunky cells (LT_CELL world units square), each one a material: air, grass (the top skin
@@ -16703,7 +16861,7 @@ function tankSettle(t, dt, snap) {
   if (want > t.y + 1.5 || t.vy < 0) {
     // the ground's gone from under it (or it hopped): it falls
     t.vy = Math.min(600, t.vy + 520 * dt); t.y = Math.min(want, t.y + t.vy * dt);
-    if (t.y >= want - 0.5) { if (t.vy > 260) tankHurt(t, 0.5 * (1 + Math.floor((t.vy - 260) / 140)), t.x, t.y, -1); if (t.vy > 120) { kickLandDust(t.x, t.y, 10); shakeAt(2, t.x); } t.vy = 0; }
+    if (t.y >= want - 0.5) { if (t.vy > 260 && !(t.dropT > 0)) tankHurt(t, 0.5 * (1 + Math.floor((t.vy - 260) / 140)), t.x, t.y, -1); if (t.vy > 120) { kickLandDust(t.x, t.y, 10); shakeAt(2, t.x); } t.vy = 0; }
   } else { t.y += (want - t.y) * Math.min(1, dt * 14); t.vy = 0; }
   t.a += (a - t.a) * Math.min(1, dt * 8);
 }
@@ -16711,6 +16869,9 @@ function stepTank(t, dt) {
   if (t.state !== 'alive') return;
   const p = t.id;
   t.rk = Math.max(0, t.rk - dt); t.recoil = Math.max(0, t.recoil - dt * 3);
+  if (t.dropT > 0) t.dropT -= dt;
+  // (hanging from the helicopter's magnet: it goes where the magnet takes it - stepRope)
+  if (t.carry != null) { const hc = helis[t.carry]; if (hc && hc.rope && hc.rope.hold === t.id) { t.vx = 0; t.vy = 0; return; } t.carry = null; }
   const mine = crew[p].mode === 'tank';
   const want = (mine ? t.input : t.cpuIn || 0) * TANK_V;
   // (user Oct 25) it never turns round: like the battleship it drives forward and backs up, its gun keeping its angle
@@ -16888,12 +17049,13 @@ function stepHeli(h, dt) {
   // flying: the lever sets the way and speed across, the stick climbs and sinks; it eases to them
   // (user Oct 25: told to go the other way it first slows to a hover and levels out, and only then turns round,
   // through the three-quarter and head-on views, on the spot)
-  let tvx = lever * HELI_V;
-  const tvy = stick * HELI_VY;
+  let tvx = lever * HELI_V, tvy = stick * HELI_VY;
+  [tvx, tvy] = heliLoadFly(h, tvx, tvy, stick);                 // (a tank on the magnet: heavier going)
   if (lever && Math.sign(lever) !== h.facing && !h.turn) { tvx = 0; if (Math.abs(h.vx) < 14 && Math.abs(h.tilt) < 0.07) h.turn = { t: 0, from: h.facing }; }
   if (h.turn) tvx = 0;
   h.vx += clamp(tvx - h.vx, -140 * dt, 140 * dt);
   h.vy += clamp(tvy - h.vy, -160 * dt, 160 * dt);
+  if (heliLoad(h)) h.vx += h.rope.pull * dt;                     // (and its swing tugs)
   if (h.turn) { h.turn.t += dt; if (h.turn.t >= HELI_TURN_T) { h.facing = -h.turn.from; h.turn = null; } }
   h.x = clamp(h.x + h.vx * dt, 30, WORLD_W - 30);
   // (the ceiling: the climb fades out over the last 80 units)
@@ -17130,7 +17292,7 @@ function stepLandUnits(dt) {
   for (let p = 0; p < 2; p++) {
     const t = tanks[p], h = helis[p];
     if (t) stepTank(t, dt);
-    if (h) stepHeli(h, dt);
+    if (h) { stepHeli(h, dt); stepRope(h, dt); }
     // the replacements: a few seconds after one's lost, a new one stands on your own ground (while you've captains)
     for (const k of ['tank', 'heli']) {
       const v = k === 'tank' ? tanks[p] : helis[p];
@@ -17523,6 +17685,7 @@ function drawLandUnits(x0, x1) {
   for (let p = 0; p < 2; p++) {
     const t = tanks[p], h = helis[p];
     if (t && t.state === 'alive') drawLandTank(t, false);
+    if (h && h.rope) drawHeliRope(h);
     if (h && h.state !== 'dead' && h.state !== 'gone') drawLandHeli(h);
   }
 }
