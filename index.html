@@ -602,6 +602,11 @@ const IS_TOUCH = (window.matchMedia && matchMedia('(pointer: coarse)').matches) 
 // a phone (a touch screen whose short side is under 500 CSS pixels)
 const PHONE = () => IS_TOUCH && Math.min(window.innerWidth, window.innerHeight) < 500;
 let WORLD_W = 4000, N = 0;
+// (LAND TEST, user Oct 25: the sea is the middle third of one world - forest | sea | desert; elsewhere it's all of it)
+let SEA0 = 0, SEA1 = 4000;
+const seaU = u => SEA0 + u * (SEA1 - SEA0), SEA_W = () => SEA1 - SEA0;
+// is x on land (one of LAND TEST's two countries), not over the sea?
+const onLand = x => LAND && (x < SEA0 || x > SEA1);
 let VIS_L = 0, VIS_R = 4000;                 // what the cameras may show: the world between the two harbours' far ends
 let wh, wv, wf, wtmp;
 let docks = [];          // the harbours in the world (one in a one-player game)
@@ -773,8 +778,23 @@ function initPier(d) {
 }
 const pierEdge = d => d.pierGone ? d.blockFace : d.quay;           // where the harbour's solid ground begins
 const onPier = (d, x) => (x - d.blockFace) * d.dir < 0;            // seaward of the block's face
-function dockArtOf(d) { return d.art || img.dockArt[d.dir > 0 ? 1 : -1]; }
-function ownDockArt(d) { if (!d.art) d.art = copyCanvas(img.dockArt[d.dir > 0 ? 1 : -1]); return d.art; }
+// (LAND TEST, user Oct 25: the city on the desert's side in a desaturated orange - its stone, hangar, towers, houses)
+const desertSide = x => LAND && x > (SEA0 + SEA1) / 2;
+function desertTone(c) {
+  if (!c) return c;
+  if (c._dt) return c._dt;
+  const o = copyCanvas(c), x = o.getContext('2d'), id = x.getImageData(0, 0, o.width, o.height), d = id.data, k = 0.7;
+  for (let i = 0; i < d.length; i += 4) {
+    if (!d[i + 3]) continue;
+    const L = 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2];
+    d[i] = d[i] * (1 - k) + Math.min(255, L * 1.12 + 22) * k; d[i + 1] = d[i + 1] * (1 - k) + (L * 0.86 + 8) * k; d[i + 2] = d[i + 2] * (1 - k) + L * 0.62 * k;
+  }
+  x.putImageData(id, 0, 0);
+  return (c._dt = o);
+}
+const baseDockArt = d => d.dir > 0 && LAND ? desertTone(img.dockArt[1]) : img.dockArt[d.dir > 0 ? 1 : -1];
+function dockArtOf(d) { return d.art || baseDockArt(d); }
+function ownDockArt(d) { if (!d.art) d.art = copyCanvas(baseDockArt(d)); return d.art; }
 // a pillar a torpedo could strike at x, y (in the water, above the footing)
 function pillarAt(d, x, y) {
   if (d.pierGone || y < WATER_Y + 1 || y > seabedY(x) - 6) return -1;
@@ -998,7 +1018,8 @@ function buildWorld(restore) {
   sfxNewRound();                   // (nor any of its sounds: a siren, a blast, a shell's whoosh)
   vehZoom[0] = {}; vehZoom[1] = {};  // (each vehicle's zoom: the defaults again)
   padPick[0] = padPick[1] = null;
-  WORLD_W = NET.worldW || Math.round(VIEW_W * (TEST && !LAND ? 3 : 5));   // (LAND TEST: as wide as the sea's, a lake in its middle: user Oct 25)   // (an online guest: the host's world, whatever its screen)  // five screens: plenty of open ocean between the harbours (the test range: three)
+  WORLD_W = NET.worldW || Math.round(VIEW_W * (LAND ? 15 : TEST ? 3 : 5));   // (LAND TEST: forest, sea and desert, five screens each: user Oct 25)
+  SEA0 = LAND ? Math.round(VIEW_W * 5) : 0; SEA1 = LAND ? Math.round(VIEW_W * 10) : WORLD_W;   // (an online guest: the host's world, whatever its screen)  // five screens: plenty of open ocean between the harbours (the test range: three)
   builtViewW = VIEW_W;
   N = Math.ceil(WORLD_W / DX) + 1;
   wh = new Float32Array(N); wv = new Float32Array(N); wf = new Float32Array(N); wtmp = new Float32Array(N);
@@ -1009,14 +1030,14 @@ function buildWorld(restore) {
   // one player: the far side is open ocean (STORY: the right, where the enemy comes from). The other player's
   // harbour still exists for the bookkeeping, but far past the edge of the world, where nothing ever reaches it
   // (LAND TEST: no harbours either - both far past the edges, like the test range's)
-  const lone = PLAYERS === 1, farL = TEST || LAND || (lone && SWAP), farR = TEST || LAND || (lone && !SWAP);
-  const left = { x0: farL ? -50000 : 0, w: DW, mirrored: true, dir: -1, player: SWAP ? 1 : 0 };
-  const RX = WORLD_W + (farR ? 50000 : 0);
+  const lone = PLAYERS === 1, farL = TEST || (lone && SWAP), farR = TEST || (lone && !SWAP);
+  const left = { x0: farL ? -50000 : SEA0, w: DW, mirrored: true, dir: -1, player: SWAP ? 1 : 0 };
+  const RX = SEA1 + (farR ? 50000 : 0);
   const right = { x0: RX - DW, w: DW, mirrored: false, dir: 1, player: SWAP ? 0 : 1 };
   homeDock = SWAP ? [right, left] : [left, right];
-  docks = TEST || LAND ? [] : lone ? [homeDock[0]] : [left, right];
+  docks = TEST ? [] : lone ? [homeDock[0]] : [left, right];
   for (const d of homeDock) layoutDock(d);
-  VIS_L = farL ? 0 : left.viewEdge; VIS_R = farR ? WORLD_W : right.viewEdge;
+  VIS_L = farL || LAND ? 0 : left.viewEdge; VIS_R = farR || LAND ? WORLD_W : right.viewEdge;   // (LAND TEST: the whole world, both countries)
   // the sea floor's shores: the pier ends; the test range has none (shallow at its ends), and one player's open side
   // is open ocean (its shore mirrored, so the deep runs out to that edge of the world)
   if (TEST) setBedShores(0, WORLD_W);
@@ -1025,13 +1046,11 @@ function buildWorld(restore) {
   else setBedShores(left.quay, right.quay);
   buildCalm();
   // each harbour's buoy marks how far its tower's gun reaches (on a calm day): an enemy past it is in range
-  buoys = LAND ? [] : docks.map(d => ({ x: d.towerX - d.dir * towerReachCalm(), col: 'orange', state: 'float', ph: Math.random() * 6, player: d.player }));
-  if (!LAND) buoys.push({ x: WORLD_W / 2, col: 'red', state: 'float', ph: Math.random() * 6 });   // marks the middle of the sea
+  buoys = docks.map(d => ({ x: d.towerX - d.dir * towerReachCalm(), col: 'orange', state: 'float', ph: Math.random() * 6, player: d.player }));
+  buoys.push({ x: WORLD_W / 2, col: 'red', state: 'float', ph: Math.random() * 6 });   // marks the middle of the sea
   if (!restore) { ui.winner = null; ui.winT = 0; }
   towers.length = 0;
   for (const d of homeDock) towers.push({ player: d.player, x: d.towerX, facing: -d.dir, hp: docks.includes(d) ? TW_HP : 0, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0, pg: docks.includes(d) ? makePierGun(d) : null });
-  // (LAND TEST, user Oct 25: each side's tower at its end of the land)
-  if (LAND) for (const tw of towers) { const R = SIDE(tw.player); Object.assign(tw, { x: R ? WORLD_W - LAND_TOWER_X : LAND_TOWER_X, facing: R ? -1 : 1, hp: TW_HP }); }
 
   ships.length = 0;
   for (let p = 0; p < 2; p++) ships.push(makeShip(p, homeDock[p].berth, -homeDock[p].dir, homeDock[p]));
@@ -1039,15 +1058,13 @@ function buildWorld(restore) {
   subs.length = 0;
   subs.push(makeSub(0, homeDock[0]), makeSub(1, homeDock[1]));
   if (PLAYERS === 1) { ships[1].state = 'gone'; subs[1].state = 'gone'; }    // player 2's boats never take to the water
-  if (LAND) for (let p = 0; p < 2; p++) { ships[p].state = 'gone'; subs[p].state = 'gone'; }   // (no boats on land)
-  for (let p = 0; p < 2; p++) { fleet[p].ship = (PLAYERS === 1 && p) || LAND ? 0 : FLEET.ship; fleet[p].sub = (PLAYERS === 1 && p) || LAND ? 0 : FLEET.sub; fleet[p].plane = PLAYERS === 1 && p ? 0 : FLEET.plane; fleetWait[p].ship = fleetWait[p].sub = 0; }
+  for (let p = 0; p < 2; p++) { fleet[p].ship = PLAYERS === 1 && p ? 0 : FLEET.ship; fleet[p].sub = PLAYERS === 1 && p ? 0 : FLEET.sub; fleet[p].plane = PLAYERS === 1 && p ? 0 : FLEET.plane; fleetWait[p].ship = fleetWait[p].sub = 0; }
   planes.length = 0; planes.push(makePlane(0), makePlane(1)); planeTrails.length = 0; planeWisps.length = 0; iceBits.length = 0;
   if (PLAYERS === 1) planes[1].state = 'gone', planes[1].wait = -1e9;
   oldShips.length = 0; oldSubs.length = 0; oldPlanes.length = 0;
   chunks.length = 0;
   buildSailboats();
   buildSea();
-  if (LAND) { schools = []; sharks = []; plants = []; }   // (no sea life on land - the lake's three yachts are built with the land)
   buildBirds();
   shocks.length = 0;
   storm.bolts.length = 0; storm.flash = 0; storm.next = 3;
@@ -1072,35 +1089,40 @@ function buildWorld(restore) {
   storyReset();
   buildCaptains();
   // LAND TEST: the ground, both sides' tank and helicopter on it, and you in your tank
-  if (LAND) { buildLand(); buildSailboats(); buildLandUnits(); if (!restore) for (let p = 0; p < PLAYERS; p++) takeOver(p, 'tank'); }
+  // (user Oct 25: nothing stands on the land at the start - a tank drives in from the world's end, a helicopter flies in)
+  if (LAND) {
+    buildLand(); buildLandUnits();
+    // (user Oct 25) and each side's second tower, on the mountain at its end of the world, where it sees far
+    for (let p = 0; p < 2; p++) { const x = SIDE(p) ? WORLD_W - LAND_TOWER_X : LAND_TOWER_X; towers.push({ player: p, edge: true, x, base: landTop(x), facing: SIDE(p) ? -1 : 1, hp: TW_HP, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0, pg: null }); }
+  }
   // every round opens with you in your tower (user Oct 24 night)
-  if (!TEST && !LAND && !restore) for (let p = 0; p < PLAYERS; p++) if (crew[p].mode === 'dock' && towers[p] && towers[p].hp > 0 && canTake(p, 'tower')) takeOver(p, 'tower');
+  if (!TEST && !restore) for (let p = 0; p < PLAYERS; p++) if (crew[p].mode === 'dock' && towers[p] && towers[p].hp > 0 && canTake(p, 'tower')) takeOver(p, 'tower');
 }
 
 // Sea life, plants and clouds
 function buildSea() {
   const types = Object.keys(FISH_DEFS);
   schools = [];
-  const nSchools = Math.round(19 * WORLD_W / (VIEW_W * 3));          // 20% more than before
+  const nSchools = Math.round(19 * SEA_W() / (VIEW_W * 3));          // 20% more than before
   for (let i = 0; i < nSchools; i++) {
     const type = types[i % types.length];
     const n = type === 'sardine' ? 10 + Math.floor(hash(i * 3.7) * 10) : 3 + Math.floor(hash(i * 7.3) * 6);
     const fish = [];
     for (let k = 0; k < n; k++) fish.push({ dx: rnd(-1, 1) * (16 + n * 3), dy: rnd(-1, 1) * (8 + n), ph: Math.random() * 6.28 });
     schools.push({
-      type, x: rnd(0.05, 0.95) * WORLD_W, y: 0, dir: Math.random() < 0.5 ? 1 : -1,
+      type, x: seaU(rnd(0.05, 0.95)), y: 0, dir: Math.random() < 0.5 ? 1 : -1,
       speed: rnd(8, 18), turnT: rnd(6, 20), flee: 0, fish, vy: 0,
     });
     const s = schools[schools.length - 1]; s.y = rnd(WATER_Y + 60, seabedY(s.x) - 40);
     for (const f of s.fish) { f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; f.vx = s.dir * s.speed; f.vy = 0; f.face = s.dir; }
   }
   sharks = [];
-  for (let i = 0; i < Math.round(5 * WORLD_W / (VIEW_W * 3)); i++) sharks.push({ x: rnd(0.1, 0.9) * WORLD_W, y: 0, dir: Math.random() < 0.5 ? 1 : -1, speed: rnd(16, 26), turnT: rnd(8, 18), turn: 0, ph: Math.random() * 6 });
+  for (let i = 0; i < Math.round(5 * SEA_W() / (VIEW_W * 3)); i++) sharks.push({ x: seaU(rnd(0.1, 0.9)), y: 0, dir: Math.random() < 0.5 ? 1 : -1, speed: rnd(16, 26), turnT: rnd(8, 18), turn: 0, ph: Math.random() * 6 });
   buildReef();                                            // (the floor's rocks, corals and the ridges behind)
   for (const k of sharks) k.y = rnd(WATER_Y + 90, seabedY(k.x) - 50);
   plants = [];
-  let x = 20;
-  while (x < WORLD_W) {
+  let x = SEA0 + 20;
+  while (x < SEA1) {
     const h = hash(x * 0.37);
     const df = deepFactor(x);                                     // 0 by the docks, 1 out in the deep
     const kind = h < 0.3 + 0.35 * df ? 'kelp' : h < 0.7 ? 'grass' : 'rock';
@@ -1479,18 +1501,18 @@ function hitTest(sh, x, y) {
 // The defense tower stands on the block at the end of the pier: six drawings, intact to a skeleton of rebar
 // (sea to the right in the art). Each hit shows the next drawing; the sixth brings it down in pieces.
 const TW_HP = 10;                    // the tower's strength: ten shells bring it down (and that loses the round)
-// (LAND TEST, user Oct 25: the towers stand at the ends of the land, on flat ground at the sides' height)
-const LAND_TOWER_Y = WATER_Y - 95;
-const TW = { K: 0.5, FW: 136, FH: 300, BARREL: 34, THICK: 3.6, W: 52, HALF: 26, H: 146, get BASE() { return LAND ? LAND_TOWER_Y : DECK_Y; }, HITS: 6, STUMP: 46 };
+// (a tower's foot: the harbour's deck - or, LAND TEST's towers on the mountains at the world's ends, their own: user Oct 25)
+const twBase = tw => tw && tw.base != null ? tw.base : DECK_Y;
+const TW = { K: 0.5, FW: 136, FH: 300, BARREL: 34, THICK: 3.6, W: 52, HALF: 26, H: 146, BASE: DECK_Y, HITS: 6, STUMP: 46 };
 // (user Oct 25, with a picture: the barrel turns about the middle of the turret, and reaches out about the turret's
 // own width; it's drawn behind the turret, so only what clears the turret shows)
 const TW_PIVOT = [[69, 17], [69, 17], [69, 16], [68, 16], [69, 17], [68, 18]];   // the turret's middle in each drawing
 function towerFrame(t) { return clamp(Math.ceil((TW_HP - Math.max(t.hp, 1)) * (TW.HITS - 1) / (TW_HP - 1)), 0, TW.HITS - 1); }   // its six drawings across its ten hits
-function towerPivot(t) { const [px, py] = TW_PIVOT[towerFrame(t)]; return [t.x + t.facing * (px - TW.FW / 2) * TW.K, TW.BASE - (TW.FH - py) * TW.K]; }
+function towerPivot(t) { const [px, py] = TW_PIVOT[towerFrame(t)]; return [t.x + t.facing * (px - TW.FW / 2) * TW.K, twBase(t) - (TW.FH - py) * TW.K]; }
 function towerHit(t, x, y) {
   if (Math.abs(x - t.x) >= TW.W / 2) return false;
   const top = t.hp > 0 ? TW.H - 6 : TW.STUMP * TW.K;
-  return y > TW.BASE - top && y < TW.BASE + 3;
+  return y > twBase(t) - top && y < twBase(t) + 3;
 }
 function towerUsable(t) { return t.hp > 0; }
 // The submarine: about the battleship's length, bow to the right in the art
@@ -1741,7 +1763,8 @@ function mapMark() { }                                              // (splash m
 function drawMiniMap() {
   const W = Math.round(ubw * 0.6), x0 = Math.round((ubw - W) / 2), y = Math.max(ui.top + (!ONEVIEW() ? 102 : 58), hudTop() + 44);     // wide enough to read; under the vehicle buttons
   const mx = wx => x0 + Math.round(clamp(wx / WORLD_W, 0, 1) * (W - 1));
-  ug.fillStyle = LAND ? '#8fae5a' : '#7fb6e8'; ug.fillRect(x0, y, W, 2);         // (LAND TEST: the ground's line)
+  ug.fillStyle = '#7fb6e8'; ug.fillRect(x0, y, W, 2);
+  if (LAND) { ug.fillStyle = '#8fae5a'; ug.fillRect(x0, y, mx(SEA0) - x0, 2); ug.fillStyle = '#d6b072'; ug.fillRect(mx(SEA1), y, x0 + W - mx(SEA1), 2); }   // (LAND TEST: the two countries' ground)
   // height above the sea, eased so even a shell fired straight up (about 1350 high) still draws its whole arc:
   // low shots keep their true shape, high ones are gently squeezed into the room above the line
   const alt = wy => Math.round(34 * (1 - Math.exp(-Math.max(0, WATER_Y - wy) / 700)));
@@ -1847,7 +1870,9 @@ function canTake(p, k) {
   if (k === 'tower') return towerUsable(towers[p]);
   if (k === 'tank' || k === 'heli') {                            // (LAND TEST: standing, and a captain for it)
     const v = k === 'tank' ? tanks[p] : helis[p];
-    return LAND && !!v && (k === 'tank' ? v.state === 'alive' : v.state === 'fly' || v.state === 'landed') && (!useCaptains() || v.cap != null || capFree(p) >= 0);
+    if (!LAND) return false;
+    if (landUp(p, k)) return !useCaptains() || v.cap != null || capFree(p) >= 0;
+    return landCanCome(p, k) && (!useCaptains() || capFree(p) >= 0);   // (a new one comes in from your end of the world)
   }
   const crewed = v => !useCaptains() || (v && v.cap != null) || capFree(p) >= 0;   // (out with a captain already, or one free to take her)
   if (k === 'plane') { const pl = planes[p]; return !!pl && (pl.state === 'fly' || (pl.state === 'hangar' && (fleet[p].plane > 0 || TEST) && crewed(pl))); }
@@ -2189,7 +2214,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 18:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 19:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -2519,7 +2544,8 @@ const CAPTI = {"w": 42, "h": 42, "count": 32, "states": ["bare", "skeleton"], "d
 const HUD_S0 = 0.62;                               // design units per atlas pixel (the mock-up's buttons)
 const HUD_VEH = ['tower', 'ship', 'sub', 'plane'];             // (the tower first, user Oct 24 night)
 // CHILL: a yacht to sail as well, its button next to the battleship's
-const hudVeh = () => LAND ? ['tower', 'tank', 'heli', 'plane'] : MODE === 'chill' ? ['tower', 'ship', 'sub', 'plane', 'sail'] : HUD_VEH;
+const hudVeh = () => LAND ? ['tower', 'ship', 'sub', 'plane', 'tank', 'heli'] :   // (LAND TEST: every vehicle, user Oct 25)
+  MODE === 'chill' ? ['tower', 'ship', 'sub', 'plane', 'sail'] : HUD_VEH;
 const HUD_TABICON = { ship: 'icShip', sub: 'icSub', tower: 'icTower', plane: 'icPlane', sail: 'icSail', tank: 'icTank', heli: 'icHeli' };
 // the yacht's button picture: a yacht, in the buttons' cream, the size of the battleship's
 function makeSailIcon() {
@@ -4675,7 +4701,7 @@ const FIRE_KEYS = { Space: 0, Enter: 1, NumpadEnter: 1 };
 const DC_KEYS = { KeyX: 0, Slash: 1, ControlRight: 1, ControlLeft: 1 };
 const MG_KEYS = { KeyF: 0, ShiftRight: 1 };          // the machine gun      // (Ctrl: player 2's second weapon too)
 // the switcher: 1 2 3 (player 1) and 8 9 0 (player 2) step into the tower, the battleship, the sub
-const SWITCH_KEYS = { Digit1: [0, 'tower'], Digit2: [0, 'ship'], Digit3: [0, 'sub'], Digit4: [0, 'plane'], Digit8: [1, 'tower'], Digit9: [1, 'ship'], Digit0: [1, 'sub'], Digit7: [1, 'plane'] };
+const SWITCH_KEYS = { Digit1: [0, 'tower'], Digit2: [0, 'ship'], Digit3: [0, 'sub'], Digit4: [0, 'plane'], Digit5: [0, 'tank'], Digit6: [0, 'heli'], Digit8: [1, 'tower'], Digit9: [1, 'ship'], Digit0: [1, 'sub'], Digit7: [1, 'plane'] };
 const held = new Set();
 const scopeHold = [0, 0];
 // one player: the arrows, Enter and the rest of player 2's keys work for player 1 too
@@ -5602,10 +5628,10 @@ function crumbleTower(tw) {
   tw.marks = null;
   if (tw.fallen) return;
   tw.hp = 0; tw.fallen = 1; tw.burnT = 73;            // the stump catches fire once the fall is over
-  const src = img.towers[TW.HITS - 1][tw.facing], sea = tw.facing;
+  const src0 = img.towers[TW.HITS - 1][tw.facing], src = desertSide(tw.x) ? desertTone(src0) : src0, sea = tw.facing;
   const rows = [0, 58, 116, 176, TW.FH - TW.STUMP], cols = [0, 50, 90, TW.FW];
   // it goes over toward the sea, pivoting on the seaward foot of what stays standing
-  const hinge = { px: tw.x + sea * TW.HALF * 0.75, py: TW.BASE - TW.STUMP * TW.K, th: 0, w: 0.02, dir: sea };
+  const hinge = { px: tw.x + sea * TW.HALF * 0.75, py: twBase(tw) - TW.STUMP * TW.K, th: 0, w: 0.02, dir: sea };
   // The cracks between the pieces are jagged, not ruled lines: each crack is one random torn profile shared
   // by the two pieces either side of it, so they interlock while together and show ragged edges once apart.
   const M = 8;
@@ -5655,7 +5681,7 @@ function crumbleTower(tw) {
     if (n < 40) continue;                                          // skip empty cells (sky beside the turret)
     g2.putImageData(idd, 0, 0);
     const cx = (ax + bx) / 2, cy = (ay + by) / 2;
-    const x = tw.x + (cx - TW.FW / 2) * TW.K, y = TW.BASE - (TW.FH - cy) * TW.K;
+    const x = tw.x + (cx - TW.FW / 2) * TW.K, y = twBase(tw) - (TW.FH - cy) * TW.K;
     const k = { img: c, k: TW.K, x, y, vx: 0, vy: 0, a: 0, w: 0, delay: 0, floor: DECK_Y, water: false, kind: 'tower', player: tw.player, hh: c.height / 2 * TW.K };
     if (r === rows.length - 2) {
       // the lowest course just slumps down onto the quay as the wall above leaves it
@@ -5667,8 +5693,8 @@ function crumbleTower(tw) {
     chunks.push(k);
   }
   // the foot gives way in a burst of grit and dust; the rest of the show is the fall itself
-  spawnDebris(tw.x, TW.BASE - 30, 16, 0);
-  for (let i = 0; i < 14; i++) spawnSmoke(tw.x + rnd(-26, 26), TW.BASE - rnd(2, 26), { mist: i % 3 === 0, dark: 0.5, r: rnd(7, 12), lift: 6, vx: rnd(-30, 30), alpha: rnd(0.3, 0.45), life: rnd(5, 9) });
+  spawnDebris(tw.x, twBase(tw) - 30, 16, 0);
+  for (let i = 0; i < 14; i++) spawnSmoke(tw.x + rnd(-26, 26), twBase(tw) - rnd(2, 26), { mist: i % 3 === 0, dark: 0.5, r: rnd(7, 12), lift: 6, vx: rnd(-30, 30), alpha: rnd(0.3, 0.45), life: rnd(5, 9) });
   shakeAt(8, tw.x);
   sfxCrash(tw.x, 1);
   for (const pr of perches) if (pr.tower === tw && pr.bird) takeOff(pr.bird, tw.x);
@@ -5869,7 +5895,7 @@ function stepSub(sb, dt) {
   const harboured = !!sb.gate || sb.state === 'docked';
   // engines: the telegraph says which way to go. Unlike the battleship she never backs up: asked to go the
   // other way, she turns right round (slowing as she swings), then drives ahead
-  const order = harboured ? 0 : sb.auto === 'home' ? d.dir * NOTCH_VAL[6] : driving || (!stopPref && sb.state === 'out' && !sb.gate) ? sb.input || 0 : 0, dirWant = Math.sign(order);
+  const order = harboured ? 0 : sb.auto === 'home' ? (sb.homeWait ? 0 : d.dir * NOTCH_VAL[6]) : driving || (!stopPref && sb.state === 'out' && !sb.gate) ? sb.input || 0 : 0, dirWant = Math.sign(order);
   if (!sb.turn && !harboured && dirWant && dirWant !== sb.facing) startSubTurn(sb);
   if (sb.turn) {
     sb.turn.t += dt;
@@ -5941,7 +5967,22 @@ function stepSub(sb, dt) {
     if (sb.blockT > 0) top = Math.min(top, sb.blockTop);
     const clearY = top - SUB_DN - 14;
     if ((sb.depthT === undefined ? WATER_Y : sb.depthT) > clearY) sb.depthT = Math.max(WATER_Y, clearY);
-  }
+    // (user Oct 25) and she never runs into an enemy sub on her way: one coming up ahead at her depth, she goes over
+    // it - or under, if that's nearer and the floor allows - and with no room either way she waits for it to move
+    sb.homeWait = false;
+    const H = (SUB_KEEL_ROW - SUB_DECK_ROW) * SUB_K, gap = H * 1.4;
+    for (const e of subs) {
+      if (!e || e === sb || e.id === sb.id || e.state !== 'out') continue;
+      const ahead = (e.x - sb.x) * d.dir;
+      if (ahead < -SUB_L * 0.9 || ahead > SUB_L * 4.5) continue;
+      if (Math.abs(e.y - sb.y) >= gap && Math.abs(e.y - sb.depthT) >= gap) continue;            // (clear of it, and staying clear)
+      const up = e.y - gap, down = e.y + gap, deepest = Math.min(clearY, subMaxY(e.x) - 6, subMaxY(sb.x) - 6);
+      const canUp = up >= WATER_Y - 1, canDown = down <= deepest;
+      if (canUp && (!canDown || Math.abs(up - sb.y) <= Math.abs(down - sb.y))) sb.depthT = Math.max(WATER_Y, up);
+      else if (canDown) sb.depthT = down;
+      if ((!canUp && !canDown) || (Math.abs(e.y - sb.y) < gap * 0.95 && ahead > 0 && ahead < SUB_L * 1.25)) sb.homeWait = true;   // (not past it yet: hold back)
+    }
+  } else sb.homeWait = false;
   // depth: the console wheel sets the depth she makes for; she steers there and holds it
   sb.depthT = clamp(sb.depthT === undefined ? WATER_Y : sb.depthT, WATER_Y, subMaxY(sb.x));
   const goalY = harboured ? SUB_GATE_Y : sb.depthT;
@@ -7159,9 +7200,43 @@ function planeEdge(p) { return SIDE(p) ? VIS_L + 12 : VIS_R - 12; }   // (right 
 function planeTurnRoom(pl) { return pl.spd * PLANE_TURN_T / Math.PI + 4; }
 const allPlanes = () => oldPlanes.length ? planes.concat(oldPlanes) : planes;
 const planeUp = pl => pl && (pl.state === 'fly' || pl.state === 'down');
+/* (LAND TEST, user Oct 25) each side's airfield, on the flat ground behind its harbour: the plane takes off from it,
+   rolling toward the sea and lifting off, and comes home to it - gliding down onto the runway, rolling to a stop */
+const PLANE_WHEELS = 10;                                   // (the plane's middle above its wheels)
+function airfield(p) {
+  const R = SIDE(p);
+  return { near: R ? SEA1 + 160 : SEA0 - 160, far: R ? SEA1 + AIR_W - 140 : SEA0 - AIR_W + 140, y: DOCK_TOP_Y - PLANE_WHEELS, dir: R ? -1 : 1 };
+}
+// on the runway: taking off (rolling, gathering speed, lifting off) or landed (rolling to a stop, then home)
+function stepPlaneGround(pl, dt) {
+  const af = airfield(pl.id);
+  if (pl.ground === 'roll') {
+    pl.spd = Math.min(PLANE_V, pl.spd + 190 * dt);
+    pl.x += pl.facing * pl.spd * dt; pl.y = af.y; pl.pitch += (-0.04 - pl.pitch) * Math.min(1, dt * 4);
+    if (pl.spd > 245) { pl.ground = null; pl.pitch = -0.3; pl.climbT = 2.2; }   // (off: nose up, climbing away for a moment)
+  } else {
+    pl.spd = Math.max(0, pl.spd - 150 * dt);
+    pl.x += pl.facing * pl.spd * dt; pl.y = af.y; pl.pitch *= 1 - Math.min(1, dt * 6);
+    if (pl.spd < 22 || (pl.x - af.far) * af.dir < 0) {
+      const p = pl.id;
+      Object.assign(pl, { state: 'hangar', ground: null, hits: 0, dmg: 0, bombs: PLANE_BOMBS, rockets: PLANE_ROCKETS, rk: 0, smokeT: 0, auto: null, mg: false, ice: 0, strand: null, spd: PLANE_V, splat: [], wings: 0 });
+      homeVeh(p, 'plane');
+      return;
+    }
+  }
+  pl.vx = pl.facing * pl.spd; pl.vy = 0;
+  if (!SIM_ONLY && Math.random() < dt * pl.spd / 20) kickLandDust(pl.x - pl.facing * 14, af.y + PLANE_WHEELS, 1);
+}
 function launchPlane(pl) {
   const p = pl.id, home = planeHome(p);
-  Object.assign(pl, { loiter: null, state: 'fly', x: home, y: LAND ? landTop(clamp(home, 0, WORLD_W)) - 420 : HANGAR_TOP - 110, facing: SIDE(p) ? -1 : 1, pitch: 0, turn: null, auto: null, spd: PLANE_V, vy: 0, mg: false, ice: 0, strand: null, vaporT: 0, inCloud: 0, eng: 'on', offT: 0, recoverT: 0 });
+  if (LAND) {                                              // (from the airfield's far end, rolling toward the sea)
+    const af = airfield(p);
+    Object.assign(pl, { loiter: null, state: 'fly', ground: 'roll', x: af.far, y: af.y, facing: af.dir, pitch: 0, turn: null, auto: null, spd: 40, vy: 0, mg: false, ice: 0, strand: null, vaporT: 0, inCloud: 0, eng: 'on', offT: 0, recoverT: 0 });
+    pl.vx = pl.facing * pl.spd;
+    sfxPlaneIn(pl.x);
+    return;
+  }
+  Object.assign(pl, { loiter: null, state: 'fly', x: home, y: HANGAR_TOP - 110, facing: SIDE(p) ? -1 : 1, pitch: 0, turn: null, auto: null, spd: PLANE_V, vy: 0, mg: false, ice: 0, strand: null, vaporT: 0, inCloud: 0, eng: 'on', offT: 0, recoverT: 0 });
   pl.vx = pl.facing * PLANE_V;
   sfxPlaneIn(pl.x);
 }
@@ -7284,6 +7359,7 @@ function stepPlanes(dt) {
     if (pl.state === 'hangar') continue;
     pl.bk = Math.max(0, pl.bk - dt); pl.rk = Math.max(0, (pl.rk || 0) - dt);
     if (pl.state === 'down') { stepPlaneDown(pl, dt); continue; }
+    if (pl.ground) { stepPlaneGround(pl, dt); continue; }        // (LAND TEST: taking off or landed, on the runway)
     const c = crew[p], mine = c.mode === 'plane' && i < 2, enemy = SIDE(p) ? -1 : 1;
     // climb and dive: held, the nose keeps coming up (or going down), steeper the longer it's held; let go, it
     // levels out. It answers straight away, turning or not. Nothing pulls it up off the sea: fly it into the
@@ -7299,12 +7375,35 @@ function stepPlanes(dt) {
     // take half the time")
     const rate = (0.22 + 0.55 * Math.min(1, pl.holdT / 2)) * (stick * pl.pitch < 0 ? 2 : 1);
     let want = stick ? clamp(pl.pitch + stick * rate * dt, -PLANE_PITCH, PLANE_PITCH) : 0, forced = false;
-    if (pl.auto === 'home') { want = clamp((HANGAR_TOP - 110 - pl.y) / 200, -0.4, 0.4); forced = true; }
+    if (pl.auto === 'home') {
+      want = clamp((HANGAR_TOP - 110 - pl.y) / 200, -0.4, 0.4); forced = true;
+      // (LAND TEST) home is the airfield: coming in over the harbour toward it, it glides down to its runway and lands
+      if (LAND) {
+        const af = airfield(p), D = (pl.x - af.near) * af.dir, homing = pl.facing === -af.dir && !pl.turn;
+        if (homing && D < 1400 && D > -(AIR_W - 300)) {
+          const yT = af.y - Math.max(0, D) * 0.15;
+          want = clamp((yT - pl.y) / 90, -0.45, 0.45);
+          pl.spd += (215 - pl.spd) * Math.min(1, dt * 0.8);
+          if (D < 80 && pl.y >= af.y - 3) { pl.ground = 'land'; pl.y = af.y; pl.pitch = 0; sfxImpact(pl.x); }
+        }
+      }
+      // (user Oct 25) flying home it never runs into another plane (or a helicopter): one ahead at its height, it
+      // goes up over it
+      const fwd = pl.turn ? -pl.turn.from : pl.facing;
+      for (const o of [...planes, ...(LAND ? helis : [])]) {
+        if (!o || o === pl || (o.state !== 'fly' && o.state !== 'down')) continue;
+        const ahead = (o.x - pl.x) * fwd, closing = pl.spd + Math.max(0, -(o.vx || 0) * fwd);
+        if (ahead < -30 || ahead > 80 + closing * 1.3 || Math.abs(o.y - pl.y) > 55) continue;
+        // (over it - or, if it's above and there's sky enough under, under it)
+        if (o.y < pl.y - 15 && pl.y < WATER_Y - 140) want = Math.max(want, 0.6); else want = Math.min(want, -0.85);
+      }
+    }
+    if (pl.climbT > 0) { pl.climbT -= dt; if (!stick) { want = Math.min(want, -0.32); forced = true; } }   // (just off the runway: climbing out)
     if (pl.y < SKY_TOP + 90 && want < 0.15) { want = 0.15; forced = true; }          // the ceiling
     // your own tower it always dodges: coming up on it too low, the nose comes up to clear it
     const tw = towers[p], dirNow = pl.turn ? (pl.turn.t / PLANE_TURN_T < 0.5 ? pl.turn.from : -pl.turn.from) : pl.facing;
     if (tw && tw.hp > 0) {
-      const ahead = (tw.x - pl.x) * dirNow, top = TW.BASE - TW.H - 28;
+      const ahead = (tw.x - pl.x) * dirNow, top = twBase(tw) - TW.H - 28;
       if (ahead > -50 && ahead < 120 + pl.spd * 1.1 && pl.y > top - 30) { want = Math.min(want, -0.75 * clamp((pl.y - top + 30) / 60, 0.4, 1)); forced = true; }
     }
     // and the rest of your own harbour (the pier, the block, the hangar the tower stands by): flying at it low,
@@ -7342,7 +7441,7 @@ function stepPlanes(dt) {
     pl.x += pl.vx * dt; pl.y += pl.vy * dt;
     if ((pl.x - planeEdge(p)) * enemy > 0) pl.x = planeEdge(p);
     // skimming the sea: the prop wash whips up spray and foam behind it and dents the water under it
-    if (LAND) planeLandWash(pl, dt);                   // (LAND TEST, user Oct 25: dust off the ground, the grass blown flat)
+    if (onLand(pl.x)) planeLandWash(pl, dt);                   // (LAND TEST, user Oct 25: dust off the ground, the grass blown flat)
     else { const hgt = surfaceY(pl.x) - pl.y;
       if (hgt > 0 && hgt < 64 && !SIM_ONLY) {
         const k = (1 - hgt / 64) * clamp(pl.spd / PLANE_V, 0.6, 1.6);
@@ -7879,8 +7978,8 @@ function takeOver(p, k) {
     c.mode = 'tower'; setScope(p, vehZoom[p].tower || ZOLD + 1); return true;
   }
   if (k === 'tank' || k === 'heli') {
-    const v = k === 'tank' ? tanks[p] : helis[p];
     if (!canTake(p, k)) return false;
+    const v = landUp(p, k) ? (k === 'tank' ? tanks[p] : helis[p]) : landArrive(p, k);
     boardCaptain(p, v, k);
     c.mode = k; setOrder(t, 3); v.input = 0;
     setScope(p, vehZoom[p][k] || ZOLD + (k === 'tank' ? 2 : 1));
@@ -7952,14 +8051,12 @@ function killCaptain(p) {
 
 /* ---------------- Sailboats: a few yachts out in the middle, in front of the warships ---------------- */
 const sailboats = [];
-// (LAND TEST: the lake's open water)
 function sailBounds() {
-  if (LAND) return lakeBounds();
   const L = homeDock.find(d => d.dir < 0), R = homeDock.find(d => d.dir > 0); return [Math.max(L.quay + 520, 360), Math.min(R.quay - 520, WORLD_W - 360)]; }
 function buildSailboats() {
   sailboats.length = 0;
   const [a, b] = sailBounds();
-  const n = LAND ? 3 : 9;                                // (LAND TEST: three on the lake)
+  const n = 9;
   for (let i = 0; i < n; i++) sailboats.push(newSailboat(i % 3, a + (b - a) * ((i + 0.5) / n + rnd(-0.03, 0.03))));
 }
 function newSailboat(kind, x) {
@@ -8283,9 +8380,6 @@ function dockFrame(p) {
 }
 function dockZoom(p) {
   if (NET.remote) return;                                  // (a teammate's seat: not this screen's view)
-  // (LAND TEST: no harbour to frame - its stand-in is far past the world's edge, which zoomed the view right out; your
-  // own ground at the tank's zoom instead)
-  if (LAND) { setScope(p, vehZoom[p].tank || ZOLD + 2); return; }
   const [, h] = dockFrame(p);
   cam.zt[p] = clamp(VIEW_W / (2 * (2 * h + 40)), ZOOM_MIN, ZOOM_TOP);
   let best = 1;
@@ -8372,9 +8466,10 @@ function stepCrew(dt) {
     if (cc.mode !== 'tower') tw.inUse = false;
     // the tower down: that's the round (the other captain wins once it's fallen)
     if (CHILL) chillTower(tw, dt);                    // (CHILL: it mends itself, and a fallen one is built again)
-    else if (tw.fallen && !TEST && docks.length && ui.winner == null) { tw.lostT = (tw.lostT || 0) + dt; if (tw.lostT > 3.5) gameOver(1 - tw.player); }
+    else if (tw.fallen && !tw.edge && !TEST && docks.length && ui.winner == null) {   // (LAND TEST: the harbour's tower; the one on the mountain is extra)
+      tw.lostT = (tw.lostT || 0) + dt; if (tw.lostT > 3.5) gameOver(1 - tw.player); }
     // towers are never repaired: damage stays for the whole round
-    tguns[tw.player].reload = Math.max(0, tguns[tw.player].reload - dt);
+    if (!tw.edge) tguns[tw.player].reload = Math.max(0, tguns[tw.player].reload - dt);
     tw.muzzleFlash = Math.max(0, tw.muzzleFlash - dt);
     tw.recoil = Math.max(0, (tw.recoil || 0) - dt * 2.5);
     // a battered tower smokes from its broken side; a fallen one burns on for a long while
@@ -8383,7 +8478,7 @@ function stepCrew(dt) {
       tw.burn += dt * (hurt >= 4 ? 5 : hurt >= 3 ? 2.5 : 1);
       while (tw.burn >= 1) {
         tw.burn -= 1;
-        const x = tw.x + tw.facing * rnd(4, 22), y = TW.BASE - rnd(60, 120);
+        const x = tw.x + tw.facing * rnd(4, 22), y = twBase(tw) - rnd(60, 120);
         spawnSmoke(x, y, { dark: 0.2, r: rnd(4, 7), lift: 32, alpha: rnd(0.3, 0.5), life: rnd(6, 9) });
         if (hurt >= 4 && Math.random() < 0.4) spawnFlame(x, y, rnd(-6, 6), -rnd(20, 50), 1, rnd(3, 5), 1.8);
       }
@@ -8394,7 +8489,7 @@ function stepCrew(dt) {
       tw.burn += dt * (3 + 8 * f);
       while (tw.burn >= 1) {
         tw.burn -= 1;
-        const x = tw.x + rnd(-14, 14), y = TW.BASE - TW.STUMP * TW.K + rnd(0, 6);
+        const x = tw.x + rnd(-14, 14), y = twBase(tw) - TW.STUMP * TW.K + rnd(0, 6);
         spawnSmoke(x, y, { vx: rnd(-3, 3), vy: -rnd(2, 10), dark: 0, r: rnd(4.5, 6.5) * (0.7 + 0.5 * f), grow: rnd(1.6, 2.4), rmax: rnd(30, 44), lift: rnd(9, 22), life: rnd(28, 40), alpha: rnd(0.8, 1), quick: true, ash: true });
         if (Math.random() < 0.6 * f) spawnFlame(x, y, rnd(-6, 6), -rnd(20, 50), 1, rnd(3, 5) * f + 1, 1.8);
       }
@@ -8423,7 +8518,7 @@ function chillTower(tw, dt) {
     tw.rebT = (tw.rebT || 0) + dt;
     if (tw.rebT < CHILL_REBUILD) return;
     Object.assign(tw, { hp: TW_HP, fallen: 0, burnT: 0, burn: 0, marks: null, scorch: null, scorchN: 0, _art: null, stumpArt: null, lostT: 0, rebT: 0, regT: 0, pg: makePierGun(d) });
-    if (!SIM_ONLY) for (let i = 0; i < 16; i++) spawnSmoke(tw.x + rnd(-24, 24), TW.BASE - rnd(0, 40), { mist: true, fam: 'dust', r: rnd(4, 8), grow: rnd(3, 5), lift: 10, vx: rnd(-20, 20), life: rnd(3, 5), alpha: 0.6 });
+    if (!SIM_ONLY) for (let i = 0; i < 16; i++) spawnSmoke(tw.x + rnd(-24, 24), twBase(tw) - rnd(0, 40), { mist: true, fam: 'dust', r: rnd(4, 8), grow: rnd(3, 5), lift: 10, vx: rnd(-20, 20), life: rnd(3, 5), alpha: 0.6 });
     return;
   }
   const pg = tw.pg;
@@ -8905,7 +9000,7 @@ function splash(x, vx, vy) {
 // boxy cradle and two barrels over and under, cooling jackets on their inner half)
 const PG_COL = 142, PG_HP = 5, PGK = 0.95, PG_BAR = 26 * PGK, PG_GAP = 2 * PGK;
 function makePierGun(d) { return { _x: d.ax(PG_COL), _y: DECK_Y, hp: PG_HP, chip: 0, flash: 0, alt: 0, boom: false }; }
-const pgOf = tw => (tw && tw.pg && tw.pg.hp > 0 && !LAND) ? tw.pg : null;
+const pgOf = tw => (tw && tw.pg && tw.pg.hp > 0) ? tw.pg : null;
 // the pivot: on top of its round housing
 const pgPivot = pg => [pg._x, pg._y - 11 * PGK];
 function pierGunHit(tw, x, y) { const pg = tw && tw.pg; return !!pg && pg.hp > 0 && Math.abs(x - pg._x) < 13 * PGK && y > pg._y - 17 * PGK && y < pg._y + 1; }
@@ -8945,7 +9040,7 @@ function firePierGun(tw) {
 const PG_STEEL = { dk: [34, 36, 40], md: [78, 82, 88], lt: [128, 132, 138], hi: [176, 180, 186] };
 function drawPierGun(tw, d) {
   const pg = tw && tw.pg;
-  if (!pg || LAND || d.pierGone && pg.hp > 0) return;
+  if (!pg || d.pierGone && pg.hp > 0) return;
   const [px, py] = pgPivot(pg), dead = pg.hp <= 0, K = PGK * SV, f = tw.facing;
   const el = dead ? -0.35 : tguns[tw.player].elev * Math.PI / 180, kd = dead ? 0.45 : 1;
   const col = c => css3(c.map(v => v * kd)), Pd = Math.max(1, Math.round(K));
@@ -9377,7 +9472,7 @@ function stepParticles(dt) {
   }
   // Storm: wind tears spray off the crests
   if (E.storm > 0.45 && Math.random() < (E.storm - 0.45) * dt * 60) {
-    const x = rnd(0, WORLD_W);
+    const x = rnd(SEA0, SEA1);
     if (ambient(x, time) > 6 * E.waveAmp * 0.6) for (let k = 0; k < 4; k++) spawnSpray(x + rnd(-6, 6), surfaceY(x) - 2, E.windU * 0.8, 0.6);
   }
 
@@ -9537,7 +9632,7 @@ function stepSea(dt) {
       }
     }
     if (s.turnT <= 0 && s.flee <= 0) { s.dir *= -1; s.turnT = rnd(8, 24); }
-    if (s.x < 60) s.dir = 1; else if (s.x > WORLD_W - 60) s.dir = -1;
+    if (s.x < SEA0 + 60) s.dir = 1; else if (s.x > SEA1 - 60) s.dir = -1;
     s.flee = Math.max(0, s.flee - dt);
     const sp = s.speed * (1 + 4 * Math.min(1, s.flee));
     s.x += s.dir * sp * dt;
@@ -9573,7 +9668,7 @@ function stepSea(dt) {
     }
     k.turnT -= dt;
     if (k.turn > 0) { k.turn += dt / (k.flee > 0 ? 0.5 : 1.1); if (k.turn >= 1) { k.turn = 0; } }
-    const wantTurn = k.turnT <= 0 || (k.x < 80 && k.dir < 0) || (k.x > WORLD_W - 80 && k.dir > 0);
+    const wantTurn = k.turnT <= 0 || (k.x < SEA0 + 80 && k.dir < 0) || (k.x > SEA1 - 80 && k.dir > 0);
     if (wantTurn && k.turn === 0) { k.turn = 0.001; k.turnT = rnd(9, 20); k.flipAt = true; }
     if (k.turn > 0.5 && k.flipAt) { k.dir *= -1; k.flipAt = false; }
     const sp = k.speed * (k.turn > 0 ? 0.35 : 1) * (1 + 2.2 * Math.min(1, k.flee));
@@ -9787,8 +9882,6 @@ function stepWeather(dt) {
 }
 
 function physics(dt) {
-  // LAND TEST: no sea - the planes, the tank and helicopter, the shells, the captains
-  if (LAND) { stepPlanes(dt); stepCrew(dt); stepFleet(dt); stepLandUnits(dt); stepShells(dt); stepSailboats(dt); stepScreens(dt); time += dt; return; }
   for (const sh of ships) if (sh.state === 'afloat') coupleShip(sh);
   for (let k = 0; k < WATER_SUBSTEPS; k++) stepWater(dt / WATER_SUBSTEPS, k === WATER_SUBSTEPS - 1);
   for (const sh of ships) { fxMask(sh); if (sh.state === 'afloat') stepShip(sh, dt); else if (sh.state === 'sinking') stepSinkingShip(sh, dt); }
@@ -9811,6 +9904,8 @@ function physics(dt) {
   for (const p of pieces) stepPiece(p, dt);
   stepShells(dt);
   stepPierGuns(dt);
+  // (LAND TEST: the sea in the middle and a country each side - their tanks, helicopters, lakes)
+  if (LAND) { stepLandUnits(dt); stepLakeFish(dt); }
   time += dt;
 }
 // Effects that only look (sparks, spray, bubbles, debris, flames, birds, splashes, rings, the storm...) move
@@ -9917,7 +10012,7 @@ function buildPerches() {
     const tw = towers[d.player];
     if (tw) {
       const tTop = artTops(img.towers[0][tw.facing]);
-      for (const ox of [-20, -12, 12, 20]) { const col = Math.round(TW.FW / 2 + ox / TW.K); perches.push({ x: tw.x + ox, y: TW.BASE - (TW.FH - tTop[col]) * TW.K, dock: d.player, bird: null, tower: tw }); }
+      for (const ox of [-20, -12, 12, 20]) { const col = Math.round(TW.FW / 2 + ox / TW.K); perches.push({ x: tw.x + ox, y: twBase(tw) - (TW.FH - tTop[col]) * TW.K, dock: d.player, bird: null, tower: tw }); }
     }
     // lamp heads
     for (const [lx, ly] of d.lamps) perches.push({ x: lx, y: ly - 1.5, dock: d.player, bird: null });
@@ -10355,7 +10450,7 @@ function stepSmoke(dt) {
       s.vx += (gu - s.vx) * k * 0.5; s.vx *= 1 - Math.min(1, dt * 0.9);
       s.x += s.vx * dt;
       s.r = Math.min(s.rmax, s.r + s.grow * dt * (1 - 0.5 * s.age / s.life));
-      s.y = (LAND ? landTopM(s.x) : surfaceY(s.x)) - s.r * 0.95; s.vy = 0;
+      s.y = (onLand(s.x) ? landTopM(s.x) : surfaceY(s.x)) - s.r * 0.95; s.vy = 0;
       continue;
     }
     // (rise: a damaged helicopter's smoke - its own rotor's downdraft doesn't pull it down)
@@ -10367,7 +10462,7 @@ function stepSmoke(dt) {
     s.x += s.vx * dt; s.y += s.vy * dt;
     s.r = Math.min(s.rmax, s.r + s.grow * dt * (1 - 0.5 * s.age / s.life));
     // (on land, user Oct 25: a puff never goes into the ground - its whole round stays above it)
-    const sy = LAND ? landTopM(s.x) - s.r * 1.05 : surfaceY(s.x) - s.r * 0.4;
+    const sy = onLand(s.x) ? landTopM(s.x) - s.r * 1.05 : surfaceY(s.x) - s.r * 0.4;
     if (s.y > sy) { s.y = sy; if (s.vy > 0) s.vy = 0; }
   }
 }
@@ -10398,7 +10493,6 @@ function camFocus(i) {
   // free look: not driving anything, looking around (the stick, the keys, a finger dragged)
   if (c.look && (c.mode === 'dock' || c.mode === 'gone')) return [c.look.x, c.look.y, 0, 0, null];
   // ashore choosing: the whole harbour, hangar to quay edge
-  if (c.mode === 'dock' && LAND) { const x = landHomeX(i, 'heli'); return [x, landTop(x) - 0.5 * VIEW_H / (cam.zt[i] || 1) * 0.44, 0, 0, [x, 60]]; }   // (LAND TEST: your own ground)
   if (c.mode === 'dock') { const [fx, fh] = dockFrame(i); return [fx, FOCUS_Y - 24, 0, 0, [fx, fh]]; }
   if (c.mode === 'sail') { const b = yachtOf(i); if (b) return [b.x, FOCUS_Y, b.vx, b.face * 0.3, [b.x, 30]]; }
   return vehFocus(i, c.mode);
@@ -12233,7 +12327,9 @@ function renderSky() {
   if (E.fog > 0.02) drawFogHills();
   let st = performance.now(); const sema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
   st = sema('skBase', T0sky);
-  if (!LAND) drawFarSea();                                 // (LAND TEST: its mountains and trees come after the clouds)
+  if (LAND) clipRegion(true);                              // (LAND TEST: the sea's far water only over the sea)
+  drawFarSea();
+  if (LAND) C.restore();
   st = sema('skFar', st);
   // Clouds live on a far layer of their own. They are placed in "cloud space" and drawn at a scale
   // that hardly changes with the periscope zoom, scrolling at a fraction (p) of the camera's motion,
@@ -12256,8 +12352,9 @@ function renderSky() {
     const low = clamp((c.y + spr.h * c.s - CLOUD_DECK) / (WATER_Y - 21 - CLOUD_DECK), 0, 1);
     C.globalAlpha = a * (0.75 - 0.45 * low); blit(sc, px, py); C.globalAlpha = 1;
   }
-  if (!LAND) drawCoasts(pivY, zr);
-  else drawLandBg(false);                                 // (LAND TEST: the far mountains and trees, behind the clouds)
+  if (LAND) clipRegion(true);
+  drawCoasts(pivY, zr);
+  if (LAND) { C.restore(); clipRegion('L'); drawLandBg(false, false); C.restore(); clipRegion('R'); drawLandBg(false, true); C.restore(); }   // (LAND TEST: each country's far land behind the clouds - the forest's mountains and trees, the desert's dry range and dunes)
   st = sema('skCoast', st);
   // under the clouds in a storm: the far air thickens to the clouds' colour, with grey curtains of rain
   if (E.cover > 0.02) drawWeatherVeil(deckY, pivY);
@@ -12292,19 +12389,28 @@ function renderSky() {
     if (c.k < img.clouds.length && (img.clouds[c.k].kind === 0 || img.clouds[c.k].kind === 1) && a > 0.5) spans.push([px, px + sc.width, c.p]);
   }
   // (LAND TEST: only the nearest trees stand in front of the clouds, user Oct 25; and there's no sea at all)
-  if (LAND) { sema('skClouds', st); return; }   // (the nearest trees are drawn with the ground: drawLandTrees)
   st = sema('skClouds', st);
+  if (LAND) clipRegion(true);                              // (LAND TEST: the sea's water only over the sea)
   drawMidSea();
   st = sema('skMid', st);
   drawFarSeaDetail();
   drawSeaShade(pivY, yW, spans);
+  if (LAND) C.restore();
   sema('skDetail', st);
+}
+// (LAND TEST) clip what's drawn to the sea's stretch of the screen, or to the two countries' either side of it
+function clipRegion(sea) {
+  const a = Math.floor(PX(SEA0)), b = Math.ceil(PX(SEA1)), T = -SHY - 60, H = bh + 120;
+  C.save(); C.beginPath();
+  if (sea === true) C.rect(a, T, Math.max(0, b - a), H);
+  else { if (sea !== 'R') C.rect(-60, T, Math.max(0, a + 60), H); if (sea !== 'L') C.rect(b, T, Math.max(0, VWP + 60 - b), H); }
+  C.clip();
 }
 const cloudSpans = [[], []], frontClouds = [[], []], planeLamps = [[], []];
 // the towers on this view's screen: [left, right, top] (with the flag on top), for keeping clouds behind them
 function towerScreens() {
   const out = [];
-  for (const tw of towers) if (tw && tw.hp > 0) out.push([PX(tw.x - TW.FW * TW.K * 0.6), PX(tw.x + TW.FW * TW.K * 0.6), PY(TW.BASE - TW.FH * TW.K - 24)]);
+  for (const tw of towers) if (tw && tw.hp > 0) out.push([PX(tw.x - TW.FW * TW.K * 0.6), PX(tw.x + TW.FW * TW.K * 0.6), PY(twBase(tw) - TW.FH * TW.K - 24)]);
   return out;
 }
 // the planes' blinking red tail lamps, over the night's darkening: a bright core and a soft red glow
@@ -12414,7 +12520,7 @@ function coastTinted(co) {
   // (under WebGL the coast is recoloured as it's drawn; only the strip its reflected foot is made from is
   // recoloured here, a third of it)
   if (GLR.on) {
-    const t = glTint(co.src, 'coast', fx.map(v => v * (1 - haze)), hz.map(v => v * haze / 255), true);
+    const t = glTint(co.side && LAND ? desertTone(co.src) : co.src, co.side && LAND ? 'coastD' : 'coast', fx.map(v => v * (1 - haze)), hz.map(v => v * haze / 255), true);
     if (co.key === key && co.foot) return t;
     co.key = key;
     const RH = Math.round(co.H * 0.32), y0 = co.H - RH, st = co.footSrc || (co.footSrc = makeCanvas(co.W, RH)), sx = st.getContext('2d'), id = sx.createImageData(co.W, RH), d = id.data, s0 = co.data;
@@ -13029,7 +13135,7 @@ function lightLean(lx) { return lx > -1e8 ? clamp((lx + VSX - bw / 2) / (bw / 2)
 // fading back to the normal harbour blue toward both docks
 function deepFactor(x) {
   if (!WORLD_W) return 0;
-  const u = Math.abs(x - WORLD_W / 2) / (WORLD_W / 2);
+  const u = Math.abs(x - (SEA0 + SEA1) / 2) / (SEA_W() / 2);
   return 1 - smoothstep(0.2, 0.8, u);
 }
 function drawDeepWater() {
@@ -14018,7 +14124,7 @@ function towerArt(tw, src) {
   const c = copyCanvas(src), x = c.getContext('2d');
   x.globalCompositeOperation = 'source-atop';
   for (const s of tw.scorch) {
-    const sx = TW.FW / 2 + s.dx / TW.K, sy = TW.FH - (TW.BASE - s.y) / TW.K, R = s.r / TW.K;
+    const sx = TW.FW / 2 + s.dx / TW.K, sy = TW.FH - (twBase(tw) - s.y) / TW.K, R = s.r / TW.K;
     const blot = (bx, by, r, a) => {
       const gr = x.createRadialGradient(bx, by, 0, bx, by, r);
       gr.addColorStop(0, `rgba(12,8,6,${a})`); gr.addColorStop(0.55, `rgba(22,15,10,${a * 0.6})`); gr.addColorStop(1, 'rgba(22,15,10,0)');
@@ -14037,13 +14143,13 @@ function towerArt(tw, src) {
 function drawTower(tw) {
   const s = TW.K * SV;
   if (tw.hp <= 0) {
-    const sp = scaled(tw.stumpArt || img.towerStump[tw.facing], s, true);
-    C.drawImage(sp, PX(tw.x) - Math.round(sp.width / 2), PY(TW.BASE) - sp.height);
+    const sp = scaled(tw.stumpArt || (desertSide(tw.x) ? desertTone(img.towerStump[tw.facing]) : img.towerStump[tw.facing]), s, true);
+    C.drawImage(sp, PX(tw.x) - Math.round(sp.width / 2), PY(twBase(tw)) - sp.height);
     return;
   }
   drawTowerGun(tw);                                   // the barrel slides out from behind the mantlet
-  const sp = scaled(towerArt(tw, img.towers[towerFrame(tw)][tw.facing]), s, true);
-  C.drawImage(sp, PX(tw.x) - Math.round(sp.width / 2), PY(TW.BASE) - sp.height);
+  const fr = img.towers[towerFrame(tw)][tw.facing], sp = scaled(towerArt(tw, desertSide(tw.x) ? desertTone(fr) : fr), s, true);
+  C.drawImage(sp, PX(tw.x) - Math.round(sp.width / 2), PY(twBase(tw)) - sp.height);
   // machine-gun pock marks: little black chips in the concrete
   if (tw.marks) for (const [dx, y, r] of tw.marks) {
     const z = Math.max(1, Math.round(SV * (r < 0.3 ? 1.6 : 1.1)));
@@ -14114,13 +14220,14 @@ function drawGate(src, r, open, k) {
 function drawHarbourFront(d, x0, x1) {
   if (!harbourInView(d, x0, x1)) return;
   const f = d.dir > 0 ? 1 : -1, [ha] = hangarSpan(d);
-  drawGate(img.subGate[f], subGateRect(d), d.gates.sub, BASE.K);
+  const T = desertSide(d.x0) ? desertTone : c => c;     // (the desert's city: orange)
+  drawGate(T(img.subGate[f]), subGateRect(d), d.gates.sub, BASE.K);
   blitRect(dockArtOf(d), [d.x0, DOCK_TOP_Y, d.x0 + d.w, DOCK_TOP_Y + BASE.H * BASE.K], BASE.K);
   // the hangar stands down in the block: its room and gate go over the stone, then the hangar round them
   const sg = shipGateRect(d);
-  blitRect(img.hangarRoom[f], [sg[0] - 1, sg[1] - 1, sg[2] + 1, sg[3] + 1], HGR.K);
-  drawGate(img.hgGate[f], sg, d.gates.ship, HGR.K);
-  blitRect(img.hangarArt[f], [ha, HANGAR_TOP, ha + HANGAR_W, HANGAR_BOT], HGR.K);
+  blitRect(T(img.hangarRoom[f]), [sg[0] - 1, sg[1] - 1, sg[2] + 1, sg[3] + 1], HGR.K);
+  drawGate(T(img.hgGate[f]), sg, d.gates.ship, HGR.K);
+  blitRect(T(img.hangarArt[f]), [ha, HANGAR_TOP, ha + HANGAR_W, HANGAR_BOT], HGR.K);
   const tw = towers[d.player];
   if (tw) drawTower(tw);
   drawPierGun(tw, d);
@@ -14137,7 +14244,7 @@ function drawHarbourFlag(d) {
   // sloping edge, user Oct 25)
   top = 0; for (let c = col - 1; c <= col + 1; c++) if (c >= 0 && c < tops.length) top = Math.max(top, tops[c]);
   if (top >= TW.FH - 4) return;
-  const poleX = tw.x - tw.facing * 12, poleBot = TW.BASE - (TW.FH - top) * TW.K + 1.5, poleTop = poleBot - 34;
+  const poleX = tw.x - tw.facing * 12, poleBot = twBase(tw) - (TW.FH - top) * TW.K + 1.5, poleTop = poleBot - 34;
   C.fillStyle = '#2b3037'; rect(poleX - 0.8, poleTop, 1.6, poleBot - poleTop);
   C.fillStyle = '#c9c9c4'; rect(poleX - 1.2, poleTop - 1.6, 2.4, 1.6);
   const fy = poleBot - 10 - (poleBot - 10 - poleTop) * clamp(d.flag, 0, 1);
@@ -14800,9 +14907,13 @@ function renderOverlays() {
   const x0 = CAMPX / SV, x1 = x0 + VWW;
   const ema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
   let ot = performance.now();
-  if (!LAND) { drawRays(true); drawMoonlight(x0, x1); }
+  if (LAND) clipRegion(true);                              // (LAND TEST: the sea's light only over the sea)
+  drawRays(true); drawMoonlight(x0, x1);
+  if (LAND) C.restore();
   if (storm.bolts.length || storm.flash > 0) drawLightning();
-  if (!LAND) drawSurfaceLight();
+  if (LAND) clipRegion(true);
+  drawSurfaceLight();
+  if (LAND) C.restore();
   { const sp = splashPal(); if (sp && (jets.length || spray.length)) drawSplashes(x0, x1, sp); }   // (in the waterline's light)
   ot = ema('ovLight', ot);
   // smoke and fire pixels grow with the zoom, like every other sprite
@@ -15028,7 +15139,7 @@ function drawRain() {
 // where a raindrop falling at world x stops (user Oct 24): on the sea, or first on a harbour's deck, its hangar
 // roof or a tower's top
 function rainRoof(wx) {
-  if (LAND) {                                                // (LAND TEST, user Oct 25: on the ground, a tank's back, a helicopter)
+  if (onLand(wx)) {                                          // (LAND TEST, user Oct 25: on the ground, a tank's back, a helicopter)
     let top = landTopM(wx);
     for (const t of tanks) if (t && t.state === 'alive' && Math.abs(wx - t.x) < TANK_L * 0.45) top = Math.min(top, t.y + TANK_DECK);
     for (const h of helis) if (h && (h.state === 'fly' || h.state === 'landed') && Math.abs(wx - h.x) < heliHalf() * 0.7) top = Math.min(top, h.y - heliSkid() * 0.9);
@@ -15041,7 +15152,7 @@ function rainRoof(wx) {
     const [ha, hb] = hangarSpan(d);
     if (wx > ha && wx < hb) top = Math.min(top, HANGAR_TOP);
   }
-  for (const tw of towers) if (tw && Math.abs(wx - tw.x) < TW.W / 2) top = Math.min(top, tw.hp > 0 ? TW.BASE - TW.H + 4 : TW.BASE - TW.STUMP * TW.K);
+  for (const tw of towers) if (tw && Math.abs(wx - tw.x) < TW.W / 2) top = Math.min(top, tw.hp > 0 ? twBase(tw) - TW.H + 4 : twBase(tw) - TW.STUMP * TW.K);
   return top;
 }
 function drawRainIn() {
@@ -15089,7 +15200,7 @@ function drawRainIn() {
   }
   rainEnd();
   // the far sea is pocked with rain too: tiny, fainter flecks between the horizon and the waterline
-  const hz = PY(WATER_Y - 21), nf = LAND ? 0 : Math.round(110 * R * VWP / 600);
+  const hz = PY(WATER_Y - 21), nf = Math.round(110 * R * VWP / 600);
   rainBegin(rgbs([214 * fx[0], 226 * fx[1], 240 * fx[2]], 0.45));
   for (let k = 0; k < nf; k++) {
     const x = hash(k * 3.71 + tick * 0.417 + 5.3) * VWP, u = hash(k * 1.37 + tick * 0.291 + 2.1);
@@ -15283,7 +15394,7 @@ function drawAim() {
     // the first stretch of the shell's path, three times as many dots as it once had, so the line reads at a glance
     for (let i = 1; i <= 48; i++) {
       vy += SHELL_G * 0.02; x += vx * 0.02; y += vy * 0.02;
-      if (LAND ? landSolid(x, y) : y > surfaceY(x)) break;
+      if ((LAND && landSolid(x, y)) || y > surfaceY(x)) break;
       C.fillStyle = `rgba(255,255,255,${(a * (1 - i / 54)).toFixed(3)})`;
       C.fillRect(PX(x), PY(y), 2, 2);
     }
@@ -15425,7 +15536,12 @@ function render() {
   tt = lap('sky', tt);
   oc.setTransform(1, 0, 0, 1, 0, 0);
   oc.clearRect(0, 0, bw, bh);
-  for (const [v, cp, sx, w, i, cf] of views) { beginView(oc, v, cp, sx, w, i, cf); if (LAND) renderLandObjects(); else renderObjects(); tt = lap('objects', tt); if (!LAND) { distortWater(sx, w); oc.setTransform(1, 0, 0, 1, sx + SHX, SHY); drawFgRocks(); } tt = lap('distort', tt); oc.restore(); }
+  for (const [v, cp, sx, w, i, cf] of views) {
+    beginView(oc, v, cp, sx, w, i, cf); renderObjects(); tt = lap('objects', tt);
+    distortWater(sx, w); oc.setTransform(1, 0, 0, 1, sx + SHX, SHY); drawFgRocks(); tt = lap('distort', tt); oc.restore();
+    // (LAND TEST: the two countries, over the sea's picture where they are - user Oct 25)
+    if (LAND) { beginView(oc, v, cp, sx, w, i, cf); renderLandObjects(); oc.restore(); tt = lap('land', tt); }
+  }
   // night and dusk tint the world (not the sky, which is already lit)
   oc.setTransform(1, 0, 0, 1, 0, 0);
   oc.globalCompositeOperation = 'source-atop';
@@ -15860,10 +15976,11 @@ function cpuLandEnemy(p) {
 }
 function cpuLandChoose(B) {
   const p = B.p, cur = crew[p].mode, sc = {}, E = cpuLandEnemy(p);
-  if (canTake(p, 'tank') && (tanks[p].ammo > 0 || tanks[p].hp > 1)) sc.tank = 0.6 + (E.tank ? 0.1 : 0);
+  if (canTake(p, 'tank') && (!tanks[p] || tanks[p].state !== 'alive' || tanks[p].ammo > 0 || tanks[p].hp > 1)) sc.tank = 0.6 + (E.tank ? 0.1 : 0);
   // (the helicopter for a far-off tank, a flier to fight, or a tank of its own that's stuck)
   const tk = tanks[p], far = E.tank && tk && Math.abs(E.tank.x - tk.x) > 1600, stuck = (B.stuckT || 0) > 3;
-  if (canTake(p, 'heli') && helis[p].hp > 1) sc.heli = 0.45 + (E.heli ? 0.15 : 0) + (far ? 0.3 : 0) + (stuck ? 0.5 : 0) + (helis[p].rockets > 3 ? 0.05 : -0.3);
+  const hh = helis[p] && (helis[p].state === 'fly' || helis[p].state === 'landed') ? helis[p] : null;   // (none standing: a new one would come in)
+  if (canTake(p, 'heli') && (!hh || hh.hp > 1)) sc.heli = 0.45 + (E.heli ? 0.15 : 0) + (far ? 0.3 : 0) + (stuck ? 0.5 : 0) + ((hh ? hh.rockets : HELI_ROCKETS) > 3 ? 0.05 : -0.3);
   if (canTake(p, 'plane')) sc.plane = (0.3 + (E.plane ? 0.15 : 0)) * B.T.plane;
   if (cur in sc) sc[cur] += 0.25;
   for (const k in sc) sc[k] += rnd(0, 0.12 + 0.1 * (2 - B.level));
@@ -15954,46 +16071,52 @@ function cpuHeli(B, dt) {
    height (WATER_Y), so the sailboats, a plane's ditching and the smoke screens work on it as on the sea. Too deep to
    drive or land in: a tank that goes in sinks, and so does a helicopter that touches it. Three yachts sail it. ---- */
 // is there water here (the lake, and the ground under it lower than its surface)?
-function lakeAt(x) { return !!(LAND && land.lake && x > land.lake[0] && x < land.lake[1] && landTop(x) > WATER_Y + 0.5); }
+// (user Oct 25: a lake in each country - the desert's an oasis)
+function lakeOf(x) { if (!LAND || !land.lakes) return null; for (const L of land.lakes) if (x > L[0] && x < L[1]) return L; return null; }
+function lakeAt(x) { return !!lakeOf(x) && landTop(x) > WATER_Y + 0.5; }
 // the lake's open water, for the yachts: its shores, a boat's length in
-function lakeBounds() { return land.lake ? [land.lake[0] + 70, land.lake[1] - 70] : [WORLD_W * 0.45, WORLD_W * 0.55]; }
 // where the lake's surface meets the land, after the land is built
 function findLake() {
-  land.lake = null;
-  const mid = Math.floor(land.cols / 2);
-  if (!(land.surf[mid] > WATER_Y)) return;
-  let a = mid, b = mid;
-  while (a > 0 && land.surf[a - 1] > WATER_Y) a--;
-  while (b < land.cols - 1 && land.surf[b + 1] > WATER_Y) b++;
-  land.lake = [a * LT_CELL, (b + 1) * LT_CELL];
+  land.lakes = [];
+  for (const cx of [SEA0 / 2, WORLD_W - SEA0 / 2]) {
+    const mid = Math.floor(cx / LT_CELL);
+    if (!(land.surf[mid] > WATER_Y && land.surf[mid] < LT_Y1)) continue;
+    let a = mid, b = mid;
+    while (a > 0 && land.surf[a - 1] > WATER_Y && land.surf[a - 1] < LT_Y1) a--;
+    while (b < land.cols - 1 && land.surf[b + 1] > WATER_Y && land.surf[b + 1] < LT_Y1) b++;
+    land.lakes.push([a * LT_CELL, (b + 1) * LT_CELL]);
+  }
 }
 // the surface's little ripple (drawn; the boats ride the flat surface under it)
 const lakeRipple = x => 1.1 * Math.sin(x * 0.045 + time * 1.5) + 0.6 * Math.sin(x * 0.12 - time * 2.2);
 // a splash: white water thrown up, spray, and rings of foam
 function lakeSplash(x, size) {
+  lakeScare(x);
   if (SIM_ONLY) return;
   size = size || 1;
   for (let i = 0; i < 10 * size; i++) spawnSmoke(x + rnd(-8, 8) * size, WATER_Y - rnd(2, 10) * size, { mist: true, r: rnd(3, 6) * size, grow: rnd(3, 5), lift: 8, vx: rnd(-25, 25), vy: -rnd(20, 60) * size, life: rnd(1.2, 2.4), alpha: rnd(0.5, 0.75) });
   for (let i = 0; i < 8 * size; i++) spawnSmoke(x + rnd(-4, 4), WATER_Y - 4, { mist: true, quick: true, r: rnd(1.5, 3), grow: 1, lift: 0, vx: rnd(-60, 60) * size, vy: -rnd(120, 220) * size, life: rnd(0.5, 0.9), alpha: 0.8 });   // (the spray, a column of it)
   sfxImpact(x);
 }
-// the water, drawn over everything in it: from its surface down to the bottom, darker the deeper; the surface's
-// bright edge on top
-function drawLake(x0, x1) {
-  if (!land.lake) return;
-  const a = Math.max(x0 - 4, land.lake[0]), b = Math.min(x1 + 4, land.lake[1]);
+// the water, in two passes: under what's in it, solid (nothing behind it shows through); then over it, a thinner
+// coat of the same, so what's under the surface is seen dimly through the water; and its bright edge on top
+function drawLake(x0, x1, over) {
+  for (const L of land.lakes || []) drawLakeIn(L, x0, x1, over);
+}
+function drawLakeIn(L, x0, x1, over) {
+  const a = Math.max(x0 - 4, L[0]), b = Math.min(x1 + 4, L[1]);
   if (b <= a) return;
   const nt = clamp(E.night * 0.8, 0, 0.75);
   const top = mix3(mix3([96, 160, 196], E.skyHor || [150, 190, 220], 0.35), [20, 30, 60], nt), deep = mix3([28, 66, 92], [8, 14, 30], nt);
-  const step = LT_CELL, w = Math.max(1, Math.ceil(step * SV));
+  const step = LT_CELL * 2, edge = rgbs(mix3([226, 240, 248], top, nt), 0.85), al = over ? 0.55 : 1;
   for (let x = Math.floor(a / step) * step; x < b; x += step) {
     const g = landTop(x + step / 2);
     if (g <= WATER_Y + 0.5) continue;
-    const sy = WATER_Y + lakeRipple(x), X = Math.round(PX(x)), Y0 = Math.round(PY(sy)), Y1 = Math.round(PY(g)) + 1;
-    const d = g - sy, k = Math.min(1, d / 120);
-    C.fillStyle = rgbs(mix3(top, deep, k * 0.5), 0.78); C.fillRect(X, Y0, w, Math.max(1, Math.round(Y0 + (Y1 - Y0) * 0.35) - Y0));
-    C.fillStyle = rgbs(mix3(top, deep, 0.35 + k * 0.65), 0.86); C.fillRect(X, Math.round(Y0 + (Y1 - Y0) * 0.35), w, Y1 - Math.round(Y0 + (Y1 - Y0) * 0.35));
-    C.fillStyle = rgbs(mix3([226, 240, 248], top, nt), 0.85); C.fillRect(X, Y0, w, Math.max(1, Math.round(SV)));     // (the bright edge)
+    const sy = WATER_Y + lakeRipple(x), X = Math.floor(PX(x)), w = Math.ceil(PX(x + step)) - X, Y0 = Math.round(PY(sy)), Y1 = Math.round(PY(g)) + 1;
+    const k = Math.min(1, (g - sy) / 140), ym = Math.round(Y0 + (Y1 - Y0) * 0.35);
+    C.fillStyle = rgbs(mix3(top, deep, k * 0.5), al); C.fillRect(X, Y0, w, Math.max(1, ym - Y0));
+    C.fillStyle = rgbs(mix3(top, deep, 0.35 + k * 0.65), al); C.fillRect(X, ym, w, Y1 - ym);
+    if (over) { C.fillStyle = edge; C.fillRect(X, Y0, w, Math.max(1, Math.round(SV))); }     // (the bright edge)
   }
 }
 /* ---- going under ---- */
@@ -16023,7 +16146,7 @@ function heliSink(h) {
 }
 function stepHeliSink(h, dt) {
   h.sinkT += dt;
-  const floor = landBelow(h.x, h.y) - heliSkid();
+  const floor = (onLand(h.x) ? landBelow(h.x, h.y) : seabedY(h.x)) - heliSkid();
   h.vx *= 1 - dt * 2; h.x += h.vx * dt; h.y = Math.min(floor, h.y + 30 * dt);
   h.tilt += (h.facing * 0.5 - h.tilt) * Math.min(1, dt); h.spin = Math.max(0, h.spin - dt); h.rotor += dt * 4 * h.spin;
   if (Math.random() < dt * 10) spawnSmoke(h.x + rnd(-15, 15), WATER_Y - 2, { mist: true, r: rnd(2, 4), grow: 2, lift: 4, vx: rnd(-6, 6), vy: -rnd(4, 12), life: rnd(0.8, 1.4), alpha: 0.5 });
@@ -16049,6 +16172,111 @@ function stepTankSmoke(t, dt) {
 }
 // what a smoke screen sits on: the ground, or the lake
 const screenFloor = x => LAND ? (lakeAt(x) ? WATER_Y : landTopM(x)) : WATER_Y;
+
+/* ---- fish in the lake (user Oct 25: "fish on the bottom of the lake"): the sea's fish, a dozen or so, nosing about
+   near the bottom; they turn back from the shallows, and dart away from a splash ---- */
+const lakeFish = [];
+function buildLakeFish() {
+  lakeFish.length = 0;
+  const types = Object.keys(FISH_DEFS);
+  for (const [a, b] of land.lakes || []) for (let i = 0; i < 14; i++) {
+    const x = a + (b - a) * (0.12 + 0.76 * Math.random()), g = landTop(x);
+    lakeFish.push({ type: types[i % types.length], x, y: Math.max(WATER_Y + 10, g - rnd(6, 26)), vx: rnd(6, 16) * (Math.random() < 0.5 ? -1 : 1), vy: 0, lift: rnd(6, 26), ph: Math.random() * 6, scare: 0 });
+  }
+}
+function stepLakeFish(dt) {
+  for (const f of lakeFish) {
+    f.ph += dt;
+    const g = landTop(f.x), ahead = landTop(f.x + Math.sign(f.vx) * 30);
+    // the shallows ahead (or the shore): about turn
+    if (ahead < WATER_Y + 22 && f.scare <= 0) f.vx = -f.vx;
+    if (f.scare > 0) f.scare -= dt;
+    else { const cruise = Math.sign(f.vx) * (8 + 6 * Math.sin(f.ph * 0.7)); f.vx += (cruise - f.vx) * Math.min(1, dt * 1.5); if (Math.random() < dt * 0.05) f.vx = -f.vx; }
+    // near the bottom, gently up and down
+    const want = clamp(g - f.lift + 4 * Math.sin(f.ph * 1.3), WATER_Y + 10, g - 4);
+    f.vy += ((want - f.y) * 1.5 - f.vy) * Math.min(1, dt * 2);
+    f.x += f.vx * dt; f.y = clamp(f.y + f.vy * dt, WATER_Y + 8, g - 3);
+    if (!lakeAt(f.x)) { f.x -= f.vx * dt * 2; f.vx = -f.vx; }
+  }
+}
+// a splash near them: they bolt away from it
+function lakeScare(x) {
+  for (const f of lakeFish) { const d = f.x - x; if (Math.abs(d) < 160) { f.vx = (Math.sign(d) || 1) * rnd(55, 85); f.vy -= rnd(-20, 20); f.scare = rnd(1.2, 2.2); } }
+}
+// (dark shapes seen through the water, as at sea)
+function drawLakeFish(x0, x1) {
+  C.globalAlpha = 0.6;
+  for (const f of lakeFish) {
+    if (f.x < x0 - 20 || f.x > x1 + 20) continue;
+    const def = img.fish[f.type]; if (!def) continue;
+    const k = pixK(def.px), sp = f.vx > 0 ? def.r : def.l, w = Math.max(1, Math.round(sp.width * k)), h = Math.max(1, Math.round(sp.height * k));
+    C.drawImage(sp, Math.round(PX(f.x) - (w >> 1)), Math.round(PY(f.y) - (h >> 1)), w, h);
+  }
+  C.globalAlpha = 1;
+}
+
+/* ---- the desert's plants (user Oct 25: "the desert is an oasis with palm trees"; and their reference's scrub and
+   cacti): palms round the oasis, dry scrub and the odd cactus across the desert, standing on the field behind the
+   ground the way the forest's trees do. Pictures made once, in pixels ---- */
+let desertArt = null;
+function buildDesertArt() {
+  const R = seededRng(8123), mk = (W, H, fn) => { const c = makeCanvas(W, H), x = c.getContext('2d'), id = x.createImageData(W, H); fn((px, py, col) => { px = Math.round(px); py = Math.round(py); if (px < 0 || py < 0 || px >= W || py >= H) return; const o = (py * W + px) * 4; id.data[o] = col[0]; id.data[o + 1] = col[1]; id.data[o + 2] = col[2]; id.data[o + 3] = 255; }, W, H); x.putImageData(id, 0, 0); return c; };
+  const palm = seed => mk(70, 96, (put, W, H) => {
+    const r = seededRng(seed), lean = (r() - 0.5) * 0.5, top = 14 + r() * 8;
+    const TR = [[122, 88, 58], [96, 68, 46], [146, 108, 72]], LF = [[86, 128, 52], [62, 98, 44], [118, 156, 66], [42, 70, 36]];
+    // the trunk: a curving column of rings
+    let tx = W / 2, cx = 0;
+    for (let y = H - 1; y > top; y--) { const u = (H - y) / (H - top); cx = W / 2 + lean * 30 * u * u; for (let k = -2; k <= 2; k++) put(cx + k, y, (y % 5 === 0) ? TR[1] : k < 0 ? TR[2] : TR[0]); tx = cx; }
+    // the fronds: drooping arcs out from the crown, each a spine with leaflets
+    const n = 7 + Math.floor(r() * 3);
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 2 + (i / (n - 1) - 0.5) * 2.9 + (r() - 0.5) * 0.2, L = 22 + r() * 12;
+      for (let s = 0; s < L; s++) {
+        const u = s / L, x = tx + Math.cos(a) * s, y = top + Math.sin(a) * s + u * u * 16;
+        put(x, y, LF[3]);
+        const lw = 4 * Math.sin(u * Math.PI);
+        for (let q = 1; q <= lw; q++) { put(x - Math.sin(a) * q, y + Math.cos(a) * q + q * 0.6, q < lw * 0.5 ? LF[2] : LF[0]); put(x + Math.sin(a) * q * 0.6, y - Math.cos(a) * q * 0.6 + q * 0.6, LF[1]); }
+      }
+    }
+    for (let k = -3; k <= 3; k++) for (let j = -2; j <= 2; j++) if (k * k + j * j < 8) put(tx + k, top + j + 1, k + j < 0 ? [150, 110, 60] : [110, 76, 44]);   // (the crown, its dates)
+  });
+  const cactus = seed => mk(26, 48, (put, W, H) => {
+    const r = seededRng(seed), G = [[92, 128, 70], [70, 104, 58], [124, 158, 88], [48, 74, 44]], top = 4 + r() * 8;
+    const col = (x0, y0, y1, w) => { for (let y = y0; y < y1; y++) for (let k = 0; k < w; k++) put(x0 + k, y, k === 0 ? G[2] : k === w - 1 ? G[3] : (k + y) % 3 === 0 ? G[1] : G[0]); };
+    col(W / 2 - 3, top, H, 6);
+    const ay = top + 10 + r() * 10, by = top + 14 + r() * 10;
+    for (let k = 0; k < 6; k++) put(W / 2 - 4 - k, ay + 8, G[1]); col(W / 2 - 10, ay, ay + 9, 4);
+    for (let k = 0; k < 6; k++) put(W / 2 + 3 + k, by + 6, G[1]); col(W / 2 + 7, by - 2, by + 7, 4);
+  });
+  const scrub = seed => mk(34, 18, (put, W, H) => {
+    const r = seededRng(seed), C = [[138, 112, 70], [112, 86, 56], [166, 140, 88], [94, 104, 60]];
+    for (let i = 0; i < 70; i++) { const a = -Math.PI * (0.1 + 0.8 * r()), L = 4 + r() * 12; let x = W / 2 + (r() - 0.5) * 10, y = H - 1; for (let s = 0; s < L; s++) { x += Math.cos(a); y += Math.sin(a) * 0.9; put(x, y, C[(i + s) % 4]); } }
+  });
+  desertArt = { palms: [1, 2, 3, 4].map(palm), cacti: [5, 6, 7].map(cactus), scrub: [8, 9, 10, 11].map(scrub) };
+  // where they stand: palms round the oasis (both its shores, a few on the slopes), scrub and cacti across the desert
+  const items = [], L = land.lakes && land.lakes.find(l => l[0] > SEA1);
+  if (L) for (let i = 0; i < 16; i++) { const side = i & 1 ? 1 : -1, x = (side < 0 ? L[0] : L[1]) + side * (R() * 260 - 40); items.push({ x, k: 'palms', i: i % 4, back: R() * 0.8, s: 0.85 + R() * 0.4, flip: R() < 0.5 }); }
+  for (let x = SEA1 + AIR_W + 300; x < WORLD_W - MTN_FLAT; x += 60 + R() * 140) {
+    if (L && x > L[0] - 300 && x < L[1] + 300) continue;
+    items.push({ x, k: R() < 0.22 ? 'cacti' : 'scrub', i: Math.floor(R() * 3), back: R() * 0.9, s: 0.8 + R() * 0.5, flip: R() < 0.5 });
+  }
+  items.sort((a, b) => b.back - a.back);
+  desertArt.items = items;
+}
+function drawDesertPlants(x0, x1) {
+  if (!land.surfS) return;
+  if (!desertArt || desertArt.seed !== land.seed) { buildDesertArt(); desertArt.seed = land.seed; }
+  const fx = E.fx || [1, 1, 1], hz = mix3(E.skyHor || [180, 200, 220], E.skyTop || [120, 170, 230], 0.3);
+  for (const it of desertArt.items) {
+    if (it.x < x0 - 80 || it.x > x1 + 80) continue;
+    const im = desertArt[it.k][it.i], haze = 0.1 + 0.25 * it.back, k = (it.k === "palms" ? 1.6 : 1.2) * it.s * (1 - 0.35 * it.back);
+    const t = GLR.on ? glTint(im, 'desP', fx.map(v => v * (1 - haze)), hz.map(v => v * haze / 255), false) : im;
+    const foot = land.surfS[clamp(Math.floor(it.x / LT_CELL), 0, land.cols - 1)] - FIELD_H * (0.15 + 0.8 * it.back);
+    const w = Math.round(im.width * k * SV), h = Math.round(im.height * k * SV), X = Math.round(PX(it.x) - w / 2), Y = Math.round(PY(foot)) - h;
+    if (it.flip) { C.save(); C.translate(X + w, 0); C.scale(-1, 1); C.drawImage(t, 0, Y, w, h); C.restore(); }
+    else C.drawImage(t, X, Y, w, h);
+  }
+}
 
 /* ---- the helicopter's magnet (LAND TEST; user Oct 25, their picture) ----
    The red button (where the boats' "home" button sat) lets a rope down from the helicopter's belly with a heavy
@@ -16293,12 +16521,10 @@ function makeMagnetArt(home) {
    The land stands above the sea's level everywhere, so nothing in the sea's code ever reaches the water.
    ================================================================ */
 const LT_CELL = 2.5;                                   // world units a cell
-const LT_Y0 = WATER_Y - 300, LT_Y1 = WATER_Y + 300;    // the grid's top and bottom (below it: solid rock)
+const LT_Y0 = WATER_Y - 420, LT_Y1 = WATER_Y + 300;    // the grid's top and bottom (below it: solid rock; above it room for the mountains)
 const LT_ROWS = Math.round((LT_Y1 - LT_Y0) / LT_CELL);
 const LT_CHUNK = 64;                                   // columns a painted slice
 const M_AIR = 0, M_GRASS = 1, M_DIRT = 2, M_SAND = 3, M_ROCK = 4;
-const LAND_TOWER_X = 95;                              // (each side's tower, from its end of the world)
-const LAND_BASE = 700;                                 // each side's own ground, from its edge of the world
 const land = { cols: 0, cell: null, scorch: null, chunks: [], back: [], dirty: null, sand: [], sandT: 0, surf: null, seed: 1, outcrops: [], boulders: [], bg: null };
 // (the user's picture, gen/land/land-proposal.jpg: a field of grass seen from above runs back from the edge, with
 // boulders on it, 6-10% of the view tall; it is painted behind the ground, never dug, and below it a darker back wall
@@ -16307,20 +16533,35 @@ const FIELD_H = 56;
 // grass on the ground's own top: five cells and a ragged fringe of one to three more hanging over the dirt
 const ltGrassD = c => 7 + (hash(c * 0.71) < 0.3 ? 0 : 1 + Math.floor(hash(c * 3.3) * 3.99));
 
-// (user Oct 25: the land is three screens wide - each side's ground, and sand through the whole middle stretch)
-// how sandy the ground is a share u of the way across: all sand from about 0.36 to 0.64, fading out by 0.3 / 0.7
-const ltSandy = u => 1 - smoothstep(0.1, 0.13, Math.abs(u - 0.5));   // (the beaches round the lake)
-// the lie of the land before anything is dug: its top at x (world y), hills and the valley
+/* (user Oct 25, evening) the land is now two countries, one each side of the sea in the middle of the world: the
+   forest left of it, the desert right of it, five screens each. Going out from the harbour: an airfield on flat ground
+   at the quay's height, then rolling country with a lake in its middle, then the land rises, rockier and rockier,
+   into a mountain at the world's end, the side's tower on its flat top where it sees far. */
+const lcRight = x => x > SEA1;                                  // the desert (right) country, or the forest (left)
+const lcX = x => x > SEA1 ? WORLD_W - x : x;                    // from the country's own end of the world, inward
+const lcFromSea = x => SEA0 - lcX(x);                           // from its harbour, back inland
+const MTN_PEAK = 250, MTN_FLAT = 270, MTN_FOOT = 1200;          // (the mountain: its height, its flat top, how far its foot reaches)
+const AIR_W = 1050;                                             // (the airfield: how far it runs back from the harbour)
+const LAND_TOWER_X = 135;                                       // (each side's edge tower, in from its end of the world)
+// how sandy the ground is: all of the desert; in the forest, the beaches round its lake
+const ltSandy = x => lcRight(x) ? 1 : 1 - smoothstep(0.17, 0.21, Math.abs(lcX(x) / SEA0 - 0.5));
+// how much of the mountain it is (0 down in the country, 1 on its top)
+const ltMtn = x => 1 - smoothstep(MTN_FLAT, MTN_FOOT, lcX(x));
+// the lie of the land before anything is dug: its top at x (world y). Over the sea: none
 function landProfile(x, R) {
-  const W = WORLD_W, u = x / W, d = Math.min(x, W - x);
-  const base = WATER_Y - 95;                                        // the sides' ground
-  const inland = smoothstep(LAND_BASE - 150, LAND_BASE + 450, d);   // (flat at home, hills further in)
-  const valley = Math.exp(-Math.pow((u - 0.5) / 0.14, 2)) * 40;     // low ground in the middle
-  // (user Oct 25) and in it a deep bowl: the lake
-  const q = (u - 0.5) / 0.07, bowl = Math.abs(q) < 1 ? Math.pow(1 - q * q, 1.5) * 205 : 0;
-  const hills = (34 * Math.sin(x / 430 + R[0]) + 20 * Math.sin(x / 190 + R[1]) + 9 * Math.sin(x / 73 + R[2])) * inland;
-  const home = 5 * Math.sin(x / 260 + R[3]) * (1 - inland) * smoothstep(LAND_TOWER_X + 50, LAND_TOWER_X + 160, d);   // (flat under the tower)
-  return base + hills * (1 - 0.6 * Math.exp(-Math.pow((u - 0.5) / 0.09, 2))) * (1 - Math.min(1, bowl / 60)) + valley * inland + bowl + home - 18 * inland;
+  if (!onLand(x)) return LT_Y1 + 10;
+  const lx = lcX(x), from = SEA0 - lx, u = lx / SEA0, base = WATER_Y - 95;
+  const valley = Math.exp(-Math.pow((u - 0.5) / 0.24, 2)) * 40;     // low ground in the middle
+  // (user Oct 25) and in it a deep bowl: the lake (the desert's: the oasis)
+  const q = (u - 0.5) / 0.14, bowl = Math.abs(q) < 1 ? Math.pow(1 - q * q, 1.5) * 250 : 0;
+  const m = ltMtn(x), inland = smoothstep(AIR_W - 100, AIR_W + 500, from);
+  const hills = (34 * Math.sin(x / 430 + R[0]) + 20 * Math.sin(x / 190 + R[1]) + 9 * Math.sin(x / 73 + R[2])) * inland * (1 - m);
+  // the mountain: rising to a flat top at the world's end, ragged on its slopes
+  const mtn = MTN_PEAK * Math.pow(m, 1.25) + (14 * Math.sin(x / 41 + R[3]) + 9 * Math.sin(x / 17 + R[1])) * 4 * m * (1 - m);
+  let top = base + hills * (1 - 0.6 * Math.exp(-Math.pow((u - 0.5) / 0.17, 2))) * (1 - Math.min(1, bowl / 60)) + valley * inland + bowl - 18 * inland - mtn;
+  // the airfield by the harbour: flat, at the quay's height
+  const air = 1 - smoothstep(AIR_W, AIR_W + 450, from);
+  return top * (1 - air) + DOCK_TOP_Y * air;
 }
 const ltIdx = (c, r) => r * land.cols + c;
 function ltCell(c, r) {
@@ -16354,16 +16595,19 @@ function buildLand() {
   const W = WORLD_W;
   // the rock under it all: a ragged floor 50-90 units under the top, never dug through
   for (let c = 0; c < land.cols; c++) {
-    const x = c * LT_CELL, top = landProfile(x, R), u = x / W;
+    const x = c * LT_CELL, top = landProfile(x, R);
     land.surf[c] = top;
+    if (top > LT_Y1) continue;                                // (the sea's stretch: no land)
     const rockAt = top + 270 + 30 * (0.5 + 0.5 * Math.sin(x / 140 + R[2])) + 9 * Math.sin(x / 37 + R[1]);   // (deep, under the view: the picture shows earth all the way down)
     // sand in the low valley (and a skin of it on the slopes down into it)
-    const sandy = ltSandy(u), sandDepth = sandy * (24 + 8 * Math.sin(x / 55 + R[3]));
+    const sandy = ltSandy(x), sandDepth = sandy * (24 + 8 * Math.sin(x / 55 + R[3])) * (1 - ltMtn(x));
+    // (rockier toward the mountain: bare rock over its top and upper slopes)
+    const rocky = smoothstep(0.3, 0.6, ltMtn(x) + 0.08 * Math.sin(x / 23 + R[0]));
     for (let r = 0; r < LT_ROWS; r++) {
       const y = LT_Y0 + r * LT_CELL;
       if (y < top) continue;
       let m;
-      if (y >= rockAt) m = M_ROCK;
+      if (y >= rockAt || (rocky > 0.5 && y < top + 60 + 40 * rocky)) m = M_ROCK;
       else if (y < top + sandDepth) m = M_SAND;
       else m = y < top + ltGrassD(c) * LT_CELL && sandy < 0.35 ? M_GRASS : M_DIRT;
       land.cell[ltIdx(c, r)] = m;
@@ -16371,14 +16615,17 @@ function buildLand() {
   }
   // stones in the dirt: small blobs of rock here and there (they show in craters, and stop a dig)
   for (let i = 0; i < W / 55; i++) {
-    const x = R0() * W, c = ltCol(x), top = land.surf[Math.min(land.cols - 1, c)], y = top + 12 + R0() * 45, rr = 1.5 + R0() * 2.8;
+    const x = R0() * W; if (!onLand(x)) continue;
+    const c = ltCol(x), top = land.surf[Math.min(land.cols - 1, c)], y = top + 12 + R0() * 45, rr = (1.5 + R0() * 2.8) * (1 + 1.5 * smoothstep(MTN_FOOT + 600, MTN_FLAT, lcX(x)));   // (bigger stones toward the mountain)
     ltBlob(x, y, rr * LT_CELL, M_ROCK, true);
   }
   // rock outcrops for cover: humps and crags standing out of the hills (none on either side's own ground)
-  const nO = Math.round(W / 900);
+  // (in each country, between the airfield and the mountain, more of them nearer the mountain; none in the lake)
+  const nO = Math.round(SEA0 / 600) * 2;
   for (let i = 0; i < nO; i++) {
     let x = 0, tries = 0;
-    do { x = LAND_BASE + 120 + R0() * (W - 2 * (LAND_BASE + 120)); tries++; } while (tries < 40 && (land.outcrops.some(o => Math.abs(o.x - x) < 420) || Math.abs(x / W - 0.5) < 0.11));   // (none in the lake)
+    const right = i % 2 === 1, lxOf = () => MTN_FLAT + 150 + Math.pow(R0(), 1.6) * (SEA0 - AIR_W - MTN_FLAT - 450);
+    do { const lx = lxOf(); x = right ? WORLD_W - lx : lx; tries++; } while (tries < 40 && (land.outcrops.some(o => Math.abs(o.x - x) < 380) || Math.abs(lcX(x) / SEA0 - 0.5) < 0.19));
     // (humps a tank can drive over - sides no steeper than it climbs - tall enough to hide behind)
     const h = 20 + R0() * 26, w = h * 4 + 30 + R0() * 30, kind = R0() < 0.4 ? 'crag' : 'hump';   // (sides no steeper than about 1 in 3)
     land.outcrops.push({ x, w, h, kind });
@@ -16395,7 +16642,7 @@ function buildLand() {
   for (let c = 0; c < land.cols; c++) {
     for (let r = 0; r < LT_ROWS; r++) {
       const m = land.cell[ltIdx(c, r)]; if (m === M_AIR) continue;
-      if (m === M_DIRT && ltSandy(c * LT_CELL / W) < 0.35) for (let q = 0, gq = ltGrassD(c); q < gq && r + q < LT_ROWS && land.cell[ltIdx(c, r + q)] === M_DIRT; q++) land.cell[ltIdx(c, r + q)] = M_GRASS;
+      if (m === M_DIRT && ltSandy(c * LT_CELL) < 0.35) for (let q = 0, gq = ltGrassD(c); q < gq && r + q < LT_ROWS && land.cell[ltIdx(c, r + q)] === M_DIRT; q++) land.cell[ltIdx(c, r + q)] = M_GRASS;
       break;
     }
   }
@@ -16403,17 +16650,19 @@ function buildLand() {
   land.boulders = [];
   for (let i = 0; i < W / 240; i++) {
     const x = R0() * W, back = R0(), w = (30 + R0() * 50) * (1 - 0.4 * back);
+    if (!onLand(x) || lcFromSea(x) < AIR_W) continue;
     land.boulders.push({ x, w, h: w * (0.5 + R0() * 0.2), back, seed: R0() * 99 });
   }
-  land.boulders = land.boulders.filter(b => Math.abs(b.x / W - 0.5) > 0.085);   // (none in the lake's bowl)
+  land.boulders = land.boulders.filter(b => Math.abs(lcX(b.x) / SEA0 - 0.5) > 0.16);   // (none in the lake's bowl)
   land.boulders.sort((a, b) => b.back - a.back);
   land.chunks = []; land.back = []; land.dirty = new Uint8Array(Math.ceil(land.cols / LT_CHUNK)).fill(1);
   land.bg = null;
   // (the back of the field, smoothed: where the nearest trees stand)
   land.surfS = new Float32Array(land.cols);
-  { const R2 = 60; let acc = 0; for (let c = -R2; c <= R2; c++) acc += land.surf[clamp(c, 0, land.cols - 1)];
-    for (let c = 0; c < land.cols; c++) { land.surfS[c] = acc / (2 * R2 + 1); acc += land.surf[clamp(c + R2 + 1, 0, land.cols - 1)] - land.surf[clamp(c - R2, 0, land.cols - 1)]; } }
+  { const R2 = 60, sv = c => { const v = land.surf[clamp(c, 0, land.cols - 1)]; return v >= LT_Y1 ? DOCK_TOP_Y : v; }; let acc = 0; for (let c = -R2; c <= R2; c++) acc += sv(c);
+    for (let c = 0; c < land.cols; c++) { land.surfS[c] = acc / (2 * R2 + 1); acc += sv(c + R2 + 1) - sv(c - R2); } }
   findLake();
+  buildLakeFish();
   buildTufts();
 }
 // a round blob of one material (keep: only where there's ground already)
@@ -16510,6 +16759,14 @@ const LT_PAL = {
   [M_SAND]: [[216, 190, 128], [198, 170, 110], [232, 210, 152]],
   [M_ROCK]: [[150, 148, 140], [128, 126, 120], [196, 194, 186], [52, 50, 54], [104, 102, 98], [172, 170, 162]],
 };
+// (the desert's: warm sandstone rock and red-brown earth, sand a little warmer - user Oct 25)
+const LT_PAL_D = {
+  [M_DIRT]: [[150, 92, 64], [132, 80, 58], [168, 106, 74], [30, 20, 22], [184, 124, 86], [206, 150, 104], [110, 66, 50]],
+  [M_SAND]: [[232, 186, 120], [214, 164, 104], [246, 208, 148]],
+  [M_ROCK]: [[200, 140, 96], [176, 118, 82], [230, 176, 124], [70, 44, 40], [150, 98, 72], [214, 158, 110]],
+};
+const DESERT_FIELD = [[226, 178, 116], [208, 158, 100], [240, 198, 138], [176, 128, 84]];
+const ltPal = (m, c) => (c * LT_CELL > SEA1 && LT_PAL_D[m]) || LT_PAL[m];
 // the dirt's lumps (as in the user's picture: rounded stones packed in earth): a cellular pattern. Returns how far
 // in from the edge of its lump a cell is (small: the dark gap between two), which lump, and where in it (dy < 0: its
 // upper part, lit)
@@ -16550,7 +16807,7 @@ function paintLandChunk(k) {
       if (m === M_AIR) { depth = 0; continue; }
       const up = r > 0 ? land.cell[i - land.cols] : M_AIR, dn = r < LT_ROWS - 1 ? land.cell[i + land.cols] : M_ROCK;
       const lf = ltCell(c - 1, r), rt = ltCell(c + 1, r);
-      const P = LT_PAL[m], hsh = hash(c * 1.37 + r * 7.91);
+      const P = ltPal(m, c), hsh = hash(c * 1.37 + r * 7.91);
       let col;
       if (m === M_DIRT) {
         // a stone (lit along its top, shaded underneath) or the dark earth packed between
@@ -16604,9 +16861,15 @@ function paintLandBack(k) {
   const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0), h = LT_ROWS + 4;
   const cv = land.back[k] = makeCanvas(w, h), x = cv.getContext('2d'), id = x.createImageData(w, h), d = id.data;
   const put = (cx, cy, col) => { if (cx < 0 || cx >= w || cy < 0 || cy >= h) return; const o = (cy * w + cx) * 4; d[o] = col[0]; d[o + 1] = col[1]; d[o + 2] = col[2]; d[o + 3] = 255; };
-  const G = LT_PAL[M_GRASS], D = LT_PAL[M_DIRT], FH = FIELD_H / LT_CELL;
+  let D = LT_PAL[M_DIRT];
+  const FH = FIELD_H / LT_CELL;
+  let G = LT_PAL[M_GRASS];
   for (let q = 0; q < w; q++) {
-    const c = c0 + q, sr = (land.surf[c] - LT_Y0) / LT_CELL, r0 = Math.max(0, Math.floor(sr - FH));
+    const c = c0 + q;
+    if (land.surf[c] >= LT_Y1) continue;                          // (the sea's stretch: nothing)
+    G = lcRight(c * LT_CELL) ? DESERT_FIELD : LT_PAL[M_GRASS];     // (the desert's field is sand, with darker patches)
+    D = ltPal(M_DIRT, c);
+    const sr = (land.surf[c] - LT_Y0) / LT_CELL, r0 = Math.max(0, Math.floor(sr - FH));
     for (let r = r0; r < LT_ROWS; r++) {
       const hsh = hash(c * 1.37 + r * 7.91);
       let col;
@@ -16631,7 +16894,7 @@ function paintLandBack(k) {
     }
   }
   // boulders on the field: lit from the upper left, shaded under, a dark rim at the foot and a shadow on the grass
-  const P = LT_PAL[M_ROCK];
+  const P = ltPal(M_ROCK, c0);
   for (const b of land.boulders) {
     const bc = b.x / LT_CELL, hw = b.w / 2 / LT_CELL, hh = b.h / LT_CELL;
     if (bc + hw < c0 - 1 || bc - hw > c0 + w + 1) continue;
@@ -16654,7 +16917,7 @@ function paintLandBack(k) {
 }
 // (user Oct 25: past the world's ends the land goes on - each end's slices mirrored, so there's never sky or sea
 // beside the ground, however far out the view is)
-function drawLandGround(x0, x1) {
+function drawLandGround(x0, x1, onField) {
   if (!land.cell) return;
   const n = land.dirty.length, Xend = land.cols * LT_CELL;
   const ga = C.imageSmoothingEnabled;
@@ -16671,12 +16934,16 @@ function drawLandGround(x0, x1) {
     C.save(); C.translate(X1, 0); C.scale(-1, 1); C.drawImage(cv, 0, Ytop, X1 - X0, Ybot - Ytop); C.restore();
   };
   for (const [k, xl, flip] of list) { if (!land.back[k]) paintLandBack(k); put(land.back[k], xl, flip); }
+  if (onField) onField();                                 // (what stands on the field behind: in front of it, behind the ground)
   for (const [k, xl, flip] of list) {
     if (land.dirty[k] || !land.chunks[k]) { paintLandChunk(k); land.dirty[k] = 0; }
     put(land.chunks[k], xl, flip);
   }
-  // below the grid: the rock goes on down, in the dark
-  C.fillStyle = '#06070b'; C.fillRect(-SHX - 2, Ybot - 1, VWP + 4, Math.max(0, bh - Ybot + 4));
+  // below the grid: the rock goes on down, in the dark (under the two countries, not the sea)
+  C.fillStyle = '#06070b';
+  const XA = Math.round(PX(SEA0)), XB = Math.round(PX(SEA1));
+  if (XA > -SHX - 2) C.fillRect(-SHX - 2, Ybot - 1, XA + SHX + 2, Math.max(0, bh - Ybot + 4));
+  if (XB < VWP + 2) C.fillRect(XB, Ybot - 1, VWP + 4 - XB, Math.max(0, bh - Ybot + 4));
   C.imageSmoothingEnabled = ga;
 }
 
@@ -16687,8 +16954,7 @@ function buildLandBg() {
   const pix = (d, W, H, c, y, col) => { if (y < 0 || y >= H) return; const o = (y * W + ((c % W) + W) % W) * 4; d[o] = col[0]; d[o + 1] = col[1]; d[o + 2] = col[2]; d[o + 3] = 255; };
   // (the user's picture: a range of sharp grey peaks, lit faces 199,208,217 toward the upper left, shaded faces
   // 134,161,178, the feet going green-blue into the haze 128,157,136; the taller peaks behind, the lower in front)
-  const mountains = strip(1400, 175, (d, W, H) => {
-    const LIT = [198, 205, 213], BASE = [160, 174, 182], SHD = [130, 148, 167], DEEP = [113, 131, 153], FOOT = [120, 152, 134];
+  const range = (LIT, BASE, SHD, DEEP, FOOT, H0) => strip(1400, H0, (d, W, H) => {
     const peaks = [];
     for (let i = 0; i < 72; i++) {                                                // (main peaks, each with a shoulder or two)
       const cx = R() * W, ap = H * (0.03 + Math.pow(R(), 1.2) * 0.42), sl = 1.1 + R() * 1.2;
@@ -16708,6 +16974,26 @@ function buildLandBg() {
           if (f > 0) col = mix3(col, FOOT, f * 0.85);
           pix(d, W, H, Math.round(P.cx + dx), y, col);
         }
+      }
+    }
+  });
+  const mountains = range([198, 205, 213], [160, 174, 182], [130, 148, 167], [113, 131, 153], [120, 152, 134], 175);
+  // (user Oct 25, their dunes at sunset: the desert's far range - dry sandstone peaks, lit warm orange on the sunny side,
+  // plum-brown in shadow, their feet going into a pink haze)
+  const dryRange = range([240, 172, 104], [216, 140, 90], [150, 82, 76], [118, 62, 68], [222, 156, 116], 175);
+  // and its dunes: long rolling ridges, a bright warm face and a shaded one, wind ripples across them
+  const dunes = strip(1200, 120, (d, W, H) => {
+    const LIT = [242, 178, 102], MID = [222, 146, 84], SHD = [168, 92, 76], DEEP = [132, 70, 72], RIP = [252, 196, 124];
+    const hAt = x => H * 0.38 + 18 * Math.sin(x / 61 + 1.3) + 11 * Math.sin(x / 23 + 0.4) + 7 * Math.sin(x / 140 + 2.2);
+    for (let c = 0; c < W; c++) {
+      const top = Math.round(hAt(c)), sl = hAt(c + 1) - hAt(c - 1);
+      for (let y = Math.max(0, top); y < H; y++) {
+        const dy = y - top, f = y / H;
+        let col = sl > 0.25 ? SHD : sl < -0.25 ? LIT : MID;
+        if (dy > 18 + 8 * Math.sin(c / 37)) col = mix3(col, DEEP, 0.35 * f);
+        if (((y + Math.round(c * 0.2)) % 7) === 0 && sl < 0.4) col = mix3(col, RIP, 0.35);   // (ripples)
+        if (dy < 1) col = sl > 0.25 ? DEEP : RIP;
+        pix(d, W, H, c, y, col);
       }
     }
   });
@@ -16750,19 +17036,24 @@ function buildLandBg() {
     { s: trees(1000, 130, 40, 50, 120, 11, 0.06), p: 0.7, q: 0.95, k: 1.2, base: WATER_Y - 95 - 40, haze: 0.3, tree: 0.5 },
     { s: trees(1000, 250, 14, 90, 240, 12, 0.03), p: 0.62, q: 0.86, k: 1.25, base: WATER_Y - 95 - 30, haze: 0.06, under: [42, 71, 75], world: true, tree: 1 },   // (drawn with the ground: drawLandTrees)
   ];
+  // (the desert's, the same depths: its dry range far off, its dunes nearer)
+  land.bgD = [
+    { s: dryRange, p: 0.5, q: 0.9, k: 2, base: WATER_Y - 95 - 20, haze: 0.32 },
+    { s: dunes, p: 0.7, q: 0.95, k: 1.4, base: WATER_Y - 95 - 34, haze: 0.18 },
+  ];
 }
 // each strip drawn tiled across the view at its own depth, its foot standing on its base line (which hangs from
 // the ground's line on the screen, as the sea's far layers hang from the horizon), hazed toward the sky's colour
 // at the horizon and lit with the hour. near: the strip in front of the clouds; otherwise the ones behind them
-function drawLandBg(near) {
+function drawLandBg(near, desert) {
   if (!land.bg) buildLandBg();
   const hz = mix3(E.skyHor || [180, 200, 220], E.skyTop || E.skyHor || [120, 170, 230], 0.3), fx = E.fx || [1, 1, 1];
-  for (const L of land.bg) {
+  for (const L of desert ? land.bgD : land.bg) {
     if (L.world || !!L.near !== !!near) continue;
     const im = L.s.c, Sl = layerScale(L.q), tileW = im.width * L.k;
     const i0 = Math.floor(layerX(0, L, Sl) / tileW) - 1, i1 = Math.ceil(layerX(VWP, L, Sl) / tileW) + 1;
     const h = Math.round(im.height * L.k * Sl), y = Math.round(PY(L.base)) - h;
-    const t = GLR.on ? glTint(im, 'land' + L.q, fx.map(v => v * (1 - L.haze)), hz.map(v => v * L.haze / 255), false) : im;
+    const t = GLR.on ? glTint(im, (desert ? 'landD' : 'land') + L.q, fx.map(v => v * (1 - L.haze)), hz.map(v => v * L.haze / 255), false) : im;
     // (the trees sway with the wind, user Oct 25: each tile leans a little about its foot, a slow gusting rock;
     // the far ones less, the mountains not at all)
     const wnd = clamp((E.windU || 0) / 60, -1, 1), sw = L.tree ? (wnd * 0.035 + Math.sin(time * 1.1) * 0.012 * (0.3 + Math.abs(wnd))) * L.tree : 0;
@@ -16795,6 +17086,7 @@ function drawLandTrees(x0, x1) {
       const wx = i * tileW + sx * k, ww = Math.min(SL, im.width - sx) * k;
       if (wx + ww < x0 - 40 || wx > x1 + 40) continue;
       let cx = wx + ww / 2; if (cx < 0) cx = -cx; else if (cx > E2) cx = 2 * E2 - cx;
+      if (cx > SEA0 - 30) continue;                       // (the forest's trees: its own country only)
       const foot = land.surfS[clamp(Math.floor(cx / LT_CELL), 0, land.cols - 1)] - FIELD_H + 6;
       const X = Math.round(PX(wx)), X2 = Math.round(PX(wx + ww)), Y = Math.round(PY(foot));
       C.fillStyle = under; C.fillRect(X, Y - 1, X2 - X, Math.max(1, bh - Y + 1));   // (down to the bottom: the ground in front covers it, so a low valley shows no sky)
@@ -16838,7 +17130,7 @@ function buildTufts() {
   const R = seededRng(5150), W = WORLD_W;
   let x = 30 + R() * 40;
   while (x < W - 30) {
-    const u = x / W, sandy = ltSandy(u);
+    const sandy = ltSandy(x);
     const c = ltCol(x), top = landTop(x);
     // (none on the sand, on rock, or where the ground's too steep for it to stand)
     const ok = sandy < 0.3 && ltCell(c, ltRow(top + 1)) === M_GRASS && Math.abs(landTop(x - 6) - landTop(x + 6)) < 6;
@@ -16934,8 +17226,7 @@ const TANK_K = TANK_W / (TANKA.r - TANKA.l), TCX = (TANKA.l + TANKA.r) / 2;
 const TAX = x => (x - TCX) * TANK_K, TAY = y => (y - TANKA.foot) * TANK_K;
 const TANK_DECK = TAY(TANKA.deck), TANK_TOPY = TAY(TANKA.turTop), TANK_TUR = [TAX(TANKA.turL), TAX(TANKA.turR)];
 const TANK_GUN_L = TANKA.gunW * TANK_K;
-// (it stops against its tower at the end of the land)
-const TANK_X0 = LAND_TOWER_X + 30 + TANK_W / 2;
+const TANK_X0 = 15;                                    // (it comes in from the world's very end, past its tower: user Oct 25)
 const TANK_L = 70, TANK_V = 46, TANK_HP = 3, TANK_AMMO = 12, TANK_RELOAD = 1.4;
 const HELI_K = 0.249, HELI_V = 120, HELI_VY = 80, HELI_HP = PLANE_HITS, HELI_ROCKETS = 8, HELI_RELOAD = 0.6, HELI_TURN_T = 0.7;
 // (user Oct 25: the helicopter flies no higher than a screen and a half above the ground at home)
@@ -16943,8 +17234,12 @@ const HELI_CEIL = WATER_Y - 95 - 1.5 * VIEW_H;
 const LAND_RESPAWN = 4;                                // seconds before a lost tank or helicopter is replaced
 const tanks = [null, null], helis = [null, null], landWrecks = [];
 const landWait = [{ tank: 0, heli: 0 }, { tank: 0, heli: 0 }];
-const landHomeX = (p, k) => SIDE(p) ? WORLD_W - (k === 'tank' ? 220 : 470) : (k === 'tank' ? 220 : 470);
-const onOwnGround = (p, x) => SIDE(p) ? x > WORLD_W - LAND_BASE : x < LAND_BASE;
+// (user Oct 25: a tank or helicopter comes in from your end of the world; it's mended and rearmed back home - on your
+// mountain, or on your airfield by the harbour)
+const landHomeX = (p, k) => SIDE(p) ? WORLD_W - (k === 'tank' ? TANK_X0 : 30) : (k === 'tank' ? TANK_X0 : 30);
+const onOwnGround = (p, x) => (SIDE(p) ? x > SEA1 : x < SEA0) && (lcX(x) < MTN_FOOT || lcFromSea(x) < AIR_W);
+// it's come in far enough to be yours to drive: past your tower on the mountain's top
+const LAND_ENTER = LAND_TOWER_X + 110;
 
 /* ---- the tank's pictures: the hull (tracks, wheels, skirts) and the turret, painted pixel by pixel ---- */
 function paintTank(col) {
@@ -17039,6 +17334,17 @@ function tankArtOf(p) {
 }
 
 /* ---- making them ---- */
+// (user Oct 25) taken, it comes in from your end of the world: the tank drives in over the mountain past your tower,
+// the helicopter flies in; until it's in, it goes on its own
+function landArrive(p, k) {
+  if (k === 'tank') { const t = tanks[p] = makeTank(p, landHomeX(p, 'tank')); t.enter = true; return t; }
+  const x = landHomeX(p, 'heli'), h = helis[p] = makeHeli(p, x);
+  Object.assign(h, { state: 'fly', y: landTop(x) - 150, spin: 1, enter: true, vx: (SIDE(p) ? -1 : 1) * HELI_V * 0.8 });
+  return h;
+}
+// is one standing (or flying) now, or can one come in?
+const landUp = (p, k) => { const v = k === 'tank' ? tanks[p] : helis[p]; return !!v && (k === 'tank' ? v.state === 'alive' : v.state === 'fly' || v.state === 'landed'); };
+const landCanCome = (p, k) => !landUp(p, k) && !(landWait[p][k] > 0) && !crew[p].dead && capsLeft(p) > 0;
 function makeTank(p, x) {
   const t = { id: p, kind: 'tank', state: 'alive', x, y: landBelow(x, LT_Y0), a: 0, vx: 0, vy: 0, facing: SIDE(p) ? -1 : 1, input: 0, hp: TANK_HP,
     ammo: TANK_AMMO, rk: 0, recoil: 0, mgT: 0, fall: 0, cap: null, smokeT: 0, hitT: -9, fixT: 0 };
@@ -17053,8 +17359,7 @@ function makeHeli(p, x) {
 function buildLandUnits() {
   landWrecks.length = 0;
   for (let p = 0; p < 2; p++) {
-    tanks[p] = makeTank(p, landHomeX(p, 'tank'));
-    helis[p] = makeHeli(p, landHomeX(p, 'heli'));
+    tanks[p] = null; helis[p] = null;                    // (none yet: each comes in from your end of the world when you take it)
     landWait[p].tank = landWait[p].heli = 0;
     Object.assign(guns[p], { elev: 30, power: 0.55 });
   }
@@ -17095,14 +17400,15 @@ function stepTank(t, dt) {
   // (hanging from the helicopter's magnet: it goes where the magnet takes it - stepRope)
   if (t.carry != null) { const hc = helis[t.carry]; if (hc && hc.rope && hc.rope.hold === t.id) { t.vx = 0; t.vy = 0; tankWheels(t, dt); return; } t.carry = null; }
   const mine = crew[p].mode === 'tank';
-  const want = (mine ? t.input : t.cpuIn || 0) * TANK_V;
+  if (t.enter && lcX(t.x) > LAND_ENTER) t.enter = false;
+  const want = t.enter ? (SIDE(p) ? -1 : 1) * TANK_V : (mine ? t.input : t.cpuIn || 0) * TANK_V;   // (coming in: it drives itself)
   // (user Oct 25) it never turns round: like the battleship it drives forward and backs up, its gun keeping its angle
   // up a slope it slows, down one it runs on a little; too steep (a wall) and it stops
   const slope = t.a * t.facing;                                 // (positive: nose down - going downhill)
   const vmax = want * (1 - 0.6 * Math.max(0, -slope * Math.sign(want) * t.facing) / 0.5);
   t.vx += clamp(vmax - t.vx, -90 * dt, 90 * dt);
   if (Math.abs(t.vx) > 0.5) {
-    const nx = clamp(t.x + t.vx * dt, TANK_X0, WORLD_W - TANK_X0), G = tankGround(t, nx);
+    const R = t.x > SEA1, nx = clamp(t.x + t.vx * dt, R ? SEA1 + TANK_W * 0.5 : TANK_X0, R ? WORLD_W - TANK_X0 : SEA0 - TANK_W * 0.5), G = tankGround(t, nx);   // (it stops at its country's edge, by the harbour)
     const lead = t.vx > 0 ? G.front : G.back;
     if (lead < t.y - TANK_STEP - 1) {                           // a wall: it can't climb that - pushed on, it hops
       t.vx = 0; t.stuckT = (t.stuckT || 0) + dt;
@@ -17268,12 +17574,13 @@ function stepHeli(h, dt) {
   const want = mine || h.cpu || flying ? 1 : 0;
   h.spin += clamp(want - h.spin, -dt * 0.35, dt * 0.6);
   h.rotor += dt * (4 + 26 * h.spin);
-  const lever = mine ? h.input : h.cpuIn || 0, stick = mine ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : h.cpuStick || 0;
+  if (h.enter && lcX(h.x) > LAND_ENTER + 200) h.enter = false;
+  const lever = h.enter ? (SIDE(p) ? -1 : 1) * 0.8 : mine ? h.input : h.cpuIn || 0, stick = h.enter ? 0 : mine ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : h.cpuStick || 0;
   if (h.state === 'landed') {
     h.vx = 0; h.vy = 0;
     // lift off: up, with the rotor going
     if (stick < -0.2 && h.spin > 0.8) { h.state = 'fly'; h.vy = -20; sfxClink(telegraphs[p]); }
-    else { const half = heliHalf() * 0.8, sl = Math.atan2(landBelow(h.x + half, h.y - 4) - landBelow(h.x - half, h.y - 4), half * 2); h.y = landBelow(h.x, h.y - 4) - heliSkid(); h.tilt += (sl - h.tilt) * Math.min(1, dt * 6); }
+    else { const half = heliHalf() * 0.8, sl = Math.atan2(landBelowIn(h.x + half, h.y - 4) - landBelowIn(h.x - half, h.y - 4), half * 2); h.y = landBelowIn(h.x, h.y - 4) - heliSkid(); h.tilt += (sl - h.tilt) * Math.min(1, dt * 6); }
     if (onOwnGround(p, h.x)) { h.fixT += dt; if (h.fixT > 1.4) { h.fixT = 0; if (h.hp < HELI_HP) h.hp = Math.min(HELI_HP, h.hp + 1); else if (h.magBroken) { h.magBroken = false; sfxClink(telegraphs[p]); } else if (h.rockets < HELI_ROCKETS) h.rockets++; } } else h.fixT = 0;
     if (h.hp <= HELI_HP - 1) heliSmoke(h, dt);
     if (h.spin > 0.5) rotorWash(h, dt);
@@ -17308,10 +17615,10 @@ function stepHeli(h, dt) {
   tilt *= 1 - 0.6 * clamp(Math.abs(h.vy) / HELI_VY, 0, 1);
   if (h.turn) tilt = 0;
   const Hg = gm - foot;
-  if (Hg < 45) { const slope = LAND ? Math.atan2(gr - gl, half * 2) : 0, bl = clamp(1 - Hg / 45, 0, 1); tilt = tilt * (1 - bl) + slope * bl; }
+  if (Hg < 45) { const slope = onLand(h.x) ? Math.atan2(gr - gl, half * 2) : 0, bl = clamp(1 - Hg / 45, 0, 1); tilt = tilt * (1 - bl) + slope * bl; }
   h.tilt += (tilt - h.tilt) * Math.min(1, dt * 4);
   if (foot >= gm && !LAND) { h.y = gm - 2 - heliSkid(); h.vy = Math.min(h.vy, 0); }   // (over water it holds just above it)
-  else if (foot >= gm && lakeAt(h.x) && gm >= WATER_Y - 0.5) { heliSink(h); return; }   // (onto the lake: it goes in)
+  else if (foot >= gm && LAND && (lakeAt(h.x) || !onLand(h.x))) { heliSink(h); return; }   // (onto a lake - or the sea - it goes in)
   else if (foot >= gm) {
     h.y = gm - heliSkid(); h.state = 'landed'; h.vy = 0; h.vx = 0; kickLandDust(h.x, gm, 6);
   }
@@ -17328,9 +17635,12 @@ function stepHeli(h, dt) {
    smoke in the air under and round the rotor the same way (through the smoke's own air flow, so the smoke keeps its
    look), lays the grass over outward, and tears leaves off the trees behind as it lifts off ---- */
 // what's under a helicopter: the ground on land, the water's surface at sea
-const heliGround = (x, y) => LAND ? (lakeAt(x) ? Math.min(WATER_Y, landBelow(x, y)) : landBelow(x, y)) : surfaceY(x);
+// (the ground under the helicopter's nose and tail is looked for inside the world: user Oct 25 - at the world's end its
+// tail hung over nothing, found no ground there, and it settled onto its tail)
+const landBelowIn = (x, y) => landBelow(clamp(x, 1, WORLD_W - 1), y);
+const heliGround = (x, y) => LAND && onLand(x) ? (lakeAt(x) ? Math.min(WATER_Y, landBelowIn(x, y)) : landBelowIn(x, y)) : surfaceY(x);
 function rotorWash(h, dt) {
-  if (!LAND) { rotorWashSea(h, dt); return; }
+  if (!onLand(h.x)) { rotorWashSea(h, dt); return; }   // (over the sea: spray)
   const gm = landBelow(h.x, h.y), foot = h.y + heliSkid(), H = Math.max(0, gm - foot), sp = h.spin || 0;
   const k = sp * clamp(1 - H / 160, 0, 1);
   // the air: down through the rotor, then out along the ground
@@ -17520,7 +17830,7 @@ function stepHeliDown(h, dt) {
   h.rotor += dt * 20;
   h.smokeT -= dt; if (h.smokeT <= 0) { h.smokeT = 0.05; spawnSmoke(h.x, h.y - 4, { dark: 0.05, r: rnd(3, 5), grow: rnd(4, 6), lift: 20, vx: rnd(-8, 8), life: rnd(4, 6), alpha: 0.6 }); }
   if (Math.random() < dt * 10) spawnFlame(h.x + rnd(-6, 6), h.y + rnd(-4, 4), rnd(-20, 20), -rnd(20, 50), 1.1, rnd(2, 4), 2);
-  if (lakeAt(h.x) && h.y + heliSkid() > WATER_Y) { heliSink(h); return; }   // (shot down over the lake: into it)
+  if (LAND && (lakeAt(h.x) || !onLand(h.x)) && h.y + heliSkid() > surfaceY(h.x)) { heliSink(h); return; }   // (shot down over a lake or the sea: into it)
   if (landSolid(h.x, h.y + heliSkid())) blowHeli(h);
 }
 
@@ -17586,16 +17896,8 @@ function stepLandUnits(dt) {
     const t = tanks[p], h = helis[p];
     if (t) stepTank(t, dt);
     if (h) { stepHeli(h, dt); stepRope(h, dt); }
-    // the replacements: a few seconds after one's lost, a new one stands on your own ground (while you've captains)
-    for (const k of ['tank', 'heli']) {
-      const v = k === 'tank' ? tanks[p] : helis[p];
-      if (v && v.state !== 'dead' && v.state !== 'down') continue;
-      if (crew[p].dead || !capsLeft(p)) continue;
-      landWait[p][k] -= dt;
-      if (landWait[p][k] > 0) continue;
-      if (k === 'tank') tanks[p] = makeTank(p, landHomeX(p, 'tank'));
-      else helis[p] = makeHeli(p, landHomeX(p, 'heli'));
-    }
+    // (a lost one: a few seconds before the next can come in)
+    for (const k of ['tank', 'heli']) if (landWait[p][k] > 0) landWait[p][k] -= dt;
   }
   // tanks don't drive through each other: they push apart
   const a = tanks[0], b = tanks[1];
@@ -18102,23 +18404,38 @@ function drawLandHeliWreck(w) {
 /* ---- the land's own pass in place of the sea's (renderObjects): the ground, what lies on it, the vehicles ---- */
 function renderLandObjects() {
   const x0 = CAMPX / SV, x1 = x0 + VWW;
-  drawLandTrees(x0, x1);
-  drawLandGround(x0, x1);
-  for (const tw of towers) if (tw && tw.x > x0 - 120 && tw.x < x1 + 120) drawTower(tw);   // (the sides' towers at the ends of the land)
-  for (const d of debris) if (d.state === 2) drawDebris(d, x0, x1);
-  drawFire(x0, x1, true);
-  drawLeaves(x0, x1);
-  drawLandUnits(x0, x1);
-  drawTufts(x0, x1);                                   // (in front: a tank drives through them)
-  for (const b of sailboats) drawSailboat(b);           // (the lake's yachts)
-  drawLake(x0, x1);                                    // (its water over what's in it)
-  drawScreens(x0, x1);                                 // (the smoke screens)
+  // (only where the land is: the two countries either side of the sea)
+  const L0 = Math.max(x0, 0), L1 = Math.min(x1, SEA0), R0 = Math.max(x0, SEA1), R1 = Math.min(x1, WORLD_W);
+  const spans = [];
+  if (L1 > L0) spans.push([L0, L1]);
+  if (R1 > R0) spans.push([R0, R1]);
+  if (spans.length) {
+    drawLandTrees(x0, x1);
+    drawLandGround(x0, x1, () => drawDesertPlants(x0, x1));   // (the desert's palms, scrub and cacti, on its field)
+    drawLake(x0, x1, false);                              // (the lakes' water, under what's in them)
+    for (const tw of towers) if (tw && tw.edge && tw.x > x0 - 120 && tw.x < x1 + 120) drawTower(tw);   // (the towers on the mountains at the world's ends)
+    for (const d of debris) if (d.state === 2 && onLand(d.x)) drawDebris(d, x0, x1);
+    drawLeaves(x0, x1);
+  }
+  drawLandUnits(x0, x1);                                 // (a helicopter can be out over the sea)
+  if (!spans.length) return;
+  drawTufts(x0, x1);                                     // (in front: a tank drives through them)
+  drawLake(x0, x1, true);                                // (the lakes' water over what's in them)
+  drawLakeFish(x0, x1);                                  // (dark shapes in it)
   drawSpikeBursts(x0, x1);
   drawEarthGrains(x0, x1);
+  // what's in the air over the land, drawn again over it (the sea's pass drew it first, under the ground)
+  C.save(); C.beginPath();
+  for (const [a, b] of spans) C.rect(Math.floor(PX(a)), -SHY - 50, Math.ceil(PX(b) - PX(a)) + 1, bh + 100);
+  C.clip();
+  drawFire(x0, x1, true);
   drawPlanes(x0, x1);
-  for (const d of debris) if (d.state === 0) drawDebris(d, x0, x1);
+  for (const d of debris) if (d.state === 0 || d.state === 1) drawDebris(d, x0, x1);
+  drawDust(x0, x1);
   drawBirds(x0, x1);
+  drawScreens(x0, x1);
   drawPlanesAir(x0, x1);
+  C.restore();
 }
 
 /* ================================================================
