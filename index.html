@@ -2159,7 +2159,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 12:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 12:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -2290,10 +2290,11 @@ function dropSeat(g, quiet) {
   const i = NET.seats.indexOf(g.seat), s = g.seat.side;
   if (i >= 0) NET.seats.splice(i, 1);
   g.seat = null;
+  // (user Oct 25: a player leaving doesn't hand their side to the CPU - the game pauses for everyone, and the host
+  // adds the CPU there (+ CPU on the menu) or waits for them to come back)
   if (!quiet && roundLive() && (s === 0 || s === 1) && !sidePeople(s)) {
-    // (user Oct 25: the CPU doesn't take a side by itself - only if it had been added to it)
-    if (VERSUS(MODE) && menuSel.cpu[s]) { ctlPick[s] = 'cpu'; const team = teamOfSide(s); brains[team] = makeBrain(team, cpuLvSide[s]); }
-    else ctlPick[s] = 'none';
+    ctlPick[s] = 'none'; menuSel.cpu[s] = false;
+    if (!ui.title) { openMainMenu(); showToast('PLAYER ' + (g.id + 1) + ' LEFT - + CPU OR WAIT FOR THEM'); }
   }
   if (!NET.seats.some(st => !st.local)) NET.role = 'local';
 }
@@ -2349,7 +2350,7 @@ function linkFromGuest(g, m) {
   // (only the commands a player has, and only for the guest's own seat on its own team)
   const st = g.seat;
   if (m.t === 'act' && Object.prototype.hasOwnProperty.call(ACTS, m.name) && Array.isArray(m.a) && m.a.length <= 3) { try { asSeat(st, () => ACTS[m.name](st.team, ...m.a)); } catch (e) {} return; }
-  if (m.t === 'ctl') { try { asSeat(st, () => setCtlState(st.team, m.s)); } catch (e) {} return; }
+  if (m.t === 'ctl') { g.ctlT = performance.now(); try { asSeat(st, () => setCtlState(st.team, m.s)); } catch (e) {} return; }
   if (m.t === 'again' && ui.winner != null) { linkStartRound(); return; }
 }
 // (the host) a guest has gone: what it was in is free again (the CPU's again if nobody's left on its side)
@@ -2420,6 +2421,10 @@ function linkPump(dt) {
   if (LINK.hosting && (NET.role === 'host' || linkGuests().some(g => g.seat))) {
     const gs = linkGuests().filter(g => g.seat);
     if (!gs.length) return;
+    // (a guest that's gone quiet - its screen asleep, the link stalled - lets go of its triggers: user Oct 25, a
+    // friend's machine gun kept firing after they'd let go)
+    const now = performance.now();
+    for (const g of gs) if (now - (g.ctlT || now) > 700) asSeat(g.seat, () => { const t = g.seat.team; mgHold[t] = false; diveHold[t] = 0; if (planes[t] && crew[t].mode === 'plane') planes[t].mg = false; });
     NET.role = 'host';                                   // (guests in the round: this screen is their host)
     // one snapshot for each team (the other team's swapped round), with what each guest and its teammates are in
     const ev = NET.events.splice(0), sky = (NET.snapN = (NET.snapN || 0) + 1) % 15 === 1, S = [null, null];
@@ -3934,7 +3939,7 @@ function menuJoin(s, dev) {
 // what pressed JOIN: a controller (the menus' focus box), a finger, or the mouse - the keyboard player (a second
 // keyboard player, on the other side, has the arrow keys)
 let joinDev = null;
-function menuFromLive() { menuSel.mode = MODE; menuSel.ctl = [ctlPick[0] === 'net' ? 'kb' : ctlPick[0], ctlPick[1] === 'net' ? 'kb' : ctlPick[1]]; menuSel.cpuLv = cpuLvSide.slice(); menuSel.storyLv = STORY_LV; }
+function menuFromLive() { if (VERSUS(MODE)) for (const s of [0, 1]) menuSel.cpu[s] = ctlPick[s] === 'cpu'; menuSel.mode = MODE; menuSel.ctl = [ctlPick[0] === 'net' ? 'kb' : ctlPick[0], ctlPick[1] === 'net' ? 'kb' : ctlPick[1]]; menuSel.cpuLv = cpuLvSide.slice(); menuSel.storyLv = STORY_LV; }
 const mCtlFor = s => { const c = menuSel.ctl[s]; if (c === 'cpu') return VERSUS(menuSel.mode) ? c : 'kb'; if (c === 'pad1' && padsSeen() < 1) return 'kb'; if (c === 'pad2' && padsSeen() < 2) return 'kb'; return c; };
 const mCtlChoices = s => ['kb', ...['pad1', 'pad2'].slice(0, padsSeen()), ...(VERSUS(menuSel.mode) ? ['cpu'] : [])];
 function menuApply() {
@@ -3974,7 +3979,16 @@ function freshWeather() {
   env.time = 9; W.lastHour = 9; env.rain = 0; env.fog = 0;
 }
 // RESUME: back to the round in progress, as it was
-function menuResume(fromNet) { menuFromLive(); startGame(); if (!fromNet) netPause(false); }
+function menuResume(fromNet) { liveCpu(); menuFromLive(); startGame(); if (!fromNet) netPause(false); }
+// RESUME after the CPU was added to (or taken off) a side in the menu: it takes that side over in the round now
+function liveCpu() {
+  if (!VERSUS(MODE) || NET.role === 'guest') return;
+  for (const s of [0, 1]) {
+    const team = teamOfSide(s);
+    if (menuSel.cpu[s] && ctlPick[s] === 'none') { ctlPick[s] = 'cpu'; brains[team] = makeBrain(team, cpuLvSide[s]); }
+    else if (!menuSel.cpu[s] && ctlPick[s] === 'cpu') { ctlPick[s] = 'none'; if (brains[team]) { brains[team] = null; mgHold[team] = false; holding[team] = null; } }
+  }
+}
 // can this side's controls be picked? (STORY: only yours, the right; the left is the enemy)
 // the menu offers only what's there: the keyboard, each controller it can see, and (1 VS 1) the CPU
 const ctlChoices = s => ['kb', ...['pad1', 'pad2'].slice(0, padsSeen()), ...(VERSUS(MODE) ? ['cpu'] : [])];
@@ -4349,7 +4363,11 @@ function drawWinner() {
 // ui.menu is the OPTIONS panel, opened from the main menu (it doesn't pause anything itself)
 function setMenu(open) { ui.menu = open; ui.picker = -1; for (let p = 0; p < 2; p++) holding[p] = null; }
 // the menu button (or Esc) in a round: back to the main menu with the round paused behind it; PLAY carries on
-function openMainMenu(fromNet) { held.clear(); setMenu(false); menuFromLive(); ui.title = true; ui.picker = -1; ui.resume = true; paused = true; for (let p = 0; p < 2; p++) holding[p] = null; if (!fromNet) netPause(true); }
+function openMainMenu(fromNet) {
+  // (let go of every trigger: online, the guest tells the host it has - user Oct 25, a machine gun kept firing)
+  mgHold[0] = mgHold[1] = false; diveHold[0] = diveHold[1] = 0; for (const pl of planes) if (pl) pl.mg = false;
+  if (NET.role === 'guest' && LINK.conn) linkSend({ t: 'ctl', s: ctlState(0) });
+  held.clear(); setMenu(false); menuFromLive(); ui.title = true; ui.picker = -1; ui.resume = true; paused = true; for (let p = 0; p < 2; p++) holding[p] = null; if (!fromNet) netPause(true); }
 function restartGame() {
   if (NET.role === 'guest') { linkSend({ t: 'again' }); return; }            // (online: the host starts the next round for everyone)
   if (LINK.hosting && !LINK.starting && linkGuests().some(g => g.side === 0 || g.side === 1)) { linkStartRound(); return; }
