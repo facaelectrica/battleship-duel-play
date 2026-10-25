@@ -1066,6 +1066,7 @@ function buildSea() {
   }
   sharks = [];
   for (let i = 0; i < Math.round(5 * WORLD_W / (VIEW_W * 3)); i++) sharks.push({ x: rnd(0.1, 0.9) * WORLD_W, y: 0, dir: Math.random() < 0.5 ? 1 : -1, speed: rnd(16, 26), turnT: rnd(8, 18), turn: 0, ph: Math.random() * 6 });
+  buildReef();                                            // (the floor's rocks, corals and the ridges behind)
   for (const k of sharks) k.y = rnd(WATER_Y + 90, seabedY(k.x) - 50);
   plants = [];
   let x = 20;
@@ -1078,7 +1079,7 @@ function buildSea() {
     const ht = kind === 'kelp' ? rnd(28, 70) * (1 + 1.1 * df) : rnd(8, 18) * (1 + 0.5 * df);
     plants.push({ x, kind, h: ht, h0: ht, seg: 0, ph: Math.random() * 6, n: 3 + Math.floor(Math.random() * 4),
       rw, rh: rw * rnd(0.45, 0.75), rs: Math.random() * 100 });
-    x += (kind === 'kelp' ? rnd(40, 110) : rnd(18, 60)) / (1 + 3.2 * df);   // denser the deeper it gets
+    x += (kind === 'kelp' ? rnd(40, 110) : rnd(18, 60)) / (1 + 1.6 * df);   // denser the deeper it gets (less than it was: the corals and rocks show)
   }
   // clouds: low horizon streaks, towering cumulus, mid-sky heaps and small puffs.
   // Each shows up past its own weather threshold, so the sky fills as the slider moves.
@@ -1403,7 +1404,9 @@ function bedDrop(x) {
   const zz = (cell, i0) => { const u = x / cell, i = Math.floor(u), f = u - i; return hash(i * 1.37 + i0) * (1 - f) + hash((i + 1) * 1.37 + i0) * f - 0.5; };
   return Math.max(0, drop + r * (110 * zz(310, 11.3) + 42 * zz(85, 57.1)));
 }
-function seabedY(x) { return SEABED_Y + bedDrop(x) + 1.5 * Math.sin(x * 0.013) + Math.sin(x * 0.041 + 1); }
+// the sand, and the floor: the sand, or the top of a rock formation standing on it (buildReef)
+function sandY(x) { return SEABED_Y + bedDrop(x) + 1.5 * Math.sin(x * 0.013) + Math.sin(x * 0.041 + 1); }
+function seabedY(x) { const s = sandY(x); return rockForms.length ? Math.min(s, rockTopY(x)) : s; }
 
 function shipLocalX(sh, sx) { return (sh.facing < 0 ? sx - SHIP_PIVOT_X : SHIP_PIVOT_X - sx) * SHIP_K; }
 function shipPoint(sh, sx, sy) {
@@ -2123,7 +2126,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 24 22:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 24 23:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -5699,7 +5702,25 @@ function stepSub(sb, dt) {
       const vmax = Math.sqrt(2 * DOCK_DECEL * Math.max(dist, 0)) + 6;
       if (vToward > vmax) sb.vx += (vmax * d.dir - sb.vx) * Math.min(1, 5 * dt);
     }
+    const xPrev = sb.x;
     sb.x = clamp(sb.x + sb.vx * dt, 30, WORLD_W - 30);
+    // a rock in her way (user Oct 24 night: the deep's formations are solid): her bow can't go into it. She stops
+    // against it - holed if she hit it hard - and has to rise over it or go round
+    if (rockForms.length && sb.vx) {
+      const s = Math.sign(sb.vx), bx = sb.x + s * SUB_L * 0.47;
+      // (only rock stops her: the sand's ups and downs she rides over)
+      const rt = rockTopY(bx);
+      if (rt < sandY(bx) && rt - (SUB_KEEL_ROW - SUB_WL_ROW) * SUB_K + 1 < sb.y - 5) {
+        const speed = Math.abs(sb.vx);
+        sb.x = xPrev; sb.vx = 0; sb.blockT = 1; sb.blockTop = seabedY(bx);
+        if (speed > 22 && !((sb.bumpT || 0) > 0)) {
+          sb.bumpT = 1.4;
+          const cx = sb.x + s * SUB_L * 0.48, u = clamp((cx - (sb.x - SUB_L / 2)) / SUB_L, 0, 0.999);
+          hitSub(sb, Math.floor(u * SUB_SECTIONS), cx, sb.y, true);
+          crashFx(cx, sb.y, speed);
+        } else if (speed > 6) kickDust(bx, 14, 0.4);
+      }
+    }
     { const lim = enemyLimit(sb.id, SUB_L / 2), ed = homeDock[1 - sb.id].dir; if ((sb.x - lim) * ed > 0) { sb.x = lim; if (sb.vx * ed > 0) sb.vx = 0; } }
     // her own harbour: reaching the end of the pier heading in takes her home through her gate
     if ((sb.x - d.subIn) * d.dir >= -0.5 && (sb.auto === 'home' || sb.vx * d.dir > 0)) {
@@ -5728,7 +5749,8 @@ function stepSub(sb, dt) {
   }
   sb.y += sb.vy * dt;
   subRam(sb, dt);
-  const floor = subMaxY(sb.x);
+  // (the floor under her whole length: a narrow spire under her bow or stern holds her up too)
+  const floor = Math.min(subMaxY(sb.x - SUB_L * 0.4), subMaxY(sb.x), subMaxY(sb.x + SUB_L * 0.4));
   if (sb.y >= floor) {
     // touching bottom: a thump of sand where she lands, and a trail of it when she drags along
     if (sb.vy > 3) { kickDust(sb.x, SUB_L * 0.42, clamp(sb.vy / 22, 0.35, 1)); scatterBed(sb.x, SUB_L * 0.45, clamp(sb.vy / 25, 0.3, 0.9)); if (sb.vy > 10) shakeAt(3, sb.x); }
@@ -11926,13 +11948,15 @@ function renderObjects() {
   drawRays(false);
   ot = ema('obRays', ot);
   // distant ridges first: each layer further back is closer to the colour of the water
-  drawRidges([[0.45, SEABED_Y - 118, 70, '#2a6fd4', 1.0], [0.6, SEABED_Y - 82, 46, '#2160c6', 1.7], [0.72, SEABED_Y - 50, 30, '#1a52b4', 2.6]]);
+  drawReefStrips();                                       // (the deep beyond: layers of ridges, user Oct 24 night)
   drawTiles(img.seabedBack, img.seabedBackFlip, SEABED_BACK_P, SEABED_BACK_TOP, SEABED_BACK_K, null);
   drawSeaLife();
   ot = ema('obBack', ot);
   for (const sb of oldSubs) if (sb.parts) drawSubParts(sb);
   for (const sb of subs) if (sb.parts) drawSubParts(sb);
+  drawRockForms(x0, x1);                                  // (standing in the sand: its foot is hidden under it)
   drawTiles(img.seabed, img.seabedFlip, 1, SEABED_TOP, SEABED_K, '#3a3122');   // (and the ground under the sand)
+  drawReefItems(reef, x0, x1);                            // (boulders, corals, sponges)
   drawAlgae(x0, x1);
   // spent shells half-sunk in the sand
   for (const d of duds) {
@@ -11944,6 +11968,7 @@ function renderObjects() {
   }
   drawTorpWrecks(x0, x1);
   for (const d of docks) { drawHarbourBack(d, x0, x1); drawHarbourFront(d, x0, x1); }
+  drawReefItems(coastFront, x0, x1);                      // (boulders in front of the pier's pillars)
   for (const b of buoys) drawBuoy(b, x0, x1);
   for (const b of blood) if (b.x > x0 - 4 && b.x < x1 + 4) drawBlood(b);
   for (const d of debris) if (d.state === 2) drawDebris(d, x0, x1);
@@ -11991,7 +12016,7 @@ function renderObjects() {
   const sso = E.sunset, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12);
   over.addColorStop(0, rgbs(mix3([70, 160, 255], [150, 100, 170], sso), 0.3 + ov)); over.addColorStop(0.35 * oz, rgbs(mix3([30, 100, 220], [90, 70, 150], sso), 0.4 + ov));
   over.addColorStop(0.75 * oz, rgbs(mix3([14, 50, 150], [44, 40, 104], sso), 0.55 + ov)); over.addColorStop(oz, rgbs(mix3([6, 24, 80], [22, 20, 58], sso), 0.72 + ov));
-  over.addColorStop(1, rgbs(mix3([2, 10, 36], [10, 9, 30], sso), Math.min(0.95, 0.84 + ov)));   // (the deep floor: dim)
+  over.addColorStop(1, rgbs(mix3([2, 10, 36], [10, 9, 30], sso), Math.min(0.95, 0.74 + ov)));   // (the deep floor: dim, but its rocks still read)
   C.fillStyle = over;
   fillBelowSurface(0, Bt);
   ot = ema('obOver', ot);
@@ -12586,61 +12611,6 @@ function glowDisc(cx, cy, R, col, a) {
   C.drawImage(c, Math.floor(cx / PB) * PB - r3 - PB, Math.floor(cy / PB) * PB - r3 - PB);
   C.globalAlpha = ga;
 }
-// A rolling silhouette band of the seabed, drawn in pixel steps with a parallax factor.
-// The three ridges at once, far to near, each hiding what is below its own top: only the part of each that
-// shows is written (into the pixel layer), which is the same picture as painting them one over the other
-function drawRidges(specs) {
-  if (!BATCH) { for (const sp of specs) drawRidge(...sp); return; }
-  const step = PB, by = bh + 4, n = specs.length, tops = new Int32Array(n);
-  let any = false;
-  for (const sp of specs) if (PY(sp[1] - sp[2]) <= bh) any = true;    // (the floor only goes deeper from there)
-  if (!any) return;
-  const last = new Int32Array(n).fill(-1), runC = new Int32Array(n), runW = new Int32Array(n);
-  const flushRuns = () => {
-    for (let i = 0; i < n; i++) {
-      if (runW[i] <= 0) continue;
-      let bot = by;                                        // the nearer ridges cover everything below their tops
-      for (let j = i + 1; j < n; j++) if (last[j] < bot) bot = last[j];
-      if (last[i] < bot) plRect(specs[i][3], runC[i], last[i], runW[i], bot - last[i]);
-      runW[i] = 0;
-    }
-  };
-  for (let c = -step; c < VWP + step; c += step) {
-    for (let i = 0; i < n; i++) {
-      const [par, baseY, amp, , seed] = specs[i], off = parRef * (1 - par);
-      const wx = (c + CAMPX) / SV - off;
-      const h = amp * (0.55 * Math.sin(wx * 0.0042 + seed) + 0.3 * Math.sin(wx * 0.011 + seed * 2.3) + 0.15 * Math.sin(wx * 0.031 + seed * 5.1));
-      // (they sink with the floor in front of them: as deep as the near floor at this column of the screen)
-      const dr = bedDrop((c + CAMPX) / SV);
-      tops[i] = PY(baseY - amp + dr) > bh ? 1e9 : Math.floor(PY(baseY - h + dr) / step) * step;
-    }
-    const w = c + step > VWP + step ? Math.ceil((VWP + step - c) / step) * step : step;
-    // columns whose bands are all the same as the last column's extend its rectangles (fewer, wider writes)
-    let same = c > -step;
-    for (let i = 0; i < n && same; i++) if (tops[i] !== last[i]) same = false;
-    if (same) { for (let i = 0; i < n; i++) runW[i] += w; continue; }
-    flushRuns();
-    for (let i = 0; i < n; i++) { last[i] = tops[i]; runC[i] = c; runW[i] = w; }
-  }
-  flushRuns();
-  plFlush();
-}
-function drawRidge(par, baseY, amp, col, seed) {
-  const off = parRef * (1 - par), step = PB;
-  const by = bh + 4;
-  if (PY(baseY - amp) > bh) return;
-  C.fillStyle = col;
-  let runC = -step, runY = null;
-  for (let c = -step; c < VWP + step; c += step) {
-    const wx = (c + CAMPX) / SV - off;
-    const h = amp * (0.55 * Math.sin(wx * 0.0042 + seed) + 0.3 * Math.sin(wx * 0.011 + seed * 2.3) + 0.15 * Math.sin(wx * 0.031 + seed * 5.1));
-    const y = Math.floor(PY(baseY - h + bedDrop((c + CAMPX) / SV)) / step) * step;
-    if (y === runY) continue;
-    if (runY !== null) C.fillRect(runC, runY, c - runC, by - runY);
-    runC = c; runY = y;
-  }
-  if (runY !== null) C.fillRect(runC, runY, Math.ceil((VWP + step - runC) / step) * step, by - runY);
-}
 // (fill: the colour to fill under the tiles with, down to the bottom of the view. The tiles follow the floor down
 // out to sea: each tile is drawn in upright strips, each strip as deep as the near floor at its column of the
 // screen, in whole particle blocks, so the sand steps down like the rest of the pixel art)
@@ -12725,6 +12695,206 @@ function drawAlgae(x0, x1) {
     plRectW('#3d9142', b.x - ux - 0.7, b.y - uy, 1.6, 1.6); plRectW('#4f9a3c', b.x - 0.7, b.y, 1.6, 1.6); plRectW('#3d9142', b.x + ux - 0.7, b.y + uy, 1.6, 1.6);
   }
   plFlush();
+}
+
+/* ================================================================
+   The sea floor's dressing (user Oct 24 night): by the coast big boulders (some in front of the pier's pillars),
+   then open sand with sea grass and a few stones, then, out in the deep, corals, sponges, kelp and big rock
+   formations - solid, so a sub can't just run along the bottom. Behind it all, layers of underwater ridges
+   fading into the blue, so the deep goes on beyond the first plane as the land does above the sea.
+   Everything is laid out from a seed (the world's width), so an online guest gets the same floor as its host.
+   ================================================================ */
+const REEF_K = 1.24;                                  // world units a sprite pixel (as the seabed tiles)
+let reef = [], rockForms = [], coastFront = [], reefStrips = null;
+function seededRng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+// how far out from the nearer shore (a harbour's pier end); negative under the pier
+function shoreDist(x) { const half = (BED_B - BED_A) / 2; return half - Math.abs(x - (BED_A + BED_B) / 2); }
+// the rock formations' tops, where they stand (Infinity where there's none): part of the floor (seabedY)
+function rockTopY(x) {
+  let top = Infinity;
+  for (let i = 0; i < rockForms.length; i++) {
+    const f = rockForms[i];
+    if (x < f.x0) break;
+    if (x >= f.x1) continue;
+    const t = f.topW[Math.min(f.topW.length - 1, Math.floor((x - f.x0) / REEF_K))];
+    if (t < top) top = t;
+  }
+  return top;
+}
+const RK = { hi: [184, 192, 200], lit: [142, 152, 164], base: [108, 118, 132], sh: [76, 84, 98], dk: [52, 58, 70], ol: [30, 34, 44], moss: [84, 132, 78], moss2: [118, 164, 92] };
+const css3 = c => 'rgb(' + (c[0] | 0) + ',' + (c[1] | 0) + ',' + (c[2] | 0) + ')';
+// a rock's silhouette, W px wide: its top row per column (0 = top of the picture, H = the bottom)
+function rockProfile(W, H, kind, rnd1) {
+  const top = new Float32Array(W), peaks = [];
+  if (kind === 'spire') { const n = 1 + Math.floor(rnd1() * 3); for (let i = 0; i < n; i++) peaks.push([0.2 + rnd1() * 0.6, 0.08 + rnd1() * 0.12, 0.55 + rnd1() * 0.45]); }
+  for (let c = 0; c < W; c++) {
+    const u = (c + 0.5) / W, e = 1 - Math.abs(2 * u - 1);
+    let h;
+    if (kind === 'mesa') h = Math.pow(Math.min(1, e * 4), 0.55) * (0.82 + 0.18 * Math.sin(u * 7 + rnd1() * 0.2));
+    else if (kind === 'spire') { h = 0.32 * Math.pow(e, 0.7); for (const [pu, pw, ph] of peaks) h = Math.max(h, ph * Math.exp(-Math.pow((u - pu) / pw, 2) * 2.2)); }
+    else h = Math.pow(Math.max(0, 1 - Math.pow(2 * u - 1, 2)), 0.62);          // a mound: a boulder
+    top[c] = H * (1 - h);
+  }
+  // rough edges in blocks: the top steps up and down a little, two pixels at a time
+  let n = 0, v = 0;
+  for (let c = 0; c < W; c++) { if (n-- <= 0) { n = 2 + Math.floor(rnd1() * 5); v = (rnd1() - 0.5) * H * 0.09; } top[c] = Math.min(H - 1, Math.max(0, Math.round((top[c] + v) / 2) * 2)); }
+  return top;
+}
+// paint a rock from its silhouette: lit on top and from the upper left, darker down and on the right, blocky
+// patches, a few cracks and strata, moss on the flatter tops; tone (0..1) dims it toward the water's blue
+function paintRock(W, H, top, rnd1, tone = 0, water = null, bold = false) {
+  const c = makeCanvas(W, H), x = c.getContext('2d'), mixW = col => water ? mix3(col, water, tone) : col;
+  const P = {}; for (const k in RK) P[k] = css3(mixW(RK[k]));
+  const cracks = []; for (let i = 0; i < Math.round(W / 22); i++) cracks.push([Math.floor(rnd1() * W), rnd1() * 0.6 + 0.2]);
+  const strata = 7 + Math.floor(rnd1() * 6), seed = rnd1() * 100;
+  for (let col = 0; col < W; col++) {
+    const t = top[col]; if (t >= H - 1) continue;
+    const slope = (top[Math.min(W - 1, col + 1)] - top[Math.max(0, col - 1)]) / 2;   // >0: the ground falls to the right
+    for (let y = Math.floor(t); y < H; y++) {
+      const dy = y - t, u = dy / Math.max(1, H - t);
+      let k = 'base';
+      if (dy < (bold ? 2 : 1)) k = 'ol';                                    // (the solid rocks: a heavier outline, a brighter rim)
+      else if (dy < (bold ? 5 : 3)) k = slope > 1.2 ? 'lit' : 'hi';
+      else {
+        const n = hash(Math.floor(col / 4) * 13.1 + Math.floor(y / 4) * 7.7 + seed);
+        k = n > 0.78 ? 'lit' : n < 0.18 ? 'sh' : 'base';
+        if (slope > 0.6 && dy < 12) k = 'sh';                                 // the face turned from the light
+        if (slope < -0.6 && dy < 10) k = 'lit';
+        if (u > 0.55) k = k === 'lit' ? 'base' : 'sh';
+        if (u > 0.8) k = 'dk';
+        if ((y + Math.floor(col * 0.15)) % strata === 0 && hash(col * 0.37 + y) < 0.6) k = 'dk';
+      }
+      x.fillStyle = P[k]; x.fillRect(col, y, 1, 1);
+    }
+    // moss on the flatter tops
+    if (Math.abs(slope) < 0.7 && hash(col * 1.7 + seed) < 0.35) { x.fillStyle = hash(col + seed) < 0.5 ? P.moss : P.moss2; x.fillRect(col, Math.floor(t), 1, hash(col * 3.1 + seed) < 0.5 ? 2 : 1); }
+  }
+  // (bold: a dark edge down its sides too, so it stands out against the ridges behind)
+  if (bold) { x.fillStyle = P.ol; for (let col = 0; col < W; col++) { const t = top[col], tl = col > 0 ? top[col - 1] : H, tr = col < W - 1 ? top[col + 1] : H; if (tl > t + 1) x.fillRect(col, Math.floor(t), 1, Math.ceil(tl - t)); if (tr > t + 1) x.fillRect(col, Math.floor(t), 1, Math.ceil(tr - t)); } }
+  // cracks: dark lines wandering down from the top
+  x.fillStyle = P.ol;
+  for (const [cx0, len] of cracks) { let cx = cx0, y = Math.floor(top[cx0]) + 3; const y1 = y + (H - y) * len; while (y < y1 && cx > 0 && cx < W - 1) { if (y > top[cx] + 2) x.fillRect(cx, y, 1, 2); y += 2; cx += hash(cx * 1.3 + y) < 0.33 ? -1 : hash(cx * 2.1 + y) < 0.5 ? 1 : 0; } }
+  return c;
+}
+// a coral or sponge, as a little sprite standing on its base (bottom middle)
+const CORAL_COLS = [[222, 108, 96], [236, 150, 72], [178, 102, 196], [226, 196, 92], [110, 186, 168], [210, 86, 132]];
+function paintCoral(kind, rnd1) {
+  const col = CORAL_COLS[Math.floor(rnd1() * CORAL_COLS.length)], dark = css3(col.map(v => v * 0.62)), mid = css3(col), lite = css3(col.map(v => Math.min(255, v * 1.25 + 20)));
+  if (kind === 'branch') {
+    const W = 26, H = 30, c = makeCanvas(W, H), x = c.getContext('2d');
+    const grow = (px, py, a, len, depth) => {
+      for (let i = 0; i < len; i++) { px += Math.cos(a); py -= Math.sin(a); x.fillStyle = depth > 2 ? mid : dark; x.fillRect(Math.round(px), Math.round(py), depth > 1 ? 1 : 2, 1); }
+      if (depth >= 4 || len < 3) { x.fillStyle = lite; x.fillRect(Math.round(px), Math.round(py) - 1, 1, 1); return; }
+      const n = 2 + (rnd1() < 0.3 ? 1 : 0);
+      for (let i = 0; i < n; i++) grow(px, py, a + (rnd1() - 0.5) * 1.3, len * (0.55 + rnd1() * 0.25), depth + 1);
+    };
+    grow(W / 2, H - 1, Math.PI / 2, 7 + rnd1() * 4, 1);
+    return c;
+  }
+  if (kind === 'fan') {
+    const W = 30, H = 26, c = makeCanvas(W, H), x = c.getContext('2d');
+    x.fillStyle = dark; x.fillRect(W / 2 - 1, H - 5, 2, 5);
+    for (let r = 4; r < H - 2; r += 1) for (let i = -10; i <= 10; i++) {
+      const a = Math.PI / 2 + i * 0.13, px = W / 2 + Math.cos(a) * r * 1.1, py = H - 4 - Math.sin(a) * r;
+      if (hash(i * 3.1 + r * 1.7) < (r % 4 === 0 ? 0.95 : i % 3 === 0 ? 0.9 : 0.2)) { x.fillStyle = r > H - 6 ? lite : mid; x.fillRect(Math.round(px), Math.round(py), 1, 1); }
+    }
+    return c;
+  }
+  if (kind === 'brain') {
+    const W = 22, H = 12, c = makeCanvas(W, H), x = c.getContext('2d');
+    for (let px = 0; px < W; px++) { const u = (px + 0.5) / W, h = Math.round(H * Math.sqrt(Math.max(0, 1 - Math.pow(2 * u - 1, 2)))); for (let y = H - h; y < H; y++) { const m = Math.sin(px * 0.9 + Math.sin(y * 0.8) * 2) > 0.3; x.fillStyle = y === H - h ? lite : m ? mid : dark; x.fillRect(px, y, 1, 1); } }
+    return c;
+  }
+  // tube sponges: a few upright tubes, open at the top
+  const W = 20, H = 26, c = makeCanvas(W, H), x = c.getContext('2d'), n = 2 + Math.floor(rnd1() * 3);
+  for (let i = 0; i < n; i++) {
+    const tx = 2 + Math.floor((W - 6) * (i + 0.5) / n + (rnd1() - 0.5) * 3), th = 10 + Math.floor(rnd1() * (H - 10));
+    x.fillStyle = mid; x.fillRect(tx, H - th, 3, th); x.fillStyle = dark; x.fillRect(tx + 2, H - th + 1, 1, th - 1);
+    x.fillStyle = lite; x.fillRect(tx, H - th, 3, 1); x.fillStyle = css3(col.map(v => v * 0.35)); x.fillRect(tx + 1, H - th, 1, 1);
+  }
+  return c;
+}
+// lay it all out (buildSea calls this after the plants and before anything is drawn)
+function buildReef() {
+  const R = seededRng(Math.round(WORLD_W) * 7919 + 17), lo = Math.max(0, VIS_L - 50), hi = Math.min(WORLD_W, VIS_R + 50);
+  reef = []; rockForms = []; coastFront = [];
+  // the big formations: out past the sand, every so often, taller in the deep
+  for (let x = lo + R() * 300; x < hi; x += 520 + R() * 520) {
+    const d = shoreDist(x);
+    if (d < 1000) continue;
+    const deep = clamp(bedDrop(x) / BED_EXTRA, 0, 1), kind = R() < 0.4 ? 'mesa' : R() < 0.6 ? 'spire' : 'mound';
+    const wU = (kind === 'spire' ? 120 : 170) + R() * 190, hU = (95 + R() * 90) * (0.65 + 0.7 * deep) * (kind === 'spire' ? 1.35 : 1);
+    const W = Math.round(wU / REEF_K), H = Math.round(hU / REEF_K) + 50, top = rockProfile(W, H - 50, kind, R);
+    const full = top;                                                       // (its bottom 50 px: down in the sand)
+    const sp = paintRock(W, H, full, R, 0, null, true);
+    let base = -Infinity; for (let c = 0; c < W; c += 4) base = Math.max(base, sandY(x - wU / 2 + c * REEF_K));
+    const baseY = base + 4, y0 = baseY - (H - 50) * REEF_K, topW = new Float32Array(W);
+    for (let c = 0; c < W; c++) topW[c] = y0 + full[c] * REEF_K;
+    rockForms.push({ x0: x - wU / 2, x1: x - wU / 2 + W * REEF_K, y0, sp, topW });
+  }
+  rockForms.sort((a, b) => a.x0 - b.x0);
+  // by the coast: boulders, big near the shore and smaller further out; those under the pier stand in front of
+  // its pillars (coastFront), the rest behind the boats
+  for (let x = lo + R() * 40; x < hi; x += 34 + R() * 80) {
+    const d = shoreDist(x);
+    if (d > 750 || rockTopY(x) < Infinity) continue;
+    const big = clamp(1 - d / 750, 0.15, 1), wU = (30 + R() * 90) * (0.35 + 1.4 * big), hU = wU * (0.45 + R() * 0.4);
+    const W = Math.max(6, Math.round(wU / REEF_K)), H = Math.max(5, Math.round(hU / REEF_K)), top = rockProfile(W, H, 'mound', R);
+    const it = { kind: 'rock', x, w: W * REEF_K, h: H * REEF_K, sp: paintRock(W, H + 2, top, R), sink: 2 + R() * 4 };
+    (d < 260 && R() < 0.75 ? coastFront : reef).push(it);
+  }
+  // out in the deep: corals and sponges, thicker the deeper; on the rocks' feet too
+  for (let x = lo + R() * 30; x < hi; x += 26 + R() * 70) {
+    const d = shoreDist(x);
+    if (d < 1300 + R() * 300) continue;
+    if (R() > 0.35 + 0.5 * clamp((d - 1300) / 1500, 0, 1)) continue;
+    const k = R(), kind = k < 0.35 ? 'branch' : k < 0.55 ? 'fan' : k < 0.75 ? 'brain' : 'tube';
+    reef.push({ kind, x, sp: paintCoral(kind, R), s: 0.8 + R() * 0.7, sink: 1 });
+  }
+  reef.sort((a, b) => a.x - b.x); coastFront.sort((a, b) => a.x - b.x);
+  reefStrips = null;                                   // (the ridges behind: made again for this world's light)
+}
+// the sprites, standing on the floor (rocks sunk into the sand a little), drawn as pixels at this zoom
+function drawReefItems(list, x0, x1) {
+  const ga = C.globalAlpha;
+  for (const it of list) {
+    if (it.x < x0 - 120 || it.x > x1 + 120) continue;
+    const k = REEF_K * SV * (it.s || 1), w = Math.max(1, Math.round(it.sp.width * k)), h = Math.max(1, Math.round(it.sp.height * k));
+    const base = seabedY(it.x) + (it.sink || 0);
+    C.drawImage(it.sp, Math.round(PX(it.x) - w / 2), Math.round(PY(base) - h), w, h);
+  }
+  C.globalAlpha = ga;
+}
+function drawRockForms(x0, x1) {
+  for (const f of rockForms) {
+    if (f.x1 < x0 - 40 || f.x0 > x1 + 40) continue;
+    const k = REEF_K * SV, X = Math.round(PX(f.x0)), Y = Math.round(PY(f.y0));
+    C.drawImage(f.sp, X, Y, Math.round(PX(f.x1)) - X, Math.round(f.sp.height * k));
+  }
+}
+/* The deep beyond: three ridges of rock, each further off a little bluer and fainter, each its own tileable strip
+   of mesas, spires and broken slopes (no smooth waves), drawn in parallax and sinking with the floor in front. */
+const REEF_STRIPS = [[0.45, 118, 72, 0.78], [0.6, 84, 56, 0.64], [0.72, 52, 42, 0.5]];   // [parallax, how far above the floor its base is, height, how much of the water's blue]
+function buildReefStrips() {
+  const water = [30, 88, 170], R = seededRng(4242);
+  reefStrips = REEF_STRIPS.map(([p, above, hU, tone], li) => {
+    const W = 900, H = Math.round(hU / REEF_K * 2.2) + 40, top = new Float32Array(W);
+    // a tileable skyline: a few long swells (whole periods across the strip) and blocky formations on top
+    const ph = [R() * 6, R() * 6, R() * 6];
+    for (let c = 0; c < W; c++) { const u = c / W * Math.PI * 2; top[c] = H * 0.55 - (Math.sin(u * 2 + ph[0]) * 0.12 + Math.sin(u * 5 + ph[1]) * 0.07 + Math.sin(u * 11 + ph[2]) * 0.03) * H; }
+    const nF = 5 + li * 2;
+    for (let i = 0; i < nF; i++) {
+      const cx = R() * W, ww = 20 + R() * 90, hh = H * (0.15 + R() * 0.35), kind = R() < 0.4 ? 'mesa' : R() < 0.5 ? 'spire' : 'mound', prof = rockProfile(Math.round(ww), 100, kind, R);
+      for (let j = 0; j < prof.length; j++) { const c = ((Math.round(cx - ww / 2) + j) % W + W) % W, t = top[c] - (1 - prof[j] / 100) * hh; if (t < top[c]) top[c] = Math.max(2, t); }
+    }
+    const sp = paintRock(W, H, top, R, tone, water);
+    // the strip's colours, taken right down to its bottom row: under it, the same as its foot
+    return { p, above, sp, flip: flipCanvas(sp), k: REEF_K };
+  });
+}
+function drawReefStrips() {
+  if (!reefStrips) buildReefStrips();
+  for (const S of reefStrips) drawTiles(S.sp, S.flip, S.p, SEABED_Y - S.above - S.sp.height * S.k * 0.55, S.k, null);
 }
 
 function drawShip(sh, mode) {
@@ -15551,7 +15721,7 @@ async function start(data) {
     towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
-    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
+    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
     gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
