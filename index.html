@@ -1010,7 +1010,7 @@ function buildWorld(restore) {
   if (!LAND) buoys.push({ x: WORLD_W / 2, col: 'red', state: 'float', ph: Math.random() * 6 });   // marks the middle of the sea
   if (!restore) { ui.winner = null; ui.winT = 0; }
   towers.length = 0;
-  for (const d of homeDock) towers.push({ player: d.player, x: d.towerX, facing: -d.dir, hp: docks.includes(d) ? TW_HP : 0, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0 });
+  for (const d of homeDock) towers.push({ player: d.player, x: d.towerX, facing: -d.dir, hp: docks.includes(d) ? TW_HP : 0, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0, pg: docks.includes(d) ? makePierGun(d) : null });
 
   ships.length = 0;
   for (let p = 0; p < 2; p++) ships.push(makeShip(p, homeDock[p].berth, -homeDock[p].dir, homeDock[p]));
@@ -1634,10 +1634,7 @@ function elevMin(p) {
   if (controlling(p) === 'heli') return -80;                 // (LAND TEST: the helicopter's nose gun, well down)
   if (controlling(p) === 'tank') return -6;
   if (controlling(p) !== 'tower') return ELEV_MIN;
-  const tw = towers[p], d = homeDock[p], [px, py] = towerPivot(tw);
-  const boxTop = DECK_Y - 4, dist = Math.abs(d.quay - px) - TW.BARREL;
-  const lim = dist < 4 ? 25 : Math.atan2(boxTop - py, dist) * 180 / Math.PI - 3;
-  return -clamp(lim, 0, 50);              // steep enough to drop shells on a ship right off your own quay
+  return -15;                             // (user Oct 25: down to 15 below, for subs close to the dock; your own pier your rounds pass)
 }
 const gunOf = sh => sh.gun || guns[sh.id];      // (a STORY raider carries its own gun)
 function activeGun(p) { const m = controlling(p); return m === 'ship' || m === 'tank' || m === 'heli' ? guns[p] : tguns[p]; }
@@ -1664,7 +1661,7 @@ function holdsFor(p, dt) {
     if (mgHold[p] && (m === 'ship' || m === 'tower' || m === 'tank') && (!ui.menu || NET.remote)) {
       const g = m === 'ship' || m === 'tank' ? guns[p] : tguns[p];
       g.mgT = (g.mgT || 0) - dt;
-      while (g.mgT <= 0) { g.mgT += MG_RATE; if (m === 'ship') shipMG(ships[p]); else if (m === 'tank') tankMG(tanks[p]); else fireTower(towers[p], true); }
+      while (g.mgT <= 0) { g.mgT += MG_RATE; if (m === 'ship') shipMG(ships[p]); else if (m === 'tank') tankMG(tanks[p]); else { fireTower(towers[p], true); firePierGun(towers[p]); } }
     } else { if ((m === 'ship' || m === 'tank') && guns[p]) guns[p].mgT = 0; if (m === 'tower' && tguns[p]) tguns[p].mgT = 0; if (m !== 'ship' && m !== 'tower' && m !== 'tank' && m !== 'heli') mgHold[p] = false; }
     const h = holding[p];
     if (!h) return;
@@ -1675,7 +1672,7 @@ function holdsFor(p, dt) {
 
 function unitFacing(p) { return crew[p].mode === 'tower' ? towers[p].facing : ships[p].facing; }
 // the battleship's turrets swing right round (up to 180 degrees, firing astern); the tower's gun to straight up
-function elevMax(p) { const m = crew[p].mode; return m === 'ship' || m === 'tank' ? 180 : m === 'heli' ? 25 : ELEV_MAX; }
+function elevMax(p) { const m = crew[p].mode; return m === 'ship' || m === 'tank' || m === 'tower' ? 180 : m === 'heli' ? 25 : ELEV_MAX; }   // (the tower right round too, user Oct 25: planes going the other way)
 const SUB_TURN = 140;                                        // world units of depth per turn of the (keyboard) dive wheel
 // the keyboard's dive keys turn an imaginary wheel: the sub's target depth follows
 function turnWheel(p, degs) {
@@ -2112,6 +2109,7 @@ function netApply(S) {
       if (pl && f && pl.state === 'fly' && f.state === 'down') downPlane(pl);
       const tw = towers[p], t = S.towers[p];
       if (tw && t && tw.hp > 0 && t.hp <= 0) { tw.hp = 0; crumbleTower(tw); }
+      if (tw && t && tw.pg && t.pg && tw.pg.hp > 0 && t.pg.hp <= 0) killPierGun(tw);   // (the pier gun destroyed: its blast here too)
       const dk = homeDock[p], k = S.docks[p];
       if (dk && k) k.pillars.forEach((b, i) => { const q = dk.pillars[i]; if (b && q && !q.broken) breakPillar(dk, i, (q.x0 + q.x1) / 2, WATER_Y + 120); });
     }
@@ -2159,7 +2157,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 12:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 12:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7166,6 +7164,7 @@ function planeCrash(pl) {
   const pts = [[pl.x, pl.y + 5], [pl.x + ux * 30, pl.y + uy * 30 + 2], [pl.x - ux * 26, pl.y - uy * 26]];
   let what = null, X = pl.x, Y = pl.y;
   for (const [x, y] of pts) {
+    for (const tw of towers) if (!what && tw.player !== p && pierGunHit(tw, x, y)) { what = 'land'; hurtPierGun(tw, 2, x, y); }
     for (const tw of towers) if (!what && tw.player !== p && towerHit(tw, x, y)) { what = 'land'; towerScorch(tw, x, y, 17); if (tw.hp > 0) { tw.hp -= 1; noteHit(tw.player, 'tower'); if (tw.hp <= 0) crumbleTower(tw); } }   // (one hit, like a shell)
     for (const sh of ships) if (!what && sh.state === 'afloat' && sh.id !== p) {
       const sec = hitTest(sh, x, y);
@@ -8564,6 +8563,7 @@ function stepShells(dt) {
         done = true; break;
       }
     }
+    if (!done) for (const tw of towers) if (tw.player !== s.owner && pierGunHit(tw, s.x, s.y)) { hurtPierGun(tw, 1, s.x, s.y); sectionBlast(s.x, s.y, 0.6, 0); done = true; break; }
     if (!done && s.age > 0.35) for (const sb of sailboats) if (sb.state === 'sail' && sailHit(sb, s.x, s.y)) { sinkSailboat(sb, s.x, s.y, s.vx); done = true; break; }
     if (!done && s.age > 0.35) for (const sb of sailboats) if (sailWreckHit(sb, s.x, s.y)) { smashSailboat(sb, s.x, s.y, 2); impact(s.x, s.y); done = true; break; }
     if (!done) for (const b of buoys) if (b.player !== s.owner && buoyHit(b, s.x, s.y)) { destroyBuoy(b, s.x, s.y); done = true; break; }   // (your own buoy your shells pass)
@@ -8661,6 +8661,7 @@ function stepShells(dt) {
       if ((tw.soot = (tw.soot || 0) + 1) % 4 === 0) towerScorch(tw, b.x, b.y, 3.2);      // (and a smudge of soot every few rounds)
       done = true; break;
     }
+    if (!done) for (const tw of towers) if (tw.player !== b.owner && pierGunHit(tw, b.x, b.y)) { hurtPierGun(tw, 1 / 6, b.x, b.y); done = true; break; }
     if (!done) for (const d of docks) if (d.player !== b.owner && harbourHit(d, b.x, b.y)) { spawnSparks(b.x, b.y, 3, 100); done = true; break; }
     // a submarine's hull takes them the way the battleship's does: twenty rounds make a hole
     if (!done) for (const sb of subs) { if (sb.id === b.owner) continue; const sec = subHitTest(sb, b.x, b.y); if (sec >= 0) { spawnSparks(b.x, b.y, 3, 100); noteHit(sb.id, 'sub'); sb.chip = (sb.chip || 0) + 0.05; if (sb.chip >= 1) { sb.chip = 0; hitSub(sb, sec, b.x, b.y); } done = true; break; } }
@@ -8779,6 +8780,93 @@ function splash(x, vx, vy) {
   for (let i = 0; i < 18; i++) addBubble(x + rnd(-8, 8), sy + rnd(4, 30), rnd(-20, 20), -rnd(10, 40), rnd(0.8, 2.6));
   scareFish(x, sy + 40, 160);
   scareBirds(x, sy, 130);
+}
+
+/* ================================================================
+   The pier gun (user Oct 25, with a sketch: gen/sea_src/pier_gun_oct25.png): the tower's second machine gun, a
+   twin-barrelled mount on the pier's deck between the tower and the far lamp. It turns with the tower's gun (its
+   angle from 15 below the horizon right round to firing back over the land, 180) and fires with the tower's
+   machine gun, its two barrels in turn. Like everything of yours it never hurts your own tower, boats or plane.
+   It takes five hits (a shell, bomb or missile is one, six machine-gun rounds are one, a plane crashing on it two),
+   and it goes when the pier comes down. Its state lives on the tower (tw.pg), so an online guest gets it with the
+   tower's (its place, _x and _y, isn't sent: each screen has it from its own pier).
+   ================================================================ */
+// (its size from the sketch: about as wide as the tower, barrels about half that)
+const PG_COL = 142, PG_HP = 5, PGK = 1.9, PG_BAR = 14 * PGK, PG_GAP = 2.2 * PGK;
+function makePierGun(d) { return { _x: d.ax(PG_COL), _y: DECK_Y, hp: PG_HP, chip: 0, flash: 0, alt: 0, boom: false }; }
+const pgOf = tw => (tw && tw.pg && tw.pg.hp > 0 && !LAND) ? tw.pg : null;
+// the pivot: on top of its round housing
+const pgPivot = pg => [pg._x, pg._y - 9 * PGK];
+function pierGunHit(tw, x, y) { const pg = tw && tw.pg; return !!pg && pg.hp > 0 && Math.abs(x - pg._x) < 11 * PGK && y > pg._y - 14 * PGK && y < pg._y + 1; }
+// a blow: n hits (fractions add up: the machine gun's rounds)
+function hurtPierGun(tw, n, x, y) {
+  const pg = tw.pg;
+  if (!pg || pg.hp <= 0 || netGuestHold()) return;
+  pg.chip += n;
+  spawnSparks(x, y, n >= 1 ? 10 : 3, 120);
+  while (pg.chip >= 1 && pg.hp > 0) { pg.chip -= 1; pg.hp--; noteHit(tw.player, 'tower'); }
+  if (pg.hp <= 0) killPierGun(tw);
+}
+function killPierGun(tw) {
+  const pg = tw.pg;
+  if (!pg) return;
+  pg.hp = 0;
+  if (pg.boom) return;
+  pg.boom = true;
+  if (SIM_ONLY) return;
+  sectionBlast(pg._x, pg._y - 6, 0.9, 0); spawnDebris(pg._x, pg._y - 6, 10, 0);
+  for (let k = 0; k < 6; k++) spawnSmoke(pg._x + rnd(-6, 6), pg._y - 8, { dark: 0.15, r: rnd(2.5, 4), grow: rnd(3, 5), lift: 22, vx: rnd(-6, 6), life: rnd(3, 5), alpha: 0.55 });
+}
+// one round from the barrel whose turn it is
+function firePierGun(tw) {
+  const pg = pgOf(tw);
+  if (!pg) return;
+  const gun = tguns[tw.player], el = gun.elev * Math.PI / 180, ux = Math.cos(el) * tw.facing, uy = -Math.sin(el), nx = -uy, ny = ux;
+  const [px, py] = pgPivot(pg), side = (pg.alt = 1 - pg.alt) ? 1 : -1;
+  const mx = px + ux * PG_BAR + nx * PG_GAP * side, my = py + uy * PG_BAR + ny * PG_GAP * side;
+  const sp = MG_SPEED * (0.75 + gun.power * 0.4), spread = rnd(-0.03, 0.03);
+  bullets.push({ x: mx, y: my, vx: (ux - uy * spread) * sp, vy: (uy + ux * spread) * sp, owner: tw.player, age: 0 });
+  pg.flash = 0.05; pg.fl = side;
+  if (pg.alt) sfxMG(mx);
+}
+// drawn on the pier's deck, in front of the harbour: two barrels out of a round steel housing on a plinth
+function drawPierGun(tw, d) {
+  const pg = tw && tw.pg;
+  if (!pg || LAND || d.pierGone && pg.hp > 0) return;
+  const [px, py] = pgPivot(pg), dead = pg.hp <= 0;
+  const el = dead ? -0.35 : tguns[tw.player].elev * Math.PI / 180, ux = Math.cos(el) * tw.facing, uy = -Math.sin(el), nx = -uy, ny = ux;
+  const tc = (img.teamCol && img.teamCol[tw.player]) || [180, 60, 50], k = dead ? 0.45 : 1, sh = c => css3(c.map(v => v * k));
+  // the barrels (behind the housing): dark steel, a lit line along each
+  for (const side of [-1, 1]) {
+    const L = dead ? PG_BAR * (side > 0 ? 0.6 : 0.9) : PG_BAR, ox = nx * PG_GAP * side, oy = ny * PG_GAP * side;
+    for (const [col, w, off] of [[[38, 40, 46], 2.2 * PGK, 0], [[118, 122, 130], 0.9 * PGK, -0.5 * PGK]]) {
+      C.fillStyle = sh(col);
+      for (let t = 2; t <= L; t += 0.6) rect(px + ux * t + ox + nx * off - w / 2, py + uy * t + oy + ny * off - w / 2, w, w);
+    }
+    if (!dead && pg.flash > 0 && pg.fl === side) { C.fillStyle = '#fff3b0'; rect(px + ux * (L + 3) + ox - 3, py + uy * (L + 3) + oy - 3, 6, 6); }
+  }
+  // the plinth: a squat block on the deck, then the round housing with a band of the team's colour
+  const K = PGK, B = 4.5 * K, u = 0.8 * K;
+  C.fillStyle = sh([30, 33, 38]); rect(pg._x - 11 * K, pg._y - B, 22 * K, B);
+  C.fillStyle = sh([92, 98, 106]); rect(pg._x - 10 * K, pg._y - 4 * K, 20 * K, 3 * K);
+  C.fillStyle = sh([128, 134, 142]); rect(pg._x - 10 * K, pg._y - 4 * K, 20 * K, u);
+  // (the housing from the bottom up: dark rim, the team's band, shaded steel, lit on top - the sketch's dome)
+  for (let yy = 0; yy < 8 * K; yy += u) {
+    const f = yy / (8 * K), r = 8 * K * Math.sqrt(Math.max(0, 1 - Math.pow(f + 0.05, 2)));
+    C.fillStyle = sh(f < 0.12 ? [30, 33, 38] : f > 0.78 ? [150, 156, 164] : f > 0.6 ? [112, 118, 126] : [84, 90, 98]);
+    rect(pg._x - r, pg._y - B - yy - u, r * 2, u);
+    if (f >= 0.3 && f < 0.46) { C.fillStyle = sh(tc.map(v => v * 0.8)); rect(pg._x - r, pg._y - B - yy - u, r * 2, u); }
+  }
+  if (dead && Math.random() < 0.08) spawnSmoke(pg._x + rnd(-6, 6), pg._y - 12 * PGK, { dark: 0.2, r: rnd(1.5, 3), grow: 3, lift: 18, vx: rnd(-4, 4), life: rnd(2, 3.5), alpha: 0.4 });
+}
+function stepPierGuns(dt) {
+  for (const tw of towers) {
+    const pg = tw.pg;
+    if (!pg) continue;
+    pg.flash = Math.max(0, pg.flash - dt);
+    const d = homeDock[tw.player];
+    if (pg.hp > 0 && d && d.pierGone) killPierGun(tw);       // (the pier came down: the gun with it)
+  }
 }
 
 const streaks = [];
@@ -9559,6 +9647,7 @@ function physics(dt) {
   stepSailboats(dt);
   for (const p of pieces) stepPiece(p, dt);
   stepShells(dt);
+  stepPierGuns(dt);
   time += dt;
 }
 // Effects that only look (sparks, spray, bubbles, debris, flames, birds, splashes, rings, the storm...) move
@@ -13859,6 +13948,7 @@ function drawHarbourFront(d, x0, x1) {
   blitRect(img.hangarArt[f], [ha, HANGAR_TOP, ha + HANGAR_W, HANGAR_BOT], HGR.K);
   const tw = towers[d.player];
   if (tw) drawTower(tw);
+  drawPierGun(tw, d);
   drawHarbourFlag(d);
 }
 // a flagpole on the hangar roof: your flag climbs while your boats are repaired
