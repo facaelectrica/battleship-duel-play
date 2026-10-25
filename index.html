@@ -357,12 +357,12 @@ function killFishNear(x, y, r) {
   for (const s of schools) {
     if (Math.abs(s.x - x) > r + 60 || Math.abs(s.y - y) > r + 60) continue;
     for (let i = s.fish.length - 1; i >= 0; i--) {
-      const f = s.fish[i], fx = s.x + f.dx * 0.6, fy = s.y + f.dy * 0.6, d = Math.hypot(fx - x, fy - y);
+      const f = s.fish[i], fx = f.x, fy = f.y, d = Math.hypot(fx - x, fy - y);
       if (d > r) continue;
       s.fish.splice(i, 1);
       if (deadFish.length > 120) deadFish.shift();
       const push = (1 - d / r) * 160 + 30, ux = (fx - x) / (d || 1), uy = (fy - y) / (d || 1);
-      deadFish.push({ type: s.type, dir: s.dir, x: fx, y: fy, vx: ux * push, vy: uy * push, rot: 0, w: rnd(-8, 8), t: 0, fade: 1, surf: false });
+      deadFish.push({ type: s.type, dir: f.face || s.dir, x: fx, y: fy, vx: ux * push, vy: uy * push, rot: 0, w: rnd(-8, 8), t: 0, fade: 1, surf: false });
     }
   }
   for (const sh of sharks) if (Math.hypot(sh.x - x, sh.y - y) < r * 1.5 && !sh.turn) sh.dir = sh.x < x ? -1 : 1;   // sharks turn away
@@ -471,9 +471,22 @@ function prepareArt() {
     img.hangarTops = artTops(copyCanvas(img.hangar));
   }
   img.towers = [];
+  // (user Oct 25: the black slot on the turret's side - where the old barrel came out of the art - read as a hole
+  // in the gun; it's painted over in the turret's own steel, taken from the same row just behind it)
+  function towerSlotFill(c) {
+    const x = c.getContext('2d'), id = x.getImageData(0, 0, TW.FW, 32), d = id.data;
+    for (let y = 11; y < 21; y++) for (let xx = 46; xx < 66; xx++) {
+      const i = (y * TW.FW + xx) * 4, L = 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2];
+      if (d[i + 3] < 200 || L > 42) continue;
+      const j = (y * TW.FW + 42) * 4, k = (Math.min(23, y + 9) * TW.FW + xx) * 4, src = 0.3 * d[j] + 0.59 * d[j + 1] > 30 ? j : k;
+      d[i] = d[src]; d[i + 1] = d[src + 1]; d[i + 2] = d[src + 2];
+    }
+    x.putImageData(id, 0, 0);
+  }
   for (let i = 0; i < TW.HITS; i++) {
     const c = makeCanvas(TW.FW, TW.FH);
     c.getContext('2d').drawImage(img.tower, i * TW.FW, 0, TW.FW, TW.FH, 0, 0, TW.FW, TW.FH);
+    towerSlotFill(c);
     img.towers.push({ [1]: c, [-1]: flipCanvas(c) });
   }
   // what's left standing once the tower has come down: the foot of the last drawing
@@ -605,13 +618,16 @@ let homeDock = [];       // each player's own harbour; in one player, player 2's
    right the sides swap, SWAP, and player 0's harbour is the one on the right. */
 const PREFS0 = (() => { try { return JSON.parse(localStorage.getItem('battleship-duel.prefs')) || {}; } catch (e) { return {}; } })();
 // the two-sided modes, where a side nobody picks is the CPU: BATTLE, and LAND TEST (user Oct 25)
-const VERSUS = m => m === 'duel' || m === 'land';
+// (CHILL too since Oct 25, user: two sides you can join either of; nobody loses there - see CHILL below)
+const VERSUS = m => m === 'duel' || m === 'land' || m === 'chill';
 let MODE = ['story', 'chill', 'duel', 'test', 'land'].includes(PREFS0.mode) ? PREFS0.mode : PREFS0.test ? 'test' : PREFS0.players === 1 ? 'chill' : 'duel';
 const CTLS = ['kb', 'kb2', 'pad1', 'pad2', 'touch', 'touch2', 'cpu', 'net', 'none'];
 const ctlPick = [0, 1].map(i => CTLS.includes((PREFS0.ctl || [])[i]) ? PREFS0.ctl[i] : i === 1 && PREFS0.vscpu ? 'cpu' : 'kb');   // per side: left, right
 const cpuLvSide = [0, 1].map(i => { const v = (PREFS0.cpuLv || [])[i]; return v === 0 || v === 2 ? v : v === 1 ? 1 : PREFS0.cpuLevel === 0 || PREFS0.cpuLevel === 2 ? PREFS0.cpuLevel : 1; });
 let STORY_LV = PREFS0.storyLv === 0 || PREFS0.storyLv === 2 ? PREFS0.storyLv : 1;
-let PLAYERS = 2, TEST = false, STORY = false, SWAP = false, LAND = false;   // (LAND: LAND TEST, user Oct 25)
+let PLAYERS = 2, TEST = false, STORY = false, SWAP = false, LAND = false, CHILL = false;   // (LAND: LAND TEST, user Oct 25)
+// (CHILL, user Oct 25: both harbours, a side for anyone who joins; towers mend themselves, no captains, no winner -
+// play on for ever)
 // the gamepads the browser can see right now (a pad shows up once a button on it has been pressed)
 let PADS_SEEN = 0;                                    // (counted once a frame, in pollPads)
 function countPads() { try { PADS_SEEN = Array.from((navigator.getGamepads && navigator.getGamepads()) || []).filter(Boolean).length; } catch (e) { PADS_SEEN = 0; } }
@@ -633,8 +649,8 @@ const TOUCH0 = (window.matchMedia && matchMedia('(pointer: coarse)').matches) ||
 // online play (see 'Player commands' further down): 'local', 'host', 'guest', or 'loop' (the tools' loopback)
 const NET = { role: window.__NET_ROLE || 'local', me: 0, send: null, log: null, lag: window.__NET_LAG != null ? window.__NET_LAG : 0.1, q: [], worldW: window.__NET_WORLDW || 0, events: [], lists: {}, side: window.__NET_ROLE === 'guest' ? 1 : 0 };   // (side: online, the side of the sea this screen's player is on)   // (__NET_ROLE: the test tools' loopback)
 function applyMode() {
-  PLAYERS = MODE === 'chill' || MODE === 'story' ? 1 : 2;
-  TEST = MODE === 'test'; STORY = MODE === 'story'; LAND = MODE === 'land';
+  PLAYERS = MODE === 'story' ? 1 : 2;
+  TEST = MODE === 'test'; STORY = MODE === 'story'; LAND = MODE === 'land'; CHILL = MODE === 'chill';
   // player 0 is a person when there is one: their harbour's side is SIDE(0) (online, a guest's is the side it picked)
   SWAP = NET.role === 'guest' ? NET.side === 1 : PLAYERS === 2 && !LOCALC(ctlFor(0)) && LOCALC(ctlFor(1));
   SLOTS.length = 0;
@@ -677,6 +693,8 @@ const debris = [], sparks = [], flashes = [], shells = [], bullets = [], smoke =
 let schools = [], sharks = [], plants = [], clouds = [];
 const guns = [0, 1].map(() => ({ elev: 28, power: 0.55, reload: 0, aimShow: 0, press: 0, rk: [0, 0], pk: [0, 0] }));
 const tguns = [0, 1].map(() => ({ elev: 22, power: 0.5, reload: 0, aimShow: 0, press: 0, mg: 0 }));
+// (LAND TEST: the helicopter's nose gun has its own angle and power, so turning it never moves the tank's turret)
+const hguns = [0, 1].map(() => ({ elev: -20, power: 0.6, reload: 0, aimShow: 0, press: 0, mgT: 0 }));
 const towers = [];
 const flagPick = [30, 140];           // Canada, Portugal (until the players pick their own; remembered between visits)
 // the players' picks (flags, one or two players) are kept in this browser between visits
@@ -848,7 +866,7 @@ const fleetWait = [{ ship: 0, sub: 0 }, { ship: 0, sub: 0 }];
 const CAPTAINS = 8, CAPT_FACES = 32;
 const captains = [[], []];          // { face, state: 'free' | 'out' | 'dead' | 'bones', veh }
 const captSel = [0, 0];             // the one who goes next
-const useCaptains = () => !TEST;
+const useCaptains = () => !TEST && !CHILL;
 // the faces that aren't light-skinned (from the art): each team is at most half light faces, and nobody appears twice
 const CAPT_DARKER = [1, 4, 8, 9, 12, 18, 20, 27, 30];
 function buildCaptains() {
@@ -1071,6 +1089,7 @@ function buildSea() {
       speed: rnd(8, 18), turnT: rnd(6, 20), flee: 0, fish, vy: 0,
     });
     const s = schools[schools.length - 1]; s.y = rnd(WATER_Y + 60, seabedY(s.x) - 40);
+    for (const f of s.fish) { f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; f.vx = s.dir * s.speed; f.vy = 0; f.face = s.dir; }
   }
   sharks = [];
   for (let i = 0; i < Math.round(5 * WORLD_W / (VIEW_W * 3)); i++) sharks.push({ x: rnd(0.1, 0.9) * WORLD_W, y: 0, dir: Math.random() < 0.5 ? 1 : -1, speed: rnd(16, 26), turnT: rnd(8, 18), turn: 0, ph: Math.random() * 6 });
@@ -1457,8 +1476,10 @@ function hitTest(sh, x, y) {
 // The defense tower stands on the block at the end of the pier: six drawings, intact to a skeleton of rebar
 // (sea to the right in the art). Each hit shows the next drawing; the sixth brings it down in pieces.
 const TW_HP = 10;                    // the tower's strength: ten shells bring it down (and that loses the round)
-const TW = { K: 0.5, FW: 136, FH: 300, BARREL: 21, THICK: 3.6, W: 52, HALF: 26, H: 146, BASE: DECK_Y, HITS: 6, STUMP: 46 };
-const TW_PIVOT = [[101, 17], [99, 17], [99, 16], [97, 16], [99, 17], [97, 18]];   // the gun's mantlet in each drawing
+const TW = { K: 0.5, FW: 136, FH: 300, BARREL: 34, THICK: 3.6, W: 52, HALF: 26, H: 146, BASE: DECK_Y, HITS: 6, STUMP: 46 };
+// (user Oct 25, with a picture: the barrel turns about the middle of the turret, and reaches out about the turret's
+// own width; it's drawn behind the turret, so only what clears the turret shows)
+const TW_PIVOT = [[69, 17], [69, 17], [69, 16], [68, 16], [69, 17], [68, 18]];   // the turret's middle in each drawing
 function towerFrame(t) { return clamp(Math.ceil((TW_HP - Math.max(t.hp, 1)) * (TW.HITS - 1) / (TW_HP - 1)), 0, TW.HITS - 1); }   // its six drawings across its ten hits
 function towerPivot(t) { const [px, py] = TW_PIVOT[towerFrame(t)]; return [t.x + t.facing * (px - TW.FW / 2) * TW.K, TW.BASE - (TW.FH - py) * TW.K]; }
 function towerHit(t, x, y) {
@@ -1637,10 +1658,10 @@ function elevMin(p) {
   return -15;                             // (user Oct 25: down to 15 below, for subs close to the dock; your own pier your rounds pass)
 }
 const gunOf = sh => sh.gun || guns[sh.id];      // (a STORY raider carries its own gun)
-function activeGun(p) { const m = controlling(p); return m === 'ship' || m === 'tank' || m === 'heli' ? guns[p] : tguns[p]; }
+function activeGun(p) { const m = controlling(p); return m === 'heli' ? hguns[p] : m === 'ship' || m === 'tank' ? guns[p] : tguns[p]; }
 
 
-function hasGuns(p) { const m = crew[p].mode; return m === 'ship' || m === 'tower' || m === 'tank'; }
+function hasGuns(p) { const m = crew[p].mode; return m === 'ship' || m === 'tower' || m === 'tank' || m === 'heli'; }
 function pressFire(p, k) {
   const m = controlling(p);
   sfxClick(gunCtl[p]);
@@ -1696,7 +1717,7 @@ function setScope(p, lv) { if (NET.remote) return; scopes[p].level = clamp(lv, 1
 // each vehicle remembers the zoom you last picked in it (keys, pad, pinch, wheel), for the rest of the round (user Oct
 // 24 night): back in it, the view comes back as you had it
 const vehZoom = [{}, {}];
-function noteVehZoom(p) { const m = crew[p] && crew[p].mode; if (m === 'ship' || m === 'sub' || m === 'tower' || m === 'plane' || m === 'sail') vehZoom[p][m] = scopes[p].level; }
+function noteVehZoom(p) { const m = crew[p] && crew[p].mode; if (m === 'ship' || m === 'sub' || m === 'tower' || m === 'plane' || m === 'sail' || m === 'tank' || m === 'heli') vehZoom[p][m] = scopes[p].level; }
 
 /* ================================================================
    Run slider: once you step off the ship at the dock, the speed
@@ -1816,7 +1837,7 @@ function layoutBoatCtl() {
 // can you step into it right now?
 function canTake(p, k) {
   if (takenByOther(p, k)) return false;                         // (a teammate online is driving it)
-  if (k === 'sail') return MODE === 'chill' && sailboats.some(b => b.state === 'sail');
+  if (k === 'sail') return CHILL;                                // (CHILL: your own yacht, or a new one out of your hangar)
   if (k === 'tower') return towerUsable(towers[p]);
   if (k === 'tank' || k === 'heli') {                            // (LAND TEST: standing, and a captain for it)
     const v = k === 'tank' ? tanks[p] : helis[p];
@@ -2157,7 +2178,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 12:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 14:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -2307,7 +2328,7 @@ function linkStartRound() {
 function roomSideOk(s) {
   const mode = liveMode();
   if (mode === 'story') return false;
-  return mode === 'chill' ? s === 0 : true;
+  return true;
 }
 // (the host) what a guest sends
 function linkFromGuest(g, m) {
@@ -2613,6 +2634,14 @@ function hudLayout(p) {
   }
   return { k, u, items, tabs, kit, caps, bottom: capB };
 }
+// the ANGLE tape and POWER slider are lit while the vehicle you're in can use them
+function aimLive(p) {
+  const m = crew[p].mode;
+  if (m === 'tower') return towerUsable(towers[p]);
+  if (m === 'tank') return !!tanks[p] && tanks[p].state === 'alive';
+  if (m === 'heli') return !!helis[p] && (helis[p].state === 'fly' || helis[p].state === 'landed');
+  return ships[p].state === 'afloat';
+}
 // the strip of the screen under the vehicle buttons (the minimap and the FPS counter sit below it)
 function hudTop() { return hudLayout(0).bottom; }
 // --- the state each control shows ---
@@ -2760,7 +2789,7 @@ function drawWeaponBtn(p, it, k, y, down) {
 // The ANGLE tape: the numbers slide under the fixed red pointers, a tick every degree and a number every five
 const TAPE_PPD = 15.6;                             // atlas pixels per degree: thirty degrees across the tape
 function drawAngleDial(p, it, k) {
-  const g = activeGun(p), live = crew[p].mode === 'tower' ? towerUsable(towers[p]) : ships[p].state === 'afloat';
+  const g = activeGun(p), live = aimLive(p);
   ug.globalAlpha = live ? 1 : 0.45;
   hudImg('dial', it.x, it.y, it.w, it.h);
   const [t0, t1, t2, t3] = HUDI.spots.tape;
@@ -2796,7 +2825,7 @@ function drawAngleDial(p, it, k) {
   ug.globalAlpha = 1;
 }
 function drawPowerSlider(p, it, k) {
-  const g = activeGun(p), live = crew[p].mode === 'tower' ? towerUsable(towers[p]) : ships[p].state === 'afloat';
+  const g = activeGun(p), live = aimLive(p);
   ug.globalAlpha = live ? 1 : 0.45;
   hudImg('power', it.x, it.y, it.w, it.h);
   const [a0, a1, a2, a3] = HUDI.spots.track, R = HUDI.spots.knobR * k;
@@ -3919,8 +3948,8 @@ const menuSel = { mode: 'duel', ctl: ['kb', 'kb'], cpuLv: [1, 1], storyLv: 1, cp
 // the modes on the menu (TEST is in OPTIONS now, user Oct 24); a side you can join in each, and everyone's side there
 const MENU_MODES = ['story', 'chill', 'duel', 'land'];   // (LAND TEST: user Oct 25)
 // (STORY and CHILL: everyone on the left, player one's side, where their harbour is - user Oct 24)
-const mJoinable = s => menuSel.mode === 'story' || menuSel.mode === 'chill' ? s === 0 : true;
-const mSideOf = q => menuSel.mode === 'story' || menuSel.mode === 'chill' ? 0 : q.side;
+const mJoinable = s => menuSel.mode === 'story' ? s === 0 : true;
+const mSideOf = q => menuSel.mode === 'story' ? 0 : q.side;
 const mOn = s => menuSel.roster.filter(q => mSideOf(q) === s);
 const DEV_NAMES = { kb: 'KEYBOARD', kb2: 'ARROW KEYS', pad1: 'CONTROLLER 1', pad2: 'CONTROLLER 2', touch: 'TOUCH', touch2: 'TOUCH 2' };
 // JOIN under side s, pressed with dev: you join it; pressed again on your own side, you leave it
@@ -4694,7 +4723,7 @@ window.addEventListener('keydown', e => {
   keyDo(s, p => {
     const c = crew[p];
     if (c.mode === 'plane') { act(p, 'planeDir', d); return; }
-    if (c.mode !== 'ship' && c.mode !== 'sub' && c.mode !== 'sail') return;
+    if (c.mode !== 'ship' && c.mode !== 'sub' && c.mode !== 'sail' && c.mode !== 'tank' && c.mode !== 'heli') return;
     const t = telegraphs[p];
     act(p, 'drive', clamp(Math.round(t.idx / 3) + d, 0, 2) * 3);      // left, stop, right
   });
@@ -4917,14 +4946,14 @@ function pollPads(dt) {
       const lx = ax(0), ly = ax(1), m = crew[p].mode;
       // left / right: in a vehicle, full ahead that way at once (it turns round), never a stop on the way - the
       // stick pressed in (L3) stops (user Oct 24). Not driving: they look around. The tower: see the sticks below
-      const drives = m === 'ship' || m === 'sub' || m === 'plane' || m === 'sail';
+      const drives = m === 'ship' || m === 'sub' || m === 'plane' || m === 'sail' || m === 'tank' || m === 'heli';
       if (drives && !ui.menu) {
         const dl = edge('dl', lx < -0.5), dr = edge('dr', lx > 0.5);
         if (dl === 1) { if (m === 'plane') act(p, 'planeDir', -1); else act(p, 'drive', 0); }
         if (dr === 1) { if (m === 'plane') act(p, 'planeDir', 1); else act(p, 'drive', 6); }
       } else if (m !== 'tower') { want.left = lx < -0.5; want.right = lx > 0.5; st.dl = st.dr = false; }
       // up / down: the sub's depth and the plane's climb
-      if (m === 'sub' || m === 'plane' || looking(p)) { want.up = ly < -0.5; want.down = ly > 0.5; }   // (and looking around)
+      if (m === 'sub' || m === 'plane' || m === 'heli' || looking(p)) { want.up = ly < -0.5; want.down = ly > 0.5; }   // (and looking around)
       if (edge('start', btn(9)) === 1) padKey('Escape', true);
       if (!ui.menu) {
         // a vehicle picked with the shoulders: A launches it (and that press doesn't fire anything)
@@ -4933,7 +4962,7 @@ function pollPads(dt) {
         if (aE === 1 && padPick[p]) { padLaunch(p); st.aEaten = true; }
         if (!btn(0)) st.aEaten = false;
         // the left stick pressed in (L3): STOP - the plane circles on the spot, a boat stops (user Oct 24)
-        if (edge('l3', btn(10)) === 1) { const m2 = crew[p].mode; if (m2 === 'plane') act(p, 'planeDir', 0); else if (m2 === 'ship' || m2 === 'sub' || m2 === 'sail') act(p, 'drive', 3); }
+        if (edge('l3', btn(10)) === 1) { const m2 = crew[p].mode; if (m2 === 'plane') act(p, 'planeDir', 0); else if (m2 === 'ship' || m2 === 'sub' || m2 === 'sail' || m2 === 'tank' || m2 === 'heli') act(p, 'drive', 3); }
         const e1 = edge('w1', (btn(0) && !st.aEaten) || btn(7)), e2 = edge('w2', btn(1) || btn(6)), e3 = edge('w3', btn(2));
         if (e1) padWeapon(p, 1, e1 > 0);
         if (e2) padWeapon(p, 2, e2 > 0);
@@ -4996,7 +5025,7 @@ function heldFor(p, dt, k) {
   if (looking(p) && (ax || ay)) { const sp = 1.3 * halfWorldW(cam.zt[p] || 1); lookBy(p, ax * sp * dt, ay * sp * 0.7 * dt); }
   // up / down: the gun's elevation (in the submarine, the dive planes; in the plane, the climb)
   diveKeys[p] = ay;
-  if (ay && (crew[p].mode === 'sub' || hasGuns(p))) {
+  if (ay && (crew[p].mode === 'sub' || hasGuns(p)) && crew[p].mode !== 'heli') {   // (the helicopter: up / down climb and sink)
     if (crew[p].mode === 'sub') turnWheel(p, ay * 360 * 60 / SUB_TURN * dt);
     else { const g = activeGun(p); g.elev = clamp(g.elev - ay * 60 * dt, elevMin(p), elevMax(p)); g.aimShow = 1.6; }
   }
@@ -5008,7 +5037,7 @@ function heldFor(p, dt, k) {
   if (!runCtl[p].drag && crew[p].mode === 'boat') runCtl[p].v = clamp(runCtl[p].v + ax * dt * 1.6, -1, 1);
   // the power, up and down
   // (the helicopter: the power keys tilt its nose gun up and down instead)
-  if ((k.pu || k.pd) && crew[p].mode === 'heli') { const g = guns[p]; g.elev = clamp(g.elev + (k.pu ? 1 : -1) * 70 * dt, elevMin(p), elevMax(p)); g.aimShow = 1.6; }
+  if ((k.pu || k.pd) && crew[p].mode === 'heli') { const g = hguns[p]; g.elev = clamp(g.elev + (k.pu ? 1 : -1) * 70 * dt, elevMin(p), elevMax(p)); g.aimShow = 1.6; }
   else if ((k.pu || k.pd) && hasGuns(p)) { const g = activeGun(p); g.power = clamp(g.power + (k.pu ? 1 : -1) * 0.6 * dt, 0, 1); g.aimShow = 1.6; powerClick(p, g.power); }
 }
 ['gesturestart', 'gesturechange', 'dblclick', 'contextmenu', 'selectstart'].forEach(t =>
@@ -5400,6 +5429,7 @@ function stepGates(d, dt) {
     const v = k === 'ship' ? ships[d.player] : subs[d.player];
     let want = 0;
     if (v && v.gate && (v.gate === 'in' || intoGate(v) > -6)) want = 1;     // coming in: open as she sets off
+    if (k === 'ship' && sailboats.some(b => b.launch === d && b.state === 'sail')) want = 1;   // (CHILL: a new yacht coming out)
     const was = d.gates[k];
     d.gates[k] = clamp(was + (want ? 1 : -1) * dt / GATE_T, 0, 1);
     if ((was === 0 && d.gates[k] > 0) || (was === 1 && d.gates[k] < 1)) sfxDoor(k === 'ship' ? d.shipGate[0] : d.subGate[0]);
@@ -6408,6 +6438,7 @@ function stepTorps(dt) {
   for (let i = torps.length - 1; i >= 0; i--) {
     const tp = torps[i];
     tp.t += dt;
+    if (!tp.spent && schools.length && !tp.air) killFishNear(tp.x, tp.y, 7);   // (it runs through the fish in its way)
     if (tp.spent) {
       // motor dead: it coasts to a stop and sinks, slowly tipping nose down, trailing the odd bubble
       tp.vx *= 1 - 0.8 * dt; tp.vy += (34 - tp.vy) * 0.6 * dt;
@@ -7176,12 +7207,13 @@ function planeCrash(pl) {
     for (const d of docks) if (!what && !(pl.state === 'fly' && d === homeDock[p]) && harbourHit(d, x, y)) what = 'land';   // (your own harbour never brings your plane down)
     if (what) { X = x; Y = y; break; }
   }
-  if (!what && LAND) { const at = landPlaneCrash(pl, pts); if (at) { what = 'land'; X = at[0]; Y = at[1]; } }   // (LAND TEST: the ground, or a tank or helicopter)
+  if (!what && LAND) { const at = landPlaneCrash(pl, pts); if (at) { what = at[2] ? 'ground' : 'land'; X = at[0]; Y = at[1]; } }   // (LAND TEST: the ground, or a tank or helicopter)
   if (!what && pl.y + 4 >= surfaceY(pl.x)) what = 'sea';
   if (!what) return false;
   const was = pl.state;
   birdStrike(X, Y, 20);
   if (what === 'sea') planeSplash(pl);
+  else if (what === 'ground') planeGroundCrash(pl, X, Y);
   else planeBlast(pl, X, Y, what === 'boat' ? 1.2 : 1.3);
   if (was === 'fly') planeLost(pl);
   return true;
@@ -7802,10 +7834,15 @@ function watchPos(w) {
 function takeOver(p, k) {
   const c = crew[p], t = telegraphs[p], d = homeDock[p];
   if (k === 'sail') {
-    // the yacht you had, or the one nearest your harbour; she goes on the way she's going
+    // the yacht you had; or (user Oct 25) a new one, out of your hangar's gate as the battleship comes out, as many
+    // times as you like - she's yours once she's clear of the pier
     let b = yachtOf(p);
-    if (!b) { let best = 1e9; sailboats.forEach((q, i) => { if (q.state === 'sail' && Math.abs(q.x - d.quay) < best) { best = Math.abs(q.x - d.quay); b = q; c.yacht = i; } }); }
-    if (!b) return false;
+    if (!b) {
+      b = newSailboat(p ? 2 : 0, d.berth);
+      Object.assign(b, { player: p, launch: d, face: -d.dir, drive: 0, own: true, vx: 0 });
+      sailboats.push(b); c.yacht = sailboats.length - 1;
+      sfxClick(gunCtl[p]);
+    }
     b.player = p; if (b.drive === undefined) b.drive = 0;
     c.mode = 'sail'; setOrder(t, b.drive < 0 ? 0 : b.drive > 0 ? 6 : 3);
     return true;
@@ -7959,6 +7996,7 @@ function stepSailboats(dt) {
   for (let q = 0; q < 2; q++) if (crew[q].mode === 'sail' && !yachtOf(q)) { const b = sailboats[crew[q].yacht]; if (b) b.player = null; lostUnit(q, b ? b.x : homeDock[q].quay, 'sail'); }
   for (const b of sailboats) {
     b.ph += dt;
+    if (b.state === 'gone' && b.own) { b.drop = true; continue; }
     if (b.state === 'gone') {
       b.respawn -= dt;
       if (b.respawn <= 0) {
@@ -7974,6 +8012,17 @@ function stepSailboats(dt) {
     // the sails lean away from the wind and flutter when it drops
     const flap = Math.sin(b.ph * 7.3) * 0.15 * clamp(1 - Math.abs(wind) / 25, 0, 1);
     b.lean += (clamp(wind / 55, -1.1, 1.1) * (b.state === 'sail' ? 1 : 0.4) + flap - b.lean) * Math.min(1, dt * 2.5);
+    if (b.state === 'sail' && b.launch) {
+      // (CHILL) a new yacht coming out of her hangar: once the gate's up she motors out past the pier's end and stops
+      const d = b.launch, out = d.shipOut;
+      sailRide(b, dt);
+      if (d.gates.ship > 0.7) {
+        const dx = out - b.x, want = Math.sign(dx) * Math.min(34, Math.abs(dx) * 1.2 + 4);
+        b.vx += (want - b.vx) * Math.min(1, dt * 1.5); b.x += b.vx * dt; b.face = -d.dir;
+        if (Math.abs(dx) < 3) { b.launch = null; b.vx = 0; b.drive = 0; if (crew[b.player] && crew[b.player].mode === 'sail') setOrder(telegraphs[b.player], 3); }
+      }
+      continue;
+    }
     if (b.state === 'sail' && b.player != null) {
       // a yacht you sail (CHILL): left, right or hove to, on the telegraph; she keeps her last order when you leave her
       const q = b.player;
@@ -8046,6 +8095,12 @@ function stepSailboats(dt) {
       }
       // (a wreck stays on the bottom for the rest of the round: no new yacht comes)
     }
+  }
+  // (your yachts lost for good are dropped; the crews' places in the list follow)
+  if (sailboats.some(b => b.drop)) {
+    const keep = sailboats.filter(b => !b.drop), at = q => keep.indexOf(sailboats[crew[q].yacht]);
+    for (let q = 0; q < 2; q++) if (crew[q].yacht != null) crew[q].yacht = at(q);
+    sailboats.length = 0; sailboats.push(...keep);
   }
 }
 
@@ -8199,6 +8254,9 @@ function dockFrame(p) {
 }
 function dockZoom(p) {
   if (NET.remote) return;                                  // (a teammate's seat: not this screen's view)
+  // (LAND TEST: no harbour to frame - its stand-in is far past the world's edge, which zoomed the view right out; your
+  // own ground at the tank's zoom instead)
+  if (LAND) { setScope(p, vehZoom[p].tank || ZOLD + 2); return; }
   const [, h] = dockFrame(p);
   cam.zt[p] = clamp(VIEW_W / (2 * (2 * h + 40)), ZOOM_MIN, ZOOM_TOP);
   let best = 1;
@@ -8284,7 +8342,8 @@ function stepCrew(dt) {
     const cc = crew[tw.player];
     if (cc.mode !== 'tower') tw.inUse = false;
     // the tower down: that's the round (the other captain wins once it's fallen)
-    if (tw.fallen && !TEST && docks.length && ui.winner == null) { tw.lostT = (tw.lostT || 0) + dt; if (tw.lostT > 3.5) gameOver(1 - tw.player); }
+    if (CHILL) chillTower(tw, dt);                    // (CHILL: it mends itself, and a fallen one is built again)
+    else if (tw.fallen && !TEST && docks.length && ui.winner == null) { tw.lostT = (tw.lostT || 0) + dt; if (tw.lostT > 3.5) gameOver(1 - tw.player); }
     // towers are never repaired: damage stays for the whole round
     tguns[tw.player].reload = Math.max(0, tguns[tw.player].reload - dt);
     tw.muzzleFlash = Math.max(0, tw.muzzleFlash - dt);
@@ -8325,9 +8384,30 @@ function stepCrew(dt) {
   while (blood.length > 600) blood.shift();
 }
 // The match ends the moment a captain dies
+// CHILL (user Oct 25): a battered tower mends a step every few seconds; one brought down stands again after a while,
+// whole, with its pier gun
+const CHILL_MEND = 6, CHILL_REBUILD = 25;
+function chillTower(tw, dt) {
+  const d = homeDock[tw.player];
+  if (!d || !docks.includes(d) || netGuestHold()) return;
+  if (tw.fallen) {
+    tw.rebT = (tw.rebT || 0) + dt;
+    if (tw.rebT < CHILL_REBUILD) return;
+    Object.assign(tw, { hp: TW_HP, fallen: 0, burnT: 0, burn: 0, marks: null, scorch: null, scorchN: 0, _art: null, stumpArt: null, lostT: 0, rebT: 0, regT: 0, pg: makePierGun(d) });
+    if (!SIM_ONLY) for (let i = 0; i < 16; i++) spawnSmoke(tw.x + rnd(-24, 24), TW.BASE - rnd(0, 40), { mist: true, fam: 'dust', r: rnd(4, 8), grow: rnd(3, 5), lift: 10, vx: rnd(-20, 20), life: rnd(3, 5), alpha: 0.6 });
+    return;
+  }
+  const pg = tw.pg;
+  if (tw.hp >= TW_HP && (!pg || pg.hp >= PG_HP)) { tw.regT = 0; return; }
+  tw.regT = (tw.regT || 0) + dt;
+  if (tw.regT < CHILL_MEND) return;
+  tw.regT = 0;
+  if (tw.hp < TW_HP) { tw.hp++; if (tw.hp >= TW_HP) { tw.marks = null; tw.scorch = null; tw.scorchN = (tw.scorchN || 0) + 1; } }
+  else if (pg && pg.hp < PG_HP) { if (pg.hp <= 0) Object.assign(pg, makePierGun(d)); else pg.hp++; }
+}
 function gameOver(winner) {
   if (netGuestHold()) return;                              // (online guest: only when the host says so)
-  if (ui.winner != null) return;
+  if (ui.winner != null || CHILL) return;                  // (CHILL: nobody ever wins - it goes on)
   ui.winner = winner; ui.winT = 0;
 }
 // the lifeboat is hit: that's the captain gone
@@ -8452,6 +8532,7 @@ function stepShells(dt) {
     const s = shells[i];
     s.age += dt;
     if (s.under) {
+      if (schools.length) killFishNear(s.x, s.y, s.from === 'rocket' ? 10 : 8);   // (user Oct 25: it kills the fish it runs into)
       // a dud: it slows hard, tips nose-down and sinks all the way, then lies on the bottom for good
       s.ut += dt;
       s.vx *= 1 - 2.6 * dt; s.vy += (42 - s.vy) * 2.2 * dt;
@@ -8528,7 +8609,7 @@ function stepShells(dt) {
     else {
       if (trails.length >= 700) { const o = trails.shift(); if (o.next) o.next.root = true; }          // drop the oldest, faintest piece, never the new one
       const p1 = seg ? seg.p2 : { x: px, y: py, vx: 0, vy: 0, age: 0, seed: Math.random() * 100, launch: s.from !== 'bomb' && s.from !== 'rocket' };
-      s.seg = { p1, p2: { x: s.x, y: s.y, vx: 0, vy: 0, age: 0, seed: Math.random() * 100 }, root: !seg, thin: s.from === 'rocket' };
+      s.seg = { p1, p2: { x: s.x, y: s.y, vx: 0, vy: 0, age: 0, seed: Math.random() * 100 }, root: !seg, thin: s.from === 'rocket' || s.from === 'tank' };   // (the tank's missile too, user Oct 25: thin and soon gone)
       if (seg) seg.next = s.seg;
       trails.push(s.seg);
     }
@@ -8791,13 +8872,14 @@ function splash(x, vx, vy) {
    and it goes when the pier comes down. Its state lives on the tower (tw.pg), so an online guest gets it with the
    tower's (its place, _x and _y, isn't sent: each screen has it from its own pier).
    ================================================================ */
-// (its size from the sketch: about as wide as the tower, barrels about half that)
-const PG_COL = 142, PG_HP = 5, PGK = 1.9, PG_BAR = 14 * PGK, PG_GAP = 2.2 * PGK;
+// (user Oct 25, their picture: half the size it was, all steel like the tower's gun - a turntable, a short pedestal, a
+// boxy cradle and two barrels over and under, cooling jackets on their inner half)
+const PG_COL = 142, PG_HP = 5, PGK = 0.95, PG_BAR = 26 * PGK, PG_GAP = 2 * PGK;
 function makePierGun(d) { return { _x: d.ax(PG_COL), _y: DECK_Y, hp: PG_HP, chip: 0, flash: 0, alt: 0, boom: false }; }
 const pgOf = tw => (tw && tw.pg && tw.pg.hp > 0 && !LAND) ? tw.pg : null;
 // the pivot: on top of its round housing
-const pgPivot = pg => [pg._x, pg._y - 9 * PGK];
-function pierGunHit(tw, x, y) { const pg = tw && tw.pg; return !!pg && pg.hp > 0 && Math.abs(x - pg._x) < 11 * PGK && y > pg._y - 14 * PGK && y < pg._y + 1; }
+const pgPivot = pg => [pg._x, pg._y - 11 * PGK];
+function pierGunHit(tw, x, y) { const pg = tw && tw.pg; return !!pg && pg.hp > 0 && Math.abs(x - pg._x) < 13 * PGK && y > pg._y - 17 * PGK && y < pg._y + 1; }
 // a blow: n hits (fractions add up: the machine gun's rounds)
 function hurtPierGun(tw, n, x, y) {
   const pg = tw.pg;
@@ -8829,35 +8911,39 @@ function firePierGun(tw) {
   pg.flash = 0.05; pg.fl = side;
   if (pg.alt) sfxMG(mx);
 }
-// drawn on the pier's deck, in front of the harbour: two barrels out of a round steel housing on a plinth
+// drawn on the pier's deck, in front of the harbour: a turntable and pedestal, and on it the cradle with its two
+// barrels, turned with the tower's gun (all in the tower gun's steel greys)
+const PG_STEEL = { dk: [34, 36, 40], md: [78, 82, 88], lt: [128, 132, 138], hi: [176, 180, 186] };
 function drawPierGun(tw, d) {
   const pg = tw && tw.pg;
   if (!pg || LAND || d.pierGone && pg.hp > 0) return;
-  const [px, py] = pgPivot(pg), dead = pg.hp <= 0;
-  const el = dead ? -0.35 : tguns[tw.player].elev * Math.PI / 180, ux = Math.cos(el) * tw.facing, uy = -Math.sin(el), nx = -uy, ny = ux;
-  const tc = (img.teamCol && img.teamCol[tw.player]) || [180, 60, 50], k = dead ? 0.45 : 1, sh = c => css3(c.map(v => v * k));
-  // the barrels (behind the housing): dark steel, a lit line along each
+  const [px, py] = pgPivot(pg), dead = pg.hp <= 0, K = PGK * SV, f = tw.facing;
+  const el = dead ? -0.35 : tguns[tw.player].elev * Math.PI / 180, kd = dead ? 0.45 : 1;
+  const col = c => css3(c.map(v => v * kd)), Pd = Math.max(1, Math.round(K));
+  const R = (x, y, w, h, c) => { C.fillStyle = col(c); C.fillRect(x * K, y * K, Math.max(Pd, w * K), Math.max(Pd, h * K)); };
+  // the turntable and pedestal (they don't turn with the angle)
+  C.save(); C.translate(Math.round(PX(pg._x)), Math.round(PY(pg._y)));
+  R(-12, -3, 24, 3, PG_STEEL.dk); R(-11, -3, 22, 1, PG_STEEL.lt); R(-11, -2, 22, 1, PG_STEEL.md);
+  R(-4, -9, 8, 6, PG_STEEL.md); R(-4, -9, 2, 6, PG_STEEL.lt); R(2, -9, 2, 6, PG_STEEL.dk);
+  C.restore();
+  // the cradle and the barrels: local x along the barrels, local y down
+  C.save(); C.translate(Math.round(PX(px)), Math.round(PY(py))); C.scale(f, 1); C.rotate(-el);
   for (const side of [-1, 1]) {
-    const L = dead ? PG_BAR * (side > 0 ? 0.6 : 0.9) : PG_BAR, ox = nx * PG_GAP * side, oy = ny * PG_GAP * side;
-    for (const [col, w, off] of [[[38, 40, 46], 2.2 * PGK, 0], [[118, 122, 130], 0.9 * PGK, -0.5 * PGK]]) {
-      C.fillStyle = sh(col);
-      for (let t = 2; t <= L; t += 0.6) rect(px + ux * t + ox + nx * off - w / 2, py + uy * t + oy + ny * off - w / 2, w, w);
-    }
-    if (!dead && pg.flash > 0 && pg.fl === side) { C.fillStyle = '#fff3b0'; rect(px + ux * (L + 3) + ox - 3, py + uy * (L + 3) + oy - 3, 6, 6); }
+    const yy = side * 2 - 1, L = dead ? (side > 0 ? 14 : 20) : 26;
+    R(4, yy, L - 4, 2, PG_STEEL.dk);                                   // the barrel
+    R(4, yy, L - 4, 1, PG_STEEL.md);
+    R(5, yy - 0.6, 11, 3.2, PG_STEEL.md);                               // its cooling jacket, holed
+    R(5, yy - 0.6, 11, 1, PG_STEEL.lt);
+    for (let h = 6; h < 16; h += 2.5) R(h, yy + 0.6, 1, 1, PG_STEEL.dk);
+    R(L - 1, yy - 0.5, 2, 3, PG_STEEL.dk);                              // the muzzle
+    if (!dead && pg.flash > 0 && pg.fl === side) { C.fillStyle = '#fff3b0'; C.fillRect((L + 1) * K, (yy - 1.5) * K, 5 * K, 5 * K); C.fillStyle = '#ffb347'; C.fillRect((L + 2) * K, (yy - 0.5) * K, 3 * K, 3 * K); }
   }
-  // the plinth: a squat block on the deck, then the round housing with a band of the team's colour
-  const K = PGK, B = 4.5 * K, u = 0.8 * K;
-  C.fillStyle = sh([30, 33, 38]); rect(pg._x - 11 * K, pg._y - B, 22 * K, B);
-  C.fillStyle = sh([92, 98, 106]); rect(pg._x - 10 * K, pg._y - 4 * K, 20 * K, 3 * K);
-  C.fillStyle = sh([128, 134, 142]); rect(pg._x - 10 * K, pg._y - 4 * K, 20 * K, u);
-  // (the housing from the bottom up: dark rim, the team's band, shaded steel, lit on top - the sketch's dome)
-  for (let yy = 0; yy < 8 * K; yy += u) {
-    const f = yy / (8 * K), r = 8 * K * Math.sqrt(Math.max(0, 1 - Math.pow(f + 0.05, 2)));
-    C.fillStyle = sh(f < 0.12 ? [30, 33, 38] : f > 0.78 ? [150, 156, 164] : f > 0.6 ? [112, 118, 126] : [84, 90, 98]);
-    rect(pg._x - r, pg._y - B - yy - u, r * 2, u);
-    if (f >= 0.3 && f < 0.46) { C.fillStyle = sh(tc.map(v => v * 0.8)); rect(pg._x - r, pg._y - B - yy - u, r * 2, u); }
-  }
-  if (dead && Math.random() < 0.08) spawnSmoke(pg._x + rnd(-6, 6), pg._y - 12 * PGK, { dark: 0.2, r: rnd(1.5, 3), grow: 3, lift: 18, vx: rnd(-4, 4), life: rnd(2, 3.5), alpha: 0.4 });
+  // the cradle: a squat box round the barrels' breeches, lit on top, an ammunition box under it
+  R(-7, -5, 12, 9, PG_STEEL.md); R(-7, -5, 12, 2, PG_STEEL.hi); R(-7, 2, 12, 2, PG_STEEL.dk); R(-7, -5, 2, 9, PG_STEEL.lt);
+  R(-5, 4, 7, 3, PG_STEEL.dk); R(-4, 4, 5, 1, PG_STEEL.md);
+  R(-11, -2, 4, 2, PG_STEEL.dk);                                        // (the grips behind)
+  C.restore();
+  if (dead && Math.random() < 0.08) spawnSmoke(pg._x + rnd(-4, 4), pg._y - 12 * PGK, { dark: 0.2, r: rnd(1.5, 3), grow: 3, lift: 18, vx: rnd(-4, 4), life: rnd(2, 3.5), alpha: 0.4 });
 }
 function stepPierGuns(dt) {
   for (const tw of towers) {
@@ -9392,30 +9478,76 @@ function stepWeedBits(dt) {
   }
 }
 
+/* Sea life (user Oct 25: "dynamic like the birds"): each fish is its own body, steering to its place in the school
+   and away from the others, so a school swims as a loose flowing shoal. Something big coming - a battleship's hull,
+   a sub, a torpedo, a shark - scatters the fish nearest it outward at once (they dart, then drift back together),
+   and the whole school bolts away fast. Sharks turn and bolt from boats too. */
+const SEA_THREATS = [];
+function seaThreats() {
+  const T = SEA_THREATS; T.length = 0;
+  for (const sh of ships) if (sh && sh.state === 'afloat' && !sh.moored) T.push(sh.x, WATER_Y + 22, SHIP_L * 0.5 + 70, 1, sh.vx);
+  for (const sb of subs) if (sb && (sb.state === 'out' || sb.state === 'docked') && !inHarbour(sb)) T.push(sb.x, sb.y, 110, 1, sb.vx || 0);
+  for (const tp of torps) if (!tp.spent) T.push(tp.x, tp.y, 70, 0.8, tp.vx || 0);
+  for (const k of sharks) T.push(k.x, k.y, 90, 0.5, k.dir * k.speed);
+  return T;
+}
 function stepSea(dt) {
   stepWeedBits(dt);
   stepShocks(dt);
-  const top = WATER_Y + 50;
+  const top = WATER_Y + 50, T = seaThreats();
   for (const s of schools) {
     s.turnT -= dt;
-    for (const k of sharks) {
-      if (Math.abs(k.x - s.x) < 130 && Math.abs(k.y - s.y) < 70) { s.flee = Math.max(s.flee, 1.2); s.dir = s.x < k.x ? -1 : 1; s.vy = s.y < k.y ? -20 : 20; }
+    // the nearest threat: the school bolts away from it (faster the closer), the fish nearest it dart outward
+    for (let i = 0; i < T.length; i += 5) {
+      const tx = T[i], ty = T[i + 1], R = T[i + 2], k = T[i + 3];
+      if (Math.abs(tx - s.x) > R + 90 || Math.abs(ty - s.y) > R + 60) continue;
+      s.flee = Math.max(s.flee, 1.4 + 1.6 * k); s.dir = s.x < tx ? -1 : 1; s.vy = (s.y < ty ? -1 : 1) * 30 * k;
+      for (const f of s.fish) {
+        const dx = f.x - tx, dy = f.y - ty, d = Math.hypot(dx, dy) || 1;
+        if (d < R && (f.scare || 0) <= 0) { const imp = (190 + 120 * Math.random()) * k * (1 - d / R * 0.5); f.vx += dx / d * imp; f.vy += dy / d * imp * 0.7; f.scare = rnd(0.5, 0.9); }
+      }
     }
     if (s.turnT <= 0 && s.flee <= 0) { s.dir *= -1; s.turnT = rnd(8, 24); }
     if (s.x < 60) s.dir = 1; else if (s.x > WORLD_W - 60) s.dir = -1;
     s.flee = Math.max(0, s.flee - dt);
-    const sp = s.speed * (1 + 1.8 * Math.min(1, s.flee));
+    const sp = s.speed * (1 + 4 * Math.min(1, s.flee));
     s.x += s.dir * sp * dt;
     s.vy += (Math.sin(time * 0.3 + s.speed) * 6 - s.vy) * 0.5 * dt;
     s.y = clamp(s.y + s.vy * dt, top, seabedY(s.x) - 30);
+    // each fish: pulled toward its place in the school (a spring), damped, a little wander, a top speed; it
+    // turns to face the way it's swimming
+    const spread = 1 + 0.8 * Math.min(1, s.flee), n = s.fish.length;
+    for (let j = 0; j < n; j++) {
+      const f = s.fish[j];
+      if (f.x === undefined) { f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; f.vx = 0; f.vy = 0; f.face = s.dir; }
+      f.scare = (f.scare || 0) - dt;
+      const wx = s.x + f.dx * 0.6 * spread + Math.sin(time * 0.7 + f.ph) * 6, wy = s.y + f.dy * 0.6 * spread + Math.sin(time * 1.1 + f.ph * 1.7) * 3;
+      const pull = f.scare > 0 ? 0.6 : 3.2;
+      f.vx += ((wx - f.x) * pull + (s.dir * sp - f.vx) * 1.4) * dt;
+      f.vy += ((wy - f.y) * pull - f.vy * 1.4) * dt;
+      // (a neighbour too close: a nudge apart)
+      const o = s.fish[(j + 1) % n];
+      if (o && o !== f) { const ddx = f.x - o.x, ddy = f.y - o.y, dd = ddx * ddx + ddy * ddy; if (dd < 25 && dd > 0.01) { f.vx += ddx * 8 * dt; f.vy += ddy * 8 * dt; } }
+      const v = Math.hypot(f.vx, f.vy), vm = f.scare > 0 ? 320 : 40 + sp * 1.6;
+      if (v > vm) { f.vx *= vm / v; f.vy *= vm / v; }
+      f.x += f.vx * dt; f.y = clamp(f.y + f.vy * dt, top - 20, seabedY(f.x) - 8);
+      if (Math.abs(f.vx) > 4) f.face = Math.sign(f.vx);
+    }
   }
   for (const k of sharks) {
+    // (a shark bolts from a boat as well, and swims fast a while)
+    k.flee = Math.max(0, (k.flee || 0) - dt);
+    for (let i = 0; i < T.length; i += 5) {
+      if (T[i + 3] < 0.8) continue;
+      const tx = T[i], ty = T[i + 1], R = T[i + 2] + 60;
+      if (Math.abs(tx - k.x) < R && Math.abs(ty - k.y) < R) { const away = k.x < tx ? -1 : 1; if (away !== k.dir && k.turn === 0) { k.turn = 0.001; k.flipAt = true; } k.flee = 2.5; k.turnT = rnd(9, 20); }
+    }
     k.turnT -= dt;
-    if (k.turn > 0) { k.turn += dt / 1.1; if (k.turn >= 1) { k.turn = 0; } }
+    if (k.turn > 0) { k.turn += dt / (k.flee > 0 ? 0.5 : 1.1); if (k.turn >= 1) { k.turn = 0; } }
     const wantTurn = k.turnT <= 0 || (k.x < 80 && k.dir < 0) || (k.x > WORLD_W - 80 && k.dir > 0);
     if (wantTurn && k.turn === 0) { k.turn = 0.001; k.turnT = rnd(9, 20); k.flipAt = true; }
     if (k.turn > 0.5 && k.flipAt) { k.dir *= -1; k.flipAt = false; }
-    const sp = k.speed * (k.turn > 0 ? 0.35 : 1);
+    const sp = k.speed * (k.turn > 0 ? 0.35 : 1) * (1 + 2.2 * Math.min(1, k.flee));
     k.x += k.dir * sp * dt;
     k.y = clamp(k.y + Math.sin(time * 0.4 + k.ph) * 8 * dt, top + 30, seabedY(k.x) - 40);
   }
@@ -9552,14 +9684,15 @@ function sfxThunder(x, close) {
    shower (clouds gather, the wind picks up, then it rains, never more than two minutes); every third
    day a 30% chance of fog, more likely at night. Everything eases in and out. A slider you move by hand
    stays where you put it until the next round. ---------------- */
-// the clock runs at different speeds: 4 minutes of daylight (dawn included), 1 minute of sunset,
-// 1 minute of night - six minutes for a whole day
-const CLOCK = [[4.5, 16.5, 12 / 240], [16.5, 20, 3.5 / 60], [20, 28.5, 8.5 / 60]];   // [from, to, hours per second]
-function clockRate(h) { for (const [a, b, r] of CLOCK) if ((h >= a && h < b) || (h + 24 >= a && h + 24 < b)) return r; return 12 / 240; }
+// the clock runs at different speeds (user Oct 25): 1 minute of sunrise, 4.5 minutes of daylight, 1 minute of sunset
+// and only 30 seconds of night - seven minutes for a whole day
+const CLOCK = [[5, 8, 3 / 60], [8, 16.5, 8.5 / 270], [16.5, 19.2, 2.7 / 60], [19.2, 29, 9.8 / 30]];   // [from, to, hours per second]
+const CLOCK_EDGES = [5, 8, 16.5, 19.2, 24];
+function clockRate(h) { for (const [a, b, r] of CLOCK) if ((h >= a && h < b) || (h + 24 >= a && h + 24 < b)) return r; return 8.5 / 270; }
 // seconds after midnight at which the clock shows hour h
 function secsTo(h) {
   let t = 0, x = 0;
-  while (x < h - 1e-9) { const r = clockRate(x), edge = [4.5, 16.5, 20, 24].find(e => e > x + 1e-9); const nx = Math.min(h, edge); t += (nx - x) / r; x = nx; }
+  while (x < h - 1e-9) { const r = clockRate(x), edge = CLOCK_EDGES.find(e => e > x + 1e-9); const nx = Math.min(h, edge); t += (nx - x) / r; x = nx; }
   return t;
 }
 const W = { t: 0, day: 1, lastHour: 9, rain: null, fog: null, manual: {}, frozen: false, seed: Math.random() * 1000 };
@@ -10094,7 +10227,7 @@ function spawnSmoke(x, y, o) {
   const p = {
     x, y, vx: o.vx || 0, vy: o.vy || -15, r: o.r || 8, grow: o.grow || rnd(6, 10), age: 0, life: o.life || rnd(10, 15),
     dark: o.dark || 0, lift: o.lift || 40, alpha: o.alpha || rnd(0.55, 0.75), mist: !!o.mist, quick: !!o.quick, rmax: o.rmax || 26,
-    ashT: o.ash ? rnd(0.5, 2) : -1, keep: !!o.keep,
+    ashT: o.ash ? rnd(0.5, 2) : -1, keep: !!o.keep, fam: o.fam || null,
   };
   // a full sky: the oldest puff is told to fade away over a couple of seconds (dropping it outright
   // used to slice the top off the column)
@@ -12084,6 +12217,7 @@ function renderSky() {
     C.globalAlpha = a * (0.75 - 0.45 * low); blit(sc, px, py); C.globalAlpha = 1;
   }
   if (!LAND) drawCoasts(pivY, zr);
+  else drawLandBg(false);                                 // (LAND TEST: the far mountains and trees, behind the clouds)
   st = sema('skCoast', st);
   // under the clouds in a storm: the far air thickens to the clouds' colour, with grey curtains of rain
   if (E.cover > 0.02) drawWeatherVeil(deckY, pivY);
@@ -12117,8 +12251,8 @@ function renderSky() {
     C.globalAlpha = a * (1 - 0.6 * low); blit(sc, px, py); C.globalAlpha = 1;
     if (c.k < img.clouds.length && (img.clouds[c.k].kind === 0 || img.clouds[c.k].kind === 1) && a > 0.5) spans.push([px, px + sc.width, c.p]);
   }
-  // (LAND TEST: the mountains and trees stand in front of every cloud - the land rises far above the sea's horizon)
-  if (LAND) drawLandBg();
+  // (LAND TEST: only the nearest trees stand in front of the clouds, user Oct 25; and there's no sea at all)
+  if (LAND) { drawLandBg(true); sema('skClouds', st); return; }
   st = sema('skClouds', st);
   drawMidSea();
   st = sema('skMid', st);
@@ -12546,7 +12680,8 @@ function renderObjects() {
   ot = ema('obOver', ot);
   drawDeepWater();
   drawRockForms(x0, x1);                                  // (the solid rocks: over the water's tint, k times its colour, so their light and shade read - user Oct 25)
-  drawFgRocks();                                          // (the near-black rocks in front of the floor - after the water's tint, so they stay black: user Oct 24 night)
+  // (the near-black rocks in front of the floor come after the water's distortion: user Oct 25, they don't ripple -
+  // see render)
   drawShipShadows(x0, x1);
   ot = ema('obShade', ot);
   drawShocks(x0, x1);
@@ -13061,13 +13196,12 @@ function drawSeaLife() {
   }
   for (const s of schools) {
     const def = img.fish[s.type];
-    const sp = s.dir > 0 ? def.r : def.l;
-    const k = pixK(def.px), w = Math.max(1, Math.round(sp.width * k)), h = Math.max(1, Math.round(sp.height * k));
-    const spread = 1 + 0.6 * Math.min(1, s.flee);
+    const k = pixK(def.px), w = Math.max(1, Math.round(def.r.width * k)), h = Math.max(1, Math.round(def.r.height * k));
     for (const f of s.fish) {
-      const x = s.x + f.dx * 0.6 * spread + Math.sin(time * 0.7 + f.ph) * 3, y = s.y + f.dy * 0.6 * spread + Math.sin(time * 1.3 + f.ph) * 1.5;
+      const x = f.x === undefined ? s.x + f.dx * 0.6 : f.x, y = f.y === undefined ? s.y + f.dy * 0.6 : f.y;
       if (x < vl - 30 || x > vl + VWW + 30) continue;
-      C.drawImage(sp, PX(x) - (w >> 1), PY(y) - (h >> 1), w, h);
+      const sp = (f.face || s.dir) > 0 ? def.r : def.l;
+      C.drawImage(sp, Math.round(PX(x) - (w >> 1)), Math.round(PY(y) - (h >> 1)), w, h);
     }
   }
   for (const s of sharks) {
@@ -13958,9 +14092,11 @@ function drawHarbourFlag(d) {
   if (!tw || tw.hp <= 0) return;
   const fr = img.towers[towerFrame(tw)][tw.facing], tops = fr._tops || (fr._tops = artTops(fr));
   let col = Math.round(TW.FW / 2 - tw.facing * 12 / TW.K), top = TW.FH;
-  for (let c = col - 3; c <= col + 3; c++) if (c >= 0 && c < tops.length) top = Math.min(top, tops[c]);
+  // (the pole's foot on the roof right under it - the lowest of the columns it covers, so it never floats over a
+  // sloping edge, user Oct 25)
+  top = 0; for (let c = col - 1; c <= col + 1; c++) if (c >= 0 && c < tops.length) top = Math.max(top, tops[c]);
   if (top >= TW.FH - 4) return;
-  const poleX = tw.x - tw.facing * 12, poleBot = TW.BASE - (TW.FH - top) * TW.K + 1, poleTop = poleBot - 34;
+  const poleX = tw.x - tw.facing * 12, poleBot = TW.BASE - (TW.FH - top) * TW.K + 1.5, poleTop = poleBot - 34;
   C.fillStyle = '#2b3037'; rect(poleX - 0.8, poleTop, 1.6, poleBot - poleTop);
   C.fillStyle = '#c9c9c4'; rect(poleX - 1.2, poleTop - 1.6, 2.4, 1.6);
   const fy = poleBot - 10 - (poleBot - 10 - poleTop) * clamp(d.flag, 0, 1);
@@ -14260,12 +14396,15 @@ function drawSailboat(b, mode) {
   const sp = mode ? moonArt(sp0, mode) : sp0;
   if (b.x + sp.width / SV < CAMPX / SV - 10 || b.x - sp.width / SV > CAMPX / SV + VWW + 10) return;
   const W = sp.width, Hh = sp.height, split = Math.round(art.split * s), wl = Math.round(art.wl * s);
+  // (CHILL: a new yacht still in her hangar shows only seaward of the gate, as the battleship does)
+  let clip = false;
+  if (b.launch) { const d = b.launch, X = PX(d.shipGate[1]); C.save(); C.beginPath(); if (d.dir > 0) C.rect(-SHX - 20, -SHY - 20, X + SHX + 20, bh + 40); else C.rect(X, -SHY - 20, VWP - X + SHX + 20, bh + 40); C.clip(); clip = true; }
   // pitched with the waves around the waterline
   C.save();
   C.translate(PX(b.x), PY(b.y + b.sink));
   if (Math.abs(b.a) > 0.01) C.rotate(b.a);
   const left = -Math.round(W / 2), top = -wl;
-  if (b.wreck) { C.drawImage(sp, left, top); C.restore(); return; }        // charred and dismasted
+  if (b.wreck) { C.drawImage(sp, left, top); C.restore(); if (clip) C.restore(); return; }        // charred and dismasted
   C.drawImage(sp, 0, split, W, Hh - split, left, top + split, W, Hh - split);
   // the rig, row by row: the mast stays straight while the sails fill and belly out with the wind,
   // lean over in a gust, and luff (ripple) when the wind drops
@@ -14281,6 +14420,7 @@ function drawSailboat(b, mode) {
     C.drawImage(sp, 0, r, W, h, dx, top + r, dw, h);
   }
   C.restore();
+  if (clip) C.restore();
 }
 // the hi-vis vest is never darkened by night or fog
 function drawGuyVests(x0, x1) {
@@ -14339,6 +14479,9 @@ const SMOKE_FAM = {
   black: [[120, 116, 124], [90, 87, 96], [66, 64, 72], [46, 44, 52], [31, 30, 36]],
   gray: [[170, 166, 174], [138, 134, 144], [108, 104, 114], [82, 80, 90], [62, 60, 68]],
   mist: [[250, 252, 255], [232, 239, 245], [214, 223, 233], [194, 205, 217], [178, 190, 204]],
+  sand: [[244, 228, 180], [222, 200, 146], [198, 172, 118], [172, 146, 96], [146, 120, 78]],
+  dustD: [[156, 134, 108], [130, 110, 88], [108, 90, 72], [88, 72, 58], [68, 56, 46]],   // (the heavier earth settling, user Oct 25)
+  dust: [[200, 184, 154], [176, 158, 128], [152, 134, 108], [128, 112, 90], [104, 90, 74]],   // (LAND TEST: earth thrown up)
   warm: [[182, 102, 52], [144, 76, 36], [110, 55, 27], [82, 40, 20], [60, 28, 14]],
 };
 // Smoke is painted the way a pixel artist layers it: every puff first lays down its dark base shape,
@@ -14484,7 +14627,7 @@ function drawSmoke(x0, x1) {
     const t = s.age / s.life, late = Math.max(s.keep ? t : t > 0.62 ? (t - 0.62) / 0.38 : 0, s.kill ? 1 - s.kill / 2.5 : 0, s.lonely ? Math.min(1, s.lonely / 1.6) : 0);
     const R = s.r * SV / SMK * Math.min(1, 0.55 + s.age * 3) * Math.min(1, 0.45 + s.alpha * 0.75);
     if (R < 0.8) continue;
-    const famName = s.mist ? 'mist' : (s.dark * 0.8 + t * 0.9 > 0.62 ? 'gray' : 'black');
+    const famName = s.fam || (s.mist ? 'mist' : (s.dark * 0.8 + t * 0.9 > 0.62 ? 'gray' : 'black'));
     const fire = s.quick ? (s.age < 3.5 ? 2 : s.age < 7 ? 1 : 0) : 0;   // fresh from the fire: near black, lightening as it climbs
     list.push({ cx: PX(s.x), cy: PY(s.y), R, pal: pal[famName], fire, a: Math.min(1, 0.35 + s.alpha * 1.1) * (1 - late) * (1 - late * 0.5), seed: (s.seed || (s.seed = Math.floor(Math.random() * 7))) });
   }
@@ -14778,7 +14921,7 @@ function renderOverlays() {
   }
   for (const s of shells) {
     if (s.x < x0 - 10 || s.x > x1 + 10) continue;
-    const sp = Math.hypot(s.vx, s.vy) || 1, ux = s.vx / sp, uy = s.vy / sp;
+    const sp = Math.hypot(s.vx, s.vy) || 1; let ux = s.vx / sp; let uy = s.vy / sp;
     if (s.from === 'bomb' && !s.under) {
       // a bomb (user Oct 25): slim, at the angle it left the plane at, its heavy nose tipping down as it falls
       drawBombBody(PX(s.x), PY(s.y), s.a == null ? Math.atan2(s.vy, s.vx) : s.a, false);
@@ -14787,6 +14930,8 @@ function renderOverlays() {
     if (s.from === 'rocket') {
       // a missile: a long pale body, and while its motor burns a flickering flame out of the tail
       const L = Math.max(PB * 3, Math.round(9 * SV)), hx = PX(s.x), hy = PY(s.y);
+      // (still falling clear before its motor lights: it keeps pointing the way it was launched, not the way it drops)
+      if (s.drop > 0 && s.ux != null) { ux = s.ux; uy = s.uy; }
       C.fillStyle = s.under ? '#1d2a3c' : '#c9ccd2';
       blkLine(hx - ux * L, hy - uy * L, hx, hy);
       if (!s.under) { C.fillStyle = '#3a3e46'; blkPx(hx, hy, 1); }
@@ -14842,6 +14987,12 @@ function drawRain() {
 // where a raindrop falling at world x stops (user Oct 24): on the sea, or first on a harbour's deck, its hangar
 // roof or a tower's top
 function rainRoof(wx) {
+  if (LAND) {                                                // (LAND TEST, user Oct 25: on the ground, a tank's back, a helicopter)
+    let top = landTopM(wx);
+    for (const t of tanks) if (t && t.state === 'alive' && Math.abs(wx - t.x) < TANK_L * 0.45) top = Math.min(top, t.y - 16);
+    for (const h of helis) if (h && (h.state === 'fly' || h.state === 'landed') && Math.abs(wx - h.x) < heliHalf() * 0.7) top = Math.min(top, h.y - heliSkid() * 0.9);
+    return top;
+  }
   let top = surfaceY(wx);
   for (const d of docks) {
     const q = pierEdge(d), a = Math.min(q, d.x0 + (d.dir > 0 ? d.w : 0)), b = Math.max(q, d.x0 + (d.dir > 0 ? d.w : 0));
@@ -14897,7 +15048,7 @@ function drawRainIn() {
   }
   rainEnd();
   // the far sea is pocked with rain too: tiny, fainter flecks between the horizon and the waterline
-  const hz = PY(WATER_Y - 21), nf = Math.round(110 * R * VWP / 600);
+  const hz = PY(WATER_Y - 21), nf = LAND ? 0 : Math.round(110 * R * VWP / 600);
   rainBegin(rgbs([214 * fx[0], 226 * fx[1], 240 * fx[2]], 0.45));
   for (let k = 0; k < nf; k++) {
     const x = hash(k * 3.71 + tick * 0.417 + 5.3) * VWP, u = hash(k * 1.37 + tick * 0.291 + 2.1);
@@ -15222,7 +15373,7 @@ function render() {
   tt = lap('sky', tt);
   oc.setTransform(1, 0, 0, 1, 0, 0);
   oc.clearRect(0, 0, bw, bh);
-  for (const [v, cp, sx, w, i, cf] of views) { beginView(oc, v, cp, sx, w, i, cf); if (LAND) renderLandObjects(); else renderObjects(); tt = lap('objects', tt); if (!LAND) distortWater(sx, w); tt = lap('distort', tt); oc.restore(); }
+  for (const [v, cp, sx, w, i, cf] of views) { beginView(oc, v, cp, sx, w, i, cf); if (LAND) renderLandObjects(); else renderObjects(); tt = lap('objects', tt); if (!LAND) { distortWater(sx, w); oc.setTransform(1, 0, 0, 1, sx + SHX, SHY); drawFgRocks(); } tt = lap('distort', tt); oc.restore(); }
   // night and dusk tint the world (not the sky, which is already lit)
   oc.setTransform(1, 0, 0, 1, 0, 0);
   oc.globalCompositeOperation = 'source-atop';
@@ -15709,7 +15860,7 @@ function cpuHeliFly(B, h, tx, alt, dt) {
   if (telegraphs[p].idx !== idx) driveCmd(p, idx);
 }
 function cpuHeli(B, dt) {
-  const p = B.p, h = helis[p], T = B.T, E = cpuLandEnemy(p), g = guns[p];
+  const p = B.p, h = helis[p], T = B.T, E = cpuLandEnemy(p), g = hguns[p];
   if (!h || (h.state !== 'fly' && h.state !== 'landed')) { cpuSetMG(B, false); diveHold[p] = 0; return; }
   if (h.hp <= 1 || h.rockets <= 0) B.mend = true;
   const homeX = landHomeX(p, 'heli');
@@ -15797,6 +15948,10 @@ function landBelow(x, y) {
 }
 // the top of the ground in column x from the sky down (what a shell or a falling plane meets first)
 function landTop(x) { return landBelow(x, LT_Y0); }
+// what the ground's made of where a blast meets it (for its colour): sand, grass on top, or dirt
+function groundAt(x, y) { const c = ltCol(x), r = ltRow(landBelow(x, y - 6)); for (let q = 0; q < 4; q++) { const m = ltCell(c, r + q); if (m === M_SAND) return 'sand'; } return 'dirt'; }
+// the same past the world's ends, where the land is drawn mirrored (what rain and the eye meet there)
+function landTopM(x) { const E2 = land.cols * LT_CELL; if (x < 0) x = -x; else if (x > E2) x = 2 * E2 - x; return landTop(clamp(x, 0, E2 - 0.1)); }
 
 function buildLand() {
   const R0 = seededRng(9001 + (land.seed | 0));
@@ -15862,6 +16017,7 @@ function buildLand() {
   land.boulders.sort((a, b) => b.back - a.back);
   land.chunks = []; land.back = []; land.dirty = new Uint8Array(Math.ceil(land.cols / LT_CHUNK)).fill(1);
   land.bg = null;
+  buildTufts();
 }
 // a round blob of one material (keep: only where there's ground already)
 function ltBlob(x, y, rad, m, keep) {
@@ -15897,13 +16053,14 @@ function landCarve(x, y, rad) {
   if (!n && !SIM_ONLY) return 0;
   ltDirty(c0, c1);
   landWakeSand(c0 - 2, c1 + 2);
+  landTuftBlast(x, y, rad + 8);
   // clods of what was dug, thrown up and out
   if (!SIM_ONLY) {
     const cols = [null, '#5f9a3a', '#6b4a2e', '#cdb27a', '#8a8a86'];
-    const tot = Math.min(40, Math.round(n / 3));
+    const tot = Math.min(rad > 30 ? 110 : 40, Math.round(n / 3));
     for (let k = 0; k < tot; k++) {
       let m = 2; { let t = Math.random() * n; for (let q = 1; q < 5; q++) { t -= kinds[q]; if (t < 0) { m = q; break; } } }
-      const a = -Math.PI / 2 + rnd(-1.2, 1.2), v = rnd(80, 260);
+      const a = -Math.PI / 2 + rnd(-1.2, 1.2), v = rnd(80, 260) * (rad > 30 ? 1.5 : 1);
       debris.push({ x: x + rnd(-rad, rad) * 0.5, y: y - rnd(0, rad * 0.5), vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: rnd(0, 6), w: rnd(-8, 8), sw: rnd(1.2, 2.6), sh: rnd(1, 2), col: cols[m], state: 0, bub: 0, seed: Math.random() * 6, age: 0, clod: true });
     }
   }
@@ -15959,6 +16116,15 @@ const LT_PAL = {
 // the dirt's lumps (as in the user's picture: rounded stones packed in earth): a cellular pattern. Returns how far
 // in from the edge of its lump a cell is (small: the dark gap between two), which lump, and where in it (dy < 0: its
 // upper part, lit)
+// how far into the dark a cell is: none near the land's first top, all of it by about 200 units down (in eighths,
+// with a dither between, so the fade reads as pixel art rather than a smooth gradient)
+const LT_DEEP = [7, 9, 15];
+function ltFade(c, r) {
+  const d = LT_Y0 + r * LT_CELL - land.surf[Math.min(land.cols - 1, Math.max(0, c))];
+  let f = smoothstep(26, 205, d) * 8;
+  const lo = Math.floor(f); f = lo + ((f - lo) > ((c + r) & 1 ? 0.62 : 0.38) ? 1 : 0);
+  return Math.min(1, f / 8);
+}
 const LUMP_W = 27, LUMP_H = 18, ltLumpOut = { e: 0, id: 0, dy: 0 };
 function ltLump(c, r) {
   const gx = Math.floor(c / LUMP_W), gy = Math.floor(r / LUMP_H);
@@ -16020,6 +16186,9 @@ function paintLandChunk(k) {
       if (lf === M_AIR || rt === M_AIR) k2 *= up === M_AIR ? 1 : 0.85;
       const sc = land.scorch[i] / 255;
       col = [col[0] * k2 * (1 - 0.72 * sc) + 14 * sc, col[1] * k2 * (1 - 0.75 * sc) + 10 * sc, col[2] * k2 * (1 - 0.75 * sc) + 8 * sc];
+      // (user Oct 25, their picture: the earth fades to black going down, in steps, as pixel art shades)
+      const fd = ltFade(c, r);
+      if (fd > 0) col = mix3(col, LT_DEEP, fd);
       put(q, r + 4, col);
       depth++;
       // grass: a few blades standing up out of a grass top
@@ -16051,11 +16220,15 @@ function paintLandBack(k) {
         if (hsh < 0.07 + f * 0.08) col = G[3];
         if (f < 0.12) col = mix3(col, [199, 208, 217], 0.25);
         else if (hsh > 0.985) col = [176, 172, 160];                                        // (a pebble)
+        // (user Oct 25: the field behind darker and a little cooler, so the ground in front stands out)
+        col = [col[0] * 0.7, col[1] * 0.74, col[2] * 0.8 + 6];
       } else {
         // the back wall: the same stony earth, in shadow
         const L = ltLump(c, r), k0 = hash(L.id * 0.37);
         col = L.e < 2.2 ? D[3] : L.dy < -0.2 ? D[4] : k0 < 0.5 ? D[0] : D[1];
         col = col.map((v, j) => v * 0.48 + [10, 12, 18][j]);
+        const fd = ltFade(c, r);
+        if (fd > 0) col = mix3(col, LT_DEEP, fd);
       }
       put(q, r + 4, col);
     }
@@ -16082,24 +16255,31 @@ function paintLandBack(k) {
   }
   x.putImageData(id, 0, 0);
 }
+// (user Oct 25: past the world's ends the land goes on - each end's slices mirrored, so there's never sky or sea
+// beside the ground, however far out the view is)
 function drawLandGround(x0, x1) {
   if (!land.cell) return;
-  const k0 = Math.max(0, Math.floor(ltCol(x0) / LT_CHUNK)), k1 = Math.min(land.dirty.length - 1, Math.floor(ltCol(x1) / LT_CHUNK));
+  const n = land.dirty.length, Xend = land.cols * LT_CELL;
   const ga = C.imageSmoothingEnabled;
   C.imageSmoothingEnabled = false;
-  for (let k = k0; k <= k1; k++) {
-    if (!land.back[k]) paintLandBack(k);
-    const cv = land.back[k], X0 = Math.round(PX(k * LT_CHUNK * LT_CELL)), X1 = Math.round(PX((k * LT_CHUNK + cv.width) * LT_CELL));
-    C.drawImage(cv, X0, Math.round(PY(LT_Y0 - 4 * LT_CELL)), X1 - X0, Math.round(PY(LT_Y0 + LT_ROWS * LT_CELL)) - Math.round(PY(LT_Y0 - 4 * LT_CELL)));
-  }
-  for (let k = k0; k <= k1; k++) {
+  const Ytop = Math.round(PY(LT_Y0 - 4 * LT_CELL)), Ybot = Math.round(PY(LT_Y0 + LT_ROWS * LT_CELL));
+  // the slices to draw: [slice, its left world x, mirrored]
+  const list = [];
+  for (let k = Math.max(0, Math.floor(ltCol(x0) / LT_CHUNK)); k <= Math.min(n - 1, Math.floor(ltCol(x1) / LT_CHUNK)); k++) list.push([k, k * LT_CHUNK * LT_CELL, false]);
+  for (let k = 0; k < n; k++) { const w = Math.min(LT_CHUNK, land.cols - k * LT_CHUNK) * LT_CELL, xl = -k * LT_CHUNK * LT_CELL - w; if (xl + w <= x0) break; if (xl < x1) list.push([k, xl, true]); }
+  for (let k = n - 1; k >= 0; k--) { const xr0 = k * LT_CHUNK * LT_CELL, w = Math.min(LT_CHUNK, land.cols - k * LT_CHUNK) * LT_CELL, xl = 2 * Xend - xr0 - w; if (xl > x1) break; if (xl + w > x0) list.push([k, xl, true]); }
+  const put = (cv, xl, flip) => {
+    const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL));
+    if (!flip) { C.drawImage(cv, X0, Ytop, X1 - X0, Ybot - Ytop); return; }
+    C.save(); C.translate(X1, 0); C.scale(-1, 1); C.drawImage(cv, 0, Ytop, X1 - X0, Ybot - Ytop); C.restore();
+  };
+  for (const [k, xl, flip] of list) { if (!land.back[k]) paintLandBack(k); put(land.back[k], xl, flip); }
+  for (const [k, xl, flip] of list) {
     if (land.dirty[k] || !land.chunks[k]) { paintLandChunk(k); land.dirty[k] = 0; }
-    const cv = land.chunks[k], X0 = Math.round(PX(k * LT_CHUNK * LT_CELL)), X1 = Math.round(PX((k * LT_CHUNK + cv.width) * LT_CELL));
-    const Y0 = Math.round(PY(LT_Y0 - 4 * LT_CELL)), Y1 = Math.round(PY(LT_Y0 + (LT_ROWS) * LT_CELL));
-    C.drawImage(cv, X0, Y0, X1 - X0, Y1 - Y0);
-    // below the grid: the rock goes on down
-    C.fillStyle = '#1c1a21'; C.fillRect(X0, Y1, X1 - X0, Math.max(0, bh - Y1 + 4));
+    put(land.chunks[k], xl, flip);
   }
+  // below the grid: the rock goes on down, in the dark
+  C.fillStyle = '#06070b'; C.fillRect(-SHX - 2, Ybot - 1, VWP + 4, Math.max(0, bh - Ybot + 4));
   C.imageSmoothingEnabled = ga;
 }
 
@@ -16163,28 +16343,128 @@ function buildLandBg() {
     for (let y = H - 22; y < H; y++) for (let c = 0; c < W; c++) pix(d, W, H, c, y, hash(c * 0.37 + y * 1.1) < 0.2 ? MID : DARK);
     for (let i = 0; i < W * bush; i++) { const r = 7 + Rt() * 12; blob(Rt() * W, H - 18 - r * 0.3, Math.round(r)); }
   });
+  // (user Oct 25: by the depth rules, docs depth-and-parallax-rules.md - each strip follows a share p of the camera's
+  // sideways motion and grows with the zoom by zr^q, so the far mountains hardly move or grow; the far ones are hazed
+  // blue with the air between, and the clouds pass in front of them)
   land.bg = [
-    { s: mountains, p: 0.15, k: 2, base: WATER_Y - 95 - 20, haze: 0.08 },
-    { s: trees(1000, 130, 40, 50, 120, 11, 0.06), p: 0.45, k: 1.2, base: WATER_Y - 95 - 40, haze: 0.28 },
-    { s: trees(1000, 250, 14, 90, 240, 12, 0.03), p: 0.72, k: 1.25, base: WATER_Y - 95 - 30, haze: 0.05, under: [42, 71, 75] },
+    { s: mountains, p: 0.06, q: 0.22, k: 2, base: WATER_Y - 95 - 20, haze: 0.4 },
+    { s: trees(1000, 130, 40, 50, 120, 11, 0.06), p: 0.32, q: 0.6, k: 1.2, base: WATER_Y - 95 - 40, haze: 0.3 },
+    { s: trees(1000, 250, 14, 90, 240, 12, 0.03), p: 0.62, q: 0.86, k: 1.25, base: WATER_Y - 95 - 30, haze: 0.06, under: [42, 71, 75], near: true },
   ];
 }
-// each strip drawn tiled across the view with its own parallax, its foot standing on the base line, hazed toward
-// the sky's horizon colour and lit with the hour
-function drawLandBg() {
+// each strip drawn tiled across the view at its own depth, its foot standing on its base line (which hangs from
+// the ground's line on the screen, as the sea's far layers hang from the horizon), hazed toward the sky's colour
+// at the horizon and lit with the hour. near: the strip in front of the clouds; otherwise the ones behind them
+function drawLandBg(near) {
   if (!land.bg) buildLandBg();
-  const hz = E.skyHor || [180, 200, 220], fx = E.fx || [1, 1, 1];
+  const hz = mix3(E.skyHor || [180, 200, 220], E.skyTop || E.skyHor || [120, 170, 230], 0.3), fx = E.fx || [1, 1, 1];
   for (const L of land.bg) {
-    const im = L.s.c, k = L.k, tileW = im.width * k, off = parRef * (1 - L.p), vl = CAMPX / SV;
-    const i0 = Math.floor((vl - off) / tileW) - 1, i1 = Math.ceil((vl + VWW - off) / tileW);
-    const y = Math.round(PY(L.base) - im.height * k * SV), h = Math.round(im.height * k * SV);
-    const t = GLR.on ? glTint(im, 'land', fx.map(v => v * (1 - L.haze)), hz.map(v => v * L.haze / 255), false) : im;
+    if (!!L.near !== !!near) continue;
+    const im = L.s.c, Sl = layerScale(L.q), tileW = im.width * L.k;
+    const i0 = Math.floor(layerX(0, L, Sl) / tileW) - 1, i1 = Math.ceil(layerX(VWP, L, Sl) / tileW) + 1;
+    const h = Math.round(im.height * L.k * Sl), y = Math.round(PY(L.base)) - h;
+    const t = GLR.on ? glTint(im, 'land' + L.q, fx.map(v => v * (1 - L.haze)), hz.map(v => v * L.haze / 255), false) : im;
     for (let i = i0; i <= i1; i++) {
-      const X = Math.round((i * tileW + off) * SV - CAMF), Wd = Math.round(((i + 1) * tileW + off) * SV - CAMF) - X;
-      C.drawImage((i & 1) && !GLR.on ? L.s.flip : t, X, y, Wd, h);
+      const X = Math.round(layerPivX + Sl * (i * tileW - L.p * layerRefX)), X2 = Math.round(layerPivX + Sl * ((i + 1) * tileW - L.p * layerRefX));
+      if (X2 < -2 || X > VWP + 2) continue;
+      C.drawImage((i & 1) && !GLR.on ? L.s.flip : t, X, y, X2 - X, h);
     }
     // (under the nearest trees, down to the ground: their shade, so a low valley shows no sky under them)
-    if (L.under) { C.fillStyle = css3(L.under.map((v, j) => (v * (1 - L.haze) + hz[j] * L.haze) * fx[j])); C.fillRect(0, y + h - 1, bw, bh - y - h + 1); }
+    if (L.under) { C.fillStyle = css3(L.under.map((v, j) => (v * (1 - L.haze) + hz[j] * L.haze) * fx[j])); C.fillRect(-SHX - 2, y + h - 1, VWP + 4, bh - y - h + 1); }
+  }
+}
+
+/* ---- tall grass (user Oct 25, their picture): clumps about half a tank tall standing on the ground; a tank driving
+   through flattens them, a blast or a crater under them tears them out, and the cuttings fly ---- */
+const TUFT_PX = 1.25;                                  // world units an art pixel (half a ground cell: finer than the earth)
+let tuftArt = null;
+function paintTuft(seed, wPx, hPx) {
+  const R = seededRng(seed), c = makeCanvas(wPx + 2, hPx + 1), x = c.getContext('2d');
+  const LITE = [168, 214, 84], MID = [112, 168, 56], DARK = [58, 104, 40], DEEP = [38, 70, 34];
+  const px = (a, b, col) => { x.fillStyle = css3(col); x.fillRect(a, b, 1, 1); };
+  const n = Math.round(wPx * 1.6);
+  // blades from the back (dark) to the front (light): each a line leaning out from the clump's middle, tapering up
+  for (let i = 0; i < n; i++) {
+    const f = i / n, bx = 1 + R() * wPx, lean = (bx - wPx / 2 - 1) / wPx * (0.8 + R() * 0.6) + (R() - 0.5) * 0.3;
+    const h = hPx * (0.62 + 0.38 * R()) * (1 - 0.3 * Math.abs(bx - wPx / 2) / wPx * 2);
+    const col = f < 0.3 ? DEEP : f < 0.6 ? DARK : f < 0.85 ? MID : LITE;
+    for (let y = 0; y < h; y++) {
+      const u = y / h, xx = Math.round(bx + lean * y * (0.6 + u * 0.8));
+      px(xx, hPx - y, u > 0.8 && col !== DEEP ? (col === LITE ? [206, 236, 120] : MID) : col);
+    }
+  }
+  // the foot: a dark mat where it meets the ground
+  for (let xx = 1; xx <= wPx; xx++) if (R() < 0.8) px(xx, hPx, DEEP);
+  return c;
+}
+function buildTuftArt() {
+  tuftArt = [];
+  // (about half a tank's height, user Oct 25: 11-14 units)
+  for (let i = 0; i < 8; i++) { const w = 9 + (i % 4) * 4, h = 10 + ((i * 5) % 4); tuftArt.push(paintTuft(700 + i * 13, w, h)); }
+}
+function buildTufts() {
+  land.tufts = [];
+  const R = seededRng(5150), W = WORLD_W;
+  let x = 30 + R() * 40;
+  while (x < W - 30) {
+    const u = x / W, sandy = Math.exp(-Math.pow((u - 0.5) / 0.085, 2));
+    const c = ltCol(x), top = landTop(x);
+    // (none on the sand, on rock, or where the ground's too steep for it to stand)
+    const ok = sandy < 0.3 && ltCell(c, ltRow(top + 1)) === M_GRASS && Math.abs(landTop(x - 6) - landTop(x + 6)) < 6;
+    if (ok) {
+      const n = R() < 0.35 ? 2 + Math.floor(R() * 2) : 1;      // (some in little stands of two or three)
+      for (let k = 0; k < n; k++) { const xx = x + k * (6 + R() * 5); land.tufts.push({ x: xx, k: Math.floor(R() * 8), s: 0.85 + R() * 0.45, ph: R() * 6, alive: true, flip: R() < 0.5 }); }
+    }
+    x += 22 + R() * 70;
+  }
+}
+// cut down: the cuttings fly, a stubble's left
+function cutTuft(t, vx, hard) {
+  if (!t.alive) return;
+  t.alive = false;
+  if (SIM_ONLY) return;
+  const cols = ['#a8d654', '#70a838', '#3a6828', '#cbe878'];
+  const y = landTop(t.x) - 4 * t.s;
+  for (let i = 0; i < (hard ? 12 : 7); i++) debris.push({ x: t.x + rnd(-6, 6), y: y - rnd(0, 6), vx: vx * 0.5 + rnd(-50, 50) * (hard ? 2 : 1), vy: -rnd(30, 110) * (hard ? 2 : 1), a: rnd(0, 6), w: rnd(-10, 10), sw: rnd(1, 2.4), sh: rnd(0.6, 1.1), col: cols[i & 3], state: 0, bub: 0, seed: Math.random() * 6, age: 0, clod: true });
+}
+// every frame: tanks flatten what they drive through, a helicopter's skids too as it lands; ground dug away under
+// a clump takes it
+function stepTufts() {
+  if (!land.tufts) return;
+  for (const t of land.tufts) {
+    if (!t.alive) continue;
+    const half = (9 + (t.k % 4) * 4) * TUFT_PX * t.s / 2;
+    for (const tk of tanks) if (tk && tk.state === 'alive' && Math.abs(t.x - tk.x) < TANK_L * 0.45 + half && Math.abs(landTop(t.x) - tk.y) < 14) { cutTuft(t, tk.vx, false); break; }
+    if (!t.alive) continue;
+    for (const h of helis) if (h && h.state === 'landed' && Math.abs(t.x - h.x) < heliHalf() * 0.5 + half) { cutTuft(t, 0, false); break; }
+  }
+}
+// a blast or a crater: the clumps in reach go
+function landTuftBlast(x, y, r) {
+  if (!land.tufts) return;
+  for (const t of land.tufts) if (t.alive && Math.abs(t.x - x) < r && Math.abs(landTop(t.x) - y) < r + 10) cutTuft(t, (t.x - x) * 3, true);
+}
+function drawTufts(x0, x1) {
+  if (!land.tufts) return;
+  if (!tuftArt) buildTuftArt();
+  const sway = clamp((E.windU || 0) / 75, -1, 1);
+  for (const t of land.tufts) {
+    if (t.x < x0 - 20 || t.x > x1 + 20) continue;
+    const top = landTop(t.x);
+    if (!t.alive) {
+      // (stubble: a few short dark stalks)
+      C.fillStyle = '#3a6028';
+      const s = Math.max(1, Math.round(TUFT_PX * SV));
+      for (let i = -2; i <= 2; i += 2) C.fillRect(Math.round(PX(t.x + i * TUFT_PX * 1.5)), Math.round(PY(top)) - s * 2, s, s * 2);
+      continue;
+    }
+    const im = tuftArt[t.k], k = TUFT_PX * t.s * SV, w = Math.round(im.width * k), h = Math.round(im.height * k);
+    const X = Math.round(PX(t.x) - w / 2), Y = Math.round(PY(top + 1.5)) - h;
+    const sk = (sway * 0.25 + Math.sin(time * 1.7 + t.ph) * 0.08 * (0.4 + Math.abs(sway)));
+    C.save(); C.translate(X + w / 2, Y + h); C.transform(1, 0, -sk, 1, 0, 0);
+    if (t.flip) C.scale(-1, 1);
+    C.drawImage(scaled(im, k, true), -w / 2, -h, w, h);
+    C.restore();
   }
 }
 
@@ -16203,6 +16483,8 @@ function drawLandBg() {
    ================================================================ */
 const TANK_L = 60, TANK_K = 0.5, TANK_V = 46, TANK_HP = 6, TANK_AMMO = 12, TANK_RELOAD = 1.4;
 const HELI_K = 0.19, HELI_V = 120, HELI_VY = 80, HELI_HP = 4, HELI_ROCKETS = 8, HELI_RELOAD = 0.6, HELI_TURN_T = 0.7;
+// (user Oct 25: the helicopter flies no higher than a screen and a half above the ground at home)
+const HELI_CEIL = WATER_Y - 95 - 1.5 * VIEW_H;
 const LAND_RESPAWN = 4;                                // seconds before a lost tank or helicopter is replaced
 const tanks = [null, null], helis = [null, null], landWrecks = [];
 const landWait = [{ tank: 0, heli: 0 }, { tank: 0, heli: 0 }];
@@ -16239,12 +16521,48 @@ function paintTurret(col) {
   px(10, 0, 1, 8, [60, 60, 56]);                                               // the aerial
   return c;
 }
+// a one-pixel dark edge round a picture's shape (inside its canvas: the pictures leave a pixel to spare)
+function outlineArt(c, col) {
+  const W = c.width, H = c.height, x = c.getContext('2d'), id = x.getImageData(0, 0, W, H), d = id.data, a = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) a[i] = d[i * 4 + 3] > 100 ? 1 : 0;
+  for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) {
+    const i = y * W + xx; if (a[i]) continue;
+    if ((xx > 0 && a[i - 1]) || (xx < W - 1 && a[i + 1]) || (y > 0 && a[i - W]) || (y < H - 1 && a[i + W])) { d[i * 4] = col[0]; d[i * 4 + 1] = col[1]; d[i * 4 + 2] = col[2]; d[i * 4 + 3] = 235; }
+  }
+  x.putImageData(id, 0, 0);
+  return c;
+}
+// the helicopter's olive paint repainted toward a team's colour, each pixel keeping its own light and shade (the
+// glass, the crew, the white number and the dark metal stay as they are)
+function teamPaint(src, col, amt) {
+  const c = copyCanvas(src), x = c.getContext('2d'), id = x.getImageData(0, 0, c.width, c.height), d = id.data;
+  const cl = 0.3 * col[0] + 0.59 * col[1] + 0.11 * col[2] || 1;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] < 40) continue;
+    const r = d[i], g = d[i + 1], b = d[i + 2], mx = Math.max(r, g, b), mn = Math.min(r, b, g);
+    // (olive: red and green well over blue, close to each other, not near white)
+    if (!(g > b + 10 && r > b + 4 && Math.abs(r - g) < 46 && mx < 215 && mx - mn > 14)) continue;
+    const L = 0.3 * r + 0.59 * g + 0.11 * b, k = L / cl * 1.08;
+    d[i] = clamp(r + (col[0] * k - r) * amt, 0, 255); d[i + 1] = clamp(g + (col[1] * k - g) * amt, 0, 255); d[i + 2] = clamp(b + (col[2] * k - b) * amt, 0, 255);
+  }
+  x.putImageData(id, 0, 0);
+  return c;
+}
+const heliTeam = [null, null];
+function heliTeamArt(p) {
+  if (!heliArt) return null;
+  const tc = img.teamCol && img.teamCol[p] ? img.teamCol[p] : null, key = tc ? tc.join(',') : '';
+  if (heliTeam[p] && heliTeam[p].key === key) return heliTeam[p];
+  const views = heliArt.map(V => { if (!tc) return V; const body = teamPaint(V[1].body, tc, 0.62); return { 1: { body, rotor: V[1].rotor }, [-1]: { body: flipCanvas(body), rotor: V[-1].rotor } }; });
+  return (heliTeam[p] = { views, key });
+}
 let tankArt = [null, null];
 function buildTankArt() {
   for (let p = 0; p < 2; p++) {
     const tc = img.teamCol && img.teamCol[p] ? img.teamCol[p] : [120, 128, 80];
-    const col = mix3([96, 112, 70], tc, 0.28).map(v => Math.round(v));
-    const hull = paintTank(col), tur = paintTurret(col);
+    // (user Oct 25: tinted toward the team's colour, and outlined dark, so it stands out from the grass)
+    const col = mix3([86, 98, 66], tc, 0.62).map(v => Math.round(v));
+    const hull = outlineArt(paintTank(col), [18, 20, 16]), tur = outlineArt(paintTurret(col), [18, 20, 16]);
     tankArt[p] = { 1: { hull, tur }, [-1]: { hull: flipCanvas(hull), tur: flipCanvas(tur) }, col, key: tc.join(',') };
   }
 }
@@ -16264,7 +16582,7 @@ function makeTank(p, x) {
 function makeHeli(p, x) {
   const y = landBelow(x, LT_Y0) - heliSkid();
   return { id: p, kind: 'heli', state: 'landed', x, y, vx: 0, vy: 0, facing: SIDE(p) ? -1 : 1, tilt: 0, turn: null, hp: HELI_HP, rockets: HELI_ROCKETS, rk: 0, mgT: 0,
-    rotor: 0, spin: 0, cap: null, smokeT: 0, input: 0, fixT: 0, roll: 0 };
+    rotor: 0, spin: 0, cap: null, smokeT: 0, input: 0, fixT: 0, roll: 0, lampPh: Math.random() };
 }
 function buildLandUnits() {
   landWrecks.length = 0;
@@ -16349,8 +16667,24 @@ function tankFire(t) {
   const mx = px + ux * L, my = py + uy * L, el = Math.atan2(-uy, ux * t.facing);
   launch(mx, my, el, (t.cpuPower != null && crew[t.id].mode !== 'tank' ? t.cpuPower : guns[t.id].power), t.facing, t.vx, t.id, 'tank');
   shells[shells.length - 1].fins = true;
+  tankMuzzleBall(mx, my, ux, uy, t);
   t.vx -= ux * 10;
   shakeAt(2, t.x);
+}
+// (user Oct 25, their photo of a tank firing) the shot leaves a round fireball standing in front of the muzzle, a
+// white jet of gas out of the barrel through it, and the blast kicks the dust up off the ground under it
+function tankMuzzleBall(mx, my, ux, uy, t) {
+  if (SIM_ONLY) return;
+  const cx = mx + ux * 16, cy = my + uy * 16;
+  flashes.push({ x: cx, y: cy, r: 22, life: 0, max: 0.14 });
+  for (let i = 0; i < 60; i++) {
+    const a = rnd(0, Math.PI * 2), sp = Math.pow(Math.random(), 0.5) * rnd(30, 80), r0 = rnd(0, 9);
+    spawnFlame(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, Math.cos(a) * sp + ux * 55 + t.vx, Math.sin(a) * sp * 0.85 + uy * 55 - rnd(0, 14), rnd(1.35, 1.65), rnd(4.5, 8), rnd(1.5, 2.1));
+    flames[flames.length - 1].clean = true;
+  }
+  for (let i = 0; i < 7; i++) spawnSmoke(mx + ux * rnd(0, 26), my + uy * rnd(0, 26), { mist: true, keep: true, r: rnd(2, 4), grow: rnd(2, 3.5), rmax: rnd(9, 14), lift: 3, vx: ux * rnd(60, 130), vy: uy * rnd(60, 130), life: rnd(1.6, 2.6), alpha: 0.75 });
+  const gy = landBelow(cx, cy - 4);
+  if (gy - cy < 50) kickLandDust(cx, gy, 10);
 }
 function tankMG(t) {
   if (!t || t.state !== 'alive') return;
@@ -16369,9 +16703,33 @@ function tankHurt(t, amt, x, y, by) {
   if (amt >= 1) { spawnSparks(x, y, 14, 220); sfxImpact(x); }
   if (t.hp <= 0) killTank(t);
 }
+// (user Oct 25, their photo) a hit on a tank goes off on top of it: a fireball that rolls upward out of the hull,
+// black smoke over it, and plates and bits of the tank thrown high
+function tankHitBlast(t, power) {
+  const [px, py] = tankPivot(t), x = px, y = py - 2;
+  sfxExplosion(x, 0.6 + 0.4 * power);
+  shakeAt(4 + 5 * power, x);
+  if (SIM_ONLY) return;
+  flashes.push({ x, y: y - 6, r: 22 + 12 * power, life: 0, max: 0.16 });
+  const n = Math.round(30 + 30 * power);
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + rnd(-0.9, 0.9), sp = Math.pow(Math.random(), 0.6) * (90 + 80 * power);
+    spawnFlame(x + rnd(-10, 10), y + rnd(-4, 3), Math.cos(a) * sp * 0.7 + t.vx * 0.5, Math.sin(a) * sp - rnd(20, 70), rnd(1.25, 1.55), rnd(3, 6) * (0.75 + 0.35 * power), rnd(1.1, 1.6));
+  }
+  for (let i = 0; i < 10 * power + 4; i++) spawnEmber(x + rnd(-8, 8), y - rnd(0, 6), t.vx * 0.3, 1.6);
+  spawnSparks(x, y, 16 + 10 * power, 300);
+  for (let i = 0; i < 6 + 6 * power; i++) spawnSmoke(x + rnd(-6, 6), y - rnd(14, 34), { dark: 0.1, r: rnd(3.5, 6) * (0.7 + 0.4 * power), grow: rnd(3, 5), lift: 40, vx: rnd(-10, 10), vy: rnd(-70, -35), life: rnd(6, 9), alpha: rnd(0.55, 0.75) });
+  // the debris: dark shards and a few in the tank's own paint, flung high
+  const col = tankArtOf(t.id).col, own = css3(col.map(v => v * 0.8));
+  const k0 = debris.length;
+  spawnDebris(x, y - 4, Math.round(10 + 8 * power), t.vx * 0.3);
+  for (let k = k0; k < debris.length; k++) { const d = debris[k]; d.vy *= 1.6; d.vx *= 1.15; d.sw *= 1.4; d.sh *= 1.3; if (Math.random() < 0.35) d.col = own; }
+  gridExplosion(x, y, 50 * power, 300 * power);
+}
 function killTank(t) {
   t.state = 'dead';
-  sectionBlast(t.x, t.y - 10, 1.4, t.vx);
+  tankHitBlast(t, 1.6);
+  sectionBlast(t.x, t.y - 10, 1.1, t.vx);
   spawnDebris(t.x, t.y - 10, 16, t.vx * 0.3);
   landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.a, facing: t.facing, t: 0, burn: 8 });
   landCarve(t.x, t.y, 10);
@@ -16430,17 +16788,21 @@ function stepHeli(h, dt) {
   // it turns round to face the way it's going (through the three-quarter and head-on views)
   if (!h.turn && lever && Math.sign(lever) !== h.facing) h.turn = { t: 0, from: h.facing };
   if (h.turn) { h.turn.t += dt; if (h.turn.t >= HELI_TURN_T) { h.facing = -h.turn.from; h.turn = null; } }
-  // the nose dips going forward (and comes up slowing down)
-  const tilt = clamp(h.vx / HELI_V, -1, 1) * h.facing * 0.2 + clamp((tvx - h.vx) / HELI_V, -1, 1) * h.facing * 0.06;
+  // the nose dips going forward (and comes up slowing down). A positive turn on the screen tips the right-hand end
+  // down, so the speed itself (not times the facing) gives the nose-down tilt either way
+  const tilt = clamp(h.vx / HELI_V, -1, 1) * 0.16 + clamp((tvx - h.vx) / HELI_V, -1, 1) * 0.08;
   h.tilt += (tilt - h.tilt) * Math.min(1, dt * 4);
   h.x = clamp(h.x + h.vx * dt, 30, WORLD_W - 30);
-  h.y = Math.max(SKY_TOP + 400, h.y + h.vy * dt);
+  // (the ceiling: the climb fades out over the last 80 units)
+  if (h.vy < 0 && h.y < HELI_CEIL + 80) h.vy = Math.max(h.vy, -Math.max(0, h.y - HELI_CEIL) * 1.5);
+  h.y = Math.max(HELI_CEIL, h.y + h.vy * dt);
   // the ground: under its skids (and its nose and tail as it goes): gently, it lands; fast, it crashes
   const foot = h.y + heliSkid(), half = heliHalf() * 0.8;
   const gm = landBelow(h.x, h.y), gl = landBelow(h.x - half, h.y), gr = landBelow(h.x + half, h.y);
-  if (gl < h.y + heliSkid() * 0.2 || gr < h.y + heliSkid() * 0.2) { if (Math.abs(h.vx) > 50 || h.vy > 50) { crashHeli(h); return; } h.vx = -h.vx * 0.3; h.x += h.vx * dt * 2; }
+  // (user Oct 25: flying it down onto the ground always lands it - only a helicopter shot down crashes. Into a slope
+  // ahead it's pushed back and up, never wrecked)
+  if ((h.vx < 0 ? gl : gr) < h.y + heliSkid() * 0.2 && Math.abs(h.vx) > 2) { h.x -= h.vx * dt * 2; h.vx = -h.vx * 0.3; }
   if (foot >= gm) {
-    if (h.vy > 70 || Math.abs(h.vx) > 70) { crashHeli(h); return; }
     h.y = gm - heliSkid(); h.state = 'landed'; h.vy = 0; h.vx = 0; kickLandDust(h.x, gm, 6);
   }
   // rotor wash: dust kicked up off the ground under it when it's low
@@ -16464,7 +16826,7 @@ function heliPoint(h, fx, fy) {
   return [h.x + lx * ca - fy * sa, h.y + lx * sa + fy * ca];
 }
 function heliMG(h) {
-  const g = guns[h.id], el = clamp((h.cpuElev != null && crew[h.id].mode !== 'heli' ? h.cpuElev : g.elev), -80, 25) * Math.PI / 180 + 0;
+  const g = hguns[h.id], el = clamp((h.cpuElev != null && crew[h.id].mode !== 'heli' ? h.cpuElev : g.elev), -80, 25) * Math.PI / 180 + 0;
   const [mx, my] = heliPoint(h, heliHalf() * 0.9, 8);
   const ux = Math.cos(el) * h.facing, uy = -Math.sin(el), sp = MG_SPEED * (0.8 + g.power * 0.35), spr = rnd(-0.02, 0.02);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spr) * sp + h.vx, vy: (uy + ux * spr) * sp + h.vy, owner: h.id, age: 0 });
@@ -16475,10 +16837,12 @@ function heliRocket(h) {
   if (!h || h.state !== 'fly' || h.turn) { if (h) sfxEmpty(h.x); return; }
   if (h.rockets <= 0 || h.rk > 0) { sfxEmpty(h.x); return; }
   h.rockets--; h.rk = HELI_RELOAD;
+  // (user Oct 25: as the plane's - it unclips from the pod under the stub wing, drops a moment, then its motor lights
+  // and it goes off along the nose)
   const side = h.rockets & 1 ? 0.5 : -0.5;
-  const [cx, cy] = heliPoint(h, -2 + side * 4, 12);
-  const ux = Math.cos(h.tilt) * h.facing, uy = Math.sin(h.tilt) * 1;
-  shells.push({ x: cx, y: cy, vx: h.vx, vy: h.vy + 10, ux, uy: uy, owner: h.id, from: 'rocket', burn: ROCKET_BURN, drop: 0.18, age: 0, trail: 0, under: false, ut: 0 });
+  const [cx, cy] = heliPoint(h, heliHalf() * 0.04 + side * 3, 8);
+  const ux = Math.cos(h.tilt) * h.facing, uy = Math.sin(h.tilt) * h.facing;
+  shells.push({ x: cx, y: cy, vx: h.vx, vy: h.vy + 15, ux, uy, owner: h.id, from: 'rocket', burn: ROCKET_BURN, drop: ROCKET_DROP, age: 0, trail: 0, under: false, ut: 0 });
   sfxRocketRelease(cx);
 }
 function heliHurt(h, amt, x, y) {
@@ -16542,17 +16906,74 @@ function stepLandUnits(dt) {
   for (let i = landWrecks.length - 1; i >= 0; i--) {
     const w = landWrecks[i];
     w.t += dt;
-    if (w.burn > 0 && w.t < w.burn && Math.random() < dt * 8) spawnSmoke(w.x + rnd(-8, 8), w.y - 12, { dark: 0, r: rnd(3, 5), grow: rnd(4, 6), lift: 26, vx: rnd(-8, 8), life: rnd(5, 8), alpha: 0.6 });
+    if (w.burn > 0 && w.t < w.burn && Math.random() < dt * (w.kind === 'plane' ? 12 * (1 - 0.6 * w.t / w.burn) : 8)) spawnSmoke(w.x + rnd(-8, 8), w.y - 12, { dark: 0, r: rnd(3, 5) * (w.kind === 'plane' ? 1.4 : 1), grow: rnd(4, 6), lift: w.kind === 'plane' ? 40 : 26, vx: rnd(-8, 8), vy: w.kind === 'plane' ? rnd(-50, -25) : -15, life: rnd(8, 12), alpha: 0.7 });
+    if (w.fire && w.t < w.fire && !SIM_ONLY && Math.random() < dt * 14) spawnFlame(w.x + rnd(-14, 10) * w.facing, w.y - rnd(2, 10), rnd(-10, 10), -rnd(30, 80), rnd(1.1, 1.4), rnd(2.5, 4.5) * (1 - 0.5 * w.t / w.fire), rnd(1.4, 2));
     // the ground under it dug away: it drops onto what's left
     const g = landBelow(w.x, w.y - 6);
     if (g > w.y + 1) w.y = Math.min(g, w.y + 120 * dt);
-    if (w.t > 40) landWrecks.splice(i, 1);
+    if (w.t > (w.kind === 'plane' ? 60 : 40)) landWrecks.splice(i, 1);
   }
   stepLandSand(dt);
+  stepSpikeBursts(dt);
+  stepTufts();
 }
 
+/* ---- a plane into the ground (user Oct 25, their photo): a small crater with the broken plane in it, a fireball
+   that rolls up into black smoke, and the wreck burning on, its smoke column standing over it for a long while ---- */
+function planeGroundCrash(pl, x, y) {
+  const gy = landBelow(x, y - 12);
+  landCarve(x, gy + 2, 13);
+  const fy = landBelow(x, gy - 4);
+  sfxExplosion(x, 1.3); shakeAt(10, x);
+  guysNear(x, fy, 50);
+  if (!SIM_ONLY) {
+    flashes.push({ x, y: fy - 10, r: 46, life: 0, max: 0.2 });
+    // the fireball: a big hot heap rolling up and forward with the plane's speed
+    for (let i = 0; i < 90; i++) {
+      const a = -Math.PI / 2 + rnd(-1.4, 1.4), sp = Math.pow(Math.random(), 0.55) * 150;
+      spawnFlame(x + rnd(-10, 10), fy - rnd(0, 10), Math.cos(a) * sp + pl.vx * 0.25, Math.sin(a) * sp * 0.8 - rnd(30, 80), rnd(1.3, 1.6), rnd(5, 9), rnd(0.9, 1.3));
+    }
+    for (let i = 0; i < 18; i++) spawnEmber(x + rnd(-10, 10), fy - rnd(0, 10), pl.vx * 0.2, 1.8);
+    spawnSparks(x, fy - 4, 30, 320);
+    // the black smoke the fireball turns into, climbing over it
+    for (let i = 0; i < 26; i++) spawnSmoke(x + rnd(-16, 16), fy - rnd(10, 46), { dark: 0, r: rnd(6, 10), grow: rnd(4, 7), lift: 46, vx: rnd(-12, 12) + pl.vx * 0.05, vy: rnd(-70, -25), life: rnd(10, 15), alpha: rnd(0.65, 0.85) });
+    spikeBurst(x, fy, 0.7, groundAt(x, fy));
+    // bits of the plane thrown out
+    const k0 = debris.length; spawnDebris(x, fy - 6, 14, pl.vx * 0.3);
+    const tc = (img.teamCol && img.teamCol[pl.id]) || [150, 60, 50];
+    for (let k = k0; k < debris.length; k++) if (Math.random() < 0.4) debris[k].col = css3(tc.map(v => v * 0.7));
+  }
+  gridExplosion(x, fy, 80, 420);
+  // hurt what's close (not the plane's own side)
+  for (let p = 0; p < 2; p++) {
+    if (p === pl.id) continue;
+    const t = tanks[p], h = helis[p];
+    if (t && t.state === 'alive' && Math.abs(t.x - x) < 50) tankHurt(t, 2, x, fy);
+    if (h && (h.state === 'fly' || h.state === 'landed') && Math.hypot(h.x - x, h.y - fy) < 50) heliHurt(h, 2, x, fy);
+  }
+  landWrecks.push({ kind: 'plane', id: pl.id, x, y: landBelow(x, fy - 6), a: clamp(Math.atan2(pl.vy, Math.abs(pl.vx) + 1), 0.15, 1.1), facing: pl.vx >= 0 ? 1 : -1, t: 0, burn: 40, fire: 14 });
+  pl.state = 'gone'; pl.wait = 0; pl.smokeT = 0; pl.strand = null;
+}
+// the wreck in its crater: a charred fuselage nose-down in the earth, the tail standing up, a torn wing beside it
+function drawPlaneWreck(w) {
+  if (w.x < CAMPX / SV - 80 || w.x > CAMPX / SV + VWW + 80) return;
+  const tc = (img.teamCol && img.teamCol[w.id]) || [150, 60, 50], K = SV, f = w.facing;
+  const R = (x, y, ww, hh, c) => { C.fillStyle = c; C.fillRect(Math.round(x * K), Math.round(y * K), Math.max(1, Math.round(ww * K)), Math.max(1, Math.round(hh * K))); };
+  const burnt = css3(tc.map(v => v * 0.28 + 12)), dark = '#1c1b1e', mid = '#38363a';
+  C.save(); C.translate(Math.round(PX(w.x)), Math.round(PY(w.y))); C.scale(f, 1);
+  // a torn wing lying flat beside the hole
+  R(-26, -3, 16, 3, mid); R(-26, -3, 16, 1, '#4c4a50'); R(-14, -4, 3, 1, dark);
+  // the fuselage, nose buried, tail up
+  C.save(); C.rotate(-w.a);
+  R(-30, -6, 34, 7, dark); R(-30, -6, 34, 2, burnt); R(-24, -4, 6, 2, '#5a3a22');
+  R(-32, -15, 6, 10, dark); R(-32, -15, 6, 2, burnt);           // the tail fin
+  R(-36, -7, 10, 2, mid);                                       // the tailplane
+  C.restore();
+  C.restore();
+}
 /* ---- what shells, bombs and rounds hit on land ---- */
-const LAND_BLAST = { tank: [15, 24, 2], rocket: [12, 22, 2], bomb: [20, 34, 3], ship: [14, 22, 2] };
+// (crater radius, reach, damage to what it hit; user Oct 25: the tank's missile digs a hole three times as big)
+const LAND_BLAST = { tank: [45, 44, 2], rocket: [12, 22, 2], bomb: [20, 34, 3], ship: [14, 22, 2] };
 // a shell, missile or bomb this frame: a tank or helicopter in its way, or the ground. True: it's gone off
 function landShellHit(s) {
   for (let p = 0; p < 2; p++) {
@@ -16567,14 +16988,128 @@ function landShellHit(s) {
 // a blast on land: the crater, the fireball, and everything near it hurt (what it hit hardest)
 function landBlast(s, x, y, hitV) {
   const B = LAND_BLAST[s.from] || LAND_BLAST.tank, [crater, reach, dmg] = B;
-  landCarve(x, y, crater);
-  sectionBlast(x, y, s.from === 'bomb' ? 1.2 : 0.8, s.vx * 0.2);
-  kickLandDust(x, y, 18);
+  if (hitV && hitV.kind === 'tank') tankHitBlast(hitV, s.from === 'bomb' ? 1.3 : 1);   // (on top of the tank, going up)
+  else {
+    const gy = landBelow(x, y - crater);
+    landCarve(x, y, crater);
+    groundFlash(x, y, s.from === 'bomb' ? 1.2 : s.from === 'tank' ? 1 : 0.6);   // (a short fireball, no black smoke: the earth is the show)
+    if (gy - y < crater + 10) spikeBurst(x, Math.min(y, gy), s.from === 'bomb' ? 1.3 : s.from === 'tank' ? 1 : 0.55, groundAt(x, Math.min(y, gy)));
+    kickLandDust(x, y, 18);
+  }
   for (let p = 0; p < 2; p++) {
     const t = tanks[p], h = helis[p];
     if (t && t.state === 'alive') { const d = Math.hypot(t.x - x, t.y - 10 - y); if (t === hitV) tankHurt(t, dmg, x, y); else if (d < reach + TANK_L * 0.3 && p !== s.owner) tankHurt(t, 1, x, y); }
     if (h && (h.state === 'fly' || h.state === 'landed')) { const d = Math.hypot(h.x - x, h.y - y); if (h === hitV) heliHurt(h, dmg, x, y); else if (d < reach + 20 && p !== s.owner) heliHurt(h, 1, x, y); }
   }
+}
+/* ---- a hit in the ground (user Oct 25, their pictures): a burst of earth in spikes ----
+   Each spike is a jet of earth thrown out of the hole: a chain of grains launched together along one line, the
+   ones at its tip fastest, so the jet stretches out into a long tapering streak as it rises (the middle ones near
+   upright and longest, the outer ones leaning out and shorter: the spiked fan of the pictures). Air drag slows the
+   grains, gravity bends the streaks over, they break up and fall back, and where they come down a low cloud of dust
+   spreads out along the ground and slowly settles. Dark earth at the foot, pale dust toward the tips; brown on dirt,
+   yellow on sand. */
+const SPIKE_PAL = {
+  dirt: { foot: [72, 52, 38], mid: [128, 100, 74], tip: [206, 186, 152], dust: 'dust', dustD: 'dustD' },
+  sand: { foot: [150, 118, 62], mid: [204, 172, 106], tip: [242, 226, 176], dust: 'sand' },
+  grass: { foot: [60, 66, 34], mid: [118, 104, 70], tip: [200, 186, 150], dust: 'dust' },
+};
+const spikeBursts = [];
+function spikeBurst(x, y, size, mat) {
+  if (SIM_ONLY) return;
+  const P = SPIKE_PAL[mat] || SPIKE_PAL.dirt, n = Math.round(18 + 16 * size), spikes = [];
+  for (let i = 0; i < n; i++) {
+    const u = (i + 0.5) / n * 2 - 1 + rnd(-0.06, 0.06), a = -Math.PI / 2 + u * 0.95 + rnd(-0.08, 0.08);
+    // (the upright ones go highest; a few stand out taller still)
+    const V = (230 + 240 * (1 - Math.abs(u)) * (Math.random() < 0.2 ? 1.25 : 1) + rnd(-40, 40)) * (0.7 + 0.45 * size);
+    const m = 16, w = (6 + 6 * (1 - Math.abs(u))) * (0.6 + 0.45 * size) * rnd(0.75, 1.2), g = [];
+    const x0 = x + u * 10 * size + rnd(-3, 3);
+    for (let k = 0; k < m; k++) {
+      const f = Math.pow(k / (m - 1), 0.85), v = V * (0.12 + 0.88 * f);
+      g.push({ x: x0, y: y - 1, vx: Math.cos(a) * v, vy: Math.sin(a) * v, f });
+    }
+    spikes.push({ g, w, life: rnd(1.1, 1.6), seed: Math.random() * 100, dark: Math.random() < 0.35 });
+  }
+  spikeBursts.push({ x, y, t: 0, spikes, P, size, dustDone: false });
+  // the clods: dark lumps of earth thrown out with it (as in the user's picture)
+  for (let k = 0; k < 10 + 10 * size; k++) {
+    const a = -Math.PI / 2 + rnd(-1, 1), v = rnd(140, 380) * (0.7 + 0.4 * size);
+    debris.push({ x: x + rnd(-6, 6), y: y - 2, vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: rnd(0, 6), w: rnd(-8, 8), sw: rnd(2, 4.2), sh: rnd(2, 3.6), col: css3(P.foot.map(c => c * rnd(0.75, 1.1))), state: 0, bub: 0, seed: Math.random() * 6, age: 0, clod: true });
+  }
+}
+function groundFlash(x, y, power) {
+  sfxExplosion(x, 0.5 + 0.5 * power);
+  shakeAt(4 + 5 * power, x);
+  gridExplosion(x, y, 50 * power, 300 * power);
+  guysNear(x, y, 40);
+  if (SIM_ONLY) return;
+  flashes.push({ x, y: y - 6, r: 22 * power, life: 0, max: 0.12 });
+  for (let i = 0; i < 26 * power; i++) { const a = -Math.PI / 2 + rnd(-1.3, 1.3), sp = Math.pow(Math.random(), 0.6) * 120 * power; spawnFlame(x + rnd(-4, 4), y - rnd(0, 5), Math.cos(a) * sp, Math.sin(a) * sp - 20, rnd(1.2, 1.5), rnd(3, 5.5) * (0.7 + 0.3 * power), rnd(1.8, 2.6)); flames[flames.length - 1].clean = true; }
+  spawnSparks(x, y - 3, 10 * power, 240);
+}
+function stepSpikeBursts(dt) {
+  for (let i = spikeBursts.length - 1; i >= 0; i--) {
+    const B = spikeBursts[i];
+    B.t += dt;
+    const drag = Math.exp(-1.6 * dt);
+    for (const S of B.spikes) for (const q of S.g) {
+      if (q.down) continue;
+      q.vx *= drag; q.vy = q.vy * drag + 330 * dt;
+      q.x += q.vx * dt; q.y += q.vy * dt;
+      if (q.vy > 0 && landSolid(q.x, q.y)) { q.down = true; q.y = landBelow(q.x, q.y - 6); }
+    }
+    // the dust: as the burst tops out and falls back, a low cloud rolls out both ways along the ground and settles
+    if (!B.dustDone && B.t > 0.35) {
+      B.dustDone = true;
+      const n = Math.round(16 + 16 * B.size);
+      for (let k = 0; k < n; k++) {
+        const side = k & 1 ? 1 : -1, sp = rnd(10, 90) * (0.7 + 0.5 * B.size);
+        spawnSmoke(B.x + side * rnd(0, 26) * B.size, B.y - rnd(2, 12), { mist: true, fam: k % 3 ? B.P.dust : B.P.dustD || B.P.dust, r: rnd(5, 8) * (0.8 + 0.3 * B.size), grow: rnd(2.5, 4.5), rmax: rnd(18, 28), lift: 0.5, vx: side * sp, vy: rnd(-6, 6), life: rnd(5, 8), alpha: rnd(0.55, 0.8) });
+      }
+    }
+    if (B.t > 2.2) spikeBursts.splice(i, 1);
+  }
+}
+// drawn as pixel blocks: each streak a run of blocks between its grains, wide at the foot and tapering to the tip,
+// ragged at the edges; old grains thin out from the tip down and fade
+function drawSpikeBursts(x0, x1) {
+  if (!spikeBursts.length) return;
+  const PBw = Math.max(1, Math.round(1.25 * SV)), fx = E.fx || [1, 1, 1];
+  const col = (c, k) => 'rgb(' + Math.round(c[0] * fx[0] * k) + ',' + Math.round(c[1] * fx[1] * k) + ',' + Math.round(c[2] * fx[2] * k) + ')';
+  for (const B of spikeBursts) {
+    if (B.x < x0 - 300 || B.x > x1 + 300) continue;
+    const P = B.P;
+    for (const S of B.spikes) {
+      const age = B.t, fade = clamp(1 - (age - S.life * 0.55) / (S.life * 0.6), 0, 1);
+      if (fade <= 0) continue;
+      const g = S.g;
+      for (let k = 0; k < g.length - 1; k++) {
+        const a = g[k], b = g[k + 1];
+        // (the tip goes first: a grain shows while the fade reaches past it)
+        const show = fade * 1.25 - a.f * 0.55;
+        if (show <= 0) continue;
+        if (a.down && b.down) continue;
+        // (dark earth low down, paling to dust up the streak; a third of the streaks stay dark most of the way)
+        const ff = S.dark ? a.f * 0.55 : a.f, c0 = ff < 0.2 ? P.foot : ff < 0.55 ? P.mid : P.tip, c1 = ff < 0.12 ? P.foot : ff < 0.4 ? P.mid : P.tip;
+        const w = Math.max(1, S.w * Math.pow(1 - a.f, 0.9) * (0.5 + 0.5 * Math.min(1, show)) + 1);
+        const ax = PX(a.x), ay = PY(a.y), bx = PX(b.x), by = PY(b.y), L = Math.hypot(bx - ax, by - ay), steps = Math.max(1, Math.ceil(L / PBw));
+        // (past its peak the streak breaks into clumps: gaps open between the blocks)
+        const broken = age > S.life * 0.45;
+        for (let j = 0; j < steps; j++) {
+          const t = j / steps, h = hash(S.seed + k * 7.3 + j * 1.91);
+          if (broken && h < 0.35 + 0.4 * (1 - fade)) continue;
+          const cx = ax + (bx - ax) * t, cy = ay + (by - ay) * t, ww = Math.max(PBw, Math.round(w * SV * (0.7 + 0.6 * h) / PBw) * PBw);
+          C.globalAlpha = Math.min(1, show) * (0.85 + 0.15 * h);
+          const h2 = hash(S.seed * 1.7 + k * 3.1 + j * 5.3), jx = Math.round((h2 - 0.5) * 2) * PBw;
+          C.fillStyle = col(h < 0.5 ? c0 : c1, 0.85 + 0.25 * h2);
+          C.fillRect(Math.floor((cx - ww / 2) / PBw) * PBw + jx, Math.floor(cy / PBw) * PBw, ww, PBw);
+          // (a darker grain or two inside the streak: texture, not stripes)
+          if (h2 > 0.72 && ww > PBw * 2) { C.fillStyle = col(P.foot, 0.9); C.fillRect(Math.floor((cx + (h - 0.5) * ww * 0.6) / PBw) * PBw, Math.floor(cy / PBw) * PBw, PBw, PBw); }
+        }
+      }
+    }
+  }
+  C.globalAlpha = 1;
 }
 // a machine-gun round: a tank or helicopter (a scratch each), or the ground (a puff of dust). True: it's spent
 function landBulletHit(b) {
@@ -16598,7 +17133,7 @@ function heliHit(h, x, y) {
 // dust off the ground: tan puffs that drift and settle
 function kickLandDust(x, y, n) {
   if (SIM_ONLY) return;
-  for (let i = 0; i < n; i++) spawnSmoke(x + rnd(-6, 6), y - rnd(0, 4), { mist: true, r: rnd(2, 4), grow: rnd(2, 4), lift: 6, vx: rnd(-14, 14), vy: rnd(-12, -2), life: rnd(1.4, 2.6), alpha: rnd(0.3, 0.5), col: [176, 150, 112] });
+  for (let i = 0; i < n; i++) spawnSmoke(x + rnd(-6, 6), y - rnd(0, 4), { mist: true, r: rnd(2, 4), grow: rnd(2, 4), lift: 6, vx: rnd(-14, 14), vy: rnd(-12, -2), life: rnd(1.4, 2.6), alpha: rnd(0.3, 0.5), fam: 'dust' });
 }
 // a plane on land: it crashes into the ground (and onto a tank or helicopter it hits)
 function landPlaneCrash(pl, pts) {
@@ -16608,7 +17143,7 @@ function landPlaneCrash(pl, pts) {
       if (tanks[p] && tanks[p].state === 'alive' && tankHit(tanks[p], x, y)) { tankHurt(tanks[p], 3, x, y); return [x, y]; }
       if (helis[p] && (helis[p].state === 'fly' || helis[p].state === 'landed') && heliHit(helis[p], x, y)) { heliHurt(helis[p], 3, x, y); return [x, y]; }
     }
-    if (landSolid(x, y)) { landCarve(x, y, 16); return [x, y]; }
+    if (landSolid(x, y)) return [x, y, true];
   }
   return null;
 }
@@ -16646,7 +17181,7 @@ function drawLandHeli(h) {
   // turning: the three-quarter view, then head-on, then the three-quarter view the other way
   let vi = 0, face = h.facing;
   if (h.turn) { const u = h.turn.t / HELI_TURN_T; vi = u < 0.33 || u > 0.67 ? 1 : 2; face = u < 0.5 ? h.turn.from : -h.turn.from; }
-  const V = heliArt[vi], A = V[face], s = HELI_K * SV, mid = heliMidY();
+  const V = heliArt[vi], TA = heliTeamArt(h.id), A = TA ? TA.views[vi][face] : V[face], s = HELI_K * SV, mid = heliMidY();
   C.save();
   C.translate(PX(h.x), PY(h.y)); C.rotate(h.tilt + (h.roll || 0) * 0.15);
   const w = Math.round(A.body.width * s), X = -Math.round(w / 2), Y = -Math.round(mid * s);
@@ -16659,10 +17194,19 @@ function drawLandHeli(h) {
   if (h.spin > 0.6) { C.globalAlpha = 0.18; C.drawImage(rs, X, Y); }
   C.globalAlpha = 1;
   C.restore();
+  // (user Oct 25) a red lamp on the tail fin, blinking as the plane's does, drawn over the night with the planes' lamps;
+  // dimmer by day, but always there
+  if (vi === 0 && h.state !== 'down' && ((time + (h.lampPh || 0)) % 1.0) < 0.32) {
+    const ax = (face > 0 ? HELI_LAMP[0] : V.w - HELI_LAMP[0]) * s + X, ay = HELI_LAMP[1] * s + Y, a = h.tilt + (h.roll || 0) * 0.15;
+    const sx = PX(h.x) + ax * Math.cos(a) - ay * Math.sin(a), sy = PY(h.y) + ax * Math.sin(a) + ay * Math.cos(a);
+    planeLamps[viewIdx].push(sx, sy, clamp(0.7 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1));
+  }
 }
+const HELI_LAMP = [19, 124];                           // (the top of the tail fin, in the side view's pixels)
 function drawLandUnits(x0, x1) {
   for (const w of landWrecks) {
     if (w.kind === 'tank') drawLandTank({ id: w.id, x: w.x, y: w.y, a: w.a, facing: w.facing, recoil: 0 }, true);
+    else if (w.kind === 'plane') drawPlaneWreck(w);
     else drawLandHeliWreck(w);
   }
   for (let p = 0; p < 2; p++) {
@@ -16673,7 +17217,7 @@ function drawLandUnits(x0, x1) {
 }
 function drawLandHeliWreck(w) {
   if (!heliArt) return;
-  const A = heliArt[0][w.facing], s = HELI_K * SV, mid = heliMidY();
+  const TA = heliTeamArt(w.id), A = TA ? TA.views[0][w.facing] : heliArt[0][w.facing], s = HELI_K * SV, mid = heliMidY();
   C.save(); C.translate(PX(w.x), PY(w.y - heliSkid() * 0.6)); C.rotate(w.a + 0.25 * w.facing);
   const bw = Math.round(A.body.width * s), BS = scaled(A.body, s, true);
   C.drawImage(BS, -Math.round(bw / 2), -Math.round(mid * s));
@@ -16688,6 +17232,8 @@ function renderLandObjects() {
   for (const d of debris) if (d.state === 2) drawDebris(d, x0, x1);
   drawFire(x0, x1, true);
   drawLandUnits(x0, x1);
+  drawTufts(x0, x1);                                   // (in front: a tank drives through them)
+  drawSpikeBursts(x0, x1);
   drawPlanes(x0, x1);
   for (const d of debris) if (d.state === 0) drawDebris(d, x0, x1);
   drawBirds(x0, x1);
@@ -17487,7 +18033,7 @@ function frameBody(now) {
   const t1 = performance.now();
   if (!held_ && !SIM_ONLY) { stepSmoke(dt); stepTrails(dt); }
   const t2 = performance.now();
-  for (const gun of [...guns, ...tguns]) { gun.aimShow = Math.max(0, gun.aimShow - dt); gun.press = Math.max(0, gun.press - dt); }
+  for (const gun of [...guns, ...tguns, ...hguns]) { gun.aimShow = Math.max(0, gun.aimShow - dt); gun.press = Math.max(0, gun.press - dt); }
   const q0 = performance.now();
   updateCamera(dt, false);
   const q1 = performance.now();
@@ -17545,8 +18091,8 @@ async function start(data) {
     towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, setFlag: (sd, k) => setFlag(sd, k), menuPlayNow: () => menuPlay(), openMenu: () => openMainMenu(), resumeMenu: () => menuResume(), titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
-    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
-    land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => L.s.c.toDataURL()); }, wrecks: () => landWrecks.length, top: x => landTop(x), below: (x, y) => landBelow(x, y), sandActive: () => land.sand.length,
+    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers[p]), get docksN() { return docks.length; }, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.mode, cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); noteVehZoom(p); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
+    landState: () => land, land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => L.s.c.toDataURL()); }, wrecks: () => landWrecks.length, top: x => landTop(x), below: (x, y) => landBelow(x, y), sandActive: () => land.sand.length,
       sandX: () => { let best = -1, bx = WORLD_W / 2; for (let c = 0; c < land.cols; c++) { let r = 0; while (r < LT_ROWS && land.cell[ltIdx(c, r)] === M_AIR) r++; let n = 0; while (r + n < LT_ROWS && land.cell[ltIdx(c, r + n)] === M_SAND) n++; if (n > best) { best = n; bx = (c + 0.5) * LT_CELL; } } return bx; }, sandCount: () => { let n = 0; for (const v of land.cell) if (v === M_SAND) n++; return n; }, rockX: () => land.outcrops[0] ? land.outcrops[0].x : WORLD_W / 2, rockAt: x => ltCell(ltCol(x), ltRow(landTop(x)) ) }),
     landShell: (x, y, owner, from) => { shells.push({ x, y, vx: 0, vy: 300, owner, from: from || 'tank', age: 1, trail: 0, under: false, ut: 0 }); }, tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), fgDump: () => { if (!fgStrip) buildFgStrip(); return fgStrip.sp.toDataURL(); }, reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
