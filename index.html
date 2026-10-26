@@ -2317,7 +2317,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 26 15:59';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 26 16:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18337,8 +18337,72 @@ function drawCivShips(x0, x1) {
 /* ---- an oil spill (user Oct 25 late: "if that one gets destroyed, it spills black into the ocean that spreads and
    stays in that area, tinting the whole ocean in that area") ---- */
 const oilSlicks = [];
+// (user Oct 26, then "The spill should stay at the top like my image, not come down as a cloud" - most of it hangs just
+// under the slick, only a thinner plume going deeper; with a picture - gen/open/ref/oil_spill_ink_target_oct26.png: "how the oil spill should feel. Like black
+// ink slowly taking over the space. It would grow maybe 50% more than this and then stay in this area of the water. It
+// has to react properly and be masked just to the bottom of the ocean") under each slick a plume of ink: billows
+// pouring from where she's holed, sinking slowly, swelling and spreading as they go, kept to the slick's own reach and
+// to the water between the surface and the bed, nudged aside by a submarine passing through; a rain of black drops
+// falling through it. It grows for a while and then stays.
+const INK_MAX = 220, INK_LEAK_MAX = 70;
 function stepOil(dt) {
-  for (const o of oilSlicks) { o.t += dt; o.r = Math.min(o.leak ? 420 : 1100, o.r + dt * (o.leak ? 8 : 30 - Math.min(26, o.t * 0.25))); }   // (a leak spreads slowly; her sunk cargo far)
+  for (const o of oilSlicks) {
+    o.t += dt; o.r = Math.min(o.leak ? 420 : 1100, o.r + dt * (o.leak ? 8 : 30 - Math.min(26, o.t * 0.25)));   // (a leak spreads slowly; her sunk cargo far)
+    if (!LAND) continue;
+    const ink = o.ink || (o.ink = []), drops = o.drops || (o.drops = []);
+    const src = o.leak && o.leak.state !== 'gone' ? o.leak.x + (o.x - o.leak.x) * 0.3 : o.x, pouring = o.leak ? o.leak.state === 'sail' || o.leak.state === 'sink' : o.t < 70;
+    // (new billows from the hole while she pours, up to the plume's size)
+    if (pouring && ink.length < (o.leak ? INK_LEAK_MAX : INK_MAX) && Math.random() < dt * (o.leak ? 2.5 : 4.5)) {
+      const core = Math.random() < 0.55;                           // (dense dark clumps, among paler billows)
+      ink.push({ x: src + rnd(-18, 18), y: WATER_Y + rnd(14, 34), vx: rnd(-5, 5), vy: rnd(8, 16), sk: Math.random() < 0.25 ? rnd(0.6, 2) : rnd(3, 9), r: rnd(4, 7), R: core ? rnd(8, 17) : rnd(14, 26), a: 0, A: core ? rnd(0.5, 0.75) : rnd(0.18, 0.34), ph: Math.random() * 6, sp: rnd(-1, 1) });
+    }
+    for (const p of ink) {
+      // (slowing as it spreads, still sinking a little, swelling to its size; its reach the slick's - growing with it)
+      // (it settles to a slow sink of its own - the plume keeps going down till it reaches the bed - and drifts outward
+      // as it goes, so the column widens with depth; the deeper, the bigger and paler)
+      p.age = (p.age || 0) + dt;
+      const dep = Math.max(0, p.y - WATER_Y), dx0 = p.x - o.x, hang = Math.exp(-p.age / 50);   // (it sinks less and less: the cloud stays where it's spread)
+      p.vx += ((clamp(dx0 / 60, -1, 1) * 0.6 + p.sp * 0.4) * (1 + dep * 0.012) - p.vx) * Math.min(1, dt * 0.15);   // (outward the further off the middle it is: one widening column, not two)
+      p.vy += (p.sk * (0.12 + 0.88 * hang) - p.vy) * Math.min(1, dt * 0.25);
+      p.x += (p.vx + Math.sin(time * 0.3 + p.ph) * 1.5) * dt; p.y += p.vy * dt;
+      const Rw = p.R + dep * 0.06;
+      p.r += (Rw - p.r) * Math.min(1, dt * 0.06); p.a += (p.A * (1 - 0.45 * Math.min(1, dep / 450)) - p.a) * Math.min(1, dt * 0.4);
+      const reach = o.r * 0.75, dx = p.x - o.x;
+      if (Math.abs(dx) > reach) { p.x = o.x + Math.sign(dx) * reach; p.vx *= -0.3; }
+      const bed = seabedY(p.x) - p.r * 0.45;
+      if (p.y > bed) { p.y = bed; p.vy = 0; p.vx += Math.sign(p.vx || dx || 1) * dt * 4; }   // (on the bottom it creeps along it)
+      if (p.y < WATER_Y + p.r * 0.5) p.y = WATER_Y + p.r * 0.5;
+      // (a submarine going through pushes the ink aside)
+      for (const q of subs) if (q && q.state !== 'sunk' && Math.abs(q.x - p.x) < p.r + 30 && Math.abs(q.y - p.y) < p.r + 14) { const k = q.x < p.x ? 1 : -1; p.vx += k * 22 * dt * 3; p.vy += (p.y > q.y ? 1 : -1) * 8 * dt * 3; }
+      for (const q of minisubs) if (q && Math.abs(q.x - p.x) < p.r + 20 && Math.abs(q.y - p.y) < p.r + 10) { p.vx += (q.x < p.x ? 1 : -1) * 40 * dt; }
+    }
+    // (black drops: falling from the slick while she pours, and shed from the billows as they sink - specks all through it)
+    if (drops.length < 140 && ink.length && Math.random() < dt * (pouring ? 16 : 5)) { const q = ink[Math.floor(Math.random() * ink.length)]; const top = pouring && Math.random() < 0.4; drops.push({ x: top ? src + rnd(-o.r * 0.2, o.r * 0.2) : q.x + rnd(-q.r, q.r), y: top ? WATER_Y + rnd(14, 40) : q.y + rnd(-q.r, q.r) * 0.6, vy: rnd(6, 18), s: Math.random() < 0.4 ? rnd(2.5, 4.5) : rnd(1, 2) }); }   // (blobs of tar, some a fair size, sinking)
+    for (let i = drops.length - 1; i >= 0; i--) { const d = drops[i]; d.y += d.vy * dt; if (d.y > seabedY(d.x) - 2) drops.splice(i, 1); }
+  }
+}
+// an ink billow (made once): a round blot in pixel steps, darkest in its middle, its edge broken by a dither
+let inkArt = null;
+function buildInkArt() {
+  const N = 24, c = makeCanvas(N, N), x = c.getContext('2d'), h = (N - 1) / 2;
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const d = Math.hypot(i - h, j - h) / (h + 0.5) + (hash(i * 3.1 + j * 7.7) - 0.5) * 0.18;
+    if (d > 1) continue;
+    const a = d < 0.45 ? 1 : d < 0.7 ? 0.8 : d < 0.88 ? 0.5 : ((i + j) & 1 ? 0.3 : 0);
+    if (!a) continue;
+    x.fillStyle = d < 0.55 ? `rgba(8,9,18,${a})` : `rgba(16,20,40,${a})`; x.fillRect(i, j, 1, 1);
+  }
+  return (inkArt = c);
+}
+// the haze round the ink (made once): a soft deep-blue round, faint at its edge
+let inkHaloArt = null;
+function buildInkHaloArt() {
+  const N = 20, c = makeCanvas(N, N), x = c.getContext('2d'), h = (N - 1) / 2;
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const d = Math.hypot(i - h, j - h) / (h + 0.5); if (d > 1) continue;
+    x.fillStyle = `rgba(14,34,96,${(d < 0.5 ? 0.9 : d < 0.8 ? 0.55 : (i + j) & 1 ? 0.3 : 0.12).toFixed(2)})`; x.fillRect(i, j, 1, 1);
+  }
+  return (inkHaloArt = c);
 }
 // how much oil lies on the water at x (0..1): thick at the middle, thinning to its ragged edge
 function oilAt(x) {
@@ -18346,9 +18410,34 @@ function oilAt(x) {
   for (const o of oilSlicks) { const d = Math.abs(x - o.x) / o.r + 0.12 * Math.sin(x * 0.013 + o.x) * Math.sin(x * 0.0047); if (d < 1) a = Math.max(a, smoothstep(1, 0.55, d) * Math.min(1, o.t / 4)); }
   return a;
 }
+// the ink, kept to the water: clipped to columns from the surface down to the bed
+function drawInk(x0, x1) {
+  const I = inkArt || buildInkArt(), H = inkHaloArt || buildInkHaloArt();
+  for (const o of oilSlicks) {
+    if (!o.ink || (!o.ink.length && !(o.drops && o.drops.length))) continue;
+    const L = Math.max(x0, o.x - o.r), R = Math.min(x1, o.x + o.r); if (R <= L) continue;
+    C.save(); C.beginPath();
+    const st = 24 / SV;
+    for (let wx = L - st; wx < R + st; wx += st) { const X = Math.round(PX(wx)), top = Math.round(PY(WATER_Y + 2)), bot = Math.round(PY(seabedY(wx + st / 2))); if (bot > top) C.rect(X, top, Math.round(PX(wx + st)) - X, bot - top); }
+    C.clip();
+    // (a deep blue haze round the plume first - the ink thinning into the water - then the billows themselves)
+    for (const p of o.ink) {
+      if (p.x + p.r * 2 < x0 || p.x - p.r * 2 > x1 || p.a < 0.02) continue;
+      const d = Math.round(p.r * 3.6 * SV); C.globalAlpha = Math.min(1, p.a * 0.3); C.drawImage(H, Math.round(PX(p.x) - d / 2), Math.round(PY(p.y) - d / 2), d, d);
+    }
+    for (const p of o.ink) {
+      if (p.x + p.r < x0 || p.x - p.r > x1 || p.a < 0.02) continue;
+      const d = Math.round(p.r * 2 * SV); C.globalAlpha = p.a; C.drawImage(I, Math.round(PX(p.x) - d / 2), Math.round(PY(p.y) - d / 2), d, d);
+    }
+    C.globalAlpha = 1; C.fillStyle = '#100e14';
+    if (o.drops) for (const d of o.drops) { const s = Math.max(PB, Math.round(d.s * SV)); if (s > PB * 2) { C.globalAlpha = 0.9; C.drawImage(I, Math.round(PX(d.x) - s / 2), Math.round(PY(d.y) - s / 2), s, s); C.globalAlpha = 1; } else C.fillRect(Math.round(PX(d.x)), Math.round(PY(d.y)), s, s); }
+    C.restore();
+  }
+}
 // drawn over the water: the sea under it stained dark, and a black film riding the surface
 function drawOil(x0, x1) {
   if (!oilSlicks.length) return;
+  if (LAND) drawInk(x0, x1);
   const Bt = bh - SHY + 2, step = PB * 2;
   for (let c = -2; c < VWP + 2; c += step) {
     const wx = (c + CAMPX) / SV, a = oilAt(wx);
@@ -18356,9 +18445,12 @@ function drawOil(x0, x1) {
     const y = ys[clamp(c + 3, 0, ys.length - 1)];
     // (user Oct 26: "The spill should not cause such a giant drop shadow. It should also spill the tar under the water and
     // cover a certain area") the water under the slick stained a little way down; the tar settled on the bed under it
-    { const d = Math.round(52 * SV); for (let k = 0; k < 4; k++) { C.fillStyle = `rgba(8,6,10,${(0.26 * a * (1 - k / 4)).toFixed(3)})`; C.fillRect(c, y + Math.round(k * d / 4), step, Math.ceil(d / 4)); } }
+    // (the picture: a thick black slab of oil riding the surface, its underside ragged and rolling, a dark stain fading
+    // under it; the tar settled on the bed)
+    { const sd = Math.round((24 + 12 * Math.sin(wx / 37) + 6 * Math.sin(wx / 11 + 1.7)) * SV * Math.min(1, 0.3 + a));
+      C.fillStyle = `rgba(12,12,22,${(0.93 * a).toFixed(3)})`; C.fillRect(c, y - PB, step, sd + PB);
+      const d = Math.round(46 * SV * a); for (let k = 0; k < 3; k++) { C.fillStyle = `rgba(10,12,26,${(0.4 * a * (1 - k / 3)).toFixed(3)})`; C.fillRect(c, y + sd + Math.round(k * d / 3), step, Math.ceil(d / 3)); } }
     { const by = PY(seabedY(wx)); if (a > 0.15) { C.fillStyle = `rgba(10,8,12,${(0.7 * a).toFixed(3)})`; const th = Math.round((2 + 3 * a + 2 * hash(Math.floor(wx / 7))) * SV); C.fillRect(c, Math.round(by) - th, step, th + Math.round(2 * SV)); } }
-    C.fillStyle = `rgba(14,10,16,${(0.85 * a).toFixed(3)})`; C.fillRect(c, y - PB, step, PB * 3);
     if (hash(Math.floor(wx / 9) * 3.3 + Math.floor(time)) < 0.06 * a) { C.fillStyle = 'rgba(90,70,120,0.5)'; C.fillRect(c, y - PB, step, PB); }   // (a sheen)
   }
 }
