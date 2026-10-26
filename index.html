@@ -1512,7 +1512,7 @@ function bedDrop(x) {
 }
 // the sand, and the floor: the sand, or the top of a rock formation standing on it (buildReef)
 function sandY(x) { return SEABED_Y + bedDrop(x) + 1.5 * Math.sin(x * 0.013) + Math.sin(x * 0.041 + 1); }
-function seabedY(x) { if (LAND && onLand(x)) return landTop(x);    // (OPEN WORLD: on land, a lake's bed, or the ground)
+function seabedY(x) { if (LAND && onLand(x) && lakeAt(x)) return landTop(x);    // (OPEN WORLD: a lake's bed - the sea's own floor under dry land stays hidden under it)
   const s = sandY(x); return rockForms.length ? Math.min(s, rockTopY(x)) : s; }
 
 function shipLocalX(sh, sx) { return (sh.facing < 0 ? sx - SHIP_PIVOT_X : SHIP_PIVOT_X - sx) * SHIP_K; }
@@ -1925,6 +1925,8 @@ function canTake(p, k) {
   if (takenByOther(p, k)) return false;                         // (a teammate online is driving it)
   if (k === 'sail') return CHILL;                                // (CHILL: your own yacht, or a new one out of your hangar)
   if (k === 'civ') return LAND && civList().some(([, v]) => v.driven == null || v.driven === p);   // (OPEN WORLD: a civilian vehicle)
+  if (k === 'mode') return LAND;                                   // (the army / civilian toggle)
+  if (k.startsWith('cv:')) return LAND && civList().some(([c, v]) => civCatOf(c) === k.slice(3) && (v.driven == null || v.driven === p));
   if (k === 'tower') return towerUsable(myTw(p));
   if (k === 'tank' || k === 'heli') {                            // (LAND TEST: standing, and a captain for it)
     const v = k === 'tank' ? tanks[p] : helis[p];
@@ -1938,7 +1940,7 @@ function canTake(p, k) {
   const sb = subs[p]; return (sb.state === 'out' || sb.state === 'docked') && crewed(sb);
 }
 function vehLife(p, k) {
-  if (k === 'civ') return canTake(p, 'civ') ? 1 : 0;
+  if (k === 'civ' || k === 'mode' || k.startsWith('cv:')) return canTake(p, k) ? 1 : 0;
   if (k === 'sail') return canTake(p, 'sail') ? 1 : 0;
   if (k === 'tower') return clamp(myTw(p).hp / TW_HP, 0, 1);
   if (k === 'tank') return tanks[p] && tanks[p].state === 'alive' ? clamp(tanks[p].hp / TANK_HP, 0, 1) : 0;
@@ -2275,7 +2277,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 25 22:11';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 25 22:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -2605,10 +2607,16 @@ const CAPTI = {"w": 42, "h": 42, "count": 32, "states": ["bare", "skeleton"], "d
 const HUD_S0 = 0.62;                               // design units per atlas pixel (the mock-up's buttons)
 const HUD_VEH = ['tower', 'ship', 'sub', 'plane'];             // (the tower first, user Oct 24 night)
 // CHILL: a yacht to sail as well, its button next to the battleship's
-const hudVeh = () => LAND ? ['tower', 'ship', 'sub', 'plane', 'tank', 'heli', 'civ'] :   // (and the person: a civilian vehicle, user Oct 25 late)
+// (OPEN WORLD, user Oct 25 late: "the civilian button is a toggle. You toggle between civilian and army... When I toggle
+// to the civilian, it's all gray. And pressing these buttons toggles the different civilian boats, ... planes, etc. It
+// just iterates through them. We only see your 8 pilots if you go into the army mode. The turret is valid for both.")
+const civUI = [false, false];
+const ARMY_TABS = ['tower', 'ship', 'sub', 'plane', 'tank', 'heli', 'mode'], CIV_TABS = ['tower', 'cv:ship', 'cv:boat', 'cv:plane', 'cv:heli', 'cv:balloon', 'mode'];
+const hudVeh = (p = 0) => LAND ? (civUI[p] ? CIV_TABS : ARMY_TABS) :
      // (LAND TEST: every vehicle, user Oct 25)
   MODE === 'chill' ? ['tower', 'ship', 'sub', 'plane', 'sail'] : HUD_VEH;
-const HUD_TABICON = { ship: 'icShip', sub: 'icSub', tower: 'icTower', plane: 'icPlane', sail: 'icSail', tank: 'icTank', heli: 'icHeli', civ: 'icCiv' };
+const HUD_TABICON = { ship: 'icShip', sub: 'icSub', tower: 'icTower', plane: 'icPlane', sail: 'icSail', tank: 'icTank', heli: 'icHeli', civ: 'icCiv', 'cv:ship': 'icCvShip', 'cv:boat': 'icCvBoat', 'cv:plane': 'icCvPlane', 'cv:heli': 'icCvHeli', 'cv:balloon': 'icCvBal' };
+const tabIcon = (p, v) => v === 'mode' ? (civUI[p] ? 'icStripes' : 'icCiv') : HUD_TABICON[v];   // (the toggle: the person in army mode, a soldier's stripes in civilian)
 // the yacht's button picture: a yacht, in the buttons' cream, the size of the battleship's
 function makeSailIcon() {
   const ref = img.hud.icShip, W = ref.width, H = ref.height, c = makeCanvas(W, H), x = c.getContext('2d');
@@ -2658,8 +2666,17 @@ function makeLandIcons() {
   if (!heliArt && img.heli) buildHeliArt();
   if (heliArt) { const B = heliArt[0][1].body, R = heliArt[0][1].rotor; img.hud.icHeli = icon(x => { x.drawImage(B, 0, -heliArt.topY + 30); x.drawImage(R, 0, -heliArt.topY + 30); }, B.width, heliArt.bot - heliArt.topY + 40); }
   else img.hud.icHeli = img.hud.icPlane;
-  img.hud.icCiv = personIcon(icon);                 // (OPEN WORLD's person: a civilian vehicle)
-  HUDI.spots.icTank = HUDI.spots.icShip; HUDI.spots.icHeli = HUDI.spots.icShip; HUDI.spots.icCiv = HUDI.spots.icShip;
+  img.hud.icCiv = personIcon(icon);                 // (OPEN WORLD's toggle: the person, and the soldier's stripes)
+  img.hud.icStripes = icon(x => { x.fillStyle = '#000'; for (let k = 0; k < 3; k++) for (let i = 0; i < 12; i++) { x.fillRect(2 + i, 4 + k * 9 + i * 0.5, 2, 4); x.fillRect(26 - i, 4 + k * 9 + i * 0.5, 2, 4); } }, 30, 34);
+  // the civilian kinds' buttons: a big ship, a jet boat, a Cessna, a helicopter, a balloon
+  try {
+    if (!trafficArt) buildTrafficArt(); if (!jbArt) buildJetboatArt(); if (!chArt && img.civhelis) buildCivHeliArt(); if (!balloonArt && img.balloons) buildBalloonArt();
+    const pic = c => icon(x => x.drawImage(c, 0, 0), c.width, c.height);
+    img.hud.icCvShip = pic(img.cruise2); img.hud.icCvBoat = pic(jbArt[1].r); img.hud.icCvPlane = pic(trafficArt.cessna[0].r);
+    img.hud.icCvHeli = chArt ? pic(chArt[6].lvR[0]) : img.hud.icHeli; img.hud.icCvBal = balloonArt ? pic(balloonArt[0].whole) : img.hud.icCiv;
+  } catch (e) { for (const k of ['icCvShip', 'icCvBoat', 'icCvPlane', 'icCvHeli', 'icCvBal']) img.hud[k] = img.hud[k] || img.hud.icCiv; }
+  HUDI.spots.icTank = HUDI.spots.icShip; HUDI.spots.icHeli = HUDI.spots.icShip;
+  for (const k of ['icCiv', 'icStripes', 'icCvShip', 'icCvBoat', 'icCvPlane', 'icCvHeli', 'icCvBal']) HUDI.spots[k] = HUDI.spots.icShip;
 }
 // the yacht a player sails (CHILL): the one picked, while she's still afloat
 function yachtOf(p) { const b = sailboats[crew[p].yacht]; return b && b.state === 'sail' ? b : null; }
@@ -2722,15 +2739,15 @@ function hudLayout(p) {
   // (one view against another team: the top laid out as for two, each team's over its own side of the sea)
   const bar2 = one && TWOBAR(), oneT = one && !bar2, WT = bar2 ? hw : W, leftT = bar2 ? SIDE(p) * hw : left;
   const mid = leftT + WT / 2, room = oneT ? Math.min(WT / 2 - 116, WT / 2 - 8) : Math.min(WT / 2 - 8, WT / 2 - 30);
-  const nT0 = hudVeh().length, g = Math.max(3, Math.round(7 * u)), tw = Math.min(130 * u, (2 * room - (nT0 - 1) * g) / nT0);
+  const nT0 = hudVeh(p).length, g = Math.max(3, Math.round(7 * u)), tw = Math.min(130 * u, (2 * room - (nT0 - 1) * g) / nT0);
   const tk = tw / img.hud.tabSteel.width, th = img.hud.tabSteel.height * tk;
   const x0 = mid - (tw * nT0 + g * (nT0 - 1)) / 2;
-  const VS = hudVeh();
+  const VS = hudVeh(p);
   const tabs = VS.map((v, i) => ({ id: 'tab:' + v, veh: v, x: Math.round(x0 + i * (tw + g)), y: Math.round(ui.top + 4), w: Math.round(tw), h: Math.round(th), k: tk }));
   // the captains: a row of eight heads under the vehicle buttons, centred under them (each about the size of the
   // weather button)
   let caps = [], capB = Math.round(ui.top + 4 + th);
-  if (useCaptains() && captains[p] && captains[p].length) {
+  if (useCaptains() && captains[p] && captains[p].length && !civUI[p]) {   // (the captains: army mode only)
     const n = captains[p].length, gap = Math.max(2, Math.round(3 * u0));
     // (42: one screen pixel per pixel of the heads' art, crisp; smaller only if eight won't fit)
     const hs = Math.round(Math.min(42, ((oneT ? WT - 8 : WT - 64) / n) - gap));   // (split: clear of the menu button in the middle)
@@ -3195,6 +3212,8 @@ function redX(w) {
 const hitAlert = [{}, {}];
 function noteHit(p, k) { if (p === 0 || p === 1) { hitAlert[p][k] = time; sfxUnderAttack(p, k); } }
 // a team's vehicle buttons, their glass in its colour (made when first needed, and again when the flags change)
+// (civilian mode's buttons: grey glass)
+function tabGrey() { return img.tabGrey || (img.tabGrey = { tabSteel: tintGlass(img.hud.tabSteel, [128, 130, 134]), tabGold: tintGlass(img.hud.tabGold, [128, 130, 134]) }); }
 function tabArt(p) {
   const col = img.teamCol && img.teamCol[p];
   if (!col) return img.hud;
@@ -3239,17 +3258,17 @@ function drawHudTabs(p, Lh) {
   let pickTab = null;
   for (const t of Lh.tabs) {
     // (online: one a teammate is in is theirs, but you can watch it; the one you're watching is lit as your own)
-    const on = cur === t.veh || crew[p].spec === t.veh, taken = !on && takenByOther(p, t.veh);
+    const on = cur === t.veh || crew[p].spec === t.veh || (cur === 'civ' && crew[p].civ && 'cv:' + civCat(crew[p].civ) === t.veh), taken = !on && takenByOther(p, t.veh);
     const ok = canTake(p, t.veh), down = (hudPress[p][t.id] || 0) > 0, picked = padPick[p] === t.veh;
     ug.globalAlpha = (ok || on) && !picked ? 1 : picked ? 0.62 : taken ? 0.8 : 0.55;
-    const fr = tabArt(p)[on ? 'tabGold' : 'tabSteel'], fw = Math.round(fr.width * t.k), fh = Math.round(fr.height * t.k);
+    const fr = (civUI[p] && t.veh !== 'tower' ? tabGrey() : tabArt(p))[on ? 'tabGold' : 'tabSteel'], fw = Math.round(fr.width * t.k), fh = Math.round(fr.height * t.k);
     const fx = Math.round(t.x + t.w / 2 - fw / 2), fy = t.y + t.h - fh + (down ? 1 : 0);
     ug.drawImage(scaled(fr, fw / fr.width, true), fx, fy);
     // the lamp on top of the frame (user Oct 24 night): yellow once it's deployed, green while you're in it, and
     // flickering while it's under attack
     tabLamp(p, t.veh, on, fx, fy, fw / fr.width);
     // the picture, filled across with its life (the rest of it dim)
-    const ic = img.hud[HUD_TABICON[t.veh]], off = HUDI.spots[HUD_TABICON[t.veh]];
+    const ic = img.hud[tabIcon(p, t.veh)] || img.hud.icCiv, off = HUDI.spots[tabIcon(p, t.veh)] || HUDI.spots.icShip;
     // (its captain aboard: their head on the right of the button, the picture smaller on its left - user's mock-up)
     const capI = captains[p] && useCaptains() ? captains[p].findIndex(c => c.state === 'out' && c.veh === t.veh) : -1, shift = capI >= 0 ? 1 : 0;
     const isz = shift ? 0.66 : 1;
@@ -4813,7 +4832,7 @@ window.addEventListener('keydown', e => {
   // G / backslash: the battleship's smoke screen
   if (code === 'KeyG' || code === 'Backslash') { e.preventDefault(); if (!ui.menu && !e.repeat) keyDo(code === 'KeyG' ? 0 : 1, p => { if (crew[p].mode === 'ship' || crew[p].mode === 'tank') act(p, 'smoke'); }); return; }
   // (the number keys pick by place on the row of vehicle buttons, user Oct 25: LAND TEST's are tank, helicopter, plane)
-  if (code in SWITCH_KEYS) { e.preventDefault(); const [s, k0] = SWITCH_KEYS[code], k = hudVeh()[HUD_VEH.indexOf(k0)] || k0; if (!ui.menu && !e.repeat) keyDo(s, p => pressSwitcher({ p, k, home: false })); return; }
+  if (code in SWITCH_KEYS) { e.preventDefault(); const [s, k0] = SWITCH_KEYS[code], ki = ['tower', 'ship', 'sub', 'plane', 'tank', 'heli', 'civ'].indexOf(k0); if (!ui.menu && !e.repeat) keyDo(s, p => pressSwitcher({ p, k: k0 === 'civ' ? 'mode' : (ki >= 0 && hudVeh(p)[ki]) || k0, home: false })); return; }
   if (code in MG_KEYS) { e.preventDefault(); if (!ui.menu) keyDo(MG_KEYS[code], p => { if (crew[p].mode === 'plane') planes[p].mg = true; else if (crew[p].mode === 'sub') { if (!e.repeat) act(p, 'mine'); } else mgHold[p] = true; }); return; }
   if (code in DC_KEYS) {
     e.preventDefault();
@@ -5027,7 +5046,7 @@ function drawPadFocus() {
 }
 function padCycle(p, d) {
   const c = crew[p], free = c.mode === 'dock' || c.mode === 'gone';      // (not driving: a teammate's can be watched)
-  const list = hudVeh().filter(k => k === c.mode || canTake(p, k) || (free && takenByOther(p, k)));
+  const list = hudVeh(p).filter(k => k === c.mode || canTake(p, k) || (free && takenByOther(p, k)));
   if (!list.length) return;
   const from = padPick[p] || c.spec || c.mode, i = list.indexOf(from);
   const k = list[i < 0 ? (d > 0 ? 0 : list.length - 1) : (i + d + list.length) % list.length];
@@ -8155,6 +8174,8 @@ function switchTo(p, k) {
     if (nx && nx !== cur && towerUsable(nx)) { cur.inUse = false; cur.restEl = tguns[p].elev; manTw[p] = nx; sfxClick(gunCtl[p]); cutTo(p); } else sfxEmpty(cur.x);
     return;
   }
+  if (k === 'mode') { civUI[p] = !civUI[p]; sfxClick(gunCtl[p]); return; }   // (OPEN WORLD: the army / civilian toggle)
+  if (k.startsWith('cv:')) { if (civCycle(p, k.slice(3))) { sfxClick(gunCtl[p]); cutTo(p); } else sfxEmpty(cam.view[p].l); return; }   // (a civilian kind: the next one of it)
   if (c.mode === 'civ' && k === 'civ') { if (takeCiv(p)) { sfxClick(gunCtl[p]); cutTo(p); } else sfxEmpty(cam.view[p].l); return; }   // (again: the next nearest)
   if (c.mode === k) { if (comeBackOut(p, k)) sfxClick(gunCtl[p]); return; }
   if (!canTake(p, k)) { sfxEmpty(towers[p].x); return; }
@@ -15751,7 +15772,7 @@ function render() {
   if (E.fog > 0.02) for (const [v, cp, sx, w, i, cf] of views) { beginView(oc, v, cp, sx, w, i, cf); fogObjects(); oc.restore(); }
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.drawImage(ob, 0, 0);
-  for (const [v, cp, sx, w, i, cf] of views) if (frontClouds[i].length || planeLamps[i].length || lighthouseGlow[i].length || airLamps[i].length) { beginView(g, v, cp, sx, w, i, cf); drawLighthouseGlow(); drawAirLamps(); drawPlaneLamps(); drawFrontClouds(); g.restore(); }
+  for (const [v, cp, sx, w, i, cf] of views) if (frontClouds[i].length || planeLamps[i].length || (LAND && E.lampsOn > 0.05) || airLamps[i].length) { beginView(g, v, cp, sx, w, i, cf); drawLighthouseGlow(); drawAirLamps(); drawPlaneLamps(); drawFrontClouds(); g.restore(); }
   tt = lap('tint', tt);
   for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); renderOverlays(); g.restore(); }
   tt = lap('overlays', tt);
@@ -16596,6 +16617,26 @@ function personIcon(draw) {
   }, 20, 34);
 }
 
+// (the civilian buttons, user Oct 25 late) which kind a civilian vehicle is, as its button names it
+const civCatOf = k => k === 'air' ? 'plane' : k;
+const civCat = v => civCatOf(civClass(v));
+// a civilian kind's button: the next one of that kind (along the world, round again at its end); from something else,
+// the one of that kind nearest you
+function civCycle(p, cat) {
+  const c = crew[p], L = civList().filter(([k, v]) => civCatOf(k) === cat && (v.driven == null || v.driven === p)).map(([, v]) => v).sort((a, b) => a.x - b.x);
+  if (!L.length) return false;
+  let v;
+  const cur = c.mode === 'civ' ? c.civ : null;
+  if (cur && L.includes(cur)) { if (L.length < 2) return false; v = L[(L.indexOf(cur) + 1) % L.length]; }
+  else {
+    const F = camFocus(p), fx = F ? F[0] : cam.view[p].l, fy = F ? F[1] : FOCUS_Y;
+    v = L.reduce((a, b) => Math.hypot(b.x - fx, ((b.y || WATER_Y) - fy) * 0.5) < Math.hypot(a.x - fx, ((a.y || WATER_Y) - fy) * 0.5) ? b : a);
+  }
+  if (c.mode !== 'civ' && c.mode !== 'dock') { c.mode = 'dock'; c.watch = null; c.look = null; }
+  boardCiv(p, v);
+  return true;
+}
+
 /* ---- civilian helicopters (OPEN WORLD, user Oct 25 late): "recreational helicopters that are lifting from the
    airport", from the user's sheet of twelve (clean, hit, wrecked; "you will have to make the rotations") ----
    Three at each airfield's helipads. Each now and then spins up, lifts off, flies somewhere - over its country, out
@@ -16920,19 +16961,23 @@ function stepCivShips(dt) {
     if (c.state === 'sail') {
       // back and forth between the two harbours, never turning: at the end of her run she goes astern
       const hurt = c.sec.filter(v => v < K.hp).length / K.n;
+      let moving = true;
       if (!(c.driven != null && stepCivDriven(c, dt))) {            // (yours: on your lever - 50-land-civdrive)
-        if (c.x > c.hi) c.dir = -1; else if (c.x < c.lo) c.dir = 1;
-        c.x += c.dir * K.v * (1 - 0.5 * hurt) * dt;
-      }
+        // (user Oct 25 late) at the end of her run, by a harbour, she stops a while - passengers off and on, cargo -
+        // her funnels quiet; then she goes astern, back the other way
+        if (c.dockT > 0) { c.dockT -= dt; moving = false; if (c.dockT <= 0) c.dir = c.x > (c.lo + c.hi) / 2 ? -1 : 1; }
+        else if ((c.x >= c.hi && c.dir > 0) || (c.x <= c.lo && c.dir < 0)) { c.x = clamp(c.x, c.lo, c.hi); c.dockT = rnd(20, 35); moving = false; }
+        else c.x += c.dir * K.v * (1 - 0.5 * hurt) * dt;
+      } else moving = Math.abs(c.drv || 0) > 0.05;
       c.a = Math.atan2(surfaceY(c.x + L * 0.3) - surfaceY(c.x - L * 0.3), L * 0.6) * 0.5;
       // her funnels' smoke, drifting off downwind
       c.smokeT -= dt;
-      if (c.smokeT <= 0 && !SIM_ONLY) {
+      if (moving && c.smokeT <= 0 && !SIM_ONLY) {
         c.smokeT = 0.22;
         for (const [fx, fy] of K.funnels) { const [x, y] = civPoint(c, fx, fy); spawnSmoke(x, y - 2, { rise: true, r: rnd(3, 5) * K.k * 1.4, grow: rnd(4, 6), lift: 26, vx: rnd(-4, 4) - c.dir * K.v * 0.3, vy: -rnd(14, 26), life: rnd(4, 6), alpha: 0.42, dark: 0.55 }); }
       }
       // a white bow wave, at whichever end she's going
-      if (!SIM_ONLY && Math.random() < dt * 8) spawnFoam(c.x + c.dir * L * 0.48 + rnd(-6, 6), rnd(1.5, 3));
+      if (moving && !SIM_ONLY && Math.random() < dt * 8) spawnFoam(c.x + c.dir * L * 0.48 + rnd(-6, 6), rnd(1.5, 3));
     } else {
       // going down: she settles by the worse end, slips under, and drifts down to the bottom
       c.sinkT += dt;
@@ -18351,7 +18396,7 @@ function buildTraffic() {
   // (user Oct 25) twenty Cessnas in all sorts of colours, going both ways at their own heights (all under the 747s),
   // leaving a few seconds apart; and each country's 747 from its own airfield
   for (let i = 0; i < 20; i++) { const f = newFlight('cessna', i & 1, 3 + i * 4.5 + Math.random() * 3); f.col = i % CESSNA_COLS.length; f.alt = 300 + Math.random() * 520; traffic.push(f); }
-  traffic.push(newFlight('jet', 0, 12, 0), newFlight('jet', 1, 40, 1));
+  traffic.push(newFlight('jet', 0, 12, 0), newFlight('jet', 1, 12, 1));   // (user Oct 25 late: always flying opposite ways - they leave together)
   const L = docks.find(d => d.dir < 0), R = docks.find(d => d.dir > 0);
   buildJetboats();
   buildCivShips();                                         // (the big ships: cruise ships, liner... - 50-land-civships)
@@ -18367,6 +18412,8 @@ function stepTraffic(dt) {
   for (let i = traffic.length - 1; i >= 0; i--) {
     const f = traffic[i], T = TRAFFIC[f.kind];
     if (f.state === 'parked') {
+      // (both 747s lost: the first back waits no longer)
+      if (f.syncWait && !traffic.some(o => o !== f && o.kind === 'jet' && !o.syncWait && (o.state === 'fly' || o.state === 'free' || o.state === 'parked'))) { f.syncWait = false; f.wait = 30; }
       f.wait -= dt;
       if (f.wait <= 0) { f.state = 'fly'; f.s = 0; }
       continue;
@@ -18389,6 +18436,7 @@ function stepTraffic(dt) {
         else { sectionBlast(f.x, ground - 4, f.kind === 'jet' ? 1.8 : 1, f.vx * 0.3); spawnDebris(f.x, ground - 6, f.kind === 'jet' ? 24 : 10, f.vx * 0.3); landCarve(f.x, ground, f.kind === 'jet' ? 22 : 10); }
         // (a while later, another; one sunk stays on the bottom)
         const nf = Object.assign(newFlight(f.kind, Math.random() < 0.5 ? 0 : 1, 30 + Math.random() * 30, f.owner), { col: f.col, alt: f.alt });
+        if (f.kind === 'jet') { nf.wait = 1e9; nf.syncWait = true; }   // (the 747s fly opposite ways: the new one waits for the other to land)
         if (sea) { traffic.push(nf); const W = traffic.filter(o => o.state === 'wreck' || o.state === 'sink'); if (W.length > 8) traffic.splice(traffic.indexOf(W[0]), 1); } else traffic[i] = nf;
       }
       continue;
@@ -18401,7 +18449,12 @@ function stepTraffic(dt) {
     f.x = A.far + d * f.s; f.y = A.y - (T.gy || 8) - alt; f.dir = d; f.vx = d * T.v * Math.min(vU, vD);
     f.ang = Math.atan2(-(alt2 - alt), 8) * d;                       // (nose up climbing, down descending)
     if (alt <= 0 && f.s < T.roll) f.ang -= (f.kind === 'jet' ? 0.1 : 0.07) * d * smoothstep(T.roll * 0.7, T.roll, f.s);   // (user Oct 25 late: the nose lifts at the end of its take-off run)
-    if (f.s >= D) { const keep = { col: f.col, alt: f.alt }; Object.assign(f, newFlight(f.kind, f.to, f.kind === 'jet' ? 25 : 10 + Math.random() * 25, f.owner), keep); continue; }
+    if (f.s >= D) {
+      const keep = { col: f.col, alt: f.alt }; Object.assign(f, newFlight(f.kind, f.to, f.kind === 'jet' ? 25 : 10 + Math.random() * 25, f.owner), keep);
+      // (a 747 lost earlier waits for this one to land, then leaves the other way at the same moment)
+      if (f.kind === 'jet') for (const o of traffic) if (o !== f && o.kind === 'jet' && o.syncWait) { Object.assign(o, newFlight('jet', 1 - f.from, f.wait, o.owner), { syncWait: false }); }
+      continue;
+    }
     trafficHits(f);
   }
   stepJetboats(dt);
@@ -18490,7 +18543,6 @@ function drawLighthouse(tw) {
   R(lx - 12, ly + 5, 24, 2, '#3a3c40'); for (let k = -11; k <= 11; k += 4) R(lx + k, ly + 2, 1, 3, '#3a3c40');
   // at night its beam (drawn over the night's darkening, as the planes' lamps are: drawLighthouseGlow)
   const on = clamp(E.lampsOn || 0, 0, 1);
-  if (on > 0.05) lighthouseGlow[viewIdx].push(PX(lx), PY(ly - 1), on, time * 0.9 + (tw.player ? 2 : 0), SV);
   if (desertSide(tw.x)) {
     // the fort: a low wall round the tower's foot, battlements along its top, in the desert's stone
     const b = twBase(tw), W2 = 46, H2 = 26, stone = '#c79868', dark = '#8e6646', lite = '#e2b886';
@@ -18503,15 +18555,35 @@ function drawLighthouse(tw) {
 // the lighthouses' lamps and beams at night, over the darkened world: a long cone turning slowly, bright on whichever
 // side it sweeps, and the lamp's glow
 const lighthouseGlow = [[], []];
+// (user Oct 25 late, their picture: "the feeling of the lighthouse") a warm halo round the lamp, and a soft wide beam
+// that sweeps round - seen only over the sea side (the land side it's turned away, behind the tower), widest and
+// brightest as it swings across, a flash as it passes us; layers of a thin cone, so it fades out softly
 function drawLighthouseGlow() {
-  const G = lighthouseGlow[viewIdx];
-  for (let i = 0; i < G.length; i += 5) {
-    const x = G[i], y = G[i + 1], on = G[i + 2], th = G[i + 3], s = G[i + 4], side = Math.cos(th), k = Math.abs(side), L = 620 * s, half = 0.05 + 0.12 * (1 - k);
-    C.fillStyle = `rgba(255,240,190,${(0.2 * on * (0.3 + 0.7 * k)).toFixed(3)})`;
-    C.beginPath(); C.moveTo(x, y); C.lineTo(x + Math.sign(side || 1) * L, y - L * half); C.lineTo(x + Math.sign(side || 1) * L, y + L * half); C.closePath(); C.fill();
-    const r = Math.round(6 * s);
-    C.fillStyle = `rgba(255,236,170,${(0.3 * on).toFixed(3)})`; C.fillRect(Math.round(x - r * 2), Math.round(y - r * 1.5), r * 4, r * 3);
-    C.fillStyle = `rgba(255,250,220,${(0.9 * on).toFixed(3)})`; C.fillRect(Math.round(x - r), Math.round(y - r * 0.6), r * 2, Math.round(r * 1.2));
+  // (each view works out its own: the beam reaches far past the tower, into a view where the tower itself isn't)
+  const G = [], on0 = clamp(E.lampsOn || 0, 0, 1);
+  if (LAND && on0 > 0.05) for (const tw of towers) if (tw && !tw.edge && tw.hp > 0) { const [, py] = towerPivot(tw); G.push(PX(tw.x), PY(py + 12), on0, time * 0.9 + (tw.player ? 2 : 0), SV, tw.facing); }
+  for (let i = 0; i < G.length; i += 6) {
+    const x = G[i], y = G[i + 1], on = G[i + 2], th = G[i + 3], s = G[i + 4], sea = G[i + 5] || 1;
+    const side = Math.cos(th), toward = Math.sin(th), k = Math.abs(side);
+    // the halo: warm, soft, brighter as the lamp faces us
+    const flash = Math.pow(Math.max(0, toward), 6), r = 6 * s;
+    for (const [rr, a] of [[5, 0.06], [3.2, 0.1], [2, 0.16]]) { C.fillStyle = `rgba(255,214,140,${((a + 0.2 * flash) * on).toFixed(3)})`; C.fillRect(Math.round(x - r * rr), Math.round(y - r * rr * 0.8), Math.round(r * rr * 2), Math.round(r * rr * 1.6)); }
+    C.fillStyle = `rgba(255,248,214,${(0.9 * on).toFixed(3)})`; C.fillRect(Math.round(x - r), Math.round(y - r * 0.6), Math.round(r * 2), Math.round(r * 1.2));
+    // the beam: always out over the water (the land side never lit), tilted a little up, sweeping gently up and down
+    // and breathing brighter and dimmer as the lamp turns
+    const kk = 0.55 + 0.45 * k, up = 0.1 + 0.06 * Math.sin(th * 0.5);
+    // (three widths, each fading out along its length: soft at its edges and far end, brightest by the lamp)
+    const L = 1900 * s * (0.75 + 0.25 * kk);
+    for (let n = 0; n < 3; n++) {
+      const half = (0.07 - n * 0.02) * (1.2 - 0.4 * kk), a = (0.08 + n * 0.05) * on * kk;
+      const gr = C.createLinearGradient(x, y, x + sea * L * Math.cos(up), y - L * Math.sin(up));
+      gr.addColorStop(0, `rgba(255,232,176,${a.toFixed(3)})`); gr.addColorStop(0.45, `rgba(255,232,176,${(a * 0.45).toFixed(3)})`); gr.addColorStop(1, 'rgba(255,232,176,0)');
+      C.fillStyle = gr;
+      C.beginPath(); C.moveTo(x, y);
+      C.lineTo(x + sea * L * Math.cos(up - half), y - L * Math.sin(up - half));
+      C.lineTo(x + sea * L * Math.cos(up + half), y - L * Math.sin(up + half));
+      C.closePath(); C.fill();
+    }
   }
 }
 
