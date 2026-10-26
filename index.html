@@ -2301,7 +2301,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 26 00:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 26 02:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -5334,8 +5334,26 @@ function coupleShip(sh) {
   }
 }
 
+const waterAct = { r: [[0, 0], [0, 0]], n: 0, t: 0 };
 function stepWater(dt, clearForces) {
-  if (wetA && wetRuns) { for (const [a, b] of wetRuns) stepWaterRun(dt, clearForces, a, b); return; }
+  if (wetA && wetRuns) {
+    // (the big world, the perf pass Oct 26: the waves are worked out only round what's on screen - each view and a
+    // screen's margin either side; far off, the water just settles down (a decay every half second), and nobody
+    // sees it. Online, the whole of it, as before: both machines' water must agree)
+    const net = NET.role === 'host' || NET.role === 'guest', A = waterAct;
+    if (net || !cam.view || !cam.view[0]) { for (const [a, b] of wetRuns) stepWaterRun(dt, clearForces, a, b); return; }
+    A.n = 0;
+    for (let v = 0; v < 2; v++) { const V = cam.view[v]; if (!V) continue; const w = 2 * halfWorldW(V.z), m = Math.max(1500, w); const R = A.r[A.n++]; R[0] = Math.floor((V.l - m) / DX); R[1] = Math.ceil((V.l + w + m) / DX); }
+    if (A.n === 2 && A.r[1][0] <= A.r[0][1] && A.r[0][0] <= A.r[1][1]) { A.r[0][0] = Math.min(A.r[0][0], A.r[1][0]); A.r[0][1] = Math.max(A.r[0][1], A.r[1][1]); A.n = 1; }
+    for (const [a, b] of wetRuns) for (let k = 0; k < A.n; k++) { const lo = Math.max(a, A.r[k][0]), hi = Math.min(b, A.r[k][1]); if (hi > lo + 2) stepWaterRun(dt, clearForces, lo, hi); }
+    A.t += dt;
+    if (A.t > 0.5) {                                        // (the rest settles: no forces, the swell's own ripples dying away)
+      A.t = 0;
+      const inA = i => { for (let k = 0; k < A.n; k++) if (i >= A.r[k][0] && i <= A.r[k][1]) return true; return false; };
+      for (const [a, b] of wetRuns) for (let i = a; i <= b; i++) { if (inA(i)) { i = Math.max(i, ...A.r.slice(0, A.n).filter(r => i >= r[0] && i <= r[1]).map(r => r[1])); continue; } wh[i] *= 0.7; wv[i] *= 0.7; wf[i] = 0; }
+    }
+    return;
+  }
   const c2 = (WAVE_C * WAVE_C) / (DX * DX);
   const last = N - 1;
   for (let i = 0; i <= last; i++) {
@@ -10575,7 +10593,7 @@ function stepBirds(dt) {
     // the wind shoves anything in the air around
     b.x += windAt(b.y) * (b.state === 'land' ? 0.12 : 0.25 + 0.35 * gale) * dt + Math.sin(time * 3 + b.ph * 7) * gale * 14 * dt;
     b.x += b.vx * dt; b.y += b.vy * dt;
-    const floor = (b.state === 'land' ? b.spot.y : surfaceY(b.x) - 14);
+    const floor = (b.state === 'land' ? b.spot.y : b.y < WATER_Y - 140 ? WATER_Y : surfaceY(b.x) - 14);   // (high up, the sea's height doesn't matter: not worked out - the perf pass, Oct 26)
     if (b.y > floor && b.state !== 'land') { b.y = floor; b.vy = Math.min(b.vy, -10); }
     b.y = Math.max(b.y, SKY_TOP + 100);
     if (Math.abs(b.vx) > 3) b.face = Math.sign(b.vx);
@@ -17304,7 +17322,7 @@ function stepCivHelis(dt) {
     if (h.state === 'parked') {
       h.spin = Math.max(0, h.spin - dt * 0.4);
       if (mine) { if (civStick(h.driven) < -0.2 || Math.abs(h.cin || 0) > 0.2) h.state = 'landed'; }
-      else { h.wait -= dt; if (h.wait <= 0) { if (civHelis.some(o => o !== h && o.R === h.R && o.state === 'fly' && o.driven == null)) h.wait = rnd(15, 40); else { h.state = 'landed'; civHeliTrip(h); } } }   // (one up at a time on each side, user Oct 26: "too many helicopters in the air")
+      else { h.wait -= dt; if (h.wait <= 0) { if (civHelis.some(o => o !== h && o.R === h.R && (o.state === 'fly' || (o.state === 'landed' && o.ai)) && o.driven == null)) h.wait = rnd(15, 40); else { h.state = 'landed'; civHeliTrip(h); } } }   // (one up at a time on each side, user Oct 26: "too many helicopters in the air")
       civHeliHits(h);
       continue;
     }
@@ -17322,6 +17340,8 @@ function stepCivHelis(dt) {
     }
     // flying: the lever sets the way and speed across, the stick climbs and sinks; told the other way, it slows to a
     // hover and turns round on the spot (as the army's)
+    if (!mine && !h.ai && h.carried == null) h.ai = { phase: 'home', tx: h.home, ty: WATER_Y - 300 };
+    if (!mine && h.mag && h.mag.out) civMagnet(h);                 // (nobody at the controls: its magnet lets go and winds in)   // (left in the air - let go of, or its magnet's work done: it flies home)
     let tvx = lever * CH_V, tvy = stick * CH_VY;
     if (h.mag && h.mag.obj) { tvx *= h.mag.obj.kind === 'jet' ? 0.4 : 0.65; if (tvy < 0) tvy *= h.mag.obj.kind === 'jet' ? 0.3 : 0.5; }   // (a plane on its magnet: it feels the weight - a 747 most of all)
     if (lever && Math.sign(lever) !== h.facing && !h.turn) { tvx = 0; if (Math.abs(h.vx) < 14) h.turn = { t: 0, from: h.facing }; }
@@ -17572,7 +17592,7 @@ function civGlint(gx, gy, ph, big) {
    tears into a big ship's sections */
 function armyWreckHits() {
   const falling = [];
-  for (const pl of planes) if (pl && pl.state === 'down') falling.push([pl, pl.x, pl.y, 30, 10]);
+  for (const pl of planes.concat(oldPlanes)) if (pl && pl.state === 'down') falling.push([pl, pl.x, pl.y, 30, 10]);   // (a lost plane goes on falling among the old ones: the next is already in its hangar)
   for (const h of helis) if (h && h.state === 'down') falling.push([h, h.x, h.y, 26, 12]);
   for (const [o, x, y, hw, hh] of falling) {
     for (const f of traffic) if ((f.state === 'fly' || f.state === 'free') && Math.abs(f.x - x) < TRAFFIC[f.kind].hit[0] + hw * 0.5 && Math.abs(f.y - y) < TRAFFIC[f.kind].hit[1] + hh * 0.5) trafficDown(f);
@@ -19620,7 +19640,16 @@ function landBelow(x, y) {
   return LT_Y1;
 }
 // the top of the ground in column x from the sky down (what a shell or a falling plane meets first)
-function landTop(x) { return landBelow(x, LT_Y0); }
+// (the perf pass Oct 26: asked thousands of times a frame - dust, smoke, every unit's ground, dryLand - so each column's
+// answer is kept until the ground there changes; any carve or slide moves land.ver on)
+function landTop(x) {
+  const c = ltCol(x);
+  if (c < 0 || !land.cell || c >= land.cols) return landBelow(x, LT_Y0);
+  if (!land.topV || land.topV.length !== land.cols) { land.topV = new Uint32Array(land.cols); land.topC = new Float32Array(land.cols); }
+  const v = (land.ver || 0) + 1;                               // (+1: a fresh table's zeros never match)
+  if (land.topV[c] === v) return land.topC[c];
+  const t = landBelow(x, LT_Y0); land.topC[c] = t; land.topV[c] = v; return t;
+}
 // what the ground's made of where a blast meets it (for its colour): sand, grass on top, or dirt
 function groundAt(x, y) { const c = ltCol(x), r = ltRow(landBelow(x, y - 6)); for (let q = 0; q < 4; q++) { const m = ltCell(c, r + q); if (m === M_SAND) return 'sand'; } return 'dirt'; }
 // the same past the world's ends, where the land is drawn mirrored (what rain and the eye meet there)
@@ -19702,6 +19731,7 @@ function buildLand() {
   findLake();
   // (user Oct 26, the lake: "The grass on the background should stay flat") the field behind the ground runs on at the
   // land's own level across a lake - its far bank - instead of dropping into the bowl: backS, the back's surface
+  land.ver = (land.ver || 0) + 1; land.topV = null;          // (a new world: no column's top known yet)
   land.backS = Float32Array.from(land.surf);
   for (const L of land.lakes) {
     const c0 = Math.max(0, Math.floor(L[0] / LT_CELL) - 1), c1 = Math.min(land.cols - 1, Math.ceil(L[1] / LT_CELL)), h0 = land.surf[c0], h1 = land.surf[c1];
@@ -19727,6 +19757,7 @@ function ltBlob(x, y, rad, m, keep) {
   }
 }
 function ltDirty(c0, c1) {
+  land.ver = (land.ver || 0) + 1;                              // (the ground changed: each column's top is found again when asked)
   for (let k = Math.max(0, Math.floor(c0 / LT_CHUNK)); k <= Math.min(land.dirty.length - 1, Math.floor(c1 / LT_CHUNK)); k++) land.dirty[k] = 1;
 }
 /* A crater: everything but rock inside the radius is blown out; round it the ground is scorched; the dirt thrown
@@ -20331,7 +20362,7 @@ function drawTufts(x0, x1) {
    cruise ship takes hits and sails on. */
 const TRAFFIC = {
   cessna: { v: 150, roll: 260, stop: 240, alt: 470, climb: 0.3, k: 0.51, w: 96, h: 31, hit: [24, 8], gy: 8 },   // (the user's picture, 96 wide at half a unit a pixel: 49 long, as before - 20% bigger, user Oct 25 late)
-  jet: { v: 270, roll: 620, stop: 560, alt: 1500, climb: 0.2, k: 0.655, w: 229, h: 58, hit: [70, 13], gy: 23 },   // (the user's 747: two thirds of the battleship, user Oct 26 - "the battleship is the official size for things")
+  jet: { v: 270, roll: 620, stop: 560, alt: 1500, climb: 0.2, k: 0.655, w: 229, h: 58, hit: [70, 13], gy: 21 },   // (the user's 747: two thirds of the battleship, user Oct 26 - "the battleship is the official size for things")
 };
 const traffic = [];
 // (each one's lower body and tail fin: the user's picture's navy and red first, then all sorts)
@@ -22853,7 +22884,8 @@ async function start(data) {
     set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers[p]), seaHeli: (x, y) => { const h = helis[0] = makeHeli(0, x); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.mode, cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); noteVehZoom(p); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
     landState: () => land, land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => L.s.c.toDataURL()); }, wrecks: () => landWrecks.length, top: x => landTop(x), below: (x, y) => landBelow(x, y), sandActive: () => land.sand.length,
       sandX: () => { let best = -1, bx = WORLD_W / 2; for (let c = 0; c < land.cols; c++) { let r = 0; while (r < LT_ROWS && land.cell[ltIdx(c, r)] === M_AIR) r++; let n = 0; while (r + n < LT_ROWS && land.cell[ltIdx(c, r + n)] === M_SAND) n++; if (n > best) { best = n; bx = (c + 0.5) * LT_CELL; } } return bx; }, sandCount: () => { let n = 0; for (const v of land.cell) if (v === M_SAND) n++; return n; }, rockX: () => land.outcrops[0] ? land.outcrops[0].x : WORLD_W / 2, rockAt: x => ltCell(ltCol(x), ltRow(landTop(x)) ) }),
-    traffic: () => traffic, minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, killTraffic: f => trafficDown(f), boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, shuttles: () => shuttles, seaplanes: () => seaplanes, blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, civLaunch: p => civLaunch(p), debugJetArt: () => { if (!trafficArt) buildTrafficArt(); const d = c => { const k = makeCanvas(c.width, c.height); k.getContext('2d').drawImage(c.src && c._tp ? c.src : c, 0, 0); return k.toDataURL(); }, a = trafficArt.jet[0].r, w = windowsArtDots(a); return { jet: d(a), jetWin: w ? d(w) : d(makeCanvas(1, 1)) }; }, SPACE: { ATMO_TOP, SPACE_TOP, SKY_TOP }, carve: (x, y, r) => landCarve(x, y, r), landShell: (x, y, owner, from) => { shells.push({ x, y, vx: 0, vy: 300, owner, from: from || 'tank', age: 1, trail: 0, under: false, ut: 0 }); }, tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), fgDump: () => { if (!fgStrip) buildFgStrip(); return fgStrip.sp.toDataURL(); }, reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
+    traffic: () => traffic, minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, killTraffic: f => trafficDown(f), boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, shuttles: () => shuttles, seaplanes: () => seaplanes, blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
+    debugJetArt: () => { if (!trafficArt) buildTrafficArt(); const d = c => { const k = makeCanvas(c.width, c.height); k.getContext('2d').drawImage(c.src && c._tp ? c.src : c, 0, 0); return k.toDataURL(); }, a = trafficArt.jet[0].r, w = windowsArtDots(a); return { jet: d(a), jetWin: w ? d(w) : d(makeCanvas(1, 1)) }; }, SPACE: { ATMO_TOP, SPACE_TOP, SKY_TOP }, carve: (x, y, r) => landCarve(x, y, r), landShell: (x, y, owner, from) => { shells.push({ x, y, vx: 0, vy: 300, owner, from: from || 'tank', age: 1, trail: 0, under: false, ut: 0 }); }, tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), fgDump: () => { if (!fgStrip) buildFgStrip(); return fgStrip.sp.toDataURL(); }, reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
     gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
