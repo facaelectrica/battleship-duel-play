@@ -2331,7 +2331,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 26 18:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 26 19:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -21511,14 +21511,70 @@ function stoneFits(x, y, rx, ry) {
 // (user Oct 26: "Why are they floating above the grass with no dirt between them?") a boulder lowered from where it was
 // meant to sit until it lies wholly in the earth - under the grass, its crown just below it
 function sinkToFit(x, y, rx, ry) { for (let k = 0; k < 14; k++, y += LT_CELL) if (stoneFits(x, y, rx, ry)) return y; return null; }
+// (user Oct 26, with a picture - gen/open/ref/rock_shapes_target_oct26.jpg: "Here's the shape the rocks should have.
+// They should have more variety in size, a lot more. And they should be packed closer together. You should feel random
+// and slightly different color variation each one.") each stone a rough faceted lump, not an oval: 6 to 8 corners at
+// uneven angles and distances round its middle, its underside flattened (it sits); each face lit by the way it faces -
+// a broad top face, bevelled sides - and each stone its own shade and warmth
+function stonePoly(o) {
+  if (o.va) return o;
+  const id = o.id, n = 6 + Math.floor(hash(id * 1.31 + 0.7) * 3), rot = hash(id * 2.17) * 6.283, P = [];
+  for (let i = 0; i < n; i++) {
+    const a = rot + 6.283 * (i + (hash(id * 3.1 + i * 1.7) - 0.5) * 0.55) / n, r = 0.8 + 0.2 * hash(id * 5.3 + i * 2.9);
+    let px = Math.cos(a) * r, py = Math.sin(a) * r;
+    if (py > 0.7) { const k = 0.7 / py; px *= 0.85 + 0.15 * k; py = 0.7; }          // (the flat underside)
+    P.push([Math.atan2(py, px), px, py]);
+  }
+  P.sort((a, b) => a[0] - b[0]);
+  o.va = P.map(q => q[0]); o.vx = P.map(q => q[1]); o.vy = P.map(q => q[2]);
+  o.tb = 0.86 + 0.28 * hash(id * 1.77 + 3.3); o.tw = (hash(id * 2.93 + 1.1) - 0.5) * 22;   // (its own brightness and warmth)
+  return o;
+}
+// is (dx, dy) - in the stone's own measure, its radii 1 - inside it? STH: how far in from its edge (same measure), the
+// face's outward direction, and how far out from the middle toward that face (0..1)
+const STH = { d: 0, nx: 0, ny: 0, f: 0 };
+function stoneHit(o, dx, dy) {
+  const A = o.va, n = A.length, th = Math.atan2(dy, dx);
+  let i = n - 1; for (let k = 0; k < n; k++) if (A[k] > th) { i = k - 1; break; }
+  if (i < 0) i = n - 1;
+  const j = (i + 1) % n, ax = o.vx[i], ay = o.vy[i], ex = o.vx[j] - ax, ey = o.vy[j] - ay, L = Math.hypot(ex, ey) || 1;
+  let nx = ey / L, ny = -ex / L; const h = nx * ax + ny * ay; if (h < 0) { nx = -nx; ny = -ny; }
+  const H = Math.abs(h), d = H - (nx * dx + ny * dy);
+  if (d < 0) return false;
+  STH.d = d; STH.nx = nx; STH.ny = ny; STH.f = 1 - d / (H || 1);
+  return true;
+}
+// a face's light: the top face broad and lit, the sides by the way they face the light from the upper left
+function stoneFaceShade(n) { const f = -(STH.nx * 0.55 + STH.ny * 0.85), w = smoothstep(0.32, 0.72, STH.f); return 0.42 * (1 - w) + f * w - 0.2 * Math.max(0, STH.ny) * w + (n - 0.5) * 0.16; }
+const stoneTint = (col, o) => [col[0] * o.tb + o.tw, col[1] * o.tb, col[2] * o.tb - o.tw * 0.6];
+// clear of every other stone by their real outlines, not their ovals (so they pack as close as their rough shapes let
+// them, a seam of earth gap wide between): no point round either's edge inside the other
+function stonePts(o) {
+  if (o.pts) return o.pts;
+  const P = [], n = o.vx.length;
+  for (let i = 0; i < n; i++) { const j = (i + 1) % n; for (const t of [0, 0.33, 0.67]) P.push(o.x + (o.vx[i] + (o.vx[j] - o.vx[i]) * t) * o.rx, o.y + (o.vy[i] + (o.vy[j] - o.vy[i]) * t) * o.ry); }
+  return (o.pts = P);
+}
+function stoneIn(q, P, gap) { for (let k = 0; k < P.length; k += 2) { const nx = (P[k] - q.x) / (q.rx + gap), ny = (P[k + 1] - q.y) / (q.ry + gap); if (nx * nx + ny * ny <= 1 && stoneHit(q, nx, ny)) return true; } return false; }
+function stoneFreeP(x, y, rx, ry, gap) {
+  const o = stonePoly({ x, y, rx, ry, id: land.stones.length }), R = Math.max(rx, ry), P = stonePts(o);
+  for (let gx = Math.floor((x - R - 50) / ST_G); gx <= Math.floor((x + R + 50) / ST_G); gx++) for (let gy = Math.floor((y - R - 50 - LT_Y0) / ST_G); gy <= Math.floor((y + R + 50 - LT_Y0) / ST_G); gy++) {
+    const L = land.stoneG.get(gx * 4096 + gy); if (!L) continue;
+    for (const j of L) {
+      const q = land.stones[j], dx = (x - q.x) / (rx + q.rx + gap), dy = (y - q.y) / (ry + q.ry + gap); if (dx * dx + dy * dy >= 1) continue;
+      if (stoneIn(q, P, gap) || stoneIn(o, stonePts(stonePoly(q)), gap)) return false;
+    }
+  }
+  return true;
+}
 function addStone(x, y, rx, ry, grey, solid) {
-  const o = { x, y, rx, ry, grey, id: land.stones.length };
+  const o = stonePoly({ x, y, rx, ry, grey, id: land.stones.length });
   land.stones.push(o);
   for (let gx = Math.floor((x - rx) / ST_G); gx <= Math.floor((x + rx) / ST_G); gx++) for (let gy = Math.floor((y - ry - LT_Y0) / ST_G); gy <= Math.floor((y + ry - LT_Y0) / ST_G); gy++) { const k = gx * 4096 + gy; let L = land.stoneG.get(k); if (!L) land.stoneG.set(k, L = []); L.push(o.id); }
   for (let k = Math.max(0, Math.floor(ltCol(x - rx) / LT_CHUNK)); k <= Math.min(land.stoneC.length - 1, Math.floor(ltCol(x + rx) / LT_CHUNK)); k++) land.stoneC[k].push(o.id);
   // (a grey one is rock: its cells made rock - a boulder standing out of the ground fills the air it stands in)
   if (grey) for (let c = Math.max(0, ltCol(x - rx)); c <= Math.min(land.cols - 1, ltCol(x + rx)); c++) for (let r = Math.max(0, ltRow(y - ry)); r <= Math.min(LT_ROWS - 1, ltRow(y + ry)); r++) {
-    const dx = ((c + 0.5) * LT_CELL - x) / rx, dy = (LT_Y0 + (r + 0.5) * LT_CELL - y) / ry; if (dx * dx + dy * dy > 1) continue;
+    const dx = ((c + 0.5) * LT_CELL - x) / rx, dy = (LT_Y0 + (r + 0.5) * LT_CELL - y) / ry; if (dx * dx + dy * dy > 1 || !stoneHit(o, dx, dy)) continue;
     const i = ltIdx(c, r), m = land.cell[i]; if (solid || m === M_DIRT || m === M_ROCK) land.cell[i] = M_ROCK;
   }
   return o;
@@ -21587,43 +21643,43 @@ function buildStones() {
   const cand = [];
   for (let c = 0; c < land.cols; c += 2) {
     const x0 = c * LT_CELL, top = land.surf[c]; if (top >= LT_Y1 - 4) continue;
-    for (let q = 0; q < 12; q++) {
-      const dep = Math.pow(Rs(), 0.85) * 250, u = Math.pow(Rs(), 1.3), rx = (4 + 15 * u) * 1.5 * (0.7 + 0.75 * dep / 250);
-      cand.push(x0 + Rs() * 2 * LT_CELL, top + dep, rx, rx * (0.72 + Rs() * 0.2), Rs());
+    for (let q = 0; q < 18; q++) {
+      // (sizes spread far wider - log-even from pebbles to great stones - user Oct 26: "a lot more")
+      const dep = Math.pow(Rs(), 0.85) * 250, rx = 3 * Math.pow(12, Math.pow(Rs(), 0.9)) * (0.7 + 0.75 * dep / 250);
+      cand.push(x0 + Rs() * 2 * LT_CELL, top + dep, rx, rx * (0.66 + Rs() * 0.26), Rs());
     }
   }
   const order = Array.from({ length: cand.length / 5 }, (_, i) => i).sort((a, b) => cand[b * 5 + 2] - cand[a * 5 + 2]);
   for (const i of order) {
     const x = cand[i * 5], y = cand[i * 5 + 1], rx = cand[i * 5 + 2], ry = cand[i * 5 + 3];
-    if (!stoneFits(x, y, rx, ry) || !stoneFree(x, y, rx, ry, 0.45)) continue;
+    if (!stoneFits(x, y, rx, ry) || !stoneFreeP(x, y, rx, ry, 0.7)) continue;   // (close: touching outlines, their rough corners leaving the seams - never one cut by another)
     const inRock = ltCell(ltCol(x), ltRow(y)) === M_ROCK;
     addStone(x, y, rx, ry, inRock || cand[i * 5 + 4] < 0.06, false);       // (grey where the ground is rock, and now and then in the earth)
   }
   // the little ones, in the gaps between
   for (let c = 0; c < land.cols; c += 2) {
     const x0 = c * LT_CELL, top = land.surf[c]; if (top >= LT_Y1 - 4) continue;
-    for (let q = 0; q < 10; q++) {
-      const x = x0 + Rs() * 2 * LT_CELL, y = top + Rs() * 260, rx = 2.2 + Rs() * 2.6, ry = rx * (0.7 + Rs() * 0.25);
-      if (stoneFits(x, y, rx, ry) && stoneFree(x, y, rx, ry, 0.35)) addStone(x, y, rx, ry, Rs() < 0.08, false);
+    for (let q = 0; q < 16; q++) {
+      const x = x0 + Rs() * 2 * LT_CELL, y = top + Rs() * 260, rx = 1.8 + Rs() * 2.8, ry = rx * (0.7 + Rs() * 0.25);
+      if (stoneFits(x, y, rx, ry) && stoneFreeP(x, y, rx, ry, 0.5)) addStone(x, y, rx, ry, Rs() < 0.08, false);
     }
   }
 }
 // a chunk's stones rasterised: for each cell the stone it's in (-1: the earth between), how far in from its rim (cells),
 // and where in it (-1..1)
 function stoneRaster(k, w, h) {
-  const n = w * h, id = new Int32Array(n).fill(-1), e = new Float32Array(n), ux = new Float32Array(n), uy = new Float32Array(n), c0 = k * LT_CHUNK;
+  const n = w * h, id = new Int32Array(n).fill(-1), e = new Float32Array(n), ux = new Float32Array(n), uy = new Float32Array(n), sd = new Float32Array(n), up = new Float32Array(n), c0 = k * LT_CHUNK;
   for (const j of (land.stoneC && land.stoneC[k]) || []) {
     const o = land.stones[j], m = Math.min(o.rx, o.ry) / LT_CELL;
     for (let c = Math.max(c0, ltCol(o.x - o.rx)); c <= Math.min(c0 + w - 1, ltCol(o.x + o.rx)); c++) for (let r = Math.max(0, ltRow(o.y - o.ry)); r <= Math.min(h - 1, ltRow(o.y + o.ry)); r++) {
       const dx = ((c + 0.5) * LT_CELL - o.x) / o.rx, dy = (LT_Y0 + (r + 0.5) * LT_CELL - o.y) / o.ry, d2 = dx * dx + dy * dy; if (d2 > 1) continue;
-      const q = r * w + (c - c0), ee = (1 - Math.sqrt(d2)) * m; if (id[q] >= 0 && e[q] >= ee) continue;
-      id[q] = j; e[q] = ee; ux[q] = dx; uy[q] = dy;
+      if (!stoneHit(stonePoly(o), dx, dy)) continue;
+      const q = r * w + (c - c0), ee = STH.d * m; if (id[q] >= 0 && e[q] >= ee) continue;
+      id[q] = j; e[q] = ee; ux[q] = dx; uy[q] = dy; sd[q] = stoneFaceShade(hash(c * 1.37 + r * 7.91)); up[q] = STH.f < 0.4 ? 1 : -STH.ny;
     }
   }
-  return { id, e, ux, uy };
+  return { id, e, ux, uy, sd, up };
 }
-// a stone's shade at (ux, uy) inside it: the light from the upper left, a rim of shade round its lower right
-function ltStoneShade(ux, uy, n) { const L = -ux * 0.55 - uy * 0.85, rr = ux * ux + uy * uy; return L - 0.35 * Math.max(0, rr - 0.55) + (n - 0.5) * 0.18; }
 function paintLandChunk(k) {
   const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0), h = LT_ROWS + 4;   // (+4: grass blades over the top row)
   let cv = land.chunks[k];
@@ -21645,16 +21701,18 @@ function paintLandChunk(k) {
         const qi = r * w + q, sj = SR.id[qi], PD = ltPal(M_DIRT, c);
         if (sj < 0) col = depth < 3 ? (hsh < 0.35 ? PD[6] : hsh < 0.75 ? PD[1] : PD[0]) : hsh < 0.14 ? PD[6] : PD[3];   // (bare earth at the surface - round a boulder - brown soil, not the dark between stones)
         else {
-          const o = land.stones[sj], P2 = o.grey ? ltPal(M_ROCK, c) : PD, k0 = hash(sj * 0.37), t = ltStoneShade(SR.ux[qi], SR.uy[qi], hsh), e = SR.e[qi];
+          const o = land.stones[sj], P2 = o.grey ? ltPal(M_ROCK, c) : PD, k0 = hash(sj * 0.37), t = SR.sd[qi], e = SR.e[qi];
           if (o.grey) {
             col = t > 0.6 ? P2[2] : t > 0.22 ? P2[5] : t > -0.25 ? (k0 < 0.5 ? P2[0] : P2[1]) : P2[4];
             if (e < 0.9 && t < 0.2) col = P2[4];
             const cy = 0.25 * Math.sin(SR.ux[qi] * 4.2 + k0 * 9) - 0.15 + 0.3 * (k0 - 0.5), cx = 0.3 * Math.sin(SR.uy[qi] * 3.7 + k0 * 5) + 0.2;
             if (k0 > 0.35 && o.rx > 9 && ((Math.abs(SR.uy[qi] - cy) < 0.06 && Math.abs(SR.ux[qi]) < 0.7) || (k0 > 0.7 && Math.abs(SR.ux[qi] - cx) < 0.06 && SR.uy[qi] > cy && SR.uy[qi] < 0.6))) col = P2[4].map(v => v * 0.82);   // (a crack or two)
+            if (SR.up[qi] > 0.35 && hash(c * 0.71 + r * 1.93 + sj) < 0.3 + 0.25 * k0) col = mix3(col, [104, 128, 66], 0.45);   // (moss on its upward faces, as the picture's)
           } else {
             col = t > 0.62 && o.rx > 6 ? P2[5] : t > 0.25 ? P2[4] : t > -0.3 ? (k0 < 0.33 ? P2[1] : k0 > 0.66 ? P2[2] : P2[0]) : P2[6];
             if (e < 0.8 && t < 0.25) col = P2[6];
           }
+          col = stoneTint(col, o);
         }
       } else if (m === M_SAND) col = hsh < 0.25 ? P[1] : hsh > 0.85 ? P[2] : P[0];
       else if (m === M_CONC) {
@@ -21742,7 +21800,7 @@ function paintLandBack(k) {
         // the back wall: the same stony earth, in shadow
         // (its stones the ground's own, whole - those standing out of the ground left out: none cut by the field's line)
         const qi = r * w + q, sj = SR.id[qi], o = sj >= 0 ? land.stones[sj] : null;
-        const k0 = hash(sj * 0.37), t = !o || o.y - o.ry < LT_Y0 + sr * LT_CELL ? -9 : ltStoneShade(SR.ux[qi], SR.uy[qi], hsh);
+        const k0 = hash(sj * 0.37), t = !o || o.y - o.ry < LT_Y0 + sr * LT_CELL ? -9 : SR.sd[qi];
         col = t < -5 ? D[3] : t > 0.25 ? (o.grey ? [150, 144, 134] : D[4]) : t > -0.3 ? (o.grey ? [120, 114, 106] : k0 < 0.5 ? D[0] : D[1]) : D[6];
         col = col.map((v, j) => v * 0.48 + [10, 12, 18][j]);
         const fd = ltFade(c, r);
