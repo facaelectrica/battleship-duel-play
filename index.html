@@ -2331,7 +2331,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 26 21:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 26 21:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13441,8 +13441,8 @@ function renderObjects() {
   seaHeliDraw();
   drawPlanes(x0, x1);
   guardDraw('drawBalloons', () => drawBalloons(x0, x1));
+  drawCivMagnets();                                       // (the rope behind the helicopter - user Oct 26)
   guardDraw('drawCivHelis', () => drawCivHelis(x0, x1));
-  drawCivMagnets();
   guardDraw('drawTraffic', () => drawTraffic(x0, x1));                                    // (LAND TEST: the Cessnas and 747s)
   guardDraw('drawSeaplanes', () => drawSeaplanes(x0, x1));
   guardDraw('drawBlimps', () => drawBlimps(x0, x1));
@@ -18246,7 +18246,7 @@ function stepCivShips(dt) {
       c.smokeT -= dt;
       if (moving && c.smokeT <= 0 && !SIM_ONLY) {
         c.smokeT = 0.22;
-        for (const [fx, fy] of K.funnels) { if (c.lp && linerOn(c) && Object.values(c.lp.loose).some(o => Math.abs(o.p.x + o.p.w / 2 - fx) < 12)) continue; const [x, y] = civPoint(c, fx, fy); spawnSmoke(x, y - 2, { rise: true, r: rnd(3, 5) * K.k * 1.4, grow: rnd(4, 6), lift: 26, vx: rnd(-4, 4) - c.dir * K.v * 0.3, vy: -rnd(14, 26), life: rnd(4, 6), alpha: 0.42, dark: 0.55 }); }
+        for (const [fx, fy] of K.funnels) { if (c.lp && linerOn(c) && Object.values(c.lp.loose).some(o => Math.abs(o.p.x + o.p.w / 2 - fx) < 12)) continue; const [x, y] = civPoint(c, fx, fy); spawnSmoke(x, y - 2, { rise: true, r: rnd(3, 5) * K.k * 1.4 * 2.2, grow: rnd(12, 18), lift: 26, vx: rnd(-4, 4) - c.dir * K.v * 0.3, vy: -rnd(14, 26), life: rnd(6, 9), alpha: 0.42, dark: 0.55 }); }   // (3x the cloud - user Oct 26: "the cloud of smoke from the ships should be bigger, like 3x at least")
       }
       // a white bow wave, at whichever end she's going
       if (moving && !SIM_ONLY && Math.random() < dt * 8) spawnFoam(c.x + c.dir * L * 0.48 + rnd(-6, 6), rnd(1.5, 3));
@@ -19655,15 +19655,17 @@ function stepRope(h, dt) {
   // move: each point keeps its way (a little damped: the air), and falls
   const damp = Math.pow(0.55, dt), G = 900 * dt * dt;
   for (let i = 1; i <= N; i++) {
-    const q = P[i], vx = (q[0] - q[2]) * damp, vy = (q[1] - q[3]) * damp;
-    q[2] = q[0]; q[3] = q[1]; q[0] += vx; q[1] += vy + G;
+    const q = P[i], wet = !dryLand(q[0]) && q[1] > surfaceY(q[0]), dk = wet ? Math.pow(0.08, dt) : 1;   // (in the water: slowed hard, lighter - it sinks, the water's no floor)
+    const vx = (q[0] - q[2]) * damp * dk, vy = (q[1] - q[3]) * damp * dk;
+    q[2] = q[0]; q[3] = q[1]; q[0] += vx; q[1] += vy + G * (wet ? 0.35 : 1);
   }
   P[0][0] = P[0][2] = ax; P[0][1] = P[0][3] = ay;
   // the rope's length: it can go slack, never stretch. The magnet is heavy (the tank much heavier), the rope light,
   // the helicopter doesn't give
   const wEnd = t || o ? 1 / 60 : 1 / 14, under = t ? MAG_H + tankTopH() : o ? MAG_H + magTop(o) + magFoot(o) : MAG_H;
   // (where the load meets the ground: the magnet's face, or the tank's tracks along its length)
-  const floorAt = x => t ? Math.min(landBelow(x - TANK_L * 0.4, P[N][1] - 30), landBelow(x, P[N][1] - 30), landBelow(x + TANK_L * 0.4, P[N][1] - 30)) : landBelow(x, P[N][1] - 20);
+  const under0 = (x, y) => dryLand(x) ? landBelow(x, y) : Math.min(landBelow(x, y), seabedY(x));   // (over the sea: down to the bottom)
+  const floorAt = x => t ? Math.min(under0(x - TANK_L * 0.4, P[N][1] - 30), under0(x, P[N][1] - 30), under0(x + TANK_L * 0.4, P[N][1] - 30)) : under0(x, P[N][1] - 20);
   let grounded = false;
   for (let it = 0; it < 14; it++) {
     for (let i = 0; i < N; i++) {
@@ -19952,7 +19954,14 @@ function stepCivMagnets(dt) {
     const ax = h.x, ay = h.y + chSkid(h) * 0.4, N = 10;
     if (!M.n) M.n = Array.from({ length: N + 1 }, (_, i) => [ax, ay + i * 0.1, ax, ay + i * 0.1]);
     const P = M.n, seg = Math.max(0.3, M.len / N), damp = Math.pow(0.8, dt), G = 900 * dt * dt, heavy = !!M.obj;
-    for (let i = 1; i <= N; i++) { const q = P[i], vx = (q[0] - q[2]) * damp, vy = (q[1] - q[3]) * damp; q[2] = q[0]; q[3] = q[1]; q[0] += vx; q[1] += vy + G; }
+    // (user Oct 26: "the magnet should sink into the water, not drag the container as if it was solid ground") the
+    // water is no floor: under the surface the rope and the magnet go on down - slowed hard by the water, the load
+    // lighter in it - to the bottom; going in, a splash
+    for (let i = 1; i <= N; i++) {
+      const q = P[i], wet = !dryLand(q[0]) && q[1] > surfaceY(q[0]), dk = wet ? Math.pow(0.08, dt) : 1;
+      const vx = (q[0] - q[2]) * damp * dk, vy = (q[1] - q[3]) * damp * dk;
+      q[2] = q[0]; q[3] = q[1]; q[0] += vx; q[1] += vy + G * (wet ? 0.35 : 1);
+    }
     P[0][0] = P[0][2] = ax; P[0][1] = P[0][3] = ay;
     const wEnd = heavy ? 1 / 60 : 1 / 14, under = MAG_H + (M.obj ? magTop(M.obj) + magFoot(M.obj) : 0);
     for (let it = 0; it < 14; it++) {
@@ -19961,11 +19970,15 @@ function stepCivMagnets(dt) {
         if (d <= seg) continue;
         const k = (d - seg) / d / (wa + wb); a[0] += dx * k * wa; a[1] += dy * k * wa; b[0] -= dx * k * wb; b[1] -= dy * k * wb;
       }
-      const e = P[N], fl = dryLand(e[0]) ? landBelow(e[0], e[1] - 20) : surfaceY(e[0]);
-      if (e[1] + under > fl) { e[1] = fl - under; e[2] += (e[0] - e[2]) * 0.5; }   // (resting on the ground or the water: it drags)
+      const e = P[N], fl = dryLand(e[0]) ? landBelow(e[0], e[1] - 20) : seabedY(e[0]);
+      if (e[1] + under > fl) { e[1] = fl - under; e[2] += (e[0] - e[2]) * 0.5; }   // (resting on the ground or the bottom: it drags)
     }
-    for (let i = 1; i < N; i++) { const q = P[i], gy = dryLand(q[0]) ? landBelow(q[0], q[1] - 8) : surfaceY(q[0]); if (q[1] > gy - 1) q[1] = gy - 1; }
+    for (let i = 1; i < N; i++) { const q = P[i], gy = dryLand(q[0]) ? landBelow(q[0], q[1] - 8) : seabedY(q[0]); if (q[1] > gy - 1) q[1] = gy - 1; }
     const e = P[N], q1 = P[N - 1], ex = e[0], ey = e[1];
+    { const wetNow = !dryLand(ex) && ey + MAG_H > surfaceY(ex);
+      if (wetNow && !M.wet && !SIM_ONLY) { lakeSplash(ex, M.obj ? 0.9 : 0.4); for (let k = 0; k < 6; k++) spawnFoam(ex + rnd(-8, 8), rnd(1.5, 3)); }
+      if (wetNow && !SIM_ONLY && Math.random() < dt * 6) addBubble(ex + rnd(-5, 5), ey + rnd(0, 8), rnd(-4, 4), -rnd(15, 30), rnd(0.8, 1.6));
+      M.wet = wetNow; }
     M.ex = ex; M.ey = ey; M.ang = clamp(-Math.atan2(ex - q1[0], ey - q1[1] + 0.01), -1.1, 1.1);   // (the magnet hangs along the rope's end)
     // (the swing tugs the helicopter toward its load: you feel its weight)
     if (heavy) { const L = Math.max(20, Math.hypot(ex - ax, ey - ay)); h.vx = (h.vx || 0) + clamp((ex - ax) / L, -1, 1) * 90 * dt; }
@@ -19976,7 +19989,7 @@ function stepCivMagnets(dt) {
     }
     if (M.obj) { const o = M.obj; magPlace(o, ex, ey, (e[0] - e[2]) / Math.max(dt, 1e-3), (e[1] - e[3]) / Math.max(dt, 1e-3), M.ang);
       // (on the ground under it, the load rests there: the cable goes slack)
-      const fl = dryLand(o.x) ? landTop(o.x) - magFoot(o) : surfaceY(o.x) - magFoot(o); if (o.y > fl) o.y = fl; }
+      const fl = dryLand(o.x) ? landTop(o.x) - magFoot(o) : seabedY(o.x) - magFoot(o); if (o.y > fl) o.y = fl; }
   }
 }
 function drawCivMagnets() {
@@ -24130,8 +24143,8 @@ function renderLandObjects() {
   drawFire(x0, x1, true);
   drawPlanes(x0, x1);
   guardDraw('drawBalloons', () => drawBalloons(x0, x1, 'air'));
+  drawCivMagnets();                                       // (the rope behind the helicopter - user Oct 26)
   guardDraw('drawCivHelis', () => drawCivHelis(x0, x1, 'air'));
-  drawCivMagnets();
   guardDraw('drawTraffic', () => drawTraffic(x0, x1, 'air'));
   guardDraw('drawSeaplanes', () => drawSeaplanes(x0, x1, 'air'));
   guardDraw('drawBlimps', () => drawBlimps(x0, x1));
@@ -24730,8 +24743,10 @@ function audioUpdate(dt) {
       e.osc.frequency.setTargetAtTime(34 + 40 * on, t, 0.2); e.lp.frequency.setTargetAtTime(130 + 300 * on, t, 0.2); e.lfo.frequency.setTargetAtTime(5 + 10 * on, t, 0.2);
       e.g.gain.setTargetAtTime(on ? (0.01 + 0.05 * on) * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard : 0, t, 0.2);
       e.pan.set(aboard > 1 ? h.pan * 0.4 : h.pan);
-      const r = SFX.rot[i], hl = helis[i], sp = hl && (hl.state === 'fly' || hl.state === 'landed') ? hl.spin : 0, hh = hl ? hear(hl.x) : { pan: 0, att: 0 };
-      const inH = crew[i].mode === 'heli' && L.includes(i) ? 2 / Math.sqrt(L.length) : 1;
+      // (the civilian helicopter you're flying has its rotor heard too, as the army one - user Oct 26)
+      const ch = crew[i].mode === 'civ' && crew[i].civ && civHelis.includes(crew[i].civ) ? crew[i].civ : null;
+      const r = SFX.rot[i], hl = ch || helis[i], sp = hl && (hl.state === 'fly' || hl.state === 'landed') ? clamp(hl.spin || 0, 0, 1) : 0, hh = hl ? hear(hl.x) : { pan: 0, att: 0 };
+      const inH = (crew[i].mode === 'heli' || ch) && L.includes(i) ? 2 / Math.sqrt(L.length) : 1;
       r.lfo.frequency.setTargetAtTime(4 + 12 * sp, t, 0.3); r.lp.frequency.setTargetAtTime(250 + 400 * sp, t, 0.3);
       r.g.gain.setTargetAtTime(sp * 0.07 * Math.max(hh.att, inH > 1 ? 1 : 0) * inH, t, 0.25);
       r.pan.set(inH > 1 ? hh.pan * 0.4 : hh.pan);
