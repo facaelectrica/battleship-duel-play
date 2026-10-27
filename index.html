@@ -2386,7 +2386,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 27 15:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 27 15:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10798,6 +10798,10 @@ function buildBirdArt() {
     gullMiniPerch: mkS(['..k.', 'kkk.', '.kk.', '.k..']),
     swift: BIRD_ROWS.swift.map(mk), swiftPerch: mk(BIRD_ROWS.swiftPerch),
   };
+  // (the birds of the foreground trees, user Oct 27, 15:45: a little brown songbird sitting on the crowns, and its flight)
+  const SONG = { b: '#6b5038', w: '#d8c4a0', k: '#1c1c20', o: '#e0a030', y: '#b07a30' }, mkS2 = rows => { const r = spriteFrom(rows, SONG); return { r, l: flipCanvas(r) }; };
+  img.birds.songPerch = mkS2(['....bb.', '...bbko', 'b.bbbww', '.bbbbww', '..bbbw.', '...y.y.']);
+  img.birds.song = [mkS2(['b.....b', '.b...b.', '..bbbko', '...bw..']), mkS2(['.......', '..bbbko', '.b.bw.b', 'b.....b'])];
 }
 // the first solid row of each column of a drawing
 function artTops(c) {
@@ -10862,6 +10866,7 @@ function buildBirds() {
   }
 }
 function birdThreat(x, dock) {
+  if (dock === -1) return LAND ? plantPerchThreat(x) : null;    // (a spot in a tree: what comes close on land - 50-land-plants)
   for (const sh of ships) {
     if (sh.state !== 'afloat') continue;
     if (Math.abs(sh.vx) < 6) continue;                 // a ship lying still at her berth doesn't bother them
@@ -10876,7 +10881,7 @@ function takeOff(b, awayX) {
   const dir = awayX === null || awayX === undefined ? (Math.random() < 0.5 ? -1 : 1) : Math.sign(b.x - awayX || 1);
   b.state = 'flee'; b.vx = dir * rnd(40, 75); b.vy = -rnd(50, 95); b.t = rnd(1.4, 3); b.face = dir;
 }
-function perchGone(p) { return !!(p.tower && (p.tower.hp <= 0 || p.broken)); }
+function perchGone(p) { return !!(p.tower && (p.tower.hp <= 0 || p.broken)) || (!!p.plant && plantPerchGone(p)); }
 // a perch on the tower: the top of its drawing as it is now (the lighthouse's damage frames change its outline - user
 // Oct 27 [11]); null where nothing's left there
 function towerPerchY(p) {
@@ -10998,6 +11003,7 @@ function stepBirds(dt) {
     }
   }
   trackTowerPerches();
+  trackPlantPerches();                                              // (the spots in the trees - 50-land-plants)
   for (let i = birds.length - 1; i >= 0; i--) {
     const b = birds[i];
     b.scared = Math.max(0, b.scared - dt);
@@ -11029,7 +11035,7 @@ function stepBirds(dt) {
       if (b.t <= 0) {
         b.t = rnd(2, 8);
         if (Math.random() < 0.35) b.face *= -1;                       // look around
-        if (!shelter && (b.kind === 'swift' ? Math.random() < 0.5 : Math.random() < 0.06)) takeOff(b, null);
+        if (!shelter && (b.tree ? Math.random() < 0.05 : b.kind === 'swift' ? Math.random() < 0.5 : Math.random() < 0.06)) takeOff(b, null);
       }
       continue;
     }
@@ -11037,7 +11043,18 @@ function stepBirds(dt) {
     if (b.state === 'flee') {
       b.t -= dt;
       b.vy += 15 * dt;
-      if (b.t <= 0) { b.state = b.kind === 'gull' ? 'circle' : 'cruise'; b.t = rnd(5, 14); }
+      if (b.t <= 0) { b.state = b.kind === 'gull' || b.tree ? 'circle' : 'cruise'; b.t = rnd(5, 14); }
+    } else if (b.state === 'circle' && b.tree) {
+      // (a bird of the trees: round over them a while, then down onto a free spot in a tree near its own - 50-land-plants)
+      const gy = landTop(clamp(b.hx, 1, WORLD_W - 1));
+      steerBird(b, b.hx + Math.sin(time * 0.3 + b.ph * 3) * 200, gy - 170 + Math.sin(time * 0.5 + b.ph * 5) * 40, flying.maxSp * 0.7, 0.8, dt);
+      b.t -= dt;
+      if (b.t <= 0) {
+        b.t = rnd(2, 5);
+        let best = null, bd = 1e9;
+        for (const p of perches) { if (!p.plant || p.bird || perchGone(p) || birdThreat(p.x, -1) !== null) continue; const d = Math.abs(p.x - b.hx); if (d < bd && d < 2500) { bd = d; best = p; } }
+        if (best) { b.state = 'land'; b.spot = best; best.bird = b; b.hx = best.x; }
+      }
     } else if (b.state === 'circle') {
       const home = docks[b.home], hx = home.x0 + home.w / 2;
       const tx = hx + Math.sin(time * 0.25 + b.ph * 3) * 220, ty = 170 + Math.sin(time * 0.4 + b.ph * 5) * 60;
@@ -11091,15 +11108,16 @@ function drawBirds(x0, x1) {
     const gs = 0.375 * SV, mini = gull && gs < 0.75;
     // (zoomed out they keep shrinking with the view, user Oct 24 night: the small sprite is drawn at the size the big
     // one would have, not stuck at one pixel a pixel)
-    let s = gull ? (mini ? 1 : Math.max(1, Math.round(gs))) : pixK(0.65);
+    let s = gull ? (mini ? 1 : Math.max(1, Math.round(gs))) : b.tree ? Math.max(1, Math.round(0.6 * SV)) : pixK(0.65);
     let set;
-    if (b.state === 'perch') set = gull ? (mini ? img.birds.gullMiniPerch : img.birds.gullPerch) : img.birds.swiftPerch;
+    if (b.tree && b.state !== 'dead' && b.state !== 'sink' && b.state !== 'bed') set = b.state === 'perch' ? img.birds.songPerch : img.birds.song[Math.floor(b.ph * (b.scared > 0 ? 14 : 9)) % 2];
+    else if (b.state === 'perch') set = gull ? (mini ? img.birds.gullMiniPerch : img.birds.gullPerch) : img.birds.swiftPerch;
     else if (gull) {
       const flapping = b.state === 'flee' || b.state === 'land' || b.vy < -8 || b.scared > 0 || Math.abs(env.wind) > 0.5;
       const fr = flapping ? [0, 1, 2, 1][Math.floor(b.ph * 11) % 4] : (Math.sin(b.ph * 0.9) > 0.85 ? [0, 1, 2, 1][Math.floor(b.ph * 8) % 4] : 1);
       set = (mini ? img.birds.gullMini : img.birds.gull)[fr];
     } else set = img.birds.swift[Math.floor(b.ph * (b.scared > 0 ? 14 : 9)) % 2];
-    const sp = b.face > 0 ? set.r : set.l;
+    const sp0 = b.face > 0 ? set.r : set.l, sp = b.tree && GLR.on ? glTint(sp0, 'bdT', E.fx || [1, 1, 1], [0, 0, 0], false) : sp0;   // (a tree bird in its colours: lit by the hour)
     if (mini) { const full = img.birds.gull[1].r.width * gs; s = Math.min(1, full / sp.width); }
     const w = Math.max(1, Math.round(sp.width * s)), h = Math.max(1, Math.round(sp.height * s));
     const px = PX(b.x) - (w >> 1), py = b.state === 'perch' ? PY(b.y) - h : PY(b.y) - (h >> 1);
@@ -19766,7 +19784,7 @@ function cpuPlane(B, dt) {
     pitchWant = up ? -0.7 : 0.7;
     break;
   }
-  if (kind !== 'ram' && pl.y > (LAND ? Math.min(landTop(pl.x), landTop(pl.x + pl.vx)) - 110 : WATER_Y - 95)) pitchWant = Math.min(pitchWant, -0.35);
+  if (kind !== 'ram' && pl.y > (LAND ? Math.min(clearTop(pl.x, 60), clearTop(pl.x + pl.vx, 60)) - 110 : WATER_Y - 95)) pitchWant = Math.min(pitchWant, -0.35);
   if (pl.y < PLANE_COLD + 150) pitchWant = Math.max(pitchWant, 0.2);
   const dp = pitchWant - pl.pitch;
   stick(Math.abs(dp) < 0.05 ? 0 : dp < 0 ? -1 : 1);
@@ -21318,7 +21336,9 @@ function civHeliPlan(h, dt) {
   if (!ai) return [0, 0];
   const gy = landTopAt(h.x) - chStand(h);
   if (ai.phase === 'go' || ai.phase === 'home') {
-    const dx = ai.tx - h.x, wantY = ai.phase === 'home' && Math.abs(dx) < 60 ? gy + 8 : ai.ty;   // (a little under its wheels: easing toward the ground itself it hovered just over it for ever)
+    const dx = ai.tx - h.x, down = ai.phase === 'home' && Math.abs(dx) < 60;
+    let wantY = down ? gy + 8 : ai.ty;   // (a little under its wheels: easing toward the ground itself it hovered just over it for ever)
+    if (!down && LAND && dryLand(h.x)) wantY = Math.min(wantY, clearTop(h.x + Math.sign(dx) * 80, 90) - chSkid(h) - 30);   // (over the trees: into one it comes down - user Oct 27)
     const lever = clamp(dx / 300, -1, 1), stick = clamp((wantY - h.y) / 120, -1, 1);
     if (ai.phase === 'go' && Math.abs(dx) < 50) { ai.phase = 'look'; ai.t = rnd(4, 9); }
     return [Math.abs(dx) < 60 && ai.phase === 'home' ? 0 : lever, stick];
@@ -22450,8 +22470,8 @@ function cpuTank(B, dt) {
 function cpuHeliFly(B, h, tx, alt, dt) {
   const p = B.p, dx = tx - h.x;
   // the ground ahead and under: never lower than clears it
-  let clear = landTop(h.x);
-  for (const o of [-1, 1, 2, 3]) clear = Math.min(clear, landTop(h.x + o * 60 * (Math.sign(h.vx) || h.facing)));
+  let clear = clearTop(h.x, 60);                             // (the trees too: user Oct 27, a helicopter into one comes down)
+  for (const o of [-1, 1, 2, 3]) clear = Math.min(clear, clearTop(h.x + o * 60 * (Math.sign(h.vx) || h.facing), 40));
   const yWant = Math.min(alt, clear - 70);
   const dy = yWant - h.y;
   diveHold[p] = Math.abs(dy) < 8 ? 0 : clamp(dy / 60, -1, 1);
@@ -24708,7 +24728,125 @@ function buildPlants() {
     add(it);
   }
   for (const t of land.tufts || []) { Object.assign(t, { pk: 'grass', hp: 1, heat: 0, fire: 0, burnT: 0, burnMax: PK.grass.burn * (0.8 + 0.4 * hash(t.x * 0.29)), char: 0, wet: 0, burnt: false }); add(t); }
+  plantPerches();
 }
+
+/* ---- birds in the trees (user Oct 27, 15:45: "Should trees have bird perches? I need to see how they look first, but
+   yes") ---- the shared perches (37-birds): two or three spots on the top of each foreground tree's and palm's crown;
+   small birds sit there, and fly off when the tree is hit, burns, falls or something comes close (a vehicle, a gun's
+   blast - scareBirds); they circle over their trees a while and settle again. Each spot found on the crown's outline
+   as it stands now (the ground under it may move) ---- */
+function crownTops(im) {
+  if (im._ct) return im._ct;
+  const m = alphaMask(im), W = im.width, H = im.height, T = new Int16Array(W);
+  for (let x = 0; x < W; x++) { let y = 0; while (y < H && !m[y * W + x]) y++; T[x] = y; }
+  return (im._ct = T);
+}
+function plantPerchY(p) {
+  const it = p.plant, G = plantGeo(it); if (!G) return null;
+  const T = crownTops(G.im), col = it.flip ? G.im.width - 1 - p.col : p.col, top = T[col];
+  if (top >= G.im.height - 2) return null;
+  return landTop(it.x) + G.sink - G.h + top * G.k + 0.5;
+}
+// (built with the plants, after the birds - buildWorld makes the birds first: some of the small birds move into the trees)
+function plantPerches() {
+  if (typeof perches === 'undefined' || !birds.length) return;
+  const mine = [];
+  for (const it of land.props || []) {
+    if (it.kind !== 'tree' && it.kind !== 'palm') continue;
+    const G = plantGeo(it); if (!G) continue;
+    const T = crownTops(G.im), W = G.im.width;
+    // (the crown's high points: a column near each of three places across it, where the outline is near its top)
+    let tmin = 1e9; for (let x = 0; x < W; x++) tmin = Math.min(tmin, T[x]);
+    for (const f of it.kind === 'palm' ? [0.3, 0.7] : [0.25, 0.5, 0.75]) {
+      let best = -1, bt = 1e9;
+      for (let x = Math.floor(W * (f - 0.12)); x <= Math.ceil(W * (f + 0.12)); x++) if (x >= 1 && x < W - 1 && T[x] < bt && Math.abs(T[x - 1] - T[x]) <= 1 && Math.abs(T[x + 1] - T[x]) <= 1) { bt = T[x]; best = x; }
+      if (best < 0 || bt > tmin + G.im.height * 0.25) continue;
+      const col = it.flip ? W - 1 - best : best, p = { x: it.x - (it.flip ? G.w - G.fo : G.fo) + (col + 0.5) * G.k, y: 0, dock: -1, bird: null, plant: it, col: best };
+      p.y = plantPerchY(p); if (p.y == null) continue;
+      perches.push(p); mine.push(p);
+    }
+  }
+  // (about every third spot taken by a small bird from the flocks, sitting there at the start)
+  let k = birds.length - 1;
+  for (const p of mine) {
+    if (hash(p.x * 0.017) > 0.4) continue;
+    while (k >= 0 && (birds[k].kind !== 'swift' || birds[k].tree)) k--;
+    if (k < 0) break;
+    const b = birds[k--];
+    Object.assign(b, { tree: true, hx: p.x, state: 'perch', spot: p, x: p.x, y: p.y, vx: 0, vy: 0, flock: b.flock, t: rnd(3, 9), face: Math.random() < 0.5 ? 1 : -1 });
+    p.bird = b;
+  }
+}
+// a tree spot gone (the tree down, burning, its leaves gone)
+const plantPerchGone = p => !p.plant || p.plant.state !== 'stand' || p.plant.fire > 0 || p.plant.leaf < 0.5 || lakeAt(p.plant.x);
+// something close to the tree: what the birds in it fly from (null: nothing)
+function plantPerchThreat(x) {
+  for (const t of tanks) if (t && t.state === 'alive' && Math.abs(t.x - x) < 160 && Math.abs(t.vx) > 4) return t.x;
+  for (const h of helis) if (h && (h.state === 'fly' || h.state === 'landed') && Math.abs(h.x - x) < 220) return h.x;
+  for (const pl of planes) if (pl && pl.state === 'fly' && Math.abs(pl.x - x) < 260 && pl.y > landTop(x) - 300) return pl.x;
+  for (const h of civHelis) if (h.state === 'fly' && Math.abs(h.x - x) < 220 && h.y > landTop(x) - 260) return h.x;
+  return null;
+}
+// each frame (stepBirds): every tree spot on its crown as it is now; a bird whose tree went flies off
+function trackPlantPerches() {
+  if (!LAND) return;
+  for (const p of perches) {
+    if (!p.plant) continue;
+    if (plantPerchGone(p)) { if (p.bird) takeOff(p.bird, p.plant.x); continue; }
+    const y = plantPerchY(p); if (y != null) p.y = y;
+  }
+}
+
+/* ---- aircraft into the trees (user Oct 27, 15:45: "Should a heli or plane that clips a tree crash? Yes.") ---- any
+   aircraft flying into a standing tree's or palm's crown or trunk comes down as it would into the ground (the army's
+   planes crash there - planeGroundCrash; helicopters, the traffic, seaplanes and the blimp fall as when shot down, and
+   crash where they meet the ground; a balloon is torn and comes down), and the tree goes over or catches fire ---- */
+// the standing tree or palm whose picture is at (x, y)
+function treeAt(x, y) {
+  if (!PLT.grid.length) return null;
+  let hit = null;
+  plantsNear(x, 70, it => { if (!hit && (it.pk === 'tree' || it.pk === 'palm') && plantUp(it) && plantSolidAt(it, x, y)) hit = it; });
+  return hit;
+}
+// a body hw either side of x along its heading a, hh below y: the tree it meets, or null (not near the trees: at once)
+function treeClip(x, y, hw, hh, a) {
+  if (!PLT.grid.length || !onLand(x) || y + hh < landTop(x) - 150) return null;
+  const c = Math.cos(a || 0), s = Math.sin(a || 0);
+  for (const [u, v] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0.6, 1], [-0.6, 1], [0.5, 0.5], [-0.5, 0.5]]) {
+    const px = x + u * hw * c - v * hh * s, py = y + u * hw * s + v * hh * c, it = treeAt(px, py);
+    if (it) return it;
+  }
+  return null;
+}
+// the tree it hit: knocked over the way it was going, and alight
+function treeStruck(it, vx, heavy) {
+  const top = landTop(it.x), hh = plantH(it);
+  plantBits(it, it.x, top - hh * 0.7, heavy ? 18 : 12, vx * 0.3, true, 0.3);
+  scareBirds(it.x, top - hh * 0.7, 200);
+  if (heavy || Math.random() < 0.7) plantFell(it, Math.sign(vx) || 1); else it.hp = Math.max(1, it.hp - PK[it.pk].hp * 0.5);
+  plantHeat(it, PK[it.pk].ign * (heavy ? 1.5 : 0.8));
+}
+// each frame: every low aircraft against the trees
+function aircraftVsTrees() {
+  if (netGuestHold()) return;
+  for (const h of helis) if (h && h.state === 'fly') { const it = treeClip(h.x, h.y, heliHalf() * 0.9, heliSkid(), h.tilt); if (it) { treeStruck(it, h.vx, false); heliHurt(h, h.hp + 1, h.x, h.y); } }
+  for (const h of civHelis) if (h.state === 'fly') { const it = treeClip(h.x, h.y, chHalf(h) * 0.85, chSkid(h), h.tilt); if (it) { treeStruck(it, h.vx, false); civHeliHit(h, 1, h.x, h.y); civHeliDown(h); } }
+  for (const f of traffic) if (f.state === 'fly' || f.state === 'free') { const T = TRAFFIC[f.kind]; if (!T) continue; const it = treeClip(f.x, f.y, T.hit[0], T.hit[1], f.ang || 0); if (it) { treeStruck(it, f.vx || (f.dir || 1) * T.v, f.kind === 'jet'); trafficDown(f); } }
+  for (const s of seaplanes) if (s.state === 'fly') { const it = treeClip(s.x, s.y, 22, 9, s.ang || 0); if (it) { treeStruck(it, s.vx || s.dir * s.spd, false); spDown(s); } }
+  for (const b of blimps) if (b.state === 'fly') { const it = treeClip(b.x, b.y, blimpArt ? blimpArt.W * BLIMP_K * 0.45 : 64, 16, b.ang || 0); if (it) { treeStruck(it, b.vx || 0, false); blimpBurst(b); } }
+  for (const b of balloons) if (b.state === 'fly') { const q = balloonBox(b), it = treeClip(q.cx, q.cy, q.hw, q.hh, 0) || treeAt(b.x, b.y); if (it) { treeStruck(it, b.vx || 0, false); balloonPop(b, false, b.x, b.y); } }
+}
+// the highest a standing tree or palm reaches between x0 and x1 (world y), or Infinity: what a low flier keeps above
+// (the CPU's helicopter, the fighter's low pass, a seaplane coming down to its lake)
+function treeTopIn(x0, x1) {
+  if (!PLT.grid.length) return Infinity;
+  const a = Math.min(x0, x1), b = Math.max(x0, x1);
+  let m = Infinity;
+  plantsNear((a + b) / 2, (b - a) / 2 + 60, it => { if ((it.pk === 'tree' || it.pk === 'palm') && plantUp(it)) m = Math.min(m, landTop(it.x) - plantH(it)); });
+  return m;
+}
+const clearTop = (x, r) => Math.min(landTop(x), treeTopIn(x - (r || 40), x + (r || 40)));
 // the plants within r of x (by cell)
 function plantsNear(x, r, fn) {
   for (let c = Math.floor((x - r) / PL_CELL); c <= Math.floor((x + r) / PL_CELL); c++) { const L = PLT.grid[c]; if (L) for (const it of L) if (Math.abs(it.x - x) <= r) fn(it); }
@@ -24750,7 +24888,7 @@ function plantBulletHit(b) {
   return false;
 }
 function plantRound(it, x, y, vx) {
-  scareBirds(x, y, 60);
+  scareBirds(x, y, 60); if (it.pk !== 'grass') scareBirds(it.x, landTop(it.x) - plantH(it) * 0.8, 120);   // (the birds in it, whichever part was hit)
   if (it.pk === 'grass') { cutTuft(it, vx * 0.05, false); return; }
   it.hp -= 1; it.shake = 1;
   const top = landTop(it.x), crown = y < top - plantH(it) * 0.45;
@@ -24898,6 +25036,7 @@ function stepFronts(dt, rain, wnd, fxK) {
 function stepPlants(dt) {
   if (!LAND || !PLT.grid.length) return;
   const rain = E.rain || 0, wnd = E.windU || 0;
+  aircraftVsTrees();
   // tanks drive through them: pushed over and flattened, never in its way; a helicopter put down on one too
   for (const t of tanks) {
     if (!t || t.state !== 'alive') continue;
@@ -26194,7 +26333,7 @@ function stepSeaplanes(dt) {
 // (user Oct 26: "Hydroplanes can fly from the ocean to the lakes and vice-versa") its own country's lake
 const spLake = s => (land.lakes || []).find(L => (L[0] + L[1]) / 2 < WORLD_W / 2 === s.home < WORLD_W / 2 && L[1] - L[0] > 700);
 // the highest ground in the next stretch ahead (it keeps 220 over it, crossing the land)
-function spClear(s) { let m = WATER_Y; for (let k = 0; k <= 700; k += 100) { const x = s.x + s.dir * k; if (dryLand(x)) m = Math.min(m, landTop(x)); } return m; }
+function spClear(s) { let m = Math.min(WATER_Y, treeTopIn(s.x, s.x + s.dir * 700)); for (let k = 0; k <= 700; k += 100) { const x = s.x + s.dir * k; if (dryLand(x)) m = Math.min(m, landTop(x)); } return m; }   // (and the trees on the way: user Oct 27, into one it comes down)
 const spHold = (s, alt) => { const tgt = Math.min(alt, spClear(s) - 220); return s.y > tgt + 30 ? -0.5 : s.y < tgt - 30 ? 0.4 : 0; };
 const spFace = (s, want) => { if (!spOnWater(s) && want && s.dir !== want && !s.turn) s.turn = { t: 0, from: s.dir }; };
 function spPlan(s, dt) {
@@ -30172,6 +30311,7 @@ function landPlaneCrash(pl, pts) {
       if (h && (h.state === 'fly' || h.state === 'landed') && heliHit(h, x, y)) { if (!netGuestHold()) { h.hp = 0; noteHit(h.id, 'heli'); blowHeli(h); } return [x, y]; }
     }
     if (landSolid(x, y)) return [x, y, true];
+    const it = treeAt(x, y); if (it) { treeStruck(it, pl.vx, true); return [x, y, true]; }   // (into a tree: down as into the ground - user Oct 27, 15:45)
   }
   return null;
 }
@@ -31340,7 +31480,7 @@ async function start(data) {
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
     bedLife: () => ({ reef, coastFront, weedBits, chunks, plants }), seabedHit: (x, hl, pw, vx, cut, bl) => seabedHit(x, hl, pw, vx, cut, bl), uwBlast: (x, y, pw) => underwaterBlast(x, y, pw),   // (Oct 27: the bottom's growth)
     set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, calmAt: x => calmAt(x), harbourTop: (x, y) => harbourTop(x, y), crumbleTower: tw => crumbleTower(tw), vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers[p]), seaHeli: (x, y) => { const h = helis[0] = makeHeli(0, x); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.mode, cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
-    landState: () => land, landPlants: () => ({ PLT, PK, plantsBlast, plantIgnite, plantFell, plantHeat, fireSpots: () => fireSpots([]) }), land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => L.s.c.toDataURL()); }, wrecks: () => landWrecks.length, top: x => landTop(x), below: (x, y) => landBelow(x, y), sandActive: () => land.sand.length,
+    landState: () => land, landPlants: () => ({ PLT, PK, plantGeo, treeAt, plantsBlast, plantIgnite, plantFell, plantHeat, fireSpots: () => fireSpots([]) }), land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => L.s.c.toDataURL()); }, wrecks: () => landWrecks.length, top: x => landTop(x), below: (x, y) => landBelow(x, y), sandActive: () => land.sand.length,
       sandX: () => { let best = -1, bx = WORLD_W / 2; for (let c = 0; c < land.cols; c++) { let r = 0; while (r < LT_ROWS && land.cell[ltIdx(c, r)] === M_AIR) r++; let n = 0; while (r + n < LT_ROWS && land.cell[ltIdx(c, r + n)] === M_SAND) n++; if (n > best) { best = n; bx = (c + 0.5) * LT_CELL; } } return bx; }, sandCount: () => { let n = 0; for (const v of land.cell) if (v === M_SAND) n++; return n; }, rockX: () => land.outcrops[0] ? land.outcrops[0].x : WORLD_W / 2, rockAt: x => ltCell(ltCol(x), ltRow(landTop(x)) ) }),
     rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, SEA0, SEA1, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? SEA1 + 10 : SEA0 - 10)), get LAND_Y() { return LAND_Y; }, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, skyNew: on => skyNewSet(on), smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
     debugJetArt: () => { if (!trafficArt) buildTrafficArt(); const d = c => { const k = makeCanvas(c.width, c.height); k.getContext('2d').drawImage(c.src && c._tp ? c.src : c, 0, 0); return k.toDataURL(); }, a = trafficArt.jet[0].r, w = windowsArtDots(a); return { jet: d(a), jetWin: w ? d(w) : d(makeCanvas(1, 1)) }; }, SPACE: { ATMO_TOP, SPACE_TOP, SKY_TOP }, carve: (x, y, r) => landCarve(x, y, r), landShell: (x, y, owner, from) => { shells.push({ x, y, vx: 0, vy: 300, owner, from: from || 'tank', age: 1, trail: 0, under: false, ut: 0 }); }, tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), fgDump: () => { if (!fgStrip) buildFgStrip(); return fgStrip.sp.toDataURL(); }, reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
