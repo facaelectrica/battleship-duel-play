@@ -2377,7 +2377,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 27 13:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 27 14:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6976,6 +6976,7 @@ function stepTorps(dt) {
         let gone = false;
         for (const sb of subs) { if (sb.id === tp.owner) continue; const sec = subHitTest(sb, tp.x, tp.y); if (sec >= 0) { hitSub(sb, sec, tp.x, tp.y); gone = true; break; } }
         if (!gone) { const w = wreckAt(tp.x, tp.y); if (w) { blowWreck(w[0], w[1], tp.x, tp.y, 1, 0); gone = true; } }
+        if (!gone) { const ms = msHitAt(tp.x, tp.y, 2); if (ms) { minisubLost(ms); gone = true; } }   // (the research sub too, user Oct 27)
         if (gone) { torps.splice(i, 1); tp.dead = true; continue; }
       }
       const bed = seabedY(tp.x) - 1;
@@ -7010,6 +7011,7 @@ function stepTorps(dt) {
     if (!hit) for (const d of docks) if (d.player !== tp.owner) { const pi = pillarAt(d, tp.x, tp.y); if (pi >= 0) { hit = ['pillar', d, pi]; break; } }
     if (!hit && tp.t > 0.25) { const w = wreckAt(tp.x, tp.y); if (w) hit = ['wreck', w]; }
     if (!hit && LAND && civAt(tp.x, tp.y)) hit = ['civ'];
+    if (!hit && LAND) { const ms = msHitAt(tp.x, tp.y, 2); if (ms) hit = ['msub', ms]; }   // (the research ships' minisubs: a full target, user Oct 27 13:47)
     const sy = surfaceY(tp.x);
     if (!hit && tp.t > TORP_RUN && tp.y > sy + 1) {
       // run out without finding anything: no blast, the motor stops and it goes to the bottom
@@ -7022,6 +7024,7 @@ function stepTorps(dt) {
     if (!end) continue;
     torps.splice(i, 1); tp.dead = true;
     if (hit && hit[0] === 'sub') { hitSub(hit[1], hit[2], tp.x, tp.y); continue; }
+    if (hit && hit[0] === 'msub') { minisubLost(hit[1]); sfxExplosion(tp.x, 0.7); continue; }
     if (hit && hit[0] === 'pillar') { breakPillar(hit[1], hit[2], tp.x, tp.y); continue; }
     if (hit && hit[0] === 'wreck') { blowWreck(hit[1][0], hit[1][1], tp.x, tp.y, 1.2, tp.vx); continue; }
     if (hit && hit[0] === 'civ') { underwaterBlast(tp.x, tp.y + 2, 1); sfxExplosion(tp.x, 0.8); splash(tp.x, 0, -600); civHit(tp.x, tp.y, 3, tp.vx); continue; }
@@ -7255,7 +7258,8 @@ function stepDcharges(dt) {
     let boom = c.y >= c.fuse || c.y >= seabedY(c.x) - 2;
     // a proximity fuse too: it goes off right beside a submarine
     for (const sb of subs) if (!boom && sb.id !== c.owner && (sb.state === 'out' || sb.state === 'docked') && Math.abs(c.x - sb.x) < SUB_L / 2 + 6 && Math.abs(c.y - sb.y) < 22) boom = true;
-    if (!boom && wreckAt(c.x, c.y + 3)) boom = true;                       // (landing on a wreck: it goes off there)
+    if (!boom && wreckAt(c.x, c.y + 3)) boom = true;
+    if (!boom && msHitAt(c.x, c.y, 8)) boom = true;                       // (beside a research sub: it goes off - user Oct 27)                       // (landing on a wreck: it goes off there)
     if (boom) { dcharges.splice(i, 1); detonateCharge(c); }
   }
 }
@@ -7286,6 +7290,8 @@ function detonateCharge(c) {
       hitSub(sb, Math.floor(u * SUB_SECTIONS), clamp(x, sb.x - SUB_L * 0.45, sb.x + SUB_L * 0.45), sb.y);
     }
   }
+  // (the research ships' minisubs in reach of it are crushed - user Oct 27 13:47, as the army's sub)
+  minisubsInBlast(x, y, DC_RADIUS * 0.8);
   // the wrecks in reach of it are blown further apart (the nearest point of each)
   { const near = []; eachWreck((o, sb) => { const [a, b] = wreckSpan(o, sb), hx = clamp(x, a, b), ty = wreckTop(o, sb, hx); if (ty != null && Math.hypot(hx - x, (ty + wreckBottom(o, sb, hx)) / 2 - y) < DC_RADIUS * 0.8) near.push([o, sb, hx, ty + 4]); return false; });
     for (const [o, sb, hx, hy] of near) blowWreck(o, sb, hx, hy, 0.6, 0); }
@@ -7380,6 +7386,7 @@ function mineContact(m, dt) {
     if (Math.abs(m.x - sb.x) > SUB_L * 0.6 || Math.abs(m.y - sb.y) > 40) continue;
     for (const [ox, oy] of [[0, -R], [-R, 0], [R, 0], [0, R], [0, 0]]) { const sec = subHitTest(sb, m.x + ox, m.y + oy); if (sec >= 0) return ['sub', sb, sec]; }
   }
+  { const ms = msHitAt(m.x, m.y, R + 2); if (ms) return ['msub', ms]; }   // (a research sub touching it: it goes off - user Oct 27)
   for (const b of sailboats) if (b.state === 'sail' && Math.abs(m.x - b.x) < sailHalf(b) + R && (sailHullHit(b, m.x - R, m.y) || sailHullHit(b, m.x + R, m.y) || sailHullHit(b, m.x, m.y - R))) return ['sail', b];
   for (const pl of planes.concat(oldPlanes)) {
     if (!pl || (pl.state !== 'fly' && pl.state !== 'down') || pl.id === m.owner) continue;
@@ -9477,6 +9484,7 @@ function stepShells(dt) {
       if (Math.random() < 0.5) addBubble(b.x, b.y, rnd(-3, 3), -rnd(8, 20), rnd(0.5, 1));
       let hitU = false;
       for (const sb of subs) { if (sb.id === b.owner) continue; const sec = subHitTest(sb, b.x, b.y); if (sec >= 0) { sb.chip = (sb.chip || 0) + 0.05; if (sb.chip >= 1) { sb.chip = 0; hitSub(sb, sec, b.x, b.y); } hitU = true; break; } }
+      if (!hitU && LAND) { const ms = msHitAt(b.x, b.y, 1); if (ms) { hitU = true; spawnSparks(b.x, b.y, 3, 80); ms.chip = (ms.chip || 0) + 0.25; if (ms.chip >= 1) minisubLost(ms); } }   // (the research sub: a few rounds just under the surface hole it - user Oct 27)
       if (hitU || Math.abs(b.vx) + Math.abs(b.vy) < 50 || b.y > seabedY(b.x) - 2 || b.age > 3) bullets.splice(i, 1);
       continue;
     }
@@ -19869,17 +19877,23 @@ function drawAirLamps() {
    Anything a player drives does nothing by itself. The sea game's yachts (no harbour of their own) anchor too. */
 // each kind's anchor: its picture's size (0 a dinghy's .. 4 the biggest), the most rope she carries (world units), the
 // winch letting out and winding in (units a second), chain (iron) or rope, a blinking lamp on it
+// (user Oct 27, 13:52: "it should have a limit, not go all the way to the bottom of the deep sea. Like in the real world it
+// can stay in the water. So each boat has a maximum anchor rope length") cap: the most rope she carries, about the
+// harbour shelf's depth (335) for the biggest - deeper than that the anchor hangs in the water on it; the lakes' boats'
+// reach their beds (about 240)
 const ANC_KIND = {
-  cruise: { size: 4, cap: 3400, pay: 170, haul: 105, chain: true },
-  container: { size: 4, cap: 3400, pay: 170, haul: 105, chain: true },
-  liner: { size: 3, cap: 3300, pay: 160, haul: 100, chain: true },
-  tanker: { size: 3, cap: 3300, pay: 160, haul: 100, chain: true },
-  research: { size: 2, cap: 3500, pay: 170, haul: 110, chain: true, blip: true },   // (her work is the trench: rope to its floor)
-  yacht: { size: 1, cap: 520, pay: 80, haul: 50 },
-  motor: { size: 0, cap: 340, pay: 70, haul: 45 },
-  jet: { size: 0, cap: 300, pay: 70, haul: 45 },
+  cruise: { size: 4, cap: 460, pay: 110, haul: 70, chain: true },
+  container: { size: 4, cap: 460, pay: 110, haul: 70, chain: true },
+  liner: { size: 3, cap: 420, pay: 105, haul: 65, chain: true },
+  tanker: { size: 3, cap: 420, pay: 105, haul: 65, chain: true },
+  research: { size: 2, cap: 380, pay: 100, haul: 60, chain: true, blip: true },
+  yacht: { size: 1, cap: 330, pay: 80, haul: 50 },
+  motor: { size: 0, cap: 300, pay: 70, haul: 45 },
+  jet: { size: 0, cap: 200, pay: 70, haul: 45 },
 };
-const ANC_PIX = [[7, 6], [9, 8], [12, 10], [15, 13], [18, 15]];   // (each size's picture: height, width - world units)
+// (user Oct 27, 13:52: "We need to see the 'anchor' at the end of the rope as it goes down") each size's picture -
+// height, width in world units: big enough to read at the usual zoom, bigger ships bigger
+const ANC_PIX = [[10, 9], [12, 11], [16, 15], [20, 18], [24, 21]];
 const PAX = new Set(['cruise', 'liner']);                          // (the passenger ships: the trip plan)
 const ANC_NIGHT = 0.05;                                            // (the sun under this: night - E.night's own line)
 const ancHour = () => ((env.time % 24) + 24) % 24;
@@ -19905,7 +19919,7 @@ function ancHawse(v, a) {
   if (CIV[k]) {
     if (v.state === 'gone') return null;
     const K = CIV[k], A = civArt(v); if (!A || !A.width) return null;
-    const py = K.wl - 7 / K.k, px = ancBowPx(A, py);
+    const px = ancBowPx(A, K.wl - 7 / K.k) - 9 / K.k, T = civTopPx(v), py = Math.min(K.wl - 5 / K.k, (T ? T[clamp(Math.floor(px), 0, T.length - 1)] : K.wl - 20 / K.k) + 3 / K.k);   // (her hawse: under the bow's deck edge, a little back from the stem)
     return v.brk != null ? civHalfPoint(v, px, py, A, K) : civPoint(v, px, py);
   }
   if (k === 'yacht') {
@@ -19983,12 +19997,12 @@ function stepAnchor(v, a, dt) {
     }
     // the bottom: it lies on it (and rubs along it)
     for (let i = 1; i <= n; i++) {
-      const p = P[i], by = seabedY(p.x) - (i === n ? A[0] * 0.3 : 0.5);
+      const p = P[i], by = seabedY(p.x) - (i === n ? A[0] * 0.45 : 0.5);
       if (p.y > by) { p.y = by; p.ox = p.x - (p.x - p.ox) * 0.25; if (p.oy > p.y) p.oy = p.y; }
     }
   }
   // the anchor reaching the bottom: a puff of sand, the growth under it crushed (the shared kickDust / seabedHit)
-  const by = seabedY(E0.x) - A[0] * 0.3;
+  const by = seabedY(E0.x) - A[0] * 0.45;
   if (!a.bed && a.st !== 'raise' && E0.y >= by - 0.6) {
     a.bed = true; a.drag = false;
     const sp = (E0.y - E0.oy) / hh;
@@ -20159,23 +20173,30 @@ function sailNight(b, dt) {
 const ancArts = [];
 function ancArt(size) {
   if (ancArts[size]) return ancArts[size];
-  const [H, W] = ANC_PIX[size], c = makeCanvas(W, H), x = c.getContext('2d'), cx = (W - 1) / 2;
-  const P = (i, j, col) => { if (i < 0 || j < 0 || i >= W || j >= H) return; x.fillStyle = col; x.fillRect(Math.round(i), j, 1, 1); };
-  const IRON = '#5b636c', LIT = '#a9b3bc', DK = '#33373d';   // (iron, its lit edge, its shade: pale enough to read through the water's tint)
-  const ring = H >= 10 ? 2 : 1;
-  if (ring === 2) { for (const [i, j] of [[-1, 0], [0, 0], [1, 0], [-1, 1], [1, 1], [-1, 2], [0, 2], [1, 2]]) P(cx + i, j, j === 0 ? LIT : IRON); }
-  else P(cx, 0, LIT);
-  const st = ring + 1, sw = Math.max(1, Math.round(W * 0.3));
-  for (let i = -sw; i <= sw; i++) P(cx + i, st, i < 0 ? LIT : IRON);   // (the stock)
-  for (let j = ring + 1; j < H - 1; j++) { P(cx, j, j === st ? LIT : IRON); if (size >= 3) P(cx + 1, j, DK); }   // (the shank)
-  const A = Math.floor(cx), rise = Math.max(1, Math.round(H * 0.32));
-  for (let i = -A; i <= A; i++) {                                // (the arms: a curve up to each side)
-    const y = H - 1 - Math.round(Math.pow(Math.abs(i) / A, 2) * rise);
-    P(cx + i, y, i < 0 ? IRON : DK); if (size >= 2) P(cx + i, y - 1, IRON);
-  }
-  for (const s of [-1, 1]) {                                     // (the flukes: barbs at the tips)
-    const tx = cx + s * A, ty = H - 1 - rise;
-    P(tx, ty - 1, LIT); P(tx - s, ty - 1, IRON); if (size >= 2) { P(tx, ty - 2, LIT); P(tx + s * 0, ty, IRON); }
+  // a proper anchor, rasterised from its parts at its size: the ring, the stock across under it, the shank, the arms
+  // curving up from the crown and a spade fluke at each tip
+  const [H, W] = ANC_PIX[size], c = makeCanvas(W, H), x = c.getContext('2d'), cx = W / 2, t = Math.max(1, H * 0.085);
+  const rr = Math.max(1.6, H * 0.09), rc = rr + 0.2, sy = rc + rr + t * 0.9, sw = W * 0.36, A = W / 2 - 1.2, rise = H * 0.34, by = H - t / 2 - 0.4;
+  const tri = (px, py, a, b, d) => { const s = (p, q, r) => (p[0] - r[0]) * (q[1] - r[1]) - (q[0] - r[0]) * (p[1] - r[1]); const P = [px, py], d1 = s(P, a, b), d2 = s(P, b, d), d3 = s(P, d, a); return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0)); };
+  const inside = (i, j) => {
+    const px = i + 0.5, py = j + 0.5, dx = px - cx, D = Math.hypot(dx, py - rc);
+    if (D <= rr + 0.5 && D >= rr - Math.max(0.9, t * 0.8)) return true;                         // (the ring)
+    if (Math.abs(py - sy) <= t * 0.6 && Math.abs(dx) <= sw) return true;                      // (the stock)
+    if (Math.abs(Math.abs(dx) - sw) <= 0.7 && Math.abs(py - sy) <= t * 0.6 + 0.9) return true;   // (its knobbed ends)
+    if (Math.abs(dx) <= t * 0.55 && py >= rc + rr - 0.5 && py <= by) return true;              // (the shank)
+    if (Math.abs(dx) <= A) { const yc = by - Math.pow(Math.abs(dx) / A, 2) * rise; if (Math.abs(py - yc) <= t * 0.55 + 0.15) return true; }   // (the arms)
+    for (const s of [-1, 1]) {                                                                // (the flukes)
+      const tx = cx + s * A, ty = by - rise, f = Math.max(2, H * 0.17);
+      if (tri(px, py, [tx + s * 0.3, ty - f * 1.05], [tx + s * f * 0.55, ty + f * 0.35], [tx - s * f * 0.6, ty + f * 0.45])) return true;
+    }
+    return Math.abs(dx) <= t * 0.9 && py >= by - t * 0.4 && py <= H;                        // (the crown)
+  };
+  const M = (i, j) => i >= 0 && j >= 0 && i < W && j < H && inside(i, j);
+  // iron, lit along its upper-left edges and shaded on its lower-right (pale enough to read through the water's tint)
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    if (!M(i, j)) continue;
+    x.fillStyle = !M(i, j - 1) || !M(i - 1, j) ? '#c5ced6' : !M(i, j + 1) || !M(i + 1, j) ? '#454b53' : '#7b848d';
+    x.fillRect(i, j, 1, 1);
   }
   return (ancArts[size] = c);
 }
@@ -20207,12 +20228,13 @@ function drawAnchors(x0, x1, lake) {
       return;
     }
     const P = a._p; if (!P) return;
-    const ring = [a.x + Math.sin(a.ang) * H * 0.5, a.y - Math.cos(a.ang) * H * 0.5];
+    const ang = a.ang + (a.bed ? 0 : 0.13 * Math.sin(time * 1.3 + a.seed));   // (swinging a little on its rope as it goes down, and hanging)
+    const ring = [a.x + Math.sin(ang) * H * 0.42, a.y - Math.cos(ang) * H * 0.42];
     const pts = P.slice(0, -1).map(p => [p.x, p.y]); pts.push(ring);
     ancRopeLine(pts, S.chain, x0, x1);
     if (a.x < x0 - 30 || a.x > x1 + 30) return;
     const Is = scaled(I, SV, true);
-    C.save(); C.translate(PX(a.x), PY(a.y)); C.rotate(a.ang); C.drawImage(Is, -Math.round(Is.width / 2), -Math.round(Is.height / 2)); C.restore();
+    C.save(); C.translate(PX(a.x), PY(a.y)); C.rotate(ang); C.drawImage(Is, -Math.round(Is.width / 2), -Math.round(Is.height / 2)); C.restore();
     // (user Oct 27: "The anchor blips and does a bit of light so the sub can know where the ship is") the research
     // ship's: a little red lamp blinking, a soft glow round it - shining through the night and the dark of the deep
     if (S.blip && a.st !== 'raise') {
@@ -21697,6 +21719,19 @@ function civPoint(c, px, py) {
   const K = CIV[c.kind], A = civArt(c), ang = c.a + c.tilt, ca = Math.cos(ang), sa = Math.sin(ang);
   const lx = (px - A.width / 2) * K.k * c.face, ly = (py - K.wl) * K.k;
   return [c.x + lx * ca - ly * sa, civY(c) + lx * sa + ly * ca];
+}
+// is a world point inside her hull (her picture, solid there) - each half where it is now
+function civHullHas(c, x, y) {
+  const K = CIV[c.kind], A = civArt(c); if (!A || !A.width) return false;
+  const al = civAlphaOf(A), W = A.width, H = A.height, pxb = c.brk != null ? (c.brk + 0.5) / K.n * W : W / 2;
+  for (let i = 0; i < (c.hv ? 2 : 1); i++) {
+    let px, py;
+    if (c.hv) { const h = c.hv[i], ca = Math.cos(-h.a), sa = Math.sin(-h.a), dx = x - h.x, dy = y - h.y, lx = dx * ca - dy * sa, ly = dx * sa + dy * ca; px = pxb + lx / (K.k * c.face); py = K.wl + ly / K.k; if (civHalfOf(c, px, A, K) !== i) continue; }
+    else { const [u, q] = civLocal(c, x, y); px = u * W; py = q; }
+    const ix = Math.floor(px), iy = Math.floor(py);
+    if (ix >= 0 && iy >= 0 && ix < W && iy < H && al[(iy * W + ix) * 4 + 3] > 80) return true;
+  }
+  return false;
 }
 // her halves going down with her: each turned about the break by the V (c.bend), the left one's far end up as the right's
 function civHalvesRide(c) {
@@ -24070,7 +24105,7 @@ const rsAfloat = c => !!c && c.state === 'sail';
    and is on its own - a CPU sub off to explore, or yours, still driving it. */
 function minisubFree(s) {
   const p = s.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === s;
-  s.state = 'out'; s.cable = 0; s.vx = 0; s.vy = 6; s.turn = null; s.splashed = true; s.armed = true;
+  s.state = 'out'; s.cable = 0; s.vx = Math.sign(s.x - s.ship.x || 1) * 45; s.vy = 6; s.turn = null; s.splashed = true; s.armed = true; s.clearT = 4;   // (away from her hull: a moment to get clear of it)
   s.ai = mine ? null : { tx: clamp(s.x + rnd(-900, 900), TR_A, TR_B), t: rnd(40, 80) };
   sfxLatch(s.x);                                                  // (the hook lets go)
   if (!SIM_ONLY) for (let k = 0; k < 16; k++) addBubble(s.x + rnd(-8, 8), s.y + rnd(-5, 5), rnd(-15, 15), -rnd(15, 40), rnd(0.8, 2));
@@ -24078,7 +24113,7 @@ function minisubFree(s) {
 // where her sub's PING points: her, afloat; once she's sunk, her wreck on the bottom (user Oct 27, 3)
 function msHomeAt(s) {
   const c = s.ship; if (!c) return null;
-  if (rsAfloat(c)) return hookAt(c);
+  if (rsAfloat(c)) return (typeof rsBeaconAt === 'function' && rsBeaconAt(c)) || hookAt(c);   // (her blinking anchor, when she's anchored - 50-land-anchors)
   if (c.hv) return [(c.hv[0].x + c.hv[1].x) / 2, (c.hv[0].y + c.hv[1].y) / 2];
   return [c.x, civY(c)];
 }
@@ -24098,6 +24133,7 @@ function stepMinisubs(dt) {
   if (!SIM_ONLY) for (const w of pirateWrecks) if (Math.random() < dt * 0.7) addBubble(w.x + rnd(-70, 70), seabedY(w.x) - rnd(15, 45), rnd(-3, 3), -rnd(10, 22), rnd(0.6, 1.4));
   if (!LAND) return;
   if (!msArt && img.minisub) buildMinisubArt();
+  msFallers = msFallersNow();
   for (const s of minisubs) stepMinisub(s, dt);
   stepPings(dt);
 }
@@ -24165,6 +24201,7 @@ function stepMinisub(s, dt) {
     s.state = 'raise'; s.cable = Math.max(0, s.y - hungAt(c)[1]); s.vx = s.vy = 0; s.turn = null; sfxLatch(s.x);
     return;
   }
+  if (s.clearT > 0) s.clearT -= dt;
   // a chest: touched (by yours), it's yours
   if (mine) for (const w of pirateWrecks) {
     if (!w.gold) continue;
@@ -24175,18 +24212,65 @@ function stepMinisub(s, dt) {
       spawnSparks(cx, cy, 24, 120); sfxClink(telegraphs[p]);
     }
   }
-  // shells, torpedoes: crushed
+  // shells, missiles, bombs reaching it under water: crushed (torpedoes, depth charges, mines and rounds: their own steps
+  // find it - msHitAt, minisubsInBlast)
   for (let k = shells.length - 1; k >= 0; k--) { const sh = shells[k]; if (sh.under && Math.abs(sh.x - s.x) < 10 && Math.abs(sh.y - s.y) < 7) { shells.splice(k, 1); minisubLost(s); return; } }
-  for (const tp of torps) if (Math.abs(tp.x - s.x) < 10 && Math.abs(tp.y - s.y) < 7) { minisubLost(s); return; }
+  // (user Oct 27, 13:47: "It should also be destroyed underwater if hit by a sinking ship...") whatever comes down on it,
+  // or runs into it: a sinking ship's hull (her own too, once it's clear of her), a wreck or a piece settling, a plane,
+  // a helicopter, a tank or a box going down, a submarine
+  if (s.y > surfaceY(s.x) + 2 && msCrushed(s)) { minisubLost(s); return; }
   // (floating on the surface its top is out of the water: a round or a shell there gets it too, as a jet boat)
   if (s.y < surfaceY(s.x) + 3) {
     for (const b of bullets) if (!b._ms && Math.abs(b.x - s.x) < 9 && Math.abs(b.y - (s.y - 2)) < 5) { b._ms = true; spawnSparks(b.x, b.y, 4, 100); minisubLost(s); return; }
     for (let k = shells.length - 1; k >= 0; k--) { const sh = shells[k]; if (!sh.under && Math.abs(sh.x - s.x) < 12 && Math.abs(sh.y - (s.y - 2)) < 8) { shells.splice(k, 1); sectionBlast(s.x, s.y - 2, 0.5, 0); minisubLost(s); return; } }
   }
 }
+/* (user Oct 27, 13:47: "A minisub floating on the surface can be shot, like a jet boat - Definitely. It should also be
+   destroyed underwater if hit by a sinking ship, hit by a missile or depth charge, etc.") a full target, as the army's
+   sub is: msHitAt - the minisub (out in the water) a point is on, within r of its hull; minisubsInBlast - every one in
+   an underwater blast's reach is crushed */
+function msHitAt(x, y, r) {
+  if (!LAND) return null;
+  for (const s of minisubs) if (s.state === 'out' && Math.abs(x - s.x) < 9 + (r || 0) && Math.abs(y - s.y) < 5 + (r || 0)) return s;
+  return null;
+}
+function minisubsInBlast(x, y, R) {
+  if (!LAND) return;
+  for (const s of minisubs) if (s.state === 'out' && Math.hypot(Math.max(0, Math.abs(x - s.x) - 8), (y - s.y) * 1.2) < R) minisubLost(s);
+}
+// what's coming down through the water this frame (moving down, under the surface): boxes [x, y, half width, half height]
+let msFallers = [];
+function msFallersNow() {
+  const L = [];
+  if (!LAND || !minisubs.some(s => s.state === 'out')) return L;
+  const down = (o, x, y, hw, hh) => { const py = o._msPy; o._msPy = y; if (py != null && y - py > 0.15 && y > surfaceY(x)) L.push([x, y, hw, hh]); };
+  for (const f of traffic) if (f.state === 'sink') down(f, f.x, f.y, f.kind === 'jet' ? 60 : 20, f.kind === 'jet' ? 14 : 8);
+  for (const q of seaplanes) if (q.state === 'sink') down(q, q.x, q.y, 20, 8);
+  for (const h of civHelis) if (h.state === 'sink') down(h, h.x, h.y - 8, 18, 10);
+  for (const pl of planes.concat(oldPlanes)) if (pl && (pl.state === 'wreck' || pl.state === 'down')) down(pl, pl.x, pl.y, 18, 7);
+  for (const h of helis) if (h && h.state === 'sink') down(h, h.x, h.y - 8, 18, 10);
+  for (const t of tanks) if (t && t.state === 'sink') down(t, t.x, t.y - 6, 16, 8);
+  for (const k of containers) if (k.where === 'free' && k.inWater) down(k, k.x, k.y, CONT_W / 2, CONT_H / 2);
+  for (const o of linerLoose) if (o.inWater && !o.rest) down(o, o.x, o.y, o.p.w * o.k / 2, o.p.h * o.k / 2);
+  return L;
+}
+function msCrushed(s) {
+  for (const [x, y, hw, hh] of msFallers) if (Math.abs(s.x - x) < hw + 7 && Math.abs(s.y - y) < hh + 4) return true;
+  // a wreck (a battleship's piece, a sub's half) still settling, on it
+  const w = wreckAt(s.x, s.y); if (w && (w[1] ? !w[0].rest : !w[0].settled)) return true;
+  // a submarine running into it
+  for (const sb of subs) if (sb && sb.state === 'out' && subHitTest(sb, s.x, s.y) >= 0) return true;
+  // a big ship going down, her hull on it (her own sub gets a moment to get clear as it comes away from her)
+  for (const c of civShips) {
+    if (c.state !== 'sink' || (c === s.ship && s.clearT > 0) || Math.abs(s.x - c.x) > civLen(c) * 0.6) continue;
+    if (civHullHas(c, s.x, s.y)) return true;
+  }
+  return false;
+}
 // crushed: a burst of bubbles, and its broken hull sinks to the bottom and stays there - no other sub is made for her
 // (user Oct 27: "The rest, when destroyed, is never spawned again"); one you were in is still in view (civAlive)
 function minisubLost(s) {
+  if (s.state === 'wreck' || s.state === 'lost') return;
   underwaterBlast(s.x, s.y, 0.8); sfxCrush(s.x);
   for (let k = 0; k < 30; k++) addBubble(s.x + rnd(-10, 10), s.y + rnd(-8, 8), rnd(-30, 30), -rnd(20, 70), rnd(1, 2.6));
   s.state = 'wreck'; s.ai = null; s.turn = null; s.vx *= 0.3; s.vy = 10; s.wa = clamp(s.vy / MS_VY, -1, 1) * 0.15 * s.facing; s.rest = false;
@@ -29417,7 +29501,7 @@ async function start(data) {
   };
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   Object.assign(window.__game, { civHalfGap: c => [0, 1].map(i => { const h = c.hv && c.hv[i]; if (!h) return null; const kl = civHalfKeel(c, i, civArt(c), CIV[c.kind]), mx = h.x + kl.m * Math.cos(h.a), my = h.y + kl.m * Math.sin(h.a), ca = Math.cos(h.a), sa = Math.sin(h.a), d = kl.pts.map(([lx, ly]) => civFloor(mx + lx * ca - ly * sa) - (my + lx * sa + ly * ca)); return { a: h.a, rest: !!h.rest, min: Math.min(...d), max: Math.max(...d) }; }),
-    civHalfPoint: (c, x, y) => civHalfPoint(c, x, y), msPings: () => msPings, partRestOf: sb => sb.parts.map(q => ({ y: q.y, a: q.a, rest: q.rest, r: partRest(sb, q) })), floorRest: (pts, cx, amax, a0) => floorRest(pts, cx, null, amax, a0), ms: { hold: msHold, keys: msKeys } });
+    civHalfPoint: (c, x, y) => civHalfPoint(c, x, y), msPings: () => msPings, partRestOf: sb => sb.parts.map(q => ({ y: q.y, a: q.a, rest: q.rest, r: partRest(sb, q) })), floorRest: (pts, cx, amax, a0) => floorRest(pts, cx, null, amax, a0), ms: { hold: msHold, keys: msKeys }, chargeAt: (x, y) => detonateCharge({ x, y, owner: -1 }) });
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
 }
 
