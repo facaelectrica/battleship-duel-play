@@ -2378,7 +2378,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 27 14:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 27 14:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6049,7 +6049,7 @@ function stepChunks(dt) {
       k.x += k.vx * dt; k.y += k.vy * dt; k.a += k.w * dt;
       if (k.lie !== undefined) k.a += (k.lie - k.a) * 0.9 * dt;           // a broken pillar topples as it sinks
       if (k.kind !== 'coral' && Math.random() < dt * 14) addBubble(k.x + rnd(-6, 6), k.y + rnd(-6, 6), rnd(-6, 6), -rnd(15, 40), rnd(0.8, 2.2));
-      const bed = seabedY(k.x) - (k.hw ? Math.abs(Math.cos(k.a)) * k.hh + Math.abs(Math.sin(k.a)) * k.hw : k.hh * 0.35);
+      const bed = (k.land && onLand(k.x) ? landTop(k.x) : seabedY(k.x)) - (k.hw ? Math.abs(Math.cos(k.a)) * k.hh + Math.abs(Math.sin(k.a)) * k.hw : k.hh * 0.35);
       if (k.y >= bed) { k.y = bed; k.rest = true; if (k.kind === 'coral') kickDust(k.x, 3, 0.2); else { kickDust(k.x, k.hh * 1.4, 0.8); scatterBed(k.x, k.hh * 2, 0.6); shock(k.x, bed, 0.4, true); } }
       continue;
     }
@@ -6059,8 +6059,9 @@ function stepChunks(dt) {
     let floor = k.floor, water = k.water;
     if (k.kind === 'tower') { const d = homeDock[k.player], overSea = (k.x - pierEdge(d)) * -d.dir > 0; water = overSea; floor = overSea ? surfaceY(k.x) : DECK_Y; }
     if (k.kind === 'mast') { water = true; floor = surfaceY(k.x); }
+    if (k.land) { water = !dryLand(k.x); floor = water ? surfaceY(k.x) : landTop(k.x); }   // (OPEN WORLD: the ground under it where it comes down - a wing, the mountain tower's pieces, user Oct 27 [10])
     // (user Oct 27: the harbour is solid for falling pieces - a wing, a gun - over the sea they land on its deck)
-    else if (k.kind !== 'tower' && water) { const ht = harbourTop(k.x, k.y - k.hh); if (ht < Infinity) { water = false; floor = ht; } }
+    if (k.kind !== 'tower' && k.kind !== 'mast' && water) { const ht = harbourTop(k.x, k.y - k.hh); if (ht < Infinity) { water = false; floor = ht; } }
     if (k.y + k.hh * 0.55 < floor) continue;
     const x = k.x, y = floor;
     if (water) {
@@ -6085,10 +6086,17 @@ function crumbleTower(tw) {
   tw.marks = null;
   if (tw.fallen) return;
   tw.hp = 0; tw.fallen = 1; tw.burnT = 73;            // the stump catches fire once the fall is over
-  const src0 = img.towers[TW.HITS - 1][tw.facing], src = desertSide(tw.x) ? desertTone(src0) : src0, sea = tw.facing;
-  const rows = [0, 58, 116, 176, TW.FH - TW.STUMP], cols = [0, 50, 90, TW.FW];
+  // (OPEN WORLD, user Oct 27 [9]: the lighthouse breaks into its own pieces - cut from its own last damage frame, the
+  // left dock's fifth drawing, the right dock's sooted first one - and leaves its own stump; elsewhere the old tower's)
+  const LH = lhOn(tw), G = LH ? lhGeo(tw) : null, src0 = LH ? lhArt(tw).c : img.towers[TW.HITS - 1][tw.facing], src = LH || !desertSide(tw.x) ? src0 : desertTone(src0), sea = tw.facing;
+  const FW = LH ? src.width : TW.FW, FH = LH ? src.height : TW.FH, K = LH ? LH_K : TW.K;
+  const BX = LH ? (tw.facing > 0 ? G.base[0] : G.w - G.base[0]) : FW / 2, BY = LH ? G.base[1] : FH;   // (its foot's middle on the drawing)
+  const STUMP = LH ? Math.round(TW.STUMP * TW.K / K) : TW.STUMP, ST0 = BY - STUMP;   // (as tall a stump as the old tower's)
+  const rows = LH ? [0, Math.round(ST0 * 0.24), Math.round(ST0 * 0.48), Math.round(ST0 * 0.74), ST0] : [0, 58, 116, 176, TW.FH - TW.STUMP], cols = LH ? [0, Math.round(BX - 20), Math.round(BX + 16), FW] : [0, 50, 90, TW.FW];
   // it goes over toward the sea, pivoting on the seaward foot of what stays standing
-  const hinge = { px: tw.x + sea * TW.HALF * 0.75, py: twBase(tw) - TW.STUMP * TW.K, th: 0, w: 0.02, dir: sea };
+  let half = TW.HALF;
+  if (LH) { const d = src.getContext('2d').getImageData(0, ST0, FW, 1).data; let a = FW, b = 0; for (let i = 0; i < FW; i++) if (d[i * 4 + 3] > 60) { a = Math.min(a, i); b = Math.max(b, i); } if (b > a) half = Math.max(Math.abs(a - BX), Math.abs(b - BX)) * K; }
+  const hinge = { px: tw.x + sea * half * 0.75, py: twBase(tw) - STUMP * K, th: 0, w: 0.02, dir: sea };
   // The cracks between the pieces are jagged, not ruled lines: each crack is one random torn profile shared
   // by the two pieces either side of it, so they interlock while together and show ragged edges once apart.
   const M = 8;
@@ -6101,25 +6109,25 @@ function crumbleTower(tw) {
     }
     return prf;
   };
-  const vP = cols.map((_, q) => q > 0 && q < cols.length - 1 ? jag(TW.FH) : null);
-  const hP = rows.map((_, r) => r > 0 ? jag(TW.FW) : null);
+  const vP = cols.map((_, q) => q > 0 && q < cols.length - 1 ? jag(FH) : null);
+  const hP = rows.map((_, r) => r > 0 ? jag(FW) : null);
   const edgeX = (q, Y) => q <= 0 ? -1e9 : q >= cols.length - 1 ? 1e9 : cols[q] + vP[q][Y];
   const edgeY = (r, X) => r <= 0 ? -1e9 : rows[r] + hP[r][X];
   // the stump left standing gets the same torn top as the bottom of the course above it
   {
-    const top = TW.FH - TW.STUMP - M, sc = makeCanvas(TW.FW, TW.STUMP + M), sg = sc.getContext('2d');
-    sg.drawImage(src, 0, top, TW.FW, TW.STUMP + M, 0, 0, TW.FW, TW.STUMP + M);
-    const sid = sg.getImageData(0, 0, TW.FW, TW.STUMP + M), sd = sid.data;
-    for (let yy = 0; yy < TW.STUMP + M; yy++) for (let xx = 0; xx < TW.FW; xx++) {
-      const qq = (yy * TW.FW + xx) * 4, Y = top + yy, e = edgeY(rows.length - 1, xx);
+    const top = ST0 - M, SH = FH - top, sc = makeCanvas(FW, SH), sg = sc.getContext('2d');
+    sg.drawImage(src, 0, top, FW, SH, 0, 0, FW, SH);
+    const sid = sg.getImageData(0, 0, FW, SH), sd = sid.data;
+    for (let yy = 0; yy < SH; yy++) for (let xx = 0; xx < FW; xx++) {
+      const qq = (yy * FW + xx) * 4, Y = top + yy, e = edgeY(rows.length - 1, xx);
       if (Y < e) sd[qq + 3] = 0;
       else if (Y < e + 3 && sd[qq + 3]) { const k2 = Y < e + 1 ? 0.35 : 0.6; sd[qq] *= k2; sd[qq + 1] *= k2; sd[qq + 2] *= k2; }
     }
     sg.putImageData(sid, 0, 0);
-    tw.stumpArt = sc;
+    tw.stumpArt = sc; tw.stumpGeo = LH ? { k: K, bx: BX, below: FH - BY } : null;   // (drawTower: the lighthouse's stump at its own scale, on its foot)
   }
   for (let r = 0; r < rows.length - 1; r++) for (let q = 0; q < cols.length - 1; q++) {
-    const ax = Math.max(0, cols[q] - M), bx = Math.min(TW.FW, cols[q + 1] + M), ay = Math.max(0, rows[r] - M), by = Math.min(TW.FH, rows[r + 1] + M);
+    const ax = Math.max(0, cols[q] - M), bx = Math.min(FW, cols[q + 1] + M), ay = Math.max(0, rows[r] - M), by = Math.min(FH, rows[r + 1] + M);
     const c = makeCanvas(bx - ax, by - ay), g2 = c.getContext('2d');
     g2.drawImage(src, ax, ay, c.width, c.height, 0, 0, c.width, c.height);
     const idd = g2.getImageData(0, 0, c.width, c.height), dd = idd.data;
@@ -6138,8 +6146,8 @@ function crumbleTower(tw) {
     if (n < 40) continue;                                          // skip empty cells (sky beside the turret)
     g2.putImageData(idd, 0, 0);
     const cx = (ax + bx) / 2, cy = (ay + by) / 2;
-    const x = tw.x + (cx - TW.FW / 2) * TW.K, y = twBase(tw) - (TW.FH - cy) * TW.K;
-    const k = { img: c, k: TW.K, x, y, vx: 0, vy: 0, a: 0, w: 0, delay: 0, floor: DECK_Y, water: false, kind: 'tower', player: tw.player, hh: c.height / 2 * TW.K };
+    const x = tw.x + (cx - BX) * K, y = twBase(tw) - (BY - cy) * K;
+    const k = { img: c, k: K, x, y, vx: 0, vy: 0, a: 0, w: 0, delay: 0, floor: DECK_Y, water: false, kind: 'tower', player: tw.player, hh: c.height / 2 * K, land: !!(LAND && tw.edge) };   // (land: the mountain's tower - its pieces land on the mountain, user Oct 27 [10])
     if (r === rows.length - 2) {
       // the lowest course just slumps down onto the quay as the wall above leaves it
       k.delay = rnd(1.2, 2.4); k.vx = sea * rnd(2, 12); k.vy = rnd(-5, 5); k.w = sea * rnd(0.1, 0.6);
@@ -7843,12 +7851,13 @@ function loseWing(pl, which) {
   if (pl.wings & (1 << which)) return;
   pl.wings |= 1 << which;
   const wimg = planeArt(pl).wings[which];
-  chunks.push({ img: wimg, k: PLANE_K * PLANE_SC(), x: pl.x + rnd(-4, 4), y: pl.y + (which ? 6 : -6), vx: pl.vx * 0.6 + rnd(-40, 40), vy: pl.vy * 0.4 - rnd(30, 80), a: rnd(0, 6), w: rnd(-9, 9), delay: 0, floor: WATER_Y, water: true, kind: 'wing', hh: 10, hw: 10 });
+  chunks.push({ img: wimg, k: PLANE_K * PLANE_SC(), x: pl.x + rnd(-4, 4), y: pl.y + (which ? 6 : -6), vx: pl.vx * 0.6 + rnd(-40, 40), vy: pl.vy * 0.4 - rnd(30, 80), a: rnd(0, 6), w: rnd(-9, 9), delay: 0, floor: WATER_Y, water: true, kind: 'wing', hh: 10, hw: 10, land: LAND });   // (land: OPEN WORLD - onto the ground where it comes down)
   spawnSparks(pl.x, pl.y, 14, 200); planeBits(pl, 5);
   sfxImpact(pl.x);
 }
 function downPlane(pl) {
   if (netGuestHold()) return;                              // (online guest: only when the host says so)
+  if (pl.state === 'down' || pl.state === 'wreck' || pl.state === 'gone') return;   // (already down: lost once, never twice - user Oct 27, a plane shot on a magnet was counted lost twice)
   pl.state = 'down'; pl.spin = 0; pl.smokeT = 99; pl.smokeDark = true; pl.wings = pl.wings || 0;
   sectionBlast(pl.x, pl.y, 0.5, pl.vx * 0.5);
   planeLost(pl);
@@ -7886,12 +7895,14 @@ function planeCrash(pl) {
   if (!what && LAND && pl.state === 'fly' && onApron(pl.x)) { const af = airfieldAt(pl.x); if (pl.y >= af.y - 4 && ((pl.vy || 0) < -1 || pl.climbT > 0)) { pl.y = Math.min(pl.y, af.y); return false; } if (pl.y >= af.y - 4) {   // (not while it's climbing away: user Oct 26, the take-off was taken for a landing)
     planeSusKick(pl, (pl.vy || 0) + 60); pl.ground = 'land'; pl.y = af.y; pl.pitch = 0; pl.turn = null; pl.gear = 1; pl.flare = 0.6; sfxImpact(pl.x); kickLandDust(pl.x, af.y + PLANE_WHEELS, 6); return false; } }
   if (!what && LAND) { const at = landPlaneCrash(pl, pts); if (at) { what = at[2] ? 'ground' : 'land'; X = at[0]; Y = at[1]; } }   // (LAND TEST: the ground, or a tank or helicopter)
+  let deck = null;                                               // (OPEN WORLD: onto a ship's top it comes down on her deck - user Oct 27, [19])
+  if (!what && LAND && !onLand(pl.x)) { const d = shipTopAt(pl.x, pl.y - 20); if (d && pl.y + 4 >= d.y) { what = 'ground'; deck = d; X = pl.x; Y = d.y; } }
   if (!what && pl.y + 4 >= surfaceY(pl.x)) what = 'sea';
   if (!what) return false;
   const was = pl.state;
   birdStrike(X, Y, 20);
   if (what === 'sea') planeSplash(pl);
-  else if (what === 'ground') planeGroundCrash(pl, X, Y);
+  else if (what === 'ground') planeGroundCrash(pl, X, Y, deck);
   else planeBlast(pl, X, Y, what === 'boat' ? 1.2 : 1.3);
   if (was === 'fly') planeLost(pl);
   return true;
@@ -10804,9 +10815,7 @@ function buildPerches() {
     // the tower's top rail
     const tw = towers[d.player];
     if (tw) {
-      if (lhOn(tw)) { for (const ox of [-21, -16, 16, 21]) { const y = lhTopAt(tw, ox); if (y != null) perches.push({ x: tw.x + ox, y, dock: d.player, bird: null, tower: tw }); } }   // (the lighthouse's gallery - user Oct 26: the birds were floating)
-      else { const tTop = artTops(img.towers[0][tw.facing]);
-      for (const ox of [-20, -12, 12, 20]) { const col = Math.round(TW.FW / 2 + ox / TW.K); perches.push({ x: tw.x + ox, y: twBase(tw) - (TW.FH - tTop[col]) * TW.K, dock: d.player, bird: null, tower: tw }); } }
+      for (const ox of lhOn(tw) ? [-21, -16, 16, 21] : [-20, -12, 12, 20]) { const p = { x: tw.x + ox, ox, y: 0, dock: d.player, bird: null, tower: tw }; p.y = towerPerchY(p); if (p.y != null) { p.fk = towerFrame(tw); perches.push(p); } }   // (the lighthouse's gallery - user Oct 26: the birds were floating)
     }
     // lamp heads
     for (const [lx, ly] of d.lamps) perches.push({ x: lx, y: ly - 1.5, dock: d.player, bird: null });
@@ -10852,7 +10861,27 @@ function takeOff(b, awayX) {
   const dir = awayX === null || awayX === undefined ? (Math.random() < 0.5 ? -1 : 1) : Math.sign(b.x - awayX || 1);
   b.state = 'flee'; b.vx = dir * rnd(40, 75); b.vy = -rnd(50, 95); b.t = rnd(1.4, 3); b.face = dir;
 }
-function perchGone(p) { return !!(p.tower && p.tower.hp <= 0); }
+function perchGone(p) { return !!(p.tower && (p.tower.hp <= 0 || p.broken)); }
+// a perch on the tower: the top of its drawing as it is now (the lighthouse's damage frames change its outline - user
+// Oct 27 [11]); null where nothing's left there
+function towerPerchY(p) {
+  const tw = p.tower;
+  if (lhOn(tw)) return lhTopAt(tw, p.ox);
+  const T = artTops(img.towers[towerFrame(tw)][tw.facing]), col = clamp(Math.round(TW.FW / 2 + p.ox / TW.K), 0, T.length - 1);
+  return T[col] >= TW.FH - 1 ? null : twBase(tw) - (TW.FH - T[col]) * TW.K;
+}
+// each time a tower's drawing changes (a hit, a new damage frame): its perches found again on the new outline; a bird
+// on a spot that broke away or moved flies off
+function trackTowerPerches() {
+  for (const p of perches) {
+    if (!p.tower || p.tower.hp <= 0) continue;
+    const fk = towerFrame(p.tower); if (p.fk === fk) continue;
+    p.fk = fk;
+    const y = towerPerchY(p), was = p.y;
+    p.broken = y == null; if (y != null) p.y = y;
+    if (p.bird && (p.broken || Math.abs(p.y - was) > 1.5)) takeOff(p.bird, p.x);
+  }
+}
 function findPerch(b, preferDock) {
   let best = null, bd = 1e9;
   for (const p of perches) {
@@ -10953,6 +10982,7 @@ function stepBirds(dt) {
       f.merged = true; break;
     }
   }
+  trackTowerPerches();
   for (let i = birds.length - 1; i >= 0; i--) {
     const b = birds[i];
     b.scared = Math.max(0, b.scared - dt);
@@ -16244,6 +16274,7 @@ function renderObjects() {
   if (LAND) guardDraw('drawLooseContainers', () => drawLooseContainers(x0, x1, true));            // (boxes knocked into the sea, sinking or on the bottom)
   for (const d of docks) { drawHarbourBack(d, x0, x1); drawHarbourFront(d, x0, x1); }
   guardDraw('drawCivShips', () => drawCivShips(x0, x1));                                   // (OPEN WORLD: the big ships, far back - behind the warships)
+  if (LAND) guardDraw('drawCrashes', () => drawCrashes(x0, x1, 'sea'));                     // (what's left of a plane on a ship's deck, or gone down - 50-land-rest)
   guardDraw('drawAnchors', () => drawAnchors(x0, x1, false));                              // (every boat's anchor out, its rope - 50-land-anchors)
   guardDraw('drawCranes', () => drawCranes(x0, x1));                                     // (the harbours' container cranes, over the pier and the ship alongside)
   if (LAND) guardDraw('drawLooseContainers', () => drawLooseContainers(x0, x1, false));           // (boxes falling, or lying burnt on the pier)
@@ -17821,8 +17852,9 @@ function towerArt(tw, src) {
 function drawTower(tw) {
   const s = TW.K * SV;
   if (tw.hp <= 0) {
-    const sp = scaled(tw.stumpArt || (desertSide(tw.x) ? desertTone(img.towerStump[tw.facing]) : img.towerStump[tw.facing]), s, true);
-    C.drawImage(sp, PX(tw.x) - Math.round(sp.width / 2), PY(twBase(tw)) - sp.height);
+    const G = tw.stumpArt && tw.stumpGeo, sp = scaled(tw.stumpArt || (desertSide(tw.x) ? desertTone(img.towerStump[tw.facing]) : img.towerStump[tw.facing]), G ? G.k * SV : s, true);
+    if (G) C.drawImage(sp, Math.round(PX(tw.x) - G.bx * G.k * SV), PY(twBase(tw)) - sp.height + Math.round(G.below * G.k * SV));   // (the lighthouse's own stump - crumbleTower)
+    else C.drawImage(sp, PX(tw.x) - Math.round(sp.width / 2), PY(twBase(tw)) - sp.height);
     return;
   }
   if (lhOn(tw)) { drawLighthouseTower(tw); drawLighthouse(tw); return; }   // (OPEN WORLD: the user's lighthouse - 50-land-lighthouse)
@@ -20575,6 +20607,7 @@ function blimpPoint(b, px, py) {
 }
 // hit hard enough: the gas inside bursts out of it, and it begins to fold up and fall
 function blimpBurst(b) {
+  if (b.state === 'fall' || b.state === 'sink' || b.state === 'wreck' || b.state === 'gone') return;   // (already down: never twice - user Oct 27)
   b.state = 'fall'; b.vy = 5; b.burstT = 0;
   sfxImpact(b.x); sfxExplosion(b.x, 0.5);
   if (!SIM_ONLY) {
@@ -21251,7 +21284,13 @@ function stepCivHelis(dt) {
     if (h.state === 'gone') continue;
     // (its wreck stays: no other helicopter comes in its place - user Oct 27: "The rest, when destroyed, is never spawned again")
     if (h.state === 'wreck' && h.onDeck && harbourTop(h.x, h.y - 6) === Infinity) { h.onDeck = false; h.state = 'sink'; h.vy = 20; ditchFx(h.x, 0, 1, 36, 60); continue; }   // (its wreck on the pier, the pier gone: into the sea - user Oct 27)
-    if (h.state === 'wreck') { h.t = (h.t || 0) + dt; if (!SIM_ONLY && (dryLand(h.x) || h.onDeck) && h.t < 25 && Math.random() < dt * 4) spawnSmoke(h.x + rnd(-10, 10), h.y - 10, { rise: true, dark: h.t < 8 ? 0 : 0.5, r: rnd(3, 6), grow: 4, lift: 25, vx: rnd(-6, 6), vy: -rnd(15, 30), life: rnd(3, 5), alpha: 0.5 }); if (h.t > 70) { h.state = 'gone'; h.wait = rnd(20, 50); } continue; }
+    if (h.state === 'wreck') {
+      h.t = (h.t || 0) + dt;
+      // (on a ship's deck it rides her; she gone from under it, it falls - user Oct 27, [19]. On land or the harbour's
+      // stone it burns and smokes there - landCrash - and stays; on land it settles into a hole dug under it - stepLandRest)
+      if (h.deck) { const c = h.deck; h.x += c.dx || 0; const d = shipTopAt(h.x, h.y - 10); if (c.state === 'sail' && d && d.c === c && d.y < h.y + 8) h.y = d.y; else { h.deck = null; h.state = 'fall'; h.vx = 0; h.vy = 0; h.spinV = rnd(-0.4, 0.4); } }
+      continue;
+    }
     if (h.state === 'sink') {
       h.y += h.vy * dt; h.vy += (24 - h.vy) * Math.min(1, dt); h.tilt += (0.5 - h.tilt) * dt * 0.3; h.spin *= 1 - dt;
       if (Math.random() < dt * 10) addBubble(h.x + rnd(-15, 15), h.y - 10, rnd(-6, 6), -rnd(15, 35), rnd(0.8, 2));
@@ -21263,12 +21302,20 @@ function stepCivHelis(dt) {
       h.vy = Math.min(260, h.vy + 220 * dt); h.vx *= 1 - dt * 0.5; h.tilt += h.spinV * dt; h.spin *= 1 - dt * 0.3;
       h.x += h.vx * dt; h.y += h.vy * dt;
       civHeliSmoke(h, dt);
-      const ht = dryLand(h.x) ? Infinity : harbourTop(h.x, h.y - 10), wet = !dryLand(h.x) && ht === Infinity, fl = ht < Infinity ? ht : wet ? surfaceY(h.x) : landTop(h.x);
+      // (onto the harbour's stone: a wreck there, no crater; onto a ship's top: on her deck - user Oct 27, [19]; the water:
+      // it sinks; the land: a crater)
+      const [fl0, dk0] = chUnder(h), dk = dk0 && civShips.includes(dk0) ? dk0 : null, ht = dryLand(h.x) ? Infinity : harbourTop(h.x, h.y - 10);
+      const wet = !dryLand(h.x) && ht === Infinity && !dk, fl = ht < Infinity ? ht : dk ? fl0 : wet ? surfaceY(h.x) : landTop(h.x);
       if (h.y >= fl) {
         h.onDeck = false;
-        if (ht < Infinity) { sectionBlast(h.x, fl - 6, 1.2, h.vx * 0.3); spawnDebris(h.x, fl - 6, 12, h.vx * 0.3); h.state = 'wreck'; h.y = fl; h.t = 0; h.tilt = 0.3 * Math.sign(h.tilt || 1); h.onDeck = true; }   // (onto the harbour's stone: a wreck on it, no crater - user Oct 27)
-        else if (wet) { ditchFx(h.x, h.vx, 1.2, 36, h.vy); h.state = 'sink'; h.vy = 40; }
-        else { sectionBlast(h.x, fl - 6, 1.2, h.vx * 0.3); spawnDebris(h.x, fl - 6, 12, h.vx * 0.3); landCarve(h.x, fl, 9); h.state = 'wreck'; h.y = fl; h.t = 0; h.tilt = 0.3 * Math.sign(h.tilt || 1); }
+        if (wet) { ditchFx(h.x, h.vx, 1.2, 36, h.vy); h.state = 'sink'; h.vy = 40; }
+        else {
+          // (its wreck burning there and staying - user Oct 27, landCrash)
+          const stone = ht < Infinity;
+          h.state = 'wreck'; h.onDeck = stone; h.deck = stone ? null : dk; h.t = 0; h.tilt = 0.3 * Math.sign(h.tilt || 1);
+          landCrash(h.x, fl, { size: 0.9, vx: h.vx, vy: h.vy, at: h, deck: h.deck, noCrater: stone });
+          h.y = stone || dk ? fl : landBelow(h.x, fl - 30);
+        }
         civFollowDown(h);
       }
       continue;
@@ -21357,7 +21404,7 @@ function drawCivHelis(x0, x1, mode) {
   if (!chArt) { if (!img.civhelis) return; buildCivHeliArt(); }
   for (const h of civHelis) {
     if (h.state === 'gone' || h.x < x0 - 140 || h.x > x1 + 140) continue;
-    const wet = h.state === 'sink' || (h.state === 'wreck' && !dryLand(h.x) && !h.onDeck);
+    const wet = h.state === 'sink' || (h.state === 'wreck' && !dryLand(h.x) && !h.deck && !h.onDeck);
     if ((mode === 'air' && wet) || (mode === 'under' && !wet)) continue;
     const A = chArt[h.kind], s = chK(h) * SV, lv = h.state === 'wreck' || h.state === 'sink' ? 2 : h.state === 'fall' ? Math.max(1, chLevel(h)) : chLevel(h);
     let face = h.facing, vi = 0;
@@ -22893,6 +22940,8 @@ function fireSpots(out) {
   for (const b of balloons) if (b.state === 'wreck' && dryLand(b.x) && b.t < 20) add(b.x - 22, b.x + 22, b.y - 22, b.y + 4, b.fire ? 1 : 0.5, pw => { b.t += 20 * HOSE_OUT * pw; if (b.t >= 20) { b.fire = 0; hoseOut(b.x, b.y - 6, 1); } });
   for (const b of blimps) if (b.state === 'wreck' && b.burn > 0) add(b.x - 90, b.x + 90, b.y - 24, b.y + 6, 1, pw => { b.burn -= 30 * HOSE_OUT * pw; if (b.burn <= 0) { b.burn = 0; hoseOut(b.x, b.y - 8, 1.5); } });
   for (const v of shuttles) if (v.state === 'wreck' && v.burn > 0) add(v.x - 45, v.x + 45, v.y - 24, v.y + 8, 1, pw => { v.burn -= 30 * HOSE_OUT * pw; if (v.burn <= 0) { v.burn = 0; hoseOut(v.x, v.y - 8, 1.5); } });
+  // (what's left of a plane down on land, burning - 50-land-rest: its fire put out, it only smokes)
+  for (const W of crashes) if (!W.out && W.t < W.fire && W.xa != null) add(W.xa - 6, W.xb + 6, W.top - 18, W.y + 4, 1, pw => { W.t += 40 * HOSE_OUT * pw / Math.sqrt(W.size); if (W.t >= W.fire) hoseOut((W.xa + W.xb) / 2, W.y - 8, 1.5); });
   for (const j of spaceJunk) if (j.state === 'wreck' && j.burn > 0) add(j.x - 26, j.x + 26, j.y - 20, j.y + 6, 1, pw => { j.burn -= 25 * HOSE_OUT * pw; if (j.burn <= 0) { j.burn = 0; hoseOut(j.x, j.y - 6, 1); } });
   return out;
 }
@@ -23500,13 +23549,13 @@ function stepTankSink(t, dt) {
   const floor = onLand(t.x) ? landBelow(t.x, t.y - 10) : seabedY(t.x);
   t.y = Math.min(floor, t.y + 26 * dt); t.a *= 1 - dt;
   if (Math.random() < dt * 12) spawnSmoke(t.x + rnd(-20, 20), WATER_Y - 2, { mist: true, r: rnd(2, 4), grow: 2, lift: 4, vx: rnd(-6, 6), vy: -rnd(4, 12), life: rnd(0.8, 1.4), alpha: 0.5 });
-  if (t.y >= floor - 0.5 || t.sinkT > 8) { t.state = 'dead'; landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: floor, a: 0, facing: t.facing, t: 0, burn: 0 }); }
+  if (t.y >= floor - 0.5 || t.sinkT > 8) { t.state = 'dead'; landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: 0, facing: t.facing, t: 0, burn: 0, wet: true }); }   // (wet: it goes on down to the bottom - stepArmyWreck)
 }
 // a helicopter that touches the water: it goes in and sinks
 function heliSink(h) {
   if (netGuestHold() || h.state === 'sink' || h.state === 'dead') return;
   if (!h.lostDone) heliLost(h);
-  ropeRelease(h); h.rope = null;
+  cutRope(h, 1, true);                                             // (its rope and magnet go in loose with it, and sink - user Oct 27, [15])
   h.state = 'sink'; h.sinkT = 0; h.vx *= 0.3; h.vy = 30;
   ditchFx(h.x, h.vx, 1.4, 34, h.vy);
 }
@@ -23516,7 +23565,7 @@ function stepHeliSink(h, dt) {
   h.vx *= 1 - dt * 2; h.x += h.vx * dt; h.y = Math.min(floor, h.y + 30 * dt);
   h.tilt += (h.facing * 0.5 - h.tilt) * Math.min(1, dt); h.spin = Math.max(0, h.spin - dt); h.rotor += dt * 4 * h.spin;
   if (Math.random() < dt * 10) spawnSmoke(h.x + rnd(-15, 15), WATER_Y - 2, { mist: true, r: rnd(2, 4), grow: 2, lift: 4, vx: rnd(-6, 6), vy: -rnd(4, 12), life: rnd(0.8, 1.4), alpha: 0.5 });
-  if (h.y >= floor - 0.5 || h.sinkT > 8) { h.state = 'dead'; landWrecks.push({ kind: 'heli', id: h.id, x: h.x, y: floor + heliSkid(), a: h.tilt, facing: h.facing, t: 0, burn: 0 }); h.wrecked = true; }
+  if (h.y >= floor - 0.5 || h.sinkT > 8) { h.state = 'dead'; landWrecks.push({ kind: 'heli', id: h.id, x: h.x, y: h.y + heliSkid(), a: h.tilt, facing: h.facing, t: 0, burn: 0, wet: true }); h.wrecked = true; }
 }
 /* ---- the tank's smoke screen (user Oct 25: "works the same way" as the battleship's) ---- */
 // (user Oct 27: its own 15 s supply, no longer the battleship's canisters - the shared smokeSupply; refilled where it's
@@ -24093,7 +24142,7 @@ function ropeRelease(h) {
 const heliLoad = h => h && h.rope && (h.rope.hold >= 0 || h.rope.obj) ? 1 : 0;
 function stepRope(h, dt) {
   const R = h.rope; if (!R) return;
-  if (h.state !== 'fly' && h.state !== 'landed') { ropeRelease(h); h.rope = null; return; }
+  if (h.state !== 'fly' && h.state !== 'landed') { cutRope(h, 1, true); return; }   // (shot down: its rope and magnet fall loose with it, and sink in water - user Oct 27, [15])
   R.dt = Math.max(1e-3, dt);
   R.len = R.mode === 'out' ? Math.min(ROPE_L, R.len + ROPE_OUT * dt) : Math.max(0, R.len - ROPE_IN * dt);
   if (R.mode === 'in' && R.len <= 0) { h.rope = null; return; }
@@ -24198,29 +24247,31 @@ function ropeBulletHit(b) {
   }
   return false;
 }
-function cutRope(h, i) {
+function cutRope(h, i, quiet) {
   const R = h.rope; if (!R) return;
   const t = R.hold >= 0 ? tanks[R.hold] : null;
   ropeRelease(h);
   if (t) t.dropT = 0;
-  looseRopes.push({ n: R.n.slice(i).map(q => q.slice()), seg: R.len / ROPE_N, mag: true, age: 0 });
+  if (R.len > 4) looseRopes.push({ n: R.n.slice(i).map(q => q.slice()), seg: R.len / ROPE_N, mag: true, age: 0 });
   h.rope = null; h.magBroken = true;
-  sfxImpact(h.x);
+  if (!quiet) sfxImpact(h.x);
 }
-// the cut end: rope and magnet falling, lying on the ground a while
+// the cut end: rope and magnet falling, lying on the ground a while; into water it sinks, slowed, to the bottom (a
+// lake's bed, the sea's, a ship's top on the way - as the magnet on its rope does)
+const LOOSE_ROPE_T = 60;
 function stepLooseRopes(dt) {
   for (let k = looseRopes.length - 1; k >= 0; k--) {
     const Lr = looseRopes[k], P = Lr.n, N = P.length - 1, G = 900 * dt * dt, damp = Math.pow(0.55, dt);
     Lr.age += dt;
-    if (Lr.age > 12) { looseRopes.splice(k, 1); continue; }
-    for (const q of P) { const vx = (q[0] - q[2]) * damp, vy = (q[1] - q[3]) * damp; q[2] = q[0]; q[3] = q[1]; q[0] += vx; q[1] += vy + G; }
+    if (Lr.age > LOOSE_ROPE_T) { looseRopes.splice(k, 1); continue; }
+    for (const q of P) { const wet = !dryLand(q[0]) && q[1] > surfaceY(q[0]), dk = wet ? Math.pow(0.08, dt) : 1, vx = (q[0] - q[2]) * damp * dk, vy = (q[1] - q[3]) * damp * dk; if (wet && !q.wet && !SIM_ONLY && Math.random() < 0.3) spawnFoam(q[0], rnd(0.8, 1.6)); q.wet = wet; q[2] = q[0]; q[3] = q[1]; q[0] += vx; q[1] += vy + G * (wet ? 0.35 : 1); }
     for (let it = 0; it < 8; it++) for (let i = 0; i < N; i++) {
       const a = P[i], b = P[i + 1], wa = 1, wb = i + 1 === N ? 1 / 14 : 1, dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1e-6;
       if (d <= Lr.seg) continue;
       const kk = (d - Lr.seg) / d / (wa + wb);
       a[0] += dx * kk * wa; a[1] += dy * kk * wa; b[0] -= dx * kk * wb; b[1] -= dy * kk * wb;
     }
-    for (let i = 0; i <= N; i++) { const q = P[i], gy = landBelow(q[0], q[1] - 8) - (i === N ? MAG_H : 1); if (q[1] > gy) { q[1] = gy; q[2] += (q[0] - q[2]) * 0.6; q[3] = q[1]; } }
+    for (let i = 0; i <= N; i++) { const q = P[i], gy = (dryLand(q[0]) || lakeAt(q[0]) ? landBelow(q[0], q[1] - 8) : seaUnder(q[0], q[1] - 8)) - (i === N ? MAG_H : 1); if (q[1] > gy) { q[1] = gy; q[2] += (q[0] - q[2]) * 0.6; q[3] = q[1]; } }
   }
 }
 
@@ -24235,7 +24286,7 @@ function heliLoadFly(h, tvx, tvy, stick) {
 /* ---- drawing ---- */
 function drawLooseRopes() {
   for (const Lr of looseRopes) {
-    C.globalAlpha = clamp((12 - Lr.age) / 2, 0, 1);
+    C.globalAlpha = clamp((LOOSE_ROPE_T - Lr.age) / 2, 0, 1);
     drawRopeLine(Lr.n);
     const P = Lr.n, e = P[P.length - 1], q = P[P.length - 2] || e;
     drawMagnet(e[0], e[1], clamp(Math.atan2(-(e[0] - q[0]), e[1] - q[1] + 0.01) * 0.6, -0.5, 0.5), false);
@@ -24359,6 +24410,12 @@ const heldAng = (o, a0) => o.carried != null && o.hookA != null ? o.hookA : a0;
 function magHoldable(o) { return isBox(o) ? o.where === 'hook' : isTank(o) ? o.state === 'alive' && !!o.hook : planes.includes(o) ? o.state === 'fly' : traffic.includes(o) ? o.state === 'free' : seaplanes.includes(o) ? (o.state === 'water' || o.state === 'moored') : shuttles.includes(o) ? o.state === 'landed' : false; }
 const magTop = o => isBox(o) ? CONT_H / 2 : isTank(o) ? tankTopH() : traffic.includes(o) ? (o.kind === 'jet' ? 14 : 9) : seaplanes.includes(o) ? 18 : shuttles.includes(o) ? 12 : 9;
 const magFoot = o => isBox(o) ? CONT_H / 2 : isTank(o) ? 0 : traffic.includes(o) ? (TRAFFIC[o.kind].gy || 10) : seaplanes.includes(o) ? 3 : shuttles.includes(o) ? 4 : PLANE_WHEELS;
+// a magnet's load let go: still whole, it's dropped (magDrop); destroyed on the magnet, it's only let go of - what destroyed
+// it already sent it down (user Oct 27: a plane shot on a civilian helicopter's magnet was lost twice)
+function magLetGo(o, tag) {
+  if (o.carried !== tag) return;
+  if (magHoldable(o)) magDrop(o); else { o.carried = null; o.hookA = null; }
+}
 function magDrop(o) {
   o.carried = null; o.hookA = null;
   // (a box falls as a loose one - into the sea it floats and sinks, on the ground it lands; a tank drops onto its
@@ -24366,7 +24423,8 @@ function magDrop(o) {
   if (isBox(o)) { Object.assign(o, { where: 'free', vx: clamp(o.vx || 0, -200, 200), vy: clamp(o.vy || 0, -100, 200), va: rnd(-0.4, 0.4) }); return; }
   if (isTank(o)) { o.hook = false; o.dropT = 3; o.x = clamp(o.x, 40, WORLD_W - 40); o.vx = clamp(o.vx || 0, -TANK_V, TANK_V); o.vy = clamp(o.vy || 0, -60, 260); return; }
   const wet = !dryLand(o.x), af = airfieldAt(o.x), H = (wet ? surfaceY(o.x) : landTop(o.x)) - o.y;
-  if (seaplanes.includes(o) && wet) { o.state = 'water'; o.y = surfaceY(o.x) - 3; o.spd = 0; o.ai = null; splash(o.x, 0, -120); return; }
+  const dk = wet && !onLand(o.x) ? shipTopAt(o.x, o.y - 10) : null, onShip = !!dk && dk.y < surfaceY(o.x);   // (over a ship: it comes down on her, not into the water under her - user Oct 27, [19])
+  if (seaplanes.includes(o) && wet && !onShip) { o.state = 'water'; o.y = surfaceY(o.x) - 3; o.spd = 0; o.ai = null; splash(o.x, 0, -120); return; }
   if (!wet && onApron(o.x) && H < 140) {
     if (shuttles.includes(o)) { o.state = 'landed'; o.y = af.y; o.wait = 45; return; }
     if (seaplanes.includes(o)) { o.state = 'gone'; o.wait = 30; return; }
@@ -24394,7 +24452,11 @@ function civMagnet(h) {
 function stepCivMagnets(dt) {
   for (const h of civHelis) {
     const M = h.mag; if (!M) continue;
-    if (h.state !== 'fly' && h.state !== 'landed') { if (M.obj) { magDrop(M.obj); M.obj = null; } h.mag = null; continue; }
+    if (h.state !== 'fly' && h.state !== 'landed') {
+      if (M.obj) { magLetGo(M.obj, -10 - civHelis.indexOf(h)); M.obj = null; }
+      if (M.n && M.len > 4) looseRopes.push({ n: M.n.slice(1).map(q => q.slice()), seg: M.len / (M.n.length - 1), mag: true, age: 0 });   // (its cable and magnet fall loose with it - user Oct 27, [15])
+      h.mag = null; continue;
+    }
     M.len = M.out ? Math.min(CMAG_L, M.len + 140 * dt) : Math.max(0, M.len - 180 * dt);
     if (!M.out && M.len <= 0) { h.mag = null; continue; }
     // (user Oct 26: "the cable that's carrying the magnet seems to behave like a single stiff line. It should feel more
@@ -24433,7 +24495,7 @@ function stepCivMagnets(dt) {
     M.ex = ex; M.ey = ey; M.ang = clamp(-Math.atan2(ex - q1[0], ey - q1[1] + 0.01), -1.1, 1.1);   // (the magnet hangs along the rope's end)
     // (the swing tugs the helicopter toward its load: you feel its weight)
     if (heavy) { const L = Math.max(20, Math.hypot(ex - ax, ey - ay)); h.vx = (h.vx || 0) + clamp((ex - ax) / L, -1, 1) * 90 * dt; }
-    if (M.obj && (M.obj.carried !== -10 - civHelis.indexOf(h) || !magHoldable(M.obj))) { if (M.obj.carried === -10 - civHelis.indexOf(h)) magDrop(M.obj); M.obj = null; }
+    if (M.obj && (M.obj.carried !== -10 - civHelis.indexOf(h) || !magHoldable(M.obj))) { magLetGo(M.obj, -10 - civHelis.indexOf(h)); M.obj = null; }   // (destroyed on it, or taken: let go, never destroyed again - user Oct 27, a plane counted lost twice)
     if (!M.obj && M.out && M.len > 30) {
       const best = magNearest(magTargetsAll(), ex, ey, MAG_GRAB + 12);
       if (best) { M.obj = best; magTake(best, -10 - civHelis.indexOf(h)); }
@@ -24975,6 +25037,479 @@ function makePingArt(home) {
   return c;
 }
 
+/* ================================================================
+   OPEN WORLD (user Oct 27): what rests on the ground, and what's left of a plane that comes down on land
+   - "Anything resting on the ground re-checks what's under it when the ground changes. If the ground has gone, it falls
+     into the hole like the army wrecks already do. One shared step for all of them, run when the ground changes."
+     The ground changes (a crater, sand sliding: ltDirty) -> landChanged wakes that stretch of it; each frame what rests
+     in a woken stretch (or is still falling) is checked by restSettle: its ground gone, it falls - gathering speed -
+     onto what's left, and tips with it (a thing as wide as the pad bridges a small hole, tips into a big one).
+   - Stones go whole (claude/ground-stones-rule.md, user Oct 26: "You can never slice a rock"): a crater takes a brown
+     stone whole or knocks it loose, and a grey boulder it undercuts drops whole into the hole; each comes to rest and is
+     bedded in the ground again where it lies.
+   - The lake's water fills a hollow dug beside it, and the lake bed's pebbles and moss are drawn again on the new bed.
+   - "When a plane crashes on land (e.g. 747) it currently just disappears? The hull should stay on the screen broken in
+     pieces. As well as a big fire and smoke stack. Same with any other plane that crashes on land (and do a crater
+     depending on the plane size)." (09:50): landCrash, one for every plane - the crater by its size, the hull broken
+     where it hit and charred, the wings torn off beside it, a big fire and a tall column of black smoke (a minute for
+     the 747, half that for a Cessna), then smoke as long again, then a smoulder; it stays for the round. Its fire sets
+     nothing else alight yet (user 09:54: "We need to do some tests before doing fire spread").
+   ================================================================ */
+// the stretches of ground changed lately: [x0, x1, seconds left]
+const landWake = [];
+function landChanged(x0, x1) {
+  if (land.lakes && land.lakes.some(L => x1 > L[0] - 120 && x0 < L[1] + 120)) land.lakeDirty = true;   // (by a lake: its water looked at again)
+  for (const w of landWake) if (x1 >= w[0] - 8 && x0 <= w[1] + 8) { w[0] = Math.min(w[0], x0); w[1] = Math.max(w[1], x1); w[2] = 1.5; return; }
+  landWake.push([x0, x1, 1.5]);
+}
+function landWoke(x, half) { for (const w of landWake) if (x + half >= w[0] && x - half <= w[1]) return true; return false; }
+// the ground under something `half` wide whose foot is at y: where its foot settles, and its tilt (from the ground at its
+// two ends: over a small hole it bridges it, one end over a big one and it tips into it). Off the land: as it was
+function restGround(x, foot, half) {
+  const at = u => { const xx = clamp(x + u, 1, WORLD_W - 1); return onLand(xx) ? landBelow(xx, foot - 6) : foot; };
+  const l = at(-half), m = at(0), r = at(half);
+  return [Math.min((l + r) / 2, m + 2), clamp(Math.atan2(r - l, half * 2), -0.6, 0.6)];
+}
+// one thing resting: if its ground has gone from under it, it falls onto what's left (o._rv: its speed). RS: its foot
+// now, its tilt, and the speed it came down at this frame (0 while still falling). False: nothing to do
+const RS = { foot: 0, a: 0, hit: 0 };
+function restSettle(o, x, foot, half, dt) {
+  const [want, a] = restGround(x, foot, half);
+  RS.foot = foot; RS.a = a; RS.hit = 0;
+  if (!o._rv && want <= foot + 0.75) return false;
+  o._rv = Math.min(600, (o._rv || 0) + 520 * dt);
+  RS.foot = Math.min(want, foot + o._rv * dt);
+  if (RS.foot >= want - 0.01) { RS.hit = o._rv; o._rv = 0; }
+  return true;
+}
+// a thing that came down onto the ground: dust, and a thump for a heavy one
+function restLanded(x, y, v, big) { if (v < 60) return; kickLandDust(x, y, Math.round(3 + 4 * big)); if (v > 160 && big > 0.6) { shakeAt(1.5 * big, x); sfxImpact(x); } }
+
+/* ---- each frame: everything resting where the ground changed ---- */
+function stepLandRest(dt) {
+  if (!LAND || !land.cell) return;
+  for (let i = landWake.length - 1; i >= 0; i--) if ((landWake[i][2] -= dt) <= 0) landWake.splice(i, 1);
+  if (land.lakeDirty && !((land.lakeT = (land.lakeT || 0) - dt) > 0)) { land.lakeDirty = false; land.lakeT = 0.3; lakeRebuild(); }
+  stepLooseStones(dt);
+  const woke = (o, half) => o._rv || landWoke(o.x, half);
+  // the army's wrecks: on land they drop into a hole dug under them; on a ship's deck they ride her; over water they
+  // splash in and sink to the bottom (user Oct 27, [18])
+  for (const w of landWrecks) stepArmyWreck(w, dt);
+  // what's left of the planes
+  for (const W of crashes) stepCrash(W, dt);
+  // the civilian helicopters', the blimp's and the balloons' wrecks; the boosters and the tank; the orbiter's wreck
+  for (const h of civHelis) if (h.state === 'wreck' && !h.deck && dryLand(h.x) && woke(h, 20)) { if (restSettle(h, h.x, h.y, chHalf(h) * 0.6, dt)) { h.y = RS.foot; restLanded(h.x, h.y, RS.hit, 0.6); } }
+  for (const b of blimps) if (b.state === 'wreck' && dryLand(b.x) && woke(b, 60)) { if (restSettle(b, b.x, b.y, 60, dt)) { b.y = RS.foot; restLanded(b.x, b.y, RS.hit, 0.8); } }
+  for (const b of balloons) if (b.state === 'wreck' && dryLand(b.x) && woke(b, 12)) { if (restSettle(b, b.x, b.y, 12, dt)) { b.y = RS.foot; restLanded(b.x, b.y, RS.hit, 0.3); } }
+  for (const j of spaceJunk) if (j.state === 'wreck' && dryLand(j.x) && woke(j, 30)) { if (restSettle(j, j.x, j.y + 4, j.kind === 'et' ? 50 : 30, dt)) { j.y = RS.foot - 4; restLanded(j.x, RS.foot, RS.hit, 1); } }
+  for (const v of shuttles) if (v.state === 'wreck' && !v.crash && dryLand(v.x) && woke(v, 40)) { if (restSettle(v, v.x, v.y + 8, 40, dt)) { v.y = RS.foot - 8; restLanded(v.x, RS.foot, RS.hit, 1); } }
+  // the launch pads: on the ground under their whole width (the stack on one tips with it - stepShuttle)
+  for (const R of [false, true]) { const P = padRestOf(R); stepPadBoom(P, dt); if (woke(P, 115) && restSettle(P, P.x, P.y, 105, dt)) { P.y = RS.foot; P.a += (RS.a - P.a) * Math.min(1, dt * 6); restLanded(P.x, P.y, RS.hit, 1); } }
+  // boxes lying on the ground: its ground gone, a box falls (as a loose one - stepContainers)
+  for (const k of containers) if (k.where === 'rest' && !k.deck && !k.inWater && dryLand(k.x) && landWoke(k.x, CONT_W / 2) && !docks.some(d => harbourHit(d, k.x, DECK_Y))) {
+    const [want] = restGround(k.x, k.y + CONT_H / 2, CONT_W * 0.4); if (want > k.y + CONT_H / 2 + 1) Object.assign(k, { where: 'free', vx: 0, vy: 0, va: rnd(-0.4, 0.4) });
+  }
+  // pieces lying on the ground (a wing, rubble): they fall again
+  for (const k of chunks) if (k.rest && k.land && !k.uw && landWoke(k.x, 6)) { const f = k.y + k.hh * 0.45; if (landBelow(k.x, f - 6) > f + 1) { k.rest = false; k.vx = k.vy = 0; k.w = rnd(-1, 1); } }
+  // the debris, the grains of earth and the leaves lying on the ground: the ground gone, they fall again
+  if (landWake.length) {
+    for (const d of debris) if (d.state === 2 && onLand(d.x) && landWoke(d.x, 1) && !landSolid(d.x, d.y + 1.5)) { d.state = 0; d.vy = 0; }
+    for (const q of earthGrains) if (q.rest && landWoke(q.x, 1) && !landSolid(q.x, q.y + 1.5)) { q.rest = 0; q.vy = 0; q.vx = 0; }
+    for (const f of leaves) if (f.rest && landWoke(f.x, 1) && !landSolid(f.x, f.y + 1.5)) { f.rest = 0; f.vy = 0; f.vx = 0; }
+  }
+}
+// an army wreck (a tank's, a helicopter's): on a ship's deck it rides her, and goes down with her; over water it falls
+// in with a splash and sinks to the bottom (seabedY - in a lake, its bed); on land it settles into what's dug under it
+function stepArmyWreck(w, dt) {
+  const half = w.kind === 'tank' ? TANK_L * 0.4 : 20;
+  if (w.deck) {
+    const c = w.deck; w.x += c.dx || 0;
+    const d = shipTopAt(w.x, w.y - 10);
+    if (c.state === 'sail' && d && d.c === c && d.y < w.y + 8) { w.y = d.y; if (w.kind === 'tank') w.a = c.a + c.tilt; return; }
+    w.deck = null; w._rv = 0;                                      // (she's gone from under it: it falls)
+  }
+  if (onLand(w.x) && !lakeAt(w.x)) { if (w._rv || landWoke(w.x, half) || w.y < landBelow(w.x, w.y - 6) - 1) { if (restSettle(w, w.x, w.y, half, dt)) { w.y = RS.foot; if (w.kind === 'tank') w.a = RS.a; restLanded(w.x, w.y, RS.hit, 1); } } return; }
+  if (w.bed) return;
+  // (on the harbour's deck: ground while it's there - the pier gone from under it, it falls in - user Oct 27)
+  if (!onLand(w.x) && !w.wet) { const ht = harbourTop(w.x, w.y - 6); if (ht < Infinity) { w.onDeck = true; if (w.y < ht - 0.5 || w._rv) { w._rv = Math.min(600, (w._rv || 0) + 520 * dt); w.y = Math.min(ht, w.y + w._rv * dt); if (w.y >= ht - 0.01) { restLanded(w.x, w.y, w._rv, 1); w._rv = 0; } } return; } w.onDeck = false; }
+  const lake = onLand(w.x), sy = lake ? WATER_Y : surfaceY(w.x), bed = lake ? landTop(w.x) : seabedY(w.x);
+  if (!w.wet) {
+    w._rv = Math.min(600, (w._rv || 0) + 520 * dt);
+    const ny = w.y + w._rv * dt, d = lake ? null : shipTopAt(w.x, w.y - 10);
+    if (d && ny >= d.y && w.y <= d.y + 6) { w.y = d.y; w.deck = d.c; restLanded(w.x, w.y, w._rv, 1); w._rv = 0; return; }   // (onto a ship's top: it lands there)
+    w.y = ny;
+    if (w.y >= sy) { w.wet = true; ditchFx(w.x, 0, 1.1); w._rv = 0; }
+    return;
+  }
+  w.y = Math.min(bed, w.y + 26 * dt); w.a = (w.a || 0) * (1 - dt * 0.3);
+  if (!SIM_ONLY && Math.random() < dt * 8) addBubble(w.x + rnd(-12, 12), w.y - 8, rnd(-5, 5), -rnd(15, 30), rnd(0.8, 1.8));
+  if (w.y >= bed - 0.5) { w.bed = true; if (!lake) { kickDust(w.x, 18, 0.6); scatterBed(w.x, 30, 0.5); } }
+}
+
+/* ---- the stones (ground-stones-rule.md): whole, never sliced ---- */
+const looseStones = [];
+// the stones within reach of (x, y)
+function stonesNear(x, y, R) {
+  const out = new Set();
+  if (!land.stoneG) return out;
+  for (let gx = Math.floor((x - R - 60) / ST_G); gx <= Math.floor((x + R + 60) / ST_G); gx++) for (let gy = Math.floor((y - R - 60 - LT_Y0) / ST_G); gy <= Math.floor((y + R + 60 - LT_Y0) / ST_G); gy++) {
+    const L = land.stoneG.get(gx * 4096 + gy); if (L) for (const j of L) out.add(j);
+  }
+  return out;
+}
+// in (or out of) the lookups the ground is painted from
+function stoneLink(o, on) {
+  for (let gx = Math.floor((o.x - o.rx) / ST_G); gx <= Math.floor((o.x + o.rx) / ST_G); gx++) for (let gy = Math.floor((o.y - o.ry - LT_Y0) / ST_G); gy <= Math.floor((o.y + o.ry - LT_Y0) / ST_G); gy++) {
+    const k = gx * 4096 + gy; let L = land.stoneG.get(k);
+    if (on) { if (!L) land.stoneG.set(k, L = []); if (!L.includes(o.id)) L.push(o.id); } else if (L) { const i = L.indexOf(o.id); if (i >= 0) L.splice(i, 1); }
+  }
+  for (let k = Math.max(0, Math.floor(ltCol(o.x - o.rx) / LT_CHUNK)); k <= Math.min(land.stoneC.length - 1, Math.floor(ltCol(o.x + o.rx) / LT_CHUNK)); k++) {
+    const L = land.stoneC[k], i = L.indexOf(o.id);
+    if (on) { if (i < 0) L.push(o.id); } else if (i >= 0) L.splice(i, 1);
+  }
+  ltDirty(ltCol(o.x - o.rx) - 1, ltCol(o.x + o.rx) + 1);
+}
+// each ground cell inside a stone's outline
+function stoneCells(o, fn) {
+  for (let c = Math.max(0, ltCol(o.x - o.rx)); c <= Math.min(land.cols - 1, ltCol(o.x + o.rx)); c++) for (let r = Math.max(0, ltRow(o.y - o.ry)); r <= Math.min(LT_ROWS - 1, ltRow(o.y + o.ry)); r++) {
+    const dx = ((c + 0.5) * LT_CELL - o.x) / o.rx, dy = (LT_Y0 + (r + 0.5) * LT_CELL - o.y) / o.ry;
+    if (dx * dx + dy * dy <= 1 && stoneHit(stonePoly(o), dx, dy)) fn(ltIdx(c, r));
+  }
+}
+// out of the ground: its cells emptied (a brown one's earth, a grey one's rock), out of the lookups
+function stoneOut(o) {
+  stoneCells(o, i => { const m = land.cell[i]; if (m === M_DIRT || m === M_GRASS || (o.grey && m === M_ROCK)) { land.cell[i] = M_AIR; land.scorch[i] = 0; } });
+  stoneLink(o, false);
+}
+// a crater at (x, y), radius rad, about to be dug: a brown stone it reaches is taken whole (its middle in the hole, or
+// most of it) or knocked loose (only its edge); grey ones are rock - looked at after the dig (stonesUndercut)
+function stonesCrater(x, y, rad) {
+  if (!land.stones) return;
+  const R = rad * 0.8;                                         // (what a crater takes of the earth: dirt goes less far - landCarve)
+  for (const j of stonesNear(x, y, rad)) {
+    const o = land.stones[j]; if (!o || o.gone || o.loose || o.grey) continue;
+    if (Math.abs(o.x - x) > R + o.rx || Math.abs(o.y - y) > R + o.ry || onApron(o.x - o.rx) || onApron(o.x + o.rx)) continue;
+    const P = stonePts(stonePoly(o)); let n = 0;
+    for (let k = 0; k < P.length; k += 2) if (Math.hypot(P[k] - x, P[k + 1] - y) < R) n++;
+    if (!n && Math.hypot(o.x - x, o.y - y) >= R) continue;
+    if (Math.hypot(o.x - x, o.y - y) < R || n > P.length / 2 * 0.45) { stoneOut(o); o.gone = true; }   // (the crater takes it whole)
+    else stoneLoosen(o);                                       // (knocked loose: it drops into the hole)
+  }
+}
+// after the dig: a grey boulder with (almost) nothing left under it drops whole into the hole
+function stonesUndercut(x, y, rad) {
+  if (!land.stones) return;
+  for (const j of stonesNear(x, y, rad + 30)) {
+    const o = land.stones[j]; if (!o || o.gone || o.loose || !o.grey || onApron(o.x - o.rx) || onApron(o.x + o.rx)) continue;
+    if (Math.abs(o.x - x) > rad + o.rx + 8 || Math.abs(o.y - y) > rad + o.ry + 8) continue;
+    const P = stonePts(stonePoly(o)); let n = 0, held = 0;
+    for (let k = 0; k < P.length; k += 2) { if (P[k + 1] < o.y + o.ry * 0.25) continue; n++; if (landSolid(P[k], P[k + 1] + LT_CELL * 1.5)) held++; }
+    if (n && held / n < 0.25) stoneLoosen(o);
+  }
+}
+function stoneLoosen(o) {
+  stoneOut(o); o.loose = true;
+  looseStones.push({ o, vy: 0 });
+}
+// is a stone at (x, y) in the ground? (its middle, and its outline's lower half)
+function stoneBlocked(o, y) {
+  const P = stonePts(stonePoly(o)), dy = y - o.y;
+  if (y + o.ry >= LT_Y1) return true;
+  if (landSolid(o.x, y)) return true;
+  for (let k = 0; k < P.length; k += 2) if (P[k + 1] >= o.y && landSolid(P[k], P[k + 1] + dy)) return true;
+  return false;
+}
+function stepLooseStones(dt) {
+  for (let i = looseStones.length - 1; i >= 0; i--) {
+    const s = looseStones[i], o = s.o;
+    s.vy = Math.min(500, s.vy + 520 * dt);
+    const ny = o.y + s.vy * dt;
+    if (!stoneBlocked(o, ny)) { o.y = ny; o.pts = null; continue; }
+    // down: as far as it goes, then bedded in the ground there - whole
+    let y = o.y; while (y + LT_CELL * 0.5 < ny && !stoneBlocked(o, y + LT_CELL * 0.5)) y += LT_CELL * 0.5;
+    o.y = y; o.pts = null; o.loose = false;
+    stoneCells(o, q => { if (land.cell[q] === M_AIR) land.cell[q] = o.grey ? M_ROCK : M_DIRT; });
+    stoneLink(o, true);
+    restLanded(o.x, o.y + o.ry * 0.6, s.vy, Math.min(1, o.rx / 14));
+    looseStones.splice(i, 1);
+  }
+}
+// a loose stone's picture: its cells, a pixel each, coloured as the ground paints it (lit from the upper left)
+function stoneSprite(o) {
+  if (o._spr) return o._spr;
+  const W = Math.ceil(o.rx * 2 / LT_CELL) + 2, H = Math.ceil(o.ry * 2 / LT_CELL) + 2, c = makeCanvas(W, H), x = c.getContext('2d'), id = x.createImageData(W, H), d = id.data;
+  const col0 = ltCol(o.x), P2 = o.grey ? ltPal(M_ROCK, col0) : ltPal(M_DIRT, col0), m = Math.min(o.rx, o.ry) / LT_CELL, k0 = hash(o.id * 0.37);
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    const dx = ((i + 0.5) * LT_CELL - o.rx - LT_CELL) / o.rx, dy = ((j + 0.5) * LT_CELL - o.ry - LT_CELL) / o.ry;
+    if (dx * dx + dy * dy > 1 || !stoneHit(stonePoly(o), dx, dy)) continue;
+    const e = STH.d * m, t = stoneFaceShade(hash(i * 1.37 + j * 7.91));
+    let col = o.grey ? (t > 0.6 ? P2[2] : t > 0.22 ? P2[5] : t > -0.25 ? (k0 < 0.5 ? P2[0] : P2[1]) : P2[4]) : (t > 0.62 && o.rx > 6 ? P2[5] : t > 0.25 ? P2[4] : t > -0.3 ? (k0 < 0.33 ? P2[1] : k0 > 0.66 ? P2[2] : P2[0]) : P2[6]);
+    if (e < 0.85 && t < 0.25) col = o.grey ? P2[4] : P2[6];
+    col = stoneTint(col, o);
+    const q = (j * W + i) * 4; d[q] = clamp(col[0], 0, 255); d[q + 1] = clamp(col[1], 0, 255); d[q + 2] = clamp(col[2], 0, 255); d[q + 3] = 255;
+  }
+  x.putImageData(id, 0, 0);
+  return (o._spr = c);
+}
+function drawLooseStones(x0, x1) {
+  for (const s of looseStones) {
+    const o = s.o; if (o.x + o.rx < x0 || o.x - o.rx > x1) continue;
+    const sp = scaled(stoneSprite(o), LT_CELL * SV, true);
+    C.drawImage(sp, Math.round(PX(o.x - o.rx - LT_CELL)), Math.round(PY(o.y - o.ry - LT_CELL)));
+  }
+}
+
+/* ---- the lake's water: it fills a hollow dug beside it (one joined to it, below its surface); its bed's pebbles and
+   moss are drawn again on the bed as it is now ---- */
+function lakeRebuild() {
+  if (!land.lakes) return;
+  let grew = false;
+  for (const L of land.lakes) {
+    let a = Math.floor(L[0] / LT_CELL), b = Math.ceil(L[1] / LT_CELL) - 1;
+    const wet = c => c >= 0 && c < land.cols && onLand(c * LT_CELL + 1) && landTop(c * LT_CELL + 1) > WATER_Y + 0.5;
+    while (wet(a - 1)) a--;
+    while (wet(b + 1)) b++;
+    if (a * LT_CELL < L[0] - 0.01 || (b + 1) * LT_CELL > L[1] + 0.01) { L[0] = a * LT_CELL; L[1] = (b + 1) * LT_CELL; grew = true; }
+  }
+  // the water's mask (where the sea's code works the water), round each lake
+  if (wetA && ambK && calmA) {
+    for (const L of land.lakes) for (let i = Math.max(0, Math.floor(L[0] / DX) - 2); i <= Math.min(N - 1, Math.ceil(L[1] / DX) + 2); i++) {
+      const x = i * DX, lake = onLand(x) && lakeAt(x);
+      wetA[i] = !onLand(x) || lake ? 1 : 0; ambK[i] = lake ? 0.3 : wetA[i];
+      if (lake) calmA[i] = 0.8;
+    }
+    calmRuns = [];
+    for (let i = 0; i < N;) { if (calmA[i] < 0.999) { let j = i; while (j < N && calmA[j] < 0.999) j++; calmRuns.push([i, j]); i = j; } else i++; }
+    wetRuns = [];
+    for (let i = 0; i < N;) { if (wetA[i]) { let j = i; while (j < N && wetA[j]) j++; wetRuns.push([Math.max(0, i - 1), Math.min(N - 1, j)]); i = j; } else i++; }
+  }
+  // the bed's still layers painted again (a lake grown: its life laid out again)
+  if (grew) lakeDeco = null;
+  else if (lakeDeco) for (const D of lakeDeco) { for (let x = D.a; x < D.b; x += 6) D.maxD = Math.max(D.maxD, landTop(x) - WATER_Y); D._bed = null; D._back = null; }
+}
+
+/* ---- the launch pads: each on the ground under its whole width (it tips into a hole dug under one end) ---- */
+const padRest = [null, null];
+function padRestOf(R) {
+  const i = R ? 1 : 0;
+  if (!padRest[i] || padRest[i].cell !== land.cell) { const X = padX(R), g = land.cell ? landTop(X) : LAND_Y; padRest[i] = { x: X, y: g, y0: g, a: 0, _rv: 0, cell: land.cell }; }
+  return padRest[i];
+}
+
+/* ---- a plane down on land: what's left of it (crashes) ---- */
+const crashes = [];
+// a side-view drawing broken across into n pieces along jagged cracks, charred - soot over most of it, the paint
+// showing here and there, the torn ends darkest. Each: its canvas and its middle from the drawing's (pixels)
+function breakArt(src, n) {
+  const memo = src._broken || (src._broken = {});
+  if (memo[n]) return memo[n];
+  const W = src.width, H = src.height, sx = src.getContext('2d').getImageData(0, 0, W, H).data;
+  let x0 = W, x1 = 0; for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) if (sx[(j * W + i) * 4 + 3] > 40) { if (i < x0) x0 = i; if (i > x1) x1 = i; }
+  if (x1 < x0) { x0 = 0; x1 = W - 1; }
+  let sd = W * 7 + H * 3 + n; const r01 = () => (sd = (sd * 9301 + 49297) % 233280) / 233280;
+  const cuts = [-1e9];
+  for (let k = 1; k < n; k++) { const base = x0 + (x1 - x0) * (k / n + (r01() - 0.5) * 0.12), prf = new Float32Array(H); let v = 0; for (let j = 0; j < H; j++) { if (j % 2 === 0) v = clamp(v + (r01() - 0.5) * 3.2, -5, 5); prf[j] = base + v; } cuts.push(prf); }
+  cuts.push(1e9);
+  const at = (q, j) => typeof cuts[q] === 'number' ? cuts[q] : cuts[q][j];
+  const out = [];
+  for (let q = 0; q < n; q++) {
+    const a = q === 0 ? x0 : Math.max(0, Math.floor(Math.min(...cuts[q])) - 1), b = q === n - 1 ? x1 + 1 : Math.min(W, Math.ceil(Math.max(...cuts[q + 1])) + 1);
+    const w = Math.max(1, b - a), c = makeCanvas(w, H), x = c.getContext('2d'), id = x.createImageData(w, H), d = id.data;
+    for (let j = 0; j < H; j++) for (let i = 0; i < w; i++) {
+      const X = a + i, s = (j * W + X) * 4; if (sx[s + 3] < 10) continue;
+      const l = at(q, j), r = at(q + 1, j); if (X < l || X >= r) continue;
+      const near = Math.min(X - l, r - 1 - X), nz = 0.5 + 0.5 * Math.sin(X * 0.37 + j * 0.21) * Math.sin(X * 0.13 - j * 0.29 + q);
+      const f = near < 2 ? 0.92 : clamp(0.25 + 0.6 * nz * nz, 0, 0.85), o = (j * w + i) * 4;   // (soot, blotchy; the torn edge black)
+      d[o] = sx[s] * (1 - f) + (sx[s] * 0.15 + 12) * f; d[o + 1] = sx[s + 1] * (1 - f) + (sx[s + 1] * 0.13 + 9) * f; d[o + 2] = sx[s + 2] * (1 - f) + (sx[s + 2] * 0.12 + 8) * f; d[o + 3] = sx[s + 3];
+    }
+    // (cropped to what's drawn, top and bottom: the sheets' cells are mostly empty)
+    let y0 = H, y1 = -1; for (let j = 0; j < H; j++) for (let i = 0; i < w; i++) if (d[(j * w + i) * 4 + 3] > 10) { if (j < y0) y0 = j; y1 = j; }
+    if (y1 < y0) continue;
+    x.putImageData(id, 0, 0);
+    const cc = makeCanvas(w, y1 - y0 + 1); cc.getContext('2d').drawImage(c, 0, y0, w, y1 - y0 + 1, 0, 0, w, y1 - y0 + 1);
+    out.push({ c: cc, ox: a + w / 2 - W / 2, w });
+  }
+  return (memo[n] = out);
+}
+// charred, whole (a wing): the same soot
+function charArt(src) { if (src._char) return src._char; return (src._char = (breakArt(src, 1)[0] || { c: src }).c); }
+/* A plane down on land at x (the ground's top there gy; or onto a ship's deck): the crater by its size (its wash's size
+   number: the 747 3.5, the orbiter 1.4, the fighter 1, a Cessna 0.8) and how hard it hit; a fireball; and its wreck -
+   the hull broken where it hit (n pieces of its side-view drawing, the front skidded on furthest), its wings torn off
+   and lying beside it, all charred - settled into the crater once it's dug. o: { size, vx, vy, art (the side view, as
+   it faces), k (world units a pixel), face, n, wings: [canvases], deck, at (a wreck that draws itself: only its fire
+   and smoke here), blast: false (the caller made its own fireball) }. The vehicle keeps its 'wreck' state; its .crash
+   points here. */
+function landCrash(x, gy, o) {
+  const size = o.size || 1, sp = Math.hypot(o.vx || 0, o.vy || 0), hard = clamp(0.8 + sp / 700, 0.8, 1.3), face = o.face || ((o.vx || 0) >= 0 ? 1 : -1);
+  const deck = o.deck || null;
+  if (o.stone) o.noCrater = true;                                 // (the harbour's stone: no crater)
+  if (!deck && !o.noCrater) landCarve(x, gy, (6 + 7 * size) * hard);
+  if (o.blast !== false) {
+    sectionBlast(x, gy - 4, 0.6 + 0.35 * size, (o.vx || 0) * 0.3); spawnDebris(x, gy - 6, Math.round(8 + 6 * size), (o.vx || 0) * 0.3);
+    if (!SIM_ONLY) {
+      flashes.push({ x, y: gy - 10, r: 24 + 12 * size, life: 0, max: 0.2 });
+      for (let i = 0; i < (30 + 30 * size) * fwFlames(); i++) { const a = -Math.PI / 2 + rnd(-1.4, 1.4), v = Math.pow(Math.random(), 0.55) * (90 + 40 * size); spawnFlame(x + rnd(-10, 10) * size, gy - rnd(0, 10), Math.cos(a) * v + (o.vx || 0) * 0.2, Math.sin(a) * v * 0.8 - rnd(30, 80), rnd(1.3, 1.6), rnd(4, 7) * Math.sqrt(size), rnd(0.9, 1.3)); }
+      for (let i = 0; i < 8 + 6 * size; i++) spawnSmoke(x + rnd(-16, 16) * size, gy - rnd(10, 40), { dark: 0, r: rnd(6, 10), grow: rnd(4, 7), lift: 46, vx: rnd(-12, 12), vy: rnd(-70, -25), life: rnd(10, 15), alpha: rnd(0.65, 0.85) });
+      if (!deck && !o.noCrater) spikeBurst(x, gy, Math.min(1.4, 0.5 + 0.3 * size), groundAt(x, gy));   // (no earth thrown up off a deck or the harbour's stone)
+    }
+    gridExplosion(x, gy, 40 + 25 * size, 220 + 120 * size);
+  }
+  const W = { x, y: gy, size, t: 0, fire: 22 + 11 * size, deck, at: o.at || null, pieces: [], face };
+  if (o.art) {
+    const B = breakArt(o.art, o.n || 2), K = o.k, spread = 1 + 0.25 * hard;
+    for (const b of B) {
+      const front = b.ox * face > 0, px = x + b.ox * K * spread + (front ? face * rnd(4, 12) * size : 0), h = b.c.height * K;   // (the front skidded on furthest)
+      W.pieces.push({ c: b.c, k: K, x: px, y: gy, dy: h * 0.42, a: rnd(-0.18, 0.18) + (front ? face * rnd(0.08, 0.3) : 0), half: Math.max(4, b.w * K * 0.4), flip: false });
+    }
+    // (a wing: lying flat - the sheets draw them standing, edge on, as they tumble)
+    for (const wg of o.wings || []) if (wg) { const c = charArt(wg), up = c.height > c.width, L = (up ? c.height : c.width) * K, h = (up ? c.width : c.height) * K, side = Math.random() < 0.5 ? -1 : 1; W.pieces.push({ c, k: K, x: x + side * rnd(14, 34) * Math.sqrt(size) - face * rnd(0, 12), y: gy, dy: h * 0.4, a: (up ? Math.PI / 2 : 0) + rnd(-0.15, 0.15), half: Math.max(3, L * 0.35), flip: Math.random() < 0.5 }); }
+  }
+  // settled on what's there now the crater's dug (a ship's top on a deck)
+  for (const p of W.pieces) {
+    const dk = deck && shipTopAt(p.x, gy - 30), ht = o.stone ? harbourTop(p.x, gy - 30) : Infinity;
+    if (dk && dk.c === deck) { p.y = dk.y; p.mode = 'deck'; }
+    else if (ht < Infinity) { p.y = ht; p.mode = 'stone'; }                                   // (on the harbour's stone: there till the pier goes)
+    else if (onLand(p.x) && !lakeAt(p.x)) { p.y = landTop(p.x) + rnd(0.5, 2); p.mode = 'land'; }
+    else { p.y = Math.min(gy, surfaceY(p.x) - 4); p.mode = 'air'; p.vy = 0; }
+  }
+  crashes.push(W);
+  return W;
+}
+// a wreck's fire and smoke (each frame): a big fire over the hull and a tall column of black smoke leaning with the
+// wind; after the fire, smoke as long again, thinning; then a smoulder. Its pieces settle into the ground, ride a ship
+// they lie on (and go down with her), splash in and sink
+function stepCrash(W, dt) {
+  W.t += dt;
+  for (const p of W.pieces) stepCrashPiece(W, p, dt);
+  // where it burns: over its pieces still on land or a deck, or the wreck that draws itself
+  const P = W.at ? null : W.pieces.filter(p => p.mode === 'land' || p.mode === 'deck' || p.mode === 'stone');
+  if (W.at) { W.x = W.at.x; W.y = W.at.y; const o = W.at; if (o.removed || o.wet || o.state === 'sink' || o.state === 'gone' || o.state === 'fall' || !(dryLand(W.x) || o.deck || o.onDeck)) W.out = true; }
+  else if (P.length) { W.x = P[0].x; W.y = P[0].y; } else W.out = true;     // (all in the water: no fire)
+  if (W.out || SIM_ONLY || W.t > W.fire * 2.6) return;
+  // (user Oct 27, 13:14, with a picture of a real airliner burning - gen/open/ref/plane_crash_fire_smoke_ref_oct27.jpg:
+  // "there should be fire and a lot of smoke") flames all along the wreck and the ground under it, and over it a huge,
+  // dense, billowing column of black smoke - much bigger than the plane - leaning off with the wind
+  const S = Math.sqrt(W.size), u = W.t / W.fire, burning = u < 1;
+  let xa = W.x - 8, xb = W.x + 8, top = W.y;
+  if (P && P.length) { xa = 1e9; xb = -1e9; for (const p of P) { xa = Math.min(xa, p.x - p.half); xb = Math.max(xb, p.x + p.half); top = Math.min(top, p.y - p.dy * 1.6); } }
+  W.xa = xa; W.xb = xb; W.top = top;                          // (where it burns: the water cannon's target - fireSpots)
+  const along = () => { const fx = rnd(xa - 4, xb + 4); return [fx, (onLand(fx) && !lakeAt(fx) && !W.deck ? landTop(fx) : W.y) - 1]; };
+  const nOf = rate => Math.floor(rate * dt + Math.random());   // (how many this frame, at that many a second)
+  if (burning) {
+    const k = 1 - 0.6 * smoothstep(0.65, 1, u);
+    // the fire: tongues of flame up out of the wreck, a carpet of it burning on the ground along it
+    // (out of the wreck's top - the hull still seen through the fire - and low along the ground beside it)
+    for (let i = nOf((18 + 14 * W.size) * k * fwFlames()); i > 0; i--) { const [fx, gy] = along(), hi = Math.random() < 0.6; spawnFlame(fx, hi ? Math.min(gy, top + rnd(-2, 4)) : gy - rnd(0, 2), rnd(-12, 12), -(hi ? rnd(45, 110) : rnd(10, 30)) * S, rnd(1.2, 1.6), (hi ? rnd(4, 7.5) : rnd(2, 4)) * S * k, rnd(0.9, 1.4)); }
+    for (let i = nOf(6 * W.size * k); i > 0; i--) { const [fx, gy] = along(); spawnEmber(fx, gy - rnd(4, 20) * S, (E.windU || 0) * 0.3, 1); }
+  }
+  // the smoke: thick and black over the fire, rolling up out of it; then thinner and greyer as it dies down; then a wisp
+  const rate = burning ? 12 + 7 * W.size : u < 2 ? (6 + 4 * W.size) * (1 - 0.75 * (u - 1)) : 1;
+  for (let i = nOf(rate); i > 0; i--) {
+    const [fx] = along(), fy = top - rnd(2, 14) * S;
+    spawnSmoke(fx, fy, { dark: burning ? 0 : u < 2 ? 0.2 + 0.35 * (u - 1) : 0.6, r: rnd(5, 9) * S, grow: rnd(5, 8), rmax: 34 + 16 * W.size, lift: 50 + 8 * W.size, vx: rnd(-8, 8), vy: -rnd(45, 85) * (burning ? 1 : 0.6), life: rnd(13, 19) * (1 + 0.12 * W.size), alpha: burning ? 0.95 : u < 2 ? 0.75 : 0.45, rise: true });
+  }
+}
+// one piece: on land it settles into a hole dug under it; on a deck it rides her; in the air it falls; in water it sinks
+function stepCrashPiece(W, p, dt) {
+  if (p.mode === 'land') {
+    if ((p._rv || landWoke(p.x, p.half)) && restSettle(p, p.x, p.y, p.half, dt)) { p.y = RS.foot; restLanded(p.x, p.y, RS.hit, 0.5 * W.size); }
+    return;
+  }
+  if (p.mode === 'stone') { const ht = harbourTop(p.x, p.y - 8); if (ht < Infinity) { p.y = ht; return; } p.mode = 'air'; p.vy = 0; }   // (the pier gone from under it: it falls in - user Oct 27)
+  if (p.mode === 'deck') {
+    const c = W.deck; p.x += (c && c.dx) || 0;
+    const d = c && shipTopAt(p.x, p.y - 12);
+    if (c && c.state === 'sail' && d && d.c === c && d.y < p.y + 8) { p.y = d.y; return; }
+    p.mode = 'air'; p.vy = 0;
+  }
+  if (p.mode === 'air') {
+    p.vy = Math.min(500, (p.vy || 0) + 430 * dt); p.y += p.vy * dt;
+    if (onLand(p.x) && !lakeAt(p.x)) { const g = landTop(p.x); if (p.y >= g) { p.y = g; p.mode = 'land'; restLanded(p.x, g, p.vy, 0.5); } return; }
+    const sy = onLand(p.x) ? WATER_Y : surfaceY(p.x);
+    if (p.y >= sy) { p.mode = 'wet'; ditchFx(p.x, 0, 0.7); }
+    return;
+  }
+  if (p.mode === 'wet') {
+    const bed = onLand(p.x) ? landTop(p.x) : seabedY(p.x);
+    p.y = Math.min(bed, p.y + 24 * dt);
+    if (!SIM_ONLY && Math.random() < dt * 5) addBubble(p.x + rnd(-6, 6), p.y - 4, rnd(-4, 4), -rnd(15, 30), rnd(0.8, 1.6));
+    if (p.y >= bed - 0.5) { p.mode = 'bed'; if (!onLand(p.x)) kickDust(p.x, 14, 0.5); }
+  }
+}
+// drawn on the ground with what lies on it (wet true: those in a lake's water; 'sea': those over the sea - on a ship's
+// deck, sinking, on the bottom - with the sea's things), charred; by night its fire lights the ground round it
+function drawCrashes(x0, x1, wet) {
+  for (const W of crashes) {
+    for (const p of W.pieces) {
+      if (p.x < x0 - 80 || p.x > x1 + 80) continue;
+      if (wet === 'sea' ? onLand(p.x) : !onLand(p.x) || (p.mode === 'wet' || p.mode === 'bed') !== !!wet) continue;
+      const s = p.k * SV, sp = scaled(p.c, s, true);
+      C.save(); C.translate(Math.round(PX(p.x)), Math.round(PY(p.y - p.dy))); C.rotate(p.a); if (p.flip) C.scale(-1, 1);
+      const X = -Math.round(sp.width / 2), Y = -Math.round(sp.height / 2);
+      C.drawImage(sp, X, Y); civLitLook(p.c, s, X, Y, PX(p.x));
+      C.restore();
+    }
+    if ((wet === 'sea') === !onLand(W.x) && wet !== true && !W.out && W.t < W.fire && W.x > x0 - 200 && W.x < x1 + 200) {
+      const u = W.t / W.fire, k = (1 - 0.6 * smoothstep(0.6, 1, u)) * (0.85 + 0.15 * Math.sin(time * 9 + W.x));
+      airLamps[viewIdx].push(PX(W.x), PY(W.y - 6), 0.7 * k, Math.round(Math.max(14, (40 + 30 * W.size) * SV)));   // (its fire lighting the ground round it after dark)
+    }
+  }
+}
+
+/* ---- the shuttle stack blown up on its pad (user Oct 27, 14:16: "Blow up. Major explosion due to the fuel." - with a
+   picture of a real rocket going up on its pad at night: gen/open/ref/shuttle_pad_explosion_ref_oct27.png). Its pad
+   tipped into a crater, shot, or lost in the first seconds of its launch: a huge fuel explosion - a bright fireball that
+   rolls and rises for seconds, a flash lighting everything round it, night or day, a big crater, burning pieces of the
+   stack (the tank, the boosters, the orbiter) thrown out and falling round it, heavy dark smoke after. The pad stays a
+   wreck for the round and no other stack comes: one shuttle a game. What's near is hurt, as by a shell's blast, much
+   further out ---- */
+const perSec = (rate, dt) => Math.floor(rate * dt + Math.random());   // (how many this frame, at that many a second)
+const PAD_BLAST_REACH = 320;
+function padBlast(v) {
+  const R = v.R, P = padRestOf(R), S = padSpot(R), gx = S.x, gy = P.y, [cx, cy] = stackPoint(v, 0.5, 0.45);
+  P.wrecked = true; P.boom = { t: 0, x: gx, y: gy };
+  for (const u of [0.1, 0.3, 0.5, 0.7, 0.9]) { const [px, py] = stackPoint(v, 0.5, u); sectionBlast(px + rnd(-10, 10), py, 3, 0); }
+  sfxExplosion(gx, 3); shakeAt(30, gx);
+  landCarve(gx, gy, 70);                                          // (the pad drops and tips into it - stepLandRest)
+  P.a += rnd(-0.12, 0.12);
+  gridExplosion(gx, gy - 60, 260, 1400);
+  if (!SIM_ONLY) {
+    flashes.push({ x: gx, y: gy - 90, r: 320, life: 0, max: 0.5 });
+    for (let i = 0; i < 260 * fwFlames(); i++) { const a = -Math.PI / 2 + rnd(-1.6, 1.6), sp = Math.pow(Math.random(), 0.5) * 320; spawnFlame(cx + rnd(-20, 20), cy + rnd(-60, 60), Math.cos(a) * sp, Math.sin(a) * sp * 0.8 - rnd(40, 120), rnd(1.5, 1.9), rnd(8, 18), rnd(0.6, 1)); }
+    spawnSparks(gx, gy - 60, 160, 720);                             // (the streaks of burning debris flying out every way)
+    const k0 = debris.length; spawnDebris(gx, gy - 40, 60, 0); for (let k = k0; k < debris.length; k++) { debris[k].vx *= 2.6; debris[k].vy *= 2.2; }
+    for (let i = 0; i < 70; i++) spawnEmber(gx + rnd(-60, 60), gy - rnd(20, 160), rnd(-120, 120), 2.4);
+    spikeBurst(gx, gy, 2, groundAt(gx, gy));
+  }
+  // the stack's pieces: the tank and the boosters thrown out, burning, to crash round it; the orbiter wrecked, falling
+  const fling = (kind, d) => spaceJunk.push({ kind, x: cx + d * 12, y: cy, vx: d * rnd(80, 220), vy: -rnd(180, 340), a: v.a, w: rnd(0.8, 2.2) * (d || 1), state: 'fall', dr: v.dr, life: 1e9 });
+  if (v.et) fling('et', rnd(-0.5, 0.5));
+  if (v.srb) { fling('srb', -1); fling('srb', 1); }
+  // what's near is hurt - the nearest worst
+  for (let p = 0; p < 2; p++) {
+    const t = tanks[p], h = helis[p];
+    if (t && t.state === 'alive') { const d = Math.hypot(t.x - gx, t.y - gy); if (d < PAD_BLAST_REACH) tankHurt(t, d < PAD_BLAST_REACH * 0.45 ? TANK_HP : 1.5, gx, gy - 40); }
+    if (h && (h.state === 'fly' || h.state === 'landed')) { const d = Math.hypot(h.x - gx, h.y - gy); if (d < PAD_BLAST_REACH) heliHurt(h, d < PAD_BLAST_REACH * 0.6 ? HELI_HP : 1, gx, gy - 40); }
+  }
+  for (const h of civHelis) if ((h.state === 'fly' || h.state === 'landed' || h.state === 'parked') && Math.hypot(h.x - gx, h.y - gy) < PAD_BLAST_REACH) civHeliHit(h, CH_HP, h.x, h.y);
+  for (const f of traffic) if ((f.state === 'fly' || f.state === 'free') && Math.hypot(f.x - gx, f.y - gy) < PAD_BLAST_REACH) trafficDown(f);
+  guysNear(gx, gy, PAD_BLAST_REACH * 0.5);
+  v.et = false; v.srb = false; v.hp = 0; v.smokeT = 1e9;
+  Object.assign(v, { state: 'fall', x: cx, y: cy, vx: rnd(-150, 150), vy: -rnd(160, 260), spin: rnd(-2, 2), pitch: 0, facing: v.dr });
+  civFollowDown(v);                                              // (yours: still yours to watch)
+}
+// the fireball rolling and rising for seconds over the pad, a ground fire, then heavy dark smoke
+function stepPadBoom(P, dt) {
+  const B = P.boom; if (!B || B.t > 32) return;
+  B.t += dt; const t = B.t;
+  if (SIM_ONLY) return;
+  const rise = 40 + 55 * Math.min(t, 5), w = 40 + 25 * t;
+  if (t < 4.5) for (let i = perSec(150 * (1 - t / 4.5) * fwFlames(), dt); i > 0; i--) spawnFlame(B.x + rnd(-1, 1) * w, B.y - rise + rnd(-1, 1) * (30 + 18 * t), rnd(-30, 30), -rnd(30, 90), rnd(1.4, 1.8), rnd(9, 18) * (1 - 0.4 * t / 4.5), rnd(0.6, 1));
+  if (t < 20) for (let i = perSec(30 * (1 - t / 20) * fwFlames(), dt); i > 0; i--) { const x = B.x + rnd(-110, 110); spawnFlame(x, (dryLand(x) ? landTop(x) : B.y) - 1, rnd(-10, 10), -rnd(20, 60), rnd(1.2, 1.5), rnd(3, 7), rnd(1, 1.5)); }
+  if (t > 0.5) for (let i = perSec(28 * (1 - t / 32), dt); i > 0; i--) spawnSmoke(B.x + rnd(-1, 1) * w * 0.8, B.y - rise * 0.8 - rnd(0, 40), { dark: t < 8 ? 0 : 0.2, r: rnd(10, 16), grow: rnd(6, 9), rmax: 90, lift: 70, vx: rnd(-14, 14), vy: -rnd(40, 90), life: rnd(18, 26), alpha: 0.9, rise: true });
+}
+
 /* ---- seaplanes (OPEN WORLD, user Oct 25 late): "We'll also have a couple of hydroplanes on each side, let's say two,
    so they take off and land near the docks of each country. And landing is almost automatic... the hydroplane is the
    same, it just smoothly lands on the water." "And the hydroplane ...3 seconds" of take-off run.
@@ -25050,18 +25585,21 @@ function stepSeaplanes(dt) {
   if (!LAND) return;
   for (const s of seaplanes) {
     const p = s.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === s;
-    if (s.carried != null) continue;                               // (on a helicopter's magnet)
-    if (s.state === 'wreck' || s.state === 'sunk') continue;        // (its wreck stays: no other comes in its place - user Oct 27: "The rest, when destroyed, is never spawned again")
+    // (on a helicopter's magnet: being carried changes where it is, nothing else - it can still be hit, user Oct 27 [17])
+    if (s.carried != null) { spHits(s); if (s.hp <= 0) spDown(s); continue; }
+    if (s.state === 'wreck' || s.state === 'sunk') continue;        // (its wreck stays: no other comes in its place - user Oct 27: "The rest, when destroyed, is never spawned again"; one down on land, its wreck is in crashes - 50-land-rest)
     if (s.state === 'gone') { s.wait -= dt; if (s.wait <= 0) Object.assign(s, { state: 'moored', x: s.home, y: WATER_Y + SP_DRAFT, dir: s.out, spd: 0, run: 0, pitch: 0, ang: 0, hp: 2, wait: rnd(20, 50), ai: null }); continue; }
     if (s.state === 'fall') { s.vy += 220 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.ang += s.spin * dt; if (!SIM_ONLY && Math.random() < dt * 25) spawnSmoke(s.x, s.y, { dark: 0, r: rnd(3, 5), grow: 5, lift: 18, vx: rnd(-8, 8), life: rnd(4, 6), alpha: 0.6 });
-      const ht = dryLand(s.x) ? Infinity : harbourTop(s.x, s.y - 10);   // (the harbour's deck: ground - user Oct 27)
-      if (ht < Infinity ? s.y >= ht : dryLand(s.x) ? s.y >= landTop(s.x) : s.y >= surfaceY(s.x)) { if (ht < Infinity || dryLand(s.x)) { const g = Math.min(ht, landTop(s.x)); sectionBlast(s.x, g - 4, 0.9, s.vx * 0.3); spawnDebris(s.x, g - 6, 10, s.vx * 0.3); if (ht === Infinity) landCarve(s.x, g, 8); s.state = 'wreck'; s.y = g - 5; s.ang = 0.25 * Math.sign(s.spin || 1); s.vx = s.vy = 0; } else { const A = seaplaneArt(s.col); if (A.wings && A.wings[1]) chunks.push({ img: A.wings[1], k: CESSNA_K, x: s.x, y: s.y + 4, vx: s.vx * 0.6 + rnd(-30, 30), vy: -rnd(20, 60), a: rnd(0, 6), w: rnd(-6, 6), delay: 0, floor: WATER_Y, water: true, kind: 'wing', hh: 5, hw: 5 });   // (a wing splits off - user Oct 26, every plane)
+      // (the harbour's deck is ground, a ship's top too - user Oct 27, [19]; on land, the stone or a deck what's left of it
+      // stays, burning - landCrash; into the water it sinks)
+      const ht = dryLand(s.x) ? Infinity : harbourTop(s.x, s.y - 10), dk = !onLand(s.x) ? shipTopAt(s.x, s.y - 30) : null, onShip = !!dk && dk.y < surfaceY(s.x) && dk.y < ht;
+      const ground = onShip ? dk.y : ht < Infinity ? ht : dryLand(s.x) ? landTop(s.x) : surfaceY(s.x);
+      if (s.y >= ground) { if (onShip || ht < Infinity || dryLand(s.x)) { const face = s.vx >= 0 ? 1 : -1, A = seaplaneArt(s.col);
+          s.crash = landCrash(s.x, ground, { size: 0.8, vx: s.vx, vy: s.vy, art: A.plane[2][0][face], k: CESSNA_K, face, n: 2, wings: A.wings ? [A.wings[0]] : [], deck: onShip ? dk.c : null, stone: !onShip && ht < Infinity }); s.state = 'wreck'; s.y = ground; } else { const A = seaplaneArt(s.col); if (A.wings && A.wings[1]) chunks.push({ img: A.wings[1], k: CESSNA_K, x: s.x, y: s.y + 4, vx: s.vx * 0.6 + rnd(-30, 30), vy: -rnd(20, 60), a: rnd(0, 6), w: rnd(-6, 6), delay: 0, floor: WATER_Y, water: true, kind: 'wing', hh: 5, hw: 5, land: LAND });   // (a wing splits off - user Oct 26, every plane)
           ditchFx(s.x, s.vx, 1.2, 49, s.vy); s.state = 'sink'; s.vy = 30; } }
       continue; }
     if (s.state === 'sink') { s.y += 28 * dt; s.ang *= 1 - dt; if (Math.random() < dt * 8) addBubble(s.x + rnd(-8, 8), s.y, rnd(-5, 5), -rnd(15, 30), rnd(0.8, 1.6)); if (s.y > seabedY(s.x) - 6) { s.y = seabedY(s.x) - 6; s.state = 'sunk'; kickDust(s.x, 16, 0.5); } continue; }
-    // hit: a round or two brings it down
-    for (const b of bullets) if (!b._sp && Math.abs(b.x - s.x) < 24 && Math.abs(b.y - s.y + 6) < 10) { b._sp = true; s.hp -= 1; spawnSparks(b.x, b.y, 4, 90); }
-    for (let k = shells.length - 1; k >= 0; k--) { const q = shells[k]; if (!q.under && Math.abs(q.x - s.x) < 26 && Math.abs(q.y - s.y + 6) < 12) { shells.splice(k, 1); s.hp = 0; sectionBlast(q.x, q.y, 0.6, 0); } }
+    spHits(s);
     if (s.hp <= 0) { spDown(s); continue; }
     // what it's told: yours from the controls; left to itself, its own trip
     let lever = 0, stick = 0;
@@ -25197,7 +25735,13 @@ function spFoam(s, dt, k, burst) {
     if (Math.random() < 0.5) spawnFoam(fx + back * rnd(6, 30), rnd(1.8, 3.2));
   }
 }
+// hit: a round or two brings it down
+function spHits(s) {
+  for (const b of bullets) if (!b._sp && Math.abs(b.x - s.x) < 24 && Math.abs(b.y - s.y + 6) < 10) { b._sp = true; s.hp -= 1; spawnSparks(b.x, b.y, 4, 90); }
+  for (let k = shells.length - 1; k >= 0; k--) { const q = shells[k]; if (!q.under && Math.abs(q.x - s.x) < 26 && Math.abs(q.y - s.y + 6) < 12) { shells.splice(k, 1); s.hp = 0; sectionBlast(q.x, q.y, 0.6, 0); } }
+}
 function spDown(s, soft) {
+  if (s.state === 'fall' || s.state === 'sink' || s.state === 'sunk' || s.state === 'wreck' || s.state === 'gone') return;   // (already down: never twice)
   if (soft) { s.state = 'gone'; s.wait = 40; sfxImpact(s.x); }
   else { s.state = 'fall'; s.vx = s.vx || s.dir * s.spd; s.vy = Math.max(10, s.vy || 0); s.spin = s.dir * rnd(0.5, 1.1); spawnSparks(s.x, s.y, 16, 200); sfxImpact(s.x); }
   civFollowDown(s);
@@ -25206,7 +25750,7 @@ function drawSeaplanes(x0, x1, mode) {
   if (!LAND || !seaplanes.length) return;
   if (!img.cessna2) return;
   for (const s of seaplanes) {
-    if (s.state === 'gone' || s.x < x0 - 60 || s.x > x1 + 60) continue;
+    if (s.state === 'gone' || s.state === 'wreck' || s.x < x0 - 60 || s.x > x1 + 60) continue;   // (down on land: drawn with the ground - drawCrashes)
     const wet = s.state === 'sink' || s.state === 'sunk';
     if ((mode === 'air' && wet) || (mode === 'under' && !wet)) continue;
     // the frame: as the Cessna's - turning, the turn frames; the damage row by its hits; falling, the spin
@@ -25309,11 +25853,13 @@ function buildSpaceArt() {
   spaceArt = { orbSheet, satParts, tank, srb, sat, satR: flipCanvas(sat), orb, orbR: flipCanvas(orb), et, stack, stackR: flipCanvas(stack), noOrb, noOrbR: flipCanvas(noOrb), pad, padR: flipCanvas(pad), iss, issR: flipCanvas(iss), lamps, nose, SW: W, SH: H, etW: et.width };
 }
 // the stack's foot on its pad (world): where it stands, and the pad's own top left
+// (user Oct 27: the pad rests on the ground under its whole width and tips or drops into a hole dug under it - padRestOf,
+// 50-land-rest; a: its tilt, about its foot's middle; L, T: its top left as if it stood level)
 function padSpot(R) {
-  const X = padX(R), gy = landTop(X), A = spaceArt || { pad: { width: SPI.pad[2], height: SPI.pad[3] } };
+  const P = padRestOf(R), X = P.x, gy = P.y, a = P.a || 0, A = spaceArt || { pad: { width: SPI.pad[2], height: SPI.pad[3] } };
   const L = X - A.pad.width * PAD_K / 2, T = gy - A.pad.height * PAD_K;
-  const sx = R ? A.pad.width - SPI.padStack[0] : SPI.padStack[0];
-  return { L, T, x: L + sx * PAD_K, y: T + SPI.padStack[1] * PAD_K, gy };
+  const sx = R ? A.pad.width - SPI.padStack[0] : SPI.padStack[0], ox = L + sx * PAD_K - X, oy = T + SPI.padStack[1] * PAD_K - gy, c = Math.cos(a), sn = Math.sin(a);
+  return { L, T, x: X + ox * c - oy * sn, y: gy + ox * sn + oy * c, gy, a, X, drop: gy - P.y0 };
 }
 function buildSpace() {
   shuttles.length = 0; spaceJunk.length = 0; orbiters.length = 0; rocketTrail.length = 0; satPieces.length = 0;
@@ -25368,7 +25914,12 @@ function stepShuttle(v, dt) {
   const p = v.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === v;
   const stick = mine ? civStick(p) : 0;
   shuttleHits(v);
-  if (v.state === 'pad') { const s = padSpot(v.R); v.x = s.x; v.y = s.y; return; }
+  if (v.state === 'pad') {
+    const s = padSpot(v.R); v.x = s.x; v.y = s.y; v.a = s.a;
+    // (the pad tipped or dropped into a crater: the stack on it goes over - and it's full of fuel - user Oct 27)
+    if (Math.abs(s.a) > 0.2 || s.drop > 40) shuttleBlow(v, true);
+    return;
+  }
   if (v.state === 'count') {
     // the main engines first, steam boiling out under the pad, the stack shaking on its bolts
     v.t += dt;
@@ -25421,7 +25972,7 @@ function stepShuttle(v, dt) {
     if (!onApron(v.x + v.facing * 40)) v.spd = Math.max(0, v.spd - 200 * dt);   // (the runway's end: it stops short)
     return;
   }
-  if (v.state === 'landed') { v.chute = Math.max(0, v.chute - dt * 0.5); if (!mine) { v.wait -= dt; if (v.wait <= 0) { v.state = 'gone'; v.wait = 40; } } return; }
+  if (v.state === 'landed') { v.chute = Math.max(0, v.chute - dt * 0.5); if (!mine && v.carried == null) { v.wait -= dt; if (v.wait <= 0) { v.state = 'gone'; v.wait = 40; } } return; }   // (on a magnet its clock stops: being carried changes where it is, nothing else - user Oct 27, [17])
   if (v.state === 'fall') {
     v.vy += 120 * dt; v.x += v.vx * dt; v.y += v.vy * dt; v.pitch += v.spin * dt;
     if (!SIM_ONLY && Math.random() < dt * 30 && v.y > ATMO_TOP) spawnSmoke(v.x, v.y, { dark: 0, r: rnd(4, 7), grow: 6, lift: 18, vx: rnd(-10, 10), life: rnd(5, 8), alpha: 0.6 });
@@ -25582,7 +26133,12 @@ const hitsGround = (x, y) => dryLand(x) ? y >= landTop(x) : y >= surfaceY(x);
 function groundCrash(v, pw) {
   const wet = !dryLand(v.x);
   if (wet) { ditchFx(v.x, v.vx, 2.2, 75, v.vy); v.state = 'sink'; v.vy = 30; }
-  else { const g = landTop(v.x); sectionBlast(v.x, g - 4, pw, (v.vx || 0) * 0.3); spawnDebris(v.x, g - 6, 24, (v.vx || 0) * 0.3); landCarve(v.x, g, 20); v.state = 'wreck'; v.y = g - 8; v.burn = 30; v.wait = 120; sfxExplosion(v.x, 1.5); }
+  else {
+    // (user Oct 27: what's left of it stays on land - broken in two, burning, in a crater by its size - landCrash)
+    const g = landTop(v.x), A = spaceArt, face = v.facing || v.dr || 1, art = A && A.orbSheet ? A.orbSheet.plane[2][0][face] : A ? (face > 0 ? A.orbR : A.orb) : null;
+    v.crash = landCrash(v.x, g, { size: 1.4, vx: v.vx, vy: v.vy, art, k: A && A.orbSheet ? SHUTTLEI.k : STACK_K, face, n: 2 });
+    sfxExplosion(v.x, 1.5); v.state = 'wreck'; v.y = g - 8; v.burn = 0; v.wait = 120;
+  }
   civFollowDown(v);
 }
 // hit by the stack's or orbiter's weapons: a round barely, a shell or a missile more; with none left it blows
@@ -25599,6 +26155,8 @@ function shuttleHits(v) {
   if (v.hp <= 0) shuttleBlow(v);
 }
 function shuttleBlow(v, all) {
+  // (on its pad, or in the first seconds of its launch: the whole stack's fuel goes up - user Oct 27, 14:16 - padBlast)
+  if (LAND && (v.state === 'pad' || v.state === 'count' || (v.state === 'climb' && v.t < 4))) { padBlast(v); return; }
   const [cx, cy] = v.state === 'climb' || v.state === 'pad' || v.state === 'count' ? stackPoint(v, 0.5, 0.5) : [v.x, v.y];
   sectionBlast(cx, cy, 2.2, v.vx * 0.3); spawnDebris(cx, cy, 30, v.vx * 0.3); sfxExplosion(cx, 1.6);
   if (all) {
@@ -25778,12 +26336,21 @@ function drawPads(x0, x1) {
   for (const R of [false, true]) {
     const s = padSpot(R), A = spaceArt, w = A.pad.width * PAD_K;
     if (s.L > x1 + 40 || s.L + w < x0 - 40) continue;
-    const I = scaled(R ? A.padR : A.pad, PAD_K * SV, true);
-    C.drawImage(I, Math.round(PX(s.L)), Math.round(PY(s.T)));
-    civLitLook(R ? A.padR : A.pad, PAD_K * SV, Math.round(PX(s.L)), Math.round(PY(s.T)), PX(s.L + w / 2), 0);
+    const I = scaled(R ? A.padR : A.pad, PAD_K * SV, true), c = Math.cos(s.a), sn = Math.sin(s.a);
+    // (turned about its foot's middle with the ground under it)
+    C.save(); C.translate(Math.round(PX(s.X)), Math.round(PY(s.gy))); if (s.a) C.rotate(s.a);
+    const LX = Math.round((s.L - s.X) * SV), TY = Math.round((s.T - s.gy) * SV);
+    C.drawImage(I, LX, TY);
+    civLitLook(R ? A.padR : A.pad, PAD_K * SV, LX, TY, PX(s.L + w / 2), 0);
+    const PR = padRestOf(R);
+    if (PR.wrecked) { C.globalAlpha = 0.72; C.drawImage(scaled(darkArt(R ? A.padR : A.pad), PAD_K * SV, true), LX, TY); C.globalAlpha = 1; }   // (blown up with its stack: charred, for the round)
+    C.restore();
+    // (the fuel's fireball lighting everything round it, night or day - user Oct 27, 14:16)
+    if (PR.boom && PR.boom.t < 7) { const k = Math.pow(1 - PR.boom.t / 7, 1.5), bx = PX(PR.boom.x), by = PY(PR.boom.y - 60 - 40 * Math.min(PR.boom.t, 5)); brightLights[viewIdx].push(bx + VSX + SHX, by + SHY, k * 1.4, Math.round(Math.max(160, 700 * SV))); airLamps[viewIdx].push(bx, by, 0.9 * k, Math.round(Math.max(40, 420 * SV))); }
+    if (PR.wrecked) continue;
     // (user Oct 26: "The night lights on the rocket station should not have this bloom and it's way too many. They should
     // also turn off during the day") one lamp in three, little lit points, only after dark
-    if (night > 0.35) A.lamps.forEach(([lx, ly], k) => { if (k % 3 === 0) airLamps[viewIdx].push(PX(s.L + (R ? A.pad.width - lx : lx) * PAD_K), PY(s.T + ly * PAD_K), (night - 0.35) / 0.65 * (0.75 + 0.25 * Math.sin(time * 1.3 + lx)), 4); });
+    if (night > 0.35) A.lamps.forEach(([lx, ly], k) => { if (k % 3 === 0) { const ox = s.L + (R ? A.pad.width - lx : lx) * PAD_K - s.X, oy = s.T + ly * PAD_K - s.gy; airLamps[viewIdx].push(PX(s.X + ox * c - oy * sn), PY(s.gy + ox * sn + oy * c), (night - 0.35) / 0.65 * (0.75 + 0.25 * Math.sin(time * 1.3 + lx)), 4); } });
   }
 }
 // the smoke column: soft round puffs, grown and thinned with age, lit by the hour (the world's tint does the rest)
@@ -25844,6 +26411,7 @@ function drawSpace(x0, x1, pass) {
   for (const v of shuttles) {
     if (v.state === 'gone' || v.state === 'bottom') continue;
     if (v.x < x0 - 400 || v.x > x1 + 400) continue;
+    if (v.crash) continue;                                          // (its wreck on land: drawn with the ground - drawCrashes)
     if (v.state === 'pad' || v.state === 'count' || v.state === 'climb') drawStack(v);
     else drawOrbiter(v);
   }
@@ -26342,6 +26910,7 @@ function ltBlob(x, y, rad, m, keep) {
 function ltDirty(c0, c1) {
   land.ver = (land.ver || 0) + 1;                              // (the ground changed: each column's top is found again when asked)
   for (let k = Math.max(0, Math.floor(c0 / LT_CHUNK)); k <= Math.min(land.dirty.length - 1, Math.floor(c1 / LT_CHUNK)); k++) land.dirty[k] = 1;
+  landChanged(c0 * LT_CELL, (c1 + 1) * LT_CELL);              // (what rests there looks again at what's under it - 50-land-rest)
 }
 /* A crater: everything but rock inside the radius is blown out; round it the ground is scorched; the dirt thrown
    up flies off as clods; any sand nearby wakes up and slides. Returns how many cells went. */
@@ -26350,6 +26919,7 @@ function landCarve(x, y, rad) {
   const c0 = ltCol(x - rad - 4), c1 = ltCol(x + rad + 4), r0 = ltRow(y - rad - 4), r1 = ltRow(y + rad + 4);
   let n = 0;
   const kinds = [0, 0, 0, 0, 0];
+  stonesCrater(x, y, rad);                                     // (the stones it reaches: taken whole or knocked loose, never sliced - 50-land-rest)
   for (let c = Math.max(0, c0); c <= Math.min(land.cols - 1, c1); c++) for (let r = Math.max(0, r0); r <= Math.min(LT_ROWS - 1, r1); r++) {
     const dx = (c + 0.5) * LT_CELL - x, dy = LT_Y0 + (r + 0.5) * LT_CELL - y, d = Math.sqrt(dx * dx + dy * dy);
     const i = ltIdx(c, r), m = land.cell[i];
@@ -26362,6 +26932,7 @@ function landCarve(x, y, rad) {
     if (d < edge + 6) land.scorch[i] = Math.min(255, land.scorch[i] + Math.round(170 * (1 - (d - edge) / 6)));
   }
   if (!n && !SIM_ONLY) return 0;
+  stonesUndercut(x, y, rad);                                   // (a grey boulder left with nothing under it drops whole)
   ltDirty(c0, c1);
   landWakeSand(c0 - 2, c1 + 2);
   landTuftBlast(x, y, rad + 8);
@@ -27417,7 +27988,7 @@ function stepTraffic(dt) {
     if (SHEET_PLANES[f.kind] && f.smokeT > 0 && (f.state === 'fly' || f.state === 'free')) { if (f.state === 'fly') f.facing = f.dir || 1; planeSmoke(f, dt); }   // (hit: white smoke, then black)
     if (f.smk) cessnaSmokeStep(f, dt);                               // (its coloured smoke, user Oct 27)
     if (f.state === 'free') { stepCivAir(f, dt); if (f.state === 'free') { trafficHits(f); if (!f.ground) planeWash(f, dt, f.kind === 'jet' ? 3.5 : 0.8); } continue; }   // (OPEN WORLD: one you've taken - see 50-land-civdrive)
-    if (f.state === 'wreck') { if (f.onDeck && harbourTop(f.x, f.y - 6) === Infinity) { f.onDeck = false; f.state = 'sink'; f.vy = 20; ditchFx(f.x, 0, f.kind === 'jet' ? 2 : 1.2, f.kind === 'jet' ? 150 : 49, 60); } continue; }   // (its wreck on the pier, the pier gone: into the sea - user Oct 27)
+    if (f.state === 'wreck') { if (f.onDeck && !f.crash && harbourTop(f.x, f.y - 6) === Infinity) { f.onDeck = false; f.state = 'sink'; f.vy = 20; ditchFx(f.x, 0, f.kind === 'jet' ? 2 : 1.2, f.kind === 'jet' ? 150 : 49, 60); } continue; }   // (its wreck on the pier, the pier gone: into the sea - user Oct 27)
     if (f.state === 'sink') {
       // (user Oct 25 late: "if the balloon falls in the water, it sinks. The same with the 747") down through the water to the bottom
       if (f.split) { f.bend = Math.min(0.3, (f.bend || 0) + dt * 0.12); if (!SIM_ONLY && Math.random() < dt * 25) addBubble(f.x + rnd(-8, 8), f.y + rnd(-4, 8), rnd(-8, 8), -rnd(25, 55), rnd(1, 2.6)); }   // (broken in two: the halves folding apart, bubbles pouring out of the break)
@@ -27430,13 +28001,14 @@ function stepTraffic(dt) {
       f.vy += 260 * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.ang += f.spin * dt;
       if (SHEET_PLANES[f.kind]) sheetFall(f, dt);
       if (!SIM_ONLY && Math.random() < dt * 30) spawnSmoke(f.x, f.y, { dark: 0, r: rnd(3, 6), grow: 5, lift: 20, vx: rnd(-10, 10), life: rnd(4, 7), alpha: 0.6 });
-      // (user Oct 27: the harbour's deck is ground - a plane crashes on it as on land, without a crater in the stone)
-      const ht = onLand(f.x) ? Infinity : harbourTop(f.x, f.y - 10), sea = ht === Infinity && (!onLand(f.x) || lakeAt(f.x)), ground = ht < Infinity ? ht : sea ? surfaceY(f.x) : landTop(f.x);
+      // (user Oct 27: the harbour's deck is ground - a plane crashes on it as on land, without a crater in the stone; a
+      // ship's top too - it comes down on her deck, [19])
+      const ht = onLand(f.x) ? Infinity : harbourTop(f.x, f.y - 10), dk = onLand(f.x) ? null : shipTopAt(f.x, f.y - 30), onShip = !!dk && dk.y < surfaceY(f.x) && dk.y < ht;
+      const sea = ht === Infinity && !onShip && (!onLand(f.x) || lakeAt(f.x)), ground = onShip ? dk.y : ht < Infinity ? ht : sea ? surfaceY(f.x) : landTop(f.x);
       if (f.y >= ground) {
-        f.onDeck = ht < Infinity;
-        if (f.onDeck) { sectionBlast(f.x, ground - 4, f.kind === 'jet' ? 1.8 : 1, f.vx * 0.3); spawnDebris(f.x, ground - 6, f.kind === 'jet' ? 24 : 10, f.vx * 0.3); f.state = 'wreck'; f.y = ground - 4; f.vx = 0; f.vy = 0; }
-        else if (sea) { if (f.kind === 'jet') { f.split = true; f.bend = 0; } wingIntoWater(f); ditchFx(f.x, f.vx, f.kind === 'jet' ? 2 : 1.2, f.kind === 'jet' ? 150 : 49, f.vy); f.state = 'sink'; f.vy = 40; f.vx *= 0.3; }   // (into the water: it sinks)
-        else { sectionBlast(f.x, ground - 4, f.kind === 'jet' ? 1.8 : 1, f.vx * 0.3); spawnDebris(f.x, ground - 6, f.kind === 'jet' ? 24 : 10, f.vx * 0.3); landCarve(f.x, ground, f.kind === 'jet' ? 22 : 10); f.state = 'wreck'; f.y = ground - 4; f.vx = 0; f.vy = 0; }
+        f.onDeck = !onShip && ht < Infinity;
+        if (!sea) { trafficCrash(f, ground, onShip ? dk.c : null, f.onDeck); continue; }   // (what's left of it stays, burning - landCrash)
+        if (f.kind === 'jet') { f.split = true; f.bend = 0; } wingIntoWater(f); ditchFx(f.x, f.vx, f.kind === 'jet' ? 2 : 1.2, f.kind === 'jet' ? 150 : 49, f.vy); f.state = 'sink'; f.vy = 40; f.vx *= 0.3;   // (into the water: it sinks)
       }
       continue;
     }
@@ -27546,11 +28118,19 @@ function sheetLoseWing(f, which, quiet) {
   if ((f.wings || 0) & (1 << which)) return;
   f.wings = (f.wings || 0) | (1 << which);
   const A = sheetArt(f), S = SHEET_PLANES[f.kind];
-  chunks.push({ img: A.wings[which], k: S.I.k, x: f.x + rnd(-4, 4), y: f.y + (which ? 5 : -5), vx: f.vx * 0.6 + rnd(-40, 40), vy: f.vy * 0.4 - rnd(30, 80), a: rnd(0, 6), w: rnd(-9, 9), delay: 0, floor: onLand(f.x) && !lakeAt(f.x) ? landTop(f.x) : WATER_Y, water: !onLand(f.x) || !!lakeAt(f.x), kind: 'wing', hh: S.wing, hw: S.wing });
+  chunks.push({ img: A.wings[which], k: S.I.k, x: f.x + rnd(-4, 4), y: f.y + (which ? 5 : -5), vx: f.vx * 0.6 + rnd(-40, 40), vy: f.vy * 0.4 - rnd(30, 80), a: rnd(0, 6), w: rnd(-9, 9), delay: 0, floor: onLand(f.x) && !lakeAt(f.x) ? landTop(f.x) : WATER_Y, water: !onLand(f.x) || !!lakeAt(f.x), kind: 'wing', hh: S.wing, hw: S.wing, land: LAND });
   if (!quiet) { spawnSparks(f.x, f.y, 14, 200); planeBits(f, 5); sfxImpact(f.x); }
 }
 // (user Oct 26, for every plane: into the water at least one wing splits off) - the lower one (or the other if it's gone)
 function wingIntoWater(f) { if (!SHEET_PLANES[f.kind]) return; const w = f.wings || 0; if ((w & 3) === 3) return; sheetLoseWing(f, w & 2 ? 0 : 1, true); }
+// (user Oct 27) down on land, the harbour's stone or a ship's deck: what's left of it stays - the hull broken in two (a
+// Cessna) or three (the 747) where it hit, its wings torn off, burning; the crater by its size (none in the stone) -
+// landCrash
+function trafficCrash(f, gy, deck, stone) {
+  const jet = f.kind === 'jet', face = (f.vx || f.dir || 1) >= 0 ? 1 : -1, S = SHEET_PLANES[f.kind], A = sheetArt(f);
+  f.crash = landCrash(f.x, gy, { size: jet ? 3.5 : 0.8, vx: f.vx, vy: f.vy, art: A.plane[2][0][face], k: S.I.k, face, n: jet ? 3 : 2, wings: [0, 1].map(w => (f.wings || 0) & (1 << w) ? null : A.wings[w]), deck, stone });
+  f.state = 'wreck'; f.y = gy; f.vx = 0; f.vy = 0; f.split = false;
+}
 // (shot down or flown in, no other comes in its place - user Oct 27: "The rest, when destroyed, is never spawned
 // again. Not just ships." Its wreck stays where it came down; the sky has one fewer till a new round)
 // flown into the water, not hit (user Oct 26, universal): it goes in with a splash and sinks - no blast, no sparks
@@ -27665,7 +28245,7 @@ function drawTraffic(x0, x1, mode) {
   if (!LAND || !traffic.length) return;
   if (!trafficArt || trafficArt.key !== teamKey) buildTrafficArt();   // (the flags changed: the 747s' colours too)
   for (const f of traffic) {
-    if (f.state === 'parked' || f.x < x0 - 140 || f.x > x1 + 140) continue;
+    if (f.state === 'parked' || f.crash || f.x < x0 - 140 || f.x > x1 + 140) continue;   // (down on land: its broken wreck is drawn with the ground - drawCrashes)
     const wet = f.state === 'sink' || f.state === 'wreck';
     if ((mode === 'air' && wet) || (mode === 'under' && !wet)) continue;
     const T = TRAFFIC[f.kind], A = f.kind === 'jet' ? trafficArt.jet[f.owner === 1 ? 1 : 0] : trafficArt.cessna[f.col || 0];
@@ -28077,7 +28657,7 @@ function makeHeli(p, x) {
     rotor: 0, spin: 0, cap: null, smokeT: 0, input: 0, fixT: 0, roll: 0, lampPh: Math.random() };
 }
 function buildLandUnits() {
-  landWrecks.length = 0;
+  landWrecks.length = 0; crashes.length = 0; looseStones.length = 0; landWake.length = 0;   // (a new round: no wrecks, nothing falling - 50-land-rest)
   for (let p = 0; p < 2; p++) {
     tanks[p] = null; helis[p] = null;                    // (none yet: each comes in from your end of the world when you take it)
     landWait[p].tank = landWait[p].heli = 0;
@@ -28257,12 +28837,16 @@ function tankHitBlast(t, power) {
   gridExplosion(x, y, 50 * power, 300 * power);
 }
 function killTank(t) {
+  if (t.state !== 'alive') return;                     // (already lost: never twice - user Oct 27)
   t.state = 'dead';
   tankHitBlast(t, 1.6);
   sectionBlast(t.x, t.y - 10, 1.1, t.vx);
   spawnDebris(t.x, t.y - 10, 16, t.vx * 0.3);
-  landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.carry != null ? landBelow(t.x, t.y - 10) : t.y, a: t.carry != null ? 0 : t.a, facing: t.facing, t: 0, burn: 8 });
-  landCarve(t.x, t.y, 10);
+  // (user Oct 27, [18]: on a ship's deck its wreck rides her; over water it falls in and sinks; on the ground, or held on
+  // a magnet over it, it lies (falls) there - stepArmyWreck)
+  const dry = onLand(t.x) && !lakeAt(t.x);
+  landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.carry != null || t.hook ? 0 : t.a, facing: t.facing, t: 0, burn: 8, deck: t.deck || null });
+  if (dry && t.carry == null && !t.hook) landCarve(t.x, t.y, 10);
   captainDies(t);
   landWait[t.id].tank = LAND_RESPAWN;
   if (crew[t.id].mode === 'tank') lostUnit(t.id, t.x, 'tank');
@@ -28314,7 +28898,7 @@ function stepHeli(h, dt) {
   if (h.state === 'landed') {
     h.vx = 0; h.vy = 0;
     // lift off: up, with the rotor going
-    if (stick < -0.2 && h.spin > 0.8) { h.state = 'fly'; h.vy = -20; h.deck = null; sfxClink(telegraphs[p]); }
+    if (stick < -0.2 && h.spin > 0.8) { h.state = 'fly'; h.vy = -20; h.deck = null; h._rv = 0; sfxClink(telegraphs[p]); }
     else if (h.deck) {
       // down on a ship: it goes with her, sat on her top; she gone from under it, it's flying again (and falls if nobody lifts it)
       const c = h.deck; h.x += c.dx || 0; const d = shipTopAt(h.x, h.y + heliSkid() - 10);
@@ -28326,7 +28910,13 @@ function stepHeli(h, dt) {
       const ht = harbourTop(h.x, h.y + heliSkid() - 10);
       if (ht < Infinity) { h.y = ht - heliSkid(); h.tilt *= 1 - Math.min(1, dt * 6); } else heliGroundGone(h, mine);
     }
-    else { const half = heliHalf() * 0.8, sl = Math.atan2(landBelowIn(h.x + half, h.y - 4) - landBelowIn(h.x - half, h.y - 4), half * 2); h.y = landBelowIn(h.x, h.y - 4) - heliSkid(); h.tilt += (sl - h.tilt) * Math.min(1, dt * 6); }
+    else {
+      const half = heliHalf() * 0.8, sl = Math.atan2(landBelowIn(h.x + half, h.y - 4) - landBelowIn(h.x - half, h.y - 4), half * 2), want = landBelowIn(h.x, h.y + heliSkid() - 6) - heliSkid();
+      // (user Oct 27, [28]: the ground dug away under it, it falls - not a jump down; a long fall hurts it)
+      if (want > h.y + 1.5 || h._rv) { h._rv = Math.min(600, (h._rv || 0) + 520 * dt); h.y = Math.min(want, h.y + h._rv * dt); if (h.y >= want - 0.01) { const v = h._rv; h._rv = 0; susKick(h, v * 0.4); kickLandDust(h.x, want + heliSkid(), 6); if (v > 300) heliHurt(h, 1, h.x, h.y); if (h.state !== 'landed') return; } }
+      else h.y = landBelowIn(h.x, h.y - 4) - heliSkid();
+      h.tilt += (sl - h.tilt) * Math.min(1, dt * 6);
+    }
     if (onOwnGround(p, h.x)) { h.fixT += dt; if (h.fixT > 1.4) { h.fixT = 0; if (h.hp < HELI_HP) h.hp = Math.min(HELI_HP, h.hp + 1); else if (h.magBroken) { h.magBroken = false; sfxClink(telegraphs[p]); } else if (h.rockets < HELI_ROCKETS) h.rockets++; } } else h.fixT = 0;
     if (h.hp <= HELI_HP - 1) heliSmoke(h, dt);
     if (h.spin > 0.5) rotorWash(h, dt);
@@ -28571,13 +29161,18 @@ function heliLost(h) {
   if (crew[h.id].mode === 'heli') lostUnit(h.id, h.x, 'heli');
 }
 function blowHeli(h) {
+  if (h.state === 'dead' || h.state === 'gone') return;   // (already a wreck: never twice - user Oct 27)
   if (!h.lostDone) heliLost(h);
   h.state = 'dead';
   sectionBlast(h.x, h.y, 1.3, h.vx);
   spawnDebris(h.x, h.y, 14, h.vx * 0.3);
-  const g0 = landBelow(h.x, h.y - 10), ht = onLand(h.x) ? Infinity : harbourTop(h.x, h.y - 10), g = Math.min(g0, ht);
-  if (g0 - h.y < 40 && ht === Infinity) landCarve(h.x, g, 9);   // (on the harbour's stone, no crater)
-  landWrecks.push({ kind: 'heli', id: h.id, x: h.x, y: Math.min(g, h.y + heliSkid()), a: h.tilt, facing: h.facing, t: 0, burn: 6 });
+  const ht = onLand(h.x) ? Infinity : harbourTop(h.x, h.y - 10), g0 = onLand(h.x) ? landBelow(h.x, h.y - 10) : LT_Y1, g = Math.min(g0, ht), deck = h.deck || null;
+  if (!deck && g0 - h.y < 40 && ht === Infinity) landCarve(h.x, g, 9);   // (on the harbour's stone or a ship's deck, no crater)
+  // (its wreck: on a ship's deck it rides her - user Oct 27, [19]; on the harbour's deck it lies there till the pier goes;
+  // it burns, its smoke standing over it - landCrash)
+  const w = { kind: 'heli', id: h.id, x: h.x, y: deck ? h.y + heliSkid() : Math.min(g, h.y + heliSkid()), a: h.tilt, facing: h.facing, t: 0, burn: 0, deck, onDeck: !deck && ht < Infinity };
+  landWrecks.push(w);
+  if (deck || g - h.y < 40) landCrash(h.x, w.y, { size: 0.9, at: w, blast: false, noCrater: true });
   h.wrecked = true;
 }
 // shot down: it spins, smoking, and falls until it meets the ground
@@ -28589,6 +29184,7 @@ function stepHeliDown(h, dt) {
   h.rotor += dt * 20;
   h.smokeT -= dt; if (h.smokeT <= 0) { h.smokeT = 0.05; spawnSmoke(h.x, h.y - 4, { dark: 0.05, r: rnd(3, 5), grow: rnd(4, 6), lift: 20, vx: rnd(-8, 8), life: rnd(4, 6), alpha: 0.6 }); }
   if (Math.random() < dt * 10) spawnFlame(h.x + rnd(-6, 6), h.y + rnd(-4, 4), rnd(-20, 20), -rnd(20, 50), 1.1, rnd(2, 4), 2);
+  if (LAND && !onLand(h.x)) { const d = shipTopAt(h.x, h.y + heliSkid() - 10); if (d && h.y + heliSkid() >= d.y) { h.y = d.y - heliSkid(); h.deck = d.c; blowHeli(h); return; } }   // (onto a ship's top: it comes down on her deck - user Oct 27, [19])
   if (LAND && !onLand(h.x) && h.y + heliSkid() >= harbourTop(h.x, h.y - 10)) { blowHeli(h); return; }   // (onto the harbour's deck: it's ground - user Oct 27)
   if (LAND && (lakeAt(h.x) || !onLand(h.x)) && h.y + heliSkid() > surfaceY(h.x)) { heliSink(h); return; }   // (shot down over a lake or the sea: into it)
   if (landSolid(h.x, h.y + heliSkid())) blowHeli(h);
@@ -28672,13 +29268,11 @@ function stepLandUnits(dt) {
     const pw = w.kind === 'plane';
     if (w.burn > 0 && w.t < w.burn && Math.random() < dt * (pw ? 16 * (1 - 0.5 * w.t / w.burn) : 8)) spawnSmoke(w.x + rnd(-8, 8), w.y - 12, { dark: 0, r: rnd(3, 5) * (pw ? 2 : 1), grow: rnd(4, 6) * (pw ? 1.3 : 1), rmax: pw ? 44 : 26, lift: pw ? 46 : 26, vx: rnd(-8, 8), vy: pw ? rnd(-60, -30) : -15, life: rnd(8, 12) * (pw ? 1.6 : 1), alpha: pw ? 0.85 : 0.7 });
     if (w.fire && w.t < w.fire && !SIM_ONLY && Math.random() < dt * 14 * fwFlames()) spawnFlame(w.x + rnd(-14, 10) * w.facing, w.y - rnd(2, 10), rnd(-10, 10), -rnd(30, 80), rnd(1.1, 1.4), rnd(2.5, 4.5) * (1 - 0.5 * w.t / w.fire), rnd(1.4, 2));
-    // the ground under it dug away: it drops onto what's left
-    // (and on the harbour's deck while it's there: the pier gone, it drops - user Oct 27)
-    const g = onLand(w.x) ? landBelow(w.x, w.y - 6) : Math.min(landBelow(w.x, w.y - 6), harbourTop(w.x, w.y - 6));
-    if (g > w.y + 1) w.y = Math.min(g, w.y + 120 * dt);
-    if (w.t > (w.kind === 'plane' ? 60 : 40)) landWrecks.splice(i, 1);
+    // (the ground under it dug away, the harbour's deck gone from under it, a ship under it, the water: stepArmyWreck - 50-land-rest)
+    if (w.t > 40) { w.removed = true; landWrecks.splice(i, 1); }
   }
   stepLandSand(dt);
+  stepLandRest(dt);                                    // (everything resting where the ground changed; the planes' wrecks burning - 50-land-rest)
   stepSpikeBursts(dt);
   stepLeaves(dt);
   stepTufts(dt);
@@ -28686,10 +29280,8 @@ function stepLandUnits(dt) {
 
 /* ---- a plane into the ground (user Oct 25, their photo): a small crater with the broken plane in it, a fireball
    that rolls up into black smoke, and the wreck burning on, its smoke column standing over it for a long while ---- */
-function planeGroundCrash(pl, x, y) {
-  const gy = landBelow(x, y - 12);
-  landCarve(x, gy + 2, 13);
-  const fy = landBelow(x, gy - 4);
+function planeGroundCrash(pl, x, y, deck) {
+  const gy = deck ? deck.y : landBelow(x, y - 12), fy = gy;
   sfxExplosion(x, 1.3); shakeAt(10, x);
   guysNear(x, fy, 50);
   if (!SIM_ONLY) {
@@ -28716,25 +29308,10 @@ function planeGroundCrash(pl, x, y) {
     if (t && t.state === 'alive' && Math.abs(t.x - x) < 50) tankHurt(t, 1, x, fy);
     if (h && (h.state === 'fly' || h.state === 'landed') && Math.hypot(h.x - x, h.y - fy) < 50) heliHurt(h, 1, x, fy);
   }
-  landWrecks.push({ kind: 'plane', id: pl.id, x, y: landBelow(x, fy - 6), a: clamp(Math.atan2(pl.vy, Math.abs(pl.vx) + 1), 0.15, 1.1), facing: pl.vx >= 0 ? 1 : -1, t: 0, burn: 40, fire: 14 });
+  // (user Oct 27: what's left of it stays - its hull broken in two, its wings beside it, burning, in its crater: landCrash)
+  const face = pl.vx >= 0 ? 1 : -1, A = planeArt(pl);
+  landCrash(x, gy, { size: 1, vx: pl.vx, vy: pl.vy, art: A.plane[2][0][face], k: PLANE_K * PLANE_SC(), face, n: 2, wings: [0, 1].map(w => pl.wings & (1 << w) ? null : A.wings && A.wings[w]), deck: deck ? deck.c : null, blast: false });
   pl.state = 'gone'; pl.wait = 0; pl.smokeT = 0; pl.strand = null;
-}
-// the wreck in its crater: a charred fuselage nose-down in the earth, the tail standing up, a torn wing beside it
-function drawPlaneWreck(w) {
-  if (w.x < CAMPX / SV - 80 || w.x > CAMPX / SV + VWW + 80) return;
-  const tc = (img.teamCol && img.teamCol[w.id]) || [150, 60, 50], K = SV, f = w.facing;
-  const R = (x, y, ww, hh, c) => { C.fillStyle = c; C.fillRect(Math.round(x * K), Math.round(y * K), Math.max(1, Math.round(ww * K)), Math.max(1, Math.round(hh * K))); };
-  const burnt = css3(tc.map(v => v * 0.28 + 12)), dark = '#1c1b1e', mid = '#38363a';
-  C.save(); C.translate(Math.round(PX(w.x)), Math.round(PY(w.y))); C.scale(f, 1);
-  // a torn wing lying flat beside the hole
-  R(-26, -3, 16, 3, mid); R(-26, -3, 16, 1, '#4c4a50'); R(-14, -4, 3, 1, dark);
-  // the fuselage, nose buried, tail up
-  C.save(); C.rotate(-w.a);
-  R(-30, -6, 34, 7, dark); R(-30, -6, 34, 2, burnt); R(-24, -4, 6, 2, '#5a3a22');
-  R(-32, -15, 6, 10, dark); R(-32, -15, 6, 2, burnt);           // the tail fin
-  R(-36, -7, 10, 2, mid);                                       // the tailplane
-  C.restore();
-  C.restore();
 }
 /* ---- what shells, bombs and rounds hit on land ---- */
 // (crater radius, reach, damage to what it hit; user Oct 25: the tank's missile digs a hole three times as big)
@@ -29141,7 +29718,6 @@ function drawLandHeli(h) {
 function drawLandUnits(x0, x1) {
   for (const w of landWrecks) {
     if (w.kind === 'tank') drawLandTank({ id: w.id, x: w.x, y: w.y, a: w.a, facing: w.facing, recoil: 0 }, true);
-    else if (w.kind === 'plane') drawPlaneWreck(w);
     else drawLandHeliWreck(w);
   }
   drawLooseRopes();
@@ -29179,11 +29755,12 @@ function renderLandObjects() {
     drawLake(x0, x1, false);                              // (the lakes' water, under what's in them)
     guardDraw('lakeBack', () => drawLakeBack(x0, x1)); guardDraw('lakeBed', () => drawLakeBed(x0, x1)); guardDraw('lakeShadows', () => drawLakeShadows(x0, x1));   // (its depth, far rocks and weeds, light; the bed's life; the boats' shadows - 50-land-lakelife)
     // (a lake is the sea's water too, user Oct 25: what lies on its bed and sinks through it)
-    lakeClip(x0, x1, () => { drawDuds(x0, x1); for (const p of pieces) if (p.x + p.hl > x0 - 20 && p.x - p.hl < x1 + 20) drawPiece(p); drawDcharges(x0, x1); drawTraffic(x0, x1, 'under'); drawBalloons(x0, x1, 'under'); drawCivHelis(x0, x1, 'under'); drawAnchors(x0, x1, true); });
+    lakeClip(x0, x1, () => { drawDuds(x0, x1); for (const p of pieces) if (p.x + p.hl > x0 - 20 && p.x - p.hl < x1 + 20) drawPiece(p); drawDcharges(x0, x1); drawTraffic(x0, x1, 'under'); drawBalloons(x0, x1, 'under'); drawCivHelis(x0, x1, 'under'); drawAnchors(x0, x1, true); drawCrashes(x0, x1, true); });
     for (const b of sailboats) if (b.lake) drawSailboat(b);   // (the lakes' yachts and motor boats)
     guardDraw('drawJetboats', () => drawJetboats(x0, x1, true));
     for (const tw of towers) if (tw && tw.edge && tw.x > x0 - 120 && tw.x < x1 + 120) drawTower(tw);   // (the towers on the mountains at the world's ends)
     for (const d of debris) if (d.state === 2 && onLand(d.x)) drawDebris(d, x0, x1);
+    drawCrashes(x0, x1, false); drawLooseStones(x0, x1);   // (what's left of the planes; stones knocked loose, falling - 50-land-rest)
     drawLeaves(x0, x1);
   }
   drawCoastWedges(x0, x1);                               // (OPEN WORLD: the embankment under each harbour's block, user Oct 25 late)
@@ -30155,7 +30732,7 @@ async function start(data) {
     set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, calmAt: x => calmAt(x), harbourTop: (x, y) => harbourTop(x, y), crumbleTower: tw => crumbleTower(tw), vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers[p]), seaHeli: (x, y) => { const h = helis[0] = makeHeli(0, x); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.mode, cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
     landState: () => land, land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => L.s.c.toDataURL()); }, wrecks: () => landWrecks.length, top: x => landTop(x), below: (x, y) => landBelow(x, y), sandActive: () => land.sand.length,
       sandX: () => { let best = -1, bx = WORLD_W / 2; for (let c = 0; c < land.cols; c++) { let r = 0; while (r < LT_ROWS && land.cell[ltIdx(c, r)] === M_AIR) r++; let n = 0; while (r + n < LT_ROWS && land.cell[ltIdx(c, r + n)] === M_SAND) n++; if (n > best) { best = n; bx = (c + 0.5) * LT_CELL; } } return bx; }, sandCount: () => { let n = 0; for (const v of land.cell) if (v === M_SAND) n++; return n; }, rockX: () => land.outcrops[0] ? land.outcrops[0].x : WORLD_W / 2, rockAt: x => ltCell(ltCol(x), ltRow(landTop(x)) ) }),
-    traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? SEA1 + 10 : SEA0 - 10)), get LAND_Y() { return LAND_Y; }, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, skyNew: on => skyNewSet(on), smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
+    rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, SEA0, SEA1, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? SEA1 + 10 : SEA0 - 10)), get LAND_Y() { return LAND_Y; }, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, skyNew: on => skyNewSet(on), smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
     debugJetArt: () => { if (!trafficArt) buildTrafficArt(); const d = c => { const k = makeCanvas(c.width, c.height); k.getContext('2d').drawImage(c.src && c._tp ? c.src : c, 0, 0); return k.toDataURL(); }, a = trafficArt.jet[0].r, w = windowsArtDots(a); return { jet: d(a), jetWin: w ? d(w) : d(makeCanvas(1, 1)) }; }, SPACE: { ATMO_TOP, SPACE_TOP, SKY_TOP }, carve: (x, y, r) => landCarve(x, y, r), landShell: (x, y, owner, from) => { shells.push({ x, y, vx: 0, vy: 300, owner, from: from || 'tank', age: 1, trail: 0, under: false, ut: 0 }); }, tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), fgDump: () => { if (!fgStrip) buildFgStrip(); return fgStrip.sp.toDataURL(); }, reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
     gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
