@@ -2331,7 +2331,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 26 19:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 26 20:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18756,6 +18756,7 @@ function craneGrab(cr, s) {
   k.where = 'held'; cr.load = k; sfxClink(telegraphs[0]); return true;
 }
 function craneRelease(cr) {
+  if (cr.obj) { magDrop(cr.obj); cr.obj = null; sfxClink(telegraphs[0]); return; }   // (a tank or a plane: let go where it hangs)
   const k = cr.load; if (!k) return;
   cr.load = null;
   const s = stackUnder(cr, cr.tx);
@@ -18770,8 +18771,18 @@ function craneAutoStep(cr, dn) {
   const A = cr.auto;
   if (A.phase === 'down') {
     if (dn(craneFloor(cr), 55)) {
-      if (cr.load) craneRelease(cr);
-      else { const s = stackUnder(cr, cr.tx); if (s && s.stack.length && Math.abs(s.topY - (cr.hy + 3)) < 6) craneGrab(cr, s); }
+      if (cr.load || cr.obj) craneRelease(cr);
+      else {
+        const s = stackUnder(cr, cr.tx);
+        if (s && s.stack.length && Math.abs(s.topY - (cr.hy + 3)) < 6) craneGrab(cr, s);
+        else {
+          // (user Oct 26: "Could the crane pick up a tank?" - every magnet takes the same things: a box anywhere under it -
+          // on a ship's deck, lying loose - a tank, a landed plane, a seaplane on the water)
+          const o = magNearest(magTargetsAll(), cr.tx, cr.hy + 3 - MAG_H, 16);
+          if (o && isBox(o)) { magTake(o, 'crane'); o.where = 'held'; o.carried = null; cr.load = o; }
+          else if (o) { magTake(o, 'crane'); cr.obj = o; }
+        }
+      }
       A.phase = 'up';
     }
   } else if (dn(cr.hyMin + 4, 55)) cr.auto = null;
@@ -18791,20 +18802,24 @@ function stepCranes(dt) {
       if (cr.auto) craneAutoStep(cr, dn);
       else cr.tx = clamp(cr.tx + clamp(cr.cin || 0, -1, 1) * 70 * dt, cr.rmin, cr.rmax);
     } else craneCpu(cr, dt, mv, dn);
+    if (cr.obj) { if (magHoldable(cr.obj)) magPlace(cr.obj, cr.tx, cr.hy + 3, 0, 0); else cr.obj = null; }   // (a tank or a plane hanging from the spreader)
     cr.x = cr.tx; cr.y = cr.hy;                          // (where the camera looks when it's yours)
   }
   stepContainers(dt);
 }
 // how low the spreader can go under the trolley: onto the stack (or the box it carries onto it), the pier's deck, the water
 function craneFloor(cr) {
-  const s = stackUnder(cr, cr.tx), h = cr.load ? CONT_H : 0;
-  if (s) return s.topY - 3 - h;
-  return (cr.tx - cr.d.quay) * cr.out > 0 ? surfaceY(cr.tx) - 3 - h : DECK_Y - 3 - h;
+  const s = stackUnder(cr, cr.tx), h = cr.load ? CONT_H : cr.obj ? magTop(cr.obj) + magFoot(cr.obj) : 0;
+  let f = s ? s.topY - 3 - h : (cr.tx - cr.d.quay) * cr.out > 0 ? surfaceY(cr.tx) - 3 - h : DECK_Y - 3 - h;
+  // (anything a magnet takes under it - a box on a ship, a tank, a plane: down onto its top)
+  if (!s) for (const q of magTargetsAll()) if (Math.abs(q.x - cr.tx) < 14) f = Math.min(f, q.y - magTop(q) - 3 - h);
+  return f;
 }
 // left to itself, with the container ship alongside: one box at a time, off her onto the pier or off the pier onto her
 function craneCpu(cr, dt, mv, dn) {
   const ship = craneShip(cr), up = cr.hyMin + 4;
   if (cr.phase === 'idle') {
+    if (cr.obj) { if (dn(craneFloor(cr), 45)) craneRelease(cr); return; }   // (left holding a tank or a plane: it sets it down where it is)
     dn(up, 50); mv(cr.landLeg + cr.out * cr.legs / 2, 60);
     if (cr.load) { cr.phase = 'carry'; cr.job = { to: null }; return; }
     if (!ship || ship.dockT < 5 || cr.t < 1.5) return;
@@ -18841,7 +18856,7 @@ function contPlaces() {
     if (cr.load) P.push([cr.load, cr.tx, cr.hy + 3 + CONT_H / 2, 0, 'held', cr]);
   }
   for (const c of civShips) if (c.cargo && c.state === 'sail') c.cargo.forEach((st, i) => st.forEach((k, j) => { const [x, y] = shipSlotAt(c, i, j); P.push([k, x, y, c.a + c.tilt, 'ship', c, i]); }));
-  for (const k of containers) if (k.where === 'free' || k.where === 'rest') P.push([k, k.x, k.y, k.a, k.where]);
+  for (const k of containers) if (k.where === 'free' || k.where === 'rest' || k.where === 'hook') P.push([k, k.x, k.y, k.a, k.where]);
   return P;
 }
 // a hit on a box (its own, never the ship's): on land it burns black where it stands, sparks, no blast; on a ship it's
@@ -18877,6 +18892,7 @@ function stepContainers(dt) {
   // a ship going down: her boxes slide off into the sea
   for (const c of civShips) if (c.cargo && c.state !== 'sail') { for (const st of c.cargo) for (const k of st) Object.assign(k, { where: 'free', x: c.x + rnd(-120, 120), y: surfaceY(c.x) - 20 - rnd(0, 20), vx: rnd(-30, 30), vy: -rnd(0, 30), va: rnd(-1, 1) }); c.cargo = null; }
   for (const k of containers) {
+    if (k.where === 'hook' && time - (k.hookT || 0) > 0.5) magDrop(k);   // (its magnet gone: it falls)
     if (k.where !== 'free') continue;
     const wet = !dryLand(k.x) && !docks.some(d => harbourHit(d, k.x, DECK_Y));
     k.x += k.vx * dt; k.a += k.va * dt;
@@ -18924,7 +18940,7 @@ function drawShipCargo(c, ox, oy, s, W) {
 }
 // the loose ones, in the water or on the bottom (drawn with the sea's things), and the ones on land
 function drawLooseContainers(x0, x1, under) {
-  for (const k of containers) if ((k.where === 'free' || k.where === 'rest') && !!k.inWater === under && k.x > x0 - 20 && k.x < x1 + 20) drawContainerAt(k.x, k.y, k.a, k);
+  for (const k of containers) if ((k.where === 'free' || k.where === 'rest' || (k.where === 'hook' && !under)) && (k.where === 'hook' || !!k.inWater === under) && k.x > x0 - 20 && k.x < x1 + 20) drawContainerAt(k.x, k.y, k.a, k);
 }
 function drawCranes(x0, x1) {
   if (!LAND || !cranes.length) return;
@@ -19671,14 +19687,13 @@ function stepRope(h, dt) {
   // well out
   if (!t && !o && R.mode === 'out' && R.len > 30) {
     // a landed plane (the warplanes, the Cessnas and 747s, a seaplane on the water, the orbiter on its runway): its top
-    let best = null, bd = MAG_GRAB + 10;
-    for (const q of magTargets()) { const d = Math.hypot(e[0] - q.x, e[1] + MAG_H - (q.y - magTop(q))); if (d < bd) { bd = d; best = q; } }
-    if (best) { R.obj = o = best; best.carried = h.id; best.spd = 0; e[0] = e[2] = best.x; e[1] = e[3] = best.y - magTop(best) - MAG_H; spawnSparks(best.x, best.y - magTop(best), 8, 120); sfxImpact(best.x); }
+    const best = magNearest(magTargets(), e[0], e[1], MAG_GRAB + 10);
+    if (best) { R.obj = o = best; magTake(best, h.id); e[0] = e[2] = best.x; e[1] = e[3] = best.y - magTop(best) - MAG_H; }
   }
-  if (o) { o.x = e[0]; o.y = e[1] + MAG_H + magTop(o); o.spd = 0; o.vx = (e[0] - e[2]) / R.dt; o.vy = (e[1] - e[3]) / R.dt; }
+  if (o) magPlace(o, e[0], e[1] + MAG_H, (e[0] - e[2]) / R.dt, (e[1] - e[3]) / R.dt);
   if (!t && !o && R.mode === 'out' && R.len > 30) {
     let best = null, bd = MAG_GRAB;
-    for (const t0 of tanks) { if (!t0 || t0.state !== 'alive' || t0.carry != null) continue; const d = Math.hypot(e[0] - t0.x, e[1] + MAG_H - (t0.y - tankTopH())); if (d < bd) { bd = d; best = t0; } }
+    for (const t0 of tanks) { if (!t0 || t0.state !== 'alive' || t0.carry != null || t0.hook) continue; const d = Math.hypot(e[0] - t0.x, e[1] + MAG_H - (t0.y - tankTopH())); if (d < bd) { bd = d; best = t0; } }
     if (best) {
       const t0 = best;
       R.hold = t0.id; t0.carry = h.id; t0.vx = 0; t0.vy = 0; t0.aKick = 0; t = t0;
@@ -19832,19 +19847,64 @@ function makeMagnetArt(home) {
 /* the planes a magnet can take (landed, stopped or nearly): how far its top is over its middle, and its middle over
    its foot; and putting one down again - on an airfield's concrete it sets down unhurt; anywhere else from any
    height it's a crash, into the water it sinks (a seaplane floats) */
+/* (user Oct 26: "Are all magnets consistent? Meaning, could a helicopter get a container? Could the crane pick up a
+   tank, etc.?") one list of what a magnet takes, whichever magnet it is - the army helicopter's, a civilian
+   helicopter's, the dock crane's: a landed plane (the warplane, a Cessna or 747 stopped, a seaplane on the water, the
+   orbiter on its runway), a container (the top box of a stack on a pier or a ship, or one lying loose) and a tank
+   (magTargetsAll - the army helicopter takes tanks its own way, swinging on its rope). Each is taken with magTake,
+   carried with magPlace (where the magnet's face is: its top there), and let go with magDrop. */
 function magTargets() {
   const L = [];
+  for (const k of magBoxTargets()) L.push(k);
   for (const pl of planes) if (pl && pl.state === 'fly' && pl.ground && pl.spd < 40 && pl.carried == null) L.push(pl);
   for (const f of traffic) if (f.state === 'free' && f.ground && f.spd < 40 && f.carried == null) L.push(f);
   for (const s of seaplanes) if ((s.state === 'moored' || (s.state === 'water' && s.spd < 25)) && s.carried == null) L.push(s);
   for (const v of shuttles) if (v.state === 'landed' && v.carried == null) L.push(v);
   return L;
 }
-function magHoldable(o) { return planes.includes(o) ? o.state === 'fly' : traffic.includes(o) ? o.state === 'free' : seaplanes.includes(o) ? (o.state === 'water' || o.state === 'moored') : shuttles.includes(o) ? o.state === 'landed' : false; }
-const magTop = o => traffic.includes(o) ? (o.kind === 'jet' ? 14 : 9) : seaplanes.includes(o) ? 18 : shuttles.includes(o) ? 12 : 9;
-const magFoot = o => traffic.includes(o) ? (TRAFFIC[o.kind].gy || 10) : seaplanes.includes(o) ? 3 : shuttles.includes(o) ? 4 : PLANE_WHEELS;
+// the boxes a magnet can take: each stack's top box (on a pier, on a ship), and boxes lying loose on dry ground or
+// floating; k.from: the stack it's taken off
+function magBoxTargets() {
+  const L = [];
+  if (!LAND || !containers.length) return L;
+  for (const cr of cranes) for (const s of cr.slots) if (s.stack.length) { const k = s.stack[s.stack.length - 1]; k.x = s.x; k.y = DECK_Y - CONT_H * (s.stack.length - 0.5); k.from = s.stack; L.push(k); }
+  for (const c of civShips) if (c.cargo && c.state === 'sail') c.cargo.forEach((st, i) => { if (!st.length) return; const k = st[st.length - 1], [x, y] = shipSlotAt(c, i, st.length - 1); k.x = x; k.y = y; k.from = st; L.push(k); });
+  for (const k of containers) if (k.where === 'rest' && !k.inWater && k.carried == null) { k.from = null; L.push(k); }
+  return L;
+}
+const isBox = o => containers.includes(o), isTank = o => tanks.includes(o);
+function magTargetsAll() {
+  const L = magTargets();
+  for (const t of tanks) if (t && t.state === 'alive' && t.carry == null && !t.hook) L.push(t);
+  return L;
+}
+// the one nearest a magnet's face (ex, ey: the face's middle), within reach
+function magNearest(L, ex, ey, reach) {
+  let best = null, bd = reach;
+  for (const q of L) { const d = Math.hypot(ex - q.x, ey + MAG_H - (q.y - magTop(q))); if (d < bd) { bd = d; best = q; } }
+  return best;
+}
+// taken: off its stack (a box), out of its own driving (a tank)
+function magTake(o, tag) {
+  o.carried = tag; o.spd = 0; o.hookT = time;
+  if (isBox(o)) { if (o.from) { const j = o.from.indexOf(o); if (j >= 0) o.from.splice(j, 1); } o.from = null; o.where = 'hook'; o.a = 0; o.va = 0; }
+  if (isTank(o)) { o.hook = true; o.vx = 0; o.vy = 0; }
+  spawnSparks(o.x, o.y - magTop(o), 8, 120); sfxImpact(o.x);
+}
+// carried: its top at the magnet's face (x, yTop), moving with it
+function magPlace(o, x, yTop, vx, vy) {
+  o.x = x; o.y = yTop + magTop(o); o.vx = vx || 0; o.vy = vy || 0; o.spd = 0; o.hookT = time;
+  if (isTank(o)) { o.a += (clamp((vx || 0) * 0.002, -0.3, 0.3) - o.a) * 0.1; }
+}
+function magHoldable(o) { return isBox(o) ? o.where === 'hook' : isTank(o) ? o.state === 'alive' && !!o.hook : planes.includes(o) ? o.state === 'fly' : traffic.includes(o) ? o.state === 'free' : seaplanes.includes(o) ? (o.state === 'water' || o.state === 'moored') : shuttles.includes(o) ? o.state === 'landed' : false; }
+const magTop = o => isBox(o) ? CONT_H / 2 : isTank(o) ? tankTopH() : traffic.includes(o) ? (o.kind === 'jet' ? 14 : 9) : seaplanes.includes(o) ? 18 : shuttles.includes(o) ? 12 : 9;
+const magFoot = o => isBox(o) ? CONT_H / 2 : isTank(o) ? 0 : traffic.includes(o) ? (TRAFFIC[o.kind].gy || 10) : seaplanes.includes(o) ? 3 : shuttles.includes(o) ? 4 : PLANE_WHEELS;
 function magDrop(o) {
   o.carried = null;
+  // (a box falls as a loose one - into the sea it floats and sinks, on the ground it lands; a tank drops onto its
+  // tracks unhurt, as from the army helicopter's rope)
+  if (isBox(o)) { Object.assign(o, { where: 'free', vx: clamp(o.vx || 0, -200, 200), vy: clamp(o.vy || 0, -100, 200), va: rnd(-0.4, 0.4) }); return; }
+  if (isTank(o)) { o.hook = false; o.dropT = 3; o.x = clamp(o.x, 40, WORLD_W - 40); o.vx = clamp(o.vx || 0, -TANK_V, TANK_V); o.vy = clamp(o.vy || 0, -60, 260); return; }
   const wet = !dryLand(o.x), af = airfieldAt(o.x), H = (wet ? surfaceY(o.x) : landTop(o.x)) - o.y;
   if (seaplanes.includes(o) && wet) { o.state = 'water'; o.y = surfaceY(o.x) - 3; o.spd = 0; o.ai = null; splash(o.x, 0, -120); return; }
   if (!wet && onApron(o.x) && H < 140) {
@@ -19881,13 +19941,12 @@ function stepCivMagnets(dt) {
     M.sv += (-(M.sx) * 4 - (h.vx || 0) * 0.02 - M.sv * 1.6) * dt; M.sx += M.sv * dt; M.sx = clamp(M.sx, -0.7, 0.7);
     const ax = h.x, ay = h.y + chSkid(h) * 0.4, ex = ax + Math.sin(M.sx) * M.len, ey = ay + Math.cos(M.sx) * M.len;
     M.ex = ex; M.ey = ey;
-    if (M.obj && (M.obj.carried !== -10 - civHelis.indexOf(h) || !magHoldable(M.obj))) { if (M.obj.carried === -10 - civHelis.indexOf(h)) M.obj.carried = null; M.obj = null; }
+    if (M.obj && (M.obj.carried !== -10 - civHelis.indexOf(h) || !magHoldable(M.obj))) { if (M.obj.carried === -10 - civHelis.indexOf(h)) magDrop(M.obj); M.obj = null; }
     if (!M.obj && M.out && M.len > 30) {
-      let best = null, bd = MAG_GRAB + 12;
-      for (const q of magTargets()) { const d = Math.hypot(ex - q.x, ey + MAG_H - (q.y - magTop(q))); if (d < bd) { bd = d; best = q; } }
-      if (best) { M.obj = best; best.carried = -10 - civHelis.indexOf(h); best.spd = 0; spawnSparks(best.x, best.y - magTop(best), 8, 120); sfxImpact(best.x); }
+      const best = magNearest(magTargetsAll(), ex, ey, MAG_GRAB + 12);
+      if (best) { M.obj = best; magTake(best, -10 - civHelis.indexOf(h)); }
     }
-    if (M.obj) { const o = M.obj; o.vx = (ex - o.x) / Math.max(dt, 1e-3); o.vy = (ey + MAG_H + magTop(o) - o.y) / Math.max(dt, 1e-3); o.x = ex; o.y = ey + MAG_H + magTop(o); o.spd = 0;
+    if (M.obj) { const o = M.obj; magPlace(o, ex, ey + MAG_H, (ex - o.x) / Math.max(dt, 1e-3), (ey + MAG_H + magTop(o) - o.y) / Math.max(dt, 1e-3));
       // (on the ground under it, the load rests there: the cable goes slack)
       const fl = dryLand(o.x) ? landTop(o.x) - magFoot(o) : surfaceY(o.x) - magFoot(o); if (o.y > fl) o.y = fl; }
   }
@@ -22989,6 +23048,7 @@ function stepTank(t, dt) {
   t.rk = Math.max(0, t.rk - dt); t.recoil = Math.max(0, t.recoil - dt * 3);
   if (t.dropT > 0) t.dropT -= dt;
   // (hanging from the helicopter's magnet: it goes where the magnet takes it - stepRope)
+  if (t.hook) { if (time - (t.hookT || 0) > 0.5) magDrop(t); else { tankWheels(t, dt); return; } }   // (on a civilian helicopter's or the crane's magnet - magPlace moves it)
   if (t.carry != null) { const hc = helis[t.carry]; if (hc && hc.rope && hc.rope.hold === t.id) { t.vx = 0; t.vy = 0; tankWheels(t, dt); return; } t.carry = null; }
   const mine = crew[p].mode === 'tank';
   if (t.enter && lcX(t.x) > LAND_ENTER) t.enter = false;
