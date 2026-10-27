@@ -2331,7 +2331,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 27 10:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 27 10:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13664,17 +13664,22 @@ function viewBufs(vi, w) {
   if (b.cw !== cw || b.h !== H0) { b.cw = cw; b.h = H0; b.bg = makeBuf(cw, H0); b.veil1 = makeBuf(cw, H0); b.veil1.by0 = 0; b.veil1.by1 = H0 - 1; b.lay = {}; for (const L of LAYERS) { b.lay[L.name] = makeBuf(cw, H0); b.lay[L.name].by0 = 0; b.lay[L.name].by1 = H0 - 1; } }
   return b;
 }
+// ---- the picture and the screen. A view's sky picture is H0 rows of CPX pixels, drawn at the shared deck zoom ZL and laid on
+// the screen magnified by M = zr / ZL about the pivot and the horizon. Its first row is the first the screen shows (V.r0
+// rows below the top of the picture as it would be at M = 1 - so a high, zoomed-in view, its horizon far under the screen,
+// still has its whole sky: user Oct 27, clouds cut off at the bottom), and it is laid at the horizon's exact place (V.fy:
+// the horizon's place within its cell - no cell-by-cell shake flying up and down). Every picture-to-screen mapping is these:
+const picX = (V, x) => V.pivX + (x - V.pivX) * (V.zr / ZL) + (V.ox || 0);
+const picY = (V, y) => V.hzPx + (y + V.fy + V.r0 * CPX - V.hzPx) * (V.zr / ZL);
+// (and back: the picture's row under a screen y)
+const picRow = (V, py) => ((V.hzPx + (py - V.hzPx) / (V.zr / ZL)) - V.fy) / CPX - V.r0;
 // ---- the pictures onto the game's screen. A buffer's rows y0.. (n of them, w wide) at the picture's pixels (x, y, wd, ht)
 // (the unmagnified view), magnified about the pivot and the horizon. Under WebGL straight from the array (premultiplied
 // when it has see-through pixels); under Canvas 2D through its own canvas.
 let PRE = new Uint32Array(0);
 function outPix(B, w, y0, n, x, y, wd, ht, seeThrough) {
   if (n <= 0 || w <= 0) return;
-  const V = VIEW, mx = v => V.pivX + (v - V.pivX) * M, my = v => V.hzPx + (v - V.hzPx) * M;
-  // (fy: the horizon's place within its sky cell - the picture is drawn on whole cells from the horizon's cell, so it is
-  // laid that much lower, or flying up and down the clouds shook a cell at a time, user Oct 27)
-  const fy = V.hzPx - Math.round(V.hzPx / CPX) * CPX;
-  const dx = mx(x) + (V.ox || 0), dy = my(y + fy), dw = wd * M, dh = ht * M;   // (ox: a shared view's second half, moved by where it starts)
+  const V = VIEW, dx = picX(V, x), dy = picY(V, y), dw = wd * M, dh = ht * M;   // (ox: a shared view's second half, moved by where it starts)
   if (dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4) return;
   const src = B.buf;
   if (V.gl) {
@@ -13740,8 +13745,11 @@ function skyBack(V) {
   W = Math.ceil(V.w / CPX) + 1; H = H0; CW = W + 2; TW = CW;
   cv.width = W * CPX; cv.height = H * CPX;
   const B = viewBufs(VI, W);
-  const hzR = Math.round(V.hzPx / CPX); HOR = hzR / H;
-  const horY = hzR;
+  // (the first picture row the screen shows: zoomed in about a horizon under the screen, the top of the screen is that far
+  // down the unmagnified picture)
+  const hzR = Math.round(V.hzPx / CPX);
+  V.fy = V.hzPx - hzR * CPX; V.r0 = M > 1 && V.hzPx > 0 ? Math.max(0, Math.floor(V.hzPx * (1 - 1 / M) / CPX) - 1) : 0;
+  const horY = hzR - V.r0; HOR = horY / H;
   // the sun: across the whole screen as the game puts it, in this view, zoomed with the clouds (about the pivot)
   // the sun: in the sky picture like the clouds (the lab's), hanging from the horizon and zoomed with the decks - so it never
   // moves against them, whatever the camera does (user Oct 27: "Sun should be in the sky locked in like the clouds, like the
@@ -13772,9 +13780,6 @@ function skyBack(V) {
   if (horY < H) for (let y = Math.max(0, horY); y < H; y++) hspan(y, 0, TW - 1, rgb(E.skyHor.map(Math.round)));   // (under the horizon: the sea covers it)
   drawSun(horY);
   outPix(B.bg, CW, 0, H, -CPX, 0, CW * CPX, H * CPX, false);
-  // (high up with the horizon far under the screen, zoomed in: the picture, magnified about the horizon, ends above the
-  // screen's foot - user Oct 27, a black stripe under a balloon. Its last row, stretched down to the foot)
-  { const foot = V.hzPx + (H * CPX - V.hzPx) * M; if (foot < V.h + 2) outPix(B.bg, CW, H - 1, 1, -CPX, (H - 1) * CPX, CW * CPX, CPX + (V.h + 4 - foot) / M, false); }
   V.bgDone = true;
   // ---- the clouds in this view: placed and lit (once a frame: a cloud the other view has done already is only drawn)
   const vis = VIS[VI]; vis.length = 0;
@@ -13934,7 +13939,7 @@ function skyFront(V) {
   // the planes in deck 1: a plane whose pixel is under a cloud is in it (the game dims it, and takes the cloud's colour)
   const LB = B.lay.hero;
   if (V.planes) for (const pl of V.planes) {
-    const x = Math.floor((V.pivX + (pl.px - V.pivX) / M) / CPX + 1 - (lay.A - Math.floor(lay.A))), y = Math.floor((V.hzPx + (pl.py - V.hzPx) / M) / CPX);
+    const x = Math.floor((V.pivX + (pl.px - V.pivX) / M) / CPX + 1 - (lay.A - Math.floor(lay.A))), y = Math.floor(picRow(V, pl.py));
     if (x < 0 || x >= CW || y < 0 || y >= H) continue;
     const v = LB.buf[y * CW + x];
     if ((v >>> 24) === 255) pl.hit(((v & 255) << 16 | ((v >>> 8) & 255) << 8 | ((v >>> 16) & 255)));
@@ -14632,7 +14637,7 @@ outPix = (...a) => { if (REC) REC.push(a); const t0 = performance.now(); outPix0
 function replay(list, V) { const v0 = VIEW, c0 = ctx; VIEW = V; ctx = V.ctx; M = V.zr / ZL; const t0 = performance.now(); for (const a of list) outPix0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; VIEW = v0; ctx = c0; }
 const REC_BACK = [[], []], REC_DECKS = [[], []], REC_VEIL = [[], []], REC_FRONT = [[], []];
 // the view's screen pixels of a picture point (unmagnified view pixels)
-const toScreen = (V, x, y) => [V.pivX + (x - V.pivX) * (V.zr / ZL) + (V.ox || 0), V.hzPx + (y - V.hzPx) * (V.zr / ZL)];
+const toScreen = (V, x, y) => [picX(V, x), picY(V, y)];   // (17-frame.js: the one mapping)
 // ---- the smoke in a view: its grid (the game's smoke pixel, SMK) and the sun in it
 function smokeView(V, pass) {
   VIEW = V; VI = V.vi; ctx = V.ctx;
@@ -14889,7 +14894,7 @@ function skyNewFrame() {
 function skyNewView() {
   const v = cam.view[viewIdx], shared = cam.merge >= 1;
   const V = {
-    vi: viewIdx, ctx: C, gl: GLR.on, w: shared ? bw : VWP, h: bh, fullW: bw, vsx: shared ? 0 : VSX,
+    vi: viewIdx, ctx: C, gl: GLR.on, w: shared ? bw : VWP, h: bh, fullW: bw, vsx: shared ? 0 : VSX, fy: 0, r0: 0,
     pivX: layerPivX, hzPx: PY(HZ_Y()), waterPx: PY(WATER_Y), zr: v.z / ZOOM_DEFAULT, refX: layerRefX,
     cellsPerUnit: S * ZOOM_DEFAULT / NSKY.CPX, flashPx: 0, smk: Math.max(2, Math.round(2.4 * SV)), sv: SV, again: shared && viewIdx === 1,
   };
@@ -14897,7 +14902,7 @@ function skyNewView() {
   // a shared view's second half: the first half's picture, moved left by where this half starts (its pictures are laid
   // again, not drawn again - they are placed about the first half's pivot, so the two halves are one picture)
   V.ox = 0;
-  if (V.again && SKYV[0]) { const V0 = SKYV[0]; V.pivX = V0.pivX; V.hzPx = V0.hzPx; V.refX = V0.refX; V.ox = -VSX; }
+  if (V.again && SKYV[0]) { const V0 = SKYV[0]; V.pivX = V0.pivX; V.hzPx = V0.hzPx; V.fy = V0.fy; V.r0 = V0.r0; V.refX = V0.refX; V.ox = -VSX; }
   SKYV[viewIdx] = V;
   return V;
 }
