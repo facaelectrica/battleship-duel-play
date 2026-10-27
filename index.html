@@ -2331,7 +2331,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 26 22:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 26 22:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -17712,6 +17712,13 @@ function civHeliTrip(h) {
   h.ai = { phase: 'go', tx, ty: WATER_Y - rnd(250, 600) };
 }
 const landTopAt = x => dryLand(x) ? landTop(x) : surfaceY(x);
+// what's under a civilian helicopter: the ground, the water - or a ship's top, and which ship (user Oct 26: "Even land
+// the helicopter on the container ship")
+function chUnder(h) {
+  if (dryLand(h.x)) return [landTop(h.x), null];
+  const s = surfaceY(h.x), d = shipTopAt(h.x, h.y + chStand(h) - 8);
+  return d && d.y < s ? [d.y, d.c] : [s, null];
+}
 function stepCivHelis(dt) {
   if (!LAND) return;
   if (!chArt && img.civhelis) buildCivHeliArt();
@@ -17741,7 +17748,9 @@ function stepCivHelis(dt) {
     }
     const mine = h.driven != null && crew[h.driven].mode === 'civ' && crew[h.driven].civ === h;
     if (h.state === 'parked') {
-      h.spin = Math.max(0, h.spin - dt * 0.4); h.gear = 1; h.y = landTopAt(h.x) - chStand(h); susStep(h, dt, CH_SUS_K, CH_SUS_C);
+      if (h.deck) h.x += h.deck.dx || 0;                            // (left on a ship: it goes with her)
+      { const [fy, dc] = chUnder(h); if (h.deck && dc !== h.deck) { h.deck = null; h.state = 'fall'; h.vx = 0; h.vy = 0; h.spinV = rnd(-0.4, 0.4); continue; } h.y = fy - chStand(h); }   // (she gone from under it: in it goes)
+      h.spin = Math.max(0, h.spin - dt * 0.4); h.gear = 1; susStep(h, dt, CH_SUS_K, CH_SUS_C);
       if (mine) { if (civStick(h.driven) < -0.2 || Math.abs(h.cin || 0) > 0.2) h.state = 'landed'; }
       else { h.wait -= dt; if (h.wait <= 0) { if (civHelis.some(o => o !== h && o.R === h.R && (o.state === 'fly' || (o.state === 'landed' && o.ai)) && o.driven == null)) h.wait = rnd(15, 40); else { h.state = 'landed'; civHeliTrip(h); } } }   // (one up at a time on each side, user Oct 26: "too many helicopters in the air")
       civHeliHits(h);
@@ -17749,13 +17758,15 @@ function stepCivHelis(dt) {
     }
     // spinning up on the ground ('landed') or flying: the lever and the stick (yours, or its plan's)
     let [lever, stick] = mine ? [h.cin || 0, civStick(h.driven)] : civHeliPlan(h, dt);
-    const gy = landTopAt(h.x) - chStand(h);
+    if (h.state === 'landed' && h.deck) h.x += h.deck.dx || 0;     // (down on a ship: it goes with her)
+    const [fy, deckC] = chUnder(h), gy = fy - chStand(h);
+    if (h.state === 'landed' && h.deck && deckC !== h.deck) { h.deck = null; h.state = 'fly'; }   // (she gone from under it)
     // its wheels: down within 120 of the ground (and on it), up again higher
     h.gear = clamp((h.gear == null ? 1 : h.gear) + (h.state === 'landed' || gy - h.y < 120 ? 1.6 : -1.2) * dt, 0, 1);
     if (h.state === 'landed') {
       h.spin = Math.min(1, h.spin + dt * 0.6);
       h.vx = 0; h.vy = 0; h.y = gy; h.tilt *= 1 - dt * 4; susStep(h, dt, CH_SUS_K, CH_SUS_C); heliDust(h.x, gy + chStand(h), 0, h.spin, dt, chHalf(h));
-      if (h.spin > 0.85 && stick < -0.2) { h.state = 'fly'; h.vy = -20; }
+      if (h.spin > 0.85 && stick < -0.2) { h.state = 'fly'; h.vy = -20; h.deck = null; }
       else if (!mine && h.ai && h.ai.phase === 'home' && h.spin > 0.5 && Math.abs(h.x - h.home) < 80) { h.state = 'parked'; h.wait = rnd(20, 70); h.ai = null; }
       else if (!mine && !h.ai) { h.state = 'parked'; h.wait = rnd(20, 70); }
       civHeliHits(h);
@@ -17780,9 +17791,9 @@ function stepCivHelis(dt) {
     h.spin = Math.min(1, h.spin + dt);
     // touching down: gently on land it sets down; hard, or on the water, it's lost
     if (h.y >= gy) {
-      if (!dryLand(h.x)) { ditchFx(h.x, h.vx, 1.2, 36, h.vy); h.state = 'sink'; h.vy = 40; h.vx *= 0.3; civLetGo(h); continue; }   // (onto the water: in it goes, and sinks - no blast, user Oct 26)
+      if (!dryLand(h.x) && !deckC) { ditchFx(h.x, h.vx, 1.2, 36, h.vy); h.state = 'sink'; h.vy = 40; h.vx *= 0.3; civLetGo(h); continue; }   // (onto the water: in it goes, and sinks - no blast, user Oct 26)
       if (h.vy > 90 && !apron) { civHeliDown(h); h.y = gy; continue; }
-      h.susV = (h.susV || 0) + clamp(h.vy + 25, 20, 110) * 0.16; h.y = gy; h.vy = 0; h.vx = 0; h.state = 'landed';   // (down on its wheels: the body sinks on its legs - up to two units - and bounces back up)
+      h.susV = (h.susV || 0) + clamp(h.vy + 25, 20, 110) * 0.16; h.y = gy; h.vy = 0; h.vx = 0; h.state = 'landed'; h.deck = deckC;   // (down on its wheels: the body sinks on its legs - up to two units - and bounces back up)
     }
     heliDust(h.x, h.y + chStand(h), gy - h.y, h.spin, dt, chHalf(h));   // (low over the ground: its downwash raises the dust)
     // (driven to the world's end: it turns back)
@@ -18142,6 +18153,38 @@ function civLocal(c, x, y) {
   const dx = x - c.x, dy = y - (surfaceY(c.x) + c.sink), lx = dx * ca - dy * sa, ly = dx * sa + dy * ca;
   return [(lx * c.face) / (A.width * K.k) + 0.5, ly / K.k + K.wl];
 }
+// (user Oct 26: "the containers on a container ship react to collision. So you should be able to drop a container on it,
+// or a tank, etc. Remember GTA. Or pick anything from it. Even land the helicopter on the container ship. That vehicle
+// has a solid surface that anything can be dropped on.") every big ship's top is a surface: the top edge of her picture
+// (a mast or rail a pixel or two wide left out), and on the container ship the tops of her stacks of boxes
+const civTopArt = {};
+function civTopPx(c) {
+  const A = civArt(c); if (!A || !A.width) return null;
+  const E = civTopArt[c.kind]; if (E && E.A === A) return E.t;
+  const W = A.width, H = A.height, cv = makeCanvas(W, H), x = cv.getContext('2d'); x.drawImage(A, 0, 0);
+  const d = x.getImageData(0, 0, W, H).data, t0 = new Float32Array(W), t = new Float32Array(W);
+  for (let i = 0; i < W; i++) { let y = 0; while (y < H && d[(y * W + i) * 4 + 3] <= 80) y++; t0[i] = y; }
+  for (let i = 0; i < W; i++) { let m = 0; for (let k = -2; k <= 2; k++) m = Math.max(m, t0[clamp(i + k, 0, W - 1)]); t[i] = m; }
+  civTopArt[c.kind] = { A, t }; return t;
+}
+// the highest ship's top at x at or below y (world): { y, c, px } - or null
+function shipTopAt(x, y0) {
+  if (!LAND) return null;
+  let best = null;
+  for (const c of civShips) {
+    if (c.state !== 'sail' || Math.abs(x - c.x) > civLen(c) * 0.55) continue;
+    const T = civTopPx(c); if (!T) continue;
+    const A = civArt(c), px = civLocal(c, x, surfaceY(c.x) + c.sink)[0] * A.width;
+    if (px < 1 || px >= A.width - 1) continue;
+    let py = T[Math.floor(px)]; if (py >= A.height - 1) continue;
+    if (c.cargo) for (let i = 0; i < CSLOT.cols.length; i++) if (Math.abs(px - CSLOT.cols[i]) < CONT_W / 2) { const n = c.cargo[i].length; if (n) py = Math.min(py, CSLOT.deck - n * CONT_H); break; }
+    const y = civPoint(c, px, py)[1];
+    if (y >= y0 && (!best || y < best.y)) best = { y, c, px };
+  }
+  return best;
+}
+const shipY = (x, y) => { const d = shipTopAt(x, y); return d ? d.y : Infinity; };
+const seaUnder = (x, y) => Math.min(seabedY(x), shipY(x, y));   // (over the sea, what a magnet or a load comes down on)
 // which ship (and which section of her) a point is in, if any
 function civAt(x, y) {
   for (const c of civShips) {
@@ -18228,7 +18271,7 @@ function stepCivShips(dt) {
   if (!LAND) return;
   for (let k = civShips.length - 1; k >= 0; k--) {
     const c = civShips[k], K = CIV[c.kind], A = civArt(c), L = A.width * K.k;
-    c.ph += dt;
+    c.ph += dt; const x0 = c.x; c.dx = 0;
     if (c.state === 'wreck') continue;
     if (c.state === 'sail') {
       // back and forth between the two harbours, never turning: at the end of her run she goes astern
@@ -18242,11 +18285,15 @@ function stepCivShips(dt) {
         else c.x += c.dir * K.v * (1 - 0.5 * hurt) * dt;
       } else moving = Math.abs(c.drv || 0) > 0.05;
       c.a = Math.atan2(surfaceY(c.x + L * 0.3) - surfaceY(c.x - L * 0.3), L * 0.6) * 0.5;
+      c.dx = c.x - x0;                                             // (how far she moved: what stands on her goes with her)
       // her funnels' smoke, drifting off downwind
       c.smokeT -= dt;
       if (moving && c.smokeT <= 0 && !SIM_ONLY) {
-        c.smokeT = 0.22;
-        for (const [fx, fy] of K.funnels) { if (c.lp && linerOn(c) && Object.values(c.lp.loose).some(o => Math.abs(o.p.x + o.p.w / 2 - fx) < 12)) continue; const [x, y] = civPoint(c, fx, fy); spawnSmoke(x, y - 2, { rise: true, r: rnd(3, 5) * K.k * 1.4 * 2.2, grow: rnd(12, 18), lift: 26, vx: rnd(-4, 4) - c.dir * K.v * 0.3, vy: -rnd(14, 26), life: rnd(6, 9), alpha: 0.42, dark: 0.55 }); }   // (3x the cloud - user Oct 26: "the cloud of smoke from the ships should be bigger, like 3x at least")
+        c.smokeT = 0.09;
+        // (user Oct 26, later, with pictures - gen/open/ref/ship_smoke_too_big_oct26.png, ship_smoke_thin_trails_target_oct26.png:
+        // "The smoke stacks on the boats from the engines should be MUCH thinner") a thin dark trail from each funnel: small
+        // puffs close together, hardly growing, leaning off downwind and fading out
+        for (const [fx, fy] of K.funnels) { if (c.lp && linerOn(c) && Object.values(c.lp.loose).some(o => Math.abs(o.p.x + o.p.w / 2 - fx) < 12)) continue; const [x, y] = civPoint(c, fx, fy); spawnSmoke(x + rnd(-0.6, 0.6), y - 2, { rise: true, r: rnd(1.2, 1.9) * Math.max(0.8, K.k * 1.6), grow: rnd(0.8, 1.4), rmax: 7, lift: 14, vx: rnd(-2, 2) - c.dir * K.v * 0.3, vy: -rnd(16, 22), life: rnd(4, 5.5), alpha: 0.55, dark: 0.12 }); }
       }
       // a white bow wave, at whichever end she's going
       if (moving && !SIM_ONLY && Math.random() < dt * 8) spawnFoam(c.x + c.dir * L * 0.48 + rnd(-6, 6), rnd(1.5, 3));
@@ -18926,6 +18973,12 @@ function stepContainers(dt) {
   for (const c of civShips) if (c.cargo && c.state !== 'sail') { for (const st of c.cargo) for (const k of st) Object.assign(k, { where: 'free', x: c.x + rnd(-120, 120), y: surfaceY(c.x) - 20 - rnd(0, 20), vx: rnd(-30, 30), vy: -rnd(0, 30), va: rnd(-1, 1) }); c.cargo = null; }
   for (const k of containers) {
     if (k.where === 'hook' && time - (k.hookT || 0) > 0.5) magDrop(k);   // (its magnet gone: it falls)
+    if (k.where === 'rest' && k.deck) {
+      // resting on a ship's deck: it goes with her; she gone from under it (sunk, sailed off), it falls
+      const c = k.deck; k.x += c.dx || 0; const d = shipTopAt(k.x, k.y + CONT_H / 2 - 8);
+      if (d && d.c === c && d.y < k.y + CONT_H / 2 + 6) { k.y = d.y - CONT_H / 2; k.a = c.a + c.tilt; } else { k.deck = null; Object.assign(k, { where: 'free', vx: (c.dx || 0) / Math.max(dt, 1e-3), vy: 0, va: rnd(-0.5, 0.5) }); }
+      continue;
+    }
     if (k.where !== 'free') continue;
     const wet = !dryLand(k.x) && !docks.some(d => harbourHit(d, k.x, DECK_Y));
     k.x += k.vx * dt; k.a += k.va * dt;
@@ -18937,11 +18990,24 @@ function stepContainers(dt) {
       if (k.y >= bed) { k.y = bed; k.where = 'rest'; k.a = clamp(k.a, -0.3, 0.3); kickDust(k.x, 14, 0.5); }
       continue;
     }
+    const yb0 = k.y + CONT_H / 2;
     k.vy += 320 * dt; k.y += k.vy * dt;
+    // (user Oct 26, GTA: a ship's top is solid) falling onto a ship: over one of the container ship's slots it joins that
+    // stack; anywhere else on her (the bridge's roof, her deck) it lands and rides with her
+    if (wet && k.vy > 0) { const d = shipTopAt(k.x, yb0 - 4);
+      if (d && k.y + CONT_H / 2 >= d.y) {
+        const c = d.c; let i = -1;
+        if (c.cargo) CSLOT.cols.forEach((cx, j) => { if (Math.abs(d.px - cx) < CONT_W * 0.6 && (i < 0 || Math.abs(d.px - cx) < Math.abs(d.px - CSLOT.cols[i]))) i = j; });
+        if (k.vy > 160) shakeAt(1.5, k.x);
+        sfxImpact(k.x); spawnSparks(k.x, d.y, 6, 90);
+        if (i >= 0 && c.cargo[i].length <= CONT_ROWS) { c.cargo[i].push(k); Object.assign(k, { where: 'stack', a: 0, vx: 0, vy: 0, va: 0, deck: null }); }
+        else Object.assign(k, { where: 'rest', deck: c, y: d.y - CONT_H / 2, a: c.a + c.tilt, vx: 0, vy: 0, va: 0 });
+        continue;
+      } }
     if (wet && k.y + CONT_H / 2 >= surfaceY(k.x)) { k.inWater = true; k.vy *= 0.25; lakeSplash(k.x, 0.6); continue; }
     if (!wet) {
       const g = docks.some(d => harbourHit(d, k.x, DECK_Y)) ? DECK_Y : landTop(k.x);
-      if (k.y + CONT_H / 2 >= g) { k.y = g - CONT_H / 2; k.where = 'rest'; k.a = 0; k.vx = 0; kickLandDust(k.x, g, 4); sfxImpact(k.x); }
+      if (k.y + CONT_H / 2 >= g) { k.y = g - CONT_H / 2; k.where = 'rest'; k.deck = null; k.a = 0; k.vx = 0; kickLandDust(k.x, g, 4); sfxImpact(k.x); }
     }
   }
   // the bottom's few: don't keep too many
@@ -19107,7 +19173,7 @@ function tankSink(t) {
 }
 function stepTankSink(t, dt) {
   t.sinkT += dt;
-  const floor = landBelow(t.x, t.y - 10);
+  const floor = onLand(t.x) ? landBelow(t.x, t.y - 10) : seabedY(t.x);
   t.y = Math.min(floor, t.y + 26 * dt); t.a *= 1 - dt;
   if (Math.random() < dt * 12) spawnSmoke(t.x + rnd(-20, 20), WATER_Y - 2, { mist: true, r: rnd(2, 4), grow: 2, lift: 4, vx: rnd(-6, 6), vy: -rnd(4, 12), life: rnd(0.8, 1.4), alpha: 0.5 });
   if (t.y >= floor - 0.5 || t.sinkT > 8) { t.state = 'dead'; landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: floor, a: 0, facing: t.facing, t: 0, burn: 0 }); }
@@ -19696,7 +19762,7 @@ function stepRope(h, dt) {
   // the helicopter doesn't give
   const wEnd = t || o ? 1 / 60 : 1 / 14, under = t ? MAG_H + tankTopH() : o ? MAG_H + magTop(o) + magFoot(o) : MAG_H;
   // (where the load meets the ground: the magnet's face, or the tank's tracks along its length)
-  const under0 = (x, y) => dryLand(x) ? landBelow(x, y) : Math.min(landBelow(x, y), seabedY(x));   // (over the sea: down to the bottom)
+  const under0 = (x, y) => dryLand(x) ? landBelow(x, y) : Math.min(landBelow(x, y), seaUnder(x, y));   // (over the sea: down to the bottom)
   const floorAt = x => t ? Math.min(under0(x - TANK_L * 0.4, P[N][1] - 30), under0(x, P[N][1] - 30), under0(x + TANK_L * 0.4, P[N][1] - 30)) : under0(x, P[N][1] - 20);
   let grounded = false;
   for (let it = 0; it < 14; it++) {
@@ -19922,7 +19988,7 @@ function magNearest(L, ex, ey, reach) {
 // taken: off its stack (a box), out of its own driving (a tank)
 function magTake(o, tag) {
   o.carried = tag; o.spd = 0; o.hookT = time;
-  if (isBox(o)) { if (o.from) { const j = o.from.indexOf(o); if (j >= 0) o.from.splice(j, 1); } o.from = null; o.where = 'hook'; o.a = 0; o.va = 0; }
+  if (isBox(o)) { if (o.from) { const j = o.from.indexOf(o); if (j >= 0) o.from.splice(j, 1); } o.from = null; o.deck = null; o.where = 'hook'; o.a = 0; o.va = 0; }
   if (isTank(o)) { o.hook = true; o.vx = 0; o.vy = 0; }
   spawnSparks(o.x, o.y - magTop(o), 8, 120); sfxImpact(o.x);
 }
@@ -20002,10 +20068,10 @@ function stepCivMagnets(dt) {
         if (d <= seg) continue;
         const k = (d - seg) / d / (wa + wb); a[0] += dx * k * wa; a[1] += dy * k * wa; b[0] -= dx * k * wb; b[1] -= dy * k * wb;
       }
-      const e = P[N], fl = dryLand(e[0]) ? landBelow(e[0], e[1] - 20) : seabedY(e[0]);
+      const e = P[N], fl = dryLand(e[0]) ? landBelow(e[0], e[1] - 20) : seaUnder(e[0], e[1] - 20);
       if (e[1] + under > fl) { e[1] = fl - under; e[2] += (e[0] - e[2]) * 0.5; }   // (resting on the ground or the bottom: it drags)
     }
-    for (let i = 1; i < N; i++) { const q = P[i], gy = dryLand(q[0]) ? landBelow(q[0], q[1] - 8) : seabedY(q[0]); if (q[1] > gy - 1) q[1] = gy - 1; }
+    for (let i = 1; i < N; i++) { const q = P[i], gy = dryLand(q[0]) ? landBelow(q[0], q[1] - 8) : seaUnder(q[0], q[1] - 8); if (q[1] > gy - 1) q[1] = gy - 1; }
     const e = P[N], q1 = P[N - 1], ex = e[0], ey = e[1];
     { const wetNow = !dryLand(ex) && ey + MAG_H > surfaceY(ex);
       if (wetNow && !M.wet && !SIM_ONLY) { lakeSplash(ex, M.obj ? 0.9 : 0.4); for (let k = 0; k < 6; k++) spawnFoam(ex + rnd(-8, 8), rnd(1.5, 3)); }
@@ -20021,7 +20087,7 @@ function stepCivMagnets(dt) {
     }
     if (M.obj) { const o = M.obj; magPlace(o, ex, ey, (e[0] - e[2]) / Math.max(dt, 1e-3), (e[1] - e[3]) / Math.max(dt, 1e-3), M.ang);
       // (on the ground under it, the load rests there: the cable goes slack)
-      const fl = dryLand(o.x) ? landTop(o.x) - magFoot(o) : seabedY(o.x) - magFoot(o); if (o.y > fl) o.y = fl; }
+      const fl = dryLand(o.x) ? landTop(o.x) - magFoot(o) : seaUnder(o.x, o.y - 20) - magFoot(o); if (o.y > fl) o.y = fl; }
   }
 }
 function drawCivMagnets() {
@@ -23097,15 +23163,19 @@ const TANK_STEP = 30;
 const TANK_FALL_KILL = Math.sqrt(2 * 520 * 10 * 21);      // (the speed of a fall from ten times its height: user Oct 25)
 function tankGround(t, x) {
   const half = TANK_L * 0.42, ys = [];
-  for (let k = 0; k < 5; k++) { const u = -1 + k / 2, gx = x + u * half; ys.push(landBelow(gx, t.y - TANK_STEP - 2 - Math.abs(u) * 6)); }
+  // (and a ship's top over the sea - user Oct 26, GTA: a tank dropped on the container ship stands on her and rides)
+  let ship = null;
+  for (let k = 0; k < 5; k++) { const u = -1 + k / 2, gx = x + u * half, sy = t.y - TANK_STEP - 2 - Math.abs(u) * 6, g = landBelow(gx, sy), d = onLand(gx) ? null : shipTopAt(gx, sy);
+    if (d && d.y < g && d.y < surfaceY(gx)) { ys.push(d.y); if (!ship || k === 2) ship = d.c; } else ys.push(g); }
   const back = Math.min(ys[0], ys[1]), front = Math.min(ys[3], ys[4]), mid = ys[2];
-  return { back, front, mid, top: Math.min(back, front, mid) };
+  return { back, front, mid, top: Math.min(back, front, mid), ship };
 }
 function tankSettle(t, dt, snap) {
   const G = tankGround(t, t.x), half = TANK_L * 0.42;
   const want = Math.min((G.back + G.front) / 2, G.mid + 2);
   const a = Math.atan2(G.front - G.back, half * 2);
   if (snap) { t.y = want; t.a = a; return; }
+  t.deck = G.ship && t.y >= want - 3 ? G.ship : null;
   if (want > t.y + 1.5 || t.vy < 0) {
     // the ground's gone from under it (or it hopped): it falls
     t.vy = Math.min(600, t.vy + 520 * dt); t.y = Math.min(want, t.y + t.vy * dt);
@@ -23126,6 +23196,7 @@ function stepTank(t, dt) {
   const mine = crew[p].mode === 'tank';
   if (t.enter && lcX(t.x) > LAND_ENTER) t.enter = false;
   const want = t.enter ? (SIDE(p) ? -1 : 1) * TANK_V : (mine ? t.input : t.cpuIn || 0) * TANK_V;   // (coming in: it drives itself)
+  if (t.deck) t.x += t.deck.dx || 0;                             // (on a ship: it goes with her)
   // (user Oct 25 late) driven off its own end of the world it's home - mended and rearmed - and you're ashore to pick
   // what's next; the next one comes in fresh
   { const out = SIDE(p) ? 1 : -1, end = SIDE(p) ? WORLD_W - TANK_X0 : TANK_X0, hung = helis.some(h => heliLoad(h) && tanks[h.rope.hold] === t);
@@ -23136,7 +23207,7 @@ function stepTank(t, dt) {
   const vmax = want * (1 - 0.6 * Math.max(0, -slope * Math.sign(want) * t.facing) / 0.5);
   t.vx += clamp(vmax - t.vx, -90 * dt, 90 * dt);
   if (Math.abs(t.vx) > 0.5) {
-    const R = t.x > SEA1, nx = clamp(t.x + t.vx * dt, R ? SEA1 + TANK_W * 0.5 : TANK_X0, R ? WORLD_W - TANK_X0 : SEA0 - TANK_W * 0.5), G = tankGround(t, nx);   // (it stops at its country's edge, by the harbour)
+    const R = t.x > SEA1, sea = !onLand(t.x), nx = sea ? clamp(t.x + t.vx * dt, TANK_X0, WORLD_W - TANK_X0) : clamp(t.x + t.vx * dt, R ? SEA1 + TANK_W * 0.5 : TANK_X0, R ? WORLD_W - TANK_X0 : SEA0 - TANK_W * 0.5), G = tankGround(t, nx);   // (on a ship at sea it drives her deck - off her end, into the water)   // (it stops at its country's edge, by the harbour)
     const lead = t.vx > 0 ? G.front : G.back;
     if (lead < t.y - TANK_STEP - 1) {                           // a wall: it can't climb that - pushed on, it hops
       t.vx = 0; t.stuckT = (t.stuckT || 0) + dt;
@@ -23157,6 +23228,7 @@ function stepTank(t, dt) {
   tankSettle(t, dt, false);
   tankWheels(t, dt);
   if (lakeAt(t.x) && t.y > WATER_Y + 6) { tankSink(t); return; }   // (into the lake: over its tracks, it sinks)
+  if (!onLand(t.x) && !t.deck && t.y > surfaceY(t.x) + 6) { tankSink(t); return; }   // (into the sea - off a ship, dropped: the same)
   // repaired and rearmed on its own ground, standing still
   if (onOwnGround(p, t.x) && Math.abs(t.vx) < 3) { t.fixT += dt; if (t.fixT > 2.4) { t.fixT = 0; if (t.hp < TANK_HP) t.hp = Math.min(TANK_HP, t.hp + 1); else if (t.ammo < TANK_AMMO) t.ammo++; } } else t.fixT = 0;
   if (t.hp <= 2) tankSmoke(t, dt);
@@ -23308,7 +23380,12 @@ function stepHeli(h, dt) {
   if (h.state === 'landed') {
     h.vx = 0; h.vy = 0;
     // lift off: up, with the rotor going
-    if (stick < -0.2 && h.spin > 0.8) { h.state = 'fly'; h.vy = -20; sfxClink(telegraphs[p]); }
+    if (stick < -0.2 && h.spin > 0.8) { h.state = 'fly'; h.vy = -20; h.deck = null; sfxClink(telegraphs[p]); }
+    else if (h.deck) {
+      // down on a ship: it goes with her, sat on her top; she gone from under it, it's flying again (and falls if nobody lifts it)
+      const c = h.deck; h.x += c.dx || 0; const d = shipTopAt(h.x, h.y + heliSkid() - 10);
+      if (d && d.c === c) { h.y = d.y - heliSkid(); h.tilt += (c.a + c.tilt - h.tilt) * Math.min(1, dt * 6); } else { h.deck = null; h.state = 'fly'; h.vy = 0; }
+    }
     else { const half = heliHalf() * 0.8, sl = Math.atan2(landBelowIn(h.x + half, h.y - 4) - landBelowIn(h.x - half, h.y - 4), half * 2); h.y = landBelowIn(h.x, h.y - 4) - heliSkid(); h.tilt += (sl - h.tilt) * Math.min(1, dt * 6); }
     if (onOwnGround(p, h.x)) { h.fixT += dt; if (h.fixT > 1.4) { h.fixT = 0; if (h.hp < HELI_HP) h.hp = Math.min(HELI_HP, h.hp + 1); else if (h.magBroken) { h.magBroken = false; sfxClink(telegraphs[p]); } else if (h.rockets < HELI_ROCKETS) h.rockets++; } } else h.fixT = 0;
     if (h.hp <= HELI_HP - 1) heliSmoke(h, dt);
@@ -23348,6 +23425,7 @@ function stepHeli(h, dt) {
   if (Hg < 45) { const slope = onLand(h.x) ? Math.atan2(gr - gl, half * 2) : 0, bl = clamp(1 - Hg / 45, 0, 1); tilt = tilt * (1 - bl) + slope * bl; }
   h.tilt += (tilt - h.tilt) * Math.min(1, dt * 4);
   if (foot >= gm && !LAND) { h.y = gm - 2 - heliSkid(); h.vy = Math.min(h.vy, 0); }   // (over water it holds just above it)
+  else if (foot >= gm && LAND && !onLand(h.x) && gm < surfaceY(h.x)) { const d = shipTopAt(h.x, h.y - 4); susKick(h, h.vy + 30); h.y = gm - heliSkid(); h.state = 'landed'; h.vy = 0; h.vx = 0; h.deck = d && d.c; }   // (onto a ship's top: it lands there)
   else if (foot >= gm && LAND && (lakeAt(h.x) || !onLand(h.x))) { heliSink(h); return; }   // (onto a lake - or the sea - it goes in)
   else if (foot >= gm) {
     susKick(h, h.vy + 30);                                       // (onto its skids' springs, as the civilians)
@@ -23369,7 +23447,7 @@ function stepHeli(h, dt) {
 // (the ground under the helicopter's nose and tail is looked for inside the world: user Oct 25 - at the world's end its
 // tail hung over nothing, found no ground there, and it settled onto its tail)
 const landBelowIn = (x, y) => landBelow(clamp(x, 1, WORLD_W - 1), y);
-const heliGround = (x, y) => LAND && onLand(x) ? (lakeAt(x) ? Math.min(WATER_Y, landBelowIn(x, y)) : landBelowIn(x, y)) : surfaceY(x);
+const heliGround = (x, y) => LAND && onLand(x) ? (lakeAt(x) ? Math.min(WATER_Y, landBelowIn(x, y)) : landBelowIn(x, y)) : Math.min(surfaceY(x), shipY(x, y));   // (at sea: the water, or a ship's top - user Oct 26, land on the container ship)
 function rotorWash(h, dt) {
   if (!dryLand(h.x)) { rotorWashSea(h, dt); return; }   // (over the sea: spray)
   const gm = landBelow(h.x, h.y), foot = h.y + heliSkid(), H = Math.max(0, gm - foot), sp = h.spin || 0;
