@@ -2331,7 +2331,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 26 20:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 26 21:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8100,6 +8100,7 @@ function planePose(pl) {
     const fk = pl.flare || 0;
     if (fk > 0) { const H = LAND ? airfieldAt(pl.x).y - pl.y : 999; deg = deg * (1 - fk) - pl.facing * fk * (2.5 + 4 * smoothstep(90, 0, H)); }
   }
+  if (pl.carried != null && pl.hookA != null) deg = pl.hookA * 180 / Math.PI;   // (on a magnet: turned with it)
   return { fr, deg: Math.round(deg / 3) * 3, side, key: 'P' + pl.id + key, side0: !pl.turn || Math.floor(clamp(pl.turn.t / PLANE_TURN_T, 0, 0.999) * 5) % 4 === 0 };
 }
 function blitPlane(src, key, side, deg, cx, cy, only) {
@@ -18802,7 +18803,7 @@ function stepCranes(dt) {
       if (cr.auto) craneAutoStep(cr, dn);
       else cr.tx = clamp(cr.tx + clamp(cr.cin || 0, -1, 1) * 70 * dt, cr.rmin, cr.rmax);
     } else craneCpu(cr, dt, mv, dn);
-    if (cr.obj) { if (magHoldable(cr.obj)) magPlace(cr.obj, cr.tx, cr.hy + 3, 0, 0); else cr.obj = null; }   // (a tank or a plane hanging from the spreader)
+    if (cr.obj) { if (magHoldable(cr.obj)) magPlace(cr.obj, cr.tx, cr.hy + 3 - MAG_H, 0, 0, 0); else cr.obj = null; }   // (a tank or a plane hanging from the spreader)
     cr.x = cr.tx; cr.y = cr.hy;                          // (where the camera looks when it's yours)
   }
   stepContainers(dt);
@@ -19690,7 +19691,7 @@ function stepRope(h, dt) {
     const best = magNearest(magTargets(), e[0], e[1], MAG_GRAB + 10);
     if (best) { R.obj = o = best; magTake(best, h.id); e[0] = e[2] = best.x; e[1] = e[3] = best.y - magTop(best) - MAG_H; }
   }
-  if (o) magPlace(o, e[0], e[1] + MAG_H, (e[0] - e[2]) / R.dt, (e[1] - e[3]) / R.dt);
+  if (o) { const q = P[N - 1]; R.ang = clamp(-Math.atan2(e[0] - q[0], e[1] - q[1] + 0.01), -1.1, 1.1); magPlace(o, e[0], e[1], (e[0] - e[2]) / R.dt, (e[1] - e[3]) / R.dt, R.ang); }
   if (!t && !o && R.mode === 'out' && R.len > 30) {
     let best = null, bd = MAG_GRAB;
     for (const t0 of tanks) { if (!t0 || t0.state !== 'alive' || t0.carry != null || t0.hook) continue; const d = Math.hypot(e[0] - t0.x, e[1] + MAG_H - (t0.y - tankTopH())); if (d < bd) { bd = d; best = t0; } }
@@ -19802,7 +19803,7 @@ function drawHeliRope(h) {
   const R = h.rope; if (!R) return;
   const P = R.n;
   drawRopeLine(P);
-  const e = P[ROPE_N], q = P[ROPE_N - 1], a = R.hold >= 0 ? (tanks[R.hold] ? tanks[R.hold].a : 0) : clamp(Math.atan2(-(e[0] - q[0]), e[1] - q[1] + 0.01) * 0.6, -0.5, 0.5);
+  const e = P[ROPE_N], q = P[ROPE_N - 1], a = R.hold >= 0 ? (tanks[R.hold] ? tanks[R.hold].a : 0) : R.obj && R.ang != null ? R.ang : clamp(Math.atan2(-(e[0] - q[0]), e[1] - q[1] + 0.01) * 0.6, -0.5, 0.5);
   drawMagnet(e[0], e[1], a, R.hold >= 0);
 }
 // the magnet: a flat round electromagnet seen from the side - a domed cap with the rope's shackle, a dark slab, a pale
@@ -19891,16 +19892,22 @@ function magTake(o, tag) {
   if (isTank(o)) { o.hook = true; o.vx = 0; o.vy = 0; }
   spawnSparks(o.x, o.y - magTop(o), 8, 120); sfxImpact(o.x);
 }
-// carried: its top at the magnet's face (x, yTop), moving with it
-function magPlace(o, x, yTop, vx, vy) {
-  o.x = x; o.y = yTop + magTop(o); o.vx = vx || 0; o.vy = vy || 0; o.spd = 0; o.hookT = time;
-  if (isTank(o)) { o.a += (clamp((vx || 0) * 0.002, -0.3, 0.3) - o.a) * 0.1; }
+// carried: hanging from the magnet's face, turned with the magnet (user Oct 26: "The container should not stay
+// horizontal. In fact, everything that's caught by a magnet should be affected by the rotation that the magnet does when
+// the object is moving") - (ex, ey) the magnet's shackle, a its tilt; the load's top on the tilted face, its middle
+// below that along the tilt, the load itself tilted as much
+function magPlace(o, ex, ey, vx, vy, a) {
+  a = a || 0; const d = MAG_H + magTop(o), s = Math.sin(a), c = Math.cos(a);
+  o.x = ex - s * d; o.y = ey + c * d; o.vx = vx || 0; o.vy = vy || 0; o.spd = 0; o.hookT = time; o.hookA = a;
+  if (isBox(o) || isTank(o)) o.a = a;
 }
+// how a carried thing is drawn turned: with its magnet, or its own way when it isn't carried
+const heldAng = (o, a0) => o.carried != null && o.hookA != null ? o.hookA : a0;
 function magHoldable(o) { return isBox(o) ? o.where === 'hook' : isTank(o) ? o.state === 'alive' && !!o.hook : planes.includes(o) ? o.state === 'fly' : traffic.includes(o) ? o.state === 'free' : seaplanes.includes(o) ? (o.state === 'water' || o.state === 'moored') : shuttles.includes(o) ? o.state === 'landed' : false; }
 const magTop = o => isBox(o) ? CONT_H / 2 : isTank(o) ? tankTopH() : traffic.includes(o) ? (o.kind === 'jet' ? 14 : 9) : seaplanes.includes(o) ? 18 : shuttles.includes(o) ? 12 : 9;
 const magFoot = o => isBox(o) ? CONT_H / 2 : isTank(o) ? 0 : traffic.includes(o) ? (TRAFFIC[o.kind].gy || 10) : seaplanes.includes(o) ? 3 : shuttles.includes(o) ? 4 : PLANE_WHEELS;
 function magDrop(o) {
-  o.carried = null;
+  o.carried = null; o.hookA = null;
   // (a box falls as a loose one - into the sea it floats and sinks, on the ground it lands; a tank drops onto its
   // tracks unhurt, as from the army helicopter's rope)
   if (isBox(o)) { Object.assign(o, { where: 'free', vx: clamp(o.vx || 0, -200, 200), vy: clamp(o.vy || 0, -100, 200), va: rnd(-0.4, 0.4) }); return; }
@@ -19937,16 +19944,37 @@ function stepCivMagnets(dt) {
     if (h.state !== 'fly' && h.state !== 'landed') { if (M.obj) { magDrop(M.obj); M.obj = null; } h.mag = null; continue; }
     M.len = M.out ? Math.min(CMAG_L, M.len + 140 * dt) : Math.max(0, M.len - 180 * dt);
     if (!M.out && M.len <= 0) { h.mag = null; continue; }
-    // its swing: a pendulum dragged behind by the helicopter's speed
-    M.sv += (-(M.sx) * 4 - (h.vx || 0) * 0.02 - M.sv * 1.6) * dt; M.sx += M.sv * dt; M.sx = clamp(M.sx, -0.7, 0.7);
-    const ax = h.x, ay = h.y + chSkid(h) * 0.4, ex = ax + Math.sin(M.sx) * M.len, ey = ay + Math.cos(M.sx) * M.len;
-    M.ex = ex; M.ey = ey;
+    // (user Oct 26: "the cable that's carrying the magnet seems to behave like a single stiff line. It should feel more
+    // like a rope. So there's more momentum to it... if you stop the helicopter, the weight of the thing you're
+    // carrying would carry the momentum forward") a rope of knots, as the army helicopter's: each keeps its way and
+    // falls, held to the rope's length; the magnet heavy, a load far heavier - so it lags behind as the helicopter sets
+    // off, and swings on ahead when it stops
+    const ax = h.x, ay = h.y + chSkid(h) * 0.4, N = 10;
+    if (!M.n) M.n = Array.from({ length: N + 1 }, (_, i) => [ax, ay + i * 0.1, ax, ay + i * 0.1]);
+    const P = M.n, seg = Math.max(0.3, M.len / N), damp = Math.pow(0.8, dt), G = 900 * dt * dt, heavy = !!M.obj;
+    for (let i = 1; i <= N; i++) { const q = P[i], vx = (q[0] - q[2]) * damp, vy = (q[1] - q[3]) * damp; q[2] = q[0]; q[3] = q[1]; q[0] += vx; q[1] += vy + G; }
+    P[0][0] = P[0][2] = ax; P[0][1] = P[0][3] = ay;
+    const wEnd = heavy ? 1 / 60 : 1 / 14, under = MAG_H + (M.obj ? magTop(M.obj) + magFoot(M.obj) : 0);
+    for (let it = 0; it < 14; it++) {
+      for (let i = 0; i < N; i++) {
+        const a = P[i], b = P[i + 1], wa = i === 0 ? 0 : 1, wb = i + 1 === N ? wEnd : 1, dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1e-6;
+        if (d <= seg) continue;
+        const k = (d - seg) / d / (wa + wb); a[0] += dx * k * wa; a[1] += dy * k * wa; b[0] -= dx * k * wb; b[1] -= dy * k * wb;
+      }
+      const e = P[N], fl = dryLand(e[0]) ? landBelow(e[0], e[1] - 20) : surfaceY(e[0]);
+      if (e[1] + under > fl) { e[1] = fl - under; e[2] += (e[0] - e[2]) * 0.5; }   // (resting on the ground or the water: it drags)
+    }
+    for (let i = 1; i < N; i++) { const q = P[i], gy = dryLand(q[0]) ? landBelow(q[0], q[1] - 8) : surfaceY(q[0]); if (q[1] > gy - 1) q[1] = gy - 1; }
+    const e = P[N], q1 = P[N - 1], ex = e[0], ey = e[1];
+    M.ex = ex; M.ey = ey; M.ang = clamp(-Math.atan2(ex - q1[0], ey - q1[1] + 0.01), -1.1, 1.1);   // (the magnet hangs along the rope's end)
+    // (the swing tugs the helicopter toward its load: you feel its weight)
+    if (heavy) { const L = Math.max(20, Math.hypot(ex - ax, ey - ay)); h.vx = (h.vx || 0) + clamp((ex - ax) / L, -1, 1) * 90 * dt; }
     if (M.obj && (M.obj.carried !== -10 - civHelis.indexOf(h) || !magHoldable(M.obj))) { if (M.obj.carried === -10 - civHelis.indexOf(h)) magDrop(M.obj); M.obj = null; }
     if (!M.obj && M.out && M.len > 30) {
       const best = magNearest(magTargetsAll(), ex, ey, MAG_GRAB + 12);
       if (best) { M.obj = best; magTake(best, -10 - civHelis.indexOf(h)); }
     }
-    if (M.obj) { const o = M.obj; magPlace(o, ex, ey + MAG_H, (ex - o.x) / Math.max(dt, 1e-3), (ey + MAG_H + magTop(o) - o.y) / Math.max(dt, 1e-3));
+    if (M.obj) { const o = M.obj; magPlace(o, ex, ey, (e[0] - e[2]) / Math.max(dt, 1e-3), (e[1] - e[3]) / Math.max(dt, 1e-3), M.ang);
       // (on the ground under it, the load rests there: the cable goes slack)
       const fl = dryLand(o.x) ? landTop(o.x) - magFoot(o) : surfaceY(o.x) - magFoot(o); if (o.y > fl) o.y = fl; }
   }
@@ -19955,8 +19983,8 @@ function drawCivMagnets() {
   for (const h of civHelis) {
     const M = h.mag; if (!M || M.ex == null) continue;
     const ax = h.x, ay = h.y + chSkid(h) * 0.4;
-    drawRopeLine(Array.from({ length: 8 }, (_, i) => { const u = i / 7; return [ax + (M.ex - ax) * u, ay + (M.ey - ay) * u]; }));
-    drawMagnet(M.ex, M.ey, clamp(-M.sx * 0.6, -0.5, 0.5), !!M.obj);
+    drawRopeLine(M.n || Array.from({ length: 8 }, (_, i) => { const u = i / 7; return [ax + (M.ex - ax) * u, ay + (M.ey - ay) * u]; }));
+    drawMagnet(M.ex, M.ey, M.ang || 0, !!M.obj);
   }
 }
 
@@ -20462,7 +20490,7 @@ function drawSeaplanes(x0, x1, mode) {
     // its lamps, turned with it about the same point (user Oct 26: "the red light is wrong when the plane tilts" - and
     // in the turn frames they'd sit off it: side views only)
     if (s.state === 'fly' && fi === 0) planeLights(s.x, s.y, d, 5, 22, fbU + 9.5, false, s.home * 0.01, s.ang || 0, -(fbU + 3));
-    C.save(); C.translate(PX(s.x), PY(s.y)); C.rotate(s.ang || 0);
+    C.save(); C.translate(PX(s.x), PY(s.y)); C.rotate(heldAng(s, s.ang || 0));
     const X = -Math.round(sp.width / 2), Y = -Math.round(sp.height / 2 + fbU * SV);
     C.drawImage(sp, X, Y);
     civLitLook(im, CESSNA_K * SV, X, Y, PX(s.x));
@@ -21134,7 +21162,7 @@ function drawOrbiter(v) {
   let ang = (v.state === 'fly' ? v.pitch : v.pitch || 0) * face;
   if (v.state === 'wreck') ang = 0.12 * face;
   ang -= face * (v.flare || 0) * 0.1;                                   // (nose up coming in to land)
-  C.save(); C.translate(PX(v.x), PY(v.y + (v.susY || 0))); C.rotate(ang); C.scale(sq, (v.roll || 0) > 0.5 ? -1 : 1);
+  C.save(); C.translate(PX(v.x), PY(v.y + (v.susY || 0))); C.rotate(heldAng(v, ang)); C.scale(sq, (v.roll || 0) > 0.5 ? -1 : 1);
   // (the sheet's frames sit in the middle of their cells, the belly 30 pixels under it: drawn with the belly 7.7 under
   // the orbiter's place, as the old drawing was)
   const L = -Math.round(sp.width / 2), T = A.orbSheet ? Math.round((7.7 - 30 * K) * SV - sp.height / 2) : -Math.round(sp.height * 0.62);
@@ -22618,7 +22646,7 @@ function drawTraffic(x0, x1, mode) {
         jet ? 23 : 5 * CESSNA_SC, CP ? (jet ? 60 : 22 * CESSNA_SC) : jet ? 70 : 24, CP ? (jet ? 23 : 9.5 * CESSNA_SC) : jet ? 17 : 7, jet, f.col || 0, CP ? CP.ang : f.ang, jet ? 11 : 2 * CESSNA_SC);
     }
     const hc = hangarClip(f.x, f.y, im.width * (CP ? SHEET_PLANES[f.kind].I.k : T.k) / 2);   // (in through its hangar's door: hidden past it)
-    C.save(); C.translate(PX(f.x), PY(f.y - lift + (f.susY || 0))); C.rotate(CP ? CP.ang : f.ang);
+    C.save(); C.translate(PX(f.x), PY(f.y - lift + (f.susY || 0))); C.rotate(heldAng(f, CP ? CP.ang : f.ang));   // (on a magnet: turned with it)
     if (f.kind === 'jet' && (f.gear || 0) > 0.03) {
       const g = f.gear, d0 = f.dir || 1;
       const B0 = CP ? 31 : 14;                                       // (the belly under the middle: the Oct 26 sheet's, or the old drawing's)
