@@ -2386,7 +2386,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 27 16:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 27 16:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12948,6 +12948,7 @@ for (const [k, , , , , def] of SL) P[k] = def;
 for (const [k, , , , , def] of SM_SL) P[k] = def;
 for (const [k, , , , , def] of FW_SL) P[k] = def;
 P.variety = 0; P.smtones = 1; P.smfast = 1; P.smsplit = 1; P.cache = 1; P.cull = 1; P.ship = 0;
+P.shade = 1;   // (each puff drawn with the light running across it, 11-drawing.js lightSlope; 0: one flat tone a puff, as before)
 // edits kept in this browser (the editor's values; COMPARE / EXPORT show them against these defaults)
 const P_DEF = Object.assign({}, P);
 const SCENE_KEYS = new Set(['time', 'cover', 'sky', 'fog', 'rain', 'wind', 'sea']);
@@ -13079,6 +13080,25 @@ function dot(x, y, col) { if (x >= 0 && x < TW && y >= 0 && y < H) { buf[y * TW 
 const SPANS = new Map();
 function spans(r) { const k = Math.max(1, Math.round(r * 2)); let s = SPANS.get(k); if (!s) { const R = k / 2, n = Math.floor(R); s = []; for (let dy = -n; dy <= n; dy++) s.push(Math.floor(Math.sqrt(Math.max(0, (R + 0.5) * (R + 0.5) - dy * dy)))); SPANS.set(k, s); } return s; }
 function disc(cx, cy, r, col, clipY) { const s = spans(r), n = (s.length - 1) >> 1; for (let i = 0; i < s.length; i++) { const y = cy - n + i; if (y > clipY) break; hspan(y, cx - s[i], cx + s[i], col); } }
+// a disc with the light running across it: the light f0 (in tone steps) at its middle, gx and gy tone steps a cell to the
+// right and down; each cell takes floor(light), lo..hi, its colour cols(tone) - in hard steps, the tones meeting along the
+// light's own lines (a few spans a row, no cell-by-cell work)
+function discShade(cx, cy, r, f0, gx, gy, lo, hi, cols, clipY) {
+  const s = spans(r), n = (s.length - 1) >> 1;
+  for (let i = 0; i < s.length; i++) {
+    const y = cy - n + i; if (y > clipY) break;
+    const a = f0 + gy * (i - n), xe = cx + s[i];
+    let x = cx - s[i];
+    while (x <= xe) {
+      const t = Math.max(lo, Math.min(hi, Math.floor(a + gx * (x - cx))));
+      let x2 = xe;
+      if (gx > 1e-6 && t < hi) x2 = Math.min(xe, Math.ceil(cx + (t + 1 - a) / gx) - 1);    // (the last cell before the next tone up)
+      else if (gx < -1e-6 && t > lo) x2 = Math.min(xe, Math.floor(cx + (t - a) / gx));    // (the last cell before the next tone down)
+      if (x2 < x) x2 = x;
+      hspan(y, x, x2, cols(t)); x = x2 + 1;
+    }
+  }
+}
 
 
 // ================================================================== cloud shapes (lobes)
@@ -13297,6 +13317,10 @@ function sphereChord(px, py, pz, L, cx, cy, cz, R) {
 const airOf = h => 1 - Math.pow(1 - h, P.atmo ?? 1);
 const hazeOf = c => Math.min(0.92, airOf(c.haze) * (1 - 0.4 * E.overcast) * (1 - 0.45 * Math.min(1, (P.glow ?? 1) * E.sunset)));
 const shadowed = od => clamp((od - 0.08) * 5, 0, 1);
+// (besides the tone: the light before it is cut into tones - f, in tone steps - and how it changes with the normal - lx, ly,
+// lz: tone steps per unit of normal - so a puff can be drawn with the light running across it (11-drawing.js discShade).
+// free: the tone is the light's own (not a shadow's, the highlight's); lo: the sunset glow's floor; bk: the sun behind)
+const LV = { f: 0, free: false, lo: 0, lx: 0, ly: 0, lz: 0, bk: 0 };
 function lightValue(it, own, lob, L, odOther, odSelf, under) {
   let nx = it.nx, ny = it.ny, nz = it.nz, rimAdd = 0;
   // the sun close behind a cloud (L mostly into the screen): light by the lobes' smooth normals, not each puff's own, or the
@@ -13310,6 +13334,7 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
   const cast = P.shadow * shadowed(od);
   let sh = cast;
   if (odSelf) sh = Math.max(sh, P.self * shadowed(odSelf * 0.8));
+  const shk = v > 0.15 ? 1 - sh * 0.5 : 1;                                   // (how much of the sun's light the shade leaves: LV)
   v -= sh * 0.5 * Math.max(0, v - 0.15);
   v += P.amb * 0.3 * (ny * 0.5 + 0.5) - P.amb * 0.12;
   if (under) v += under * Math.max(0, -ny) * 0.95 * (1 - cast * 0.6);           // the sun under the deck: the whole base lights, in steps
@@ -13348,7 +13373,15 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
   // sun lights every cloud from below and from its sides, whatever the sun's own rays do: undersides up to tone 3 (orange),
   // sides 1–2 (mauve, pink), tops left in the shade (purple). A floor under the tone, so the rims (tone 4) stay.
   const gk = (P.glow ?? 1) * E.sunset;
-  if (gk > 0.01) { const gy = it.lny ?? ny, f = gk * (0.12 + 0.62 * Math.max(0, -gy) + 0.2 * (1 - Math.abs(gy))); out = Math.max(out, Math.min(3, Math.floor(f * 4.2))); }
+  let lo = 0;
+  if (gk > 0.01) { const gy = it.lny ?? ny, f = gk * (0.12 + 0.62 * Math.max(0, -gy) + 0.2 * (1 - Math.abs(gy))); lo = Math.min(3, Math.floor(f * 4.2)); out = Math.max(out, lo); }
+  // (LV: the light's slope - d(tone)/d(normal): the sun's 0.5·L, the sky's AMBIENT and the light from under the deck on ny -
+  // for a puff whose tone is the light's own; in a cast shadow, the highlight or an edge's glow it stays one flat tone)
+  const C5 = 5 * P.contrast * E.contrast;
+  LV.f = (q - (it.jit || 0) * P.jitter) * 5; LV.lo = lo; LV.bk = bk;           // (without its JITTER: a puff's own random step would break the light's lines)
+  LV.free = out === Math.max(lo, clamp(Math.floor(q * 5), 0, 4)) && tone !== 5 && !(cast > 0.45) && rimAdd < 0.05;
+  LV.lx = 0.5 * L[0] * shk * C5; LV.lz = 0.5 * L[2] * shk * C5;
+  LV.ly = (0.5 * L[1] * shk + 0.15 * P.amb - (under && ny < 0 ? under * 0.95 * (1 - cast * 0.6) : 0)) * C5;
   return out;
 }
 // the view's zoom (1 = the game's framing; out to 1/50, in to ×5), about the screen's middle and the horizon
@@ -13596,6 +13629,7 @@ function drawCloud(c, ax, from, to, ayOver, Hworld) {
   const lod = c.lod;
   const ay = ayOver ?? c.y, L = c.L, X = screenX(c), haze = hazeOf(c), HW = Hworld ?? H, ayW = c.y;
   const cache = []; const lit = flash.k > 0 && flash.lay === c.lay;
+  const colOf = t => cache[t] ?? (cache[t] = toneCol(t, haze, 0, 0));
   const idx = lod ? fillIdx(c) : null, n = idx ? idx.length : to - from, stride = c.toneStride || 5, cb = P.cull === 0 ? null : c.cb;
   for (let q = 0; q < n; q++) {
     const i = idx ? idx[q] : from + q, it = c.items[i];                   // (zoomed out: the billows alone)
@@ -13609,14 +13643,44 @@ function drawCloud(c, ax, from, to, ayOver, Hworld) {
       if (c.casters.length) { const wx = X + it.x, wy = HW - ayW + it.y, wz = c.wz + it.zz; for (const o of c.casters) for (const l of o.wl) odOther += chord(wx, wy, wz, L, l) / l.rb; }
       it.tone = lightValue(it, it.j, c.lob, L, odOther, odSelf, c.under);
       if (!(it.tone >= 0)) it.tone = 0;                                   // (never a tone that isn't one: it stopped the frame)
+      lightSlope(c, it);
     }
     let tone = it.tone;
     if (lit) tone = Math.min(5, tone + flashBoost(c, it, X));            // (lit: always drawn live, never from the sprite)
+    const cx = ax + Math.round(it.x + it.dx), cy = ay - Math.round(it.y) + Math.round(it.dy);
+    if (view === 0 && it.tgx !== undefined && tone === it.tone && (it.tgx || it.tgy)) {
+      // (the light across it: if it stays within one tone over the whole disc, the plain disc in that tone)
+      const e = (Math.abs(it.tgx) + Math.abs(it.tgy)) * (r + 1), t0 = clamp(Math.floor(it.tf - e), it.tlo, 4), t1 = clamp(Math.floor(it.tf + e), it.tlo, 4);
+      if (t0 === t1) disc(cx, cy, r, colOf(t0), H); else discShade(cx, cy, r, it.tf, it.tgx, it.tgy, it.tlo, 4, colOf, H);
+      continue;
+    }
     let col;
-    if (view === 0) { col = cache[tone]; if (col === undefined) col = cache[tone] = toneCol(tone, haze, 0, 0); }
+    if (view === 0) col = colOf(tone);
     else col = toneCol(tone, haze, it.j, it.id);
-    disc(ax + Math.round(it.x + it.dx), ay - Math.round(it.y) + Math.round(it.dy), r, col, H);
+    disc(cx, cy, r, col, H);
   }
+}
+// A puff's light across it (user Oct 27: "sometimes I see these splotches in the clouds"). Each puff had one flat tone: the
+// puffs are several cells wide and the light changes a tone or more across one (over its billow's dome), so where the
+// tones met, each puff stood out whole - discs of a slightly different tone over the cloud's lit body, a flat circle
+// for every billow and puff, worst magnified (zoomed in, or SKY PIXEL 2). Now a puff whose tone is the light's own is
+// drawn with the light running across it, as the light changes over the cloud there: the lobe's smooth curve and its
+// billow's dome, weighed by MASS as the puff's own light is (more of the lobe's with the sun behind). Neighbouring puffs
+// then meet in the same tone, and the tones change along the light's lines through them - one lit volume, still in the
+// five hard tones. In a cast shadow, the highlight and an edge's glow a puff stays one tone, as before.
+function lightSlope(c, it) {
+  if (!LV.free || P.shade === 0) { it.tgx = it.tgy = 0; return; }
+  const l = c.lob[it.j]; if (!l || it.lnx === undefined) { it.tgx = it.tgy = 0; return; }
+  // its normal: m·(the lobe's) + (1 − m)·(its billow's dome); moving a cell across a sphere of radius R turns its normal
+  // by (1/R, 0, −nx/(R·nz)) (to the right) and (0, 1/R, −ny/(R·nz)) (up)
+  const m = P.mass + (1 - P.mass) * LV.bk, bill = it.fill ? it : it.bill, Rl = Math.max(2, l.rb), Rb = Math.max(1.5, it.fill ? it.br : (bill.br || 4) * 0.82);
+  const p = it.fill ? null : it.p, lnz = Math.max(0.3, it.lnz);
+  const px = p ? p[0] : it.lnx, py = p ? p[1] : it.lny, pz = Math.max(0.3, p ? p[2] : it.lnz);
+  const ul = Math.hypot(m * it.lnx + (1 - m) * px, m * it.lny + (1 - m) * py, m * it.lnz + (1 - m) * (p ? p[2] : it.lnz)) || 1;
+  const a = m / Rl, b = (1 - m) / Rb;
+  const dxz = -(a * it.lnx / lnz + b * px / pz), dyz = -(a * it.lny / lnz + b * py / pz);
+  const gx = (LV.lx * (a + b) + LV.lz * dxz) / ul, gUp = (LV.ly * (a + b) + LV.lz * dyz) / ul, G = 1.5;   // (never more than a tone and a half a cell)
+  it.tgx = clamp(gx, -G, G); it.tgy = clamp(-gUp, -G, G); it.tf = LV.f; it.tlo = LV.lo;
 }
 function lobeTones(c) {
   const L = c.L, lob = c.lob; c.ltones = [];
@@ -14023,7 +14087,7 @@ function skyFrame(G) {
   skyGrowK = G.fast ? 3 : 0.35;                                             // (the settings open: the clouds follow the slider)
   P.fog = Math.max(P.ghaze, G.fog);
   computeEnv();
-  LSIG = [P.shadow, P.self, P.amb, P.contrast, P.expo, P.jitter, P.glow, P.lightz, P.rim, view, E.contrast.toFixed(3), E.sunset.toFixed(2), E.behind.toFixed(2), E.night.toFixed(2)].join(',') + '|';
+  LSIG = [P.shadow, P.self, P.amb, P.contrast, P.expo, P.jitter, P.glow, P.lightz, P.rim, P.mass, P.shade, view, E.contrast.toFixed(3), E.sunset.toFixed(2), E.behind.toFixed(2), E.night.toFixed(2)].join(',') + '|';
   const windV = P.wind * 8 * S;
   for (const lay of LAYERS) lay.off += windV * lay.par * dt;
   // the lightning: the game's newest bolt, its brightness
@@ -15013,7 +15077,8 @@ const NSKY_API = {
   // (tests: a deck's buffer of a view, as RGBA rows, and its band)
   dbgBuf(vi, name) { const b = VB[vi], B = name === 'bg' || name === 'veil1' ? b[name] : b.lay && b.lay[name]; if (!B) return null; const u = new Uint8Array(B.buf.buffer.slice(0)); return { w: b.cw, h: b.h, by0: B.by0, by1: B.by1, px: Array.from(u) }; },
   dbgClouds(vi) { return VIS[vi].map(c => ({ lay: c.lay.name, x: Math.round(screenX(c)), minX: Math.round(c.minX), maxX: Math.round(c.maxX), h: Math.round(c.h), y: c.y, grow: +c.grow.toFixed(2), far: c.far, wisp: !!c.wisp })); },
-  stats() { const n = clouds.filter(c => c.visible).length; return { clouds: n, balls: [SMNPV[0].front.balls, SMNPV[0].back.balls, SMNPV[1].front.balls], last: !!SMNPV[0].front.last, o: (f => f.ob ? [f.ox, f.oy, f.ow, f.oh, f.ob.subarray(0, f.ow * f.oh).filter(v => v >>> 24).length, f.ocam && f.ocam.map(Math.round)] : null)(SMNPV[0].front), smoke: ((SMNPV[0].front.ms || 0) + (SMNPV[0].back.ms || 0)).toFixed(1) }; },
+  stats() { const n = clouds.filter(c => c.visible).length; let sh = 0, fl = 0; for (const c of clouds) if (c.visible && c.items && !c.far) for (const it of c.items) if (it.tone !== undefined) { if (it.tgx || it.tgy) sh++; else fl++; }
+    return { clouds: n, puffs: [sh, fl], balls: [SMNPV[0].front.balls, SMNPV[0].back.balls, SMNPV[1].front.balls], last: !!SMNPV[0].front.last, o: (f => f.ob ? [f.ox, f.oy, f.ow, f.oh, f.ob.subarray(0, f.ow * f.oh).filter(v => v >>> 24).length, f.ocam && f.ocam.map(Math.round)] : null)(SMNPV[0].front), smoke: ((SMNPV[0].front.ms || 0) + (SMNPV[0].back.ms || 0)).toFixed(1) }; },
 };
 
 // ================================================================== the SKY EDITOR (the Cloud Lab's panel, in the game)
