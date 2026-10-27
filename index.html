@@ -2331,7 +2331,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 27 09:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 27 09:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10894,7 +10894,9 @@ function spawnSmoke(x, y, o) {
     x, y, vx: o.vx || 0, vy: o.vy || -15, r: o.r || 8, grow: o.grow || rnd(6, 10), age: 0, life: o.life || rnd(10, 15),
     dark: o.dark || 0, lift: o.lift || 40, alpha: o.alpha || rnd(0.55, 0.75), mist: !!o.mist, quick: !!o.quick, rmax: o.rmax || 26,
     ashT: o.ash ? rnd(0.5, 2) : -1, keep: !!o.keep, fam: o.fam || null, ground: !!o.ground, rise: !!o.rise,
+    src: o.src || null,                                   // (the new sky: 'smear' - pulled out of a column by a plane)
   };
+  if (o.chain) { p.prev = o.chain.last; o.chain.last = p; }   // (a streak: each puff joined to the one before it)
   // a full sky: the oldest puff is told to fade away over a couple of seconds (dropping it outright
   // used to slice the top off the column)
   if (smoke.length >= 1500) { for (const o of smoke) if (!o.kill) { o.kill = 2.5; break; } }
@@ -11325,7 +11327,7 @@ function glSetup() {
   gl.activeTexture(gl.TEXTURE8); gl.bindTexture(gl.TEXTURE_2D, GLR.gradTex); gl.bindSampler(8, null);
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
-  GLR.pix = null;
+  GLR.pix = null; GLR.pixPool = [];
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
@@ -11772,6 +11774,7 @@ function glBeginFrame() {
   for (const k in s) { sh[k] = (sh[k] || 0) + (s[k] - (sh[k] || 0)) * 0.1; s[k] = 0; }
   glClearTarget(GLR.screen, 0, 0, GLR.screen._w, GLR.screen._h);
 }
+const PIX_RING = 24;
 function glEndFrame() { if (GLR.on && !GLR.lost) glFlush(); }
 
 /* ---- the context: the Canvas 2D calls the world uses, drawn with the batch ---- */
@@ -11897,12 +11900,15 @@ class GLCtx {
     if (GLR.lost || !(w > 0 && hgt > 0)) return;
     const s = this.s, gl = GLR.gl;
     glBegin(this, s.op);
-    let P = GLR.pix;
+    // (a ring of textures, one per picture in a frame: the new sky lays a dozen pictures a view, and with one texture each
+    // upload had to wait for the draws before it - a flush and a stall every picture)
+    const pool = GLR.pixPool || (GLR.pixPool = []), k = (GLR.pixI = (GLR.pixI || 0) + 1) % PIX_RING;
+    let P = pool[k];
     if (!P || P.epoch !== GLR.epoch || P.w < w || P.h < hgt) {
       if (P && P.epoch === GLR.epoch && glTexBusy(P.tex)) glFlush();
       let tw = 64, th = 64; while (tw < w) tw *= 2; while (th < hgt) th *= 2;
       if (P && P.epoch === GLR.epoch) { tw = Math.max(tw, P.w); th = Math.max(th, P.h); gl.deleteTexture(P.tex); }
-      P = GLR.pix = { tex: glNewTex(tw, th, gl.NEAREST), w: tw, h: th, epoch: GLR.epoch };
+      P = pool[k] = { tex: glNewTex(tw, th, gl.NEAREST), w: tw, h: th, epoch: GLR.epoch };
     } else if (glTexBusy(P.tex)) glFlush();
     gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, P.tex);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
@@ -12570,7 +12576,7 @@ const SL = [
   ['lodb', 'PUFF LOD', 0, 3, 0.05, 0.8],
   ['lodl', 'LOBE LOD', 0, 8, 0.1, 1.8],
   // (the game's own: how the game's weather becomes the lab's sky, and how the decks move with the camera)
-  ['gcover', 'CLOUDS ON A CLEAR DAY', 0, 1, 0.01, 0.3],
+  ['gcover', 'CLOUDS AT THE USUAL SKY', 0, 1, 0.01, 0.3],   // (the game's SKY 0.12; SKY 0 is always clear)
   ['ghaze', 'HAZE ON A CLEAR DAY', 0, 1, 0.01, 0.35],
   ['par1', 'DECK 1 PARALLAX', 0, 1, 0.01, 0.45],
   ['par2', 'DECK 2 PARALLAX', 0, 1, 0.01, 0.3],
@@ -13695,14 +13701,18 @@ function deckOut(lay, B, frac) {
 }
 // ================================================================== once a frame
 // G: { dt, time, weather, rain, fog, wind, sea, flash: { k, x (the bolt's world x) } }
-let skyDt = 0;
+let skyDt = 0, skyGrowK = 0.35;
 function skyFrame(G) {
   const dt = skyDt = Math.min(0.1, G.dt);
   now += dt; frameNo++;
   // the game's weather as the lab's sky: a clear day keeps the lab's few clouds and its haze (CLOUDS / HAZE ON A CLEAR DAY)
   P.time = G.time; P.sea = G.sea; P.wind = G.wind;
   P.rain = G.rain; P.sky = G.weather;
-  P.cover = clamp(Math.max(P.gcover + (1 - P.gcover) * clamp((G.weather - 0.12) / 0.5, 0, 1), clamp(G.rain * 1.5, 0, 1)), 0, 1);   // (the game's clear day: weather 0.12)
+  // the game's SKY slider as the lab's CLOUDS: 0 (CLEAR) none at all, the game's usual sky (0.12) the lab's few clouds
+  // (CLOUDS AT THE USUAL SKY, 0.3), all of them by OVERCAST (0.76); rain brings its own
+  const w = G.weather, g0 = P.gcover;
+  P.cover = clamp(Math.max(w <= 0.12 ? g0 * w / 0.12 : g0 + (1 - g0) * (w - 0.12) / 0.64, clamp(G.rain * 1.5, 0, 1)), 0, 1);
+  skyGrowK = G.fast ? 3 : 0.35;                                             // (the settings open: the clouds follow the slider)
   P.fog = Math.max(P.ghaze, G.fog);
   computeEnv();
   LSIG = [P.shadow, P.self, P.amb, P.contrast, P.expo, P.jitter, P.glow, P.lightz, P.rim, view, E.contrast.toFixed(3), E.sunset.toFixed(2), E.behind.toFixed(2), E.night.toFixed(2)].join(',') + '|';
@@ -13753,6 +13763,9 @@ function skyBack(V) {
   if (horY < H) for (let y = Math.max(0, horY); y < H; y++) hspan(y, 0, TW - 1, rgb(E.skyHor.map(Math.round)));   // (under the horizon: the sea covers it)
   drawSun(horY);
   outPix(B.bg, CW, 0, H, -CPX, 0, CW * CPX, H * CPX, false);
+  // (high up with the horizon far under the screen, zoomed in: the picture, magnified about the horizon, ends above the
+  // screen's foot - user Oct 27, a black stripe under a balloon. Its last row, stretched down to the foot)
+  { const foot = V.hzPx + (H * CPX - V.hzPx) * M; if (foot < V.h + 2) outPix(B.bg, CW, H - 1, 1, -CPX, (H - 1) * CPX, CW * CPX, CPX + (V.h + 4 - foot) / M, false); }
   V.bgDone = true;
   // ---- the clouds in this view: placed and lit (once a frame: a cloud the other view has done already is only drawn)
   const vis = VIS[VI]; vis.length = 0;
@@ -13760,8 +13773,12 @@ function skyBack(V) {
     if (c.gfr !== frameNo) {                                             // (its forming, once a frame whoever sees it)
       c.gfr = frameNo; c.y = c.lay.baseY;
       const d = c.bx - c.lay.uPiv; if (d > WORLD / 2) c.bx -= WORLD; if (d < -WORLD / 2) c.bx += WORLD;
-      c.growT = c === hero ? 1 : smoothstep(c.thr * 0.6 - 0.04, c.thr * 0.6 + 0.12, c.wisp ? (P.wisps ?? 0.5) : P.cover);
-      c.grow += (c.growT - c.grow) * Math.min(1, skyDt * 0.35); if (Math.abs(c.growT - c.grow) < 0.002) c.grow = c.growT;
+      // (the game: a clear sky has no clouds at all - user Oct 27, "There should be no clouds in the sky whatsoever if the
+      // sky is clear. And you should have this gradual appearance of clouds as we move the slider". Every cloud, the
+      // hero and the wisps too, fades in from nothing as CLOUDS rises from 0; the wisps go with the clouds)
+      const cov = P.cover, clear = smoothstep(0, 0.06, cov);
+      c.growT = c === hero ? smoothstep(0.12, 0.3, cov) : clear * smoothstep(c.thr * 0.6 - 0.04, c.thr * 0.6 + 0.12, c.wisp ? (P.wisps ?? 0.5) * clamp(cov / 0.3, 0, 1) : cov);
+      c.grow += (c.growT - c.grow) * Math.min(1, skyDt * skyGrowK); if (Math.abs(c.growT - c.grow) < 0.002 || frameNo < 3) c.grow = c.growT;
     }
     c.y = c.lay.baseY;
     if (c.extU === undefined) cloudBox(c);
@@ -14087,7 +14104,7 @@ function gatherSmokeNew(want) {
     smnPuff(cx, cy, Math.max(0.55, R), z, a, fam, s.h);
     // joined to the puff before it: fill the gap so the body is unbroken
     const q = s.prev;
-    if (q && !q.dead) {
+    if (q && !q.dead && q.age < q.life) {
       const qx = cxOf(q.x), qy = cyOf(q.y), d = Math.hypot(qx - cx, qy - cy);
       const qt = q.age / q.life, qR = Math.max(0.55, q.r * kx * Math.min(1, 0.55 + q.age * 3) * Math.min(1, 0.45 + q.alpha * 0.75)), rr = Math.min(R, qR);
       const st = Math.max(0.5, rr * 0.7);
@@ -14655,7 +14672,7 @@ const NSKY_API = {
 // it's opened. Edits are kept in this browser. TUNE.add(tab, rows) adds a category: the editor is meant to grow.
 const DESC = {
   sunh: 'How high the sun climbs at midday, in screens above the horizon at ×1', bands: 'How many steps the sky\'s gradient has: more is smoother',
-  wisps: 'How many long thin wisps stream between the clouds', gcover: 'How many clouds there are when the game\'s sky is clear (more come with its weather and its rain)',
+  wisps: 'How many long thin wisps stream between the clouds', gcover: 'How many clouds there are at the game\'s usual sky (its SKY slider at 0.12). SKY at 0 (CLEAR) has none at all; they fade in as it rises, all of them by OVERCAST; rain brings its own',
   ghaze: 'The haze under each deck of clouds on a clear day (the game\'s fog adds to it)', par1: 'How much deck 1 (the front clouds) moves as the camera pans: 1 = with the world, 0 = fixed in the sky',
   par2: 'How much deck 2 moves as the camera pans', par3: 'How much deck 3 moves as the camera pans', par4: 'How much deck 4 (the far horizon) moves as the camera pans',
   cloudk: 'The clouds\' size, times the lab\'s (the sky is built again)',
@@ -14847,7 +14864,7 @@ function skyNewFrame() {
   let fl = null;
   const b = storm.bolts[storm.bolts.length - 1];
   if (b) { const vis = b.t < 0.08 ? 1 : b.t < 0.16 ? 0.25 : b.t < 0.26 ? 0.85 : b.t < 0.32 ? 0 : 0.5 * (1 - (b.t - 0.32) / 0.18); if (vis > 0.02) fl = { k: vis, x: b.x0 }; }
-  NSKY.frame({ dt: frameDt || 1 / 60, time: env.time, weather: env.weather, rain: env.rain, fog: env.fog, wind: env.wind, sea: env.sea, flash: fl });
+  NSKY.frame({ dt: frameDt || 1 / 60, time: env.time, weather: env.weather, rain: env.rain, fog: env.fog, wind: env.wind, sea: env.sea, flash: fl, fast: ui.settings });
   if (!NSKY.editor.TUNE.built && document.body) NSKY.editor.build({ isNew: () => SKYNEW, setNew: skyNewSet, rescreen: () => { } });
   NSKY.editor.show(ui.settings || NSKY.editor.open);
 }
@@ -14873,6 +14890,7 @@ function skyNewFront() {
   const V = SKYV[viewIdx]; if (!V) return;
   V.ctx = C;
   NSKY.smoke(V, 'back');
+  { const x0 = CAMPX / SV, x1 = x0 + VWW; drawSparks(x0, x1); drawBullets(x0, x1); }   // (under deck 1's clouds, as the smoke behind them)
   V.planes = [];
   for (const pl of allPlanes()) {
     if (!pl || pl.state !== 'fly') continue;
@@ -14882,6 +14900,74 @@ function skyNewFront() {
 }
 // the overlays: the smoke in front of deck 1 (fires, trails, planes' smoke)
 function skyNewSmoke() { const V = SKYV[viewIdx]; if (!V) return; V.ctx = C; NSKY.smoke(V, 'front'); }
+// ---- the planes in the smoke (the Cloud Lab's PLANE IN SMOKE, SMEAR - the user, Oct 27: "all planes should affect the
+// smoke like we had decided on the cloud test when they fly through it"). Every aircraft in the air drags the air along
+// its path, tears the puffs in its way into smaller ones flung into its wake, and pulls a streak of the column's own smoke
+// out behind it. (NEW only: the old smoke goes on as it was)
+const PLSM_R = 34;
+function planesInSmoke(dt) {
+  if (!SKYNEW || !(dt > 0) || (!smoke.length && !trails.length)) return;
+  const list = [];
+  for (const pl of allPlanes()) if (pl && (pl.state === 'fly' || pl.state === 'down')) list.push(pl);
+  for (const f of traffic) if ((f.state === 'fly' || f.state === 'free') && !f.ground) list.push(f);
+  for (const s of seaplanes) if (s.state === 'fly') list.push(s);
+  for (const h of civHelis) if (h.state === 'fly') list.push(h);
+  for (const h of helis) if (h && h.state === 'fly') list.push(h);
+  // (user Oct 27: "missiles should affect each other's trails when they're fired, like the smear the plane is supposed to
+  // be doing" - a missile smears the trails and smoke it flies through; its own fresh trail, under 0.8 s, it leaves alone)
+  for (const m of shells) if (m.from === 'rocket' && !m.under && !(m.drop > 0)) { m._smR = 24; list.push(m); }
+  for (const a of list) {
+    // (its speed from where it was: every kind keeps its own velocity its own way)
+    const vx = a._smX === undefined ? 0 : clamp((a.x - a._smX) / dt, -900, 900), vy = a._smY === undefined ? 0 : clamp((a.y - a._smY) / dt, -900, 900);
+    a._smX = a.x; a._smY = a.y;
+    const sp = Math.hypot(vx, vy); if (sp < 25) continue;
+    smearAir(a, vx, vy, sp, dt);
+  }
+}
+function smearAir(a, vx, vy, sp, dt) {
+  const ux = vx / sp, uy = vy / sp, R = a._smR || PLSM_R, x = a.x, y = a.y;
+  // (no smoke near it - none in its cell of the smoke's air or those round it, no trail close: nothing to do)
+  let any = false;
+  for (let j = -1; j <= 1 && !any; j++) for (let i = -1; i <= 1; i++) { const g = gIdx(x + i * SG.cell, y + j * SG.cell); if (g >= 0 && SG.dens[g] > 0.02) { any = true; break; } }
+  if (!any) for (const t of trails) if (Math.abs(t.p2.x - x) < R * 2 && Math.abs(t.p2.y - y) < R * 2) { any = true; break; }
+  if (!any) { if (a._smCh) a._smCh.last = null; return; }
+  gridImpulse(x, y, vx * 0.85, vy * 0.85, 2.2);
+  let near = null, nd = 1e9;
+  const touch = (q, r, puff) => {
+    const dx = q.x - x, dy = q.y - y, rr = R + r * 0.6; if (dx > rr || dx < -rr || dy > rr || dy < -rr) return;
+    const d = Math.hypot(dx, dy) || 1, f = 1 - d / rr; if (f <= 0) return;
+    if (puff && d < nd) { nd = d; near = q; }
+    // a puff in its way is dragged with it - the big ones less than the small - and torn: it shrinks, and what it loses
+    // comes off as smaller puffs flung into the wake
+    const k = Math.min(1, 4 * f * dt / (1 + r / 14));
+    q.vx += (vx * 0.7 - q.vx) * k; q.vy += (vy * 0.7 - q.vy) * k;
+    q.x += vx * 0.2 * f * dt / (1 + r / 14); q.y += vy * 0.2 * f * dt / (1 + r / 14);
+    if (puff && f > 0.3 && q.r > 5 && q.src !== 'smear') {
+      const lose = Math.min(q.r - 4, q.r * 0.9 * f * dt); q.r -= lose; q.rmax = Math.max(4, q.rmax - lose);
+      q.tear = (q.tear || 0) + lose / 2.2;
+      while (q.tear >= 1) {
+        q.tear -= 1;
+        const ex = q.x + (x - q.x) * 0.35 + rnd(-4, 4), ey = q.y + (y - q.y) * 0.35 + rnd(-4, 4);
+        spawnSmoke(ex, ey, { mist: q.mist, dark: q.dark, fam: q.fam, r: rnd(2.5, 4.5), grow: rnd(1.5, 3), rmax: rnd(9, 15), lift: 3,
+          vx: vx * rnd(0.35, 0.65) + rnd(-15, 15), vy: vy * rnd(0.35, 0.65) + rnd(-12, 12), life: rnd(4, 7), alpha: Math.min(1, q.alpha + 0.1), src: 'smear' });
+      }
+    }
+  };
+  for (const s of smoke) if (!(s.src === 'smear' && s.age < 1.2) && s.age > 0.5) touch(s, s.r, true);
+  for (const t of trails) { if (t.p2.age > 0.8) touch(t.p2, trailR(t.p2.age)); if (t.root && t.p1.age > 0.8) touch(t.p1, trailR(t.p1.age)); }
+  // while it is in the smoke, a streak of it comes out behind (as many puffs as the smoke there is thick)
+  const g = gIdx(x, y), dens = g >= 0 ? SG.dens[g] : 0;
+  if (near && dens > 0.15) {
+    const ch = a._smCh || (a._smCh = { last: null });
+    a._smAcc = (a._smAcc || 0) + dt * 45 * Math.min(1, dens / 1.2);
+    while (a._smAcc >= 1) {
+      a._smAcc -= 1;
+      const bx = x - ux * rnd(14, 24), by = y - uy * rnd(14, 24) + rnd(-3, 3);
+      spawnSmoke(bx, by, { mist: near.mist, dark: near.dark, fam: near.fam, r: Math.min(near.r * 0.35, rnd(3, 5)), grow: rnd(1.5, 3), rmax: rnd(10, 16), lift: 4,
+        vx: vx * 0.55, vy: vy * 0.55, life: rnd(5, 8), alpha: Math.min(1, near.alpha + 0.1), chain: ch, src: 'smear' });
+    }
+  } else if (a._smCh) a._smCh.last = null;
+}
 
 function beginView(c, v, camPx, sx, wpx, vi, camF = camPx) {
   C = c;
@@ -18218,13 +18304,7 @@ function renderOverlays() {
     const n = Math.max(12, Math.round(R * 0.7));
     for (let k = 0; k < n; k++) { const ang = k / n * Math.PI * 2; blkPx(cx + Math.cos(ang) * R, cy + Math.sin(ang) * R * 0.75, 1); }
   }
-  for (const s of sparks) {
-    if (s.x < x0 - 20 || s.x > x1 + 20 || s.px === undefined) continue;
-    const t = s.life / s.max;
-    C.fillStyle = t < 0.4 ? '#fffbe0' : t < 0.75 ? '#ffd24a' : '#ff7a1a';
-    blk(s.x, s.y, 1);
-    if (t < 0.6) blk((s.x + s.px) / 2, (s.y + s.py) / 2, 1);
-  }
+  if (!skyNewOn) drawSparks(x0, x1);                      // (NEW: behind deck 1's clouds - 41-sky-new.js skyNewFront)
   for (const s of shells) {
     if (s.click || s.x < x0 - 10 || s.x > x1 + 10) continue;
     const sp = Math.hypot(s.vx, s.vy) || 1; let ux = s.vx / sp; let uy = s.vy / sp;
@@ -18253,13 +18333,29 @@ function renderOverlays() {
     blkLine(PX(s.x) - ux * L, PY(s.y) - uy * L, PX(s.x), PY(s.y));
     if (!s.under) { C.fillStyle = '#ffd36b'; blk(s.x, s.y, 1); }
   }
+  if (!skyNewOn) drawBullets(x0, x1);                     // (NEW: behind deck 1's clouds, user Oct 27)
+  drawAim();
+  ema('ovEnd', ot);
+}
+
+// the sparks (hits on metal, the guns' muzzles) and the machine guns' rounds: over the world, and with the new sky under
+// deck 1's clouds (user Oct 27: "the machine gun fire should render behind the first cloud layer too... The same with the
+// sparks that they make")
+function drawSparks(x0, x1) {
+  for (const s of sparks) {
+    if (s.x < x0 - 20 || s.x > x1 + 20 || s.px === undefined) continue;
+    const t = s.life / s.max;
+    C.fillStyle = t < 0.4 ? '#fffbe0' : t < 0.75 ? '#ffd24a' : '#ff7a1a';
+    blk(s.x, s.y, 1);
+    if (t < 0.6) blk((s.x + s.px) / 2, (s.y + s.py) / 2, 1);
+  }
+}
+function drawBullets(x0, x1) {
   C.fillStyle = '#ffe680';
   for (const b of bullets) if (b.px !== undefined && !b.spent && b.x > x0 - 10 && b.x < x1 + 10) blkLine(PX(b.px), PY(b.py), PX(b.x), PY(b.y));
   // spent rounds: fading as they droop (a short streak, dimmer and dimmer)
   for (const b of bullets) if (b.spent && b.px !== undefined && b.x > x0 - 10 && b.x < x1 + 10) { C.globalAlpha = clamp(b.spent / BULLET_FADE, 0, 1) * 0.9; blkLine(PX(b.px), PY(b.py), PX(b.x), PY(b.y)); }
   C.globalAlpha = 1;
-  drawAim();
-  ema('ovEnd', ot);
 }
 
 // Rain: two layers of slanted streaks, leaning with the wind, stopping at the sea, with little splashes.
@@ -27507,7 +27603,7 @@ function frameBody(now) {
     stepVisuals(dt);
   }
   const t1 = performance.now();
-  if (!held_ && !SIM_ONLY) { stepSmoke(dt); stepTrails(dt); }
+  if (!held_ && !SIM_ONLY) { stepSmoke(dt); stepTrails(dt); planesInSmoke(dt); }
   const t2 = performance.now();
   for (const gun of [...guns, ...tguns, ...hguns]) { gun.aimShow = Math.max(0, gun.aimShow - dt); gun.press = Math.max(0, gun.press - dt); }
   const q0 = performance.now();
@@ -27558,7 +27654,7 @@ async function start(data) {
   for (let i = 0; i < 120; i++) physics(SUBSTEP);
   window.claude?.hot?.snapshot?.(() => ({ worldW: WORLD_W, ships: ships.map(s => ({ x: s.x, vx: s.vx })) }));
   window.__game = {
-    nsky: NSKY, skyNewSet, strike: x => strike(x, surfaceY(x), null),
+    nsky: NSKY, skyNewSet, strike: x => strike(x, surfaceY(x), null), planesInSmokeTest: (a, dt) => { const vx = a._smX === undefined ? 0 : (a.x - a._smX) / dt, vy = a._smY === undefined ? 0 : (a.y - a._smY) / dt; a._smX = a.x; a._smY = a.y; const sp = Math.hypot(vx, vy); if (sp > 25) smearAir(a, vx, vy, sp, dt); },
     lifeboat: () => img.lifeboat, docks: () => docks, blast: (p, k) => { const sh = ships[p]; const [x, y] = deckPoint(sh, k, 0.5); sectionBlast(x, y - 6, 0.95, sh.vx); damageSection(sh, k, 1, x, y); }, runCtl, shocks, plants, birds, perches, ships, cam, telegraphs, guns, tguns, towers, crew, pieces, debris, smoke, shells, trails, dust, grains, flames, env, scopes,
     get time() { return time; }, get worldW() { return WORLD_W; }, boom: (x, y, pw) => sectionBlast(x, y, pw || 1, 0), ui, menuBtn: () => { const L = topLayout(); return [(L.menu[0] + 20) * PIXU / dpr, (L.menu[1] + 20) * PIXU / dpr]; }, mapTracks, shellAt: (p, x, y) => { const sh = ships[p], sec = hitTest(sh, x, y); if (sec >= 0) shellHit({ x, y, vx: 0, vy: 100, owner: 1 - p }, sh, sec); return sec; }, pinFX: v => { FX_PIN = v; }, get fx() { return FX; }, wh: () => wh, computeEnv,
     setOrder: (p, i) => setOrder(telegraphs[p], i), fire: p => fireGun(ships[p]), shipMG: p => shipMG(ships[p]), tower: (p, mg) => fireTower(towers[p], mg),
