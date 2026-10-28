@@ -2387,8 +2387,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 152;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 27 20:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 153;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 27 20:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12327,8 +12327,10 @@ class GLCtx {
     GLR.stats.draws++; GLR.stats.quads += b.n;
   }
   // premultiplied pixels (a Uint32Array, w x h) straight onto the target: the game's own pixel buffers (fire);
-  // straight: the pixels are not premultiplied (r g b a as the sky's buffers hold them) and the GPU premultiplies them
-  drawPixels(px, w, hgt, dx, dy, dw, dh, straight) {
+  // straight: the pixels are not premultiplied (r g b a as the sky's buffers hold them) and the GPU premultiplies them.
+  // rows: instead of the one quad, one quad per entry [sy, dy, dh]: row sy of the picture stretched over dy..dy+dh (the
+  // sky's veil: a strip of columns, each band of rows its own thickness)
+  drawPixels(px, w, hgt, dx, dy, dw, dh, straight, rows) {
     if (GLR.lost || !(w > 0 && hgt > 0)) return;
     const s = this.s, gl = GLR.gl;
     glBegin(this, s.op);
@@ -12347,8 +12349,12 @@ class GLCtx {
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, hgt, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(px.buffer, px.byteOffset, w * hgt * 4));
     GLR.stats.uploads++; GLR.stats.upPx += w * hgt;
     const slot = glSlot(P.tex, false);
-    this._corners(dx, dy, dw, dh);
     const X = GLC4.x, Y = GLC4.y, u1 = w / P.w, v1 = hgt / P.h;
+    if (rows) {
+      for (const [sy, ry, rh] of rows) { if (!(rh > 0)) continue; const v0 = (sy + 0.5) / P.h; this._corners(dx, ry, dw, rh); glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], 0, v0, u1, v0, u1, v0, 0, v0, glAlpha(s.ga), 1 + 8 * slot, 0); }
+      return;
+    }
+    this._corners(dx, dy, dw, dh);
     glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], 0, 0, u1, 0, u1, v1, 0, v1, glAlpha(s.ga), 1 + 8 * slot, 0);
   }
   // paths: kept as lists of points already on the target, as a canvas keeps them
@@ -13700,7 +13706,7 @@ function healCloud(c, dt) {
 // ================================================================== drawing
 const LOBE_COLS = [[236, 96, 96], [96, 200, 120], [96, 150, 236], [236, 196, 80], [190, 110, 230], [80, 210, 220], [240, 140, 60], [160, 160, 160]];
 let curPal = null, TONE_PH = -1;   // (TONE_PH: the phase a rebuild lights its puffs by, in place of the frame's, for a relight in halves)
-let SHAFT = new Uint32Array(0), COLA = new Float32Array(0); const VC4 = [0, 0, 0, 0];   // (the GPU: a rain shaft's picture; a colour for glPack)
+let SHAFT = new Uint32Array(0), COLA = new Float32Array(0), VSTRIP = new Uint32Array(0);   // (the GPU: a rain shaft's picture, the veil's strip)
 function toneCol(tone, haze, j, id) {
   let col;
   if (view === 0) col = (curPal || E.pal)[tone];
@@ -13752,12 +13758,13 @@ function drawCloudCached(c, ax, ay) {
     const key = !moved && pb.key !== sprKey(c), must = live || moved || key, want = relight || ((frameNo + c.uid) % (c.slowMv ? SLOW_EVERY : SETTLED_EVERY) === 0 && !!pb && pb.fr !== frameNo);
     if (must || (want && BUILD_MS > 0)) {
       const t0 = performance.now(), st = c.toneStride;
-      // (a big cloud is re-lit in two halves over two rebuilds - its even puffs, then its odd - a frame apart)
-      const halves = relight && pb && c.items.length > 4000;
-      if (relight) { c.toneStride = halves ? 2 : 1; TONE_PH = halves ? (pb.lkPass || 0) : -1; }
+      // (a cloud is re-lit in parts over as many rebuilds - a quarter of its puffs each for a big one, a half for a small -
+      // a frame or so apart, so one rebuild stays within the budget)
+      const parts = !relight || !pb ? 1 : c.items.length > 2400 ? 4 : c.items.length > 800 ? 2 : 1;
+      if (relight) { c.toneStride = parts; TONE_PH = parts > 1 ? (pb.lkPass || 0) : -1; }
       const b = buildBatch(c, ax, ay); b.fr = frameNo;
       c.toneStride = st; TONE_PH = -1;
-      if (relight) { if (!halves) b.lk = c.lk; else if ((b.lkPass = (b.lkPass || 0) + 1) >= 2) { b.lk = c.lk; b.lkPass = 0; } }
+      if (relight) { if (parts === 1) b.lk = c.lk; else if ((b.lkPass = (b.lkPass || 0) + 1) >= parts) { b.lk = c.lk; b.lkPass = 0; } }
       // (a batch built live is the batch: no second build next frame, as the sprite needed. The lightning's light is in the key)
       const d = performance.now() - t0; if (!must) BUILD_MS -= d; if (relight && pb) RELIGHT -= d;
       FTV.build = (FTV.build || 0) + d; FTV.builds = (FTV.builds || 0) + 1;   // (the perf panel: BUILD ms / count)
@@ -13983,16 +13990,20 @@ function drawVeil2(lay, horY, X0, vis) {
   const vc = col.map(Math.round);
   const kAt = y => { let k = y < lay.baseY + 2 ? 0.55 : y < lay.baseY + 5 ? 0.8 : 1; if (y > horY) k *= 0.7; return k; };   // (over the water it thins)
   if (GPU) {
-    // (the GPU: the veil as rectangles - each run of columns of one thickness, over each band of rows of one k)
+    // (the GPU: the veil as one strip a band - a row of columns, each the colour at its thickness times the band's k -
+    // uploaded once and each row stretched over its band of rows. It was a rectangle per run of columns per band: under
+    // storm clouds, whose edges ramp, thousands of them)
     const yA = Math.max(0, lay.baseY - 2), yB = Math.min(H - 1, foot), cuts = [lay.baseY + 2, lay.baseY + 5, horY + 1];
-    let y0 = yA;
-    while (y0 <= yB) {
+    if (VSTRIP.length < TW * 4) VSTRIP = new Uint32Array(TW * 4 * 2);
+    const rows = []; let y0 = yA, r = 0;
+    while (y0 <= yB && r < 4) {
       let y1 = yB; for (const cY of cuts) if (cY > y0 && cY - 1 < y1) y1 = cY - 1;
-      const k = kAt(y0);
-      let x = 0;
-      while (x < TW) { const av = colA[x]; let e = x + 1; while (e < TW && colA[e] === av) e++; if (av >= 0.02) { VC4[0] = vc[0]; VC4[1] = vc[1]; VC4[2] = vc[2]; VC4[3] = av * k; DCTX.fillRectCol(x, y0, e - x, y1 - y0 + 1, glPack(VC4, 1)); } x = e; }
+      const k = kAt(y0), o = r * TW;
+      for (let x = 0; x < TW; x++) { const av = colA[x]; VSTRIP[o + x] = av >= 0.02 ? rgba(vc, av * k) : 0; }
+      rows.push([r, y0, y1 - y0 + 1]); r++;
       y0 = y1 + 1;
     }
+    if (r) DCTX.drawPixels(VSTRIP, TW, r, 0, 0, TW, r, true, rows);
   } else for (let y = Math.max(0, lay.baseY - 2); y <= foot; y++) {
     const k = kAt(y);
     let x = 0;
@@ -14405,7 +14416,7 @@ function deckOut(lay, B, frac) {
 }
 // ================================================================== once a frame
 // G: { dt, time, weather, rain, fog, wind, sea, flash: { k, x (the bolt's world x) } }
-let skyDt = 0, skyGrowK = 0.35, EPALK = '', RELIGHT = 2.5, BUILD_MS = 3;   // (RELIGHT: the frame's budget, ms, for re-lighting clouds whose light moved)
+let skyDt = 0, skyGrowK = 0.35, EPALK = '', RELIGHT = 1.2, BUILD_MS = 1.2;   // (RELIGHT: the frame's budget, ms, for re-lighting clouds whose light moved)
 function skyFrame(G) {
   skyDt = Math.min(0.1, G.dt);
   // (the world paused - the settings' WORLD button - holds the clouds still too, user Oct 27: no wind drift, no breathing or
@@ -14431,7 +14442,7 @@ function skyFrame(G) {
   // (the hour's terms to a coarser step: as the weather or the hour eases, E.contrast moved every frame and every cloud's light key with it)
   LSIG = [P.shadow, P.self, P.amb, P.contrast, P.expo, P.jitter, P.glow, P.lightz, P.rim, P.mass, P.shade, view, E.contrast.toFixed(2), E.sunset.toFixed(1), E.behind.toFixed(1), E.night.toFixed(1)].join(',') + '|';
   EPALK = ',' + E.pal.map(t => t.join(',')).join(';') + ';' + E.palStorm.map(t => t.join(',')).join(';');   // (the hour's palettes, for the storm clouds' own)
-  RELIGHT = P.relight ?? 2.5; BUILD_MS = P.buildms ?? 3;
+  RELIGHT = P.relight ?? 1.2; BUILD_MS = P.buildms ?? 1.2;   // (a sixteenth of a 60 fps frame each: the PC spent 7.8 ms a frame on three rebuilds at 2.5 / 3)
   const windV = P.wind * 8 * S;
   for (const lay of LAYERS) lay.off += windV * lay.par * dt;
   // the lightning: the game's newest bolt, its brightness
@@ -19424,19 +19435,25 @@ function drawRainStreaks(R) {
   // the light: the clouds' dark base colour under them, the hour's daylight in the drops lower down (the lab's two ends)
   const dark = [120 * fx[0], 128 * fx[1], 146 * fx[2]], light = [236 * fx[0], 242 * fx[1], 252 * fx[2]], NL = 6;
   const camL = CAMPX / SV, Wc = w + 60, tt = time, sv = Math.max(0.5, S);
+  // (where the rain stops, by column - the sea, a deck, the ground - once a frame a column, not once a drop: 8,000 drops at
+  // 1920 wide, each asking the docks, the towers and the surface; and each drop's four hashes once, not four sines a frame)
+  const roofs = RAINP.roofs && RAINP.roofs.length >= w ? RAINP.roofs : (RAINP.roofs = new Int32Array(w + 64));
+  roofs.fill(-1, 0, w);
+  const roofAt = x => { let v = roofs[x]; if (v === -1) v = roofs[x] = Math.floor(PY(rainRoof((x * rp + CAMPX) / SV)) / rp); return v; };
   for (let L = 0; L < RAIN_DEPTH.length; L++) {
     const D = RAIN_DEPTH[L], n = Math.round(D.n * R * VWP / 600), spd = D.v * sv / rp, drift = camL * SV * D.par / rp;
+    let HS = RAINP['hs' + L]; if (!HS || HS.length < n * 4) { HS = RAINP['hs' + L] = new Float32Array(Math.max(n, 512) * 8); for (let k = 0; k < HS.length / 4; k++) { HS[k * 4] = hash(k * 1.731 + L * 91); HS[k * 4 + 1] = hash(k * 4.913 + L * 37); HS[k * 4 + 2] = hash(k * 2.37 + L * 13); HS[k * 4 + 3] = hash(k * 7.31 + L * 5); } }
     // (its six steps, premultiplied: dark and faint under the base, lighter as it falls)
     const tier = [];
     for (let i = 0; i < NL; i++) { const f = (i + 1) / NL, a = D.a * (0.12 + 0.88 * f) * (0.6 + 0.4 * R), c = mix3(dark, light, 0.15 + 0.85 * f); tier.push(((Math.round(a * 255) << 24) | (Math.round(c[2] * a) << 16) | (Math.round(c[1] * a) << 8) | Math.round(c[0] * a)) >>> 0); }
     for (let k = 0; k < n; k++) {
-      const h1 = hash(k * 1.731 + L * 91), h2 = hash(k * 4.913 + L * 37), h3 = hash(k * 2.37 + L * 13), h4 = hash(k * 7.31 + L * 5);
+      const h1 = HS[k * 4], h2 = HS[k * 4 + 1], h3 = HS[k * 4 + 2], h4 = HS[k * 4 + 3];
       const len = Math.round((D.len[0] + (D.len[1] - D.len[0]) * h3) * sv), span = (bot - top) + len + 8;
       const y0 = top - len + ((h2 * span + tt * spd * (0.85 + 0.3 * h1)) % span);   // (its head; it falls every frame)
       if (y0 - len < top + h4 * 12) continue;                                      // (out of the clouds' base, a ragged edge)
       const sl = slant * (1 + (h4 - 0.5) * 0.3) + (h3 - 0.5) * 0.08;                 // (each its own slant about the wind's)
       const x0 = ((h1 * Wc + (y0 - top) * sl - drift) % Wc + Wc) % Wc - 30;
-      const roof = Math.floor(PY(rainRoof((x0 * rp + CAMPX) / SV)) / rp);           // (where it stops: the sea, a deck, the ground...)
+      const xc = Math.round(x0), roof = xc >= 0 && xc < w ? roofAt(xc) : Math.floor(PY(rainRoof((x0 * rp + CAMPX) / SV)) / rp);   // (where it stops: the sea, a deck, the ground...)
       const jit = (h1 * 7.3 % 1 - 0.5) * 0.22;                                       // (each lights at its own height: no line across)
       for (let t = 0; t < len; t++) {
         const y = Math.round(y0) - t; if (y > roof || y > bot) continue; if (y < top) break;
