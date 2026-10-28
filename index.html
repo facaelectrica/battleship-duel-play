@@ -1727,7 +1727,7 @@ function bedDrop0(x) {
 }
 // the sand, and the floor: the sand, or the top of a rock formation standing on it (buildReef)
 function sandY(x) { return SEABED_Y + bedDrop(x) + 1.5 * Math.sin(x * 0.013) + Math.sin(x * 0.041 + 1); }
-function seabedY(x) { if (LAND && onLand(x) && lakeAt(x)) return landTop(x);    // (OPEN WORLD: a lake's bed - the sea's own floor under dry land stays hidden under it)
+function seabedY(x) { if (LAND && onLand(x) && lakeAt(x)) { const t = landTop(x); return land.lkRocks && rockForms.length ? Math.min(t, rockTopY(x)) : t; }   // (OPEN WORLD: a lake's bed - the sea's own floor under dry land stays hidden under it; a lake marked SEA: its rock formations too - buildLakeSea)
   const s = sandY(x); return rockForms.length ? Math.min(s, rockTopY(x)) : s; }
 
 function shipLocalX(sh, sx) { return (sh.facing < 0 ? sx - SHIP_PIVOT_X : SHIP_PIVOT_X - sx) * SHIP_K; }
@@ -2543,8 +2543,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 185;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 18:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 186;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 19:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18781,11 +18781,11 @@ function rockBlast(x, y, r) {
   return any;
 }
 const ROCK_K = 0.62;                                   // (the solid rocks: about half the water's brightness, user's picture; drawn over the tint)
-function drawRockForms(x0, x1) {
+function drawRockForms(x0, x1, lkOnly) {
   rockFormsSync();
   const hz = bgP('bgrkh', 0);
   for (const f of rockForms) {
-    if (f.x1 < x0 - 40 || f.x0 > x1 + 40) continue;
+    if (f.x1 < x0 - 40 || f.x0 > x1 + 40 || !f.lk !== !lkOnly) continue;      // (lk: a lake's, drawn over its water - drawLakeSea)
     const k = REEF_K * SV, X = Math.round(PX(f.x0)), Y = Math.round(PY(f.y0)), my = f.y0 + f.sp.height * REEF_K * 0.45;
     C.drawImage(sbTint(f.sp, seaTint(my, ROCK_K, true), my, hz, true), X, Y, Math.round(PX(f.x1)) - X, Math.round(f.sp.height * k));
   }
@@ -29095,8 +29095,32 @@ function buildLandProps() {
 function buildLakeSea() {
   if (reef.some(it => it.lk)) reef = reef.filter(it => !it.lk);
   if (plants.some(p => p.lk)) plants = plants.filter(p => !p.lk);
+  if (rockForms.some(f => f.lk)) rockForms = rockForms.filter(f => !f.lk);
+  land.lkRocks = false;
   if (!land.marked || !land.sea || !land.lakes) return;
   const R = seededRng(6161), seaAt = x => land.sea[clamp(ltCol(x), 0, land.cols - 1)] === 1 && lakeAt(x);
+  // (user Oct 28, 19:02: "yes" - the sea's big rock formations too: mesas, spires and mounds out in a SEA lake's deeper
+  // water, taller the deeper, solid - the floor the subs stand on (seabedY) - and broken by blasts (rockBlast) as the sea's;
+  // their own seed, so the lakes' other dressing stays where it was)
+  { const RR = seededRng(6262), [RKs, RKg] = rockFormsK();
+    for (const L of land.lakes) for (let x = L[0] + 300 + RR() * 300; x < L[1] - 300; x += (520 + RR() * 520) * RKg) {
+      const dep = landTop(x) - WATER_Y; if (!seaAt(x) || dep < 280) continue;
+      if (Math.abs(landTop(x + 200) - landTop(x - 200)) > 400) continue;          // (none on a steep wall: the wall is the rock there)
+      if (typeof CAVE !== 'undefined' && CAVE.nearMouth(x, 520)) continue;          // (none on a cave's mouth)
+      const deep = clamp(dep / BED_EXTRA, 0, 1), kind = RR() < 0.4 ? 'mesa' : RR() < 0.6 ? 'spire' : 'mound';
+      const wU = Math.min(((kind === 'spire' ? 120 : 170) + RR() * 190) * RKs, (Math.min(x - L[0], L[1] - x) - 60) * 2);
+      if (wU < 80) continue;
+      const hU = Math.min((95 + RR() * 90) * (0.65 + 1.3 * deep) * (kind === 'spire' ? 1.9 : 1) * RKs, dep - 40);   // (never up out of the water)
+      const W = Math.round(wU / REEF_K), H = Math.round(hU / REEF_K) + 50, top = rockProfile(W, H - 50, kind, RR);
+      const sp = paintRock(W, H, top, RR, 0, null, true, RK_SOLID);
+      let base = -Infinity; for (let c = 0; c < W; c += 4) base = Math.max(base, landTop(x - wU / 2 + c * REEF_K));
+      const y0 = base + 4 - (H - 50) * REEF_K, topW = new Float32Array(W);
+      for (let c = 0; c < W; c++) topW[c] = y0 + top[c] * REEF_K;
+      { const g = sp.getContext('2d'); for (let c = 0; c < W; c++) { const r = Math.ceil((landTop(x - wU / 2 + c * REEF_K) + 3 - y0) / REEF_K); if (r < H) g.clearRect(c, Math.max(0, r), 1, H - r); } }   // (its foot cut away below the bed)
+      rockForms.push({ x0: x - wU / 2, x1: x - wU / 2 + W * REEF_K, y0, sp, topW, lk: true });
+      land.lkRocks = true;
+    }
+    rockForms.sort((a, b) => a.x0 - b.x0); }
   for (const L of land.lakes) {
     for (let x = L[0] + 10 + R() * 30; x < L[1] - 10; x += 26 + R() * 70) {
       if (!seaAt(x)) continue;
@@ -29141,6 +29165,8 @@ function drawLakeSea(x0, x1) {
   const b0 = BATCH; BATCH = false;
   try { lakeClip(x0, x1, () => { drawReefItems(reef, x0, x1, true); drawAlgae(x0, x1, true); }); } finally { BATCH = b0; }
 }
+// its rock formations: over the lake's water, as the sea's are drawn over the sea's tint (renderObjects)
+function drawLakeRocks(x0, x1) { if (land.lkRocks) lakeClip(x0, x1, () => drawRockForms(x0, x1, true)); }
 
 /* ---- the lake's life (OPEN WORLD, user Oct 26, with pictures: gen/open/ref/lake_bottom_proposal_oct26.png, and how it
    was: lake_bottom_current_oct26.png) - "The transition to the ground should have more variety, we should have schools
@@ -36655,6 +36681,7 @@ function renderLandObjects() {
   if (!spans.length) return;
   drawTufts(x0, x1);                                     // (in front: a tank drives through them)
   drawLake(x0, x1, true);                                // (the lakes' water over what's in them)
+  guardDraw('lakeRocks', () => drawLakeRocks(x0, x1));   // (a SEA lake's rock formations, over its water as the sea's - 50-land-lake)
   drawLakeFish(x0, x1);                                  // (dark shapes in it)
   // and, as on the sea: blasts' shock rings, the trails through it, bubbles, the wake's churn, foam on top
   lakeClip(x0, x1, () => { drawShocks(x0, x1); drawStreaks(x0, x1); drawGasBalls(x0, x1); drawBubbles(x0, x1); drawWakeField(x0, x1, false); drawWakeField(x0, x1, true); drawFoamBits(x0, x1); });
