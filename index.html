@@ -2543,8 +2543,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 183;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 17:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 184;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 18:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18342,7 +18342,7 @@ function drawRock(p, base) {
     if (u > 0.3) plRectW(u > 0.7 ? '#8c96a0' : '#68727c', p.x - half, y, Math.max(1, half * 0.6), h / rows + 0.5);   // lit flank
   }
 }
-function drawAlgae(x0, x1) {
+function drawAlgae(x0, x1, lkOnly) {
   // algae and kelp swaying in the current
   const current = E.windU * 0.004 + E.storm * 0.3 * Math.sin(time * 0.9);
   // a rough sea stirs the bottom too: the weed sways further and quicker the more the water's churning
@@ -18350,7 +18350,7 @@ function drawAlgae(x0, x1) {
   const swA = 1 + 1.1 * tur, swF = 1 + 0.55 * tur;
   fsLast = null;
   for (const p of plants) {
-    if (p.x < x0 - 60 || p.x > x1 + 60) continue;
+    if (p.x < x0 - 60 || p.x > x1 + 60 || !p.lk !== !lkOnly) continue;
     const base = seabedY(p.x) + 3;
     if (p.kind === 'rock') { drawRock(p, base); continue; }
     const blades = p.kind === 'kelp' ? 1 + (p.n > 4 ? 1 : 0) : p.n;
@@ -18367,6 +18367,7 @@ function drawAlgae(x0, x1) {
       }
     }
   }
+  if (lkOnly) return;                                     // (the cut-off pieces: with the sea's pass)
   // the cut-off pieces, drawn as the plant draws its blades, along the piece's own angle (upright as cut, lying on the sand)
   for (const b of weedBits) {
     if (b.x < x0 - b.len - 10 || b.x > x1 + b.len + 10) continue;
@@ -18632,12 +18633,14 @@ function buildReef() {
   }
   reef.sort((a, b) => a.x - b.x); coastFront.sort((a, b) => a.x - b.x);
   reefStrips = null; fgStrip = null;                   // (the ridges behind: made again for this world's light)
+  if (LAND && land.cell) buildLakeSea();               // (the lake beds marked SEA: their own corals, boulders and weed - 50-land-lake)
 }
 // the sprites, standing on the floor (rocks sunk into the sand a little), drawn as pixels at this zoom
-function drawReefItems(list, x0, x1) {
+// (lk: the ones on a lake bed marked SEA - drawn in the land's pass, under the lake's water - lkOnly picks those)
+function drawReefItems(list, x0, x1, lkOnly) {
   const ga = C.globalAlpha;
   for (const it of list) {
-    if (it.x < x0 - 120 || it.x > x1 + 120) continue;
+    if (it.x < x0 - 120 || it.x > x1 + 120 || !it.lk !== !lkOnly) continue;
     const k = REEF_K * SV * (it.s || 1), w = Math.max(1, Math.round(it.sp.width * k)), h = Math.max(1, Math.round(it.sp.height * k));
     const base = seabedY(it.x) + (it.sink || 0), X = Math.round(PX(it.x) - w / 2), Y = Math.round(PY(base) - h);
     C.drawImage(it.sp, X, Y, w, h);
@@ -28976,6 +28979,62 @@ function buildLandProps() {
 }
 // (drawn with their hits, fire and felling: drawLandProps, 50-land-plants)
 
+/* ---- a lake bed marked SEA in the TERRAIN tab (user Oct 28, 17:12-17:14: "mark it SEA") gets the sea's dressing: its
+   bed the sea floor's sand (seabedCell, 50-land-terrain), boulders with corals and weed on them near its shores, corals and
+   sponges further out - more the deeper - and the sea's kelp and grass. They go in the sea's own lists (reef, plants:
+   marked lk), so what breaks a coral or cuts the weed at sea does it here too (seabedHit); they're drawn in the land's
+   pass, under the lake's water (drawLakeSea). The dark of the deep comes with the depth, as at sea (drawAbyss). From
+   their own seed: the sea's dressing stays as it was. ---- */
+function buildLakeSea() {
+  if (reef.some(it => it.lk)) reef = reef.filter(it => !it.lk);
+  if (plants.some(p => p.lk)) plants = plants.filter(p => !p.lk);
+  if (!land.marked || !land.sea || !land.lakes) return;
+  const R = seededRng(6161), seaAt = x => land.sea[clamp(ltCol(x), 0, land.cols - 1)] === 1 && lakeAt(x);
+  for (const L of land.lakes) {
+    for (let x = L[0] + 10 + R() * 30; x < L[1] - 10; x += 26 + R() * 70) {
+      if (!seaAt(x)) continue;
+      const dep = landTop(x) - WATER_Y, shore = Math.min(x - L[0], L[1] - x), df = clamp(dep / 1200, 0, 1);
+      if (dep < 24) continue;
+      if (shore < 320 && R() < 0.55) {
+        // a boulder, big near the shore, with corals and weed on it (as the sea's by its coasts)
+        const big = clamp(1 - shore / 320, 0.15, 1), wU = (30 + R() * 90) * (0.35 + 1.4 * big), hU = wU * (0.45 + R() * 0.4);
+        const W = Math.max(6, Math.round(wU / REEF_K)), H = Math.max(5, Math.round(hU / REEF_K)), top = rockProfile(W, H, 'mound', R);
+        const it = { kind: 'rock', x, w: W * REEF_K, h: H * REEF_K, sp: paintRock(W, H + 2, top, R), sink: 2 + R() * 4, top, lk: true };
+        if (W > 8 && R() < 0.9) {
+          it.deco = [];
+          for (let n = 1 + Math.floor(R() * (W > 30 ? 5 : 2)); n > 0; n--) {
+            const c = Math.floor(W * (0.15 + 0.7 * R())), k2 = R(), kind = k2 < 0.45 ? 'weed' : k2 < 0.6 ? 'branch' : k2 < 0.72 ? 'fan' : k2 < 0.86 ? 'brain' : 'tube';
+            it.deco.push({ c, sp: kind === 'weed' ? paintWeed(R) : paintCoral(kind, R), s: (0.6 + 0.7 * R()) * (0.6 + 0.6 * big), weed: kind === 'weed' });
+          }
+        }
+        reef.push(it);
+      } else if (R() < 0.35 + 0.5 * df) {
+        const k = R(), kind = k < 0.35 ? 'branch' : k < 0.55 ? 'fan' : k < 0.75 ? 'brain' : 'tube';
+        reef.push({ kind, x, sp: paintCoral(kind, R), s: R() < 0.25 ? 1.6 + R() * 1.1 : 0.7 + R() * 0.7, sink: 1, lk: true });
+      }
+    }
+    // the kelp and grass (and the odd small rock), denser the deeper - as the sea's
+    for (let x = L[0] + 20; x < L[1] - 20;) {
+      const dep = landTop(x) - WATER_Y, df = clamp(dep / 1200, 0, 1), h = R();
+      const kind = h < 0.3 + 0.35 * df ? 'kelp' : h < 0.7 ? 'grass' : 'rock';
+      if (seaAt(x) && dep > 20) {
+        const rw = 5 + R() * 12, big = R() < 0.22 ? 1.8 + R() * 1.2 : 0.6 + R() * 0.65;
+        const ht = Math.min((kind === 'kelp' ? (28 + R() * 42) * (1 + 1.1 * df) : (8 + R() * 10) * (1 + 0.5 * df)) * big, dep - 10);   // (never up out of the water)
+        plants.push({ x, kind, h: ht, h0: ht, seg: 0, ph: R() * 6, n: 3 + Math.floor(R() * 4), rw, rh: rw * (0.45 + R() * 0.3), rs: R() * 100, lk: true });
+      }
+      x += (kind === 'kelp' ? 40 + R() * 70 : 18 + R() * 42) / (1 + 1.6 * df);
+    }
+  }
+  reef.sort((a, b) => a.x - b.x);
+}
+// drawn in the land's pass, after the lake's deep water and before its tint over (renderLandObjects); the weed's blades
+// drawn plainly (not into the pixel batch), so the lake's clip holds them
+function drawLakeSea(x0, x1) {
+  if (!land.marked || !(land.sea && land.lakes)) return;
+  const b0 = BATCH; BATCH = false;
+  try { lakeClip(x0, x1, () => { drawReefItems(reef, x0, x1, true); drawAlgae(x0, x1, true); }); } finally { BATCH = b0; }
+}
+
 /* ---- the lake's life (OPEN WORLD, user Oct 26, with pictures: gen/open/ref/lake_bottom_proposal_oct26.png, and how it
    was: lake_bottom_current_oct26.png) - "The transition to the ground should have more variety, we should have schools
    of fish, since it's a lake some caustics pixel art effect... ALL boats should get the drop shadow, just like the
@@ -32885,8 +32944,8 @@ function buildLand() {
   // the rock under it all: a ragged floor 50-90 units under the top, never dug through
   landShapePrep();                                          // (the LAND tab's points: their curves - 50-land-tshape)
   for (let c = 0; c < land.cols; c++) land.surf[c] = landProfile(c * LT_CELL, R);
-  land.look = new Uint8Array(land.cols); land.marked = false;     // (each column's look: 1 the desert's - lookD)
-  for (let c = 0; c < land.cols; c++) { const x = c * LT_CELL, sk = landSkinAt(x), d = sk === 'D' ? 1 : sk === 'F' ? 0 : +lcRight(x); land.look[c] = d; if (d !== +lcRight(x)) land.marked = true; }
+  land.look = new Uint8Array(land.cols); land.sea = new Uint8Array(land.cols); land.marked = false;   // (each column's look: 1 the desert's - lookD; sea: marked SEA)
+  for (let c = 0; c < land.cols; c++) { const x = c * LT_CELL, sk = landSkinAt(x), d = sk === 'D' ? 1 : sk === 'F' ? 0 : +lcRight(x); land.look[c] = d; if (sk === 'S') { land.sea[c] = 1; land.marked = true; } if (d !== +lcRight(x)) land.marked = true; }
   const n = ltBands();                                      // (each slice's rows, from the shape)
   land.cell = new Uint8Array(n); land.scorch = new Uint8Array(n);
   land.prof0 = null;                                         // (the land as it was, for the LAND tab's line: made when asked)
@@ -32899,7 +32958,8 @@ function buildLand() {
     // sand in the low valley (and a skin of it on the slopes down into it)
     const sandy = ltSandy(x), sandDepth = sandy * (24 + 8 * Math.sin(x / 55 + R[3])) * (1 - ltMtn(x));
     // (rockier toward the mountain: bare rock over its top and upper slopes)
-    const rocky = smoothstep(0.3, 0.6, ltMtn(x) + 0.08 * Math.sin(x / 23 + R[0])), apron = onApron(x);
+    // (a piece marked SEA standing out of the water: the coast's bare rock, no grass - user Oct 28, 17:12)
+    const rocky = land.sea[c] && top < WATER_Y ? 1 : smoothstep(0.3, 0.6, ltMtn(x) + 0.08 * Math.sin(x / 23 + R[0])), apron = onApron(x);
     for (let r = ltR0(c), r1 = ltR1(c); r < r1; r++) {
       const y = LT_Y0 + r * LT_CELL;
       if (y < top) continue;
@@ -32977,6 +33037,7 @@ function buildLand() {
   buildTufts();
   buildLandProps();                                         // (the desert's palms, cacti, scrub and rocks on the ground - 50-land-lake)
   buildPlants();                                            // (every plant in front: its hits and its fire - 50-land-plants)
+  buildLakeSea();                                           // (the lake beds marked SEA: the sea's corals, boulders and weed - 50-land-lake)
 }
 // a round blob of one material (keep: only where there's ground already)
 function ltBlob(x, y, rad, m, keep) {
@@ -33157,6 +33218,19 @@ function desertCell(c, r, m, depth, hsh, SR, qi) {
   const deep = m === M_ROCK ? desertRock(c, r, hsh) : desertEarth(c, r, hsh);
   if (d0 >= 0 && d0 + jit * 1.6 < sb + 2) return mix3(sand, deep, 0.5);                            // (a soft seam into the earth)
   return m === M_SAND ? mix3(sand, deep, 0.4) : deep;                                               // (sand lower down - slid in, dug into - between the two)
+}
+// (a lake bed marked SEA - user Oct 28, 17:12) a cell of it painted from the sea floor's own sand tile (img.seabed, as
+// drawTiles lays it along the ocean floor: every other tile mirrored, its sand line at SEABED_Y - SEABED_TOP down it) set
+// on the bed's first top; under the tile, the sea floor's own fill
+let SEAB_PX = null;
+const SEAB_FILL = [0x8a, 0x80, 0x72];
+function seabedCell(c, r) {
+  if (!SEAB_PX) { const im = img.seabed, k = makeCanvas(im.width, im.height), g = k.getContext('2d'); g.drawImage(im, 0, 0); SEAB_PX = { w: im.width, h: im.height, d: g.getImageData(0, 0, im.width, im.height).data }; }
+  const P = SEAB_PX, x = (c + 0.5) * LT_CELL, y = LT_Y0 + (r + 0.5) * LT_CELL, top = land.top0 ? land.top0[c] : land.surf[c];
+  const px = Math.floor(x / SEABED_K), i = Math.floor(px / P.w), u0 = px - i * P.w, u = (i & 1) ? P.w - 1 - u0 : u0;
+  const row = Math.floor((y - top + (SEABED_Y - SEABED_TOP)) / SEABED_K);
+  if (row >= 0 && row < P.h) { const o = (row * P.w + u) * 4; if (P.d[o + 3] > 128) return [P.d[o], P.d[o + 1], P.d[o + 2]]; }
+  return SEAB_FILL;
 }
 // the dirt's lumps (as in the user's picture: rounded stones packed in earth): a cellular pattern. Returns how far
 // in from the edge of its lump a cell is (small: the dark gap between two), which lump, and where in it (dy < 0: its
@@ -33406,7 +33480,7 @@ function paintLandChunk(k) {
   const x = cv.getContext('2d'), id = x.createImageData(w, h), d = id.data, SR = stoneRaster(k, w);
   const put = (cx, cy, col, a = 255) => { if (cx < 0 || cx >= w || cy < 0 || cy >= h) return; const o = (cy * w + cx) * 4; d[o] = col[0]; d[o + 1] = col[1]; d[o + 2] = col[2]; d[o + 3] = a; };
   for (let q = 0; q < w; q++) {
-    const c = c0 + q, DS = lookD(c * LT_CELL);
+    const c = c0 + q, DS = lookD(c * LT_CELL), SEAB = land.sea && land.sea[c] === 1 && land.surf[c] > WATER_Y + 1;
     let depth = 0;
     for (let r = rT; r < rB; r++) {
       const i = ltIdx(c, r), m = land.cell[i];
@@ -33416,7 +33490,8 @@ function paintLandChunk(k) {
       const P = ltPal(m, c), hsh = hash(c * 1.37 + r * 7.91);
       let col;
       DES_SOFT = false;
-      if (DS && m !== M_CONC) col = desertCell(c, r, m, depth, hsh, SR, (r - rT) * w + q);   // (the desert's own earth, above)
+      if (SEAB) col = seabedCell(c, r);                                                // (a lake bed marked SEA: the sea floor's own sand)
+      else if (DS && m !== M_CONC) col = desertCell(c, r, m, depth, hsh, SR, (r - rT) * w + q);   // (the desert's own earth, above)
       else if (m === M_DIRT || m === M_ROCK) {
         // the stone this cell is in - whole, lit on its upper left, a shaded rim - or the dark earth between stones
         const qi = (r - rT) * w + q, sj = SR.id[qi], PD = ltPal(M_DIRT, c);
@@ -35084,7 +35159,8 @@ const TERRAIN_ED = { btn: null, rb: null, ta: null, note: null, sel: null };
    AUTO (the look it has always had there: every piece starts AUTO), FOREST or DESERT (the forest's or the desert's
    ground, field, stones and plants, under the water a lake bed). The mark rides on the point the piece starts at (its
    third item: 'F', 'D'; 50-land-tshape), is kept and copied with the points, and is built on REFRESH. A mark changes
-   only the look: whose country it is stays as it was. (SEA - the sea's dressing under the water - comes next.) ---- */
+   only the look: whose country it is stays as it was. SEA: under the water the sea's floor and its life (a lake bed:
+   50-land-lake, buildLakeSea), out of it the coast's bare rock. ---- */
 const TERRAIN_SKIN_COL = { F: '#7fdc6e', D: '#ffe38a', S: '#6ec8ff' };
 // the piece of a country's line over x: which country, and the point it starts at
 function terrainPiece(R, x) {
@@ -35110,7 +35186,7 @@ function terrainMark(sk) {
 function terrainSyncSkin() {
   const s = TERRAIN_ED.sel, P = s && LAND_PTS[s.R ? 'R' : 'L'], sk = P && P[s.k] ? P[s.k][2] || null : undefined;
   for (const [b, v] of TERRAIN_ED.skinBtns || []) b.classList.toggle('on', sk !== undefined && sk === v);
-  if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = !s ? 'Press the line between two handles to pick a piece of the ground.' : 'The white piece: ' + (sk === 'F' ? 'FOREST' : sk === 'D' ? 'DESERT' : 'AUTO (the look it has always had)') + '. REFRESH builds it.';
+  if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = !s ? 'Press the line between two handles to pick a piece of the ground.' : 'The white piece: ' + (sk === 'F' ? 'FOREST' : sk === 'D' ? 'DESERT' : sk === 'S' ? 'SEA' : 'AUTO (the look it has always had)') + '. REFRESH builds it.';
 }
 // the REFRESH button: lit while the floor or the land has changes waiting
 function terrainSync() {
@@ -35160,6 +35236,7 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SKIN OF THE PIECE YOU PRESSED', [
   skinBtn('AUTO', null, 'The look this piece has always had (its country\'s)'),
   skinBtn('FOREST', 'F', 'The forest\'s ground, field, stones, trees and flowers; under the water, a lake bed'),
   skinBtn('DESERT', 'D', 'The desert\'s ground, sand, scrub, cacti and palms by its water; under the water, the oasis\'s bed'),
+  skinBtn('SEA', 'S', 'Under the water, the sea\'s floor: its sand, boulders, corals, sponges, kelp and grass, darker with depth; out of the water, the coast\'s bare rock'),
 ]);
 NSKY.editor.TUNE.buttons('TERRAIN', 'THE GROUND (OPEN WORLD)', [
   ['RESET TO TODAY\'S GROUND', 'Back to the ground as it was: the land with its two lakes, the airports and launch pads where they were, the ocean floor from your drawing', terrainReset],
@@ -36456,6 +36533,7 @@ function renderLandObjects() {
     drawAirportsBack(x0, x1);                             // (the control towers, the runway lights)
     drawLake(x0, x1, false);                              // (the lakes' water, under what's in them)
     guardDraw('lakeBack', () => drawLakeBack(x0, x1)); guardDraw('lakeBed', () => drawLakeBed(x0, x1)); guardDraw('lakeShadows', () => drawLakeShadows(x0, x1));   // (its depth, far rocks and weeds, light; the bed's life; the boats' shadows - 50-land-lakelife)
+    guardDraw('lakeSea', () => drawLakeSea(x0, x1));     // (a lake bed marked SEA: the sea's corals, boulders and weed - 50-land-lake)
     // (a lake is the sea's water too, user Oct 25: what lies on its bed and sinks through it)
     lakeClip(x0, x1, () => { drawDuds(x0, x1); for (const p of pieces) if (p.x + p.hl > x0 - 20 && p.x - p.hl < x1 + 20) drawPiece(p); drawDcharges(x0, x1); drawTraffic(x0, x1, 'under'); drawBalloons(x0, x1, 'under'); drawCivHelis(x0, x1, 'under'); drawAnchors(x0, x1, true); drawCrashes(x0, x1, true); });
     for (const b of sailboats) if (b.lake) drawSailboat(b);   // (the lakes' yachts and motor boats)
