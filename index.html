@@ -2517,8 +2517,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 164;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 07:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 165;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 07:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8109,7 +8109,7 @@ function planeCrash(pl) {
   if (!what && LAND && !onLand(pl.x)) { const d = shipTopAt(pl.x, pl.y - 20); if (d && pl.y + 4 >= d.y) { what = 'ground'; deck = d; X = pl.x; Y = d.y; } }
   // (into a big civilian ship's side or her superstructure - not down onto her top, above: user Oct 27 night, everything
   // that flies crashes into one - the shared hullStrike)
-  if (!what && LAND && !onLand(pl.x)) for (const [x, y] of pts) if (hullStrike([[x, y]], 2, pl.vx)) { what = 'boat'; X = x; Y = y; pl._civT = 1e9; break; }
+  if (!what && LAND && !onLand(pl.x)) for (const [x, y] of pts) if (hullStrike([[x, y]], 2, pl.vx, p)) { what = 'boat'; X = x; Y = y; pl._civT = 1e9; break; }
   if (!what && pl.y + 4 >= surfaceY(pl.x)) what = 'sea';
   if (!what) return false;
   const was = pl.state;
@@ -17365,7 +17365,6 @@ function renderObjects() {
   ot = ema('obOver', ot);
   drawDeepWater();
   drawRockForms(x0, x1);                                  // (the solid rocks: over the water's tint, k times its colour, so their light and shade read - user Oct 25)
-  if (LAND) guardDraw('drawKraken', () => drawKraken(x0, x1));                    // (OPEN WORLD: the kraken in the deepest pit, black over the water's tint - 50-land-kraken)
   // (the near-black rocks in front of the floor come after the water's distortion: user Oct 25, they don't ripple -
   // see render)
   drawShipShadows(x0, x1);
@@ -17377,6 +17376,8 @@ function renderObjects() {
   // (OPEN WORLD) the deep ocean's dark over everything down there - the floor, the wrecks, the subs, their bubbles and
   // the dust they raise (user Oct 25 late: no brighter than the light that reaches them); then what shines in it
   drawAbyss();
+  // (OPEN WORLD: the kraken in the deepest pit - 50-land-kraken; after the deep's dark, in the foreground silhouette's colour, user Oct 28)
+  if (LAND) guardDraw('drawKraken', () => drawKraken(x0, x1));
   drawDeepLights(x0, x1);                                 // (the chests' glow, the subs' headlights)
   // under the wake: churned, aerated water, dense and white just under the surface, thinning with depth and age
   drawWakeField(x0, x1, false);
@@ -18623,6 +18624,13 @@ function drawSeabedBack() {
 // (OPEN WORLD, user Oct 25) the deep ocean: under the sea's usual floor the water - and the trench's walls and
 // floor - go on getting darker, nearly black at the bottom, where only lamps and the treasure's glow show
 const abyssMap = {};
+// how dark the deep's dark is at world height y (0 none .. 0.98) - drawAbyss's own curve, for what's drawn after it and must
+// look as dark as if it were under it (the kraken's blood)
+function abyssDarkAt(y) {
+  if (!(TR_B > TR_A)) return 0;
+  const ya = SEABED_DEEP + 80, yb = SEA_FLOOR_MAX - 300, u = clamp((y - ya) / Math.max(1, yb - ya), 0, 1);
+  return u < 0.5 ? 0.62 * u * 2 : 0.62 + 0.36 * (u - 0.5) * 2;
+}
 function drawAbyss() {
   if (!floorTab) return;                                    // (OPEN WORLD: by depth, down to the floor's real deepest - SEA_FLOOR_MAX from FLOOR_PTS)
   const ya = PY(SEABED_DEEP + 80), Bt = bh - SHY + 2;
@@ -23026,10 +23034,39 @@ function inHull(x, y) {
 // every flying thing's one check against the big ships (a helicopter, a plane, a seaplane in the air, a balloon, the
 // blimp, the orbiter): any of its points pts ([x, y]) in a hull - the ship takes the blow (dmg in shells, as civHit) where
 // it struck, and true: the caller brings the flier down by its own rules (it falls, burns, sinks)
-function hullStrike(pts, dmg, vx) {
-  if (!LAND || !civShips.length) return false;
-  for (const [x, y] of pts) if (inHull(x, y)) { civHit(x, y, dmg, vx || 0); return true; }
+// (user Oct 28: "Yes, all aircraft should crash into the army battleship") the army's battleships too, afloat or going
+// down in pieces; side: the flier's own side for an army one, which flies through its own ships as its rounds do (the
+// warplane's rule in planeCrash), null for a civilian, which crashes into both
+function hullStrike(pts, dmg, vx, side) {
+  if (!LAND) return false;
+  for (const [x, y] of pts) {
+    if (civShips.length && inHull(x, y)) { civHit(x, y, dmg, vx || 0); return true; }
+    const b = armyHullAt(x, y, side);
+    if (b) {
+      if (b.sh) { damageSection(b.sh, b.sec, dmg >= 1 ? Math.round(dmg) : dmg, x, y); b.sh.vy += 4 * dmg; b.sh.vx += (vx || 0) * 0.005 * dmg; }
+      if (dmg >= 0.5) { sectionBlast(x, y, Math.min(1.4, 0.6 + dmg * 0.25), (vx || 0) * 0.2); spawnDebris(x, y, 4 + Math.round(dmg * 3), (vx || 0) * 0.2); sfxImpact(x); }
+      else spawnSparks(x, y, 3, 120);
+      return true;
+    }
+  }
   return false;
+}
+// is a world point in one of the army's battleships - afloat (her hull's mask, hitTest: { sh, sec }), or a piece of one
+// going down, the part still out of the water ({ pc }) - not one of side's own
+function armyHullAt(x, y, side) {
+  for (const sh of ships) if (sh && sh.state === 'afloat' && sh.id !== side && Math.abs(x - sh.x) < SHIP_L * 0.6) { const sec = hitTest(sh, x, y); if (sec >= 0) return { sh, sec }; }
+  if (y >= surfaceY(x) + 4) return null;
+  for (const pc of pieces) {
+    if (pc.settled || pc.owner === side || Math.abs(x - pc.x) > pc.hl + 40) continue;
+    // the piece's own frame: about its middle, turned by its angle; back to a column and row of the ship's picture
+    const c0 = SECTION_FR[pc.s0] * SHIP_SRC_W, c1 = SECTION_FR[pc.s1] * SHIP_SRC_W, lc = shipLocalX(pc, (c0 + c1) / 2);
+    const ca = Math.cos(-pc.a), sa = Math.sin(-pc.a), dx = x - pc.x, dy = y - pc.y, lx = lc + dx * ca - dy * sa, ly = dx * sa + dy * ca;
+    const col = Math.round(pc.facing < 0 ? SHIP_PIVOT_X + lx / SHIP_K : SHIP_PIVOT_X - lx / SHIP_K), row = Math.round(SHIP_WL_ROW + ly / SHIP_K);
+    if (col < c0 || col >= c1 || row < 0 || row >= img.shipH) continue;
+    const m = pc.dead[sectionOfCol(col)] ? img.maskD : img.maskI;
+    if (m[row * SHIP_SRC_W + col]) return { pc };
+  }
+  return null;
 }
 // a hit: dmg in shells (a round about 0.04, a shell or missile 1, a bomb 2, a torpedo 3). True if it hit a ship.
 function civHit(x, y, dmg, vx) {
@@ -25009,7 +25046,7 @@ function floorEdDraw() {
 // the Lab's sliders at the user's defaults (Oct 27 19:02: WAVE 4.1, WAVE SPEED 0.2, SHAPE HOLD 0.01, LENGTH 1.5, SIZE 1.25; MAX
 // SPEED 50 from 20:06; AT ONCE 4 from 20:19), except SIZE: 1.5 times the Lab's 1.25 (user: "lets have it 1.5x the scale that
 // its in the lab currently"). MAX SPEED, the reach, the radii, the head all scale with SIZE as in the Lab (krS).
-const KP = { krreach: 0.95, krlen: 1.5, krspeed: 1, krwarn: 2.5, krhaul: 1, krwamp: 4.1, krwfreq: 2, krwspeed: 0.2, krik: 2, krcons: 10, krweight: 0.7, krhead: 1, krvmax: 50, krhold: 0.01, krcurl: 1, krn: 8, krat: 4, krper: 2, krsize: 1.25 * 1.5 };
+const KP = { krreach: 0.95, krlen: 1.5, krspeed: 1, krwarn: 2.5, krhaul: 1, krwamp: 4.1, krwfreq: 2, krwspeed: 0.2, krik: 2, krcons: 10, krweight: 0.7, krhead: 1, krvmax: 50, krhold: 0.01, krcurl: 1, krn: 8, krat: 4, krper: 2, krsize: 1.25 * 1.5 * 0.7 };   // (user Oct 28: "The Kraken is too big, should be 30% smaller")
 const KR = { on: false, bx: 0, by: 0, fanL: 1, fanR: 1, ft: null, ft0: 0, t: 0, dt: 0, react: 0, focus: null, objs: [], map: new Map(), tents: [], torps: [], tmap: new Map(), blood: [], gore: [], pieces: [],
   dead: 0, deadT: 0, eaten: 0, uid: 0, k: 0.3, eye: 0, sense: 0, hurt: 0, angry: null, acc: 0, stepAcc: 0, awake: false, gatherT: 0, selfBlast: 0, steps: 0 };
 const KR_NB = 24, KR_NC = 14, KR_SEG = KR_NB + KR_NC; // an arm's segments: 24 along it (as Arm.gd's), 14 shorter ones in its curl
@@ -25029,7 +25066,9 @@ const KRT = {
 };
 const krArtOf = o => o.art;
 const krRGB = c => ((255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0]) >>> 0;
-const KR_BLACK = krRGB([2, 3, 6]);                    // the kraken: all black
+const KR_BLACK = krRGB(FG_COL);                       // the kraken: the black of the ocean's foreground silhouette (user Oct 28: "it should match
+// the black color of the ocean foreground. Right now it's more black, like it doesn't have the atmosphere tint") - drawn after
+// the deep's dark (render), so it reads as that colour, as the floor's silhouette does
 // the floor under it (the game's own, with its zigzag and rocks), every 8 units round it, made when it's placed
 function krFloorY(x) {
   const T = KR.ft; if (!T) return KR.by;
@@ -25746,7 +25785,7 @@ function krTentacles() {
 function krDrawBlood() {
   { const BL = 2;
     for (const q of KR.blood) {
-      const front = !!q.front, TONES = front ? [0.3, 0.55, 0.8] : [0.16, 0.3, 0.46], col = front ? [150, 10, 18] : [96, 6, 14];
+      const front = !!q.front, TONES = front ? [0.3, 0.55, 0.8] : [0.16, 0.3, 0.46], dm = 1 - abyssDarkAt(q.y), col = (front ? [150, 10, 18] : [96, 6, 14]).map(v => v * dm);
       const a = (front ? 0.95 : 0.55) * (1 - q.t / q.life) * Math.min(1, q.t * 4); if (a < 0.03) continue;
       const rr = q.r * KR.k, cx = krCol(q.x) + 1, cy = krRow(q.y), R = Math.ceil(rr * 1.3 / BL) * BL;
       const x0 = Math.floor((cx - R) / BL) * BL, y0 = Math.floor((cy - R) / BL) * BL;
@@ -25760,7 +25799,7 @@ function krDrawBlood() {
     for (const g of KR.gore) {
       const front = !!g.front;
       const c = Math.round(krCol(g.x)) + 1, r = Math.round(krRow(g.y)), sz = Math.max(1, Math.round(g.s * KR.k)), fade = Math.min(1, (g.life - g.t) / 3);
-      const cc = g.dark ? [40, 2, 6] : front ? [160, 12, 20] : [110, 8, 16];
+      const dm = 1 - abyssDarkAt(g.y), cc = (g.dark ? [40, 2, 6] : front ? [160, 12, 20] : [110, 8, 16]).map(v => v * dm);
       for (let yy = 0; yy < sz; yy++) for (let xx = 0; xx < sz; xx++) {
         if (sz > 2 && ((xx === 0 || xx === sz - 1) && (yy === 0 || yy === sz - 1)) && ((g.sd + xx * 3 + yy) % 2 < 1)) continue;   // (ragged corners)
         krAdd(c + xx - (sz >> 1), r + yy - (sz >> 1), 0.95 * fade, cc);
@@ -26095,7 +26134,8 @@ function drawKraken(x0, x1) {
   for (const q of KR.blood) grow(q.x, q.y, q.r * 1.4);
   for (const g of KR.gore) grow(g.x, g.y, g.s);
   if (!krTarget(PX(a), PY(t), PX(b), PY(u))) return;
-  // blood behind everything of it (user 19:25: "There should never be blood in front of the head")
+  // blood behind everything of it (user 19:25: "There should never be blood in front of the head"), dimmed by the deep's dark
+  // where it is (the kraken is drawn after that dark - abyssDarkAt)
   krDrawBlood();
   // the pieces cut off
   for (const pc of KR.pieces) {
@@ -32385,7 +32425,7 @@ function stepHeli(h, dt) {
   if (h.vy < 0 && h.y < HELI_CEIL + 80) h.vy = Math.max(h.vy, -Math.max(0, h.y - HELI_CEIL) * 1.5);
   h.y = Math.max(HELI_CEIL, h.y + h.vy * dt);
   // (into a big ship's hull or her superstructure: brought down - the shared hullStrike, user Oct 27 night)
-  if (LAND && !onLand(h.x) && hullStrike([[h.x, h.y], [h.x + h.facing * heliHalf() * 0.85, h.y], [h.x - h.facing * heliHalf() * 0.85, h.y - heliSkid() * 0.5]], 1.5, h.vx)) { h._civT = 1e9; heliHurt(h, HELI_HP, h.x, h.y); return; }
+  if (LAND && !onLand(h.x) && hullStrike([[h.x, h.y], [h.x + h.facing * heliHalf() * 0.85, h.y], [h.x - h.facing * heliHalf() * 0.85, h.y - heliSkid() * 0.5]], 1.5, h.vx, h.id)) { h._civT = 1e9; heliHurt(h, HELI_HP, h.x, h.y); return; }
   // the ground: under its skids (and its nose and tail as it goes): gently, it lands; fast, it crashes
   const foot = h.y + heliSkid(), half = heliHalf() * 0.8;
   const gm = heliGround(h.x, h.y), gl = heliGround(h.x - half, h.y), gr = heliGround(h.x + half, h.y);
@@ -32638,7 +32678,7 @@ function stepHeliDown(h, dt) {
   if (Math.random() < dt * 10) spawnFlame(h.x + rnd(-6, 6), h.y + rnd(-4, 4), rnd(-20, 20), -rnd(20, 50), 1.1, rnd(2, 4), 2);
   if (LAND && !onLand(h.x)) { const d = shipTopAt(h.x, h.y + heliSkid() - 10); if (d && h.y + heliSkid() >= d.y) { h.y = d.y - heliSkid(); h.deck = d.c; blowHeli(h); return; } }   // (onto a ship's top: it comes down on her deck - user Oct 27, [19])
   if (LAND && !onLand(h.x) && h.y + heliSkid() >= harbourTop(h.x, h.y - 10)) { blowHeli(h); return; }   // (onto the harbour's deck: it's ground - user Oct 27)
-  if (LAND && !onLand(h.x) && !(h._civT > 1e8) && hullStrike([[h.x, h.y]], 2, h.vx)) { h._civT = 1e9; blowHeli(h); return; }   // (into a big ship's side: it blows there, its wreck falls on - user Oct 27 night)
+  if (LAND && !onLand(h.x) && !(h._civT > 1e8) && hullStrike([[h.x, h.y]], 2, h.vx, h.id)) { h._civT = 1e9; blowHeli(h); return; }   // (into a big ship's side: it blows there, its wreck falls on - user Oct 27 night)
   if (LAND && (lakeAt(h.x) || !onLand(h.x)) && h.y + heliSkid() > surfaceY(h.x)) { heliSink(h); return; }   // (shot down over a lake or the sea: into it)
   if (landSolid(h.x, h.y + heliSkid())) blowHeli(h);
 }
@@ -34350,7 +34390,7 @@ async function start(data) {
     civHalfGap: c => [0, 1].map(i => { const h = c.hv && c.hv[i]; if (!h) return null; const kl = civHalfKeel(c, i, civArt(c), CIV[c.kind]), mx = h.x + kl.m * Math.cos(h.a), my = h.y + kl.m * Math.sin(h.a), ca = Math.cos(h.a), sa = Math.sin(h.a), d = kl.pts.map(([lx, ly]) => civFloor(mx + lx * ca - ly * sa) - (my + lx * sa + ly * ca)); return { a: h.a, rest: !!h.rest, min: Math.min(...d), max: Math.max(...d) }; }),
     civHalfPoint: (c, x, y) => civHalfPoint(c, x, y), msPings: () => msPings, partRestOf: sb => sb.parts.map(q => ({ y: q.y, a: q.a, rest: q.rest, r: partRest(sb, q) })), floorRest: (pts, cx, amax, a0) => floorRest(pts, cx, null, amax, a0), ms: { hold: msHold, keys: msKeys }, chargeAt: (x, y) => detonateCharge({ x, y, owner: -1 }) });
   // (Oct 27 night, group B's checks - tools/groupb.mjs)
-  window.__game.gb = { airDoor, airfieldAt, hangarDoorX, oldLand, landAll, inHull, magTop, magTargets, trafficAtRest, BAL_CEIL, ATMO_TOP, landArrive, heliHurt, killTank, stepPlanes, oldPlanes, makePlane, civLoadSpot, armyWreckHits, get time() { return time; } };
+  window.__game.gb = { armyHullAt, hullStrike, airDoor, airfieldAt, hangarDoorX, oldLand, landAll, inHull, magTop, magTargets, trafficAtRest, BAL_CEIL, ATMO_TOP, landArrive, heliHurt, killTank, stepPlanes, oldPlanes, makePlane, civLoadSpot, armyWreckHits, get time() { return time; } };
   // (group C, Oct 27: the storm's targets, the weather, PLAY AGAIN and the sky editor - tools/weathercheck.mjs)
   Object.assign(window.__game, { storm, deckYs, scr: () => ({ bh, S }), stepStorm: dt => stepStorm(dt), stormTargets: air => stormTargets(air).map(([x, y, sh]) => ({ x, y, ship: !!sh })), stormHitAll: air => { const T = stormTargets(air); for (const t of T) { strike(t[0], t[1], t[2], true); t[3](); } return T.length; },
     restartGame: () => restartGame(), weatherFog: (d, h) => weatherFog(d, h), secsTo: h => secsTo(h), skyAt: h => skyAt(h), rainRoof: x => rainRoof(x), towerTopAt: (tw, dx) => towerTopAt(tw, dx), craneTopAt: (cr, x) => craneTopAt(cr, x), hangarRoofAt: (d, x) => hangarRoofAt(d, x), reefFormsInfo: () => ({ forms: rockForms.length, w: rockForms.map(f => Math.round(f.x1 - f.x0)) }) });
