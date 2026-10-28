@@ -2387,8 +2387,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 154;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 27 20:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 155;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 27 20:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12328,8 +12328,8 @@ class GLCtx {
   }
   // premultiplied pixels (a Uint32Array, w x h) straight onto the target: the game's own pixel buffers (fire);
   // straight: the pixels are not premultiplied (r g b a as the sky's buffers hold them) and the GPU premultiplies them.
-  // rows: instead of the one quad, one quad per entry [sy, dy, dh]: row sy of the picture stretched over dy..dy+dh (the
-  // sky's veil: a strip of columns, each band of rows its own thickness)
+  // rows: instead of the one quad, one quad per entry [sy, dy, dh, k]: row sy of the picture stretched over dy..dy+dh, at
+  // k times its alpha (the sky's veil: one row of columns, each band of rows its own thickness)
   drawPixels(px, w, hgt, dx, dy, dw, dh, straight, rows) {
     if (GLR.lost || !(w > 0 && hgt > 0)) return;
     const s = this.s, gl = GLR.gl;
@@ -12351,7 +12351,7 @@ class GLCtx {
     const slot = glSlot(P.tex, false);
     const X = GLC4.x, Y = GLC4.y, u1 = w / P.w, v1 = hgt / P.h;
     if (rows) {
-      for (const [sy, ry, rh] of rows) { if (!(rh > 0)) continue; const v0 = (sy + 0.5) / P.h; this._corners(dx, ry, dw, rh); glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], 0, v0, u1, v0, u1, v0, 0, v0, glAlpha(s.ga), 1 + 8 * slot, 0); }
+      for (const [sy, ry, rh, k] of rows) { if (!(rh > 0)) continue; const v0 = (sy + 0.5) / P.h; this._corners(dx, ry, dw, rh); glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], 0, v0, u1, v0, u1, v0, 0, v0, glAlpha(s.ga * (k ?? 1)), 1 + 8 * slot, 0); }
       return;
     }
     this._corners(dx, dy, dw, dh);
@@ -13996,16 +13996,16 @@ function drawVeil2(lay, horY, X0, vis) {
     // uploaded once and each row stretched over its band of rows. It was a rectangle per run of columns per band: under
     // storm clouds, whose edges ramp, thousands of them)
     const yA = Math.max(0, lay.baseY - 2), yB = Math.min(H - 1, foot), cuts = [lay.baseY + 2, lay.baseY + 5, horY + 1];
-    if (VSTRIP.length < TW * 4) VSTRIP = new Uint32Array(TW * 4 * 2);
-    const rows = []; let y0 = yA, r = 0; VBANDS.length = 0;
-    while (y0 <= yB && r < 4) {
+    // (one row, each column at its full thickness; each band laid from it at its k through the quad's alpha)
+    if (VSTRIP.length < TW) VSTRIP = new Uint32Array(TW * 2);
+    for (let x = 0; x < TW; x++) { const av = colA[x]; VSTRIP[x] = av >= 0.02 ? rgba(vc, av) : 0; }
+    const rows = []; let y0 = yA; VBANDS.length = 0;
+    while (y0 <= yB) {
       let y1 = yB; for (const cY of cuts) if (cY > y0 && cY - 1 < y1) y1 = cY - 1;
-      const k = kAt(y0), o = r * TW;
-      for (let x = 0; x < TW; x++) { const av = colA[x]; VSTRIP[o + x] = av >= 0.02 ? rgba(vc, av * k) : 0; }
-      rows.push([r, y0, y1 - y0 + 1]); VBANDS.push(y0, y1, r); r++;
+      rows.push([0, y0, y1 - y0 + 1, kAt(y0)]); VBANDS.push(y0, y1, kAt(y0)); 
       y0 = y1 + 1;
     }
-    if (r) DCTX.drawPixels(VSTRIP, TW, r, 0, 0, TW, r, true, rows);
+    if (rows.length) DCTX.drawPixels(VSTRIP, TW, 1, 0, 0, TW, 1, true, rows);
   } else for (let y = Math.max(0, lay.baseY - 2); y <= foot; y++) {
     const k = kAt(y);
     let x = 0;
@@ -14044,7 +14044,7 @@ function drawVeil2(lay, horY, X0, vis) {
               if (SHAFT.length < bw * bh) SHAFT = new Uint32Array(bw * bh * 2);
               const sb = SHAFT;
               // (the veil under it, row by row from the strip's band rows - what the buffer held there - not a pixel at a time)
-              for (let y = by0; y <= by1; y++) { let rr = -1; for (let q = 0; q < VBANDS.length; q += 3) if (y >= VBANDS[q] && y <= VBANDS[q + 1]) { rr = VBANDS[q + 2]; break; } const o = (y - by0) * bw; if (rr < 0) sb.fill(0, o, o + bw); else sb.set(VSTRIP.subarray(rr * TW + bx0, rr * TW + bx1 + 1), o); }
+              for (let y = by0; y <= by1; y++) { let kk = -1; for (let q = 0; q < VBANDS.length; q += 3) if (y >= VBANDS[q] && y <= VBANDS[q + 1]) { kk = VBANDS[q + 2]; break; } const o = (y - by0) * bw; if (kk < 0) sb.fill(0, o, o + bw); else if (kk === 1) sb.set(VSTRIP.subarray(bx0, bx1 + 1), o); else for (let x = bx0; x <= bx1; x++) { const v = VSTRIP[x]; sb[o + x - bx0] = v ? ((Math.round((v >>> 24) * kk) & 255) << 24) | (v & 0xffffff) : 0; } }
               // (each column's edge once, each row's fade once; the drop's colour from its alpha byte)
               const xs = Math.round(cx), xe = Math.ceil(cx + w), dk = (dark[2] << 16) | (dark[1] << 8) | dark[0];
               if (EDGE.length < xe - xs + 1) EDGE = new Float32Array((xe - xs + 1) * 2);
@@ -14447,7 +14447,7 @@ function skyFrame(G) {
   // (the hour's terms to a coarser step: as the weather or the hour eases, E.contrast moved every frame and every cloud's light key with it)
   LSIG = [P.shadow, P.self, P.amb, P.contrast, P.expo, P.jitter, P.glow, P.lightz, P.rim, P.mass, P.shade, view, E.contrast.toFixed(2), E.sunset.toFixed(1), E.behind.toFixed(1), E.night.toFixed(1)].join(',') + '|';
   EPALK = ',' + E.pal.map(t => t.join(',')).join(';') + ';' + E.palStorm.map(t => t.join(',')).join(';');   // (the hour's palettes, for the storm clouds' own)
-  RELIGHT = P.relight ?? 1.2; BUILD_MS = P.buildms ?? 1.2;   // (a sixteenth of a 60 fps frame each: the PC spent 7.8 ms a frame on three rebuilds at 2.5 / 3)
+  RELIGHT = P.relight ?? 0.8; BUILD_MS = P.buildms ?? 0.8;   // (a twentieth of a 60 fps frame each: the PC spent 7.8 ms a frame on three rebuilds at 2.5 / 3)
   const windV = P.wind * 8 * S;
   for (const lay of LAYERS) lay.off += windV * lay.par * dt;
   // the lightning: the game's newest bolt, its brightness
