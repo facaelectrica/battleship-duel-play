@@ -1605,6 +1605,20 @@ function floorValid(P) { return Array.isArray(P) && P.length >= 3 && P.every((p,
 let FLOOR_PTS = FLOOR_DEF.map(p => p.slice());
 try { const o = JSON.parse(localStorage.getItem('bd_floor_pts') || 'null'); if (floorValid(o)) FLOOR_PTS = o; } catch (e) { }
 const floorPtsUsed = () => NET.role === 'local' ? FLOOR_PTS : FLOOR_DEF;
+// (user Oct 28, 19:02: the ocean floor's pieces take the TERRAIN tab's marks too) the skin marked on the floor's piece over x
+// - 'F' / 'D': the forest's or the desert's lake bed there instead of the sea's sand, corals, weed and rocks; 'S' or none:
+// the sea's own. FLOOR_MARKED: any piece marked F or D (none: the floor exactly as it was)
+let FLOOR_MARKED = false;
+function floorSkinAt(x) {
+  if (!(BED_B - BED_A > 0)) return null;
+  const P = floorPtsUsed(), u = (x - BED_A) / (BED_B - BED_A);
+  if (u < 0 || u > 1) return null;
+  let lo = 0, hi = P.length - 1;
+  while (hi - lo > 1) { const k = (lo + hi) >> 1; if (P[k][0] <= u) lo = k; else hi = k; }
+  return P[lo][2] || null;
+}
+// the forest's or the desert's lake bed at x, on the ocean floor ('F', 'D'), or null - the sea's own
+const floorLook = x => { if (!FLOOR_MARKED) return null; const s = floorSkinAt(x); return s === 'F' || s === 'D' ? s : null; };
 // the monotone cubic's slopes (Fritsch-Carlson): flat at every peak and hollow, steep walls kept steep
 function floorTangents(P) {
   const n = P.length, d = [], m = new Array(n).fill(0);
@@ -1634,6 +1648,7 @@ const SEA_FLOOR_MAX0 = SEABED_Y + 3 * (SEABED_Y - WATER_Y) + 1650;
 let SEA_FLOOR_MAX = SEA_FLOOR_MAX0;                          // the deepest anywhere (OPEN WORLD: the drawing's pit)
 function floorRebuild() {
   floorTab = floorTabS = null; SEA_FLOOR_MAX = SEA_FLOOR_MAX0; setTrench(0, 0);
+  FLOOR_MARKED = LAND && floorPtsUsed().some(p => p[2] === 'F' || p[2] === 'D'); floorSkinStrips = null;
   if (!LAND || !(BED_B - BED_A > 2 * BED_SHELF + 400)) return;
   const P = floorPtsUsed(), m = floorTangents(P), L = BED_B - BED_A, n = Math.ceil(L / FLOOR_STEP) + 2, H = SEABED_Y - WATER_Y;
   const T = new Float32Array(n), Ts = new Float32Array(n);
@@ -2543,8 +2558,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 186;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 19:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 187;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 19:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -17577,7 +17592,8 @@ function renderObjects() {
   ot = ema('obBack', ot);
   for (const sb of oldSubs) if (sb.parts) drawSubParts(sb);
   for (const sb of subs) if (sb.parts) drawSubParts(sb);
-  drawTiles(img.seabed, img.seabedFlip, 1, SEABED_TOP, SEABED_K, '#8a8072');   // (lighter: the user's picture's sand reads pale)   // (and the ground under the sand)
+  drawTiles(img.seabed, img.seabedFlip, 1, SEABED_TOP, SEABED_K, '#8a8072');   // (lighter: the user's picture's sand reads pale)
+  drawFloorSkins(x0, x1);                                 // (pieces marked FOREST or DESERT: that country's lake bed - 44-shadows-seafloor.js)   // (and the ground under the sand)
   drawReefItems(reef, x0, x1);                            // (boulders, corals, sponges)
   drawAlgae(x0, x1);
   drawDuds(x0, x1);
@@ -18350,7 +18366,7 @@ function drawAlgae(x0, x1, lkOnly) {
   const swA = 1 + 1.1 * tur, swF = 1 + 0.55 * tur;
   fsLast = null;
   for (const p of plants) {
-    if (p.x < x0 - 60 || p.x > x1 + 60 || !p.lk !== !lkOnly) continue;
+    if (p.x < x0 - 60 || p.x > x1 + 60 || !p.lk !== !lkOnly || (FLOOR_MARKED && !p.lk && floorLook(p.x))) continue;   // (none on a floor piece marked FOREST or DESERT)
     const base = seabedY(p.x) + 3;
     if (p.kind === 'rock') { drawRock(p, base); continue; }
     const blades = p.kind === 'kelp' ? 1 + (p.n > 4 ? 1 : 0) : p.n;
@@ -18584,6 +18600,7 @@ function buildReef() {
   // the big formations: out past the sand, every so often, taller in the deep
   for (let x = lo + R() * 300; x < hi; x += (520 + R() * 520) * RKg) {
     const d = shoreDist(x);
+    if (floorLook(x)) continue;                                                                  // (a piece marked FOREST or DESERT: a lake bed, no rock formations)
     if (d < 1000) continue;
     if (LAND && pirateWrecks.some(w => Math.abs(x - w.x) < (w.half || 200) + 260)) continue;   // (none on a pirate wreck's levelled floor)
     if (KR_PAD && Math.abs(x - KR_PAD.x) < KR_PAD.half + 300) continue;                          // (none on the kraken's pad)
@@ -18608,6 +18625,7 @@ function buildReef() {
   // its pillars (coastFront), the rest behind the boats
   for (let x = lo + R() * 40; x < hi; x += 34 + R() * 80) {
     const d = shoreDist(x);
+    if (floorLook(x)) continue;
     if (d > 750 || rockTopY(x) < Infinity) continue;
     const big = clamp(1 - d / 750, 0.15, 1), wU = (30 + R() * 90) * (0.35 + 1.4 * big), hU = wU * (0.45 + R() * 0.4);
     const W = Math.max(6, Math.round(wU / REEF_K)), H = Math.max(5, Math.round(hU / REEF_K)), top = rockProfile(W, H, 'mound', R);
@@ -18625,6 +18643,7 @@ function buildReef() {
   // out in the deep: corals and sponges, thicker the deeper; on the rocks' feet too
   for (let x = lo + R() * 30; x < hi; x += 26 + R() * 70) {
     const d = shoreDist(x);
+    if (floorLook(x)) continue;
     if (d < 1300 + R() * 300) continue;
     if (R() > 0.35 + 0.5 * clamp((d - 1300) / 1500, 0, 1)) continue;
     const k = R(), kind = k < 0.35 ? 'branch' : k < 0.55 ? 'fan' : k < 0.75 ? 'brain' : 'tube';
@@ -18634,6 +18653,54 @@ function buildReef() {
   reef.sort((a, b) => a.x - b.x); coastFront.sort((a, b) => a.x - b.x);
   reefStrips = null; fgStrip = null;                   // (the ridges behind: made again for this world's light)
   if (LAND && land.cell) buildLakeSea();               // (the lake beds marked SEA: their own corals, boulders and weed - 50-land-lake)
+}
+/* ---- (user Oct 28, 19:02) a piece of the ocean floor marked FOREST or DESERT in the TERRAIN tab: that country's lake bed
+   there instead of the sea's sand - a skin of sand (the forest's beach, the desert's ochre), then the earth (the forest's
+   brown, the desert's red), fading to the dark with depth as the land's does (ltFade); no corals, weed or rock formations
+   (buildReef, drawAlgae). Painted once per marked stretch, a cell a pixel as the land, along the floor's line (sandY) ---- */
+let floorSkinStrips = null;
+function floorSkinRuns() {
+  const P = floorPtsUsed(), L = BED_B - BED_A, out = [];
+  for (let k = 0; k < P.length - 1; k++) {
+    const sk = P[k][2]; if (sk !== 'F' && sk !== 'D') continue;
+    const a = BED_A + P[k][0] * L, b = BED_A + P[k + 1][0] * L, last = out[out.length - 1];
+    if (last && last[2] === sk && Math.abs(last[1] - a) < 1) last[1] = b; else out.push([a, b, sk]);
+  }
+  return out;
+}
+function buildFloorSkinStrip(a, b, sk) {
+  const c0 = Math.floor(a / LT_CELL), c1 = Math.ceil(b / LT_CELL), w = Math.max(1, c1 - c0), tops = new Float32Array(w), D = sk === 'D';
+  let lo = Infinity, hi = -Infinity;
+  for (let q = 0; q < w; q++) { const t = sandY((c0 + q + 0.5) * LT_CELL); tops[q] = t; if (t < lo) lo = t; if (t > hi) hi = t; }
+  const y0 = Math.floor(lo) - 6, h = Math.ceil((hi + 240 - y0) / LT_CELL), cv = makeCanvas(w, h), g = cv.getContext('2d'), id = g.createImageData(w, h), d8 = id.data;
+  const SAND = D ? DES_SAND : LT_PAL[M_SAND], PD = D ? DES_EARTH : LT_PAL[M_DIRT], DEEP = D ? LT_DEEP_D : LT_DEEP;
+  for (let q = 0; q < w; q++) {
+    const c = c0 + q, x = c * LT_CELL, sd = (D ? 18 : 22) + 6 * Math.sin(x / 55 + 1.3);
+    for (let r = 0; r < h; r++) {
+      const d = y0 + (r + 0.5) * LT_CELL - tops[q]; if (d < 0) continue;
+      const hs = hash(c * 1.37 + r * 7.91);
+      let col = d < sd ? (hs < 0.25 ? SAND[1] : hs > 0.85 ? SAND[2] : SAND[0])
+        : D ? PD[Math.floor(hash(Math.floor(d / 22) * 3.71 + 0.5) * 4)] : (hs < 0.35 ? PD[6] : hs < 0.75 ? PD[1] : hs < 0.97 ? PD[0] : PD[5]);
+      let f = smoothstep(26, 205, d) * 8; const fl = Math.floor(f); f = Math.min(1, (fl + ((f - fl) > ((c + r) & 1 ? 0.62 : 0.38) ? 1 : 0)) / 8);
+      if (f > 0) col = mix3(col, DEEP, f);
+      const o = (r * w + q) * 4; d8[o] = col[0]; d8[o + 1] = col[1]; d8[o + 2] = col[2]; d8[o + 3] = 255;
+    }
+  }
+  g.putImageData(id, 0, 0);
+  return { cv, x0: c0 * LT_CELL, x1: (c0 + w) * LT_CELL, y0, h, deep: DEEP };
+}
+function drawFloorSkins(x0, x1) {
+  if (!FLOOR_MARKED) return;
+  if (!floorSkinStrips) floorSkinStrips = floorSkinRuns().map(([a, b, sk]) => buildFloorSkinStrip(a, b, sk));
+  const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
+  const Bt = bh - SHY + 2;
+  for (const S of floorSkinStrips) {
+    if (S.x1 < x0 - 10 || S.x0 > x1 + 10) continue;
+    const X0 = Math.round(PX(S.x0)), X1 = Math.round(PX(S.x1)), Y0 = Math.round(PY(S.y0)), Y1 = Math.round(PY(S.y0 + S.h * LT_CELL));
+    C.drawImage(S.cv, X0, Y0, X1 - X0, Y1 - Y0);
+    if (Y1 < Bt) { C.fillStyle = rgbs(S.deep); C.fillRect(X0, Y1 - 1, X1 - X0, Bt - Y1 + 1); }   // (and on down, in the dark)
+  }
+  C.imageSmoothingEnabled = sm;
 }
 // the sprites, standing on the floor (rocks sunk into the sand a little), drawn as pixels at this zoom
 // (lk: the ones on a lake bed marked SEA - drawn in the land's pass, under the lake's water - lkOnly picks those)
@@ -18727,7 +18794,7 @@ function seabedHit(x, hl, power, vx = 0, cutY, blast) {
   }
   // the weed and kelp: torn off at the cut (or near the sand under what landed on it, or in the blast's reach) - floaty
   for (const p of plants) {
-    if (p.kind === 'rock' || p.h < 4 || p.x < a - 4 || p.x > b + 4) continue;
+    if (p.kind === 'rock' || p.h < 4 || p.x < a - 4 || p.x > b + 4 || (FLOOR_MARKED && !p.lk && floorLook(p.x))) continue;
     const bed = seabedY(p.x) + 3;
     if (blast && Math.hypot(p.x - blast.x, Math.max(0, bed - p.h - blast.y, blast.y - bed)) > blast.r) continue;
     const keep = cutY === undefined || blast ? 2 : Math.max(2, bed - cutY - 2);
@@ -18883,7 +18950,14 @@ function drawFgRocks() {
   // its tallest tops come up to just under the sand line (whole blocks at this zoom)
   // (OPEN WORLD, user Oct 26: "a weird sliding effect on the underground foreground black rocks" - they keep to the
   // world, p 1, not sliding across it)
-  drawTiles(fgStrip.sp, fgStrip.flip, LAND ? 1 : FG_P, SEABED_Y + 12 - fgStrip.hi * FG_K, FG_K, css3(FG_COL));
+  const go = () => drawTiles(fgStrip.sp, fgStrip.flip, LAND ? 1 : FG_P, SEABED_Y + 12 - fgStrip.hi * FG_K, FG_K, css3(FG_COL));
+  // (pieces of the floor marked FOREST or DESERT: a lake bed, not the sea's - none of its black rocks in front there)
+  if (!FLOOR_MARKED) { go(); return; }
+  const runs = floorSkinRuns(); if (!runs.length) { go(); return; }
+  C.save(); C.beginPath();
+  let a = -1e9; for (const [ra, rb] of runs) { if (ra > a) C.rect(Math.floor(PX(Math.max(a, -1e6))), -SHY - 50, Math.ceil(PX(ra) - PX(Math.max(a, -1e6))), bh + 100); a = rb; }
+  C.rect(Math.floor(PX(a)), -SHY - 50, VWP + SHX + 50 - Math.floor(PX(a)), bh + 100);
+  C.clip(); go(); C.restore();
 }
 function drawReefStrips() {
   if (!reefStrips) buildReefStrips();
@@ -27569,6 +27643,7 @@ window.addEventListener('pointerdown', e => {
   if (h.k < 0 && !onLine) { FLOOR_ED.lastDown = null; return; }
   e.stopImmediatePropagation(); e.preventDefault();             // (the editor's, not the game's: no shot where you click)
   if (h.k < 0) {
+    terrainSelectFloor(h.x);                                     // (the piece of line pressed: the one the SKIN buttons mark - 50-land-unified)
     // the line: a second press here soon after the first adds a point
     const ld = FLOOR_ED.lastDown;
     if (ld && now - ld.t < 380 && Math.hypot(e.clientX - ld.cx, e.clientY - ld.cy) < 24) {
@@ -27612,11 +27687,12 @@ function floorEdDraw() {
   if (!floorEdOn()) return;
   const P = FLOOR_PTS, m = floorTangents(P), [a, L] = floorSpan(), x0 = CAMPX / SV, x1 = x0 + VWW;
   const st = Math.max(1, Math.round(PIXU / PIXW)), t = Math.max(1, Math.round(1.5 * dpr / PIXW));
-  C.fillStyle = 'rgba(255,179,71,0.85)';
+  // (in its piece's skin colour - orange: AUTO; the piece picked for the SKIN buttons thicker and white)
   for (let c = 0; c < VWP; c += st) {
     const wx = (c + CAMPX + 0.5) / SV; if (wx < a || wx > a + L || wx < x0 - 10 || wx > x1 + 10) continue;
-    const y0 = PY(WATER_Y + floorCurve(P, m, (wx - a) / L)), y1 = PY(WATER_Y + floorCurve(P, m, (wx + st / SV - a) / L));
-    C.fillRect(c, Math.min(y0, y1) - (t >> 1), st, Math.abs(y1 - y0) + t);
+    const y0 = PY(WATER_Y + floorCurve(P, m, (wx - a) / L)), y1 = PY(WATER_Y + floorCurve(P, m, (wx + st / SV - a) / L)), sel = floorSelAt(wx), sk = floorEdSkinAt(wx), tt = sel ? t * 3 : sk ? t * 2 : t;
+    C.fillStyle = sel ? '#ffffff' : TERRAIN_SKIN_COL[sk] || 'rgba(255,179,71,0.85)';
+    C.fillRect(c, Math.min(y0, y1) - (tt >> 1), st, Math.abs(y1 - y0) + tt);
   }
   const hs = Math.max(5, Math.round(4.5 * dpr / PIXW));
   P.forEach((p, k) => {
@@ -35302,9 +35378,21 @@ function terrainPiece(R, x) {
   return { R, k };
 }
 function terrainSelect(R, x) { TERRAIN_ED.sel = terrainPiece(R, x); terrainSyncSkin(); }
+// (user Oct 28, 19:02) the ocean floor's pieces too: F - the piece of FLOOR_PTS from point k
+function terrainSelectFloor(x) {
+  const P = FLOOR_PTS, u = (x - BED_A) / Math.max(1, BED_B - BED_A);
+  let k = 0; while (k < P.length - 2 && P[k + 1][0] <= u) k++;
+  TERRAIN_ED.sel = { F: true, k }; terrainSyncSkin();
+}
+function floorSelAt(x) {
+  const s = TERRAIN_ED.sel; if (!s || !s.F || !FLOOR_PTS[s.k + 1]) return false;
+  const u = (x - BED_A) / Math.max(1, BED_B - BED_A); return u >= FLOOR_PTS[s.k][0] && u < FLOOR_PTS[s.k + 1][0];
+}
+// the skin on the floor's piece over x, as the tab's points have it now (before REFRESH builds it)
+function floorEdSkinAt(x) { const P = FLOOR_PTS, u = (x - BED_A) / Math.max(1, BED_B - BED_A); let k = 0; while (k < P.length - 2 && P[k + 1][0] <= u) k++; return P[k][2] || null; }
 // is x on the selected piece
 function terrainSelAt(x) {
-  const s = TERRAIN_ED.sel; if (!s || !onLand(x) || lcRight(x) !== s.R) return false;
+  const s = TERRAIN_ED.sel; if (!s || s.F || !onLand(x) || lcRight(x) !== s.R) return false;
   const P = LAND_PTS[s.R ? 'R' : 'L']; if (!P[s.k + 1]) return false;
   const u = lcX(x) / SEA0; return u >= P[s.k][0] && u < P[s.k + 1][0];
 }
@@ -35312,12 +35400,13 @@ function terrainSelAt(x) {
 function terrainMark(sk) {
   const s = TERRAIN_ED.sel;
   if (!s) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Press the line between two handles first: that piece turns white, then pick its skin.'; return; }
-  const P = LAND_PTS[s.R ? 'R' : 'L'], p = P[s.k]; if (!p) return;
+  const P = s.F ? FLOOR_PTS : LAND_PTS[s.R ? 'R' : 'L'], p = P[s.k]; if (!p) return;
   if (sk) p[2] = sk; else p.length = 2;
-  landShapePrep(); landEdChanged(); terrainSyncSkin();
+  if (s.F) floorChanged(); else { landShapePrep(); landEdChanged(); }
+  terrainSyncSkin();
 }
 function terrainSyncSkin() {
-  const s = TERRAIN_ED.sel, P = s && LAND_PTS[s.R ? 'R' : 'L'], sk = P && P[s.k] ? P[s.k][2] || null : undefined;
+  const s = TERRAIN_ED.sel, P = s && (s.F ? FLOOR_PTS : LAND_PTS[s.R ? 'R' : 'L']), sk = P && P[s.k] ? P[s.k][2] || null : undefined;
   for (const [b, v] of TERRAIN_ED.skinBtns || []) b.classList.toggle('on', sk !== undefined && sk === v);
   if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = !s ? 'Press the line between two handles to pick a piece of the ground.' : 'The white piece: ' + (sk === 'F' ? 'FOREST' : sk === 'D' ? 'DESERT' : sk === 'S' ? 'SEA' : 'AUTO (the look it has always had)') + '. REFRESH builds it.';
 }
