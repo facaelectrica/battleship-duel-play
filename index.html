@@ -1677,6 +1677,9 @@ function floorAt(T, x) {
 }
 // the shape's depth under the calm sea at x, world units (no zigzag, no rocks): what the caves will cut into
 function floorProfile(x) { return SEABED_Y - WATER_Y + (floorTab ? floorAt(floorTab, x) : bedSmooth(x)); }
+// the deepest ground anywhere - the ocean floor's, or the land's when it's dug deeper (50-land-terrain): how far down the
+// GAME EDITOR's camera goes
+const worldDeepY = () => Math.max(SEA_FLOOR_MAX, LAND && land.deepY ? land.deepY : 0);
 // the deepest point of the shape (the kraken's)
 const floorDeepest = () => floorDeep.slice();
 let TR_A = 0, TR_B = 0;
@@ -2535,8 +2538,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 181;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 16:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 182;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 17:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4157,7 +4160,7 @@ function edModeClose() { const T = NSKY.editor.TUNE; if (T.root) T.root.hidden =
 function photoZoom(f) { PHOTO.z = clamp(PHOTO.z * f, ZOOM_MIN * 0.8, ZOOM_TOP); }
 function photoPan(dxPx, dyPx) {          // (screen pixels dragged: the world follows the finger)
   const k = dpr / PIXW / (S * PHOTO.z);                         // (world units a screen point)
-  PHOTO.x = clamp(PHOTO.x - dxPx * k, 0, WORLD_W); PHOTO.y = clamp(PHOTO.y - dyPx * k, (LAND ? SPACE_TOP : SKY_TOP) + 300, SEA_FLOOR_MAX);
+  PHOTO.x = clamp(PHOTO.x - dxPx * k, 0, WORLD_W); PHOTO.y = clamp(PHOTO.y - dyPx * k, (LAND ? SPACE_TOP : SKY_TOP) + 300, worldDeepY());
 }
 // the camera, while the eye is shut: one view, where you've put it
 function photoCamera() {
@@ -4217,7 +4220,7 @@ function photoInput(dt) {
     if (b(12)) zf += 1; if (b(13)) zf -= 1; if (b(14)) ax -= 1; if (b(15)) ax += 1;
     if (b(1) || b(9)) { if (!PHOTO.padBack) { PHOTO.padBack = true; photoExit(); return; } } else PHOTO.padBack = false;
   }
-  PHOTO.x = clamp(PHOTO.x + ax * sp, 0, WORLD_W); PHOTO.y = clamp(PHOTO.y + ay * sp, (LAND ? SPACE_TOP : SKY_TOP) + 300, SEA_FLOOR_MAX);
+  PHOTO.x = clamp(PHOTO.x + ax * sp, 0, WORLD_W); PHOTO.y = clamp(PHOTO.y + ay * sp, (LAND ? SPACE_TOP : SKY_TOP) + 300, worldDeepY());
   if (zf) photoZoom(Math.exp(zf * dt * 1.4));
 }
 
@@ -32682,12 +32685,14 @@ const LT_CHUNK = 64;                                   // columns a painted slic
    needs: from its top row land.rT[k] (0, today's top - or above it, up a mountain raised past it) to its bottom row
    land.rB[k] (LT_ROWS, today's bottom - or below it, under a lake dug deeper), so a raised mountain or a deep lake
    costs memory only where it is. Every slice keeps at least today's rows, so the land as it was is stored, dug and
-   painted exactly as before. The ground may rise to LAND_CEIL and go down to LAND_FLOOR (as deep as the ocean's pit) */
+   painted exactly as before. The ground goes as high and as deep as it's dragged (user Oct 28, 15:16: "I decide how high
+   I make it"): LAND_CEIL is only the top of the world (as high as anything goes, SPACE_TOP) and LAND_FLOOR the same depth
+   the ocean floor's points may go (FLOOR_MAX_D) - the same rule for both */
 // (a slice's room over its highest ground - humps, blades; and its earth under its lowest: today's grid kept 60 under
 // the lake beds - LT_SKIN; a slice that goes deeper keeps LT_DEEP_SKIN, past where the earth has faded to dark - ltFade -
 // so a steep wall's earth never stops short at a slice's edge)
 const LT_HEAD = 120, LT_SKIN = 60, LT_DEEP_SKIN = 260;
-const LAND_CEIL = WATER_Y - 2000, LAND_FLOOR = WATER_Y + 4900;
+const LAND_CEIL = SPACE_TOP + 400, LAND_FLOOR = WATER_Y + FLOOR_MAX_D;
 const M_AIR = 0, M_GRASS = 1, M_DIRT = 2, M_SAND = 3, M_ROCK = 4, M_CONC = 5;   // (M_CONC: the airfield's concrete, user Oct 25 late)
 // (user Oct 28: the airport is a placed structure - 50-land-tshape: its concrete wherever it's put)
 const onApron = x => onLand(x) && apronD(x) < 0;
@@ -32811,6 +32816,7 @@ function ltBands() {
     land.cw[k] = w; land.base[k] = tot; tot += w * (land.rB[k] - land.rT[k]);
   }
   land.base[n] = tot;
+  land.deepY = LT_Y0 + Math.max(...land.rB) * LT_CELL;          // (the deepest the land goes: the editor's camera reaches it - worldDeepY)
   // (all slices today's rows: the land as it was - one dark fill under them all, as before)
   land.flat = land.rT.every(v => v === 0) && land.rB.every(v => v === LT_ROWS);
   return tot;
