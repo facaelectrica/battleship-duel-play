@@ -2531,8 +2531,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 168;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 08:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 169;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 09:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13443,7 +13443,8 @@ const SL = [
   ['self', 'SELF', 0, 1, 0.05, 0.45],
   ['shade', 'PUFF SHADING', 0, 1, 1, 1],          // (user Oct 27: the splotches - 1: each puff drawn with the light across it, 0: one flat tone a puff, as before)
   ['amb', 'AMBIENT', 0, 1, 0.05, 0.35],
-  ['crease', 'CREASE', 0, 1, 0.05, 0.4],          // (Oct 28, lab V50: how dark the crease where two lobes meet is, in any light)
+  ['crease', 'CREASE', 0, 1, 0.05, 0.4],
+  ['lightfix', 'LIGHT FIX', 0, 1, 1, 1],           // (Oct 28: 1 = the sun's side-light the same for every cloud and relights whole; 0 = the old per-cloud rule, for comparison)          // (Oct 28, lab V50: how dark the crease where two lobes meet is, in any light)
   ['rim', 'RIM', 0, 3, 1, 0],
   ['hi', 'HIGHLIGHT', 0, 2, 0.05, 1],
   ['glow', 'SUNSET GLOW', 0, 2, 0.05, 1],
@@ -14032,12 +14033,18 @@ function lightDir(c) {
   // across: how far the sun is past the cloud's side (0 while it is within the cloud's width: a sun at the cloud's height
   // beside it is behind it); up: how far above the cloud's middle. In screen heights at ×1. Height counts for much more than
   // the side: the sun high in the sky lights the tops; beside a cloud, it only tilts the light a little toward that side.
-  const ex = sx < X0 + c.minX ? sx - (X0 + c.minX) : sx > X0 + c.maxX ? sx - (X0 + c.maxX) : 0;
+  // (Oct 28: the sun is at infinity, so its side-light is the same for every cloud - by where the hour puts the sun on the
+  // screen, not by each cloud's offset from it. Before, the offset was per cloud: as the camera panned (a plane flying) every
+  // cloud's light moved every frame, so every cloud was re-lit every frame - 500 puffs and 2-4 batch builds a frame, and the
+  // clouds splotchy with half-finished relights. LIGHT FIX 0 puts the old rule back for comparison)
+  const ex = (P.lightfix ?? 1) > 0 ? (sx - W / 2) * 0.5 : sx < X0 + c.minX ? sx - (X0 + c.minX) : sx > X0 + c.maxX ? sx - (X0 + c.maxX) : 0;
   const k = 1 - 0.45 * E.behind, ax = ex / HS / Zg * 0.6 * k, ay = (Ym - sz.row * H) / HS / Zg * (2.2 - 1.6 * P.lightz) * k;   // (angles, radians)
   const d = Math.hypot(ax, ay) || 1e-6, dx = ax, dy = ay;
   // the sun inside the cloud's outline: straight behind it (V21), easing out to the plain angle past its edge
   const rx = Math.max(6 * S * Zg, (c.maxX - c.minX) / 2), ry = Math.max(6 * S * Zg, c.h / 2);
-  const e = Math.hypot((sz.x * W - Xm) / rx, (sz.row * H - Ym) / ry), out = smoothstep(0.15, 1.5, e);
+  const e = Math.hypot((sz.x * W - Xm) / rx, (sz.row * H - Ym) / ry);
+  let out = smoothstep(0.15, 1.5, e);
+  if ((P.lightfix ?? 1) > 0) out = Math.round(out * 4) / 4;   // (in quarters: a cloud passing the sun changes its light four times, not every frame)
   const th = Math.min(1.48, d) * out;
   let lx = Math.sin(th) * dx / d, ly = Math.sin(th) * dy / d, lz = -Math.cos(th);
   if (E.overcast > 0.6) { const k = (E.overcast - 0.6) / 0.4; lx *= 1 - k; ly = ly * (1 - k) + k; }
@@ -14263,7 +14270,10 @@ function drawCloudCached(c, ax, ay) {
       const t0 = performance.now(), st = c.toneStride;
       // (a cloud is re-lit in parts over as many rebuilds - a quarter of its puffs each for a big one, a half for a small -
       // a frame or so apart, so one rebuild stays within the budget)
-      const parts = !relight || !pb ? 1 : c.items.length > 2400 ? 4 : c.items.length > 800 ? 2 : 1;
+      // (Oct 28: a relight is the whole cloud in one build - LIGHT FIX. In parts, a cloud whose light kept moving (the camera
+      // panning) never finished: half its puffs in the old light, half in the new, splotchy. The RELIGHT budget spreads the
+      // relights over the clouds instead: one or two a frame, the rest wait a frame with last time's picture)
+      const parts = !relight || !pb || (P.lightfix ?? 1) > 0 ? 1 : c.items.length > 2400 ? 4 : c.items.length > 800 ? 2 : 1;
       if (relight) { c.toneStride = parts; TONE_PH = parts > 1 ? (pb.lkPass || 0) : -1; }
       const b = buildBatch(c, ax, ay); b.fr = frameNo;
       c.toneStride = st; TONE_PH = -1;
@@ -16016,6 +16026,7 @@ const NSKY_API = {
   deck1Px(V) { return toScreen(V, 0, LAYERS[3].baseY * CPX)[1]; },
   spans: skySpans,
   get drift() { return LAYERS.map(l => l.off); },   // (tests: each deck's wind drift - it holds while the world is held)
+  get clouds() { return clouds; },                   // (tests: the clouds, their light keys - tools/skylight.mjs)
   get CPX() { return CPX; }, get ZL() { return ZL; }, set ZL(v) { ZL = v; },
   get gpu() { return (P.gpu ?? 1) > 0; }, set gpu(v) { P.gpu = v ? 1 : 0; },   // (the decks on the GPU: 04-buffers.js; ?skygpu=0 draws them in the buffers)
   // (tests: a deck's buffer of a view, as RGBA rows, and its band)
@@ -16035,7 +16046,7 @@ const NSKY_API = {
 const DESC = {
   sunh: 'How high the sun climbs at midday, in screens above the horizon at ×1', bands: 'How many steps the sky\'s gradient has: more is smoother',
   wisps: 'How many long thin wisps stream between the clouds',
-  tall: 'How many of the big clouds are tall cumulus towers (the TALL shapes); the scene is rebuilt', tallwx: 'How much the towers wait for heavy weather: 1 = the last clouds to grow (SKY past 60%), 0 = they show like any cloud', mix: 'The world is cut into stretches that take turns being wispy (small clouds, thick wisps), tall (towers) and banks (the wide clouds). How strictly each keeps to its kind: 0 = every kind everywhere, 1 = nothing else in it', region: 'How long each stretch of one kind is, in screens', wispbump: 'How many small bumps along a wisp\'s top', wispbumpk: 'How big those bumps are', wisppuff: '1: a wisp is built of puffs like the other clouds; 0: shaded ovals, as before', crease: 'How much darker a face tucked into the crease between two lobes is, in any light: the sky cannot reach it', gcover: 'How many clouds there are with the game\'s SKY slider at 30%. SKY 0 (CLEAR) has none at all; up to 40% there are only a few here and there; every cloud shows by 60%; rain brings its own', bigk: 'How much bigger (and so taller) the clouds grow as the SKY slider goes from 60% to 100%',
+  tall: 'How many of the big clouds are tall cumulus towers (the TALL shapes); the scene is rebuilt', tallwx: 'How much the towers wait for heavy weather: 1 = the last clouds to grow (SKY past 60%), 0 = they show like any cloud', mix: 'The world is cut into stretches that take turns being wispy (small clouds, thick wisps), tall (towers) and banks (the wide clouds). How strictly each keeps to its kind: 0 = every kind everywhere, 1 = nothing else in it', region: 'How long each stretch of one kind is, in screens', wispbump: 'How many small bumps along a wisp\'s top', wispbumpk: 'How big those bumps are', wisppuff: '1: a wisp is built of puffs like the other clouds; 0: shaded ovals, as before', lightfix: '1: the sun lights every cloud from the same side (it is at infinity), so the camera panning re-lights nothing; relights are whole clouds. 0: the old rule - each cloud lit by its own offset from the sun - for comparison', crease: 'How much darker a face tucked into the crease between two lobes is, in any light: the sky cannot reach it', gcover: 'How many clouds there are with the game\'s SKY slider at 30%. SKY 0 (CLEAR) has none at all; up to 40% there are only a few here and there; every cloud shows by 60%; rain brings its own', bigk: 'How much bigger (and so taller) the clouds grow as the SKY slider goes from 60% to 100%',
   ghaze: 'The haze under each deck of clouds on a clear day (the game\'s fog adds to it)', par1: 'How much deck 1 (the front clouds) moves as the camera pans: 1 = with the world, 0 = fixed in the sky',
   par2: 'How much deck 2 moves as the camera pans', par3: 'How much deck 3 moves as the camera pans', par4: 'How much deck 4 (the far horizon) moves as the camera pans',
   cloudk: 'The clouds\' size, times the lab\'s (the sky is built again)',
@@ -16062,7 +16073,7 @@ const DESC = {
 const ED_TABS = {
   SKY: [['GRADIENT AND SUN', ['bands', 'sunh', 'flare', 'sunbig']], ['THE GAME\'S WEATHER', ['gcover', 'bigk', 'ghaze', 'wisps']], ['KINDS OF CLOUD (LAB V50)', ['tall', 'tallwx', 'mix', 'region', 'wispbump', 'wispbumpk', 'wisppuff']], ['CAMERA', ['par1', 'par2', 'par3', 'par4', 'cells', 'skyh', 'cloudk']]],
   DECKS: [['HEIGHTS', ['alt', 'gap']], ['AIR', ['atmo']]],
-  LIGHT: [['SUN', ['lightz', 'glow']], ['TONES', ['contrast', 'expo']], ['SHADOWS', ['shadow', 'self', 'amb', 'crease', 'shade']], ['EDGES', ['hi', 'rim']], ['RAYS', ['rays', 'raythru', 'raylen', 'rayhid']]],
+  LIGHT: [['SUN', ['lightz', 'glow', 'lightfix']], ['TONES', ['contrast', 'expo']], ['SHADOWS', ['shadow', 'self', 'amb', 'crease', 'shade']], ['EDGES', ['hi', 'rim']], ['RAYS', ['rays', 'raythru', 'raylen', 'rayhid']]],
   COLOURS: null,
   SHAPE: [['PUFFS AND BILLOWS', ['puff', 'billow', 'jitter']], ['MASS', ['mass', 'base']], ['DETAIL (LOD)', ['lodb', 'lodl']]],
   MOTION: [['FORMING', ['form', 'morph']], ['LIFE', ['evolve', 'heal']]],
