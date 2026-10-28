@@ -2387,7 +2387,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const BUILD = 'OCT 27 19:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 152;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 27 20:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -3877,10 +3878,10 @@ function drawPerfPanel(x, y) {
     'SCRIPT ' + f(script) + '  DRAW+GPU ' + f(Math.max(0, (fpsMeter.gap || 0) - script)) + (fillTest.ms >= 0 ? '  FILL ' + fillTest.ms.toFixed(2) + ' ' + fillTest.kind + '  PATH ' + fillTest.path.toFixed(1) + ' VS RECTS ' + fillTest.rects.toFixed(1) : ''),
     (probe.on ? 'PROBING ' + Math.ceil(probe.left) + 'S: ' : probe.done ? 'PROBED: ' : '') + 'PHYS ' + f(perf.phys) + '  SMOKE ' + f(perf.smoke),
     'SKY ' + f(P.sky) + '  WORLD ' + f(P.objects) + '  WATER ' + f(P.distort),
-    skyNewOn ? (T => 'NEW SKY ' + f(T.back) + '+' + f(T.decks) + '+' + f(T.front) + '+' + f(T.veil1) + '  LAY ' + f(T.out) + '  SMOKE ' + f(T.smoke))(NSKY.FT) : '',
+    skyNewOn ? (T => 'NEW SKY ' + f(T.back) + '+' + f(T.decks) + '+' + f(T.front) + '+' + f(T.veil1) + '  LAY ' + f(T.out) + '  SMOKE ' + f(T.smoke) + '  BUILD ' + f(T.build) + '/' + Math.round(T.builds || 0) + ' LIT ' + Math.round(T.lit || 0) + ' LOBES ' + f(T.lobes) + ' VEIL ' + f(T.veil) + ' GL ' + f(T.gl))(NSKY.FT) : '',
     'TINT ' + f(P.tint) + '  FX ' + f(P.overlays) + '  HUD ' + f((P.console || 0) + (P.dots || 0) + (P.topui || 0)),
     'PUFFS ' + f(P.ovSmoke) + '  TRAILS ' + f(P.ovTrails) + '  FIRE ' + f(P.ovFire) + '  RAIN ' + f(P.ovRain),
-    'DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + (GLR.on ? '  WEBGL' : '  MODE ' + MODE_NAMES[getMode()] + (BATCH_AUTO ? (abTrial.phase ? ' TRYING' : ' AUTO') : '') + '  [TAP HERE: NEXT MODE]'),
+    'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + (GLR.on ? '  WEBGL' : '  MODE ' + MODE_NAMES[getMode()] + (BATCH_AUTO ? (abTrial.phase ? ' TRYING' : ' AUTO') : '') + '  [TAP HERE: NEXT MODE]'),
     GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + (GLR.lost ? '  LOST' : '') : '',
     'SMOKE ' + smoke.length + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
     probe.on || probe.done ? '' : 'TAP AGAIN: MEASURE DRAWING TOO',
@@ -13698,7 +13699,7 @@ function healCloud(c, dt) {
 
 // ================================================================== drawing
 const LOBE_COLS = [[236, 96, 96], [96, 200, 120], [96, 150, 236], [236, 196, 80], [190, 110, 230], [80, 210, 220], [240, 140, 60], [160, 160, 160]];
-let curPal = null;
+let curPal = null, TONE_PH = -1;   // (TONE_PH: the phase a rebuild lights its puffs by, in place of the frame's, for a relight in halves)
 let SHAFT = new Uint32Array(0), COLA = new Float32Array(0); const VC4 = [0, 0, 0, 0];   // (the GPU: a rain shaft's picture; a colour for glPack)
 function toneCol(tone, haze, j, id) {
   let col;
@@ -13745,19 +13746,29 @@ function drawCloudCached(c, ax, ay) {
     const pbv = c.pbv || (c.pbv = [null, null]), pb = pbv[VI];
     const moved = !pb || pb.lobes || Math.abs(ax - pb.ax) > CULL_MOVE || Math.abs(ay - pb.ay) > CULL_MOVE;
     const relight = !live && (!pb || (pb.lk !== c.lk && RELIGHT > 0));
-    if (live || moved || relight || ((frameNo + c.uid) % (c.slowMv ? SLOW_EVERY : SETTLED_EVERY) === 0 && pb.fr !== frameNo) || pb.key !== sprKey(c)) {
+    // (must: it has no batch, or its old one can't serve; want: its cadence or its light - within the frame's BUILD budget,
+    // else it keeps last time's picture a frame or two longer. On an iPad with a full sky slowly growing, every cloud
+    // was rebuilt every 4th frame - twenty rebuilds a frame, a third of 10,000 puffs lit in each)
+    const key = !moved && pb.key !== sprKey(c), must = live || moved || key, want = relight || ((frameNo + c.uid) % (c.slowMv ? SLOW_EVERY : SETTLED_EVERY) === 0 && !!pb && pb.fr !== frameNo);
+    if (must || (want && BUILD_MS > 0)) {
       const t0 = performance.now(), st = c.toneStride;
-      if (relight) c.toneStride = 1;
+      // (a big cloud is re-lit in two halves over two rebuilds - its even puffs, then its odd - a frame apart)
+      const halves = relight && pb && c.items.length > 4000;
+      if (relight) { c.toneStride = halves ? 2 : 1; TONE_PH = halves ? (pb.lkPass || 0) : -1; }
       const b = buildBatch(c, ax, ay); b.fr = frameNo;
-      c.toneStride = st;
-      if (relight) { b.lk = c.lk; if (pb) RELIGHT -= performance.now() - t0; }
-      if (live) b.key = '';                                               // (lit by lightning, or disturbed: drawn again next frame)
+      c.toneStride = st; TONE_PH = -1;
+      if (relight) { if (!halves) b.lk = c.lk; else if ((b.lkPass = (b.lkPass || 0) + 1) >= 2) { b.lk = c.lk; b.lkPass = 0; } }
+      // (a batch built live is the batch: no second build next frame, as the sprite needed. The lightning's light is in the key)
+      const d = performance.now() - t0; if (!must) BUILD_MS -= d; if (relight && pb) RELIGHT -= d;
+      FTV.build = (FTV.build || 0) + d; FTV.builds = (FTV.builds || 0) + 1;   // (the perf panel: BUILD ms / count)
+      { const k = live ? 'bLive' : !pb ? 'bNew' : moved ? 'bMoved' : key ? 'bKey' : relight ? 'bLit' : 'bCad'; FTV[k] = (FTV[k] || 0) + 1; }
     }
-    DCTX.drawPuffs(pbv[VI], ax, ay, palOf(c));
+    { const t1 = performance.now(); DCTX.drawPuffs(pbv[VI], ax, ay, palOf(c)); FTV.gl = (FTV.gl || 0) + performance.now() - t1; }
     return;
   }
   const relight = !live && c.spr && c.spr.lk !== c.lk && RELIGHT > 0;
-  if (live || !c.spr || relight || ((frameNo + c.uid) % (c.slowMv ? SLOW_EVERY : SETTLED_EVERY) === 0 && c.sprFr !== frameNo) || c.spr.key !== sprKey(c)) {
+  const want = relight || ((frameNo + c.uid) % (c.slowMv ? SLOW_EVERY : SETTLED_EVERY) === 0 && c.sprFr !== frameNo);
+  if (live || !c.spr || c.spr.key !== sprKey(c) || (want && BUILD_MS > 0)) {
     // (drawn live: its sprite is kept, marked out of date - drawn again the first frame it isn't live - and not dropped, which
     // made the frame place all its puffs again every frame it was live, as if it had none)
     if (live) { if (c.spr) c.spr.key = ''; drawCloud(c, ax, 0, c.items.length); return; }
@@ -13765,7 +13776,8 @@ function drawCloudCached(c, ax, ay) {
     if (relight || first) c.toneStride = 1;
     buildSprite(c); c.sprFr = frameNo;   // (the game: once a frame, whichever view draws it first)
     c.toneStride = st;
-    if (relight || first) { c.spr.lk = c.lk; if (relight) RELIGHT -= performance.now() - t0; }
+    if (relight || first) c.spr.lk = c.lk;
+    { const d = performance.now() - t0; if (want) BUILD_MS -= d; if (relight) RELIGHT -= d; }
   }
   const sp = c.spr, x0 = ax + sp.x0, y0 = ay + sp.y0, sb = sp.b, sw = sp.w;
   const xa = Math.max(0, -x0), xb = Math.min(sw, TW - x0), ys = Math.max(0, -y0), ye = Math.min(sp.h, H - y0);
@@ -13775,7 +13787,9 @@ function drawCloudCached(c, ax, ay) {
     for (let x = xa; x < xb; x++) { const v = sb[so + x]; if (v) buf[ro + x] = v; }
   }
 }
-const sprKey = c => view + ',' + c.lay.zl + ',' + hazeOf(c).toFixed(3);
+// (the sprite bakes its colours, so its key holds the cloud's haze; a GPU batch holds tones only - its colours are the palette
+// it is drawn with - so its key doesn't: the haze eases every frame at dusk and in rain, and every cloud was rebuilt every frame)
+const sprKey = c => GPU ? view + ',' + c.lay.zl + ',' + (c.lod ? 1 : 0) + (c.flit ? ',f' : '') : view + ',' + c.lay.zl + ',' + hazeOf(c).toFixed(3);
 function buildSprite(c) {
   // the cloud drawn into its own buffer, at its own (ax, ay) = (−x0, −y0)
   let xl = 1e9, xr = -1e9, yt = 1e9, yb = -1e9;
@@ -13833,14 +13847,14 @@ function drawCloud(c, ax, from, to, ayOver, Hworld) {
     if (it.x === undefined) continue;                                    // (not placed yet: drawn from the next frame)
     const r = (lod ? it.r * 1.12 : it.r) * (1 - it.cut); if (!(r >= 0.6)) continue;
     if (cb) { const px = it.x + it.dx, py = it.y - it.dy; if (px + r < cb[0] || px - r > cb[1] || py + r < cb[2] || py - r > cb[3]) continue; }   // (off the screen)
-    if (it.tone === undefined || (i + frameNo) % stride === 0) {
+    if (it.tone === undefined || (i + (TONE_PH >= 0 ? TONE_PH : frameNo)) % stride === 0) {
       let odSelf = 0;
       if (P.self > 0) { const own = it.fill ? it : it.bill; for (const b of own.nbr) { const ch = sphereChord(it.x, it.y, it.zz, L, b.x, b.y, b.zz, b.br); if (ch) odSelf += ch / b.br; } }
       let odOther = 0;
       if (c.casters.length) { const wx = X + it.x, wy = HW - ayW + it.y, wz = c.wz + it.zz; for (const o of c.casters) for (const l of o.wl) odOther += chord(wx, wy, wz, L, l) / l.rb; }
       it.tone = lightValue(it, it.j, c.lob, L, odOther, odSelf, c.under);
       if (!(it.tone >= 0)) it.tone = 0;                                   // (never a tone that isn't one: it stopped the frame)
-      lightSlope(c, it);
+      lightSlope(c, it); FTV.lit = (FTV.lit || 0) + 1;                      // (the perf panel: puffs lit a frame)
     }
     let tone = it.tone;
     if (lit) tone = Math.min(5, tone + flashBoost(c, it, X));            // (lit: always drawn live, never from the sprite)
@@ -13907,6 +13921,7 @@ function drawLobes(c, ax) {
   if (!ok) order = c.lorder = c.lob.map((l, j) => j).sort((a, b) => c.lob[a].z - c.lob[b].z);
   if (GPU) {
     // (the GPU: each lobe a record, its fifteen tones packed; this frame's, since the lobes breathe every frame)
+    const t0 = performance.now();
     const pbv = c.pbv || (c.pbv = [null, null]), pb = pbv[VI] || (pbv[VI] = new GLPuffs()); pb.begin(); pb.key = ''; pb.lobes = true; pb.fr = frameNo;
     for (const j of order) {
       const l = c.lob[j], T = c.ltones[j]; if (!(l.rx > 0.35)) continue;
@@ -13915,7 +13930,8 @@ function drawLobes(c, ax) {
       for (let q = 8; q < 15; q++) T1 |= (T[q] & 7) << ((q - 8) * 3);
       pb.lobe(l.x, -l.y, Math.max(0.5, l.rx), Math.max(0.5, l.ry), 0, T0, T1);
     }
-    DCTX.drawPuffs(pb, ax, ay, palOf(c));
+    FTV.lobes = (FTV.lobes || 0) + performance.now() - t0;
+    { const t1 = performance.now(); DCTX.drawPuffs(pb, ax, ay, palOf(c)); FTV.gl = (FTV.gl || 0) + performance.now() - t1; }
     return;
   }
   for (const j of order) {
@@ -13951,7 +13967,8 @@ function drawLiveGPU(c, ax) {
 }
 // the veil under a deck: from its base line down to the horizon, in the colour of the clouds' base so there's no seam.
 // Drawn into the deck's own layer, behind its clouds and over everything behind it.
-function drawVeil(lay, horY, X0, vis) {
+function drawVeil(lay, horY, X0, vis) { const t0 = performance.now(); try { drawVeil2(lay, horY, X0, vis); } finally { FTV.veil = (FTV.veil || 0) + performance.now() - t0; } }
+function drawVeil2(lay, horY, X0, vis) {
   const foot = Math.max(lay.footY || horY, lay.baseY + 2);
   const gk = Math.min(1, (P.glow ?? 1) * E.sunset);                       // (SUNSET GLOW: a clear, bright low sky)
   const a = E.veil * (lay.name === 'horizon' ? 0.55 : lay.name === 'far' ? 0.7 : 1) * (1 - 0.65 * gk);
@@ -14388,7 +14405,7 @@ function deckOut(lay, B, frac) {
 }
 // ================================================================== once a frame
 // G: { dt, time, weather, rain, fog, wind, sea, flash: { k, x (the bolt's world x) } }
-let skyDt = 0, skyGrowK = 0.35, EPALK = '', RELIGHT = 2.5;   // (RELIGHT: the frame's budget, ms, for re-lighting clouds whose light moved)
+let skyDt = 0, skyGrowK = 0.35, EPALK = '', RELIGHT = 2.5, BUILD_MS = 3;   // (RELIGHT: the frame's budget, ms, for re-lighting clouds whose light moved)
 function skyFrame(G) {
   skyDt = Math.min(0.1, G.dt);
   // (the world paused - the settings' WORLD button - holds the clouds still too, user Oct 27: no wind drift, no breathing or
@@ -14411,9 +14428,10 @@ function skyFrame(G) {
   skyGrowK = G.fast ? 3 : 0.35;                                             // (the settings open: the clouds follow the slider)
   P.fog = Math.max(P.ghaze, G.fog);
   computeEnv();
-  LSIG = [P.shadow, P.self, P.amb, P.contrast, P.expo, P.jitter, P.glow, P.lightz, P.rim, P.mass, P.shade, view, E.contrast.toFixed(3), E.sunset.toFixed(2), E.behind.toFixed(2), E.night.toFixed(2)].join(',') + '|';
+  // (the hour's terms to a coarser step: as the weather or the hour eases, E.contrast moved every frame and every cloud's light key with it)
+  LSIG = [P.shadow, P.self, P.amb, P.contrast, P.expo, P.jitter, P.glow, P.lightz, P.rim, P.mass, P.shade, view, E.contrast.toFixed(2), E.sunset.toFixed(1), E.behind.toFixed(1), E.night.toFixed(1)].join(',') + '|';
   EPALK = ',' + E.pal.map(t => t.join(',')).join(';') + ';' + E.palStorm.map(t => t.join(',')).join(';');   // (the hour's palettes, for the storm clouds' own)
-  RELIGHT = P.relight ?? 2.5;
+  RELIGHT = P.relight ?? 2.5; BUILD_MS = P.buildms ?? 3;
   const windV = P.wind * 8 * S;
   for (const lay of LAYERS) lay.off += windV * lay.par * dt;
   // the lightning: the game's newest bolt, its brightness
@@ -14549,14 +14567,14 @@ function skyBack(V) {
     }
     c.under = clamp((H * sunZ().row - c.y + 4 * Zg) / (HS * 0.12 * Zg), 0, 1) * (1 - E.overcast) * (1 - 0.6 * E.night);
     c.L = lightDir(c);
-    // its light's key: the light's direction (to a hundredth), the light from under, its casters, the sliders. When it moves
+    // its light's key: the light's direction (to a fiftieth), the light from under, its casters, the sliders. When it moves
     // the cloud is re-lit whole - every puff's tone again in one rebuild, within the frame's RELIGHT budget (drawCloudCached) -
     // where it used to be 'hot' for 15 frames (its sprite rebuilt every 2nd frame, a third of its puffs re-lit each time: seven
     // rebuilds for one change, and a drifting sky kept half its clouds hot). The puffs no longer refresh between changes:
     // the key's step is small enough (a tenth of a tone) that nothing moves until it does
-    { const l0 = Math.round(c.L[0] * 100), l1 = Math.round(c.L[1] * 100), l2 = Math.round(c.L[2] * 100), u = Math.round(c.under * 40);
+    { const l0 = Math.round(c.L[0] * 50), l1 = Math.round(c.L[1] * 50), l2 = Math.round(c.L[2] * 50), u = Math.round(c.under * 16);
       if (c.lk0 !== l0 || c.lk1 !== l1 || c.lk2 !== l2 || c.lku !== u || c.lkn !== c.casters.length || c.lks !== LSIG) { c.lk0 = l0; c.lk1 = l1; c.lk2 = l2; c.lku = u; c.lkn = c.casters.length; c.lks = LSIG; c.lk = (c.lk || 0) + 1; }
-      c.toneStride = c.moving || c.slowMv ? 3 : 15; }
+      c.toneStride = c.moving ? 3 : c.slowMv ? 6 : 15; }   // (slowly growing or morphing: its light changes slowly too - a sixth of its puffs a rebuild, not a third)
     const Xs = screenX(c);
     { const wl = c.wl, lob = c.lob; if (wl.length !== lob.length) { wl.length = 0; for (let j = 0; j < lob.length; j++) wl.push({ x: 0, y: 0, z: 0, rx: 0, ry: 0, rz: 0, rb: 0 }); }
       for (let j = 0; j < lob.length; j++) { const l = lob[j], o = wl[j]; o.x = Xs + l.x; o.y = H - c.y + l.y; o.z = c.wz + l.z; o.rx = l.rx; o.ry = l.ry; o.rz = l.rz; o.rb = l.rb; } }
