@@ -2531,8 +2531,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 170;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 10:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 171;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 10:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4018,7 +4018,7 @@ function drawPerfPanel(x, y) {
   const P = (probe.on || probe.done) ? probe.parts : (perf.parts || {}), f = v => (v || 0).toFixed(1);
   const script = perf.phys + perf.smoke + perf.render;
   const lines = [
-    'FRAME ' + f(fpsMeter.gap) + ' MS  WORST ' + Math.round(fpsMeter.worst || 0),
+    'V' + GAME_VERSION + '  FRAME ' + f(fpsMeter.gap) + ' MS  WORST ' + Math.round(fpsMeter.worst || 0),   // (user Oct 28: the version up top, to be sure it's the latest)
     'SCRIPT ' + f(script) + '  DRAW+GPU ' + f(Math.max(0, (fpsMeter.gap || 0) - script)) + (fillTest.ms >= 0 ? '  FILL ' + fillTest.ms.toFixed(2) + ' ' + fillTest.kind + '  PATH ' + fillTest.path.toFixed(1) + ' VS RECTS ' + fillTest.rects.toFixed(1) : ''),
     (probe.on ? 'PROBING ' + Math.ceil(probe.left) + 'S: ' : probe.done ? 'PROBED: ' : '') + 'PHYS ' + f(perf.phys) + '  SMOKE ' + f(perf.smoke),
     'SKY ' + f(P.sky) + '  WORLD ' + f(P.objects) + '  WATER ' + f(P.distort),
@@ -14038,7 +14038,7 @@ function lightDir(c) {
   // cloud's light moved every frame, so every cloud was re-lit every frame - 500 puffs and 2-4 batch builds a frame, and the
   // clouds splotchy with half-finished relights. LIGHT FIX 0 puts the old rule back for comparison)
   const ex = (P.lightfix ?? 1) > 0 ? (sx - W / 2) * 0.5 : sx < X0 + c.minX ? sx - (X0 + c.minX) : sx > X0 + c.maxX ? sx - (X0 + c.maxX) : 0;
-  const k = 1 - 0.45 * E.behind, ax = ex / HS / Zg * 0.6 * k, ay = (Ym - sz.row * H) / HS / Zg * (2.2 - 1.6 * P.lightz) * k;   // (angles, radians)
+  const k = 1 - 0.45 * E.behind, ax = ex / HS / ((P.lightfix ?? 1) > 0 ? 1 : Zg) * 0.6 * k, ay = (Ym - sz.row * H) / HS / Zg * (2.2 - 1.6 * P.lightz) * k;   // (angles, radians)
   const d = Math.hypot(ax, ay) || 1e-6, dx = ax, dy = ay;
   // the sun inside the cloud's outline: straight behind it (V21), easing out to the plain angle past its edge
   const rx = Math.max(6 * S * Zg, (c.maxX - c.minX) / 2), ry = Math.max(6 * S * Zg, c.h / 2);
@@ -14269,19 +14269,22 @@ function drawCloudCached(c, ax, ay) {
     // (Oct 28, LIGHT FIX: a big cloud's relight runs in slices of a few hundred puffs a frame into a second set of tones, the
     // old batch drawn meanwhile; when every puff has its new light the tones are swapped and the batch built once. No 14 ms
     // frame for a 3,600-puff tower lit whole, and no half-lit cloud on the screen. A newer key before it's done starts it over)
-    if (relight && pb && !must && (P.lightfix ?? 1) > 0 && c.items.length > RELIT_SLICE) {
+    const slicing = !!pb && (P.lightfix ?? 1) > 0 && c.items.length > RELIT_SLICE && pb.lk !== c.lk;   // (a big cloud's light moved: relit by slices, never inside a build)
+    let fresh = false;
+    if (slicing && !live && RELIGHT > 0) {
       const t0 = performance.now();
       const R = (c.rl || (c.rl = [{}, {}]))[VI];                         // (this view's slicing: where it has got to, for which key)
       if (R.lk !== c.lk) { R.lk = c.lk; R.i = 0; }
       const n = c.items.length, to = Math.min(n, R.i + RELIT_SLICE);
       relightSlice(c, R.i, to); R.i = to;
       const d = performance.now() - t0; RELIGHT -= d; FTV.build = (FTV.build || 0) + d; FTV.bSlice = (FTV.bSlice || 0) + 1;
-      if (R.i < n) { const t1 = performance.now(); DCTX.drawPuffs(pbv[VI], ax, ay, palOf(c)); FTV.gl = (FTV.gl || 0) + performance.now() - t1; return; }
-      for (const it of c.items) if (it.n2) { it.tone = it.n2[0]; it.tgx = it.n2[1]; it.tgy = it.n2[2]; it.tf = it.n2[3]; it.tlo = it.n2[4]; it.n2 = null; }
-      R.lk = undefined;
-      const st = c.toneStride; c.toneStride = 1e9;                        // (the tones are fresh: the build lights nothing again)
+      if (R.i >= n) { for (const it of c.items) if (it.n2) { it.tone = it.n2[0]; it.tgx = it.n2[1]; it.tgy = it.n2[2]; it.tf = it.n2[3]; it.tlo = it.n2[4]; it.n2 = null; } R.lk = undefined; fresh = true; }
+    }
+    if (slicing && !fresh && !must) { const t1 = performance.now(); DCTX.drawPuffs(pbv[VI], ax, ay, palOf(c)); FTV.gl = (FTV.gl || 0) + performance.now() - t1; return; }   // (last light's picture until the slices are done)
+    if (fresh) {
+      const t0 = performance.now(), st = c.toneStride; c.toneStride = 1e9;   // (the tones are fresh: the build lights nothing again)
       const b = buildBatch(c, ax, ay); b.fr = frameNo; b.lk = c.lk; c.toneStride = st;
-      const d2 = performance.now() - t0 - d; FTV.build += d2; FTV.builds = (FTV.builds || 0) + 1; FTV.bLit = (FTV.bLit || 0) + 1;
+      const d2 = performance.now() - t0; FTV.build = (FTV.build || 0) + d2; FTV.builds = (FTV.builds || 0) + 1; FTV.bLit = (FTV.bLit || 0) + 1;
       const t1 = performance.now(); DCTX.drawPuffs(pbv[VI], ax, ay, palOf(c)); FTV.gl = (FTV.gl || 0) + performance.now() - t1;
       return;
     }
@@ -14294,7 +14297,7 @@ function drawCloudCached(c, ax, ay) {
       // relights over the clouds instead: one or two a frame, the rest wait a frame with last time's picture)
       const parts = !relight || !pb || (P.lightfix ?? 1) > 0 ? 1 : c.items.length > 2400 ? 4 : c.items.length > 800 ? 2 : 1;
       // (a big cloud that must be built now (moved, live) while its light is pending keeps last light's tones: its relight is the slices' job)
-      const sliced = relight && (P.lightfix ?? 1) > 0 && !!pb && c.items.length > RELIT_SLICE;
+      const sliced = slicing;   // (its light is pending in slices: this build keeps last light's tones, live or not)
       if (relight && !sliced) { c.toneStride = parts; TONE_PH = parts > 1 ? (pb.lkPass || 0) : -1; } else if (sliced) c.toneStride = 1e9;
       const b = buildBatch(c, ax, ay); b.fr = frameNo;
       c.toneStride = st; TONE_PH = -1;
@@ -15036,6 +15039,7 @@ const VIS = [[], []];
 // a value in steps that holds: it moves to the next step only once the value is well past the middle between the steps
 // (three quarters of a step from the one it holds), so a value easing about a boundary doesn't flip the key every frame
 const QHOLD = {};
+const NEAR = [];   // (the clouds within half a screen of the view this frame: the shadow casters are picked among them, not all 2,600)
 function qHold(k, v, step) { const p = QHOLD[k]; if (p !== undefined && Math.abs(v - p) < step * 0.75) return p.toFixed(2); const q = Math.round(v / step) * step; QHOLD[k] = q; return q.toFixed(2); }
 function castWorld(c) {
   const Xs = screenX(c);
@@ -15112,7 +15116,7 @@ function skyBack(V) {
   }
   V.bgDone = true;
   // ---- the clouds in this view: placed and lit (once a frame: a cloud the other view has done already is only drawn)
-  const vis = VIS[VI]; vis.length = 0;
+  const vis = VIS[VI]; vis.length = 0; NEAR.length = 0;
   for (const c of clouds) {
     if (c.gfr !== frameNo) {                                             // (its forming, once a frame whoever sees it)
       c.gfr = frameNo; c.y = c.lay.baseY;
@@ -15128,6 +15132,7 @@ function skyBack(V) {
     c.y = c.lay.baseY;
     if (c.extU === undefined) cloudBox(c);
     { const X = screenX(c), r = c.extU * c.s * c.lay.zl * Math.max(1, c.grow ?? 1), Mg = W * 0.5 + 24; if (X + r < -Mg || X - r > W + Mg) { if (c.pfr !== frameNo) c.visible = false; continue; } }
+    if (c.grow > 0.04) NEAR.push(c);                                      // (within half a screen of the view: a shadow caster, on the screen or just off it)
     if (c.pfr === frameNo) { if (c.visible) { const X = screenX(c); if (X + c.maxX >= -24 && X + c.minX <= W + 24) vis.push(c); } continue; }
     c.pfr = frameNo;
     stepLobes(c);
@@ -15194,19 +15199,22 @@ function skyBack(V) {
     c.cfr = frameNo;
     if (c.far || P.shadow <= 0) { c.casters = []; continue; }
     if (c.casters.length && (frameNo + c.uid) % 4) continue;
-    c.casters = [];
     // (Oct 28: the casters from every cloud of the sky, not the visible ones alone - a neighbour just off the screen still
     // casts its shadow. Taken from the visible ones, a cloud scrolling off the screen dropped out of its neighbours' casters,
     // which moved their light keys and re-lit them: flying, that was a relight every frame)
-    for (const o of clouds) {
-      if (o === c || o.far || !(o.grow > 0.04)) continue;
+    const was = c.casters;
+    c.casters = [];
+    for (const o of NEAR) {
+      if (o === c || o.far) continue;
       if (o.cwf !== frameNo) { if (!(o.lob && o.lob.length && o.lob[0].rb > 0) || o.minX === undefined) continue; o.cwf = frameNo; castWorld(o); }
       if (!o.bc) continue;
       if (Math.abs(o.bc[0] - c.bc[0]) > (o.bR + c.bR) * 3) continue;
       const ox = o.bc[0] - c.bc[0], oy = o.bc[1] - c.bc[1], oz = o.bc[2] - c.bc[2], t = ox * c.L[0] + oy * c.L[1] + oz * c.L[2];
       if (t <= 0) continue;
       const px = ox - c.L[0] * t, py = oy - c.L[1] * t, pz = oz - c.L[2] * t;
-      if (Math.hypot(px, py, pz) < (o.bR + c.bR) * 0.75) c.casters.push(o);
+      // (with a hold: a caster stays one until it is well clear, a cloud becomes one only once well inside - the clouds
+      // breathe and morph, and a set that flickered at the edge re-lit its cloud every time: KEYS N 6 a frame in a full sky)
+      if (Math.hypot(px, py, pz) < (o.bR + c.bR) * (was.includes(o) ? 0.9 : 0.62)) c.casters.push(o);
     }
   }
   // the bolt's light in this view (deck 1's base, under the bolt)
