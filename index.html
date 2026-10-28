@@ -1650,6 +1650,19 @@ function floorRebuild() {
   for (let i = 0; i < n; i++) if (T[i] > deepD) { if (a < 0) a = i; b = i; }
   if (a >= 0 && b - a > 400 / FLOOR_STEP) setTrench(BED_A + a * FLOOR_STEP, BED_A + b * FLOOR_STEP);
   else setTrench(BED_A + 0.3 * L, BED_B - 0.3 * L);
+  krPadSet();
+}
+// (user Oct 28: "Just make the floor just below the Kraken body flat") the kraken's pad: at the deepest point (where it
+// sits), the floor under its body levelled to the lowest of the floor there (bedDrop0, zigzag and all), easing back into
+// the slopes either side - as a pirate wreck's spot is; no rock formation stands on it (buildReef)
+let KR_PAD = null;
+function krPadSet() {
+  KR_PAD = null;
+  if (!floorTab) return;
+  // eslint-disable-next-line no-undef
+  const x = floorDeep[0], half = typeof krPadHalf === 'function' ? krPadHalf() : 180;
+  let flat = -Infinity; for (let q = x - half; q <= x + half; q += 8) flat = Math.max(flat, bedDrop0(q));
+  KR_PAD = { x, half, flat };
 }
 function floorAt(T, x) {
   const f = (x - BED_A) / FLOOR_STEP;
@@ -1668,7 +1681,8 @@ function setTrench(a, b) { TR_A = a; TR_B = b; }
 // surface so this doesn't happen") the floor under each sunken pirate ship levelled to the depth at her middle, easing
 // back into the slopes either side of her
 function bedDrop(x) {
-  const v = bedDrop0(x);
+  let v = bedDrop0(x);
+  if (KR_PAD) { const d = Math.abs(x - KR_PAD.x), m = 220; if (d < KR_PAD.half + m) v += (KR_PAD.flat - v) * smoothstep(KR_PAD.half + m, KR_PAD.half, d); }   // (the kraken's pad)
   if (!LAND || !pirateWrecks.length) return v;
   for (const w of pirateWrecks) {
     if (w.flat == null) continue;
@@ -2517,8 +2531,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 167;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 08:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 168;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 08:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18351,6 +18365,7 @@ function buildReef() {
     const d = shoreDist(x);
     if (d < 1000) continue;
     if (LAND && pirateWrecks.some(w => Math.abs(x - w.x) < (w.half || 200) + 260)) continue;   // (none on a pirate wreck's levelled floor)
+    if (KR_PAD && Math.abs(x - KR_PAD.x) < KR_PAD.half + 300) continue;                          // (none on the kraken's pad)
     if (floorTab && Math.abs(bedSmooth(x + 200) - bedSmooth(x - 200)) > 400) continue;          // (none on the drawing's cliffs: the wall is the rock there)
     const deep = clamp(bedDrop(x) / BED_EXTRA, 0, 1), kind = R() < 0.4 ? 'mesa' : R() < 0.6 ? 'spire' : 'mound';
     // (taller the deeper: the sea is twice as deep in the middle now, Oct 25)
@@ -25870,6 +25885,8 @@ function krDrawBlood() {
 // ---- where it lives: the deepest point of the open ocean's floor (floorDeepest: the floor's own, group F's; else a scan of
 // it), found at world build (fresh: whole again, alive - a new round brings it back) and when the floor is edited (the floor
 // editor calls this: it keeps its wounds and its death). Its base never moves.
+// the half-width of the floor levelled under it (KR_PAD, 09-sea-surface): its head's base and the roots of its arms
+function krPadHalf() { return KR_BW * krS() * 1.25; }
 function placeKraken(fresh) {
   for (const o of KR.objs) krUnpin(o);
   krLetGo(); KR.objs.length = 0; KR.map.clear(); KR.torps.length = 0;
@@ -25881,12 +25898,18 @@ function placeKraken(fresh) {
     let best = -Infinity; const a = TR_B > TR_A ? TR_A : SEA0, b = TR_B > TR_A ? TR_B : SEA1;
     for (let q = a; q <= b; q += 16) { const y = seabedY(q); if (y > best) { best = y; x = q; } }
   }
-  KR.bx = x; KR.by = seabedY(x) + 4;
+  // (user Oct 28, with a picture: "currently its floating and it should be sitting at the bottom of the ocean") its base
+  // on the lowest of the sand under its whole width (the head's base is wide and flat, and the floor's zigzag and rocks
+  // stand up under one column), sunk into it a little: the floor's silhouette, drawn over it in the same colour, covers
+  // its foot, so it grows out of the bottom
+  const hw = KR_BW * krS() * 0.95; let low = -Infinity;
+  for (let q = x - hw; q <= x + hw; q += 8) low = Math.max(low, sandY(q));
+  KR.bx = x; KR.by = low + 6 * krS();
   // the floor round it, and how far it is to the pit's walls each side: the arms' fan narrowed to fit between them
   const sK = krS(), R = krLen() * 1.4, n = Math.ceil(2 * R / 8) + 1;
   KR.ft0 = x - R; KR.ft = new Float32Array(n);
   for (let i = 0; i < n; i++) KR.ft[i] = seabedY(KR.ft0 + i * 8);
-  const wall = s => { for (let d = 0; d < R; d += 8) if (krFloorY(x + s * d) < KR.by - 150 * sK) return d; return R; };
+  const fy = seabedY(x) + 4, wall = s => { for (let d = 0; d < R; d += 8) if (krFloorY(x + s * d) < fy - 150 * sK) return d; return R; };   // (from the floor's level there, not its sunk base)
   KR.fanL = clamp((wall(-1) - 40 * sK) / (530 * sK), 0.25, 1); KR.fanR = clamp((wall(1) - 40 * sK) / (530 * sK), 0.25, 1);
   const keep = { dead: KR.dead, deadT: KR.deadT, headHits: KR.headHits, fallDir: KR.fallDir, thudDone: KR.thudDone };
   krBuild();
