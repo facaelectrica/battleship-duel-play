@@ -2543,8 +2543,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 184;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 18:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 185;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 18:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -22254,6 +22254,12 @@ function paramsSave() {
 const LAND_D = -14;
 const inOcean = X => X >= BED_A && X <= BED_B;
 const floorDepth = X => inOcean(X) ? sandY(X) - WATER_Y : LAND_D;
+// (user Oct 28, 17:14 - "This should also work for caves, so we could have 'underwater' caves or dry land cave systems") a
+// system can hang from any part of the ground: a system whose mouth is on the land or a lake's bed (s.x, not on the ocean
+// floor) reads the ground there - the land's top, a lake's bed - instead (the ocean's systems read the floor as they always did)
+const groundDepth = X => inOcean(X) ? sandY(X) - WATER_Y : onLand(X) && land.cell ? landTop(clamp(X, 1, WORLD_W - 1)) - WATER_Y : LAND_D;
+const sysOnLand = s => Number.isFinite(s.x) && !inOcean(s.x);
+const depthFor = s => sysOnLand(s) ? groundDepth : floorDepth;
 const isSea = (X, Y) => Y < floorDepth(X);
 // the system's mouth on the floor at its u (the floor's own u: 0 the left pier's end, 1 the right's)
 const uX = u => BED_A + u * (BED_B - BED_A);
@@ -22267,6 +22273,7 @@ const clone = o => JSON.parse(JSON.stringify(o));
 function cavesValid(o) {
   const pt = p => Array.isArray(p) && p.length === 2 && isFinite(p[0]) && isFinite(p[1]);
   return o && o.v === 1 && Array.isArray(o.systems) && o.systems.every(s => isFinite(s.u) && Array.isArray(s.rooms) && Array.isArray(s.tunnels)
+    && (s.x === undefined || isFinite(s.x)) && (s.dry === undefined || typeof s.dry === 'boolean') && (s.water === undefined || (Array.isArray(s.water) && s.water.every(v => v === null || isFinite(v))))
     && (s.levels === undefined || (Array.isArray(s.levels) && s.levels.length === 2 && s.levels.every(v => v === null || isFinite(v)))) && s.rooms.every(r => Array.isArray(r) && r.length >= 3 && r.every(pt)) && s.tunnels.every(t => isFinite(t.r) && t.r > 0 && (t.rs === undefined || (Array.isArray(t.rs) && t.rs.length === 3 && t.rs.every(v => isFinite(v) && v > 0))) && Array.isArray(t.pts) && t.pts.length >= 2 && t.pts.every(pt)));
 }
 // (the default: CAVE_DEF, src/50-land-caves.js - the user's design from the Lab; edits kept in this browser, as the floor's)
@@ -22275,7 +22282,9 @@ try { const o = JSON.parse(localStorage.getItem('bd_caves') || 'null'); if (cave
 function cavesSave() { try { if (JSON.stringify(CAVES) === JSON.stringify(CAVE_DEF)) localStorage.removeItem('bd_caves'); else localStorage.setItem('bd_caves', JSON.stringify(CAVES)); } catch (e) { /* (private window) */ } }
 
 // a system's mouth (world) and its points in the world
-const sysMouth = s => { const X = uX(s.u); return [X, floorDepth(X)]; };
+// (x: a mouth anywhere in the world - on the land, in a lake; u: on the ocean floor, as the default systems)
+const sysX = s => Number.isFinite(s.x) ? s.x : uX(s.u);
+const sysMouth = s => { const X = sysX(s); return [X, depthFor(s)(X)]; };
 const sysPt = (s, p) => { const [ax, ay] = sysMouth(s); return [ax + p[0], ay + p[1]]; };
 // a centripetal Catmull-Rom through points (closed: a loop), n samples a span
 function crCurve(P, closed, n) {
@@ -22489,7 +22498,7 @@ function* buildSystem(k) {
   const { w, h } = Wn, N = w * h;
   // the open sea in the window (what the floor leaves open), and the shapes cut out of the rock
   const sea = new Uint8Array(N), fd = new Float32Array(w);
-  for (let i = 0; i < w; i++) fd[i] = floorDepth(Wn.X0 + (i + 0.5) * G);
+  const fdOf = depthFor(s); for (let i = 0; i < w; i++) fd[i] = fdOf(Wn.X0 + (i + 0.5) * G);
   for (let j = 0; j < h; j++) { const Y = Wn.Y0 + (j + 0.5) * G; for (let i = 0; i < w; i++) if (Y < fd[i]) sea[j * w + i] = 1; if (!(j & 63)) yield; }
   const cut = yield* roughen(Wn, yield* rasterShapes(Wn, sh), P.rough, 7);
   yield;
@@ -22525,7 +22534,7 @@ function* buildSystem(k) {
   }
   yield;
   const cave = i => !sea[i];
-  let PK = yield* findPockets(mat, w, h, yield* spill(mat, w, h, sea));
+  let PK = yield* pocketsOf(s, sh, Wn, mat, sea);
   const inAir0 = i => PK.pid[i] !== NONE;
   // ---- STALACTITES: the user's sprites hanging from the caves' ceilings, more over the pockets, never closing a tunnel
   const tips = [], SPR = artSprites(), sal = Wn.sal = new Uint8Array(N);    // (sal: a sprite pixel's colour index + 1)
@@ -22652,7 +22661,7 @@ function* buildSystem(k) {
   yield;
   // ---- the pockets again, from the rock alone (in 3D the air goes round a stalactite: the water lines are the rock's)
   const rockOnly = new Uint8Array(N); for (let i = 0; i < N; i++) { rockOnly[i] = mat[i] === 2 ? 0 : mat[i]; if (!(i & 0x7ffff)) yield; }
-  PK = yield* findPockets(rockOnly, w, h, yield* spill(rockOnly, w, h, sea));
+  PK = yield* pocketsOf(s, sh, Wn, rockOnly, sea);
   // (each pocket's reach goes on a little under its lip, down every column its water line crosses, so the swell's troughs
   // show there too)
   for (const p of PK.pockets) for (let x = p.xa; x <= p.xb; x++) {
@@ -22691,7 +22700,55 @@ function* buildSystem(k) {
 // every pocket, in both systems
 const allPockets = () => CV.wins.flatMap(Wn => Wn ? Wn.pockets : []);
 // a pocket's water line (Y) for the AIR share now: from its top (none) to its lip (the most it can hold)
-const pocketLevel = p => p.win.Y0 + p.top * CV.G + P.air * (p.lip - p.top) * CV.G;
+const pocketLevel = p => p.lvl != null ? p.lvl : p.win.Y0 + p.top * CV.G + P.air * (p.lip - p.top) * CV.G;   // (lvl: a water line set in EDIT - pocketsOf)
+/* ---- (user Oct 28, 17:14: "underwater caves or dry land cave systems. If dry land caves, they would have no water (or we
+   could have a 'water line' that we can set per room or grouped rooms") a system is underwater (as the first two: flooded,
+   the air only where it's trapped - findPockets) or dry (s.dry: all of it air - each run of open cave a pocket of air down
+   to its floor). A room's water line (s.water[i], its depth under the mouth, as the room's points) sets the level of the
+   air it is in - and of the rooms that air runs on into with it (grouped rooms: water finds one level through what
+   joins them). In an underwater system it can only lower the water so far as the trapped air reaches (its lip: any more
+   would bubble out) ---- */
+function* pocketsOf(s, sh, Wn, mat, sea) {
+  const { w, h } = Wn;
+  const PK = s.dry ? yield* dryPockets(mat, w, h, sea) : yield* findPockets(mat, w, h, yield* spill(mat, w, h, sea));
+  if (s.dry) for (const p of PK.pockets) p.lvl = Wn.Y0 + p.lip * CV.G;      // (dry: no water, its line under its floor)
+  if (Array.isArray(s.water)) {
+    const [, my] = sysMouth(s), G = CV.G;
+    sh.rooms.forEach((L, i) => {
+      const v = s.water[i]; if (!Number.isFinite(v)) return;
+      // (the air the room is in: from its middle and from points part way in from its outline)
+      let cx = 0, cy = 0; for (const [x, y] of L) { cx += x; cy += y; } cx /= L.length; cy /= L.length;
+      const tries = [[cx, cy]].concat(L.filter((p, k) => !(k % 4)).map(([x, y]) => [cx + (x - cx) * 0.6, cy + (y - cy) * 0.6]));
+      for (const [X, Y] of tries) {
+        const c = cellOf(Wn, X, Y); if (c < 0 || PK.pid[c] === NONE) continue;
+        const p = PK.pockets[PK.pid[c]]; if (!p) continue;
+        p.lvl = clamp(my + v, Wn.Y0 + p.top * G, Wn.Y0 + p.lip * G); break;
+      }
+    });
+  }
+  return PK;
+}
+// a dry system's pockets: every run of open cave (what isn't rock or the world outside) is air, its line at its floor
+function* dryPockets(mat, w, h, sea) {
+  const N = w * h, pid = new Uint8Array(N).fill(NONE), pockets = [], seen = new Uint8Array(N);
+  for (let i = 0; i < N; i++) {
+    if (!(i % (w * 32))) yield;
+    if (seen[i] || mat[i] || sea[i]) continue;
+    const st = [i], cells = []; seen[i] = 1; let top = h, bot = 0, xa = w, xb = 0;
+    while (st.length) {
+      const c = st.pop(); cells.push(c);
+      const x = c % w, y = (c - x) / w;
+      if (y < top) top = y; if (y > bot) bot = y; if (x < xa) xa = x; if (x > xb) xb = x;
+      const go = j => { if (!seen[j] && !mat[j] && !sea[j]) { seen[j] = 1; st.push(j); } };
+      if (x > 0) go(c - 1); if (x < w - 1) go(c + 1); if (y > 0) go(c - w); if (y < h - 1) go(c + w);
+    }
+    if (cells.length < 60 || pockets.length >= 250) continue;
+    const id = pockets.length;
+    for (const c of cells) pid[c] = id;
+    pockets.push({ id, top, lip: bot + 1, xa, xb, cells: cells.length, sealed: false, first: i, lipX: (xa + xb) >> 1, dry: true });
+  }
+  return { pid, pockets, sealed: [] };
+}
 // the normal of a rock face, from its angle index
 const NRM = (() => { const t = new Float32Array(512); for (let k = 1; k < 256; k++) { const a = (k - 1) / 254 * 2 * Math.PI; t[k * 2] = Math.cos(a); t[k * 2 + 1] = Math.sin(a); } return t; })();
 
@@ -23051,6 +23108,7 @@ function pocketsChanged() {
     p.wet = new Uint8Array(n);
     const L = pocketLevel(p), row = clamp(Math.floor((L - 1 - Wn.Y0) / CV.G), 0, Wn.h - 1);   // (the row just over the line: the pocket's own)
     for (let k = 0; k < n; k++) { const i = row * Wn.w + p.xa + k; p.wet[k] = (!Wn.mat[i] || Wn.mat[i] === 2) && Wn.pid[i] === p.id ? 1 : 0; }   // (the water goes on round a stalactite: 09:14)
+    if (p.dry && L >= Wn.Y0 + p.lip * CV.G - 0.01) p.wet.fill(0);                // (no water in it - a dry system's room without a water line: no surface to move)
     surfTable(p);
   }
 }
@@ -23862,7 +23920,7 @@ function draw() {
   for (const s of minisubs) if (s.state === 'out' && HULL.some(([dx, dy]) => inCave(s.x + dx, s.y - WATER_Y + dy)) && s.x > vx0 - 50 && s.x < vx1 + 50) drawMinisub(s);
 }
 // is x near a system's mouth (the game keeps its rock formations off them, as off the kraken's pad - buildReef)
-function nearMouth(x, r) { if (!(BED_B - BED_A > 2000)) return false; return CAVES.systems.some(s => Math.abs(uX(s.u) - x) < r); }
+function nearMouth(x, r) { if (!(BED_B - BED_A > 2000)) return false; return CAVES.systems.some(s => Math.abs(sysX(s) - x) < r); }
 const CAVE_API = {
   nearMouth,
   step, pump, draw, buildNow, subNear, subMove, rebuild: () => refresh(null),
@@ -23977,6 +24035,7 @@ function edHandles() {
     const [mx, my] = sysMouth(s);
     H.push({ si, kind: 'mouth', X: mx, Y: my });
     if (CV.wins[si]) for (let k = 1; k <= 2; k++) H.push({ si, kind: 'lvl', k, X: CV.wins[si].X1 - 60, Y: my + levelDepth(si, k, P['w' + (k + 1) + 'd']) });
+    if (Array.isArray(s.water)) s.rooms.forEach((r, i) => { const v = s.water[i]; if (!Number.isFinite(v)) return; let a = 1e9; for (const p of r) a = Math.min(a, p[0]); H.push({ si, kind: 'wl', i, X: mx + a - 30, Y: my + v }); });
     s.rooms.forEach((r, i) => { r.forEach((p, k) => H.push({ si, kind: 'room', i, k, X: mx + p[0], Y: my + p[1] })); const c = centroid(r); H.push({ si, kind: 'roomC', i, X: mx + c[0], Y: my + c[1] }); const sc = scaleHandle(r); H.push({ si, kind: 'roomS', i, X: mx + sc[0], Y: my + sc[1] }); });
     s.tunnels.forEach((t, i) => { t.pts.forEach((p, k) => H.push({ si, kind: 'tun', i, k, X: mx + p[0], Y: my + p[1] })); for (let j = 0; j < 3; j++) { const wh = tunWidthAt(s, t, j); H.push({ si, kind: 'tunW', i, k: j, X: wh[0], Y: wh[1] }); } });
   });
@@ -24028,6 +24087,33 @@ function edAddRoom(X, Y) {
   for (let k = 0; k < ROOM_N; k++) { const a = -Math.PI / 2 + k * Math.PI * 2 / ROOM_N; pts.push([Math.round(X - mx + Math.cos(a) * 160), Math.round(Y - my + Math.sin(a) * 130)]); }
   edSnapshot(); s.rooms.push(pts); ED.sel = { si, kind: 'room', i: s.rooms.length - 1 }; edChanged(si);
 }
+// (user Oct 28, 17:14: caves anywhere) a new system, its mouth on the ground at X: one room under it and a tunnel down to it;
+// dry on dry land, underwater in the sea or a lake
+function edAddSystem(X) {
+  const sea = inOcean(X) && X > BED_A + 0.02 * (BED_B - BED_A) && X < BED_B - 0.02 * (BED_B - BED_A), wet = sea || (onLand(X) && lakeAt(X));
+  const pts = []; for (let k = 0; k < ROOM_N; k++) { const a = -Math.PI / 2 + k * Math.PI * 2 / ROOM_N; pts.push([Math.round(Math.cos(a) * 160), Math.round(320 + Math.sin(a) * 130)]); }
+  const s = { name: 'CAVES ' + (CAVES.systems.length + 1), u: sea ? +((X - BED_A) / (BED_B - BED_A)).toFixed(4) : 0.5, rooms: [pts], tunnels: [{ r: 40, pts: [[0, -20], [10, 90], [0, 200]] }] };
+  if (!sea) s.x = Math.round(clamp(X, 60, WORLD_W - 60));
+  if (!wet) s.dry = true;
+  edSnapshot(); CAVES.systems.push(s); ED.sel = { si: CAVES.systems.length - 1, kind: 'room', i: 0 }; edChanged(CAVES.systems.length - 1);
+}
+// the system the SYSTEM buttons act on: the one a picked shape is in, or the one nearest the middle of the view
+const edSysNow = () => ED.sel ? ED.sel.si : nearestSys((CAMPX + VWP / 2) / SV);
+function edSetDry(dry) { const si = edSysNow(), s = CAVES.systems[si]; if (!s || !!s.dry === dry) return; edSnapshot(); if (dry) s.dry = true; else delete s.dry; edChanged(si); }
+let edDelT = 0;
+function edDelSystem(b) {
+  const si = edSysNow(); if (!CAVES.systems[si] || CAVES.systems.length <= 1) return;
+  if (performance.now() - edDelT > 3000) { edDelT = performance.now(); b.textContent = 'SURE? TAP AGAIN (' + CAVES.systems[si].name + ')'; setTimeout(() => { if (performance.now() - edDelT >= 2900) b.textContent = 'DELETE THE SYSTEM'; }, 3000); return; }
+  edDelT = 0; b.textContent = 'DELETE THE SYSTEM';
+  edSnapshot(); CAVES.systems.splice(si, 1); CV.wins.splice(si, 1); ED.sel = null; ED.dirty.clear(); edChanged(CAVES.systems.map((s, i) => i));
+}
+// a water line in the picked room (at its middle, to drag where it goes), or none
+function edWaterLine(on) {
+  const q = ED.sel; if (!q || q.kind !== 'room') { if (ED.toolNote) ED.toolNote.textContent = 'Pick a room first (tap its outline), then WATER LINE.'; return; }
+  const s = CAVES.systems[q.si], wl = (s.water || []).slice(); while (wl.length < s.rooms.length) wl.push(null);
+  if (on) { let y = 0; for (const p of s.rooms[q.i]) y += p[1]; wl[q.i] = Math.round(y / s.rooms[q.i].length); } else wl[q.i] = null;
+  edSnapshot(); if (wl.some(v => v != null)) s.water = wl; else delete s.water; edChanged(q.si);
+}
 function edAddTunnel(a, b) {
   const si = nearestSys(a[0]), s = CAVES.systems[si], [mx, my] = sysMouth(s), rel = p => [Math.round(p[0] - mx), Math.round(p[1] - my)];
   edSnapshot(); s.tunnels.push({ r: 40, pts: [rel(a), rel([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]), rel(b)] }); ED.sel = { si, kind: 'tun', i: s.tunnels.length - 1 }; edChanged(si);
@@ -24040,11 +24126,12 @@ function edPick(e) {
 function edDown(e) {
   const { X, Y, r } = edPick(e), now = performance.now();
   if (ED.tool === 'room') { edAddRoom(X, Y); ED.tool = 'move'; edSyncAll(); return true; }
+  if (ED.tool === 'system') { edAddSystem(X); ED.tool = 'move'; edSyncAll(); return true; }
   if (ED.tool === 'sub') { if (!hullHits(X, Y)) moveSub(X, Y); ED.tool = 'move'; edSyncAll(); return true; }
   if (ED.tool === 'tunnel') { if (!ED.pend) { ED.pend = [X, Y]; edSyncAll(); return true; } edAddTunnel(ED.pend, [X, Y]); ED.pend = null; ED.tool = 'move'; edSyncAll(); return true; }
   if (ED.tool === 'delete') {
     const hit = nearestShape(X, Y, r * 1.6, true);
-    if (hit) { edSnapshot(); const s = CAVES.systems[hit.si]; (hit.kind === 'room' ? s.rooms : s.tunnels).splice(hit.i, 1); ED.sel = null; edChanged(hit.si); }
+    if (hit) { edSnapshot(); const s = CAVES.systems[hit.si]; (hit.kind === 'room' ? s.rooms : s.tunnels).splice(hit.i, 1); if (hit.kind === 'room' && s.water) { s.water.splice(hit.i, 1); if (!s.water.some(v => v != null)) delete s.water; } ED.sel = null; edChanged(hit.si); }
     ED.tool = 'move'; edSyncAll(); return true;
   }
   const h = nearestHandle(X, Y, r);
@@ -24063,7 +24150,7 @@ function edDown(e) {
   }
   if (h.kind === 'lvl') { ED.sel = null; ED.drag = h; ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, X, Y, orig: JSON.stringify(CAVES), lvl: true }; return true; }
   if (h.kind === 'sub') { ED.sel = null; ED.drag = h; ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, X, Y, sub: true }; return true; }
-  ED.sel = h.kind === 'mouth' ? null : { si: h.si, kind: h.kind === 'roomC' || h.kind === 'roomS' || h.kind === 'room' ? 'room' : 'tun', i: h.i };
+  ED.sel = h.kind === 'mouth' ? null : { si: h.si, kind: h.kind === 'roomC' || h.kind === 'roomS' || h.kind === 'room' || h.kind === 'wl' ? 'room' : 'tun', i: h.i };
   if (e.button === 2) { if (h.kind === 'room' || h.kind === 'tun') edRemovePoint(h); return true; }
   ED.drag = h; ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, X, Y, orig: JSON.stringify(CAVES), sys: clone(CAVES.systems[h.si]) };
   clearTimeout(ED.hold);
@@ -24098,7 +24185,11 @@ function edMoveTo(e) {
   } else if (h.kind === 'tunW') {
     const t = s.tunnels[h.i], c = tunWidthAt(s, t, h.k)[2], rs = tunRs(t).slice();
     rs[h.k] = Math.round(clamp(Math.hypot(X - c[0], Y - c[1]), 12, 240)); t.rs = rs; t.r = rs[1];
-  } else if (h.kind === 'mouth') s.u = +clamp((X - BED_A) / (BED_B - BED_A), 0.02, 0.98).toFixed(4);
+  } else if (h.kind === 'mouth') {
+    // (anywhere on the ground, user Oct 28, 17:14: on the ocean floor by its u, as before; on the land or in a lake by its x)
+    if (inOcean(X) && X > BED_A + 0.02 * (BED_B - BED_A) && X < BED_B - 0.02 * (BED_B - BED_A)) { s.u = +((X - BED_A) / (BED_B - BED_A)).toFixed(4); delete s.x; }
+    else s.x = Math.round(clamp(X, 60, WORLD_W - 60));
+  } else if (h.kind === 'wl') { const wl = (s.water || []).slice(); while (wl.length < s.rooms.length) wl.push(null); wl[h.i] = Math.round(Y - my); s.water = wl; }
 }
 function edUp(e) {
   const q = ED.ptr;
@@ -24182,10 +24273,16 @@ function edDraw() {
       const r = hs * 1.3; C.fillStyle = '#04070f'; C.fillRect(X - r - 1.5 * D, Y - r - 1.5 * D, 2 * r + 3 * D, 2 * r + 3 * D);
       C.fillStyle = hot ? '#ffffff' : col; C.fillRect(X - r, Y - r, 2 * r, 2 * r);
       drawText(C, 'LEVEL ' + (h.k + 1) + ' FROM HERE', X - r - 4 * D, Y - r - 7 * ts, h.k === 1 ? [125, 255, 155] : [143, 180, 255], ts, 'right');
+    } else if (h.kind === 'wl') {
+      const s = CAVES.systems[h.si], [mx] = sysMouth(s), r0 = s.rooms[h.i]; let b = -1e9; for (const p of r0) b = Math.max(b, p[0]);
+      polyline([[h.X + 30, h.Y], [mx + b, h.Y]], false, Math.max(1.5, 1.6 * D), hot ? '#ffffff' : 'rgba(110,200,255,0.95)', [6 * D, 4 * D]);
+      const r = hs * 1.2; C.fillStyle = '#04070f'; C.fillRect(X - r - 1.5 * D, Y - r - 1.5 * D, 2 * r + 3 * D, 2 * r + 3 * D);
+      C.fillStyle = hot ? '#ffffff' : '#6ec8ff'; C.fillRect(X - r, Y - r, 2 * r, 2 * r);
+      drawText(C, 'WATER LINE', X - r - 4 * D, Y - r - 7 * ts, [110, 200, 255], ts, 'right');
     } else if (h.kind === 'mouth') {
       const r = hs * 1.8;
       C.save(); C.translate(X, Y); C.rotate(Math.PI / 4); C.fillStyle = '#04070f'; C.fillRect(-r * 0.75 - 2, -r * 0.75 - 2, r * 1.5 + 4, r * 1.5 + 4); C.fillStyle = hot ? '#ffffff' : '#7fd6ff'; C.fillRect(-r * 0.75, -r * 0.75, r * 1.5, r * 1.5); C.restore();
-      drawText(C, CAVES.systems[h.si].name + ' MOUTH', X + r + 4 * D, Y - r - 4 * ts, [127, 214, 255], ts);
+      drawText(C, CAVES.systems[h.si].name + ' MOUTH' + (CAVES.systems[h.si].dry ? ' (DRY)' : ' (UNDERWATER)'), X + r + 4 * D, Y - r - 4 * ts, [127, 214, 255], ts);
     } else if (h.kind === 'roomC') {
       const a = hs * 1.6;
       seg(X - a, Y, X + a, Y, 4 * D, '#04070f'); seg(X, Y - a, X, Y + a, 4 * D, '#04070f');
@@ -24250,14 +24347,15 @@ function edSyncAll() {
   const on = (k, v) => ED.b[k] && ED.b[k].classList.toggle('on', !!v);
   on('all', VIEW.all); on('lamp', !VIEW.all); on('levels', ED.levels);
   on('left', ED.frame === 'left'); on('right', ED.frame === 'right'); on('ocean', ED.frame === 'ocean'); on('follow', !ED.frame);
-  on('move', ED.tool === 'move'); on('room', ED.tool === 'room'); on('tunnel', ED.tool === 'tunnel'); on('del', ED.tool === 'delete'); on('psub', ED.tool === 'sub');
+  on('move', ED.tool === 'move'); on('room', ED.tool === 'room'); on('tunnel', ED.tool === 'tunnel'); on('del', ED.tool === 'delete'); on('psub', ED.tool === 'sub'); on('system', ED.tool === 'system');
+  { const sy = CAVES.systems[edSysNow()]; on('dry', sy && sy.dry); on('wet', sy && !sy.dry); }
   if (ED.b.undo) ED.b.undo.disabled = !ED.undo.length;
   if (ED.b.refresh) {
     const busy = CV.job && CV.edOpen;
     ED.b.refresh.disabled = !ED.dirty.size; on('refresh', ED.dirty.size > 0);
     ED.b.refresh.textContent = ED.dirty.size ? 'REFRESH (' + [...ED.dirty].sort().map(k => CAVES.systems[k] ? CAVES.systems[k].name : '?').join(' + ') + ')' : busy ? 'BUILDING...' : 'REFRESH';
   }
-  if (ED.toolNote) ED.toolNote.textContent = ED.tool === 'room' ? 'Tap where the new room\'s middle goes.' : ED.tool === 'tunnel' ? (ED.pend ? 'Now tap where it ends.' : 'Tap where the new tunnel starts.') : ED.tool === 'delete' ? 'Tap a room or a tunnel to delete it.' : ED.tool === 'sub' ? 'Tap the water where the sub goes (or drag its ring).' : ED.dirty.size ? 'The lines are new, the caves under them not yet: REFRESH.' : '';
+  if (ED.toolNote) ED.toolNote.textContent = ED.tool === 'room' ? 'Tap where the new room\'s middle goes.' : ED.tool === 'system' ? 'Tap the ground where the new system\'s mouth goes.' : ED.tool === 'tunnel' ? (ED.pend ? 'Now tap where it ends.' : 'Tap where the new tunnel starts.') : ED.tool === 'delete' ? 'Tap a room or a tunnel to delete it.' : ED.tool === 'sub' ? 'Tap the water where the sub goes (or drag its ring).' : ED.dirty.size ? 'The lines are new, the caves under them not yet: REFRESH.' : '';
 }
 function buildPane(pane, el) {
   edElF = el; ED.pane = pane; pane.className = '';
@@ -24293,6 +24391,15 @@ function buildPane(pane, el) {
       btn(tl, 'del', 'DELETE A SHAPE', () => { ED.tool = ED.tool === 'delete' ? 'move' : 'delete'; ED.pend = null; });
       btn(tl, 'undo', 'UNDO', edUndo, 'Ctrl+Z too');
       ED.toolNote = mk('div', 'tabnote'); ED.toolNote.style.color = '#ffb347'; ED.toolNote.style.flexBasis = '100%'; tl.appendChild(ED.toolNote);
+      // (user Oct 28, 17:14: caves anywhere, underwater or dry, a water line per room)
+      const sy = mk('div', 'cat btns'); sy.appendChild(mk('h4', '', 'THE SYSTEM'));
+      btn(sy, 'system', '+ SYSTEM', () => { ED.tool = ED.tool === 'system' ? 'move' : 'system'; ED.pend = null; }, 'Tap the ground anywhere - the land, a lake, the ocean floor: a new cave system with its mouth there');
+      btn(sy, 'wet', 'UNDERWATER', () => edSetDry(false), 'The system full of water, air only where it is trapped (the picked shape\'s system, or the one nearest the middle of the view)');
+      btn(sy, 'dry', 'DRY', () => edSetDry(true), 'The system all air: no water, unless a room has a water line');
+      btn(sy, 'wlon', 'WATER LINE IN THE ROOM', () => edWaterLine(true), 'A water line in the picked room - drag its blue handle; it sets the water in that room and every room its air runs into');
+      btn(sy, 'wloff', 'NO WATER LINE', () => edWaterLine(false), 'The picked room\'s water line taken away: the water as the system has it');
+      btn(sy, 'delsys', 'DELETE THE SYSTEM', b => edDelSystem(b), 'The picked shape\'s system, or the one nearest the middle of the view (tap twice)');
+      sy.appendChild(mk('div', 'tabnote', 'Move a system by its blue diamond (its mouth): anywhere on the ground. In the game a cave stays dark until a light comes into it.'));
       const ds = mk('div', 'cat btns'); ds.appendChild(mk('h4', '', 'THE DESIGN'));
       btn(ds, 'reset', 'RESET TO THE DEFAULT', () => { edSnapshot(); const u = ED.undo.slice(); CAVES = clone(CAVE_DEF); cavesSave(); ED.undo = u; ED.sel = null; edChanged(CAVES.systems.map((s, i) => i)); edShowTa(false); }, 'Back to your design of Oct 28, 11:04');
       btn(ds, 'copy', 'COPY CAVES', b => {
@@ -24306,7 +24413,7 @@ function buildPane(pane, el) {
       }, 'Caves pasted into the box below (as COPY gives them) become the design');
       ED.ta = mk('textarea'); ED.ta.spellcheck = false; ED.ta.hidden = true; ED.ta.style.flexBasis = '100%'; ds.appendChild(ED.ta);
       ds.appendChild(mk('div', 'tabnote', 'The same text as the Cave Lab\'s COPY / LOAD. Kept in this browser; online the default caves are used.'));
-      p.append(rf, tl, ds);
+      p.append(rf, tl, sy, ds);
     }
     for (const c of (CATS[T] || [])) {
       const box = mk('div', 'cat'); box.appendChild(mk('h4', '', c));
