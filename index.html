@@ -2535,8 +2535,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 177;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 14:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 178;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 14:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8860,15 +8860,16 @@ function lostUnit(p, x, lost) {
   if (!hasForces(p) && !TEST) { killCaptain(p); return; }
   // (user Oct 28: "It seems we are no longer staying on the vehicle that crashed, but the camera just snaps to a random
   // place?" - it used to park the view at the surface where she was lost) the camera stays on the wreck as it falls or
-  // sinks, framed as the vehicle was, until it has lain still a few seconds (12 s at most); then home, to the harbour, to pick the next
-  // one (stepWatch). Nothing left to watch (eaten by the kraken, blown to nothing, gone off the world): home at once.
-  // A vehicle button, or looking round (lookBy), ends it sooner
+  // sinks, framed as the vehicle was, and stays on it where it comes to rest (stepWatch). User Oct 28, 14:36: "it stays
+  // there, it never goes 'home'. There is no home until you pick something else" - and eaten by the kraken: "its supposed
+  // to STAY IN THE KRAKEN". So the camera never moves by itself after a loss: nothing left to watch (eaten, blown to
+  // nothing), it stays where the vehicle was last. Only a vehicle button (or looking round, lookBy) moves it
   const v = lost === 'ship' ? ships[p] : lost === 'sub' ? subs[p] : lost === 'plane' ? planes[p] : lost === 'tank' ? tanks[p] : lost === 'heli' ? helis[p] : lost === 'tower' ? myTw(p) : lost === 'sail' ? sailboats[c.yacht] || null : null;
   c.look = null; c.watch = null;
   const w = { kind: lost, v, id: p, x, t: 0, still: 0, old: null };
   if (lost === 'tank' || lost === 'heli') w.old = new Set(landWrecks.filter(q => !(q.kind === lost && q.id === p && v && Math.abs(q.x - v.x) < 4)));   // (its own wreck, when it comes, is the new one)
   const P = v ? lostWreckAt(w) : null;
-  if (!P) { watchEnd(p); return; }
+  if (!P) { c.look = v && Number.isFinite(v.x) && Number.isFinite(v.y) ? { x: v.x, y: v.y } : { x, y: FOCUS_Y }; return; }   // (where it was last: the kraken, for one it ate)
   // the offset the vehicle's own framing had (a tank's ground low in the view, a ship's waterline): kept, so the view
   // doesn't jump as it changes from the vehicle to its wreck
   const F = was === lost && lost !== 'civ' && lost !== 'sail' ? vehFocus(p, was) : null;
@@ -8914,17 +8915,10 @@ function stepWatch(p, dt) {
   if (c.mode !== 'dock' && c.mode !== 'gone') { c.watch = null; return; }   // (into something else)
   const x0 = w.px, y0 = w.py, P = lostWreckAt(w);
   w.t += dt;
-  if (!P) { w.gone = (w.gone || 0) + dt; if (w.gone > 0.6) watchEnd(p); return; }
+  if (!P) return;                                                  // (nothing left of it - eaten, cleared: the view stays where it was last, w.px / w.py)
   w.px = P[0]; w.py = P[1];
   const sp = dt > 0 ? Math.hypot(P[0] - x0, P[1] - y0) / dt : 0;
-  w.still = sp < 4 ? w.still + dt : 0;
-  if (w.still > 3 || w.t > 12) watchEnd(p);                       // (a few seconds: a long way down to the deep's bottom isn't waited for)
-}
-function watchEnd(p) {
-  const c = crew[p];
-  c.watch = null; c.look = null;
-  if (c.mode !== 'dock') return;
-  dockZoom(p); cutTo(p);                                                // (straight there: a cut, as a vehicle button's)
+  w.still = sp < 4 ? w.still + dt : 0;                            // (no going home by itself, user Oct 28 14:36: it stays till you pick something)
 }
 // Taking over a boat: one at home (or anywhere in the harbour) is brought out through her gate first and is
 // yours once she's clear of the pier; one out on the water is yours straight away, at the speed she's making.
@@ -8995,7 +8989,7 @@ function switchTo(p, k) {
   sfxClick(gunCtl[p]);
   if (c.mode === 'civ') civRelease(p);              // (the civilian vehicle you leave carries on by itself)
   c.mode = 'dock'; c.watch = null; c.look = null;
-  if (!takeOver(p, k)) dockZoom(p);
+  takeOver(p, k);                                  // (no zoom change on switching: the zoom is the player's - user Oct 27, Oct 28)
   cutTo(p);                                        // (straight to it: a cut, not a glide - user Oct 24 night)
 }
 // The house button: the boat you're in sails home and is taken in through her gate, and you're straight into
@@ -9018,9 +9012,18 @@ function sendHomeVeh(p, k) {
 function stepAshore(p, k) {
   const c = crew[p];
   if (c.mode !== k) return;
+  const F = camFocus(p);
   c.mode = 'dock';
   setOrder(telegraphs[p], 3);
-  dockZoom(p);                                  // home: the harbour in view, and you pick what's next
+  // (user Oct 28, 14:39, "remember the GTA? Like if I fly a plane into the hangar. it stays in the hangar until I swap to
+  // something else. Also no changes of zoom ever unless the user did it") the view stays where the vehicle went in, at
+  // the zoom you had, till you pick something
+  holdView(p, F);
+}
+// the view kept where it is (F: the focus it had), no zoom change: after a vehicle is put away or you step out of it
+function holdView(p, F) {
+  const c = crew[p]; c.watch = null;
+  c.look = F && Number.isFinite(F[0]) && Number.isFinite(F[1]) ? { x: F[0], y: F[1] } : null;
 }
 function killCaptain(p) {
   if (netGuestHold()) return;                              // (online guest: only when the host says so)
@@ -9397,7 +9400,7 @@ const freshCrew = () => ({ mode: 'dock', x: 0, face: 1, anim: 0, bv: 0, boatZoom
 const crew = [0, 1].map(freshCrew);
 NET.home = [crew[0], crew[1]];                   // (the records of whoever plays at this screen, whatever asSeat stands in)
 const blood = [];
-const BOAT_SPEED = 58, BOAT_ACC = 70, BOAT_G = 220, BOAT_ZOOM = ZOOM_TOP * 1.3;
+const BOAT_SPEED = 58, BOAT_ACC = 70, BOAT_G = 220;
 // the stretch of harbour a player sees while choosing: the hangar, the tower and the pier, centred
 function dockFrame(p) {
   if (TEST) return [testSpot(p, 'ship'), 260];
@@ -9424,7 +9427,6 @@ function stepCrew(dt) {
     if (c.mode === 'ship') continue;
     if (c.mode === 'boat') {
       // motor home; reaching your own pier puts you ashore
-      if (c.boatZoomT > 0) { c.boatZoomT -= dt; if (c.boatZoomT <= 0) cam.zt[p] = BOAT_ZOOM; }   // a close view of its own: the lifeboat is tiny
       const run = runCtl[p].v;
       // half the battleship's top speed, but it gets going (and stops) much quicker
       c.bv += clamp(run * BOAT_SPEED - c.bv, -BOAT_ACC * dt, BOAT_ACC * dt);
@@ -9469,8 +9471,9 @@ function stepCrew(dt) {
         // ashore: he takes what's left (the battleship, the sub, the tower). With nothing left he stays in his
         // boat until someone sinks it.
         if (['ship', 'sub', 'tower'].some(k => canTake(p, k))) {
+          const F = camFocus(p);
           c.mode = 'dock'; runCtl[p].v = 0; c.bv = 0;
-          if (!['ship', 'sub', 'tower'].some(k => canTake(p, k) && takeOver(p, k))) dockZoom(p);
+          if (!['ship', 'sub', 'tower'].some(k => canTake(p, k) && takeOver(p, k))) holdView(p, F);   // (no zoom change, the view where he came ashore - user Oct 28)
         }
       }
       continue;
@@ -10258,7 +10261,6 @@ function sinkShip(sh) {
   sh.state = 'sinking'; sh.sinkT = 0; sh.input = 0; sh.throttle = 0; sh.moored = false;
   if (ships[sh.id] === sh) fleet[sh.id].ship = Math.max(0, fleet[sh.id].ship - 1);
   captainDies(sh);
-  if (crew[sh.id].mode === 'ship') setScope(sh.id, zoomLevelOf(ZOOM_DEFAULT) + 2);
   if (crew[sh.id].mode === 'ship') setOrder(telegraphs[sh.id], 3);   // only if you were aboard her
   // the hull parts at the sections that were blown open
   const cuts = new Set();
@@ -11879,7 +11881,7 @@ function updateCamera(dt, snap) {
   // (the zoom-out with speed, in steps too: the level nearest the eased value, kept until the value is clearly nearer another)
   cam.zq = cam.zq || [null, null]; cam.zl = cam.zl || [null, null];
   const zEff = i => {
-    const raw = cam.za[i] * (1 - 0.16 * cam.spd[i]);
+    const raw = cam.za[i];                                   // (no zoom-out with speed: the zoom changes only when the player changes it - user Oct 28, 14:39: "taking off from the hangar is zooming out after takeoff")
     if (zoomLocked(i)) return raw;
     let lv = zoomLevelOf(raw); const cur = cam.zq[i];
     if (cur !== null && cur !== lv && cur >= 1 && cur <= ZN && Math.abs(raw - ZOOM_LEVELS[lv - 1]) > 0.6 * Math.abs(raw - ZOOM_LEVELS[cur - 1])) lv = cur;
