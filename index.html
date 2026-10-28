@@ -2535,8 +2535,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 176;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 14:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 177;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 14:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4115,7 +4115,45 @@ function photoEnter() {
   PHOTO.z = cam.merge >= 1 ? cam.zsa || v.z : v.z;
   PHOTO.x = cam.merge >= 1 ? cam.cs : v.l + hw; PHOTO.y = v.top + 0.5 * VIEW_H / v.z;
 }
-function photoExit() { PHOTO.on = false; PHOTO.ptr.clear(); PHOTO.pinch = null; ui.settings = true; }
+function photoExit() { if (PHOTO.ed) { edModeClose(); return; } PHOTO.on = false; PHOTO.ptr.clear(); PHOTO.pinch = null; ui.settings = true; }
+/* ---- the GAME EDITOR's mode (user Oct 28: "Anytime we go into Editor mode, the game should pause, the UI disappear and I
+   can drag the camera around (like in the Eye mode) so I can edit around as needed. Once I press Close it returns to the
+   game as normal.") - while its panel is open the eye is shut, as photo mode: the world held, no HUD, no sliders, one view;
+   a drag on empty space pans, the wheel or a pinch zooms, the keys and a pad look round. A drag that starts on a FLOOR,
+   LAND or CAVES handle is the handle's (their listeners take it first); one on the panel (a slider) is the panel's
+   (onEdUI). CLOSE (or Escape, a pad's B / Start): the world goes on, the HUD's back, the camera on what you're in, at the
+   zoom you had. Followed each frame from the editor's own open state (edModeSync), so the sky editor isn't touched. */
+const EDMODE = { on: false, keep: null, ov: null };
+function edModeSync() {
+  const open = !!(typeof NSKY !== 'undefined' && NSKY.editor && NSKY.editor.TUNE.built && NSKY.editor.open);
+  if (open && !EDMODE.on) edModeEnter();
+  else if (!open && EDMODE.on) edModeExit();
+  if (!EDMODE.on) return;
+  // (the CAVES tab's FRAME buttons put the camera on a cave - camOverride and a zoom: the editor's view goes there)
+  const o = camOverride[0];
+  if (o !== EDMODE.ov) { EDMODE.ov = o; if (o != null) { PHOTO.x = Array.isArray(o) ? o[0] : o; PHOTO.y = Array.isArray(o) ? o[1] : FOCUS_Y; PHOTO.z = cam.zt[0] || PHOTO.z; } }
+}
+function edModeEnter() {
+  EDMODE.on = true; EDMODE.ov = camOverride[0];
+  EDMODE.keep = { zt: cam.zt.slice(), lv: scopes.map(q => q.level), ov: camOverride[0] };
+  if (!PHOTO.on) photoEnter();
+  PHOTO.ed = true; PHOTO.hint = 0;
+  dropAll();                                                         // (a press, a held key in the game when it opened: let go)
+}
+function edModeExit() {
+  EDMODE.on = false; PHOTO.ed = false;
+  // (the FLOOR and LAND tabs' edits waiting for REFRESH: built now, so the game never runs on a stale floor or land)
+  floorRefresh(); landRefresh();
+  PHOTO.on = false; PHOTO.ptr.clear(); PHOTO.pinch = null;
+  ui.settings = false;                                               // (back to the game, not to the sliders)
+  const k = EDMODE.keep; EDMODE.keep = null;
+  if (camOverride[0] !== (k ? k.ov : null)) camOverride[0] = k ? k.ov : null;
+  if (k) for (const p of [0, 1]) { cam.zt[p] = k.zt[p]; scopes[p].level = k.lv[p]; }
+  cam.pan[0] = cam.pan[1] = 0; cam.panY[0] = cam.panY[1] = 0;
+  cam.cut[0] = cam.cut[1] = true;                                    // (straight back to what you're in: a cut)
+}
+// closing it from the game (Escape, a pad's B): as its own CLOSE does
+function edModeClose() { const T = NSKY.editor.TUNE; if (T.root) T.root.hidden = true; T.open = false; edModeSync(); }
 function photoZoom(f) { PHOTO.z = clamp(PHOTO.z * f, ZOOM_MIN * 0.8, ZOOM_TOP); }
 function photoPan(dxPx, dyPx) {          // (screen pixels dragged: the world follows the finger)
   const k = dpr / PIXW / (S * PHOTO.z);                         // (world units a screen point)
@@ -4144,6 +4182,7 @@ const eyeSpot = L => [L.play[0] + 52, L.play[1]];
 // over the bare world: only the shut eye, where it was
 // (user Oct 26: no explanation; the eye stays where it was, shut, so you know where to tap to come back)
 function drawPhotoHint(dt) {
+  if (PHOTO.ed) return;                                              // (the GAME EDITOR: its panel, nothing else)
   const [ex, ey] = eyeSpot(topLayout()); ug.drawImage(eyeBtn().shut, ex, ey);
 }
 // pointers while the eye is shut: drag pans, two fingers pinch, a tap near the eye's place opens it again
@@ -4161,7 +4200,7 @@ function photoPointerMove(e) {
 function photoPointerUp(e) {
   const p = PHOTO.ptr.get(e.pointerId); PHOTO.ptr.delete(e.pointerId);
   if (PHOTO.ptr.size < 2) PHOTO.pinch = null;
-  if (p && p.eye && performance.now() - p.t0 < 400 && Math.hypot(p.x - p.x0, p.y - p.y0) < 12) { menuClick(); photoExit(); }
+  if (p && p.eye && !PHOTO.ed && performance.now() - p.t0 < 400 && Math.hypot(p.x - p.x0, p.y - p.y0) < 12) { menuClick(); photoExit(); }
 }
 // keys and pads (each frame): arrows / stick pan, + - / d-pad up-down zoom, Escape / B / Start back
 function photoInput(dt) {
@@ -5648,6 +5687,7 @@ const looking = p => { const c = crew[p]; return !!c && !c.dead && (c.mode === '
 function lookBy(p, dx, dy) {
   const c = crew[p];
   if (c.spec) { const F = camFocus(p); c.look = { x: F[0], y: F[1] }; c.spec = null; }   // (watching a teammate: off from where the view is)
+  if (c.watch) { const F = camFocus(p); c.look = { x: F[0], y: F[1] }; c.watch = null; }   // (watching a wreck: off from where the view is)
   if (!c.look) { const [fx] = dockFrame(p); c.look = { x: fx, y: FOCUS_Y - 24 }; }
   c.look.x = clamp(c.look.x + dx, VIS_L, VIS_R);
   c.look.y = clamp(c.look.y + dy, SKY_TOP + 600, seabedY(c.look.x) - 150);
@@ -7023,7 +7063,7 @@ function stepBlastRings(dt) {
 // A depth charge's gas bubble: a ball of white water punches out in a fraction of a second, churns
 // (mottled light and shadow inside it), drifts up a little, then tears apart into bubbles
 const gasBalls = [];
-const BALL_TONES = ['#ffffff', '#e6f4fd', '#c4e0f6', '#96c4ec', '#6aa4dc'].map(s => s);
+const BALL_TONES = ['#ffffff', '#e6f4fd', '#c4e0f6', '#96c4ec', '#6aa4dc'].map(s => s), BALL_RGB = BALL_TONES.map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)));
 function gasBall(x, y, R) { gasBalls.push({ x, y, R, r: 2, t: 0, seed: Math.random() * 40 }); if (gasBalls.length > 8) gasBalls.shift(); }
 function stepGasBalls(dt) {
   for (let i = gasBalls.length - 1; i >= 0; i--) {
@@ -7046,6 +7086,8 @@ function drawGasBalls(x0, x1) {
   // centre in the direction of the blast. As it tears apart it thins from the rim inward.
   for (const b of gasBalls) {
     if (b.x + b.r < x0 || b.x - b.r > x1) continue;
+    // (seen through the water at its depth, user Oct 28 - uwLight; the deep's dark comes after, over it: drawAbyss)
+    const tones = BALL_RGB.map(c => rgbs(uwLight(b.y, c, false))), core = rgbs(uwLight(b.y, [255, 243, 176], false).map((v, j) => v + ([255, 243, 176][j] - v) * 0.4));
     const cx = PX(b.x), cy = PY(b.y), R = b.r * SV, brk = clamp((b.t - 0.9) / 0.8, 0, 1);
     const s = PB, j0 = Math.floor((cy - R * 1.1) / s) * s, i0 = Math.floor((cx - R * 1.1) / s) * s;
     const rip = Math.max(0, 1 - b.t / 1.3);                                   // the ripples die away
@@ -7066,11 +7108,11 @@ function drawGasBalls(x0, x1) {
       if (d > 0.84) v -= 0.45;                                                  // a bright skin at the rim
       v += brk * 0.5;                                                           // and it greys out as it breaks
       v += BAYER[((x / s) & 3) + ((y / s) & 3) * 4] * 0.32;                     // ordered dither between the tones
-      fs1(BALL_TONES[clamp(Math.floor(v * 5), 0, 4)]);
+      fs1(tones[clamp(Math.floor(v * 5), 0, 4)]);
       C.fillRect(x, y, s, s);
     }
     // the instant of the blast: a small, hot, square-ish core
-    if (b.t < 0.12) { fs1('#fff3b0'); const r = Math.max(s, Math.round(R * 0.3 / s) * s); C.fillRect(Math.round(cx / s) * s - r, Math.round(cy / s) * s - r, r * 2, r * 2); }
+    if (b.t < 0.12) { fs1(core); const r = Math.max(s, Math.round(R * 0.3 / s) * s); C.fillRect(Math.round(cx / s) * s - r, Math.round(cy / s) * s - r, r * 2, r * 2); }
     fsLast = null;
   }
 }
@@ -7140,15 +7182,18 @@ function stepWclouds(dt) {
 function drawWclouds(x0, x1) {
   if (!wclouds.length) return;
   const fx = E.fxq, pal = FOAM_TONES.map(c => Math.round(c[0] * fx[0]) + ',' + Math.round(c[1] * fx[1]) + ',' + Math.round(c[2] * fx[2]));
+  // (under the water: the sea's colour and dark at its depth, user Oct 28 - uwLight; by 40-unit steps of depth so the
+  // blobs' coloured copies stay few)
+  const palAt = {}, palOf = y => { const q = Math.max(0, Math.round((y - WATER_Y) / 40)); return palAt[q] || (palAt[q] = FOAM_TONES.map(c => uwLight(WATER_Y + q * 40, c, true).map((v, j) => Math.round(v * fx[j] / 3) * 3).join(','))); };
   const list = [];
   for (const w of wclouds) {
     if (w.x + w.r * 1.4 < x0 || w.x - w.r * 1.4 > x1) continue;
     const t = w.age / w.life, late = t > 0.45 ? (t - 0.45) / 0.55 : 0;
     const R = w.r * SV / SMK * Math.min(1, 0.5 + w.age * 4);
     if (R < 0.8) continue;
-    // under the water it's seen through the sea: a touch dimmer and bluer the deeper it is
+    // under the water it's seen through the sea: a touch fainter the deeper it is, in the water's colour there
     const deep = w.water ? clamp((w.y - WATER_Y) / 300, 0, 1) : 0;
-    list.push({ cx: PX(w.x), cy: PY(w.y), R, a: w.alpha * (1 - late * late) * (1 - 0.35 * deep), seed: w.seed });
+    list.push({ cx: PX(w.x), cy: PY(w.y), R, a: w.alpha * (1 - late * late) * (1 - 0.35 * deep), seed: w.seed, pal: w.water && w.y > WATER_Y + 8 ? palOf(w.y) : pal });
   }
   // light from above: the lit side is the top, the shadowed side underneath
   if (!list.length) return;
@@ -7157,7 +7202,7 @@ function drawWclouds(x0, x1) {
     for (const p of list) {
       const R = Math.min(60, Math.round(p.R * size));
       if (R < 1) continue;
-      const sp = blobSprite(R, p.seed, pal[tone]), off = p.R * shift * SMK;
+      const sp = blobSprite(R, p.seed, p.pal[tone]), off = p.R * shift * SMK;
       const ox = Math.floor(p.cx / SMK) * SMK, oy = Math.floor((p.cy - off) / SMK) * SMK;
       puffBlob(sp, ox, oy, R, p.a);
     }
@@ -8805,29 +8850,81 @@ function hasForces(p) {
   const sh = ships[p], sb = subs[p];
   return towerUsable(towers[p]) || sh.state === 'afloat' || sb.state === 'out' || sb.state === 'docked' || fleet[p].ship > 0 || fleet[p].sub > 0 || canTake(p, 'plane');
 }
-// The boat or tower you were in is gone: you're straight into the next one - the battleship first (wherever
-// she is, even on her way home), then the submarine, then the tower. With nothing left, you've lost.
-// You stay watching what you lost (it goes down, burns or falls) until you press a vehicle button.
+// The boat, plane, tank or tower you were in is lost: you're ashore (with nothing left, you've lost), watching it go
+// down a few seconds, then home to the harbour to pick the next one - or press a vehicle button sooner.
 function lostUnit(p, x, lost) {
   const c = crew[p];
   setOrder(telegraphs[p], 3);
+  const was = c.mode;
   c.mode = 'dock';
   if (!hasForces(p) && !TEST) { killCaptain(p); return; }
-  // (no camera riding the wreck down any more, user Oct 24: you look around freely from where it was lost)
-  const v = lost === 'ship' ? ships[p] : lost === 'sub' ? subs[p] : lost === 'plane' ? planes[p] : lost === 'tank' ? tanks[p] : lost === 'heli' ? helis[p] : null;
-  c.watch = null; c.look = { x, y: v && lost === 'plane' ? clamp(v.y + 110, SKY_TOP + 600, FOCUS_Y) : FOCUS_Y };
+  // (user Oct 28: "It seems we are no longer staying on the vehicle that crashed, but the camera just snaps to a random
+  // place?" - it used to park the view at the surface where she was lost) the camera stays on the wreck as it falls or
+  // sinks, framed as the vehicle was, until it has lain still a few seconds (12 s at most); then home, to the harbour, to pick the next
+  // one (stepWatch). Nothing left to watch (eaten by the kraken, blown to nothing, gone off the world): home at once.
+  // A vehicle button, or looking round (lookBy), ends it sooner
+  const v = lost === 'ship' ? ships[p] : lost === 'sub' ? subs[p] : lost === 'plane' ? planes[p] : lost === 'tank' ? tanks[p] : lost === 'heli' ? helis[p] : lost === 'tower' ? myTw(p) : lost === 'sail' ? sailboats[c.yacht] || null : null;
+  c.look = null; c.watch = null;
+  const w = { kind: lost, v, id: p, x, t: 0, still: 0, old: null };
+  if (lost === 'tank' || lost === 'heli') w.old = new Set(landWrecks.filter(q => !(q.kind === lost && q.id === p && v && Math.abs(q.x - v.x) < 4)));   // (its own wreck, when it comes, is the new one)
+  const P = v ? lostWreckAt(w) : null;
+  if (!P) { watchEnd(p); return; }
+  // the offset the vehicle's own framing had (a tank's ground low in the view, a ship's waterline): kept, so the view
+  // doesn't jump as it changes from the vehicle to its wreck
+  const F = was === lost && lost !== 'civ' && lost !== 'sail' ? vehFocus(p, was) : null;
+  w.off = F ? [F[0] - P[0], clamp(F[1] - P[1], -0.3 * VIEW_H / (cam.zt[p] || 1), 0.3 * VIEW_H / (cam.zt[p] || 1))] : [0, 0];
+  if (Math.abs(w.off[0]) > 400) w.off[0] = 0;
+  w.px = P[0]; w.py = P[1];
+  c.watch = w;
 }
-function watchPos(w) {
-  const v = w.v;
-  if (!v) return [w.x, FOCUS_Y];
-  if (v.parts && v.parts.length) { let x = 0; for (const q of v.parts) x += q.x; w.x = x / v.parts.length; return [w.x, clamp(FOCUS_Y + (v.parts[0].y - WATER_Y) * 0.6, FOCUS_Y, seabedY(w.x) - 150)]; }
-  if (w.kind === 'plane') {
-    // (once the next plane's made ready the old one's gone: the camera stays where it last was)
-    if (v.state !== 'hangar') { w.x = v.x; w.y = v.y; }
-    return [w.x, Math.max(SKY_TOP + 600, Math.min(FOCUS_Y, (w.y === undefined ? FOCUS_Y : w.y) + 110))];
+// where the wreck being watched is now (null: nothing left of it)
+function lostWreckAt(w) {
+  const v = w.v, k = w.kind;
+  if (!v) return null;
+  if (k === 'tower') return [v.x, DECK_Y];
+  if (k === 'ship') {
+    let x = 0, y = 0, n = 0;
+    for (const q of pieces) if (q.owner === w.id && q.gen === undefined) { x += q.x; y += q.y; n++; }
+    if (n) return [x / n, y / n];
+    return v.state === 'gone' ? (w.px !== undefined ? [w.px, w.py] : null) : [v.x, v.y];
   }
-  if (w.kind === 'sub') { w.x = v.x; return [v.x, Math.max(FOCUS_Y, v.y)]; }
-  w.x = v.x; return [v.x, FOCUS_Y];
+  if (k === 'sub') {
+    if (v.parts) { if (!v.parts.length) return null; let x = 0, y = 0; for (const q of v.parts) { x += q.x; y += q.y; } return [x / v.parts.length, y / v.parts.length]; }
+    return v.state === 'gone' ? null : [v.x, v.y];
+  }
+  if (k === 'tank' || k === 'heli') {
+    // its wreck once there is one (it goes on falling, sinking or riding a deck: stepArmyWreck); till then the vehicle
+    if (!w.lw && w.old) w.lw = landWrecks.find(q => q.kind === k && q.id === w.id && !w.old.has(q)) || null;
+    if (w.lw) return w.lw.removed ? null : [w.lw.x, w.lw.y];
+  }
+  if (k === 'sail' && !sailboats.includes(v)) return null;
+  return [v.x, v.y != null ? v.y : WATER_Y];
+}
+// the camera on the wreck: where it is, framed as the vehicle was
+function watchPos(w) {
+  const P = lostWreckAt(w);
+  if (P) { w.px = P[0]; w.py = P[1]; }
+  const o = w.off || [0, 0];
+  return [w.px + o[0], w.py + o[1]];
+}
+// each step: how long it's lain still; a few seconds still (or gone), the view goes home
+function stepWatch(p, dt) {
+  const c = crew[p], w = c.watch;
+  if (!w) return;
+  if (c.mode !== 'dock' && c.mode !== 'gone') { c.watch = null; return; }   // (into something else)
+  const x0 = w.px, y0 = w.py, P = lostWreckAt(w);
+  w.t += dt;
+  if (!P) { w.gone = (w.gone || 0) + dt; if (w.gone > 0.6) watchEnd(p); return; }
+  w.px = P[0]; w.py = P[1];
+  const sp = dt > 0 ? Math.hypot(P[0] - x0, P[1] - y0) / dt : 0;
+  w.still = sp < 4 ? w.still + dt : 0;
+  if (w.still > 3 || w.t > 12) watchEnd(p);                       // (a few seconds: a long way down to the deep's bottom isn't waited for)
+}
+function watchEnd(p) {
+  const c = crew[p];
+  c.watch = null; c.look = null;
+  if (c.mode !== 'dock') return;
+  dockZoom(p); cutTo(p);                                                // (straight there: a cut, as a vehicle button's)
 }
 // Taking over a boat: one at home (or anywhere in the harbour) is brought out through her gate first and is
 // yours once she's clear of the pier; one out on the water is yours straight away, at the speed she's making.
@@ -9386,7 +9483,7 @@ function stepCrew(dt) {
       }
       continue;
     }
-    if (c.watch) { c.watch.t -= dt; if (c.watch.t <= 0) { c.watch = null; dockZoom(p); } }
+    if (c.watch) stepWatch(p, dt);
     if (c.mode === 'dock' && !hasForces(p)) killCaptain(p);
   }
   // a teammate online in a tower that's coming down: ashore
@@ -11690,20 +11787,19 @@ function stepSmoke(dt) {
 
 /* ================================================================
    Cameras. Each player's view is centered on whatever they control:
-   the ship (looking ahead and easing out a little at speed), the sailor
+   the ship (centred, fixed on her; easing out a little at speed), the sailor
    ashore, or the dock tower. One shared view while both fit at the
    same zoom; split with a black line otherwise.
    ================================================================ */
 const halfWorldW = z => VIEW_W / (2 * z);
 const smooth01 = m => m * m * (3 - 2 * m);
-const leadK = z => smoothstep(ZOOM_PLAY_MIN + 0.1, ZOOM_DEFAULT, z);   // how much look-ahead at zoom z: all of it at the default, none at the widest
 const camOverride = [null, null];
 function camFocus(i) {
   const c = crew[i];
   if (camOverride[i] != null) return Array.isArray(camOverride[i]) ? [camOverride[i][0], camOverride[i][1], 0, 0, null] : [camOverride[i], FOCUS_Y, 0, 0, null];          // testing hook (an x, or [x, y])
   if (c.mode === 'boat') return [c.x, WATER_Y - 4, 0, clamp((c.bv || 0) / BOAT_SPEED, -1, 1) * 0.32, [c.x, 14]];   // leaning ahead when she's moving
   if (c.mode === 'gone') return [c.x, WATER_Y - 4, 0, undefined, [c.x, 14]];
-  if (c.watch) { const [wx, wy] = watchPos(c.watch); return [wx, wy, 0, 0, [wx, 40]]; }        // (the tools' old watch)
+  if (c.watch && (c.mode === 'dock' || c.mode === 'gone')) { const [wx, wy] = watchPos(c.watch); return [wx, wy, 0, 0, [wx - (c.watch.off ? c.watch.off[0] : 0), 40]]; }   // (on the wreck of what you were in: lostUnit)
   // watching a teammate's vehicle (online, not driving anything yourself): its own camera; once it's gone (or
   // back home) the view stays where it last was, free to look around
   if (c.spec) {
@@ -11746,8 +11842,7 @@ function vehFocus(i, m) {
     const escaping = sb.vx * sb.facing < -4;
     return [sb.x, y, sb.vx, !escaping ? sb.facing * 0.3 : 0, [sb.x, SUB_L * 0.52]];
   }
-  // stopped or going ahead: your ship sits near the back edge so you see as far ahead as possible;
-  // backing away astern: the ship is centred
+  // (F[3], the look-ahead each vehicle once asked for, is no longer used: the view is fixed on what you're in, user Oct 28)
   const escaping = sh.state === 'afloat' && sh.vx * sh.facing < -4;
   return [sh.x, FOCUS_Y, sh.state === 'afloat' ? sh.vx : 0, sh.state === 'afloat' && !escaping ? sh.facing * 0.3 : 0, [sh.x, SHIP_L * 0.52]];
 }
@@ -11775,7 +11870,10 @@ function updateCamera(dt, snap) {
     if (cam.pan[i] || cam.panY[i]) F[i] = [F[i][0] + cam.pan[i], F[i][1] + cam.panY[i], 0, 0, null];
   }
   for (let i = 0; i < 2; i++) {
-    cam.spd[i] += (clamp(Math.abs(F[i][2]) / 110, 0, 1) - cam.spd[i]) * kv(i, 1.5);
+    // (the zoom-out with speed: it rises as she gets going but falls only slowly, so turning round - her speed through
+    // nothing for a moment - never steps the zoom in and out again, user Oct 28)
+    const sv = clamp(Math.abs(F[i][2]) / 110, 0, 1);
+    cam.spd[i] += (sv - cam.spd[i]) * kv(i, sv > cam.spd[i] ? 1.5 : 0.12);
     cam.za[i] = cam.zt[i];                                   // (the stepped zoom: a cut to the level, no easing - 13-scope-minimap.js)
   }
   // (the zoom-out with speed, in steps too: the level nearest the eased value, kept until the value is clearly nearer another)
@@ -11810,28 +11908,34 @@ function updateCamera(dt, snap) {
     if (cam.mode === 'single' && cam.merge > 0.997) cam.merge = 1;
   }
   const hwS = halfWorldW(cam.zsa);
+  // (user Oct 28: "When I change direction with a vehicle the camera is doing these pan/jump. It should stay fixed in the
+  // vehicle without any issues") no look-ahead any more, and no lag: the view moves with what you're in as it moves (a
+  // turn swung the old look-ahead across, and the easing trailed a fast vehicle by a speed's worth, both flipping sides
+  // as it turned). Only a change of target - a pan let go, the view off to something else without a cut - still eases.
+  // follow(key, cur, target, rate, kf): cur carried by however far the target moved since last frame (if that's a move,
+  // not a jump), then eased the rest of the way
+  cam.tg = cam.tg || {};
+  const follow = (key, cur, tgt, rate, kf, hw) => {
+    const was = cam.tg[key]; cam.tg[key] = tgt;
+    if (kf >= 1 || was === undefined) return tgt;
+    const d = tgt - was;
+    if (Math.abs(d) < hw * 0.5) cur += d;
+    return cur + (tgt - cur) * kf;
+  };
+  const cutAll = snap || (ONEVIEW() && cam.cut[0]);
   if (ONEVIEW()) {
-    // one wide view: look ahead the way you're heading, and never let what you're steering leave the frame
+    // one wide view: centred on what you're steering
     cam.mode = 'single'; if (snap || cam.merge > 0.99) cam.merge = 1;
-    // (the look-ahead fades out as you zoom out, user Oct 24 night: zoomed out the camera stays centred on what
-    // you're in, well clear of the buttons round the edges)
-    const f = F[0], want1 = (f[3] !== undefined ? f[3] * hwS * 2 : clamp(f[2] * 0.9, -hwS * 0.5, hwS * 0.5)) * leadK(cam.zsa);
-    cam.lead1 = (cam.lead1 || 0) + (want1 - (cam.lead1 || 0)) * k(1.2);
-    let c = f[0] + cam.lead1;
-    if (f[4]) { const m = Math.min(f[4][1] + 10, hwS * 0.96); c = clamp(c, f[4][0] - hwS + m, f[4][0] + hwS - m); }
-    cam.cs += (clamp(c, VIS_L + hwS, VIS_R - hwS) - cam.cs) * k(snap ? 1 : 3.6);
-  } else cam.cs += (clamp((F[0][0] + F[1][0]) / 2, VIS_L + hwS, VIS_R - hwS) - cam.cs) * k(6);
+    const f = F[0];
+    cam.cs = follow('cs', cam.cs, clamp(f[0], VIS_L + hwS, VIS_R - hwS), 3.6, k(snap ? 1 : 3.6), hwS);
+  } else cam.cs = follow('cs', cam.cs, clamp((F[0][0] + F[1][0]) / 2, VIS_L + hwS, VIS_R - hwS), 6, k(6), hwS);
   cam.cs = clamp(cam.cs, VIS_L + hwS, VIS_R - hwS);
-  cam.fy = cam.fy === undefined || snap || (ONEVIEW() && cam.cut[0]) ? (F[0][1] + F[1][1]) / 2 : cam.fy + ((F[0][1] + F[1][1]) / 2 - cam.fy) * k(4);
+  { const ty = (F[0][1] + F[1][1]) / 2; cam.fy = cam.fy === undefined || cutAll ? (cam.tg.fy = ty) : follow('fy', cam.fy, ty, 4, k(4), 0.5 * VIEW_H / cam.zsa); }
   cam.fyi = cam.fyi || [F[0][1], F[1][1]];
   for (let i = 0; i < 2; i++) {
     const z = zEff(i), hw = halfWorldW(z);
-    cam.leadS = cam.leadS || [0, 0];
-    const want = (F[i][3] !== undefined ? F[i][3] * hw : clamp(F[i][2] * 0.9, -hw * 0.26, hw * 0.26)) * leadK(z);
-    cam.leadS[i] += (want - cam.leadS[i]) * kv(i, 1.2);
-    const lead = cam.leadS[i];
     const key = i ? 'c2' : 'c1';
-    cam[key] += (clamp(F[i][0] + lead, VIS_L + hw / 2, VIS_R - hw / 2) - cam[key]) * kv(i, 3.6);
+    cam[key] = follow(key, cam[key], clamp(F[i][0], VIS_L + hw / 2, VIS_R - hw / 2), 3.6, kv(i, 3.6), hw);
     // never let the thing you control slide out of frame (zooming in, or switching ship -> tower)
     const obj = F[i][4];
     if (obj) {
@@ -11839,7 +11943,7 @@ function updateCamera(dt, snap) {
       cam[key] = clamp(cam[key], obj[0] - hw / 2 + m, obj[0] + hw / 2 - m);
     }
     cam[key] = clamp(cam[key], VIS_L + hw / 2, VIS_R - hw / 2);
-    cam.fyi[i] += (F[i][1] - cam.fyi[i]) * kv(i, 4);
+    cam.fyi[i] = follow('fy' + i, cam.fyi[i], F[i][1], 4, kv(i, 4), 0.5 * VIEW_H / z);
   }
   const mm = smooth01(cam.merge);
   for (let i = 0; i < 2; i++) {
@@ -18811,6 +18915,24 @@ function abyssDarkAt(y) {
   const ya = SEABED_DEEP + 80, yb = SEA_FLOOR_MAX - 300, u = clamp((y - ya) / Math.max(1, yb - ya), 0, 1);
   return u < 0.5 ? 0.62 * u * 2 : 0.62 + 0.36 * (u - 0.5) * 2;
 }
+// (user Oct 28: "Water puffs underwater (e.g. missile hitting Kraken) should be darkened accordingly to the depth. now they
+// are always fully lit") a light thing under the water - white water, a gas ball, a flash - as the sea shows it at depth y:
+// through the water's own tint there (seaAt: the tint laid over everything in the sea), and, drawn after the deep's dark
+// (after: drawAbyss has already run), darkened as everything down there is (abyssDarkAt). c: [r, g, b]; the result too.
+// Looked up by 16-unit steps of depth, kept for the frame
+const UWL = { tick: -1, map: new Map() };
+function uwLight(y, c, after) {
+  if (y <= WATER_Y) return c;
+  if (UWL.tick !== renderTick) { UWL.tick = renderTick; UWL.map.clear(); }
+  const q = Math.round((y - WATER_Y) / 16);
+  let m = UWL.map.get(q);
+  if (!m) { const yy = WATER_Y + q * 16, s = seaAt(yy); m = { T: s.T, a: s.a, dk: LAND ? abyssDarkAt(yy) : 0 }; UWL.map.set(q, m); }
+  const k = after ? 1 - m.dk : 1;
+  return [(c[0] * (1 - m.a) + m.T[0] * m.a) * k, (c[1] * (1 - m.a) + m.T[1] * m.a) * k, (c[2] * (1 - m.a) + m.T[2] * m.a) * k];
+}
+// how much of a light's own glow still shows at depth y, past the deep's dark (a flash, a flame: light, so brighter than
+// what it lights, but never full daylight at the bottom of the pit)
+const uwGlow = y => y > WATER_Y + 2 && LAND ? 1 - 0.85 * abyssDarkAt(y) : 1;
 function drawAbyss() {
   if (!floorTab) return;                                    // (OPEN WORLD: by depth, down to the floor's real deepest - SEA_FLOOR_MAX from FLOOR_PTS)
   const ya = PY(SEABED_DEEP + 80), Bt = bh - SHY + 2;
@@ -19791,7 +19913,7 @@ function drawFire(x0, x1, behind) {
   for (const f of flames) {
     if (!!behind !== !!f.behind) continue;
     if (f.x + f.r < x0 - 10 || f.x - f.r > x1 + 10) continue;
-    const R = Math.max(1.2, f.r * SV / FPX), cx = (PX(f.x) + 3 * FPX) / FPX, cy = (PY(f.y) + 3 * FPX) / FPX, a = clamp(f.heat * 0.5, 0, 1);
+    const R = Math.max(1.2, f.r * SV / FPX), cx = (PX(f.x) + 3 * FPX) / FPX, cy = (PY(f.y) + 3 * FPX) / FPX, a = clamp(f.heat * 0.5, 0, 1) * uwGlow(f.y);   // (a blast's hot core under the water: less of it in the deep's dark, user Oct 28)
     if (a <= 0) continue;
     L.push(cx, cy, R, a);
     if (cx - R < bx0) bx0 = cx - R; if (cy - R < by0) by0 = cy - R; if (cx + R > bx1) bx1 = cx + R; if (cy + R > by1) by1 = cy + R;
@@ -19884,6 +20006,7 @@ function drawSurfaceLight() {
   }
 }
 
+const FLASH_RGB = [255, 236, 180];
 function renderOverlays() {
   const x0 = CAMPX / SV, x1 = x0 + VWW;
   const ema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
@@ -20014,7 +20137,7 @@ function renderOverlays() {
     for (let i = 0; i < flames.length; i += 6) {
       const f = flames[i];
       if (f.heat < 0.7 || f.x < x0 - 80 || f.x > x1 + 80) continue;
-      glowDisc(PX(f.x), PY(f.y), (36 + f.r * 3) * SV, [255, 130, 45], glowA * Math.min(1, f.heat));
+      glowDisc(PX(f.x), PY(f.y), (36 + f.r * 3) * SV, [255, 130, 45], glowA * Math.min(1, f.heat) * uwGlow(f.y));   // (under the water, dimmed in the deep's dark)
     }
     C.restore();
   }
@@ -20037,7 +20160,11 @@ function renderOverlays() {
   }
   for (const f of flashes) {
     const a = 1 - f.life / f.max;
-    glowDisc(PX(f.x), PY(f.y), f.r * SV * (1.2 + 0.8 * (1 - a)), [255, 236, 180], 0.9 * a);
+    // (under the water: in the sea's colour at its depth, a little brighter than it - it's light - and dimmed in the deep's
+    // dark, never daylight-white at the bottom of the pit: user Oct 28)
+    let col = FLASH_RGB, ga = 0.9 * a;
+    if (f.y > WATER_Y + 2) { const g = uwGlow(f.y), w = uwLight(f.y, FLASH_RGB, true); col = w.map((v, j) => Math.round((v + (FLASH_RGB[j] - v) * 0.35 * g) / 8) * 8); ga *= g; }
+    glowDisc(PX(f.x), PY(f.y), f.r * SV * (1.2 + 0.8 * (1 - a)), col, ga);
   }
   C.restore();
   C.fillStyle = '#f4faff';
@@ -27243,14 +27370,24 @@ function sfxFwBang(x, kind) {
    is the GAME EDITOR's FLOOR tab and what is laid out again when the shape changes:
      the tab open, every control point shows as a handle over the world (at any zoom; the far zoom shows the whole
      ocean). Drag one (mouse or finger) to move it; double-click / double-tap the line to add a point there; right-click
-     a handle, or hold a finger on it, to remove it. Let go and the floor is built again with everything on it: the
+     a handle, or hold a finger on it, to remove it. REFRESH (or closing the editor) builds the floor again with everything on it: the
      rocks, corals and boulders (buildReef), the ridges behind and the black rocks in front, the dark of the deep, the
      pirate wrecks' level spots, the research ships' stretches and the kraken (placeKraken, when there is one).
      RESET: back to the user's drawing. COPY: the points as text (to send to Claude to make them the default); LOAD:
      points pasted back in. Kept in this browser (localStorage bd_floor_pts; the editor's DELETE SAVED forgets them).
    Online every screen builds the default floor (the edits are a local design tool), so host and guest share one floor.
    ================================================================ */
-const FLOOR_ED = { on: false, drag: -1, hover: -1, ptr: null, lastDown: null, hold: 0, btn: null, ta: null, note: null };
+const FLOOR_ED = { on: false, drag: -1, hover: -1, ptr: null, lastDown: null, hold: 0, btn: null, ta: null, note: null, dirty: false, rb: null };
+// (user Oct 28, 14:18: "Land and Floor should not update in real time. It should use the Refresh button like we do for the
+// Caves") an edit moves the points and the tab's line at once and is kept; the floor and everything on it are built again
+// only on REFRESH - or when the editor is closed with changes waiting (edModeExit), so the game never runs on a stale floor
+function floorChanged() { floorSave(); FLOOR_ED.dirty = true; floorSync(); }
+function floorRefresh() { if (!FLOOR_ED.dirty) return; FLOOR_ED.dirty = false; floorEdited(); floorSync(); }
+function floorSync() {
+  const b = FLOOR_ED.rb; if (!b) return;
+  b.disabled = !FLOOR_ED.dirty; b.classList.toggle('on', FLOOR_ED.dirty);
+  b.textContent = FLOOR_ED.dirty ? 'REFRESH (CHANGES NOT BUILT)' : 'REFRESH';
+}
 const floorSpan = () => [BED_A, BED_B - BED_A];
 const floorPtX = p => BED_A + p[0] * (BED_B - BED_A), floorPtY = p => WATER_Y + p[1];
 function floorSave() { try { if (JSON.stringify(FLOOR_PTS) === JSON.stringify(FLOOR_DEF)) localStorage.removeItem('bd_floor_pts'); else localStorage.setItem('bd_floor_pts', JSON.stringify(FLOOR_PTS)); } catch (e) { } }
@@ -27291,12 +27428,14 @@ function floorTabInit(b) {
   setTimeout(() => {
     const cat = b.parentNode; if (!cat || FLOOR_ED.note) return;
     const n = document.createElement('div'); n.className = 'tabnote';
-    n.textContent = 'OPEN WORLD, with this tab open: the floor\'s points show as handles over the world (zoom right out to see the whole ocean). Drag a handle to move it. Double-click (or double-tap) the line to add a point; right-click a handle (or hold a finger on it) to remove it. Let go and the floor is built again. Kept in this browser; online the default floor is used.';
+    n.textContent = 'OPEN WORLD, with this tab open: the floor\'s points show as handles over the world (zoom right out to see the whole ocean). Drag a handle to move it. Double-click (or double-tap) the line to add a point; right-click a handle (or hold a finger on it) to remove it. The line moves at once; REFRESH builds the floor under it again (closing the editor does it too). Kept in this browser; online the default floor is used.';
     cat.appendChild(n); FLOOR_ED.note = n;
   }, 0);
 }
-function floorReset() { FLOOR_PTS = FLOOR_DEF.map(p => p.slice()); floorSave(); floorEdited(); floorShowTa(false); }
+function floorReset() { FLOOR_PTS = FLOOR_DEF.map(p => p.slice()); floorChanged(); floorShowTa(false); }
 floorReset.init = floorTabInit;
+floorRefresh.init = b => { FLOOR_ED.rb = b; floorSync(); };
+NSKY.editor.TUNE.buttons('FLOOR', 'BUILD', [['REFRESH', 'Build the floor under the new line, and everything on it (closing the editor does it too)', floorRefresh]]);
 NSKY.editor.TUNE.buttons('FLOOR', 'OCEAN FLOOR (OPEN WORLD)', [
   ['RESET TO THE DRAWING', 'Back to the floor from your drawing (Oct 27)', floorReset],
   ['COPY POINTS', 'The floor\'s points as text, copied: paste them to Claude to make them the default', b => {
@@ -27305,7 +27444,7 @@ NSKY.editor.TUNE.buttons('FLOOR', 'OCEAN FLOOR (OPEN WORLD)', [
   }],
   ['LOAD POINTS', 'Points pasted into the box below (as COPY gives them) become the floor', () => {
     const t = floorShowTa(true);
-    try { const o = JSON.parse(t.value); if (!floorValid(o)) throw new Error('needs [[0, depth], ..., [1, depth]], each u bigger than the last'); FLOOR_PTS = o.map(p => [+p[0], clamp(+p[1], FLOOR_MIN_D, FLOOR_MAX_D)]); floorSave(); floorEdited(); }
+    try { const o = JSON.parse(t.value); if (!floorValid(o)) throw new Error('needs [[0, depth], ..., [1, depth]], each u bigger than the last'); FLOOR_PTS = o.map(p => [+p[0], clamp(+p[1], FLOOR_MIN_D, FLOOR_MAX_D)]); floorChanged(); }
     catch (e) { t.value = 'not valid: ' + e.message + '\n' + t.value; }
   }],
 ]);
@@ -27330,7 +27469,7 @@ function floorPick(e) {
 function floorCurveAt(x) { const P = FLOOR_PTS, [a, L] = floorSpan(); return floorCurve(P, floorTangents(P), (x - a) / L); }
 function floorRemove(k) {
   if (k <= 0 || k >= FLOOR_PTS.length - 1 || FLOOR_PTS.length <= 3) return;
-  FLOOR_PTS.splice(k, 1); floorSave(); floorEdited();
+  FLOOR_PTS.splice(k, 1); floorChanged();
 }
 window.addEventListener('pointerdown', e => {
   if (!floorEdOn() || onEdUI(e)) return;
@@ -27343,7 +27482,7 @@ window.addEventListener('pointerdown', e => {
     const ld = FLOOR_ED.lastDown;
     if (ld && now - ld.t < 380 && Math.hypot(e.clientX - ld.cx, e.clientY - ld.cy) < 24) {
       const u = (h.x - a) / L, P = FLOOR_PTS; let i = 1; while (i < P.length - 1 && P[i][0] < u) i++;
-      if (u > P[i - 1][0] + 0.0005 && u < P[i][0] - 0.0005) { P.splice(i, 0, [+u.toFixed(4), Math.round(clamp(floorCurveAt(h.x), FLOOR_MIN_D, FLOOR_MAX_D))]); floorSave(); floorEdited(); }
+      if (u > P[i - 1][0] + 0.0005 && u < P[i][0] - 0.0005) { P.splice(i, 0, [+u.toFixed(4), Math.round(clamp(floorCurveAt(h.x), FLOOR_MIN_D, FLOOR_MAX_D))]); floorChanged(); }
       FLOOR_ED.lastDown = null;
     } else FLOOR_ED.lastDown = { t: now, cx: e.clientX, cy: e.clientY };
     return;
@@ -27373,7 +27512,7 @@ function floorUp(e) {
   e.stopImmediatePropagation();
   clearTimeout(FLOOR_ED.hold);
   const was = FLOOR_ED.drag; FLOOR_ED.drag = -1; FLOOR_ED.ptr = null;
-  if (was >= 0 && q.moved) { floorSave(); floorEdited(); }     // (on letting go, not every move: the floor and all on it built again)
+  if (was >= 0 && q.moved) floorChanged();                     // (on letting go: kept; built on REFRESH)
 }
 window.addEventListener('pointerup', floorUp, { capture: true });
 window.addEventListener('pointercancel', floorUp, { capture: true });
@@ -34629,18 +34768,42 @@ function structEdited(old) {
   landEditMs = landEditMs || 0;
 }
 /* ---- the LAND tab ---- */
-const LAND_ED = { on: false, drag: null, hover: null, ptr: null, lastDown: null, hold: 0, btn: null, ta: null, note: null };
+const LAND_ED = { on: false, drag: null, hover: null, ptr: null, lastDown: null, hold: 0, btn: null, ta: null, note: null, dirty: false, structs: false, old: null, rb: null };
+// (user Oct 28, 14:18: "Land and Floor should not update in real time. It should use the Refresh button like we do for the
+// Caves") an edit moves the points, the boxes and the line at once (landPreview) and is kept; the land and all on it are
+// built again only on REFRESH - or when the editor is closed with changes waiting (edModeExit). old: the structures as they
+// were before the first change waiting (what belongs to a moved airport goes with it on REFRESH)
+function landEdChanged(old, structs) {
+  landSave(); structSave();
+  if (!LAND_ED.dirty) LAND_ED.old = old || LAND_STRUCTS.map(o => Object.assign({}, o));
+  LAND_ED.dirty = true; if (structs) LAND_ED.structs = true;
+  landSync();
+}
+function landRefresh() {
+  if (!LAND_ED.dirty) return;
+  const old = LAND_ED.old, st = LAND_ED.structs;
+  LAND_ED.dirty = LAND_ED.structs = false; LAND_ED.old = null;
+  if (st) structEdited(old); else landEdited();
+  landSync();
+}
+function landSync() {
+  const b = LAND_ED.rb; if (!b) return;
+  b.disabled = !LAND_ED.dirty; b.classList.toggle('on', LAND_ED.dirty);
+  b.textContent = LAND_ED.dirty ? 'REFRESH (CHANGES NOT BUILT)' : 'REFRESH';
+}
 function landTabInit(b) {
   LAND_ED.btn = b;
   setTimeout(() => {
     const cat = b.parentNode; if (!cat || LAND_ED.note) return;
     const n = document.createElement('div'); n.className = 'tabnote';
-    n.textContent = 'OPEN WORLD, with this tab open: the blue boxes are the airports and launch pads - drag one along its country, or up or down: the ground under it is made flat at its height, banking into the land either side, and everything at it moves with it. Each country\'s ground has handles (zoom right out to see a whole country). Drag a handle up or down (or along). Double-click (or double-tap) the ground\'s line to add a point; right-click a handle (or hold a finger on it) to remove it. Let go and the land is built again: water fills every dip below the blue line - a new lake - and drains where the ground is raised. The shaded stretches (the harbour, the tower\'s foot) and the ground under the boxes take no points. Rebuilding fills in the craters. Kept in this browser; online the default land is used.';
+    n.textContent = 'OPEN WORLD, with this tab open: the blue boxes are the airports and launch pads - drag one along its country, or up or down: the ground under it is made flat at its height, banking into the land either side, and everything at it moves with it. Each country\'s ground has handles (zoom right out to see a whole country). Drag a handle up or down (or along). Double-click (or double-tap) the ground\'s line to add a point; right-click a handle (or hold a finger on it) to remove it. The line moves at once; REFRESH builds the land under it again (closing the editor does it too): water fills every dip below the blue line - a new lake - and drains where the ground is raised. The shaded stretches (the harbour, the tower\'s foot) and the ground under the boxes take no points. Rebuilding fills in the craters. Kept in this browser; online the default land is used.';
     cat.appendChild(n); LAND_ED.note = n;
   }, 0);
 }
-function landReset() { LAND_PTS = { L: LAND_DEF.L.map(p => p.slice()), R: LAND_DEF.R.map(p => p.slice()) }; LAND_STRUCTS = STRUCT_DEF.map(o => Object.assign({}, o)); landSave(); structSave(); structEdited(); landShowTa(false); }
+function landReset() { const old = LAND_STRUCTS.map(o => Object.assign({}, o)); LAND_PTS = { L: LAND_DEF.L.map(p => p.slice()), R: LAND_DEF.R.map(p => p.slice()) }; LAND_STRUCTS = STRUCT_DEF.map(o => Object.assign({}, o)); landEdChanged(old, true); landPreview(false); landPreview(true); landShowTa(false); }
 landReset.init = landTabInit;
+landRefresh.init = b => { LAND_ED.rb = b; landSync(); };
+NSKY.editor.TUNE.buttons('LAND', 'BUILD', [['REFRESH', 'Build the land under the new line and boxes, and everything on it (closing the editor does it too)', landRefresh]]);
 NSKY.editor.TUNE.buttons('LAND', 'THE LAND\'S SHAPE (OPEN WORLD)', [
   ['RESET TO TODAY\'S LAND', 'Back to the land as it was (Oct 28): its two lakes, the airports and launch pads where they were', landReset],
   ['COPY POINTS', 'The land\'s points and the placed structures as text, copied: paste them to Claude to make them the default', b => {
@@ -34651,9 +34814,11 @@ NSKY.editor.TUNE.buttons('LAND', 'THE LAND\'S SHAPE (OPEN WORLD)', [
     const t = landShowTa(true);
     try { const o = JSON.parse(t.value); if (!landValid(o)) throw new Error('needs {"L": [[0, dy], ..., [1, dy]], "R": [...]}, each u bigger than the last');
       const fix = P => P.map(p => [+p[0], Math.round(clamp(+p[1], LAND_DY[0], LAND_DY[1]))]);
-      LAND_PTS = { L: fix(o.L), R: fix(o.R) }; landSave();
-      if (o.S !== undefined) { if (!structsValid(o.S)) throw new Error('S: the structures, as COPY gives them'); LAND_STRUCTS = o.S.map(q => Object.assign({}, q)); structSave(); }
-      structEdited(); }
+      if (o.S !== undefined && !structsValid(o.S)) throw new Error('S: the structures, as COPY gives them');
+      const old = LAND_STRUCTS.map(q => Object.assign({}, q));
+      LAND_PTS = { L: fix(o.L), R: fix(o.R) };
+      if (o.S !== undefined) LAND_STRUCTS = o.S.map(q => Object.assign({}, q));
+      landEdChanged(old, true); landPreview(false); landPreview(true); }
     catch (e) { t.value = 'not valid: ' + e.message + '\n' + t.value; }
   }],
 ]);
@@ -34683,7 +34848,7 @@ function landPick(e) {
 function landRemove(h) {
   const P = LAND_PTS[h.R ? 'R' : 'L'];
   if (!landPtFree(h.R, P, h.k) || P.length <= 3) return;
-  P.splice(h.k, 1); landSave(); landEdited();
+  P.splice(h.k, 1); landEdChanged(); landPreview(h.R);
 }
 window.addEventListener('pointerdown', e => {
   if (!landEdOn() || onEdUI(e)) return;
@@ -34697,7 +34862,7 @@ window.addEventListener('pointerdown', e => {
     if (ld && now - ld.t < 380 && Math.hypot(e.clientX - ld.cx, e.clientY - ld.cy) < 24) {
       const R = lcRight(q.x), P = LAND_PTS[R ? 'R' : 'L'], u = lcX(q.x) / SEA0;
       let i = 1; while (i < P.length - 1 && P[i][0] < u) i++;
-      if (u > P[i - 1][0] + 0.0005 && u < P[i][0] - 0.0005) { P.splice(i, 0, [+u.toFixed(4), Math.round(landOffAt(q.x))]); landSave(); landEdited(); }
+      if (u > P[i - 1][0] + 0.0005 && u < P[i][0] - 0.0005) { P.splice(i, 0, [+u.toFixed(4), Math.round(landOffAt(q.x))]); landEdChanged(); landPreview(R); }
       LAND_ED.lastDown = null;
     } else LAND_ED.lastDown = { t: now, cx: e.clientX, cy: e.clientY };
     return;
@@ -34743,7 +34908,7 @@ function landEdUp(e) {
   e.stopImmediatePropagation();
   clearTimeout(LAND_ED.hold);
   const was = LAND_ED.drag; LAND_ED.drag = null; LAND_ED.ptr = null;
-  if (was && q.moved) { landSave(); landEdited(); }            // (on letting go, not every move: the land and all on it built again)
+  if (was && q.moved) landEdChanged();                          // (on letting go: kept; built on REFRESH)
 }
 window.addEventListener('pointerup', landEdUp, { capture: true });
 window.addEventListener('pointercancel', landEdUp, { capture: true });
@@ -34828,7 +34993,7 @@ function structUp(e) {
   const P = SED.ptr; if (!P || P.id !== e.pointerId) return;
   e.stopImmediatePropagation();
   const o = SED.o, old = SED.old; SED.o = null; SED.ptr = null;
-  if (o && P.moved) { structSave(); structEdited(old); }
+  if (o && P.moved) landEdChanged(old, true);
 }
 window.addEventListener('pointerup', structUp, { capture: true });
 window.addEventListener('pointercancel', structUp, { capture: true });
@@ -37170,6 +37335,7 @@ function frameBody(now) {
   netStep(); linkPump(dt);
   // (also holds still behind the 'turn the iPad' notice; and, user Oct 25 late, while the sliders are open or the eye
   // is shut - photo mode, 18-zz-photo)
+  edModeSync();                                                      // (the GAME EDITOR open: held, as photo mode - 18-zz-photo)
   const held_ = paused || !rotateEl.hidden || PHOTO.on || photoWorldFreeze();
   if (PHOTO.on) photoInput(dt); else pollPads(dt);
   if (!held_) {
@@ -37265,7 +37431,7 @@ async function start(data) {
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
-  Object.assign(window.__game, { structs: () => LAND_STRUCTS, structDragTo: (i, u, y) => structDragTo(LAND_STRUCTS[i], u, y), structUp: old => { structSave(); structEdited(old); }, airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landShape: () => ({ pts: LAND_PTS, def: LAND_DEF, lakes: (land.lakes || []).map(L => [L[0], L[1], L.today ? 1 : 0]), ms: landEditMs, any: LSH.any }), landSet: P => { LAND_PTS = P; landSave(); landEdited(); }, landEdited: () => landEdited(), landReset: () => landReset(), landDragTo: (R, k, x, y) => landDragTo({ R, k }, x, y), landUp: () => { landSave(); landEdited(); }, landPtX: (R, u) => landPtX(R, u), landLock: x => landLock(x), landProfile0: x => landProfile0(x, land.R), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)] });
+  Object.assign(window.__game, { structs: () => LAND_STRUCTS, structDragTo: (i, u, y) => structDragTo(LAND_STRUCTS[i], u, y), structUp: old => { structSave(); structEdited(old); }, airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landShape: () => ({ pts: LAND_PTS, def: LAND_DEF, lakes: (land.lakes || []).map(L => [L[0], L[1], L.today ? 1 : 0]), ms: landEditMs, any: LSH.any }), landSet: P => { LAND_PTS = P; landSave(); landEdited(); }, landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landDragTo: (R, k, x, y) => landDragTo({ R, k }, x, y), landUp: () => { landSave(); landEdited(); }, landPtX: (R, u) => landPtX(R, u), landLock: x => landLock(x), landProfile0: x => landProfile0(x, land.R), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)] });
   Object.assign(window.__game, { floor: () => ({ pts: FLOOR_PTS, def: FLOOR_DEF, A: BED_A, B: BED_B, TR: [TR_A, TR_B], max: SEA_FLOOR_MAX, deepest: floorDeepest(), tab: !!floorTab }), floorProfile: x => floorProfile(x), floorSet: P => { FLOOR_PTS = P; floorEdited(); }, floorEdited: () => floorEdited(), bedSmooth: x => bedSmooth(x), floorEdOn: () => floorEdOn(), S: () => S, viewW: () => VIEW_W, editorTab: t => { const b = [...document.querySelectorAll('#skyEd button.tab')].find(q => q.textContent === t); if (b) b.click(); return !!b; }, editorOpen: () => { if (!NSKY.editor.TUNE.built) skyNewFrame(); if (NSKY.editor.TUNE.root.hidden) NSKY.editor.TUNE.openBtn.click(); },
     civHalfGap: c => [0, 1].map(i => { const h = c.hv && c.hv[i]; if (!h) return null; const kl = civHalfKeel(c, i, civArt(c), CIV[c.kind]), mx = h.x + kl.m * Math.cos(h.a), my = h.y + kl.m * Math.sin(h.a), ca = Math.cos(h.a), sa = Math.sin(h.a), d = kl.pts.map(([lx, ly]) => civFloor(mx + lx * ca - ly * sa) - (my + lx * sa + ly * ca)); return { a: h.a, rest: !!h.rest, min: Math.min(...d), max: Math.max(...d) }; }),
     civHalfPoint: (c, x, y) => civHalfPoint(c, x, y), msPings: () => msPings, partRestOf: sb => sb.parts.map(q => ({ y: q.y, a: q.a, rest: q.rest, r: partRest(sb, q) })), floorRest: (pts, cx, amax, a0) => floorRest(pts, cx, null, amax, a0), ms: { hold: msHold, keys: msKeys }, chargeAt: (x, y) => detonateCharge({ x, y, owner: -1 }) });
