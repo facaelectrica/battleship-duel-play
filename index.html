@@ -2403,8 +2403,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 158;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 27 21:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 159;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 27 21:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11676,6 +11676,59 @@ void main() {
   }
   o = u_pal[clamp(t, 0, 5)];
 }`;
+/* ---- the sky's light rays (16-light-rays.js): the fan of wedges from the sun, each ray's light left after the clouds it
+   crossed, as a fragment program. The CPU keeps walking the rays (RAY_N of them, NS steps each: a byte a step, T | inn << 2
+   | hit << 4, in a texture NS wide and RAY_N tall) and the fan's wedges (tier and length a ray, RAY_N x 1); every cell of
+   the picture then finds its wedge (atan) and its step (its distance) on the GPU - where it was a pass over every cell of
+   the sky in JS: a clear sky with the sun out, 24 ms a frame on the user's PC. ---- */
+const GL_RVS = `#version 300 es
+layout(location=0) in vec2 a_q;
+uniform vec2 u_size; uniform vec4 u_quad; uniform vec4 u_cells;
+out vec2 v_cell;
+void main() {
+  vec2 p = (u_quad.xy + a_q * u_quad.zw) / u_size;
+  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+  v_cell = mix(u_cells.xy, u_cells.zw, a_q);
+}`;
+const GL_RFS = `#version 300 es
+precision highp float; precision highp int;
+uniform sampler2D u_rt, u_rb;
+uniform vec2 u_sun; uniform vec4 u_p; uniform vec4 u_k; uniform vec4 u_k2; uniform vec3 u_col;
+in vec2 v_cell;
+out vec4 o;
+void main() {
+  vec2 c = floor(v_cell);
+  if (c.y >= u_k2.z || c.y < 0.0 || c.x < 0.0) discard;
+  float dx = c.x - u_sun.x, dy = c.y - u_sun.y, RN = u_p.z;
+  int bi = int(mod(floor((atan(dy, dx) + 3.14159265) * RN / 6.2831853), RN));
+  vec2 rb = texelFetch(u_rb, ivec2(bi, 0), 0).rg;
+  int tier = int(rb.r * 255.0 + 0.5);
+  if (tier == 0) discard;
+  float d = sqrt(dx * dx + dy * dy), u = d / (u_p.x * rb.g);
+  if (u >= 1.0) discard;
+  int j = int(floor(d / u_p.w));
+  if (j >= int(u_p.y)) discard;
+  int v = int(texelFetch(u_rt, ivec2(j, bi), 0).r * 255.0 + 0.5);
+  int hit = (v >> 4) & 1, T = hit == 1 ? v & 3 : 3, inn = hit == 1 ? (v >> 2) & 3 : 0;
+  if (T == 0 || inn == 2) discard;
+  float K = u < 0.35 ? u_k.x : u < 0.6 ? u_k.y : u < 0.82 ? u_k.z : u_k.w;
+  float k = min(0.85, K * (tier == 2 ? 1.0 : 0.5) * u_k2.x * (inn != 0 ? u_k2.y : 1.0));
+  k *= T == 3 ? 1.0 : T == 2 ? 0.6 : 0.3;
+  float a = floor(k * 255.0 + 0.5) / 255.0;
+  o = vec4(u_col * a, a);
+}`;
+function glRaySetup() {
+  const gl = GLR.gl, p = gl.createProgram();
+  gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_RFS));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  GLR.rprog = p; GLR.rU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_sun', 'u_p', 'u_k', 'u_k2', 'u_col', 'u_rt', 'u_rb']) GLR.rU[k] = gl.getUniformLocation(p, k);
+  gl.useProgram(p); gl.uniform1i(GLR.rU.u_rt, 0); gl.uniform1i(GLR.rU.u_rb, 1); gl.useProgram(GLR.prog);
+  GLR.rvao = gl.createVertexArray(); gl.bindVertexArray(GLR.rvao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+  gl.bindVertexArray(GLR.vao);
+  GLR.rtex = null; GLR.rbtex = null; GLR.rtW = 0; GLR.rtH = 0;
+}
 // a batch of records (the sky's puffs of one cloud, or a deck's live shapes): kept on the GPU until it changes
 class GLPuffs {
   constructor() { this.n = 0; this.data = new Float32Array(8 * 256); this.vbo = null; this.epoch = -1; this.dirty = true; }
@@ -11760,7 +11813,7 @@ function glSetup() {
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
   GLR.pix = null; GLR.pixPool = [];
-  glPuffSetup();
+  glPuffSetup(); glRaySetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
@@ -12353,6 +12406,37 @@ class GLCtx {
     gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 32, 0); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 32, 16);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, b.n);
     GLR.stats.draws++; GLR.stats.quads += b.n;
+  }
+  // the sky's rays (GL_RFS): rt the rays' steps (a Uint8Array, NS x RAY_N), rb the wedges (RAY_N x 2 bytes: tier, length*255),
+  // over the screen quad (dx, dy, dw, dh) whose cells run x0..x1, y0..y1; sun in cells; p = [maxD, NS, RAY_N, RAY_STEP];
+  // kk = [K0..K3]; k2 = [amt, inK, horY]; col = [r, g, b] 0..1
+  drawRays(rt, rb, NS, RAY_N, dx, dy, dw, dh, x0, y0, x1, y1, sun, p, kk, k2, col) {
+    if (GLR.lost) return;
+    const gl = GLR.gl, t = this.target, U = GLR.rU;
+    glBegin(this, 'source-over'); glFlush();
+    if (GLR.cur.prog !== 1) { gl.useProgram(GLR.prog); GLR.cur.prog = 1; }
+    glApplyState();
+    if (!GLR.rtex || GLR.rtW !== NS || GLR.rtH !== RAY_N) {
+      if (GLR.rtex) { gl.deleteTexture(GLR.rtex); gl.deleteTexture(GLR.rbtex); }
+      GLR.rtex = glNewTex(0, 0, gl.NEAREST); GLR.rbtex = glNewTex(0, 0, gl.NEAREST); GLR.rtW = NS; GLR.rtH = RAY_N;
+      gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, GLR.rtex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, NS, RAY_N, 0, gl.RED, gl.UNSIGNED_BYTE, null);
+      gl.bindTexture(gl.TEXTURE_2D, GLR.rbtex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, RAY_N, 1, 0, gl.RG, gl.UNSIGNED_BYTE, null);
+    }
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, GLR.rtex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NS, RAY_N, gl.RED, gl.UNSIGNED_BYTE, rt); GLR.unit[0] = GLR.rtex;
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, GLR.rbtex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, RAY_N, 1, gl.RG, gl.UNSIGNED_BYTE, rb); GLR.unit[1] = GLR.rbtex;
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    for (const i of [0, 1]) if (GLR.unitS[i] !== GLR.near) { gl.bindSampler(i, GLR.near); GLR.unitS[i] = GLR.near; }
+    GLR.stats.uploads += 2; GLR.stats.upPx += NS * RAY_N + RAY_N;
+    gl.useProgram(GLR.rprog); GLR.cur.prog = 3;
+    gl.uniform2f(U.u_size, t._w, t._h);
+    this._corners(dx, dy, dw, dh);
+    gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
+    gl.uniform4f(U.u_cells, x0, y0, x1, y1);
+    gl.uniform2f(U.u_sun, sun[0], sun[1]); gl.uniform4f(U.u_p, p[0], p[1], p[2], p[3]); gl.uniform4f(U.u_k, kk[0], kk[1], kk[2], kk[3]); gl.uniform4f(U.u_k2, k2[0], k2[1], k2[2], 0); gl.uniform3f(U.u_col, col[0], col[1], col[2]);
+    gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    GLR.stats.draws++; GLR.stats.quads++;
   }
   // premultiplied pixels (a Uint32Array, w x h) straight onto the target: the game's own pixel buffers (fire);
   // straight: the pixels are not premultiplied (r g b a as the sky's buffers hold them) and the GPU premultiplies them.
@@ -14282,6 +14366,7 @@ const RAYV = [{ buf: null, map: rayMap }, { buf: null, map: { key: '', bin: new 
 const RAY_COS = new Float64Array(RAY_N), RAY_SIN = new Float64Array(RAY_N);
 for (let bi = 0; bi < RAY_N; bi++) { const a = (bi + 0.5) / RAY_N * 2 * Math.PI - Math.PI; RAY_COS[bi] = Math.cos(a); RAY_SIN[bi] = Math.sin(a); }
 const rayHit = new Uint8Array(RAY_N);
+const RAYG = {};   // (the GPU rays' frame: the step and wedge bytes, the sun, the box)
 let LSIG = '', sunHid = 0, rayBuf = null, rayNS = 0, rayDiff = new Float32Array(0), rayT = new Uint8Array(0), rayIn = new Uint8Array(0), rayMs = 0, rayOn = false;
 function drawRays(sunX, sunY, horY, vis) {
   rayBuf = RAYV[VI].buf; rayMap = RAYV[VI].map;
@@ -14342,6 +14427,17 @@ function drawRays2(sunX, sunY, horY, vis) {
   const y0 = Math.max(0, Math.ceil(sunY - maxD)), y1 = Math.min(horY - 1, Math.floor(sunY + maxD));
   const x0 = Math.max(0, Math.ceil(sunX - maxD)), x1 = Math.min(TW - 1, Math.floor(sunX + maxD));
   const K = [0.62, 0.44, 0.28, 0.14], inK = 0.55;
+  if (GPU) {
+    // (the GPU: the rays' steps and the wedges go up as two small textures and every cell finds its own on the chip -
+    // 40-gl.js drawRays; the pass below was every cell of the sky in JS)
+    if (y1 < y0) return false;
+    const G = RAYG;
+    if (!G.rt || G.rt.length !== RAY_N * NS) { G.rt = new Uint8Array(RAY_N * NS); G.rb = new Uint8Array(RAY_N * 2); for (let bi = 0; bi < RAY_N; bi++) { G.rb[bi * 2] = rayTier[bi]; G.rb[bi * 2 + 1] = Math.round(rayLen[bi] * 255); } }
+    const rt = G.rt; rt.fill(0);
+    for (let bi = 0; bi < RAY_N; bi++) { if (!rayHit[bi]) continue; const o = bi * NS; for (let i = 0; i < NS; i++) rt[o + i] = rayT[o + i] | (rayIn[o + i] << 2) | 16; }
+    G.NS = NS; G.sun = [sunX, sunY]; G.p = [maxD, NS, RAY_N, RAY_STEP]; G.K = K; G.k2 = [amt, inK, horY]; G.col = [cr / 255, cg / 255, cb / 255]; G.y0 = y0; G.y1 = y1;
+    return true;
+  }
   const key = sunX + ',' + sunY + ',' + TW + ',' + horY;
   if (rayMap.key !== key) {
     rayMap.key = key; const n = TW * horY, binK = RAY_N / (2 * Math.PI);
@@ -14440,6 +14536,12 @@ function outImg(img, w, y0, n, x, y, wd, ht) {
   const sm = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false;
   ctx.drawImage(img, 0, y0, w, n, dx, dy, dw, dh);
   ctx.imageSmoothingEnabled = sm;
+}
+// the GPU rays over the picture's rows y0..y1 (16-light-rays.js RAYG), laid like a buffer's band
+function outRays(G) {
+  const V = VIEW, n = G.y1 - G.y0 + 1, dx = picX(V, -CPX), dy = picY(V, G.y0 * CPX), dw = CW * CPX * M, dh = n * CPX * M;
+  if (n <= 0 || dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4) return;
+  ctx.drawRays(G.rt, G.rb, G.NS, RAY_N, dx, dy, dw, dh, 0, G.y0, CW, G.y1 + 1, G.sun, G.p, G.K, G.k2, G.col);
 }
 // a deck's band (BY0..BY1, a row more each side) at its sub-cell offset frac; the GPU: its whole layer
 function deckOut(lay, B, frac) {
@@ -14675,7 +14777,7 @@ function skyRays(V, B, horY) {
     SHV[VI] += ((n ? k / n : 0) - SHV[VI]) * Math.min(1, skyDt * 4); }
   sunHid = SHV[VI];
   drawRays(sunX, sunY, horY, VIS[VI]);
-  if (rayOn) { const y0 = Math.max(0, rayBuf.y0 - 1), n = Math.min(H - 1, rayBuf.y1 + 1) - y0 + 1; outPix(rayBuf, TW, y0, n, -CPX, y0 * CPX, CW * CPX, n * CPX, true); }
+  if (rayOn) { if (GPU) outRays(RAYG); else { const y0 = Math.max(0, rayBuf.y0 - 1), n = Math.min(H - 1, rayBuf.y1 + 1) - y0 + 1; outPix(rayBuf, TW, y0, n, -CPX, y0 * CPX, CW * CPX, n * CPX, true); } }
 }
 // (the other view draws between this view's sky and its front: each view's own places kept, and put back)
 const VSAVE = [null, null];
@@ -15465,11 +15567,12 @@ function skySun() {
 }
 // the outPix calls of a view, kept so the other half of a shared view lays the same pictures (no second drawing)
 let REC = null;
-const outPix0 = outPix, outImg0 = outImg;
+const outPix0 = outPix, outImg0 = outImg, outRays0 = outRays;
 outPix = (...a) => { if (REC) REC.push([0, a]); const t0 = performance.now(); outPix0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };   // (FT.out: the laying of the pictures, within the parts' times)
 outImg = (...a) => { if (REC) REC.push([1, a]); const t0 = performance.now(); outImg0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };
+outRays = (...a) => { if (REC) REC.push([2, a]); const t0 = performance.now(); outRays0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };
 // (a layer or a canvas laid again is drawn from its texture, not uploaded again; a buffer is uploaded again)
-function replay(list, V) { const v0 = VIEW, c0 = ctx; VIEW = V; ctx = V.ctx; M = V.zr / ZL; const t0 = performance.now(); for (const [k, a] of list) (k ? outImg0 : outPix0)(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; VIEW = v0; ctx = c0; }
+function replay(list, V) { const v0 = VIEW, c0 = ctx; VIEW = V; ctx = V.ctx; M = V.zr / ZL; const t0 = performance.now(); for (const [k, a] of list) (k === 2 ? outRays0 : k ? outImg0 : outPix0)(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; VIEW = v0; ctx = c0; }
 const REC_BACK = [[], []], REC_DECKS = [[], []], REC_DECKS2 = [[], []], REC_VEIL = [[], []], REC_FRONT = [[], []];
 // the view's screen pixels of a picture point (unmagnified view pixels)
 const toScreen = (V, x, y) => [picX(V, x), picY(V, y)];   // (17-frame.js: the one mapping)
