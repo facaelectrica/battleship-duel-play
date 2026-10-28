@@ -1897,10 +1897,26 @@ function turnWheel(p, degs) {
 /* ================================================================
    Periscope zoom: five brass sections. Pull it out to look closer.
    ================================================================ */
-const ZOOM_LEVELS = [0.35, 0.42, 0.5, 0.6, 0.72, 0.85, 1.08, 1.32, 1.72, 2.25];   // (0.35, 0.42: two more out, user Oct 24 night)
-const ZOLD = 5;                           // (the levels below the old widest: the old level n is now ZOLD + n)
-const ZOOM_REF = 1.32, ZOOM_TOP = ZOOM_LEVELS[ZOOM_LEVELS.length - 1], ZN = ZOOM_LEVELS.length;   // (ZOOM_REF: what the sky and the distance are drawn for)
-const scopes = [0, 1].map(player => ({ player, cx: 0, base: 0, level: ZOOM_LEVELS.indexOf(ZOOM_DEFAULT) + 1, shown: ZOOM_LEVELS.indexOf(ZOOM_DEFAULT) + 1 }));
+// THE STEPPED ZOOM (user Oct 27 evening: "when we zoom in/out it slows down a lot... maybe the zoom could happen in a cut
+// vs the camera zooming out smoothly? It also looks not that great since its pixel art"). The zoom goes in cuts between
+// fixed levels, no easing through the zooms between: every sprite was rebuilt at each in-between scale, every cloud
+// re-placed, and pixel art at a fractional scale shimmers. The levels respect the pixel ratio: each is a zoom at which
+// one screen pixel is a whole number N of the ship art's pixels (SHIP_K * S * z = 1 / N), so the art lands on the
+// pixel grid at every level. They depend on the screen (S): setZoomLevels, at every resize.
+let ZOOM_LEVELS = [0.35, 0.42, 0.5, 0.6, 0.72, 0.85, 1.08, 1.32, 1.72, 2.25];   // (until the screen is known)
+const ZOOM_REF = 1.32, ZOOM_TOP = 2.25;   // (ZOOM_REF: what the sky and the distance are drawn for; ZOOM_TOP, ZOOM_MIN: the bounds)
+let ZN = ZOOM_LEVELS.length;
+const zoomLevelOf = z => { let best = 1; for (let k = 1; k <= ZN; k++) if (Math.abs(ZOOM_LEVELS[k - 1] - z) < Math.abs(ZOOM_LEVELS[best - 1] - z)) best = k; return best; };
+const ZOOM_NS = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32];   // (the art pixels a screen pixel: every step near, wider apart far out)
+function setZoomLevels() {
+  const k = SHIP_K * S, lv = [];
+  for (const N of ZOOM_NS) { const z = 1 / (N * k); if (z <= ZOOM_TOP * 1.001 && z >= ZOOM_MIN * 0.999) lv.push(+z.toFixed(4)); }
+  lv.sort((a, b) => a - b);
+  if (lv.length < 2) return;
+  ZOOM_LEVELS = lv; ZN = lv.length;
+  for (const p of [0, 1]) { const q = scopes[p]; q.level = clamp(zoomLevelOf(cam.zt[p] || ZOOM_DEFAULT), 1, ZN); q.shown = q.level; if (!zoomLocked(p)) cam.zt[p] = ZOOM_LEVELS[q.level - 1]; }
+}
+const scopes = [0, 1].map(player => ({ player, cx: 0, base: 0, level: zoomLevelOf(ZOOM_DEFAULT), shown: zoomLevelOf(ZOOM_DEFAULT) }));
 function scopeZoom(p) {
   const lv = scopes[p].level;
   return ZOOM_LEVELS[lv - 1];
@@ -2387,8 +2403,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 155;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 27 20:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 156;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 27 21:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4795,9 +4811,9 @@ function zoomLocked(p) { return crew[p] && crew[p].mode === 'boat'; }   // the l
 function setZoom(half, z) {
   if (zoomLocked(half)) return;
   if (crew[half]) crew[half].zoomHold = false;
-  cam.zt[half] = clamp(z, ZOOM_MIN, ZOOM_TOP);
-  let best = 1;
-  for (let k = 1; k <= ZN; k++) if (Math.abs(ZOOM_LEVELS[k - 1] - cam.zt[half]) < Math.abs(ZOOM_LEVELS[best - 1] - cam.zt[half])) best = k;
+  // (the stepped zoom: the nearest level, in a cut - a pinch steps through them as the fingers move)
+  const best = zoomLevelOf(clamp(z, ZOOM_MIN, ZOOM_TOP));
+  cam.zt[half] = ZOOM_LEVELS[best - 1];
   scopes[half].level = best;
 }
 const pointers = new Map();
@@ -5034,7 +5050,7 @@ function endPointer0(e) {
   const now = performance.now();
   const isTap = !p.look && !wasPinch && now - p.t0 < 280 && Math.hypot(p.x - p.x0, p.y - p.y0) < 14;
   if (isTap) {
-    if (now - lastTap[p.half] < 340) { asSlot(p.half, q => { if (!zoomLocked(q)) { setScope(q, ZOLD + 1); } }); lastTap[p.half] = 0; }
+    if (now - lastTap[p.half] < 340) { asSlot(p.half, q => { if (!zoomLocked(q)) { setScope(q, zoomLevelOf(ZOOM_DEFAULT)); } }); lastTap[p.half] = 0; }
     else lastTap[p.half] = now;
   }
 }
@@ -9094,9 +9110,8 @@ function dockFrame(p) {
 function dockZoom(p) {
   if (NET.remote) return;                                  // (a teammate's seat: not this screen's view)
   const [, h] = dockFrame(p);
-  cam.zt[p] = clamp(VIEW_W / (2 * (2 * h + 40)), ZOOM_MIN, ZOOM_TOP);
-  let best = 1;
-  for (let k = 1; k <= ZN; k++) if (Math.abs(ZOOM_LEVELS[k - 1] - cam.zt[p]) < Math.abs(ZOOM_LEVELS[best - 1] - cam.zt[p])) best = k;
+  const best = zoomLevelOf(clamp(VIEW_W / (2 * (2 * h + 40)), ZOOM_MIN, ZOOM_TOP));   // (the stepped zoom: the nearest level)
+  cam.zt[p] = ZOOM_LEVELS[best - 1];
   scopes[p].level = best;
 }
 // the lifeboat is home once she's under her own pier (user Oct 27: from where the harbour's solid begins - the pier
@@ -9942,7 +9957,7 @@ function sinkShip(sh) {
   sh.state = 'sinking'; sh.sinkT = 0; sh.input = 0; sh.throttle = 0; sh.moored = false;
   if (ships[sh.id] === sh) fleet[sh.id].ship = Math.max(0, fleet[sh.id].ship - 1);
   captainDies(sh);
-  if (crew[sh.id].mode === 'ship') setScope(sh.id, ZOLD + 3);
+  if (crew[sh.id].mode === 'ship') setScope(sh.id, zoomLevelOf(ZOOM_DEFAULT) + 2);
   if (crew[sh.id].mode === 'ship') setOrder(telegraphs[sh.id], 3);   // only if you were aboard her
   // the hull parts at the sections that were blown open
   const cuts = new Set();
@@ -11433,9 +11448,18 @@ function updateCamera(dt, snap) {
   }
   for (let i = 0; i < 2; i++) {
     cam.spd[i] += (clamp(Math.abs(F[i][2]) / 110, 0, 1) - cam.spd[i]) * kv(i, 1.5);
-    cam.za[i] += (cam.zt[i] - cam.za[i]) * kv(i, 5);
+    cam.za[i] = cam.zt[i];                                   // (the stepped zoom: a cut to the level, no easing - 13-scope-minimap.js)
   }
-  const zEff = i => cam.za[i] * (1 - 0.16 * cam.spd[i]);
+  // (the zoom-out with speed, in steps too: the level nearest the eased value, kept until the value is clearly nearer another)
+  cam.zq = cam.zq || [null, null];
+  const zEff = i => {
+    const raw = cam.za[i] * (1 - 0.16 * cam.spd[i]);
+    if (zoomLocked(i)) return raw;
+    let lv = zoomLevelOf(raw); const cur = cam.zq[i];
+    if (cur !== null && cur !== lv && cur >= 1 && cur <= ZN && Math.abs(raw - ZOOM_LEVELS[lv - 1]) > 0.6 * Math.abs(raw - ZOOM_LEVELS[cur - 1])) lv = cur;
+    cam.zq[i] = lv;
+    return ZOOM_LEVELS[lv - 1];
+  };
   const z0 = zEff(0), z1 = zEff(1);
   cam.zsa = (z0 + z1) / 2;
 
@@ -15718,7 +15742,6 @@ if (/[?&]sky=new/.test(location.search)) SKYNEW = true;
 if (/[?&]skygpu=0/.test(location.search)) NSKY.gpu = false;   // (the decks drawn in the buffers, as before the GPU: the tools compare the two)
 function skyNewSet(on) { SKYNEW = !!on; try { localStorage.setItem('bd_sky_new', SKYNEW ? '1' : '0'); } catch (e) { } }
 const SKYV = [null, null];                                // (each view's record for NSKY this frame)
-const ZL_STEP = Math.pow(2, 1 / 6);                       // (the decks' drawing zoom goes in these steps: skyNewFrame)
 let skyNewOn = false;                                     // (this frame draws the new sky)
 // once a frame, before the views: the screen, the shared deck zoom, the weather, the newest bolt's light
 function skyNewFrame() {
@@ -15733,8 +15756,10 @@ function skyNewFrame() {
   // step - between steps the picture is only magnified (M), smoothly. Every frame at the exact zoom, a camera easing its zoom
   // (it does with the speed: climbing and diving) redrew every cloud at a new size, each snapped to the cells anew: the clouds
   // shook (user Oct 27, "a LOT of clouds shaking especially when I go up and down zoomed out")
-  const zmin = Math.min(1, z0, z1), q0 = NSKY.ZL;
-  if (!(zmin >= q0 && zmin < q0 * ZL_STEP * 1.04)) NSKY.ZL = Math.min(1, Math.pow(ZL_STEP, Math.floor(Math.log(zmin) / Math.log(ZL_STEP) + 1e-6)));
+  // (the stepped zoom, Oct 27 evening: the camera's zoom is a level, cut to, so the decks are drawn at it exactly - every
+  // cloud redrawn once at the cut, never between; magnified (M) only past 1)
+  const zmin = Math.min(1, z0, z1);
+  if (Math.abs(zmin - NSKY.ZL) > 1e-9) NSKY.ZL = zmin;
   let fl = null;
   const b = storm.bolts[storm.bolts.length - 1];
   if (b) { const vis = b.t < 0.08 ? 1 : b.t < 0.16 ? 0.25 : b.t < 0.26 ? 0.85 : b.t < 0.32 ? 0 : 0.5 * (1 - (b.t - 0.32) / 0.18); if (vis > 0.02) fl = { k: vis, x: b.x0 }; }
@@ -31896,6 +31921,7 @@ function resize(restore) {
   ubuf.style.width = (ubw * PIXU / dpr) + 'px'; ubuf.style.height = (ubh * PIXU / dpr) + 'px';
   S = bh / VIEW_H;
   VIEW_W = bw / S;
+  setZoomLevels();                                        // (the stepped zoom's levels: by the screen, 13-scope-minimap.js)
   const safeTop = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sat')) || 0;
   ui.top = 12 + Math.round(safeTop * dpr / PIXU);
   layoutControls(); layoutBoatCtl();
