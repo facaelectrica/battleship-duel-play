@@ -665,6 +665,12 @@ const PHONE = () => IS_TOUCH && Math.min(window.innerWidth, window.innerHeight) 
 let WORLD_W = 4000, N = 0;
 // (LAND TEST, user Oct 25: the sea is the middle third of one world - forest | sea | desert; elsewhere it's all of it)
 let SEA0 = 0, SEA1 = 4000;
+// (user Oct 28, 20:19-20:25: the docks placed as the airports are - dragged along the line) the coasts as they are by
+// default (SEA0_0, SEA1_0) and the ocean floor's ends then (BED_A0, BED_B0): the land's and the floor's points, the caves
+// and the towers are placed against these, so moving a dock moves only its coast and its harbour - the ground stays where
+// it was. DOCKS_MOVED: a dock moved (each country's width its own then - cwOf; unmoved, both are SEA0, exactly as before)
+let SEA0_0 = 0, SEA1_0 = 4000, BED_A0 = 0, BED_B0 = 4000, DOCKS_MOVED = false;
+const cwOf = R => R && DOCKS_MOVED ? WORLD_W - SEA1 : SEA0;
 const seaU = u => SEA0 + u * (SEA1 - SEA0), SEA_W = () => SEA1 - SEA0;
 // is x on land (one of LAND TEST's two countries), not over the sea?
 // (user Oct 28, 19:55: "why cant I raise a SEA part above the water? Shouldnt it be a single line from one end to the other?")
@@ -678,6 +684,9 @@ const inCountry = x => LAND && (x < SEA0 || x > SEA1);
 // the middle plane: solid for what flies and drives, the ships and the subs go through it - 50-land-islands)
 const onLand = x => LAND && (x < SEA0 || x > SEA1 || (ISLE !== null && ISLE[Math.floor(x / 2.5)] > 0));
 const isleCol = x => ISLE !== null && ISLE[Math.floor(x / 2.5)] === 2;
+// (user Oct 28) the ground's own line out of the water at sea, `half` ahead of x going `dir`: a coast every boat stops or
+// turns at (an island line's island they go past)
+const coastAhead = (x, dir, half) => { if (ISLE === null) return false; const q = x + dir * half; return ISLE[Math.floor(q / 2.5)] === 1; };
 let VIS_L = 0, VIS_R = 4000;                 // what the cameras may show: the world between the two harbours' far ends
 let wh, wv, wf, wtmp;
 let docks = [];          // the harbours in the world (one in a one-player game)
@@ -1106,7 +1115,11 @@ function buildWorld(restore) {
   // (an online guest: the host's world, whatever its screen) five screens: plenty of open ocean between the harbours
   // (the test range: three). OPEN WORLD: forest 6, sea 10 (its middle five the deep ocean), desert 6 - user Oct 25
   WORLD_W = NET.worldW || Math.round(VIEW_W * (LAND ? 22 : TEST ? 3 : 5));
-  SEA0 = LAND ? Math.round(VIEW_W * 6) : 0; SEA1 = LAND ? Math.round(VIEW_W * 16) : WORLD_W;   // (each country six screens, user Oct 25 late: room for its three-screen lake)
+  SEA0_0 = LAND ? Math.round(VIEW_W * 6) : 0; SEA1_0 = LAND ? Math.round(VIEW_W * 16) : WORLD_W;   // (each country six screens, user Oct 25 late: room for its three-screen lake)
+  // (OPEN WORLD, user Oct 28: the docks dragged in the GAME EDITOR's TERRAIN tab - in screens from the left end, kept in this
+  // browser; online the default)
+  { const D = LAND && NET.role === 'local' && !NET.worldW ? dockSet() : null;
+    SEA0 = D ? Math.round(VIEW_W * D.L) : SEA0_0; SEA1 = D ? Math.round(VIEW_W * D.R) : SEA1_0; DOCKS_MOVED = !!D; }
   builtViewW = VIEW_W;
   N = Math.ceil(WORLD_W / DX) + 1;
   wh = new Float32Array(N); wv = new Float32Array(N); wf = new Float32Array(N); wtmp = new Float32Array(N);
@@ -1131,6 +1144,7 @@ function buildWorld(restore) {
   else if (farL) setBedShores(-right.quay, right.quay);
   else if (farR) setBedShores(left.quay, 2 * WORLD_W - left.quay);
   else setBedShores(left.quay, right.quay);
+  BED_A0 = BED_A - (SEA0 - SEA0_0); BED_B0 = BED_B - (SEA1 - SEA1_0);   // (the floor's ends had the docks not moved: its points' frame)
   pirateWrecks.length = 0;                            // (the last world's: not levelling this one's floor while its rocks are laid out - buildDeep places them again)
   floorRebuild();                                     // (OPEN WORLD: the ocean floor's shape, from the user's drawing - FLOOR_PTS; and the deep ocean's range, TR_A..TR_B)
   buildCalm();
@@ -1187,7 +1201,8 @@ function buildWorld(restore) {
     buildLand(); buildLandUnits(); buildLakeBoats();
     placeKraken(true);                                  // (OPEN WORLD: the kraken, whole, at the deepest point of the floor - 50-land-kraken)
     // (user Oct 25) and each side's second tower, on the mountain at its end of the world, where it sees far
-    for (let p = 0; p < 2; p++) { const x = SIDE(p) ? WORLD_W - LAND_TOWER_X : LAND_TOWER_X; towers.push({ player: p, edge: true, x, base: landTop(x), facing: SIDE(p) ? -1 : 1, hp: TW_HP, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0, pg: null }); }
+    // (since Oct 28: as many as are placed, each its owner's - LAND_TOWERS, 50-land-tshape)
+    landTowersBuild();
   }
   // every round opens with you in your tower (user Oct 24 night)
   if (!TEST && !restore) for (let p = 0; p < PLAYERS; p++) if (crew[p].mode === 'dock' && towers[p] && towers[p].hp > 0 && canTake(p, 'tower')) takeOver(p, 'tower');
@@ -1623,8 +1638,8 @@ const floorPtsUsed = () => NET.role === 'local' ? FLOOR_PTS : FLOOR_DEF;
 let FLOOR_MARKED = false;
 function floorSkinAt(x) {
   if (!(BED_B - BED_A > 0)) return null;
-  const P = floorPtsUsed(), u = (x - BED_A) / (BED_B - BED_A);
-  if (u < 0 || u > 1) return null;
+  const P = floorPtsUsed(), u = (x - BED_A0) / (BED_B0 - BED_A0);   // (the points' frame: the floor's ends with the docks unmoved)
+  if (u < 0 || u > 1 || x < BED_A || x > BED_B) return null;
   let lo = 0, hi = P.length - 1;
   while (hi - lo > 1) { const k = (lo + hi) >> 1; if (P[k][0] <= u) lo = k; else hi = k; }
   return P[lo][2] || null;
@@ -1667,7 +1682,7 @@ function floorRebuild() {
   let mx = 0, mi = 0;
   for (let i = 0; i < n; i++) {
     const x = BED_A + i * FLOOR_STEP, k = smoothstep(BED_SHELF, BED_SHELF + 400, shoreDist(x));   // (the harbours' shelves as they were)
-    const v = floorCurve(P, m, (x - BED_A) / L) - H;
+    const v = floorCurve(P, m, (x - BED_A0) / (BED_B0 - BED_A0)) - H;   // (the points stay where they are when a dock moves)
     T[i] = k * (v > -0.5 ? Math.max(0, v) : v);                     // (shallower than the harbours: raised - toward an island)
     if (T[i] > mx) { mx = T[i]; mi = i; }
   }
@@ -2572,8 +2587,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 194;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 23:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 195;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 00:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8604,14 +8619,14 @@ function planePose(pl) {
     if (fk > 0) { const H = LAND ? airfieldAt(pl.x).y - pl.y : 999; deg = deg * (1 - fk) - pl.facing * fk * (2.5 + 4 * smoothstep(90, 0, H)); }
   }
   if (pl.carried != null && pl.hookA != null) deg = pl.hookA * 180 / Math.PI;   // (on a magnet: turned with it)
-  return { fr, deg: Math.round(deg / 3) * 3, side, key: 'P' + pl.id + key, side0: !pl.turn || Math.floor(clamp(pl.turn.t / PLANE_TURN_T, 0, 0.999) * 5) % 4 === 0 };
+  return { fr, deg: Math.round(deg), side, key: 'P' + pl.id + key, side0: !pl.turn || Math.floor(clamp(pl.turn.t / PLANE_TURN_T, 0, 0.999) * 5) % 4 === 0 };
 }
 function blitPlane(src, key, side, deg, cx, cy, only) {
   const s = PLANE_K * PLANE_SC() * SV, w = Math.round(src.width * s), h = Math.round(src.height * s);
   let im, x, y;
-  if (Math.abs(deg) < 1.5) { im = scaled(src, s, true); x = cx - (im.width >> 1); y = cy - (im.height >> 1); }
+  if (Math.abs(deg) < 0.5) { im = scaled(src, s, true); x = cx - (im.width >> 1); y = cy - (im.height >> 1); }
   else {
-    im = rotated(src, key + '|' + side, w, h, deg, w / 2, h / 2);
+    im = rotated(src, key + '|' + side, w, h, deg, w / 2, h / 2, 1);   // (a degree at a time: no steps as it pitches)
     // (a stand-in from another zoom, while the zoom moves: drawn at this zoom's size, never at its own - user Oct 24
     // night, zoomed out a crashing plane showed as one giant picture)
     if (im.w0 && im.w0 !== w) { const R = im.R * w / im.w0; x = cx - R; y = cy - R; if (!only) C.drawImage(im, x, y, R * 2, R * 2); return { im, x, y, sz: R * 2 }; }
@@ -9021,7 +9036,8 @@ function switchTo(p, k) {
   if (c.dead || p >= PLAYERS) return;
   if (c.mode === k && k === 'tower' && edgeTw(p)) {
     // (OPEN WORLD) in a tower already: over to your other one, if it's standing - the gun keeps its angle
-    const cur = myTw(p), nx = cur === towers[p] ? edgeTw(p) : towers[p];
+    // (since Oct 28 a side may have several: round them all, the harbour's first)
+    const cur = myTw(p), own = [towers[p], ...towers.filter(t => t && t.edge && t.player === p)].filter(t => t === cur || towerUsable(t)), i = own.indexOf(cur), nx = own[(i + 1) % own.length];
     if (nx && nx !== cur && towerUsable(nx)) { cur.inUse = false; cur.restEl = tguns[p].elev; manTw[p] = nx; sfxClick(gunCtl[p]); cutTo(p); } else sfxEmpty(cur.x);
     return;
   }
@@ -9237,6 +9253,7 @@ function stepSailboats(dt) {
       }
       const want = b.face * (yachtEngine(true) + yachtSail(b, wind, b.face) * 0.6);
       b.vx += (want - b.vx) * Math.min(1, dt * 0.4);
+      if (coastAhead(b.x, Math.sign(b.vx) || b.face, sailHalf(b) + 10)) { b.face = -b.face; b.vx *= -0.2; b.hold = rnd(10, 20); }   // (a coast out at sea: about)
       b.x += b.vx * dt;
       sailRide(b, dt);
       // a small wake
@@ -9544,7 +9561,7 @@ function stepCrew(dt) {
     // Oct 27: "You only lose if both your towers are destroyed or you lost all captains. That's the rule." The captains:
     // killCaptain. A fallen harbour tower's pier gun is no tower: it doesn't keep the round going. The sea game has the
     // one tower: losing it loses the round)
-    else if (tw.fallen && !TEST && docks.length && ui.winner == null && (LAND ? towers.every(o => o.player !== tw.player || o.fallen || o.hp <= 0) : !tw.edge)) {
+    else if (tw.fallen && !TEST && docks.length && ui.winner == null && tw.player >= 0 && (LAND ? towers.every(o => o.player !== tw.player || o.fallen || o.hp <= 0) : !tw.edge)) {
       tw.lostT = (tw.lostT || 0) + dt; if (tw.lostT > 3.5) gameOver(1 - tw.player); }
     // towers are never repaired: damage stays for the whole round
     if (!tw.edge) tguns[tw.player].reload = Math.max(0, tguns[tw.player].reload - dt);
@@ -14198,8 +14215,10 @@ function standIn(src, w, h) {
 // rotated sprites, cached by size and angle
 const rotCache = new Map();
 const rotNear = new Map();             // key|angle -> the last size built (stands in while a zoom is moving)
-function rotated(src, key, w, h, deg, px, py) {
-  const a = Math.round(deg / 3) * 3, id = key + '|' + w + '|' + a;
+// (step: the angles built, in degrees - 3 for most; user Oct 28, 22:52, the plane: "when I aim it up and down, it isnt very
+// smooth, its like 'steps'" - the planes 1)
+function rotated(src, key, w, h, deg, px, py, step = 3) {
+  const a = Math.round(deg / step) * step, id = key + '|' + w + '|' + a;
   let r = rotCache.get(id);
   if (r) return r;
   // (a zoom in motion asks for a new size every frame: the nearest one built stands in until it settles)
@@ -14215,7 +14234,7 @@ function rotated(src, key, w, h, deg, px, py) {
   else { x.drawImage(src, -px, -py, w, h); x.setTransform(1, 0, 0, 1, 0, 0); hardenCPU(x); }
   r.R = R; r.w0 = w;                                   // (w0: the width it was built for, to scale a stand-in)
   rotCache.set(id, r); rotNear.set(key + '|' + a, r);
-  if (rotCache.size > 260) { const k0 = rotCache.keys().next().value, r0 = rotCache.get(k0); rotCache.delete(k0); if (r0 !== r) { for (const [k, v] of rotNear) if (v === r0) rotNear.delete(k); glFreeSrc(r0); r0.width = r0.height = 0; } }
+  if (rotCache.size > 520) { const k0 = rotCache.keys().next().value, r0 = rotCache.get(k0); rotCache.delete(k0); if (r0 !== r) { for (const [k, v] of rotNear) if (v === r0) rotNear.delete(k); glFreeSrc(r0); r0.width = r0.height = 0; } }
   return r;
 }
 /* Every size built is kept for reuse, but all of them together live within one memory budget (and at most a few
@@ -19988,10 +20007,10 @@ function buildReef() {
    (buildReef, drawAlgae). Painted once per marked stretch, a cell a pixel as the land, along the floor's line (sandY) ---- */
 let floorSkinStrips = null;
 function floorSkinRuns() {
-  const P = floorPtsUsed(), L = BED_B - BED_A, out = [];
+  const P = floorPtsUsed(), L = BED_B0 - BED_A0, out = [];
   for (let k = 0; k < P.length - 1; k++) {
     const sk = P[k][2]; if (sk !== 'F' && sk !== 'D') continue;
-    const a = BED_A + P[k][0] * L, b = BED_A + P[k + 1][0] * L, last = out[out.length - 1];
+    const a = Math.max(BED_A, BED_A0 + P[k][0] * L), b = Math.min(BED_B, BED_A0 + P[k + 1][0] * L), last = out[out.length - 1]; if (!(b > a)) continue;
     if (last && last[2] === sk && Math.abs(last[1] - a) < 1) last[1] = b; else out.push([a, b, sk]);
   }
   return out;
@@ -22651,11 +22670,17 @@ function cpuPlane(B, dt) {
 // the airfield whose country x is in: its runway's sea end and hangar end, its height, and which way take-off runs
 // (user Oct 28: the airport is a placed structure - LAND_STRUCTS, 50-land-tshape: wherever it's put in its country, at its
 // pad's height; take-off always runs toward the sea)
-function airfieldAt(x) {
-  const R = x > SEA1, o = structOf('airport', R), u = o ? o.u : 0, gy = o ? o.y : LAND_Y;
-  return { near: structX({ R }, u + 160), far: structX({ R }, u + AIR_W - 140), y: gy - PLANE_WHEELS, dir: R ? -1 : 1, R };
+function airfieldAt(x) { const R = x > SEA1; return airfieldFor(structIn('airport', R), R); }
+// (an airport structure's field - its country's geometry: take-off toward that country's sea; own: whose it is)
+function airfieldFor(o, R) {
+  if (o) R = !!o.R;
+  const u = o ? o.u : 0, gy = o ? o.y : LAND_Y;
+  return { near: structX({ R }, u + 160), far: structX({ R }, u + AIR_W - 140), y: gy - PLANE_WHEELS, dir: R ? -1 : 1, R, own: o ? ownerOf(o) : +R };
 }
-const airfieldOf = R => airfieldAt(R ? SEA1 + 10 : SEA0 - 10);
+// the airfield standing in a country (R: the right one), and a side's own (wherever it stands - user Oct 28, 20:23;
+// a side owning none: its own country's, as a fallback, so nothing is left without a field)
+const airfieldIn = R => airfieldFor(structIn('airport', R), R);
+const airfieldOf = side => airfieldFor(structOf('airport', side) || structIn('airport', side), side);
 const AIRI = {"hangar": [0, 0, 151, 67], "terminal": [153, 0, 304, 151], "door": [18, 18, 115, 46]};                   // (gen/open/airport.py: the hangar's and the terminal's rects, the hangar's door)
 // the hangar's middle: just past the runway's inland end (a plane at the far end is inside it); the terminal set back
 // beside it, toward the runway
@@ -22733,7 +22758,7 @@ function drawAirportsBack(x0, x1) {
   if (!airportArt || airportArt.key !== teamKey) buildAirportArt();
   const night = clamp(E.night * 1.2 + E.dusk * 0.8 + E.sunset * 0.5, 0, 1);
   for (const R of [false, true]) {
-    const af = airfieldOf(R), p = sidePlayer(R), gy = af.y + PLANE_WHEELS + 2, ry = af.y + PLANE_WHEELS;
+    const af = airfieldIn(R), p = sidePlayer(af.own === -1 ? R : af.own === 1), gy = af.y + PLANE_WHEELS + 2, ry = af.y + PLANE_WHEELS;
     // the terminal and its tower
     const tx = termX(af), T = airportArt.term[p];
     if (tx > x0 - 260 && tx < x1 + 260) {
@@ -23487,7 +23512,7 @@ function buildBlimps() {
   blimps.length = 0;
   if (!LAND) return;
   for (const R of [0, 1]) {
-    const o = structOf('airport', R), far = o ? o.u + AIR_W : AIR_W, lo = R ? SEA1 + far + 900 : 1600, hi = R ? WORLD_W - 1600 : SEA0 - far - 900;   // (inland of its airport, wherever that's placed)
+    const o = structIn('airport', R), far = o ? o.u + AIR_W : AIR_W, lo = R ? SEA1 + far + 900 : 1600, hi = R ? WORLD_W - 1600 : SEA0 - far - 900;   // (inland of its airport, wherever that's placed)
     blimps.push({ team: R, face: R ? -1 : 1, x: (lo + hi) / 2, y: WATER_Y - 950 - R * 120, lo, hi, dir: R ? -1 : 1, vx: 0, vy: 0, state: 'fly', hp: 10, sag: 0, ang: 0, driven: null, ph: R * 2.1 });
   }
 }
@@ -23667,7 +23692,7 @@ const SL = [
   ['buoy', 'BUOYANCY', 0.3, 3, 0.05, 1, 'How strongly the water holds the sub up at a pocket\'s surface', 'SUB', 'THE SUB'],
   ['w1on', 'SHOW', 0, 1, 1, 1, 'Level 1 (the back one) on or off', 'WALL', 'LEVEL 1 (BACK)'],
   ['w1s', 'SCALE', 0.25, 4, 0.05, 1, 'How big the tile is: 1 = one art pixel to one cave cell (2 world units)', 'WALL', 'LEVEL 1 (BACK)'],
-  ['w1p', 'PARALLAX', 0, 1, 0.01, 0.85, 'How much the level moves with the world as the camera moves: 1 = with the rock', 'WALL', 'LEVEL 1 (BACK)'],
+  ['w1p', 'PARALLAX', 0, 1, 0.01, 1, 'How much the level moves with the world as the camera moves: 1 = with the rock (the default since Oct 28, 22:56: no parallax)', 'WALL', 'LEVEL 1 (BACK)'],
   ['binset', 'INSET', 0, 600, 5, 90, 'How far in from a cave\'s opening the back wall starts, in world units', 'WALL', 'LEVEL 1 (BACK)'],
   ['w1b', 'BRIGHTNESS', 0, 2.5, 0.05, 1, 'How bright the level is in the light', 'WALL', 'LEVEL 1 (BACK)'],
   ['w1t', 'DEPTH TINT', 0, 1, 0.01, 0, 'How far this level is tinted toward the deep\'s dark navy', 'WALL', 'LEVEL 1 (BACK)'],
@@ -23675,7 +23700,7 @@ const SL = [
   ['w1y', 'SHIFT Y', 0, 418, 1, 0, 'Slides the tile up and down (world units)', 'WALL', 'LEVEL 1 (BACK)'],
   ['w2on', 'SHOW', 0, 1, 1, 1, 'Level 2 on or off', 'WALL', 'LEVEL 2 (MIDDLE)'],
   ['w2s', 'SCALE', 0.25, 4, 0.05, 1, 'How big the tile is', 'WALL', 'LEVEL 2 (MIDDLE)'],
-  ['w2p', 'PARALLAX', 0, 1, 0.01, 0.92, 'How much the level moves with the world', 'WALL', 'LEVEL 2 (MIDDLE)'],
+  ['w2p', 'PARALLAX', 0, 1, 0.01, 1, 'How much the level moves with the world', 'WALL', 'LEVEL 2 (MIDDLE)'],
   ['w2d', 'FROM DEPTH', -600, 1200, 10, 150, 'How far down the cave this level starts, under the system\'s mouth (each system\'s own line in EDIT wins)', 'WALL', 'LEVEL 2 (MIDDLE)'],
   ['w2bl', 'BLEND', 10, 600, 10, 140, 'How many world units the change from the level above takes', 'WALL', 'LEVEL 2 (MIDDLE)'],
   ['w2b', 'BRIGHTNESS', 0, 2.5, 0.05, 0.85, 'How bright the level is in the light', 'WALL', 'LEVEL 2 (MIDDLE)'],
@@ -23685,7 +23710,7 @@ const SL = [
   ['w2y', 'SHIFT Y', 0, 418, 1, 90, 'Slides the tile up and down (world units)', 'WALL', 'LEVEL 2 (MIDDLE)'],
   ['w3on', 'SHOW', 0, 1, 1, 1, 'Level 3 on or off', 'WALL', 'LEVEL 3 (FRONT)'],
   ['w3s', 'SCALE', 0.25, 4, 0.05, 1, 'How big the tile is', 'WALL', 'LEVEL 3 (FRONT)'],
-  ['w3p', 'PARALLAX', 0, 1, 0.01, 0.97, 'How much the level moves with the world', 'WALL', 'LEVEL 3 (FRONT)'],
+  ['w3p', 'PARALLAX', 0, 1, 0.01, 1, 'How much the level moves with the world', 'WALL', 'LEVEL 3 (FRONT)'],
   ['w3d', 'FROM DEPTH', -600, 1200, 10, 450, 'How far down the cave this level starts, under the system\'s mouth', 'WALL', 'LEVEL 3 (FRONT)'],
   ['w3bl', 'BLEND', 10, 600, 10, 140, 'How many world units the change from the level above takes', 'WALL', 'LEVEL 3 (FRONT)'],
   ['w3b', 'BRIGHTNESS', 0, 2.5, 0.05, 0.7, 'How bright the level is in the light', 'WALL', 'LEVEL 3 (FRONT)'],
@@ -23716,7 +23741,7 @@ const sysOnLand = s => Number.isFinite(s.x) && !inOcean(s.x);
 const depthFor = s => sysOnLand(s) ? groundDepth : floorDepth;
 const isSea = (X, Y) => Y < floorDepth(X);
 // the system's mouth on the floor at its u (the floor's own u: 0 the left pier's end, 1 the right's)
-const uX = u => BED_A + u * (BED_B - BED_A);
+const uX = u => BED_A0 + u * (BED_B0 - BED_A0);   // (a system's place on the floor: the points' frame - stays when a dock moves)
 
 // ---- the caves as data (CAVE_DEF's format, 01-caves-default.js) and what they cut out of the rock
 // Every system hangs from its mouth, on the floor at its u; its rooms are closed loops of points and its tunnels lines of
@@ -25557,7 +25582,7 @@ function edAddRoom(X, Y) {
 function edAddSystem(X) {
   const sea = inOcean(X) && X > BED_A + 0.02 * (BED_B - BED_A) && X < BED_B - 0.02 * (BED_B - BED_A), wet = sea || (onLand(X) && lakeAt(X));
   const pts = []; for (let k = 0; k < ROOM_N; k++) { const a = -Math.PI / 2 + k * Math.PI * 2 / ROOM_N; pts.push([Math.round(Math.cos(a) * 160), Math.round(320 + Math.sin(a) * 130)]); }
-  const s = { name: 'CAVES ' + (CAVES.systems.length + 1), u: sea ? +((X - BED_A) / (BED_B - BED_A)).toFixed(4) : 0.5, rooms: [pts], tunnels: [{ r: 40, pts: [[0, -20], [10, 90], [0, 200]] }] };
+  const s = { name: 'CAVES ' + (CAVES.systems.length + 1), u: sea ? +((X - BED_A0) / (BED_B0 - BED_A0)).toFixed(4) : 0.5, rooms: [pts], tunnels: [{ r: 40, pts: [[0, -20], [10, 90], [0, 200]] }] };
   if (!sea) s.x = Math.round(clamp(X, 60, WORLD_W - 60));
   if (!wet) s.dry = true;
   edSnapshot(); CAVES.systems.push(s); ED.sel = { si: CAVES.systems.length - 1, kind: 'room', i: 0 }; edChanged(CAVES.systems.length - 1);
@@ -25652,7 +25677,7 @@ function edMoveTo(e) {
     rs[h.k] = Math.round(clamp(Math.hypot(X - c[0], Y - c[1]), 12, 240)); t.rs = rs; t.r = rs[1];
   } else if (h.kind === 'mouth') {
     // (anywhere on the ground, user Oct 28, 17:14: on the ocean floor by its u, as before; on the land or in a lake by its x)
-    if (inOcean(X) && X > BED_A + 0.02 * (BED_B - BED_A) && X < BED_B - 0.02 * (BED_B - BED_A)) { s.u = +((X - BED_A) / (BED_B - BED_A)).toFixed(4); delete s.x; }
+    if (inOcean(X) && X > BED_A + 0.02 * (BED_B - BED_A) && X < BED_B - 0.02 * (BED_B - BED_A)) { s.u = +((X - BED_A0) / (BED_B0 - BED_A0)).toFixed(4); delete s.x; }
     else s.x = Math.round(clamp(X, 60, WORLD_W - 60));
   } else if (h.kind === 'wl') { const wl = (s.water || []).slice(); while (wl.length < s.rooms.length) wl.push(null); wl[h.i] = Math.round(Y - my); s.water = wl; }
 }
@@ -26488,7 +26513,7 @@ function buildCivHeliArt() {
 }
 // the helipads: three in a row on each airfield, between the control tower and the runway's middle
 function heliPads(R) {
-  const af = airfieldOf(R);
+  const af = airfieldIn(R);
   return [0, 1, 2].map(k => af.far + af.dir * (360 + k * 170));
 }
 // (user Oct 26: "Let's have only 2 civilian helicopters, total of 2 per country. They never cross the ocean. We keep
@@ -26505,7 +26530,7 @@ function buildCivHelis() {
   for (const R of [false, true]) heliPads(R).slice(0, CH_KEEP.length).forEach((x, k) => civHelis.push(newCivHeli(CH_KEEP[k], x, R, k)));
 }
 function newCivHeli(kind, x, R, pad) {
-  return { kind, x, y: airfieldOf(R).y + PLANE_WHEELS, vx: 0, vy: 0, facing: R ? -1 : 1, turn: null, tilt: 0, spin: 0, rotor: 0, state: 'parked', R, pad, home: x, dmg: 0, wait: rnd(5, 60), ai: null, smokeT: 0, ph: Math.random() * 6, gear: 1, susY: 0, susV: 0, hose: false, flow: 0 };
+  return { kind, x, y: airfieldIn(R).y + PLANE_WHEELS, vx: 0, vy: 0, facing: R ? -1 : 1, turn: null, tilt: 0, spin: 0, rotor: 0, state: 'parked', R, pad, home: x, dmg: 0, wait: rnd(5, 60), ai: null, smokeT: 0, ph: Math.random() * 6, gear: 1, susY: 0, susV: 0, hose: false, flow: 0 };
 }
 const chArtOf = h => chArt && chArt[h.kind];
 const chSkid = h => { const A = chArtOf(h); return A ? A.H * chK(h) * 0.5 : 20; };     // (its middle above its belly)
@@ -26561,7 +26586,7 @@ function civHeliPlan(h, dt) {
 // Oct 26: "they would not be crossing between countries. The helicopters stay on their side. They fly near the dock,
 // mostly on the land side")
 function civHeliTrip(h) {
-  const coast = h.R ? SEA1 : SEA0, inl = h.R ? 1 : -1, ap = structOf('airport', h.R), sp = ap ? Math.max(0, ap.u - 150) : 0, tx = sp > 0 && Math.random() < 0.5 ? airfieldOf(h.R).near + inl * rnd(-600, 900) : Math.random() < 0.8 ? coast + inl * rnd(150, 1800) : coast - inl * rnd(100, 500);
+  const coast = h.R ? SEA1 : SEA0, inl = h.R ? 1 : -1, ap = structIn('airport', h.R), sp = ap ? Math.max(0, ap.u - 150) : 0, tx = sp > 0 && Math.random() < 0.5 ? airfieldOf(h.R).near + inl * rnd(-600, 900) : Math.random() < 0.8 ? coast + inl * rnd(150, 1800) : coast - inl * rnd(100, 500);
   h.ai = { phase: 'go', tx, ty: WATER_Y - rnd(250, 600) };
 }
 const landTopAt = x => dryLand(x) ? landTop(x) : surfaceY(x);
@@ -27290,6 +27315,7 @@ function stepCivShips(dt) {
         if (civNightHold(c, dt)) moving = false;                      // (the night, at anchor or moored; the cruise ships' trips - 50-land-anchors)
         else if (c.dockT > 0) { c.dockT -= dt; moving = false; if (c.dockT <= 0) c.dir = c.x > (c.lo + c.hi) / 2 ? -1 : 1; }
         else if ((c.x >= c.hi && c.dir > 0) || (c.x <= c.lo && c.dir < 0)) { c.x = clamp(c.x, c.lo, c.hi); if (K.noDock || noPier) c.dir = -c.dir; else { c.dockT = c.kind === 'container' ? rnd(50, 70) : rnd(20, 35); moving = false; } }
+        else if (coastAhead(c.x, c.dir, L * 0.5 + 15)) c.dir = -c.dir;   // (a coast out at sea: she goes about - user Oct 28)
         else c.x += c.dir * K.v * (1 - 0.5 * hurt) * (c.vk == null ? 1 : c.vk) * dt;   // (c.vk: a cruise ship's pace to her night spot)
       } else moving = Math.abs(c.drv || 0) > 0.05;
       c.a = Math.atan2(surfaceY(c.x + L * 0.3) - surfaceY(c.x - L * 0.3), L * 0.6) * 0.5;
@@ -27767,7 +27793,7 @@ function cpuLandChoose(B) {
   return best;
 }
 // toward its own side: -1 or 1
-const cpuHomeDir = p => SIDE(p) ? 1 : -1;
+const cpuHomeDir = (p, x) => Math.sign(landHomeX(p) - x) || -homeOut(p);   // (toward its own hangar)
 function cpuTank(B, dt) {
   const p = B.p, t = tanks[p], E = cpuLandEnemy(p), g = guns[p];
   if (!t || t.state !== 'alive') { cpuSetMG(B, false); return; }
@@ -27775,7 +27801,7 @@ function cpuTank(B, dt) {
   if (t.hp <= 2 || t.ammo <= 0) B.mend = true;
   if (B.mend) {
     cpuSetMG(B, false);
-    if (!onOwnGround(p, t.x) || Math.abs(t.x - landHomeX(p, 'tank')) > 160) { cpuDrive(B, cpuHomeDir(p)); return; }
+    if (!onOwnGround(p, t.x) || Math.abs(t.x - landHomeX(p, 'tank')) > 160) { cpuDrive(B, cpuHomeDir(p, t.x)); return; }
     cpuDrive(B, 0);
     if (t.hp >= TANK_HP && t.ammo >= TANK_AMMO - 2) B.mend = false; else return;
   }
@@ -28971,8 +28997,9 @@ function floorChanged() { floorSave(); FLOOR_ED.dirty = true; floorSync(); }
 function floorRefresh() { if (!FLOOR_ED.dirty) return; FLOOR_ED.dirty = false; floorEdited(); floorSync(); }
 // (the REFRESH button is the TERRAIN tab's, one for the floor and the land: terrainSync)
 function floorSync() { terrainSync(); }
-const floorSpan = () => [BED_A, BED_B - BED_A];
-const floorPtX = p => BED_A + p[0] * (BED_B - BED_A), floorPtY = p => WATER_Y + p[1];
+// (the points' frame: the floor's ends with the docks unmoved - BED_A0, BED_B0)
+const floorSpan = () => [BED_A0, BED_B0 - BED_A0];
+const floorPtX = p => BED_A0 + p[0] * (BED_B0 - BED_A0), floorPtY = p => WATER_Y + p[1];
 function floorSave() { try { if (JSON.stringify(FLOOR_PTS) === JSON.stringify(FLOOR_DEF)) localStorage.removeItem('bd_floor_pts'); else localStorage.setItem('bd_floor_pts', JSON.stringify(FLOOR_PTS)); } catch (e) { } }
 // the nearest fairly level ground to x for something `half` wide (a pirate wreck), over the deep and clear of the kraken's
 // pit bottom: on the drawn floor's cliffs a wreck can't lie level
@@ -29207,6 +29234,22 @@ function drawIslands(x0, x1) {
     }
   }
   C.imageSmoothingEnabled = ga;
+  if (land.islRuns && land.islRuns.length) drawLandProps(x0, x1, true);   // (what grows on them, in their plane)
+}
+// (user Oct 28) what grows on an island, by its look: the forest's trees on its gentle grass, the desert's scrub and cacti
+// (a palm now and then by the water) - each marked isl, drawn in the island's plane (drawIslands) and nowhere else; its own
+// seed, so nothing else moves
+function islandProps() {
+  if (!land.islRuns || !land.islRuns.length) return;
+  const R = seededRng(8127);
+  for (const [a, b] of land.islRuns) {
+    for (let x = a + 40 + R() * 80; x < b - 40; x += 110 + R() * 220) {
+      const pick = Math.floor(R() * 1000), s = 0.8 + R() * 0.35, flip = R() < 0.5, z = R(), roll = R();
+      const t = landTop(x); if (Math.abs(landTop(x - 12) - landTop(x + 12)) > 12 || t > WATER_Y - 14) continue;   // (no steep bank, nothing at the water's edge)
+      if (lookD(x)) { const nearW = Math.min(x - a, b - x) < 260; land.props.push({ x, kind: nearW && roll < 0.5 ? 'palm' : roll < 0.25 ? 'cactus' : 'scrub', pick, s, flip, z, alive: true, isl: true }); }
+      else if (ltCell(ltCol(x), ltRow(t + 1)) === M_GRASS || ltCell(ltCol(x), ltRow(t + 1)) === M_DIRT) land.props.push({ x, kind: 'tree', pick, s: s + 0.08, flip, z, alive: true, isl: true });
+    }
+  }
 }
 // (paintLandChunk) a slice holding island columns: their pixels moved out of the land's canvas into the island's
 function islSplitChunk(k, id, w, h) {
@@ -30781,6 +30824,7 @@ function buildLandProps() {
   // the kit's sandstone rocks, where the field's boulders were (a little smaller: they're near now, on the ground)
   for (const b of land.boulders) if (lookD(b.x) && ok(b.x)) land.props.push({ x: b.x, kind: 'rock', pick: Math.floor(b.seed * 7), s: b.w * 0.5, flip: b.seed * 10 % 1 < 0.5, z: 2 + b.back, alive: true });
   buildForestTrees(seededRng(8124));                       // (the forest's foreground trees, user Oct 27 - 50-land-plants)
+  islandProps();                                           // (the island lines' own: drawn with them, behind the water - 50-land-islands)
   land.props.sort((a, b) => b.z - a.z);
 }
 // (drawn with their hits, fire and felling: drawLandProps, 50-land-plants)
@@ -31731,7 +31775,7 @@ function forestTreeArt() {
 // near it, the launch pad, the lake, a rock face, a steep slope or the mountain's top by the tower)
 function buildForestTrees(R) {
   const air = AIR_W + 160, P = padX(false), P2 = padX(true);
-  const ok = x => onLand(x) && !isleCol(x) && !lookD(x) && apronD(x) > 120 && Math.abs(x - (lcRight(x) ? P2 : P)) > 300 && lcX(x) > LAND_TOWER_X + 140 && !lakeAt(x) && !lakeAt(x - 30) && !lakeAt(x + 30)
+  const ok = x => onLand(x) && !isleCol(x) && !towersUsed().some(t => Math.abs(x - towerDefX(t)) < 140) && !lookD(x) && apronD(x) > 120 && Math.abs(x - (lcRight(x) ? P2 : P)) > 300 && lcX(x) > LAND_TOWER_X + 140 && !lakeAt(x) && !lakeAt(x - 30) && !lakeAt(x + 30)
     && !(land.proud || []).some(([a, b]) => x > a - 10 && x < b + 10) && Math.abs(landTop(x - 12) - landTop(x + 12)) < 10
     && [M_GRASS, M_DIRT].includes(ltCell(ltCol(x), ltRow(landTop(x) + 1)));
   for (let x = 120 + R() * 100, end = structsDefault() ? SEA0 - air : SEA0 - 300; x < end; x += 150 + R() * 320) {   // (the airport moved inland: trees between it and the coast too)
@@ -32231,15 +32275,15 @@ function drawScar(x0, x1) {
     C.fillStyle = 'rgba(52,38,24,0.55)'; C.fillRect(X, Math.round(PY(g + 2.5)), w, hp);
   }
 }
-function drawLandProps(x0, x1) {
-  drawScar(x0, x1);
+function drawLandProps(x0, x1, isl) {
+  if (!isl) drawScar(x0, x1);
   if (!land.props || !land.props.length) return;
   if (!desertArt) buildDesertArt();
   const DA = desertKitArt(), fx = E.fx || [1, 1, 1], none = [0, 0, 0];
   const wnd = clamp((E.windU || 0) / 60, -1, 1);
   let lamps = 0;
   for (const it of land.props) {
-    if (it.x < x0 - 220 || it.x > x1 + 220 || lakeAt(it.x)) continue;
+    if (it.x < x0 - 220 || it.x > x1 + 220 || lakeAt(it.x) || !it.isl !== !isl) continue;   // (an island's: drawn with it, behind the water)
     if (it.kind === 'rock') {
       const arr = DA && DA.rockC; if (!arr || !arr.length || !it.alive) continue;
       const im = arr[it.pick % arr.length], k = desertArt.kit ? DESERT_PK : it.s / im.width;   // (a rock at its own pixel too)
@@ -33675,7 +33719,7 @@ const SHUTTLEI = {"CW": 152, "CH": 84, "k": 0.5, "rows": [[[150, 65], [130, 81],
 const STACK_K = 0.54, PAD_K = 0.47,   // (the rocket 15% bigger - user Oct 26; the pad as it was)
       SAT_K = 0.46, ISS_K = 0.95;
 // where each side's pad stands: past the hangar at the runway's inland end
-const padX = R => { const o = structOf('pads', R); return structX({ R }, o ? o.u + PAD_IN : AIR_W + 420); };   // (the launch pads: a placed structure - LAND_STRUCTS, 50-land-tshape)
+const padX = R => { const o = structIn('pads', R); return structX({ R }, o ? o.u + PAD_IN : AIR_W + 420); };   // (the launch pads: a placed structure - LAND_STRUCTS, 50-land-tshape)
 function buildSpaceArt() {
   const cut = ([x, y, w, h]) => { const c = makeCanvas(w, h); c.getContext('2d').drawImage(img.space, x, y, w, h, 0, 0, w, h); return c; };
   const sat = cut(SPI.sat), orb = cut(SPI.orbiter), et = cut(SPI.etsrb), pad = cut(SPI.pad), tank = cut(SPI.et), srb = cut(SPI.srb);
@@ -34641,7 +34685,7 @@ const lcRight = x => x > SEA1;                                  // the desert (r
 // (land.look, a column at a time, made with the land). Only the look: whose country it is stays lcRight
 const lookD = x => land.look ? land.look[clamp(ltCol(x), 0, land.cols - 1)] === 1 : lcRight(x);
 const lcX = x => x > SEA1 ? WORLD_W - x : x;                    // from the country's own end of the world, inward
-const lcFromSea = x => SEA0 - lcX(x);                           // from its harbour, back inland
+const lcFromSea = x => cwOf(x > SEA1) - lcX(x);                           // from its harbour, back inland
 const MTN_PEAK = 250, MTN_FLAT = 270, MTN_FOOT = 1200;          // (the mountain: its height, its flat top, how far its foot reaches)
 // the far layers' foot (user Oct 26: the land came down to the docks' deck, LAND_Y - its far country with it, so no sky
 // shows between the far trees and the field)
@@ -34696,7 +34740,7 @@ function landProfile0(x, R) {
 function landNat(x, R) {
   // (user Oct 26: the ground goes on at the harbours' deck height, LAND_Y - just over the sea - and only rises from
   // it, gently, into hills and the mountain; the lakes' water, at the sea's height, comes up near the grass)
-  const lx = lcX(x), from = SEA0 - lx, u = lx / SEA0, base = LAND_Y;
+  const lx = lcX(x), from = cwOf(x > SEA1) - lx, base = LAND_Y;
   const k = lkU(x), valley = 0;
   // (user Oct 25) and in it a deep bowl: the lake (the desert's: the oasis)
   const q = k / 1.07, bowl = Math.abs(q) < 1 ? Math.pow(1 - q * q * q * q, 1.2) * 270 : 0;   // (a broad flat-bottomed bowl)
@@ -34827,11 +34871,11 @@ function buildLand() {
   // shape is made - buildStones, below - user Oct 26: "You can never slice a rock")
   // rock outcrops for cover: humps and crags standing out of the hills (none on either side's own ground)
   // (in each country, between the airfield and the mountain, more of them nearer the mountain; none in the lake)
-  const nO = Math.round(SEA0 / 600) * 2;
+  const nO = Math.round(SEA0_0 / 600) * 2;
   for (let i = 0; i < nO; i++) {
     let x = 0, tries = 0;
-    const right = i % 2 === 1, lxOf = () => MTN_FLAT + 150 + Math.pow(R0(), 1.6) * (SEA0 - AIR_W - MTN_FLAT - 1400);   // (none by the launch pads: they stand on flat ground past the hangars)
-    do { const lx = lxOf(); x = right ? WORLD_W - lx : lx; tries++; } while (tries < 40 && (land.outcrops.some(o => Math.abs(o.x - x) < 380) || lakeU(x) < 1.35 || (!structsDefault() && structNear(x, 320))));   // (and none on a placed structure's pad or its banks)
+    const right = i % 2 === 1, lxOf = () => MTN_FLAT + 150 + Math.pow(R0(), 1.6) * (SEA0_0 - AIR_W - MTN_FLAT - 1400);   // (none by the launch pads: they stand on flat ground past the hangars)
+    do { const lx = lxOf(); x = right ? WORLD_W - lx : lx; tries++; } while (tries < 40 && (!inCountry(x) || land.outcrops.some(o => Math.abs(o.x - x) < 380) || lakeU(x) < 1.35 || (!structsDefault() && structNear(x, 320))));   // (and none on a placed structure's pad or its banks)
     // (humps a tank can drive over - sides no steeper than it climbs - tall enough to hide behind)
     const h = 20 + R0() * 26, w = h * 4 + 30 + R0() * 30, kind = R0() < 0.4 ? 'crag' : 'hump';   // (sides no steeper than about 1 in 3)
     if (!structsDefault() && structNear(x, w + 20)) continue;             // (still on one after all the tries: none - the pads stay flat)
@@ -36022,7 +36066,7 @@ const traffic = [];
 const CESSNA_COLS = [[[30, 46, 92], [210, 46, 40]], [[40, 110, 70], [240, 200, 60]], [[170, 40, 40], [40, 40, 44]], [[230, 170, 40], [40, 80, 150]], [[60, 120, 200], [230, 230, 226]], [[120, 60, 140], [240, 140, 50]], [[50, 50, 56], [220, 60, 60]], [[200, 90, 40], [30, 46, 92]], [[70, 160, 170], [200, 46, 40]], [[150, 150, 160], [40, 120, 70]]];
 let cruise = null, trafficArt = null;
 // an airfield's runway, for traffic: its inland end and its harbour end, and its height
-const airport = R => { const A = airfieldOf(R); return { far: A.far, near: A.near, y: A.y + PLANE_WHEELS }; };   // (wherever its airport's placed - LAND_STRUCTS)
+const airport = R => { const A = airfieldIn(R); return { far: A.far, near: A.near, y: A.y + PLANE_WHEELS }; };   // (wherever its airport's placed - LAND_STRUCTS)
 function buildTraffic() {
   traffic.length = 0; cruise = null; jetboats.length = 0;
   buildBalloons(); buildCivHelis(); buildSpace(); buildSeaplanes(); buildBlimps();
@@ -36548,10 +36592,10 @@ function stepJetboats(dt) {
     else if (jetNight(j, dt)) { /* (the night: in to the harbour, or anchored on the lake - 50-land-anchors) */ }
     else {
       j.nextTurn -= dt;
-      if ((j.dir > 0 && j.x > j.hi) || (j.dir < 0 && j.x < j.lo) || j.nextTurn <= 0) { j.turn = 0.001; j.flipped = false; j.nextTurn = rnd(5, 16); }
+      if ((j.dir > 0 && j.x > j.hi) || (j.dir < 0 && j.x < j.lo) || j.nextTurn <= 0 || coastAhead(j.x, j.dir, 40)) { j.turn = 0.001; j.flipped = false; j.nextTurn = rnd(5, 16); }
     }
     const sp = (j.driven != null ? j.vDrive || 0 : j.v * (j.nk == null ? 1 : j.nk)) * (j.turn > 0 ? 0.25 : 1) * (j.hp < 2 ? 0.6 : 1);
-    j.x += j.dir * sp * dt;
+    if (!coastAhead(j.x, Math.sign(sp) * j.dir || j.dir, 25)) j.x += j.dir * sp * dt;   // (never up onto a coast out at sea)
     const yb = surfaceY(j.x + j.dir * 10), ys = surfaceY(j.x - j.dir * 10), yS = (yb + ys) / 2;
     // (user Oct 26: "They should be able to jump off it when they're going fast and the water is turbulent, so they
     // feel fun") riding the water it rises and falls with it; coming up a wave fast, where the water drops away under
@@ -36695,7 +36739,7 @@ function landShapePrep() {
 function landSkinAt(x) {
   if (!inCountry(x)) return !onLand(x) ? null : isleCol(x) ? islSkinAt(x) : floorSkinAt(x);   // (out at sea: the island line's piece, or the ocean floor's)
   const K = LSH[lcRight(x) ? 'R' : 'L']; if (!K) return null;
-  const P = K.P, u = lcX(x) / SEA0;
+  const P = K.P, u = lcX(x) / SEA0_0;
   let lo = 0, hi = P.length - 1;
   while (hi - lo > 1) { const k = (lo + hi) >> 1; if (P[k][0] <= u) lo = k; else hi = k; }
   return P[lo][2] || null;
@@ -36704,7 +36748,7 @@ function landSkinAt(x) {
 function landOffAt(x) {
   if (!LSH.any || !inCountry(x)) return 0;
   const K = LSH[lcRight(x) ? 'R' : 'L'];
-  return K ? floorCurve(K.P, K.m, lcX(x) / SEA0) : 0;
+  return K ? floorCurve(K.P, K.m, lcX(x) / SEA0_0) : 0;   // (the points' frame: the coasts with the docks unmoved)
 }
 // how fixed the ground at x is (1: as it is, whatever the edits; 0: free): the placed structures' pads (structAt), the
 // dock area by the harbour and the edge tower's foot (landEdgeLock)
@@ -36738,12 +36782,67 @@ const STRUCT_DEF = [
   { kind: 'pads', R: 1, u: AIR_W + 160, y: LAND_Y, w: 560 },
 ];
 const STRUCT_Y = [LAND_CEIL + 80, WATER_Y - 8];                // (a pad's height: never under the water, never past the ground's ceiling)
-function structsValid(L) { return Array.isArray(L) && L.length === STRUCT_DEF.length && L.every((o, i) => o && o.kind === STRUCT_DEF[i].kind && o.R === STRUCT_DEF[i].R && isFinite(o.u) && isFinite(o.y) && isFinite(o.w)); }
+function structsValid(L) { return Array.isArray(L) && L.length === STRUCT_DEF.length && L.every((o, i) => o && o.kind === STRUCT_DEF[i].kind && o.R === STRUCT_DEF[i].R && isFinite(o.u) && isFinite(o.y) && isFinite(o.w) && (o.own === undefined || o.own === -1 || o.own === 0 || o.own === 1)); }
+/* ---- (user Oct 28, 20:19-20:23: "we place structures in the world and we define whose faction those structures belong
+   to. So yes, we could have a certain faction structure in the middle of the terrain of another faction") each structure
+   has an owner: own 0 the left side, 1 the right, -1 nobody's; none given, the side of the country it stands in (R) - so the
+   default world's are today's. R stays where it stands (its country: u is counted from that country's harbour). The
+   side's own structure: structOf(kind, side); the one standing in a country: structIn(kind, R) ---- */
+const ownerOf = o => o.own !== undefined ? o.own : (o.R ? 1 : 0);
+/* ---- the towers on the land (user Oct 28, 20:46: "The towers at the end would be another type of structure" - "To destroy
+   a faction, you have to destroy all their towers"): LAND_TOWERS [{ R (its country), u (from that country's end of the
+   world, inland), own? }], each a tower with its gun on the ground at its foot (towers, edge: 07-world-build); as many as
+   wanted, any owner (none: its country's side; -1 nobody's). The default: each country's one on its mountain, as always.
+   Kept in this browser (bd_land_towers); online the default ---- */
+const TOWER_DEF = [{ R: 0, u: LAND_TOWER_X }, { R: 1, u: LAND_TOWER_X }];
+function towersValid(L) { return Array.isArray(L) && L.length <= 24 && L.every(t => t && (t.R === 0 || t.R === 1) && isFinite(t.u) && (t.own === undefined || t.own === -1 || t.own === 0 || t.own === 1)); }
+let LAND_TOWERS = TOWER_DEF.map(t => Object.assign({}, t));
+try { const o = JSON.parse(localStorage.getItem('bd_land_towers') || 'null'); if (towersValid(o)) LAND_TOWERS = o; } catch (e) { }
+const towersUsed = () => NET.role === 'local' ? LAND_TOWERS : TOWER_DEF;
+function towerSave() { try { if (JSON.stringify(LAND_TOWERS) === JSON.stringify(TOWER_DEF)) localStorage.removeItem('bd_land_towers'); else localStorage.setItem('bd_land_towers', JSON.stringify(LAND_TOWERS)); } catch (e) { } }
+const towerDefX = t => t.R ? WORLD_W - t.u : t.u;
+/* ---- the docks (user Oct 28, 20:19: "the same way you lift the terrain for an airport, we would need to have a dock
+   between the transition of land to ocean on each side" - "that dock is facing the ocean") each harbour is dragged along
+   the line in the TERRAIN tab: where it stands is that country's coast (SEA0 / SEA1), the ground's points staying where
+   they are (their frame: SEA0_0, BED_A0 - 05-game-state). DOCK_SET { L, R }: the two coasts in screens (VIEW_W) from the
+   left end of the world; none: the default, 6 and 16. Moving one builds the world again (a fresh round). Kept in this
+   browser (bd_docks); online the default ---- */
+const DOCK_MIN_LAND = 2.6, DOCK_MIN_SEA = 4;                    // (screens: room for a country's airport, pads and tower; for a sea)
+function dockSetValid(o) { return !!o && isFinite(o.L) && isFinite(o.R) && o.L >= DOCK_MIN_LAND && o.R <= 22 - DOCK_MIN_LAND && o.R - o.L >= DOCK_MIN_SEA; }
+let DOCK_SET = null;
+try { const o = JSON.parse(localStorage.getItem('bd_docks') || 'null'); if (dockSetValid(o)) DOCK_SET = o; } catch (e) { }
+const dockSet = () => DOCK_SET;
+function dockSave() { try { if (!DOCK_SET) localStorage.removeItem('bd_docks'); else localStorage.setItem('bd_docks', JSON.stringify(DOCK_SET)); } catch (e) { } }
+// a harbour moved by dx world units (R: the right one): its coast there, what stands in its country kept inside it, the
+// world built again
+function dockMoveBy(R, dx) {
+  const D = DOCK_SET ? Object.assign({}, DOCK_SET) : { L: 6, R: 16 };
+  const k = R ? 'R' : 'L', v = (R ? SEA1 : SEA0) / VIEW_W + dx / VIEW_W;
+  D[k] = +(R ? clamp(v, D.L + DOCK_MIN_SEA, 22 - DOCK_MIN_LAND) : clamp(v, DOCK_MIN_LAND, D.R - DOCK_MIN_SEA)).toFixed(3);
+  DOCK_SET = Math.abs(D.L - 6) < 0.002 && Math.abs(D.R - 16) < 0.002 ? null : D;
+  dockSave();
+  // (the country's width after: its structures and towers kept in it - a structure from its harbour, a tower from its end)
+  const cw = R ? WORLD_W - Math.round(VIEW_W * (DOCK_SET ? DOCK_SET.R : 16)) : Math.round(VIEW_W * (DOCK_SET ? DOCK_SET.L : 6));
+  for (const o of LAND_STRUCTS) if (!!o.R === !!R && o.u + o.w > cw - LAND_TOWER_X - 300) o.u = Math.max(0, Math.round(cw - LAND_TOWER_X - 300 - o.w));
+  for (const t of LAND_TOWERS) if (!!t.R === !!R && t.u > cw - DOCK_W - 120) t.u = Math.max(40, Math.round(cw - DOCK_W - 120));
+  structSave(); towerSave();
+  builtViewW = 0; resize();                                       // (the world built again with its new coast)
+}
+// the world's land towers made again from the list: the side's own grouped by player, as the default always had them
+// (towers[2], towers[3]: player 0's and player 1's), nobody's after (player -1: no gun of anyone's)
+function landTowersBuild() {
+  for (let i = towers.length - 1; i >= 0; i--) if (towers[i] && towers[i].edge) towers.splice(i, 1);
+  const add = (t, p) => { const x = towerDefX(t); towers.push({ player: p, edge: true, x, base: landTop(x), facing: t.R ? -1 : 1, hp: TW_HP, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0, pg: null, def: t, restEl: p < 0 ? 20 : undefined }); };
+  for (let p = 0; p < 2; p++) for (const t of towersUsed()) if (ownerOf(t) === SIDE(p)) add(t, p);
+  for (const t of towersUsed()) if (ownerOf(t) === -1) add(t, -1);
+}
 let LAND_STRUCTS = STRUCT_DEF.map(o => Object.assign({}, o));
 try { const o = JSON.parse(localStorage.getItem('bd_land_structs') || 'null'); if (structsValid(o)) LAND_STRUCTS = o; } catch (e) { }
 const structsUsed = () => NET.role === 'local' ? LAND_STRUCTS : STRUCT_DEF;
 const structsDefault = () => JSON.stringify(structsUsed()) === JSON.stringify(STRUCT_DEF);
-const structOf = (kind, R) => structsUsed().find(o => o.kind === kind && !!o.R === !!R);
+const structIn = (kind, R) => structsUsed().find(o => o.kind === kind && !!o.R === !!R);
+// (a side owning more than one: the one given to it in the editor first - own set - then its own country's)
+const structOf = (kind, side) => { const s = side ? 1 : 0, L = structsUsed().filter(o => o.kind === kind && ownerOf(o) === s); return L.find(o => o.own === s) || L[0] || null; };
 // its stretch in the world: [sea end, inland end] as world x (left < right), and which way inland is
 const structX = (o, u) => o.R ? SEA1 + u : SEA0 - u;
 function structSpan(o) { const a = structX(o, o.u), b = structX(o, o.u + o.w); return [Math.min(a, b), Math.max(a, b)]; }
@@ -36769,11 +36868,11 @@ function structNear(x, r) { for (let q = -r; q <= r; q += 40) if (structAt(x + q
 // runway from the harbour end to past the hangar, AIR_W + 40 inland of the airport's sea end
 function apronD(x) {
   if (!inCountry(x)) return 1e9;
-  const o = structOf('airport', lcRight(x)); if (!o) return 1e9;
+  const o = structIn('airport', lcRight(x)); if (!o) return 1e9;
   const d = lcFromSea(x), a = o.u <= DOCK_W ? -1e9 : o.u - 40, b = o.u + AIR_W + 40;
   return d < a ? a - d : d > b ? d - b : -Math.min(d - a, b - d);
 }
-const landPtX = (R, u) => R ? WORLD_W - u * SEA0 : u * SEA0;
+const landPtX = (R, u) => R ? WORLD_W - u * SEA0_0 : u * SEA0_0;
 function landSave() { try { if (JSON.stringify(LAND_PTS) === JSON.stringify(LAND_DEF)) localStorage.removeItem('bd_land_pts'); else localStorage.setItem('bd_land_pts', JSON.stringify(LAND_PTS)); } catch (e) { } }
 
 /* ---- the land built again (the editor; RESET; LOAD): the ground and all on it, then what stands on the ground ---- */
@@ -36820,7 +36919,7 @@ function structEdited(old) {
   landEdited();
   fieldFlowers = null;
   for (const R of [false, true]) {
-    const A = airfieldOf(R), o = old && old.find(q => q.kind === 'airport' && !!q.R === R), n = structOf('airport', R);
+    const A = airfieldIn(R), o = old && old.find(q => q.kind === 'airport' && !!q.R === R), n = structIn('airport', R);
     const dx = o && n ? structX(n, n.u) - structX(o, o.u) : 0, gy = A.y;
     // (on the ground at its airport: moved along with it, onto its new height)
     const onIt = v => v && onLand(v.x) && lcRight(v.x) === R && (!o || Math.abs(lcFromSea(v.x) - o.u - AIR_W / 2) < AIR_W / 2 + 200);
@@ -36896,7 +36995,7 @@ window.addEventListener('pointerdown', e => {
     // the line: a second press here soon after the first adds a point (moved as far as the ground is there already)
     const ld = LAND_ED.lastDown;
     if (ld && now - ld.t < 380 && Math.hypot(e.clientX - ld.cx, e.clientY - ld.cy) < 24) {
-      const R = lcRight(q.x), P = LAND_PTS[R ? 'R' : 'L'], u = lcX(q.x) / SEA0;
+      const R = lcRight(q.x), P = LAND_PTS[R ? 'R' : 'L'], u = lcX(q.x) / SEA0_0;
       let i = 1; while (i < P.length - 1 && P[i][0] < u) i++;
       if (u > P[i - 1][0] + 0.0005 && u < P[i][0] - 0.0005) { P.splice(i, 0, P[i - 1].length > 2 ? [+u.toFixed(4), Math.round(landOffAt(q.x)), P[i - 1][2]] : [+u.toFixed(4), Math.round(landOffAt(q.x))]); landEdChanged(); landPreview(R); }   // (a point added in a marked piece: both halves keep its skin)
       LAND_ED.lastDown = null;
@@ -36926,7 +37025,7 @@ window.addEventListener('pointermove', e => {
 function landDragTo(h, x, y) {
   const P = LAND_PTS[h.R ? 'R' : 'L'], k = h.k;
   if (!landPtFree(h.R, P, k)) return;
-  let u = clamp(lcX(clamp(x, 1, WORLD_W - 1)) / SEA0, P[k - 1][0] + 0.002, P[k + 1][0] - 0.002);
+  let u = clamp(lcX(clamp(x, 1, WORLD_W - 1)) / SEA0_0, P[k - 1][0] + 0.002, P[k + 1][0] - 0.002);
   if (inCountry(x) && lcRight(x) === h.R && landLock(landPtX(h.R, u)) < 0.02) P[k][0] = +u.toFixed(4);
   const hx = landPtX(h.R, P[k][0]), base = landNat(hx, land.R);
   P[k][1] = Math.round(clamp(y - base, LAND_DY[0], LAND_DY[1]));
@@ -36991,9 +37090,15 @@ const STRUCT_BOX_H = 70;                                          // (the box's 
 function structFree(o, u) {
   if (u < 0 || (u > 0 && u < DOCK_W + 40)) return false;          // (at the harbour, as today's airport, or clear of the dock area)
   if (u === 0 && o.kind !== 'airport') return false;
-  if (u + o.w > SEA0 - LAND_TOWER_X - 300) return false;
+  if (u + o.w > cwOf(o.R) - LAND_TOWER_X - 300) return false;
   for (const q of LAND_STRUCTS) if (q !== o && !!q.R === !!o.R && u < q.u + q.w + 40 && u + o.w > q.u - 40) return false;
   return true;
+}
+// a tower's box: 80 wide, its tower's height over the ground at its foot
+const TOWER_BOX = { w: 80, h: 150 };
+function towerPick(x, y, r) {
+  for (const t of LAND_TOWERS) { const tx = towerDefX(t), g = landTop(tx); if (Math.abs(x - tx) < TOWER_BOX.w / 2 + r && y > g - TOWER_BOX.h - r && y < g + 20 + r) return t; }
+  return null;
 }
 function structPick(x, y, r) {
   for (const o of LAND_STRUCTS) {
@@ -37002,20 +37107,44 @@ function structPick(x, y, r) {
   }
   return null;
 }
-const SED = { o: null, ptr: null, old: null, grab: 0 };
+const SED = { o: null, ptr: null, old: null, grab: 0, dock: null };
+// a harbour's box: from the land's end of its quay out to its pier's end, over the water (R: the right one; null: none)
+function dockSpan(R) { const d = docks.find(q => (q.dir > 0) === !!R); if (!d) return null; const a = R ? SEA1 + DOCK_W : SEA0 - DOCK_W, b = d.quay; return [Math.min(a, b), Math.max(a, b)]; }
+function dockPick(x, y, r) {
+  if (!LAND) return null;
+  for (const R of [false, true]) { const s = dockSpan(R); if (s && x > s[0] - r && x < s[1] + r && y > WATER_Y - 260 - r && y < WATER_Y + 60 + r) return R; }
+  return null;
+}
 window.addEventListener('pointerdown', e => {
   if (!landEdOn() || onEdUI(e) || e.button === 2) return;
   const q = landPick(e); if (q.h) return;                       // (a point's handle first)
+  const dk = dockPick(q.x, q.y, q.r);
+  if (dk !== null) {                                             // (a harbour: dragged along the line; let go, the world's built again)
+    e.stopImmediatePropagation(); e.preventDefault();
+    SED.dock = { R: dk, x0: q.x, dx: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
+    return;
+  }
+  const tw = towerPick(q.x, q.y, q.r);
+  if (tw) {                                                      // (a tower: dragged along its country; its owner by the OWNER buttons)
+    e.stopImmediatePropagation(); e.preventDefault();
+    TERRAIN_ED.struct = tw; terrainSyncOwner();
+    SED.o = tw; SED.tower = true; SED.grab = lcX(q.x) - tw.u; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
+    return;
+  }
+  SED.tower = false;
   const o = structPick(q.x, q.y, q.r); if (!o) return;
   e.stopImmediatePropagation(); e.preventDefault();
+  TERRAIN_ED.struct = o; terrainSyncOwner();                     // (the box pressed: the one the OWNER buttons set - 50-land-unified)
   SED.o = o; SED.old = LAND_STRUCTS.map(s => Object.assign({}, s)); SED.grab = lcFromSea(q.x) - o.u; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, y0: o.y, wy: q.y };
 }, { capture: true, passive: false });
 window.addEventListener('pointermove', e => {
-  const P = SED.ptr; if (!P || P.id !== e.pointerId || !SED.o) return;
+  const P = SED.ptr; if (!P || P.id !== e.pointerId || (!SED.o && !SED.dock)) return;
   e.stopImmediatePropagation();
   if (Math.hypot(e.clientX - P.cx, e.clientY - P.cy) > 6) P.moved = true;
   if (!P.moved) return;
   const [x, y] = screenToWorld(e.clientX, e.clientY);
+  if (SED.dock) { SED.dock.dx = x - SED.dock.x0; return; }
+  if (SED.tower) { if (inCountry(x) && lcRight(x) === !!SED.o.R) SED.o.u = Math.round(clamp(lcX(x) - SED.grab, 40, cwOf(SED.o.R) - DOCK_W - 120)); return; }
   structDragTo(SED.o, inCountry(x) && lcRight(x) === !!SED.o.R ? lcFromSea(x) - SED.grab : SED.o.u, P.y0 + (y - P.wy));
 }, { capture: true, passive: true });
 // a structure moved to u (along its country, from its harbour) and its pad to y: only where it's free; the line shown
@@ -37029,6 +37158,8 @@ function structUp(e) {
   const P = SED.ptr; if (!P || P.id !== e.pointerId) return;
   e.stopImmediatePropagation();
   const o = SED.o, old = SED.old; SED.o = null; SED.ptr = null;
+  if (SED.dock) { const d = SED.dock; SED.dock = null; if (P.moved && Math.abs(d.dx) > 20) dockMoveBy(d.R, d.dx); return; }
+  if (SED.tower) { SED.tower = false; if (o && P.moved) { towerSave(); landTowersBuild(); } return; }
   if (o && P.moved) landEdChanged(old, true);
 }
 window.addEventListener('pointerup', structUp, { capture: true });
@@ -37036,10 +37167,33 @@ window.addEventListener('pointercancel', structUp, { capture: true });
 // drawn with the tab's handles: each structure's box and pad line, its name
 function structEdDraw() {
   const t = Math.max(1, Math.round(1.5 * dpr / PIXW));
+  // (the harbours: a box each over its quay and pier - dragged, a ghost where it will go)
+  for (const R of [false, true]) {
+    const s = dockSpan(R); if (!s) continue;
+    const dx = SED.dock && SED.dock.R === R ? SED.dock.dx : 0;
+    for (const [off, ghost] of dx ? [[0, true], [dx, false]] : [[0, false]]) {
+      const X0 = PX(s[0] + off), X1 = PX(s[1] + off), Y0 = PY(WATER_Y - 260), Y = PY(WATER_Y + 60);
+      if (X1 < 0 || X0 > VWP) continue;
+      C.fillStyle = ghost ? 'rgba(160,255,200,0.06)' : 'rgba(160,255,200,0.14)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
+      C.fillStyle = ghost ? 'rgba(160,255,200,0.4)' : 'rgba(160,255,200,0.95)';
+      C.fillRect(X0, Y0, X1 - X0, t); C.fillRect(X0, Y0, t, Y - Y0); C.fillRect(X1 - t, Y0, t, Y - Y0); C.fillRect(X0, Y - t, X1 - X0, t);
+      if (!ghost) drawText(C, dx ? 'DOCK - LET GO TO BUILD IT HERE' : 'DOCK - DRAG ALONG', Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), '#d8ffe6', Math.max(1, Math.round(dpr / PIXW)), 'center');
+    }
+  }
+  // (the towers: a narrow box each, over its foot)
+  for (const tw of LAND_TOWERS) {
+    const tx = towerDefX(tw), g = landTop(tx), X0 = PX(tx - TOWER_BOX.w / 2), X1 = PX(tx + TOWER_BOX.w / 2), Y = PY(g), Y0 = PY(g - TOWER_BOX.h);
+    if (X1 < 0 || X0 > VWP) continue;
+    const hot = SED.o === tw || TERRAIN_ED.struct === tw;
+    C.fillStyle = hot ? 'rgba(255,200,120,0.25)' : 'rgba(255,190,110,0.12)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
+    C.fillStyle = hot ? '#ffffff' : 'rgba(255,196,120,0.95)';
+    C.fillRect(X0, Y0, X1 - X0, t); C.fillRect(X0, Y0, t, Y - Y0); C.fillRect(X1 - t, Y0, t, Y - Y0); C.fillRect(X0, Y - (t >> 1), X1 - X0, t + 1);
+    drawText(C, 'TOWER - ' + ['NOBODY', 'LEFT', 'RIGHT'][ownerOf(tw) + 1], Math.round((X0 + X1) / 2), Y0 - Math.max(8, Math.round(9 * dpr / PIXW)), hot ? '#ffffff' : '#ffe0b8', Math.max(1, Math.round(dpr / PIXW)), 'center');
+  }
   for (const o of LAND_STRUCTS) {
     const [a, b] = structSpan(o), X0 = PX(a), X1 = PX(b), Y = PY(o.y), Y0 = PY(o.y - STRUCT_BOX_H);
     if (X1 < 0 || X0 > VWP) continue;
-    const hot = SED.o === o;
+    const hot = SED.o === o || TERRAIN_ED.struct === o;
     C.fillStyle = hot ? 'rgba(120,220,255,0.22)' : 'rgba(120,200,255,0.12)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
     C.fillStyle = hot ? '#ffffff' : 'rgba(120,210,255,0.95)';
     C.fillRect(X0, Y0, X1 - X0, t); C.fillRect(X0, Y0, t, Y - Y0); C.fillRect(X1 - t, Y0, t, Y - Y0);
@@ -37047,7 +37201,7 @@ function structEdDraw() {
     C.fillRect(X0, Y - (t >> 1), X1 - X0, t + 1);
     const B = STRUCT_BANK * SV, dash = Math.max(3, Math.round(5 * dpr / PIXW));
     for (let k = 0; k < B; k += dash * 2) { C.fillRect(X0 - k - dash, Y - (t >> 1), dash, t); C.fillRect(X1 + k, Y - (t >> 1), dash, t); }
-    if (X1 - X0 > 60) drawText(C, STRUCT_KINDS[o.kind].name, Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), hot ? '#ffffff' : '#bfe8ff', Math.max(1, Math.round(dpr / PIXW)), 'center');
+    if (X1 - X0 > 60) drawText(C, STRUCT_KINDS[o.kind].name + ' - ' + ['NOBODY', 'LEFT', 'RIGHT'][ownerOf(o) + 1], Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), hot ? '#ffffff' : '#bfe8ff', Math.max(1, Math.round(dpr / PIXW)), 'center');
   }
 }
 
@@ -37064,7 +37218,7 @@ function structEdDraw() {
      pads (drag along or up and down). The line moves at once; REFRESH (or closing the editor) builds the ground under
      it again with everything on it. Online every screen builds the default ground.
    ================================================================ */
-const TERRAIN_ED = { btn: null, rb: null, ta: null, note: null, sel: null };
+const TERRAIN_ED = { btn: null, rb: null, ta: null, note: null, sel: null, struct: null };
 /* ---- the skins (user Oct 28, 17:11-17:14: "Should we not be able to flag what 'skin' is a section? What if I want a really
    deep lake?"): press the line between two handles to pick that piece (it shows white), then a SKIN button marks it -
    AUTO (the look it has always had there: every piece starts AUTO), FOREST or DESERT (the forest's or the desert's
@@ -37081,7 +37235,7 @@ const selPts = s => s.I != null ? (ISLANDS[s.I] ? ISLANDS[s.I].p : []) : s.F ? F
 const selLo = s => Math.min(s.k, s.k1 == null ? s.k : s.k1), selHi = s => Math.max(s.k, s.k1 == null ? s.k : s.k1);
 // which piece of a line is over x: a country's (u from its own end) or the floor's (u from the left pier's end)
 function pieceAt(F, R, x) {
-  const P = F ? FLOOR_PTS : LAND_PTS[R ? 'R' : 'L'], u = F ? (x - BED_A) / Math.max(1, BED_B - BED_A) : lcX(clamp(x, 1, WORLD_W - 1)) / SEA0;
+  const P = F ? FLOOR_PTS : LAND_PTS[R ? 'R' : 'L'], u = F ? (x - BED_A0) / Math.max(1, BED_B0 - BED_A0) : lcX(clamp(x, 1, WORLD_W - 1)) / SEA0_0;
   let k = 0; while (k < P.length - 2 && P[k + 1][0] <= u) k++;
   return k;
 }
@@ -37102,14 +37256,14 @@ window.addEventListener('pointercancel', selEnd, { capture: true });
 // is x on the picked pieces (the floor's line / a country's line)
 function floorSelAt(x) {
   const s = TERRAIN_ED.sel; if (!s || !s.F || !FLOOR_PTS[selHi(s) + 1]) return false;
-  const u = (x - BED_A) / Math.max(1, BED_B - BED_A); return u >= FLOOR_PTS[selLo(s)][0] && u < FLOOR_PTS[selHi(s) + 1][0];
+  const u = (x - BED_A0) / Math.max(1, BED_B0 - BED_A0); return u >= FLOOR_PTS[selLo(s)][0] && u < FLOOR_PTS[selHi(s) + 1][0];
 }
 // the skin on the floor's piece over x, as the tab's points have it now (before REFRESH builds it)
 function floorEdSkinAt(x) { const P = FLOOR_PTS; return P[pieceAt(true, false, x)][2] || null; }
 function terrainSelAt(x) {
   const s = TERRAIN_ED.sel; if (!s || s.F || !inCountry(x) || lcRight(x) !== s.R) return false;
   const P = LAND_PTS[s.R ? 'R' : 'L']; if (!P[selHi(s) + 1]) return false;
-  const u = lcX(x) / SEA0; return u >= P[selLo(s)][0] && u < P[selHi(s) + 1][0];
+  const u = lcX(x) / SEA0_0; return u >= P[selLo(s)][0] && u < P[selHi(s) + 1][0];
 }
 // a SKIN button: every picked piece marked (null: AUTO), built on REFRESH
 function terrainMark(sk) {
@@ -37137,19 +37291,23 @@ function terrainSync() {
 // (the floor first: the caves notice the floor by themselves; the land's rebuild ends by building them again)
 // (the islands: the land built again with them - unless the land's own rebuild just did it)
 function terrainRefresh() { const isl = ISL_ED.dirty; ISL_ED.dirty = false; const ld = LAND_ED.dirty; floorRefresh(); landRefresh(); if (isl && !ld && LAND && land.cell) landEdited(); terrainSync(); }
-function terrainReset() { floorReset(); landReset(); if (ISLANDS.length) { ISLANDS = []; islChanged(); } terrainShowTa(false); TERRAIN_ED.sel = null; terrainSyncSkin(); terrainSync(); }
+function terrainReset() { if (DOCK_SET) { DOCK_SET = null; dockSave(); builtViewW = 0; resize(); } floorReset(); landReset(); if (ISLANDS.length) { ISLANDS = []; islChanged(); } LAND_TOWERS = TOWER_DEF.map(t => Object.assign({}, t)); towerSave(); if (LAND && land.cell) landTowersBuild(); terrainShowTa(false); TERRAIN_ED.sel = null; terrainSyncSkin(); terrainSync(); }
 // COPY gives {"F": the floor's points, "L"/"R": each country's, "S": the structures}; LOAD takes that, or either old
 // tab's text (the floor's [[u, depth]...], or the land's {"L", "R", "S"})
-function terrainCopyText() { const o = { F: FLOOR_PTS, L: LAND_PTS.L, R: LAND_PTS.R, S: LAND_STRUCTS }; if (ISLANDS.length) o.I = ISLANDS; return JSON.stringify(o); }
+function terrainCopyText() { const o = { F: FLOOR_PTS, L: LAND_PTS.L, R: LAND_PTS.R, S: LAND_STRUCTS }; if (ISLANDS.length) o.I = ISLANDS; if (DOCK_SET) o.D = DOCK_SET; if (JSON.stringify(LAND_TOWERS) !== JSON.stringify(TOWER_DEF)) o.T = LAND_TOWERS; return JSON.stringify(o); }
 function terrainLoad(text) {
   const o = JSON.parse(text);
   if (Array.isArray(o)) { floorLoad(o); return; }
   if (!o || typeof o !== 'object') throw new Error('paste the text COPY gives');
   if (o.F === undefined && o.L === undefined) throw new Error('nothing to load: needs "F" (the floor) or "L" and "R" (the land)');
   if (o.F !== undefined && !floorValid(o.F)) throw new Error('F: the floor needs [[0, depth], ..., [1, depth]], each u bigger than the last');
+  if (o.D !== undefined && o.D !== null && !dockSetValid(o.D)) throw new Error('D: the docks need {"L": screens, "R": screens}, a sea of 4 screens at least between them');
+  if (o.T !== undefined && !towersValid(o.T)) throw new Error('T: the towers need [{"R": 0 or 1, "u": from its end}, ...]');
   if (o.I !== undefined && !islandsValid(o.I)) throw new Error('I: each island needs {"p": [[x, depth], ...]}, three points or more, each x bigger than the last');
   if (o.L !== undefined) landLoad(o);                              // (checks the land's part before anything changes)
   if (o.F !== undefined) floorLoad(o.F);
+  if ((o.D || null) !== DOCK_SET && JSON.stringify(o.D || null) !== JSON.stringify(DOCK_SET)) { DOCK_SET = o.D || null; dockSave(); builtViewW = 0; resize(); }
+  if (o.T !== undefined || JSON.stringify(LAND_TOWERS) !== JSON.stringify(TOWER_DEF)) { LAND_TOWERS = (o.T || TOWER_DEF).map(t => Object.assign({}, t)); towerSave(); if (LAND && land.cell) landTowersBuild(); }
   if (o.I !== undefined || ISLANDS.length) { ISLANDS = (o.I || []).map(I => ({ p: I.p.map(q => q.slice()) })); islChanged(); }
 }
 function terrainShowTa(on) {
@@ -37184,6 +37342,40 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SKIN OF THE PIECE YOU PRESSED', [
 NSKY.editor.TUNE.buttons('TERRAIN', 'ISLANDS', [
   ['ADD ISLAND', 'A new island line in the middle of the view: its ends under the water, its top out of it. Drag its violet handles anywhere; double-click its line to add a point; right-click a handle (or hold a finger on it) to remove it. It stands behind the water: ships, boats and subs pass in front of it and through it; for planes, shells and tanks it is solid ground', islAdd],
   ['DELETE ISLAND', 'Removes the island whose line you pressed last', islDelete],
+]);
+// (user Oct 28, 20:23) whose a structure is: press its blue box, then an OWNER button (LEFT, RIGHT or NOBODY); its planes,
+// its tanks and helicopters (out of its hangar) are that side's wherever it stands. Kept with the boxes (bd_land_structs)
+function terrainSetOwner(v) {
+  const o = TERRAIN_ED.struct, tw = o && LAND_TOWERS.includes(o);
+  if (!o || !(tw || LAND_STRUCTS.includes(o))) { TERRAIN_ED.struct = null; terrainSyncOwner('Press a box first (an airport, the launch pads or a tower), then pick whose it is.'); return; }
+  if (v === (o.R ? 1 : 0)) delete o.own; else o.own = v;           // (its own country's side: as it always was, nothing kept)
+  if (tw) { towerSave(); landTowersBuild(); } else structSave();
+  terrainSyncOwner();
+}
+// (user Oct 28, 20:46) towers: a new one in the country in the middle of the view (or the nearer country); the pressed one gone
+function terrainAddTower() {
+  const v = cam.view[0], vw = (ONEVIEW() ? bw : bw / 2) / (S * v.z), cx = v.l + vw / 2, R = cx > (SEA0 + SEA1) / 2 ? 1 : 0;
+  const u = Math.round(clamp(inCountry(cx) && lcRight(cx) === !!R ? lcX(cx) : cwOf(R) * 0.5, 40, cwOf(R) - DOCK_W - 120));
+  const t = { R, u }; LAND_TOWERS.push(t); towerSave(); landTowersBuild(); TERRAIN_ED.struct = t; terrainSyncOwner();
+}
+function terrainDelTower() {
+  const o = TERRAIN_ED.struct, i = LAND_TOWERS.indexOf(o);
+  if (i < 0) { terrainSyncOwner('Press a tower\'s box first, then DELETE TOWER.'); return; }
+  LAND_TOWERS.splice(i, 1); towerSave(); landTowersBuild(); TERRAIN_ED.struct = null; terrainSyncOwner();
+}
+function terrainSyncOwner(msg) {
+  const o = TERRAIN_ED.struct && (LAND_STRUCTS.includes(TERRAIN_ED.struct) || LAND_TOWERS.includes(TERRAIN_ED.struct)) ? TERRAIN_ED.struct : null, w = o ? ownerOf(o) : null;
+  for (const [b, v] of TERRAIN_ED.ownBtns || []) b.classList.toggle('on', w === v);
+  if (TERRAIN_ED.ownNote) TERRAIN_ED.ownNote.textContent = msg || (o ? 'The ' + (o.kind ? STRUCT_KINDS[o.kind].name : 'TOWER') + ' you pressed: ' + ['NOBODY\'s', 'the LEFT side\'s', 'the RIGHT side\'s'][w + 1] + (o.kind ? '. Its planes, tanks and helicopters are that side\'s, wherever it stands.' : '. A side is beaten when all its towers are down; nobody\'s towers don\'t count.') : 'Press a box (an airport, the launch pads or a tower) to pick whose it is.');
+}
+const ownBtn = (lab, v, desc) => { const f = () => terrainSetOwner(v); f.init = b => { (TERRAIN_ED.ownBtns || (TERRAIN_ED.ownBtns = [])).push([b, v]);
+  if (!TERRAIN_ED.ownNote) setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.ownNote) return; const n = document.createElement('div'); n.className = 'tabnote'; cat.appendChild(n); TERRAIN_ED.ownNote = n; terrainSyncOwner(); }, 0); }; return [lab, desc, f]; };
+NSKY.editor.TUNE.buttons('TERRAIN', 'OWNER OF THE BOX YOU PRESSED', [
+  ownBtn('LEFT', 0, 'The left side\'s: its planes take off from here, its tanks and helicopters come out of this hangar'),
+  ownBtn('RIGHT', 1, 'The right side\'s: its planes take off from here, its tanks and helicopters come out of this hangar'),
+  ownBtn('NOBODY', -1, 'Nobody\'s: it stands there, but no side uses it'),
+  ['ADD TOWER', 'A new tower in the country in the middle of the view: drag its box along; OWNER sets whose it is. A side is beaten when all its towers are down', terrainAddTower],
+  ['DELETE TOWER', 'Removes the tower whose box you pressed last', terrainDelTower],
 ]);
 NSKY.editor.TUNE.buttons('TERRAIN', 'THE GROUND (OPEN WORLD)', [
   ['RESET TO TODAY\'S GROUND', 'Back to the ground as it was: the land with its two lakes, the airports and launch pads where they were, the ocean floor from your drawing', terrainReset],
@@ -37229,8 +37421,21 @@ const tanks = [null, null], helis = [null, null], landWrecks = [];
 const landWait = [{ tank: 0, heli: 0 }, { tank: 0, heli: 0 }];
 // (user Oct 25: a tank or helicopter comes in from your end of the world; it's mended and rearmed back home - on your
 // mountain, or on your airfield by the harbour)
-const landHomeX = (p, k) => SIDE(p) ? WORLD_W - (k === 'tank' ? TANK_X0 : 30) : (k === 'tank' ? TANK_X0 : 30);
-const onOwnGround = (p, x) => (SIDE(p) ? x > SEA1 : x < SEA0) && (lcX(x) < MTN_FOOT || apronD(x) < -40);
+// (user Oct 28, 20:46: "The tanks and helicopters would also come from the hangar at the airport for now, since the edge of
+// the world is not that important") home: the hangar of the side's own airport, wherever it stands; they come out of its
+// door down the runway (homeOut: that way) and go home driving or flying back in through it
+const landHomeX = (p, k) => hangarX(airfieldOf(SIDE(p)));
+const homeOut = p => airfieldOf(SIDE(p)).dir;
+// in through the hangar's door, heading in, within its depth (not anywhere inland of it)
+const atHangarIn = (p, x, vx) => { const hx = landHomeX(p), o = homeOut(p), d = (hx - x) * o; return vx * o < 0 && d > -3 && d < 90; };
+// own ground (mended and rearmed there): on or by one of the side's own structures, or at the foot of its own tower on its
+// mountain (the towers: structures of their own next)
+function onOwnGround(p, x) {
+  const s = SIDE(p) ? 1 : 0;
+  for (const tw of towers) if (tw && tw.edge && tw.player === p && Math.abs(x - tw.x) < MTN_FOOT - LAND_TOWER_X) return true;   // (by one of its own towers)
+  for (const o of structsUsed()) { if (ownerOf(o) !== s) continue; const [a, b] = structSpan(o); if (x > a + 40 && x < b - 40) return true; }
+  return false;
+}
 // it's come in far enough to be yours to drive: past your tower on the mountain's top
 const LAND_ENTER = LAND_TOWER_X + 110;
 
@@ -37339,7 +37544,7 @@ function landArrive(p, k) {
   { const old = k === 'tank' ? tanks[p] : helis[p]; if (landGoing(old)) oldLand.push(old); }
   if (k === 'tank') { const t = tanks[p] = makeTank(p, landHomeX(p, 'tank')); t.enter = true; return t; }
   const x = landHomeX(p, 'heli'), h = helis[p] = makeHeli(p, x);
-  Object.assign(h, { state: 'fly', y: landTop(x) - 150, spin: 1, enter: true, vx: (SIDE(p) ? -1 : 1) * HELI_V * 0.8 });
+  Object.assign(h, { state: 'fly', y: landTop(x) - 40, spin: 1, enter: true, facing: homeOut(p), vx: homeOut(p) * HELI_V * 0.5 });   // (out of the hangar's door, low)
   return h;
 }
 // is one standing (or flying) now, or can one come in?
@@ -37412,13 +37617,14 @@ function stepTank(t, dt) {
   if (t.hook) { if (time - (t.hookT || 0) > 0.5) magDrop(t); else { tankWheels(t, dt); return; } }   // (on a civilian helicopter's or the crane's magnet - magPlace moves it)
   if (t.carry != null) { const hc = helis[t.carry]; if (hc && hc.rope && hc.rope.hold === t.id) { t.vx = 0; t.vy = 0; tankWheels(t, dt); return; } t.carry = null; }
   const mine = crew[p].mode === 'tank';
-  if (t.enter && lcX(t.x) > LAND_ENTER) t.enter = false;
-  const want = t.enter ? (SIDE(p) ? -1 : 1) * TANK_V : (mine ? t.input : t.cpuIn || 0) * TANK_V;   // (coming in: it drives itself)
+  if (t.enter && (t.x - landHomeX(p)) * homeOut(p) > 220) t.enter = false;   // (out of the hangar and clear of its door)
+  const want = t.enter ? homeOut(p) * TANK_V : (mine ? t.input : t.cpuIn || 0) * TANK_V;   // (coming out: it drives itself)
   if (t.deck) t.x += t.deck.dx || 0;                             // (on a ship: it goes with her)
   // (user Oct 25 late) driven off its own end of the world it's home - mended and rearmed - and you're ashore to pick
   // what's next; the next one comes in fresh
-  { const out = SIDE(p) ? 1 : -1, end = SIDE(p) ? WORLD_W - TANK_X0 : TANK_X0, hung = helis.some(h => heliLoad(h) && tanks[h.rope.hold] === t);
-    if (!t.enter && t.state === 'alive' && !hung && want * out > 0 && (t.x - end) * out > -3) { landGoHome(p, 'tank'); return; } }
+  // (since Oct 28: driven back in through its own hangar's door - landHomeX)
+  { const hung = helis.some(h => heliLoad(h) && tanks[h.rope.hold] === t);
+    if (!t.enter && t.state === 'alive' && !hung && !t.deck && atHangarIn(p, t.x, want)) { landGoHome(p, 'tank'); return; } }
   // (user Oct 25) it never turns round: like the battleship it drives forward and backs up, its gun keeping its angle
   // up a slope it slows, down one it runs on a little; too steep (a wall) and it stops
   const slope = t.a * t.facing;                                 // (positive: nose down - going downhill)
@@ -37597,8 +37803,8 @@ function stepHeli(h, dt) {
   const want = mine || h.cpu || flying ? 1 : 0;
   h.spin += clamp(want - h.spin, -dt * 0.35, dt * 0.6);
   h.rotor += dt * (4 + 26 * h.spin);
-  if (h.enter && lcX(h.x) > LAND_ENTER + 200) h.enter = false;
-  const lever = h.enter ? (SIDE(p) ? -1 : 1) * 0.8 : mine ? h.input : h.cpuIn || 0, stick = h.enter ? 0 : mine ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : h.cpuStick || 0;
+  if (h.enter && (h.x - landHomeX(p)) * homeOut(p) > 320) h.enter = false;   // (out of the hangar's door)
+  const lever = h.enter ? homeOut(p) * 0.8 : mine ? h.input : h.cpuIn || 0, stick = h.enter ? 0 : mine ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : h.cpuStick || 0;
   susStep(h, dt);
   if (h.state === 'landed') {
     h.vx = 0; h.vy = 0;
@@ -37639,10 +37845,13 @@ function stepHeli(h, dt) {
   if (heliLoad(h)) h.vx += h.rope.pull * dt;                     // (and its swing tugs)
   if (h.turn) { h.turn.t += dt; if (h.turn.t >= HELI_TURN_T) { h.facing = -h.turn.from; h.turn = null; } }
   h.x = clamp(h.x + h.vx * dt, 30, WORLD_W - 30);
-  if (!h.enter && !h.sea && h.vx * (SIDE(h.id) ? 1 : -1) > 20 && (h.x - landHomeX(h.id, 'heli')) * (SIDE(h.id) ? 1 : -1) > -2) {
-    // (off its own end: home - user Oct 27 night: "A helicopter going home off its end drops its load on the mountain":
-    // with something on its magnet it holds at the world's end instead, its load still on; let go of it, it goes home)
-    if (heliLoad(h)) { const out = SIDE(h.id) ? 1 : -1; h.x = landHomeX(h.id, 'heli') - out * 2.5; h.vx = 0; if (!(h.edgeT > time)) { h.edgeT = time + 1; sfxEmpty(h.x); } }
+  // (held at the door with a load and then let go of it, right there: in it goes - tester, Oct 28)
+  const doorNow = h.doorT > time - 0.6 && !heliLoad(h) && Math.abs(h.x - landHomeX(h.id)) < 120;
+  if (!h.enter && !h.sea && (doorNow || (Math.abs(h.vx) > 20 && atHangarIn(h.id, h.x, h.vx) && h.y > landTop(h.x) - 140 - (heliLoad(h) ? ROPE_L + 60 : 0)))) {   // (low - or, with something on its rope, as low as that lets it)
+    // (in low through its own hangar's door: home - since Oct 28, the hangar. User Oct 27 night: "A helicopter going home
+    // off its end drops its load on the mountain": with something on its magnet it holds at the door instead, its load
+    // still on; let go of it, it goes home)
+    if (heliLoad(h)) { h.x = landHomeX(h.id) + homeOut(h.id) * 3; h.vx = 0; h.doorT = time; if (!(h.edgeT > time)) { h.edgeT = time + 1; sfxEmpty(h.x); } }
     else { landGoHome(h.id, 'heli'); return; }
   }
   // (the ceiling: the climb fades out over the last 80 units)
@@ -39617,8 +39826,8 @@ async function start(data) {
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
-  Object.assign(window.__game, { structs: () => LAND_STRUCTS, structDragTo: (i, u, y) => structDragTo(LAND_STRUCTS[i], u, y), structUp: old => { structSave(); structEdited(old); }, airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landShape: () => ({ pts: LAND_PTS, def: LAND_DEF, lakes: (land.lakes || []).map(L => [L[0], L[1], L.today ? 1 : 0]), ms: landEditMs, any: LSH.any }), landSet: P => { LAND_PTS = P; landSave(); landEdited(); }, landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landDragTo: (R, k, x, y) => landDragTo({ R, k }, x, y), landUp: () => { landSave(); landEdited(); }, landPtX: (R, u) => landPtX(R, u), landLock: x => landLock(x), landProfile0: x => landProfile0(x, land.R), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x) });
-  Object.assign(window.__game, { floor: () => ({ pts: FLOOR_PTS, def: FLOOR_DEF, A: BED_A, B: BED_B, TR: [TR_A, TR_B], max: SEA_FLOOR_MAX, deepest: floorDeepest(), tab: !!floorTab }), floorProfile: x => floorProfile(x), floorSet: P => { FLOOR_PTS = P; floorEdited(); }, floorEdited: () => floorEdited(), bedSmooth: x => bedSmooth(x), floorEdOn: () => floorEdOn(), S: () => S, viewW: () => VIEW_W, editorTab: t => { const b = [...document.querySelectorAll('#skyEd button.tab')].find(q => q.textContent === t); if (b) b.click(); return !!b; }, editorOpen: () => { if (!NSKY.editor.TUNE.built) skyNewFrame(); if (NSKY.editor.TUNE.root.hidden) NSKY.editor.TUNE.openBtn.click(); },
+  Object.assign(window.__game, { structs: () => LAND_STRUCTS, structDragTo: (i, u, y) => structDragTo(LAND_STRUCTS[i], u, y), structUp: old => { structSave(); structEdited(old); }, airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landShape: () => ({ pts: LAND_PTS, def: LAND_DEF, lakes: (land.lakes || []).map(L => [L[0], L[1], L.today ? 1 : 0]), ms: landEditMs, any: LSH.any }), landSet: P => { LAND_PTS = P; landSave(); landEdited(); }, landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landDragTo: (R, k, x, y) => landDragTo({ R, k }, x, y), landUp: () => { landSave(); landEdited(); }, landPtX: (R, u) => landPtX(R, u), landLock: x => landLock(x), landProfile0: x => landProfile0(x, land.R), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), setOwner: (i, v) => { const o = LAND_STRUCTS[i]; if (v === (o.R ? 1 : 0)) delete o.own; else o.own = v; }, islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x) });
+  Object.assign(window.__game, { floor: () => ({ pts: FLOOR_PTS, def: FLOOR_DEF, A: BED_A, B: BED_B, TR: [TR_A, TR_B], max: SEA_FLOOR_MAX, deepest: floorDeepest(), tab: !!floorTab }), floorProfile: x => floorProfile(x), floorSet: P => { FLOOR_PTS = P; floorEdited(); }, floorEdited: () => floorEdited(), bedSmooth: x => bedSmooth(x), floorEdOn: () => floorEdOn(), floorED: () => FLOOR_ED, S: () => S, viewW: () => VIEW_W, editorTab: t => { const b = [...document.querySelectorAll('#skyEd button.tab')].find(q => q.textContent === t); if (b) b.click(); return !!b; }, editorOpen: () => { if (!NSKY.editor.TUNE.built) skyNewFrame(); if (NSKY.editor.TUNE.root.hidden) NSKY.editor.TUNE.openBtn.click(); },
     civHalfGap: c => [0, 1].map(i => { const h = c.hv && c.hv[i]; if (!h) return null; const kl = civHalfKeel(c, i, civArt(c), CIV[c.kind]), mx = h.x + kl.m * Math.cos(h.a), my = h.y + kl.m * Math.sin(h.a), ca = Math.cos(h.a), sa = Math.sin(h.a), d = kl.pts.map(([lx, ly]) => civFloor(mx + lx * ca - ly * sa) - (my + lx * sa + ly * ca)); return { a: h.a, rest: !!h.rest, min: Math.min(...d), max: Math.max(...d) }; }),
     civHalfPoint: (c, x, y) => civHalfPoint(c, x, y), msPings: () => msPings, partRestOf: sb => sb.parts.map(q => ({ y: q.y, a: q.a, rest: q.rest, r: partRest(sb, q) })), floorRest: (pts, cx, amax, a0) => floorRest(pts, cx, null, amax, a0), ms: { hold: msHold, keys: msKeys }, chargeAt: (x, y) => detonateCharge({ x, y, owner: -1 }) });
   // (Oct 27 night, group B's checks - tools/groupb.mjs)
