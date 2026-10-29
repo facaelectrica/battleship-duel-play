@@ -2572,8 +2572,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 190;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 22:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 191;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 22:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12732,7 +12732,7 @@ function glSetup() {
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
   GLR.pix = null; GLR.pixPool = [];
-  glPuffSetup(); glRaySetup(); glLitSetup(); glSmokeSetup();
+  glPuffSetup(); glRaySetup(); glLitSetup(); glSmokeSetup(); wglSetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
@@ -13408,8 +13408,32 @@ class GLCtx {
     const n = Math.max(4, Math.ceil(Math.abs(span) * Math.max(4, r) / 3));
     for (let i = 0; i <= n; i++) { const t = a0 + span * i / n; this.lineTo(x + r * Math.cos(t), y + r * Math.sin(t)); }
   }
+  // (Oct 28, the water on the GPU) a path that is one convex shape of three or four corners - the sea's light rays, a
+  // wedge - is laid straight as the two triangles the stencil pass would have counted (the same fan from its first
+  // corner, so the same pixels), with no stencil pass: one quad in the batch instead of a flush and two passes
+  _fillConvex() {
+    const p = this.path; let sp = null;
+    for (const q of p) { if (q.length < 6) continue; if (sp) return false; sp = q; }
+    if (!sp || sp.length > 8) return false;
+    const n = sp.length / 2, X = GLC4.x, Y = GLC4.y;
+    for (let i = 0; i < 4; i++) { const k = Math.min(i, n - 1); X[i] = sp[k * 2]; Y[i] = sp[k * 2 + 1]; }
+    let sg = 0;
+    for (let i = 0; i < n; i++) {
+      const a = i, b = (i + 1) % n, c = (i + 2) % n;
+      const cr = (X[b] - X[a]) * (Y[c] - Y[b]) - (Y[b] - Y[a]) * (X[c] - X[b]);
+      if (!isFinite(cr)) return false;
+      if (cr !== 0) { const s1 = cr > 0 ? 1 : -1; if (sg && s1 !== sg) return false; sg = s1; }
+    }
+    if (!sg) return true;                                  // (no area: nothing to paint)
+    const s = this.s, m = s.m, det = m[0] * m[3] - m[1] * m[2], ux = GLC4.ux, uy = GLC4.uy;
+    for (let i = 0; i < 4; i++) { const px = X[i] - m[4], py = Y[i] - m[5]; ux[i] = det ? (m[3] * px - m[2] * py) / det : 0; uy[i] = det ? (m[0] * py - m[1] * px) / det : 0; }
+    glBegin(this, s.op);
+    glFillQuad(this, ux, uy, X, Y);
+    return true;
+  }
   fill() {
     if (GLR.lost) return;
+    if (GPUW.quads > 0 && this._fillConvex()) return;
     const tris = glPathTris(this.path);
     if (!tris) return;
     const s = this.s, t = this.target, gl = GLR.gl;
@@ -13481,6 +13505,437 @@ class GLCtx {
   putImageData() { console.warn('GLCtx: putImageData is not supported'); }
 }
 const GLC4 = { x: [0, 0, 0, 0], y: [0, 0, 0, 0], ux: [0, 0, 0, 0], uy: [0, 0, 0, 0] };
+
+/* ================================================================
+   THE WATER ON THE GPU (user Oct 28, after the Sky Bench port: "the underwater column stack - definitely... ship shadows
+   - definitely... water distortion - definitely"). The water under the surface was painted in JS, column by column:
+   for each run of pixel columns, from the surface line down to the bottom, a rectangle in a colour that is a function
+   of x and depth - five or six of those passes a view a frame, each reading the surface again; the ships' shadows as a
+   rectangle run per row per band per caster; the distortion as a snapshot and a strip drawn back per band of rows; the
+   night's tint as two or three full-screen fills before the world's layer was copied to the screen.
+   Now each of those is one quad and a fragment program that does the per-pixel part. The surface line goes up once a
+   view a frame (ys, the table renderObjects fills: a screen row a column) as a 1-pixel-tall float texture, and every
+   program clips itself under it. The same rules, line for line, so the picture is the same (up to a level of 255 here
+   and there, where two passes used to round between them).
+   Each one has its switch in GPUW (?gpuw=0 turns them all off; __game.gpuw for the tools): 0 draws it in JS as before.
+   ================================================================ */
+const GPUW = { cols: 1, shadows: 1, abyss: 1, distort: 1, tint: 1, quads: 1 };
+try { if (/[?&]gpuw=0/.test(location.search)) for (const k in GPUW) GPUW[k] = 0; } catch (e) { }
+const gpuwOn = k => GLR.on && !GLR.lost && GPUW[k] > 0 && WGL.ok && WGL.ep === GLR.epoch;
+const WGL = { ok: false, ep: -1 };
+// the shared vertex program: a rectangle given in the context's own (user) space, through its transform (no rotation:
+// a, d, e, f), out to the target; the fragment gets its user-space position
+const WGL_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_q;
+uniform vec2 u_size; uniform vec4 u_rect; uniform vec4 u_m;
+out vec2 v_u;
+void main() {
+  vec2 pu = u_rect.xy + a_q * u_rect.zw, p = pu * u_m.xy + u_m.zw, n = p / u_size;
+  gl_Position = vec4(n.x * 2.0 - 1.0, 1.0 - n.y * 2.0, 0.0, 1.0);
+  v_u = pu;
+}`;
+// (the surface line: column c of the view is texel c + 3, a screen row in user space)
+const WGL_SURF = `
+uniform highp sampler2D u_surf; uniform int u_n;
+float surfAt(float c) { return texelFetch(u_surf, ivec2(clamp(int(c) + 3, 0, u_n - 1), 0), 0).r; }
+`;
+/* ---- 1. THE COLUMNS (renderObjects: the deep water's gradient and the clouds' shade over it, at the top of the pass;
+   the water's tint (seaOverStops) and the middle of the ocean's dark (drawDeepWater) later on). Up to three layers in
+   one draw, composited in the order the JS painted them. A layer: kind (1 a vertical gradient - its row in the
+   gradients' texture and its two ends; 2 one colour; 3 the deep-ocean strips), yOff (under ys + yOff) ---- */
+const WGL_COLS_FS = `#version 300 es
+precision highp float; precision highp int;
+in vec2 v_u; out vec4 o;
+uniform sampler2D u_grad;
+` + WGL_SURF + `
+uniform ivec4 u_kind;        // the layers' kinds (0 none)
+uniform vec4 u_yoff;         // each layer's offset under the surface line
+uniform vec4 u_g0;           // layer 0's gradient: row, y0, y1, alpha
+uniform vec4 u_g1;           // layer 1's (when a gradient)
+uniform vec4 u_c1;           // layer 1's colour (premultiplied) when one colour
+uniform vec4 u_ds;           // the strips: step, first strip's x, the last strip's end, the bottom (Bt)
+uniform vec4 u_dw;           // deepFactor: the sea's middle, its half width, CAMPX, SV
+uniform float u_bot;         // the bottom of the fills (Bt)
+uniform vec2 u_xr;           // the fills' columns: -3 .. VWP + 3
+vec4 grad(vec4 g, float y) {
+  float t = clamp((y + 0.5 - g.y) / (g.z - g.y), 0.0, 1.0);
+  return textureLod(u_grad, vec2((t * 255.0 + 0.5) / 256.0, (g.x + 0.5) / 256.0), 0.0) * g.w;
+}
+vec4 layer(int k, int i, float x, float y) {
+  if (k == 0) return vec4(0.0);
+  if (k == 3) {
+    float st = u_ds.x, cs = floor(x / st) * st;
+    if (cs < u_ds.y || cs >= u_ds.z || y >= u_ds.w) return vec4(0.0);
+    float top = surfAt(cs);
+    if (y < top) return vec4(0.0);
+    float wx = (cs + u_dw.z + st * 0.5) / u_dw.w, uu = abs(wx - u_dw.x) / u_dw.y;
+    float tt = clamp((uu - 0.2) / 0.6, 0.0, 1.0), f = u_dw.y > 0.0 ? 1.0 - tt * tt * (3.0 - 2.0 * tt) : 0.0;
+    if (f < 0.01) return vec4(0.0);
+    float a = floor(0.3 * f * 1000.0 + 0.5) / 1000.0;
+    a = floor(a * 255.0 + 0.5) / 255.0;
+    return vec4(0.0, 4.0 / 255.0, 18.0 / 255.0, 1.0) * a;
+  }
+  if (y >= u_bot || x < u_xr.x || x >= u_xr.y || y < surfAt(x) + u_yoff[i]) return vec4(0.0);
+  if (k == 1) return grad(i == 0 ? u_g0 : u_g1, y);
+  return u_c1;
+}
+void main() {
+  float x = floor(v_u.x), y = floor(v_u.y);
+  vec4 acc = vec4(0.0);
+  for (int i = 0; i < 3; i++) { int k = u_kind[i]; if (k == 0) continue; vec4 c = layer(k, i, x, y); acc = c + acc * (1.0 - c.a); }
+  if (acc.a <= 0.0) discard;
+  o = acc;
+}`;
+/* ---- 2. THE SHIPS' SHADOWS (drawShipShadows / shadowRow): a caster an instance, its rows and its four nested bands
+   worked out per fragment - the same steps, the same snapping to PB blocks, the same shear about one pivot ---- */
+const WGL_SH_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_q;
+layout(location=1) in vec4 a_c0;   // cx, half, reachK, dk (world)
+layout(location=2) in vec4 a_c1;   // tn, top, bot, pivot (screen)
+layout(location=3) in vec4 a_bb;   // the box, user space: x0, y0, x1, y1
+uniform vec2 u_size; uniform vec4 u_m;
+out vec2 v_u; flat out vec4 v_c0; flat out vec4 v_c1;
+void main() {
+  vec2 pu = mix(a_bb.xy, a_bb.zw, a_q), p = pu * u_m.xy + u_m.zw, n = p / u_size;
+  gl_Position = vec4(n.x * 2.0 - 1.0, 1.0 - n.y * 2.0, 0.0, 1.0);
+  v_u = pu; v_c0 = a_c0; v_c1 = a_c1;
+}`;
+const WGL_SH_FS = `#version 300 es
+precision highp float; precision highp int;
+in vec2 v_u; flat in vec4 v_c0; flat in vec4 v_c1; out vec4 o;
+` + WGL_SURF + `
+uniform vec4 u_p;    // strength x (moon 1.15 / sun 0.72), the fade's power, lean x 95, step
+uniform vec4 u_v;    // SV, CAMPX, PB, the clip (1: under the surface line)
+uniform vec3 u_col;  // the shadow's colour, 0..1
+float PXf(float wx) { return floor(wx * u_v.x + 0.5) - u_v.y; }
+void main() {
+  float x = floor(v_u.x), y = floor(v_u.y), PB = u_v.z, step = u_p.w;
+  // under the surface (the clip: surfaceLine(1), a point every other column, straight lines between)
+  if (u_v.w > 0.5) {
+    float xc = x + 0.5, c0 = 2.0 * floor((xc - 1.0) / 2.0) + 1.0, k = (xc - c0) / 2.0;
+    float yl = mix(surfAt(c0), surfAt(c0 + 2.0), k) + 1.0;
+    if (y + 0.5 <= yl) discard;
+  }
+  float cx = v_c0.x, half_ = v_c0.y, reachK = v_c0.z, dk = v_c0.w, tn = v_c1.x, top = v_c1.y, bot = v_c1.z, pivot = v_c1.w;
+  float xb = floor(x / PB) * PB;
+  float dy = abs(tn) < 0.004 ? 0.0 : floor(tn * (xb + PB * 0.5 - pivot) / PB + 0.5) * PB;
+  float yr = y - dy;
+  if (yr < top) discard;
+  float row = top + floor((yr - top) / step) * step;
+  if (row >= bot) discard;
+  float u = (row - top) / max(1.0, bot - top);
+  float a = min(1.0, u_p.x * dk) * pow(1.0 - u, u_p.y);
+  if (a < 0.004) discard;
+  float off = -u_p.z * reachK * u, spread = half_ * (1.0 + 0.22 * u);
+  float L = PXf(cx - spread + off), R = PXf(cx + spread + off), w = R - L;
+  int n = 0; float x0 = 1e9, x1 = -1e9;
+  for (int b = 0; b < 4; b++) {
+    float inset = w * (0.04 + 0.07 * float(b)) * (0.6 + u);
+    float bl = floor((L + inset) / PB) * PB, br = bl + max(PB, ceil((w - inset * 2.0) / PB) * PB);
+    x0 = min(x0, bl); x1 = max(x1, br);
+    if (xb >= bl && xb < br) n++;
+  }
+  if (n == 0 || xb >= x1) discard;
+  float q = min(1.0, a * 0.25), al = floor((1.0 - pow(1.0 - q, float(n))) * 1000.0 + 0.5) / 1000.0;
+  al = floor(al * 255.0 + 0.5) / 255.0;
+  o = vec4(u_col * al, al);
+}`;
+/* ---- 3. THE DEEP'S DARK WITH ITS LIGHTS (drawAbyss): the light map's cells worked out at their middles and laid
+   smoothed, as the two small canvases were drawn with smoothing on: the dark, then the beams' glow ---- */
+const WGL_AB_FS = `#version 300 es
+precision highp float; precision highp int;
+in vec2 v_u; out vec4 o;
+uniform vec4 u_g;       // L0, T0, cs, deepK
+uniform ivec2 u_gn;     // gw, gh
+uniform vec2 u_dk;      // ya, yb
+uniform int u_nl;
+uniform vec4 u_l0[24];  // x, y, R (L or r), k
+uniform vec4 u_l1[24];  // ux, uy, is a cone (1) or a glow round (0), beam (1)
+float dkAt(float y) { float u = clamp((y - u_dk.x) / max(1.0, u_dk.y - u_dk.x), 0.0, 1.0); return u < 0.5 ? 0.62 * u * 2.0 : 0.62 + 0.36 * (u - 0.5) * 2.0; }
+void cell(int q, int r, out vec4 dark, out vec4 glo) {
+  float xc = u_g.x + (float(q) + 0.5) * u_g.z, yc = u_g.y + (float(r) + 0.5) * u_g.z, d = dkAt(yc);
+  float lit = 0.0, glow = 0.0;
+  for (int k = 0; k < 24; k++) {
+    if (k >= u_nl) break;
+    vec4 a = u_l0[k], b = u_l1[k]; float R = a.z;
+    if (yc < a.y - R || yc > a.y + R || xc < a.x - R || xc > a.x + R) continue;
+    float dx = xc - a.x, dy = yc - a.y, d2 = dx * dx + dy * dy;
+    if (d2 > R * R) continue;
+    float dd = sqrt(d2);
+    if (b.z < 0.5) { float uu = 1.0 - dd / R; lit = max(lit, a.w * uu * uu * (3.0 - 2.0 * uu)); continue; }
+    float cosA = dd < 1.0 ? 1.0 : (dx * b.x + dy * b.y) / dd, e0 = clamp((cosA - 0.55) / 0.3, 0.0, 1.0);
+    if (e0 <= 0.0) continue;
+    float fall = pow(1.0 - dd / R, 0.7) * e0 * e0 * (3.0 - 2.0 * e0);
+    lit = max(lit, a.w * fall);
+    if (b.w < 0.5) glow = max(glow, 0.75 * fall * (0.5 + 0.5 * clamp(cosA * 1.6 - 0.6, 0.0, 1.0)));
+  }
+  float aD = lit > 0.0 ? floor(255.0 * d * (1.0 - min(1.0, lit)) + 0.5) : floor(255.0 * d + 0.5);
+  float aG = glow > 0.0 ? floor(255.0 * clamp(glow * (0.16 + 0.22 * d) * u_g.w, 0.0, 0.5) + 0.5) : 0.0;
+  aD /= 255.0; aG /= 255.0;
+  dark = vec4(vec3(1.0, 4.0, 12.0) / 255.0 * aD, aD); glo = vec4(vec3(230.0, 240.0, 255.0) / 255.0 * aG, aG);
+}
+void main() {
+  float gx = (floor(v_u.x) + 0.5 - u_g.x) / u_g.z - 0.5, gy = (floor(v_u.y) + 0.5 - u_g.y) / u_g.z - 0.5;
+  float fx = floor(gx), fy = floor(gy), tx = gx - fx, ty = gy - fy;
+  int q0 = clamp(int(fx), 0, u_gn.x - 1), q1 = clamp(int(fx) + 1, 0, u_gn.x - 1), r0 = clamp(int(fy), 0, u_gn.y - 1), r1 = clamp(int(fy) + 1, 0, u_gn.y - 1);
+  vec4 d00, g00, d10, g10, d01, g01, d11, g11;
+  cell(q0, r0, d00, g00); cell(q1, r0, d10, g10); cell(q0, r1, d01, g01); cell(q1, r1, d11, g11);
+  vec4 D = mix(mix(d00, d10, tx), mix(d01, d11, tx), ty), G = mix(mix(g00, g10, tx), mix(g01, g11, tx), ty);
+  vec4 acc = G + D * (1.0 - G.a);
+  if (acc.a <= 0.0) discard;
+  o = acc;
+}`;
+/* ---- 4. THE WATER'S DISTORTION (distortWater): the snapshot of the picture below drawn back once, every row of it
+   shifted by its own wave, and more where the water's stirred (per STIR piece) and inside a blast's ring ---- */
+const WGL_DI_FS = `#version 300 es
+precision highp float; precision highp int;
+in vec2 v_u; out vec4 o;
+uniform sampler2D u_src;      // the snapshot: the view's rows y0.. (user rows), its own pixels
+uniform vec4 u_a;             // y0, wpx, amp, band
+uniform vec4 u_w;             // SHY, TOPPX, SV, time
+uniform vec2 u_sh;            // the snapshot's rows (H), 0
+uniform int u_np;             // stirred pieces
+uniform vec4 u_pc[48];        // xa, xb, A, 0 (view pixels)
+uniform int u_nr;             // blast rings
+uniform vec4 u_rg[12];        // cx, cy, R, w
+uniform float u_rp[12];       // push
+float baseDx(float y) { float wy = (y - u_w.x + u_w.y) / u_w.z; return floor(u_a.z * (0.65 * sin(wy * 0.13 + u_w.w * 1.9) + 0.35 * sin(wy * 0.047 - u_w.w * 1.2)) + 0.5); }
+// (the snapshot holds the rows as the framebuffer has them: bottom row first)
+vec4 snap(float x, float y) { if (x < 0.0 || x >= u_a.y || y < u_a.x || y >= u_a.x + u_sh.x) return vec4(-1.0); return texelFetch(u_src, ivec2(int(x), int(u_sh.x - 1.0 - (y - u_a.x))), 0); }
+void main() {
+  float x = floor(v_u.x), y = floor(v_u.y), band = u_a.w;   // (x: the view's own pixel - the program is laid at the view's left)
+  if (y < u_a.x) discard;
+  // the slow waves: the row's band, its shift
+  float yb = u_a.x + floor((y - u_a.x) / band) * band;
+  vec4 c = snap(x - baseDx(yb), y);
+  // the stirred water: a strip of rows (band x 2) in a piece, its extra shift on top, drawn over
+  float y2 = u_a.x + floor((y - u_a.x) / (band * 2.0)) * band * 2.0;
+  for (int k = 0; k < 48; k++) {
+    if (k >= u_np) break;
+    vec4 p = u_pc[k];
+    float wy = (y2 - u_w.x + u_w.y) / u_w.z, base = baseDx(y2);
+    float dx = base + floor(p.z * (0.6 * sin(wy * 0.21 + u_w.w * 5.3 + p.x * 0.01) + 0.4 * sin(wy * 0.09 - u_w.w * 3.7)) + 0.5);
+    if (dx == base) continue;
+    float sx = x - dx;
+    if (sx >= p.x && sx < p.y) { vec4 s = snap(sx, y); if (s.a >= 0.0) c = s + c * (1.0 - s.a); }
+  }
+  // a blast's ring: rows of PB, each crossing twice, shifted out from its middle
+  for (int k = 0; k < 12; k++) {
+    if (k >= u_nr) break;
+    vec4 r = u_rg[k]; float push = u_rp[k], outer = r.z + r.w * 0.5, inner = max(0.0, r.z - r.w * 0.5), PB = band;
+    float ys0 = floor(y / PB) * PB;
+    for (int j = -8; j <= 8; j++) {       // (the source rows this pixel can come from: its own band, up to 8 bands either way)
+      float ys = ys0 + float(j) * PB; if (ys < u_a.x || ys >= u_a.x + u_sh.x) continue;
+      float dyy = ys + PB * 0.5 - r.y;
+      if (abs(dyy) > outer) continue;
+      float vsh = floor(sign(dyy) * push * abs(dyy) / outer + 0.5);
+      if (ys + vsh > y || ys + vsh + PB <= y) continue;
+      float xo = sqrt(outer * outer - dyy * dyy), xi = abs(dyy) < inner ? sqrt(inner * inner - dyy * dyy) : 0.0;
+      for (int s = -1; s <= 1; s += 2) {
+        float fs = float(s), aa = floor(r.x + fs * xi + 0.5), bb = floor(r.x + fs * xo + 0.5), L = max(0.0, min(aa, bb)), Rr = min(u_a.y, max(aa, bb));
+        if (Rr - L < 1.0) continue;
+        float hs = floor(fs * push * (xo / outer) + 0.5), sx = x - hs;
+        if (sx < L || sx >= Rr) continue;
+        vec4 sv = snap(sx, y - vsh); if (sv.a >= 0.0) c = sv + c * (1.0 - sv.a);
+      }
+    }
+  }
+  if (c.a < 0.0) discard;
+  o = c;
+}`;
+/* ---- 5. THE WORLD'S LAYER TO THE SCREEN, TINTED (render: the night's and the weather's tint, the dusk's warmth, laid
+   'source-atop' over the world's layer, then the layer copied to the screen) in one pass, a view at a time ---- */
+const WGL_TI_FS = `#version 300 es
+precision highp float; precision highp int;
+in vec2 v_u; out vec4 o;
+uniform sampler2D u_src; uniform vec2 u_ss;
+uniform vec4 u_t0;     // the tint above the clouds (premultiplied)
+uniform vec4 u_t1;     // under them
+uniform vec2 u_ty;     // the band between: its top, its bottom (screen rows); equal: one tint
+uniform vec4 u_wm;     // the warmth (premultiplied)
+uniform sampler2D u_grad; uniform float u_row;
+void main() {
+  vec2 p = floor(v_u);
+  vec4 c = texelFetch(u_src, ivec2(int(p.x), int(u_ss.y - 1.0 - p.y)), 0);   // (a layer's rows: bottom first)
+  if (c.a <= 0.0) discard;
+  vec4 t = u_t1;
+  if (u_ty.y > u_ty.x) { float tt = clamp((p.y + 0.5 - u_ty.x) / (u_ty.y - u_ty.x), 0.0, 1.0); t = textureLod(u_grad, vec2((tt * 255.0 + 0.5) / 256.0, (u_row + 0.5) / 256.0), 0.0); }
+  if (t.a > 0.0) c = vec4(t.rgb * c.a + c.rgb * (1.0 - t.a), c.a);
+  if (u_wm.a > 0.0) c = vec4(u_wm.rgb * c.a + c.rgb * (1.0 - u_wm.a), c.a);
+  o = c;
+}`;
+function wglSetup() {
+  const gl = GLR.gl;
+  WGL.ok = false;
+  const prog = (vs, fs, names) => { const p = gl.createProgram(); gl.attachShader(p, glShader(gl.VERTEX_SHADER, vs)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const U = {}; for (const k of names) U[k] = gl.getUniformLocation(p, k); return { p, U }; };
+  const base = ['u_size', 'u_rect', 'u_m', 'u_surf', 'u_n'];
+  WGL.cols = prog(WGL_VS, WGL_COLS_FS, base.concat(['u_grad', 'u_kind', 'u_yoff', 'u_g0', 'u_g1', 'u_c1', 'u_ds', 'u_dw', 'u_bot', 'u_xr']));
+  WGL.sh = prog(WGL_SH_VS, WGL_SH_FS, ['u_size', 'u_m', 'u_surf', 'u_n', 'u_p', 'u_v', 'u_col']);
+  WGL.ab = prog(WGL_VS, WGL_AB_FS, ['u_size', 'u_rect', 'u_m', 'u_g', 'u_gn', 'u_dk', 'u_nl', 'u_l0', 'u_l1']);
+  WGL.di = prog(WGL_VS, WGL_DI_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_a', 'u_w', 'u_sh', 'u_np', 'u_pc', 'u_nr', 'u_rg', 'u_rp']);
+  WGL.ti = prog(WGL_VS, WGL_TI_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_ss', 'u_t0', 'u_t1', 'u_ty', 'u_wm', 'u_grad', 'u_row']);
+  WGL.qvao = gl.createVertexArray(); gl.bindVertexArray(WGL.qvao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+  WGL.svao = gl.createVertexArray(); gl.bindVertexArray(WGL.svao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+  WGL.svbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, WGL.svbo);
+  for (let i = 1; i <= 3; i++) { gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, 4, gl.FLOAT, false, 48, (i - 1) * 16); gl.vertexAttribDivisor(i, 1); }
+  gl.bindVertexArray(GLR.vao);
+  WGL.surf = [null, null]; WGL.sd = null; WGL.snap = null;
+  WGL.ep = GLR.epoch; WGL.ok = true;
+}
+// a program's draw into ctx's target, with ctx's state (its blend, scissor and clip), then the quad renderer's state again
+function wglBegin(ctx, blend, pr) {
+  const gl = GLR.gl;
+  glBegin(ctx, blend); glFlush();
+  if (GLR.cur.prog !== 1) { gl.useProgram(GLR.prog); GLR.cur.prog = 1; }
+  glApplyState();
+  gl.useProgram(pr.p); GLR.cur.prog = 20;
+  const t = ctx.target, m = ctx.s.m;
+  gl.uniform2f(pr.U.u_size, t._w, t._h); gl.uniform4f(pr.U.u_m, m[0], m[3], m[4], m[5]);
+  return t;
+}
+function wglTex(unit, tex, smooth) {
+  const gl = GLR.gl;
+  gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); GLR.unit[unit] = tex;
+  const s = smooth ? GLR.lin : GLR.near; gl.bindSampler(unit, s); GLR.unitS[unit] = s;
+}
+function wglEnd(n) { const gl = GLR.gl; gl.bindVertexArray(GLR.vao); GLR.cur.vao = 1; GLR.stats.draws++; GLR.stats.quads += n || 1; }
+// this view's surface line as a texture (once a view a frame: renderObjects fills ys first)
+function wglSurf() {
+  const gl = GLR.gl, n = VWP + 6, vi = viewIdx;
+  let S = WGL.surf[vi];
+  if (S && S.tick === renderTick && S.n === n && S.ep === GLR.epoch && S.top === TOPPX && S.cam === CAMPX) return S;
+  if (!S || S.ep !== GLR.epoch) S = WGL.surf[vi] = { tex: glNewTex(0, 0, gl.NEAREST), w: 0, ep: GLR.epoch, f: new Float32Array(0) };
+  if (S.f.length < n) S.f = new Float32Array(n + 256);
+  let mn = 1e9;
+  for (let i = 0; i < n; i++) { const v = ys[i]; S.f[i] = v; if (v < mn) mn = v; }
+  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, S.tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  if (S.w < n) { S.w = n + 256; gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, S.w, 1, 0, gl.RED, gl.FLOAT, null); }
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, n, 1, gl.RED, gl.FLOAT, S.f.subarray(0, n));
+  GLR.stats.uploads++; GLR.stats.upPx += n;
+  S.n = n; S.tick = renderTick; S.top = TOPPX; S.cam = CAMPX; S.min = mn;
+  return S;
+}
+// (a gradient's row and ends, for a program: [row, y0, y1, alpha] - a vertical one only)
+function wglGrad(gr, ga) { return [glGradRow(gr), gr.a[1], gr.a[3], ga]; }
+/* the columns: layers [{k: 'grad', g: GLGrad, yOff} | {k: 'col', css, yOff} | {k: 'strips'}], composited in order */
+function wglColumns(layers, Bt) {
+  const gl = GLR.gl, pr = WGL.cols, ctx = C, S = wglSurf();
+  const g0 = [0, 0, 1, 0], g1 = [0, 0, 1, 0], kind = [0, 0, 0, 0], yo = [0, 0, 0, 0];
+  let c1 = [0, 0, 0, 0], top = S.min;
+  layers.forEach((L, i) => {
+    yo[i] = L.yOff || 0;
+    if (L.k === 'grad') { kind[i] = 1; const g = wglGrad(L.g, ctx.s.ga); if (i === 0) g0.splice(0, 4, ...g); else g1.splice(0, 4, ...g); }
+    else if (L.k === 'col') { kind[i] = 2; const c = glParse(L.css), a = c[3] * ctx.s.ga; c1 = [c[0] / 255 * a, c[1] / 255 * a, c[2] / 255 * a, a]; }
+    else if (L.k === 'strips') kind[i] = 3;
+  });
+  if (layers.some(L => L.k === 'grad')) glGradRow(layers.find(L => L.k === 'grad').g);   // (the row uploaded before the draw)
+  wglBegin(ctx, ctx.s.op, pr);
+  const U = pr.U, step = PB * 2, c0 = Math.floor((-SHX - 2) / step) * step, cEnd = c0 + Math.ceil((VWP + 4 - c0) / step) * step;
+  wglTex(0, S.tex, false); gl.uniform1i(U.u_surf, 0); gl.uniform1i(U.u_n, S.n);
+  gl.uniform1i(U.u_grad, 8);
+  gl.uniform4i(U.u_kind, kind[0], kind[1], kind[2], kind[3]); gl.uniform4f(U.u_yoff, yo[0], yo[1], yo[2], yo[3]);
+  gl.uniform4f(U.u_g0, g0[0], g0[1], g0[2], g0[3]); gl.uniform4f(U.u_g1, g1[0], g1[1], g1[2], g1[3]); gl.uniform4f(U.u_c1, c1[0], c1[1], c1[2], c1[3]);
+  gl.uniform4f(U.u_ds, step, c0, cEnd, Bt); gl.uniform4f(U.u_dw, (SEA0 + SEA1) / 2, WORLD_W ? SEA_W() / 2 : 0, CAMPX, SV); gl.uniform1f(U.u_bot, Bt); gl.uniform2f(U.u_xr, -3, VWP + 3);
+  const x0 = Math.min(-3, c0), x1 = Math.max(VWP + 3, cEnd), y0 = Math.max(-SHY - 8, top);
+  if (Bt > y0) { gl.uniform4f(U.u_rect, x0, y0, x1 - x0, Bt - y0); gl.bindVertexArray(WGL.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
+  wglEnd();
+}
+// the ships' shadows: the casters [[cx, half, reachK, y0, dk, tn]...] as drawShipShadows gathers them, in one draw
+function wglShadows(list, strength, moonLit, lean, col, clipSurf) {
+  if (!list.length) return;
+  const gl = GLR.gl, pr = WGL.sh, ctx = C, S = wglSurf(), step = PB * 2;
+  const D = WGL.sd && WGL.sd.length >= list.length * 12 ? WGL.sd : (WGL.sd = new Float32Array(Math.max(64, list.length * 24)));
+  let n = 0;
+  for (const [cx, half, reachK, y0, dk, tn] of list) {
+    const reach = (SEABED_Y - WATER_Y) * reachK, top = PY(y0), bot = PY(y0 + reach), pivot = PX(cx);
+    const ext = (half * 1.22 + Math.abs(lean) * 95 * reachK) * SV + PB * 4;
+    const bx0 = Math.floor((pivot - ext) / PB) * PB - PB, bx1 = Math.ceil((pivot + ext) / PB) * PB + PB, sh = Math.abs(tn) * (bx1 - bx0) + PB * 2;
+    const o = n++ * 12;
+    D[o] = cx; D[o + 1] = half; D[o + 2] = reachK; D[o + 3] = dk; D[o + 4] = tn; D[o + 5] = top; D[o + 6] = bot; D[o + 7] = pivot;
+    D[o + 8] = bx0; D[o + 9] = top - sh; D[o + 10] = bx1; D[o + 11] = bot + step + sh;
+  }
+  wglBegin(ctx, ctx.s.op, pr);
+  const U = pr.U;
+  wglTex(0, S.tex, false); gl.uniform1i(U.u_surf, 0); gl.uniform1i(U.u_n, S.n);
+  gl.uniform4f(U.u_p, strength * (moonLit ? 1.15 : 0.72), moonLit ? 1.9 : 2.4, lean * 95, step);
+  gl.uniform4f(U.u_v, SV, CAMPX, PB, clipSurf ? 1 : 0);
+  gl.uniform3f(U.u_col, col[0] / 255, col[1] / 255, col[2] / 255);
+  gl.bindVertexArray(WGL.svao); gl.bindBuffer(gl.ARRAY_BUFFER, WGL.svbo); gl.bufferData(gl.ARRAY_BUFFER, D, gl.STREAM_DRAW, 0, n * 12);
+  gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);
+  wglEnd(n);
+}
+// the deep's dark and its lights (drawAbyss, when lights reach it)
+function wglAbyss(lights, L0, T0, cs, gw, gh, ya, yb, deepK, x0, y0, x1, y1) {
+  const gl = GLR.gl, pr = WGL.ab, ctx = C, U = pr.U;
+  const n = Math.min(24, lights.length), l0 = new Float32Array(96), l1 = new Float32Array(96);
+  for (let k = 0; k < n; k++) { const l = lights[k]; l0[k * 4] = l.x; l0[k * 4 + 1] = l.y; l0[k * 4 + 2] = l.L || l.r; l0[k * 4 + 3] = l.k; l1[k * 4] = l.ux || 0; l1[k * 4 + 1] = l.uy || 0; l1[k * 4 + 2] = l.r ? 0 : 1; l1[k * 4 + 3] = l.beam ? 1 : 0; }
+  wglBegin(ctx, ctx.s.op, pr);
+  gl.uniform4f(U.u_g, L0, T0, cs, deepK); gl.uniform2i(U.u_gn, gw, gh); gl.uniform2f(U.u_dk, ya, yb); gl.uniform1i(U.u_nl, n);
+  gl.uniform4fv(U.u_l0, l0); gl.uniform4fv(U.u_l1, l1);
+  gl.uniform4f(U.u_rect, x0, y0, x1 - x0, y1 - y0); gl.bindVertexArray(WGL.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  wglEnd();
+}
+// the distortion: the view's rows y0.. of the world's layer (screen space) copied, then drawn back shifted
+function wglDistort(sx, wpx, y0, amp, band, pieces, rings) {
+  const gl = GLR.gl, pr = WGL.di, U = pr.U, H = bh - y0;
+  glFlush();
+  // the snapshot: a straight copy on the GPU (the framebuffer's rows into the snapshot's texture)
+  let N = WGL.snap;
+  if (!N || N.ep !== GLR.epoch || N.w < wpx || N.h < H) {
+    if (N && N.ep === GLR.epoch) { gl.deleteTexture(N.tex); gl.deleteFramebuffer(N.fbo); }
+    const w = Math.max(wpx, N && N.ep === GLR.epoch ? N.w : 0), h = Math.max(H, N && N.ep === GLR.epoch ? N.h : 0);
+    N = WGL.snap = { tex: glNewTex(w, h, gl.NEAREST), w, h, ep: GLR.epoch, fbo: gl.createFramebuffer() };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, N.fbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, N.tex, 0);
+  }
+  ob.ensure();
+  gl.disable(gl.SCISSOR_TEST); gl.disable(gl.STENCIL_TEST);
+  // (a layer's framebuffer rows run bottom first: the picture's rows y0..bh are its rows obH - bh .. obH - y0)
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, ob.fbo); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, N.fbo);
+  const oh = ob.height;
+  gl.blitFramebuffer(sx, oh - y0 - H, sx + wpx, oh - y0, 0, 0, wpx, H, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  GLR.cur = {}; GLR.unit = []; GLR.unitS = [];
+  // drawn back over the view's rows, through the world's layer's context at the view's left (no shake: screen rows)
+  oc.save(); oc.setTransform(1, 0, 0, 1, sx, 0);
+  wglBegin(oc, 'source-over', pr);
+  wglTex(0, N.tex, false); gl.uniform1i(U.u_src, 0);
+  gl.uniform4f(U.u_a, y0, wpx, amp, band); gl.uniform4f(U.u_w, SHY, TOPPX, SV, time); gl.uniform2f(U.u_sh, H, 0);
+  const np = Math.min(48, pieces.length / 3), pc = new Float32Array(48 * 4);
+  for (let k = 0; k < np; k++) { pc[k * 4] = pieces[k * 3]; pc[k * 4 + 1] = pieces[k * 3 + 1]; pc[k * 4 + 2] = pieces[k * 3 + 2]; }
+  gl.uniform1i(U.u_np, np); gl.uniform4fv(U.u_pc, pc);
+  const nr = Math.min(12, rings.length / 5), rg = new Float32Array(48), rp = new Float32Array(12);
+  for (let k = 0; k < nr; k++) { rg[k * 4] = rings[k * 5]; rg[k * 4 + 1] = rings[k * 5 + 1]; rg[k * 4 + 2] = rings[k * 5 + 2]; rg[k * 4 + 3] = rings[k * 5 + 3]; rp[k] = rings[k * 5 + 4]; }
+  gl.uniform1i(U.u_nr, nr); gl.uniform4fv(U.u_rg, rg); gl.uniform1fv(U.u_rp, rp);
+  gl.uniform4f(U.u_rect, 0, y0, wpx, H); gl.bindVertexArray(WGL.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  wglEnd();
+  oc.restore();
+}
+// the world's layer onto the screen, a view at a time, with its tint: t (a GLGrad or a css colour, or null), warm (css or null)
+function wglTintCopy(views, tintOf, warmCss) {
+  const gl = GLR.gl, pr = WGL.ti, U = pr.U;
+  ob.ensure();
+  g.save(); g.setTransform(1, 0, 0, 1, 0, 0);
+  const pm = css => { if (!css) return [0, 0, 0, 0]; const c = glParse(css), a = c[3]; return [c[0] / 255 * a, c[1] / 255 * a, c[2] / 255 * a, a]; };
+  const wm = pm(warmCss);
+  for (const [, , sx, w, i] of views) {
+    const t = tintOf(i);
+    let row = 0, ty = [0, 0], t1 = [0, 0, 0, 0];
+    if (t && t.grad) { row = glGradRow(t.grad); ty = [t.grad.a[1], t.grad.a[3]]; }
+    else t1 = pm(t && t.css);
+    wglBegin(g, 'source-over', pr);
+    wglTex(0, ob.tex, false); gl.uniform1i(U.u_src, 0); gl.uniform2f(U.u_ss, ob.width, ob.height);
+    gl.uniform4f(U.u_t0, 0, 0, 0, 0); gl.uniform4f(U.u_t1, t1[0], t1[1], t1[2], t1[3]); gl.uniform2f(U.u_ty, ty[0], ty[1]);
+    gl.uniform4f(U.u_wm, wm[0], wm[1], wm[2], wm[3]); gl.uniform1i(U.u_grad, 8); gl.uniform1f(U.u_row, row);
+    gl.uniform4f(U.u_rect, sx, 0, w, bh); gl.bindVertexArray(WGL.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    wglEnd();
+  }
+  g.restore();
+}
 
 /* ================================================================
    Rendering. The world is pixel art on a 1-point grid:
@@ -18419,8 +18874,11 @@ function renderObjects() {
   if (ys.length < n) ys = ysPer[viewIdx] = new Int32Array(n * 2);
   for (let c = -3; c < VWP + 3; c++) ys[c + 3] = PY(surfaceY((c + CAMPX + 0.5) / SV));
   C.fillStyle = deep;
-  fillBelowSurface(1, Bt);
-  if (E.overcast > 0.05) { C.fillStyle = `rgba(4,10,26,${(0.38 * E.overcast).toFixed(3)})`; fillBelowSurface(1, Bt); }   // in the clouds' shade
+  if (gpuwOn('cols')) wglColumns(E.overcast > 0.05 ? [{ k: 'grad', g: deep, yOff: 1 }, { k: 'col', css: `rgba(4,10,26,${(0.38 * E.overcast).toFixed(3)})`, yOff: 1 }] : [{ k: 'grad', g: deep, yOff: 1 }], Bt);   // (on the GPU: one pass - 40-zz-water-gl.js)
+  else {
+    fillBelowSurface(1, Bt);
+    if (E.overcast > 0.05) { C.fillStyle = `rgba(4,10,26,${(0.38 * E.overcast).toFixed(3)})`; fillBelowSurface(1, Bt); }   // in the clouds' shade
+  }
   ot = ema('obDeep', ot);
   drawRays(false);
   ot = ema('obRays', ot);
@@ -18509,9 +18967,9 @@ function renderObjects() {
   const sso = E.sunset, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12);
   for (const [t, c] of seaOverStops(sso, ov, oz)) over.addColorStop(t, rgbs(c.slice(0, 3), c[3]));
   C.fillStyle = over;
-  fillBelowSurface(0, Bt);
+  if (gpuwOn('cols')) wglColumns([{ k: 'grad', g: over, yOff: 0 }, { k: 'strips' }], Bt);   // (the tint and the middle of the ocean's dark, one pass on the GPU)
+  else { fillBelowSurface(0, Bt); drawDeepWater(); }
   ot = ema('obOver', ot);
-  drawDeepWater();
   drawRockForms(x0, x1);                                  // (the solid rocks: over the water's tint, k times its colour, so their light and shade read - user Oct 25)
   // (the near-black rocks in front of the floor come after the water's distortion: user Oct 25, they don't ripple -
   // see render)
@@ -18951,6 +19409,23 @@ function drawShipShadows(x0, x1) {
   if (LAND) {
     for (const c of civShips) if (c.state === 'sail' && Math.abs(c.x - (x0 + x1) / 2) < (x1 - x0) + 600) casters.push([c.x, civLen(c) * 0.44, 0.8, surfaceY(c.x) + 3 + c.sink, 1, Math.tan(c.a)]);
     for (const j of jetboats) if (j.state === 'run' && !j.lake) casters.push([j.x, 11, 0.12, j.y + 2, 0.6, 0]);
+  }
+  // (on the GPU: every caster in one draw, its rows and bands worked out per pixel, clipped under the surface there -
+  // 40-zz-water-gl.js; the pier's deck shade in its own, inside its box)
+  if (gpuwOn('shadows')) {
+    const list = casters.filter(([cx, half, , y0]) => !(cx + half + 200 < x0 || cx - half - 200 > x1) && !inQuay(cx, y0 + 4));
+    wglShadows(list, strength, moonLit, lean, col, true);
+    for (const d of docks) {
+      const a = d.quay, b = d.blockFace + d.dir * 80, cx = (a + b) / 2, half = Math.abs(b - a) / 2;
+      if (d.pierGone || cx + half + 200 < x0 || cx - half - 200 > x1) continue;
+      C.save(); C.beginPath();
+      const X = PX(d.blockFace);
+      if (d.dir > 0) C.rect(-SHX - 20, -SHY - 20, X + SHX + 20, bh + 40); else C.rect(X, -SHY - 20, VWP - X + SHX + 20, bh + 40);
+      C.clip();
+      wglShadows([[cx, half, 0.8, WATER_Y + 1, 1.35, 0]], strength, moonLit, lean, col, true);
+      C.restore();
+    }
+    return;
   }
   // shadows live under the water: clip them to below the surface line of this view
   C.save(); C.beginPath(); C.moveTo(-3, bh + 4);
@@ -19888,6 +20363,10 @@ function drawAbyss() {
   // own glow in the water. No hard edges anywhere, nothing boxed.
   const cs = Math.max(6, Math.round(8 * S)), gw = Math.ceil((L1 - L0) / cs) + 1, gt = Math.min(top, ...lights.map(l => l.y - (l.L || l.r))), T0 = Math.max(-SHY - 4, Math.floor(gt)), gh = Math.ceil((Bt - T0) / cs) + 1;
   if (gh < 2 || gw < 2) return;
+  if (gpuwOn('abyss')) {                                   // (on the GPU: the cells worked out per pixel's four, smoothed the same - 40-zz-water-gl.js)
+    wglAbyss(lights, L0, T0, cs, gw, gh, ya, yb, clamp((PY(SEABED_DEEP + 300) < VWP ? 1 : 0.6), 0, 1), L0, T0, L0 + gw * cs, T0 + gh * cs);
+    return;
+  }
   const M = abyssMap.c && abyssMap.c.width === gw && abyssMap.c.height === gh ? abyssMap : (abyssMap.c = makeCanvas(gw, gh), abyssMap.g = abyssMap.c.getContext('2d'), abyssMap.id = abyssMap.g.createImageData(gw, gh), abyssMap.G = makeCanvas(gw, gh), abyssMap.gg = abyssMap.G.getContext('2d'), abyssMap.gid = abyssMap.gg.createImageData(gw, gh), abyssMap);
   const D = M.id.data, Gd = M.gid.data;
   const deepK = clamp((PY(SEABED_DEEP + 300) < VWP ? 1 : 0.6), 0, 1);
@@ -21519,6 +21998,36 @@ function fogObjects() {
   C.globalCompositeOperation = 'source-over';
 }
 const dbuf = makeLayer(300, 150), dg = dbuf.getContext('2d');
+// distortWater's numbers for the GPU's pass: the stirred pieces and the blast rings worked out as below, drawn in one pass
+function distortGL(sx, wpx, y0) {
+  const amp = clamp(Math.round(1.3 * SV), 1, 4), band = PB, pieces = [], rings = [];
+  stirReady();
+  const cw = STIR_CELL * SV, spans = [];
+  let a = -1;
+  for (let c = 0; c <= Math.ceil(wpx / cw) + 1; c++) {
+    const wx = (c * cw + CAMPX) / SV, I = c * cw < wpx + cw ? stirAt(wx) : 0;
+    if (I > 0.06) { if (a < 0) a = c; }
+    else if (a >= 0) { spans.push([a, c]); a = -1; }
+  }
+  if (a >= 0) spans.push([a, Math.ceil(wpx / cw) + 1]);
+  for (const [c0, c1] of spans) {
+    const X0 = Math.max(0, Math.round(c0 * cw - cw / 2)), X1 = Math.min(wpx, Math.round(c1 * cw - cw / 2));
+    if (X1 - X0 < 2) continue;
+    const n = Math.max(1, Math.min(12, Math.round((X1 - X0) / Math.max(8, cw))));
+    for (let q = 0; q < n; q++) {
+      const xa = X0 + Math.round((X1 - X0) * q / n), xb = X0 + Math.round((X1 - X0) * (q + 1) / n), I = stirAt(((xa + xb) / 2 + CAMPX) / SV);
+      if (I < 0.06 || xb - xa < 1) continue;
+      pieces.push(xa, xb, Math.min(7, I * 3.2) * Math.max(0.6, Math.min(SV, 2.2)));
+    }
+  }
+  for (const b of blastRings) {
+    const cx = PX(b.x) - sx, cy = PY(b.y), R = b.r * SV, fade = 1 - b.r / b.max, w = Math.max(PB * 3, Math.round(10 * SV));
+    const push = Math.max(1, Math.round(b.amp * SV * fade));
+    if (fade <= 0.03 || cx + R + w < 0 || cx - R - w > wpx) continue;
+    rings.push(cx, cy, R, w, push);
+  }
+  wglDistort(sx, wpx, y0, amp, band, pieces, rings);
+}
 function distortWater(sx, wpx) {
   // start just below the lowest point of the surface line in this view, so the surface itself stays put
   let deepest = -1e9;
@@ -21526,6 +22035,7 @@ function distortWater(sx, wpx) {
   const y0 = Math.max(0, deepest + SHY + Math.round(6 * Math.min(SV, 2)));
   const H = bh - y0;
   if (H <= 4) return;
+  if (gpuwOn('distort')) { distortGL(sx, wpx, y0); return; }   // (on the GPU: one copy and one draw - 40-zz-water-gl.js)
   if (dbuf.width < wpx) dbuf.width = wpx;
   if (dbuf.height < H) dbuf.height = H;
   // One snapshot of the picture below, then each shifted strip is drawn back from it. (Copying every strip
@@ -21681,6 +22191,18 @@ function render() {
   }
   // night and dusk tint the world (not the sky, which is already lit)
   oc.setTransform(1, 0, 0, 1, 0, 0);
+  // (on the GPU, with no fog to draw between: the tint and the copy to the screen in one pass - 40-zz-water-gl.js)
+  const tintGL = gpuwOn('tint') && !(E.fog > 0.02);
+  if (tintGL) {
+    const two = E.tintA > 0.01 && E.tintA - E.tintClearA > 0.01;
+    wglTintCopy(views, i => {
+      if (!(E.tintA > 0.01)) return null;
+      if (!two) return { css: rgbs(E.tint, E.tintA) };
+      const dy = deckYs[i] + SHY, f = Math.round(40 * S * ZOOM_REF), tg = oc.createLinearGradient(0, dy - f, 0, dy + f);
+      tg.addColorStop(0, rgbs(E.tint, E.tintClearA)); tg.addColorStop(1, rgbs(E.tint, E.tintA));
+      return { grad: tg };
+    }, E.warm > 0.01 ? `rgba(255,120,140,${E.warm.toFixed(3)})` : null);
+  } else {
   oc.globalCompositeOperation = 'source-atop';
   if (E.tintA > 0.01) {
     // the weather's gray light is under the clouds; above them only the hour's tint
@@ -21695,6 +22217,8 @@ function render() {
   if (E.fog > 0.02) for (const [v, cp, sx, w, i, cf] of views) { beginView(oc, v, cp, sx, w, i, cf); fogObjects(); oc.restore(); }
   g.setTransform(1, 0, 0, 1, 0, 0);
   g.drawImage(ob, 0, 0);
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0);
   for (const [v, cp, sx, w, i, cf] of views) if (skyNewOn || frontClouds[i].length || planeLamps[i].length || (LAND && E.lampsOn > 0.05) || airLamps[i].length || lateLit[i].length || fwLate[i].length) { beginView(g, v, cp, sx, w, i, cf); drawLighthouseGlow(); drawLateLit(); drawAirLamps(); drawPlaneLamps(); if (skyNewOn) guardDraw('newsky', skyNewFront); else drawFrontClouds(); drawFwLate(); g.restore(); }
   // (OPEN WORLD: the underwater caves where the exploration sub's lamp finds them - over the world and its night, as the
   // lamp's own light is - 50-land-caves)
@@ -39046,7 +39570,7 @@ async function start(data) {
   window.claude?.hot?.snapshot?.(() => ({ worldW: WORLD_W, ships: ships.map(s => ({ x: s.x, vx: s.vx })) }));
   window.__game = {
     cave: CAVE,                                           // (the underwater caves: 50-land-caves)
-    nsky: NSKY, skyNewSet, skyv: () => SKYV, strike: x => strike(x, surfaceY(x), null), planesInSmokeTest: (a, dt) => { const vx = a._smX === undefined ? 0 : (a.x - a._smX) / dt, vy = a._smY === undefined ? 0 : (a.y - a._smY) / dt; a._smX = a.x; a._smY = a.y; const sp = Math.hypot(vx, vy); if (sp > 25) smearAir(a, vx, vy, sp, dt); },
+    nsky: NSKY, gpuw: GPUW, disturb, skyNewSet, skyv: () => SKYV, strike: x => strike(x, surfaceY(x), null), planesInSmokeTest: (a, dt) => { const vx = a._smX === undefined ? 0 : (a.x - a._smX) / dt, vy = a._smY === undefined ? 0 : (a.y - a._smY) / dt; a._smX = a.x; a._smY = a.y; const sp = Math.hypot(vx, vy); if (sp > 25) smearAir(a, vx, vy, sp, dt); },
     lifeboat: () => img.lifeboat, docks: () => docks, blast: (p, k) => { const sh = ships[p]; const [x, y] = deckPoint(sh, k, 0.5); sectionBlast(x, y - 6, 0.95, sh.vx); damageSection(sh, k, 1, x, y); }, runCtl, shocks, plants, birds, perches, ships, cam, telegraphs, guns, tguns, towers, crew, pieces, debris, smoke, shells, trails, dust, grains, flames, env, scopes,
     get time() { return time; }, get worldW() { return WORLD_W; }, boom: (x, y, pw) => sectionBlast(x, y, pw || 1, 0), ui, menuBtn: () => { const L = topLayout(); return [(L.menu[0] + 20) * PIXU / dpr, (L.menu[1] + 20) * PIXU / dpr]; }, mapTracks, shellAt: (p, x, y) => { const sh = ships[p], sec = hitTest(sh, x, y); if (sec >= 0) shellHit({ x, y, vx: 0, vy: 100, owner: 1 - p }, sh, sec); return sec; }, pinFX: v => { FX_PIN = v; }, get fx() { return FX; }, wh: () => wh, computeEnv,
     setOrder: (p, i) => setOrder(telegraphs[p], i), fire: p => fireGun(ships[p]), shipMG: p => shipMG(ships[p]), tower: (p, mg) => fireTower(towers[p], mg),
