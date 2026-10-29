@@ -1668,7 +1668,27 @@ const FLOOR_MIN_D = -10500, FLOOR_MAX_D = 8000, FLOOR_STEP = 8;
 // skin of the piece of line from it to the next point - 'F' forest, 'D' desert, 'S' sea; none: AUTO, the look it has always
 // had there (the GAME EDITOR's TERRAIN tab marks them - 50-land-unified.js)
 const SKINS = ['F', 'D', 'S'];
-const ptOk = p => Array.isArray(p) && (p.length === 2 || (p.length === 3 && SKINS.includes(p[2]))) && isFinite(p[0]) && isFinite(p[1]);
+const ptOk = p => Array.isArray(p) && (p.length === 2 || (p.length === 3 && SKINS.includes(p[2])) || (p.length === 4 && (p[2] === null || SKINS.includes(p[2])) && isFinite(p[3]) && p[3] >= 0 && p[3] <= 1)) && isFinite(p[0]) && isFinite(p[1]);
+// (user Oct 29: "For each segment we would control the smoothness") a point's fourth item: how much of the ground's own small
+// hills - the land's waves, the floor's zigzag - the piece of line from it to the next keeps (1, or none: as it always was;
+// 0: smooth). Where two pieces meet their amounts blend over a quarter of each, so the ground never steps
+const ptHills = p => p.length > 3 ? p[3] : 1;
+const ptsHilly = P => P.some(p => p.length > 3 && p[3] !== 1);
+function hillsAt(P, u) {
+  const n = P.length; if (u <= P[0][0]) return ptHills(P[0]); if (u >= P[n - 1][0]) return ptHills(P[n - 2]);
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const k = (lo + hi) >> 1; if (P[k][0] <= u) lo = k; else hi = k; }
+  const v = ptHills(P[lo]), t = (u - P[lo][0]) / (P[lo + 1][0] - P[lo][0]);
+  if (t < 0.25 && lo > 0) return v + (ptHills(P[lo - 1]) - v) * 0.5 * smoothstep(0.25, 0, t);
+  if (t > 0.75 && lo < n - 2) return v + (ptHills(P[lo + 1]) - v) * 0.5 * smoothstep(0.75, 1, t);
+  return v;
+}
+// the floor's: the amount at x (1 where nothing's set)
+let FLOOR_HILLY = false;
+function floorHillsAt(x) {
+  if (!FLOOR_HILLY || !(BED_B0 - BED_A0 > 0)) return 1;
+  return hillsAt(floorPtsUsed(), (x - BED_A0) / (BED_B0 - BED_A0));
+}
 function floorValid(P) { return Array.isArray(P) && P.length >= 3 && P.every((p, i) => ptOk(p) && isFinite(p[0]) && isFinite(p[1]) && (!i || p[0] > P[i - 1][0])) && P[0][0] === 0 && P[P.length - 1][0] === 1; }
 let FLOOR_PTS = FLOOR_DEF.map(p => p.slice());
 try { const o = JSON.parse(localStorage.getItem('bd_floor_pts') || 'null'); if (floorValid(o)) FLOOR_PTS = o; } catch (e) { }
@@ -1716,7 +1736,7 @@ const SEA_FLOOR_MAX0 = SEABED_Y + 3 * (SEABED_Y - WATER_Y) + 1650;
 let SEA_FLOOR_MAX = SEA_FLOOR_MAX0;                          // the deepest anywhere (OPEN WORLD: the drawing's pit)
 function floorRebuild() {
   floorTab = floorTabS = null; SEA_FLOOR_MAX = SEA_FLOOR_MAX0; setTrench(0, 0);
-  FLOOR_MARKED = LAND && floorPtsUsed().some(p => p[2] === 'F' || p[2] === 'D'); floorSkinStrips = null;
+  FLOOR_MARKED = LAND && floorPtsUsed().some(p => p[2] === 'F' || p[2] === 'D'); floorSkinStrips = null; FLOOR_HILLY = LAND && ptsHilly(floorPtsUsed());
   if (!LAND || !(BED_B - BED_A > 2 * BED_SHELF + 400)) return;
   const P = floorPtsUsed(), m = floorTangents(P), L = BED_B - BED_A, n = Math.ceil(L / FLOOR_STEP) + 2, H = SEABED_Y - WATER_Y;
   const T = new Float32Array(n), Ts = new Float32Array(n);
@@ -1825,7 +1845,7 @@ function bedDrop0(x) {
   const drop = floorTab ? floorAt(floorTab, x) : BED_EXTRA * smoothstep(BED_SHELF, half, d);
   // (not a smooth slope, user Oct 24 night: ups and downs, zigzagging - straight stretches between random heights,
   // a long swell of them and a shorter, sharper one on top; none on the harbour's shelf, more the deeper it gets)
-  const r = smoothstep(BED_SHELF, BED_SHELF + 500, d) * (0.55 + 0.45 * Math.min(1, drop / BED_EXTRA));
+  const r = smoothstep(BED_SHELF, BED_SHELF + 500, d) * (0.55 + 0.45 * Math.min(1, drop / BED_EXTRA)) * (FLOOR_HILLY ? floorHillsAt(x) : 1);
   if (r <= 0) return drop;
   const zz = (cell, i0) => { const u = x / cell, i = Math.floor(u), f = u - i; return hash(i * 1.37 + i0) * (1 - f) + hash((i + 1) * 1.37 + i0) * f - 0.5; };
   if (drop < 0) return drop + Math.max(0, r) * (150 * zz(310, 11.3) + 50 * zz(85, 57.1)) * 0.35;   // (raised toward the surface or out of it: a gentler zigzag)
@@ -2665,8 +2685,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 206;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 11:11';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 207;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 11:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4013,6 +4033,8 @@ function drawFps() {
   const col = fpsMeter.v >= 55 ? '#9dff8a' : fpsMeter.v >= 40 ? '#ffd36b' : '#ff7a6a';
   drawText(ug, txt, x + 1, y + 1, '#04070f', 2, 'right');
   drawText(ug, txt, x, y, col, 2, 'right');
+  // (user Oct 29: "lets have the version number next to the FPS always so I dont have to open the fps tab to check it")
+  { const vt = 'V' + GAME_VERSION, vx = x - textWidth(txt) * 2 - 10; drawText(ug, vt, vx + 1, y + 1, '#04070f', 2, 'right'); drawText(ug, vt, vx, y, '#d8dde8', 2, 'right'); }
   if (ui.perfPanel) drawPerfPanel(x, y + 18);
   else drawNetStats(x, y + 18);
 }
@@ -29011,7 +29033,7 @@ function floorReset() { FLOOR_PTS = FLOOR_DEF.map(p => p.slice()); floorChanged(
 // points as COPY gives them: the floor's [[u, depth]...], kept to the depths the floor allows
 function floorLoad(o) {
   if (!floorValid(o)) throw new Error('the floor needs [[0, depth], ..., [1, depth]], each u bigger than the last');
-  FLOOR_PTS = o.map(p => p.length > 2 ? [+p[0], clamp(+p[1], FLOOR_MIN_D, FLOOR_MAX_D), p[2]] : [+p[0], clamp(+p[1], FLOOR_MIN_D, FLOOR_MAX_D)]); floorChanged();
+  FLOOR_PTS = o.map(p => [+p[0], clamp(+p[1], FLOOR_MIN_D, FLOOR_MAX_D), ...p.slice(2)]); floorChanged();
 }
 // the handles show while the tab does (in OPEN WORLD, off line)
 const floorEdOn = () => LAND && NET.role === 'local' && !!FLOOR_ED.btn && FLOOR_ED.btn.offsetParent !== null && !ui.title;
@@ -29040,7 +29062,7 @@ window.addEventListener('pointerdown', e => {
     const ld = FLOOR_ED.lastDown;
     if (ld && now - ld.t < 380 && Math.hypot(e.clientX - ld.cx, e.clientY - ld.cy) < 24) {
       const u = (h.x - a) / L, P = FLOOR_PTS; let i = 1; while (i < P.length - 1 && P[i][0] < u) i++;
-      if (u > P[i - 1][0] + 0.0005 && u < P[i][0] - 0.0005) { { const np = [+u.toFixed(4), Math.round(clamp(floorCurveAt(h.x), FLOOR_MIN_D, FLOOR_MAX_D))]; if (P[i - 1].length > 2) np.push(P[i - 1][2]); P.splice(i, 0, np); } floorChanged(); }
+      if (u > P[i - 1][0] + 0.0005 && u < P[i][0] - 0.0005) { { const np = [+u.toFixed(4), Math.round(clamp(floorCurveAt(h.x), FLOOR_MIN_D, FLOOR_MAX_D))]; np.push(...P[i - 1].slice(2)); P.splice(i, 0, np); } floorChanged(); }
       FLOOR_ED.lastDown = null;
     } else FLOOR_ED.lastDown = { t: now, cx: e.clientX, cy: e.clientY };
     return;
@@ -29285,7 +29307,7 @@ window.addEventListener('pointerdown', e => {
     const ld = ISL_ED.lastDown;
     if (ld && now - ld.t < 380 && Math.hypot(e.clientX - ld.cx, e.clientY - ld.cy) < 24) {
       const k = islPieceAt(I, q.x) + 1, P = I.p;
-      if (q.x > P[k - 1][0] + 4 && q.x < P[k][0] - 4) { const np = [Math.round(q.x), Math.round(clamp(islTopAt(I, floorTangents(P), q.x) - WATER_Y, ISL_MIN_D, ISL_MAX_D))]; if (P[k - 1].length > 2) np.push(P[k - 1][2]); P.splice(k, 0, np); islChanged(); }
+      if (q.x > P[k - 1][0] + 4 && q.x < P[k][0] - 4) { const np = [Math.round(q.x), Math.round(clamp(islTopAt(I, floorTangents(P), q.x) - WATER_Y, ISL_MIN_D, ISL_MAX_D))]; np.push(...P[k - 1].slice(2)); P.splice(k, 0, np); islChanged(); }
       ISL_ED.lastDown = null;
     } else ISL_ED.lastDown = { t: now, cx: e.clientX, cy: e.clientY };
     return;
@@ -34718,9 +34740,10 @@ function landNat(x, R) {
   const q = k / 1.07, bowl = Math.abs(q) < 1 ? Math.pow(1 - q * q * q * q, 1.2) * 270 : 0;   // (a broad flat-bottomed bowl)
   const m = ltMtn(x), inland = smoothstep(AIR_W - 100, AIR_W + 500, from);
   const xo = x - EXT_L;                                  // (the hills where they were, the world made bigger at its left end or not)
-  const hills = -(31.5 + 0.5 * (34 * Math.sin(xo / 430 + R[0]) + 20 * Math.sin(xo / 190 + R[1]) + 9 * Math.sin(xo / 73 + R[2]))) * inland * (1 - m);   // (rising only)
+  const hk = LSH.hilly ? landHillsAt(x) : 1;             // (the TERRAIN tab's HILLS for the piece: how much of the waves it keeps)
+  const hills = -(31.5 + 0.5 * hk * (34 * Math.sin(xo / 430 + R[0]) + 20 * Math.sin(xo / 190 + R[1]) + 9 * Math.sin(xo / 73 + R[2]))) * inland * (1 - m);   // (rising only)
   // the mountain: rising to a flat top at the world's end, ragged on its slopes
-  const mtn = MTN_PEAK * Math.pow(m, 1.25) + (14 * Math.sin(xo / 41 + R[3]) + 9 * Math.sin(xo / 17 + R[1])) * 4 * m * (1 - m);
+  const mtn = MTN_PEAK * Math.pow(m, 1.25) + hk * (14 * Math.sin(xo / 41 + R[3]) + 9 * Math.sin(xo / 17 + R[1])) * 4 * m * (1 - m);
   return base + hills * (1 - 0.6 * Math.exp(-Math.pow(k / 1.2, 2))) * (1 - Math.min(1, bowl / 60)) + valley * inland + bowl - 18 * inland - mtn;
   // (the airfield by the harbour, flat at the quay's height, and on past the hangar to the launch pad: now the placed
   // structures' pads - structAt, 50-land-tshape - whose defaults are exactly that)
@@ -36714,11 +36737,14 @@ let LAND_PTS = { L: LAND_DEF.L.map(p => p.slice()), R: LAND_DEF.R.map(p => p.sli
 try { const o = JSON.parse(localStorage.getItem('bd_land_pts') || 'null'); if (landValid(o)) LAND_PTS = o; } catch (e) { }
 const landPtsUsed = () => NET.role === 'local' ? LAND_PTS : LAND_DEF;
 // the curves through the points (made once before each build): the same monotone cubic as the floor's
-const LSH = { L: null, R: null, any: false };
+const LSH = { L: null, R: null, any: false, hilly: false };
+// (user Oct 29) how much of the land's own small hills the piece over x keeps (1: as always - 09-sea-surface hillsAt)
+function landHillsAt(x) { if (!LSH.hilly || !inCountry(x)) return 1; const K = LSH[lcRight(x) ? 'R' : 'L']; return K ? hillsAt(K.P, lcX(x) / LAND_CW0) : 1; }
 function landShapePrep() {
   const P = landPtsUsed();
   LSH.any = false;
-  for (const k of ['L', 'R']) { LSH[k] = { P: P[k], m: floorTangents(P[k]) }; if (P[k].some(p => p[1])) LSH.any = true; }
+  LSH.hilly = false;
+  for (const k of ['L', 'R']) { LSH[k] = { P: P[k], m: floorTangents(P[k]) }; if (P[k].some(p => p[1])) LSH.any = true; if (ptsHilly(P[k])) LSH.hilly = true; }
 }
 // the skin marked on the piece of line over x (the TERRAIN tab: 'F', 'D', 'S'), or null - AUTO
 function landSkinAt(x) {
@@ -37017,7 +37043,7 @@ function landReset() { const old = LAND_STRUCTS.map(o => Object.assign({}, o)); 
 function landLoad(o) {
   if (!landValid(o)) throw new Error('the land needs {"L": [[0, dy], ..., [1, dy]], "R": [...]}, each u bigger than the last');
   if (o.S !== undefined && !structsValid(o.S)) throw new Error('S: the structures, as COPY gives them');
-  const fix = P => P.map(p => p.length > 2 ? [+p[0], Math.round(clamp(+p[1], LAND_DY[0], LAND_DY[1])), p[2]] : [+p[0], Math.round(clamp(+p[1], LAND_DY[0], LAND_DY[1]))]);
+  const fix = P => P.map(p => [+p[0], Math.round(clamp(+p[1], LAND_DY[0], LAND_DY[1])), ...p.slice(2)]);
   const old = LAND_STRUCTS.map(q => Object.assign({}, q));
   LAND_PTS = { L: fix(o.L), R: fix(o.R) };
   if (o.S !== undefined) LAND_STRUCTS = o.S.map(q => Object.assign({}, q));
@@ -37056,7 +37082,7 @@ window.addEventListener('pointerdown', e => {
     if (ld && now - ld.t < 380 && Math.hypot(e.clientX - ld.cx, e.clientY - ld.cy) < 24) {
       const R = lcRight(q.x), P = LAND_PTS[R ? 'R' : 'L'], u = lcX(q.x) / LAND_CW0;
       let i = 1; while (i < P.length - 1 && P[i][0] < u) i++;
-      if (u > P[i - 1][0] + 0.0005 && u < P[i][0] - 0.0005) { P.splice(i, 0, P[i - 1].length > 2 ? [+u.toFixed(4), Math.round(landOffAt(q.x)), P[i - 1][2]] : [+u.toFixed(4), Math.round(landOffAt(q.x))]); landEdChanged(); landPreview(R); }   // (a point added in a marked piece: both halves keep its skin)
+      if (u > P[i - 1][0] + 0.0005 && u < P[i][0] - 0.0005) { P.splice(i, 0, [+u.toFixed(4), Math.round(landOffAt(q.x)), ...P[i - 1].slice(2)]); landEdChanged(); landPreview(R); }   // (a point added in a marked piece: both halves keep its skin)
       LAND_ED.lastDown = null;
     } else LAND_ED.lastDown = { t: now, cx: e.clientX, cy: e.clientY };
     return;
@@ -37338,14 +37364,44 @@ function terrainMark(sk) {
   const s = TERRAIN_ED.sel;
   if (!s) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Press the line between two handles first (or press and drag along it for several pieces): they turn white, then pick their skin.'; return; }
   const P = selPts(s);
-  for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) { if (sk) P[k][2] = sk; else P[k].length = 2; }
+  for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) { if (sk) P[k][2] = sk; else if (P[k].length > 3) P[k][2] = null; else P[k].length = 2; }   // (AUTO: its HILLS kept)
   if (s.I != null) islChanged(); else if (s.F) floorChanged(); else { landShapePrep(); landEdChanged(); }
+  terrainSyncSkin();
+}
+// (user Oct 29: "For each segment we would control the smoothness") the HILLS slider: how much of the ground's own small
+// hills every picked piece keeps - 100% as it always was, 0% smooth (the land's waves, the floor's zigzag; an island's
+// line has none). Built on REFRESH, as the skins are
+function terrainSetHills(v) {
+  const s = TERRAIN_ED.sel; if (!s || s.I != null) { terrainSyncSkin(); return; }
+  const P = selPts(s);
+  for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) {
+    const p = P[k];
+    if (v >= 1) { if (p.length > 3) { p.length = 3; if (p[2] === null) p.length = 2; } }
+    else { if (p.length === 2) p.push(null); p[3] = +v.toFixed(2); }
+  }
+  if (s.F) floorChanged(); else { landShapePrep(); landEdChanged(); }
+  terrainSyncSkin();
+}
+function terrainHillsRow(cat) {
+  if (TERRAIN_ED.hills || !cat) return;
+  const r = document.createElement('div'); r.className = 'row';
+  r.innerHTML = '<label>HILLS</label><input type="range" min="0" max="100" step="5"><output></output><span class="dv"></span>';
+  const inp = r.querySelector('input'), lbl = r.querySelector('label');
+  lbl.title = 'How much of the ground\'s own small hills the white pieces keep: 100% as they always were, 0% smooth (press and drag along the line for several pieces). Built on REFRESH';
+  inp.addEventListener('input', () => terrainSetHills(+inp.value / 100));
+  cat.appendChild(r); TERRAIN_ED.hills = { r, inp, out: r.querySelector('output') };
   terrainSyncSkin();
 }
 function terrainSyncSkin() {
   const s = TERRAIN_ED.sel, P = s && selPts(s);
   let sk; if (P) { const set = new Set(); for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) set.add(P[k][2] || null); sk = set.size === 1 ? [...set][0] : 'mixed'; }
   for (const [b, v] of TERRAIN_ED.skinBtns || []) b.classList.toggle('on', sk !== undefined && sk === v);
+  if (TERRAIN_ED.hills) {                                         // (the HILLS slider: the picked pieces' amount, or blank when they differ)
+    const H = TERRAIN_ED.hills, ok = !!P && s.I == null, set = new Set();
+    if (ok) for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) set.add(Math.round((P[k].length > 3 ? P[k][3] : 1) * 100));
+    H.inp.disabled = !ok; if (set.size === 1) H.inp.value = [...set][0];
+    H.out.textContent = !ok ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED';
+  }
   const n = s ? selHi(s) - selLo(s) + 1 : 0, what = (s && s.I != null ? 'Island ' + (s.I + 1) + ', ' : '') + (n > 1 ? 'the ' + n + ' white pieces: ' : 'the white piece: ');
   if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = !s ? 'Press the line between two handles to pick a piece of the ground (press and drag along it for several).' : what + (sk === 'F' ? 'FOREST' : sk === 'D' ? 'DESERT' : sk === 'S' ? 'SEA' : sk === 'mixed' ? 'MIXED' : 'AUTO (the look it has always had)') + '. REFRESH builds it.';
 }
@@ -37405,8 +37461,8 @@ terrainReset.init = terrainTabInit;
 terrainRefresh.init = b => { TERRAIN_ED.rb = b; terrainSync(); };
 NSKY.editor.TUNE.buttons('TERRAIN', 'BUILD', [['REFRESH', 'Build the ground under the new line and boxes, and everything on it (closing the editor does it too)', terrainRefresh]]);
 const skinBtn = (lab, v, desc) => { const f = () => terrainMark(v); f.init = b => { (TERRAIN_ED.skinBtns || (TERRAIN_ED.skinBtns = [])).push([b, v]);
-  if (!TERRAIN_ED.skinNote) setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.skinNote) return; const n = document.createElement('div'); n.className = 'tabnote'; cat.appendChild(n); TERRAIN_ED.skinNote = n; terrainSyncSkin(); }, 0); }; return [lab, desc, f]; };
-NSKY.editor.TUNE.buttons('TERRAIN', 'SKIN OF THE PIECE YOU PRESSED', [
+  if (!TERRAIN_ED.skinNote) setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.skinNote) return; terrainHillsRow(cat); const n = document.createElement('div'); n.className = 'tabnote'; cat.appendChild(n); TERRAIN_ED.skinNote = n; terrainSyncSkin(); }, 0); }; return [lab, desc, f]; };
+NSKY.editor.TUNE.buttons('TERRAIN', 'SKIN AND HILLS OF THE PIECE YOU PRESSED', [
   skinBtn('AUTO', null, 'The look this piece has always had (its country\'s)'),
   skinBtn('FOREST', 'F', 'The forest\'s ground, field, stones, trees and flowers; under the water, a lake bed'),
   skinBtn('DESERT', 'D', 'The desert\'s ground, sand, scrub, cacti and palms by its water; under the water, the oasis\'s bed'),
@@ -39953,7 +40009,7 @@ async function start(data) {
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
   Object.assign(window.__game, { structs: () => LAND_STRUCTS, structDragTo: (i, u, y) => structDragTo(LAND_STRUCTS[i], u, y), structUp: old => { structSave(); structEdited(old); }, airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landShape: () => ({ pts: LAND_PTS, def: LAND_DEF, lakes: (land.lakes || []).map(L => [L[0], L[1], L.today ? 1 : 0]), ms: landEditMs, any: LSH.any }), landSet: P => { LAND_PTS = P; landSave(); landEdited(); }, landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landDragTo: (R, k, x, y) => landDragTo({ R, k }, x, y), landUp: () => { landSave(); landEdited(); }, landPtX: (R, u) => landPtX(R, u), landLock: x => landLock(x), landProfile0: x => landProfile0(x, land.R), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), setOwner: (i, v) => { const o = LAND_STRUCTS[i]; if (v === (o.R ? 1 : 0)) delete o.own; else o.own = v; }, islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x),
-    dockOwnSet: (R, v) => dockOwnSet(R, v), worldExtSet: (R, n) => worldExtSet(R, n), buildTimes: () => BUILD_T.slice(), landEvictNow: () => { if (!land.seen) return 0; land.seen.fill(-1e6); const n = land.chunks.filter(Boolean).length; landEvict(); return n - land.chunks.filter(Boolean).length; }, landCounts: () => ({ stones: (land.stones || []).length, props: (land.props || []).length, tufts: (land.tufts || []).length, boulders: (land.boulders || []).length, outcrops: (land.outcrops || []).length, cells: land.cell ? land.cell.length : 0 }), worldInfo: () => ({ W: WORLD_W, EXT_L, EXT_R, SEA0, SEA1, VIEW_W, BED_A, BED_B, cols: land.cols, pts: LAND_PTS }), docksXSet: L => { DOCKS_X = L; docksXSave(); }, sandY: x => sandY(x), myTw: p => myTw(p), ownTowers: p => ownTowers(p), dockInfo: () => ({ owned: DOCKS_OWNED, docks: docks.map(d => ({ x: Math.round(d.quay), dir: d.dir, player: d.player, tw: towers.indexOf(d._tw) })), home: homeDock.map(d => ({ x: Math.round(d.quay), dir: d.dir, stand: !!d.stand, player: d.player })), towers: towers.map(t => ({ p: t.player, x: Math.round(t.x), hp: t.hp, edge: !!t.edge })), ships: ships.map(s => s.state), subs: subs.map(s => s.state), fleet: [0, 1].map(p => [fleet[p].ship, fleet[p].sub]) }) });
+    dockOwnSet: (R, v) => dockOwnSet(R, v), worldExtSet: (R, n) => worldExtSet(R, n), buildTimes: () => BUILD_T.slice(), landHillsAt: x => landHillsAt(x), landNatAt: x => landNat(x, land.R), landEvictNow: () => { if (!land.seen) return 0; land.seen.fill(-1e6); const n = land.chunks.filter(Boolean).length; landEvict(); return n - land.chunks.filter(Boolean).length; }, landCounts: () => ({ stones: (land.stones || []).length, props: (land.props || []).length, tufts: (land.tufts || []).length, boulders: (land.boulders || []).length, outcrops: (land.outcrops || []).length, cells: land.cell ? land.cell.length : 0 }), worldInfo: () => ({ W: WORLD_W, EXT_L, EXT_R, SEA0, SEA1, VIEW_W, BED_A, BED_B, cols: land.cols, pts: LAND_PTS }), docksXSet: L => { DOCKS_X = L; docksXSave(); }, sandY: x => sandY(x), myTw: p => myTw(p), ownTowers: p => ownTowers(p), dockInfo: () => ({ owned: DOCKS_OWNED, docks: docks.map(d => ({ x: Math.round(d.quay), dir: d.dir, player: d.player, tw: towers.indexOf(d._tw) })), home: homeDock.map(d => ({ x: Math.round(d.quay), dir: d.dir, stand: !!d.stand, player: d.player })), towers: towers.map(t => ({ p: t.player, x: Math.round(t.x), hp: t.hp, edge: !!t.edge })), ships: ships.map(s => s.state), subs: subs.map(s => s.state), fleet: [0, 1].map(p => [fleet[p].ship, fleet[p].sub]) }) });
   Object.assign(window.__game, { floor: () => ({ pts: FLOOR_PTS, def: FLOOR_DEF, A: BED_A, B: BED_B, TR: [TR_A, TR_B], max: SEA_FLOOR_MAX, deepest: floorDeepest(), tab: !!floorTab }), floorProfile: x => floorProfile(x), floorSet: P => { FLOOR_PTS = P; floorEdited(); }, floorEdited: () => floorEdited(), bedSmooth: x => bedSmooth(x), floorEdOn: () => floorEdOn(), floorED: () => FLOOR_ED, S: () => S, viewW: () => VIEW_W, editorTab: t => { const b = [...document.querySelectorAll('#skyEd button.tab')].find(q => q.textContent === t); if (b) b.click(); return !!b; }, editorOpen: () => { if (!NSKY.editor.TUNE.built) skyNewFrame(); if (NSKY.editor.TUNE.root.hidden) NSKY.editor.TUNE.openBtn.click(); },
     civHalfGap: c => [0, 1].map(i => { const h = c.hv && c.hv[i]; if (!h) return null; const kl = civHalfKeel(c, i, civArt(c), CIV[c.kind]), mx = h.x + kl.m * Math.cos(h.a), my = h.y + kl.m * Math.sin(h.a), ca = Math.cos(h.a), sa = Math.sin(h.a), d = kl.pts.map(([lx, ly]) => civFloor(mx + lx * ca - ly * sa) - (my + lx * sa + ly * ca)); return { a: h.a, rest: !!h.rest, min: Math.min(...d), max: Math.max(...d) }; }),
     civHalfPoint: (c, x, y) => civHalfPoint(c, x, y), msPings: () => msPings, partRestOf: sb => sb.parts.map(q => ({ y: q.y, a: q.a, rest: q.rest, r: partRest(sb, q) })), floorRest: (pts, cx, amax, a0) => floorRest(pts, cx, null, amax, a0), ms: { hold: msHold, keys: msKeys }, chargeAt: (x, y) => detonateCharge({ x, y, owner: -1 }) });
