@@ -2685,7 +2685,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 207;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const GAME_VERSION = 208;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
 const BUILD = 'OCT 29 11:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
@@ -7316,6 +7316,9 @@ function underwaterBlast(x, y, power, ball) {
   { const r = 30 + 40 * power; if (y > seabedY(x) - r - 120) seabedHit(x, r + 60, 1, 0, undefined, { x, y, r, power }); }   // (the bottom's growth in reach breaks)
   anchorsBlast(x, y, power);                                       // (an anchor's rope near it thrown about)
   if (LAND) krBlast(x, y, power, ball);                            // (the kraken in reach of it: struck as by a torpedo - 50-land-kraken)
+  // (a mine going off on the surface, user Oct 29: "The underwater explosion is only if it explodes underwater" - its
+  // blow under the water still reaches what it reaches, but nothing of a blast is seen down there: the splash shows it)
+  if (ball === 'none') { for (let k = -18; k <= 18; k += DX) addForce(x + k, -1800 * power * (1 - Math.abs(k) / 20)); scareFish(x, y, 220); shakeAt(6 * power, x); return; }
   if (ball) {
     // the depth charge: one round, churning ball of white water, a ring of spray bubbles, nothing cloud-like
     gasBall(x, y, 34 * power);
@@ -7841,10 +7844,10 @@ function stepDcharges(dt) {
 function detonateCharge(c) {
   const x = c.x, y = c.y;
   sfxExplosion(x, 0.85);
-  shock(x, y, 1.8);
+  if (!c.noBall) shock(x, y, 1.8);
   // the pressure wave: rings that bend the water as they spread
-  for (let k = 0; k < 3; k++) blastRings.push({ x, y, r: 4 + k * 12, speed: 150 - k * 25, max: 280 - k * 50, life: 0, amp: 6 - k * 1.6 });
-  underwaterBlast(x, y, 1.4, true);
+  if (!c.noBall) for (let k = 0; k < 3; k++) blastRings.push({ x, y, r: 4 + k * 12, speed: 150 - k * 25, max: 280 - k * 50, life: 0, amp: 6 - k * 1.6 });
+  underwaterBlast(x, y, 1.4, c.noBall ? 'none' : true);   // (a mine on the surface: no ball under the water, its splash instead - detonateMine)
   killFishNear(x, y, 110);
   scareFish(x, y, 260);
   shakeAt(9, x);
@@ -7853,7 +7856,7 @@ function detonateCharge(c) {
   const depth = y - WATER_Y, amt = clamp(1 - depth / 320, 0.25, 1);
   for (let k = -40; k <= 40; k += DX) addForce(x + k, -9000 * amt * (1 - Math.abs(k) / 42));
   const sy = surfaceY(x);
-  for (let i = 0; i < 90 * amt; i++) spray.length < 700 && spray.push({ x: x + rnd(-14, 14), y: sy - rnd(0, 4), vx: rnd(-40, 40), vy: -rnd(120, 480) * amt, life: 0, s: rnd(1.6, 4) });
+  if (!c.noBall) for (let i = 0; i < 90 * amt; i++) spray.length < 700 && spray.push({ x: x + rnd(-14, 14), y: sy - rnd(0, 4), vx: rnd(-40, 40), vy: -rnd(120, 480) * amt, life: 0, s: rnd(1.6, 4) });
   for (let i = 0; i < 14; i++) spawnFoam(x + rnd(-24, 24), rnd(1.6, 3.4));
   sfxSplash(x, amt);
   // submarines inside the blast are holed
@@ -8015,9 +8018,14 @@ function stepMines(dt) {
 function detonateMine(m, hit) {
   // a depth charge going off right under the surface: the other side's ships, subs and buoys, yachts, pillars (never
   // its own side's boats, user Oct 25: shooting your own mine is safe)
-  detonateCharge({ x: m.x, y: m.y + 2, owner: m.owner });
-  for (let k = 0; k < 10; k++) flames.length < 600 && spawnFlame(m.x + rnd(-6, 6), m.y - rnd(0, 6), rnd(-30, 30), -rnd(40, 120), 1, rnd(2, 4), 0.7);
-  flashes.push({ x: m.x, y: m.y - 4, r: 22, life: 0, max: 0.14 });
+  // (user Oct 29, with a picture - gen/sea_src/mine_splash_ref_oct29.png: "when a mine explodes, it should do a water
+  // splash similar to this. The underwater explosion is only if it explodes underwater. But if its close enough to the
+  // surface we would still have the splash") afloat: the crown of water and no blast under it; still rising, shallow:
+  // both; deep: the underwater blast only
+  const depth = m.y - surfaceY(m.x), wet = depth > 8;
+  detonateCharge({ x: m.x, y: m.y + 2, owner: m.owner, noBall: !wet });
+  if (depth < MINE_SPLASH_D) mineSplash(m.x, clamp(1 - Math.max(0, depth) / MINE_SPLASH_D, 0.35, 1));
+  if (!wet) flashes.push({ x: m.x, y: m.y - 4, r: 22, life: 0, max: 0.14 });
   // and a harder blow to whatever touched it
   if (hit && !netGuestHold()) {
     const [kind, o, sec] = hit;
@@ -8028,6 +8036,28 @@ function detonateMine(m, hit) {
   }
   // planes low over it are caught in the blast
   if (!netGuestHold()) for (const pl of planes) if (pl && pl.state === 'fly' && pl.id !== m.owner && Math.hypot(pl.x - m.x, pl.y - m.y) < 45) hitPlane(pl, 1, pl.x, pl.y);
+}
+// a mine going off at the surface: a mass of water (startMineSplash, 34-zz-mine-splash.js) heaving up out of the
+// sea; the surface punched down under it, a few drops flung out at once. amt: 1 on the surface, less from under it
+const MINE_SPLASH_D = 60;                  // (under the surface deeper than this: no splash, the underwater blast only)
+function mineSplash(x, amt) {
+  sfxSplash(x, amt);
+  for (let k = -50; k <= 50; k += DX) addForce(x + k, -16000 * amt * (1 - Math.abs(k) / 52));
+  if (SIM_ONLY) return;
+  startMineSplash(x, amt);
+  // a few thin jets off its sides, leaning out (a small part of it - the mass is the splash)
+  for (const [dx, hk, lean] of [[-34, 0.36, -1], [35, 0.32, 1.05], [-42, 0.24, -1.4], [43, 0.26, 1.45]]) {
+    const H = 185 * amt * hk * rnd(0.9, 1.06), k = 0.55 + 0.45 * amt;
+    jets.push({ x: x + dx * k, v0: Math.sqrt(2 * JET_G * H), w: 3.5 * k, base: 3.5 * k, t: 0, lean: lean + rnd(-0.05, 0.05), seed: Math.random() * 100, rained: false, small: true });
+  }
+  if (jets.length > 64) jets.splice(0, jets.length - 64);
+  const sy = surfaceY(x);
+  for (let i = 0; i < 30 * amt; i++) {
+    if (spray.length > 700) break;
+    const a = rnd(-Math.PI * 0.85, -Math.PI * 0.15), s = rnd(60, 200) * amt;
+    spray.push({ x: x + rnd(-30, 30), y: sy - rnd(0, 20), vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0, s: rnd(1.4, 3.4) });
+  }
+  scareBirds(x, sy, 200);
 }
 // another blast near a mine sets it off a moment later (not in the same instant: they go up one after another)
 function mineChain(x, y, r) {
@@ -10473,6 +10503,7 @@ function drawStreaks(x0, x1) {
 }
 const jets = [], JET_G = 300;          // a jet hangs longer than a thrown droplet: the column holds itself up
 function stepJets(dt) {
+  stepMineSplashes(dt);                    // (a mine's: 34-zz-mine-splash.js)
   for (let i = jets.length - 1; i >= 0; i--) {
     const j = jets[i];
     j.t += dt;
@@ -10508,6 +10539,7 @@ function drawSplashes(x0, x1, pal) {
   plFlush();
 }
 function drawJets(x0, x1, pal = SPLASH_DAY) {
+  drawMineSplashes(x0, x1, pal);           // (a mine's mass of water: 34-zz-mine-splash.js)
   for (const j of jets) {
     if (j.x < x0 - 60 || j.x > x1 + 60) continue;
     const tApex = j.v0 / JET_G, Hmax = j.v0 * j.v0 / (2 * JET_G);
@@ -10742,6 +10774,92 @@ function stepSinkingShip(sh, dt) {
     // there is no second ship: this captain fights on from the tower alone
     for (const p of pieces) if (p.owner === sh.id) p.gen = 1;
     sh.state = 'gone';
+  }
+}
+
+/* ---- a mine's mass of water (user Oct 29, with pictures for the look: gen/sea_src/mine_splash_ref_oct29.png and
+   mine_splash_ref_core_oct29.png)
+   "When a mine explodes, it should do a water splash similar to this"; "there is always a kind of 'thicker' central
+   part to it"; "it should resemble a huge, heavy mountain of water erupting out of the ocean, with smaller sprays
+   breaking away from its surface. The main silhouette must be dominated by large, connected masses of water, with thin
+   jets and droplets representing only a small fraction"; "it has to be 'dynamic' in how the foam builds and then
+   falls"; "the mass has to be 100% dynamic / code, like all the other splashes"; "we could just use white".
+   One solid body of white water, made in code each frame: a thick middle that bulges up into a few big lobes, lower
+   lobes leaning out to the sides joined to it at the foot. Each lobe is thrown up like the jets (the same JET_G) - fast,
+   slowing, hanging at the top - then slumps back under its own weight, widening as it sinks into the sea, coming apart
+   from the top and shedding spray. Drawn in the splashes' whites (pal), so it shines at night as they do. ---- */
+const msplashes = [];
+// its lobes: [middle (world units), half-width at the foot, height (of the whole), lean, a head start (s)] - the middle
+// mass and the two tips merged into it, then the side lobes, then the outer ones
+const MSPL_LOBES = [[0, 30, 1, 0, 0], [-11, 19, 0.9, -0.05, 0.02], [12, 18, 0.86, 0.06, 0.03], [-24, 18, 0.6, -0.35, 0.05], [25, 18, 0.63, 0.35, 0.05], [-36, 12, 0.4, -0.85, 0.08], [37, 12, 0.38, 0.9, 0.08]];
+const MSPL_H = 185, MSPL_SLUMP = 1.35;   // (the middle's height, world units: about ten mines; how much faster than a thrown drop it falls back)
+function startMineSplash(x, amt) {
+  const k = 0.55 + 0.45 * amt;
+  msplashes.push({ x, t: 0, k, seed: Math.random() * 100, shed: 0, lobes: MSPL_LOBES.map(([c, r, h, l, d]) => {
+    const H = MSPL_H * amt * h * rnd(0.92, 1.06);
+    return { c: c * k + rnd(-1.5, 1.5), r: r * k * rnd(0.92, 1.08), H, v0: Math.sqrt(2 * JET_G * H), l: l + rnd(-0.04, 0.04), d: d + rnd(0, 0.03) };
+  }) });
+  if (msplashes.length > 6) msplashes.shift();
+}
+// a lobe at time t: its height now, how far it has risen (0..1) and fallen back (0..1)
+function msplLobe(L, t) {
+  const tt = Math.max(0, t - L.d), tA = L.v0 / JET_G;
+  if (tt <= tA) { const h = L.v0 * tt - 0.5 * JET_G * tt * tt; return [h, h / L.H, 0]; }
+  const f = 0.5 * JET_G * MSPL_SLUMP * (tt - tA) * (tt - tA);              // (past the top it slumps, faster than it rose)
+  return [Math.max(0, L.H - f), 1, clamp(f / L.H, 0, 1)];
+}
+function stepMineSplashes(dt) {
+  for (let i = msplashes.length - 1; i >= 0; i--) {
+    const m = msplashes[i];
+    m.t += dt;
+    const sy = surfaceY(m.x);
+    let live = false;
+    for (const L of m.lobes) {
+      const [h, , f] = msplLobe(L, m.t);
+      if (h > 1) live = true;
+      // spray breaking off it: off its top as it climbs, more as it comes apart
+      const rate = f > 0 ? 70 * (1 - f) : h > 4 ? 10 : 0;
+      if (Math.random() < dt * rate * L.r / 30 && spray.length < 700) {
+        const v = f > 0 ? rnd(0.4, 1) : rnd(0.8, 1), wy = sy - h * v, wx = m.x + L.c + L.l * h * v + rnd(-0.6, 0.6) * L.r * (1 - v * v);
+        spray.push({ x: wx, y: wy, vx: (Math.sign(L.c + L.l * 30) || rnd(-1, 1)) * rnd(15, 70), vy: f > 0 ? rnd(-50, 20) : -rnd(30, 110), life: 0, s: rnd(1.5, 3.6) });
+      }
+      // foam where it falls back in
+      if (f > 0.2 && Math.random() < dt * 6) spawnFoam(m.x + L.c + rnd(-1, 1) * L.r * 1.6, rnd(1.6, 3.4));
+    }
+    if (!live && m.t > 0.3) msplashes.splice(i, 1);
+  }
+}
+function drawMineSplashes(x0, x1, pal) {
+  for (const m of msplashes) {
+    if (m.x < x0 - 150 || m.x > x1 + 150) continue;
+    const sy = surfaceY(m.x), tick = Math.floor(m.t * 14);
+    // each lobe now: [middle, half-width at the foot, height, lean, fallen]
+    const now = m.lobes.map(L => { const [h, r, f] = msplLobe(L, m.t); return [L.c * (1 + 0.5 * f), L.r * (0.55 + 0.45 * Math.min(1, r * 1.6)) * (1 + 0.7 * f), h, L.l, f]; }).filter(q => q[2] > 1);
+    if (!now.length) continue;
+    const top = Math.max(...now.map(q => q[2])), fMid = now[0][4] || 0;
+    const foot = 62 * m.k * Math.min(1, top / 40) * (1 + 0.5 * fMid), footH = Math.min(top, 0.2 * MSPL_H * m.k);   // (the white water heaped round its foot)
+    const span = 120 * m.k * (1 + 0.8 * fMid);
+    const yb = PY(sy) + PB, yt = PY(sy - top);
+    for (let y = Math.floor(yt / PB) * PB; y < yb; y += PB) {
+      const wy = sy - (y + PB / 2 + TOPPX) / SV;                             // (height above the water, world units)
+      for (let X = Math.floor(PX(m.x - span) / PB) * PB; X < PX(m.x + span); X += PB) {
+        const wx = (X + PB / 2 + CAMPX) / SV - m.x;
+        // how deep inside the water it is (0 at its edge, 1 well inside), and how far fallen the lobe it's in is
+        let e = -1, fall = 0;
+        for (const [c, r, h, l, f] of now) {
+          if (wy >= h) continue;
+          const q = Math.max(0, wy) / h, half = r * Math.pow(1 - Math.pow(q, 1.8), 0.6), d = half - Math.abs(wx - (c + l * Math.max(0, wy)));
+          if (d > 0) { const ee = Math.min(1, d / Math.max(3, half * 0.35)); if (ee > e) { e = ee; fall = f; } }
+        }
+        if (footH > 0 && wy < footH) { const half = foot * Math.pow(1 - Math.max(0, wy) / footH, 0.7), d = half - Math.abs(wx); if (d > 0) { const ee = Math.min(1, d / Math.max(3, half * 0.3)); if (ee > e) { e = ee; fall = fMid; } } }
+        if (e < 0) continue;
+        const hh = hash(X * 0.37 + y * 1.13 + tick * 0.71 + m.seed);
+        if (hh > 0.35 + 0.65 * e) continue;                                    // (a ragged, broken edge)
+        if (hh < fall * (0.25 + 0.75 * clamp(wy / top, 0, 1)) * (1.1 - 0.5 * e)) continue;   // (coming apart from the top as it falls)
+        C.fillStyle = e > 0.5 ? pal[0] : hh > 0.6 ? pal[1] : pal[2];
+        C.fillRect(X, y, PB, PB);
+      }
+    }
   }
 }
 
