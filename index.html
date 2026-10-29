@@ -2572,8 +2572,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 192;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 23:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 193;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 23:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -16256,8 +16256,10 @@ function skyFrame(G) {
   for (const lay of LAYERS) lay.off += windV * lay.par * dt;
   // the lightning: the game's newest bolt, its brightness
   flash.k = G.flash ? G.flash.k : 0; flash.wx = G.flash ? G.flash.x : 0; flash.lay = flash.k > 0 ? LAYERS[3] : null;
-  if (frameNo % 60 === 0) for (const c of clouds) { if (c.spr && now - (c.seen || 0) > 3) c.spr = null; if (c.pbv && !c.visible && now - (c.seen || 0) > 3) { for (const b of c.pbv) if (b) b.free(); c.pbv = null; if (c.pbx) { c.pbx.free(); c.pbx = null; } } if (c.lorder && !c.visible) c.lorder = null; }
-  if (frameNo % 60 === 0) for (const c of clouds) if (c.items && c !== hero && !c.disturbed && !(c.tubes && c.tubes.length) && now - (c.seen || 0) > 12) { c.items = c.billows = null; c.nbrReady = false; }
+  // (Oct 28, 23:09: flying, a cloud gone off the screen was let go after 3 s and built again from nothing when it came back -
+  // five a frame; kept 20 s now, its puffs 60 s)
+  if (frameNo % 60 === 0) for (const c of clouds) { if (c.spr && now - (c.seen || 0) > 20) c.spr = null; if (c.pbv && !c.visible && now - (c.seen || 0) > 20) { for (const b of c.pbv) if (b) b.free(); c.pbv = null; if (c.pbx) { c.pbx.free(); c.pbx = null; } } if (c.lorder && !c.visible) c.lorder = null; }
+  if (frameNo % 60 === 0) for (const c of clouds) if (c.items && c !== hero && !c.disturbed && !(c.tubes && c.tubes.length) && now - (c.seen || 0) > 60) { c.items = c.billows = null; c.nbrReady = false; }
   skyGen = frameNo < 4 || frameNo < FORCE ? 1e9 : (P.genms ?? 4);   // (the frame's budget, ms, for making clouds' puffs: a cloud past it is drawn as lobes till its turn)
 }
 let skyGen = 7, FORCE = 0, RL_WAIT = 0;
@@ -16366,7 +16368,11 @@ function skyBack(V) {
   V.bgDone = true;
   // ---- the clouds in this view: placed and lit (once a frame: a cloud the other view has done already is only drawn)
   const vis = VIS[VI]; vis.length = 0; NEAR.length = 0;
+  // (Oct 28, 23:09: in a clear sky every one of ~2,600 clouds was still gone through each frame, all at nothing) a cloud at
+  // nothing that the sky's cover can't grow is passed over until the cover (or what sets how clouds grow) changes
+  const gk = P.cover + ',' + (P.wisps ?? 0.5) + ',' + (P.big || 0) + ',' + (P.bigk ?? 0.5) + ',' + SNAP;
   for (const c of clouds) {
+    if (c.grow === 0 && c.growT === 0 && c.gk0 === gk && frameNo >= 3) { c.visible = false; continue; }
     if (c.gfr !== frameNo) {                                             // (its forming, once a frame whoever sees it)
       c.gfr = frameNo; c.y = c.lay.baseY;
       const d = c.bx - c.lay.uPiv; if (d > WORLD / 2) c.bx -= WORLD; if (d < -WORLD / 2) c.bx += WORLD;
@@ -16377,6 +16383,7 @@ function skyBack(V) {
       c.growT = c === hero ? smoothstep(0.12, 0.3, cov) : clear * smoothstep(c.thr * 0.6 - 0.04, c.thr * 0.6 + 0.12, c.wisp ? (P.wisps ?? 0.5) * clamp(cov / 0.3, 0, 1) : cov);
       if (!c.wisp) c.growT *= 1 + (P.bigk ?? 0.5) * (P.big || 0);           // (past 60: bigger, so they tower higher over their deck)
       c.grow += (c.growT - c.grow) * Math.min(1, skyDt * skyGrowK); if (Math.abs(c.growT - c.grow) < 0.002 || frameNo < 3 || frameNo < SNAP) c.grow = c.growT;
+      c.gk0 = gk;                                                         // (the cover it was last grown for: at nothing and unchanged, passed over)
     }
     c.y = c.lay.baseY;
     if (c.extU === undefined) cloudBox(c);
@@ -24602,11 +24609,12 @@ function waterStep(dt) {
   // ~4,300 columns of the open sea's swell for water nobody could see) only the pockets within a screen of a view; the
   // rest lie flat at their level until one comes near
   const vis = [];
-  for (let i = 0; i < (ONEVIEW() ? 1 : 2); i++) { const v = cam.view[i]; if (!v) continue; const w = (ONEVIEW() ? bw : bw / 2) / (S * v.z); vis.push([v.l - w, v.l + 2 * w]); }
+  // (and up-down too, Oct 28 23:09: from the sky - above the sea floor - no cave can be seen)
+  for (let i = 0; i < (ONEVIEW() ? 1 : 2); i++) { const v = cam.view[i]; if (!v) continue; const w = (ONEVIEW() ? bw : bw / 2) / (S * v.z), h = VIEW_H / v.z; vis.push([v.l - w, v.l + 2 * w, v.top - h * 0.5, v.top + h * 1.5]); }
   for (const p of pk) {
     if (!p.sy) continue;
-    const a = p.win.X0 + p.xa * CV.G, b = a + p.sy.length * CV.G;
-    if (!vis.length || vis.some(([l, r]) => b > l && a < r)) { surfTable(p); p.flat = false; }
+    const a = p.win.X0 + p.xa * CV.G, b = a + p.sy.length * CV.G, yt = p.win.Y0 + p.top * CV.G + WATER_Y, yb = pocketLevel(p) + WATER_Y + 60;
+    if (!vis.length || vis.some(([l, r, t, u]) => b > l && a < r && yb > t && yt < u)) { surfTable(p); p.flat = false; }
     else { const L = pocketLevel(p); if (!p.flat || p.flatL !== L) { p.sy.fill(L); p.flat = true; p.flatL = L; } }   // (its level kept as it rises or falls)
   }
   // drips from the stalactites hanging over a pocket's air (only once the water's under their tips)
