@@ -2089,7 +2089,7 @@ function comeBackOut(p, k) {
 }
 // The tower gun may depress below horizontal, but only as far as its shells still clear its own quay
 function elevMin(p) {
-  if (msOf(p)) return 0;                                     // (the minisub's light: right round below it, never up - user Oct 27)
+  if (lampOf(p)) return 0;                                     // (the minisub's light: right round below it, never up - user Oct 27)
   if (controlling(p) === 'heli') return -80;                 // (LAND TEST: the helicopter's nose gun, well down)
   if (controlling(p) === 'civ') return -80;                  // (the fire helicopter's water cannon)
   if (controlling(p) === 'tank') return -6;
@@ -2097,7 +2097,7 @@ function elevMin(p) {
   return -15;                             // (user Oct 25: down to 15 below, for subs close to the dock; your own pier your rounds pass)
 }
 const gunOf = sh => sh.gun || guns[sh.id];      // (a STORY raider carries its own gun)
-function activeGun(p) { const m = controlling(p); if (m === 'civ' && isFireHeli(crew[p].civ)) return hoseGun(crew[p].civ); if (m === 'civ' && msOf(p)) return msOf(p).lamp; return m === 'heli' ? hguns[p] : m === 'ship' || m === 'tank' ? guns[p] : tguns[p]; }
+function activeGun(p) { const m = controlling(p); if (m === 'civ' && isFireHeli(crew[p].civ)) return hoseGun(crew[p].civ); if (m === 'civ' && msOf(p)) return msOf(p).lamp; if (m === 'sub' && subLampOf(p)) return subLampOf(p); return m === 'heli' ? hguns[p] : m === 'ship' || m === 'tank' ? guns[p] : tguns[p]; }
 
 
 // what you're in has an ANGLE / POWER (activeGun) that the keys, the right stick, the guest's link aim - one path
@@ -2140,7 +2140,7 @@ function holdsFor(p, dt) {
 
 function unitFacing(p) { const m = crew[p].mode; return m === 'tower' ? myTw(p).facing : m === 'tank' && tanks[p] ? tanks[p].facing : m === 'heli' && helis[p] ? helis[p].facing : ships[p].facing; }
 // the battleship's turrets swing right round (up to 180 degrees, firing astern); the tower's gun to straight up
-function elevMax(p) { const m = crew[p].mode; if (msOf(p)) return 180; return m === 'ship' || m === 'tank' || m === 'tower' ? 180 : m === 'heli' ? 25 : m === 'civ' ? 35 : ELEV_MAX; }   // (the tower right round too, user Oct 25: planes going the other way)
+function elevMax(p) { const m = crew[p].mode; if (lampOf(p)) return 180; return m === 'ship' || m === 'tank' || m === 'tower' ? 180 : m === 'heli' ? 25 : m === 'civ' ? 35 : ELEV_MAX; }   // (the tower right round too, user Oct 25: planes going the other way)
 const SUB_TURN = 140;                                        // world units of depth per turn of the (keyboard) dive wheel
 // the keyboard's dive keys turn an imaginary wheel: the sub's target depth follows
 function turnWheel(p, degs) {
@@ -2381,7 +2381,8 @@ const ACTS = {
   ping: p => minisubPing(p),                     // (the minisub: a wave toward her ship, user Oct 27)
   launch: p => civLaunch(p),                     // (OPEN WORLD: the research ship lets her sub down)                // (LAND TEST: the helicopter's magnet, user Oct 25)
   rocket: p => crew[p].mode === 'heli' ? heliRocket(helis[p]) : fireRocket(planes[p]),
-  torp: (p, up) => fireTorpedo(subs[p], !!up),
+  torp: p => fireTorpedo(subs[p], false),          // (the vertical torpedo is gone: user Oct 29)
+  light: p => toggleSubLight(subs[p]),            // (the army sub's light, user Oct 29)
   mine: p => layMine(subs[p]),
   smoke: p => crew[p].mode === 'tank' ? tankScreen(tanks[p]) : dropSmoke(ships[p]),   // (the tank's too: user Oct 25)
   // the plane: -1 / 1 head left / right, 0 circle on the spot
@@ -2664,8 +2665,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 202;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 09:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 203;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 10:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -2970,14 +2971,15 @@ function linkClose(msg) {
 function ctlState(p) {
   const m = crew[p].mode, g = hasGuns(p) ? activeGun(p) : null, pl = planes[p];
   // (d: the climb / dive held - the plane's keys too, user Oct 24: a guest's plane couldn't go up or down)
-  return { m, e: g ? +g.elev.toFixed(2) : null, w: g ? +g.power.toFixed(3) : null, d: m === 'plane' ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : diveHold[p] || 0, mg: m === 'plane' ? !!(pl && pl.mg) : !!mgHold[p], z: m === 'sub' ? Math.round(subs[p].depthT) : null, cl: hiddenPlane(pl), h: msOf(p) ? msHold[p] + msKeys[p] : 0, le: msOf(p) ? Math.round(msOf(p).lamp.elev) : null };
+  return { m, e: g ? +g.elev.toFixed(2) : null, w: g ? +g.power.toFixed(3) : null, d: m === 'plane' ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : diveHold[p] || 0, mg: m === 'plane' ? !!(pl && pl.mg) : !!mgHold[p], z: m === 'sub' ? Math.round(subs[p].depthT) : null, cl: hiddenPlane(pl), h: msOf(p) ? msHold[p] + msKeys[p] : 0, le: lampOf(p) ? Math.round(lampOf(p).elev) : null };
 }
 function setCtlState(p, s) {
   if (s && s.cl && planes[p] && planes[p].state === 'fly') planes[p].cloudT = time;   // (in a cloud on its own player's screen)
   if (!s || s.m !== crew[p].mode) return;                       // (sent for the vehicle it was in: ignored once it's left)
   if (s.e != null && hasGuns(p)) { const g = activeGun(p); g.elev = clamp(s.e, elevMin(p), elevMax(p)); g.power = clamp(s.w, 0, 1); }
   diveHold[p] = s.d || 0;
-  if (msOf(p)) { msHold[p] = clamp(s.h || 0, -1, 1); if (s.le != null) msOf(p).lamp.elev = clamp(s.le, 0, 180); }   // (the minisub: its direction held, its light)
+  if (msOf(p)) msHold[p] = clamp(s.h || 0, -1, 1);
+  if (lampOf(p) && s.le != null) lampOf(p).elev = clamp(s.le, 0, 180);   // (a sub's light, the minisub's or the army sub's)   // (the minisub: its direction held, its light)
   if (s.m === 'plane') { if (planes[p]) planes[p].mg = !!s.mg; } else mgHold[p] = !!s.mg;
   if (s.z != null && s.m === 'sub') subs[p].depthT = clamp(s.z, WATER_Y, subMaxY(subs[p].x));
 }
@@ -3104,7 +3106,7 @@ function hudKit(p) {
   const m = crew[p].mode;
   const home = !TEST && stopPref;                    // (with the boats carrying on, you sail them home yourself)
   if (m === 'ship') return { drive: true, home, dive: false, aim: true, weapons: ['mg', 'shell', 'dc', 'smoke'] };
-  if (m === 'sub') return { drive: true, home, dive: true, aim: false, weapons: ['torp', 'torpUp', 'mine'] };   // (the mine: user Oct 24 night)
+  if (m === 'sub') return { drive: true, home, dive: true, aim: true, noPower: true, weapons: ['torp', 'light', 'mine'] };   // (the mine: user Oct 24 night; the light in the vertical torpedo's place, with the ANGLE tape for it - user Oct 29)
   if (m === 'tower') return { drive: false, home: false, dive: false, aim: true, weapons: ['mg', 'shell'] };
   if (m === 'plane') return { drive: true, home, dive: true, aim: false, weapons: ['mg', 'rocket', 'bomb'] };   // (the bomb in the depth charge's slot: it is one, under water)
   if (m === 'sail') return { drive: true, home: false, dive: false, aim: false, weapons: ['anchor', 'sails'] };   // (CHILL's yacht: green, as every vehicle's)
@@ -3168,6 +3170,7 @@ function hudLayout(p) {
 function aimLive(p) {
   const m = crew[p].mode;
   if (msOf(p)) return msOf(p).state === 'out';
+  if (m === 'sub') return !!subs[p] && subs[p].state === 'out';   // (her light's angle)
   if (m === 'tower') return towerUsable(myTw(p));
   if (m === 'tank') return !!tanks[p] && tanks[p].state === 'alive';
   if (m === 'heli') return !!helis[p] && (helis[p].state === 'fly' || helis[p].state === 'landed');
@@ -3203,6 +3206,7 @@ function weaponState(p, wk) {
   }
   if (m === 'sub') {
     const sb = subs[p];
+    if (wk === 'light') return { f: 0, off: sb.state !== 'out' && sb.state !== 'docked', n: -1 };
     if (wk === 'mine') return { f: (sb.mk || 0) / MINE_RELOAD, off: (sb.mines || 0) <= 0 || sb.state !== 'out', n: sb.mines || 0 };
     return { f: sb.tk / TORP_RELOAD, off: sb.torps <= 0, n: wk === 'torp' ? sb.torps : -1 };
   }
@@ -3252,6 +3256,7 @@ function weaponIcon(p, wk) {
   if (wk === 'bomb') return img.hud.bomb;
   if (wk === 'torpUp') return img.hud.torpUp;
   if (wk === 'mine') return mineIcon();
+  if (wk === 'light') return lightIcon();
   if (wk === 'launch') return (crew[p] && crew[p].civ && civClass(crew[p].civ) === 'shuttle' ? img.hud.icLaunch : null) || img.hud.icCvSub || img.hud.icSub;
   return fc > 0 ? img.hud.shellR : img.hud.shell;   // the shell (or torpedo) points the way she faces
 }
@@ -3276,7 +3281,7 @@ function drawHudIn(p) {
   ug.save();
   if (!ONEVIEW()) { ug.beginPath(); ug.rect(Math.round((HUD_HALF != null ? HUD_HALF : p) * ubw / 2), 0, Math.ceil(ubw / 2), ubh); ug.clip(); }
   for (const it of Lh.items) {
-    const down = (pr[it.id] || 0) > 0 || (it.id === 'magnet' && ((helis[p] && helis[p].rope && helis[p].rope.mode === 'out') || (crew[p].mode === 'civ' && crew[p].civ && crew[p].civ.mag && crew[p].civ.mag.out))) || (it.id === 'sails' && yachtFor(p) && yachtFor(p).sailsUp === false) || (it.id === 'up' && diveHold[p] < 0) || (msOf(p) && ((it.id === 'left' && msLever(p) < 0) || (it.id === 'right' && msLever(p) > 0))) || (it.id === 'down' && diveHold[p] > 0);
+    const down = (pr[it.id] || 0) > 0 || (it.id === 'magnet' && ((helis[p] && helis[p].rope && helis[p].rope.mode === 'out') || (crew[p].mode === 'civ' && crew[p].civ && crew[p].civ.mag && crew[p].civ.mag.out))) || (it.id === 'sails' && yachtFor(p) && yachtFor(p).sailsUp === false) || (it.id === 'light' && crew[p].mode === 'sub' && subs[p] && subs[p].light) || (it.id === 'up' && diveHold[p] < 0) || (msOf(p) && ((it.id === 'left' && msLever(p) < 0) || (it.id === 'right' && msLever(p) > 0))) || (it.id === 'down' && diveHold[p] > 0);
     const y = it.y + (down ? Math.max(1, Math.round(2 * k)) : 0);
     if (it.id === 'dial') { drawAngleDial(p, it, k); continue; }
     if (it.id === 'power') { drawPowerSlider(p, it, k); continue; }
@@ -3814,7 +3819,8 @@ function hudPressAt(hit, ux) {
     if (CW_SET.has(it.weapon)) { act(p, 'cw', it.weapon); return null; }   // (a vehicle's own green button)
     if (it.weapon === 'dc') act(p, 'dc');
     else if (it.weapon === 'mine') act(p, 'mine');
-    else if (it.weapon === 'torp' || it.weapon === 'torpUp') act(p, 'torp', it.weapon === 'torpUp');
+    else if (it.weapon === 'light') act(p, 'light');
+    else if (it.weapon === 'torp') act(p, 'torp', false);
     else { act(p, 'fire'); return { kind: 'cbtn', p }; }
     sfxClick(gunCtl[p]);
     return null;
@@ -3826,7 +3832,7 @@ function hudPressAt(hit, ux) {
 // which way the tape runs: for a gun facing right, bigger numbers to the right; for one facing left (the right-hand
 // player's) the other way round, so a slide of the finger turns the barrel the same way round on both sides
 // (sliding right turns it clockwise)
-const tapeDir = p => msOf(p) ? 1 : unitFacing(p) < 0 ? -1 : 1;   // (the minisub's light: slide right, it swings to the right)
+const tapeDir = p => lampOf(p) ? 1 : unitFacing(p) < 0 ? -1 : 1;   // (the minisub's light: slide right, it swings to the right)
 function dragDial(d, ux) {
   // the numbers follow your finger
   const g = activeGun(d.p);
@@ -5480,7 +5486,7 @@ window.addEventListener('keydown', e => {
   if (code in MG_KEYS) { e.preventDefault(); if (!ui.menu) keyDo(MG_KEYS[code], p => { if (crew[p].mode === 'plane') planes[p].mg = true; else if (crew[p].mode === 'sub') { if (!e.repeat) act(p, 'mine'); } else if (crew[p].mode === 'civ' || crew[p].mode === 'sail') { if (!e.repeat) civSlot(p, 0, true); } else mgHold[p] = true; }); return; }   // (a vehicle's first green button, user Oct 27)
   if (code in DC_KEYS) {
     e.preventDefault();
-    if (!ui.menu && !e.repeat) keyDo(DC_KEYS[code], p => { const m = crew[p].mode; if (m === 'plane') act(p, 'bomb'); else if (m === 'ship') act(p, 'dc'); else if (m === 'sub') act(p, 'torp', true); else if (m === 'heli') act(p, 'magnet'); else if (m === 'civ' || m === 'sail') civSlot(p, 2, true); });   // (the army helicopter's magnet: its third green button; a civilian's or a yacht's third, user Oct 27)
+    if (!ui.menu && !e.repeat) keyDo(DC_KEYS[code], p => { const m = crew[p].mode; if (m === 'plane') act(p, 'bomb'); else if (m === 'ship') act(p, 'dc'); else if (m === 'sub') act(p, 'light'); else if (m === 'heli') act(p, 'magnet'); else if (m === 'civ' || m === 'sail') civSlot(p, 2, true); });   // (the army helicopter's magnet: its third green button; a civilian's or a yacht's third, user Oct 27)
     return;
   }
   if (LEVER_KEYS[code] || HOLD_KEYS.has(code) || code in FIRE_KEYS) e.preventDefault(); else return;
@@ -5549,7 +5555,7 @@ function padWeapon(p, slot, down) {
   } else if (slot === 2) {
     if (!down) { act(p, 'release'); return; }
     if (m === 'plane') act(p, 'rocket');
-    else if (m === 'sub') act(p, 'torp', true);
+    else if (m === 'sub') act(p, 'light');                 // (her light, where the vertical torpedo was - user Oct 29)
     else if (m === 'ship' || m === 'tower' || m === 'tank' || m === 'heli') act(p, 'fire');
   } else if (slot === 3 && down && m === 'ship') act(p, 'dc');
   else if (slot === 3 && down && m === 'sub') act(p, 'mine');
@@ -5788,7 +5794,7 @@ function pollPads(dt) {
         // well (user Oct 24: it has nothing else to do there)
         const rx = ax(2) || (m === 'tower' ? lx : 0), ry = ax(3) || (m === 'tower' ? ly : 0);
         // (the minisub: the right stick points its light - anywhere through the half below it, user Oct 27)
-        if ((rx || ry) && msOf(p)) { if (Math.hypot(rx, ry) > 0.5) { const L = msOf(p).lamp; L.elev = clamp(Math.atan2(Math.max(0, ry), rx) * 180 / Math.PI, 0, 180); } }
+        if ((rx || ry) && lampOf(p)) { if (Math.hypot(rx, ry) > 0.5) { const L = lampOf(p); L.elev = clamp(Math.atan2(Math.max(0, ry), rx) * 180 / Math.PI, 0, 180); } }
         else if ((rx || ry) && hasGuns(p)) {
           const g = activeGun(p);
           if (ry) g.elev = clamp(g.elev - ry * 55 * dt, elevMin(p), elevMax(p));
@@ -5854,7 +5860,7 @@ function heldFor(p, dt, k) {
   if (!runCtl[p].drag && crew[p].mode === 'boat') runCtl[p].v = clamp(runCtl[p].v + ax * dt * 1.6, -1, 1);
   // the power, up and down
   // (the helicopter: the power keys tilt its nose gun up and down instead)
-  if ((k.pu || k.pd) && msOf(p)) { const L = msOf(p).lamp; L.elev = clamp(L.elev + (k.pu ? -1 : 1) * 90 * dt, 0, 180); }   // (the minisub's light, as the helicopter's nose gun)
+  if ((k.pu || k.pd) && lampOf(p)) { const L = lampOf(p); L.elev = clamp(L.elev + (k.pu ? -1 : 1) * 90 * dt, 0, 180); }   // (the minisub's light, as the helicopter's nose gun)
   else if ((k.pu || k.pd) && heliAim(p)) { const g = activeGun(p); g.elev = clamp(g.elev + (k.pu ? 1 : -1) * 70 * dt, elevMin(p), elevMax(p)); g.aimShow = 1.6; }
   else if ((k.pu || k.pd) && hasGuns(p)) { const g = activeGun(p); g.power = clamp(g.power + (k.pu ? 1 : -1) * 0.6 * dt, 0, 1); g.aimShow = 1.6; powerClick(p, g.power); }
 }
@@ -6576,7 +6582,7 @@ const SUB_ACC = 84, SUB_DRAG_L = 0.42, SUB_DRAG_Q = 0.0016, SUB_VZ = 46;   // (O
 function makeSub(id, d) {
   return {
     id, dock: d, facing: -d.dir, x: d.subBerth, y: SUB_GATE_Y, vx: 0, vy: 0, a: 0, throttle: 0, input: 0, dive: 0, depthT: SUB_GATE_Y,
-    state: 'docked', lvl: new Array(SUB_SECTIONS).fill(0), away: false, rising: false, autoDive: 0, scorch: [], art: null, parts: null, turn: null, torps: TORP_MAX, tk: 0, resupT: 0, mines: MINE_MAX, mk: 0,
+    state: 'docked', lvl: new Array(SUB_SECTIONS).fill(0), away: false, rising: false, autoDive: 0, scorch: [], art: null, parts: null, turn: null, torps: TORP_MAX, tk: 0, resupT: 0, mines: MINE_MAX, mk: 0, light: false, lamp: { elev: d.dir > 0 ? 155 : 25, power: 0, aimShow: 0 },
     bubbleAcc: 0, fixIdx: -1, sinkT: 0, weld: 0, leak: 0, rest: 0, ventAcc: 0,
   };
 }
@@ -6761,6 +6767,7 @@ function stepSub(sb, dt) {
   const p = sb.id, d = sb.dock, c = crew[p];
   if (sb.state === 'gone') return;
   if (sb.state === 'sinking' || sb.state === 'wreck') { stepSubWreck(sb, dt); return; }
+  subLampStep(sb, dt);
   const driving = c.mode === 'sub' && sb.state === 'out' && !sb.gate;
   const harboured = !!sb.gate || sb.state === 'docked';
   // engines: the telegraph says which way to go. Unlike the battleship she never backs up: asked to go the
@@ -7372,6 +7379,84 @@ function drawWclouds(x0, x1) {
   puffEnd();
 }
 
+/* ---- the army sub's light (user Oct 29) ----
+   "We're going to remove the vertical missiles and add those to the mines... 10 mines is the total" (MINE_MAX), "a third
+   button that replaces the vertical missiles, which is a light. Same light we have in the exploration sub. If you press
+   that button, you turn the light on as well as a blinking red light on the tail of the submarine (like the planes do).
+   It will be placed at the front of the sub, near the bottom. If you press it again, you toggle it off" - B on a pad, X
+   on the keyboard (the slot the vertical torpedo had). Its direction: the ANGLE tape on the right, as the exploration
+   sub's - 180 degrees below her, left, bottom, right (sb.lamp.elev: 0 straight right, 90 down, 180 left; never up):
+   the right stick points it, the power keys turn it, a finger slides the tape. The beam is the exploration sub's own
+   (msBeamSprite, MS_BEAM_L, MS_BEAM_A - 50-land-research.js). */
+const SUB_LAMP_AT = [20, 126], SUB_TAIL_AT = [690, 40];   // (the art's column and row, bow on the left: the lamp low on her bow, the red lamp on top of her rudder)
+const subLampOf = p => {
+  if (p == null || !crew[p] || crew[p].mode !== 'sub' || !subs[p]) return null;
+  const sb = subs[p]; if (!sb.lamp) sb.lamp = { elev: sb.facing > 0 ? 25 : 155, power: 0, aimShow: 0 };
+  return sb.lamp;
+};
+// the light you point, in whichever sub you're in: the exploration sub's or the army sub's
+const lampOf = p => { const s = msOf(p); return s ? s.lamp : subLampOf(p); };
+function toggleSubLight(sb) {
+  if (!sb || (sb.state !== 'out' && sb.state !== 'docked')) return;
+  if (!sb.lamp) sb.lamp = { elev: sb.facing > 0 ? 25 : 155, power: 0, aimShow: 0 };
+  sb.light = !sb.light;
+}
+// the beam eases round to where the tape is set (through the half below her, never up)
+function subLampStep(sb, dt) {
+  if (!sb.lamp) return;
+  const want = clamp(sb.lamp.elev, 0, 180) * Math.PI / 180, a = sb.aimA == null ? want : sb.aimA;
+  sb.aimA = clamp(a + (want - a) * Math.min(1, dt * 8), 0, Math.PI);
+}
+// a point of her drawing in the world: side-on following her pitch; part way round, along the narrower turning drawing
+function subArtPt(sb, col, row) {
+  const fk = subTurnFrame(sb), face = sb.turn ? (fk < 3 ? sb.turn.from : sb.turn.to) : sb.facing, w = sb.turn ? TURN_W[fk] : 1;
+  const lx = (0.5 - col / SUB_SRC_W) * SUB_L * face * w, ly = (row - SUB_WL_ROW) * SUB_K, a = sb.turn ? 0 : sb.a, ca = Math.cos(a), sa = Math.sin(a);
+  return [sb.x + lx * ca - ly * sa, sb.y + lx * sa + ly * ca];
+}
+const subLightOn = sb => sb && sb.light && (sb.state === 'out' || sb.state === 'docked') && !sb.parts;
+// (OPEN WORLD) the deep's dark opened along her beam too (drawAbyss), as the exploration sub's
+function subAbyssLights(out) {
+  for (const sb of subs) {
+    if (!subLightOn(sb)) continue;
+    const [lx, ly] = subArtPt(sb, ...SUB_LAMP_AT), X = PX(lx), Y = PY(ly);
+    if (X < -900 * SV || X > VWP + 900 * SV) continue;
+    const a = sb.aimA == null ? clamp(sb.lamp.elev, 0, 180) * Math.PI / 180 : sb.aimA, ux = Math.cos(a), uy = Math.sin(a);
+    out.push({ x: X, y: Y, r: 40 * SV, k: 0.9 });
+    out.push({ x: X + ux * 8 * SV, y: Y + uy * 8 * SV, ux, uy, L: MS_BEAM_L * SV, k: 1, beam: true });
+  }
+  return out;
+}
+// her light: the beam (after the night's tint, under the water only), a bright spot at the lamp; and while it's on, the
+// red lamp on her tail blinking (drawn after the night, as the planes')
+function drawSubLights(x0, x1) {
+  for (const sb of subs) {
+    if (!subLightOn(sb)) continue;
+    // (the screen is two half views: a sub a whole beam past this one's edge still lights it - rules.md 6)
+    if (sb.x < x0 - MS_BEAM_L - SUB_L || sb.x > x1 + MS_BEAM_L + SUB_L) continue;
+    const [tx, ty] = subArtPt(sb, ...SUB_TAIL_AT);
+    if ((time + sb.id * 0.37) % 1.0 < 0.32) planeLamps[viewIdx].push(PX(tx), PY(ty), clamp(0.7 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1));
+    const [lx, ly] = subArtPt(sb, ...SUB_LAMP_AT), a = sb.aimA == null ? clamp(sb.lamp.elev, 0, 180) * Math.PI / 180 : sb.aimA;
+    const X = PX(lx), Y = PY(ly), L = MS_BEAM_L * SV, sp = msBeamSprite(), sc = L / sp.width, wy = Math.round(PY(WATER_Y + 2));
+    lateLit[viewIdx].push(() => {
+      C.save(); C.beginPath(); C.rect(-SHX - 4, wy, VWP + 2 * SHX + 8, bh - SHY - wy + 4); C.clip();
+      const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = true;
+      C.globalCompositeOperation = 'lighter'; C.globalAlpha = MS_BEAM_A;
+      C.translate(X, Y); C.rotate(a); C.drawImage(sp, 0, -Math.round(sp.height * sc / 2), Math.round(sp.width * sc), Math.round(sp.height * sc));
+      C.restore(); C.save();
+      C.globalCompositeOperation = 'lighter'; C.globalAlpha = 1;
+      const R = 9 * SV, g = C.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, 'rgba(250,252,255,0.95)'); g.addColorStop(1, 'rgba(230,240,255,0)'); C.fillStyle = g; C.fillRect(Math.round(X - R), Math.round(Y - R), Math.round(2 * R), Math.round(2 * R));
+      C.imageSmoothingEnabled = sm; C.restore();
+    });
+  }
+}
+// the button's picture: a lamp throwing its beam, in the buttons' cream (glyphIcon)
+function lightIcon() {
+  if (!ACT_GLYPH.light) ACT_GLYPH.light = (u, v) =>
+    (u >= 16 && u < 34 && v >= 40 && v < 57) ||                                               // (the lamp)
+    (u >= 39 && u < 86 && Math.abs(v - 48.5) <= 5 + (u - 39) * 0.42);                        // (its beam, spreading)
+  return glyphIcon('light');
+}
+
 /* ---------------- Torpedoes: the submarine fires them straight up (at the hulls above) or ahead (at other subs) ---------------- */
 const torps = [], torpWrecks = [];   // spent torpedoes lying on the bottom
 const TORP_RUN = 9;                  // seconds of motor; after that a torpedo that found nothing sinks
@@ -7828,7 +7913,7 @@ function drawDcharges(x0, x1) {
    torpedo, another blast. Each sub carries three (more at her pier). Contact sets it off as a depth charge going off
    right at the surface, with a heavier blow to whatever touched it; nearby mines go up with it. For the first
    moments, until it has floated clear of her, its own sub can't set it off; after that it's anybody's - yours too. */
-const mines = [], MINE_MAX = 3, MINE_RELOAD = 2.5, MINE_ARM = 2, MINE_R = 7;
+const mines = [], MINE_MAX = 10, MINE_RELOAD = 2.5, MINE_ARM = 2, MINE_R = 7;
 function layMine(sb) {
   if (!sb || sb.state !== 'out') return;
   if ((sb.mk || 0) > 0) return;
@@ -18784,6 +18869,7 @@ function renderObjects() {
   // (OPEN WORLD: the kraken in the deepest pit - 50-land-kraken; after the deep's dark, in the foreground silhouette's colour, user Oct 28)
   if (LAND) guardDraw('drawKraken', () => drawKraken(x0, x1));
   drawDeepLights(x0, x1);                                 // (the chests' glow, the subs' headlights)
+  drawSubLights(x0, x1);                                  // (the army sub's light, user Oct 29)
   // under the wake: churned, aerated water, dense and white just under the surface, thinning with depth and age
   drawWakeField(x0, x1, false);
   const lw = SV > 1.6 ? 3 : SV > 0.9 ? 2 : 1;
@@ -20144,7 +20230,7 @@ const uwGlow = y => y > WATER_Y + 2 && LAND ? 1 - 0.85 * abyssDarkAt(y) : 1;
 function drawAbyss() {
   if (!floorTab) return;                                    // (OPEN WORLD: by depth, down to the floor's real deepest - SEA_FLOOR_MAX from FLOOR_PTS)
   const ya = PY(SEABED_DEEP + 80), Bt = bh - SHY + 2;
-  const lights = krAbyssLights(ancAbyssLights(typeof abyssLights === 'function' ? abyssLights() : []));   // (and the research ships' anchor lamps - 50-land-anchors)
+  const lights = krAbyssLights(ancAbyssLights(subAbyssLights(typeof abyssLights === 'function' ? abyssLights() : [])));   // (and the research ships' anchor lamps - 50-land-anchors)
   if (ya >= Bt && !lights.some(l => l.L)) return;           // (a beam shines in the shallower water too)
   const yb = PY(SEA_FLOOR_MAX - 300), L0 = -SHX - 4, L1 = VWP + SHX + 4;
   // how dark at a screen row: none at the old deep floor's depth, near-black at the deepest (user Oct 25 late: so deep down the
@@ -22380,11 +22466,12 @@ function cpuSub0(B, dt) {
   // hurt, or out of torpedoes: home (a raider never goes home)
   if (!B.unit && (subLife(sb) < 0.4 || sb.torps <= 0)) { cpuDrive(B, d.dir); sb.depthT = SUB_GATE_Y; return; }
   if (E.ship) {
-    // under the battleship, then a torpedo straight up into her keel (aimed where she'll be when it gets there)
+    // under the battleship, then a mine let go under her keel, floating up into her (aimed where she'll be; the vertical
+    // torpedo is gone, user Oct 29)
     sb.depthT = clamp(WATER_Y + 80, WATER_Y, subMaxY(sb.x));
     const rise = Math.max(0.3, (sb.y - WATER_Y) / 140), tx = E.ship.x + E.ship.vx * rise * T.lead, dx = tx - sb.x;
     cpuDrive(B, Math.abs(dx) > 14 ? Math.sign(dx) : 0);
-    if (Math.abs(dx) < T.subTol && sb.y > WATER_Y + 35 && sb.tk <= 0 && !sb.turn && Math.random() < dt * (2 + 4 * B.level)) { fireTorpedo(sb, true); cpuCount(p, 'torp'); }
+    if (Math.abs(dx) < T.subTol && sb.y > WATER_Y + 35 && (sb.mines || 0) > 0 && !(sb.mk > 0) && subClear(sb) && !sb.turn && Math.random() < dt * (2 + 4 * B.level)) { layMine(sb); cpuCount(p, 'mine'); }
     // a mine in her path: the battleship coming this way, still well off (and not off its own pier)
     { const gap = Math.abs(E.ship.x - sb.x), coming = Math.sign(E.ship.vx) === Math.sign(sb.x - E.ship.x) && Math.abs(E.ship.vx) > 8;
       if (coming && gap > 180 && gap < 650 && (sb.mines || 0) > 0 && !(sb.mk > 0) && subClear(sb) && Math.random() < dt * 0.15 * (1 + B.level)) { layMine(sb); cpuCount(p, 'mine'); } }
@@ -30221,14 +30308,13 @@ function krClickAt(x, y) {
   return false;
 }
 // a CPU sub an arm is going for, or has hold of, fires at that arm if it can: a torpedo ahead at it (turning to face it, if
-// it's free to), or straight up at it when it's overhead
+// it's free to; the vertical torpedo is gone - user Oct 29)
 function krCpuFire(dt) {
   for (const o of KR.objs) {
     if (o.type !== 'SUB' || o.st !== 'free') continue;
     const sb = o.ref; if (!isCpu(sb.id) || sb.state !== 'out' || sb.turn || sb.tk > 0 || sb.torps <= 0) continue;
     const T = KR.tents.find(T => T.o === o && (T.st === 'reach' || T.st === 'haul')); if (!T || Math.random() > dt * 1.5) continue;
     const q = T.J[Math.floor((T.J.length - 1) * 0.55)], dx = q.x - sb.x, dy = q.y - sb.y;
-    if (dy < -40 && Math.abs(dx) < 60) { fireTorpedo(sb, true); cpuCount(sb.id, 'torp'); continue; }
     if (Math.sign(dx) !== sb.facing) { startSubTurn(sb); continue; }
     if (Math.abs(dy) < 90) { fireTorpedo(sb, false); cpuCount(sb.id, 'torp'); }
   }
