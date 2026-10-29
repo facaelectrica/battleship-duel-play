@@ -2685,8 +2685,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 211;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 11:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 212;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 12:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -37260,6 +37260,7 @@ window.addEventListener('pointercancel', landEdUp, { capture: true });
 // the ground's line and a handle on each free point
 function landEdDraw() {
   if (!landEdOn()) return;
+  terrainMarqueeDraw();                                          // (a box being drawn to pick pieces of line - 50-land-unified)
   const x0 = CAMPX / SV, x1 = x0 + VWW, st = Math.max(1, Math.round(PIXU / PIXW)), t = Math.max(1, Math.round(1.5 * dpr / PIXW));
   // the fixed stretches: shaded from the sky to the grid's bottom
   C.fillStyle = 'rgba(120,130,150,0.28)';
@@ -37469,6 +37470,53 @@ window.addEventListener('pointermove', e => {
   const k1 = pieceAt(!!s.F, s.R, x); if (k1 !== s.k1) { s.k1 = k1; terrainSyncSkin(); }
 }, { capture: true, passive: true });
 const selEnd = () => { TERRAIN_ED.selDrag = false; };
+/* (user Oct 29: "the left mouse button press and drag to multiple select ... drawing a rectangle that represents what I
+   want to select") a left-button drag on empty space draws a box: the pieces of line whose middles are in it are picked -
+   on the one line (a country's, the ocean floor's or an island's) with the most of them, from its first to its last. A
+   click on empty space picks nothing. (A press on a line still picks its piece; drag along the line for more) */
+const MQ = { on: false, id: null, a: null, b: null, cx: 0, cy: 0, moved: false };
+window.addEventListener('pointerdown', e => {
+  if (!landEdOn() || onEdUI(e) || e.pointerType !== 'mouse' || e.button !== 0) return;
+  const w = screenToWorld(e.clientX, e.clientY);
+  Object.assign(MQ, { on: true, id: e.pointerId, a: w, b: w, cx: e.clientX, cy: e.clientY, moved: false });
+}, { capture: true });
+window.addEventListener('pointermove', e => {
+  if (!MQ.on || e.pointerId !== MQ.id) return;
+  MQ.b = screenToWorld(e.clientX, e.clientY); if (Math.hypot(e.clientX - MQ.cx, e.clientY - MQ.cy) > 4) MQ.moved = true;
+}, { capture: true, passive: true });
+const mqEnd = e => {
+  if (!MQ.on || e.pointerId !== MQ.id) return;
+  MQ.on = false;
+  if (MQ.moved) terrainBoxSelect(MQ.a, MQ.b); else { TERRAIN_ED.sel = null; terrainSyncSkin(); }
+};
+window.addEventListener('pointerup', mqEnd, { capture: true });
+window.addEventListener('pointercancel', e => { if (e.pointerId === MQ.id) MQ.on = false; }, { capture: true });
+function terrainBoxSelect(a, b) {
+  const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+  const inBox = (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y1, lines = [];
+  for (const R of [false, true]) {                               // (the two countries' lines)
+    const P = LAND_PTS[R ? 'R' : 'L'], ks = [];
+    for (let k = 0; k < P.length - 1; k++) { const xm = landPtX(R, (P[k][0] + P[k + 1][0]) / 2); if (inCountry(xm) && lcRight(xm) === R && inBox(xm, landHandleY(xm))) ks.push(k); }
+    lines.push([{ R }, ks]);
+  }
+  { const P = FLOOR_PTS, [fa, fL] = floorSpan(), ks = [];         // (the ocean floor's)
+    for (let k = 0; k < P.length - 1; k++) { const xm = fa + (P[k][0] + P[k + 1][0]) / 2 * fL; if (inBox(xm, WATER_Y + floorCurveAt(xm))) ks.push(k); }
+    lines.push([{ F: true }, ks]); }
+  ISLANDS.forEach((I, n) => { const P = I.p, m = floorTangents(P), ks = [];   // (each island's)
+    for (let k = 0; k < P.length - 1; k++) { const xm = (P[k][0] + P[k + 1][0]) / 2; if (inBox(xm, islTopAt(I, m, xm))) ks.push(k); }
+    lines.push([{ I: n }, ks]); });
+  const best = lines.reduce((q, l) => l[1].length > q[1].length ? l : q, [null, []]);
+  TERRAIN_ED.sel = best[1].length ? Object.assign(best[0], { k: Math.min(...best[1]), k1: Math.max(...best[1]) }) : null;
+  terrainSyncSkin();
+}
+// the box while it's drawn (with the land's handles - landEdDraw)
+function terrainMarqueeDraw() {
+  if (!MQ.on || !MQ.moved) return;
+  const X0 = Math.round(PX(Math.min(MQ.a[0], MQ.b[0]))), X1 = Math.round(PX(Math.max(MQ.a[0], MQ.b[0]))), Y0 = Math.round(PY(Math.min(MQ.a[1], MQ.b[1]))), Y1 = Math.round(PY(Math.max(MQ.a[1], MQ.b[1])));
+  const t = Math.max(1, Math.round(1.5 * dpr / PIXW));
+  C.fillStyle = 'rgba(255,255,255,0.08)'; C.fillRect(X0, Y0, X1 - X0, Y1 - Y0);
+  C.fillStyle = 'rgba(255,255,255,0.9)'; C.fillRect(X0, Y0, X1 - X0, t); C.fillRect(X0, Y1 - t, X1 - X0, t); C.fillRect(X0, Y0, t, Y1 - Y0); C.fillRect(X1 - t, Y0, t, Y1 - Y0);
+}
 window.addEventListener('pointerup', selEnd, { capture: true });
 window.addEventListener('pointercancel', selEnd, { capture: true });
 // is x on the picked pieces (the floor's line / a country's line)
@@ -37503,7 +37551,7 @@ function terrainSetHills(v) {
     if (v >= 1) { if (p.length > 3) { p.length = 3; if (p[2] === null) p.length = 2; } }
     else { if (p.length === 2) p.push(null); p[3] = +v.toFixed(2); }
   }
-  if (s.F) floorChanged(); else { landShapePrep(); landEdChanged(); }
+  if (s.F) floorChanged(); else { landShapePrep(); landEdChanged(); landPreview(!!s.R); }   // (the land's line follows the slider at once - user Oct 29)
   terrainSyncSkin();
 }
 function terrainHillsRow(cat) {
