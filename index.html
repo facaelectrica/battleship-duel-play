@@ -2572,8 +2572,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 189;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 28 21:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 190;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 28 22:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4060,6 +4060,7 @@ function drawPerfPanel(x, y) {
   const script = perf.phys + perf.smoke + perf.render;
   const lines = [
     'V' + GAME_VERSION + '  FRAME ' + f(fpsMeter.gap) + ' MS  WORST ' + Math.round(fpsMeter.worst || 0),   // (user Oct 28: the version up top, to be sure it's the latest)
+    frameErrN ? 'ERRORS ' + frameErrN + ': ' + frameErr.slice(0, 70).toUpperCase() : '',   // (frames that threw: the first of each message is in the console)
     'SCRIPT ' + f(script) + '  DRAW+GPU ' + f(Math.max(0, (fpsMeter.gap || 0) - script)) + (fillTest.ms >= 0 ? '  FILL ' + fillTest.ms.toFixed(2) + ' ' + fillTest.kind + '  PATH ' + fillTest.path.toFixed(1) + ' VS RECTS ' + fillTest.rects.toFixed(1) : ''),
     (probe.on ? 'PROBING ' + Math.ceil(probe.left) + 'S: ' : probe.done ? 'PROBED: ' : '') + 'PHYS ' + f(perf.phys) + '  SMOKE ' + f(perf.smoke),
     'SKY ' + f(P.sky) + '  WORLD ' + f(P.objects) + '  WATER ' + f(P.distort),
@@ -4067,7 +4068,7 @@ function drawPerfPanel(x, y) {
     'TINT ' + f(P.tint) + '  FX ' + f(P.overlays) + '  HUD ' + f((P.console || 0) + (P.dots || 0) + (P.topui || 0)),
     'PUFFS ' + f(P.ovSmoke) + '  TRAILS ' + f(P.ovTrails) + '  FIRE ' + f(P.ovFire) + '  RAIN ' + f(P.ovRain),
     'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + (GLR.on ? '  WEBGL' : '  MODE ' + MODE_NAMES[getMode()] + (BATCH_AUTO ? (abTrial.phase ? ' TRYING' : ' AUTO') : '') + '  [TAP HERE: NEXT MODE]'),
-    GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + (GLR.lost ? '  LOST' : '') : '',
+    GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + (skyNewOn ? '  DECKS ' + Math.round(FT.dDraw || 0) + '/' + Math.round(FT.dSkip || 0) : '') + (GLR.lost ? '  LOST' : '') : '',
     'SMOKE ' + smoke.length + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
     probe.on || probe.done ? '' : 'TAP AGAIN: MEASURE DRAWING TOO',
   ].filter(l => l);
@@ -12207,13 +12208,16 @@ function glRaySetup() {
   GLR.rtex = null; GLR.rbtex = null; GLR.rtW = 0; GLR.rtH = 0;
 }
 // a batch of records (the sky's puffs of one cloud, or a deck's live shapes): kept on the GPU until it changes
+let GLP_UID = 0;
 class GLPuffs {
-  constructor() { this.n = 0; this.data = new Float32Array(8 * 256); this.vbo = null; this.epoch = -1; this.dirty = true; }
-  begin() { this.n = 0; this.dirty = true; }
+  constructor() { this.n = 0; this.data = new Float32Array(8 * 256); this.vbo = null; this.epoch = -1; this.dirty = true; this.uid = ++GLP_UID; this.ver = 0; }
+  begin() { this.n = 0; this.dirty = true; this.ver++; this._h = null; }
+  // (its records' content, hashed once a build: a rebuild that came out the same - a growing cloud whose puffs round to the same cells - is no change)
+  hash() { if (this._h == null) { const u = new Uint32Array(this.data.buffer, 0, this.n * 8); let h = 2166136261; for (let i = 0; i < u.length; i++) h = Math.imul(h ^ u[i], 16777619); this._h = h >>> 0; } return this._h; }
   room(k) { const need = (this.n + k) * 8; if (need > this.data.length) { const d = new Float32Array(Math.max(need, this.data.length * 2)); d.set(this.data.subarray(0, this.n * 8)); this.data = d; } }
   disc(x, y, k, f0, gx, gy, lo, hi) { if (this.n * 8 + 8 > this.data.length) this.room(1); const d = this.data, o = this.n++ * 8; d[o] = x; d[o + 1] = y; d[o + 2] = k; d[o + 3] = f0; d[o + 4] = gx; d[o + 5] = gy; d[o + 6] = lo + 8 * hi; d[o + 7] = 0; }
   lobe(cx, cy, rx, ry, yMax, T0, T1) { if (this.n * 8 + 8 > this.data.length) this.room(1); const d = this.data, o = this.n++ * 8; d[o] = cx; d[o + 1] = cy; d[o + 2] = rx; d[o + 3] = ry; d[o + 4] = yMax; d[o + 5] = T0; d[o + 6] = T1; d[o + 7] = 1; }
-  free() { if (this.vbo && this.epoch === GLR.epoch && GLR.gl) GLR.gl.deleteBuffer(this.vbo); this.vbo = null; this.epoch = -1; }
+  free() { if (this.vbo && this.epoch === GLR.epoch && GLR.gl) GLR.gl.deleteBuffer(this.vbo); this.vbo = null; this.epoch = -1; if (this.lit) this.lit.free(); }
 }
 function glPuffSetup() {
   const gl = GLR.gl, p = gl.createProgram();
@@ -12226,6 +12230,444 @@ function glPuffSetup() {
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
   gl.enableVertexAttribArray(1); gl.enableVertexAttribArray(2); gl.vertexAttribDivisor(1, 1); gl.vertexAttribDivisor(2, 1);
   gl.bindVertexArray(GLR.vao);
+}
+
+/* ---- THE CLOUDS' LIGHT ON THE GPU (Oct 28, user: "the clouds are taking ages to change for the new light... let's do it all
+   in the GPU"). Every puff's light was worked out in JS (lightValue, lightSlope: its sun-facing, the shadow rays through its
+   cloud's lobes and through the clouds that shade it, its billow's neighbours, the crease, the glow, the highlight) - a
+   relight was all of a cloud's puffs in JS, spread over many frames by a budget. Now the light is a pass on the GPU: each
+   puff's shape (its place, its normals, its billow, its jitter) is kept in a buffer, built only when the cloud's shape
+   changes, and its cloud's lobes, billows (with their neighbour lists) and casters in a small float texture; the pass runs
+   lightValue + lightSlope for every puff, line for line, and writes its record (the same 8 numbers the CPU wrote: place,
+   size, light, slope, tones) by transform feedback straight into the buffer GL_PFS draws. A relight is one pass: instant.
+   A record a puff (in): a0 cx cy k jit | a1 x y zz r | a2 nx ny nz j | a3 lnx lny lnz billow | a4 p0 p1 p2 Rb. ---- */
+const GL_LVS = `#version 300 es
+precision highp float; precision highp int;
+layout(location=0) in vec4 a0; layout(location=1) in vec4 a1; layout(location=2) in vec4 a2; layout(location=3) in vec4 a3; layout(location=4) in vec4 a4;
+uniform highp sampler2D u_d;
+uniform ivec4 u_o;          // lobes' start, lobes, billows' start, casters' start
+uniform int u_nc;           // casters' lobes
+uniform vec3 u_L; uniform float u_under;
+uniform vec3 u_W;           // a puff's place in the world (the casters'): X + x, HW - c.y + y, c.wz + zz
+uniform vec4 u_p0;          // SHADOW, SELF, AMBIENT, CREASE
+uniform vec4 u_p1;          // CONTRAST x the hour's contrast, EXPOSURE, JITTER, HIGHLIGHT
+uniform vec4 u_p2;          // night, dusk, sunset glow (GLOW x E.sunset), MASS
+uniform float u_shade;      // PUFF SHADING
+out vec4 o0; out vec4 o1;
+vec4 T(int i) { return texelFetch(u_d, ivec2(i & 255, i >> 8), 0); }
+float chord(vec3 p, vec3 L, vec4 a, vec4 b) {
+  vec3 r = vec3(a.w, b.x, b.y), o = (p - a.xyz) / r, d = L / r;
+  float A = dot(d, d), B = 2.0 * dot(o, d), C = dot(o, o) - 1.0, D = B * B - 4.0 * A * C;
+  if (D <= 0.0) return 0.0;
+  float q = sqrt(D), t1 = (-B - q) / (2.0 * A), t2 = (-B + q) / (2.0 * A);
+  return t2 <= 0.0 ? 0.0 : t2 - max(t1, 0.0);
+}
+float sphereChord(vec3 p, vec3 L, vec3 c, float R) {
+  vec3 o = p - c; float b = dot(o, L), cc = dot(o, o) - R * R;
+  if (cc <= 0.0 || b > 0.0) return 0.0;
+  float D = b * b - cc; if (D <= 0.0) return 0.0;
+  return 2.0 * sqrt(D);
+}
+float shadowed(float od) { return clamp((od - 0.08) * 5.0, 0.0, 1.0); }
+vec3 nrm(vec3 v) { float l = length(v); return l > 0.0 ? v / l : v; }
+void main() {
+  vec3 P = a1.xyz, L = u_L, n = a2.xyz, ln = a3.xyz;
+  int own = int(a2.w + 0.5), bill = int(a3.w + 0.5), nL = u_o.y;
+  float jit = a0.w, r = a1.w, under = u_under;
+  float SH = u_p0.x, SELF = u_p0.y, AMB = u_p0.z, CREASE = u_p0.w, CT = u_p1.x, EXPO = u_p1.y, JITTER = u_p1.z, HI = u_p1.w;
+  // (lightValue)
+  float bk = smoothstep(0.35, 0.8, -L.z);
+  if (bk > 0.0) { n += (ln - n) * bk; float l = length(n); n = l > 0.0 ? n / l : n; }
+  float v = dot(n, L) * 0.5 + 0.5, openR = 1.0;
+  // the shadow of the clouds that shade it (its casters' lobes, in the world)
+  float od = 0.0;
+  vec3 Pw = u_W + P;
+  for (int k = 0; k < u_nc; k++) { vec4 a = T(u_o.w + k * 2), b = T(u_o.w + k * 2 + 1); od += chord(Pw, L, a, b) / b.z; }
+  // and of its own cloud's other lobes (not those of its own smear)
+  float grp = own >= 0 && own < nL ? T(u_o.x + own * 2 + 1).w : 0.0;
+  for (int k = 0; k < nL; k++) { if (k == own) continue; vec4 a = T(u_o.x + k * 2), b = T(u_o.x + k * 2 + 1); if (grp != 0.0 && b.w == grp) continue; od += chord(P, L, a, b) / b.z; }
+  // its own billow's neighbours (SELF)
+  float odSelf = 0.0;
+  if (SELF > 0.0) {
+    vec4 bb = T(u_o.z + bill * 2 + 1); int s0 = int(bb.x + 0.5), sn = int(bb.y + 0.5);
+    for (int q = 0; q < sn; q++) { int idx = s0 + q; vec4 t4 = T(idx >> 2); int m = idx & 3; float nb = m == 0 ? t4.x : m == 1 ? t4.y : m == 2 ? t4.z : t4.w;
+      vec4 B = T(u_o.z + int(nb + 0.5) * 2); float ch = sphereChord(P, L, B.xyz, B.w); if (ch > 0.0) odSelf += ch / B.w; }
+  }
+  float castK = SH * shadowed(od), sh = castK;
+  if (odSelf > 0.0) sh = max(sh, SELF * shadowed(odSelf * 0.8));
+  float shk = v > 0.15 ? 1.0 - sh * 0.5 : 1.0;
+  v -= sh * 0.5 * max(0.0, v - 0.15);
+  v += AMB * 0.3 * (n.y * 0.5 + 0.5) - AMB * 0.12;
+  if (under > 0.0) v += under * max(0.0, -n.y) * 0.95 * (1.0 - castK * 0.6);
+  // the crease where two lobes meet (CREASE)
+  float side = 1.0 - abs(n.z), open = 1.0;
+  if (side > 0.05) {
+    float nl = length(n.xy); if (nl == 0.0) nl = 1.0;
+    float d = 2.5 + (r != 0.0 ? r : 2.0) * 1.2; vec2 qq = P.xy + n.xy / nl * d;
+    float m = 9.0;
+    for (int k = 0; k < nL; k++) { vec4 a = T(u_o.x + k * 2), b = T(u_o.x + k * 2 + 1); if (a.w == 0.0 || k == own) continue;
+      float ex = (qq.x - a.x) / (a.w * 1.2), ey = (qq.y - a.y) / (b.x * 1.2), e = ex * ex + ey * ey; if (e < m) m = e; }
+    open = smoothstep(0.75, 1.15, m);
+  }
+  openR = open;
+  v -= (1.0 - open) * side * CREASE * max(0.25, v);
+  float rimAdd = 0.0;
+  if (L.z < 0.0) {
+    float lxy = length(L.xy), dirT = lxy > 1e-4 ? max(0.0, n.x * L.x + n.y * L.y) / lxy : 0.0;
+    float toward = dirT * (1.0 - bk) + (0.45 + 0.55 * max(0.0, n.y)) * bk, away = lxy < 0.05 ? 1.0 : 0.3 + 0.7 * dirT;
+    rimAdd = -L.z * side * side * toward * away * 1.1 * (1.0 - sh) * open; v += rimAdd;
+    v -= bk * (1.0 - open) * side * 0.45;
+  }
+  float q = (v - 0.5) * CT + 0.5 + EXPO + jit * JITTER;
+  int tone = int(clamp(floor(q * 5.0), 0.0, 4.0));
+  if (HI > 0.0 && q >= 1.25 - 0.25 * HI && (rimAdd > 0.12 || u_p2.x > 0.5 || u_p2.y > 0.3)) tone = 5;
+  int outT = castK > 0.45 ? min(tone, ln.y > 0.3 ? 1 : 0) : tone;
+  float gk = u_p2.z; int lo = 0;
+  if (gk > 0.01) { float gy = ln.y, f = gk * (0.12 + 0.62 * max(0.0, -gy) + 0.2 * (1.0 - abs(gy))) * (0.35 + 0.65 * openR); lo = int(min(3.0, floor(f * 4.2))); outT = max(outT, lo); }
+  float C5 = 5.0 * CT, LVf = (q - jit * JITTER) * 5.0;
+  bool free_ = outT == max(lo, int(clamp(floor(q * 5.0), 0.0, 4.0))) && tone != 5 && !(castK > 0.45) && rimAdd < 0.05;
+  float lx = 0.5 * L.x * shk * C5, lz = 0.5 * L.z * shk * C5;
+  float ly = (0.5 * L.y * shk + 0.15 * AMB - (under > 0.0 && n.y < 0.0 ? under * 0.95 * (1.0 - castK * 0.6) : 0.0)) * C5;
+  // (lightSlope: the light across the puff)
+  float tgx = 0.0, tgy = 0.0;
+  if (free_ && u_shade != 0.0 && own >= 0 && own < nL) {
+    float mass = u_p2.w, mm = mass + (1.0 - mass) * bk, Rl = max(2.0, T(u_o.x + own * 2 + 1).z), Rb = a4.w;
+    vec3 p = a4.xyz; float lnz = max(0.3, ln.z), pz = max(0.3, p.z);
+    float ul = length(mm * ln + (1.0 - mm) * p); if (ul == 0.0) ul = 1.0;
+    float A = mm / Rl, B = (1.0 - mm) / Rb;
+    float dxz = -(A * ln.x / lnz + B * p.x / pz), dyz = -(A * ln.y / lnz + B * p.y / pz);
+    float gx = (lx * (A + B) + lz * dxz) / ul, gUp = (ly * (A + B) + lz * dyz) / ul;
+    tgx = clamp(gx, -1.5, 1.5); tgy = clamp(-gUp, -1.5, 1.5);
+  }
+  if (tgx != 0.0 || tgy != 0.0) { o0 = vec4(a0.x, a0.y, a0.z, LVf); o1 = vec4(tgx, tgy, float(lo + 8 * 4), 0.0); }
+  else { o0 = vec4(a0.x, a0.y, a0.z, float(outT)); o1 = vec4(0.0, 0.0, float(outT + 8 * outT), 0.0); }
+}`;
+const GL_LFS = `#version 300 es
+precision mediump float; out vec4 o; void main() { o = vec4(0.0); }`;
+function glLitSetup() {
+  const gl = GLR.gl, p = gl.createProgram();
+  gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_LVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_LFS));
+  gl.transformFeedbackVaryings(p, ['o0', 'o1'], gl.INTERLEAVED_ATTRIBS);
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  GLR.lprog = p; GLR.lU = {};
+  for (const k of ['u_d', 'u_o', 'u_nc', 'u_L', 'u_under', 'u_W', 'u_p0', 'u_p1', 'u_p2', 'u_shade']) GLR.lU[k] = gl.getUniformLocation(p, k);
+  gl.useProgram(p); gl.uniform1i(GLR.lU.u_d, 11); gl.useProgram(GLR.prog);
+  GLR.lvao = gl.createVertexArray(); GLR.ltf = gl.createTransformFeedback();
+  gl.bindVertexArray(GLR.vao);
+}
+// a cloud's light pass, its inputs kept with its batch (GLPuffs): the puffs' shapes (src), the cloud's data (lobes, billows,
+// neighbours, casters), the GPU buffers and the data texture
+class GLLit {
+  constructor() { this.src = new Float32Array(20 * 256); this.n = 0; this.items = []; this.dat = new Float32Array(4 * 256); this.srcVbo = null; this.tex = null; this.ep = -1; this.geo = 0; this.done = -1; this.key = null; this.texH = 0; this.dlen = 0; }
+  room(n) { if (n * 20 > this.src.length) { const a = new Float32Array(Math.max(n * 20, this.src.length * 2)); a.set(this.src.subarray(0, this.n * 20)); this.src = a; } }
+  free() { const gl = GLR.gl; if (gl && this.ep === GLR.epoch) { if (this.srcVbo) gl.deleteBuffer(this.srcVbo); if (this.tex) gl.deleteTexture(this.tex); } this.srcVbo = this.tex = null; this.ep = -1; }
+}
+// run the pass: the light of every puff of lit into the records of b (its vbo), with this light
+function glLitRun(b, lit, U) {
+  if (GLR.lost || !lit.n) { b.n = lit.n; return; }
+  const gl = GLR.gl;
+  glFlush();
+  if (lit.ep !== GLR.epoch) { lit.srcVbo = gl.createBuffer(); lit.tex = glNewTex(0, 0, gl.NEAREST); lit.ep = GLR.epoch; lit.srcUp = -1; lit.texH = 0; }
+  if (!b.vbo || b.epoch !== GLR.epoch) { b.vbo = gl.createBuffer(); b.epoch = GLR.epoch; b.cap = 0; }
+  // the shapes (only when they changed)
+  gl.bindVertexArray(GLR.lvao); GLR.cur.vao = 7;
+  gl.bindBuffer(gl.ARRAY_BUFFER, lit.srcVbo);
+  if (lit.srcUp !== lit.geo) { gl.bufferData(gl.ARRAY_BUFFER, lit.src, gl.DYNAMIC_DRAW, 0, lit.n * 20); lit.srcUp = lit.geo; GLR.stats.uploads++; }
+  for (let i = 0; i < 5; i++) { gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, 4, gl.FLOAT, false, 80, i * 16); gl.vertexAttribDivisor(i, 0); }
+  // the cloud's data
+  const W = 256, Hd = Math.max(1, Math.ceil(lit.dlen / 4 / W));
+  gl.activeTexture(gl.TEXTURE11); gl.bindTexture(gl.TEXTURE_2D, lit.tex); gl.bindSampler(11, null);
+  if (lit.dat.length < W * Hd * 4) { const a = new Float32Array(W * Hd * 4); a.set(lit.dat.subarray(0, lit.dlen)); lit.dat = a; }
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  if (lit.texH !== Hd) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, W, Hd, 0, gl.RGBA, gl.FLOAT, lit.dat.subarray(0, W * Hd * 4)); lit.texH = Hd; }
+  else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, Hd, gl.RGBA, gl.FLOAT, lit.dat.subarray(0, W * Hd * 4));
+  // the records' buffer, as big as the puffs
+  gl.bindBuffer(gl.ARRAY_BUFFER, b.vbo);
+  if ((b.cap || 0) < lit.n) { b.cap = Math.ceil(lit.n * 1.25); gl.bufferData(gl.ARRAY_BUFFER, b.cap * 32, gl.DYNAMIC_COPY); }
+  gl.bindBuffer(gl.ARRAY_BUFFER, null);
+  gl.useProgram(GLR.lprog); GLR.cur.prog = 7; const u = GLR.lU;
+  gl.uniform4i(u.u_o, U.lo0, U.nl, U.bo0, U.co0); gl.uniform1i(u.u_nc, U.nc);
+  gl.uniform3f(u.u_L, U.L[0], U.L[1], U.L[2]); gl.uniform1f(u.u_under, U.under); gl.uniform3f(u.u_W, U.W[0], U.W[1], U.W[2]);
+  gl.uniform4f(u.u_p0, U.p0[0], U.p0[1], U.p0[2], U.p0[3]); gl.uniform4f(u.u_p1, U.p1[0], U.p1[1], U.p1[2], U.p1[3]); gl.uniform4f(u.u_p2, U.p2[0], U.p2[1], U.p2[2], U.p2[3]); gl.uniform1f(u.u_shade, U.shade);
+  gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, GLR.ltf);
+  gl.bindBufferRange(gl.TRANSFORM_FEEDBACK_BUFFER, 0, b.vbo, 0, lit.n * 32);
+  gl.enable(gl.RASTERIZER_DISCARD);
+  gl.beginTransformFeedback(gl.POINTS); gl.drawArrays(gl.POINTS, 0, lit.n); gl.endTransformFeedback();
+  gl.disable(gl.RASTERIZER_DISCARD);
+  gl.bindBufferBase(gl.TRANSFORM_FEEDBACK_BUFFER, 0, null); gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, null);
+  gl.bindVertexArray(GLR.vao); GLR.cur.vao = 1;
+  b.n = lit.n; b.dirty = false; b.lver = (b.lver || 0) + 1;
+  GLR.stats.draws++; GLR.stats.lit = (GLR.stats.lit || 0) + lit.n;
+}
+
+/* ---- THE SMOKE ON THE GPU (Oct 28, user: "do it all to work in the GPU"). The smoke's picture was made in JS: thousands of
+   balls splatted front-most-wins into a z-buffer, then every pixel's puff found and lit, every frame. Its coarse fields (the
+   density grid, the body's smoothed normals, the shadow marched toward the sun, which puffs make one body) stay in JS - a
+   few thousand cells; the per-pixel work moves to three passes on the GPU, the same rules line for line:
+   1. SPLAT: each ball a quad, its surface's height (its sphere and the billow tile) the depth, nearest wins (ties: the first
+      drawn, as the z-buffer's strict test); its index and height kept per pixel.
+   2. TONES: every puff (a ball's dome of the billow tile, or the ball whole) lit once at its middle - shadePuff - with the
+      puff's memory (its shadow eased a quarter a paint, its tone held unless clearly past a step, moved a step at a time
+      after two paints) kept in a texture from one paint to the next, a slot a puff.
+   3. COMPOSE: each pixel its puff's tone (a trail's thin line lit per pixel), the crease, the colour, the fire's light.
+   A ball: b0 X Y R Z | b1 A F TK slot | b2 LX LY LZ thin | b3 TU TV 0 0 (4 texels, 1024 a row). ---- */
+const SM_COMMON = `
+uniform highp sampler2D u_b; uniform highp sampler2D u_g1; uniform highp sampler2D u_g2;
+uniform ivec2 u_gs;          // the grid's size (gw, gh)
+uniform vec4 u_q0;           // MASS, SHADOW, SELF, AMBIENT
+uniform vec4 u_q1;           // contrast (CONTRAST x hour x SMOKE CONTRAST), EXPOSURE, JITTER, HIGHLIGHT
+uniform vec4 u_q2;           // night, dusk, glow (GLOW x sunset x SMOKE GLOW), FIRE GLOW
+uniform float u_hp[47]; uniform float u_hq[47]; uniform vec2 u_dc[46];
+uniform vec4 u_fl[64]; uniform int u_nf;
+vec4 B(int i, int k) { int t = i * 4 + k; return texelFetch(u_b, ivec2(t & 1023, t >> 10), 0); }
+float samp(int ch, int which, float gxf, float gyf) {
+  int gi = clamp(int(gxf), 0, u_gs.x - 2), gj = clamp(int(gyf), 0, u_gs.y - 2);
+  float u = clamp(gxf - float(gi), 0.0, 1.0), v = clamp(gyf - float(gj), 0.0, 1.0);
+  vec4 a, b, c, d;
+  if (which == 1) { a = texelFetch(u_g1, ivec2(gi, gj), 0); b = texelFetch(u_g1, ivec2(gi + 1, gj), 0); c = texelFetch(u_g1, ivec2(gi, gj + 1), 0); d = texelFetch(u_g1, ivec2(gi + 1, gj + 1), 0); }
+  else { a = texelFetch(u_g2, ivec2(gi, gj), 0); b = texelFetch(u_g2, ivec2(gi + 1, gj), 0); c = texelFetch(u_g2, ivec2(gi, gj + 1), 0); d = texelFetch(u_g2, ivec2(gi + 1, gj + 1), 0); }
+  float fa = a[ch], fb = b[ch], fc = c[ch], fd = d[ch];
+  return (fa * (1.0 - u) + fb * u) * (1.0 - v) + (fc * (1.0 - u) + fd * u) * v;
+}
+vec3 nrm3(vec3 v) { float l = length(v); return l > 0.0 ? v / l : v; }
+// shadePuff: ball i, its puff's middle (px, py), dome d; pn: this pixel's own normal (THIN), mem: (tone, cast, shS, k+1) or 0
+// returns (tone, warm, cast, shS) and k in kOut
+vec4 shadePuff(int i, float px, float py, int d, bool pnOn, vec3 pn, vec4 mem, out float kOut) {
+  vec4 b0 = B(i, 0), b1 = B(i, 1), b2 = B(i, 2);
+  float X = b0.x, Y = b0.y, r = b0.z, F = b1.y; const float G = 3.0;
+  float ox = (px - X) / r, oy = (Y - py) / r, o2 = ox * ox + oy * oy, ok = o2 > 0.97 ? sqrt(0.97 / o2) : 1.0;
+  vec3 n = vec3(ox * ok, oy * ok, 0.0); n.z = sqrt(max(0.0, 1.0 - n.x * n.x - n.y * n.y));
+  if (pnOn) n = pn;
+  float hp = u_hp[d], hq = u_hq[d];
+  if (d < 46 && !pnOn) { n.x += (hp - 0.5) * 0.5; n.y += (hq - 0.5) * 0.5; n = nrm3(n); }
+  bool thinP = pnOn;                                            // (the GPU's per-pixel path is the THIN one only)
+  float gxf = px / G - 0.5, gyf = py / G - 0.5;
+  vec3 bn = n; float mass = u_q0.x;
+  if (mass > 0.0 && !thinP) {
+    bn = nrm3(vec3(samp(0, 1, gxf, gyf), samp(1, 1, gxf, gyf), samp(2, 1, gxf, gyf)));
+    n = nrm3(bn * mass + n * (1.0 - mass));
+  }
+  float cast_ = u_q0.y * samp(0, 2, gxf, gyf), shS = max(cast_, u_q0.z * samp(1, 2, gxf, gyf));
+  bool prev = !pnOn && mem.w > 0.0;
+  if (prev) { cast_ = mem.y + (cast_ - mem.y) * 0.25; shS = mem.z + (shS - mem.z) * 0.25; }
+  vec3 L = b2.xyz; float bk = smoothstep(0.35, 0.8, -L.z);
+  if (bk > 0.0 && !thinP) n = nrm3(n + (bn - n) * bk);
+  float AMB = u_q0.w;
+  float val = dot(n, L) * 0.5 + 0.5;
+  val -= shS * 0.5 * max(0.0, val - 0.15);
+  val += AMB * 0.3 * (n.y * 0.5 + 0.5) - AMB * 0.12;
+  float rimAdd = 0.0;
+  if (L.z < 0.0) {
+    float lxy = length(L.xy), dirT = lxy > 1e-4 ? max(0.0, n.x * L.x + n.y * L.y) / lxy : 0.0;
+    float toward = dirT * (1.0 - bk) + (0.45 + 0.55 * max(0.0, n.y)) * bk, side = 1.0 - abs(n.z), open = 1.0;
+    if (side > 0.05) { float nl = length(n.xy); if (nl == 0.0) nl = 1.0; float dd = (2.5 + min(r, 6.0) * 1.2) / G;
+      open = smoothstep(0.5, 0.15, samp(3, 1, clamp(gxf + n.x / nl * dd, 0.0, float(u_gs.x) - 1.01), clamp(gyf - n.y / nl * dd, 0.0, float(u_gs.y) - 1.01))); }
+    rimAdd = -L.z * side * side * toward * 1.1 * (1.0 - shS) * open; val += rimAdd;
+    val -= bk * (1.0 - open) * side * 0.45;
+  }
+  if (F >= 3.0 && r < 1.8) val += 0.25;
+  float qv = (val - 0.5) * u_q1.x + 0.5 + u_q1.y + (pnOn ? 0.0 : (hp - 0.5) * u_q1.z);
+  float gk = u_q2.z, gf = gk > 0.01 ? gk * (0.12 + 0.62 * max(0.0, -bn.y) + 0.2 * (1.0 - abs(bn.y))) : 0.0;
+  float hiK = u_q1.w;
+  int T[3];
+  for (int s = 0; s < 3; s++) {
+    float e = s == 0 ? 0.0 : s == 1 ? -0.08 : 0.08;
+    int t = int(clamp(floor((qv + e) * 5.0), 0.0, 4.0));
+    if (hiK > 0.0 && qv + e >= 1.25 - 0.25 * hiK && (rimAdd + e > 0.12 || u_q2.x > 0.5 || u_q2.y > 0.3)) t = 5;
+    float kk = clamp((cast_ - e - 0.3) / 0.3, 0.0, 1.0), floorT = bn.y > 0.3 ? 1.0 : 0.0;
+    if (kk > 0.0) t = min(t, int(floor(4.0 - kk * (4.0 - floorT) + 0.5)));
+    if (gf > 0.0) t = max(t, int(min(3.0, floor((gf + e) * 4.2))));
+    T[s] = t;
+  }
+  int tone = T[0]; float k = 0.0;
+  if (prev) {
+    int tp = int(mem.x + 0.5); k = mem.w - 1.0;
+    if (tp != tone && tp >= min(T[1], T[2]) && tp <= max(T[1], T[2])) tone = tp;
+    if (tone != tp) { k += 1.0; if (k >= 2.0) { tone = tp + (tone > tp ? 1 : -1); k = 0.0; } else tone = tp; } else k = 0.0;
+  }
+  kOut = k;
+  // the fire's light
+  int warm = 0;
+  if (u_nf > 0 && u_q2.w > 0.0) {
+    float fl = 0.0;
+    for (int m = 0; m < 64; m++) { if (m >= u_nf) break; vec4 f = u_fl[m]; float dx = f.x - px, dy = py - f.y, d2 = dx * dx + dy * dy; if (d2 >= f.z * f.z) continue;
+      float dl = sqrt(d2); if (dl == 0.0) dl = 1.0; float fall = 1.0 - d2 / (f.z * f.z); fl += f.w * fall * (0.35 + 0.65 * max(0.0, (n.x * dx + n.y * dy) / dl * 0.8 + n.z * 0.2)); }
+    fl *= u_q2.w; warm = fl > 0.62 ? 2 : fl > 0.3 ? 1 : 0;
+  }
+  return vec4(float(tone), float(warm), cast_, shS);
+}`;
+const SM_SPLAT_VS = `#version 300 es
+precision highp float; precision highp int;
+layout(location=0) in vec2 a_q; layout(location=1) in float a_i;
+uniform highp sampler2D u_b; uniform vec2 u_size;
+flat out int v_i;
+vec4 B(int i, int k) { int t = i * 4 + k; return texelFetch(u_b, ivec2(t & 1023, t >> 10), 0); }
+void main() {
+  int i = int(a_i + 0.5); v_i = i; vec4 b0 = B(i, 0); float cx = b0.x, cy = b0.y, r = b0.z;
+  vec2 lo, hi;
+  if (r < 0.75) { lo = vec2(floor(cx), floor(cy)); hi = lo + 1.0; }
+  else { lo = vec2(floor(cx - r), floor(cy - r)); hi = vec2(ceil(cx + r) + 1.0, ceil(cy + r) + 1.0); }
+  vec2 p = mix(lo, hi, a_q) / u_size;
+  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+}`;
+const SM_SPLAT_FS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp sampler2D u_b; uniform highp sampler2D u_w; uniform highp sampler2D u_bt; uniform vec2 u_size; uniform float u_tka;
+flat in int v_i;
+out vec4 o;
+vec4 B(int i, int k) { int t = i * 4 + k; return texelFetch(u_b, ivec2(t & 1023, t >> 10), 0); }
+void main() {
+  float fx = floor(gl_FragCoord.x), fy = floor(u_size.y - gl_FragCoord.y);
+  if (fy > texelFetch(u_w, ivec2(int(fx), 0), 0).r) discard;              // (under the water: no ball)
+  vec4 b0 = B(v_i, 0), b1 = B(v_i, 1), b3 = B(v_i, 3);
+  float cx = b0.x, cy = b0.y, r = b0.z, z = b0.w, tk = b1.z, hz;
+  if (r < 0.75) hz = z + r;
+  else {
+    float dy = fy + 0.5 - cy, w2 = r * r - dy * dy;
+    if (w2 <= 0.0) discard;
+    float hw = sqrt(w2);
+    if (fx < ceil(cx - hw - 0.5) || fx > floor(cx + hw - 0.5)) discard;
+    float dx = fx + 0.5 - cx, t = (dx * dx + dy * dy) * (1024.0 / (r * r));
+    if (tk > 0.0) {
+      int q = ((int(floor(dy * tk + b3.y + 4096.0)) & 63) << 6) + (int(floor(dx * tk + b3.x + 4096.0)) & 63);
+      float th = texelFetch(u_bt, ivec2(q & 63, q >> 6), 0).r;
+      if (t > 1024.0 - 300.0 * u_tka * (1.0 - th)) discard;
+      hz = z + r * sqrt(1.0 - floor(t) / 1024.0) + r * 0.22 * u_tka * th;
+    } else hz = z + r * sqrt(1.0 - (t < 1024.0 ? floor(t) : 1024.0) / 1024.0);
+  }
+  o = vec4(float(v_i), hz, 0.0, 1.0);
+  gl_FragDepth = clamp(0.5 - hz * 1e-3, 0.0, 1.0);
+}`;
+const SM_QUAD_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_q; uniform vec4 u_rect; uniform vec2 u_size;
+void main() { vec2 p = (u_rect.xy + a_q * u_rect.zw) / u_size; gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0); }`;
+const SM_TONE_FS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp sampler2D u_mem; uniform highp sampler2D u_s2b; uniform vec2 u_size;
+` + SM_COMMON + `
+layout(location=0) out vec4 oMem; layout(location=1) out vec4 oTone;
+void main() {
+  int col = int(gl_FragCoord.x), row = int(gl_FragCoord.y), slot = row * 64 + col / 47, d = col - (col / 47) * 47;   // (texel rows as stored)
+  vec4 mem = texelFetch(u_mem, ivec2(col, row), 0);
+  float sb = texelFetch(u_s2b, ivec2(slot & 1023, slot >> 10), 0).r;
+  oTone = vec4(0.0);
+  if (sb < -0.5) { oMem = mem; return; }                                  // (no ball of this puff in this paint: its memory kept)
+  bool fresh = sb >= 1048576.0; int i = int((fresh ? sb - 1048576.0 : sb) + 0.5);
+  if (fresh) mem = vec4(0.0);
+  vec4 b0 = B(i, 0), b1 = B(i, 1), b2 = B(i, 2), b3 = B(i, 3);
+  float tk = b1.z;
+  if (b2.w > 0.5 || (tk <= 0.0 && d != 46)) { oMem = mem; return; }        // (a thin line's ball: lit per pixel; no tile: only the ball whole)
+  float px = b0.x, py = b0.y;
+  if (d < 46) {                                                           // (the dome's middle: its repeat of the tile nearest the ball's middle)
+    float tuC = b3.x + 4096.0, tvC = b3.y + 4096.0, cu = u_dc[d].x + 64.0 * floor((tuC - u_dc[d].x) / 64.0 + 0.5), cv = u_dc[d].y + 64.0 * floor((tvC - u_dc[d].y) / 64.0 + 0.5);
+    px = b0.x + (cu - b3.x - 4096.0) / tk; py = b0.y + (cv - b3.y - 4096.0) / tk;
+  }
+  float k; vec4 s = shadePuff(i, px, py, d, false, vec3(0.0), mem, k);
+  oMem = vec4(s.x, s.z, s.w, k + 1.0);
+  oTone = vec4(s.x, s.y, 0.0, 1.0);
+}`;
+const SM_COMP_FS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp sampler2D u_sp; uniform highp sampler2D u_tone; uniform highp sampler2D u_bt; uniform highp sampler2D u_lut; uniform vec2 u_size; uniform float u_crease; uniform float u_thin;
+` + SM_COMMON + `
+out vec4 o;
+void main() {
+  int x = int(gl_FragCoord.x), ty = int(gl_FragCoord.y), y = int(u_size.y) - 1 - ty, cw = int(u_size.x);   // (ty: the texel row - the splat's target is laid out as this one; y: the row from the top)
+  vec4 S = texelFetch(u_sp, ivec2(x, ty), 0);
+  int i = int(S.x + 0.5); if (S.x < -0.5) { o = vec4(0.0); return; }
+  vec4 b0 = B(i, 0), b1 = B(i, 1), b2 = B(i, 2), b3 = B(i, 3);
+  float X = b0.x, Y = b0.y, R = b0.z, F = b1.y, tk = b1.z; int slot = int(b1.w + 0.5);
+  int d = 46; bool tcr = false;
+  if (tk > 0.0) {
+    int q = ((int(floor((float(y) + 0.5 - Y) * tk + b3.y + 4096.0)) & 63) << 6) + (int(floor((float(x) + 0.5 - X) * tk + b3.x + 4096.0)) & 63);
+    vec4 bt = texelFetch(u_bt, ivec2(q & 63, q >> 6), 0);
+    tcr = F < 3.0 && bt.w > 0.5;
+    if (bt.z >= 0.0) d = int(bt.z + 0.5);
+  }
+  int tone, warm;
+  if (u_thin > 0.5 && tk <= 0.0 && F >= 3.0) {                           // THIN: lit per pixel, from its own round surface
+    vec3 n = vec3((float(x) + 0.5 - X) / R, (Y - float(y) - 0.5) / R, 0.0); n.z = sqrt(max(0.0, 1.0 - n.x * n.x - n.y * n.y));
+    float k; vec4 s = shadePuff(i, float(x) + 0.5, float(y) + 0.5, d, true, n, vec4(0.0), k);
+    tone = int(s.x + 0.5); warm = int(s.y + 0.5);
+  } else {
+    vec4 t = texelFetch(u_tone, ivec2((slot & 63) * 47 + d, slot >> 6), 0);
+    tone = int(t.x + 0.5); warm = int(t.y + 0.5);
+  }
+  if (u_crease > 0.5 && tcr && tone > 0) tone = tone == 5 ? 3 : tone - 1;
+  else if (u_crease > 0.5 && tone > 0) {
+    float zk = S.y + R * 0.22; bool cr = false;
+    if (x > 0) { vec4 n = texelFetch(u_sp, ivec2(x - 1, ty), 0); if (int(n.x + 0.5) != i && n.y > zk) cr = true; }
+    if (x < cw - 1) { vec4 n = texelFetch(u_sp, ivec2(x + 1, ty), 0); if (int(n.x + 0.5) != i && n.y > zk) cr = true; }
+    if (y > 0) { vec4 n = texelFetch(u_sp, ivec2(x, ty + 1), 0); if (int(n.x + 0.5) != i && n.y > zk) cr = true; }   // (the row above)
+    if (cr) tone = tone == 5 ? 3 : tone - 1;
+  }
+  int li = (int(F + 0.5) * 6 + tone) * 3 + warm;
+  o = texelFetch(u_lut, ivec2(li, 0), 0);
+}`;
+// 0. MARCH: the shadow from the smoke itself, each grid cell's march toward the sun through the density (sh: others' shadow,
+// ss: its own depth) - the JS march, line for line (it was lazy in JS: a cell marched the first time a puff asked for it)
+const SM_QUADU_VS = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_q; uniform vec4 u_rect; uniform vec2 u_size;
+void main() { vec2 p = (u_rect.xy + a_q * u_rect.zw) / u_size; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
+const SM_MARCH_FS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp sampler2D u_dn; uniform ivec4 u_box; uniform vec4 u_m0; uniform vec4 u_m1;
+out vec4 o;
+float DN(int i, int j) { return texelFetch(u_dn, ivec2(i, j), 0).r; }
+void main() {
+  int i = int(gl_FragCoord.x), j = int(gl_FragCoord.y), nM = int(u_m0.w + 0.5);
+  float sdx = u_m0.x, sdy = u_m0.y, ownF = u_m0.z, f2 = u_m1.x, kS = u_m1.y, behind = u_m1.z;
+  float od = 0.0, odS = 0.0, x = float(i) + 0.5, y = float(j) + 0.5;
+  for (int s = 1; s <= 48; s++) {
+    if (s > nM) break;
+    x += sdx; y += sdy; float fx = x - 0.5, fy = y - 0.5; int xi = int(floor(fx)), yj = int(floor(fy));
+    if (xi < u_box.x || yj < u_box.y || xi >= u_box.z || yj >= u_box.w) break;
+    float u = fx - float(xi), v = fy - float(yj);
+    float d = min(1.3, (DN(xi, yj) * (1.0 - u) + DN(xi + 1, yj) * u) * (1.0 - v) + (DN(xi, yj + 1) * (1.0 - u) + DN(xi + 1, yj + 1) * u) * v), wo = clamp(ownF - float(s - 1), 0.0, 1.0);
+    odS += d * wo; od += d * (1.0 - wo);
+  }
+  float own = min(1.3, DN(i, j));
+  o = vec4(clamp((od * f2 * kS - 0.08) * 5.0, 0.0, 1.0), clamp(((odS * f2 + own * behind * 1.6) * kS * 0.8 - 0.08) * 5.0, 0.0, 1.0), 0.0, 1.0);
+}`;
+const GSM = { ok: false };
+function glSmokeSetup() {
+  const gl = GLR.gl;
+  GSM.ok = false;
+  if (!gl.getExtension('EXT_color_buffer_float')) return;                // (no float targets: the smoke stays in JS)
+  const prog = (vs, fs, names) => { const p = gl.createProgram(); gl.attachShader(p, glShader(gl.VERTEX_SHADER, vs)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const U = {}; for (const k of names) U[k] = gl.getUniformLocation(p, k); return { p, U }; };
+  const common = ['u_b', 'u_g1', 'u_g2', 'u_gs', 'u_q0', 'u_q1', 'u_q2', 'u_hp', 'u_hq', 'u_dc', 'u_fl', 'u_nf', 'u_size'];
+  GSM.splat = prog(SM_SPLAT_VS, SM_SPLAT_FS, ['u_b', 'u_w', 'u_bt', 'u_size', 'u_tka']);
+  GSM.march = prog(SM_QUADU_VS, SM_MARCH_FS, ['u_rect', 'u_size', 'u_dn', 'u_box', 'u_m0', 'u_m1']);
+  GSM.tone = prog(SM_QUAD_VS, SM_TONE_FS, common.concat(['u_rect', 'u_mem', 'u_s2b']));
+  GSM.comp = prog(SM_QUAD_VS, SM_COMP_FS, common.concat(['u_rect', 'u_sp', 'u_tone', 'u_bt', 'u_lut', 'u_crease', 'u_thin']));
+  GSM.svao = gl.createVertexArray(); gl.bindVertexArray(GSM.svao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+  GSM.ordVbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, GSM.ordVbo); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 4, 0); gl.vertexAttribDivisor(1, 1);
+  GSM.qvao = gl.createVertexArray(); gl.bindVertexArray(GSM.qvao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+  gl.bindVertexArray(GLR.vao);
+  GSM.bt = null; GSM.ep = GLR.epoch; GSM.ok = true;
+}
+// a float texture of w x h (RGBA32F), its data from a Float32Array (or empty)
+function gsmTex(t, w, h, data, fmt) {
+  const gl = GLR.gl; fmt = fmt || 'RGBA32F';
+  if (!t || t.w !== w || t.h !== h || t.ep !== GLR.epoch) { if (t && t.ep === GLR.epoch) gl.deleteTexture(t.tex); t = { tex: glNewTex(0, 0, gl.NEAREST), w, h, ep: GLR.epoch, alloc: false }; }
+  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, t.tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  const ifmt = fmt === 'R32F' ? gl.R32F : gl.RGBA32F, f = fmt === 'R32F' ? gl.RED : gl.RGBA;
+  if (!t.alloc) { gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, w, h, 0, f, gl.FLOAT, data || null); t.alloc = true; }
+  else if (data) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, f, gl.FLOAT, data);
+  return t;
+}
+function gsmBind(unit, t) { const gl = GLR.gl; gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t.tex); gl.bindSampler(unit, null); }
+function gsmFbo(attach, depth) {
+  const gl = GLR.gl, f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  attach.forEach((t, k) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + k, gl.TEXTURE_2D, t.tex, 0));
+  if (depth) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+  return f;
 }
 
 /* ---- start-up, and again after the browser takes the GPU away and gives it back ---- */
@@ -12290,7 +12732,7 @@ function glSetup() {
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
   GLR.pix = null; GLR.pixPool = [];
-  glPuffSetup(); glRaySetup();
+  glPuffSetup(); glRaySetup(); glLitSetup(); glSmokeSetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
@@ -13581,7 +14023,7 @@ const SL = [
   ['rain', 'RAIN', 0, 1.25, 0.01, 0],
   ['wind', 'WIND', -1, 1, 0.01, 0.2],
   ['sea', 'SEA', 0, 1, 0.01, 0.18],
-  ['form', 'RE-FORM', 0, 1, 0.05, 0.3],
+  ['form', 'RE-FORM', 0, 1, 0.05, 0],   // (Oct 28, user: the clouds "always moving a little bit and changing a little bit all the time... should not be always shaking": off by default)
   ['morph', 'MORPH SPEED', 0.1, 4, 0.05, 1],
   ['alt', 'DECK 1 HEIGHT', 0.1, 0.75, 0.01, 0.42],   // (the game: 0.42 and a gap of 0.75 - the lab's 0.54 and 1 put deck 1 behind the game's top bar)
   ['gap', 'DECK GAP', 0, 2, 0.05, 0.75],
@@ -13594,7 +14036,8 @@ const SL = [
   ['shade', 'PUFF SHADING', 0, 1, 1, 1],          // (user Oct 27: the splotches - 1: each puff drawn with the light across it, 0: one flat tone a puff, as before)
   ['amb', 'AMBIENT', 0, 1, 0.05, 0.35],
   ['crease', 'CREASE', 0, 1, 0.05, 0.4],          // (Oct 28, lab V50: how dark the crease where two lobes meet is, in any light)
-  ['lightfix', 'LIGHT FIX', 0, 1, 1, 1],           // (Oct 28: 1 = the sun's side-light the same for every cloud and relights whole; 0 = the old per-cloud rule, for comparison)
+  ['lightfix', 'LIGHT FIX', 0, 1, 1, 1],
+  ['gpulight', 'LIGHT ON GPU', 0, 1, 1, 1],         // (Oct 28: the puffs' light worked out on the GPU - instant; 0 = in JS, as before, to compare)           // (Oct 28: 1 = the sun's side-light the same for every cloud and relights whole; 0 = the old per-cloud rule, for comparison)
   ['rim', 'RIM', 0, 3, 1, 0],
   ['hi', 'HIGHLIGHT', 0, 2, 0.05, 1],
   ['glow', 'SUNSET GLOW', 0, 2, 0.05, 1],
@@ -13609,16 +14052,19 @@ const SL = [
   ['mass', 'MASS', 0, 1, 0.05, 0.62],
   ['jitter', 'JITTER', 0, 0.6, 0.01, 0.14],
   ['base', 'BASE', 0, 1, 0.05, 0.9],
-  ['evolve', 'EVOLVE', 0, 1, 0.05, 0.25],
+  ['evolve', 'EVOLVE', 0, 1, 0.05, 0],   // (the puffs' breathing: off by default, the same - and with it off a settled cloud is never re-placed or rebuilt)
   ['heal', 'HEAL', 0.02, 1, 0.01, 0.1],
   ['lodb', 'PUFF LOD', 0, 3, 0.05, 0.8],
   ['lodl', 'LOBE LOD', 0, 8, 0.1, 1.8],
   // (Oct 28, user: "a set of sliders for the LOD of each deck so I can see how low I can take them": each deck's puff size
   // (bigger = fewer puffs) and its own factor on PUFF LOD (higher = the billows alone sooner). Deck 1 is the front)
-  ['pk1', 'DECK 1 PUFF SIZE', 0.5, 3, 0.05, 1], ['pl1', 'DECK 1 BILLOWS UNDER', 0, 40, 0.5, 0.8],
-  ['pk2', 'DECK 2 PUFF SIZE', 0.5, 3, 0.05, 1], ['pl2', 'DECK 2 BILLOWS UNDER', 0, 40, 0.5, 0.8],
-  ['pk3', 'DECK 3 PUFF SIZE', 0.5, 3, 0.05, 1], ['pl3', 'DECK 3 BILLOWS UNDER', 0, 40, 0.5, 1.1],
-  ['pk4', 'DECK 4 PUFF SIZE', 0.5, 3, 0.05, 1], ['pl4', 'DECK 4 BILLOWS UNDER', 0, 40, 0.5, 1.1],
+  // (Oct 28, Sky Bench brought to the Cloud Lab's rule: per deck, the deck on or off; its billows on or off and their size;
+  // its puffs on or off and their size; the puffs left out under a size. BILLOW SIZE and PUFF SIZE are apart now - PUFF SIZE
+  // used to scale the billows too, so raising it made every billow a huge ball striped with its light: the dots)
+  ['dk1', 'DECK 1', 0, 1, 1, 1], ['bl1', 'DECK 1 BILLOWS', 0, 1, 1, 1], ['bs1', 'DECK 1 BILLOW SIZE', 0.5, 3, 0.05, 1], ['pf1', 'DECK 1 PUFFS', 0, 1, 1, 1], ['pk1', 'DECK 1 PUFF SIZE', 0.5, 3, 0.05, 1], ['pl1', 'DECK 1 PUFFS OFF UNDER', 0, 40, 0.5, 0.8],
+  ['dk2', 'DECK 2', 0, 1, 1, 1], ['bl2', 'DECK 2 BILLOWS', 0, 1, 1, 1], ['bs2', 'DECK 2 BILLOW SIZE', 0.5, 3, 0.05, 1], ['pf2', 'DECK 2 PUFFS', 0, 1, 1, 1], ['pk2', 'DECK 2 PUFF SIZE', 0.5, 3, 0.05, 1], ['pl2', 'DECK 2 PUFFS OFF UNDER', 0, 40, 0.5, 0.8],
+  ['dk3', 'DECK 3', 0, 1, 1, 1], ['bl3', 'DECK 3 BILLOWS', 0, 1, 1, 1], ['bs3', 'DECK 3 BILLOW SIZE', 0.5, 3, 0.05, 1], ['pf3', 'DECK 3 PUFFS', 0, 1, 1, 1], ['pk3', 'DECK 3 PUFF SIZE', 0.5, 3, 0.05, 1], ['pl3', 'DECK 3 PUFFS OFF UNDER', 0, 40, 0.5, 1.1],
+  ['dk4', 'DECK 4', 0, 1, 1, 1], ['bl4', 'DECK 4 BILLOWS', 0, 1, 1, 1], ['bs4', 'DECK 4 BILLOW SIZE', 0.5, 3, 0.05, 1], ['pf4', 'DECK 4 PUFFS', 0, 1, 1, 1], ['pk4', 'DECK 4 PUFF SIZE', 0.5, 3, 0.05, 1], ['pl4', 'DECK 4 PUFFS OFF UNDER', 0, 40, 0.5, 1.1],
   // (the game's own: how the game's weather becomes the lab's sky, and how the decks move with the camera)
   ['gcover', 'CLOUDS AT SKY 30%', 0, 0.5, 0.01, 0.1],   // (the game's SKY 0.3; SKY 0 is always clear, 0.6 every cloud - user Oct 27)
   ['bigk', 'BIGGER PAST 60%', 0, 1.5, 0.05, 0.5],   // (how much bigger the clouds grow from SKY 0.6 to 1)
@@ -13627,9 +14073,10 @@ const SL = [
   ['par2', 'DECK 2 PARALLAX', 0, 1, 0.01, 0.3],
   ['par3', 'DECK 3 PARALLAX', 0, 1, 0.01, 0.2],
   ['par4', 'DECK 4 PARALLAX', 0, 1, 0.01, 0.12],
-  ['cells', 'SKY PIXEL', 2, 8, 1, 2],   // (user Oct 27: "Default should be 2"; 1 broke up, 0 was 'about 230 to the screen's height')
+  ['cells', 'SKY PIXEL', 2, 8, 1, 4],   // (user Oct 27: "Default should be 2"; 1 broke up, 0 was 'about 230 to the screen's height')
   ['skyh', 'SKY HEIGHT', 0.25, 1, 0.01, 0.5],
   ['cloudk', 'CLOUD SIZE', 0.3, 2, 0.05, 1],
+  ['cellz', 'SKY PIXEL BY ZOOM', 0, 1, 1, 1],
 ];
 const SM_SL = [   // the smoke's (the lab's SMOKE tab)
   ['smshadow', 'SHADOW', 0, 1, 0.05, 0.7, 'As the clouds\' SHADOW: the shadow other smoke casts on a part of it (light marched toward the sun past its own puff); deep in it, only the two darkest tones'],
@@ -13643,6 +14090,7 @@ const SM_SL = [   // the smoke's (the lab's SMOKE tab)
   ['smcrease', 'CREASES', 0, 1, 1, 1, 'A one-pixel darker line where a billow sits in front of another'],
   ['smglow', 'SUNSET GLOW', 0, 2, 0.05, 1, 'The low sun\'s bright sky lighting the smoke\'s undersides, as it does the clouds (times LIGHT > SUNSET GLOW)'],
   ['smfire', 'FIRE GLOW', 0, 2, 0.05, 1, 'How strongly the flames, the rocket\'s fire and the blasts light the smoke near them'],
+  ['smgpu', 'ON GPU', 0, 1, 1, 1, 'The smoke\'s picture made on the graphics card: its balls splatted, every puff lit (with its memory, so it doesn\'t blink) and every pixel coloured there. 0: in JS, as before - to compare'],
   ['smpx', 'SMOKE PIXEL', 0.5, 2, 0.05, 1, 'The size of one smoke pixel, times the game\'s (which grows with the zoom like every sprite)'],
 ];
 // fire and water (the lab's FIRE tab, V45-V49 - the sliders that apply to the game: the fire helicopter's water cannon,
@@ -13705,7 +14153,7 @@ let view = 0, editing = false, sel = -1, brushI = 0;
 let now = 0, frameNo = 0;
 const FT = {};
 const ftick = (k, t0) => { const t = performance.now(); FT[k] = (FT[k] ?? (t - t0)) * 0.92 + (t - t0) * 0.08; return t; };
-const SETTLED_EVERY = 47, SLOW_EVERY = 4;   // (see the lab's 15-frame-state.js)
+const SETTLED_EVERY = 47, SLOW_EVERY = 4, GROW_CELL = 0.35;   // (GROW_CELL: how far, in sky pixels, a cloud's edge grows before it's re-placed)   // (see the lab's 15-frame-state.js)
 const BOLT_VEIL = false;
 // the screen of the view being drawn: its size in screen pixels, for the lab's "pixels a cell" (cv.width / W)
 const cv = { width: 1, height: 1 };
@@ -13830,6 +14278,39 @@ function dot(x, y, col) { if (x >= 0 && x < TW && y >= 0 && y < H) { buf[y * TW 
 // as small uploads. GPU: this view draws its decks that way (set in skyBack); PB: the batch being built; DCTX: the deck
 // layer's context. The Canvas 2D path (?gl=0), and the editor's VIEW pictures, still draw into the buffers as before.
 let GPU = false, PB = null, DCTX = null;
+// ---- STILL FRAMES (Oct 28, user: "20 fps... what's causing the frame rate issues"): every frame each deck layer was cleared
+// and every cloud drawn into it again - 118,000 puffs, 380 draws - though nothing in the sky had changed. Now a deck's drawing
+// is recorded (DREC: the same two calls, drawPuffs and drawPixels), compared with what its layer already holds - each batch by
+// its id and version, where it goes and its colours; each picture by its pixels - and laid into the layer only when it
+// differs. A still sky lays its finished layers; a change of light, a cloud growing, a step of the wind or the camera redraws
+// that deck as before, so nothing looks different
+function pixHash(px, n) { let h = 2166136261; for (let i = 0; i < n; i++) h = Math.imul(h ^ px[i], 16777619); return h >>> 0; }
+const DREC = {
+  ops: [], sig: [], op: 'source-over',
+  reset() { this.ops = []; this.sig = []; this.op = 'source-over'; return this; },
+  get globalCompositeOperation() { return this.op; }, set globalCompositeOperation(v) { this.op = v; },
+  clearRect() { },
+  drawPuffs(b, ax, ay, pal) { if (!b.n) return; const p = Array.from(pal); this.ops.push([0, b, ax, ay, p]); this.sig.push(b.uid, b.hash(), b.lver || 0, b.n, ax, ay, ...p); },
+  drawPixels(px, w, h, dx, dy, dw, dh, straight, rows) {
+    const n = w * h, copy = px.slice(0, n), hs = pixHash(copy, n);
+    this.ops.push([1, copy, w, h, dx, dy, dw, dh, straight, rows ? rows.map(r => r.slice()) : null, this.op]);
+    this.sig.push(-1, this.op, w, h, dx, dy, dw, dh, straight ? 1 : 0, hs); if (rows) for (const r of rows) this.sig.push(r[0], r[1], r[2], r[3]);
+  },
+};
+// lay the recorded drawing into the deck's layer T, unless the layer already holds exactly that
+function deckCommit(T) {
+  const sig = DREC.sig, last = T._sig;
+  let same = !!last && T._ep === GLR.epoch && !!T.tex && last.length === sig.length && (P.still ?? 1) > 0;
+  for (let i = 0; same && i < sig.length; i++) if (last[i] !== sig[i]) same = false;
+  if (same) { FTV.dSkip = (FTV.dSkip || 0) + 1; return; }
+  const cx = T.getContext();
+  cx.clearRect(0, 0, T.width, T.height);
+  for (const o of DREC.ops) {
+    if (o[0] === 0) cx.drawPuffs(o[1], o[2], o[3], o[4]);
+    else { cx.globalCompositeOperation = o[10]; cx.drawPixels(o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], o[9]); cx.globalCompositeOperation = 'source-over'; }
+  }
+  T._sig = sig; T._ep = GLR.epoch; FTV.dDraw = (FTV.dDraw || 0) + 1;
+}
 const SPANS = new Map();
 function spans(r) { const k = Math.max(1, Math.round(r * 2)); let s = SPANS.get(k); if (!s) { const R = k / 2, n = Math.floor(R); s = []; for (let dy = -n; dy <= n; dy++) s.push(Math.floor(Math.sqrt(Math.max(0, (R + 0.5) * (R + 0.5) - dy * dy)))); SPANS.set(k, s); } return s; }
 function disc(cx, cy, r, col, clipY) { const s = spans(r), n = (s.length - 1) >> 1; for (let i = 0; i < s.length; i++) { const y = cy - n + i; if (y > clipY) break; hspan(y, cx - s[i], cx + s[i], col); } }
@@ -13904,7 +14385,7 @@ function applyStyle() {
   for (const c of clouds) {
     if (c === hero || c.wisp) continue;                                     // (wisps keep being wisps)
     morphTo(c, shapeFor(c, rnd), d * (0.75 + 0.5 * rnd()));
-    c.nextForm = now + (25 + 35 * rnd()) / Math.max(0.05, P.form * (0.4 + Math.abs(P.wind) * 1.6));
+    c.nextForm = now + (25 + 35 * rnd()) / Math.max(0.05, P.form * 0.72);   // (not sooner in a wind: user Oct 28)
   }
 }
 const designLobes = () => heroLobes.filter(l => !l.tmp).map(l => ({ x: Math.round(l.m ? l.m.t.x : l.x), y: Math.round(l.m ? l.m.t.y : l.y), z: Math.round(l.m ? l.m.t.z : l.z || 0), rx: Math.round(l.m ? l.m.t.rx : l.rx), ry: Math.round(l.m ? l.m.t.ry : l.ry), seed: l.seed }));
@@ -13921,11 +14402,13 @@ function genLobe(c, L, j, items) {
   const rx = RX * s, ry = RY * s, rz = Math.min(RX, RY) * 0.95 * s, rb = (rx + ry) / 2;
   // (DECK n PUFF SIZE scales the billows too - a coarser cloud all through: puffs and billows both fall with its square. The
   // puffs alone fell only a quarter: most of a cloud's items are its billows (up to 400 a lobe), their count set by their own size)
-  const dk = P['pk' + c.lay.dn] ?? 1;
+  // (DECK n BILLOW SIZE and DECK n PUFF SIZE: bigger means fewer, with the square - billows cover the lobe, puffs cover each
+  // billow. As the Cloud Lab: PUFF SIZE no longer scales the billows)
+  const dk = P['bs' + c.lay.dn] ?? 1, dp = P['pk' + c.lay.dn] ?? 1;
   const br0 = 0.34 * rb * P.billow * dk;
   const area = 4 * Math.PI * (rx * ry + ry * rz + rx * rz) / 3;
   const nb = clamp(Math.round(area / (br0 * br0 * 1.7)), 6, 400), a0 = rnd() * 6.28;
-  const pr0 = Math.max(1, P.puff * s * c.puffK * dk);   // (DECK n PUFF SIZE: bigger puffs on a deck - fewer of them)
+  const pr0 = Math.max(1, P.puff * s * c.puffK * dp);   // (DECK n PUFF SIZE: bigger puffs on a deck - fewer of them)
   for (let i = 0; i < nb; i++) {
     const d = norm3(fib(nb, i, a0).map(v => v + (rnd() - 0.5) * 0.12));
     if (d[2] < -0.12) continue;
@@ -14017,7 +14500,7 @@ function morphTo(c, target, dur) {
   if (c === hero) heroLobes = c.lobes;
   if (c.items || c === hero) genCloud(c); else { c.lob = c.lobes.map(() => ({})); cloudBox(c); }
 }
-const formDur = () => 16 / (0.5 + Math.abs(P.wind) * 1.5) / (P.morph || 1);      // (MORPH SPEED: 2 = twice as fast)
+const formDur = () => 20 / (P.morph || 1);   // (MORPH SPEED: 2 = twice as fast; no longer faster in a wind - user Oct 28)      // (MORPH SPEED: 2 = twice as fast)
 function placeLobes(c, t) {
   const s = c.s * c.lay.zl, g = c.grow ?? 1;
   if (c.lob.length !== c.lobes.length) c.lob = c.lobes.map(() => ({}));
@@ -14039,7 +14522,7 @@ function placeCloud(c, t, full) {
   // zoomed out (or far away, where the puffs are about a pixel): the billows alone
   // (the puff's size on the deck, in cells, without DECK n PUFF SIZE - so making a deck's puffs bigger doesn't also take it out of
   // its LOD; under DECK n BILLOWS UNDER (cells; the old PUFF LOD, times 1.4 on the far decks, when unset) the billows alone)
-  const lod = P.puff * c.s * c.puffK * c.lay.zl < (P['pl' + c.lay.dn] ?? P.lodb * (c.lay.name === 'far' || c.lay.name === 'horizon' ? 1.4 : 1));
+  const lod = (P['pf' + c.lay.dn] ?? 1) === 0 || P.puff * c.s * c.puffK * c.lay.zl < (P['pl' + c.lay.dn] ?? P.lodb * (c.lay.name === 'far' || c.lay.name === 'horizon' ? 1.4 : 1));
   if (lod !== c.lod) { c.lod = lod; full = true; }
   const items = c.items, ph = frameNo & 7, idx = c.lod ? fillIdx(c) : null, n = idx ? idx.length : items.length, cbp = P.cull === 0 ? null : c.cb;
   // (each puff's breathing, sin(t·0.13 + its phase), as sin·cos + cos·sin with its phase's sine and cosine kept: no sine a puff)
@@ -14059,12 +14542,18 @@ function placeCloud(c, t, full) {
     it.lnx = nx; it.lny = ny; it.lnz = nz;                                  // (the lobe's own normal here: smooth over the lobe)
     if (it.fill) { it.x = bx; it.y = by; it.zz = bz; it.r = br * 0.8; it.br = br; it.nx = nx; it.ny = ny; it.nz = nz; }
     else {
-      const p = it.p; it.x = bx + p[0] * br * 0.82; it.y = by + p[1] * br * 0.82; it.zz = bz + p[2] * br * 0.82; it.r = it.pr * Math.min(1, l.k) * zl;
+      // (Oct 28, user: "circles in the clouds" in HEAVY and storms: past 60% the clouds grow past their full size (grow up to
+      // 1 + BIG K: 1.48 in HEAVY) and their billows with them, but a puff's size stopped at its full size - the puffs spread
+      // over a billow half again as big, covering under half of it, its disc showing between them and each puff a circle on
+      // it. Past full size the puffs now grow with the cloud; growing up to it, as before)
+      const gk = Math.max(1, c.grow ?? 1);
+      const p = it.p; it.x = bx + p[0] * br * 0.82; it.y = by + p[1] * br * 0.82; it.zz = bz + p[2] * br * 0.82; it.r = it.pr * Math.min(1, l.k / gk) * gk * zl;
       const mx = nx * mass + p[0] * (1 - mass), my = ny * mass + p[1] * (1 - mass), mz = nz * mass + p[2] * (1 - mass), ml = Math.sqrt(mx * mx + my * my + mz * mz) || 1;
       it.nx = mx / ml; it.ny = my / ml; it.nz = mz / ml;
     }
     if (it.y < 0) it.y *= flat;
   }
+  if (full) { c.placedG = c.grow; c.placeV = (c.placeV || 0) + 1; }   // (the GPU batch is rebuilt from a full placing, and only then)
 }
 
 
@@ -14379,7 +14868,7 @@ function toneCol(tone, haze, j, id) {
   let col;
   if (view === 0) col = (curPal || E.pal)[tone];
   else if (view === 1) col = mix3([20, 20, 30], LOBE_COLS[j % 8], 0.45 + tone * 0.14);
-  else if (view === 2) col = mix3([20, 20, 30], LOBE_COLS[(id + j * 3) % 8], 0.45 + tone * 0.14);
+  else if (view === 2 || view === 4) col = mix3([20, 20, 30], LOBE_COLS[(id + j * 3) % 8], 0.45 + tone * 0.14);   // (BILLOWS: a colour a billow; PUFFS: a colour a puff)
   else col = [40 + tone * 50, 40 + tone * 50, 40 + tone * 50];
   if (haze > 0) col = mix3(col, E.skyHor, haze);
   return rgb(col.map(Math.round));
@@ -14420,13 +14909,16 @@ function drawCloudCached(c, ax, ay) {
     // (the GPU: its batch of records stands in for the sprite, on the same cadence - one batch a view, since each view takes
     // the puffs within its own wide box; built again too once the cloud has moved far enough across the screen that the box
     // its puffs were taken within no longer covers it)
+    if ((P.gpulight ?? 1) > 0 && !lit && view === 0) { drawCloudLit(c, ax, ay, live); return; }   // (LIGHT ON GPU: no puff lit in JS)
+    if (c.pbv && c.pbv[VI] && c.pbv[VI].lit) { c.pbv[VI].free(); c.pbv[VI] = null; }   // (back to the CPU's light: a batch of its own)
     const pbv = c.pbv || (c.pbv = [null, null]), pb = pbv[VI];
     const moved = !pb || pb.lobes || Math.abs(ax - pb.ax) > CULL_MOVE || Math.abs(ay - pb.ay) > CULL_MOVE;
+    if (pb && pb.lk !== c.lk) RL_WAIT++;                                   // (waiting for its new light: the next frame's budget)
     const relight = !live && (!pb || (pb.lk !== c.lk && RELIGHT > 0));
     // (must: it has no batch, or its old one can't serve; want: its cadence or its light - within the frame's BUILD budget,
     // else it keeps last time's picture a frame or two longer. On an iPad with a full sky slowly growing, every cloud
     // was rebuilt every 4th frame - twenty rebuilds a frame, a third of 10,000 puffs lit in each)
-    const key = !moved && pb.key !== sprKey(c), must = live || moved || key, want = relight || ((frameNo + c.uid) % (c.slowMv ? SLOW_EVERY : SETTLED_EVERY) === 0 && !!pb && pb.fr !== frameNo);
+    const key = !moved && pb.key !== sprKey(c), must = live || moved || key, want = relight || ((frameNo + c.uid) % (c.slowMv ? SLOW_EVERY : SETTLED_EVERY) === 0 && (c.slowMv || P.evolve > 0) && !!pb && pb.fr !== frameNo);   // (nothing changing: no rebuild on the cadence)
     // (Oct 28, LIGHT FIX: a big cloud's relight runs in slices of a few hundred puffs a frame into a second set of tones, the
     // old batch drawn meanwhile; when every puff has its new light the tones are swapped and the batch built once. No 14 ms
     // frame for a 3,600-puff tower lit whole, and no half-lit cloud on the screen. A newer key before it's done starts it over)
@@ -14537,7 +15029,8 @@ const kOf = r => Math.max(1, Math.round(r * 2));
 // the ends of clouds past its sides). Set per cloud each frame from where it is drawn. (cbw: the GPU batch's wide box)
 function cullBox(c, axReal, ayReal) {
   const M = 6; c.cb = [-axReal - M, CW - axReal + M, ayReal - H - M, ayReal + M];
-  if (GPU) { const Mw = Math.max(64, W >> 1); CULL_MOVE = Mw - 8; const w = c.cbw || (c.cbw = [0, 0, 0, 0]); w[0] = -axReal - Mw; w[1] = CW - axReal + Mw; w[2] = ayReal - H - Mw; w[3] = ayReal + Mw; }
+  if (GPU) { const Mw = Math.max(64, W), MXg = Math.max(16, W >> 2); CULL_MOVE = Math.max(16, Mw - 2 * MXg - 8);   // (a view each side: the deck layers' margins and the anchor's slack)
+    const w = c.cbw || (c.cbw = [0, 0, 0, 0]); w[0] = -axReal - Mw; w[1] = CW - axReal + Mw; w[2] = ayReal - H - Mw; w[3] = ayReal + Mw; }
 }
 function drawCloud(c, ax, from, to, ayOver, Hworld) {
   if (!c.nbrReady) findNeighbours(c);
@@ -14574,7 +15067,7 @@ function drawCloud(c, ax, from, to, ayOver, Hworld) {
     if (PB) { PB.disc(cx, cy, kOf(r), tone, 0, 0, tone, tone); continue; }
     let col;
     if (view === 0) col = colOf(tone);
-    else col = toneCol(tone, haze, it.j, it.id);
+    else col = toneCol(tone, haze, it.j, view === 2 ? (it.fill ? it.id : it.bill.id) : it.id);   // (BILLOWS: the puffs take their billow's colour)
     disc(cx, cy, r, col, H);
   }
 }
@@ -14590,6 +15083,9 @@ function drawCloud(c, ax, from, to, ayOver, Hworld) {
 // meanwhile is last light's whole picture (drawCloudCached: the sliced relight)
 const RELIT_SLICE = 400;
 function relightSlice(c, from, to) {
+  // (Oct 28: a cloud that had just re-formed - new billows, their neighbour lists not made yet - could be relit here before
+  // drawCloud made them: 'own.nbr is not iterable', the frame thrown away and the loop stopped, the sky left without clouds)
+  if (!c.nbrReady) findNeighbours(c);
   const L = c.L, X = screenX(c), ayW = c.y, HW = H;
   for (let i = from; i < to; i++) {
     const it = c.items[i]; if (it.x === undefined) continue;
@@ -14630,14 +15126,14 @@ function lobeTones(c) {
     c.ltones.push(t);
   }
 }
-function drawLobes(c, ax) {
+function drawLobes(c, ax, ayO) {
   // (its lobes' tones again when its light changes (its key: the sun's angle to it, the sliders), or every SETTLED_EVERY frames
   // for the breathing - four times as long for a cloud whose lobes are a pixel or two - not every 8th frame whatever happened:
   // zoomed far out all 2,600 clouds are lobes, and that was 50 ms a frame)
   const every = c.rbAvg * c.s * c.lay.zl < 3 ? SETTLED_EVERY * 4 : SETTLED_EVERY;
   if (!c.ltones || c.ltones.length !== c.lob.length || c.ltk !== c.lk || (frameNo + c.uid) % every === 0) { lobeTones(c); c.ltk = c.lk; }
   curPal = c.pal;
-  const ay = c.y, haze = hazeOf(c), cache = [];
+  const ay = ayO ?? c.y, haze = hazeOf(c), cache = [];
   const col = t => cache[t] ?? (cache[t] = toneCol(t, haze, 0, 0));
   // (back to front: last frame's order kept while it still is that order - the lobes move in depth only in a morph)
   let order = c.lorder, ok = order && order.length === c.lob.length;
@@ -14646,14 +15142,22 @@ function drawLobes(c, ax) {
   if (GPU) {
     // (the GPU: each lobe a record, its fifteen tones packed; this frame's, since the lobes breathe every frame)
     const t0 = performance.now();
-    const pbv = c.pbv || (c.pbv = [null, null]), pb = pbv[VI] || (pbv[VI] = new GLPuffs()); pb.begin(); pb.key = ''; pb.lobes = true; pb.fr = frameNo;
+    // (Oct 28: built into a scratch batch and kept only if a record differs - a still cloud's lobes were sent to the GPU again
+    // every frame, 150 uploads a frame zoomed out)
+    const pbv = c.pbv || (c.pbv = [null, null]), old = pbv[VI] && pbv[VI].lobes ? pbv[VI] : null, tmp = LOBE_TMP; tmp.n = 0;
     for (const j of order) {
       const l = c.lob[j], T = c.ltones[j]; if (!(l.rx > 0.35)) continue;
       let T0 = 0, T1 = 0;
       for (let q = 0; q < 8; q++) T0 |= (T[q] & 7) << (q * 3);
       for (let q = 8; q < 15; q++) T1 |= (T[q] & 7) << ((q - 8) * 3);
-      pb.lobe(l.x, -l.y, Math.max(0.5, l.rx), Math.max(0.5, l.ry), 0, T0, T1);
+      const q8 = v => Math.round(v * 8) / 8;   // (to an eighth of a sky pixel: a cloud easing in still grows smoothly, but the last tiny steps are no change)
+      tmp.lobe(q8(l.x), q8(-l.y), q8(Math.max(0.5, l.rx)), q8(Math.max(0.5, l.ry)), 0, T0, T1);
     }
+    let same = !!old && old.n === tmp.n;
+    for (let i = 0, m = tmp.n * 8; same && i < m; i++) if (old.data[i] !== tmp.data[i]) same = false;
+    const pb = same ? old : (pbv[VI] = old || new GLPuffs());
+    if (!same) { pb.begin(); pb.room(tmp.n); pb.data.set(tmp.data.subarray(0, tmp.n * 8)); pb.n = tmp.n; }
+    pb.key = ''; pb.lobes = true; pb.fr = frameNo;
     FTV.lobes = (FTV.lobes || 0) + performance.now() - t0;
     { const t1 = performance.now(); DCTX.drawPuffs(pb, ax, ay, palOf(c)); FTV.gl = (FTV.gl || 0) + performance.now() - t1; }
     return;
@@ -14672,6 +15176,7 @@ function drawLobes(c, ax) {
     }
   }
 }
+const LOBE_TMP = new GLPuffs();
 function drawPaint(c, ax) {
   for (const p of c.paint) {
     const u = p.age / p.life, r = p.r * Math.min(1, p.age * 4) * (u > 0.75 ? 1 - (u - 0.75) / 0.25 : 1);
@@ -14681,13 +15186,106 @@ function drawPaint(c, ax) {
     disc(ax + Math.round(p.x), c.y - Math.round(p.y), r, toneCol(p.tone, hazeOf(c), 0, 0), H);
   }
 }
+// ---- the clouds' side of the GPU light: a cloud's shapes and data built (litBuild) when its shape changes; its light pass
+// (glLitRun) when its shape or its light (its light key: the sun's angle to it, the light from under, its casters, the
+// sliders) changes. No puff is lit in JS
+function litBuild(c, pb, ax, ay) {
+  if (!c.nbrReady) findNeighbours(c);
+  const lit = pb.lit || (pb.lit = new GLLit());
+  pb.begin(); pb.ax = ax; pb.ay = ay; pb.lobes = false;
+  const cb = P.cull === 0 ? null : c.cbw, lod = c.lod, idx = lod ? fillIdx(c) : null, n = idx ? idx.length : c.items.length;
+  // the billows: every billow of the cloud, its place, size and its neighbours (indices into the same list)
+  const bi = new Map(); let nb = 0; const bl = [];
+  for (const list of c.billows) for (const b of list) { if (b.x === undefined) continue; bi.set(b, nb++); bl.push(b); }
+  lit.n = 0; lit.items.length = 0; lit.room(n);
+  const S = lit.src;
+  for (let q = 0; q < n; q++) {
+    const it = c.items[idx ? idx[q] : q];
+    if (it.x === undefined || it.lnx === undefined) continue;
+    const r = (lod ? it.r * 1.12 : it.r) * (1 - it.cut); if (!(r >= 0.6)) continue;
+    if (cb) { const px = it.x + it.dx, py = it.y - it.dy; if (px + r < cb[0] || px - r > cb[1] || py + r < cb[2] || py - r > cb[3]) continue; }
+    const own = it.fill ? it : it.bill, b = bi.get(own); if (b === undefined) continue;
+    const cx = Math.round(it.x + it.dx), cy = -Math.round(it.y) + Math.round(it.dy), k = kOf(r);
+    pb.disc(cx, cy, k, 0, 0, 0, 0, 0);
+    const o = lit.n++ * 20, p = it.fill ? null : it.p, Rb = Math.max(1.5, it.fill ? it.br : (own.br || 4) * 0.82);
+    S[o] = cx; S[o + 1] = cy; S[o + 2] = k; S[o + 3] = it.jit || 0;
+    S[o + 4] = it.x; S[o + 5] = it.y; S[o + 6] = it.zz; S[o + 7] = it.r || 0;
+    S[o + 8] = it.nx; S[o + 9] = it.ny; S[o + 10] = it.nz; S[o + 11] = it.j;
+    S[o + 12] = it.lnx; S[o + 13] = it.lny; S[o + 14] = it.lnz; S[o + 15] = b;
+    S[o + 16] = p ? p[0] : it.lnx; S[o + 17] = p ? p[1] : it.lny; S[o + 18] = p ? p[2] : it.lnz; S[o + 19] = Rb;
+    lit.items.push(it);
+  }
+  // the data: lobes (2 texels: x y z rx | ry rz rb grp), billows (2: x y zz br | first neighbour, neighbours), the neighbours
+  // (4 a texel), then the casters' lobes (written by litRun)
+  const lob = c.lob, nL = lob.length;
+  let nn = 0; for (const b of bl) nn += (b.nbr ? b.nbr.length : 0);
+  const lo0 = 0, bo0 = nL * 2, no0 = bo0 + nb * 2, co0 = no0 + Math.ceil(nn / 4);
+  lit.lo0 = lo0; lit.nl = nL; lit.bo0 = bo0; lit.co0 = co0;
+  const need = co0 * 4 + 4;
+  if (lit.dat.length < need) lit.dat = new Float32Array(Math.max(need, lit.dat.length * 2));
+  const D = lit.dat;
+  for (let j = 0; j < nL; j++) { const l = lob[j], o = (lo0 + j * 2) * 4; D[o] = l.x; D[o + 1] = l.y; D[o + 2] = l.z; D[o + 3] = l.rx; D[o + 4] = l.ry; D[o + 5] = l.rz; D[o + 6] = l.rb; D[o + 7] = l.grp || 0; }
+  let ni = 0;
+  for (let k = 0; k < nb; k++) {
+    const b = bl[k], o = (bo0 + k * 2) * 4, nbr = b.nbr || [];
+    D[o] = b.x; D[o + 1] = b.y; D[o + 2] = b.zz; D[o + 3] = b.br; D[o + 4] = no0 * 4 + ni; let cnt = 0;
+    for (const q of nbr) { const qi = bi.get(q); if (qi === undefined) continue; D[no0 * 4 + ni++] = qi; cnt++; }
+    D[o + 5] = cnt; D[o + 6] = 0; D[o + 7] = 0;
+  }
+  lit.dlen = co0 * 4;
+  lit.geo++;
+  pb.key = sprKey(c); pb.fr = frameNo;
+}
+// the light pass for cloud c (its casters and its place in the world as they are now, as a relight took them)
+function litRun(c, pb) {
+  const lit = pb.lit, L = c.L;
+  let nc = 0; for (const o of c.casters) nc += o.wl.length;
+  const need = (lit.co0 + nc * 2) * 4;
+  if (lit.dat.length < need) { const a = new Float32Array(need * 1.5); a.set(lit.dat.subarray(0, lit.co0 * 4)); lit.dat = a; }
+  const D = lit.dat; let o = lit.co0 * 4;
+  for (const oc of c.casters) for (const l of oc.wl) { D[o] = l.x; D[o + 1] = l.y; D[o + 2] = l.z; D[o + 3] = l.rx; D[o + 4] = l.ry; D[o + 5] = l.rz; D[o + 6] = l.rb; D[o + 7] = 0; o += 8; }
+  lit.dlen = o;
+  const U = { lo0: lit.lo0, nl: lit.nl, bo0: lit.bo0, co0: lit.co0, nc, L, under: c.under || 0, W: [screenX(c), H - c.y, c.wz],
+    p0: [P.shadow, P.self, P.amb, P.crease ?? 0.4], p1: [P.contrast * E.contrast, P.expo, P.jitter, P.hi ?? 1], p2: [E.night, E.dusk, (P.glow ?? 1) * E.sunset, P.mass], shade: P.shade };
+  glLitRun(pb, lit, U);
+  pb.lk = c.lk; lit.done = lit.geo; FTV.bLit = (FTV.bLit || 0) + 1;
+}
+// a cloud drawn with its light on the GPU (drawCloudCached's GPU branch, unless lit by lightning)
+function drawCloudLit(c, ax, ay, live) {
+  const pbv = c.pbv || (c.pbv = [null, null]); let pb = pbv[VI];
+  const moved = !pb || pb.lobes || !pb.lit || Math.abs(ax - pb.ax) > CULL_MOVE || Math.abs(ay - pb.ay) > CULL_MOVE;
+  if (!pb || pb.lobes) pb = pbv[VI] = new GLPuffs();
+  const key = !moved && pb.key !== sprKey(c);
+  // (its shape changed: a move past its box, a new look, a cloud growing or morphing (every SLOW_EVERY frames), a brush, breathing)
+  const want = pb.pv !== c.placeV;   // (placed again since this batch was built: growing, morphing, breathing - placeCloud counts)
+  if (moved || key || live || want) {
+    pb.pv = c.placeV;
+    const t0 = performance.now();
+    litBuild(c, pb, ax, ay);
+    const d = performance.now() - t0; FTV.build = (FTV.build || 0) + d; FTV.builds = (FTV.builds || 0) + 1;
+  }
+  // (its light: again when its shape or its light key changed, or the GPU was lost and given back)
+  if (pb.lit.done !== pb.lit.geo || pb.lk !== c.lk || pb.lit.ep !== GLR.epoch || pb.vbo === null || pb.epoch !== GLR.epoch) {
+    const t0 = performance.now(); litRun(c, pb); FTV.gl = (FTV.gl || 0) + performance.now() - t0;
+  }
+  { const t1 = performance.now(); DCTX.drawPuffs(pb, ax, ay, palOf(c)); FTV.gl = (FTV.gl || 0) + performance.now() - t1; }
+}
+// (the planes in deck 1 ask for the tone under them: a lit batch holds no tones in JS - the puff's light worked out here, once)
+function cpuToneOf(c, it) {
+  const L = c.L; let odSelf = 0;
+  if (P.self > 0) { const own = it.fill ? it : it.bill; for (const b of own.nbr || []) { const ch = sphereChord(it.x, it.y, it.zz, L, b.x, b.y, b.zz, b.br); if (ch) odSelf += ch / b.br; } }
+  let odOther = 0;
+  if (c.casters.length) { const wx = screenX(c) + it.x, wy = H - c.y + it.y, wz = c.wz + it.zz; for (const o of c.casters) for (const l of o.wl) odOther += chord(wx, wy, wz, L, l) / l.rb; }
+  const t = lightValue(it, it.j, c.lob, L, odOther, odSelf, c.under); return t >= 0 ? t : 0;
+}
+
 // (the GPU: a cloud's tubes and paint, drawn live every frame, go in a second batch of its own, relative to (ax, c.y))
-function drawLiveGPU(c, ax) {
+function drawLiveGPU(c, ax, ayO) {
   if (!(c.tubes && c.tubes.length) && !c.paint.length) return;
   const pb = c.pbx || (c.pbx = new GLPuffs()); pb.begin();
   PB = pb;
   try { drawTubes(c, ax); drawPaint(c, ax); } finally { PB = null; }
-  if (pb.n) DCTX.drawPuffs(pb, ax, c.y, palOf(c));
+  if (pb.n) DCTX.drawPuffs(pb, ax, ayO ?? c.y, palOf(c));
 }
 // the veil under a deck: from its base line down to the horizon, in the colour of the clouds' base so there's no seam.
 // Drawn into the deck's own layer, behind its clouds and over everything behind it.
@@ -14710,7 +15308,7 @@ function drawVeil2(lay, horY, X0, vis) {
     // (the GPU: the veil as one strip a band - a row of columns, each the colour at its thickness times the band's k -
     // uploaded once and each row stretched over its band of rows. It was a rectangle per run of columns per band: under
     // storm clouds, whose edges ramp, thousands of them)
-    const yA = Math.max(0, lay.baseY - 2), yB = Math.min(H - 1, foot), cuts = [lay.baseY + 2, lay.baseY + 5, horY + 1];
+    const yA = Math.max(0, lay.baseY - 2), yB = Math.min((DLH || H) - 1, foot), cuts = [lay.baseY + 2, lay.baseY + 5, horY + 1];
     // (one row, each column at its full thickness; each band laid from it at its k through the quad's alpha)
     if (VSTRIP.length < TW) VSTRIP = new Uint32Array(TW * 2);
     for (let x = 0; x < TW; x++) { const av = colA[x]; VSTRIP[x] = av >= 0.02 ? rgba(vc, av) : 0; }
@@ -14754,7 +15352,7 @@ function drawVeil2(lay, horY, X0, vis) {
               // (the GPU: the shaft in a small picture of its own - the veil under it first, as the deck's buffer held it, then its
               // drops - put on the layer as it is ('copy'), so it replaces the veil's pixels cell for cell as dot() did)
               const shA = Math.round(P.wind * 4 * zl), bx0 = Math.max(0, Math.round(cx) + Math.min(0, shA)), bx1 = Math.min(TW - 1, Math.ceil(cx + w) - 1 + Math.max(0, shA));
-              const by0 = Math.max(0, lay.baseY), by1 = Math.min(H - 1, foot), bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+              const by0 = Math.max(0, lay.baseY), by1 = Math.min((DLH || H) - 1, foot), bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
               if (bw <= 0 || bh <= 0) continue;
               if (SHAFT.length < bw * bh) SHAFT = new Uint32Array(bw * bh * 2);
               const sb = SHAFT;
@@ -14836,6 +15434,7 @@ function batchToneAt(c, x, y) {
       if (d[o + 7] < 0.5) {
         const R = d[o + 2] * 0.5, nn = Math.floor(R), dx = x - (ax + d[o]), dy = y - (ay + d[o + 1]);
         if (Math.abs(dy) > nn || dx * dx + dy * dy > (R + 0.5) * (R + 0.5)) continue;
+        if (pb.lit && pb.lit.items[i]) { tone = cpuToneOf(c, pb.lit.items[i]); continue; }   // (LIGHT ON GPU: the puff's light worked out here)
         const lh = d[o + 6]; tone = clamp(Math.floor(d[o + 3] + d[o + 4] * dx + d[o + 5] * dy), lh & 7, lh >> 3);
       } else {
         const cx = ax + d[o], cy = ay + d[o + 1], rx = d[o + 2], ry = d[o + 3]; if (y > ay + d[o + 4]) continue;
@@ -15082,7 +15681,14 @@ const VB = [{}, {}];                                      // (each view its own 
 const SHV = [0, 0];                                       // (how hidden the sun is, eased, each view)
 let lastScreen = '';
 function skyScreen(bw, bh) {
-  CPX = Math.max(2, Math.round(P.cells) || 2);   // (SKY PIXEL: 2 by default, never under 2 - user Oct 27)
+  // (SKY PIXEL: the sky pixel at x1, 4 by default - user Oct 28: "too high res now... prettier at 4 when zoom is 1x, otherwise we
+  // get the splotches": at 2 a puff was 5 to 7 sky pixels across on a big screen and each one showed as a dot. Zoomed out it
+  // follows the zoom (SKY PIXEL BY ZOOM): x2/3 gives 3, the user's choice there; never under 2)
+  const old = CPX;
+  // (user Oct 28: "never lower than 3, otherwise it gets really slow": zoomed out it stops at 3 - or at SKY PIXEL itself, if set lower)
+  const cs = Math.max(2, Math.round(P.cells || 4));
+  CPX = Math.max(Math.min(3, cs), Math.round(cs * ((P.cellz ?? 1) > 0 ? Math.min(1, ZL) : 1)));
+  if (lastScreen && old !== CPX) { for (const L of LAYERS) L.off = (L.off || 0) * old / CPX; FORCE = frameNo + 3; }   // (the wind drift kept in place; the sky built at once, not over many frames)
   const key = bw + 'x' + bh + '@' + CPX + '/' + (P.skyh ?? 0.5) + '/' + (P.cloudk ?? 1) + '/' + (P.tall ?? 0.3) + '/' + (P.tallwx ?? 0.5) + '/' + (P.mix ?? 0.7) + '/' + (P.region ?? 1.6);   // (Oct 28: TOWERS, KIND MIX, STRETCH rebuild the scene too)
   if (key === lastScreen) return;
   lastScreen = key;
@@ -15097,6 +15703,10 @@ function viewBufs(vi, w) {
   const b = VB[vi], cw = w + 2;
   if (b.cw !== cw || b.h !== H0) { b.cw = cw; b.h = H0; b.bg = makeBuf(cw, H0); b.bg0 = null; b.bgKey = ''; b.veil1 = makeBuf(cw, H0); b.veil1.by0 = 0; b.veil1.by1 = H0 - 1; b.lay = {}; for (const L of LAYERS) { b.lay[L.name] = makeBuf(cw, H0); b.lay[L.name].by0 = 0; b.lay[L.name].by1 = H0 - 1; } }
   return b;
+}
+function deckTargetAt(LB, w, h) {
+  if (!LB.T || LB.T.width !== w || LB.T.height !== h) { LB.T = makeLayer(w, h); LB.ctx = LB.T.getContext(); LB.ctx.imageSmoothingEnabled = false; }
+  return LB.T;
 }
 function deckTarget(LB) {
   if (!LB.T || LB.T.width !== CW || LB.T.height !== H) { LB.T = makeLayer(CW, H); LB.ctx = LB.T.getContext(); LB.ctx.imageSmoothingEnabled = false; }
@@ -15147,7 +15757,7 @@ function outRays(G) {
 }
 // a deck's band (BY0..BY1, a row more each side) at its sub-cell offset frac; the GPU: its whole layer
 function deckOut(lay, B, frac) {
-  if (GPU) { if (B.T) outImg(B.T, CW, 0, H, (frac - 1) * CPX, 0, CW * CPX, H * CPX); return; }
+  if (GPU) { if (!B.T) return; if (B.lw) outImg(B.T, B.lw, 0, B.lh, (frac - 1 - B.dox) * CPX, -B.doy * CPX, B.lw * CPX, B.lh * CPX); else outImg(B.T, CW, 0, H, (frac - 1) * CPX, 0, CW * CPX, H * CPX); return; }
   if (BY1 < BY0) return;
   const y0 = Math.max(0, BY0 - 1), y1 = Math.min(H - 1, BY1 + 1), n = y1 - y0 + 1;
   outPix(B, CW, y0, n, (frac - 1) * CPX, y0 * CPX, CW * CPX, n * CPX, true);
@@ -15182,16 +15792,39 @@ function skyFrame(G) {
   // two decimals it flipped 1.00 / 0.99 / 1.00 frame after frame: every cloud in the sky re-lit each time, 50 keys a frame)
   LSIG = [P.shadow, P.self, P.amb, P.contrast, P.expo, P.jitter, P.glow, P.lightz, P.rim, P.mass, P.shade, view, qHold('ct', E.contrast, 0.05), qHold('su', E.sunset, 0.1), qHold('bh', E.behind, 0.1), qHold('ni', E.night, 0.1)].join(',') + '|';
   EPALK = ',' + E.pal.map(t => t.join(',')).join(';') + ';' + E.palStorm.map(t => t.join(',')).join(';');   // (the hour's palettes, for the storm clouds' own)
-  RELIGHT = P.relight ?? 0.8; BUILD_MS = P.buildms ?? 0.8;   // (a twentieth of a 60 fps frame each: the PC spent 7.8 ms a frame on three rebuilds at 2.5 / 3)
+  // (Oct 28, user: "the clouds are taking ages to change for the new light when I change the time": 0.8 ms of relighting a frame
+  // was set when a still frame cost the most of the frame; now that still decks are kept, the budget grows with the clouds
+  // waiting for their new light (last frame's count): up to 6 ms, a big change of hour done in a few frames)
+  RELIGHT = Math.min(6, (P.relight ?? 0.8) + RL_WAIT * 0.4); BUILD_MS = P.buildms ?? 0.8; RL_WAIT = 0;
+  if (frameNo < FORCE) { RELIGHT = 1e9; BUILD_MS = 1e9; }   // (REFRESH: everything at once, not a few clouds a frame)   // (a twentieth of a 60 fps frame each: the PC spent 7.8 ms a frame on three rebuilds at 2.5 / 3)
   const windV = P.wind * 8 * S;
   for (const lay of LAYERS) lay.off += windV * lay.par * dt;
   // the lightning: the game's newest bolt, its brightness
   flash.k = G.flash ? G.flash.k : 0; flash.wx = G.flash ? G.flash.x : 0; flash.lay = flash.k > 0 ? LAYERS[3] : null;
   if (frameNo % 60 === 0) for (const c of clouds) { if (c.spr && now - (c.seen || 0) > 3) c.spr = null; if (c.pbv && !c.visible && now - (c.seen || 0) > 3) { for (const b of c.pbv) if (b) b.free(); c.pbv = null; if (c.pbx) { c.pbx.free(); c.pbx = null; } } if (c.lorder && !c.visible) c.lorder = null; }
   if (frameNo % 60 === 0) for (const c of clouds) if (c.items && c !== hero && !c.disturbed && !(c.tubes && c.tubes.length) && now - (c.seen || 0) > 12) { c.items = c.billows = null; c.nbrReady = false; }
-  skyGen = frameNo < 4 ? 1e9 : (P.genms ?? 4);   // (the frame's budget, ms, for making clouds' puffs: a cloud past it is drawn as lobes till its turn)
+  skyGen = frameNo < 4 || frameNo < FORCE ? 1e9 : (P.genms ?? 4);   // (the frame's budget, ms, for making clouds' puffs: a cloud past it is drawn as lobes till its turn)
 }
-let skyGen = 7;
+let skyGen = 7, FORCE = 0, RL_WAIT = 0;
+// REFRESH CLOUDS (Oct 28, user: "I change values but the clouds take a while to change"): every cloud's light worked out
+// again and its batch built again on the next frames, past the budgets that spread that over many frames; shape too: its
+// puffs made again
+// (Oct 28, user: "still slow when I ask it to build clouds": a let-go of the SKY or TIME slider (shape false) used to throw away
+// every cloud's batches and its tones - for the light to come in at once, when the light was worked out in JS. With the light on
+// the GPU every cloud is relit the frame its light changes, so that only rebuilt every cloud at once: about 200 ms a frame for
+// the first frames at x1/3. Now it only lifts the frame's budgets; REFRESH CLOUDS (shape true) still rebuilds everything)
+const GPUL = () => GPU && (P.gpulight ?? 1) > 0 && view === 0;
+function skyRefresh(shape) {
+  if (shape) regenAll();
+  if (!shape && GPUL()) { FORCE = frameNo + 3; return; }
+  for (const c of clouds) {
+    if (c.pbv) { for (const b of c.pbv) if (b) b.free(); c.pbv = null; }
+    if (c.pbx) { c.pbx.free(); c.pbx = null; }
+    c.spr = null; c.ltones = null; c.rl = null; c.dirty = true;
+    if (c.items) for (const it of c.items) { it.tone = undefined; it.n2 = null; }
+  }
+  FORCE = frameNo + 3;
+}
 let SNAP = 0;   // (the clouds take the weather at once until this frame: a new round's - NSKY.snap)
 const PARK = { horizon: 'par4', far: 'par3', mid: 'par2', hero: 'par1' };
 // ================================================================== a view's sky (the sky pass)
@@ -15294,10 +15927,10 @@ function skyBack(V) {
     if (c.extU === undefined) cloudBox(c);
     { const X = screenX(c), r = c.extU * c.s * c.lay.zl * Math.max(1, c.grow ?? 1), Mg = W * 0.5 + 24; if (X + r < -Mg || X - r > W + Mg) { if (c.pfr !== frameNo) c.visible = false; continue; } }
     if (c.grow > 0.04) NEAR.push(c);                                      // (within half a screen of the view: a shadow caster, on the screen or just off it)
-    if (c.pfr === frameNo) { if (c.visible) { const X = screenX(c); if (X + c.maxX >= -24 && X + c.minX <= W + 24) vis.push(c); } continue; }
+    if (c.pfr === frameNo) { if (c.visible) { const X = screenX(c), VM = 24 + (W >> 2); if (X + c.maxX >= -VM && X + c.minX <= W + VM) vis.push(c); } continue; }
     c.pfr = frameNo;
     stepLobes(c);
-    c.visible = c.grow > 0.04;
+    c.visible = c.grow > 0.04 && (P['dk' + c.lay.dn] ?? 1) > 0;   // (DECK n off: its clouds aren't placed or drawn)
     if (!c.visible) continue;
     // (a re-forming cloud takes its new lobes and all their puffs at once: within the frame's budget for making clouds, skyGen,
     // or a frame or two later - not several clouds in one frame on top of a frame already full)
@@ -15307,21 +15940,33 @@ function skyBack(V) {
         if (c.wisp) { const r = seed32(Math.floor(Math.random() * 1e9)); morphTo(c, wispLobes(r, 140 + r() * 300, r() * (c.lay.name === 'hero' ? 170 : 100), 1 / Math.sqrt(c.lay.k)), formDur()); }
         else morphTo(c, shapeFor(c, seed32(Math.floor(Math.random() * 1e9))), formDur());
       }
-      c.nextForm = now + (25 + 35 * Math.random()) / (P.form * (0.4 + Math.abs(P.wind) * 1.6));
+      c.nextForm = now + (25 + 35 * Math.random()) / (P.form * 0.72);
       skyGen -= performance.now() - t0;
     }
     cloudBox(c);
-    { const X = screenX(c); if (X + c.maxX < -24 || X + c.minX > W + 24) { c.visible = false; continue; } }
+    { const X = screenX(c), VM = 24 + (W >> 2); if (X + c.maxX < -VM || X + c.minX > W + VM) { c.visible = false; continue; } }   // (a quarter of a view past each side: the deck layers' margins)
     // (its storm palette: made again only when its storm or the hour's palette changes, not six arrays a cloud a frame)
     if (c.storm > 0.02) { const pk = Math.round(c.storm * 1000) + EPALK; if (c.palK !== pk) { c.palK = pk; c.pal = E.pal.map((t, i) => mix3(t, E.palStorm[i], c.storm).map(Math.round)); } } else c.pal = null;
-    c.far = (c.wisp && !(P.wisppuff ?? 1)) || c.rbAvg * c.s * c.lay.zl * (c.grow ?? 1) < P.lodl;
+    c.far = (c.wisp && !(P.wisppuff ?? 1)) || (P['bl' + c.lay.dn] ?? 1) === 0 || c.rbAvg * c.s * c.lay.zl * (c.grow ?? 1) < P.lodl;
     if (!c.far && !c.items) { if (skyGen > 0) { const t0 = performance.now(); genCloud(c); skyGen -= performance.now() - t0; } else c.far = true; }
-    if (c.far) { placeLobes(c, now); placeTubes(c, now); }
+    if (c.far) {   // (a far cloud, its lobes alone: placed again by the same rule - grown by GROW_CELL, on its deck's frame)
+      const ext = Math.max(1, (c.extU || 0) * c.s * c.lay.zl), lg = c.lobG ?? -1, zm = Math.abs((c.lobZ ?? -1) - c.lay.zl) > 1e-4;
+      const grew = lg !== c.grow && (c.grow === c.growT || Math.abs(lg - c.grow) * ext > GROW_CELL);
+      const morph = c.lobes.some(L => L.m || L.tmp) || (c.tubes && c.tubes.length) || P.evolve > 0;
+      if (zm || c.lobSrc !== c.lobes || c.lob.length !== c.lobes.length || lg < 0 || ((grew || morph) && (frameNo + (c.lay.dn | 0)) % SLOW_EVERY === 0) || (morph && !GPUL())) { placeLobes(c, now); placeTubes(c, now); c.lobG = c.grow; c.lobZ = c.lay.zl; c.lobSrc = c.lobes; }
+    }
     else {
       c.seen = now;
       const fastMv = c.dirty || Math.abs((c.lastZ || 0) - c.lay.zl) > 1e-4;
-      const slowMv = !fastMv && (Math.abs((c.lastG ?? -1) - c.grow) > 1e-3 || c.lobes.some(L => L.m || L.tmp));
-      const moving = fastMv || (slowMv && (frameNo + c.uid) % SLOW_EVERY === 0);
+      // (Oct 28, user: "still slow when I ask it to build clouds (moving clouds at sky 30%)": a growing cloud was re-placed and
+      // rebuilt every 4th frame however little it had grown - at x1/3 most steps far under a sky pixel - and each cloud on its
+      // own frame (its uid), so every deck had a cloud changing every frame and all four were redrawn every frame. Now a cloud
+      // is re-placed when it has grown by GROW_CELL sky pixels at its edge (and once more where it stops, so it ends exact), and
+      // a deck's clouds all on that deck's frame: one deck in four a frame, its clouds' changes together)
+      const ext = Math.max(1, (c.extU || 0) * c.s * c.lay.zl), pg = c.placedG ?? -1;
+      const grew = pg !== c.grow && (c.grow === c.growT || Math.abs(pg - c.grow) * ext > GROW_CELL);
+      const slowMv = !fastMv && (grew || c.lobes.some(L => L.m || L.tmp));
+      const moving = fastMv || (slowMv && (frameNo + (c.lay.dn | 0)) % SLOW_EVERY === 0);
       c.flit = false;
       if (flash.k > 0 && flash.lay === c.lay) {
         let rbM = 0; for (const o of c.lob) if (o.rb > rbM) rbM = o.rb;
@@ -15330,7 +15975,7 @@ function skyBack(V) {
         c.flit = 9 / (1 + q * q) >= 1;
       }
       const settled = c.placedN === c.items.length && c.placedItems === c.items && !fastMv && !slowMv && !c.disturbed && !(c.tubes && c.tubes.length) && P.cache !== 0;
-      if (!settled) placeCloud(c, now, moving); else if ((frameNo + c.uid) % SETTLED_EVERY === 0 || !(c.spr || c.pbv)) placeCloud(c, now, true);   // (its sprite, or its GPU batches)
+      if (!settled) { if (moving || !GPUL() || c.placedItems !== c.items || c.placedN !== c.items.length) placeCloud(c, now, moving); } else if (((frameNo + c.uid) % SETTLED_EVERY === 0 && P.evolve > 0) || !(c.spr || c.pbv)) placeCloud(c, now, true);   // (no breathing: a settled cloud stays as it is - not re-placed every 47th frame)   // (its sprite, or its GPU batches)
       c.dirty = false; c.lastZ = c.lay.zl; c.lastG = c.grow; c.moving = fastMv; c.slowMv = slowMv;
       placeTubes(c, now);
     }
@@ -15433,34 +16078,56 @@ function skyVeil1(V) {
   if (!viewLoad(V)) return;
   const B = VB[VI], lay = LAYERS[3], LB = B.veil1;               // (its own buffer: a shared view's other half lays it again)
   target(LB);
-  if (GPU) { DCTX = deckTarget(LB).getContext(); DCTX.clearRect(0, 0, CW, H); }
+  if (GPU) { deckTarget(LB); DCTX = DREC.reset(); }
   else if (LB.by1 >= LB.by0) LB.buf.fill(0, LB.by0 * CW, (LB.by1 + 1) * CW);
   BY0 = 1e9; BY1 = -1;
   const frac = lay.A - Math.floor(lay.A);
-  drawVeil(lay, Math.round(H * HOR), frac - 1, VIS[VI]);
+  if ((P['dk' + lay.dn] ?? 1) > 0) drawVeil(lay, Math.round(H * HOR), frac - 1, VIS[VI]); else lay.rain = null;   // (DECK 1 off: no veil)
+  if (GPU) deckCommit(LB.T);
   deckOut(lay, LB, frac); LB.by0 = BY0; LB.by1 = BY1; DCTX = null;
   VSAVE[V.vi].lays[3][4] = lay.rain;
 }
 // one deck: its veil (unless drawn apart), its clouds, its rain
-function drawDeck(lay, B, horY, vis, withVeil, later) {   // (later: painted only - laid and rained on by deckLay)
+// (Oct 28, user: "why the drop when moving the camera?": a deck's layer was the view's size, its clouds drawn at their place
+// on the screen, so every step of the camera (or the wind) of a sky pixel moved every cloud in it and the whole deck was
+// drawn again, every frame of a pan. On the GPU the layer is now a quarter of the view bigger on every side and anchored:
+// its clouds keep their place in it, and it is laid where the camera has moved it since. It is drawn again only when the
+// camera has gone a quarter of a view past its anchor - or when something in it changes, as before)
+let DLH = 0;
+function drawDeck(lay, B, horY, vis, withVeil, later) {
+  if (!GPU || (P.still ?? 1) === 0) { B.lay[lay.name].lw = 0; return drawDeck0(lay, B, horY, vis, withVeil, later, 0, 0, 0); }
+  const LB = B.lay[lay.name], MX = Math.max(16, W >> 2), MY = Math.max(16, H >> 2), lw = CW + 2 * MX, lh = H + 2 * MY;
+  const ioff = Math.floor(lay.A), y0 = lay.baseY;
+  let an = LB.anchor;
+  if (!an || an.w !== lw || an.h !== lh || an.zl !== lay.zl || Math.abs(ioff - an.x) > MX - 2 || Math.abs(y0 - an.y) > MY - 2) an = LB.anchor = { x: ioff, y: y0, w: lw, h: lh, zl: lay.zl };
+  const dox = MX + an.x - ioff, doy = MY + an.y - y0;               // (where the view's own cells are in the layer)
+  LB.lw = lw; LB.lh = lh; LB.dox = dox; LB.doy = doy;
+  const b0 = lay.baseY, f0 = lay.footY, tw0 = TW;
+  lay.baseY += doy; if (lay.footY !== undefined) lay.footY += doy; TW = lw; DLH = lh;
+  try { drawDeck0(lay, B, horY + doy, vis, withVeil, later, dox, doy, 1); }
+  finally { lay.baseY = b0; lay.footY = f0; TW = tw0; DLH = 0; }
+}
+function drawDeck0(lay, B, horY, vis, withVeil, later, dox, doy, big) {   // (later: painted only - laid and rained on by deckLay)
   const LB = B.lay[lay.name];
-  target(LB);
+  target(LB); if (big) TW = LB.lw;                                         // (target() sets the view's width: the anchored layer is wider)
   // (the GPU: the deck's layer, cleared; the veil, the clouds' batches, the live shapes drawn into it - 04-buffers.js)
-  if (GPU) { DCTX = deckTarget(LB).getContext(); DCTX.clearRect(0, 0, CW, H); }
+  if (GPU) { if (big) deckTargetAt(LB, LB.lw, LB.lh); else deckTarget(LB); DCTX = DREC.reset(); }
   else if (LB.by1 >= LB.by0) LB.buf.fill(0, LB.by0 * CW, (LB.by1 + 1) * CW);
   BY0 = 1e9; BY1 = -1;
-  const ioff = Math.floor(lay.A), frac = lay.A - ioff, X0 = frac - 1;
+  const ioff = Math.floor(lay.A), frac = lay.A - ioff, X0 = frac - 1 - dox;
+  if ((P['dk' + lay.dn] ?? 1) === 0) { if (GPU) deckCommit(LB.T); LB.by0 = 1e9; LB.by1 = -1; LB.frac = frac; lay.rain = null; if (!later) deckLay(lay, LB); DCTX = null; return; }   // (DECK n off: nothing, not even its veil)
   const zx = c => Math.round(c.bx * lay.zl) + ioff + 1;
   if (withVeil) drawVeil(lay, horY, X0, vis);
   for (const c of vis) {
     if (c.lay !== lay) continue;
-    const ax = zx(c);
-    (c.axd || (c.axd = [0, 0]))[VI] = ax;                                // (where it was drawn this frame, in this view: for the sun and the planes)
-    if (c.far) drawLobes(c, ax); else drawCloudCached(c, ax, c.y);
-    if (GPU) drawLiveGPU(c, ax); else { drawTubes(c, ax); drawPaint(c, ax); }
+    const ax = zx(c) + dox, ay = c.y + doy;
+    (c.axd || (c.axd = [0, 0]))[VI] = ax - dox;                          // (where it is in the view this frame: for the sun and the planes)
+    if (c.far) drawLobes(c, ax, ay); else drawCloudCached(c, ax, ay);
+    if (GPU) drawLiveGPU(c, ax, ay); else { drawTubes(c, ax); drawPaint(c, ax); }
     if (c.hfr !== frameNo) { c.hfr = frameNo; healCloud(c, skyDt); }
   }
   rimPass(lay, X0);
+  if (GPU) deckCommit(LB.T);
   LB.by0 = BY0; LB.by1 = BY1; LB.frac = frac;
   if (!later) deckLay(lay, LB);
   DCTX = null;
@@ -15813,6 +16480,7 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   if ((++smnPaint & 127) === 0) { for (const [k, v] of SMN.mem) if (smnPaint - v.p > 64) SMN.mem.delete(k); for (const [k, v] of SMN.pos) if (smnPaint - v[2] > 64) SMN.pos.delete(k); }
   const cw = SMG.cw, h = SMG.h, N = cw * h;
   if (SMN.cw !== cw || SMN.h !== h) { SMN.cw = cw; SMN.h = h; SMN.buf = makeBuf(cw, h); SMN.zb = new Float32Array(N); SMN.ib = new Int32Array(N); SMN.wrow = new Int32Array(cw); }
+  const GPUSM = gsmOn();                                                  // (SMOKE ON GPU: the splat, the tones and the pixels there)
   SMN.cam = [CAMPX, TOPPX]; SMN.lazyL = (P.smfast ?? 1) > 0 && (P.smgroup ?? 1) > 0;
   SMN.n = 0; SMN.tkz = clamp(1.05 / Math.sqrt(Zg), 0.8, 2.2);              // (the tile's scale: billows of 4-10 cells at x1, smaller zoomed out)
   gatherSmokeNew(want);
@@ -15842,6 +16510,7 @@ function drawSmokeNew(pass = 'front', want = () => true) {
     for (let b = 0; b < NB; b++) cnt[b + 1] += cnt[b];
     for (let i = 0; i < n; i++) ord[cnt[okey[i]]++] = i;
   }
+  if (!GPUSM) {                                                           // (the splat in JS: not when the GPU splats)
   // (FAST) the screen in 16 x 16 tiles, each knowing the farthest height drawn in it (worked out again only after a write):
   // before a ball is drawn, the tiles it covers where everything is already nearer than its top are left out, and a ball
   // behind everything in all its tiles is not drawn at all - the launch heaps are thousands of big balls inside one another
@@ -15921,6 +16590,7 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   if (fast) { const [rx0, rx1, ry0, ry1] = SMN.rgn;                       // (and back to empty where nothing was drawn)
     for (let y = ry0; y <= ry1; y++) { const row = y * cw; if (y < by0 || y > by1) zb.fill(-1e9, row + rx0, row + rx1 + 1); else { zb.fill(-1e9, row + rx0, row + bx0); zb.fill(-1e9, row + bx1 + 1, row + rx1 + 1); } }
     for (let x = bx0; x <= bx1; x++) for (let y = Math.max(by0, wrow[x] + 1); y <= by1; y++) zb[y * cw + x] = -1e9; }   // (under the water no ball draws)
+  }
   const t1 = performance.now();
   const phase2 = () => {
   const t1p = performance.now();
@@ -16030,8 +16700,16 @@ function drawSmokeNew(pass = 'front', want = () => true) {
     const gi = Math.max(0, Math.min(gw - 2, gxf | 0)), gj = Math.max(0, Math.min(gh - 2, gyf | 0));
     for (let jj = gj; jj <= gj + 1; jj++) for (let ii = gi; ii <= gi + 1; ii++) { if (ii < gx0 || ii > gx1 || jj < gy0 || jj > gy1) continue; const q = jj * gw + ii; if (mst[q] !== mstamp) { mst[q] = mstamp; march(ii, jj); } }
   };
-  if (!fast) for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) march(i, j);
+  if (!fast && !GPUSM) for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) march(i, j);   // (on the GPU: marched there, every cell of the box)
   const tS4 = performance.now();
+  if (GPUSM) {
+    buildSmokeLUT(); const FLg = fireLights(), t5 = performance.now();
+    gsmPaint(SMN, { n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, MX, MY, MZ, hb, dn, mass, tkA: tkA0, FL: FLg, nF: FLg.length / 4, mg: [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] });
+    smShow(SMN); SMN.last = [bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1];
+    FTV.smG = (FTV.smG || 0) + SMN.tg; FTV.smS = (FTV.smS || 0) + (t1 - t0 - SMN.tg); FTV.smB = (FTV.smB || 0) + (t5 - t1p); FTV.smT = (FTV.smT || 0) + (performance.now() - t5);
+    SMN.ms = SMN.ms * 0.9 + (t1 - t0 + performance.now() - t1p) * 0.1;
+    return;
+  }
   // ---- 3. the tones
   buildSmokeLUT();
   const sv = smView, gOfB = SMN.gOf, gk = (P.glow ?? 1) * E.sunset * (P.smglow ?? 1), lut = SMN.lut, FL = fireLights(), nF = FL.length / 4, glow = P.smfire ?? 1, amb = P.smamb ?? 0.5, crease = (P.smcrease ?? 1) > 0.5, hiK = P.hi ?? 1, con = P.smcon ?? 1;
@@ -16179,11 +16857,12 @@ function drawSmokeNew(pass = 'front', want = () => true) {
 function smKeep(S_, out, cw, x0, y0, w, h) {
   if (!S_.ob || S_.ob.length < w * h) { S_.ob = new Uint32Array(Math.ceil(w * h * 1.5)); S_.oc = null; }
   const ob = S_.ob; for (let y = 0; y < h; y++) ob.set(out.subarray((y0 + y) * cw + x0, (y0 + y) * cw + x0 + w), y * w);
-  S_.ow = w; S_.oh = h; S_.ox = (x0 - 1) * FXV.pxX; S_.oy = y0 * FXV.pxY; S_.ocam = S_.cam; S_.osv = FXV.SV; S_.odirty = true;
+  S_.ow = w; S_.oh = h; S_.ox = (x0 - 1) * FXV.pxX; S_.oy = y0 * FXV.pxY; S_.ocam = S_.cam; S_.osv = FXV.SV; S_.odirty = true; S_.gpuOut = false;
 }
 function smShow(S_) {
   if (!S_.ow) return;
   const dx = S_.ox + S_.ocam[0] - CAMPX, dy = S_.oy + S_.ocam[1] - TOPPX, dw = S_.ow * FXV.pxX, dh = S_.oh * FXV.pxY;
+  if (VIEW.gl && S_.gpuOut && S_.otT) { const sm = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false; ctx.drawImage(S_.otT, S_.gx0, S_.gy0, S_.ow, S_.oh, dx, dy, dw, dh); ctx.imageSmoothingEnabled = sm; return; }   // (the GPU's picture)
   if (VIEW.gl) { ctx.drawPixels(new Uint32Array(S_.ob.buffer, 0, S_.ow * S_.oh), S_.ow, S_.oh, dx, dy, dw, dh); return; }
   if (!S_.oc || S_.oc.width < S_.ow || S_.oc.height < S_.oh) { S_.oc = document.createElement('canvas'); S_.oc.width = Math.max(S_.ow, 64); S_.oc.height = Math.max(S_.oh, 64); S_.ocx = S_.oc.getContext('2d'); S_.odirty = true; }
   if (S_.odirty) { S_.ocx.putImageData(new ImageData(new Uint8ClampedArray(S_.ob.buffer, 0, S_.ow * S_.oh * 4), S_.ow, S_.oh), 0, 0); S_.odirty = false; }
@@ -16191,10 +16870,140 @@ function smShow(S_) {
   ctx.drawImage(S_.oc, 0, 0, S_.ow, S_.oh, dx, dy, dw, dh);
   ctx.imageSmoothingEnabled = sm;
 }
+// ---- the smoke's picture on the GPU (GSM, 40-gl.js): its coarse fields made here as before, its balls, its puffs' tones
+// and its pixels there. SMOKE ON GPU 0 (or a SMOKE VIEW, or no float targets) draws it in JS as before
+const gsmOn = () => !!(VIEW && VIEW.gl && GSM.ok && GSM.ep === GLR.epoch && (P.smgpu ?? 1) > 0 && smView === 0);
+const SM_HP = new Float32Array(47).map((_, d) => fxHash(d * 1.73)), SM_HQ = new Float32Array(47).map((_, d) => fxHash(d * 2.9));   // (a puff's lean: its dome's own - the tile's offset is 0, SMN_TILE_OFS)
+let SM_DC = null, SM_BTD = null;
+function gsmPaint(S_, a) {
+  const gl = GLR.gl, { n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, MX, MY, MZ, hb, dn, mass, tkA, FL, nF, mg } = a;
+  glFlush();
+  const G_ = S_.gsm || (S_.gsm = { slot: new Map(), free: [], next: 0, paint: 0, s2b: null, cur: 0 });
+  G_.paint++;
+  const thinOn = (P.smthin ?? 1) > 0;
+  // the puffs' slots in the memory: a ball's own number (SID) keeps its slot from paint to paint; one not seen for 64 paints
+  // gives it back (as the JS memory forgot a puff)
+  const slotOf = new Float32Array(n); let fresh = [];
+  for (let i = 0; i < n; i++) {
+    const sid = S_.SID[i]; let e = G_.slot.get(sid);
+    if (!e) { e = { s: G_.free.length ? G_.free.pop() : G_.next++, p: G_.paint }; G_.slot.set(sid, e); fresh.push(e.s); e.f = true; } else e.f = false;
+    e.p = G_.paint; slotOf[i] = e.s;
+  }
+  if ((G_.paint & 15) === 0) for (const [k, e] of G_.slot) if (G_.paint - e.p > 64) { G_.slot.delete(k); G_.free.push(e.s); }
+  const slots = Math.max(64, G_.next), rows = Math.ceil(slots / 64), MW = 47 * 64;
+  // ---- the inputs: the balls (4 texels each), the order, the water's rows, the fields, the slots' balls, the colours
+  const bRows = Math.max(1, Math.ceil(n * 4 / 1024)), BD = G_.bd && G_.bd.length >= bRows * 4096 ? G_.bd : (G_.bd = new Float32Array(bRows * 4096 * 1.5 | 0));
+  for (let i = 0; i < n; i++) {
+    const o = i * 16, thin = thinOn && S_.TK[i] === 0 && F[i] >= 3;
+    BD[o] = X[i]; BD[o + 1] = Y[i]; BD[o + 2] = R[i]; BD[o + 3] = Z[i];
+    BD[o + 4] = A[i]; BD[o + 5] = F[i]; BD[o + 6] = S_.TK[i]; BD[o + 7] = slotOf[i];
+    BD[o + 8] = LX[i]; BD[o + 9] = LY[i]; BD[o + 10] = LZ[i]; BD[o + 11] = thin ? 1 : 0;
+    BD[o + 12] = S_.TU[i]; BD[o + 13] = S_.TV[i]; BD[o + 14] = 0; BD[o + 15] = 0;
+  }
+  G_.btex = gsmTex(G_.btex, 1024, bRows, BD.subarray(0, bRows * 4096));
+  const W1 = G_.w1 && G_.w1.length >= cw ? G_.w1 : (G_.w1 = new Float32Array(cw * 2)); for (let x = 0; x < cw; x++) W1[x] = wrow[x];
+  G_.wtex = gsmTex(G_.wtex, cw, 1, W1.subarray(0, cw), 'R32F');
+  const GN = gw * gh, g1 = G_.g1 && G_.g1.length >= GN * 4 ? G_.g1 : (G_.g1 = new Float32Array(GN * 4));
+  for (let k = 0; k < GN; k++) { const o = k * 4; g1[o] = MX[k]; g1[o + 1] = MY[k]; g1[o + 2] = MZ[k]; g1[o + 3] = hb[k]; }
+  G_.g1t = gsmTex(G_.g1t, gw, gh, g1.subarray(0, GN * 4)); G_.dnt = gsmTex(G_.dnt, gw, gh, dn.subarray(0, GN), 'R32F');
+  // ---- 0. MARCH: sh and ss for every cell of the box, into the shadow grid (kept between paints, as the JS arrays were)
+  if (!G_.g2t || G_.g2t.w !== gw || G_.g2t.h !== gh || G_.g2t.ep !== GLR.epoch) { if (G_.g2f) gl.deleteFramebuffer(G_.g2f); G_.g2t = gsmTex(G_.g2t && G_.g2t.ep === GLR.epoch ? G_.g2t : null, gw, gh, null); G_.g2f = gsmFbo([G_.g2t]); gl.disable(gl.SCISSOR_TEST); gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]); }
+  { const [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] = mg, mp = GSM.march;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, G_.g2f); gl.viewport(0, 0, gw, gh); gl.disable(gl.SCISSOR_TEST); gl.disable(gl.BLEND); gl.disable(gl.STENCIL_TEST); gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(mp.p); gl.uniform4f(mp.U.u_rect, gx0, gy0, gx1 - gx0 + 1, gy1 - gy0 + 1); gl.uniform2f(mp.U.u_size, gw, gh); gl.uniform1i(mp.U.u_dn, 0);
+    gl.uniform4i(mp.U.u_box, gx0, gy0, gx1, gy1); gl.uniform4f(mp.U.u_m0, sdx, sdy, ownF, nMarch); gl.uniform4f(mp.U.u_m1, f2, kS, behind, 0);
+    gsmBind(0, G_.dnt); gl.bindVertexArray(GSM.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
+  const sRows = Math.ceil(slots / 1024), S2 = G_.s2 && G_.s2.length >= sRows * 1024 ? G_.s2 : (G_.s2 = new Float32Array(sRows * 1024 * 2));
+  S2.fill(-1, 0, sRows * 1024);
+  for (let i = 0; i < n; i++) { const s = slotOf[i]; const e = G_.slot.get(S_.SID[i]); S2[s] = e && e.f ? i + 1048576 : i; }
+  G_.s2t = gsmTex(G_.s2t, 1024, sRows, S2.subarray(0, sRows * 1024), 'R32F');
+  if (!SM_DC) { SM_DC = new Float32Array(92); for (let d = 0; d < 46; d++) { SM_DC[d * 2] = BT.DCX[d]; SM_DC[d * 2 + 1] = BT.DCY[d]; }
+    SM_BTD = new Float32Array(64 * 64 * 4); for (let q = 0; q < 4096; q++) { SM_BTD[q * 4] = BT.H[q]; SM_BTD[q * 4 + 1] = BT.NX[q]; SM_BTD[q * 4 + 2] = BT.ID[q]; SM_BTD[q * 4 + 3] = BT.CR[q]; } }
+  if (!GSM.bt || GSM.bt.ep !== GLR.epoch) GSM.bt = gsmTex(null, 64, 64, SM_BTD);
+  const lut = S_.lut, NL = lut.length;
+  if (!G_.lt || G_.lt.ep !== GLR.epoch || G_.lt.w !== NL) { if (G_.lt && G_.lt.ep === GLR.epoch) gl.deleteTexture(G_.lt.tex); G_.lt = { tex: glNewTex(0, 0, gl.NEAREST), w: NL, ep: GLR.epoch }; gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G_.lt.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, NL, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); }
+  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G_.lt.tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NL, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(lut.buffer, lut.byteOffset, NL * 4));
+  // ---- 1. SPLAT, into the index-and-height target (the whole picture's size; the box cleared and drawn)
+  if (!G_.sp || G_.sp.w !== cw || G_.sp.h !== h || G_.sp.ep !== GLR.epoch) {
+    if (G_.sp && G_.sp.ep === GLR.epoch) { gl.deleteFramebuffer(G_.sp.fbo); gl.deleteRenderbuffer(G_.sp.rb); gl.deleteTexture(G_.sp.t.tex); }
+    const t = gsmTex(null, cw, h, null), rb = gl.createRenderbuffer(); gl.bindRenderbuffer(gl.RENDERBUFFER, rb); gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT32F, cw, h);
+    G_.sp = { t, rb, fbo: gsmFbo([t], rb), w: cw, h, ep: GLR.epoch };
+  }
+  const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, G_.sp.fbo); gl.viewport(0, 0, cw, h);
+  gl.enable(gl.SCISSOR_TEST); gl.scissor(bx0, h - by0 - bh, bw, bh);
+  gl.disable(gl.STENCIL_TEST); gl.disable(gl.BLEND);
+  gl.clearBufferfv(gl.COLOR, 0, [-1, -1e9, 0, 0]); gl.clearDepth(1); gl.depthMask(true); gl.clear(gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS);
+  const sp = GSM.splat; gl.useProgram(sp.p);
+  gl.uniform1i(sp.U.u_b, 0); gl.uniform1i(sp.U.u_w, 1); gl.uniform1i(sp.U.u_bt, 2); gl.uniform2f(sp.U.u_size, cw, h); gl.uniform1f(sp.U.u_tka, tkA);
+  gsmBind(0, G_.btex); gsmBind(1, G_.wtex); gsmBind(2, GSM.bt);
+  const OD = G_.od && G_.od.length >= n ? G_.od : (G_.od = new Float32Array(Math.ceil(n * 1.5))); for (let q = 0; q < n; q++) OD[q] = ord ? ord[q] : q;
+  gl.bindVertexArray(GSM.svao); gl.bindBuffer(gl.ARRAY_BUFFER, GSM.ordVbo); gl.bufferData(gl.ARRAY_BUFFER, OD, gl.STREAM_DRAW, 0, n);
+  gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);
+  gl.disable(gl.DEPTH_TEST);
+  // ---- 2. TONES: every puff's light and memory (the memory ping-ponged between two targets)
+  // (Oct 28, user: "the smoke looks weirdly lit now. Lots of flickering and the part that should be dark has some tones": a
+  // source pouring smoke - a burning ship - keeps making new puffs, and each 64 more slots made the memory again, empty: every
+  // puff forgot its eased shadow and its held tone at once - the column lit for a moment, then easing back into its shade.
+  // Now the memory grows with room to spare and keeps what it held: the old rows copied into the new)
+  const memOk = G_.mem && G_.mem[0].w === MW && G_.mem[0].h >= rows && G_.mem[0].ep === GLR.epoch;
+  gl.disable(gl.SCISSOR_TEST);
+  if (!memOk) {
+    const old = G_.mem && G_.mem[0].ep === GLR.epoch ? G_.mem : null, R2 = Math.max(rows, Math.ceil((old ? old[0].h : 0) * 1.5), rows + 4);
+    G_.mem = [gsmTex(null, MW, R2, null), gsmTex(null, MW, R2, null)]; G_.tn = gsmTex(G_.tn && G_.tn.ep === GLR.epoch ? G_.tn : null, MW, R2, null);
+    for (const t of G_.mem) { const f = gsmFbo([t]); gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]); gl.deleteFramebuffer(f); }
+    if (old) {
+      // the memory as it was (the last paint's: old[G_.cur]) into both new targets, row for row
+      const rf = gsmFbo([old[G_.cur]]);
+      for (const t of G_.mem) { const df = gsmFbo([t]); gl.bindFramebuffer(gl.READ_FRAMEBUFFER, rf); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, df); gl.blitFramebuffer(0, 0, MW, old[0].h, 0, 0, MW, old[0].h, gl.COLOR_BUFFER_BIT, gl.NEAREST); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null); gl.deleteFramebuffer(df); }
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null); gl.deleteFramebuffer(rf);
+      for (const t of old) gl.deleteTexture(t.tex);
+      G_.grew = (G_.grew || 0) + 1; GSM.grows = (GSM.grows || 0) + 1;   // (tests: how often the memory grew)
+    }
+    G_.cur = 0; G_.tfbo = null;
+  }
+  const rowsM = G_.mem[0].h;   // (the memory's rows: room to spare - the passes run over all of them)
+  const src = G_.mem[G_.cur], dst = G_.mem[1 - G_.cur];
+  if (!G_.tfbo || G_.tfbo.dst !== dst || G_.tfbo.tn !== G_.tn) { if (G_.tfbo) gl.deleteFramebuffer(G_.tfbo.f); G_.tfbo = { f: gsmFbo([dst, G_.tn]), dst, tn: G_.tn }; }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, G_.tfbo.f); gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+  gl.viewport(0, 0, MW, rows); gl.disable(gl.SCISSOR_TEST);
+  const setCommon = (pr, size) => {
+    const U = pr.U; gl.uniform1i(U.u_b, 0); gl.uniform1i(U.u_g1, 3); gl.uniform1i(U.u_g2, 4); gl.uniform2i(U.u_gs, gw, gh);
+    gl.uniform4f(U.u_q0, mass, P.smshadow ?? 0.7, P.smself ?? 0.45, P.smamb ?? 0.5);
+    gl.uniform4f(U.u_q1, (P.contrast ?? 2) * E.contrast * (P.smcon ?? 1), P.expo ?? 0, P.jitter ?? 0, P.hi ?? 1);
+    gl.uniform4f(U.u_q2, E.night, E.dusk, (P.glow ?? 1) * E.sunset * (P.smglow ?? 1), P.smfire ?? 1);
+    gl.uniform1fv(U.u_hp, SM_HP); gl.uniform1fv(U.u_hq, SM_HQ); gl.uniform2fv(U.u_dc, SM_DC);
+    const fl = G_.fl || (G_.fl = new Float32Array(256)); fl.fill(0); const m = Math.min(64, nF); for (let k = 0; k < m * 4; k++) fl[k] = FL[k];
+    gl.uniform4fv(U.u_fl, fl); gl.uniform1i(U.u_nf, m); gl.uniform2f(U.u_size, size[0], size[1]);
+  };
+  const tp = GSM.tone; gl.useProgram(tp.p); setCommon(tp, [MW, rows]);
+  gl.uniform4f(tp.U.u_rect, 0, 0, MW, rows); gl.uniform1i(tp.U.u_mem, 5); gl.uniform1i(tp.U.u_s2b, 6);
+  gsmBind(0, G_.btex); gsmBind(3, G_.g1t); gsmBind(4, G_.g2t); gsmBind(5, src); gsmBind(6, G_.s2t);
+  gl.bindVertexArray(GSM.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+  G_.cur = 1 - G_.cur;
+  // ---- 3. COMPOSE, into the smoke's picture (a GL layer the size of the grid; the box drawn)
+  const OT = S_.otT || (S_.otT = new GLTarget(cw, h)); if (OT.width !== cw || OT.height !== h) { OT.width = cw; OT.height = h; }
+  OT.ensure(); gl.bindFramebuffer(gl.FRAMEBUFFER, OT.fbo); gl.viewport(0, 0, cw, h);
+  const cp = GSM.comp; gl.useProgram(cp.p); setCommon(cp, [cw, h]);
+  gl.uniform4f(cp.U.u_rect, bx0, by0, bw, bh); gl.uniform1i(cp.U.u_sp, 5); gl.uniform1i(cp.U.u_tone, 6); gl.uniform1i(cp.U.u_bt, 2); gl.uniform1i(cp.U.u_lut, 7);
+  gl.uniform1f(cp.U.u_crease, (P.smcrease ?? 1) > 0.5 ? 1 : 0); gl.uniform1f(cp.U.u_thin, thinOn ? 1 : 0);
+  gsmBind(0, G_.btex); gsmBind(2, GSM.bt); gsmBind(3, G_.g1t); gsmBind(4, G_.g2t); gsmBind(5, G_.sp.t); gsmBind(6, G_.tn); gsmBind(7, G_.lt);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  // (the quad renderer's state, all of it, to be set again: units, samplers, program, buffers)
+  gl.enable(gl.BLEND); gl.bindVertexArray(GLR.vao);
+  GLR.cur = {}; GLR.unit = []; GLR.unitS = []; GLR.st.tgt = null;
+  GLR.stats.draws += 3;
+  // kept for the frames between paints, as smKeep keeps the JS picture
+  S_.ow = bw; S_.oh = bh; S_.ox = (bx0 - 1) * FXV.pxX; S_.oy = by0 * FXV.pxY; S_.ocam = S_.cam; S_.osv = FXV.SV; S_.gx0 = bx0; S_.gy0 = by0; S_.gpuOut = true;
+}
 
 // ================================================================== what the game calls (src/41-sky-new.js)
 // The sun's place across the screen by the hour (the lab's: up at 5:30, down at 19:00; at night the moon, mirrored)
+let SUNO = null;   // (SUN: DRAG - where the user put it: x a share of the screen, y its height as the hour's)
 function skySun() {
+  if (SUNO) { sunScreen = { x: SUNO.x, y: SUNO.y }; return; }
   const h = ((P.time % 24) + 24) % 24, alt = Math.sin((h - 6) / 12 * Math.PI), night = 1 - smoothstep(-0.25, 0.05, alt);
   const sx = 0.12 + 0.76 * clamp((h - 5.5) / 13.5, 0, 1);
   const a = night > 0.9 ? Math.sin((h - 18) / 12 * Math.PI) : alt;
@@ -16248,6 +17057,14 @@ const NSKY_API = {
   hour(G) { P.time = G.time; P.rain = G.rain; P.sky = G.weather; P.fog = Math.max(P.ghaze, G.fog); computeEnv(); return E; },
   // (a new round: the clouds as the weather is at once, not easing over from the last round's - 19-menu.js freshWeather)
   snap() { SNAP = frameNo + 3; },
+  refresh: skyRefresh,
+  // (SUN: DRAG) the sun under the screen point (px, py) of view V - the inverse of skyBack's placing; null: by the hour again
+  setSun(V, px, py) {
+    if (px == null) { SUNO = null; return; }
+    const x = ((px - V.pivX) / V.zr + V.pivX + (V.vsx || 0)) / V.fullW, y = (V.hzPx - py) / ((P.sunh ?? 1.6) * HS * CPX * V.zr);
+    SUNO = { x: clamp(x, -0.2, 1.2), y: clamp(y, -0.3, 1.2) };
+  },
+  get sunDragged() { return !!SUNO; },
   frame(G) { ftFrame(); const t0 = performance.now(); skySun(); skyFrame(G); FTV.frame = performance.now() - t0; },
   // a view's sky; a shared view's second half lays the first half's pictures again
   back: timed('back', function (V, again) { if (again) { if (OFF0) return; replay(REC_BACK[0], V); return; } REC = REC_BACK[V.vi]; REC.length = 0; try { skyBack(V); } finally { REC = null; } if (V.vi === 0) OFF0 = !!V.off; }),
@@ -16285,12 +17102,13 @@ const NSKY_API = {
 const DESC = {
   sunh: 'How high the sun climbs at midday, in screens above the horizon at ×1', bands: 'How many steps the sky\'s gradient has: more is smoother',
   wisps: 'How many long thin wisps stream between the clouds',
-  tall: 'How many of the big clouds are tall cumulus towers (the TALL shapes); the scene is rebuilt', tallwx: 'How much the towers wait for heavy weather: 1 = the last clouds to grow (SKY past 60%), 0 = they show like any cloud', mix: 'The world is cut into stretches that take turns being wispy (small clouds, thick wisps), tall (towers) and banks (the wide clouds). How strictly each keeps to its kind: 0 = every kind everywhere, 1 = nothing else in it', region: 'How long each stretch of one kind is, in screens', wispbump: 'How many small bumps along a wisp\'s top', wispbumpk: 'How big those bumps are', wisppuff: '1: a wisp is built of puffs like the other clouds; 0: shaded ovals, as before', lightfix: '1: the sun lights every cloud from the same side (it is at infinity), so the camera panning re-lights nothing; relights are whole clouds. 0: the old rule - each cloud lit by its own offset from the sun - for comparison', crease: 'How much darker a face tucked into the crease between two lobes is, in any light: the sky cannot reach it', gcover: 'How many clouds there are with the game\'s SKY slider at 30%. SKY 0 (CLEAR) has none at all; up to 40% there are only a few here and there; every cloud shows by 60%; rain brings its own', bigk: 'How much bigger (and so taller) the clouds grow as the SKY slider goes from 60% to 100%',
+  tall: 'How many of the big clouds are tall cumulus towers (the TALL shapes); the scene is rebuilt', tallwx: 'How much the towers wait for heavy weather: 1 = the last clouds to grow (SKY past 60%), 0 = they show like any cloud', mix: 'The world is cut into stretches that take turns being wispy (small clouds, thick wisps), tall (towers) and banks (the wide clouds). How strictly each keeps to its kind: 0 = every kind everywhere, 1 = nothing else in it', region: 'How long each stretch of one kind is, in screens', wispbump: 'How many small bumps along a wisp\'s top', wispbumpk: 'How big those bumps are', wisppuff: '1: a wisp is built of puffs like the other clouds; 0: shaded ovals, as before', gpulight: '1: every puff\'s light is worked out on the graphics card, all of a cloud at once whenever its light changes (instant). 0: in JS as before, a few clouds a frame - to compare the two', lightfix: '1: the sun lights every cloud from the same side (it is at infinity), so the camera panning re-lights nothing; relights are whole clouds. 0: the old rule - each cloud lit by its own offset from the sun - for comparison', crease: 'How much darker a face tucked into the crease between two lobes is, in any light: the sky cannot reach it', gcover: 'How many clouds there are with the game\'s SKY slider at 30%. SKY 0 (CLEAR) has none at all; up to 40% there are only a few here and there; every cloud shows by 60%; rain brings its own', bigk: 'How much bigger (and so taller) the clouds grow as the SKY slider goes from 60% to 100%',
   ghaze: 'The haze under each deck of clouds on a clear day (the game\'s fog adds to it)', par1: 'How much deck 1 (the front clouds) moves as the camera pans: 1 = with the world, 0 = fixed in the sky',
   par2: 'How much deck 2 moves as the camera pans', par3: 'How much deck 3 moves as the camera pans', par4: 'How much deck 4 (the far horizon) moves as the camera pans',
   cloudk: 'The clouds\' size, times the lab\'s (the sky is built again)',
+  cellz: '1: zoomed out, the sky pixel shrinks with the zoom (SKY PIXEL 4: 3 at x2/3 and further out - never under 3, for speed). 0: SKY PIXEL at every zoom',
   skyh: 'How much of the screen (at the default camera) the decks and the sun spread over above the horizon: the lab\'s heights fitted into it',
-  cells: 'The size of one sky pixel in screen pixels at the default zoom (2 by default; the smallest is 2)',
+  cells: 'The size of one sky pixel in screen pixels at x1 (4 by default; the smallest is 2). Smaller is finer, but each puff gets bigger in sky pixels and they start to show as dots',
   alt: 'How high deck 1 (the front clouds) sits above the horizon, as a share of the screen at ×1', gap: 'How far below deck 1 the back decks sit (0: all at one height)',
   atmo: 'The haze of distance in front of the back decks: more and they fade into the sky',
   lightz: 'How far behind the clouds the sun is: more and a sun beside a cloud lights it less from that side (darker faces, brighter edges)',
@@ -16307,15 +17125,16 @@ const DESC = {
   base: 'How flat the clouds\' undersides are (1: a level base)', form: 'How often a cloud takes a new shape', morph: 'How fast a change of shape plays out (the wind speeds it up too)',
   evolve: 'How much the puffs breathe, swelling and shrinking slowly', heal: 'How fast a cloud mends where a plane has cut through it',
   lodb: 'PUFF LOD: under this puff size on the screen a cloud keeps its billows only (lower: more detail for longer, slower)',
-  pk1: 'Deck 1 (the front clouds): how big its puffs are - bigger means fewer, cheaper; the clouds are made again', pl1: 'Deck 1: under this puff size (sky cells, at the zoom) its clouds show their billows alone, no puffs. The panel\'s PUFF SIZES line shows each deck\'s size now', pk2: 'Deck 2 puff size', pl2: 'Deck 2: billows alone under this puff size', pk3: 'Deck 3 puff size', pl3: 'Deck 3: billows alone under this puff size (the far decks drop detail sooner)', pk4: 'Deck 4 (the horizon) puff size', pl4: 'Deck 4: billows alone under this puff size',
+  pk1: 'Deck 1 (the front clouds): how big its puffs are - bigger means fewer, cheaper; the billows keep their size (the clouds are made again)', pl1: 'Deck 1: under this puff size (sky cells, at the zoom) its clouds show their billows alone, no puffs. The panel\'s PUFF SIZES line shows each deck\'s size now', pk2: 'Deck 2 puff size', pl2: 'Deck 2: billows alone under this puff size', pk3: 'Deck 3 puff size', pl3: 'Deck 3: billows alone under this puff size (the far decks drop detail sooner)', pk4: 'Deck 4 (the horizon) puff size', pl4: 'Deck 4: billows alone under this puff size',
+  ...Object.fromEntries([1, 2, 3, 4].flatMap(n => [['dk' + n, 'Deck ' + n + ' on or off (1 = the front, 4 = the horizon)'], ['bl' + n, 'Deck ' + n + ': its billows on or off - off, each cloud is its lobes alone, shaded ovals'], ['bs' + n, 'Deck ' + n + ': how big its billows are - bigger means fewer (the clouds are made again)'], ['pf' + n, 'Deck ' + n + ': its puffs on or off - off, the billows alone, no grain']])),
   lodl: 'LOBE LOD: under this lobe size each lobe is one shaded oval (lower: more detail for longer, slower)',
 };
 const ED_TABS = {
-  SKY: [['GRADIENT AND SUN', ['bands', 'sunh', 'flare', 'sunbig']], ['THE GAME\'S WEATHER', ['gcover', 'bigk', 'ghaze', 'wisps']], ['KINDS OF CLOUD (LAB V50)', ['tall', 'tallwx', 'mix', 'region', 'wispbump', 'wispbumpk', 'wisppuff']], ['CAMERA', ['par1', 'par2', 'par3', 'par4', 'cells', 'skyh', 'cloudk']]],
+  SKY: [['GRADIENT AND SUN', ['bands', 'sunh', 'flare', 'sunbig']], ['THE GAME\'S WEATHER', ['gcover', 'bigk', 'ghaze', 'wisps']], ['KINDS OF CLOUD (LAB V50)', ['tall', 'tallwx', 'mix', 'region', 'wispbump', 'wispbumpk', 'wisppuff']], ['CAMERA', ['par1', 'par2', 'par3', 'par4', 'cells', 'cellz', 'skyh', 'cloudk']]],
   DECKS: [['HEIGHTS', ['alt', 'gap']], ['AIR', ['atmo']]],
-  LIGHT: [['SUN', ['lightz', 'glow', 'lightfix']], ['TONES', ['contrast', 'expo']], ['SHADOWS', ['shadow', 'self', 'amb', 'crease', 'shade']], ['EDGES', ['hi', 'rim']], ['RAYS', ['rays', 'raythru', 'raylen', 'rayhid']]],
+  LIGHT: [['SUN', ['lightz', 'glow', 'lightfix', 'gpulight']], ['TONES', ['contrast', 'expo']], ['SHADOWS', ['shadow', 'self', 'amb', 'crease', 'shade']], ['EDGES', ['hi', 'rim']], ['RAYS', ['rays', 'raythru', 'raylen', 'rayhid']]],
   COLOURS: null,
-  SHAPE: [['PUFFS AND BILLOWS', ['puff', 'billow', 'jitter']], ['MASS', ['mass', 'base']], ['DETAIL (LOD)', ['lodb', 'lodl']], ['DETAIL PER DECK (1 = FRONT)', ['pk1', 'pl1', 'pk2', 'pl2', 'pk3', 'pl3', 'pk4', 'pl4']]],
+  SHAPE: [['PUFFS AND BILLOWS', ['puff', 'billow', 'jitter']], ['MASS', ['mass', 'base']], ['DETAIL (LOD)', ['lodl']], ['DECK 1 (FRONT)', ['dk1', 'bl1', 'bs1', 'pf1', 'pk1', 'pl1']], ['DECK 2', ['dk2', 'bl2', 'bs2', 'pf2', 'pk2', 'pl2']], ['DECK 3', ['dk3', 'bl3', 'bs3', 'pf3', 'pk3', 'pl3']], ['DECK 4 (HORIZON)', ['dk4', 'bl4', 'bs4', 'pf4', 'pk4', 'pl4']]],
   MOTION: [['FORMING', ['form', 'morph']], ['LIFE', ['evolve', 'heal']]],
   SMOKE: [['NEW LOOK', SM_SL.map(r => r[0])]],
   // (user Oct 27: the lab's fire and water in the game's editor - the fire helicopter's water cannon and the game's fires)
@@ -16377,7 +17196,7 @@ function edRow(k, lab, mn, mx, st, desc) {
   const inp = r.querySelector('input'), out = r.querySelector('output'), dv = r.querySelector('.dv'), lbl = r.querySelector('label');
   inp.value = P[k];
   const show = () => { const v = P[k], d = TUNE.def[k], on = Math.abs(v - d) > (+st) * 0.5; out.textContent = fmtV(k, v); dv.textContent = on ? '(' + fmtV(k, d) + ')' : ''; dv.classList.toggle('on', on); };
-  inp.addEventListener('input', () => { P[k] = +inp.value; show(); saveP(); if (k === 'cells' && edHost) edHost.rescreen(); if (k === 'wispbump' || k === 'wispbumpk') reformWisps(); if (/^p[kl][1-4]$/.test(k) || k === 'lodb' || k === 'puff') regenAll(); });
+  inp.addEventListener('input', () => { P[k] = +inp.value; show(); saveP(); clearTimeout(TUNE.rt); TUNE.rt = setTimeout(() => skyRefresh(false), 200); if (k === 'cells' && edHost) edHost.rescreen(); if (k === 'wispbump' || k === 'wispbumpk') reformWisps(); if (/^(pk|bs)[1-4]$/.test(k) || k === 'lodb' || k === 'puff' || k === 'billow') regenAll(); });
   dv.addEventListener('click', () => { if (!dv.classList.contains('on')) return; P[k] = TUNE.def[k]; inp.value = P[k]; show(); saveP(); });
   if (desc) { lbl.title = desc; lbl.addEventListener('click', () => { TUNE.tipEl.textContent = lab + ': ' + desc; }); }
   TUNE.rows[k] = { inp, show }; TUNE.label[k] = lab; show();
@@ -16491,10 +17310,10 @@ TUNE.add = (tab, rows) => { ED_TABS[tab] = [[tab, rows.map(r => r[0])]]; for (co
 // the lab's views (user Oct 27 evening: "In the Lab we have these view: tones etc... I cant find any of that in the game
 // editor"): the clouds' VIEW (TONES, LOBES, BILLOWS, LIGHT - each lobe, billow or puff in a colour of its own; the decks drawn
 // in the buffers while a view is on, as the lab draws them) and the smoke's SMOKE VIEW (21-smoke.js SM_VIEWS)
-const CLOUD_VIEWS = ['TONES', 'LOBES', 'BILLOWS', 'LIGHT'];
+const CLOUD_VIEWS = ['TONES', 'LOBES', 'BILLOWS', 'LIGHT', 'PUFFS'];
 { const vb = b => { view = (view + 1) % CLOUD_VIEWS.length; b.textContent = 'VIEW: ' + CLOUD_VIEWS[view]; b.classList.toggle('on', view > 0); }; vb.init = b => { b.textContent = 'VIEW: ' + CLOUD_VIEWS[view]; b.classList.toggle('on', view > 0); };
   const sb = b => { smView = (smView + 1) % SM_VIEWS.length; b.textContent = 'SMOKE VIEW: ' + SM_VIEWS[smView]; b.classList.toggle('on', smView > 0); for (const vv of SMNPV) for (const k in vv) vv[k].force = true; }; sb.init = b => { b.textContent = 'SMOKE VIEW: ' + SM_VIEWS[smView]; b.classList.toggle('on', smView > 0); };
-  TUNE.buttons('LIGHT', 'VIEW', [['VIEW: TONES', 'TONES: the picture. LOBES: each lobe its own colour. BILLOWS: each billow its own. LIGHT: the light before it is cut into tones. (A view draws the decks in the buffers, slower, as the lab does.)', vb]]);
+  TUNE.buttons('LIGHT', 'VIEW', [['VIEW: TONES', 'TONES: the picture. LOBES: each lobe its own colour. BILLOWS: each billow its own. LIGHT: the light before it is cut into tones. PUFFS: each puff its own. (A view draws the decks in the buffers, slower, as the lab does.)', vb]]);
   TUNE.buttons('SMOKE', 'VIEW', [['SMOKE VIEW: TONES', 'TONES: the picture; TONE NUMBERS; BODIES; BALLS; LIGHT; SHADOW; NORMALS; FIRE - what the smoke\'s light is doing, as in the lab.', sb]]); }
 NSKY_API.editor = { build: edBuild, TUNE, show(on) { if (TUNE.openBtn) TUNE.openBtn.hidden = !on; }, get open() { return TUNE.open; } };
 
@@ -16548,7 +17367,6 @@ function skyNewFrame() {
   if (!NSKY.editor.TUNE.built && document.body) NSKY.editor.build({ isNew: () => SKYNEW, setNew: skyNewSet, rescreen: () => { } });
   NSKY.editor.show(ui.settings || NSKY.editor.open);
   if (!skyNewOn) return;
-  NSKY.screen(bw, bh);
   const z0 = cam.view[0].z / ZOOM_DEFAULT, z1 = cam.merge >= 1 ? z0 : cam.view[1].z / ZOOM_DEFAULT;
   // the decks' drawing zoom: in steps (an eighth of a zoom step apart, 2^(1/6)), held while the camera's zoom stays within its
   // step - between steps the picture is only magnified (M), smoothly. Every frame at the exact zoom, a camera easing its zoom
@@ -16558,6 +17376,7 @@ function skyNewFrame() {
   // cloud redrawn once at the cut, never between; magnified (M) only past 1)
   const zmin = Math.min(1, z0, z1);
   if (Math.abs(zmin - NSKY.ZL) > 1e-9) NSKY.ZL = zmin;
+  NSKY.screen(bw, bh);                                     // (after the zoom: the sky pixel follows it - SKY PIXEL BY ZOOM, Sky Bench port Oct 28)
   let fl = null;
   const b = storm.bolts[storm.bolts.length - 1];
   if (b) { const vis = b.t < 0.08 ? 1 : b.t < 0.16 ? 0.25 : b.t < 0.26 ? 0.85 : b.t < 0.32 ? 0 : 0.5 * (1 - (b.t - 0.32) / 0.18); if (vis > 0.02) fl = { k: vis, x: b.x0 }; }
@@ -38139,13 +38958,14 @@ function frame(now) {
   if (holdFrames) return;                                           // (a test steps the game by hand)
   try { frameBody(now); }
   catch (e) {
-    console.error(e);
+    frameErrN++; if (String(e) !== frameErr) { frameErr = String(e); console.error(e); }   // (each new error once; the count on the perf panel - Sky Bench port)
     SURF.on = false;
     if (GLR.on) { GLR.n = 0; GLR.slots.length = 0; GLR.st.sten = 0; GLR.st.tgt = null; GLR.cur = {}; GLR.unit = []; GLR.unitS = []; }
     for (const c of [g, oc, ug]) { try { c.setTransform(1, 0, 0, 1, 0, 0); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; if (c.reset) c.reset(); } catch (e2) {} }
     C = g; fsLast = null;
   }
 }
+let frameErr = '', frameErrN = 0;
 let SIM_ONLY = false;           // (headless matches: the world runs, nothing is drawn)
 let NO_DRAW = false;            // (tests, stepQuiet: everything runs - the smoke and the trails too - but no frame is drawn)
 function frameBody(now) {
