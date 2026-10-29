@@ -3016,8 +3016,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 272;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 17:35';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 273;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 17:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12883,7 +12883,7 @@ function updateCamera(dt, snap) {
   const zDiff = Math.abs(cam.zt[0] - cam.zt[1]) / zMean;
   const span = Math.abs(F[1][0] - F[0][0]) + SHIP_L;
   const fullW = VIEW_W / cam.zsa;
-  if (cam.mode === 'single') {
+  if (cam.mode === 'single' && !ONEVIEW()) {             // (alone it never splits, user Oct 29: zoomed in close, the ship wider than the screen split it and drew the middle line)
     if (zDiff > 0.05 || span + fullW * 0.06 > fullW) cam.mode = 'split';
   } else if (ONEVIEW() && zDiff < 0.01 && !pinch[0] && !pinch[1] && span + fullW * 0.06 < fullW * 0.9) {
     cam.mode = 'single';                  // (two players always keep their own halves: the view never joins)
@@ -12911,7 +12911,7 @@ function updateCamera(dt, snap) {
   const cutAll = snap || (ONEVIEW() && cam.cut[0]);
   if (ONEVIEW()) {
     // one wide view: centred on what you're steering
-    cam.mode = 'single'; if (snap || cam.merge > 0.99) cam.merge = 1;
+    cam.mode = 'single'; cam.merge = 1;
     const f = F[0];
     cam.cs = follow('cs', cam.cs, clamp(f[0], VIS_L + hwS, VIS_R - hwS), 3.6, k(snap ? 1 : 3.6), hwS);
   } else cam.cs = follow('cs', cam.cs, clamp((F[0][0] + F[1][0]) / 2, VIS_L + hwS, VIS_R - hwS), 6, k(6), hwS);
@@ -13149,7 +13149,7 @@ void main() {
 // its rim. u_sun its centre, u_s.x its radius (cells), u_s.z how much of it shows, u_s.w the time; u_k.y the heat, u_k.z its reach (radii)
 const GL_SFS = `#version 300 es
 precision highp float;
-uniform vec2 u_sun; uniform vec4 u_s; uniform vec4 u_k; uniform vec3 u_core;
+uniform vec2 u_sun; uniform vec4 u_s; uniform vec4 u_k; uniform vec3 u_core; uniform vec3 u_sky;
 in vec2 v_cell;
 out vec4 o;
 vec3 ramp(float h) {
@@ -13180,6 +13180,10 @@ void main() {
   float a = u_s.z * (1.0 - 0.7 * h * smoothstep(0.84, 0.97, g) * smoothstep(0.4, 0.8, seg));
   float hzp = (hor - (u_sun.y + p.y * R)) / R;
   vec3 col = mix(u_core, ramp(max(0.0, hzp)), u_k.x) * (1.0 - 0.1 * u_k.x * pow(r, 6.0));
+  // (the low sun in the sky's own tones, user Oct 29: "too saturated yellow... closer to the tones of the background" - each
+  // cell keeps the ramp's brightness, its hue pulled toward the sky's horizon behind it)
+  float L = dot(col, vec3(0.3, 0.55, 0.15)), Ls = max(0.05, dot(u_sky, vec3(0.3, 0.55, 0.15)));
+  col = mix(col, min(u_sky * (L / Ls), vec3(1.0)), 0.55 * u_k.x);
   a = floor(a * 255.0 + 0.5) / 255.0;
   o = vec4(col * a, a);
 }`;
@@ -13188,7 +13192,7 @@ function glSunSetup() {
   gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_SFS));
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-  GLR.sprog = p; GLR.sU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_sun', 'u_s', 'u_k', 'u_core']) GLR.sU[k] = gl.getUniformLocation(p, k);
+  GLR.sprog = p; GLR.sU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_sun', 'u_s', 'u_k', 'u_core', 'u_sky']) GLR.sU[k] = gl.getUniformLocation(p, k);
 }
 function glRaySetup() {
   const gl = GLR.gl, p = gl.createProgram();
@@ -14388,7 +14392,7 @@ class GLCtx {
   // over the screen quad (dx, dy, dw, dh) whose cells run x0..x1, y0..y1; sun in cells; p = [maxD, NS, RAY_N, RAY_STEP];
   // kk = [K0..K3]; k2 = [amt, inK, horY]; col = [r, g, b] 0..1
   // the sun's disc through the heat over the sea (GL_SFS): cells x0..x1, y0..y1 of the sky's picture over the screen's dx, dy, dw, dh
-  drawSunGL(dx, dy, dw, dh, x0, y0, x1, y1, sun, s, k, core) {
+  drawSunGL(dx, dy, dw, dh, x0, y0, x1, y1, sun, s, k, core, sky) {
     if (GLR.lost || !GLR.sprog) return;
     const gl = GLR.gl, t = this.target, U = GLR.sU;
     glBegin(this, 'source-over'); glFlush();
@@ -14398,7 +14402,7 @@ class GLCtx {
     this._corners(dx, dy, dw, dh);
     gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
     gl.uniform4f(U.u_cells, x0, y0, x1, y1);
-    gl.uniform2f(U.u_sun, sun[0], sun[1]); gl.uniform4f(U.u_s, s[0], s[1], s[2], s[3]); gl.uniform4f(U.u_k, k[0], k[1], k[2], k[3]); gl.uniform3f(U.u_core, core[0], core[1], core[2]);
+    gl.uniform2f(U.u_sun, sun[0], sun[1]); gl.uniform4f(U.u_s, s[0], s[1], s[2], s[3]); gl.uniform4f(U.u_k, k[0], k[1], k[2], k[3]); gl.uniform3f(U.u_core, core[0], core[1], core[2]); gl.uniform3f(U.u_sky, sky ? sky[0] : core[0], sky ? sky[1] : core[1], sky ? sky[2] : core[2]);
     gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     GLR.stats.draws++; GLR.stats.quads++;
@@ -17154,7 +17158,7 @@ function drawSun(horY) {
   // (the heat on the wall clock, user Oct 29: "it should move no? this heat distortion in real life is not static" - the sky's own clock
   // stops while the world is held: the editors, photo mode, the WORLD button)
   const low = dusk * (1 - E.night);
-  if (GPU) { SUNG = { sun: [ox + 0.5, oy + 0.5], s: [sr, horY, vis, (performance.now() / 1000) % 3600], k: [low, (P.heat ?? 1) * low, P.heatr ?? 0.6, 0], core: core.map(v => v / 255), x0: Math.floor(ox - sr * 1.25), x1: Math.ceil(ox + sr * 1.25) + 1, y0: Math.max(0, Math.floor(oy - sr * 1.2)), y1: Math.min(horY, Math.ceil(oy + sr * 1.25) + 1) }; return; }
+  if (GPU) { SUNG = { sun: [ox + 0.5, oy + 0.5], s: [sr, horY, vis, (performance.now() / 1000) % 3600], k: [low, (P.heat ?? 1) * low, P.heatr ?? 0.6, 0], core: core.map(v => v / 255), sky: E.skyHor.map(v => v / 255), x0: Math.floor(ox - sr * 1.25), x1: Math.ceil(ox + sr * 1.25) + 1, y0: Math.max(0, Math.floor(oy - sr * 1.2)), y1: Math.min(horY, Math.ceil(oy + sr * 1.25) + 1) }; return; }
   for (let i = 0; i < s0.length; i++) { const y = oy - m + i; if (y < 0 || y >= horY) continue; const w = s0[i]; for (let x = ox - w; x <= ox + w; x++) if (x >= 0 && x < TW) blendPx(y * TW + x, core, vis); }
 }
 let SUNG = null;   // (this view's sun disc for the GPU, from drawSun - null: none)
@@ -17389,7 +17393,7 @@ function outImg(img, w, y0, n, x, y, wd, ht) {
 function outSun(G) {
   const V = VIEW, dx = picX(V, (G.x0 - 1) * CPX), dy = picY(V, G.y0 * CPX), dw = (G.x1 - G.x0) * CPX * M, dh = (G.y1 - G.y0) * CPX * M;
   if (G.y1 <= G.y0 || dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4 || !ctx.drawSunGL) return;
-  ctx.drawSunGL(dx, dy, dw, dh, G.x0, G.y0, G.x1, G.y1, G.sun, G.s, G.k, G.core);
+  ctx.drawSunGL(dx, dy, dw, dh, G.x0, G.y0, G.x1, G.y1, G.sun, G.s, G.k, G.core, G.sky);
 }
 // the GPU rays over the picture's rows y0..y1 (16-light-rays.js RAYG), laid like a buffer's band
 function outRays(G) {
