@@ -2195,7 +2195,8 @@ function shipLocal(sh, x, y) {
   const lx = dx * ca + dy * sa, ly = -dx * sa + dy * ca;
   return [sh.facing < 0 ? SHIP_PIVOT_X + lx / SHIP_K : SHIP_PIVOT_X - lx / SHIP_K, SHIP_WL_ROW + ly / SHIP_K];
 }
-function hitTest(sh, x, y) {
+function hitTest(sh, x, y, inside) {
+  if (!inside && inHangar(x, y)) return -1;                                      // (inside a hangar's walls: out of reach - 23-harbour-gates)
   const [cf, rf] = shipLocal(sh, x, y);
   const col = Math.round(cf), row = Math.round(rf);
   if (col < -2 || col >= SHIP_SRC_W + 2 || row < -2 || row >= img.shipH) return -1;
@@ -2993,8 +2994,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 253;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 16:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 254;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 16:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6738,6 +6739,15 @@ function harbourHit(d, x, y) {
 // loads, boxes, wrecks, pieces: the top of its solid at x at or below y (the hangar's roof; the deck - the pier's while
 // it stands, then the block's), or Infinity. It follows the pier (pierEdge), so what stood on it falls when it goes
 const HANGAR_ROOF = () => HANGAR_TOP + 14;
+// (user Oct 29: planes kept flying through the long hangar into the battleship parked inside - "make the hangar solid to
+// anything flying, and a boat inside her own hangar impossible to hit from outside") the hangar's body, from its roof down
+// (its walls stand in the water on its foundation): inHangar - a point in it; hangarSolid - flown into (above the water);
+// hangarTopIn - its roof if a hangar stands between x0 and x1, else Infinity (what a low flier keeps above, with clearTop);
+// AIR_ROOM - what a flier keeps over a roof (the runway's clearance and the Cessnas' heights, 50-land-tshape / -traffic)
+function inHangar(x, y) { if (y <= HANGAR_ROOF()) return false; for (const d of docks) { const [ha, hb] = hangarSpan(d); if (x > ha && x < hb) return true; } return false; }
+const hangarSolid = (x, y) => y < WATER_Y + 2 && inHangar(x, y);
+function hangarTopIn(x0, x1) { const a = Math.min(x0, x1), b = Math.max(x0, x1); for (const d of docks) { const [ha, hb] = hangarSpan(d); if (b > ha && a < hb) return HANGAR_ROOF(); } return Infinity; }
+const AIR_ROOM = 10 * UPM;
 function harbourAt(x) {
   for (const d of docks) { const q = pierEdge(d), e = d.x0 + (d.dir > 0 ? d.w : 0); if (x >= Math.min(q, e) && x <= Math.max(q, e) && !deckGone(d, x)) return d; }   // (not where a span of the deck has fallen)
   return null;
@@ -6930,7 +6940,8 @@ function subAt(sb, u, row) {
   const ca = Math.cos(sb.a), sa = Math.sin(sb.a);
   return [sb.x + lx * ca - ly * sa, sb.y + lx * sa + ly * ca];
 }
-function subHitTest(sb, x, y) {
+function subHitTest(sb, x, y, inside) {
+  if (!inside && inHangar(x, y)) return -1;                                      // (inside a hangar's walls: out of reach)
   if (sb.state !== 'out' && sb.state !== 'docked') return -1;
   if (sb.turn) {
     // mid-turn: a box as long as the part of her that shows, deck to keel
@@ -8777,6 +8788,7 @@ function planeCrash(pl) {
     for (const b of sailboats) if (!what && b.state === 'sail' && sailHullHit(b, x, y)) { sinkSailboat(b, x, y, pl.vx); what = 'sea'; }   // (it flies through the sails; only her hull stops it)
     for (const b of buoys) if (!what && b.player !== p && buoyHit(b, x, y)) destroyBuoy(b, x, y);           // (the plane flies on)
     for (const d of docks) if (!what && !(pl.state === 'fly' && d === homeDock[p]) && harbourHit(d, x, y)) what = 'land';   // (your own harbour never brings your plane down)
+    if (!what && OWM && hangarSolid(x, y)) what = 'land';                       // (but a hangar's walls do - user Oct 29)
     if (what) { X = x; Y = y; break; }
   }
   // (OPEN WORLD, user Oct 25 late: "in the airport, planes always land. You cannot crash a plane in the airport")
@@ -16903,13 +16915,17 @@ function bakeVisit(c, vis, gk) {
   v.live = false; v.now = 0;
   const shownF = bkOk(v.F) ? v.F : null;
   // what this cloud needs: its sprite for the gen being baked (b.next), or - no gen going - its sprite for the look shown
-  let need = 0;   // 0 nothing, 1 bake into B (swapped with the rest), 2 bake into F (shown at once)
-  if (b.next) { if (!(v.B && v.B.sig === b.next && bkOk(v.B))) need = wants ? 1 : -1; }
+  let need = 0;   // 0 nothing, 1 bake into B (swapped with the rest), 2 bake into F (shown at once), 3 nothing to show yet: now
+  // (Oct 29, user: "Seeing some holes in our pre rendered clouds" - a cloud with no picture at all (just come into view, or after a
+  // zoom) was baked only into the next set while a set was being baked, so it showed nothing - the sky through it - until the
+  // whole sky swapped. Now it is baked at once, whatever the frame's budget, and that picture serves the coming swap too)
+  if (wants && !shownF) need = 3;
+  else if (b.next) { if (!(v.B && v.B.sig === b.next && bkOk(v.B))) need = wants ? 1 : -1; }
   else if (wants && !(bkOk(v.F) && v.F.sig === b.cur)) need = 2;
   else if (!wants && v.F) { bkFree(v.F); v.F = null; }
   if (need === -1) { if (v.B && v.B !== v.F) bkFree(v.B); v.B = { empty: true, sig: b.next }; need = 0; }   // (gone at the new look: gone at the swap)
   if (need > 0 && inView) {
-    if (b.baking < BK_BUDGET) {
+    if (need === 3 || b.baking < BK_BUDGET) {
       b.baking++;
       v.now = need; c.grow = c.growT; c.dirty = true; c.lobG = -1;           // (placed whole, at its finished size, lit afresh)
       if (skyGen <= 0) skyGen = 0.001;                                        // (its puffs made now, whatever the frame's budget)
@@ -16960,7 +16976,8 @@ function bakeCloud(c, ax, ay) {
     s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID };
   }
   BKREC.ops.length = 0;
-  if (v.now === 2) { s.sig = b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (v.B && v.B.sig !== b.next) { bkFree(v.B); v.B = null; } }
+  if (v.now === 3) { s.sig = b.next || b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (b.next) { if (v.B && v.B !== s) bkFree(v.B); v.B = s; } }
+  else if (v.now === 2) { s.sig = b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (v.B && v.B.sig !== b.next) { bkFree(v.B); v.B = null; } }
   else { s.sig = b.next; if (v.B && v.B !== v.F) bkFree(v.B); v.B = s; }
   const ms = performance.now() - t0; b.avg = b.avg * 0.9 + ms * 0.1; b.ms += ms; b.n++;
   FTV.bake = (FTV.bake || 0) + ms; FTV.baked = (FTV.baked || 0) + 1;
@@ -27047,7 +27064,8 @@ function civAutoAir(f, dt) {
     yT = A.y + 6 - Math.min(up + 6, Math.max(0, D + IN) * G);
     if ((D < 700 && A.y - f.y > Math.max(0, D + IN) * G + 140) || D < -(AIR_W - 300)) ap.phase = 'out';   // (too high to make it down, or past it: round again)
   }
-  if (dryLand(f.x) && !onApron(f.x)) yT = Math.min(yT, clearTop(f.x + now * 300, 150) - 120);   // (over the land away from the field: clear of the hills and trees ahead)
+  if (dryLand(f.x) && !onApron(f.x)) yT = Math.min(yT, clearTop(f.x + now * 300, 150) - 120);
+  { const bt = hangarTopIn(f.x, f.x + now * 1200); if (bt < Infinity) yT = Math.min(yT, bt - AIR_ROOM - (TRAFFIC[f.kind].gy || 8)); }   // (and over a hangar: user Oct 29)   // (over the land away from the field: clear of the hills and trees ahead)
   const want = ap.phase === 'out' ? A.dir : -A.dir;
   if (now !== want && !f.turn) f.turn = { t: 0, from: f.facing };
   if (ap.phase === 'in' && D < 900 && !f.turn) f.spd += (K.vmin + 20 - f.spd) * Math.min(1, dt * 1.5);   // (slowing for the runway)
@@ -27363,8 +27381,8 @@ function civTakeAt(p, x, y) {
   }
   // your own army's
   let k = null;
-  if (ships[p] && ships[p].state === 'afloat' && hitTest(ships[p], x, y) >= 0) k = 'ship';
-  else if (subs[p] && subHitTest(subs[p], x, y) >= 0) k = 'sub';
+  if (ships[p] && ships[p].state === 'afloat' && hitTest(ships[p], x, y, true) >= 0) k = 'ship';
+  else if (subs[p] && subHitTest(subs[p], x, y, true) >= 0) k = 'sub';
   else if (planes[p] && planeHitTest(planes[p], x, y)) k = 'plane';
   else if (LAND && tanks[p] && tanks[p].state === 'alive' && tankHit(tanks[p], x, y)) k = 'tank';
   else if (LAND && helis[p] && (helis[p].state === 'fly' || helis[p].state === 'landed') && heliHit(helis[p], x, y)) k = 'heli';
@@ -27492,7 +27510,8 @@ function civHeliPlan(h, dt) {
     const load = ai.phase === 'home' && h.mag && h.mag.obj, tx = load ? civLoadSpot(h) : ai.tx;
     const dx = tx - h.x, down = ai.phase === 'home' && Math.abs(dx) < (load ? 30 : 60);
     let wantY = down ? gy + 8 : ai.ty;   // (a little under its wheels: easing toward the ground itself it hovered just over it for ever)
-    if (!down && LAND && dryLand(h.x)) wantY = Math.min(wantY, clearTop(h.x + Math.sign(dx) * 80, 90) - chSkid(h) - 30 - (load ? CMAG_L + 30 : 0));   // (over the trees: into one it comes down - user Oct 27; a load on its magnet clear of them too)
+    if (!down && LAND && dryLand(h.x)) wantY = Math.min(wantY, clearTop(h.x + Math.sign(dx) * 80, 90) - chSkid(h) - 30 - (load ? CMAG_L + 30 : 0));
+    if (!down && LAND) wantY = Math.min(wantY, hangarTopIn(h.x, h.x + Math.sign(dx) * 400) - chSkid(h) - 30 - (load ? CMAG_L + 30 : 0));   // (over a hangar: user Oct 29)   // (over the trees: into one it comes down - user Oct 27; a load on its magnet clear of them too)
     const lever = clamp(dx / 300, -1, 1), stick = clamp((wantY - h.y) / 120, -1, 1);
     if (ai.phase === 'go' && Math.abs(dx) < 50) { ai.phase = 'look'; ai.t = rnd(4, 9); }
     return [Math.abs(dx) < (load ? 30 : 60) && ai.phase === 'home' ? 0 : lever, stick];
@@ -32987,7 +33006,7 @@ function treeTopIn(x0, x1) {
   plantsNear((a + b) / 2, (b - a) / 2 + 60, it => { if ((it.pk === 'tree' || it.pk === 'palm') && plantUp(it)) m = Math.min(m, landTop(it.x) - plantH(it)); });
   return m;
 }
-const clearTop = (x, r) => Math.min(landTop(x), treeTopIn(x - (r || 40), x + (r || 40)));
+const clearTop = (x, r) => Math.min(landTop(x), treeTopIn(x - (r || 40), x + (r || 40)), hangarTopIn(x - (r || 40), x + (r || 40)));   // (and the hangars: user Oct 29)
 // the plants within r of x (by cell)
 function plantsNear(x, r, fn) {
   for (let c = Math.floor((x - r) / PL_CELL); c <= Math.floor((x + r) / PL_CELL); c++) { const L = PLT.grid[c]; if (L) for (const it of L) if (Math.abs(it.x - x) <= r) fn(it); }
@@ -34530,7 +34549,7 @@ const SP_LAKE_MIN = 700;
 const spLakes = not => (land.lakes || []).filter(L => L[1] - L[0] > SP_LAKE_MIN && L !== not && !(not && Math.abs(L[0] - not[0]) < 1));
 const spLake = s => { const A = spLakes(null); if (A.length < 3) return A.find(L => (L[0] + L[1]) / 2 < WORLD_W / 2 === s.home < WORLD_W / 2) || A[0]; return A[Math.floor(Math.random() * A.length)]; };
 // the highest ground in the next stretch ahead (it keeps 220 over it, crossing the land)
-function spClear(s) { let m = Math.min(WATER_Y, treeTopIn(s.x, s.x + s.dir * 700)); for (let k = 0; k <= 700; k += 100) { const x = s.x + s.dir * k; if (dryLand(x)) m = Math.min(m, landTop(x)); } return m; }   // (and the trees on the way: user Oct 27, into one it comes down)
+function spClear(s) { let m = Math.min(WATER_Y, treeTopIn(s.x, s.x + s.dir * 700), hangarTopIn(s.x, s.x + s.dir * 2500)); for (let k = 0; k <= 700; k += 100) { const x = s.x + s.dir * k; if (dryLand(x)) m = Math.min(m, landTop(x)); } return m; }   // (and the trees on the way: user Oct 27, into one it comes down)
 const spHold = (s, alt) => { const tgt = Math.min(alt, spClear(s) - 220); return s.y > tgt + 30 ? -0.5 : s.y < tgt - 30 ? 0.4 : 0; };
 const spFace = (s, want) => { if (!spOnWater(s) && want && s.dir !== want && !s.turn) s.turn = { t: 0, from: s.dir }; };
 function spPlan(s, dt) {
@@ -34640,7 +34659,7 @@ function spAir(s, dt, stick, mine) {
   // the floats touch the water (not while it climbs away): down onto it, in a burst of thick foam
   if (wet && s.y >= surfaceY(s.x) && s.vy >= -1 && !(s.climbT > 0)) { spTouch(s, d); return; }
   // into the ground: down it goes (onto an airfield's concrete, it lands on its floats like a belly landing - stopped)
-  if (wet && s.y >= harbourTop(s.x, s.y - 10) - 6) { spDown(s); return; }   // (into the harbour's deck or the hangar: down it goes - user Oct 27)
+  if (wet && (s.y >= harbourTop(s.x, s.y - 10) - 6 || hangarSolid(s.x + d * 20, s.y - 6) || hangarSolid(s.x, s.y))) { spDown(s); return; }   // (into the harbour's deck or the hangar: down it goes - user Oct 27)
   if (!wet && s.y >= landTop(s.x) - 6) { if (onApron(s.x)) { s.y = landTop(s.x) - 6; s.spd = 0; s.pitch = 0; spDown(s, true); } else spDown(s); }
 }
 // setting down on the water: a turn under way finishes the way it's facing, the speed carries it on as a boat, and
@@ -37169,7 +37188,7 @@ function newFlight(kind, from, wait, owner) {
 // and back, or out past the coast, round inland over its own country (short of the mountain), out past the coast
 // again and in to land. f.route: the points it turns at, the last its runway's inland end; f.D the whole way.
 const CESSNAS_A_SIDE = 5, CESSNA_REACH = 5000, CESSNA_GATE = 4400;   // (about three screens either side of the tower; the approach gate out over the water)
-const cessnaAlt = () => rnd(280, 950);                          // (each its own height, all under the 747s)
+const cessnaAlt = () => { const lo = Math.max(280, WATER_Y - HANGAR_ROOF() + AIR_ROOM); return rnd(lo, Math.max(950, lo + 400)); };   // (each its own height, all under the 747s; over the hangars' roofs, user Oct 29)
 function cessnaZone(R) {
   // (its own side: within reach of its airfield's tower, never within 700 of the sea's middle, short of the mountain)
   const A = airport(R), d0 = R ? -1 : 1, mid = (SEA0 + SEA1) / 2, edge = R ? SEA1 : SEA0, landW = R ? WORLD_W - SEA1 : SEA0;
@@ -37338,8 +37357,9 @@ function cessnaSmokeStep(f, dt) {
 // a Cessna or a 747 into a big ship (the shared hullStrike): its nose, middle and tail along its way; down it goes
 function trafficHull(f) {
   if (dryLand(f.x)) return;
-  const [hw] = TRAFFIC[f.kind].hit, d = f.dir || f.facing || 1;
-  if (hullStrike([[f.x + d * hw, f.y], [f.x, f.y], [f.x - d * hw, f.y]], f.kind === 'jet' ? 3 : 1.5, f.vx)) { f.ground = null; trafficDown(f); }
+  const [hw] = TRAFFIC[f.kind].hit, d = f.dir || f.facing || 1, P = [[f.x + d * hw, f.y], [f.x, f.y], [f.x - d * hw, f.y]];
+  if (P.some(([x, y]) => hangarSolid(x, y))) { f.ground = null; trafficDown(f); return; }   // (into a hangar's walls - user Oct 29)
+  if (hullStrike(P, f.kind === 'jet' ? 3 : 1.5, f.vx)) { f.ground = null; trafficDown(f); }
 }
 function trafficHits(f) {
   const [hw, hh] = TRAFFIC[f.kind].hit;
@@ -37849,12 +37869,35 @@ function landEdgeLock(x) {
 // footprint to AIR_W + 160. The launch pads: the pad's middle PAD_IN in from their footprint's sea end)
 const STRUCT_KINDS = { airport: { name: 'AIRPORT' }, pads: { name: 'LAUNCH PAD' } };
 const PAD_IN = 260;
+/* ---- (user Oct 29, the planes flying into the long hangar, its runway 27 m from it: "lets have a rule that it cant be that
+   close to a building so there is enough space. So when moving it, its not allowed to be that close") a runway's sea end
+   keeps runwayClear(y) from its coast, where its harbour's hangar stands: far enough that the traffic's own climb out
+   (TRAFFIC climb, lifting off `roll` in from the far end), its glide in (0.8 of it, touching down `stop` short of the far
+   end) and a taken plane's glide home (1 in 5, to 700 in) all pass over the hangar's roof with AIR_ROOM to spare. It goes
+   by the airport's height (a lower one needs more). airMinU: the nearest an airport may stand (its u); the default
+   airports stand there, a saved world's closer one is moved out to it (structsFit), and the editor won't drag one in ---- */
+function runwayClear(y) {
+  const need = y - HANGAR_ROOF() + AIR_ROOM, RW = AIR_W - 300;   // (the runway: from 160 in to AIR_W - 140 in)
+  let g = need / 0.2 - 700;
+  for (const T of Object.values(TRAFFIC)) g = Math.max(g, need / T.climb - (RW - T.roll), need / (0.8 * T.climb) - (RW - T.stop));
+  return Math.ceil(g);
+}
+const airMinU = o => Math.max(0, runwayClear(o.y) - 160);
+const AIR_U0 = airMinU({ y: LAND_Y });
 const STRUCT_DEF = [
-  { kind: 'airport', R: 0, u: 0, y: LAND_Y, w: AIR_W + 160 },
-  { kind: 'airport', R: 1, u: 0, y: LAND_Y, w: AIR_W + 160 },
-  { kind: 'pads', R: 0, u: AIR_W + 160, y: LAND_Y, w: 560 },
-  { kind: 'pads', R: 1, u: AIR_W + 160, y: LAND_Y, w: 560 },
+  { kind: 'airport', R: 0, u: AIR_U0, y: LAND_Y, w: AIR_W + 160 },
+  { kind: 'airport', R: 1, u: AIR_U0, y: LAND_Y, w: AIR_W + 160 },
+  { kind: 'pads', R: 0, u: AIR_U0 + AIR_W + 160, y: LAND_Y, w: 560 },
+  { kind: 'pads', R: 1, u: AIR_U0 + AIR_W + 160, y: LAND_Y, w: 560 },
 ];
+// a world's structures with each airport moved out to its clearance, and whatever stood in its way pushed on inland
+function structsFit(L) {
+  for (const a of L) if (a.kind === 'airport' && a.u < airMinU(a)) {
+    a.u = airMinU(a);
+    for (const q of L) if (q !== a && !!q.R === !!a.R && q.u < a.u + a.w && q.u + q.w > a.u) q.u = a.u + a.w;
+  }
+  return L;
+}
 const STRUCT_Y = [LAND_CEIL + 80, WATER_Y - 8];                // (a pad's height: never under the water, never past the ground's ceiling)
 function structsValid(L) { return Array.isArray(L) && L.length === STRUCT_DEF.length && L.every((o, i) => o && o.kind === STRUCT_DEF[i].kind && o.R === STRUCT_DEF[i].R && isFinite(o.u) && isFinite(o.y) && isFinite(o.w) && (o.own === undefined || o.own === -1 || o.own === 0 || o.own === 1)); }
 /* ---- (user Oct 28, 20:19-20:23: "we place structures in the world and we define whose faction those structures belong
@@ -38027,7 +38070,7 @@ function landTowersBuild() {
   for (const t of towersUsed()) if (ownerOf(t) === -1) add(t, -1);
 }
 let LAND_STRUCTS = STRUCT_DEF.map(o => Object.assign({}, o));
-try { const o = JSON.parse(localStorage.getItem('bd_land_structs') || 'null'); if (structsValid(o)) LAND_STRUCTS = o; } catch (e) { }
+try { const o = JSON.parse(localStorage.getItem('bd_land_structs') || 'null'); if (structsValid(o)) LAND_STRUCTS = structsFit(o); } catch (e) { }
 const structsUsed = () => NET.role === 'local' ? LAND_STRUCTS : STRUCT_DEF;
 const structsDefault = () => JSON.stringify(structsUsed()) === JSON.stringify(STRUCT_DEF);
 const structIn = (kind, R) => structsUsed().find(o => o.kind === kind && !!o.R === !!R);
@@ -38151,7 +38194,7 @@ function landLoad(o) {
   const fix = P => P.map(p => [+p[0], Math.round(clamp(+p[1], LAND_DY[0], LAND_DY[1])), ...p.slice(2)]);
   const old = LAND_STRUCTS.map(q => Object.assign({}, q));
   LAND_PTS = { L: fix(o.L), R: fix(o.R) };
-  if (o.S !== undefined) LAND_STRUCTS = o.S.map(q => Object.assign({}, q));
+  if (o.S !== undefined) LAND_STRUCTS = structsFit(o.S.map(q => Object.assign({}, q)));   // (an airport too near its harbour moved out - user Oct 29)
   landEdChanged(old, true); landPreview(false); landPreview(true);
 }
 const landEdOn = () => LAND && NET.role === 'local' && !!LAND_ED.btn && LAND_ED.btn.offsetParent !== null && !ui.title && !!land.cell;
@@ -38281,6 +38324,7 @@ const STRUCT_BOX_H = 70;                                          // (the box's 
 function structFree(o, u) {
   if (u < 0 || (u > 0 && u < DOCK_W + 40)) return false;          // (at the harbour, as today's airport, or clear of the dock area)
   if (u === 0 && o.kind !== 'airport') return false;
+  if (o.kind === 'airport' && u < airMinU(o)) return false;       // (its runway clear of the harbour's hangar - user Oct 29)
   if (u + o.w > cwW(o.R) - (extOf(o.R) ? 0 : LAND_TOWER_X) - 300) return false;   // (to its end of the world: in the world, as its u)   // (the world made bigger: on past the old end)
   for (const q of LAND_STRUCTS) if (q !== o && !!q.R === !!o.R && u < q.u + q.w + 40 && u + o.w > q.u - 40) return false;
   return true;
@@ -38378,9 +38422,10 @@ window.addEventListener('pointermove', e => {
 }, { capture: true, passive: true });
 // a structure moved to u (along its country, from its harbour) and its pad to y: only where it's free; the line shown
 function structDragTo(o, u, y) {
-  u = Math.round(u); if (u < DOCK_W + 40 && o.kind === 'airport') u = u < (DOCK_W + 40) / 2 ? 0 : DOCK_W + 40;
+  const y0 = o.y; o.y = Math.round(clamp(y, STRUCT_Y[0], STRUCT_Y[1]));
+  u = Math.round(u); if (o.kind === 'airport') u = Math.max(u, airMinU(o));   // (no nearer the harbour than its runway's clearance - user Oct 29)
   if (structFree(o, u)) o.u = u;
-  o.y = Math.round(clamp(y, STRUCT_Y[0], STRUCT_Y[1]));
+  else if (o.kind === 'airport' && o.u < airMinU(o)) o.y = y0;   // (lowered, it would need more room than it has here: it keeps its height)
   landPreview(!!o.R);
 }
 function structUp(e) {
@@ -39396,7 +39441,7 @@ function stepHeli(h, dt) {
 // (the ground under the helicopter's nose and tail is looked for inside the world: user Oct 25 - at the world's end its
 // tail hung over nothing, found no ground there, and it settled onto its tail)
 const landBelowIn = (x, y) => landBelow(clamp(x, 1, WORLD_W - 1), y);
-const heliGround = (x, y) => LAND && onLand(x) ? (lakeAt(x) ? Math.min(WATER_Y, landBelowIn(x, y)) : landBelowIn(x, y)) : Math.min(surfaceY(x), shipY(x, y), harbourTop(x, y));   // (at sea: the water, or a ship's top - user Oct 26, land on the container ship)
+const heliGround = (x, y) => LAND && onLand(x) ? (lakeAt(x) ? Math.min(WATER_Y, landBelowIn(x, y)) : landBelowIn(x, y)) : Math.min(surfaceY(x), shipY(x, y), harbourTop(x, y), hangarTopIn(x, x));   // (at sea: the water, or a ship's top - user Oct 26, land on the container ship)
 function rotorWash(h, dt) {
   rotorDownwash(h.x, h.y - (heliArt ? (heliMidY() - heliArt.topY) * HELI_K : 14), heliHalf(), h.spin || 0, h.vx || 0, dt, false);   // (the smoke in the air round it pushed away - 38-smoke-sim)
   if (!dryLand(h.x)) { rotorWashSea(h, dt); return; }   // (over the sea: spray)
