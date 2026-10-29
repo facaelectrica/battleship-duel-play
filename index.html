@@ -2685,8 +2685,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 209;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 11:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 211;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 11:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -3227,7 +3227,7 @@ function weaponState(p, wk) {
   if (m === 'sub') {
     const sb = subs[p];
     if (wk === 'light') return { f: 0, off: sb.state !== 'out' && sb.state !== 'docked', n: -1 };
-    if (wk === 'mine') return { f: (sb.mk || 0) / MINE_RELOAD, off: (sb.mines || 0) <= 0 || sb.state !== 'out', n: sb.mines || 0 };
+    if (wk === 'mine') return { f: MINE_RELOAD > 0 ? (sb.mk || 0) / MINE_RELOAD : 0, off: (sb.mines || 0) <= 0 || sb.state !== 'out', n: sb.mines || 0 };
     return { f: sb.tk / TORP_RELOAD, off: sb.torps <= 0, n: wk === 'torp' ? sb.torps : -1 };
   }
   if (m === 'tank') { const t = tanks[p], out = !t || t.state !== 'alive'; if (wk === 'smoke') return smokeBtn(t, SMOKE_SHIP_S, out); return wk === 'mg' ? { f: 0, off: out, n: -1 } : { f: out ? 0 : t.rk / TANK_RELOAD, off: out, n: -1 }; }   // (the tank's missiles never run out: no count)
@@ -5210,6 +5210,8 @@ function testHitAt(clientX, clientY) {
   const [x, y] = screenToWorld(clientX, clientY);
   if (LAND && contHit(x, y, 1, 0)) return true;                   // (a container: its own hit - user Oct 26)
   if (LAND && krClickAt(x, y)) return true;                       // (the kraken: the Lab's click - a torpedo striking there)
+  // (a mine: set off, as a round would - once it's armed, user Oct 29: "I should be able to blow a mine with lmb")
+  for (let i = mines.length - 1; i >= 0; i--) { const m = mines[i]; if (m.t >= MINE_ARM && !m.boomT && Math.hypot(m.x - x, m.y - y) < MINE_R + 6) { mines.splice(i, 1); detonateMine(m, null); return true; } }
   let owner = -1;
   for (const d of docks) if (harbourHit(d, x, y)) owner = d.player >= 0 ? 1 - d.player : 0;
   if (owner < 0) for (const sh of ships) if (sh && sh.state === 'afloat' && hitTest(sh, x, y) >= 0) owner = 1 - sh.id;
@@ -7942,7 +7944,8 @@ function drawDcharges(x0, x1) {
    torpedo, another blast. Each sub carries three (more at her pier). Contact sets it off as a depth charge going off
    right at the surface, with a heavier blow to whatever touched it; nearby mines go up with it. For the first
    moments, until it has floated clear of her, its own sub can't set it off; after that it's anybody's - yours too. */
-const mines = [], MINE_MAX = 10, MINE_RELOAD = 2.5, MINE_ARM = 2, MINE_R = 7;
+const mines = [], MINE_MAX = 10, MINE_RELOAD = 0,   // (no wait between them, user Oct 29: "so I can drop several together")
+  MINE_ARM = 2, MINE_R = 7;
 function layMine(sb) {
   if (!sb || sb.state !== 'out') return;
   if ((sb.mk || 0) > 0) return;
@@ -7976,6 +7979,8 @@ function mineContact(m, dt) {
   { const ms = msHitAt(m.x, m.y, R + 2); if (ms) return ['msub', ms]; }
   // (a big ship running onto it - user Oct 27: "Big ships should not ignore depth charges and mines")
   if (LAND) for (const cv of civShips) if (cv.state === 'sail' && Math.abs(m.x - cv.x) < civLen(cv) * 0.55 && [[0, R], [-R, 0], [R, 0], [0, 0]].some(([ox, oy]) => civHullHas(cv, m.x + ox, m.y + oy))) return ['civ', cv];   // (a research sub touching it: it goes off - user Oct 27)
+  // (user Oct 29: "The tiny jet boats should blow up if they hit a mine")
+  if (LAND) for (const j of jetboats) if (j.state === 'run' && !j.lake && Math.abs(m.x - j.x) < 13 + R && Math.abs(m.y - (j.y - 3)) < 8) return ['jet', j];
   for (const b of sailboats) if (b.state === 'sail' && Math.abs(m.x - b.x) < sailHalf(b) + R && (sailHullHit(b, m.x - R, m.y) || sailHullHit(b, m.x + R, m.y) || sailHullHit(b, m.x, m.y - R))) return ['sail', b];
   for (const pl of planes.concat(oldPlanes)) {
     if (!pl || (pl.state !== 'fly' && pl.state !== 'down') || pl.id === m.owner) continue;
@@ -8032,6 +8037,7 @@ function detonateMine(m, hit) {
     if (kind === 'ship') damageSection(o, sec, 1, m.x, m.y);           // (with the blast's own: two steps - badly holed, not sunk outright)
     else if (kind === 'sub') hitSub(o, sec, m.x, m.y);
     else if (kind === 'plane' && o.state === 'fly') downPlane(o);
+    else if (kind === 'jet') jetboatSink(o);
     else if (kind === 'civ' && o.state === 'sail') civHit(clamp(m.x, o.x - civLen(o) * 0.45, o.x + civLen(o) * 0.45), m.y + 4, 1, 0);   // (with the blast's own: two shells' worth)
   }
   // planes low over it are caught in the blast
@@ -12622,7 +12628,6 @@ uniform float u_nodir;      // 1 - SUN_DIRECT: no direct sun, all of the cloud i
 uniform vec4 u_fl;          // lightning on this cloud (flashBoost): the bolt's place from the cloud (x, y, z), its strength (0: none)
 uniform vec2 u_fls;         // its reach (46 S zl) and how low it lights (9 S zl)
 uniform float u_body;       // BODY LIGHT
-uniform float u_bh;         // the cloud's height over its base (BODY LIGHT's height shade)
 uniform int u_view;         // the debug VIEW (0 the picture; 1 LOBES, 2 BILLOWS, 3 LIGHT, 4 PUFFS): an id for the puff shader
 out vec4 o0; out vec4 o1;
 vec4 T(int i) { return texelFetch(u_d, ivec2(i & 255, i >> 8), 0); }
@@ -12698,6 +12703,13 @@ void main() {
     for (int q = 0; q < sn; q++) { int idx = s0 + q; vec4 t4 = T(idx >> 2); int m = idx & 3; float nb = m == 0 ? t4.x : m == 1 ? t4.y : m == 2 ? t4.z : t4.w;
       vec4 B = T(u_o.z + int(nb + 0.5) * 2); float ch = sphereChord(P, L, B.xyz, B.w); if (ch > 0.0) odSelf += ch / B.w; }
   }
+  float shE = shadowed(od) + (max(bodyRamp(odB), shadowed(odC)) - shadowed(od)) * kB;   // (BODY LIGHT: the body's soft shade, and other clouds' shadows)
+  float castK = SH * max(shE, u_nodir), sh = castK;
+  if (odSelf > 0.0) sh = max(sh, SELF * shadowed(odSelf * 0.8));
+  float shk = v > 0.15 ? 1.0 - sh * 0.5 : 1.0;
+  v -= sh * 0.5 * max(0.0, v - 0.15);
+  v += AMB * 0.3 * (n.y * 0.5 + 0.5) - AMB * 0.12;
+  if (under > 0.0) v += under * max(0.0, -n.y) * 0.95 * (1.0 - castK * 0.6);
   // the crease where two lobes meet (CREASE)
   float side = 1.0 - abs(n.z), open = 1.0;
   if (side > 0.05) {
@@ -12708,18 +12720,6 @@ void main() {
       float ex = (qq.x - a.x) / (a.w * 1.2), ey = (qq.y - a.y) / (b.x * 1.2), e = ex * ex + ey * ey; if (e < m) m = e; }
     open = smoothstep(0.75, 1.15, m);
   }
-  // (BODY LIGHT's height shade, Oct 29 - the user: a sunset tower's lower half came out lit and speckled, "it doesn't take into
-  // account that it's a big shape ... we have this clear bottom of the cloud, so why not say that everything higher gets
-  // shadowed". A tall cloud is lit along its bottom only, as the lightning lights it (low on the cloud): everything higher is in
-  // the body's shade, apart from a thin rim on its outline (open to the sky, facing out))
-  float hsB = smoothstep(0.05, 0.18, P.y / max(1.0, u_bh)) * (1.0 - 0.75 * open * side * side);
-  float shE = shadowed(od) + (max(max(bodyRamp(odB), hsB), shadowed(odC)) - shadowed(od)) * kB;   // (BODY LIGHT: the body's shade, and other clouds' shadows)
-  float castK = SH * max(shE, u_nodir), sh = castK;
-  if (odSelf > 0.0) sh = max(sh, SELF * shadowed(odSelf * 0.8));
-  float shk = v > 0.15 ? 1.0 - sh * 0.5 : 1.0;
-  v -= sh * 0.5 * max(0.0, v - 0.15);
-  v += AMB * 0.3 * (n.y * 0.5 + 0.5) - AMB * 0.12;
-  if (under > 0.0) v += under * max(0.0, -n.y) * 0.95 * (1.0 - castK * 0.6);
   openR = open;
   v -= (1.0 - open) * side * CREASE * max(0.25, v);
   float rimAdd = 0.0;
@@ -12734,7 +12734,7 @@ void main() {
   if (HI > 0.0 && q >= 1.25 - 0.25 * HI && (rimAdd > 0.12 || u_p2.x > 0.5 || u_p2.y > 0.3)) tone = 5;
   int outT = castK > 0.45 ? min(tone, ln.y > 0.3 ? 1 : 0) : tone;
   float gk = u_p2.z; int lo = 0;
-  if (gk > 0.01) { float gy = ln.y, f = gk * (0.12 + 0.62 * max(0.0, -gy) + 0.2 * (1.0 - abs(gy))) * (0.35 + 0.65 * openR) * (1.0 - hsB * kB); lo = int(min(3.0, floor(f * 4.2))); outT = max(outT, lo); }
+  if (gk > 0.01) { float gy = ln.y, f = gk * (0.12 + 0.62 * max(0.0, -gy) + 0.2 * (1.0 - abs(gy))) * (0.35 + 0.65 * openR); lo = int(min(3.0, floor(f * 4.2))); outT = max(outT, lo); }
   float C5 = 5.0 * CT, LVf = (q - jit * JITTER) * 5.0;
   bool free_ = outT == max(lo, int(clamp(floor(q * 5.0), 0.0, 4.0))) && tone != 5 && !(castK > 0.45) && rimAdd < 0.05;
   float lx = 0.5 * L.x * shk * C5, lz = 0.5 * L.z * shk * C5;
@@ -12778,7 +12778,7 @@ function glLitSetup() {
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
   GLR.lprog = p; GLR.lU = {};
-  for (const k of ['u_d', 'u_o', 'u_nc', 'u_L', 'u_under', 'u_W', 'u_p0', 'u_p1', 'u_p2', 'u_shade', 'u_nodir', 'u_fl', 'u_fls', 'u_view', 'u_body', 'u_bh']) GLR.lU[k] = gl.getUniformLocation(p, k);
+  for (const k of ['u_d', 'u_o', 'u_nc', 'u_L', 'u_under', 'u_W', 'u_p0', 'u_p1', 'u_p2', 'u_shade', 'u_nodir', 'u_fl', 'u_fls', 'u_view', 'u_body']) GLR.lU[k] = gl.getUniformLocation(p, k);
   gl.useProgram(p); gl.uniform1i(GLR.lU.u_d, 11); gl.useProgram(GLR.prog);
   GLR.lvao = gl.createVertexArray(); GLR.ltf = gl.createTransformFeedback();
   gl.bindVertexArray(GLR.vao);
@@ -12816,7 +12816,7 @@ function glLitRun(b, lit, U) {
   gl.useProgram(GLR.lprog); GLR.cur.prog = 7; const u = GLR.lU;
   gl.uniform4i(u.u_o, U.lo0, U.nl, U.bo0, U.co0); gl.uniform1i(u.u_nc, U.nc);
   gl.uniform3f(u.u_L, U.L[0], U.L[1], U.L[2]); gl.uniform1f(u.u_under, U.under); gl.uniform3f(u.u_W, U.W[0], U.W[1], U.W[2]);
-  gl.uniform4f(u.u_p0, U.p0[0], U.p0[1], U.p0[2], U.p0[3]); gl.uniform4f(u.u_p1, U.p1[0], U.p1[1], U.p1[2], U.p1[3]); gl.uniform4f(u.u_p2, U.p2[0], U.p2[1], U.p2[2], U.p2[3]); gl.uniform1f(u.u_shade, U.shade); gl.uniform1f(u.u_nodir, U.nodir || 0); const fl = U.fl || [0, 0, 0, 0], fs = U.fls || [1, 1]; gl.uniform4f(u.u_fl, fl[0], fl[1], fl[2], fl[3]); gl.uniform2f(u.u_fls, fs[0], fs[1]); gl.uniform1i(u.u_view, U.view | 0); gl.uniform1f(u.u_body, U.body || 0); gl.uniform1f(u.u_bh, U.bh || 1);
+  gl.uniform4f(u.u_p0, U.p0[0], U.p0[1], U.p0[2], U.p0[3]); gl.uniform4f(u.u_p1, U.p1[0], U.p1[1], U.p1[2], U.p1[3]); gl.uniform4f(u.u_p2, U.p2[0], U.p2[1], U.p2[2], U.p2[3]); gl.uniform1f(u.u_shade, U.shade); gl.uniform1f(u.u_nodir, U.nodir || 0); const fl = U.fl || [0, 0, 0, 0], fs = U.fls || [1, 1]; gl.uniform4f(u.u_fl, fl[0], fl[1], fl[2], fl[3]); gl.uniform2f(u.u_fls, fs[0], fs[1]); gl.uniform1i(u.u_view, U.view | 0); gl.uniform1f(u.u_body, U.body || 0);
   gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, GLR.ltf);
   gl.bindBufferRange(gl.TRANSFORM_FEEDBACK_BUFFER, 0, b.vbo, 0, lit.n * 32);
   gl.enable(gl.RASTERIZER_DISCARD);
@@ -15535,7 +15535,7 @@ const bodyRamp = od => clamp((od * 0.15 - 0.22) * 1.6, 0, 1);   // (GL_LVS)
 // lz: tone steps per unit of normal - so a puff can be drawn with the light running across it (11-drawing.js discShade).
 // free: the tone is the light's own (not a shadow's, the highlight's); lo: the sunset glow's floor; bk: the sun behind)
 const LV = { f: 0, free: false, lo: 0, lx: 0, ly: 0, lz: 0, bk: 0 };
-let LV_BODYK = 0, LV_BH = 1;   // (BODY LIGHT: the share of it for the cloud being lit - c.bodyK, set by lightValue's callers)
+let LV_BODYK = 0;   // (BODY LIGHT: the share of it for the cloud being lit - c.bodyK, set by lightValue's callers)
 function lightValue(it, own, lob, L, odOther, odSelf, under) {
   let nx = it.nx, ny = it.ny, nz = it.nz, rimAdd = 0;
   // the sun close behind a cloud (L mostly into the screen): light by the lobes' smooth normals, not each puff's own, or the
@@ -15557,17 +15557,7 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
   const odC = od, kB = bodyL;
   const grp = own >= 0 && lob[own] ? lob[own].grp : 0;                     // (the lobes of one smear are one shape: they don't shade each other)
   for (let k = 0; k < lob.length; k++) { const l = lob[k]; if (kB > 0 && l.rx) odB += softChord(it.x, it.y, pbzz, L, l, 2.6); if (k !== own && !(grp && l.grp === grp)) od += chord(it.x, it.y, it.zz, L, l) / l.rb; }
-  const side = 1 - Math.abs(nz);
-  let open = 1;
-  if (side > 0.05) {
-    const nl = Math.hypot(nx, ny) || 1, d = 2.5 + (it.r || 2) * 1.2, qx = it.x + nx / nl * d, qy = it.y + ny / nl * d;
-    let m = 9;
-    for (let k = 0; k < lob.length; k++) { const l = lob[k]; if (!l.rx || k === own) continue; const ex = (qx - l.x) / (l.rx * 1.2), ey = (qy - l.y) / (l.ry * 1.2), e = ex * ex + ey * ey; if (e < m) m = e; }   // (a lobe's body reaches past its ellipse by its billows: a fifth more)
-    open = smoothstep(0.75, 1.15, m);
-  }
-  // (BODY LIGHT's height shade, Oct 29: a tall cloud lit along its bottom only, higher up the body's shade but for a rim - GL_LVS hsB)
-  const hsB = smoothstep(0.05, 0.18, it.y / Math.max(1, LV_BH)) * (1 - 0.75 * open * side * side);
-  const shE = shadowed(od) + (Math.max(bodyRamp(odB), hsB, shadowed(odC)) - shadowed(od)) * kB;   // (BODY LIGHT - GL_LVS)
+  const shE = shadowed(od) + (Math.max(bodyRamp(odB), shadowed(odC)) - shadowed(od)) * kB;   // (BODY LIGHT - GL_LVS)
   const cast = P.shadow * Math.max(shE, 1 - SUN_DIRECT);   // (no direct sun: all of it in the shade - SUN_DIRECT)
   let sh = cast;
   if (odSelf) sh = Math.max(sh, P.self * shadowed(odSelf * 0.8));
@@ -15579,6 +15569,14 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
   // normal); if that lands inside another lobe the edge is inside the cloud, closed off from the sky. Such a face gets no
   // edge glow (below) and, whatever the sun does, CREASE of its light taken away: the sky can't reach it (user Oct 27, 21:44:
   // by day the crease between two lobes was white, "I would expect it to be in shadow")
+  const side = 1 - Math.abs(nz);
+  let open = 1;
+  if (side > 0.05) {
+    const nl = Math.hypot(nx, ny) || 1, d = 2.5 + (it.r || 2) * 1.2, qx = it.x + nx / nl * d, qy = it.y + ny / nl * d;
+    let m = 9;
+    for (let k = 0; k < lob.length; k++) { const l = lob[k]; if (!l.rx || k === own) continue; const ex = (qx - l.x) / (l.rx * 1.2), ey = (qy - l.y) / (l.ry * 1.2), e = ex * ex + ey * ey; if (e < m) m = e; }   // (a lobe's body reaches past its ellipse by its billows: a fifth more)
+    open = smoothstep(0.75, 1.15, m);
+  }
   openR = open;
   v -= (1 - open) * side * (P.crease ?? 0.4) * Math.max(0.25, v);
   if (L[2] < 0) {
@@ -15614,7 +15612,7 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
   const gk = (P.glow ?? 1) * E.sunset;
   // (and the glow's floor stays out of the creases: a face a lobe in front hides from the sky isn't lit by the sky - user Oct 27, 21:44)
   let lo = 0;
-  if (gk > 0.01) { const gy = it.lny ?? ny, f = gk * (0.12 + 0.62 * Math.max(0, -gy) + 0.2 * (1 - Math.abs(gy))) * (0.35 + 0.65 * openR) * (1 - hsB * kB); lo = Math.min(3, Math.floor(f * 4.2)); out = Math.max(out, lo); }
+  if (gk > 0.01) { const gy = it.lny ?? ny, f = gk * (0.12 + 0.62 * Math.max(0, -gy) + 0.2 * (1 - Math.abs(gy))) * (0.35 + 0.65 * openR); lo = Math.min(3, Math.floor(f * 4.2)); out = Math.max(out, lo); }
   // (LV: the light's slope - d(tone)/d(normal): the sun's 0.5·L, the sky's AMBIENT and the light from under the deck on ny -
   // for a puff whose tone is the light's own; in a cast shadow, the highlight or an edge's glow it stays one flat tone)
   const C5 = 5 * P.contrast * E.contrast;
@@ -15803,7 +15801,7 @@ function placeTubes(c, t) {
 }
 function drawTubes(c, ax) {
   if (!c.tubes) return;
-  LV_BODYK = c.bodyK ?? 0; LV_BH = c.h || 1;
+  LV_BODYK = c.bodyK ?? 0;
   const L = c.L, X = screenX(c), lit = flash.k > 0 && flash.lay === c.lay;
   for (const T of c.tubes) for (const list of [T.fills, T.puffs]) for (const it of list) {
     const r = it.r * (1 - it.cut); if (r < 0.6) continue;
@@ -15901,7 +15899,7 @@ function cullBox(c, axReal, ayReal) {
   const w = c.cbw || (c.cbw = [0, 0, 0, 0]); w[0] = -axReal - Mw; w[1] = CW - axReal + Mw; w[2] = ayReal - H - Mw; w[3] = ayReal + Mw;
 }
 function lobeTones(c) {
-  LV_BODYK = c.bodyK ?? 0; LV_BH = c.h || 1;
+  LV_BODYK = c.bodyK ?? 0;
   const L = c.L, lob = c.lob; c.ltones = [];
   for (let j = 0; j < lob.length; j++) {
     const l = lob[j], t = [];
@@ -15948,7 +15946,7 @@ function drawLobes(c, ax, ayO) {
 }
 const LOBE_TMP = new GLPuffs();
 function drawPaint(c, ax) {
-  LV_BODYK = c.bodyK ?? 0; LV_BH = c.h || 1;
+  LV_BODYK = c.bodyK ?? 0;
   for (const p of c.paint) {
     const u = p.age / p.life, r = p.r * Math.min(1, p.age * 4) * (u > 0.75 ? 1 - (u - 0.75) / 0.25 : 1);
     if (r < 0.6) continue;
@@ -16016,7 +16014,7 @@ function litRun(c, pb) {
   for (const oc of c.casters) for (const l of oc.wl) { D[o] = l.x; D[o + 1] = l.y; D[o + 2] = l.z; D[o + 3] = l.rx; D[o + 4] = l.ry; D[o + 5] = l.rz; D[o + 6] = l.rb; D[o + 7] = 0; o += 8; }
   lit.dlen = o;
   const U = { lo0: lit.lo0, nl: lit.nl, bo0: lit.bo0, co0: lit.co0, nc, L, under: c.under || 0, W: [screenX(c), H - c.y, c.wz],
-    p0: [P.shadow, P.self, P.amb, P.crease ?? 0.4], nodir: 1 - SUN_DIRECT, view, body: (P.bodyL ?? 0) * (c.bodyK ?? 0), bh: c.h || 1,
+    p0: [P.shadow, P.self, P.amb, P.crease ?? 0.4], nodir: 1 - SUN_DIRECT, view, body: (P.bodyL ?? 0) * (c.bodyK ?? 0),
     fl: c.flit ? [flash.x - screenX(c), c.y - flash.y, 40 * S * c.lay.zl, flash.k] : null, fls: [46 * S * c.lay.zl, 9 * S * c.lay.zl], p1: [P.contrast * E.contrast, P.expo, P.jitter, P.hi ?? 1], p2: [E.night, E.dusk, (P.glow ?? 1) * E.sunset, P.mass], shade: P.shade };
   glLitRun(pb, lit, U);
   pb.lk = c.lk; lit.done = lit.geo; FTV.bLit = (FTV.bLit || 0) + 1;
@@ -16044,7 +16042,7 @@ function drawCloudLit(c, ax, ay, live) {
 }
 // (the planes in deck 1 ask for the tone under them: a lit batch holds no tones in JS - the puff's light worked out here, once)
 function cpuToneOf(c, it) {
-  LV_BODYK = c.bodyK ?? 0; LV_BH = c.h || 1;
+  LV_BODYK = c.bodyK ?? 0;
   const L = c.L; let odSelf = 0;
   if (P.self > 0) { const own = it.fill ? it : it.bill; for (const b of own.nbr || []) { const ch = sphereChord(it.x, it.y, it.zz, L, b.x, b.y, b.zz, b.br); if (ch) odSelf += ch / b.br; } }
   let odOther = 0;
@@ -22650,10 +22648,10 @@ function cpuSub0(B, dt) {
     sb.depthT = clamp(WATER_Y + 80, WATER_Y, subMaxY(sb.x));
     const rise = Math.max(0.3, (sb.y - WATER_Y) / 140), tx = E.ship.x + E.ship.vx * rise * T.lead, dx = tx - sb.x;
     cpuDrive(B, Math.abs(dx) > 14 ? Math.sign(dx) : 0);
-    if (Math.abs(dx) < T.subTol && sb.y > WATER_Y + 35 && (sb.mines || 0) > 0 && !(sb.mk > 0) && subClear(sb) && !sb.turn && Math.random() < dt * (2 + 4 * B.level)) { layMine(sb); cpuCount(p, 'mine'); }
+    if (Math.abs(dx) < T.subTol && sb.y > WATER_Y + 35 && (sb.mines || 0) > 0 && !(sb.mk > 0) && subClear(sb) && !sb.turn && Math.random() < dt * (2 + 4 * B.level)) { layMine(sb); sb.mk = 2.5; cpuCount(p, 'mine'); }   // (the CPU keeps its old pace: one each 2.5 s)
     // a mine in her path: the battleship coming this way, still well off (and not off its own pier)
     { const gap = Math.abs(E.ship.x - sb.x), coming = Math.sign(E.ship.vx) === Math.sign(sb.x - E.ship.x) && Math.abs(E.ship.vx) > 8;
-      if (coming && gap > 180 && gap < 650 && (sb.mines || 0) > 0 && !(sb.mk > 0) && subClear(sb) && Math.random() < dt * 0.15 * (1 + B.level)) { layMine(sb); cpuCount(p, 'mine'); } }
+      if (coming && gap > 180 && gap < 650 && (sb.mines || 0) > 0 && !(sb.mk > 0) && subClear(sb) && Math.random() < dt * 0.15 * (1 + B.level)) { layMine(sb); sb.mk = 2.5; cpuCount(p, 'mine'); } }
     return;
   }
   if (E.sub) {
