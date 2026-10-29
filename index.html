@@ -2664,8 +2664,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 199;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 07:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 200;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 08:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6182,6 +6182,16 @@ function damageSection(sh, i, steps, hx, hy, dent) {
     return;
   }
   sh.fire[i] = Math.min(1.4, 0.45 + 0.32 * sh.lvl[i]);
+  // (user Oct 29: "make sure you have the smudge black on the fire area on the actual ship, as we have on the cloud test": a
+  // section that burns is charred where its fire stands - the middle of the section, its deck - as well as where it was hit)
+  if (SECTION_FIRE[i] > 0) {
+    const col = Math.round((SECTION_FR[i] + SECTION_FR[i + 1]) / 2 * SHIP_SRC_W), top = (sh.dead[i] ? img.topD : img.topI)[clamp(col, 0, SHIP_SRC_W - 1)];
+    if (!sh.scorch.some(q => Math.abs(q.x - col) < 45 && q.fire)) {
+      sh.scorch.push({ x: col, y: clamp(top + 10, 20, SHIP_WL_ROW + 10), r: rnd(70, 95), seed: Math.random() * 100, fire: true });
+      if (sh.scorch.length > 16) sh.scorch.shift();
+      rebuildShipArt(sh);
+    }
+  }
   if (!sh.dead[i]) { sh.dead[i] = true; rebuildShipArt(sh); }
   const [x, y] = deckPoint(sh, i, 0.5);
   spawnDebris(x, y, 4 + 3 * sh.lvl[i], sh.vx);
@@ -21202,6 +21212,52 @@ function drawSurfaceLight() {
 }
 
 const FLASH_RGB = [255, 236, 180];
+/* ---- a burning ship in front of her own fire and smoke (user Oct 29: "why not do a mask based on the ship in the fire
+   layer, so it's cut off by that mask instead of rendering a second ship" ... "All the big ships, the battleship, the cruise
+   ships, the oil tanker, Titanic etc will have a mask"). The smoke and the fire are drawn after the world (over the front
+   clouds, so trails and columns rise in front of them, and untouched by the world's night and fog tint - the flames keep
+   their glow). Where a ship that is burning or smouldering is on the screen, they are drawn into a layer of their own first,
+   every such ship's outline (her own art, at her own pose: tilt, harbour clip, guns) is cut out of it, and what's left goes
+   on the screen: the ship, drawn and tinted in the world, shows through, in front of them. With no burning ship in the view
+   (most frames) they are drawn straight on the screen as before, at no cost. SHIPCUT = false: off, to compare. ---- */
+let SHIPCUT = true, cutCv = null;
+function cutLayer() {
+  if (!cutCv) cutCv = makeLayer(bw, bh);
+  if (cutCv.width !== bw || cutCv.height !== bh) { cutCv.width = bw; cutCv.height = bh; }
+  const c = cutCv.getContext('2d'); c.imageSmoothingEnabled = false; return c;
+}
+const shipBurns = sh => sh.fire.some(f => f > 0) || sh.lvl.some((l, i) => l - (sh.dent[i] || 0) > 0);
+// the outlines that cut this view's smoke and fire: the battleships and the big ships that are burning, on the screen
+function shipCutters(x0, x1) {
+  const out = [];
+  for (const sh of ships) {
+    if (sh.state !== 'afloat' || sh.moored || sh.x + SHIP_L < x0 || sh.x - SHIP_L > x1 || !shipBurns(sh)) continue;
+    out.push(() => { const cl = harbourClip(sh); drawShip(sh); drawGuns(sh); if (cl) C.restore(); });
+  }
+  if (LAND && civShips.length) for (const c of civShips) {
+    if (c.state === 'gone' || !c.fire.some(f => f > 0)) continue;
+    const K = CIV[c.kind], L = civArt(c).width * K.k;
+    if (c.x + L < x0 - 40 || c.x - L > x1 + 40) continue;
+    out.push(() => drawCivShip(c, x0, x1, true));
+  }
+  return out;
+}
+function shipCut(x0, x1, draw) {
+  const cut = SHIPCUT && GLR.on ? shipCutters(x0, x1) : null;
+  if (!cut || !cut.length) { draw(); return; }
+  const main = C, lc = cutLayer(), x = VSX, w = VWP;
+  lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(x, 0, w, bh); lc.setTransform(main.getTransform());
+  C = lc; fsLast = null;
+  try {
+    draw();
+    lc.globalCompositeOperation = 'destination-out';
+    for (const f of cut) f();
+  } finally {
+    lc.globalCompositeOperation = 'source-over'; lc.globalAlpha = 1;
+    C = main; fsLast = null;
+  }
+  main.save(); main.setTransform(1, 0, 0, 1, 0, 0); main.drawImage(lc.canvas, x, 0, w, bh, x, 0, w, bh); main.restore();
+}
 function renderOverlays() {
   const x0 = CAMPX / SV, x1 = x0 + VWW;
   const ema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
@@ -21217,7 +21273,7 @@ function renderOverlays() {
   ot = ema('ovLight', ot);
   // smoke and fire pixels grow with the zoom, like every other sprite
   SMK = FPX = Math.max(2, Math.round(2.4 * SV));
-  if (skyNewOn) guardDraw('newsmoke', skyNewSmoke); else drawSmoke(x0, x1);
+  shipCut(x0, x1, () => { if (skyNewOn) guardDraw('newsmoke', skyNewSmoke); else drawSmoke(x0, x1); });   // (a burning ship in front of her own smoke: shipCut)
   ot = ema('ovSmoke', ot);
   drawWclouds(x0, x1);
   drawAirStreaks(x0, x1);                                   // (the wind, faintly, everywhere in the sky)
@@ -21337,7 +21393,7 @@ function renderOverlays() {
     C.restore();
   }
   ot = ema('ovMid', ot);
-  drawFire(x0, x1); ot = ema('ovFire', ot);
+  shipCut(x0, x1, () => drawFire(x0, x1)); ot = ema('ovFire', ot);   // (and of her own fire)
   drawSailsOver(x0, x1);                         // the yachts sit in front of the warships' smoke and fire
   ot = ema('ovSails', ot);
   // embers: single pixels riding the wind
@@ -27112,7 +27168,9 @@ function stepCivShips(dt) {
     for (let i = 0; i < c.fire.length; i++) if (c.fire[i] > 0 && c.fire[i] < 1) c.fire[i] = Math.min(1, c.fire[i] + dt * 0.012);
     if (!SIM_ONLY) c.fire.forEach((f, i) => {
       if (!f) return;
-      const [x, y] = civHalfPoint(c, (i + 0.5) / K.n * A.width, K.wl - 12, A, K);
+      // (Oct 29: the fire stands on her, at the top of her drawing there - it was 12 rows above her waterline, inside her hull:
+      // with the hull now in front of her own fire and smoke (shipCut, 47-render-overlays.js) it would have been hidden)
+      const fc = Math.round((i + 0.5) / K.n * A.width), [x, y] = civHalfPoint(c, fc, Math.min(civTops(A, K)[clamp(fc, 0, A.width - 1)] + 3, K.wl - 12), A, K);
       if (y > WATER_Y + 2) return;
       if (Math.random() < dt * 10 * f * fwFlames()) spawnFlame(x + rnd(-8, 8), y - rnd(0, 6), rnd(-6, 6), -rnd(25, 55), 1.2, rnd(3, 6), 1.8);
       if (Math.random() < dt * 5 * (0.3 + 0.7 * f)) spawnSmoke(x, y - 8, { rise: true, dark: 0, r: rnd(4, 7), grow: 5, lift: 30, vx: rnd(-6, 6), vy: -rnd(20, 40), life: rnd(5, 7), alpha: 0.6, stream: smStream(c, 'fire') });
@@ -27243,51 +27301,67 @@ function civTearEdge(c, bx, top, bot, src, ox, oy, s) {
     C.fillRect(bx + jag(k) - w, y, w * 2, st + 1);
   }
 }
+// the top of her drawing in each column (the first row with paint), down to her waterline - where her fires stand
+function civTops(A, K) {
+  if (A._tops && A._tops.wl === K.wl) return A._tops;
+  const W = A.width, H = A.height, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const x2 = cv.getContext('2d'); x2.drawImage(A, 0, 0);
+  const d = x2.getImageData(0, 0, W, H).data, t = new Int16Array(W);
+  for (let x = 0; x < W; x++) { let y = 0; while (y < K.wl && !d[(y * W + x) * 4 + 3]) y++; t[x] = y; }
+  t.wl = K.wl; A._tops = t; return t;
+}
 function drawCivShips(x0, x1) {
   if (!LAND || !civShips.length) return;
   if (!trafficArt) buildTrafficArt();
   for (const c of civShips) {
     if (c.state === 'gone') continue;
-    const K = CIV[c.kind], A = civArt(c), L = A.width * K.k;
+    const K = CIV[c.kind], L = civArt(c).width * K.k;
     if (c.x + L < x0 - 40 || c.x - L > x1 + 40) continue;
-    const s = K.k * SV, src = c.face > 0 ? A : (A._flip || (A._flip = flipCanvas(A))), I = scaled(src, s, true);
-    C.save(); C.translate(PX(c.x), PY(civY(c))); C.rotate(c.a + c.tilt);
-    const ox = -Math.round(I.width / 2), oy = -Math.round(K.wl * s);
-    const D = scaled(darkArt(src), s, true), sw = I.width / K.n;
-    const hull = () => {
-      C.drawImage(I, ox, oy);
-      if (c.kind === 'container') drawShipCargo(c, ox, oy, s, A.width);
-      if (linerOn(c)) drawLinerPieces(c, ox, oy, s, A.width);   // (her masts and funnels, while they're on her - 50-land-linerparts)   // (her boxes: things of their own - 50-land-crane)
-      // her damage: each hurt section blackened, the more the worse; a wreck all of her, dark
-      if (c.state === 'wreck') { C.globalAlpha = 0.7; C.drawImage(D, ox, oy); C.globalAlpha = 1; }
-      else if (c.sec.some(v => v < K.hp)) C.drawImage(scaled(civCharArt(c, src), s, true), ox, oy);   // (smooth charring along her)
-      civLitLook(src, s, ox, oy, PX(c.x));                                // (her night shape, moon and sun rims)
-    };
-    if (c.brk == null) hull();
-    else {
-      // broken in two at the section that gave (user Oct 26, as the battleship): each half turned about the break at
-      // her waterline, both ends rising, a little apart - each half where it is (c.hv: riding her down, or settled
-      // on the floor by itself - user Oct 27, 14a)
-      const jb = c.face > 0 ? c.brk : K.n - 1 - c.brk, bx = ox + Math.round((jb + 0.5) * sw), g = Math.round((c.bend || 0) * 8 * SV);
-      for (const side of [-1, 1]) {
-        const h = c.hv && c.hv[side < 0 ? 0 : 1];
-        C.save();
-        if (h) { C.rotate(-(c.a + c.tilt)); C.translate(PX(h.x) - PX(c.x), PY(h.y) - PY(civY(c))); C.rotate(h.a); C.translate(side * g - bx, 0); }   // (out of her whole frame, into the half's own)
-        else { C.translate(bx + side * g, 0); C.rotate(-side * (c.bend || 0)); C.translate(-bx, 0); }
-        civTearPath(c, bx, oy - 4, oy + I.height + 8, side < 0 ? ox - 2 : ox + I.width + 2); C.clip();
-        hull();
-        // the torn edge: burnt black and ragged
-        civTearEdge(c, bx, oy - 4, oy + I.height + 8, src, ox, oy, s);
-        C.restore();
-      }
-    }
-    C.restore(); drawLinerRigging(c, x0, x1); if (c.state === 'sail') shipNavLights(c, L); C.save(); C.translate(PX(c.x), PY(civY(c))); C.rotate(c.a + c.tilt);   // (her navigation lights)
-    // (her cabins and portholes lit at night)
-    { const L = cabinLit(), Wn = L > 0.05 && c.state === 'sail' ? (windowsArt(src) || windowsArtDots(src)) : null; if (Wn) { C.globalAlpha = L; C.drawImage(scaled(Wn, s, true), ox, oy); } }
-    C.globalAlpha = 1;
-    C.restore();
+    drawCivShip(c, x0, x1, false);
   }
   drawLinerLoose(x0, x1);                                          // (her pieces torn off: falling, in the water, on the bottom)
+}
+// one big ship (cut: her outline alone - the hull, her cargo and her liner pieces, without her charring, rims, rigging or
+// lights - to cut her out of the smoke and fire in front of her: shipCut, 47-render-overlays.js)
+function drawCivShip(c, x0, x1, cut) {
+  const K = CIV[c.kind], A = civArt(c), L = A.width * K.k;
+  const s = K.k * SV, src = c.face > 0 ? A : (A._flip || (A._flip = flipCanvas(A))), I = scaled(src, s, true);
+  C.save(); C.translate(PX(c.x), PY(civY(c))); C.rotate(c.a + c.tilt);
+  const ox = -Math.round(I.width / 2), oy = -Math.round(K.wl * s);
+  const D = scaled(darkArt(src), s, true), sw = I.width / K.n;
+  const hull = () => {
+    C.drawImage(I, ox, oy);
+    if (c.kind === 'container') drawShipCargo(c, ox, oy, s, A.width);
+    if (linerOn(c)) drawLinerPieces(c, ox, oy, s, A.width);   // (her masts and funnels, while they're on her - 50-land-linerparts)   // (her boxes: things of their own - 50-land-crane)
+    // her damage: each hurt section blackened, the more the worse; a wreck all of her, dark
+    if (cut) return;                                                // (the outline alone: shipCut)
+    if (c.state === 'wreck') { C.globalAlpha = 0.7; C.drawImage(D, ox, oy); C.globalAlpha = 1; }
+    else if (c.sec.some(v => v < K.hp)) C.drawImage(scaled(civCharArt(c, src), s, true), ox, oy);   // (smooth charring along her)
+    civLitLook(src, s, ox, oy, PX(c.x));                                // (her night shape, moon and sun rims)
+  };
+  if (c.brk == null) hull();
+  else {
+    // broken in two at the section that gave (user Oct 26, as the battleship): each half turned about the break at
+    // her waterline, both ends rising, a little apart - each half where it is (c.hv: riding her down, or settled
+    // on the floor by itself - user Oct 27, 14a)
+    const jb = c.face > 0 ? c.brk : K.n - 1 - c.brk, bx = ox + Math.round((jb + 0.5) * sw), g = Math.round((c.bend || 0) * 8 * SV);
+    for (const side of [-1, 1]) {
+      const h = c.hv && c.hv[side < 0 ? 0 : 1];
+      C.save();
+      if (h) { C.rotate(-(c.a + c.tilt)); C.translate(PX(h.x) - PX(c.x), PY(h.y) - PY(civY(c))); C.rotate(h.a); C.translate(side * g - bx, 0); }   // (out of her whole frame, into the half's own)
+      else { C.translate(bx + side * g, 0); C.rotate(-side * (c.bend || 0)); C.translate(-bx, 0); }
+      civTearPath(c, bx, oy - 4, oy + I.height + 8, side < 0 ? ox - 2 : ox + I.width + 2); C.clip();
+      hull();
+      // the torn edge: burnt black and ragged
+      if (!cut) civTearEdge(c, bx, oy - 4, oy + I.height + 8, src, ox, oy, s);
+      C.restore();
+    }
+  }
+  C.restore(); if (cut) return; drawLinerRigging(c, x0, x1); if (c.state === 'sail') shipNavLights(c, L); C.save(); C.translate(PX(c.x), PY(civY(c))); C.rotate(c.a + c.tilt);   // (her navigation lights)
+  // (her cabins and portholes lit at night)
+  { const L = cabinLit(), Wn = L > 0.05 && c.state === 'sail' ? (windowsArt(src) || windowsArtDots(src)) : null; if (Wn) { C.globalAlpha = L; C.drawImage(scaled(Wn, s, true), ox, oy); } }
+  C.globalAlpha = 1;
+  C.restore();
 }
 
 /* ---- an oil spill (user Oct 25 late: "if that one gets destroyed, it spills black into the ocean that spreads and
@@ -39727,6 +39801,7 @@ async function start(data) {
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
   };
   // (OPEN WORLD: the kraken - tools/kraken.mjs)
+  Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
