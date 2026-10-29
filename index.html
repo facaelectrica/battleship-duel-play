@@ -2993,8 +2993,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 252;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 16:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 253;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 16:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12442,7 +12442,7 @@ function smokeSpans(nx, ny, cell, u, v, p) {
   const nxt = SG.next, act = SG.active, M = 5;
   nxt.fill(0);
   const mark = (x, r) => { const a = Math.max(1, Math.floor((x - r) / cell) - M), b = Math.min(nx - 2, Math.floor((x + r) / cell) + M); for (let i = a; i <= b; i++) nxt[i] = 1; };
-  for (const s of smoke) mark(s.x, s.r);
+  for (const s of smoke) if (!s.drift || s.age < s.drift) mark(s.x, s.r);
   for (const s of shells) if (!s.under) mark(s.x, 0);
   const spans = [];
   for (let i = 1; i < nx - 1; i++) {
@@ -12530,6 +12530,8 @@ function spawnSmoke(x, y, o) {
     climb: o.climb || 0,                                  // (how much higher than the sea's smoke it rises before it slows: a tower's - stepSmoke)
     hs: FXK,                                              // (real scale: how much taller its rise is - a ship's smoke as much as she's bigger)
     link: o.link || 60,
+    drift: o.drift || 0,                                  // (Oct 29, V253: past this age it drifts with the wind on its own - no air grid under it, which kept
+                                                          // ~25 columns awake a puff all along a big ship's 40 s trail; the grid only added swirls out there)
     buoy: o.buoy === undefined ? 1 : o.buoy,             // (how hard it heats the air round it - the grid's updraft; a big funnel's puffs only a little, or the air grid,
                                                           // made for small puffs, shoots them straight up)                                   // (a chain: how far apart two puffs may be and still be joined - a big funnel's puffs are far apart)
   };
@@ -12561,7 +12563,7 @@ function stepSmoke(dt) {
   // just blows with the wind, so solving it there changed nothing. A column that wakes up starts from that.
   const SPANS = smokeSpans(nx, ny, cell, u, v, p);
   dens.fill(0);
-  for (const s of smoke) { const k = gIdx(s.x, s.y); if (k >= 0) dens[k] += s.alpha * (1 - s.age / s.life) * (0.5 + s.r / 30) * s.buoy; }
+  for (const s of smoke) { if (s.drift && s.age >= s.drift) continue; const k = gIdx(s.x, s.y); if (k >= 0) dens[k] += s.alpha * (1 - s.age / s.life) * (0.5 + s.r / 30) * s.buoy; }
   for (const [ia, ib] of SPANS) for (let j = 1; j < ny - 1; j++) {
     const wy = SG.top + (j + 0.5) * cell, wind = windAt(wy), row = j * nx;
     // smoke pushes up hard near the fire and loses its drive with height: high up it only drifts
@@ -12637,7 +12639,9 @@ function stepSmoke(dt) {
       s.ashT = rnd(9, 18);
       ash.push({ x: s.x + rnd(-s.r, s.r) * 0.8, y: s.y + rnd(-s.r, s.r) * 0.5, vx: s.vx * 0.5, vy: rnd(2, 8), ph: Math.random() * 6, life: 0, max: rnd(6, 12), big: Math.random() < 0.25 });
     }
-    const gu = gSample(u, s.x, s.y), gv = gSample(v, s.x, s.y);
+    // (a drifting puff: the air a calm column of the grid holds - the wind, no updraft)
+    const drifting = s.drift && s.age >= s.drift;
+    const gu = drifting ? windAt(s.y) * 1.25 : gSample(u, s.x, s.y), gv = drifting ? 0 : gSample(v, s.x, s.y);
     const k = Math.min(1, 2.2 * dt);
     // (user Oct 25: dust lifted by a rotor's wash hugs the ground - it rolls out along it, swells and fades, never rises)
     if (s.ground) {
@@ -28257,7 +28261,7 @@ function stepCivShips(dt) {
         for (const [fx, fy, fm] of K.funnels) {
           if (c.lp && linerOn(c) && Object.values(c.lp.loose).some(o => Math.abs(o.p.x + o.p.w / 2 - fx) < 12)) continue;
           const [x, y] = civPoint(c, fx, fy), W = fm * K.k, r0 = 0.5 * W, r1 = 1.9 * W, life = rnd(38, 44);
-          spawnSmoke(x + rnd(-0.1, 0.1) * W, y - 0.3 * r0, { rise: true, r: r0 / FXK, grow: (r1 - r0) / FXK / (life * 0.6), rmax: r1 / FXK, lift: 25 * FXK, vx: Math.sign(c.dx) * sp * 0.6 + rnd(-2, 2) * FXK, vy: -rnd(30, 36) * FXK, life, alpha: 0.7, dark: 0.4, buoy: 0.15, climb: Math.max(0, WATER_Y - 40 - y), chain: smStream(c, fx), link: 3 * r1 });   // (out of the funnel fast and with her way on, so it climbs straight a moment before it bends back; dark at the mouth only)
+          spawnSmoke(x + rnd(-0.1, 0.1) * W, y - 0.3 * r0, { rise: true, r: r0 / FXK, grow: (r1 - r0) / FXK / (life * 0.6), rmax: r1 / FXK, lift: 25 * FXK, vx: Math.sign(c.dx) * sp * 0.6 + rnd(-2, 2) * FXK, vy: -rnd(30, 36) * FXK, life, alpha: 0.7, dark: 0.4, buoy: 0.15, drift: 4, climb: Math.max(0, WATER_Y - 40 - y), chain: smStream(c, fx), link: 3 * r1 });   // (out of the funnel fast and with her way on, so it climbs straight a moment before it bends back; dark at the mouth only)
         }
       }
       // a white bow wave, at whichever end she's going
