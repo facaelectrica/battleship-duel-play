@@ -1799,7 +1799,7 @@ function floorRebuild() {
 let KR_PAD = null;
 function krPadSet() {
   KR_PAD = null;
-  if (!floorTab) return;
+  if (!floorTab || krPlaced()) return;                           // (put where the TERRAIN tab put it: the floor left as it is)
   // eslint-disable-next-line no-undef
   const x = krSeatX(), half = typeof krPadHalf === 'function' ? krPadHalf() : 180;
   let flat = -Infinity; for (let q = x - half; q <= x + half; q += 8) flat = Math.max(flat, bedDrop0(q));
@@ -1821,10 +1821,15 @@ const worldDeepY = () => Math.max(SEA_FLOOR_MAX, LAND && land.deepY ? land.deepY
 const floorDeepest = () => floorDeep.slice();
 // (user Oct 29: "I should also be able to move the kraken to position it") where the kraken sits: KR_U along the ocean
 // floor (its points' frame - floorX), dragged in the TERRAIN tab; none: the floor's deepest point, as always
-let KR_U = null;
-try { const v = JSON.parse(localStorage.getItem('bd_kraken_u') || 'null'); if (v === null || (isFinite(v) && v > 0 && v < 1)) KR_U = v; } catch (e) { }
-function krUSave() { try { if (KR_U === null) localStorage.removeItem('bd_kraken_u'); else localStorage.setItem('bd_kraken_u', JSON.stringify(KR_U)); } catch (e) { } }
-const krSeatX = () => KR_U !== null && NET.role === 'local' && floorTab ? clamp(floorX(KR_U), BED_A + 700, BED_B - 700) : floorDeep[0];
+// (user Oct 29: "I would prefer that the kraken can be placed wherever I want, not to shape the ground around it") and
+// KR_DY: how far under the sea's level its base is, where it was let go (null: on the floor) - the floor not touched
+let KR_U = null, KR_DY = null;
+try { const v = JSON.parse(localStorage.getItem('bd_kraken_u') || 'null'); if (v === null || (isFinite(v) && v > 0 && v < 1)) KR_U = v;
+  const d = JSON.parse(localStorage.getItem('bd_kraken_dy') || 'null'); if (KR_U !== null && isFinite(d) && d !== null) KR_DY = d; } catch (e) { }
+function krUSave() { try { if (KR_U === null) { localStorage.removeItem('bd_kraken_u'); localStorage.removeItem('bd_kraken_dy'); } else { localStorage.setItem('bd_kraken_u', JSON.stringify(KR_U)); if (KR_DY === null) localStorage.removeItem('bd_kraken_dy'); else localStorage.setItem('bd_kraken_dy', JSON.stringify(KR_DY)); } } catch (e) { } }
+const krPlaced = () => KR_U !== null && NET.role === 'local' && !!floorTab;
+const krSeatX = () => krPlaced() ? clamp(floorX(KR_U), BED_A + 700, BED_B - 700) : floorDeep[0];
+const krSeatY = () => krPlaced() && KR_DY !== null ? WATER_Y + KR_DY : null;
 let TR_A = 0, TR_B = 0;
 function setTrench(a, b) { TR_A = a; TR_B = b; }
 // (user Oct 26, with a picture - gen/open/ref/pirate_wreck_slope_bug_oct26.png: "The pirate ships should be on a flat
@@ -2719,8 +2724,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 218;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 12:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 220;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 13:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12809,7 +12814,8 @@ uniform float u_shade;      // PUFF SHADING
 uniform float u_nodir;      // 1 - SUN_DIRECT: no direct sun, all of the cloud in its shade
 uniform vec4 u_fl;          // lightning on this cloud (flashBoost): the bolt's place from the cloud (x, y, z), its strength (0: none)
 uniform vec2 u_fls;         // its reach (46 S zl) and how low it lights (9 S zl)
-uniform float u_body;       // BODY LIGHT
+uniform float u_body;       // BODY LIGHT (every cloud: ONE LIGHT, Oct 29)
+uniform vec3 u_bk;          // ONE LIGHT: how dark the cloud's own body makes it (BODY SHADE), the body normal's share (BODY SHAPE), the shade's reach
 uniform int u_view;         // the debug VIEW (0 the picture; 1 LOBES, 2 BILLOWS, 3 LIGHT, 4 PUFFS): an id for the puff shader
 out vec4 o0; out vec4 o1;
 vec4 T(int i) { return texelFetch(u_d, ivec2(i & 255, i >> 8), 0); }
@@ -12867,17 +12873,17 @@ void main() {
     vec3 g = vec3(0.0);
     for (int k = 0; k < nL; k++) { vec4 a = T(u_o.x + k * 2), b = T(u_o.x + k * 2 + 1); vec3 rr = vec3(a.w, b.x, b.y) * 2.6, o = (Pb - a.xyz) / rr; float qq = dot(o, o); if (qq < 1.0) g += -4.0 * (1.0 - qq) * o / rr; }
     float gLen = length(g);
-    if (gLen > 0.0) { n += (-g / gLen - n) * (u_body * 0.85); float l = length(n); n = l > 0.0 ? n / l : n; }
+    if (gLen > 0.0) { n += (-g / gLen - n) * (u_body * u_bk.y); float l = length(n); n = l > 0.0 ? n / l : n; }
   }
   float v = dot(n, L) * 0.5 + 0.5, openR = 1.0;
   // the shadow of the clouds that shade it (its casters' lobes, in the world)
-  float od = 0.0, odB = 0.0, kB = u_body;
+  float od = 0.0, odB = 0.0, odD = 0.0, kB = u_body;
   vec3 Pw = u_W + P;
   for (int k = 0; k < u_nc; k++) { vec4 a = T(u_o.w + k * 2), b = T(u_o.w + k * 2 + 1); od += chord(Pw, L, a, b) / b.z; }
   float odC = od;
   // and of its own cloud's other lobes (not those of its own smear); BODY LIGHT: every lobe of it, its own too, soft
   float grp = own >= 0 && own < nL ? T(u_o.x + own * 2 + 1).w : 0.0;
-  for (int k = 0; k < nL; k++) { vec4 a = T(u_o.x + k * 2), b = T(u_o.x + k * 2 + 1); if (kB > 0.0) odB += softChord(Pb, L, a, b, 2.6); if (k == own) continue; if (grp != 0.0 && b.w == grp) continue; od += chord(P, L, a, b) / b.z; }
+  for (int k = 0; k < nL; k++) { vec4 a = T(u_o.x + k * 2), b = T(u_o.x + k * 2 + 1); if (kB > 0.0) { odB += softChord(Pb, L, a, b, u_bk.z); odD += softChord(Pb, vec3(0.0, -1.0, 0.0), a, b, u_bk.z); continue; } if (k == own) continue; if (grp != 0.0 && b.w == grp) continue; od += chord(P, L, a, b) / b.z; }
   // its own billow's neighbours (SELF)
   float odSelf = 0.0;
   if (SELF > 0.0) {
@@ -12885,7 +12891,13 @@ void main() {
     for (int q = 0; q < sn; q++) { int idx = s0 + q; vec4 t4 = T(idx >> 2); int m = idx & 3; float nb = m == 0 ? t4.x : m == 1 ? t4.y : m == 2 ? t4.z : t4.w;
       vec4 B = T(u_o.z + int(nb + 0.5) * 2); float ch = sphereChord(P, L, B.xyz, B.w); if (ch > 0.0) odSelf += ch / B.w; }
   }
-  float shE = shadowed(od) + (max(bodyRamp(odB), shadowed(odC)) - shadowed(od)) * kB;   // (BODY LIGHT: the body's soft shade, and other clouds' shadows)
+  // (ONE LIGHT, Oct 29 - the user: "it feels you are patching vs making the actual system consistent". Every cloud, big or small,
+  // near or far, at every hour, by one rule: the light reaching a spot is what gets through the cloud's whole body on its way
+  // from the sun (Tb, soft, every lobe of the cloud) - a cloud's thin edges let it through and glow, its thick middle doesn't;
+  // other clouds' shadows as before. The sky's glow from under the horizon reaches a spot through the cloud below it (Td).
+  // No switch by a cloud's size, no hard shadows between a cloud's own lobes)
+  float Tb = exp(-u_bk.x * u_body * odB), Td = exp(-u_bk.x * u_body * odD);
+  float shE = kB > 0.0 ? max(shadowed(od), 1.0 - Tb) : shadowed(od);   // (BODY LIGHT 0: the lobes' hard shadows on each other, as before)
   float castK = SH * max(shE, u_nodir), sh = castK;
   if (odSelf > 0.0) sh = max(sh, SELF * shadowed(odSelf * 0.8));
   float shk = v > 0.15 ? 1.0 - sh * 0.5 : 1.0;
@@ -12908,15 +12920,15 @@ void main() {
   if (L.z < 0.0) {
     float lxy = length(L.xy), dirT = lxy > 1e-4 ? max(0.0, n.x * L.x + n.y * L.y) / lxy : 0.0;
     float toward = dirT * (1.0 - bk) + (0.45 + 0.55 * max(0.0, n.y)) * bk, away = lxy < 0.05 ? 1.0 : 0.3 + 0.7 * dirT;
-    rimAdd = -L.z * side * side * toward * away * 1.1 * (1.0 - sh) * open; v += rimAdd;
+    rimAdd = -L.z * (kB > 0.0 ? Tb * u_bk.y + side * side * toward * away * (1.0 - sh) * (1.0 - u_bk.y) : side * side * toward * away * (1.0 - sh)) * 1.1 * open; v += rimAdd;   // (ONE LIGHT: the sun behind glows through where the cloud is thin - Tb - not only at a puff's outline)
     v -= bk * (1.0 - open) * side * 0.45;
   }
   float q = (v - 0.5) * CT + 0.5 + EXPO + jit * JITTER;
   int tone = int(clamp(floor(q * 5.0), 0.0, 4.0));
   if (HI > 0.0 && q >= 1.25 - 0.25 * HI && (rimAdd > 0.12 || u_p2.x > 0.5 || u_p2.y > 0.3)) tone = 5;
-  int outT = castK > 0.45 ? min(tone, ln.y > 0.3 ? 1 : 0) : tone;
+  int outT = castK > 0.45 ? min(tone, (kB > 0.0 ? n.y : ln.y) > 0.3 ? 1 : 0) : tone;   // (ONE LIGHT: in shade, the tops of the cloud's shape a step lighter - not each lobe's own top)
   float gk = u_p2.z; int lo = 0;
-  if (gk > 0.01) { float gy = ln.y, f = gk * (0.12 + 0.62 * max(0.0, -gy) + 0.2 * (1.0 - abs(gy))) * (0.35 + 0.65 * openR); lo = int(min(3.0, floor(f * 4.2))); outT = max(outT, lo); }
+  if (gk > 0.01) { float gy = kB > 0.0 ? n.y : ln.y, f = gk * (0.12 + 0.62 * max(0.0, -gy) + 0.2 * (1.0 - abs(gy))) * (0.35 + 0.65 * openR) * Td; lo = int(min(3.0, floor(f * 4.2))); outT = max(outT, lo); }
   float C5 = 5.0 * CT, LVf = (q - jit * JITTER) * 5.0;
   bool free_ = outT == max(lo, int(clamp(floor(q * 5.0), 0.0, 4.0))) && tone != 5 && !(castK > 0.45) && rimAdd < 0.05;
   float lx = 0.5 * L.x * shk * C5, lz = 0.5 * L.z * shk * C5;
@@ -12930,7 +12942,7 @@ void main() {
     float A = mm / Rl, B = (1.0 - mm) / Rb;
     float dxz = -(A * ln.x / lnz + B * p.x / pz), dyz = -(A * ln.y / lnz + B * p.y / pz);
     float gx = (lx * (A + B) + lz * dxz) / ul, gUp = (ly * (A + B) + lz * dyz) / ul;
-    tgx = clamp(gx, -1.5, 1.5); tgy = clamp(-gUp, -1.5, 1.5);
+    float own_ = 1.0 - u_body * u_bk.y; tgx = clamp(gx * own_, -1.5, 1.5); tgy = clamp(-gUp * own_, -1.5, 1.5);   // (ONE LIGHT: the light runs across a puff as much as the puff's own shape counts in its normal)
   }
   // (lightning, flashBoost: the bolt lights the puffs facing it, near it and low on the cloud, less through the cloud's other lobes;
   // a lit puff is one flat tone, as the JS drew it)
@@ -12960,7 +12972,7 @@ function glLitSetup() {
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
   GLR.lprog = p; GLR.lU = {};
-  for (const k of ['u_d', 'u_o', 'u_nc', 'u_L', 'u_under', 'u_W', 'u_p0', 'u_p1', 'u_p2', 'u_shade', 'u_nodir', 'u_fl', 'u_fls', 'u_view', 'u_body']) GLR.lU[k] = gl.getUniformLocation(p, k);
+  for (const k of ['u_d', 'u_o', 'u_nc', 'u_L', 'u_under', 'u_W', 'u_p0', 'u_p1', 'u_p2', 'u_shade', 'u_nodir', 'u_fl', 'u_fls', 'u_view', 'u_body', 'u_bk']) GLR.lU[k] = gl.getUniformLocation(p, k);
   gl.useProgram(p); gl.uniform1i(GLR.lU.u_d, 11); gl.useProgram(GLR.prog);
   GLR.lvao = gl.createVertexArray(); GLR.ltf = gl.createTransformFeedback();
   gl.bindVertexArray(GLR.vao);
@@ -12998,7 +13010,7 @@ function glLitRun(b, lit, U) {
   gl.useProgram(GLR.lprog); GLR.cur.prog = 7; const u = GLR.lU;
   gl.uniform4i(u.u_o, U.lo0, U.nl, U.bo0, U.co0); gl.uniform1i(u.u_nc, U.nc);
   gl.uniform3f(u.u_L, U.L[0], U.L[1], U.L[2]); gl.uniform1f(u.u_under, U.under); gl.uniform3f(u.u_W, U.W[0], U.W[1], U.W[2]);
-  gl.uniform4f(u.u_p0, U.p0[0], U.p0[1], U.p0[2], U.p0[3]); gl.uniform4f(u.u_p1, U.p1[0], U.p1[1], U.p1[2], U.p1[3]); gl.uniform4f(u.u_p2, U.p2[0], U.p2[1], U.p2[2], U.p2[3]); gl.uniform1f(u.u_shade, U.shade); gl.uniform1f(u.u_nodir, U.nodir || 0); const fl = U.fl || [0, 0, 0, 0], fs = U.fls || [1, 1]; gl.uniform4f(u.u_fl, fl[0], fl[1], fl[2], fl[3]); gl.uniform2f(u.u_fls, fs[0], fs[1]); gl.uniform1i(u.u_view, U.view | 0); gl.uniform1f(u.u_body, U.body || 0);
+  gl.uniform4f(u.u_p0, U.p0[0], U.p0[1], U.p0[2], U.p0[3]); gl.uniform4f(u.u_p1, U.p1[0], U.p1[1], U.p1[2], U.p1[3]); gl.uniform4f(u.u_p2, U.p2[0], U.p2[1], U.p2[2], U.p2[3]); gl.uniform1f(u.u_shade, U.shade); gl.uniform1f(u.u_nodir, U.nodir || 0); const fl = U.fl || [0, 0, 0, 0], fs = U.fls || [1, 1]; gl.uniform4f(u.u_fl, fl[0], fl[1], fl[2], fl[3]); gl.uniform2f(u.u_fls, fs[0], fs[1]); gl.uniform1i(u.u_view, U.view | 0); gl.uniform1f(u.u_body, U.body || 0); { const k = U.bk || [1.6, 0.85, 2]; gl.uniform3f(u.u_bk, k[0], k[1], k[2]); }
   gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, GLR.ltf);
   gl.bindBufferRange(gl.TRANSFORM_FEEDBACK_BUFFER, 0, b.vbo, 0, lit.n * 32);
   gl.enable(gl.RASTERIZER_DISCARD);
@@ -15104,6 +15116,9 @@ const SL = [
   // straight above: a neighbour's upper lobes shaded the cloud's side. Off: only the other decks' clouds cast shadows)
   ['deckSh', 'SAME-DECK SHADOWS', 0, 1, 1, 0],
   ['bodyL', 'BODY LIGHT', 0, 1, 0.05, 1],
+  ['bshade', 'BODY SHADE', 0, 4, 0.05, 1.6],
+  ['bshape', 'BODY SHAPE', 0, 1, 0.05, 0.85],
+  ['breach', 'SHADE REACH', 1, 2.6, 0.05, 2],
   ['shade', 'PUFF SHADING', 0, 1, 1, 1],          // (user Oct 27: the splotches - 1: each puff drawn with the light across it, 0: one flat tone a puff, as before)
   ['amb', 'AMBIENT', 0, 1, 0.05, 0.35],
   ['crease', 'CREASE', 0, 1, 0.05, 0.4],          // (Oct 28, lab V50: how dark the crease where two lobes meet is, in any light)
@@ -15712,6 +15727,7 @@ const softChord = (px, py, pz, L, l, s) => {
   const t0 = Math.max(t1, 0);
   return -(A / 3 * (t2 ** 3 - t0 ** 3) + B / 2 * (t2 * t2 - t0 * t0) + C * (t2 - t0)) / (l.rb * s);
 };
+const DOWN = [0, -1, 0];
 const bodyRamp = od => clamp((od * 0.15 - 0.22) * 1.6, 0, 1);   // (GL_LVS)
 // (besides the tone: the light before it is cut into tones - f, in tone steps - and how it changes with the normal - lx, ly,
 // lz: tone steps per unit of normal - so a puff can be drawn with the light running across it (11-drawing.js discShade).
@@ -15725,21 +15741,24 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
   const bk = smoothstep(0.35, 0.8, -L[2]);
   if (bk > 0 && it.lnx !== undefined) { nx += (it.lnx - nx) * bk; ny += (it.lny - ny) * bk; nz += (it.lnz - nz) * bk; const n = Math.hypot(nx, ny, nz) || 1; nx /= n; ny /= n; nz /= n; }
   const pbz = it.fill ? 0.82 * (it.br || it.r || 0) : 0;   // (a billow's own disc: lit as the billow's front - GL_LVS)
-  const bodyL = (P.bodyL ?? 0) * LV_BODYK;   // (the cloud's share: its callers set LV_BODYK from c.bodyK)
+  const bodyL = P.bodyL ?? 0;   // (ONE LIGHT, Oct 29: every cloud - no share by its height to width any more; GL_LVS)
+  const BS = (P.bshade ?? 1.6) * bodyL, BN = P.bshape ?? 0.85, BR = P.breach ?? 2;
   let pbzz = it.zz + pbz;   // (BODY LIGHT is read on the cloud's front surface at the puff's place on the screen - GL_LVS, Oct 29)
   if (bodyL > 0) { let zf = -1e9; for (const l of lob) { if (!l.rx) continue; const ex = (it.x - l.x) / (l.rx * 1.2), ey = (it.y - l.y) / (l.ry * 1.2), e = ex * ex + ey * ey; if (e < 1) zf = Math.max(zf, l.z + l.rz * 1.2 * Math.sqrt(1 - e)); } if (zf > -1e8) pbzz = zf; }
   if (bodyL > 0) {   // (BODY LIGHT: the body's own normal - GL_LVS)
     let gx = 0, gy = 0, gz = 0;
     for (const l of lob) { if (!l.rx) continue; const rx = l.rx * 2.6, ry = l.ry * 2.6, rz = l.rz * 2.6, ox = (it.x - l.x) / rx, oy = (it.y - l.y) / ry, oz = (pbzz - l.z) / rz, qq = ox * ox + oy * oy + oz * oz; if (qq < 1) { const f = -4 * (1 - qq); gx += f * ox / rx; gy += f * oy / ry; gz += f * oz / rz; } }
-    const gl = Math.hypot(gx, gy, gz), kb = bodyL * 0.85;
+    const gl = Math.hypot(gx, gy, gz), kb = bodyL * BN;
     if (gl > 0) { nx += (-gx / gl - nx) * kb; ny += (-gy / gl - ny) * kb; nz += (-gz / gl - nz) * kb; const n = Math.hypot(nx, ny, nz) || 1; nx /= n; ny /= n; nz /= n; }
   }
   let v = (nx * L[0] + ny * L[1] + nz * L[2]) * 0.5 + 0.5, openR = 1;   // (openR: how open to the sky the puff's edge is, from below)
-  let od = odOther || 0, odB = 0;
+  let od = odOther || 0, odB = 0, odD = 0;
   const odC = od, kB = bodyL;
   const grp = own >= 0 && lob[own] ? lob[own].grp : 0;                     // (the lobes of one smear are one shape: they don't shade each other)
-  for (let k = 0; k < lob.length; k++) { const l = lob[k]; if (kB > 0 && l.rx) odB += softChord(it.x, it.y, pbzz, L, l, 2.6); if (k !== own && !(grp && l.grp === grp)) od += chord(it.x, it.y, it.zz, L, l) / l.rb; }
-  const shE = shadowed(od) + (Math.max(bodyRamp(odB), shadowed(odC)) - shadowed(od)) * kB;   // (BODY LIGHT - GL_LVS)
+  for (let k = 0; k < lob.length; k++) { const l = lob[k]; if (kB > 0) { if (l.rx) { odB += softChord(it.x, it.y, pbzz, L, l, BR); odD += softChord(it.x, it.y, pbzz, DOWN, l, BR); } continue; } if (k !== own && !(grp && l.grp === grp)) od += chord(it.x, it.y, it.zz, L, l) / l.rb; }
+  // (ONE LIGHT - GL_LVS: the light that gets through the cloud's whole body from the sun (Tb), and from under the horizon (Td))
+  const Tb = Math.exp(-BS * odB), Td = Math.exp(-BS * odD);
+  const shE = kB > 0 ? Math.max(shadowed(od), 1 - Tb) : shadowed(od);
   const cast = P.shadow * Math.max(shE, 1 - SUN_DIRECT);   // (no direct sun: all of it in the shade - SUN_DIRECT)
   let sh = cast;
   if (odSelf) sh = Math.max(sh, P.self * shadowed(odSelf * 0.8));
@@ -15771,7 +15790,7 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
     // The sun close to a cloud counts as behind it, and behind lit every edge of the silhouette alike. Now, with the sun off
     // to one side, an edge facing away from it gets a third of that glow; only a sun straight behind lights all round)
     const away = lxy < 0.05 ? 1 : 0.3 + 0.7 * dirT;
-    rimAdd = -L[2] * side * side * toward * away * 1.1 * (1 - sh) * open; v += rimAdd;
+    rimAdd = -L[2] * (kB > 0 ? Tb * BN + side * side * toward * away * (1 - sh) * (1 - BN) : side * side * toward * away * (1 - sh)) * 1.1 * open; v += rimAdd;   // (ONE LIGHT: the sun behind glows through where the cloud is thin)
     // and with the sun behind, a lobe's side inside the outline is in the body's shade: the wrapped light alone would leave
     // it a mid tone (a pale seam where two lobes meet)
     v -= bk * (1 - open) * side * 0.45;
@@ -15787,14 +15806,14 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
   // In shadow, the two darkest tones by which way the lobe faces: its tops toward the sky a step lighter, the rest the
   // deepest shade. (It was a random one puff in five a step lighter: with the sun behind, when most of a cloud is in
   // shadow, that speckled the whole body; user 18:56.)
-  let out = cast > 0.45 ? Math.min(tone, (it.lny ?? it.ny) > 0.3 ? 1 : 0) : tone;
+  let out = cast > 0.45 ? Math.min(tone, (kB > 0 ? ny : (it.lny ?? it.ny)) > 0.3 ? 1 : 0) : tone;   // (ONE LIGHT - GL_LVS)
   // SUNSET GLOW (ref_sunset_vivid_*; user 22:02: "why is the sunset always so faint?"): at sunset the bright sky round the low
   // sun lights every cloud from below and from its sides, whatever the sun's own rays do: undersides up to tone 3 (orange),
   // sides 1–2 (mauve, pink), tops left in the shade (purple). A floor under the tone, so the rims (tone 4) stay.
   const gk = (P.glow ?? 1) * E.sunset;
   // (and the glow's floor stays out of the creases: a face a lobe in front hides from the sky isn't lit by the sky - user Oct 27, 21:44)
   let lo = 0;
-  if (gk > 0.01) { const gy = it.lny ?? ny, f = gk * (0.12 + 0.62 * Math.max(0, -gy) + 0.2 * (1 - Math.abs(gy))) * (0.35 + 0.65 * openR); lo = Math.min(3, Math.floor(f * 4.2)); out = Math.max(out, lo); }
+  if (gk > 0.01) { const gy = kB > 0 ? ny : (it.lny ?? ny), f = gk * (0.12 + 0.62 * Math.max(0, -gy) + 0.2 * (1 - Math.abs(gy))) * (0.35 + 0.65 * openR) * Td; lo = Math.min(3, Math.floor(f * 4.2)); out = Math.max(out, lo); }
   // (LV: the light's slope - d(tone)/d(normal): the sun's 0.5·L, the sky's AMBIENT and the light from under the deck on ny -
   // for a puff whose tone is the light's own; in a cast shadow, the highlight or an edge's glow it stays one flat tone)
   const C5 = 5 * P.contrast * E.contrast;
@@ -16196,7 +16215,7 @@ function litRun(c, pb) {
   for (const oc of c.casters) for (const l of oc.wl) { D[o] = l.x; D[o + 1] = l.y; D[o + 2] = l.z; D[o + 3] = l.rx; D[o + 4] = l.ry; D[o + 5] = l.rz; D[o + 6] = l.rb; D[o + 7] = 0; o += 8; }
   lit.dlen = o;
   const U = { lo0: lit.lo0, nl: lit.nl, bo0: lit.bo0, co0: lit.co0, nc, L, under: c.under || 0, W: [screenX(c), H - c.y, c.wz],
-    p0: [P.shadow, P.self, P.amb, P.crease ?? 0.4], nodir: 1 - SUN_DIRECT, view, body: (P.bodyL ?? 0) * (c.bodyK ?? 0),
+    p0: [P.shadow, P.self, P.amb, P.crease ?? 0.4], nodir: 1 - SUN_DIRECT, view, body: P.bodyL ?? 0, bk: [P.bshade ?? 1.6, P.bshape ?? 0.85, P.breach ?? 2],
     fl: c.flit ? [flash.x - screenX(c), c.y - flash.y, 40 * S * c.lay.zl, flash.k] : null, fls: [46 * S * c.lay.zl, 9 * S * c.lay.zl], p1: [P.contrast * E.contrast, P.expo, P.jitter, P.hi ?? 1], p2: [E.night, E.dusk, (P.glow ?? 1) * E.sunset, P.mass], shade: P.shade };
   glLitRun(pb, lit, U);
   pb.lk = c.lk; lit.done = lit.geo; FTV.bLit = (FTV.bLit || 0) + 1;
@@ -17769,6 +17788,7 @@ const DESC = {
   atmo: 'The haze of distance in front of the back decks: more and they fade into the sky',
   lightz: 'How far behind the clouds the sun is: more and a sun beside a cloud lights it less from that side (darker faces, brighter edges)',
   contrast: 'How far apart the clouds\' tones are spread (low: all close to the middle tone)', expo: 'Lighter or darker overall: every cloud\'s light moved up or down before it is cut into tones',
+  bshade: 'ONE LIGHT: how dark a cloud gets where the sun has to cross much of it - a thick middle dark, thin edges lit (every cloud, big or small, near or far)', bshape: 'ONE LIGHT: how much a cloud is lit as one smooth shape rather than puff by puff', breach: 'ONE LIGHT: how far past its clumps a cloud counts as cloud for its own shade (more: softer, darker)',
   shadow: 'How dark the shadow one part of a cloud casts on another (deep in it: only the two darkest tones)', deckSh: 'Off (default): a cloud is shaded only by clouds of the other decks, not by its own deck\'s neighbours (overlapping on the screen, their overhangs threw flat, hard-edged shade on each other). On: every cloud near the line to the sun casts', self: 'How much a lobe shades itself, away from the sun (soft)',
   amb: 'The sky\'s light in the shade: the tops lighter than the undersides even out of the sun',
   hi: 'The sixth tone: how readily the brightest light (an edge lit from behind, the moon on the tops, a sunset) takes the highlight colour (0 = never)',
@@ -17789,7 +17809,7 @@ const DESC = {
 const ED_TABS = {
   SKY: [['GRADIENT AND SUN', ['bands', 'sunh', 'flare', 'sunbig']], ['THE GAME\'S WEATHER', ['gcover', 'bigk', 'ghaze', 'wisps']], ['KINDS OF CLOUD (LAB V50)', ['tall', 'tallwx', 'mix', 'region', 'wispbump', 'wispbumpk', 'wisppuff']], ['CAMERA', ['par1', 'par2', 'par3', 'par4', 'cells', 'cellz', 'skyh', 'cloudk']]],
   DECKS: [['HEIGHTS', ['alt', 'gap']], ['AIR', ['atmo']]],
-  LIGHT: [['SUN', ['lightz', 'glow', 'lightfix']], ['TONES', ['contrast', 'expo']], ['SHADOWS', ['shadow', 'deckSh', 'bodyL', 'self', 'amb', 'crease', 'shade']], ['EDGES', ['hi']], ['RAYS', ['rays', 'raythru', 'raylen', 'rayhid']]],
+  LIGHT: [['SUN', ['lightz', 'glow', 'lightfix']], ['TONES', ['contrast', 'expo']], ['SHADOWS', ['shadow', 'deckSh', 'bodyL', 'bshade', 'bshape', 'breach', 'self', 'amb', 'crease', 'shade']], ['EDGES', ['hi']], ['RAYS', ['rays', 'raythru', 'raylen', 'rayhid']]],
   COLOURS: null,
   SHAPE: [['PUFFS AND BILLOWS', ['puff', 'billow', 'bcap', 'jitter']], ['MASS', ['mass', 'base']], ['DETAIL (LOD)', ['lodl']], ['DECK 1 (FRONT)', ['dk1', 'bl1', 'bs1', 'pf1', 'pk1', 'pl1']], ['DECK 2', ['dk2', 'bl2', 'bs2', 'pf2', 'pk2', 'pl2']], ['DECK 3', ['dk3', 'bl3', 'bs3', 'pf3', 'pk3', 'pl3']], ['DECK 4 (HORIZON)', ['dk4', 'bl4', 'bs4', 'pf4', 'pk4', 'pl4']]],
   MOTION: [['FORMING', ['form', 'morph']], ['LIFE', ['evolve', 'heal']]],
@@ -20163,7 +20183,7 @@ function buildReef() {
     const d = shoreDist(x);
     if (floorLook(x)) continue;                                                                  // (a piece marked FOREST or DESERT: a lake bed, no rock formations)
     if (d < 1000) continue;
-    if (LAND && pirateWrecks.some(w => Math.abs(x - w.x) < (w.half || 200) + 260)) continue;   // (none on a pirate wreck's levelled floor)
+    if (LAND && pirateWrecks.some(w => w.y == null && Math.abs(x - w.x) < (w.half || 200) + 260)) continue;   // (none on a pirate wreck's levelled floor)
     if (KR_PAD && Math.abs(x - KR_PAD.x) < KR_PAD.half + 300) continue;                          // (none on the kraken's pad)
     if (DOCK_PADS && DOCK_PADS.some(([X, , q]) => Math.abs(x - (X + q) / 2) < Math.abs(q - X) / 2 + PAD_LAND + 900)) continue;   // (none on a placed dock's ground or off its pier)
     if (LAND && CAVE.nearMouth(x, 520)) continue;                                                // (none on an underwater cave's mouth - 50-land-caves)
@@ -25674,6 +25694,9 @@ function draw() {
   }
   // the exploration subs in a cave, again over it (the game drew them in the sea's pass, under this)
   for (const s of minisubs) if (s.state === 'out' && HULL.some(([dx, dy]) => inCave(s.x + dx, s.y - WATER_Y + dy)) && s.x > vx0 - 50 && s.x < vx1 + 50) drawMinisub(s);
+  // (user Oct 29: a pirate wreck put in a cave in the TERRAIN tab) she and her chest, again over it
+  const inC = w => w.y != null && (inCave(w.x, w.y - 30 - WATER_Y) || inCave(chestAt(w)[0], chestAt(w)[1] - WATER_Y));
+  if (pirateWrecks.some(inC)) { drawPirateWrecks(vx0, vx1, inC); drawDeepLights(vx0, vx1, inC); }
 }
 // is x near a system's mouth (the game keeps its rock formations off them, as off the kraken's pad - buildReef)
 function nearMouth(x, r) { if (!(BED_B - BED_A > 2000)) return false; return CAVES.systems.some(s => Math.abs(sysX(s) - x) < r); }
@@ -29326,8 +29349,8 @@ function floorEdited() {
   if (!LAND) return;
   // the pirate wrecks: each to the nearest level ground and the floor levelled under her again
   const ws = pirateWrecks.slice(); pirateWrecks.length = 0;
-  for (const w of ws) { w.flat = null; w.x = floorFlatSpot(w.x, w.half || 200); pirateWrecks.push(w); }
-  for (const w of pirateWrecks) w.flat = bedDrop0(w.x);
+  for (const w of ws) { w.flat = null; if (!wreckSeat(w)) w.x = floorFlatSpot(w.x, w.half || 200); pirateWrecks.push(w); }   // (one placed in the TERRAIN tab: where she was put)
+  for (const w of pirateWrecks) if (w.y == null) w.flat = bedDrop0(w.x);
   // the research ships: each her own third of the deep ocean
   let k = 0;
   for (const c of civShips) if (c.kind === 'research' && TR_B > TR_A) { c.lo = TR_A + (TR_B - TR_A) * k / 3 + 150; c.hi = TR_A + (TR_B - TR_A) * (k + 1) / 3 - 150; k++; }
@@ -30495,6 +30518,7 @@ function placeKraken(fresh) {
   const hw = KR_BW * krS() * 0.95; let low = -Infinity;
   for (let q = x - hw; q <= x + hw; q += 8) low = Math.max(low, sandY(q));
   KR.bx = x; KR.by = low + 6 * krS();
+  if (typeof krSeatY === 'function' && floorTab && krSeatY() !== null) KR.by = krSeatY();   // (where it was let go, as it is)
   // the floor round it, and how far it is to the pit's walls each side: the arms' fan narrowed to fit between them
   const sK = krS(), R = krLen() * 1.4, n = Math.ceil(2 * R / 8) + 1;
   KR.ft0 = x - R; KR.ft = new Float32Array(n);
@@ -32666,6 +32690,23 @@ const msHold = [0, 0], msKeys = [0, 0];
 const msOf = p => { const v = p != null && crew[p] && crew[p].mode === 'civ' ? crew[p].civ : null; return v && minisubs.includes(v) ? v : null; };
 const msLever = p => clamp((msHold[p] || 0) + (msKeys[p] || 0), -1, 1);
 const pirateWrecks = [], treasures = [0, 0];
+// (user Oct 29: "And we should do the same for the pirate ships / treasure. I can place them manually, including inside a
+// cave") WRECK_SET: for each of the four wrecks (k) where the TERRAIN tab put her - [u along the ocean floor's points'
+// frame (floorX), how far under the sea's level her keel is] - or null: the nearest level ground, as always. A placed one
+// lies just there, the floor not levelled under her (in a cave too: nothing holds her to the floor)
+let WRECK_SET = [null, null, null, null];
+try { const v = JSON.parse(localStorage.getItem('bd_wrecks') || 'null'); if (wreckSetOk(v)) WRECK_SET = v; } catch (e) { }
+function wreckSetOk(v) { return Array.isArray(v) && v.length === 4 && v.every(e => e === null || (Array.isArray(e) && e.length === 2 && e[0] > 0 && e[0] < 1 && isFinite(e[1]))); }
+function wreckSave() { try { if (WRECK_SET.every(e => e === null)) localStorage.removeItem('bd_wrecks'); else localStorage.setItem('bd_wrecks', JSON.stringify(WRECK_SET)); } catch (e) { } }
+const wreckPlaced = k => NET.role === 'local' && !!floorTab && !!WRECK_SET[k];
+// a wreck put where it was placed (or not): its x, its keel's y (null: on the floor) and the floor levelled under her or not
+function wreckSeat(w) {
+  const s = wreckPlaced(w.k) ? WRECK_SET[w.k] : null;
+  if (s) { w.x = clamp(floorX(s[0]), BED_A + 200, BED_B - 200); w.y = WATER_Y + s[1]; w.flat = null; return true; }
+  w.y = null; return false;
+}
+// her keel's y: where she was put, or on the floor
+const wreckBy = w => w.y != null ? w.y : seabedY(w.x) + 6;
 const WRI = [{"x": 0, "w": 235, "h": 93, "hold": [122, 62]}, {"x": 237, "w": 221, "h": 93, "hold": [115, 70]}, {"x": 460, "w": 227, "h": 84, "hold": [118, 62]}, {"x": 689, "w": 212, "h": 83, "hold": [110, 61]}], WRK = 1.5;           // (WRK: world units a pixel of the user's wrecks - big, as in the target picture)                      // (gen/open/wrecks.py: the user's four wrecks, Oct 26 - each with its hull's middle, where the chest is)
 let msArt = null, pirateArt = null;
 function buildMinisubArt() {
@@ -32706,15 +32747,17 @@ function buildDeep() {
   for (let k = 0; k < 4; k++) {
     const v = k % 4, half = (WRI[v] ? WRI[v].w : 240) * WRK / 2 + 20;
     const x = floorFlatSpot(TR_A + 700 + (TR_B - TR_A - 1400) * (k + 0.5) / 4 + rnd(-200, 200), half);   // (OPEN WORLD's drawn floor: the nearest fairly level ground, not a cliff - 50-land-floor.js)
-    pirateWrecks.push({ x, a: 0, face: Math.random() < 0.5 ? 1 : -1, gold: true, ph: Math.random() * 6, v, half, flat: bedDrop0(x) });   // (each a different one of the four; level, on the floor levelled under her)
+    const w = { k, x, y: null, a: 0, face: Math.random() < 0.5 ? 1 : -1, gold: true, ph: Math.random() * 6, v, half, flat: null };   // (each a different one of the four; level, on the floor levelled under her)
+    if (!wreckSeat(w)) w.flat = bedDrop0(x);
+    pirateWrecks.push(w);
   }
   // (the rocks were laid out before the wrecks: none standing on a wreck's levelled floor - buildReef keeps them off it too)
-  rockForms = rockForms.filter(f => !pirateWrecks.some(w => f.x1 > w.x - w.half - 160 && f.x0 < w.x + w.half + 160));
+  rockForms = rockForms.filter(f => !pirateWrecks.some(w => w.y == null && f.x1 > w.x - w.half - 160 && f.x0 < w.x + w.half + 160));
 }
 // where a wreck's chest is (its hold, in the world)
 function chestAt(w) {
   if (!pirateArt) buildPirateArt();
-  const A = pirateArt[(w.v || 0) % pirateArt.length], k = A.k || 1, by = seabedY(w.x) + 6, lx = (A.hold[0] - A.W / 2) * w.face * k, ly = (A.hold[1] - A.H) * k, ca = Math.cos(w.a), sa = Math.sin(w.a);
+  const A = pirateArt[(w.v || 0) % pirateArt.length], k = A.k || 1, by = wreckBy(w), lx = (A.hold[0] - A.W / 2) * w.face * k, ly = (A.hold[1] - A.H) * k, ca = Math.cos(w.a), sa = Math.sin(w.a);
   return [w.x + lx * ca - ly * sa, by + lx * sa + ly * ca];
 }
 // the crane's hook (where the sub hangs, docked) and the sub's middle hanging under it (on her half, once she's broken)
@@ -32753,7 +32796,7 @@ function minisubLaunch(p) {
 }
 function stepMinisubs(dt) {
   // (the wrecks: now and then a few bubbles rising out of a hull)
-  if (!SIM_ONLY) for (const w of pirateWrecks) if (Math.random() < dt * 0.7) addBubble(w.x + rnd(-70, 70), seabedY(w.x) - rnd(15, 45), rnd(-3, 3), -rnd(10, 22), rnd(0.6, 1.4));
+  if (!SIM_ONLY) for (const w of pirateWrecks) if (Math.random() < dt * 0.7) addBubble(w.x + rnd(-70, 70), wreckBy(w) - 6 - rnd(15, 45), rnd(-3, 3), -rnd(10, 22), rnd(0.6, 1.4));
   if (!LAND) return;
   if (!msArt && img.minisub) buildMinisubArt();
   msFallers = msFallersNow();
@@ -32922,18 +32965,21 @@ function stepMinisubWreck(s, dt) {
 }
 const MS_KEEL = [[-8, 4], [-3, 5], [3, 5], [8, 4]];             // (its underside about its middle, for the settle)
 // the wrecks on the bottom (darkened by the deep with everything else there)
-function drawPirateWrecks(x0, x1) {
+// (only: a cave's pass - just those in a cave, no shaft of light down onto them)
+function drawPirateWrecks(x0, x1, only) {
   if (!pirateWrecks.length) return;
   if (!pirateArt) buildPirateArt();
   for (const w of pirateWrecks) {
-    if (w.x < x0 - 160 || w.x > x1 + 160) continue;
-    const A = pirateArt[(w.v || 0) % pirateArt.length], by = seabedY(w.x) + 6;
+    if (w.x < x0 - 160 || w.x > x1 + 160 || (only && !only(w))) continue;
+    const A = pirateArt[(w.v || 0) % pirateArt.length], by = wreckBy(w);
+    if (!only) {
     // a pale shaft of light down onto her from far above (the target picture's), slowly breathing
     C.save(); C.globalCompositeOperation = 'lighter';
     const al = 0.06 + 0.025 * Math.sin(time * 0.4 + w.ph), sx = w.x - 60;
     C.fillStyle = `rgba(110,170,240,${al.toFixed(3)})`;
     C.beginPath(); C.moveTo(PX(sx - 30), PY(by - 700)); C.lineTo(PX(sx + 30), PY(by - 700)); C.lineTo(PX(w.x + 110), PY(by)); C.lineTo(PX(w.x - 50), PY(by)); C.closePath(); C.fill();
     C.restore();
+    }
     const I = scaled(w.face > 0 ? A.c : A.cR, (A.k || 1) * SV, true);
     C.save(); C.translate(PX(w.x), PY(by)); C.rotate(w.a);
     C.drawImage(I, -Math.round(I.width / 2), -I.height);
@@ -32965,7 +33011,7 @@ function abyssLights() {
   }
   // (user Oct 26, the target picture: the wreck itself seen in a dim pool of the light from far above, so it reads in the
   // deep even before the sub's lamp finds it)
-  if (pirateArt && pirateArt.length) for (const w of pirateWrecks) { const A = pirateArt[(w.v || 0) % pirateArt.length], X = PX(w.x), Y = PY(seabedY(w.x) - A.H * WRK * 0.5); if (X > -400 * SV && X < VWP + 400 * SV) out.push({ x: X, y: Y, r: A.W * WRK * 0.7 * SV, k: 0.62 }); }
+  if (pirateArt && pirateArt.length) for (const w of pirateWrecks) { const A = pirateArt[(w.v || 0) % pirateArt.length], X = PX(w.x), Y = PY(wreckBy(w) - 6 - A.H * WRK * 0.5); if (X > -400 * SV && X < VWP + 400 * SV) out.push({ x: X, y: Y, r: A.W * WRK * 0.7 * SV, k: 0.62 }); }
   // (the treasure no longer lights the dark round it - user Oct 27, 12:21: "should not glow so much. It should be more of
   // a 'glint' so the player has to explore with the lights of their sub" - see chestGlint)
   return out;
@@ -33006,10 +33052,10 @@ function msAimStep(sub, dt) {
   sub.aimA = clamp(a, 0, Math.PI);
 }
 // what shines in the deep, after its dark: the chests' glow, and the sub's headlight
-function drawDeepLights(x0, x1) {
-  drawPings(x0, x1);                                              // (the PING's wave: seen in the dark too)
+function drawDeepLights(x0, x1, only) {
+  if (!only) drawPings(x0, x1);                                   // (the PING's wave: seen in the dark too)
   for (const w of pirateWrecks) {
-    if (!w.gold || w.x < x0 - 200 || w.x > x1 + 200) continue;
+    if (!w.gold || w.x < x0 - 200 || w.x > x1 + 200 || (only && !only(w))) continue;
     const [cx, cy] = chestAt(w), X = PX(cx), Y = PY(cy), s = SV, lit = chestLit(cx, cy), g = chestGlint(w, lit);
     // (user Oct 27, 12:21: no glow - the chest dark in the dark, seen as the sub's lamp falls on it, the gold in it
     // catching that light; now and then a glint off it, more often and brighter in the beam)
@@ -33029,6 +33075,7 @@ function drawDeepLights(x0, x1) {
   }
   // (user Oct 28, 14:48: the light cut off at the screen's middle - the screen is two half views, each drawing only the
   // beams that reach into it; the beam is MS_BEAM_L long, so a sub that far past a view's edge still lights it)
+  if (only) return;                                               // (a cave's pass: the chests only)
   for (const sub of minisubs) if (sub.state === 'out' && msArt && sub.x > x0 - MS_BEAM_L - 40 && sub.x < x1 + MS_BEAM_L + 40) {
     // its headlight: a cone of light the way it aims, fading out into the dark (brighter the deeper it is)
     const fc = msToUs(sub), [ux, uy] = msAim(sub), X = PX(sub.x) + ux * 8 * SV * (1 - fc), Y = PY(sub.y) + uy * 8 * SV * (1 - fc), L = MS_BEAM_L * SV * (1 - 0.9 * fc), deep = clamp((sub.y - SEABED_DEEP) / 900, 0, 1);
@@ -37529,12 +37576,21 @@ function structFree(o, u) {
 // a tower's box: 80 wide, its tower's height over the ground at its foot
 const TOWER_BOX = { w: 80, h: 150 };
 // (user Oct 29: "I should also be able to move the kraken to position it") its box: its body's width, from over its head
-// down to the floor it sits on; dragged along, it sits where it's let go (KR_U - 09-sea-surface), its floor levelled there
+// down to its base; dragged anywhere, it stays where it's let go (KR_U, KR_DY - 09-sea-surface), the floor left as it is
 function krakenBox() { const hw = KR_BW * krS() * 1.1; return [KR.bx - hw, KR.bx + hw, KR.by - 520 * krS(), KR.by + 20]; }
 function krakenPick(x, y, r) { if (!LAND || !KR.on) return false; const B = krakenBox(); return x > B[0] - r && x < B[1] + r && y > B[2] - r && y < B[3] + r; }
-function krakenMoveTo(x) {
-  KR_U = +clamp(floorU(clamp(x, BED_A + 700, BED_B - 700)), 0.001, 0.999).toFixed(4); krUSave();
-  floorEdited();                                                  // (the floor levelled under it there, the reef kept off it, the kraken seated)
+function krakenMoveTo(x, y) {
+  KR_U = +clamp(floorU(clamp(x, BED_A + 700, BED_B - 700)), 0.001, 0.999).toFixed(4);
+  KR_DY = Math.round(clamp(y, WATER_Y + 200, worldDeepY() + 300) - WATER_Y); krUSave();
+  floorEdited();                                                  // (the floor as it is - no pad - and the kraken put there)
+}
+// (user Oct 29: "And we should do the same for the pirate ships / treasure ... including inside a cave") a wreck's box:
+// her picture's size, over her keel; dragged anywhere, she (and her chest) stays where she's let go (WRECK_SET)
+function wreckBox(w) { if (!pirateArt) buildPirateArt(); const A = pirateArt[(w.v || 0) % pirateArt.length], k = A.k || 1, hw = A.W * k / 2, by = wreckBy(w); return [w.x - hw, w.x + hw, by - A.H * k, by + 10]; }
+function wreckPick(x, y, r) { if (!LAND) return null; for (const w of pirateWrecks) { const B = wreckBox(w); if (x > B[0] - r && x < B[1] + r && y > B[2] - r && y < B[3] + r) return w; } return null; }
+function wreckMoveTo(k, x, y) {
+  WRECK_SET[k] = [+clamp(floorU(clamp(x, BED_A + 200, BED_B - 200)), 0.001, 0.999).toFixed(4), Math.round(clamp(y, WATER_Y + 60, worldDeepY() + 300) - WATER_Y)]; wreckSave();
+  floorEdited();                                                  // (the floor as it is under her, the wrecks seated again)
 }
 function towerPick(x, y, r) {
   for (const t of LAND_TOWERS) { const tx = towerDefX(t), g = landTop(tx); if (Math.abs(x - tx) < TOWER_BOX.w / 2 + r && y > g - TOWER_BOX.h - r && y < g + 20 + r) return t; }
@@ -37571,10 +37627,16 @@ window.addEventListener('pointerdown', e => {
     SED.dock = { m: dk, x0: q.x, dx: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
     return;
   }
+  const wk = wreckPick(q.x, q.y, q.r);
+  if (wk) {                                                      // (a pirate wreck: dragged anywhere; let go, she lies there)
+    e.stopImmediatePropagation(); e.preventDefault();
+    SED.wreck = { w: wk, x0: q.x, y0: q.y, dx: 0, dy: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
+    return;
+  }
   const kp = krakenPick(q.x, q.y, q.r);
   if (kp) {                                                      // (the kraken: dragged along the ocean floor; let go, it sits there)
     e.stopImmediatePropagation(); e.preventDefault();
-    SED.kraken = { x0: q.x, dx: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
+    SED.kraken = { x0: q.x, y0: q.y, dx: 0, dy: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
     return;
   }
   const tw = towerPick(q.x, q.y, q.r);
@@ -37591,13 +37653,14 @@ window.addEventListener('pointerdown', e => {
   SED.o = o; SED.old = LAND_STRUCTS.map(s => Object.assign({}, s)); SED.grab = lcFromSea(q.x) - o.u; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, y0: o.y, wy: q.y };
 }, { capture: true, passive: false });
 window.addEventListener('pointermove', e => {
-  const P = SED.ptr; if (!P || P.id !== e.pointerId || (!SED.o && !SED.dock && !SED.kraken)) return;
+  const P = SED.ptr; if (!P || P.id !== e.pointerId || (!SED.o && !SED.dock && !SED.kraken && !SED.wreck)) return;
   e.stopImmediatePropagation();
   if (Math.hypot(e.clientX - P.cx, e.clientY - P.cy) > 6) P.moved = true;
   if (!P.moved) return;
   const [x, y] = screenToWorld(e.clientX, e.clientY);
   if (SED.dock) { SED.dock.dx = x - SED.dock.x0; return; }
-  if (SED.kraken) { SED.kraken.dx = x - SED.kraken.x0; return; }
+  if (SED.kraken) { SED.kraken.dx = x - SED.kraken.x0; SED.kraken.dy = y - SED.kraken.y0; return; }
+  if (SED.wreck) { SED.wreck.dx = x - SED.wreck.x0; SED.wreck.dy = y - SED.wreck.y0; return; }
   if (SED.tower) { if (inCountry(x) && lcRight(x) === !!SED.o.R) SED.o.u = Math.round(clamp(lcX(x) - SED.grab, 40 - extOf(SED.o.R), cwOf(SED.o.R) - DOCK_W - 120)); return; }
   structDragTo(SED.o, inCountry(x) && lcRight(x) === !!SED.o.R ? lcFromSea(x) - SED.grab : SED.o.u, P.y0 + (y - P.wy));
 }, { capture: true, passive: true });
@@ -37612,7 +37675,8 @@ function structUp(e) {
   const P = SED.ptr; if (!P || P.id !== e.pointerId) return;
   e.stopImmediatePropagation();
   const o = SED.o, old = SED.old; SED.o = null; SED.ptr = null;
-  if (SED.kraken) { const k = SED.kraken; SED.kraken = null; if (P.moved && Math.abs(k.dx) > 20) krakenMoveTo(KR.bx + k.dx); return; }
+  if (SED.wreck) { const k = SED.wreck; SED.wreck = null; if (P.moved && Math.hypot(k.dx, k.dy) > 20) wreckMoveTo(k.w.k, k.w.x + k.dx, wreckBy(k.w) + k.dy); return; }
+  if (SED.kraken) { const k = SED.kraken; SED.kraken = null; if (P.moved && Math.hypot(k.dx, k.dy) > 20) krakenMoveTo(KR.bx + k.dx, KR.by + k.dy); return; }
   if (SED.dock) { const d = SED.dock; SED.dock = null; if (!P.moved || Math.abs(d.dx) <= 20) return;
     if (d.m.u !== undefined) { const A = unwarpX(BED_A), B = unwarpX(BED_B); d.m.u = +clamp((unwarpX(dockXAt(d.m) + d.dx) - A) / (B - A), 0.01, 0.99).toFixed(4); docksXSave(); } else dockMoveBy(!!d.m.dockR, d.dx);   // (a placed dock: along the floor; a coast's: its coast)
     return; }
@@ -37639,14 +37703,26 @@ function structEdDraw() {
   }
   // (the kraken: a box over it on the ocean floor - dragged, a ghost where it will go)
   if (LAND && KR.on) {
-    const B = krakenBox(), dx = SED.kraken ? SED.kraken.dx : 0;
-    for (const [off, ghost] of dx ? [[0, true], [dx, false]] : [[0, false]]) {
-      const X0 = PX(B[0] + off), X1 = PX(B[1] + off), Y0 = PY(B[2]), Y = PY(B[3]);
+    const B = krakenBox(), dx = SED.kraken ? SED.kraken.dx : 0, dy = SED.kraken ? SED.kraken.dy : 0;
+    for (const [off, ghost, oy] of dx || dy ? [[0, true, 0], [dx, false, dy]] : [[0, false, 0]]) {
+      const X0 = PX(B[0] + off), X1 = PX(B[1] + off), Y0 = PY(B[2] + oy), Y = PY(B[3] + oy);
       if (X1 < 0 || X0 > VWP) continue;
       C.fillStyle = ghost ? 'rgba(255,140,200,0.06)' : 'rgba(255,140,200,0.14)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
       C.fillStyle = ghost ? 'rgba(255,140,200,0.4)' : 'rgba(255,170,215,0.95)';
       C.fillRect(X0, Y0, X1 - X0, t); C.fillRect(X0, Y0, t, Y - Y0); C.fillRect(X1 - t, Y0, t, Y - Y0); C.fillRect(X0, Y - t, X1 - X0, t);
-      if (!ghost) drawText(C, dx ? 'KRAKEN - LET GO TO PUT IT HERE' : 'KRAKEN - DRAG ALONG', Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), '#ffe0f0', Math.max(1, Math.round(dpr / PIXW)), 'center');
+      if (!ghost) drawText(C, dx || dy ? 'KRAKEN - LET GO TO PUT IT HERE' : 'KRAKEN - DRAG IT ANYWHERE', Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), '#ffe0f0', Math.max(1, Math.round(dpr / PIXW)), 'center');
+    }
+  }
+  // (the pirate wrecks: a box over each, her chest with her - dragged, a ghost where she'll go)
+  if (LAND) for (const w of pirateWrecks) {
+    const B = wreckBox(w), d = SED.wreck && SED.wreck.w === w ? SED.wreck : null, dx = d ? d.dx : 0, dy = d ? d.dy : 0;
+    for (const [off, ghost, oy] of dx || dy ? [[0, true, 0], [dx, false, dy]] : [[0, false, 0]]) {
+      const X0 = PX(B[0] + off), X1 = PX(B[1] + off), Y0 = PY(B[2] + oy), Y = PY(B[3] + oy);
+      if (X1 < 0 || X0 > VWP) continue;
+      C.fillStyle = ghost ? 'rgba(255,200,90,0.06)' : 'rgba(255,200,90,0.12)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
+      C.fillStyle = ghost ? 'rgba(255,200,90,0.4)' : 'rgba(255,214,120,0.95)';
+      C.fillRect(X0, Y0, X1 - X0, t); C.fillRect(X0, Y0, t, Y - Y0); C.fillRect(X1 - t, Y0, t, Y - Y0); C.fillRect(X0, Y - t, X1 - X0, t);
+      if (!ghost) drawText(C, dx || dy ? 'WRECK - LET GO TO PUT IT HERE' : 'WRECK ' + (w.k + 1) + (w.gold ? ' + TREASURE' : '') + ' - DRAG IT ANYWHERE', Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), '#fff0cc', Math.max(1, Math.round(dpr / PIXW)), 'center');
     }
   }
   // (the towers: a narrow box each, over its foot)
@@ -37838,10 +37914,10 @@ function terrainSync() {
 // (the floor first: the caves notice the floor by themselves; the land's rebuild ends by building them again)
 // (the islands: the land built again with them - unless the land's own rebuild just did it)
 function terrainRefresh() { const isl = ISL_ED.dirty; ISL_ED.dirty = false; const ld = LAND_ED.dirty; floorRefresh(); landRefresh(); if (isl && !ld && LAND && land.cell) landEdited(); terrainSync(); }
-function terrainReset() { if (KR_U !== null) { KR_U = null; krUSave(); } if (STRETCH_SET) { STRETCH_SET = null; stretchSave(); builtViewW = 0; resize(); } if (WORLD_EXT) { WORLD_EXT = { L: 0, R: 0 }; worldExtSet(true, 0); } if (DOCKS_X.length) { DOCKS_X = []; docksXSave(); } if (DOCK_OWN) { DOCK_OWN = { L: 0, R: 0 }; dockOwnSet(true, 1); } if (DOCK_SET) { DOCK_SET = null; dockSave(); builtViewW = 0; resize(); } floorReset(); landReset(); if (ISLANDS.length) { ISLANDS = []; islChanged(); } LAND_TOWERS = TOWER_DEF.map(t => Object.assign({}, t)); towerSave(); if (LAND && land.cell) landTowersBuild(); terrainShowTa(false); TERRAIN_ED.sel = null; terrainSyncSkin(); terrainSync(); }
+function terrainReset() { if (KR_U !== null) { KR_U = null; KR_DY = null; krUSave(); } if (WRECK_SET.some(e => e)) { WRECK_SET = [null, null, null, null]; wreckSave(); } if (STRETCH_SET) { STRETCH_SET = null; stretchSave(); builtViewW = 0; resize(); } if (WORLD_EXT) { WORLD_EXT = { L: 0, R: 0 }; worldExtSet(true, 0); } if (DOCKS_X.length) { DOCKS_X = []; docksXSave(); } if (DOCK_OWN) { DOCK_OWN = { L: 0, R: 0 }; dockOwnSet(true, 1); } if (DOCK_SET) { DOCK_SET = null; dockSave(); builtViewW = 0; resize(); } floorReset(); landReset(); if (ISLANDS.length) { ISLANDS = []; islChanged(); } LAND_TOWERS = TOWER_DEF.map(t => Object.assign({}, t)); towerSave(); if (LAND && land.cell) landTowersBuild(); terrainShowTa(false); TERRAIN_ED.sel = null; terrainSyncSkin(); terrainSync(); }
 // COPY gives {"F": the floor's points, "L"/"R": each country's, "S": the structures}; LOAD takes that, or either old
 // tab's text (the floor's [[u, depth]...], or the land's {"L", "R", "S"})
-function terrainCopyText() { const o = { F: FLOOR_PTS, L: LAND_PTS.L, R: LAND_PTS.R, S: LAND_STRUCTS }; if (WORLD_EXT) o.W = WORLD_EXT; if (ISLANDS.length) o.I = ISLANDS; if (DOCK_SET) o.D = DOCK_SET; if (DOCK_OWN) o.DO = DOCK_OWN; if (STRETCH_SET) o.X = STRETCH_SET; if (KR_U !== null) o.K = KR_U; if (DOCKS_X.length) o.DX = DOCKS_X; if (JSON.stringify(LAND_TOWERS) !== JSON.stringify(TOWER_DEF)) o.T = LAND_TOWERS; return JSON.stringify(o); }
+function terrainCopyText() { const o = { F: FLOOR_PTS, L: LAND_PTS.L, R: LAND_PTS.R, S: LAND_STRUCTS }; if (WORLD_EXT) o.W = WORLD_EXT; if (ISLANDS.length) o.I = ISLANDS; if (DOCK_SET) o.D = DOCK_SET; if (DOCK_OWN) o.DO = DOCK_OWN; if (STRETCH_SET) o.X = STRETCH_SET; if (KR_U !== null) o.K = KR_DY === null ? KR_U : [KR_U, KR_DY]; if (WRECK_SET.some(e => e)) o.P = WRECK_SET; if (DOCKS_X.length) o.DX = DOCKS_X; if (JSON.stringify(LAND_TOWERS) !== JSON.stringify(TOWER_DEF)) o.T = LAND_TOWERS; return JSON.stringify(o); }
 function terrainLoad(text) {
   const o = JSON.parse(text);
   if (Array.isArray(o)) { floorLoad(o); return; }
@@ -37858,8 +37934,10 @@ function terrainLoad(text) {
   if (o.L !== undefined) landLoad(o);                              // (checks the land's part before anything changes)
   if (o.F !== undefined) floorLoad(o.F);
   if ((o.D || null) !== DOCK_SET && JSON.stringify(o.D || null) !== JSON.stringify(DOCK_SET)) { DOCK_SET = o.D || null; dockSave(); builtViewW = 0; resize(); }
-  if (o.K !== undefined && o.K !== null && !(isFinite(o.K) && o.K > 0 && o.K < 1)) throw new Error('K: the kraken\'s place needs a number between 0 and 1 along the floor');
-  if ((o.K ?? null) !== KR_U) { KR_U = o.K ?? null; krUSave(); floorEdited(); }
+  if (o.K !== undefined && o.K !== null && !((isFinite(o.K) && o.K > 0 && o.K < 1) || (Array.isArray(o.K) && o.K.length === 2 && o.K[0] > 0 && o.K[0] < 1 && isFinite(o.K[1])))) throw new Error('K: the kraken\'s place needs a number between 0 and 1 along the floor');
+  if (o.P !== undefined && !wreckSetOk(o.P)) throw new Error('P: the wrecks\' places need four of [a number between 0 and 1 along the floor, a depth] or null');
+  if (JSON.stringify(o.P || [null, null, null, null]) !== JSON.stringify(WRECK_SET)) { WRECK_SET = o.P || [null, null, null, null]; wreckSave(); floorEdited(); }
+  { const k = o.K ?? null, u = Array.isArray(k) ? k[0] : k, d = Array.isArray(k) ? k[1] : null; if (u !== KR_U || d !== KR_DY) { KR_U = u; KR_DY = u === null ? null : d; krUSave(); floorEdited(); } }
   if (JSON.stringify(o.X || null) !== JSON.stringify(STRETCH_SET)) { STRETCH_SET = o.X || null; stretchSave(); builtViewW = 0; resize(); }
   if (JSON.stringify(o.W || null) !== JSON.stringify(WORLD_EXT)) { const W = o.W || { L: 0, R: 0 }; WORLD_EXT = { L: W.L, R: 0 }; worldExtSet(true, W.R); }
   if (JSON.stringify(o.DX || []) !== JSON.stringify(DOCKS_X)) { DOCKS_X = (o.DX || []).map(d => Object.assign({}, d)); docksXSave(); }
@@ -40466,7 +40544,7 @@ async function start(data) {
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
   Object.assign(window.__game, { structs: () => LAND_STRUCTS, structDragTo: (i, u, y) => structDragTo(LAND_STRUCTS[i], u, y), structUp: old => { structSave(); structEdited(old); }, airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landShape: () => ({ pts: LAND_PTS, def: LAND_DEF, lakes: (land.lakes || []).map(L => [L[0], L[1], L.today ? 1 : 0]), ms: landEditMs, any: LSH.any }), landSet: P => { LAND_PTS = P; landSave(); landEdited(); }, landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landDragTo: (R, k, x, y) => landDragTo({ R, k }, x, y), landUp: () => { landSave(); landEdited(); }, landPtX: (R, u) => landPtX(R, u), landLock: x => landLock(x), landProfile0: x => landProfile0(x, land.R), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), setOwner: (i, v) => { const o = LAND_STRUCTS[i]; if (v === (o.R ? 1 : 0)) delete o.own; else o.own = v; }, islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x),
-    dockOwnSet: (R, v) => dockOwnSet(R, v), worldExtSet: (R, n) => worldExtSet(R, n), buildTimes: () => BUILD_T.slice(), landHillsAt: x => landHillsAt(x), landNatAt: x => landNat(x, land.R), stretchSel: (sel, n) => { const sp = selBaseSpan(sel); return sp ? stretchAt(sp[0], sp[1], n * VIEW_W) : false; }, stretchReset: () => { STRETCH_SET = null; stretchSave(); builtViewW = 0; resize(); }, lakes: () => (land.lakes || []).map(L => [Math.round(L[0]), Math.round(L[1])]), krakenMoveTo: x => krakenMoveTo(x), krSeat: () => ({ x: Math.round(KR.bx), y: Math.round(KR.by), u: KR_U }), landEvictNow: () => { if (!land.seen) return 0; land.seen.fill(-1e6); const n = land.chunks.filter(Boolean).length; landEvict(); return n - land.chunks.filter(Boolean).length; }, landCounts: () => ({ stones: (land.stones || []).length, props: (land.props || []).length, tufts: (land.tufts || []).length, boulders: (land.boulders || []).length, outcrops: (land.outcrops || []).length, cells: land.cell ? land.cell.length : 0 }), worldInfo: () => ({ W: WORLD_W, EXT_L, EXT_R, SEA0, SEA1, VIEW_W, BED_A, BED_B, cols: land.cols, pts: LAND_PTS }), docksXSet: L => { DOCKS_X = L; docksXSave(); }, sandY: x => sandY(x), myTw: p => myTw(p), ownTowers: p => ownTowers(p), dockInfo: () => ({ owned: DOCKS_OWNED, docks: docks.map(d => ({ x: Math.round(d.quay), dir: d.dir, player: d.player, tw: towers.indexOf(d._tw) })), home: homeDock.map(d => ({ x: Math.round(d.quay), dir: d.dir, stand: !!d.stand, player: d.player })), towers: towers.map(t => ({ p: t.player, x: Math.round(t.x), hp: t.hp, edge: !!t.edge })), ships: ships.map(s => s.state), subs: subs.map(s => s.state), fleet: [0, 1].map(p => [fleet[p].ship, fleet[p].sub]) }) });
+    dockOwnSet: (R, v) => dockOwnSet(R, v), worldExtSet: (R, n) => worldExtSet(R, n), buildTimes: () => BUILD_T.slice(), landHillsAt: x => landHillsAt(x), landNatAt: x => landNat(x, land.R), stretchSel: (sel, n) => { const sp = selBaseSpan(sel); return sp ? stretchAt(sp[0], sp[1], n * VIEW_W) : false; }, stretchReset: () => { STRETCH_SET = null; stretchSave(); builtViewW = 0; resize(); }, lakes: () => (land.lakes || []).map(L => [Math.round(L[0]), Math.round(L[1])]), krakenMoveTo: (x, y) => krakenMoveTo(x, y), wreckMoveTo: (k, x, y) => wreckMoveTo(k, x, y), wrecks: () => pirateWrecks.map(w => ({ k: w.k, x: Math.round(w.x), y: w.y, by: Math.round(wreckBy(w)), flat: w.flat, chest: chestAt(w).map(Math.round) })),  krSeat: () => ({ x: Math.round(KR.bx), y: Math.round(KR.by), u: KR_U }), landEvictNow: () => { if (!land.seen) return 0; land.seen.fill(-1e6); const n = land.chunks.filter(Boolean).length; landEvict(); return n - land.chunks.filter(Boolean).length; }, landCounts: () => ({ stones: (land.stones || []).length, props: (land.props || []).length, tufts: (land.tufts || []).length, boulders: (land.boulders || []).length, outcrops: (land.outcrops || []).length, cells: land.cell ? land.cell.length : 0 }), worldInfo: () => ({ W: WORLD_W, EXT_L, EXT_R, SEA0, SEA1, VIEW_W, BED_A, BED_B, cols: land.cols, pts: LAND_PTS }), docksXSet: L => { DOCKS_X = L; docksXSave(); }, sandY: x => sandY(x), myTw: p => myTw(p), ownTowers: p => ownTowers(p), dockInfo: () => ({ owned: DOCKS_OWNED, docks: docks.map(d => ({ x: Math.round(d.quay), dir: d.dir, player: d.player, tw: towers.indexOf(d._tw) })), home: homeDock.map(d => ({ x: Math.round(d.quay), dir: d.dir, stand: !!d.stand, player: d.player })), towers: towers.map(t => ({ p: t.player, x: Math.round(t.x), hp: t.hp, edge: !!t.edge })), ships: ships.map(s => s.state), subs: subs.map(s => s.state), fleet: [0, 1].map(p => [fleet[p].ship, fleet[p].sub]) }) });
   Object.assign(window.__game, { floor: () => ({ pts: FLOOR_PTS, def: FLOOR_DEF, A: BED_A, B: BED_B, TR: [TR_A, TR_B], max: SEA_FLOOR_MAX, deepest: floorDeepest(), tab: !!floorTab }), floorProfile: x => floorProfile(x), floorSet: P => { FLOOR_PTS = P; floorEdited(); }, floorEdited: () => floorEdited(), bedSmooth: x => bedSmooth(x), floorEdOn: () => floorEdOn(), floorED: () => FLOOR_ED, S: () => S, viewW: () => VIEW_W, editorTab: t => { const b = [...document.querySelectorAll('#skyEd button.tab')].find(q => q.textContent === t); if (b) b.click(); return !!b; }, editorOpen: () => { if (!NSKY.editor.TUNE.built) skyNewFrame(); if (NSKY.editor.TUNE.root.hidden) NSKY.editor.TUNE.openBtn.click(); },
     civHalfGap: c => [0, 1].map(i => { const h = c.hv && c.hv[i]; if (!h) return null; const kl = civHalfKeel(c, i, civArt(c), CIV[c.kind]), mx = h.x + kl.m * Math.cos(h.a), my = h.y + kl.m * Math.sin(h.a), ca = Math.cos(h.a), sa = Math.sin(h.a), d = kl.pts.map(([lx, ly]) => civFloor(mx + lx * ca - ly * sa) - (my + lx * sa + ly * ca)); return { a: h.a, rest: !!h.rest, min: Math.min(...d), max: Math.max(...d) }; }),
     civHalfPoint: (c, x, y) => civHalfPoint(c, x, y), msPings: () => msPings, partRestOf: sb => sb.parts.map(q => ({ y: q.y, a: q.a, rest: q.rest, r: partRest(sb, q) })), floorRest: (pts, cx, amax, a0) => floorRest(pts, cx, null, amax, a0), ms: { hold: msHold, keys: msKeys }, chargeAt: (x, y) => detonateCharge({ x, y, owner: -1 }) });
