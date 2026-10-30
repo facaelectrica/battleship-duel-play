@@ -1356,6 +1356,8 @@ function captainDies(v) {
   c.state = 'bones'; c.veh = null; c.t = time;                                 // (straight to the skull, with a red X)
   if (!capsLeft(p) && !crew[p].dead) killCaptain(p);                            // the last of them: the round is lost
 }
+// (engine stage 3) 'lost' {kind: ship|sub|plane|tank|heli, o}: a vehicle sunk, blown up or crashed (36-zz-events.js)
+on('lost', e => captainDies(e.o), 'captains', 10);
 // home again (berthed, docked, in the hangar): the captain steps ashore
 function stepCaptains() {
   if (!useCaptains()) return;
@@ -3041,8 +3043,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 339;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 11:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 340;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 11:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6587,6 +6589,17 @@ function hullBreak(sh) {
   if (h.reduce((a, b) => a + b, 0) > MAX_HITS) { let w = 0; for (let i = 1; i < SECTIONS; i++) if (h[i] > h[w]) w = i; return clamp(w === 0 ? 1 : w, 1, SECTIONS - 1); }
   return 0;
 }
+// (engine stage 3) a shell's or a round's hit, 'hit' {kind: 'ship', o, sec, amt, x, y, vx, vy, shell} (36-zz-events.js): the
+// section damaged; a shell also knocks her about
+on('hit', e => {
+  if (e.kind !== 'ship') return;
+  const sh = e.o;
+  if (!e.shell) { damageSection(sh, e.sec, e.amt); return; }
+  damageSection(sh, e.sec, e.amt, e.x, e.y);
+  sh.vx += e.vx * 0.02;
+  sh.w += (e.x - sh.x) * 0.0009 * Math.sign(e.vy || 1);
+  sh.vy += 6;
+}, 'ships');
 // dent: the damage is from ramming - crumpled plating and sparks, but no fire and no smoke
 function damageSection(sh, i, steps, hx, hy, dent) {
   if (sh.state !== 'afloat' || i < 0 || i >= SECTIONS || steps <= 0) return;
@@ -6928,6 +6941,20 @@ function stepChunks(dt) {
 // random sources (36-zz-tables.js) come after this file. Its tables: 36-zzz-arms-tables.js
 let armTowerR_ = null;
 const armTowerR = () => (armTowerR_ || (armTowerR_ = sysRng('armTowers')))(), armTowerRnd = (a, b) => a + (b - a) * armTowerR();
+// (engine stage 3) a shell's hit, 'hit' {kind: 'tower', o, x, y} (36-zz-events.js): ten shells bring a tower down; one
+// already down only takes the impact
+on('hit', e => {
+  if (e.kind !== 'tower') return;
+  const tw = e.o;
+  if (tw.hp > 0) {
+    tw.hp -= 1;
+    noteHit(tw.player, 'tower');
+    towerScorch(tw, e.x, e.y, 10);
+    sectionBlast(e.x, e.y, 0.8, 0);
+    spawnDebris(e.x, e.y, 8, 0);
+    if (tw.hp <= 0) crumbleTower(tw);
+  } else impact(e.x, e.y);
+}, 'towers');
 function crumbleTower(tw) {
   if (netGuestHold()) return;                              // (online guest: only when the host says so)
   tw.marks = null;
@@ -7081,6 +7108,15 @@ function rebuildSubArt(sb) {
   };
   sb.art = sb.scorch.length ? { I: make(base.I), D: make(base.D) } : null;
 }
+// (engine stage 3) a shell's or a round's hit, 'hit' {kind: 'sub', o, sec, x, y, chip, note} (36-zz-events.js): a shell holes her;
+// rounds chip at her hull (chip each, twenty make a hole; note: the alarm on her player's screen)
+on('hit', e => {
+  if (e.kind !== 'sub') return;
+  const sb = e.o;
+  if (!e.chip) { hitSub(sb, e.sec, e.x, e.y); return; }
+  if (e.note) noteHit(sb.id, 'sub');
+  sb.chip = (sb.chip || 0) + e.chip; if (sb.chip >= 1) { sb.chip = 0; hitSub(sb, e.sec, e.x, e.y); }
+}, 'subs');
 function hitSub(sb, sec, x, y, ram) {
   if (sb.state !== 'out' && sb.state !== 'docked') return;
   noteHit(sb.id, 'sub');
@@ -7194,7 +7230,7 @@ function sinkSub(sb) {
   if (sb.state !== 'out' && sb.state !== 'docked') return;
   sb.state = 'sinking'; sb.sinkT = 0; sb.throttle = 0; sb.input = 0;
   if (subs[sb.id] === sb) fleet[sb.id].sub = Math.max(0, fleet[sb.id].sub - 1);
-  captainDies(sb);
+  emit('lost', { kind: 'sub', o: sb });
   // she breaks in two where the last hit struck; each half goes down on its own and buries itself in the sand
   const last = sb.lastSec === undefined ? 4 : sb.lastSec, cut = clamp(vehSubR() < 0.5 ? last : last + 1, 1, SUB_SECTIONS - 1);
   sb.parts = [[0, cut], [cut, SUB_SECTIONS]].map(([s0, s1], i) => {
@@ -8861,7 +8897,9 @@ function launchPlane(pl) {
   sfxPlaneIn(pl.x);
 }
 function planeTurn(pl) { if ((pl.state === 'fly' || pl.state === 'free') && !pl.turn) pl.turn = { t: 0, from: pl.facing }; }
-// a hit: amt 1 for a shell or a bomb, a fraction for each machine-gun round
+// a hit: amt 1 for a shell or a bomb, a fraction for each machine-gun round. (engine stage 3: a shell's or a round's
+// comes as 'hit' {kind: 'plane', o, amt, x, y} - 36-zz-events.js)
+on('hit', e => { if (e.kind === 'plane') hitPlane(e.o, e.amt, e.x, e.y); }, 'planes');
 function hitPlane(pl, amt, x, y) {
   if (pl.state !== 'fly') return;
   noteHit(pl.id, 'plane');
@@ -8909,7 +8947,7 @@ function downPlane(pl) {
 function planeLost(pl) {
   pl.turn = null; pl.mg = false; pl.strand = null;
   fleet[pl.id].plane = Math.max(0, fleet[pl.id].plane - 1);
-  captainDies(pl);
+  emit('lost', { kind: 'plane', o: pl });
   if (crew[pl.id].mode === 'plane' || seatDriving(pl.id, 'plane')) lostVeh(pl.id, pl.x, 'plane');
   else if (crew[pl.id].mode === 'dock' && !hasForces(pl.id)) killCaptain(pl.id);
 }
@@ -10529,7 +10567,7 @@ function stepShells(dt) {
       if (!s.crushed) {
         let hitS = false; blastOpen();   // (what goes off here is BLAST_K bigger - 33-zz-blast-scale)
         for (const d of docks) if (d.player !== s.owner) { const pi = pillarAt(d, s.x, s.y); if (pi >= 0) { breakPillar(d, pi, s.x, s.y); hitS = true; break; } }
-        if (!hitS) for (const sb of subs) { if (sb.id === s.owner) continue; const sec = subHitTest(sb, s.x, s.y); if (sec >= 0) { hitSub(sb, sec, s.x, s.y); hitS = true; break; } }
+        if (!hitS) for (const sb of subs) { if (sb.id === s.owner) continue; const sec = subHitTest(sb, s.x, s.y); if (sec >= 0) { emit('hit', { kind: 'sub', o: sb, sec, x: s.x, y: s.y }); hitS = true; break; } }
         if (!hitS) for (const sh of ships) { if (sh.state !== 'afloat' || sh.id === s.owner) continue; const sec = hitTest(sh, s.x, s.y); if (sec >= 0) { shellHit(s, sh, sec); hitS = true; break; } }
         if (!hitS) { const w = wreckAt(s.x, s.y); if (w) { blowWreck(w[0], w[1], s.x, s.y, 1, s.vx); hitS = true; } }
         if (!hitS && LAND && civHitFor(s, s.x, s.y, 1, s.vx)) hitS = true;
@@ -10604,7 +10642,7 @@ function stepShells(dt) {
       if (d.player === s.owner && (s.age < 1.2 || s.from === 'tower')) continue;     // your own tower's shells pass over your harbour
       if (harbourHit(d, s.x, s.y)) { impact(s.x, s.y); done = true; break; }
     }
-    if (!done) for (const pl of planes) if (pl && pl.id !== s.owner && planeHitTest(pl, s.x, s.y)) { hitPlane(pl, PLANE_HITS, s.x, s.y); impact(s.x, s.y); done = true; break; }   // a shell or a bomb: it's down at once
+    if (!done) for (const pl of planes) if (pl && pl.id !== s.owner && planeHitTest(pl, s.x, s.y)) { emit('hit', { kind: 'plane', o: pl, amt: PLANE_HITS, x: s.x, y: s.y }); impact(s.x, s.y); done = true; break; }   // a shell or a bomb: it's down at once
     if (!done) for (const sh of ships) {
       if (sh.state !== 'afloat' || sh.id === s.owner) continue;                  // your own shells and bombs never hit your own boats
       const sec = hitTest(sh, s.x, s.y);
@@ -10613,23 +10651,13 @@ function stepShells(dt) {
     if (!done) for (const sb of subs) {
       if (sb.id === s.owner) continue;
       const sec = subHitTest(sb, s.x, s.y);
-      if (sec >= 0) { hitSub(sb, sec, s.x, s.y); done = true; break; }
+      if (sec >= 0) { emit('hit', { kind: 'sub', o: sb, sec, x: s.x, y: s.y }); done = true; break; }
     }
     if (!done) for (const tw of towers) {
       if (tw.player === s.owner) continue;                                       // nor your own tower
-      if (towerHit(tw, s.x, s.y)) {
-        if (tw.hp > 0) {
-          tw.hp -= 1;                                    // ten shells bring a tower down
-          noteHit(tw.player, 'tower');
-          towerScorch(tw, s.x, s.y, 10);
-          sectionBlast(s.x, s.y, 0.8, 0);
-          spawnDebris(s.x, s.y, 8, 0);
-          if (tw.hp <= 0) crumbleTower(tw);
-        } else impact(s.x, s.y);
-        done = true; break;
-      }
+      if (towerHit(tw, s.x, s.y)) { emit('hit', { kind: 'tower', o: tw, amt: 1, x: s.x, y: s.y }); done = true; break; }   // (23-harbour-gates)
     }
-    if (!done) for (const tw of towers) if (tw.player !== s.owner && pierGunHit(tw, s.x, s.y)) { hurtPierGun(tw, 1, s.x, s.y); sectionBlast(s.x, s.y, 0.6, 0); done = true; break; }
+    if (!done) for (const tw of towers) if (tw.player !== s.owner && pierGunHit(tw, s.x, s.y)) { emit('hit', { kind: 'piergun', o: tw, amt: 1, x: s.x, y: s.y }); sectionBlast(s.x, s.y, 0.6, 0); done = true; break; }
     if (!done && LAND && civHitFor(s, s.x, s.y, s.from === 'bomb' ? 2 : 1, s.vx)) done = true;   // (OPEN WORLD: the big ships, section by section)
     if (!done && s.age > 0.35) for (const sb of sailboats) if (sb.state === 'sail' && sailHit(sb, s.x, s.y)) { sinkSailboat(sb, s.x, s.y, s.vx); done = true; break; }
     if (!done && s.age > 0.35) for (const sb of sailboats) if (sailWreckHit(sb, s.x, s.y)) { smashSailboat(sb, s.x, s.y, 2); impact(s.x, s.y); done = true; break; }
@@ -10696,7 +10724,7 @@ function stepShells(dt) {
       b.vx *= Math.exp(-7 * dt); b.vy = b.vy * Math.exp(-7 * dt) + 20 * dt;
       if (armShellR() < 0.5) addBubble(b.x, b.y, armShellRnd(-3, 3), -armShellRnd(8, 20), armShellRnd(0.5, 1));
       let hitU = false;
-      for (const sb of subs) { if (sb.id === b.owner) continue; const sec = subHitTest(sb, b.x, b.y); if (sec >= 0) { sb.chip = (sb.chip || 0) + 0.05; if (sb.chip >= 1) { sb.chip = 0; hitSub(sb, sec, b.x, b.y); } hitU = true; break; } }
+      for (const sb of subs) { if (sb.id === b.owner) continue; const sec = subHitTest(sb, b.x, b.y); if (sec >= 0) { emit('hit', { kind: 'sub', o: sb, sec, x: b.x, y: b.y, chip: 0.05 }); hitU = true; break; } }
       if (!hitU && LAND) { const ms = msHitAt(b.x, b.y, 1); if (ms) { hitU = true; spawnSparks(b.x, b.y, 3, 80); ms.chip = (ms.chip || 0) + 0.25; if (ms.chip >= 1) minisubLost(ms); } }   // (the research sub: a few rounds just under the surface hole it - user Oct 27)
       if (hitU || Math.abs(b.vx) + Math.abs(b.vy) < 50 || b.y > seabedY(b.x) - 2 || b.age > 3 * MG_T) bullets.splice(i, 1);
       continue;
@@ -10718,13 +10746,13 @@ function stepShells(dt) {
       break;
     }
     // another plane: six rounds make a hit
-    for (const pl of planes) if (pl && pl.id !== b.owner && planeHitTest(pl, b.x, b.y)) { hitPlane(pl, 1 / 6, b.x, b.y); done = true; break; }
+    for (const pl of planes) if (pl && pl.id !== b.owner && planeHitTest(pl, b.x, b.y)) { emit('hit', { kind: 'plane', o: pl, amt: 1 / 6, x: b.x, y: b.y }); done = true; break; }
     if (!done && OWM && landBulletHit(b)) done = true;
     if (!done && LAND && civHitFor(b, b.x, b.y, 0.04, b.vx * 0.05)) done = true;               // (LAND TEST: a tank, a helicopter, the ground)
     if (!done) for (const sh of ships) {
       if (sh.state !== 'afloat' || sh.id === b.owner) continue;
       const sec = hitTest(sh, b.x, b.y);
-      if (sec >= 0) { damageSection(sh, sec, 0.05); spawnSparks(b.x, b.y, 4, 120); done = true; break; }
+      if (sec >= 0) { emit('hit', { kind: 'ship', o: sh, sec, amt: 0.05 }); spawnSparks(b.x, b.y, 4, 120); done = true; break; }
     }
     // bullets just spark off the concrete, leaving black pock marks
     if (!done) for (const tw of towers) if (tw.player !== b.owner && towerHit(tw, b.x, b.y)) {
@@ -10733,10 +10761,10 @@ function stepShells(dt) {
       if ((tw.soot = (tw.soot || 0) + 1) % 4 === 0) towerScorch(tw, b.x, b.y, 3.2);      // (and a smudge of soot every few rounds)
       done = true; break;
     }
-    if (!done) for (const tw of towers) if (tw.player !== b.owner && pierGunHit(tw, b.x, b.y)) { hurtPierGun(tw, 1 / 6, b.x, b.y); done = true; break; }
+    if (!done) for (const tw of towers) if (tw.player !== b.owner && pierGunHit(tw, b.x, b.y)) { emit('hit', { kind: 'piergun', o: tw, amt: 1 / 6, x: b.x, y: b.y }); done = true; break; }
     if (!done) for (const d of docks) if (d.player !== b.owner && harbourHit(d, b.x, b.y)) { spawnSparks(b.x, b.y, 3, 100); done = true; break; }
     // a submarine's hull takes them the way the battleship's does: twenty rounds make a hole
-    if (!done) for (const sb of subs) { if (sb.id === b.owner) continue; const sec = subHitTest(sb, b.x, b.y); if (sec >= 0) { spawnSparks(b.x, b.y, 3, 100); noteHit(sb.id, 'sub'); sb.chip = (sb.chip || 0) + 0.05; if (sb.chip >= 1) { sb.chip = 0; hitSub(sb, sec, b.x, b.y); } done = true; break; } }
+    if (!done) for (const sb of subs) { if (sb.id === b.owner) continue; const sec = subHitTest(sb, b.x, b.y); if (sec >= 0) { spawnSparks(b.x, b.y, 3, 100); emit('hit', { kind: 'sub', o: sb, sec, x: b.x, y: b.y, chip: 0.05, note: true }); done = true; break; } }
     if (!done) for (const sb of sailboats) if (sb.state === 'sail' && sailHit(sb, b.x, b.y)) { sinkSailboat(sb, b.x, b.y, b.vx * 0.05); done = true; break; }
     if (!done) for (const sb of sailboats) if (sailWreckHit(sb, b.x, b.y)) { smashSailboat(sb, b.x, b.y, 0.15); done = true; break; }
     if (!done) for (const bu of buoys) if (bu.player !== b.owner && buoyHit(bu, b.x, b.y)) { destroyBuoy(bu, b.x, b.y); done = true; break; }
@@ -10763,10 +10791,7 @@ function shellHit(s, sh, sec) {
   // the section itself goes up: bigger each level, nothing but sparks on the empty bow
   if (fire > 0) shipBlast(sh, s.x, s.y, (0.45 + 0.5 * fire) * (0.75 + 0.25 * Math.min(3, sh.lvl[sec] + 1)));
   else shipBlast(sh, s.x, s.y, 0.3);
-  damageSection(sh, sec, 1, s.x, s.y);
-  sh.vx += s.vx * 0.02;
-  sh.w += (s.x - sh.x) * 0.0009 * Math.sign(s.vy || 1);
-  sh.vy += 6;
+  emit('hit', { kind: 'ship', o: sh, sec, amt: 1, x: s.x, y: s.y, vx: s.vx, vy: s.vy, shell: true });   // (the ship takes it: 22-ship-physics)
   spawnDebris(s.x, s.y, 8, sh.vx + s.vx * 0.05);
 }
 
@@ -10899,7 +10924,9 @@ const pgElev = tw => pgManned(tw) ? tguns[tw.player].elev : (tw.pg.el != null ? 
 // the pivot: on top of its round housing
 const pgPivot = pg => [pg._x, pg._y - 11 * PGK];
 function pierGunHit(tw, x, y) { const pg = tw && tw.pg; return !!pg && pg.hp > 0 && !pg.gone && Math.abs(x - pg._x) < 13 * PGK && y > pg._y - 17 * PGK && y < pg._y + 1; }
-// a blow: n hits (fractions add up: the machine gun's rounds)
+// a blow: n hits (fractions add up: the machine gun's rounds). (engine stage 3: a shell's or a round's comes as 'hit'
+// {kind: 'piergun', o: the tower, amt, x, y} - 36-zz-events.js)
+on('hit', e => { if (e.kind === 'piergun') hurtPierGun(e.o, e.amt, e.x, e.y); }, 'pierGuns');
 function hurtPierGun(tw, n, x, y) {
   const pg = tw.pg;
   if (!pg || pg.hp <= 0 || netGuestHold()) return;
@@ -11134,7 +11161,7 @@ function sinkShip(sh) {
   if (sh.state !== 'afloat') return;
   sh.state = 'sinking'; sh.sinkT = 0; sh.input = 0; sh.throttle = 0; sh.moored = false;
   if (ships[sh.id] === sh) fleet[sh.id].ship = Math.max(0, fleet[sh.id].ship - 1);
-  captainDies(sh);
+  emit('lost', { kind: 'ship', o: sh });                  // (engine stage 3: the captain (06-fleet-captains), the fish (35-particles))
   if (crew[sh.id].mode === 'ship') setOrder(telegraphs[sh.id], 3);   // only if you were aboard her
   // the hull parts at the sections that were blown open
   const cuts = new Set();
@@ -11171,7 +11198,6 @@ function sinkShip(sh) {
     for (let i = 0; i < 30; i++) addBubble(x + armPieceRnd(-20, 20), WATER_Y + armPieceRnd(4, 26), armPieceRnd(-15, 15), -armPieceRnd(20, 60), armPieceRnd(1, 3.2));
   }
   shakeAt(16, sh.x);
-  scareFish(sh.x, WATER_Y + 120, 400);
   while (pieces.length > 60) pieces.shift();
   // heavy chunks (turrets, masts) tumble off and sink on their own
   for (let i = 0; i < 6; i++) {
@@ -11681,6 +11707,7 @@ function shock(x, y, power, faint, len = 0) {
 }
 function scareFish(x, y, r) { for (const s of schools) if (Math.abs(s.x - x) < r && Math.abs(s.y - y) < r) { s.flee = 2.5; s.dir = s.x < x ? -1 : 1; } }
 on('splash', e => scareFish(e.x, e.y + 40, 160), 'fish', 10);   // (engine stage 3: a splash - 36-zz-events.js)
+on('lost', e => { if (e.kind === 'ship') scareFish(e.o.x, WATER_Y + 120, 400); }, 'fish', 20);   // (a battleship going down)
 function stepShocks(dt) {
   for (let i = shocks.length - 1; i >= 0; i--) {
     const w = shocks[i];
@@ -33239,7 +33266,7 @@ function krSubLost(sb) {
   if (netGuestHold() || (sb.state !== 'out' && sb.state !== 'docked')) return;
   sb.state = 'gone'; sb.throttle = 0; sb.input = 0; sb._krHeld = false;
   if (subs[sb.id] === sb) fleet[sb.id].sub = Math.max(0, fleet[sb.id].sub - 1);
-  captainDies(sb);
+  emit('lost', { kind: 'sub', o: sb });
   sb.auto = null;
   if (crew[sb.id].mode === 'sub' || seatDriving(sb.id, 'sub')) lostVeh(sb.id, sb.x, 'sub');
   else if (crew[sb.id].mode === 'dock' && !hasForces(sb.id)) killCaptain(sb.id);
@@ -33581,7 +33608,7 @@ function tankSink(t) {
   if (t.state !== 'alive' || netGuestHold()) return;
   t.state = 'sink'; t.vx = 0; t.vy = 0; t.sinkT = 0;
   lakeSplash(t.x, 1.2);
-  captainDies(t);
+  emit('lost', { kind: 'tank', o: t });
   landWait[t.id].tank = LAND_RESPAWN;
   if (crew[t.id].mode === 'tank') lostUnit(t.id, t.x, 'tank');
 }
@@ -41310,7 +41337,7 @@ function killTank(t) {
   const dry = onLand(t.x) && !lakeAt(t.x);
   landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.carry != null || t.hook ? 0 : t.a, facing: t.facing, t: 0, burn: 8, deck: t.deck || null });
   if (dry && t.carry == null && !t.hook) landCarve(t.x, t.y, 10);
-  captainDies(t);
+  emit('lost', { kind: 'tank', o: t });
   landWait[t.id].tank = LAND_RESPAWN;
   if (crew[t.id].mode === 'tank') lostUnit(t.id, t.x, 'tank');
 }
@@ -41636,7 +41663,7 @@ function heliGroundGone(h, mine) {
 function heliLost(h) {
   if (h.lostDone) return;
   h.lostDone = true;
-  captainDies(h);
+  emit('lost', { kind: 'heli', o: h });
   landWait[h.id].heli = LAND_RESPAWN;
   if (crew[h.id].mode === 'heli') lostUnit(h.id, h.x, 'heli');
 }
