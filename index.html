@@ -2859,8 +2859,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 372;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 18:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 373;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 18:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14792,6 +14792,49 @@ void main() {
   if (b <= 0.0) discard;
   o = vec4(mix(s.rgb, u_col * s.a, min(1.0, b)), s.a);
 }`;
+// THE SKY'S TEXTURE ON THE GPU (Oct 30 evening, branch opt-skytex): the gradient's streaky bands (17-frame.js skyBack, SKY TEXTURE)
+// were painted cell by cell in JS - two value noises a cell - and the whole picture uploaded whenever the sun's parallax or the top of
+// deck 1 moved: in a two-view fight nearly every frame, 13 to 17 ms. The same sums a cell here: the same integer hash (uint maths wraps
+// as Math.imul and | 0 do), the same smoothstepped value noise, each noise's whole and fractional parts split in integers as the
+// double sums land them; each row's place in the gradient (bands x (y - top) / span) from JS in doubles, its whole part apart from
+// its fraction, so a band's edge is decided on a small number. u_ki: the texture's shift (shX), the horizon's row, the bands, the
+// rows; u_amp: the noise's reach in bands; u_col: the bands' colours, then the horizon's (under it)
+const GL_KFS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp sampler2D u_rows; uniform vec4 u_col[65]; uniform ivec4 u_ki; uniform float u_amp; uniform vec2 u_size; uniform vec4 u_quad; uniform vec4 u_cells;
+out vec4 o;
+float kv(int x, int y) { uint h = uint(x) * 374761393u + uint(y) * 668265263u; h = (h ^ (h >> 13u)) * 1274126177u; h = h ^ (h >> 16u); return float(h) / 4294967296.0; }
+float kn(int xi, int yi, float fx, float fy) {
+  float sx = fx * fx * (3.0 - 2.0 * fx), sy = fy * fy * (3.0 - 2.0 * fy);
+  float a = kv(xi, yi), b = kv(xi + 1, yi), c = kv(xi, yi + 1), d = kv(xi + 1, yi + 1);
+  return a + (b - a) * sx + (c - a + (a - b + d - c) * sx) * sy;
+}
+int fdiv(int a, int d) { return a >= 0 ? a / d : -((d - 1 - a) / d); }
+void main() {
+  // (the cell from this pixel's place against the quad's corner, as the sprites' texel choice is made - GL_FS)
+  vec2 f = vec2(gl_FragCoord.x, u_size.y - gl_FragCoord.y);
+  ivec2 c = ivec2(floor(u_cells.xy + (f - u_quad.xy) * (u_cells.zw - u_cells.xy) / u_quad.zw));
+  int bands = u_ki.z;
+  if (c.y >= u_ki.y) { o = u_col[bands]; return; }
+  int wx = c.x - u_ki.x, y = max(0, c.y);
+  // skyNoise(wx / 90, y / 3)
+  int q1 = fdiv(wx, 90), r1 = wx - 90 * q1, qy1 = y / 3, ry1 = y - 3 * qy1;
+  // skyNoise(wx / 23 + 17.3, y / 1.5 + 5.1)
+  int q2 = fdiv(wx, 23), r2 = wx - 23 * q2, y2 = 2 * y, qy2 = y2 / 3, ry2 = y2 - 3 * qy2, x2 = q2 + 17;
+  float t2 = float(r2) / 23.0 + 0.3; if (r2 >= 17) { t2 -= 1.0; x2 += 1; }
+  float n = kn(q1, qy1, float(r1) / 90.0, float(ry1) / 3.0) + 0.5 * kn(x2, qy2 + 5, t2, float(ry2) / 3.0 + 0.1) - 0.75;
+  vec2 rw = texelFetch(u_rows, ivec2(clamp(y, 0, u_ki.w - 1), 0), 0).rg;
+  int i = clamp(int(rw.x) + int(floor(rw.y + n * u_amp)), 0, bands - 1);
+  o = u_col[i];
+}`;
+function glSkySetup() {
+  const gl = GLR.gl, p = gl.createProgram();
+  gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_KFS));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  GLR.kprog = p; GLR.kU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_rows', 'u_col', 'u_ki', 'u_amp']) GLR.kU[k] = gl.getUniformLocation(p, k);
+  GLR.krows = null; GLR.krowsW = 0;
+}
 function glBurnSetup() {
   const gl = GLR.gl, p = gl.createProgram();
   gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_BFS));
@@ -15560,7 +15603,7 @@ function glSetup() {
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
   GLR.pix = null; GLR.pixPool = [];
-  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
+  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glSkySetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
@@ -16275,6 +16318,39 @@ class GLCtx {
     gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     GLR.stats.draws++; GLR.stats.quads++;
+  }
+  // the sky's textured gradient (GL_KFS): cells x0..x1, y0..y1 over the screen's dx, dy, dw, dh; rows a Float32Array of n rows
+  // (each its band's whole part, then its fraction), col the bands' colours and the horizon's (rgba 0..1, 4 a colour), ki and amp
+  drawSkyGL(dx, dy, dw, dh, x0, y0, x1, y1, rows, n, col, ki, amp) {
+    if (GLR.lost || !GLR.kprog || !(n > 0)) return;
+    const gl = GLR.gl, t = this.target, U = GLR.kU;
+    glBegin(this, 'source-over'); glFlush();
+    glApplyState();
+    gl.useProgram(GLR.kprog); GLR.cur.prog = 13;
+    gl.activeTexture(gl.TEXTURE13);
+    if (!GLR.krows || GLR.krowsW < n) {
+      if (GLR.krows) gl.deleteTexture(GLR.krows);
+      GLR.krowsW = Math.max(n, 64);
+      GLR.krows = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, GLR.krows);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, GLR.krowsW, 1, 0, gl.RG, gl.FLOAT, null);
+    } else gl.bindTexture(gl.TEXTURE_2D, GLR.krows);
+    gl.bindSampler(13, null);
+    const fy = gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL), pm = gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL);
+    if (fy) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); if (pm) gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, n, 1, gl.RG, gl.FLOAT, rows, 0);
+    if (fy) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); if (pm) gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(U.u_rows, 13);
+    gl.uniform2f(U.u_size, t._w, t._h);
+    this._corners(dx, dy, dw, dh);
+    gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
+    gl.uniform4f(U.u_cells, x0, y0, x1, y1);
+    gl.uniform4fv(U.u_col, col); gl.uniform4i(U.u_ki, ki[0], ki[1], ki[2], n); gl.uniform1f(U.u_amp, amp);
+    gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    GLR.stats.draws++; GLR.stats.quads++; GLR.stats.uploads++;
   }
   drawSunGL(dx, dy, dw, dh, x0, y0, x1, y1, sun, s, k, core, sky) {
     if (GLR.lost || !GLR.sprog) return;
@@ -19668,8 +19744,10 @@ function drawSun(horY) {
   for (let i = 0; i < s0.length; i++) { const y = oy - m + i; if (y < 0 || y >= horY) continue; const w = s0[i]; for (let x = ox - w; x <= ox + w; x++) if (x >= 0 && x < TW) blendPx(y * TW + x, core, vis); }
 }
 let SUNG = null;   // (this view's sun disc for the GPU, from drawSun - null: none)
+let BGPRE = null;   // (the sky's texture on the GPU: the cells the moon will blend into, worked out in the buffer first - 17-frame.js skyTexGPU)
 function drawMoon(cx, cy, mr, horY, vis) {
   const glow = [176, 194, 236], gx = mr * 3.4, am = 0.32 * vis;
+  if (BGPRE) BGPRE(Math.floor(cx - gx) - 2, Math.floor(cy - gx) - 2, Math.ceil(cx + gx) + 2, Math.min(horY - 1, Math.ceil(cy + gx) + 2));
   for (let y = Math.max(0, Math.floor(cy - gx)); y <= Math.min(horY - 1, Math.ceil(cy + gx)); y++) for (let x = Math.max(0, Math.floor(cx - gx)); x <= Math.min(TW - 1, Math.ceil(cx + gx)); x++) {
     const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / gx; if (d >= 1) continue;
     const q = Math.ceil(Math.pow(1 - d, 2) * 4) / 4; blendPx(y * TW + x, glow, q * am);
@@ -20100,6 +20178,51 @@ const skyHash = (x, y) => { let h = (x * 374761393 + y * 668265263) | 0; h = Mat
 function skyNoise(x, y) { const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
   const a = skyHash(xi, yi), b = skyHash(xi + 1, yi), c = skyHash(xi, yi + 1), d = skyHash(xi + 1, yi + 1); return a + (b - a) * sx + (c - a + (a - b + d - c) * sx) * sy; }
 const BGKS = [];   // (the gradient's key, made each view: skyBack)
+// THE SKY'S TEXTURE ON THE GPU (Oct 30 evening, branch opt-skytex - see skyBack): the gradient laid by the chip (40-gl.js GL_KFS) over
+// the place the painted one was laid (outImg of the buffer's canvas), each row's place in it from here in doubles - its whole band
+// apart from its fraction, so the chip decides a band's edge on a small number as the doubles here did; then the sun over it as before
+// (by the GPU: nothing of it in the buffer). The moon is blended into the buffer: drawMoon asks first (BGPRE) for the cells it will
+// touch, worked out here as the painted gradient worked them out, and that box alone goes up over the chip's gradient
+const SKYTEX_GPU = /[?&]skytexgpu=0/.test(location.search) ? 0 : 1;
+// (each view its own rows and colours: a shared view's second half lays the first's again - 30-api.js replay)
+const KROWS = [new Float32Array(2048), new Float32Array(2048)], KCOL = [new Float32Array(65 * 4), new Float32Array(65 * 4)];
+// the chip's gradient: cells 0..cw, 0..h of the picture at its pixels (x, y, wd, ht), as outImg lays the painted one
+function outSky(x, y, wd, ht, cw, h, rows, col, ki, amp) {
+  const V = VIEW, dx = picX(V, x), dy = picY(V, y), dw = wd * M, dh = ht * M;
+  if (dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4 || !ctx.drawSkyGL) return;
+  ctx.drawSkyGL(dx, dy, dw, dh, 0, 0, cw, h, rows, h, col, ki, amp);
+}
+function skyTexGPU(K, KC, bands, horY, yTop, shX, tex) {
+  const span = Math.max(1, horY - yTop), amp = tex * 1.4 / bands;
+  if (KROWS[VI].length < H * 2) KROWS[VI] = new Float32Array(H * 2 + 256);
+  const R = KROWS[VI], C = KCOL[VI];
+  for (let y = 0; y < H; y++) { const b = (y - yTop) / span * bands, f = Math.floor(b); R[2 * y] = f; R[2 * y + 1] = b - f; }
+  for (let b = 0; b <= bands; b++) { const v = K[KC + b]; C[4 * b] = (v & 255) / 255; C[4 * b + 1] = ((v >>> 8) & 255) / 255; C[4 * b + 2] = ((v >>> 16) & 255) / 255; C[4 * b + 3] = 1; }
+  outSky(-CPX, 0, CW * CPX, H * CPX, CW, H, R, C, [shX, horY, bands], amp * bands);
+  // the moon's cells of the painted gradient, worked out as skyBack paints them
+  let box = null;
+  BGPRE = (x0, y0, x1, y1) => {
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(TW - 1, x1); y1 = Math.min(H - 1, y1);
+    if (x1 < x0 || y1 < y0) return;
+    box = [x0, y0, x1, y1];
+    for (let y = y0; y <= y1; y++) {
+      const u0 = (y - yTop) / span, row = y * TW;
+      if (y >= horY) { for (let x = x0; x <= x1; x++) buf[row + x] = K[KC + bands]; continue; }
+      for (let x = x0; x <= x1; x++) {
+        const wx = x - shX, n = skyNoise(wx / 90, y / 3) + 0.5 * skyNoise(wx / 23 + 17.3, y / 1.5 + 5.1) - 0.75;
+        buf[row + x] = K[KC + clamp(Math.floor(clamp(u0 + n * amp, 0, 0.9999) * bands), 0, bands - 1)];
+      }
+    }
+  };
+  BY0 = 1e9; BY1 = -1;
+  drawSun(horY);
+  BGPRE = null;
+  if (box) {
+    const [x0, y0, x1, y1] = box, bw = x1 - x0 + 1, bh = y1 - y0 + 1, out = new Uint32Array(bw * bh);
+    for (let y = 0; y < bh; y++) out.set(buf.subarray((y0 + y) * TW + x0, (y0 + y) * TW + x1 + 1), y * bw);
+    outPix({ buf: out }, bw, 0, bh, (x0 - 1) * CPX, y0 * CPX, bw * CPX, bh * CPX, false);
+  }
+}
 function skyBack(V) {
   // (Oct 28: the horizon above the top of the screen - the camera under the water, or the sea filling it - no sky shows:
   // nothing is placed, lit or drawn for this view (the user: "underwater, no clouds, 36 fps": the sky was 5 ms of it))
@@ -20169,9 +20292,17 @@ function skyBack(V) {
     K.push(rgb(c.map(Math.round)));
   }
   K.push(rgb(E.skyHor.map(Math.round)));
+  // (Oct 30 evening, branch opt-skytex - the user's two-view fight at 20-26 fps, 35 at Version 368: the texture's key holds its place
+  // (the sun's parallax) and the top of deck 1, so as the camera moved it was painted again here nearly every frame in both views, two
+  // value noises a cell and the whole picture uploaded - 13 to 17 ms a frame at one sky pixel a screen pixel. On the GPU the same
+  // picture is worked out by the chip each frame (40-gl.js GL_KFS: the same sums a cell), nothing painted or uploaded but each row's
+  // place in the gradient. The moon, still blended into the buffer, has its few cells of the gradient worked out here first (BGPRE)
+  // and goes up alone. ?skytexgpu=0 (or P.skytexgpu = 0): painted here as before; SKY TEXTURE 0 (flat bands) is painted here as before)
+  const kg = tex > 0 && GPU && !!ctx.drawSkyGL && (P.skytexgpu ?? SKYTEX_GPU) > 0;
+  if (kg) B.bgKey = '';   // (back on the CPU path: painted afresh)
   let bgSame = B.bgKey === 'k' && B.bgC && B.bgC.length === K.length;
   if (bgSame) for (let i = 0; i < K.length; i++) if (B.bgC[i] !== K[i]) { bgSame = false; break; }
-  if (!bgSame) {
+  if (!bgSame && !kg) {
     const span = Math.max(1, horY - yTop), amp = tex * 1.4 / bands;
     for (let y = 0; y < Math.min(horY, H); y++) {
       const u0 = (y - yTop) / span, row = y * TW;
@@ -20188,12 +20319,15 @@ function skyBack(V) {
     B.bg.cx.putImageData(B.bg.img, 0, 0); B.bgSun = [1e9, -1];
   }
   {
+    if (kg) skyTexGPU(K, KC, bands, horY, yTop, shX, tex);   // (the gradient by the GPU, the sun or the moon over it)
+    else {
     // (the sun's rows of last frame put back from the pristine gradient, the sun drawn afresh, those rows uploaded)
     const s = B.bgSun; if (s[1] >= s[0]) B.bg.buf.set(B.bg0.subarray(s[0] * CW, (s[1] + 1) * CW), s[0] * CW);
     BY0 = 1e9; BY1 = -1;
     drawSun(horY);
     outImg(B.bg.cv, CW, 0, H, -CPX, 0, CW * CPX, H * CPX);
     if (BY1 >= BY0) { const y0 = Math.max(0, BY0), y1 = Math.min(H - 1, BY1); s[0] = y0; s[1] = y1; outPix(B.bg, CW, y0, y1 - y0 + 1, -CPX, y0 * CPX, CW * CPX, (y1 - y0 + 1) * CPX, false); } else { s[0] = 1e9; s[1] = -1; }
+    }
     if (SUNG) outSun(SUNG);   // (the disc, on the GPU through the heat: 14-sun-moon.js, 40-gl.js GL_SFS)
     // (the burn's disc for this view's decks: the sun's or the moon's; its colour the disc's light: the sun's white by day, the sunset's
     // warm gold (its highlight tone, PAL.set[5]) as it goes down - 13:10, "It doesnt make sense to have a yellow burn on daytime, it
@@ -21557,14 +21691,15 @@ function skySun() {
 }
 // the outPix calls of a view, kept so the other half of a shared view lays the same pictures (no second drawing)
 let REC = null;
-const outPix0 = outPix, outImg0 = outImg, outRays0 = outRays, outSun0 = outSun, outBurn0 = outBurn;
+const outPix0 = outPix, outImg0 = outImg, outRays0 = outRays, outSun0 = outSun, outBurn0 = outBurn, outSky0 = outSky;
 outPix = (...a) => { if (REC) REC.push([0, a]); const t0 = performance.now(); outPix0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };   // (FT.out: the laying of the pictures, within the parts' times)
 outImg = (...a) => { if (REC) REC.push([1, a]); const t0 = performance.now(); outImg0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };
 outSun = (...a) => { if (REC) REC.push([3, a]); outSun0(...a); };
 outBurn = (...a) => { if (REC) REC.push([4, a]); outBurn0(...a); };
+outSky = (...a) => { if (REC) REC.push([5, a]); const t0 = performance.now(); outSky0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };   // (the sky's texture by the GPU - 17-frame.js skyTexGPU)
 outRays = (...a) => { if (REC) REC.push([2, a]); const t0 = performance.now(); outRays0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };
 // (a layer or a canvas laid again is drawn from its texture, not uploaded again; a buffer is uploaded again)
-function replay(list, V) { const v0 = VIEW, c0 = ctx; VIEW = V; ctx = V.ctx; M = V.zr / ZL; const t0 = performance.now(); for (const [k, a] of list) (k === 4 ? outBurn0 : k === 3 ? outSun0 : k === 2 ? outRays0 : k ? outImg0 : outPix0)(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; VIEW = v0; ctx = c0; }
+function replay(list, V) { const v0 = VIEW, c0 = ctx; VIEW = V; ctx = V.ctx; M = V.zr / ZL; const t0 = performance.now(); for (const [k, a] of list) (k === 5 ? outSky0 : k === 4 ? outBurn0 : k === 3 ? outSun0 : k === 2 ? outRays0 : k ? outImg0 : outPix0)(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; VIEW = v0; ctx = c0; }
 const REC_BACK = [[], []], REC_DECKS = [[], []], REC_DECKS2 = [[], []], REC_VEIL = [[], []], REC_FRONT = [[], []];
 // the view's screen pixels of a picture point (unmagnified view pixels)
 const toScreen = (V, x, y) => [picX(V, x), picY(V, y)];   // (17-frame.js: the one mapping)
@@ -45985,7 +46120,7 @@ async function start(data) {
   // (OPEN WORLD: the kraken - tools/kraken.mjs)
   Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
-  Object.assign(window.__game, { perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}), budget: FRAME_BUDGET }) });
+  Object.assign(window.__game, { planesP: planes, perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}), budget: FRAME_BUDGET }) });
   Object.assign(window.__game, { smokeWorker: on => { if (on != null) { SMW.on = !!on; if (CAVE.worker && !CAVE.worker.fail) CAVE.worker.on = !!on; if (CAVE.buildWorker && !CAVE.buildWorker.fail) CAVE.buildWorker.on = !!on; } const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
