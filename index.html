@@ -3039,8 +3039,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 329;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 09:11';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 330;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 09:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12371,7 +12371,8 @@ function schedFrame() { REG.frame++; for (const k in SYSTEMS) { const S = SYSTEM
 function schedPanel() {
   const L = []; for (const k in SYSTEMS) { const S = SYSTEMS[k], n = S.n0 || S.n; L.push(k.toUpperCase() + ' ' + S.ms.toFixed(1) + '/' + S.budget + ' ' + n[0] + ' ' + n[1] + ' ' + n[2] + (S.ms > S.budget ? ' OVER' : '')); }
   // (engine stage 4: the worker, when it's on - steps sent, steps back, frames it was late; or why it's off)
-  const wk = SMW.on ? '  WORKER smoke air ' + SMW.got + '/' + SMW.sent + ' late ' + SMW.late : SMW.fail ? '  WORKER off: ' + SMW.fail : '';
+  const cw = typeof CAVE !== 'undefined' && CAVE && CAVE.worker, cws = cw && cw.on ? ', cave swell ' + cw.got + '/' + cw.sent + ' late ' + cw.late : cw && cw.fail ? ', cave swell off: ' + cw.fail : '';
+  const wk = SMW.on ? '  WORKER smoke air ' + SMW.got + '/' + SMW.sent + ' late ' + SMW.late + cws : SMW.fail ? '  WORKER off: ' + SMW.fail : '';
   return (L.length ? 'SYSTEMS MS/BUDGET ACTIVE NEAR FAR:  ' + L.join('  ') : '') + wk;
 }
 
@@ -12419,7 +12420,7 @@ function tblPlain(o, depth, skip, top) {
 function tablesSave() {
   const T = {};
   for (const k in TABLES) for (const o of TABLES[k].list()) uidOf(o);   // (every thing its id first: a reference to one is saved as its id)
-  for (const k in TABLES) { const t = TABLES[k]; T[k] = t.list().map(o => { const d = tblPlain(o, t.depth, t.skip, true); d.u_ = o._uid; if (o._sa) d.sa_ = o._sa; if (o._sk != null) d.sk_ = o._sk; return d; }); }
+  for (const k in TABLES) { const t = TABLES[k]; T[k] = t.list().map(o => { const d = tblPlain(o, t.depth, t.skip, true); d.u_ = o._uid; if (o._sa != null) d.sa_ = o._sa; if (o._sk != null) d.sk_ = o._sk; return d; }); }
   const R = {}; for (const k in RNGS) R[k] = RNGS[k].s;
   return { v: 1, t: time, reg: { tick: REG.tick, frame: REG.frame, sid: REG.sid }, tables: T, rng: R, uid: netUid };
 }
@@ -12464,7 +12465,7 @@ function tablesLoad(S) {
       const sa = d.sa_, sk = d.sk_, u = d.u_; delete d.u_; delete d.sa_; delete d.sk_;
       tblRefs(d, byU, t.depth + 2);
       for (const f in o) { const v = o[f]; if ((v === null || typeof v !== 'object') && typeof v !== 'function' && !(f in d) && f[0] !== '_' && !t.skip.has(f)) delete o[f]; }   // (a plain value the saved one didn't have)
-      tblMerge(o, d); o._uid = u; if (sa) o._sa = sa; else delete o._sa; if (sk != null) o._sk = sk; else delete o._sk;
+      tblMerge(o, d); o._uid = u; if (sa != null) o._sa = sa; else delete o._sa; if (sk != null) o._sk = sk; else delete o._sk;
     }
     arr.length = 0; for (const [o] of rows) arr.push(o);
   }
@@ -12577,17 +12578,18 @@ const WATER_ROW = worldRow({
   wv: [() => f32ToB64(wv), v => b64IntoF32(v, wv)],
   wf: [() => f32ToB64(wf), v => b64IntoF32(v, wf)],
   stir: [() => f32ToB64(stirA), v => { stirReady(); b64IntoF32(v, stirA); }],
+  // (the clock of the far water's settling - every half second the cells outside the worked stretches decay and their
+  // waiting forces are cleared: stepWater. s3-drift Oct 30: not saved, a loaded sea settled on other ticks)
+  settleT: [() => waterAct.t, v => { if (typeof v === 'number') waterAct.t = v; }],
 });
 defTable('water', () => [WATER_ROW], { make: () => WATER_ROW });
 // ---- the game's clock (time: what every system's timers count by) and the round (who won, and how long ago). The clock comes
-// back too, so the tables' own times (stamps of it) mean what they did; the two clocks netApply puts on this screen's time
-// (the captains', a plane's time in a cloud) moved along with it
+// back too, so the tables' own times (stamps of it) mean what they did. (Not shifted: the captains' clocks and a plane's time
+// in a cloud, which netApply puts on this screen's time - their own tables, loaded too, hold them as they were; shifted again
+// here they ran a second ahead, s3-drift Oct 30)
 function roundClock(v) {
   if (typeof v !== 'number') return;
-  const d = v - time; time = v;
-  if (!d) return;
-  for (const cs of captains) for (const c of cs) if (c && typeof c.t === 'number') c.t += d;
-  for (const pl of planes) if (pl && typeof pl.cloudT === 'number') pl.cloudT += d;
+  time = v;
 }
 const ROUND_ROW = worldRow({
   time: [() => time, roundClock],
@@ -12596,6 +12598,28 @@ const ROUND_ROW = worldRow({
   acc: [() => acc, v => { acc = v; }],   // (the physics steps' accumulator: the fraction of a step carried to the next frame)
 });
 defTable('round', () => [ROUND_ROW], { make: () => ROUND_ROW });
+// ---- the cameras (39-camera updateCamera): each view's place and zoom and what it eases by. Not only a look: the regions'
+// tiers (regionsTick reads the views of the frame before), a sailboat's respawn out of sight, the storm's bolts and the
+// land's bits all go by where the views are - a fresh page's views were somewhere else for the first steps after a load
+// (s3-drift Oct 30). Taken back into the same arrays and objects (UI_PER and asSlot swap them by identity)
+const CAM_KEYS = ['merge', 'cs', 'c1', 'c2', 'zt', 'zsa', 'za', 'spd', 'view', 'pan', 'panY', 'cut', 'zq', 'zl', 'tg', 'fy', 'fyi'];
+function camPut(dst, k, v) {
+  const cur = dst[k];
+  if (Array.isArray(v) && Array.isArray(cur)) { v.forEach((e, i) => { if (e && typeof e === 'object' && cur[i] && typeof cur[i] === 'object') camPut(cur, i, e); else cur[i] = e; }); cur.length = v.length; }
+  else if (v && typeof v === 'object' && !Array.isArray(v) && cur && typeof cur === 'object' && !Array.isArray(cur)) { for (const q of Object.keys(cur)) if (!(q in v)) delete cur[q]; for (const q in v) camPut(cur, q, v[q]); }
+  else dst[k] = v;
+}
+const CAM_ROW = worldRow({
+  cam: [() => { const o = {}, u = []; for (const k of CAM_KEYS) { if (cam[k] === undefined) u.push(k); else o[k] = cam[k]; } return wjson({ o, u, sv: shakeV, sxy: shakeXY, ov: camOverride }); },
+    v => {
+      const s = wunjson(v); if (!s || !s.o) return;
+      for (const k of CAM_KEYS) { if (k in s.o) camPut(cam, k, s.o[k]); else if ((s.u || []).includes(k)) cam[k] = undefined; }
+      if (Array.isArray(s.sv)) camPut({ a: shakeV }, 'a', s.sv);
+      if (Array.isArray(s.sxy)) camPut({ a: shakeXY }, 'a', s.sxy);
+      if (Array.isArray(s.ov)) camPut({ a: camOverride }, 'a', s.ov);
+    }],
+});
+defTable('camera', () => [CAM_ROW], { make: () => CAM_ROW });
 
 /* (engine stage 3) The weapons' and hits' tables - their systems' files are read before the tables (36-zz-tables.js), so they
    are registered here; each file still the one owner of its lists, its random source made on first use in its own file. */
@@ -13435,16 +13459,45 @@ function smSolve(G, dt, SPANS, W, SH, WY) {
 // (engine stage 3) the smoke's table: its puffs. A puff's chain link (prev) is another puff, saved as its id; its stream
 // (st: the { last, head } its source keeps on itself, smStream) belongs to the source, so it isn't saved: a loaded puff keeps
 // the live one's, and each stream's newest puff is found again from the list. The air-flow grid (SG) isn't saved either: once
-// loaded every column starts again from the wind as it wakes (smokeSpans)
+// loaded every column starts again from the wind as it wakes (smokeSpans) - unless the save held it (smokeAir, below)
 defTable('smoke', () => smoke, {
   skip: ['st'],
   after: arr => {
     const newest = new Map(), live = new Set(arr);
     for (const s of arr) if (s.st) newest.set(s.st, s);
     for (const [st, s] of newest) if (!live.has(st.last)) st.last = s;
-    if (SG.active) SG.active.fill(0);
+    if (SG.active && !SG.loaded) SG.active.fill(0);
+    SG.loaded = false;
   },
 });
+// the air-flow grid itself (s3-drift Oct 30: not saved, a loaded game's smoke rode other air from the first step): the
+// columns that hold anything - the flow u, v, and the pressure p and swirl curl, which the edges of the worked columns read
+// from the step before - and which columns are awake. Base64 text of their bytes (36-zz-world f32ToB64): exact. Taken back
+// only into a grid of the same size (the same world)
+const smRuns = on => { const r = []; for (let i = 0; i < on.length; i++) if (on[i]) { if (r.length && r[r.length - 1] === i - 1) r[r.length - 1] = i; else r.push(i, i); } return r; };
+function smAirSave() {
+  if (!SG.u) return null;
+  const { nx, ny, u, v, p, curl } = SG, used = new Uint8Array(nx);
+  for (let j = 0; j < ny; j++) for (let i = 0, k = j * nx; i < nx; i++, k++) if (u[k] || v[k] || p[k] || curl[k]) used[i] = 1;
+  const cols = smRuns(used); let n = 0; for (let r = 0; r < cols.length; r += 2) n += cols[r + 1] - cols[r] + 1;
+  const d = new Float32Array(n * ny * 4); let o = 0;
+  for (let r = 0; r < cols.length; r += 2) for (let i = cols[r]; i <= cols[r + 1]; i++) for (const f of [u, v, p, curl]) for (let j = 0; j < ny; j++) d[o++] = f[j * nx + i];
+  return JSON.stringify({ nx, ny, c: cols, a: SG.active ? smRuns(SG.active) : [], d: f32ToB64(d) });
+}
+function smAirLoad(txt) {
+  let s = null; try { s = typeof txt === 'string' ? JSON.parse(txt) : null; } catch (e) { }
+  if (!s || !SG.u || s.nx !== SG.nx || s.ny !== SG.ny) return;
+  const { nx, ny, u, v, p, curl } = SG; let n = 0;
+  for (let r = 0; r < s.c.length; r += 2) n += s.c[r + 1] - s.c[r] + 1;
+  const d = new Float32Array(n * ny * 4); b64IntoF32(s.d, d);
+  for (const f of [u, v, p, curl]) f.fill(0);
+  let o = 0;
+  for (let r = 0; r < s.c.length; r += 2) for (let i = s.c[r]; i <= s.c[r + 1]; i++) for (const f of [u, v, p, curl]) for (let j = 0; j < ny; j++) f[j * nx + i] = d[o++];
+  SG.active.fill(0); for (let r = 0; r < s.a.length; r += 2) SG.active.fill(1, s.a[r], s.a[r + 1] + 1);
+  SG.loaded = true; SMW.g = null;   // (with ?worker=1: the worker's copy of the grid made again - it starts from the wind, not the loaded air)
+}
+const SMOKE_AIR_ROW = worldRow({ air: [smAirSave, smAirLoad] });
+defTable('smokeAir', () => [SMOKE_AIR_ROW], { make: () => SMOKE_AIR_ROW });
 
 /* THE SIMULATION WORKER, ITS FIRST SYSTEM: THE SMOKE'S AIR (engine migration, stage 4 - plan:
    https://claude.ai/artifact/7osEef5ubafK3gkAEjY3Dt, "Simulation in a worker"). Behind a switch, off unless the page's address
@@ -26683,14 +26736,25 @@ function pocketsChanged() {
 // its smallest ripple is a fraction of a pixel there; the springs (p.h) are still every column's own)
 let caveStride = 1;
 function surfTable(p) {
-  const L = pocketLevel(p), Wn = p.win, n = p.sy.length, A = P.waves, K = caveStride;
-  if (K <= 1) { for (let k = 0; k < n; k++) p.sy[k] = p.wet[k] ? L - (A * caveAmbient(Wn.X0 + (p.xa + k + 0.5) * CV.G, wTime) + p.h[k]) : L; return; }
-  const amb = k => A * caveAmbient(Wn.X0 + (p.xa + k + 0.5) * CV.G, wTime);
+  const n = p.sy.length;
+  if (!p.amb || p.amb.length !== n) p.amb = new Float64Array(n);
+  surfAmb(p.amb, p.win.X0, p.xa, CV.G, n, caveStride, P.waves, wTime, p.wet);
+  surfFrom(p, p.amb);
+}
+// (engine stage 4) the swell part of a pocket's surface, a column at a time (wet ones), into out: a pure function, run here
+// or in the caves' worker (cwwStep) from the same text; surfFrom adds the springs and the level
+function surfAmb(out, X0, xa, G, n, K, A, t, wet) {
+  if (K <= 1) { for (let k = 0; k < n; k++) if (wet[k]) out[k] = A * caveAmbient(X0 + (xa + k + 0.5) * G, t); return; }
+  const amb = k => A * caveAmbient(X0 + (xa + k + 0.5) * G, t);
   for (let k0 = 0; k0 < n; k0 += K) {
     const k1 = Math.min(n - 1, k0 + K), a0 = amb(k0), a1 = k1 > k0 ? amb(k1) : a0;
-    for (let k = k0; k < Math.min(n, k0 + K); k++) p.sy[k] = p.wet[k] ? L - (a0 + (a1 - a0) * (k - k0) / Math.max(1, k1 - k0) + p.h[k]) : L;
+    for (let k = k0; k < Math.min(n, k0 + K); k++) if (wet[k]) out[k] = a0 + (a1 - a0) * (k - k0) / Math.max(1, k1 - k0);
   }
-  if (p.wet[n - 1]) p.sy[n - 1] = L - (amb(n - 1) + p.h[n - 1]);
+  if (wet[n - 1]) out[n - 1] = amb(n - 1);
+}
+function surfFrom(p, amb) {
+  const L = pocketLevel(p), n = p.sy.length, W = p.wet, H = p.h, sy = p.sy;
+  for (let k = 0; k < n; k++) sy[k] = W[k] ? L - (amb[k] + H[k]) : L;
 }
 function surfaceOf(p, X) {
   if (!p.sy) return pocketLevel(p);
@@ -26744,9 +26808,10 @@ function waterStep(dt) {
     // (the band its water line can reach - swell and springs at most ~46 either way -, not the whole pocket: a cave's roof on
     // screen with its water below the screen's edge has nothing to move that anyone sees)
     const a = p.win.X0 + p.xa * CV.G, b = a + p.sy.length * CV.G, yt = pocketLevel(p) + WATER_Y - 60, yb = pocketLevel(p) + WATER_Y + 60;
-    if (!vis.length || vis.some(([l, r, t, u]) => b > l && a < r && yb > t && yt < u)) { surfTable(p); p.flat = false; }
+    if (!vis.length || vis.some(([l, r, t, u]) => b > l && a < r && yb > t && yt < u)) { if (!cwwSurf(p)) surfTable(p); p.flat = false; }
     else { const L = pocketLevel(p); if (!p.flat || p.flatL !== L) { p.sy.fill(L); p.flat = true; p.flatL = L; } }   // (its level kept as it rises or falls)
   }
+  if (CWW.on) cwwSend(pk);
   // drips from the stalactites hanging over a pocket's air (only once the water's under their tips)
   if (P.drips > 0) for (const t of CV.wins.flatMap(Wn => Wn.tips)) {
     const p = t.p; if (!p || t.Y > pocketLevel(p) - 2) continue;
@@ -26827,6 +26892,48 @@ const CAVE_WATER_ROW = worldRow({
     }],
 });
 defTable('caveWater', () => [CAVE_WATER_ROW], { make: () => CAVE_WATER_ROW });
+// ---- (engine stage 4) the caves' worker: the swell on the pockets on screen (the open world's biggest steady simulation cost
+// after the smoke's air, ~2.4 ms a tick by the harbour) worked out on a second core. Behind the same switch as the smoke's
+// air (?worker=1, SMW.on). Each frame the pockets on screen are sent with this frame's time; the swell comes back for the next
+// frame, which adds its own springs and level (surfFrom): the swell is a frame behind, the springs aren't. A pocket with no
+// answer yet (new on screen, or the worker late) is worked out here as before. Pure functions sent as text: surfAmb and what
+// it calls, from this closure (its clamp, swell, crestAt)
+const CWW = { on: SMW.on, w: null, busy: false, seq: 0, res: new Map(), sent: 0, got: 0, late: 0, fail: '' };
+function cwwBody() {
+  self.onmessage = e => {
+    const m = e.data, out = [];
+    for (const j of m.jobs) { const a = new Float64Array(j.n); surfAmb(a, j.X0, j.xa, j.G, j.n, j.K, j.A, m.t, j.wet); out.push(a); }
+    self.postMessage({ seq: m.seq, out }, out.map(a => a.buffer));
+  };
+}
+function cwwStart() {
+  try {
+    const src = 'const clamp = ' + clamp.toString() + ';\n' + [swell, crestAt, caveAmbient, surfAmb, cwwBody].map(f => f.toString()).join('\n') + '\ncwwBody();';
+    CWW.w = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+    CWW.w.onmessage = e => {
+      const m = e.data; if (m.seq !== CWW.seq) return;
+      CWW.busy = false; CWW.got++; CWW.res.clear();
+      m.out.forEach((a, i) => { const j = CWW.jobs[i]; CWW.res.set(j.p, { a, n: j.n, K: j.K, wet: j.p.wet }); });
+    };
+    CWW.w.onerror = e => { CWW.on = false; CWW.fail = String(e.message || 'error'); };
+  } catch (e) { CWW.on = false; CWW.fail = String(e.message || e); }
+}
+// a pocket's surface from the worker's swell (true), or false: work it out here
+function cwwSurf(p) {
+  if (!CWW.on) return false;
+  const r = CWW.res.get(p);
+  if (!r || r.n !== p.sy.length || r.K !== caveStride || r.wet !== p.wet) return false;
+  surfFrom(p, r.a); return true;
+}
+function cwwSend(pk) {
+  if (!CWW.w) { cwwStart(); if (!CWW.on) return; }
+  if (CWW.busy) { CWW.late++; return; }
+  const jobs = [];
+  for (const p of pk) if (p.sy && !p.flat) jobs.push({ p, X0: p.win.X0, xa: p.xa, G: CV.G, n: p.sy.length, K: caveStride, A: P.waves, wet: p.wet });
+  if (!jobs.length) return;
+  CWW.jobs = jobs; CWW.busy = true; CWW.sent++; CWW.seq++;
+  CWW.w.postMessage({ seq: CWW.seq, t: wTime, jobs: jobs.map(j => ({ X0: j.X0, xa: j.xa, G: j.G, n: j.n, K: j.K, A: j.A, wet: j.wet })) });
+}
 
 // ---- the sub's lamp, stopped by the rock. The game's beam (msBeamSprite, chestLit): a cone the way it aims, spreading
 // about 90 degrees, brightest along its middle and near the lamp, fading out to its reach; and a small pool of light round
@@ -27558,7 +27665,7 @@ function draw() {
 // is x near a system's mouth (the game keeps its rock formations off them, as off the kraken's pad - buildReef)
 function nearMouth(x, r) { if (!(BED_B - BED_A > 2000)) return false; return CAVES.systems.some(s => Math.abs(sysX(s) - x) < r); }
 const CAVE_API = {
-  nearMouth,
+  nearMouth, worker: CWW,   // (engine stage 4: the caves' worker, for the perf panel)
   step, pump, draw, buildNow, subNear, subMove, rebuild: () => refresh(null),
   inCave: (x, y) => CV.ready && inCave(x, y - WATER_Y),
   get ready() { return CV.ready; }, get building() { return !!CV.job; },
@@ -43158,7 +43265,7 @@ async function start(data) {
   };
   // (OPEN WORLD: the kraken - tools/kraken.mjs)
   Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
-  Object.assign(window.__game, { smokeWorker: on => { if (on != null) SMW.on = !!on; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
+  Object.assign(window.__game, { smokeWorker: on => { if (on != null) SMW.on = !!on; const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
