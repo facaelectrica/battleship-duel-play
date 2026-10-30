@@ -2859,8 +2859,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 368;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 17:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 369;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 17:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14422,28 +14422,58 @@ layout(location=0) in vec2 a_q;
 layout(location=1) in vec4 a_r0;
 layout(location=2) in vec4 a_r1;
 uniform vec2 u_size; uniform vec2 u_off;
-flat out vec4 v_r0; flat out vec4 v_r1;
+flat out vec4 v_r0; flat out vec4 v_r1; flat out vec2 v_c0;
 void main() {
   vec2 lo, hi;
-  if (a_r1.w < 0.5) { float n = floor(a_r0.z * 0.5); lo = vec2(a_r0.x - n - 1.0, a_r0.y - n); hi = vec2(a_r0.x + n + 2.0, a_r0.y + n + 1.0); }
+  v_c0 = a_r0.xy;   // (its place in its own cloud: EDGE BREAK's pattern goes with the cloud, not the screen)
+  bool lobe = abs(a_r1.w - 1.0) < 0.5;   // (a lobe: 1; a disc: 0, a debug id < 0, or THE BURN's code >= 2)
+  if (!lobe) { float n = floor(a_r0.z * 0.5); lo = vec2(a_r0.x - n - 1.0, a_r0.y - n); hi = vec2(a_r0.x + n + 2.0, a_r0.y + n + 1.0); }
   else { lo = vec2(floor(a_r0.x - a_r0.z) - 1.0, floor(a_r0.y - a_r0.w + 0.5)); hi = vec2(ceil(a_r0.x + a_r0.z) + 2.0, min(floor(a_r0.y + a_r0.w + 0.5), a_r1.x) + 1.0); }
   vec2 p = (u_off + mix(lo, hi, a_q)) / u_size;
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-  v_r0 = a_r0 + vec4(u_off, 0.0, 0.0); v_r1 = a_r1 + vec4(a_r1.w < 0.5 ? 0.0 : u_off.y, 0.0, 0.0, 0.0);
+  v_r0 = a_r0 + vec4(u_off, 0.0, 0.0); v_r1 = a_r1 + vec4(lobe ? u_off.y : 0.0, 0.0, 0.0, 0.0);
 }`;
 const GL_PFS = `#version 300 es
 precision highp float; precision highp int;
 uniform vec2 u_size; uniform vec4 u_pal[15];
-flat in vec4 v_r0; flat in vec4 v_r1;
+flat in vec4 v_r0; flat in vec4 v_r1; flat in vec2 v_c0;
+uniform float u_edge;
+uniform vec3 u_burn;   // (THE BURN's colour of the hour - 02-hour.js E.burn)
 out vec4 o;
+// (EDGE BREAK, Oct 30 - the user, with a reference: its puffs have "this more detailed 'edge' around them that breaks the 'balls'
+// shape ... versus our clouds that are more circles". A puff's outer ring of pixels is broken up: each pixel near its edge left out
+// by chance, more often the nearer the edge, so the outline is notched and stepped, one pixel at a time. The chance is a hash of
+// the pixel's place in its puff and the puff's place in its cloud, so a puff keeps its pattern wherever the cloud drifts)
+float edgeHash(vec2 d, vec2 c) {
+  uvec3 q = uvec3(ivec3(int(floor(d.x)) + 4096, int(floor(d.y)) + 4096, int(floor(c.x * 4.0)) * 7919 + int(floor(c.y * 4.0)) * 104729));
+  uint h = q.x * 1597334677u ^ q.y * 3812015801u ^ q.z * 2798796415u;
+  h = (h ^ (h >> 15)) * 2246822519u; h ^= h >> 13;
+  return float(h & 0xffffffu) / 16777216.0;
+}
 void main() {
   float fx = floor(gl_FragCoord.x), fy = floor(u_size.y - gl_FragCoord.y);
-  int t;
-  if (v_r1.w < 0.5) {
+  int t; float burnK = 0.0;
+  if (abs(v_r1.w - 1.0) >= 0.5) {
     float R = v_r0.z * 0.5, n = floor(R), dx = fx - v_r0.x, dy = fy - v_r0.y;
     if (abs(dy) > n || dx * dx + dy * dy > (R + 0.5) * (R + 0.5)) discard;
+    if (u_edge > 0.0 && R >= 1.5) {   // (EDGE BREAK: a puff of three cells or more; the ring a cell and a bit deep, wider on big puffs)
+      // (in little clumps, not lone pixels: two cells together most of the time - notches and steps, as the reference's)
+      float rim = R + 0.5 - sqrt(dx * dx + dy * dy), w = 1.0 + 0.08 * R;
+      float h = 0.7 * edgeHash(floor(vec2(dx, dy) * 0.5), v_c0 + 0.37) + 0.3 * edgeHash(vec2(dx, dy), v_c0);
+      if (rim < w && h < u_edge * (1.0 - rim / w) * 0.85) discard;
+    }
     int lh = int(v_r1.z + 0.5);
     t = clamp(int(floor(v_r0.w + v_r1.x * dx + v_r1.y * dy)), lh & 7, lh >> 3);
+    // (THE BURN, 13:23 - the user: "It needs to actually affect and use the way we render and draw the balls for the clouds. Like we do the
+    // thunder lighting. We want to feel the '3d' of it". A puff the light pass found burning (its code: 2 + the way to the disc in
+    // sixteenths of a turn, 16 all round, + how much) is lit on its side toward the disc - a crescent of the burn's colour on the ball,
+    // its middle and far side left in the cloud's own tone - all round its rim when the disc is right behind it. In thirds: flat steps)
+    if (v_r1.w > 1.5) {
+      float w = v_r1.w - 2.0, ai = floor(w), bb = (w - ai) / 0.98;
+      vec2 nn = vec2(dx, dy) / max(R, 1.0); float rr = length(nn);
+      float cres = R < 2.5 ? 1.0 : ai > 15.5 ? smoothstep(0.3, 0.95, rr) : clamp(dot(nn, vec2(cos(ai * 0.3927), sin(ai * 0.3927))) * 1.5 + 0.15 * rr - 0.1, 0.0, 1.0);   // (a puff too small for a crescent: the billow's own side carries it)
+      burnK = floor(bb * cres * 3.0 + 0.4) / 3.0;
+    }
   } else {
     float cx = v_r0.x, cy = v_r0.y, rx = v_r0.z, ry = v_r0.w;
     if (fy > v_r1.x) discard;
@@ -14462,6 +14492,7 @@ void main() {
     o = vec4(mix(col, u_pal[14].rgb, u_pal[14].a), 1.0); return;
   }
   o = u_pal[clamp(t, 0, 5)];
+  o.rgb = mix(o.rgb, u_burn * o.a, burnK);
 }`;
 /* ---- the sky's light rays (16-light-rays.js): the fan of wedges from the sun, each ray's light left after the clouds it
    crossed, as a fragment program. The CPU keeps walking the rays (RAY_N of them, NS steps each: a byte a step, T | inn << 2
@@ -14540,7 +14571,9 @@ uniform vec2 u_sun; uniform vec4 u_s; uniform vec4 u_k; uniform vec3 u_core; uni
 in vec2 v_cell;
 out vec4 o;
 vec3 ramp(float h) {
-  vec3 c0 = vec3(0.925, 0.384, 0.157), c1 = vec3(0.973, 0.549, 0.141), c2 = vec3(1.0, 0.745, 0.141), c3 = vec3(1.0, 0.847, 0.173), c4 = vec3(1.0, 0.910, 0.329), c5 = vec3(1.0, 0.957, 0.659);
+  // (13:10 - the user: the sun's colour to match the sunset target, ref/sunset-colour-target-oct30.png: red-orange at the line, a
+  // saturated gold above - no pale cream)
+  vec3 c0 = vec3(0.925, 0.33, 0.31), c1 = vec3(0.98, 0.47, 0.27), c2 = vec3(0.988, 0.66, 0.2), c3 = vec3(1.0, 0.84, 0.28), c4 = vec3(1.0, 0.89, 0.34), c5 = vec3(1.0, 0.93, 0.45);
   if (h < 0.22) return mix(c0, c1, h / 0.22);
   if (h < 0.45) return mix(c1, c2, (h - 0.22) / 0.23);
   if (h < 0.85) return mix(c2, c3, (h - 0.45) / 0.4);
@@ -14602,6 +14635,53 @@ void main() {
   float a = fq / NG * ak;
   o = vec4(col * a, a);
 }`;
+// THE BURN - SEEN AGAINST THE SUN, AT A DECK'S OUTLINE (11:55-12:07, the user: "When the moon/sun is right behind something we should get a
+// 'burn effect' around the cloud" - and "special cases ... are still part of the system, more of a rule than a patch"). Laid over a
+// deck's layer as it goes on the screen: each cell of a cloud at its outline (an empty cell within two) takes the disc's colour by how
+// much it is seen against the sun - the same measure as the clouds' light (07-light-shadow.js sunAgainst): near the disc (BURN REACH of
+// its radii past its edge) or, gentler, in the deck's oval - and by how much its outside faces the disc (all round, in front of the
+// disc). The outer ring of cells only; the second too near the disc. In thirds, so the pixels stay flat steps.
+// u_b0: the disc's middle (the layer's cells), its radius, BURN REACH; u_b1: the deck's oval width, AGAINST SUN x how much disc shows,
+// the rows shown (the horizon), the layer's height; u_col: the disc's colour
+const GL_BFS = `#version 300 es
+precision highp float; precision highp int;
+uniform sampler2D u_t; uniform vec4 u_b0; uniform vec4 u_b1; uniform vec3 u_col; uniform vec2 u_bh;
+in vec2 v_cell;
+out vec4 o;
+float al(ivec2 c, int th, int tw) { if (c.x < 0 || c.y < 0 || c.y >= th || c.x >= tw) return 0.0; return texelFetch(u_t, ivec2(c.x, th - 1 - c.y), 0).a; }
+void main() {
+  vec2 c = floor(v_cell); int th = int(u_b1.w + 0.5), tw = textureSize(u_t, 0).x;
+  if (c.y >= u_b1.z || c.y < 0.0 || c.x < 0.0 || c.x >= float(tw)) discard;
+  ivec2 ic = ivec2(c);
+  vec4 s = texelFetch(u_t, ivec2(ic.x, th - 1 - ic.y), 0);
+  if (s.a < 0.5) discard;
+  vec2 dv = c + 0.5 - u_b0.xy; float d = length(dv), R = max(1.0, u_b0.z), bw = max(1.0, u_b1.x);
+  float near = 1.0 - smoothstep(0.0, u_b0.w, d / R - 1.0);
+  float wide = 1.0 - smoothstep(u_bh.y, 1.0, length(vec2(dv.x / bw, dv.y / max(1.0, u_bh.x))));
+  float A = max(near, 0.5 * wide) * u_b1.y;
+  if (A <= 0.0) discard;
+  // (its outline: the empty cells round it - the four beside it and the four corners, then the four two away; the way out of the cloud)
+  vec2 ow = vec2(0.0); float m = 9.0;
+  const ivec2 N8[8] = ivec2[8](ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1), ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1));
+  for (int i = 0; i < 8; i++) { if (al(ic + N8[i], th, tw) < 0.5) { float r2 = i < 4 ? 1.0 : 2.0; m = min(m, r2); ow += vec2(N8[i]) / r2; } }
+  const ivec2 N2[4] = ivec2[4](ivec2(2, 0), ivec2(-2, 0), ivec2(0, 2), ivec2(0, -2));
+  if (m > 2.0) for (int i = 0; i < 4; i++) { if (al(ic + N2[i], th, tw) < 0.5) { m = min(m, 4.0); ow += vec2(N2[i]) / 4.0; } }
+  if (m > 4.0) discard;
+  float ring = m <= 2.0 ? 1.0 : 0.5 * near;
+  float ol = length(ow), face = ol > 0.0 && d > 0.0 ? dot(ow / ol, -dv / d) : 0.0;
+  float inside = 1.0 - smoothstep(R * 0.9, R * 1.15, d);
+  float b = A * ring * mix(max(0.0, face), 1.0, inside);
+  b = floor(b * 3.0 + 0.35) / 3.0;
+  if (b <= 0.0) discard;
+  o = vec4(mix(s.rgb, u_col * s.a, min(1.0, b)), s.a);
+}`;
+function glBurnSetup() {
+  const gl = GLR.gl, p = gl.createProgram();
+  gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_BFS));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  GLR.bprog = p; GLR.bU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_t', 'u_b0', 'u_b1', 'u_col', 'u_bh']) GLR.bU[k] = gl.getUniformLocation(p, k);
+}
 function glGlowSetup() {
   const gl = GLR.gl, p = gl.createProgram();
   gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_GFS));
@@ -14682,7 +14762,7 @@ function glPuffSetup() {
   gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_PVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_PFS));
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-  GLR.pprog = p; GLR.pSize = gl.getUniformLocation(p, 'u_size'); GLR.pOff = gl.getUniformLocation(p, 'u_off'); GLR.pPal = gl.getUniformLocation(p, 'u_pal');
+  GLR.pprog = p; GLR.pBurn = gl.getUniformLocation(p, 'u_burn'); GLR.pEdge = gl.getUniformLocation(p, 'u_edge'); GLR.pSize = gl.getUniformLocation(p, 'u_size'); GLR.pOff = gl.getUniformLocation(p, 'u_off'); GLR.pPal = gl.getUniformLocation(p, 'u_pal');
   GLR.pvao = gl.createVertexArray(); gl.bindVertexArray(GLR.pvao);
   GLR.pqvbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
@@ -14692,7 +14772,7 @@ function glPuffSetup() {
   gl.attachShader(m, glShader(gl.VERTEX_SHADER, GL_MVS)); gl.attachShader(m, glShader(gl.FRAGMENT_SHADER, GL_MFS));
   gl.linkProgram(m);
   if (!gl.getProgramParameter(m, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(m));
-  GLR.mprog = m; GLR.mSize = gl.getUniformLocation(m, 'u_size'); GLR.mPalT = gl.getUniformLocation(m, 'u_palT');
+  GLR.mprog = m; GLR.mBurn = gl.getUniformLocation(m, 'u_burn'); GLR.mEdge = gl.getUniformLocation(m, 'u_edge'); GLR.mSize = gl.getUniformLocation(m, 'u_size'); GLR.mPalT = gl.getUniformLocation(m, 'u_palT');
   GLR.mvao = gl.createVertexArray(); gl.bindVertexArray(GLR.mvao);
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
   GLR.mvbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, GLR.mvbo); GLR.mcap = 0;   // (the records, copied on the GPU from each batch's own buffer)
@@ -14723,6 +14803,8 @@ uniform highp sampler2D u_d;
 uniform ivec4 u_o;          // lobes' start, lobes, billows' start, casters' start
 uniform int u_nc;           // casters' lobes
 uniform vec3 u_L; uniform float u_under;
+uniform vec4 u_ag;          // SEEN AGAINST THE SUN (07-light-shadow.js sunAgainst): AGAINST SUN x the disc shown (0: none), the disc's middle from the cloud (x, y up), the deck's oval width
+uniform vec4 u_ag2;         // the disc's radius, BURN REACH, the reach up and down (07-light-shadow.js ovalH), where the fade starts (BACKLIT FADE)
 uniform vec3 u_W;           // a puff's place in the world (the casters'): X + x, HW - c.y + y, c.wz + zz
 uniform vec4 u_p0;          // SHADOW, SELF, AMBIENT, CREASE
 uniform vec4 u_p1;          // CONTRAST x the hour's contrast, EXPOSURE, JITTER, HIGHLIGHT
@@ -14769,7 +14851,13 @@ void main() {
   float jit = a0.w, r = a1.w, under = u_under;
   float SH = u_p0.x, SELF = u_p0.y, AMB = u_p0.z, CREASE = u_p0.w, CT = u_p1.x, EXPO = u_p1.y, JITTER = u_p1.z, HI = u_p1.w;
   // (lightValue)
-  float bk = smoothstep(0.35, 0.8, -L.z);
+  // (SEEN AGAINST THE SUN: how near this puff is to the disc - BURN REACH of its radii past its edge - 07-light-shadow.js sunAgainst)
+  // (each puff's own: a big cloud is against the sun where it is near the disc, not all of it)
+  vec2 toD = u_ag.yz - P.xy; float dD = length(toD);
+  float nearP = u_ag.x > 0.0 ? 1.0 - smoothstep(0.0, u_ag2.y, dD / max(1.0, u_ag2.x) - 1.0) : 0.0;
+  float wideP = u_ag.x > 0.0 ? 1.0 - smoothstep(u_ag2.w, 1.0, length(vec2(toD.x / max(1.0, u_ag.w), toD.y / max(1.0, u_ag2.z)))) : 0.0;
+  float AG = max(nearP, wideP) * u_ag.x;
+  float bk = max(smoothstep(0.35, 0.8, -L.z), AG);   // (against the sun too: its body read whole, not puff by puff)
   if (bk > 0.0) { n += (ln - n) * bk; float l = length(n); n = l > 0.0 ? n / l : n; }
   // (BODY LIGHT: the body's own normal - the slope of the cloud's soft density, every lobe (1 - r^2)^2 out to 1.6 of its radius -
   // so the light turns across the whole cloud, not round each billow)
@@ -14794,13 +14882,14 @@ void main() {
   }
   float v = dot(n, L) * 0.5 + 0.5, openR = 1.0;
   // the shadow of the clouds that shade it (its casters' lobes, in the world)
-  float od = 0.0, odB = 0.0, odD = 0.0, kB = u_body;
+  float od = 0.0, odB = 0.0, odD = 0.0, odK = 0.0, kB = u_body;
   vec3 Pw = u_W + P;
-  for (int k = 0; k < u_nc; k++) { vec4 a = T(u_o.w + k * 2), b = T(u_o.w + k * 2 + 1); od += chord(Pw, L, a, b) / b.z; }
+  float odCB = 0.0;   // (SEEN AGAINST THE SUN: the clouds behind it, along the line straight back - casters flagged 2; the sun's own light: flag 1)
+  for (int k = 0; k < u_nc; k++) { vec4 a = T(u_o.w + k * 2), b = T(u_o.w + k * 2 + 1); int f = int(b.w + 0.5); if ((f & 1) != 0) od += chord(Pw, L, a, b) / b.z; if ((f & 2) != 0) odCB += chord(Pw, vec3(0.0, 0.0, -1.0), a, b) / b.z; }
   float odC = od;
   // and of its own cloud's other lobes (not those of its own smear); BODY LIGHT: every lobe of it, its own too, soft
   float grp = own >= 0 && own < nL ? T(u_o.x + own * 2 + 1).w : 0.0;
-  for (int k = 0; k < nL; k++) { vec4 a = T(u_o.x + k * 2), b = T(u_o.x + k * 2 + 1); if (kB > 0.0) { odB += softChord(Pb, L, a, b, u_bk.z); odD += softChord(Pb, vec3(0.0, -1.0, 0.0), a, b, u_bk.z); continue; } if (k == own) continue; if (grp != 0.0 && b.w == grp) continue; od += chord(P, L, a, b) / b.z; }
+  for (int k = 0; k < nL; k++) { vec4 a = T(u_o.x + k * 2), b = T(u_o.x + k * 2 + 1); if (kB > 0.0) { odB += softChord(Pb, L, a, b, u_bk.z); odD += softChord(Pb, vec3(0.0, -1.0, 0.0), a, b, u_bk.z); if (AG > 0.0) odK += softChord(Pb, vec3(0.0, 0.0, -1.0), a, b, u_bk.z); continue; } if (k == own) continue; if (grp != 0.0 && b.w == grp) continue; od += chord(P, L, a, b) / b.z; }
   // its own billow's neighbours (SELF)
   float odSelf = 0.0;
   if (SELF > 0.0) {
@@ -14840,16 +14929,60 @@ void main() {
     rimAdd = -L.z * (kB > 0.0 ? Tb * u_bk.y + side * side * toward * away * (1.0 - sh) * (1.0 - u_bk.y) : side * side * toward * away * (1.0 - sh)) * 1.1 * open; v += rimAdd;   // (ONE LIGHT: the sun behind glows through where the cloud is thin - Tb - not only at a puff's outline)
     v -= bk * (1.0 - open) * side * 0.45;
   }
-  float q = (v - 0.5) * CT + 0.5 + EXPO + jit * JITTER;
+  // (SEEN AGAINST THE SUN, 11:58-12:18 - the second part of every cloud's light, by one rule: the more a puff is against the sun (AG -
+  // near the disc or within the deck's oval about it, 07-light-shadow.js sunAgainst), the more it takes the backlit look instead of the
+  // sun's own light above: we see the side away from the sun, so its body dark (its face toward us, the sky's light on its top), and
+  // its thin parts (Tk: the light through the body from straight behind) and its outline glowing - more on the side toward the disc,
+  // all round right in front of it. Out of the oval nothing changes: every cloud keeps its lit and shaded sides)
+  float burnB = 0.0, burnAi = 0.0;
+  if (AG > 0.0) {
+    float Tk = kB > 0.0 ? exp(-u_bk.x * u_body * odK) : 1.0, nl2 = length(n.xy), face = nl2 > 1e-4 && dD > 1e-4 ? max(0.0, dot(n.xy / nl2, toD / dD)) : 0.0;
+    // (12:31 - the user, a small cloud by the sun lit white all over, "ignored": the glow through its thin body (Tk) lit a small cloud
+    // whole, so it read as a sunlit cloud. Every cloud, any size, the same: the glow is its outline's, its body dark)
+    float g = side * side * mix(0.35 + 0.65 * face, 1.0, nearP) * 1.1 * open;
+    // (12:49 - the user, sunset: the clouds round the low sun backlit but their undersides no longer lit from below - "backlit but also
+    // bottom illuminated". Against the sun the light still comes from the sun's height, only from behind the cloud: Lb, the sun's up and
+    // down with its across turned into the screen - from below at sunset (the undersides lit), from above with the sun high behind (the
+    // tops); and the light from under the deck as in the sun's own light. One rule)
+    // (15:05 - the user, the sun behind a cloud and its tops lit white: "Sun behind, not backlit". The light from the sun's height made a
+    // sun a quarter up read as 'from above' for the clouds in front of it. Now the backlit light comes from behind tilted toward where the
+    // disc is on the screen from this puff - straight through right in front of it (dark body, rims all round), from below for the
+    // clouds over a low sun (the undersides at sunset), from the side for those beside it. One rule)
+    vec3 Lb = dD > 1e-4 ? nrm(vec3(toD / dD * 0.75 * clamp(dD / max(1.0, u_ag2.x) - 0.5, 0.0, 1.0), -1.0)) : vec3(0.0, 0.0, -1.0);
+    float vB = dot(n, Lb) * 0.5 + 0.5 + AMB * 0.3 * (n.y * 0.5 + 0.5) - AMB * 0.12 - (1.0 - open) * side * 0.45 + g;
+    if (under > 0.0) vB += under * max(0.0, -n.y) * 0.95;
+    float shB = SH * shadowed(odCB), gB = g * (1.0 - shB);   // (a cloud behind it shades it - the light comes from behind)
+    // (THE BURN - the near end of the same: a puff near the disc on the cloud's outline facing it, or thin, or right over it - unless a
+    // cloud behind it hides the disc. Its code for the puff shader: the way to the disc on the screen, how much - as the lightning's boost)
+    if (nearP > 0.0) {
+      float inD = 1.0 - smoothstep(0.6, 1.05, dD / max(1.0, u_ag2.x));
+      // (by its billow's face, not its own - the balls we see are the billows: the burn lies on the billow's side toward the disc)
+      vec3 bn = nrm(a4.xyz); float bsd = 1.0 - abs(bn.z), bl = length(bn.xy), bfc = bl > 1e-4 && dD > 1e-4 ? max(0.0, dot(bn.xy / bl, toD / dD)) : 0.0;
+      // (and only where the disc's light gets through: the cloud's thin edge (Tk, the body behind it toward the disc) - a billow's side deep
+      // in the body has the cloud between it and the disc)
+      burnB = nearP * open * clamp(bsd * mix(bfc, 1.0, inD) * 1.6, 0.0, 1.0) * smoothstep(0.04, 0.3, Tk) * (1.0 - shB) * u_ag.x;
+      burnAi = inD > 0.5 ? 16.0 : mod(floor(atan(-toD.y, toD.x) / 0.3927 + 0.5), 16.0);
+    }
+    vB = vB - g + gB - shB * 0.5 * max(0.0, vB - g - 0.15);
+    v = mix(v, vB, AG); rimAdd += AG * gB; castK = max(castK, AG * SH * shadowed(odCB));
+  }
+  // (16:40 - the user, of the scraps: "I don't think they should have depth like the clouds ... like flat color. They're so thin that they
+  // would not get a grading. but they need to get shadowed when the sun is down ... change depending on how high or low the sun is". A
+  // scrap (its lobe's group -1, 06-lobes-billows-puffs.js placeLobes) is lit as a thin sheet: one flat light for all of it, by the sun's
+  // height alone - bright with the sun up, in shade as it goes down - lit through near the sun, shaded by a cloud in front of its light)
+  bool flatS = own >= 0 && own < nL && T(u_o.x + own * 2 + 1).w < -0.5;
+  if (flatS) { v = 0.5 + 0.42 * clamp(L.y, -1.0, 1.0) + AMB * 0.15; v = mix(v, 0.85, AG * 0.6); v -= sh * 0.5 * max(0.0, v - 0.15); rimAdd = 0.0; }
+  float q = (v - 0.5) * CT + 0.5 + EXPO + (flatS ? 0.0 : jit * JITTER);
   int tone = int(clamp(floor(q * 5.0), 0.0, 4.0));
   if (HI > 0.0 && q >= 1.25 - 0.25 * HI && (rimAdd > 0.12 || u_p2.x > 0.5 || u_p2.y > 0.3)) tone = 5;
   int outT = castK > 0.45 ? min(tone, (kB > 0.0 ? n.y : ln.y) > 0.3 ? 1 : 0) : tone;   // (ONE LIGHT: in shade, the tops of the cloud's shape a step lighter - not each lobe's own top)
   float gk = u_p2.z; int lo = 0;
-  if (gk > 0.01) { float gy = kB > 0.0 ? n.y : ln.y, f = gk * (0.12 + 0.62 * max(0.0, -gy) + 0.2 * (1.0 - abs(gy))) * (0.35 + 0.65 * openR) * Td; lo = int(min(3.0, floor(f * 4.2))); outT = max(outT, lo); }
+  if (gk > 0.01 && !flatS) { float gy = kB > 0.0 ? n.y : ln.y, f = gk * (0.12 + 0.62 * max(0.0, -gy) + 0.2 * (1.0 - abs(gy))) * (0.35 + 0.65 * openR) * Td; lo = int(min(3.0, floor(f * 4.2))); outT = max(outT, lo); }
   float C5 = 5.0 * CT, LVf = (q - jit * JITTER) * 5.0;
-  bool free_ = outT == max(lo, int(clamp(floor(q * 5.0), 0.0, 4.0))) && tone != 5 && !(castK > 0.45) && rimAdd < 0.05;
-  float lx = 0.5 * L.x * shk * C5, lz = 0.5 * L.z * shk * C5;
-  float ly = (0.5 * L.y * shk + 0.15 * AMB - (under > 0.0 && n.y < 0.0 ? under * 0.95 * (1.0 - castK * 0.6) : 0.0)) * C5;
+  bool free_ = !flatS && outT == max(lo, int(clamp(floor(q * 5.0), 0.0, 4.0))) && tone != 5 && !(castK > 0.45) && rimAdd < 0.05;
+  // (the light running across a puff is the sun's own light's: against the sun, only its share of it - 1 - AG)
+  float lx = 0.5 * L.x * shk * C5 * (1.0 - AG), lz = 0.5 * L.z * shk * C5 * (1.0 - AG);
+  float ly = (0.5 * L.y * shk * (1.0 - AG) + 0.15 * AMB - (under > 0.0 && n.y < 0.0 ? under * 0.95 * (1.0 - castK * 0.6) : 0.0)) * C5;
   // (lightSlope: the light across the puff)
   float tgx = 0.0, tgy = 0.0;
   if (free_ && u_shade != 0.0 && own >= 0 && own < nL) {
@@ -14876,7 +15009,8 @@ void main() {
   // (a debug VIEW: the puff's colour id - its lobe, its billow, itself, or grey for LIGHT - negative, so it still reads as a disc)
   float vid = 0.0;
   if (u_view > 0) { int ci = u_view == 1 ? own % 8 : u_view == 2 ? (int(T(u_o.z + bill * 2 + 1).z + 0.5) + own * 3) % 8 : u_view == 4 ? (gl_VertexID + own * 3) % 8 : 8; vid = -float(ci + 1); }
-  if (boost > 0) { int tb = min(5, outT + boost); o0 = vec4(a0.x, a0.y, a0.z, float(tb)); o1 = vec4(0.0, 0.0, float(tb + 8 * tb), vid); }
+  if (burnB > 0.05 && boost == 0 && u_view == 0) { o0 = vec4(a0.x, a0.y, a0.z, float(outT)); o1 = vec4(0.0, 0.0, float(outT + 8 * outT), 2.0 + burnAi + min(burnB, 1.0) * 0.98); }
+  else if (boost > 0) { int tb = min(5, outT + boost); o0 = vec4(a0.x, a0.y, a0.z, float(tb)); o1 = vec4(0.0, 0.0, float(tb + 8 * tb), vid); }
   else if ((tgx != 0.0 || tgy != 0.0) && u_view == 0) { o0 = vec4(a0.x, a0.y, a0.z, LVf); o1 = vec4(tgx, tgy, float(lo + 8 * 4), vid); }
   else { o0 = vec4(a0.x, a0.y, a0.z, float(outT)); o1 = vec4(0.0, 0.0, float(outT + 8 * outT), vid); }
 }`;
@@ -14889,7 +15023,7 @@ function glLitSetup() {
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
   GLR.lprog = p; GLR.lU = {};
-  for (const k of ['u_d', 'u_o', 'u_nc', 'u_L', 'u_under', 'u_W', 'u_p0', 'u_p1', 'u_p2', 'u_shade', 'u_nodir', 'u_fl', 'u_fls', 'u_view', 'u_body', 'u_bk']) GLR.lU[k] = gl.getUniformLocation(p, k);
+  for (const k of ['u_d', 'u_o', 'u_nc', 'u_L', 'u_ag', 'u_ag2', 'u_under', 'u_W', 'u_p0', 'u_p1', 'u_p2', 'u_shade', 'u_nodir', 'u_fl', 'u_fls', 'u_view', 'u_body', 'u_bk']) GLR.lU[k] = gl.getUniformLocation(p, k);
   gl.useProgram(p); gl.uniform1i(GLR.lU.u_d, 11); gl.useProgram(GLR.prog);
   GLR.lvao = gl.createVertexArray(); GLR.ltf = gl.createTransformFeedback();
   gl.bindVertexArray(GLR.vao);
@@ -14926,7 +15060,7 @@ function glLitRun(b, lit, U) {
   gl.bindBuffer(gl.ARRAY_BUFFER, null);
   gl.useProgram(GLR.lprog); GLR.cur.prog = 7; const u = GLR.lU;
   gl.uniform4i(u.u_o, U.lo0, U.nl, U.bo0, U.co0); gl.uniform1i(u.u_nc, U.nc);
-  gl.uniform3f(u.u_L, U.L[0], U.L[1], U.L[2]); gl.uniform1f(u.u_under, U.under); gl.uniform3f(u.u_W, U.W[0], U.W[1], U.W[2]);
+  gl.uniform3f(u.u_L, U.L[0], U.L[1], U.L[2]); { const a = U.ag || [0, 0, 0, 1, 1, 1, 1, 0.1]; gl.uniform4f(u.u_ag, a[0], a[1], a[2], a[3]); gl.uniform4f(u.u_ag2, a[4], a[5], a[6], a[7] ?? 0.1); } gl.uniform1f(u.u_under, U.under); gl.uniform3f(u.u_W, U.W[0], U.W[1], U.W[2]);
   gl.uniform4f(u.u_p0, U.p0[0], U.p0[1], U.p0[2], U.p0[3]); gl.uniform4f(u.u_p1, U.p1[0], U.p1[1], U.p1[2], U.p1[3]); gl.uniform4f(u.u_p2, U.p2[0], U.p2[1], U.p2[2], U.p2[3]); gl.uniform1f(u.u_shade, U.shade); gl.uniform1f(u.u_nodir, U.nodir || 0); const fl = U.fl || [0, 0, 0, 0], fs = U.fls || [1, 1]; gl.uniform4f(u.u_fl, fl[0], fl[1], fl[2], fl[3]); gl.uniform2f(u.u_fls, fs[0], fs[1]); gl.uniform1i(u.u_view, U.view | 0); gl.uniform1f(u.u_body, U.body || 0); { const k = U.bk || [1.6, 0.85, 2]; gl.uniform3f(u.u_bk, k[0], k[1], k[2]); }
   gl.bindTransformFeedback(gl.TRANSFORM_FEEDBACK, GLR.ltf);
   gl.bindBufferRange(gl.TRANSFORM_FEEDBACK_BUFFER, 0, b.vbo, 0, lit.n * 32);
@@ -15309,7 +15443,7 @@ function glSetup() {
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
   GLR.pix = null; GLR.pixPool = [];
-  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
+  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
@@ -15933,7 +16067,7 @@ class GLCtx {
     if (GLR.cur.prog !== 1) { gl.useProgram(GLR.prog); GLR.cur.prog = 1; }   // (glApplyState sets the quad program's size)
     glApplyState();
     gl.useProgram(GLR.pprog); GLR.cur.prog = 2;
-    gl.uniform2f(GLR.pSize, t._w, t._h); gl.uniform2f(GLR.pOff, ox, oy); gl.uniform4fv(GLR.pPal, pal);
+    gl.uniform2f(GLR.pSize, t._w, t._h); gl.uniform2f(GLR.pOff, ox, oy); gl.uniform4fv(GLR.pPal, pal); gl.uniform1f(GLR.pEdge, GLR.edge || 0); { const b = GLR.burn || [1, 1, 1]; gl.uniform3f(GLR.pBurn, b[0], b[1], b[2]); }
     gl.bindVertexArray(GLR.pvao); GLR.cur.vao = 3;
     if (!b.vbo || b.epoch !== GLR.epoch) { b.vbo = gl.createBuffer(); b.epoch = GLR.epoch; b.dirty = true; }
     gl.bindBuffer(gl.ARRAY_BUFFER, b.vbo);
@@ -15974,7 +16108,7 @@ class GLCtx {
     gl.bindBuffer(gl.COPY_READ_BUFFER, null); gl.bindBuffer(gl.COPY_WRITE_BUFFER, null);
     gl.bindBuffer(gl.ARRAY_BUFFER, GLR.mvbo2); gl.bufferData(gl.ARRAY_BUFFER, M, gl.STREAM_DRAW, 0, tot * 4);
     gl.useProgram(GLR.mprog); GLR.cur.prog = 11;
-    gl.uniform2f(GLR.mSize, t._w, t._h); gl.uniform1i(GLR.mPalT, 10);
+    gl.uniform2f(GLR.mSize, t._w, t._h); gl.uniform1i(GLR.mPalT, 10); gl.uniform1f(GLR.mEdge, GLR.edge || 0); { const b = GLR.burn || [1, 1, 1]; gl.uniform3f(GLR.mBurn, b[0], b[1], b[2]); }
     gl.activeTexture(gl.TEXTURE10); gl.bindTexture(gl.TEXTURE_2D, GLR.mpal); gl.bindSampler(10, null);
     const fy = gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL), pm = gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL);
     if (fy) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); if (pm) gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
@@ -16002,6 +16136,25 @@ class GLCtx {
     gl.uniform4f(U.u_g0, G.cx, G.cy, G.gx, G.gy); gl.uniform4f(U.u_g1, G.ak, 0, G.NG, G.horY);
     gl.uniform3f(U.u_far, G.far[0], G.far[1], G.far[2]); gl.uniform3f(U.u_near, G.near[0], G.near[1], G.near[2]);
     gl.uniform1fv(U.u_dq, G.dq);
+    gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    GLR.stats.draws++; GLR.stats.quads++;
+  }
+  // the burn over a deck's layer T (GL_BFS): its cells x0..x1, y0..y1 over the screen's dx, dy, dw, dh
+  drawBurnGL(T, dx, dy, dw, dh, x0, y0, x1, y1, b0, b1, col, bh) {
+    if (GLR.lost || !GLR.bprog || !T || !T.isGLTarget) return;
+    const E = glSrc(T); if (!E) return;
+    const gl = GLR.gl, t = this.target, U = GLR.bU;
+    glBegin(this, 'source-over'); glFlush();
+    glApplyState();
+    gl.useProgram(GLR.bprog); GLR.cur.prog = 12;
+    gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, E.tex); gl.bindSampler(12, null); gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(U.u_t, 12);
+    gl.uniform2f(U.u_size, t._w, t._h);
+    this._corners(dx, dy, dw, dh);
+    gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
+    gl.uniform4f(U.u_cells, x0, y0, x1, y1);
+    gl.uniform4f(U.u_b0, b0[0], b0[1], b0[2], b0[3]); gl.uniform4f(U.u_b1, b1[0], b1[1], b1[2], b1[3]); gl.uniform3f(U.u_col, col[0], col[1], col[2]); gl.uniform2f(U.u_bh, bh ? bh[0] : 1, bh ? bh[1] : 0.1);
     gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     GLR.stats.draws++; GLR.stats.quads++;
@@ -17424,6 +17577,12 @@ const SL = [
   ['amb', 'AMBIENT', 0, 1, 0.05, 0.35],
   ['crease', 'CREASE', 0, 1, 0.05, 0.4],          // (Oct 28, lab V50: how dark the crease where two lobes meet is, in any light)
   ['lightfix', 'LIGHT FIX', 0, 1, 1, 1],
+  ['farsun', 'FAR SUN', 0, 1, 1, 1],
+  ['agk', 'AGAINST SUN', 0, 2, 0.05, 1],
+  ['burnr', 'BURN REACH', 0.5, 6, 0.25, 2.5],   // (07-light-shadow.js sunAgainst: how far past the disc's edge, in its radii, clouds burn)   // (07-light-shadow.js sunAgainst, 11:58: the glow on the edges of the clouds near the sun - 0 none)
+  ['skytex', 'SKY TEXTURE', 0, 2, 0.1, 1],   // (17-frame.js skyBack, 13:13: the sky's bands ragged in streaks - 0 flat)
+  ['backw', 'BACKLIT WIDTH', 0.05, 1.5, 0.05, 0.45],
+  ['backf', 'BACKLIT FADE', 0, 1, 0.05, 0.9],   // (07-light-shadow.js fadeE0, 12:31: how much of the backlit reach is its fade out)   // (07-light-shadow.js sunOut, Oct 30: the backlit oval about the sun, a share of the view across)   // (07-light-shadow.js lightDir, Oct 30: one light for the whole sky)
   ['hi', 'HIGHLIGHT', 0, 2, 0.05, 1],
   ['glow', 'SUNSET GLOW', 0, 2, 0.05, 1],
   ['flare', 'SUN SPARKLE', 0, 2, 0.05, 1],
@@ -17437,6 +17596,9 @@ const SL = [
   ['rayhid', 'WHEN HIDDEN', 0, 2, 0.05, 1],
   ['raylen', 'RAY LENGTH', 0.3, 3, 0.05, 1.4],
   ['puff', 'PUFF', 1.5, 7, 0.1, 4.2],
+  ['edgeb', 'EDGE BREAK', 0, 1, 0.05, 0.7],
+  ['scraps', 'WIND SCRAPS', 0, 2, 0.05, 1],   // (06-lobes-billows-puffs.js placeLobes, 13:42: the bits off a cloud's base, how far the wind trails them - 0 none)
+  ['windpile', 'WIND SHAPE', 0, 1, 0.05, 0.6],   // (06-lobes-billows-puffs.js placeLobes, Oct 30)   // (40-gl.js GL_PFS, Oct 30)
   ['billow', 'BILLOW', 0.4, 1.6, 0.05, 1],
   ['bcap', 'BILLOW CAP', 0, 60, 1, 15],
   ['mass', 'MASS', 0, 1, 0.05, 0.62],
@@ -17465,6 +17627,8 @@ const SL = [
   ['hz1', 'DECK 1 HAZE', 0, 0.95, 0.01, 0], ['hz2', 'DECK 2 HAZE', 0, 0.95, 0.01, 0.22], ['hz3', 'DECK 3 HAZE', 0, 0.95, 0.01, 0.36], ['hz4', 'DECK 4 HAZE', 0, 0.95, 0.01, 0.5], ['hz5', 'DECK 5 HAZE', 0, 0.95, 0.01, 0.58], ['hz6', 'DECK 6 HAZE', 0, 0.95, 0.01, 0.66],
   // (the game's own: how the game's weather becomes the lab's sky, and how the decks move with the camera)
   ['gcover', 'CLOUDS AT SKY 30%', 0, 0.5, 0.01, 0.1],   // (the game's SKY 0.3; SKY 0 is always clear, 0.6 every cloud - user Oct 27)
+  ['gmin', 'SMALLEST CLOUD', 0, 1, 0.01, 0.35],
+  ['clump', 'CLUMPING', 0, 1, 0.05, 0.85], ['clumpw', 'CLUMP SIZE', 0.3, 5, 0.1, 1.1], ['clumpd', 'DECK VARIETY', 0, 1, 0.05, 0.45],   // (08-scene.js densityAt, Oct 30)   // (17-frame.js growMin, Oct 30)
   ['bigk', 'BIGGER PAST 60%', 0, 1.5, 0.05, 0.5],   // (how much bigger the clouds grow from SKY 0.6 to 1)
   ['ghaze', 'HAZE ON A CLEAR DAY', 0, 1, 0.01, 0.35],
   ['par1', 'DECK 1 PARALLAX', 0, 1, 0.01, 1],   // (1: deck 1 is where the planes fly - it moves with the world, user Oct 27: the balloon stays with the clouds under it)
@@ -17473,7 +17637,8 @@ const SL = [
   ['par4', 'DECK 4 PARALLAX', 0, 1, 0.01, 0.2],
   ['par5', 'DECK 5 PARALLAX', 0, 1, 0.01, 0.16],
   ['par6', 'DECK 6 PARALLAX', 0, 1, 0.01, 0.12],
-  ['cells', 'SKY PIXEL', 2, 8, 1, 3],   // (user Oct 29 15:25: 3)   // (user Oct 27: "Default should be 2"; 1 broke up, 0 was 'about 230 to the screen's height')
+  ['sunpar', 'SUN PARALLAX', 0, 1, 0.01, 0.08],   // (17-frame.js skyBack, Oct 30: the sun is a 'deck 7', just behind deck 6 (0.12) - user 11:50; 1 with the land, 0 following the camera)
+  ['cells', 'SKY PIXEL', 1, 8, 1, 1],   // (user Oct 29 15:25: 3)   // (user Oct 27: "Default should be 2"; 1 broke up, 0 was 'about 230 to the screen's height')
   ['skyh', 'SKY HEIGHT', 0.25, 1, 0.01, 0.5],
   ['cloudk', 'CLOUD SIZE', 0.3, 10, 0.05, 4],   // (user Oct 29 defaults)   // (max 10, was 2 - user Oct 29: the clouds' size with the real-scale world)
   ['cellz', 'SKY PIXEL BY ZOOM', 0, 1, 1, 1],
@@ -17591,20 +17756,25 @@ const cv = { width: 1, height: 1 };
 const SKY_KEYS = [  // hour, top, horizon (the game's, with the day from the user's cumulus reference)
   [0, [6, 10, 30], [20, 30, 66]], [4.6, [10, 14, 42], [34, 38, 84]], [5.6, [70, 54, 124], [236, 128, 110]],
   [6.2, [112, 102, 172], [254, 196, 104]], [7.2, [104, 150, 228], [255, 214, 160]], [8.5, [100, 164, 236], [163, 217, 251]],
-  [15.5, [100, 164, 236], [163, 217, 251]], [16.8, [104, 136, 214], [255, 214, 168]], [17.8, [112, 102, 172], [254, 196, 104]],
-  [18.5, [100, 86, 158], [252, 152, 92]], [19.4, [26, 24, 64], [80, 52, 104]], [24, [6, 10, 30], [20, 30, 66]],
+  [15.5, [100, 164, 236], [163, 217, 251]], [16.8, [104, 136, 214], [255, 214, 168]], [17.8, [88, 86, 152], [252, 206, 78]],
+  [18.5, [66, 70, 128], [252, 178, 58]], [19.4, [26, 24, 64], [80, 52, 104]], [24, [6, 10, 30], [20, 30, 66]],
 ];
 function skyAt(h) { for (let i = 0; i < SKY_KEYS.length - 1; i++) { const a = SKY_KEYS[i], b = SKY_KEYS[i + 1]; if (h <= b[0]) { const u = (h - a[0]) / (b[0] - a[0]); return [mix3(a[1], b[1], u), mix3(a[2], b[2], u)]; } } return [SKY_KEYS[0][1], SKY_KEYS[0][2]]; }
 // five cloud tones, deepest shade (0) to full light (4)
 const PAL = {
   day: [[136, 176, 228], [159, 206, 236], [189, 217, 231], [209, 228, 238], [233, 242, 247], [248, 251, 255]],    // sampled from ref_cumulus_day
   gold: [[146, 146, 196], [190, 174, 200], [232, 200, 184], [250, 224, 188], [255, 243, 218], [255, 251, 238]],
-  set: [[84, 60, 100], [150, 84, 122], [226, 112, 114], [250, 170, 108], [252, 236, 188], [255, 242, 156]],      // after ref_cumulus_sunset
+  // (13:00 - the user: the sunset "how it should look like color wise", lab/skybench/ref/sunset-colour-target-oct30.png - sampled: the
+  // bodies deep purple, then magenta, red, orange, gold, the rims a warm yellow)
+  set: [[80, 56, 104], [168, 70, 114], [236, 82, 86], [250, 124, 60], [252, 162, 62], [252, 198, 84]],   // (13:50: the lit parts oranger, as the target's - sampled)      // after ref_cumulus_sunset
   night: [[18, 26, 62], [28, 42, 90], [42, 62, 122], [62, 90, 154], [104, 136, 194], [170, 196, 238]],
   gray: [[112, 120, 140], [138, 146, 162], [164, 170, 184], [190, 196, 206], [214, 220, 228], [234, 238, 244]],
   // (tone 5, the last: the highlight, above full light: the backlit outline at sunset, the moonlit tops at night)
   storm: [[20, 27, 46], [32, 42, 66], [48, 61, 90], [76, 92, 124], [128, 150, 190], [170, 190, 228]],            // after ref_deck_storm_lightning
   fog: [[24, 42, 60], [214, 224, 236], [226, 158, 138]],   // night, day, dusk: the fog and the rain's curtain under the decks (mixed with cloud tone 1)
+  // (THE BURN's colour - the light of the disc behind a cloud on its balls: day, golden hour, sunset, the moon; mixed by the hour as the
+  // cloud palettes are - 13:23, the user: "the burn color should be different per time of day for the sun (able to change in editor)")
+  burn: [[255, 255, 250], [255, 236, 190], [255, 218, 110], [255, 226, 150]],
 };
 const E = {};
 let sunScreen = { x: 0.3, y: 0.7 };
@@ -17635,7 +17805,7 @@ function computeEnv() {
   let fogCol = mix3(PAL.fog[0], PAL.fog[1], E.day); fogCol = mix3(fogCol, PAL.fog[2], E.dusk * 0.6);
   E.fogCol = fogCol;
   E.sunset = E.dusk * (1 - E.overcast);
-  E.skyMid = mix3(mix3(top, hor, 0.55), [253, 98, 106], E.sunset * 0.8);
+  E.skyMid = mix3(mix3(top, hor, 0.55), [242, 84, 86], E.sunset * 0.9);   // (the sunset's red band: the user's target, 13:00)
   let sunCol = mix3([255, 130, 96], [255, 250, 236], smoothstep(0.02, 0.45, E.sunAlt));
   sunCol = mix3(sunCol, [255, 176, 88], E.dusk * 0.9); sunCol = mix3(sunCol, [196, 214, 246], E.night);
   E.sunCol = sunCol;
@@ -17652,6 +17822,7 @@ function computeEnv() {
     return c.map(Math.round);
   });
   E.rayK = clamp(0.25 * E.day + Math.max(E.dusk, goldK), 0, 1) * (1 - E.overcast) * (1 - E.night) * (1 - 0.5 * E.fog) * smoothstep(-1.2, -0.6, sunSet());   // (RAYS: a low sun under a clear sky - gone with the disc's last sliver, by the screen: 14-sun-moon.js sunSet)
+  { let c = mix3(PAL.burn[3], PAL.burn[0], E.day); c = mix3(c, PAL.burn[1], goldK * (1 - E.overcast)); c = mix3(c, PAL.burn[2], setK); E.burn = c.map(Math.round); }
   E.w = { night: 1 - E.day, day: E.day, gold: goldK * (1 - E.overcast), set: setK, gray: grayK, storm: E.storm };
   E.palStorm = PAL.storm.map((c, t) => mix3(c.map(v => v * (0.55 + 0.45 * E.day)), E.pal[t], 0.15 + 0.45 * E.sunset).map(Math.round));
   E.contrast = 1 - 0.55 * E.overcast * (1 - E.storm * 0.6);
@@ -17707,7 +17878,7 @@ function resizeSky(cw, ch, keep) {
     regenAll();
     return;
   }
-  buildScene();
+  buildScene(); deckDepths();   // (16:51 - the user: scraps "are terrible, lets disable them we need to rethink them": addScraps no longer called)
 }
 const rgb = c => (255 << 24) | (c[2] << 16) | (c[1] << 8) | c[0];
 const rgba = (c, a) => ((Math.round(a * 255) & 255) << 24) | (c[2] << 16) | (c[1] << 8) | c[0];
@@ -17903,9 +18074,15 @@ function genCloud(c) {
   c.paint = c.paint || [];
   cloudBox(c);
 }
+// (GROWS FROM ITS BASE UP, 16:55 - the user, of a tower at 35% grown: "bad shaded, weird shape, too small". A growing cloud was its
+// whole finished shape scaled down evenly: a tower at a third its size a tiny tower. Now every cloud rises as it grows - its width
+// with its growth as before, its height (where its lobes sit above its base, and how tall each one is) held lower while it is young:
+// a young tower a low heap of its lobes, rising into the column as the weather builds; a flat cloud hardly changes. Past full size, as before)
+const growH = g => g >= 1 ? 1 : 0.35 + 0.65 * g * g;
 function cloudBox(c) {
-  const s = c.s * c.lay.zl, g = c.grow ?? 1; let minX = 1e9, maxX = -1e9, maxY = 0;
-  for (const L of c.lobes) { const RX = Math.max(L.rx, L.gx ?? 0), RY = Math.max(L.ry, L.gy ?? 0); minX = Math.min(minX, (L.x - RX) * s * g); maxX = Math.max(maxX, (L.x + RX) * s * g); maxY = Math.max(maxY, (L.y + RY) * s * g); }
+  const s = c.s * c.lay.zl, g = c.grow ?? 1, hq = growH(g), hr = Math.sqrt(hq); let minX = 1e9, maxX = -1e9, maxY = 0;
+  for (const L of c.lobes) { if (L.scrap) continue; const RX = Math.max(L.rx, L.gx ?? 0), RY = Math.max(L.ry, L.gy ?? 0); minX = Math.min(minX, (L.x - RX) * s * g); maxX = Math.max(maxX, (L.x + RX) * s * g); maxY = Math.max(maxY, (L.y * hq + RY * hr) * s * g); }
+  // (SCRAPS stay out of the box: it is the cloud's body - its middle and size for the light; the views' margins cover their trail)
   c.minX = minX; c.maxX = maxX; c.h = maxY;
   // (BODY LIGHT is for the tall clouds - a tower as high as it is wide lit as one mass (user Oct 29: "it works beautifully in the
   // midday sun or if the clouds are not so tall"): none under 0.6 of its width high, all of it from 0.95)
@@ -17962,17 +18139,40 @@ function morphTo(c, target, dur) {
   if (c.items || c === hero) genCloud(c); else { c.lob = c.lobes.map(() => ({})); cloudBox(c); }
 }
 const formDur = () => 20 / (P.morph || 1);   // (MORPH SPEED: 2 = twice as fast; no longer faster in a wind - user Oct 28)      // (MORPH SPEED: 2 = twice as fast)
+// (SCRAPS: how far a scrap sits past its cloud's end, in lobe units, by the wind's strength aw (0..1) - 08-scene.js addScraps)
+const scrapGap = (L, aw) => L.rx * (0.5 + 0.8 * L.sd) + L.scrap * L.rx * 2.2 * (0.35 + 1.3 * aw);
 function placeLobes(c, t) {
-  const s = c.s * c.lay.zl, g = c.grow ?? 1;
+  const s = c.s * c.lay.zl, g = c.grow ?? 1, hq = growH(g), hr = Math.sqrt(hq);   // (GROWS FROM ITS BASE UP: cloudBox)
   if (c.lob.length !== c.lobes.length) c.lob = c.lobes.map(() => ({}));
   c.lobV = (c.lobV || 0) + 1;   // (its lobes changed: drawLobes builds its record again - perf pass, Oct 29)
+  // (WIND SHAPE, Oct 30 - the user, with a sketch and a photo: "based on the wind direction it could define how it 'accumulates'... where
+  // there is this accumulation of puffs in a specific direction". The wind heaps a cloud up on its downwind end and leaves it lower
+  // and thinner upwind, its base kept flat, and leans its tops downwind a little. f: how much, by the wind (stepped, WINDQ) and
+  // WIND SHAPE; u: where a lobe is along the cloud, -1 its upwind end to 1 its downwind one)
+  // (15:08 - the user, of flat clouds "always the same all the time get 0 affected by the wind. Why?": they were left out (a special case)
+  // after the wind tipped them into ramps. One rule now, by how tall a cloud is for its width (tl): a tall one heaps up downwind as
+  // above; a flat one can't heap - the wind stretches it downwind and thins its downwind end, its base level, frayed into scraps)
+  const f = WINDQ * (P.windpile ?? 0.6), fa = Math.abs(f), fs = Math.sign(f);
+  let lo = 1e9, hi = -1e9, ylo = 1e9, yhi = -1e9; for (const L of c.lobes) { if (L.scrap) continue; if (L.x - L.rx < lo) lo = L.x - L.rx; if (L.x + L.rx > hi) hi = L.x + L.rx; if (L.y - L.ry < ylo) ylo = L.y - L.ry; if (L.y + L.ry > yhi) yhi = L.y + L.ry; }
+  const tl = clamp((yhi - ylo) / Math.max(1, hi - lo) * 4 - 0.2, 0, 1);   // (how tall it is for its width - its own thickness, not its lift above the deck)
+  const mid = (lo + hi) / 2, half = Math.max(1, (hi - lo) / 2);
   c.lobes.forEach((L, j) => {
     let e = 1 + P.evolve * 0.045 * Math.sin(t * 0.06 + (L.seed % 97) * 0.7);
     if (L.tmp) { const a = t - L.born; e *= smoothstep(0, 0.35, a) * (1 - smoothstep(L.life * 0.55, L.life, a)); }   // a smear swells out, then melts back
     const ge = e * g;
-    const o = c.lob[j]; o.grp = L.grp || 0; o.ux = L.ux; o.uy = L.uy; o.x = L.x * s * g; o.y = L.y * s * (1 + (e - 1) * 1.5) * g; o.z = (L.z || 0) * s;
-    o.rx = Math.max(0.3, L.rx * s * ge); o.ry = Math.max(0.3, L.ry * s * ge); o.rz = Math.max(0.3, Math.min(L.rx, L.ry) * 0.95 * s * ge); o.rb = (o.rx + o.ry) / 2;
+    const o = c.lob[j]; o.grp = L.grp || 0; o.ux = L.ux; o.uy = L.uy; o.x = L.x * s * g; o.y = L.y * s * (1 + (e - 1) * 1.5) * g * hq; o.z = (L.z || 0) * s;
+    o.rx = Math.max(0.3, L.rx * s * ge); o.ry = Math.max(0.3, L.ry * s * ge * hr); o.rz = Math.max(0.3, Math.min(L.rx, L.ry) * 0.95 * s * ge); o.rb = (o.rx + o.ry) / 2;
     o.k = Math.min(1, (L.rx + L.ry) / ((L.gx ?? L.rx) + (L.gy ?? L.ry))) * ge;                     // how big its puffs are now
+    if (L.scrap) {   // (SCRAPS: off the downwind end, trailing further with the wind; in a calm, by either end in turn)
+      const w = WINDQ * (P.scraps ?? 1), side = w > 0 ? 1 : w < 0 ? -1 : (L.scrap % 2 ? 1 : -1), x = (side > 0 ? hi : lo) + side * scrapGap(L, Math.min(1, Math.abs(w)));
+      o.x = x * s * g; o.grp = -1; o.k *= (P.scraps ?? 1) > 0 ? 1 : 0;   // (grp -1: a scrap - lit flat, 40-gl.js GL_LVS) if ((P.scraps ?? 1) <= 0) { o.rx = o.ry = o.rz = o.rb = 0.3; }
+      return;
+    }
+    if (f) {   // (WIND SHAPE: taller downwind, lower upwind - its height and its middle together, so its bottom stays where it was; tops leaning downwind)
+      const u = clamp((L.x - mid) / half, -1, 1), dn = u * fs, hk = clamp(1 + 0.9 * fa * dn * tl, 0.55, 1.6) * (1 - 0.55 * fa * (1 - tl) * Math.max(0, dn));
+      const bot = o.y - o.ry; o.ry *= hk; o.y = bot + o.ry; o.rz *= Math.sqrt(hk); o.rb = (o.rx + o.ry) / 2;   // (each lobe's own bottom kept: only its top rises or sinks)
+      o.x += Math.max(0, o.y) * 0.35 * f * tl + fs * (dn + 1) / 2 * fa * (1 - tl) * half * 0.5 * s * g;   // (tall: tops leaning; flat: stretched downwind)
+    }
   });
 }
 // the billows' places in the cloud's list (zoomed out only they are drawn): rebuilt when the list changes
@@ -18039,7 +18239,7 @@ function sphereChord(px, py, pz, L, cx, cy, cz, R) {
 // the air between the eye and a deck: its tones mixed toward the horizon's colour (deck 3: 0.5, deck 2: 0.22 at ATMOSPHERE 1;
 // 0 = no air, 2 = twice as much air: 1 − (1 − haze)^ATMOSPHERE)
 const airOf = h => 1 - Math.pow(1 - h, P.atmo ?? 1);
-const hazeOf = c => Math.min(0.92, airOf(c.haze) * (1 - 0.4 * E.overcast) * (1 - 0.45 * Math.min(1, (P.glow ?? 1) * E.sunset)));
+const hazeOf = c => Math.min(0.92, airOf(c.haze) * (1 - 0.4 * E.overcast) * (1 - 0.75 * Math.min(1, (P.glow ?? 1) * E.sunset)));   // (13:50: at sunset the far decks stay crisp purple and gold, as the user's target - less air)
 const shadowed = od => clamp((od - 0.08) * 5, 0, 1);
 // (BODY LIGHT, Oct 28, user: a tall cloud "should read as a 'whole' vs those small blobs". Each puff's shadow was a hard test
 // against the cloud's other lobes alone, so a puff standing out of its lobe slipped out of the shade and the cloud broke into
@@ -18055,18 +18255,23 @@ const softChord = (px, py, pz, L, l, s) => {
   const t0 = Math.max(t1, 0);
   return -(A / 3 * (t2 ** 3 - t0 ** 3) + B / 2 * (t2 * t2 - t0 * t0) + C * (t2 - t0)) / (l.rb * s);
 };
-const DOWN = [0, -1, 0];
+const DOWN = [0, -1, 0], BACK = [0, 0, -1];
 const bodyRamp = od => clamp((od * 0.15 - 0.22) * 1.6, 0, 1);   // (GL_LVS)
 // (besides the tone: the light before it is cut into tones - f, in tone steps - and how it changes with the normal - lx, ly,
 // lz: tone steps per unit of normal - so a puff can be drawn with the light running across it (11-drawing.js discShade).
 // free: the tone is the light's own (not a shadow's, the highlight's); lo: the sunset glow's floor; bk: the sun behind)
 const LV = { f: 0, free: false, lo: 0, lx: 0, ly: 0, lz: 0, bk: 0 };
 let LV_BODYK = 0;   // (BODY LIGHT: the share of it for the cloud being lit - c.bodyK, set by lightValue's callers)
+let LV_AG = null, LV_CB = 0;   // (LV_CB: the clouds behind it along the line straight back - against the sun, set with the casters)
+let LV_AG_ = null;   // (SEEN AGAINST THE SUN: the cloud's c.ag, set by lightValue's callers - the same rule as GL_LVS for the clouds lit in JS: lobes, tubes, paint)
 function lightValue(it, own, lob, L, odOther, odSelf, under) {
   let nx = it.nx, ny = it.ny, nz = it.nz, rimAdd = 0;
   // the sun close behind a cloud (L mostly into the screen): light by the lobes' smooth normals, not each puff's own, or the
   // puffs inside the shaded body catch the edge glow one by one and the cloud looks noisy (user, 18:56)
-  const bk = smoothstep(0.35, 0.8, -L[2]);
+  // (SEEN AGAINST THE SUN - GL_LVS, the same numbers: how much this spot is against the sun, near the disc or within the reach)
+  const ag = LV_AG; let AG = 0, nearP = 0, tdx = 0, tdy = 0, dD = 0;
+  if (ag && ag[0] > 0) { tdx = ag[1] - it.x; tdy = ag[2] - it.y; dD = Math.hypot(tdx, tdy); nearP = 1 - smoothstep(0, ag[5], dD / Math.max(1, ag[4]) - 1); AG = Math.max(nearP, 1 - smoothstep(ag[7], 1, Math.hypot(tdx / Math.max(1, ag[3]), tdy / Math.max(1, ag[6])))) * ag[0]; }
+  const bk = Math.max(smoothstep(0.35, 0.8, -L[2]), AG);
   if (bk > 0 && it.lnx !== undefined) { nx += (it.lnx - nx) * bk; ny += (it.lny - ny) * bk; nz += (it.lnz - nz) * bk; const n = Math.hypot(nx, ny, nz) || 1; nx /= n; ny /= n; nz /= n; }
   const pbz = it.fill ? 0.82 * (it.br || it.r || 0) : 0;   // (a billow's own disc: lit as the billow's front - GL_LVS)
   const bodyL = P.bodyL ?? 0;   // (ONE LIGHT, Oct 29: every cloud - no share by its height to width any more; GL_LVS)
@@ -18080,10 +18285,10 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
     if (gl > 0) { nx += (-gx / gl - nx) * kb; ny += (-gy / gl - ny) * kb; nz += (-gz / gl - nz) * kb; const n = Math.hypot(nx, ny, nz) || 1; nx /= n; ny /= n; nz /= n; }
   }
   let v = (nx * L[0] + ny * L[1] + nz * L[2]) * 0.5 + 0.5, openR = 1;   // (openR: how open to the sky the puff's edge is, from below)
-  let od = odOther || 0, odB = 0, odD = 0;
+  let od = odOther || 0, odB = 0, odD = 0, odK = 0;
   const odC = od, kB = bodyL;
   const grp = own >= 0 && lob[own] ? lob[own].grp : 0;                     // (the lobes of one smear are one shape: they don't shade each other)
-  for (let k = 0; k < lob.length; k++) { const l = lob[k]; if (kB > 0) { if (l.rx) { odB += softChord(it.x, it.y, pbzz, L, l, BR); odD += softChord(it.x, it.y, pbzz, DOWN, l, BR); } continue; } if (k !== own && !(grp && l.grp === grp)) od += chord(it.x, it.y, it.zz, L, l) / l.rb; }
+  for (let k = 0; k < lob.length; k++) { const l = lob[k]; if (kB > 0) { if (l.rx) { odB += softChord(it.x, it.y, pbzz, L, l, BR); odD += softChord(it.x, it.y, pbzz, DOWN, l, BR); if (AG > 0) odK += softChord(it.x, it.y, pbzz, BACK, l, BR); } continue; } if (k !== own && !(grp && l.grp === grp)) od += chord(it.x, it.y, it.zz, L, l) / l.rb; }
   // (ONE LIGHT - GL_LVS: the light that gets through the cloud's whole body from the sun (Tb), and from under the horizon (Td))
   const Tb = Math.exp(-BS * odB), Td = Math.exp(-BS * odD);
   const shE = kB > 0 ? Math.max(shadowed(od), 1 - Tb) : shadowed(od);
@@ -18123,7 +18328,17 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
     // it a mid tone (a pale seam where two lobes meet)
     v -= bk * (1 - open) * side * 0.45;
   }
-  const q = (v - 0.5) * P.contrast * E.contrast + 0.5 + P.expo + it.jit * P.jitter;
+  if (AG > 0) {   // (SEEN AGAINST THE SUN - GL_LVS: the backlit look, by how much the spot is against the sun)
+    const Tk = kB > 0 ? Math.exp(-BS * odK) : 1, nl2 = Math.hypot(nx, ny), face = nl2 > 1e-4 && dD > 1e-4 ? Math.max(0, (nx * tdx + ny * tdy) / (nl2 * dD)) : 0;
+    const g = side * side * ((0.35 + 0.65 * face) + (1 - (0.35 + 0.65 * face)) * nearP) * 1.1 * open;   // (its outline's glow, its body dark, any size - GL_LVS)
+    const tk = dD > 1e-4 ? 0.75 * clamp(dD / Math.max(1, ag[4]) - 0.5, 0, 1) / dD : 0, bx = tdx * tk, by = tdy * tk, lbl = Math.hypot(bx, by, 1), vB = (nx * bx + ny * by - nz) / lbl * 0.5 + 0.5 + P.amb * 0.3 * (ny * 0.5 + 0.5) - P.amb * 0.12 - (1 - open) * side * 0.45 + g + (under ? under * Math.max(0, -ny) * 0.95 : 0);   // (from behind, tilted toward the disc - GL_LVS Lb)
+    const shB = P.shadow * shadowed(LV_CB);   // (a cloud behind it shades it: the light comes from behind - GL_LVS)
+    const gB = g * (1 - shB), vB2 = vB - g + gB - shB * 0.5 * Math.max(0, vB - g - 0.15);
+    v += (vB2 - v) * AG; rimAdd += AG * gB; LV_CB = 0;
+  }
+  const flatS = own >= 0 && lob[own] && lob[own].grp === -1;   // (a scrap: one flat light by the sun's height - GL_LVS)
+  if (flatS) { v = 0.5 + 0.42 * clamp(L[1], -1, 1) + P.amb * 0.15; v += (0.85 - v) * AG * 0.6; v -= sh * 0.5 * Math.max(0, v - 0.15); rimAdd = 0; }
+  const q = (v - 0.5) * P.contrast * E.contrast + 0.5 + P.expo + (flatS ? 0 : (it.jit || 0) * P.jitter);
   let tone = clamp(Math.floor(q * 5), 0, 4);
   // the sixth tone, the highlight (user 22:36: "a 6th gradient level to get those sunset and moonlight highlights... actual
   // shape to it with our system"): a puff whose light goes past full light, if that light is the glow round an edge lit from
@@ -18141,14 +18356,14 @@ function lightValue(it, own, lob, L, odOther, odSelf, under) {
   const gk = (P.glow ?? 1) * E.sunset;
   // (and the glow's floor stays out of the creases: a face a lobe in front hides from the sky isn't lit by the sky - user Oct 27, 21:44)
   let lo = 0;
-  if (gk > 0.01) { const gy = kB > 0 ? ny : (it.lny ?? ny), f = gk * (0.12 + 0.62 * Math.max(0, -gy) + 0.2 * (1 - Math.abs(gy))) * (0.35 + 0.65 * openR) * Td; lo = Math.min(3, Math.floor(f * 4.2)); out = Math.max(out, lo); }
+  if (gk > 0.01 && !flatS) { const gy = kB > 0 ? ny : (it.lny ?? ny), f = gk * (0.12 + 0.62 * Math.max(0, -gy) + 0.2 * (1 - Math.abs(gy))) * (0.35 + 0.65 * openR) * Td; lo = Math.min(3, Math.floor(f * 4.2)); out = Math.max(out, lo); }
   // (LV: the light's slope - d(tone)/d(normal): the sun's 0.5·L, the sky's AMBIENT and the light from under the deck on ny -
   // for a puff whose tone is the light's own; in a cast shadow, the highlight or an edge's glow it stays one flat tone)
   const C5 = 5 * P.contrast * E.contrast;
   LV.f = (q - (it.jit || 0) * P.jitter) * 5; LV.lo = lo; LV.bk = bk;           // (without its JITTER: a puff's own random step would break the light's lines)
-  LV.free = out === Math.max(lo, clamp(Math.floor(q * 5), 0, 4)) && tone !== 5 && !(cast > 0.45) && rimAdd < 0.05;
-  LV.lx = 0.5 * L[0] * shk * C5; LV.lz = 0.5 * L[2] * shk * C5;
-  LV.ly = (0.5 * L[1] * shk + 0.15 * P.amb - (under && ny < 0 ? under * 0.95 * (1 - cast * 0.6) : 0)) * C5;
+  LV.free = !flatS && out === Math.max(lo, clamp(Math.floor(q * 5), 0, 4)) && tone !== 5 && !(cast > 0.45) && rimAdd < 0.05;
+  LV.lx = 0.5 * L[0] * shk * C5 * (1 - AG); LV.lz = 0.5 * L[2] * shk * C5 * (1 - AG);   // (against the sun: only the sun's own light's share runs across a puff - GL_LVS)
+  LV.ly = (0.5 * L[1] * shk * (1 - AG) + 0.15 * P.amb - (under && ny < 0 ? under * 0.95 * (1 - cast * 0.6) : 0)) * C5;
   return out;
 }
 // the view's zoom (1 = the game's framing; out to 1/50, in to ×5), about the screen's middle and the horizon
@@ -18162,6 +18377,51 @@ const screenX = c => c.lay.A + c.bx * c.lay.zl;
 // being far away"). Before, the offset was weighed against a shallow fixed depth, which put a sun 0.2 screens to the side
 // almost in the cloud's own plane and lit its sun-side faces. SUN DEPTH now sets the angular scale (more = the sun further
 // behind, smaller angles); at dusk it is further behind still.
+// (11:31 - the user: keep the perspective, "clouds need to update as they move". A cloud's side light, by where it is from the disc on
+// the screen, in small steps (an eighth of a radian): as it slides past the sun its light turns a step at a time - the baked sky bakes
+// that one cloud again at each step (12-bake.js), never the whole sky for a pan. The same steps live. And whether it is in front of
+// the disc (out, in quarters). Both read where the cloud is this frame)
+function sunSide(Xm) {
+  const sx = sunZ().x * W, LOW = smoothstep(0.25, 0, sunScreen.y);
+  return Math.round(clamp((sx - Xm) / HS * 0.6, -1.4, 1.4) * (1 - 0.75 * LOW) * 8) / 8;
+}
+// (BACKLIGHT FALLOFF, 11:40 - the user: "if the sun is behind a cloud, it cant be just that cloud, the sun is infinitely far so I would
+// expect a wider range of clouds being backlit, like a falloff... Otherwise it reads like a focused flashlight". How much a cloud is
+// seen against the sun: by how far it is from the disc on the screen, in a wide oval about the sun - BACKLIT WIDTH of the view across,
+// half that up and down - fully at the disc, easing out to none at the oval's edge; a cloud over the disc fully, as before. In eighths)
+// (ONE LIGHT, TWO PARTS - 11:58, the user: clouds near the moon "not getting shadows", and "I want to be sure you're not just patching
+// code ... we cannot just be doing exceptions to the rule over and over". The backlit falloff (11:40) tipped each nearby cloud's light
+// behind it: its thin parts glowed through evenly and its lit and shaded sides were gone. Now every cloud's light is two parts, by one
+// rule for all: the sun's light (lightDir - up and down by the sun's height, across by the disc's side: every cloud keeps its lit side
+// and its shaded side, near the sun or not) and SEEN AGAINST THE SUN (this): a glow on a cloud's thin edges and outline by how near it
+// is to the disc - full at the disc, easing out over the oval (BACKLIT WIDTH, narrower on each further deck, two-fifths as tall:
+// the user's marks 11:40-11:42) - and, right in front of the disc, its body dark against it and its outline burning (11:55, the burn:
+// the near end of the same glow, not an effect of its own). At sunset deck 6 is level with the sun, so the oval reaches it with no
+// rule of its own. [A, D] in eighths: A the glow, D how far the cloud is in front of the disc)
+// The measure, at a spot dx, dy cells from the disc's middle on deck k: NEAR - within BURN REACH of the disc's radii past its edge -
+// and WIDE - within the deck's oval (BACKLIT WIDTH of the view across times 0.25 + 0.75 k, two-fifths as tall). The same numbers on
+// the GPU, per puff (GL_LVS) and per pixel of a deck's outline (GL_BFS)
+const discR = () => sunR() * (E.night > 0.5 ? 0.8 : 1);   // (the moon's disc is four-fifths the sun's - 14-sun-moon.js drawSun)
+const ovalW = k => Math.max(0.05, P.backw ?? 0.35) * W * (0.25 + 0.75 * (k ?? 1));
+// (12:19 - the user's marks, the sun among the near decks: the backlit reach widens up through the near decks and narrows down to the
+// horizon's deck, all the way down - not an oval about the sun that stops a little under it. Across: each deck's own width (ovalW); up
+// and down: one reach for every deck, the near deck's width - so the far decks under a low sun are against it, and a sun high above
+// the decks backlights none of them)
+const ovalH = () => ovalW(1);
+// (BACKLIT FADE, 12:31 - the user: "the falloff should be a bit wider (can we have a slider to tweak it)": how much of the reach is the fade out
+// from the full backlit look - 1 all of it, 0 a hard edge)
+const fadeE0 = () => 1 - clamp(P.backf ?? 0.9, 0, 1);
+function sunAgainst(c, Xm, Ym) {
+  const sz = sunZ(), dx = Xm - sz.x * W, dy = Ym - sz.row * H, bw = ovalW(c.lay.k);
+  const wide = 1 - smoothstep(fadeE0(), 1, Math.hypot(dx / bw, dy / ovalH()));
+  // (near: the disc from the cloud's own outline - its box's ellipse - in the disc's radii past its edge)
+  const rx = Math.max(1, (c.maxX - c.minX) / 2), ry = Math.max(1, c.h / 2), e = Math.hypot(dx / rx, dy / ry), dist = Math.hypot(dx, dy), gap = e > 1 ? dist * (1 - 1 / e) : 0;
+  const near = 1 - smoothstep(0, P.burnr ?? 2.5, gap / discR() - 1);
+  const v = sunLight();   // (SUN THROUGH THE WEATHER: seen against the sun in any weather, softer under an overcast - 14-sun-moon.js)
+  return [Math.round(wide * v * 8) / 8, Math.round(near * v * 8) / 8];
+}
+// (a cloud's step of light, for its sprite: its side, and its glow against the sun - 12-bake.js)
+function sunStep(c, Xm, Ym) { const a = sunAgainst(c, Xm, Ym), q = Math.max(1, a[1] > 0 ? discR() / 3 : ovalW(c.lay.k) / 16), X0 = Xm - (c.minX + c.maxX) / 2; return sunSide(Xm) + (a[0] > 0 || a[1] > 0 ? '/' + Math.round((sunZ().x * W - X0) / q) + ',' + Math.round((c.y - sunZ().row * H) / q) + '/' + q.toFixed(1) : ''); }
 function lightDir(c) {
   const sz = sunZ(), X0 = screenX(c), Xm = X0 + (c.minX + c.maxX) / 2, Ym = c.y - c.h / 2, sx = sz.x * W;
   // (in the lab's screen heights: HS in the game)
@@ -18173,16 +18433,47 @@ function lightDir(c) {
   // cloud's light moved every frame, so every cloud was re-lit every frame - 500 puffs and 2-4 batch builds a frame, and the
   // clouds splotchy with half-finished relights. LIGHT FIX 0 puts the old rule back for comparison)
   const ex = (P.lightfix ?? 1) > 0 ? (sx - W / 2) * 0.5 : sx < X0 + c.minX ? sx - (X0 + c.minX) : sx > X0 + c.maxX ? sx - (X0 + c.maxX) : 0;
-  const k = 1 - 0.45 * E.behind, ax = ex / HS / ((P.lightfix ?? 1) > 0 ? 1 : Zg) * 0.6 * k, ay = (Ym - sz.row * H) / HS / Zg * (2.2 - 1.6 * P.lightz) * k;   // (angles, radians)
+  let k = 1 - 0.45 * E.behind, ax = ex / HS / ((P.lightfix ?? 1) > 0 ? 1 : Zg) * 0.6 * k, ay = (Ym - sz.row * H) / HS / Zg * (2.2 - 1.6 * P.lightz) * k;   // (angles, radians)
+  // (FAR SUN, Oct 30 - the user, with a sketch: "the sun is REALLY FAR AWAY and all the clouds are in front of it... Clouds only get
+  // lit from below WHEN the sun is down in the sky". The rule above lit each cloud from where the sun's disc is on the screen beside
+  // it: a cloud above the disc lit from below, one under it from above, as if the sun hung among them. Now one light for the whole
+  // sky: up and down by how high the sun is (the hour, or where it was dragged), across by which side of the view it is on - every
+  // cloud lit on that side, shaded on the other. A cloud right in front of the disc is still seen against the light (out, below))
+  // (and with perspective, 10:52 - the user, the sun low in the middle and every cloud lit from the left: "There should be some
+  // perspective too from the sun". Across, each cloud is lit from the side the sun's disc is on from it, more the further it is -
+  // as a far light looks in a picture, its light seeming to spread from where the sun is. Up and down stays the sun's height alone)
+  // (11:06 - the user, with a sunset photo: "The sun when at the horizon should be lighting the clouds from below... deck 6 (the
+  // furthest one) gets backlit and the others get it from below". LOW: how near the horizon the sun is (1 at it, 0 from a quarter up):
+  // the light turns to come up from under the clouds as the sun goes down, and the furthest deck - level with the sun - is seen
+  // against it instead (th, below))
+  const LOW = smoothstep(0.25, 0, sunScreen.y);
+  if ((P.farsun ?? 1) > 0) { ax = sunSide(Xm) * k; ay = (clamp(sunScreen.y, -0.3, 1) * 2.0 * (1 - 0.8 * P.lightz) - 0.9 * LOW) * k; }
   const d = Math.hypot(ax, ay) || 1e-6, dx = ax, dy = ay;
   // the sun inside the cloud's outline: straight behind it (V21), easing out to the plain angle past its edge
   const rx = Math.max(6 * S * Zg, (c.maxX - c.minX) / 2), ry = Math.max(6 * S * Zg, c.h / 2);
   const e = Math.hypot((sz.x * W - Xm) / rx, (sz.row * H - Ym) / ry);
   let out = smoothstep(0.15, 1.5, e);
-  if ((P.lightfix ?? 1) > 0) out = Math.round(out * 4) / 4;   // (in quarters: a cloud passing the sun changes its light four times, not every frame)
-  const th = Math.min(1.48, d) * out;
+  if ((P.lightfix ?? 1) > 0) out = Math.round(out * 4) / 4;
+  // (FAR SUN: the light itself is never tipped behind a cloud near the sun - being seen against the sun is its own part, c.ag)
+  if ((P.farsun ?? 1) > 0) {
+    out = 1; const ag = sunAgainst(c, Xm, Ym), X0c = screenX(c), on = ag[0] > 0 || ag[1] > 0, q = Math.max(1, ag[1] > 0 ? discR() / 3 : ovalW(c.lay.k) / 16);
+    // (c.ag: AGAINST SUN x how much of the disc shows (0 when the cloud is out of reach), the disc's middle from the cloud's base in its
+    // own cells, y up - in steps, a third of the disc's radius near it, a sixteenth of the oval out in it - the deck's oval width, the
+    // disc's radius, BURN REACH: each puff works out its own (GL_LVS))
+    c.ag = [on ? (P.agk ?? 1) * sunLight() : 0, on ? Math.round((sx - X0c) / q) * q : 0, on ? Math.round((c.y - sz.row * H) / q) * q : 0, ovalW(c.lay.k), discR(), P.burnr ?? 2.5, ovalH(), fadeE0()];
+  } else c.ag = null;
+  // (11:03 - the user, small clouds A B C D lit white all over beside darker big ones, "they don't seem to get affected": the angle
+  // from the view came from how far the disc was, so with the sun low in the view every cloud was lit from straight behind - its thin
+  // small clouds glowing white through, its thick ones dark. FAR SUN: the light comes across the picture, from the sun's side, for
+  // every cloud alike (SUN DEPTH tips it a little toward the viewer); only a cloud right in front of the disc is seen against it)
+  // (11:58: "deck 6 backlit at sunset" was a rule of its own here - now the against-the-sun glow reaches it, level with the low sun)
+  // (11:11 - the user, a sunset: thin tops and small clouds lit yellow all over, "like the sun is in the middle of the clouds". The
+  // light tipped even a little toward the viewer glows through every thin part of a cloud (BODY LIGHT's transmission), on any side;
+  // at dusk that tipped into the yellow highlight. FAR SUN: flat across the picture - only SUN DEPTH tips it - so the glow through is
+  // for a cloud in front of the disc and deck 6 at sunset; and with the sun low its light comes up from below, not from the disc's side)
+  const th = ((P.farsun ?? 1) > 0 ? Math.PI / 2 * (1 - 0.6 * P.lightz) : Math.min(1.48, d)) * out;
   let lx = Math.sin(th) * dx / d, ly = Math.sin(th) * dy / d, lz = -Math.cos(th);
-  if (E.overcast > 0.6) { const k = (E.overcast - 0.6) / 0.4; lx *= 1 - k; ly = ly * (1 - k) + k; }
+  // (SUN THROUGH THE WEATHER, 17:01: an overcast no longer turns the light straight down - the sun's direction holds in any weather)
   return norm3([lx, ly, lz]);
 }
 
@@ -18196,6 +18487,17 @@ function weatherAt(wx) {
   const u = (wx - W / 2) / WORLD * Math.PI * 2, n = Math.max(1, Math.round(WORLD / (2.6 * W)));
   const f = 0.5 + 0.5 * Math.sin(u * n + 0.45) * 0.95 + 0.08 * Math.sin(u * Math.round(n * 2.5) + 1.3) + 0.16 * Math.sin(u * 3) + 0.08 * (Math.sin(u * 7 + 2) - Math.sin(2));
   return clamp(0.5 + (f - 0.5) * P.variety, 0, 1);   // (P.variety 0: the user wants the same weather over the whole scene)
+}
+// (CLUMPING: how dense the clouds are about world x on a deck, 0 open to 1 dense, sharpened so a stretch reads as either busy or open.
+// 15:14 - the user: the clouds "still feel very 'tiled'... a part with a few and then a section more... Even a deck could have a few less
+// and then the next deck has more", with a photo's big gap through several layers (ref/density-gap-marked-oct30.png). Two parts: the
+// sky's own busy and open stretches, shared by every deck (CLUMP SIZE screens long - the gaps open through the decks together), and each
+// deck's own, out of step with the others (DECK VARIETY: its share) - so one deck thins where the next is full)
+function densityAt(wx, lay) {
+  const L = Math.max(0.2, P.clumpw ?? 1.1) * W, u = wx / L * Math.PI * 2, dn = lay.dn || 1, a = clamp(P.clumpd ?? 0.45, 0, 1);
+  const shared = 0.5 + 0.34 * Math.sin(u) + 0.16 * Math.sin(u * 2.618 + 1.1) + 0.1 * Math.sin(u * 0.381 + 2.3);
+  const u2 = u * 1.43 + dn * 2.17, own = 0.5 + 0.36 * Math.sin(u2) + 0.14 * Math.sin(u2 * 1.91 + dn * 1.3);
+  return smoothstep(0.34, 0.66, shared * (1 - a) + own * a);
 }
 const scaled = (lobes, k) => lobes.map(l => ({ ...l, x: l.x * k, y: l.y * k, rx: l.rx * k, ry: l.ry * k, z: (l.z || 0) * k }));
 // The kind of cloud along the world (user Oct 27, 22:56: "a third small wispy clouds, another third tall clouds... not
@@ -18211,8 +18513,64 @@ function kindAt(wx, rnd) {
   if (rnd() < edge) return k;
   return KINDS[(((f < 0.5 ? i - 1 : i + 1) % 3) + 3) % 3];
 }
-const towerLobes = (rnd, sc) => { const mir = rnd() < 0.5 ? -1 : 1; return scaled(SHAPES[TALLS[Math.floor(rnd() * TALLS.length)]], sc).map(l => ({ ...l, x: l.x * mir, seed: l.seed + Math.floor(rnd() * 1e5) })); };
+// (NO TWINS, Oct 30 - the user, two night towers side by side: "that tower shape is very specific and we should never have obvious
+// repetition". Every tower was one of two fixed shapes, TALL or TALL2, only scaled and mirrored. Now each tower is made for itself -
+// a base bank, a column of stacked lobes leaning its own way, a cauliflower head, bulges off its sides, every count, size and height
+// its own - from its own seed. It takes exactly the scene's draws it took before and as wide as the shape it replaces, so every
+// other cloud of the sky keeps its place: the user's snapshots still load the same sky)
+const spanOf = L => { let lo = 1e9, hi = -1e9; for (const l of L) { lo = Math.min(lo, l.x - l.rx); hi = Math.max(hi, l.x + l.rx); } return [lo, hi]; };
+// (lobes L made exactly as wide as the span [lo, hi], centred as it was)
+function fitSpan(L, lo, hi) {
+  const [a, b] = spanOf(L), k = (hi - lo) / Math.max(1e-6, b - a), m = (lo + hi) / 2, c = (a + b) / 2;
+  return L.map(l => ({ ...l, x: Math.round(m + (l.x - c) * k), y: Math.round(l.y * k), z: Math.round((l.z || 0) * k), rx: Math.max(3, Math.round(l.rx * k)), ry: Math.max(3, Math.round(l.ry * k)) }));
+}
+function makeTower(r) {
+  const Wb = 300, H = Wb * (0.55 + 0.6 * r()), L = [], sd = () => Math.floor(r() * 1e6), jz = rx => Math.round((r() - 0.5) * rx * 0.7);
+  // the base: a flat bank of 3 to 5 lobes, its ends thinner
+  const nb = 3 + Math.floor(r() * 3), bw = Wb * (0.85 + 0.3 * r());
+  for (let i = 0; i < nb; i++) { const t = nb === 1 ? 0.5 : i / (nb - 1), end = Math.sin(t * Math.PI), rx = Wb * (0.1 + 0.08 * end) * (0.8 + 0.4 * r()); L.push({ x: (t - 0.5) * bw + (r() - 0.5) * 20, y: 6 + 12 * end * r(), z: jz(rx), rx, ry: rx * (0.35 + 0.25 * r()), seed: sd() }); }
+  // (ONE BANK, 16:55 - the user's tower C, "weird shape": 3 base lobes spread wide left gaps, its ends small separate puffs beside the
+  // column. A base is one bank: wherever two neighbours don't overlap, a lobe fills between them (no draws taken - every other cloud
+  // keeps its shape; inside the span - the tower's width is kept))
+  { const B = L.slice().sort((p, q) => p.x - q.x);
+    for (let i = 0; i + 1 < B.length; i++) { const p = B[i], q = B[i + 1], a = p.x + p.rx * 0.6, b = q.x - q.rx * 0.6; if (b <= a) continue;
+      const rx = (b - a) / 2 + 0.35 * Math.min(p.rx, q.rx); L.push({ x: (a + b) / 2, y: (p.y + q.y) / 2, z: Math.round(((p.z || 0) + (q.z || 0)) / 2), rx, ry: rx * 0.5, seed: (p.seed * 31 + q.seed) % 1000003 }); } }
+  // the column: 3 to 5 lobes stacked, narrowing, leaning one way and wandering a little
+  const nc = 3 + Math.floor(r() * 3), lean = (r() - 0.5) * Wb * 0.35, x0 = (r() - 0.5) * Wb * 0.25, rx0 = Wb * (0.17 + 0.05 * r()), rx1 = Wb * (0.1 + 0.05 * r());
+  let top = { x: x0, y: 0, rx: rx0 };
+  for (let i = 0; i < nc; i++) { const t = (i + 1) / nc, rx = (rx0 + (rx1 - rx0) * t) * (0.85 + 0.3 * r()), x = x0 + lean * t + (r() - 0.5) * Wb * 0.08, y = H * (0.15 + 0.7 * t) * (0.92 + 0.16 * r()); L.push({ x, y, z: jz(rx), rx, ry: rx * (0.75 + 0.25 * r()), seed: sd() }); top = { x, y, rx }; }
+  // the head: 2 to 4 small lobes heaped on the column's top
+  const nh = 2 + Math.floor(r() * 3);
+  for (let i = 0; i < nh; i++) { const rx = Wb * (0.05 + 0.05 * r()); L.push({ x: top.x + (r() - 0.5) * top.rx * 1.4, y: top.y + top.rx * (0.3 + 0.6 * r()), z: jz(rx), rx, ry: rx * (0.85 + 0.2 * r()), seed: sd() }); }
+  // bulges off the column's sides, and the shoulders where the column meets the bank
+  const ns = 1 + Math.floor(r() * 3);
+  for (let i = 0; i < ns; i++) { const t = 0.25 + 0.5 * r(), side = r() < 0.5 ? -1 : 1, rx = Wb * (0.07 + 0.06 * r()), cx = x0 + lean * t, cr = rx0 + (rx1 - rx0) * t; L.push({ x: cx + side * cr * (0.8 + 0.4 * r()), y: H * (0.15 + 0.7 * t), z: jz(rx), rx, ry: rx * (0.8 + 0.25 * r()), seed: sd() }); }
+  const nsh = Math.floor(r() * 3);
+  for (let i = 0; i < nsh; i++) { const side = r() < 0.5 ? -1 : 1, rx = Wb * (0.08 + 0.06 * r()); L.push({ x: x0 + side * rx0 * (0.9 + 0.6 * r()), y: H * (0.12 + 0.15 * r()), z: jz(rx), rx, ry: rx * (0.6 + 0.25 * r()), seed: sd() }); }
+  return L;
+}
+// (a fixed shape - deck 1's BANK, TOWER heap, SMALL - made its own: each lobe moved, resized, raised; sometimes one left out or one
+// more heaped on; as wide as before)
+function varyLobes(base, r) {
+  let L = base.map(l => ({ ...l, x: l.x + (r() - 0.5) * l.rx * 0.6, y: l.y * (0.7 + 0.6 * r()), z: (l.z || 0) + (r() - 0.5) * l.rx * 0.4, rx: l.rx * (0.75 + 0.5 * r()), ry: l.ry * (0.7 + 0.6 * r()), seed: Math.floor(r() * 1e6) }));
+  if (L.length > 3 && r() < 0.35) { const big = L.reduce((a, l, i) => l.rx > L[a].rx ? i : a, 0); let i = Math.floor(r() * L.length); if (i === big) i = (i + 1) % L.length; L.splice(i, 1); }
+  for (let n = r() < 0.6 ? 1 + Math.floor(r() * 2) : 0; n > 0; n--) { const o = L[Math.floor(r() * L.length)], rx = o.rx * (0.4 + 0.3 * r()); L.push({ x: o.x + (r() - 0.5) * o.rx, y: o.y + o.ry * (0.5 + 0.4 * r()), z: (o.z || 0) - rx * 0.3, rx, ry: rx * (0.8 + 0.3 * r()), seed: Math.floor(r() * 1e6) }); }
+  const [lo, hi] = spanOf(base);
+  return fitSpan(L, lo, hi);
+}
+const towerLobes = (rnd, sc) => {
+  const mir = rnd() < 0.5 ? -1 : 1, T = SHAPES[TALLS[Math.floor(rnd() * TALLS.length)]], u = T.map(() => rnd());   // (the draws it always took)
+  const r = seed32(Math.floor(u[0] * 4294967295) ^ Math.floor(u[1] * 1e9)), [lo, hi] = spanOf(scaled(T, sc));
+  return fitSpan(makeTower(r), lo, hi).map(l => ({ ...l, x: l.x * mir }));
+};
+// (13:45 - why a snapshot rebuilt other clouds: the first scene of a page was laid out at the decks' sizes as written in LAYERS, and
+// DECK n SIZE (sz1..sz6) only reached them on the first frame (deckLook) - re-made at the new size, not laid out again - while any later
+// rebuild laid out at DECK n SIZE: 2,720 clouds then, 4,082 after. Now every scene is laid out at DECK n SIZE. SCENE_K0: lay out at the
+// sizes as written - only to load a snapshot from before this)
+let SCENE_K0 = false;
+const LAYER_K0 = {}; for (const L of LAYERS) LAYER_K0[L.name] = L.k;
 function buildScene() {
+  if (SCENE_K0) for (const L of LAYERS) L.k = LAYER_K0[L.name]; else deckLook();
   const rnd = seed32(4242);
   WORLD = Math.round(W * 52);
   const x0 = W / 2 - WORLD / 2, heroX = W * 0.52;
@@ -18227,10 +18585,10 @@ function buildScene() {
       const k = lay.k, pt = kind === 'TALL' ? 0.85 : kind ? 0 : (P.tall ?? 0.3);   // (pt: the chance of a tower here)
       if (lay.name === 'hero') {
         if (Math.abs(x - heroX) < 175 * S) { x += 40 * S; continue; }          // room for the hero
-        if (small > 0.5) { const sc = 0.55 + 0.4 * rnd(); lobes = rnd() < 0.5 ? scaled(SHAPES.SMALL, sc) : randLobes(rnd, 70 + rnd() * 60); }
+        if (small > 0.5) { const sc = 0.55 + 0.4 * rnd(); lobes = rnd() < 0.5 ? varyLobes(scaled(SHAPES.SMALL, sc), seed32(Math.round(x * 7919) ^ 0x5a17)) : randLobes(rnd, 70 + rnd() * 60); }   // (NO TWINS: its own shape, seeded by its place)
         else if (storm > 0.4) { lobes = randLobes(rnd, 260 + rnd() * 120); lobes.push({ x: Math.round((rnd() - 0.5) * 60), y: 70, z: -10, rx: 60, ry: 55, seed: Math.floor(rnd() * 1e6) }); }
         else if (rnd() < pt) { lobes = towerLobes(rnd, 0.8 + 0.35 * rnd()); tall = true; }   // (TOWERS: a tall one)
-        else { const kk = ['TOWER', 'BANK', 'RANDOM', 'BANK'][Math.floor(rnd() * 4)], mir = rnd() < 0.5 ? -1 : 1; lobes = kk === 'RANDOM' ? randLobes(rnd, 200 + rnd() * 60) : JSON.parse(JSON.stringify(SHAPES[kk])).map(l => ({ ...l, x: l.x * mir, seed: l.seed + Math.floor(rnd() * 1e5) })); }
+        else { const kk = ['TOWER', 'BANK', 'RANDOM', 'BANK'][Math.floor(rnd() * 4)], mir = rnd() < 0.5 ? -1 : 1; lobes = kk === 'RANDOM' ? randLobes(rnd, 200 + rnd() * 60) : JSON.parse(JSON.stringify(SHAPES[kk])).map(l => ({ ...l, x: l.x * mir, seed: l.seed + Math.floor(rnd() * 1e5) })); if (kk !== 'RANDOM') lobes = varyLobes(lobes, seed32(lobes[0].seed * 2654435761 >>> 0)); }   // (NO TWINS: its own shape)
       } else {
         const base = lay.w[0] + rnd() * lay.w[1];
         // (towers on every deck, scaled to the deck's cloud width; the back decks a little less often)
@@ -18244,6 +18602,12 @@ function buildScene() {
       c.storm = storm; c.wf = wf;
       // when it shows: stormy places fill first, fair ones last
       c.thr = clamp(rnd() * 0.5 * (1.25 - wf * 0.8 * P.variety) + 0.02, 0.02, 0.9);
+      // (CLUMPING, Oct 30 - the user: "a big part is having areas where there are more clouds accumulated and areas that have less
+      // density, even in the background layers... the density slider is not 'all clouds' get this uniform density, but its more about
+      // 'overall' we will have more density". Each deck has its own dense and open stretches along the world (densityAt); a cloud in a
+      // dense stretch shows at little weather, one in an open stretch only once the sky is nearly full - SKY raises the overall amount,
+      // the dense places filling first. Its draws unchanged: every cloud keeps its place)
+      { const kc = P.clump ?? 0.85; if (kc > 0) c.thr = clamp(c.thr + ((0.02 + 0.9 * (1 - densityAt(x + w / 2, lay)) + (c.thr - 0.27) * 0.3) - c.thr) * kc, 0.02, 1.1); }   // (the busy places full by SKY 0.4, the open ones filling only from about SKY 0.55)
       // (user Oct 27, 22:45: the heavy towers "appear when it's cloudy and closer to storm": they're the last to grow - from
       // CLOUDS about 0.65 (the game: SKY past 60%, where the clouds get bigger and taller) up to 0.9, the biggest last)
       if (tall) c.thr = c.thr + ((1.1 + 0.4 * rnd()) - c.thr) * (P.tallwx ?? 0.5);   // (TOWERS IN WEATHER: 1 = only then, 0 = like any cloud)
@@ -18267,7 +18631,11 @@ function wispLobes(rnd, len, lift, thick = 1) {
   while (x < len / 2 && L.length < 70) {
     const t = clamp(x / (len / 2), -1, 1), taper = 1 - 0.7 * t * t;
     const ry = Math.max(2, th * taper * (0.75 + 0.5 * rnd())), rx = ry * (1.6 + 1.2 * rnd());
-    const cx = x + rx * 0.9, y = lift + ry + Math.sin(t * 2.2 + wave) * 4 + (rnd() - 0.5) * ry * 0.4;
+    // (LEVEL, Oct 30 - the user, of wisps leaning different ways: "The wind moves the clouds, so you cant have parts at different
+    // angle". The wave along a strand ran uphill end to end, so each wisp leaned its own way: its slope taken out, the ripple kept)
+    // (10:57, the user again, two strands bowed and crossing: "Flat clouds should stay horizontal, not cross or even curve like
+    // that" - no wave along a strand at all: its base level, only each oval's own small step up or down)
+    const cx = x + rx * 0.9, y = lift + ry + (rnd() - 0.5) * ry * 0.4 + wave * 0;
     L.push({ x: Math.round(cx), y: Math.round(y), z: Math.round((rnd() - 0.5) * 10), rx: Math.round(rx), ry: Math.round(ry), seed: Math.floor(rnd() * 1e6) });
     // (Oct 27: WISP BUMPS - how many, and how big: user: "these guys need more lobes... so it feels more like [a bank of small
     // cumulus]"; before, a bump on about every other oval, little more than half its height)
@@ -18290,6 +18658,25 @@ function addWisps(rnd, lay, x0) {
     x += len * S * lay.k * (0.45 + 0.8 * rnd());
   }
 }
+// (FRONT AND BACK IN A DECK, 12:36 - the user: "There should be some notion of 'foreground / background' in each deck. So that small cloud
+// ... gets shadowed by the big cloud" behind it, backlit. A deck's clouds are drawn in their order, each over the ones before it: so
+// that order is their depth - each a little nearer than the one drawn before, all of a deck within 20 of its own depth (the decks are
+// 25 or more apart), so a cloud seen in front is in front for the light too)
+// (SCRAPS, 13:42 - the user's reference lab/skybench/ref/target-wisps-oct30.png: little pieces of cloud off a cloud's base, "like parts
+// of that cloud that moved with the wind". Every cloud keeps 0-3 of them - small, flat, low by its base, each smaller
+// than the one before - its own random draws (by its id), so the scene's draws are untouched. Where they sit is placeLobes': off its
+// downwind end, trailing further the stronger the wind; in a calm, close by its ends)
+function addScraps(c) {
+  if (c.lobes.length < 2 || c.lobes.some(L => L.scrap)) return;   // (flat wisps too - 15:08: no cloud left out of the wind)
+  const r = seed32(c.uid * 7919 + 31), n = Math.floor(r() * 4); if (!n) return;
+  // (16:30 - the user: "The scraps should have a min size otherwise it looks like an error like a mini cloud": a scrap is at least a few
+  // of its cloud's puffs across (each a little smaller than the one before, never far under the minimum) (two puffs across or so: its radius two puff radii, in its own units) - and a cloud too small to shed one that big sheds none)
+  const mrx = c.lobes.reduce((a, L) => a + L.rx, 0) / c.lobes.length, minRx = 2 * (P.puff ?? 4.2) * (c.puffK ?? 1);
+  if (minRx > mrx * 0.45) return;
+  for (let k = 1; k <= n; k++) { const rx = Math.max(minRx * (1.3 - 0.1 * k), mrx * (0.24 - 0.045 * k)) * (0.85 + 0.3 * r()); c.lobes.push({ x: 0, y: rx * (0.5 + 0.6 * r()), z: (r() - 0.5) * mrx * 0.3, rx, ry: rx * (0.28 + 0.12 * r()), seed: Math.floor(r() * 1e6), scrap: k, sd: r() }); }
+  c.lob = c.lobes.map(() => ({})); cloudBox(c);
+}
+function deckDepths() { for (const lay of LAYERS) { const mine = clouds.filter(c => c.lay === lay), n = Math.max(1, mine.length - 1); mine.forEach((c, i) => { c.wz = lay.z + 20 * i / n; }); } }
 // every wisp takes a new shape (the WISP BUMPS sliders), each with its own seed - the lifts are kept
 function reformWisps() { for (const c of clouds) if (c.wisp) { const r = seed32(c.uid * 7919 + 13); morphTo(c, wispLobes(r, 140 + r() * 300, r() * (c.lay.name === 'hero' ? 170 : 100), 1 / Math.sqrt(c.lay.k)), 0.3); } }
 function deckLook() { let ch = 0; for (const L of LAYERS) { const k = P['sz' + L.dn] ?? L.k, h = P['hz' + L.dn] ?? L.haze; if (k !== L.k) { L.k = k; ch = 1; } L.haze = h; } for (const c of clouds) { const h = c.lay.haze; if (c.haze !== h) c.haze = h; } return ch; }   // (stage 6, Oct 30: written only when it changes - a number stored in every cloud every frame was a new heap number each, ~50 KB of garbage a frame)   // (DECK n SIZE, DECK n HAZE)
@@ -18321,13 +18708,13 @@ function placeTubes(c, t) {
 }
 function drawTubes(c, ax) {
   if (!c.tubes) return;
-  LV_BODYK = c.bodyK ?? 0;
+  LV_BODYK = c.bodyK ?? 0; LV_AG = c.ag;
   const L = c.L, X = screenX(c), lit = flash.k > 0 && flash.lay === c.lay;
   for (const T of c.tubes) for (const list of [T.fills, T.puffs]) for (const it of list) {
     const r = it.r * (1 - it.cut); if (r < 0.6) continue;
     if (it.tone === undefined || (frameNo & 3) === 0) {
       let odOther = 0;
-      if (c.casters.length) { const wx = X + it.x, wy = H - c.y + it.y, wz = c.wz + it.zz; for (const o of c.casters) for (const l of o.wl) odOther += chord(wx, wy, wz, L, l) / l.rb; }
+      LV_CB = 0; if (c.casters.length) { const wx = X + it.x, wy = H - c.y + it.y, wz = c.wz + it.zz; c.casters.forEach((o, ci) => { const f = c.castF ? c.castF[ci] || 1 : 1; for (const l of o.wl) { if (f & 1) odOther += chord(wx, wy, wz, L, l) / l.rb; if (f & 2) LV_CB += chord(wx, wy, wz, BACK, l) / l.rb; } }); }
       it.tone = lightValue(it, it.j, c.lob, L, odOther, 0, c.under);
     }
     let tone = it.tone; if (lit) tone = Math.min(5, tone + flashBoost(c, it, X));
@@ -18409,7 +18796,7 @@ function cullBox(c, axReal, ayReal) {
   const w = c.cbw || (c.cbw = [0, 0, 0, 0]); w[0] = -axReal - Mw; w[1] = CW - axReal + Mw; w[2] = ayReal - H - Mw; w[3] = ayReal + Mw;
 }
 function lobeTones(c) {
-  LV_BODYK = c.bodyK ?? 0;
+  LV_BODYK = c.bodyK ?? 0; LV_AG = c.ag;
   const L = c.L, lob = c.lob; c.ltones = [];
   for (let j = 0; j < lob.length; j++) {
     const l = lob[j], t = [];
@@ -18469,7 +18856,7 @@ function drawLobes(c, ax, ayO) {
 }
 const LOBE_TMP = new GLPuffs();
 function drawPaint(c, ax) {
-  LV_BODYK = c.bodyK ?? 0;
+  LV_BODYK = c.bodyK ?? 0; LV_AG = c.ag;
   for (const p of c.paint) {
     const u = p.age / p.life, r = p.r * Math.min(1, p.age * 4) * (u > 0.75 ? 1 - (u - 0.75) / 0.25 : 1);
     if (r < 0.6) continue;
@@ -18534,9 +18921,9 @@ function litRun(c, pb) {
   const need = (lit.co0 + nc * 2) * 4;
   if (lit.dat.length < need) { const a = new Float32Array(need * 1.5); a.set(lit.dat.subarray(0, lit.co0 * 4)); lit.dat = a; }
   const D = lit.dat; let o = lit.co0 * 4;
-  for (const oc of c.casters) for (const l of oc.wl) { D[o] = l.x; D[o + 1] = l.y; D[o + 2] = l.z; D[o + 3] = l.rx; D[o + 4] = l.ry; D[o + 5] = l.rz; D[o + 6] = l.rb; D[o + 7] = 0; o += 8; }
+  c.casters.forEach((oc, ci) => { const f = c.castF ? c.castF[ci] || 1 : 1; for (const l of oc.wl) { D[o] = l.x; D[o + 1] = l.y; D[o + 2] = l.z; D[o + 3] = l.rx; D[o + 4] = l.ry; D[o + 5] = l.rz; D[o + 6] = l.rb; D[o + 7] = f; o += 8; } });   // (D[o + 7]: 1 the sun's own light, 2 against the sun - 17-frame.js)
   lit.dlen = o;
-  const U = { lo0: lit.lo0, nl: lit.nl, bo0: lit.bo0, co0: lit.co0, nc, L, under: c.under || 0, W: [screenX(c), H - c.y, c.wz],
+  const U = { lo0: lit.lo0, nl: lit.nl, bo0: lit.bo0, co0: lit.co0, nc, L, ag: c.ag, under: c.under || 0, W: [screenX(c), H - c.y, c.wz],
     p0: [P.shadow, P.self, P.amb, P.crease ?? 0.4], nodir: 1 - SUN_DIRECT, view, body: P.bodyL ?? 0, bk: [P.bshade ?? 1.6, P.bshape ?? 0.85, P.breach ?? 2],
     fl: c.flit ? [flash.x - screenX(c), c.y - flash.y, 40 * S * c.lay.zl, flash.k] : null, fls: [46 * S * c.lay.zl, 9 * S * c.lay.zl], p1: [P.contrast * E.contrast, P.expo, P.jitter, P.hi ?? 1], p2: [E.night, E.dusk, (P.glow ?? 1) * E.sunset, P.mass], shade: P.shade };
   glLitRun(pb, lit, U);
@@ -18565,11 +18952,11 @@ function drawCloudLit(c, ax, ay, live) {
 }
 // (the planes in deck 1 ask for the tone under them: a lit batch holds no tones in JS - the puff's light worked out here, once)
 function cpuToneOf(c, it) {
-  LV_BODYK = c.bodyK ?? 0;
+  LV_BODYK = c.bodyK ?? 0; LV_AG = c.ag;
   const L = c.L; let odSelf = 0;
   if (P.self > 0) { const own = it.fill ? it : it.bill; for (const b of own.nbr || []) { const ch = sphereChord(it.x, it.y, it.zz, L, b.x, b.y, b.zz, b.br); if (ch) odSelf += ch / b.br; } }
   let odOther = 0;
-  if (c.casters.length) { const wx = screenX(c) + it.x, wy = H - c.y + it.y, wz = c.wz + it.zz; for (const o of c.casters) for (const l of o.wl) odOther += chord(wx, wy, wz, L, l) / l.rb; }
+  LV_CB = 0; if (c.casters.length) { const wx = screenX(c) + it.x, wy = H - c.y + it.y, wz = c.wz + it.zz; c.casters.forEach((o, ci) => { const f = c.castF ? c.castF[ci] || 1 : 1; for (const l of o.wl) { if (f & 1) odOther += chord(wx, wy, wz, L, l) / l.rb; if (f & 2) LV_CB += chord(wx, wy, wz, BACK, l) / l.rb; } }); }
   const t = lightValue(it, it.j, c.lob, L, odOther, odSelf, c.under); return t >= 0 ? t : 0;
 }
 
@@ -18779,7 +19166,7 @@ function bakeSigs(V) {
   const hard = [ZL.toFixed(4), view, W, H, CPX, S.toFixed(4), V.w, GLR.epoch].join(',');
   const step = Math.max(0.25, P.bakestep ?? 3) / 60, hk = Math.round(P.time / step);
   const hero = LAYERS[HERO_I], mvU = Math.max(8, W * Math.max(0.05, P.bakemove ?? 0.25) / Math.max(1e-3, ZL));
-  const mv = Math.round(hero.uPiv / mvU);
+  const mv = (P.farsun ?? 1) > 0 ? 0 : Math.round(hero.uPiv / mvU);   // (FAR SUN: a pan no longer bakes the whole sky again - each cloud's own light step does, bakeVisit)
   // (engine stage 6, Oct 30: the sliders' part - every one of P's values written out and hashed - was built again for each view
   // every frame though the sliders hardly ever move. The keys and values it was made from are kept: while they are all the
   // same (in the same order) its length and hash are the ones worked out last time - the same signature, without the strings)
@@ -18791,7 +19178,7 @@ function bakeSigs(V) {
     BKP.len = ps.length; BKP.hash = hashStr(ps);
   }
   const sun = SUNO ? SUNO.x.toFixed(3) + '/' + SUNO.y.toFixed(3) : '';
-  const soft = [hk, Math.round(P.cover * 50), Math.round((P.big || 0) * 20), Math.round(P.rain * 20), Math.round(P.fog * 20), mv, sun, BKP.len, BKP.hash].join('|');
+  const soft = [hk, WINDQ, Math.round(P.cover * 50), Math.round((P.big || 0) * 20), Math.round(P.rain * 20), Math.round(P.fog * 20), mv, sun, BKP.len, BKP.hash].join('|');
   return [hard, soft];
 }
 const BKP = { k: [], v: [], len: 0, hash: 0 };
@@ -18840,6 +19227,7 @@ function bakeVisit(c, vis, gk) {
     // (engine stage 6, Oct 30: worked out in a local and stored only when it changes - every cloud, every frame, two stores of
     // a fresh number were most of the sky's garbage. The same sums in the same order: the same value)
     let gT = c === hero ? BKV.heroT : BKV.clear * smoothstep(c.thr * 0.6 - 0.04, c.thr * 0.6 + 0.12, c.wisp ? BKV.wx : cov);
+    gT = growMin(gT);   // (SMALLEST CLOUD - user Oct 30: no miniature towers)
     if (!c.wisp) gT *= BKV.bigF;
     if (c.growT !== gT) c.growT = gT;
     c.gk0 = gk;
@@ -18861,6 +19249,10 @@ function bakeVisit(c, vis, gk) {
   }
   v.live = false; v.now = 0;
   const shownF = bkOk(v.F) ? v.F : null;
+  // (FAR SUN: its light by where it is from the disc, in steps - a step moved since its picture was baked: baked again, alone)
+  let pk = '';
+  if ((P.farsun ?? 1) > 0 && c.minX !== undefined) { const Xm = X + (c.minX + c.maxX) / 2; pk = sunStep(c, Xm, c.y - c.h / 2); }
+  c.pkNow = pk;
   // what this cloud needs: its sprite for the gen being baked (b.next), or - no gen going - its sprite for the look shown
   let need = 0;   // 0 nothing, 1 bake into B (swapped with the rest), 2 bake into F (shown at once), 3 nothing to show yet: now
   // (Oct 29, user: "Seeing some holes in our pre rendered clouds" - a cloud with no picture at all (just come into view, or after a
@@ -18868,7 +19260,7 @@ function bakeVisit(c, vis, gk) {
   // whole sky swapped. Now it is baked at once, whatever the frame's budget, and that picture serves the coming swap too)
   if (wants && !shownF) need = 3;
   else if (b.next) { if (!(v.B && v.B.sig === b.next && bkOk(v.B))) need = wants ? 1 : -1; }
-  else if (wants && !(bkOk(v.F) && v.F.sig === b.cur)) need = 2;
+  else if (wants && !(bkOk(v.F) && v.F.sig === b.cur && (v.F.pk ?? '') === pk)) need = 2;
   else if (!wants && v.F) { bkFree(v.F); v.F = null; }
   if (need === -1) { if (v.B && v.B !== v.F) bkFree(v.B); v.B = { empty: true, sig: b.next }; need = 0; }   // (gone at the new look: gone at the swap)
   if (need > 0 && inView) {
@@ -18966,7 +19358,7 @@ function bakeCloud(c, ax, ay) {
     }
   }
   let s;
-  if (!(x1 >= x0)) s = { empty: true };
+  if (!(x1 >= x0)) s = { empty: true, pk: c.pkNow || '' };
   else {
     x0 = Math.floor(x0); y0 = Math.floor(y0); x1 = Math.ceil(x1); y1 = Math.ceil(y1);
     const w = x1 - x0 + 1, h = y1 - y0 + 1;
@@ -18977,13 +19369,13 @@ function bakeCloud(c, ax, ay) {
     if (!T) T = new GLTarget(w, h);
     const cx = T.getContext();
     for (const [pb, ox, oy, pal] of BKREC.ops) cx.drawPuffs(pb, ox - x0, oy - y0, pal);
-    s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID };
+    s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID, pk: c.pkNow || '' };
   }
   BKREC.ops.length = 0;
   if (v.now === 3) { s.sig = b.next || b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (b.next) { if (v.B && v.B !== s) bkFree(v.B); v.B = s; } }
   else if (v.now === 2) { s.sig = b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (v.B && v.B.sig !== b.next) { bkFree(v.B); v.B = null; } }
   else { s.sig = b.next; if (v.B && v.B !== v.F) bkFree(v.B); v.B = s; }
-  const ms = performance.now() - t0; b.avg = b.avg * 0.9 + ms * 0.1; b.ms += ms; b.n++;
+  const ms = performance.now() - t0; b.avg = b.avg * 0.9 + ms * 0.1; b.ms += ms; b.n++; b.lastF = frameNo;   // (the bench's CLOUDS: READY / BAKING - Oct 30)
   FTV.bake = (FTV.bake || 0) + ms; FTV.baked = (FTV.baked || 0) + 1;
   v.now = 0;
 }
@@ -19001,7 +19393,7 @@ function bakeDraw(c, ax, ay) {
   return true;
 }
 // (the panel)
-function bakeStats() { const b = BK[0]; let n = 0; for (const c of clouds) if (c.bk && c.bk[0].F && c.bk[0].F.T) n++; return { on: BK_ON, sprites: n, gen: !!b.next, left: b.left, swaps: b.swaps, took: b.took, frames: b.frames, avg: b.avg }; }
+function bakeStats() { const b = BK[0]; let n = 0; for (const c of clouds) if (c.bk && c.bk[0].F && c.bk[0].F.T) n++; return { on: BK_ON, busy: !!b.next || frameNo - (b.lastF ?? -99) < 3, sprites: n, gen: !!b.next, left: b.left, swaps: b.swaps, took: b.took, frames: b.frames, avg: b.avg }; }
 
 // ================================================================== the sun and the moon
 // The sun (ref_sun_paintover_pixel, ref_sun_flare_photo): a white core, a soft glow in flat steps fading into the sky, and
@@ -19023,15 +19415,22 @@ const sunSizeK = () => { const m = P.sunmid ?? 1; return m + (sunLowK() - m) * E
 const sunR = () => Math.max(1, 4.5 * S * Zg * SUN_K * sunSizeK());
 const sunSet = () => (HOR - SUNZ.row) * H / sunR();
 const sunVis = () => smoothstep(-1, -0.55, sunSet()) * (1 - smoothstep(0.55, 0.92, E.overcast));
+// (SUN THROUGH THE WEATHER, 17:01 - the user, a low sun in heavy weather, the clouds shaded as if lit from one side but nothing backlit:
+// "If they are not lit why do they have a light direction? ... An overcast day is still affected by the sun direction", with an overcast
+// field and a stormy sunset. The weather hid the sun entirely - its glow, its backlight - and turned its light straight down, while the
+// clouds kept a lit side. One rule now: the weather hides the disc (sunVis), but the sun's light still comes from where the sun is, only
+// softer - through the heaviest overcast half as strong (the glow on the sky about it, the clouds seen against it); its direction never
+// changes with the weather)
+const sunLight = () => smoothstep(-1, -0.55, sunSet()) * (1 - 0.5 * smoothstep(0.55, 0.92, E.overcast));
 function drawSun(horY) {
   SUNG = null;
-  const vis = sunVis(); if (vis < 0.02) return;
+  const vis = sunVis(), lv = sunLight(); if (lv < 0.02) return;   // (SUN THROUGH THE WEATHER: the glow by its light, the disc and sparkle by the disc's own)
   const sk = sunSizeK(), big = sk - 1, sz = sunZ(), cx = sz.x * W + 1, cy = H * sz.row, sr = Math.max(1, 4.5 * S * Zg * SUN_K * sk);
   const srG = Math.max(1, 4.5 * S * Zg * SUN_K * Math.max(0.2, 1 + 0.3 * big));                                // (its glow and sparkle grow less than the disc, or a big sun's glow fills the sky)
-  if (E.night > 0.5) { drawMoon(cx, cy, Math.max(1, sr * 0.8), horY, vis); return; }
-  const dusk = E.dusk, glowFar = dusk > 0.05 ? mix3(E.sunCol, [255, 170, 96], 0.3 * dusk) : mix3([255, 255, 255], E.sunCol, 0.25), glowNear = mix3([255, 255, 255], [255, 214, 140], dusk);
+  if (E.night > 0.5) { if (vis >= 0.02) drawMoon(cx, cy, Math.max(1, sr * 0.8), horY, vis); return; }
+  const dusk = E.dusk, glowFar = dusk > 0.05 ? mix3(E.sunCol, [252, 150, 62], 0.6 * dusk) : mix3([255, 255, 255], E.sunCol, 0.25), glowNear = mix3([255, 255, 255], [253, 204, 64], dusk);   // (13:10: the sunset glow a saturated gold, as the user's target)
   // the glow: round and tight by day, wide along the horizon at sunset; flat steps
-  const gl = Math.min(1.5, (P.glow ?? 1)) * dusk, gx = Math.max(sr * 1.6, srG * (5.5 + 17 * dusk + 10 * gl)), gy = Math.max(sr * 1.6, srG * (5.5 + 4.5 * dusk + 3 * gl)), amax = Math.min(1, (0.62 + 0.3 * dusk + 0.08 * gl) * vis * (1 - 0.6 * E.overcast));
+  const gl = Math.min(1.5, (P.glow ?? 1)) * dusk, gx = Math.max(sr * 1.6, srG * (5.5 + 17 * dusk + 10 * gl)), gy = Math.max(sr * 1.6, srG * (5.5 + 4.5 * dusk + 3 * gl)), amax = Math.min(1, (0.62 + 0.3 * dusk + 0.08 * gl) * lv * (1 - 0.6 * E.overcast));
   const NG = 12, steps = Array.from({ length: NG }, (_, i) => mix3(glowFar, glowNear, Math.pow((i + 1) / NG, 1.6)).map(Math.round));   // (each step its colour: warm out, pale in)
   const y0 = Math.max(0, Math.floor(cy - gy)), y1 = Math.min(horY - 1, Math.ceil(cy + gy));
   // (each step is a ring: the step qi = ceil(NG (1 - d)^e) is at least q where d^2 < DQ[q] = (1 - ((q - 1) / NG)^(1/e))^2 -
@@ -19075,7 +19474,7 @@ function drawSun(horY) {
     }
   }
   // the core
-  const core = dusk > 0.05 ? mix3([255, 252, 236], [255, 240, 196], dusk * 0.5).map(Math.round) : [255, 255, 252];
+  const core = dusk > 0.05 ? mix3([255, 252, 236], [253, 210, 90], dusk).map(Math.round) : [255, 255, 252];   // (13:10: gold at sunset, not cream)
   const s0 = spans(sr), m = (s0.length - 1) >> 1, ox = Math.round(cx - 0.5), oy = Math.round(cy - 0.5);
   // the disc: on the GPU, through the heat over the sea (40-gl.js GL_SFS, laid by outSun in 17-frame.js after the gradient and glow);
   // the plain white disc when there is no GPU
@@ -19092,15 +19491,19 @@ function drawMoon(cx, cy, mr, horY, vis) {
     const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / gx; if (d >= 1) continue;
     const q = Math.ceil(Math.pow(1 - d, 2) * 4) / 4; blendPx(y * TW + x, glow, q * am);
   }
-  const face = [224, 230, 244], mare = [188, 198, 224], marks = [[-0.32, -0.22, 0.3], [0.28, 0.08, 0.24], [-0.04, 0.4, 0.2], [0.18, -0.42, 0.14]];
+  // (13:23 - the user, with a reference (lab/skybench/ref/moon-target-oct30.png): the moon "closer to white and ... a much less cartoony
+  // texturing" - near-white, soft pale-grey seas in irregular patches (two scales of the sky's noise, fixed to the face), a faint cool rim)
+  const face = [246, 247, 251], mare1 = [229, 232, 238], mare2 = [214, 218, 227], rim = [208, 218, 238];
   const s0 = spans(mr), m = (s0.length - 1) >> 1;
   for (let i = 0; i < s0.length; i++) {
     const y = Math.round(cy - 0.5) - m + i; if (y < 0 || y >= horY) continue; const w = s0[i];
     for (let x = Math.round(cx - 0.5) - w; x <= Math.round(cx - 0.5) + w; x++) {
       if (x < 0 || x >= TW) continue;
-      const u = (x + 0.5 - cx) / mr, v = (y + 0.5 - cy) / mr;
-      let dark = false; if (mr >= 3) for (let k = 0; k < marks.length; k++) { const q = marks[k]; if (Math.hypot(u - q[0], v - q[1]) < q[2]) { dark = true; break; } }   // (a plain loop: the same test, nothing made per pixel)
-      blendPx(y * TW + x, dark ? mare : face, vis);
+      const u = (x + 0.5 - cx) / mr, v = (y + 0.5 - cy) / mr, r = Math.hypot(u, v);
+      let c = face;
+      if (mr >= 3) { const q = skyNoise(u * 1.8 + 3.1, v * 1.8 + 7.7) * 0.7 + skyNoise(u * 4.5 + 11.3, v * 4.5 + 2.9) * 0.3; c = q > 0.62 ? mare2 : q > 0.54 ? mare1 : face; }
+      if (r > 1 - 1.2 / Math.max(1, mr)) c = rim;
+      blendPx(y * TW + x, c, vis);
     }
   }
 }
@@ -19258,6 +19661,7 @@ function drawRays2(sunX, sunY, horY, vis) {
 // its horizon (the lab's painting zoom), so both views share one placing of every cloud.
 // HS: the lab's screen height, for heights above the horizon (the lab's horizon was 0.78 down its screen; the game's sky,
 // at the default camera, is the top half of its screen: the decks and the sun keep the lab's places between the horizon and the top)
+let SUNREF = null, SUNSH = 0;   // (SUN PARALLAX: the camera's first place, the sun's shift in cells now)
 let SUN_K = 1, HS = 1, CPX = 3, H0 = 1, W0 = 1, ZL = 1, M = 1, VI = 0, VIEW = null;
 const VB = [{}, {}];                                      // (each view its own deck buffers)
 const SHV = [0, 0];                                       // (how hidden the sun is, eased, each view)
@@ -19269,10 +19673,10 @@ function skyScreen(bw, bh) {
   // follows the zoom (SKY PIXEL BY ZOOM): x2/3 gives 3, the user's choice there; never under 2)
   const old = CPX;
   // (user Oct 28: "never lower than 3, otherwise it gets really slow": zoomed out it stops at 3 - or at SKY PIXEL itself, if set lower)
-  const cs = Math.max(2, Math.round(P.cells || 4));
+  const cs = Math.max(1, Math.round(P.cells || 4));   // (Oct 30, user: "higher pixel density overall" - the baked sky pays for it at bake time: down to 1)
   CPX = Math.max(Math.min(3, cs), Math.round(cs * ((P.cellz ?? 1) > 0 ? Math.min(1, ZL) : 1)));
   if (lastScreen && old !== CPX) { for (const L of LAYERS) L.off = (L.off || 0) * old / CPX; FORCE = frameNo + 3; }   // (the wind drift kept in place; the sky built at once, not over many frames)
-  const key = bw + 'x' + bh + '@' + CPX + '/' + (P.skyh ?? 0.5) + '/' + (P.cloudk ?? 1) + '/' + (P.tall ?? 0.3) + '/' + (P.tallwx ?? 0.5) + '/' + (P.mix ?? 0.7) + '/' + (P.region ?? 1.6);   // (Oct 28: TOWERS, KIND MIX, STRETCH rebuild the scene too)
+  const key = bw + 'x' + bh + '@' + CPX + '/' + (P.skyh ?? 0.5) + '/' + (P.cloudk ?? 1) + '/' + (P.tall ?? 0.3) + '/' + (P.tallwx ?? 0.5) + '/' + (P.mix ?? 0.7) + '/' + (P.region ?? 1.6) + '/' + (P.clump ?? 0.85) + '/' + (P.clumpw ?? 1.1) + '/' + (P.clumpd ?? 0.45);   // (Oct 28: TOWERS, KIND MIX, STRETCH rebuild the scene too)
   if (key === lastScreen) return;
   const keyNC = key.replace('@' + CPX + '/', '/'), onlyPx = !!lastScreen && keyNC === lastScreenNC && !SNAPLOAD;   // (only the sky pixel changed: the same scene, scaled)
   lastScreen = key; lastScreenNC = keyNC;
@@ -19284,7 +19688,11 @@ function skyScreen(bw, bh) {
     // user's was (scx), then scaled to this one. Snapshots from before scx: the first sky pixel whose scene has as many clouds)
     const s = SNAPLOAD, tries = s.scx ? [s.scx] : [4, CPX, 3, 2, 5, 6, 8].filter((v, i, a) => a.indexOf(v) === i);
     let got = 0;
-    for (const cp of tries) { cells(cp); resizeSky(W0, H0, false); got = cp; if (clouds.length === s.n) break; }
+    // (and a snapshot from before every scene was laid out at DECK n SIZE: the decks' sizes as written, if those give its clouds)
+    let ok = false;
+    for (const k0 of [false, true]) { SCENE_K0 = k0; for (const cp of tries) { cells(cp); resizeSky(W0, H0, false); got = cp; if (clouds.length === s.n) { ok = true; break; } } if (ok) break; }
+    if (!ok) { SCENE_K0 = false; cells(tries[0]); resizeSky(W0, H0, false); got = tries[0]; }
+    SCENE_K0 = false;
     SCENE_CPX = got;
     if (got !== CPX) { cells(CPX); resizeSky(W0, H0, true); }
   } else {
@@ -19381,11 +19789,29 @@ function outRays(G) {
   if (n <= 0 || dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4) return;
   ctx.drawRays(G.rt, G.rb, G.NS, RAY_N, dx, dy, dw, dh, 0, G.y0, CW, G.y1 + 1, G.sun, G.p, G.K, G.k2, G.col, G.gb);
 }
+// THE BURN over a deck's layer T (40-gl.js GL_BFS): its cells near the disc - the disc's place (BURN) in the layer's cells, x0 the
+// picture's x of the layer's first cell, y0 its row; n its rows shown; k the deck's size (its oval)
+let BURN = null;   // (this view's disc for the burn: its middle in the picture's cells, its radius, its colour, AGAINST SUN x how much shows)
+function outBurn(T, tw, th, n, x0, y0, k, Bn) {
+  if (!Bn || !ctx.drawBurnGL || !(Bn.a > 0)) return;
+  const V = VIEW, sx = Bn.x - x0, sy = Bn.y - y0, bw = ovalW(k), reach = Math.max(Bn.R * (1 + Bn.br) + 3, bw);
+  const cx0 = Math.max(0, Math.floor(sx - reach)), cx1 = Math.min(tw, Math.ceil(sx + reach)), cy0 = Math.max(0, Math.floor(sy - Math.max(reach, ovalH()))), cy1 = Math.min(n, Math.ceil(sy + Math.max(reach, ovalH())));
+  if (cx1 <= cx0 || cy1 <= cy0) return;
+  const dx = picX(V, (x0 + cx0) * CPX), dy = picY(V, (y0 + cy0) * CPX), dw = (cx1 - cx0) * CPX * M, dh = (cy1 - cy0) * CPX * M;
+  if (dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4) return;
+  ctx.drawBurnGL(T, dx, dy, dw, dh, cx0, cy0, cx1, cy1, [sx, sy, Bn.R, Bn.br], [bw, Bn.a, n, th], Bn.col, [ovalH(), fadeE0()]);
+}
 // a deck's band (BY0..BY1, a row more each side) at its sub-cell offset frac; the GPU: its whole layer
 function deckOut(lay, B, frac) {
   if (!B.T) return;
+  // (11:47 - the user: "a 'deck' should never be able to 'touch' the water (horizon line) since they are progressively smaller and far
+  // away": every deck is above the eye, so none of its clouds is ever under the horizon - its clouds' layer laid down to the horizon's
+  // row and no further. Its veil and rain, a layer of their own, still reach the sea)
+  const hr = Math.round(H * HOR);
   for (const T of B.TV ? [B.TV, B.T] : [B.T]) {   // (its veil and rain under its clouds, when they have a layer of their own - drawDeck0)
-    if (B.lw) outImg(T, B.lw, 0, B.lh, (frac - 1 - B.dox) * CPX, -B.doy * CPX, B.lw * CPX, B.lh * CPX); else outImg(T, CW, 0, H, (frac - 1) * CPX, 0, CW * CPX, H * CPX);
+    const clip = T === B.T;
+    if (B.lw) { const n = clip ? clamp(hr + B.doy, 0, B.lh) : B.lh; outImg(T, B.lw, 0, n, (frac - 1 - B.dox) * CPX, -B.doy * CPX, B.lw * CPX, n * CPX); }
+    else { const n = clip ? clamp(hr, 0, H) : H; outImg(T, CW, 0, n, (frac - 1) * CPX, 0, CW * CPX, n * CPX); }
   }
 }
 // (perf pass, Oct 29) a deck's veil and rain in a layer of their own, the size of its clouds' layer, laid under it
@@ -19396,10 +19822,16 @@ function veilTarget(LB) {
 }
 // ================================================================== once a frame
 // G: { dt, time, weather, rain, fog, wind, sea, flash: { k, x (the bolt's world x) } }
+// (SMALLEST CLOUD, Oct 30 - the user, of a deck-1 tower at 11% of its size, a tiny tree of billows: "we should have a limit of how
+// small it can be, otherwise its detail seems wrong"; fix 1 of three, his pick: a cloud shown at all is at least SMALLEST CLOUD of its
+// full size - more weather brings more clouds, not miniature ones. Under 0.04 it isn't shown, as before)
+const growMin = g => g > 0.04 ? Math.max(P.gmin ?? 0.35, g) : 0;
 let skyDt = 0, skyGrowK = 0.35, EPALK = '', RELIGHT = 1.2, BUILD_MS = 1.2;   // (RELIGHT: the frame's budget, ms, for re-lighting clouds whose light moved)
 function skyFrame(G) {
   if (deckLook()) regenAll();   // (a deck's size changed: its clouds remade at it)
   skyDt = Math.min(0.1, G.dt);
+  GLR.edge = P.edgeb ?? 0.7;   // (EDGE BREAK: the puff shader's - 40-gl.js)
+  WINDQ = clamp(Math.round(clamp(P.wind * 2.5, -1, 1) * 8) / 8, -1, 1);   // (WIND SHAPE: the wind in eighths - 06-lobes-billows-puffs.js placeLobes)
   // (the world paused - the settings' WORLD button - holds the clouds still too, user Oct 27: no wind drift, no breathing or
   // re-forming; they still follow the SKY slider)
   const dt = G.still ? 0 : skyDt;
@@ -19425,7 +19857,8 @@ function skyFrame(G) {
   // two decimals it flipped 1.00 / 0.99 / 1.00 frame after frame: every cloud in the sky re-lit each time, 50 keys a frame)
   SUN_DIRECT = +qHold('dr', 1 - (1 - smoothstep(0.05, 0.3, sunScreen.y)) * smoothstep(0.55, 0.92, E.overcast), 0.1);
   LSIG = [SUN_DIRECT, P.bodyL ?? 0, P.shadow, P.self, P.amb, P.contrast, P.expo, P.jitter, P.glow, P.lightz, P.mass, P.shade, view, qHold('ct', E.contrast, 0.05), qHold('su', E.sunset, 0.1), qHold('bh', E.behind, 0.1), qHold('ni', E.night, 0.1)].join(',') + '|';
-  EPALK = ',' + E.pal.map(t => t.join(',')).join(';') + ';' + E.palStorm.map(t => t.join(',')).join(';');   // (the hour's palettes, for the storm clouds' own)
+  GLR.burn = E.burn.map(v => v / 255);   // (THE BURN's colour of the hour: the puff shader's - 40-gl.js GL_PFS)
+  EPALK = ',' + E.burn.join(',') + ',' + E.pal.map(t => t.join(',')).join(';') + ';' + E.palStorm.map(t => t.join(',')).join(';');   // (the hour's palettes, for the storm clouds' own)
   // (Oct 28, user: "the clouds are taking ages to change for the new light when I change the time": 0.8 ms of relighting a frame
   // was set when a still frame cost the most of the frame; now that still decks are kept, the budget grows with the clouds
   // waiting for their new light (last frame's count): up to 6 ms, a big change of hour done in a few frames)
@@ -19442,7 +19875,7 @@ function skyFrame(G) {
   if (frameNo % 60 === 0) for (const c of clouds) if (c.items && c !== hero && !c.disturbed && !(c.tubes && c.tubes.length) && now - (c.seen || 0) > 60) { c.items = c.billows = null; c.nbrReady = false; }
   skyGen = frameNo < 4 || frameNo < FORCE ? 1e9 : (P.genms ?? 4);   // (the frame's budget, ms, for making clouds' puffs: a cloud past it is drawn as lobes till its turn)
 }
-let skyGen = 7, FORCE = 0, RL_WAIT = 0;
+let skyGen = 7, FORCE = 0, RL_WAIT = 0, WINDQ = 0;
 // REFRESH CLOUDS (Oct 28, user: "I change values but the clouds take a while to change"): every cloud's light worked out
 // again and its batch built again on the next frames, past the budgets that spread that over many frames; shape too: its
 // puffs made again
@@ -19479,6 +19912,10 @@ function castWorld(c) {
     for (let j = 0; j < lob.length; j++) { const l = lob[j], o = wl[j]; o.x = Xs + l.x; o.y = H - c.y + l.y; o.z = c.wz + l.z; o.rx = l.rx; o.ry = l.ry; o.rz = l.rz; o.rb = l.rb; } }
   { const bc = c.bc || (c.bc = [0, 0, 0]); bc[0] = Xs + (c.minX + c.maxX) / 2; bc[1] = H - c.y + c.h * 0.4; bc[2] = c.wz; } c.bR = Math.hypot((c.maxX - c.minX) / 2, c.h * 0.6) + 4;
 }
+// (the sky's texture: value noise on a grid of whole numbers, smooth between - 0..1)
+const skyHash = (x, y) => { let h = (x * 374761393 + y * 668265263) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+function skyNoise(x, y) { const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+  const a = skyHash(xi, yi), b = skyHash(xi + 1, yi), c = skyHash(xi, yi + 1), d = skyHash(xi + 1, yi + 1); return a + (b - a) * sx + (c - a + (a - b + d - c) * sx) * sy; }
 const BGKS = [];   // (the gradient's key, made each view: skyBack)
 function skyBack(V) {
   // (Oct 28: the horizon above the top of the screen - the camera under the water, or the sea filling it - no sky shows:
@@ -19499,7 +19936,15 @@ function skyBack(V) {
   // the sun: in the sky picture like the clouds (the lab's), hanging from the horizon and zoomed with the decks - so it never
   // moves against them, whatever the camera does (user Oct 27: "Sun should be in the sky locked in like the clouds, like the
   // lab stuff"). Across, it is far off: where the hour puts it on the screen, whatever the camera's x
-  const pc = V.pivX / CPX, sunCx = pc + (((sunScreen.x * V.fullW - V.vsx) / CPX) - pc) * ZL, sunCy = horY - sunScreen.y * (P.sunh ?? 1.6) * HS * ZL;
+  // (SUN PARALLAX, 11:37 - the user: "If I pan left and right, the sun is following me": the sun has its place in the world, and the
+  // camera moving along the world moves it across the screen like the decks - 1 as the land and deck 1, 0 following the camera as
+  // before. Its place: where the hour puts it on the screen at the camera's first place (SUNREF), the world repeating as the decks do)
+  if (SUNREF === null) SUNREF = V.refX;
+  // (11:50 - the user: the sun moves like the decks, slower than the furthest - "a 'deck 7' as if its after deck 6"; fixed up and down)
+  const sp = P.sunpar ?? 0.08; let shC = -(V.refX - SUNREF) * V.cellsPerUnit * sp;
+  if (sp > 0) { const per = WORLD; shC = ((shC % per) + per * 1.5) % per - per / 2; }
+  SUNSH = shC;
+  const pc = V.pivX / CPX, sunCx = pc + (((sunScreen.x * V.fullW - V.vsx) / CPX + shC) - pc) * ZL, sunCy = horY - sunScreen.y * (P.sunh ?? 1.6) * HS * ZL;
   SUNZ = { x: sunCx / W, row: sunCy / H }; SUN_K = 1;
   // where each deck's coordinate 0 lands in this view: its camera (the world's x under the pivot, times its parallax, in
   // cells at the default zoom), its wind drift, about the pivot; its base and its foot on the water
@@ -19508,7 +19953,7 @@ function skyBack(V) {
     lay.zl = ZL;
     const uPiv = W0 / 2 - lay.off + V.refX * Sw * (P[PARK[lay.name]] ?? lay.par);
     lay.A = pc - uPiv * ZL; lay.uPiv = uPiv;
-    const altC = HS * Math.max(0.02, (P.alt ?? 0.54) - DECK_DROP[lay.name] * (P.gap ?? 1));
+    const altC = HS * Math.max(0.02 + 0.05 * Math.sqrt(lay.k ?? 1), (P.alt ?? 0.54) - DECK_DROP[lay.name] * (P.gap ?? 1));   // (a little above the horizon at least, more for a nearer deck - 11:47)
     lay.baseY = Math.round(horY - altC * ZL); lay.baseY0 = lay.baseY;
     lay.footY = Math.round(horY + (V.waterPx - V.hzPx) / (CPX * M) * lay.foot);
   }
@@ -19520,26 +19965,40 @@ function skyBack(V) {
   BY0 = 1e9; BY1 = -1;
   // (the GPU: the gradient is drawn again only when it changes - the hour, the horizon's row, the screen - and its canvas is
   // uploaded then alone; a pristine copy is kept, and each frame the sun is drawn over it and its rows uploaded)
-  // (sky & far sea pass, Oct 30: the key was the hour's colours as they are - fractions that move a hair whenever the hour or the
-  // weather eases - so the whole gradient was painted again, copied, put to its canvas and uploaded to the GPU, every frame, in
-  // each view, though what it paints is each band's colour rounded to whole values, which changes only now and then. The key
-  // is now those very colours (and the rows, the band count, the size): when they hold, the buffer would be painted pixel for
-  // pixel as it is - it is kept)
-  const K = BGKS; K.length = 0; K.push(horY, bands, H, CW);
+  // (13:13 - the user, with a reference (lab/skybench/ref/sky-texture-target-oct30.png): the sky "instead of the current flat lines ... should
+  // have some texture to it" - its bands' edges ragged in long horizontal streaks, as brushed pixel art; and "the sunset background color
+  // should fade to darker soon near the end of deck 1 ... so that we get the colors very close, from the cloud shadow and the background"
+  // (ref/sky-dark-above-deck1-oct30.png). One rule at every hour: the gradient runs from the horizon up to the top of deck 1's clouds -
+  // the near deck - and the top colour holds above it; each cell's place in it nudged by a streaky noise, a band or so. The streaks move
+  // with the sky's own place (the sun's parallax, SUNSH), so they don't ride the camera)
+  // (the top of deck 1: its base less its highest clouds - the wisps lifted up to 170 and their thickness, in its own scale)
+  const b1 = LAYERS[HERO_I].baseY, yTop = Math.min(horY - 8, b1 - 200 * S * (LAYERS[HERO_I].k ?? 1) * ZL), shX = Math.round(SUNSH);
+  const tex = P.skytex ?? 1;
+  // (the game's key, Oct 30 sky pass: the colours as painted, the rows and sizes - and the texture's place and the top of deck 1 - when
+  // they hold, the buffer would be painted the same and is kept)
+  const K = BGKS; K.length = 0; K.push(horY, bands, H, CW, Math.round(yTop), tex > 0 ? shX : 0, tex);
+  const KC = K.length;
   for (let b = 0; b < bands; b++) {
     const u = b / (bands - 1);
-    let c = mix3(E.skyTop, E.skyMid, smoothstep(0, 0.65, u)); c = mix3(c, E.skyHor, smoothstep(0.4, 1, u));
+    // (13:00 - the user's sunset target: the middle colour fills the middle of the sky and the horizon's colour only its lowest
+    // part - the red band over the clouds, the gold low down. By day the three are close blues: the same sky)
+    let c = mix3(E.skyTop, E.skyMid, smoothstep(0, 0.6, u)); c = mix3(c, E.skyHor, smoothstep(0.62, 1, u));   // (13:50: orange longer, the gold only low - the target)
     K.push(rgb(c.map(Math.round)));
   }
   K.push(rgb(E.skyHor.map(Math.round)));
   let bgSame = B.bgKey === 'k' && B.bgC && B.bgC.length === K.length;
   if (bgSame) for (let i = 0; i < K.length; i++) if (B.bgC[i] !== K[i]) { bgSame = false; break; }
   if (!bgSame) {
-    for (let b = 0; b < bands; b++) {
-      const y0 = Math.round(b / bands * horY), y1 = Math.round((b + 1) / bands * horY) - 1, col = K[4 + b];
-      for (let y = y0; y <= y1; y++) hspan(y, 0, TW - 1, col);
+    const span = Math.max(1, horY - yTop), amp = tex * 1.4 / bands;
+    for (let y = 0; y < Math.min(horY, H); y++) {
+      const u0 = (y - yTop) / span, row = y * TW;
+      if (amp <= 0) { const col = K[KC + clamp(Math.floor(clamp(u0, 0, 0.9999) * bands), 0, bands - 1)]; for (let x = 0; x < TW; x++) buf[row + x] = col; BY0 = Math.min(BY0, y); BY1 = Math.max(BY1, y); continue; }
+      for (let x = 0; x < TW; x++) {
+        const wx = x - shX, n = skyNoise(wx / 90, y / 3) + 0.5 * skyNoise(wx / 23 + 17.3, y / 1.5 + 5.1) - 0.75;
+        buf[row + x] = K[KC + clamp(Math.floor(clamp(u0 + n * amp, 0, 0.9999) * bands), 0, bands - 1)];
+      }
     }
-    if (horY < H) for (let y = Math.max(0, horY); y < H; y++) hspan(y, 0, TW - 1, K[4 + bands]);   // (under the horizon: the sea covers it)
+    if (horY < H) for (let y = Math.max(0, horY); y < H; y++) hspan(y, 0, TW - 1, K[KC + bands]);   // (under the horizon: the sea covers it)
     B.bgKey = 'k'; B.bgC = K.slice();
     if (!B.bg0 || B.bg0.length !== B.bg.buf.length) B.bg0 = new Uint32Array(B.bg.buf.length);
     B.bg0.set(B.bg.buf);
@@ -19553,6 +20012,11 @@ function skyBack(V) {
     outImg(B.bg.cv, CW, 0, H, -CPX, 0, CW * CPX, H * CPX);
     if (BY1 >= BY0) { const y0 = Math.max(0, BY0), y1 = Math.min(H - 1, BY1); s[0] = y0; s[1] = y1; outPix(B.bg, CW, y0, y1 - y0 + 1, -CPX, y0 * CPX, CW * CPX, (y1 - y0 + 1) * CPX, false); } else { s[0] = 1e9; s[1] = -1; }
     if (SUNG) outSun(SUNG);   // (the disc, on the GPU through the heat: 14-sun-moon.js, 40-gl.js GL_SFS)
+    // (the burn's disc for this view's decks: the sun's or the moon's; its colour the disc's light: the sun's white by day, the sunset's
+    // warm gold (its highlight tone, PAL.set[5]) as it goes down - 13:10, "It doesnt make sense to have a yellow burn on daytime, it
+    // should be white" - and the moon's the warm gold the user picked (13:02, after his proposal ref/burn-proposal-oct30.png))
+    { const z = sunZ(), a = (P.farsun ?? 1) > 0 ? (P.agk ?? 1) * sunLight() : 0;
+      BURN = a > 0 ? { x: z.x * W, y: z.row * H, R: discR(), br: P.burnr ?? 2.5, a, col: (E.night > 0.5 ? PAL.set[5] : mix3([255, 255, 250], PAL.set[5], E.dusk)).map(v => v / 255) } : null; }
   }
   V.bgDone = true;
   // ---- the clouds in this view: placed and lit (once a frame: a cloud the other view has done already is only drawn)
@@ -19573,6 +20037,7 @@ function skyBack(V) {
       // hero and the wisps too, fades in from nothing as CLOUDS rises from 0; the wisps go with the clouds)
       const cov = P.cover, clear = smoothstep(0, 0.06, cov);
       c.growT = c === hero ? smoothstep(0.12, 0.3, cov) : clear * smoothstep(c.thr * 0.6 - 0.04, c.thr * 0.6 + 0.12, c.wisp ? (P.wisps ?? 0.5) * clamp(cov / 0.3, 0, 1) : cov);
+      c.growT = growMin(c.growT);   // (SMALLEST CLOUD - user Oct 30: no miniature towers)
       if (!c.wisp) c.growT *= 1 + (P.bigk ?? 0.5) * (P.big || 0);           // (past 60: bigger, so they tower higher over their deck)
       c.grow += (c.growT - c.grow) * Math.min(1, skyDt * skyGrowK); if (Math.abs(c.growT - c.grow) < 0.002 || frameNo < 3 || frameNo < SNAP) c.grow = c.growT;
       c.gk0 = gk;                                                         // (the cover it was last grown for: at nothing and unchanged, passed over)
@@ -19615,7 +20080,7 @@ function skyBack(V) {
     }
     else {
       c.seen = now;
-      const fastMv = c.dirty || Math.abs((c.lastZ || 0) - c.lay.zl) > 1e-4;
+      const fastMv = c.dirty || Math.abs((c.lastZ || 0) - c.lay.zl) > 1e-4 || c.wq !== WINDQ; c.wq = WINDQ;   // (WIND SHAPE: the wind stepped - placed again)
       // (Oct 28, user: "still slow when I ask it to build clouds (moving clouds at sky 30%)": a growing cloud was re-placed and
       // rebuilt every 4th frame however little it had grown - at x1/3 most steps far under a sky pixel - and each cloud on its
       // own frame (its uid), so every deck had a cloud changing every frame and all four were redrawn every frame. Now a cloud
@@ -19637,7 +20102,7 @@ function skyBack(V) {
       c.dirty = false; c.lastZ = c.lay.zl; c.lastG = c.grow; c.moving = fastMv; c.slowMv = slowMv;
       placeTubes(c, now);
     }
-    c.under = clamp((H * sunZ().row - c.y + 4 * Zg) / (HS * 0.12 * Zg), 0, 1) * (1 - E.overcast) * (1 - 0.6 * E.night);
+    c.under = ((P.farsun ?? 1) > 0 ? smoothstep(0.3, 0.02, sunScreen.y) : clamp((H * sunZ().row - c.y + 4 * Zg) / (HS * 0.12 * Zg), 0, 1)) * (1 - E.overcast) * (1 - 0.6 * E.night);   // (FAR SUN: light from under only with the sun low - every cloud alike)
     c.L = lightDir(c);
     // its light's key: the light's direction (to a fiftieth), the light from under, its casters, the sliders. When it moves
     // the cloud is re-lit whole - every puff's tone again in one rebuild, within the frame's RELIGHT budget (drawCloudCached) -
@@ -19646,12 +20111,12 @@ function skyBack(V) {
     // the key's step is small enough (a tenth of a tone) that nothing moves until it does
     // (Oct 28: the key is kept per view - two views light a cloud a little differently (the sun's place in each), and one key
     // for both flipped every frame in a split screen, so both views' batches were always behind their key)
-    { const l0 = Math.round(c.L[0] * 50), l1 = Math.round(c.L[1] * 50), l2 = Math.round(c.L[2] * 50), u = Math.round(c.under * 16);
-      const K = (c.lkv || (c.lkv = [{}, {}]))[VI];
-      if (K.l0 !== l0 || K.l1 !== l1 || K.l2 !== l2 || K.u !== u || K.n !== c.casters.length || K.s !== LSIG) {
+    { const l0 = Math.round(c.L[0] * 50), l1 = Math.round(c.L[1] * 50), l2 = Math.round(c.L[2] * 50), u = Math.round(c.under * 16) + (c.ag ? '/' + c.ag.map(v => Math.round(v * 8)).join(',') : '');   // (and its glow against the sun - 07-light-shadow.js sunAgainst)
+      const K = (c.lkv || (c.lkv = [{}, {}]))[VI], cn = c.casters.length + '/' + (c.castF ? c.castF.join('') : '');
+      if (K.l0 !== l0 || K.l1 !== l1 || K.l2 !== l2 || K.u !== u || K.n !== cn || K.s !== LSIG) {
         // (the perf panel's KEYS: why clouds' light keys moved this frame - L the light's direction, U the light from under, N the casters, S the sliders' signature)
-        if (K.l0 !== undefined) { if (K.l0 !== l0 || K.l1 !== l1 || K.l2 !== l2) FTV.kL = (FTV.kL || 0) + 1; if (K.u !== u) FTV.kU = (FTV.kU || 0) + 1; if (K.n !== c.casters.length) FTV.kN = (FTV.kN || 0) + 1; if (K.s !== LSIG) FTV.kS = (FTV.kS || 0) + 1; }
-        K.l0 = l0; K.l1 = l1; K.l2 = l2; K.u = u; K.n = c.casters.length; K.s = LSIG; K.lk = (K.lk || 0) + 1;
+        if (K.l0 !== undefined) { if (K.l0 !== l0 || K.l1 !== l1 || K.l2 !== l2) FTV.kL = (FTV.kL || 0) + 1; if (K.u !== u) FTV.kU = (FTV.kU || 0) + 1; if (K.n !== cn) FTV.kN = (FTV.kN || 0) + 1; if (K.s !== LSIG) FTV.kS = (FTV.kS || 0) + 1; }
+        K.l0 = l0; K.l1 = l1; K.l2 = l2; K.u = u; K.n = cn; K.s = LSIG; K.lk = (K.lk || 0) + 1;
       }
       c.lk = K.lk;   // (this view's key count: what its batch or sprite compares against)
       c.toneStride = c.moving ? 3 : c.slowMv ? 6 : 15; }   // (slowly growing or morphing: its light changes slowly too - a sixth of its puffs a rebuild, not a third)
@@ -19665,25 +20130,30 @@ function skyBack(V) {
   for (const c of vis) {
     if (c.pfr !== frameNo || c.cfr === frameNo) continue;
     c.cfr = frameNo;
-    if (c.far || P.shadow <= 0) { c.casters = []; continue; }
+    if (c.far || P.shadow <= 0) { c.casters = []; c.castF = []; continue; }
     if (c.casters.length && (frameNo + c.uid) % 4 && !(c.bk && c.bk[VI].now)) continue;
     // (Oct 28: the casters from every cloud of the sky, not the visible ones alone - a neighbour just off the screen still
     // casts its shadow. Taken from the visible ones, a cloud scrolling off the screen dropped out of its neighbours' casters,
     // which moved their light keys and re-lit them: flying, that was a relight every frame)
     const was = c.casters;
-    c.casters = [];
+    c.casters = []; c.castF = [];
+    // (SEEN AGAINST THE SUN: its light comes from behind it, so a cloud behind it on the screen - of its own deck, drawn before it, or a
+    // further one - shades it there (flag 2, read along the line straight back, GL_LVS); the sun's own light as before (flag 1))
+    const agOn = c.ag && c.ag[0] > 0;
     for (const o of NEARC) {
       if (o === c) continue;
-      if ((P.deckSh ?? 0) === 0 && o.lay === c.lay) continue;   // (SAME-DECK SHADOWS off: a cloud isn't shaded by its own deck's neighbours)
+      const same = (P.deckSh ?? 0) === 0 && o.lay === c.lay;   // (SAME-DECK SHADOWS off: a cloud isn't shaded by its own deck's neighbours in the sun's own light)
+      if (same && !agOn) continue;
       if (o.cwf !== frameNo) { if (!(o.lob && o.lob.length && o.lob[0].rb > 0) || o.minX === undefined) continue; o.cwf = frameNo; castWorld(o); }
       if (!o.bc) continue;
       if (Math.abs(o.bc[0] - c.bc[0]) > (o.bR + c.bR) * 3) continue;
-      const ox = o.bc[0] - c.bc[0], oy = o.bc[1] - c.bc[1], oz = o.bc[2] - c.bc[2], t = ox * c.L[0] + oy * c.L[1] + oz * c.L[2];
-      if (t <= 0) continue;
-      const px = ox - c.L[0] * t, py = oy - c.L[1] * t, pz = oz - c.L[2] * t;
+      const ox = o.bc[0] - c.bc[0], oy = o.bc[1] - c.bc[1], oz = o.bc[2] - c.bc[2], hold = (o.bR + c.bR) * (was.includes(o) ? 0.9 : 0.62);
+      let f = 0;
       // (with a hold: a caster stays one until it is well clear, a cloud becomes one only once well inside - the clouds
       // breathe and morph, and a set that flickered at the edge re-lit its cloud every time: KEYS N 6 a frame in a full sky)
-      if (Math.hypot(px, py, pz) < (o.bR + c.bR) * (was.includes(o) ? 0.9 : 0.62)) c.casters.push(o);
+      if (!same) { const t = ox * c.L[0] + oy * c.L[1] + oz * c.L[2]; if (t > 0 && Math.hypot(ox - c.L[0] * t, oy - c.L[1] * t, oz - c.L[2] * t) < hold) f |= 1; }
+      if (agOn && oz < 0 && Math.hypot(ox, oy) < hold) f |= 2;   // (behind it, over it on the screen)
+      if (f) { c.casters.push(o); c.castF.push(f); }
     }
   }
   // the bolt's light in this view (deck 1's base, under the bolt)
@@ -19888,7 +20358,6 @@ function smnLight(cx, cy, r, out, o) {
   const d = Math.hypot(ax, ay) || 1e-6, rr = Math.max(SMSUN.s4, r);
   const e = Math.hypot((sx - cx) / rr, (sy - cy) / rr), th = Math.min(1.48, d) * smoothstep(0.15, 1.5, e);
   let lx = Math.sin(th) * ax / d, ly = Math.sin(th) * ay / d, lz = -Math.cos(th);
-  if (E.overcast > 0.6) { const q = (E.overcast - 0.6) / 0.4; lx *= 1 - q; ly = ly * (1 - q) + q; }
   const n = Math.hypot(lx, ly, lz) || 1;
   out.LX[o] = lx / n; out.LY[o] = ly / n; out.LZ[o] = lz / n;
 }
@@ -19900,7 +20369,6 @@ function smnLightBox(cx, cy, rx, ry) {
   const d = Math.hypot(ax, ay) || 1e-6, ex2 = (sx - cx) / Math.max(SMSUN.s4, rx), ey2 = (sy - cy) / Math.max(SMSUN.s4, ry);
   const th = Math.min(1.48, d) * smoothstep(0.15, 1.5, Math.hypot(ex2, ey2));
   let lx = Math.sin(th) * ax / d, ly = Math.sin(th) * ay / d, lz = -Math.cos(th);
-  if (E.overcast > 0.6) { const q = (E.overcast - 0.6) / 0.4; lx *= 1 - q; ly = ly * (1 - q) + q; }
   const n = Math.hypot(lx, ly, lz) || 1; return [lx / n, ly / n, lz / n];
 }
 function smnAdd(cx, cy, r, z, a, fam, h = 0.5) {
@@ -20906,13 +21374,14 @@ function skySun() {
 }
 // the outPix calls of a view, kept so the other half of a shared view lays the same pictures (no second drawing)
 let REC = null;
-const outPix0 = outPix, outImg0 = outImg, outRays0 = outRays, outSun0 = outSun;
+const outPix0 = outPix, outImg0 = outImg, outRays0 = outRays, outSun0 = outSun, outBurn0 = outBurn;
 outPix = (...a) => { if (REC) REC.push([0, a]); const t0 = performance.now(); outPix0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };   // (FT.out: the laying of the pictures, within the parts' times)
 outImg = (...a) => { if (REC) REC.push([1, a]); const t0 = performance.now(); outImg0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };
 outSun = (...a) => { if (REC) REC.push([3, a]); outSun0(...a); };
+outBurn = (...a) => { if (REC) REC.push([4, a]); outBurn0(...a); };
 outRays = (...a) => { if (REC) REC.push([2, a]); const t0 = performance.now(); outRays0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };
 // (a layer or a canvas laid again is drawn from its texture, not uploaded again; a buffer is uploaded again)
-function replay(list, V) { const v0 = VIEW, c0 = ctx; VIEW = V; ctx = V.ctx; M = V.zr / ZL; const t0 = performance.now(); for (const [k, a] of list) (k === 3 ? outSun0 : k === 2 ? outRays0 : k ? outImg0 : outPix0)(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; VIEW = v0; ctx = c0; }
+function replay(list, V) { const v0 = VIEW, c0 = ctx; VIEW = V; ctx = V.ctx; M = V.zr / ZL; const t0 = performance.now(); for (const [k, a] of list) (k === 4 ? outBurn0 : k === 3 ? outSun0 : k === 2 ? outRays0 : k ? outImg0 : outPix0)(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; VIEW = v0; ctx = c0; }
 const REC_BACK = [[], []], REC_DECKS = [[], []], REC_DECKS2 = [[], []], REC_VEIL = [[], []], REC_FRONT = [[], []];
 // the view's screen pixels of a picture point (unmagnified view pixels)
 const toScreen = (V, x, y) => [picX(V, x), picY(V, y)];   // (17-frame.js: the one mapping)
@@ -20968,13 +21437,14 @@ const NSKY_API = {
     return { scx: SCENE_CPX, now: +now.toFixed(3), off: LAYERS.map(L => +(L.off || 0).toFixed(3)), P: { ...P }, hero: heroLobes, sun: SUNO, view,
       n: clouds.length, grow: clouds.map(c => +(c.grow ?? 0).toFixed(4)), lobes: clouds.map((c, i) => c.reformed ? [i, c.lobes] : null).filter(Boolean) };
   },
-  restore(s) { for (const k in s.P) P[k] = s.P[k]; if (s.hero) heroLobes = s.hero; SUNO = s.sun || null; if (s.view != null) view = s.view; SNAPLOAD = s; lastScreen = ''; },
+  restore(s) { for (const k in s.P) P[k] = s.P[k]; if (s.hero) heroLobes = s.hero.filter(L => !L.scrap); SUNO = s.sun || null; if (s.view != null) view = s.view; SNAPLOAD = s; lastScreen = ''; },
   refresh: skyRefresh,
   // (SUN: DRAG) the sun under the screen point (px, py) of view V - the inverse of skyBack's placing; null: by the hour again
   setSun(V, px, py) {
     if (px == null) { SUNO = null; return; }
-    const x = ((px - V.pivX) / V.zr + V.pivX + (V.vsx || 0)) / V.fullW, y = (V.hzPx - py) / ((P.sunh ?? 1.6) * HS * CPX * V.zr);
-    SUNO = { x: clamp(x, -0.2, 1.2), y: clamp(y, -0.3, 1.2) };
+    // (SUN PARALLAX: less the sun's shift by the camera)
+    const x = ((px - V.pivX) / V.zr + V.pivX + (V.vsx || 0) - SUNSH * CPX) / V.fullW, y = (V.hzPx - py) / ((P.sunh ?? 1.6) * HS * CPX * V.zr);
+    SUNO = { x: clamp(x, -20, 20), y: clamp(y, -0.3, 1.2) };   // (Oct 30, user: "drag the sun left and right anywhere" - was -0.2..1.2 of the screen)
   },
   get sunDragged() { return !!SUNO; },
   frame(G) { ftFrame(); const t0 = performance.now(); skySun(); skyFrame(G); FTV.frame = performance.now() - t0; },
@@ -21002,6 +21472,9 @@ const NSKY_API = {
   dbgBuf(vi, name) { const b = VB[vi], B = name === 'bg' || name === 'veil1' ? b[name] : b.lay && b.lay[name]; if (!B) return null; const u = new Uint8Array(B.buf.buffer.slice(0)); return { w: b.cw, h: b.h, by0: B.by0, by1: B.by1, px: Array.from(u) }; },
   // (tests: the records drawn over a cell of view vi this frame - cloud, offset, record - to check a pixel against the buffers)
   dbgRecs(vi, x, y) { const out = []; for (const c of VIS[vi]) { if (!c.axd) continue; for (const pb of [c.pbv && c.pbv[vi], c.pbx]) { if (!pb || !pb.n) continue; const ax = c.axd[vi], ay = c.y, d = pb.data; for (let i = 0; i < pb.n; i++) { const o = i * 8, r = Array.from(d.subarray(o, o + 8)); const near = r[7] < 0.5 ? Math.abs(x - ax - r[0]) <= r[2] / 2 + 2 && Math.abs(y - ay - r[1]) <= r[2] / 2 + 2 : Math.abs(x - ax - r[0]) <= r[2] + 2 && Math.abs(y - ay - r[1]) <= r[3] + 2; if (near) out.push({ uid: c.uid, lay: c.lay.name, far: c.far, ax, ay, i, r }); } } } return out; },
+  // (tests: each cloud in view - its screen box, deck, light direction, how far it is seen against the sun, its side step)
+  dbgLight(V) { return VIS[V.vi].map(c => { const X = screenX(c), a = toScreen(V, (X + c.minX) * CPX, (c.y - c.h) * CPX), b = toScreen(V, (X + c.maxX) * CPX, c.y * CPX), Xm = X + (c.minX + c.maxX) / 2;
+    return { uid: c.uid, dn: c.lay.dn, box: [a[0], a[1], b[0], b[1]].map(Math.round), L: (c.L || []).map(v => +v.toFixed(2)), ag: c.ag ? c.ag.map(v => +v.toFixed(2)) : null, side: sunSide(Xm), under: +(c.under || 0).toFixed(2), wisp: !!c.wisp }; }); },
   dbgClouds(vi) { return VIS[vi].map(c => ({ lay: c.lay.name, x: Math.round(screenX(c)), minX: Math.round(c.minX), maxX: Math.round(c.maxX), h: Math.round(c.h), y: c.y, grow: +c.grow.toFixed(2), far: c.far, wisp: !!c.wisp })); },
   stats() { const n = clouds.filter(c => c.visible).length; let sh = 0, fl = 0; for (const c of clouds) if (c.visible && c.items && !c.far) for (const it of c.items) if (it.tone !== undefined) { if (it.tgx || it.tgy) sh++; else fl++; }
     return { clouds: n, puffs: [sh, fl], balls: [SMNPV[0].front.balls, SMNPV[0].back.balls, SMNPV[1].front.balls], last: !!SMNPV[0].front.last, o: (f => f.ob ? [f.ox, f.oy, f.ow, f.oh, f.ob.subarray(0, f.ow * f.oh).filter(v => v >>> 24).length, f.ocam && f.ocam.map(Math.round)] : null)(SMNPV[0].front), smoke: ((SMNPV[0].front.ms || 0) + (SMNPV[0].back.ms || 0)).toFixed(1), smd: { on: smdOn(), sent: SMD.sent, got: SMD.got, late: SMD.late, fail: SMD.fail, gsent: SMD.gsent, ggot: SMD.ggot, glate: SMD.glate, glate2: SMD.glate2, gwaits: SMD.gwaits, dwaits: SMD.dwaits, chk: SMD.chk } }; },
@@ -21022,7 +21495,7 @@ const DESC = {
   sz1: 'Deck 1 cloud size', sz2: 'Deck 2 size vs deck 1', sz3: 'Deck 3 size vs deck 1', sz4: 'Deck 4 size vs deck 1', sz5: 'Deck 5 size vs deck 1', sz6: 'Deck 6 size vs deck 1',
   hz1: 'Deck 1 haze', hz2: 'Deck 2 haze', hz3: 'Deck 3 haze', hz4: 'Deck 4 haze', hz5: 'Deck 5 haze', hz6: 'Deck 6 haze',
   heat: 'Heat shimmer on a low sun', heatr: 'Shimmer height, sun radii', cloudk: 'Cloud size (rebuilds)',
-  cellz: 'Sky pixel shrinks zoomed out', skyh: 'Screen share for the sky', cells: 'Sky pixel size (2 = finest)',
+  cellz: 'Sky pixel shrinks zoomed out', skyh: 'Screen share for the sky', cells: 'Sky pixel size (1 = finest)',
   alt: 'Deck 1 height', gap: 'Back decks below deck 1', atmo: 'Distance haze on back decks',
   bake: 'Bake the sky into a picture', bakestep: 'Minutes between bakes', bakemove: 'Drift before a new bake',
   lightz: 'Sun depth behind the clouds', contrast: 'Spread of the tones', expo: 'Lighter or darker',
@@ -21039,15 +21512,33 @@ const DESC = {
   ...Object.fromEntries([1, 2, 3, 4, 5, 6].flatMap(n => [['dk' + n, 'Deck ' + n + ' on/off'], ['bl' + n, 'Deck ' + n + ' billows'], ['bs' + n, 'Deck ' + n + ' billow size'], ['pf' + n, 'Deck ' + n + ' puffs']])),
   strat: 'Stratosphere, m', upper: 'Upper atmosphere, m', space: 'Edge of space, m',
   lodl: 'Lobe LOD threshold',
+  gmin: 'Smallest a cloud shows, share of full', edgeb: 'Ragged pixel edges (0 = round)', farsun: 'One sun light for all clouds',
+  windpile: 'Clouds heap up downwind', sunpar: 'Sun slide when panning', backw: 'Glow reach round the sun', agk: 'Cloud glow against the sun',
+  skytex: 'Streaky sky bands', burnr: 'Burn reach from sun or moon', clumpd: 'Each deck thins and fills', backf: 'Backlit fade softness',
+  clump: 'Busy and open stretches', clumpw: 'Stretch length, screens',
 };
 const ED_TABS = {
-  // (user Oct 30: "Weather", "Cloud types"; AIR and ATMOSPHERE moved here from DECKS)
-  SKY: [['GRADIENT AND SUN', ['bands', 'sunh', 'flare', 'sunrise', 'sunmid', 'sunset', 'heat', 'heatr']], ['WEATHER', ['gcover', 'bigk', 'ghaze', 'wisps']], ['CLOUD TYPES', ['tall', 'tallwx', 'mix', 'region', 'wispbump', 'wispbumpk', 'wisppuff']], ['CAMERA', ['par1', 'par2', 'par3', 'par4', 'par5', 'par6', 'cells', 'cellz', 'skyh', 'cloudk']], ['AIR', ['atmo']], ['ATMOSPHERE LAYERS (OPEN WORLD)', ['strat', 'upper', 'space']]],
-  DECKS: [['HEIGHTS', ['alt', 'gap']], ['DEPTH: EACH DECK\'S SIZE (TIMES DECK 1)', ['sz1', 'sz2', 'sz3', 'sz4', 'sz5', 'sz6']], ['DEPTH: EACH DECK\'S HAZE', ['hz1', 'hz2', 'hz3', 'hz4', 'hz5', 'hz6']]],
-  LIGHT: [['SUN', ['lightz', 'glow', 'lightfix']], ['TONES', ['contrast', 'expo']], ['SHADOWS', ['shadow', 'deckSh', 'bodyL', 'bshade', 'bshape', 'breach', 'self', 'amb', 'crease', 'shade']], ['EDGES', ['hi']], ['RAYS', ['rays', 'raythru', 'raylen', 'rayhid']]],
+  // (THE EDITOR'S SECTIONS, Sky Bench Oct 30, 15:36 - the user: "a section for the sun, a section for the clouds, and a section for the
+  // background ... the clouds should have their own submenus ... maybe the wind and the weather should be separate": pages, grouped in
+  // ED_GROUPS under the top tabs)
+  DISC: [['SIZE', ['sunrise', 'sunmid', 'sunset']], ['PLACE', ['sunh', 'sunpar']], ['HEAT AND SPARKLE', ['heat', 'heatr', 'flare']]],
+  'LIGHT ON CLOUDS': [['THE SUN\'S LIGHT', ['farsun', 'lightz', 'lightfix', 'glow']], ['HIGHLIGHT', ['hi']]],
+  'BACKLIGHT & BURN': [['AGAINST THE SUN', ['agk', 'backw', 'backf']], ['THE BURN', ['burnr']]],
+  RAYS: [['RAYS', ['rays', 'raythru', 'raylen', 'rayhid']]],
+  SHAPE: [['PUFFS AND BILLOWS', ['puff', 'edgeb', 'billow', 'bcap', 'jitter']], ['MASS', ['mass', 'base']]],
+  TYPES: [['CLOUD TYPES', ['tall', 'tallwx', 'mix', 'region']], ['WISPS', ['wispbump', 'wispbumpk', 'wisppuff']]],
+  'LIGHT & SHADOW': [['TONES', ['contrast', 'expo']], ['SHADOWS', ['shadow', 'deckSh', 'self', 'amb', 'crease', 'shade']], ['BODY LIGHT', ['bodyL', 'bshade', 'bshape', 'breach']]],
+  DECKS: [['HEIGHTS', ['alt', 'gap']], ['EACH DECK\'S SIZE (TIMES DECK 1)', ['sz1', 'sz2', 'sz3', 'sz4', 'sz5', 'sz6']], ['EACH DECK\'S HAZE', ['hz1', 'hz2', 'hz3', 'hz4', 'hz5', 'hz6']]],
+  'DECK DETAIL': [['DECK 1 (FRONT)', ['dk1', 'bl1', 'bs1', 'pf1', 'pk1', 'pl1']], ['DECK 2', ['dk2', 'bl2', 'bs2', 'pf2', 'pk2', 'pl2']], ['DECK 3', ['dk3', 'bl3', 'bs3', 'pf3', 'pk3', 'pl3']], ['DECK 4', ['dk4', 'bl4', 'bs4', 'pf4', 'pk4', 'pl4']], ['DECK 5', ['dk5', 'bl5', 'bs5', 'pf5', 'pk5', 'pl5']], ['DECK 6 (HORIZON)', ['dk6', 'bl6', 'bs6', 'pf6', 'pk6', 'pl6']]],
   COLOURS: null,
-  SHAPE: [['PUFFS AND BILLOWS', ['puff', 'billow', 'bcap', 'jitter']], ['MASS', ['mass', 'base']], ['DETAIL (LOD)', ['lodl']], ['DECK 1 (FRONT)', ['dk1', 'bl1', 'bs1', 'pf1', 'pk1', 'pl1']], ['DECK 2', ['dk2', 'bl2', 'bs2', 'pf2', 'pk2', 'pl2']], ['DECK 3', ['dk3', 'bl3', 'bs3', 'pf3', 'pk3', 'pl3']], ['DECK 4', ['dk4', 'bl4', 'bs4', 'pf4', 'pk4', 'pl4']], ['DECK 5', ['dk5', 'bl5', 'bs5', 'pf5', 'pk5', 'pl5']], ['DECK 6 (HORIZON)', ['dk6', 'bl6', 'bs6', 'pf6', 'pk6', 'pl6']]],
-  MOTION: [['FORMING', ['form', 'morph']], ['LIFE', ['evolve', 'heal']], ['BAKED SKY', ['bake', 'bakestep', 'bakemove']]],
+  RENDER: [['BAKED SKY', ['bake', 'bakestep', 'bakemove']], ['DETAIL (LOD)', ['lodl']]],
+  COVER: [['HOW MANY', ['gcover', 'gmin', 'bigk', 'wisps']], ['HAZE', ['ghaze']]],
+  SPREAD: [['BUSY AND OPEN STRETCHES', ['clump', 'clumpw', 'clumpd']]],
+  'ON THE CLOUDS': [['THE WIND\'S SHAPE', ['windpile']]],
+  MOTION: [['FORMING', ['form', 'morph']], ['LIFE', ['evolve', 'heal']]],
+  GRADIENT: [['BANDS', ['bands', 'skytex']], ['AIR', ['atmo']]],
+  CAMERA: [['EACH DECK\'S PARALLAX', ['par1', 'par2', 'par3', 'par4', 'par5', 'par6']], ['SCALE', ['cells', 'cellz', 'skyh', 'cloudk']]],
+  ATMOSPHERE: [['LAYERS (OPEN WORLD)', ['strat', 'upper', 'space']]],
   SMOKE: [['LIFETIMES', SM_SL.filter(r => /^sl/.test(r[0])).map(r => r[0])], ['NEW LOOK', SM_SL.filter(r => !/^s[fl]/.test(r[0])).map(r => r[0])], ['SHIP FIRE', SM_SL.filter(r => /^sf/.test(r[0])).map(r => r[0])]],
   // (user Oct 27: the lab's fire and water in the game's editor - the fire helicopter's water cannon and the game's fires)
   'FIRE & WATER': [['WATER CANNON (FIRE HELICOPTER)', ['wpress', 'wflow', 'wpow', 'steam']], ['FIRE', ['fflame']]],
@@ -21057,7 +21548,11 @@ const ED_TABS = {
 };
 // (user Oct 30) the top tabs that hold pages of their own, as CAVES has: each page is one of ED_TABS; a tab not listed
 // here is a top tab by itself (TERRAIN, CAVES, COLLISION, ZOOM LEVELS...)
-const ED_GROUPS = [['BACKGROUND', ['SKY', 'BG']], ['CLOUDS', ['DECKS', 'LIGHT', 'COLOURS', 'SHAPE', 'MOTION']], ['PARTICLES', ['SMOKE', 'FIRE & WATER']]];
+// (16:22 - the user: "reduce the name length of things that you think are too long in the editor". Names on screen, short: the group's
+// heading already names what they're about (DECK 3 > PUFF SIZE, MOUNTAINS > HAZE). The settings keep their keys; EXPORT shows the key too)
+const ED_SHORT = { sunrise: 'SUNRISE', sunmid: 'MIDDAY', sunset: 'SUNSET', agk: 'STRENGTH', backw: 'WIDTH', backf: 'FADE', tallwx: 'STORM TOWERS', wispbump: 'BUMPS', wispbumpk: 'BUMP SIZE', wisppuff: 'PUFFS', deckSh: 'DECK SHADOWS', alt: 'DECK 1', gap: 'GAP', gcover: 'AT SKY 30%', gmin: 'MIN SIZE', bigk: 'PAST 60%', ghaze: 'CLEAR HAZE', cellz: 'PIXEL ZOOM', strat: 'STRATOSPHERE', upper: 'UPPER AIR', space: 'SPACE', smtex: 'DETAIL', sfFoot: 'FOOT WIDTH', sfFootR: 'FOOT PUFFS', sfUp: 'FOOT HEIGHT', bgmh: 'HEIGHT', bgmw: 'WAVES', bgss: 'SIZE', bgsv: 'SPREAD', bgsc: 'COLOURS', bgsh: 'HEIGHT', bgsw: 'WAVES', bgrks: 'SPACING', dk1: 'SHOWN', bl1: 'BILLOWS', bs1: 'BILLOW SIZE', pf1: 'PUFFS', pk1: 'PUFF SIZE', pl1: 'PUFFS UNDER', par1: 'DECK 1', dk2: 'SHOWN', bl2: 'BILLOWS', bs2: 'BILLOW SIZE', pf2: 'PUFFS', pk2: 'PUFF SIZE', pl2: 'PUFFS UNDER', par2: 'DECK 2', dk3: 'SHOWN', bl3: 'BILLOWS', bs3: 'BILLOW SIZE', pf3: 'PUFFS', pk3: 'PUFF SIZE', pl3: 'PUFFS UNDER', par3: 'DECK 3', dk4: 'SHOWN', bl4: 'BILLOWS', bs4: 'BILLOW SIZE', pf4: 'PUFFS', pk4: 'PUFF SIZE', pl4: 'PUFFS UNDER', par4: 'DECK 4', dk5: 'SHOWN', bl5: 'BILLOWS', bs5: 'BILLOW SIZE', pf5: 'PUFFS', pk5: 'PUFF SIZE', pl5: 'PUFFS UNDER', par5: 'DECK 5', dk6: 'SHOWN', bl6: 'BILLOWS', bs6: 'BILLOW SIZE', pf6: 'PUFFS', pk6: 'PUFF SIZE', pl6: 'PUFFS UNDER', par6: 'DECK 6', bgfmy: 'UP', bgfmh: 'HAZE', bgfmg: 'GAP', bgffy: 'UP', bgffh: 'HAZE', bgffg: 'GAP', bgfny: 'UP', bgfnh: 'HAZE', bgfng: 'GAP', bgdmy: 'UP', bgdmh: 'HAZE', bgdmg: 'GAP', bgdcy: 'UP', bgdch: 'HAZE', bgdcg: 'GAP', bgddy: 'UP', bgddh: 'HAZE', bgddg: 'GAP', bgr1y: 'UP', bgr1h: 'HAZE', bgr1g: 'GAP', bgr2y: 'UP', bgr2h: 'HAZE', bgr2g: 'GAP', bgr3y: 'UP', bgr3h: 'HAZE', bgr3g: 'GAP', bgsby: 'UP', bgsbh: 'HAZE', bgsbg: 'GAP', bgrky: 'UP', bgrkh: 'HAZE', bgrkg: 'GAP' };
+const ED_GROUPS = [['SUN', ['DISC', 'LIGHT ON CLOUDS', 'BACKLIGHT & BURN', 'RAYS']], ['CLOUDS', ['SHAPE', 'TYPES', 'LIGHT & SHADOW', 'DECKS', 'DECK DETAIL', 'COLOURS', 'RENDER']],
+  ['WEATHER', ['COVER', 'SPREAD']], ['WIND', ['ON THE CLOUDS', 'MOTION']], ['BACKGROUND', ['GRADIENT', 'CAMERA', 'ATMOSPHERE', 'BG']], ['PARTICLES', ['SMOKE', 'FIRE & WATER']]];
 // buttons the game adds to a tab (TUNE.buttons): [tab, category, [[label, description, onclick(button)]...]]
 const ED_BTNS = [];
 // tabs that build their own pane (TUNE.pane): { tab: build(pane, el) } - the OPEN WORLD's caves, with tabs of their own
@@ -21119,7 +21614,7 @@ function loadColours(o) {
   if (o && Array.isArray(o.SKY) && o.SKY.length === SKY_KEYS.length) o.SKY.forEach((r, i) => { SKY_KEYS[i] = [SKY_KEYS[i][0], r[1].map(Number), r[2].map(Number)]; });
 }
 try { loadColours(JSON.parse(localStorage.getItem('bd_sky_colours') || 'null')); } catch (e) { }
-let edTab = 'SKY', edHost = null;
+let edTab = 'DISC', edHost = null;
 function edEl(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
 // (user Oct 30: "Anything that is on/off becomes a real toggle, not a slider") a switch standing in for a 0..1 range: it
 // keeps the range's interface (value, 'input' events), so the rows' code is the same for both
@@ -21158,6 +21653,9 @@ function edColours(box) {
     for (let t = 0; t < PAL[k].length; t++) r.appendChild(sw(() => PAL[k][t], c => { PAL[k][t] = c; }));
     add(r);
   }
+  { const r = edEl('div', 'crow', '<label>BURN</label>');   // (THE BURN's colour: day, golden hour, sunset, moon - 02-hour.js E.burn)
+    for (let t = 0; t < PAL.burn.length; t++) r.appendChild(sw(() => PAL.burn[t], c => { PAL.burn[t] = c; }));
+    r.title = 'Burn: day, golden, sunset, moon'; add(r); }
   add(edEl('h4', '', 'THE SKY\'S GRADIENT BY THE HOUR (top, horizon)'));
   SKY_KEYS.forEach((key, i) => {
     if (i === SKY_KEYS.length - 1) return;
@@ -21239,7 +21737,7 @@ function edBuild(host) {
     if (!cats) continue;
     for (const [name, keys] of cats) {
       const c = edEl('div', 'cat'); c.appendChild(edEl('h4', '', name));
-      for (const k of keys) { const r = rowOf[k]; if (!r) continue; c.appendChild(edRow(k, r[1], r[2], r[3], r[4], DESC[k] || smHint[k])); TUNE.tab[k] = t; }
+      for (const k of keys) { const r = rowOf[k]; if (!r) continue; c.appendChild(edRow(k, ED_SHORT[k] || r[1], r[2], r[3], r[4], DESC[k] || smHint[k])); TUNE.tab[k] = t; }
       pane.appendChild(c);
     }
     if (ED_PANES[t]) ED_PANES[t](pane, edEl);                                  // (a tab that builds its own pane: TUNE.pane)
@@ -21300,7 +21798,7 @@ TUNE.add = (tab, rows) => { ED_TABS[tab] = [[tab, rows.map(r => r[0])]]; for (co
 // on the GPU, as the picture; the smoke's SMOKE VIEW went with its JS path, Oct 28)
 const CLOUD_VIEWS = ['TONES', 'LOBES', 'BILLOWS', 'LIGHT', 'PUFFS'];
 { const vb = b => { view = (view + 1) % CLOUD_VIEWS.length; b.textContent = 'VIEW: ' + CLOUD_VIEWS[view]; b.classList.toggle('on', view > 0); }; vb.init = b => { b.textContent = 'VIEW: ' + CLOUD_VIEWS[view]; b.classList.toggle('on', view > 0); };
-  TUNE.buttons('LIGHT', 'VIEW', [['VIEW: TONES', 'Picture, or lobes, billows, light, puffs', vb]]); }
+  TUNE.buttons('LIGHT & SHADOW', 'VIEW', [['VIEW: TONES', 'Picture, or lobes, billows, light, puffs', vb]]); }
 NSKY_API.editor = { build: edBuild, TUNE, show(on) { if (TUNE.openBtn) TUNE.openBtn.hidden = !on; }, get open() { return TUNE.open; } };
 
 // ================================================================== the GAME EDITOR's BG tab: the ocean's sea bed
