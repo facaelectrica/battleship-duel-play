@@ -2857,8 +2857,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 362;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 16:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 363;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 16:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12329,8 +12329,9 @@ function defTable(name, list, o = {}) {
   TABLES[name] = { name, list, depth: o.depth ?? 4, make: o.make || (() => ({})), after: o.after || null, skip,
     net: o.net ?? true, netSkip: new Set(o.netSkip || []), perPlayer: o.perPlayer || 0, netIds: new Set(o.netIds || []) };
   // (the GAME EDITOR's VEHICLES tab asks, the table's owner writes - rules.md "Systems" 1): 'tableAdd' {t, o} puts a made row in;
-  // 'tableMove' {t, o, x, y} moves one (y null: it keeps its own - on the water, on its tower's pier); o.moveTo: the owner's own way
-  on('tableAdd', e => { if (e.t === name) { list().push(e.o); e.done = true; } }, name);
+  // 'tableMove' {t, o, x, y} moves one (y null: it keeps its own - on the water, on its tower's pier); o.moveTo, o.add: the owner's
+  // own way (a list made for the table - the tanks', the ones there are - puts a row in its own place)
+  on('tableAdd', e => { if (e.t === name) { if (o.add) o.add(e.o, e); else list().push(e.o); e.done = true; } }, name);
   on('tableMove', e => { if (e.t === name) { (o.moveTo || tblMoveTo)(e.o, e); e.done = true; } }, name);
 }
 function tblMoveTo(v, e) { v.x = e.x; if (e.y != null) v.y = e.y; if ('vx' in v) v.vx = 0; if ('vy' in v) v.vy = 0; }
@@ -12451,6 +12452,11 @@ defTable('crewBlood', () => blood, { net: false });
 // the captains (06-fleet-captains buildCaptains): both sides' in one table, each back in her side's list once loaded
 defTable('captains', () => captains[0].concat(captains[1]), { netIds: ['p'], make: d => ({ p: d.p || 0, face: 0, state: 'free', veh: null, t: 0, blood: 0, band: 0 }),
   after: arr => { captains[0] = arr.filter(c => (c.p || 0) === 0); captains[1] = arr.filter(c => c.p === 1); } });
+// the captain each side has picked to go next (captSel[p], an index in her side's list) and each side's hulls left (fleet[p]):
+// a row per side at its index. The pick is a plain number, so its row reads and writes it (worldRow, 36-zz-world.js)
+const CAPT_SEL_ROWS = [0, 1].map(p => worldRow({ i: [() => captSel[p], v => { if (typeof v === 'number') captSel[p] = v; }] }));
+defTable('captSel', () => CAPT_SEL_ROWS, { perPlayer: 2, make: () => CAPT_SEL_ROWS[0] });
+defTable('fleet', () => fleet, { perPlayer: 2, make: () => ({ ship: 0, sub: 0, plane: 0 }) });
 
 /* (engine stage 3) the tables of the systems whose own files are read before the tables' (36-zz-tables), registered here
    for them - each system still the one owner of its lists; their random sources are in their own files */
@@ -19810,13 +19816,59 @@ function smSort(n, Z, R, tkA0, ord, okey, cnt) {
   for (let b = 0; b < NB; b++) cnt[b + 1] += cnt[b];
   for (let i = 0; i < n; i++) ord[cnt[okey[i]]++] = i;
 }
+// MASS's smoothing: its reach in grid cells and the slope's scale at this zoom - phase2's, moved out (Oct 30, SMG's blur)
+function smMassR(sv, pxX) {
+  const G = 3, rb = clamp(Math.round(30 * sv / pxX / G), 1, 8), K = 2.4 * rb * Math.min(1, 30 * sv / pxX / G / rb);   // (zoomed out, the smoothing stays a cell or more: its slope eased to match the 30 units)
+  return [rb, K];
+}
+// the density smoothed (a box blur, twice: across, then down) into hb, in the box - phase2's, moved out word for word (Oct 30)
+// so the smoke-drawing worker runs it too (SMG's second step); hb and tb are read and written only inside the box
+function smBlur(dn, hb, tb, gw, gx0, gy0, gx1, gy1, rb) {
+  for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) hb[j * gw + i] = Math.min(1, dn[j * gw + i]);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let j = gy0; j <= gy1; j++) { let acc = 0, c = 0; const row = j * gw;
+      for (let i = gx0 - rb; i <= gx1; i++) { const a = i + rb, d = i - rb - 1; if (a <= gx1) { acc += hb[row + a]; c++; } if (d >= gx0) { acc -= hb[row + d]; c--; } if (i >= gx0) tb[row + i] = acc / (2 * rb + 1); } }
+    for (let i = gx0; i <= gx1; i++) { let acc = 0;
+      for (let j = gy0 - rb; j <= gy1; j++) { const a = j + rb, d = j - rb - 1; if (a <= gy1) acc += tb[a * gw + i]; if (d >= gy0) acc -= tb[d * gw + i]; if (j >= gy0) hb[j * gw + i] = acc / (2 * rb + 1); } }
+  }
+}
+// what belongs to what (phase2's, moved out word for word - Oct 30): the parts of the smoothed density that touch are one
+// body; each body lit from its box (smnLightBox), each ball given its body's light, or its own (smnLight) outside any body.
+// The light into L.LX/LY/LZ; back: the bodies' count, each ball's body, the bodies' boxes
+function smBodies(n, X, Y, R, hb, lab, stk, gw, gh, gx0, gy0, gx1, gy1, group, lazyL, L) {
+  const G = 3; let nb = 0;
+  for (let j = gy0; j <= gy1; j++) lab.fill(0, j * gw + gx0, j * gw + gx1 + 1);
+  for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) {
+    const k0 = j * gw + i; if (lab[k0] || hb[k0] < 0.1) continue;
+    nb++; let sp = 0; stk[sp++] = k0; lab[k0] = nb;
+    while (sp) { const k = stk[--sp], ii = k % gw, jj = (k - ii) / gw;
+      if (ii > gx0 && !lab[k - 1] && hb[k - 1] >= 0.1) { lab[k - 1] = nb; stk[sp++] = k - 1; }
+      if (ii < gx1 && !lab[k + 1] && hb[k + 1] >= 0.1) { lab[k + 1] = nb; stk[sp++] = k + 1; }
+      if (jj > gy0 && !lab[k - gw] && hb[k - gw] >= 0.1) { lab[k - gw] = nb; stk[sp++] = k - gw; }
+      if (jj < gy1 && !lab[k + gw] && hb[k + gw] >= 0.1) { lab[k + gw] = nb; stk[sp++] = k + gw; } }
+  }
+  let gOf = null, bb = null;
+  const { LX, LY, LZ } = L;
+  if (nb && group) {
+    bb = new Float32Array((nb + 1) * 4); for (let b = 1; b <= nb; b++) { bb[b * 4] = 1e9; bb[b * 4 + 1] = 1e9; bb[b * 4 + 2] = -1e9; bb[b * 4 + 3] = -1e9; }
+    gOf = new Int32Array(n);
+    for (let i = 0; i < n; i++) {
+      const gi = clamp(Math.floor(X[i] / G), 0, gw - 1), gj = clamp(Math.floor(Y[i] / G), 0, gh - 1), b = lab[gj * gw + gi]; gOf[i] = b;
+      if (!b) continue; const o = b * 4, r = R[i];
+      bb[o] = Math.min(bb[o], X[i] - r); bb[o + 1] = Math.min(bb[o + 1], Y[i] - r); bb[o + 2] = Math.max(bb[o + 2], X[i] + r); bb[o + 3] = Math.max(bb[o + 3], Y[i] + r);
+    }
+    const BL = []; for (let b = 1; b <= nb; b++) { const o = b * 4; BL[b] = bb[o + 2] > bb[o] ? smnLightBox((bb[o] + bb[o + 2]) / 2, (bb[o + 1] + bb[o + 3]) / 2, (bb[o + 2] - bb[o]) / 2, (bb[o + 3] - bb[o + 1]) / 2) : null; }
+    for (let i = 0; i < n; i++) { const Lb = BL[gOf[i]]; if (Lb) { LX[i] = Lb[0]; LY[i] = Lb[1]; LZ[i] = Lb[2]; } else if (lazyL) smnLight(X[i], Y[i], R[i], L, i); }
+  } else if (lazyL) for (let i = 0; i < n; i++) smnLight(X[i], Y[i], R[i], L, i);
+  return { nb, gOf, bb };
+}
 // THE SMOKE-DRAWING WORKER (Oct 30, the optimisation phase: user "no smoke or fire or debris limits" - in a heavy battle ~2,000
 // puffs are ~80,000 balls, and their density on the shadow's grid was ~10 ms of a painting frame). With the workers on
 // (SMW.on, ?worker=0 off), the front pass is painted over two frames like the back pass (SPLIT: the balls gathered on one,
 // the rest on the next - its smoke a frame later) and the balls go to this worker as they're gathered; it works out their
 // density (smDensity, from its text) by the next frame, when phase2 takes it. Late or failed: phase2 does it itself, the same
 // function and numbers. Off (tests: head.js, webdriver), the front pass is painted in one frame as before.
-const SMD = { ws: new Map(), fail: '', ids: 0, by: new Map(), sent: 0, got: 0, late: 0, gsent: 0, ggot: 0, glate: 0, chk: { runs: 0, balls: 0, bad: 0, box: 0, ord: 0, den: 0 } };   // (a worker for each view's pass: two players' halves at once)
+const SMD = { ws: new Map(), fail: '', ids: 0, by: new Map(), sent: 0, got: 0, late: 0, gsent: 0, ggot: 0, glate: 0, glate2: 0, gwaits: 0, dwaits: 0, chk: { runs: 0, balls: 0, bad: 0, box: 0, ord: 0, den: 0, hb: 0, body: 0, light: 0, spaints: 0, slot: 0, bd: 0, mir: 0, takes: 0 } };   // (a worker for each view's pass: two players' halves at once)
 const smdOn = () => SMW.on && !SMD.fail && typeof Worker !== 'undefined';
 function smdBody() {
   let dn = null, dd = null, Xa = null, Ya = null, Ra = null, Aa = null;
@@ -19835,7 +19887,7 @@ function smdBody() {
 function smdStart(id) {
   try {
     const w = new Worker(URL.createObjectURL(new Blob([smgText() + '\n' + smDensity.toString() + '\n' + smdBody.toString() + '\nsmdBody();'], { type: 'text/javascript' })));
-    w.onmessage = e => { const m = e.data, S_ = SMD.by.get(m.id); if (!S_) return; if (m.g) { if (m.seq === S_.gseq) { SMD.ggot++; S_.gres = m; } return; } if (m.seq !== S_.dseq) return; SMD.got++; S_.dres = m.out; };
+    w.onmessage = e => { const m = e.data, S_ = SMD.by.get(m.id); if (!S_) return; if (m.g) { if (m.seq !== S_.gseq) return; if (m.part === 2) { if (S_.gres) { delete m.part; Object.assign(S_.gres, m); S_.gres.done = 1; } return; } SMD.ggot++; S_.gres = m; if (!m.part) m.done = 1; return; } if (m.seq !== S_.dseq) return; SMD.got++; S_.dres = m.out; };
     w.onerror = e => { SMD.fail = String(e.message || 'error'); };
     SMD.ws.set(id, w);
   } catch (e) { SMD.fail = String(e.message || e); }
@@ -19848,7 +19900,7 @@ function smdSend(n, X, Y, R, A, cw, h, bx0, by0, bx1, by1, fast) {
   for (let i = 0; i < n; i++) { B[i * 4] = X[i]; B[i * 4 + 1] = Y[i]; B[i * 4 + 2] = R[i]; B[i * 4 + 3] = A[i]; }
   if (!SMN.did) { SMN.did = ++SMD.ids; SMD.by.set(SMN.did, SMN); }
   if (!SMD.ws.has(SMN.did)) { smdStart(SMN.did); if (SMD.fail) return; }
-  SMN.dseq = (SMN.dseq || 0) + 1; SMN.dres = null; SMN.dbox = [gw, gx0, gy0, gx1, gy1]; SMD.sent++;
+  SMN.dseq = (SMN.dseq || 0) + 1; SMN.dres = null; SMN.dbox = [gw, gx0, gy0, gx1, gy1]; SMN.dwt = 0; SMD.sent++;
   SMD.ws.get(SMN.did).postMessage({ id: SMN.did, seq: SMN.dseq, n, B, gw, gh, gx0, gy0, gx1, gy1, fast }, [B.buffer]);
 }
 // phase2: the worker's density for this paint, into dn's box (true), or false - not there (yet): phase2 works it out
@@ -19886,16 +19938,22 @@ function smgText() {
     `const trailLate = (() => { const clamp = ${O.clamp}, smoothstep = ${O.smoothstep}, TRAIL_HOLD = ${v(TRAIL_HOLD)}, TRAIL_LIFE = ${v(TRAIL_LIFE)}; return ${trailLate}; })();`,
     `const TRAIL_SHAPE = ${v(TRAIL_SHAPE)}, TRAIL_LIFE = ${v(TRAIL_LIFE)}, THIN_AGE = ${v(THIN_AGE)}, THIN_R = ${v(THIN_R)}, SMN_TILE_OFS = ${v(SMN_TILE_OFS)};`,
     `let SV = 1, CAMPX = 0, TOPPX = 0, SMN = null, smHc = 0; const PX = ${PX}, PY = ${PY}, wpx = ${wpx}, wpy = ${wpy};`,
-    `const FXV = {}, SMG = {}, P = {}, SMN_HC = new Map(), TGM = new Map(), smoke = [], trails = [], rocketTrail = [];`,
+    `const FXV = {}, SMG = {}, P = {}, SMSUN = {}, E = {}, SMN_HC = new Map(), TGM = new Map(), smoke = [], trails = [], rocketTrail = [];`,
     // (worked out on the main thread and sent: a puff's kind, the rocket's puff's size, the ground under a launch's foot;
-    // the light is laid in phase2 - the worker is used only when it is, SMN.lazyL)
-    `const famOf = s => s.fm, srcOf = s => '', rocketPuffR = p => p.rr, trailGround = x => TGM.get(x), smnLight = () => {};`,
-    smnCap, smnHash, smnAdd, smnPuff, smnLumpy, gatherSmokeNew, smBox, smSort, smgRun].join('\n');
+    // the light is laid after the gather (smgAfter's smBodies) - the worker is used only when it is, SMN.lazyL)
+    `const famOf = s => s.fm, srcOf = s => '', rocketPuffR = p => p.rr, trailGround = x => TGM.get(x);`,
+    // (the slots' table, SMG's last step: the pass's table and slots, kept here between jobs - SMS; the arrays the main thread
+    // gave back to fill again - SMS_RB)
+    `let SMS = null, SMS_RB = null; const smsH = ${smsH};`,
+    smnCap, smnLight, smnLightBox, smnHash, smnAdd, smnPuff, smnLumpy, gatherSmokeNew, smBox, smSort, smMassR, smBlur, smBodies, smgRun, smgAfter,
+    smsTab, smsFind, smsGrow, smsDel, smsRun, smsPack, smsFrom, smsLoad].join('\n');
 }
 // (in the worker) one gather: the puffs back from their numbers, the balls, their box, order and density
 function smgRun(m) {
   SV = m.sv; CAMPX = m.campx; TOPPX = m.toppx;
   FXV.SV = m.fsv; FXV.pxX = m.pxX; FXV.pxY = m.pxY; SMG.mx = m.mx; SMG.my = m.my; P.smbump = m.smbump; P.smtex = m.smtex;
+  if (m.sync) SMS = smsFrom(m.sync);   // (the main thread painted this pass itself last: its table, taken over)
+  if (m.rb) SMS_RB = m.rb;
   SMN = { cap: 0, n: 0, X: null, Y: null, R: null, Z: null, A: null, F: null, LX: null, LY: null, LZ: null, TK: null, TU: null, TV: null, SID: null, cw: m.cw, h: m.h, tkz: m.tkz, lazyL: true };
   const S = m.S, T = m.T, K = m.K;
   smoke.length = 0; trails.length = 0; rocketTrail.length = 0; TGM.clear();
@@ -19912,19 +19970,52 @@ function smgRun(m) {
   }
   for (let i = 0; i < m.nk; i++) { const o = i * 7; rocketTrail.push({ x: K[o], y: K[o + 1], rr: K[o + 2], age: K[o + 3], life: K[o + 4], h: K[o + 5], w: K[o + 6] }); }
   gatherSmokeNew(() => true);
-  const n = SMN.n, res = { g: 1, id: m.id, seq: m.seq, n }, tr = [];
-  if (!n) return [res, tr];
+  const n = SMN.n, res = { g: 1, id: m.id, seq: m.seq, n, part: 1 }, tr = [];
+  if (!n) { res.part = 0; return [res, tr]; }
   for (const k of ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV']) { const a = SMN[k].slice(0, n); res[k] = a; tr.push(a.buffer); }
-  const box = res.box = smBox(n, SMN.X, SMN.Y, SMN.R, m.cw, m.h);
-  if (m.fast) { const ord = res.ord = new Uint32Array(n); smSort(n, SMN.Z, SMN.R, m.tkA0, ord, new Uint16Array(n), new Uint32Array(1025)); tr.push(ord.buffer); }
+  // the light as it was on the main thread when the puffs were packed (the sun in this view, the hour's)
+  SMSUN.x = m.sun[0]; SMSUN.y = m.sun[1]; SMSUN.H = m.sun[2]; SMSUN.Z = m.sun[3]; SMSUN.s4 = m.sun[4]; E.behind = m.behind; E.overcast = m.overcast; P.lightz = m.lightz;
+  const [res2, tr2] = smgAfter(n, SMN, m, res, tr, (r, t) => self.postMessage(r, t));
+  // the slots (smsRun on the pass's table) and the balls' data packed for the GPU (smsPack), as gsmPaint does; with what the
+  // main thread needs to keep its copy of the table (smsMir): the numbers given slots, the slots given back, each slot's last paint
+  if (m.sl && SMS) {
+    const slotOf = new Int32Array(n), nw = new Uint8Array(n), lg = { nw: [], ev: [] };
+    smsRun(SMS, n, SMN.SID, slotOf, nw, lg);
+    const slots = Math.max(64, SMS.next), sRows = Math.ceil(slots / 1024), bRows = Math.max(1, Math.ceil(n * 4 / 1024));
+    const BD = SMS_RB && SMS_RB[0].length >= bRows * 4096 ? SMS_RB[0] : new Float32Array(Math.ceil(bRows * 1.25) * 4096);
+    const S2 = SMS_RB && SMS_RB[1].length >= sRows * 1024 ? SMS_RB[1] : new Float32Array(Math.ceil(sRows * 1.25) * 1024);
+    SMS_RB = null;
+    smsPack(n, { X: SMN.X, Y: SMN.Y, R: SMN.R, Z: SMN.Z, A: SMN.A, F: SMN.F, TK: SMN.TK, TU: SMN.TU, TV: SMN.TV, SID: SMN.SID, LX: res2.LX, LY: res2.LY, LZ: res2.LZ }, slotOf, nw, m.thin, BD, S2, sRows);
+    Object.assign(res2, { BD, S2, next: SMS.next, paint: SMS.paint, sseq: SMS.tab.seq, snw: Float64Array.from(lg.nw), sev: Int32Array.from(lg.ev), sp: SMS.sp.slice(0, SMS.next) });
+    tr2.push(BD.buffer, S2.buffer, res2.snw.buffer, res2.sev.buffer, res2.sp.buffer);
+  } else res2.od = null;
+  return [res2, tr2];
+}
+// (in the worker, and on the main thread for ?smdcheck=1) phase2's steps from the balls up to their light: the balls' box,
+// order (FAST), density, its smoothing (MASS) and the bodies with each ball's light - the same functions as phase2 runs
+// (in the worker, mid: the balls, their box, order and density go back as they're ready - the first message - and the rest
+// follows in a second (returned): no one message waits for all of it)
+function smgAfter(n, B, m, res, tr, mid) {
+  const box = res.box = smBox(n, B.X, B.Y, B.R, m.cw, m.h);
+  if (m.fast) { const ord = res.ord = new Uint32Array(n); smSort(n, B.Z, B.R, m.tkA0, ord, new Uint16Array(n), new Uint32Array(1025)); tr.push(ord.buffer); }
   // the density, on phase2's grid and box (smdSend's)
   const G = 3, gw = Math.ceil(m.cw / G) + 1, gh = Math.ceil(m.h / G) + 1, GN = gw * gh;
   const gx0 = Math.floor(box[0] / G), gy0 = Math.floor(box[1] / G), gx1 = Math.min(gw - 1, Math.ceil(box[2] / G) + 1), gy1 = Math.min(gh - 1, Math.ceil(box[3] / G) + 1);
   const dn = new Float32Array(GN), dd = new Float64Array(GN + 1);
-  smDensity(n, SMN.X, SMN.Y, SMN.R, SMN.A, gw, gh, gx0, gy0, gx1, gy1, m.fast, dn, dd);
-  const bw = gx1 - gx0 + 1, out = new Float32Array(Math.max(0, bw * (gy1 - gy0 + 1)));
-  for (let j = gy0; j <= gy1; j++) out.set(dn.subarray(j * gw + gx0, j * gw + gx1 + 1), (j - gy0) * bw);
-  res.dbox = [gw, gx0, gy0, gx1, gy1]; res.dout = out; tr.push(out.buffer);
+  smDensity(n, B.X, B.Y, B.R, B.A, gw, gh, gx0, gy0, gx1, gy1, m.fast, dn, dd);
+  const bw = gx1 - gx0 + 1, bh = gy1 - gy0 + 1, cut = a => { const o = new Float32Array(Math.max(0, bw * bh)); for (let j = gy0; j <= gy1; j++) o.set(a.subarray(j * gw + gx0, j * gw + gx1 + 1), (j - gy0) * bw); tr.push(o.buffer); return o; };
+  res.dbox = [gw, gx0, gy0, gx1, gy1]; res.dout = cut(dn);
+  let od = null;   // (the draw order as the GPU takes it, for the second message: the first gives ord away)
+  if (mid && m.sl) { od = new Float32Array(n); const ord = res.ord; for (let q = 0; q < n; q++) od[q] = ord ? ord[q] : q; }
+  if (mid) { mid(res, tr); res = { g: 1, id: res.id, seq: res.seq, n, part: 2 }; tr = []; if (od) { res.od = od; tr.push(od.buffer); } }
+  // the smoothing (smBlur, at the zoom the balls were gathered at) and the bodies and their light (smBodies)
+  const mr = res.mr = smMassR(m.fsv, m.pxX), hb = new Float32Array(GN), tb = new Float32Array(GN);
+  smBlur(dn, hb, tb, gw, gx0, gy0, gx1, gy1, mr[0]);
+  res.hbo = cut(hb);
+  const L = { LX: new Float32Array(n), LY: new Float32Array(n), LZ: new Float32Array(n) };
+  const bo = smBodies(n, B.X, B.Y, B.R, hb, new Int32Array(GN), new Int32Array(GN), gw, gh, gx0, gy0, gx1, gy1, true, true, L);
+  res.nb = bo.nb; res.LX = L.LX; res.LY = L.LY; res.LZ = L.LZ; tr.push(L.LX.buffer, L.LY.buffer, L.LZ.buffer);
+  if (m.chk) { res.gOf = bo.gOf; res.bb = bo.bb; }   // (?smdcheck=1: each ball's body and the bodies' boxes, to compare)
   return [res, tr];
 }
 // (main thread, the paint's first frame) what the gather reads, packed and posted; false: no worker - gather here
@@ -19961,19 +20052,42 @@ function smgSend(want, cw, h, fast, tkA0) {
       const o = nk++ * SMG_K; K[o] = p.x; K[o + 1] = p.y; K[o + 2] = rocketPuffR(p); K[o + 3] = p.age; K[o + 4] = p.life; K[o + 5] = p.h; K[o + 6] = p.w ? 1 : 0;
     }
   }
-  SMN.gseq = (SMN.gseq || 0) + 1; SMN.gres = null; SMN.gwait = true; SMN.chk = null; SMD.gsent++;
-  // (?smdcheck=1: the main thread's own gather of the same puffs now, into a scratch store, for smgTake to compare)
-  if (SMD_CHECK) { const keep = SMN, C = makeSMN(); C.cw = keep.cw; C.h = keep.h; C.tkz = keep.tkz; C.lazyL = keep.lazyL; C.fast = fast; C.tkA0 = tkA0; SMN = C; try { gatherSmokeNew(want); } finally { SMN = keep; } SMN.chk = C; }
-  SMD.ws.get(SMN.did).postMessage({ g: 1, id: SMN.did, seq: SMN.gseq, S, ns, T, nt, K, nk, sv: SV, campx: CAMPX, toppx: TOPPX, fsv: FXV.SV, pxX: FXV.pxX, pxY: FXV.pxY, mx: SMG.mx, my: SMG.my, cw, h, tkz: SMN.tkz, smbump: P.smbump, smtex: P.smtex, fast, tkA0 }, [S.buffer, T.buffer, K.buffer]);
+  SMN.gseq = (SMN.gseq || 0) + 1; SMN.gres = null; SMN.gwait = true; SMN.gwt = 0; SMN.chk = null; SMD.gsent++;
+  // (the light's numbers too - the sun in this view, the hour's: the bodies and their light are worked out there, as here now)
+  const m = { g: 1, id: SMN.did, seq: SMN.gseq, S, ns, T, nt, K, nk, sv: SV, campx: CAMPX, toppx: TOPPX, fsv: FXV.SV, pxX: FXV.pxX, pxY: FXV.pxY, mx: SMG.mx, my: SMG.my, cw, h, tkz: SMN.tkz, smbump: P.smbump, smtex: P.smtex, fast, tkA0,
+    sun: [SMSUN.x, SMSUN.y, SMSUN.H, SMSUN.Z, SMSUN.s4], behind: E.behind, overcast: E.overcast, lightz: P.lightz, chk: SMD_CHECK, sl: 1, thin: (P.smthin ?? 1) > 0 };
+  // (the slots: the worker's table. Painted here last (or never yet), this thread's table goes over with the job (smsSnap), a
+  // copy kept here (G_.mir); the arrays of the last paint go back to be filled again)
+  const G_ = gsmState(SMN), tl = [S.buffer, T.buffer, K.buffer];
+  if (G_.own !== 'w') { m.sync = smsSnap(G_); G_.mir = smsCopy(m.sync); G_.own = 'w'; tl.push(m.sync.key.buffer, m.sync.ins.buffer, m.sync.p.buffer, m.sync.use.buffer, m.sync.free.buffer); }
+  if (G_.rb) { m.rb = G_.rb; tl.push(G_.rb[0].buffer, G_.rb[1].buffer); G_.rb = null; }
+  // (?smdcheck=1: the main thread's own gather of the same puffs now, into a scratch store, and its steps after (smgAfter, with
+  // the light as it is here now), for smgTake to compare)
+  if (SMD_CHECK) {
+    const keep = SMN, C = makeSMN(); C.cw = keep.cw; C.h = keep.h; C.tkz = keep.tkz; C.lazyL = keep.lazyL; SMN = C; try { gatherSmokeNew(want); } finally { SMN = keep; }
+    C.res = {}; if (C.n) smgAfter(C.n, C, m, C.res, []); SMN.chk = C;
+  }
+  SMD.ws.get(SMN.did).postMessage(m, tl);
   return true;
 }
 // (phase2's frame) the worker's balls for this paint, or null - not there (yet): the main thread gathers
+// (Oct 30, V362's lesson - on the user's GPU a late worker made the main thread redo the whole paint, 43 fps against 54: late,
+// the last picture stays up and the worker's answer is taken on a later frame; only SMG_WAIT frames behind (or failed) does the
+// main thread do it - with the worker's balls if they came (its first message), else from the gather on. 'wait': not yet)
+const SMG_WAIT = 4;
 function smgTake(S_) {
   if (!S_.gwait) return null;
+  const W0 = S_.gres;
+  if (!(W0 && W0.done) && smdOn() && ++S_.gwt < (P.smwait ?? SMG_WAIT)) { SMD.gwaits++; return 'wait'; }
   S_.gwait = false;
   const W = S_.gres, C = S_.chk; S_.gres = null; S_.chk = null;
   if (!W) { SMD.glate++; return null; }
+  if (!W.done) SMD.glate2++;   // (the balls came, the rest not: worked out here)
   if (C) smgCompare(C, W);
+  // the worker's slots into this thread's copy of its table - or, not there (no table there yet), the table taken back here
+  // (?smdcheck=1: now and then the worker's slots are left and worked out here from the copy instead, to check the copy)
+  if (W.BD && SMD_CHECK && SMD.chk.runs % 8 === 7) { W.BD = null; W.od = null; SMD.chk.takes++; }
+  if (W.BD) SMD.chk.mir += smsMir(gsmState(S_).mir, W);
   return W;
 }
 // the balls into the pass's store, as gathered here
@@ -20000,14 +20114,17 @@ function smgCompare(C, W) {
   }
   c.bad += bad;
   if (!C.n || C.n !== W.n) return;
-  const box = smBox(C.n, C.X, C.Y, C.R, C.cw, C.h);
-  if (box.some((v, i) => v !== W.box[i])) { c.box++; return; }
-  if (C.fast) { const ord = new Uint32Array(C.n); smSort(C.n, C.Z, C.R, C.tkA0, ord, new Uint16Array(C.n), new Uint32Array(1025)); for (let i = 0; i < C.n; i++) if (ord[i] !== W.ord[i]) { c.ord++; break; } }
-  const G = 3, gw = Math.ceil(C.cw / G) + 1, gh = Math.ceil(C.h / G) + 1, GN = gw * gh, [, gx0, gy0, gx1, gy1] = W.dbox;
-  const dn = new Float32Array(GN), dd = new Float64Array(GN + 1), bw = gx1 - gx0 + 1, ub = new Uint32Array(W.dout.buffer);
-  smDensity(C.n, C.X, C.Y, C.R, C.A, gw, gh, gx0, gy0, gx1, gy1, C.fast, dn, dd);
-  const ua = new Uint32Array(dn.buffer);
-  for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) if (ua[j * gw + i] !== ub[(j - gy0) * bw + i - gx0]) { c.den++; return; }
+  // (the steps after the gather, as the main thread ran them when it packed the puffs (smgSend): each that differs anywhere, to
+  // the bit, counted once a paint under its name - box, ord(er), den(sity), hb (the smoothing), body (the bodies' count, each
+  // ball's body, their boxes), light (LX, LY, LZ))
+  const Cr = C.res, same = (a, b) => { if (!a || !b) return a === b; if (a.length !== b.length) return false; const ua = new Uint32Array(a.buffer, a.byteOffset, a.length), ub = new Uint32Array(b.buffer, b.byteOffset, b.length); for (let i = 0; i < ua.length; i++) if (ua[i] !== ub[i]) return false; return true; };
+  if (Cr.box.some((v, i) => v !== W.box[i])) { c.box++; return; }
+  if (!same(Cr.ord, W.ord)) c.ord++;
+  if (Cr.dbox.some((v, i) => v !== W.dbox[i]) || !same(Cr.dout, W.dout)) c.den++;
+  if (!W.done) return;   // (the second message didn't come in time: its part worked out here, nothing of the worker's to compare)
+  if (!same(Cr.hbo, W.hbo) || Cr.mr[0] !== W.mr[0] || Cr.mr[1] !== W.mr[1]) c.hb = (c.hb || 0) + 1;
+  if (Cr.nb !== W.nb || !same(Cr.gOf, W.gOf) || !same(Cr.bb, W.bb)) c.body = (c.body || 0) + 1;
+  if (!same(Cr.LX, W.LX) || !same(Cr.LY, W.LY) || !same(Cr.LZ, W.LZ)) c.light = (c.light || 0) + 1;
 }
 function drawSmokeNew(pass = 'front', want = () => true) {
   SMN = SMNPV[VI][pass];
@@ -20041,7 +20158,9 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   const fillWrow = wrow => { for (let x = 0; x < cw; x++) wrow[x] = Math.floor(PY(trailGround(((x - SMG.mx + 0.5) * FXV.pxX + CAMPX) / FXV.SV)) / FXV.pxY + SMG.my); };   // (the game: the water, or the land's top)
   // the rest of the paint, from the balls: gathered here (W null), or by the worker (SMG: W its balls, box, order, density)
   const rest = (W, t0) => {
-  if (W) smgPut(W); else gatherSmokeNew(want);
+  // (WF: the worker packed the balls for the GPU too - nothing of theirs is needed here but their count)
+  const WF = W && W.BD ? W : null;
+  if (WF) SMN.n = W.n; else if (W) smgPut(W); else gatherSmokeNew(want);
   const tgL = performance.now() - t0; SMN.tg = W ? SMN.tgp + tgL : tgL;
   const n = SMN.n; SMN.balls = n;
   if (!n) { SMN.last = null; SMN.ms = SMN.ms * 0.9 + (performance.now() - t0) * 0.1; return; }
@@ -20051,7 +20170,7 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   const [bx0, by0, bx1, by1] = W ? W.box : smBox(n, X, Y, R, cw, h);
   // ---- 1. the balls, nearest surface wins (dissolving in the Bayer pattern as they fade)
   let ord = null;
-  if (fast) {
+  if (fast && !WF) {
     if (!SMN.ord || SMN.ord.length < n) { SMN.ord = new Uint32Array(SMN.cap); SMN.okey = new Uint16Array(SMN.cap); }
     ord = SMN.ord;
     if (W) ord.set(W.ord); else smSort(n, Z, R, tkA0, ord, SMN.okey, SMN.ocnt || (SMN.ocnt = new Uint32Array(1024 + 1)));
@@ -20061,6 +20180,9 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   else if (split && (!forced || wk) && smdOn()) smdSend(n, X, Y, R, A, cw, h, bx0, by0, bx1, by1, fast); else SMN.dbox = null;   // (SMD: the density by the next frame)
   const t1 = performance.now();
   const phase2 = () => {
+  // (SMD: the worker's density not here yet - the last picture stays up a frame more, up to SMG_WAIT frames, rather than the
+  // density worked out here)
+  if (SMN.dbox && !SMN.dres && smdOn() && ++SMN.dwt < (P.smwait ?? SMG_WAIT)) { SMD.dwaits++; SMN.pend = phase2; blitLast(); return; }
   const t1p = performance.now();
   // ---- 2. shadow from the smoke: the balls' density on a coarse grid, marched toward the sun
   const G = 3, gw = Math.ceil(cw / G) + 1, gh = Math.ceil(h / G) + 1, GN = gw * gh;
@@ -20077,17 +20199,14 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   // and the billows only shade it within that
   if (!SMN.hb || SMN.hb.length < GN) { SMN.hb = new Float32Array(GN); SMN.tb = new Float32Array(GN); SMN.mx = new Float32Array(GN); SMN.my = new Float32Array(GN); SMN.mz = new Float32Array(GN); }
   const mass = P.smmass ?? 0.62, hb = SMN.hb, tb = SMN.tb, MX = SMN.mx, MY = SMN.my, MZ = SMN.mz;
+  // (SMG: the worker smoothed it and found the bodies and their light, at the zoom and sun of the balls' frame - WB)
+  const WB = W && W.hbo ? W : null;
   let massK = 0;
   {
-    const rb = clamp(Math.round(30 * FXV.SV / FXV.pxX / G), 1, 8), K = 2.4 * rb * Math.min(1, 30 * FXV.SV / FXV.pxX / G / rb);   // (zoomed out, the smoothing stays a cell or more: its slope eased to match the 30 units)
+    const [rb, K] = WB ? WB.mr : smMassR(FXV.SV, FXV.pxX);
     massK = K;
-    for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) hb[j * gw + i] = Math.min(1, dn[j * gw + i]);
-    for (let pass = 0; pass < 2; pass++) {                                   // (a box blur, twice: across, then down)
-      for (let j = gy0; j <= gy1; j++) { let acc = 0, c = 0; const row = j * gw;
-        for (let i = gx0 - rb; i <= gx1; i++) { const a = i + rb, d = i - rb - 1; if (a <= gx1) { acc += hb[row + a]; c++; } if (d >= gx0) { acc -= hb[row + d]; c--; } if (i >= gx0) tb[row + i] = acc / (2 * rb + 1); } }
-      for (let i = gx0; i <= gx1; i++) { let acc = 0;
-        for (let j = gy0 - rb; j <= gy1; j++) { const a = j + rb, d = j - rb - 1; if (a <= gy1) acc += tb[a * gw + i]; if (d >= gy0) acc -= tb[d * gw + i]; if (j >= gy0) hb[j * gw + i] = acc / (2 * rb + 1); } }
-    }
+    if (WB) { const bw = gx1 - gx0 + 1; for (let j = gy0; j <= gy1; j++) hb.set(WB.hbo.subarray((j - gy0) * bw, (j - gy0 + 1) * bw), j * gw + gx0); }
+    else smBlur(dn, hb, tb, gw, gx0, gy0, gx1, gy1, rb);
     // (engine stage 8, Oct 30: the normals are the GPU's - 40-gl.js SM_MASS_FS, from hb; ?smgpu=0 works them out here as before)
     if (mass > 0 && !SM_GPU_MASS) for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) {
       const k = j * gw + i, l = i > gx0 ? hb[k - 1] : hb[k], r = i < gx1 ? hb[k + 1] : hb[k], u = j > gy0 ? hb[k - gw] : hb[k], d = j < gy1 ? hb[k + gw] : hb[k];
@@ -20099,30 +20218,11 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   // ---- what belongs to what: the parts of the smoothed density that touch are one body (puffs within about a puff's
   // size of each other). Each body is lit as the clouds light a cloud, from its whole outline: the sun beside it lights
   // that side, the sun within its outline is behind all of it (07-light-shadow.js lightDir)
-  if (!SMN.lab || SMN.lab.length < GN) { SMN.lab = new Int32Array(GN); SMN.stk = new Int32Array(GN); }
-  const lab = SMN.lab, stk = SMN.stk; let nb = 0;
-  for (let j = gy0; j <= gy1; j++) lab.fill(0, j * gw + gx0, j * gw + gx1 + 1);
-  for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) {
-    const k0 = j * gw + i; if (lab[k0] || hb[k0] < 0.1) continue;
-    nb++; let sp = 0; stk[sp++] = k0; lab[k0] = nb;
-    while (sp) { const k = stk[--sp], ii = k % gw, jj = (k - ii) / gw;
-      if (ii > gx0 && !lab[k - 1] && hb[k - 1] >= 0.1) { lab[k - 1] = nb; stk[sp++] = k - 1; }
-      if (ii < gx1 && !lab[k + 1] && hb[k + 1] >= 0.1) { lab[k + 1] = nb; stk[sp++] = k + 1; }
-      if (jj > gy0 && !lab[k - gw] && hb[k - gw] >= 0.1) { lab[k - gw] = nb; stk[sp++] = k - gw; }
-      if (jj < gy1 && !lab[k + gw] && hb[k + gw] >= 0.1) { lab[k + gw] = nb; stk[sp++] = k + gw; } }
+  if (WB) { if (!WF) { LX.set(WB.LX); LY.set(WB.LY); LZ.set(WB.LZ); } SMN.bodies = WB.nb; }
+  else {
+    if (!SMN.lab || SMN.lab.length < GN) { SMN.lab = new Int32Array(GN); SMN.stk = new Int32Array(GN); }
+    SMN.bodies = smBodies(n, X, Y, R, hb, SMN.lab, SMN.stk, gw, gh, gx0, gy0, gx1, gy1, (P.smgroup ?? 1) > 0, SMN.lazyL, SMN).nb;
   }
-  SMN.bodies = nb; SMN.gOf = null;
-  if (nb && (P.smgroup ?? 1) > 0) {
-    const bb = new Float32Array((nb + 1) * 4); for (let b = 1; b <= nb; b++) { bb[b * 4] = 1e9; bb[b * 4 + 1] = 1e9; bb[b * 4 + 2] = -1e9; bb[b * 4 + 3] = -1e9; }
-    const gOf = SMN.gOf = new Int32Array(n);
-    for (let i = 0; i < n; i++) {
-      const gi = clamp(Math.floor(X[i] / G), 0, gw - 1), gj = clamp(Math.floor(Y[i] / G), 0, gh - 1), b = lab[gj * gw + gi]; gOf[i] = b;
-      if (!b) continue; const o = b * 4, r = R[i];
-      bb[o] = Math.min(bb[o], X[i] - r); bb[o + 1] = Math.min(bb[o + 1], Y[i] - r); bb[o + 2] = Math.max(bb[o + 2], X[i] + r); bb[o + 3] = Math.max(bb[o + 3], Y[i] + r);
-    }
-    const BL = []; for (let b = 1; b <= nb; b++) { const o = b * 4; BL[b] = bb[o + 2] > bb[o] ? smnLightBox((bb[o] + bb[o + 2]) / 2, (bb[o + 1] + bb[o + 3]) / 2, (bb[o + 2] - bb[o]) / 2, (bb[o + 3] - bb[o + 1]) / 2) : null; }
-    for (let i = 0; i < n; i++) { const L = BL[gOf[i]]; if (L) { LX[i] = L[0]; LY[i] = L[1]; LZ[i] = L[2]; } else if (SMN.lazyL) smnLight(X[i], Y[i], R[i], SMN, i); }
-  } else if (SMN.lazyL) for (let i = 0; i < n; i++) smnLight(X[i], Y[i], R[i], SMN, i);
   // the light across the smoke as a whole (its box's middle), for the march
   const tS3 = performance.now();
   const tmp = { LX: [0], LY: [0], LZ: [0] }; smnLight((bx0 + bx1) / 2, (by0 + by1) / 2, Math.max(bx1 - bx0, by1 - by0) / 2, tmp, 0);
@@ -20130,7 +20230,7 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   const stepW = G * FXV.pxX / FXV.SV, D0 = 45, kS = stepW / D0, behind = Math.max(0, -lzS), ownF = 30 / stepW, nMarch = clamp(Math.round(420 / stepW), 2, 48), ss = SMN.ss;   // (in world units: a puff's own depth 30, the march 420, at any zoom)
   const tS4 = performance.now();
   buildSmokeLUT(); const FLg = fireLights(), t5 = performance.now();
-  gsmPaint(SMN, { n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, MX, MY, MZ, hb, dn, mass, massK, tkA: tkA0, FL: FLg, nF: FLg.length / 4, mg: [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] });
+  gsmPaint(SMN, { wk: WF, B: W, n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, MX, MY, MZ, hb, dn, mass, massK, tkA: tkA0, FL: FLg, nF: FLg.length / 4, mg: [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] });
   smShow(SMN); SMN.last = [bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1];
   { const t6 = performance.now(), ad = (k, v) => { FTV[k] = (FTV[k] || 0) + v; }; ad('smDen', tS1 - t1p); ad('smBlur', tS2 - tS1); ad('smBody', tS3 - tS2); ad('smMarch', tS4 - tS3); ad('smFire', t5 - tS4); ad('smGpu', t6 - t5); }   // (the parts of smB / smT, for the perf work - Oct 29)
   FTV.smG = (FTV.smG || 0) + SMN.tg; FTV.smS = (FTV.smS || 0) + (t1 - t0 - tgL); FTV.smB = (FTV.smB || 0) + (t5 - t1p); FTV.smT = (FTV.smT || 0) + (performance.now() - t5);
@@ -20143,7 +20243,8 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   // and paints - or, late, gathers here then and goes on as before
   if (wk && SMN.lazyL && (P.smgw ?? 1) > 0 && smgSend(want, cw, h, fast, tkA0)) {
     fillWrow(SMN.wrow); SMN.tgp = performance.now() - t0;
-    SMN.pend = () => { const W = smgTake(SMN); if (W) { rest(W, performance.now()); return; } SMN.n = 0; SMN.cam = [CAMPX, TOPPX]; rest(null, performance.now()); };
+    const take = () => { const W = smgTake(SMN); if (W === 'wait') { SMN.pend = take; blitLast(); return; } if (W) { rest(W, performance.now()); return; } SMN.n = 0; SMN.cam = [CAMPX, TOPPX]; rest(null, performance.now()); };
+    SMN.pend = take;
     blitLast(); return;
   }
   rest(null, t0);
@@ -20186,48 +20287,127 @@ function smsDel(T, key) {
     j = (j + 1) & m;
   }
 }
+// a paint's slots (gsmPaint's, moved out - Oct 30, so the smoke-drawing worker runs it too): St the pass's table and slots
+// ({ tab, free, next, paint }); each ball's slot into slotOf, whether its slot is new into nw. lg (the worker's): the numbers
+// given a slot ([slot, number, first-seen] each) and the slots given back, in order, for the main thread's copy (smsMir)
+function smsRun(St, n, SID, slotOf, nw, lg) {
+  St.paint++;
+  const T_ = St.tab || (St.tab = smsTab(1 << 16));
+  if ((T_.n + n) * 2 > T_.cap) smsGrow(T_, (T_.n + n) * 2);
+  const ent = St.ent && St.ent.length >= n ? St.ent : (St.ent = new Int32Array(Math.ceil(n * 1.5)));
+  const sp = St.sp; if (sp && sp.length < St.next + n) { const o = sp; St.sp = new Int32Array(Math.ceil((St.next + n) * 1.5)); St.sp.set(o); }
+  for (let i = 0; i < n; i++) {
+    const sid = SID[i]; let k = smsFind(T_, sid);
+    if (k < 0) { k = ~k; T_.key[k] = sid; T_.use[k] = 1; T_.ins[k] = T_.seq++; T_.n++; T_.slot[k] = St.free.length ? St.free.pop() : St.next++; T_.f[k] = 1; if (lg) lg.nw.push(T_.slot[k], sid, T_.ins[k]); } else T_.f[k] = 0;
+    T_.p[k] = St.paint; slotOf[i] = T_.slot[k]; ent[i] = k;
+    if (St.sp) St.sp[T_.slot[k]] = St.paint;
+  }
+  // (whether a slot is new: read once every ball has been through - two balls can share a number - and before any slot is
+  // given back: giving back moves entries in the table, and an entry's old place could hold another's flag, where the Map
+  // before it (V357) kept each flag with its own entry)
+  for (let i = 0; i < n; i++) nw[i] = T_.f[ent[i]];
+  if ((St.paint & 15) === 0) {
+    const old = [];
+    for (let k = 0; k < T_.cap; k++) if (T_.use[k] && St.paint - T_.p[k] > 64) old.push(k);
+    old.sort((x, y) => T_.ins[x] - T_.ins[y]);
+    const keys = old.map(k => T_.key[k]);
+    for (let q = 0; q < old.length; q++) { St.free.push(T_.slot[old[q]]); if (lg) lg.ev.push(T_.slot[old[q]]); }
+    for (const key of keys) smsDel(T_, key);
+  }
+}
+// the balls' data for the GPU (4 texels a ball) and each slot's ball (S2: -1 none, + 1048576 a new one) - gsmPaint's, moved out
+function smsPack(n, B, slotOf, nw, thinOn, BD, S2, sRows) {
+  const { X, Y, R, Z, A, F, TK, TU, TV, SID, LX, LY, LZ } = B;
+  for (let i = 0; i < n; i++) {
+    const o = i * 16, thin = thinOn && TK[i] === 0 && F[i] >= 3;
+    BD[o] = X[i]; BD[o + 1] = Y[i]; BD[o + 2] = R[i]; BD[o + 3] = Z[i];
+    BD[o + 4] = A[i]; BD[o + 5] = F[i]; BD[o + 6] = TK[i]; BD[o + 7] = slotOf[i];
+    BD[o + 8] = LX[i]; BD[o + 9] = LY[i]; BD[o + 10] = LZ[i]; BD[o + 11] = thin ? 1 : 0;
+    BD[o + 12] = TU[i]; BD[o + 13] = TV[i]; BD[o + 14] = (SID[i] % 65521) / 65521; BD[o + 15] = 0;   // (14: its own number, for its dissolve pattern - SM_COMP_FS)
+  }
+  S2.fill(-1, 0, sRows * 1024);
+  for (let i = 0; i < n; i++) S2[slotOf[i]] = nw[i] ? i + 1048576 : i;
+}
+// (in the worker) the table and slots again from the main thread's (smsSnap): after the main thread painted a pass itself
+function smsFrom(s) {
+  const St = { tab: smsTab(1 << 16), free: Array.from(s.free), next: s.next, paint: s.paint, ent: null, sp: new Int32Array(Math.max(1024, s.next * 2)) };
+  St.sp.set(s.p.subarray(0, s.next));
+  smsLoad(St.tab, s);
+  return St;
+}
+// the table filled from a copy by slot (its number, first-seen, last paint seen, in use) - where each entry sits in the table
+// doesn't change anything given out (the slots, the new flags, the order slots are given back in: by first-seen)
+function smsLoad(T, s) {
+  let c = 0; for (let q = 0; q < s.next; q++) c += s.use[q];
+  if (c * 2 > T.cap) smsGrow(T, c * 2);
+  for (let q = 0; q < s.next; q++) if (s.use[q]) { const j = ~smsFind(T, s.key[q]); T.key[j] = s.key[q]; T.use[j] = 1; T.slot[j] = q; T.p[j] = s.p[q]; T.f[j] = 0; T.ins[j] = s.ins[q]; T.n++; }
+  T.seq = s.seq;
+}
+// (main thread) the pass's table by slot, to send (the worker takes it over: smsFrom) and to keep (G_.mir)
+function smsSnap(G_) {
+  const T = G_.tab || (G_.tab = smsTab(1 << 16)), N = G_.next;
+  const s = { key: new Float64Array(N), ins: new Float64Array(N), p: new Int32Array(N), use: new Uint8Array(N), free: Int32Array.from(G_.free), next: N, seq: T.seq, paint: G_.paint };
+  for (let k = 0; k < T.cap; k++) if (T.use[k]) { const q = T.slot[k]; s.key[q] = T.key[k]; s.ins[q] = T.ins[k]; s.p[q] = T.p[k]; s.use[q] = 1; }
+  return s;
+}
+const smsCopy = s => ({ key: s.key.slice(), ins: s.ins.slice(), p: s.p.slice(), use: s.use.slice(), free: Array.from(s.free), next: s.next, seq: s.seq, paint: s.paint });
+// (main thread) the worker's paint into the copy: the numbers given slots (each takes the last slot given back, or the next, as
+// smsRun gives them), the slots given back, the last paint each slot was seen (the worker's own list, sent whole)
+function smsMir(M, W) {
+  const L = W.snw, need = W.next;
+  if (M.key.length < need) { const g = Math.ceil(need * 1.5), gr = (a, C) => { const b = new C(g); b.set(a); return b; }; M.key = gr(M.key, Float64Array); M.ins = gr(M.ins, Float64Array); M.use = gr(M.use, Uint8Array); }
+  let bad = 0;
+  for (let q = 0; q < L.length; q += 3) {
+    const s = L[q], at = M.free.length ? M.free.pop() : M.next++;
+    if (at !== s) bad++;
+    M.key[s] = L[q + 1]; M.ins[s] = L[q + 2]; M.use[s] = 1; M.seq++;
+  }
+  for (const s of W.sev) { M.use[s] = 0; M.free.push(s); }
+  if (M.next !== W.next || M.seq !== W.sseq) bad++;
+  M.p = W.sp; M.paint = W.paint;
+  return bad;
+}
+// (main thread) the pass's slots back from the copy, to paint here (the worker late, or off)
+function smsTake(G_) {
+  const M = G_.mir; G_.own = 'm';
+  if (!M) return;
+  G_.tab = smsTab(1 << 16); smsLoad(G_.tab, M);
+  G_.free = M.free.slice(); G_.next = M.next; G_.paint = M.paint;
+}
+const gsmState = S_ => S_.gsm || (S_.gsm = { slot: new Map(), free: [], next: 0, paint: 0, s2b: null, cur: 0, own: 'm' });
 function gsmPaint(S_, a) {
   const gl = GLR.gl, { n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, MX, MY, MZ, hb, dn, mass, tkA, FL, nF, mg } = a;
   glFlush();
-  const G_ = S_.gsm || (S_.gsm = { slot: new Map(), free: [], next: 0, paint: 0, s2b: null, cur: 0 });
-  G_.paint++;
-  const thinOn = (P.smthin ?? 1) > 0;
+  const G_ = gsmState(S_);
+  const thinOn = (P.smthin ?? 1) > 0, WK = a.wk;
   // the puffs' slots in the memory: a ball's own number (SID) keeps its slot from paint to paint; one not seen for 64 paints
   // gives it back (as the JS memory forgot a puff)
   // (each ball's slot entry kept in arrays held between paints: one look-up a ball, not two, and nothing made anew each paint -
   // Oct 29, the frame-rate work. Whether a slot is new is read once every ball has been through, as the second look-up did:
   // two balls can share a number)
-  if (!G_.so || G_.so.length < n) { G_.so = new Float32Array(Math.ceil(n * 1.5)); G_.se = new Int32Array(G_.so.length); }
-  const slotOf = G_.so, entOf = G_.se;
   // (Oct 30, the optimisation phase: the Map of ball numbers - ~80,000 look-ups of a double a paint in a heavy battle - is now
   // a table of its own (smsTab: open addressing on the numbers, entries kept in place through the paint). The same slots, in
   // the same order: a new number takes a freed slot (the last freed first) or the next; every 16th paint the ones not seen
   // for 64 paints give theirs back in the order they were first seen, as the Map gave them)
-  const T_ = G_.tab || (G_.tab = smsTab(1 << 16));
-  if ((T_.n + n) * 2 > T_.cap) smsGrow(T_, (T_.n + n) * 2);
-  for (let i = 0; i < n; i++) {
-    const sid = S_.SID[i]; let k = smsFind(T_, sid);
-    if (k < 0) { k = ~k; T_.key[k] = sid; T_.use[k] = 1; T_.ins[k] = T_.seq++; T_.n++; T_.slot[k] = G_.free.length ? G_.free.pop() : G_.next++; T_.f[k] = 1; } else T_.f[k] = 0;
-    T_.p[k] = G_.paint; slotOf[i] = T_.slot[k]; entOf[i] = k;
+  // (SMG, Oct 30: with the workers on, the table is the worker's (smsRun there, the main thread keeping a copy by slot - smsMir)
+  // and the balls' data and the slots' balls come packed from it (WK); painted here, the table taken back from the copy first)
+  const bRows = Math.max(1, Math.ceil(n * 4 / 1024));
+  let slots, sRows, BD, S2;
+  if (WK) { slots = Math.max(64, WK.next); sRows = Math.ceil(slots / 1024); BD = WK.BD; S2 = WK.S2; }
+  else {
+    if (G_.own !== 'm') smsTake(G_);
+    if (!G_.so || G_.so.length < n) { G_.so = new Int32Array(Math.ceil(n * 1.5)); G_.se = new Uint8Array(G_.so.length); }
+    smsRun(G_, n, S_.SID, G_.so, G_.se, null);
+    slots = Math.max(64, G_.next); sRows = Math.ceil(slots / 1024);
+    // ---- the inputs: the balls (4 texels each), the order, the water's rows, the fields, the slots' balls, the colours
+    BD = G_.bd && G_.bd.length >= bRows * 4096 ? G_.bd : (G_.bd = new Float32Array(bRows * 4096 * 1.5 | 0));
+    S2 = G_.s2 && G_.s2.length >= sRows * 1024 ? G_.s2 : (G_.s2 = new Float32Array(sRows * 1024 * 2));
+    smsPack(n, { X, Y, R, Z, A, F, TK: S_.TK, TU: S_.TU, TV: S_.TV, SID: S_.SID, LX, LY, LZ }, G_.so, G_.se, thinOn, BD, S2, sRows);
   }
-  if ((G_.paint & 15) === 0) {
-    const old = [];
-    for (let k = 0; k < T_.cap; k++) if (T_.use[k] && G_.paint - T_.p[k] > 64) old.push(k);
-    old.sort((x, y) => T_.ins[x] - T_.ins[y]);
-    const keys = old.map(k => T_.key[k]);
-    for (let q = 0; q < old.length; q++) G_.free.push(T_.slot[old[q]]);
-    for (const key of keys) smsDel(T_, key);
-  }
-  const slots = Math.max(64, G_.next), rows = Math.ceil(slots / 64), MW = 47 * 64;
-  // ---- the inputs: the balls (4 texels each), the order, the water's rows, the fields, the slots' balls, the colours
-  const bRows = Math.max(1, Math.ceil(n * 4 / 1024)), BD = G_.bd && G_.bd.length >= bRows * 4096 ? G_.bd : (G_.bd = new Float32Array(bRows * 4096 * 1.5 | 0));
-  for (let i = 0; i < n; i++) {
-    const o = i * 16, thin = thinOn && S_.TK[i] === 0 && F[i] >= 3;
-    BD[o] = X[i]; BD[o + 1] = Y[i]; BD[o + 2] = R[i]; BD[o + 3] = Z[i];
-    BD[o + 4] = A[i]; BD[o + 5] = F[i]; BD[o + 6] = S_.TK[i]; BD[o + 7] = slotOf[i];
-    BD[o + 8] = LX[i]; BD[o + 9] = LY[i]; BD[o + 10] = LZ[i]; BD[o + 11] = thin ? 1 : 0;
-    BD[o + 12] = S_.TU[i]; BD[o + 13] = S_.TV[i]; BD[o + 14] = (S_.SID[i] % 65521) / 65521; BD[o + 15] = 0;   // (14: its own number, for its dissolve pattern - SM_COMP_FS)
-  }
+  // (?smdcheck=1: the same slots worked out here by a table of the main thread's own, from the same balls, and the packed data
+  // compared to the bit - the worker's, or this thread's after taking the table back from its copy)
+  if (SMD_CHECK) smsCheck(G_, n, a.B || { X, Y, R, Z, A, F, TK: S_.TK, TU: S_.TU, TV: S_.TV, SID: S_.SID, LX, LY, LZ }, thinOn, BD, S2, slots, sRows);
+  const rows = Math.ceil(slots / 64), MW = 47 * 64;
   G_.btex = gsmTex(G_.btex, 1024, bRows, BD.subarray(0, bRows * 4096));
   const W1 = G_.w1 && G_.w1.length >= cw ? G_.w1 : (G_.w1 = new Float32Array(cw * 2)); for (let x = 0; x < cw; x++) W1[x] = wrow[x];
   G_.wtex = gsmTex(G_.wtex, cw, 1, W1.subarray(0, cw), 'R32F');
@@ -20256,9 +20436,6 @@ function gsmPaint(S_, a) {
     gl.useProgram(mp.p); gl.uniform4f(mp.U.u_rect, gx0, gy0, gx1 - gx0 + 1, gy1 - gy0 + 1); gl.uniform2f(mp.U.u_size, gw, gh); gl.uniform1i(mp.U.u_dn, 0);
     gl.uniform4i(mp.U.u_box, gx0, gy0, gx1, gy1); gl.uniform4f(mp.U.u_m0, sdx, sdy, ownF, nMarch); gl.uniform4f(mp.U.u_m1, f2, kS, behind, 0);
     gsmBind(0, G_.dnt); gl.bindVertexArray(GSM.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
-  const sRows = Math.ceil(slots / 1024), S2 = G_.s2 && G_.s2.length >= sRows * 1024 ? G_.s2 : (G_.s2 = new Float32Array(sRows * 1024 * 2));
-  S2.fill(-1, 0, sRows * 1024);
-  { const TF = G_.tab.f; for (let i = 0; i < n; i++) { const s = slotOf[i]; S2[s] = TF[entOf[i]] ? i + 1048576 : i; } }
   G_.s2t = gsmTex(G_.s2t, 1024, sRows, S2.subarray(0, sRows * 1024), 'R32F');
   if (!SM_DC) { SM_DC = new Float32Array(92); for (let d = 0; d < 46; d++) { SM_DC[d * 2] = BT.DCX[d]; SM_DC[d * 2 + 1] = BT.DCY[d]; }
     SM_BTD = new Float32Array(64 * 64 * 4); for (let q = 0; q < 4096; q++) { SM_BTD[q * 4] = BT.H[q]; SM_BTD[q * 4 + 1] = BT.NX[q]; SM_BTD[q * 4 + 2] = BT.ID[q]; SM_BTD[q * 4 + 3] = BT.CR[q]; } }
@@ -20281,7 +20458,8 @@ function gsmPaint(S_, a) {
   const sp = GSM.splat; gl.useProgram(sp.p);
   gl.uniform1i(sp.U.u_b, 0); gl.uniform1i(sp.U.u_w, 1); gl.uniform1i(sp.U.u_bt, 2); gl.uniform2f(sp.U.u_size, cw, h); gl.uniform1f(sp.U.u_tka, tkA);
   gsmBind(0, G_.btex); gsmBind(1, G_.wtex); gsmBind(2, GSM.bt);
-  const OD = G_.od && G_.od.length >= n ? G_.od : (G_.od = new Float32Array(Math.ceil(n * 1.5))); for (let q = 0; q < n; q++) OD[q] = ord ? ord[q] : q;
+  let OD = WK && WK.od;
+  if (!OD) { OD = G_.od && G_.od.length >= n ? G_.od : (G_.od = new Float32Array(Math.ceil(n * 1.5))); for (let q = 0; q < n; q++) OD[q] = ord ? ord[q] : q; }
   gl.bindVertexArray(GSM.svao); gl.bindBuffer(gl.ARRAY_BUFFER, GSM.ordVbo); gl.bufferData(gl.ARRAY_BUFFER, OD, gl.STREAM_DRAW, 0, n);
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);
   gl.disable(gl.DEPTH_TEST);
@@ -20340,6 +20518,21 @@ function gsmPaint(S_, a) {
   GLR.stats.draws += 3;
   // kept for the frames between paints (smShow lays it again)
   S_.ow = bw; S_.oh = bh; S_.ox = (bx0 - SMG.mx) * FXV.pxX; S_.oy = (by0 - SMG.my) * FXV.pxY; S_.ocam = S_.cam; S_.osv = FXV.SV; S_.gx0 = bx0; S_.gy0 = by0; S_.gpuOut = true;
+  if (WK) G_.rb = [WK.BD, WK.S2];   // (uploaded: the worker's arrays go back to it with the next job, to fill again)
+}
+// (?smdcheck=1) the slots and the packed data against a table of the main thread's own (G_.ref), run on every paint's balls
+function smsCheck(G_, n, B, thinOn, BD, S2, slots, sRows) {
+  const c = SMD.chk, R_ = G_.ref || (G_.ref = { tab: null, free: [], next: 0, paint: 0, ent: null });
+  const so = new Int32Array(n), nw = new Uint8Array(n);
+  smsRun(R_, n, B.SID, so, nw, null);
+  c.spaints++;
+  const sl = Math.max(64, R_.next), sr = Math.ceil(sl / 1024), bd = new Float32Array(n * 16), s2 = new Float32Array(sr * 1024);
+  smsPack(n, B, so, nw, thinOn, bd, s2, sr);
+  if (sl !== slots || sr !== sRows) { c.slot++; return; }
+  const a = new Uint32Array(bd.buffer), b = new Uint32Array(BD.buffer, BD.byteOffset, n * 16);
+  for (let i = 0; i < n * 16; i++) if (a[i] !== b[i]) { c.bd++; break; }
+  const a2 = new Uint32Array(s2.buffer), b2 = new Uint32Array(S2.buffer, S2.byteOffset, sr * 1024);
+  for (let i = 0; i < sr * 1024; i++) if (a2[i] !== b2[i]) { c.slot++; break; }
 }
 
 // ================================================================== what the game calls (src/41-sky-new.js)
@@ -20452,7 +20645,7 @@ const NSKY_API = {
   dbgRecs(vi, x, y) { const out = []; for (const c of VIS[vi]) { if (!c.axd) continue; for (const pb of [c.pbv && c.pbv[vi], c.pbx]) { if (!pb || !pb.n) continue; const ax = c.axd[vi], ay = c.y, d = pb.data; for (let i = 0; i < pb.n; i++) { const o = i * 8, r = Array.from(d.subarray(o, o + 8)); const near = r[7] < 0.5 ? Math.abs(x - ax - r[0]) <= r[2] / 2 + 2 && Math.abs(y - ay - r[1]) <= r[2] / 2 + 2 : Math.abs(x - ax - r[0]) <= r[2] + 2 && Math.abs(y - ay - r[1]) <= r[3] + 2; if (near) out.push({ uid: c.uid, lay: c.lay.name, far: c.far, ax, ay, i, r }); } } } return out; },
   dbgClouds(vi) { return VIS[vi].map(c => ({ lay: c.lay.name, x: Math.round(screenX(c)), minX: Math.round(c.minX), maxX: Math.round(c.maxX), h: Math.round(c.h), y: c.y, grow: +c.grow.toFixed(2), far: c.far, wisp: !!c.wisp })); },
   stats() { const n = clouds.filter(c => c.visible).length; let sh = 0, fl = 0; for (const c of clouds) if (c.visible && c.items && !c.far) for (const it of c.items) if (it.tone !== undefined) { if (it.tgx || it.tgy) sh++; else fl++; }
-    return { clouds: n, puffs: [sh, fl], balls: [SMNPV[0].front.balls, SMNPV[0].back.balls, SMNPV[1].front.balls], last: !!SMNPV[0].front.last, o: (f => f.ob ? [f.ox, f.oy, f.ow, f.oh, f.ob.subarray(0, f.ow * f.oh).filter(v => v >>> 24).length, f.ocam && f.ocam.map(Math.round)] : null)(SMNPV[0].front), smoke: ((SMNPV[0].front.ms || 0) + (SMNPV[0].back.ms || 0)).toFixed(1), smd: { on: smdOn(), sent: SMD.sent, got: SMD.got, late: SMD.late, fail: SMD.fail, gsent: SMD.gsent, ggot: SMD.ggot, glate: SMD.glate, chk: SMD.chk } }; },
+    return { clouds: n, puffs: [sh, fl], balls: [SMNPV[0].front.balls, SMNPV[0].back.balls, SMNPV[1].front.balls], last: !!SMNPV[0].front.last, o: (f => f.ob ? [f.ox, f.oy, f.ow, f.oh, f.ob.subarray(0, f.ow * f.oh).filter(v => v >>> 24).length, f.ocam && f.ocam.map(Math.round)] : null)(SMNPV[0].front), smoke: ((SMNPV[0].front.ms || 0) + (SMNPV[0].back.ms || 0)).toFixed(1), smd: { on: smdOn(), sent: SMD.sent, got: SMD.got, late: SMD.late, fail: SMD.fail, gsent: SMD.gsent, ggot: SMD.ggot, glate: SMD.glate, glate2: SMD.glate2, gwaits: SMD.gwaits, dwaits: SMD.dwaits, chk: SMD.chk } }; },
 };
 
 // ================================================================== the SKY EDITOR (the Cloud Lab's panel, in the game)
@@ -25378,6 +25571,10 @@ const cpuStats = [{}, {}];
 const vehCpuR = sysRng('vehCpu'), vehCpuRnd = (a, b) => a + (b - a) * vehCpuR();
 defTable('brains', () => brains.filter(Boolean), { net: false, make: d => makeBrain(d.p || 0, d.level || 0), skip: ['T'],
   after: arr => { brains[0] = brains[1] = null; for (const b of arr) { b.T = CPU_TUNE[b.level] || CPU_TUNE[0]; brains[b.p] = b; } } });
+// what each CPU player did (cpuCount; the tests read it): a row per side. The counts are replaced by a new object each round,
+// so the row reads and writes cpuStats[p] itself, as JSON text (worldRow, 36-zz-world.js)
+const CPU_STATS_ROWS = [0, 1].map(p => worldRow({ n: [() => wjson(cpuStats[p]), v => { const o = wunjson(v); cpuStats[p] = o && typeof o === 'object' ? o : {}; }] }));
+defTable('cpuStats', () => CPU_STATS_ROWS, { net: false, perPlayer: 2, make: () => CPU_STATS_ROWS[0] });
 function makeBrain(p, level) { return { p, level, T: CPU_TUNE[level], thinkT: 1.5, dwellT: 0, react: CPU_TUNE[level].react + 1, fireT: 0, nP: 0, nE: 0, aimT: null, plan: null }; }
 function cpuReset() {
   for (let p = 0; p < 2; p++) brains[p] = isCpu(p) ? makeBrain(p, cpuLvSide[SIDE(p)]) : null;
@@ -41676,9 +41873,17 @@ const HELI_K = 0.249 * REAL.heli, HELI_VY = 80, HELI_TURN_T = 0.7;
 const HELI_CEIL = WATER_Y - 95 - 1.5 * VIEW_H;
 const LAND_RESPAWN = 4;                                // seconds before a lost tank or helicopter is replaced
 const tanks = [null, null], helis = [null, null], landWrecks = [];
-// (the GAME EDITOR's VEHICLES tab moves a tank or a helicopter through its owner - this file: 'tableMove' {t: 'tanks'|'helis'})
-on('tableMove', e => { if (e.t === 'tanks' || e.t === 'helis') { tblMoveTo(e.o, e); e.done = true; } }, 'landUnits');
 const landWait = [{ tank: 0, heli: 0 }, { tank: 0, heli: 0 }];
+// (engine stage 3, tables - 36-zz-tables.js) tanks[p] / helis[p]: each side's own or none (null), so each table is the ones
+// there are, each back in its side's place (id) once loaded or added; oldLand the lost ones still going down; landWait each
+// side's time till the next can come. Their own random source: landUnitR (the tanks' and helicopters' own steps)
+const landUnitR = sysRng('landUnits'), luRnd = (a, b) => a + (b - a) * landUnitR();
+const landMake = d => d.kind === 'heli' ? makeHeli(d.id || 0, d.x || 0) : makeTank(d.id || 0, d.x || 0);
+const landSides = L => ({ make: landMake, netIds: ['carry'], add: v => { L[v.id ? 1 : 0] = v; }, after: arr => { L[0] = L[1] = null; for (const v of arr) L[v.id ? 1 : 0] = v; } });
+defTable('tanks', () => tanks.filter(Boolean), landSides(tanks));
+defTable('helis', () => helis.filter(Boolean), landSides(helis));
+defTable('oldLand', () => oldLand, { make: landMake, netIds: ['carry'] });
+defTable('landWait', () => landWait, { perPlayer: 2, make: () => ({ tank: 0, heli: 0 }) });
 // (user Oct 25: a tank or helicopter comes in from your end of the world; it's mended and rearmed back home - on your
 // mountain, or on your airfield by the harbour)
 // (user Oct 28, 20:46: "The tanks and helicopters would also come from the hangar at the airport for now, since the edge of
@@ -41775,7 +41980,7 @@ function makeTank(p, x) {
 function makeHeli(p, x) {
   const y = landTop(x) - heliSkid();
   return { id: p, kind: 'heli', state: 'landed', x, y, vx: 0, vy: 0, facing: SIDE(p) ? -1 : 1, tilt: 0, turn: null, hp: VTUNE.heli.hp, rockets: VTUNE.heli.rockets, rk: 0, mgT: 0,
-    rotor: 0, spin: 0, cap: null, smokeT: 0, input: 0, fixT: 0, roll: 0, lampPh: Math.random() };
+    rotor: 0, spin: 0, cap: null, smokeT: 0, input: 0, fixT: 0, roll: 0, lampPh: landUnitR() };
 }
 function buildLandUnits() {
   landListsReset();
@@ -41861,12 +42066,12 @@ function stepTank(t, dt) {
     // (a steep climb slows it a little, never stops it)
     if (lead < t.y - 4 && t.vy >= 0) t.vx *= 1 - Math.min(0.5, dt * 2);
     t.track = (t.track || 0) + t.vx * dt;
-    if (Math.random() < dt * Math.abs(t.vx) / 12) kickLandDust(t.x - Math.sign(t.vx) * TANK_L * 0.4, t.y, 2);
+    if (landUnitR() < dt * Math.abs(t.vx) / 12) kickLandDust(t.x - Math.sign(t.vx) * TANK_L * 0.4, t.y, 2);
     // (user Oct 25: on sand its tracks throw up a cloud behind it)
     const bx = t.x - Math.sign(t.vx) * TANK_L * 0.45;
     if (!SIM_ONLY && groundAt(bx, t.y) === 'sand') {
       t.sandT = (t.sandT || 0) + dt * Math.abs(t.vx) * 0.6;
-      while (t.sandT >= 1) { t.sandT -= 1; const r0 = rnd(3, 5); spawnSmoke(bx + rnd(-6, 6), t.y - r0 - 1, { kind: 'gun', mist: true, fam: 'sand', r: r0, grow: rnd(5, 8), rmax: rnd(20, 30), lift: 4, vx: -t.vx * rnd(0.2, 0.5) + rnd(-12, 12), vy: -rnd(8, 24), life: rnd(2.2, 3.6), alpha: rnd(0.4, 0.6), stream: smStream(t, 'sand') }); }
+      while (t.sandT >= 1) { t.sandT -= 1; const r0 = luRnd(3, 5); spawnSmoke(bx + luRnd(-6, 6), t.y - r0 - 1, { kind: 'gun', mist: true, fam: 'sand', r: r0, grow: luRnd(5, 8), rmax: luRnd(20, 30), lift: 4, vx: -t.vx * luRnd(0.2, 0.5) + luRnd(-12, 12), vy: -luRnd(8, 24), life: luRnd(2.2, 3.6), alpha: luRnd(0.4, 0.6), stream: smStream(t, 'sand') }); }
     }
   }
   tankSettle(t, dt, false);
@@ -41882,7 +42087,7 @@ function tankSmoke(t, dt) {
   t.smokeT -= dt;
   if (t.smokeT > 0) return;
   t.smokeT = t.hp <= 1 ? 0.12 : 0.3;
-  spawnSmoke(t.x - t.facing * 10 + rnd(-4, 4), t.y - 14, { kind: 'trail', dark: t.hp <= 1 ? 0.1 : 0.7, r: rnd(2.5, 4), grow: rnd(3, 5), lift: 24, vx: rnd(-6, 6), life: rnd(3, 5), alpha: 0.5, stream: smStream(t) });
+  spawnSmoke(t.x - t.facing * 10 + luRnd(-4, 4), t.y - 14, { kind: 'trail', dark: t.hp <= 1 ? 0.1 : 0.7, r: luRnd(2.5, 4), grow: luRnd(3, 5), lift: 24, vx: luRnd(-6, 6), life: luRnd(3, 5), alpha: 0.5, stream: smStream(t) });
 }
 // the turret's pivot and the barrel's line (elev: degrees from straight ahead, over the top to straight back)
 // the gun's pivot: in the mantlet at the turret's front
@@ -41917,11 +42122,11 @@ function tankMuzzleBall(mx, my, ux, uy, t) {
   const cx = mx + ux * 16, cy = my + uy * 16;
   flashes.push({ x: cx, y: cy, r: 22, life: 0, max: 0.14 });
   for (let i = 0; i < 60; i++) {
-    const a = rnd(0, Math.PI * 2), sp = Math.pow(Math.random(), 0.5) * rnd(30, 80), r0 = rnd(0, 9);
-    spawnFlame(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, Math.cos(a) * sp + ux * 55 + t.vx, Math.sin(a) * sp * 0.85 + uy * 55 - rnd(0, 14), rnd(1.35, 1.65), rnd(4.5, 8), rnd(1.5, 2.1));
+    const a = luRnd(0, Math.PI * 2), sp = Math.pow(landUnitR(), 0.5) * luRnd(30, 80), r0 = luRnd(0, 9);
+    spawnFlame(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, Math.cos(a) * sp + ux * 55 + t.vx, Math.sin(a) * sp * 0.85 + uy * 55 - luRnd(0, 14), luRnd(1.35, 1.65), luRnd(4.5, 8), luRnd(1.5, 2.1));
     flames[flames.length - 1].clean = true;
   }
-  for (let i = 0; i < 7; i++) spawnSmoke(mx + ux * rnd(0, 26), my + uy * rnd(0, 26), { kind: 'gun', mist: true, keep: true, r: rnd(2, 4), grow: rnd(2, 3.5), rmax: rnd(9, 14), lift: 3, vx: ux * rnd(60, 130), vy: uy * rnd(60, 130), life: rnd(1.6, 2.6), alpha: 0.75 });
+  for (let i = 0; i < 7; i++) spawnSmoke(mx + ux * luRnd(0, 26), my + uy * luRnd(0, 26), { kind: 'gun', mist: true, keep: true, r: luRnd(2, 4), grow: luRnd(2, 3.5), rmax: luRnd(9, 14), lift: 3, vx: ux * luRnd(60, 130), vy: uy * luRnd(60, 130), life: luRnd(1.6, 2.6), alpha: 0.75 });
   const gy = landBelow(cx, cy - 4);
   if (gy - cy < 50) kickLandDust(cx, gy, 10);
 }
@@ -41929,7 +42134,7 @@ function tankMG(t) {
   if (!t || t.state !== 'alive') return;
   const [px, py] = tankPivot(t), [ux, uy] = tankBarrel(t), g = guns[t.id];
   const mx = px + ux * 10 + uy * 6 * t.facing * 0, my = py - 7 + uy * 10;
-  const sp = MG_SPEED * (0.75 + g.power * 0.4), spr = rnd(-0.025, 0.025);
+  const sp = MG_SPEED * (0.75 + g.power * 0.4), spr = luRnd(-0.025, 0.025);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spr) * sp + t.vx, vy: (uy + ux * spr) * sp, owner: t.id, age: 0 });
   flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
   sound('mg', mx);
@@ -41941,7 +42146,7 @@ function tankHurt(t, amt, x, y, by) {
   if (t.carry != null && x != null) ropeKick(t, x, y, amt);            // (hanging from a magnet: the hit swings it, and the helicopter)
   noteHit(t.id, 'tank');
   if (amt >= 0.3) { spawnSparks(x, y, 14, 220); sound('impact', x); }
-  if (by !== -1) unitScorch(t, x, y, amt >= 0.3 ? 4 + 3 * Math.min(1, amt) : Math.random() < 0.5 ? 0.9 : 0);
+  if (by !== -1) unitScorch(t, x, y, amt >= 0.3 ? 4 + 3 * Math.min(1, amt) : landUnitR() < 0.5 ? 0.9 : 0);
   if (t.hp <= 1e-6) killTank(t);
 }
 // (user Oct 25, their photo) a hit on a tank goes off on top of it: a fireball that rolls upward out of the hull,
@@ -41954,17 +42159,17 @@ function tankHitBlast(t, power) {
   flashes.push({ x, y: y - 6, r: 22 + 12 * power, life: 0, max: 0.16 });
   const n = Math.round(30 + 30 * power);
   for (let i = 0; i < n; i++) {
-    const a = -Math.PI / 2 + rnd(-0.9, 0.9), sp = Math.pow(Math.random(), 0.6) * (90 + 80 * power);
-    spawnFlame(x + rnd(-10, 10), y + rnd(-4, 3), Math.cos(a) * sp * 0.7 + t.vx * 0.5, Math.sin(a) * sp - rnd(20, 70), rnd(1.25, 1.55), rnd(3, 6) * (0.75 + 0.35 * power), rnd(1.1, 1.6));
+    const a = -Math.PI / 2 + luRnd(-0.9, 0.9), sp = Math.pow(landUnitR(), 0.6) * (90 + 80 * power);
+    spawnFlame(x + luRnd(-10, 10), y + luRnd(-4, 3), Math.cos(a) * sp * 0.7 + t.vx * 0.5, Math.sin(a) * sp - luRnd(20, 70), luRnd(1.25, 1.55), luRnd(3, 6) * (0.75 + 0.35 * power), luRnd(1.1, 1.6));
   }
-  for (let i = 0; i < 10 * power + 4; i++) spawnEmber(x + rnd(-8, 8), y - rnd(0, 6), t.vx * 0.3, 1.6);
+  for (let i = 0; i < 10 * power + 4; i++) spawnEmber(x + luRnd(-8, 8), y - luRnd(0, 6), t.vx * 0.3, 1.6);
   spawnSparks(x, y, 16 + 10 * power, 300);
-  for (let i = 0; i < 6 + 6 * power; i++) spawnSmoke(x + rnd(-6, 6), y - rnd(14, 34), { kind: 'blast', dark: 0.1, r: rnd(3.5, 6) * (0.7 + 0.4 * power), grow: rnd(3, 5), lift: 40, vx: rnd(-10, 10), vy: rnd(-70, -35), life: rnd(6, 9), alpha: rnd(0.55, 0.75) });
+  for (let i = 0; i < 6 + 6 * power; i++) spawnSmoke(x + luRnd(-6, 6), y - luRnd(14, 34), { kind: 'blast', dark: 0.1, r: luRnd(3.5, 6) * (0.7 + 0.4 * power), grow: luRnd(3, 5), lift: 40, vx: luRnd(-10, 10), vy: luRnd(-70, -35), life: luRnd(6, 9), alpha: luRnd(0.55, 0.75) });
   // the debris: dark shards and a few in the tank's own paint, flung high
   const col = tankArtOf(t.id).col, own = css3(col.map(v => v * 0.8));
   const k0 = debris.length;
   spawnDebris(x, y - 4, Math.round(10 + 8 * power), t.vx * 0.3);
-  for (let k = k0; k < debris.length; k++) { const d = debris[k]; d.vy *= 1.6; d.vx *= 1.15; d.sw *= 1.4; d.sh *= 1.3; if (Math.random() < 0.35) d.col = own; }
+  for (let k = k0; k < debris.length; k++) { const d = debris[k]; d.vy *= 1.6; d.vx *= 1.15; d.sw *= 1.4; d.sh *= 1.3; if (landUnitR() < 0.35) d.col = own; }
   gridExplosion(x, y, 50 * power, 300 * power);
 }
 function killTank(t) {
@@ -42132,23 +42337,23 @@ function rotorWash(h, dt) {
   h.washT = (h.washT || 0) + dt * 46 * k;
   while (h.washT >= 1) {
     h.washT -= 1;
-    const side = Math.random() < 0.5 ? -1 : 1, x0 = h.x + side * rnd(0, 22), gy = landBelow(x0, gm - 12), r0 = rnd(2.5, 4.5);
+    const side = landUnitR() < 0.5 ? -1 : 1, x0 = h.x + side * luRnd(0, 22), gy = landBelow(x0, gm - 12), r0 = luRnd(2.5, 4.5);
     // (it rolls out and swells into big soft puffs that thin away - user Oct 25 - never below the ground)
     // (on an airfield's concrete, user Oct 26: no dust there - a thin pale haze)
-    if (onApron(x0)) spawnSmoke(x0 + side * 14, gy - r0 - 1, { kind: 'dust', mist: true, r: r0, grow: rnd(4, 7), rmax: rnd(18, 26), lift: 1.5, ground: true, vx: side * rnd(80, 190) * k + h.vx * 0.3, vy: 0, life: rnd(1.2, 2), alpha: rnd(0.22, 0.32) });
-    else spawnSmoke(x0, gy - r0 - 1, { kind: 'dust', mist: true, fam: groundAt(x0, gy) === 'sand' ? 'sand' : 'dust', r: r0, grow: rnd(6, 10), rmax: rnd(24, 36), lift: 1.5, ground: true, vx: side * rnd(80, 190) * k + h.vx * 0.3, vy: 0, life: rnd(2, 3.6), alpha: rnd(0.4, 0.6) });
+    if (onApron(x0)) spawnSmoke(x0 + side * 14, gy - r0 - 1, { kind: 'dust', mist: true, r: r0, grow: luRnd(4, 7), rmax: luRnd(18, 26), lift: 1.5, ground: true, vx: side * luRnd(80, 190) * k + h.vx * 0.3, vy: 0, life: luRnd(1.2, 2), alpha: luRnd(0.22, 0.32) });
+    else spawnSmoke(x0, gy - r0 - 1, { kind: 'dust', mist: true, fam: groundAt(x0, gy) === 'sand' ? 'sand' : 'dust', r: r0, grow: luRnd(6, 10), rmax: luRnd(24, 36), lift: 1.5, ground: true, vx: side * luRnd(80, 190) * k + h.vx * 0.3, vy: 0, life: luRnd(2, 3.6), alpha: luRnd(0.4, 0.6) });
   }
   // bits of earth thrown out, more the lower it comes (user Oct 25); and grass torn up and lifted, fluttering
   const near = k * k;
   h.bitT = (h.bitT || 0) + dt * 90 * near;
   while (h.bitT >= 1) {
     h.bitT -= 1;
-    const side = Math.random() < 0.5 ? -1 : 1, x0 = h.x + side * rnd(0, 30), gy = landBelow(x0, gm - 12);
-    earthGrains.push({ x: x0, y: gy - 1.5, vx: side * rnd(90, 240) * k, vy: -rnd(30, 120) * k, c: ['#5a4030', '#6b4a2e', '#4a3424'][(Math.random() * 3) | 0], light: false, big: Math.random() < 0.2, t: 0, rest: 0, life: rnd(1.4, 2.6) });
-    if (Math.random() < 0.35) bladeFly(x0, gy - 2, side * rnd(60, 160) * k, -rnd(70, 170) * k);
+    const side = landUnitR() < 0.5 ? -1 : 1, x0 = h.x + side * luRnd(0, 30), gy = landBelow(x0, gm - 12);
+    earthGrains.push({ x: x0, y: gy - 1.5, vx: side * luRnd(90, 240) * k, vy: -luRnd(30, 120) * k, c: ['#5a4030', '#6b4a2e', '#4a3424'][(landUnitR() * 3) | 0], light: false, big: landUnitR() < 0.2, t: 0, rest: 0, life: luRnd(1.4, 2.6) });
+    if (landUnitR() < 0.35) bladeFly(x0, gy - 2, side * luRnd(60, 160) * k, -luRnd(70, 170) * k);
   }
   // the trees behind lose leaves to it near the ground
-  if (Math.random() < dt * 30 * k) leafFly(h.x + rnd(-120, 120), gm - rnd(20, 90), (Math.random() < 0.5 ? -1 : 1) * rnd(40, 110) * k, -rnd(10, 60) * k);
+  if (landUnitR() < dt * 30 * k) leafFly(h.x + luRnd(-120, 120), gm - luRnd(20, 90), (landUnitR() < 0.5 ? -1 : 1) * luRnd(40, 110) * k, -luRnd(10, 60) * k);
 }
 // over the sea (user Oct 25: "like the plane does, but outwards"): the downdraft dents the water under the rotor and
 // blows a ring of spray, foam and ripples out both ways across it, with a low mist rolling out over the water
@@ -42163,11 +42368,11 @@ function rotorWashSea(h, dt) {
   h.washT = (h.washT || 0) + dt * 90 * k;
   while (h.washT >= 1) {
     h.washT -= 1;
-    const side = Math.random() < 0.5 ? -1 : 1, x0 = h.x + side * rnd(4, 34), wy = surfaceY(x0);
-    spawnSpray(x0, wy - 1, side * rnd(90, 230) * k + h.vx * 0.3, 0.15 + 0.35 * k * Math.random());
-    if (Math.random() < 0.7) spawnFoam(x0 + side * rnd(0, 20), rnd(1, 2.4) * (0.6 + k));
-    if (Math.random() < 0.25 && wakes.length < 650 && !fxHidden(x0)) wakes.push({ x: x0, life: 0, max: rnd(1.2, 2.4) * (0.5 + k), w: rnd(8, 16) * (0.5 + 0.5 * k), drift: side * rnd(16, 34) * k, k: 0.5 + 0.5 * k });
-    if (Math.random() < 0.3) spawnSmoke(x0, wy - rnd(2, 6), { kind: 'dust', mist: true, r: rnd(2.5, 4), grow: rnd(3, 5), rmax: rnd(12, 18), lift: 1, vx: side * rnd(70, 160) * k, vy: -rnd(2, 10), life: rnd(1.4, 2.6), alpha: rnd(0.3, 0.5) });
+    const side = landUnitR() < 0.5 ? -1 : 1, x0 = h.x + side * luRnd(4, 34), wy = surfaceY(x0);
+    spawnSpray(x0, wy - 1, side * luRnd(90, 230) * k + h.vx * 0.3, 0.15 + 0.35 * k * landUnitR());
+    if (landUnitR() < 0.7) spawnFoam(x0 + side * luRnd(0, 20), luRnd(1, 2.4) * (0.6 + k));
+    if (landUnitR() < 0.25 && wakes.length < 650 && !fxHidden(x0)) wakes.push({ x: x0, life: 0, max: luRnd(1.2, 2.4) * (0.5 + k), w: luRnd(8, 16) * (0.5 + 0.5 * k), drift: side * luRnd(16, 34) * k, k: 0.5 + 0.5 * k });
+    if (landUnitR() < 0.3) spawnSmoke(x0, wy - luRnd(2, 6), { kind: 'dust', mist: true, r: luRnd(2.5, 4), grow: luRnd(3, 5), rmax: luRnd(12, 18), lift: 1, vx: side * luRnd(70, 160) * k, vy: -luRnd(2, 10), life: luRnd(1.4, 2.6), alpha: luRnd(0.3, 0.5) });
   }
 }
 // (tools: a helicopter hovering over the sea, to see its wash there - nothing in the game puts one at sea yet)
@@ -42256,11 +42461,11 @@ function heliSmoke(h, dt) {
   const bad = h.hp <= 1;
   h.smokeT -= dt;
   const [ex, ey] = heliPoint(h, -heliHalf() * 0.22, -heliSkid() * 0.75);
-  if (bad && Math.random() < dt * 14) spawnFlame(ex + rnd(-3, 3), ey + rnd(-2, 2), -h.facing * rnd(5, 25) + h.vx * 0.5, -rnd(25, 55) + h.vy * 0.5, 1.1, rnd(2, 3.5), 2.4);
+  if (bad && landUnitR() < dt * 14) spawnFlame(ex + luRnd(-3, 3), ey + luRnd(-2, 2), -h.facing * luRnd(5, 25) + h.vx * 0.5, -luRnd(25, 55) + h.vy * 0.5, 1.1, luRnd(2, 3.5), 2.4);
   if (h.smokeT > 0) return;
   h.smokeT = bad ? 0.06 : 0.11;
-  if (bad) spawnSmoke(ex + rnd(-2, 2), ey - 3, { kind: 'trail', rise: true, dark: 0, r: rnd(3, 5), grow: rnd(4, 7), lift: 34, vx: h.vx * 0.15 + rnd(-6, 6), vy: -rnd(20, 40), life: rnd(4, 6), alpha: rnd(0.5, 0.7), chain: smStream(h) });
-  else spawnSmoke(ex + rnd(-2, 2), ey - 3, { kind: 'trail', rise: true, mist: true, r: rnd(2.5, 4), grow: rnd(3, 5), lift: 28, vx: h.vx * 0.15 + rnd(-6, 6), vy: -rnd(16, 32), life: rnd(2.5, 4), alpha: rnd(0.45, 0.6), chain: smStream(h) });
+  if (bad) spawnSmoke(ex + luRnd(-2, 2), ey - 3, { kind: 'trail', rise: true, dark: 0, r: luRnd(3, 5), grow: luRnd(4, 7), lift: 34, vx: h.vx * 0.15 + luRnd(-6, 6), vy: -luRnd(20, 40), life: luRnd(4, 6), alpha: luRnd(0.5, 0.7), chain: smStream(h) });
+  else spawnSmoke(ex + luRnd(-2, 2), ey - 3, { kind: 'trail', rise: true, mist: true, r: luRnd(2.5, 4), grow: luRnd(3, 5), lift: 28, vx: h.vx * 0.15 + luRnd(-6, 6), vy: -luRnd(16, 32), life: luRnd(2.5, 4), alpha: luRnd(0.45, 0.6), chain: smStream(h) });
 }
 // the nose: its gun and its rails, turned with the tilt
 function heliPoint(h, fx, fy) {
@@ -42270,7 +42475,7 @@ function heliPoint(h, fx, fy) {
 function heliMG(h) {
   const g = hguns[h.id], el = clamp((h.cpuElev != null && crew[h.id].mode !== 'heli' ? h.cpuElev : g.elev), -80, 25) * Math.PI / 180 + 0;
   const [mx, my] = heliPoint(h, heliHalf() * 0.9, 8);
-  const ux = Math.cos(el) * h.facing, uy = -Math.sin(el), sp = MG_SPEED * (0.8 + g.power * 0.35), spr = rnd(-0.02, 0.02);
+  const ux = Math.cos(el) * h.facing, uy = -Math.sin(el), sp = MG_SPEED * (0.8 + g.power * 0.35), spr = luRnd(-0.02, 0.02);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spr) * sp + h.vx, vy: (uy + ux * spr) * sp + h.vy, owner: h.id, age: 0 });
   flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
   sound('mg', mx);
@@ -42291,15 +42496,15 @@ function heliHurt(h, amt, x, y) {
   if (!h || (h.state !== 'fly' && h.state !== 'landed') || netGuestHold()) return;
   h.hp -= amt; noteHit(h.id, 'heli');
   if (amt >= 1) { spawnSparks(x, y, 12, 220); sound('impact', x); }
-  unitScorch(h, x, y, amt >= 0.5 ? 5 : Math.random() < 0.6 ? 0.9 : 0);
-  if (h.hp <= 1e-6) { if (h.state === 'landed') blowHeli(h); else { h.state = 'down'; h.spinV = rnd(3, 5) * (Math.random() < 0.5 ? -1 : 1); heliLost(h); } }
+  unitScorch(h, x, y, amt >= 0.5 ? 5 : landUnitR() < 0.6 ? 0.9 : 0);
+  if (h.hp <= 1e-6) { if (h.state === 'landed') blowHeli(h); else { h.state = 'down'; h.spinV = luRnd(3, 5) * (landUnitR() < 0.5 ? -1 : 1); heliLost(h); } }
 }
 // what it sat on gone from under it (a ship sunk or sailed off, the pier collapsed): with someone at its controls it's
 // flying; left alone it falls (user Oct 27: "An unmanned army helicopter on the pier lifts off and hovers when the pier
 // collapses... Should it fall instead?" - "Yes, it should fall") - down as a helicopter shot down goes, into what's below
 function heliGroundGone(h, mine) {
   if (mine || h.cpu) { h.state = 'fly'; h.vy = 0; return; }
-  h.state = 'down'; h.vy = 0; h.spinV = rnd(0.6, 1.4) * (Math.random() < 0.5 ? -1 : 1); heliLost(h);
+  h.state = 'down'; h.vy = 0; h.spinV = luRnd(0.6, 1.4) * (landUnitR() < 0.5 ? -1 : 1); heliLost(h);
 }
 function heliLost(h) {
   if (h.lostDone) return;
@@ -42333,8 +42538,8 @@ function stepHeliDown(h, dt) {
   // (user Oct 25: the front is heavier - it always goes down nose first, swinging round a little as it falls)
   h.downT = (h.downT || 0) + dt; h.roll = Math.sin(h.downT * 6) * 0.8 * Math.sign(h.spinV); h.tilt += (h.facing * 1.15 - h.tilt) * Math.min(1, dt * 1.6);
   h.rotor += dt * 20;
-  h.smokeT -= dt; if (h.smokeT <= 0) { h.smokeT = 0.05; spawnSmoke(h.x, h.y - 4, { kind: 'trail', dark: 0.05, r: rnd(3, 5), grow: rnd(4, 6), lift: 20, vx: rnd(-8, 8), life: rnd(4, 6), alpha: 0.6, chain: smStream(h) }); }
-  if (Math.random() < dt * 10) spawnFlame(h.x + rnd(-6, 6), h.y + rnd(-4, 4), rnd(-20, 20), -rnd(20, 50), 1.1, rnd(2, 4), 2);
+  h.smokeT -= dt; if (h.smokeT <= 0) { h.smokeT = 0.05; spawnSmoke(h.x, h.y - 4, { kind: 'trail', dark: 0.05, r: luRnd(3, 5), grow: luRnd(4, 6), lift: 20, vx: luRnd(-8, 8), life: luRnd(4, 6), alpha: 0.6, chain: smStream(h) }); }
+  if (landUnitR() < dt * 10) spawnFlame(h.x + luRnd(-6, 6), h.y + luRnd(-4, 4), luRnd(-20, 20), -luRnd(20, 50), 1.1, luRnd(2, 4), 2);
   if (LAND && !onLand(h.x)) { const d = shipTopAt(h.x, h.y + heliSkid() - 10); if (d && h.y + heliSkid() >= d.y) { h.y = d.y - heliSkid(); h.deck = d.c; blowHeli(h); return; } }   // (onto a ship's top: it comes down on her deck - user Oct 27, [19])
   if (LAND && !onLand(h.x) && h.y + heliSkid() >= harbourTop(h.x, h.y - 10)) { blowHeli(h); return; }   // (onto the harbour's deck: it's ground - user Oct 27)
   if (LAND && !onLand(h.x) && !(h._civT > 1e8) && hullStrike([[h.x, h.y]], 2, h.vx, h.id)) { h._civT = 1e9; blowHeli(h); return; }   // (into a big ship's side: it blows there, its wreck falls on - user Oct 27 night)
@@ -43547,8 +43752,8 @@ function vehPick(X, Y, rPx) {
 }
 function vehSelect(e) { VE.sel = e; vehSync(); }
 const vehFloats = e => e.k === 'ship' || e.k === 'boat' || e.k === 'yacht' || e.k === 'tower' || e.k === 'tank' || civShips.includes(e.v);
-// (moved by its owner: the editor asks with 'tableMove' - 36-zz-tables.js; the tanks' and helicopters', 50-land-units.js)
-const vehTable = e => e.k === 'tank' ? 'tanks' : e.k === 'heli' && e.army ? 'helis' : tableOf(e.v);
+// (moved by its owner: the editor asks with 'tableMove' - 36-zz-tables.js)
+const vehTable = e => tableOf(e.v);
 function vehMoveTo(e, X, Y, t = vehTable(e)) {
   if (e.k === 'crane' || !t) return;                                       // (it runs on its rails)
   emit('tableMove', { t, o: e.v, x: X, y: vehFloats(e) ? null : Y });
