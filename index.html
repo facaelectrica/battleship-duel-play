@@ -3052,8 +3052,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 346;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 12:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 347;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 12:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14318,6 +14318,29 @@ void main() {
   float a = floor(k * 255.0 + 0.5) / 255.0;
   o = vec4(u_col * a, a);
 }`;
+// THE RAYS' MARCH (engine stage 8, Oct 30): the step bytes above, made here - one fragment a step of a ray (x the step, y the ray).
+// u_ray a ray's (first crossing, crossings, first step outside every lobe, hit); u_iv the crossings (entry step, exit step - NS when
+// it runs off the end), each ray's by entry step. The lobes the step is in (n) and the steps of cloud before it (M, n summed over
+// the steps before - the march's running sums, closed form) give its level by u_m, whole steps: the march's od is M x sig
+const GL_RBUILD_FS = `#version 300 es
+precision highp float; precision highp int; precision highp isampler2D;
+uniform highp isampler2D u_ray, u_iv; uniform ivec3 u_m; uniform int u_ivw;
+out vec4 o;
+void main() {
+  int j = int(gl_FragCoord.x), bi = int(gl_FragCoord.y);
+  ivec4 r = texelFetch(u_ray, ivec2(bi, 0), 0);
+  if (r.w == 0) { o = vec4(0.0); return; }
+  int n = 0, M = 0;
+  for (int k = 0; k < r.y; k++) {
+    int q = r.x + k; ivec2 iv = texelFetch(u_iv, ivec2(q % u_ivw, q / u_ivw), 0).xy;
+    if (iv.x > j) break;
+    if (j < iv.y) n++;
+    M += min(j, iv.y) - iv.x;
+  }
+  int T = M < u_m.x ? 3 : M < u_m.y ? 2 : M < u_m.z ? 1 : 0;
+  int inn = n > 0 ? (j < r.z ? 2 : 1) : 0;
+  o = vec4(float(T | (inn << 2) | 16) / 255.0, 0.0, 0.0, 1.0);
+}`;
 // THE SUN'S DISC (user Oct 29: "I would expect you to use a shader to simulate the heat, not move pixels"): drawn here over the sky's
 // gradient and glow, behind every deck. Each sky cell (whole cells: the pixels stay chunky) looks up where its light comes from through
 // the hot air over the sea - a smooth ripple in both directions, strongest at the sea's line and gone by HEAT REACH radii above it - so
@@ -14426,6 +14449,34 @@ function glRaySetup() {
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
   gl.bindVertexArray(GLR.vao);
   GLR.rtex = null; GLR.rbtex = null; GLR.rtW = 0; GLR.rtH = 0;
+  { const q = gl.createProgram();   // (the rays' march, GL_RBUILD_FS - engine stage 8)
+    gl.attachShader(q, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(q, glShader(gl.FRAGMENT_SHADER, GL_RBUILD_FS)); gl.linkProgram(q);
+    if (!gl.getProgramParameter(q, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(q));
+    GLR.rbprog = q; GLR.rbU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_ray', 'u_iv', 'u_m', 'u_ivw']) GLR.rbU[k] = gl.getUniformLocation(q, k);
+    GLR.rbfbo = null; GLR.rayT = null; GLR.ivT = null; GLR.ivRows = 0; GLR.rbSeq = -1; }
+}
+// the rays' step bytes made on the GPU (GL_RBUILD_FS, engine stage 8) into GLR.rtex, from 16-light-rays.js rayIvPack's lists
+function glRayBuild(gb, NS, RAY_N) {
+  const gl = GLR.gl, U = GLR.rbU;
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  if (!GLR.rayT) { GLR.rayT = glNewTex(0, 0, gl.NEAREST); gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, GLR.rayT); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32I, RAY_N, 1, 0, gl.RGBA_INTEGER, gl.INT, null); }
+  if (!GLR.ivT || GLR.ivRows < gb.rows) { if (GLR.ivT) gl.deleteTexture(GLR.ivT); GLR.ivT = glNewTex(0, 0, gl.NEAREST); GLR.ivRows = Math.max(gb.rows, GLR.ivRows * 2, 4); gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, GLR.ivT); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32I, gb.ivw, GLR.ivRows, 0, gl.RG_INTEGER, gl.INT, null); }
+  for (let i = 0; i < 8; i++) if (GLR.unit[i] === GLR.rtex) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, null); GLR.unit[i] = null; }
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, GLR.rayT); GLR.unit[2] = GLR.rayT;
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, RAY_N, 1, gl.RGBA_INTEGER, gl.INT, gb.ray);
+  gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, GLR.ivT); GLR.unit[3] = GLR.ivT;
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gb.ivw, gb.rows, gl.RG_INTEGER, gl.INT, gb.iv.subarray(0, gb.ivw * gb.rows * 2));
+  for (const i of [2, 3]) if (GLR.unitS[i] !== null) { gl.bindSampler(i, null); GLR.unitS[i] = null; }
+  if (!GLR.rbfbo) { GLR.rbfbo = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, GLR.rbfbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, GLR.rtex, 0); }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, GLR.rbfbo); gl.viewport(0, 0, NS, RAY_N);
+  gl.disable(gl.SCISSOR_TEST); gl.disable(gl.STENCIL_TEST); gl.disable(gl.BLEND);
+  gl.useProgram(GLR.rbprog);
+  gl.uniform2f(U.u_size, NS, RAY_N); gl.uniform4f(U.u_quad, 0, 0, NS, RAY_N); gl.uniform4f(U.u_cells, 0, 0, NS, RAY_N);
+  gl.uniform1i(U.u_ray, 2); gl.uniform1i(U.u_iv, 3); gl.uniform3i(U.u_m, gb.m[0], gb.m[1], gb.m[2]); gl.uniform1i(U.u_ivw, gb.ivw);
+  gl.bindVertexArray(GLR.rvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  // (the quad renderer's state to be set again: framebuffer, viewport, program, blend, scissor, stencil)
+  gl.enable(gl.BLEND); GLR.cur = {};
+  GLR.rbSeq = gb.seq; GLR.stats.draws++; GLR.stats.uploads += 2; GLR.stats.upPx += RAY_N + gb.n;
 }
 // a batch of records (the sky's puffs of one cloud, or a deck's live shapes): kept on the GPU until it changes
 let GLP_UID = 0;
@@ -15783,7 +15834,7 @@ class GLCtx {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     GLR.stats.draws++; GLR.stats.quads++;
   }
-  drawRays(rt, rb, NS, RAY_N, dx, dy, dw, dh, x0, y0, x1, y1, sun, p, kk, k2, col) {
+  drawRays(rt, rb, NS, RAY_N, dx, dy, dw, dh, x0, y0, x1, y1, sun, p, kk, k2, col, gb) {
     if (GLR.lost) return;
     const gl = GLR.gl, t = this.target, U = GLR.rU;
     glBegin(this, 'source-over'); glFlush();
@@ -15794,13 +15845,17 @@ class GLCtx {
       GLR.rtex = glNewTex(0, 0, gl.NEAREST); GLR.rbtex = glNewTex(0, 0, gl.NEAREST); GLR.rtW = NS; GLR.rtH = RAY_N;
       gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, GLR.rtex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, NS, RAY_N, 0, gl.RED, gl.UNSIGNED_BYTE, null);
       gl.bindTexture(gl.TEXTURE_2D, GLR.rbtex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, RAY_N, 1, 0, gl.RG, gl.UNSIGNED_BYTE, null);
+      if (GLR.rbfbo) gl.deleteFramebuffer(GLR.rbfbo); GLR.rbfbo = null; GLR.rbSeq = -1;
     }
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, GLR.rtex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NS, RAY_N, gl.RED, gl.UNSIGNED_BYTE, rt); GLR.unit[0] = GLR.rtex;
+    if (gb) { if (GLR.rbSeq !== gb.seq) { glRayBuild(gb, NS, RAY_N); glApplyState(); } }   // (engine stage 8: the steps made on the GPU; ?raygpu=0 uploaded as before)
+    else { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, GLR.rtex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NS, RAY_N, gl.RED, gl.UNSIGNED_BYTE, rt); GLR.unit[0] = GLR.rtex; GLR.rbSeq = -1; }
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, GLR.rtex); GLR.unit[0] = GLR.rtex;
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, GLR.rbtex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, RAY_N, 1, gl.RG, gl.UNSIGNED_BYTE, rb); GLR.unit[1] = GLR.rbtex;
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
     for (const i of [0, 1]) if (GLR.unitS[i] !== GLR.near) { gl.bindSampler(i, GLR.near); GLR.unitS[i] = GLR.near; }
-    GLR.stats.uploads += 2; GLR.stats.upPx += NS * RAY_N + RAY_N;
+    GLR.stats.uploads += gb ? 1 : 2; GLR.stats.upPx += (gb ? 0 : NS * RAY_N) + RAY_N;
     gl.useProgram(GLR.rprog); GLR.cur.prog = 3;
     gl.uniform2f(U.u_size, t._w, t._h);
     this._corners(dx, dy, dw, dh);
@@ -18651,7 +18706,43 @@ const RAY_N = 720, rayTier = new Uint8Array(RAY_N), rayLen = new Float32Array(RA
 const RAY_COS = new Float64Array(RAY_N), RAY_SIN = new Float64Array(RAY_N);
 for (let bi = 0; bi < RAY_N; bi++) { const a = (bi + 0.5) / RAY_N * 2 * Math.PI - Math.PI; RAY_COS[bi] = Math.cos(a); RAY_SIN[bi] = Math.sin(a); }
 const rayHit = new Uint8Array(RAY_N);
-const RAYG = {};   // (the GPU rays' frame: the step and wedge bytes, the sun, the box)
+const RAYG = {};
+// (engine stage 8, Oct 30: the rays' march on the GPU - 40-gl.js GL_RBUILD_FS makes the step bytes from each ray's lobe crossings,
+// sorted by entry step, where JS ran the +1/-1 sums along every ray and packed the bytes; ?raygpu=0 marches them in JS as before)
+const RAY_GPU = !/[?&]raygpu=0/.test(location.search);
+const RAYI = { n: 0, b: new Int32Array(4096), i0: new Int32Array(4096), i1: new Int32Array(4096), cnt: new Int32Array(Math.max(RAY_N, 4096) + 1), ray: new Int32Array(RAY_N * 4), iv: new Int32Array(8192), seq: 0 };
+function rayIvPush(bi, i0, i1) {
+  const R = RAYI;
+  if (R.n >= R.b.length) { const m = R.b.length * 2, g = a => { const z = new Int32Array(m); z.set(a); return z; }; R.b = g(R.b); R.i0 = g(R.i0); R.i1 = g(R.i1); }
+  R.b[R.n] = bi; R.i0[R.n] = i0; R.i1[R.n] = i1; R.n++;
+}
+// each ray's crossings in one list, by ray and within a ray by entry step (two counting sorts), with its first step outside every
+// lobe (the cloud the sun is behind ends there) and the light's levels as whole steps of cloud: level 3 below m[0] steps, 2 below
+// m[1], 1 below m[2] (od = steps x sig, as the march's sums)
+function rayIvPack(NS, sig) {
+  const R = RAYI, n = R.n, IVW = 1024, rows = Math.max(1, Math.ceil(n / IVW));
+  let cnt = R.cnt; if (cnt.length < NS + 2) cnt = R.cnt = new Int32Array(NS + 2);
+  const tmp = R.tmp && R.tmp.length >= n ? R.tmp : (R.tmp = new Int32Array(Math.max(n, 4096) * 2)), ord = R.ord && R.ord.length >= n ? R.ord : (R.ord = new Int32Array(Math.max(n, 4096) * 2));
+  cnt.fill(0, 0, NS + 1); for (let k = 0; k < n; k++) cnt[R.i0[k] + 1]++;
+  for (let i = 0; i < NS; i++) cnt[i + 1] += cnt[i];
+  for (let k = 0; k < n; k++) tmp[cnt[R.i0[k]]++] = k;
+  cnt.fill(0, 0, RAY_N + 1); for (let k = 0; k < n; k++) cnt[R.b[k] + 1]++;
+  for (let b = 0; b < RAY_N; b++) cnt[b + 1] += cnt[b];
+  const ray = R.ray; ray.fill(0);
+  for (let b = 0; b < RAY_N; b++) { ray[b * 4] = cnt[b]; ray[b * 4 + 1] = cnt[b + 1] - cnt[b]; }
+  for (let q = 0; q < n; q++) { const k = tmp[q]; ord[cnt[R.b[k]]++] = k; }
+  if (R.iv.length < rows * IVW * 2) R.iv = new Int32Array(rows * IVW * 2);
+  const iv = R.iv;
+  for (let q = 0; q < n; q++) { const k = ord[q]; iv[q * 2] = R.i0[k]; iv[q * 2 + 1] = R.i1[k]; }
+  for (let b = 0; b < RAY_N; b++) {
+    if (!rayHit[b]) continue;
+    const o = ray[b * 4], c = ray[b * 4 + 1]; let r = 0;
+    for (let q = o; q < o + c; q++) { if (iv[q * 2] > r) break; if (iv[q * 2 + 1] > r) r = iv[q * 2 + 1]; }
+    ray[b * 4 + 2] = r; ray[b * 4 + 3] = 1;
+  }
+  const lev = t => { let m = Math.max(0, Math.ceil(t / sig)); while (m > 0 && (m - 1) * sig >= t) m--; while (m * sig < t) m++; return m; };
+  return { ray, iv, ivw: IVW, rows, n, m: [lev(0.415), lev(1.109), lev(3.22)], seq: ++R.seq };
+}   // (the GPU rays' frame: the step and wedge bytes, the sun, the box)
 // (SUN_DIRECT, Oct 28, two of the user's snapshots: a low sun under an overcast (17:36, SKY 0.9) gave "grey blobs" - every billow
 // standing out lit, the rest in hard shade - while a high sun in a heavy sky (10:00, SKY 0.93) is to stay "a uniform cloud mass
 // that is backlit". First try (v25) faded the shadows with the sun disc's own fade: under an overcast every billow then lit as its
@@ -18668,8 +18759,10 @@ function drawRays2(sunX, sunY, horY, vis) {
   const hb = (P.rayhid ?? 1) * sunHid, amt = (P.rays ?? 0) * E.rayK * (1 + 0.9 * hb);   // (WHEN HIDDEN: stronger behind a cloud)
   if (amt < 0.02 || horY <= 0) return false;
   const maxD = H * Zg * P.raylen * (1 + 0.5 * hb), NS = Math.ceil(maxD / RAY_STEP) + 2;
-  if (rayNS !== NS || rayDiff.length !== RAY_N * NS) { rayNS = NS; rayDiff = new Float32Array(RAY_N * NS); rayT = new Uint8Array(RAY_N * NS); rayIn = new Uint8Array(RAY_N * NS); }
-  rayDiff.fill(0); rayHit.fill(0);
+  const gpu = RAY_GPU;
+  if (gpu) { rayNS = NS; RAYI.n = 0; }
+  else if (rayNS !== NS || rayDiff.length !== RAY_N * NS) { rayNS = NS; rayDiff = new Float32Array(RAY_N * NS); rayT = new Uint8Array(RAY_N * NS); rayIn = new Uint8Array(RAY_N * NS); }
+  if (!gpu) rayDiff.fill(0); rayHit.fill(0);
   // where each ray is inside a lobe: every lobe's screen ellipse (grown by half a puff), its entry and exit along each ray it
   // crosses, added as +1 / −1 at those steps (a running sum then counts the lobes the ray is in at each step)
   for (const c of vis) {
@@ -18691,7 +18784,9 @@ function drawRays2(sunX, sunY, horY, vis) {
         const sq = Math.sqrt(D), tIn = Math.max(0, (-B - sq) / (2 * A)), tOut = (-B + sq) / (2 * A);
         if (tOut <= 0) continue;
         const i0 = Math.floor(tIn / RAY_STEP); if (i0 >= NS) continue;
-        rayDiff[bi * NS + i0] += 1; const i1 = Math.floor(tOut / RAY_STEP); if (i1 < NS) rayDiff[bi * NS + i1] -= 1; rayHit[bi] = 1;
+        const i1 = Math.floor(tOut / RAY_STEP);
+        if (gpu) rayIvPush(bi, i0, i1 < NS ? i1 : NS); else { rayDiff[bi * NS + i0] += 1; if (i1 < NS) rayDiff[bi * NS + i1] -= 1; }
+        rayHit[bi] = 1;
       }
     }
   }
@@ -18702,7 +18797,7 @@ function drawRays2(sunX, sunY, horY, vis) {
   // that part of the cloud is seen from its shaded side; the rays come out of its edges)
   // (a ray no lobe crosses is all sky, full light: not walked, the screen pass knows it by rayHit; and once the light left is
   // none (level 0) it stays none, and nothing more of that ray is drawn: the rest of it set at once)
-  for (let bi = 0; bi < RAY_N; bi++) {
+  if (!gpu) for (let bi = 0; bi < RAY_N; bi++) {
     if (!rayHit[bi]) continue;
     let n = 0, od = 0, cover = true; const o = bi * NS;
     for (let i = 0; i < NS; i++) {
@@ -18724,8 +18819,11 @@ function drawRays2(sunX, sunY, horY, vis) {
     if (y1 < y0) return false;
     const G = RAYG;
     if (!G.rt || G.rt.length !== RAY_N * NS) { G.rt = new Uint8Array(RAY_N * NS); G.rb = new Uint8Array(RAY_N * 2); for (let bi = 0; bi < RAY_N; bi++) { G.rb[bi * 2] = rayTier[bi]; G.rb[bi * 2 + 1] = Math.round(rayLen[bi] * 255); } }
-    const rt = G.rt; rt.fill(0);
-    for (let bi = 0; bi < RAY_N; bi++) { if (!rayHit[bi]) continue; const o = bi * NS; for (let i = 0; i < NS; i++) rt[o + i] = rayT[o + i] | (rayIn[o + i] << 2) | 16; }
+    if (gpu) G.gb = rayIvPack(NS, sig);
+    else {
+      G.gb = null; const rt = G.rt; rt.fill(0);
+      for (let bi = 0; bi < RAY_N; bi++) { if (!rayHit[bi]) continue; const o = bi * NS; for (let i = 0; i < NS; i++) rt[o + i] = rayT[o + i] | (rayIn[o + i] << 2) | 16; }
+    }
     G.NS = NS; G.sun = [sunX, sunY]; G.p = [maxD, NS, RAY_N, RAY_STEP]; G.K = K; G.k2 = [amt, inK, horY, 4.5 * S * Zg * SUN_K * sunSizeK() * 1.15]; G.col = [cr / 255, cg / 255, cb / 255]; G.y0 = y0; G.y1 = y1;   // (k2[3]: the sun's disc, a little more - the rays start behind it, 40-gl.js GL_RFS)
     return true;
   }
@@ -18865,7 +18963,7 @@ function outSun(G) {
 function outRays(G) {
   const V = VIEW, n = G.y1 - G.y0 + 1, dx = picX(V, -CPX), dy = picY(V, G.y0 * CPX), dw = CW * CPX * M, dh = n * CPX * M;
   if (n <= 0 || dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4) return;
-  ctx.drawRays(G.rt, G.rb, G.NS, RAY_N, dx, dy, dw, dh, 0, G.y0, CW, G.y1 + 1, G.sun, G.p, G.K, G.k2, G.col);
+  ctx.drawRays(G.rt, G.rb, G.NS, RAY_N, dx, dy, dw, dh, 0, G.y0, CW, G.y1 + 1, G.sun, G.p, G.K, G.k2, G.col, G.gb);
 }
 // a deck's band (BY0..BY1, a row more each side) at its sub-cell offset frac; the GPU: its whole layer
 function deckOut(lay, B, frac) {
