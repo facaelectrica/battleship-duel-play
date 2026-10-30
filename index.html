@@ -3011,8 +3011,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 284;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 20:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 285;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 20:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -29267,13 +29267,17 @@ function craneCpu(cr, dt, mv, dn) {
 }
 /* ---- the boxes: where each one is, hit, falling, sinking ---- */
 // every box with where it is now (its middle) and its tilt: on a pier stack, on a ship, held, loose
-function contPlaces() {
+// (near(x0, x1): only the ships with something that could hit their boxes between x0 and x1 - a ship's boxes are each a
+// trip through the waves (cargoAt -> surfaceY0), ~150 a ship, and every shell asked for all of them every physics step:
+// ~3 ms a frame in a fight in OPEN WORLD, Oct 29. A box rides within her length of her middle, broken or not)
+const CONT_REACH = c => civLen(c) + 300;
+function contPlaces(near) {
   const P = [];
   for (const cr of cranes) {
     cr.slots.forEach(s => s.stack.forEach((k, j) => P.push([k, s.x, DECK_Y - CONT_H * (j + 0.5), 0, 'dock'])));
     if (cr.load) P.push([cr.load, cr.tx, cr.hy + 3 + CONT_H / 2, 0, 'held', cr]);
   }
-  for (const c of civShips) if (c.cargo && (c.state === 'sail' || c.state === 'sink')) c.cargo.forEach((st, i) => st.forEach((k, j) => { const [x, y, a] = cargoAt(c, i, j); P.push([k, x, y, a, 'ship', c, i]); }));
+  for (const c of civShips) if (c.cargo && (c.state === 'sail' || c.state === 'sink') && (!near || near(c.x - CONT_REACH(c), c.x + CONT_REACH(c)))) c.cargo.forEach((st, i) => st.forEach((k, j) => { const [x, y, a] = cargoAt(c, i, j); P.push([k, x, y, a, 'ship', c, i]); }));
   for (const k of containers) if (k.where === 'free' || k.where === 'rest' || k.where === 'hook') P.push([k, k.x, k.y, k.a, k.where]);
   return P;
 }
@@ -29315,7 +29319,7 @@ function cargoAway(c) {
 // lying on a ship's deck, knocked off into the sea, burnt)
 function contHit(x, y, dmg, vx, P) {
   if (!LAND || !containers.length) return false;
-  for (const [k, cx, cy, ca, where, owner, i] of P || contPlaces()) {
+  for (const [k, cx, cy, ca, where, owner, i] of P || contPlaces((x0, x1) => x >= x0 && x <= x1)) {
     if (where === 'ship' && owner.cargo[i].indexOf(k) < 0) continue;   // (already knocked off this frame)
     if (Math.abs(x - cx) > CONT_W / 2 + 1 || Math.abs(y - cy) > CONT_H / 2 + 1) continue;
     spawnSparks(x, y, 10, 160); sfxImpact(x);
@@ -29333,15 +29337,18 @@ function contHit(x, y, dmg, vx, P) {
 }
 function stepContainers(dt) {
   // rounds and shells through a box on the pier, on the crane or loose (the ship's are caught first in civHit)
-  let P = contPlaces();
+  // (only the ships with a round or shell within reach - contPlaces)
+  const PX = []; for (const b of bullets) PX.push(b.x); for (const q of shells) PX.push(q.x);
+  const nearAny = (x0, x1) => { for (const x of PX) if (x >= x0 && x <= x1) return true; return false };
+  let P = contPlaces(nearAny);
   // (the optimization pass: the boxes' columns of the world, 64 units each - a round or shell in none of them is passed
   // over at once; the harbours are far apart, so one box round all of them would hold most of the sea)
   const cols = new Set(); let y0 = 1e9, y1 = -1e9;
   for (const q of P) { cols.add(Math.floor(q[1] / 64)); if (q[2] < y0) y0 = q[2]; if (q[2] > y1) y1 = q[2]; }
   const near = (x, y) => y > y0 - CONT_H && y < y1 + CONT_H && (cols.has(Math.floor(x / 64)) || cols.has(Math.floor((x - CONT_W) / 64)) || cols.has(Math.floor((x + CONT_W) / 64)));
   if (P.length) {
-    for (const b of bullets) if (!b._ct && near(b.x, b.y) && contHit(b.x, b.y, 0.2, b.vx, P)) { b._ct = true; b.spent = 0; P = contPlaces(); }
-    for (let s = shells.length - 1; s >= 0; s--) { const q = shells[s]; if (!q.under && !q.click && near(q.x, q.y) && contHit(q.x, q.y, 1, q.vx, P)) { shells.splice(s, 1); P = contPlaces(); } }
+    for (const b of bullets) if (!b._ct && near(b.x, b.y) && contHit(b.x, b.y, 0.2, b.vx, P)) { b._ct = true; b.spent = 0; P = contPlaces(nearAny); }
+    for (let s = shells.length - 1; s >= 0; s--) { const q = shells[s]; if (!q.under && !q.click && near(q.x, q.y) && contHit(q.x, q.y, 1, q.vx, P)) { shells.splice(s, 1); P = contPlaces(nearAny); } }
   }
   for (const c of civShips) if (c.kind === 'container' && c.state === 'sail' && !c.cargo) shipCargo(c);   // (her load from the start)
   // a ship going down: her boxes ride her, and come away as the water reaches them
