@@ -3030,8 +3030,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 307;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 00:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 308;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 07:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4530,6 +4530,7 @@ function drawPerfPanel(x, y) {
     'SCRIPT ' + f(script) + '  DRAW+GPU ' + f(Math.max(0, (fpsMeter.gap || 0) - script)) + (fillTest.ms >= 0 ? '  FILL ' + fillTest.ms.toFixed(2) + ' ' + fillTest.kind + '  PATH ' + fillTest.path.toFixed(1) + ' VS RECTS ' + fillTest.rects.toFixed(1) : ''),
     (probe.on ? 'PROBING ' + Math.ceil(probe.left) + 'S: ' : probe.done ? 'PROBED: ' : '') + 'PHYS ' + f(perf.phys) + '  SMOKE ' + f(perf.smoke),
     (Q => 'IN PHYS: STEPS ' + f(perf.steps) + '  CPU ' + f(Q.uCpu) + '  SEA ' + f(Q.uWater) + '  SHIPS ' + f(Q.uVehicles) + '  ARMS ' + f((Q.uArms || 0) + (Q.uShells || 0)) + '  LAND ' + f(Q.uLand) + '  OPEN ' + f(Q.uOpenWorld) + '  FX ' + f((Q.uVisuals || 0) + (Q.uRest || 0)))(perf.parts || {}),   // (the world's update by part - Oct 29, the iPad's PHYS 13)
+    schedPanel(),   // (engine stage 7: each scheduled system against its budget - 36-zz-regions)
     'SKY ' + f(P.sky) + '  WORLD ' + f(P.objects) + '  WATER ' + f(P.distort),
     skyNewOn ? (T => 'NEW SKY ' + f(T.back) + '+' + f(T.decks) + '+' + f(T.front) + '+' + f(T.veil1) + '  LAY ' + f(T.out) + '  SMOKE ' + f(T.smoke) + '  BUILD ' + f(T.build) + '/' + Math.round(T.builds || 0) + ' LIT ' + Math.round(T.lit || 0) + ' KEYS ' + Math.round(T.kL || 0) + '/' + Math.round(T.kU || 0) + '/' + Math.round(T.kN || 0) + '/' + Math.round(T.kS || 0) + ' LOBES ' + f(T.lobes) + ' VEIL ' + f(T.veil) + ' GL ' + f(T.gl) + '  SM ' + f(T.smG) + '/' + f(T.smS) + '/' + f(T.smB) + '/' + f(T.smT) + (D => '  PUFF SIZES ' + D.sizes.map(v => v.toFixed(1)).join('/') + ' LOD ' + D.lod + '/' + D.n)(NSKY.deckSizes()))(NSKY.FT) : '',
     'TINT ' + f(P.tint) + '  FX ' + f(P.overlays) + '  HUD ' + f((P.console || 0) + (P.dots || 0) + (P.topui || 0)),
@@ -4551,7 +4552,7 @@ function drawPerfPanel(x, y) {
   const w = 6 + Math.max(...lines.map(l => textWidth(l))) * 2, h = lines.length * 14 + 8;
   perfPanelRect[0] = x - w; perfPanelRect[1] = y; perfPanelRect[2] = w + 4; perfPanelRect[3] = h;
   ug.fillStyle = 'rgba(4,7,15,0.82)'; ug.fillRect(x - w, y, w + 4, h);
-  lines.forEach((l, i) => drawText(ug, l, x - 2, y + 6 + i * 14, '#dfe8f0', 2, 'right'));
+  lines.forEach((l, i) => drawText(ug, l, x - 2, y + 6 + i * 14, / OVER\b/.test(l) ? '#ff6a5a' : '#dfe8f0', 2, 'right'));   // (a system over its budget: red)
 }
 function drawTopUI() {
   const L = topLayout();
@@ -12110,6 +12111,7 @@ function stepWeather(dt) {
 const uLap = (k, t0) => { const t1 = performance.now(); FT[k] = (FT[k] || 0) + t1 - t0; return t1; };
 function physics(dt) {
   let ut = performance.now();
+  regionsTick();                                                       // (the regions' tiers this tick - 36-zz-regions)
   for (const sh of ships) if (sh.state === 'afloat') coupleShip(sh);
   for (let k = 0; k < WATER_SUBSTEPS; k++) stepWater(dt / WATER_SUBSTEPS, k === WATER_SUBSTEPS - 1);
   ut = uLap('uWater', ut);
@@ -12190,6 +12192,68 @@ function stepStir(dt) {
   const t = stirA; stirA = stirB; stirB = t;
 }
 const stirAt = x => { const c = Math.round(x / STIR_CELL); return c >= 0 && c < stirA.length ? stirA[c] : 0; };
+
+/* THE ENGINE'S REGIONS, TIERS AND SCHEDULER (engine migration, stage 2 - plan: https://claude.ai/artifact/7osEef5ubafK3gkAEjY3Dt).
+   The world is cut into regions one screen (VIEW_W) wide. Each tick the views (the two half views; online, every player's) set
+   every region's tier by how far it is from the nearest view, in screens:
+     0 ACTIVE  in a view or within one screen of it   - stepped every tick, exactly as before
+     1 NEAR    within 3 screens                        - 15 times a second, with the time since its last step
+     2 FAR     further out                             - twice a second, with the time since
+   A system that is scheduled steps each of its things through schedStep(o, x, dt, fn): ACTIVE things get fn(dt) as they always
+   did; the others build up their time and get it in steps of at most the system's own largest step when their turn comes
+   (staggered by a number each thing keeps, so a fleet's far ships don't all step on the same tick). Nothing on screen changes:
+   what is in or near a view is stepped every tick. The user, Oct 29: things far from every view may update less often and
+   catch up when a player gets near. Rules for every system: rules.md section 6, "Systems". */
+const REG = {
+  w: 1333,                // (a region's width: one screen, VIEW_W)
+  spans: [],              // (each view's [left, right] in world units, this tick)
+  tick: 0,                // (physics ticks so far)
+  on: true,               // (false: everything ACTIVE - the old behaviour, for comparing)
+  sid: 0,                 // (the next stagger number)
+  per: [1, 8, 60],        // (ticks between steps per tier at 120 ticks a second: every tick, 15 Hz, 2 Hz)
+  frame: 0,               // (frames so far: the clock of a system stepped once a frame)
+  perF: [1, 4, 30],       // (frames between steps per tier at 60 frames a second)
+};
+// (the systems that are scheduled: name -> { n: things stepped this frame by tier, ms, budget })
+const SYSTEMS = {}, SCHED_DONE = 1;
+function schedSystem(name, budget, maxH, perFrame) { return SYSTEMS[name] || (SYSTEMS[name] = { name, budget, maxH: maxH || 1 / 30, frame: !!perFrame, n: [0, 0, 0], ms: 0, t: 0 }); }   // (perFrame: stepped once a frame, not once a physics tick)
+// the views' spans, once a physics tick (the camera of the frame before: the world is stepped before the camera moves)
+function regionsTick() {
+  REG.tick++; REG.w = VIEW_W; REG.spans.length = 0;
+  for (const v of cam.view) { if (!v || !(v.z > 0)) continue; REG.spans.push(v.l, v.l + halfWorldW(v.z)); }
+}
+// a place's tier: its distance from the nearest view's span, in screens
+function tierAt(x) {
+  if (!REG.on || !REG.spans.length) return 0;
+  const W = REG.w; let d = Infinity;
+  for (let i = 0; i < REG.spans.length; i += 2) {
+    const l = REG.spans[i], r = REG.spans[i + 1], e = x < l ? l - x : x > r ? x - r : 0;
+    if (e < d) d = e;
+  }
+  return d <= W ? 0 : d <= 3 * W ? 1 : 2;
+}
+// step one thing of a scheduled system: fn(h) with the time it is owed (an ACTIVE or pinned thing that was far gets what it is
+// owed first, in steps of at most the system's largest). Returns true when it was stepped this tick.
+function schedStep(S, o, x, dt, fn, pin) {
+  const t = pin ? 0 : tierAt(x);                                       // (pin: stepped every tick wherever it is - yours, hit, falling...)
+  S.n[t]++;
+  if (t === 0 && !o._sa) { fn(dt); return true; }                      // (ACTIVE and up to date: as it always was)
+  if (o._sk === undefined) o._sk = REG.sid++;
+  o._sa = (o._sa || 0) + dt;
+  if (t !== 0 && (S.frame ? (REG.frame + o._sk) % REG.perF[t] : (REG.tick + o._sk) % REG.per[t])) return false;   // (not its turn: its time builds up)
+  let T = o._sa; o._sa = 0;
+  const n = Math.max(1, Math.ceil(T / S.maxH - 1e-9)), h = T / n;
+  for (let k = 0; k < n; k++) if (fn(h) === SCHED_DONE) break;         // (SCHED_DONE: it's gone - no more steps for it)
+  return true;
+}
+// a frame's start for the perf panel's counts
+function schedFrame() { REG.frame++; for (const k in SYSTEMS) { const S = SYSTEMS[k]; S.n0 = S.n.slice(); S.n[0] = S.n[1] = S.n[2] = 0; S.ms += ((S.t || 0) - S.ms) * 0.05; S.t = 0; } }
+// (stage 7: each system's time a frame against its budget - a system's step adds to S.t: const t0 = performance.now(); ...; S.t += performance.now() - t0)
+// the perf panel's line: each system's ms against its budget and how many of its things are ACTIVE, NEAR, FAR; over its budget: OVER
+function schedPanel() {
+  const L = []; for (const k in SYSTEMS) { const S = SYSTEMS[k], n = S.n0 || S.n; L.push(k.toUpperCase() + ' ' + S.ms.toFixed(1) + '/' + S.budget + ' ' + n[0] + ' ' + n[1] + ' ' + n[2] + (S.ms > S.budget ? ' OVER' : '')); }
+  return L.length ? 'SYSTEMS MS/BUDGET ACTIVE NEAR FAR:  ' + L.join('  ') : '';
+}
 
 /* ================================================================
    Birds: 100 for the whole round, no new ones. Seagulls sit on the
@@ -41955,6 +42019,7 @@ function frameBody(now) {
   last = now; frameDt = dt || 1 / 60;
   const t0 = performance.now();
   buildBudget = 4;
+  schedFrame();
   netStep(); linkPump(dt);
   // (also holds still behind the 'turn the iPad' notice; and, user Oct 25 late, while the sliders are open or the eye
   // is shut - photo mode, 18-zz-photo)
