@@ -3052,8 +3052,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 343;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 11:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 344;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 11:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14147,7 +14147,8 @@ const GLR = {
   pix: null, screen: null, onRestore: [], uSize: null, unit: [], unitS: [],
   stats: { draws: 0, quads: 0, uploads: 0, upPx: 0, atlas: 0, fills: 0, clips: 0 }, shown: {},
 };
-const GLB = {};                                   // blend modes: [srcRGB, dstRGB, srcA, dstA]
+const GLB = {};
+const GL_TEXFIX = !/[?&]texfix=0/.test(location.search);   // (the sprites' texel choice from the pixel's place - drawImage, GL_FS)                                   // blend modes: [srcRGB, dstRGB, srcA, dstA]
 const GL_VS = `#version 300 es
 layout(location=0) in vec2 a_pos;
 layout(location=1) in vec2 a_uv;
@@ -14155,20 +14156,25 @@ layout(location=2) in vec4 a_col;
 layout(location=3) in vec2 a_aux;
 layout(location=4) in vec4 a_mul;
 layout(location=5) in vec4 a_add;
+layout(location=6) in vec4 a_o;
+layout(location=7) in vec2 a_s;
 uniform vec2 u_size;
 out vec2 v_uv; out vec4 v_col; out vec4 v_mul; out vec4 v_add;
+flat out vec4 v_o; flat out vec2 v_s;
 flat out int v_mode; flat out int v_slot; flat out float v_row; flat out float v_k;
 void main() {
   vec2 p = a_pos / u_size;
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-  v_uv = a_uv; v_col = a_col; v_mul = a_mul; v_add = a_add;
+  v_uv = a_uv; v_col = a_col; v_mul = a_mul; v_add = a_add; v_o = a_o; v_s = a_s;
   int q = int(a_aux.x + 0.5);
   v_mode = q & 7; v_slot = (q >> 3) & 15; v_row = float(q >> 7); v_k = a_aux.y;
 }`;
 const GL_FS = `#version 300 es
 precision highp float; precision highp int;
 uniform sampler2D u_t0, u_t1, u_t2, u_t3, u_t4, u_t5, u_t6, u_t7, u_grad;
+uniform vec2 u_size;
 in vec2 v_uv; in vec4 v_col; in vec4 v_mul; in vec4 v_add;
+flat in vec4 v_o; flat in vec2 v_s;
 flat in int v_mode; flat in int v_slot; flat in float v_row; flat in float v_k;
 out vec4 o;
 vec4 tx(int s, vec2 uv) {
@@ -14181,13 +14187,19 @@ vec4 tx(int s, vec2 uv) {
 }
 void main() {
   vec2 ddx = dFdx(v_uv), ddy = dFdy(v_uv);              // (taken before any branch: a scaled sprite's footprint)
+  // (engine stage 6, Oct 30, the texel choice: an upright sprite (v_s set) works out its texture coordinate from this pixel's
+  // place relative to its own corner - (pixel - corner) x texels a pixel + the corner's - not from the coordinate interpolated
+  // across the triangle, whose last bits depend on where on the target the quad sits and the target's size. A pixel's centre
+  // right on a texel's edge then picks the same texel on the screen and in a kept layer, on every GPU. ?texfix=0: the old way)
+  vec2 uv = v_uv;
+  if (v_s.x != 0.0) { uv = v_o.zw + (vec2(gl_FragCoord.x, u_size.y - gl_FragCoord.y) - v_o.xy) * v_s; ddx = vec2(v_s.x, 0.0); ddy = vec2(0.0, v_s.y); }
   if (v_mode == 0) { o = v_col; return; }
-  if (v_mode == 1) { o = tx(v_slot, v_uv) * v_col; return; }
+  if (v_mode == 1) { o = tx(v_slot, uv) * v_col; return; }
   if (v_mode == 4) {
     // a tinted sprite (the copies darkArt / warmed / fogged / coastTinted / moonArt 'mB' made on canvases):
     // colour x mul + add, the add laid over the shape as 'source-atop' would; mul.a set: every pixel of the
     // shape made opaque first (the coast's recolouring did that)
-    vec4 t = tx(v_slot, v_uv), m = v_mul;
+    vec4 t = tx(v_slot, uv), m = v_mul;
     if (v_mul.a > 0.5) { if (t.a <= 0.0) { o = vec4(0.0); return; } o = vec4(t.rgb / t.a * m.rgb + v_add.rgb, 1.0) * v_col; }
     else o = vec4(t.rgb * m.rgb + v_add.rgb * t.a, t.a) * v_col;
     return;
@@ -14200,7 +14212,7 @@ void main() {
     vec4 acc = vec4(0.0);
     for (int j = 0; j < 4; j++) { if (j >= n) break;
       for (int i = 0; i < 4; i++) { if (i >= n) break;
-        acc += tx(v_slot, v_uv + ddx * ((float(i) + 0.5) / float(n) - 0.5) + ddy * ((float(j) + 0.5) / float(n) - 0.5)); } }
+        acc += tx(v_slot, uv + ddx * ((float(i) + 0.5) / float(n) - 0.5) + ddy * ((float(j) + 0.5) / float(n) - 0.5)); } }
     vec4 t = acc / float(n * n);
     if ((q & 8) != 0) { if (t.a < 0.4314) { o = vec4(0.0); return; } t = vec4(t.rgb / t.a, 1.0); }
     t.rgb = t.rgb * v_mul.rgb + v_add.rgb * t.a;
@@ -15028,15 +15040,19 @@ function glSetup() {
   GLR.uSize = gl.getUniformLocation(p, 'u_size');
   // the quad batch: 4 vertices a quad, 9 numbers a vertex (x, y, u, v, colour as 4 bytes, mode, k, and a tint's
   // multiply and add as 4 bytes each)
-  GLR.ab = new ArrayBuffer(GLR.MAXQ * 4 * 36); GLR.f32 = new Float32Array(GLR.ab); GLR.u32 = new Uint32Array(GLR.ab);
+  // (engine stage 6, Oct 30: and an upright sprite's corner on the target, its texture coordinate there, and texels a pixel
+  // across and down - 6 more, 15 a vertex - for the texel choice in the fragment shader; 0 texels a pixel: not used)
+  GLR.ab = new ArrayBuffer(GLR.MAXQ * 4 * 60); GLR.f32 = new Float32Array(GLR.ab); GLR.u32 = new Uint32Array(GLR.ab);
   GLR.vao = gl.createVertexArray(); gl.bindVertexArray(GLR.vao);
   GLR.vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, GLR.vbo); gl.bufferData(gl.ARRAY_BUFFER, GLR.ab.byteLength, gl.STREAM_DRAW);
-  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 36, 0);
-  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 36, 8);
-  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, 36, 16);
-  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 36, 20);
-  gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, 36, 28);
-  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.UNSIGNED_BYTE, true, 36, 32);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 60, 0);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 60, 8);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, 60, 16);
+  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 60, 20);
+  gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, 60, 28);
+  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.UNSIGNED_BYTE, true, 60, 32);
+  gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 4, gl.FLOAT, false, 60, 36);
+  gl.enableVertexAttribArray(7); gl.vertexAttribPointer(7, 2, gl.FLOAT, false, 60, 52);
   const idx = new Uint16Array(GLR.MAXQ * 6);
   for (let i = 0, v = 0; i < idx.length; i += 6, v += 4) { idx[i] = v; idx[i + 1] = v + 1; idx[i + 2] = v + 2; idx[i + 3] = v; idx[i + 4] = v + 2; idx[i + 5] = v + 3; }
   GLR.ibo = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, GLR.ibo); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
@@ -15393,7 +15409,7 @@ function glFlush() {
   if (GLR.cur.prog !== 1) { gl.useProgram(GLR.prog); GLR.cur.prog = 1; }
   if (GLR.cur.vao !== 1) { gl.bindVertexArray(GLR.vao); GLR.cur.vao = 1; }
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.vbo);
-  gl.bufferData(gl.ARRAY_BUFFER, GLR.f32, gl.STREAM_DRAW, 0, n * 36);
+  gl.bufferData(gl.ARRAY_BUFFER, GLR.f32, gl.STREAM_DRAW, 0, n * 60);
   const sl = GLR.slots;
   for (let i = 0; i < sl.length; i++) {
     if (GLR.unit[i] !== sl[i].tex) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, sl[i].tex); GLR.unit[i] = sl[i].tex; }
@@ -15422,14 +15438,18 @@ function glBegin(ctx, blend) {
   if (clip && t.stencilClip !== s.clip) glBuildClip(t, s.clip);
   if (GLR.n >= GLR.MAXQ) glFlush();
 }
-function glQuad(x0, y0, x1, y1, x2, y2, x3, y3, u0, v0, u1, v1, u2, v2, u3, v3, col, aux, k, mul = 0, add = 0) {
+function glQuad(x0, y0, x1, y1, x2, y2, x3, y3, u0, v0, u1, v1, u2, v2, u3, v3, col, aux, k, mul = 0, add = 0, ox = 0, oy = 0, ou = 0, ov = 0, su = 0, sv = 0) {
   if (GLR.n >= GLR.MAXQ) glFlush();
   const f = GLR.f32, u = GLR.u32;
-  const o = GLR.n * 36;
+  const o = GLR.n * 60;
   f[o] = x0; f[o + 1] = y0; f[o + 2] = u0; f[o + 3] = v0; u[o + 4] = col; f[o + 5] = aux; f[o + 6] = k; u[o + 7] = mul; u[o + 8] = add;
-  f[o + 9] = x1; f[o + 10] = y1; f[o + 11] = u1; f[o + 12] = v1; u[o + 13] = col; f[o + 14] = aux; f[o + 15] = k; u[o + 16] = mul; u[o + 17] = add;
-  f[o + 18] = x2; f[o + 19] = y2; f[o + 20] = u2; f[o + 21] = v2; u[o + 22] = col; f[o + 23] = aux; f[o + 24] = k; u[o + 25] = mul; u[o + 26] = add;
-  f[o + 27] = x3; f[o + 28] = y3; f[o + 29] = u3; f[o + 30] = v3; u[o + 31] = col; f[o + 32] = aux; f[o + 33] = k; u[o + 34] = mul; u[o + 35] = add;
+  f[o + 9] = ox; f[o + 10] = oy; f[o + 11] = ou; f[o + 12] = ov; f[o + 13] = su; f[o + 14] = sv;
+  f[o + 15] = x1; f[o + 16] = y1; f[o + 17] = u1; f[o + 18] = v1; u[o + 19] = col; f[o + 20] = aux; f[o + 21] = k; u[o + 22] = mul; u[o + 23] = add;
+  f[o + 24] = ox; f[o + 25] = oy; f[o + 26] = ou; f[o + 27] = ov; f[o + 28] = su; f[o + 29] = sv;
+  f[o + 30] = x2; f[o + 31] = y2; f[o + 32] = u2; f[o + 33] = v2; u[o + 34] = col; f[o + 35] = aux; f[o + 36] = k; u[o + 37] = mul; u[o + 38] = add;
+  f[o + 39] = ox; f[o + 40] = oy; f[o + 41] = ou; f[o + 42] = ov; f[o + 43] = su; f[o + 44] = sv;
+  f[o + 45] = x3; f[o + 46] = y3; f[o + 47] = u3; f[o + 48] = v3; u[o + 49] = col; f[o + 50] = aux; f[o + 51] = k; u[o + 52] = mul; u[o + 53] = add;
+  f[o + 54] = ox; f[o + 55] = oy; f[o + 56] = ou; f[o + 57] = ov; f[o + 58] = su; f[o + 59] = sv;
   GLR.n++;
 }
 // a quad with the context's fill style: corners in user space (ux, uy) and on the target (dx, dy)
@@ -15647,13 +15667,16 @@ class GLCtx {
     if (E.flip) { v0 = 1 - v0; v1 = 1 - v1; }
     this._corners(dx, dy, dw, dh);
     const X = GLC4.x, Y = GLC4.y;
+    // (the texel choice - see the fragment shader: an upright quad gives its corner, the coordinate there and texels a pixel)
+    let su = 0, sv = 0;
+    if (GL_TEXFIX && Y[0] === Y[1] && X[1] === X[2] && Y[2] === Y[3] && X[0] === X[3] && X[1] !== X[0] && Y[3] !== Y[0]) { su = (u1 - u0) / (X[1] - X[0]); sv = (v1 - v0) / (Y[3] - Y[0]); }
     if (G) {
       // taps a side: as many as source pixels fall in a screen pixel, up to 4
       const tpp = Math.max(sw / Math.max(1e-6, Math.abs(dw * Math.hypot(this.s.m[0], this.s.m[1]))), sh / Math.max(1e-6, Math.abs(dh * Math.hypot(this.s.m[2], this.s.m[3]))));
       const nt = G.down ? Math.min(4, Math.max(1, Math.ceil(tpp - 0.05))) : 1;
-      glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 5 + 8 * slot, nt + (G.hard ? 8 : 0), T ? T.mul : 0xffffffff, T ? T.add : 0);
-    } else if (T) glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 4 + 8 * slot, 0, T.mul, T.add);
-    else glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 1 + 8 * slot, 0);
+      glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 5 + 8 * slot, nt + (G.hard ? 8 : 0), T ? T.mul : 0xffffffff, T ? T.add : 0, X[0], Y[0], u0, v0, su, sv);
+    } else if (T) glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 4 + 8 * slot, 0, T.mul, T.add, X[0], Y[0], u0, v0, su, sv);
+    else glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], u0, v0, u1, v0, u1, v1, u0, v1, glAlpha(s.ga), 1 + 8 * slot, 0, 0, 0, X[0], Y[0], u0, v0, su, sv);
   }
   // a rectangle in one packed premultiplied colour (r g b a bytes, as glPack gives): no fill-style string to parse
   fillRectCol(x, y, w, h, col) {
@@ -22596,6 +22619,7 @@ function drawFloorSkins(x0, x1) {
 // the sprites, standing on the floor (rocks sunk into the sand a little), drawn as pixels at this zoom
 // (lk: the ones on a lake bed marked SEA - drawn in the land's pass, under the lake's water - lkOnly picks those)
 function drawReefItems(list, x0, x1, lkOnly) {
+  if (!lkOnly && reefLayerDraw(list, x0, x1)) return;   // (engine stage 6: from the kept layers - 44-zz-reef-layer.js)
   const ga = C.globalAlpha;
   for (const it of list) {
     if (it.x < x0 - 120 || it.x > x1 + 120 || !it.lk !== !lkOnly) continue;
@@ -22672,15 +22696,17 @@ function seabedHit(x, hl, power, vx = 0, cutY, blast) {
       if (!near(B)) continue;
       const st = breakCoral(it.sp, B, cutY === undefined || blast ? B.base : cutY, vx, blast && blast.x, blast && blast.y, kick);
       if (st) it.sp = st; else list.splice(i, 1);
+      REEF_GEN++;                                                 // (the reef's kept layers painted again - 44-zz-reef-layer.js)
     } else if (it.deco) for (let j = it.deco.length - 1; j >= 0; j--) {
       const g = it.deco[j], B = coralBox(it, g);
       if (!near(B)) continue;
       if (g.weed) {                                                   // (weed on a rock: torn off, a floaty piece)
         weedBit({ x: B.left + B.w / 2, kind: 'weed', n: 3, ph: j }, B.base, B.h * (cutY === undefined || blast ? 1 : clamp((B.base - cutY) / B.h, 0, 1)), vx, kick);
-        it.deco.splice(j, 1); continue;
+        it.deco.splice(j, 1); REEF_GEN++; continue;
       }
       const st = breakCoral(g.sp, B, cutY === undefined || blast ? B.base : cutY, vx, blast && blast.x, blast && blast.y, kick);
       if (st) g.sp = st; else it.deco.splice(j, 1);
+      REEF_GEN++;
     }
   }
   // the weed and kelp: torn off at the cut (or near the sand under what landed on it, or in the blast's reach) - floaty
@@ -22974,6 +23000,109 @@ function drawAbyss() {
   C.drawImage(M.G, 0, 0, gw, gh, L0, T0, gw * cs, gh * cs);
   C.imageSmoothingEnabled = sm;
 }
+
+/* ---- engine stage 6, kept layers (Oct 30): the sea floor's boulders, corals and sponges (drawReefItems) never move between
+   frames - each one stands at its own whole world pixel (PX, PY: the world rounded, then the camera's whole pixel taken off).
+   So they are painted once, per region of the world 1024 pixels wide at this zoom, into a kept texture, and each region is
+   laid on the screen as one quad at its whole-pixel place: the same pixels the live loop drew, a handful of draws instead of
+   hundreds. A region is painted again when what it shows changes: the zoom (a new SV, once it has held for a frame - while
+   zooming the live loop draws), the list (a coral broken - seabedHit -, a lake's reef built), the floor's shape, the GL
+   context lost. ?reeflayer=0 turns it off; so does ?texfix=0 (it needs the texel choice below fixed).
+   (Oct 30, the user's GPU - GTX 1660 Super: not exact - battle 84 px, max 105, all at sprite edges in the floor's band; SwiftShader
+   0 px. A sprite drawn scaled with NEAREST picks its texel from the interpolated texture coordinate: where a pixel's centre falls
+   exactly on a texel edge (common at rational scales), which texel wins depends on float rounding of the vertex positions, and
+   those differ between the screen (sprite at x 700 on a 1280-wide target) and the region (x 50 on a 1024-wide one). Fixed by
+   the sprite shader's texel choice from the pixel's place relative to the sprite's own corner - GL_TEXFIX, 40-gl.js - so on again)
+   Exact only where the live loop's cull (it.x within 120 world units of the view) and the layer agree: a frame with an item
+   culled by the loop but reaching into the view is drawn the live way. */
+let REEF_GEN = 0;
+const RLY = { on: GL_TEXFIX && !/[?&]reeflayer=0/.test(location.search), RW: 1024, map: new Map(), last: new Map(), stats: { lay: 0, live: 0, paint: 0 } };
+function reefLayerSig(list) {
+  return [list, list.length, REEF_GEN, rockForms, rockForms.length, floorTab, floorTabS, DOCK_PADS, KR_PAD, COAST_RAMP, pirateWrecks.length, BED_A, BED_B, BED_EXTRA, BED_SHELF, FLOOR_HILLY, SEABED_Y, OWM, GLR.epoch];
+}
+const sigEq = (a, b) => { if (!a || a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && !(a[i] !== a[i] && b[i] !== b[i])) return false; return true; };
+// every item's box at this zoom, in world pixels (the screen's, before the camera), grouped by region
+function reefLayerIndex(list, sv) {
+  const SV0 = SV; SV = sv;
+  const regs = new Map(), RW = RLY.RW, ck = regs.ck = { its: [], base: [], i: 0 };
+  try {
+    for (const it of list) {
+      if (it.lk) continue;
+      const k = REEF_K * SV * (it.s || 1), w = Math.max(1, Math.round(it.sp.width * k)), h = Math.max(1, Math.round(it.sp.height * k));
+      const base = seabedY(it.x) + (it.sink || 0), X = Math.round(Math.round(it.x * SV) - w / 2), Y = Math.round(Math.round(base * SV) - h);
+      ck.its.push(it); ck.base.push(base);
+      let x0 = X, x1 = X + w, y0 = Y, y1 = Y + h;
+      if (it.deco) for (const g of it.deco) {
+        const kk = REEF_K * SV * g.s, gw = Math.max(1, Math.round(g.sp.width * kk)), gh = Math.max(1, Math.round(g.sp.height * kk));
+        const gx = X + Math.round((g.c + 0.5) * k) - (gw >> 1), gy = Y + Math.round((it.top[g.c] + 1.5) * k) - gh;
+        x0 = Math.min(x0, gx); x1 = Math.max(x1, gx + gw); y0 = Math.min(y0, gy); y1 = Math.max(y1, gy + gh);
+      }
+      for (let r = Math.floor(x0 / RW), r1 = Math.floor((x1 - 1) / RW); r <= r1; r++) {
+        let R = regs.get(r);
+        if (!R) regs.set(r, R = { r, items: [], x0: [], x1: [], wx: [], y0: 1e9, y1: -1e9, cv: null });
+        R.items.push(it); R.x0.push(x0); R.x1.push(x1); R.wx.push(it.x);
+        if (y0 < R.y0) R.y0 = y0; if (y1 > R.y1) R.y1 = y1;
+      }
+    }
+  } finally { SV = SV0; }
+  return regs;
+}
+function reefLayerPaint(R, sv) {
+  const w = RLY.RW, h = R.y1 - R.y0;
+  if (!R.cv) R.cv = makeLayer(w, h);
+  const c = R.cv.getContext('2d'), C0 = C, SV0 = SV;
+  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.imageSmoothingEnabled = false;
+  const ox = R.r * w, oy = R.y0;
+  SV = sv;
+  try {
+    // the live loop's own sums, against the region's corner instead of the camera's
+    for (const it of R.items) {
+      const k = REEF_K * SV * (it.s || 1), iw = Math.max(1, Math.round(it.sp.width * k)), ih = Math.max(1, Math.round(it.sp.height * k));
+      const base = seabedY(it.x) + (it.sink || 0), X = Math.round(Math.round(it.x * SV) - iw / 2) - ox, Y = Math.round(Math.round(base * SV) - ih) - oy;
+      c.drawImage(it.sp, X, Y, iw, ih);
+      if (it.deco) for (const g of it.deco) {
+        const kk = REEF_K * SV * g.s, gw = Math.max(1, Math.round(g.sp.width * kk)), gh = Math.max(1, Math.round(g.sp.height * kk));
+        const gx = X + Math.round((g.c + 0.5) * k), gy = Y + Math.round((it.top[g.c] + 1.5) * k);
+        c.drawImage(g.sp, gx - (gw >> 1), gy - gh, gw, gh);
+      }
+    }
+  } finally { SV = SV0; C = C0; }
+  R.epoch = GLR.epoch; RLY.stats.paint++;
+}
+// true: drawn from the kept layers; false: the caller draws the live way
+function reefLayerDraw(list, x0, x1) {
+  if (!RLY.on || !GLR.on || GLR.lost || C.globalAlpha !== 1 || C.globalCompositeOperation !== 'source-over' || !list.length) return false;
+  let ls = RLY.last.get(list); if (!ls) RLY.last.set(list, ls = [0, 0]);
+  const held = ls[viewIdx] === SV; ls[viewIdx] = SV;
+  if (!held) return false;                                 // (zooming: a new SV each frame - the live way till it holds)
+  let st = RLY.map.get(list);
+  const sig = reefLayerSig(list);
+  if (!st || !sigEq(st.sig, sig) || !(st.sv.has(SV))) {
+    if (!st || !sigEq(st.sig, sig)) { if (st) reefLayerFree(st); st = { sig, sv: new Map() }; RLY.map.set(list, st); }
+    if (st.sv.size >= 2) for (const [k, regs] of st.sv) if (k !== ls[0] && k !== ls[1]) { for (const R of regs.values()) if (R.cv && R.cv.free) R.cv.free(); st.sv.delete(k); }   // (the two views' zooms kept)
+    st.sv.set(SV, reefLayerIndex(list, SV));
+  }
+  const regs = st.sv.get(SV), RW = RLY.RW, ck = regs.ck;
+  // (anything else the floor's height reads - a wreck's pad, the land's edits by a lake: a few items asked again each frame,
+  // in turn; one standing elsewhere now and every layer is painted again - this frame the live way)
+  for (let n = 0; n < 6 && ck.its.length; n++) { const i = ck.i = (ck.i + 1) % ck.its.length, it = ck.its[i]; if (seabedY(it.x) + (it.sink || 0) !== ck.base[i]) { REEF_GEN++; return false; } }
+  // the view in world pixels; the regions it touches
+  const L = CAMPX - SHX, Rr = CAMPX + VWP - SHX, T = TOPPX - SHY, B = TOPPX + bh - SHY, cx0 = x0 - 120, cx1 = x1 + 120;
+  const r0 = Math.floor(L / RW), r1 = Math.floor((Rr - 1) / RW);
+  for (let r = r0; r <= r1; r++) {                          // (an item the live loop culls, reaching into the view: the live way)
+    const R = regs.get(r); if (!R || R.y1 <= T || R.y0 >= B) continue;
+    if (R.y1 - R.y0 > 2048) { RLY.stats.live++; return false; }      // (zoomed right in: a region too tall for a texture)
+    for (let i = 0; i < R.items.length; i++) if ((R.wx[i] < cx0 || R.wx[i] > cx1) && R.x1[i] > L && R.x0[i] < Rr) { RLY.stats.live++; return false; }
+  }
+  for (let r = r0; r <= r1; r++) {
+    const R = regs.get(r); if (!R || R.y1 <= T || R.y0 >= B) continue;
+    if (!R.cv || R.epoch !== GLR.epoch || !R.cv.tex) reefLayerPaint(R, SV);
+    C.drawImage(R.cv, R.r * RW - CAMPX, R.y0 - TOPPX);
+  }
+  RLY.stats.lay++;
+  return true;
+}
+function reefLayerFree(st) { for (const regs of st.sv.values()) for (const R of regs.values()) if (R.cv && R.cv.free) R.cv.free(); }
 
 function drawShip(sh, mode) {
   const art = shipArt(sh, mode), W = art.I.width, s = art.s;
