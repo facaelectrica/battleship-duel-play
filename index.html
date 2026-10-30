@@ -3041,8 +3041,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 337;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 10:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 338;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 11:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4547,6 +4547,7 @@ function drawPerfPanel(x, y) {
     (Q => 'IN PHYS: STEPS ' + f(perf.steps) + '  CPU ' + f(Q.uCpu) + '  SEA ' + f(Q.uWater) + '  SHIPS ' + f(Q.uVehicles) + '  ARMS ' + f((Q.uArms || 0) + (Q.uShells || 0)) + '  LAND ' + f(Q.uLand) + '  OPEN ' + f(Q.uOpenWorld) + '  FX ' + f((Q.uVisuals || 0) + (Q.uRest || 0)))(perf.parts || {}),   // (the world's update by part - Oct 29, the iPad's PHYS 13)
     ntbPanel(),     // (engine stage 5: online from the tables, bytes a second to each guest - 36-zzzz-net-tables)
     schedPanel(),   // (engine stage 7: each scheduled system against its budget - 36-zz-regions)
+    budgetPanel(Object.assign({}, perf.parts || {}, P), perf.smoke),   // (engine stage 7: every part of the frame against its budget - 36-zz-regions FRAME_BUDGET)
     'SKY ' + f(P.sky) + '  WORLD ' + f(P.objects) + '  WATER ' + f(P.distort),
     skyNewOn ? (T => 'NEW SKY ' + f(T.back) + '+' + f(T.decks) + '+' + f(T.front) + '+' + f(T.veil1) + '  LAY ' + f(T.out) + '  SMOKE ' + f(T.smoke) + '  BUILD ' + f(T.build) + '/' + Math.round(T.builds || 0) + ' LIT ' + Math.round(T.lit || 0) + ' KEYS ' + Math.round(T.kL || 0) + '/' + Math.round(T.kU || 0) + '/' + Math.round(T.kN || 0) + '/' + Math.round(T.kS || 0) + ' LOBES ' + f(T.lobes) + ' VEIL ' + f(T.veil) + ' GL ' + f(T.gl) + '  SM ' + f(T.smG) + '/' + f(T.smS) + '/' + f(T.smB) + '/' + f(T.smT) + (D => '  PUFF SIZES ' + D.sizes.map(v => v.toFixed(1)).join('/') + ' LOD ' + D.lod + '/' + D.n)(NSKY.deckSizes()))(NSKY.FT) : '',
     'TINT ' + f(P.tint) + '  FX ' + f(P.overlays) + '  HUD ' + f((P.console || 0) + (P.dots || 0) + (P.topui || 0)),
@@ -12375,6 +12376,21 @@ function schedStep(S, o, x, dt, fn, pin) {
 // a frame's start for the perf panel's counts
 function schedFrame() { REG.frame++; for (const k in SYSTEMS) { const S = SYSTEMS[k]; S.n0 = S.n.slice(); S.n[0] = S.n[1] = S.n[2] = 0; S.ms += ((S.t || 0) - S.ms) * 0.05; S.t = 0; } }
 // (stage 7: each system's time a frame against its budget - a system's step adds to S.t: const t0 = performance.now(); ...; S.t += performance.now() - t0)
+// (engine stage 7) every part of a frame against its budget, ms a frame on the user's PC (the plan's frame budget: drawing and
+// the HUD about 10 ms on the main thread, the simulation about 10, the network about 1 - set from stage 0's measurements and
+// Version 336's): a part over its budget is listed on the panel's OVER BUDGET line, in red. New work keeps inside these, or
+// says which budget it takes from (rules.md section 6)
+const FRAME_BUDGET = {
+  uCpu: ['CPU', 0.5], uWater: ['SEA', 1.5], uVehicles: ['SHIPS', 1], uArms: ['ARMS', 0.5], uShells: ['SHELLS', 0.5], uLand: ['LAND', 1],
+  uOpenWorld: ['OPEN', 2], uVisuals: ['FX', 1], uRest: ['ROPES', 0.5], smoke: ['SMOKE', 1.5],
+  sky: ['SKY', 3], objects: ['WORLD', 3.5], distort: ['WATER', 1], tint: ['TINT', 0.5], overlays: ['OVERLAYS', 1.5], hud: ['HUD', 1.5],
+};
+function budgetPanel(P, smokeMs) {
+  const v = k => k === 'smoke' ? smokeMs : k === 'hud' ? (P.console || 0) + (P.dots || 0) + (P.topui || 0) : (P[k] || 0);
+  const over = [];
+  for (const k in FRAME_BUDGET) { const [name, b] = FRAME_BUDGET[k], ms = v(k); if (ms > b) over.push(name + ' ' + ms.toFixed(1) + '/' + b + ' OVER'); }   // (OVER on each: a long line is wrapped, and each piece is red)
+  return over.length ? 'OVER BUDGET MS/BUDGET:  ' + over.join('  ') : 'ALL PARTS WITHIN BUDGET';
+}
 // the perf panel's line: each system's ms against its budget and how many of its things are ACTIVE, NEAR, FAR; over its budget: OVER
 function schedPanel() {
   const L = []; for (const k in SYSTEMS) { const S = SYSTEMS[k], n = S.n0 || S.n; L.push(k.toUpperCase() + ' ' + S.ms.toFixed(1) + '/' + S.budget + ' ' + n[0] + ' ' + n[1] + ' ' + n[2] + (S.ms > S.budget ? ' OVER' : '')); }
@@ -43660,7 +43676,7 @@ async function start(data) {
   // (OPEN WORLD: the kraken - tools/kraken.mjs)
   Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
-  Object.assign(window.__game, { perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}) }) });
+  Object.assign(window.__game, { perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}), budget: FRAME_BUDGET }) });
   Object.assign(window.__game, { smokeWorker: on => { if (on != null) { SMW.on = !!on; if (CAVE.worker && !CAVE.worker.fail) CAVE.worker.on = !!on; } const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
