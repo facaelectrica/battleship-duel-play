@@ -2857,8 +2857,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 360;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 16:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 361;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 16:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18451,7 +18451,16 @@ function bakeBegin(V) {
   BK_BUDGET = b.force > 0 ? 1e9 : Math.max(1, Math.floor((P.bakems ?? 3) / Math.max(0.05, b.avg)));
   if (b.force > 0) b.force--;
   b.n = 0; b.left = 0; b.baking = 0;
+  // (sky & far sea pass, Oct 30: what every cloud's forming read from the sliders - the cover, how clear the sky is, the wisps'
+  // share, the big clouds' growth, its deck on or off - worked out once a pass, not once a cloud: the same sums of the same
+  // values (nothing between here and the clouds' loop moves a slider). Zoomed out every cloud of the sky is visited)
+  const cov = P.cover;
+  BKV.s++; BKV.cov = cov; BKV.clear = smoothstep(0, 0.06, cov); BKV.heroT = smoothstep(0.12, 0.3, cov);
+  BKV.wx = (P.wisps ?? 0.5) * clamp(cov / 0.3, 0, 1); BKV.bigF = 1 + (P.bigk ?? 0.5) * (P.big || 0);
 }
+const BKV = { s: 0, cov: 0, clear: 0, heroT: 0, wx: 0, bigF: 1 };
+// (a deck on or off, DECK n: once a pass)
+function bkLayOn(lay) { lay.bkS = BKV.s; return (lay.bkOn = (P[lay.dkK || (lay.dkK = 'dk' + lay.dn)] ?? 1) > 0); }
 // a cloud in the clouds' loop (skyBack), baked sky: true = handled (frozen: its sprite laid, or nothing to show), false = go
 // the live way this frame (to be baked, or lit by lightning)
 function bakeVisit(c, vis, gk) {
@@ -18462,17 +18471,17 @@ function bakeVisit(c, vis, gk) {
     const d = c.bx - c.lay.uPiv; if (d > WORLD / 2) c.bx -= WORLD; if (d < -WORLD / 2) c.bx += WORLD;
     // (a cloud the passes skipped for a while (skixList) may be more than one world off: wrapped on until it is near)
     while (c.bx - c.lay.uPiv > WORLD / 2) c.bx -= WORLD; while (c.bx - c.lay.uPiv < -WORLD / 2) c.bx += WORLD;
-    const cov = P.cover, clear = smoothstep(0, 0.06, cov);
+    const cov = BKV.cov;
     // (engine stage 6, Oct 30: worked out in a local and stored only when it changes - every cloud, every frame, two stores of
     // a fresh number were most of the sky's garbage. The same sums in the same order: the same value)
-    let gT = c === hero ? smoothstep(0.12, 0.3, cov) : clear * smoothstep(c.thr * 0.6 - 0.04, c.thr * 0.6 + 0.12, c.wisp ? (P.wisps ?? 0.5) * clamp(cov / 0.3, 0, 1) : cov);
-    if (!c.wisp) gT *= 1 + (P.bigk ?? 0.5) * (P.big || 0);
+    let gT = c === hero ? BKV.heroT : BKV.clear * smoothstep(c.thr * 0.6 - 0.04, c.thr * 0.6 + 0.12, c.wisp ? BKV.wx : cov);
+    if (!c.wisp) gT *= BKV.bigF;
     if (c.growT !== gT) c.growT = gT;
     c.gk0 = gk;
   }
   c.y = c.lay.baseY;
   if (c.extU === undefined) cloudBox(c);
-  const on = (P[c.lay.dkK || (c.lay.dkK = 'dk' + c.lay.dn)] ?? 1) > 0, X = screenX(c);
+  const lay = c.lay, on = lay.bkS === BKV.s ? lay.bkOn : bkLayOn(lay), X = screenX(c);
   // (where it could be seen: its box at its new size or its sprite's, a quarter of a view past each side as the decks keep)
   // (zoomed out past the world's width - the bench's endless zoom - the world repeats across the view, as it wraps: every cloud
   // is in view, its sprite laid once a repeat, bakeDraw)
@@ -22690,21 +22699,25 @@ function drawTiles(im, imFlip, p, topW, k, fill, gap = 0) {
     const x = sx(i), w = (gap ? Math.round((i * step + tileW + off) * SV - CAMF) : sx(i + 1)) - x, sp = (i & 1) ? b : a, S = sp.big ? sp.src : sp, H = sp.height;
     if (w <= 0 || x + w < -SHX - 4 || x > VWP + 4) continue;
     const xa = Math.max(x, -SHX - 4), xb = Math.min(x + w, VWP + 4);
-    if (dropAt(xa) === 0 && dropAt(xb) === 0 && dropAt((xa + xb) / 2) === 0) {
+    // (opt-algae: each column's depth asked once - its first column's was asked twice, and the column a run stops at twice, once
+    // ending the run and again starting the next; the last one, past the tile's end, for nothing. The same answers)
+    const da = dropAt(xa);
+    if (da === 0 && dropAt(xb) === 0 && dropAt((xa + xb) / 2) === 0) {
       // at harbour depth: the tile in one piece, as it always was
       if (sp.big) C.drawImage(sp.src, x, y, w, H); else C.drawImage(sp, 0, 0, sp.width, H, x, y, w, H);
       if (fill) { C.fillStyle = fill; C.fillRect(x, y + H - 1, w, Bt - y - H + 1); }
       continue;
     }
     const kx = S.width / w;
-    let c = xa, d = dropAt(c);
+    let c = xa, d = da;
     while (c < xb) {
-      let e = c + PB;
-      while (e < xb && dropAt(e) === d) e += PB;
+      let e = c + PB, de = 0, hit = false;
+      while (e < xb) { de = dropAt(e); if (de !== d) { hit = true; break; } e += PB; }
       e = Math.min(e, xb);
       C.drawImage(S, (c - x) * kx, 0, (e - c) * kx, S.height, c, y + d, e - c, H);
       if (fill) { C.fillStyle = fill; C.fillRect(c, y + d + H - 1, e - c, Bt - y - d - H + 1); }
-      c = e; d = dropAt(c);
+      if (!hit) break;                                       // (the run reached the tile's end)
+      c = e; d = de;
     }
   }
   return y + a.height;
@@ -22731,13 +22744,34 @@ function plantLook(p) {
   if (p._flx !== p.x || p._flP !== GSH.P || p._flA !== BED_A || p._flB !== BED_B) { p._flx = p.x; p._flP = GSH.P; p._flA = BED_A; p._flB = BED_B; p._fl = floorLook(p.x); }
   return p._fl;
 }
-const ALG = { on: false, c: null, x: 0, y: 0, w: 0, h: 0 };
+// (engine stage 6, Oct 30, opt-algae: under WebGL a kept rectangle went plRect -> fs1 -> fillRect -> glBegin -> _corners ->
+// glFillQuad -> glQuad, every one of the frame's tens of thousands. Now straight to glQuad: the batch made ready once (glBegin,
+// again after anything else drawn - algOut), the colour packed as glFillQuad packs it, the corners by _corners' own sums (an
+// upright transform). The fill style the plain way would have left is set at algOut. The same quads, in the same order)
+const ALG = { on: false, c: null, x: 0, y: 0, w: 0, h: 0, gl: false, need: true, m: null, lc: null, lv: 0, pend: null };
+function algQuad(col, x, y, w, h) {
+  if (!ALG.gl) { plRect(col, x, y, w, h); return; }
+  if (ALG.need) {
+    const m = C.s.m;
+    if (m[1] !== 0 || m[2] !== 0) { ALG.gl = false; plRect(col, x, y, w, h); return; }   // (turned: the plain way)
+    glBegin(C, C.s.op); ALG.m = m; ALG.need = false;
+  }
+  if (col !== ALG.lc) { ALG.lc = col; ALG.lv = glParse(col).p1; }
+  const m = ALG.m, ax = m[0] * x + m[4], ay = m[3] * y + m[5], bx = ax + m[0] * w, by = ay + m[3] * h;
+  glQuad(ax, ay, bx, ay, bx, by, ax, by, 0, 0, 0, 0, 0, 0, 0, 0, ALG.lv, 0, 0);
+  ALG.pend = col;
+}
 function algPut(col, x, y, w, h) {
   if (!ALG.on) { plRect(col, x, y, w, h); return; }
-  if (ALG.c !== null && !(x <= ALG.x && y <= ALG.y && x + w >= ALG.x + ALG.w && y + h >= ALG.y + ALG.h)) plRect(ALG.c, ALG.x, ALG.y, ALG.w, ALG.h);
+  if (ALG.c !== null && !(x <= ALG.x && y <= ALG.y && x + w >= ALG.x + ALG.w && y + h >= ALG.y + ALG.h)) algQuad(ALG.c, ALG.x, ALG.y, ALG.w, ALG.h);
   ALG.c = col; ALG.x = x; ALG.y = y; ALG.w = w; ALG.h = h;
 }
-function algOut() { if (ALG.c !== null) plRect(ALG.c, ALG.x, ALG.y, ALG.w, ALG.h); ALG.c = null; }
+function algOut() {
+  if (ALG.c !== null) algQuad(ALG.c, ALG.x, ALG.y, ALG.w, ALG.h);
+  ALG.c = null;
+  if (ALG.pend !== null) { fs1(ALG.pend); ALG.pend = null; }   // (the fill style as the plain way leaves it)
+  ALG.need = true;                                         // (something else may draw next: the batch made ready again)
+}
 const algW = (col, wx, wy, ww, wh) => { const X = PX(wx), w = Math.max(1, Math.round(ww * SV)); if (X + w > RKL.maxR) RKL.maxR = X + w; algPut(col, X, PY(wy), w, Math.max(1, Math.round(wh * SV))); };   // (maxR: how far right the weed has reached - 44-zz-rock-layer.js)
 function drawAlgae(x0, x1, lkOnly) {
   // algae and kelp swaying in the current
@@ -22746,24 +22780,33 @@ function drawAlgae(x0, x1, lkOnly) {
   const tur = clamp(0.35 * ((E.waveAmp || 1) - 1) + 1.3 * (E.storm || 0) + Math.abs(E.windU || 0) * 0.006, 0, 2.2);
   const swA = 1 + 1.1 * tur, swF = 1 + 0.55 * tur;
   fsLast = null;
-  ALG.on = C.globalAlpha === 1 && C.globalCompositeOperation === 'source-over'; ALG.c = null;
+  ALG.on = C.globalAlpha === 1 && C.globalCompositeOperation === 'source-over'; ALG.c = null; ALG.pend = null; ALG.need = true;
   if (!lkOnly) rockLayerDraw(x0, x1); else { RKL.lay = false; }   // (engine stage 6: the rocks from their kept layers - 44-zz-rock-layer.js)
+  ALG.gl = ALG.on && GLR.on && !GLR.lost && !BATCH && C instanceof GLCtx;   // (the plain way would be fillRect on the GL context: algQuad)
+  // (opt-algae: what a blade's segments share worked out once a plant or a blade, not every segment - the same sums in the same
+  // order, so the same numbers: the first wave's angle up to the segment's own step, the second's, the current's 8; the second
+  // wave left out when the sea is calm (tur 0: it adds nothing); the segment's size in pixels once a plant; PX, PY as algW does)
+  const T35 = tur * 0.35, C8 = current * 8;
   for (const p of plants) {
     if (p.x < x0 - 60 || p.x > x1 + 60 || !p.lk !== !lkOnly || (FLOOR_MARKED && !p.lk && plantLook(p))) continue;   // (none on a floor piece marked FOREST or DESERT)
     const base = seabedY(p.x) + 3;
     if (ISLE !== null && base - (p.h || 0) < WATER_Y + 4) continue;   // (by an island: nothing of the sea's out of the water)
     if (p.kind === 'rock') { algOut(); if (rockAgain(p, base)) drawRock(p, base); continue; }
-    const blades = p.kind === 'kelp' ? 1 + (p.n > 4 ? 1 : 0) : p.n;
+    const kelp = p.kind === 'kelp', blades = kelp ? 1 + (p.n > 4 ? 1 : 0) : p.n;
+    const segs = kelp ? Math.round(p.h / 6) : Math.round(p.h / 3.5), segH = kelp ? 6 : 3.5;
+    const tA = time * (kelp ? 0.9 : 1.6) * swF + p.ph, tB = time * 2.7 * swF + p.ph * 1.7, bend = p.bend || 0;
+    const dX = kelp ? 1.5 : 0.7, wP = Math.max(1, Math.round((kelp ? 3 : 1.4) * SV)), hP = Math.max(1, Math.round((segH + 0.5) * SV));
     for (let b = 0; b < blades; b++) {
-      const segs = p.kind === 'kelp' ? Math.round(p.h / 6) : Math.round(p.h / 3.5);
-      const segH = p.kind === 'kelp' ? 6 : 3.5;
-      let x = p.x + (b - (blades - 1) / 2) * (p.kind === 'kelp' ? 7 : 2.5), y = base;
+      const A = tA + b;
+      let x = p.x + (b - (blades - 1) / 2) * (kelp ? 7 : 2.5), y = base;
       for (let s = 0; s < segs; s++) {
         const u = s / segs;
-        const sway = (Math.sin(time * (p.kind === 'kelp' ? 0.9 : 1.6) * swF + p.ph + b + s * 0.35) + tur * 0.35 * Math.sin(time * 2.7 * swF + p.ph * 1.7 + s * 0.6)) * (0.9 + 1.6 * u) * swA + current * 8 * u + (p.bend || 0) * u * 1.6;
+        const sway = (Math.sin(A + s * 0.35) + (T35 !== 0 ? T35 * Math.sin(tB + s * 0.6) : 0)) * (0.9 + 1.6 * u) * swA + C8 * u + bend * u * 1.6;
         x += sway * 0.55; y -= segH;
-        algW(p.kind === 'kelp' ? (s % 2 ? '#2f7a34' : '#3d9142') : (u > 0.6 ? '#6fb34a' : '#4f9a3c'), x - (p.kind === 'kelp' ? 1.5 : 0.7), y, p.kind === 'kelp' ? 3 : 1.4, segH + 0.5);
-        if (p.kind === 'kelp' && s % 3 === 1) algW('#56a84c', x + (s % 2 ? 1.5 : -4.5), y + 1, 3, 2);
+        const X = Math.round((x - dX) * SV) - CAMPX;
+        if (X + wP > RKL.maxR) RKL.maxR = X + wP;
+        algPut(kelp ? (s % 2 ? '#2f7a34' : '#3d9142') : (u > 0.6 ? '#6fb34a' : '#4f9a3c'), X, Math.round(y * SV) - TOPPX, wP, hP);
+        if (kelp && s % 3 === 1) algW('#56a84c', x + (s % 2 ? 1.5 : -4.5), y + 1, 3, 2);
       }
     }
   }
