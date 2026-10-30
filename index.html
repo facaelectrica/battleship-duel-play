@@ -3030,7 +3030,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 310;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const GAME_VERSION = 311;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
 const BUILD = 'OCT 30 07:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
@@ -13335,6 +13335,41 @@ void main() {
   a = floor(a * 255.0 + 0.5) / 255.0;
   o = vec4(col * a, a);
 }`;
+// THE SUN'S GLOW ON THE GPU (engine stage 8, Oct 29 night - branch mig-gpu-sun): the flat-stepped glow drawSun painted into the sky's
+// buffer cell by cell and uploaded row by row each frame, worked out here per cell from a few numbers instead. The same rings: on
+// a cell's row the ring q reaches |x + 0.5 - cx| < gx sqrt(DQ[q] - dy^2), its pixels XL..XR as drawSun rounds them; the cell
+// takes the innermost ring that holds it, its colour (the step's, rounded as drawSun rounds it) at q / NG of the glow's alpha
+const GL_GFS = `#version 300 es
+precision highp float;
+uniform vec4 u_g0; uniform vec4 u_g1; uniform vec3 u_far; uniform vec3 u_near; uniform float u_dq[14];
+in vec2 v_cell;
+out vec4 o;
+void main() {
+  vec2 c = floor(v_cell);
+  float cx = u_g0.x, cy = u_g0.y, gx = u_g0.z, gy = u_g0.w, ak = u_g1.x, NG = u_g1.z;
+  if (c.y > u_g1.w - 1.0) discard;
+  float dy = (c.y + 0.5 - cy) / gy, dy2 = dy * dy;
+  if (dy2 >= 1.0) discard;
+  int qh = 0;
+  for (int q = 1; q <= 12; q++) {
+    float w2 = u_dq[q] - dy2; if (w2 <= 0.0) break;
+    float w = gx * sqrt(w2), xl = floor(cx - w - 0.5) + 1.0, xr = ceil(cx + w - 0.5) - 1.0;
+    if (xl > xr) break;
+    if (c.x >= xl && c.x <= xr) qh = q;
+  }
+  if (qh == 0) discard;
+  float fq = float(qh);
+  vec3 col = floor(mix(u_far, u_near, pow(fq / NG, 1.6)) + 0.5) / 255.0;
+  float a = fq / NG * ak;
+  o = vec4(col * a, a);
+}`;
+function glGlowSetup() {
+  const gl = GLR.gl, p = gl.createProgram();
+  gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_GFS));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  GLR.gprog = p; GLR.gU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_g0', 'u_g1', 'u_far', 'u_near', 'u_dq']) GLR.gU[k] = gl.getUniformLocation(p, k);
+}
 function glSunSetup() {
   const gl = GLR.gl, p = gl.createProgram();
   gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_SFS));
@@ -13980,7 +14015,7 @@ function glSetup() {
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
   GLR.pix = null; GLR.pixPool = [];
-  glPuffSetup(); glRaySetup(); glSunSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
+  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
@@ -14621,6 +14656,23 @@ class GLCtx {
   // over the screen quad (dx, dy, dw, dh) whose cells run x0..x1, y0..y1; sun in cells; p = [maxD, NS, RAY_N, RAY_STEP];
   // kk = [K0..K3]; k2 = [amt, inK, horY]; col = [r, g, b] 0..1
   // the sun's disc through the heat over the sea (GL_SFS): cells x0..x1, y0..y1 of the sky's picture over the screen's dx, dy, dw, dh
+  drawGlowGL(dx, dy, dw, dh, x0, y0, x1, y1, G) {   // (the sun's glow: GL_GFS over cells x0..x1, y0..y1)
+    if (GLR.lost || !GLR.gprog) return;
+    const gl = GLR.gl, t = this.target, U = GLR.gU;
+    glBegin(this, 'source-over'); glFlush();
+    glApplyState();
+    gl.useProgram(GLR.gprog); GLR.cur.prog = 10;
+    gl.uniform2f(U.u_size, t._w, t._h);
+    this._corners(dx, dy, dw, dh);
+    gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
+    gl.uniform4f(U.u_cells, x0, y0, x1, y1);
+    gl.uniform4f(U.u_g0, G.cx, G.cy, G.gx, G.gy); gl.uniform4f(U.u_g1, G.ak, 0, G.NG, G.horY);
+    gl.uniform3f(U.u_far, G.far[0], G.far[1], G.far[2]); gl.uniform3f(U.u_near, G.near[0], G.near[1], G.near[2]);
+    gl.uniform1fv(U.u_dq, G.dq);
+    gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    GLR.stats.draws++; GLR.stats.quads++;
+  }
   drawSunGL(dx, dy, dw, dh, x0, y0, x1, y1, sun, s, k, core, sky) {
     if (GLR.lost || !GLR.sprog) return;
     const gl = GLR.gl, t = this.target, U = GLR.sU;
@@ -17351,6 +17403,10 @@ function drawSun(horY) {
   const ge = 2.1 - 0.5 * dusk, ak = amax * (dusk > 0.05 ? 0.85 : 1), DQ = new Float64Array(NG + 2), XL = new Int32Array(NG + 2), XR = new Int32Array(NG + 2);
   for (let q = 1; q <= NG; q++) { const r = 1 - Math.pow((q - 1) / NG, 1 / ge); DQ[q] = r * r; }
   DQ[NG + 1] = -1;
+  // (engine stage 8, branch mig-gpu-sun: on the GPU the glow and the fine rays are drawn by the chip - outSun, GL_GFS - and nothing
+  // of the sun touches the sky's buffer, so no rows go up each frame)
+  const GG = GPU ? { cx, cy, gx, gy, ak, NG, horY, far: glowFar, near: glowNear, dq: Float32Array.from({ length: 14 }, (_, q) => q >= 1 && q <= NG + 1 ? DQ[q] : 0), y0, y1, rays: [] } : null;
+  if (!GG)
   for (let y = y0; y <= y1; y++) {
     const dy = (y + 0.5 - cy) / gy, dy2 = dy * dy; if (dy2 >= 1) continue;
     // the pixels of ring q on this row: |x + 0.5 - cx| < gx sqrt(DQ[q] - dy^2)
@@ -17377,7 +17433,7 @@ function drawSun(horY) {
       for (let t = sr * 1.05; t < len; t += 0.5) {
         const x = Math.round(cx + ca * t - 0.5), y = Math.round(cy + sa * t - 0.5); if (x < 0 || x >= TW || y < 0 || y >= horY) continue;
         const f = Math.pow(1 - (t - sr) / Math.max(1, len - sr), 1.6), q = Math.ceil(f * 4) / 4;
-        blendPx(y * TW + x, white, q * 0.55 * Math.min(1, sp));
+        if (GG) GG.rays.push(x, y, q * 0.55 * Math.min(1, sp)); else blendPx(y * TW + x, white, q * 0.55 * Math.min(1, sp));
       }
     }
   }
@@ -17389,7 +17445,7 @@ function drawSun(horY) {
   // (the heat on the wall clock, user Oct 29: "it should move no? this heat distortion in real life is not static" - the sky's own clock
   // stops while the world is held: the editors, photo mode, the WORLD button)
   const low = dusk * (1 - E.night);
-  if (GPU) { SUNG = { sun: [ox + 0.5, oy + 0.5], s: [sr, horY, vis, (performance.now() / 1000) % 3600], k: [low, (P.heat ?? 1) * low, P.heatr ?? 0.6, 0], core: core.map(v => v / 255), sky: E.skyHor.map(v => v / 255), x0: Math.floor(ox - sr * 1.25), x1: Math.ceil(ox + sr * 1.25) + 1, y0: Math.max(0, Math.floor(oy - sr * 1.2)), y1: Math.min(horY, Math.ceil(oy + sr * 1.25) + 1) }; return; }
+  if (GPU) { SUNG = { sun: [ox + 0.5, oy + 0.5], s: [sr, horY, vis, (performance.now() / 1000) % 3600], k: [low, (P.heat ?? 1) * low, P.heatr ?? 0.6, 0], core: core.map(v => v / 255), sky: E.skyHor.map(v => v / 255), x0: Math.floor(ox - sr * 1.25), x1: Math.ceil(ox + sr * 1.25) + 1, y0: Math.max(0, Math.floor(oy - sr * 1.2)), y1: Math.min(horY, Math.ceil(oy + sr * 1.25) + 1), glow: GG }; return; }
   for (let i = 0; i < s0.length; i++) { const y = oy - m + i; if (y < 0 || y >= horY) continue; const w = s0[i]; for (let x = ox - w; x <= ox + w; x++) if (x >= 0 && x < TW) blendPx(y * TW + x, core, vis); }
 }
 let SUNG = null;   // (this view's sun disc for the GPU, from drawSun - null: none)
@@ -17620,7 +17676,21 @@ function outImg(img, w, y0, n, x, y, wd, ht) {
 }
 // the sun's disc on the GPU (SUNG from drawSun): its cells laid like a buffer's
 function outSun(G) {
-  const V = VIEW, dx = picX(V, (G.x0 - 1) * CPX), dy = picY(V, G.y0 * CPX), dw = (G.x1 - G.x0) * CPX * M, dh = (G.y1 - G.y0) * CPX * M;
+  const V = VIEW;
+  // (engine stage 8, branch mig-gpu-sun: the glow over its rows, then the fine rays a cell at a time in their order, as drawSun
+  // blended them into the buffer)
+  const Q = G.glow;
+  if (Q && ctx.drawGlowGL && Q.y1 >= Q.y0) {
+    const x0 = Math.max(0, Math.floor(Q.cx - Q.gx) - 1), x1 = Math.min(TW, Math.ceil(Q.cx + Q.gx) + 2);
+    const gx = picX(V, (x0 - 1) * CPX), gy = picY(V, Q.y0 * CPX), gw = (x1 - x0) * CPX * M, gh = (Q.y1 + 1 - Q.y0) * CPX * M;
+    if (!(gx > V.w + 4 || gx + gw < -4 || gy > V.h + 4 || gy + gh < -4)) ctx.drawGlowGL(gx, gy, gw, gh, x0, Q.y0, x1, Q.y1 + 1, Q);
+  }
+  if (Q && Q.rays.length) {
+    const R = Q.rays, cs = CPX * M, a0 = ctx.globalAlpha; ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < R.length; i += 3) { ctx.globalAlpha = R[i + 2]; ctx.fillRect(picX(V, (R[i] - 1) * CPX), picY(V, R[i + 1] * CPX), cs, cs); }
+    ctx.globalAlpha = a0;
+  }
+  const dx = picX(V, (G.x0 - 1) * CPX), dy = picY(V, G.y0 * CPX), dw = (G.x1 - G.x0) * CPX * M, dh = (G.y1 - G.y0) * CPX * M;
   if (G.y1 <= G.y0 || dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4 || !ctx.drawSunGL) return;
   ctx.drawSunGL(dx, dy, dw, dh, G.x0, G.y0, G.x1, G.y1, G.sun, G.s, G.k, G.core, G.sky);
 }
