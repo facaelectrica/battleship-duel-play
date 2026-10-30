@@ -189,6 +189,10 @@ const KMH = UPM / 3.6;
 // as before, each bigger (the same cost). The hits it takes to sink or bring down something are unchanged.
 // ROCKET_RANGE_K: a missile's motor burns that much longer, so it flies that much further ("it dies too fast")
 const BLAST_K = 3, ROCKET_RANGE_K = 3;
+// the battleship's and the towers' cannon shells (user Oct 29: "really slow and dont go very far. They should go 3x
+// faster and further"): SHELL_K times as fast under SHELL_K times the pull, so the same arc SHELL_K times as big, in the
+// same time. gunK(from): SHELL_K for 'ship' and 'tower', 1 for everything else that uses launch (the tank, a dropped shell)
+const SHELL_K = 3, gunK = from => (from === 'ship' || from === 'tower') ? SHELL_K : 1;
 // the machine guns' reach x MG_RANGE_K (user Oct 29: "its incredibly short now"): a round flies sqrt(K) times as fast
 // for sqrt(K) times as long, so it goes K times as far and its drop is the same shape for its reach (MG_T)
 const MG_RANGE_K = 3, MG_T = Math.sqrt(MG_RANGE_K);
@@ -224,7 +228,7 @@ const SECTION_FIRE = [0, 0, 0.6, 1, 1, 0.9, 0.6, 0.35];
 // The two forward turrets: barrel pivot (sprite px, bow on the left). Their painted barrels are erased
 // and drawn live so they can elevate.
 const TURRETS = [{ px: 289, py: 141, erase: [228, 134, 288, 147] }, { px: 832, py: 141, erase: [856, 138, 915, 146] }];
-const BARREL_LEN = 15 * REAL.ship, BARREL_W = 3.2 * REAL.ship;
+const BARREL_LEN = 15 * REAL.ship * 0.5, BARREL_W = 3.2 * REAL.ship * 0.5;   // (half size, user Oct 29: "ridiculously giant")
 const FLAG_HOLE = [575, 6, 597, 24];  // the sprite's own ensign, removed so the chosen flag can fly
 const MAST_TOP = [599, 3];
 
@@ -3014,8 +3018,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 300;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 22:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 301;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 22:11';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4205,7 +4209,7 @@ function stepHud(dt) {
   for (const pr of hudPress) for (const k in pr) pr[k] = Math.max(0, pr[k] - dt);
   for (let p = 0; p < 2; p++) {
     // rise / dive, held: the depth she's going for moves while the button is down
-    if (diveHold[p] && crew[p].mode === 'sub') { const sb = subs[p]; sb.depthT = clamp(sb.depthT + diveHold[p] * 90 * dt, WATER_Y, subMaxY(sb.x)); }
+    if (diveHold[p] && crew[p].mode === 'sub') { const sb = subs[p]; sb.depthT = clamp(sb.depthT + diveHold[p] * 90 * (diveHold[p] > 0 ? SUB_DIVE_K : 1) * dt, WATER_Y, subMaxY(sb.x)); }   // (down twice as fast, user Oct 29)
     // the dive planes thud as rise or dive is pressed (button, keys or stick)
     const dv = crew[p].mode === 'sub' && subs[p] && subs[p].state === 'out' ? Math.sign(clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1)) : 0;
     if (dv && dv !== subDivePrev[p]) sfxSubPlanes(subs[p].x, dv);
@@ -6967,7 +6971,10 @@ function crumbleTower(tw) {
 
 /* ---------------- The submarine ---------------- */
 const subs = [];
-const SUB_ACC = 84, SUB_DRAG_L = 0.42, SUB_DRAG_Q = 0.0016, SUB_VZ = 46;   // (Oct 25: a bit more arcade - quicker up, down and to a stop)
+// (user Oct 29: 1.5x as fast - SUB_SPD_K: the push that much harder and the water's square drag that much weaker, so she
+// reaches 1.5x the speed in the same time; SUB_DIVE_K: she goes down twice as fast)
+const SUB_SPD_K = 1.5, SUB_DIVE_K = 2;
+const SUB_ACC = 84 * SUB_SPD_K, SUB_DRAG_L = 0.42, SUB_DRAG_Q = 0.0016 / SUB_SPD_K, SUB_VZ = 46;   // (Oct 25: a bit more arcade - quicker up, down and to a stop)
 function makeSub(id, d) {
   return {
     id, dock: d, facing: -d.dir, x: d.subBerth, y: SUB_GATE_Y, vx: 0, vy: 0, a: 0, throttle: 0, input: 0, dive: 0, depthT: SUB_GATE_Y,
@@ -7254,7 +7261,8 @@ function stepSub(sb, dt) {
   } else sb.homeWait = false;
   // depth: the console wheel sets the depth she makes for; she steers there and holds it
   sb.depthT = clamp(sb.depthT === undefined ? WATER_Y : sb.depthT, WATER_Y, subMaxY(sb.x));
-  const goalY = harboured ? SUB_GATE_Y : sb.depthT;
+  // (user Oct 29) she can go down as soon as she's out of the hangar's door on her way out, not only past the pier
+  const goalY = harboured && !(sb.gate === 'out' && intoGate(sb) < 0) ? SUB_GATE_Y : sb.depthT;
   const surf = (surfaceY(sb.x - SUB_L * 0.3) + surfaceY(sb.x) + surfaceY(sb.x + SUB_L * 0.3)) / 3;
   const y0 = sb.y;
   const dive = goalY > sb.y + 4 ? 1 : goalY < sb.y - 4 ? -1 : 0;
@@ -7263,7 +7271,7 @@ function stepSub(sb, dt) {
     sb.vy += ((surf - sb.y) * 16 - sb.vy * 4.5) * dt;
   } else {
     // surfacing she comes up at speed and breaks through; otherwise she eases into the depth set
-    const want = goalY <= WATER_Y + 2 ? -SUB_VZ * 0.85 : clamp((goalY - sb.y) * 1.8, -SUB_VZ, SUB_VZ);
+    const want = goalY <= WATER_Y + 2 ? -SUB_VZ * 0.85 : clamp((goalY - sb.y) * 1.8 * (goalY > sb.y ? SUB_DIVE_K : 1), -SUB_VZ, SUB_VZ * SUB_DIVE_K);
     sb.vy += (want - sb.vy) * Math.min(1, 4.5 * dt);
     if (sb.y < surf && goalY > WATER_Y + 2) sb.vy += 60 * dt;   // pushed back down when the bow breaks the surface diving
   }
@@ -7824,7 +7832,7 @@ function subAbyssLights(out) {
   }
   return out;
 }
-// her light: the beam (after the night's tint, under the water only), a bright spot at the lamp; and while it's on, the
+// her light: the beam (after the night's tint, under the water only); and while it's on, the
 // red lamp on her tail blinking (drawn after the night, as the planes')
 function drawSubLights(x0, x1) {
   for (const sb of subs) {
@@ -7840,10 +7848,7 @@ function drawSubLights(x0, x1) {
       const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = true;
       C.globalCompositeOperation = 'lighter'; C.globalAlpha = MS_BEAM_A;
       C.translate(X, Y); C.rotate(a); C.drawImage(sp, 0, -Math.round(sp.height * sc / 2), Math.round(sp.width * sc), Math.round(sp.height * sc));
-      C.restore(); C.save();
-      C.globalCompositeOperation = 'lighter'; C.globalAlpha = 1;
-      const R = 9 * SV, g = C.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, 'rgba(250,252,255,0.95)'); g.addColorStop(1, 'rgba(230,240,255,0)'); C.fillStyle = g; C.fillRect(Math.round(X - R), Math.round(Y - R), Math.round(2 * R), Math.round(2 * R));
-      C.imageSmoothingEnabled = sm; C.restore();
+      C.imageSmoothingEnabled = sm; C.restore();   // (no bright dot at the lamp any more - user Oct 29, gen/open/ref/sub_lamp_dot_oct29.png)
     });
   }
 }
@@ -7857,6 +7862,7 @@ function lightIcon() {
 
 /* ---------------- Torpedoes: the submarine fires them straight up (at the hulls above) or ahead (at other subs) ---------------- */
 const torps = [], torpWrecks = [];   // spent torpedoes lying on the bottom
+const TORP_SPD_K = 3;                // (user Oct 29: 3x as fast)
 const TORP_RUN = 9;                  // seconds of motor; after that a torpedo that found nothing sinks
 function fireTorpedo(sb, up) {
   if (sb.state !== 'out' || sb.turn || sb.tk > 0) return;
@@ -7905,12 +7911,12 @@ function stepTorps(dt) {
     }
     if (tp.air) { if (stepRocket(tp, dt)) torps.splice(i, 1); continue; }
     // the motor spins up: it gathers speed along its line
-    if (tp.up) tp.vy += (-150 - tp.vy) * 1.6 * dt; else tp.vx += (tp.dir * 175 - tp.vx) * 1.4 * dt;
+    if (tp.up) tp.vy += (-150 * TORP_SPD_K - tp.vy) * 1.6 * dt; else tp.vx += (tp.dir * 175 * TORP_SPD_K - tp.vx) * 1.4 * dt;
     tp.x += tp.vx * dt; tp.y += tp.vy * dt;
     // fired ahead near the top (a surfaced sub): it runs along just under the skin of the water, riding the
     // waves, rather than breaking out and going off at once, and draws a thin white line on the surface
     if (!tp.up) { const sy0 = surfaceY(tp.x); if (tp.y < sy0 + 3) { tp.y = sy0 + 3; if (tp.vy < 0) tp.vy = 0; if (Math.random() < 20 * dt) spawnFoam(tp.x - tp.dir * 4, rnd(1, 2)); } }
-    tp.bub += dt * 80;
+    tp.bub += dt * 80 * TORP_SPD_K;   // (as many bubbles along its way at its new speed)
     while (tp.bub >= 1) { tp.bub -= 1; addBubble(tp.x - (tp.up ? 0 : tp.dir * 6) + rnd(-2, 2), tp.y + (tp.up ? 6 : 0) + rnd(-2, 2), rnd(-6, 6), -rnd(6, 20), rnd(0.6, 1.6)); }
     let hit = null;
     for (const sh of ships) if (sh.state === 'afloat' && sh.id !== tp.owner) { const sec = hitTest(sh, tp.x, tp.y); if (sec >= 0) { hit = ['ship', sh, sec]; break; } }
@@ -8839,13 +8845,20 @@ function planeLost(pl) {
 // The enemy's tower: the tower comes down with it. The enemy's battleship or submarine: two hits on her.
 // A sailboat's mast: the yacht goes down and so does the plane. (Your own tower and boats it flies through, the
 // way your own rounds do.)
+// flown by a person (yours or a teammate's online), not flying itself home or for the CPU: it dodges nothing and your own
+// tower, harbour and crane are as solid to it as anyone's (user Oct 29)
+function planeByHand(pl) {
+  const p = pl.id;
+  if (p > 1 || planes[p] !== pl || pl.raid || pl.auto === 'home' || isCpu(p)) return false;
+  return crew[p].mode === 'plane' || !!seatDriving(p, 'plane');
+}
 function planeCrash(pl) {
-  const p = pl.id, sp = Math.max(1, Math.hypot(pl.vx, pl.vy)), ux = pl.vx / sp, uy = pl.vy / sp;
+  const p = pl.id, hand = pl.state === 'fly' && planeByHand(pl), sp = Math.max(1, Math.hypot(pl.vx, pl.vy)), ux = pl.vx / sp, uy = pl.vy / sp;
   const pts = [[pl.x, pl.y + 5], [pl.x + ux * 30, pl.y + uy * 30 + 2], [pl.x - ux * 26, pl.y - uy * 26]];
   let what = null, X = pl.x, Y = pl.y;
   for (const [x, y] of pts) {
     for (const tw of towers) if (!what && tw.player !== p && pierGunHit(tw, x, y)) { what = 'land'; hurtPierGun(tw, 2, x, y); }
-    for (const tw of towers) if (!what && tw.player !== p && towerHit(tw, x, y)) { what = 'land'; towerScorch(tw, x, y, 17); if (tw.hp > 0) { tw.hp -= 1; noteHit(tw.player, 'tower'); if (tw.hp <= 0) crumbleTower(tw); } }   // (one hit, like a shell)
+    for (const tw of towers) if (!what && (tw.player !== p || hand) && towerHit(tw, x, y)) { what = 'land'; towerScorch(tw, x, y, 17); if (tw.hp > 0) { tw.hp -= 1; noteHit(tw.player, 'tower'); if (tw.hp <= 0) crumbleTower(tw); } }   // (one hit, like a shell)
     for (const sh of ships) if (!what && sh.state === 'afloat' && sh.id !== p) {
       const sec = hitTest(sh, x, y);
       if (sec >= 0) { what = 'boat'; damageSection(sh, sec, 1, x, y); damageSection(sh, sec, 1, x, y); sh.vy += 10; sh.vx += pl.vx * 0.01; }
@@ -8853,7 +8866,8 @@ function planeCrash(pl) {
     for (const sb of subs) if (!what && sb.id !== p) { const sec = subHitTest(sb, x, y); if (sec >= 0) { what = 'boat'; hitSub(sb, sec, x, y); hitSub(sb, sec, x, y); } }
     for (const b of sailboats) if (!what && b.state === 'sail' && sailHullHit(b, x, y)) { sinkSailboat(b, x, y, pl.vx); what = 'sea'; }   // (it flies through the sails; only her hull stops it)
     for (const b of buoys) if (!what && b.player !== p && buoyHit(b, x, y)) destroyBuoy(b, x, y);           // (the plane flies on)
-    for (const d of docks) if (!what && !(pl.state === 'fly' && d === homeDock[p]) && harbourHit(d, x, y)) what = 'land';   // (your own harbour never brings your plane down)
+    for (const d of docks) if (!what && !(pl.state === 'fly' && d === homeDock[p] && !hand) && harbourHit(d, x, y)) what = 'land';   // (your own harbour never brings your plane down - unless you're flying it: then dodge it yourself)
+    if (!what && hand && typeof cranes !== 'undefined') for (const cr of cranes) { const t = craneTopAt(cr, x); if (t != null && y >= t && y < DECK_Y) { what = 'land'; break; } }   // (the crane: solid to a plane flown by hand, user Oct 29 - it's yours to fly round)
     if (!what && OWM && hangarSolid(x, y)) what = 'land';                       // (but a hangar's walls do - user Oct 29)
     if (what) { X = x; Y = y; break; }
   }
@@ -8997,15 +9011,18 @@ function stepPlanes(dt) {
     pl.flare = clamp((pl.flare || 0) + (gearWant && LAND ? 1 : -1) * dt * 1.5, 0, 1);   // (nose up coming in to land)
     if (pl.climbT > 0) { pl.climbT -= dt; if (!stick) { want = Math.min(want, -0.32); forced = true; } }   // (just off the runway: climbing out)
     if (pl.y < SKY_TOP + 90 && want < 0.15) { want = 0.15; forced = true; }          // the ceiling
+    // (user Oct 29: flown by hand it dodges nothing - your own hangar, tower and crane are yours to fly round; flying
+    // itself - home, a raid, the CPU - it still does)
+    const handFlown = planeByHand(pl);
     // your own tower it always dodges: coming up on it too low, the nose comes up to clear it
     const tw = towers[p], dirNow = pl.turn ? (pl.turn.t / PLANE_TURN_T < 0.5 ? pl.turn.from : -pl.turn.from) : pl.facing;
-    if (tw && tw.hp > 0) {
+    if (tw && tw.hp > 0 && !handFlown) {
       const ahead = (tw.x - pl.x) * dirNow, top = twBase(tw) - TW.H - 28;
       if (ahead > -50 && ahead < 120 + pl.spd * 1.1 && pl.y > top - 30) { want = Math.min(want, -0.75 * clamp((pl.y - top + 30) / 60, 0.4, 1)); forced = true; }
     }
     // and the rest of your own harbour (the pier, the block, the hangar the tower stands by): flying at it low,
     // the nose comes up at the last moment, and it climbs until it's over the top (user: never into your own)
-    const hd = !pl.raid && homeDock[p];
+    const hd = !pl.raid && !handFlown && homeDock[p];
     if (hd && hd.x0 !== undefined) {
       const q = pierEdge(hd), a = Math.min(q, hd.x0 + (hd.dir > 0 ? hd.w : 0)), b = Math.max(q, hd.x0 + (hd.dir > 0 ? hd.w : 0));
       const look = 60 + pl.spd * 0.9, nx = pl.x + dirNow * look;
@@ -9475,13 +9492,14 @@ function fireRocket(pl) {
   // (its spot under the wing, turned with the plane as planeSpot turns it)
   const [ox, oy] = slot, a = pl.pitch * pl.facing, ex = -ox * pl.facing;
   const cx = pl.x + ex * Math.cos(a) - oy * Math.sin(a), cy = pl.y + ex * Math.sin(a) + oy * Math.cos(a);
-  const s = { x: cx, y: cy, vx: pl.vx, vy: pl.vy + 15, ux, uy, owner: pl.id, from: 'rocket', burn: ROCKET_BURN, drop: ROCKET_DROP, age: 0, trail: 0, under: false, ut: 0 };
+  const s = { x: cx, y: cy, vx: pl.vx, vy: pl.vy + 15, ux, uy, owner: pl.id, from: 'rocket', burn: ROCKET_BURN * PLANE_ROCKET_K, drop: ROCKET_DROP, age: 0, trail: 0, under: false, ut: 0 };
   shells.push(s);
   sfxRocketRelease(cx);
 }
 // where missile k hangs under the wing (the plane's own units: back from the middle toward the tail, down from it);
 // the even ones under the near wing, the odd ones under the far wing (drawn behind the fuselage)
-const ROCKET_DROP = 0.32, ROCKET_ACC = 2600;   // (the drop before it lights; how hard it surges once lit)
+const ROCKET_DROP = 0.32, ROCKET_ACC = 2600;
+const PLANE_ROCKET_K = 1.5;   // (the plane's missiles burn 1.5x longer, so they fly 1.5x further - user Oct 29; the helicopter's as they were)   // (the drop before it lights; how hard it surges once lit)
 function rocketSlot(k) { const i = k >> 1; return [-12 + i * 3.2, (k & 1 ? 8.6 : 10.4) + i * 0.5]; }
 // the motor lights, a moment after it was let go: the launch puff, a flash, the roar
 function rocketIgnite(s) {
@@ -10302,9 +10320,9 @@ function muzzlePoint(sh, k = sh.muzzle) {
 function gunWorks(sh, k) { return !sh.dead[sectionOfCol(TURRETS[k].px)]; }
 function launch(x, y, el, power, facing, baseVx, owner, from) {
   // (the tower's big gun carries half as far again as the battleship's: range goes with the speed squared)
-  const sp = (SHELL_V0 + power * SHELL_VPOW) * (from === 'tower' ? Math.sqrt(1.5) : 1);
+  const sp = (SHELL_V0 + power * SHELL_VPOW) * (from === 'tower' ? Math.sqrt(1.5) : 1) * gunK(from);
   const dx = Math.cos(el) * facing, dy = -Math.sin(el);
-  shells.push({ x, y, vx: dx * sp + baseVx, vy: dy * sp, owner, from, age: 0, trail: 0, under: false, ut: 0 });
+  shells.push({ x, y, vx: dx * sp + baseVx, vy: dy * sp, owner, from, age: 0, trail: 0, under: false, ut: 0, g: SHELL_G * gunK(from) });
   sfxCannon(x, from === 'tower'); sfxWhoosh(shells[shells.length - 1]);
   flashes.push({ x: x + dx * 4, y: y + dy * 4, r: 10, life: 0, max: 0.1 });
   for (let i = 0; i < 10; i++) { spawnFlame(x + dx * rnd(2, 10), y + dy * rnd(2, 10), dx * rnd(40, 120), dy * rnd(40, 120), 1.2, rnd(2, 4), rnd(5, 7)); flames[flames.length - 1].clean = true; }
@@ -10450,7 +10468,7 @@ function stepShells(dt) {
       if (s.burn <= 0) { s.seg = null; if (!SIM_ONLY) spawnSmoke(s.x, s.y, { kind: 'gun', mist: true, r: 1.6, grow: 2, lift: 2, vx: s.vx * 0.05, vy: s.vy * 0.05, life: 1, alpha: 0.3 }); }
     } else {
       s.vx += (windAt(s.y) * 0.5 - s.vx) * 0.002;
-      s.vy += SHELL_G * dt;
+      s.vy += (s.g || SHELL_G) * dt;
     }
     const px = s.x, py = s.y;
     s.x += s.vx * dt; s.y += s.vy * dt;
@@ -22743,7 +22761,7 @@ function renderOverlays() {
       }
       continue;
     }
-    const L = Math.max(PB * 2, Math.round(6 * SV));
+    const L = Math.max(PB * 2, Math.round((s.from === 'ship' || s.from === 'tower' ? 12 : 6) * SV));   // (the ship's and the towers' twice as long, user Oct 29)
     C.fillStyle = s.under ? '#1d2a3c' : '#2b2b2b';
     blkLine(PX(s.x) - ux * L, PY(s.y) - uy * L, PX(s.x), PY(s.y));
     if (!s.under) { C.fillStyle = '#ffd36b'; blk(s.x, s.y, 1); }
@@ -23074,7 +23092,7 @@ function drawAim() {
     const mode = controlling(p), gun = activeGun(p);
     if (gun.aimShow <= 0 || (mode !== 'tower' && mode !== 'ship' && mode !== 'tank' && mode !== 'heli')) continue;
     let x, y, vx, vy;
-    const el = gun.elev * Math.PI / 180, sp = SHELL_V0 + gun.power * SHELL_VPOW;
+    const gk = gunK(mode), el = gun.elev * Math.PI / 180, sp = (SHELL_V0 + gun.power * SHELL_VPOW) * gk;   // (gk: the ship's and the tower's shells SHELL_K)
     // (LAND TEST, user Oct 25: the tank's missile's arc, and the helicopter's nose gun's line, as the others have)
     if (mode === 'heli') {
       const h = helis[p]; if (!h || (h.state !== 'fly' && h.state !== 'landed')) continue;
@@ -23098,7 +23116,7 @@ function drawAim() {
     const a = Math.min(1, gun.aimShow);
     // the first stretch of the shell's path, three times as many dots as it once had, so the line reads at a glance
     for (let i = 1; i <= 48; i++) {
-      vy += SHELL_G * 0.02; x += vx * 0.02; y += vy * 0.02;
+      vy += SHELL_G * gk * 0.02; x += vx * 0.02; y += vy * 0.02;
       if ((OWM && landSolid(x, y)) || y > surfaceY(x)) break;
       C.fillStyle = `rgba(255,255,255,${(a * (1 - i / 54)).toFixed(3)})`;
       C.fillRect(PX(x), PY(y), 2, 2);
@@ -23427,33 +23445,34 @@ function cpuReset() {
 function cpuCount(p, k) { cpuStats[p][k] = (cpuStats[p][k] || 0) + 1; }
 const gauss = () => { let u = 0; for (let i = 0; i < 6; i++) u += Math.random(); return (u - 3) / 0.707; };
 // a shell's flight, step by step, the way stepShells moves it: where it comes down through height ty
-function simShot(x, y, vx, vy, ty, maxT) {
+function simShot(x, y, vx, vy, ty, maxT, g = SHELL_G) {
   const dt = SUBSTEP;                                      // (shells move in the physics substeps)
   for (let t = 0; t < (maxT || 14); t += dt) {
-    vx += (windAt(y) * 0.5 - vx) * 0.002; vy += SHELL_G * dt; x += vx * dt; y += vy * dt;
+    vx += (windAt(y) * 0.5 - vx) * 0.002; vy += g * dt; x += vx * dt; y += vy * dt;
     if (vy > 0 && y >= ty) return { x, t };
   }
   return { x, t: maxT || 14 };
 }
 // the tower gun's reach with no wind (where its buoy goes)
 function towerReachCalm() {
-  const sp = (SHELL_V0 + SHELL_VPOW) * Math.sqrt(1.5), el = Math.PI / 4, dt = SUBSTEP;
+  const sp = (SHELL_V0 + SHELL_VPOW) * Math.sqrt(1.5) * SHELL_K, el = Math.PI / 4, dt = SUBSTEP;
   let x = 0, y = TW.BASE - 140, vx = Math.cos(el) * sp, vy = -Math.sin(el) * sp;
-  for (let t = 0; t < 20; t += dt) { vx -= vx * 0.002; vy += SHELL_G * dt; x += vx * dt; y += vy * dt; if (vy > 0 && y >= WATER_Y) break; }
+  for (let t = 0; t < 20; t += dt) { vx -= vx * 0.002; vy += SHELL_G * SHELL_K * dt; x += vx * dt; y += vy * dt; if (vy > 0 && y >= WATER_Y) break; }
   return x;
 }
-const shellSpeed = (power, tower) => (SHELL_V0 + power * SHELL_VPOW) * (tower ? Math.sqrt(1.5) : 1);
+const shellSpeed = (power, tower) => (SHELL_V0 + power * SHELL_VPOW) * (tower ? Math.sqrt(1.5) : 1) * SHELL_K;   // (the ship's and the tower's: SHELL_K)
+const GUN_G = SHELL_G * SHELL_K;
 // the angle and power that put a shell from (x0, y0) down on (tx, ty): the lowest of a few elevations that
 // reaches, the power found by halving. null if it's out of reach
 function solveShot(x0, y0, baseVx, tx, ty, tower, elevs) {
   const dir = Math.sign(tx - x0) || 1, dist = Math.abs(tx - x0);
   for (const e of elevs) {
-    const el = e * Math.PI / 180, land = pw => { const sp = shellSpeed(pw, tower); return (simShot(x0, y0, Math.cos(el) * dir * sp + baseVx, -Math.sin(el) * sp, ty).x - x0) * dir; };
+    const el = e * Math.PI / 180, land = pw => { const sp = shellSpeed(pw, tower); return (simShot(x0, y0, Math.cos(el) * dir * sp + baseVx, -Math.sin(el) * sp, ty, 0, GUN_G).x - x0) * dir; };
     if (land(1) < dist || land(0) > dist) continue;
     let a = 0, b = 1;
     for (let i = 0; i < 16; i++) { const m = (a + b) / 2; if (land(m) < dist) a = m; else b = m; }
     const pw = (a + b) / 2, sp = shellSpeed(pw, tower);
-    return { elev: e, power: pw, dir, t: simShot(x0, y0, Math.cos(el) * dir * sp + baseVx, -Math.sin(el) * sp, ty).t };
+    return { elev: e, power: pw, dir, t: simShot(x0, y0, Math.cos(el) * dir * sp + baseVx, -Math.sin(el) * sp, ty, 0, GUN_G).t };
   }
   return null;
 }
@@ -23463,7 +23482,7 @@ function gunReach(tower) {
   const k = tower ? 't' : 's';
   if (cpuReach[k]) return cpuReach[k];
   const y0 = tower ? TW.BASE - 140 : WATER_Y - 22, sp = shellSpeed(1, tower), el = Math.PI / 4;
-  return (cpuReach[k] = simShot(0, y0, Math.cos(el) * sp, -Math.sin(el) * sp, WATER_Y - 8).x);
+  return (cpuReach[k] = simShot(0, y0, Math.cos(el) * sp, -Math.sin(el) * sp, WATER_Y - 8, 0, GUN_G).x);
 }
 // the enemy as the computer sees it: what's out in the open
 function cpuEnemy(p) {
