@@ -3030,8 +3030,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 323;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 08:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 324;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 08:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11778,7 +11778,26 @@ function stepSea(dt) {
   stepWeedBits(dt);
   stepShocks(dt);
   const top = WATER_Y + 50, T = seaThreats();
-  for (const s of schools) {
+  // (engine stage 2, Oct 30): the schools (each with its fish, keyed on the school), the sharks and the whales by their
+  // region's tier - within a screen of a view every frame step as before, within 3 screens every 4th frame, further twice a
+  // second, with the time since. Pinned (every step wherever it is): one fleeing (a threat near, a blast, a scare)
+  const t0 = performance.now(), S = schedSystem('seaLife', 0.5, 1 / 15, true);
+  for (const s of schools) schedStep(S, s, s.x, dt, h => stepSchool(s, h, T, top), s.flee > 0);
+  for (const k of sharks) schedStep(S, k, k.x, dt, h => stepShark(k, h, T, top), k.flee > 0);
+  // the whales (user Oct 27: "have 3 whales"): slow, deep, each its own way; a slow turn now and then, at the sea's
+  // ends, and away from a boat or a blast close by (they hurry a little, never dart); they drift up and down a long way
+  // and keep clear of each other's paths by depth
+  const WL = 64 * 1.4;                                                       // (its length, world units)
+  for (const k of whales) schedStep(S, k, k.x, dt, h => stepWhale(k, h, T, top, WL), k.flee > 0);
+  S.t += performance.now() - t0;
+  for (const c of clouds) {
+    c.x += E.windU * 0.12 * dt + 0.6 * dt;
+    if (c.x > c.hi) c.x -= c.hi - c.lo;
+    if (c.x < c.lo) c.x += c.hi - c.lo;
+  }
+}
+
+function stepSchool(s, dt, T, top) {
     s.turnT -= dt;
     // the nearest threat: the school bolts away from it (faster the closer), the fish nearest it dart outward
     for (let i = 0; i < T.length; i += 5) {
@@ -11816,8 +11835,8 @@ function stepSea(dt) {
       f.x += f.vx * dt; f.y = clamp(f.y + f.vy * dt, top - 20, seabedY(f.x) - 8);
       if (Math.abs(f.vx) > 4) f.face = Math.sign(f.vx);
     }
-  }
-  for (const k of sharks) {
+}
+function stepShark(k, dt, T, top) {
     // (a shark bolts from a boat as well, and swims fast a while)
     k.flee = Math.max(0, (k.flee || 0) - dt);
     for (let i = 0; i < T.length; i += 5) {
@@ -11833,12 +11852,8 @@ function stepSea(dt) {
     const sp = k.speed * (k.turn > 0 ? 0.35 : 1) * (1 + 2.2 * Math.min(1, k.flee));
     k.x += k.dir * sp * dt;
     k.y = clamp(k.y + Math.sin(time * 0.4 + k.ph) * 8 * dt, top + 30, seabedY(k.x) - 40);
-  }
-  // the whales (user Oct 27: "have 3 whales"): slow, deep, each its own way; a slow turn now and then, at the sea's
-  // ends, and away from a boat or a blast close by (they hurry a little, never dart); they drift up and down a long way
-  // and keep clear of each other's paths by depth
-  const WL = 64 * 1.4;                                                       // (its length, world units)
-  for (const k of whales) {
+}
+function stepWhale(k, dt, T, top, WL) {
     k.flee = Math.max(0, k.flee - dt);
     for (let i = 0; i < T.length; i += 5) {
       if (T[i + 3] < 0.8) continue;
@@ -11854,14 +11869,7 @@ function stepSea(dt) {
     k.x += k.dir * sp * dt;
     k.dy += (Math.sin(time * 0.05 + k.ph * 3) * 7 - k.dy) * Math.min(1, dt * 0.5);
     k.y = clamp(k.y + k.dy * dt, top + 70, Math.max(top + 80, seabedY(k.x) - 60));
-  }
-  for (const c of clouds) {
-    c.x += E.windU * 0.12 * dt + 0.6 * dt;
-    if (c.x > c.hi) c.x -= c.hi - c.lo;
-    if (c.x < c.lo) c.x += c.hi - c.lo;
-  }
 }
-
 /* ---------------- Thunderstorm: lightning strikes; one in ten finds a ship ---------------- */
 const storm = { next: 3, bolts: [], flash: 0 };
 const MAST = [599, 0];                    // the masthead, where a strike lands
@@ -12529,17 +12537,41 @@ function stepBirds(dt) {
   }
   trackTowerPerches();
   trackPlantPerches();                                              // (the spots in the trees - 50-land-plants)
-  for (let i = birds.length - 1; i >= 0; i--) {
-    const b = birds[i];
+  // (engine stage 2, Oct 30): each bird by its region's tier - within a screen of a view every step as before, within 3
+  // screens every 4th frame, further twice a second, with the time since. The flocks themselves (the leaders their swifts
+  // follow), their merging and the perches' tracking stay every step, so a far swift catches up with where its flock is now.
+  // Pinned (every step wherever it is): one scared, falling dead, sinking, fleeing or coming in to land
+  { const t0 = performance.now(), S = schedSystem('birds', 0.5, 1 / 15, true);
+    for (let i = birds.length - 1; i >= 0; i--) {
+      const b = birds[i];
+      schedStep(S, b, b.x, dt, h => stepBird(b, h, shelter, gale), b.scared > 0 || b.state === 'dead' || b.state === 'sink' || b.state === 'flee' || b.state === 'land');
+    }
+    S.t += performance.now() - t0;
+  }
+  for (let i = gore.length - 1; i >= 0; i--) {
+    const g = gore[i];
+    // a splat that's gone in a moment
+    g.life += dt; g.vy += 40 * dt; g.vx *= 1 - 4 * dt; g.vy *= 1 - 4 * dt; g.x += g.vx * dt; g.y += g.vy * dt;
+    if (g.life > g.max) gore.splice(i, 1);
+  }
+  for (let i = feathers.length - 1; i >= 0; i--) {
+    const f = feathers[i];
+    f.life += dt;
+    f.vy += (14 - f.vy) * 1.5 * dt; f.vx += (windAt(f.y) * 0.6 - f.vx) * 0.8 * dt;
+    f.x += (f.vx + Math.sin(f.life * 4 + f.ph) * 10) * dt; f.y += f.vy * dt;
+    if (f.y > surfaceY(f.x) || f.life > f.max) feathers.splice(i, 1);
+  }
+}
+function stepBird(b, dt, shelter, gale) {
     b.scared = Math.max(0, b.scared - dt);
     b.ph += dt;
-    if (b.state === 'gone') continue;
+    if (b.state === 'gone') return;
     if (b.state === 'dead') {
       b.vy += 300 * dt; b.vx += (windAt(b.y) * 0.3 - b.vx) * 0.5 * dt;
       b.x += b.vx * dt; b.y += b.vy * dt; b.rot += b.spin * dt;
       const sy = surfaceY(b.x);
       if (b.y > sy) { spawnFoam(b.x, rnd(1, 2)); addForce(b.x, -150); addBubble(b.x, sy + 3, 0, -15, 1); b.state = 'sink'; b.vy = Math.min(b.vy, 40); b.vx *= 0.3; }
-      continue;
+      return;
     }
     // into the sea: it goes slowly down to the bottom and lies there a while
     if (b.state === 'sink') {
@@ -12548,21 +12580,21 @@ function stepBirds(dt) {
       if (Math.random() < dt * 0.8) addBubble(b.x, b.y - 1, 0, -12, 0.7);
       const bed = seabedY(b.x) - 1;
       if (b.y >= bed) { b.y = bed; b.state = 'bed'; b.t = rnd(60, 120); kickDust(b.x, 4, 0.4); }
-      continue;
+      return;
     }
-    if (b.state === 'bed') { b.t -= dt; if (b.t <= 0) b.state = 'gone'; continue; }
+    if (b.state === 'bed') { b.t -= dt; if (b.t <= 0) b.state = 'gone'; return; }
     if (b.state === 'perch') {
-      if (perchGone(b.spot)) { takeOff(b, null); continue; }
+      if (perchGone(b.spot)) { takeOff(b, null); return; }
       b.x = b.spot.x; b.y = b.spot.y;
       const th = birdThreat(b.x, b.spot.dock);
-      if (th !== null) { takeOff(b, th); continue; }
+      if (th !== null) { takeOff(b, th); return; }
       b.t -= dt;
       if (b.t <= 0) {
         b.t = rnd(2, 8);
         if (Math.random() < 0.35) b.face *= -1;                       // look around
         if (!shelter && (b.tree ? Math.random() < 0.05 : b.kind === 'swift' ? Math.random() < 0.5 : Math.random() < 0.06)) takeOff(b, null);
       }
-      continue;
+      return;
     }
     const flying = { maxSp: b.kind === 'gull' ? 70 : 85 };
     if (b.state === 'flee') {
@@ -12577,7 +12609,7 @@ function stepBirds(dt) {
       if (b.t <= 0) {
         b.t = rnd(2, 5);
         let best = null, bd = 1e9;
-        for (const p of perches) { if (!p.plant || p.bird || perchGone(p) || birdThreat(p.x, -1) !== null) continue; const d = Math.abs(p.x - b.hx); if (d < bd && d < 2500) { bd = d; best = p; } }
+        for (const p of perches) { if (!p.plant || p.bird || perchGone(p) || birdThreat(p.x, -1) !== null) return; const d = Math.abs(p.x - b.hx); if (d < bd && d < 2500) { bd = d; best = p; } }
         if (best) { b.state = 'land'; b.spot = best; best.bird = b; b.hx = best.x; }
       }
     } else if (b.state === 'circle') {
@@ -12599,9 +12631,9 @@ function stepBirds(dt) {
       }
     } else if (b.state === 'land') {
       const p = b.spot;
-      if (perchGone(p) || birdThreat(p.x, p.dock) !== null) { takeOff(b, null); continue; }   // (its spot broke away while it flew in: another, user Oct 27)
+      if (perchGone(p) || birdThreat(p.x, p.dock) !== null) { takeOff(b, null); return; }   // (its spot broke away while it flew in: another, user Oct 27)
       steerBird(b, p.x, p.y, flying.maxSp * (shelterNow ? 1.8 : 1.2), 2.2, dt);
-      if (Math.hypot(p.x - b.x, p.y - b.y) < 2.2) { b.state = 'perch'; b.vx = b.vy = 0; b.t = rnd(3, 9); continue; }
+      if (Math.hypot(p.x - b.x, p.y - b.y) < 2.2) { b.state = 'perch'; b.vx = b.vy = 0; b.t = rnd(3, 9); return; }
     }
     // the wind shoves anything in the air around
     b.x += windAt(b.y) * (b.state === 'land' ? 0.12 : 0.25 + 0.35 * gale) * dt + Math.sin(time * 3 + b.ph * 7) * gale * 14 * dt;
@@ -12610,20 +12642,6 @@ function stepBirds(dt) {
     if (b.y > floor && b.state !== 'land') { b.y = floor; b.vy = Math.min(b.vy, -10); }
     b.y = Math.max(b.y, SKY_TOP + 100);
     if (Math.abs(b.vx) > 3) b.face = Math.sign(b.vx);
-  }
-  for (let i = gore.length - 1; i >= 0; i--) {
-    const g = gore[i];
-    // a splat that's gone in a moment
-    g.life += dt; g.vy += 40 * dt; g.vx *= 1 - 4 * dt; g.vy *= 1 - 4 * dt; g.x += g.vx * dt; g.y += g.vy * dt;
-    if (g.life > g.max) gore.splice(i, 1);
-  }
-  for (let i = feathers.length - 1; i >= 0; i--) {
-    const f = feathers[i];
-    f.life += dt;
-    f.vy += (14 - f.vy) * 1.5 * dt; f.vx += (windAt(f.y) * 0.6 - f.vx) * 0.8 * dt;
-    f.x += (f.vx + Math.sin(f.life * 4 + f.ph) * 10) * dt; f.y += f.vy * dt;
-    if (f.y > surfaceY(f.x) || f.life > f.max) feathers.splice(i, 1);
-  }
 }
 function drawBirds(x0, x1) {
   for (const b of birds) {
@@ -24840,12 +24858,22 @@ const balLiftK = y => clamp((y - BAL_CEIL) / (BAL_THIN - BAL_CEIL), 0, 1);
 function stepBalloons(dt) {
   if (!LAND) return;
   if (!balloonArt && img.balloons) buildBalloonArt();
-  for (const b of balloons) {
+  { const t0 = performance.now(), S = schedSystem('balloons', 0.3, 1 / 30);
+    // (engine stage 2: a balloon drifting on its own, or waiting off the world's end, or a cold wreck, is stepped by its
+    // region's tier with the time since; one you fly, carried, popped, falling, sinking or a wreck still smoking every tick)
+    for (const b of balloons) {
+      const pin = b.driven != null || b.carried != null || b.state === 'pop' || b.state === 'fall' || b.state === 'sink' || (b.state === 'wreck' && !((b.t || 0) >= 20));
+      schedStep(S, b, b.x, dt, h => stepBalloon(b, h), pin);
+    }
+    S.t += performance.now() - t0;
+  }
+}
+function stepBalloon(b, dt) {
     b.ph += dt;
     if (b.state === 'gone') {
       b.wait -= dt;
       if (b.wait <= 0) Object.assign(b, newBalloon(b.i, (E.windU || 0) >= 0 ? -80 : WORLD_W + 80));   // (in from the end the wind blows from)
-      continue;
+      return;
     }
     if (b.state === 'wreck') {
       // lying on the ground: smoking a while (and burning, if it caught), then cleared away
@@ -24854,13 +24882,13 @@ function stepBalloons(dt) {
       if (b.fire && b.t < 6 && !SIM_ONLY && Math.random() < dt * 8 * fwFlames()) spawnFlame(b.x + rnd(-10, 10), b.y - rnd(2, 10), rnd(-5, 5), -rnd(20, 40), 1.1, rnd(2, 4), 1.8);
       // (and there it stays: no other balloon comes in its place - user Oct 27: "The rest, when destroyed, is never
       // spawned again"; one that only drifted off the world's end comes back, below)
-      continue;
+      return;
     }
     if (b.state === 'sink') {
       b.y += b.vy * dt; b.vy += (18 - b.vy) * Math.min(1, dt); b.a += (0.4 - b.a) * dt * 0.3;
       if (Math.random() < dt * 8) addBubble(b.x + rnd(-15, 15), b.y - 40, rnd(-5, 5), -rnd(15, 30), rnd(0.8, 2));
       if (b.y >= seabedY(b.x)) { b.y = seabedY(b.x); b.state = 'wreck'; b.t = 0; b.fire = 0; }
-      continue;
+      return;
     }
     const wind = windAt(b.y) * 0.9 + 6 * Math.sin(b.ph * 0.07 + b.i);
     b.x += (wind + (b.driven != null ? b.push || 0 : 0)) * dt;
@@ -24902,7 +24930,6 @@ function stepBalloons(dt) {
       }
     }
     if (b.x < -200 || b.x > WORLD_W + 200) { b.state = 'gone'; b.wait = rnd(5, 20); }
-  }
 }
 // drawn with the planes, over the sea and again over the land; at sunset a dark shape against the sky, its burner's
 // flame the only light on it. (mode 'air': what's not in the water - the land's redraw; 'under': what's sinking or
@@ -25019,9 +25046,19 @@ function blimpBurst(b) {
 }
 function stepBlimps(dt) {
   if (!LAND) return;
-  for (const b of blimps) {
+  { const t0 = performance.now(), S = schedSystem('blimps', 0.3, 1 / 30);
+    // (engine stage 2: one going to and fro on its own, waiting to come back, or sunk, is stepped by its region's tier with
+    // the time since; one you fly, hit, falling, sinking or a wreck still burning every tick)
+    for (const b of blimps) {
+      const pin = b.driven != null || b.carried != null || b.hp < 10 || b.state === 'fall' || b.state === 'sink' || (b.state === 'wreck' && b.burn > 0);
+      schedStep(S, b, b.x, dt, h => stepBlimp(b, h), pin);
+    }
+    S.t += performance.now() - t0;
+  }
+}
+function stepBlimp(b, dt) {
     const p = b.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === b;
-    if (b.state === 'gone') { b.wait -= dt; if (b.wait <= 0) Object.assign(b, { state: 'fly', x: (b.lo + b.hi) / 2, y: WATER_Y - 950 - b.team * 120, hp: 10, sag: 0, ang: 0, vx: 0, vy: 0 }); continue; }
+    if (b.state === 'gone') { b.wait -= dt; if (b.wait <= 0) Object.assign(b, { state: 'fly', x: (b.lo + b.hi) / 2, y: WATER_Y - 950 - b.team * 120, hp: 10, sag: 0, ang: 0, vx: 0, vy: 0 }); return; }
     if (b.state === 'fall') {
       // deflating as it goes down: the envelope folding, the last of its gas leaking out, its nose dropping
       b.burstT = (b.burstT || 0) + dt;
@@ -25029,13 +25066,13 @@ function stepBlimps(dt) {
       if (!SIM_ONLY && Math.random() < dt * (b.burstT < 2 ? 16 : 5)) { const [px, py] = blimpPoint(b, rnd(20, 150), rnd(8, 30)); spawnSmoke(px, py, { kind: 'trail', mist: true, r: rnd(3, 6), grow: 5, lift: 20, vx: rnd(-20, 20), vy: -rnd(10, 40), life: rnd(1.2, 2), alpha: 0.4, stream: smStream(b, 'leak') }); }
       const wet = !dryLand(b.x), fl = wet ? surfaceY(b.x) : landTop(b.x);
       if (b.y >= fl) { if (wet) { ditchFx(b.x, b.vx, 2); b.state = 'sink'; } else { sectionBlast(b.x, fl - 6, 1.2, b.vx * 0.3); spawnDebris(b.x, fl - 8, 16, b.vx * 0.3); b.state = 'wreck'; b.y = fl; b.burn = 30; } }
-      continue;
+      return;
     }
     // (its wreck stays, in the sea or on the land: no other blimp comes in its place - user Oct 27: "The rest, when
     // destroyed, is never spawned again")
-    if (b.state === 'sink') { b.y += 20 * dt; b.ang += (b.face * 0.12 - b.ang) * dt * 0.5; if (!SIM_ONLY && Math.random() < dt * 10) addBubble(b.x + rnd(-60, 60), b.y - 8, rnd(-5, 5), -rnd(15, 30), rnd(0.8, 2)); if (b.y > seabedY(b.x) - 4) { b.y = seabedY(b.x) - 4; b.state = 'sunk'; kickDust(b.x, 60, 0.8); } continue; }
-    if (b.state === 'sunk') continue;
-    if (b.state === 'wreck') { b.burn -= dt; if (b.burn > 0 && !SIM_ONLY && Math.random() < dt * 6) spawnSmoke(b.x + rnd(-80, 80), b.y - 6, { kind: 'trail', dark: 1, r: rnd(3, 6), grow: 6, lift: 22, vx: rnd(-6, 6), life: rnd(6, 9), alpha: 0.55, rise: true, stream: smStream(b) }); continue; }
+    if (b.state === 'sink') { b.y += 20 * dt; b.ang += (b.face * 0.12 - b.ang) * dt * 0.5; if (!SIM_ONLY && Math.random() < dt * 10) addBubble(b.x + rnd(-60, 60), b.y - 8, rnd(-5, 5), -rnd(15, 30), rnd(0.8, 2)); if (b.y > seabedY(b.x) - 4) { b.y = seabedY(b.x) - 4; b.state = 'sunk'; kickDust(b.x, 60, 0.8); } return; }
+    if (b.state === 'sunk') return;
+    if (b.state === 'wreck') { b.burn -= dt; if (b.burn > 0 && !SIM_ONLY && Math.random() < dt * 6) spawnSmoke(b.x + rnd(-80, 80), b.y - 6, { kind: 'trail', dark: 1, r: rnd(3, 6), grow: 6, lift: 22, vx: rnd(-6, 6), life: rnd(6, 9), alpha: 0.55, rise: true, stream: smStream(b) }); return; }
     // flying: yours on the lever and up / down; left to itself, slowly to and fro over the country
     let lever, st = 0;
     if (mine) { lever = b.cin || 0; st = civStick(p); }
@@ -25052,7 +25089,6 @@ function stepBlimps(dt) {
     if (b.hp <= 0) blimpBurst(b);
     // (a big ship's superstructure: it tears on it and comes down - the shared hullStrike, user Oct 27 night)
     else if (!dryLand(b.x) && hullStrike([[b.x - hw * 0.9, b.y], [b.x, b.y + hh], [b.x + hw * 0.9, b.y]], 0.5, b.vx)) blimpBurst(b);
-  }
 }
 function drawBlimps(x0, x1) {
   if (!LAND || !blimps.length) return;
@@ -28100,24 +28136,35 @@ function chUnder(h) {
 function stepCivHelis(dt) {
   if (!LAND) return;
   if (!chArt && img.civhelis) buildCivHeliArt();
-  for (const h of civHelis) {
+  { const t0 = performance.now(), S = schedSystem('civHelis', 0.5, 1 / 30);
+    // (engine stage 2: one flying its trips, waiting at its pad or a cold wreck on the ground is stepped by its region's tier
+    // with the time since; one you fly, carried, hit, falling, sinking, on a ship's deck (it rides her each tick), with its
+    // magnet or hose out every tick)
+    for (const h of civHelis) {
+      const pin = h.driven != null || h.carried != null || h.state === 'fall' || h.state === 'sink' || !!h.deck || !!h.mag || !!h.hose || (h.dmg || 0) > 0 || h.smokeT > 0 || (h.state === 'wreck' && !((h.t || 0) >= 30));
+      schedStep(S, h, h.x, dt, k => stepCivHeli(h, k), pin);
+    }
+    S.t += performance.now() - t0;
+  }
+}
+function stepCivHeli(h, dt) {
     h.ph += dt;
     h.rotor += h.spin * dt * 9;
-    if (h.state === 'gone') continue;
+    if (h.state === 'gone') return;
     // (its wreck stays: no other helicopter comes in its place - user Oct 27: "The rest, when destroyed, is never spawned again")
-    if (h.state === 'wreck' && h.onDeck && harbourTop(h.x, h.y - 6) === Infinity) { h.onDeck = false; h.state = 'sink'; h.vy = 20; ditchFx(h.x, 0, 1, 36, 60); continue; }   // (its wreck on the pier, the pier gone: into the sea - user Oct 27)
+    if (h.state === 'wreck' && h.onDeck && harbourTop(h.x, h.y - 6) === Infinity) { h.onDeck = false; h.state = 'sink'; h.vy = 20; ditchFx(h.x, 0, 1, 36, 60); return; }   // (its wreck on the pier, the pier gone: into the sea - user Oct 27)
     if (h.state === 'wreck') {
       h.t = (h.t || 0) + dt;
       // (on a ship's deck it rides her; she gone from under it, it falls - user Oct 27, [19]. On land or the harbour's
       // stone it burns and smokes there - landCrash - and stays; on land it settles into a hole dug under it - stepLandRest)
       if (h.deck) { const c = h.deck; h.x += c.dx || 0; const d = shipTopAt(h.x, h.y - 10); if (deckUp(c) && d && d.c === c && d.y < h.y + 8) h.y = d.y; else { h.deck = null; h.state = 'fall'; h.vx = 0; h.vy = 0; h.spinV = rnd(-0.4, 0.4); } }
-      continue;
+      return;
     }
     if (h.state === 'sink') {
       h.y += h.vy * dt; h.vy += (24 - h.vy) * Math.min(1, dt); h.tilt += (0.5 - h.tilt) * dt * 0.3; h.spin *= 1 - dt;
       if (Math.random() < dt * 10) addBubble(h.x + rnd(-15, 15), h.y - 10, rnd(-6, 6), -rnd(15, 35), rnd(0.8, 2));
       if (h.y >= seabedY(h.x) - 4) { h.state = 'wreck'; h.t = 0; h.y = seabedY(h.x) - 4; }
-      continue;
+      return;
     }
     if (h.state === 'fall') {
       // going down, turning over, smoking and burning
@@ -28140,18 +28187,18 @@ function stepCivHelis(dt) {
         }
         civFollowDown(h);
       }
-      continue;
+      return;
     }
     const mine = h.driven != null && crew[h.driven].mode === 'civ' && crew[h.driven].civ === h;
     if (h.state === 'parked') {
       if (h.deck) h.x += h.deck.dx || 0;                            // (left on a ship: it goes with her)
-      { const [fy, dc] = chUnder(h); if (h.deck && dc !== h.deck) { h.deck = null; h.state = 'fall'; h.vx = 0; h.vy = 0; h.spinV = rnd(-0.4, 0.4); continue; } h.y = fy - chStand(h); }   // (she gone from under it: in it goes)
+      { const [fy, dc] = chUnder(h); if (h.deck && dc !== h.deck) { h.deck = null; h.state = 'fall'; h.vx = 0; h.vy = 0; h.spinV = rnd(-0.4, 0.4); return; } h.y = fy - chStand(h); }   // (she gone from under it: in it goes)
       h.spin = Math.max(0, h.spin - dt * 0.4); h.gear = 1; susStep(h, dt, CH_SUS_K, CH_SUS_C);
       civLoadHome(h, mine, dt);
       if (mine) { if (civStick(h.driven) < -0.2 || Math.abs(h.cin || 0) > 0.2) h.state = 'landed'; }
       else { h.wait -= dt; if (h.wait <= 0) { if (civHelis.some(o => o !== h && o.R === h.R && (o.state === 'fly' || (o.state === 'landed' && o.ai)) && o.driven == null)) h.wait = rnd(15, 40); else { h.state = 'landed'; civHeliTrip(h); } } }   // (one up at a time on each side, user Oct 26: "too many helicopters in the air")
       civHeliHits(h);
-      continue;
+      return;
     }
     // spinning up on the ground ('landed') or flying: the lever and the stick (yours, or its plan's)
     let [lever, stick] = mine ? [h.cin || 0, civStick(h.driven)] : civHeliPlan(h, dt);
@@ -28168,7 +28215,7 @@ function stepCivHelis(dt) {
       else if (!mine && h.ai && h.ai.phase === 'home' && h.spin > 0.5 && Math.abs(h.x - h.home) < 80) { h.state = 'parked'; h.wait = rnd(20, 70); h.ai = null; }
       else if (!mine && !h.ai) { h.state = 'parked'; h.wait = rnd(20, 70); }   // (user Oct 27: only the player puts out fires - it flies its trips like the others)
       civHeliHits(h);
-      continue;
+      return;
     }
     // flying: the lever sets the way and speed across, the stick climbs and sinks; told the other way, it slows to a
     // hover and turns round on the spot (as the army's)
@@ -28190,8 +28237,8 @@ function stepCivHelis(dt) {
     h.spin = Math.min(1, h.spin + dt);
     // touching down: gently on land it sets down; hard, or on the water, it's lost
     if (h.y >= gy) {
-      if (!dryLand(h.x) && !deckC) { ditchFx(h.x, h.vx, 1.2, 36, h.vy); h.state = 'sink'; h.vy = 40; h.vx *= 0.3; civLetGo(h); continue; }   // (onto the water: in it goes, and sinks - no blast, user Oct 26)
-      if (h.vy > 90 && !apron) { civHeliDown(h); h.y = gy; continue; }
+      if (!dryLand(h.x) && !deckC) { ditchFx(h.x, h.vx, 1.2, 36, h.vy); h.state = 'sink'; h.vy = 40; h.vx *= 0.3; civLetGo(h); return; }   // (onto the water: in it goes, and sinks - no blast, user Oct 26)
+      if (h.vy > 90 && !apron) { civHeliDown(h); h.y = gy; return; }
       h.susV = (h.susV || 0) + clamp(h.vy + 25, 20, 110) * 0.16; h.y = gy; h.vy = 0; h.vx = 0; h.state = 'landed'; h.deck = deckC;   // (down on its wheels: the body sinks on its legs - up to two units - and bounces back up)
     }
     heliDust(h.x, h.y + chStand(h), gy - h.y, h.spin, dt, chHalf(h));   // (low over the ground: its downwash raises the dust)
@@ -28204,7 +28251,6 @@ function stepCivHelis(dt) {
     // civilian aircrafts and military aircrafts"; only weapons bring them down). A big ship's hull still does - the shared
     // hullStrike, as every flying thing (user Oct 27 night)
     if (h.state === 'fly' && hullStrike([[h.x, h.y - chSkid(h) * 0.8], [h.x + h.facing * chHalf(h) * 0.7, h.y - chSkid(h) * 0.8], [h.x - h.facing * chHalf(h) * 0.7, h.y - chSkid(h)]], 1.5, h.vx)) civHeliDown(h);
-  }
 }
 // rounds and shells: a round hurts it a little, a shell, missile or bomb brings it down
 function civHeliHits(h) {
@@ -32887,13 +32933,23 @@ function linerHitParts(c, x, y, vx) {
 }
 function stepLinerParts(dt) {
   if (!LAND) return;
+  const t0 = performance.now(), SY = schedSystem('linerRopes', 0.3, 1 / 30);
   for (const c of civShips) {
     if (!linerOn(c) || c.state === 'gone') continue;
     const S = linerState(c);
     // going down: her funnels and masts come away one by one
     if (c.state === 'sink' && c.sinkT > 1.2 && Math.random() < dt * 0.9) { const left = Object.keys(linerArts()).filter(n => !S.loose[n]); if (left.length) linerTear(c, left[Math.floor(Math.random() * left.length)]); }
     if (c.state === 'wreck') continue;
-    // the ropes: their ends held where they're made fast; the knots between fall and swing, kept to the rope's length
+    // (engine stage 2: her rigging, on her run whole and unhurt, by her region's tier with the time since, as she is - its
+    // ends follow her; going down, hurt, yours, carried, or a piece torn off her, every tick)
+    const pin = c.state !== 'sail' || c.driven != null || c.carried != null || c.sec.some(v => v < CIV[c.kind].hp) || Object.keys(S.loose).length > 0;
+    schedStep(SY, S, c.x, dt, h => linerRopes(c, S, h), pin);
+  }
+  SY.t += performance.now() - t0;
+  stepLinerLoose(dt);
+}
+// the ropes: their ends held where they're made fast; the knots between fall and swing, kept to the rope's length
+function linerRopes(c, S, dt) {
     for (const R of S.ropes) {
       const { rp, N } = R;
       const [ax, ay] = linerPoint(c, rp.pa, ...rp.a), [bx, by] = linerPoint(c, rp.pb, ...rp.b);
@@ -32912,8 +32968,9 @@ function stepLinerParts(dt) {
         p[0] += dx * e * wp / w; p[1] += dy * e * wp / w; q[0] -= dx * e * wq / w; q[1] -= dy * e * wq / w;
       }
     }
-  }
-  // the pieces off her: falling, into the water with a splash, sinking, at rest on the bottom
+}
+// the pieces off her: falling, into the water with a splash, sinking, at rest on the bottom (every tick: falling or sinking)
+function stepLinerLoose(dt) {
   for (const o of linerLoose) {
     if (o.rest) continue;
     o.x += o.vx * dt; o.a += o.va * dt;
@@ -35150,12 +35207,22 @@ function seaplaneArt(col) {
 const spOnWater = s => s.state === 'moored' || s.state === 'water';
 function stepSeaplanes(dt) {
   if (!LAND) return;
-  for (const s of seaplanes) {
+  { const t0 = performance.now(), S = schedSystem('seaplanes', 0.3, 1 / 30);
+    // (engine stage 2: one moored, or on its own trip, is stepped by its region's tier with the time since; one you fly,
+    // carried, hit, falling or sinking every tick)
+    for (const s of seaplanes) {
+      const pin = s.driven != null || s.carried != null || s.state === 'fall' || s.state === 'sink' || s.hp < 2;
+      schedStep(S, s, s.x, dt, h => stepSeaplane(s, h), pin);
+    }
+    S.t += performance.now() - t0;
+  }
+}
+function stepSeaplane(s, dt) {
     const p = s.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === s;
     // (on a helicopter's magnet: being carried changes where it is, nothing else - it can still be hit, user Oct 27 [17])
-    if (s.carried != null) { spHits(s); if (s.hp <= 0) spDown(s); continue; }
-    if (s.state === 'wreck' || s.state === 'sunk') continue;        // (its wreck stays: no other comes in its place - user Oct 27: "The rest, when destroyed, is never spawned again"; one down on land, its wreck is in crashes - 50-land-rest)
-    if (s.state === 'gone') { s.wait -= dt; if (s.wait <= 0) Object.assign(s, { state: 'moored', x: s.home, y: WATER_Y + SP_DRAFT, dir: s.out, spd: 0, run: 0, pitch: 0, ang: 0, hp: 2, wait: rnd(20, 50), ai: null }); continue; }
+    if (s.carried != null) { spHits(s); if (s.hp <= 0) spDown(s); return; }
+    if (s.state === 'wreck' || s.state === 'sunk') return;        // (its wreck stays: no other comes in its place - user Oct 27: "The rest, when destroyed, is never spawned again"; one down on land, its wreck is in crashes - 50-land-rest)
+    if (s.state === 'gone') { s.wait -= dt; if (s.wait <= 0) Object.assign(s, { state: 'moored', x: s.home, y: WATER_Y + SP_DRAFT, dir: s.out, spd: 0, run: 0, pitch: 0, ang: 0, hp: 2, wait: rnd(20, 50), ai: null }); return; }
     if (s.state === 'fall') { s.vy += 220 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.ang += s.spin * dt; if (!SIM_ONLY && Math.random() < dt * 25) spawnSmoke(s.x, s.y, { kind: 'trail', dark: 0, r: rnd(3, 5), grow: 5, lift: 18, vx: rnd(-8, 8), life: rnd(4, 6), alpha: 0.6, chain: smStream(s) });
       // (the harbour's deck is ground, a ship's top too - user Oct 27, [19]; on land, the stone or a deck what's left of it
       // stays, burning - landCrash; into the water it sinks)
@@ -35163,16 +35230,15 @@ function stepSeaplanes(dt) {
       const ground = onShip ? dk.y : ht < Infinity ? ht : dryLand(s.x) ? landTop(s.x) : surfaceY(s.x);
       if (s.y >= ground) { if (onShip || ht < Infinity || dryLand(s.x)) { const face = s.vx >= 0 ? 1 : -1, A = seaplaneArt(s.col);
           s.crash = landCrash(s.x, ground, { size: 0.8, vx: s.vx, vy: s.vy, art: A.plane[2][0][face], k: CESSNA_K, face, n: 2, wings: A.wings ? [A.wings[0]] : [], deck: onShip ? dk.c : null, stone: !onShip && ht < Infinity }); s.state = 'wreck'; s.y = ground; } else spDitch(s); }
-      continue; }
-    if (s.state === 'sink') { s.y += 28 * dt; s.ang *= 1 - dt; if (Math.random() < dt * 8) addBubble(s.x + rnd(-8, 8), s.y, rnd(-5, 5), -rnd(15, 30), rnd(0.8, 1.6)); if (s.y > seabedY(s.x) - 6) { s.y = seabedY(s.x) - 6; s.state = 'sunk'; kickDust(s.x, 16, 0.5); } continue; }
+      return; }
+    if (s.state === 'sink') { s.y += 28 * dt; s.ang *= 1 - dt; if (Math.random() < dt * 8) addBubble(s.x + rnd(-8, 8), s.y, rnd(-5, 5), -rnd(15, 30), rnd(0.8, 1.6)); if (s.y > seabedY(s.x) - 6) { s.y = seabedY(s.x) - 6; s.state = 'sunk'; kickDust(s.x, 16, 0.5); } return; }
     spHits(s);
-    if (s.hp <= 0) { spDown(s); continue; }
+    if (s.hp <= 0) { spDown(s); return; }
     // what it's told: yours from the controls; left to itself, its own trip
     let lever = 0, stick = 0;
     if (mine) { lever = s.cin || 0; stick = civStick(p); }
     else [lever, stick] = spPlan(s, dt);
     if (spOnWater(s)) spWater(s, dt, lever, stick, mine); else spAir(s, dt, stick, mine);
-  }
 }
 // left to itself: moored a while, then out, a run, a flight out over the sea and back, down onto the water, home
 // (user Oct 26: "Hydroplanes can fly from the ocean to the lakes and vice-versa") its own country's lake
