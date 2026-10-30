@@ -3039,8 +3039,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 333;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 10:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 334;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 10:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14849,7 +14849,13 @@ function gsmTex(t, w, h, data, fmt) {
   else if (data) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, f, gl.FLOAT, data);
   return t;
 }
-function gsmBind(unit, t) { const gl = GLR.gl; gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t.tex); gl.bindSampler(unit, null); }
+// (engine stage 6, Oct 30: through the units' cache, GLR.unit / GLR.unitS, as glFlush and wglTex bind - only what isn't bound
+// already. It keeps the cache true too, where it used to leave it stale until gsmPaint reset it)
+function gsmBind(unit, t) {
+  const gl = GLR.gl;
+  if (GLR.unit[unit] !== t.tex) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t.tex); GLR.unit[unit] = t.tex; }
+  if (GLR.unitS[unit] !== null) { gl.bindSampler(unit, null); GLR.unitS[unit] = null; }
+}
 function gsmFbo(attach, depth) {
   const gl = GLR.gl, f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
   attach.forEach((t, k) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + k, gl.TEXTURE_2D, t.tex, 0));
@@ -15664,8 +15670,10 @@ class GLCtx {
   // paths: kept as lists of points already on the target, as a canvas keeps them
   beginPath() { this.path = []; this.sub = null; }
   _pt(x, y) { const m = this.s.m; return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; }
-  moveTo(x, y) { const [X, Y] = this._pt(x, y); this.sub = [X, Y]; this.path.push(this.sub); }
-  lineTo(x, y) { if (!this.sub) { this.moveTo(x, y); return; } const [X, Y] = this._pt(x, y); this.sub.push(X, Y); }
+  // (engine stage 6, Oct 30: moveTo and lineTo work out the point in place - the same sums as _pt - not through a two-number
+  // array made for every point of every path, garbage by the thousand a frame)
+  moveTo(x, y) { const m = this.s.m; this.sub = [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]; this.path.push(this.sub); }
+  lineTo(x, y) { if (!this.sub) { this.moveTo(x, y); return; } const m = this.s.m; this.sub.push(m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]); }
   closePath() { const sp = this.sub; if (sp && sp.length >= 2) { this.sub = [sp[0], sp[1]]; this.path.push(this.sub); } }
   rect(x, y, w, h) {
     const a = this._pt(x, y), b = this._pt(x + w, y), c = this._pt(x + w, y + h), d = this._pt(x, y + h);
@@ -16073,8 +16081,11 @@ function wglBegin(ctx, blend, pr) {
 }
 function wglTex(unit, tex, smooth) {
   const gl = GLR.gl;
-  gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); GLR.unit[unit] = tex;
-  const s = smooth ? GLR.lin : GLR.near; gl.bindSampler(unit, s); GLR.unitS[unit] = s;
+  // (engine stage 6, Oct 30: bound only when the unit holds something else - the cache glFlush keeps, GLR.unit / GLR.unitS,
+  // which every bind on units 0-7 keeps up to date and the smoke, a lost context and a resize reset. Every caller sets its
+  // own active unit before it binds or uploads, so skipping activeTexture here changes nothing drawn)
+  if (GLR.unit[unit] !== tex) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); GLR.unit[unit] = tex; }
+  const s = smooth ? GLR.lin : GLR.near; if (GLR.unitS[unit] !== s) { gl.bindSampler(unit, s); GLR.unitS[unit] = s; }
 }
 function wglEnd(n) { const gl = GLR.gl; gl.bindVertexArray(GLR.vao); GLR.cur.vao = 1; GLR.stats.draws++; GLR.stats.quads += n || 1; }
 // this view's surface line as a texture (once a view a frame: renderObjects fills ys first)
@@ -17650,7 +17661,7 @@ function addWisps(rnd, lay, x0) {
 }
 // every wisp takes a new shape (the WISP BUMPS sliders), each with its own seed - the lifts are kept
 function reformWisps() { for (const c of clouds) if (c.wisp) { const r = seed32(c.uid * 7919 + 13); morphTo(c, wispLobes(r, 140 + r() * 300, r() * (c.lay.name === 'hero' ? 170 : 100), 1 / Math.sqrt(c.lay.k)), 0.3); } }
-function deckLook() { let ch = 0; for (const L of LAYERS) { const k = P['sz' + L.dn] ?? L.k, h = P['hz' + L.dn] ?? L.haze; if (k !== L.k) { L.k = k; ch = 1; } L.haze = h; } for (const c of clouds) c.haze = c.lay.haze; return ch; }   // (DECK n SIZE, DECK n HAZE)
+function deckLook() { let ch = 0; for (const L of LAYERS) { const k = P['sz' + L.dn] ?? L.k, h = P['hz' + L.dn] ?? L.haze; if (k !== L.k) { L.k = k; ch = 1; } L.haze = h; } for (const c of clouds) { const h = c.lay.haze; if (c.haze !== h) c.haze = h; } return ch; }   // (stage 6, Oct 30: written only when it changes - a number stored in every cloud every frame was a new heap number each, ~50 KB of garbage a frame)   // (DECK n SIZE, DECK n HAZE)
 function regenAll() { for (const c of clouds) { c.s = S * c.lay.k; if (c === hero || (c.items && c.visible)) genCloud(c); else c.items = null; } }
 
 
@@ -18184,8 +18195,11 @@ function bakeVisit(c, vis, gk) {
     c.gfr = frameNo; c.y = c.lay.baseY;
     const d = c.bx - c.lay.uPiv; if (d > WORLD / 2) c.bx -= WORLD; if (d < -WORLD / 2) c.bx += WORLD;
     const cov = P.cover, clear = smoothstep(0, 0.06, cov);
-    c.growT = c === hero ? smoothstep(0.12, 0.3, cov) : clear * smoothstep(c.thr * 0.6 - 0.04, c.thr * 0.6 + 0.12, c.wisp ? (P.wisps ?? 0.5) * clamp(cov / 0.3, 0, 1) : cov);
-    if (!c.wisp) c.growT *= 1 + (P.bigk ?? 0.5) * (P.big || 0);
+    // (engine stage 6, Oct 30: worked out in a local and stored only when it changes - every cloud, every frame, two stores of
+    // a fresh number were most of the sky's garbage. The same sums in the same order: the same value)
+    let gT = c === hero ? smoothstep(0.12, 0.3, cov) : clear * smoothstep(c.thr * 0.6 - 0.04, c.thr * 0.6 + 0.12, c.wisp ? (P.wisps ?? 0.5) * clamp(cov / 0.3, 0, 1) : cov);
+    if (!c.wisp) gT *= 1 + (P.bigk ?? 0.5) * (P.big || 0);
+    if (c.growT !== gT) c.growT = gT;
     c.gk0 = gk;
   }
   c.y = c.lay.baseY;
@@ -18226,7 +18240,7 @@ function bakeVisit(c, vis, gk) {
   }
   // frozen: its sprite laid where the cloud is - nothing worked out
   if (!shownF || !on) { c.visible = false; return true; }
-  c.visible = true; c.seen = now;
+  c.visible = true; if (c.seen !== now) c.seen = now;   // (stage 6: not a fresh number stored per cloud per view per frame)
   if (c.grow > 0.04 || c.growT > 0.04) NEAR.push(c);
   if (inView) vis.push(c);
   return true;
