@@ -157,7 +157,7 @@ function swBootData(o = {}) {
     store, coarse: mm('(pointer: coarse)') || ('ontouchstart' in window), reduced: mm('(prefers-reduced-motion: reduce)') }, o);
 }
 // ---- the page's side
-const SW = { on: false, worker: null, fail: null, ready: false, seq: 0, wait: new Map(), bootMs: 0, t0: 0, touch: null };
+const SW = { on: false, worker: null, fail: null, ready: false, seq: 0, wait: new Map(), bootMs: 0, t0: 0, touch: null, gen: 0, liveGen: 0, resyncing: false };
 function swStart(o) {
   if (SW.worker || !SW_SRC) { if (!SW_SRC) SW.fail = 'no script text'; return; }
   try {
@@ -167,7 +167,7 @@ function swStart(o) {
     SW.t0 = performance.now();
     const w = SW.worker = new Worker(url);
     w.onmessage = e => swFromWorker(e.data);
-    w.onerror = e => { SW.fail = 'error: ' + (e.message || e); console.error('sim worker', e.message || e); };
+    w.onerror = e => swFail('error: ' + (e.message || e));
     SW.on = true;
   } catch (e) { SW.fail = String(e); SW.worker = null; console.error('sim worker', e); }
 }
@@ -177,18 +177,49 @@ function swStart(o) {
 Object.assign(SW, { live: false, snaps: [], acts: [], tickMs: 0, behind: 0, got: 0, framesNoSnap: 0 });
 async function swGoLive() {
   if (!SW.ready) throw new Error('sim worker not ready' + (SW.fail ? ': ' + SW.fail : ''));
-  swMirrorReset();
-  swApply(await swAsk('snap', { reset: true }));                     // (a whole snapshot first: every row matched afresh)
-  SW.live = true; SW.snaps.length = 0; SW.acts.length = 0;
   await swAsk('go', { hold: false });
-  SW.worker.postMessage({ t: 'in', credit: 1, cam: CAM_ROW.cam });
+  SW.acts.length = 0; SW.framesNoSnap = 0;
+  await swResync();                                                  // (the worker takes this page's world, then a whole snapshot back)
+  if (SW.fail) return false;
+  SW.live = true;
   return true;
 }
+// (the page) the worker's sounds, shakes and toasts, here
+function swEvents(E) {
+  const arg = v => v && typeof v === 'object' && v.ref != null && Object.keys(v).length === 1 ? SWM.byU.get(v.ref) || null : v;
+  for (const e of E) {
+    try {
+      if (e[0] === 's') emit('sound', { id: e[1], x: arg(e[2]), a: arg(e[3]) });
+      else if (e[0] === 'k') shakeAt(e[1], e[2]);
+      else if (e[0] === 't') showToast(e[1]);
+    } catch (err) { }
+  }
+}
+// the worker failed (an error, no snapshot for 5 s): this page goes on with the game itself, from the last snapshot it has
+function swFail(why) {
+  SW.fail = String(why); console.error('sim worker:', SW.fail);
+  if (SW.live) { SW.live = false; console.warn('sim worker: the page runs the game itself from here'); }
+}
+// the page built a new world (a round, a mode, the editor's REFRESH): the worker builds the same and takes the page's tables
+async function swResync() {
+  SW.resyncing = true;
+  try {
+    const store = swBootData().store;
+    await swAsk('resync', { mode: MODE, ctl: ctlPick.slice(), store, ui: [!!ui.title, !!ui.menu, !!ui.settings], s: JSON.stringify(tablesSave()) });
+    SW.liveGen = SW.gen; swMirrorReset();
+    const s0 = await swAsk('snap', { reset: true }); SW.snaps.length = 0;
+    swApply(s0);
+  } catch (e) { swFail(e && e.message || e); }
+  finally { SW.resyncing = false; }
+}
 function swGuestFrame(dt, held) {
+  if (SW.resyncing) return;
+  if (SW.gen !== SW.liveGen) { swResync(); return; }
+  if (SW.framesNoSnap > 300 && !held) { swFail('no snapshot for 300 frames'); return; }
   // the newest snapshot (all of them in order if more than one came: each is a delta on the one before)
   if (SW.snaps.length) {
     const ctl = [0, 1].map(p => { try { return ctlState(p); } catch (e) { return null; } });
-    for (const m of SW.snaps.splice(0)) { swApply(m.s); SW.tickMs = m.tickMs; SW.behind = m.behind; SW.got++; }
+    for (const m of SW.snaps.splice(0)) { swApply(m.s); SW.tickMs = m.tickMs; SW.behind = m.behind; SW.got++; if (m.ev && m.ev.length) swEvents(m.ev); }
     for (let p = 0; p < 2; p++) if (ctl[p]) try { setCtlState(p, ctl[p]); } catch (e) { }
     SW.framesNoSnap = 0;
   } else SW.framesNoSnap++;
@@ -196,12 +227,12 @@ function swGuestFrame(dt, held) {
   regionsTick();                                                     // (the regions' tiers by this page's views: what the drawing culls by)
   const ctl = [];
   for (let p = 0; p < 2; p++) { try { const s = ctlState(p); if (s) { const g = hasGuns(p) ? activeGun(p) : null; if (g) { s.e = g.elev; s.w = g.power; } } ctl.push(s); } catch (e) { ctl.push(null); } }
-  SW.worker.postMessage({ t: 'in', credit: 1, hold: !!held, acts: SW.acts.splice(0), ctl, cam: CAM_ROW.cam });
+  SW.worker.postMessage({ t: 'in', credit: 1, hold: !!held, acts: SW.acts.splice(0), ctl, cam: CAM_ROW.cam, ui: [!!ui.title, !!ui.menu, !!ui.settings] });
 }
 function swFromWorker(m) {
   if (m.t === 'snap') { SW.snaps.push(m); return; }
-  if (m.t === 'ready') { SW.ready = true; SW.bootMs = performance.now() - SW.t0; SW.touch = m.touch; return; }
-  if (m.t === 'fail') { SW.fail = m.err; console.error('sim worker:', m.err); return; }
+  if (m.t === 'ready') { SW.ready = true; SW.bootMs = performance.now() - SW.t0; SW.touch = m.touch; if (SW_WANT) swGoLive().catch(e => swFail(e && e.message || e)); return; }
+  if (m.t === 'fail') { swFail(m.err); return; }
   if (m.t === 're') { const P = SW.wait.get(m.id); if (P) { SW.wait.delete(m.id); if (m.err) P[1](new Error(m.err)); else P[0](m.v); } }
 }
 // a request to the worker; its answer as a promise
@@ -210,6 +241,10 @@ function swAsk(t, o) {
   const id = ++SW.seq;
   return new Promise((res, rej) => { SW.wait.set(id, [res, rej]); SW.worker.postMessage(Object.assign({ t, id }, o)); });
 }
+// (the page) the GAME EDITOR's VEHICLES tab puts a thing in or moves one (events to the table's owner): the page's tables are
+// the truth again, the worker takes them (as after a new world or a LOAD)
+on('tableAdd', () => { SW.gen++; }, 'simworker', 100);
+on('tableMove', () => { SW.gen++; }, 'simworker', 100);
 // ---- the worker's side: the game (start() done, window.__game set) answers the page's requests
 function swHostReady() {
   const answer = m => {
@@ -219,15 +254,22 @@ function swHostReady() {
       else if (m.t === 'step') { window.__game.stepQuiet(m.dt, m.n); v = { time, tick: REG.tick }; }
       else if (m.t === 'tables') v = JSON.stringify(tablesSave());
       else if (m.t === 'load') { tablesLoad(JSON.parse(m.s)); v = true; }
-      else if (m.t === 'snap') { if (m.reset) swSnapReset(); v = swSnapshot(); }   // (36-zzzzz-sw-snap.js)
+      else if (m.t === 'snap') { if (m.reset) swSnapReset(); v = swSnapshot(m.full !== false); }   // (36-zzzzz-sw-snap.js)
       else if (m.t === 'stats') v = { snapMs: SWS.ms, snapBytes: SWS.bytes, snaps: SWS.n, tick: REG.tick, time, hostTickMs: SWH.tickMs, hostBehind: SWH.behind, hostDone: SWH.done, hostSent: SWH.sent, hostHold: SWH.hold };
       else if (m.t === 'touch') v = self.__SW_TOUCH;
       else if (m.t === 'go') { swHostGo(m); v = true; }
+      else if (m.t === 'resync') { swHostResync(m); v = true; }
       else if (m.t === 'in') { swHostIn(m); return; }
       else err = 'unknown ' + m.t;
     } catch (e) { err = String(e && e.stack || e); }
     if (m.id) postMessage({ t: 're', id: m.id, v, err }, v && v.bufs ? v.bufs : []);   // (a snapshot's columns are moved, not copied)
   };
+  // what the page must hear, see or show that isn't in the tables (design section 3, lane 4): the sounds, the camera's
+  // shakes, the toasts - kept in order and sent with the next snapshot
+  const arg = v => v && typeof v === 'object' ? (v._uid != null ? { ref: v._uid } : tblPlain(v, 2, TBL_SKIP, false)) : v;
+  on('sound', e => { SWH.ev.push(['s', e.id, arg(e.x), arg(e.a)]); }, 'simworker');
+  const shake0 = shakeAt; shakeAt = (amt, x) => { SWH.ev.push(['k', amt, x]); return shake0(amt, x); };
+  const toast0 = showToast; showToast = msg => { SWH.ev.push(['t', msg]); return toast0(msg); };
   self.__swReady = answer;
   for (const m of self.__swQ.splice(0)) answer(m);
   postMessage({ t: 'ready', touch: self.__SW_TOUCH });
@@ -236,7 +278,7 @@ function swHostReady() {
    step); at most 8 a wake-up - behind that, the game runs slower, never different (nothing thinned or skipped: each tick is
    1/120 s of game time). The page grants one credit a frame with its inputs ('in'); after the next tick the worker spends
    it on a snapshot, so the page has one to fold in at each frame and never two. */
-const SWH = { on: false, hold: false, t0: 0, done: 0, credit: 0, q: [], tickMs: 0, behind: 0, sent: 0, timer: 0 };
+const SWH = { on: false, hold: false, t0: 0, done: 0, credit: 0, q: [], tickMs: 0, behind: 0, sent: 0, timer: 0, ev: [] };
 function swHostGo(m) {
   SWH.hold = !!m.hold;
   if (!SWH.on) { SWH.on = true; SWH.t0 = performance.now(); SWH.done = 0; swHostLoop(); }
@@ -247,6 +289,7 @@ function swHostIn(m) {
   if (m.acts) for (const a of m.acts) SWH.q.push(a);
   if (m.ctl) SWH.ctl = m.ctl;
   if (m.cam) SWH.cam = m.cam;                                        // (the page's camera: the regions' tiers go by its views)
+  if (m.ui) swHostUi(m.ui);
 }
 function swHostInputs() {
   for (const [p, name, a] of SWH.q.splice(0)) { const f = ACTS[name]; if (f) try { f(p, ...a); } catch (e) { console.error(e); } }
@@ -268,9 +311,20 @@ function swHostLoop() {
       SWH.tickMs += (performance.now() - a - SWH.tickMs) * 0.05;
     }
     if (SWH.done < want) { SWH.behind += want - SWH.done; SWH.t0 += (want - SWH.done) * ms; }   // (fallen behind: slower, never different)
-    if (n && SWH.credit) { SWH.credit = 0; SWH.sent++; const S = swSnapshot(); postMessage({ t: 'snap', s: S, tickMs: SWH.tickMs, behind: SWH.behind, done: SWH.done }, S.bufs); }
+    if (n && SWH.credit) { SWH.credit = 0; SWH.sent++; const S = swSnapshot(); postMessage({ t: 'snap', s: S, ev: SWH.ev.splice(0), tickMs: SWH.tickMs, behind: SWH.behind, done: SWH.done }, S.bufs); }
   }
   SWH.timer = setTimeout(swHostLoop, Math.max(0, SWH.t0 + (SWH.done + 1) * ms - performance.now()));
+}
+// (the page's menus: some of the game's steps look at them - a held trigger, the weather's clock under the settings)
+function swHostUi(u) { ui.title = u[0]; ui.menu = u[1]; ui.settings = u[2]; }
+// the page built a new world: the same mode, controls and saved world here, built the same, then the page's tables put in
+function swHostResync(m) {
+  localStorage.clear(); for (const k in m.store) localStorage.setItem(k, m.store[k]);
+  ctlPick[0] = m.ctl[0]; ctlPick[1] = m.ctl[1]; MODE = m.mode;
+  if (m.ui) swHostUi(m.ui);
+  applyMode(); builtViewW = 0; resize();
+  tablesLoad(JSON.parse(m.s)); swSnapReset();
+  SWH.t0 = performance.now() - SWH.done * SUBSTEP * 1000;            // (no catching up on the time the rebuild took)
 }
 
 /* ================================================================
@@ -1663,6 +1717,7 @@ function stepTest(dt) {
 }
 
 function buildWorld(restore) {
+  SW.gen++;                                                 // (the simulation worker, 00-sw-boot.js: the page built a new world - the worker follows it)
   BUILD_T.length = 0; buildT0 = performance.now();
   if (restore && !restore.ships) restore = null;          // hot-reload data without a saved round is a fresh start
   mgHold[0] = mgHold[1] = false;   // (no trigger held over from the last round)
@@ -3079,7 +3134,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 370;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 18:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 30 18:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12654,6 +12709,7 @@ function tblMerge(dst, src, depth = 12) {
   }
 }
 function tablesLoad(S) {
+  SW.gen++;                                                 // (the simulation worker, 00-sw-boot.js: a loaded game - the worker takes it)
   const byU = new Map(), plan = [];
   // first every thing matched or made (so a reference to any of them can be found), then each filled in
   for (const k in S.tables) {
@@ -13515,6 +13571,10 @@ const SW_LOCAL = new Set(['camera', 'smokeAir']);
 const SW_COLS = new Set(['spray', 'bubbles', 'foam', 'wakes', 'sparks', 'flames', 'embers', 'flashes', 'welds', 'rings', 'debris', 'dust', 'grains', 'ash',
   'streaks', 'jets', 'msplashes', 'leaves', 'earthGrains', 'fwBits', 'hoseDrops', 'hoseSteams', 'seaBlood', 'seaGore', 'birdFeathers', 'birdGore', 'crewBlood', 'planeWisps', 'iceBits', 'rocketTrail',
   'smoke', 'trails', 'planeTrails', 'spikeBursts', 'seaSchools', 'msPings']);
+// lists the game keeps outside the tables that the page draws (spawned by the game's steps, so only the worker has them): sent
+// as columns the same way
+const SW_EXTRA = { wclouds: () => wclouds, blastRings: () => blastRings, gasBalls: () => gasBalls, shocks: () => shocks, airStreaks: () => airStreaks, landWake: () => landWake };
+const SW_EXTRA_T = { skip: TBL_SKIP, depth: 4, after: null };
 function swColsOf(t, arr, strs, sIdx, bufs) {
   const n = arr.length, keys = new Map();                      // key -> kind: 1 number, 4 boolean, 2 string, 3 other (or mixed)
   for (let i = 0; i < n; i++) {
@@ -13590,29 +13650,109 @@ function swArraysInto(a) {
   if (typeof a.settleT === 'number') waterAct.t = a.settleT;
 }
 // ---- the worker's side: what it last sent, per table (row id -> its text; the order as text)
-const SWS = { rows: {}, order: {}, ms: 0, bytes: 0, n: 0, by: {} };
+const SWS = { rows: {}, order: {}, ms: 0, bytes: 0, n: 0, by: {}, tms: {} };
 function swSnapReset() { SWS.rows = {}; SWS.order = {}; }
-function swSnapshot() {
+/* Rows without text (main chat 18:50: "typed columns ... rather than reusing ntbSnapshot's JSON"). A row is walked the way tblPlain
+   walks it, into its LEAVES: each a key, its depth and kind (0 a plain value, 1 another thing - its id, 2 a small typed array,
+   3 an array, 4 an object: the last two only mark where a container starts) and a value. The worker keeps each row's last
+   leaves; next time, if the keys, depths and kinds are the same (the row's SHAPE), only the leaves whose value changed go - their
+   place in the row and the value, numbers in a Float64Array; else the row goes whole as text (new rows, and rows whose shape
+   changed: a list grew, a field came or went). The page keeps each row's paths from the whole text it got, and puts a changed
+   leaf's value at its path. */
+const SWL = { K: [], L: [], V: [] };                                  // (the walk's scratch: keys, depth * 8 + kind, values)
+function swLeaves(o, depth, skip, lvl) {
+  const K = SWL.K, L = SWL.L, V = SWL.V, arr = Array.isArray(o);
+  for (const k in o) {
+    if (!arr && skip.has(k)) continue;
+    let v = o[k];
+    const key = arr ? +k : k, ty = typeof v;
+    if (ty === 'function' || v === undefined) { if (arr) { K.push(key); L.push(lvl * 8); V.push(null); } continue; }
+    if (v === null || ty !== 'object') {
+      if (ty === 'number' && !Number.isFinite(v)) v = v > 0 ? 1e300 : v < 0 ? -1e300 : 0;
+      K.push(key); L.push(lvl * 8); V.push(v); continue;
+    }
+    if (v instanceof HTMLCanvasElement || v instanceof HTMLImageElement || (typeof ImageData !== 'undefined' && v instanceof ImageData)) { if (arr) { K.push(key); L.push(lvl * 8); V.push(null); } continue; }
+    if (v._uid != null) { K.push(key); L.push(lvl * 8 + 1); V.push(v._uid); continue; }
+    if (ArrayBuffer.isView(v)) { if (v.length <= 4096) { K.push(key); L.push(lvl * 8 + 2); V.push(v); } else if (arr) { K.push(key); L.push(lvl * 8); V.push(null); } continue; }
+    if (depth - 1 <= 0 || v instanceof Map || v instanceof Set) { if (arr) { K.push(key); L.push(lvl * 8); V.push(null); } continue; }
+    const isA = Array.isArray(v);
+    K.push(key); L.push(lvl * 8 + (isA ? 3 : 4)); V.push(isA ? v.length : 0);
+    swLeaves(v, depth - 1, skip, lvl + 1);
+  }
+}
+// (the page) the same leaves from the plain data a whole row came as: { ref } is a thing, { ta, v } a typed array
+function swLeavesOfPlain(d, lvl, K, L) {
+  const arr = Array.isArray(d);
+  for (const k in d) {
+    const v = d[k], key = arr ? +k : k;
+    if (v === null || typeof v !== 'object') { K.push(key); L.push(lvl * 8); continue; }
+    const n = Object.keys(v).length;
+    if (v.ref != null && n === 1) { K.push(key); L.push(lvl * 8 + 1); continue; }
+    if (v.ta && Array.isArray(v.v) && n === 2) { K.push(key); L.push(lvl * 8 + 2); continue; }
+    const isA = Array.isArray(v);
+    K.push(key); L.push(lvl * 8 + (isA ? 3 : 4));
+    swLeavesOfPlain(v, lvl + 1, K, L);
+  }
+}
+// each leaf's path from the keys and depths
+function swPaths(K, L) {
+  const P = new Array(K.length), stack = [];
+  for (let i = 0; i < K.length; i++) { const lv = L[i] >> 3; stack.length = lv; P[i] = stack.concat(K[i]); if ((L[i] & 7) >= 3) stack.push(K[i]); }
+  return P;
+}
+const swSameTA = (a, b) => { if (!b || a.length !== b.length || a.constructor !== b.constructor) return false; for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false; return true; };
+// (the land's props - plants, tufts, sand: thousands of rows, built the same on both sides and rarely changed - are looked at
+// an eighth a snapshot, as online looks at them a fifteenth: a change reaches the page within 8 snapshots. full: all of them,
+// for the checks)
+const SW_SLICE = 8;
+function swSnapshot(full) {
   const t0 = performance.now();
   for (const k in TABLES) if (!SW_LOCAL.has(k)) for (const o of TABLES[k].list()) if (o) uidOf(o);
-  const parts = [], cols = {}, strs = [], sIdx = new Map(), bufs = []; SWS.by = {};
+  const parts = [], cols = {}, strs = [], sIdx = new Map(), bufs = []; SWS.by = {}; SWS.leaf = {}; SWS.tms = {};
   for (const k in TABLES) {
     if (SW_LOCAL.has(k)) continue;
-    if (SW_COLS.has(k)) { cols[k] = swColsOf(TABLES[k], TABLES[k].list(), strs, sIdx, bufs); continue; }
+    const tk = performance.now();
+    if (SW_COLS.has(k)) { cols[k] = swColsOf(TABLES[k], TABLES[k].list(), strs, sIdx, bufs); SWS.tms[k] = performance.now() - tk; continue; }
     if (k === 'water') continue;                                       // (its arrays: below)
     const t = TABLES[k], arr = t.list(), had = SWS.rows[k] || (SWS.rows[k] = new Map()), here = new Set(), ch = [];
-    let ord = '';
+    const cu = [], ci = [], cv = [], co = [];                           // (changed leaves: the row, the leaf, the number or the other value)
+    let ord = '', ri = -1;
+    const sliced = !full && t.net === 'changes';
     for (const o of arr) {
+      ri++;
       if (!o) continue;
       const u = o._uid; here.add(u); ord += u + ',';
+      if (sliced && (ri + SWS.n) % SW_SLICE && had.has(u)) continue;
+      const K = SWL.K, L = SWL.L, V = SWL.V; K.length = L.length = V.length = 0;
+      swLeaves(o, t.depth, t.skip, 0);
+      const c = had.get(u), n = K.length;
+      let same = !!c && c.K.length === n;
+      if (same) for (let i = 0; i < n; i++) if (c.K[i] !== K[i] || c.L[i] !== L[i]) { same = false; break; }
+      if (same) {
+        for (let i = 0; i < n; i++) {
+          const v = V[i], w = c.V[i], kind = L[i] & 7;
+          if (kind === 2 ? swSameTA(v, w) : Object.is(v, w)) continue;
+          cu.push(u); ci.push(i);
+          if (typeof v === 'number' && kind !== 1) { cv.push(v); co.push(undefined); }
+          else { cv.push(0); co.push(kind === 2 ? { ta: v.constructor.name, v: Array.from(v) } : v); }
+          c.V[i] = kind === 2 ? v.slice() : v;
+        }
+        continue;
+      }
       const d = tblPlain(o, t.depth, t.skip, true);
       if (o._sa != null) d.sa_ = o._sa; if (o._sk != null) d.sk_ = o._sk;
-      const w = JSON.stringify(d);
-      if (had.get(u) !== w) { had.set(u, w); ch.push('[' + u + ',' + w + ']'); }
+      ch.push('[' + u + ',' + JSON.stringify(d) + ']');
+      had.set(u, { K: K.slice(), L: L.slice(), V: V.map((v, i) => (L[i] & 7) === 2 ? v.slice() : v) });
     }
+    if (cu.length) {
+      const U = Int32Array.from(cu), I = Int32Array.from(ci), F = Float64Array.from(cv);
+      bufs.push(U.buffer, I.buffer, F.buffer);
+      (SWS.leaf || (SWS.leaf = {}))[k] = { u: U, i: I, f: F, o: co.some(x => x !== undefined) ? co : null };
+    }
+    SWS.tms[k] = performance.now() - tk;
     const gone = []; for (const u of had.keys()) if (!here.has(u)) { had.delete(u); gone.push(u); }
     const oc = SWS.order[k] !== ord; SWS.order[k] = ord;
-    if (!ch.length && !gone.length && !oc) continue;
+    if (!ch.length && !gone.length && !oc) { if (cu.length) SWS.by[k] = cu.length * 20; continue; }
     const p = [];
     if (ch.length) p.push('"c":[' + ch.join(',') + ']');
     if (gone.length) p.push('"r":[' + gone.join(',') + ']');
@@ -13620,15 +13760,16 @@ function swSnapshot() {
     parts.push(JSON.stringify(k) + ':{' + p.join(',') + '}'); SWS.by[k] = parts[parts.length - 1].length;
   }
   const txt = '{"t":' + JSON.stringify(time) + ',"tick":' + REG.tick + ',"T":{' + parts.join(',') + '}}';
+  for (const k in SW_EXTRA) cols['+' + k] = swColsOf(SW_EXTRA_T, SW_EXTRA[k](), strs, sIdx, bufs);
   const arrays = swArraysOf(bufs);
   let colB = 0; for (const b of bufs) colB += b.byteLength;
   SWS.ms += (performance.now() - t0 - SWS.ms) * 0.1; SWS.bytes += (txt.length + colB - SWS.bytes) * 0.1; SWS.colBytes = colB; SWS.n++;
-  const by = Object.entries(SWS.by).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  return { s: txt, cols, strs, bufs, arrays, ms: performance.now() - t0, rowsB: txt.length, colB, by };
+  const by = Object.entries(SWS.by).sort((a, b) => b[1] - a[1]).slice(0, 8), slow = Object.entries(SWS.tms).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => [k, +v.toFixed(2)]);
+  return { s: txt, leaf: SWS.leaf, cols, strs, bufs, arrays, ms: performance.now() - t0, rowsB: txt.length, colB, by, slow };
 }
 // ---- the page's side: the worker's ids -> the page's things
-const SWM = { byU: new Map(), mine: new Set(), ms: 0, n: 0, t: 0, tick: 0 };
-function swMirrorReset() { SWM.byU = new Map(); SWM.mine = new Set(); }
+const SWM = { byU: new Map(), mine: new Set(), paths: new Map(), ms: 0, n: 0, t: 0, tick: 0, lost: 0 };
+function swMirrorReset() { SWM.byU = new Map(); SWM.mine = new Set(); SWM.paths = new Map(); }
 function swApply(snap) {
   const t0 = performance.now(), m = JSON.parse(typeof snap === 'string' ? snap : snap.s), byU = SWM.byU, rows = [], touched = [];
   for (const k in m.T) {
@@ -13645,20 +13786,40 @@ function swApply(snap) {
       }
       rows.push([t, o, d, u]);
     }
-    if (D.r) for (const u of D.r) { const o = byU.get(u); byU.delete(u); if (o) SWM.mine.delete(o); }
+    if (D.r) for (const u of D.r) { const o = byU.get(u); byU.delete(u); SWM.paths.delete(u); if (o) SWM.mine.delete(o); }
     touched.push([t, arr, D.o]);                                     // (its `after` runs on any change: a one-row table's row writes its globals there - restState's clock)
   }
   // filled once every new thing is known, so a reference to one made in this snapshot is found
   for (const [t, o, d, u] of rows) {
     const sa = d.sa_, sk = d.sk_; delete d.sa_; delete d.sk_;
+    { const K = [], L = []; swLeavesOfPlain(d, 0, K, L); SWM.paths.set(u, { P: swPaths(K, L), L }); }   // (its leaves' paths, for the changes to come)
     tblRefs(d, byU, t.depth + 2);
     for (const f in o) { const v = o[f]; if ((v === null || typeof v !== 'object') && typeof v !== 'function' && !(f in d) && f[0] !== '_' && !t.skip.has(f)) delete o[f]; }
     tblMerge(o, d); o._uid = u;
     if (sa != null) o._sa = sa; else delete o._sa;
     if (sk != null) o._sk = sk; else delete o._sk;
   }
+  // the rows' changed leaves, each put at its path
+  if (snap.leaf) for (const k in snap.leaf) {
+    const C = snap.leaf[k], t = TABLES[k];
+    if (t && t.after && !(k in m.T)) touched.push([t, t.list(), null]);   // (its after runs too: a one-row table's globals)
+    for (let j = 0; j < C.u.length; j++) {
+      const u = C.u[j], o = byU.get(u), sh = SWM.paths.get(u);
+      if (!o || !sh) { SWM.lost++; continue; }
+      const i = C.i[j], path = sh.P[i], kind = sh.L[i] & 7;
+      let v = C.o && C.o[j] !== undefined ? C.o[j] : C.f[j];
+      if (kind === 1) v = byU.get(v) || null;
+      else if (kind === 2 && v && v.ta) { const T = globalThis[v.ta]; v = T ? T.from(v.v) : v.v; }
+      else if (kind >= 3) continue;
+      let c = o; for (let q = 0; q < path.length - 1 && c; q++) c = c[path[q]];
+      if (c && typeof c === 'object') c[path[path.length - 1]] = v; else SWM.lost++;
+    }
+  }
   // the effect columns and the sea's arrays (after the rows: an effect may name a row's thing by its id)
-  if (snap.cols) for (const k in snap.cols) { const t = TABLES[k]; if (!t) continue; const arr = t.list(); swColsInto(arr, snap.cols[k], snap.strs); if (t.after) t.after(arr); }
+  if (snap.cols) for (const k in snap.cols) {
+    if (k[0] === '+') { const f = SW_EXTRA[k.slice(1)]; if (f) swColsInto(f(), snap.cols[k], snap.strs); continue; }
+    const t = TABLES[k]; if (!t) continue; const arr = t.list(); swColsInto(arr, snap.cols[k], snap.strs); if (t.after) t.after(arr);
+  }
   if (snap.arrays) swArraysInto(snap.arrays);
   for (const [t, arr, ord] of touched) {
     if (ord) { arr.length = 0; for (const u of ord) { const o = byU.get(u); if (o) arr.push(o); } }
@@ -46248,7 +46409,7 @@ async function start(data) {
   Object.assign(window.__game, { sw: { get state() { return { on: SW.on, ready: SW.ready, fail: SW.fail, bootMs: Math.round(SW.bootMs) }; }, start: o => swStart(o), ask: (t, o) => swAsk(t, o),
     run: code => swAsk('run', { code }), step: (n, dt) => swAsk('step', { n, dt: dt || SUBSTEP }), tables: () => swAsk('tables'), touch: () => swAsk('touch'),
     // (the page as the worker's mirror: its snapshot folded in here - 36-zzzzz-sw-snap.js; reset: a whole one, ids matched afresh)
-    mirror: async reset => { if (reset) swMirrorReset(); const s = await swAsk('snap', { reset: !!reset }); swApply(s); return { rowsBytes: s.rowsB, colBytes: s.colB, encodeMs: +s.ms.toFixed(2), applyMs: +SWM.last.toFixed(2), tick: SWM.tick, by: s.by }; },
+    mirror: async reset => { if (reset) swMirrorReset(); const s = await swAsk('snap', { reset: !!reset }); swApply(s); return { rowsBytes: s.rowsB, colBytes: s.colB, encodeMs: +s.ms.toFixed(2), applyMs: +SWM.last.toFixed(2), tick: SWM.tick, by: s.by, slow: s.slow }; },
     stats: async () => Object.assign({ applyMs: SWM.ms, applied: SWM.n, live: SW.live, got: SW.got, tickMs: SW.tickMs, behind: SW.behind }, await swAsk('stats')), pageTables: () => JSON.stringify(tablesSave()),
     live: () => swGoLive(), act: (p, name, ...a) => act(p, name, ...a) } });
   if (SW_IN_WORKER) { swHostReady(); return; }
