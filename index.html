@@ -3039,8 +3039,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 332;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 10:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 333;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 10:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12663,7 +12663,7 @@ defTable('towers', () => towers, { perPlayer: 2, make: () => ({ player: 0, x: 0,
 // the falling chunks - a toppled tower's courses, a pier gun, wings, masts, crane parts, coral (stepChunks in 23-harbour-gates.js;
 // random source sysRng('armChunks'), armChunkR). The picture (img) isn't saved: a loaded chunk keeps the live one's, and one the
 // game had no picture for is dropped. A toppling tower's pieces share one hinge: saved with each, shared again once loaded
-defTable('chunks', () => chunks, {
+defTable('chunks', () => chunks, { net: false,   // (online: each screen's own, from the falls the host's rows tell it of)
   make: () => ({ x: 0, y: 0, vx: 0, vy: 0, a: 0, w: 0, delay: 0, floor: WATER_Y, water: true, kind: 'chunk', hh: 0 }),
   after: arr => {
     for (let i = arr.length - 1; i >= 0; i--) if (!arr[i].img) arr.splice(i, 1);
@@ -12674,7 +12674,7 @@ defTable('chunks', () => chunks, {
 // a sunk battleship's broken pieces (sinkShip, wreckBubbles, stepPiece in 34-splashes-sinking.js; random source
 // sysRng('armPieces'), armPieceR). Their picture (art, the network's local-only field) isn't saved: a made piece takes its
 // ship's again (owner: her id)
-defTable('pieces', () => pieces, {
+defTable('pieces', () => pieces, { net: false,   // (online: each screen's own, from the sinkings)
   make: () => ({ owner: 0, facing: 1, s0: 0, s1: 1, hl: 0, dead: [], x: 0, y: 0, a: 0, vx: 0, vy: 0, w: 0, rate: 0.045, t: 0, rest: 0, settled: false, bubbleAcc: 0, emit: 0, fire: 0 }),
   after: arr => { for (const p of arr) if (!p.art && ships[p.owner]) p.art = ships[p.owner].art; }
 });
@@ -12922,7 +12922,7 @@ function ntbApply(T) {
     for (const [u, i, F] of D.a || []) {
       let o = mine.get(u) || byU.get(u);
       if (!o) { const c = arr[i]; if (c && !c._nt && c.kind === F.kind) o = c; }
-      if (!o) o = t.make(F);
+      if (!o) { o = t.make(F); o._ntNew = 1; }
       o._uid = u; o._nt = 1; byU.set(u, o);
       if (!inArr.has(o)) { arr.push(o); inArr.add(o); changed = true; }
       fills.push([t, o, F, true]);
@@ -12945,11 +12945,31 @@ function ntbApply(T) {
   for (const [t, o, F, whole] of fills) {
     tblRefs(F, byU, t.depth + 2);
     if (whole) for (const f in o) { const v = o[f]; if ((v === null || typeof v !== 'object') && typeof v !== 'function' && !(f in F) && f[0] !== '_' && !t.skip.has(f) && !t.netSkip.has(f)) delete o[f]; }
+    const ev = NTB_EVENTS[t.name];
+    if (ev && !o._ntNew) try { ev(o, F); } catch (e) { console.error(e); }   // (what it does when it goes down: its sound, pieces, smoke)
+    delete o._ntNew;
     const u = o._uid; tblMerge(o, F); o._uid = u; o._nt = 1;
     if (whole && netShot[t.name] && !o._ntSnd) { o._ntSnd = 1; try { netShot[t.name](o); } catch (e) {} }   // (a new shot: its sound and flash)
   }
   for (const [t, arr] of touched) if (t.after) t.after(arr);
 }
+// (the guest) a row's state turned on the host - a ship sinking, a tower falling: here too, with what that does on the screen
+// (its sound, its pieces and chunks - each screen's own: net: false - its smoke, its captain's skull), before its new values
+// are put in. Only for a thing the guest already had (one made from the row has nothing to go down from). As netApply did
+const ntbSinkSub = s => s === 'sinking' || s === 'wreck';
+const NTB_EVENTS = {
+  ships: (o, F) => { if (o.state === 'afloat' && F.state && F.state !== 'afloat') sinkShip(o); },
+  subs: (o, F) => { if ((o.state === 'out' || o.state === 'docked') && ntbSinkSub(F.state)) sinkSub(o); },
+  planes: (o, F) => { if (o.state === 'fly' && F.state === 'down') downPlane(o); },
+  towers: (o, F) => {
+    if (!o.fallen && F.fallen) { o.hp = 0; crumbleTower(o); }
+    if (o.pg && o.pg.hp > 0 && F.pg && F.pg.hp <= 0 && !F.pg.gone) killPierGun(o);
+  },
+  docks: (o, F) => { if (Array.isArray(F.pillars) && o.pillars) F.pillars.forEach((b, i) => { const q = o.pillars[i]; if (b && b.broken && q && !q.broken) breakPillar(o, i, (q.x0 + q.x1) / 2, WATER_Y + 120); }); },
+  sailboats: (o, F) => { if (o.state === 'sail' && F.state === 'sinking') sinkSailboat(o, o.x, o.y - 4, 0); },
+  buoys: (o, F) => { if (o.state === 'float' && F.state && F.state !== 'float') destroyBuoy(o, o.x, surfaceY(o.x) - 8); },
+};
+NTB_EVENTS.oldShips = NTB_EVENTS.ships; NTB_EVENTS.oldSubs = NTB_EVENTS.subs; NTB_EVENTS.oldPlanes = NTB_EVENTS.planes;
 // (the guest) what isn't in a table yet
 function ntbHeadApply(h) {
   for (let p = 0; p < 2; p++) {
@@ -12961,7 +12981,7 @@ function ntbHeadApply(h) {
   for (const e of h.ev || []) if (e.e === 'strike') strike(e.x, e.y, e.s >= 0 ? ships[e.s] || null : null, !!e.h);
 }
 // (tests) the delta encode / decode on its own: a host's rows, the text, and the rows put back
-window.__ntb = { snapshot: ntbSnapshot, apply: ntbApply, receive: ntbReceive, stat: NTB_IN, prof: NTB_PROF, rows: k => TABLES[k].list(), panel: () => ntbPanel(),
+window.__ntb = { snapshot: ntbSnapshot, apply: ntbApply, receive: ntbReceive, stat: NTB_IN, prof: NTB_PROF, shot: (...a) => launch(...a), mode: m => { menuSel.mode = m; }, rows: k => TABLES[k].list(), panel: () => ntbPanel(),
   out: () => { window.__ntbLog = true; const g = linkGuests().find(q => q.seat) || {}; return { first: g.ntbFirst, last: g.ntbLast }; } };
 
 /* ================================================================
@@ -12980,9 +13000,9 @@ let flocks = [], perches = [];
 // the perches (a bird's spot and a perch's bird kept as references; the tower or tree a perch is on stays with the live perch),
 // the feathers and the splats
 const bdR = sysRng('birds'), bdRnd = (a, b) => a + (b - a) * bdR();
-defTable('birds', () => birds, { make: () => ({ kind: 'swift', state: 'cruise', spot: null, x: 0, y: 0, vx: 0, vy: 0, face: 1, ph: 0, t: 0, scared: 0 }) });
-defTable('birdFlocks', () => flocks, { make: () => ({ x: 0, y: 0, top: 30, dir: 1, speed: 30, ph: 0 }) });
-defTable('birdPerches', () => perches, { make: () => ({ x: 0, y: 0, dock: -1, bird: null }), skip: ['tower', 'plant', 'dock'] });   // (dock: the network's NET_SKIP leaves it out of a save, so it's kept here with the live perch)
+defTable('birds', () => birds, { net: false, make: () => ({ kind: 'swift', state: 'cruise', spot: null, x: 0, y: 0, vx: 0, vy: 0, face: 1, ph: 0, t: 0, scared: 0 }) });
+defTable('birdFlocks', () => flocks, { net: false, make: () => ({ x: 0, y: 0, top: 30, dir: 1, speed: 30, ph: 0 }) });
+defTable('birdPerches', () => perches, { net: false, make: () => ({ x: 0, y: 0, dock: -1, bird: null }), skip: ['tower', 'plant', 'dock'] });   // (dock: the network's NET_SKIP leaves it out of a save, so it's kept here with the live perch)
 defTable('birdFeathers', () => feathers, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 0, ph: 0, dark: false }) });
 defTable('birdGore', () => gore, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 0 }) });
 const BIRD_ROWS = {
@@ -43518,7 +43538,9 @@ async function start(data) {
   };
   // (OPEN WORLD: the kraken - tools/kraken.mjs)
   Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
-  Object.assign(window.__game, { smokeWorker: on => { if (on != null) SMW.on = !!on; const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
+  // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
+  Object.assign(window.__game, { perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}) }) });
+  Object.assign(window.__game, { smokeWorker: on => { if (on != null) { SMW.on = !!on; if (CAVE.worker && !CAVE.worker.fail) CAVE.worker.on = !!on; } const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
