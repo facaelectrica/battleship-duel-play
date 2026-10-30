@@ -2933,7 +2933,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 362;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 16:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 30 16:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12404,8 +12404,9 @@ function defTable(name, list, o = {}) {
   TABLES[name] = { name, list, depth: o.depth ?? 4, make: o.make || (() => ({})), after: o.after || null, skip,
     net: o.net ?? true, netSkip: new Set(o.netSkip || []), perPlayer: o.perPlayer || 0, netIds: new Set(o.netIds || []) };
   // (the GAME EDITOR's VEHICLES tab asks, the table's owner writes - rules.md "Systems" 1): 'tableAdd' {t, o} puts a made row in;
-  // 'tableMove' {t, o, x, y} moves one (y null: it keeps its own - on the water, on its tower's pier); o.moveTo: the owner's own way
-  on('tableAdd', e => { if (e.t === name) { list().push(e.o); e.done = true; } }, name);
+  // 'tableMove' {t, o, x, y} moves one (y null: it keeps its own - on the water, on its tower's pier); o.moveTo, o.add: the owner's
+  // own way (a list made for the table - the tanks', the ones there are - puts a row in its own place)
+  on('tableAdd', e => { if (e.t === name) { if (o.add) o.add(e.o, e); else list().push(e.o); e.done = true; } }, name);
   on('tableMove', e => { if (e.t === name) { (o.moveTo || tblMoveTo)(e.o, e); e.done = true; } }, name);
 }
 function tblMoveTo(v, e) { v.x = e.x; if (e.y != null) v.y = e.y; if ('vx' in v) v.vx = 0; if ('vy' in v) v.vy = 0; }
@@ -12526,6 +12527,11 @@ defTable('crewBlood', () => blood, { net: false });
 // the captains (06-fleet-captains buildCaptains): both sides' in one table, each back in her side's list once loaded
 defTable('captains', () => captains[0].concat(captains[1]), { netIds: ['p'], make: d => ({ p: d.p || 0, face: 0, state: 'free', veh: null, t: 0, blood: 0, band: 0 }),
   after: arr => { captains[0] = arr.filter(c => (c.p || 0) === 0); captains[1] = arr.filter(c => c.p === 1); } });
+// the captain each side has picked to go next (captSel[p], an index in her side's list) and each side's hulls left (fleet[p]):
+// a row per side at its index. The pick is a plain number, so its row reads and writes it (worldRow, 36-zz-world.js)
+const CAPT_SEL_ROWS = [0, 1].map(p => worldRow({ i: [() => captSel[p], v => { if (typeof v === 'number') captSel[p] = v; }] }));
+defTable('captSel', () => CAPT_SEL_ROWS, { perPlayer: 2, make: () => CAPT_SEL_ROWS[0] });
+defTable('fleet', () => fleet, { perPlayer: 2, make: () => ({ ship: 0, sub: 0, plane: 0 }) });
 
 /* (engine stage 3) the tables of the systems whose own files are read before the tables' (36-zz-tables), registered here
    for them - each system still the one owner of its lists; their random sources are in their own files */
@@ -25640,6 +25646,10 @@ const cpuStats = [{}, {}];
 const vehCpuR = sysRng('vehCpu'), vehCpuRnd = (a, b) => a + (b - a) * vehCpuR();
 defTable('brains', () => brains.filter(Boolean), { net: false, make: d => makeBrain(d.p || 0, d.level || 0), skip: ['T'],
   after: arr => { brains[0] = brains[1] = null; for (const b of arr) { b.T = CPU_TUNE[b.level] || CPU_TUNE[0]; brains[b.p] = b; } } });
+// what each CPU player did (cpuCount; the tests read it): a row per side. The counts are replaced by a new object each round,
+// so the row reads and writes cpuStats[p] itself, as JSON text (worldRow, 36-zz-world.js)
+const CPU_STATS_ROWS = [0, 1].map(p => worldRow({ n: [() => wjson(cpuStats[p]), v => { const o = wunjson(v); cpuStats[p] = o && typeof o === 'object' ? o : {}; }] }));
+defTable('cpuStats', () => CPU_STATS_ROWS, { net: false, perPlayer: 2, make: () => CPU_STATS_ROWS[0] });
 function makeBrain(p, level) { return { p, level, T: CPU_TUNE[level], thinkT: 1.5, dwellT: 0, react: CPU_TUNE[level].react + 1, fireT: 0, nP: 0, nE: 0, aimT: null, plan: null }; }
 function cpuReset() {
   for (let p = 0; p < 2; p++) brains[p] = isCpu(p) ? makeBrain(p, cpuLvSide[SIDE(p)]) : null;
@@ -41938,9 +41948,17 @@ const HELI_K = 0.249 * REAL.heli, HELI_VY = 80, HELI_TURN_T = 0.7;
 const HELI_CEIL = WATER_Y - 95 - 1.5 * VIEW_H;
 const LAND_RESPAWN = 4;                                // seconds before a lost tank or helicopter is replaced
 const tanks = [null, null], helis = [null, null], landWrecks = [];
-// (the GAME EDITOR's VEHICLES tab moves a tank or a helicopter through its owner - this file: 'tableMove' {t: 'tanks'|'helis'})
-on('tableMove', e => { if (e.t === 'tanks' || e.t === 'helis') { tblMoveTo(e.o, e); e.done = true; } }, 'landUnits');
 const landWait = [{ tank: 0, heli: 0 }, { tank: 0, heli: 0 }];
+// (engine stage 3, tables - 36-zz-tables.js) tanks[p] / helis[p]: each side's own or none (null), so each table is the ones
+// there are, each back in its side's place (id) once loaded or added; oldLand the lost ones still going down; landWait each
+// side's time till the next can come. Their own random source: landUnitR (the tanks' and helicopters' own steps)
+const landUnitR = sysRng('landUnits'), luRnd = (a, b) => a + (b - a) * landUnitR();
+const landMake = d => d.kind === 'heli' ? makeHeli(d.id || 0, d.x || 0) : makeTank(d.id || 0, d.x || 0);
+const landSides = L => ({ make: landMake, netIds: ['carry'], add: v => { L[v.id ? 1 : 0] = v; }, after: arr => { L[0] = L[1] = null; for (const v of arr) L[v.id ? 1 : 0] = v; } });
+defTable('tanks', () => tanks.filter(Boolean), landSides(tanks));
+defTable('helis', () => helis.filter(Boolean), landSides(helis));
+defTable('oldLand', () => oldLand, { make: landMake, netIds: ['carry'] });
+defTable('landWait', () => landWait, { perPlayer: 2, make: () => ({ tank: 0, heli: 0 }) });
 // (user Oct 25: a tank or helicopter comes in from your end of the world; it's mended and rearmed back home - on your
 // mountain, or on your airfield by the harbour)
 // (user Oct 28, 20:46: "The tanks and helicopters would also come from the hangar at the airport for now, since the edge of
@@ -42037,7 +42055,7 @@ function makeTank(p, x) {
 function makeHeli(p, x) {
   const y = landTop(x) - heliSkid();
   return { id: p, kind: 'heli', state: 'landed', x, y, vx: 0, vy: 0, facing: SIDE(p) ? -1 : 1, tilt: 0, turn: null, hp: VTUNE.heli.hp, rockets: VTUNE.heli.rockets, rk: 0, mgT: 0,
-    rotor: 0, spin: 0, cap: null, smokeT: 0, input: 0, fixT: 0, roll: 0, lampPh: Math.random() };
+    rotor: 0, spin: 0, cap: null, smokeT: 0, input: 0, fixT: 0, roll: 0, lampPh: landUnitR() };
 }
 function buildLandUnits() {
   landListsReset();
@@ -42123,12 +42141,12 @@ function stepTank(t, dt) {
     // (a steep climb slows it a little, never stops it)
     if (lead < t.y - 4 && t.vy >= 0) t.vx *= 1 - Math.min(0.5, dt * 2);
     t.track = (t.track || 0) + t.vx * dt;
-    if (Math.random() < dt * Math.abs(t.vx) / 12) kickLandDust(t.x - Math.sign(t.vx) * TANK_L * 0.4, t.y, 2);
+    if (landUnitR() < dt * Math.abs(t.vx) / 12) kickLandDust(t.x - Math.sign(t.vx) * TANK_L * 0.4, t.y, 2);
     // (user Oct 25: on sand its tracks throw up a cloud behind it)
     const bx = t.x - Math.sign(t.vx) * TANK_L * 0.45;
     if (!SIM_ONLY && groundAt(bx, t.y) === 'sand') {
       t.sandT = (t.sandT || 0) + dt * Math.abs(t.vx) * 0.6;
-      while (t.sandT >= 1) { t.sandT -= 1; const r0 = rnd(3, 5); spawnSmoke(bx + rnd(-6, 6), t.y - r0 - 1, { kind: 'gun', mist: true, fam: 'sand', r: r0, grow: rnd(5, 8), rmax: rnd(20, 30), lift: 4, vx: -t.vx * rnd(0.2, 0.5) + rnd(-12, 12), vy: -rnd(8, 24), life: rnd(2.2, 3.6), alpha: rnd(0.4, 0.6), stream: smStream(t, 'sand') }); }
+      while (t.sandT >= 1) { t.sandT -= 1; const r0 = luRnd(3, 5); spawnSmoke(bx + luRnd(-6, 6), t.y - r0 - 1, { kind: 'gun', mist: true, fam: 'sand', r: r0, grow: luRnd(5, 8), rmax: luRnd(20, 30), lift: 4, vx: -t.vx * luRnd(0.2, 0.5) + luRnd(-12, 12), vy: -luRnd(8, 24), life: luRnd(2.2, 3.6), alpha: luRnd(0.4, 0.6), stream: smStream(t, 'sand') }); }
     }
   }
   tankSettle(t, dt, false);
@@ -42144,7 +42162,7 @@ function tankSmoke(t, dt) {
   t.smokeT -= dt;
   if (t.smokeT > 0) return;
   t.smokeT = t.hp <= 1 ? 0.12 : 0.3;
-  spawnSmoke(t.x - t.facing * 10 + rnd(-4, 4), t.y - 14, { kind: 'trail', dark: t.hp <= 1 ? 0.1 : 0.7, r: rnd(2.5, 4), grow: rnd(3, 5), lift: 24, vx: rnd(-6, 6), life: rnd(3, 5), alpha: 0.5, stream: smStream(t) });
+  spawnSmoke(t.x - t.facing * 10 + luRnd(-4, 4), t.y - 14, { kind: 'trail', dark: t.hp <= 1 ? 0.1 : 0.7, r: luRnd(2.5, 4), grow: luRnd(3, 5), lift: 24, vx: luRnd(-6, 6), life: luRnd(3, 5), alpha: 0.5, stream: smStream(t) });
 }
 // the turret's pivot and the barrel's line (elev: degrees from straight ahead, over the top to straight back)
 // the gun's pivot: in the mantlet at the turret's front
@@ -42179,11 +42197,11 @@ function tankMuzzleBall(mx, my, ux, uy, t) {
   const cx = mx + ux * 16, cy = my + uy * 16;
   flashes.push({ x: cx, y: cy, r: 22, life: 0, max: 0.14 });
   for (let i = 0; i < 60; i++) {
-    const a = rnd(0, Math.PI * 2), sp = Math.pow(Math.random(), 0.5) * rnd(30, 80), r0 = rnd(0, 9);
-    spawnFlame(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, Math.cos(a) * sp + ux * 55 + t.vx, Math.sin(a) * sp * 0.85 + uy * 55 - rnd(0, 14), rnd(1.35, 1.65), rnd(4.5, 8), rnd(1.5, 2.1));
+    const a = luRnd(0, Math.PI * 2), sp = Math.pow(landUnitR(), 0.5) * luRnd(30, 80), r0 = luRnd(0, 9);
+    spawnFlame(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, Math.cos(a) * sp + ux * 55 + t.vx, Math.sin(a) * sp * 0.85 + uy * 55 - luRnd(0, 14), luRnd(1.35, 1.65), luRnd(4.5, 8), luRnd(1.5, 2.1));
     flames[flames.length - 1].clean = true;
   }
-  for (let i = 0; i < 7; i++) spawnSmoke(mx + ux * rnd(0, 26), my + uy * rnd(0, 26), { kind: 'gun', mist: true, keep: true, r: rnd(2, 4), grow: rnd(2, 3.5), rmax: rnd(9, 14), lift: 3, vx: ux * rnd(60, 130), vy: uy * rnd(60, 130), life: rnd(1.6, 2.6), alpha: 0.75 });
+  for (let i = 0; i < 7; i++) spawnSmoke(mx + ux * luRnd(0, 26), my + uy * luRnd(0, 26), { kind: 'gun', mist: true, keep: true, r: luRnd(2, 4), grow: luRnd(2, 3.5), rmax: luRnd(9, 14), lift: 3, vx: ux * luRnd(60, 130), vy: uy * luRnd(60, 130), life: luRnd(1.6, 2.6), alpha: 0.75 });
   const gy = landBelow(cx, cy - 4);
   if (gy - cy < 50) kickLandDust(cx, gy, 10);
 }
@@ -42191,7 +42209,7 @@ function tankMG(t) {
   if (!t || t.state !== 'alive') return;
   const [px, py] = tankPivot(t), [ux, uy] = tankBarrel(t), g = guns[t.id];
   const mx = px + ux * 10 + uy * 6 * t.facing * 0, my = py - 7 + uy * 10;
-  const sp = MG_SPEED * (0.75 + g.power * 0.4), spr = rnd(-0.025, 0.025);
+  const sp = MG_SPEED * (0.75 + g.power * 0.4), spr = luRnd(-0.025, 0.025);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spr) * sp + t.vx, vy: (uy + ux * spr) * sp, owner: t.id, age: 0 });
   flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
   sound('mg', mx);
@@ -42203,7 +42221,7 @@ function tankHurt(t, amt, x, y, by) {
   if (t.carry != null && x != null) ropeKick(t, x, y, amt);            // (hanging from a magnet: the hit swings it, and the helicopter)
   noteHit(t.id, 'tank');
   if (amt >= 0.3) { spawnSparks(x, y, 14, 220); sound('impact', x); }
-  if (by !== -1) unitScorch(t, x, y, amt >= 0.3 ? 4 + 3 * Math.min(1, amt) : Math.random() < 0.5 ? 0.9 : 0);
+  if (by !== -1) unitScorch(t, x, y, amt >= 0.3 ? 4 + 3 * Math.min(1, amt) : landUnitR() < 0.5 ? 0.9 : 0);
   if (t.hp <= 1e-6) killTank(t);
 }
 // (user Oct 25, their photo) a hit on a tank goes off on top of it: a fireball that rolls upward out of the hull,
@@ -42216,17 +42234,17 @@ function tankHitBlast(t, power) {
   flashes.push({ x, y: y - 6, r: 22 + 12 * power, life: 0, max: 0.16 });
   const n = Math.round(30 + 30 * power);
   for (let i = 0; i < n; i++) {
-    const a = -Math.PI / 2 + rnd(-0.9, 0.9), sp = Math.pow(Math.random(), 0.6) * (90 + 80 * power);
-    spawnFlame(x + rnd(-10, 10), y + rnd(-4, 3), Math.cos(a) * sp * 0.7 + t.vx * 0.5, Math.sin(a) * sp - rnd(20, 70), rnd(1.25, 1.55), rnd(3, 6) * (0.75 + 0.35 * power), rnd(1.1, 1.6));
+    const a = -Math.PI / 2 + luRnd(-0.9, 0.9), sp = Math.pow(landUnitR(), 0.6) * (90 + 80 * power);
+    spawnFlame(x + luRnd(-10, 10), y + luRnd(-4, 3), Math.cos(a) * sp * 0.7 + t.vx * 0.5, Math.sin(a) * sp - luRnd(20, 70), luRnd(1.25, 1.55), luRnd(3, 6) * (0.75 + 0.35 * power), luRnd(1.1, 1.6));
   }
-  for (let i = 0; i < 10 * power + 4; i++) spawnEmber(x + rnd(-8, 8), y - rnd(0, 6), t.vx * 0.3, 1.6);
+  for (let i = 0; i < 10 * power + 4; i++) spawnEmber(x + luRnd(-8, 8), y - luRnd(0, 6), t.vx * 0.3, 1.6);
   spawnSparks(x, y, 16 + 10 * power, 300);
-  for (let i = 0; i < 6 + 6 * power; i++) spawnSmoke(x + rnd(-6, 6), y - rnd(14, 34), { kind: 'blast', dark: 0.1, r: rnd(3.5, 6) * (0.7 + 0.4 * power), grow: rnd(3, 5), lift: 40, vx: rnd(-10, 10), vy: rnd(-70, -35), life: rnd(6, 9), alpha: rnd(0.55, 0.75) });
+  for (let i = 0; i < 6 + 6 * power; i++) spawnSmoke(x + luRnd(-6, 6), y - luRnd(14, 34), { kind: 'blast', dark: 0.1, r: luRnd(3.5, 6) * (0.7 + 0.4 * power), grow: luRnd(3, 5), lift: 40, vx: luRnd(-10, 10), vy: luRnd(-70, -35), life: luRnd(6, 9), alpha: luRnd(0.55, 0.75) });
   // the debris: dark shards and a few in the tank's own paint, flung high
   const col = tankArtOf(t.id).col, own = css3(col.map(v => v * 0.8));
   const k0 = debris.length;
   spawnDebris(x, y - 4, Math.round(10 + 8 * power), t.vx * 0.3);
-  for (let k = k0; k < debris.length; k++) { const d = debris[k]; d.vy *= 1.6; d.vx *= 1.15; d.sw *= 1.4; d.sh *= 1.3; if (Math.random() < 0.35) d.col = own; }
+  for (let k = k0; k < debris.length; k++) { const d = debris[k]; d.vy *= 1.6; d.vx *= 1.15; d.sw *= 1.4; d.sh *= 1.3; if (landUnitR() < 0.35) d.col = own; }
   gridExplosion(x, y, 50 * power, 300 * power);
 }
 function killTank(t) {
@@ -42394,23 +42412,23 @@ function rotorWash(h, dt) {
   h.washT = (h.washT || 0) + dt * 46 * k;
   while (h.washT >= 1) {
     h.washT -= 1;
-    const side = Math.random() < 0.5 ? -1 : 1, x0 = h.x + side * rnd(0, 22), gy = landBelow(x0, gm - 12), r0 = rnd(2.5, 4.5);
+    const side = landUnitR() < 0.5 ? -1 : 1, x0 = h.x + side * luRnd(0, 22), gy = landBelow(x0, gm - 12), r0 = luRnd(2.5, 4.5);
     // (it rolls out and swells into big soft puffs that thin away - user Oct 25 - never below the ground)
     // (on an airfield's concrete, user Oct 26: no dust there - a thin pale haze)
-    if (onApron(x0)) spawnSmoke(x0 + side * 14, gy - r0 - 1, { kind: 'dust', mist: true, r: r0, grow: rnd(4, 7), rmax: rnd(18, 26), lift: 1.5, ground: true, vx: side * rnd(80, 190) * k + h.vx * 0.3, vy: 0, life: rnd(1.2, 2), alpha: rnd(0.22, 0.32) });
-    else spawnSmoke(x0, gy - r0 - 1, { kind: 'dust', mist: true, fam: groundAt(x0, gy) === 'sand' ? 'sand' : 'dust', r: r0, grow: rnd(6, 10), rmax: rnd(24, 36), lift: 1.5, ground: true, vx: side * rnd(80, 190) * k + h.vx * 0.3, vy: 0, life: rnd(2, 3.6), alpha: rnd(0.4, 0.6) });
+    if (onApron(x0)) spawnSmoke(x0 + side * 14, gy - r0 - 1, { kind: 'dust', mist: true, r: r0, grow: luRnd(4, 7), rmax: luRnd(18, 26), lift: 1.5, ground: true, vx: side * luRnd(80, 190) * k + h.vx * 0.3, vy: 0, life: luRnd(1.2, 2), alpha: luRnd(0.22, 0.32) });
+    else spawnSmoke(x0, gy - r0 - 1, { kind: 'dust', mist: true, fam: groundAt(x0, gy) === 'sand' ? 'sand' : 'dust', r: r0, grow: luRnd(6, 10), rmax: luRnd(24, 36), lift: 1.5, ground: true, vx: side * luRnd(80, 190) * k + h.vx * 0.3, vy: 0, life: luRnd(2, 3.6), alpha: luRnd(0.4, 0.6) });
   }
   // bits of earth thrown out, more the lower it comes (user Oct 25); and grass torn up and lifted, fluttering
   const near = k * k;
   h.bitT = (h.bitT || 0) + dt * 90 * near;
   while (h.bitT >= 1) {
     h.bitT -= 1;
-    const side = Math.random() < 0.5 ? -1 : 1, x0 = h.x + side * rnd(0, 30), gy = landBelow(x0, gm - 12);
-    earthGrains.push({ x: x0, y: gy - 1.5, vx: side * rnd(90, 240) * k, vy: -rnd(30, 120) * k, c: ['#5a4030', '#6b4a2e', '#4a3424'][(Math.random() * 3) | 0], light: false, big: Math.random() < 0.2, t: 0, rest: 0, life: rnd(1.4, 2.6) });
-    if (Math.random() < 0.35) bladeFly(x0, gy - 2, side * rnd(60, 160) * k, -rnd(70, 170) * k);
+    const side = landUnitR() < 0.5 ? -1 : 1, x0 = h.x + side * luRnd(0, 30), gy = landBelow(x0, gm - 12);
+    earthGrains.push({ x: x0, y: gy - 1.5, vx: side * luRnd(90, 240) * k, vy: -luRnd(30, 120) * k, c: ['#5a4030', '#6b4a2e', '#4a3424'][(landUnitR() * 3) | 0], light: false, big: landUnitR() < 0.2, t: 0, rest: 0, life: luRnd(1.4, 2.6) });
+    if (landUnitR() < 0.35) bladeFly(x0, gy - 2, side * luRnd(60, 160) * k, -luRnd(70, 170) * k);
   }
   // the trees behind lose leaves to it near the ground
-  if (Math.random() < dt * 30 * k) leafFly(h.x + rnd(-120, 120), gm - rnd(20, 90), (Math.random() < 0.5 ? -1 : 1) * rnd(40, 110) * k, -rnd(10, 60) * k);
+  if (landUnitR() < dt * 30 * k) leafFly(h.x + luRnd(-120, 120), gm - luRnd(20, 90), (landUnitR() < 0.5 ? -1 : 1) * luRnd(40, 110) * k, -luRnd(10, 60) * k);
 }
 // over the sea (user Oct 25: "like the plane does, but outwards"): the downdraft dents the water under the rotor and
 // blows a ring of spray, foam and ripples out both ways across it, with a low mist rolling out over the water
@@ -42425,11 +42443,11 @@ function rotorWashSea(h, dt) {
   h.washT = (h.washT || 0) + dt * 90 * k;
   while (h.washT >= 1) {
     h.washT -= 1;
-    const side = Math.random() < 0.5 ? -1 : 1, x0 = h.x + side * rnd(4, 34), wy = surfaceY(x0);
-    spawnSpray(x0, wy - 1, side * rnd(90, 230) * k + h.vx * 0.3, 0.15 + 0.35 * k * Math.random());
-    if (Math.random() < 0.7) spawnFoam(x0 + side * rnd(0, 20), rnd(1, 2.4) * (0.6 + k));
-    if (Math.random() < 0.25 && wakes.length < 650 && !fxHidden(x0)) wakes.push({ x: x0, life: 0, max: rnd(1.2, 2.4) * (0.5 + k), w: rnd(8, 16) * (0.5 + 0.5 * k), drift: side * rnd(16, 34) * k, k: 0.5 + 0.5 * k });
-    if (Math.random() < 0.3) spawnSmoke(x0, wy - rnd(2, 6), { kind: 'dust', mist: true, r: rnd(2.5, 4), grow: rnd(3, 5), rmax: rnd(12, 18), lift: 1, vx: side * rnd(70, 160) * k, vy: -rnd(2, 10), life: rnd(1.4, 2.6), alpha: rnd(0.3, 0.5) });
+    const side = landUnitR() < 0.5 ? -1 : 1, x0 = h.x + side * luRnd(4, 34), wy = surfaceY(x0);
+    spawnSpray(x0, wy - 1, side * luRnd(90, 230) * k + h.vx * 0.3, 0.15 + 0.35 * k * landUnitR());
+    if (landUnitR() < 0.7) spawnFoam(x0 + side * luRnd(0, 20), luRnd(1, 2.4) * (0.6 + k));
+    if (landUnitR() < 0.25 && wakes.length < 650 && !fxHidden(x0)) wakes.push({ x: x0, life: 0, max: luRnd(1.2, 2.4) * (0.5 + k), w: luRnd(8, 16) * (0.5 + 0.5 * k), drift: side * luRnd(16, 34) * k, k: 0.5 + 0.5 * k });
+    if (landUnitR() < 0.3) spawnSmoke(x0, wy - luRnd(2, 6), { kind: 'dust', mist: true, r: luRnd(2.5, 4), grow: luRnd(3, 5), rmax: luRnd(12, 18), lift: 1, vx: side * luRnd(70, 160) * k, vy: -luRnd(2, 10), life: luRnd(1.4, 2.6), alpha: luRnd(0.3, 0.5) });
   }
 }
 // (tools: a helicopter hovering over the sea, to see its wash there - nothing in the game puts one at sea yet)
@@ -42518,11 +42536,11 @@ function heliSmoke(h, dt) {
   const bad = h.hp <= 1;
   h.smokeT -= dt;
   const [ex, ey] = heliPoint(h, -heliHalf() * 0.22, -heliSkid() * 0.75);
-  if (bad && Math.random() < dt * 14) spawnFlame(ex + rnd(-3, 3), ey + rnd(-2, 2), -h.facing * rnd(5, 25) + h.vx * 0.5, -rnd(25, 55) + h.vy * 0.5, 1.1, rnd(2, 3.5), 2.4);
+  if (bad && landUnitR() < dt * 14) spawnFlame(ex + luRnd(-3, 3), ey + luRnd(-2, 2), -h.facing * luRnd(5, 25) + h.vx * 0.5, -luRnd(25, 55) + h.vy * 0.5, 1.1, luRnd(2, 3.5), 2.4);
   if (h.smokeT > 0) return;
   h.smokeT = bad ? 0.06 : 0.11;
-  if (bad) spawnSmoke(ex + rnd(-2, 2), ey - 3, { kind: 'trail', rise: true, dark: 0, r: rnd(3, 5), grow: rnd(4, 7), lift: 34, vx: h.vx * 0.15 + rnd(-6, 6), vy: -rnd(20, 40), life: rnd(4, 6), alpha: rnd(0.5, 0.7), chain: smStream(h) });
-  else spawnSmoke(ex + rnd(-2, 2), ey - 3, { kind: 'trail', rise: true, mist: true, r: rnd(2.5, 4), grow: rnd(3, 5), lift: 28, vx: h.vx * 0.15 + rnd(-6, 6), vy: -rnd(16, 32), life: rnd(2.5, 4), alpha: rnd(0.45, 0.6), chain: smStream(h) });
+  if (bad) spawnSmoke(ex + luRnd(-2, 2), ey - 3, { kind: 'trail', rise: true, dark: 0, r: luRnd(3, 5), grow: luRnd(4, 7), lift: 34, vx: h.vx * 0.15 + luRnd(-6, 6), vy: -luRnd(20, 40), life: luRnd(4, 6), alpha: luRnd(0.5, 0.7), chain: smStream(h) });
+  else spawnSmoke(ex + luRnd(-2, 2), ey - 3, { kind: 'trail', rise: true, mist: true, r: luRnd(2.5, 4), grow: luRnd(3, 5), lift: 28, vx: h.vx * 0.15 + luRnd(-6, 6), vy: -luRnd(16, 32), life: luRnd(2.5, 4), alpha: luRnd(0.45, 0.6), chain: smStream(h) });
 }
 // the nose: its gun and its rails, turned with the tilt
 function heliPoint(h, fx, fy) {
@@ -42532,7 +42550,7 @@ function heliPoint(h, fx, fy) {
 function heliMG(h) {
   const g = hguns[h.id], el = clamp((h.cpuElev != null && crew[h.id].mode !== 'heli' ? h.cpuElev : g.elev), -80, 25) * Math.PI / 180 + 0;
   const [mx, my] = heliPoint(h, heliHalf() * 0.9, 8);
-  const ux = Math.cos(el) * h.facing, uy = -Math.sin(el), sp = MG_SPEED * (0.8 + g.power * 0.35), spr = rnd(-0.02, 0.02);
+  const ux = Math.cos(el) * h.facing, uy = -Math.sin(el), sp = MG_SPEED * (0.8 + g.power * 0.35), spr = luRnd(-0.02, 0.02);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spr) * sp + h.vx, vy: (uy + ux * spr) * sp + h.vy, owner: h.id, age: 0 });
   flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
   sound('mg', mx);
@@ -42553,15 +42571,15 @@ function heliHurt(h, amt, x, y) {
   if (!h || (h.state !== 'fly' && h.state !== 'landed') || netGuestHold()) return;
   h.hp -= amt; noteHit(h.id, 'heli');
   if (amt >= 1) { spawnSparks(x, y, 12, 220); sound('impact', x); }
-  unitScorch(h, x, y, amt >= 0.5 ? 5 : Math.random() < 0.6 ? 0.9 : 0);
-  if (h.hp <= 1e-6) { if (h.state === 'landed') blowHeli(h); else { h.state = 'down'; h.spinV = rnd(3, 5) * (Math.random() < 0.5 ? -1 : 1); heliLost(h); } }
+  unitScorch(h, x, y, amt >= 0.5 ? 5 : landUnitR() < 0.6 ? 0.9 : 0);
+  if (h.hp <= 1e-6) { if (h.state === 'landed') blowHeli(h); else { h.state = 'down'; h.spinV = luRnd(3, 5) * (landUnitR() < 0.5 ? -1 : 1); heliLost(h); } }
 }
 // what it sat on gone from under it (a ship sunk or sailed off, the pier collapsed): with someone at its controls it's
 // flying; left alone it falls (user Oct 27: "An unmanned army helicopter on the pier lifts off and hovers when the pier
 // collapses... Should it fall instead?" - "Yes, it should fall") - down as a helicopter shot down goes, into what's below
 function heliGroundGone(h, mine) {
   if (mine || h.cpu) { h.state = 'fly'; h.vy = 0; return; }
-  h.state = 'down'; h.vy = 0; h.spinV = rnd(0.6, 1.4) * (Math.random() < 0.5 ? -1 : 1); heliLost(h);
+  h.state = 'down'; h.vy = 0; h.spinV = luRnd(0.6, 1.4) * (landUnitR() < 0.5 ? -1 : 1); heliLost(h);
 }
 function heliLost(h) {
   if (h.lostDone) return;
@@ -42595,8 +42613,8 @@ function stepHeliDown(h, dt) {
   // (user Oct 25: the front is heavier - it always goes down nose first, swinging round a little as it falls)
   h.downT = (h.downT || 0) + dt; h.roll = Math.sin(h.downT * 6) * 0.8 * Math.sign(h.spinV); h.tilt += (h.facing * 1.15 - h.tilt) * Math.min(1, dt * 1.6);
   h.rotor += dt * 20;
-  h.smokeT -= dt; if (h.smokeT <= 0) { h.smokeT = 0.05; spawnSmoke(h.x, h.y - 4, { kind: 'trail', dark: 0.05, r: rnd(3, 5), grow: rnd(4, 6), lift: 20, vx: rnd(-8, 8), life: rnd(4, 6), alpha: 0.6, chain: smStream(h) }); }
-  if (Math.random() < dt * 10) spawnFlame(h.x + rnd(-6, 6), h.y + rnd(-4, 4), rnd(-20, 20), -rnd(20, 50), 1.1, rnd(2, 4), 2);
+  h.smokeT -= dt; if (h.smokeT <= 0) { h.smokeT = 0.05; spawnSmoke(h.x, h.y - 4, { kind: 'trail', dark: 0.05, r: luRnd(3, 5), grow: luRnd(4, 6), lift: 20, vx: luRnd(-8, 8), life: luRnd(4, 6), alpha: 0.6, chain: smStream(h) }); }
+  if (landUnitR() < dt * 10) spawnFlame(h.x + luRnd(-6, 6), h.y + luRnd(-4, 4), luRnd(-20, 20), -luRnd(20, 50), 1.1, luRnd(2, 4), 2);
   if (LAND && !onLand(h.x)) { const d = shipTopAt(h.x, h.y + heliSkid() - 10); if (d && h.y + heliSkid() >= d.y) { h.y = d.y - heliSkid(); h.deck = d.c; blowHeli(h); return; } }   // (onto a ship's top: it comes down on her deck - user Oct 27, [19])
   if (LAND && !onLand(h.x) && h.y + heliSkid() >= harbourTop(h.x, h.y - 10)) { blowHeli(h); return; }   // (onto the harbour's deck: it's ground - user Oct 27)
   if (LAND && !onLand(h.x) && !(h._civT > 1e8) && hullStrike([[h.x, h.y]], 2, h.vx, h.id)) { h._civT = 1e9; blowHeli(h); return; }   // (into a big ship's side: it blows there, its wreck falls on - user Oct 27 night)
@@ -43809,8 +43827,8 @@ function vehPick(X, Y, rPx) {
 }
 function vehSelect(e) { VE.sel = e; vehSync(); }
 const vehFloats = e => e.k === 'ship' || e.k === 'boat' || e.k === 'yacht' || e.k === 'tower' || e.k === 'tank' || civShips.includes(e.v);
-// (moved by its owner: the editor asks with 'tableMove' - 36-zz-tables.js; the tanks' and helicopters', 50-land-units.js)
-const vehTable = e => e.k === 'tank' ? 'tanks' : e.k === 'heli' && e.army ? 'helis' : tableOf(e.v);
+// (moved by its owner: the editor asks with 'tableMove' - 36-zz-tables.js)
+const vehTable = e => tableOf(e.v);
 function vehMoveTo(e, X, Y, t = vehTable(e)) {
   if (e.k === 'crane' || !t) return;                                       // (it runs on its rails)
   emit('tableMove', { t, o: e.v, x: X, y: vehFloats(e) ? null : Y });
