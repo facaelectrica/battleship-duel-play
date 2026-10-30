@@ -1364,7 +1364,7 @@ on('lost', e => captainDies(e.o), 'captains', 10);
 function stepCaptains() {
   if (!useCaptains()) return;
   for (let p = 0; p < 2; p++) {
-    for (const c of captains[p]) if (c.state === 'bones' && !c.xed && time - c.t > 0.35) { c.xed = true; if (p < HUMANS()) sfxMarker(); }
+    for (const c of captains[p]) if (c.state === 'bones' && !c.xed && time - c.t > 0.35) { c.xed = true; if (p < HUMANS()) sound('marker'); }
     // out in a vehicle: the more it's been knocked about, the more blood on the face (it never goes back down
     // until they're patched up at home)
     // (only the damage done on this trip: a captain taking out a boat still being patched up starts clean)
@@ -1440,7 +1440,7 @@ function buildWorld(restore) {
   BUILD_T.length = 0; buildT0 = performance.now();
   if (restore && !restore.ships) restore = null;          // hot-reload data without a saved round is a fresh start
   mgHold[0] = mgHold[1] = false;   // (no trigger held over from the last round)
-  sfxNewRound();                   // (nor any of its sounds: a siren, a blast, a shell's whoosh)
+  sound('newRound');                   // (nor any of its sounds: a siren, a blast, a shell's whoosh)
   padPick[0] = padPick[1] = null;
   // (an online guest: the host's world, whatever its screen) five screens: plenty of open ocean between the harbours
   // (the test range: three). OPEN WORLD: forest 6, sea 10 (its middle five the deep ocean), desert 6 - user Oct 25
@@ -1973,6 +1973,13 @@ function surfaceY(x) {
   return surfaceY0(x);
 }
 function addForce(x, f) { const i = Math.round(x / DX); if (i > 0 && i < N - 1) wf[i] += f; }
+// (engine stage 3) the water system's one entry for the rest of the game, instead of reaching into its arrays:
+//   water.push(x, f)                        - a push on the surface at x (it waits in wf for stepWater: 22-ship-physics)
+//   water.shock(x, y, power, faint, len)    - a ring spreading through the water from an impact (35-particles' shock: the
+//                                             picture bends round it, the fish flee it, the weed bends away)
+// (a function, not an event: the pushes come a column at a time, hundreds a frame, in the callers' own loops - the same
+// arithmetic, in the same order, with no event object for each)
+const water = { push: addForce, shock };
 function windAt(y) {
   const gust = 1 + 0.25 * Math.sin(time * 0.31) + 0.15 * Math.sin(time * 1.13 + 2);
   return E.windU * gust * (0.45 + 0.55 * clamp((WATER_Y - y) / 500, 0, 1.6));
@@ -2401,7 +2408,7 @@ function layoutControls() {
 
 function setOrder(t, idx) {
   idx = clamp(idx, 0, 6);
-  if (idx !== t.idx && typeof sfxClink === 'function') sfxClink(t);
+  if (idx !== t.idx) sound('clink', t);
   t.idx = idx;
   // the order goes to the boat you're in (a boat you left keeps the last one you gave her)
   const m = crew[t.player] && crew[t.player].mode;
@@ -2490,7 +2497,7 @@ const heliAim = p => crew[p].mode === 'heli' || (crew[p].mode === 'civ' && isFir
 function pressFire(p, k) {
   const m = controlling(p);
   if (m === 'civ') { civLaunch(p); return; }   // (OPEN WORLD: the research ship's fire button lets her sub down)
-  sfxClick(gunCtl[p]);
+  sound('click', gunCtl[p]);
   if (m === 'tower') fireTower(myTw(p), false); else if (m === 'ship') fireGun(ships[p], k);
   else if (m === 'tank') tankFire(tanks[p]); else if (m === 'heli') { heliRocket(helis[p]); return; } else return;
   holding[p] = { t: 0 };
@@ -2843,7 +2850,7 @@ function specTry(p, k) {
   if (!c || c.dead || (c.mode !== 'dock' && c.mode !== 'gone') || !takenByOther(p, k)) return false;
   c.spec = c.spec === k ? null : k; c.look = null;
   if (c.spec) showToast('YOUR TEAMMATE IS IN IT: WATCHING');
-  sfxClick(gunCtl[p]);
+  sound('click', gunCtl[p]);
   return true;
 }
 function act(p, name, ...a) {
@@ -2968,9 +2975,9 @@ function netList(arr, data, kind, onNew, create = true) {
 }
 // what a new shot sounds and looks like when the guest first hears of it
 const netShot = {
-  shells: o => { if (o.from === 'bomb') sfxBombDrop(o.x); else if (o.from === 'rocket') sfxMissile(o.x); else { sfxCannon(o.x, o.from === 'tower'); flashes.push({ x: o.x, y: o.y, r: 9, life: 0, max: 0.07 }); } sfxWhoosh(o); },
+  shells: o => { if (o.from === 'bomb') sound('bombDrop', o.x); else if (o.from === 'rocket') sound('missile', o.x); else { sound('cannon', o.x, o.from === 'tower'); flashes.push({ x: o.x, y: o.y, r: 9, life: 0, max: 0.07 }); } sound('whoosh', o); },
   torps: o => sound('impact', o.x),
-  bullets: o => sfxMG(o.x),
+  bullets: o => sound('mg', o.x),
   dcharges: o => sound('splash', o.x, 0.3),
   mines: o => sound('splash', o.x, 0.12),
 };
@@ -3045,8 +3052,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 342;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 11:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 343;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 11:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4028,7 +4035,7 @@ function redX(w) {
 }
 // when each of a player's vehicles was last hit (to flag one under attack while you're elsewhere)
 const hitAlert = [{}, {}];
-function noteHit(p, k) { if (p === 0 || p === 1) { hitAlert[p][k] = time; sfxUnderAttack(p, k); } }
+function noteHit(p, k) { if (p === 0 || p === 1) { hitAlert[p][k] = time; sound('underAttack', p, k); } }
 // a team's vehicle buttons, their glass in its colour (made when first needed, and again when the flags change)
 // (civilian mode's buttons: grey glass)
 function tabGrey() { return img.tabGrey || (img.tabGrey = { tabSteel: tintGlass(img.hud.tabSteel, [128, 130, 134]), tabGold: tintGlass(img.hud.tabGold, [128, 130, 134]) }); }
@@ -4206,7 +4213,7 @@ function hudPressAt(hit, ux) {
     else if (it.weapon === 'light') act(p, 'light');
     else if (it.weapon === 'torp') act(p, 'torp', false);
     else { act(p, 'fire'); return { kind: 'cbtn', p }; }
-    sfxClick(gunCtl[p]);
+    sound('click', gunCtl[p]);
     return null;
   }
   if (it.id === 'dial') return { kind: 'dial', p, x0: ux, e0: activeGun(p).elev, ppd: TAPE_PPD * L.k, tick: Math.round(activeGun(p).elev) };
@@ -4223,7 +4230,7 @@ function dragDial(d, ux) {
   g.elev = clamp(d.e0 - (ux - d.x0) / d.ppd * 2.3 * tapeDir(d.p), elevMin(d.p), elevMax(d.p));   // a short slide turns the gun a long way
   g.aimShow = 1.6;
   const t = Math.round(g.elev);
-  if (t !== d.tick) { d.tick = t; if (t % 5 === 0) sfxClick(gunCtl[d.p]); }
+  if (t !== d.tick) { d.tick = t; if (t % 5 === 0) sound('click', gunCtl[d.p]); }
 }
 function setPowerAt(d, ux) {
   const [a0, , a2] = HUDI.spots.track, R = HUDI.spots.knobR * d.k, X0 = d.it.x + a0 * d.k + R, X1 = d.it.x + a2 * d.k - R;
@@ -4234,7 +4241,7 @@ function setPowerAt(d, ux) {
 }
 // the power slider ratchets: a click every twentieth of its travel
 const powerNotch = [-1, -1];
-function powerClick(p, v) { const n = Math.round(v * 20); if (n !== powerNotch[p]) { if (powerNotch[p] >= 0) sfxClick(gunCtl[p]); powerNotch[p] = n; } }
+function powerClick(p, v) { const n = Math.round(v * 20); if (n !== powerNotch[p]) { if (powerNotch[p] >= 0) sound('click', gunCtl[p]); powerNotch[p] = n; } }
 const subDivePrev = [0, 0];
 function stepHud(dt) {
   for (const pr of hudPress) for (const k in pr) pr[k] = Math.max(0, pr[k] - dt);
@@ -4243,7 +4250,7 @@ function stepHud(dt) {
     if (diveHold[p] && crew[p].mode === 'sub') { const sb = subs[p]; sb.depthT = clamp(sb.depthT + diveHold[p] * 90 * (diveHold[p] > 0 ? SUB_DIVE_K : 1) * dt, WATER_Y, subMaxY(sb.x)); }   // (down twice as fast, user Oct 29)
     // the dive planes thud as rise or dive is pressed (button, keys or stick)
     const dv = crew[p].mode === 'sub' && subs[p] && subs[p].state === 'out' ? Math.sign(clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1)) : 0;
-    if (dv && dv !== subDivePrev[p]) sfxSubPlanes(subs[p].x, dv);
+    if (dv && dv !== subDivePrev[p]) sound('subPlanes', subs[p].x, dv);
     subDivePrev[p] = dv;
     if (crew[p].mode !== 'sub' && crew[p].mode !== 'plane' && crew[p].mode !== 'heli' && crew[p].mode !== 'civ') diveHold[p] = 0;
   }
@@ -5307,7 +5314,7 @@ function menuArrow(x, y, d, col = '#ffd23a') {
   for (let k = 0; k < 4; k++) ug.fillRect(Math.round(x - d * k * B) - (d > 0 ? B : 0), y - k * B - (B >> 1), B, (2 * k + 1) * B);
 }
 // a click for every press on the menus (user Oct 24: every button press makes a sound, the iPad too)
-function menuClick() { audioInit(); sfxClick(gunCtl[0]); }
+function menuClick() { audioInit(); sound('click', gunCtl[0]); }
 function drawTitle() {
   if (ui.picker >= 0) { drawFlagPicker(); return; }
   if (ui.menu) { drawMenu(); return; }
@@ -6047,7 +6054,7 @@ function padNavDir(k) {
     const d = along + side * 2.2;
     if (d < bd) { bd = d; best = t; }
   }
-  if (best) { padMenu.focus = best.id; sfxClick(gunCtl[0]); }
+  if (best) { padMenu.focus = best.id; sound('click', gunCtl[0]); }
 }
 // A: the focused button pressed, exactly as a tap on it
 function padNavPress() {
@@ -6137,9 +6144,9 @@ function padCycle(p, d) {
   if (i < 0) i = list.indexOf('mode');
   const k = list[i < 0 ? (d > 0 ? 0 : list.length - 1) : (i + d + list.length) % list.length];
   padPick[p] = null; padStick[p] = false;
-  if (k === crew[p].mode) { sfxClick(gunCtl[p]); return; }
+  if (k === crew[p].mode) { sound('click', gunCtl[p]); return; }
   if (vehOut(p, k)) { act(p, 'switch', k); return; }
-  padPick[p] = k; sfxClick(gunCtl[p]);
+  padPick[p] = k; sound('click', gunCtl[p]);
 }
 function padLaunch(p) {
   const k = padPick[p];
@@ -6292,16 +6299,16 @@ function coupleShip(sh) {
     const lx = side * SHIP_L * 0.47;
     const vDown = sh.vy + sh.w * lx;
     const end = sh.x + lx;
-    for (let k = 0; k <= 36; k += DX) addForce(end + side * k, COUPLE * vDown * (1 - k / 36));   // (real scale: the water's push kept at its old strength - 8x wider, it lifted a hump that rolled her over)
+    for (let k = 0; k <= 36; k += DX) water.push(end + side * k, COUPLE * vDown * (1 - k / 36));   // (real scale: the water's push kept at its old strength - 8x wider, it lifted a hump that rolled her over)
   }
   const sp = Math.abs(sh.vx);
   if (sp > 0.5) {
     const dir = Math.sign(sh.vx);
     const bow = sh.x + dir * SHIP_L * 0.47;
-    for (let k = 0; k <= BOW_W; k += DX) addForce(bow + dir * k, BOW_K * sp * (1 - k / BOW_W));
+    for (let k = 0; k <= BOW_W; k += DX) water.push(bow + dir * k, BOW_K * sp * (1 - k / BOW_W));
     const stern = sh.x - dir * SHIP_L * 0.45;
-    for (let k = 0; k <= STERN_W; k += DX) addForce(stern - dir * k, -STERN_K * sp * (1 - k / STERN_W));
-    for (let n = 0; n < 4; n++) addForce(sh.x + vehShipRnd(-0.5, 0.5) * SHIP_L - dir * vehShipRnd(0, 0.35) * SHIP_L, (vehShipR() - 0.5) * CHURN_K * sp);
+    for (let k = 0; k <= STERN_W; k += DX) water.push(stern - dir * k, -STERN_K * sp * (1 - k / STERN_W));
+    for (let n = 0; n < 4; n++) water.push(sh.x + vehShipRnd(-0.5, 0.5) * SHIP_L - dir * vehShipRnd(0, 0.35) * SHIP_L, (vehShipR() - 0.5) * CHURN_K * sp);
   }
   const th = Math.abs(sh.throttle);
   if (th > 0.01) {
@@ -6309,10 +6316,10 @@ function coupleShip(sh) {
     const lead = sh.x + dir * SHIP_L * 0.48;
     const onset = Math.max(0, sh.throttleRate * dir);
     const f = THRUST_K * th + PULSE_K * onset;
-    for (let k = 0; k <= 26; k += DX) addForce(lead + dir * k, f * (1 - k / 26));
+    for (let k = 0; k <= 26; k += DX) water.push(lead + dir * k, f * (1 - k / 26));
     const trail = sh.x - dir * SHIP_L * 0.44;
-    for (let k = 0; k <= 20; k += DX) addForce(trail - dir * k, -0.6 * f * (1 - k / 20));
-    addForce(trail - dir * vehShipRnd(0, 16), (vehShipR() - 0.5) * 140 * th);
+    for (let k = 0; k <= 20; k += DX) water.push(trail - dir * k, -0.6 * f * (1 - k / 20));
+    water.push(trail - dir * vehShipRnd(0, 16), (vehShipR() - 0.5) * 140 * th);
   }
 }
 
@@ -6561,11 +6568,11 @@ function collide() {
 
 function ram(speed, x) {
   sound('crash', x, Math.min(1, speed / 120));
-  shock(x, WATER_Y + 6, 0.6 + Math.min(1, speed / 120));
+  water.shock(x, WATER_Y + 6, 0.6 + Math.min(1, speed / 120));
   emit('scare', { x, y: WATER_Y - 40, r: 260, kind: 'birds' });
   shakeAt(Math.min(18, speed * 0.16), x);
   const amt = Math.min(1, speed / 120);
-  for (let k = -24; k <= 24; k += DX) addForce(x + k, -9000 * amt * (1 - Math.abs(k) / 26));
+  for (let k = -24; k <= 24; k += DX) water.push(x + k, -9000 * amt * (1 - Math.abs(k) / 26));
   const sy = surfaceY(x);
   for (let i = 0; i < 14 + amt * 30; i++) spawnSpray(x + vehShipRnd(-15, 15), sy - 2, vehShipRnd(-110, 110) * amt, 1 + amt);
   const y = WATER_Y - vehShipRnd(6, 14);
@@ -6777,7 +6784,7 @@ function stepGates(d, dt) {
     if (k === 'ship' && sailboats.some(b => b.launch && homeDock[b.player] === d && b.state === 'sail')) want = 1;   // (CHILL: a new yacht coming out)
     const was = d.gates[k];
     d.gates[k] = clamp(was + (want ? 1 : -1) * dt / GATE_T, 0, 1);
-    if ((was === 0 && d.gates[k] > 0) || (was === 1 && d.gates[k] < 1)) sfxDoor(d.shipGate[0]);
+    if ((was === 0 && d.gates[k] > 0) || (was === 1 && d.gates[k] < 1)) sound('door', d.shipGate[0]);
     // the hangar gate's foot is in the water too: a little churn of foam and bubbles where it lifts out
     // (one door for both boats now - the dock chat, Oct 29: drawn as far open as either wants it)
     if (d.gates[k] !== was) {
@@ -6909,26 +6916,26 @@ function stepChunks(dt) {
       if (k.lie !== undefined) k.a += (k.lie - k.a) * 0.9 * dt;           // a broken pillar topples as it sinks
       if (k.kind !== 'coral' && armChunkR() < dt * 14) addBubble(k.x + armChunkRnd(-6, 6), k.y + armChunkRnd(-6, 6), armChunkRnd(-6, 6), -armChunkRnd(15, 40), armChunkRnd(0.8, 2.2));
       const bed = (k.land && onLand(k.x) ? landTop(k.x) : seabedY(k.x)) - (k.hw ? Math.abs(Math.cos(k.a)) * k.hh + Math.abs(Math.sin(k.a)) * k.hw : k.hh * 0.35);
-      if (k.y >= bed) { k.y = bed; k.rest = true; if (k.kind === 'coral') kickDust(k.x, 3, 0.2); else { kickDust(k.x, k.hh * 1.4, 0.8); scatterBed(k.x, k.hh * 2, 0.6); shock(k.x, bed, 0.4, true); } }
+      if (k.y >= bed) { k.y = bed; k.rest = true; if (k.kind === 'coral') kickDust(k.x, 3, 0.2); else { kickDust(k.x, k.hh * 1.4, 0.8); scatterBed(k.x, k.hh * 2, 0.6); water.shock(k.x, bed, 0.4, true); } }
       continue;
     }
     k.vy += (k.kind === 'tower' ? 260 : 430) * dt; k.x += k.vx * dt; k.y += k.vy * dt; k.a += k.w * dt;
     if (k.kind === 'tower' && armChunkR() < dt * 1.5) spawnSmoke(k.x, k.y, { kind: 'trail', dark: 0.6, r: armChunkRnd(4, 7), lift: 8, alpha: armChunkRnd(0.2, 0.35), life: armChunkRnd(3, 5), stream: smStream(k) });
     // over the quay it lands on the stones; past the edge it goes into the sea
-    let floor = k.floor, water = k.water;
-    if (k.kind === 'tower' && (k.dock || homeDock[k.player])) { const d = k.dock || homeDock[k.player], overSea = (k.x - pierEdge(d)) * -d.dir > 0; water = overSea; floor = overSea ? surfaceY(k.x) : DECK_Y; }
-    if (k.kind === 'mast') { water = true; floor = surfaceY(k.x); }
-    if (k.land) { water = !dryLand(k.x); floor = water ? surfaceY(k.x) : landTop(k.x); }   // (OPEN WORLD: the ground under it where it comes down - a wing, the mountain tower's pieces, user Oct 27 [10])
+    let floor = k.floor, wet = k.water;
+    if (k.kind === 'tower' && (k.dock || homeDock[k.player])) { const d = k.dock || homeDock[k.player], overSea = (k.x - pierEdge(d)) * -d.dir > 0; wet = overSea; floor = overSea ? surfaceY(k.x) : DECK_Y; }
+    if (k.kind === 'mast') { wet = true; floor = surfaceY(k.x); }
+    if (k.land) { wet = !dryLand(k.x); floor = wet ? surfaceY(k.x) : landTop(k.x); }   // (OPEN WORLD: the ground under it where it comes down - a wing, the mountain tower's pieces, user Oct 27 [10])
     // (user Oct 27: the harbour is solid for falling pieces - a wing, a gun - over the sea they land on its deck)
-    if (k.kind !== 'tower' && k.kind !== 'mast' && water) { const ht = harbourTop(k.x, k.y - k.hh); if (ht < Infinity) { water = false; floor = ht; } }
+    if (k.kind !== 'tower' && k.kind !== 'mast' && wet) { const ht = harbourTop(k.x, k.y - k.hh); if (ht < Infinity) { wet = false; floor = ht; } }
     if (k.y + k.hh * 0.55 < floor) continue;
     const x = k.x, y = floor;
-    if (water) {
+    if (wet) {
       for (let i = 0; i < 16 * (k.kind === 'tower' ? 1.5 : 1); i++) spawnSpray(x + armChunkRnd(-10, 10), surfaceY(x) - 2, armChunkRnd(-60, 60), 1.1 + (k.kind === 'tower' ? 0.6 : 0));
-      for (let kx = -14; kx <= 14; kx += DX) addForce(x + kx, -2600 * (1 - Math.abs(kx) / 16));
+      for (let kx = -14; kx <= 14; kx += DX) water.push(x + kx, -2600 * (1 - Math.abs(kx) / 16));
       for (let i = 0; i < 6; i++) spawnFoam(x + armChunkRnd(-12, 12), armChunkRnd(1.4, 3));
       if (k.kind === 'mast') { k.float = true; k.ttl = 60; sound('splash', x, 0.3); }
-      else if (k.kind === 'tower' || k.kind === 'pier' || k.kind === 'wing') { k.uw = true; sound('splash', x, 0.7); shock(x, WATER_Y + 4, 0.7); for (let i = 0; i < 14; i++) addBubble(x + armChunkRnd(-8, 8), WATER_Y + armChunkRnd(3, 14), armChunkRnd(-15, 15), -armChunkRnd(10, 40), armChunkRnd(1, 2.6)); }
+      else if (k.kind === 'tower' || k.kind === 'pier' || k.kind === 'wing') { k.uw = true; sound('splash', x, 0.7); water.shock(x, WATER_Y + 4, 0.7); for (let i = 0; i < 14; i++) addBubble(x + armChunkRnd(-8, 8), WATER_Y + armChunkRnd(3, 14), armChunkRnd(-15, 15), -armChunkRnd(10, 40), armChunkRnd(1, 2.6)); }
       else k.dead = true;
     } else {
       k.y = floor - k.hh * 0.45; k.rest = true; k.vx = k.vy = k.w = 0;
@@ -7141,10 +7148,10 @@ function hitSub(sb, sec, x, y, ram) {
   if (under) {
     // underwater: a dull thump, a small yellow flash, then a billowing cloud of white water and bubbles
     sound('explosion', x, 0.6);
-    shock(x, y, 1.1);
+    water.shock(x, y, 1.1);
     underwaterBlast(x, y, 1);
     killFishNear(x, y, 60);
-    for (let k = -18; k <= 18; k += DX) addForce(x + k, -1800 * (1 - Math.abs(k) / 20));
+    for (let k = -18; k <= 18; k += DX) water.push(x + k, -1800 * (1 - Math.abs(k) / 20));
     emit('scare', { x, y, r: 200, kind: 'fish' });
     shakeAt(7, x);
   } else sectionBlast(x, y, 0.65, sb.vx);
@@ -7183,8 +7190,8 @@ function subRam(sb, dt) {
     spawnSparks(cx, cy, 24, 200);
     flashes.push({ x: cx, y: cy, r: 10, life: 0, max: 0.08 });
     for (let i = 0; i < 50; i++) addBubble(cx + vehSubRnd(-30, 30), cy + vehSubRnd(-4, 8), vehSubRnd(-30, 30), -vehSubRnd(15, 60), vehSubRnd(0.8, 3));
-    shock(cx, cy + 4, 1.1, false, SUB_L * 0.5);
-    for (let k = -30; k <= 30; k += DX) addForce(cx + k, -1500 * (1 - Math.abs(k) / 32));
+    water.shock(cx, cy + 4, 1.1, false, SUB_L * 0.5);
+    for (let k = -30; k <= 30; k += DX) water.push(cx + k, -1500 * (1 - Math.abs(k) / 32));
     emit('scare', { x: cx, y: cy, r: 200, kind: 'fish' });
     shakeAt(10, cx);
   }
@@ -7223,7 +7230,7 @@ function subsCollide() {
   spawnSparks(cx, cy, 24, 200);
   flashes.push({ x: cx, y: cy, r: 10, life: 0, max: 0.08 });
   for (let i = 0; i < 50; i++) addBubble(cx + vehSubRnd(-20, 20), cy + vehSubRnd(-6, 6), vehSubRnd(-30, 30), -vehSubRnd(15, 60), vehSubRnd(0.8, 3));
-  shock(cx, cy, 1, false, SUB_L * 0.4);
+  water.shock(cx, cy, 1, false, SUB_L * 0.4);
   emit('scare', { x: cx, y: cy, r: 200, kind: 'fish' });
   shakeAt(8, cx);
 }
@@ -7243,11 +7250,10 @@ function sinkSub(sb) {
   });
   { const [bx, by] = subAt(sb, cut / SUB_SECTIONS, 90); underwaterBlast(bx, by, 1.2); }
   for (let i = 0; i < 90; i++) addBubble(sb.x + vehSubRnd(-SUB_L / 2, SUB_L / 2), sb.y + vehSubRnd(-6, 8), vehSubRnd(-25, 25), -vehSubRnd(20, 70), vehSubRnd(1, 3.4));
-  shock(sb.x, sb.y + 4, 1.4, false, SUB_L * 0.8);
+  water.shock(sb.x, sb.y + 4, 1.4, false, SUB_L * 0.8);
   shakeAt(10, sb.x);
   sb.auto = null;                                                   // (lostUnit resets the lever if you were aboard)
-  if (crew[sb.id].mode === 'sub' || seatDriving(sb.id, 'sub')) lostVeh(sb.id, sb.x, 'sub');
-  else if (crew[sb.id].mode === 'dock' && !hasForces(sb.id)) killCaptain(sb.id);
+  emit('sunk', { kind: 'sub', o: sb });                             // (engine stage 3: her two halves are there - the camera, 39-camera)
 }
 function stepSub(sb, dt) {
   const p = sb.id, d = sb.dock, c = crew[p];
@@ -7390,7 +7396,7 @@ function stepSub(sb, dt) {
   // much bigger as she is, FXK, like the battleship's; back to 1 after the screw's)
   FXK = REAL.sub;
   if ((y0 - surf) * (sb.y - surf) < 0 && Math.abs(sb.vy) > 2) {
-    for (let k = -SUB_L * 0.4; k <= SUB_L * 0.4; k += 10) { spawnFoam(sb.x + k + vehSubRnd(-4, 4) * FXK, vehSubRnd(1.4, 3)); addForce(sb.x + k, sb.vy * 60); }
+    for (let k = -SUB_L * 0.4; k <= SUB_L * 0.4; k += 10) { spawnFoam(sb.x + k + vehSubRnd(-4, 4) * FXK, vehSubRnd(1.4, 3)); water.push(sb.x + k, sb.vy * 60); }
     sound('splash', sb.x, 0.35);
     if (sb.vy < 0) { sb.emerge = 3; emergeFoam(sb, 18); }      // coming up: the sea pours off her for a while
   }
@@ -7412,7 +7418,7 @@ function stepSub(sb, dt) {
   }
   if (surfaced && Math.abs(sb.vx) > 6) {
     const bow = sb.x + Math.sign(sb.vx) * SUB_L * 0.48;
-    addForce(bow, Math.abs(sb.vx) * 1.2);
+    water.push(bow, Math.abs(sb.vx) * 1.2);
     sb.foamAcc = (sb.foamAcc || 0) + Math.abs(sb.vx) * 0.12 * dt;
     while (sb.foamAcc >= 1) { sb.foamAcc -= 1; spawnFoam(bow + vehSubRnd(-4, 4) * FXK, vehSubRnd(1.2, 2.4)); spawnFoam(sb.x - Math.sign(sb.vx) * SUB_L * 0.46 + vehSubRnd(-8, 8) * FXK, vehSubRnd(1.2, 2.6)); }
   }
@@ -7488,7 +7494,7 @@ function stepSubWreck(sb, dt) {
         if (v > 4) crashFx(q.x, r.y + SUB_DN, v);
       } else {
         kickDust(q.x, half * 1.3, 1); scatterBed(q.x, half * 1.8, 1);
-        shock(q.x, r.y, 0.7, true, half * 2);
+        water.shock(q.x, r.y, 0.7, true, half * 2);
         sound('crash', q.x, 0.4);
         shakeAt(4, q.x);
       }
@@ -7580,7 +7586,7 @@ on('hit', e => { if (e.kind === 'wreck') blowWreck(e.o, e.sb, e.x, e.y, e.amt, e
 function blowWreck(o, sb, x, y, power, vx) {
   const under = y > surfaceY(x) + 3;
   if (under) {
-    underwaterBlast(x, y, 0.8 * power); sound('explosion', x, 0.55 + 0.25 * power); shock(x, y, 0.9);
+    underwaterBlast(x, y, 0.8 * power); sound('explosion', x, 0.55 + 0.25 * power); water.shock(x, y, 0.9);
     killFishNear(x, y, 50); emit('scare', { x, y, r: 200, kind: 'fish' });
     for (let i = 0; i < 26; i++) addBubble(x + rnd(-10, 10), y + rnd(-6, 6), rnd(-25, 25), -rnd(20, 60), rnd(0.8, 2.8));
   } else sectionBlast(x, y, 0.6 * power, vx || 0);
@@ -7637,7 +7643,7 @@ function crashFx(cx, cy, speed) {
   spawnSparks(cx, cy, 20, 180);
   flashes.push({ x: cx, y: cy, r: 9, life: 0, max: 0.08 });
   for (let i = 0; i < 40; i++) addBubble(cx + rnd(-24, 24), cy + rnd(-6, 6), rnd(-30, 30), -rnd(15, 60), rnd(0.8, 3));
-  shock(cx, cy, 0.9, false, SUB_L * 0.4);
+  water.shock(cx, cy, 0.9, false, SUB_L * 0.4);
   emit('scare', { x: cx, y: cy, r: 200, kind: 'fish' });
   shakeAt(7, cx);
 }
@@ -7785,13 +7791,13 @@ function underwaterBlast(x, y, power, ball) {
   if (LAND) krBlast(x, y, power, ball);                            // (the kraken in reach of it: struck as by a torpedo - 50-land-kraken)
   // (a mine going off on the surface, user Oct 29: "The underwater explosion is only if it explodes underwater" - its
   // blow under the water still reaches what it reaches, but nothing of a blast is seen down there: the splash shows it)
-  if (ball === 'none') { for (let k = -18; k <= 18; k += DX) addForce(x + k, -1800 * power * (1 - Math.abs(k) / 20)); emit('scare', { x, y, r: 220, kind: 'fish' }); shakeAt(6 * power, x); return; }
+  if (ball === 'none') { for (let k = -18; k <= 18; k += DX) water.push(x + k, -1800 * power * (1 - Math.abs(k) / 20)); emit('scare', { x, y, r: 220, kind: 'fish' }); shakeAt(6 * power, x); return; }
   if (ball) {
     // the depth charge: one round, churning ball of white water, a ring of spray bubbles, nothing cloud-like
     gasBall(x, y, 34 * power);
     flashes.push({ x, y, r: 9 * power, life: 0, max: 0.1 });
     for (let i = 0; i < 60 * power; i++) { const a = rnd(0, 6.28), s = rnd(40, 140); addBubble(x + Math.cos(a) * rnd(8, 30), y + Math.sin(a) * rnd(8, 30), Math.cos(a) * s, Math.sin(a) * s - 20, rnd(0.8, 2.4)); }
-    for (let k = -18; k <= 18; k += DX) addForce(x + k, -1800 * power * clamp(1 - (y - WATER_Y) / 300, 0.2, 1) * (1 - Math.abs(k) / 20));
+    for (let k = -18; k <= 18; k += DX) water.push(x + k, -1800 * power * clamp(1 - (y - WATER_Y) / 300, 0.2, 1) * (1 - Math.abs(k) / 20));
     emit('scare', { x, y, r: 220, kind: 'fish' });
     shakeAt(6 * power, x);
     return;
@@ -7807,7 +7813,7 @@ function underwaterBlast(x, y, power, ball) {
     spawnWcloud({ x: x + Math.cos(a) * d0, y: y + Math.sin(a) * d0, vx: Math.cos(a) * sp * 0.8, vy: Math.sin(a) * sp * 0.7 - (plume ? rnd(20, 50) : 0), r: rnd(2.5, 4.5), rmax: rnd(7, 15) * (0.85 + 0.25 * power), grow: rnd(24, 40), life: rnd(2.6, 5), lift: plume ? rnd(45, 75) : rnd(10, 26), alpha: 1, water: true });
   }
   for (let i = 0; i < 70 * power; i++) { const a = rnd(0, 6.28), s = rnd(10, 90); addBubble(x + Math.cos(a) * rnd(0, 10), y + Math.sin(a) * rnd(0, 10), Math.cos(a) * s, Math.sin(a) * s - 30, rnd(1, 3.6)); }
-  for (let k = -18; k <= 18; k += DX) addForce(x + k, -1800 * power * clamp(1 - (y - WATER_Y) / 300, 0.2, 1) * (1 - Math.abs(k) / 20));
+  for (let k = -18; k <= 18; k += DX) water.push(x + k, -1800 * power * clamp(1 - (y - WATER_Y) / 300, 0.2, 1) * (1 - Math.abs(k) / 20));
   emit('scare', { x, y, r: 220, kind: 'fish' });
   shakeAt(6 * power, x);
 }
@@ -7960,8 +7966,8 @@ const TORP_SPD_K = 3;                // (user Oct 29: 3x as fast)
 const TORP_RUN = 9;                  // seconds of motor; after that a torpedo that found nothing sinks
 function fireTorpedo(sb, up) {
   if (sb.state !== 'out' || sb.turn || sb.tk > 0) return;
-  if (!subClear(sb)) { sfxEmpty(sb.x); return; }                     // still in the harbour: safety on
-  if (sb.torps <= 0) { sfxEmpty(sb.x); return; }
+  if (!subClear(sb)) { sound('empty', sb.x); return; }                     // still in the harbour: safety on
+  if (sb.torps <= 0) { sound('empty', sb.x); return; }
   sb.torps--; sb.tk = TORP_RELOAD;
   let x, y, vx, vy;
   if (up) { [x, y] = subAt(sb, 0.5 + 0.12 * -sb.facing, SUB_DECK_ROW); vx = sb.vx; vy = -25; }
@@ -7971,7 +7977,7 @@ function fireTorpedo(sb, up) {
   // the launch: a thump and a gush of bubbles from the tube
   sound('impact', x);
   for (let i = 0; i < 32; i++) addBubble(x + armTorpRnd(-4, 4), y + armTorpRnd(-4, 4), (up ? 0 : sb.facing * armTorpRnd(10, 40)) + armTorpRnd(-12, 12), up ? -armTorpRnd(20, 50) : -armTorpRnd(5, 25), armTorpRnd(0.8, 2.2));
-  shock(x, y, 0.4, true);
+  water.shock(x, y, 0.4, true);
 }
 function stepTorps(dt) {
   for (let i = torps.length - 1; i >= 0; i--) {
@@ -8202,8 +8208,8 @@ const armScrR = () => (armScrR_ || (armScrR_ = sysRng('armScreens')))(), armScrR
 function dropSmoke(sh) {
   if (!sh || sh.state !== 'afloat') return;
   const S = smokeSupply(sh, SMOKE_SHIP_S);
-  if (!S.on && (!shipClear(sh) || S.left <= 0.05)) { sfxEmpty(sh.x); return; }   // (still in the harbour: safety on)
-  if (smokeToggle(sh, SMOKE_SHIP_S)) sfxSmoke(sh.x); else sfxClick(null);
+  if (!S.on && (!shipClear(sh) || S.left <= 0.05)) { sound('empty', sh.x); return; }   // (still in the harbour: safety on)
+  if (smokeToggle(sh, SMOKE_SHIP_S)) sound('smoke', sh.x); else sound('click', null);
 }
 function screenPuff(x, y, vx) {
   if (netGuestHold()) return;                              // (online guest: only when the host says so)
@@ -8270,15 +8276,15 @@ function dropDepthCharge(sh) {
   if (!sh || sh.state !== 'afloat') return;
   const g = gunOf(sh);
   if ((g.dk || 0) > 0) return;
-  if (!shipClear(sh)) { sfxEmpty(sh.x); return; }                   // still in the harbour: safety on
-  if (g.dcAmmo <= 0) { sfxEmpty(sh.x); return; }
+  if (!shipClear(sh)) { sound('empty', sh.x); return; }                   // still in the harbour: safety on
+  if (g.dcAmmo <= 0) { sound('empty', sh.x); return; }
   g.dcAmmo--;
   g.dk = DC_RELOAD;
   const [x, y] = shipPoint(sh, SHIP_SRC_W / 2, 150);                   // over the side amidships
   // the power setting is the fuse: low goes off shallow, high goes deep
   const fuse = WATER_Y + 35 + g.power * (seabedY(x) - WATER_Y - 70);   // (out in the deep, deeper)
   dcharges.push({ x, y, vx: sh.vx * 0.8 + armDchRnd(-8, 8), vy: -armDchRnd(10, 22), a: 0, w: armDchRnd(-6, 6), owner: sh.id, under: false, fuse, t: 0 });
-  sfxClink(telegraphs[sh.id]);
+  sound('clink', telegraphs[sh.id]);
 }
 // a plane's bomb gone into the sea: a depth charge with no set depth (it sinks quicker than a drum, nose down)
 function bombToCharge(s) {
@@ -8294,7 +8300,7 @@ function stepDcharges(dt) {
       if (c.y >= sy) {
         c.under = true; c.vy = Math.min(c.vy, 60) * 0.4; c.vx *= 0.4;
         for (let k = 0; k < 10; k++) spawnSpray(c.x + armDchRnd(-4, 4), sy - 1, armDchRnd(-30, 30), 0.6);
-        for (let k = -8; k <= 8; k += DX) addForce(c.x + k, -900 * (1 - Math.abs(k) / 10));
+        for (let k = -8; k <= 8; k += DX) water.push(c.x + k, -900 * (1 - Math.abs(k) / 10));
         spawnFoam(c.x, armDchRnd(1.4, 2.6));
         sound('splash', c.x, 0.3);
       }
@@ -8324,7 +8330,7 @@ function stepDcharges(dt) {
 function detonateCharge(c) {
   const x = c.x, y = c.y;
   sound('explosion', x, 0.85);
-  if (!c.noBall) shock(x, y, 1.8);
+  if (!c.noBall) water.shock(x, y, 1.8);
   // the pressure wave: rings that bend the water as they spread
   if (!c.noBall) for (let k = 0; k < 3; k++) blastRings.push({ x, y, r: 4 + k * 12, speed: 150 - k * 25, max: 280 - k * 50, life: 0, amp: 6 - k * 1.6 });
   underwaterBlast(x, y, 1.4, c.noBall ? 'none' : true);   // (a mine on the surface: no ball under the water, its splash instead - detonateMine)
@@ -8334,7 +8340,7 @@ function detonateCharge(c) {
   if (y > seabedY(x) - 30) { kickDust(x, 40, 1); scatterBed(x, 60, 1); }
   // the sea humps up over it and throws up a column of white water
   const depth = y - WATER_Y, amt = clamp(1 - depth / 320, 0.25, 1);
-  for (let k = -40; k <= 40; k += DX) addForce(x + k, -9000 * amt * (1 - Math.abs(k) / 42));
+  for (let k = -40; k <= 40; k += DX) water.push(x + k, -9000 * amt * (1 - Math.abs(k) / 42));
   const sy = surfaceY(x);
   if (!c.noBall) for (let i = 0; i < 90 * amt; i++) spray.length < 700 && spray.push({ x: x + armDchRnd(-14, 14), y: sy - armDchRnd(0, 4), vx: armDchRnd(-40, 40), vy: -armDchRnd(120, 480) * amt, life: 0, s: armDchRnd(1.6, 4) });
   for (let i = 0; i < 14; i++) spawnFoam(x + armDchRnd(-24, 24), armDchRnd(1.6, 3.4));
@@ -8431,13 +8437,13 @@ const armMineR = () => (armMineR_ || (armMineR_ = sysRng('armMines')))(), armMin
 function layMine(sb) {
   if (!sb || sb.state !== 'out') return;
   if ((sb.mk || 0) > 0) return;
-  if (!subClear(sb) || (sb.mines || 0) <= 0) { sfxEmpty(sb.x); return; }   // (in the harbour: safety on)
+  if (!subClear(sb) || (sb.mines || 0) <= 0) { sound('empty', sb.x); return; }   // (in the harbour: safety on)
   sb.mines--; sb.mk = MINE_RELOAD;
   // (from her middle, just aft of the sail, up off the deck - user Oct 24 night: not from the stern)
   const face = sb.turn ? sb.turn.from : sb.facing, x = sb.x - face * 14 * REAL.sub;
   const deck = sb.y - (SUB_WL_ROW - SUB_DECK_ROW) * SUB_K;
   mines.push({ x, y: deck - MINE_R, vx: sb.vx * 0.6, vy: -10, owner: sb.id, t: 0, float: false, boomT: 0, ph: armMineR() * 6 });
-  sfxClink(telegraphs[sb.id]); sfxSubPlanes(x, 1);
+  sound('clink', telegraphs[sb.id]); sound('subPlanes', x, 1);
   // (user Oct 29: "We need many bubbles from the hatch where the mine comes from") a gush of air out of the hatch with it
   for (let k = 0; k < 50; k++) addBubble(x + armMineRnd(-1, 1) * MINE_R, deck - armMineRnd(0, MINE_R * 1.5), armMineRnd(-18, 18) + sb.vx * 0.3, -armMineRnd(25, 70), armMineRnd(0.8, 2.8));
 }
@@ -8531,7 +8537,7 @@ function detonateMine(m, hit) {
 const MINE_SPLASH_D = 60;                  // (under the surface deeper than this: no splash, the underwater blast only)
 function mineSplash(x, amt) {
   sound('splash', x, amt);
-  for (let k = -50; k <= 50; k += DX) addForce(x + k, -16000 * amt * (1 - Math.abs(k) / 52));
+  for (let k = -50; k <= 50; k += DX) water.push(x + k, -16000 * amt * (1 - Math.abs(k) / 52));
   if (SIM_ONLY) return;
   startMineSplash(x, amt);
   const sy = surfaceY(x);
@@ -8895,12 +8901,12 @@ function launchPlane(pl) {
     const af = airfield(p);
     Object.assign(pl, { loiter: null, state: 'fly', ground: 'roll', rot: 0, gear: 1, gWant: 0, exitK: 1, x: hangarX(af) + af.dir * 10, y: af.y, facing: af.dir, pitch: 0, turn: null, auto: null, spd: 0, vy: 0, mg: false, ice: 0, strand: null, vaporT: 0, inCloud: 0, eng: 'on', offT: 0, recoverT: 0 });
     pl.vx = pl.facing * pl.spd;
-    sfxPlaneIn(pl.x);
+    sound('planeIn', pl.x);
     return;
   }
   Object.assign(pl, { loiter: null, state: 'fly', x: home, y: HANGAR_TOP - 110, facing: SIDE(p) ? -1 : 1, pitch: 0, turn: null, auto: null, spd: PLANE_V, vy: 0, mg: false, ice: 0, strand: null, vaporT: 0, inCloud: 0, eng: 'on', offT: 0, recoverT: 0 });
   pl.vx = pl.facing * PLANE_V;
-  sfxPlaneIn(pl.x);
+  sound('planeIn', pl.x);
 }
 function planeTurn(pl) { if ((pl.state === 'fly' || pl.state === 'free') && !pl.turn) pl.turn = { t: 0, from: pl.facing }; }
 // a hit: amt 1 for a shell or a bomb, a fraction for each machine-gun round. (engine stage 3: a shell's or a round's
@@ -9031,7 +9037,7 @@ function planeWash(o, dt, size = 1) {
     if (vehPlaneR() < 0.3 && wakes.length < 650 && !fxHidden(wx)) wakes.push({ x: wx, life: 0, max: vehPlaneRnd(1.6, 3.2) * (0.5 + k) * (0.6 + 0.4 * size), w: vehPlaneRnd(8, 18) * (0.5 + 0.5 * k) * size, drift: -fac * vehPlaneRnd(3, 9), k: 0.5 + 0.5 * k });
   }
   const W = 16 * size;
-  for (let q = -W; q <= W; q += DX) addForce(o.x - fac * 14 * size + q, -70 * k * (1 - Math.abs(q) / (W + 4)));
+  for (let q = -W; q <= W; q += DX) water.push(o.x - fac * 14 * size + q, -70 * k * (1 - Math.abs(q) / (W + 4)));
 }
 function planeSplash(pl) {
   // into the sea: the wings always come off
@@ -9177,7 +9183,7 @@ function stepPlanes(dt) {
     if (pl.y < PLANE_ICE) pl.ice = Math.min(1, pl.ice + dt / 5);
     else if (pl.y > PLANE_THAW && pl.ice > 0) { const was = pl.ice; pl.ice = Math.max(0, pl.ice - dt / 3); iceShed(pl, was - pl.ice); }
     if (pl.ice > 0.12 && time > (pl.coughT || 0)) { pl.coughT = time + vehPlaneRnd(1.4, 2.4) * (1.4 - pl.ice); engineCough(pl, 2); }
-    if (pl.ice >= 1) { pl.eng = 'off'; pl.offT = 0; pl.mg = false; engineCough(pl, 3); sfxEngineDie(pl.x); }
+    if (pl.ice >= 1) { pl.eng = 'off'; pl.offT = 0; pl.mg = false; engineCough(pl, 3); sound('engineDie', pl.x); }
     for (const b of birds) if (birdLive(b) && Math.abs(b.x - pl.x) < 38 && Math.abs(b.y - pl.y) < 12) {
       // a bird in its way: killed, in a little burst of blood, and some of it on the plane
       killBird(b, pl.vx * 0.25 + vehPlaneRnd(-20, 20), pl.vy * 0.25 - 30);
@@ -9194,7 +9200,7 @@ function stepPlanes(dt) {
       continue;
     }
     // the machine gun, held: rounds straight out along the nose
-    if (pl.mg && !pl.turn && planeFrozen(pl)) { if (!(pl.frzT > time)) { sfxEmpty(pl.x); pl.frzT = time + 0.5; } pl.mgT = 0; }
+    if (pl.mg && !pl.turn && planeFrozen(pl)) { if (!(pl.frzT > time)) { sound('empty', pl.x); pl.frzT = time + 0.5; } pl.mgT = 0; }
     else if (pl.mg && !pl.turn) {
       pl.mgT -= dt;
       while (pl.mgT <= 0) {
@@ -9202,7 +9208,7 @@ function stepPlanes(dt) {
         const ux = Math.cos(pl.pitch) * pl.facing, uy = Math.sin(pl.pitch), sp = MG_SPEED + pl.spd, spr = vehPlaneRnd(-0.02, 0.02);
         const mx = pl.x + ux * 30 * PLANE_SC(), my = pl.y + uy * 30 * PLANE_SC() + 2;
         bullets.push({ x: mx, y: my, vx: (ux - uy * spr * pl.facing) * sp, vy: (uy + ux * spr * pl.facing) * sp, owner: p, age: 0, plane: true });
-        sfxMG(mx);
+        sound('mg', mx);
         flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
       }
     } else pl.mgT = 0;
@@ -9230,7 +9236,7 @@ function stepPlanes(dt) {
 function engineCough(pl, n) {
   const nx = pl.x + Math.cos(pl.pitch) * pl.facing * 34, ny = pl.y + Math.sin(pl.pitch) * 34;
   for (let i = 0; i < n; i++) spawnSmoke(nx + vehPlaneRnd(-3, 3), ny + vehPlaneRnd(-3, 3), { kind: 'trail', dark: 0.15, r: vehPlaneRnd(2.5, 4), grow: vehPlaneRnd(4, 6), lift: 6, vx: pl.vx * 0.15, vy: vehPlaneRnd(-6, 4), life: vehPlaneRnd(2, 3.5), alpha: vehPlaneRnd(0.5, 0.7) });
-  sfxSputter(pl.x, n);
+  sound('sputter', pl.x, n);
 }
 // engine dead: it stalls and falls free, the nose dropping into the fall; after three seconds it coughs, the
 // starter whines, it catches, and the plane levels out by itself
@@ -9241,7 +9247,7 @@ function stepPlaneStall(pl, dt) {
   pl.pitch += (Math.atan2(pl.vy, Math.abs(pl.vx) + 1) - pl.pitch) * Math.min(1, dt * 2);
   pl.spd = clamp(Math.hypot(pl.vx, pl.vy), PLANE_VMIN, PLANE_VMAX);
   if (pl.y > PLANE_THAW) pl.ice = Math.max(0, pl.ice - dt / 3);
-  if (pl.offT > 2.3 && !pl.cranking) { pl.cranking = true; engineCough(pl, 3); sfxRestart(pl.x); }
+  if (pl.offT > 2.3 && !pl.cranking) { pl.cranking = true; engineCough(pl, 3); sound('restart', pl.x); }
   if (pl.offT > 3) {
     pl.eng = 'on'; pl.cranking = false; pl.recoverT = 2.2; { const was = pl.ice; pl.ice = Math.min(pl.ice, 0.55); iceShed(pl, was - pl.ice); } pl.coughT = time + 3;
     pl.pitch = clamp(pl.pitch, -PLANE_PITCH, PLANE_PITCH);
@@ -9271,7 +9277,7 @@ function iceShed(pl, amt) {
     const along = vehPlaneRnd(-34, 30), up = vehPlaneRnd(-12, 9);
     iceBits.push({ x: pl.x + along * pl.facing, y: pl.y + up, vx: pl.vx * vehPlaneRnd(0.55, 0.85) + vehPlaneRnd(-25, 25), vy: pl.vy * 0.6 + vehPlaneRnd(-30, 25), life: 0, max: vehPlaneRnd(0.9, 1.8), s: vehPlaneR() < 0.3 ? 2 : 1, tw: vehPlaneR() * 6 });
   }
-  if (amt > 0 && vehPlaneR() < amt * 25) sfxIceCrack(pl.x);
+  if (amt > 0 && vehPlaneR() < amt * 25) sound('iceCrack', pl.x);
 }
 function stepIceBits(dt) {
   for (let i = iceBits.length - 1; i >= 0; i--) {
@@ -9599,7 +9605,7 @@ function sfxBombDrop(x) {
 // a missile: off the rail under the wing and straight out along the nose, much faster than the plane
 function fireRocket(pl) {
   if (!pl || pl.state !== 'fly') return;
-  if (pl.turn || (pl.rockets || 0) <= 0 || (pl.rk || 0) > 0 || planeFrozen(pl)) { sfxEmpty(pl.x); return; }
+  if (pl.turn || (pl.rockets || 0) <= 0 || (pl.rk || 0) > 0 || planeFrozen(pl)) { sound('empty', pl.x); return; }
   // (user Oct 24 night: it unclips from under the wing, drops a moment with the plane's speed, and only then does its
   // motor light and it shoots off; the one let go is the last of the row hanging under the wing)
   const n = pl.rockets, slot = rocketSlot(n - 1);
@@ -9610,7 +9616,7 @@ function fireRocket(pl) {
   const cx = pl.x + ex * Math.cos(a) - oy * Math.sin(a), cy = pl.y + ex * Math.sin(a) + oy * Math.cos(a);
   const s = { x: cx, y: cy, vx: pl.vx, vy: pl.vy + 15, ux, uy, owner: pl.id, from: 'rocket', burn: ROCKET_BURN * PLANE_ROCKET_K, drop: ROCKET_DROP, age: 0, trail: 0, under: false, ut: 0 };
   shells.push(s);
-  sfxRocketRelease(cx);
+  sound('rocketRelease', cx);
 }
 // where missile k hangs under the wing (the plane's own units: back from the middle toward the tail, down from it);
 // the even ones under the near wing, the odd ones under the far wing (drawn behind the fuselage)
@@ -9621,7 +9627,7 @@ function rocketSlot(k) { const i = k >> 1; return [-12 + i * 3.2, (k & 1 ? 8.6 :
 function rocketIgnite(s) {
   const ux = s.ux, uy = s.uy;
   s.ia = s.age;
-  sfxMissile(s.x); sfxWhoosh(s);
+  sound('missile', s.x); sound('whoosh', s);
   flashes.push({ x: s.x - ux * 6, y: s.y - uy * 6, r: 6, life: 0, max: 0.07 });
   for (let i = 0; i < 5; i++) spawnSmoke(s.x - ux * vehPlaneRnd(2, 12), s.y - uy * vehPlaneRnd(2, 12), { kind: 'gun', mist: true, keep: true, r: vehPlaneRnd(3, 5), grow: vehPlaneRnd(1.2, 2), rmax: vehPlaneRnd(8, 12), lift: 3, vx: s.vx * 0.12 + vehPlaneRnd(-6, 6), vy: s.vy * 0.12 + vehPlaneRnd(-4, 4), life: vehPlaneRnd(3, 5), alpha: 0.5 });
 }
@@ -9660,14 +9666,14 @@ function sfxMissile(x) {   // (the warplane's missile: renamed from sfxRocket, O
 }
 function dropBomb(pl) {
   if (!pl || pl.state !== 'fly') return;
-  if (pl.bombs <= 0 || pl.bk > 0 || planeFrozen(pl)) { sfxEmpty(pl.x); return; }
+  if (pl.bombs <= 0 || pl.bk > 0 || planeFrozen(pl)) { sound('empty', pl.x); return; }
   pl.bombs--; pl.bk = BOMB_RELOAD;
   // it falls away carrying the plane's whole momentum, then only gravity and the air act on it
-  sfxBombDrop(pl.x);
+  sound('bombDrop', pl.x);
   // (user Oct 25: it leaves at the plane's angle - climbing, it points up - and then its heavy nose drops)
   const b = { x: pl.x + pl.facing * 2, y: pl.y + 9, vx: pl.vx, vy: pl.vy, owner: pl.id, from: 'bomb', age: 0, trail: 0, under: false, ut: 0, face: pl.facing, a: Math.atan2(pl.vy, pl.vx || pl.facing) };
   shells.push(b);
-  sfxWhoosh(b);                                     // (its whistle: rising as it gathers speed, heard near it)
+  sound('whoosh', b);                                     // (its whistle: rising as it gathers speed, heard near it)
 }
 
 /* ---------------- The captain: one life, in the tower, a boat or ashore in the harbour ---------------- */
@@ -9760,7 +9766,7 @@ function takeOver(p, k) {
       b = newSailboat(p ? 2 : 0, d.berth);
       Object.assign(b, { player: p, launch: true, face: -d.dir, drive: 0, own: true, vx: 0 });   // (launch: from her owner's harbour - a flag, so it goes in an online snapshot)
       sailboats.push(b); c.yacht = sailboats.length - 1;
-      sfxClick(gunCtl[p]);
+      sound('click', gunCtl[p]);
     }
     b.player = p; if (b.drive === undefined) b.drive = 0;
     c.mode = 'sail'; setOrder(t, b.drive < 0 ? 0 : b.drive > 0 ? 6 : 3);
@@ -9807,15 +9813,15 @@ function switchTo(p, k) {
     // (OPEN WORLD) in a tower already: over to your other one, if it's standing - the gun keeps its angle
     // (since Oct 28 a side may have several: round them all, the harbour's first)
     const cur = myTw(p), own = ownTowers(p).filter(t => t === cur || towerUsable(t)), i = own.indexOf(cur), nx = own[(i + 1) % own.length];
-    if (nx && nx !== cur && towerUsable(nx)) { cur.inUse = false; cur.restEl = tguns[p].elev; manTw[p] = nx; sfxClick(gunCtl[p]); cutTo(p); } else sfxEmpty(cur.x);
+    if (nx && nx !== cur && towerUsable(nx)) { cur.inUse = false; cur.restEl = tguns[p].elev; manTw[p] = nx; sound('click', gunCtl[p]); cutTo(p); } else sound('empty', cur.x);
     return;
   }
-  if (k === 'mode') { civUI[p] = !civUI[p]; sfxClick(gunCtl[p]); return; }   // (OPEN WORLD: the army / civilian toggle)
-  if (k.startsWith('cv:')) { if (civCycle(p, k.slice(3))) { sfxClick(gunCtl[p]); cutTo(p); } else sfxEmpty(cam.view[p].l); return; }   // (a civilian kind: the next one of it)
-  if (c.mode === 'civ' && k === 'civ') { if (takeCiv(p)) { sfxClick(gunCtl[p]); cutTo(p); } else sfxEmpty(cam.view[p].l); return; }   // (again: the next nearest)
-  if (c.mode === k) { if (comeBackOut(p, k)) sfxClick(gunCtl[p]); return; }
-  if (!canTake(p, k)) { sfxEmpty(towers[p].x); return; }
-  sfxClick(gunCtl[p]);
+  if (k === 'mode') { civUI[p] = !civUI[p]; sound('click', gunCtl[p]); return; }   // (OPEN WORLD: the army / civilian toggle)
+  if (k.startsWith('cv:')) { if (civCycle(p, k.slice(3))) { sound('click', gunCtl[p]); cutTo(p); } else sound('empty', cam.view[p].l); return; }   // (a civilian kind: the next one of it)
+  if (c.mode === 'civ' && k === 'civ') { if (takeCiv(p)) { sound('click', gunCtl[p]); cutTo(p); } else sound('empty', cam.view[p].l); return; }   // (again: the next nearest)
+  if (c.mode === k) { if (comeBackOut(p, k)) sound('click', gunCtl[p]); return; }
+  if (!canTake(p, k)) { sound('empty', towers[p].x); return; }
+  sound('click', gunCtl[p]);
   if (c.mode === 'civ') civRelease(p);              // (the civilian vehicle you leave carries on by itself)
   c.mode = 'dock'; c.watch = null; c.look = null;
   takeOver(p, k);                                  // (no zoom change on switching: the zoom is the player's - user Oct 27, Oct 28)
@@ -9824,18 +9830,18 @@ function switchTo(p, k) {
 // The house button: the boat you're in sails home and is taken in through her gate, and you're straight into
 // the tower (or your other boat), so you're never left with nothing to do.
 function sendHomeVeh(p, k) {
-  if (!canSendHome(p, k)) { sfxEmpty(towers[p].x); return; }
+  if (!canSendHome(p, k)) { sound('empty', towers[p].x); return; }
   if (k === 'plane') {
     // the plane turns for home and flies back by itself (you can still shoot); off your edge it's repaired
     const pl = planes[p];
     pl.auto = 'home'; pl.loiter = null; pl.around = false; if (pl.facing !== (SIDE(p) ? 1 : -1)) planeTurn(pl);
-    sfxClick(gunCtl[p]);
+    sound('click', gunCtl[p]);
     return;
   }
   const v = k === 'ship' ? ships[p] : subs[p];
   if (inHarbour(v)) bringIn(v);
   else { v.auto = 'home'; if (k === 'sub') v.depthT = SUB_GATE_Y; }   // the sub comes home at her gate's depth
-  sfxClick(gunCtl[p]);                                              // (you stay with her: the camera follows her home)
+  sound('click', gunCtl[p]);                                              // (you stay with her: the camera follows her home)
 }
 // home (the boat behind her gate, the plane off your edge): ashore, the harbour in view, to choose what's next
 function stepAshore(p, k) {
@@ -9895,7 +9901,7 @@ function yachtHuman(b) {
   if (b.driven != null) return true;
   return b.player != null && crew[b.player] && crew[b.player].mode === 'sail' && sailboats[crew[b.player].yacht] === b;
 }
-function toggleSails(b) { if (b && b.state === 'sail') { b.sailsUp = b.sailsUp === false; b.keepFurled = !b.sailsUp; sfxClick(null); } }
+function toggleSails(b) { if (b && b.state === 'sail') { b.sailsUp = b.sailsUp === false; b.keepFurled = !b.sailsUp; sound('click', null); } }
 function yachtFor(p) { const c = crew[p]; if (c.mode === 'sail') return yachtOf(p); if (c.mode === 'civ' && c.civ && sailboats.includes(c.civ)) return c.civ; return null; }
 function sailHalf(b) { const a = img.sails[b.kind]; return a.w * SAIL_K * 0.42; }
 function sailHullHit(b, x, y) {
@@ -10316,12 +10322,12 @@ function stepCrew(dt) {
           if (c.by >= s) {
             const hit = c.bvy - sv;
             c.air = false; c.by = s; c.bvy = sv;
-            if (hit > 30) { for (let i = 0; i < 8 + hit * 0.1; i++) spawnSpray(c.x + vehCrewRnd(-8, 8), s - 1, vehCrewRnd(-50, 50), clamp(hit / 160, 0.4, 1)); spawnFoam(c.x, vehCrewRnd(2, 3.4)); addForce(c.x, -hit * 25); if (hit > 70) sound('splash', c.x, 0.25); }
+            if (hit > 30) { for (let i = 0; i < 8 + hit * 0.1; i++) spawnSpray(c.x + vehCrewRnd(-8, 8), s - 1, vehCrewRnd(-50, 50), clamp(hit / 160, 0.4, 1)); spawnFoam(c.x, vehCrewRnd(2, 3.4)); water.push(c.x, -hit * 25); if (hit > 70) sound('splash', c.x, 0.25); }
           }
         }
       }
       const sp = Math.abs(c.bv) / BOAT_SPEED, stern = c.x - c.face * 7;
-      addForce(stern, (vehCrewR() - 0.5) * 80 * sp);
+      water.push(stern, (vehCrewR() - 0.5) * 80 * sp);
       c.foamT = (c.foamT || 0) - dt;
       if (sp > 0.08 && c.foamT <= 0) {
         c.foamT = 0.05 / (0.3 + sp);
@@ -10474,7 +10480,7 @@ function launch(x, y, el, power, facing, baseVx, owner, from) {
   const sp = (SHELL_V0 + power * SHELL_VPOW) * (from === 'tower' ? Math.sqrt(1.5) : 1) * gunV(from);
   const dx = Math.cos(el) * facing, dy = -Math.sin(el);
   shells.push({ x, y, vx: dx * sp + baseVx, vy: dy * sp, owner, from, age: 0, trail: 0, under: false, ut: 0, g: SHELL_G * gunK(from) });
-  sfxCannon(x, from === 'tower'); sfxWhoosh(shells[shells.length - 1]);
+  sound('cannon', x, from === 'tower'); sound('whoosh', shells[shells.length - 1]);
   flashes.push({ x: x + dx * 4, y: y + dy * 4, r: 10, life: 0, max: 0.1 });
   for (let i = 0; i < 10; i++) { spawnFlame(x + dx * armShellRnd(2, 10), y + dy * armShellRnd(2, 10), dx * armShellRnd(40, 120), dy * armShellRnd(40, 120), 1.2, armShellRnd(2, 4), armShellRnd(5, 7)); flames[flames.length - 1].clean = true; }
   // the muzzle smoke stays at the muzzle: a short puff, not a second trail chasing the shell
@@ -10491,8 +10497,8 @@ function fireGun(sh, which) {
   if (k === undefined) { k = shipGunReady(sh, gun); if (k < 0) k = gunWorks(sh, 0) ? 0 : 1; }
   gun.press = 0.14; gun.pk[k] = 0.14;
   if (gun.rk[k] > 0 || !gunWorks(sh, k)) return;
-  if (!shipClear(sh)) { sfxEmpty(sh.x); return; }                   // still in the harbour: safety on
-  if (gun.ammo <= 0) { sfxEmpty(sh.x); return; }                  // the magazine is empty: back to the hangar to rearm
+  if (!shipClear(sh)) { sound('empty', sh.x); return; }                   // still in the harbour: safety on
+  if (gun.ammo <= 0) { sound('empty', sh.x); return; }                  // the magazine is empty: back to the hangar to rearm
   gun.ammo--;
   gun.rk[k] = RELOAD;
   gun.reload = Math.min(gun.rk[0], gun.rk[1]);
@@ -10505,7 +10511,7 @@ function fireGun(sh, which) {
   shells[shells.length - 1].pass = passingShips(sh);   // (the big ships she's passing: not hit - 50-land-civships)
   sh.vx -= sh.facing * Math.cos(el) * 5;
   sh.w += sh.facing * 0.035;
-  for (let k = -40; k <= 40; k += DX) addForce(sh.x + k, -500 * (1 - Math.abs(k) / 42));
+  for (let k = -40; k <= 40; k += DX) water.push(sh.x + k, -500 * (1 - Math.abs(k) / 42));
   shakeAt(2.5, sh.x);
 }
 // The battleship's machine guns (in place of her two cannons): rounds along the barrels, from one turret then the
@@ -10514,7 +10520,7 @@ function shipMG(sh) {
   if (!sh || sh.state !== 'afloat') return;
   const g = gunOf(sh), works = [0, 1].filter(k => gunWorks(sh, k));
   if (!works.length) return;
-  if (!shipClear(sh)) { if (!(g.safeT > 0)) { sfxEmpty(sh.x); g.safeT = 0.5; } return; }   // still in the harbour: safety on
+  if (!shipClear(sh)) { if (!(g.safeT > 0)) { sound('empty', sh.x); g.safeT = 0.5; } return; }   // still in the harbour: safety on
   g.mgK = works.length > 1 ? 1 - (g.mgK || 0) : works[0];
   const k = g.mgK, [mx, my] = muzzlePoint(sh, k), [ux, uy] = barrelDir(sh);
   const sp = MG_SPEED * (0.75 + g.power * 0.4), spr = armShellRnd(-0.02, 0.02);
@@ -10522,7 +10528,7 @@ function shipMG(sh) {
   sh.muzzle = k; sh.recoil[k] = 0.35; g.press = 0.08;
   flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
   if (armShellR() < 0.4) spawnSmoke(mx, my, { kind: 'gun', dark: 0.85, r: 1.6, lift: 6, life: 0.7, alpha: 0.25, grow: 4 });
-  sfxMG(mx);
+  sound('mg', mx);
 }
 function towerMuzzle(tw, el) {
   const [px, py] = towerPivot(tw);
@@ -10537,7 +10543,7 @@ function fireTower(tw, mg) {
     const sp = MG_SPEED * (0.75 + gun.power * 0.4), spread = armShellRnd(-0.025, 0.025);
     bullets.push({ x: mx, y: my, vx: Math.cos(el + spread) * tw.facing * sp, vy: -Math.sin(el + spread) * sp, owner: tw.player, age: 0 });
     tw.muzzleFlash = 0.05;
-    sfxMG(mx);
+    sound('mg', mx);
     spawnSmoke(mx, my, { kind: 'gun', dark: 0.85, r: 2, lift: 6, life: 0.8, alpha: 0.3, grow: 4 });
     return;
   }
@@ -10592,7 +10598,7 @@ function stepShells(dt) {
         s.crushed = true; s.vy *= 0.6;
         if (!SIM_ONLY) {
           for (let k = 0; k < 14; k++) addBubble(s.x + armShellRnd(-3, 3), s.y + armShellRnd(-3, 3), armShellRnd(-14, 14), -armShellRnd(25, 60), armShellRnd(0.8, 2.2));
-          shock(s.x, s.y, 0.18, true); sfxCrush(s.x);
+          water.shock(s.x, s.y, 0.18, true); sound('crush', s.x);
         }
       }
       if (s.y >= bed) {
@@ -10742,7 +10748,7 @@ function stepShells(dt) {
     }
     birdStrike(b.x, b.y, 3);
     // (a round going by the plane you're flying, close: you hear it)
-    if (!b._whiz) for (const pl of planes) if (pl && pl.state === 'fly' && pl.id !== b.owner && crew[pl.id].mode === 'plane') { const d = Math.hypot(b.x - pl.x, b.y - pl.y); if (d < 60) { b._whiz = true; sfxWhiz(pl.x, 1 - d / 60); } }
+    if (!b._whiz) for (const pl of planes) if (pl && pl.state === 'fly' && pl.id !== b.owner && crew[pl.id].mode === 'plane') { const d = Math.hypot(b.x - pl.x, b.y - pl.y); if (d < 60) { b._whiz = true; sound('whiz', pl.x, 1 - d / 60); } }
     let done = false;
     // a shell or a bomb in the air: a round that meets it sets it off
     for (let j = shells.length - 1; j >= 0; j--) {
@@ -10786,7 +10792,7 @@ function stepShells(dt) {
     if (!done && b.y > surfaceY(b.x)) {
       // a round into the sea: a thin spike of water straight up, and on into the water a little way
       const sy = surfaceY(b.x);
-      addForce(b.x, -500); for (let k = 0; k < 4; k++) spawnSpray(b.x, sy - 1, armShellRnd(-20, 20), 0.6);
+      water.push(b.x, -500); for (let k = 0; k < 4; k++) spawnSpray(b.x, sy - 1, armShellRnd(-20, 20), 0.6);
       let small = 0; for (const j of jets) if (j.small) small++;
       if (small > 40) { const k = jets.findIndex(j => j.small); if (k >= 0) jets.splice(k, 1); }
       jets.push({ x: b.x, v0: armShellRnd(95, 140), w: 1.3, base: 3, t: 0, lean: clamp(b.vx / 4000, -0.08, 0.08), seed: armShellR() * 100, rained: false, small: true });
@@ -10827,13 +10833,13 @@ function shipBlast(sh, x, y, power) {
   spawnSparks(x, deck - 3, 10 + 12 * power, 220);
   for (let i = 0; i < 6 + 8 * power; i++) spawnSmoke(x + armShellRnd(-5, 5), deck - armShellRnd(16, 34), { kind: 'blast', dark: 0.75, r: armShellRnd(3, 5.5) * (0.7 + 0.5 * power), grow: armShellRnd(3, 5), lift: 34, vx: armShellRnd(-8, 8) + sh.vx * 0.5, vy: armShellRnd(-55, -25), life: armShellRnd(7, 10), alpha: armShellRnd(0.5, 0.7) });
   gridExplosion(x, deck, 40 * power, 220 * power);
-  for (let k = -20; k <= 20; k += DX) addForce(x + k, -2500 * power * (1 - Math.abs(k) / 22));
+  for (let k = -20; k <= 20; k += DX) water.push(x + k, -2500 * power * (1 - Math.abs(k) / 22));
   guysNear(x, deck, 30);
 }
 // A shell on bare steel: a bright punch, sparks and a puff of gray smoke, no fire.
 function impact(x, y) {
   sound('impact', x);
-  if (y > WATER_Y - 60) shock(x, WATER_Y + 4, 0.8);
+  if (y > WATER_Y - 60) water.shock(x, WATER_Y + 4, 0.8);
   shakeAt(5, x);
   flashes.push({ x, y, r: 18, life: 0, max: 0.12 });
   spawnSparks(x, y, 26, 300);
@@ -10846,7 +10852,7 @@ function impact(x, y) {
 function sectionBlast(x, y, power, baseVx) {
   sound('explosion', x, power);
   shakeAt(5 + 6 * power, x);
-  if (y > WATER_Y - 70) shock(x, WATER_Y + 4, 0.8 + 0.5 * power);
+  if (y > WATER_Y - 70) water.shock(x, WATER_Y + 4, 0.8 + 0.5 * power);
   // about half the size it was: a tight yellow fireball, like a real hit seen from a distance
   flashes.push({ x, y, r: 30 * power, life: 0, max: 0.16 });
   rings.push({ x, y, r: 3, max: 35 * power, life: 0 });
@@ -10862,7 +10868,7 @@ function sectionBlast(x, y, power, baseVx) {
   anchorsBlast(x, y, power);                                       // (a ship's anchor rope near it thrown about - user Oct 27: "React when a ship explodes")
   const sy = surfaceY(x);
   if (Math.abs(y - sy) < 60) {
-    for (let k = -34; k <= 34; k += DX) addForce(x + k, -5500 * power * (1 - Math.abs(k) / 36));
+    for (let k = -34; k <= 34; k += DX) water.push(x + k, -5500 * power * (1 - Math.abs(k) / 36));
     for (let i = 0; i < 20; i++) spawnSpray(x + armShellRnd(-18, 18), sy - 2, armShellRnd(-100, 100), 1.5);
   }
   guysNear(x, y, 40);
@@ -10875,7 +10881,7 @@ function sectionBlast(x, y, power, baseVx) {
 function crashSplash(x, len, vx, vy, size = 1) {
   splash(x, vx || 0, Math.max(vy || 0, 400) * size);
   const dir = Math.sign(vx || 0) || 1, n = Math.max(3, Math.round(len / 13)), R = len * 0.6 + 6;
-  for (let k = -R; k <= R; k += DX) addForce(x + k, -9000 * size * (1 - Math.abs(k) / (R + 6)));
+  for (let k = -R; k <= R; k += DX) water.push(x + k, -9000 * size * (1 - Math.abs(k) / (R + 6)));
   if (SIM_ONLY) return;
   for (let i = 0; i < n; i++) {
     const u = n > 1 ? i / (n - 1) : 0.5, jx = x - dir * len * 0.5 + dir * len * u + armShellRnd(-3, 3);   // (from its tail to its nose)
@@ -10890,9 +10896,9 @@ function splash(x, vx, vy) {
   const sy = surfaceY(x);
   const amt = clamp(Math.hypot(vx, vy) / 700, 0.5, 1.4);
   sound('splash', x, amt);
-  shock(x, sy + 2, 0.6 + 0.3 * amt);
+  water.shock(x, sy + 2, 0.6 + 0.3 * amt);
   // the surface is punched down hard...
-  for (let k = -26; k <= 26; k += DX) addForce(x + k, -14000 * amt * (1 - Math.abs(k) / 28));
+  for (let k = -26; k <= 26; k += DX) water.push(x + k, -14000 * amt * (1 - Math.abs(k) / 28));
   // ...and a jet of water shoots straight up: a solid white spike with a flared foot, which hangs,
   // then breaks up and rains back as droplets (drawn as water, not as a cloud)
   jets.push({ x, v0: (150 + 90 * amt) * armShellRnd(0.9, 1.08), w: 4.5 + 3 * amt, base: 13 + 8 * amt, t: 0, lean: clamp(vx / 3000, -0.1, 0.1), seed: armShellR() * 100, rained: false });
@@ -10968,7 +10974,7 @@ function firePierGun(tw) {
   const sp = MG_SPEED * (0.75 + gun.power * 0.4), spread = armPierRnd(-0.03, 0.03);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spread) * sp, vy: (uy + ux * spread) * sp, owner: tw.player, age: 0 });
   pg.flash = 0.05; pg.fl = side;
-  if (pg.alt) sfxMG(mx);
+  if (pg.alt) sound('mg', mx);
 }
 // drawn on the pier's deck, in front of the harbour: a turntable and pedestal, and on it the cradle with its two
 // barrels, turned with the tower's gun (all in the tower gun's steel greys)
@@ -11218,9 +11224,7 @@ function sinkShip(sh) {
   }
   // back ashore to pick what's left (or that's the end)
   sh.auto = null;
-  const c = crew[sh.id];
-  if (c.mode === 'ship' || seatDriving(sh.id, 'ship')) lostVeh(sh.id, sh.x, 'ship');
-  else if (c.mode === 'dock' && !hasForces(sh.id)) killCaptain(sh.id);
+  emit('sunk', { kind: 'ship', o: sh });                  // (engine stage 3: her wreck is there - the camera, 39-camera)
 }
 
 function wreckBubbles(p, dt) {
@@ -11345,7 +11349,7 @@ function stepPiece(p, dt) {
     if (p.rest > 1.5) p.settled = true;
   }
   // a sinking hull keeps pushing faint rings through the water
-  if (wet > 0.3 && !p.splashed) { p.splashed = true; shock(p.x, WATER_Y + 6, 0.6, true, p.hl * 1.8); }
+  if (wet > 0.3 && !p.splashed) { p.splashed = true; water.shock(p.x, WATER_Y + 6, 0.6, true, p.hl * 1.8); }
   if (wet > 0.6) {
     p.bubbleAcc += (5 + Math.hypot(p.vx, p.vy) * 0.25) * dt;
     while (p.bubbleAcc >= 1) { p.bubbleAcc -= 1; const l = armPieceRnd(-p.hl, p.hl); addBubble(p.x + l * ca2, p.y + l * sa2 - 4, armPieceRnd(-10, 10), -armPieceRnd(20, 50), armPieceRnd(1, 3)); }
@@ -11360,7 +11364,7 @@ function stepPiece(p, dt) {
     p.fire += 18 * dt * fwFlames();
     while (p.fire >= 1) { p.fire -= 1; const l = armPieceRnd(-p.hl, p.hl) * 0.7; spawnFlame(p.x + l * ca2, p.y + l * sa2 - 8, armPieceRnd(-8, 8), -armPieceRnd(25, 55), 1, armPieceRnd(3, 6), 1.8); }
   }
-  if (wet < 0.95) for (const side of [-1, 1]) { const l = side * p.hl; addForce(p.x + l * ca2 + side * 6, COUPLE * 1.5 * (p.vy + p.w * l)); }
+  if (wet < 0.95) for (const side of [-1, 1]) { const l = side * p.hl; water.push(p.x + l * ca2 + side * 6, COUPLE * 1.5 * (p.vy + p.w * l)); }
 }
 
 function stepSinkingShip(sh, dt) {
@@ -11564,7 +11568,7 @@ function stepParticles(dt) {
   for (let i = spray.length - 1; i >= 0; i--) {
     const p = spray[i];
     p.vy += 520 * dt; p.vx += (W * 0.6 - p.vx) * 0.6 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life += dt;
-    if (p.vy > 0 && p.y > wTop && p.y > surfaceY(p.x)) { addForce(p.x, -450 * p.s); if (ptR() < 0.5) spawnFoam(p.x, ptRnd(1, 2)); spray.splice(i, 1); }
+    if (p.vy > 0 && p.y > wTop && p.y > surfaceY(p.x)) { water.push(p.x, -450 * p.s); if (ptR() < 0.5) spawnFoam(p.x, ptRnd(1, 2)); spray.splice(i, 1); }
     else if (p.life > 4) spray.splice(i, 1);
   }
   for (let i = bubbles.length - 1; i >= 0; i--) {
@@ -11619,7 +11623,7 @@ function stepParticles(dt) {
       if (d.vy > 0 && docks.length) { const ht = harbourTop(d.x, y0 - 1); if (d.y >= ht) { d.y = ht - 0.5; d.state = 2; d.deck = true; d.vx = d.vy = 0; d.w = 0; continue; } }
       if (d.vy > 0 && d.y > wTop && d.y > surfaceY(d.x)) {
         d.state = 1; d.vy *= 0.25; d.vx *= 0.35; d.w *= 0.3;     // the water swallows most of the tumble
-        addForce(d.x, -260 * d.sw); spawnFoam(d.x, ptRnd(1, 2.2));
+        water.push(d.x, -260 * d.sw); spawnFoam(d.x, ptRnd(1, 2.2));
         if (ptR() < 0.5) spawnSpray(d.x, d.y - 1, 0, 0.5);
       }
     } else if (d.state === 4) {
@@ -12108,7 +12112,7 @@ function strike(x, y, sh, hit) {
   if (NET.role === 'host') NET.events.push({ e: 'strike', x: +x.toFixed(1), y: +y.toFixed(1), s: sh ? 1 - ships.indexOf(sh) : -1, h: hit || sh ? 1 : 0 });   // (the guest's lists are the other way round)
   storm.bolts.push({ pts, forks, t: 0, x, y, x0: pts[0][0] });
   storm.flash = 1;
-  sfxThunder(x, !!(sh || hit));
+  sound('thunder', x, !!(sh || hit));
   if (sh || hit) {
     if (sh) sh.zap = 0;                               // the lights flicker and die, then come back 3 s later
     spawnSparks(x, y, 26, 220);
@@ -12116,7 +12120,7 @@ function strike(x, y, sh, hit) {
     shakeAt(4, x);
   } else {
     for (let i = 0; i < 14; i++) spawnSpray(x + stormRnd(-6, 6), y - 2, stormRnd(-60, 60), 1.4);
-    addForce(x, -4000);
+    water.push(x, -4000);
   }
   emit('scare', { x, y: y - 80, r: 300, kind: 'birds' });
 }
@@ -12367,7 +12371,7 @@ const stirAt = x => { const c = Math.round(x / STIR_CELL); return c >= 0 && c < 
    runs exactly as the direct calls did. Handlers run by `order` (lowest first; the same order the direct calls had), then by
    when they were registered. sys: the system the handler belongs to (for the perf panel: evStats()). Lazy-safe: the bus is
    made on first use (evBus), so a file before this one may register or emit too.
-   Events: 'blast' {x, y, r, s} (gridExplosion: every shell, bomb, missile, vehicle explosion), 'splash', 'hit', 'sinking',
+   Events: 'blast' {x, y, r, s} (gridExplosion: every shell, bomb, missile, vehicle explosion), 'splash', 'hit', 'sinking', 'sunk',
    'sound', 'scare' {x, y, r, kind: 'fish'|'birds'|'both'} (the fish, 35-particles; the birds, 37-birds) - each described
    where it's emitted (or handled). */
 function evBus() { return evBus.b || (evBus.b = { h: Object.create(null), n: Object.create(null) }); }
@@ -12385,7 +12389,8 @@ function emit(type, d) {
   for (let i = 0; i < L.length; i++) { const h = L[i]; h.n++; h.fn(d); }
   return d;
 }
-// a request to play a sound: 'sound' {id, x, a} - the audio system (51-audio.js) plays it (its SND list: id -> its sfx function)
+// a request to play a sound: 'sound' {id, x, a} - the audio system (51-audio.js) plays it (its SND list: id -> its sfx function,
+// called with x, a: that function's own first two arguments)
 function sound(id, x, a) { emit('sound', { id, x, a }); }
 // counts so far: per type, and per handler (type: [sys, calls]...)
 function evStats() {
@@ -13387,7 +13392,7 @@ function stepBird(b, dt, shelter, gale) {
       b.vy += 300 * dt; b.vx += (windAt(b.y) * 0.3 - b.vx) * 0.5 * dt;
       b.x += b.vx * dt; b.y += b.vy * dt; b.rot += b.spin * dt;
       const sy = surfaceY(b.x);
-      if (b.y > sy) { spawnFoam(b.x, bdRnd(1, 2)); addForce(b.x, -150); addBubble(b.x, sy + 3, 0, -15, 1); b.state = 'sink'; b.vy = Math.min(b.vy, 40); b.vx *= 0.3; }
+      if (b.y > sy) { spawnFoam(b.x, bdRnd(1, 2)); water.push(b.x, -150); addBubble(b.x, sy + 3, 0, -15, 1); b.state = 'sink'; b.vy = Math.min(b.vy, 40); b.vx *= 0.3; }
       return;
     }
     // into the sea: it goes slowly down to the bottom and lies there a while
@@ -13954,6 +13959,13 @@ function smwStep(dt, SPANS) {
 const halfWorldW = z => VIEW_W / (2 * z);
 const smooth01 = m => m * m * (3 - 2 * m);
 const camOverride = [null, null];
+// (engine stage 3) 'sunk' {kind: 'ship'|'sub', o} (36-zz-events.js), at the end of sinkShip / sinkSub, once her wreck is
+// there: whoever was driving her (here or a seat) is ashore watching it; with nothing left, and nobody aboard, it's the end
+on('sunk', e => {
+  const p = e.o.id, k = e.kind, c = crew[p];
+  if (c.mode === k || seatDriving(p, k)) lostVeh(p, e.o.x, k);
+  else if (c.mode === 'dock' && !hasForces(p)) killCaptain(p);
+}, 'camera');
 function camFocus(i) {
   const c = crew[i];
   if (camOverride[i] != null) return Array.isArray(camOverride[i]) ? [camOverride[i][0], camOverride[i][1], 0, 0, null] : [camOverride[i], FOCUS_Y, 0, 0, null];          // testing hook (an x, or [x, y])
@@ -14920,6 +14932,22 @@ void main() {
   float own = min(1.3, DN(i, j));
   o = vec4(clamp((od * f2 * kS - 0.08) * 5.0, 0.0, 1.0), clamp(((odS * f2 + own * behind * 1.6) * kS * 0.8 - 0.08) * 5.0, 0.0, 1.0), 0.0, 1.0);
 }`;
+// MASS (engine stage 8, Oct 30): the smoke's body normals - its smoothed density's slope, each cell from its four neighbours
+// within the box (the box's edge: the cell's own), as 21-smoke.js phase2 worked them out in JS - into the grid the tones read
+// (u_g1: x y z the normal, w the smoothed density itself). Outside the box: (0, 0, 0, density) - no puff reads a normal there
+const SM_MASS_FS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp sampler2D u_hb; uniform ivec4 u_box; uniform float u_k;
+out vec4 o;
+float HB(int i, int j) { return texelFetch(u_hb, ivec2(i, j), 0).r; }
+void main() {
+  int i = int(gl_FragCoord.x), j = int(gl_FragCoord.y);
+  float c = HB(i, j);
+  if (i < u_box.x || j < u_box.y || i > u_box.z || j > u_box.w) { o = vec4(0.0, 0.0, 0.0, c); return; }
+  float l = i > u_box.x ? HB(i - 1, j) : c, r = i < u_box.z ? HB(i + 1, j) : c, u = j > u_box.y ? HB(i, j - 1) : c, d = j < u_box.w ? HB(i, j + 1) : c;
+  float nx = -(r - l) * 0.5 * u_k, ny = (d - u) * 0.5 * u_k, m = sqrt(nx * nx + ny * ny + 1.0);
+  o = vec4(nx / m, ny / m, 1.0 / m, c);
+}`;
 const GSM = { ok: false };
 function glSmokeSetup() {
   const gl = GLR.gl;
@@ -14930,6 +14958,7 @@ function glSmokeSetup() {
   const common = ['u_b', 'u_g1', 'u_g2', 'u_gs', 'u_q0', 'u_q1', 'u_q2', 'u_hp', 'u_hq', 'u_dc', 'u_fl', 'u_nf', 'u_size'];
   GSM.splat = prog(SM_SPLAT_VS, SM_SPLAT_FS, ['u_b', 'u_w', 'u_bt', 'u_size', 'u_tka']);
   GSM.march = prog(SM_QUADU_VS, SM_MARCH_FS, ['u_rect', 'u_size', 'u_dn', 'u_box', 'u_m0', 'u_m1']);
+  GSM.mass = prog(SM_QUADU_VS, SM_MASS_FS, ['u_rect', 'u_size', 'u_hb', 'u_box', 'u_k']);
   GSM.tone = prog(SM_QUAD_VS, SM_TONE_FS, common.concat(['u_rect', 'u_mem', 'u_s2b']));
   GSM.comp = prog(SM_QUAD_VS, SM_COMP_FS, common.concat(['u_rect', 'u_sp', 'u_tone', 'u_bt', 'u_lut', 'u_crease', 'u_thin']));
   GSM.svao = gl.createVertexArray(); gl.bindVertexArray(GSM.svao);
@@ -19638,8 +19667,10 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   // and the billows only shade it within that
   if (!SMN.hb || SMN.hb.length < GN) { SMN.hb = new Float32Array(GN); SMN.tb = new Float32Array(GN); SMN.mx = new Float32Array(GN); SMN.my = new Float32Array(GN); SMN.mz = new Float32Array(GN); }
   const mass = P.smmass ?? 0.62, hb = SMN.hb, tb = SMN.tb, MX = SMN.mx, MY = SMN.my, MZ = SMN.mz;
+  let massK = 0;
   {
     const rb = clamp(Math.round(30 * FXV.SV / FXV.pxX / G), 1, 8), K = 2.4 * rb * Math.min(1, 30 * FXV.SV / FXV.pxX / G / rb);   // (zoomed out, the smoothing stays a cell or more: its slope eased to match the 30 units)
+    massK = K;
     for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) hb[j * gw + i] = Math.min(1, dn[j * gw + i]);
     for (let pass = 0; pass < 2; pass++) {                                   // (a box blur, twice: across, then down)
       for (let j = gy0; j <= gy1; j++) { let acc = 0, c = 0; const row = j * gw;
@@ -19647,7 +19678,8 @@ function drawSmokeNew(pass = 'front', want = () => true) {
       for (let i = gx0; i <= gx1; i++) { let acc = 0;
         for (let j = gy0 - rb; j <= gy1; j++) { const a = j + rb, d = j - rb - 1; if (a <= gy1) acc += tb[a * gw + i]; if (d >= gy0) acc -= tb[d * gw + i]; if (j >= gy0) hb[j * gw + i] = acc / (2 * rb + 1); } }
     }
-    if (mass > 0) for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) {
+    // (engine stage 8, Oct 30: the normals are the GPU's - 40-gl.js SM_MASS_FS, from hb; ?smgpu=0 works them out here as before)
+    if (mass > 0 && !SM_GPU_MASS) for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) {
       const k = j * gw + i, l = i > gx0 ? hb[k - 1] : hb[k], r = i < gx1 ? hb[k + 1] : hb[k], u = j > gy0 ? hb[k - gw] : hb[k], d = j < gy1 ? hb[k + gw] : hb[k];
       const nx = -(r - l) * 0.5 * K, ny = (d - u) * 0.5 * K, m = Math.hypot(nx, ny, 1);
       MX[k] = nx / m; MY[k] = ny / m; MZ[k] = 1 / m;
@@ -19688,7 +19720,7 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   const stepW = G * FXV.pxX / FXV.SV, D0 = 45, kS = stepW / D0, behind = Math.max(0, -lzS), ownF = 30 / stepW, nMarch = clamp(Math.round(420 / stepW), 2, 48), ss = SMN.ss;   // (in world units: a puff's own depth 30, the march 420, at any zoom)
   const tS4 = performance.now();
   buildSmokeLUT(); const FLg = fireLights(), t5 = performance.now();
-  gsmPaint(SMN, { n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, MX, MY, MZ, hb, dn, mass, tkA: tkA0, FL: FLg, nF: FLg.length / 4, mg: [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] });
+  gsmPaint(SMN, { n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, MX, MY, MZ, hb, dn, mass, massK, tkA: tkA0, FL: FLg, nF: FLg.length / 4, mg: [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] });
   smShow(SMN); SMN.last = [bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1];
   { const t6 = performance.now(), ad = (k, v) => { FTV[k] = (FTV[k] || 0) + v; }; ad('smDen', tS1 - t1p); ad('smBlur', tS2 - tS1); ad('smBody', tS3 - tS2); ad('smMarch', tS4 - tS3); ad('smFire', t5 - tS4); ad('smGpu', t6 - t5); }   // (the parts of smB / smT, for the perf work - Oct 29)
   FTV.smG = (FTV.smG || 0) + SMN.tg; FTV.smS = (FTV.smS || 0) + (t1 - t0 - SMN.tg); FTV.smB = (FTV.smB || 0) + (t5 - t1p); FTV.smT = (FTV.smT || 0) + (performance.now() - t5);
@@ -19708,6 +19740,8 @@ function smShow(S_) {
 // ---- the smoke's picture on the GPU (GSM, 40-gl.js): its coarse fields made here as before, its balls, its puffs' tones
 // and its pixels there. SMOKE ON GPU 0 (or a SMOKE VIEW, or no float targets) draws it in JS as before
 const gsmOn = () => !!(VIEW && VIEW.gl && GSM.ok && GSM.ep === GLR.epoch);
+// (engine stage 8, Oct 30: the body's normals made on the GPU from the smoothed density - SM_MASS_FS; ?smgpu=0: in JS, as before)
+const SM_GPU_MASS = !/[?&]smgpu=0/.test(location.search);
 const SM_HP = new Float32Array(47).map((_, d) => fxHash(d * 1.73)), SM_HQ = new Float32Array(47).map((_, d) => fxHash(d * 2.9));   // (a puff's lean: its dome's own - the tile's offset is 0, SMN_TILE_OFS)
 let SM_DC = null, SM_BTD = null;
 function gsmPaint(S_, a) {
@@ -19742,9 +19776,24 @@ function gsmPaint(S_, a) {
   G_.btex = gsmTex(G_.btex, 1024, bRows, BD.subarray(0, bRows * 4096));
   const W1 = G_.w1 && G_.w1.length >= cw ? G_.w1 : (G_.w1 = new Float32Array(cw * 2)); for (let x = 0; x < cw; x++) W1[x] = wrow[x];
   G_.wtex = gsmTex(G_.wtex, cw, 1, W1.subarray(0, cw), 'R32F');
-  const GN = gw * gh, g1 = G_.g1 && G_.g1.length >= GN * 4 ? G_.g1 : (G_.g1 = new Float32Array(GN * 4));
-  for (let k = 0; k < GN; k++) { const o = k * 4; g1[o] = MX[k]; g1[o + 1] = MY[k]; g1[o + 2] = MZ[k]; g1[o + 3] = hb[k]; }
-  G_.g1t = gsmTex(G_.g1t, gw, gh, g1.subarray(0, GN * 4)); G_.dnt = gsmTex(G_.dnt, gw, gh, dn.subarray(0, GN), 'R32F');
+  const GN = gw * gh;
+  if (SM_GPU_MASS) {
+    // (engine stage 8: the smoothed density alone goes up, a quarter of the four channels; the normals made from it on the GPU,
+    // over the whole grid - the box's cells their normals, the rest the density only)
+    G_.hbt = gsmTex(G_.hbt, gw, gh, hb.subarray(0, GN), 'R32F');
+    if (!G_.g1g || G_.g1g.w !== gw || G_.g1g.h !== gh || G_.g1g.ep !== GLR.epoch) { if (G_.g1f && G_.g1g && G_.g1g.ep === GLR.epoch) gl.deleteFramebuffer(G_.g1f); G_.g1g = gsmTex(G_.g1g && G_.g1g.ep === GLR.epoch ? G_.g1g : null, gw, gh, null); G_.g1f = gsmFbo([G_.g1g]); }
+    const [gx0, gy0, gx1, gy1] = mg, mp = GSM.mass;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, G_.g1f); gl.viewport(0, 0, gw, gh); gl.disable(gl.SCISSOR_TEST); gl.disable(gl.BLEND); gl.disable(gl.STENCIL_TEST); gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(mp.p); gl.uniform4f(mp.U.u_rect, 0, 0, gw, gh); gl.uniform2f(mp.U.u_size, gw, gh); gl.uniform1i(mp.U.u_hb, 0);
+    gl.uniform4i(mp.U.u_box, gx0, gy0, gx1, gy1); gl.uniform1f(mp.U.u_k, a.massK);
+    gsmBind(0, G_.hbt); gl.bindVertexArray(GSM.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    G_.g1u = G_.g1g;
+  } else {
+    const g1 = G_.g1 && G_.g1.length >= GN * 4 ? G_.g1 : (G_.g1 = new Float32Array(GN * 4));
+    for (let k = 0; k < GN; k++) { const o = k * 4; g1[o] = MX[k]; g1[o + 1] = MY[k]; g1[o + 2] = MZ[k]; g1[o + 3] = hb[k]; }
+    G_.g1u = G_.g1t = gsmTex(G_.g1t, gw, gh, g1.subarray(0, GN * 4));
+  }
+  G_.dnt = gsmTex(G_.dnt, gw, gh, dn.subarray(0, GN), 'R32F');
   // ---- 0. MARCH: sh and ss for every cell of the box, into the shadow grid (kept between paints, as the JS arrays were)
   if (!G_.g2t || G_.g2t.w !== gw || G_.g2t.h !== gh || G_.g2t.ep !== GLR.epoch) { if (G_.g2f) gl.deleteFramebuffer(G_.g2f); G_.g2t = gsmTex(G_.g2t && G_.g2t.ep === GLR.epoch ? G_.g2t : null, gw, gh, null); G_.g2f = gsmFbo([G_.g2t]); gl.disable(gl.SCISSOR_TEST); gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]); }
   { const [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] = mg, mp = GSM.march;
@@ -19818,7 +19867,7 @@ function gsmPaint(S_, a) {
   };
   const tp = GSM.tone; gl.useProgram(tp.p); setCommon(tp, [MW, rows]);
   gl.uniform4f(tp.U.u_rect, 0, 0, MW, rows); gl.uniform1i(tp.U.u_mem, 5); gl.uniform1i(tp.U.u_s2b, 6);
-  gsmBind(0, G_.btex); gsmBind(3, G_.g1t); gsmBind(4, G_.g2t); gsmBind(5, src); gsmBind(6, G_.s2t);
+  gsmBind(0, G_.btex); gsmBind(3, G_.g1u); gsmBind(4, G_.g2t); gsmBind(5, src); gsmBind(6, G_.s2t);
   gl.bindVertexArray(GSM.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
   G_.cur = 1 - G_.cur;
@@ -19828,7 +19877,7 @@ function gsmPaint(S_, a) {
   const cp = GSM.comp; gl.useProgram(cp.p); setCommon(cp, [cw, h]);
   gl.uniform4f(cp.U.u_rect, bx0, by0, bw, bh); gl.uniform1i(cp.U.u_sp, 5); gl.uniform1i(cp.U.u_tone, 6); gl.uniform1i(cp.U.u_bt, 2); gl.uniform1i(cp.U.u_lut, 7);
   gl.uniform1f(cp.U.u_crease, (P.smcrease ?? 1) > 0.5 ? 1 : 0); gl.uniform1f(cp.U.u_thin, thinOn ? 1 : 0);
-  gsmBind(0, G_.btex); gsmBind(2, GSM.bt); gsmBind(3, G_.g1t); gsmBind(4, G_.g2t); gsmBind(5, G_.sp.t); gsmBind(6, G_.tn); gsmBind(7, G_.lt);
+  gsmBind(0, G_.btex); gsmBind(2, GSM.bt); gsmBind(3, G_.g1u); gsmBind(4, G_.g2t); gsmBind(5, G_.sp.t); gsmBind(6, G_.tn); gsmBind(7, G_.lt);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   // (the quad renderer's state, all of it, to be set again: units, samplers, program, buffers)
   gl.enable(gl.BLEND); gl.bindVertexArray(GLR.vao);
@@ -25590,7 +25639,7 @@ function stepAnchor(v, a, dt) {
   }
   // into the water: a little splash; going down: a trail of bubbles
   const wet = E0.y > ancSurf(E0.x);
-  if (wet && !a.wet && !SIM_ONLY) { for (let k = 0; k < 4 + S.size * 3; k++) spawnSpray(E0.x + ancRnd(-3, 3), ancSurf(E0.x) - 1, ancRnd(-40, 40), 0.35 + S.size * 0.12); sfxAnchorThunk(E0.x, S.size); }
+  if (wet && !a.wet && !SIM_ONLY) { for (let k = 0; k < 4 + S.size * 3; k++) spawnSpray(E0.x + ancRnd(-3, 3), ancSurf(E0.x) - 1, ancRnd(-40, 40), 0.35 + S.size * 0.12); sound('anchorThunk', E0.x, S.size); }
   a.wet = wet;
   if (wet && !a.bed && !SIM_ONLY && ancR() < dt * 6) addBubble(E0.x + ancRnd(-2, 2), E0.y - 2, ancRnd(-4, 4), -ancRnd(12, 26), ancRnd(0.6, 1.3));
   a.x = E0.x; a.y = E0.y;
@@ -29066,9 +29115,9 @@ const ancKindOf = v => sailboats.includes(v) ? 'yacht' : v.kind;
 function anchorToggle(v) {
   if (!v || v.state !== 'sail') return;
   const a = ancOf(v, ancKindOf(v));
-  if (a.parted) { sfxEmpty(v.x); return; }
+  if (a.parted) { sound('empty', v.x); return; }
   if (a.st === 'stowed' || a.st === 'raise') { ancDrop(v, a); a.byPl = true; } else ancRaise(a);
-  sfxAnchorWinch(v.x, ANC_KIND[a.k].size);
+  sound('anchorWinch', v.x, ANC_KIND[a.k].size);
 }
 // the winch: a rattle of chain (rope for the small ones)
 function sfxAnchorWinch(x, size) {
@@ -29177,7 +29226,7 @@ function civTakeAt(p, x, y) {
     if (c.mode !== 'civ' && c.mode !== 'dock') { c.mode = 'dock'; c.watch = null; c.look = null; }
     civUI[p] = true;
     boardCiv(p, v);
-    sfxClick(gunCtl[p]); cutTo(p);
+    sound('click', gunCtl[p]); cutTo(p);
     return true;
   }
   // your own army's
@@ -30950,10 +30999,10 @@ const stackUnder = (cr, x) => { let best = null, bd = CONT_W * 0.6; for (const s
 // the magnet takes the top box of a stack / lets go (onto a stack under it, or to fall)
 function craneGrab(cr, s) {
   const k = s.stack.pop(); if (!k) return false;
-  k.where = 'held'; cr.load = k; sfxClink(telegraphs[0]); return true;
+  k.where = 'held'; cr.load = k; sound('clink', telegraphs[0]); return true;
 }
 function craneRelease(cr) {
-  if (cr.obj) { magDrop(cr.obj); cr.obj = null; sfxClink(telegraphs[0]); return; }   // (a tank or a plane: let go where it hangs)
+  if (cr.obj) { magDrop(cr.obj); cr.obj = null; sound('clink', telegraphs[0]); return; }   // (a tank or a plane: let go where it hangs)
   const k = cr.load; if (!k) return;
   cr.load = null;
   const s = stackUnder(cr, cr.tx);
@@ -30963,7 +31012,7 @@ function craneRelease(cr) {
 function civCraneAct(p) { const cr = crew[p].civ; if (cr && cranes.includes(cr)) craneMagnet(cr); }
 // the magnet button: down to what's under it - a box (or the stack, the deck, the water) - then: empty, it takes the box
 // there; loaded, it sets its box down there and lets go; and back up either way
-function craneMagnet(cr) { if (!cr.auto) { cr.auto = { phase: 'down' }; sfxClick && sfxClick(gunCtl[cr.driven != null ? cr.driven : 0]); } }
+function craneMagnet(cr) { if (!cr.auto) { cr.auto = { phase: 'down' }; sound('click', gunCtl[cr.driven != null ? cr.driven : 0]); } }
 function craneAutoStep(cr, dn) {
   const A = cr.auto;
   if (A.phase === 'down') {
@@ -31750,7 +31799,7 @@ function fireworkLaunch(c) {
   const lean = [-1, 0, 1][Math.floor(fwksR() * 3)] * fwRnd(0.1, 0.24), sp = fwRnd(220, 250);
   while (fireworks.length >= FW_MAX) fireworks.shift();         // (the oldest goes)
   fireworks.push({ st: 'up', x, y, vx: Math.sin(lean) * sp, vy: -Math.cos(lean) * sp, t: 0, fuse: fwRnd(0.9, 1.05), kind: FW_KINDS[ki], col: FW_COLS[ci], ci, seed: fwksR() * 1000, sparkT: 0 });
-  sfxFwLaunch(x, fireworks[fireworks.length - 1].fuse);
+  sound('fwLaunch', x, fireworks[fireworks.length - 1].fuse);
   return true;
 }
 // it bursts: its stars laid out, a little smoke left at the centre, the birds near it scared off, its bang to come
@@ -31786,7 +31835,7 @@ function stepFireworks(dt) {
       if (f.t >= f.fuse) fwBurst(f);
       continue;
     }
-    if (!f.bang && f.t >= f.bangT) { f.bang = true; sfxFwBang(f.x, f.kind); }
+    if (!f.bang && f.t >= f.bangT) { f.bang = true; sound('fwBang', f.x, f.kind); }
     if (f.t > f.life) fireworks.splice(i, 1);
   }
   for (let i = fwBits.length - 1; i >= 0; i--) {
@@ -33663,8 +33712,8 @@ function stepHeliSink(h, dt) {
 function tankScreen(t) {
   if (!t || t.state !== 'alive') return;
   const S = smokeSupply(t, SMOKE_SHIP_S);
-  if (!S.on && S.left <= 0.05) { sfxEmpty(t.x); return; }
-  if (smokeToggle(t, SMOKE_SHIP_S)) sfxSmoke(t.x); else sfxClick(null);
+  if (!S.on && S.left <= 0.05) { sound('empty', t.x); return; }
+  if (smokeToggle(t, SMOKE_SHIP_S)) sound('smoke', t.x); else sound('click', null);
 }
 function stepTankSmoke(t, dt) {
   if (!smokeRun(t, dt)) return;
@@ -34326,24 +34375,24 @@ const tankTopH = () => -TANK_TOPY - 0.3;
 function ropeAnchor(h) { return heliPoint(h, 0, heliSkid() * 0.5); }
 function heliMagnet(h) {
   if (!h || (h.state !== 'fly' && h.state !== 'landed')) return;
-  if (h.magBroken) { sfxEmpty(h.x); return; }                    // (its rope was shot through: fixed at home)
+  if (h.magBroken) { sound('empty', h.x); return; }                    // (its rope was shot through: fixed at home)
   const R = h.rope;
   if (!R || R.mode === 'in') {
     if (!R) { const [ax, ay] = ropeAnchor(h); h.rope = { len: 0, mode: 'out', hold: -1, pull: 0, air: false, dt: 1 / 60, n: Array.from({ length: ROPE_N + 1 }, () => [ax, ay, ax, ay]) }; }
     else R.mode = 'out';
   } else { ropeRelease(h); R.mode = 'in'; }
-  sfxClink(telegraphs[h.id]);
+  sound('clink', telegraphs[h.id]);
 }
 // let the tank go: it keeps the magnet's way and speed, and lands unhurt (arcade)
 function ropeRelease(h) {
   const R = h.rope; if (!R) return;
-  if (R.obj) { magDrop(R.obj); R.obj = null; R.air = false; sfxClink(telegraphs[h.id]); return; }
+  if (R.obj) { magDrop(R.obj); R.obj = null; R.air = false; sound('clink', telegraphs[h.id]); return; }
   if (R.hold < 0) return;
   const t = tanks[R.hold], e = R.n[ROPE_N];
   if (t && t.carry === h.id) {
     t.carry = null; t.dropT = 3; t.x = clamp(t.x, 40, WORLD_W - 40);
     t.vy = clamp((e[1] - e[3]) / R.dt, -60, 260); t.vx = clamp((e[0] - e[2]) / R.dt, -TANK_V, TANK_V);
-    sfxClink(telegraphs[h.id]);
+    sound('clink', telegraphs[h.id]);
   }
   R.hold = -1; R.air = false;
 }
@@ -34695,11 +34744,11 @@ const CMAG_L = 120;
 const civTag = h => -10 - civHelis.indexOf(h);                    // (what a civilian helicopter's magnet marks its load with)
 function civMagnet(h) {
   if (!h || (h.state !== 'fly' && h.state !== 'landed')) return;
-  if (h.magBroken) { sfxEmpty(h.x); return; }                    // (its cable shot through: mended on its own pad)
+  if (h.magBroken) { sound('empty', h.x); return; }                    // (its cable shot through: mended on its own pad)
   const M = h.mag || (h.mag = { len: 0, out: false, obj: null, sx: 0, sv: 0 });
   if (!M.out) M.out = true;
   else { if (M.obj) { magDrop(M.obj); M.obj = null; } M.out = false; }
-  sfxClink(telegraphs[h.driven != null ? h.driven : 0]);
+  sound('clink', telegraphs[h.driven != null ? h.driven : 0]);
 }
 function stepCivMagnets(dt) {
   for (const h of civHelis) {
@@ -35505,7 +35554,7 @@ function minisubFree(s) {
   const p = s.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === s;
   s.state = 'out'; s.cable = 0; s.vx = Math.sign(s.x - s.ship.x || 1) * 45; s.vy = 6; s.turn = null; s.splashed = true; s.armed = true; s.clearT = 4;   // (away from her hull: a moment to get clear of it)
   s.ai = mine ? null : { tx: clamp(s.x + vehMsubRnd(-900, 900), TR_A, TR_B), t: vehMsubRnd(40, 80) };
-  sfxLatch(s.x);                                                  // (the hook lets go)
+  sound('latch', s.x);                                                  // (the hook lets go)
   if (!SIM_ONLY) for (let k = 0; k < 16; k++) addBubble(s.x + vehMsubRnd(-8, 8), s.y + vehMsubRnd(-5, 5), vehMsubRnd(-15, 15), -vehMsubRnd(15, 40), vehMsubRnd(0.8, 2));
 }
 // where her sub's PING points: her, afloat; once she's sunk, her wreck on the bottom (user Oct 27, 3)
@@ -35519,9 +35568,9 @@ const hungAt = (c, drop) => { const [hx, hy] = hookAt(c); return [hx, hy + (msAr
 // the button (driving her): her sub is let down on its wire into the water, and you're in it
 function minisubLaunch(p) {
   const c = p != null && crew[p].civ && crew[p].civ.msub ? crew[p].civ : null, s = c && c.msub;
-  if (!s || c.state !== 'sail' || s.state !== 'docked') { sfxEmpty(c ? c.x : 0); return false; }
+  if (!s || c.state !== 'sail' || s.state !== 'docked') { sound('empty', c ? c.x : 0); return false; }
   s.state = 'lower'; s.cable = 0; s.ai = null;
-  sfxClink(telegraphs[p]);
+  sound('clink', telegraphs[p]);
   boardCiv(p, s);
   msHold[p] = 0;
   return true;
@@ -35561,8 +35610,8 @@ function stepMinisub(s, dt) {
     const [x, y] = hungAt(c, s.cable); s.x = x; s.y = y; s.facing = c.face;
     // (user Oct 27, 12:21: "the sound when a sub gets detached should be a 'clink' and then a nice SFX when it hits the
     // water, more like a 'splash'") just over the water the hook lets go - a clink - and it drops in with a splash (below)
-    if (s.state === 'lower' && y > surfaceY(x) - 5) { s.state = 'out'; s.vx = 0; s.vy = 30; s.splashed = false; s.armed = false; s.sinkT = 0; sfxLatch(x); }
-    if (s.state === 'raise' && s.cable <= 0) { s.state = 'docked'; s.wait = vehMsubRnd(40, 120); s.ai = null; sfxLatch(s.x); if (mine) boardCiv(p, c); }
+    if (s.state === 'lower' && y > surfaceY(x) - 5) { s.state = 'out'; s.vx = 0; s.vy = 30; s.splashed = false; s.armed = false; s.sinkT = 0; sound('latch', x); }
+    if (s.state === 'raise' && s.cable <= 0) { s.state = 'docked'; s.wait = vehMsubRnd(40, 120); s.ai = null; sound('latch', s.x); if (mine) boardCiv(p, c); }
     return;
   }
   // out in the water: yours on the lever and up / down; or exploring by itself
@@ -35603,7 +35652,7 @@ function stepMinisub(s, dt) {
   // up under her crane, at the surface: hooked on and wound back aboard (you're on her bridge again)
   const [hx] = rsAfloat(c) ? hookAt(c) : [Infinity];               // (only to her while she's afloat)
   if (s.armed !== false && Math.abs(s.x - hx) < 28 && s.y < surfaceY(s.x) + 26 && (mine ? s.vy <= 5 : s.ai && s.ai.t <= 0)) {
-    s.state = 'raise'; s.cable = Math.max(0, s.y - hungAt(c)[1]); s.vx = s.vy = 0; s.turn = null; sfxLatch(s.x);
+    s.state = 'raise'; s.cable = Math.max(0, s.y - hungAt(c)[1]); s.vx = s.vy = 0; s.turn = null; sound('latch', s.x);
     return;
   }
   if (s.clearT > 0) s.clearT -= dt;
@@ -35614,7 +35663,7 @@ function stepMinisub(s, dt) {
     if (Math.hypot(s.x - cx, s.y - cy) < 24) {
       w.gold = false; treasures[p]++;
       for (let k = 0; k < 30; k++) addBubble(cx + vehMsubRnd(-8, 8), cy + vehMsubRnd(-6, 2), vehMsubRnd(-20, 20), -vehMsubRnd(20, 60), vehMsubRnd(0.8, 2.2));
-      spawnSparks(cx, cy, 24, 120); sfxClink(telegraphs[p]);
+      spawnSparks(cx, cy, 24, 120); sound('clink', telegraphs[p]);
     }
   }
   // shells, missiles, bombs reaching it under water: crushed (torpedoes, depth charges, mines and rounds: their own steps
@@ -35682,7 +35731,7 @@ function msCrushed(s) {
 // (user Oct 27: "The rest, when destroyed, is never spawned again"); one you were in is still in view (civAlive)
 function minisubLost(s) {
   if (s.state === 'wreck' || s.state === 'lost') return;
-  underwaterBlast(s.x, s.y, 0.8); sfxCrush(s.x);
+  underwaterBlast(s.x, s.y, 0.8); sound('crush', s.x);
   for (let k = 0; k < 30; k++) addBubble(s.x + vehMsubRnd(-10, 10), s.y + vehMsubRnd(-8, 8), vehMsubRnd(-30, 30), -vehMsubRnd(20, 70), vehMsubRnd(1, 2.6));
   s.state = 'wreck'; s.ai = null; s.turn = null; s.vx *= 0.3; s.vy = 10; s.wa = clamp(s.vy / MS_VY, -1, 1) * 0.15 * s.facing; s.rest = false;
   civFollowDown(s);
@@ -35896,13 +35945,13 @@ function drawMinisub(s) {
 const msPings = [];
 function minisubPing(p) {
   const s = p != null && crew[p].mode === 'civ' ? crew[p].civ : null;
-  if (!s || !minisubs.includes(s) || s.state !== 'out') { sfxEmpty(s ? s.x : 0); return; }
+  if (!s || !minisubs.includes(s) || s.state !== 'out') { sound('empty', s ? s.x : 0); return; }
   if (s.pingT > 0) return;                                          // (one at a time: it has to run out first)
   const H = msHomeAt(s); if (!H) return;
   s.pingT = 1.2;
   if (msPings.length > 8) msPings.shift();
   msPings.push({ x: s.x, y: s.y, ang: Math.atan2(H[1] - s.y, H[0] - s.x), r: 6, life: 0, max: 2.6, seed: vehMsubR() * 100 });
-  sfxPing(s.x);
+  sound('ping', s.x);
 }
 function stepPings(dt) {
   for (const s of minisubs) if (s.pingT > 0) s.pingT -= dt;
@@ -35946,9 +35995,9 @@ function msSplash(s) {
     for (let i = 0; i < 16; i++) spawnSpray(x + vehMsubRnd(-6, 6), sy - 1, vehMsubRnd(-60, 60), vehMsubRnd(0.3, 0.8));
     for (let i = 0; i < 5; i++) spawnFoam(x + vehMsubRnd(-10, 10), vehMsubRnd(1.4, 2.6));
     for (let i = 0; i < 14; i++) addBubble(x + vehMsubRnd(-6, 6), sy + vehMsubRnd(3, 16), vehMsubRnd(-12, 12), -vehMsubRnd(10, 30), vehMsubRnd(0.6, 1.8));
-    for (let k = -10; k <= 10; k += DX) addForce(x + k, -2600 * (1 - Math.abs(k) / 12));
+    for (let k = -10; k <= 10; k += DX) water.push(x + k, -2600 * (1 - Math.abs(k) / 12));
   }
-  sfxSubSplash(x);
+  sound('subSplash', x);
 }
 function sfxSubSplash(x) {
   if (!SFX.ctx) return;
@@ -36920,7 +36969,7 @@ function newStack(R) {
 const axisOf = a => [Math.sin(a), -Math.cos(a)];
 function shuttleLaunch(v) {
   if (!v || v.state !== 'pad') return false;
-  v.state = 'count'; v.t = 0; sfxClick(gunCtl[v.driven != null ? v.driven : 0]);
+  v.state = 'count'; v.t = 0; sound('click', gunCtl[v.driven != null ? v.driven : 0]);
   return true;
 }
 // (the engines' roar: one steady sound from ignition to cut-off, user Oct 27 - shuttleRoar, set each frame in 51-audio)
@@ -37068,8 +37117,8 @@ function toOrbit(v) {
 const BAY_OPEN = 1.6, BAY_RISE = 2.6, BAY_UNF = 1.8, BAY_UP = 18;   // (seconds; how far it rises, world units)
 const bayReady = v => !!v && v.state === 'fly' && v.sat && !v.bayOp && v.y < ATMO_TOP;
 function shuttleBay(v) {
-  if (!bayReady(v)) { if (v) sfxEmpty(v.x); return false; }
-  v.bayOp = { st: 'open', t: 0, o: null }; sfxBayDoors(v.x);
+  if (!bayReady(v)) { if (v) sound('empty', v.x); return false; }
+  v.bayOp = { st: 'open', t: 0, o: null }; sound('bayDoors', v.x);
   return true;
 }
 // the bay's middle on top of the orbiter, in the world, `up` over its rim (the drawing's rows: the bay x 38..110 of the
@@ -37107,7 +37156,7 @@ function stepBay(v, dt) {
     }
   } else {
     v.bay = Math.max(0, 1 - B.t / BAY_OPEN);
-    if (B.t >= BAY_OPEN) { v.bay = 0; v.bayOp = null; sfxBayDoors(v.x); }
+    if (B.t >= BAY_OPEN) { v.bay = 0; v.bayOp = null; sound('bayDoors', v.x); }
   }
 }
 // the doors' motors and latches: a whirring hum with a clunk
@@ -39423,11 +39472,11 @@ function stepFlight(f, dt) {
 const CESSNA_SMOKE_S = 10, CESSNA_SMOKE_COLS = Object.keys(SMOKE_COLS);
 function cessnaSmoke(f) {
   const S = smokeSupply(f, CESSNA_SMOKE_S);
-  if (!S.on && S.left <= 0.05) { sfxEmpty(f.x); return; }
+  if (!S.on && S.left <= 0.05) { sound('empty', f.x); return; }
   if (smokeToggle(f, CESSNA_SMOKE_S)) {
     const L = CESSNA_SMOKE_COLS.filter(c => c !== S.col);           // (a different one from the last)
-    S.col = L[Math.floor(trR() * L.length)]; f._smkCh = { last: null }; sfxSmoke(f.x);
-  } else { f._smkCh = null; sfxClick(null); }
+    S.col = L[Math.floor(trR() * L.length)]; f._smkCh = { last: null }; sound('smoke', f.x);
+  } else { f._smkCh = null; sound('click', null); }
 }
 function cessnaSmokeStep(f, dt) {
   const S = f.smk, p = f.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === f;
@@ -41313,7 +41362,7 @@ function tankMG(t) {
   const sp = MG_SPEED * (0.75 + g.power * 0.4), spr = rnd(-0.025, 0.025);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spr) * sp + t.vx, vy: (uy + ux * spr) * sp, owner: t.id, age: 0 });
   flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
-  sfxMG(mx);
+  sound('mg', mx);
 }
 // damage: a missile or bomb close is a heavy blow, a round a scratch; at none it blows up
 function tankHurt(t, amt, x, y, by) {
@@ -41410,7 +41459,7 @@ function stepHeli(h, dt) {
   if (h.state === 'landed') {
     h.vx = 0; h.vy = 0;
     // lift off: up, with the rotor going
-    if (stick < -0.2 && h.spin > 0.8) { h.state = 'fly'; h.vy = -20; h.deck = null; h._rv = 0; sfxClink(telegraphs[p]); }
+    if (stick < -0.2 && h.spin > 0.8) { h.state = 'fly'; h.vy = -20; h.deck = null; h._rv = 0; sound('clink', telegraphs[p]); }
     else if (h.deck) {
       // down on a ship: it goes with her, sat on her top; she gone from under it, it's flying again (and falls if nobody lifts it)
       const c = h.deck; h.x += c.dx || 0; const d = shipTopAt(h.x, h.y + heliSkid() - 10);
@@ -41429,7 +41478,7 @@ function stepHeli(h, dt) {
       else h.y = landBelowIn(h.x, h.y - 4) - heliSkid();
       h.tilt += (sl - h.tilt) * Math.min(1, dt * 6);
     }
-    if (onOwnGround(p, h.x)) { h.fixT += dt; if (h.fixT > 1.4) { h.fixT = 0; if (h.hp < HELI_HP) h.hp = Math.min(HELI_HP, h.hp + 1); else if (h.magBroken) { h.magBroken = false; sfxClink(telegraphs[p]); } else if (h.rockets < HELI_ROCKETS) h.rockets++; } } else h.fixT = 0;
+    if (onOwnGround(p, h.x)) { h.fixT += dt; if (h.fixT > 1.4) { h.fixT = 0; if (h.hp < HELI_HP) h.hp = Math.min(HELI_HP, h.hp + 1); else if (h.magBroken) { h.magBroken = false; sound('clink', telegraphs[p]); } else if (h.rockets < HELI_ROCKETS) h.rockets++; } } else h.fixT = 0;
     if (h.hp <= HELI_HP - 1) heliSmoke(h, dt);
     if (h.spin > 0.5) rotorWash(h, dt);
     return;
@@ -41452,7 +41501,7 @@ function stepHeli(h, dt) {
     // (in low through its own hangar's door: home - since Oct 28, the hangar. User Oct 27 night: "A helicopter going home
     // off its end drops its load on the mountain": with something on its magnet it holds at the door instead, its load
     // still on; let go of it, it goes home)
-    if (heliLoad(h)) { h.x = landHomeX(h.id) + homeOut(h.id) * 3; h.vx = 0; h.doorT = time; if (!(h.edgeT > time)) { h.edgeT = time + 1; sfxEmpty(h.x); } }
+    if (heliLoad(h)) { h.x = landHomeX(h.id) + homeOut(h.id) * 3; h.vx = 0; h.doorT = time; if (!(h.edgeT > time)) { h.edgeT = time + 1; sound('empty', h.x); } }
     else { landGoHome(h.id, 'heli'); return; }
   }
   // (the ceiling: the climb fades out over the last 80 units)
@@ -41539,7 +41588,7 @@ function rotorWashSea(h, dt) {
   if (sp > 0.3) gridImpulse(h.x, h.y + 18, h.vx * 0.3, 240 * sp, 2.2);
   if (k < 0.03) return;
   gridImpulse(h.x - 34, sy - 10, -230 * k, -12, 2); gridImpulse(h.x + 34, sy - 10, 230 * k, -12, 2);
-  for (let o = -24; o <= 24; o += DX) addForce(h.x + o, -110 * k * (1 - Math.abs(o) / 28));     // (the dent under it)
+  for (let o = -24; o <= 24; o += DX) water.push(h.x + o, -110 * k * (1 - Math.abs(o) / 28));     // (the dent under it)
   if (SIM_ONLY) return;
   h.washT = (h.washT || 0) + dt * 90 * k;
   while (h.washT >= 1) {
@@ -41654,11 +41703,11 @@ function heliMG(h) {
   const ux = Math.cos(el) * h.facing, uy = -Math.sin(el), sp = MG_SPEED * (0.8 + g.power * 0.35), spr = rnd(-0.02, 0.02);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spr) * sp + h.vx, vy: (uy + ux * spr) * sp + h.vy, owner: h.id, age: 0 });
   flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
-  sfxMG(mx);
+  sound('mg', mx);
 }
 function heliRocket(h) {
-  if (!h || h.state !== 'fly' || h.turn) { if (h) sfxEmpty(h.x); return; }
-  if (h.rockets <= 0 || h.rk > 0) { sfxEmpty(h.x); return; }
+  if (!h || h.state !== 'fly' || h.turn) { if (h) sound('empty', h.x); return; }
+  if (h.rockets <= 0 || h.rk > 0) { sound('empty', h.x); return; }
   h.rockets--; h.rk = HELI_RELOAD;
   // (user Oct 25: as the plane's - it unclips from the pod under the stub wing, drops a moment, then its motor lights
   // and it goes off along the nose)
@@ -41666,7 +41715,7 @@ function heliRocket(h) {
   const [cx, cy] = heliPoint(h, heliHalf() * 0.04 + side * 3, 8);
   const ux = Math.cos(h.tilt) * h.facing, uy = Math.sin(h.tilt) * h.facing;
   shells.push({ x: cx, y: cy, vx: h.vx, vy: h.vy + 15, ux, uy, owner: h.id, from: 'rocket', burn: ROCKET_BURN, drop: ROCKET_DROP, age: 0, trail: 0, under: false, ut: 0 });
-  sfxRocketRelease(cx);
+  sound('rocketRelease', cx);
 }
 function heliHurt(h, amt, x, y) {
   if (!h || (h.state !== 'fly' && h.state !== 'landed') || netGuestHold()) return;
@@ -42742,7 +42791,7 @@ function spawnWave(n) {
   }
   for (const u of story.raiders) if (!u.B) u.B = raidBrain(u);
   story.banner = { text: 'WAVE ' + (n + 1), sub: n === STORY_WAVES.length - 1 ? 'THE LAST WAVE' : '', t: 0 };
-  sfxSiren();
+  sound('siren');
 }
 function stepStory(dt) {
   if (!STORY || ui.title || ui.winner != null) return;
@@ -43214,8 +43263,16 @@ function sfxCrash(x, amt) {
   noiseShot(out, t, 0.6, 'bandpass', 1600, 900, 6, 0.4);
   thump(out, t, 60, 28, 0.9, 0.9);
 }
-// (engine stage 3) the world's play requests: sound(id, x, a) -> 'sound' (36-zz-events.js), played here
-const SND = { explosion: sfxExplosion, impact: sfxImpact, splash: sfxSplash, crash: sfxCrash };
+// (engine stage 3) the world's play requests: sound(id, x, a) -> 'sound' (36-zz-events.js), played here. x, a: the sound's
+// own two arguments, whatever they are (mostly where, and how loud; for the UI's, a player or a pad); the sounds made in
+// other files (the plane's, the fireworks', the research ship's...) are listed here too, so every request comes this way
+const SND = { explosion: sfxExplosion, impact: sfxImpact, splash: sfxSplash, crash: sfxCrash,
+  anchorThunk: sfxAnchorThunk, anchorWinch: sfxAnchorWinch, bayDoors: sfxBayDoors, bombDrop: sfxBombDrop, cannon: sfxCannon,
+  click: sfxClick, clink: sfxClink, crush: sfxCrush, door: sfxDoor, empty: sfxEmpty, engineDie: sfxEngineDie,
+  fwBang: sfxFwBang, fwLaunch: sfxFwLaunch, iceCrack: sfxIceCrack, latch: sfxLatch, marker: sfxMarker, mg: sfxMG,
+  missile: sfxMissile, newRound: sfxNewRound, ping: sfxPing, planeIn: sfxPlaneIn, restart: sfxRestart,
+  rocketRelease: sfxRocketRelease, siren: sfxSiren, smoke: sfxSmoke, sputter: sfxSputter, subPlanes: sfxSubPlanes,
+  subSplash: sfxSubSplash, thunder: sfxThunder, underAttack: sfxUnderAttack, whiz: sfxWhiz, whoosh: sfxWhoosh };
 on('sound', e => SND[e.id](e.x, e.a), 'audio');
 // UI sounds, panned to the player's side of the screen
 function uiOut(cx, gain) {
