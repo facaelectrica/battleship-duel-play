@@ -3043,8 +3043,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 340;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 11:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 341;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 11:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6589,13 +6589,14 @@ function hullBreak(sh) {
   if (h.reduce((a, b) => a + b, 0) > MAX_HITS) { let w = 0; for (let i = 1; i < SECTIONS; i++) if (h[i] > h[w]) w = i; return clamp(w === 0 ? 1 : w, 1, SECTIONS - 1); }
   return 0;
 }
-// (engine stage 3) a shell's or a round's hit, 'hit' {kind: 'ship', o, sec, amt, x, y, vx, vy, shell} (36-zz-events.js): the
-// section damaged; a shell also knocks her about
+// (engine stage 3) a hit from outside - a shell, a round, a torpedo, a depth charge, a mine, lightning, a crashing plane, a
+// sub's ram: 'hit' {kind: 'ship', o, sec, amt, x, y, dent, vx, vy, shell} (36-zz-events.js): the section damaged; a shell
+// also knocks her about
 on('hit', e => {
   if (e.kind !== 'ship') return;
   const sh = e.o;
-  if (!e.shell) { damageSection(sh, e.sec, e.amt); return; }
-  damageSection(sh, e.sec, e.amt, e.x, e.y);
+  damageSection(sh, e.sec, e.amt, e.x, e.y, e.dent);
+  if (!e.shell) return;
   sh.vx += e.vx * 0.02;
   sh.w += (e.x - sh.x) * 0.0009 * Math.sign(e.vy || 1);
   sh.vy += 6;
@@ -7108,12 +7109,13 @@ function rebuildSubArt(sb) {
   };
   sb.art = sb.scorch.length ? { I: make(base.I), D: make(base.D) } : null;
 }
-// (engine stage 3) a shell's or a round's hit, 'hit' {kind: 'sub', o, sec, x, y, chip, note} (36-zz-events.js): a shell holes her;
-// rounds chip at her hull (chip each, twenty make a hole; note: the alarm on her player's screen)
+// (engine stage 3) a hit from outside - a shell, a torpedo, a depth charge, a mine, lightning, a crashing plane, a wreck she
+// runs into (ram) - 'hit' {kind: 'sub', o, sec, x, y, ram, chip, note} (36-zz-events.js): it holes her; rounds chip at her
+// hull (chip each, twenty make a hole; note: the alarm on her player's screen)
 on('hit', e => {
   if (e.kind !== 'sub') return;
   const sb = e.o;
-  if (!e.chip) { hitSub(sb, e.sec, e.x, e.y); return; }
+  if (!e.chip) { hitSub(sb, e.sec, e.x, e.y, e.ram); return; }
   if (e.note) noteHit(sb.id, 'sub');
   sb.chip = (sb.chip || 0) + e.chip; if (sb.chip >= 1) { sb.chip = 0; hitSub(sb, e.sec, e.x, e.y); }
 }, 'subs');
@@ -7171,7 +7173,7 @@ function subRam(sb, dt) {
     const cx = clamp((sb.x + sh.x) / 2 + (nearSail ? 0 : 0), Math.max(sb.x - SUB_L / 2, sh.x - SHIP_L / 2) + 6, Math.min(sb.x + SUB_L / 2, sh.x + SHIP_L / 2) - 6), cy = keel;
     // the ship's section over the impact
     const col = sh.facing < 0 ? (cx - sh.x) / SHIP_K + SHIP_PIVOT_X : SHIP_PIVOT_X - (cx - sh.x) / SHIP_K;
-    damageSection(sh, sectionOfCol(clamp(col, 0, SHIP_SRC_W - 1)), 1, cx, cy - 4);
+    emit('hit', { kind: 'ship', o: sh, sec: sectionOfCol(clamp(col, 0, SHIP_SRC_W - 1)), amt: 1, x: cx, y: cy - 4 });
     sh.vy -= 10 + speed * 0.4; sh.w += Math.sign(cx - sh.x || 1) * 0.04;
     hitSub(sb, clamp(Math.floor((cx - (sb.x - SUB_L / 2)) / SUB_L * SUB_SECTIONS), 0, SUB_SECTIONS - 1), cx, cy + 2, true);
     // steel on steel under the water: a grinding crash, sparks, a burst of bubbles and a pressure wave
@@ -7670,7 +7672,7 @@ function subVsWrecks(sb, dt) {
     if (speed > hard && !((sb.bumpT || 0) > 0)) {
       sb.bumpT = 1.4;
       const u = clamp((cx - (sb.x - SUB_L / 2)) / SUB_L, 0, 0.999);
-      hitSub(sb, Math.floor(u * SUB_SECTIONS), cx, cy, true);
+      emit('hit', { kind: 'sub', o: sb, sec: Math.floor(u * SUB_SECTIONS), x: cx, y: cy, ram: true });
       crashFx(cx, cy, speed);
     }
   }
@@ -7981,7 +7983,7 @@ function stepTorps(dt) {
       // its warhead hasn't gone off: sinking onto an enemy sub or a wreck, it does (user Oct 24)
       {
         let gone = false;
-        for (const sb of subs) { if (sb.id === tp.owner) continue; const sec = subHitTest(sb, tp.x, tp.y); if (sec >= 0) { hitSub(sb, sec, tp.x, tp.y); gone = true; break; } }
+        for (const sb of subs) { if (sb.id === tp.owner) continue; const sec = subHitTest(sb, tp.x, tp.y); if (sec >= 0) { emit('hit', { kind: 'sub', o: sb, sec: sec, x: tp.x, y: tp.y }); gone = true; break; } }
         if (!gone) { const w = wreckAt(tp.x, tp.y); if (w) { blowWreck(w[0], w[1], tp.x, tp.y, 1, 0); gone = true; } }
         if (!gone) { const ms = msHitAt(tp.x, tp.y, 2); if (ms) { minisubLost(ms); gone = true; } }   // (the research sub too, user Oct 27)
         if (gone) { torps.splice(i, 1); tp.dead = true; continue; }
@@ -8030,7 +8032,7 @@ function stepTorps(dt) {
     const end = hit || (tp.up && tp.y < sy + 1) || tp.y > seabedY(tp.x) - 2 || inQuay(tp.x, tp.y) || tp.x < 20 || tp.x > WORLD_W - 20;
     if (!end) continue;
     torps.splice(i, 1); tp.dead = true;
-    if (hit && hit[0] === 'sub') { hitSub(hit[1], hit[2], tp.x, tp.y); continue; }
+    if (hit && hit[0] === 'sub') { emit('hit', { kind: 'sub', o: hit[1], sec: hit[2], x: tp.x, y: tp.y }); continue; }
     if (hit && hit[0] === 'msub') { minisubLost(hit[1]); sound('explosion', tp.x, 0.7); continue; }
     if (hit && hit[0] === 'pillar') { breakPillar(hit[1], hit[2], tp.x, tp.y); continue; }
     if (hit && hit[0] === 'wreck') { blowWreck(hit[1][0], hit[1][1], tp.x, tp.y, 1.2, tp.vx); continue; }
@@ -8054,7 +8056,7 @@ function stepTorps(dt) {
       const sh = hit[1];
       underwaterBlast(tp.x, tp.y + 3, 1);
       sound('explosion', tp.x, 0.9);
-      damageSection(sh, hit[2], 1, tp.x, tp.y);
+      emit('hit', { kind: 'ship', o: sh, sec: hit[2], amt: 1, x: tp.x, y: tp.y });
       sh.vy -= 18; sh.w += Math.sign(tp.x - sh.x || 1) * 0.06;
       splash(tp.x, 0, -500);
       spawnDebris(tp.x, sh.y - 4, 8, sh.vx);
@@ -8080,7 +8082,7 @@ function stepRocket(tp, dt) {
   for (const q of planes) if (q && q.id !== tp.owner && planeHitTest(q, tp.x, tp.y)) { pl = q; break; }
   if (!pl && tp.y > tp.burstY) return false;
   tp.dead = true;
-  if (pl) hitPlane(pl, PLANE_HITS, tp.x, tp.y);
+  if (pl) emit('hit', { kind: 'plane', o: pl, amt: PLANE_HITS, x: tp.x, y: tp.y });
   // the burst: a flash, a puff of black smoke, sparks; a plane close by catches some of it
   sound('explosion', tp.x, 0.7); shakeAt(3, tp.x);
   flashes.push({ x: tp.x, y: tp.y, r: 22, life: 0, max: 0.14 });
@@ -8088,7 +8090,7 @@ function stepRocket(tp, dt) {
   spawnSparks(tp.x, tp.y, 30, 320);
   for (let k = 0; k < 10; k++) spawnFlame(tp.x + armTorpRnd(-4, 4), tp.y + armTorpRnd(-4, 4), armTorpRnd(-90, 90), armTorpRnd(-90, 60), 1.1, armTorpRnd(3, 6), armTorpRnd(3.5, 5));
   for (let k = 0; k < 7; k++) spawnSmoke(tp.x + armTorpRnd(-10, 10), tp.y + armTorpRnd(-8, 8), { kind: 'gun', dark: 0.7, r: armTorpRnd(6, 10), lift: 8, vx: armTorpRnd(-25, 25), alpha: armTorpRnd(0.35, 0.5), life: armTorpRnd(4, 7) });
-  if (!pl) for (const q of planes) if (q && q.id !== tp.owner && planeUp(q) && Math.hypot(q.x - tp.x, q.y - tp.y) < 70) hitPlane(q, 1, q.x, q.y);
+  if (!pl) for (const q of planes) if (q && q.id !== tp.owner && planeUp(q) && Math.hypot(q.x - tp.x, q.y - tp.y) < 70) emit('hit', { kind: 'plane', o: q, amt: 1, x: q.x, y: q.y });
   return true;
 }
 // a torpedo at any angle: a run of pixel blocks along its axis, dark body and a lighter nose
@@ -8339,7 +8341,7 @@ function detonateCharge(c) {
     const dx = Math.max(0, Math.abs(x - sb.x) - SUB_L * 0.42), dy = (y - sb.y) * 1.2;
     if (Math.hypot(dx, dy) < DC_RADIUS) {
       const u = clamp((x - (sb.x - SUB_L / 2)) / SUB_L, 0, 0.999);
-      hitSub(sb, Math.floor(u * SUB_SECTIONS), clamp(x, sb.x - SUB_L * 0.45, sb.x + SUB_L * 0.45), sb.y);
+      emit('hit', { kind: 'sub', o: sb, sec: Math.floor(u * SUB_SECTIONS), x: clamp(x, sb.x - SUB_L * 0.45, sb.x + SUB_L * 0.45), y: sb.y });
     }
   }
   // (the research ships' minisubs in reach of it are crushed - user Oct 27 13:47, as the army's sub)
@@ -8351,7 +8353,7 @@ function detonateCharge(c) {
   for (const sh of ships) {
     if (sh.state !== 'afloat' || sh.id === c.owner) continue;
     const dx = Math.max(0, Math.abs(x - sh.x) - SHIP_L * 0.42), dy = (y - sh.y - 6) * 1.2;
-    if (Math.hypot(dx, dy) < DC_RADIUS) { const hx = clamp(x, sh.x - SHIP_L * 0.45, sh.x + SHIP_L * 0.45), sec = sectionOfCol(clamp(Math.round(shipLocal(sh, hx, sh.y)[0]), 0, SHIP_SRC_W - 1)); damageSection(sh, sec, 1, hx, sh.y + 4); sh.vy -= 14; }
+    if (Math.hypot(dx, dy) < DC_RADIUS) { const hx = clamp(x, sh.x - SHIP_L * 0.45, sh.x + SHIP_L * 0.45), sec = sectionOfCol(clamp(Math.round(shipLocal(sh, hx, sh.y)[0]), 0, SHIP_SRC_W - 1)); emit('hit', { kind: 'ship', o: sh, sec: sec, amt: 1, x: hx, y: sh.y + 4 }); sh.vy -= 14; }
   }
   // (user Oct 27: "Big ships should not ignore depth charges and mines") the big ships in reach: a blow to the nearest
   // point of her hull under the water, through her own hit (civHit: a shell's worth, her sections and her sinking)
@@ -8511,14 +8513,14 @@ function detonateMine(m, hit) {
   // and a harder blow to whatever touched it
   if (hit && !netGuestHold()) {
     const [kind, o, sec] = hit;
-    if (kind === 'ship') damageSection(o, sec, 1, m.x, m.y);           // (with the blast's own: two steps - badly holed, not sunk outright)
-    else if (kind === 'sub') hitSub(o, sec, m.x, m.y);
+    if (kind === 'ship') emit('hit', { kind: 'ship', o: o, sec: sec, amt: 1, x: m.x, y: m.y });           // (with the blast's own: two steps - badly holed, not sunk outright)
+    else if (kind === 'sub') emit('hit', { kind: 'sub', o: o, sec: sec, x: m.x, y: m.y });
     else if (kind === 'plane' && o.state === 'fly') downPlane(o);
     else if (kind === 'jet') jetboatSink(o);
     else if (kind === 'civ' && o.state === 'sail') civHit(clamp(m.x, o.x - civLen(o) * 0.45, o.x + civLen(o) * 0.45), m.y + 4, 1, 0);   // (with the blast's own: two shells' worth)
   }
   // planes low over it are caught in the blast
-  if (!netGuestHold()) for (const pl of planes) if (pl && pl.state === 'fly' && pl.id !== m.owner && Math.hypot(pl.x - m.x, pl.y - m.y) < 45) hitPlane(pl, 1, pl.x, pl.y);
+  if (!netGuestHold()) for (const pl of planes) if (pl && pl.state === 'fly' && pl.id !== m.owner && Math.hypot(pl.x - m.x, pl.y - m.y) < 45) emit('hit', { kind: 'plane', o: pl, amt: 1, x: pl.x, y: pl.y });
 }
 // a mine going off at the surface: a mass of water (startMineSplash, 34-zz-mine-splash.js) heaving up out of the
 // sea; the surface punched down under it, a few drops flung out at once. amt: 1 on the surface, less from under it
@@ -8967,13 +8969,13 @@ function planeCrash(pl) {
   const pts = [[pl.x, pl.y + 5], [pl.x + ux * 30, pl.y + uy * 30 + 2], [pl.x - ux * 26, pl.y - uy * 26]];
   let what = null, X = pl.x, Y = pl.y;
   for (const [x, y] of pts) {
-    for (const tw of towers) if (!what && tw.player !== p && pierGunHit(tw, x, y)) { what = 'land'; hurtPierGun(tw, 2, x, y); }
+    for (const tw of towers) if (!what && tw.player !== p && pierGunHit(tw, x, y)) { what = 'land'; emit('hit', { kind: 'piergun', o: tw, amt: 2, x: x, y: y }); }
     for (const tw of towers) if (!what && (tw.player !== p || hand) && towerHit(tw, x, y)) { what = 'land'; towerScorch(tw, x, y, 17); if (tw.hp > 0) { tw.hp -= 1; noteHit(tw.player, 'tower'); if (tw.hp <= 0) crumbleTower(tw); } }   // (one hit, like a shell)
     for (const sh of ships) if (!what && sh.state === 'afloat' && sh.id !== p) {
       const sec = hitTest(sh, x, y);
-      if (sec >= 0) { what = 'boat'; damageSection(sh, sec, 1, x, y); damageSection(sh, sec, 1, x, y); sh.vy += 10; sh.vx += pl.vx * 0.01; }
+      if (sec >= 0) { what = 'boat'; emit('hit', { kind: 'ship', o: sh, sec: sec, amt: 1, x: x, y: y }); emit('hit', { kind: 'ship', o: sh, sec: sec, amt: 1, x: x, y: y }); sh.vy += 10; sh.vx += pl.vx * 0.01; }
     }
-    for (const sb of subs) if (!what && sb.id !== p) { const sec = subHitTest(sb, x, y); if (sec >= 0) { what = 'boat'; hitSub(sb, sec, x, y); hitSub(sb, sec, x, y); } }
+    for (const sb of subs) if (!what && sb.id !== p) { const sec = subHitTest(sb, x, y); if (sec >= 0) { what = 'boat'; emit('hit', { kind: 'sub', o: sb, sec: sec, x: x, y: y }); emit('hit', { kind: 'sub', o: sb, sec: sec, x: x, y: y }); } }
     for (const b of sailboats) if (!what && b.state === 'sail' && sailHullHit(b, x, y)) { sinkSailboat(b, x, y, pl.vx); what = 'sea'; }   // (it flies through the sails; only her hull stops it)
     for (const b of buoys) if (!what && b.player !== p && buoyHit(b, x, y)) destroyBuoy(b, x, y);           // (the plane flies on)
     for (const d of docks) if (!what && !(pl.state === 'fly' && d === homeDock[p] && !hand) && harbourHit(d, x, y)) what = 'land';   // (your own harbour never brings your plane down - unless you're flying it: then dodge it yourself)
@@ -12049,8 +12051,8 @@ function stormTargets(air) {
   };
   const add = (x, y, sh, hit) => { if (seen(x, air ? y : null)) out.push([x, y, sh, hit]); };
   if (!air) {
-    for (const sh of ships) if (sh && sh.state === 'afloat' && !sh.moored) { const [mx, my] = shipPoint(sh, MAST[0], MAST[1]); add(mx, my, sh, () => { const sec = sectionOfCol(MAST[0]); shipBlast(sh, mx, my + 8, 0.45); damageSection(sh, sec, 1, mx, my + 8); }); }
-    for (const sb of subs) if (sb && sb.state === 'out' && sb.y < surfaceY(sb.x) + 3) add(sb.x, sb.y - 10, null, () => hitSub(sb, Math.floor(SUB_SECTIONS / 2), sb.x, sb.y - 4));
+    for (const sh of ships) if (sh && sh.state === 'afloat' && !sh.moored) { const [mx, my] = shipPoint(sh, MAST[0], MAST[1]); add(mx, my, sh, () => { const sec = sectionOfCol(MAST[0]); shipBlast(sh, mx, my + 8, 0.45); emit('hit', { kind: 'ship', o: sh, sec: sec, amt: 1, x: mx, y: my + 8 }); }); }
+    for (const sb of subs) if (sb && sb.state === 'out' && sb.y < surfaceY(sb.x) + 3) add(sb.x, sb.y - 10, null, () => emit('hit', { kind: 'sub', o: sb, sec: Math.floor(SUB_SECTIONS / 2), x: sb.x, y: sb.y - 4 }));
     for (const b of sailboats) if (b && b.state === 'sail') { const a = img.sails[b.kind], [x, y] = sailPoint(b, a.w / 2, 2); add(x, y, null, () => sinkSailboat(b, b.x, b.y - 4, 0)); }
     if (LAND) {
       for (const c of civShips) if (c.state === 'sail') {
@@ -12061,7 +12063,7 @@ function stormTargets(air) {
       for (const j of jetboats) if (j.state === 'run') add(j.x, j.y - 6, null, () => jetboatSink(j));
     }
   } else {
-    for (const pl of planes) if (pl && pl.state === 'fly') add(pl.x, pl.y, null, () => hitPlane(pl, 1, pl.x, pl.y));
+    for (const pl of planes) if (pl && pl.state === 'fly') add(pl.x, pl.y, null, () => emit('hit', { kind: 'plane', o: pl, amt: 1, x: pl.x, y: pl.y }));
     if (LAND) {
       for (const h of helis) if (h && h.state === 'fly') add(h.x, h.y - 4, null, () => heliHurt(h, 1, h.x, h.y - 4));
       for (const h of civHelis) if (h.state === 'fly') add(h.x, h.y - 4, null, () => civHeliHit(h, CH_HP / 3, h.x, h.y - 4));
