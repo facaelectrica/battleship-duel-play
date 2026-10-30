@@ -3030,8 +3030,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 322;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 08:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 323;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 08:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -9847,10 +9847,27 @@ function stepSailboats(dt) {
   const SB = sailBounds();
   // the yacht you were sailing is lost: you're ashore, watching her go down
   for (let q = 0; q < 2; q++) if (crew[q].mode === 'sail' && !yachtOf(q)) { const b = sailboats[crew[q].yacht]; if (b) b.player = null; lostUnit(q, b ? b.x : homeDock[q].quay, 'sail'); }
-  for (const b of sailboats) {
+  { const t0 = performance.now(), S = schedSystem('sailboats', 0.3, 1 / 30);
+    // (engine stage 2: a CPU yacht sailing her course, at anchor or gone is stepped by her region's tier, catching up when a
+    // view comes near; one yours or taken, coming out of her hangar, holed, sinking or going down every tick wherever she is)
+    for (const b of sailboats) {
+      const pin = b.player != null || b.driven != null || !!b.launch || b.state === 'sinking' || b.state === 'down' || (b.state === 'gone' && b.own);
+      schedStep(S, b, b.x, dt, h => stepSailboat(b, h, SB), pin);
+    }
+    S.t += performance.now() - t0;
+  }
+  // (your yachts lost for good are dropped; the crews' places in the list follow)
+  if (sailboats.some(b => b.drop)) {
+    const keep = sailboats.filter(b => !b.drop), at = q => keep.indexOf(sailboats[crew[q].yacht]);
+    for (let q = 0; q < 2; q++) if (crew[q].yacht != null) crew[q].yacht = at(q);
+    sailboats.length = 0; sailboats.push(...keep);
+  }
+}
+function stepSailboat(b, dt, SB) {
+  {
     const [lo, hi] = b.lake || SB;                         // (OPEN WORLD: a lake's yachts keep to their lake)
     b.ph += dt;
-    if (b.state === 'gone' && b.own) { b.drop = true; continue; }
+    if (b.state === 'gone' && b.own) { b.drop = true; return; }
     if (b.state === 'gone') {
       b.respawn -= dt;
       if (b.respawn <= 0) {
@@ -9860,7 +9877,7 @@ function stepSailboats(dt) {
         if (!seen) Object.assign(b, newSailboat(b.kind, x), { face: x < (lo + hi) / 2 ? 1 : -1 });
         else b.respawn = 2;
       }
-      continue;
+      return;
     }
     const wind = E.windU || 0;
     // (the sails: the CPU takes them in for a storm on any yacht nobody's steering, and sets them again after)
@@ -9878,7 +9895,7 @@ function stepSailboats(dt) {
         b.vx += (want - b.vx) * Math.min(1, dt * 1.5); b.x += b.vx * dt; b.face = -d.dir;
         if (Math.abs(dx) < 3) { b.launch = null; b.vx = 0; b.drive = 0; if (crew[b.player] && crew[b.player].mode === 'sail') setOrder(telegraphs[b.player], 3); }
       }
-      continue;
+      return;
     }
     if (b.state === 'sail' && (b.player != null || b.driven != null)) {
       // a yacht you sail (CHILL; OPEN WORLD, one taken from the civilian boats): left, right or hove to, on the
@@ -9958,12 +9975,6 @@ function stepSailboats(dt) {
       }
       // (a wreck stays on the bottom for the rest of the round: no new yacht comes)
     }
-  }
-  // (your yachts lost for good are dropped; the crews' places in the list follow)
-  if (sailboats.some(b => b.drop)) {
-    const keep = sailboats.filter(b => !b.drop), at = q => keep.indexOf(sailboats[crew[q].yacht]);
-    for (let q = 0; q < 2; q++) if (crew[q].yacht != null) crew[q].yacht = at(q);
-    sailboats.length = 0; sailboats.push(...keep);
   }
 }
 
@@ -29098,9 +29109,21 @@ const oilSlicks = [];
 // falling through it. It grows for a while and then stays.
 const INK_MAX = 220, INK_LEAK_MAX = 70;
 function stepOil(dt) {
+  // (engine stage 2: a slick - its film, its plume of ink and its drops - by its region's tier, catching up when a view comes
+  // near; its tier the nearest of its middle and its two edges, so one reaching toward a view is stepped as before)
+  const t0 = performance.now(), S = schedSystem('oil', 0.5, 1 / 20);
   for (const o of oilSlicks) {
+    const R = o.r + 60; let x = o.x, tb = tierAt(x);
+    for (const e of [o.x - R, o.x + R]) { const t = tierAt(e); if (t < tb) { tb = t; x = e; } }
+    schedStep(S, o, x, dt, h => stepSlick(o, h), false);
+  }
+  S.t += performance.now() - t0;
+  stepOilStains(dt);
+}
+function stepSlick(o, dt) {
+  {
     o.t += dt; o.r = Math.min(o.leak ? 420 : 1100, o.r + dt * (o.leak ? 8 : 30 - Math.min(26, o.t * 0.25)));   // (a leak spreads slowly; her sunk cargo far)
-    if (!LAND) continue;
+    if (!LAND) return;
     const ink = o.ink || (o.ink = []), drops = o.drops || (o.drops = []);
     const src = o.leak && o.leak.state !== 'gone' ? o.leak.x + (o.x - o.leak.x) * 0.3 : o.x, pouring = o.leak ? o.leak.state === 'sail' || o.leak.state === 'sink' : o.t < 70;
     // (new billows from the hole while she pours, up to the plume's size)
@@ -29132,7 +29155,6 @@ function stepOil(dt) {
     if (drops.length < 140 && ink.length && Math.random() < dt * (pouring ? 16 : 5)) { const q = ink[Math.floor(Math.random() * ink.length)]; const top = pouring && Math.random() < 0.4; drops.push({ x: top ? src + rnd(-o.r * 0.2, o.r * 0.2) : q.x + rnd(-q.r, q.r), y: top ? WATER_Y + rnd(14, 40) : q.y + rnd(-q.r, q.r) * 0.6, vy: rnd(6, 18), s: Math.random() < 0.4 ? rnd(2.5, 4.5) : rnd(1, 2) }); }   // (blobs of tar, some a fair size, sinking)
     for (let i = drops.length - 1; i >= 0; i--) { const d = drops[i]; d.y += d.vy * dt; if (d.y > seabedY(d.x) - 2) drops.splice(i, 1); }
   }
-  stepOilStains(dt);
 }
 /* (user Oct 27: "Submarines get black dirty with oil spill") how much oil is in the water at a point (0..1): the film on
    the surface (oilAt) just under it, and the ink's billows (each thickest at its middle) down through the plume */
@@ -29659,9 +29681,20 @@ function craneAutoStep(cr, dn) {
 }
 function stepCranes(dt) {
   if (!LAND) return;
+  const t0 = performance.now(), S = schedSystem('cranes', 0.3, 1 / 30);
   for (const cr of cranes) {
     if (cr.gone) continue;                               // (come down with the pier)
-    craneDeckCheck(cr); if (cr.gone) continue;           // (rolled out over a fallen span)
+    craneDeckCheck(cr); if (cr.gone) continue;           // (rolled out over a fallen span - asked every tick, wherever it is)
+    // (engine stage 2: a crane by its trolley's region tier, catching up when a view comes near; one you work, one carrying
+    // a box or holding a tank or plane, or one on its own magnet's job, every tick wherever it is)
+    const pin = cr.driven != null || !!cr.load || !!cr.obj || !!cr.auto;
+    schedStep(S, cr, cr.tx, dt, h => stepCrane(cr, h), pin);
+  }
+  S.t += performance.now() - t0;
+  stepContainers(dt);
+}
+function stepCrane(cr, dt) {
+  {
     const mine = cr.driven != null && crew[cr.driven].mode === 'civ' && crew[cr.driven].civ === cr;
     // (it rolls: its trolley, between its legs, to x)
     const mv = (x, v) => { const want = clamp((cr.sea0 - x) * cr.out - cr.legs / 2, 0, cr.offMax), dd = want - cr.off; cr.off += clamp(dd, -2 * v * dt, 2 * v * dt); craneGeo(cr); return Math.abs(dd) < 1; };
@@ -29678,7 +29711,6 @@ function stepCranes(dt) {
     if (cr.obj) { if (magHoldable(cr.obj)) magPlace(cr.obj, cr.tx, cr.hy + 3 - MAG_H, 0, 0, 0); else cr.obj = null; }   // (a tank or a plane hanging from the spreader)
     cr.x = cr.tx; cr.y = cr.hy;                          // (where the camera looks when it's yours)
   }
-  stepContainers(dt);
 }
 // how low the spreader can go under the trolley: onto the stack (or the box it carries onto it), the pier's deck, the water
 function craneFloor(cr) {
