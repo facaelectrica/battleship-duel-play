@@ -3030,7 +3030,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 311;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const GAME_VERSION = 312;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
 const BUILD = 'OCT 30 07:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
@@ -37806,8 +37806,21 @@ const CESSNA_TURN_R = 80;          // (a scripted Cessna's turn: the 80 units ei
 function flightAlt(T, s, D, top) { return Math.max(0, Math.min(top || T.alt, T.climb * (s - T.roll), T.climb * 0.8 * (D - T.stop - s))); }
 function stepTraffic(dt) {
   if (!LAND) return;
-  for (let i = traffic.length - 1; i >= 0; i--) {
-    const f = traffic[i], T = TRAFFIC[f.kind];
+  { const S = schedSystem('traffic', 1, 1 / 30);
+    for (let i = traffic.length - 1; i >= 0; i--) {
+      const f = traffic[i];
+      // (engine stage 2: a plane on its timetable - parked, or on its route - is stepped by its region's tier; one you fly, one
+      // hit, falling, sinking or burning is stepped every tick wherever it is)
+      const pin = f.state === 'free' || f.state === 'fall' || f.state === 'sink' || f.state === 'wreck' || f.driven != null || f.smokeT > 0 || !!f.smk || f.carried != null;
+      schedStep(S, f, f.x, dt, h => stepFlight(f, h), pin);
+    }
+  }
+  stepJetboats(dt);
+  stepCivShips(dt); stepLinerParts(dt); stepOil(dt); stepMinisubs(dt); stepFireworks(dt);
+
+}
+function stepFlight(f, dt) {
+    const T = TRAFFIC[f.kind];
     if (f.state === 'parked') {
       // (both 747s lost: the first back waits no longer)
       if (f.syncWait && !traffic.some(o => o !== f && o.kind === 'jet' && !o.syncWait && (o.state === 'fly' || o.state === 'free' || o.state === 'parked'))) { f.syncWait = false; f.wait = 30; }
@@ -37815,19 +37828,19 @@ function stepTraffic(dt) {
       if (f.wait < 1.6) openHangar(airfieldAt(airport(f.from).far), 1);   // (its door going up before it rolls out)
       if (f.kind === 'cessna' && f.wait < 1 && traffic.some(g => g !== f && g.kind === 'cessna' && g.to === f.to && g.state === 'fly' && g.final)) f.wait = 1;   // (one on the runway at a time: it waits for the one coming in)
       if (f.wait <= 0) { f.state = 'fly'; f.s = 0; }
-      continue;
+      return;
     }
     if (SHEET_PLANES[f.kind] && f.smokeT > 0 && (f.state === 'fly' || f.state === 'free')) { if (f.state === 'fly') f.facing = f.dir || 1; planeSmoke(f, dt); }   // (hit: white smoke, then black)
     if (f.smk) cessnaSmokeStep(f, dt);                               // (its coloured smoke, user Oct 27)
-    if (f.state === 'free') { stepCivAir(f, dt); if (f.state === 'free') { trafficHits(f); if (!f.ground) { trafficHull(f); planeWash(f, dt, f.kind === 'jet' ? 3.5 : 0.8); } } continue; }   // (OPEN WORLD: one you've taken - see 50-land-civdrive)
-    if (f.state === 'wreck') { if (f.onDeck && !f.crash && harbourTop(f.x, f.y - 6) === Infinity) { f.onDeck = false; f.state = 'sink'; f.vy = 20; ditchFx(f.x, 0, f.kind === 'jet' ? 2 : 1.2, f.kind === 'jet' ? 150 : 49, 60); } continue; }   // (its wreck on the pier, the pier gone: into the sea - user Oct 27)
+    if (f.state === 'free') { stepCivAir(f, dt); if (f.state === 'free') { trafficHits(f); if (!f.ground) { trafficHull(f); planeWash(f, dt, f.kind === 'jet' ? 3.5 : 0.8); } } return; }   // (OPEN WORLD: one you've taken - see 50-land-civdrive)
+    if (f.state === 'wreck') { if (f.onDeck && !f.crash && harbourTop(f.x, f.y - 6) === Infinity) { f.onDeck = false; f.state = 'sink'; f.vy = 20; ditchFx(f.x, 0, f.kind === 'jet' ? 2 : 1.2, f.kind === 'jet' ? 150 : 49, 60); } return; }   // (its wreck on the pier, the pier gone: into the sea - user Oct 27)
     if (f.state === 'sink') {
       // (user Oct 25 late: "if the balloon falls in the water, it sinks. The same with the 747") down through the water to the bottom
       if (f.split) { f.bend = Math.min(0.3, (f.bend || 0) + dt * 0.12); if (!SIM_ONLY && Math.random() < dt * 25) addBubble(f.x + rnd(-8, 8), f.y + rnd(-4, 8), rnd(-8, 8), -rnd(25, 55), rnd(1, 2.6)); }   // (broken in two: the halves folding apart, bubbles pouring out of the break)
       f.y += f.vy * dt; f.vy += (22 - f.vy) * Math.min(1, dt); f.ang += (f.spin * 0.3) * dt; f.x += f.vx * dt; f.vx *= 1 - dt;
       { const big = f.kind === 'jet', n = dt * (big ? 45 : 16), L = big ? 70 : 20; for (let q = 0; q < Math.floor(n) + (Math.random() < n % 1 ? 1 : 0); q++) addBubble(f.x + rnd(-L, L), f.y + rnd(-6, 6), rnd(-6, 6), -rnd(15, 40), rnd(0.8, big ? 3 : 2)); }   // (user Oct 26: more bubbles as it goes down)
       if (f.y >= seabedY(f.x) - 6) { f.state = 'wreck'; kickDust(f.x, 20, 0.6); }
-      continue;
+      return;
     }
     if (f.state === 'fall') {
       f.vy += 260 * dt; f.x += f.vx * dt; f.y += f.vy * dt; f.ang += f.spin * dt;
@@ -37839,10 +37852,10 @@ function stepTraffic(dt) {
       const sea = ht === Infinity && !onShip && (!onLand(f.x) || lakeAt(f.x)), ground = onShip ? dk.y : ht < Infinity ? ht : sea ? surfaceY(f.x) : landTop(f.x);
       if (f.y >= ground) {
         f.onDeck = !onShip && ht < Infinity;
-        if (!sea) { trafficCrash(f, ground, onShip ? dk.c : null, f.onDeck); continue; }   // (what's left of it stays, burning - landCrash)
+        if (!sea) { trafficCrash(f, ground, onShip ? dk.c : null, f.onDeck); return; }   // (what's left of it stays, burning - landCrash)
         if (f.kind === 'jet') { f.split = true; f.bend = 0; } wingIntoWater(f); ditchFx(f.x, f.vx, f.kind === 'jet' ? 2 : 1.2, f.kind === 'jet' ? 150 : 49, f.vy); f.state = 'sink'; f.vy = 40; f.vx *= 0.3;   // (into the water: it sinks)
       }
-      continue;
+      return;
     }
     const A = airport(f.from), B = airport(f.to), D = f.route ? f.D : Math.abs(B.far - A.far);
     let d = Math.sign(B.far - A.far);
@@ -37870,16 +37883,12 @@ function stepTraffic(dt) {
       const keep = { col: f.col, alt: f.kind === 'jet' ? rnd(1250, 1850) * JET_ALT_K : cessnaAlt(), ph: Math.random() * 6 }; Object.assign(f, newFlight(f.kind, f.to, f.kind === 'jet' ? 25 : 6 + Math.random() * 8, f.owner), keep);   // (a new height each flight)
       // (a 747 lost earlier waits for this one to land, then leaves the other way at the same moment)
       if (f.kind === 'jet') for (const o of traffic) if (o !== f && o.kind === 'jet' && o.syncWait) { Object.assign(o, newFlight('jet', 1 - f.from, f.wait, o.owner), { syncWait: false }); }
-      continue;
+      return;
     }
     trafficHits(f);
     if (f.state === 'fly') trafficHull(f);
     if (f.y + (T.gy || 8) < (dryLand(f.x) ? landTop(f.x) : surfaceY(f.x)) - 2) planeWash(f, dt, f.kind === 'jet' ? 3.5 : 0.8);   // (low over the water or the land: its wash - every plane's)
   }
-  stepJetboats(dt);
-  stepCivShips(dt); stepLinerParts(dt); stepOil(dt); stepMinisubs(dt); stepFireworks(dt);
-
-}
 // hit: a round or a shell through it, and it's going down
 /* ---- a Cessna's coloured smoke (user Oct 27: "A Cessna has a button to do coloured smoke trails, like those plane
    shows. It's always a random colour (between blue, yellow, red, green, orange, pink)... Then you need to land it on an
