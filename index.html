@@ -3039,8 +3039,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 331;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 09:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 332;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 10:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -15187,10 +15187,13 @@ function glApplyState() {
   const gl = GLR.gl, st = GLR.st, c = GLR.cur, t = st.tgt;
   glBind(t);
   if (c.blend !== st.blend) { const b = GLB[st.blend] || GLB['source-over']; gl.blendFuncSeparate(b[0], b[1], b[2], b[3]); c.blend = st.blend; }
-  const sc = st.sc, key = sc ? sc[0] + ',' + sc[1] + ',' + sc[2] + ',' + sc[3] + ',' + t._h : '';
-  if (c.sc !== key) {
-    if (sc) { gl.enable(gl.SCISSOR_TEST); gl.scissor(sc[0], t._h - sc[1] - sc[3], sc[2], sc[3]); } else gl.disable(gl.SCISSOR_TEST);
-    c.sc = key;
+  // (engine stage 6, Oct 30: the scissor's key was a string made at every flush - hundreds a frame, all garbage. The same test
+  // on the numbers: c.sc '' = no scissor, 1 = the one in c.s0..c.sH; anything else (undefined: glClearTarget and the stencil
+  // passes set their own) = not known, set again)
+  const sc = st.sc;
+  if (sc ? !(c.sc === 1 && c.s0 === sc[0] && c.s1 === sc[1] && c.s2 === sc[2] && c.s3 === sc[3] && c.sH === t._h) : c.sc !== '') {
+    if (sc) { gl.enable(gl.SCISSOR_TEST); gl.scissor(sc[0], t._h - sc[1] - sc[3], sc[2], sc[3]); c.sc = 1; c.s0 = sc[0]; c.s1 = sc[1]; c.s2 = sc[2]; c.s3 = sc[3]; c.sH = t._h; }
+    else { gl.disable(gl.SCISSOR_TEST); c.sc = ''; }
   }
   const sten = st.sten || (st.clip ? 1 : 0);
   if (c.sten !== sten) {
@@ -18115,11 +18118,21 @@ function bakeSigs(V) {
   const step = Math.max(0.25, P.bakestep ?? 3) / 60, hk = Math.round(P.time / step);
   const hero = LAYERS[HERO_I], mvU = Math.max(8, W * Math.max(0.05, P.bakemove ?? 0.25) / Math.max(1e-3, ZL));
   const mv = Math.round(hero.uPiv / mvU);
-  let ps = ''; for (const k in P) if (!BK_SKIP.has(k)) { const v = P[k]; ps += typeof v === 'number' ? v.toFixed(3) + ',' : String(v) + ','; }
+  // (engine stage 6, Oct 30: the sliders' part - every one of P's values written out and hashed - was built again for each view
+  // every frame though the sliders hardly ever move. The keys and values it was made from are kept: while they are all the
+  // same (in the same order) its length and hash are the ones worked out last time - the same signature, without the strings)
+  let same = true, n = 0;
+  for (const k in P) { if (BK_SKIP.has(k)) continue; if (n >= BKP.k.length || BKP.k[n] !== k || !Object.is(BKP.v[n], P[k])) { same = false; break; } n++; }
+  if (!same || n !== BKP.k.length) {
+    let ps = ''; BKP.k.length = 0; BKP.v.length = 0;
+    for (const k in P) if (!BK_SKIP.has(k)) { const v = P[k]; BKP.k.push(k); BKP.v.push(v); ps += typeof v === 'number' ? v.toFixed(3) + ',' : String(v) + ','; }
+    BKP.len = ps.length; BKP.hash = hashStr(ps);
+  }
   const sun = SUNO ? SUNO.x.toFixed(3) + '/' + SUNO.y.toFixed(3) : '';
-  const soft = [hk, Math.round(P.cover * 50), Math.round((P.big || 0) * 20), Math.round(P.rain * 20), Math.round(P.fog * 20), mv, sun, ps.length, hashStr(ps)].join('|');
+  const soft = [hk, Math.round(P.cover * 50), Math.round((P.big || 0) * 20), Math.round(P.rain * 20), Math.round(P.fog * 20), mv, sun, BKP.len, BKP.hash].join('|');
   return [hard, soft];
 }
+const BKP = { k: [], v: [], len: 0, hash: 0 };
 function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
 // once a view a frame, before its clouds are gone through: a swap when the last gen finished, a new gen when the look moved
 function bakeBegin(V) {
@@ -21495,9 +21508,12 @@ function drawSparkles(p, cell, yTop, yRange, alpha) {
   const c0 = Math.floor(layerX(0, L, Sl) / cell) - 1, c1 = Math.ceil(layerX(VWP, L, Sl) / cell) + 1;
   const a0 = alpha * (0.25 + 0.75 * E.light);
   for (let c = c0; c <= c1; c++) {
-    const h1 = hash(c * 1.17 + p * 91), h2 = hash(c * 2.31 + p * 37), h3 = hash(c * 0.73 + p * 13);
+    // (engine stage 6, Oct 30: h2 - only where it is placed - worked out after the twinkle test, not before it: about two
+    // columns in three are dark this frame, and zoomed out that was thousands of sin() a frame for nothing. Same values)
+    const h1 = hash(c * 1.17 + p * 91), h3 = hash(c * 0.73 + p * 13);
     const tw = Math.sin(time * (1.5 + h3 * 3) + h1 * 6.28);
     if (tw < 0.45) continue;
+    const h2 = hash(c * 2.31 + p * 37);
     const x = Math.round(layerPivX + Sl * (c * cell + h1 * cell - p * layerRefX)), y = PY(yTop + h2 * yRange);
     if (x >= VWP - SHX || x < -SHX - 2 || y < -SHY || y >= bh - SHY) continue;     // (off this view: nothing to paint)
     C.fillStyle = `rgba(255,255,255,${(a0 * (tw - 0.45) / 0.55).toFixed(3)})`;
