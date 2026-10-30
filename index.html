@@ -3030,7 +3030,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 309;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const GAME_VERSION = 310;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
 const BUILD = 'OCT 30 07:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
@@ -16357,6 +16357,7 @@ const formDur = () => 20 / (P.morph || 1);   // (MORPH SPEED: 2 = twice as fast;
 function placeLobes(c, t) {
   const s = c.s * c.lay.zl, g = c.grow ?? 1;
   if (c.lob.length !== c.lobes.length) c.lob = c.lobes.map(() => ({}));
+  c.lobV = (c.lobV || 0) + 1;   // (its lobes changed: drawLobes builds its record again - perf pass, Oct 29)
   c.lobes.forEach((L, j) => {
     let e = 1 + P.evolve * 0.045 * Math.sin(t * 0.06 + (L.seed % 97) * 0.7);
     if (L.tmp) { const a = t - L.born; e *= smoothstep(0, 0.35, a) * (1 - smoothstep(L.life * 0.55, L.life, a)); }   // a smear swells out, then melts back
@@ -16816,18 +16817,31 @@ function drawLobes(c, ax, ayO) {
   // for the breathing - four times as long for a cloud whose lobes are a pixel or two - not every 8th frame whatever happened:
   // zoomed far out all 2,600 clouds are lobes, and that was 50 ms a frame)
   const every = c.rbAvg * c.s * c.lay.zl < 3 ? SETTLED_EVERY * 4 : SETTLED_EVERY;
-  if (!c.ltones || c.ltones.length !== c.lob.length || c.ltk !== c.lk || (frameNo + c.uid) % every === 0) { lobeTones(c); c.ltk = c.lk; }
+  // (perf pass, Oct 29: also when its lobes were placed again; the every-few-frames refresh is for EVOLVE's breathing - with it
+  // off the lobes only change when placed, and that is caught by their version)
+  if (!c.ltones || c.ltones.length !== c.lob.length || c.ltk !== c.lk || c.ltv !== c.lobV || (P.evolve > 0 && (frameNo + c.uid) % every === 0)) { lobeTones(c); c.ltk = c.lk; c.ltv = c.lobV; }
   const ay = ayO ?? c.y;
   // (back to front: last frame's order kept while it still is that order - the lobes move in depth only in a morph)
   let order = c.lorder, ok = order && order.length === c.lob.length;
-  for (let q = 1; ok && q < order.length; q++) { const a = order[q - 1], b = order[q], za = c.lob[a].z, zb = c.lob[b].z; if (!(za < zb || (za === zb && a < b))) ok = false; }
+  // (perf pass, Oct 29: the lobes unchanged since the order was last found right - same array, not placed again - it still is)
+  const lobSame = ok && c.lordArr === c.lob && c.lordV === c.lobV && c.lobV !== undefined;
+  if (!lobSame) for (let q = 1; ok && q < order.length; q++) { const a = order[q - 1], b = order[q], za = c.lob[a].z, zb = c.lob[b].z; if (!(za < zb || (za === zb && a < b))) ok = false; }
   if (!ok) order = c.lorder = c.lob.map((l, j) => j).sort((a, b) => c.lob[a].z - c.lob[b].z);
+  c.lordArr = c.lob; c.lordV = c.lobV;
   {
     // (each lobe a record, its fifteen tones packed; this frame's, since the lobes breathe every frame)
     const t0 = performance.now();
     // (Oct 28: built into a scratch batch and kept only if a record differs - a still cloud's lobes were sent to the GPU again
     // every frame, 150 uploads a frame zoomed out)
     const pbv = c.pbv || (c.pbv = [null, null]), old = pbv[VI] && pbv[VI].lobes ? pbv[VI] : null, tmp = LOBE_TMP; tmp.n = 0;
+    // (perf pass, Oct 29: zoomed far out every cloud is lobes, and each frame each one's record was built again only to find it
+    // the same. Built from the same lobes (array and placing), tones (lobeTones' array) and order, it is the same: kept as it is)
+    if (old && old.srcLob === c.lob && old.srcV === c.lobV && c.lobV !== undefined && old.srcT === c.ltones && old.srcO === order) {
+      old.key = ''; old.lobes = true; old.fr = frameNo;
+      FTV.lobes = (FTV.lobes || 0) + performance.now() - t0;
+      { const t1 = performance.now(); DCTX.drawPuffs(old, ax, ay, palOf(c)); FTV.gl = (FTV.gl || 0) + performance.now() - t1; }
+      return;
+    }
     for (const j of order) {
       const l = c.lob[j], T = c.ltones[j]; if (!(l.rx > 0.35)) continue;
       let T0 = 0, T1 = 0;
@@ -16840,7 +16854,7 @@ function drawLobes(c, ax, ayO) {
     for (let i = 0, m = tmp.n * 8; same && i < m; i++) if (old.data[i] !== tmp.data[i]) same = false;
     const pb = same ? old : (pbv[VI] = old || new GLPuffs());
     if (!same) { pb.begin(); pb.room(tmp.n); pb.data.set(tmp.data.subarray(0, tmp.n * 8)); pb.n = tmp.n; }
-    pb.key = ''; pb.lobes = true; pb.fr = frameNo;
+    pb.key = ''; pb.lobes = true; pb.fr = frameNo; pb.srcLob = c.lob; pb.srcV = c.lobV; pb.srcT = c.ltones; pb.srcO = order;
     FTV.lobes = (FTV.lobes || 0) + performance.now() - t0;
     { const t1 = performance.now(); DCTX.drawPuffs(pb, ax, ay, palOf(c)); FTV.gl = (FTV.gl || 0) + performance.now() - t1; }
   }
