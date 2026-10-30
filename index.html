@@ -3039,8 +3039,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 330;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 09:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 331;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 09:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -3160,7 +3160,7 @@ function seatJoin(g) {
     ctlPick[s] = 'net';
     if (brains[team]) { brains[team] = null; const c = crew[team]; if (c.mode !== 'dock' && c.mode !== 'gone') { c.mode = 'dock'; mgHold[team] = false; holding[team] = null; } }
   }
-  g.seat = makeSeat(g.id, team); g.seat.side = s; NET.seats.push(g.seat);
+  g.seat = makeSeat(g.id, team); g.seat.side = s; NET.seats.push(g.seat); g.ntb = null;
   NET.role = 'host';
   linkTo(g, { t: 'start', worldW: WORLD_Wb, flags: flagPick.slice(), lv: STORY_LV, mode: MODE, clouds: clouds.map(c => netPlain(c, 1)), side: s });
   LINK.acc = 1;
@@ -3231,7 +3231,8 @@ function linkFromGuest(g, m) {
   // (only the commands a player has, and only for the guest's own seat on its own team)
   const st = g.seat;
   if (m.t === 'act' && Object.prototype.hasOwnProperty.call(ACTS, m.name) && Array.isArray(m.a) && m.a.length <= 3) { try { asSeat(st, () => ACTS[m.name](st.team, ...m.a)); } catch (e) {} return; }
-  if (m.t === 'ctl') { g.ctlT = performance.now(); try { asSeat(st, () => setCtlState(st.team, m.s)); } catch (e) {} return; }
+  if (m.t === 'tfull') { g.ntbFull = true; return; }   // (36-zzzz-net-tables: a guest missed a snapshot)
+  if (m.t === 'ctl') { g.ctlT = performance.now(); if (NET_TABLES && Array.isArray(m.v)) g.span = m.v.slice(0, 8).map(Number); try { asSeat(st, () => setCtlState(st.team, m.s)); } catch (e) {} return; }
   if (m.t === 'again' && ui.winner != null) { linkStartRound(); return; }
 }
 // (the host) a guest has gone: what it was in is free again (the CPU's again if nobody's left on its side)
@@ -3255,6 +3256,7 @@ function netPause(on, from) {
 }
 // (a guest) what the host sends
 function linkReceive(m) {
+  if (NET_TABLES && typeof m === 'string') { if (NET.role === 'guest' && !LINK.hosting) ntbReceive(m); return; }   // (36-zzzz-net-tables: a snapshot from the tables)
   if (!m || typeof m !== 'object' || LINK.hosting) return;
   if (m.t === 'full') { linkClose(m.why || 'THAT SESSION IS FULL'); return; }
   if (m.t === 'lobby') {
@@ -3269,6 +3271,7 @@ function linkReceive(m) {
   if (m.t === 'away') { LINK.away = !!m.on; return; }
   if (m.t === 'pause' && NET.role === 'guest') { if (m.on && !ui.title) { openMainMenu(true); showToast('GAME PAUSED'); } else if (!m.on && ui.title && ui.resume) menuResume(true); return; }
   if (m.t === 'start') {
+    if (NET_TABLES) ntbReset();
     NET.role = 'guest'; NET.me = 0; NET.worldW = m.worldW | 0; NET.send = linkSend; NET.side = m.side === 1 ? 1 : 0; NET.taken = null;
     if (Array.isArray(m.flags)) { flagPick[0] = m.flags[0]; flagPick[1] = m.flags[1]; }
     MODE = ['duel', 'chill', 'test'].includes(m.mode) ? m.mode : 'duel'; EXTRA = null; applyMode();
@@ -3307,6 +3310,7 @@ function linkPump(dt) {
     const now = performance.now();
     for (const g of gs) if (now - (g.ctlT || now) > 700) asSeat(g.seat, () => { const t = g.seat.team; mgHold[t] = false; diveHold[t] = 0; if (planes[t] && crew[t].mode === 'plane') planes[t].mg = false; });
     NET.role = 'host';                                   // (guests in the round: this screen is their host)
+    if (NET_TABLES) { ntbPump(gs); return; }             // (36-zzzz-net-tables: each guest's snapshot from the tables)
     // one snapshot for each team (the other team's swapped round), with what each guest and its teammates are in
     const ev = NET.events.splice(0), sky = (NET.snapN = (NET.snapN || 0) + 1) % 15 === 1, S = [null, null];
     for (const g of gs) {
@@ -3316,7 +3320,7 @@ function linkPump(dt) {
       linkTo(g, { t: 'snap', s: S[t], you: { mode: st.crew.mode, dead: !!st.crew.dead }, taken });
     }
     NETST.snapOut++;
-  } else if (NET.role === 'guest' && LINK.conn && !paused) linkSend({ t: 'ctl', s: ctlState(0) });
+  } else if (NET.role === 'guest' && LINK.conn && !paused) linkSend(NET_TABLES ? { t: 'ctl', s: ctlState(0), v: ntbSpans(), k: NTB_IN.seq } : { t: 'ctl', s: ctlState(0) });
 }
 function linkDrop() {
   try { if (LINK.conn) LINK.conn.close(); } catch (e) {}
@@ -4539,6 +4543,7 @@ function drawPerfPanel(x, y) {
     'SCRIPT ' + f(script) + '  DRAW+GPU ' + f(Math.max(0, (fpsMeter.gap || 0) - script)) + (fillTest.ms >= 0 ? '  FILL ' + fillTest.ms.toFixed(2) + ' ' + fillTest.kind + '  PATH ' + fillTest.path.toFixed(1) + ' VS RECTS ' + fillTest.rects.toFixed(1) : ''),
     (probe.on ? 'PROBING ' + Math.ceil(probe.left) + 'S: ' : probe.done ? 'PROBED: ' : '') + 'PHYS ' + f(perf.phys) + '  SMOKE ' + f(perf.smoke),
     (Q => 'IN PHYS: STEPS ' + f(perf.steps) + '  CPU ' + f(Q.uCpu) + '  SEA ' + f(Q.uWater) + '  SHIPS ' + f(Q.uVehicles) + '  ARMS ' + f((Q.uArms || 0) + (Q.uShells || 0)) + '  LAND ' + f(Q.uLand) + '  OPEN ' + f(Q.uOpenWorld) + '  FX ' + f((Q.uVisuals || 0) + (Q.uRest || 0)))(perf.parts || {}),   // (the world's update by part - Oct 29, the iPad's PHYS 13)
+    ntbPanel(),     // (engine stage 5: online from the tables, bytes a second to each guest - 36-zzzz-net-tables)
     schedPanel(),   // (engine stage 7: each scheduled system against its budget - 36-zz-regions)
     'SKY ' + f(P.sky) + '  WORLD ' + f(P.objects) + '  WATER ' + f(P.distort),
     skyNewOn ? (T => 'NEW SKY ' + f(T.back) + '+' + f(T.decks) + '+' + f(T.front) + '+' + f(T.veil1) + '  LAY ' + f(T.out) + '  SMOKE ' + f(T.smoke) + '  BUILD ' + f(T.build) + '/' + Math.round(T.builds || 0) + ' LIT ' + Math.round(T.lit || 0) + ' KEYS ' + Math.round(T.kL || 0) + '/' + Math.round(T.kU || 0) + '/' + Math.round(T.kN || 0) + '/' + Math.round(T.kS || 0) + ' LOBES ' + f(T.lobes) + ' VEIL ' + f(T.veil) + ' GL ' + f(T.gl) + '  SM ' + f(T.smG) + '/' + f(T.smS) + '/' + f(T.smB) + '/' + f(T.smT) + (D => '  PUFF SIZES ' + D.sizes.map(v => v.toFixed(1)).join('/') + ' LOD ' + D.lod + '/' + D.n)(NSKY.deckSizes()))(NSKY.FT) : '',
@@ -12339,6 +12344,7 @@ function schedSystem(name, budget, maxH, perFrame) { return SYSTEMS[name] || (SY
 function regionsTick() {
   REG.tick++; REG.w = VIEW_W; REG.spans.length = 0;
   for (const v of cam.view) { if (!v || !(v.z > 0)) continue; REG.spans.push(v.l, v.l + halfWorldW(v.z)); }
+  if (NET_TABLES && LINK.hosting) for (const g of LINK.conns.values()) if (g.seat && g.span) for (let i = 0; i + 1 < g.span.length; i += 2) REG.spans.push(g.span[i], g.span[i + 1]);   // (stage 5: online, every player's views)
 }
 // a place's tier: its distance from the nearest view's span, in screens
 function tierAt(x) {
@@ -12396,8 +12402,14 @@ const TABLES = {};
 // (keep: fields the network leaves out (NET_SKIP) that are this system's own state - a sunk sub's halves, a plane's trail)
 function defTable(name, list, o = {}) {
   const keep = new Set(o.keep || []), skip = new Set([...TBL_SKIP, ...(o.skip || [])].filter(k => !keep.has(k)));
-  TABLES[name] = { name, list, depth: o.depth ?? 4, make: o.make || (() => ({})), after: o.after || null, skip };
+  TABLES[name] = { name, list, depth: o.depth ?? 4, make: o.make || (() => ({})), after: o.after || null, skip,
+    net: o.net ?? true, netSkip: new Set(o.netSkip || []), perPlayer: o.perPlayer || 0, netIds: new Set(o.netIds || []) };
 }
+// (stage 5, online play from the tables - 36-zzzz-net-tables.js. net: false - a table each screen makes for itself (smoke, the
+// particles, splashes, trails...), never sent; net: 'changes' - built the same on both screens (the land's props), only its rows
+// changed since the round began are sent; netSkip: fields that are each screen's own (the physics accumulator); perPlayer: N -
+// the list is each side's own things at its index, in groups of N per side... (2: [side 0, side 1, side 0, side 1...]), sent
+// swapped to the second team's guest); netIds: more fields than id / owner / player that are a side (the captains' p))
 // a thing as plain data at full precision (the network's netPlain rounds; a save must replay exactly): numbers, strings, little
 // arrays and nested plain objects; pictures, canvases, functions and the network's local-only fields left out; another thing of
 // a table referred to by its id ({ ref: uid })
@@ -12483,41 +12495,41 @@ function tablesLoad(S) {
 // (her art, scorch marks and dock are local: NET_SKIP leaves them out; a made one gets her side's harbour back)
 const vehShipMake = d => makeShip(d.id || 0, d.x || 0, d.facing || 1, homeDock[d.id] || null);
 const vehShipAfter = arr => { for (const sh of arr) if (!sh.dock && homeDock[sh.id]) sh.dock = homeDock[sh.id]; };
-defTable('ships', () => ships, { keep: ['scorch'], make: vehShipMake, after: vehShipAfter });
+defTable('ships', () => ships, { perPlayer: 2, keep: ['scorch'], make: vehShipMake, after: vehShipAfter });
 defTable('oldShips', () => oldShips, { keep: ['scorch'], make: vehShipMake, after: vehShipAfter });
 // (a sunk ship's broken pieces are the weapons' table, 'pieces' - 36-zzz-arms-tables.js)
 // the submarines (24-submarine makeSub): subs[p] each side's own, oldSubs the lost ones going down and their halves on the
 // sand (art and dock local; a made one gets her side's harbour back)
 const vehSubMake = d => makeSub(d.id || 0, homeDock[d.id] || homeDock[0]);
 const vehSubAfter = arr => { for (const sb of arr) if (!sb.dock && homeDock[sb.id]) sb.dock = homeDock[sb.id]; };
-defTable('subs', () => subs, { keep: ['scorch','parts'], make: vehSubMake, after: vehSubAfter });
+defTable('subs', () => subs, { perPlayer: 2, keep: ['scorch','parts'], make: vehSubMake, after: vehSubAfter });
 defTable('oldSubs', () => oldSubs, { keep: ['scorch','parts'], make: vehSubMake, after: vehSubAfter });
 // the planes (29-plane makePlane): planes[p] each side's own, oldPlanes the lost ones still falling or sinking (strand - the
 // trail it's laying - cover and splat are local: a loaded plane starts a new trail); the trails, the wisps of rushing air and
 // the ice shed off its wings
-defTable('planes', () => planes, { keep: ['strand','cover','splat'], make: d => makePlane(d.id || 0) });
+defTable('planes', () => planes, { perPlayer: 2, keep: ['strand','cover','splat'], make: d => makePlane(d.id || 0) });
 defTable('oldPlanes', () => oldPlanes, { keep: ['strand','cover','splat'], make: d => makePlane(d.id || 0) });
-defTable('planeTrails', () => planeTrails, { make: () => ({ pts: [], id: 0, col: 0, drift: 0.12 }) });
-defTable('planeWisps', () => planeWisps, { make: () => ({ x: 0, y: 0, age: 0, max: 0.5, L: 20, ux: 1, uy: 0 }) });
-defTable('iceBits', () => iceBits);
+defTable('planeTrails', () => planeTrails, { net: false, make: () => ({ pts: [], id: 0, col: 0, drift: 0.12 }) });
+defTable('planeWisps', () => planeWisps, { net: false, make: () => ({ x: 0, y: 0, age: 0, max: 0.5, L: 20, ux: 1, uy: 0 }) });
+defTable('iceBits', () => iceBits, { net: false });
 // the crews (32-crew freshCrew): crew[p] each side's (loaded into the same two objects: NET.home holds them); the blood on the pier
-defTable('crew', () => crew, { make: () => freshCrew() });
-defTable('crewBlood', () => blood);
+defTable('crew', () => crew, { net: false, make: () => freshCrew() });
+defTable('crewBlood', () => blood, { net: false });
 // the captains (06-fleet-captains buildCaptains): both sides' in one table, each back in her side's list once loaded
-defTable('captains', () => captains[0].concat(captains[1]), { make: d => ({ p: d.p || 0, face: 0, state: 'free', veh: null, t: 0, blood: 0, band: 0 }),
+defTable('captains', () => captains[0].concat(captains[1]), { netIds: ['p'], make: d => ({ p: d.p || 0, face: 0, state: 'free', veh: null, t: 0, blood: 0, band: 0 }),
   after: arr => { captains[0] = arr.filter(c => (c.p || 0) === 0); captains[1] = arr.filter(c => c.p === 1); } });
 
 /* (engine stage 3) the tables of the systems whose own files are read before the tables' (36-zz-tables), registered here
    for them - each system still the one owner of its lists; their random sources are in their own files */
 // the sea life (36-sea-storm-weather, 07-world-build's buildSea): the schools (each with its fish), sharks and whales; the
 // stunned fish floating up (04-art-prep); the dead sharks and whales and their blood (35-zz-sea-kills)
-defTable('seaSchools', () => schools, { make: () => ({ type: 'sardine', x: 0, y: 0, dir: 1, speed: 10, turnT: 10, flee: 0, fish: [], vy: 0 }) });
+defTable('seaSchools', () => schools, { net: false, make: () => ({ type: 'sardine', x: 0, y: 0, dir: 1, speed: 10, turnT: 10, flee: 0, fish: [], vy: 0 }) });
 defTable('seaSharks', () => sharks, { make: () => ({ x: 0, y: 0, dir: 1, speed: 20, turnT: 10, turn: 0, ph: 0 }) });
 defTable('seaWhales', () => whales, { make: () => ({ x: 0, y: 0, dir: 1, speed: 10, turnT: 30, turn: 0, ph: 0, dy: 0, flee: 0 }) });
 defTable('seaDeadFish', () => deadFish, { make: () => ({ type: 'sardine', dir: 1, x: 0, y: 0, vx: 0, vy: 0, rot: 0, w: 0, t: 0, fade: 1, surf: false }) });
 defTable('seaDeadBig', () => deadBig, { make: () => ({ kind: 'shark', x: 0, y: 0, dir: 1, vx: 0, vy: 0, rot: 0, w: 0, t: 0, bleed: 1, fade: 1, rest: false, ph: 0 }) });
-defTable('seaBlood', () => seaBlood, { make: () => ({ x: 0, y: 0, vx: 0, vy: 0, r: 3, t: 0, life: 6, sd: 0, lob: 2 }) });
-defTable('seaGore', () => seaGore, { make: () => ({ x: 0, y: 0, vx: 0, vy: 0, s: 2, t: 0, life: 18, sd: 0, dark: false }) });
+defTable('seaBlood', () => seaBlood, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, r: 3, t: 0, life: 6, sd: 0, lob: 2 }) });
+defTable('seaGore', () => seaGore, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, s: 2, t: 0, life: 18, sd: 0, dark: false }) });
 // the yachts (31-sailboats-buoys; a player's own yacht is one of them, crew[p].yacht her place in the list)
 defTable('sailboats', () => sailboats, { make: d => ({ kind: d.kind || 0, x: 0, y: WATER_Y, a: 0, av: 0, vx: 0, face: 1, state: 'sail', sink: 0, lean: 0, ph: 0, t: 0, respawn: 0, hold: 10, sailsUp: true, furl: 0 }) });
 // the buoys (31-sailboats-buoys, built in 07-world-build): one off each harbour (buoys[k] is docks[k]'s), the red one mid-sea
@@ -12582,7 +12594,7 @@ const WATER_ROW = worldRow({
   // waiting forces are cleared: stepWater. s3-drift Oct 30: not saved, a loaded sea settled on other ticks)
   settleT: [() => waterAct.t, v => { if (typeof v === 'number') waterAct.t = v; }],
 });
-defTable('water', () => [WATER_ROW], { make: () => WATER_ROW });
+defTable('water', () => [WATER_ROW], { net: false, make: () => WATER_ROW });
 // ---- the game's clock (time: what every system's timers count by) and the round (who won, and how long ago). The clock comes
 // back too, so the tables' own times (stamps of it) mean what they did. (Not shifted: the captains' clocks and a plane's time
 // in a cloud, which netApply puts on this screen's time - their own tables, loaded too, hold them as they were; shifted again
@@ -12597,7 +12609,7 @@ const ROUND_ROW = worldRow({
   winT: [() => ui.winT || 0, v => { ui.winT = v; }],
   acc: [() => acc, v => { acc = v; }],   // (the physics steps' accumulator: the fraction of a step carried to the next frame)
 });
-defTable('round', () => [ROUND_ROW], { make: () => ROUND_ROW });
+defTable('round', () => [ROUND_ROW], { netSkip: ['acc'], make: () => ROUND_ROW });
 // ---- the cameras (39-camera updateCamera): each view's place and zoom and what it eases by. Not only a look: the regions'
 // tiers (regionsTick reads the views of the frame before), a sailboat's respawn out of sight, the storm's bolts and the
 // land's bits all go by where the views are - a fresh page's views were somewhere else for the first steps after a load
@@ -12619,7 +12631,7 @@ const CAM_ROW = worldRow({
       if (Array.isArray(s.ov)) camPut({ a: camOverride }, 'a', s.ov);
     }],
 });
-defTable('camera', () => [CAM_ROW], { make: () => CAM_ROW });
+defTable('camera', () => [CAM_ROW], { net: false, make: () => CAM_ROW });
 
 /* (engine stage 3) The weapons' and hits' tables - their systems' files are read before the tables (36-zz-tables.js), so they
    are registered here; each file still the one owner of its lists, its random source made on first use in its own file. */
@@ -12634,9 +12646,9 @@ defTable('shells', () => shells, {
 defTable('bullets', () => bullets, { make: () => ({ x: 0, y: 0, vx: 0, vy: 0, owner: 0, age: 0 }) });
 defTable('duds', () => duds, { make: () => ({ x: 0, y: 0, a: 0, t: 0, crushed: false }) });
 // the guns' aim and reload, each player's: the battleship's (guns), the tower's (tguns), the helicopter's (hguns)
-defTable('guns', () => guns, { make: () => ({ elev: 28, power: 0.55, reload: 0, aimShow: 0, press: 0, rk: [0, 0], pk: [0, 0] }) });
-defTable('tguns', () => tguns, { make: () => ({ elev: 22, power: 0.5, reload: 0, aimShow: 0, press: 0, mg: 0 }) });
-defTable('hguns', () => hguns, { make: () => ({ elev: -20, power: 0.6, reload: 0, aimShow: 0, press: 0, mgT: 0 }) });
+defTable('guns', () => guns, { perPlayer: 2, make: () => ({ elev: 28, power: 0.55, reload: 0, aimShow: 0, press: 0, rk: [0, 0], pk: [0, 0] }) });
+defTable('tguns', () => tguns, { perPlayer: 2, make: () => ({ elev: 22, power: 0.5, reload: 0, aimShow: 0, press: 0, mg: 0 }) });
+defTable('hguns', () => hguns, { perPlayer: 2, make: () => ({ elev: -20, power: 0.6, reload: 0, aimShow: 0, press: 0, mgT: 0 }) });
 // the torpedoes and the spent ones on the bottom (27-torpedoes.js; random source sysRng('armTorps'), armTorpR; a rocket's flame
 // flickers from its own drawing source, armTorpFlame). All plain values: owners are vehicle ids
 defTable('torps', () => torps, { make: () => ({ x: 0, y: 0, vx: 0, vy: 0, up: false, dir: 1, owner: 0, t: 0, torp: true, dead: false, bub: 0 }) });
@@ -12645,8 +12657,7 @@ defTable('torpWrecks', () => torpWrecks, { make: () => ({ x: 0, y: 0, ang: 0.12,
 // towerScorch in 45-draw-vehicles.js: random source sysRng('armTowers'), armTowerR; the pier gun's own armPierR). Not saved:
 // the T-shape's definition it stands for (def), its pictures (_art, stumpArt and the stump's geometry), its harbour (dock, kept
 // by the live tower) and its soot marks (scorch: the network's local-only list)
-defTable('towers', () => towers, {
-  make: () => ({ player: 0, x: 0, facing: 1, hp: TW_HP, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0, pg: null }),
+defTable('towers', () => towers, { perPlayer: 2, make: () => ({ player: 0, x: 0, facing: 1, hp: TW_HP, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0, pg: null }),
   skip: ['def', '_art', 'stumpArt', 'stumpGeo']
 });
 // the falling chunks - a toppled tower's courses, a pier gun, wings, masts, crane parts, coral (stepChunks in 23-harbour-gates.js;
@@ -12699,7 +12710,7 @@ const CALM_ROW = worldRow({
     const g = new Float32Array(calmA.length); b64IntoF32(v, g); calmGoal = g;
   }],
 });
-defTable('dockCalm', () => [CALM_ROW], {
+defTable('dockCalm', () => [CALM_ROW], { net: false,
   make: () => CALM_ROW,
   // (the sheltered stretches again: wherever either is sheltered while it eases, as rebuildCalm leaves them)
   after: () => {
@@ -12716,15 +12727,242 @@ defTable('dockCalm', () => [CALM_ROW], {
    nothing to rebuild. Their random source: sysRng('particles') (ptR, 35-particles.js) */
 for (const [name, list] of [['spray', spray], ['bubbles', bubbles], ['foam', foam], ['wakes', wakes], ['sparks', sparks], ['flames', flames],
   ['embers', embers], ['flashes', flashes], ['welds', welds], ['rings', rings], ['debris', debris], ['dust', dust], ['grains', grains], ['ash', ash]])
-  defTable(name, () => list);
+  defTable(name, () => list, { net: false });   // (stage 5: each screen makes its own)
 
 /* (engine stage 3) The splashes' tables (34-splashes-sinking.js and 34-zz-mine-splash.js own them; registered here because the
    tables (36-zz-tables.js) come after those files): the foam streaks a shell leaves under water, the jets of a splash and a
    mine's splashes (their spires and rays plain nested values). Nothing to skip, nothing to rebuild. Their random source:
    sysRng('splashes') (spR, 34-splashes-sinking.js) */
-defTable('streaks', () => streaks);
-defTable('jets', () => jets);
-defTable('msplashes', () => msplashes);
+defTable('streaks', () => streaks, { net: false });
+defTable('jets', () => jets, { net: false });
+defTable('msplashes', () => msplashes, { net: false });
+
+/* ONLINE PLAY FROM THE TABLES (engine migration, stage 5 - plan: https://claude.ai/artifact/7osEef5ubafK3gkAEjY3Dt, "Online play
+   on the same state"). Behind a switch, off unless the page is opened with ?nettables=1: with it off, nothing here runs and online
+   play is the hand-listed snapshot of 15-net-commands.js (netSnapshot / netApply), as before.
+   With it on, the host's world is still the truth, but each guest's snapshot (~15 a second) is built from the TABLES
+   (36-zz-tables.js): per table, the rows whose x is within 3 screens of that guest's views (its ACTIVE and NEAR regions - the
+   guest sends its views' spans with its control state) and every row without an x; each row as plain data (tblPlain), sent as
+   a delta against what that guest already has: a new row whole, a known row only its changed fields, a row gone from the host's
+   list as its id. A row that leaves the guest's range is forgotten (sent whole again when it comes back) but stays on the guest,
+   which keeps stepping it as its own until then. Rows are matched by their id (uidOf); a row the guest doesn't know yet takes
+   the guest's own thing at the same place in the list if it isn't the host's yet (the guest's own world, built the same way), or
+   one of the host's things moved from another table (a ship gone to oldShips), or a fresh one (the table's make).
+   What decides the game still only comes from the host (NET.applying while it's put in; netGuestHold on the guest's own steps).
+   The guest still sends its commands (act) and control state (ctlState) as before. Online the guest's team is player 0 on its
+   screen: for the second team the player-indexed tables are sent in swapped order and every id / owner / player 0-1 swapped
+   (as netPlain does), the captains' side (p) too.
+   Messages go as JSON text, so the bytes counted (the perf panel's NET TABLES line) are what goes on the wire. The link is
+   reliable and in order (PeerJS reliable:true), so what was sent is what the guest acknowledges; a guest that sees a snapshot
+   missing asks for everything again (tfull), and the host starts that guest over from nothing. */
+const NET_TABLES = (() => { try { return new URLSearchParams(location.search).get('nettables') === '1' || !!window.__NET_TABLES; } catch (e) { return false; } })();
+// what isn't sent comes from each table's own options (defTable in 36-zz-tables.js): net: false - each screen makes its own (the
+// smoke, the particles, splashes, trails; the guest's own seat is its crew, sent as "you"; the CPU's brains think on the host;
+// the sea's surface is simulated on each screen); net: 'changes' - the land's props, built the same on both screens: only the
+// rows changed since the host first saw them; netSkip - fields each screen keeps for itself; perPlayer - a list each side's
+// things are at their index in (swapped for the second team); netIds - more fields that are a side (the captains' p)
+const ntbOn = t => t.net !== false;
+const NTB_RANGE = 3;                         // (screens from a guest's view that are sent: ACTIVE within 1, NEAR within 3)
+const NTB_SLICE = 15;                        // (a 'changes' table's rows are looked at once in this many snapshots: once a second)
+const ntbRound = (k, v) => typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 1000) / 1000 : v;
+// a row's ids swapped for the second team (as netPlain does)
+function ntbSwap(o, d, ids) {
+  if (!o || typeof o !== 'object' || d <= 0) return;
+  if (Array.isArray(o)) { for (const v of o) ntbSwap(v, d - 1, null); return; }
+  if (o.ref != null && Object.keys(o).length === 1) return;
+  for (const k in o) {
+    const v = o[k];
+    if ((NET_IDS.has(k) || (ids && ids.has(k))) && (v === 0 || v === 1)) o[k] = 1 - v;
+    else if (v && typeof v === 'object') ntbSwap(v, d - 1, null);
+  }
+}
+// a row as plain data, its local-only fields (_...) and its table's netSkip left out
+function ntbPlain(t, o, sw) {
+  const d = tblPlain(o, t.depth, t.skip, true);
+  for (const k in d) if (k[0] === '_' || t.netSkip.has(k)) delete d[k];
+  if (sw) ntbSwap(d, t.depth + 2, t.netIds);
+  return d;
+}
+// its fields, each as JSON text
+function ntbFields(d) { const F = {}; for (const k in d) F[k] = JSON.stringify(d[k], ntbRound); return F; }
+// the order a player-indexed list goes in for the second team
+function ntbOrder(t, arr, sw) {
+  if (!sw || !t.perPlayer) return arr;
+  const a = arr.slice();
+  for (let i = 0; i + 1 < a.length; i += 2) { const x = a[i]; a[i] = a[i + 1]; a[i + 1] = x; }
+  return a;
+}
+// (the host) is this x within a guest's range?
+function ntbNear(x, spans) {
+  if (typeof x !== 'number' || !spans || !spans.length) return true;
+  const W = REG.w * NTB_RANGE;
+  for (let i = 0; i + 1 < spans.length; i += 2) if (x >= spans[i] - W && x <= spans[i + 1] + W) return true;
+  return false;
+}
+// (the host, for tests and the panel) time spent and bytes, by table
+const NTB_PROF = { snapMs: 0, applyMs: 0, by: {} };
+// (the host) one guest's snapshot as JSON text: g.ntb holds what it has, per table uid -> { w: the row's text, F: its fields' }
+// (null: known, out of range). A row whose text is what was sent costs one stringify and nothing on the wire
+function ntbSnapshot(g, sw, head) {
+  const t0 = performance.now();
+  const S = g.ntb || (g.ntb = { seq: 0, T: {} });
+  for (const k in TABLES) if (ntbOn(TABLES[k])) for (const o of TABLES[k].list()) if (o) uidOf(o);   // (ids first: references go as ids)
+  const parts = [], prof = window.__ntbLog ? {} : null;
+  for (const name in TABLES) {
+    const t = TABLES[name]; if (!ntbOn(t)) continue;
+    const arr = ntbOrder(t, t.list(), sw), per = !!t.perPlayer, chg0 = t.net === 'changes';
+    const had = S.T[name] || (S.T[name] = new Map()), here = new Set();
+    const add = [], chg = [], gone = [];
+    let reorder = false;
+    arr.forEach((o, i) => {
+      if (!o) return;
+      const u = o._uid; here.add(u);
+      if (chg0) {
+        // (the land's props: the host's first look at each is what both screens built; only one changed since is sent)
+        if ((i + S.seq) % NTB_SLICE && !had.get(u)) return;
+        const w0 = JSON.stringify(ntbPlain(t, o, false), ntbRound);
+        if (o._nb === undefined) { o._nb = w0; return; }
+        if (o._nb === w0 && !had.get(u)) return;
+      }
+      if (!per && !ntbNear(o.x, g.span)) { if (had.get(u)) had.set(u, null); return; }   // (out of range: forgotten, but known)
+      const d = ntbPlain(t, o, sw), w = JSON.stringify(d, ntbRound), old = had.get(u);
+      if (old && old.w === w) return;                                                     // (unchanged: nothing)
+      const F = ntbFields(d);
+      if (!old) { add.push('[' + u + ',' + i + ',{' + Object.keys(F).map(k => JSON.stringify(k) + ':' + F[k]).join(',') + '}]'); had.set(u, { w, F }); if (per) reorder = true; return; }
+      const c = [], del = [];
+      for (const k in F) if (old.F[k] !== F[k]) c.push(JSON.stringify(k) + ':' + F[k]);
+      for (const k in old.F) if (!(k in F)) del.push(JSON.stringify(k));
+      if (c.length || del.length) chg.push('[' + u + ',{' + c.join(',') + '}' + (del.length ? ',[' + del.join(',') + ']' : '') + ']');
+      had.set(u, { w, F });
+    });
+    for (const u of had.keys()) if (!here.has(u)) { gone.push(u); had.delete(u); if (per) reorder = true; }
+    if (!add.length && !chg.length && !gone.length && !reorder) continue;
+    const p = [];
+    if (add.length) p.push('"a":[' + add.join(',') + ']');
+    if (chg.length) p.push('"c":[' + chg.join(',') + ']');
+    if (gone.length) p.push('"r":[' + gone.join(',') + ']');
+    if (reorder) p.push('"o":[' + arr.filter(Boolean).map(o => o._uid).join(',') + ']');
+    const txt = JSON.stringify(name) + ':{' + p.join(',') + '}';
+    if (prof) prof[name] = txt.length;
+    parts.push(txt);
+  }
+  S.seq++;
+  if (prof) NTB_PROF.by = prof;
+  NTB_PROF.snapMs += (performance.now() - t0 - NTB_PROF.snapMs) * 0.1;
+  return '{"t":"tsnap","n":' + S.seq + ',"h":' + JSON.stringify(head) + ',"T":{' + parts.join(',') + '}}';
+}
+// (the host) what isn't in a table, for one team: what happened in between (a lightning strike), each side's crew (the crew
+// table is each screen's own: the guest's is its seat), the clouds once a second
+function ntbHead(sw, ev, sky) {
+  const two = a => sw ? [a[1], a[0]] : [a[0], a[1]];
+  return {
+    ev, crew: two(crew).map(c => ({ mode: c.mode, dead: !!c.dead })),
+    clouds: sky ? clouds.map(c => +c.x.toFixed(1)) : null,
+  };
+}
+// (the host) bytes a second to each guest, for the perf panel
+function ntbCount(g, n) {
+  if (!g.ntbFirst) g.ntbFirst = n;
+  g.ntbB = (g.ntbB || 0) + n;
+  const now = performance.now();
+  if (!g.ntbT) g.ntbT = now;
+  if (now - g.ntbT >= 1000) { g.ntbBps = Math.round(g.ntbB * 1000 / (now - g.ntbT)); g.ntbB = 0; g.ntbT = now; }
+}
+function ntbPanel() {
+  if (!NET_TABLES) return '';
+  if (LINK.hosting) { const gs = linkGuests().filter(g => g.seat); return gs.length ? 'NET TABLES OUT ' + gs.map(g => 'P' + (g.id + 1) + ' ' + ((g.ntbBps || 0) / 1024).toFixed(1) + ' KB/S').join('  ') : ''; }
+  return NET.role === 'guest' ? 'NET TABLES IN ' + ((NTB_IN.bps || 0) / 1024).toFixed(1) + ' KB/S  SNAP ' + NTB_IN.seq : '';
+}
+// (the host, each pump) send every guest in the round its snapshot
+function ntbPump(gs) {
+  const ev = NET.events.splice(0), sky = (NET.snapN = (NET.snapN || 0) + 1) % 15 === 1, H = [null, null];
+  for (const g of gs) {
+    const st = g.seat, t = st.team;
+    if (g.ntbFull) { g.ntb = null; g.ntbFull = false; }
+    if (!H[t]) H[t] = ntbHead(t === 1, ev, sky);
+    const head = Object.assign({}, H[t], { you: { mode: st.crew.mode, dead: !!st.crew.dead }, taken: crewsOf(t).filter(c => c !== st.crew && c.mode !== 'dock' && c.mode !== 'gone').map(c => c.mode) });
+    const m = ntbSnapshot(g, t === 1, head);
+    ntbCount(g, m.length);
+    linkTo(g, m);
+    if (window.__ntbLog) { const T = JSON.parse(m).T, L = {}; for (const k in T) L[k] = JSON.stringify(T[k]).length; g.ntbLast = L; }   // (tests: bytes by table)
+  }
+  NETST.snapOut++;
+}
+// ---- the guest
+const NTB_IN = { seq: 0, b: 0, t0: 0, bps: 0, tot: 0 };
+function ntbReset() { NTB_IN.seq = 0; NTB_IN.b = 0; NTB_IN.t0 = 0; NTB_IN.tot = 0; }
+// (the guest) the views' spans, sent with the control state
+const ntbSpans = () => REG.spans.map(v => Math.round(v));
+// (the guest) a snapshot from the host
+function ntbReceive(txt) {
+  NTB_IN.b += txt.length; NTB_IN.tot += txt.length; const now = performance.now();
+  if (!NTB_IN.t0) NTB_IN.t0 = now; else if (now - NTB_IN.t0 >= 1000) { NTB_IN.bps = Math.round(NTB_IN.b * 1000 / (now - NTB_IN.t0)); NTB_IN.b = 0; NTB_IN.t0 = now; }
+  const m = JSON.parse(txt);
+  if (NTB_IN.seq && m.n !== NTB_IN.seq + 1) { NTB_IN.seq = 0; linkSend({ t: 'tfull' }); return; }   // (one missed: everything again)
+  NTB_IN.seq = m.n;
+  NETST.snapIn++; NETST.lastSnap = now; LINK.away = false;
+  NET.taken = Array.isArray(m.h.taken) ? m.h.taken : null;
+  NET.applying = true;
+  const t0 = performance.now();
+  try { ntbApply(m.T); ntbHeadApply(m.h); NTB_PROF.applyMs += (performance.now() - t0 - NTB_PROF.applyMs) * 0.1; } catch (e) { console.error(e); } finally { NET.applying = false; }
+}
+// every thing of the host's the guest has, by id (a thing moved from one table to another is found in its old one)
+function ntbByU() {
+  const M = new Map();
+  for (const k in TABLES) if (ntbOn(TABLES[k])) for (const o of TABLES[k].list()) if (o && o._nt) M.set(o._uid, o);
+  return M;
+}
+function ntbApply(T) {
+  const byU = ntbByU(), fills = [], touched = [];
+  for (const name in T) {
+    const t = TABLES[name]; if (!t || !ntbOn(t)) continue;
+    const D = T[name], arr = t.list(), mine = new Map(), inArr = new Set(arr);
+    for (const o of arr) if (o && o._nt) mine.set(o._uid, o);
+    let changed = false;
+    for (const [u, i, F] of D.a || []) {
+      let o = mine.get(u) || byU.get(u);
+      if (!o) { const c = arr[i]; if (c && !c._nt && c.kind === F.kind) o = c; }
+      if (!o) o = t.make(F);
+      o._uid = u; o._nt = 1; byU.set(u, o);
+      if (!inArr.has(o)) { arr.push(o); inArr.add(o); changed = true; }
+      fills.push([t, o, F, true]);
+    }
+    for (const [u, F, del] of D.c || []) {
+      const o = mine.get(u); if (!o) continue;
+      fills.push([t, o, F, false]);
+      if (del) for (const k of del) delete o[k];
+    }
+    if (D.r) { const R = new Set(D.r); for (let i = arr.length - 1; i >= 0; i--) if (arr[i] && arr[i]._nt && R.has(arr[i]._uid)) { arr.splice(i, 1); changed = true; } }
+    if (D.o) {
+      // (a player-indexed list: the host's things in the host's order, the guest's own left after them)
+      const by = new Map(arr.filter(o => o && o._nt).map(o => [o._uid, o])), rest = arr.filter(o => !o || !o._nt), next = D.o.map(u => by.get(u)).filter(Boolean);
+      arr.length = 0; for (const o of next) arr.push(o); for (const o of rest) if (o && arr.length < D.o.length) arr.push(o);
+      changed = true;
+    }
+    if (changed) touched.push([t, arr]);
+  }
+  // filled once every new thing is in, so a reference to one made this snapshot is found
+  for (const [t, o, F, whole] of fills) {
+    tblRefs(F, byU, t.depth + 2);
+    if (whole) for (const f in o) { const v = o[f]; if ((v === null || typeof v !== 'object') && typeof v !== 'function' && !(f in F) && f[0] !== '_' && !t.skip.has(f) && !t.netSkip.has(f)) delete o[f]; }
+    const u = o._uid; tblMerge(o, F); o._uid = u; o._nt = 1;
+    if (whole && netShot[t.name] && !o._ntSnd) { o._ntSnd = 1; try { netShot[t.name](o); } catch (e) {} }   // (a new shot: its sound and flash)
+  }
+  for (const [t, arr] of touched) if (t.after) t.after(arr);
+}
+// (the guest) what isn't in a table yet
+function ntbHeadApply(h) {
+  for (let p = 0; p < 2; p++) {
+    const you = p === 0 && h.you ? h.you : h.crew[p];
+    crew[p].mode = you.mode; crew[p].dead = you.dead;
+  }
+  for (let q = 0; q < 2; q++) if (crew[q].mode === 'sail') { let k = -1; sailboats.forEach((b, n) => { if (b.player === q && b.state === 'sail') k = n; }); if (k >= 0) crew[q].yacht = k; }
+  if (h.clouds && h.clouds.length === clouds.length) h.clouds.forEach((x, i) => { clouds[i].x = x; });
+  for (const e of h.ev || []) if (e.e === 'strike') strike(e.x, e.y, e.s >= 0 ? ships[e.s] || null : null, !!e.h);
+}
+// (tests) the delta encode / decode on its own: a host's rows, the text, and the rows put back
+window.__ntb = { snapshot: ntbSnapshot, apply: ntbApply, receive: ntbReceive, stat: NTB_IN, prof: NTB_PROF, rows: k => TABLES[k].list(), panel: () => ntbPanel(),
+  out: () => { window.__ntbLog = true; const g = linkGuests().find(q => q.seat) || {}; return { first: g.ntbFirst, last: g.ntbLast }; } };
 
 /* ================================================================
    Birds: 100 for the whole round, no new ones. Seagulls sit on the
@@ -12745,8 +12983,8 @@ const bdR = sysRng('birds'), bdRnd = (a, b) => a + (b - a) * bdR();
 defTable('birds', () => birds, { make: () => ({ kind: 'swift', state: 'cruise', spot: null, x: 0, y: 0, vx: 0, vy: 0, face: 1, ph: 0, t: 0, scared: 0 }) });
 defTable('birdFlocks', () => flocks, { make: () => ({ x: 0, y: 0, top: 30, dir: 1, speed: 30, ph: 0 }) });
 defTable('birdPerches', () => perches, { make: () => ({ x: 0, y: 0, dock: -1, bird: null }), skip: ['tower', 'plant', 'dock'] });   // (dock: the network's NET_SKIP leaves it out of a save, so it's kept here with the live perch)
-defTable('birdFeathers', () => feathers, { make: () => ({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 0, ph: 0, dark: false }) });
-defTable('birdGore', () => gore, { make: () => ({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 0 }) });
+defTable('birdFeathers', () => feathers, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 0, ph: 0, dark: false }) });
+defTable('birdGore', () => gore, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 0 }) });
 const BIRD_ROWS = {
   gull: [
     ['k...........k', '.g.........g.', '..g.......g..', '...gg.w.gg...', '....wwwwwo...', '.....ww......'],
@@ -13460,8 +13698,7 @@ function smSolve(G, dt, SPANS, W, SH, WY) {
 // (st: the { last, head } its source keeps on itself, smStream) belongs to the source, so it isn't saved: a loaded puff keeps
 // the live one's, and each stream's newest puff is found again from the list. The air-flow grid (SG) isn't saved either: once
 // loaded every column starts again from the wind as it wakes (smokeSpans) - unless the save held it (smokeAir, below)
-defTable('smoke', () => smoke, {
-  skip: ['st'],
+defTable('smoke', () => smoke, { net: false, skip: ['st'],
   after: arr => {
     const newest = new Map(), live = new Set(arr);
     for (const s of arr) if (s.st) newest.set(s.st, s);
@@ -13497,7 +13734,7 @@ function smAirLoad(txt) {
   SG.loaded = true; SMW.g = null;   // (with ?worker=1: the worker's copy of the grid made again - it starts from the wind, not the loaded air)
 }
 const SMOKE_AIR_ROW = worldRow({ air: [smAirSave, smAirLoad] });
-defTable('smokeAir', () => [SMOKE_AIR_ROW], { make: () => SMOKE_AIR_ROW });
+defTable('smokeAir', () => [SMOKE_AIR_ROW], { net: false, make: () => SMOKE_AIR_ROW });
 
 /* THE SIMULATION WORKER, ITS FIRST SYSTEM: THE SMOKE'S AIR (engine migration, stage 4 - plan:
    https://claude.ai/artifact/7osEef5ubafK3gkAEjY3Dt, "Simulation in a worker"). Behind a switch, off unless the page's address
@@ -23939,7 +24176,7 @@ const trailLate = age => age <= TRAIL_HOLD ? 1 : 1 - smoothstep(TRAIL_HOLD, TRAI
 // pieces in a row share a point (one's p2 is the next one's p1), which a save holds twice: once loaded, each next's p1 is its
 // piece's p2 again
 const trlR = sysRng('trails');
-defTable('trails', () => trails, { after: arr => { for (const t of arr) if (t.next) t.next.p1 = t.p2; } });
+defTable('trails', () => trails, { net: false, after: arr => { for (const t of arr) if (t.next) t.next.p1 = t.p2; } });
 // once per frame (not every physics step): the trail slowly spreads, rises a little and drifts
 function stepTrails(dt) {
   // the trail slowly spreads, rises a little and is carried off by the wind (each point by the wind at its own height)
@@ -24409,7 +24646,7 @@ const cpuStats = [{}, {}];
 // the brains there are (brains[p] or none), each back in her side's place once loaded; T, her level's tuning (a shared
 // CPU_TUNE entry), not saved but found again by her level
 const vehCpuR = sysRng('vehCpu'), vehCpuRnd = (a, b) => a + (b - a) * vehCpuR();
-defTable('brains', () => brains.filter(Boolean), { make: d => makeBrain(d.p || 0, d.level || 0), skip: ['T'],
+defTable('brains', () => brains.filter(Boolean), { net: false, make: d => makeBrain(d.p || 0, d.level || 0), skip: ['T'],
   after: arr => { brains[0] = brains[1] = null; for (const b of arr) { b.T = CPU_TUNE[b.level] || CPU_TUNE[0]; brains[b.p] = b; } } });
 function makeBrain(p, level) { return { p, level, T: CPU_TUNE[level], thinkT: 1.5, dwellT: 0, react: CPU_TUNE[level].react + 1, fireT: 0, nP: 0, nE: 0, aimT: null, plan: null }; }
 function cpuReset() {
@@ -26891,7 +27128,7 @@ const CAVE_WATER_ROW = worldRow({
       });
     }],
 });
-defTable('caveWater', () => [CAVE_WATER_ROW], { make: () => CAVE_WATER_ROW });
+defTable('caveWater', () => [CAVE_WATER_ROW], { net: false, make: () => CAVE_WATER_ROW });
 // ---- (engine stage 4) the caves' worker: the swell on the pockets on screen (the open world's biggest steady simulation cost
 // after the smoke's air, ~2.4 ms a tick by the harbour) worked out on a second core. Behind the same switch as the smoke's
 // air (?worker=1, SMW.on). Each frame the pockets on screen are sent with this frame's time; the swell comes back for the next
@@ -30858,8 +31095,8 @@ const HOSE = { drops: [], mistTok: 0, steamTok: 0, spots: [], steams: [], col: f
 // (engine stage 3: the fire hose's own random source, and its tables: the drops (a drop's helicopter saved by her id), the
 // steam spots, and the hose's own tokens as a one-row table - its lists, the debug hits and the frame's box list left out)
 const hoseR = sysRng('hose'), hoseRnd = (a, b) => a + hoseR() * (b - a);
-defTable('hoseDrops', () => HOSE.drops, { make: () => ({}) });
-defTable('hoseSteams', () => HOSE.steams, { make: () => ({}) });
+defTable('hoseDrops', () => HOSE.drops, { net: false, make: () => ({}) });
+defTable('hoseSteams', () => HOSE.steams, { net: false, make: () => ({}) });
 defTable('hose', () => [HOSE], { make: () => HOSE, skip: ['drops', 'steams', 'spots', 'hits', 'boxes', 'col'] });
 const isFireHeli = h => !!h && h.kind === FH_KIND && civHelis.includes(h);
 // the action button: on / off
@@ -31223,7 +31460,7 @@ function drawFwLate() { for (const f of fwLate[viewIdx]) f(); C.globalAlpha = 1;
 // tables: a rocket's colour its FW_COLS entry found again by its index ci, an ember's colour its own copy)
 const fwksR = sysRng('fireworks'), fwRnd = (a, b) => a + fwksR() * (b - a);
 defTable('fireworks', () => fireworks, { make: () => ({}), skip: ['col'], after: arr => { for (const f of arr) f.col = FW_COLS[f.ci | 0]; } });
-defTable('fwBits', () => fwBits, { make: () => ({}) });
+defTable('fwBits', () => fwBits, { net: false, make: () => ({}) });
 const FW_KINDS = ['chrys', 'willow', 'glitter', 'peony', 'ring', 'crackle'];
 // colours: m the stars, l their bright tips, i the second colour (the chrysanthemum's heart, a peony's change)
 const FW_COLS = [
@@ -34311,7 +34548,7 @@ function plantsRegrid() {
   for (const t of land.tufts || []) if (t.pk === 'grass') add(t);
   for (const L of PLT.grid) if (L) for (const it of L) if (it.heat > 0 && !(it.fire > 0)) PLT.warm.add(it);
 }
-defTable('plants', () => land.props || [], { make: () => ({}) });
+defTable('plants', () => land.props || [], { net: 'changes', make: () => ({}) });
 defTable('plantFire', () => [PLT], { make: () => PLT, skip: ['grid', 'warm', 'spots'], after: plantsRegrid });
 const plantUp = it => it.state === 'stand';
 const plantLive = it => it.pk === 'grass' ? it.alive : it.state !== 'gone';
@@ -34913,7 +35150,7 @@ const minisubs = [];
 // research ship by her id) and the pings
 const vehMsubR = sysRng('vehMinisubs'), vehMsubRnd = (a, b) => a + (b - a) * vehMsubR();
 defTable('minisubs', () => minisubs, { make: d => newMinisub({ x: d.x || 0, face: d.facing || 1 }) });
-defTable('msPings', () => msPings);
+defTable('msPings', () => msPings, { net: false });
 const newMinisub = c => ({ state: 'docked', x: c.x, y: WATER_Y, vx: 0, vy: 0, facing: c.face, turn: null, ph: vehMsubR() * 6, ship: c, cable: 0, wait: vehMsubRnd(10, 60), ai: null, lamp: { elev: c.face > 0 ? 25 : 155, power: 0, aimShow: 0 } });
 /* (user Oct 27, 12:21) the minisub you drive: "it uses the orange buttons for the 4 directions, so you need to be
    pressing in the direction you want to go as a player. Otherwise it stops." - msHold: the left / right button held
@@ -36342,7 +36579,7 @@ const spaceR = sysRng('space'), spcRnd = (a, b) => a + spaceR() * (b - a);
 defTable('shuttles', () => shuttles, { make: () => ({}) });
 defTable('spaceJunk', () => spaceJunk, { make: () => ({}) });
 defTable('orbiters', () => orbiters, { make: () => ({}) });
-defTable('rocketTrail', () => rocketTrail, { make: () => ({}) });
+defTable('rocketTrail', () => rocketTrail, { net: false, make: () => ({}) });
 defTable('satPieces', () => satPieces, { make: () => ({}), after: arr => { const P = spaceArt && spaceArt.satParts; for (const q of arr) if (P && P[q.key]) q.img = P[q.key].c; } });
 const SHUTTLEI = {"CW": 152, "CH": 84, "k": 0.5, "rows": [[[150, 65], [130, 81], [127, 81], [147, 82]], [[150, 66], [129, 79], [132, 81], [143, 81]], [[150, 67], [129, 80], [130, 82], [143, 79]]]};
 // (sized against the 747 - itself two thirds of the battleship, user Oct 26: the orbiter about half a 747, the stack
@@ -38639,8 +38876,8 @@ function buildTuftArt() {
 // (engine stage 3: the grass tufts' own random source, and the tufts' and the sliding sand's tables - each tuft's plant
 // state with it, 50-land-plants)
 const tfR = sysRng('tufts'), tfRnd = (a, b) => a + (b - a) * tfR();
-defTable('tufts', () => land.tufts || [], { make: () => ({}) });
-defTable('sand', () => land.sand, { make: () => ({}) });
+defTable('tufts', () => land.tufts || [], { net: 'changes', make: () => ({}) });
+defTable('sand', () => land.sand, { net: 'changes', make: () => ({}) });
 function buildTufts() {
   land.tufts = [];
   const R = seededRng(5150), W = WORLD_W;
@@ -41082,9 +41319,9 @@ const leaves = [];
 // (engine stage 3: the leaves and blades, the ground hits' spike bursts and flash, and the earth grains draw from their own
 // random source, and are tables: a burst's palette found again from its ground (mat); its spikes' grains kept (depth 6))
 const landBitsR = sysRng('landBits'), landBitsRnd = (a, b) => a + landBitsR() * (b - a);
-defTable('leaves', () => leaves, { make: () => ({}) });
-defTable('earthGrains', () => earthGrains, { make: () => ({}) });
-defTable('spikeBursts', () => spikeBursts, { make: () => ({}), depth: 6, skip: ['P'], after: arr => { for (const B of arr) B.P = SPIKE_PAL[B.mat] || SPIKE_PAL.dirt; } });
+defTable('leaves', () => leaves, { net: false, make: () => ({}) });
+defTable('earthGrains', () => earthGrains, { net: false, make: () => ({}) });
+defTable('spikeBursts', () => spikeBursts, { net: false, make: () => ({}), depth: 6, skip: ['P'], after: arr => { for (const B of arr) B.P = SPIKE_PAL[B.mat] || SPIKE_PAL.dirt; } });
 const LEAF_COLS = ['#54724e', '#8ba34f', '#2a474b', '#6f8c47'];
 function leafFly(x, y, vx, vy) {
   if (SIM_ONLY || leaves.length > 260) return;
