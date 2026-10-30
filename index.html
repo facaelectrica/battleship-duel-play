@@ -2200,10 +2200,12 @@ function bedDrop0(x) {
   // a long swell of them and a shorter, sharper one on top; none on the harbour's shelf, more the deeper it gets)
   const r = smoothstep(BED_SHELF, BED_SHELF + 500, d) * (0.55 + 0.45 * Math.min(1, drop / BED_EXTRA)) * (FLOOR_HILLY ? floorHillsAt(x) : 1);
   if (r <= 0) return drop;
-  const zz = (cell, i0) => { const u = x / cell, i = Math.floor(u), f = u - i; return hash(i * 1.37 + i0) * (1 - f) + hash((i + 1) * 1.37 + i0) * f - 0.5; };
-  if (drop < 0) return drop + Math.max(0, r) * (150 * zz(310, 11.3) + 50 * zz(85, 57.1)) * 0.35;   // (raised toward the surface or out of it: a gentler zigzag)
-  return Math.max(0, drop + r * (150 * zz(310, 11.3) + 50 * zz(85, 57.1)));
+  // (engine stage 6, round 3, Oct 30: the zigzag by bedZZ, not a closure over x made at every call - thousands a frame, the
+  // floor and the layers on it asking for every column. The same sums)
+  if (drop < 0) return drop + Math.max(0, r) * (150 * bedZZ(x, 310, 11.3) + 50 * bedZZ(x, 85, 57.1)) * 0.35;   // (raised toward the surface or out of it: a gentler zigzag)
+  return Math.max(0, drop + r * (150 * bedZZ(x, 310, 11.3) + 50 * bedZZ(x, 85, 57.1)));
 }
+function bedZZ(x, cell, i0) { const u = x / cell, i = Math.floor(u), f = u - i; return hash(i * 1.37 + i0) * (1 - f) + hash((i + 1) * 1.37 + i0) * f - 0.5; }
 // the sand, and the floor: the sand, or the top of a rock formation standing on it (buildReef)
 function sandY(x) { return SEABED_Y + bedDrop(x) + 1.5 * Math.sin(x * 0.013) + Math.sin(x * 0.041 + 1); }
 function seabedY(x) { if (OWM && onLand(x) && lakeAt(x)) { const t = landTop(x); return land.lkRocks && rockForms.length ? Math.min(t, rockTopY(x)) : t; }   // (OPEN WORLD: a lake's bed - the sea's own floor under dry land stays hidden under it; a lake marked SEA: its rock formations too - buildLakeSea)
@@ -3039,8 +3041,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 334;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 10:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 335;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 10:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -15038,11 +15040,30 @@ class GLGrad {
 // (engine stage 8, Oct 30: a gradient made anew each frame with the same stops as one already laid in this table took a row of
 // its own - 256 colours worked out and uploaded - every frame. It now shares that row: the same colours, the same picture)
 const GRADK = new Map();
+const glNumEq = (a, b) => a === b || (a !== a && b !== b);
+function glGradHash(stops) {
+  let h = stops.length | 0;
+  for (const s of stops) { const c = s[1]; h = Math.imul(h ^ ((s[0] * 1e6) | 0), 16777619); h = Math.imul(h ^ ((c[0] * 1000) | 0), 16777619); h = Math.imul(h ^ ((c[1] * 1000) | 0), 16777619); h = Math.imul(h ^ ((c[2] * 1000) | 0), 16777619); h = Math.imul(h ^ ((c[3] * 1000) | 0), 16777619); }
+  return h;
+}
+function glGradFind(L, stops) {
+  if (!L) return undefined;
+  for (const e of L) {
+    const f = e.flat; if (f.length !== stops.length * 5) continue;
+    let ok = true;
+    for (let i = 0; ok && i < stops.length; i++) { const s = stops[i], c = s[1], o = i * 5; ok = glNumEq(f[o], s[0]) && glNumEq(f[o + 1], c[0]) && glNumEq(f[o + 2], c[1]) && glNumEq(f[o + 3], c[2]) && glNumEq(f[o + 4], c[3]); }
+    if (ok) return e.row;
+  }
+  return undefined;
+}
 function glGradRow(gr) {
   if (gr.gen === GLR.gradGen) return gr.row;
   if (GRADK.gen !== GLR.gradGen) { GRADK.clear(); GRADK.gen = GLR.gradGen; }
-  let key = ''; for (const s of gr.stops) { const c = s[1]; key += s[0] + ':' + c[0] + ',' + c[1] + ',' + c[2] + ',' + c[3] + '|'; }
-  const hit = GRADK.get(key);
+  // (engine stage 6, round 3, Oct 30: the key was a string written out from every stop of every new gradient - most of them
+  // made afresh each frame - now a number hashed from the stops, each entry keeping its stops' numbers to compare exactly.
+  // Two numbers are equal here exactly when they wrote out the same (0 and -0 both '0', NaN 'NaN'): the same rows found)
+  const hk = glGradHash(gr.stops);
+  const hit = glGradFind(GRADK.get(hk), gr.stops);
   if (hit !== undefined) { gr.row = hit; gr.gen = GLR.gradGen; return hit; }
   if (GLR.gradNext >= 256) { glFlush(); GLR.gradGen++; GLR.gradNext = 0; GRADK.clear(); GRADK.gen = GLR.gradGen; }
   const row = GLR.gradNext++, px = GLR.gradPx;
@@ -15067,7 +15088,8 @@ function glGradRow(gr) {
   gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, GLR.gradTex);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-  gr.row = row; gr.gen = GLR.gradGen; GRADK.set(key, row);
+  gr.row = row; gr.gen = GLR.gradGen;
+  { const flat = []; for (const s of gr.stops) { const c = s[1]; flat.push(s[0], c[0], c[1], c[2], c[3]); } let L = GRADK.get(hk); if (!L) GRADK.set(hk, L = []); L.push({ flat, row }); }
   return row;
 }
 
@@ -15283,6 +15305,7 @@ function glQuad(x0, y0, x1, y1, x2, y2, x3, y3, u0, v0, u1, v1, u2, v2, u3, v3, 
   GLR.n++;
 }
 // a quad with the context's fill style: corners in user space (ux, uy) and on the target (dx, dy)
+const glGradT = (ux, uy, i, a, ex, ey, L2) => ((ux[i] - a[0]) * ex + (uy[i] - a[1]) * ey) / L2;
 function glFillQuad(ctx, ux, uy, dx, dy) {
   const s = ctx.s, fs = s.fs;
   if (typeof fs === 'string') {
@@ -15298,8 +15321,9 @@ function glFillQuad(ctx, ux, uy, dx, dy) {
   if (fs.kind === 'L') {
     const ex = a[2] - a[0], ey = a[3] - a[1], L2 = ex * ex + ey * ey;
     if (!L2) return;                                       // (a gradient of no length paints nothing)
-    const row = glGradRow(fs), t = i => ((ux[i] - a[0]) * ex + (uy[i] - a[1]) * ey) / L2;
-    glQuad(dx[0], dy[0], dx[1], dy[1], dx[2], dy[2], dx[3], dy[3], t(0), 0, t(1), 0, t(2), 0, t(3), 0, col, 2 + 128 * row, 0);
+    // (round 3, Oct 30: the corner's place along the gradient by a plain function, not a closure made at every fill - same sums)
+    const row = glGradRow(fs);
+    glQuad(dx[0], dy[0], dx[1], dy[1], dx[2], dy[2], dx[3], dy[3], glGradT(ux, uy, 0, a, ex, ey, L2), 0, glGradT(ux, uy, 1, a, ex, ey, L2), 0, glGradT(ux, uy, 2, a, ex, ey, L2), 0, glGradT(ux, uy, 3, a, ex, ey, L2), 0, col, 2 + 128 * row, 0);
   } else {
     const dr = a[5] - a[2];
     if (!dr) return;
@@ -23590,7 +23614,8 @@ function puffEnd(cacheKey) {
     const c = puffCache[key] || (puffCache[key] = { cv: makeLayer(300, 150) });
     if (c.cv.width < w || c.cv.height < h) { c.cv.width = Math.max(c.cv.width, w); c.cv.height = Math.max(c.cv.height, h); }
     const g = c.cv.getContext('2d'); g.clearRect(0, 0, w, h); g.drawImage(puffCv, x0, y0, w, h, 0, 0, w, h);
-    Object.assign(c, { tick: renderTick, smk: SMK, sv: SV, campx: CAMPX, toppx: TOPPX, X0: PUFF.X0 + x0, Y0: PUFF.Y0 + y0, W: w, H: h, ok: true });
+    // (engine stage 6, round 3, Oct 30: the fields written one by one, in the same order, not an object made to copy them from)
+    c.tick = renderTick; c.smk = SMK; c.sv = SV; c.campx = CAMPX; c.toppx = TOPPX; c.X0 = PUFF.X0 + x0; c.Y0 = PUFF.Y0 + y0; c.W = w; c.H = h; c.ok = true;
     C.drawImage(c.cv, 0, 0, w, h, (PUFF.X0 + x0) * SMK, (PUFF.Y0 + y0) * SMK, w * SMK, h * SMK);
   } else C.drawImage(puffCv, x0, y0, w, h, (PUFF.X0 + x0) * SMK, (PUFF.Y0 + y0) * SMK, w * SMK, h * SMK);
   C.imageSmoothingEnabled = sm;
@@ -27053,7 +27078,7 @@ function surfaceOf(p, X) {
 function pokeWave(p, X, amt, rad) {
   if (!p.h) return;
   const c = Math.round((X - p.win.X0) / CV.G - p.xa - 0.5), r = rad || 3;
-  for (let k = -r; k <= r; k++) { const j = c + k; if (j >= 0 && j < p.h.length && p.wet[j]) p.v[j] -= amt * (1 - Math.abs(k) / (r + 1)); }
+  for (let k = -r; k <= r; k++) { const j = c + k; if (j >= 0 && j < p.h.length && p.wet[j]) { p.v[j] -= amt * (1 - Math.abs(k) / (r + 1)); p.still = false; } }
 }
 // the springs, one step (the game's stepWater on a pocket's columns)
 function stepSurface(p, dt) {
@@ -27067,6 +27092,19 @@ function stepSurface(p, dt) {
   T[0] = V[0]; T[N - 1] = V[N - 1];
   for (let j = 0; j < N; j++) { V[j] = T[j]; let h = H[j] + V[j] * dt; if (h > 40) { h = 40; V[j] *= 0.5; } else if (h < -40) { h = -40; V[j] *= 0.5; } H[j] = W[j] ? h : 0; }
 }
+// (engine stage 2: T seconds of a pocket's springs in 1/240 s steps; once every column is within a thousandth of a unit of still
+// it is set still, flat, and left - a still pocket's step changes nothing - till pokeWave or a table load moves it)
+function springsFor(p, T) {
+  if (p.still) return;
+  const k = Math.max(1, Math.round(T / WSTEP));
+  for (let i = 0; i < k; i++) { stepSurface(p, WSTEP); if ((i & 63) === 63 && pocketStill(p)) return; }
+  pocketStill(p);
+}
+function pocketStill(p) {
+  const H = p.h, V = p.v;
+  for (let j = 0; j < H.length; j++) if (H[j] > 1e-3 || H[j] < -1e-3 || V[j] > 1e-3 || V[j] < -1e-3) return false;
+  H.fill(0); V.fill(0); p.still = true; return true;
+}
 function splashAt(p, X, k) {
   pokeWave(p, X, 70 * k, 4);
   const Y = surfaceOf(p, X);
@@ -27079,7 +27117,15 @@ function waterStep(dt) {
   // the surfaces: the springs at the game's step, then this frame's table of the surface (swell + springs)
   wAcc = Math.min(wAcc + dt, 0.1); wTime += dt;
   const pk = allPockets();
-  while (wAcc >= WSTEP) { wAcc -= WSTEP; for (const p of pk) if (p.h) stepSurface(p, WSTEP); }
+  // (engine stage 2: a pocket's springs by its region's tier - every 1/240 s step this tick within a screen of a view (by its
+  // middle or either end), 15 Hz within 3, 2 Hz further, catching up its time in the same 1/240 s steps; one lying still
+  // (nothing pushed it since its waves died away) is not stepped till something does)
+  let m = 0; while (wAcc >= WSTEP) { wAcc -= WSTEP; m++; }
+  if (m) { const S = schedSystem('cavesprings', 0.3, 1e9), G = CV.G;
+    for (const p of pk) { if (!p.h) continue;
+      const a = p.win.X0 + p.xa * G, b = a + p.h.length * G, c = (a + b) / 2;
+      schedStep(S, p, c, m * WSTEP, T => springsFor(p, T), tierAt(a) === 0 || tierAt(b) === 0); }
+  }
   // (perf, Oct 28 22:50, claude/perf-cave-water-v191-oct28.md: the swell on every pocket's surface was a fifth of the frame -
   // ~4,300 columns of the open sea's swell for water nobody could see) only the pockets within a screen of a view; the
   // rest lie flat at their level until one comes near
@@ -27161,7 +27207,7 @@ const CAVE_WATER_ROW = worldRow({
         const Wn = CV.wins[k]; if (!Wn || !Wn.pockets || !Array.isArray(ps)) return;
         ps.forEach((d, i) => {
           const p = Wn.pockets[i]; if (!p || !d || !p.h || p.h.length !== d.n) return;
-          b64IntoF32(d.h, p.h); b64IntoF32(d.v, p.v);
+          b64IntoF32(d.h, p.h); b64IntoF32(d.v, p.v); p.still = false; delete p._sa;
           p.flat = d.flat; if (d.flatL == null) delete p.flatL; else p.flatL = d.flatL;
           if (p.sy) { if (p.flat) p.sy.fill(p.flatL != null ? p.flatL : pocketLevel(p)); else surfTable(p); }   // (this frame's surface again)
         });
@@ -33918,8 +33964,12 @@ const lhCut = (im, [x0, y0, w, h], f) => { const c = makeCanvas(w, h); c.getCont
 // its drawing facing f and its glow: the left one's frame k as it is; the right one in the desert's tone if it's on the
 // desert side, sooted by frame k (0-5)
 function lhArt(tw) {
-  const f = tw.facing, L = lhLeft(tw), k = L ? lhFrameL(tw) : towerFrame(tw), desert = desertSide(tw.x), key = (L ? 'L' : 'R') + f + ':' + (desert ? 1 : 0) + ':' + k;
-  if (lhArts[key]) return lhArts[key];
+  const f = tw.facing, L = lhLeft(tw), k = L ? lhFrameL(tw) : towerFrame(tw), desert = desertSide(tw.x);
+  // (engine stage 6, round 3, Oct 30: the tower keeps the last one it was given and what it was for - asked several times a
+  // frame (the flag, the birds, the drawing), it made its key string every time. The same picture, from the same table)
+  const m = tw._lhA; if (m && m.f === f && m.L === L && m.k === k && m.d === desert && lhArts[m.key] === m.A) return m.A;
+  const key = (L ? 'L' : 'R') + f + ':' + (desert ? 1 : 0) + ':' + k;
+  if (lhArts[key]) { tw._lhA = { f, L, k, d: desert, key, A: lhArts[key] }; return lhArts[key]; }
   let c, glow;
   if (L) { c = lhCut(img.lighthouseL, [k * LHL.w, 0, LHL.w, LHL.h], f); glow = lhCut(img.lighthouseL, [k * LHL.w, LHL.h, LHL.w, LHL.h], f); if (desert) c = desertTone(c); }   // (the desert side's in its desert tone, as its city)
   else {
