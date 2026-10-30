@@ -3014,8 +3014,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 297;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 29 21:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 298;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 29 21:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6288,8 +6288,14 @@ function stepWater(dt, clearForces) {
     A.t += dt;
     if (A.t > 0.5) {                                        // (the rest settles: no forces, the swell's own ripples dying away)
       A.t = 0;
-      const inA = i => { for (let k = 0; k < A.n; k++) if (i >= A.r[k][0] && i <= A.r[k][1]) return true; return false; };
-      for (const [a, b] of wetRuns) for (let i = a; i <= b; i++) { if (inA(i)) { i = Math.max(i, ...A.r.slice(0, A.n).filter(r => i >= r[0] && i <= r[1]).map(r => r[1])); continue; } wh[i] *= 0.7; wv[i] *= 0.7; wf[i] = 0; }
+      // (the cells outside the worked stretches, walked by stretch - no test a cell: the same cells as before. Oct 29, the
+      // frame-rate work: the iPad spent 11 ms a frame in the sea)
+      const rs = A.r.slice(0, A.n).map(r => [r[0], r[1]]).sort((p, q) => p[0] - q[0]), H = wh, V = wv, Fo = wf;
+      for (const [a, b] of wetRuns) {
+        let i = a;
+        for (const [r0, r1] of rs) { const e = Math.min(b, r0 - 1); for (; i <= e; i++) { H[i] *= 0.7; V[i] *= 0.7; Fo[i] = 0; } if (i <= r1) i = Math.max(i, r1 + 1); if (i > b) break; }
+        for (; i <= b; i++) { H[i] *= 0.7; V[i] *= 0.7; Fo[i] = 0; }
+      }
     }
     return;
   }
@@ -6582,19 +6588,27 @@ function damageSection(sh, i, steps, hx, hy, dent) {
 
 // the same over one stretch of water a..b (its ends dry: they stay flat, the waves stop at them)
 function stepWaterRun(dt, clearForces, a, b) {
-  const c2 = (WAVE_C * WAVE_C) / (DX * DX), last = N - 1;
+  // (the arrays read into locals once, the two end cells - which mirror their neighbour - worked out on their own so the
+  // middle has no tests, the last two passes as one: the same numbers to the bit. Oct 29: SEA 11.4 ms on the iPad)
+  const c2 = (WAVE_C * WAVE_C) / (DX * DX), last = N - 1, H = wh, V = wv, Fo = wf, T = wtmp, WA = wetA, CA = calmA, k0 = WAVE_K0, dm = WAVE_DAMP;
+  const i0 = Math.max(a, 1), i1 = Math.min(b, last - 1), has0 = a <= 0 && b >= 0, hasL = last > 0 && a <= last && b >= last;
+  // 1. the wave equation
+  if (has0) { const hl = H[1], hr = 0 < last ? H[1] : H[last - 1]; V[0] += (c2 * (hl + hr - 2 * H[0]) - k0 * H[0] - dm * V[0] + Fo[0]) * dt; }
+  for (let i = i0; i <= i1; i++) { const h = H[i]; V[i] += (c2 * (H[i - 1] + H[i + 1] - 2 * h) - k0 * h - dm * V[i] + Fo[i]) * dt; }
+  if (hasL) { const hl = H[last - 1], hr = H[last - 1]; V[last] += (c2 * (hl + hr - 2 * H[last]) - k0 * H[last] - dm * V[last] + Fo[last]) * dt; }
+  // 2. sheltered water inside the harbours soaks up waves
+  for (const [p, q] of calmRuns) { const lo = Math.max(a, p), hi = Math.min(b + 1, q); for (let i = lo; i < hi; i++) V[i] -= V[i] * (1 - CA[i]) * 3 * dt; }
+  // 3. the speed smoothed across its neighbours
+  if (has0) T[0] = V[0];
+  for (let i = i0; i <= i1; i++) T[i] = V[i] + 0.03 * (V[i - 1] + V[i + 1] - 2 * V[i]);
+  if (hasL) T[last] = V[last];
+  // 4. the height moved by it (dry cells kept still)
   for (let i = a; i <= b; i++) {
-    const hl = i > 0 ? wh[i - 1] : wh[1], hr = i < last ? wh[i + 1] : wh[last - 1];
-    wv[i] += (c2 * (hl + hr - 2 * wh[i]) - WAVE_K0 * wh[i] - WAVE_DAMP * wv[i] + wf[i]) * dt;
-  }
-  for (const [p, q] of calmRuns) { const lo = Math.max(a, p), hi = Math.min(b + 1, q); for (let i = lo; i < hi; i++) wv[i] -= wv[i] * (1 - calmA[i]) * 3 * dt; }
-  for (let i = a; i <= b; i++) wtmp[i] = i > 0 && i < last ? wv[i] + 0.03 * (wv[i - 1] + wv[i + 1] - 2 * wv[i]) : wv[i];
-  for (let i = a; i <= b; i++) {
-    wv[i] = wtmp[i];
-    let h = wh[i] + wv[i] * dt;
-    if (h > 40) { h = 40; wv[i] *= 0.5; } else if (h < -40) { h = -40; wv[i] *= 0.5; }
-    if (wetA[i]) wh[i] = h; else { wh[i] = 0; wv[i] = 0; }
-    if (clearForces) wf[i] = 0;
+    V[i] = T[i];
+    let h = H[i] + V[i] * dt;
+    if (h > 40) { h = 40; V[i] *= 0.5; } else if (h < -40) { h = -40; V[i] *= 0.5; }
+    if (WA[i]) H[i] = h; else { H[i] = 0; V[i] = 0; }
+    if (clearForces) Fo[i] = 0;
   }
 }
 // (forces put on dry cells between the waters are never used: cleared with the rest)
