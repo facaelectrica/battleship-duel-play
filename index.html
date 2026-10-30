@@ -3058,8 +3058,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 352;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 13:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 353;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 13:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -16497,6 +16497,217 @@ function wglTintCopy(views, tintOf, warmCss) {
 }
 
 /* ================================================================
+   ENGINE STAGE 8, the last two passes (Oct 30): the middle sea's columns and the rain's streaks on the GPU.
+   1. THE MIDDLE SEA (drawMidSea, 42-render-sky.js): every column's swell height and its patch of foam were worked out in JS
+      every frame (crestAt, two swells of three Gerstner steps, a sine, cloudNoise's four hashes and a hash: some twenty sines
+      a column) and drawn as runs of rectangles. Now JS works out only what needs doubles - each sine's phase at the start of
+      every block of 32 columns, reduced to one turn (the time and the camera's place make them large), the noise's lattice
+      and the foam's hashes (a few dozen) - and one program does the columns, in three draws: the water (the same gradient),
+      then the foam twice (a rising column's first foam row was painted twice, its 1-pixel patch and its 2-pixel rise: two
+      blends, so two draws). The same formulas in the same order, highp. ON by default (?midseagpu=0 turns it off).
+   2. THE RAIN'S STREAKS (drawRainStreaks, 47-render-overlays.js): each drop's cells were written into a pixel buffer in JS
+      (a dozen or two a drop, thousands of drops) and the buffer uploaded (a view's width x its height in cells, every frame).
+      Now JS keeps each drop's head, slant, length and where it stops (the same doubles as before) - 8 numbers a drop - and one
+      instanced draw writes the cells into a kept layer of the same cells (no blending: the last drop over a cell wins, as in
+      the buffer), which is laid on the view as the buffer was. ON by default (?raingpu=0 turns it off).
+   ================================================================ */
+// (ON by default since Version 353: on the user's GPU (Oct 30) storm, battle and openfar came out the same to the pixel as the JS
+// path; only a headless software renderer drew them differently. ?midseagpu=0 / ?raingpu=0 turn them off; a failed setup falls back
+// to the JS path by itself)
+const MIDSEA_GPU = !/[?&]midseagpu=0/.test(location.search);
+const RAIN_GPU = !/[?&]raingpu=0/.test(location.search);
+const G8 = { ep: -1, ms: null, rn: null };
+function g8Setup() {
+  if (G8.ep === GLR.epoch) return true;
+  const gl = GLR.gl;
+  try {
+    const prog = (vs, fs, names) => { const p = gl.createProgram(); gl.attachShader(p, glShader(gl.VERTEX_SHADER, vs)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
+      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const U = {}; for (const k of names) U[k] = gl.getUniformLocation(p, k); return { p, U }; };
+    G8.ms = prog(WGL_VS, G8_MS_FS, ['u_size', 'u_rect', 'u_m', 'u_d', 'u_grad', 'u_c', 'u_k', 'u_g', 'u_col', 'u_pass', 'u_off', 'u_cb']);
+    G8.msT = glNewTex(0, 0, gl.NEAREST); G8.msW = 0; G8.msF = new Float32Array(0);
+    G8.rn = prog(G8_RN_VS, G8_RN_FS, ['u_fb', 'u_lim', 'u_tier']);
+    G8.rvao = gl.createVertexArray(); gl.bindVertexArray(G8.rvao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+    G8.rvbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, G8.rvbo);
+    for (let i = 1; i <= 2; i++) { gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, 4, gl.FLOAT, false, 32, (i - 1) * 16); gl.vertexAttribDivisor(i, 1); }
+    gl.bindVertexArray(GLR.vao); GLR.cur.vao = 1;
+    G8.rT = null; G8.rW = 0; G8.rH = 0; G8.rfbo = null;
+    G8.ep = GLR.epoch; return true;
+  } catch (e) { console.error(e); G8.ep = -2; return false; }
+}
+const g8On = () => GLR.on && !GLR.lost && (G8.ep === GLR.epoch || (G8.ep !== -2 && g8Setup())) && C instanceof GLCtx;
+// one turn: the phases are reduced in doubles, so the shader's sines see small numbers (the same sine)
+const G8_TAU = Math.PI * 2;
+const g8Turn = v => v - G8_TAU * Math.floor(v / G8_TAU);
+
+/* ---- 1. the middle sea. u_d (RGBA32F): rows 0-2 one texel a block of 32 columns - the five phases at its first column (crestAt's
+   two, the two swells', the ripple's), the noise's x there (its lattice cell from the table's first, and its fraction), u/3 there
+   (the same); row 3 the noise's lattice (hash at (xi, yi), (xi, yi + 1)); row 4 the foam's hashes. u_k: each phase's step a
+   column, the noise x's and u/3's ---- */
+const G8_MS_FS = `#version 300 es
+precision highp float; precision highp int;
+in vec2 v_u; out vec4 o;
+uniform highp sampler2D u_d; uniform sampler2D u_grad;
+uniform vec4 u_c;      // first column, step, columns, the noise's v (smoothstep of y's fraction)
+uniform vec4 u_k;      // steps a column: crestAt's two phases, the swells' two
+uniform vec4 u_off;    // steps a column: the ripple's phase, the noise x, u/3; foamCut
+uniform vec4 u_g;      // base, amp, hz, bot
+uniform vec4 u_col;    // the foam (premultiplied)
+uniform vec3 u_pass;   // pass (0 the water, 1 foam once, 2 foam twice), the gradient's row, its alpha
+uniform vec2 u_cb;      // crestAt's base (its clamp), PB
+float swell(float ph, float s) {
+  if (s < 0.02) return sin(ph);
+  float f = ph - 1.5707963;
+  float th = f + s * sin(f);
+  th = f + s * sin(th); th = f + s * sin(th);
+  return cos(th) + s * 0.5;
+}
+// column i: its top (y) and whether foam is on it
+vec2 col(int i, float cbase) {
+  int b = i >> 5, j = i & 31; float fj = float(j);
+  vec4 p = texelFetch(u_d, ivec2(b, 0), 0), q = texelFetch(u_d, ivec2(b, 1), 0);
+  float pa = p.x + fj * u_k.x, pb = p.y + fj * u_k.y;
+  float pat = 0.5 + 0.32 * sin(pa) + 0.18 * sin(pb);
+  float sh = cbase * clamp(pat * 1.25 - 0.1, 0.0, 1.0) * 0.8;
+  float w = swell(p.z + fj * u_k.z, sh) + 0.6 * swell(p.w + fj * u_k.w, sh) + 0.3 * sin(q.x + fj * u_off.x);
+  float y = u_g.x + floor(w * u_g.y / u_cb.y + 0.5) * u_cb.y;
+  float xr = q.z + fj * u_off.y, fl = floor(xr), fx = xr - fl; int xi = int(q.y + 0.5) + int(fl);
+  vec2 h0 = texelFetch(u_d, ivec2(xi, 3), 0).xy, h1 = texelFetch(u_d, ivec2(xi + 1, 3), 0).xy;
+  float uu = fx * fx * (3.0 - 2.0 * fx), v = u_c.w;
+  float a = h0.x, bb = h1.x, c = h0.y, d = h1.y;
+  float nz = (a + (bb - a) * uu) * (1.0 - v) + (c + (d - c) * uu) * v;
+  vec4 r = texelFetch(u_d, ivec2(b, 2), 0);
+  float kr = r.x + fj * u_off.z; int ki = int(r.y + 0.5) + int(floor(kr));
+  float hs = texelFetch(u_d, ivec2(ki, 4), 0).x;
+  return vec2(y, nz * 0.75 + hs * 0.25 > u_off.w ? 1.0 : 0.0);
+}
+void main() {
+  float x = floor(v_u.x), y = floor(v_u.y);
+  float fi = floor((x - u_c.x) / u_c.y); int i = int(fi), n = int(u_c.z + 0.5);
+  if (fi < 0.0 || i >= n) discard;
+  vec2 c = col(i, u_cb.x);
+  if (u_pass.x < 0.5) {
+    float bot = u_g.w;
+    if (y < min(c.x, bot) || y >= max(c.x, bot)) discard;
+    float t = clamp((y + 0.5 - u_g.z) / (bot - u_g.z), 0.0, 1.0);
+    o = textureLod(u_grad, vec2((t * 255.0 + 0.5) / 256.0, (u_pass.y + 0.5) / 256.0), 0.0) * u_pass.z;
+    return;
+  }
+  if (c.y < 0.5) discard;
+  bool rise = i > 0 && c.x < col(i - 1, u_cb.x).x;
+  int k = (y == c.x ? 1 : 0) + (rise && (y == c.x || y == c.x + 1.0) ? 1 : 0);
+  if (float(k) < u_pass.x) discard;
+  o = u_col;
+}`;
+// the middle sea's columns on the GPU (drawMidSea's loop): its numbers as drawMidSea has them
+function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, crest) {
+  const gl = GLR.gl, pr = G8.ms, U = pr.U, ctx = C;
+  const c0 = Math.floor(Lp / step) * step, n = Math.ceil((Lp + Wp - c0) / step), nb = (n + 31) >> 5;
+  const du = step / Sl, cbase = clamp(0.1 + 0.13 * A + 0.3 * st, 0, 0.82);
+  // the noise's lattice and the foam's hashes over the columns' span (u rises with c)
+  const uA = layerX(c0, L, Sl), uB = layerX(c0 + (n - 1) * step, L, Sl);
+  const xi0 = Math.floor(uA * 0.045 + time * 0.08) - 1, xi1 = Math.floor(uB * 0.045 + time * 0.08) + 2;
+  const k0 = Math.floor(uA / 3) - 1, k1 = Math.floor(uB / 3) + 1;
+  const Y = time * 0.35, yi = Math.floor(Y), fy = Y - yi, v = fy * fy * (3 - 2 * fy);
+  const nl = xi1 - xi0 + 1, nk = k1 - k0 + 1, TW = Math.max(nb, nl, nk);
+  if (G8.msF.length < TW * 5 * 4) G8.msF = new Float32Array((TW + 64) * 5 * 4);
+  const F = G8.msF, R = TW * 4;
+  for (let b = 0; b < nb; b++) {
+    const u = layerX(c0 + b * 32 * step, L, Sl), o = b * 4, x2 = u * 2;
+    F[o] = g8Turn(x2 * 0.0019 + time * 0.11); F[o + 1] = g8Turn(x2 * 0.0047 - time * 0.17 + 1.9);
+    F[o + 2] = g8Turn(u * 0.021 + time * 0.7); F[o + 3] = g8Turn(u * 0.047 - time * 1.1);
+    const X = u * 0.045 + time * 0.08, xi = Math.floor(X), U3 = u / 3, ki = Math.floor(U3);
+    F[R + o] = g8Turn(u * 0.09 + time * 1.7); F[R + o + 1] = xi - xi0; F[R + o + 2] = X - xi; F[R + o + 3] = 0;
+    F[2 * R + o] = U3 - ki; F[2 * R + o + 1] = ki - k0; F[2 * R + o + 2] = 0; F[2 * R + o + 3] = 0;
+  }
+  const h = (i, j) => hash(i * 12.9898 + j * 78.233 + 7.1 * 3.719);   // (cloudNoise's, sd 7.1)
+  for (let i = 0; i < nl; i++) { const o = 3 * R + i * 4; F[o] = h(xi0 + i, yi); F[o + 1] = h(xi0 + i, yi + 1); F[o + 2] = 0; F[o + 3] = 0; }
+  for (let i = 0; i < nk; i++) { const o = 4 * R + i * 4; F[o] = hash((k0 + i) * 0.731 + 0.17); F[o + 1] = 0; F[o + 2] = 0; F[o + 3] = 0; }
+  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G8.msT); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  if (G8.msW < TW) { G8.msW = TW + 64; gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, G8.msW, 5, 0, gl.RGBA, gl.FLOAT, null); }
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TW, 5, gl.RGBA, gl.FLOAT, F.subarray(0, TW * 5 * 4));
+  for (let i = 0; i < 8; i++) if (GLR.unit[i] === G8.msT) GLR.unit[i] = null;   // (unit 9 used for the upload: the cache keeps 0-7)
+  GLR.stats.uploads++; GLR.stats.upPx += TW * 5;
+  const row = glGradRow(g), ga = ctx.s.ga, gA = Math.round(ga * 255) / 255;
+  const pc = glParse(crest), cc = glPack(pc, ga), col = [(cc & 255) / 255, ((cc >>> 8) & 255) / 255, ((cc >>> 16) & 255) / 255, (cc >>> 24) / 255];
+  // the quad: every column's top lies within 3 swells' height of base (|w| < 2.9)
+  const yLo = Math.min(bot, Math.floor(base - 3 * Math.abs(amp)) - 4), yHi = Math.max(bot, Math.ceil(base + 3 * Math.abs(amp)) + 4);
+  for (let pass = 0; pass < 3; pass++) {
+    if (pass && !(cc >>> 24)) break;
+    wglBegin(ctx, ctx.s.op, pr);
+    wglTex(0, G8.msT, false); gl.uniform1i(U.u_d, 0); gl.uniform1i(U.u_grad, 8);
+    gl.uniform4f(U.u_c, c0, step, n, v); gl.uniform2f(U.u_cb, cbase, PB);
+    gl.uniform4f(U.u_k, 2 * du * 0.0019, 2 * du * 0.0047, du * 0.021, du * 0.047);
+    gl.uniform4f(U.u_off, du * 0.09, du * 0.045, du / 3, foamCut);
+    gl.uniform4f(U.u_g, base, amp, hz, bot); gl.uniform4f(U.u_col, col[0], col[1], col[2], col[3]); gl.uniform3f(U.u_pass, pass, row, gA);
+    gl.uniform4f(U.u_rect, c0, yLo, n * step, yHi - yLo); gl.bindVertexArray(WGL.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    wglEnd();
+  }
+}
+
+/* ---- 2. the rain's streaks: an instance a drop - (x0's whole cells, its fraction, slant, jit), (head row, length, roof, depth) -
+   drawn into a layer of cells (row y of the layer = cell row y) with no blending, in the drops' order ---- */
+const G8_RN_VS = `#version 300 es
+layout(location=0) in vec2 a_q;
+layout(location=1) in vec4 a_a;
+layout(location=2) in vec4 a_b;
+uniform vec2 u_fb;
+flat out vec4 v_a; flat out vec4 v_b;
+void main() {
+  float e = a_a.y - a_a.z * (a_b.y - 1.0);
+  vec2 lo = vec2(a_a.x + floor(min(a_a.y, e)) - 1.0, a_b.x - a_b.y), hi = vec2(a_a.x + ceil(max(a_a.y, e)) + 2.0, a_b.x + 2.0);
+  vec2 p = mix(lo, hi, a_q) / u_fb;
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+  v_a = a_a; v_b = a_b;
+}`;
+const G8_RN_FS = `#version 300 es
+precision highp float; precision highp int;
+flat in vec4 v_a; flat in vec4 v_b;
+uniform vec4 u_lim;      // top, bot, band, w
+uniform vec4 u_tier[18];
+out vec4 o;
+void main() {
+  float x = floor(gl_FragCoord.x), y = floor(gl_FragCoord.y), t = v_b.x - y;
+  if (t < 0.0 || t >= v_b.y || y > v_b.z || y > u_lim.y || y < u_lim.x) discard;
+  float xx = v_a.x + floor(v_a.y - v_a.z * t + 0.5);
+  if (x != xx || x < 0.0 || x >= u_lim.w) discard;
+  float u = (y - u_lim.x) / u_lim.z + v_a.w;
+  int q = min(5, int(floor((u - 0.04) / 0.62 * 6.0)));
+  if (q < 0) discard;
+  o = u_tier[int(v_b.w + 0.5) * 6 + q];
+}`;
+// the drops (inst: 8 floats each, k of them) into the layer, which is then laid over the view as drawRainStreaks laid its buffer
+function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
+  const gl = GLR.gl, ctx = C, s = ctx.s;
+  glBegin(ctx, s.op); glFlush();
+  let tw = 64, th = 64; while (tw < w) tw *= 2; while (th < h) th *= 2;
+  if (!G8.rT || G8.rW < tw || G8.rH < th) {
+    if (G8.rT) { gl.deleteTexture(G8.rT); gl.deleteFramebuffer(G8.rfbo); }
+    G8.rW = Math.max(tw, G8.rW); G8.rH = Math.max(th, G8.rH);
+    G8.rT = glNewTex(0, 0, gl.NEAREST); gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G8.rT); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, G8.rW, G8.rH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    G8.rfbo = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, G8.rfbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, G8.rT, 0);
+  }
+  for (let i = 0; i < 8; i++) if (GLR.unit[i] === G8.rT) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, null); GLR.unit[i] = null; }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, G8.rfbo); gl.viewport(0, 0, G8.rW, G8.rH);
+  gl.disable(gl.SCISSOR_TEST); gl.disable(gl.STENCIL_TEST); gl.disable(gl.BLEND);
+  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+  if (k) {
+    const pr = G8.rn, U = pr.U;
+    gl.useProgram(pr.p);
+    gl.uniform2f(U.u_fb, G8.rW, G8.rH); gl.uniform4f(U.u_lim, top, bot, band, w); gl.uniform4fv(U.u_tier, tiers);
+    gl.bindVertexArray(G8.rvao); gl.bindBuffer(gl.ARRAY_BUFFER, G8.rvbo); gl.bufferData(gl.ARRAY_BUFFER, inst.subarray(0, k * 8), gl.STREAM_DRAW);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, k);
+    GLR.stats.draws++; GLR.stats.uploads++; GLR.stats.upPx += k * 2;
+  }
+  gl.bindVertexArray(GLR.vao); gl.enable(gl.BLEND); GLR.cur = {};
+  // (laid as drawPixels laid the buffer: rows top..bot, a cell rp pixels square, nearest)
+  glBegin(ctx, s.op);
+  const slot = glSlot(G8.rT, false), X = GLC4.x, Y = GLC4.y, n = bot - top + 1, u1 = w / G8.rW, v0 = top / G8.rH, v1 = (bot + 1) / G8.rH;
+  ctx._corners(0, top * rp, w * rp, n * rp);
+  glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], 0, v0, u1, v0, u1, v1, 0, v1, glAlpha(s.ga), 1 + 8 * slot, 0);
+}
+
+/* ================================================================
    Rendering. The world is pixel art on a 1-point grid:
    1. sky (already lit for the time of day) with sun, moon, stars, clouds
    2. everything else on its own layer, tinted for night and dusk
@@ -20786,6 +20997,8 @@ function drawMidSea() {
   const L = DEPTH.midSea, Sl = layerScale(L.q), A = E.waveAmp || 1, st = E.storm || 0;
   const amp = (0.4 + L.wave * nearSwell()) * Sl * 0.55, base = hz + Math.round(4 * Sl + amp * 0.9);
   const step = PB;
+  // (engine stage 8: the columns on the GPU, 40-zzz-gpu8.js - on by default, ?midseagpu=0 for the loop below)
+  if (MIDSEA_GPU && g8On()) { g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, 0.5 - 0.12 * Math.min(1, st + (A - 1) * 0.5), hz, bot, g, crest); return; }
   // columns at the same height are drawn as one run (the same picture as column by column, far fewer calls)
   let prev = null, runC = 0, runY = 0;
   const flush = end => { if (prev !== null) { C.fillStyle = g; C.fillRect(runC, runY, end - runC, bot - runY); } };
@@ -24831,7 +25044,7 @@ function drawRainStreaks(R) {
     if (!GLR.on) { RAINP.cv = makeCanvas(w, h); RAINP.cx = RAINP.cv.getContext('2d'); RAINP.img = RAINP.cx.createImageData(w, h); RAINP.b = new Uint32Array(RAINP.img.data.buffer); }
   }
   const b = RAINP.b, top = Math.max(0, Math.floor((rainTopY[viewIdx] - 20) / rp)), foot = Math.min(h - 1, Math.ceil(PY(WATER_Y) / rp)), bot = h - 1;
-  b.fill(0, top * w, (bot + 1) * w);
+  if (!(RAIN_GPU && g8On())) b.fill(0, top * w, (bot + 1) * w);   // (the GPU's drops: their own layer, cleared there)
   const band = Math.max(20, foot - top), slant = clamp(E.windU / 75, -1, 1) * 0.6 + 0.12 * Math.sign(E.windU || 1);   // (cells across a cell down: the wind's)
   // the light: the clouds' dark base colour under them, the hour's daylight in the drops lower down (the lab's two ends)
   const dark = [120 * fx[0], 128 * fx[1], 146 * fx[2]], light = [236 * fx[0], 242 * fx[1], 252 * fx[2]], NL = 6;
@@ -24841,12 +25054,17 @@ function drawRainStreaks(R) {
   const roofs = RAINP.roofs && RAINP.roofs.length >= w ? RAINP.roofs : (RAINP.roofs = new Int32Array(w + 64));
   roofs.fill(-1, 0, w);
   const roofAt = x => { let v = roofs[x]; if (v === -1) v = roofs[x] = Math.floor(PY(rainRoof((x * rp + CAMPX) / SV)) / rp); return v; };
+  // (engine stage 8: the drops' cells on the GPU, 40-zzz-gpu8.js - each drop's 8 numbers kept here, one instanced draw; on by default; with ?raingpu=0
+  // the cells written below)
+  const gpu = RAIN_GPU && g8On();
+  let ni = 0, IN = RAINP.inst, TI = gpu ? (RAINP.tiers || (RAINP.tiers = new Float32Array(72))) : null;
   for (let L = 0; L < RAIN_DEPTH.length; L++) {
     const D = RAIN_DEPTH[L], n = Math.round(D.n * R * VWP / 600), spd = D.v * sv / rp, drift = camL * SV * D.par / rp;
     let HS = RAINP['hs' + L]; if (!HS || HS.length < n * 4) { HS = RAINP['hs' + L] = new Float32Array(Math.max(n, 512) * 8); for (let k = 0; k < HS.length / 4; k++) { HS[k * 4] = hash(k * 1.731 + L * 91); HS[k * 4 + 1] = hash(k * 4.913 + L * 37); HS[k * 4 + 2] = hash(k * 2.37 + L * 13); HS[k * 4 + 3] = hash(k * 7.31 + L * 5); } }
     // (its six steps, premultiplied: dark and faint under the base, lighter as it falls)
     const tier = [];
     for (let i = 0; i < NL; i++) { const f = (i + 1) / NL, a = D.a * (0.12 + 0.88 * f) * (0.6 + 0.4 * R), c = mix3(dark, light, 0.15 + 0.85 * f); tier.push(((Math.round(a * 255) << 24) | (Math.round(c[2] * a) << 16) | (Math.round(c[1] * a) << 8) | Math.round(c[0] * a)) >>> 0); }
+    if (gpu) for (let i = 0; i < NL; i++) { const v = tier[i], o = (L * NL + i) * 4; TI[o] = (v & 255) / 255; TI[o + 1] = ((v >>> 8) & 255) / 255; TI[o + 2] = ((v >>> 16) & 255) / 255; TI[o + 3] = (v >>> 24) / 255; }
     for (let k = 0; k < n; k++) {
       const h1 = HS[k * 4], h2 = HS[k * 4 + 1], h3 = HS[k * 4 + 2], h4 = HS[k * 4 + 3];
       const len = Math.round((D.len[0] + (D.len[1] - D.len[0]) * h3) * sv), span = (bot - top) + len + 8;
@@ -24856,6 +25074,12 @@ function drawRainStreaks(R) {
       const x0 = ((h1 * Wc + (y0 - top) * sl - drift) % Wc + Wc) % Wc - 30;
       const xc = Math.round(x0), roof = xc >= 0 && xc < w ? roofAt(xc) : Math.floor(PY(rainRoof((x0 * rp + CAMPX) / SV)) / rp);   // (where it stops: the sea, a deck, the ground...)
       const jit = (h1 * 7.3 % 1 - 0.5) * 0.22;                                       // (each lights at its own height: no line across)
+      if (gpu) {
+        if (!IN || IN.length < (ni + 1) * 8) { const nw = new Float32Array(Math.max(4096, (ni + 1) * 16)); if (IN) nw.set(IN.subarray(0, ni * 8)); IN = RAINP.inst = nw; }
+        const xf = Math.floor(x0), o = ni * 8; ni++;
+        IN[o] = xf; IN[o + 1] = x0 - xf; IN[o + 2] = sl; IN[o + 3] = jit; IN[o + 4] = Math.round(y0); IN[o + 5] = len; IN[o + 6] = roof; IN[o + 7] = L;
+        continue;
+      }
       for (let t = 0; t < len; t++) {
         const y = Math.round(y0) - t; if (y > roof || y > bot) continue; if (y < top) break;
         const x = Math.round(x0 - sl * t); if (x < 0 || x >= w) continue;
@@ -24865,6 +25089,7 @@ function drawRainStreaks(R) {
     }
   }
   const n = bot - top + 1; if (n <= 0) return;
+  if (gpu) { g8Rain(IN || new Float32Array(8), ni, TI, w, h, top, bot, band, rp); return; }
   if (GLR.on) C.drawPixels(new Uint32Array(b.buffer, top * w * 4, n * w), w, n, 0, top * rp, w * rp, n * rp);
   else { RAINP.cx.putImageData(RAINP.img, 0, 0, 0, top, w, n); const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false; C.drawImage(RAINP.cv, 0, top, w, n, 0, top * rp, w * rp, n * rp); C.imageSmoothingEnabled = sm; }
 }
