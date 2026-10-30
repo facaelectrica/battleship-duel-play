@@ -2099,10 +2099,10 @@ function towerHit(t, x, y) {
   // (OPEN WORLD and BATTLE: the lighthouse, standing or its stump - by its drawing's outline, as the rain stops on it. It was
   // a fixed box 58 wide and 150 up, the old 30 m lighthouse's: drawn x4 since real scale (95 m), missiles and shells went
   // through all of it but its foot - user Oct 30: "I cant hit it with plane missiles anymore")
-  if (lhOn(t)) { if (Math.abs(x - t.x) > LH_LAND + LH_SEA || y >= twBase(t) + 3) return false; const top = towerTopAt(t, x - t.x); return top != null && y > top; }
-  if (Math.abs(x - t.x) >= TW.W / 2) return false;
-  const top = t.hp > 0 ? TW.H - 6 : TW.STUMP * TW.K;
-  return y > twBase(t) - top && y < twBase(t) + 3;
+  // (user Oct 30, the drawn shape - 23-harbour-gates: every tower by its drawing's outline the same way, standing, damaged or
+  // a stump: it was a box TW.W wide and TW.H high round the old one)
+  if (y >= twBase(t) + 3 || Math.abs(x - t.x) > (lhOn(t) ? LH_LAND + LH_SEA : TW.FW * TW.K)) return false;
+  const top = towerTopAt(t, x - t.x); return top != null && y > top;
 }
 // (user Oct 27: the harbour tower destroyed with its pier gun still on the pier - "the pier gun keeps working; you can
 // still select the destroyed tower's button, and it puts you on the pier gun") a tower can be manned while it stands,
@@ -2859,8 +2859,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 367;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 17:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 368;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 17:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6665,8 +6665,8 @@ function harbourHit(d, x, y) {
   const q = pierEdge(d), a = Math.min(q, d.x0 + (d.dir > 0 ? d.w : 0)), b = Math.max(q, d.x0 + (d.dir > 0 ? d.w : 0));
   if (x < a || x > b || deckGone(d, x)) return false;
   if (y >= DECK_Y - 1 && y < WATER_Y + 2) return true;                                   // the deck
-  const [ha, hb] = hangarSpan(d);
-  return x > ha + 2 && x < hb - 2 && y > HANGAR_TOP + 14 && y < DECK_Y;                 // the hangar
+  const t = hangarRoofAt(d, x);
+  return t != null && y > t && y < DECK_Y;                                              // the hangar, as drawn (inHangar's rule)
 }
 // (user Oct 27: "The pier's deck (and the stone block, and the hangar roof) is solid ground for everything. Only ships
 // pass through it, to dock with it") the one test for what stands on a harbour - helicopters, tanks, magnets and their
@@ -6678,9 +6678,45 @@ const HANGAR_ROOF = () => HANGAR_TOP + 14;
 // (its walls stand in the water on its foundation): inHangar - a point in it; hangarSolid - flown into (above the water);
 // hangarTopIn - its roof if a hangar stands between x0 and x1, else Infinity (what a low flier keeps above, with clearTop);
 // AIR_ROOM - what a flier keeps over a roof (the runway's clearance and the Cessnas' heights, 50-land-tshape / -traffic)
-function inHangar(x, y) { if (y <= HANGAR_ROOF()) return false; for (const d of docks) { const [ha, hb] = hangarSpan(d); if (x > ha && x < hb) return true; } return false; }
+// THE DRAWN SHAPE (user Oct 30: "collisions are wrong for hangar, cruise ships and other stuff" - a plane burning above
+// the hangar's roof, gen/open/ref/hangar-collision-oct30.png): one rule for every solid thing - it is solid where its
+// picture is drawn, under its outline's top at each column (artTops: the picture's opaque pixels, made once per picture
+// and kept on it) down to its foot, at the scale and place it's drawn. The hangar had been one flat line at its chimney's
+// top (HANGAR_ROOF, the drawing's row 13) the whole length: ~21 m over the roof drawn at rows 140-230. Now its drawn roof,
+// column by column (hangarRoofAt, 47-render-overlays - the rain's), for everything: what flies into it, what lands on it,
+// what keeps over it. HANGAR_ROOF stays its highest point (the chimney), what the runways and the Cessnas clear
+// Something that moves and turns (a plane) by its picture's opaque pixels: artAlpha - kept on the picture; spriteHit - is
+// world (x, y) on src drawn centred at (cx, cy), k units a pixel, turned deg degrees as the canvas turns it (a pixel's pad
+// round it counted, as the battleship's hitTest)
+const artAlpha = c => c._alpha || (c._alpha = (() => { const g = c.getContext ? c.getContext('2d') : null, cv = g ? c : makeCanvas(c.width, c.height), x = cv.getContext('2d'); if (!g) x.drawImage(c, 0, 0); const d = x.getImageData(0, 0, c.width, c.height).data, m = new Uint8Array(c.width * c.height); for (let i = 0; i < m.length; i++) m[i] = d[i * 4 + 3] > 40 ? 1 : 0; return m; })());
+function spriteHit(src, k, cx, cy, deg, x, y, pad = 2) {
+  const a = -deg * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a), dx = x - cx, dy = y - cy, W = src.width, H = src.height;
+  const col = Math.floor((dx * ca - dy * sa) / k + W / 2), row = Math.floor((dx * sa + dy * ca) / k + H / 2);
+  if (col < -pad || row < -pad || col >= W + pad || row >= H + pad) return false;
+  const m = artAlpha(src);
+  for (let r = Math.max(0, row - pad); r <= Math.min(H - 1, row + pad); r++) for (let c = Math.max(0, col - pad); c <= Math.min(W - 1, col + pad); c++) if (m[r * W + c]) return true;
+  return false;
+}
+function inHangar(x, y) { if (y <= HANGAR_ROOF()) return false; for (const d of docks) { const t = hangarRoofAt(d, x); if (t != null && y > t) return true; } return false; }
 const hangarSolid = (x, y) => y < WATER_Y + 2 && inHangar(x, y);
-function hangarTopIn(x0, x1) { const a = Math.min(x0, x1), b = Math.max(x0, x1); for (const d of docks) { const [ha, hb] = hangarSpan(d); if (b > ha && a < hb) return HANGAR_ROOF(); } return Infinity; }
+// the highest of the drawn roof between x0 and x1 (each drawing's tops in blocks of HG_BLK columns, their lowest row each)
+const HG_BLK = 32;
+let hgBlk_ = null;
+function hgBlocks() { const T = img.hangarTops; if (hgBlk_ && hgBlk_.T === T) return hgBlk_.m; const m = new Int16Array(Math.ceil(T.length / HG_BLK)).fill(32767); for (let c = 0; c < T.length; c++) if (T[c] < HGR.H - 1) m[c / HG_BLK | 0] = Math.min(m[c / HG_BLK | 0], T[c]); hgBlk_ = { T, m }; return m; }
+function hangarTopIn(x0, x1) {
+  const a = Math.min(x0, x1), b = Math.max(x0, x1), T = img.hangarTops, n = T.length;
+  let top = Infinity;
+  for (const d of docks) {
+    const [ha, hb] = hangarSpan(d); if (b <= ha || a >= hb) continue;
+    // the overlap in the drawing's columns (mirrored for a harbour facing the other way, as hangarRoofAt)
+    const ca = Math.round((d.dir > 0 ? Math.max(a, ha) - ha : ha + HANGAR_W - Math.min(b, hb)) / HGR.K), cb = Math.round((d.dir > 0 ? Math.min(b, hb) - ha : ha + HANGAR_W - Math.max(a, ha)) / HGR.K);
+    const c0 = clamp(ca, 0, n - 1), c1 = clamp(cb, 0, n - 1), m = hgBlocks();
+    let r = 32767;
+    for (let c = c0; c <= c1;) { if (c % HG_BLK === 0 && c + HG_BLK - 1 <= c1) { r = Math.min(r, m[c / HG_BLK]); c += HG_BLK; } else { if (T[c] < HGR.H - 1) r = Math.min(r, T[c]); c++; } }
+    if (r < 32767) top = Math.min(top, HANGAR_TOP + r * HGR.K);
+  }
+  return top;
+}
 const AIR_ROOM = 10 * UPM;
 function harbourAt(x) {
   for (const d of docks) { const q = pierEdge(d), e = d.x0 + (d.dir > 0 ? d.w : 0); if (x >= Math.min(q, e) && x <= Math.max(q, e) && !deckGone(d, x)) return d; }   // (not where a span of the deck has fallen)
@@ -6689,8 +6725,8 @@ function harbourAt(x) {
 function harbourTop(x, y = -1e9) {
   const d = harbourAt(x);
   if (d) {
-    const [ha, hb] = hangarSpan(d), roof = HANGAR_ROOF();
-    if (x > ha + 2 && x < hb - 2 && y <= roof + 2) return roof;
+    const roof = hangarRoofAt(d, x);                                                   // (its drawn roof - inHangar's rule)
+    if (roof != null && y <= roof + 2) return roof;
     return y <= DECK_Y + 2 ? DECK_Y : Infinity;
   }
   return Infinity;
@@ -9193,8 +9229,13 @@ function stepPlaneWreck(pl, dt) {
 // what a round or a shell can hit: the plane's outline, roughly (a long body and a pair of wings)
 function planeHitTest(pl, x, y) {
   if (!planeUp(pl)) return false;
-  const k = PLANE_SC(), dx = (x - pl.x) / k, dy = (y - pl.y) / k;
-  return (Math.abs(dx) < 37 && Math.abs(dy) < 8) || (Math.abs(dx) < 10 && Math.abs(dy) < 20);
+  const k = PLANE_SC();
+  if (Math.abs(x - pl.x) > 60 * k || Math.abs(y - pl.y) > 60 * k) return false;
+  // (user Oct 30, the drawn shape - 23-harbour-gates: its picture as drawn now, its pose and tilt - planePose, blitPlane. It
+  // was a box 74 by 16 and 20 by 40 that never tilted)
+  const P = planePose(pl), src = P.fr && P.fr[P.side];
+  if (!src || !src.width) return (Math.abs(x - pl.x) < 37 * k && Math.abs(y - pl.y) < 8 * k);
+  return spriteHit(src, PLANE_K * k, pl.x, pl.y, P.deg, x, y);
 }
 // --- drawing ---
 // the plane's sprite for this moment: frame, which way it faces, the tilt
@@ -31066,9 +31107,11 @@ on('hit', e => {
 function civAt(x, y) {
   for (const c of civShips) {
     if (CIV_SKIP && CIV_SKIP.includes(c)) continue;
-    if (c.state === 'gone' || c.state === 'wreck' || Math.abs(x - c.x) > civLen(c) * 0.55) continue;
-    const K = CIV[c.kind], A = civArt(c), [u, py] = civLocal(c, x, y);
-    if (u < 0.01 || u > 0.99 || py < K.top || py > A.height) continue;
+    if (c.state === 'gone' || c.state === 'wreck' || Math.abs(x - c.x) > civLen(c) * (c.hv ? 0.75 : 0.55)) continue;
+    // (user Oct 30, the drawn shape - 23-harbour-gates: where her picture is drawn, each half where it is now - civHullHas.
+    // It was a box from row K.top down over her whole length: the sky over her low bow and stern took shells)
+    if (!civHullHas(c, x, y)) continue;
+    const K = CIV[c.kind], u = civLocal(c, x, y)[0];
     return [c, clamp(Math.floor(u * K.n), 0, K.n - 1)];
   }
   return null;
@@ -43963,8 +44006,8 @@ function sfxSiren() {
    out from her berth): LAUNCH_ZOOM's steps from the harbour's view (30-vehicle-switching.js, Version 349), edited in
    place here - the code's values are the defaults, untouched. Kept in this browser (bd_launch_zoom).
    ================================================================ */
-const COLV = { ship: 0, sub: 0, plane: 0, tower: 0, crane: 0, harbour: 0, land: 0 };
-const COLV_ROWS = [['ship', 'SHIPS', 'rgba(255,90,79,0.5)'], ['sub', 'SUBS', 'rgba(127,214,255,0.55)'], ['plane', 'PLANES', 'rgba(255,230,90,0.6)'], ['tower', 'TOWERS', 'rgba(220,120,255,0.5)'],
+const COLV = { ship: 0, sub: 0, civ: 0, plane: 0, tower: 0, crane: 0, harbour: 0, land: 0 };
+const COLV_ROWS = [['ship', 'SHIPS', 'rgba(255,90,79,0.5)'], ['sub', 'SUBS', 'rgba(127,214,255,0.55)'], ['civ', 'BIG SHIPS', 'rgba(255,140,200,0.5)'], ['plane', 'PLANES', 'rgba(255,230,90,0.6)'], ['tower', 'TOWERS', 'rgba(220,120,255,0.5)'],
   ['crane', 'CRANES', 'rgba(255,179,71,0.5)'], ['harbour', 'HARBOUR', 'rgba(255,255,255,0.4)'], ['land', 'LAND', 'rgba(125,255,155,0.9)']];
 const colvOn = () => NSKY.editor.TUNE.open && Object.values(COLV).some(Boolean);
 // a box of the world, cell by cell on the screen: filled where test(x, y) says solid
@@ -43984,20 +44027,22 @@ function colvDraw() {
     C.fillStyle = c.land;
     for (let px = 0; px < VWP; px += st) { const y = landTop((px + st / 2 + CAMPX) / SV); if (Number.isFinite(y)) C.fillRect(px, PY(y) - (w >> 1), st, w); }
   }
-  if (COLV.harbour) for (const d of docks) { const e = d.x0 + (d.dir > 0 ? d.w : 0), [ha, hb] = hangarSpan(d); colvFill((x, y) => harbourHit(d, x, y) || hangarSolid(x, y), Math.min(pierEdge(d), e, ha) - 4, HANGAR_TOP - 4, Math.max(pierEdge(d), e, hb) + 4, WATER_Y + 4, c.harbour); }
+  if (COLV.harbour) for (const d of docks) { const e = d.x0 + (d.dir > 0 ? d.w : 0), [ha, hb] = hangarSpan(d); colvFill((x, y) => harbourHit(d, x, y) || hangarSolid(x, y), Math.min(pierEdge(d), e, ha) - 4, HANGAR_TOP - 40, Math.max(pierEdge(d), e, hb) + 4, WATER_Y + 4, c.harbour); }
   if (COLV.crane && typeof cranes !== 'undefined') for (const cr of cranes) {
     if (cr.gone || !cr.wx) continue;
     const a = Math.min(cr.wx(0), cr.wx(CRI.w));
     colvFill((x, y) => { const t = craneTopAt(cr, x); return t != null && y >= t && y < DECK_Y; }, a, cr.top - 4, a + CRI.w * CRK, DECK_Y, c.crane);
   }
-  if (COLV.tower) for (const tw of towers) { if (!tw) continue; const r = Math.max(58, TW.W) / 2 + 2, b = twBase(tw); colvFill((x, y) => towerHit(tw, x, y), tw.x - r, b - Math.max(150, TW.H) - 4, tw.x + r, b + 4, c.tower); }
+  if (COLV.tower) for (const tw of towers) { if (!tw) continue; const r = (lhOn(tw) ? LH_LAND + LH_SEA : TW.FW * TW.K) + 2, b = twBase(tw), h = lhOn(tw) ? lhGeo(tw).base[1] * LH_K : TW.FH * TW.K; colvFill((x, y) => towerHit(tw, x, y), tw.x - r, b - h - 8, tw.x + r, b + 4, c.tower); }
   if (COLV.ship) for (const sh of ships) {
     if (!sh || sh.state !== 'afloat') continue;
     const L = SHIP_L * 0.6, up = SHIP_WL_ROW * SHIP_K + SHIP_L * 0.15, dn = (img.shipH - SHIP_WL_ROW) * SHIP_K + SHIP_L * 0.15;
     colvFill((x, y) => hitTest(sh, x, y) >= 0, sh.x - L, sh.y - up, sh.x + L, sh.y + dn, c.ship);
   }
+  // (the big ships: civAt, what shells, rounds and torpedoes meet - her picture as drawn, each half going down)
+  if (COLV.civ && LAND) for (const cv of civShips) { if (cv.state === 'gone' || cv.state === 'wreck') continue; const L = civLen(cv) * (cv.hv ? 0.75 : 0.55), A = civArt(cv), K = CIV[cv.kind], up = K.wl * K.k + 40, dn = (A.height - K.wl) * K.k + 40; colvFill((x, y) => { const h = civAt(x, y); return !!h && h[0] === cv; }, cv.x - L, civY(cv) - up, cv.x + L, civY(cv) + dn, c.civ); }
   if (COLV.sub) for (const sb of subs) { if (!sb) continue; const L = SUB_L * 0.6; colvFill((x, y) => subHitTest(sb, x, y) >= 0, sb.x - L, sb.y - L * 0.5, sb.x + L, sb.y + L * 0.5, c.sub); }
-  if (COLV.plane) for (const pl of planes) { if (!pl) continue; const k = PLANE_SC(); colvFill((x, y) => planeHitTest(pl, x, y), pl.x - 40 * k, pl.y - 22 * k, pl.x + 40 * k, pl.y + 22 * k, c.plane); }
+  if (COLV.plane) for (const pl of planes) { if (!pl) continue; const k = PLANE_SC(); colvFill((x, y) => planeHitTest(pl, x, y), pl.x - 60 * k, pl.y - 60 * k, pl.x + 60 * k, pl.y + 60 * k, c.plane); }
 }
 // ---- ZOOM LEVELS: LAUNCH_ZOOM, steps in (+) or out (-) from the harbour's view, as the code has them by default
 const LAUNCH_ZOOM_DEF = Object.assign({}, LAUNCH_ZOOM), LAUNCH_ZOOM_LAB = { ship: 'BATTLESHIP', sub: 'SUB', plane: 'PLANE' };
@@ -44262,7 +44307,7 @@ NSKY.editor.TUNE.pane('VEHICLES', (pane, el) => {
   U.sel = el('span', '', 'NONE'); U.sel.style.cssText = 'color:#ffb347;min-width:120px';
   U.drive = el('button', '', 'DRIVE'); U.drive.onclick = vehDrive;
   const cr = el('span', 'grp', 'COLLISION'), tg = NSKY.editor.TUNE.toggle(0);
-  tg.addEventListener('input', () => { for (const k of ['ship', 'sub', 'plane', 'tower', 'crane']) COLV[k] = +tg.value; });
+  tg.addEventListener('input', () => { for (const k of ['ship', 'sub', 'civ', 'plane', 'tower', 'crane', 'harbour']) COLV[k] = +tg.value; });
   cr.appendChild(tg);
   const bCopy = el('button', '', 'COPY'); bCopy.title = 'Every vehicle as text';
   const ta = el('textarea'); ta.hidden = true; ta.spellcheck = false; ta.style.flexBasis = '100%';
