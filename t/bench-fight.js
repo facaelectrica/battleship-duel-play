@@ -14,16 +14,11 @@ window.__fight = async (world = 'battle', secs = 20) => {
   g.setMode(world === 'open' ? 'land' : 'duel');
   await wait(1500);
   const S0 = g.ships[0], S1 = g.ships[1];
-  const mid = world === 'open' ? (S0.x + S1.x) / 2 : 3550, xs = [mid - 350, mid + 350];
+  const mid = (S0.x + S1.x) / 2, xs = [mid - 350, mid + 350];
   for (const p of [0, 1]) {
     g.placeOut(p, 'sub', xs[p] + (p ? 120 : -120)); g.depth(p, g.subs[p].y + 120);
     g.placeOut(p, 'ship', xs[p]);
   }
-  const launch = p => {
-    g.select(p, 'plane');
-    const pl = g.planeOf ? g.planeOf(p) : null;
-  };
-  const planes = () => [0, 1].map(p => g.plane ? g.plane(p) : null);
   const fly = p => {
     g.select(p, 'plane');
     const pl = g.planesP[p];
