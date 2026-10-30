@@ -40,14 +40,44 @@
     return out;
   };
   window.__swCmp = cmp;
-  window.__swGate = async (ticks = 240, world = 'battle') => {
-    const g = __game, t0 = performance.now(), log = [];
+  // (after a check: the page's sound and clock back)
+  const unprep = () => { const g = __game; if (window.__swCtx) { g.SFX.ctx = window.__swCtx; window.__swCtx = null; } if (window.__swNow) { performance.now = window.__swNow; window.__swNow = null; } };
+  // the same start on both sides: the fight set up, the page's tables loaded into the worker, both reseeded; the page's smoke air
+  // on the page (as the worker has it: no smoke worker there)
+  const prep = async (world, log) => {
+    const g = __game;
     if (!g.sw.state.ready) { g.sw.start(); for (let i = 0; i < 600 && !g.sw.state.ready && !g.sw.state.fail; i++) await new Promise(r => setTimeout(r, 100)); }
     log.push(['worker', g.sw.state]);
-    if (!g.sw.state.ready) return log;
+    if (!g.sw.state.ready) return false;
+    g.smokeWorker(false);
+    // (the page's sounds draw from the shared Math.random - the game still does too in places - so they'd shift the page's
+    // game against the worker's, which plays none: muted for the check; the camera's shake goes by the wall clock: frozen)
+    if (g.SFX.ctx) { window.__swCtx = g.SFX.ctx; g.SFX.ctx = null; }
+    if (!window.__swNow) { window.__swNow = performance.now; performance.now = () => 1000; }
+    await g.sw.run('performance.now = () => 1000; return 1;');
     await both(SETUP(world));
     await g.sw.ask('load', { s: JSON.stringify(g.swT.tablesSave()) });
     await both(`${SEED} Math.random = seeded(99); return 1;`);
+    return true;
+  };
+  // tick by tick from the shared start: the first tick whose tables differ, and in which tables (main chat 19:05)
+  window.__swFirst = async (max = 60, world = 'battle') => {
+    const g = __game, log = [];
+    if (!await prep(world, log)) return log;
+    const same0 = cmp(JSON.parse(JSON.stringify(g.swT.tablesSave())), JSON.parse(await g.sw.tables()));
+    log.push(['tick 0', same0.differ, same0.by, same0.rng, same0.first.slice(0, 10)]);
+    for (let t = 1; t <= max; t++) {
+      await both(STEP(1));
+      const r = cmp(JSON.parse(JSON.stringify(g.swT.tablesSave())), JSON.parse(await g.sw.tables()));
+      if (r.differ || r.rng.length) { log.push(['first different tick', t, r.differ, r.by, r.rng, r.first]); break; }
+      if (t === max) log.push(['same through tick', t]);
+    }
+    unprep(); console.log(JSON.stringify(log, null, 1));
+    return log;
+  };
+  window.__swGate = async (ticks = 240, world = 'battle') => {
+    const g = __game, t0 = performance.now(), log = [];
+    if (!await prep(world, log)) return log;
     for (let d = 0; d < ticks; d += 60) log.push(['step', await both(STEP(Math.min(60, ticks - d)))]);
     const r = cmp(JSON.parse(JSON.stringify(g.swT.tablesSave())), JSON.parse(await g.sw.tables()));
     log.push(['gate', r.differ === 0 && !r.rng.length ? 'SAME GAME' : 'DIFFERENT', r]);
@@ -58,7 +88,7 @@
       const m = cmp(JSON.parse(JSON.stringify(g.swT.tablesSave())), JSON.parse(await g.sw.tables()), ['camera', 'smokeAir']);
       log.push(['mirror', m.differ === 0 ? 'SAME' : 'DIFFERENT', m]);
     }
-    log.push(['ms', Math.round(performance.now() - t0)]);
+    unprep(); log.push(["ms", Math.round(performance.now() - t0)]);
     console.log(log);
     return log;
   };

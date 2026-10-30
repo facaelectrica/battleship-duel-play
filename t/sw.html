@@ -221,7 +221,7 @@ function swHostReady() {
       else if (m.t === 'in') { swHostIn(m); return; }
       else err = 'unknown ' + m.t;
     } catch (e) { err = String(e && e.stack || e); }
-    if (m.id) postMessage({ t: 're', id: m.id, v, err });
+    if (m.id) postMessage({ t: 're', id: m.id, v, err }, v && v.bufs ? v.bufs : []);   // (a snapshot's columns are moved, not copied)
   };
   self.__swReady = answer;
   for (const m of self.__swQ.splice(0)) answer(m);
@@ -263,7 +263,7 @@ function swHostLoop() {
       SWH.tickMs += (performance.now() - a - SWH.tickMs) * 0.05;
     }
     if (SWH.done < want) { SWH.behind += want - SWH.done; SWH.t0 += (want - SWH.done) * ms; }   // (fallen behind: slower, never different)
-    if (n && SWH.credit) { SWH.credit = 0; SWH.sent++; postMessage({ t: 'snap', s: swSnapshot(), tickMs: SWH.tickMs, behind: SWH.behind, done: SWH.done }); }
+    if (n && SWH.credit) { SWH.credit = 0; SWH.sent++; const S = swSnapshot(); postMessage({ t: 'snap', s: S, tickMs: SWH.tickMs, behind: SWH.behind, done: SWH.done }, S.bufs); }
   }
   SWH.timer = setTimeout(swHostLoop, Math.max(0, SWH.t0 + (SWH.done + 1) * ms - performance.now()));
 }
@@ -3074,7 +3074,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 370;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 18:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 30 18:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13503,15 +13503,72 @@ on('tableMove', wixDirty, 'wrecks');
    the same world), else a fresh one (the table's make) - tablesLoad's rule. Typed columns per table come next (design: the
    per-row text costs time at frame rate - SWS.ms says how much). */
 const SW_LOCAL = new Set(['camera', 'smokeAir']);
+/* The busy effect lists go as COLUMNS instead (design section 3, lane 2): every row of them changes every tick, so a delta
+   buys nothing and the per-row text is the cost. Whole each time, field by field: numbers and booleans in one Float64Array
+   (exact), strings as ids into the message's own list, anything else (an array, a small object) as plain data beside them.
+   The page refills its own list's objects in place, by position (they're effects: nothing refers to one by id) */
+const SW_COLS = new Set(['spray', 'bubbles', 'foam', 'wakes', 'sparks', 'flames', 'embers', 'flashes', 'welds', 'rings', 'debris', 'dust', 'grains', 'ash',
+  'streaks', 'jets', 'msplashes', 'leaves', 'earthGrains', 'fwBits', 'hoseDrops', 'hoseSteams', 'seaBlood', 'seaGore', 'birdFeathers', 'birdGore', 'crewBlood', 'planeWisps', 'iceBits', 'rocketTrail']);
+function swColsOf(t, arr, strs, sIdx, bufs) {
+  const n = arr.length, keys = new Map();                      // key -> kind: 1 number, 4 boolean, 2 string, 3 other (or mixed)
+  for (let i = 0; i < n; i++) {
+    const o = arr[i]; if (!o) continue;
+    for (const k in o) {
+      if (t.skip.has(k)) continue;
+      const v = o[k], ty = typeof v, kind = ty === 'number' ? 1 : ty === 'boolean' ? 4 : ty === 'string' ? 2 : ty === 'undefined' || ty === 'function' ? 0 : 3;
+      if (!kind) continue;
+      const was = keys.get(k);
+      keys.set(k, was == null || was === kind ? kind : 3);
+    }
+  }
+  const C = { n, k: [], d: [] };
+  for (const [k, kind] of keys) {
+    let col;
+    if (kind === 1 || kind === 4) {
+      col = new Float64Array(n); const bool = kind === 4; let miss = null;
+      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v === 'number') col[i] = v; else if (typeof v === 'boolean') col[i] = v ? 1 : 0; else { (miss || (miss = new Uint8Array(n)))[i] = 1; } }
+      bufs.push(col.buffer); if (miss) bufs.push(miss.buffer);
+      C.k.push(k); C.d.push(bool ? { b: col, m: miss } : { f: col, m: miss });
+    } else if (kind === 2) {
+      col = new Int32Array(n);
+      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v !== 'string') { col[i] = -1; continue; } let id = sIdx.get(v); if (id == null) { id = strs.length; strs.push(v); sIdx.set(v, id); } col[i] = id; }
+      bufs.push(col.buffer); C.k.push(k); C.d.push({ s: col });
+    } else {
+      const vals = new Array(n);
+      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; vals[i] = v === undefined ? undefined : tblPlain(v, t.depth, t.skip, false); }
+      C.k.push(k); C.d.push({ j: vals });
+    }
+  }
+  return C;
+}
+// (the page) a list refilled from its columns
+function swColsInto(arr, C, strs) {
+  const n = C.n, K = C.k, D = C.d, has = new Set(K);
+  if (arr.length > n) arr.length = n;
+  for (let i = 0; i < n; i++) {
+    let o = arr[i];
+    if (!o || typeof o !== 'object') o = arr[i] = {};
+    else for (const k in o) if (!has.has(k)) delete o[k];
+    for (let c = 0; c < K.length; c++) {
+      const d = D[c], k = K[c];
+      if (d.m && d.m[i]) { delete o[k]; continue; }
+      if (d.f) o[k] = d.f[i];
+      else if (d.b) o[k] = d.b[i] !== 0;
+      else if (d.s) { const id = d.s[i]; if (id < 0) delete o[k]; else o[k] = strs[id]; }
+      else { const v = d.j[i]; if (v === undefined) delete o[k]; else o[k] = v; }
+    }
+  }
+}
 // ---- the worker's side: what it last sent, per table (row id -> its text; the order as text)
 const SWS = { rows: {}, order: {}, ms: 0, bytes: 0, n: 0 };
 function swSnapReset() { SWS.rows = {}; SWS.order = {}; }
 function swSnapshot() {
   const t0 = performance.now();
   for (const k in TABLES) if (!SW_LOCAL.has(k)) for (const o of TABLES[k].list()) if (o) uidOf(o);
-  const parts = [];
+  const parts = [], cols = {}, strs = [], sIdx = new Map(), bufs = [];
   for (const k in TABLES) {
     if (SW_LOCAL.has(k)) continue;
+    if (SW_COLS.has(k)) { cols[k] = swColsOf(TABLES[k], TABLES[k].list(), strs, sIdx, bufs); continue; }
     const t = TABLES[k], arr = t.list(), had = SWS.rows[k] || (SWS.rows[k] = new Map()), here = new Set(), ch = [];
     let ord = '';
     for (const o of arr) {
@@ -13532,14 +13589,16 @@ function swSnapshot() {
     parts.push(JSON.stringify(k) + ':{' + p.join(',') + '}');
   }
   const txt = '{"t":' + JSON.stringify(time) + ',"tick":' + REG.tick + ',"T":{' + parts.join(',') + '}}';
-  SWS.ms += (performance.now() - t0 - SWS.ms) * 0.1; SWS.bytes += (txt.length - SWS.bytes) * 0.1; SWS.n++;
-  return txt;
+  let colB = 0; for (const b of bufs) colB += b.byteLength;
+  SWS.ms += (performance.now() - t0 - SWS.ms) * 0.1; SWS.bytes += (txt.length + colB - SWS.bytes) * 0.1; SWS.colBytes = colB; SWS.n++;
+  return { s: txt, cols, strs, bufs };
 }
 // ---- the page's side: the worker's ids -> the page's things
 const SWM = { byU: new Map(), mine: new Set(), ms: 0, n: 0, t: 0, tick: 0 };
 function swMirrorReset() { SWM.byU = new Map(); SWM.mine = new Set(); }
-function swApply(txt) {
-  const t0 = performance.now(), m = typeof txt === 'string' ? JSON.parse(txt) : txt, byU = SWM.byU, rows = [], touched = [];
+function swApply(snap) {
+  const t0 = performance.now(), m = JSON.parse(typeof snap === 'string' ? snap : snap.s), byU = SWM.byU, rows = [], touched = [];
+  if (snap.cols) for (const k in snap.cols) { const t = TABLES[k]; if (t) swColsInto(t.list(), snap.cols[k], snap.strs); }
   for (const k in m.T) {
     const t = TABLES[k]; if (!t) continue;
     const D = m.T[k], arr = t.list(), pos = new Map();
@@ -13555,7 +13614,7 @@ function swApply(txt) {
       rows.push([t, o, d, u]);
     }
     if (D.r) for (const u of D.r) { const o = byU.get(u); byU.delete(u); if (o) SWM.mine.delete(o); }
-    if (D.o || D.r) touched.push([t, arr, D.o]);
+    touched.push([t, arr, D.o]);                                     // (its `after` runs on any change: a one-row table's row writes its globals there - restState's clock)
   }
   // filled once every new thing is known, so a reference to one made in this snapshot is found
   for (const [t, o, d, u] of rows) {
@@ -46154,7 +46213,7 @@ async function start(data) {
   Object.assign(window.__game, { sw: { get state() { return { on: SW.on, ready: SW.ready, fail: SW.fail, bootMs: Math.round(SW.bootMs) }; }, start: o => swStart(o), ask: (t, o) => swAsk(t, o),
     run: code => swAsk('run', { code }), step: (n, dt) => swAsk('step', { n, dt: dt || SUBSTEP }), tables: () => swAsk('tables'), touch: () => swAsk('touch'),
     // (the page as the worker's mirror: its snapshot folded in here - 36-zzzzz-sw-snap.js; reset: a whole one, ids matched afresh)
-    mirror: async reset => { if (reset) swMirrorReset(); const s = await swAsk('snap', { reset: !!reset }); swApply(s); return { bytes: s.length, applyMs: SWM.ms, tick: SWM.tick }; },
+    mirror: async reset => { if (reset) swMirrorReset(); const s = await swAsk('snap', { reset: !!reset }); swApply(s); return { bytes: s.s.length, colBytes: s.bufs.reduce((a, b) => a + b.byteLength, 0), applyMs: SWM.ms, tick: SWM.tick }; },
     stats: async () => Object.assign({ applyMs: SWM.ms, applied: SWM.n, live: SW.live, got: SW.got, tickMs: SW.tickMs, behind: SW.behind }, await swAsk('stats')), pageTables: () => JSON.stringify(tablesSave()),
     live: () => swGoLive(), act: (p, name, ...a) => act(p, name, ...a) } });
   if (SW_IN_WORKER) { swHostReady(); return; }
