@@ -3041,8 +3041,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 335;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 10:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 336;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 10:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -17308,6 +17308,7 @@ function cloudBox(c) {
   let ext = 0;
   for (const L of c.lobes) { ext = Math.max(ext, Math.abs(L.x) + Math.max(L.rx, L.gx ?? 0)); if (L.m) ext = Math.max(ext, Math.abs(L.m.f.x) + L.m.f.rx, Math.abs(L.m.t.x) + L.m.t.rx); }
   c.extU = ext;
+  if (c.lay && ext * c.s > c.lay.ixExt) c.lay.ixExt = ext * c.s;   // (the deck's largest reach, for the baked pass's stretch: skixList)
   let rb = 0; for (const L of c.lobes) rb += (L.rx + L.ry) / 2; c.rbAvg = rb / Math.max(1, c.lobes.length);
 }
 // lobes leaving (a morph that ended in nothing, a smear melted back): the rest keep their puffs exactly
@@ -17686,7 +17687,7 @@ function addWisps(rnd, lay, x0) {
 // every wisp takes a new shape (the WISP BUMPS sliders), each with its own seed - the lifts are kept
 function reformWisps() { for (const c of clouds) if (c.wisp) { const r = seed32(c.uid * 7919 + 13); morphTo(c, wispLobes(r, 140 + r() * 300, r() * (c.lay.name === 'hero' ? 170 : 100), 1 / Math.sqrt(c.lay.k)), 0.3); } }
 function deckLook() { let ch = 0; for (const L of LAYERS) { const k = P['sz' + L.dn] ?? L.k, h = P['hz' + L.dn] ?? L.haze; if (k !== L.k) { L.k = k; ch = 1; } L.haze = h; } for (const c of clouds) { const h = c.lay.haze; if (c.haze !== h) c.haze = h; } return ch; }   // (stage 6, Oct 30: written only when it changes - a number stored in every cloud every frame was a new heap number each, ~50 KB of garbage a frame)   // (DECK n SIZE, DECK n HAZE)
-function regenAll() { for (const c of clouds) { c.s = S * c.lay.k; if (c === hero || (c.items && c.visible)) genCloud(c); else c.items = null; } }
+function regenAll() { SKIX.clouds = null; for (const c of clouds) { c.s = S * c.lay.k; if (c === hero || (c.items && c.visible)) genCloud(c); else c.items = null; } }   // (SKIX.clouds = null: sizes and places changed, the baked pass's index made again)
 
 
 // ================================================================== lightning: the game's bolts light the clouds
@@ -18218,6 +18219,8 @@ function bakeVisit(c, vis, gk) {
   if (c.gfr !== frameNo) {
     c.gfr = frameNo; c.y = c.lay.baseY;
     const d = c.bx - c.lay.uPiv; if (d > WORLD / 2) c.bx -= WORLD; if (d < -WORLD / 2) c.bx += WORLD;
+    // (a cloud the passes skipped for a while (skixList) may be more than one world off: wrapped on until it is near)
+    while (c.bx - c.lay.uPiv > WORLD / 2) c.bx -= WORLD; while (c.bx - c.lay.uPiv < -WORLD / 2) c.bx += WORLD;
     const cov = P.cover, clear = smoothstep(0, 0.06, cov);
     // (engine stage 6, Oct 30: worked out in a local and stored only when it changes - every cloud, every frame, two stores of
     // a fresh number were most of the sky's garbage. The same sums in the same order: the same value)
@@ -18268,6 +18271,56 @@ function bakeVisit(c, vis, gk) {
   if (c.grow > 0.04 || c.growT > 0.04) NEAR.push(c);
   if (inView) vis.push(c);
   return true;
+}
+// ---- (engine stage 6, Oct 30: the clouds a baked pass goes through) bakeVisit went through every one of ~2,600 clouds per
+// view per frame, though all but a few hundred are off the view and only culled. Each deck's clouds are kept in order of
+// their place around the world (bx, wrapped to 0..WORLD), and a baked pass goes through only those that could be in view - a
+// stretch of that order wide enough for the largest cloud of the deck at its largest growth (lay.ixExt, raised by cloudBox
+// whenever a box grows) - plus the clouds the last pass left visible (they are culled the exact way, as before), in the
+// clouds' own order. What a skipped cloud misses is only what a culled visit does: its forming (worked out afresh, not eased,
+// at its next visit), its y (set again then), its wrap round the world (bakeVisit wraps it as many times as it needs) and
+// visible = false (it already is: every cloud left visible is visited). So every cloud the picture shows is visited exactly
+// as before, in the same order, and the picture is the same. Off: the live sky (P.bake 0), the world narrower than the view.
+const SKIX = { clouds: null, n: -1, world: 0, lays: [], on: [], on2: [], known: false, stamp: 0, out: [] };
+function skixBuild() {
+  SKIX.clouds = clouds; SKIX.n = clouds.length; SKIX.world = WORLD; SKIX.lays = [];
+  const by = new Map();
+  clouds.forEach((c, i) => {
+    c.ixi = i; let L = by.get(c.lay);
+    if (!L) { by.set(c.lay, L = { lay: c.lay, cs: [], p: null }); SKIX.lays.push(L); c.lay.ixExt = 0; }
+    L.cs.push(c); const e = c.extU * c.s; if (e > c.lay.ixExt || e !== e) c.lay.ixExt = e;
+  });
+  const md = x => x - Math.floor(x / WORLD) * WORLD;
+  for (const L of SKIX.lays) { L.cs.sort((a, b) => md(a.bx) - md(b.bx)); L.p = Float64Array.from(L.cs, c => md(c.bx)); }
+}
+// (the first index of p at or past v)
+function skixLow(p, v) { let a = 0, b = p.length; while (a < b) { const m = (a + b) >> 1; if (p[m] < v) a = m + 1; else b = m; } return a; }
+// the clouds this view's pass goes through, in the clouds' order - or null: all of them
+function skixList() {
+  if (!BK_ON || !SKIX.known) return null;
+  if (SKIX.clouds !== clouds || SKIX.n !== clouds.length || SKIX.world !== WORLD) skixBuild();
+  const st = ++SKIX.stamp, out = SKIX.out; out.length = 0;
+  const gm = Math.max(1, 1 + (P.bigk ?? 0.5) * (P.big || 0)), Mg = W * 0.5 + 24;
+  if (!(gm < Infinity)) return null;
+  for (const L of SKIX.lays) {
+    const lay = L.lay, zl = lay.zl;
+    if (WORLD * zl < W + 2 * Mg) return null;                         // (the world repeats across the view: every cloud is in it)
+    const R = lay.ixExt * zl * gm + 4, lo = (-Mg - R - lay.A) / zl - 2, hi = (W + Mg + R - lay.A) / zl + 2;
+    if (!(hi - lo < WORLD)) return null;
+    const a = lo - Math.floor(lo / WORLD) * WORLD, b = a + (hi - lo), p = L.p, cs = L.cs;
+    for (let i = skixLow(p, a); i < p.length && p[i] <= b; i++) { const c = cs[i]; if (c.ixs !== st) { c.ixs = st; out.push(c); } }
+    if (b >= WORLD) for (let i = 0; i < p.length && p[i] <= b - WORLD; i++) { const c = cs[i]; if (c.ixs !== st) { c.ixs = st; out.push(c); } }
+  }
+  for (const c of SKIX.on) if (c.ixs !== st) { c.ixs = st; out.push(c); }
+  out.sort((x, y) => x.ixi - y.ixi);
+  return out;
+}
+// after a pass: the clouds it left visible (what the next pass must visit whatever their place)
+function skixAfter(list) {
+  if (!BK_ON) { SKIX.known = false; return; }
+  const on = SKIX.on2; on.length = 0;
+  for (const c of list) if (c.visible) on.push(c);
+  SKIX.on2 = SKIX.on; SKIX.on = on; SKIX.known = true;
 }
 // after the loop: is the gen complete (every cloud near the view has its new sprite, or is being baked this frame)?
 function bakeEnd() { if (!BK_ON) return; const b = BK[VI]; if (b.next && b.left === 0) b.done = true; }
@@ -18831,7 +18884,8 @@ function skyBack(V) {
   // nothing that the sky's cover can't grow is passed over until the cover (or what sets how clouds grow) changes
   const gk = P.cover + ',' + (P.wisps ?? 0.5) + ',' + (P.big || 0) + ',' + (P.bigk ?? 0.5) + ',' + SNAP;
   bakeBegin(V);   // (BAKED SKY: a finished bake swapped in, a new one started - 12-bake.js)
-  for (const c of clouds) {
+  const LIST = skixList() || clouds;   // (BAKED SKY: only the clouds that could be in view, and those left visible - skixList, 12-bake.js)
+  for (const c of LIST) {
     if (BK_ON && bakeVisit(c, vis, gk)) continue;   // (BAKED SKY: its sprite, nothing worked out - unless it is baked now or lit by lightning)
     if (c.grow === 0 && c.growT === 0 && c.gk0 === gk && frameNo >= 3) { c.visible = false; continue; }
     if (c.gfr !== frameNo) {                                             // (its forming, once a frame whoever sees it)
@@ -18927,7 +18981,7 @@ function skyBack(V) {
     castWorld(c); c.cwf = frameNo;
     vis.push(c);
   }
-  bakeEnd();
+  bakeEnd(); skixAfter(LIST);
   // (perf pass, Oct 29: NEAR without its far clouds - lobes only, never casters. Zoomed out NEAR is most of the sky and nearly
   // all of it far, and every cloud's search went through all of it to pass them over: 70% of the sky's frame there)
   NEARC.length = 0; for (const o of NEAR) if (!o.far) NEARC.push(o);
