@@ -133,7 +133,7 @@ function swPrelude(B) {
   Object.assign(self, { innerWidth: B.w, innerHeight: B.h, devicePixelRatio: B.dpr, scrollX: 0, scrollY: 0, visualViewport: null, __noWorker: true, __SW_HOST: true });
   self.scrollTo = () => { }; self.addEventListener = (t, f) => { if (t === 'message') self.__swOnMsg = f; }; self.removeEventListener = () => { };
   self.matchMedia = q => ({ matches: /coarse/.test(q) ? !!B.coarse : /reduced-motion/.test(q) ? !!B.reduced : false, addEventListener() { }, addListener() { } });
-  self.getComputedStyle = () => ({ getPropertyValue: () => '' });
+  self.getComputedStyle = () => ({ getPropertyValue: k => k === '--sat' ? String(B.sat || '') : '' });
   self.requestAnimationFrame = () => 0; self.cancelAnimationFrame = () => { };
   self.alert = () => { }; self.prompt = () => null; self.confirm = () => false;
   try { Object.defineProperty(self, 'location', { value: { search: B.search || '', href: 'blob:sim-worker', hash: '', pathname: '/', origin: B.origin || '' }, configurable: true }); } catch (e) { }
@@ -149,7 +149,11 @@ function swPrelude(B) {
 function swBootData(o = {}) {
   const store = {}; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); store[k] = localStorage.getItem(k); } } catch (e) { }
   const mm = q => { try { return !!(window.matchMedia && matchMedia(q).matches); } catch (e) { return false; } };
-  return Object.assign({ w: window.innerWidth, h: window.innerHeight, dpr: window.devicePixelRatio || 1, search: (location.search || '').replace(/([?&])simworker=1/, '$1simworker=host') + '&gl=0&worker=0', origin: location.origin,
+  // (the size the way resize() takes it - the visual viewport if there is one: the worker has none, so it gets that size as its window's; a
+  // pixel off and the world is laid out a little differently - Oct 30, the first gate run)
+  const vv = window.visualViewport, w = vv ? Math.min(window.innerWidth, Math.round(vv.width)) : window.innerWidth, h = vv ? Math.min(window.innerHeight, Math.round(vv.height)) : window.innerHeight;
+  let sat = 0; try { sat = getComputedStyle(document.documentElement).getPropertyValue("--sat"); } catch (e) { }
+  return Object.assign({ w, h, sat, dpr: window.devicePixelRatio || 1, search: (location.search || '').replace(/([?&])simworker=1/, '$1simworker=host') + '&gl=0&worker=0', origin: location.origin,
     store, coarse: mm('(pointer: coarse)') || ('ontouchstart' in window), reduced: mm('(prefers-reduced-motion: reduce)') }, o);
 }
 // ---- the page's side
@@ -189,6 +193,7 @@ function swGuestFrame(dt, held) {
     SW.framesNoSnap = 0;
   } else SW.framesNoSnap++;
   if (!held) { applyHeldKeys(dt); stepHud(dt); }
+  regionsTick();                                                     // (the regions' tiers by this page's views: what the drawing culls by)
   const ctl = [];
   for (let p = 0; p < 2; p++) { try { const s = ctlState(p); if (s) { const g = hasGuns(p) ? activeGun(p) : null; if (g) { s.e = g.elev; s.w = g.power; } } ctl.push(s); } catch (e) { ctl.push(null); } }
   SW.worker.postMessage({ t: 'in', credit: 1, hold: !!held, acts: SW.acts.splice(0), ctl, cam: CAM_ROW.cam });
@@ -3074,7 +3079,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 370;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 18:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 30 18:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13508,7 +13513,8 @@ const SW_LOCAL = new Set(['camera', 'smokeAir']);
    (exact), strings as ids into the message's own list, anything else (an array, a small object) as plain data beside them.
    The page refills its own list's objects in place, by position (they're effects: nothing refers to one by id) */
 const SW_COLS = new Set(['spray', 'bubbles', 'foam', 'wakes', 'sparks', 'flames', 'embers', 'flashes', 'welds', 'rings', 'debris', 'dust', 'grains', 'ash',
-  'streaks', 'jets', 'msplashes', 'leaves', 'earthGrains', 'fwBits', 'hoseDrops', 'hoseSteams', 'seaBlood', 'seaGore', 'birdFeathers', 'birdGore', 'crewBlood', 'planeWisps', 'iceBits', 'rocketTrail']);
+  'streaks', 'jets', 'msplashes', 'leaves', 'earthGrains', 'fwBits', 'hoseDrops', 'hoseSteams', 'seaBlood', 'seaGore', 'birdFeathers', 'birdGore', 'crewBlood', 'planeWisps', 'iceBits', 'rocketTrail',
+  'smoke', 'trails', 'planeTrails', 'spikeBursts', 'seaSchools', 'msPings']);
 function swColsOf(t, arr, strs, sIdx, bufs) {
   const n = arr.length, keys = new Map();                      // key -> kind: 1 number, 4 boolean, 2 string, 3 other (or mixed)
   for (let i = 0; i < n; i++) {
@@ -13534,11 +13540,13 @@ function swColsOf(t, arr, strs, sIdx, bufs) {
       for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v !== 'string') { col[i] = -1; continue; } let id = sIdx.get(v); if (id == null) { id = strs.length; strs.push(v); sIdx.set(v, id); } col[i] = id; }
       bufs.push(col.buffer); C.k.push(k); C.d.push({ s: col });
     } else {
-      const vals = new Array(n);
-      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; vals[i] = v === undefined ? undefined : tblPlain(v, t.depth, t.skip, false); }
+      // (a thing of the same list - a trail's next - goes as its place in the list; another table's thing as its id)
+      const idx = C.idx || (C.idx = new Map(arr.map((o, i) => [o, i]))), vals = new Array(n);
+      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; vals[i] = v === undefined ? undefined : v && typeof v === 'object' && idx.has(v) ? { ri: idx.get(v) } : tblPlain(v, t.depth, t.skip, false); }
       C.k.push(k); C.d.push({ j: vals });
     }
   }
+  delete C.idx;
   return C;
 }
 // (the page) a list refilled from its columns
@@ -13558,17 +13566,40 @@ function swColsInto(arr, C, strs) {
       else { const v = d.j[i]; if (v === undefined) delete o[k]; else o[k] = v; }
     }
   }
+  // places in the list and ids back into things
+  for (let c = 0; c < K.length; c++) {
+    const d = D[c], k = K[c]; if (!d.j) continue;
+    for (let i = 0; i < n; i++) {
+      const v = d.j[i]; if (!v || typeof v !== 'object') continue;
+      if (v.ri != null && Object.keys(v).length === 1) arr[i][k] = arr[v.ri] || null;
+      else arr[i][k] = tblRefs(v, SWM.byU, 6);
+    }
+  }
+}
+/* The sea's arrays (the water table, lane 3): copies of the typed arrays themselves, moved, instead of their base64 text */
+function swArraysOf(bufs) {
+  const a = { wh: wh.slice(), wv: wv.slice(), wf: wf.slice(), stir: stirA.slice(), settleT: waterAct.t };
+  bufs.push(a.wh.buffer, a.wv.buffer, a.wf.buffer, a.stir.buffer);
+  return a;
+}
+function swArraysInto(a) {
+  if (a.wh.length === wh.length) wh.set(a.wh);
+  if (a.wv.length === wv.length) wv.set(a.wv);
+  if (a.wf.length === wf.length) wf.set(a.wf);
+  stirReady(); if (a.stir.length === stirA.length) stirA.set(a.stir);
+  if (typeof a.settleT === 'number') waterAct.t = a.settleT;
 }
 // ---- the worker's side: what it last sent, per table (row id -> its text; the order as text)
-const SWS = { rows: {}, order: {}, ms: 0, bytes: 0, n: 0 };
+const SWS = { rows: {}, order: {}, ms: 0, bytes: 0, n: 0, by: {} };
 function swSnapReset() { SWS.rows = {}; SWS.order = {}; }
 function swSnapshot() {
   const t0 = performance.now();
   for (const k in TABLES) if (!SW_LOCAL.has(k)) for (const o of TABLES[k].list()) if (o) uidOf(o);
-  const parts = [], cols = {}, strs = [], sIdx = new Map(), bufs = [];
+  const parts = [], cols = {}, strs = [], sIdx = new Map(), bufs = []; SWS.by = {};
   for (const k in TABLES) {
     if (SW_LOCAL.has(k)) continue;
     if (SW_COLS.has(k)) { cols[k] = swColsOf(TABLES[k], TABLES[k].list(), strs, sIdx, bufs); continue; }
+    if (k === 'water') continue;                                       // (its arrays: below)
     const t = TABLES[k], arr = t.list(), had = SWS.rows[k] || (SWS.rows[k] = new Map()), here = new Set(), ch = [];
     let ord = '';
     for (const o of arr) {
@@ -13586,19 +13617,20 @@ function swSnapshot() {
     if (ch.length) p.push('"c":[' + ch.join(',') + ']');
     if (gone.length) p.push('"r":[' + gone.join(',') + ']');
     if (oc) p.push('"o":[' + ord.slice(0, -1) + ']');
-    parts.push(JSON.stringify(k) + ':{' + p.join(',') + '}');
+    parts.push(JSON.stringify(k) + ':{' + p.join(',') + '}'); SWS.by[k] = parts[parts.length - 1].length;
   }
   const txt = '{"t":' + JSON.stringify(time) + ',"tick":' + REG.tick + ',"T":{' + parts.join(',') + '}}';
+  const arrays = swArraysOf(bufs);
   let colB = 0; for (const b of bufs) colB += b.byteLength;
   SWS.ms += (performance.now() - t0 - SWS.ms) * 0.1; SWS.bytes += (txt.length + colB - SWS.bytes) * 0.1; SWS.colBytes = colB; SWS.n++;
-  return { s: txt, cols, strs, bufs };
+  const by = Object.entries(SWS.by).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  return { s: txt, cols, strs, bufs, arrays, ms: performance.now() - t0, rowsB: txt.length, colB, by };
 }
 // ---- the page's side: the worker's ids -> the page's things
 const SWM = { byU: new Map(), mine: new Set(), ms: 0, n: 0, t: 0, tick: 0 };
 function swMirrorReset() { SWM.byU = new Map(); SWM.mine = new Set(); }
 function swApply(snap) {
   const t0 = performance.now(), m = JSON.parse(typeof snap === 'string' ? snap : snap.s), byU = SWM.byU, rows = [], touched = [];
-  if (snap.cols) for (const k in snap.cols) { const t = TABLES[k]; if (t) swColsInto(t.list(), snap.cols[k], snap.strs); }
   for (const k in m.T) {
     const t = TABLES[k]; if (!t) continue;
     const D = m.T[k], arr = t.list(), pos = new Map();
@@ -13625,13 +13657,16 @@ function swApply(snap) {
     if (sa != null) o._sa = sa; else delete o._sa;
     if (sk != null) o._sk = sk; else delete o._sk;
   }
+  // the effect columns and the sea's arrays (after the rows: an effect may name a row's thing by its id)
+  if (snap.cols) for (const k in snap.cols) { const t = TABLES[k]; if (!t) continue; const arr = t.list(); swColsInto(arr, snap.cols[k], snap.strs); if (t.after) t.after(arr); }
+  if (snap.arrays) swArraysInto(snap.arrays);
   for (const [t, arr, ord] of touched) {
     if (ord) { arr.length = 0; for (const u of ord) { const o = byU.get(u); if (o) arr.push(o); } }
     if (t.after) t.after(arr);
   }
   if (typeof m.t === 'number') time = m.t;
   SWM.t = m.t; SWM.tick = m.tick; SWM.n++;
-  SWM.ms += (performance.now() - t0 - SWM.ms) * 0.1;
+  SWM.last = performance.now() - t0; SWM.ms += (SWM.last - SWM.ms) * 0.1;
 }
 
 /* ================================================================
@@ -46213,7 +46248,7 @@ async function start(data) {
   Object.assign(window.__game, { sw: { get state() { return { on: SW.on, ready: SW.ready, fail: SW.fail, bootMs: Math.round(SW.bootMs) }; }, start: o => swStart(o), ask: (t, o) => swAsk(t, o),
     run: code => swAsk('run', { code }), step: (n, dt) => swAsk('step', { n, dt: dt || SUBSTEP }), tables: () => swAsk('tables'), touch: () => swAsk('touch'),
     // (the page as the worker's mirror: its snapshot folded in here - 36-zzzzz-sw-snap.js; reset: a whole one, ids matched afresh)
-    mirror: async reset => { if (reset) swMirrorReset(); const s = await swAsk('snap', { reset: !!reset }); swApply(s); return { bytes: s.s.length, colBytes: s.bufs.reduce((a, b) => a + b.byteLength, 0), applyMs: SWM.ms, tick: SWM.tick }; },
+    mirror: async reset => { if (reset) swMirrorReset(); const s = await swAsk('snap', { reset: !!reset }); swApply(s); return { rowsBytes: s.rowsB, colBytes: s.colB, encodeMs: +s.ms.toFixed(2), applyMs: +SWM.last.toFixed(2), tick: SWM.tick, by: s.by }; },
     stats: async () => Object.assign({ applyMs: SWM.ms, applied: SWM.n, live: SW.live, got: SW.got, tickMs: SW.tickMs, behind: SW.behind }, await swAsk('stats')), pageTables: () => JSON.stringify(tablesSave()),
     live: () => swGoLive(), act: (p, name, ...a) => act(p, name, ...a) } });
   if (SW_IN_WORKER) { swHostReady(); return; }

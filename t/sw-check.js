@@ -64,6 +64,11 @@
   window.__swFirst = async (max = 60, world = 'battle') => {
     const g = __game, log = [];
     if (!await prep(world, log)) return log;
+    // the screen's layout and the world built from it, both sides (not in the tables: built the same from the same size)
+    const LAY = `const W = g.worldW, xs = []; for (let i = 1; i < 40; i++) xs.push(W * i / 40);
+      return JSON.stringify({ lay: g.layout, W, viewW: g.viewW(), S: g.S(), bed: xs.map(x => g.seabedY(x)), line: xs.map(x => g.ground().lineY(x)), sw: g.swT.REG.w });`;
+    const [la, lb] = await both(LAY);
+    log.push(['layout', la === lb ? 'same' : 'DIFFERENT', la === lb ? '' : [la.slice(0, 300), lb.slice(0, 300)]]);
     const same0 = cmp(JSON.parse(JSON.stringify(g.swT.tablesSave())), JSON.parse(await g.sw.tables()));
     log.push(['tick 0', same0.differ, same0.by, same0.rng, same0.first.slice(0, 10)]);
     for (let t = 1; t <= max; t++) {
