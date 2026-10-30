@@ -310,11 +310,14 @@ const WAVE_C = 270, WAVE_K0 = 5.0, WAVE_DAMP = 1.0;
 const SUBSTEP = 1 / 120, WATER_SUBSTEPS = 2;
 
 // Ship handling (heavy)
-const ACC_FWD = 62, ACC_REV = 52;
-const DRAG_L = 0.36, DRAG_Q = 0.0013;
+// SHIP_SPD_K (user Oct 30: "Battleship moving speed 2x faster"): her push x K and the quadratic drag / K, so her top speed
+// (120 -> 240 u/s) and her pick-up are both K times; the CPU's ship drives through the same. The pitch from speeding up as it was
+const SHIP_SPD_K = 2;
+const ACC_FWD = 62 * SHIP_SPD_K, ACC_REV = 52 * SHIP_SPD_K;
+const DRAG_L = 0.36, DRAG_Q = 0.0013 / SHIP_SPD_K;
 const SPOOL_UP = 1.7, SPOOL_DOWN = 2.4;
 const K_HEAVE = 11, C_HEAVE = 1.5;
-const K_PITCH = 13, C_PITCH = 1.7, K_ACC_PITCH = 0.003 / REAL.ship;   // (real scale: pushed as hard 8x bigger she'd stand on her end - the pitch from speeding up as it was)
+const K_PITCH = 13, C_PITCH = 1.7, K_ACC_PITCH = 0.003 / REAL.ship / SHIP_SPD_K;   // (real scale: pushed as hard 8x bigger she'd stand on her end - the pitch from speeding up as it was)
 const CONTACT = SHIP_L * 0.97;
 const DOCK_ZONE = 320 * REAL.ship, DOCK_DECEL = 20;
 
@@ -3055,8 +3058,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 348;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 12:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 349;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 13:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4227,10 +4230,13 @@ function hudPressAt(hit, ux) {
 // player's) the other way round, so a slide of the finger turns the barrel the same way round on both sides
 // (sliding right turns it clockwise)
 const tapeDir = p => lampOf(p) ? 1 : unitFacing(p) < 0 ? -1 : 1;   // (the minisub's light: slide right, it swings to the right)
+// (user Oct 30: "Rotating the sub's light with touch on the ANGLE dial is 2x faster") a slide turns a sub's light
+// (the army sub's or the exploration sub's) LAMP_DIAL_K times as far as a gun
+const LAMP_DIAL_K = 2;
 function dragDial(d, ux) {
   // the numbers follow your finger
   const g = activeGun(d.p);
-  g.elev = clamp(d.e0 - (ux - d.x0) / d.ppd * 2.3 * tapeDir(d.p), elevMin(d.p), elevMax(d.p));   // a short slide turns the gun a long way
+  g.elev = clamp(d.e0 - (ux - d.x0) / d.ppd * 2.3 * (lampOf(d.p) ? LAMP_DIAL_K : 1) * tapeDir(d.p), elevMin(d.p), elevMax(d.p));   // a short slide turns the gun a long way
   g.aimShow = 1.6;
   const t = Math.round(g.elev);
   if (t !== d.tick) { d.tick = t; if (t % 5 === 0) sound('click', gunCtl[d.p]); }
@@ -6610,9 +6616,27 @@ on('hit', e => {
   damageSection(sh, e.sec, e.amt, e.x, e.y, e.dent);
   if (!e.shell) return;
   sh.vx += e.vx * 0.02;
-  sh.w += (e.x - sh.x) * 0.0009 * Math.sign(e.vy || 1);
-  sh.vy += 6;
+  const [dv, dw] = hitBob(SHIP_L, e.x - sh.x, e.vy);
+  sh.w += dw; sh.vy += dv;
 }, 'ships');
+// THE HIT BOB (user Oct 30: "The 'buoy' bob when a battleship is hit: a bit less. Make it one universal rule for ALL
+// ships ... every ship bobs the same way when hit, scaled by its size"): a shell's hit pushes a ship down (dv, world
+// units a second) and tips her about her middle toward where it struck (dw, radians a second) - the battleship's old
+// kick (6, and 0.0009 a unit off her middle) times HIT_BOB, the down push in proportion to her length L (the same look
+// on a ship twice her size, twice as big), the tip by where along her it struck. The battleship's heave and pitch
+// springs take it (stepShip); the big civilian ships' the same springs (hitBobStep)
+const HIT_BOB = 0.7;
+const hitBob = (L, dx, vy) => [6 * HIT_BOB * L / SHIP_L, 0.0009 * HIT_BOB * SHIP_L * clamp(dx / L, -0.5, 0.5) * Math.sign(vy || 1)];   // (dx: where it struck, off her middle)
+// a ship without the battleship's hull physics (the big civilian ships): her bob's own heave and pitch, on the battleship's
+// springs (K_HEAVE, C_HEAVE, K_PITCH, C_PITCH), round where the sea holds her - o.bob = [y, vy, a, w]
+function hitBobKick(o, L, dx, vy) { const [dv, dw] = hitBob(L, dx, vy), b = o.bob || (o.bob = [0, 0, 0, 0]); b[1] += dv; b[3] += dw; }
+function hitBobStep(o, dt) {
+  const b = o.bob; if (!b) return;
+  if (dt > 0.1) { o.bob = null; return; }                 // (a long step - far off, caught up: settled)
+  b[1] += (-K_HEAVE * b[0] - C_HEAVE * b[1]) * dt; b[0] += b[1] * dt;
+  b[3] += (-K_PITCH * b[2] - C_PITCH * b[3]) * dt; b[2] += b[3] * dt;
+  if (Math.abs(b[0]) + Math.abs(b[1]) * 0.2 < 0.02 && Math.abs(b[2]) + Math.abs(b[3]) * 0.2 < 1e-4) o.bob = null;
+}
 // dent: the damage is from ramming - crumpled plating and sparks, but no fire and no smoke
 function damageSection(sh, i, steps, hx, hy, dent) {
   if (sh.state !== 'afloat' || i < 0 || i >= SECTIONS || steps <= 0) return;
@@ -8618,8 +8642,14 @@ const SKY_H = 3600, SKY_TOP = WATER_Y - SKY_H;  // the top of the world: four sc
 const SKY_PAR = 0.14;
 const PLANE_UNSEEN_Y = WATER_Y - 380;            // above the clouds: the buoy's watchers can't see a plane up there                          // climbing, the sky (sun, moon, stars) sinks a little: you see you're going up
 const PLANE_COLD = WATER_Y - SKY_H * 2 / 3;     // above two thirds of the way up the air is so cold the plane always leaves a trail
-const PLANE_ICE = WATER_Y - SKY_H * 0.88;       // up under the ceiling it ices up...
-const PLANE_THAW = WATER_Y - SKY_H / 2;            // ...and the ice only melts again down here
+// (user Oct 30: "Planes fly 3x higher before icing up", then "forget the 3x. A plane's ceiling, where icing starts, is
+// simply the stratosphere level from the sky's atmosphere settings. When the user changes the stratosphere, the plane's
+// maximum height follows. No multiplier") the ceiling and the icing are ATMO_STRAT - the SKY EDITOR's ATMOSPHERE LAYERS >
+// STRATOSPHERE (atmoSync, 50-land-space.js; 3470 m, 22,500 units over the sea by default - it was 3,168 here, 3,510 the
+// ceiling): above it the plane is turned down and ices up; the ice only melts again under the same share of that height
+// as before (0.5 / 0.88)
+const planeIceY = () => ATMO_STRAT;
+const planeThawY = () => WATER_Y - (WATER_Y - ATMO_STRAT) * (0.5 / 0.88);
 // the missiles (user Oct 24): straight out along the nose under power, a thin smoke trail that's soon gone; when the
 // motor burns out they fall like a shell
 const PLANE_ROCKETS = 6, ROCKET_RELOAD = 0.8, ROCKET_V = 620, ROCKET_BURN = 1.5 * ROCKET_RANGE_K;
@@ -9135,7 +9165,7 @@ function stepPlanes(dt) {
     pl.gear = clamp((pl.gear || 0) + (gearWant ? 1.5 : -1.5) * dt, 0, 1);
     pl.flare = clamp((pl.flare || 0) + (gearWant && LAND ? 1 : -1) * dt * 1.5, 0, 1);   // (nose up coming in to land)
     if (pl.climbT > 0) { pl.climbT -= dt; if (!stick) { want = Math.min(want, -0.32); forced = true; } }   // (just off the runway: climbing out)
-    if (pl.y < SKY_TOP + 90 && want < 0.15) { want = 0.15; forced = true; }          // the ceiling
+    if (pl.y < planeIceY() && want < 0.15) { want = 0.15; forced = true; }          // the ceiling (the stratosphere)
     // (user Oct 29: flown by hand it dodges nothing - your own hangar, tower and crane are yours to fly round; flying
     // itself - home, a raid, the CPU - it still does)
     const handFlown = planeByHand(pl);
@@ -9183,8 +9213,8 @@ function stepPlanes(dt) {
     // land, dust and leaves (planeWash - every plane's, user Oct 26)
     planeWash(pl, dt, 1);
     // the cold up high: ice builds near the ceiling (the engine coughs first) and melts low down
-    if (pl.y < PLANE_ICE) pl.ice = Math.min(1, pl.ice + dt / 5);
-    else if (pl.y > PLANE_THAW && pl.ice > 0) { const was = pl.ice; pl.ice = Math.max(0, pl.ice - dt / 3); iceShed(pl, was - pl.ice); }
+    if (pl.y < planeIceY()) pl.ice = Math.min(1, pl.ice + dt / 5);
+    else if (pl.y > planeThawY() && pl.ice > 0) { const was = pl.ice; pl.ice = Math.max(0, pl.ice - dt / 3); iceShed(pl, was - pl.ice); }
     if (pl.ice > 0.12 && time > (pl.coughT || 0)) { pl.coughT = time + vehPlaneRnd(1.4, 2.4) * (1.4 - pl.ice); engineCough(pl, 2); }
     if (pl.ice >= 1) { pl.eng = 'off'; pl.offT = 0; pl.mg = false; engineCough(pl, 3); sound('engineDie', pl.x); }
     for (const b of birds) if (birdLive(b) && Math.abs(b.x - pl.x) < 38 && Math.abs(b.y - pl.y) < 12) {
@@ -9249,7 +9279,7 @@ function stepPlaneStall(pl, dt) {
   pl.x = clamp(pl.x + pl.vx * dt, VIS_L + 20, VIS_R - 20); pl.y += pl.vy * dt;
   pl.pitch += (Math.atan2(pl.vy, Math.abs(pl.vx) + 1) - pl.pitch) * Math.min(1, dt * 2);
   pl.spd = clamp(Math.hypot(pl.vx, pl.vy), PLANE_VMIN, PLANE_VMAX);
-  if (pl.y > PLANE_THAW) pl.ice = Math.max(0, pl.ice - dt / 3);
+  if (pl.y > planeThawY()) pl.ice = Math.max(0, pl.ice - dt / 3);
   if (pl.offT > 2.3 && !pl.cranking) { pl.cranking = true; engineCough(pl, 3); sound('restart', pl.x); }
   if (pl.offT > 3) {
     pl.eng = 'on'; pl.cranking = false; pl.recoverT = 2.2; { const was = pl.ice; pl.ice = Math.min(pl.ice, 0.55); iceShed(pl, was - pl.ice); } pl.coughT = time + 3;
@@ -9791,7 +9821,7 @@ function takeOver(p, k) {
   if (k === 'plane') {
     const pl = planes[p];
     if (!canTake(p, 'plane')) return false;
-    if (pl.state === 'hangar') launchPlane(pl);           // (one in the air carries on as it was)
+    if (pl.state === 'hangar') { launchPlane(pl); launchZoom(p, 'plane'); }   // (one in the air carries on as it was)
     boardCaptain(p, pl, 'plane');
     pl.mg = false;
     c.mode = 'plane'; return true;
@@ -9802,10 +9832,19 @@ function takeOver(p, k) {
   boardCaptain(p, v, k);
   // switching to a boat leaves her doing what she was doing (going ahead, going home, in or out through her
   // gate): only one lying at her berth is brought out. The lever shows her order
-  if (!v.gate && (v.moored === true || v.state === 'docked')) { launchOut(v); setOrder(t, 3); }
+  if (!v.gate && (v.moored === true || v.state === 'docked')) { launchOut(v); setOrder(t, 3); launchZoom(p, k); }
   else if (v.gate) setOrder(t, 3);
   else { const keep = v.input || 0; setOrder(t, notchOf(keep)); v.input = keep; }
   return true;
+}
+// (user Oct 30: "Default zooms when you switch to a vehicle: a plane taking off: 3 steps zoomed IN from now; a submarine
+// going out: 4 steps zoomed OUT from now; the battleship: 2 steps zoomed OUT from now") taking one out - the plane off
+// its hangar, the sub or the battleship out from her berth - sets the zoom that many of the stepped levels from the
+// harbour's view (dockLevel, the zoom you start at); switching to one already out keeps your zoom (user Oct 27)
+const LAUNCH_ZOOM = { plane: 3, sub: -4, ship: -2 };
+function launchZoom(p, k) {
+  if (NET.remote || brains[p] || zoomLocked(p) || LAUNCH_ZOOM[k] == null) return;
+  setScope(p, dockLevel(p) + LAUNCH_ZOOM[k]);
 }
 // the switcher: step into the tower, the battleship or the sub, wherever it is. A boat you leave carries on
 // with whatever the harbour was doing with her (coming out, going in, or sailing home); otherwise she idles.
@@ -10280,10 +10319,10 @@ function dockFrame(p) {
   const a = d.viewEdge, b = d.quay - d.dir * 70;
   return [(a + b) / 2, Math.abs(b - a) / 2];
 }
+const dockLevel = p => { const [, h] = dockFrame(p); return zoomLevelOf(clamp(Math.min(VIEW_W / (2 * (2 * h + 40)), ZOOM_START), ZOOM_PLAY_MIN, ZOOM_TOP)); };
 function dockZoom(p) {
   if (NET.remote) return;                                  // (a teammate's seat: not this screen's view)
-  const [, h] = dockFrame(p);
-  const best = zoomLevelOf(clamp(Math.min(VIEW_W / (2 * (2 * h + 40)), ZOOM_START), ZOOM_PLAY_MIN, ZOOM_TOP));   // (the stepped zoom: the nearest level; real scale - never closer than the start zoom)
+  const best = dockLevel(p);   // (the stepped zoom: the nearest level; real scale - never closer than the start zoom)
   cam.zt[p] = ZOOM_LEVELS[best - 1];
   scopes[p].level = best;
 }
@@ -10650,7 +10689,10 @@ function stepShells(dt) {
     if (s.from === 'bomb' || (s.from === 'rocket' && (!powered || s.age - (s.ia || 0) < 0.5))) { /* no trail (yet, or any more) */ }
     else if (seg && Math.hypot(s.x - seg.p1.x, s.y - seg.p1.y) < 34) { seg.p2.x = s.x; seg.p2.y = s.y; }
     else {
-      if (trails.length >= 700) { const o = trails.shift(); if (o.next) o.next.root = true; }          // drop the oldest, faintest piece, never the new one
+      // (user Oct 30: "Smoke from trails must ALWAYS disappear smoothly" - many missiles' old trails "suddenly faded out
+      // very fast"; Oct 29: "Details are never capped". There was a cap here: at 700 pieces the oldest was dropped for each
+      // new one - a missile lays a piece every 34 units, so a handful of them cut every older trail off. Gone: each piece
+      // lives its whole fade (stepTrails), made cheap enough instead - stepTrails, drawTrails, 47-render-overlays.js)
       const p1 = seg ? seg.p2 : { x: px, y: py, vx: 0, vy: 0, age: 0, seed: trlR() * 100, launch: s.from !== 'bomb' && s.from !== 'rocket' };
       s.seg = { p1, p2: { x: s.x, y: s.y, vx: 0, vy: 0, age: 0, seed: trlR() * 100 }, root: !seg, thin: s.from === 'rocket' || s.from === 'tank' };   // (the tank's missile too, user Oct 25: thin and soon gone)
       if (seg) seg.next = s.seg;
@@ -14007,7 +14049,7 @@ function vehFocus(i, m) {
     const pl = planes[i], hz = 0.5 * VIEW_H / (cam.zt[i] || 1);
     // (the plane in the middle of the view at every zoom, user Oct 24 night: it used to sit a fixed distance above
     // the middle, which zoomed in put it up under the buttons; right up to the ceiling, the sky going on above it)
-    const y = Math.max(SKY_TOP - hz * 0.2, Math.min(FOCUS_Y, pl.y));
+    const y = Math.max(Math.min(SKY_TOP, planeIceY() - 90) - hz * 0.2, Math.min(FOCUS_Y, pl.y));   // (up to its ceiling, the stratosphere - user Oct 30)
     return [pl.x, y, pl.vx, 0, [pl.x, 40]];                 // (the plane in the middle of the view: no look-ahead, user)
   }
   if (m === 'sub') {
@@ -24796,7 +24838,15 @@ function stepTrails(dt) {
       q.vx += (nx * side * 260 + s.vx * 0.5) * f * dt; q.vy += (ny * side * 260 + s.vy * 0.5) * f * dt;
     }
   };
-  if (shells.length) for (const t of trails) { shove(t.p2); if (t.root) shove(t.p1); }
+  // (user Oct 30, no cap on the trails: a piece only asks the shells if one is near it at all - the box round the shells
+  // flying in the air, R wider - so hundreds of pieces cost a compare each)
+  if (shells.length) {
+    let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
+    for (const s of shells) if (!s.under) { if (s.x < bx0) bx0 = s.x; if (s.x > bx1) bx1 = s.x; if (s.y < by0) by0 = s.y; if (s.y > by1) by1 = s.y; }
+    bx0 -= R; bx1 += R; by0 -= R; by1 += R;
+    const near = q => q.x >= bx0 && q.x <= bx1 && q.y >= by0 && q.y <= by1;
+    if (bx0 <= bx1) for (const t of trails) { if (near(t.p2)) shove(t.p2); if (t.root && near(t.p1)) shove(t.p1); }
+  }
   for (let i = trails.length - 1; i >= 0; i--) {
     const t = trails[i];
     move(t.p2); if (t.root) move(t.p1);                   // every point once: a piece owns its far end, the first piece both
@@ -24830,6 +24880,7 @@ function drawTrails(x0, x1) {
   for (const t of trails) {
     const p1 = t.p1, p2 = t.p2;
     if (Math.max(p1.x, p2.x) < x0 - 80 || Math.min(p1.x, p2.x) > x1 + 80) continue;
+    if (Math.min(p1.y, p2.y) - 80 > (bh + TOPPX) / SV || Math.max(p1.y, p2.y) + 80 < TOPPX / SV) continue;   // (above or below the view: no work - user Oct 30, no cap on the trails)
     const ak = t.thin ? THIN_AGE : 1, rk = t.thin ? THIN_R : 1;
     if (reuse && p2.age * ak > (t.thin ? 1e9 : thinAge)) continue;
     const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
@@ -26643,7 +26694,7 @@ const SL = [
   ['sand', 'SAND', 0, 3, 0.05, 1, 'How much sand settles on the floors', 'CAVE', 'FLOOR', 1],
   ['weed', 'WEED', 0, 3, 0.05, 1, 'How much weed grows on the floors under the water', 'CAVE', 'FLOOR', 1],
   ['coral', 'CORAL', 0, 3, 0.05, 0.6, 'How many corals and sponges', 'CAVE', 'FLOOR', 1],
-  ['reach', 'LAMP REACH', 150, 900, 10, 460, 'How far the sub\'s lamp reaches in a cave (460: the game\'s beam)', 'LIGHT', 'THE LAMP'],
+  ['reach', 'LAMP REACH', 150, 1800, 10, 920, 'How far the sub\'s lamp reaches in a cave (920: the game\'s beam - twice as far, user Oct 30)', 'LIGHT', 'THE LAMP'],
   ['lampk', 'LAMP STRENGTH', 0.3, 2.5, 0.05, 1, 'How brightly the lamp lights the rock, sand and weed', 'LIGHT', 'THE LAMP'],
   ['glow', 'BEAM IN WATER', 0, 1.5, 0.02, 0.46, 'How much the beam itself shows in a cave\'s water', 'LIGHT', 'THE LAMP'],
   ['pool', 'POOL', 0, 150, 1, 50, 'The little round light about the sub itself', 'LIGHT', 'THE LAMP'],
@@ -27825,7 +27876,7 @@ function lampAt(X, Y) {
   let beam = 0;
   if (d < P.reach) {
     const cosA = d < 0.5 ? 1 : (dx * LB.ux + dy * LB.uy) / d, e0 = clamp((cosA - 0.55) / 0.3, 0, 1);
-    if (e0 > 0) { const core = clamp((cosA - 0.8) / 0.18, 0, 1), q = 1 - d / P.reach; beam = Math.pow(q, 0.8) * e0 * e0 * (3 - 2 * e0) * (0.55 + 0.45 * core) * (1 - Math.exp(-d / 5)); }
+    if (e0 > 0) { const core = clamp((cosA - 0.8) / 0.18, 0, 1), q = 1 - d / P.reach; beam = beamFall(q) * e0 * e0 * (3 - 2 * e0) * (0.55 + 0.45 * core) * (1 - Math.exp(-d / 5)); }
   }
   // the pool round the sub (from its middle)
   const pd = Math.hypot(X - SUB.x, Y - SUB.y), pool = P.pool > 0 && pd < P.pool ? Math.pow(1 - pd / P.pool, 2) * 0.9 : 0;
@@ -30274,7 +30325,12 @@ function passingShips(sh) { return LAND ? civShips.filter(c => c.state !== 'gone
 function civHitFor(s, x, y, dmg, vx) { CIV_SKIP = s.pass && s.pass.length ? s.pass : null; try { return civHit(x, y, dmg, vx); } finally { CIV_SKIP = null; } }
 // (engine stage 3) 'hit' {kind: 'civ', x, y, amt: dmg in shells, vx, shell} (36-zz-events.js): a blow to whatever big ship is
 // at (x, y) - shell: the shell or round, whose passing ships it skips (civHitFor). e.took: she (or a box on her deck) took it
-on('hit', e => { if (e.kind === 'civ') e.took = e.shell ? civHitFor(e.shell, e.x, e.y, e.amt, e.vx) : civHit(e.x, e.y, e.amt, e.vx); }, 'civShips');
+on('hit', e => {
+  if (e.kind !== 'civ') return;
+  e.took = e.shell ? civHitFor(e.shell, e.x, e.y, e.amt, e.vx) : civHit(e.x, e.y, e.amt, e.vx);
+  // (user Oct 30: a shell's hit bobs her as it does the battleship - hitBob, 22-ship-physics.js)
+  if (e.took && e.shell && e.amt >= 0.5) { const h = civAt(e.x, e.y); if (h && h[0].state === 'sail') hitBobKick(h[0], civLen(h[0]), e.x - h[0].x, e.shell.vy); }   // (a shell, missile or bomb - not a round)
+}, 'civShips');
 function civAt(x, y) {
   for (const c of civShips) {
     if (CIV_SKIP && CIV_SKIP.includes(c)) continue;
@@ -30445,7 +30501,7 @@ function stepCivShips(dt) {
       const c = civShips[k], X0 = c.x;
       // (engine stage 2: a big ship on her run - not yours, not hurt, afloat - is stepped by her region's tier, catching up when a
       // view comes near; c.dx is what she moved this tick, so what stands on her goes with her)
-      const pin = c.state !== 'sail' || c.driven != null || c.carried != null || c.sec.some(v => v < CIV[c.kind].hp);
+      const pin = c.state !== 'sail' || !!c.bob || c.driven != null || c.carried != null || c.sec.some(v => v < CIV[c.kind].hp);
       if (!schedStep(S, c, c.x, dt, h => stepCivShip(c, h), pin)) c.dx = 0; else c.dx = c.x - X0;
     }
     S.t += performance.now() - t0;
@@ -30479,7 +30535,8 @@ function stepCivShip(c, dt) {
       // undone; one going her way she follows behind, anything else (coming at her, moored, stopped) she goes about from
       if (c.x !== x0) { const mv = c.x - x0, o = civShips.find(q => q !== c && q.state === 'sail' && (q.x - c.x) * mv > 0 && Math.abs(q.x - c.x) < (civLen(q) + L) / 2 + CIV_GAP);
         if (o) { c.x = x0; if (c.driven == null && !(o.dir === c.dir && (o.dx || 0) * c.dir > 0)) c.dir = -c.dir; } }
-      c.a = Math.atan2(surfaceY(c.x + L * 0.3) - surfaceY(c.x - L * 0.3), L * 0.6) * 0.5;
+      hitBobStep(c, dt);                                           // (a shell's hit: her bob - 22-ship-physics.js)
+      c.a = Math.atan2(surfaceY(c.x + L * 0.3) - surfaceY(c.x - L * 0.3), L * 0.6) * 0.5 + (c.bob ? c.bob[2] : 0);
       c.dx = c.x - x0;                                             // (how far she moved: what stands on her goes with her)
       // her funnels' smoke, drifting off downwind
       c.smokeT -= dt;
@@ -30560,7 +30617,7 @@ function civPierGone(c) {
 }
 // where her waterline's middle is: riding the surface afloat; sinking, eased off it to the still water's (c.yb), so a
 // wreck on the bottom doesn't bob with the waves above (user Oct 27, 14a)
-const civY = c => (c.state === 'sail' || c.yb == null ? surfaceY(c.x) : c.yb) + c.sink;
+const civY = c => (c.state === 'sail' || c.yb == null ? surfaceY(c.x) + (c.state === 'sail' && c.bob ? c.bob[0] : 0) : c.yb) + c.sink;
 // a point on her picture (pixels from its left, top) in the world - the whole of her, as she was before she broke
 function civPoint(c, px, py) {
   const K = CIV[c.kind], A = civArt(c), ang = c.a + c.tilt, ca = Math.cos(ang), sa = Math.sin(ang);
@@ -36200,17 +36257,24 @@ function drawDeepLights(x0, x1, only) {
 }
 // the beam's light: a cone along +x from its lamp (at the left middle), spreading about 90 degrees (user Oct 25 late),
 // brightest along its middle and near the lamp, fading out to its length; smooth (a light, never blocky), made once
-const MS_BEAM_L = 460;                     // (the beam's length, world units)
+// (user Oct 30: "The sub's light reaches 2x further, with a smoother falloff at its far end") SUB_BEAM_K: the beam twice as
+// long - the army sub's and the exploration sub's (the same light), in the open water, the deep's dark and the caves (their
+// LAMP REACH, 920 by default) - and beamFall, its fade along its length (q: the share of its length still to go): as before
+// near the lamp, then easing out over the last third so it ends with no edge (was pow(q, 0.8) to the end, which drops
+// steeply right at its tip)
+const SUB_BEAM_K = 2;
+const MS_BEAM_L = 460 * SUB_BEAM_K;        // (the beam's length, world units)
+const beamFall = q => q <= 0 ? 0 : Math.pow(q, 0.8) * smoothstep(0, 0.35, q);
 const MS_BEAM_A = 0.46;                    // (user Oct 27, 15:52: "stupidly strong. Can you reduce it 20% at least?" - a quarter less)
 let msBeamArt = null;
 function msBeamSprite() {
   if (msBeamArt) return msBeamArt;
-  const W = 230, H = 384, c = makeCanvas(W, H), g = c.getContext('2d'), id = g.createImageData(W, H), d = id.data;
+  const W = 230 * SUB_BEAM_K, H = 384 * SUB_BEAM_K, c = makeCanvas(W, H)   /* (two world units a pixel, as before) */, g = c.getContext('2d'), id = g.createImageData(W, H), d = id.data;
   for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
     const dx = i + 0.5, dy = j + 0.5 - H / 2, dd = Math.hypot(dx, dy), u = dd / W;
     if (u >= 1) continue;
     const cosA = dx / dd, e0 = clamp((cosA - 0.55) / 0.3, 0, 1); if (e0 <= 0) continue;
-    const core = clamp((cosA - 0.8) / 0.18, 0, 1), al = Math.pow(1 - u, 0.8) * e0 * e0 * (3 - 2 * e0) * (0.55 + 0.45 * core) * (1 - Math.exp(-dd / 5));
+    const core = clamp((cosA - 0.8) / 0.18, 0, 1), al = beamFall(1 - u) * e0 * e0 * (3 - 2 * e0) * (0.55 + 0.45 * core) * (1 - Math.exp(-dd / 5));
     const o = (j * W + i) * 4; d[o] = 228; d[o + 1] = 240; d[o + 2] = 255; d[o + 3] = Math.round(255 * clamp(al, 0, 1));
   }
   g.putImageData(id, 0, 0);
@@ -44139,6 +44203,10 @@ async function start(data) {
     gasBalls, camOverride, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, whales: () => whales, smokePuff: (x, y) => spawnSmoke(x, y, { dark: 0.9, r: 5, grow: 5, lift: 40, vy: -30, life: 10, alpha: 0.7, rise: false }), deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), cloudsNow: () => clouds, skyData: () => clouds.map(c => netPlain(c, 1)), setSky: d => { clouds.length = 0; for (const c of d) clouds.push(c); }, killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
   };
+  // (user Oct 30: the subs' beam - its length and its picture, for a check of its reach)
+  Object.assign(window.__game, { subBeam: () => ({ L: MS_BEAM_L, sprite: msBeamSprite() }) });
+  // (user Oct 30: the hit bob on every ship - a hit sent as the game sends it, and which big ship is at a point)
+  Object.assign(window.__game, { emit: (t, e) => emit(t, e), civAt: (x, y) => civAt(x, y) });
   // (OPEN WORLD: the kraken - tools/kraken.mjs)
   Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
