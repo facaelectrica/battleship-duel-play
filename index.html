@@ -2859,8 +2859,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 373;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 18:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 374;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 18:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6538,6 +6538,11 @@ const inHarbour = v => !!v.gate || (v.moored === true) || v.state === 'docked' |
 const GATE_V = 150, GATE_A = 90;          // how fast the harbour moves a boat, and how hard it starts and stops her
 // (real scale: as much faster as she's bigger, so a launch takes the time it did)
 const gateK = v => vKind(v) === 'ship' ? REAL.ship * 0.5 : REAL.sub;   // (the battleship half as fast through her harbour, user Oct 29)
+// how gently a boat run out through her gate eases to her own speed before she's handed over (a share of GATE_A)
+const GATE_EASE = 0.25;
+// a boat's own top speed at full ahead: where her engines' push meets the water's drag, a = b v + c v^2 (stepShip's
+// ACC_FWD, DRAG_L, DRAG_Q; stepSub's SUB_PUSH, SUB_DRAG_L, SUB_DRAG_Q)
+function ownTop(v) { const [a, b, c] = vKind(v) === 'ship' ? [ACC_FWD, DRAG_L, DRAG_Q] : [SUB_PUSH(), SUB_DRAG_L, SUB_DRAG_Q()]; return (-b + Math.sqrt(b * b + 4 * c * a)) / (2 * c); }
 function vKind(v) { return v === ships[v.id] ? 'ship' : 'sub'; }
 function gateOf(v) { const d = v.dock; return vKind(v) === 'ship' ? d.shipGate : d.subGate; }
 function berthOf(v) { const d = v.dock; return vKind(v) === 'ship' ? d.berth : d.subBerth; }
@@ -6566,8 +6571,14 @@ function stepGate(v, dt) {
     const inside = (v.x - hold) * d.dir > 0;
     if (canPass || !inside) {
       // out she goes, and keeps going: no easing to a stop at the pier's end, she's handed over under way
-      const s = -d.dir;
-      v.vx += clamp(s * GATE_V * gateK(v) - v.vx, -GATE_A * gateK(v) * dt * 1.5, GATE_A * gateK(v) * dt * 1.5);
+      // (user Oct 30: "my battleship is hitting something while in the ocean ... after leaving the dock and sailing for a
+      // little bit" - the gate ran her out at GATE_V x gateK, 600 for the battleship, 2.5x her own top speed, and let go at
+      // the pier's end: her own drag braked her to 240 within a second, a jolt like a ram) over the last of the run she
+      // eases down, GATE_EASE x her gate's push, to her own full-ahead speed (ownTop), so she's handed over at the speed
+      // she keeps
+      const s = -d.dir, k = gateK(v), left = Math.max(0, (outOf(v) - v.x) * s), top = ownTop(v);
+      const want = Math.min(GATE_V * k, Math.max(top, Math.sqrt(top * top + 2 * GATE_EASE * GATE_A * k * left)));
+      v.vx += clamp(s * want - v.vx, -GATE_A * k * dt * 1.5, GATE_A * k * dt * 1.5);
       v.x += v.vx * dt;
       if ((v.x - outOf(v)) * s >= 0) { v.x = outOf(v); gateDone(v, 'out'); }
     } else harbourMove(v, v.x, dt);
@@ -6927,7 +6938,9 @@ function vehSubRnd(a, b) { return a + (b - a) * vehSubR(); }
 // (user Oct 29: 1.5x as fast - SUB_SPD_K: the push that much harder and the water's square drag that much weaker, so she
 // reaches 1.5x the speed in the same time; SUB_DIVE_K: she goes down twice as fast)
 const SUB_DIVE_K = 2;   // (SUB_SPD_K: VTUNE.sub.speedK - 01-z-vehicle-tune.js)
-const SUB_DRAG_L = 0.42, SUB_VZ = 46;   // (Oct 25: a bit more arcade - quicker up, down and to a stop)
+const SUB_DRAG_L = 0.42, SUB_VZ = 46;
+// her engines' push at full and the water's square drag (VTUNE.sub.speedK, read live): stepSub, and her top speed (ownTop, 23-harbour-gates)
+const SUB_PUSH = () => 84 * VTUNE.sub.speedK, SUB_DRAG_Q = () => 0.0016 / VTUNE.sub.speedK;   // (Oct 25: a bit more arcade - quicker up, down and to a stop)
 function makeSub(id, d) {
   return {
     id, dock: d, facing: -d.dir, x: d.subBerth, y: SUB_GATE_Y, vx: 0, vy: 0, a: 0, throttle: 0, input: 0, dive: 0, depthT: SUB_GATE_Y,
@@ -7157,7 +7170,7 @@ function stepSub(sb, dt) {
   } else {
     const target = sb.turn ? 0 : dirWant === sb.facing ? order : 0;
     sb.throttle += clamp(target - sb.throttle, -3 * dt, 2.2 * dt);
-    sb.vx += (sb.throttle * (84 * VTUNE.sub.speedK) - SUB_DRAG_L * sb.vx - (0.0016 / VTUNE.sub.speedK) * sb.vx * Math.abs(sb.vx)) * dt;
+    sb.vx += (sb.throttle * SUB_PUSH() - SUB_DRAG_L * sb.vx - SUB_DRAG_Q() * sb.vx * Math.abs(sb.vx)) * dt;
     if (!target && !sb.turn) sb.vx *= 1 - Math.min(1, 1.1 * dt);         // (told to stop, she brakes: stops in a couple of seconds)
     if (sb.turn) sb.vx *= 1 - 1.4 * dt;
     // sent home she eases in to the end of her pier
@@ -46117,6 +46130,8 @@ async function start(data) {
   Object.assign(window.__game, { subBeam: () => ({ L: MS_BEAM_L, sprite: msBeamSprite() }) });
   // (user Oct 30: the hit bob on every ship - a hit sent as the game sends it, and which big ship is at a point)
   Object.assign(window.__game, { emit: (t, e) => emit(t, e), civAt: (x, y) => civAt(x, y) });
+  // (the collision tests - tools/collide.mjs, collideshot.mjs: what's solid where, and the COLLISION view's switches)
+  Object.assign(window.__game, { col: { COLV, SHIP_L, UPM, CONTACT, hangarRoofAt: (d, x) => hangarRoofAt(d, x), hangarSolid: (x, y) => hangarSolid(x, y), harbourHit: (d, x, y) => harbourHit(d, x, y), enemyLimit: (p, h) => enemyLimit(p, h), onLand: x => onLand(x), isleCol: x => isleCol(x), isle: x => ISLE === null ? null : ISLE[Math.floor(x / 2.5)], owned: () => DOCKS_OWNED, docks: () => docks, civShips: () => civShips, civLen: c => civLen(c), sea: () => [SEA0, SEA1], WATER_Y, HANGAR_ROOF: () => HANGAR_ROOF(), edOpen: on => { NSKY.editor.TUNE.open = !!on; }, launch: (p, k) => launchOut(k === 'ship' ? ships[p] : subs[p]), ownTop: v => ownTop(v) } });
   // (OPEN WORLD: the kraken - tools/kraken.mjs)
   Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
