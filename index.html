@@ -2859,8 +2859,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 371;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 18:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 372;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 18:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7786,37 +7786,149 @@ function subArtPt(sb, col, row) {
   return [sb.x + lx * ca - ly * sa, sb.y + lx * sa + ly * ca];
 }
 const subLightOn = sb => sb && sb.light && (sb.state === 'out' || sb.state === 'docked') && !sb.parts;
-// (OPEN WORLD) the deep's dark opened along her beam too (drawAbyss), as the exploration sub's
-function subAbyssLights(out) {
+/* ---- every sub lamp, one list, one light (user Oct 30: "the sub lights should illuminate everything, including other
+   submarines"). The exploration subs out in the water and the army subs with their light on: where the lamp is, which way
+   it points (a: 0 right, PI/2 down, PI left), and the sub. Everything the light does reads this list and the one beam
+   (lampBeamAt - the beam sprite's own cone and fall): the light on whatever is under the water in it (LAMP_K, applied
+   over the world's layer in one pass - drawLampLight), the beam's glow in the water, the deep's dark opened along it,
+   the chests' glint, the ink thinned, the caves' lamp ---- */
+const LAMP_K = 1.6;                        // (how strongly a beam lights what's in it: its own colour times this at the beam's heart)
+function subLamps() {
+  const out = [];
+  if (LAND && msArt) for (const s of minisubs) {
+    if (s.state !== 'out') continue;
+    const [ux, uy] = msAim(s);
+    out.push({ x: s.x + ux * 8, y: s.y + uy * 8, a: s.aimA == null ? Math.atan2(uy, ux) : s.aimA, s, ms: true });
+  }
   for (const sb of subs) {
     if (!subLightOn(sb)) continue;
-    const [lx, ly] = subArtPt(sb, ...SUB_LAMP_AT), X = PX(lx), Y = PY(ly);
-    if (X < -900 * SV || X > VWP + 900 * SV) continue;
-    const a = sb.aimA == null ? clamp(sb.lamp.elev, 0, 180) * Math.PI / 180 : sb.aimA, ux = Math.cos(a), uy = Math.sin(a);
-    out.push({ x: X, y: Y, r: 40 * SV, k: 0.9 });
-    out.push({ x: X + ux * 8 * SV, y: Y + uy * 8 * SV, ux, uy, L: MS_BEAM_L * SV, k: 1, beam: true });
+    const [x, y] = subArtPt(sb, ...SUB_LAMP_AT);
+    out.push({ x, y, a: sb.aimA == null ? clamp(sb.lamp.elev, 0, 180) * Math.PI / 180 : sb.aimA, s: sb, ms: false });
   }
   return out;
 }
-// her light: the beam (after the night's tint, under the water only); and while it's on, the
-// red lamp on her tail blinking (drawn after the night, as the planes')
+// the beam's light at (dx, dy) from its lamp, along aim (ux, uy) - 0..1, the beam sprite's (msBeamSprite) in world units
+function lampBeamAt(dx, dy, ux, uy) {
+  const d = Math.hypot(dx, dy); if (d >= MS_BEAM_L) return 0;
+  const cosA = d < 0.5 ? 1 : (dx * ux + dy * uy) / d, e0 = clamp((cosA - 0.55) / 0.3, 0, 1); if (e0 <= 0) return 0;
+  const core = clamp((cosA - 0.8) / 0.18, 0, 1);
+  return beamFall(1 - d / MS_BEAM_L) * e0 * e0 * (3 - 2 * e0) * (0.55 + 0.45 * core) * (1 - Math.exp(-d / 10));
+}
+// how much light the lamps put on a point (0..1): in a beam, or close round a sub with its lamp on
+function lampLitAt(x, y) {
+  let k = 0;
+  for (const l of subLamps()) {
+    const d = Math.hypot(x - l.s.x, y - l.s.y);
+    if (d < 50) k = Math.max(k, 1 - d / 60);
+    k += lampBeamAt(x - l.x, y - l.y, Math.cos(l.a), Math.sin(l.a));
+  }
+  return clamp(k, 0, 1);
+}
+// (OPEN WORLD) the deep's dark opened along every beam (drawAbyss) - and round an army sub with her light on
+function subAbyssLights(out) {
+  for (const l of subLamps()) {
+    const X = PX(l.x), Y = PY(l.y), ux = Math.cos(l.a), uy = Math.sin(l.a);
+    if (X < -MS_BEAM_L * SV || X > VWP + MS_BEAM_L * SV) continue;
+    if (!l.ms) out.push({ x: X, y: Y, r: 40 * SV, k: 0.9 });       // (the exploration sub's pool is its own: abyssLights)
+    out.push({ x: X, y: Y, ux, uy, L: MS_BEAM_L * SV, k: 1, beam: true });
+  }
+  return out;
+}
+// the army subs' red lamp on the tail blinking while the light is on (after the night, as the planes'); and every lamp's
+// beam glowing in the water (after the night's tint, under the water only - added to what's there) and, the exploration
+// sub's, its bright spot at the lamp
 function drawSubLights(x0, x1) {
   for (const sb of subs) {
-    if (!subLightOn(sb)) continue;
-    // (the screen is two half views: a sub a whole beam past this one's edge still lights it - rules.md 6)
-    if (sb.x < x0 - MS_BEAM_L - SUB_L || sb.x > x1 + MS_BEAM_L + SUB_L) continue;
+    if (!subLightOn(sb) || sb.x < x0 - SUB_L || sb.x > x1 + SUB_L) continue;
     const [tx, ty] = subArtPt(sb, ...SUB_TAIL_AT);
     if ((time + sb.id * 0.37) % 1.0 < 0.32) planeLamps[viewIdx].push(PX(tx), PY(ty), clamp(0.7 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1));
-    const [lx, ly] = subArtPt(sb, ...SUB_LAMP_AT), a = sb.aimA == null ? clamp(sb.lamp.elev, 0, 180) * Math.PI / 180 : sb.aimA;
-    const X = PX(lx), Y = PY(ly), L = MS_BEAM_L * SV, sp = msBeamSprite(), sc = L / sp.width, wy = Math.round(PY(WATER_Y + 2));
+  }
+  for (const l of subLamps()) {
+    // (the screen is two half views: a lamp a whole beam past this one's edge still lights it - rules.md 6)
+    if (l.x < x0 - MS_BEAM_L - 40 || l.x > x1 + MS_BEAM_L + 40) continue;
+    const X = PX(l.x), Y = PY(l.y), a = l.a, L = MS_BEAM_L * SV, sp = msBeamSprite(), sc = L / sp.width, wy = Math.round(PY(WATER_Y + 2)), dot = l.ms;
     lateLit[viewIdx].push(() => {
       C.save(); C.beginPath(); C.rect(-SHX - 4, wy, VWP + 2 * SHX + 8, bh - SHY - wy + 4); C.clip();
       const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = true;
       C.globalCompositeOperation = 'lighter'; C.globalAlpha = MS_BEAM_A;
       C.translate(X, Y); C.rotate(a); C.drawImage(sp, 0, -Math.round(sp.height * sc / 2), Math.round(sp.width * sc), Math.round(sp.height * sc));
-      C.imageSmoothingEnabled = sm; C.restore();   // (no bright dot at the lamp any more - user Oct 29, gen/open/ref/sub_lamp_dot_oct29.png)
+      C.restore();
+      if (dot) {                                                  // (the army sub's has none - user Oct 29, gen/open/ref/sub_lamp_dot_oct29.png)
+        C.save(); C.globalCompositeOperation = 'lighter'; C.globalAlpha = 1;
+        const R = 7 * SV, g = C.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, 'rgba(250,252,255,0.95)'); g.addColorStop(1, 'rgba(230,240,255,0)'); C.fillStyle = g; C.fillRect(Math.round(X - R), Math.round(Y - R), Math.round(2 * R), Math.round(2 * R));
+        C.restore();
+      }
+      C.imageSmoothingEnabled = sm;
     });
   }
+}
+/* the lamps' light on what's under the water, in two steps, each one pass for every lamp in the view:
+   1. (renderObjects) everything under the water is drawn; a copy of it is kept (lampSnapshot); the water's tint goes over it
+      (the deep's blue, stronger the deeper); then the copy is laid back over the tint where the beams fall (lampUncover) -
+      fully near the lamp, fading toward the beam's edge and end. So what's lit is seen in its own colours, not through the
+      blue (user Oct 30, 18:40: the other sub "an even mid-blue shape with no detail").
+   2. (render, on the screen just after the world's layer went to it with the night's tint, before the beams' glow) the
+      light added: the world's layer's own colour (before the night) times the beam's light (drawLampLight) - brightest
+      near the lamp, fading with distance and toward the cone's edge, like a torch at night.
+   On the GPU (wglLamps, wglLampSnap); with no WebGL the same through a canvas, the beam sprite as the mask. No lamp near
+   the view: nothing happens. */
+const LAMP_UNCOVER = 2.2;                  // (how quickly, in from the beam's edge and end, the water's tint is fully lifted)
+// this view's lamps, in its pixels, and the box they reach (null: none)
+function lampView(k) {
+  const x0 = CAMPX / SV, x1 = x0 + VWP / SV, wy = PY(WATER_Y + 2), R = MS_BEAM_L * SV;
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  const L = [];
+  for (const l of subLamps()) {
+    if (l.x < x0 - MS_BEAM_L - 40 || l.x > x1 + MS_BEAM_L + 40) continue;
+    const X = PX(l.x), Y = PY(l.y);
+    bx0 = Math.min(bx0, X - R); bx1 = Math.max(bx1, X + R); by0 = Math.min(by0, Y - R); by1 = Math.max(by1, Y + R);
+    L.push([X, Y, R, wy, Math.cos(l.a), Math.sin(l.a), k, 10 * SV]);
+  }
+  if (!L.length) return null;
+  bx0 = Math.max(bx0, -SHX - 4); bx1 = Math.min(bx1, VWP + SHX + 4); by0 = Math.max(by0, wy, -SHY - 4); by1 = Math.min(by1, bh - SHY + 4);
+  return bx1 > bx0 && by1 > by0 ? { L, bx0, by0, bx1, by1, R } : null;
+}
+let lampCv = null, lampSnapCv = null;
+// the beam's light as a mask on a canvas the box's size (no WebGL), each lamp's sprite added at strength a
+function lampMask(V, a) {
+  const w = Math.ceil(V.bx1 - V.bx0), h = Math.ceil(V.by1 - V.by0);
+  if (!lampCv || lampCv.width < w || lampCv.height < h) lampCv = makeCanvas(Math.max(w, lampCv ? lampCv.width : 0), Math.max(h, lampCv ? lampCv.height : 0));
+  const x = lampCv.getContext('2d'), sp = msBeamSprite(), sc = V.R / sp.width;
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1; x.clearRect(0, 0, w, h);
+  x.imageSmoothingEnabled = true; x.globalCompositeOperation = 'lighter'; x.globalAlpha = Math.min(1, a);
+  for (const q of V.L) { x.setTransform(1, 0, 0, 1, q[0] - V.bx0, q[1] - V.by0); x.rotate(Math.atan2(q[5], q[4])); x.drawImage(sp, 0, -sp.height * sc / 2, sp.width * sc, sp.height * sc); }
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1;
+  return [x, w, h];
+}
+// 1a. (renderObjects, its view, before the water's tint) a copy of what's under the water as it is; null: no lamp here
+function lampSnapshot() {
+  const V = lampView(LAMP_UNCOVER); if (!V) return null;
+  if (gpuwOn('tint')) { wglLampSnap(VSX + SHX + V.bx0 - 1, VSX + SHX + V.bx1 + 1); return V; }
+  if (GLR.on) return null;                                        // (the GPU's context with its water passes off: no copy to make)
+  const w = Math.ceil(V.bx1 - V.bx0), h = Math.ceil(V.by1 - V.by0);
+  if (!lampSnapCv || lampSnapCv.width < w || lampSnapCv.height < h) lampSnapCv = makeCanvas(Math.max(w, lampSnapCv ? lampSnapCv.width : 0), Math.max(h, lampSnapCv ? lampSnapCv.height : 0));
+  const x = lampSnapCv.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, w, h);
+  x.drawImage(ob, Math.round(VSX + SHX + V.bx0), Math.round(SHY + V.by0), w, h, 0, 0, w, h);
+  return V;
+}
+// 1b. (renderObjects, after the water's tint) the copy laid back where the beams fall
+function lampUncover(V) {
+  if (gpuwOn('tint')) { wglLamps(V.L, V.bx0, V.by0, V.bx1, V.by1, 1); return; }
+  const [x, w, h] = lampMask(V, 1);
+  x.globalCompositeOperation = 'source-in'; x.drawImage(lampSnapCv, 0, 0, w, h, 0, 0, w, h); x.globalCompositeOperation = 'source-over';
+  C.save(); C.setTransform(1, 0, 0, 1, VSX + SHX, SHY); C.drawImage(lampCv, 0, 0, w, h, Math.round(V.bx0), Math.round(V.by0), w, h); C.restore();
+}
+// 2. (render, the screen, each view) the light added
+function drawLampLight() {
+  const V = lampView(LAMP_K); if (!V) return;
+  if (gpuwOn('tint')) { wglLamps(V.L, V.bx0, V.by0, V.bx1, V.by1, 0); return; }
+  if (GLR.on) return;
+  const [x, w, h] = lampMask(V, 1);
+  x.globalCompositeOperation = 'source-in'; x.drawImage(ob, Math.round(VSX + SHX + V.bx0), Math.round(SHY + V.by0), w, h, 0, 0, w, h); x.globalCompositeOperation = 'source-over';
+  // (the mask's light is 1 at most: added LAMP_K times over)
+  C.save(); C.globalCompositeOperation = 'lighter';
+  for (let left = LAMP_K; left > 0.01; left -= 1) { C.globalAlpha = Math.min(1, left); C.drawImage(lampCv, 0, 0, w, h, Math.round(V.bx0), Math.round(V.by0), w, h); }
+  C.restore();
 }
 // the button's picture: a lamp throwing its beam, in the buttons' cream (glyphIcon)
 function lightIcon() {
@@ -16622,6 +16734,38 @@ void main() {
   if (u_wm.a > 0.0) c = vec4(u_wm.rgb * c.a + c.rgb * (1.0 - u_wm.a), c.a);
   o = c;
 }`;
+/* ---- 6. THE SUB LAMPS' LIGHT (user Oct 30: "the sub lights should illuminate everything, including other submarines"):
+   one pass over the world's layer as it went to the screen, for every lamp in the view at once (subLamps, 27-sub-light.js):
+   whatever was drawn under the water inside a beam - the floor, rocks, plants, wrecks, subs, hulls, pieces, mines, fish,
+   the kraken - gets its own colour (the world's layer before the night's tint) times the beam's light added, so it is lit
+   the same way, nothing per thing. The beam's shape is the sprite's (msBeamSprite): its cone, its fall along its length.
+   No lamp: no pass ---- */
+const WGL_LAMP_FS = `#version 300 es
+precision highp float; precision highp int;
+in vec2 v_u; out vec4 o;
+uniform sampler2D u_src; uniform vec2 u_ss; uniform vec2 u_off;
+uniform int u_nl; uniform int u_mode;   // (0: the light added; 1: the layer as it was under the water's tint, laid back over it)
+uniform vec4 u_l0[8];  // the lamp (view px), its reach (px), the water's line (view row): under it only
+uniform vec4 u_l1[8];  // its aim (unit), how strong, the near fade's length (px)
+void main() {
+  vec2 p = floor(v_u) + 0.5;
+  float lit = 0.0;
+  for (int k = 0; k < 8; k++) {
+    if (k >= u_nl) break;
+    vec4 a = u_l0[k], b = u_l1[k];
+    if (p.y < a.w) continue;
+    vec2 d = p - a.xy; float dd = length(d);
+    if (dd >= a.z) continue;
+    float cosA = dd < 0.5 ? 1.0 : dot(d, b.xy) / dd, e0 = clamp((cosA - 0.55) / 0.3, 0.0, 1.0);
+    if (e0 <= 0.0) continue;
+    float core = clamp((cosA - 0.8) / 0.18, 0.0, 1.0), q = 1.0 - dd / a.z, fall = pow(q, 0.8) * smoothstep(0.0, 0.35, q);
+    lit += b.z * fall * e0 * e0 * (3.0 - 2.0 * e0) * (0.55 + 0.45 * core) * (1.0 - exp(-dd / b.w));
+  }
+  if (lit <= 0.002) discard;
+  ivec2 t = ivec2(floor(v_u + u_off));
+  vec4 c = texelFetch(u_src, ivec2(t.x, int(u_ss.y) - 1 - t.y), 0);   // (a layer's rows: bottom first)
+  if (u_mode == 1) { float m = min(lit, 1.0); o = c * m; } else o = vec4(c.rgb * min(lit, 2.0), 0.0);
+}`;
 function wglSetup() {
   const gl = GLR.gl;
   WGL.ok = false;
@@ -16633,6 +16777,7 @@ function wglSetup() {
   WGL.ab = prog(WGL_VS, WGL_AB_FS, ['u_size', 'u_rect', 'u_m', 'u_g', 'u_gn', 'u_dk', 'u_nl', 'u_l0', 'u_l1']);
   WGL.di = prog(WGL_VS, WGL_DI_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_a', 'u_w', 'u_sh', 'u_np', 'u_pc', 'u_nr', 'u_rg', 'u_rp']);
   WGL.ti = prog(WGL_VS, WGL_TI_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_ss', 'u_t0', 'u_t1', 'u_ty', 'u_wm', 'u_grad', 'u_row']);
+  WGL.lamp = prog(WGL_VS, WGL_LAMP_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_ss', 'u_off', 'u_nl', 'u_mode', 'u_l0', 'u_l1']);
   WGL.qvao = gl.createVertexArray(); gl.bindVertexArray(WGL.qvao);
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
   WGL.svao = gl.createVertexArray(); gl.bindVertexArray(WGL.svao);
@@ -16794,6 +16939,39 @@ function wglTintCopy(views, tintOf, warmCss) {
     wglEnd();
   }
   g.restore();
+}
+// the lamps over this view (C: its context in its view, beginView): L - [X, Y, reach, water row, ux, uy, k, near] in the
+// view's pixels; the box they light (view px). mode 0 (the screen, after the world's layer went to it): the light added,
+// the world's layer's own colour times it. mode 1 (the world's layer, under the water's tint): the layer as it was before
+// the tint (wglLampSnap) laid back over it, fully near the lamp, fading to the beam's edge and end - so what's lit is seen
+// in its own colours, not through the deep's blue. The layer is read at the view's place on it (VSX + SHX, SHY)
+function wglLamps(L, x0, y0, x1, y1, mode) {
+  const gl = GLR.gl, pr = WGL.lamp, U = pr.U, n = Math.min(8, L.length), l0 = new Float32Array(32), l1 = new Float32Array(32);
+  for (let k = 0; k < n; k++) { const q = L[k]; l0.set([q[0], q[1], q[2], q[3]], k * 4); l1.set([q[4], q[5], q[6], q[7]], k * 4); }
+  ob.ensure();
+  wglBegin(C, mode ? 'source-over' : 'lighter', pr);
+  wglTex(0, mode ? WGL.lsnap.tex : ob.tex, false); gl.uniform1i(U.u_src, 0); gl.uniform2f(U.u_ss, ob.width, ob.height); gl.uniform2f(U.u_off, VSX + SHX, SHY);
+  gl.uniform1i(U.u_nl, n); gl.uniform1i(U.u_mode, mode ? 1 : 0); gl.uniform4fv(U.u_l0, l0); gl.uniform4fv(U.u_l1, l1);
+  gl.uniform4f(U.u_rect, x0, y0, x1 - x0, y1 - y0); gl.bindVertexArray(WGL.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  wglEnd();
+}
+// the world's layer as it is now, this view's columns (device px x0..x1), kept for wglLamps' mode 1: a copy on the GPU
+function wglLampSnap(x0, x1) {
+  const gl = GLR.gl, w = ob.width, h = ob.height;
+  glFlush();
+  let N = WGL.lsnap;
+  if (!N || N.ep !== GLR.epoch || N.w !== w || N.h !== h) {
+    if (N && N.ep === GLR.epoch) { gl.deleteTexture(N.tex); gl.deleteFramebuffer(N.fbo); }
+    N = WGL.lsnap = { tex: glNewTex(w, h, gl.NEAREST), w, h, ep: GLR.epoch, fbo: gl.createFramebuffer() };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, N.fbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, N.tex, 0);
+  }
+  ob.ensure();
+  gl.disable(gl.SCISSOR_TEST); gl.disable(gl.STENCIL_TEST);
+  const a = Math.max(0, Math.floor(x0)), b = Math.min(w, Math.ceil(x1));
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, ob.fbo); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, N.fbo);
+  if (b > a) gl.blitFramebuffer(a, 0, b, h, a, 0, b, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  GLR.cur = {}; GLR.unit = []; GLR.unitS = [];
 }
 
 /* ================================================================
@@ -22850,6 +23028,7 @@ function renderObjects() {
     C.restore();
   }
   drawPlanesAir(x0, x1);
+  const lampV = lampSnapshot();                           // (the sub lamps: what's under the water as it is, before the water's tint - 27-sub-light)
   const over = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(SEABED_DEEP + 150));
   const ov = 0.08 * E.storm;
   const sso = E.sunset, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12);
@@ -22857,6 +23036,7 @@ function renderObjects() {
   C.fillStyle = over;
   if (gpuwOn('cols')) wglColumns([{ k: 'grad', g: over, yOff: 0 }, { k: 'strips' }], Bt);   // (the tint and the middle of the ocean's dark, one pass on the GPU)
   else { fillBelowSurface(0, Bt); drawDeepWater(); }
+  if (lampV) lampUncover(lampV);                          // (and laid back over the tint where their beams fall)
   ot = ema('obOver', ot);
   drawRockForms(x0, x1);                                  // (the solid rocks: over the water's tint, k times its colour, so their light and shade read - user Oct 25)
   // (the near-black rocks in front of the floor come after the water's distortion: user Oct 25, they don't ripple -
@@ -26360,7 +26540,7 @@ function render() {
   g.drawImage(ob, 0, 0);
   }
   g.setTransform(1, 0, 0, 1, 0, 0);
-  for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); drawLighthouseGlow(); drawLateLit(); drawAirLamps(); drawPlaneLamps(); guardDraw('newsky', skyNewFront); drawFwLate(); g.restore(); }
+  for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); drawLampLight(); drawLighthouseGlow(); drawLateLit(); drawAirLamps(); drawPlaneLamps(); guardDraw('newsky', skyNewFront); drawFwLate(); g.restore(); }
   // (OPEN WORLD: the underwater caves where the exploration sub's lamp finds them - over the world and its night, as the
   // lamp's own light is - 50-land-caves)
   if (OWM && CAVE.ready) for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); guardDraw('caves', CAVE.draw); g.restore(); }
@@ -28692,23 +28872,22 @@ function subMove(s, dt, lever, stick) {
     else addBubble(bx, byy + WATER_Y, -s.facing * rnd(5, 15), -rnd(10, 25), rnd(0.6, 1.4));
   }
 }
-// the sub whose lamp lights the caves this frame: one that's out, in or by a system (its beam's reach), the nearest the
-// middle of the view
+// the sub whose lamp lights the caves this frame: one with its lamp on (subLamps: an exploration sub out, an army sub with
+// her light on - the one list), in or by a system (its beam's reach), the nearest the middle of the view
 function pickLamp(cx, cy) {
   LIT.on = false; LIT.s = null;
   if (!CV.ready || typeof minisubs === 'undefined') return;
   let best = null, bd = 1e18;
   const R = P.reach + 40;
-  for (const s of minisubs) {
-    if (s.state !== 'out') continue;
-    const Y = s.y - WATER_Y;
+  for (const l of subLamps()) {
+    const s = l.s, Y = s.y - WATER_Y;
     if (!CV.wins.some(Wn => Wn && s.x > Wn.X0 - R && s.x < Wn.X1 + R && Y > Wn.Y0 - R && Y < Wn.Y1 + R)) continue;
-    const d = (s.x - cx) ** 2 + (Y - cy) ** 2; if (d < bd) { bd = d; best = s; }
+    const d = (s.x - cx) ** 2 + (Y - cy) ** 2; if (d < bd) { bd = d; best = l; }
   }
   if (!best) return;
-  LIT.on = true; LIT.s = best;
-  SUB.x = best.x; SUB.y = best.y - WATER_Y;
-  SUB.aimA = best.aimA != null ? best.aimA : (best.facing > 0 ? 0.4 : Math.PI - 0.4);
+  LIT.on = true; LIT.s = best.s;
+  // (the lamp's rays start 7 ahead of SUB along its aim, lampRays: SUB put so they start at the lamp itself)
+  SUB.aimA = best.a; SUB.x = best.x - Math.cos(best.a) * 7; SUB.y = best.y - Math.sin(best.a) * 7 - WATER_Y;
 }
 const subAim = () => [Math.cos(SUB.aimA), Math.sin(SUB.aimA)];
 
@@ -32210,10 +32389,10 @@ function drawInk(x0, x1) {
     for (let wx = L - st; wx < R + st; wx += st) { const X = Math.round(PX(wx)), top = Math.round(PY(WATER_Y + 2)), bot = Math.round(PY(seabedY(wx + st / 2))); if (bot > top) C.rect(X, top, Math.round(PX(wx + st)) - X, bot - top); }
     C.clip();
     // (a deep blue haze round the plume first - the ink thinning into the water - then the billows themselves)
-    // (user Oct 27: "Light from the research sub doesn't work in oil spill (doesn't see through)") a minisub's lamp cuts
+    // (user Oct 27: "Light from the research sub doesn't work in oil spill (doesn't see through)") a sub's lamp (any: subLamps) cuts
     // through it: where its beam falls (chestLit - the beam's own reach and spread) the ink thins away, so what's in it
     // and behind it shows in the light; its beam (drawn after, over everything) then lights the murk that's left
-    const lamps = minisubs.some(m => m.state === 'out'), seen = q => lamps ? 1 - 0.85 * chestLit(q.x, q.y) : 1;
+    const lamps = subLamps().length > 0, seen = q => lamps ? 1 - 0.85 * chestLit(q.x, q.y) : 1;
     for (const p of o.ink) {
       if (p.x + p.r * 2 < x0 || p.x - p.r * 2 > x1 || p.a < 0.02) continue;
       const d = Math.round(p.r * 3.6 * SV); C.globalAlpha = Math.min(1, p.a * 0.3) * seen(p); C.drawImage(H, Math.round(PX(p.x) - d / 2), Math.round(PY(p.y) - d / 2), d, d);
@@ -37457,9 +37636,7 @@ function abyssLights() {
     const fc = msToUs(sub);
     out.push({ x: X, y: Y, r: (50 + 110 * fc) * SV, k: 0.9 });
     // (user Oct 25 late: it aims the way you go - down going down, left going left - and spreads 90 degrees, so you
-    // pick what's lit by the way you steer; still, it keeps its last aim)
-    const [ux, uy] = msAim(sub);
-    if (fc < 0.9) out.push({ x: X + ux * 8 * SV, y: Y + uy * 8 * SV, ux, uy, L: 460 * SV * (1 - 0.9 * fc), k: 1, beam: true });
+    // pick what's lit by the way you steer; still, it keeps its last aim) - its beam: every lamp's, subAbyssLights
   }
   // (user Oct 26, the target picture: the wreck itself seen in a dim pool of the light from far above, so it reads in the
   // deep even before the sub's lamp finds it)
@@ -37468,17 +37645,8 @@ function abyssLights() {
   // a 'glint' so the player has to explore with the lights of their sub" - see chestGlint)
   return out;
 }
-// how much a sub's lamp lights a point (0..1): inside its beam, nearer brighter; or just by the sub
-function chestLit(x, y) {
-  let k = 0;
-  for (const sub of minisubs) {
-    if (sub.state !== 'out') continue;
-    const dx = x - sub.x, dy = y - sub.y, d = Math.hypot(dx, dy); if (d > 460) continue;
-    const [ux, uy] = msAim(sub), c = d < 1 ? 1 : (dx * ux + dy * uy) / d;
-    k = Math.max(k, d < 50 ? 1 - d / 60 : smoothstep(0.75, 0.93, c) * (1 - d / 460));
-  }
-  return clamp(k, 0, 1);
-}
+// how much a sub's lamp lights a point (0..1): every lamp's, the one beam (lampBeamAt - 27-sub-light.js)
+const chestLit = (x, y) => lampLitAt(x, y);
 // the treasure's glint (0..1): now and then a short sparkle; in a sub's beam, often and bright
 function chestGlint(w, lit) {
   const T = time * (0.9 + 2.2 * lit) + w.ph * 3, i = Math.floor(T), u = T - i;
@@ -37525,31 +37693,7 @@ function drawDeepLights(x0, x1, only) {
       C.restore();
     }
   }
-  // (user Oct 28, 14:48: the light cut off at the screen's middle - the screen is two half views, each drawing only the
-  // beams that reach into it; the beam is MS_BEAM_L long, so a sub that far past a view's edge still lights it)
-  if (only) return;                                               // (a cave's pass: the chests only)
-  for (const sub of minisubs) if (sub.state === 'out' && msArt && sub.x > x0 - MS_BEAM_L - 40 && sub.x < x1 + MS_BEAM_L + 40) {
-    // its headlight: a cone of light the way it aims, fading out into the dark (brighter the deeper it is)
-    const fc = msToUs(sub), [ux, uy] = msAim(sub), X = PX(sub.x) + ux * 8 * SV * (1 - fc), Y = PY(sub.y) + uy * 8 * SV * (1 - fc), L = MS_BEAM_L * SV * (1 - 0.9 * fc), deep = clamp((sub.y - SEABED_DEEP) / 900, 0, 1);
-    // turned to us, the lamp is a round glow looking out of the screen
-    if (fc > 0.05) { const R = (14 + 46 * fc) * SV, g = C.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, `rgba(250,252,255,${(0.95 * fc).toFixed(3)})`); g.addColorStop(0.18, `rgba(235,244,255,${(0.6 * fc).toFixed(3)})`); g.addColorStop(1, 'rgba(220,235,255,0)'); C.fillStyle = g; C.fillRect(Math.round(X - R), Math.round(Y - R), Math.round(R * 2), Math.round(R * 2)); }
-    // (user Oct 27, 14:58: "Sub light should be a constant strong light, not disappear. Its super important for
-    // gameplay.") the beam itself: a strong cone of light, drawn after the night's tint (lateLit) and added to what's
-    // under it, so the floor, rocks, wrecks and fish in it are lit - the same at every hour and every depth, standing out
-    // the more the darker it is round it (the deep's dark is opened along it too: abyssLights / drawAbyss). Only under
-    // the water; a bright spot at the lamp itself
-    const sp = msBeamSprite(), sc = L / sp.width, a = sub.aimA == null ? Math.atan2(uy, ux) : sub.aimA, wy = Math.round(PY(WATER_Y + 2));
-    lateLit[viewIdx].push(() => {
-      C.save(); C.beginPath(); C.rect(-SHX - 4, wy, VWP + 2 * SHX + 8, bh - SHY - wy + 4); C.clip();
-      const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = true;
-      C.globalCompositeOperation = 'lighter'; C.globalAlpha = MS_BEAM_A;
-      C.translate(X, Y); C.rotate(a); C.drawImage(sp, 0, -Math.round(sp.height * sc / 2), Math.round(sp.width * sc), Math.round(sp.height * sc));
-      C.restore(); C.save();
-      C.globalCompositeOperation = 'lighter'; C.globalAlpha = 1;
-      const R = 7 * SV, g = C.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, 'rgba(250,252,255,0.95)'); g.addColorStop(1, 'rgba(230,240,255,0)'); C.fillStyle = g; C.fillRect(Math.round(X - R), Math.round(Y - R), Math.round(2 * R), Math.round(2 * R));
-      C.imageSmoothingEnabled = sm; C.restore();
-    });
-  }
+  // (the beams themselves, every lamp's, after this: drawSubLights, 27-sub-light.js)
 }
 // the beam's light: a cone along +x from its lamp (at the left middle), spreading about 90 degrees (user Oct 25 late),
 // brightest along its middle and near the lamp, fading out to its length; smooth (a light, never blocky), made once
@@ -45828,7 +45972,7 @@ async function start(data) {
     set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, calmAt: x => calmAt(x), harbourTop: (x, y) => harbourTop(x, y), crumbleTower: tw => crumbleTower(tw), vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers[p]), seaHeli: (x, y) => { const h = helis[0] = makeHeli(0, x); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.merge ? 'single' : 'split', cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
     landState: () => land, landPlants: () => ({ PLT, PK, plantGeo, treeAt, plantsBlast, plantIgnite, plantFell, plantHeat, fireSpots: () => fireSpots([]) }), land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => L.s.c.toDataURL()); }, wrecks: () => landWrecks.length, top: x => landTop(x), below: (x, y) => landBelow(x, y), sandActive: () => land.sand.length,
       sandX: () => { let best = -1, bx = WORLD_W / 2; for (let c = 0; c < land.cols; c++) { let r = ltR0(c); while (r < ltR1(c) && land.cell[ltIdx(c, r)] === M_AIR) r++; let n = 0; while (r + n < ltR1(c) && land.cell[ltIdx(c, r + n)] === M_SAND) n++; if (n > best) { best = n; bx = (c + 0.5) * LT_CELL; } } return bx; }, sandCount: () => { let n = 0; for (const v of land.cell) if (v === M_SAND) n++; return n; }, rockX: () => land.outcrops[0] ? land.outcrops[0].x : WORLD_W / 2, rockAt: x => ltCell(ltCol(x), ltRow(landTop(x)) ) }),
-    rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, SEA0, SEA1, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? SEA1 + 10 : SEA0 - 10)), get LAND_Y() { return LAND_Y; }, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, civSpawn: (kind, x, lo, hi, dir) => { const c = newCivShip(kind, x, lo, hi, dir); civShips.push(c); return c; }, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
+    rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, SEA0, SEA1, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? SEA1 + 10 : SEA0 - 10)), get LAND_Y() { return LAND_Y; }, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), civLose: v => { const k = civClass(v); if (k === 'air') trafficDown(v); else if (k === 'ship') civSink(v, 0); else if (k === 'boat') jetboatSink(v); else if (k === 'balloon') balloonPop(v); else if (k === 'heli') civHeliDown(v); else if (k === 'sub') minisubLost(v); else if (k === 'seaplane') spDown(v); else if (k === 'blimp') blimpBurst(v); else if (k === 'yacht') sinkSailboat(v, v.x, v.y, 0); else if (k === 'shuttle') groundCrash(v, 1); return k; },   /* (tools: a civilian vehicle lost by its own rule - tools/civloss.mjs) */ lampScene: (gap = 150, hour = 23) => { const x = (SEA0 + SEA1) / 2, y = WATER_Y + (seabedY(x) - WATER_Y) * 0.5, a = subs[0], b = subs[1], dx = SUB_L + gap; for (const [s, sx, f] of [[a, x - dx / 2, 1], [b, x + dx / 2, -1]]) Object.assign(s, { state: 'out', gate: null, auto: null, x: sx, y, depthT: y, vx: 0, vy: 0, facing: f, turn: null, input: 0, throttle: 0, a: 0 }); a.light = true; b.light = false; a.lamp = { elev: 0, power: 0, aimShow: 0 }; const [lx, ly] = subArtPt(a, ...SUB_LAMP_AT), el = clamp(Math.atan2(b.y - ly, b.x - lx) * 180 / Math.PI, 0, 180); a.lamp.elev = el; a.aimA = el * Math.PI / 180; env.time = hour; computeEnv(); camOverride[0] = [x, y]; paused = true; return { x: Math.round(x), y: Math.round(y), elev: +el.toFixed(1) }; },   /* (the sub lamp's check, user Oct 30: two subs a gap apart at mid-depth, the left one's light on the other, at night; paused there) */ boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, civSpawn: (kind, x, lo, hi, dir) => { const c = newCivShip(kind, x, lo, hi, dir); civShips.push(c); return c; }, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
     debugJetArt: () => { if (!trafficArt) buildTrafficArt(); const d = c => { const k = makeCanvas(c.width, c.height); k.getContext('2d').drawImage(c.src && c._tp ? c.src : c, 0, 0); return k.toDataURL(); }, a = trafficArt.jet[0].r, w = windowsArtDots(a); return { jet: d(a), jetWin: w ? d(w) : d(makeCanvas(1, 1)) }; }, SPACE: { ATMO_TOP, SPACE_TOP, SKY_TOP }, carve: (x, y, r) => landCarve(x, y, r), landShell: (x, y, owner, from) => { shells.push({ x, y, vx: 0, vy: 300, owner, from: from || 'tank', age: 1, trail: 0, under: false, ut: 0 }); }, tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), fgDump: () => { if (!fgStrip) buildFgStrip(); return fgStrip.sp.toDataURL(); }, reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
     gasBalls, camOverride, settled: () => Object.assign({ restDebris: restCount(), restChunks: restChunkCount() }, RST.stats), restLayer: on => { RST.on = !!on; return RST.on; }, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, whales: () => whales, smokePuff: (x, y) => spawnSmoke(x, y, { dark: 0.9, r: 5, grow: 5, lift: 40, vy: -30, life: 10, alpha: 0.7, rise: false }), deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
