@@ -3134,7 +3134,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 381;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 08:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 31 08:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13822,6 +13822,15 @@ function swKeysOf(arr, skip, only) {
   }
   return keys;
 }
+/* Values the drawing reads through a thing the table skips (a puff's stream, st): worked out per row on the worker as number
+   columns of their own, and put back on the page as the drawing reads them. A funnel's newest puff is drawn joined down to the
+   funnel's mouth (sky/21-smoke.js: s.st.last === s && s.st.head) - its head goes as hd0..hd2, and the page gives that puff a
+   stream of its own { last: it, head } */
+const SW_DV3 = [0, 0, 0];
+const SW_DERIVE = {
+  smoke: { keys: ['hd0', 'hd1', 'hd2'], own: ['st'], get: (s, k) => { const st = s.st, h = st && st.last === s && st.head; return h ? h[k] : undefined; },
+    put: (s, v) => { if (v[0] === undefined) s.st = undefined; else if (s.st && s.st.last === s) { const h = s.st.head; h[0] = v[0]; h[1] = v[1]; h[2] = v[2]; } else s.st = { last: s, head: v }; } },
+};
 // draw: the list's drawn fields (SW_DRAWK) - a live snapshot; null: every field
 function swColsOf(t, arr, strs, sIdx, bufs, draw) {
   const n = arr.length, keys = swKeysOf(arr, t.skip, draw ? draw.top : null);
@@ -13841,6 +13850,13 @@ function swColsOf(t, arr, strs, sIdx, bufs, draw) {
     C.k.push(k); C.d.push({ j: vals });
   }
   delete C.idx;
+  const dv = t.name && SW_DERIVE[t.name];
+  if (dv) dv.keys.forEach((k, j) => {
+    const col = new Float64Array(n); let miss = null;
+    for (let i = 0; i < n; i++) { const v = arr[i] ? dv.get(arr[i], j) : undefined; if (typeof v === 'number') col[i] = v; else (miss || (miss = new Uint8Array(n)))[i] = 1; }
+    bufs.push(col.buffer); if (miss) bufs.push(miss.buffer);
+    C.k.push(k); C.d.push({ f: col, m: miss, dv: 1 });
+  });
   return C;
 }
 // one field of the things in `arr` as a column: numbers and booleans in a Float64Array (m: where a thing hasn't it), strings as
@@ -13884,13 +13900,14 @@ function swNestOf(arr, k, only, strs, sIdx, bufs) {
   return N;
 }
 // (the page) one thing's field of a column, put: a number, a flag, a string or nothing
+// (a field a row hasn't: set to undefined, never deleted - the drawing reads it the same, and the row keeps its shape: see swColsInto)
 function swColPut(o, k, d, i, strs) {
-  if (d.m && d.m[i]) { delete o[k]; return; }
+  if (d.m && d.m[i]) { o[k] = undefined; return; }
   if (d.z && d.z[i]) { o[k] = null; return; }
   if (d.f) o[k] = d.f[i];
   else if (d.b) o[k] = d.b[i] !== 0;
-  else if (d.s) { const id = d.s[i]; if (id === -2) o[k] = null; else if (id < 0) delete o[k]; else o[k] = strs[id]; }
-  else if (d.ri) { const r = d.ri[i]; if (r === -2) o[k] = null; else if (r < 0) delete o[k]; }   // (a place: put after every row exists, below)
+  else if (d.s) { const id = d.s[i]; o[k] = id === -2 ? null : id < 0 ? undefined : strs[id]; }
+  else if (d.ri) { const r = d.ri[i]; o[k] = r === -2 ? null : undefined; }   // (a place: put after every row exists, below)
 }
 // (the page) a thing's nested objects refilled in place from the flat columns, from item `at` on; returns the next item
 function swNestInto(o, k, N, i, at, strs) {
@@ -13912,7 +13929,11 @@ const SW_KEEP = { smoke: { by: 'sq', keys: ['h'] } };
 const swKept = new Map();                                            // (table -> Map of sq -> { h })
 function swColsInto(arr, C, strs, name) {
   const n = C.n, K = C.k, D = C.d, has = new Set(K), at = new Int32Array(K.length);   // (at: each nested column's next item)
+  // (the page's own fields of a row - kept values, derived things - are never deleted: a field deleted and put back every frame
+  // turns the thing into a slow dictionary object for the drawing too; they're overwritten in place instead)
+  { const kp = name && SW_KEEP[name], dv0 = name && SW_DERIVE[name]; if (kp) for (const k of kp.keys) has.add(k); if (dv0) { for (const k of dv0.own) has.add(k); for (const k of dv0.keys) has.add(k); } }
   const keep = name && SW_KEEP[name], kby = keep ? K.indexOf(keep.by) : -1, kd = kby >= 0 ? D[kby] : null;
+  const dvp = name && SW_DERIVE[name] && K.includes(SW_DERIVE[name].keys[0]) ? SW_DERIVE[name] : null;
   let km = null;
   if (kd && kd.f) { km = swKept.get(name); if (!km) swKept.set(name, km = new Map()); }
   if (arr.length > n) arr.length = n;
@@ -13925,11 +13946,12 @@ function swColsInto(arr, C, strs, name) {
     }
     for (let c = 0; c < K.length; c++) {
       const d = D[c], k = K[c];
-      if (d.j) { const v = d.j[i]; if (v === undefined) delete o[k]; else o[k] = v; }
+      if (d.j) o[k] = d.j[i];
       else if (d.nest) at[c] = swNestInto(o, k, d.nest, i, at[c], strs);
       else swColPut(o, k, d, i, strs);
     }
-    if (km) { const e = km.get(o[keep.by]); if (e) for (const kk of keep.keys) if (e[kk] !== undefined) o[kk] = e[kk]; }
+    if (km) { const e = km.get(o[keep.by]); for (const kk of keep.keys) o[kk] = e ? e[kk] : undefined; }   // (a puff not seen before: none yet - the drawer rolls it)
+    if (dvp) { const v = SW_DV3; for (let j = 0; j < dvp.keys.length; j++) v[j] = o[dvp.keys[j]]; dvp.put(o, v[0] === undefined ? v : v.slice()); }
   }
   // (the kept values of rows gone: dropped, so the map holds only what lives)
   if (km && km.size > n * 2 + 64) { const live = new Set(); for (let i = 0; i < n; i++) live.add(arr[i][keep.by]); for (const key of km.keys()) if (!live.has(key)) km.delete(key); }
