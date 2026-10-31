@@ -3167,8 +3167,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 388;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 09:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 389;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 09:35';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -46360,6 +46360,62 @@ NSKY.editor.TUNE.pane('STRUCTURES', (pane, el) => {
   pane.append(top, U.box);
   strSync();
 });
+
+/* ---- UNDO for the GAME EDITOR (user Oct 31, the Story spec section 9: "Provide global Undo"). One history over the
+   world the editor builds - everything the TERRAIN tab's COPY holds: the ground, the airports and pads, the islands, the
+   docks, the towers, the wrecks, the kraken, the world's size and stretch, the placed structures (terrainCopyText). After
+   each finished edit (a press let go, a click, a value set) the world as it was goes on the stack if it changed; UNDO
+   (the button by EXPORT, or Ctrl/Cmd+Z) puts it back with the TERRAIN tab's own LOAD, REDO (Ctrl/Cmd+Shift+Z) the other
+   way. The CAVES tab keeps its own undo (its Ctrl+Z while it's open). Not in it yet: the sky's sliders (each has its
+   reset). ---- */
+const UNDO = { back: [], fwd: [], last: null, max: 80, busy: false, btn: null, rbtn: null };
+const undoOn = () => NSKY.editor.TUNE.open && OWM;
+function undoState() { try { return terrainCopyText(); } catch (e) { return null; } }
+// the world as it is now taken as the starting point (the editor opened, or a press about to change it)
+function undoMark() { if (UNDO.busy || !undoOn()) return; if (UNDO.last === null) UNDO.last = undoState(); }
+// after an edit: what it was goes on the stack, if anything changed
+function undoCommit() {
+  if (UNDO.busy || !undoOn()) return;
+  const cur = undoState(); if (cur === null) return;
+  if (UNDO.last === null) { UNDO.last = cur; return; }
+  if (cur === UNDO.last) return;
+  UNDO.back.push(UNDO.last); if (UNDO.back.length > UNDO.max) UNDO.back.shift();
+  UNDO.fwd.length = 0; UNDO.last = cur; undoButtons();
+}
+// put a state back: the TERRAIN tab's LOAD; the ground rebuilt if more than the structures changed
+function undoApply(to) {
+  const from = UNDO.last;
+  UNDO.busy = true;
+  try {
+    terrainLoad(to);
+    const a = JSON.parse(from || '{}'), b = JSON.parse(to); delete a.ST; delete b.ST;
+    if (JSON.stringify(a) !== JSON.stringify(b) && typeof terrainRefresh === 'function') terrainRefresh();
+  } catch (e) { console.warn('undo', e); }
+  UNDO.busy = false; UNDO.last = undoState();
+  SE.sel = SE.sel.filter(id => strById(id)); strSync(); undoButtons();
+}
+function undoBack() { if (!UNDO.back.length) return; undoCommit(); const to = UNDO.back.pop(); UNDO.fwd.push(UNDO.last); undoApply(to); }
+function undoFwd() { if (!UNDO.fwd.length) return; const to = UNDO.fwd.pop(); UNDO.back.push(UNDO.last); undoApply(to); }
+function undoButtons() { if (UNDO.btn) UNDO.btn.disabled = !UNDO.back.length; if (UNDO.rbtn) UNDO.rbtn.disabled = !UNDO.fwd.length; }
+// when to look: a press (before: the starting point) and after it's let go; a click; a value set; a key let go
+window.addEventListener('pointerdown', () => undoMark(), { capture: true });
+setInterval(() => { if (UNDO.last === null) undoMark(); }, 1000);   // (the editor just opened: a tab's own press handler may stop the press before it gets here)
+for (const ev of ['pointerup', 'click', 'change', 'keyup']) window.addEventListener(ev, () => { if (undoOn()) setTimeout(undoCommit, 0); }, { capture: false });
+const cavesTabOpen = () => { const t = [...document.querySelectorAll('#skyEd button.tab')].find(b => b.textContent === 'CAVES'); return !!t && t.classList.contains('on'); };
+window.addEventListener('keydown', e => {
+  if (!undoOn() || !(e.ctrlKey || e.metaKey) || e.code !== 'KeyZ' || cavesTabOpen()) return;
+  if (/^(INPUT|TEXTAREA)$/.test(e.target.tagName) && e.target.type !== 'range') return;   // (typing in a field: its own undo)
+  e.preventDefault(); e.stopImmediatePropagation();
+  if (e.shiftKey) undoFwd(); else undoBack();
+}, { capture: true });
+// the buttons, by the editor's EXPORT (put in once the editor is built)
+(function undoPlace() {
+  const ex = [...document.querySelectorAll('#skyEd button')].find(b => b.textContent === 'EXPORT');
+  if (!ex) { setTimeout(undoPlace, 500); return; }
+  const mk = (lab, f, tip) => { const b = document.createElement('button'); b.textContent = lab; b.title = tip; b.onclick = f; b.disabled = true; ex.parentElement.insertBefore(b, ex); return b; };
+  UNDO.btn = mk('UNDO', undoBack, 'Ctrl+Z'); UNDO.rbtn = mk('REDO', undoFwd, 'Ctrl+Shift+Z');
+  undoButtons();
+})();
 
 /* ---- OPEN WORLD: the kraken's sounds (50-land-kraken.js) ----
    User Oct 27, 21:20: "For sfx it should give a deep 'roar' when it gets hurt. Then a final 'sad roar' like a dying lion but
