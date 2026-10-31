@@ -212,6 +212,13 @@ async function swResync() {
   } catch (e) { swFail(e && e.message || e); }
   finally { SW.resyncing = false; }
 }
+// (Oct 31: the page opens on the menu with no world) the worker takes the game whenever one is live here and it isn't running it
+// yet - the first game picked, and any after a failure was cleared - one rule, whatever order the worker and the world are ready in
+function swWantLive() {
+  if (!SW_WANT || !SW.ready || SW.live || SW.going || SW.fail) return;
+  SW.going = true;
+  swGoLive().catch(e => swFail(e && e.message || e)).finally(() => { SW.going = false; });
+}
 function swGuestFrame(dt, held) {
   if (SW.resyncing) return;
   if (SW.gen !== SW.liveGen) { swResync(); return; }
@@ -231,7 +238,7 @@ function swGuestFrame(dt, held) {
 }
 function swFromWorker(m) {
   if (m.t === 'snap') { SW.snaps.push(m); return; }
-  if (m.t === 'ready') { SW.ready = true; SW.bootMs = performance.now() - SW.t0; SW.touch = m.touch; if (SW_WANT) swGoLive().catch(e => swFail(e && e.message || e)); return; }
+  if (m.t === 'ready') { SW.ready = true; SW.bootMs = performance.now() - SW.t0; SW.touch = m.touch; return; }   // (it takes the game once a world is live: swWantLive)
   if (m.t === 'fail') { swFail(m.err); return; }
   if (m.t === 're') { const P = SW.wait.get(m.id); if (P) { SW.wait.delete(m.id); if (m.err) P[1](new Error(m.err)); else P[0](m.v); } }
 }
@@ -761,7 +768,9 @@ function computeEnv() {
    Canvas + sizing
    ================================================================ */
 const canvas = document.getElementById('game');
-let dpr = 1, cw = 0, ch = 0, S = 1, VIEW_W = 1333, builtViewW = 0;
+// (builtViewW: the screen width the world was built for; 0 asks resize for a build, -1 is no world wanted yet - the page
+// opens on the menu with none, user Oct 31 - so a resize there builds nothing)
+let dpr = 1, cw = 0, ch = 0, S = 1, VIEW_W = 1333, builtViewW = -1;
 
 /* ================================================================
    Images and generated pixel art
@@ -1235,6 +1244,11 @@ const HUMANS = () => SLOTS.length;                            // how many people
 const ONEVIEW = () => HUMANS() <= 1;                          // one screen (yours) rather than the split screen
 const ships = [];
 let time = 0, frameDt = 1 / 60, paused = false;
+// (user Oct 31: "when the game opens, it doesnt load the world automatically. we need to pick 'battle, open world, etc' vs
+// loading everything at the start") a world is there only once a game is picked: until then nothing steps it or draws it
+// (frameBody, render), and the menu stands on black. worldLive: one is built and none is on its way (LOADING, 19-menu.js)
+let WORLD_READY = false;
+const worldLive = () => WORLD_READY && !LOADING;
 const cam = {
   merge: 1, cs: 0, c1: 0, c2: 0,
   zt: [ZOOM_START, ZOOM_START], zsa: ZOOM_START, za: [ZOOM_START, ZOOM_START], spd: [0, 0],
@@ -3152,7 +3166,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 384;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const GAME_VERSION = 385;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
 const BUILD = 'OCT 31 08:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
@@ -3367,8 +3381,10 @@ function netPause(on, from) {
   if (LINK.hosting) { for (const g of linkGuests()) if (g !== from && g.seat) linkTo(g, { t: 'pause', on }); }
   else if (NET.role === 'guest') linkSend({ t: 'pause', on });
 }
-// (a guest) what the host sends
+// (a guest) what the host sends; while this screen is loading (LOADING, 19-menu.js) it waits, in order, for the world
+const netWaiting = [];
 function linkReceive(m) {
+  if (LOADING) { netWaiting.push(m); return; }
   if (NET_TABLES && typeof m === 'string') { if (NET.role === 'guest' && !LINK.hosting) ntbReceive(m); return; }   // (36-zzzz-net-tables: a snapshot from the tables)
   if (!m || typeof m !== 'object' || LINK.hosting) return;
   if (m.t === 'full') { linkClose(m.why || 'THAT SESSION IS FULL'); return; }
@@ -3383,22 +3399,24 @@ function linkReceive(m) {
   if (m.t === 'stop') { guestOut(); return; }
   if (m.t === 'away') { LINK.away = !!m.on; return; }
   if (m.t === 'pause' && NET.role === 'guest') { if (m.on && !ui.title) { openMainMenu(true); showToast('GAME PAUSED'); } else if (!m.on && ui.title && ui.resume) menuResume(true); return; }
-  if (m.t === 'start') {
-    if (NET_TABLES) ntbReset();
-    NET.role = 'guest'; NET.me = 0; NET.worldW = m.worldW | 0; NET.send = linkSend; NET.side = m.side === 1 ? 1 : 0; NET.taken = null;
-    if (Array.isArray(m.flags)) { flagPick[0] = m.flags[0]; flagPick[1] = m.flags[1]; }
-    MODE = ['duel', 'chill', 'test'].includes(m.mode) ? m.mode : 'duel'; EXTRA = null; applyMode();
-    held.clear(); ui.title = false; ui.resume = false; ui.menu = false; paused = false;
-    builtViewW = 0; resize(); buildTeamArt();
-    crew[0].spec = null; crew[0].look = null;
-    brains[0] = brains[1] = null;                      // (Oct 24: a CPU left over from this screen's own last round drove the guest's vehicles)
-    return;
-  }
+  // (user Oct 31: LOADING... first, then the host's world - built before any of its snapshots is taken in)
+  if (m.t === 'start') { loadThen(() => linkStart(m)); return; }
   if (m.t === 'snap' && NET.role === 'guest' && m.s) {
     NETST.snapIn++; NETST.lastSnap = performance.now(); LINK.away = false;
     try { if (m.you) m.s.you = m.you; NET.taken = Array.isArray(m.taken) ? m.taken : null; netApply(m.s); } catch (e) { console.error(e); }
     return;
   }
+}
+// (a guest) the host's round starts: its mode and world
+function linkStart(m) {
+  if (NET_TABLES) ntbReset();
+  NET.role = 'guest'; NET.me = 0; NET.worldW = m.worldW | 0; NET.send = linkSend; NET.side = m.side === 1 ? 1 : 0; NET.taken = null;
+  if (Array.isArray(m.flags)) { flagPick[0] = m.flags[0]; flagPick[1] = m.flags[1]; }
+  MODE = ['duel', 'chill', 'test'].includes(m.mode) ? m.mode : 'duel'; EXTRA = null; applyMode();
+  held.clear(); ui.title = false; ui.resume = false; ui.menu = false; paused = false;
+  builtViewW = 0; resize(); buildTeamArt();
+  crew[0].spec = null; crew[0].look = null;
+  brains[0] = brains[1] = null;                      // (Oct 24: a CPU left over from this screen's own last round drove the guest's vehicles)
 }
 // (a guest) out of the round, still in the session: back to its menu
 function guestOut() {
@@ -3406,7 +3424,7 @@ function guestOut() {
   NET.role = 'local'; NET.send = null; NET.worldW = 0; NET.side = 0; NET.taken = null;
   applyMode();
   held.clear(); ui.title = true; ui.resume = false; ui.menu = false; ui.picker = -1; paused = true;
-  builtViewW = 0; resize();
+  worldDrop();                                          // (no round here now: the menu on black till the next one - user Oct 31)
 }
 // each frame: the host's snapshots, the guest's control state, ~15 a second
 function linkPump(dt) {
@@ -3453,7 +3471,7 @@ function linkClose(msg) {
     NET.role = 'local'; NET.send = null; NET.worldW = 0; NET.side = 0; NET.taken = null;
     applyMode();
     ui.title = true; ui.resume = false; ui.menu = false; paused = false;
-    builtViewW = 0; resize();
+    worldDrop();                                        // (no round here now: the menu on black till the next one - user Oct 31)
   }
   setTimeout(roomOpen, 200);
 }
@@ -5225,14 +5243,38 @@ function menuApply() {
   cpuLvSide[0] = menuSel.cpuLv[0]; cpuLvSide[1] = menuSel.cpuLv[1]; STORY_LV = menuSel.storyLv;
   applyMode(); savePrefs();
 }
-// PLAY: a new round as the menu has it
-function menuPlay() {
+// PLAY: a new round as the menu has it (load: pressed on the menu - LOADING... first, loadThen)
+function menuPlay(load) {
   if (NET.role === 'guest' || joinedRoom()) return;
   // (BATTLE: nobody here or online has picked a side - it would be the CPU against itself. Anyone left in the middle
   // just sits this one out: user Oct 25, the keyboard showed in the middle and the game wouldn't start)
   const someone = menuSel.roster.some(q => q.side === 0 || q.side === 1) || (LINK.hosting && linkGuests().some(g => g.side === 0 || g.side === 1)) || menuSel.cpu[0] || menuSel.cpu[1];
   if (VERSUS(menuSel.mode) && !someone) { showToast(menuSel.roster.length ? 'LEFT OR RIGHT TO PICK A SIDE' : 'PRESS A KEY OR BUTTON TO JOIN'); return; }
-  menuApply(); ui.resume = false; freshWeather(); restartGame(); }
+  const go = () => { menuApply(); ui.resume = false; freshWeather(); restartGame(); };
+  if (load) loadThen(go); else go(); }
+/* (user Oct 31: "we need to pick 'battle, open world, etc' vs loading everything at the start. Then we get a 'loading....'
+   and the game starts.") A game started with a press - NEW GAME, the TEST RANGE, PLAY AGAIN, an online guest's round -
+   puts LOADING... on the screen, lets that frame be painted (the next frame, then a moment after it), and only then builds
+   the world and starts. Nothing of a world steps or draws meanwhile (worldLive); what the host sends a guest in that time
+   waits, in order, for its world (netWaiting). The tools' hooks still build at once. */
+let LOADING = null;
+function loadThen(fn) {
+  if (LOADING) return;                                  // (one at a time: a second press while loading is nothing)
+  LOADING = fn;
+  const run = () => setTimeout(() => {
+    try { fn(); }
+    finally { LOADING = null; for (const m of netWaiting.splice(0)) linkReceive(m); }
+  }, 0);
+  if (document.hidden) run(); else requestAnimationFrame(run);   // (a hidden page paints no frame: at once)
+}
+// the screen with no world behind it (none built yet, or LOADING): plain black, and on it the menu as it always is, or
+// LOADING... in the title's letters
+function drawNoWorld() {
+  ug.fillStyle = UG_CSS; ug.fillRect(0, 0, ubw, ubh);
+  ug.imageSmoothingEnabled = false;
+  if (LOADING) { const s = titleLayout().titleS; drawText(ug, 'LOADING...', ubw / 2, (ubh - 5 * s) >> 1, '#ffffff', s, 'center'); drawFps(); return; }
+  drawTitle(); if (ui.picker < 0) drawFullscreenBtn(); drawControls(); drawPadFocus(); drawToast(); drawFps();
+}
 // the JOIN panel closed (BACK, Esc, OK): back to the menu, this screen's session as it was
 function linkPanelClose() {
   codeBox(false);
@@ -5647,8 +5689,9 @@ function openMainMenu(fromNet) {
   mgHold[0] = mgHold[1] = false; diveHold[0] = diveHold[1] = 0; for (const pl of planes) if (pl) pl.mg = false;
   if (NET.role === 'guest' && LINK.conn) linkSend({ t: 'ctl', s: ctlState(0) });
   held.clear(); setMenu(false); menuFromLive(); ui.title = true; ui.picker = -1; ui.resume = true; paused = true; for (let p = 0; p < 2; p++) holding[p] = null; if (!fromNet) netPause(true); }
-function restartGame() {
+function restartGame(load) {
   if (NET.role === 'guest') { linkSend({ t: 'again' }); return; }            // (online: the host starts the next round for everyone)
+  if (load) { loadThen(() => restartGame()); return; }                      // (pressed: LOADING... first - loadThen)
   if (LINK.hosting && !LINK.starting && linkGuests().some(g => g.side === 0 || g.side === 1)) { linkStartRound(); return; }
   held.clear(); ui.title = false; ui.resume = false; paused = false;
   freshWeather();                                                         // (PLAY AGAIN: back to the round's morning and weather)
@@ -5743,7 +5786,7 @@ window.addEventListener('pointerdown', e => {
   if (ui.controls) { const h = controlsHit(ux, uy); if (h) menuClick(); if (h === 'back') ui.controls = null; return; }
   if (ui.winner != null) {
     const B = winLayout().btn;
-    if (ui.winT > 1.2 && ux >= B[0] - 6 && ux <= B[0] + B[2] + 6 && uy >= B[1] - 6 && uy <= B[1] + B[3] + 6) { menuClick(); restartGame(); }
+    if (ui.winT > 1.2 && ux >= B[0] - 6 && ux <= B[0] + B[2] + 6 && uy >= B[1] - 6 && uy <= B[1] + B[3] + 6) { menuClick(); restartGame(true); }
     return;
   }
   if ((ui.title || ui.menu) && ui.picker < 0) {
@@ -5764,7 +5807,7 @@ window.addEventListener('pointerdown', e => {
     else if (h.act === 'close') setMenu(false);
     else if (h.act === 'ctlPs') ui.controls = 'ps';
     else if (h.act === 'ctlXb') ui.controls = 'xb';
-    else if (h.act === 'testRange') { if (NET.role === 'guest' || joinedRoom()) return; setMenu(false); menuSel.mode = 'test'; menuApply(); ui.resume = false; freshWeather(); restartGame(); }
+    else if (h.act === 'testRange') { if (NET.role === 'guest' || joinedRoom()) return; setMenu(false); loadThen(() => { menuSel.mode = 'test'; menuApply(); ui.resume = false; freshWeather(); restartGame(); }); }   // (LOADING... first: loadThen, 19-menu)
     else if (h.act === 'ctlKb') ui.controls = 'kb';
     else if (h.act === 'ctlTc') ui.controls = 'tc';
     else if (h.act === 'stats') { SHOW_STATS = !SHOW_STATS; savePrefs(); }
@@ -5778,7 +5821,7 @@ window.addEventListener('pointerdown', e => {
   if (ui.title) {
     const h = titleHit(ux, uy);
     if (h.act && h.act !== 'none' && h.act !== 'lAdd' && h.act !== 'lMove' && h.act !== 'lBack') menuClick();   // (the lobby's own steps click by themselves)
-    if (h.act === 'play') menuPlay();
+    if (h.act === 'play') menuPlay(true);                 // (LOADING... first, then the world: user Oct 31)
     else if (h.act === 'resume') menuResume();
     else if (h.act === 'options') setMenu(true);
     else if (h.act === 'mode') { menuSel.mode = h.m; linkLobby(); }
@@ -5789,7 +5832,7 @@ window.addEventListener('pointerdown', e => {
     else if (h.act === 'joinPick') { LINK.state = 'enter'; LINK.msg = ''; codeBox(true); }
     else if (h.act === 'go') linkJoin(codeInput.value);
     else if (h.act === 'lobbySide') lobbyPick(h.s, guestDev(e));
-    else if (h.act === 'lobbyStart') { if (LINK.hosting && lobbyReady()) linkStartRound(); }
+    else if (h.act === 'lobbyStart') { if (LINK.hosting && lobbyReady()) loadThen(linkStartRound); }
     else if (h.act === 'story') menuSel.storyLv = h.n;
     else if (h.act === 'ctl') stepCtl(h.s, h.d);
     else if (h.act === 'lAdd') lobbyAdd(tapDev(e));
@@ -5974,7 +6017,7 @@ window.addEventListener('keydown', e => {
     if (code === 'Escape' || code === 'Backspace' || code === 'Enter' || code === 'Space') ui.controls = null;
     e.preventDefault(); return;
   }
-  if (ui.winner != null) { if ((code === 'Enter' || code === 'Space') && ui.winT > 1.2) restartGame(); e.preventDefault(); return; }
+  if (ui.winner != null) { if ((code === 'Enter' || code === 'Space') && ui.winT > 1.2) restartGame(true); e.preventDefault(); return; }
   if (ui.title) {
     if (linkPanelUp()) { if (code === 'Escape' || ((code === 'Enter' || code === 'Space') && LINK.state === 'msg')) linkPanelClose(); e.preventDefault(); return; }
     // the lobby, with the keyboard (Enter or Space to join, then left / right, Backspace to step back)
@@ -5987,7 +6030,7 @@ window.addEventListener('keydown', e => {
     if (code === 'Escape' && ui.picker >= 0) ui.picker = -1;
     else if (code === 'Escape' && ui.menu) setMenu(false);
     else if (code === 'Escape' && ui.resume) menuResume();              // Esc again: back to the round
-    else if ((code === 'Enter' || code === 'Space') && ui.picker < 0 && !ui.menu) { if (ui.resume) menuResume(); else menuPlay(); }
+    else if ((code === 'Enter' || code === 'Space') && ui.picker < 0 && !ui.menu) { if (ui.resume) menuResume(); else menuPlay(true); }
     else if ((code === 'Digit1' || code === 'Digit2' || code === 'Digit3') && ui.picker < 0 && menuModes()[+code.slice(5) - 1]) menuSel.mode = menuModes()[+code.slice(5) - 1];
     e.preventDefault(); return;
   }
@@ -23042,6 +23085,7 @@ function gameSnapshot() {
 function gameLoad(txt) {
   const s = typeof txt === 'string' ? JSON.parse(txt) : txt;
   if (!s || s.kind !== 'battleship-duel') throw new Error('not a game snapshot');
+  if (!WORLD_READY) return 'No world yet (user Oct 31: it is built when a game is picked): start a game in ' + String(s.mode).toUpperCase() + ' first, then LOAD again.';
   if (s.mode !== MODE) return 'Taken in ' + String(s.mode).toUpperCase() + ', this game is in ' + MODE.toUpperCase() + ': start a game in that mode first, then LOAD again.';
   NET.lists = {};                                                       // (the world's lists taken as they are: nothing counted as gone)
   netApply(s.world);                                                     // (the vehicles, their damage and fires, the towers, the hour and weather - held)
@@ -27524,6 +27568,7 @@ function drawGrade(views) {
   }
 }
 function render() {
+  if (!worldLive()) { drawNoWorld(); return; }            // (no world yet, or LOADING: the menu over black - user Oct 31, 19-menu.js)
   const T0 = performance.now();
   renderTick++; scaledFrame++;
   SURF.on = true;
@@ -46674,7 +46719,8 @@ function audioUpdate(dt) {
   if (!SFX.ctx) return;
   const ctx = SFX.ctx, t = SFX.ctx.currentTime, k = 0.12;
   SFX.master.gain.setTargetAtTime(MUTED ? 0 : env.volume * 0.9, t, 0.05);
-  SFX.world.gain.setTargetAtTime(ui.menu || ui.title || ui.settings || PHOTO.on ? 0 : 1, t, 0.04);       // menus: the world goes quiet (the world menu and photo mode too, user Oct 26: "we don't want any volume in that menu")
+  SFX.world.gain.setTargetAtTime(ui.menu || ui.title || ui.settings || PHOTO.on || !worldLive() ? 0 : 1, t, 0.04);       // menus: the world goes quiet (the world menu and photo mode too, user Oct 26: "we don't want any volume in that menu")
+  if (!worldLive()) return;                                           // (no world yet, or LOADING: only the menu's volume - user Oct 31)
   // the sea: always there, louder and more surf-filled when it's rough or windy
   const sea = env.sea, wind = Math.abs(env.wind);
   const swell = 0.75 + 0.25 * Math.sin(time * 0.55) * Math.sin(time * 0.23 + 1);
@@ -46922,8 +46968,19 @@ function resize(restore) {
   // the world is laid out for the screen's shape: rebuilt when a round starts (or at the menu with no round in
   // progress), never in the middle of one (turning the iPad, Split View or a resized window used to start a fresh
   // round; Oct 24, user: so did one while the round was paused at the menu - leaving full screen, say)
-  if (!builtViewW || (ui.title && !ui.resume && Math.abs(VIEW_W - builtViewW) / builtViewW > 0.15)) buildWorld(restore);
+  // (user Oct 31: no world until a game is picked - builtViewW -1: none wanted yet, so nothing's built)
+  if (builtViewW < 0) return;
+  if (!builtViewW || (ui.title && !ui.resume && Math.abs(VIEW_W - builtViewW) / builtViewW > 0.15)) { buildWorld(restore); WORLD_READY = true; }
 }
+// a world now, if there's none: built as the page used to build it as it opened, and settled (a round carried over a hot
+// reload, and the tools - their window.__game hooks expect the world the page used to open with)
+function worldNow(restore) {
+  if (WORLD_READY) return;
+  builtViewW = 0; resize(restore);
+  for (let i = 0; i < 120; i++) physics(SUBSTEP);
+}
+// back at the menu with no round to go back to: no world behind it (black, as when the page opens) until the next pick
+function worldDrop() { WORLD_READY = false; builtViewW = -1; }
 
 let last = 0, acc = 0, holdFrames = false;
 // The governor watches how long each frame's own work takes and the time between frames. It used to lower FX
@@ -46965,6 +47022,9 @@ function frameBody(now) {
   last = now; frameDt = dt || 1 / 60;
   const t0 = performance.now();
   buildBudget = 4;
+  // (user Oct 31) no world yet, or one on its way: only the menu runs - its controllers, its clock (the blinking PRESS TO
+  // JOIN), its picture over black, the volume; nothing of a world is stepped, sent online or drawn
+  if (!worldLive()) { pollPads(dt); time += dt; render(); audioUpdate(dt); return; }
   netStep(); linkPump(dt);
   // (also holds still behind the 'turn the iPad' notice; and, user Oct 25 late, while the sliders are open or the eye
   // is shut - photo mode, 18-zz-photo)
@@ -46973,6 +47033,7 @@ function frameBody(now) {
   const held_ = paused || !rotateEl.hidden || PHOTO.on || photoWorldFreeze();
   schedFrame(!held_ && !SW.live);                                   // (the scheduler's frame count moves with the simulation only: a held page frame, or a guest's, isn't a frame of the game - Oct 30 gate)
   if (PHOTO.on) photoInput(dt); else pollPads(dt);
+  swWantLive();
   if (SW.live) swGuestFrame(dt, held_);                              // (the simulation worker steps the game; this page draws it - 00-sw-boot.js)
   else if (!held_) {
     applyHeldKeys(dt);
@@ -47036,15 +47097,19 @@ async function start(data) {
   buildTeamArt();
   buildUiArt();
   buildPuffs();
+  // (user Oct 31: the page opens on the menu with no world - it's built when a game is picked; only a round carried over
+  // a hot reload is built at once)
   resize(data);
+  if (data && data.ships && data.ships.length) worldNow(data);
   try { const q = new URLSearchParams(location.search).get('mode'); if (q === '0' || q === '1' || q === '2') { setMode(+q); BATCH_AUTO = false; } } catch (e) {}
   if (GLR.on) { setMode(0); BATCH_AUTO = false; } else if (!SW_IN_WORKER) runFillTest();
   window.addEventListener('resize', () => resize());
   if (window.visualViewport) { window.visualViewport.addEventListener('resize', () => resize()); window.visualViewport.addEventListener('scroll', () => resize()); }
   window.addEventListener('scroll', () => { if (window.scrollY || window.scrollX) resize(); }, { passive: true });
-  for (let i = 0; i < 120; i++) physics(SUBSTEP);
   window.claude?.hot?.snapshot?.(() => ({ worldW: WORLD_W, ships: ships.map(s => ({ x: s.x, vx: s.vx })) }));
-  window.__game = {
+  // (the tools' hooks: anything read from window.__game first builds the world the page used to open with, if there's
+  // none yet - so every tool finds the world it always found; the game itself never reads it)
+  window.__game = new Proxy({
     cave: CAVE,                                           // (the underwater caves: 50-land-caves)
     nsky: NSKY, gpuw: GPUW, disturb, skyv: () => SKYV, strike: x => strike(x, surfaceY(x), null), planesInSmokeTest: (a, dt) => { const vx = a._smX === undefined ? 0 : (a.x - a._smX) / dt, vy = a._smY === undefined ? 0 : (a.y - a._smY) / dt; a._smX = a.x; a._smY = a.y; const sp = Math.hypot(vx, vy); if (sp > 25) smearAir(a, vx, vy, sp, dt); },
     lifeboat: () => img.lifeboat, docks: () => docks, blast: (p, k) => { const sh = ships[p]; const [x, y] = deckPoint(sh, k, 0.5); sectionBlast(x, y - 6, 0.95, sh.vx); damageSection(sh, k, 1, x, y); }, runCtl, shocks, plants, birds, perches, ships, cam, telegraphs, guns, tguns, towers, crew, pieces, debris, smoke, shells, trails, dust, grains, flames, env, scopes,
@@ -47067,7 +47132,7 @@ async function start(data) {
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
     gasBalls, camOverride, settled: () => Object.assign({ restDebris: restCount(), restChunks: restChunkCount() }, RST.stats), restLayer: on => { RST.on = !!on; return RST.on; }, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, whales: () => whales, smokePuff: (x, y) => spawnSmoke(x, y, { dark: 0.9, r: 5, grow: 5, lift: 40, vy: -30, life: 10, alpha: 0.7, rise: false }), deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
-  };
+  }, { get(o, k, r) { if (!WORLD_READY && !LOADING) worldNow(); return Reflect.get(o, k, r); } });
   // (user Oct 30: the subs' beam - its length and its picture, for a check of its reach)
   Object.assign(window.__game, { subBeam: () => ({ L: MS_BEAM_L, sprite: msBeamSprite() }) });
   // (user Oct 30: the hit bob on every ship - a hit sent as the game sends it, and which big ship is at a point)
