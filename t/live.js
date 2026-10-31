@@ -3,7 +3,7 @@
 // waits for the worker, sets the fight up on both sides (sw-check's SETUP), runs __swLive and averages the perf parts after 4 s
 window.__liveRun = async (world = 'battle', secs = 20) => {
   const g = __game, wait = ms => new Promise(r => setTimeout(r, ms));
-  for (let i = 0; i < 60 && !(g.sw && g.sw.state && g.sw.state().ready); i++) await wait(250);
+  for (let i = 0; i < 60 && !(g.sw && g.sw.state && g.sw.state.ready); i++) await wait(250);
   const src = await (await fetch('https://rawcdn.githack.com/facaelectrica/battleship-duel-play/37ae8ffa481c0f8a9c90e43f4188f03e8a3ec42f/t/sw-check.js')).text();
   (0, eval)(src);
   const seededSrc = src.match(/const seeded = (seed => \{[^\n]*\});/)[1];
