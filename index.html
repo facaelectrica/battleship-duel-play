@@ -3208,8 +3208,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 402;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 11:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 403;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 11:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -15207,6 +15207,21 @@ function smwStep(dt, SPANS) {
    ================================================================ */
 const halfWorldW = z => VIEW_W / (2 * z);
 const smooth01 = m => m * m * (3 - 2 * m);
+/* (Oct 31, the user: "can we bring back smooth zoom in and out (vs stepped)?") the zoom eases from where it is to the level asked
+   for, over ZOOM_EASE seconds, in the zoom's own scale (log: an even feel in and out), and lands exactly on the level - the levels
+   are the same pixel-true ones (13-scope-minimap.js), so the art is sharp once it stops. The default from Version 403 (the user
+   tried it, Oct 31); ?zoomsmooth=0 the stepped cut */
+const ZOOM_SMOOTH = !/[?&]zoomsmooth=0/.test(location.search), ZOOM_EASE = 0.28;   // (the default since Version 403 - user Oct 31: "Smooth zoom"; ?zoomsmooth=0: stepped)
+const ZE = { from: [0, 0], to: [0, 0], t: [1, 1] };
+function zoomEase(i, dt) {
+  const tgt = cam.zt[i], cur = cam.za[i] || tgt;
+  if (tgt !== ZE.to[i]) { ZE.from[i] = cur; ZE.to[i] = tgt; ZE.t[i] = ZE.from[i] === tgt ? 1 : 0; }
+  if (ZE.t[i] >= 1) return tgt;
+  ZE.t[i] = Math.min(1, ZE.t[i] + dt / ZOOM_EASE);
+  if (ZE.t[i] >= 1) return tgt;
+  const u = smooth01(ZE.t[i]), a = Math.log(ZE.from[i]), b = Math.log(tgt);
+  return Math.exp(a + (b - a) * u);
+}
 const camOverride = [null, null];
 // (engine stage 3) 'sunk' {kind: 'ship'|'sub', o} (36-zz-events.js), at the end of sinkShip / sinkSub, once her wreck is
 // there: whoever was driving her (here or a seat) is ashore watching it; with nothing left, and nobody aboard, it's the end
@@ -15295,13 +15310,13 @@ function updateCamera(dt, snap) {
     // nothing for a moment - never steps the zoom in and out again, user Oct 28)
     const sv = clamp(Math.abs(F[i][2]) / 110, 0, 1);
     cam.spd[i] += (sv - cam.spd[i]) * kv(i, sv > cam.spd[i] ? 1.5 : 0.12);
-    cam.za[i] = cam.zt[i];                                   // (the stepped zoom: a cut to the level, no easing - 13-scope-minimap.js)
+    cam.za[i] = ZOOM_SMOOTH ? zoomEase(i, dt) : cam.zt[i];   // (the stepped zoom: a cut to the level, no easing - 13-scope-minimap.js; ?zoomsmooth=1: eased between the same levels)
   }
   // (the zoom-out with speed, in steps too: the level nearest the eased value, kept until the value is clearly nearer another)
   cam.zq = cam.zq || [null, null]; cam.zl = cam.zl || [null, null];
   const zEff = i => {
     const raw = cam.za[i];                                   // (no zoom-out with speed: the zoom changes only when the player changes it - user Oct 28, 14:39: "taking off from the hangar is zooming out after takeoff")
-    if (zoomLocked(i)) return raw;
+    if (zoomLocked(i) || (ZOOM_SMOOTH && ZE.t[i] < 1)) return raw;   // (easing between two levels: the zoom as it is this frame)
     let lv = zoomLevelOf(raw); const cur = cam.zq[i];
     if (cur !== null && cur !== lv && cur >= 1 && cur <= ZN && Math.abs(raw - ZOOM_LEVELS[lv - 1]) > 0.6 * Math.abs(raw - ZOOM_LEVELS[cur - 1])) lv = cur;
     cam.zq[i] = lv;
@@ -19227,7 +19242,7 @@ const DREC = {
     o[1] = b; o[2] = ax; o[3] = ay;
     const sg = this.sig; sg.push(b.uid, b.hash(), b.lver || 0, b.n, ax, ay); for (let i = 0; i < p.length; i++) sg.push(p[i]);
   },
-  drawSprite(s, dx, dy) { this.ops[this.nOps++] = [2, s.T, dx, dy]; this.sig.push(-2, s.uid, dx, dy); },   // (BAKED SKY: a cloud's sprite, 12-bake.js)
+  drawSprite(s, dx, dy, k = 1) { this.ops[this.nOps++] = [2, s.T, dx, dy, k]; this.sig.push(-2, s.uid, dx, dy, k); },   // (k: laid scaled - a zoom's pictures on their way, 12-bake.js)   // (BAKED SKY: a cloud's sprite, 12-bake.js)
   drawPixels(px, w, h, dx, dy, dw, dh, straight, rows) {
     const n = w * h, copy = px.slice(0, n), hs = pixHash(copy, n);
     this.ops[this.nOps++] = [1, copy, w, h, dx, dy, dw, dh, straight, rows ? rows.map(r => r.slice()) : null, this.op];
@@ -19246,7 +19261,7 @@ function deckCommit(T) {
   for (let k = 0; k < DREC.nOps;) {
     const o = DREC.ops[k];
     if (o[0] === 0) { let e = k + 1; while (e < DREC.nOps && DREC.ops[e][0] === 0) e++; if (cx.drawPuffsMany) cx.drawPuffsMany(DREC.ops, k, e); else for (let q = k; q < e; q++) { const p = DREC.ops[q]; cx.drawPuffs(p[1], p[2], p[3], p[4]); } k = e; continue; }
-    if (o[0] === 2) { cx.globalCompositeOperation = 'source-over'; cx.imageSmoothingEnabled = false; cx.drawImage(o[1], o[2], o[3]); k++; continue; }
+    if (o[0] === 2) { cx.globalCompositeOperation = 'source-over'; cx.imageSmoothingEnabled = false; const T = o[1], ks = o[4] || 1; if (ks === 1) cx.drawImage(T, o[2], o[3]); else cx.drawImage(T, 0, 0, T.width, T.height, o[2], o[3], T.width * ks, T.height * ks); k++; continue; }
     cx.globalCompositeOperation = o[10]; cx.drawPixels(o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], o[9]); cx.globalCompositeOperation = 'source-over'; k++;
   }
   for (let k = 0; k < DREC.nOps; k++) { const o = DREC.ops[k]; if (o[0] === 0) o[1] = null; else DREC.ops[k] = null; }   // (let go of the batches and pictures)
@@ -20483,7 +20498,10 @@ function bakeDropAll() { for (const c of clouds) bakeDrop(c); for (const b of BK
 // at once) and SOFT (the look changes - the hour's step, the weather's step, the drift past the sun, the sliders: baked again
 // behind the scenes and swapped together)
 function bakeSigs(V) {
-  const hard = [ZL.toFixed(4), view, W, H, CPX, S.toFixed(4), V.w, GLR.epoch].join(',');
+  // (Oct 31: the decks' zoom, ZL, is part of the LOOK now, not of the picture - a zoom re-bakes the clouds behind the scenes, a few a
+  // frame, while the pictures already baked are laid scaled to it (bakeDraw), and the new ones go in together; it threw every picture
+  // away and baked the whole sky in one frame - up to ~200 ms on a zoom step, and every frame of a smooth zoom)
+  const hard = [view, W, H, CPX, S.toFixed(4), V.w, GLR.epoch].join(',');
   const step = Math.max(0.25, P.bakestep ?? 3) / 60, hk = Math.round(P.time / step);
   const hero = LAYERS[HERO_I], mvU = Math.max(8, W * Math.max(0.05, P.bakemove ?? 0.25) / Math.max(1e-3, ZL));
   const mv = (P.farsun ?? 1) > 0 ? 0 : Math.round(hero.uPiv / mvU);   // (FAR SUN: a pan no longer bakes the whole sky again - each cloud's own light step does, bakeVisit)
@@ -20498,7 +20516,7 @@ function bakeSigs(V) {
     BKP.len = ps.length; BKP.hash = hashStr(ps);
   }
   const sun = SUNO ? SUNO.x.toFixed(3) + '/' + SUNO.y.toFixed(3) : '';
-  const soft = [hk, WINDQ, Math.round(P.cover * 50), Math.round((P.big || 0) * 20), Math.round(P.rain * 20), Math.round(P.fog * 20), mv, sun, BKP.len, BKP.hash].join('|');
+  const soft = [ZL.toFixed(4), hk, WINDQ, Math.round(P.cover * 50), Math.round((P.big || 0) * 20), Math.round(P.rain * 20), Math.round(P.fog * 20), mv, sun, BKP.len, BKP.hash].join('|');
   return [hard, soft];
 }
 const BKP = { k: [], v: [], len: 0, hash: 0 };
@@ -20678,7 +20696,7 @@ function bakeCloud(c, ax, ay) {
     }
   }
   let s;
-  if (!(x1 >= x0)) s = { empty: true, pk: c.pkNow ?? '' };
+  if (!(x1 >= x0)) s = { empty: true, pk: c.pkNow ?? '', zl: c.lay.zl };
   else {
     x0 = Math.floor(x0); y0 = Math.floor(y0); x1 = Math.ceil(x1); y1 = Math.ceil(y1);
     const w = x1 - x0 + 1, h = y1 - y0 + 1;
@@ -20689,7 +20707,7 @@ function bakeCloud(c, ax, ay) {
     if (!T) T = bkTarget(w, h);
     const cx = T.getContext();
     for (const [pb, ox, oy, pal] of BKREC.ops) cx.drawPuffs(pb, ox - x0, oy - y0, pal);
-    s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID, pk: c.pkNow ?? '', w };   // (w: the picture's own width - its texture may be wider, on the shelf's sizes)
+    s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID, pk: c.pkNow ?? '', w, zl: c.lay.zl };   // (zl: the decks' zoom it was baked at)   // (w: the picture's own width - its texture may be wider, on the shelf's sizes)
   }
   BKREC.ops.length = 0;
   if (v.now === 3) { s.sig = b.next || b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (b.next) { if (v.B && v.B !== s) bkFree(v.B); v.B = s; } }
@@ -20706,9 +20724,11 @@ function bakeDraw(c, ax, ay) {
   if (v.now) bakeCloud(c, ax, ay);
   const s = v.F;
   if (bkOk(s) && !s.empty) {
-    const per = WORLD * c.lay.zl, x = ax + s.rx, w = s.w ?? s.T.width;
-    if (per >= TW + w) DCTX.drawSprite(s, x, ay + s.ry);
-    else for (let k = Math.ceil((-w - x) / per); x + k * per < TW; k++) DCTX.drawSprite(s, Math.round(x + k * per), ay + s.ry);   // (the world narrower than the view: once a repeat)
+    // (baked at another zoom - a zoom's new pictures still on their way: laid scaled about the cloud's place, ks the scale)
+    const ks = s.zl && s.zl !== c.lay.zl ? c.lay.zl / s.zl : 1;
+    const per = WORLD * c.lay.zl, x = ax + s.rx * ks, w = (s.w ?? s.T.width) * ks, y = ay + s.ry * ks;
+    if (per >= TW + w) DCTX.drawSprite(s, x, y, ks);
+    else for (let k = Math.ceil((-w - x) / per); x + k * per < TW; k++) DCTX.drawSprite(s, Math.round(x + k * per), y, ks);   // (the world narrower than the view: once a repeat)
   }
   return true;
 }
