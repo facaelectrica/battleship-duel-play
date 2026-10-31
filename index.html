@@ -58,6 +58,275 @@ body {
 (() => {
 'use strict';
 
+/* THE SIMULATION WORKER (sim-worker branch, user Oct 30 18:22: "the whole game simulation moves to a worker"; design:
+   docs/sim-worker-design.md). Behind ?simworker=1; ?simworker=0 (the default) is the game as it was. This first part runs
+   before every other: on the page it keeps the game script's own text (SW_SRC: the whole game, pictures and all), from which
+   the worker is made - a blob of SW_PRELUDE's stand-ins for the page (document, window, canvases as OffscreenCanvas,
+   localStorage as a copy, no WebGL, no rAF) followed by the same text. In the worker the same game then loads and builds
+   the same world as the page, and is driven by messages (SW_HOST: frameBody without drawing or sound).
+   Step 1 (boot): the worker builds its world and steps when told (lockstep), so its tables can be compared with the page's
+   (tools/sw-same.mjs). */
+const SW_IN_WORKER = typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined' && self instanceof WorkerGlobalScope;
+// (kept only when the address asks for the worker - ?simworker=1, or =test for the tools: the text is the whole page's size)
+const SW_SRC = SW_IN_WORKER ? '' : (() => { try { return /[?&]simworker=(1|test)/.test(location.search) && document.currentScript ? document.currentScript.textContent : ''; } catch (e) { return ''; } })();
+const SW_WANT = !SW_IN_WORKER && (() => { try { return /[?&]simworker=1/.test(location.search); } catch (e) { return false; } })();
+// the stand-ins, as text run in the worker before the game (B: the page's numbers, sent in the blob)
+function swPrelude(B) {
+  const touch = self.__SW_TOUCH = {};
+  const note = k => { touch[k] = (touch[k] || 0) + 1; };
+  // an inert element: every property read is noted and gives another inert thing; calls give one too; sets are kept
+  const inert = name => {
+    const kept = {};
+    const f = function () { return inert(name + '()'); };
+    return new Proxy(f, {
+      get(t, k) {
+        if (k in kept) return kept[k];
+        if (k === Symbol.toPrimitive) return () => '';
+        if (typeof k === 'symbol') return undefined;
+        if (k === 'then') return undefined;                       // (not a promise)
+        if (k === 'hidden' || k === 'checked' || k === 'disabled' || k === 'offsetParent' || k === 'parentNode' || k === 'parentElement' || k === 'firstChild' || k === 'nextSibling') return null;
+        if (k === 'value' || k === 'textContent' || k === 'innerHTML' || k === 'className' || k === 'id') return '';
+        if (k === 'children' || k === 'childNodes') return [];
+        if (k === 'style' || k === 'dataset') return kept[k] = {};
+        if (k === 'classList') return kept[k] = { add() { }, remove() { }, toggle() { }, contains() { return false; } };
+        if (/^(offset|client|scroll)(Width|Height|Left|Top)$/.test(k)) return 0;
+        if (k === 'getBoundingClientRect') return () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0 });
+        if (k === 'querySelectorAll' || k === 'getElementsByTagName' || k === 'getElementsByClassName') return () => [];
+        if (k === 'querySelector' || k === 'closest') return () => null;
+        note(name + '.' + String(k));
+        return inert(name + '.' + String(k));
+      },
+      set(t, k, v) { kept[k] = v; return true; },
+      apply() { return inert(name + '()'); },
+      construct() { return inert('new ' + name); },
+    });
+  };
+  // canvases: OffscreenCanvas with what page code expects of a canvas element; no WebGL (the worker never draws)
+  class SwCanvas extends OffscreenCanvas {
+    constructor(w = 300, h = 150) { super(w, h); this.style = {}; this.dataset = {}; }
+    getContext(type, o) { if (type !== '2d') { note('canvas.getContext ' + type); return null; } return super.getContext(type, o); }
+    addEventListener() { } removeEventListener() { }
+    getBoundingClientRect() { return { left: 0, top: 0, right: this.width, bottom: this.height, width: this.width, height: this.height, x: 0, y: 0 }; }
+    toDataURL() { note('canvas.toDataURL'); return 'data:,'; }
+    transferControlToOffscreen() { return this; }
+  }
+  self.HTMLCanvasElement = SwCanvas;
+  self.HTMLImageElement = class SwImage { };
+  self.Image = class SwImageEl {
+    constructor() { this.onload = null; this.onerror = null; this.width = 0; this.height = 0; }
+    set src(u) { note('Image.src'); fetch(u).then(r => r.blob()).then(b => createImageBitmap(b)).then(bm => { this.width = bm.width; this.height = bm.height; this.bitmap = bm; this.onload && this.onload(); }, e => this.onerror && this.onerror(e)); }
+  };
+  const store = new Map(Object.entries(B.store || {}));
+  self.localStorage = { getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => { store.set(k, String(v)); }, removeItem: k => { store.delete(k); }, clear: () => store.clear(), key: i => [...store.keys()][i] ?? null, get length() { return store.size; } };
+  const els = {};
+  self.document = {
+    getElementById: id => id === 'game' || id === 'hud' ? (els[id] || (els[id] = new SwCanvas(300, 150))) : (els[id] || (els[id] = inert('#' + id))),
+    createElement: tag => String(tag).toLowerCase() === 'canvas' ? new SwCanvas(300, 150) : inert('<' + tag + '>'),
+    createElementNS: (ns, tag) => inert('<' + tag + '>'),
+    createTextNode: () => inert('text'),
+    addEventListener() { }, removeEventListener() { },
+    querySelector: () => null, querySelectorAll: () => [], getElementsByTagName: () => [],
+    body: inert('body'), head: inert('head'), documentElement: inert('html'),
+    hidden: false, visibilityState: 'visible', currentScript: null, fullscreenEnabled: false, fullscreenElement: null,
+  };
+  self.window = self;
+  Object.assign(self, { innerWidth: B.w, innerHeight: B.h, devicePixelRatio: B.dpr, scrollX: 0, scrollY: 0, visualViewport: null, __noWorker: true, __SW_HOST: true });
+  self.scrollTo = () => { }; self.addEventListener = (t, f) => { if (t === 'message') self.__swOnMsg = f; }; self.removeEventListener = () => { };
+  self.matchMedia = q => ({ matches: /coarse/.test(q) ? !!B.coarse : /reduced-motion/.test(q) ? !!B.reduced : false, addEventListener() { }, addListener() { } });
+  self.getComputedStyle = () => ({ getPropertyValue: k => k === '--sat' ? String(B.sat || '') : '' });
+  self.requestAnimationFrame = () => 0; self.cancelAnimationFrame = () => { };
+  self.alert = () => { }; self.prompt = () => null; self.confirm = () => false;
+  try { Object.defineProperty(self, 'location', { value: { search: B.search || '', href: 'blob:sim-worker', hash: '', pathname: '/', origin: B.origin || '' }, configurable: true }); } catch (e) { }
+  if (B.seed != null) { let s = B.seed | 0; Math.random = () => { let t = (s = (s + 0x6D2B79F5) | 0); t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  if (B.now != null) { const n = B.now; performance.now = () => n; }
+  // (messages that come before the game is ready wait for it)
+  self.__swQ = [];
+  self.onerror = e => { postMessage({ t: 'fail', err: String(e && e.message || e) }); };
+  self.onunhandledrejection = e => { postMessage({ t: 'fail', err: String(e && e.reason && (e.reason.stack || e.reason) || e) }); };
+  self.onmessage = e => { if (self.__swReady) self.__swReady(e.data); else self.__swQ.push(e.data); };
+}
+// what the page tells the worker about itself at boot
+function swBootData(o = {}) {
+  const store = {}; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); store[k] = localStorage.getItem(k); } } catch (e) { }
+  const mm = q => { try { return !!(window.matchMedia && matchMedia(q).matches); } catch (e) { return false; } };
+  // (the size the way resize() takes it - the visual viewport if there is one: the worker has none, so it gets that size as its window's; a
+  // pixel off and the world is laid out a little differently - Oct 30, the first gate run)
+  const vv = window.visualViewport, w = vv ? Math.min(window.innerWidth, Math.round(vv.width)) : window.innerWidth, h = vv ? Math.min(window.innerHeight, Math.round(vv.height)) : window.innerHeight;
+  let sat = 0; try { sat = getComputedStyle(document.documentElement).getPropertyValue("--sat"); } catch (e) { }
+  return Object.assign({ w, h, sat, dpr: window.devicePixelRatio || 1, search: (location.search || '').replace(/([?&])simworker=1/, '$1simworker=host') + '&gl=0&worker=0', origin: location.origin,
+    store, coarse: mm('(pointer: coarse)') || ('ontouchstart' in window), reduced: mm('(prefers-reduced-motion: reduce)') }, o);
+}
+// ---- the page's side
+const SW = { on: false, worker: null, fail: null, ready: false, seq: 0, wait: new Map(), bootMs: 0, t0: 0, touch: null, gen: 0, liveGen: 0, resyncing: false };
+function swStart(o) {
+  if (SW.worker || !SW_SRC) { if (!SW_SRC) SW.fail = 'no script text'; return; }
+  try {
+    const B = swBootData(o || {});
+    const text = '(' + swPrelude + ')(' + JSON.stringify(B) + ');\n' + SW_SRC;
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+    SW.t0 = performance.now();
+    const w = SW.worker = new Worker(url);
+    w.onmessage = e => swFromWorker(e.data);
+    w.onerror = e => swFail('error: ' + (e.message || e));
+    SW.on = true;
+  } catch (e) { SW.fail = String(e); SW.worker = null; console.error('sim worker', e); }
+}
+/* ---- the page as the worker's guest (phase 3, `live`): each frame it folds in the newest snapshot and sends its inputs
+   with one credit; the game itself is never stepped here (frameBody, swGuestFrame). Its own: the camera, the HUD, the
+   menus, the aim being moved (put back after each snapshot: ctlState / setCtlState, as online) */
+Object.assign(SW, { live: false, snaps: [], acts: [], tickMs: 0, behind: 0, got: 0, framesNoSnap: 0 });
+async function swGoLive() {
+  if (!SW.ready) throw new Error('sim worker not ready' + (SW.fail ? ': ' + SW.fail : ''));
+  await swAsk('go', { hold: false });
+  SW.acts.length = 0; SW.framesNoSnap = 0;
+  await swResync();                                                  // (the worker takes this page's world, then a whole snapshot back)
+  if (SW.fail) return false;
+  SW.live = true;
+  return true;
+}
+// (the page) the worker's sounds, shakes and toasts, here
+function swEvents(E) {
+  const arg = v => v && typeof v === 'object' && v.ref != null && Object.keys(v).length === 1 ? SWM.byU.get(v.ref) || null : v;
+  for (const e of E) {
+    try {
+      if (e[0] === 's') emit('sound', { id: e[1], x: arg(e[2]), a: arg(e[3]) });
+      else if (e[0] === 'k') shakeAt(e[1], e[2]);
+      else if (e[0] === 't') showToast(e[1]);
+    } catch (err) { }
+  }
+}
+// the worker failed (an error, no snapshot for 5 s): this page goes on with the game itself, from the last snapshot it has
+function swFail(why) {
+  SW.fail = String(why); console.error('sim worker:', SW.fail);
+  if (SW.live) { SW.live = false; console.warn('sim worker: the page runs the game itself from here'); }
+}
+// the page built a new world (a round, a mode, the editor's REFRESH): the worker builds the same and takes the page's tables
+async function swResync() {
+  SW.resyncing = true;
+  try {
+    const store = swBootData().store;
+    await swAsk('resync', { mode: MODE, ctl: ctlPick.slice(), store, ui: [!!ui.title, !!ui.menu, !!ui.settings], s: JSON.stringify(tablesSave()) });
+    SW.liveGen = SW.gen; swMirrorReset();
+    const s0 = await swAsk('snap', { reset: true }); SW.snaps.length = 0;
+    swApply(s0);
+  } catch (e) { swFail(e && e.message || e); }
+  finally { SW.resyncing = false; }
+}
+function swGuestFrame(dt, held) {
+  if (SW.resyncing) return;
+  if (SW.gen !== SW.liveGen) { swResync(); return; }
+  if (SW.framesNoSnap > 300 && !held) { swFail('no snapshot for 300 frames'); return; }
+  // the newest snapshot (all of them in order if more than one came: each is a delta on the one before)
+  if (SW.snaps.length) {
+    const ctl = [0, 1].map(p => { try { return ctlState(p); } catch (e) { return null; } });
+    for (const m of SW.snaps.splice(0)) { swApply(m.s); SW.tickMs = m.tickMs; SW.behind = m.behind; SW.got++; if (m.ev && m.ev.length) swEvents(m.ev); }
+    for (let p = 0; p < 2; p++) if (ctl[p]) try { setCtlState(p, ctl[p]); } catch (e) { }
+    SW.framesNoSnap = 0;
+  } else SW.framesNoSnap++;
+  if (!held) { applyHeldKeys(dt); stepHud(dt); }
+  regionsTick();                                                     // (the regions' tiers by this page's views: what the drawing culls by)
+  const ctl = [];                                                    // (unrounded: online rounds them for the wire)
+  for (let p = 0; p < 2; p++) { try { const s = ctlState(p); if (s) { const g = hasGuns(p) ? activeGun(p) : null; if (g) { s.e = g.elev; s.w = g.power; } if (s.z != null) s.z = subs[p].depthT; if (s.le != null) s.le = lampOf(p).elev; } ctl.push(s); } catch (e) { ctl.push(null); } }
+  SW.worker.postMessage({ t: 'in', credit: 1, hold: !!held, acts: SW.acts.splice(0), ctl, cam: CAM_ROW.cam, ui: [!!ui.title, !!ui.menu, !!ui.settings] });
+}
+function swFromWorker(m) {
+  if (m.t === 'snap') { SW.snaps.push(m); return; }
+  if (m.t === 'ready') { SW.ready = true; SW.bootMs = performance.now() - SW.t0; SW.touch = m.touch; if (SW_WANT) swGoLive().catch(e => swFail(e && e.message || e)); return; }
+  if (m.t === 'fail') { swFail(m.err); return; }
+  if (m.t === 're') { const P = SW.wait.get(m.id); if (P) { SW.wait.delete(m.id); if (m.err) P[1](new Error(m.err)); else P[0](m.v); } }
+}
+// a request to the worker; its answer as a promise
+function swAsk(t, o) {
+  if (!SW.worker) return Promise.reject(new Error('no sim worker' + (SW.fail ? ': ' + SW.fail : '')));
+  const id = ++SW.seq;
+  return new Promise((res, rej) => { SW.wait.set(id, [res, rej]); SW.worker.postMessage(Object.assign({ t, id }, o)); });
+}
+// (the page) the GAME EDITOR's VEHICLES tab puts a thing in or moves one (events to the table's owner): the page's tables are
+// the truth again, the worker takes them (as after a new world or a LOAD)
+on('tableAdd', () => { SW.gen++; }, 'simworker', 100);
+on('tableMove', () => { SW.gen++; }, 'simworker', 100);
+// ---- the worker's side: the game (start() done, window.__game set) answers the page's requests
+function swHostReady() {
+  const answer = m => {
+    let v, err = null;
+    try {
+      if (m.t === 'run') v = new Function('g', 'T', m.code)(window.__game, window.__game.swT);   // (tools: a few lines run in the worker)
+      else if (m.t === 'step') { window.__game.stepQuiet(m.dt, m.n); v = { time, tick: REG.tick }; }
+      else if (m.t === 'tables') v = JSON.stringify(tablesSave());
+      else if (m.t === 'load') { tablesLoad(JSON.parse(m.s)); computeEnv(); v = true; }   // (E: worked out from the loaded weather, as the page's last frame did)
+      else if (m.t === 'snap') { if (m.reset) swSnapReset(); v = swSnapshot(m.full !== false, m.drawn === true); }   // (drawn: the effect lists' drawn fields only, as live)   // (36-zzzzz-sw-snap.js)
+      else if (m.t === 'stats') v = { snapMs: SWS.ms, snapBytes: SWS.bytes, snaps: SWS.n, tick: REG.tick, time, hostTickMs: SWH.tickMs, hostBehind: SWH.behind, hostDone: SWH.done, hostSent: SWH.sent, hostHold: SWH.hold };
+      else if (m.t === 'touch') v = self.__SW_TOUCH;
+      else if (m.t === 'go') { swHostGo(m); v = true; }
+      else if (m.t === 'resync') { swHostResync(m); v = true; }
+      else if (m.t === 'in') { swHostIn(m); return; }
+      else err = 'unknown ' + m.t;
+    } catch (e) { err = String(e && e.stack || e); }
+    if (m.id) postMessage({ t: 're', id: m.id, v, err }, v && v.bufs ? v.bufs : []);   // (a snapshot's columns are moved, not copied)
+  };
+  // what the page must hear, see or show that isn't in the tables (design section 3, lane 4): the sounds, the camera's
+  // shakes, the toasts - kept in order and sent with the next snapshot
+  const arg = v => v && typeof v === 'object' ? (v._uid != null ? { ref: v._uid } : tblPlain(v, 2, TBL_SKIP, false)) : v;
+  on('sound', e => { SWH.ev.push(['s', e.id, arg(e.x), arg(e.a)]); }, 'simworker');
+  const shake0 = shakeAt; shakeAt = (amt, x) => { SWH.ev.push(['k', amt, x]); return shake0(amt, x); };
+  const toast0 = showToast; showToast = msg => { SWH.ev.push(['t', msg]); return toast0(msg); };
+  self.__swReady = answer;
+  for (const m of self.__swQ.splice(0)) answer(m);
+  postMessage({ t: 'ready', touch: self.__SW_TOUCH });
+}
+/* ---- the worker on its own clock (phase 3): 120 ticks a second of wall time, each one frameBody at 1/120 (one physics
+   step); at most 8 a wake-up - behind that, the game runs slower, never different (nothing thinned or skipped: each tick is
+   1/120 s of game time). The page grants one credit a frame with its inputs ('in'); after the next tick the worker spends
+   it on a snapshot, so the page has one to fold in at each frame and never two. */
+const SWH = { on: false, hold: false, t0: 0, done: 0, credit: 0, q: [], tickMs: 0, behind: 0, sent: 0, timer: 0, ev: [] };
+function swHostGo(m) {
+  SWH.hold = !!m.hold;
+  if (!SWH.on) { SWH.on = true; SWH.t0 = performance.now(); SWH.done = 0; swHostLoop(); }
+}
+function swHostIn(m) {
+  if (m.credit) SWH.credit = 1;
+  if (m.hold != null) SWH.hold = !!m.hold;
+  if (m.acts) for (const a of m.acts) SWH.q.push(a);
+  if (m.ctl) SWH.ctl = m.ctl;
+  if (m.cam) SWH.cam = m.cam;                                        // (the page's camera: the regions' tiers go by its views)
+  if (m.ui) swHostUi(m.ui);
+}
+function swHostInputs() {
+  for (const [p, name, a] of SWH.q.splice(0)) { const f = ACTS[name]; if (f) try { f(p, ...a); } catch (e) { console.error(e); } }
+  if (SWH.ctl) for (let p = 0; p < SWH.ctl.length; p++) if (SWH.ctl[p]) setCtlState(p, SWH.ctl[p]);
+  if (SWH.cam) { try { CAM_ROW.cam = SWH.cam; } catch (e) { } SWH.cam = null; }
+}
+function swHostLoop() {
+  if (!SWH.on) return;
+  const ms = SUBSTEP * 1000, now = performance.now();
+  if (SWH.hold) { SWH.t0 = now - SWH.done * ms; }                      // (held: the clock waits with the game)
+  else {
+    const want = Math.floor((now - SWH.t0) / ms);
+    let n = 0;
+    while (SWH.done < want && n < 8) {
+      const a = performance.now();
+      swHostInputs();
+      paused = false; last = 1000; frameBody(1000 + ms);
+      SWH.done++; n++;
+      SWH.tickMs += (performance.now() - a - SWH.tickMs) * 0.05;
+    }
+    if (SWH.done < want) { SWH.behind += want - SWH.done; SWH.t0 += (want - SWH.done) * ms; }   // (fallen behind: slower, never different)
+    if (n && SWH.credit) { SWH.credit = 0; SWH.sent++; const S = swSnapshot(); postMessage({ t: 'snap', s: S, ev: SWH.ev.splice(0), tickMs: SWH.tickMs, behind: SWH.behind, done: SWH.done }, S.bufs); }
+  }
+  SWH.timer = setTimeout(swHostLoop, Math.max(0, SWH.t0 + (SWH.done + 1) * ms - performance.now()));
+}
+// (the page's menus: some of the game's steps look at them - a held trigger, the weather's clock under the settings)
+function swHostUi(u) { ui.title = u[0]; ui.menu = u[1]; ui.settings = u[2]; }
+// the page built a new world: the same mode, controls and saved world here, built the same, then the page's tables put in
+function swHostResync(m) {
+  localStorage.clear(); for (const k in m.store) localStorage.setItem(k, m.store[k]);
+  ctlPick[0] = m.ctl[0]; ctlPick[1] = m.ctl[1]; MODE = m.mode;
+  if (m.ui) swHostUi(m.ui);
+  applyMode(); builtViewW = 0; resize();
+  tablesLoad(JSON.parse(m.s)); computeEnv(); swSnapReset();
+  SWH.t0 = performance.now() - SWH.done * SUBSTEP * 1000;            // (no catching up on the time the rebuild took)
+}
+
 /* ================================================================
    Assets (cut out from the supplied art)
    ================================================================ */
@@ -499,6 +768,9 @@ let dpr = 1, cw = 0, ch = 0, S = 1, VIEW_W = 1333, builtViewW = 0;
    ================================================================ */
 const img = {};
 function loadImage(src) {
+  // (in the simulation worker, 00-sw-boot.js: decoded off the page and kept as a canvas - the same pixels for the game's
+  // hit tests and keels)
+  if (SW_IN_WORKER) return fetch(src).then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })).then(bm => { const c = makeCanvas(bm.width, bm.height); c.getContext('2d').drawImage(bm, 0, 0); bm.close(); return c; });
   return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
 }
 function makeCanvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
@@ -1445,6 +1717,7 @@ function stepTest(dt) {
 }
 
 function buildWorld(restore) {
+  SW.gen++;                                                 // (the simulation worker, 00-sw-boot.js: the page built a new world - the worker follows it)
   BUILD_T.length = 0; buildT0 = performance.now();
   if (restore && !restore.ships) restore = null;          // hot-reload data without a saved round is a fresh start
   mgHold[0] = mgHold[1] = false;   // (no trigger held over from the last round)
@@ -2664,6 +2937,7 @@ function specTry(p, k) {
 function act(p, name, ...a) {
   if (name === 'switch' && specTry(p, a[0])) return;           // (watching is this screen's own business)
   if (NET.log) NET.log.push([p, name, ...a]);
+  if (SW.live) { SW.acts.push([p, name, a]); return; }           // (the simulation worker's game: the command goes there - 00-sw-boot.js)
   if (NET.role === 'guest') { if (p === NET.me && NET.send) NET.send({ t: 'act', name, a }); return; }
   // (testing: every command goes out as text and comes back a moment later, as it would over a network)
   if (NET.role === 'loop') { NET.q.push({ at: time + NET.lag, m: JSON.stringify([p, name, a]) }); return; }
@@ -2859,8 +3133,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 383;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 08:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 384;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 08:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7387,6 +7661,8 @@ function stepSubWreck(sb, dt) {
   if (all && sb.state === 'sinking') sb.state = 'wreck';
 }
 
+// (engine stage 3, rule 4 - Oct 30 gate) the wrecks' own random source, never Math.random: made on first use, its state saved with the tables
+let wkR_ = null; const wkR = () => (wkR_ || (wkR_ = sysRng('wrecks')))(), wkRnd = (a, b) => a + (b - a) * wkR();
 /* ---------------- Wrecks: what has gone down is still there (user Oct 24) ----------------
    A sinking or sunk hull - a battleship's broken pieces, a submarine's halves - can still be hit: a shell, a torpedo
    or a depth charge blows it further apart. And it's solid: a submarine can't pass through it (she crashes into it, or
@@ -7472,7 +7748,7 @@ function blowWreck(o, sb, x, y, power, vx) {
   if (under) {
     underwaterBlast(x, y, 0.8 * power); sound('explosion', x, 0.55 + 0.25 * power); water.shock(x, y, 0.9);
     killFishNear(x, y, 50); emit('scare', { x, y, r: 200, kind: 'fish' });
-    for (let i = 0; i < 26; i++) addBubble(x + rnd(-10, 10), y + rnd(-6, 6), rnd(-25, 25), -rnd(20, 60), rnd(0.8, 2.8));
+    for (let i = 0; i < 26; i++) addBubble(x + wkRnd(-10, 10), y + wkRnd(-6, 6), wkRnd(-25, 25), -wkRnd(20, 60), wkRnd(0.8, 2.8));
   } else sectionBlast(x, y, 0.6 * power, vx || 0);
   spawnDebris(x, y, 8, vx || 0);
   shakeAt(4 + 3 * power, x);
@@ -7484,7 +7760,7 @@ function splitPiece(p, x, y, under) {
   const col = clamp(p.facing < 0 ? cS + lx / SHIP_K : cS - lx / SHIP_K, c0, c1 - 1), sec = clamp(sectionOfCol(Math.round(col)), p.s0, p.s1 - 1);
   p.dead[sec] = true; p.sprite = null;
   p.settled = false; p.rest = 0; p.contactT = 0; wixDirty();
-  p.vy -= under ? 10 : 4; p.w += Math.sign(lx || 1) * rnd(0.04, 0.1);
+  p.vy -= under ? 10 : 4; p.w += Math.sign(lx || 1) * wkRnd(0.04, 0.1);
   if (p.s1 - p.s0 < 2) return;
   // it parts at the section joint nearer the blast
   const fr = col / SHIP_SRC_W, cands = [sec, sec + 1].filter(c => c > p.s0 && c < p.s1);
@@ -7496,7 +7772,7 @@ function splitPiece(p, x, y, under) {
     const cS2 = (SECTION_FR[s0] + SECTION_FR[s1]) / 2 * SHIP_SRC_W, l2 = (p.facing < 0 ? cS2 - cS : cS - cS2) * SHIP_K, away = Math.sign(l2) || 1;
     return Object.assign({}, p, {
       s0, s1, hl: (SECTION_FR[s1] - SECTION_FR[s0]) / 2 * SHIP_SRC_W * SHIP_K, x: p.x + l2 * ca, y: p.y + l2 * sa,
-      vx: p.vx + away * rnd(8, 18), vy: p.vy - rnd(2, 8), w: p.w + away * rnd(0.04, 0.12), dead: p.dead.slice(), sprite: null, spriteL: 0,
+      vx: p.vx + away * wkRnd(8, 18), vy: p.vy - wkRnd(2, 8), w: p.w + away * wkRnd(0.04, 0.12), dead: p.dead.slice(), sprite: null, spriteL: 0,
       brokenL: lowEndIsBow ? s0 > 0 : s1 < SECTIONS, brokenR: lowEndIsBow ? s1 < SECTIONS : s0 > 0, leakT: 0, leakAcc: 0, junkAcc: 0,
     });
   });
@@ -7507,16 +7783,16 @@ function splitPart(sb, q, x, y) {
   const u = (q.s0 + q.s1) / 2 / SUB_SECTIONS + lx / SUB_L;
   // the steel is charred where it struck
   sb.scorch = sb.scorch || [];
-  sb.scorch.push({ u: clamp(u, 0.02, 0.98), row: clamp((y - q.y - lx * Math.tan(q.a)) / SUB_K + SUB_WL_ROW, 30, 140), r: rnd(55, 85) });
+  sb.scorch.push({ u: clamp(u, 0.02, 0.98), row: clamp((y - q.y - lx * Math.tan(q.a)) / SUB_K + SUB_WL_ROW, 30, 140), r: wkRnd(55, 85) });
   if (sb.scorch.length > 14) sb.scorch.shift();
   rebuildSubArt(sb);
-  q.rest = false; wixDirty(); q.vy -= 8; q.tilt = clamp(q.tilt + rnd(-0.15, 0.15), -0.45, 0.45);
+  q.rest = false; wixDirty(); q.vy -= 8; q.tilt = clamp(q.tilt + wkRnd(-0.15, 0.15), -0.45, 0.45);
   if (q.s1 - q.s0 < 2) return;
   const cut = clamp(Math.round(u * SUB_SECTIONS), q.s0 + 1, q.s1 - 1), i = sb.parts.indexOf(q);
   if (i < 0) return;
   const two = [[q.s0, cut], [cut, q.s1]].map(([s0, s1], k) => {
     const off = ((s0 + s1) / 2 - (q.s0 + q.s1) / 2) / SUB_SECTIONS * SUB_L, away = k ? 1 : -1;
-    return { s0, s1, x: q.x + off * Math.cos(q.a), y: q.y + off * Math.sin(q.a), a: q.a, vx: q.vx + away * rnd(5, 12), vy: q.vy - rnd(4, 10), w: 0, tilt: clamp(q.tilt + away * rnd(0.08, 0.2), -0.45, 0.45), rest: false, leak: 0 };
+    return { s0, s1, x: q.x + off * Math.cos(q.a), y: q.y + off * Math.sin(q.a), a: q.a, vx: q.vx + away * wkRnd(5, 12), vy: q.vy - wkRnd(4, 10), w: 0, tilt: clamp(q.tilt + away * wkRnd(0.08, 0.2), -0.45, 0.45), rest: false, leak: 0 };
   });
   sb.parts.splice(i, 1, ...two);
 }
@@ -7525,7 +7801,7 @@ function crashFx(cx, cy, speed) {
   sound('crash', cx, Math.min(1, speed / 30));
   spawnSparks(cx, cy, 20, 180);
   flashes.push({ x: cx, y: cy, r: 9, life: 0, max: 0.08 });
-  for (let i = 0; i < 40; i++) addBubble(cx + rnd(-24, 24), cy + rnd(-6, 6), rnd(-30, 30), -rnd(15, 60), rnd(0.8, 3));
+  for (let i = 0; i < 40; i++) addBubble(cx + wkRnd(-24, 24), cy + wkRnd(-6, 6), wkRnd(-30, 30), -wkRnd(15, 60), wkRnd(0.8, 3));
   water.shock(cx, cy, 0.9, false, SUB_L * 0.4);
   emit('scare', { x: cx, y: cy, r: 200, kind: 'fish' });
   shakeAt(7, cx);
@@ -7602,11 +7878,13 @@ function drawSubParts(sb) {
   }
 }
 
+// (engine stage 3, rule 4 - Oct 30 gate) the white water's own random source, never Math.random: made on first use, its state saved with the tables
+let wwR_ = null; const wwR = () => (wwR_ || (wwR_ = sysRng('whitewater')))(), wwRnd = (a, b) => a + (b - a) * wwR();
 /* ---------------- White water: the billowing cloud of an underwater blast, and the foam a surfacing
    submarine throws off. Painted like the smoke (layered tones, lumpy pixel blobs) in sea-foam colours. ---------------- */
 const wclouds = [];
 const FOAM_TONES = [[255, 255, 255], [228, 242, 252], [190, 218, 242], [146, 186, 226], [98, 146, 204]];
-function spawnWcloud(o) { if (wclouds.length < 360) wclouds.push(Object.assign({ age: 0, seed: Math.floor(Math.random() * 7) }, o)); }
+function spawnWcloud(o) { if (wclouds.length < 360) wclouds.push(Object.assign({ age: 0, seed: Math.floor(wwR() * 7) }, o)); }
 const blastRings = [];
 function stepBlastRings(dt) {
   for (let i = blastRings.length - 1; i >= 0; i--) { const b = blastRings[i]; b.life += dt; b.r += b.speed * dt; b.speed *= 1 - 0.7 * dt; if (b.r >= b.max || b.life > 2.5) blastRings.splice(i, 1); }   // (slowing as it goes, a ring may never reach its max: it's done after a while)
@@ -7615,7 +7893,7 @@ function stepBlastRings(dt) {
 // (mottled light and shadow inside it), drifts up a little, then tears apart into bubbles
 const gasBalls = [];
 const BALL_TONES = ['#ffffff', '#e6f4fd', '#c4e0f6', '#96c4ec', '#6aa4dc'].map(s => s), BALL_RGB = BALL_TONES.map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)));
-function gasBall(x, y, R) { gasBalls.push({ x, y, R, r: 2, t: 0, seed: Math.random() * 40 }); if (gasBalls.length > 8) gasBalls.shift(); }
+function gasBall(x, y, R) { gasBalls.push({ x, y, R, r: 2, t: 0, seed: wwR() * 40 }); if (gasBalls.length > 8) gasBalls.shift(); }
 function stepGasBalls(dt) {
   for (let i = gasBalls.length - 1; i >= 0; i--) {
     const b = gasBalls[i];
@@ -7626,7 +7904,7 @@ function stepGasBalls(dt) {
     if (b.y - b.r < surfaceY(b.x) + 2) b.y = surfaceY(b.x) + 2 + b.r;
     if (b.t > 0.9) {                                                           // tearing apart: bubbles stream off it
       b.bAcc = (b.bAcc || 0) + 200 * dt;
-      for (; b.bAcc >= 1; b.bAcc--) { const a = rnd(0, 6.28), d = b.r * rnd(0.5, 1); addBubble(b.x + Math.cos(a) * d, b.y + Math.sin(a) * d, Math.cos(a) * rnd(5, 25), -rnd(20, 60), rnd(1, 3)); }
+      for (; b.bAcc >= 1; b.bAcc--) { const a = wwRnd(0, 6.28), d = b.r * wwRnd(0.5, 1); addBubble(b.x + Math.cos(a) * d, b.y + Math.sin(a) * d, Math.cos(a) * wwRnd(5, 25), -wwRnd(20, 60), wwRnd(1, 3)); }
     }
     if (b.t > 1.7) gasBalls.splice(i, 1);
   }
@@ -7679,7 +7957,7 @@ function underwaterBlast(x, y, power, ball) {
     // the depth charge: one round, churning ball of white water, a ring of spray bubbles, nothing cloud-like
     gasBall(x, y, 34 * power);
     flashes.push({ x, y, r: 9 * power, life: 0, max: 0.1 });
-    for (let i = 0; i < 60 * power; i++) { const a = rnd(0, 6.28), s = rnd(40, 140); addBubble(x + Math.cos(a) * rnd(8, 30), y + Math.sin(a) * rnd(8, 30), Math.cos(a) * s, Math.sin(a) * s - 20, rnd(0.8, 2.4)); }
+    for (let i = 0; i < 60 * power; i++) { const a = wwRnd(0, 6.28), s = wwRnd(40, 140); addBubble(x + Math.cos(a) * wwRnd(8, 30), y + Math.sin(a) * wwRnd(8, 30), Math.cos(a) * s, Math.sin(a) * s - 20, wwRnd(0.8, 2.4)); }
     for (let k = -18; k <= 18; k += DX) water.push(x + k, -1800 * power * clamp(1 - (y - WATER_Y) / 300, 0.2, 1) * (1 - Math.abs(k) / 20));
     emit('scare', { x, y, r: 220, kind: 'fish' });
     shakeAt(6 * power, x);
@@ -7687,15 +7965,15 @@ function underwaterBlast(x, y, power, ball) {
   }
   // a small, hot centre...
   flashes.push({ x, y, r: 7 * power, life: 0, max: 0.12 });
-  for (let i = 0; i < 6; i++) spawnFlame(x + rnd(-2, 2), y + rnd(-2, 2), rnd(-25, 25), rnd(-25, 25), 1.3, rnd(2, 3.5), rnd(6, 9));
+  for (let i = 0; i < 6; i++) spawnFlame(x + wwRnd(-2, 2), y + wwRnd(-2, 2), wwRnd(-25, 25), wwRnd(-25, 25), 1.3, wwRnd(2, 3.5), wwRnd(6, 9));
   // ...then white water boils out of it, rolls upward and thins out, and the bubbles race for the surface
   const n = Math.round(46 * power);
   for (let i = 0; i < n; i++) {
     // a lumpy ball that billows out, then a plume that rolls up toward the surface
-    const a = rnd(0, Math.PI * 2), d0 = Math.pow(Math.random(), 0.7) * 16 * power, sp = Math.pow(Math.random(), 0.6) * rnd(30, 100) * power, plume = i % 3 === 0;
-    spawnWcloud({ x: x + Math.cos(a) * d0, y: y + Math.sin(a) * d0, vx: Math.cos(a) * sp * 0.8, vy: Math.sin(a) * sp * 0.7 - (plume ? rnd(20, 50) : 0), r: rnd(2.5, 4.5), rmax: rnd(7, 15) * (0.85 + 0.25 * power), grow: rnd(24, 40), life: rnd(2.6, 5), lift: plume ? rnd(45, 75) : rnd(10, 26), alpha: 1, water: true });
+    const a = wwRnd(0, Math.PI * 2), d0 = Math.pow(wwR(), 0.7) * 16 * power, sp = Math.pow(wwR(), 0.6) * wwRnd(30, 100) * power, plume = i % 3 === 0;
+    spawnWcloud({ x: x + Math.cos(a) * d0, y: y + Math.sin(a) * d0, vx: Math.cos(a) * sp * 0.8, vy: Math.sin(a) * sp * 0.7 - (plume ? wwRnd(20, 50) : 0), r: wwRnd(2.5, 4.5), rmax: wwRnd(7, 15) * (0.85 + 0.25 * power), grow: wwRnd(24, 40), life: wwRnd(2.6, 5), lift: plume ? wwRnd(45, 75) : wwRnd(10, 26), alpha: 1, water: true });
   }
-  for (let i = 0; i < 70 * power; i++) { const a = rnd(0, 6.28), s = rnd(10, 90); addBubble(x + Math.cos(a) * rnd(0, 10), y + Math.sin(a) * rnd(0, 10), Math.cos(a) * s, Math.sin(a) * s - 30, rnd(1, 3.6)); }
+  for (let i = 0; i < 70 * power; i++) { const a = wwRnd(0, 6.28), s = wwRnd(10, 90); addBubble(x + Math.cos(a) * wwRnd(0, 10), y + Math.sin(a) * wwRnd(0, 10), Math.cos(a) * s, Math.sin(a) * s - 30, wwRnd(1, 3.6)); }
   for (let k = -18; k <= 18; k += DX) water.push(x + k, -1800 * power * clamp(1 - (y - WATER_Y) / 300, 0.2, 1) * (1 - Math.abs(k) / 20));
   emit('scare', { x, y, r: 220, kind: 'fish' });
   shakeAt(6 * power, x);
@@ -7704,10 +7982,10 @@ function underwaterBlast(x, y, power, ball) {
 function emergeFoam(sb, amt) {
   for (let i = 0; i < 3 * amt; i++) {
     // water thrown off her deck and ends, splashing outward, and foam spreading on the surface
-    const u = Math.random(), x = sb.x + (u - 0.5) * SUB_L * 1.05, sy = surfaceY(x);
+    const u = wwR(), x = sb.x + (u - 0.5) * SUB_L * 1.05, sy = surfaceY(x);
     const out = Math.sign(x - sb.x) || 1, edge = Math.abs(u - 0.5) * 2;
-    spawnSpray(x, sy - rnd(1, 6), out * rnd(15, 70) * (0.4 + edge), rnd(0.35, 0.8));
-    spawnFoam(x + out * rnd(0, 20) * FXK, rnd(1.6, 3.4));   // (FXK: the sub's size, set round her effects)
+    spawnSpray(x, sy - wwRnd(1, 6), out * wwRnd(15, 70) * (0.4 + edge), wwRnd(0.35, 0.8));
+    spawnFoam(x + out * wwRnd(0, 20) * FXK, wwRnd(1.6, 3.4));   // (FXK: the sub's size, set round her effects)
   }
 }
 function stepWclouds(dt) {
@@ -7725,11 +8003,11 @@ function stepWclouds(dt) {
     const sy = surfaceY(w.x);
     if (w.water) {
       // underwater: it can't rise out of the sea; at the top it spreads and breaks into foam
-      if (w.y < sy + w.r * 0.45) { w.y = sy + w.r * 0.45; w.vy = 0; w.vx *= 1 + dt; w.age += dt; if (Math.random() < dt * 6) spawnFoam(w.x + rnd(-w.r, w.r), rnd(1.4, 3)); }
+      if (w.y < sy + w.r * 0.45) { w.y = sy + w.r * 0.45; w.vy = 0; w.vx *= 1 + dt; w.age += dt; if (wwR() < dt * 6) spawnFoam(w.x + wwRnd(-w.r, w.r), wwRnd(1.4, 3)); }
     } else if (w.y > sy - w.r * 0.25) {
       // above it: it falls back, slides off along the surface and turns to foam
       w.y = sy - w.r * 0.25; w.vy = Math.min(w.vy, 0); w.vx *= 1 + 0.6 * dt;
-      if (Math.random() < dt * 8) spawnFoam(w.x + rnd(-w.r, w.r), rnd(1.6, 3.2));
+      if (wwR() < dt * 8) spawnFoam(w.x + wwRnd(-w.r, w.r), wwRnd(1.6, 3.2));
     }
   }
 }
@@ -11745,7 +12023,7 @@ function kickDust(x, hl, power) {
 function shock(x, y, power, faint, len = 0) {
   disturb(x, (faint ? 0.25 : 0.7) * power, 70 + 120 * power);       // (the water bends round it: distortWater)
   if (shocks.length > 40) shocks.shift();
-  shocks.push({ x, y: Math.max(y, WATER_Y - 2), r: 4, max: 70 + 130 * power, speed: 75 + 45 * power, life: 0, power, faint: !!faint, seed: Math.random() * 100, len });
+  shocks.push({ x, y: Math.max(y, WATER_Y - 2), r: 4, max: 70 + 130 * power, speed: 75 + 45 * power, life: 0, power, faint: !!faint, seed: ptR() * 100, len });
 }
 function scareFish(x, y, r) { for (const s of schools) if (Math.abs(s.x - x) < r && Math.abs(s.y - y) < r) { s.flee = 2.5; s.dir = s.x < x ? -1 : 1; } }
 on('splash', e => scareFish(e.x, e.y + 40, 160), 'fish', 10);   // (engine stage 3: a splash - 36-zz-events.js)
@@ -11802,8 +12080,8 @@ const weedBits = [], WEED_KEEP = 140;
 function weedBit(p, y, len, vx, kick = 0) {
   if (SIM_ONLY || fxHidden(p.x) || len < 2) return;
   const kelp = p.kind === 'kelp';
-  weedBits.push({ x: p.x, y, len, kelp, n: kelp ? 1 + (p.n > 4 ? 1 : 0) : p.n || 3, ph: (p.ph || 0) + Math.random() * 6, vx: vx * rnd(0.25, 0.45) + rnd(-6, 6) + rnd(-1, 1) * kick * 0.6,
-    vy: -rnd(2, 8) - kick * rnd(0.3, 0.7), a: (p.bend || 0) * 0.04, w: Math.sign(vx || rnd(-1, 1) || 1) * rnd(0.25, 0.6), lie: (Math.sign(vx || rnd(-1, 1)) || 1) * rnd(1.25, 1.5), rest: false, t: 0 });
+  weedBits.push({ x: p.x, y, len, kelp, n: kelp ? 1 + (p.n > 4 ? 1 : 0) : p.n || 3, ph: (p.ph || 0) + ptR() * 6, vx: vx * ptRnd(0.25, 0.45) + ptRnd(-6, 6) + ptRnd(-1, 1) * kick * 0.6,
+    vy: -ptRnd(2, 8) - kick * ptRnd(0.3, 0.7), a: (p.bend || 0) * 0.04, w: Math.sign(vx || ptRnd(-1, 1) || 1) * ptRnd(0.25, 0.6), lie: (Math.sign(vx || ptRnd(-1, 1)) || 1) * ptRnd(1.25, 1.5), rest: false, t: 0 });
   if (weedBits.length > WEED_KEEP) weedBits.shift();               // (the oldest on the bottom go first)
 }
 // floaty (user Oct 27: "the seaweed when destroyed should be 'floaty' as it falls to the ground, not stiff"): it sinks
@@ -11819,7 +12097,7 @@ function stepWeedBits(dt) {
     b.x += b.vx * dt; b.y += b.vy * dt;
     // its lowest end on the sand: it lies there
     const ex = b.x + Math.sin(b.a) * b.len, ey = b.y - Math.cos(b.a) * b.len, low = Math.max(b.y - seabedY(b.x), ey - seabedY(ex));
-    if (low >= -1) { b.y -= low + 1; b.rest = true; b.vx = b.vy = b.w = 0; if (Math.random() < 0.5) kickDust(b.x, 4, 0.2); }
+    if (low >= -1) { b.y -= low + 1; b.rest = true; b.vx = b.vy = b.w = 0; if (ptR() < 0.5) kickDust(b.x, 4, 0.2); }
   }
 }
 
@@ -12487,7 +12765,7 @@ function schedStep(S, o, x, dt, fn, pin) {
   return true;
 }
 // a frame's start for the perf panel's counts
-function schedFrame() { REG.frame++; for (const k in SYSTEMS) { const S = SYSTEMS[k]; S.n0 = S.n.slice(); S.n[0] = S.n[1] = S.n[2] = 0; S.ms += ((S.t || 0) - S.ms) * 0.05; S.t = 0; } }
+function schedFrame(adv = true) { if (adv) REG.frame++; for (const k in SYSTEMS) { const S = SYSTEMS[k]; S.n0 = S.n.slice(); S.n[0] = S.n[1] = S.n[2] = 0; S.ms += ((S.t || 0) - S.ms) * 0.05; S.t = 0; } }
 // (stage 7: each system's time a frame against its budget - a system's step adds to S.t: const t0 = performance.now(); ...; S.t += performance.now() - t0)
 // (engine stage 7) every part of a frame against its budget, ms a frame on the user's PC (the plan's frame budget: drawing and
 // the HUD about 10 ms on the main thread, the simulation about 10, the network about 1 - set from stage 0's measurements and
@@ -12596,6 +12874,7 @@ function tblMerge(dst, src, depth = 12) {
   }
 }
 function tablesLoad(S) {
+  SW.gen++;                                                 // (the simulation worker, 00-sw-boot.js: a loaded game - the worker takes it)
   const byU = new Map(), plan = [];
   // first every thing matched or made (so a reference to any of them can be found), then each filled in
   for (const k in S.tables) {
@@ -13441,6 +13720,509 @@ function eachWreckIn(a, b, f) {
 }
 on('tableMove', wixDirty, 'wrecks');
 
+/* THE SIMULATION WORKER'S SNAPSHOTS (sim-worker branch, docs/sim-worker-design.md section 3). The worker (the game's host,
+   00-sw-boot.js) sends the page what changed in the tables since its last snapshot; the page (the local guest) folds it into
+   its own live things, which it then draws. Version 0, to prove the same game first: each row as full-precision JSON
+   (tblPlain, as a save), sent whole when its text changed; a table's order when it changed; rows gone by id. The page's own
+   tables (SW_LOCAL: its camera; the smoke's air) are never sent. Rows are matched by id; a row the page doesn't know yet
+   takes the page's own thing at the same place in the list if it isn't matched yet and is of the same kind (the page built
+   the same world), else a fresh one (the table's make) - tablesLoad's rule. Typed columns per table come next (design: the
+   per-row text costs time at frame rate - SWS.ms says how much). */
+const SW_LOCAL = new Set(['camera', 'smokeAir']);
+/* The busy effect lists go as COLUMNS instead (design section 3, lane 2): every row of them changes every tick, so a delta
+   buys nothing and the per-row text is the cost. Whole each time, field by field: numbers and booleans in one Float64Array
+   (exact), strings as ids into the message's own list, anything else (an array, a small object) as plain data beside them.
+   The page refills its own list's objects in place, by position (they're effects: nothing refers to one by id) */
+const SW_COLS = new Set(['spray', 'bubbles', 'foam', 'wakes', 'sparks', 'flames', 'embers', 'flashes', 'welds', 'rings', 'debris', 'dust', 'grains', 'ash',
+  'streaks', 'jets', 'msplashes', 'leaves', 'earthGrains', 'fwBits', 'hoseDrops', 'hoseSteams', 'seaBlood', 'seaGore', 'birdFeathers', 'birdGore', 'crewBlood', 'planeWisps', 'iceBits', 'rocketTrail',
+  'smoke', 'trails', 'planeTrails', 'spikeBursts', 'seaSchools', 'msPings']);
+// lists the game keeps outside the tables that the page draws (spawned by the game's steps, so only the worker has them): sent
+// as columns the same way
+const SW_EXTRA = { wclouds: () => wclouds, blastRings: () => blastRings, gasBalls: () => gasBalls, shocks: () => shocks, airStreaks: () => airStreaks, landWake: () => landWake };
+const SW_EXTRA_T = { skip: TBL_SKIP, depth: 4, after: null };
+/* The page only DRAWS these lists in live mode (it never steps them: design section 2), so a live snapshot carries each row's
+   DRAWN fields only - the ones the drawing reads, listed here per list from the draw functions named; the velocities, timers
+   and seeds the step uses stay in the worker. A full snapshot (the gate's mirror, a resync) carries every field. A list not
+   named here goes whole (everything of it is drawn: streaks, trails (p1 p2 thin root next), planeWisps, msPings, msplashes,
+   airStreaks, landWake). References drawing follows stay in: a puff's prev, a trail's next (same-list {ri}); the smoke's
+   after hook reads st, which the table skips anyway. 'a.b' names a field of the small objects inside the list field a (the
+   fish of a school: swNestOf). When in doubt a field is kept. */
+const SW_DRAW = {
+  // 35-particles.js' lists: 43-render-objects.js (drawBubbles, drawFoamBits + drawBigFoam, buildWakeField, drawDebris via
+  // 45-draw-vehicles.js, drawShocks, drawBlood), 47-render-overlays.js (the embers, welds, flashes, rings, drawSparks, drawAsh,
+  // the flames' glow), 46-smoke-fire-draw.js drawFire + sky/21-smoke.js fireLights (flames), 45-draw-vehicles.js drawDust
+  // (dust, grains), 34-splashes-sinking.js drawSplashes (spray), 50-land-firewater.js drawHoseCollision (flames)
+  spray: ['x', 'y', 's'],
+  bubbles: ['x', 'y', 'r'],
+  foam: ['x', 's', 'k', 'life', 'max', 'seed'],
+  wakes: ['x', 'life', 'max', 'w', 'k'],
+  sparks: ['x', 'y', 'px', 'py', 'life', 'max'],
+  flames: ['x', 'y', 'r', 'heat', 'behind', 'src'],
+  embers: ['x', 'y', 'life', 'max'],
+  flashes: ['x', 'y', 'r', 'life', 'max'],
+  welds: ['x', 'y', 'r', 'life', 'max'],
+  rings: ['x', 'y', 'r', 'life'],
+  debris: ['x', 'y', 'a', 'sw', 'sh', 'col', 'state'],
+  dust: ['x', 'y', 'r', 'age', 'life'],
+  grains: ['x', 'y', 'life'],
+  ash: ['x', 'y', 'life', 'ph', 'big'],
+  // 34-splashes-sinking.js drawJets
+  jets: ['x', 'v0', 'w', 'base', 't', 'lean', 'seed'],
+  // 50-land-units.js drawLeaves, drawEarthGrains, drawSpikeBursts (P is rebuilt by the table's after from mat)
+  leaves: ['x', 'y', 't', 'life', 'c', 'blade', 'ph'],
+  earthGrains: ['x', 'y', 't', 'life', 'c', 'light', 'big', 'rest'],
+  spikeBursts: ['x', 't', 'spikes', 'mat'],
+  // 50-land-fireworks.js drawFireworks (the bits); 50-land-firewater.js drawHose (drops; the steams are never drawn - they spawn smoke)
+  fwBits: ['x', 'y', 't', 'life', 'col', 'ember'],
+  hoseDrops: ['x', 'y', 'vx', 'vy', 'age', 'br', 'sp'],
+  hoseSteams: ['x', 'y'],
+  // 35-zz-sea-kills.js drawSeaKills; 37-birds.js drawBirds (feathers, gore); 45-draw-vehicles.js drawBlood (the crew's)
+  seaBlood: ['x', 'y', 'r', 't', 'life', 'sd', 'lob'],
+  seaGore: ['x', 'y', 's', 't', 'life', 'dark'],
+  birdFeathers: ['x', 'y', 'dark'],
+  birdGore: ['x', 'y', 'life', 'max'],
+  crewBlood: ['x', 'y', 'age', 'state', 'len'],
+  // 29-plane.js drawPlanesAir (the trails' points and colour), drawIceBits
+  planeTrails: ['pts', 'col'],
+  iceBits: ['x', 'y', 'life', 'max', 's', 'tw'],
+  // sky/21-smoke.js gatherSmokeNew + famOf + smgSend (the puffs and the puff before each: prev; h is the page's own number),
+  // 50-land-space.js rocketPuffR (the rocket's puffs)
+  smoke: ['x', 'y', 'r', 'age', 'life', 'alpha', 'dark', 'mist', 'quick', 'fam', 'fadeFrom', 'keep', 'kill', 'lonely', 'link', 'lumpy', 'prev', 'src', 'dead', 'sq'],   // (h: the page's own, kept by sq - SW_KEEP)
+  rocketTrail: ['x', 'y', 'r', 'age', 'life', 'k', 'ground', 'w', 'h'],
+  // 44-shadows-seafloor.js drawSeaLife (each fish of a school; its x, y are undefined until its first step)
+  seaSchools: ['type', 'x', 'y', 'dir', 'fish.x', 'fish.y', 'fish.dx', 'fish.dy', 'fish.face'],
+  // SW_EXTRA: 26-white-water.js drawWclouds, drawGasBalls; 47-render-overlays.js (blastRings: the distortion's rings); 43-render-objects.js drawShocks
+  wclouds: ['x', 'y', 'r', 'age', 'life', 'alpha', 'seed', 'water'],
+  gasBalls: ['x', 'y', 'r', 't', 'seed'],
+  blastRings: ['x', 'y', 'r', 'max', 'amp'],
+  shocks: ['x', 'y', 'r', 'max', 'len', 'faint', 'seed', 'life'],
+};
+// each list's drawn fields as sets: top (the row's fields) and sub (per list field, the fields of the small objects in it)
+const SW_DRAWK = {};
+for (const k in SW_DRAW) {
+  const top = new Set(), sub = {};
+  for (const e of SW_DRAW[k]) { const d = e.indexOf('.'); if (d < 0) top.add(e); else { top.add(e.slice(0, d)); (sub[e.slice(0, d)] || (sub[e.slice(0, d)] = new Set())).add(e.slice(d + 1)); } }
+  SW_DRAWK[k] = { top: [...top], sub };
+}
+// (5: null - folded into a number, boolean or string column as a mask of its own, z; a column of nulls alone stays plain data)
+const swKindOf = v => { const ty = typeof v; return ty === 'number' ? 1 : ty === 'boolean' ? 4 : ty === 'string' ? 2 : ty === 'undefined' || ty === 'function' ? 0 : v === null ? 5 : 3; };
+const swKindMix = (was, kind) => was == null || was === kind ? kind : was === 5 && kind !== 3 ? kind : kind === 5 && was !== 3 ? was : 3;
+// the fields of the things in `arr` and each one's kind (1 number, 4 boolean, 2 string, 3 other or mixed); only: these fields
+function swKeysOf(arr, skip, only) {
+  const n = arr.length, keys = new Map();
+  for (let i = 0; i < n; i++) {
+    const o = arr[i]; if (!o) continue;
+    if (only) for (const k of only) { const kind = swKindOf(o[k]); if (!kind) continue; keys.set(k, swKindMix(keys.get(k), kind)); }
+    else for (const k in o) {
+      if (skip.has(k)) continue;
+      const kind = swKindOf(o[k]);
+      if (!kind) continue;
+      keys.set(k, swKindMix(keys.get(k), kind));
+    }
+  }
+  return keys;
+}
+/* Values the drawing reads through a thing the table skips (a puff's stream, st): worked out per row on the worker as number
+   columns of their own, and put back on the page as the drawing reads them. A funnel's newest puff is drawn joined down to the
+   funnel's mouth (sky/21-smoke.js: s.st.last === s && s.st.head) - its head goes as hd0..hd2, and the page gives that puff a
+   stream of its own { last: it, head } */
+const SW_DV3 = [0, 0, 0];
+const SW_DERIVE = {
+  smoke: { keys: ['hd0', 'hd1', 'hd2'], own: ['st'], get: (s, k) => { const st = s.st, h = st && st.last === s && st.head; return h ? h[k] : undefined; },
+    put: (s, v) => { if (v[0] === undefined) s.st = undefined; else if (s.st && s.st.last === s) { const h = s.st.head; h[0] = v[0]; h[1] = v[1]; h[2] = v[2]; } else s.st = { last: s, head: v }; } },
+};
+// draw: the list's drawn fields (SW_DRAWK) - a live snapshot; null: every field
+function swColsOf(t, arr, strs, sIdx, bufs, draw) {
+  const n = arr.length, keys = swKeysOf(arr, t.skip, draw ? draw.top : null);
+  const C = { n, k: [], d: [] };
+  for (const [k, kind] of keys) {
+    if (kind === 1 || kind === 4 || kind === 2) { C.k.push(k); C.d.push(swColOf(arr, k, kind, strs, sIdx, bufs)); continue; }
+    const nest = swNestOf(arr, k, draw ? draw.sub[k] : null, strs, sIdx, bufs);
+    if (nest) { C.k.push(k); C.d.push({ nest }); continue; }
+    // (a thing of the same list - a puff's prev, a trail's next - goes as its place in the list; another table's thing as its id)
+    const idx = C.idx || (C.idx = new Map(arr.map((o, i) => [o, i])));
+    // (a field that is only ever a thing of this list, null or absent: one Int32 column of places, -1 none, -2 null)
+    { let ok = true; const ri = new Int32Array(n);
+      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (v === undefined) ri[i] = -1; else if (v === null) ri[i] = -2; else if (v && typeof v === 'object' && idx.has(v)) ri[i] = idx.get(v); else { ok = false; break; } }
+      if (ok) { bufs.push(ri.buffer); C.k.push(k); C.d.push({ ri }); continue; } }
+    const vals = new Array(n);
+    for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; vals[i] = v === undefined ? undefined : v && typeof v === 'object' && idx.has(v) ? { ri: idx.get(v) } : tblPlain(v, t.depth, t.skip, false); }
+    C.k.push(k); C.d.push({ j: vals });
+  }
+  delete C.idx;
+  const dv = t.name && SW_DERIVE[t.name];
+  if (dv) dv.keys.forEach((k, j) => {
+    const col = new Float64Array(n); let miss = null;
+    for (let i = 0; i < n; i++) { const v = arr[i] ? dv.get(arr[i], j) : undefined; if (typeof v === 'number') col[i] = v; else (miss || (miss = new Uint8Array(n)))[i] = 1; }
+    bufs.push(col.buffer); if (miss) bufs.push(miss.buffer);
+    C.k.push(k); C.d.push({ f: col, m: miss, dv: 1 });
+  });
+  return C;
+}
+// one field of the things in `arr` as a column: numbers and booleans in a Float64Array (m: where a thing hasn't it), strings as
+// ids into strs (-1: none)
+function swColOf(arr, k, kind, strs, sIdx, bufs) {
+  const n = arr.length;
+  if (kind === 2) {
+    const col = new Int32Array(n);   // (-1 absent, -2 null)
+    for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v !== 'string') { col[i] = v === null ? -2 : -1; continue; } let id = sIdx.get(v); if (id == null) { id = strs.length; strs.push(v); sIdx.set(v, id); } col[i] = id; }
+    bufs.push(col.buffer);
+    return { s: col };
+  }
+  const col = new Float64Array(n); let miss = null, nul = null;
+  for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v === 'number') col[i] = v; else if (typeof v === 'boolean') col[i] = v ? 1 : 0; else if (v === null) (nul || (nul = new Uint8Array(n)))[i] = 1; else { (miss || (miss = new Uint8Array(n)))[i] = 1; } }
+  bufs.push(col.buffer); if (miss) bufs.push(miss.buffer); if (nul) bufs.push(nul.buffer);
+  return kind === 4 ? { b: col, m: miss, z: nul } : { f: col, m: miss, z: nul };
+}
+/* A list field whose values are small plain objects of plain values (a trail piece's two points), or arrays of them (a school's
+   fish, a mine splash's spires) goes as FLAT COLUMNS over all those objects in a row - c: how many each thing has (-1: the field
+   is absent), obj: one object each rather than an array - instead of one plain copy per thing (the fish were the snapshot's
+   biggest part as data). Anything else in them (a nested array, a thing of a table, a typed array, null) and the field goes as
+   plain data as before (null: not that). only: the objects' fields sent (SW_DRAW's 'a.b' names); else all of them */
+function swNestOf(arr, k, only, strs, sIdx, bufs) {
+  const n = arr.length, items = [], counts = new Int32Array(n);
+  let obj = -1;                                                       // (-1 not seen yet, 1 objects, 0 arrays)
+  for (let i = 0; i < n; i++) {
+    const o = arr[i], v = o ? o[k] : undefined;
+    if (v === undefined) { counts[i] = -1; continue; }
+    if (!v || typeof v !== 'object' || ArrayBuffer.isView(v) || v._uid != null) return null;
+    const isA = Array.isArray(v);
+    if (obj < 0) obj = isA ? 0 : 1; else if (obj === (isA ? 1 : 0)) return null;
+    if (isA) { for (const e of v) { if (!e || typeof e !== 'object' || Array.isArray(e) || ArrayBuffer.isView(e) || e._uid != null) return null; items.push(e); } counts[i] = v.length; }
+    else { items.push(v); counts[i] = 1; }
+  }
+  if (obj < 0 || !items.length) return null;
+  const keys = swKeysOf(items, TBL_SKIP, only);
+  for (const kind of keys.values()) if (kind === 3) return null;
+  const N = { c: counts, obj: obj === 1, k: [], d: [] };
+  for (const [kk, kind] of keys) { N.k.push(kk); N.d.push(swColOf(items, kk, kind, strs, sIdx, bufs)); }
+  bufs.push(counts.buffer);
+  return N;
+}
+// (the page) one thing's field of a column, put: a number, a flag, a string or nothing
+// (a field a row hasn't: set to undefined, never deleted - the drawing reads it the same, and the row keeps its shape: see swColsInto)
+function swColPut(o, k, d, i, strs) {
+  if (d.m && d.m[i]) { o[k] = undefined; return; }
+  if (d.z && d.z[i]) { o[k] = null; return; }
+  if (d.f) o[k] = d.f[i];
+  else if (d.b) o[k] = d.b[i] !== 0;
+  else if (d.s) { const id = d.s[i]; o[k] = id === -2 ? null : id < 0 ? undefined : strs[id]; }
+  else if (d.ri) { const r = d.ri[i]; o[k] = r === -2 ? null : undefined; }   // (a place: put after every row exists, below)
+}
+// (the page) a thing's nested objects refilled in place from the flat columns, from item `at` on; returns the next item
+function swNestInto(o, k, N, i, at, strs) {
+  const cnt = N.c[i];
+  if (cnt < 0) { delete o[k]; return at; }
+  const K = N.k, D = N.d, has = new Set(K);
+  const fill = e => { for (const f in e) if (!has.has(f)) delete e[f]; for (let c = 0; c < K.length; c++) swColPut(e, K[c], D[c], at, strs); at++; return e; };
+  if (N.obj) { const cur = o[k]; o[k] = fill(cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}); return at; }
+  const a = Array.isArray(o[k]) ? o[k] : (o[k] = []);
+  if (a.length > cnt) a.length = cnt;
+  for (let j = 0; j < cnt; j++) { const cur = a[j]; a[j] = fill(cur && typeof cur === 'object' ? cur : {}); }
+  return at;
+}
+// (the page) a list refilled from its columns
+// lists whose rows the page matches by a number of their own rather than by place (the rows shift as old ones die): each incoming
+// row takes the page's thing with the same number, so what the page's drawing gives a thing itself stays on it - a puff's h,
+// rolled when it's first drawn (sky/21-smoke.js) - and keeps: a puff by its spawn number (sq)
+const SW_MATCH = { smoke: { by: 'sq', keys: ['h'] } };
+const SW_KEEP = SW_MATCH;
+const swColsSig = new Map();                                         // (list -> its columns last refill: a field is cleaned off only when they change)
+function swColsInto(arr, C, strs, name) {
+  const n = C.n, K = C.k, D = C.d, has = new Set(K), at = new Int32Array(K.length);   // (at: each nested column's next item)
+  // (the page's own fields of a row - kept values, derived things - are never deleted: a field deleted and put back every frame
+  // turns the thing into a slow dictionary object for the drawing too; they're overwritten in place instead)
+  { const kp = name && SW_KEEP[name], dv0 = name && SW_DERIVE[name]; if (kp) for (const k of kp.keys) has.add(k); if (dv0) { for (const k of dv0.own) has.add(k); for (const k of dv0.keys) has.add(k); } }
+  const keep = name && SW_MATCH[name], kby = keep ? K.indexOf(keep.by) : -1, kd = kby >= 0 ? D[kby] : null;
+  const dvp = name && SW_DERIVE[name] && K.includes(SW_DERIVE[name].keys[0]) ? SW_DERIVE[name] : null;
+  // (a field is cleaned off a reused thing only when this list's columns changed since its last refill - a full snapshot after
+  // live ones, or back: otherwise every thing already has exactly these fields, and walking them all is the refill's cost)
+  const sig = K.join(','), clean = swColsSig.get(arr) !== sig; swColsSig.set(arr, sig);
+  // (matched by number: the page's things by that number first, then each incoming row takes its own or a new one)
+  let byN = null;
+  if (kd && kd.f) { byN = new Map(); for (const o of arr) if (o && typeof o === 'object') byN.set(o[keep.by], o); }
+  if (arr.length > n) arr.length = n;
+  // (first the things, each in its place: its own by number, or a new one with every field there from the start, in one order -
+  // one shape for them all)
+  for (let i = 0; i < n; i++) {
+    let o;
+    if (byN) { o = byN.get(kd.f[i]); if (!o) { o = {}; for (const k of K) o[k] = undefined; for (const kk of keep.keys) o[kk] = undefined; } arr[i] = o; }
+    else { o = arr[i]; if (!o || typeof o !== 'object') { o = arr[i] = {}; for (const k of K) o[k] = undefined; } }
+    if (clean) for (const k in o) if (!has.has(k)) delete o[k];
+  }
+  // (then the fields, a column at a time: one field written down the whole list, the same kind each time)
+  for (let c = 0; c < K.length; c++) {
+    const d = D[c], k = K[c], m = d.m, z = d.z;
+    if (d.f) { const f = d.f; if (!m && !z) for (let i = 0; i < n; i++) arr[i][k] = f[i]; else for (let i = 0; i < n; i++) arr[i][k] = m && m[i] ? undefined : z && z[i] ? null : f[i]; }
+    else if (d.b) { const f = d.b; for (let i = 0; i < n; i++) arr[i][k] = m && m[i] ? undefined : z && z[i] ? null : f[i] !== 0; }
+    else if (d.j) { const j = d.j; for (let i = 0; i < n; i++) arr[i][k] = j[i]; }
+    else if (d.nest) { let at = 0; for (let i = 0; i < n; i++) at = swNestInto(arr[i], k, d.nest, i, at, strs); }
+    else for (let i = 0; i < n; i++) swColPut(arr[i], k, d, i, strs);
+  }
+  if (dvp) for (let i = 0; i < n; i++) { const o = arr[i], v = SW_DV3; for (let j = 0; j < dvp.keys.length; j++) v[j] = o[dvp.keys[j]]; dvp.put(o, v[0] === undefined ? v : v.slice()); }
+  // places in the list and ids back into things
+  for (let c = 0; c < K.length; c++) {
+    const d = D[c], k = K[c];
+    if (d.ri) { for (let i = 0; i < n; i++) { const r = d.ri[i]; if (r >= 0) arr[i][k] = arr[r] || null; } continue; }
+    if (!d.j) continue;
+    for (let i = 0; i < n; i++) {
+      const v = d.j[i]; if (!v || typeof v !== 'object') continue;
+      if (v.ri != null && Object.keys(v).length === 1) arr[i][k] = arr[v.ri] || null;
+      else arr[i][k] = tblRefs(v, SWM.byU, 6);
+    }
+  }
+}
+/* The sea's arrays (the water table, lane 3): copies of the typed arrays themselves, moved, instead of their base64 text. The
+   harbours' calm (the dockCalm table: calmA, and calmGoal while a fallen pier's shelter eases away - 09-sea-surface.js) go the
+   same way: its row's fields are the arrays as base64 text, 190 KB made and compared each snapshot; now only while it eases
+   (and the snapshot after, and a full one), as copies. The page rebuilds calmRuns from them (the table's after) */
+// (the page draws the sea from wh (simAt) and wv (simVelAt) near its views only - never wf, the forces, which only the step reads:
+// a live snapshot carries wh and wv as the slices under the views' spans (REG.spans, SW_MARGIN to spare) and no wf; a full one all three whole)
+function swArraysOf(bufs, full) {
+  const a = { stir: stirA.slice(), settleT: waterAct.t };
+  bufs.push(a.stir.buffer);
+  const sp = REG.spans;
+  if (full || !sp.length) { a.wh = wh.slice(); a.wv = wv.slice(); a.wf = wf.slice(); bufs.push(a.wh.buffer, a.wv.buffer, a.wf.buffer); }
+  else {
+    const cuts = [];
+    for (let i = 0; i < sp.length; i += 2) {
+      const i0 = clamp(Math.floor((sp[i] - SW_MARGIN) / DX), 0, N - 1), i1 = clamp(Math.ceil((sp[i + 1] + SW_MARGIN) / DX) + 1, 0, N);
+      if (i1 <= i0) continue;
+      const h = wh.slice(i0, i1), v = wv.slice(i0, i1); bufs.push(h.buffer, v.buffer); cuts.push({ i0, h, v });
+    }
+    a.cuts = cuts;
+  }
+  const easing = !!calmGoal;
+  if (calmA && (full || easing || SWS.calmWas)) {
+    a.calm = calmA.slice(); bufs.push(a.calm.buffer);
+    if (calmGoal) { a.goal = calmGoal.slice(); bufs.push(a.goal.buffer); } else a.goal = null;
+  }
+  SWS.calmWas = easing;
+  return a;
+}
+function swArraysInto(a) {
+  if (a.cuts) { for (const c of a.cuts) { if (c.i0 + c.h.length <= wh.length) { wh.set(c.h, c.i0); wv.set(c.v, c.i0); } } }
+  else {
+    if (a.wh.length === wh.length) wh.set(a.wh);
+    if (a.wv.length === wv.length) wv.set(a.wv);
+    if (a.wf.length === wf.length) wf.set(a.wf);
+  }
+  stirReady(); if (a.stir.length === stirA.length) stirA.set(a.stir);
+  if (typeof a.settleT === 'number') waterAct.t = a.settleT;
+  if (a.calm && calmA && a.calm.length === calmA.length) {
+    calmA.set(a.calm);
+    if (a.goal && a.goal.length === calmA.length) { if (!calmGoal || calmGoal.length !== calmA.length) calmGoal = new Float32Array(calmA.length); calmGoal.set(a.goal); } else calmGoal = null;
+    const t = TABLES.dockCalm; if (t && t.after) t.after(t.list());
+  }
+}
+// ---- the worker's side: what it last sent, per table (row id -> its text; the order as text)
+const SWS = { rows: {}, order: {}, ms: 0, bytes: 0, n: 0, by: {}, tms: {} };
+function swSnapReset() { SWS.rows = {}; SWS.order = {}; }
+/* Rows without text (main chat 18:50: "typed columns ... rather than reusing ntbSnapshot's JSON"). A row is walked the way tblPlain
+   walks it, into its LEAVES: each a key, its depth and kind (0 a plain value, 1 another thing - its id, 2 a small typed array,
+   3 an array, 4 an object: the last two only mark where a container starts) and a value. The worker keeps each row's last
+   leaves; next time, if the keys, depths and kinds are the same (the row's SHAPE), only the leaves whose value changed go - their
+   place in the row and the value, numbers in a Float64Array, a typed array (the dock's calm water, dockCalm) as a copy moved
+   with the message's buffers ({ tb }); else the row goes whole as text (new rows, and rows whose shape changed: a list grew, a
+   field came or went). The page keeps each row's paths from the whole text it got, and puts a changed leaf's value at its path. */
+const SWL = { K: [], L: [], V: [] };                                  // (the walk's scratch: keys, depth * 8 + kind, values)
+function swLeaves(o, depth, skip, lvl) {
+  const K = SWL.K, L = SWL.L, V = SWL.V, arr = Array.isArray(o);
+  for (const k in o) {
+    if (!arr && skip.has(k)) continue;
+    let v = o[k];
+    const key = arr ? +k : k, ty = typeof v;
+    if (ty === 'function' || v === undefined) { if (arr) { K.push(key); L.push(lvl * 8); V.push(null); } continue; }
+    if (v === null || ty !== 'object') {
+      if (ty === 'number' && !Number.isFinite(v)) v = v > 0 ? 1e300 : v < 0 ? -1e300 : 0;
+      K.push(key); L.push(lvl * 8); V.push(v); continue;
+    }
+    if (v instanceof HTMLCanvasElement || v instanceof HTMLImageElement || (typeof ImageData !== 'undefined' && v instanceof ImageData)) { if (arr) { K.push(key); L.push(lvl * 8); V.push(null); } continue; }
+    if (v._uid != null) { K.push(key); L.push(lvl * 8 + 1); V.push(v._uid); continue; }
+    if (ArrayBuffer.isView(v)) { if (v.length <= 4096) { K.push(key); L.push(lvl * 8 + 2); V.push(v); } else if (arr) { K.push(key); L.push(lvl * 8); V.push(null); } continue; }
+    if (depth - 1 <= 0 || v instanceof Map || v instanceof Set) { if (arr) { K.push(key); L.push(lvl * 8); V.push(null); } continue; }
+    const isA = Array.isArray(v);
+    K.push(key); L.push(lvl * 8 + (isA ? 3 : 4)); V.push(isA ? v.length : 0);
+    swLeaves(v, depth - 1, skip, lvl + 1);
+  }
+}
+// (the page) the same leaves from the plain data a whole row came as: { ref } is a thing, { ta, v } a typed array
+function swLeavesOfPlain(d, lvl, K, L) {
+  const arr = Array.isArray(d);
+  for (const k in d) {
+    const v = d[k], key = arr ? +k : k;
+    if (v === null || typeof v !== 'object') { K.push(key); L.push(lvl * 8); continue; }
+    const n = Object.keys(v).length;
+    if (v.ref != null && n === 1) { K.push(key); L.push(lvl * 8 + 1); continue; }
+    if (v.ta && Array.isArray(v.v) && n === 2) { K.push(key); L.push(lvl * 8 + 2); continue; }
+    const isA = Array.isArray(v);
+    K.push(key); L.push(lvl * 8 + (isA ? 3 : 4));
+    swLeavesOfPlain(v, lvl + 1, K, L);
+  }
+}
+// each leaf's path from the keys and depths
+function swPaths(K, L) {
+  const P = new Array(K.length), stack = [];
+  for (let i = 0; i < K.length; i++) { const lv = L[i] >> 3; stack.length = lv; P[i] = stack.concat(K[i]); if ((L[i] & 7) >= 3) stack.push(K[i]); }
+  return P;
+}
+const swSameTA = (a, b) => { if (!b || a.length !== b.length || a.constructor !== b.constructor) return false; for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return false; return true; };
+// (the land's props - plants, tufts, sand: thousands of rows, built the same on both sides and rarely changed - are looked at
+// an eighth a snapshot, as online looks at them a fifteenth: a change reaches the page within 8 snapshots. full: all of them,
+// for the checks)
+const SW_SLICE = 8;
+/* The effect columns carry only what the page can draw: the rows within one of its views' spans (REG.spans, the camera it sends
+   each frame), with SW_MARGIN world units to spare on each side plus the row's own size (r). A row without an x goes always.
+   A full snapshot (the gate's mirror, a resync) carries them all. The page's lists then hold the effects near its views and
+   nothing else - it draws them and never steps them (design section 2: nothing of the page's reads them back in live mode) */
+const SW_MARGIN = 600;
+function swInView(arr, full) {
+  const sp = REG.spans;
+  if (full || !sp.length) return arr;
+  const out = [];
+  for (const o of arr) {
+    if (!o) continue;
+    const x = o.x;
+    if (typeof x !== 'number') { out.push(o); continue; }
+    const r = (typeof o.r === 'number' ? Math.abs(o.r) : 0) + SW_MARGIN;
+    for (let i = 0; i < sp.length; i += 2) if (x + r >= sp[i] && x - r <= sp[i + 1]) { out.push(o); break; }
+  }
+  return out;
+}
+// full: every row (not only those in the page's views); drawn: the effect lists' drawn fields only (SW_DRAW) - a live snapshot
+function swSnapshot(full, drawn = !full) {
+  const t0 = performance.now();
+  for (const k in TABLES) if (!SW_LOCAL.has(k)) for (const o of TABLES[k].list()) if (o) uidOf(o);
+  const parts = [], cols = {}, strs = [], sIdx = new Map(), bufs = []; SWS.by = {}; SWS.leaf = {}; SWS.tms = {};
+  for (const k in TABLES) {
+    if (SW_LOCAL.has(k)) continue;
+    const tk = performance.now();
+    if (SW_COLS.has(k)) { cols[k] = swColsOf(TABLES[k], swInView(TABLES[k].list(), full), strs, sIdx, bufs, drawn ? SW_DRAWK[k] : null); SWS.tms[k] = performance.now() - tk; continue; }
+    if (k === 'water' || k === 'dockCalm') continue;                   // (their arrays: below, swArraysOf)
+    const t = TABLES[k], arr = t.list(), had = SWS.rows[k] || (SWS.rows[k] = new Map()), here = new Set(), ch = [];
+    const cu = [], ci = [], cv = [], co = [];                           // (changed leaves: the row, the leaf, the number or the other value)
+    let ord = '', ri = -1;
+    const sliced = !full && t.net === 'changes';
+    for (const o of arr) {
+      ri++;
+      if (!o) continue;
+      const u = o._uid; here.add(u); ord += u + ',';
+      if (sliced && (ri + SWS.n) % SW_SLICE && had.has(u)) continue;
+      const K = SWL.K, L = SWL.L, V = SWL.V; K.length = L.length = V.length = 0;
+      swLeaves(o, t.depth, t.skip, 0);
+      const c = had.get(u), n = K.length;
+      let same = !!c && c.K.length === n;
+      if (same) for (let i = 0; i < n; i++) if (c.K[i] !== K[i] || c.L[i] !== L[i]) { same = false; break; }
+      if (same) {
+        for (let i = 0; i < n; i++) {
+          const v = V[i], w = c.V[i], kind = L[i] & 7;
+          if (kind === 2 ? swSameTA(v, w) : Object.is(v, w)) continue;
+          cu.push(u); ci.push(i);
+          if (typeof v === 'number' && kind !== 1) { cv.push(v); co.push(undefined); }
+          else if (kind === 2) { cv.push(0); const a = v.slice(); bufs.push(a.buffer); co.push({ tb: a }); }   // (a typed array: a copy, moved with the buffers - never as text)
+          else { cv.push(0); co.push(v); }
+          c.V[i] = kind === 2 ? v.slice() : v;
+        }
+        continue;
+      }
+      const d = tblPlain(o, t.depth, t.skip, true);
+      if (o._sa != null) d.sa_ = o._sa; if (o._sk != null) d.sk_ = o._sk;
+      ch.push('[' + u + ',' + JSON.stringify(d) + ']');
+      had.set(u, { K: K.slice(), L: L.slice(), V: V.map((v, i) => (L[i] & 7) === 2 ? v.slice() : v) });
+    }
+    if (cu.length) {
+      const U = Int32Array.from(cu), I = Int32Array.from(ci), F = Float64Array.from(cv);
+      bufs.push(U.buffer, I.buffer, F.buffer);
+      (SWS.leaf || (SWS.leaf = {}))[k] = { u: U, i: I, f: F, o: co.some(x => x !== undefined) ? co : null };
+    }
+    SWS.tms[k] = performance.now() - tk;
+    const gone = []; for (const u of had.keys()) if (!here.has(u)) { had.delete(u); gone.push(u); }
+    const oc = SWS.order[k] !== ord; SWS.order[k] = ord;
+    if (!ch.length && !gone.length && !oc) { if (cu.length) SWS.by[k] = cu.length * 20; continue; }
+    const p = [];
+    if (ch.length) p.push('"c":[' + ch.join(',') + ']');
+    if (gone.length) p.push('"r":[' + gone.join(',') + ']');
+    if (oc) p.push('"o":[' + ord.slice(0, -1) + ']');
+    parts.push(JSON.stringify(k) + ':{' + p.join(',') + '}'); SWS.by[k] = parts[parts.length - 1].length;
+  }
+  const txt = '{"t":' + JSON.stringify(time) + ',"tick":' + REG.tick + ',"T":{' + parts.join(',') + '}}';
+  for (const k in SW_EXTRA) cols['+' + k] = swColsOf(SW_EXTRA_T, swInView(SW_EXTRA[k](), full), strs, sIdx, bufs, drawn ? SW_DRAWK[k] : null);
+  const arrays = swArraysOf(bufs, full);
+  let colB = 0; for (const b of bufs) colB += b.byteLength;
+  SWS.ms += (performance.now() - t0 - SWS.ms) * 0.1; SWS.bytes += (txt.length + colB - SWS.bytes) * 0.1; SWS.colBytes = colB; SWS.n++;
+  const by = Object.entries(SWS.by).sort((a, b) => b[1] - a[1]).slice(0, 8), slow = Object.entries(SWS.tms).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => [k, +v.toFixed(2)]);
+  return { s: txt, leaf: SWS.leaf, cols, strs, bufs, arrays, ms: performance.now() - t0, rowsB: txt.length, colB, by, slow };
+}
+// ---- the page's side: the worker's ids -> the page's things
+const SWM = { byU: new Map(), mine: new Set(), paths: new Map(), ms: 0, n: 0, t: 0, tick: 0, lost: 0 };
+function swMirrorReset() { SWM.byU = new Map(); SWM.mine = new Set(); SWM.paths = new Map(); }
+function swApply(snap) {
+  const t0 = performance.now(), m = JSON.parse(typeof snap === 'string' ? snap : snap.s), byU = SWM.byU, rows = [], touched = [];
+  const TP = SWM.tp || (SWM.tp = {}), lap = (k, t) => { const n = performance.now(); TP[k] = (TP[k] || 0) * 0.95 + (n - t) * 0.05; return n; }; let tq = performance.now();
+  for (const k in m.T) {
+    const t = TABLES[k]; if (!t) continue;
+    const D = m.T[k], arr = t.list(), pos = new Map();
+    if (D.o) D.o.forEach((u, i) => pos.set(u, i));
+    for (const [u, d] of D.c || []) {
+      let o = byU.get(u);
+      if (!o) {
+        const i = pos.has(u) ? pos.get(u) : -1, c = i >= 0 ? arr[i] : null;
+        if (c && !SWM.mine.has(c) && c.kind === d.kind) o = c;
+        else o = t.make(d);
+        byU.set(u, o); SWM.mine.add(o);
+      }
+      rows.push([t, o, d, u]);
+    }
+    if (D.r) for (const u of D.r) { const o = byU.get(u); byU.delete(u); SWM.paths.delete(u); if (o) SWM.mine.delete(o); }
+    touched.push([t, arr, D.o]);                                     // (its `after` runs on any change: a one-row table's row writes its globals there - restState's clock)
+  }
+  // filled once every new thing is known, so a reference to one made in this snapshot is found
+  for (const [t, o, d, u] of rows) {
+    const sa = d.sa_, sk = d.sk_; delete d.sa_; delete d.sk_;
+    { const K = [], L = []; swLeavesOfPlain(d, 0, K, L); SWM.paths.set(u, { P: swPaths(K, L), L }); }   // (its leaves' paths, for the changes to come)
+    tblRefs(d, byU, t.depth + 2);
+    for (const f in o) { const v = o[f]; if ((v === null || typeof v !== 'object') && typeof v !== 'function' && !(f in d) && f[0] !== '_' && !t.skip.has(f)) delete o[f]; }
+    tblMerge(o, d); o._uid = u;
+    if (sa != null) o._sa = sa; else delete o._sa;
+    if (sk != null) o._sk = sk; else delete o._sk;
+  }
+  tq = lap('rows', tq);
+  // the rows' changed leaves, each put at its path
+  if (snap.leaf) for (const k in snap.leaf) {
+    const C = snap.leaf[k], t = TABLES[k];
+    if (t && t.after && !(k in m.T)) touched.push([t, t.list(), null]);   // (its after runs too: a one-row table's globals)
+    for (let j = 0; j < C.u.length; j++) {
+      const u = C.u[j], o = byU.get(u), sh = SWM.paths.get(u);
+      if (!o || !sh) { SWM.lost++; continue; }
+      const i = C.i[j], path = sh.P[i], kind = sh.L[i] & 7;
+      let v = C.o && C.o[j] !== undefined ? C.o[j] : C.f[j];
+      if (kind === 1) v = byU.get(v) || null;
+      else if (kind === 2 && v && v.tb) v = v.tb;                   // (the moved copy, already of its kind)
+      else if (kind === 2 && v && v.ta) { const T = globalThis[v.ta]; v = T ? T.from(v.v) : v.v; }   // (a whole row's text: tblPlain's shape)
+      else if (kind >= 3) continue;
+      let c = o; for (let q = 0; q < path.length - 1 && c; q++) c = c[path[q]];
+      if (c && typeof c === 'object') c[path[path.length - 1]] = v; else SWM.lost++;
+    }
+  }
+  tq = lap('leaves', tq);
+  // the effect columns and the sea's arrays (after the rows: an effect may name a row's thing by its id)
+  if (snap.cols) for (const k in snap.cols) {
+    if (k[0] === '+') { const f = SW_EXTRA[k.slice(1)]; if (f) swColsInto(f(), snap.cols[k], snap.strs, k); continue; }
+    const t = TABLES[k]; if (!t) continue; const arr = t.list(); swColsInto(arr, snap.cols[k], snap.strs, k); if (t.after) t.after(arr);
+    tq = lap('c:' + k, tq);
+  }
+  if (snap.arrays) swArraysInto(snap.arrays);
+  tq = lap('arrays', tq);
+  for (const [t, arr, ord] of touched) {
+    if (ord) { arr.length = 0; for (const u of ord) { const o = byU.get(u); if (o) arr.push(o); } }
+    if (t.after) t.after(arr);
+  }
+  tq = lap('after', tq);
+  if (typeof m.t === 'number') time = m.t;
+  SWM.t = m.t; SWM.tick = m.tick; SWM.n++;
+  SWM.last = performance.now() - t0; SWM.ms += (SWM.last - SWM.ms) * 0.1;
+}
+
 /* ================================================================
    Birds: 100 for the whole round, no new ones. Seagulls sit on the
    dock rooftops and scatter when a ship pulls in; flocks of small
@@ -13985,6 +14767,7 @@ function rotorDownwash(x, ry, half, spin, vx, dt, grid = true) {
 // a source's own stream (or chain) of puffs, kept on the source: smStream(plane), smStream(ship, 'fire' + i)
 // the smoke's own random source (engine stage 3: never Math.random; its state saved with the tables)
 const smR = sysRng('smoke'), smRnd = (a, b) => a + (b - a) * smR();
+let smSq = 0;
 function smStream(o, k = '') { const m = o._smS || (o._smS = {}); return m[k] || (m[k] = { last: null }); }
 function spawnSmoke(x, y, o) {
   // (no budget, no thinning, user Oct 30: "no smoke or fire or debris limits" - every puff spawned, every puff lives its life)
@@ -13997,6 +14780,7 @@ function spawnSmoke(x, y, o) {
     hs: FXK,                                              // (real scale: how much taller its rise is - a ship's smoke as much as she's bigger)
     link: o.link || 60,
     seed: 1 + Math.floor(smR() * 6),                      // (the old renderer's puff pattern, 1-6: drawn from the smoke's own source here, not at draw time - 46-smoke-fire-draw.js)
+    sq: ++smSq,                                           // (its number in the order spawned: the simulation worker's page keeps a puff's own drawing values (h) by it - 36-zzzzz-sw-snap.js)
     steady: !!o.steady,                                   // (its lift held over its life and no slowing high up: it climbs all its life - stepSmoke)
     trailV: o.trailV || 0,                                // (Oct 29, V266: its ship's speed - the air never carries it forward faster than 0.4 of it, so a
                                                           // funnel's smoke always streams back from her, whatever the wind - user: "why is the smoke up if the boat is moving??")
@@ -14175,6 +14959,7 @@ function smSolve(G, dt, SPANS, W, SH, WY) {
 defTable('smoke', () => smoke, { net: false, skip: ['st'],
   after: arr => {
     const newest = new Map(), live = new Set(arr);
+    for (const s of arr) if (s.sq > smSq) smSq = s.sq;              // (the spawn count goes on from the highest loaded: both sides of the worker count alike)
     for (const s of arr) if (s.st) newest.set(s.st, s);
     for (const [st, s] of newest) if (!live.has(st.last)) st.last = s;
     if (SG.active && !SG.loaded) SG.active.fill(0);
@@ -46177,15 +46962,16 @@ function frameBody(now) {
   last = now; frameDt = dt || 1 / 60;
   const t0 = performance.now();
   buildBudget = 4;
-  schedFrame();
   netStep(); linkPump(dt);
   // (also holds still behind the 'turn the iPad' notice; and, user Oct 25 late, while the sliders are open or the eye
   // is shut - photo mode, 18-zz-photo)
   edModeSync();                                                      // (the GAME EDITOR open: held, as photo mode - 18-zz-photo)
   atmoSync();                                                        // (the air's layers from the SKY EDITOR - 50-land-space.js)
   const held_ = paused || !rotateEl.hidden || PHOTO.on || photoWorldFreeze();
+  schedFrame(!held_ && !SW.live);                                   // (the scheduler's frame count moves with the simulation only: a held page frame, or a guest's, isn't a frame of the game - Oct 30 gate)
   if (PHOTO.on) photoInput(dt); else pollPads(dt);
-  if (!held_) {
+  if (SW.live) swGuestFrame(dt, held_);                              // (the simulation worker steps the game; this page draws it - 00-sw-boot.js)
+  else if (!held_) {
     applyHeldKeys(dt);
     { const ut = performance.now(); cpuStep(dt); uLap('uCpu', ut); }
     stepStory(dt);
@@ -46202,15 +46988,17 @@ function frameBody(now) {
     stepVisuals(dt);
   }
   const t1 = performance.now();
-  if (!held_ && !SIM_ONLY) { stepSmoke(dt); stepTrails(dt); planesInSmoke(dt); }
+  if (!held_ && !SIM_ONLY && !SW.live) { stepSmoke(dt); stepTrails(dt); planesInSmoke(dt); }
   const t2 = performance.now();
   for (const gun of [...guns, ...tguns, ...hguns]) { gun.aimShow = Math.max(0, gun.aimShow - dt); gun.press = Math.max(0, gun.press - dt); }
   const q0 = performance.now();
   updateCamera(dt, false);
   const q1 = performance.now();
-  if (!SIM_ONLY && !NO_DRAW) render();
+  // (the simulation worker never draws or plays: 00-sw-boot.js. A frame not drawn still works out the light and the wind from
+  // the weather, E - render() does it first thing, and the game's next steps read it: a ship's drift, the waves - Oct 30 gate)
+  if (!SIM_ONLY && !NO_DRAW && !SW_IN_WORKER) render(); else computeEnv();
   const q2 = performance.now();
-  if (!SIM_ONLY) audioUpdate(dt);
+  if (!SIM_ONLY && !SW_IN_WORKER) audioUpdate(dt);
   const q3 = performance.now(), PQ = perf.parts || (perf.parts = {});
   FT.cam = q1 - q0; FT.renderAll = q2 - q1; FT.audio = q3 - q2;
   // each part's time over the whole frame (both views together), smoothed
@@ -46229,10 +47017,10 @@ async function start(data) {
   const keys = Object.keys(SRC);
   const loaded = await Promise.all(keys.map(k => loadImage(SRC[k])));
   keys.forEach((k, i) => { img[k] = loaded[i]; });
-  await loadBigArt();                               // (the big sprites at their final size: 04-zz-big-art.js)
+  if (!SW_IN_WORKER) await loadBigArt();          // (the big sprites at their final size: 04-zz-big-art.js; only drawn, so not in the sim worker)
   menuFromLive();                                   // (the menu starts from the saved settings)
   // opened from an invite link: straight into the friend's room (once everything's ready)
-  try { const j = new URLSearchParams(location.search).get('join'); if (j) setTimeout(() => linkJoin(j), 400); else setTimeout(roomOpen, 900); } catch (e) {}   // (every screen's game is a session: user Oct 24)
+  if (!SW_IN_WORKER) try { const j = new URLSearchParams(location.search).get('join'); if (j) setTimeout(() => linkJoin(j), 400); else setTimeout(roomOpen, 900); } catch (e) {}   // (every screen's game is a session: user Oct 24)
   computeEnv();
   prepareArt();
   prepCoasts();
@@ -46247,7 +47035,7 @@ async function start(data) {
   buildPuffs();
   resize(data);
   try { const q = new URLSearchParams(location.search).get('mode'); if (q === '0' || q === '1' || q === '2') { setMode(+q); BATCH_AUTO = false; } } catch (e) {}
-  if (GLR.on) { setMode(0); BATCH_AUTO = false; } else runFillTest();
+  if (GLR.on) { setMode(0); BATCH_AUTO = false; } else if (!SW_IN_WORKER) runFillTest();
   window.addEventListener('resize', () => resize());
   if (window.visualViewport) { window.visualViewport.addEventListener('resize', () => resize()); window.visualViewport.addEventListener('scroll', () => resize()); }
   window.addEventListener('scroll', () => { if (window.scrollY || window.scrollX) resize(); }, { passive: true });
@@ -46289,6 +47077,8 @@ async function start(data) {
   Object.assign(window.__game, { planesP: planes, perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}), budget: FRAME_BUDGET }) });
   Object.assign(window.__game, { smokeWorker: on => { if (on != null) { SMW.on = !!on; if (CAVE.worker && !CAVE.worker.fail) CAVE.worker.on = !!on; if (CAVE.buildWorker && !CAVE.buildWorker.fail) CAVE.buildWorker.on = !!on; } const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
+  // (the simulation worker, sim-worker branch: the tables and the snapshot's parts, for tools/sw-measure.mjs)
+  Object.assign(window.__game, { swT: { TABLES, RNGS, tablesSave, tablesLoad, tblPlain, uidOf, REG, planes, subs, ships, evStats, SW_DRAW, SW_COLS } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
   Object.assign(window.__game, { structs: () => LAND_STRUCTS, structDragTo: (i, u, y) => structDragTo(LAND_STRUCTS[i], u, y), structUp: old => { structSave(); structEdited(old); }, airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landShape: () => ({ pts: LAND_PTS, def: LAND_DEF, lakes: (land.lakes || []).map(L => [L[0], L[1], L.today ? 1 : 0]), ms: landEditMs, any: LSH.any }), landSet: P => { LAND_PTS = P; landSave(); landEdited(); }, landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landDragTo: (R, k, x, y) => landDragTo({ R, k }, x, y), landUp: () => { landSave(); landEdited(); }, landPtX: (R, u) => landPtX(R, u), landLock: x => landLock(x), landProfile0: x => landProfile0(x, land.R), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), setOwner: (i, v) => { const o = LAND_STRUCTS[i]; if (v === (o.R ? 1 : 0)) delete o.own; else o.own = v; }, islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x),
@@ -46302,6 +47092,16 @@ async function start(data) {
   // (group C, Oct 27: the storm's targets, the weather, PLAY AGAIN and the sky editor - tools/weathercheck.mjs)
   Object.assign(window.__game, { storm, deckYs, scr: () => ({ bh, S }), stepStorm: dt => stepStorm(dt), stormTargets: air => stormTargets(air).map(([x, y, sh]) => ({ x, y, ship: !!sh })), stormHitAll: air => { const T = stormTargets(air); for (const t of T) { strike(t[0], t[1], t[2], true); t[3](); } return T.length; },
     restartGame: () => restartGame(), weatherFog: (d, h) => weatherFog(d, h), secsTo: h => secsTo(h), skyAt: h => skyAt(h), rainRoof: x => rainRoof(x), towerTopAt: (tw, dx) => towerTopAt(tw, dx), craneTopAt: (cr, x) => craneTopAt(cr, x), hangarRoofAt: (d, x) => hangarRoofAt(d, x), reefFormsInfo: () => ({ forms: rockForms.length, w: rockForms.map(f => Math.round(f.x1 - f.x0)) }) });
+  // (the simulation worker, 00-sw-boot.js: in the worker the game now answers the page; on the page, ?simworker=1 starts it)
+  Object.assign(window.__game, { sw: { get applyParts() { return SWM.tp; }, get state() { return { on: SW.on, ready: SW.ready, fail: SW.fail, bootMs: Math.round(SW.bootMs) }; }, start: o => swStart(o), ask: (t, o) => swAsk(t, o),
+    run: code => swAsk('run', { code }), step: (n, dt) => swAsk('step', { n, dt: dt || SUBSTEP }), tables: () => swAsk('tables'), touch: () => swAsk('touch'),
+    // (the page as the worker's mirror: its snapshot folded in here - 36-zzzzz-sw-snap.js; reset: a whole one, ids matched afresh;
+    // drawn: the effect lists' drawn fields only, as a live snapshot carries them - SW_DRAW)
+    mirror: async (reset, drawn) => { if (reset) swMirrorReset(); const s = await swAsk('snap', { reset: !!reset, drawn: !!drawn }); swApply(s); return { rowsBytes: s.rowsB, colBytes: s.colB, encodeMs: +s.ms.toFixed(2), applyMs: +SWM.last.toFixed(2), tick: SWM.tick, by: s.by, slow: s.slow }; },
+    stats: async () => Object.assign({ applyMs: SWM.ms, applied: SWM.n, live: SW.live, got: SW.got, tickMs: SW.tickMs, behind: SW.behind }, await swAsk('stats')), pageTables: () => JSON.stringify(tablesSave()),
+    live: () => swGoLive(), act: (p, name, ...a) => act(p, name, ...a) } });
+  if (SW_IN_WORKER) { swHostReady(); return; }
+  if (SW_WANT) swStart();
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
 }
 
