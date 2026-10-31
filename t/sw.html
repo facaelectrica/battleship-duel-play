@@ -225,8 +225,8 @@ function swGuestFrame(dt, held) {
   } else SW.framesNoSnap++;
   if (!held) { applyHeldKeys(dt); stepHud(dt); }
   regionsTick();                                                     // (the regions' tiers by this page's views: what the drawing culls by)
-  const ctl = [];
-  for (let p = 0; p < 2; p++) { try { const s = ctlState(p); if (s) { const g = hasGuns(p) ? activeGun(p) : null; if (g) { s.e = g.elev; s.w = g.power; } } ctl.push(s); } catch (e) { ctl.push(null); } }
+  const ctl = [];                                                    // (unrounded: online rounds them for the wire)
+  for (let p = 0; p < 2; p++) { try { const s = ctlState(p); if (s) { const g = hasGuns(p) ? activeGun(p) : null; if (g) { s.e = g.elev; s.w = g.power; } if (s.z != null) s.z = subs[p].depthT; if (s.le != null) s.le = lampOf(p).elev; } ctl.push(s); } catch (e) { ctl.push(null); } }
   SW.worker.postMessage({ t: 'in', credit: 1, hold: !!held, acts: SW.acts.splice(0), ctl, cam: CAM_ROW.cam, ui: [!!ui.title, !!ui.menu, !!ui.settings] });
 }
 function swFromWorker(m) {
@@ -253,7 +253,7 @@ function swHostReady() {
       if (m.t === 'run') v = new Function('g', 'T', m.code)(window.__game, window.__game.swT);   // (tools: a few lines run in the worker)
       else if (m.t === 'step') { window.__game.stepQuiet(m.dt, m.n); v = { time, tick: REG.tick }; }
       else if (m.t === 'tables') v = JSON.stringify(tablesSave());
-      else if (m.t === 'load') { tablesLoad(JSON.parse(m.s)); v = true; }
+      else if (m.t === 'load') { tablesLoad(JSON.parse(m.s)); computeEnv(); v = true; }   // (E: worked out from the loaded weather, as the page's last frame did)
       else if (m.t === 'snap') { if (m.reset) swSnapReset(); v = swSnapshot(m.full !== false); }   // (36-zzzzz-sw-snap.js)
       else if (m.t === 'stats') v = { snapMs: SWS.ms, snapBytes: SWS.bytes, snaps: SWS.n, tick: REG.tick, time, hostTickMs: SWH.tickMs, hostBehind: SWH.behind, hostDone: SWH.done, hostSent: SWH.sent, hostHold: SWH.hold };
       else if (m.t === 'touch') v = self.__SW_TOUCH;
@@ -323,7 +323,7 @@ function swHostResync(m) {
   ctlPick[0] = m.ctl[0]; ctlPick[1] = m.ctl[1]; MODE = m.mode;
   if (m.ui) swHostUi(m.ui);
   applyMode(); builtViewW = 0; resize();
-  tablesLoad(JSON.parse(m.s)); swSnapReset();
+  tablesLoad(JSON.parse(m.s)); computeEnv(); swSnapReset();
   SWH.t0 = performance.now() - SWH.done * SUBSTEP * 1000;            // (no catching up on the time the rebuild took)
 }
 
@@ -3133,8 +3133,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 370;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 18:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 379;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 21:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6252,7 +6252,7 @@ function pollPads(dt) {
       // the menus are driven by any controller (padMenuPoll, below): here only what's held is noted, so nothing
       // fires or opens the moment you're back in the round
       st.start = btn(9); st.w1 = btn(0) || btn(7); st.pa = btn(0); st.w2 = btn(1) || btn(6); st.w3 = btn(2); st.w4 = btn(3);
-      st.lb = btn(4); st.rb = btn(5); st.l3 = btn(10); st.dl = st.dr = false;
+      st.lb = btn(4); st.rb = btn(5); st.l3 = btn(10); st.dl = (gp.axes[0] || 0) < -0.5; st.dr = (gp.axes[0] || 0) > 0.5;
     } else if (gp && v < HUMANS()) asSlot(v, p => {                // (each slot's pad plays as that slot: see asSlot)
       if (brains[p] || crew[p].mode === 'gone') return;
       const ax = i => { const a = gp.axes[i] || 0; return Math.abs(a) < 0.25 ? 0 : a; };
@@ -6260,12 +6260,17 @@ function pollPads(dt) {
       // left / right: in a vehicle, full ahead that way at once (it turns round), never a stop on the way - the
       // stick pressed in (L3) stops (user Oct 24). Not driving: they look around. The tower: see the sticks below
       const drives = m === 'ship' || m === 'sub' || m === 'plane' || m === 'sail' || m === 'tank' || m === 'heli' || m === 'civ';
-      if (drives && !ui.menu && msOf(p)) { want.left = lx < -0.5; want.right = lx > 0.5; st.dl = st.dr = false; }   // (the minisub: held, as the keys)
+      // (user Oct 30, 17:15 - the right side's sub "never left the hangar" after the explorer sub was lost: a stick still held
+      // from driving the explorer sub, which never tracked it, became a fresh push the moment the sub was picked - toward her
+      // hangar, that sends a boat on her way out back in) the stick is followed every frame whatever you're in - the
+      // explorer sub, looking round, the tower, a menu: one held over from before is no command to what you switch to; let
+      // go and pushed again, it is
+      const dl = edge('dl', lx < -0.5), dr = edge('dr', lx > 0.5);
+      if (drives && !ui.menu && msOf(p)) { want.left = lx < -0.5; want.right = lx > 0.5; }   // (the minisub: held, as the keys)
       else if (drives && !ui.menu) {
-        const dl = edge('dl', lx < -0.5), dr = edge('dr', lx > 0.5);
         if (dl === 1) { if (m === 'plane' || m === 'civ') act(p, 'planeDir', -1); else act(p, 'drive', 0); }
         if (dr === 1) { if (m === 'plane' || m === 'civ') act(p, 'planeDir', 1); else act(p, 'drive', 6); }
-      } else if (m !== 'tower') { want.left = lx < -0.5; want.right = lx > 0.5; st.dl = st.dr = false; }
+      } else if (m !== 'tower') { want.left = lx < -0.5; want.right = lx > 0.5; }
       // up / down: the sub's depth and the plane's climb
       if (m === 'sub' || m === 'plane' || m === 'heli' || m === 'civ' || looking(p)) { want.up = ly < -0.5; want.down = ly > 0.5; }   // (and looking around)
       if (edge('start', btn(9)) === 1) padKey('Escape', true);
@@ -6807,6 +6812,11 @@ const inHarbour = v => !!v.gate || (v.moored === true) || v.state === 'docked' |
 const GATE_V = 150, GATE_A = 90;          // how fast the harbour moves a boat, and how hard it starts and stops her
 // (real scale: as much faster as she's bigger, so a launch takes the time it did)
 const gateK = v => vKind(v) === 'ship' ? REAL.ship * 0.5 : REAL.sub;   // (the battleship half as fast through her harbour, user Oct 29)
+// how gently a boat run out through her gate eases to her own speed before she's handed over (a share of GATE_A)
+const GATE_EASE = 0.25;
+// a boat's own top speed at full ahead: where her engines' push meets the water's drag, a = b v + c v^2 (stepShip's
+// ACC_FWD, DRAG_L, DRAG_Q; stepSub's SUB_PUSH, SUB_DRAG_L, SUB_DRAG_Q)
+function ownTop(v) { const [a, b, c] = vKind(v) === 'ship' ? [ACC_FWD, DRAG_L, DRAG_Q] : [SUB_PUSH(), SUB_DRAG_L, SUB_DRAG_Q()]; return (-b + Math.sqrt(b * b + 4 * c * a)) / (2 * c); }
 function vKind(v) { return v === ships[v.id] ? 'ship' : 'sub'; }
 function gateOf(v) { const d = v.dock; return vKind(v) === 'ship' ? d.shipGate : d.subGate; }
 function berthOf(v) { const d = v.dock; return vKind(v) === 'ship' ? d.berth : d.subBerth; }
@@ -6835,8 +6845,14 @@ function stepGate(v, dt) {
     const inside = (v.x - hold) * d.dir > 0;
     if (canPass || !inside) {
       // out she goes, and keeps going: no easing to a stop at the pier's end, she's handed over under way
-      const s = -d.dir;
-      v.vx += clamp(s * GATE_V * gateK(v) - v.vx, -GATE_A * gateK(v) * dt * 1.5, GATE_A * gateK(v) * dt * 1.5);
+      // (user Oct 30: "my battleship is hitting something while in the ocean ... after leaving the dock and sailing for a
+      // little bit" - the gate ran her out at GATE_V x gateK, 600 for the battleship, 2.5x her own top speed, and let go at
+      // the pier's end: her own drag braked her to 240 within a second, a jolt like a ram) over the last of the run she
+      // eases down, GATE_EASE x her gate's push, to her own full-ahead speed (ownTop), so she's handed over at the speed
+      // she keeps
+      const s = -d.dir, k = gateK(v), left = Math.max(0, (outOf(v) - v.x) * s), top = ownTop(v);
+      const want = Math.min(GATE_V * k, Math.max(top, Math.sqrt(top * top + 2 * GATE_EASE * GATE_A * k * left)));
+      v.vx += clamp(s * want - v.vx, -GATE_A * k * dt * 1.5, GATE_A * k * dt * 1.5);
       v.x += v.vx * dt;
       if ((v.x - outOf(v)) * s >= 0) { v.x = outOf(v); gateDone(v, 'out'); }
     } else harbourMove(v, v.x, dt);
@@ -7196,7 +7212,9 @@ function vehSubRnd(a, b) { return a + (b - a) * vehSubR(); }
 // (user Oct 29: 1.5x as fast - SUB_SPD_K: the push that much harder and the water's square drag that much weaker, so she
 // reaches 1.5x the speed in the same time; SUB_DIVE_K: she goes down twice as fast)
 const SUB_DIVE_K = 2;   // (SUB_SPD_K: VTUNE.sub.speedK - 01-z-vehicle-tune.js)
-const SUB_DRAG_L = 0.42, SUB_VZ = 46;   // (Oct 25: a bit more arcade - quicker up, down and to a stop)
+const SUB_DRAG_L = 0.42, SUB_VZ = 46;
+// her engines' push at full and the water's square drag (VTUNE.sub.speedK, read live): stepSub, and her top speed (ownTop, 23-harbour-gates)
+const SUB_PUSH = () => 84 * VTUNE.sub.speedK, SUB_DRAG_Q = () => 0.0016 / VTUNE.sub.speedK;   // (Oct 25: a bit more arcade - quicker up, down and to a stop)
 function makeSub(id, d) {
   return {
     id, dock: d, facing: -d.dir, x: d.subBerth, y: SUB_GATE_Y, vx: 0, vy: 0, a: 0, throttle: 0, input: 0, dive: 0, depthT: SUB_GATE_Y,
@@ -7426,7 +7444,7 @@ function stepSub(sb, dt) {
   } else {
     const target = sb.turn ? 0 : dirWant === sb.facing ? order : 0;
     sb.throttle += clamp(target - sb.throttle, -3 * dt, 2.2 * dt);
-    sb.vx += (sb.throttle * (84 * VTUNE.sub.speedK) - SUB_DRAG_L * sb.vx - (0.0016 / VTUNE.sub.speedK) * sb.vx * Math.abs(sb.vx)) * dt;
+    sb.vx += (sb.throttle * SUB_PUSH() - SUB_DRAG_L * sb.vx - SUB_DRAG_Q() * sb.vx * Math.abs(sb.vx)) * dt;
     if (!target && !sb.turn) sb.vx *= 1 - Math.min(1, 1.1 * dt);         // (told to stop, she brakes: stops in a couple of seconds)
     if (sb.turn) sb.vx *= 1 - 1.4 * dt;
     // sent home she eases in to the end of her pier
@@ -8055,37 +8073,149 @@ function subArtPt(sb, col, row) {
   return [sb.x + lx * ca - ly * sa, sb.y + lx * sa + ly * ca];
 }
 const subLightOn = sb => sb && sb.light && (sb.state === 'out' || sb.state === 'docked') && !sb.parts;
-// (OPEN WORLD) the deep's dark opened along her beam too (drawAbyss), as the exploration sub's
-function subAbyssLights(out) {
+/* ---- every sub lamp, one list, one light (user Oct 30: "the sub lights should illuminate everything, including other
+   submarines"). The exploration subs out in the water and the army subs with their light on: where the lamp is, which way
+   it points (a: 0 right, PI/2 down, PI left), and the sub. Everything the light does reads this list and the one beam
+   (lampBeamAt - the beam sprite's own cone and fall): the light on whatever is under the water in it (LAMP_K, applied
+   over the world's layer in one pass - drawLampLight), the beam's glow in the water, the deep's dark opened along it,
+   the chests' glint, the ink thinned, the caves' lamp ---- */
+const LAMP_K = 1.6;                        // (how strongly a beam lights what's in it: its own colour times this at the beam's heart)
+function subLamps() {
+  const out = [];
+  if (LAND && msArt) for (const s of minisubs) {
+    if (s.state !== 'out') continue;
+    const [ux, uy] = msAim(s);
+    out.push({ x: s.x + ux * 8, y: s.y + uy * 8, a: s.aimA == null ? Math.atan2(uy, ux) : s.aimA, s, ms: true });
+  }
   for (const sb of subs) {
     if (!subLightOn(sb)) continue;
-    const [lx, ly] = subArtPt(sb, ...SUB_LAMP_AT), X = PX(lx), Y = PY(ly);
-    if (X < -900 * SV || X > VWP + 900 * SV) continue;
-    const a = sb.aimA == null ? clamp(sb.lamp.elev, 0, 180) * Math.PI / 180 : sb.aimA, ux = Math.cos(a), uy = Math.sin(a);
-    out.push({ x: X, y: Y, r: 40 * SV, k: 0.9 });
-    out.push({ x: X + ux * 8 * SV, y: Y + uy * 8 * SV, ux, uy, L: MS_BEAM_L * SV, k: 1, beam: true });
+    const [x, y] = subArtPt(sb, ...SUB_LAMP_AT);
+    out.push({ x, y, a: sb.aimA == null ? clamp(sb.lamp.elev, 0, 180) * Math.PI / 180 : sb.aimA, s: sb, ms: false });
   }
   return out;
 }
-// her light: the beam (after the night's tint, under the water only); and while it's on, the
-// red lamp on her tail blinking (drawn after the night, as the planes')
+// the beam's light at (dx, dy) from its lamp, along aim (ux, uy) - 0..1, the beam sprite's (msBeamSprite) in world units
+function lampBeamAt(dx, dy, ux, uy) {
+  const d = Math.hypot(dx, dy); if (d >= MS_BEAM_L) return 0;
+  const cosA = d < 0.5 ? 1 : (dx * ux + dy * uy) / d, e0 = clamp((cosA - 0.55) / 0.3, 0, 1); if (e0 <= 0) return 0;
+  const core = clamp((cosA - 0.8) / 0.18, 0, 1);
+  return beamFall(1 - d / MS_BEAM_L) * e0 * e0 * (3 - 2 * e0) * (0.55 + 0.45 * core) * (1 - Math.exp(-d / 10));
+}
+// how much light the lamps put on a point (0..1): in a beam, or close round a sub with its lamp on
+function lampLitAt(x, y) {
+  let k = 0;
+  for (const l of subLamps()) {
+    const d = Math.hypot(x - l.s.x, y - l.s.y);
+    if (d < 50) k = Math.max(k, 1 - d / 60);
+    k += lampBeamAt(x - l.x, y - l.y, Math.cos(l.a), Math.sin(l.a));
+  }
+  return clamp(k, 0, 1);
+}
+// (OPEN WORLD) the deep's dark opened along every beam (drawAbyss) - and round an army sub with her light on
+function subAbyssLights(out) {
+  for (const l of subLamps()) {
+    const X = PX(l.x), Y = PY(l.y), ux = Math.cos(l.a), uy = Math.sin(l.a);
+    if (X < -MS_BEAM_L * SV || X > VWP + MS_BEAM_L * SV) continue;
+    if (!l.ms) out.push({ x: X, y: Y, r: 40 * SV, k: 0.9 });       // (the exploration sub's pool is its own: abyssLights)
+    out.push({ x: X, y: Y, ux, uy, L: MS_BEAM_L * SV, k: 1, beam: true });
+  }
+  return out;
+}
+// the army subs' red lamp on the tail blinking while the light is on (after the night, as the planes'); and every lamp's
+// beam glowing in the water (after the night's tint, under the water only - added to what's there) and, the exploration
+// sub's, its bright spot at the lamp
 function drawSubLights(x0, x1) {
   for (const sb of subs) {
-    if (!subLightOn(sb)) continue;
-    // (the screen is two half views: a sub a whole beam past this one's edge still lights it - rules.md 6)
-    if (sb.x < x0 - MS_BEAM_L - SUB_L || sb.x > x1 + MS_BEAM_L + SUB_L) continue;
+    if (!subLightOn(sb) || sb.x < x0 - SUB_L || sb.x > x1 + SUB_L) continue;
     const [tx, ty] = subArtPt(sb, ...SUB_TAIL_AT);
     if ((time + sb.id * 0.37) % 1.0 < 0.32) planeLamps[viewIdx].push(PX(tx), PY(ty), clamp(0.7 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1));
-    const [lx, ly] = subArtPt(sb, ...SUB_LAMP_AT), a = sb.aimA == null ? clamp(sb.lamp.elev, 0, 180) * Math.PI / 180 : sb.aimA;
-    const X = PX(lx), Y = PY(ly), L = MS_BEAM_L * SV, sp = msBeamSprite(), sc = L / sp.width, wy = Math.round(PY(WATER_Y + 2));
+  }
+  for (const l of subLamps()) {
+    // (the screen is two half views: a lamp a whole beam past this one's edge still lights it - rules.md 6)
+    if (l.x < x0 - MS_BEAM_L - 40 || l.x > x1 + MS_BEAM_L + 40) continue;
+    const X = PX(l.x), Y = PY(l.y), a = l.a, L = MS_BEAM_L * SV, sp = msBeamSprite(), sc = L / sp.width, wy = Math.round(PY(WATER_Y + 2)), dot = l.ms;
     lateLit[viewIdx].push(() => {
       C.save(); C.beginPath(); C.rect(-SHX - 4, wy, VWP + 2 * SHX + 8, bh - SHY - wy + 4); C.clip();
       const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = true;
       C.globalCompositeOperation = 'lighter'; C.globalAlpha = MS_BEAM_A;
       C.translate(X, Y); C.rotate(a); C.drawImage(sp, 0, -Math.round(sp.height * sc / 2), Math.round(sp.width * sc), Math.round(sp.height * sc));
-      C.imageSmoothingEnabled = sm; C.restore();   // (no bright dot at the lamp any more - user Oct 29, gen/open/ref/sub_lamp_dot_oct29.png)
+      C.restore();
+      if (dot) {                                                  // (the army sub's has none - user Oct 29, gen/open/ref/sub_lamp_dot_oct29.png)
+        C.save(); C.globalCompositeOperation = 'lighter'; C.globalAlpha = 1;
+        const R = 7 * SV, g = C.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, 'rgba(250,252,255,0.95)'); g.addColorStop(1, 'rgba(230,240,255,0)'); C.fillStyle = g; C.fillRect(Math.round(X - R), Math.round(Y - R), Math.round(2 * R), Math.round(2 * R));
+        C.restore();
+      }
+      C.imageSmoothingEnabled = sm;
     });
   }
+}
+/* the lamps' light on what's under the water, in two steps, each one pass for every lamp in the view:
+   1. (renderObjects) everything under the water is drawn; a copy of it is kept (lampSnapshot); the water's tint goes over it
+      (the deep's blue, stronger the deeper); then the copy is laid back over the tint where the beams fall (lampUncover) -
+      fully near the lamp, fading toward the beam's edge and end. So what's lit is seen in its own colours, not through the
+      blue (user Oct 30, 18:40: the other sub "an even mid-blue shape with no detail").
+   2. (render, on the screen just after the world's layer went to it with the night's tint, before the beams' glow) the
+      light added: the world's layer's own colour (before the night) times the beam's light (drawLampLight) - brightest
+      near the lamp, fading with distance and toward the cone's edge, like a torch at night.
+   On the GPU (wglLamps, wglLampSnap); with no WebGL the same through a canvas, the beam sprite as the mask. No lamp near
+   the view: nothing happens. */
+const LAMP_UNCOVER = 2.2;                  // (how quickly, in from the beam's edge and end, the water's tint is fully lifted)
+// this view's lamps, in its pixels, and the box they reach (null: none)
+function lampView(k) {
+  const x0 = CAMPX / SV, x1 = x0 + VWP / SV, wy = PY(WATER_Y + 2), R = MS_BEAM_L * SV;
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  const L = [];
+  for (const l of subLamps()) {
+    if (l.x < x0 - MS_BEAM_L - 40 || l.x > x1 + MS_BEAM_L + 40) continue;
+    const X = PX(l.x), Y = PY(l.y);
+    bx0 = Math.min(bx0, X - R); bx1 = Math.max(bx1, X + R); by0 = Math.min(by0, Y - R); by1 = Math.max(by1, Y + R);
+    L.push([X, Y, R, wy, Math.cos(l.a), Math.sin(l.a), k, 10 * SV]);
+  }
+  if (!L.length) return null;
+  bx0 = Math.max(bx0, -SHX - 4); bx1 = Math.min(bx1, VWP + SHX + 4); by0 = Math.max(by0, wy, -SHY - 4); by1 = Math.min(by1, bh - SHY + 4);
+  return bx1 > bx0 && by1 > by0 ? { L, bx0, by0, bx1, by1, R } : null;
+}
+let lampCv = null, lampSnapCv = null;
+// the beam's light as a mask on a canvas the box's size (no WebGL), each lamp's sprite added at strength a
+function lampMask(V, a) {
+  const w = Math.ceil(V.bx1 - V.bx0), h = Math.ceil(V.by1 - V.by0);
+  if (!lampCv || lampCv.width < w || lampCv.height < h) lampCv = makeCanvas(Math.max(w, lampCv ? lampCv.width : 0), Math.max(h, lampCv ? lampCv.height : 0));
+  const x = lampCv.getContext('2d'), sp = msBeamSprite(), sc = V.R / sp.width;
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1; x.clearRect(0, 0, w, h);
+  x.imageSmoothingEnabled = true; x.globalCompositeOperation = 'lighter'; x.globalAlpha = Math.min(1, a);
+  for (const q of V.L) { x.setTransform(1, 0, 0, 1, q[0] - V.bx0, q[1] - V.by0); x.rotate(Math.atan2(q[5], q[4])); x.drawImage(sp, 0, -sp.height * sc / 2, sp.width * sc, sp.height * sc); }
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1;
+  return [x, w, h];
+}
+// 1a. (renderObjects, its view, before the water's tint) a copy of what's under the water as it is; null: no lamp here
+function lampSnapshot() {
+  const V = lampView(LAMP_UNCOVER); if (!V) return null;
+  if (gpuwOn('tint')) { wglLampSnap(VSX + SHX + V.bx0 - 1, VSX + SHX + V.bx1 + 1); return V; }
+  if (GLR.on) return null;                                        // (the GPU's context with its water passes off: no copy to make)
+  const w = Math.ceil(V.bx1 - V.bx0), h = Math.ceil(V.by1 - V.by0);
+  if (!lampSnapCv || lampSnapCv.width < w || lampSnapCv.height < h) lampSnapCv = makeCanvas(Math.max(w, lampSnapCv ? lampSnapCv.width : 0), Math.max(h, lampSnapCv ? lampSnapCv.height : 0));
+  const x = lampSnapCv.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, w, h);
+  x.drawImage(ob, Math.round(VSX + SHX + V.bx0), Math.round(SHY + V.by0), w, h, 0, 0, w, h);
+  return V;
+}
+// 1b. (renderObjects, after the water's tint) the copy laid back where the beams fall
+function lampUncover(V) {
+  if (gpuwOn('tint')) { wglLamps(V.L, V.bx0, V.by0, V.bx1, V.by1, 1); return; }
+  const [x, w, h] = lampMask(V, 1);
+  x.globalCompositeOperation = 'source-in'; x.drawImage(lampSnapCv, 0, 0, w, h, 0, 0, w, h); x.globalCompositeOperation = 'source-over';
+  C.save(); C.setTransform(1, 0, 0, 1, VSX + SHX, SHY); C.drawImage(lampCv, 0, 0, w, h, Math.round(V.bx0), Math.round(V.by0), w, h); C.restore();
+}
+// 2. (render, the screen, each view) the light added
+function drawLampLight() {
+  const V = lampView(LAMP_K); if (!V) return;
+  if (gpuwOn('tint')) { wglLamps(V.L, V.bx0, V.by0, V.bx1, V.by1, 0); return; }
+  if (GLR.on) return;
+  const [x, w, h] = lampMask(V, 1);
+  x.globalCompositeOperation = 'source-in'; x.drawImage(ob, Math.round(VSX + SHX + V.bx0), Math.round(SHY + V.by0), w, h, 0, 0, w, h); x.globalCompositeOperation = 'source-over';
+  // (the mask's light is 1 at most: added LAMP_K times over)
+  C.save(); C.globalCompositeOperation = 'lighter';
+  for (let left = LAMP_K; left > 0.01; left -= 1) { C.globalAlpha = Math.min(1, left); C.drawImage(lampCv, 0, 0, w, h, Math.round(V.bx0), Math.round(V.by0), w, h); }
+  C.restore();
 }
 // the button's picture: a lamp throwing its beam, in the buttons' cream (glyphIcon)
 function lightIcon() {
@@ -10293,7 +10423,7 @@ function buoyCanvas(O, D, M, L, E) {
 }
 const BUOY_K = 0.78;
 function buoyHit(b, x, y) {
-  if (!b || b.state !== 'float') return false;
+  if (!b || b.state !== 'float' || Math.abs(x - b.x) >= 7) return false;   // (opt-fight: off to the side - the wave's height not asked)
   const sy = surfaceY(b.x);
   return Math.abs(x - b.x) < 7 && y > sy - 24 && y < sy + 4;
 }
@@ -11955,6 +12085,7 @@ function stepWeedBits(dt) {
    the bottom, still bleeding a while, where it lies and in time fades away. Drawn with the sea life, before the deep's
    dark, so down there it's as dark as everything else. */
 const deadBig = [], seaBlood = [], seaGore = [];
+const SEA_BLOOD_COLS = ['', 'rgba(150,10,18,0.3)', 'rgba(150,10,18,0.55)', 'rgba(150,10,18,0.8)'];   // the blood's three tones, by index
 const bigLen = (kind) => { const a = kind === 'whale' ? img.whale : img.shark; return a ? a.swim[0].r.width * a.px : 60; };
 // is (x, y) on this shark or whale? (r: how far round it still counts)
 function bigHit(s, kind, x, y, r = 0) {
@@ -12024,16 +12155,26 @@ function drawSeaKills() {
   const vl = CAMPX / SV, vr = vl + VWW;
   if (seaBlood.length) {
     const BL = PB * 2, TONES = [0.3, 0.55, 0.8];   // (the kraken's head-wound tones: brighter, as in the lit water it has to show)
+    const COLS = SEA_BLOOD_COLS;   // one string per tone, not one per block
     for (const q of seaBlood) {
       if (q.x < vl - 60 || q.x > vr + 60) continue;
       const a = 0.95 * (1 - q.t / q.life) * Math.min(1, q.t * 4); if (a < 0.03) continue;
       const rr = q.r * SV, cx = PX(q.x), cy = PY(q.y), R = Math.ceil(rr * 1.3 / BL) * BL;
       const x0 = Math.floor((cx - R) / BL) * BL, y0 = Math.floor((cy - R) / BL) * BL;
-      for (let by = y0; by <= cy + R; by += BL) for (let bx = x0; bx <= cx + R; bx += BL) {
-        const dx = bx + BL / 2 - cx, dy = by + BL / 2 - cy, an = Math.atan2(dy, dx), lump = 1 + 0.28 * Math.sin(an * q.lob + q.sd) + 0.12 * Math.sin(an * (q.lob + 3) - q.sd * 2);
-        const d = Math.hypot(dx, dy) / Math.max(0.6, rr * lump); if (d >= 1) continue;
-        const v = a * (1 - d * d), t = v > TONES[2] ? TONES[2] : v > TONES[1] ? TONES[1] : v > TONES[0] ? TONES[0] : 0; if (!t) continue;
-        C.fillStyle = `rgba(150,10,18,${t})`; C.fillRect(bx, by, BL, BL);
+      // the blocks of a row never overlap, so a run of one tone is one rectangle: the same pixels, the same colour
+      for (let by = y0; by <= cy + R; by += BL) {
+        let runT = 0, runX = 0, bx = x0;
+        for (; bx <= cx + R; bx += BL) {
+          const dx = bx + BL / 2 - cx, dy = by + BL / 2 - cy, an = Math.atan2(dy, dx), lump = 1 + 0.28 * Math.sin(an * q.lob + q.sd) + 0.12 * Math.sin(an * (q.lob + 3) - q.sd * 2);
+          const d = Math.hypot(dx, dy) / Math.max(0.6, rr * lump);
+          let t = 0;
+          if (d < 1) { const v = a * (1 - d * d); t = v > TONES[2] ? 3 : v > TONES[1] ? 2 : v > TONES[0] ? 1 : 0; }
+          if (t !== runT) {
+            if (runT) { C.fillStyle = COLS[runT]; C.fillRect(runX, by, bx - runX, BL); }
+            runT = t; runX = bx;
+          }
+        }
+        if (runT) { C.fillStyle = COLS[runT]; C.fillRect(runX, by, bx - runX, BL); }
       }
     }
   }
@@ -14029,7 +14170,7 @@ function killBird(b, vx = 0, vy = 0) {
   for (let i = 0; i < (b.kind === 'gull' ? 10 : 5); i++) feathers.push({ x: b.x + bdRnd(-2, 2), y: b.y + bdRnd(-2, 2), vx: bdRnd(-30, 30) + vx * 0.2, vy: bdRnd(-40, 5), life: 0, max: bdRnd(5, 9), ph: bdR() * 6, dark: b.kind === 'swift' || bdR() < 0.3 });
 }
 function birdStrike(x, y, r, vx, vy) {
-  for (const b of birds) if (birdLive(b) && Math.abs(b.x - x) < r && Math.abs(b.y - y) < r) killBird(b, vx === undefined ? bdRnd(-30, 30) : vx * 0.25 + bdRnd(-20, 20), vy === undefined ? 0 : vy * 0.25 - 20);
+  for (const b of birds) if (Math.abs(b.x - x) < r && Math.abs(b.y - y) < r && birdLive(b)) killBird(b, vx === undefined ? bdRnd(-30, 30) : vx * 0.25 + bdRnd(-20, 20), vy === undefined ? 0 : vy * 0.25 - 20);
 }
 function scareBirds(x, y, r) {
   for (const b of birds) {
@@ -15225,6 +15366,49 @@ void main() {
   if (b <= 0.0) discard;
   o = vec4(mix(s.rgb, u_col * s.a, min(1.0, b)), s.a);
 }`;
+// THE SKY'S TEXTURE ON THE GPU (Oct 30 evening, branch opt-skytex): the gradient's streaky bands (17-frame.js skyBack, SKY TEXTURE)
+// were painted cell by cell in JS - two value noises a cell - and the whole picture uploaded whenever the sun's parallax or the top of
+// deck 1 moved: in a two-view fight nearly every frame, 13 to 17 ms. The same sums a cell here: the same integer hash (uint maths wraps
+// as Math.imul and | 0 do), the same smoothstepped value noise, each noise's whole and fractional parts split in integers as the
+// double sums land them; each row's place in the gradient (bands x (y - top) / span) from JS in doubles, its whole part apart from
+// its fraction, so a band's edge is decided on a small number. u_ki: the texture's shift (shX), the horizon's row, the bands, the
+// rows; u_amp: the noise's reach in bands; u_col: the bands' colours, then the horizon's (under it)
+const GL_KFS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp sampler2D u_rows; uniform vec4 u_col[65]; uniform ivec4 u_ki; uniform float u_amp; uniform vec2 u_size; uniform vec4 u_quad; uniform vec4 u_cells;
+out vec4 o;
+float kv(int x, int y) { uint h = uint(x) * 374761393u + uint(y) * 668265263u; h = (h ^ (h >> 13u)) * 1274126177u; h = h ^ (h >> 16u); return float(h) / 4294967296.0; }
+float kn(int xi, int yi, float fx, float fy) {
+  float sx = fx * fx * (3.0 - 2.0 * fx), sy = fy * fy * (3.0 - 2.0 * fy);
+  float a = kv(xi, yi), b = kv(xi + 1, yi), c = kv(xi, yi + 1), d = kv(xi + 1, yi + 1);
+  return a + (b - a) * sx + (c - a + (a - b + d - c) * sx) * sy;
+}
+int fdiv(int a, int d) { return a >= 0 ? a / d : -((d - 1 - a) / d); }
+void main() {
+  // (the cell from this pixel's place against the quad's corner, as the sprites' texel choice is made - GL_FS)
+  vec2 f = vec2(gl_FragCoord.x, u_size.y - gl_FragCoord.y);
+  ivec2 c = ivec2(floor(u_cells.xy + (f - u_quad.xy) * (u_cells.zw - u_cells.xy) / u_quad.zw));
+  int bands = u_ki.z;
+  if (c.y >= u_ki.y) { o = u_col[bands]; return; }
+  int wx = c.x - u_ki.x, y = max(0, c.y);
+  // skyNoise(wx / 90, y / 3)
+  int q1 = fdiv(wx, 90), r1 = wx - 90 * q1, qy1 = y / 3, ry1 = y - 3 * qy1;
+  // skyNoise(wx / 23 + 17.3, y / 1.5 + 5.1)
+  int q2 = fdiv(wx, 23), r2 = wx - 23 * q2, y2 = 2 * y, qy2 = y2 / 3, ry2 = y2 - 3 * qy2, x2 = q2 + 17;
+  float t2 = float(r2) / 23.0 + 0.3; if (r2 >= 17) { t2 -= 1.0; x2 += 1; }
+  float n = kn(q1, qy1, float(r1) / 90.0, float(ry1) / 3.0) + 0.5 * kn(x2, qy2 + 5, t2, float(ry2) / 3.0 + 0.1) - 0.75;
+  vec2 rw = texelFetch(u_rows, ivec2(clamp(y, 0, u_ki.w - 1), 0), 0).rg;
+  int i = clamp(int(rw.x) + int(floor(rw.y + n * u_amp)), 0, bands - 1);
+  o = u_col[i];
+}`;
+function glSkySetup() {
+  const gl = GLR.gl, p = gl.createProgram();
+  gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_KFS));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  GLR.kprog = p; GLR.kU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_rows', 'u_col', 'u_ki', 'u_amp']) GLR.kU[k] = gl.getUniformLocation(p, k);
+  GLR.krows = null; GLR.krowsW = 0;
+}
 function glBurnSetup() {
   const gl = GLR.gl, p = gl.createProgram();
   gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_BFS));
@@ -15993,7 +16177,7 @@ function glSetup() {
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
   GLR.pix = null; GLR.pixPool = [];
-  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
+  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glSkySetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
@@ -16709,6 +16893,39 @@ class GLCtx {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     GLR.stats.draws++; GLR.stats.quads++;
   }
+  // the sky's textured gradient (GL_KFS): cells x0..x1, y0..y1 over the screen's dx, dy, dw, dh; rows a Float32Array of n rows
+  // (each its band's whole part, then its fraction), col the bands' colours and the horizon's (rgba 0..1, 4 a colour), ki and amp
+  drawSkyGL(dx, dy, dw, dh, x0, y0, x1, y1, rows, n, col, ki, amp) {
+    if (GLR.lost || !GLR.kprog || !(n > 0)) return;
+    const gl = GLR.gl, t = this.target, U = GLR.kU;
+    glBegin(this, 'source-over'); glFlush();
+    glApplyState();
+    gl.useProgram(GLR.kprog); GLR.cur.prog = 13;
+    gl.activeTexture(gl.TEXTURE13);
+    if (!GLR.krows || GLR.krowsW < n) {
+      if (GLR.krows) gl.deleteTexture(GLR.krows);
+      GLR.krowsW = Math.max(n, 64);
+      GLR.krows = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, GLR.krows);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, GLR.krowsW, 1, 0, gl.RG, gl.FLOAT, null);
+    } else gl.bindTexture(gl.TEXTURE_2D, GLR.krows);
+    gl.bindSampler(13, null);
+    const fy = gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL), pm = gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL);
+    if (fy) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); if (pm) gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, n, 1, gl.RG, gl.FLOAT, rows, 0);
+    if (fy) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); if (pm) gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(U.u_rows, 13);
+    gl.uniform2f(U.u_size, t._w, t._h);
+    this._corners(dx, dy, dw, dh);
+    gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
+    gl.uniform4f(U.u_cells, x0, y0, x1, y1);
+    gl.uniform4fv(U.u_col, col); gl.uniform4i(U.u_ki, ki[0], ki[1], ki[2], n); gl.uniform1f(U.u_amp, amp);
+    gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    GLR.stats.draws++; GLR.stats.quads++; GLR.stats.uploads++;
+  }
   drawSunGL(dx, dy, dw, dh, x0, y0, x1, y1, sun, s, k, core, sky) {
     if (GLR.lost || !GLR.sprog) return;
     const gl = GLR.gl, t = this.target, U = GLR.sU;
@@ -17167,6 +17384,38 @@ void main() {
   if (u_wm.a > 0.0) c = vec4(u_wm.rgb * c.a + c.rgb * (1.0 - u_wm.a), c.a);
   o = c;
 }`;
+/* ---- 6. THE SUB LAMPS' LIGHT (user Oct 30: "the sub lights should illuminate everything, including other submarines"):
+   one pass over the world's layer as it went to the screen, for every lamp in the view at once (subLamps, 27-sub-light.js):
+   whatever was drawn under the water inside a beam - the floor, rocks, plants, wrecks, subs, hulls, pieces, mines, fish,
+   the kraken - gets its own colour (the world's layer before the night's tint) times the beam's light added, so it is lit
+   the same way, nothing per thing. The beam's shape is the sprite's (msBeamSprite): its cone, its fall along its length.
+   No lamp: no pass ---- */
+const WGL_LAMP_FS = `#version 300 es
+precision highp float; precision highp int;
+in vec2 v_u; out vec4 o;
+uniform sampler2D u_src; uniform vec2 u_ss; uniform vec2 u_off;
+uniform int u_nl; uniform int u_mode;   // (0: the light added; 1: the layer as it was under the water's tint, laid back over it)
+uniform vec4 u_l0[8];  // the lamp (view px), its reach (px), the water's line (view row): under it only
+uniform vec4 u_l1[8];  // its aim (unit), how strong, the near fade's length (px)
+void main() {
+  vec2 p = floor(v_u) + 0.5;
+  float lit = 0.0;
+  for (int k = 0; k < 8; k++) {
+    if (k >= u_nl) break;
+    vec4 a = u_l0[k], b = u_l1[k];
+    if (p.y < a.w) continue;
+    vec2 d = p - a.xy; float dd = length(d);
+    if (dd >= a.z) continue;
+    float cosA = dd < 0.5 ? 1.0 : dot(d, b.xy) / dd, e0 = clamp((cosA - 0.55) / 0.3, 0.0, 1.0);
+    if (e0 <= 0.0) continue;
+    float core = clamp((cosA - 0.8) / 0.18, 0.0, 1.0), q = 1.0 - dd / a.z, fall = pow(q, 0.8) * smoothstep(0.0, 0.35, q);
+    lit += b.z * fall * e0 * e0 * (3.0 - 2.0 * e0) * (0.55 + 0.45 * core) * (1.0 - exp(-dd / b.w));
+  }
+  if (lit <= 0.002) discard;
+  ivec2 t = ivec2(floor(v_u + u_off));
+  vec4 c = texelFetch(u_src, ivec2(t.x, int(u_ss.y) - 1 - t.y), 0);   // (a layer's rows: bottom first)
+  if (u_mode == 1) { float m = min(lit, 1.0); o = c * m; } else o = vec4(c.rgb * min(lit, 2.0), 0.0);
+}`;
 function wglSetup() {
   const gl = GLR.gl;
   WGL.ok = false;
@@ -17178,6 +17427,7 @@ function wglSetup() {
   WGL.ab = prog(WGL_VS, WGL_AB_FS, ['u_size', 'u_rect', 'u_m', 'u_g', 'u_gn', 'u_dk', 'u_nl', 'u_l0', 'u_l1']);
   WGL.di = prog(WGL_VS, WGL_DI_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_a', 'u_w', 'u_sh', 'u_np', 'u_pc', 'u_nr', 'u_rg', 'u_rp']);
   WGL.ti = prog(WGL_VS, WGL_TI_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_ss', 'u_t0', 'u_t1', 'u_ty', 'u_wm', 'u_grad', 'u_row']);
+  WGL.lamp = prog(WGL_VS, WGL_LAMP_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_ss', 'u_off', 'u_nl', 'u_mode', 'u_l0', 'u_l1']);
   WGL.qvao = gl.createVertexArray(); gl.bindVertexArray(WGL.qvao);
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
   WGL.svao = gl.createVertexArray(); gl.bindVertexArray(WGL.svao);
@@ -17339,6 +17589,39 @@ function wglTintCopy(views, tintOf, warmCss) {
     wglEnd();
   }
   g.restore();
+}
+// the lamps over this view (C: its context in its view, beginView): L - [X, Y, reach, water row, ux, uy, k, near] in the
+// view's pixels; the box they light (view px). mode 0 (the screen, after the world's layer went to it): the light added,
+// the world's layer's own colour times it. mode 1 (the world's layer, under the water's tint): the layer as it was before
+// the tint (wglLampSnap) laid back over it, fully near the lamp, fading to the beam's edge and end - so what's lit is seen
+// in its own colours, not through the deep's blue. The layer is read at the view's place on it (VSX + SHX, SHY)
+function wglLamps(L, x0, y0, x1, y1, mode) {
+  const gl = GLR.gl, pr = WGL.lamp, U = pr.U, n = Math.min(8, L.length), l0 = new Float32Array(32), l1 = new Float32Array(32);
+  for (let k = 0; k < n; k++) { const q = L[k]; l0.set([q[0], q[1], q[2], q[3]], k * 4); l1.set([q[4], q[5], q[6], q[7]], k * 4); }
+  ob.ensure();
+  wglBegin(C, mode ? 'source-over' : 'lighter', pr);
+  wglTex(0, mode ? WGL.lsnap.tex : ob.tex, false); gl.uniform1i(U.u_src, 0); gl.uniform2f(U.u_ss, ob.width, ob.height); gl.uniform2f(U.u_off, VSX + SHX, SHY);
+  gl.uniform1i(U.u_nl, n); gl.uniform1i(U.u_mode, mode ? 1 : 0); gl.uniform4fv(U.u_l0, l0); gl.uniform4fv(U.u_l1, l1);
+  gl.uniform4f(U.u_rect, x0, y0, x1 - x0, y1 - y0); gl.bindVertexArray(WGL.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  wglEnd();
+}
+// the world's layer as it is now, this view's columns (device px x0..x1), kept for wglLamps' mode 1: a copy on the GPU
+function wglLampSnap(x0, x1) {
+  const gl = GLR.gl, w = ob.width, h = ob.height;
+  glFlush();
+  let N = WGL.lsnap;
+  if (!N || N.ep !== GLR.epoch || N.w !== w || N.h !== h) {
+    if (N && N.ep === GLR.epoch) { gl.deleteTexture(N.tex); gl.deleteFramebuffer(N.fbo); }
+    N = WGL.lsnap = { tex: glNewTex(w, h, gl.NEAREST), w, h, ep: GLR.epoch, fbo: gl.createFramebuffer() };
+    gl.bindFramebuffer(gl.FRAMEBUFFER, N.fbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, N.tex, 0);
+  }
+  ob.ensure();
+  gl.disable(gl.SCISSOR_TEST); gl.disable(gl.STENCIL_TEST);
+  const a = Math.max(0, Math.floor(x0)), b = Math.min(w, Math.ceil(x1));
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, ob.fbo); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, N.fbo);
+  if (b > a) gl.blitFramebuffer(a, 0, b, h, a, 0, b, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  GLR.cur = {}; GLR.unit = []; GLR.unitS = [];
 }
 
 /* ================================================================
@@ -20035,8 +20318,10 @@ function drawSun(horY) {
   for (let i = 0; i < s0.length; i++) { const y = oy - m + i; if (y < 0 || y >= horY) continue; const w = s0[i]; for (let x = ox - w; x <= ox + w; x++) if (x >= 0 && x < TW) blendPx(y * TW + x, core, vis); }
 }
 let SUNG = null;   // (this view's sun disc for the GPU, from drawSun - null: none)
+let BGPRE = null;   // (the sky's texture on the GPU: the cells the moon will blend into, worked out in the buffer first - 17-frame.js skyTexGPU)
 function drawMoon(cx, cy, mr, horY, vis) {
   const glow = [176, 194, 236], gx = mr * 3.4, am = 0.32 * vis;
+  if (BGPRE) BGPRE(Math.floor(cx - gx) - 2, Math.floor(cy - gx) - 2, Math.ceil(cx + gx) + 2, Math.min(horY - 1, Math.ceil(cy + gx) + 2));
   for (let y = Math.max(0, Math.floor(cy - gx)); y <= Math.min(horY - 1, Math.ceil(cy + gx)); y++) for (let x = Math.max(0, Math.floor(cx - gx)); x <= Math.min(TW - 1, Math.ceil(cx + gx)); x++) {
     const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy) / gx; if (d >= 1) continue;
     const q = Math.ceil(Math.pow(1 - d, 2) * 4) / 4; blendPx(y * TW + x, glow, q * am);
@@ -20467,6 +20752,51 @@ const skyHash = (x, y) => { let h = (x * 374761393 + y * 668265263) | 0; h = Mat
 function skyNoise(x, y) { const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
   const a = skyHash(xi, yi), b = skyHash(xi + 1, yi), c = skyHash(xi, yi + 1), d = skyHash(xi + 1, yi + 1); return a + (b - a) * sx + (c - a + (a - b + d - c) * sx) * sy; }
 const BGKS = [];   // (the gradient's key, made each view: skyBack)
+// THE SKY'S TEXTURE ON THE GPU (Oct 30 evening, branch opt-skytex - see skyBack): the gradient laid by the chip (40-gl.js GL_KFS) over
+// the place the painted one was laid (outImg of the buffer's canvas), each row's place in it from here in doubles - its whole band
+// apart from its fraction, so the chip decides a band's edge on a small number as the doubles here did; then the sun over it as before
+// (by the GPU: nothing of it in the buffer). The moon is blended into the buffer: drawMoon asks first (BGPRE) for the cells it will
+// touch, worked out here as the painted gradient worked them out, and that box alone goes up over the chip's gradient
+const SKYTEX_GPU = /[?&]skytexgpu=0/.test(location.search) ? 0 : 1;
+// (each view its own rows and colours: a shared view's second half lays the first's again - 30-api.js replay)
+const KROWS = [new Float32Array(2048), new Float32Array(2048)], KCOL = [new Float32Array(65 * 4), new Float32Array(65 * 4)];
+// the chip's gradient: cells 0..cw, 0..h of the picture at its pixels (x, y, wd, ht), as outImg lays the painted one
+function outSky(x, y, wd, ht, cw, h, rows, col, ki, amp) {
+  const V = VIEW, dx = picX(V, x), dy = picY(V, y), dw = wd * M, dh = ht * M;
+  if (dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4 || !ctx.drawSkyGL) return;
+  ctx.drawSkyGL(dx, dy, dw, dh, 0, 0, cw, h, rows, h, col, ki, amp);
+}
+function skyTexGPU(K, KC, bands, horY, yTop, shX, tex) {
+  const span = Math.max(1, horY - yTop), amp = tex * 1.4 / bands;
+  if (KROWS[VI].length < H * 2) KROWS[VI] = new Float32Array(H * 2 + 256);
+  const R = KROWS[VI], C = KCOL[VI];
+  for (let y = 0; y < H; y++) { const b = (y - yTop) / span * bands, f = Math.floor(b); R[2 * y] = f; R[2 * y + 1] = b - f; }
+  for (let b = 0; b <= bands; b++) { const v = K[KC + b]; C[4 * b] = (v & 255) / 255; C[4 * b + 1] = ((v >>> 8) & 255) / 255; C[4 * b + 2] = ((v >>> 16) & 255) / 255; C[4 * b + 3] = 1; }
+  outSky(-CPX, 0, CW * CPX, H * CPX, CW, H, R, C, [shX, horY, bands], amp * bands);
+  // the moon's cells of the painted gradient, worked out as skyBack paints them
+  let box = null;
+  BGPRE = (x0, y0, x1, y1) => {
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(TW - 1, x1); y1 = Math.min(H - 1, y1);
+    if (x1 < x0 || y1 < y0) return;
+    box = [x0, y0, x1, y1];
+    for (let y = y0; y <= y1; y++) {
+      const u0 = (y - yTop) / span, row = y * TW;
+      if (y >= horY) { for (let x = x0; x <= x1; x++) buf[row + x] = K[KC + bands]; continue; }
+      for (let x = x0; x <= x1; x++) {
+        const wx = x - shX, n = skyNoise(wx / 90, y / 3) + 0.5 * skyNoise(wx / 23 + 17.3, y / 1.5 + 5.1) - 0.75;
+        buf[row + x] = K[KC + clamp(Math.floor(clamp(u0 + n * amp, 0, 0.9999) * bands), 0, bands - 1)];
+      }
+    }
+  };
+  BY0 = 1e9; BY1 = -1;
+  drawSun(horY);
+  BGPRE = null;
+  if (box) {
+    const [x0, y0, x1, y1] = box, bw = x1 - x0 + 1, bh = y1 - y0 + 1, out = new Uint32Array(bw * bh);
+    for (let y = 0; y < bh; y++) out.set(buf.subarray((y0 + y) * TW + x0, (y0 + y) * TW + x1 + 1), y * bw);
+    outPix({ buf: out }, bw, 0, bh, (x0 - 1) * CPX, y0 * CPX, bw * CPX, bh * CPX, false);
+  }
+}
 function skyBack(V) {
   // (Oct 28: the horizon above the top of the screen - the camera under the water, or the sea filling it - no sky shows:
   // nothing is placed, lit or drawn for this view (the user: "underwater, no clouds, 36 fps": the sky was 5 ms of it))
@@ -20536,9 +20866,17 @@ function skyBack(V) {
     K.push(rgb(c.map(Math.round)));
   }
   K.push(rgb(E.skyHor.map(Math.round)));
+  // (Oct 30 evening, branch opt-skytex - the user's two-view fight at 20-26 fps, 35 at Version 368: the texture's key holds its place
+  // (the sun's parallax) and the top of deck 1, so as the camera moved it was painted again here nearly every frame in both views, two
+  // value noises a cell and the whole picture uploaded - 13 to 17 ms a frame at one sky pixel a screen pixel. On the GPU the same
+  // picture is worked out by the chip each frame (40-gl.js GL_KFS: the same sums a cell), nothing painted or uploaded but each row's
+  // place in the gradient. The moon, still blended into the buffer, has its few cells of the gradient worked out here first (BGPRE)
+  // and goes up alone. ?skytexgpu=0 (or P.skytexgpu = 0): painted here as before; SKY TEXTURE 0 (flat bands) is painted here as before)
+  const kg = tex > 0 && GPU && !!ctx.drawSkyGL && (P.skytexgpu ?? SKYTEX_GPU) > 0;
+  if (kg) B.bgKey = '';   // (back on the CPU path: painted afresh)
   let bgSame = B.bgKey === 'k' && B.bgC && B.bgC.length === K.length;
   if (bgSame) for (let i = 0; i < K.length; i++) if (B.bgC[i] !== K[i]) { bgSame = false; break; }
-  if (!bgSame) {
+  if (!bgSame && !kg) {
     const span = Math.max(1, horY - yTop), amp = tex * 1.4 / bands;
     for (let y = 0; y < Math.min(horY, H); y++) {
       const u0 = (y - yTop) / span, row = y * TW;
@@ -20555,12 +20893,15 @@ function skyBack(V) {
     B.bg.cx.putImageData(B.bg.img, 0, 0); B.bgSun = [1e9, -1];
   }
   {
+    if (kg) skyTexGPU(K, KC, bands, horY, yTop, shX, tex);   // (the gradient by the GPU, the sun or the moon over it)
+    else {
     // (the sun's rows of last frame put back from the pristine gradient, the sun drawn afresh, those rows uploaded)
     const s = B.bgSun; if (s[1] >= s[0]) B.bg.buf.set(B.bg0.subarray(s[0] * CW, (s[1] + 1) * CW), s[0] * CW);
     BY0 = 1e9; BY1 = -1;
     drawSun(horY);
     outImg(B.bg.cv, CW, 0, H, -CPX, 0, CW * CPX, H * CPX);
     if (BY1 >= BY0) { const y0 = Math.max(0, BY0), y1 = Math.min(H - 1, BY1); s[0] = y0; s[1] = y1; outPix(B.bg, CW, y0, y1 - y0 + 1, -CPX, y0 * CPX, CW * CPX, (y1 - y0 + 1) * CPX, false); } else { s[0] = 1e9; s[1] = -1; }
+    }
     if (SUNG) outSun(SUNG);   // (the disc, on the GPU through the heat: 14-sun-moon.js, 40-gl.js GL_SFS)
     // (the burn's disc for this view's decks: the sun's or the moon's; its colour the disc's light: the sun's white by day, the sunset's
     // warm gold (its highlight tone, PAL.set[5]) as it goes down - 13:10, "It doesnt make sense to have a yellow burn on daytime, it
@@ -21924,14 +22265,15 @@ function skySun() {
 }
 // the outPix calls of a view, kept so the other half of a shared view lays the same pictures (no second drawing)
 let REC = null;
-const outPix0 = outPix, outImg0 = outImg, outRays0 = outRays, outSun0 = outSun, outBurn0 = outBurn;
+const outPix0 = outPix, outImg0 = outImg, outRays0 = outRays, outSun0 = outSun, outBurn0 = outBurn, outSky0 = outSky;
 outPix = (...a) => { if (REC) REC.push([0, a]); const t0 = performance.now(); outPix0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };   // (FT.out: the laying of the pictures, within the parts' times)
 outImg = (...a) => { if (REC) REC.push([1, a]); const t0 = performance.now(); outImg0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };
 outSun = (...a) => { if (REC) REC.push([3, a]); outSun0(...a); };
 outBurn = (...a) => { if (REC) REC.push([4, a]); outBurn0(...a); };
+outSky = (...a) => { if (REC) REC.push([5, a]); const t0 = performance.now(); outSky0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };   // (the sky's texture by the GPU - 17-frame.js skyTexGPU)
 outRays = (...a) => { if (REC) REC.push([2, a]); const t0 = performance.now(); outRays0(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; };
 // (a layer or a canvas laid again is drawn from its texture, not uploaded again; a buffer is uploaded again)
-function replay(list, V) { const v0 = VIEW, c0 = ctx; VIEW = V; ctx = V.ctx; M = V.zr / ZL; const t0 = performance.now(); for (const [k, a] of list) (k === 4 ? outBurn0 : k === 3 ? outSun0 : k === 2 ? outRays0 : k ? outImg0 : outPix0)(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; VIEW = v0; ctx = c0; }
+function replay(list, V) { const v0 = VIEW, c0 = ctx; VIEW = V; ctx = V.ctx; M = V.zr / ZL; const t0 = performance.now(); for (const [k, a] of list) (k === 5 ? outSky0 : k === 4 ? outBurn0 : k === 3 ? outSun0 : k === 2 ? outRays0 : k ? outImg0 : outPix0)(...a); FTV.out = (FTV.out || 0) + performance.now() - t0; VIEW = v0; ctx = c0; }
 const REC_BACK = [[], []], REC_DECKS = [[], []], REC_DECKS2 = [[], []], REC_VEIL = [[], []], REC_FRONT = [[], []];
 // the view's screen pixels of a picture point (unmagnified view pixels)
 const toScreen = (V, x, y) => [picX(V, x), picY(V, y)];   // (17-frame.js: the one mapping)
@@ -23395,6 +23737,7 @@ function renderObjects() {
     C.restore();
   }
   drawPlanesAir(x0, x1);
+  const lampV = lampSnapshot();                           // (the sub lamps: what's under the water as it is, before the water's tint - 27-sub-light)
   const over = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(SEABED_DEEP + 150));
   const ov = 0.08 * E.storm;
   const sso = E.sunset, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12);
@@ -23402,6 +23745,7 @@ function renderObjects() {
   C.fillStyle = over;
   if (gpuwOn('cols')) wglColumns([{ k: 'grad', g: over, yOff: 0 }, { k: 'strips' }], Bt);   // (the tint and the middle of the ocean's dark, one pass on the GPU)
   else { fillBelowSurface(0, Bt); drawDeepWater(); }
+  if (lampV) lampUncover(lampV);                          // (and laid back over the tint where their beams fall)
   ot = ema('obOver', ot);
   drawRockForms(x0, x1);                                  // (the solid rocks: over the water's tint, k times its colour, so their light and shade read - user Oct 25)
   // (the near-black rocks in front of the floor come after the water's distortion: user Oct 25, they don't ripple -
@@ -23870,19 +24214,66 @@ function shadowRow(L, w, u, y, h, colKey, q, shear) {
   }
   q = Math.min(1, q);
   let runX = 0, runN = 0, runDy = 0;
-  const flush = xEnd => { if (!runN) return; if (PATHS) shadowRect(runN, q, runDy, runX, y, xEnd - runX, h); else if (BATCH) plRect(`rgba(${colKey},${(1 - Math.pow(1 - q, runN)).toFixed(3)})`, runX, y + runDy, xEnd - runX, h); else { fs1(`rgba(${colKey},${(1 - Math.pow(1 - q, runN)).toFixed(3)})`); C.fillRect(runX, y + runDy, xEnd - runX, h); } };
+  // (plain mode on the GPU: the run's colour packed once per band count, no colour string to build and parse - the same
+  // bytes the string would have given: its alpha to three decimals, then glPack's rounding)
+  const packed = !PATHS && !BATCH && C.fillRectCol && C.globalAlpha === 1 ? shColOf(colKey) : null;
+  if (packed) SH_PK[1] = SH_PK[2] = SH_PK[3] = SH_PK[4] = 0;
+  const flush = xEnd => {
+    if (!runN) return;
+    if (packed) { let p = SH_PK[runN]; if (!p) { const A = Math.round(+(1 - Math.pow(1 - q, runN)).toFixed(3) * 255), f = A / 255; p = SH_PK[runN] = ((A << 24) | (Math.round(packed[2] * f) << 16) | (Math.round(packed[1] * f) << 8) | Math.round(packed[0] * f)) >>> 0; } C.fillRectCol(runX, y + runDy, xEnd - runX, h, p); return; }
+    if (PATHS) shadowRect(runN, q, runDy, runX, y, xEnd - runX, h); else if (BATCH) plRect(`rgba(${colKey},${(1 - Math.pow(1 - q, runN)).toFixed(3)})`, runX, y + runDy, xEnd - runX, h); else { fs1(`rgba(${colKey},${(1 - Math.pow(1 - q, runN)).toFixed(3)})`); C.fillRect(runX, y + runDy, xEnd - runX, h); }
+  };
   const x0 = Math.min(SH_BL[0], SH_BL[1], SH_BL[2], SH_BL[3]), x1 = Math.max(SH_BR[0], SH_BR[1], SH_BR[2], SH_BR[3]);
-  for (let x = x0; x <= x1; x += PB) {
+  // The band count only changes at a band's edge, so the row is walked edge to edge (nine stops at most) instead of
+  // pixel block by pixel block (hundreds). Where the shadow is sheared, dy can change inside a stretch between
+  // edges, and that stretch is walked block by block as before. The runs that come out are the same.
+  const E = SH_EDGE; for (let b = 0; b < 4; b++) { E[b] = SH_BL[b]; E[b + 4] = SH_BR[b]; } E[8] = x1; E.sort(shEdgeCmp);
+  const level = shear.level === true;
+  let x = x0;
+  for (let i = 0; i < 9 && x <= x1; i++) {
+    const xe = E[i]; if (xe <= x) continue;
+    // the stretch [x, xe): the band count is fixed here
     let n = 0;
     if (x < x1) for (let b = 0; b < 4; b++) if (x >= SH_BL[b] && x < SH_BR[b]) n++;
-    const dy = n ? shear(x) : 0;
-    if (n !== runN || dy !== runDy) { flush(x); runX = x; runN = n; runDy = dy; }
+    if (level || !n) {
+      const dy = n ? shear(x) : 0;
+      if (n !== runN || dy !== runDy) { flush(x); runX = x; runN = n; runDy = dy; }
+      x = xe;
+    } else if (shear.tn !== undefined) {
+      // a shear about one pivot: dy is a step function of x, so the walk jumps to where the next step falls
+      // (worked out from the line, then checked against shear itself, so the steps land exactly where the scan's did)
+      for (; x < xe;) {
+        const dy = shear(x);
+        if (n !== runN || dy !== runDy) { flush(x); runX = x; runN = n; runDy = dy; }
+        x = shNextStep(shear, x, dy, xe);
+      }
+    } else for (; x < xe; x += PB) {
+      const dy = shear(x);
+      if (n !== runN || dy !== runDy) { flush(x); runX = x; runN = n; runDy = dy; }
+    }
   }
-  flush(x1);
+  if (x <= x1) { if (runN) { flush(x1); runN = 0; } }   // (at x1 the count is 0: the last run ends there)
+  else flush(x1);
+}
+const SH_EDGE = [0, 0, 0, 0, 0, 0, 0, 0, 0], shEdgeCmp = (a, b) => a - b;
+const SH_PK = [0, 0, 0, 0, 0], SH_COLS = new Map();     // (the row's packed colours by band count; a colour key's r, g, b)
+function shColOf(key) { let c = SH_COLS.get(key); if (!c) { c = key.split(',').map(Number); SH_COLS.set(key, c); } return c; }
+// the first pixel block past x (up to xe) where a pivot shear's dy differs from dy at x: the step's place from the line,
+// then moved block by block until shear(x' - PB) === dy and shear(x') !== dy (or xe is reached)
+function shNextStep(shear, x, dy, xe) {
+  const tn = shear.tn, pivot = shear.pivot, m = dy / PB;
+  // dy = round(tn * (x + PB/2 - pivot) / PB) * PB; the rounding changes where tn * (x' + PB/2 - pivot) / PB = m +- 0.5
+  const xs = pivot - PB / 2 + PB * (m + (tn > 0 ? 0.5 : -0.5)) / tn;
+  let xn = x + Math.max(PB, Math.ceil((xs - x) / PB) * PB);
+  if (xn >= xe) xn = xe;
+  while (xn > x + PB && shear(xn - PB) !== dy) xn -= PB;
+  while (xn < xe && shear(xn) === dy) xn += PB;
+  return xn;
 }
 // The shadow is sheared about ONE pivot under the hull, so each column of it moves as a block and its rows
 // always butt together (a pivot that drifted row by row made rows overlap or part as the hull pitched)
-const shearFn = (tn, pivot) => Math.abs(tn) < 0.004 ? () => 0 : x => Math.round(tn * (x + PB / 2 - pivot) / PB) * PB;
+const shearFn = (tn, pivot) => { if (Math.abs(tn) < 0.004) return SHEAR_NONE; const f = x => Math.round(tn * (x + PB / 2 - pivot) / PB) * PB; f.tn = tn; f.pivot = pivot; return f; };
+const SHEAR_NONE = () => 0; SHEAR_NONE.level = true;   // (a level shadow: shadowRow walks it edge to edge)
 function drawShipShadows(x0, x1) {
   const dayS = E.day * (1 - 0.75 * E.overcast) * (1 - 0.5 * E.storm) * (1 - E.fog);
   const nightS = E.night * (1 - 0.6 * E.overcast) * (1 - E.fog);
@@ -24066,10 +24457,11 @@ function blkLine(xa, ya, xb, yb) {
 // a soft halo in many faint hard-edged rings: brightest in the middle, melting into the air
 function softGlow(cx, cy, R, col, a, rings = 6) {
   rings = Math.max(rings, Math.min(18, Math.round(R / (PB * 4))));   // big halos get finer steps
+  const bx = Math.floor(cx / PB) * PB, by = Math.floor(cy / PB) * PB;   // the centre block, once (not once per row)
   for (let k = rings; k >= 1; k--) {
     const r = Math.max(PB, Math.round(R * k / rings / PB) * PB);
     C.fillStyle = rgbs(col, a / rings * (1.3 - 0.5 * k / rings));
-    for (let j = -r; j < r; j += PB) { const w = Math.floor(Math.sqrt(r * r - (j + PB / 2) * (j + PB / 2)) / PB) * PB; C.fillRect(Math.floor(cx / PB) * PB - w, Math.floor(cy / PB) * PB + j, w * 2, PB); }
+    for (let j = -r; j < r; j += PB) { const w = Math.floor(Math.sqrt(r * r - (j + PB / 2) * (j + PB / 2)) / PB) * PB; C.fillRect(bx - w, by + j, w * 2, PB); }
   }
 }
 // A three-step light pool, for additive ('lighter') glows: built once per size and colour as a sprite
@@ -26905,7 +27297,7 @@ function render() {
   g.drawImage(ob, 0, 0);
   }
   g.setTransform(1, 0, 0, 1, 0, 0);
-  for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); drawLighthouseGlow(); drawLateLit(); drawAirLamps(); drawPlaneLamps(); guardDraw('newsky', skyNewFront); drawFwLate(); g.restore(); }
+  for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); drawLampLight(); drawLighthouseGlow(); drawLateLit(); drawAirLamps(); drawPlaneLamps(); guardDraw('newsky', skyNewFront); drawFwLate(); g.restore(); }
   // (OPEN WORLD: the underwater caves where the exploration sub's lamp finds them - over the world and its night, as the
   // lamp's own light is - 50-land-caves)
   if (OWM && CAVE.ready) for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); guardDraw('caves', CAVE.draw); g.restore(); }
@@ -29237,23 +29629,22 @@ function subMove(s, dt, lever, stick) {
     else addBubble(bx, byy + WATER_Y, -s.facing * rnd(5, 15), -rnd(10, 25), rnd(0.6, 1.4));
   }
 }
-// the sub whose lamp lights the caves this frame: one that's out, in or by a system (its beam's reach), the nearest the
-// middle of the view
+// the sub whose lamp lights the caves this frame: one with its lamp on (subLamps: an exploration sub out, an army sub with
+// her light on - the one list), in or by a system (its beam's reach), the nearest the middle of the view
 function pickLamp(cx, cy) {
   LIT.on = false; LIT.s = null;
   if (!CV.ready || typeof minisubs === 'undefined') return;
   let best = null, bd = 1e18;
   const R = P.reach + 40;
-  for (const s of minisubs) {
-    if (s.state !== 'out') continue;
-    const Y = s.y - WATER_Y;
+  for (const l of subLamps()) {
+    const s = l.s, Y = s.y - WATER_Y;
     if (!CV.wins.some(Wn => Wn && s.x > Wn.X0 - R && s.x < Wn.X1 + R && Y > Wn.Y0 - R && Y < Wn.Y1 + R)) continue;
-    const d = (s.x - cx) ** 2 + (Y - cy) ** 2; if (d < bd) { bd = d; best = s; }
+    const d = (s.x - cx) ** 2 + (Y - cy) ** 2; if (d < bd) { bd = d; best = l; }
   }
   if (!best) return;
-  LIT.on = true; LIT.s = best;
-  SUB.x = best.x; SUB.y = best.y - WATER_Y;
-  SUB.aimA = best.aimA != null ? best.aimA : (best.facing > 0 ? 0.4 : Math.PI - 0.4);
+  LIT.on = true; LIT.s = best.s;
+  // (the lamp's rays start 7 ahead of SUB along its aim, lampRays: SUB put so they start at the lamp itself)
+  SUB.aimA = best.a; SUB.x = best.x - Math.cos(best.a) * 7; SUB.y = best.y - Math.sin(best.a) * 7 - WATER_Y;
 }
 const subAim = () => [Math.cos(SUB.aimA), Math.sin(SUB.aimA)];
 
@@ -32755,10 +33146,10 @@ function drawInk(x0, x1) {
     for (let wx = L - st; wx < R + st; wx += st) { const X = Math.round(PX(wx)), top = Math.round(PY(WATER_Y + 2)), bot = Math.round(PY(seabedY(wx + st / 2))); if (bot > top) C.rect(X, top, Math.round(PX(wx + st)) - X, bot - top); }
     C.clip();
     // (a deep blue haze round the plume first - the ink thinning into the water - then the billows themselves)
-    // (user Oct 27: "Light from the research sub doesn't work in oil spill (doesn't see through)") a minisub's lamp cuts
+    // (user Oct 27: "Light from the research sub doesn't work in oil spill (doesn't see through)") a sub's lamp (any: subLamps) cuts
     // through it: where its beam falls (chestLit - the beam's own reach and spread) the ink thins away, so what's in it
     // and behind it shows in the light; its beam (drawn after, over everything) then lights the murk that's left
-    const lamps = minisubs.some(m => m.state === 'out'), seen = q => lamps ? 1 - 0.85 * chestLit(q.x, q.y) : 1;
+    const lamps = subLamps().length > 0, seen = q => lamps ? 1 - 0.85 * chestLit(q.x, q.y) : 1;
     for (const p of o.ink) {
       if (p.x + p.r * 2 < x0 || p.x - p.r * 2 > x1 || p.a < 0.02) continue;
       const d = Math.round(p.r * 3.6 * SV); C.globalAlpha = Math.min(1, p.a * 0.3) * seen(p); C.drawImage(H, Math.round(PX(p.x) - d / 2), Math.round(PY(p.y) - d / 2), d, d);
@@ -33361,9 +33752,28 @@ function cargoAway(c) {
 // a hit on a box (its own, never the ship's): on land it burns black where it stands, sparks, no blast; on a ship it's
 // knocked off into the sea; held, it's dropped (user Oct 27 [16]: on a helicopter's magnet too - it's let go and falls;
 // lying on a ship's deck, knocked off into the sea, burnt)
+// (opt-fight, Oct 30: every round and shell asked this each physics step through civHit, and each call built the whole
+// list of boxes first - an array for every box on every pier. contFind walks the same boxes in the same order (contPlaces')
+// and stops at the first one the point is in: the same box taken, nothing made for the others)
+const contIn = (x, y, cx, cy) => !(Math.abs(x - cx) > CONT_W / 2 + 1 || Math.abs(y - cy) > CONT_H / 2 + 1);
+function contFind(x, y) {
+  for (const cr of cranes) {
+    for (const s of cr.slots) { const st = s.stack; for (let j = 0; j < st.length; j++) { const cy = DECK_Y - CONT_H * (j + 0.5); if (contIn(x, y, s.x, cy)) return [st[j], s.x, cy, 0, 'dock']; } }
+    if (cr.load) { const cy = cr.hy + 3 + CONT_H / 2; if (contIn(x, y, cr.tx, cy)) return [cr.load, cr.tx, cy, 0, 'held', cr]; }
+  }
+  for (const c of civShips) {
+    if (!c.cargo || (c.state !== 'sail' && c.state !== 'sink') || !(x >= c.x - CONT_REACH(c) && x <= c.x + CONT_REACH(c))) continue;
+    if (CIV_SKIP && CIV_SKIP.includes(c)) continue;                     // (a ship the battleship is passing: her boxes too)
+    const cg = c.cargo;
+    for (let i = 0; i < cg.length; i++) { const st = cg[i]; for (let j = 0; j < st.length; j++) { const [cx, cy, a] = cargoAt(c, i, j); if (contIn(x, y, cx, cy)) return [st[j], cx, cy, a, 'ship', c, i]; } }
+  }
+  for (const k of containers) if ((k.where === 'free' || k.where === 'rest' || k.where === 'hook') && contIn(x, y, k.x, k.y)) return [k, k.x, k.y, k.a, k.where];
+  return null;
+}
 function contHit(x, y, dmg, vx, P) {
   if (!LAND || !containers.length) return false;
-  for (const [k, cx, cy, ca, where, owner, i] of P || contPlaces((x0, x1) => x >= x0 && x <= x1)) {
+  if (!P) { const q = contFind(x, y); if (!q) return false; P = [q]; }
+  for (const [k, cx, cy, ca, where, owner, i] of P) {
     if (where === 'ship' && owner.cargo[i].indexOf(k) < 0) continue;   // (already knocked off this frame)
     if (where === 'ship' && CIV_SKIP && CIV_SKIP.includes(owner)) continue;   // (a ship the battleship is passing: her boxes too)
     if (Math.abs(x - cx) > CONT_W / 2 + 1 || Math.abs(y - cy) > CONT_H / 2 + 1) continue;
@@ -36717,10 +37127,16 @@ function magRopes() {
   return L;
 }
 function ropeBulletHit(b) {
+  // (opt-fight, Oct 30: a segment the round's whole path this step stays 5 clear of, box to box, can't be within 4 of it -
+  // passed over before the sweep; the same segments hit as before)
+  const bx0 = b._lx != null ? b._lx : b.x, by0 = b._ly != null ? b._ly : b.y;
+  const xa = Math.min(bx0, b.x) - 5, xb = Math.max(bx0, b.x) + 5, ya = Math.min(by0, b.y) - 5, yb = Math.max(by0, b.y) + 5;
   for (const [h, P, R] of magRopes()) {
     if (b.owner === h.id && helis.includes(h)) continue;
     for (let i = 0; i < P.length - 1; i++) {
-      const a = P[i], c = P[i + 1], vx = c[0] - a[0], vy = c[1] - a[1], L2 = vx * vx + vy * vy || 1;
+      const a = P[i], c = P[i + 1];
+      if ((a[0] < xa && c[0] < xa) || (a[0] > xb && c[0] > xb) || (a[1] < ya && c[1] < ya) || (a[1] > yb && c[1] > yb)) continue;
+      const vx = c[0] - a[0], vy = c[1] - a[1], L2 = vx * vx + vy * vy || 1;
       // (along the round's path since last frame: a thin rope, a fast round)
       const near = (x, y) => { const u = clamp(((x - a[0]) * vx + (y - a[1]) * vy) / L2, 0, 1), qx = a[0] + vx * u - x, qy = a[1] + vy * u - y; return qx * qx + qy * qy < 16; };
       const q = sweepHit(b, near);
@@ -38002,9 +38418,7 @@ function abyssLights() {
     const fc = msToUs(sub);
     out.push({ x: X, y: Y, r: (50 + 110 * fc) * SV, k: 0.9 });
     // (user Oct 25 late: it aims the way you go - down going down, left going left - and spreads 90 degrees, so you
-    // pick what's lit by the way you steer; still, it keeps its last aim)
-    const [ux, uy] = msAim(sub);
-    if (fc < 0.9) out.push({ x: X + ux * 8 * SV, y: Y + uy * 8 * SV, ux, uy, L: 460 * SV * (1 - 0.9 * fc), k: 1, beam: true });
+    // pick what's lit by the way you steer; still, it keeps its last aim) - its beam: every lamp's, subAbyssLights
   }
   // (user Oct 26, the target picture: the wreck itself seen in a dim pool of the light from far above, so it reads in the
   // deep even before the sub's lamp finds it)
@@ -38013,17 +38427,8 @@ function abyssLights() {
   // a 'glint' so the player has to explore with the lights of their sub" - see chestGlint)
   return out;
 }
-// how much a sub's lamp lights a point (0..1): inside its beam, nearer brighter; or just by the sub
-function chestLit(x, y) {
-  let k = 0;
-  for (const sub of minisubs) {
-    if (sub.state !== 'out') continue;
-    const dx = x - sub.x, dy = y - sub.y, d = Math.hypot(dx, dy); if (d > 460) continue;
-    const [ux, uy] = msAim(sub), c = d < 1 ? 1 : (dx * ux + dy * uy) / d;
-    k = Math.max(k, d < 50 ? 1 - d / 60 : smoothstep(0.75, 0.93, c) * (1 - d / 460));
-  }
-  return clamp(k, 0, 1);
-}
+// how much a sub's lamp lights a point (0..1): every lamp's, the one beam (lampBeamAt - 27-sub-light.js)
+const chestLit = (x, y) => lampLitAt(x, y);
 // the treasure's glint (0..1): now and then a short sparkle; in a sub's beam, often and bright
 function chestGlint(w, lit) {
   const T = time * (0.9 + 2.2 * lit) + w.ph * 3, i = Math.floor(T), u = T - i;
@@ -38070,31 +38475,7 @@ function drawDeepLights(x0, x1, only) {
       C.restore();
     }
   }
-  // (user Oct 28, 14:48: the light cut off at the screen's middle - the screen is two half views, each drawing only the
-  // beams that reach into it; the beam is MS_BEAM_L long, so a sub that far past a view's edge still lights it)
-  if (only) return;                                               // (a cave's pass: the chests only)
-  for (const sub of minisubs) if (sub.state === 'out' && msArt && sub.x > x0 - MS_BEAM_L - 40 && sub.x < x1 + MS_BEAM_L + 40) {
-    // its headlight: a cone of light the way it aims, fading out into the dark (brighter the deeper it is)
-    const fc = msToUs(sub), [ux, uy] = msAim(sub), X = PX(sub.x) + ux * 8 * SV * (1 - fc), Y = PY(sub.y) + uy * 8 * SV * (1 - fc), L = MS_BEAM_L * SV * (1 - 0.9 * fc), deep = clamp((sub.y - SEABED_DEEP) / 900, 0, 1);
-    // turned to us, the lamp is a round glow looking out of the screen
-    if (fc > 0.05) { const R = (14 + 46 * fc) * SV, g = C.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, `rgba(250,252,255,${(0.95 * fc).toFixed(3)})`); g.addColorStop(0.18, `rgba(235,244,255,${(0.6 * fc).toFixed(3)})`); g.addColorStop(1, 'rgba(220,235,255,0)'); C.fillStyle = g; C.fillRect(Math.round(X - R), Math.round(Y - R), Math.round(R * 2), Math.round(R * 2)); }
-    // (user Oct 27, 14:58: "Sub light should be a constant strong light, not disappear. Its super important for
-    // gameplay.") the beam itself: a strong cone of light, drawn after the night's tint (lateLit) and added to what's
-    // under it, so the floor, rocks, wrecks and fish in it are lit - the same at every hour and every depth, standing out
-    // the more the darker it is round it (the deep's dark is opened along it too: abyssLights / drawAbyss). Only under
-    // the water; a bright spot at the lamp itself
-    const sp = msBeamSprite(), sc = L / sp.width, a = sub.aimA == null ? Math.atan2(uy, ux) : sub.aimA, wy = Math.round(PY(WATER_Y + 2));
-    lateLit[viewIdx].push(() => {
-      C.save(); C.beginPath(); C.rect(-SHX - 4, wy, VWP + 2 * SHX + 8, bh - SHY - wy + 4); C.clip();
-      const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = true;
-      C.globalCompositeOperation = 'lighter'; C.globalAlpha = MS_BEAM_A;
-      C.translate(X, Y); C.rotate(a); C.drawImage(sp, 0, -Math.round(sp.height * sc / 2), Math.round(sp.width * sc), Math.round(sp.height * sc));
-      C.restore(); C.save();
-      C.globalCompositeOperation = 'lighter'; C.globalAlpha = 1;
-      const R = 7 * SV, g = C.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, 'rgba(250,252,255,0.95)'); g.addColorStop(1, 'rgba(230,240,255,0)'); C.fillStyle = g; C.fillRect(Math.round(X - R), Math.round(Y - R), Math.round(2 * R), Math.round(2 * R));
-      C.imageSmoothingEnabled = sm; C.restore();
-    });
-  }
+  // (the beams themselves, every lamp's, after this: drawSubLights, 27-sub-light.js)
 }
 // the beam's light: a cone along +x from its lamp (at the left middle), spreading about 90 degrees (user Oct 25 late),
 // brightest along its middle and near the lamp, fading out to its length; smooth (a light, never blocky), made once
@@ -44137,8 +44518,8 @@ function landShellHit(s) {
     if (p === s.owner) continue;
     const t = tanks[p], h = helis[p];
     let q;
-    if (t && t.state === 'alive' && (q = sweepHit(s, (x, y) => tankHit(t, x, y)))) { s.x = q[0]; s.y = q[1]; landBlast(s, s.x, s.y, t); return true; }
-    if (h && (h.state === 'fly' || h.state === 'landed') && (q = sweepHit(s, (x, y) => heliHit(h, x, y)))) { s.x = q[0]; s.y = q[1]; landBlast(s, s.x, s.y, h); return true; }
+    if (t && t.state === 'alive' && sweepReach(s, t.x, t.y, tankReach()) && (q = sweepHit(s, (x, y) => tankHit(t, x, y)))) { s.x = q[0]; s.y = q[1]; landBlast(s, s.x, s.y, t); return true; }
+    if (h && (h.state === 'fly' || h.state === 'landed') && sweepReach(s, h.x, h.y, heliReach()) && (q = sweepHit(s, (x, y) => heliHit(h, x, y)))) { s.x = q[0]; s.y = q[1]; landBlast(s, s.x, s.y, h); return true; }
   }
   if (plantShellHit(s)) { landBlast(s, s.x, s.y, null); return true; }   // (into a standing tree, palm or cactus: it goes off there - user Oct 27)
   s._lx = s.x; s._ly = s.y;
@@ -44338,8 +44719,8 @@ function landBulletHit(b) {
     if (p === b.owner) continue;
     const t = tanks[p], h = helis[p];
     let q;
-    if (t && t.state === 'alive' && (q = sweepHit(b, (x, y) => tankHit(t, x, y)))) { tankHurt(t, VTUNE.tank.hp / (VTUNE.plane.hits * 6 * 4), q[0], q[1]); spawnSparks(q[0], q[1], 3, 120); return true; }
-    if (h && (h.state === 'fly' || h.state === 'landed') && (q = sweepHit(b, (x, y) => heliHit(h, x, y)))) { heliHurt(h, VTUNE.mg.heli, q[0], q[1]); spawnSparks(q[0], q[1], 3, 120); return true; }
+    if (t && t.state === 'alive' && sweepReach(b, t.x, t.y, tankReach()) && (q = sweepHit(b, (x, y) => tankHit(t, x, y)))) { tankHurt(t, VTUNE.tank.hp / (VTUNE.plane.hits * 6 * 4), q[0], q[1]); spawnSparks(q[0], q[1], 3, 120); return true; }
+    if (h && (h.state === 'fly' || h.state === 'landed') && sweepReach(b, h.x, h.y, heliReach()) && (q = sweepHit(b, (x, y) => heliHit(h, x, y)))) { heliHurt(h, VTUNE.mg.heli, q[0], q[1]); spawnSparks(q[0], q[1], 3, 120); return true; }
   }
   b._lx = b.x; b._ly = b.y;
   if (plantBulletHit(b)) return true;                                // (a tree, a palm, a cactus, scrub, grass in its way: chipped - 50-land-plants)
@@ -44361,6 +44742,12 @@ function heliHit(h, x, y) {
 }
 // along a projectile's path since the last frame, so a fast one can't skip over what it should hit: the first point
 // where fn(x, y) is true, or null
+// (opt-fight, Oct 30) can the path sweepHit walks come within R of (cx, cy) at all? (box to box) - false: every point it would
+// test is out of reach, so the sweep is passed over; tankReach / heliReach: the farthest point of tankHit's / heliHit's shape
+// from the vehicle's middle (heliHit's widest pose), and 1 to spare
+function sweepReach(o, cx, cy, R) { const x0 = o._lx != null ? o._lx : o.x, y0 = o._ly != null ? o._ly : o.y; return !(Math.min(x0, o.x) > cx + R || Math.max(x0, o.x) < cx - R || Math.min(y0, o.y) > cy + R || Math.max(y0, o.y) < cy - R); }
+const tankReach = () => Math.hypot(Math.max(TANK_W * 0.5, Math.abs(TANK_TUR[0]), Math.abs(TANK_TUR[1])), Math.max(1, Math.abs(TANK_DECK), Math.abs(TANK_DECK - 1), Math.abs(TANK_TOPY - 1))) + 1;
+const heliReach = () => { const w = heliHalf() * 1.05, sk = heliSkid(); return Math.hypot(Math.abs(w), Math.abs(sk) * 1.25) + 1; };
 function sweepHit(o, fn) {
   const x0 = o._lx != null ? o._lx : o.x, y0 = o._ly != null ? o._ly : o.y, n = Math.min(12, Math.ceil(Math.hypot(o.x - x0, o.y - y0) / 4));
   for (let k = 1; k <= n; k++) { const u = k / n, x = x0 + (o.x - x0) * u, y = y0 + (o.y - y0) * u; if (fn(x, y)) return [x, y]; }
@@ -46311,7 +46698,9 @@ function frameBody(now) {
   const q0 = performance.now();
   updateCamera(dt, false);
   const q1 = performance.now();
-  if (!SIM_ONLY && !NO_DRAW && !SW_IN_WORKER) render();             // (the simulation worker never draws or plays: 00-sw-boot.js)
+  // (the simulation worker never draws or plays: 00-sw-boot.js. A frame not drawn still works out the light and the wind from
+  // the weather, E - render() does it first thing, and the game's next steps read it: a ship's drift, the waves - Oct 30 gate)
+  if (!SIM_ONLY && !NO_DRAW && !SW_IN_WORKER) render(); else computeEnv();
   const q2 = performance.now();
   if (!SIM_ONLY && !SW_IN_WORKER) audioUpdate(dt);
   const q3 = performance.now(), PQ = perf.parts || (perf.parts = {});
@@ -46374,7 +46763,7 @@ async function start(data) {
     set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, calmAt: x => calmAt(x), harbourTop: (x, y) => harbourTop(x, y), crumbleTower: tw => crumbleTower(tw), vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers[p]), seaHeli: (x, y) => { const h = helis[0] = makeHeli(0, x); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.merge ? 'single' : 'split', cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
     landState: () => land, landPlants: () => ({ PLT, PK, plantGeo, treeAt, plantsBlast, plantIgnite, plantFell, plantHeat, fireSpots: () => fireSpots([]) }), land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => L.s.c.toDataURL()); }, wrecks: () => landWrecks.length, top: x => landTop(x), below: (x, y) => landBelow(x, y), sandActive: () => land.sand.length,
       sandX: () => { let best = -1, bx = WORLD_W / 2; for (let c = 0; c < land.cols; c++) { let r = ltR0(c); while (r < ltR1(c) && land.cell[ltIdx(c, r)] === M_AIR) r++; let n = 0; while (r + n < ltR1(c) && land.cell[ltIdx(c, r + n)] === M_SAND) n++; if (n > best) { best = n; bx = (c + 0.5) * LT_CELL; } } return bx; }, sandCount: () => { let n = 0; for (const v of land.cell) if (v === M_SAND) n++; return n; }, rockX: () => land.outcrops[0] ? land.outcrops[0].x : WORLD_W / 2, rockAt: x => ltCell(ltCol(x), ltRow(landTop(x)) ) }),
-    rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, SEA0, SEA1, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? SEA1 + 10 : SEA0 - 10)), get LAND_Y() { return LAND_Y; }, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, civSpawn: (kind, x, lo, hi, dir) => { const c = newCivShip(kind, x, lo, hi, dir); civShips.push(c); return c; }, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
+    rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, SEA0, SEA1, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? SEA1 + 10 : SEA0 - 10)), get LAND_Y() { return LAND_Y; }, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), civLose: v => { const k = civClass(v); if (k === 'air') trafficDown(v); else if (k === 'ship') civSink(v, 0); else if (k === 'boat') jetboatSink(v); else if (k === 'balloon') balloonPop(v); else if (k === 'heli') civHeliDown(v); else if (k === 'sub') minisubLost(v); else if (k === 'seaplane') spDown(v); else if (k === 'blimp') blimpBurst(v); else if (k === 'yacht') sinkSailboat(v, v.x, v.y, 0); else if (k === 'shuttle') groundCrash(v, 1); return k; },   /* (tools: a civilian vehicle lost by its own rule - tools/civloss.mjs) */ lampScene: (gap = 150, hour = 23) => { const x = (SEA0 + SEA1) / 2, y = WATER_Y + (seabedY(x) - WATER_Y) * 0.5, a = subs[0], b = subs[1], dx = SUB_L + gap; for (const [s, sx, f] of [[a, x - dx / 2, 1], [b, x + dx / 2, -1]]) Object.assign(s, { state: 'out', gate: null, auto: null, x: sx, y, depthT: y, vx: 0, vy: 0, facing: f, turn: null, input: 0, throttle: 0, a: 0 }); a.light = true; b.light = false; a.lamp = { elev: 0, power: 0, aimShow: 0 }; const [lx, ly] = subArtPt(a, ...SUB_LAMP_AT), el = clamp(Math.atan2(b.y - ly, b.x - lx) * 180 / Math.PI, 0, 180); a.lamp.elev = el; a.aimA = el * Math.PI / 180; env.time = hour; computeEnv(); camOverride[0] = [x, y]; paused = true; return { x: Math.round(x), y: Math.round(y), elev: +el.toFixed(1) }; },   /* (the sub lamp's check, user Oct 30: two subs a gap apart at mid-depth, the left one's light on the other, at night; paused there) */ boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, civSpawn: (kind, x, lo, hi, dir) => { const c = newCivShip(kind, x, lo, hi, dir); civShips.push(c); return c; }, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
     debugJetArt: () => { if (!trafficArt) buildTrafficArt(); const d = c => { const k = makeCanvas(c.width, c.height); k.getContext('2d').drawImage(c.src && c._tp ? c.src : c, 0, 0); return k.toDataURL(); }, a = trafficArt.jet[0].r, w = windowsArtDots(a); return { jet: d(a), jetWin: w ? d(w) : d(makeCanvas(1, 1)) }; }, SPACE: { ATMO_TOP, SPACE_TOP, SKY_TOP }, carve: (x, y, r) => landCarve(x, y, r), landShell: (x, y, owner, from) => { shells.push({ x, y, vx: 0, vy: 300, owner, from: from || 'tank', age: 1, trail: 0, under: false, ut: 0 }); }, tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), fgDump: () => { if (!fgStrip) buildFgStrip(); return fgStrip.sp.toDataURL(); }, reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
     gasBalls, camOverride, settled: () => Object.assign({ restDebris: restCount(), restChunks: restChunkCount() }, RST.stats), restLayer: on => { RST.on = !!on; return RST.on; }, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, whales: () => whales, smokePuff: (x, y) => spawnSmoke(x, y, { dark: 0.9, r: 5, grow: 5, lift: 40, vy: -30, life: 10, alpha: 0.7, rise: false }), deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
@@ -46384,10 +46773,12 @@ async function start(data) {
   Object.assign(window.__game, { subBeam: () => ({ L: MS_BEAM_L, sprite: msBeamSprite() }) });
   // (user Oct 30: the hit bob on every ship - a hit sent as the game sends it, and which big ship is at a point)
   Object.assign(window.__game, { emit: (t, e) => emit(t, e), civAt: (x, y) => civAt(x, y) });
+  // (the collision tests - tools/collide.mjs, collideshot.mjs: what's solid where, and the COLLISION view's switches)
+  Object.assign(window.__game, { col: { COLV, SHIP_L, UPM, CONTACT, hangarRoofAt: (d, x) => hangarRoofAt(d, x), hangarSolid: (x, y) => hangarSolid(x, y), harbourHit: (d, x, y) => harbourHit(d, x, y), enemyLimit: (p, h) => enemyLimit(p, h), onLand: x => onLand(x), isleCol: x => isleCol(x), isle: x => ISLE === null ? null : ISLE[Math.floor(x / 2.5)], owned: () => DOCKS_OWNED, docks: () => docks, civShips: () => civShips, civLen: c => civLen(c), sea: () => [SEA0, SEA1], WATER_Y, HANGAR_ROOF: () => HANGAR_ROOF(), edOpen: on => { NSKY.editor.TUNE.open = !!on; }, launch: (p, k) => launchOut(k === 'ship' ? ships[p] : subs[p]), ownTop: v => ownTop(v) } });
   // (OPEN WORLD: the kraken - tools/kraken.mjs)
   Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
-  Object.assign(window.__game, { perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}), budget: FRAME_BUDGET }) });
+  Object.assign(window.__game, { planesP: planes, perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}), budget: FRAME_BUDGET }) });
   Object.assign(window.__game, { smokeWorker: on => { if (on != null) { SMW.on = !!on; if (CAVE.worker && !CAVE.worker.fail) CAVE.worker.on = !!on; if (CAVE.buildWorker && !CAVE.buildWorker.fail) CAVE.buildWorker.on = !!on; } const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (the simulation worker, sim-worker branch: the tables and the snapshot's parts, for tools/sw-measure.mjs)
