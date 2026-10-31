@@ -1,5 +1,7 @@
 // (sim-worker) the gate and the live run, pasted into a page of the sim-worker build opened with ?simworker=test (or =1):
 //   await __swGate(240)    the worker and the page step the same fight 240 ticks from the same tables: are the tables the same?
+//                          (then the mirror: the page applies the worker's snapshots - whole, then live-shaped deltas - and its
+//                          tables are compared with the worker's on the fields a live delta carries: the effect lists' drawn ones)
 //   await __swLive(20)     then the page becomes the worker's guest for 20 s of the fight: fps, apply ms, the worker's tick ms
 // (the same as tools/sw-same.mjs, for the user's Chrome; a seeded Math.random on both sides from the set-up on)
 (() => {
@@ -26,20 +28,36 @@
     if (n % 960 === 480) { const q = (n / 960 | 0) & 1; if (T.planes[q].state === 'fly') g.downPlane(q); }`;
   const STEP = N => `for (let k = 0; k < ${N}; k++) { ${SHOOT} g.stepQuiet(1 / 120, 1); } return [g.time, T.REG.tick];`;
   const both = async code => { const g = __game; return [new Function('g', 'T', code)(g, g.swT), await g.sw.run(code)]; };
-  const cmp = (A, B, skip = []) => {
-    const out = { tables: 0, same: 0, values: 0, differ: 0, by: {}, first: [], rng: [] };
-    const walk = (a, b, path, tb) => {
-      if (a && typeof a === 'object' && b && typeof b === 'object') { for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) walk(a[k], b[k], path + '.' + k, tb); return; }
+  // (keep: per table, the row fields compared - the effect lists' drawn fields (SW_DRAW) after a live-shaped delta; a field
+  // 'a.b' names a field of the small objects in the row's list field a. Other fields of those tables aren't sent: skipped)
+  const cmp = (A, B, skip = [], keep = null) => {
+    const out = { tables: 0, same: 0, values: 0, differ: 0, by: {}, first: [], rng: [], skipped: 0 };
+    const walk = (a, b, path, tb, lvl, col) => {
+      if (a && typeof a === 'object' && b && typeof b === 'object') {
+        const kp = keep && keep[tb];
+        for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+          if (kp && lvl === 1 && !kp.top.has(k)) { out.skipped++; continue; }
+          if (kp && lvl === 3 && kp.sub[col] && !kp.sub[col].has(k)) { out.skipped++; continue; }
+          walk(a[k], b[k], path + '.' + k, tb, lvl + 1, lvl === 1 ? k : col);
+        }
+        return;
+      }
       out.values++;
       if (a === b || (typeof a === 'number' && typeof b === 'number' && Number.isNaN(a) && Number.isNaN(b))) return;
       out.differ++; out.by[tb] = (out.by[tb] || 0) + 1;
       if (out.first.length < 30) out.first.push(path + ': ' + JSON.stringify(a)?.slice(0, 60) + ' vs ' + JSON.stringify(b)?.slice(0, 60));
     };
-    for (const k of new Set([...Object.keys(A.tables), ...Object.keys(B.tables)])) { if (skip.includes(k)) continue; out.tables++; const d0 = out.differ; walk(A.tables[k] ?? null, B.tables[k] ?? null, k, k); if (out.differ === d0) out.same++; }
+    for (const k of new Set([...Object.keys(A.tables), ...Object.keys(B.tables)])) { if (skip.includes(k)) continue; out.tables++; const d0 = out.differ; walk(A.tables[k] ?? null, B.tables[k] ?? null, k, k, 0, null); if (out.differ === d0) out.same++; }
     for (const k of new Set([...Object.keys(A.rng), ...Object.keys(B.rng)])) if (A.rng[k] !== B.rng[k]) out.rng.push(k);
     return out;
   };
   window.__swCmp = cmp;
+  // the drawn fields of each effect list (SW_DRAW, 36-zzzzz-sw-snap.js) as sets, for the mirror's compare
+  const drawnKeep = () => {
+    const D = __game.swT.SW_DRAW, K = {};
+    for (const t in D) { const top = new Set(), sub = {}; for (const e of D[t]) { const d = e.indexOf('.'); if (d < 0) top.add(e); else { top.add(e.slice(0, d)); (sub[e.slice(0, d)] || (sub[e.slice(0, d)] = new Set())).add(e.slice(d + 1)); } } K[t] = { top, sub }; }
+    return K;
+  };
   // (after a check: the page's sound and clock back)
   const unprep = () => { const g = __game; if (window.__swCtx) { g.SFX.ctx = window.__swCtx; window.__swCtx = null; } if (window.__swNow) { performance.now = window.__swNow; window.__swNow = null; } };
   // the same start on both sides: the fight set up, the page's tables loaded into the worker, both reseeded; the page's smoke air
@@ -86,11 +104,12 @@
     for (let d = 0; d < ticks; d += 60) log.push(['step', await both(STEP(Math.min(60, ticks - d)))]);
     const r = cmp(JSON.parse(JSON.stringify(g.swT.tablesSave())), JSON.parse(await g.sw.tables()));
     log.push(['gate', r.differ === 0 && !r.rng.length ? 'SAME GAME' : 'DIFFERENT', r]);
-    // the mirror: the page takes the worker's snapshots (whole, then 4 deltas of 2 ticks) and must hold the worker's state
+    // the mirror: the page takes the worker's snapshots (whole, then 4 deltas of 2 ticks shaped as live ones: the effect lists'
+    // drawn fields only) and must hold the worker's state - compared on the fields it was sent (drawnKeep; the rest skipped)
     if (g.sw.mirror) {
       log.push(['mirror whole', await g.sw.mirror(true)]);
-      for (let i = 0; i < 4; i++) { await g.sw.run(STEP(2)); log.push(['delta', await g.sw.mirror(false)]); }
-      const m = cmp(JSON.parse(JSON.stringify(g.swT.tablesSave())), JSON.parse(await g.sw.tables()), ['camera', 'smokeAir']);
+      for (let i = 0; i < 4; i++) { await g.sw.run(STEP(2)); log.push(['delta', await g.sw.mirror(false, true)]); }
+      const m = cmp(JSON.parse(JSON.stringify(g.swT.tablesSave())), JSON.parse(await g.sw.tables()), ['camera', 'smokeAir'], drawnKeep());
       log.push(['mirror', m.differ === 0 ? 'SAME' : 'DIFFERENT', m]);
     }
     unprep(); log.push(["ms", Math.round(performance.now() - t0)]);

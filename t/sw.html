@@ -254,7 +254,7 @@ function swHostReady() {
       else if (m.t === 'step') { window.__game.stepQuiet(m.dt, m.n); v = { time, tick: REG.tick }; }
       else if (m.t === 'tables') v = JSON.stringify(tablesSave());
       else if (m.t === 'load') { tablesLoad(JSON.parse(m.s)); computeEnv(); v = true; }   // (E: worked out from the loaded weather, as the page's last frame did)
-      else if (m.t === 'snap') { if (m.reset) swSnapReset(); v = swSnapshot(m.full !== false); }   // (36-zzzzz-sw-snap.js)
+      else if (m.t === 'snap') { if (m.reset) swSnapReset(); v = swSnapshot(m.full !== false, m.drawn === true); }   // (drawn: the effect lists' drawn fields only, as live)   // (36-zzzzz-sw-snap.js)
       else if (m.t === 'stats') v = { snapMs: SWS.ms, snapBytes: SWS.bytes, snaps: SWS.n, tick: REG.tick, time, hostTickMs: SWH.tickMs, hostBehind: SWH.behind, hostDone: SWH.done, hostSent: SWH.sent, hostHold: SWH.hold };
       else if (m.t === 'touch') v = self.__SW_TOUCH;
       else if (m.t === 'go') { swHostGo(m); v = true; }
@@ -3133,8 +3133,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 379;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 21:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 381;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 08:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -9836,8 +9836,28 @@ function drawPlanesAir(x0, x1) {
 // a line of pixel blocks from one point to another, th thick
 function pixLine(xa, ya, xb, yb, th) {
   const dx = xb - xa, dy = yb - ya, n = Math.max(1, Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / PB)), h = th >> 1;
-  if (Math.abs(dx) >= Math.abs(dy)) for (let i = 0; i < n; i++) { const x = xa + dx * i / n, y = ya + dy * i / n; C.fillRect(Math.floor(x / PB) * PB, Math.floor((y - h) / PB) * PB, PB, th); }
-  else for (let i = 0; i < n; i++) { const x = xa + dx * i / n, y = ya + dy * i / n; C.fillRect(Math.floor((x - h) / PB) * PB, Math.floor(y / PB) * PB, th, PB); }
+  // (the line's blocks in a row - the next one PB further along, on the same line of blocks - go as one rectangle: the same
+  // pixels painted the same number of times; a block drawn again (a step shorter than PB) stays its own rectangle, as before)
+  let rx = 0, ry = 0, rn = 0, rd = 0;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    const d = dx >= 0 ? PB : -PB;
+    for (let i = 0; i < n; i++) {
+      const x = xa + dx * i / n, y = ya + dy * i / n, bx = Math.floor(x / PB) * PB, by = Math.floor((y - h) / PB) * PB;
+      if (rn && by === ry && bx === rx + rd) { rn++; rd += d; continue; }
+      if (rn) C.fillRect(d > 0 ? rx : rx + rd + PB, ry, rn * PB, th);
+      rx = bx; ry = by; rn = 1; rd = d;
+    }
+    if (rn) C.fillRect(d > 0 ? rx : rx + rd + PB, ry, rn * PB, th);
+  } else {
+    const d = dy >= 0 ? PB : -PB;
+    for (let i = 0; i < n; i++) {
+      const x = xa + dx * i / n, y = ya + dy * i / n, bx = Math.floor((x - h) / PB) * PB, by = Math.floor(y / PB) * PB;
+      if (rn && bx === rx && by === ry + rd) { rn++; rd += d; continue; }
+      if (rn) C.fillRect(rx, d > 0 ? ry : ry + rd + PB, th, rn * PB);
+      rx = bx; ry = by; rn = 1; rd = d;
+    }
+    if (rn) C.fillRect(rx, d > 0 ? ry : ry + rd + PB, th, rn * PB);
+  }
 }
 function sfxPlaneIn(x) {
   if (!SFX.ctx) return;
@@ -13720,57 +13740,191 @@ const SW_COLS = new Set(['spray', 'bubbles', 'foam', 'wakes', 'sparks', 'flames'
 // as columns the same way
 const SW_EXTRA = { wclouds: () => wclouds, blastRings: () => blastRings, gasBalls: () => gasBalls, shocks: () => shocks, airStreaks: () => airStreaks, landWake: () => landWake };
 const SW_EXTRA_T = { skip: TBL_SKIP, depth: 4, after: null };
-function swColsOf(t, arr, strs, sIdx, bufs) {
-  const n = arr.length, keys = new Map();                      // key -> kind: 1 number, 4 boolean, 2 string, 3 other (or mixed)
+/* The page only DRAWS these lists in live mode (it never steps them: design section 2), so a live snapshot carries each row's
+   DRAWN fields only - the ones the drawing reads, listed here per list from the draw functions named; the velocities, timers
+   and seeds the step uses stay in the worker. A full snapshot (the gate's mirror, a resync) carries every field. A list not
+   named here goes whole (everything of it is drawn: streaks, trails (p1 p2 thin root next), planeWisps, msPings, msplashes,
+   airStreaks, landWake). References drawing follows stay in: a puff's prev, a trail's next (same-list {ri}); the smoke's
+   after hook reads st, which the table skips anyway. 'a.b' names a field of the small objects inside the list field a (the
+   fish of a school: swNestOf). When in doubt a field is kept. */
+const SW_DRAW = {
+  // 35-particles.js' lists: 43-render-objects.js (drawBubbles, drawFoamBits + drawBigFoam, buildWakeField, drawDebris via
+  // 45-draw-vehicles.js, drawShocks, drawBlood), 47-render-overlays.js (the embers, welds, flashes, rings, drawSparks, drawAsh,
+  // the flames' glow), 46-smoke-fire-draw.js drawFire + sky/21-smoke.js fireLights (flames), 45-draw-vehicles.js drawDust
+  // (dust, grains), 34-splashes-sinking.js drawSplashes (spray), 50-land-firewater.js drawHoseCollision (flames)
+  spray: ['x', 'y', 's'],
+  bubbles: ['x', 'y', 'r'],
+  foam: ['x', 's', 'k', 'life', 'max', 'seed'],
+  wakes: ['x', 'life', 'max', 'w', 'k'],
+  sparks: ['x', 'y', 'px', 'py', 'life', 'max'],
+  flames: ['x', 'y', 'r', 'heat', 'behind', 'src'],
+  embers: ['x', 'y', 'life', 'max'],
+  flashes: ['x', 'y', 'r', 'life', 'max'],
+  welds: ['x', 'y', 'r', 'life', 'max'],
+  rings: ['x', 'y', 'r', 'life'],
+  debris: ['x', 'y', 'a', 'sw', 'sh', 'col', 'state'],
+  dust: ['x', 'y', 'r', 'age', 'life'],
+  grains: ['x', 'y', 'life'],
+  ash: ['x', 'y', 'life', 'ph', 'big'],
+  // 34-splashes-sinking.js drawJets
+  jets: ['x', 'v0', 'w', 'base', 't', 'lean', 'seed'],
+  // 50-land-units.js drawLeaves, drawEarthGrains, drawSpikeBursts (P is rebuilt by the table's after from mat)
+  leaves: ['x', 'y', 't', 'life', 'c', 'blade', 'ph'],
+  earthGrains: ['x', 'y', 't', 'life', 'c', 'light', 'big', 'rest'],
+  spikeBursts: ['x', 't', 'spikes', 'mat'],
+  // 50-land-fireworks.js drawFireworks (the bits); 50-land-firewater.js drawHose (drops; the steams are never drawn - they spawn smoke)
+  fwBits: ['x', 'y', 't', 'life', 'col', 'ember'],
+  hoseDrops: ['x', 'y', 'vx', 'vy', 'age', 'br', 'sp'],
+  hoseSteams: ['x', 'y'],
+  // 35-zz-sea-kills.js drawSeaKills; 37-birds.js drawBirds (feathers, gore); 45-draw-vehicles.js drawBlood (the crew's)
+  seaBlood: ['x', 'y', 'r', 't', 'life', 'sd', 'lob'],
+  seaGore: ['x', 'y', 's', 't', 'life', 'dark'],
+  birdFeathers: ['x', 'y', 'dark'],
+  birdGore: ['x', 'y', 'life', 'max'],
+  crewBlood: ['x', 'y', 'age', 'state', 'len'],
+  // 29-plane.js drawPlanesAir (the trails' points and colour), drawIceBits
+  planeTrails: ['pts', 'col'],
+  iceBits: ['x', 'y', 'life', 'max', 's', 'tw'],
+  // sky/21-smoke.js gatherSmokeNew + famOf + smgSend (the puffs and the puff before each: prev; h is the page's own number),
+  // 50-land-space.js rocketPuffR (the rocket's puffs)
+  smoke: ['x', 'y', 'r', 'age', 'life', 'alpha', 'dark', 'mist', 'quick', 'fam', 'fadeFrom', 'keep', 'kill', 'lonely', 'link', 'lumpy', 'prev', 'src', 'dead', 'sq'],   // (h: the page's own, kept by sq - SW_KEEP)
+  rocketTrail: ['x', 'y', 'r', 'age', 'life', 'k', 'ground', 'w', 'h'],
+  // 44-shadows-seafloor.js drawSeaLife (each fish of a school; its x, y are undefined until its first step)
+  seaSchools: ['type', 'x', 'y', 'dir', 'fish.x', 'fish.y', 'fish.dx', 'fish.dy', 'fish.face'],
+  // SW_EXTRA: 26-white-water.js drawWclouds, drawGasBalls; 47-render-overlays.js (blastRings: the distortion's rings); 43-render-objects.js drawShocks
+  wclouds: ['x', 'y', 'r', 'age', 'life', 'alpha', 'seed', 'water'],
+  gasBalls: ['x', 'y', 'r', 't', 'seed'],
+  blastRings: ['x', 'y', 'r', 'max', 'amp'],
+  shocks: ['x', 'y', 'r', 'max', 'len', 'faint', 'seed', 'life'],
+};
+// each list's drawn fields as sets: top (the row's fields) and sub (per list field, the fields of the small objects in it)
+const SW_DRAWK = {};
+for (const k in SW_DRAW) {
+  const top = new Set(), sub = {};
+  for (const e of SW_DRAW[k]) { const d = e.indexOf('.'); if (d < 0) top.add(e); else { top.add(e.slice(0, d)); (sub[e.slice(0, d)] || (sub[e.slice(0, d)] = new Set())).add(e.slice(d + 1)); } }
+  SW_DRAWK[k] = { top: [...top], sub };
+}
+const swKindOf = v => { const ty = typeof v; return ty === 'number' ? 1 : ty === 'boolean' ? 4 : ty === 'string' ? 2 : ty === 'undefined' || ty === 'function' ? 0 : 3; };
+// the fields of the things in `arr` and each one's kind (1 number, 4 boolean, 2 string, 3 other or mixed); only: these fields
+function swKeysOf(arr, skip, only) {
+  const n = arr.length, keys = new Map();
   for (let i = 0; i < n; i++) {
     const o = arr[i]; if (!o) continue;
-    for (const k in o) {
-      if (t.skip.has(k)) continue;
-      const v = o[k], ty = typeof v, kind = ty === 'number' ? 1 : ty === 'boolean' ? 4 : ty === 'string' ? 2 : ty === 'undefined' || ty === 'function' ? 0 : 3;
+    if (only) for (const k of only) { const kind = swKindOf(o[k]); if (!kind) continue; const was = keys.get(k); keys.set(k, was == null || was === kind ? kind : 3); }
+    else for (const k in o) {
+      if (skip.has(k)) continue;
+      const kind = swKindOf(o[k]);
       if (!kind) continue;
       const was = keys.get(k);
       keys.set(k, was == null || was === kind ? kind : 3);
     }
   }
+  return keys;
+}
+// draw: the list's drawn fields (SW_DRAWK) - a live snapshot; null: every field
+function swColsOf(t, arr, strs, sIdx, bufs, draw) {
+  const n = arr.length, keys = swKeysOf(arr, t.skip, draw ? draw.top : null);
   const C = { n, k: [], d: [] };
   for (const [k, kind] of keys) {
-    let col;
-    if (kind === 1 || kind === 4) {
-      col = new Float64Array(n); const bool = kind === 4; let miss = null;
-      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v === 'number') col[i] = v; else if (typeof v === 'boolean') col[i] = v ? 1 : 0; else { (miss || (miss = new Uint8Array(n)))[i] = 1; } }
-      bufs.push(col.buffer); if (miss) bufs.push(miss.buffer);
-      C.k.push(k); C.d.push(bool ? { b: col, m: miss } : { f: col, m: miss });
-    } else if (kind === 2) {
-      col = new Int32Array(n);
-      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v !== 'string') { col[i] = -1; continue; } let id = sIdx.get(v); if (id == null) { id = strs.length; strs.push(v); sIdx.set(v, id); } col[i] = id; }
-      bufs.push(col.buffer); C.k.push(k); C.d.push({ s: col });
-    } else {
-      // (a thing of the same list - a trail's next - goes as its place in the list; another table's thing as its id)
-      const idx = C.idx || (C.idx = new Map(arr.map((o, i) => [o, i]))), vals = new Array(n);
-      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; vals[i] = v === undefined ? undefined : v && typeof v === 'object' && idx.has(v) ? { ri: idx.get(v) } : tblPlain(v, t.depth, t.skip, false); }
-      C.k.push(k); C.d.push({ j: vals });
-    }
+    if (kind === 1 || kind === 4 || kind === 2) { C.k.push(k); C.d.push(swColOf(arr, k, kind, strs, sIdx, bufs)); continue; }
+    const nest = swNestOf(arr, k, draw ? draw.sub[k] : null, strs, sIdx, bufs);
+    if (nest) { C.k.push(k); C.d.push({ nest }); continue; }
+    // (a thing of the same list - a trail's next - goes as its place in the list; another table's thing as its id)
+    const idx = C.idx || (C.idx = new Map(arr.map((o, i) => [o, i]))), vals = new Array(n);
+    for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; vals[i] = v === undefined ? undefined : v && typeof v === 'object' && idx.has(v) ? { ri: idx.get(v) } : tblPlain(v, t.depth, t.skip, false); }
+    C.k.push(k); C.d.push({ j: vals });
   }
   delete C.idx;
   return C;
 }
+// one field of the things in `arr` as a column: numbers and booleans in a Float64Array (m: where a thing hasn't it), strings as
+// ids into strs (-1: none)
+function swColOf(arr, k, kind, strs, sIdx, bufs) {
+  const n = arr.length;
+  if (kind === 2) {
+    const col = new Int32Array(n);
+    for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v !== 'string') { col[i] = -1; continue; } let id = sIdx.get(v); if (id == null) { id = strs.length; strs.push(v); sIdx.set(v, id); } col[i] = id; }
+    bufs.push(col.buffer);
+    return { s: col };
+  }
+  const col = new Float64Array(n); let miss = null;
+  for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v === 'number') col[i] = v; else if (typeof v === 'boolean') col[i] = v ? 1 : 0; else { (miss || (miss = new Uint8Array(n)))[i] = 1; } }
+  bufs.push(col.buffer); if (miss) bufs.push(miss.buffer);
+  return kind === 4 ? { b: col, m: miss } : { f: col, m: miss };
+}
+/* A list field whose values are small plain objects of plain values (a trail piece's two points), or arrays of them (a school's
+   fish, a mine splash's spires) goes as FLAT COLUMNS over all those objects in a row - c: how many each thing has (-1: the field
+   is absent), obj: one object each rather than an array - instead of one plain copy per thing (the fish were the snapshot's
+   biggest part as data). Anything else in them (a nested array, a thing of a table, a typed array, null) and the field goes as
+   plain data as before (null: not that). only: the objects' fields sent (SW_DRAW's 'a.b' names); else all of them */
+function swNestOf(arr, k, only, strs, sIdx, bufs) {
+  const n = arr.length, items = [], counts = new Int32Array(n);
+  let obj = -1;                                                       // (-1 not seen yet, 1 objects, 0 arrays)
+  for (let i = 0; i < n; i++) {
+    const o = arr[i], v = o ? o[k] : undefined;
+    if (v === undefined) { counts[i] = -1; continue; }
+    if (!v || typeof v !== 'object' || ArrayBuffer.isView(v) || v._uid != null) return null;
+    const isA = Array.isArray(v);
+    if (obj < 0) obj = isA ? 0 : 1; else if (obj === (isA ? 1 : 0)) return null;
+    if (isA) { for (const e of v) { if (!e || typeof e !== 'object' || Array.isArray(e) || ArrayBuffer.isView(e) || e._uid != null) return null; items.push(e); } counts[i] = v.length; }
+    else { items.push(v); counts[i] = 1; }
+  }
+  if (obj < 0 || !items.length) return null;
+  const keys = swKeysOf(items, TBL_SKIP, only);
+  for (const kind of keys.values()) if (kind === 3) return null;
+  const N = { c: counts, obj: obj === 1, k: [], d: [] };
+  for (const [kk, kind] of keys) { N.k.push(kk); N.d.push(swColOf(items, kk, kind, strs, sIdx, bufs)); }
+  bufs.push(counts.buffer);
+  return N;
+}
+// (the page) one thing's field of a column, put: a number, a flag, a string or nothing
+function swColPut(o, k, d, i, strs) {
+  if (d.m && d.m[i]) { delete o[k]; return; }
+  if (d.f) o[k] = d.f[i];
+  else if (d.b) o[k] = d.b[i] !== 0;
+  else if (d.s) { const id = d.s[i]; if (id < 0) delete o[k]; else o[k] = strs[id]; }
+}
+// (the page) a thing's nested objects refilled in place from the flat columns, from item `at` on; returns the next item
+function swNestInto(o, k, N, i, at, strs) {
+  const cnt = N.c[i];
+  if (cnt < 0) { delete o[k]; return at; }
+  const K = N.k, D = N.d, has = new Set(K);
+  const fill = e => { for (const f in e) if (!has.has(f)) delete e[f]; for (let c = 0; c < K.length; c++) swColPut(e, K[c], D[c], at, strs); at++; return e; };
+  if (N.obj) { const cur = o[k]; o[k] = fill(cur && typeof cur === 'object' && !Array.isArray(cur) ? cur : {}); return at; }
+  const a = Array.isArray(o[k]) ? o[k] : (o[k] = []);
+  if (a.length > cnt) a.length = cnt;
+  for (let j = 0; j < cnt; j++) { const cur = a[j]; a[j] = fill(cur && typeof cur === 'object' ? cur : {}); }
+  return at;
+}
 // (the page) a list refilled from its columns
-function swColsInto(arr, C, strs) {
-  const n = C.n, K = C.k, D = C.d, has = new Set(K);
+// fields the page's drawing gives a row itself and keeps (never sent, never cleared by a refill): a puff's h, rolled when it's
+// first drawn (sky/21-smoke.js). A refill matches rows by place, and the rows shift as old ones die, so the kept value follows
+// the row's own number (sq) through a small map, not its place
+const SW_KEEP = { smoke: { by: 'sq', keys: ['h'] } };
+const swKept = new Map();                                            // (table -> Map of sq -> { h })
+function swColsInto(arr, C, strs, name) {
+  const n = C.n, K = C.k, D = C.d, has = new Set(K), at = new Int32Array(K.length);   // (at: each nested column's next item)
+  const keep = name && SW_KEEP[name], kby = keep ? K.indexOf(keep.by) : -1, kd = kby >= 0 ? D[kby] : null;
+  let km = null;
+  if (kd && kd.f) { km = swKept.get(name); if (!km) swKept.set(name, km = new Map()); }
   if (arr.length > n) arr.length = n;
   for (let i = 0; i < n; i++) {
     let o = arr[i];
     if (!o || typeof o !== 'object') o = arr[i] = {};
-    else for (const k in o) if (!has.has(k)) delete o[k];
+    else {
+      if (km) { const was = o[keep.by]; if (was !== undefined) { let e = km.get(was); if (!e) km.set(was, e = {}); for (const kk of keep.keys) if (o[kk] !== undefined) e[kk] = o[kk]; } }
+      for (const k in o) if (!has.has(k)) delete o[k];
+    }
     for (let c = 0; c < K.length; c++) {
       const d = D[c], k = K[c];
-      if (d.m && d.m[i]) { delete o[k]; continue; }
-      if (d.f) o[k] = d.f[i];
-      else if (d.b) o[k] = d.b[i] !== 0;
-      else if (d.s) { const id = d.s[i]; if (id < 0) delete o[k]; else o[k] = strs[id]; }
-      else { const v = d.j[i]; if (v === undefined) delete o[k]; else o[k] = v; }
+      if (d.j) { const v = d.j[i]; if (v === undefined) delete o[k]; else o[k] = v; }
+      else if (d.nest) at[c] = swNestInto(o, k, d.nest, i, at[c], strs);
+      else swColPut(o, k, d, i, strs);
     }
+    if (km) { const e = km.get(o[keep.by]); if (e) for (const kk of keep.keys) if (e[kk] !== undefined) o[kk] = e[kk]; }
   }
+  // (the kept values of rows gone: dropped, so the map holds only what lives)
+  if (km && km.size > n * 2 + 64) { const live = new Set(); for (let i = 0; i < n; i++) live.add(arr[i][keep.by]); for (const key of km.keys()) if (!live.has(key)) km.delete(key); }
   // places in the list and ids back into things
   for (let c = 0; c < K.length; c++) {
     const d = D[c], k = K[c]; if (!d.j) continue;
@@ -13781,10 +13935,19 @@ function swColsInto(arr, C, strs) {
     }
   }
 }
-/* The sea's arrays (the water table, lane 3): copies of the typed arrays themselves, moved, instead of their base64 text */
-function swArraysOf(bufs) {
+/* The sea's arrays (the water table, lane 3): copies of the typed arrays themselves, moved, instead of their base64 text. The
+   harbours' calm (the dockCalm table: calmA, and calmGoal while a fallen pier's shelter eases away - 09-sea-surface.js) go the
+   same way: its row's fields are the arrays as base64 text, 190 KB made and compared each snapshot; now only while it eases
+   (and the snapshot after, and a full one), as copies. The page rebuilds calmRuns from them (the table's after) */
+function swArraysOf(bufs, full) {
   const a = { wh: wh.slice(), wv: wv.slice(), wf: wf.slice(), stir: stirA.slice(), settleT: waterAct.t };
   bufs.push(a.wh.buffer, a.wv.buffer, a.wf.buffer, a.stir.buffer);
+  const easing = !!calmGoal;
+  if (calmA && (full || easing || SWS.calmWas)) {
+    a.calm = calmA.slice(); bufs.push(a.calm.buffer);
+    if (calmGoal) { a.goal = calmGoal.slice(); bufs.push(a.goal.buffer); } else a.goal = null;
+  }
+  SWS.calmWas = easing;
   return a;
 }
 function swArraysInto(a) {
@@ -13793,6 +13956,11 @@ function swArraysInto(a) {
   if (a.wf.length === wf.length) wf.set(a.wf);
   stirReady(); if (a.stir.length === stirA.length) stirA.set(a.stir);
   if (typeof a.settleT === 'number') waterAct.t = a.settleT;
+  if (a.calm && calmA && a.calm.length === calmA.length) {
+    calmA.set(a.calm);
+    if (a.goal && a.goal.length === calmA.length) { if (!calmGoal || calmGoal.length !== calmA.length) calmGoal = new Float32Array(calmA.length); calmGoal.set(a.goal); } else calmGoal = null;
+    const t = TABLES.dockCalm; if (t && t.after) t.after(t.list());
+  }
 }
 // ---- the worker's side: what it last sent, per table (row id -> its text; the order as text)
 const SWS = { rows: {}, order: {}, ms: 0, bytes: 0, n: 0, by: {}, tms: {} };
@@ -13801,9 +13969,9 @@ function swSnapReset() { SWS.rows = {}; SWS.order = {}; }
    walks it, into its LEAVES: each a key, its depth and kind (0 a plain value, 1 another thing - its id, 2 a small typed array,
    3 an array, 4 an object: the last two only mark where a container starts) and a value. The worker keeps each row's last
    leaves; next time, if the keys, depths and kinds are the same (the row's SHAPE), only the leaves whose value changed go - their
-   place in the row and the value, numbers in a Float64Array; else the row goes whole as text (new rows, and rows whose shape
-   changed: a list grew, a field came or went). The page keeps each row's paths from the whole text it got, and puts a changed
-   leaf's value at its path. */
+   place in the row and the value, numbers in a Float64Array, a typed array (the dock's calm water, dockCalm) as a copy moved
+   with the message's buffers ({ tb }); else the row goes whole as text (new rows, and rows whose shape changed: a list grew, a
+   field came or went). The page keeps each row's paths from the whole text it got, and puts a changed leaf's value at its path. */
 const SWL = { K: [], L: [], V: [] };                                  // (the walk's scratch: keys, depth * 8 + kind, values)
 function swLeaves(o, depth, skip, lvl) {
   const K = SWL.K, L = SWL.L, V = SWL.V, arr = Array.isArray(o);
@@ -13868,15 +14036,16 @@ function swInView(arr, full) {
   }
   return out;
 }
-function swSnapshot(full) {
+// full: every row (not only those in the page's views); drawn: the effect lists' drawn fields only (SW_DRAW) - a live snapshot
+function swSnapshot(full, drawn = !full) {
   const t0 = performance.now();
   for (const k in TABLES) if (!SW_LOCAL.has(k)) for (const o of TABLES[k].list()) if (o) uidOf(o);
   const parts = [], cols = {}, strs = [], sIdx = new Map(), bufs = []; SWS.by = {}; SWS.leaf = {}; SWS.tms = {};
   for (const k in TABLES) {
     if (SW_LOCAL.has(k)) continue;
     const tk = performance.now();
-    if (SW_COLS.has(k)) { cols[k] = swColsOf(TABLES[k], swInView(TABLES[k].list(), full), strs, sIdx, bufs); SWS.tms[k] = performance.now() - tk; continue; }
-    if (k === 'water') continue;                                       // (its arrays: below)
+    if (SW_COLS.has(k)) { cols[k] = swColsOf(TABLES[k], swInView(TABLES[k].list(), full), strs, sIdx, bufs, drawn ? SW_DRAWK[k] : null); SWS.tms[k] = performance.now() - tk; continue; }
+    if (k === 'water' || k === 'dockCalm') continue;                   // (their arrays: below, swArraysOf)
     const t = TABLES[k], arr = t.list(), had = SWS.rows[k] || (SWS.rows[k] = new Map()), here = new Set(), ch = [];
     const cu = [], ci = [], cv = [], co = [];                           // (changed leaves: the row, the leaf, the number or the other value)
     let ord = '', ri = -1;
@@ -13897,7 +14066,8 @@ function swSnapshot(full) {
           if (kind === 2 ? swSameTA(v, w) : Object.is(v, w)) continue;
           cu.push(u); ci.push(i);
           if (typeof v === 'number' && kind !== 1) { cv.push(v); co.push(undefined); }
-          else { cv.push(0); co.push(kind === 2 ? { ta: v.constructor.name, v: Array.from(v) } : v); }
+          else if (kind === 2) { cv.push(0); const a = v.slice(); bufs.push(a.buffer); co.push({ tb: a }); }   // (a typed array: a copy, moved with the buffers - never as text)
+          else { cv.push(0); co.push(v); }
           c.V[i] = kind === 2 ? v.slice() : v;
         }
         continue;
@@ -13923,8 +14093,8 @@ function swSnapshot(full) {
     parts.push(JSON.stringify(k) + ':{' + p.join(',') + '}'); SWS.by[k] = parts[parts.length - 1].length;
   }
   const txt = '{"t":' + JSON.stringify(time) + ',"tick":' + REG.tick + ',"T":{' + parts.join(',') + '}}';
-  for (const k in SW_EXTRA) cols['+' + k] = swColsOf(SW_EXTRA_T, swInView(SW_EXTRA[k](), full), strs, sIdx, bufs);
-  const arrays = swArraysOf(bufs);
+  for (const k in SW_EXTRA) cols['+' + k] = swColsOf(SW_EXTRA_T, swInView(SW_EXTRA[k](), full), strs, sIdx, bufs, drawn ? SW_DRAWK[k] : null);
+  const arrays = swArraysOf(bufs, full);
   let colB = 0; for (const b of bufs) colB += b.byteLength;
   SWS.ms += (performance.now() - t0 - SWS.ms) * 0.1; SWS.bytes += (txt.length + colB - SWS.bytes) * 0.1; SWS.colBytes = colB; SWS.n++;
   const by = Object.entries(SWS.by).sort((a, b) => b[1] - a[1]).slice(0, 8), slow = Object.entries(SWS.tms).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => [k, +v.toFixed(2)]);
@@ -13972,7 +14142,8 @@ function swApply(snap) {
       const i = C.i[j], path = sh.P[i], kind = sh.L[i] & 7;
       let v = C.o && C.o[j] !== undefined ? C.o[j] : C.f[j];
       if (kind === 1) v = byU.get(v) || null;
-      else if (kind === 2 && v && v.ta) { const T = globalThis[v.ta]; v = T ? T.from(v.v) : v.v; }
+      else if (kind === 2 && v && v.tb) v = v.tb;                   // (the moved copy, already of its kind)
+      else if (kind === 2 && v && v.ta) { const T = globalThis[v.ta]; v = T ? T.from(v.v) : v.v; }   // (a whole row's text: tblPlain's shape)
       else if (kind >= 3) continue;
       let c = o; for (let q = 0; q < path.length - 1 && c; q++) c = c[path[q]];
       if (c && typeof c === 'object') c[path[path.length - 1]] = v; else SWM.lost++;
@@ -13980,8 +14151,8 @@ function swApply(snap) {
   }
   // the effect columns and the sea's arrays (after the rows: an effect may name a row's thing by its id)
   if (snap.cols) for (const k in snap.cols) {
-    if (k[0] === '+') { const f = SW_EXTRA[k.slice(1)]; if (f) swColsInto(f(), snap.cols[k], snap.strs); continue; }
-    const t = TABLES[k]; if (!t) continue; const arr = t.list(); swColsInto(arr, snap.cols[k], snap.strs); if (t.after) t.after(arr);
+    if (k[0] === '+') { const f = SW_EXTRA[k.slice(1)]; if (f) swColsInto(f(), snap.cols[k], snap.strs, k); continue; }
+    const t = TABLES[k]; if (!t) continue; const arr = t.list(); swColsInto(arr, snap.cols[k], snap.strs, k); if (t.after) t.after(arr);
   }
   if (snap.arrays) swArraysInto(snap.arrays);
   for (const [t, arr, ord] of touched) {
@@ -14537,6 +14708,7 @@ function rotorDownwash(x, ry, half, spin, vx, dt, grid = true) {
 // a source's own stream (or chain) of puffs, kept on the source: smStream(plane), smStream(ship, 'fire' + i)
 // the smoke's own random source (engine stage 3: never Math.random; its state saved with the tables)
 const smR = sysRng('smoke'), smRnd = (a, b) => a + (b - a) * smR();
+let smSq = 0;
 function smStream(o, k = '') { const m = o._smS || (o._smS = {}); return m[k] || (m[k] = { last: null }); }
 function spawnSmoke(x, y, o) {
   // (no budget, no thinning, user Oct 30: "no smoke or fire or debris limits" - every puff spawned, every puff lives its life)
@@ -14549,6 +14721,7 @@ function spawnSmoke(x, y, o) {
     hs: FXK,                                              // (real scale: how much taller its rise is - a ship's smoke as much as she's bigger)
     link: o.link || 60,
     seed: 1 + Math.floor(smR() * 6),                      // (the old renderer's puff pattern, 1-6: drawn from the smoke's own source here, not at draw time - 46-smoke-fire-draw.js)
+    sq: ++smSq,                                           // (its number in the order spawned: the simulation worker's page keeps a puff's own drawing values (h) by it - 36-zzzzz-sw-snap.js)
     steady: !!o.steady,                                   // (its lift held over its life and no slowing high up: it climbs all its life - stepSmoke)
     trailV: o.trailV || 0,                                // (Oct 29, V266: its ship's speed - the air never carries it forward faster than 0.4 of it, so a
                                                           // funnel's smoke always streams back from her, whatever the wind - user: "why is the smoke up if the boat is moving??")
@@ -15040,7 +15213,7 @@ function updateCamera(dt, snap) {
    ================================================================ */
 const GLR = {
   on: false, gl: null, lost: false, epoch: 0, prog: null, vao: null, vbo: null, ibo: null, tvao: null, tvbo: null,
-  MAXQ: 8192, ab: null, f32: null, u32: null, n: 0, slots: [], tris: new Float32Array(1 << 14),
+  MAXQ: 8192, QW: 27, ab: null, f32: null, u32: null, n: 0, slots: [], tris: new Float32Array(1 << 14),
   st: { tgt: null, blend: 'source-over', sc: null, clip: false, sten: 0 },     // the pending batch's state
   cur: {},                                                                       // the state GL is actually in
   near: null, lin: null, gradTex: null, gradGen: 1, gradNext: 0, gradPx: new Uint8Array(1024),
@@ -15049,20 +15222,27 @@ const GLR = {
 };
 const GLB = {};
 const GL_TEXFIX = !/[?&]texfix=0/.test(location.search);   // (the sprites' texel choice from the pixel's place - drawImage, GL_FS)                                   // blend modes: [srcRGB, dstRGB, srcA, dstA]
+// (60-fps chat, Oct 30: one record a quad, drawn instanced - its four corners picked by gl_VertexID from the same six indices
+// as before (0 1 2, 0 2 3) - instead of four vertices a quad: 27 numbers written and uploaded a quad, not 60; the same triangles)
 const GL_VS = `#version 300 es
-layout(location=0) in vec2 a_pos;
-layout(location=1) in vec2 a_uv;
-layout(location=2) in vec4 a_col;
-layout(location=3) in vec2 a_aux;
-layout(location=4) in vec4 a_mul;
-layout(location=5) in vec4 a_add;
-layout(location=6) in vec4 a_o;
-layout(location=7) in vec2 a_s;
+layout(location=0) in vec4 a_p01;
+layout(location=1) in vec4 a_p23;
+layout(location=2) in vec4 a_uv01;
+layout(location=3) in vec4 a_uv23;
+layout(location=4) in vec4 a_col;
+layout(location=5) in vec2 a_aux;
+layout(location=6) in vec4 a_mul;
+layout(location=7) in vec4 a_add;
+layout(location=8) in vec4 a_o;
+layout(location=9) in vec2 a_s;
 uniform vec2 u_size;
 out vec2 v_uv; out vec4 v_col; out vec4 v_mul; out vec4 v_add;
 flat out vec4 v_o; flat out vec2 v_s;
 flat out int v_mode; flat out int v_slot; flat out float v_row; flat out float v_k;
 void main() {
+  int c = gl_VertexID < 3 ? gl_VertexID : gl_VertexID == 3 ? 0 : gl_VertexID == 4 ? 2 : 3;   // (six vertices a quad: the triangles 0 1 2 and 0 2 3)
+  vec2 a_pos = c == 0 ? a_p01.xy : c == 1 ? a_p01.zw : c == 2 ? a_p23.xy : a_p23.zw;
+  vec2 a_uv = c == 0 ? a_uv01.xy : c == 1 ? a_uv01.zw : c == 2 ? a_uv23.xy : a_uv23.zw;
   vec2 p = a_pos / u_size;
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
   v_uv = a_uv; v_col = a_col; v_mul = a_mul; v_add = a_add; v_o = a_o; v_s = a_s;
@@ -16166,24 +16346,39 @@ function glSetup() {
   for (let i = 0; i < 8; i++) gl.uniform1i(gl.getUniformLocation(p, 'u_t' + i), i);
   gl.uniform1i(gl.getUniformLocation(p, 'u_grad'), 8);
   GLR.uSize = gl.getUniformLocation(p, 'u_size');
+  // the path passes (the stencil's winding, glDrawTris): plain triangles, positions only - their own little program, now that
+  // the quad program picks its corners by gl_VertexID
+  { const q = gl.createProgram();
+    gl.attachShader(q, glShader(gl.VERTEX_SHADER, `#version 300 es
+layout(location=0) in vec2 a_pos; uniform vec2 u_size;
+void main() { vec2 p = a_pos / u_size; gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0); }`));
+    gl.attachShader(q, glShader(gl.FRAGMENT_SHADER, `#version 300 es
+precision highp float; out vec4 o; void main() { o = vec4(0.0); }`));
+    gl.linkProgram(q);
+    if (!gl.getProgramParameter(q, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(q));
+    GLR.tprog = q; GLR.tuSize = gl.getUniformLocation(q, 'u_size'); gl.useProgram(p); }
   // the quad batch: 4 vertices a quad, 9 numbers a vertex (x, y, u, v, colour as 4 bytes, mode, k, and a tint's
   // multiply and add as 4 bytes each)
   // (engine stage 6, Oct 30: and an upright sprite's corner on the target, its texture coordinate there, and texels a pixel
   // across and down - 6 more, 15 a vertex - for the texel choice in the fragment shader; 0 texels a pixel: not used)
-  GLR.ab = new ArrayBuffer(GLR.MAXQ * 4 * 60); GLR.f32 = new Float32Array(GLR.ab); GLR.u32 = new Uint32Array(GLR.ab);
+  // (one record a quad, QW words - see GL_VS: the corners' places and texture coordinates, then the colour as 4 bytes, mode,
+  // k, the tint's multiply and add as 4 bytes each, the texel choice's corner, coordinate and texels a pixel)
+  GLR.ab = new ArrayBuffer(GLR.MAXQ * GLR.QW * 4); GLR.f32 = new Float32Array(GLR.ab); GLR.u32 = new Uint32Array(GLR.ab);
   GLR.vao = gl.createVertexArray(); gl.bindVertexArray(GLR.vao);
   GLR.vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, GLR.vbo); gl.bufferData(gl.ARRAY_BUFFER, GLR.ab.byteLength, gl.STREAM_DRAW);
-  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 60, 0);
-  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 60, 8);
-  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, 60, 16);
-  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 60, 20);
-  gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, 60, 28);
-  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.UNSIGNED_BYTE, true, 60, 32);
-  gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 4, gl.FLOAT, false, 60, 36);
-  gl.enableVertexAttribArray(7); gl.vertexAttribPointer(7, 2, gl.FLOAT, false, 60, 52);
-  const idx = new Uint16Array(GLR.MAXQ * 6);
-  for (let i = 0, v = 0; i < idx.length; i += 6, v += 4) { idx[i] = v; idx[i + 1] = v + 1; idx[i + 2] = v + 2; idx[i + 3] = v; idx[i + 4] = v + 2; idx[i + 5] = v + 3; }
-  GLR.ibo = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, GLR.ibo); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+  { const QB = GLR.QW * 4;
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 4, gl.FLOAT, false, QB, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, QB, 16);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, QB, 32);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 4, gl.FLOAT, false, QB, 48);
+    gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, QB, 64);
+    gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 2, gl.FLOAT, false, QB, 68);
+    gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 4, gl.UNSIGNED_BYTE, true, QB, 76);
+    gl.enableVertexAttribArray(7); gl.vertexAttribPointer(7, 4, gl.UNSIGNED_BYTE, true, QB, 80);
+    gl.enableVertexAttribArray(8); gl.vertexAttribPointer(8, 4, gl.FLOAT, false, QB, 84);
+    gl.enableVertexAttribArray(9); gl.vertexAttribPointer(9, 2, gl.FLOAT, false, QB, 100);
+    for (let a = 0; a <= 9; a++) gl.vertexAttribDivisor(a, 1); }
+
   // path triangles (stencil passes): positions only
   GLR.tvao = gl.createVertexArray(); gl.bindVertexArray(GLR.tvao);
   GLR.tvbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, GLR.tvbo);
@@ -16537,14 +16732,14 @@ function glFlush() {
   if (GLR.cur.prog !== 1) { gl.useProgram(GLR.prog); GLR.cur.prog = 1; }
   if (GLR.cur.vao !== 1) { gl.bindVertexArray(GLR.vao); GLR.cur.vao = 1; }
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.vbo);
-  gl.bufferData(gl.ARRAY_BUFFER, GLR.f32, gl.STREAM_DRAW, 0, n * 60);
+  gl.bufferData(gl.ARRAY_BUFFER, GLR.f32, gl.STREAM_DRAW, 0, n * GLR.QW);
   const sl = GLR.slots;
   for (let i = 0; i < sl.length; i++) {
     if (GLR.unit[i] !== sl[i].tex) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, sl[i].tex); GLR.unit[i] = sl[i].tex; }
     const smp = sl[i].smooth ? GLR.lin : GLR.near;
     if (GLR.unitS[i] !== smp) { gl.bindSampler(i, smp); GLR.unitS[i] = smp; }
   }
-  gl.drawElements(gl.TRIANGLES, n * 6, gl.UNSIGNED_SHORT, 0);
+  gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
   GLR.stats.draws++; GLR.stats.quads += n;
   GLR.n = 0; sl.length = 0;
 }
@@ -16569,15 +16764,11 @@ function glBegin(ctx, blend) {
 function glQuad(x0, y0, x1, y1, x2, y2, x3, y3, u0, v0, u1, v1, u2, v2, u3, v3, col, aux, k, mul = 0, add = 0, ox = 0, oy = 0, ou = 0, ov = 0, su = 0, sv = 0) {
   if (GLR.n >= GLR.MAXQ) glFlush();
   const f = GLR.f32, u = GLR.u32;
-  const o = GLR.n * 60;
-  f[o] = x0; f[o + 1] = y0; f[o + 2] = u0; f[o + 3] = v0; u[o + 4] = col; f[o + 5] = aux; f[o + 6] = k; u[o + 7] = mul; u[o + 8] = add;
-  f[o + 9] = ox; f[o + 10] = oy; f[o + 11] = ou; f[o + 12] = ov; f[o + 13] = su; f[o + 14] = sv;
-  f[o + 15] = x1; f[o + 16] = y1; f[o + 17] = u1; f[o + 18] = v1; u[o + 19] = col; f[o + 20] = aux; f[o + 21] = k; u[o + 22] = mul; u[o + 23] = add;
-  f[o + 24] = ox; f[o + 25] = oy; f[o + 26] = ou; f[o + 27] = ov; f[o + 28] = su; f[o + 29] = sv;
-  f[o + 30] = x2; f[o + 31] = y2; f[o + 32] = u2; f[o + 33] = v2; u[o + 34] = col; f[o + 35] = aux; f[o + 36] = k; u[o + 37] = mul; u[o + 38] = add;
-  f[o + 39] = ox; f[o + 40] = oy; f[o + 41] = ou; f[o + 42] = ov; f[o + 43] = su; f[o + 44] = sv;
-  f[o + 45] = x3; f[o + 46] = y3; f[o + 47] = u3; f[o + 48] = v3; u[o + 49] = col; f[o + 50] = aux; f[o + 51] = k; u[o + 52] = mul; u[o + 53] = add;
-  f[o + 54] = ox; f[o + 55] = oy; f[o + 56] = ou; f[o + 57] = ov; f[o + 58] = su; f[o + 59] = sv;
+  const o = GLR.n * 27;
+  f[o] = x0; f[o + 1] = y0; f[o + 2] = x1; f[o + 3] = y1; f[o + 4] = x2; f[o + 5] = y2; f[o + 6] = x3; f[o + 7] = y3;
+  f[o + 8] = u0; f[o + 9] = v0; f[o + 10] = u1; f[o + 11] = v1; f[o + 12] = u2; f[o + 13] = v2; f[o + 14] = u3; f[o + 15] = v3;
+  u[o + 16] = col; f[o + 17] = aux; f[o + 18] = k; u[o + 19] = mul; u[o + 20] = add;
+  f[o + 21] = ox; f[o + 22] = oy; f[o + 23] = ou; f[o + 24] = ov; f[o + 25] = su; f[o + 26] = sv;
   GLR.n++;
 }
 // a quad with the context's fill style: corners in user space (ux, uy) and on the target (dx, dy)
@@ -16627,7 +16818,9 @@ function glPathTris(path) {
 function glDrawTris(tris) {
   const gl = GLR.gl;
   if (GLR.cur.vao !== 2) { gl.bindVertexArray(GLR.tvao); GLR.cur.vao = 2; }
-  if (GLR.cur.prog !== 1) { gl.useProgram(GLR.prog); GLR.cur.prog = 1; }
+  const t = GLR.st.tgt;
+  if (GLR.cur.prog !== 13) { gl.useProgram(GLR.tprog); GLR.cur.prog = 13; }
+  gl.uniform2f(GLR.tuSize, t._w, t._h);
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.tvbo);
   gl.bufferData(gl.ARRAY_BUFFER, tris, gl.STREAM_DRAW);
   gl.drawArrays(gl.TRIANGLES, 0, tris.length / 2);
@@ -46804,7 +46997,7 @@ async function start(data) {
   Object.assign(window.__game, { smokeWorker: on => { if (on != null) { SMW.on = !!on; if (CAVE.worker && !CAVE.worker.fail) CAVE.worker.on = !!on; if (CAVE.buildWorker && !CAVE.buildWorker.fail) CAVE.buildWorker.on = !!on; } const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (the simulation worker, sim-worker branch: the tables and the snapshot's parts, for tools/sw-measure.mjs)
-  Object.assign(window.__game, { swT: { TABLES, RNGS, tablesSave, tablesLoad, tblPlain, uidOf, REG, planes, subs, ships, evStats } });
+  Object.assign(window.__game, { swT: { TABLES, RNGS, tablesSave, tablesLoad, tblPlain, uidOf, REG, planes, subs, ships, evStats, SW_DRAW, SW_COLS } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
   Object.assign(window.__game, { structs: () => LAND_STRUCTS, structDragTo: (i, u, y) => structDragTo(LAND_STRUCTS[i], u, y), structUp: old => { structSave(); structEdited(old); }, airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landShape: () => ({ pts: LAND_PTS, def: LAND_DEF, lakes: (land.lakes || []).map(L => [L[0], L[1], L.today ? 1 : 0]), ms: landEditMs, any: LSH.any }), landSet: P => { LAND_PTS = P; landSave(); landEdited(); }, landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landDragTo: (R, k, x, y) => landDragTo({ R, k }, x, y), landUp: () => { landSave(); landEdited(); }, landPtX: (R, u) => landPtX(R, u), landLock: x => landLock(x), landProfile0: x => landProfile0(x, land.R), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), setOwner: (i, v) => { const o = LAND_STRUCTS[i]; if (v === (o.R ? 1 : 0)) delete o.own; else o.own = v; }, islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x),
@@ -46821,8 +47014,9 @@ async function start(data) {
   // (the simulation worker, 00-sw-boot.js: in the worker the game now answers the page; on the page, ?simworker=1 starts it)
   Object.assign(window.__game, { sw: { get state() { return { on: SW.on, ready: SW.ready, fail: SW.fail, bootMs: Math.round(SW.bootMs) }; }, start: o => swStart(o), ask: (t, o) => swAsk(t, o),
     run: code => swAsk('run', { code }), step: (n, dt) => swAsk('step', { n, dt: dt || SUBSTEP }), tables: () => swAsk('tables'), touch: () => swAsk('touch'),
-    // (the page as the worker's mirror: its snapshot folded in here - 36-zzzzz-sw-snap.js; reset: a whole one, ids matched afresh)
-    mirror: async reset => { if (reset) swMirrorReset(); const s = await swAsk('snap', { reset: !!reset }); swApply(s); return { rowsBytes: s.rowsB, colBytes: s.colB, encodeMs: +s.ms.toFixed(2), applyMs: +SWM.last.toFixed(2), tick: SWM.tick, by: s.by, slow: s.slow }; },
+    // (the page as the worker's mirror: its snapshot folded in here - 36-zzzzz-sw-snap.js; reset: a whole one, ids matched afresh;
+    // drawn: the effect lists' drawn fields only, as a live snapshot carries them - SW_DRAW)
+    mirror: async (reset, drawn) => { if (reset) swMirrorReset(); const s = await swAsk('snap', { reset: !!reset, drawn: !!drawn }); swApply(s); return { rowsBytes: s.rowsB, colBytes: s.colB, encodeMs: +s.ms.toFixed(2), applyMs: +SWM.last.toFixed(2), tick: SWM.tick, by: s.by, slow: s.slow }; },
     stats: async () => Object.assign({ applyMs: SWM.ms, applied: SWM.n, live: SW.live, got: SW.got, tickMs: SW.tickMs, behind: SW.behind }, await swAsk('stats')), pageTables: () => JSON.stringify(tablesSave()),
     live: () => swGoLive(), act: (p, name, ...a) => act(p, name, ...a) } });
   if (SW_IN_WORKER) { swHostReady(); return; }
