@@ -50,7 +50,8 @@ window.__gpuByProg = () => {
   const names = new Map();
   const nameOf = p => { if (names.has(p)) return names.get(p); let nm = null;
     for (const [o, pre] of [[G, 'GLR.'], [window.__game.GSM || {}, 'GSM.'], [window.__game.WGL || {}, 'WGL.']]) for (const k in o) { try { if (o[k] === p) nm = pre + k; else if (o[k] && typeof o[k] === 'object' && !(o[k] instanceof WebGLProgram)) for (const k2 in o[k]) if (o[k][k2] === p) nm = pre + k + '.' + k2; } catch (e) { } }
-    nm = nm || 'prog' + names.size; names.set(p, nm); return nm; };
+    if (!nm) { const L = (new Error().stack || '').split('\n').slice(2).map(l => (l.match(/at (?:[\w.]+\.)?([\w$]+) /) || [])[1]).filter(f => f && !/^(useProgram|nameOf)$/.test(f)); nm = 'p:' + (L.slice(0, 2).join('<') || names.size); }
+    names.set(p, nm); return nm; };
   let cur = 'none', fb = 'screen', q = null, tag = ''; const acc = {}, pend = [];
   const uP = gl.useProgram.bind(gl); gl.useProgram = p => { cur = p ? nameOf(p) : 'none'; return uP(p); };
   const bF = gl.bindFramebuffer.bind(gl); gl.bindFramebuffer = (t, f) => { fb = f ? 'fbo' : 'screen'; return bF(t, f); };
