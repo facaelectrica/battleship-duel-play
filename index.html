@@ -2859,8 +2859,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 378;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 21:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 379;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 21:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10149,7 +10149,7 @@ function buoyCanvas(O, D, M, L, E) {
 }
 const BUOY_K = 0.78;
 function buoyHit(b, x, y) {
-  if (!b || b.state !== 'float') return false;
+  if (!b || b.state !== 'float' || Math.abs(x - b.x) >= 7) return false;   // (opt-fight: off to the side - the wave's height not asked)
   const sy = surfaceY(b.x);
   return Math.abs(x - b.x) < 7 && y > sy - 24 && y < sy + 4;
 }
@@ -13620,7 +13620,7 @@ function killBird(b, vx = 0, vy = 0) {
   for (let i = 0; i < (b.kind === 'gull' ? 10 : 5); i++) feathers.push({ x: b.x + bdRnd(-2, 2), y: b.y + bdRnd(-2, 2), vx: bdRnd(-30, 30) + vx * 0.2, vy: bdRnd(-40, 5), life: 0, max: bdRnd(5, 9), ph: bdR() * 6, dark: b.kind === 'swift' || bdR() < 0.3 });
 }
 function birdStrike(x, y, r, vx, vy) {
-  for (const b of birds) if (birdLive(b) && Math.abs(b.x - x) < r && Math.abs(b.y - y) < r) killBird(b, vx === undefined ? bdRnd(-30, 30) : vx * 0.25 + bdRnd(-20, 20), vy === undefined ? 0 : vy * 0.25 - 20);
+  for (const b of birds) if (Math.abs(b.x - x) < r && Math.abs(b.y - y) < r && birdLive(b)) killBird(b, vx === undefined ? bdRnd(-30, 30) : vx * 0.25 + bdRnd(-20, 20), vy === undefined ? 0 : vy * 0.25 - 20);
 }
 function scareBirds(x, y, r) {
   for (const b of birds) {
@@ -33202,9 +33202,28 @@ function cargoAway(c) {
 // a hit on a box (its own, never the ship's): on land it burns black where it stands, sparks, no blast; on a ship it's
 // knocked off into the sea; held, it's dropped (user Oct 27 [16]: on a helicopter's magnet too - it's let go and falls;
 // lying on a ship's deck, knocked off into the sea, burnt)
+// (opt-fight, Oct 30: every round and shell asked this each physics step through civHit, and each call built the whole
+// list of boxes first - an array for every box on every pier. contFind walks the same boxes in the same order (contPlaces')
+// and stops at the first one the point is in: the same box taken, nothing made for the others)
+const contIn = (x, y, cx, cy) => !(Math.abs(x - cx) > CONT_W / 2 + 1 || Math.abs(y - cy) > CONT_H / 2 + 1);
+function contFind(x, y) {
+  for (const cr of cranes) {
+    for (const s of cr.slots) { const st = s.stack; for (let j = 0; j < st.length; j++) { const cy = DECK_Y - CONT_H * (j + 0.5); if (contIn(x, y, s.x, cy)) return [st[j], s.x, cy, 0, 'dock']; } }
+    if (cr.load) { const cy = cr.hy + 3 + CONT_H / 2; if (contIn(x, y, cr.tx, cy)) return [cr.load, cr.tx, cy, 0, 'held', cr]; }
+  }
+  for (const c of civShips) {
+    if (!c.cargo || (c.state !== 'sail' && c.state !== 'sink') || !(x >= c.x - CONT_REACH(c) && x <= c.x + CONT_REACH(c))) continue;
+    if (CIV_SKIP && CIV_SKIP.includes(c)) continue;                     // (a ship the battleship is passing: her boxes too)
+    const cg = c.cargo;
+    for (let i = 0; i < cg.length; i++) { const st = cg[i]; for (let j = 0; j < st.length; j++) { const [cx, cy, a] = cargoAt(c, i, j); if (contIn(x, y, cx, cy)) return [st[j], cx, cy, a, 'ship', c, i]; } }
+  }
+  for (const k of containers) if ((k.where === 'free' || k.where === 'rest' || k.where === 'hook') && contIn(x, y, k.x, k.y)) return [k, k.x, k.y, k.a, k.where];
+  return null;
+}
 function contHit(x, y, dmg, vx, P) {
   if (!LAND || !containers.length) return false;
-  for (const [k, cx, cy, ca, where, owner, i] of P || contPlaces((x0, x1) => x >= x0 && x <= x1)) {
+  if (!P) { const q = contFind(x, y); if (!q) return false; P = [q]; }
+  for (const [k, cx, cy, ca, where, owner, i] of P) {
     if (where === 'ship' && owner.cargo[i].indexOf(k) < 0) continue;   // (already knocked off this frame)
     if (where === 'ship' && CIV_SKIP && CIV_SKIP.includes(owner)) continue;   // (a ship the battleship is passing: her boxes too)
     if (Math.abs(x - cx) > CONT_W / 2 + 1 || Math.abs(y - cy) > CONT_H / 2 + 1) continue;
@@ -36558,10 +36577,16 @@ function magRopes() {
   return L;
 }
 function ropeBulletHit(b) {
+  // (opt-fight, Oct 30: a segment the round's whole path this step stays 5 clear of, box to box, can't be within 4 of it -
+  // passed over before the sweep; the same segments hit as before)
+  const bx0 = b._lx != null ? b._lx : b.x, by0 = b._ly != null ? b._ly : b.y;
+  const xa = Math.min(bx0, b.x) - 5, xb = Math.max(bx0, b.x) + 5, ya = Math.min(by0, b.y) - 5, yb = Math.max(by0, b.y) + 5;
   for (const [h, P, R] of magRopes()) {
     if (b.owner === h.id && helis.includes(h)) continue;
     for (let i = 0; i < P.length - 1; i++) {
-      const a = P[i], c = P[i + 1], vx = c[0] - a[0], vy = c[1] - a[1], L2 = vx * vx + vy * vy || 1;
+      const a = P[i], c = P[i + 1];
+      if ((a[0] < xa && c[0] < xa) || (a[0] > xb && c[0] > xb) || (a[1] < ya && c[1] < ya) || (a[1] > yb && c[1] > yb)) continue;
+      const vx = c[0] - a[0], vy = c[1] - a[1], L2 = vx * vx + vy * vy || 1;
       // (along the round's path since last frame: a thin rope, a fast round)
       const near = (x, y) => { const u = clamp(((x - a[0]) * vx + (y - a[1]) * vy) / L2, 0, 1), qx = a[0] + vx * u - x, qy = a[1] + vy * u - y; return qx * qx + qy * qy < 16; };
       const q = sweepHit(b, near);
@@ -43943,8 +43968,8 @@ function landShellHit(s) {
     if (p === s.owner) continue;
     const t = tanks[p], h = helis[p];
     let q;
-    if (t && t.state === 'alive' && (q = sweepHit(s, (x, y) => tankHit(t, x, y)))) { s.x = q[0]; s.y = q[1]; landBlast(s, s.x, s.y, t); return true; }
-    if (h && (h.state === 'fly' || h.state === 'landed') && (q = sweepHit(s, (x, y) => heliHit(h, x, y)))) { s.x = q[0]; s.y = q[1]; landBlast(s, s.x, s.y, h); return true; }
+    if (t && t.state === 'alive' && sweepReach(s, t.x, t.y, tankReach()) && (q = sweepHit(s, (x, y) => tankHit(t, x, y)))) { s.x = q[0]; s.y = q[1]; landBlast(s, s.x, s.y, t); return true; }
+    if (h && (h.state === 'fly' || h.state === 'landed') && sweepReach(s, h.x, h.y, heliReach()) && (q = sweepHit(s, (x, y) => heliHit(h, x, y)))) { s.x = q[0]; s.y = q[1]; landBlast(s, s.x, s.y, h); return true; }
   }
   if (plantShellHit(s)) { landBlast(s, s.x, s.y, null); return true; }   // (into a standing tree, palm or cactus: it goes off there - user Oct 27)
   s._lx = s.x; s._ly = s.y;
@@ -44144,8 +44169,8 @@ function landBulletHit(b) {
     if (p === b.owner) continue;
     const t = tanks[p], h = helis[p];
     let q;
-    if (t && t.state === 'alive' && (q = sweepHit(b, (x, y) => tankHit(t, x, y)))) { tankHurt(t, VTUNE.tank.hp / (VTUNE.plane.hits * 6 * 4), q[0], q[1]); spawnSparks(q[0], q[1], 3, 120); return true; }
-    if (h && (h.state === 'fly' || h.state === 'landed') && (q = sweepHit(b, (x, y) => heliHit(h, x, y)))) { heliHurt(h, VTUNE.mg.heli, q[0], q[1]); spawnSparks(q[0], q[1], 3, 120); return true; }
+    if (t && t.state === 'alive' && sweepReach(b, t.x, t.y, tankReach()) && (q = sweepHit(b, (x, y) => tankHit(t, x, y)))) { tankHurt(t, VTUNE.tank.hp / (VTUNE.plane.hits * 6 * 4), q[0], q[1]); spawnSparks(q[0], q[1], 3, 120); return true; }
+    if (h && (h.state === 'fly' || h.state === 'landed') && sweepReach(b, h.x, h.y, heliReach()) && (q = sweepHit(b, (x, y) => heliHit(h, x, y)))) { heliHurt(h, VTUNE.mg.heli, q[0], q[1]); spawnSparks(q[0], q[1], 3, 120); return true; }
   }
   b._lx = b.x; b._ly = b.y;
   if (plantBulletHit(b)) return true;                                // (a tree, a palm, a cactus, scrub, grass in its way: chipped - 50-land-plants)
@@ -44167,6 +44192,12 @@ function heliHit(h, x, y) {
 }
 // along a projectile's path since the last frame, so a fast one can't skip over what it should hit: the first point
 // where fn(x, y) is true, or null
+// (opt-fight, Oct 30) can the path sweepHit walks come within R of (cx, cy) at all? (box to box) - false: every point it would
+// test is out of reach, so the sweep is passed over; tankReach / heliReach: the farthest point of tankHit's / heliHit's shape
+// from the vehicle's middle (heliHit's widest pose), and 1 to spare
+function sweepReach(o, cx, cy, R) { const x0 = o._lx != null ? o._lx : o.x, y0 = o._ly != null ? o._ly : o.y; return !(Math.min(x0, o.x) > cx + R || Math.max(x0, o.x) < cx - R || Math.min(y0, o.y) > cy + R || Math.max(y0, o.y) < cy - R); }
+const tankReach = () => Math.hypot(Math.max(TANK_W * 0.5, Math.abs(TANK_TUR[0]), Math.abs(TANK_TUR[1])), Math.max(1, Math.abs(TANK_DECK), Math.abs(TANK_DECK - 1), Math.abs(TANK_TOPY - 1))) + 1;
+const heliReach = () => { const w = heliHalf() * 1.05, sk = heliSkid(); return Math.hypot(Math.abs(w), Math.abs(sk) * 1.25) + 1; };
 function sweepHit(o, fn) {
   const x0 = o._lx != null ? o._lx : o.x, y0 = o._ly != null ? o._ly : o.y, n = Math.min(12, Math.ceil(Math.hypot(o.x - x0, o.y - y0) / 4));
   for (let k = 1; k <= n; k++) { const u = k / n, x = x0 + (o.x - x0) * u, y = y0 + (o.y - y0) * u; if (fn(x, y)) return [x, y]; }
