@@ -3219,8 +3219,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 425;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 16:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 426;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 16:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -32531,7 +32531,7 @@ function civAutoAir(f, dt) {
 }
 // the big ships, the boats, the balloons, driven: their own small rules, the drive lever (and up / down)
 function stepCivDriven(v, dt) {
-  const k = civClass(v), p = v.driven, lever = v.cin || 0;
+  const k = civClass(v), p = v.driven, lever = v.story && v.fuel <= 0 ? 0 : v.cin || 0;   // (STORY: out of fuel, no power - 50-story.js)
   if (k === 'ship') {
     const K = CIV[v.kind];
     const held = ancHeld(v);                                         // (her anchor down: she lies to it till it's up, user Oct 27)
@@ -46810,7 +46810,7 @@ function storyBoats() {
     for (let i = 0; i < storyBerths(o); i++) {
       const e = V[i], D = e && STR_VEHS[e.v]; if (!D || D.fam !== 'boat') continue;   // (an empty spot; the other families: not yet)
       const B = strBox(o), j = newJetboat(B.x0, B.x1, D.col, D.kind);
-      Object.assign(j, { story: true, sid: ++k, own: !!e.own, price: D.price, sv: e.v, berth: o.id, spot: i, hb: o.id, hs: i, x: storySpotX(o, i), dir: o.flip ? -1 : 1 });   // (hb / hs: where it started - a lost one's new one is sold there)
+      Object.assign(j, { story: true, sid: ++k, own: !!e.own, price: D.price, sv: e.v, berth: o.id, spot: i, hb: o.id, hs: i, fuel: 1, x: storySpotX(o, i), dir: o.flip ? -1 : 1 });   // (hb / hs: where it started - a lost one's new one is sold there)
       owned = owned || j.own;
       jetboats.push(j);
     }
@@ -46911,6 +46911,32 @@ function storyNets(dt) {
     const f0 = s.fish[0], f = Object.assign({}, f0, { dx: (storyR() - 0.5) * 30, dy: (storyR() - 0.5) * 12, ph: storyR() * 6.28 });
     f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; s.fish.push(f); s.backT = time;
   }
+}
+/* ---- fuel and repairs (user Oct 31, the spec section 5: "All vehicles consume fuel ... When fuel runs out, the vehicle loses
+   powered operation"; "Docked or parked vehicles repair gradually when Allow Repair is enabled and refuel gradually when Allow
+   Refuel is enabled"; 09:31: "In story mode, fixing a broken vehicle takes 1 day"). A story vehicle's fuel (j.fuel, 0-1) burns
+   with its power - a full tank FUEL_S seconds flat out; empty, its lever does nothing (stepCivDriven). Tied up at ALLOW
+   REFUEL it fills in REFUEL_S; damaged and tied up at ALLOW REPAIR, it's mended the next morning. ---- */
+const FUEL_S = 300, REFUEL_S = 40;
+function storyFuel(dt) {
+  for (const j of jetboats) {
+    if (!j.story || j.state !== 'run') continue;
+    if (j.fuel == null) j.fuel = 1;
+    if (j.driven != null) j.fuel = Math.max(0, j.fuel - clamp(Math.abs(j.vDrive || 0) / (j.v || 60), 0, 1.3) * dt / FUEL_S);
+    const o = j.berth != null ? strsUsed().find(q => q.id === j.berth) : null; if (!o) { j.fixDay = null; continue; }
+    if (o.ref && j.fuel < 1) j.fuel = Math.min(1, j.fuel + dt / REFUEL_S);
+    if (o.rep && j.hp < 2) { if (j.fixDay == null) j.fixDay = W.day + 1; else if (W.day >= j.fixDay && env.time >= STORY_WAKE_H) { j.hp = 2; j.fixDay = null; } }
+    else j.fixDay = null;
+  }
+}
+// the gauge, top-left under the day, while you're aboard: FUEL and how much, red when it's low
+function drawStoryFuel(y) {
+  const c = crew[0], v = c.mode === 'civ' ? c.civ : null; if (!v || !v.story || v.fuel == null) return;
+  const f = clamp(v.fuel, 0, 1), w = 80, h = 8, x = 16, yy = y + 18, low = f < 0.2;
+  drawText(ug, 'FUEL', x + 1, yy + 1, '#04070f', 1); drawText(ug, 'FUEL', x, yy, low ? '#ff6a5a' : '#ffffff', 1);
+  ug.fillStyle = 'rgba(4,7,15,0.7)'; ug.fillRect(x + 24, yy - 1, w + 2, h);
+  ug.fillStyle = low ? (Math.floor(time * 3) % 2 ? '#ff6a5a' : '#a03a30') : '#ffd23a'; ug.fillRect(x + 25, yy, Math.round(w * f), h - 2);
+  if (v.hp < 2) { drawText(ug, 'DAMAGED', x + 1, yy + 13, '#04070f', 1); drawText(ug, 'DAMAGED', x, yy + 12, '#ff9a7a', 1); }
 }
 // tied up: a structure that takes fish buys the catch
 function storySellFish(v, o) {
@@ -47027,7 +47053,7 @@ function storyLosses() {
       if (!o || !D) { j.renewed = true; continue; }
       if (jetboats.some(q => q.story && q.state === 'run' && q.berth === o.id && q.spot === j.hs)) continue;   // (its spot taken: later)
       const B = strBox(o), n = newJetboat(B.x0, B.x1, D.col, D.kind);
-      Object.assign(n, { story: true, sid: ++top, own: false, price: D.price, sv: j.sv, berth: o.id, spot: j.hs, hb: o.id, hs: j.hs, x: storySpotX(o, j.hs), dir: o.flip ? -1 : 1 });
+      Object.assign(n, { story: true, sid: ++top, own: false, price: D.price, sv: j.sv, berth: o.id, spot: j.hs, hb: o.id, hs: j.hs, fuel: 1, x: storySpotX(o, j.hs), dir: o.flip ? -1 : 1 });
       jetboats.push(n); j.renewed = true;
     }
   }
@@ -47036,7 +47062,7 @@ function storyLosses() {
 }
 function stepStory(dt) {
   if (!STORY) return;
-  storyLosses(); storyNets(dt);
+  storyLosses(); storyNets(dt); storyFuel(dt);
   if (!story.wake) return;
   stepWeather(dt * (STORY_SLEEP_X - 1));                 // (the clock, the sky and the weather run on: the frame's own step is the 1)
   if (W.day >= story.wake && env.time >= STORY_WAKE_H && env.time < 12) { story.wake = 0; story.saveN++; }
@@ -47119,6 +47145,7 @@ function drawStoryBanner() {
 function storyBannerTop() {
   const y = hudTop() + 12, k = 3, day = 'DAY ' + (W.day || 1);
   drawText(ug, day, 17, y + 1, '#04070f', 2); drawText(ug, day, 16, y, '#ffffff', 2);
+  drawStoryFuel(y);
   const coins = String(story.coins), x = uvw - 16, cy = y + 24, w = textWidth(coins) * 2;
   drawText(ug, coins, x + 1, cy + 1, '#04070f', 2, 'right'); drawText(ug, coins, x, cy, '#ffd23a', 2, 'right');
   const X0 = x - w - 8 - 7 * k + 1, Y0 = cy - 4;
