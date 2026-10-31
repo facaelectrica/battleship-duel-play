@@ -3219,8 +3219,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 422;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 15:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 423;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 15:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14007,6 +14007,10 @@ const SW_DRAW = {
   // 50-land-space.js rocketPuffR (the rocket's puffs)
   smoke: ['x', 'y', 'r', 'age', 'life', 'alpha', 'dark', 'mist', 'quick', 'fam', 'fadeFrom', 'keep', 'kill', 'lonely', 'link', 'lumpy', 'prev', 'src', 'dead', 'sq'],   // (h: the page's own, kept by sq - SW_KEEP)
   rocketTrail: ['x', 'y', 'r', 'age', 'life', 'k', 'ground', 'w', 'h'],
+  // (60-fps chat, Oct 31) the shells' trails: sky/21-smoke.js gatherSmokeNew (the points' x, y, age, seed, launch; thin, root),
+  // 47-render-overlays.js trailR (age), 41-sky-new.js (x, y, age) - the points' vx, vy are the step's alone (stepTrails' wind and
+  // shove). Thousands of pieces in a long fight: two of the six numbers of every point never sent
+  trails: ['p1.x', 'p1.y', 'p1.age', 'p1.seed', 'p1.launch', 'p2.x', 'p2.y', 'p2.age', 'p2.seed', 'p2.launch', 'root', 'thin', 'next'],
   // 44-shadows-seafloor.js drawSeaLife (each fish of a school; its x, y are undefined until its first step)
   seaSchools: ['type', 'x', 'y', 'dir', 'fish.x', 'fish.y', 'fish.dx', 'fish.dy', 'fish.face'],
   // SW_EXTRA: 26-white-water.js drawWclouds, drawGasBalls; 47-render-overlays.js (blastRings: the distortion's rings); 43-render-objects.js drawShocks
@@ -14139,6 +14143,35 @@ function swNestInto(o, k, N, i, at, strs) {
   for (let j = 0; j < cnt; j++) { const cur = a[j]; a[j] = fill(cur && typeof cur === 'object' ? cur : {}); }
   return at;
 }
+/* (the page) a nested field down the whole list at once (60-fps chat, Oct 31: the heavy battle's trails - thousands of pieces, two
+   points each - spent ~15 ms a snapshot in swNestInto, a set and a closure made per piece and per field, every point's fields
+   walked for strays): the objects first, each in its place (reused, or new with every field there from the start), then each
+   field a column at a time. A reused object's stray fields are cleaned off when the list's columns changed (clean: the nested
+   fields are part of the list's signature) - otherwise every one already holds exactly these fields. The same values in the same
+   places as swNestInto */
+const SWNI = [];
+function swNestCol(arr, k, N, n, strs, clean) {
+  const K = N.k, D = N.d, nk = K.length, cnt = N.c, items = SWNI; items.length = 0;
+  const fresh = () => { const e = {}; for (let c = 0; c < nk; c++) e[K[c]] = undefined; return e; };
+  let has = null;
+  const tidy = e => { if (!clean) return; if (!has) has = new Set(K); for (const f in e) if (!has.has(f)) delete e[f]; };
+  for (let i = 0; i < n; i++) {
+    const o = arr[i], c = cnt[i];
+    if (c < 0) { delete o[k]; continue; }
+    if (N.obj) { let e = o[k]; if (e && typeof e === 'object' && !Array.isArray(e)) tidy(e); else e = o[k] = fresh(); items.push(e); continue; }
+    const a = Array.isArray(o[k]) ? o[k] : (o[k] = []);
+    if (a.length > c) a.length = c;
+    for (let j = 0; j < c; j++) { let e = a[j]; if (e && typeof e === 'object') tidy(e); else e = a[j] = fresh(); items.push(e); }
+  }
+  const m = items.length;
+  for (let c = 0; c < nk; c++) {
+    const d = D[c], f = K[c], mm = d.m, z = d.z;
+    if (d.f) { const v = d.f; if (!mm && !z) for (let i = 0; i < m; i++) items[i][f] = v[i]; else for (let i = 0; i < m; i++) items[i][f] = mm && mm[i] ? undefined : z && z[i] ? null : v[i]; }
+    else if (d.b) { const v = d.b; for (let i = 0; i < m; i++) items[i][f] = mm && mm[i] ? undefined : z && z[i] ? null : v[i] !== 0; }
+    else for (let i = 0; i < m; i++) swColPut(items[i], f, d, i, strs);
+  }
+  items.length = 0;
+}
 // (the page) a list refilled from its columns
 // lists whose rows the page matches by a number of their own rather than by place (the rows shift as old ones die): each incoming
 // row takes the page's thing with the same number, so what the page's drawing gives a thing itself stays on it - a puff's h,
@@ -14155,7 +14188,8 @@ function swColsInto(arr, C, strs, name) {
   const dvp = name && SW_DERIVE[name] && K.includes(SW_DERIVE[name].keys[0]) ? SW_DERIVE[name] : null;
   // (a field is cleaned off a reused thing only when this list's columns changed since its last refill - a full snapshot after
   // live ones, or back: otherwise every thing already has exactly these fields, and walking them all is the refill's cost)
-  const sig = K.join(','), clean = swColsSig.get(arr) !== sig; swColsSig.set(arr, sig);
+  let sig = K.join(','); for (let c = 0; c < K.length; c++) if (D[c].nest) sig += '|' + K[c] + ':' + D[c].nest.k.join(',') + (D[c].nest.obj ? '' : '[]');
+  const clean = swColsSig.get(arr) !== sig; swColsSig.set(arr, sig);
   // (matched by number: the page's things by that number first, then each incoming row takes its own or a new one)
   let byN = null;
   if (kd && kd.f) { byN = new Map(); for (const o of arr) if (o && typeof o === 'object') byN.set(o[keep.by], o); }
@@ -14174,7 +14208,7 @@ function swColsInto(arr, C, strs, name) {
     if (d.f) { const f = d.f; if (!m && !z) for (let i = 0; i < n; i++) arr[i][k] = f[i]; else for (let i = 0; i < n; i++) arr[i][k] = m && m[i] ? undefined : z && z[i] ? null : f[i]; }
     else if (d.b) { const f = d.b; for (let i = 0; i < n; i++) arr[i][k] = m && m[i] ? undefined : z && z[i] ? null : f[i] !== 0; }
     else if (d.j) { const j = d.j; for (let i = 0; i < n; i++) arr[i][k] = j[i]; }
-    else if (d.nest) { let at = 0; for (let i = 0; i < n; i++) at = swNestInto(arr[i], k, d.nest, i, at, strs); }
+    else if (d.nest) swNestCol(arr, k, d.nest, n, strs, clean);
     else for (let i = 0; i < n; i++) swColPut(arr[i], k, d, i, strs);
   }
   if (dvp) for (let i = 0; i < n; i++) { const o = arr[i], v = SW_DV3; for (let j = 0; j < dvp.keys.length; j++) v[j] = o[dvp.keys[j]]; dvp.put(o, v[0] === undefined ? v : v.slice()); }
@@ -41632,10 +41666,12 @@ function buildLand() {
   for (let i = 0; i < nO; i++) {
     let x = 0, tries = 0;
     const right = i % 2 === 1, lxOf = () => MTN_FLAT + 150 + Math.pow(R0(), 1.6) * (SEA0_0 - AIR_W - MTN_FLAT - 1400);   // (none by the launch pads: they stand on flat ground past the hangars)
-    do { const lx = lxOf(); x = right ? WORLD_W - lx : lx; tries++; } while (tries < 40 && (!inCountry(x) || land.outcrops.some(o => Math.abs(o.x - x) < 380) || lakeU(x) < 1.35 || (!structsDefault() && structNear(x, 320))));   // (and none on a placed structure's pad or its banks)
+    // (and none on a structure's pad or its banks - every world's, the default one too: since Version 293 the default
+    // airports stand inland, where a hump came up through the runway and a plane lifting off flew into it - Oct 31)
+    do { const lx = lxOf(); x = right ? WORLD_W - lx : lx; tries++; } while (tries < 40 && (!inCountry(x) || land.outcrops.some(o => Math.abs(o.x - x) < 380) || lakeU(x) < 1.35 || structNear(x, 320)));
     // (humps a tank can drive over - sides no steeper than it climbs - tall enough to hide behind)
     const h = 20 + R0() * 26, w = h * 4 + 30 + R0() * 30, kind = R0() < 0.4 ? 'crag' : 'hump';   // (sides no steeper than about 1 in 3)
-    if (!structsDefault() && structNear(x, w + 20)) continue;             // (still on one after all the tries: none - the pads stay flat)
+    if (structNear(x, w + 20)) continue;                                   // (still on one after all the tries: none - the pads stay flat)
     land.outcrops.push({ x, w, h, kind });
     const c0 = ltCol(x - w), c1 = ltCol(x + w);
     for (let c = c0; c <= c1; c++) {
