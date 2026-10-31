@@ -3167,8 +3167,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 392;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 10:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 393;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 10:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -46000,6 +46000,55 @@ function sfxSiren() {
   }
 }
 
+/* ---- the air's layers as lines in the GAME EDITOR (user Oct 31, 09:14: "horizontal markers that we can drag in the editor,
+   so I can visually see where we mark the different atmospheres, like the stratosphere, and we can drag them to adjust
+   visually versus just using the sliders"). Each layer the SKY EDITOR's sliders set (STRATOSPHERE, UPPER ATMOSPHERE, OUTER
+   SPACE - metres over the sea; atmoSync, 50-land-space.js) is a line across the view while the editor is open, its name
+   and height on it. Press near one and drag it up or down: the value goes through its own slider (the same value: the
+   slider moves, it's saved, the sky follows), each kept over the one below it. ---- */
+const ATMO_MARKS = [['strat', 'STRATOSPHERE', [120, 200, 255], /STRATOSPHERE/], ['upper', 'UPPER ATMOSPHERE', [190, 150, 255], /UPPER ATMOSPHERE/], ['space', 'OUTER SPACE', [255, 140, 200], /OUTER SPACE/]];
+const AMK = { drag: null };
+const atmoY = k => WATER_Y - (NSKY.P[k] || 0) * UPM;
+// a layer's height set: through its slider when the editor has built it (its row, its saving, the sky's refresh), else straight
+function atmoSet(k, m) {
+  const i = ATMO_MARKS.findIndex(a => a[0] === k), lo = i > 0 ? NSKY.P[ATMO_MARKS[i - 1][0]] + 10 : 50, hi = i < ATMO_MARKS.length - 1 ? NSKY.P[ATMO_MARKS[i + 1][0]] - 10 : 20000;
+  const v = Math.round(clamp(m, lo, hi) / 10) * 10;
+  const row = [...document.querySelectorAll('#skyEd .row')].find(r => { const l = r.querySelector('label'), inp = r.querySelector('input[type=range]'); return l && inp && ATMO_MARKS[i][3].test(l.textContent) && +inp.max === 20000; });
+  const inp = row && row.querySelector('input[type=range]');
+  if (inp) { inp.value = v; inp.dispatchEvent(new Event('input', { bubbles: true })); }
+  else { NSKY.P[k] = v; NSKY.saveP(); }
+  atmoSync();
+}
+window.addEventListener('pointerdown', ev => {
+  if ((ev.pointerType === 'mouse' && ev.button !== 0) || !OWM || !NSKY.editor.TUNE.open || onEdUI(ev)) return;
+  const [, Y, r] = vehWorld(ev);
+  let best = null, bd = r * 1.2;
+  for (const [k] of ATMO_MARKS) { const d = Math.abs(Y - atmoY(k)); if (d < bd) { bd = d; best = k; } }
+  if (!best) return;
+  AMK.drag = { id: ev.pointerId, k: best, dy: atmoY(best) - Y };
+  ev.stopImmediatePropagation(); ev.preventDefault();
+}, { capture: true, passive: false });
+window.addEventListener('pointermove', ev => {
+  const d = AMK.drag; if (!d || d.id !== ev.pointerId) return;
+  const [, Y] = vehWorld(ev); atmoSet(d.k, (WATER_Y - (Y + d.dy)) / UPM);
+  ev.stopImmediatePropagation();
+}, { capture: true, passive: true });
+const amkUp = ev => { if (AMK.drag && AMK.drag.id === ev.pointerId) { AMK.drag = null; ev.stopImmediatePropagation(); } };
+window.addEventListener('pointerup', amkUp, { capture: true });
+window.addEventListener('pointercancel', amkUp, { capture: true });
+// drawn over the world while the editor is open (from vehEdDraw, each view): the line across the view, dashed, its label
+function atmoMarksDraw() {
+  if (!OWM || !NSKY.editor.TUNE.open) return;
+  const q = Math.max(1, Math.round(2 * dpr / PIXW)), dash = 12 * q;
+  for (const [k, lab, c] of ATMO_MARKS) {
+    const Y = Math.round(PY(atmoY(k))); if (Y < -20 || Y > bh + 20) continue;
+    const on = AMK.drag && AMK.drag.k === k, w = on ? q + 1 : q;
+    C.fillStyle = '#04070f'; for (let x = 0; x < VWP; x += dash * 2) C.fillRect(x, Y - w, dash, w * 2 + 1);
+    C.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`; for (let x = 0; x < VWP; x += dash * 2) C.fillRect(x, Y - (w >> 1), dash, w);
+    drawText(C, lab + ' ' + Math.round(NSKY.P[k]) + ' M', 8 * q, Y - 9 * q, on ? [255, 255, 255] : c, q, 'left');
+  }
+}
+
 /* ================================================================
    The GAME EDITOR's COLLISION and ZOOM LEVELS tabs (user Oct 30, the editor overhaul, phase 1)
    COLLISION: switches that draw, over the world, what each kind of thing is hit by - the game's own hit tests
@@ -46147,6 +46196,7 @@ window.addEventListener('pointercancel', vehUp, { capture: true });
 // ---- drawn over the world: a ring round the picked vehicle (each view, after the COLLISION view)
 function vehEdDraw() {
   strEdDraw();                                               // (the STRUCTURES tab's frames and names - 50-zz-struct)
+  atmoMarksDraw();                                           // (the air's layers as lines to drag - 50-zz-atmo-marks)
   if (!VE.sel || !vehTabOpen()) return;
   const [x, y] = vehPos(VE.sel), X = PX(x), Y = PY(y), r = Math.max(14 * dpr / PIXW, vehR(VE.sel) * SV), w = Math.max(2, Math.round(2 * dpr / PIXW));
   if (X < -r || X > VWP + r) return;
