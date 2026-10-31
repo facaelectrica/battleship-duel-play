@@ -2085,11 +2085,13 @@ function surfTab() {
   const n = VWP + 2 * SURF.PAD + 1;
   if (!T || T.y.length < n) T = SURF.tab[viewIdx] = { y: new Float64Array(n + 256) };
   T.n = n; T.tick = renderTick; T.sv = SV; T.campx = CAMPX; T.vwp = VWP;
-  // exact on every other column, the one between interpolated (well under a tenth of a pixel off)
-  const y = T.y;
-  for (let i = 0; i < n; i += 2) y[i] = surfaceY0((i - SURF.PAD + CAMPX + 0.5) / SV);
-  for (let i = 1; i < n - 1; i += 2) y[i] = (y[i - 1] + y[i + 1]) * 0.5;
-  if (!(n & 1)) y[n - 1] = surfaceY0((n - 1 - SURF.PAD + CAMPX + 0.5) / SV);
+  // exact on every fourth column, the three between interpolated along the straight line (user Oct 31, 17:10: differences
+  // only a screenshot program could find are fine for frame rate - the surface's twenty sines were ~0.65 ms a frame; a
+  // straight line over four pixels of a swell is a few hundredths of a pixel off, the line a pixel off here and there)
+  const y = T.y, Q = 4, last = n - 1;
+  for (let i = 0; i <= last; i += Q) y[i] = surfaceY0((i - SURF.PAD + CAMPX + 0.5) / SV);
+  if (last % Q) y[last] = surfaceY0((last - SURF.PAD + CAMPX + 0.5) / SV);
+  for (let i = 0; i < last; i += Q) { const j = Math.min(i + Q, last), a = y[i], d = (y[j] - a) / (j - i); for (let k = i + 1; k < j; k++) y[k] = a + d * (k - i); }
   return T;
 }
 /* How far the surface can be from WATER_Y anywhere right now: the swell's largest possible height (every swell term at its
@@ -3224,8 +3226,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 430;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 17:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 431;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 17:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14087,12 +14089,24 @@ const SW_DERIVE = {
    columns swColsOf makes for them (its fields in its order, the same kinds, masks and places): p1 and p2 as flat columns of
    their points (x, y, age, seed; launch where a point has it), root and thin, next as a place in the list (absent: none, or a
    piece not sent - off the views). Anything not as a trail piece always is, and it's the general walk instead (null) */
+/* (60-fps chat, Oct 31) A SNAPSHOT'S NUMBERS IN ONE BLOCK: every column, mask and slice of a live snapshot is a view into one big
+   buffer (or a few, as it fills), not a buffer each - hundreds of small buffers moved to the page and dropped every frame. The
+   page reads the same numbers through the same kinds of arrays; nothing of it keeps one (it copies the values out) */
+let SWF32 = false;   // (a live snapshot's number columns as 32-bit floats - swColOf, swTrailCols)
+const SWA = { buf: null, off: 0, list: [], size: 1 << 16, used: 0 };
+function swNew(T, n) {
+  const by = T.BYTES_PER_ELEMENT * n; let off = (SWA.off + 7) & ~7;
+  if (!SWA.buf || off + by > SWA.buf.byteLength) { SWA.buf = new ArrayBuffer(Math.max(SWA.size, by)); SWA.list.push(SWA.buf); off = 0; }
+  SWA.off = off + by; SWA.used += by;
+  return new T(SWA.buf, off, n);
+}
+const swCopy = (a, i0, i1) => { const v = swNew(a.constructor, i1 - i0); v.set(a.subarray(i0, i1)); return v; };
 const SWIX = new Map();
 function swTrailCols(arr, bufs) {
   const n = arr.length; if (!n) return null;
   const P = ['x', 'y', 'age', 'seed'];
   const cols = side => {
-    const X = new Float64Array(n), Y = new Float64Array(n), A = new Float64Array(n), S = new Float64Array(n);
+    const FT = SWF32 ? Float32Array : Float64Array, X = swNew(FT, n), Y = swNew(FT, n), A = swNew(FT, n), S = swNew(FT, n);
     let L = null, LM = null, any = false;
     for (let i = 0; i < n; i++) {
       const q = side ? arr[i].p2 : arr[i].p1;
@@ -14101,17 +14115,17 @@ function swTrailCols(arr, bufs) {
       if (typeof x !== 'number' || typeof y !== 'number' || typeof a !== 'number' || typeof sd !== 'number') return null;
       X[i] = x; Y[i] = y; A[i] = a; S[i] = sd;
       const la = q.launch;
-      if (la !== undefined) { if (typeof la !== 'boolean') return null; if (!L) { L = new Float64Array(n); LM = new Uint8Array(n); for (let j = 0; j < i; j++) LM[j] = 1; } L[i] = la ? 1 : 0; any = true; }
+      if (la !== undefined) { if (typeof la !== 'boolean') return null; if (!L) { L = swNew(Float64Array, n); LM = swNew(Uint8Array, n); for (let j = 0; j < i; j++) LM[j] = 1; } L[i] = la ? 1 : 0; any = true; }
       else if (L) LM[i] = 1;
     }
-    const c = new Int32Array(n).fill(1), N = { c, obj: true, k: P.slice(), d: [] };
+    const c = swNew(Int32Array, n).fill(1), N = { c, obj: true, k: P.slice(), d: [] };
     for (const f of [X, Y, A, S]) { bufs.push(f.buffer); N.d.push({ f, m: null, z: null }); }
     if (any) { let miss = null; for (let i = 0; i < n; i++) if (LM[i]) { miss = LM; break; } bufs.push(L.buffer); if (miss) bufs.push(miss.buffer); N.k.push('launch'); N.d.push({ b: L, m: miss, z: null }); }
     bufs.push(c.buffer);
     return N;
   };
   // (the plain fields first, checked, so nothing is half made when one isn't as it should be)
-  const R = new Float64Array(n), Tn = new Float64Array(n), ri = new Int32Array(n); let hasNext = false;
+  const R = swNew(Float64Array, n), Tn = swNew(Float64Array, n), ri = swNew(Int32Array, n); let hasNext = false;
   SWIX.clear(); for (let i = 0; i < n; i++) SWIX.set(arr[i], i);
   for (let i = 0; i < n; i++) {
     const o = arr[i];
@@ -14152,7 +14166,7 @@ function swColsOf(t, arr, strs, sIdx, bufs, draw, all) {
     // thing, a column of them, every snapshot)
     const outs = all && all !== arr ? (C.outs || (C.outs = new Set(all))) : null;
     // (a field that is only ever a thing of this list, null or absent: one Int32 column of places, -1 none, -2 null)
-    { let ok = true; const ri = new Int32Array(n);
+    { let ok = true; const ri = swNew(Int32Array, n);
       for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (v === undefined) ri[i] = -1; else if (v === null) ri[i] = -2; else if (v && typeof v === 'object' && idx.has(v)) ri[i] = idx.get(v); else if (outs && outs.has(v)) ri[i] = -1; else { ok = false; break; } }
       if (ok) { bufs.push(ri.buffer); C.k.push(k); C.d.push({ ri }); continue; } }
     const vals = new Array(n);
@@ -14162,8 +14176,8 @@ function swColsOf(t, arr, strs, sIdx, bufs, draw, all) {
   delete C.idx; delete C.outs;
   const dv = t.name && SW_DERIVE[t.name];
   if (dv) dv.keys.forEach((k, j) => {
-    const col = new Float64Array(n); let miss = null;
-    for (let i = 0; i < n; i++) { const v = arr[i] ? dv.get(arr[i], j) : undefined; if (typeof v === 'number') col[i] = v; else (miss || (miss = new Uint8Array(n)))[i] = 1; }
+    const col = swNew(Float64Array, n); let miss = null;
+    for (let i = 0; i < n; i++) { const v = arr[i] ? dv.get(arr[i], j) : undefined; if (typeof v === 'number') col[i] = v; else (miss || (miss = swNew(Uint8Array, n)))[i] = 1; }
     bufs.push(col.buffer); if (miss) bufs.push(miss.buffer);
     C.k.push(k); C.d.push({ f: col, m: miss, dv: 1 });
   });
@@ -14174,13 +14188,17 @@ function swColsOf(t, arr, strs, sIdx, bufs, draw, all) {
 function swColOf(arr, k, kind, strs, sIdx, bufs) {
   const n = arr.length;
   if (kind === 2) {
-    const col = new Int32Array(n);   // (-1 absent, -2 null)
+    const col = swNew(Int32Array, n);   // (-1 absent, -2 null)
     for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v !== 'string') { col[i] = v === null ? -2 : -1; continue; } let id = sIdx.get(v); if (id == null) { id = strs.length; strs.push(v); sIdx.set(v, id); } col[i] = id; }
     bufs.push(col.buffer);
     return { s: col };
   }
-  const col = new Float64Array(n); let miss = null, nul = null;
-  for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v === 'number') col[i] = v; else if (typeof v === 'boolean') col[i] = v ? 1 : 0; else if (v === null) (nul || (nul = new Uint8Array(n)))[i] = 1; else { (miss || (miss = new Uint8Array(n)))[i] = 1; } }
+  // (user Oct 31, 17:10: a live snapshot's numbers as 32-bit floats - a world position to under a hundredth of a pixel, half
+  // the bytes; a column holding a whole number past 2^24 - a spawn count, an id - stays exact, 64-bit. A full snapshot: 64-bit)
+  let big = false;
+  if (SWF32) for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v === 'number' && (v >= 16777216 || v <= -16777216) && Number.isInteger(v)) { big = true; break; } }
+  const col = swNew(SWF32 && !big ? Float32Array : Float64Array, n); let miss = null, nul = null;
+  for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v === 'number') col[i] = v; else if (typeof v === 'boolean') col[i] = v ? 1 : 0; else if (v === null) (nul || (nul = swNew(Uint8Array, n)))[i] = 1; else { (miss || (miss = swNew(Uint8Array, n)))[i] = 1; } }
   bufs.push(col.buffer); if (miss) bufs.push(miss.buffer); if (nul) bufs.push(nul.buffer);
   return kind === 4 ? { b: col, m: miss, z: nul } : { f: col, m: miss, z: nul };
 }
@@ -14190,7 +14208,7 @@ function swColOf(arr, k, kind, strs, sIdx, bufs) {
    biggest part as data). Anything else in them (a nested array, a thing of a table, a typed array, null) and the field goes as
    plain data as before (null: not that). only: the objects' fields sent (SW_DRAW's 'a.b' names); else all of them */
 function swNestOf(arr, k, only, strs, sIdx, bufs) {
-  const n = arr.length, items = [], counts = new Int32Array(n);
+  const n = arr.length, items = [], counts = swNew(Int32Array, n);
   let obj = -1;                                                       // (-1 not seen yet, 1 objects, 0 arrays)
   for (let i = 0; i < n; i++) {
     const o = arr[i], v = o ? o[k] : undefined;
@@ -14321,7 +14339,7 @@ function swColsInto(arr, C, strs, name) {
 // (the page draws the sea from wh (simAt) and wv (simVelAt) near its views only - never wf, the forces, which only the step reads:
 // a live snapshot carries wh and wv as the slices under the views' spans (REG.spans, SW_MARGIN to spare) and no wf; a full one all three whole)
 function swArraysOf(bufs, full) {
-  const a = { stir: stirA.slice(), settleT: waterAct.t };
+  const a = { stir: full ? stirA.slice() : swCopy(stirA, 0, stirA.length), settleT: waterAct.t };
   bufs.push(a.stir.buffer);
   const sp = REG.spans;
   if (full || !sp.length) { a.wh = wh.slice(); a.wv = wv.slice(); a.wf = wf.slice(); bufs.push(a.wh.buffer, a.wv.buffer, a.wf.buffer); }
@@ -14330,7 +14348,7 @@ function swArraysOf(bufs, full) {
     for (let i = 0; i < sp.length; i += 2) {
       const i0 = clamp(Math.floor((sp[i] - SW_MARGIN) / DX), 0, N - 1), i1 = clamp(Math.ceil((sp[i + 1] + SW_MARGIN) / DX) + 1, 0, N);
       if (i1 <= i0) continue;
-      const h = wh.slice(i0, i1), v = wv.slice(i0, i1); bufs.push(h.buffer, v.buffer); cuts.push({ i0, h, v });
+      const h = swCopy(wh, i0, i1), v = swCopy(wv, i0, i1); bufs.push(h.buffer, v.buffer); cuts.push({ i0, h, v });
     }
     a.cuts = cuts;
   }
@@ -14439,6 +14457,8 @@ function swSnapshot(full, drawn = !full) {
   const t0 = performance.now();
   for (const k in TABLES) if (!SW_LOCAL.has(k)) for (const o of TABLES[k].list()) if (o) uidOf(o);
   const parts = [], cols = {}, strs = [], sIdx = new Map(), bufs = []; SWS.by = {}; SWS.leaf = {}; SWS.tms = {};
+  SWA.buf = null; SWA.off = 0; SWA.list = []; SWA.used = 0;   // (this snapshot's block: sized from the last one's - swNew)
+  SWF32 = !full && drawn;
   for (const k in TABLES) {
     if (SW_LOCAL.has(k)) continue;
     const tk = performance.now();
@@ -14476,7 +14496,7 @@ function swSnapshot(full, drawn = !full) {
       had.set(u, { K: K.slice(), L: L.slice(), V: V.map((v, i) => (L[i] & 7) === 2 ? v.slice() : v) });
     }
     if (cu.length) {
-      const U = Int32Array.from(cu), I = Int32Array.from(ci), F = Float64Array.from(cv);
+      const U = swNew(Int32Array, cu.length), I = swNew(Int32Array, ci.length), F = swNew(Float64Array, cv.length); U.set(cu); I.set(ci); F.set(cv);
       bufs.push(U.buffer, I.buffer, F.buffer);
       (SWS.leaf || (SWS.leaf = {}))[k] = { u: U, i: I, f: F, o: co.some(x => x !== undefined) ? co : null };
     }
@@ -14493,6 +14513,8 @@ function swSnapshot(full, drawn = !full) {
   const txt = '{"t":' + JSON.stringify(time) + ',"tick":' + REG.tick + ',"T":{' + parts.join(',') + '}}';
   for (const k in SW_EXTRA) { const all = SW_EXTRA[k](); cols['+' + k] = swColsOf(SW_EXTRA_T, swInView(all, full), strs, sIdx, bufs, drawn ? SW_DRAWK[k] : null, all); }
   const arrays = swArraysOf(bufs, full);
+  SWA.size = Math.max(1 << 16, Math.ceil(SWA.used * 1.25 / 4096) * 4096); SWA.buf = null; SWF32 = false;
+  { const u = [...new Set(bufs)]; bufs.length = 0; for (const b of u) bufs.push(b); }   // (a block once in the list of what's moved)
   let colB = 0; for (const b of bufs) colB += b.byteLength;
   SWS.ms += (performance.now() - t0 - SWS.ms) * 0.1; SWS.bytes += (txt.length + colB - SWS.bytes) * 0.1; SWS.colBytes = colB; SWS.n++;
   const by = Object.entries(SWS.by).sort((a, b) => b[1] - a[1]).slice(0, 8), slow = Object.entries(SWS.tms).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => [k, +v.toFixed(2)]);
@@ -17734,7 +17756,7 @@ class GLCtx {
     const ring = GLR.shRing, i = GLR.shI = (GLR.shI + 1) % 8;
     let T = ring[i];
     if (!T || T.epoch !== GLR.epoch) T = ring[i] = { rows: null, rowsH: 0, cols: null, colsH: 0, lut: null, lutH: 0, par: null, parH: 0, epoch: GLR.epoch };
-    const tex = (k, kh, h, unit, ifmt, fmt, type, data) => {
+    const tex = (k, kh, h, unit, ifmt, fmt, type, data, cnt) => {
       gl.activeTexture(gl.TEXTURE0 + unit);
       const w = k === 'lut' ? 256 : 2048;
       if (!T[k] || T[kh] < h) {
@@ -17746,13 +17768,20 @@ class GLCtx {
         gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, w, T[kh], 0, fmt, type, null);
       } else gl.bindTexture(gl.TEXTURE_2D, T[k]);
       gl.bindSampler(unit, null);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, fmt, type, data, 0);
+      // (only the texels in use: the whole rows before the last, then the last row's used part - a veil's few hundred rows
+      // were sent as a whole 2048-wide row, Oct 31; what the draws read is the same)
+      if (cnt === undefined || cnt >= w * h) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, fmt, type, data, 0);
+      else {
+        const full = Math.floor(cnt / w), rest = cnt - full * w, per = data.length / (w * h);
+        if (full) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, full, fmt, type, data, 0);
+        if (rest) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, full, rest, 1, fmt, type, data, full * w * per);
+      }
     };
     const pm = GLR.pm;
     if (pm) glPM(false);
-    tex('rows', 'rowsH', hr, 13, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.R);
-    tex('cols', 'colsH', hc, 14, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.C);
-    tex('par', 'parH', Math.max(1, hs), 12, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.S);
+    tex('rows', 'rowsH', hr, 13, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.R.subarray(0, hr * 2048 * 4), nr);
+    tex('cols', 'colsH', hc, 14, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.C.subarray(0, hc * 2048 * 4), nc);
+    tex('par', 'parH', Math.max(1, hs), 12, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.S.subarray(0, Math.max(1, hs) * 2048 * 4), ns * 3);
     glPM(true);   // (the tables as the picture's pixels were: straight, premultiplied on upload)
     tex('lut', 'lutH', nl, 15, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(P.L.buffer, 0, nl * 1024));
     if (!pm) glPM(false);
@@ -25778,6 +25807,7 @@ function algOut() {
   ALG.need = true;                                         // (something else may draw next: the batch made ready again)
 }
 const algW = (col, wx, wy, ww, wh) => { const X = PX(wx), w = Math.max(1, Math.round(ww * SV)); if (X + w > RKL.maxR) RKL.maxR = X + w; algPut(col, X, PY(wy), w, Math.max(1, Math.round(wh * SV))); };   // (maxR: how far right the weed has reached - 44-zz-rock-layer.js)
+const ALG_C35 = Math.cos(0.35), ALG_S35 = Math.sin(0.35), ALG_C60 = Math.cos(0.6), ALG_S60 = Math.sin(0.6);
 function drawAlgae(x0, x1, lkOnly) {
   // algae and kelp swaying in the current
   const current = E.windU * 0.004 + E.storm * 0.3 * Math.sin(time * 0.9);
@@ -25804,9 +25834,14 @@ function drawAlgae(x0, x1, lkOnly) {
     for (let b = 0; b < blades; b++) {
       const A = tA + b;
       let x = p.x + (b - (blades - 1) / 2) * (kelp ? 7 : 2.5), y = base;
+      // (user Oct 31, 17:10: the two waves stepped down the blade by turning, not a sine a segment - the same sway to a
+      // millionth, a segment now and then a pixel over: the weed was ~0.8 ms a frame)
+      let sa = Math.sin(A), ca = Math.cos(A), sb = T35 !== 0 ? Math.sin(tB) : 0, cb = T35 !== 0 ? Math.cos(tB) : 0;
       for (let s = 0; s < segs; s++) {
         const u = s / segs;
-        const sway = (Math.sin(A + s * 0.35) + (T35 !== 0 ? T35 * Math.sin(tB + s * 0.6) : 0)) * (0.9 + 1.6 * u) * swA + C8 * u + bend * u * 1.6;
+        const sway = (sa + (T35 !== 0 ? T35 * sb : 0)) * (0.9 + 1.6 * u) * swA + C8 * u + bend * u * 1.6;
+        { const t = sa * ALG_C35 + ca * ALG_S35; ca = ca * ALG_C35 - sa * ALG_S35; sa = t; }
+        if (T35 !== 0) { const t = sb * ALG_C60 + cb * ALG_S60; cb = cb * ALG_C60 - sb * ALG_S60; sb = t; }
         x += sway * 0.55; y -= segH;
         const X = Math.round((x - dX) * SV) - CAMPX;
         if (X + wP > RKL.maxR) RKL.maxR = X + wP;
