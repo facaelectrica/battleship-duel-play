@@ -3226,8 +3226,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 434;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 17:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 435;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 17:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -47559,9 +47559,16 @@ const STORY_COIN = ['..###..', '.#ooo#.', '#oo#oo#', '#o#o#o#', '#oo#oo#', '.#oo
    or wherever they like) until they're at another structure or in another vehicle. The levels are the stepped zoom's own
    (setScope). This screen's camera: run as it's drawn. ---- */
 const STORY_ZOOM = { key: null, lv: null, manual: false, mv: 0, moving: false };
+/* each vehicle type's own CLOSE and MEDIUM (the spec section 9: "Configure each vehicle type's gameplay zoom levels in the
+   Vehicles section"): the view's width in metres, set in the GAME EDITOR's VEHICLES tab (its STORY ZOOM box), kept in this
+   browser (bd_story_zoom: { type: [close, medium] }); unset, from the vehicle's length */
+let STORY_ZW = {};
+try { const o = JSON.parse(localStorage.getItem('bd_story_zoom') || 'null'); if (o && typeof o === 'object') STORY_ZW = o; } catch (e) { }
+function storyZoomDef(sv) { const D = STR_VEHS[sv], L = D && D.fam === 'car' ? 5 : sv === 'jet' ? 3.5 : sv === 'motor' ? 4.3 : 11.3; return [Math.round(Math.max(45, 4 * L)), Math.round(Math.max(130, 12 * L))]; }
+const storyZoomOf = sv => STORY_ZW[sv] || storyZoomDef(sv);
 function storyZoomWidth() {
   const c = crew[0];
-  if (c.mode === 'civ' && c.civ && c.civ.story) { const L = storyBoatSize(c.civ)[0]; return STORY_ZOOM.moving ? Math.max(130 * UPM, 12 * L) : Math.max(45 * UPM, 4 * L); }
+  if (c.mode === 'civ' && c.civ && c.civ.story) { const z = storyZoomOf(c.civ.sv); return (STORY_ZOOM.moving ? z[1] : z[0]) * UPM; }
   if (c.mode === 'dock') { const o = storyAt(); if (o) { const B = strBox(o); return Math.max(60 * UPM, 3 * (B.x1 - B.x0)); } }
   return null;
 }
@@ -47577,12 +47584,32 @@ function storyZoom(dt) {
   // (Medium at least a step further out than Close: the stepped zoom's levels near the top are far apart)
   const lvOf = w => clamp(zoomLevelOf(clamp(VIEW_W / w, ZOOM_PLAY_MIN, ZOOM_TOP)), 1, ZN);
   let lv = lvOf(w);
-  if (Z.moving && c.civ) { const wc = Math.max(45 * UPM, 4 * storyBoatSize(c.civ)[0]); lv = Math.min(lv, lvOf(wc) - 1); }
+  if (Z.moving && c.civ) lv = Math.min(lv, lvOf(storyZoomOf(c.civ.sv)[0] * UPM) - 1);
   lv = Math.max(1, lv);
   if (scopes[0].level !== lv) setScope(0, lv);
   Z.lv = lv;
 }
-window.__storyZoom = STORY_ZOOM;                         // (tools)
+window.__storyZoom = STORY_ZOOM;
+// the STORY ZOOM box at the foot of the GAME EDITOR's VEHICLES tab: a vehicle type, its CLOSE and MEDIUM widths
+function storyZoomBox() {
+  if (typeof document === 'undefined' || SIM_ONLY) return;   // (the worker, a headless match: no editor)
+  if (!VE.pane) { setTimeout(storyZoomBox, 700); return; }
+  const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.textContent = h; return e; };
+  const box = el('div', 'cat'); box.appendChild(el('h4', '', 'STORY ZOOM'));
+  const r0 = el('div', 'row'), sp = el('select'); sp.style.cssText = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px;max-width:180px';
+  for (const k in STR_VEHS) { const o = el('option', '', STR_VEHS[k].lab); o.value = k; sp.appendChild(o); }
+  r0.append(el('label', '', 'VEHICLE'), sp); box.appendChild(r0);
+  const rows = [['CLOSE', 0, 20, 200, 'Stopped: how wide the view is (metres)'], ['MEDIUM', 1, 40, 600, 'Driving: how wide the view is (metres)']].map(([lab, i, lo, hi, tip]) => {
+    const r = el('div', 'row'), inp = el('input'), out = el('output'), l = el('label', '', lab); l.title = tip;
+    inp.type = 'range'; inp.min = lo; inp.max = hi; inp.step = 5;
+    inp.oninput = () => { const z = storyZoomOf(sp.value).slice(); z[i] = +inp.value; STORY_ZW[sp.value] = z; out.textContent = inp.value + ' M'; try { localStorage.setItem('bd_story_zoom', JSON.stringify(STORY_ZW)); } catch (e) { } STORY_ZOOM.key = null; };
+    r.append(l, inp, out); box.appendChild(r); return [inp, out, i];
+  });
+  const sync = () => { const z = storyZoomOf(sp.value); for (const [inp, out, i] of rows) { inp.value = z[i]; out.textContent = z[i] + ' M'; } };
+  sp.onchange = sync; sync();
+  VE.pane.appendChild(box);
+}
+setTimeout(storyZoomBox, 700);                           // (after every file's loaded: VE is the VEHICLES tab's - 50-zz-editor-vehicles.js)                         // (tools)
 // the sun button: at a HOME BASE, where the home button is (bottom left), in the controls' layer's pixels
 function storySunBtn() { if (!STORY || ui.title || story.wake || crew[0].mode !== 'dock' || !storyIsHome(storyAt())) return null; const z = Math.round(Math.min(56, ubh * 0.14)); return [Math.round(16 + ubw * 0.02), ubh - z - 16, z, z]; }
 function drawStorySun(r) {
