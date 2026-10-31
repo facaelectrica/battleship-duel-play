@@ -44,3 +44,22 @@ window.__gpuTimer = () => {
   requestAnimationFrame(f);
   return { stop: () => { st.on = false; return { gpuMs: +(st.sum / Math.max(1, st.n)).toFixed(2), gpuWorst: +st.max.toFixed(1), frames: st.n }; } };
 };
+// the GPU's time by program: every draw call a query of its own, tagged with the program in use (named from GLR / GSM / WGL fields)
+window.__gpuByProg = () => {
+  const G = __game.GLR, gl = G.gl, ext = gl.getExtension('EXT_disjoint_timer_query_webgl2'); if (!ext) return null;
+  const names = new Map();
+  const nameOf = p => { if (names.has(p)) return names.get(p); let nm = null;
+    for (const [o, pre] of [[G, 'GLR.'], [window.__game.GSM || {}, 'GSM.'], [window.__game.WGL || {}, 'WGL.']]) for (const k in o) { try { if (o[k] === p) nm = pre + k; else if (o[k] && typeof o[k] === 'object' && !(o[k] instanceof WebGLProgram)) for (const k2 in o[k]) if (o[k][k2] === p) nm = pre + k + '.' + k2; } catch (e) { } }
+    nm = nm || 'prog' + names.size; names.set(p, nm); return nm; };
+  let cur = 'none', fb = 'screen', q = null, tag = ''; const acc = {}, pend = [];
+  const uP = gl.useProgram.bind(gl); gl.useProgram = p => { cur = p ? nameOf(p) : 'none'; return uP(p); };
+  const bF = gl.bindFramebuffer.bind(gl); gl.bindFramebuffer = (t, f) => { fb = f ? 'fbo' : 'screen'; return bF(t, f); };
+  const start = t => { if (q) { gl.endQuery(ext.TIME_ELAPSED_EXT); pend.push([q, tag]); } q = gl.createQuery(); tag = t; gl.beginQuery(ext.TIME_ELAPSED_EXT, q); };
+  const wrap = (fn, lab) => { const o = gl[fn].bind(gl); gl[fn] = (...a) => { start(lab ? lab : cur + '@' + fb); return o(...a); }; };
+  for (const f of ['drawArrays', 'drawArraysInstanced', 'drawElements', 'drawElementsInstanced']) wrap(f);
+  wrap('clear', 'clear'); wrap('blitFramebuffer', 'blit'); wrap('texSubImage2D', 'upload'); wrap('texImage2D', 'upload');
+  let on = true, frames = 0;
+  const poll = () => { while (pend.length && gl.getQueryParameter(pend[0][0], gl.QUERY_RESULT_AVAILABLE)) { const [qq, t] = pend.shift(); if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) acc[t] = (acc[t] || 0) + gl.getQueryParameter(qq, gl.QUERY_RESULT) / 1e6; gl.deleteQuery(qq); } if (on) { frames++; requestAnimationFrame(poll); } };
+  requestAnimationFrame(poll);
+  return { stop: () => { on = false; return Object.fromEntries(Object.entries(acc).map(([k, v]) => [k, +(v / frames).toFixed(2)]).filter(([k, v]) => v >= 0.1).sort((a, b) => b[1] - a[1])); } };
+};
