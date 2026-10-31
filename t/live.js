@@ -27,3 +27,20 @@ window.__liveRun = async (world = 'battle', secs = 20) => {
   const parts = Object.fromEntries(Object.entries(acc).filter(([k]) => !/Q$/.test(k)).map(([k, v]) => [k, +(v / nf).toFixed(2)]).filter(([k, v]) => v >= 0.15).sort((a, b) => b[1] - a[1]));
   return { fps: r.fps, worst: r.worstMs, render: r.renderMs, guest: r.guestMs, apply: +(+r.applyMs).toFixed(2), tick: +(+r.tickMs).toFixed(2), parts };
 };
+// the GPU's own time a frame (EXT_disjoint_timer_query_webgl2): a query from one animation frame to the next spans one frame of the
+// game's GL work; the average and the worst over the run
+window.__gpuTimer = () => {
+  const gl = __game.GLR.gl, ext = gl.getExtension('EXT_disjoint_timer_query_webgl2'); if (!ext) return null;
+  const st = { on: true, n: 0, sum: 0, max: 0, pend: [], cur: null };
+  const f = () => {
+    if (st.cur) { gl.endQuery(ext.TIME_ELAPSED_EXT); st.pend.push(st.cur); st.cur = null; }
+    while (st.pend.length && gl.getQueryParameter(st.pend[0], gl.QUERY_RESULT_AVAILABLE)) {
+      const q = st.pend.shift(); if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) { const ms = gl.getQueryParameter(q, gl.QUERY_RESULT) / 1e6; st.n++; st.sum += ms; if (ms > st.max) st.max = ms; } gl.deleteQuery(q);
+    }
+    if (!st.on) return;
+    st.cur = gl.createQuery(); gl.beginQuery(ext.TIME_ELAPSED_EXT, st.cur);
+    requestAnimationFrame(f);
+  };
+  requestAnimationFrame(f);
+  return { stop: () => { st.on = false; return { gpuMs: +(st.sum / Math.max(1, st.n)).toFixed(2), gpuWorst: +st.max.toFixed(1), frames: st.n }; } };
+};
