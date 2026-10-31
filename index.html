@@ -3224,8 +3224,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 429;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 16:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 430;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 17:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -43806,6 +43806,7 @@ function drawJetboats(x0, x1, lake) {
   if (!jetboats.length) return;
   if (!jbArt) buildJetboatArt();
   for (const j of jetboats) {
+    if (j.res && lake === false) drawStoryRescue(j);                    // (STORY: a rescue on its way - it flies off the screen with you - 50-story.js)
     if (j.state === 'gone' || j.x < x0 - 60 || j.x > x1 + 60 || (lake !== undefined && !!j.lake !== lake)) continue;
     if (j.kind === 'fish') { drawFishBoat(j); continue; }                // (STORY's fishing boats: the tropical set's pictures - 50-story.js)
     const A = (j.kind === 'motor' ? mbArt : jbArt)[j.col], s = SV * 0.9 * (j.kind === 'motor' ? REAL.motorboat : REAL.jetboat);   // (real scale, Oct 29)
@@ -47162,6 +47163,74 @@ window.addEventListener('pointerup', storyGiveUp, { capture: true });
 window.addEventListener('pointercancel', storyGiveUp, { capture: true });
 window.addEventListener('keydown', ev => { if (ev.code === 'KeyT' && STORY && !ui.title && !ev.repeat && storyGiveBtn()) { storyGiveHeld = true; act(0, 'storyGive', true); } });
 window.addEventListener('keyup', ev => { if (ev.code === 'KeyT') storyGiveUp(); });
+/* ---- the emergency rescue at sea (the spec section 5: "When the controlled boat runs out of fuel at sea, the Emergency button
+   becomes active instead of greyed out ... Press the Emergency button to launch a flare into the air. After about 10
+   seconds, an emergency helicopter appears. The helicopter hovers above the boat and lowers a rope with a blip at its end.
+   When the blip touches the boat, the player transfers into the helicopter. The player cannot drive the helicopter. It
+   takes the player to the nearest Fire Station"). The rescue is the boat's (j.res: st flare / come / hover / lift / fly, t,
+   x, y the helicopter, r the rope, to the station): act storySOS; the red-and-white Dauphin (the civilian helicopters' art,
+   FH_KIND) drawn with the boat (drawStoryRescue); you ride in it (the view on it) to the nearest FIRE STATION (else your home
+   base), and you're there. The boat stays where she is. ---- */
+const SOS_WAIT = 10, SOS_ALT = 16, SOS_V = 45;   // (the hover 16 m over her: the rope and blip read as hers)
+const storySosOk = v => !!v && v.story && v.state === 'run' && (v.fuel || 0) <= 0 && !v.res && v.berth == null;
+function storySOS(p) {
+  const v = crew[p].mode === 'civ' ? crew[p].civ : null; if (!STORY || !storySosOk(v)) return;
+  const fires = strsUsed().filter(o => o.k === 'fire'), to = (fires.length ? fires : [storyHome()].filter(Boolean)).sort((a, b) => Math.abs(a.x - v.x) - Math.abs(b.x - v.x))[0];
+  v.res = { st: 'flare', t: 0, x: v.x + (to && to.x < v.x ? -1 : 1) * 160 * UPM, y: WATER_Y - 60 * UPM, r: 0, to: to ? to.id : null };
+  sound('fwLaunch', v.x);
+}
+ACTS.storySOS = p => storySOS(p);
+function storyRescue(dt) {
+  for (const j of jetboats) {
+    const R = j.res; if (!j.story || !R) continue;
+    R.t += dt;
+    const hy = j.y - SOS_ALT * UPM, toward = (tx, ty) => { const dx = tx - R.x, dy = ty - R.y, d = Math.hypot(dx, dy), m = SOS_V * UPM * dt; if (d <= m) { R.x = tx; R.y = ty; return true; } R.x += dx / d * m; R.y += dy / d * m; return false; };
+    if (R.st === 'flare' && R.t > SOS_WAIT) R.st = 'come';
+    else if (R.st === 'come' && toward(j.x, hy)) R.st = 'hover';
+    else if (R.st === 'hover') { R.x = j.x; R.y = hy; R.r = Math.min(SOS_ALT * UPM - 3 * UPM, R.r + 6 * UPM * dt); if (R.r >= SOS_ALT * UPM - 3 * UPM) { R.st = 'lift'; if (j.driven != null) { const p = j.driven; civRelease(p); crew[p].mode = 'dock'; crew[p].watch = null; story.at = 0; R.who = p; } } }
+    else if (R.st === 'lift') { R.r = Math.max(0, R.r - 8 * UPM * dt); if (!R.r) R.st = 'fly'; }
+    else if (R.st === 'fly') {
+      const o = strsUsed().find(q => q.id === R.to);
+      if (!o || toward(o.x, strBox(o).top - 20 * UPM)) { const p = R.who; j.res = null; if (p != null && o) storyGo(p, o.id, true); continue; }
+    }
+    if (R.who != null && crew[R.who].mode === 'dock') crew[R.who].look = { x: R.x, y: R.y };   // (aboard it: the view rides with it)
+  }
+}
+// the flare, the helicopter, its rope and the blip at its end (from drawFishBoat)
+function drawStoryRescue(j) {
+  const R = j.res; if (!R) return;
+  if (R.t < 6) { const fy = j.y - Math.min(R.t, 3) * 30 * UPM, X = PX(j.x), Y = PY(fy), q = Math.max(2, Math.round(PX(j.x + 0.4 * UPM) - PX(j.x)));
+    C.fillStyle = `rgba(255,${80 + Math.floor(Math.sin(time * 30) * 40 + 40)},60,${R.t < 3 ? 1 : (6 - R.t) / 3})`; C.fillRect(X - q, Y - q, 2 * q, 2 * q);
+    C.fillStyle = 'rgba(255,190,160,0.35)'; for (let k = 1; k < 8; k++) C.fillRect(X - (q >> 1), Y + k * q * 1.5, q, q); }
+  if (R.st === 'flare') return;
+  if (!chArt) { if (!img.civhelis) return; buildCivHeliArt(); }
+  const A = chArt[FH_KIND], h = { kind: FH_KIND }, s = chK(h) * SV, face = R.st === 'fly' ? ((strsUsed().find(q => q.id === R.to) || { x: R.x }).x < R.x ? -1 : 1) : 1;
+  const I = scaled(face > 0 ? A.lvR[0] : A.lv[0], s, true), X = Math.round(PX(R.x) - I.width / 2), Y = Math.round(PY(R.y) - A.H * 0.5 * s);
+  if (R.r > 0) { const q = Math.max(1, Math.round(PX(R.x + 0.08 * UPM) - PX(R.x))), y0 = Y + Math.round(A.H * s), y1 = PY(R.y + R.r); C.fillStyle = '#e8e4d6'; C.fillRect(Math.round(PX(R.x)) - (q >> 1), y0, q, Math.max(0, y1 - y0));
+    C.fillStyle = Math.floor(time * 4) % 2 ? '#ff4a3a' : '#ffd23a'; C.fillRect(Math.round(PX(R.x)) - 2 * q, Math.round(y1) - q, 4 * q, 3 * q); }   // (the blip)
+  C.drawImage(I, X, Y);
+  const Rr = scaled(face > 0 ? A.rotR : A.rot, s, true), sq = Math.abs(Math.cos(time * 40)) * 0.82 + 0.18;
+  for (const [, ry, rw, rh, hub] of A.rotors) { const hl = face > 0 ? A.W - hub : hub; C.save(); C.translate(X + hl * s, 0); C.scale(sq, 1); C.globalAlpha = 0.7; C.drawImage(Rr, -Math.round(hl * s), Y); C.restore(); }
+}
+// the EMERGENCY button: over the right drive arrow while you're aboard - lit when she's out of fuel at sea
+function storySosBtn() {
+  if (!STORY || ui.title || crew[0].mode !== 'civ' || !crew[0].civ || !crew[0].civ.story) return null;
+  let L; try { L = hudLayout(0); } catch (e) { return null; }
+  const a = L.items.find(it => it.id === 'right'); if (!a) return null;
+  const z = Math.round(a.h * 1.1), w = Math.round(a.w * 2.2); return [a.x, a.y - z - Math.round(a.h * 0.35), w, z];   // (from the right arrow on: clear of GIVE FUEL over the left one)
+}
+function drawStorySos(r) {
+  const [x, y, w, h] = r, on = storySosOk(crew[0].civ);
+  ug.fillStyle = on ? (Math.floor(time * 2) % 2 ? '#e0402e' : '#b02a20') : 'rgba(90,90,96,0.55)'; ug.fillRect(x, y, w, h);
+  ug.fillStyle = '#04070f'; ug.fillRect(x, y + h - 3, w, 3);
+  const s = Math.max(1, Math.round(h / 22)); drawText(ug, crew[0].civ.res ? 'HELP COMING' : 'EMERGENCY', x + w / 2, y + h / 2 - 3 * s, on || crew[0].civ.res ? '#ffffff' : '#c8c8cc', s, 'center');
+}
+window.addEventListener('pointerdown', ev => {
+  const r = storySosBtn(); if (!r) return;
+  const [X, Y] = toUI(ev.clientX, ev.clientY); if (X < r[0] || X > r[0] + r[2] || Y < r[1] || Y > r[1] + r[3]) return;
+  if (storySosOk(crew[0].civ)) act(0, 'storySOS'); else sound('empty', 0);
+  ev.stopImmediatePropagation(); ev.preventDefault();
+}, { capture: true, passive: false });
 // tied up: a structure that takes fish buys the catch
 function storySellFish(v, o) {
   const N = v && v.net; if (!N || !N.n || !o || !o.fish) return;
@@ -47286,14 +47355,14 @@ function storyLosses() {
 }
 function stepStory(dt) {
   if (!STORY) return;
-  storyLosses(); storyNets(dt); storyFuel(dt); storyGive(dt);
+  storyLosses(); storyNets(dt); storyFuel(dt); storyGive(dt); storyRescue(dt);
   if (!story.wake) return;
   stepWeather(dt * (STORY_SLEEP_X - 1));                 // (the clock, the sky and the weather run on: the frame's own step is the 1)
   if (W.day >= story.wake && env.time >= STORY_WAKE_H && env.time < 12) { story.wake = 0; story.saveN++; }
 }
 function storyTidy() { }
 function spawnWave() { }
-window.__story = story; window.__storyDots = () => storyDots(); window.__storyQ = () => storyQ; window.__storyGiveBtn = () => storyGiveBtn();                                   // (tools)                                 // (gone with the waves; kept by name for the tools' hook)
+window.__story = story; window.__storyDots = () => storyDots(); window.__storyQ = () => storyQ; window.__storyGiveBtn = () => storyGiveBtn(); window.__storySosBtn = () => storySosBtn();                                   // (tools)                                 // (gone with the waves; kept by name for the tools' hook)
 // the day, top-left; the coins, top-right under the version and frame rate (each its own ink shadow)
 const STORY_COIN = ['..###..', '.#ooo#.', '#oo#oo#', '#o#o#o#', '#oo#oo#', '.#ooo#.', '..###..'];
 /* ---- the automatic zoom, STORY only (user Oct 31 08:36; the spec: "Close when stopped, Medium when driving, Far set by
@@ -47341,6 +47410,7 @@ function drawStoryBanner() {
   storyZoom(frameDt);                                    // (STORY's automatic zoom)
   const sun = storySunBtn(); if (sun) drawStorySun(sun);
   const give = storyGiveBtn(); if (give) drawStoryGive(give); else if (storyGiveHeld) storyGiveUp();
+  const sos = storySosBtn(); if (sos) drawStorySos(sos);
   if (story.wake) { const t = 'SLEEPING...'; drawText(ug, t, ubw / 2 + 1, Math.round(ubh * 0.3) + 1, '#04070f', 3, 'center'); drawText(ug, t, ubw / 2, Math.round(ubh * 0.3), '#ffd23a', 3, 'center'); }
   // the dots: white, pulsing, an ink ring (on the controls' layer: toUI)
   const pulse = 0.5 + 0.5 * Math.sin(time * 4);
