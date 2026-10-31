@@ -3236,8 +3236,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 437;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 18:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 438;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 18:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -32778,6 +32778,7 @@ function stepCivAir(f, dt) {
   if (f.ground) {
     f.id = p != null ? p : 0;
     stepPlaneGround(f, dt, K.gk, o => {                            // (into its hangar: parked, its next flight later)
+      if (o.story) { storyPlaneIn(o); return; }                  // (STORY: into its hangar, you ashore there - 50-story-planes.js)
       const q = o.driven; o.driven = null;
       Object.assign(o, newFlight(o.kind, airfieldAt(o.x).R ? 1 : 0, rnd(20, 40), o.owner), { col: o.col, alt: o.alt, ground: null, gear: 0, auto: null, ap: null });
       if (q != null) { crew[q].civ = null; stepAshore(q, 'civ'); }
@@ -43459,6 +43460,7 @@ function stepTraffic(dt) {
 
 }
 function stepFlight(f, dt) {
+    if (f.story && f.state === 'parked') return;              // (STORY: a plane in its hangar waits for you - 50-story-planes.js)
     const T = TRAFFIC[f.kind];
     if (f.state === 'parked') {
       // (both 747s lost: the first back waits no longer)
@@ -46983,6 +46985,58 @@ function drawStoryCars(x0, x1) {
 }
 
 /* ================================================================
+   STORY's PLANES (user Oct 31 09:31: "if you go to an hangar, you can select a plane, but it will show you the cost of that
+   plane. If you have that money ... then that plane becomes yours"; 09:32: "the Cessna costs 100 coins"; the spec section 2:
+   "Aircraft hangar - can store many planes, such as ten Cessnas, provided each plane fits through the entrance. They do not
+   all need to fit physically inside together").
+   An AIRCRAFT HANGAR's spots hold planes (STR_VEHS fam 'plane' - the Cessna): civilian traffic rows (the traffic table) with
+   the story vehicles' fields and plane: true. In the hangar a plane waits (state 'parked': not drawn, not on a timetable -
+   stepFlight). Boarded (storyBoard), it comes out onto the runway nearest its hangar (a RUNWAY structure within
+   PLANE_RW_M - 50-zz-struct.js) at its hangar end, facing down it, and flies as any taken civilian plane (stepCivAir: the
+   take-off run, landing by itself over the runway, the gear); taxiing back in at the hangar end it's parked in the nearest
+   hangar that takes planes (storyPlaneIn, from stepCivAir's hangar callback) and you're ashore there.
+   ================================================================ */
+const PLANE_RW_M = 400;
+function storyPlanesBuild() {
+  for (let i = traffic.length - 1; i >= 0; i--) if (traffic[i].story) traffic.splice(i, 1);
+  let k = 2000;
+  for (const o of strsUsed().filter(o => (strTakes(o) || []).includes('plane'))) {
+    const V = strVehs(o), B = strBox(o);
+    for (let i = 0; i < storyBerths(o); i++) {
+      const e = V[i], D = e && STR_VEHS[e.v]; if (!D || D.fam !== 'plane') continue;
+      const f = newFlight('cessna', 0, 1e9, -1);
+      Object.assign(f, { story: true, plane: true, sid: ++k, own: !!e.own, price: D.price, sv: e.v, berth: o.id, spot: i, hb: o.id, hs: i, fuel: 1, col: k % CESSNA_COLS.length, state: 'parked', x: storySpotX(o, i), y: B.top + 4 * UPM, route: null });
+      traffic.push(f);
+    }
+  }
+}
+// the runway that serves a structure: the nearest RUNWAY within PLANE_RW_M of it
+function storyRunwayFor(o) {
+  let best = null, bd = PLANE_RW_M * UPM;
+  for (const q of strsUsed()) { if (q.k !== 'runway') continue; const B = strBox(q), d = Math.max(0, Math.max(B.x0, o.x) - Math.min(B.x1, o.x)); if (d < bd) { bd = d; best = q; } }
+  return best;
+}
+// out of its hangar onto the runway (false: there's none)
+function storyPlaneOut(f) {
+  const h = strsUsed().find(o => o.id === f.berth), rw = h && storyRunwayFor(h); if (!rw) return false;
+  const af = strAirfield(rw);
+  Object.assign(f, { state: 'free', ground: 'taxi', x: hangarDoorX(af) + af.dir * 30, y: af.y, facing: af.dir, dir: af.dir, pitch: 0, ang: 0, spd: 0, gWant: 0, turn: null, climbT: 0, offField: false, gear: 1, rot: 0, auto: null, ap: null, vx: 0, vy: 0, exitK: 1 });
+  openHangar(af, 1.5);
+  return true;
+}
+// taxied in at a runway's hangar end: parked in the nearest hangar that takes planes, you ashore there
+function storyPlaneIn(f) {
+  const q = f.driven; f.driven = null;
+  let h = null, bd = PLANE_RW_M * 2 * UPM;
+  for (const o of strsUsed()) { if (!(strTakes(o) || []).includes('plane')) continue; const d = Math.abs(o.x - f.x); if (d < bd) { bd = d; h = o; } }
+  h = h || strsUsed().find(o => o.id === f.hb) || null;
+  const used = new Set(traffic.filter(g => g !== f && g.story && g.state === 'parked' && h && g.berth === h.id).map(g => g.spot));
+  let spot = 0; if (h) while (used.has(spot) && spot < storyBerths(h) + 8) spot++;
+  Object.assign(f, { state: 'parked', ground: null, auto: null, spd: 0, vx: 0, vy: 0, berth: h ? h.id : null, spot, x: h ? storySpotX(h, Math.min(spot, storyBerths(h) - 1)) : f.x, y: h ? strBox(h).top + 4 * UPM : f.y });
+  if (q != null) { crew[q].civ = null; crew[q].mode = 'dock'; crew[q].watch = null; civUI[q] = true; if (h) storyGo(q, h.id, true); }
+}
+
+/* ================================================================
    STORY's SAVES (user Oct 31 09:31: "When you do story mode, you either can start a new save or load an existing save. There
    will be 5 slots for the saves. The save file will show you the day and the time it was saved, and the current day in the
    game world, and how much money the character has"; 13:07: "If there's a save game, it should load at the last base that
@@ -47193,7 +47247,7 @@ ACTS.storyGo = (p, id) => storyGo(p, id);
 const STORY_PARK_M = 15;                                 // (how far past a structure's ends you can still tie up to it)
 const storyBerths = o => Math.max(1, o.n ?? (strVehs(o).length || 1));
 function storySpotX(o, i) { const B = strBox(o); return B.x0 + (i + 0.5) * (B.x1 - B.x0) / storyBerths(o); }
-const storyVehs = () => jetboats.filter(j => j.story && j.state === 'run').concat(storyCars.filter(c => c.state === 'run'));   // (the boats and the cars - 50-story-cars.js)
+const storyVehs = () => jetboats.filter(j => j.story && j.state === 'run').concat(storyCars.filter(c => c.state === 'run'), traffic.filter(f => f.story && (f.state === 'parked' || f.state === 'free')));   // (the boats, the cars, the planes)   // (the boats and the cars - 50-story-cars.js)
 function storyBoats() {
   if (!STORY) return;
   const home = storyHome(), hx = home ? home.x : 0;
@@ -47205,6 +47259,7 @@ function storyBoats() {
     for (let i = 0; i < storyBerths(o); i++) { const e = V[i], D = e && STR_VEHS[e.v]; if (D && D.fam === 'car') storyCars.push(newStoryCar({ sid: 1000 + (++k), own: !!e.own, price: D.price, sv: e.v, art: D.art, berth: o.id, spot: i, hb: o.id, hs: i, x: storySpotX(o, i), dir: o.flip ? 1 : -1 })); }
   }
   owned = storyCars.some(c => c.own);
+  storyPlanesBuild(); owned = owned || traffic.some(f => f.story && f.own);
   for (const o of L) {
     const V = strVehs(o);
     for (let i = 0; i < storyBerths(o); i++) {
@@ -47222,12 +47277,13 @@ function storyBoard(p, sid) {
   const v = storyVehs().find(j => j.sid === sid); if (!v || !STORY || !v.own || v.berth !== story.at || v.driven != null) return;
   const c = crew[p]; civUI[p] = true;
   if (c.mode !== 'civ' && c.mode !== 'dock') { c.mode = 'dock'; c.watch = null; c.look = null; }
+  if (v.plane && !storyPlaneOut(v)) { sound('empty', v.x); return; }   // (no runway by its hangar: it can't come out)
   v.berth = null; boardCiv(p, v); v.drv = 0; v.vDrive = 0; v.cin = 0; setOrder(telegraphs[p], 3);   // (aboard a tied-up boat: she stays still till you drive)
   sound('click', gunCtl[p]); cutTo(p);
 }
 // the structures the vehicle you drive can tie up at now: they take its kind, it's slow, it's by them
 function storyParks(v) {
-  if (!v || !v.story || v.state !== 'run') return [];   // (sinking: nowhere to tie up)
+  if (!v || !v.story || v.state !== 'run' || v.plane) return [];   // (sinking: nowhere to tie up; a plane parks by taxiing into its hangar)
   if (Math.abs(v.vDrive || 0) > v.v * 0.35 || v.turn > 0 || v.air) return [];
   const cat = civCat(v);
   const len = storyBoatSize(v)[0] / UPM;
@@ -47249,7 +47305,7 @@ ACTS.storyPark = (p, id) => storyPark(p, id);
 // a fishing boat drawn (drawJetboats - 50-land-traffic.js): the tropical set's picture at its own metres, riding the water,
 // swinging round through a narrow side-on when it turns
 const STORY_BOAT_ART = ['fishing-boat-red', 'fishing-boat-teal'];
-function storyBoatSize(j) { if (j.car) return storyCarSize(j); if (j.kind !== 'fish') return [(j.kind === 'motor' ? 4.3 : 3.5) * UPM, 3 * UPM, null]; const P = tropPic(STORY_BOAT_ART[(j.col | 0) % 2]); return P ? [P.width * P._m * UPM, P.height * P._m * UPM, P] : [11 * UPM, 7 * UPM, null]; }
+function storyBoatSize(j) { if (j.car) return storyCarSize(j); if (j.plane) return [10 * UPM, 3 * UPM, null]; if (j.kind !== 'fish') return [(j.kind === 'motor' ? 4.3 : 3.5) * UPM, 3 * UPM, null]; const P = tropPic(STORY_BOAT_ART[(j.col | 0) % 2]); return P ? [P.width * P._m * UPM, P.height * P._m * UPM, P] : [11 * UPM, 7 * UPM, null]; }
 function drawFishBoat(j) {
   const [w, h, P] = storyBoatSize(j); if (!P) return;   // (the tropical sheet not loaded yet)
   const u = j.turn > 0 ? j.turn / JB_TURN : 0, sq = j.turn > 0 ? Math.max(0.15, Math.abs(Math.cos(Math.PI * u))) : 1;
@@ -47596,7 +47652,7 @@ const STORY_ZOOM = { key: null, lv: null, manual: false, mv: 0, moving: false };
    browser (bd_story_zoom: { type: [close, medium] }); unset, from the vehicle's length */
 let STORY_ZW = {};
 try { const o = JSON.parse(localStorage.getItem('bd_story_zoom') || 'null'); if (o && typeof o === 'object') STORY_ZW = o; } catch (e) { }
-function storyZoomDef(sv) { const D = STR_VEHS[sv], L = D && D.fam === 'car' ? 5 : sv === 'jet' ? 3.5 : sv === 'motor' ? 4.3 : 11.3; return [Math.round(Math.max(45, 4 * L)), Math.round(Math.max(130, 12 * L))]; }
+function storyZoomDef(sv) { if (sv === 'cessna') return [70, 420]; const D = STR_VEHS[sv], L = D && D.fam === 'car' ? 5 : sv === 'jet' ? 3.5 : sv === 'motor' ? 4.3 : 11.3; return [Math.round(Math.max(45, 4 * L)), Math.round(Math.max(130, 12 * L))]; }
 const storyZoomOf = sv => STORY_ZW[sv] || storyZoomDef(sv);
 function storyZoomWidth() {
   const c = crew[0];
@@ -48257,6 +48313,7 @@ const STR_VEHS = {
   fireEngine: { lab: 'FIRE ENGINE', fam: 'car', art: 'fire_engine', price: 80 }, boxTruck: { lab: 'BOX TRUCK', fam: 'car', art: 'box_truck', price: 55 },
   dumpTruck: { lab: 'DUMP TRUCK', fam: 'car', art: 'dump_truck', price: 60 }, cityBus: { lab: 'CITY BUS', fam: 'car', art: 'city_bus', price: 70 },
   schoolBus: { lab: 'SCHOOL BUS', fam: 'car', art: 'school_bus', price: 65 },
+  cessna: { lab: 'CESSNA', fam: 'plane', price: 100 },     // (the user, 09:32: a Cessna 100 coins - 50-story-planes.js)
 };
 const strTakes = o => o.takes || (STR_KINDS[o.k] && STR_KINDS[o.k].takes) || null;
 const strMaxL = o => o.maxL || 30;
@@ -48464,7 +48521,7 @@ window.__ed = { pick: ids => { SE.sel = ids; strSync(); return !!SE.pane; }, pan
    length. So for example, the current airport is actually a mix of the hangar structure with the runway structure and the
    terminal structure"; 17:43: airports next). A RUNWAY structure: o.len metres long, its deck o.hgt metres over the ground at
    its middle, on an embankment down to whatever ground is under it (so it's flat wherever it's put); FLIP turns which way
-   it runs (the hangar end: its far end). The flying recognises it as an airfield (airfieldAt / onApron - 50-land-airport.js,
+   it runs (unflipped: the hangar end on the left, take-off to the right). The flying recognises it as an airfield (airfieldAt / onApron - 50-land-airport.js,
    50-land-terrain.js): strAirfield(o) is the old airports' record ({ near, far, len, y, dir, R, own }) with sid (its id) - so
    take-off, landing by itself, the gear and the hangar door work on it as on the countries' airports. ---- */
 const RUNWAY_DECK = 1.2;                                    // (the asphalt's depth, metres)
@@ -48479,7 +48536,9 @@ function strRunwayAt(x, pad = 0) {
 }
 function strAirfield(o) {
   const B = strRunwayBox(o), dir = o.flip ? -1 : 1, w = B.x1 - B.x0, s = dir > 0 ? B.x0 : B.x1, e = dir > 0 ? B.x1 : B.x0;
-  return { near: s + dir * w * 0.06, far: e - dir * w * 0.06, len: w, y: B.top - PLANE_WHEELS, dir, R: o.x > SEA1, own: -1, sid: o.id };
+  // (as the countries' airfields: dir points from the hangar end (far) down the runway to its take-off end (near) - unflipped,
+  // the hangar end is its left end and planes take off to the right)
+  return { near: e - dir * w * 0.06, far: s + dir * w * 0.06, len: w, y: B.top - PLANE_WHEELS, dir, R: o.x > SEA1, own: -1, sid: o.id };
 }
 // its own hangar door (the countries' are airDoor[R]): made when first asked for
 const STR_DOORS = {};
