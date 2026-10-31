@@ -1172,9 +1172,14 @@ function unwarpX(w) {
   for (let i = 1; i < K.length; i++) if (w <= K[i][1]) { const [b0, w0] = K[i - 1], [b1, w1] = K[i]; return b0 + (w - w0) * (b1 - b0) / (w1 - w0); }
   const L = K[K.length - 1]; return w - L[1] + L[0];
 }
-// the ocean floor's points' frame (BED_A0..BED_B0, base): a world x's u along it, and back
-const floorU = x => (unwarpX(x) - BED_A0) / (BED_B0 - BED_A0);
-const floorX = u => warpX(BED_A0 + u * (BED_B0 - BED_A0));
+// the ocean floor's points' frame: a world x's u along it, and back. (Oct 31) It is the stretch of the one ground line its
+// points were made into (G_FA..G_FB, in screens - 50-land-zz-ground's gS / gX), so what's placed by u on the floor - the
+// kraken (KR_U), the pirate wrecks (WRECK_SET) - stands on the same piece of ground on every screen. It was the old piers'
+// ends (BED_A0..BED_B0), which grow with the screen's width by a different rule from the ground's screens: only on a screen
+// 1333 wide did the two agree, and on a wider one the kraken sat some 1200-2200 to the side of its pit, under a plateau,
+// buried 2300 deep in it where no sub could ever reach it (user Oct 31: "I'm surprised it's not happening")
+const floorU = x => (gS(x) - G_FA) / (G_FB - G_FA);
+const floorX = u => gX(G_FA + u * (G_FB - G_FA));
 // (the world's build, step by step: [name, ms] - the perf panel's tools read it, __game.buildTimes)
 const BUILD_T = []; let buildT0 = 0;
 const btMark = name => { const t = performance.now(); BUILD_T.push([name, Math.round(t - buildT0)]); buildT0 = t; };
@@ -3214,8 +3219,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 418;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 14:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 419;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 14:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8204,19 +8209,32 @@ const subLightOn = sb => sb && sb.light && (sb.state === 'out' || sb.state === '
    over the world's layer in one pass - drawLampLight), the beam's glow in the water, the deep's dark opened along it,
    the chests' glint, the ink thinned, the caves' lamp ---- */
 const LAMP_K = 1.28;                       // (how strongly a beam lights what's in it: its own colour times this at the beam's heart; user Oct 31 12:43, "20% less strong": 1.6 x 0.8)
+// (each lamp's strength, k: 1, or less while its sub's electrics fail - subLampK. Everything a lamp does is that much: the
+// beam's glow, its light on what's in it, the deep's dark opened round it and along it, the chests' glint; and her red tail lamp)
 function subLamps() {
   const out = [];
   if (LAND && msArt) for (const s of minisubs) {
     if (s.state !== 'out') continue;
     const [ux, uy] = msAim(s);
-    out.push({ x: s.x + ux * 8, y: s.y + uy * 8, a: s.aimA == null ? Math.atan2(uy, ux) : s.aimA, s, ms: true });
+    out.push({ x: s.x + ux * 8, y: s.y + uy * 8, a: s.aimA == null ? Math.atan2(uy, ux) : s.aimA, s, ms: true, k: subLampK(s) });
   }
   for (const sb of subs) {
     if (!subLightOn(sb)) continue;
     const [x, y] = subArtPt(sb, ...SUB_LAMP_AT);
-    out.push({ x, y, a: sb.aimA == null ? clamp(sb.lamp.elev, 0, 180) * Math.PI / 180 : sb.aimA, s: sb, ms: false });
+    out.push({ x, y, a: sb.aimA == null ? clamp(sb.lamp.elev, 0, 180) * Math.PI / 180 : sb.aimA, s: sb, ms: false, k: subLampK(sb) });
   }
   return out;
+}
+/* (user Oct 31: "When a sub gets caught by the kraken, the lights should start flickering") a sub in the kraken's arms
+   (_krHeld - krPin, 50-land-kraken.js) has her electrics failing: her lamps mostly on, with quick irregular drop-outs and now
+   and then a stutter of them, more and longer the further she's dragged in (krPull: 0 just taken, 1 at its mouth). Only the
+   light: from the game's clock and the sub, so it's the same on every screen and changes nothing in the game */
+function subLampK(s) {
+  if (!s || !s._krHeld) return 1;
+  const w = krPull(s), id = (s.id || 0) * 7.13 + 0.5, f = Math.floor(time * 22), m = Math.floor(time * 5);
+  if (hash(m * 0.731 + id + 3.1) < 0.1 + 0.35 * w && hash(f * 1.913 + id) < 0.6) return 0.04 + 0.2 * hash(f * 0.37 + id + 9);   // (a stutter, a fifth of a second)
+  if (hash(f * 1.371 + id) < 0.05 + 0.25 * w) return 0.05 + 0.25 * hash(f * 2.17 + id + 5);   // (a drop-out, a 22nd of a second)
+  return 1 - 0.18 * w * hash(f * 0.913 + id + 1);                                              // (on, sagging a little)
 }
 // the beam's light at (dx, dy) from its lamp, along aim (ux, uy) - 0..1, the beam sprite's (msBeamSprite) in world units
 function lampBeamAt(dx, dy, ux, uy) {
@@ -8230,8 +8248,8 @@ function lampLitAt(x, y) {
   let k = 0;
   for (const l of subLamps()) {
     const d = Math.hypot(x - l.s.x, y - l.s.y);
-    if (d < 50) k = Math.max(k, 1 - d / 60);
-    k += lampBeamAt(x - l.x, y - l.y, Math.cos(l.a), Math.sin(l.a));
+    if (d < 50) k = Math.max(k, (1 - d / 60) * l.k);
+    k += lampBeamAt(x - l.x, y - l.y, Math.cos(l.a), Math.sin(l.a)) * l.k;
   }
   return clamp(k, 0, 1);
 }
@@ -8240,8 +8258,8 @@ function subAbyssLights(out) {
   for (const l of subLamps()) {
     const X = PX(l.x), Y = PY(l.y), ux = Math.cos(l.a), uy = Math.sin(l.a);
     if (X < -MS_BEAM_L * SV || X > VWP + MS_BEAM_L * SV) continue;
-    if (!l.ms) out.push({ x: X, y: Y, r: 40 * SV, k: 0.9 });       // (the exploration sub's pool is its own: abyssLights)
-    out.push({ x: X, y: Y, ux, uy, L: MS_BEAM_L * SV, k: 1, beam: true });
+    if (!l.ms) out.push({ x: X, y: Y, r: 40 * SV, k: 0.9 * l.k });       // (the exploration sub's pool is its own: abyssLights)
+    out.push({ x: X, y: Y, ux, uy, L: MS_BEAM_L * SV, k: l.k, beam: true });
   }
   return out;
 }
@@ -8251,21 +8269,22 @@ function subAbyssLights(out) {
 function drawSubLights(x0, x1) {
   for (const sb of subs) {
     if (!subLightOn(sb) || sb.x < x0 - SUB_L || sb.x > x1 + SUB_L) continue;
-    const [tx, ty] = subArtPt(sb, ...SUB_TAIL_AT);
-    if ((time + sb.id * 0.37) % 1.0 < 0.32) planeLamps[viewIdx].push(PX(tx), PY(ty), clamp(0.7 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1));
+    const [tx, ty] = subArtPt(sb, ...SUB_TAIL_AT), k = subLampK(sb);
+    if ((time + sb.id * 0.37) % 1.0 < 0.32 && k > 0.02) planeLamps[viewIdx].push(PX(tx), PY(ty), clamp(0.7 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1) * k);
   }
   for (const l of subLamps()) {
     // (the screen is two half views: a lamp a whole beam past this one's edge still lights it - rules.md 6)
     if (l.x < x0 - MS_BEAM_L - 40 || l.x > x1 + MS_BEAM_L + 40) continue;
-    const X = PX(l.x), Y = PY(l.y), a = l.a, L = MS_BEAM_L * SV, sp = msBeamSprite(), sc = L / sp.width, wy = Math.round(PY(WATER_Y + 2)), dot = l.ms;
+    if (l.k <= 0.01) continue;
+    const X = PX(l.x), Y = PY(l.y), a = l.a, L = MS_BEAM_L * SV, sp = msBeamSprite(), sc = L / sp.width, wy = Math.round(PY(WATER_Y + 2)), dot = l.ms, lk = l.k;
     lateLit[viewIdx].push(() => {
       C.save(); C.beginPath(); C.rect(-SHX - 4, wy, VWP + 2 * SHX + 8, bh - SHY - wy + 4); C.clip();
       const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = true;
-      C.globalCompositeOperation = 'lighter'; C.globalAlpha = MS_BEAM_A;
+      C.globalCompositeOperation = 'lighter'; C.globalAlpha = MS_BEAM_A * lk;
       C.translate(X, Y); C.rotate(a); C.drawImage(sp, 0, -Math.round(sp.height * sc / 2), Math.round(sp.width * sc), Math.round(sp.height * sc));
       C.restore();
       if (dot) {                                                  // (the army sub's has none - user Oct 29, gen/open/ref/sub_lamp_dot_oct29.png)
-        C.save(); C.globalCompositeOperation = 'lighter'; C.globalAlpha = 1;
+        C.save(); C.globalCompositeOperation = 'lighter'; C.globalAlpha = lk;
         const R = 7 * SV, g = C.createRadialGradient(X, Y, 0, X, Y, R); g.addColorStop(0, 'rgba(250,252,255,0.95)'); g.addColorStop(1, 'rgba(230,240,255,0)'); C.fillStyle = g; C.fillRect(Math.round(X - R), Math.round(Y - R), Math.round(2 * R), Math.round(2 * R));
         C.restore();
       }
@@ -8290,24 +8309,24 @@ function lampView(k) {
   let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
   const L = [];
   for (const l of subLamps()) {
-    if (l.x < x0 - MS_BEAM_L - 40 || l.x > x1 + MS_BEAM_L + 40) continue;
+    if (l.x < x0 - MS_BEAM_L - 40 || l.x > x1 + MS_BEAM_L + 40 || l.k <= 0.01) continue;
     const X = PX(l.x), Y = PY(l.y);
     bx0 = Math.min(bx0, X - R); bx1 = Math.max(bx1, X + R); by0 = Math.min(by0, Y - R); by1 = Math.max(by1, Y + R);
-    L.push([X, Y, R, wy, Math.cos(l.a), Math.sin(l.a), k, 10 * SV]);
+    L.push([X, Y, R, wy, Math.cos(l.a), Math.sin(l.a), k * l.k, 10 * SV, l.k]);   // (the last: its strength alone, for the canvas's mask - lampMask)
   }
   if (!L.length) return null;
   bx0 = Math.max(bx0, -SHX - 4); bx1 = Math.min(bx1, VWP + SHX + 4); by0 = Math.max(by0, wy, -SHY - 4); by1 = Math.min(by1, bh - SHY + 4);
   return bx1 > bx0 && by1 > by0 ? { L, bx0, by0, bx1, by1, R } : null;
 }
 let lampCv = null, lampSnapCv = null;
-// the beam's light as a mask on a canvas the box's size (no WebGL), each lamp's sprite added at strength a
+// the beam's light as a mask on a canvas the box's size (no WebGL), each lamp's sprite added at strength a (times its own, q[8])
 function lampMask(V, a) {
   const w = Math.ceil(V.bx1 - V.bx0), h = Math.ceil(V.by1 - V.by0);
   if (!lampCv || lampCv.width < w || lampCv.height < h) lampCv = makeCanvas(Math.max(w, lampCv ? lampCv.width : 0), Math.max(h, lampCv ? lampCv.height : 0));
   const x = lampCv.getContext('2d'), sp = msBeamSprite(), sc = V.R / sp.width;
   x.setTransform(1, 0, 0, 1, 0, 0); x.globalCompositeOperation = 'source-over'; x.globalAlpha = 1; x.clearRect(0, 0, w, h);
-  x.imageSmoothingEnabled = true; x.globalCompositeOperation = 'lighter'; x.globalAlpha = Math.min(1, a);
-  for (const q of V.L) { x.setTransform(1, 0, 0, 1, q[0] - V.bx0, q[1] - V.by0); x.rotate(Math.atan2(q[5], q[4])); x.drawImage(sp, 0, -sp.height * sc / 2, sp.width * sc, sp.height * sc); }
+  x.imageSmoothingEnabled = true; x.globalCompositeOperation = 'lighter';
+  for (const q of V.L) { x.globalAlpha = Math.min(1, a) * q[8]; x.setTransform(1, 0, 0, 1, q[0] - V.bx0, q[1] - V.by0); x.rotate(Math.atan2(q[5], q[4])); x.drawImage(sp, 0, -sp.height * sc / 2, sp.width * sc, sp.height * sc); }
   x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1;
   return [x, w, h];
 }
@@ -36622,7 +36641,7 @@ function krRim() {
   const all = subLamps(); if (!all.length) return null;
   const cw = KCS / SV, x0w = (K0X - KCS + CAMPX) / SV, y0w = (K0Y + TOPPX) / SV, x1w = x0w + KTW * cw, y1w = y0w + KTH * cw, Lr = MS_BEAM_L + 60;
   const lamps = [];
-  for (const l of all) if (l.x > x0w - Lr && l.x < x1w + Lr && l.y > y0w - Lr && l.y < y1w + Lr) lamps.push(l.x, l.y, Math.cos(l.a), Math.sin(l.a), l.s.x, l.s.y);
+  for (const l of all) if (l.x > x0w - Lr && l.x < x1w + Lr && l.y > y0w - Lr && l.y < y1w + Lr) lamps.push(l.x, l.y, Math.cos(l.a), Math.sin(l.a), l.s.x, l.s.y, l.k ?? 1);
   if (!lamps.length) return null;
   const w = KTW, h = KTH, n = w * h, vi = viewIdx;
   let R = KR_RIMB[vi]; if (!R || R.length < n) R = KR_RIMB[vi] = new Uint32Array(n * 1.25 | 0);
@@ -36634,14 +36653,14 @@ function krRim() {
       if (!(KB[o + c] >>> 24)) continue;
       const wx = x0w + (c + 0.5) * cw;
       let k = 0;
-      for (let q = 0; q < lamps.length; q += 6) {
+      for (let q = 0; q < lamps.length; q += 7) {
         const dx = lamps[q] - wx, dy = lamps[q + 1] - wy, d = Math.hypot(dx, dy);
         if (d < 1 || d > Lr) continue;
         const nc = c + Math.round(dx / d), nr = r + Math.round(dy / d);   // (the cell next to it toward the lamp)
         if (nc >= 0 && nc < w && nr >= 0 && nr < h && (KB[nr * w + nc] >>> 24)) continue;
         let lk = lampBeamAt(-dx, -dy, lamps[q + 2], lamps[q + 3]);
         const ds = Math.hypot(wx - lamps[q + 4], wy - lamps[q + 5]); if (ds < 60) lk = Math.max(lk, 1 - ds / 60);
-        k += lk;
+        k += lk * lamps[q + 6];   // (the lamp's strength: a held sub's flickers)
       }
       if (k < 0.01) continue;
       const a = Math.min(1, k * KR_RIM_K);
@@ -36826,28 +36845,38 @@ function krSync() {
 // what it holds (or is eating) is where its arms have it: the game's object pinned there, every physics step
 function krPin() {
   for (const sb of subs) if (sb) sb._krHeld = false;
-  for (const o of KR.objs) {
-    if (o.taken || (!o.held.length && o.st !== 'eat') || o.dead) continue;
-    const r = o.ref;
-    switch (o.type) {
-      case 'SUB': r.x = o.x; r.y = o.y; r.a = o.a; r.vx = 0; r.vy = 0; r._krHeld = true; break;
-      case 'MINISUB': r.x = o.x; r.y = o.y; r.vx = 0; r.vy = 0; break;
-      case 'PIECE': r.x = o.x; r.y = o.y; r.a = o.a; r.vx = r.vy = r.w = 0; r.settled = false; r.rest = 0; wixDirty(); break;
-      case 'SUBHALF': r.x = o.x; r.y = o.y; r.vx = r.vy = 0; r.rest = false; r.to = null; wixDirty(); break;
-      case 'BOX': case 'PART': r.x = o.x; r.y = o.y; r.a = o.a; r.vx = r.vy = r.va = 0; break;
-    }
+  for (const o of KR.objs) if (!o.taken && (o.held.length || o.st === 'eat') && !o.dead) krPin1(o);
+}
+function krPin1(o) {
+  const r = o.ref;
+  switch (o.type) {
+    case 'SUB': r.x = o.x; r.y = o.y; r.a = o.a; r.vx = 0; r.vy = 0; r._krHeld = true; r._krS = o.s; break;   // (_krS: her size as it swallows her - krDrawHeld)
+    case 'MINISUB': r.x = o.x; r.y = o.y; r.vx = 0; r.vy = 0; break;
+    case 'PIECE': r.x = o.x; r.y = o.y; r.a = o.a; r.vx = r.vy = r.w = 0; r.settled = false; r.rest = 0; wixDirty(); break;
+    case 'SUBHALF': r.x = o.x; r.y = o.y; r.vx = r.vy = 0; r.rest = false; r.to = null; wixDirty(); break;
+    case 'BOX': case 'PART': r.x = o.x; r.y = o.y; r.a = o.a; r.vx = r.vy = r.va = 0; break;
   }
 }
 function krUnpin(o) { if (o.type === 'SUB') o.ref._krHeld = false; }
+// how far a sub it holds has been dragged in: 0 out at its arms' reach .. 1 at its mouth (her lamp's flicker - subLampK)
+function krPull(sb) {
+  if (!KR.on) return 0;
+  const M = krMouth();
+  return clamp(1 - Math.hypot(sb.x - M.x, sb.y - M.y) / (krLen() * 0.75), 0, 1);
+}
 // taken hold of: a fish leaves its school, a shark the sharks - from now on it's the kraken's to draw
 function krTaken(o) {
   if (o.taken) return;
   if (o.type === 'FISH') { const s = o.school, i = s.fish.indexOf(o.ref); if (i >= 0) s.fish.splice(i, 1); o.taken = true; o.dirF = o.ref.face || s.dir; }
   else if (o.type === 'SHARK') { const i = sharks.indexOf(o.ref); if (i >= 0) sharks.splice(i, 1); o.taken = true; o.dirF = o.ref.dir; }
 }
-// eaten: gone from the world, through the game's own paths
+// eaten: gone from the world, through the game's own paths - from where it is, in its mouth. (Oct 31) The thing is put there
+// first (krPin1): between the pins each physics step, its own step has moved it (a sub to the lowest the floor under her whole
+// length lets her go, ~2500 over it in its pit), and what follows reads where it is - the camera stays where she was last
+// (lostUnit: user Oct 28, "its supposed to STAY IN THE KRAKEN"; Oct 31, "the camera stays on the kraken until you choose a
+// new vehicle")
 function krGone(o) {
-  const r = o.ref; krUnpin(o);
+  const r = o.ref; krPin1(o); krUnpin(o);
   switch (o.type) {
     case 'SUB': krSubLost(r); break;
     case 'MINISUB': { r.state = 'lost'; r.ai = null; const q = r.driven; if (q != null && crew[q] && crew[q].civ === r) { civRelease(q); lostUnit(q, r.x, 'civ'); } break; }
@@ -37013,17 +37042,19 @@ function krTarget(x0, y0, x1, y1) {   // (a screen box, in pixels: the buffer ov
   return true;
 }
 // what it holds that the game doesn't draw itself (a fish, a shark), or draws turned with its arms (an army sub)
+// (Oct 31: an army sub from the subs themselves - _krHeld, _krS, set by krPin - not its proxy: with the simulation worker the
+// page has the subs but not the kraken's proxies, KR.objs, and a held sub went undrawn)
 function krDrawHeld() {
+  for (const sb of subs) {
+    if (!sb || !sb._krHeld) continue;
+    const s = Math.round(SUB_K * SV * 160) / 160, art = subArtOf(sb)[sb.facing], own = sb.art || art, I = scaled(own.I, s, true), wlY = Math.round(SUB_WL_ROW * s), ks = sb._krS ?? 1;
+    const nightK = clamp(E.night * 1.1 + E.sunset * 0.3, 0, 0.92);
+    C.save(); C.translate(PX(sb.x), PY(sb.y)); C.rotate(sb.a); if (ks < 0.999) C.scale(ks, ks); C.drawImage(I, -Math.round(I.width / 2), -wlY);
+    if (nightK > 0.02) { const K = scaled(art.KI, s, true); C.globalAlpha = nightK; C.drawImage(K, -Math.round(K.width / 2), -wlY); C.globalAlpha = 1; }
+    C.restore();
+  }
   for (const o of KR.objs) {
-    if (o.dead) continue;
-    if (o.type === 'SUB' && o.ref._krHeld) {
-      const sb = o.ref, s = Math.round(SUB_K * SV * 160) / 160, art = subArtOf(sb)[sb.facing], own = sb.art || art, I = scaled(own.I, s, true), wlY = Math.round(SUB_WL_ROW * s);
-      const nightK = clamp(E.night * 1.1 + E.sunset * 0.3, 0, 0.92);
-      C.save(); C.translate(PX(sb.x), PY(sb.y)); C.rotate(sb.a); if (o.s < 0.999) C.scale(o.s, o.s); C.drawImage(I, -Math.round(I.width / 2), -wlY);
-      if (nightK > 0.02) { const K = scaled(art.KI, s, true); C.globalAlpha = nightK; C.drawImage(K, -Math.round(K.width / 2), -wlY); C.globalAlpha = 1; }
-      C.restore();
-      continue;
-    }
+    if (o.dead || o.type === 'SUB') continue;
     if (!o.taken) continue;
     let sp, k;
     if (o.type === 'FISH') { const def = img.fish[o.school.type]; sp = o.dirF > 0 ? def.r : def.l; k = pixK(def.px); }
@@ -37034,7 +37065,7 @@ function krDrawHeld() {
 }
 // what it holds: in the underwater pass with the subs (behind its arms and head, under the water's tint like all sea life)
 function drawKrakenHeld(x0, x1) {
-  if (!KR.on || !KR.objs.length) return;
+  if (!KR.on) return;
   const L = krLen();
   if (KR.bx + L * 1.3 < x0 || KR.bx - L * 1.3 > x1) return;
   krDrawHeld();
@@ -48533,7 +48564,7 @@ async function start(data) {
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
   }, { get(o, k, r) { if (!WORLD_READY && !LOADING) worldNow(); return Reflect.get(o, k, r); } });
   // (user Oct 30: the subs' beam - its length and its picture, for a check of its reach)
-  Object.assign(window.__game, { subBeam: () => ({ L: MS_BEAM_L, sprite: msBeamSprite() }) });
+  Object.assign(window.__game, { subBeam: () => ({ L: MS_BEAM_L, sprite: msBeamSprite() }), lamps: () => subLamps().map(l => ({ x: l.x, y: l.y, k: l.k, ms: l.ms })) });   // (lamps: each lamp and its strength - the kraken's held sub's flicker, tools/kraken.mjs)
   // (user Oct 30: the hit bob on every ship - a hit sent as the game sends it, and which big ship is at a point)
   Object.assign(window.__game, { emit: (t, e) => emit(t, e), civAt: (x, y) => civAt(x, y) });
   // (the collision tests - tools/collide.mjs, collideshot.mjs: what's solid where, and the COLLISION view's switches)
