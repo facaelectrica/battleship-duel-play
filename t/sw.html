@@ -3134,7 +3134,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 381;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 08:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 31 08:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13804,19 +13804,20 @@ for (const k in SW_DRAW) {
   for (const e of SW_DRAW[k]) { const d = e.indexOf('.'); if (d < 0) top.add(e); else { top.add(e.slice(0, d)); (sub[e.slice(0, d)] || (sub[e.slice(0, d)] = new Set())).add(e.slice(d + 1)); } }
   SW_DRAWK[k] = { top: [...top], sub };
 }
-const swKindOf = v => { const ty = typeof v; return ty === 'number' ? 1 : ty === 'boolean' ? 4 : ty === 'string' ? 2 : ty === 'undefined' || ty === 'function' ? 0 : 3; };
+// (5: null - folded into a number, boolean or string column as a mask of its own, z; a column of nulls alone stays plain data)
+const swKindOf = v => { const ty = typeof v; return ty === 'number' ? 1 : ty === 'boolean' ? 4 : ty === 'string' ? 2 : ty === 'undefined' || ty === 'function' ? 0 : v === null ? 5 : 3; };
+const swKindMix = (was, kind) => was == null || was === kind ? kind : was === 5 && kind !== 3 ? kind : kind === 5 && was !== 3 ? was : 3;
 // the fields of the things in `arr` and each one's kind (1 number, 4 boolean, 2 string, 3 other or mixed); only: these fields
 function swKeysOf(arr, skip, only) {
   const n = arr.length, keys = new Map();
   for (let i = 0; i < n; i++) {
     const o = arr[i]; if (!o) continue;
-    if (only) for (const k of only) { const kind = swKindOf(o[k]); if (!kind) continue; const was = keys.get(k); keys.set(k, was == null || was === kind ? kind : 3); }
+    if (only) for (const k of only) { const kind = swKindOf(o[k]); if (!kind) continue; keys.set(k, swKindMix(keys.get(k), kind)); }
     else for (const k in o) {
       if (skip.has(k)) continue;
       const kind = swKindOf(o[k]);
       if (!kind) continue;
-      const was = keys.get(k);
-      keys.set(k, was == null || was === kind ? kind : 3);
+      keys.set(k, swKindMix(keys.get(k), kind));
     }
   }
   return keys;
@@ -13829,8 +13830,13 @@ function swColsOf(t, arr, strs, sIdx, bufs, draw) {
     if (kind === 1 || kind === 4 || kind === 2) { C.k.push(k); C.d.push(swColOf(arr, k, kind, strs, sIdx, bufs)); continue; }
     const nest = swNestOf(arr, k, draw ? draw.sub[k] : null, strs, sIdx, bufs);
     if (nest) { C.k.push(k); C.d.push({ nest }); continue; }
-    // (a thing of the same list - a trail's next - goes as its place in the list; another table's thing as its id)
-    const idx = C.idx || (C.idx = new Map(arr.map((o, i) => [o, i]))), vals = new Array(n);
+    // (a thing of the same list - a puff's prev, a trail's next - goes as its place in the list; another table's thing as its id)
+    const idx = C.idx || (C.idx = new Map(arr.map((o, i) => [o, i])));
+    // (a field that is only ever a thing of this list, null or absent: one Int32 column of places, -1 none, -2 null)
+    { let ok = true; const ri = new Int32Array(n);
+      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (v === undefined) ri[i] = -1; else if (v === null) ri[i] = -2; else if (v && typeof v === 'object' && idx.has(v)) ri[i] = idx.get(v); else { ok = false; break; } }
+      if (ok) { bufs.push(ri.buffer); C.k.push(k); C.d.push({ ri }); continue; } }
+    const vals = new Array(n);
     for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; vals[i] = v === undefined ? undefined : v && typeof v === 'object' && idx.has(v) ? { ri: idx.get(v) } : tblPlain(v, t.depth, t.skip, false); }
     C.k.push(k); C.d.push({ j: vals });
   }
@@ -13842,15 +13848,15 @@ function swColsOf(t, arr, strs, sIdx, bufs, draw) {
 function swColOf(arr, k, kind, strs, sIdx, bufs) {
   const n = arr.length;
   if (kind === 2) {
-    const col = new Int32Array(n);
-    for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v !== 'string') { col[i] = -1; continue; } let id = sIdx.get(v); if (id == null) { id = strs.length; strs.push(v); sIdx.set(v, id); } col[i] = id; }
+    const col = new Int32Array(n);   // (-1 absent, -2 null)
+    for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v !== 'string') { col[i] = v === null ? -2 : -1; continue; } let id = sIdx.get(v); if (id == null) { id = strs.length; strs.push(v); sIdx.set(v, id); } col[i] = id; }
     bufs.push(col.buffer);
     return { s: col };
   }
-  const col = new Float64Array(n); let miss = null;
-  for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v === 'number') col[i] = v; else if (typeof v === 'boolean') col[i] = v ? 1 : 0; else { (miss || (miss = new Uint8Array(n)))[i] = 1; } }
-  bufs.push(col.buffer); if (miss) bufs.push(miss.buffer);
-  return kind === 4 ? { b: col, m: miss } : { f: col, m: miss };
+  const col = new Float64Array(n); let miss = null, nul = null;
+  for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (typeof v === 'number') col[i] = v; else if (typeof v === 'boolean') col[i] = v ? 1 : 0; else if (v === null) (nul || (nul = new Uint8Array(n)))[i] = 1; else { (miss || (miss = new Uint8Array(n)))[i] = 1; } }
+  bufs.push(col.buffer); if (miss) bufs.push(miss.buffer); if (nul) bufs.push(nul.buffer);
+  return kind === 4 ? { b: col, m: miss, z: nul } : { f: col, m: miss, z: nul };
 }
 /* A list field whose values are small plain objects of plain values (a trail piece's two points), or arrays of them (a school's
    fish, a mine splash's spires) goes as FLAT COLUMNS over all those objects in a row - c: how many each thing has (-1: the field
@@ -13880,9 +13886,11 @@ function swNestOf(arr, k, only, strs, sIdx, bufs) {
 // (the page) one thing's field of a column, put: a number, a flag, a string or nothing
 function swColPut(o, k, d, i, strs) {
   if (d.m && d.m[i]) { delete o[k]; return; }
+  if (d.z && d.z[i]) { o[k] = null; return; }
   if (d.f) o[k] = d.f[i];
   else if (d.b) o[k] = d.b[i] !== 0;
-  else if (d.s) { const id = d.s[i]; if (id < 0) delete o[k]; else o[k] = strs[id]; }
+  else if (d.s) { const id = d.s[i]; if (id === -2) o[k] = null; else if (id < 0) delete o[k]; else o[k] = strs[id]; }
+  else if (d.ri) { const r = d.ri[i]; if (r === -2) o[k] = null; else if (r < 0) delete o[k]; }   // (a place: put after every row exists, below)
 }
 // (the page) a thing's nested objects refilled in place from the flat columns, from item `at` on; returns the next item
 function swNestInto(o, k, N, i, at, strs) {
@@ -13927,7 +13935,9 @@ function swColsInto(arr, C, strs, name) {
   if (km && km.size > n * 2 + 64) { const live = new Set(); for (let i = 0; i < n; i++) live.add(arr[i][keep.by]); for (const key of km.keys()) if (!live.has(key)) km.delete(key); }
   // places in the list and ids back into things
   for (let c = 0; c < K.length; c++) {
-    const d = D[c], k = K[c]; if (!d.j) continue;
+    const d = D[c], k = K[c];
+    if (d.ri) { for (let i = 0; i < n; i++) { const r = d.ri[i]; if (r >= 0) arr[i][k] = arr[r] || null; } continue; }
+    if (!d.j) continue;
     for (let i = 0; i < n; i++) {
       const v = d.j[i]; if (!v || typeof v !== 'object') continue;
       if (v.ri != null && Object.keys(v).length === 1) arr[i][k] = arr[v.ri] || null;
