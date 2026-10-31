@@ -3208,8 +3208,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 403;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 11:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 404;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 11:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -46059,12 +46059,12 @@ function groundEdHandles() {
    structures, prices, saves, the home's next-day sun, fuel - is built on this, one version at a time (work note
    story-mode-oct31.md). The old wave defence it replaces is in git (before Version 401).
    ================================================================ */
-const story = { coins: 0 };
+const story = { coins: 0, at: 0 };                       // (at: the structure you're at - its id in STRS; 0: none)
 const STORY_COINS0 = 0;                                  // (what a new story starts with - the user, 09:32: a fish catch 10, a Cessna 100)
 const storyR = sysRng('story');
-const STORY_ROW = worldRow({ coins: [() => story.coins, v => { story.coins = v; }] });
+const STORY_ROW = worldRow({ coins: [() => story.coins, v => { story.coins = v; }], at: [() => story.at, v => { story.at = v; }] });
 defTable('story', () => [STORY_ROW], { make: () => STORY_ROW });
-function storyReset() { story.coins = STORY_COINS0; }
+function storyReset() { story.coins = STORY_COINS0; story.at = 0; }
 // where a story opens: the HOME structure, else a house, else nothing (the harbour's view, as ever)
 function storyHome() {
   const L = strsUsed();
@@ -46074,9 +46074,37 @@ function storyStart() {
   const c = crew[0], o = storyHome();
   story.opened = { home: o ? o.k : null, n: (story.opened ? story.opened.n : 0) + 1 };   // (for the tools: what it opened on)
   civUI[0] = true;
-  if (o) { const B = strBox(o); c.look = { x: o.x, y: (B.top + B.foot) / 2 }; }
-  cutTo(0);
+  if (o) storyGo(0, o.id); else cutTo(0);
 }
+/* ---- being at a structure, and the ones it connects to (user Oct 31, the spec section 1: "The player can switch between
+   the home and dock, then from the dock to the boat"; "White pulsing dots identify objects available for switching. Nearby
+   structures connect automatically by distance"). Two structures connect when the gap between them is under
+   STORY_LINK_M; each one you can go to from where you are shows a dot; pressing it takes you there (the view on it). ---- */
+const STORY_LINK_M = 60;
+function storyGap(a, b) { const A = strBox(a), B = strBox(b); return Math.max(0, Math.max(A.x0, B.x0) - Math.min(A.x1, B.x1)); }
+function storyLinks(o) { return o ? strsUsed().filter(q => q !== o && storyGap(o, q) < STORY_LINK_M * UPM) : []; }
+const storyAt = () => strsUsed().find(o => o.id === story.at) || null;
+function storyGo(p, id) {
+  const o = strsUsed().find(q => q.id === id); if (!o || !STORY) return;
+  const here = storyAt(); if (here && here !== o && !storyLinks(here).includes(o)) return;   // (only to a connected one)
+  story.at = o.id;
+  const c = crew[p], B = strBox(o); c.mode = 'dock'; c.watch = null; c.look = { x: o.x, y: (B.top + B.foot) / 2 };
+  cutTo(p);
+}
+ACTS.storyGo = (p, id) => storyGo(p, id);
+// the dots: where each connected structure's is on the page (CSS pixels), from the world as the camera has it
+function storyDots() {
+  if (!STORY || ui.title || crew[0].mode !== 'dock') return [];
+  const here = storyAt(); if (!here) return [];
+  const a = screenToWorld(0, 0), b = screenToWorld(1000, 1000), sx = 1000 / (b[0] - a[0]), sy = 1000 / (b[1] - a[1]);
+  return storyLinks(here).map(o => { const B = strBox(o); return { id: o.id, cx: (o.x - a[0]) * sx, cy: (B.top - 30 - a[1]) * sy }; });
+}
+window.addEventListener('pointerdown', ev => {
+  if (!STORY || ui.title || NSKY.editor.TUNE.open || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
+  const r = ev.pointerType === 'touch' ? 34 : 22, d = storyDots().find(q => Math.hypot(ev.clientX - q.cx, ev.clientY - q.cy) < r);
+  if (!d) return;
+  act(0, 'storyGo', d.id); ev.stopImmediatePropagation(); ev.preventDefault();
+}, { capture: true, passive: false });
 function stepStory(dt) { }                               // (the days are the clock's: nothing of its own to step yet)
 function storyTidy() { }
 function spawnWave() { }
@@ -46085,6 +46113,13 @@ window.__story = story;                                   // (tools)            
 const STORY_COIN = ['..###..', '.#ooo#.', '#oo#oo#', '#o#o#o#', '#oo#oo#', '.#ooo#.', '..###..'];
 function drawStoryBanner() {
   if (!STORY || ui.title) return;
+  // the dots: white, pulsing, an ink ring (on the controls' layer: toUI)
+  const pulse = 0.5 + 0.5 * Math.sin(time * 4);
+  for (const q of storyDots()) {
+    const [x, yy] = toUI(q.cx, q.cy), rr = Math.round(5 + 3 * pulse);
+    ug.fillStyle = 'rgba(4,7,15,0.8)'; ug.beginPath(); ug.arc(x, yy, rr + 2, 0, Math.PI * 2); ug.fill();
+    ug.fillStyle = `rgba(255,255,255,${(0.75 + 0.25 * pulse).toFixed(2)})`; ug.beginPath(); ug.arc(x, yy, rr, 0, Math.PI * 2); ug.fill();
+  }
   const y = hudTop() + 12, k = 3, day = 'DAY ' + (W.day || 1);
   drawText(ug, day, 17, y + 1, '#04070f', 2); drawText(ug, day, 16, y, '#ffffff', 2);
   const coins = String(story.coins), x = uvw - 16, cy = y + 24, w = textWidth(coins) * 2;
