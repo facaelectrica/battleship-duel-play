@@ -3167,8 +3167,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 390;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 09:51';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 391;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 09:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -15734,6 +15734,47 @@ function glSkySetup() {
   GLR.kprog = p; GLR.kU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_rows', 'u_col', 'u_ki', 'u_amp']) GLR.kU[k] = gl.getUniformLocation(p, k);
   GLR.krows = null; GLR.krowsW = 0;
 }
+/* ---- A CAST SHADOW IN ONE PASS (Oct 31, the 60-fps chat): the ships' and subs' shadows through the water (44-shadows-seafloor.js
+   shadowRow) were drawn as runs of rectangles - a sub's leaning shadow ~4,000 of them, ~16,000 a frame in the fight. Here each pixel
+   works out what the runs gave it, all in integers: its block column (u_sh.y + PB x column) and that column's shear (u_dy), so
+   the row it falls in (rows u_sh.z apart from the top u_hi.x); the row's four bands' edges and how many cover it; the row's
+   colour for that count (packed as fillRectCol takes it: r | g << 8 | b << 16 | a << 24, premultiplied). A row: 4 texels of
+   u_rows - (y, h, bl0, bl1), (bl2, bl3, br0, br1), (br2, br3, 0, 0), (c1, c2, c3, c4). u_off: the view's translation (whole
+   pixels), so a pixel's place in the shadow's own coordinates is whole too and a rectangle's edge is met exactly as the
+   rasterizer meets it. ---- */
+const GL_HFS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp isampler2D u_rows; uniform highp isampler2D u_dy; uniform ivec4 u_sh; uniform ivec2 u_hi; uniform vec2 u_off; uniform vec2 u_size;
+out vec4 o;
+int fdiv(int a, int d) { return a >= 0 ? a / d : -((d - 1 - a) / d); }
+void main() {
+  int lx = int(floor(gl_FragCoord.x - u_off.x)), ly = int(floor(u_size.y - gl_FragCoord.y - u_off.y));
+  int PB = u_sh.x, b = fdiv(lx - u_sh.y, PB);
+  if (b < 0 || b >= u_sh.w) discard;
+  int yy = ly - texelFetch(u_dy, ivec2(b, 0), 0).r;
+  int k = fdiv(yy - u_hi.x, u_sh.z);
+  if (k < 0 || k >= u_hi.y) discard;
+  ivec4 r0 = texelFetch(u_rows, ivec2(k * 4, 0), 0), r1 = texelFetch(u_rows, ivec2(k * 4 + 1, 0), 0), r2 = texelFetch(u_rows, ivec2(k * 4 + 2, 0), 0);
+  if (yy < r0.x || yy >= r0.x + r0.y) discard;
+  int n = (lx >= r0.z && lx < r1.z ? 1 : 0) + (lx >= r0.w && lx < r1.w ? 1 : 0) + (lx >= r1.x && lx < r2.x ? 1 : 0) + (lx >= r1.y && lx < r2.y ? 1 : 0);
+  if (n == 0) discard;
+  ivec4 cs = texelFetch(u_rows, ivec2(k * 4 + 3, 0), 0);
+  uint c = uint(n == 1 ? cs.x : n == 2 ? cs.y : n == 3 ? cs.z : cs.w);
+  if ((c >> 24u) == 0u) discard;
+  o = vec4(float(c & 255u), float((c >> 8u) & 255u), float((c >> 16u) & 255u), float(c >> 24u)) / 255.0;
+}`;
+// (Oct 31) the premultiply-on-upload switch, set only through here and kept in GLR.pm: asking the GPU for it (gl.getParameter)
+// makes the page wait for the GPU process - the shadows' and the sky texture's uploads did that every draw. (UNPACK_FLIP_Y is
+// never set: always false.)
+function glPM(v) { v = !!v; GLR.pm = v; GLR.gl.pixelStorei(GLR.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, v); }
+function glShadeSetup() {
+  const gl = GLR.gl, p = gl.createProgram();
+  gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_HFS));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  GLR.hprog = p; GLR.hU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_rows', 'u_dy', 'u_sh', 'u_hi', 'u_off']) GLR.hU[k] = gl.getUniformLocation(p, k);
+  GLR.hrows = null; GLR.hrowsW = 0; GLR.hdy = null; GLR.hdyW = 0;
+}
 function glBurnSetup() {
   const gl = GLR.gl, p = gl.createProgram();
   gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_BFS));
@@ -16110,7 +16151,7 @@ function glLitRun(b, lit, U) {
   const W = 256, Hd = Math.max(1, Math.ceil(lit.dlen / 4 / W));
   gl.activeTexture(gl.TEXTURE11); gl.bindTexture(gl.TEXTURE_2D, lit.tex); gl.bindSampler(11, null);
   if (lit.dat.length < W * Hd * 4) { const a = new Float32Array(W * Hd * 4); a.set(lit.dat.subarray(0, lit.dlen)); lit.dat = a; }
-  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  glPM(false);
   if (lit.texH !== Hd) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, W, Hd, 0, gl.RGBA, gl.FLOAT, lit.dat.subarray(0, W * Hd * 4)); lit.texH = Hd; }
   else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, Hd, gl.RGBA, gl.FLOAT, lit.dat.subarray(0, W * Hd * 4));
   // the records' buffer, as big as the puffs
@@ -16416,7 +16457,7 @@ function glSmokeSetup() {
 function gsmTex(t, w, h, data, fmt) {
   const gl = GLR.gl; fmt = fmt || 'RGBA32F';
   if (!t || t.w !== w || t.h !== h || t.ep !== GLR.epoch) { if (t && t.ep === GLR.epoch) gl.deleteTexture(t.tex); t = { tex: glNewTex(0, 0, gl.NEAREST), w, h, ep: GLR.epoch, alloc: false }; }
-  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, t.tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, t.tex); glPM(false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
   const ifmt = fmt === 'R32F' ? gl.R32F : gl.RGBA32F, f = fmt === 'R32F' ? gl.RED : gl.RGBA;
   if (!t.alloc) { gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, w, h, 0, f, gl.FLOAT, data || null); t.alloc = true; }
   else if (data) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, f, gl.FLOAT, data);
@@ -16517,7 +16558,7 @@ precision highp float; out vec4 o; void main() { o = vec4(0.0); }`));
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
   GLR.pix = null; GLR.pixPool = [];
-  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glSkySetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
+  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glSkySetup(); glShadeSetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
@@ -16676,7 +16717,7 @@ function glGradRow(gr) {
   }
   const gl = GLR.gl;
   gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, GLR.gradTex);
-  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  glPM(false);
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, row, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
   gr.row = row; gr.gen = GLR.gradGen;
   { const flat = []; for (const s of gr.stops) { const c = s[1]; flat.push(s[0], c[0], c[1], c[2], c[3]); } let L = GRADK.get(hk); if (!L) GRADK.set(hk, L = []); L.push({ flat, row }); }
@@ -16708,7 +16749,7 @@ function glTexBusy(tex) { for (const s of GLR.slots) if (s.tex === tex) return t
 function glUploadSrc(e, src, x, y, whole) {
   const gl = GLR.gl;
   gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, e.tex);
-  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+  glPM(true);
   if (whole) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
   else gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, src);
   GLR.stats.uploads++; GLR.stats.upPx += e.w * e.h;
@@ -16942,7 +16983,7 @@ function glDrawTris(tris) {
   const gl = GLR.gl;
   if (GLR.cur.vao !== 2) { gl.bindVertexArray(GLR.tvao); GLR.cur.vao = 2; }
   const t = GLR.st.tgt;
-  if (GLR.cur.prog !== 13) { gl.useProgram(GLR.tprog); GLR.cur.prog = 13; }
+  if (GLR.cur.prog !== 21) { gl.useProgram(GLR.tprog); GLR.cur.prog = 21; }   // (its own number: 13 is the sky texture's)
   gl.uniform2f(GLR.tuSize, t._w, t._h);
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.tvbo);
   gl.bufferData(gl.ARRAY_BUFFER, tris, gl.STREAM_DRAW);
@@ -17182,11 +17223,11 @@ class GLCtx {
     gl.useProgram(GLR.mprog); GLR.cur.prog = 11;
     gl.uniform2f(GLR.mSize, t._w, t._h); gl.uniform1i(GLR.mPalT, 10); gl.uniform1f(GLR.mEdge, GLR.edge || 0); { const b = GLR.burn || [1, 1, 1]; gl.uniform3f(GLR.mBurn, b[0], b[1], b[2]); }
     gl.activeTexture(gl.TEXTURE10); gl.bindTexture(gl.TEXTURE_2D, GLR.mpal); gl.bindSampler(10, null);
-    const fy = gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL), pm = gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL);
-    if (fy) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); if (pm) gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    const pm = GLR.pm;   // (kept here, not asked of the GPU: gl.getParameter waits on it - glPM)
+    if (pm) glPM(false);
     if (GLR.mpalH < rows) { GLR.mpalH = Math.max(rows, GLR.mpalH * 2, 64); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 15, GLR.mpalH, 0, gl.RGBA, gl.FLOAT, null); }
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 15, rows, gl.RGBA, gl.FLOAT, PD, 0);
-    if (fy) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); if (pm) gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    if (pm) glPM(true);
     gl.bindVertexArray(GLR.mvao); GLR.cur.vao = 11;
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, tot);
     GLR.stats.draws++; GLR.stats.quads += tot; GLR.stats.uploads += 2;
@@ -17249,10 +17290,10 @@ class GLCtx {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, GLR.krowsW, 1, 0, gl.RG, gl.FLOAT, null);
     } else gl.bindTexture(gl.TEXTURE_2D, GLR.krows);
     gl.bindSampler(13, null);
-    const fy = gl.getParameter(gl.UNPACK_FLIP_Y_WEBGL), pm = gl.getParameter(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL);
-    if (fy) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); if (pm) gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    const pm = GLR.pm;   // (kept here, not asked of the GPU: gl.getParameter waits on it - glPM)
+    if (pm) glPM(false);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, n, 1, gl.RG, gl.FLOAT, rows, 0);
-    if (fy) gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true); if (pm) gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    if (pm) glPM(true);
     gl.activeTexture(gl.TEXTURE0);
     gl.uniform1i(U.u_rows, 13);
     gl.uniform2f(U.u_size, t._w, t._h);
@@ -17260,6 +17301,44 @@ class GLCtx {
     gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
     gl.uniform4f(U.u_cells, x0, y0, x1, y1);
     gl.uniform4fv(U.u_col, col); gl.uniform4i(U.u_ki, ki[0], ki[1], ki[2], n); gl.uniform1f(U.u_amp, amp);
+    gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    GLR.stats.draws++; GLR.stats.quads++; GLR.stats.uploads++;
+  }
+  // a cast shadow's rows in one pass (GL_HFS): the box x, y, w, h (this context's coordinates) it can reach; rows an Int32Array
+  // of n rows (16 ints each), sh [PB, the first column's x, the rows' spacing, the columns], top the first row's y, dy an
+  // Int32Array of the columns' shear. Its own blend: the context's, as fillRectCol's
+  drawShadeRows(x, y, w, h, rows, n, dy, sh, top) {
+    if (GLR.lost || !GLR.hprog || !(n > 0) || !(sh[3] > 0)) return;
+    const gl = GLR.gl, t = this.target, U = GLR.hU, m = this.s.m;
+    glBegin(this, this.s.op); glFlush();
+    glApplyState();
+    gl.useProgram(GLR.hprog); GLR.cur.prog = 22;
+    const tex = (k, kw, need, fmt, ifmt, unit, data, len) => {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      if (!GLR[k] || GLR[kw] < need) {
+        if (GLR[k]) gl.deleteTexture(GLR[k]);
+        GLR[kw] = Math.max(need, 256);
+        GLR[k] = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, GLR[k]);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, GLR[kw], 1, 0, fmt, gl.INT, null);
+      } else gl.bindTexture(gl.TEXTURE_2D, GLR[k]);
+      gl.bindSampler(unit, null);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, len, 1, fmt, gl.INT, data, 0);
+    };
+    const pm = GLR.pm;   // (kept here, not asked of the GPU: gl.getParameter waits on it - glPM)
+    if (pm) glPM(false);
+    tex('hrows', 'hrowsW', n * 4, gl.RGBA_INTEGER, gl.RGBA32I, 13, rows, n * 4);
+    tex('hdy', 'hdyW', sh[3], gl.RED_INTEGER, gl.R32I, 14, dy, sh[3]);
+    if (pm) glPM(true);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(U.u_rows, 13); gl.uniform1i(U.u_dy, 14);
+    gl.uniform2f(U.u_size, t._w, t._h);
+    this._corners(x, y, w, h);
+    gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
+    gl.uniform4f(U.u_cells, 0, 0, 1, 1);
+    gl.uniform4i(U.u_sh, sh[0], sh[1], sh[2], sh[3]); gl.uniform2i(U.u_hi, top, n); gl.uniform2f(U.u_off, m[4], m[5]);
     gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     GLR.stats.draws++; GLR.stats.quads++; GLR.stats.uploads++;
@@ -17292,7 +17371,7 @@ class GLCtx {
       gl.bindTexture(gl.TEXTURE_2D, GLR.rbtex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG8, RAY_N, 1, 0, gl.RG, gl.UNSIGNED_BYTE, null);
       if (GLR.rbfbo) gl.deleteFramebuffer(GLR.rbfbo); GLR.rbfbo = null; GLR.rbSeq = -1;
     }
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    glPM(false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     if (gb) { if (GLR.rbSeq !== gb.seq) { glRayBuild(gb, NS, RAY_N); glApplyState(); } }   // (engine stage 8: the steps made on the GPU; ?raygpu=0 uploaded as before)
     else { gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, GLR.rtex); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NS, RAY_N, gl.RED, gl.UNSIGNED_BYTE, rt); GLR.unit[0] = GLR.rtex; GLR.rbSeq = -1; }
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -17330,7 +17409,7 @@ class GLCtx {
       P = pool[k] = { tex: glNewTex(tw, th, gl.NEAREST), w: tw, h: th, epoch: GLR.epoch };
     } else if (glTexBusy(P.tex)) glFlush();
     gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, P.tex);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, !!straight);
+    glPM(!!straight);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, hgt, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(px.buffer, px.byteOffset, w * hgt * 4));
     GLR.stats.uploads++; GLR.stats.upPx += w * hgt;
     const slot = glSlot(P.tex, false);
@@ -17805,7 +17884,7 @@ function wglSurf() {
   if (S.f.length < n) S.f = new Float32Array(n + 256);
   let mn = 1e9;
   for (let i = 0; i < n; i++) { const v = ys[i]; S.f[i] = v; if (v < mn) mn = v; }
-  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, S.tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, S.tex); glPM(false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
   if (S.w < n) { S.w = n + 256; gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, S.w, 1, 0, gl.RED, gl.FLOAT, null); }
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, n, 1, gl.RED, gl.FLOAT, S.f.subarray(0, n));
   GLR.stats.uploads++; GLR.stats.upPx += n;
@@ -18089,7 +18168,7 @@ function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, cr
   const h = (i, j) => hash(i * 12.9898 + j * 78.233 + 7.1 * 3.719);   // (cloudNoise's, sd 7.1)
   for (let i = 0; i < nl; i++) { const o = 3 * R + i * 4; F[o] = h(xi0 + i, yi); F[o + 1] = h(xi0 + i, yi + 1); F[o + 2] = 0; F[o + 3] = 0; }
   for (let i = 0; i < nk; i++) { const o = 4 * R + i * 4; F[o] = hash((k0 + i) * 0.731 + 0.17); F[o + 1] = 0; F[o + 2] = 0; F[o + 3] = 0; }
-  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G8.msT); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G8.msT); glPM(false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
   if (G8.msW < TW) { G8.msW = TW + 64; gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, G8.msW, 5, 0, gl.RGBA, gl.FLOAT, null); }
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TW, 5, gl.RGBA, gl.FLOAT, F.subarray(0, TW * 5 * 4));
   for (let i = 0; i < 8; i++) if (GLR.unit[i] === G8.msT) GLR.unit[i] = null;   // (unit 9 used for the upload: the cache keeps 0-7)
@@ -22498,7 +22577,7 @@ function gsmPaint(S_, a) {
   if (!GSM.bt || GSM.bt.ep !== GLR.epoch) GSM.bt = gsmTex(null, 64, 64, SM_BTD);
   const lut = S_.lut, NL = lut.length;
   if (!G_.lt || G_.lt.ep !== GLR.epoch || G_.lt.w !== NL) { if (G_.lt && G_.lt.ep === GLR.epoch) gl.deleteTexture(G_.lt.tex); G_.lt = { tex: glNewTex(0, 0, gl.NEAREST), w: NL, ep: GLR.epoch }; gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G_.lt.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, NL, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); }
-  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G_.lt.tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NL, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(lut.buffer, lut.byteOffset, NL * 4));
+  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G_.lt.tex); glPM(false); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NL, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(lut.buffer, lut.byteOffset, NL * 4));
   // ---- 1. SPLAT, into the index-and-height target (the whole picture's size; the box cleared and drawn)
   if (!G_.sp || G_.sp.w !== cw || G_.sp.h !== h || G_.sp.ep !== GLR.epoch) {
     if (G_.sp && G_.sp.ep === GLR.epoch) { gl.deleteFramebuffer(G_.sp.fbo); gl.deleteRenderbuffer(G_.sp.rb); gl.deleteTexture(G_.sp.t.tex); }
@@ -24509,7 +24588,58 @@ const rgbsCache = c => c.join(',');
 // one part in 255 here and there, which no eye can see; SHADOW_GRADIENT = false paints the rows one by one)
 const SHADOW_GRADIENT = true;
 const SHG = { paths: new Map(), top: 0, h: 0, col: '' };
-function shadowBegin(top, h, colKey) { SHG.paths.clear(); SHG.top = top; SHG.h = h; SHG.col = colKey; }
+function shadowBegin(top, h, colKey) {
+  SHG.paths.clear(); SHG.top = top; SHG.h = h; SHG.col = colKey;
+  SHQ.on = !PATHS && !BATCH && !SHQ_OFF && !!C.drawShadeRows && !!C.fillRectCol && C.globalAlpha === 1; SHQ.n = 0; SHQ.top = top; SHQ.key = colKey;
+}
+/* (Oct 31, the 60-fps chat) ON THE GPU A SHADOW IS ONE PASS: its rows are kept here (SHQ) and drawn together by C.drawShadeRows
+   (40-gl.js GL_HFS), each pixel finding its row, its bands and its colour exactly as the runs below would have painted it - a
+   sub's leaning shadow was ~4,000 rectangles. Rows not evenly spaced from the top (none today) go the old way. ?shadegl=0: the
+   old way always, for comparison. */
+const SHQ_OFF = /[?&]shadegl=0/.test(location.search);
+const SHQ = { on: false, n: 0, top: 0, key: '', rows: [], shear: null, I: new Int32Array(16 * 64), D: new Int32Array(512) };
+function shadeRowsGL() {
+  const R = SHQ.rows, n = SHQ.n, top = SHQ.top, shear = SHQ.shear; SHQ.on = false;
+  if (!n) return;
+  const step = R[4];
+  let ok = step > 0;
+  for (let i = 0; ok && i < n; i++) { const y = R[i * 6 + 3]; if (R[i * 6 + 4] !== step || (y - top) % step !== 0 || y < top) ok = false; }
+  if (!ok) { for (let i = 0; i < n; i++) shadowRunRow(R[i * 6], R[i * 6 + 1], R[i * 6 + 2], R[i * 6 + 3], R[i * 6 + 4], SHQ.key, R[i * 6 + 5], shear); return; }
+  const K = (R[(n - 1) * 6 + 3] - top) / step + 1;
+  if (SHQ.I.length < K * 16) SHQ.I = new Int32Array(K * 32);
+  const I = SHQ.I.fill(0, 0, K * 16), packed = shColOf(SHQ.key);
+  let xa = 1e9, xb = -1e9;
+  for (let i = 0; i < n; i++) {
+    const L = R[i * 6], w = R[i * 6 + 1], u = R[i * 6 + 2], y = R[i * 6 + 3], q = Math.min(1, R[i * 6 + 5]);
+    shBands(L, w, u);
+    const o = (y - top) / step * 16;
+    I[o] = y; I[o + 1] = step; I[o + 2] = SH_BL[0]; I[o + 3] = SH_BL[1]; I[o + 4] = SH_BL[2]; I[o + 5] = SH_BL[3];
+    I[o + 6] = SH_BR[0]; I[o + 7] = SH_BR[1]; I[o + 8] = SH_BR[2]; I[o + 9] = SH_BR[3];
+    for (let k = 1; k <= 4; k++) I[o + 11 + k] = shPack(packed, q, k) | 0;
+    xa = Math.min(xa, SH_BL[0], SH_BL[1], SH_BL[2], SH_BL[3]); xb = Math.max(xb, SH_BR[0], SH_BR[1], SH_BR[2], SH_BR[3]);
+  }
+  if (!(xb > xa)) return;
+  const cols = (xb - xa) / PB;
+  if (SHQ.D.length < cols) SHQ.D = new Int32Array(cols * 2);
+  const D = SHQ.D, level = shear.level === true;
+  let d0 = 0, d1 = 0;
+  for (let c = 0; c < cols; c++) { const d = level ? 0 : shear(xa + c * PB); D[c] = d; if (d < d0) d0 = d; if (d > d1) d1 = d; }
+  SH_SH[0] = PB; SH_SH[1] = xa; SH_SH[2] = step; SH_SH[3] = cols;
+  C.drawShadeRows(xa, top + d0, xb - xa, K * step + d1 - d0, I, K, D, SH_SH, top);
+}
+const SH_SH = [0, 0, 0, 0];
+// a row's four nested bands' edges, in whole pixel blocks (SH_BL, SH_BR)
+function shBands(L, w, u) {
+  for (let b = 0; b < 4; b++) {
+    const inset = w * (0.04 + 0.07 * b) * (0.6 + u);
+    SH_BL[b] = Math.floor((L + inset) / PB) * PB; SH_BR[b] = SH_BL[b] + Math.max(PB, Math.ceil((w - inset * 2) / PB) * PB);
+  }
+}
+// a row's packed colour for n bands (fillRectCol's: premultiplied, the alpha to three decimals as the colour string had it)
+function shPack(packed, q, n) {
+  const A = Math.round(+(1 - Math.pow(1 - q, n)).toFixed(3) * 255), f = A / 255;
+  return ((A << 24) | (Math.round(packed[2] * f) << 16) | (Math.round(packed[1] * f) << 8) | Math.round(packed[0] * f)) >>> 0;
+}
 function shadowRect(n, q, dy, x, y, w, h) {
   if (x + w <= -SHX || x >= VWP - SHX || y + dy + h <= -SHY || y + dy >= bh - SHY) return;
   const key = n * 64 + dy / PB + 32;
@@ -24519,6 +24649,7 @@ function shadowRect(n, q, dy, x, y, w, h) {
   if (p.rowY[p.rowY.length - 1] !== y) { p.rowY.push(y); p.rowA.push((1 - Math.pow(1 - q, n)).toFixed(3)); }
 }
 function shadowEnd() {
+  if (SHQ.on) { shadeRowsGL(); return; }
   if (!PATHS) { plFlush(); return; }
   const top = SHG.top, bot = SHG.top + SHG.h;
   for (const p of SHG.paths.values()) {
@@ -24547,10 +24678,11 @@ function shadowEnd() {
   SHG.paths.clear(); fsLast = null;
 }
 function shadowRow(L, w, u, y, h, colKey, q, shear) {
-  for (let b = 0; b < 4; b++) {
-    const inset = w * (0.04 + 0.07 * b) * (0.6 + u);
-    SH_BL[b] = Math.floor((L + inset) / PB) * PB; SH_BR[b] = SH_BL[b] + Math.max(PB, Math.ceil((w - inset * 2) / PB) * PB);
-  }
+  if (SHQ.on) { const R = SHQ.rows, o = SHQ.n++ * 6; R[o] = L; R[o + 1] = w; R[o + 2] = u; R[o + 3] = y; R[o + 4] = h; R[o + 5] = q; SHQ.shear = shear; return; }
+  shadowRunRow(L, w, u, y, h, colKey, q, shear);
+}
+function shadowRunRow(L, w, u, y, h, colKey, q, shear) {
+  shBands(L, w, u);
   q = Math.min(1, q);
   let runX = 0, runN = 0, runDy = 0;
   // (plain mode on the GPU: the run's colour packed once per band count, no colour string to build and parse - the same
@@ -24559,7 +24691,7 @@ function shadowRow(L, w, u, y, h, colKey, q, shear) {
   if (packed) SH_PK[1] = SH_PK[2] = SH_PK[3] = SH_PK[4] = 0;
   const flush = xEnd => {
     if (!runN) return;
-    if (packed) { let p = SH_PK[runN]; if (!p) { const A = Math.round(+(1 - Math.pow(1 - q, runN)).toFixed(3) * 255), f = A / 255; p = SH_PK[runN] = ((A << 24) | (Math.round(packed[2] * f) << 16) | (Math.round(packed[1] * f) << 8) | Math.round(packed[0] * f)) >>> 0; } C.fillRectCol(runX, y + runDy, xEnd - runX, h, p); return; }
+    if (packed) { let p = SH_PK[runN]; if (!p) p = SH_PK[runN] = shPack(packed, q, runN); C.fillRectCol(runX, y + runDy, xEnd - runX, h, p); return; }
     if (PATHS) shadowRect(runN, q, runDy, runX, y, xEnd - runX, h); else if (BATCH) plRect(`rgba(${colKey},${(1 - Math.pow(1 - q, runN)).toFixed(3)})`, runX, y + runDy, xEnd - runX, h); else { fs1(`rgba(${colKey},${(1 - Math.pow(1 - q, runN)).toFixed(3)})`); C.fillRect(runX, y + runDy, xEnd - runX, h); }
   };
   const x0 = Math.min(SH_BL[0], SH_BL[1], SH_BL[2], SH_BL[3]), x1 = Math.max(SH_BR[0], SH_BR[1], SH_BR[2], SH_BR[3]);
@@ -30771,12 +30903,12 @@ function cglFloatTex(tex, w, h, fmt) {
 }
 // a window's cells on the chip: ready (true), or a slice more uploaded this frame (false: the CPU draws it meanwhile)
 function cglWindow(Wn) {
-  const gl = GLR.gl, max = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+  const gl = GLR.gl, max = GLR.maxTex || (GLR.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE));   // (asked once: gl.getParameter waits on the GPU - Oct 31)
   if (Wn.w > max || Wn.h > max) return false;
   let T = Wn._gl;
   if (!T) { T = Wn._gl = { tex: [], k: 0, row: 0, done: false }; CGL.live.add(Wn); }
   if (T.done) return true;
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); glPM(false);
   gl.activeTexture(gl.TEXTURE9);
   let budget = 1 << 20;                                     // (about a million cells a frame)
   while (budget > 0 && T.k < CGL_NAMES.length) {
@@ -30811,7 +30943,7 @@ function cglDraw(ctx, Wn, bx, all, WS, dx, dy, dw, dh) {
   glBegin(ctx, 'source-over'); glFlush();
   if (GLR.cur.prog !== 1) { gl.useProgram(GLR.prog); GLR.cur.prog = 1; }
   glApplyState();
-  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  glPM(false);
   // the frame's small things: the light's nodes, the palette, the pockets' surfaces, the wall's tiles (when they change)
   gl.activeTexture(gl.TEXTURE9);
   const { LW, LH } = NG;
