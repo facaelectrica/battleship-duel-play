@@ -2859,8 +2859,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 382;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 08:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 383;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 08:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -34297,15 +34297,21 @@ function islSkinAt(x) {
   }
   return null;
 }
-// (isleBuild, 50-land-terrain) each island's columns that stand out of the water: ISLE 2, their tops in land.itop
-function islMarkCols(I_, any) {
+// the ground in front at x (world y of its top, before anything is dug): the ocean floor at sea, the ground's own line in
+// a country (under the water there: a lake, or a sea carved into the country)
+const islGroundAt = (x, R) => inCountry(x) ? landProfile(x, R) : sandY(x);
+// (isleBuild, 50-land-terrain) each island's columns that stand out of the water: ISLE 2, their tops in land.itop.
+// One rule for every water (user Oct 31: "I cant build islands on water that is not the 'main' one"): an island stands
+// wherever its line rises out of the water and the ground in front is under the water - the sea between the harbours, a
+// lake, or a sea in a country. Where the ground in front stands out of the water, it hides the island: nothing to mark
+function islMarkCols(I_, any, R) {
   land.itop = null; land.islRuns = [];
   const L = islandsUsed(); if (!L.length) return any;
   const T = land.itop = new Float32Array(land.cols);
   for (const I of L) {
     const m = floorTangents(I.p), a = I.p[0][0], b = I.p[I.p.length - 1][0];
     for (let c = Math.max(0, Math.ceil(a / LT_CELL)); c < land.cols && c * LT_CELL < b; c++) {
-      const x = c * LT_CELL; if (I_[c] || inCountry(x)) continue;
+      const x = c * LT_CELL; if (I_[c] || islGroundAt(x, R) < WATER_Y - 1) continue;
       const t = islTopAt(I, m, x); if (t < WATER_Y - 1 && t < islBotAt(I, x) - 1) { I_[c] = 2; T[c] = t; any = true; }
     }
   }
@@ -34316,7 +34322,7 @@ function islMarkCols(I_, any) {
 // down to its foot, a cell a pixel as the land - its earth, then rock, darker the deeper (the water's tint over it as over
 // the floor). Painted once per build (islRootsBuild), drawn in the middle plane under the ground out of the water
 let islRoots = [];
-function islRootsBuild() {
+function islRootsBuild(R = land.R) {
   islRoots = [];
   for (const I of islandsUsed()) {
     const m = floorTangents(I.p), a = I.p[0][0], b = I.p[I.p.length - 1][0];
@@ -34324,7 +34330,7 @@ function islRootsBuild() {
     let yA = Infinity, yB = -Infinity;
     const top = new Float32Array(W), bot = new Float32Array(W);
     for (let q = 0; q < W; q++) {
-      const x = (c0 + q) * LT_CELL, t = islTopAt(I, m, x), f = Math.max(islBotAt(I, x), t < islBotAt(I, x) ? sandY(x) + 30 : -Infinity);   // (its root on down behind the floor in front: never hanging in the water)
+      const x = (c0 + q) * LT_CELL, t = islTopAt(I, m, x), f = Math.max(islBotAt(I, x), t < islBotAt(I, x) ? islGroundAt(x, R) + 30 : -Infinity);   // (its root on down behind the ground in front - the floor, a lake's bed: never hanging in the water)
       top[q] = t; bot[q] = f;
       if (f > t) { yA = Math.min(yA, Math.max(t, WATER_Y)); yB = Math.max(yB, f); }
     }
@@ -34402,9 +34408,11 @@ function islSplitChunk(k, id, w, h) {
   let cv = land.ichunks[k];
   if (!cv || cv.width !== w || cv.height !== h) cv = land.ichunks[k] = makeCanvas(w, h);
   const g = cv.getContext('2d'), iid = g.createImageData(w, h), s = id.data, d = iid.data;
+  const yW = Math.ceil((WATER_Y + 2 - LT_Y0) / LT_CELL) - land.rT[k] + 4;   // (the canvas row of the water's line: row r is r + 4 - rT)
   for (let q = 0; q < w; q++) {
     if (ISLE[c0 + q] !== 2) continue;
-    for (let y = 0; y < h; y++) { const o = (y * w + q) * 4; d[o] = s[o]; d[o + 1] = s[o + 1]; d[o + 2] = s[o + 2]; d[o + 3] = s[o + 3]; s[o + 3] = 0; }
+    const yE = inCountry((c0 + q) * LT_CELL) ? Math.min(h, yW) : h;   // (in a country the column keeps its own ground under the water - a lake's bed - in front)
+    for (let y = 0; y < yE; y++) { const o = (y * w + q) * 4; d[o] = s[o]; d[o + 1] = s[o + 1]; d[o + 2] = s[o + 2]; d[o + 3] = s[o + 3]; s[o + 3] = 0; }
   }
   g.putImageData(iid, 0, 0);
 }
@@ -40011,7 +40019,7 @@ function ltCell(c, r) {
 // where the ground there rises higher (room for LT_HEAD over it) or lies deeper (LT_SKIN of earth under it)
 // the islands: every grid column whose ocean floor stands out of the water, past the harbours' shelves (ISLE, read by
 // onLand - 05-game-state); none: null, the sea as it always was
-function isleBuild() {
+function isleBuild(R = land.R) {
   ISLE = null; land.isles = []; land.islRuns = []; land.itop = null;
   if (!OWM) return;
   let any = false; const I = new Uint8Array(land.cols);
@@ -40019,7 +40027,7 @@ function isleBuild() {
   // (land.isles: each stretch of the ground's own line out of the water at sea, [left, right] in world x - the land's
   // pass draws there too, renderLandObjects)
   for (let c = 0; c < land.cols; c++) if (I[c] === 1 && I[c - 1] !== 1) { let e = c; while (I[e + 1] === 1) e++; land.isles.push([c * LT_CELL, (e + 1) * LT_CELL]); }
-  any = islMarkCols(I, any);                                // (the island lines' - 50-land-islands)
+  any = islMarkCols(I, any, R);                                // (the island lines' - 50-land-islands)
   if (any) ISLE = I;
 }
 function ltBands() {
@@ -40029,7 +40037,7 @@ function ltBands() {
   for (let k = 0; k < n; k++) {
     const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0);
     let lo = Infinity, hi = -Infinity;
-    for (let c = c0; c < c0 + w; c++) if (onLand(c * LT_CELL)) { const t = land.surf[c]; if (t < lo) lo = t; if (t > hi) hi = t; }
+    for (let c = c0; c < c0 + w; c++) if (onLand(c * LT_CELL)) { const t = land.surf[c], u = ISLE !== null && ISLE[c] === 2 ? Math.min(t, land.itop[c]) : t; if (u < lo) lo = u; if (t > hi) hi = t; }   // (an island in a country's water: room for its top over the ground's own)
     land.rT[k] = lo < Infinity ? Math.min(0, Math.floor((lo - LT_HEAD - LT_Y0) / LT_CELL)) : 0;
     land.rB[k] = hi + LT_SKIN <= LT_Y1 ? LT_ROWS : Math.ceil((hi + LT_DEEP_SKIN - LT_Y0) / LT_CELL);
     land.cw[k] = w; land.base[k] = tot; tot += w * (land.rB[k] - land.rT[k]);
@@ -40075,8 +40083,8 @@ function buildLand() {
   const W = WORLD_W;
   // the rock under it all: a ragged floor 50-90 units under the top, never dug through
   landShapePrep();                                          // (the LAND tab's points: their curves - 50-land-tshape)
-  isleBuild();                                              // (where the ocean floor stands out of the water, and the island lines: onLand)
-  islRootsBuild();                                          // (the islands' roots under the water - 50-land-islands)
+  isleBuild(R);                                             // (where the ocean floor stands out of the water, and the island lines: onLand)
+  islRootsBuild(R);                                         // (the islands' roots under the water - 50-land-islands)
   for (let c = 0; c < land.cols; c++) land.surf[c] = landProfile(c * LT_CELL, R);
   land.lookP = null;
   land.look = new Uint8Array(land.cols); land.sea = new Uint8Array(land.cols); land.marked = false;   // (each column's look: 1 the desert's - lookD; sea: marked SEA)
@@ -40096,9 +40104,13 @@ function buildLand() {
     // (a piece marked SEA standing out of the water: the coast's bare rock, no grass - user Oct 28, 17:12)
     const rocky = land.sea[c] && top < WATER_Y ? 1 : smoothstep(0.3, 0.6, ltMtn(x) + 0.08 * Math.sin(x / 23 + R[0])), apron = onApron(x);
     // (an island: its ground down to the water's line - under it, the sea's own floor, in the water's colour)
-    const rEnd = ISLE !== null && ISLE[c] ? Math.min(ltR1(c), Math.ceil((WATER_Y + 2 - LT_Y0) / LT_CELL)) : ltR1(c);
+    const rW = Math.ceil((WATER_Y + 2 - LT_Y0) / LT_CELL), wetIsl = ISLE !== null && ISLE[c] === 2 && inCountry(x);
+    const rEnd = ISLE !== null && ISLE[c] && !wetIsl ? Math.min(ltR1(c), rW) : ltR1(c);
+    // (an island in a country's water - a lake, a sea carved into it: its ground down to the water's line, the water under
+    // it, then the column's own ground - the lake's bed - in front, as everywhere: one column, two grounds)
     for (let r = ltR0(c), r1 = rEnd; r < r1; r++) {
       const y = LT_Y0 + r * LT_CELL;
+      if (wetIsl && y >= land.itop[c] && r < rW) { land.cell[ltIdx(c, r)] = y < land.itop[c] + ltGrassD(c) * LT_CELL && sandy < 0.35 ? M_GRASS : M_DIRT; continue; }
       if (y < top) continue;
       let m;
       if (y >= rockAt || (rocky > 0.5 && y < top + 60 + 40 * rocky)) m = M_ROCK;
