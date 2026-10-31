@@ -68,8 +68,10 @@ body {
    (tools/sw-same.mjs). */
 const SW_IN_WORKER = typeof WorkerGlobalScope !== 'undefined' && typeof self !== 'undefined' && self instanceof WorkerGlobalScope;
 // (kept only when the address asks for the worker - ?simworker=1, or =test for the tools: the text is the whole page's size)
-const SW_SRC = SW_IN_WORKER ? '' : (() => { try { return /[?&]simworker=(1|test)/.test(location.search) && document.currentScript ? document.currentScript.textContent : ''; } catch (e) { return ''; } })();
-const SW_WANT = !SW_IN_WORKER && (() => { try { return /[?&]simworker=1/.test(location.search); } catch (e) { return false; } })();
+// (Oct 31: the worker is the game's default - ?simworker=0 the page runs the game itself, as do the picture tests, __noWorker)
+const SW_OFF = (() => { try { return /[?&]simworker=0/.test(location.search) || !!window.__noWorker || /[?&]worker=0/.test(location.search); } catch (e) { return true; } })();
+const SW_SRC = SW_IN_WORKER ? '' : (() => { try { return (!SW_OFF || /[?&]simworker=(1|test)/.test(location.search)) && document.currentScript ? document.currentScript.textContent : ''; } catch (e) { return ''; } })();
+const SW_WANT = !SW_IN_WORKER && (() => { try { return /[?&]simworker=1/.test(location.search) || !SW_OFF; } catch (e) { return false; } })();
 // the stand-ins, as text run in the worker before the game (B: the page's numbers, sent in the blob)
 function swPrelude(B) {
   const touch = self.__SW_TOUCH = {};
@@ -200,6 +202,31 @@ function swFail(why) {
   SW.fail = String(why); console.error('sim worker:', SW.fail);
   if (SW.live) { SW.live = false; console.warn('sim worker: the page runs the game itself from here'); }
 }
+/* (Oct 31) THE PAGE TAKES THE GAME BACK whenever it needs the whole of it: while the worker runs the game the page's copy holds
+   only what is drawn, so whatever reads or writes the whole game here - the GAME EDITOR (it puts the game aside and builds the
+   world's start), online play (the host sends its game to the guests), a SNAPSHOT or a LOAD - holds the worker first:
+   swHold(why) loads the worker's whole tables here, holds the worker, and the page runs the game (a promise: done when the game
+   is here); swRelease(why): when nothing holds it any more, the worker takes this page's game again (swWantLive, swResync).
+   Anything new that saves, loads or sends the whole game: swHold first. */
+const SWB = { holds: new Set(), taking: null };
+function swHold(why) {
+  SWB.holds.add(why);
+  if (SWB.taking) return SWB.taking;
+  if (!SW.live) return Promise.resolve();
+  SW.live = false; SW.snaps.length = 0;
+  SWB.taking = (async () => {
+    try {
+      const s = await swAsk('tables');
+      SW.worker.postMessage({ t: 'in', hold: true });
+      SW.snaps.length = 0;
+      tablesLoad(JSON.parse(s)); computeEnv();
+      SW.liveGen = SW.gen;
+    } catch (e) { swFail(e && e.message || e); }
+    finally { SWB.taking = null; }
+  })();
+  return SWB.taking;
+}
+function swRelease(why) { SWB.holds.delete(why); }
 // the page built a new world (a round, a mode, the editor's REFRESH): the worker builds the same and takes the page's tables
 async function swResync() {
   SW.resyncing = true;
@@ -215,7 +242,8 @@ async function swResync() {
 // (Oct 31: the page opens on the menu with no world) the worker takes the game whenever one is live here and it isn't running it
 // yet - the first game picked, and any after a failure was cleared - one rule, whatever order the worker and the world are ready in
 function swWantLive() {
-  if (!SW_WANT || !SW.ready || SW.live || SW.going || SW.fail) return;
+  if (NET.role !== 'local') swHold('online'); else if (SWB.holds.has('online')) swRelease('online');
+  if (!SW_WANT || !SW.ready || SW.live || SW.going || SW.fail || SWB.holds.size || SWB.taking) return;
   SW.going = true;
   swGoLive().catch(e => swFail(e && e.message || e)).finally(() => { SW.going = false; });
 }
@@ -3168,8 +3196,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 396;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 10:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 397;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 10:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4808,8 +4836,12 @@ function edModeEnter() {
   if (!PHOTO.on) photoEnter();
   PHOTO.ed = true; PHOTO.hint = 0;
   dropAll();                                                         // (a press, a held key in the game when it opened: let go)
-  EDMODE.game = edGameSwap() ? edGameSave() : null;
-  if (EDMODE.game) { const v = { x: PHOTO.x, y: PHOTO.y, z: PHOTO.z }; loadThen(() => { builtViewW = 0; resize(); Object.assign(PHOTO, v); }); }
+  // (the game here whole first: the simulation worker held - 00-sw-boot.js swHold)
+  swHold('editor').then(() => {
+    if (!EDMODE.on) return;
+    EDMODE.game = edGameSwap() ? edGameSave() : null;
+    if (EDMODE.game) { const v = { x: PHOTO.x, y: PHOTO.y, z: PHOTO.z }; loadThen(() => { builtViewW = 0; resize(); Object.assign(PHOTO, v); }); }
+  });
 }
 function edModeExit() {
   EDMODE.on = false; PHOTO.ed = false;
@@ -4823,10 +4855,11 @@ function edModeExit() {
     cam.cut[0] = cam.cut[1] = true;                                  // (straight back to what you're in: a cut)
   };
   // (the game put aside: the world built again from the edits, and the game back in it)
-  if (G) { loadThen(() => { builtViewW = 0; resize(); edGameBack(G); camBack(); }); return; }
+  if (G) { loadThen(() => { builtViewW = 0; resize(); edGameBack(G); camBack(); swRelease('editor'); }); return; }
   // (the FLOOR and LAND tabs' edits waiting for REFRESH: built now, so the game never runs on a stale floor or land)
   terrainRefresh();                                                  // (the islands' too: the tab's one REFRESH)
   camBack();
+  swRelease('editor');
 }
 // closing it from the game (Escape, a pad's B): as its own CLOSE does
 function edModeClose() { const T = NSKY.editor.TUNE; if (T.root) T.root.hidden = true; T.open = false; edModeSync(); }
@@ -12972,6 +13005,7 @@ function tablesLoad(S) {
   for (const [t, arr] of plan) if (t.after) t.after(arr);
   for (const k in S.rng) (RNGS[k] || (RNGS[k] = {})).s = S.rng[k];
   if (S.reg) { REG.tick = S.reg.tick; REG.frame = S.reg.frame; REG.sid = S.reg.sid; }
+  if (typeof S.t === 'number') time = S.t;                  // (the game's clock with it - Oct 31: the worker taking the game, the editor putting it back)
   if (S.uid) netUid = Math.max(netUid, S.uid);
 }
 
@@ -47649,7 +47683,7 @@ function frameBody(now) {
   // is shut - photo mode, 18-zz-photo)
   edModeSync();                                                      // (the GAME EDITOR open: held, as photo mode - 18-zz-photo)
   atmoSync();                                                        // (the air's layers from the SKY EDITOR - 50-land-space.js)
-  const held_ = paused || !rotateEl.hidden || PHOTO.on || photoWorldFreeze();
+  const held_ = paused || !rotateEl.hidden || PHOTO.on || photoWorldFreeze() || !!SWB.taking;   // (SWB.taking: the game on its way back from the worker - 00-sw-boot.js swHold)
   schedFrame(!held_ && !SW.live);                                   // (the scheduler's frame count moves with the simulation only: a held page frame, or a guest's, isn't a frame of the game - Oct 30 gate)
   if (PHOTO.on) photoInput(dt); else pollPads(dt);
   swWantLive();
