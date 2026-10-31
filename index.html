@@ -3203,8 +3203,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 400;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 11:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 401;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 11:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -19717,10 +19717,12 @@ function sunAgainst(c, Xm, Ym) {
   const rx = Math.max(1, (c.maxX - c.minX) / 2), ry = Math.max(1, c.h / 2), e = Math.hypot(dx / rx, dy / ry), dist = Math.hypot(dx, dy), gap = e > 1 ? dist * (1 - 1 / e) : 0;
   const near = 1 - smoothstep(0, P.burnr ?? 2.5, gap / discR() - 1);
   const v = sunLight();   // (SUN THROUGH THE WEATHER: seen against the sun in any weather, softer under an overcast - 14-sun-moon.js)
-  return [Math.round(wide * v * 8) / 8, Math.round(near * v * 8) / 8];
+  const R = SUN_AG; R[0] = Math.round(wide * v * 8) / 8; R[1] = Math.round(near * v * 8) / 8; return R;   // (one array, read at once by its callers - Oct 31: a new one a cloud a frame was garbage)
 }
+const SUN_AG = [0, 0];
 // (a cloud's step of light, for its sprite: its side, and its glow against the sun - 12-bake.js)
-function sunStep(c, Xm, Ym) { const a = sunAgainst(c, Xm, Ym), q = Math.max(1, a[1] > 0 ? discR() / 3 : ovalW(c.lay.k) / 16), X0 = Xm - (c.minX + c.maxX) / 2; return sunSide(Xm) + (a[0] > 0 || a[1] > 0 ? '/' + Math.round((sunZ().x * W - X0) / q) + ',' + Math.round((c.y - sunZ().row * H) / q) + '/' + q.toFixed(1) : ''); }
+function sunStep(c, Xm, Ym) { const a = sunAgainst(c, Xm, Ym), q = Math.max(1, a[1] > 0 ? discR() / 3 : ovalW(c.lay.k) / 16), X0 = Xm - (c.minX + c.maxX) / 2; if (!(a[0] > 0 || a[1] > 0)) return sunSide(Xm);   // (away from the sun: the side's step alone, a number - no text made a cloud a frame, Oct 31)
+  return sunSide(Xm) + ('/' + Math.round((sunZ().x * W - X0) / q) + ',' + Math.round((c.y - sunZ().row * H) / q) + '/' + q.toFixed(1)); }
 function lightDir(c) {
   const sz = sunZ(), X0 = screenX(c), Xm = X0 + (c.minX + c.maxX) / 2, Ym = c.y - c.h / 2, sx = sz.x * W;
   // (in the lab's screen heights: HS in the game)
@@ -20454,7 +20456,22 @@ const BK_SKIP = new Set(['time', 'sea', 'wind', 'rain', 'sky', 'cover', 'big', '
 const bakeOn = () => (P.bake ?? 1) > 0 && GPU;
 // (a sprite still usable: drawn in this GL context, or an 'empty' one - the cloud gone at the new weather)
 const bkOk = s => !!s && (s.empty || (!!s.T && s.T.epoch === GLR.epoch && !!s.T.tex));
-function bkFree(s) { if (s && s.T) { s.T.free(); s.T = null; } }
+// (Oct 31: a sprite's picture back on the shelf, not given back to the GPU - a texture made and freed for each cloud baked was ~90 a
+// second in a fight, hitches on Direct3D. Pictures are in sizes rounded up to 32 pixels, so one fits many clouds; the margin is
+// clear and draws nothing. The shelf keeps up to BK_SHELF; past that a picture is freed)
+const BK_POOL = new Map(), BK_SHELF = 96; let BK_PN = 0;
+const bkSize = n => Math.ceil(n / 32) * 32;
+function bkTarget(w, h) {
+  const W = bkSize(w), H = bkSize(h), L = BK_POOL.get(W * 65536 + H);
+  if (L && L.length) { const T = L.pop(); BK_PN--; if (T.epoch === GLR.epoch && T.tex) { T.width = W; return T; } T.free(); }   // (width set: cleared, as a canvas)
+  return new GLTarget(W, H);
+}
+function bkFree(s) {
+  if (!s || !s.T) return;
+  const T = s.T; s.T = null;
+  if (BK_PN < BK_SHELF && T.epoch === GLR.epoch && T.tex) { const k = T.width * 65536 + T.height; let L = BK_POOL.get(k); if (!L) BK_POOL.set(k, L = []); L.push(T); BK_PN++; }
+  else T.free();
+}
 function bkSlot(c) { const v = c.bk || (c.bk = [{ F: null, B: null, now: 0, live: false }, { F: null, B: null, now: 0, live: false }]); return v[VI]; }
 function bakeDrop(c) { if (!c.bk) return; for (const v of c.bk) { if (v.B && v.B !== v.F) bkFree(v.B); bkFree(v.F); v.F = v.B = null; } }
 function bakeDropAll() { for (const c of clouds) bakeDrop(c); for (const b of BK) { b.cur = b.next = null; b.hard = null; } }
@@ -20657,18 +20674,18 @@ function bakeCloud(c, ax, ay) {
     }
   }
   let s;
-  if (!(x1 >= x0)) s = { empty: true, pk: c.pkNow || '' };
+  if (!(x1 >= x0)) s = { empty: true, pk: c.pkNow ?? '' };
   else {
     x0 = Math.floor(x0); y0 = Math.floor(y0); x1 = Math.ceil(x1); y1 = Math.ceil(y1);
     const w = x1 - x0 + 1, h = y1 - y0 + 1;
     // (the old sprite's picture reused when it is the right size and not on the screen any more)
-    let T = null; const spare = v.now === 2 ? v.F : v.B;
-    if (spare && spare.T && spare !== v.F && spare.T.width === w && spare.T.height === h) { T = spare.T; spare.T = null; T.width = w; }
-    if (v.now === 2 && v.F && v.F.T && v.F.T.width === w && v.F.T.height === h) { T = v.F.T; v.F.T = null; T.width = w; }
-    if (!T) T = new GLTarget(w, h);
+    let T = null; const spare = v.now === 2 ? v.F : v.B, Wb = bkSize(w), Hb = bkSize(h);
+    if (spare && spare.T && spare !== v.F && spare.T.width === Wb && spare.T.height === Hb) { T = spare.T; spare.T = null; T.width = Wb; }
+    if (v.now === 2 && v.F && v.F.T && v.F.T.width === Wb && v.F.T.height === Hb) { T = v.F.T; v.F.T = null; T.width = Wb; }
+    if (!T) T = bkTarget(w, h);
     const cx = T.getContext();
     for (const [pb, ox, oy, pal] of BKREC.ops) cx.drawPuffs(pb, ox - x0, oy - y0, pal);
-    s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID, pk: c.pkNow || '' };
+    s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID, pk: c.pkNow ?? '', w };   // (w: the picture's own width - its texture may be wider, on the shelf's sizes)
   }
   BKREC.ops.length = 0;
   if (v.now === 3) { s.sig = b.next || b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (b.next) { if (v.B && v.B !== s) bkFree(v.B); v.B = s; } }
@@ -20685,7 +20702,7 @@ function bakeDraw(c, ax, ay) {
   if (v.now) bakeCloud(c, ax, ay);
   const s = v.F;
   if (bkOk(s) && !s.empty) {
-    const per = WORLD * c.lay.zl, x = ax + s.rx, w = s.T.width;
+    const per = WORLD * c.lay.zl, x = ax + s.rx, w = s.w ?? s.T.width;
     if (per >= TW + w) DCTX.drawSprite(s, x, ay + s.ry);
     else for (let k = Math.ceil((-w - x) / per); x + k * per < TW; k++) DCTX.drawSprite(s, Math.round(x + k * per), ay + s.ry);   // (the world narrower than the view: once a repeat)
   }
@@ -22666,12 +22683,15 @@ function gsmPaint(S_, a) {
       for (const t of old) gl.deleteTexture(t.tex);
       G_.grew = (G_.grew || 0) + 1; GSM.grows = (GSM.grows || 0) + 1;   // (tests: how often the memory grew)
     }
-    G_.cur = 0; G_.tfbo = null;
+    G_.cur = 0; if (G_.tfbos) for (const T of G_.tfbos) if (T) gl.deleteFramebuffer(T.f); G_.tfbos = null;
   }
   const rowsM = G_.mem[0].h;   // (the memory's rows: room to spare - the passes run over all of them)
   const src = G_.mem[G_.cur], dst = G_.mem[1 - G_.cur];
-  if (!G_.tfbo || G_.tfbo.dst !== dst || G_.tfbo.tn !== G_.tn) { if (G_.tfbo) gl.deleteFramebuffer(G_.tfbo.f); G_.tfbo = { f: gsmFbo([dst, G_.tn]), dst, tn: G_.tn }; }
-  gl.bindFramebuffer(gl.FRAMEBUFFER, G_.tfbo.f); gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+  // (one target a side of the ping-pong, kept: Oct 31 - the side flips every frame, and a new framebuffer made and the last thrown away
+  // each time was ~45 a second of the GPU's objects made and freed, a hitch on Direct3D)
+  const TF = G_.tfbos || (G_.tfbos = [null, null]), ti = 1 - G_.cur;
+  if (!TF[ti] || TF[ti].dst !== dst || TF[ti].tn !== G_.tn || TF[ti].ep !== GLR.epoch) { if (TF[ti] && TF[ti].ep === GLR.epoch) gl.deleteFramebuffer(TF[ti].f); TF[ti] = { f: gsmFbo([dst, G_.tn]), dst, tn: G_.tn, ep: GLR.epoch }; }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, TF[ti].f); gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
   gl.viewport(0, 0, MW, rows); gl.disable(gl.SCISSOR_TEST);
   const setCommon = (pr, size) => {
     const U = pr.U; gl.uniform1i(U.u_b, 0); gl.uniform1i(U.u_g1, 3); gl.uniform1i(U.u_g2, 4); gl.uniform2i(U.u_gs, gw, gh);
@@ -24629,7 +24649,9 @@ function drawBigFoam(f, c, t) {
 // exactly once, with the strength of all the bands that cover it (q per band, stacked), so neighbouring
 // rows and bands never overlap into darker lines or part into lighter ones.
 const SH_BL = [0, 0, 0, 0], SH_BR = [0, 0, 0, 0];
-const rgbsCache = c => c.join(',');
+// (a colour's key, made once a colour - its callers pass a new array each time: Oct 31)
+const RGBK = new Map();
+const rgbsCache = c => { if ((c[0] | 0) !== c[0] || (c[1] | 0) !== c[1] || (c[2] | 0) !== c[2]) return c.join(','); const k = c[0] * 65536 + c[1] * 256 + c[2]; let v = RGBK.get(k); if (v === undefined) RGBK.set(k, v = c.join(',')); return v; };
 // A shadow is many rows, each a different depth of shade. Every row's rectangles go into a path for its
 // band count (how many of the four nested bands cover it) and shear step; each path is then filled once with
 // a vertical gradient stepped at the row edges, the same colour per row as before.
