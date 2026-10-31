@@ -3208,8 +3208,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 416;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 14:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 417;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 14:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -15852,27 +15852,29 @@ void main() {
 const GL_SHFS = `#version 300 es
 precision highp float; precision highp int;
 uniform highp isampler2D u_rows; uniform highp isampler2D u_cols; uniform sampler2D u_lut;
-uniform ivec4 u_box; uniform ivec2 u_ft;
+uniform ivec4 u_box; uniform ivec2 u_ft; uniform ivec3 u_at;
 in vec2 v_cell;
 out vec4 o;
 void main() {
   int X = int(floor(v_cell.x)), Y = int(floor(v_cell.y));   // (the box's own pixels, whatever the context's transform)
   int r = Y - u_box.y;
   if (r < 0 || r >= u_ft.y) discard;
-  ivec4 R = texelFetch(u_rows, ivec2(r, 0), 0);
+  int ri = u_at.x + r;
+  ivec4 R = texelFetch(u_rows, ivec2(ri & 2047, ri >> 11), 0);
   int x = X - R.y;
   if (x < u_box.z || x >= u_box.w) discard;
-  ivec4 c = texelFetch(u_cols, ivec2(x - u_box.z, 0), 0);
+  int ci = u_at.y + x - u_box.z;
+  ivec4 c = texelFetch(u_cols, ivec2(ci & 2047, ci >> 11), 0);
   if (Y >= u_ft.x - 1 && Y > u_ft.x - 1 - c.y) discard;
   int a = int(floor(intBitsToFloat(R.x) * intBitsToFloat(c.x) + 0.5)) & 255;
-  o = texelFetch(u_lut, ivec2(a, 0), 0);
+  o = texelFetch(u_lut, ivec2(a, u_at.z), 0);
 }`;
 function glShaftSetup() {
   const gl = GLR.gl, p = gl.createProgram();
   gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_SHFS));
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-  GLR.shprog = p; GLR.shU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_rows', 'u_cols', 'u_lut', 'u_box', 'u_ft']) GLR.shU[k] = gl.getUniformLocation(p, k);
+  GLR.shprog = p; GLR.shU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_rows', 'u_cols', 'u_lut', 'u_box', 'u_ft', 'u_at']) GLR.shU[k] = gl.getUniformLocation(p, k);
   GLR.shRing = []; GLR.shI = 0;
 }
 // (Oct 31) the premultiply-on-upload switch, set only through here and kept in GLR.pm: asking the GPU for it (gl.getParameter)
@@ -17457,35 +17459,59 @@ class GLCtx {
   }
   // (Oct 31, 60-fps chat) a far rain shaft's drops in one pass (GL_SHFS; s: sky/11-drawing.js shaftGL). Its three small
   // textures come from a ring, so a shaft's upload never waits for the draw of the one before it
-  drawShaft(sp) {
-    if (GLR.lost || !GLR.shprog || !(sp.nw > 0) || !(sp.bh > 0)) return;
-    const gl = GLR.gl, t = this.target, U = GLR.shU;
-    glBegin(this, this.s.op); glFlush();
-    glApplyState();
+  // (Oct 31) all the shafts of a layer's picture packed into three textures, uploaded once before they are laid (deckCommit): each
+  // shaft's rows, its columns, its colour's table of alphas - 2048 a texture row; a shaft then reads its own stretch (u_at). It was
+  // three uploads and a flush a shaft: ~310 uploads a frame in a storm. A ring of packs, so a pack's upload never waits on the last
+  drawShaftPack(ops, n) {
+    if (GLR.lost || !GLR.shprog) return;
+    const gl = GLR.gl, P = GLR.shP || (GLR.shP = { R: new Int32Array(0), C: new Int32Array(0), L: new Uint32Array(0), dks: new Map() });
+    let nr = 0, nc = 0, nl = 0; P.dks.clear();
+    for (let k = 0; k < n; k++) { const o = ops[k]; if (!o || o[0] !== 3) continue; const sp = o[1]; sp.ro = nr; sp.co = nc; nr += sp.bh; nc += sp.nw; let li = P.dks.get(sp.dk); if (li === undefined) { li = nl++; P.dks.set(sp.dk, li); } sp.li = li; }
+    if (!nr) return;
+    const hr = (nr + 2047) >> 11, hc = (nc + 2047) >> 11;
+    if (P.R.length < hr * 2048 * 4) P.R = new Int32Array(hr * 2048 * 8);
+    if (P.C.length < hc * 2048 * 4) P.C = new Int32Array(hc * 2048 * 8);
+    if (P.L.length < nl * 256) P.L = new Uint32Array(nl * 512);
+    for (let k = 0; k < n; k++) { const o = ops[k]; if (!o || o[0] !== 3) continue; const sp = o[1]; P.R.set(sp.rows.subarray(0, sp.bh * 4), sp.ro * 4); P.C.set(sp.cols.subarray(0, sp.nw * 4), sp.co * 4); P.L.set(sp.lut, sp.li * 256); }
+    glFlush();
     const ring = GLR.shRing, i = GLR.shI = (GLR.shI + 1) % 8;
     let T = ring[i];
-    if (!T || T.epoch !== GLR.epoch) T = ring[i] = { rows: null, rowsW: 0, cols: null, colsW: 0, lut: glNewTex(256, 1, gl.NEAREST), epoch: GLR.epoch };
-    const itex = (k, kw, need, unit, data) => {
+    if (!T || T.epoch !== GLR.epoch) T = ring[i] = { rows: null, rowsH: 0, cols: null, colsH: 0, lut: null, lutH: 0, epoch: GLR.epoch };
+    const tex = (k, kh, h, unit, ifmt, fmt, type, data) => {
       gl.activeTexture(gl.TEXTURE0 + unit);
-      if (!T[k] || T[kw] < need) {
+      const w = k === 'lut' ? 256 : 2048;
+      if (!T[k] || T[kh] < h) {
         if (T[k]) gl.deleteTexture(T[k]);
-        T[kw] = Math.max(256, need);
+        T[kh] = Math.max(h, 2);
         T[k] = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, T[k]);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32I, T[kw], 1, 0, gl.RGBA_INTEGER, gl.INT, null);
+        gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, w, T[kh], 0, fmt, type, null);
       } else gl.bindTexture(gl.TEXTURE_2D, T[k]);
       gl.bindSampler(unit, null);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, need, 1, gl.RGBA_INTEGER, gl.INT, data, 0);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, fmt, type, data, 0);
     };
     const pm = GLR.pm;
     if (pm) glPM(false);
-    itex('rows', 'rowsW', sp.bh, 13, sp.rows);
-    itex('cols', 'colsW', sp.nw, 14, sp.cols);
-    glPM(true);   // (the table as the picture's pixels were: straight, premultiplied on upload)
-    gl.activeTexture(gl.TEXTURE15); gl.bindTexture(gl.TEXTURE_2D, T.lut); gl.bindSampler(15, null);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(sp.lut.buffer, sp.lut.byteOffset, 1024));
+    tex('rows', 'rowsH', hr, 13, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.R);
+    tex('cols', 'colsH', hc, 14, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.C);
+    glPM(true);   // (the tables as the picture's pixels were: straight, premultiplied on upload)
+    tex('lut', 'lutH', nl, 15, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(P.L.buffer, 0, nl * 1024));
     if (!pm) glPM(false);
+    gl.activeTexture(gl.TEXTURE0);
+    GLR.shT = T;
+    GLR.stats.uploads += 3;
+  }
+  // a far rain shaft's drops in one pass (GL_SHFS; s: sky/11-drawing.js shaftGL), from the pack made for its layer (drawShaftPack)
+  drawShaft(sp) {
+    const T = GLR.shT;
+    if (GLR.lost || !GLR.shprog || !T || !(sp.nw > 0) || !(sp.bh > 0) || sp.ro === undefined) return;
+    const gl = GLR.gl, t = this.target, U = GLR.shU;
+    glBegin(this, this.s.op); glFlush();
+    glApplyState();
+    gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, T.rows); gl.bindSampler(13, null);
+    gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, T.cols); gl.bindSampler(14, null);
+    gl.activeTexture(gl.TEXTURE15); gl.bindTexture(gl.TEXTURE_2D, T.lut); gl.bindSampler(15, null);
     gl.activeTexture(gl.TEXTURE0);
     gl.useProgram(GLR.shprog); GLR.cur.prog = 23;
     gl.uniform1i(U.u_rows, 13); gl.uniform1i(U.u_cols, 14); gl.uniform1i(U.u_lut, 15);
@@ -17493,10 +17519,10 @@ class GLCtx {
     this._corners(sp.bx0, sp.by0, sp.bw, sp.bh);
     gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
     gl.uniform4f(U.u_cells, sp.bx0, sp.by0, sp.bx0 + sp.bw, sp.by0 + sp.bh);
-    gl.uniform4i(U.u_box, sp.bx0, sp.by0, sp.xs, sp.xe); gl.uniform2i(U.u_ft, sp.foot, sp.bh);
+    gl.uniform4i(U.u_box, sp.bx0, sp.by0, sp.xs, sp.xe); gl.uniform2i(U.u_ft, sp.foot, sp.bh); gl.uniform3i(U.u_at, sp.ro, sp.co, sp.li);
     gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    GLR.stats.draws++; GLR.stats.quads++; GLR.stats.uploads += 3;
+    GLR.stats.draws++; GLR.stats.quads++;
   }
   drawSunGL(dx, dy, dw, dh, x0, y0, x1, y1, sun, s, k, core, sky) {
     if (GLR.lost || !GLR.sprog) return;
@@ -19350,6 +19376,7 @@ function deckCommit(T) {
   if (same) { T._sigSpare = sig; FTV.dSkip = (FTV.dSkip || 0) + 1; return; }   // (the new signature's array: next frame's to fill)
   const cx = T.getContext();
   cx.clearRect(0, 0, T.width, T.height);
+  if (cx.drawShaftPack) for (let k = 0; k < DREC.nOps; k++) if (DREC.ops[k][0] === 3) { cx.drawShaftPack(DREC.ops, DREC.nOps); break; }   // (the rain shafts' numbers, all of this layer's in one upload - 40-gl.js)
   // (perf pass, Oct 29: each run of batches one draw - drawPuffsMany - not a draw a cloud)
   for (let k = 0; k < DREC.nOps;) {
     const o = DREC.ops[k];
@@ -34377,7 +34404,13 @@ function craneRelease(cr) {
 function civCraneAct(p) { const cr = crew[p].civ; if (cr && cranes.includes(cr)) craneMagnet(cr); }
 // the magnet button: down to what's under it - a box (or the stack, the deck, the water) - then: empty, it takes the box
 // there; loaded, it sets its box down there and lets go; and back up either way
-function craneMagnet(cr) { if (!cr.auto) { cr.auto = { phase: 'down' }; sound('click', gunCtl[cr.driven != null ? cr.driven : 0]); } }
+// (user Oct 31: "I should be able to press the magnet button at any time to cancel as it goes up and down") pressed again
+// on its way down, it turns back up (taking nothing, letting go of nothing: what it holds it keeps); on its way up, it goes
+// down again, as a first press does
+function craneMagnet(cr) {
+  if (!cr.auto) cr.auto = { phase: 'down' }; else cr.auto.phase = cr.auto.phase === 'down' ? 'up' : 'down';
+  sound('click', gunCtl[cr.driven != null ? cr.driven : 0]);
+}
 function craneAutoStep(cr, dn) {
   const A = cr.auto;
   if (A.phase === 'down') {
@@ -34423,9 +34456,14 @@ function stepCrane(cr, dt) {
       // (user Oct 26: "The big structure never moves, it's stable. What moves is the little arm we can move to left and
       // right... Then we have the magnet button that lowers the arm and grabs if a container is at the bottom, then
       // comes back up with it. A second press would lower, turn the magnet off and come back up.") yours: the lever
-      // slides the trolley along the girder (not while the magnet's working); the magnet button does the rest
+      // slides the trolley along the girder; the magnet button does the rest
+      // (user Oct 31: "I should be able to move the crane left and right even when it's lowering the magnet") the lever
+      // rolls it along the pier always, the magnet going down or up too - the spreader (and what it holds) with it, never
+      // below what it comes over (a stack, a ship's top: it rides up onto it)
+      const lv = clamp(cr.cin || 0, -1, 1);
+      cr.off = clamp(cr.off - cr.out * lv * 150 * dt, 0, cr.offMax); craneGeo(cr);   // (the lever rolls it along the pier)
+      if (cr.auto && lv) cr.hy = Math.max(cr.hyMin, Math.min(cr.hy, craneFloor(cr)));
       if (cr.auto) craneAutoStep(cr, dn);
-      else { cr.off = clamp(cr.off - cr.out * clamp(cr.cin || 0, -1, 1) * 150 * dt, 0, cr.offMax); craneGeo(cr); }   // (the lever rolls it along the pier)
     } else craneCpu(cr, dt, mv, dn);
     if (cr.obj) { if (magHoldable(cr.obj)) magPlace(cr.obj, cr.tx, cr.hy + 3 - MAG_H, 0, 0, 0); else cr.obj = null; }   // (a tank or a plane hanging from the spreader)
     cr.x = cr.tx; cr.y = cr.hy;                          // (where the camera looks when it's yours)
