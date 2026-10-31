@@ -2859,8 +2859,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 380;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 30 21:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 381;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 30 21:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14488,7 +14488,7 @@ function updateCamera(dt, snap) {
    ================================================================ */
 const GLR = {
   on: false, gl: null, lost: false, epoch: 0, prog: null, vao: null, vbo: null, ibo: null, tvao: null, tvbo: null,
-  MAXQ: 8192, ab: null, f32: null, u32: null, n: 0, slots: [], tris: new Float32Array(1 << 14),
+  MAXQ: 8192, QW: 27, ab: null, f32: null, u32: null, n: 0, slots: [], tris: new Float32Array(1 << 14),
   st: { tgt: null, blend: 'source-over', sc: null, clip: false, sten: 0 },     // the pending batch's state
   cur: {},                                                                       // the state GL is actually in
   near: null, lin: null, gradTex: null, gradGen: 1, gradNext: 0, gradPx: new Uint8Array(1024),
@@ -14497,20 +14497,27 @@ const GLR = {
 };
 const GLB = {};
 const GL_TEXFIX = !/[?&]texfix=0/.test(location.search);   // (the sprites' texel choice from the pixel's place - drawImage, GL_FS)                                   // blend modes: [srcRGB, dstRGB, srcA, dstA]
+// (60-fps chat, Oct 30: one record a quad, drawn instanced - its four corners picked by gl_VertexID from the same six indices
+// as before (0 1 2, 0 2 3) - instead of four vertices a quad: 27 numbers written and uploaded a quad, not 60; the same triangles)
 const GL_VS = `#version 300 es
-layout(location=0) in vec2 a_pos;
-layout(location=1) in vec2 a_uv;
-layout(location=2) in vec4 a_col;
-layout(location=3) in vec2 a_aux;
-layout(location=4) in vec4 a_mul;
-layout(location=5) in vec4 a_add;
-layout(location=6) in vec4 a_o;
-layout(location=7) in vec2 a_s;
+layout(location=0) in vec4 a_p01;
+layout(location=1) in vec4 a_p23;
+layout(location=2) in vec4 a_uv01;
+layout(location=3) in vec4 a_uv23;
+layout(location=4) in vec4 a_col;
+layout(location=5) in vec2 a_aux;
+layout(location=6) in vec4 a_mul;
+layout(location=7) in vec4 a_add;
+layout(location=8) in vec4 a_o;
+layout(location=9) in vec2 a_s;
 uniform vec2 u_size;
 out vec2 v_uv; out vec4 v_col; out vec4 v_mul; out vec4 v_add;
 flat out vec4 v_o; flat out vec2 v_s;
 flat out int v_mode; flat out int v_slot; flat out float v_row; flat out float v_k;
 void main() {
+  int c = gl_VertexID < 3 ? gl_VertexID : gl_VertexID == 3 ? 0 : gl_VertexID == 4 ? 2 : 3;   // (six vertices a quad: the triangles 0 1 2 and 0 2 3)
+  vec2 a_pos = c == 0 ? a_p01.xy : c == 1 ? a_p01.zw : c == 2 ? a_p23.xy : a_p23.zw;
+  vec2 a_uv = c == 0 ? a_uv01.xy : c == 1 ? a_uv01.zw : c == 2 ? a_uv23.xy : a_uv23.zw;
   vec2 p = a_pos / u_size;
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
   v_uv = a_uv; v_col = a_col; v_mul = a_mul; v_add = a_add; v_o = a_o; v_s = a_s;
@@ -15614,24 +15621,39 @@ function glSetup() {
   for (let i = 0; i < 8; i++) gl.uniform1i(gl.getUniformLocation(p, 'u_t' + i), i);
   gl.uniform1i(gl.getUniformLocation(p, 'u_grad'), 8);
   GLR.uSize = gl.getUniformLocation(p, 'u_size');
+  // the path passes (the stencil's winding, glDrawTris): plain triangles, positions only - their own little program, now that
+  // the quad program picks its corners by gl_VertexID
+  { const q = gl.createProgram();
+    gl.attachShader(q, glShader(gl.VERTEX_SHADER, `#version 300 es
+layout(location=0) in vec2 a_pos; uniform vec2 u_size;
+void main() { vec2 p = a_pos / u_size; gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0); }`));
+    gl.attachShader(q, glShader(gl.FRAGMENT_SHADER, `#version 300 es
+precision highp float; out vec4 o; void main() { o = vec4(0.0); }`));
+    gl.linkProgram(q);
+    if (!gl.getProgramParameter(q, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(q));
+    GLR.tprog = q; GLR.tuSize = gl.getUniformLocation(q, 'u_size'); gl.useProgram(p); }
   // the quad batch: 4 vertices a quad, 9 numbers a vertex (x, y, u, v, colour as 4 bytes, mode, k, and a tint's
   // multiply and add as 4 bytes each)
   // (engine stage 6, Oct 30: and an upright sprite's corner on the target, its texture coordinate there, and texels a pixel
   // across and down - 6 more, 15 a vertex - for the texel choice in the fragment shader; 0 texels a pixel: not used)
-  GLR.ab = new ArrayBuffer(GLR.MAXQ * 4 * 60); GLR.f32 = new Float32Array(GLR.ab); GLR.u32 = new Uint32Array(GLR.ab);
+  // (one record a quad, QW words - see GL_VS: the corners' places and texture coordinates, then the colour as 4 bytes, mode,
+  // k, the tint's multiply and add as 4 bytes each, the texel choice's corner, coordinate and texels a pixel)
+  GLR.ab = new ArrayBuffer(GLR.MAXQ * GLR.QW * 4); GLR.f32 = new Float32Array(GLR.ab); GLR.u32 = new Uint32Array(GLR.ab);
   GLR.vao = gl.createVertexArray(); gl.bindVertexArray(GLR.vao);
   GLR.vbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, GLR.vbo); gl.bufferData(gl.ARRAY_BUFFER, GLR.ab.byteLength, gl.STREAM_DRAW);
-  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 60, 0);
-  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 60, 8);
-  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, 60, 16);
-  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 60, 20);
-  gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, 60, 28);
-  gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.UNSIGNED_BYTE, true, 60, 32);
-  gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 4, gl.FLOAT, false, 60, 36);
-  gl.enableVertexAttribArray(7); gl.vertexAttribPointer(7, 2, gl.FLOAT, false, 60, 52);
-  const idx = new Uint16Array(GLR.MAXQ * 6);
-  for (let i = 0, v = 0; i < idx.length; i += 6, v += 4) { idx[i] = v; idx[i + 1] = v + 1; idx[i + 2] = v + 2; idx[i + 3] = v; idx[i + 4] = v + 2; idx[i + 5] = v + 3; }
-  GLR.ibo = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, GLR.ibo); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+  { const QB = GLR.QW * 4;
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 4, gl.FLOAT, false, QB, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, QB, 16);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, QB, 32);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 4, gl.FLOAT, false, QB, 48);
+    gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.UNSIGNED_BYTE, true, QB, 64);
+    gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 2, gl.FLOAT, false, QB, 68);
+    gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 4, gl.UNSIGNED_BYTE, true, QB, 76);
+    gl.enableVertexAttribArray(7); gl.vertexAttribPointer(7, 4, gl.UNSIGNED_BYTE, true, QB, 80);
+    gl.enableVertexAttribArray(8); gl.vertexAttribPointer(8, 4, gl.FLOAT, false, QB, 84);
+    gl.enableVertexAttribArray(9); gl.vertexAttribPointer(9, 2, gl.FLOAT, false, QB, 100);
+    for (let a = 0; a <= 9; a++) gl.vertexAttribDivisor(a, 1); }
+
   // path triangles (stencil passes): positions only
   GLR.tvao = gl.createVertexArray(); gl.bindVertexArray(GLR.tvao);
   GLR.tvbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, GLR.tvbo);
@@ -15985,14 +16007,14 @@ function glFlush() {
   if (GLR.cur.prog !== 1) { gl.useProgram(GLR.prog); GLR.cur.prog = 1; }
   if (GLR.cur.vao !== 1) { gl.bindVertexArray(GLR.vao); GLR.cur.vao = 1; }
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.vbo);
-  gl.bufferData(gl.ARRAY_BUFFER, GLR.f32, gl.STREAM_DRAW, 0, n * 60);
+  gl.bufferData(gl.ARRAY_BUFFER, GLR.f32, gl.STREAM_DRAW, 0, n * GLR.QW);
   const sl = GLR.slots;
   for (let i = 0; i < sl.length; i++) {
     if (GLR.unit[i] !== sl[i].tex) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, sl[i].tex); GLR.unit[i] = sl[i].tex; }
     const smp = sl[i].smooth ? GLR.lin : GLR.near;
     if (GLR.unitS[i] !== smp) { gl.bindSampler(i, smp); GLR.unitS[i] = smp; }
   }
-  gl.drawElements(gl.TRIANGLES, n * 6, gl.UNSIGNED_SHORT, 0);
+  gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
   GLR.stats.draws++; GLR.stats.quads += n;
   GLR.n = 0; sl.length = 0;
 }
@@ -16017,15 +16039,11 @@ function glBegin(ctx, blend) {
 function glQuad(x0, y0, x1, y1, x2, y2, x3, y3, u0, v0, u1, v1, u2, v2, u3, v3, col, aux, k, mul = 0, add = 0, ox = 0, oy = 0, ou = 0, ov = 0, su = 0, sv = 0) {
   if (GLR.n >= GLR.MAXQ) glFlush();
   const f = GLR.f32, u = GLR.u32;
-  const o = GLR.n * 60;
-  f[o] = x0; f[o + 1] = y0; f[o + 2] = u0; f[o + 3] = v0; u[o + 4] = col; f[o + 5] = aux; f[o + 6] = k; u[o + 7] = mul; u[o + 8] = add;
-  f[o + 9] = ox; f[o + 10] = oy; f[o + 11] = ou; f[o + 12] = ov; f[o + 13] = su; f[o + 14] = sv;
-  f[o + 15] = x1; f[o + 16] = y1; f[o + 17] = u1; f[o + 18] = v1; u[o + 19] = col; f[o + 20] = aux; f[o + 21] = k; u[o + 22] = mul; u[o + 23] = add;
-  f[o + 24] = ox; f[o + 25] = oy; f[o + 26] = ou; f[o + 27] = ov; f[o + 28] = su; f[o + 29] = sv;
-  f[o + 30] = x2; f[o + 31] = y2; f[o + 32] = u2; f[o + 33] = v2; u[o + 34] = col; f[o + 35] = aux; f[o + 36] = k; u[o + 37] = mul; u[o + 38] = add;
-  f[o + 39] = ox; f[o + 40] = oy; f[o + 41] = ou; f[o + 42] = ov; f[o + 43] = su; f[o + 44] = sv;
-  f[o + 45] = x3; f[o + 46] = y3; f[o + 47] = u3; f[o + 48] = v3; u[o + 49] = col; f[o + 50] = aux; f[o + 51] = k; u[o + 52] = mul; u[o + 53] = add;
-  f[o + 54] = ox; f[o + 55] = oy; f[o + 56] = ou; f[o + 57] = ov; f[o + 58] = su; f[o + 59] = sv;
+  const o = GLR.n * 27;
+  f[o] = x0; f[o + 1] = y0; f[o + 2] = x1; f[o + 3] = y1; f[o + 4] = x2; f[o + 5] = y2; f[o + 6] = x3; f[o + 7] = y3;
+  f[o + 8] = u0; f[o + 9] = v0; f[o + 10] = u1; f[o + 11] = v1; f[o + 12] = u2; f[o + 13] = v2; f[o + 14] = u3; f[o + 15] = v3;
+  u[o + 16] = col; f[o + 17] = aux; f[o + 18] = k; u[o + 19] = mul; u[o + 20] = add;
+  f[o + 21] = ox; f[o + 22] = oy; f[o + 23] = ou; f[o + 24] = ov; f[o + 25] = su; f[o + 26] = sv;
   GLR.n++;
 }
 // a quad with the context's fill style: corners in user space (ux, uy) and on the target (dx, dy)
@@ -16075,7 +16093,9 @@ function glPathTris(path) {
 function glDrawTris(tris) {
   const gl = GLR.gl;
   if (GLR.cur.vao !== 2) { gl.bindVertexArray(GLR.tvao); GLR.cur.vao = 2; }
-  if (GLR.cur.prog !== 1) { gl.useProgram(GLR.prog); GLR.cur.prog = 1; }
+  const t = GLR.st.tgt;
+  if (GLR.cur.prog !== 13) { gl.useProgram(GLR.tprog); GLR.cur.prog = 13; }
+  gl.uniform2f(GLR.tuSize, t._w, t._h);
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.tvbo);
   gl.bufferData(gl.ARRAY_BUFFER, tris, gl.STREAM_DRAW);
   gl.drawArrays(gl.TRIANGLES, 0, tris.length / 2);
