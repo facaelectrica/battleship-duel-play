@@ -282,6 +282,11 @@ on('tableAdd', () => { SW.gen++; }, 'simworker', 100);
 on('tableMove', () => { SW.gen++; }, 'simworker', 100);
 // ---- the worker's side: the game (start() done, window.__game set) answers the page's requests
 function swHostReady() {
+  // (60-fps chat, Oct 31: the smoke's air - smSolve, a third of a step in a long fight - on a core of its own again: a worker of
+  // this worker, as it was the page's before the simulation moved here (design section 9: the workers' pool, its first). Its air
+  // comes back a wake-up later, as it came a frame later on the page. Off under the test tools (navigator.webdriver: their
+  // steps are synchronous) and with ?smw=0; if it can't start, the step is done here as before - 38-smoke-worker.js)
+  try { if (!navigator.webdriver && typeof Worker !== 'undefined' && !/[?&]smw=0/.test(location.search)) SMW.on = true; } catch (e) { }
   const answer = m => {
     let v, err = null;
     try {
@@ -3219,8 +3224,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 427;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 16:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 428;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 16:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14028,14 +14033,38 @@ for (const k in SW_DRAW) {
 }
 // (5: null - folded into a number, boolean or string column as a mask of its own, z; a column of nulls alone stays plain data)
 const swKindOf = v => { const ty = typeof v; return ty === 'number' ? 1 : ty === 'boolean' ? 4 : ty === 'string' ? 2 : ty === 'undefined' || ty === 'function' ? 0 : v === null ? 5 : 3; };
+const SWK = { ks: [], kinds: [], first: [], ord: [] };
 const swKindMix = (was, kind) => was == null || was === kind ? kind : was === 5 && kind !== 3 ? kind : kind === 5 && was !== 3 ? was : 3;
 // the fields of the things in `arr` and each one's kind (1 number, 4 boolean, 2 string, 3 other or mixed); only: these fields
 function swKeysOf(arr, skip, only) {
   const n = arr.length, keys = new Map();
+  // (60-fps chat, Oct 31: the named fields, a field at a time - its kind over all the things in one pass, no table looked up a
+  // value; the fields then in the order the table would have met them (the first thing that has each, then the names' order).
+  // A long fight's trails - thousands of pieces, their points - spent ~4 ms a snapshot here)
+  if (only) {
+    const ks = SWK.ks, kinds = SWK.kinds, first = SWK.first; ks.length = kinds.length = first.length = 0;
+    let q = 0;
+    for (const k of only) {
+      let kind = null, f = -1;
+      for (let i = 0; i < n; i++) {
+        const o = arr[i]; if (!o) continue;
+        const v = o[k], ty = typeof v;
+        const kd = ty === 'number' ? 1 : ty === 'boolean' ? 4 : ty === 'string' ? 2 : ty === 'undefined' || ty === 'function' ? 0 : v === null ? 5 : 3;
+        if (!kd) continue;
+        if (f < 0) f = i;
+        kind = swKindMix(kind, kd);
+      }
+      if (f >= 0) { ks.push(k); kinds.push(kind); first.push(f * 1024 + q); }
+      q++;
+    }
+    const ord = SWK.ord; ord.length = 0; for (let j = 0; j < ks.length; j++) ord.push(j);
+    ord.sort((a, b) => first[a] - first[b]);
+    for (const j of ord) keys.set(ks[j], kinds[j]);
+    return keys;
+  }
   for (let i = 0; i < n; i++) {
     const o = arr[i]; if (!o) continue;
-    if (only) for (const k of only) { const kind = swKindOf(o[k]); if (!kind) continue; keys.set(k, swKindMix(keys.get(k), kind)); }
-    else for (const k in o) {
+    for (const k in o) {
       if (skip.has(k)) continue;
       const kind = swKindOf(o[k]);
       if (!kind) continue;
@@ -14053,8 +14082,63 @@ const SW_DERIVE = {
   smoke: { keys: ['hd0', 'hd1', 'hd2'], own: ['st'], get: (s, k) => { const st = s.st, h = st && st.last === s && st.head; return h ? h[k] : undefined; },
     put: (s, v) => { if (v[0] === undefined) s.st = undefined; else if (s.st && s.st.last === s) { const h = s.st.head; h[0] = v[0]; h[1] = v[1]; h[2] = v[2]; } else s.st = { last: s, head: v }; } },
 };
+/* (60-fps chat, Oct 31) THE SHELLS' TRAILS' COLUMNS, written straight: thousands of pieces in a long fight, each two points -
+   the general walk (each field of each thing looked up by its name) cost ~5 ms of the simulation worker a snapshot. The same
+   columns swColsOf makes for them (its fields in its order, the same kinds, masks and places): p1 and p2 as flat columns of
+   their points (x, y, age, seed; launch where a point has it), root and thin, next as a place in the list (absent: none, or a
+   piece not sent - off the views). Anything not as a trail piece always is, and it's the general walk instead (null) */
+const SWIX = new Map();
+function swTrailCols(arr, bufs) {
+  const n = arr.length; if (!n) return null;
+  const P = ['x', 'y', 'age', 'seed'];
+  const cols = side => {
+    const X = new Float64Array(n), Y = new Float64Array(n), A = new Float64Array(n), S = new Float64Array(n);
+    let L = null, LM = null, any = false;
+    for (let i = 0; i < n; i++) {
+      const q = side ? arr[i].p2 : arr[i].p1;
+      if (!q || typeof q !== 'object' || Array.isArray(q) || ArrayBuffer.isView(q) || q._uid != null) return null;
+      const x = q.x, y = q.y, a = q.age, sd = q.seed;
+      if (typeof x !== 'number' || typeof y !== 'number' || typeof a !== 'number' || typeof sd !== 'number') return null;
+      X[i] = x; Y[i] = y; A[i] = a; S[i] = sd;
+      const la = q.launch;
+      if (la !== undefined) { if (typeof la !== 'boolean') return null; if (!L) { L = new Float64Array(n); LM = new Uint8Array(n); for (let j = 0; j < i; j++) LM[j] = 1; } L[i] = la ? 1 : 0; any = true; }
+      else if (L) LM[i] = 1;
+    }
+    const c = new Int32Array(n).fill(1), N = { c, obj: true, k: P.slice(), d: [] };
+    for (const f of [X, Y, A, S]) { bufs.push(f.buffer); N.d.push({ f, m: null, z: null }); }
+    if (any) { let miss = null; for (let i = 0; i < n; i++) if (LM[i]) { miss = LM; break; } bufs.push(L.buffer); if (miss) bufs.push(miss.buffer); N.k.push('launch'); N.d.push({ b: L, m: miss, z: null }); }
+    bufs.push(c.buffer);
+    return N;
+  };
+  // (the plain fields first, checked, so nothing is half made when one isn't as it should be)
+  const R = new Float64Array(n), Tn = new Float64Array(n), ri = new Int32Array(n); let hasNext = false;
+  SWIX.clear(); for (let i = 0; i < n; i++) SWIX.set(arr[i], i);
+  for (let i = 0; i < n; i++) {
+    const o = arr[i];
+    if (typeof o.root !== 'boolean' || typeof o.thin !== 'boolean') return null;
+    R[i] = o.root ? 1 : 0; Tn[i] = o.thin ? 1 : 0;
+    const v = o.next;
+    if (v === undefined) { ri[i] = -1; continue; }
+    if (v === null) { ri[i] = -2; hasNext = true; continue; }
+    if (typeof v !== 'object') return null;
+    hasNext = true;
+    const j = SWIX.get(v);
+    if (j !== undefined) ri[i] = j;
+    else if (v.p1 && v.p2 && v._uid != null) ri[i] = -1;                // (a piece not sent: off the views)
+    else return null;
+  }
+  const bk = bufs.length;
+  const N1 = cols(0); if (!N1) { bufs.length = bk; return null; }
+  const N2 = cols(1); if (!N2) { bufs.length = bk; return null; }
+  bufs.push(R.buffer, Tn.buffer);
+  const C = { n, k: ['p1', 'p2', 'root', 'thin'], d: [{ nest: N1 }, { nest: N2 }, { b: R, m: null, z: null }, { b: Tn, m: null, z: null }] };
+  if (hasNext) { bufs.push(ri.buffer); C.k.push('next'); C.d.push({ ri }); }
+  SWIX.clear();
+  return C;
+}
 // draw: the list's drawn fields (SW_DRAWK) - a live snapshot; null: every field
-function swColsOf(t, arr, strs, sIdx, bufs, draw) {
+function swColsOf(t, arr, strs, sIdx, bufs, draw, all) {
+  if (draw && t.name === 'trails' && draw === SW_DRAWK.trails) { const C = swTrailCols(arr, bufs); if (C) return C; }
   const n = arr.length, keys = swKeysOf(arr, t.skip, draw ? draw.top : null);
   const C = { n, k: [], d: [] };
   for (const [k, kind] of keys) {
@@ -14063,15 +14147,19 @@ function swColsOf(t, arr, strs, sIdx, bufs, draw) {
     if (nest) { C.k.push(k); C.d.push({ nest }); continue; }
     // (a thing of the same list - a puff's prev, a trail's next - goes as its place in the list; another table's thing as its id)
     const idx = C.idx || (C.idx = new Map(arr.map((o, i) => [o, i])));
+    // (Oct 31, 60-fps chat: a thing of the same list that isn't sent - out of the page's views - goes as absent, as if it had none:
+    // the page draws only what is near its views, and what it would point to is off them. It went as a whole plain copy of that
+    // thing, a column of them, every snapshot)
+    const outs = all && all !== arr ? (C.outs || (C.outs = new Set(all))) : null;
     // (a field that is only ever a thing of this list, null or absent: one Int32 column of places, -1 none, -2 null)
     { let ok = true; const ri = new Int32Array(n);
-      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (v === undefined) ri[i] = -1; else if (v === null) ri[i] = -2; else if (v && typeof v === 'object' && idx.has(v)) ri[i] = idx.get(v); else { ok = false; break; } }
+      for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; if (v === undefined) ri[i] = -1; else if (v === null) ri[i] = -2; else if (v && typeof v === 'object' && idx.has(v)) ri[i] = idx.get(v); else if (outs && outs.has(v)) ri[i] = -1; else { ok = false; break; } }
       if (ok) { bufs.push(ri.buffer); C.k.push(k); C.d.push({ ri }); continue; } }
     const vals = new Array(n);
     for (let i = 0; i < n; i++) { const o = arr[i], v = o ? o[k] : undefined; vals[i] = v === undefined ? undefined : v && typeof v === 'object' && idx.has(v) ? { ri: idx.get(v) } : tblPlain(v, t.depth, t.skip, false); }
     C.k.push(k); C.d.push({ j: vals });
   }
-  delete C.idx;
+  delete C.idx; delete C.outs;
   const dv = t.name && SW_DERIVE[t.name];
   if (dv) dv.keys.forEach((k, j) => {
     const col = new Float64Array(n); let miss = null;
@@ -14334,10 +14422,13 @@ function swInView(arr, full) {
   const out = [];
   for (const o of arr) {
     if (!o) continue;
-    const x = o.x;
+    let x = o.x, x2 = x;
+    // (a row whose place is its two points - a shell's trail piece, p1 to p2: thousands of them in a long fight, every one sent
+    // every snapshot, Oct 31)
+    if (typeof x !== 'number' && o.p1 && o.p2 && typeof o.p1.x === 'number' && typeof o.p2.x === 'number') { x = Math.min(o.p1.x, o.p2.x); x2 = Math.max(o.p1.x, o.p2.x); }
     if (typeof x !== 'number') { out.push(o); continue; }
     const r = (typeof o.r === 'number' ? Math.abs(o.r) : 0) + SW_MARGIN;
-    for (let i = 0; i < sp.length; i += 2) if (x + r >= sp[i] && x - r <= sp[i + 1]) { out.push(o); break; }
+    for (let i = 0; i < sp.length; i += 2) if (x2 + r >= sp[i] && x - r <= sp[i + 1]) { out.push(o); break; }
   }
   return out;
 }
@@ -14349,7 +14440,7 @@ function swSnapshot(full, drawn = !full) {
   for (const k in TABLES) {
     if (SW_LOCAL.has(k)) continue;
     const tk = performance.now();
-    if (SW_COLS.has(k)) { cols[k] = swColsOf(TABLES[k], swInView(TABLES[k].list(), full), strs, sIdx, bufs, drawn ? SW_DRAWK[k] : null); SWS.tms[k] = performance.now() - tk; continue; }
+    if (SW_COLS.has(k)) { { const all = TABLES[k].list(); cols[k] = swColsOf(TABLES[k], swInView(all, full), strs, sIdx, bufs, drawn ? SW_DRAWK[k] : null, all); } SWS.tms[k] = performance.now() - tk; continue; }
     if (k === 'water' || k === 'dockCalm') continue;                   // (their arrays: below, swArraysOf)
     const t = TABLES[k], arr = t.list(), had = SWS.rows[k] || (SWS.rows[k] = new Map()), here = new Set(), ch = [];
     const cu = [], ci = [], cv = [], co = [];                           // (changed leaves: the row, the leaf, the number or the other value)
@@ -14398,7 +14489,7 @@ function swSnapshot(full, drawn = !full) {
     parts.push(JSON.stringify(k) + ':{' + p.join(',') + '}'); SWS.by[k] = parts[parts.length - 1].length;
   }
   const txt = '{"t":' + JSON.stringify(time) + ',"tick":' + REG.tick + ',"T":{' + parts.join(',') + '}}';
-  for (const k in SW_EXTRA) cols['+' + k] = swColsOf(SW_EXTRA_T, swInView(SW_EXTRA[k](), full), strs, sIdx, bufs, drawn ? SW_DRAWK[k] : null);
+  for (const k in SW_EXTRA) { const all = SW_EXTRA[k](); cols['+' + k] = swColsOf(SW_EXTRA_T, swInView(all, full), strs, sIdx, bufs, drawn ? SW_DRAWK[k] : null, all); }
   const arrays = swArraysOf(bufs, full);
   let colB = 0; for (const b of bufs) colB += b.byteLength;
   SWS.ms += (performance.now() - t0 - SWS.ms) * 0.1; SWS.bytes += (txt.length + colB - SWS.bytes) * 0.1; SWS.colBytes = colB; SWS.n++;
@@ -15321,7 +15412,10 @@ function smwStep(dt, SPANS) {
     SMW.g = SG.u; SMW.busy = false; SMW.seq++; SMW.imp.length = 0;
     SMW.w.postMessage({ init: 1, nx: SG.nx, ny: SG.ny, cell: SG.cell, top: SG.top });
   }
-  if (SMW.busy) { SMW.late++; return true; }          // (still on the last one: this frame the puffs ride the air they have)
+  // (still on the last one: this frame the puffs ride the air they have - and the air keeps the time it missed, for its next step:
+  // in the simulation worker several steps go by between its answers, Oct 31)
+  if (SMW.busy) { SMW.late++; SMW.owed = (SMW.owed || 0) + dt; return true; }
+  dt = Math.min(1 / 30, dt + (SMW.owed || 0)); SMW.owed = 0;
   const { nx, ny, cell, dens } = SG;
   let cells = 0; for (const [a, b] of SPANS) cells += (b - a + 1) * ny;
   const S = new Int32Array(SPANS.length * 2), D = new Float32Array(cells), W = new Float64Array(ny);
@@ -23860,7 +23954,10 @@ function smearAir(a, vx, vy, sp, dt) {
     }
   };
   for (const s of smoke) if (!(s.src === 'smear' && s.age < 1.2) && s.age > 0.5) touch(s, s.r, true);
-  for (const t of trails) { if (t.p2.age > 0.8) touch(t.p2, trailR(t.p2.age)); if (t.root && t.p1.age > 0.8) touch(t.p1, trailR(t.p1.age)); }
+  // (Oct 31, 60-fps chat: a point plainly out of reach is passed by before its size is worked out - trailR is never more than
+  // 11 + age / 5 - the same points touched; thousands of trail pieces in a long fight, for every plane, every step)
+  const far = q => { const m = R + (11 + q.age * 0.2) * 0.6 + 1, dx = q.x - x, dy = q.y - y; return dx > m || dx < -m || dy > m || dy < -m; };
+  for (const t of trails) { if (t.p2.age > 0.8 && !far(t.p2)) touch(t.p2, trailR(t.p2.age)); if (t.root && t.p1.age > 0.8 && !far(t.p1)) touch(t.p1, trailR(t.p1.age)); }
   // while it is in the smoke, a streak of it comes out behind (as many puffs as the smoke there is thick)
   const g = gIdx(x, y), dens = g >= 0 ? SG.dens[g] : 0;
   if (near && dens > 0.15) {
@@ -27991,21 +28088,36 @@ const trailLate = age => age <= TRAIL_HOLD ? 1 : 1 - smoothstep(TRAIL_HOLD, TRAI
 const trlR = sysRng('trails');
 defTable('trails', () => trails, { net: false, after: arr => { for (const t of arr) if (t.next) t.next.p1 = t.p2; } });
 // once per frame (not every physics step): the trail slowly spreads, rises a little and drifts
+const TRSX = [], TRSI = [], TRSC = [];
 function stepTrails(dt) {
   // the trail slowly spreads, rises a little and is carried off by the wind (each point by the wind at its own height)
+  // (windAt's gust - the same for every point this step - worked out once: the same numbers, Oct 31)
+  const WG = E.windU * (1 + 0.25 * Math.sin(time * 0.31) + 0.15 * Math.sin(time * 1.13 + 2));
   const move = p => {
       p.age += dt;
-      p.vx += (windAt(p.y) * 0.7 + Math.sin(p.age * 0.4 + p.seed) * 2 - p.vx) * 0.5 * dt;
+      p.vx += (WG * (0.45 + 0.55 * clamp((WATER_Y - p.y) / 500, 0, 1.6)) * 0.7 + Math.sin(p.age * 0.4 + p.seed) * 2 - p.vx) * 0.5 * dt;
       p.vy += (-1.6 + Math.sin(p.age * 0.3 + p.seed * 1.7) * 1.2 - p.vy) * 0.5 * dt;
       p.x += p.vx * dt; p.y += p.vy * dt;
   };
   // a shell flying through an old trail punches through it: the smoke near its path is shoved aside and
   // dragged along a little, then settles back to drifting on the wind
   const R = 16;
+  // (60-fps chat, Oct 31: a long fight's thousands of pieces each asked every shell in the air - ~80 in the heavy battle, half a
+  // million questions a step. The shells in the air now sorted by x once a step: a piece asks only those within reach of its x,
+  // a whole unit to spare, in the shells' own order - the same shells, the same sums, in the same order)
+  const SX = TRSX, SI = TRSI; SI.length = 0;
+  for (let i = 0; i < shells.length; i++) if (!shells[i].under) SI.push(i);
+  SI.sort((a, b) => shells[a].x - shells[b].x || a - b);
+  SX.length = SI.length; for (let j = 0; j < SI.length; j++) SX[j] = shells[SI[j]].x;
+  const CAND = TRSC;
   const shove = q => {
     if (q.age < 0.8) return;                                         // not the trail it's laying right now
-    for (const s of shells) {
-      if (s.under) continue;
+    const xa = q.x - R - 1, xb = q.x + R + 1;
+    let lo = 0, hi = SX.length; while (lo < hi) { const m = (lo + hi) >> 1; if (SX[m] < xa) lo = m + 1; else hi = m; }
+    CAND.length = 0; for (let j = lo; j < SX.length && SX[j] <= xb; j++) CAND.push(SI[j]);
+    if (CAND.length > 1) CAND.sort((a, b) => a - b);
+    for (let c = 0; c < CAND.length; c++) {
+      const s = shells[CAND[c]];
       const dx = q.x - s.x, dy = q.y - s.y;
       if (dx > R || dx < -R || dy > R || dy < -R) continue;
       const d = Math.hypot(dx, dy) || 1, f = 1 - d / R;
