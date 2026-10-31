@@ -2502,7 +2502,7 @@ const FONT = {
   // (for the keyboard's keys and the controls screens, Oct 24 night)
   ',': ['00', '00', '00', '01', '10'], ';': ['00', '01', '00', '01', '10'], "'": ['1', '1', '0', '0', '0'],
   '/': ['001', '001', '010', '100', '100'], '\\': ['100', '100', '010', '001', '001'],
-  '[': ['11', '10', '10', '10', '11'], ']': ['11', '01', '01', '01', '11'], '=': ['000', '111', '000', '111', '000'],
+  '[': ['11', '10', '10', '10', '11'], ']': ['11', '01', '01', '01', '11'], '=': ['000', '111', '000', '111', '000'], '?': ['110', '001', '010', '000', '010'], '(': ['01', '10', '10', '10', '01'], ')': ['10', '01', '01', '01', '10'], '!': ['1', '1', '1', '0', '1'],   // (? and !: STORY's purchase question)
 };
 function textWidth(str) { let w = 0; for (const ch of str) w += (ch === ' ' ? 2 : (FONT[ch] ? FONT[ch][0].length : 3)) + 1; return Math.max(0, w - 1); }
 function textCanvas(str, col) {
@@ -3208,8 +3208,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 414;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 13:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 415;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 13:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -46411,19 +46411,57 @@ function storyDots() {
   if (c.mode !== 'dock') return [];
   const here = storyAt(); if (!here) return [];
   const L = storyLinks(here).map(o => Object.assign(at(o.x, strBox(o).top - 30), { act: 'storyGo', id: o.id }));
-  for (const j of storyVehs()) if (j.own && j.berth === here.id && j.driven == null) L.push(Object.assign(at(j.x, j.y - storyBoatSize(j)[1] - 20), { act: 'storyBoard', id: j.sid }));
+  for (const j of storyVehs()) if (j.berth === here.id && j.driven == null) L.push(Object.assign(at(j.x, j.y - storyBoatSize(j)[1] - 20), j.own ? { act: 'storyBoard', id: j.sid } : { act: 'storyAsk', id: j.sid, price: j.price }));   // (for sale: its dot asks - storyAsk)
   return L;
+}
+/* ---- buying (user Oct 31 13:17: "when you have the dot to select the vehicle, if you select it, it should show the price.
+   And then on the whole screen, it says, do you want to purchase? Yes or no. If you don't have enough money, it says
+   insufficient funds"). A vehicle for sale at the structure you're at has a dot like your own, its price beside it;
+   pressing it darkens the whole screen with the question - YES (Enter) buys it (act storyBuy: the coins paid, it's yours,
+   its dot now takes you aboard), NO (Esc) closes it; short of coins, INSUFFICIENT FUNDS and OK. The question is this
+   screen's own (storyQ), the purchase a command like the rest. ---- */
+let storyQ = null;                                       // ({ sid, lab, price } while the question's up)
+function storyBuy(p, sid) {
+  const v = storyVehs().find(j => j.sid === sid); if (!v || !STORY || v.own || v.berth !== story.at || story.coins < v.price) return;
+  story.coins -= v.price; v.own = true;
+  sound('click', gunCtl[p]);
+}
+ACTS.storyBuy = (p, sid) => storyBuy(p, sid);
+// the question's box and buttons, in CSS pixels
+function storyQLayout() {
+  const W = window.innerWidth, H = window.innerHeight, bw = Math.min(420, W - 32), bh = 190, x = (W - bw) / 2, y = (H - bh) / 2;
+  const broke = storyQ && story.coins < storyQ.price, b = (k, i, n) => ({ k, w: 120, h: 44, x: W / 2 + (i - (n - 1) / 2) * 140 - 60, y: y + bh - 62 });
+  return { W, H, x, y, w: bw, h: bh, broke, btn: broke ? [b('no', 0, 1)] : [b('yes', 0, 2), b('no', 1, 2)] };
+}
+function storyAnswer(yes) {
+  const q = storyQ; storyQ = null; if (!q || !yes || story.coins < q.price) return;
+  act(0, 'storyBuy', q.sid);
 }
 window.addEventListener('pointerdown', ev => {
   if (!STORY || ui.title || NSKY.editor.TUNE.open || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
-  const r = ev.pointerType === 'touch' ? 34 : 22, d = storyDots().find(q => Math.hypot(ev.clientX - q.cx, ev.clientY - q.cy) < r);
+  if (storyQ) {                                          // (the question takes every press while it's up)
+    const Lq = storyQLayout(), b = Lq.btn.find(q => ev.clientX >= q.x && ev.clientX <= q.x + q.w && ev.clientY >= q.y && ev.clientY <= q.y + q.h);
+    if (b) storyAnswer(b.k === 'yes');
+    ev.stopImmediatePropagation(); ev.preventDefault(); return;
+  }
+  const r = ev.pointerType === 'touch' ? 34 : 22, dd = q => Math.hypot(ev.clientX - q.cx, ev.clientY - q.cy);
+  const d = storyDots().filter(q => dd(q) < r).sort((a, b) => dd(a) - dd(b))[0];   // (the nearest: boats side by side have their dots close together)
   if (!d) return;
-  act(0, d.act, d.id); ev.stopImmediatePropagation(); ev.preventDefault();
+  if (d.act === 'storyAsk') { const v = storyVehs().find(j => j.sid === d.id); if (v) { storyQ = { sid: v.sid, lab: (STR_VEHS[v.sv] || { lab: 'VEHICLE' }).lab, price: v.price }; sound('click', 0); } }
+  else act(0, d.act, d.id);
+  ev.stopImmediatePropagation(); ev.preventDefault();
 }, { capture: true, passive: false });
+window.addEventListener('keydown', ev => {
+  if (!storyQ) return;
+  if (ev.code === 'Enter' || ev.code === 'NumpadEnter' || ev.code === 'KeyY') storyAnswer(!(story.coins < storyQ.price));
+  else if (ev.code === 'Escape' || ev.code === 'KeyN' || ev.code === 'Backspace') storyAnswer(false);
+  else return;
+  ev.stopImmediatePropagation(); ev.preventDefault();
+}, { capture: true });
 function stepStory(dt) { }                               // (the days are the clock's: nothing of its own to step yet)
 function storyTidy() { }
 function spawnWave() { }
-window.__story = story; window.__storyDots = () => storyDots();                                   // (tools)                                 // (gone with the waves; kept by name for the tools' hook)
+window.__story = story; window.__storyDots = () => storyDots(); window.__storyQ = () => storyQ;                                   // (tools)                                 // (gone with the waves; kept by name for the tools' hook)
 // the day, top-left; the coins, top-right under the version and frame rate (each its own ink shadow)
 const STORY_COIN = ['..###..', '.#ooo#.', '#oo#oo#', '#o#o#o#', '#oo#oo#', '.#ooo#.', '..###..'];
 function drawStoryBanner() {
@@ -46434,7 +46472,26 @@ function drawStoryBanner() {
     const [x, yy] = toUI(q.cx, q.cy), rr = Math.round(5 + 3 * pulse);
     ug.fillStyle = 'rgba(4,7,15,0.8)'; ug.beginPath(); ug.arc(x, yy, rr + 2, 0, Math.PI * 2); ug.fill();
     ug.fillStyle = `rgba(255,255,255,${(0.75 + 0.25 * pulse).toFixed(2)})`; ug.beginPath(); ug.arc(x, yy, rr, 0, Math.PI * 2); ug.fill();
+    if (q.price != null) { const t = q.price + ' C'; drawText(ug, t, x + 13, yy - 4, '#04070f', 2); drawText(ug, t, x + 12, yy - 5, '#ffd23a', 2); }   // (for sale: its price)
   }
+  if (!storyQ) return storyBannerTop();
+  storyBannerTop();
+  // the question, over the whole screen
+  const Lq = storyQLayout(), [X0, Y0] = toUI(0, 0), [X1, Y1] = toUI(Lq.W, Lq.H), k = (X1 - X0) / Lq.W;
+  ug.fillStyle = 'rgba(4,7,15,0.72)'; ug.fillRect(X0, Y0, X1 - X0, Y1 - Y0);
+  const [bx, by] = toUI(Lq.x, Lq.y), bw = Lq.w * k, bh = Lq.h * k, cx = bx + bw / 2, s = Math.max(2, Math.round(2 * k));
+  ug.fillStyle = '#121a2a'; ug.fillRect(bx, by, bw, bh); ug.fillStyle = '#ffd23a'; ug.fillRect(bx, by, bw, 2 * k); ug.fillRect(bx, by + bh - 2 * k, bw, 2 * k); ug.fillRect(bx, by, 2 * k, bh); ug.fillRect(bx + bw - 2 * k, by, 2 * k, bh);
+  drawText(ug, storyQ.lab, cx, by + 22 * k, '#ffffff', s, 'center');
+  drawText(ug, storyQ.price + ' COINS', cx, by + 50 * k, '#ffd23a', s, 'center');
+  if (Lq.broke) drawText(ug, 'INSUFFICIENT FUNDS', cx, by + 82 * k, '#ff6a5a', s, 'center');
+  else drawText(ug, 'DO YOU WANT TO PURCHASE?', cx, by + 82 * k, '#d8dce8', s, 'center');
+  for (const b of Lq.btn) {
+    const [x, y] = toUI(b.x, b.y), w = b.w * k, h = b.h * k, lab = b.k === 'yes' ? 'YES' : Lq.broke ? 'OK' : 'NO';
+    ug.fillStyle = b.k === 'yes' ? '#2f8a4a' : '#3a4560'; ug.fillRect(x, y, w, h);
+    drawText(ug, lab, x + w / 2, y + h / 2 - 5 * s / 2, '#ffffff', s, 'center');
+  }
+}
+function storyBannerTop() {
   const y = hudTop() + 12, k = 3, day = 'DAY ' + (W.day || 1);
   drawText(ug, day, 17, y + 1, '#04070f', 2); drawText(ug, day, 16, y, '#ffffff', 2);
   const coins = String(story.coins), x = uvw - 16, cy = y + 24, w = textWidth(coins) * 2;
