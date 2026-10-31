@@ -20,6 +20,7 @@ window.__liveRun = async (world = 'battle', secs = 20) => {
     };
     __fly(0); __fly(1); self.__n = 0; self.__mid = mid; return 1;`;
   new Function('g', 'T', S)(g, g.swT); await g.sw.run(S);
+  if (secs < 0) return S;   // (the set-up alone: __liveBare)
   const acc = {}; let nf = 0, on = true; const t0 = performance.now();
   const samp = () => { if (!on) return; if (performance.now() - t0 > 4000) { nf++; const P = g.perfNow().parts || {}; for (const k in P) acc[k] = (acc[k] || 0) + P[k]; } requestAnimationFrame(samp); };
   requestAnimationFrame(samp);
@@ -63,4 +64,20 @@ window.__gpuByProg = () => {
   const poll = () => { while (pend.length && gl.getQueryParameter(pend[0][0], gl.QUERY_RESULT_AVAILABLE)) { const [qq, t] = pend.shift(); if (!gl.getParameter(ext.GPU_DISJOINT_EXT)) acc[t] = (acc[t] || 0) + gl.getQueryParameter(qq, gl.QUERY_RESULT) / 1e6; gl.deleteQuery(qq); } if (on) { frames++; requestAnimationFrame(poll); } };
   requestAnimationFrame(poll);
   return { stop: () => { on = false; return Object.fromEntries(Object.entries(acc).map(([k, v]) => [k, +(v / frames).toFixed(2)]).filter(([k, v]) => v >= 0.1).sort((a, b) => b[1] - a[1])); } };
+};
+
+// the same fight with nothing of the tool's own in the frames: the shooting from a timer, only the frames' lengths kept
+window.__liveBare = async (world = 'battle', secs = 8, settle = 8) => {
+  const g = __game, w = ms => new Promise(r => setTimeout(r, ms));
+  await __liveRun(world, -1);
+  const src = await (await fetch('https://rawcdn.githack.com/facaelectrica/battleship-duel-play/37ae8ffa481c0f8a9c90e43f4188f03e8a3ec42f/t/sw-check.js')).text();
+  const shoot = src.slice(src.indexOf('const SHOOT = `') + 15, src.indexOf('`;', src.indexOf('const SHOOT = `')));
+  g.paused = false; g.hold = false; await g.sw.live();
+  const iv = setInterval(() => g.sw.run('for (let k = 0; k < 1; k++) { ' + shoot + ' } return 1;').catch(() => { }), 500);
+  await w(settle * 1000);
+  const d = []; let prev = performance.now(); const t0 = prev;
+  await new Promise(res => { const f = () => { const now = performance.now(); d.push(now - prev); prev = now; if (now - t0 < secs * 1000) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
+  clearInterval(iv);
+  const s = d.slice().sort((a, b) => a - b), q = p => +s[Math.floor(p * (s.length - 1))].toFixed(1);
+  return { fps: +(d.length / secs).toFixed(1), p10: q(0.1), p50: q(0.5), p90: q(0.9), p99: q(0.99), max: q(1), over20: d.filter(x => x > 20).length, n: d.length };
 };
