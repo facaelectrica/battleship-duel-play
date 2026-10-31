@@ -2540,6 +2540,25 @@ function driveCmd(p, idx) {
   else if (v.gate === 'out' && dir === d.dir) bringIn(v);
   else if (v.auto === 'home' && dir !== d.dir) v.auto = null;
 }
+/* Hold to drive (user Oct 31, the Story spec: "All vehicle acceleration uses press-and-hold input rather than a toggle. To
+   stop, release the forward control. Planes keep moving forward"; "Remove the Stop button"): one rule for every vehicle and
+   every input - the touch buttons, the keys, the pad's stick. Held: full ahead that way (it turns round); let go: it stops.
+   A plane only turns round on a push and flies on when let go. The minisub was already held (msHold). */
+// what pushing left (-1) or right (1) does in what p is in
+function drivePush(p, d) {
+  const c = crew[p], m = c.mode;
+  if (msOf(p)) { msHold[p] = d; return; }
+  if (m === 'civ' && c.civ && civLever(c.civ)) { act(p, 'planeDir', d); return; }   // (a civilian boat, ship, balloon, helicopter, sub: its lever)
+  if (m === 'plane' || m === 'civ') { act(p, 'planeDir', d); return; }           // (anything flying as a plane: it turns round)
+  if (m === 'ship' || m === 'sub' || m === 'sail' || m === 'tank' || m === 'heli') act(p, 'drive', d < 0 ? 0 : 6);
+}
+// let go: whatever drives on its own power stops; a plane flies on
+function driveRelease(p) {
+  const c = crew[p], m = c.mode;
+  if (msOf(p)) { msHold[p] = 0; return; }
+  if (m === 'civ' && c.civ && civLever(c.civ)) { act(p, 'planeDir', 0); return; }
+  if (m === 'ship' || m === 'sub' || m === 'sail' || m === 'tank' || m === 'heli') { if (telegraphs[p].idx !== 3) act(p, 'drive', 3); }
+}
 // pressing the button of a vehicle that's on its way home: it turns round and goes back out at once
 function comeBackOut(p, k) {
   const t = telegraphs[p];
@@ -2797,7 +2816,7 @@ const vehOf = (p, k) => k === 'ship' ? ships[p] : k === 'sub' ? subs[p] : k === 
 const vehHoming = (p, k) => { const v = vehOf(p, k); return !!v && (v.auto === 'home' || v.gate === 'in'); };
 const vehInside = (p, k) => { const v = vehOf(p, k); return !!v && (v.moored === true || v.state === 'docked'); };
 // one house button: for the boat you're in, unless she's already home or on her way
-const canSendHome = (p, k) => !TEST && stopPref && k !== 'tower' && crew[p].mode === k && canTake(p, k) && !vehInside(p, k) && !vehHoming(p, k);
+const canSendHome = (p, k) => !TEST && OWM && k !== 'tower' && crew[p].mode === k && canTake(p, k) && !vehInside(p, k) && !vehHoming(p, k);
 function pressSwitcher(hit) { act(hit.p, hit.home ? 'home' : 'switch', hit.k); }
 // the house key: the boat you're in heads home
 function pressHome(p) { const m = crew[p].mode; if (m === 'ship' || m === 'sub' || m === 'plane') pressSwitcher({ p, k: m, home: true }); }
@@ -3134,7 +3153,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 384;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 08:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 31 08:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -3575,7 +3594,7 @@ function prepHudArt() {
 // what the vehicle you're in has: the drive buttons, rise and dive, aim and power, and its weapons
 function hudKit(p) {
   const m = crew[p].mode;
-  const home = !TEST && stopPref;                    // (with the boats carrying on, you sail them home yourself)
+  const home = !TEST && OWM;                         // (BATTLE and OPEN WORLD: the army's vehicles sent back to their hangar - user Oct 31)
   if (m === 'ship') return { drive: true, home, dive: false, aim: true, weapons: ['mg', 'shell', 'dc', 'smoke'] };
   if (m === 'sub') return { drive: true, home, dive: true, aim: true, noPower: true, weapons: ['torp', 'light', 'mine'] };   // (the mine: user Oct 24 night; the light in the vertical torpedo's place, with the ANGLE tape for it - user Oct 29)
   if (m === 'tower') return { drive: false, home: false, dive: false, aim: true, weapons: ['mg', 'shell'] };
@@ -3584,7 +3603,7 @@ function hudKit(p) {
   if (m === 'tank') return { drive: true, home: false, dive: false, aim: true, weapons: ['mg', 'shell', 'smoke'] };       // (LAND TEST)
   if (m === 'heli') return { drive: true, home: false, dive: true, aim: true, weapons: ['mg', 'rocket', 'magnet'] };   // (its magnet green, after its guns - user Oct 27)
   // (user Oct 27, 13:49: every vehicle's own buttons green, on the right, in its weapon row - no red button: civWeapons)
-  if (m === 'civ') { const v = crew[p].civ, k = v ? civClass(v) : null; return { drive: true, home: false, noStop: k === 'sub', noPower: k === 'sub', dive: k === 'air' || k === 'balloon' || k === 'heli' || k === 'sub' || (k === 'shuttle' && v.state !== 'pad' && v.state !== 'count' && v.state !== 'climb') || k === 'orb' || k === 'seaplane' || k === 'blimp', aim: k === 'sub' || isFireHeli(v), weapons: civWeapons(v) }; }   // (the fire helicopter: ANGLE and POWER, its water on the green button; the minisub: the angle of its light)
+  if (m === 'civ') { const v = crew[p].civ, k = v ? civClass(v) : null; return { drive: true, home: false, noPower: k === 'sub', dive: k === 'air' || k === 'balloon' || k === 'heli' || k === 'sub' || (k === 'shuttle' && v.state !== 'pad' && v.state !== 'count' && v.state !== 'climb') || k === 'orb' || k === 'seaplane' || k === 'blimp', aim: k === 'sub' || isFireHeli(v), weapons: civWeapons(v) }; }   // (the fire helicopter: ANGLE and POWER, its water on the green button; the minisub: the angle of its light)
   return null;
 }
 function hudLayout(p) {
@@ -3607,7 +3626,7 @@ function hudLayout(p) {
     const at = (dx, dy) => [L + (dx - 95) * u, B + (dy - 853) * u];
     if (kit.home) put('home', 'home', ...at(126.5, 686.5));
     if (kit.dive) { put('up', 'up', ...at(201, 685.5)); put('down', 'down', ...at(201, 823)); }
-    if (kit.drive) { put('left', 'left', ...at(126.5, 757.5)); if (!kit.noStop) put('stop', 'stop', ...at(200, 757.5)); put('right', 'right', ...at(273.5, 757.5)); }
+    if (kit.drive) { put('left', 'left', ...at(126.5, 757.5)); put('right', 'right', ...at(273.5, 757.5)); }   // (no STOP: let go and it stops - user Oct 31)
     if (kit.aim) { put('dial', 'dial', Rc, B + (685 - 853) * u); if (!kit.noPower) put('power', 'power', Rc, B + (760 - 853) * u); }   // (the minisub: the angle only - its light, user Oct 27)
     // fixed slots, the same order in everything: the machine gun (the sub's torpedo), the missile, the depth charge
     // (the battleship's four - with the smoke screen - sit half a slot further left, to fit)
@@ -4270,12 +4289,7 @@ function hudPressAt(hit, ux) {
   if (it.veh) { pr[it.id] = 0.15; act(p, 'switch', it.veh); return null; }
   if (it.id === 'home') { pr.home = 0.15; act(p, 'home', m); return null; }
   if (it.id === 'water') { pr.water = 0.15; act(p, 'water'); return null; }
-  if (it.id === 'left' || it.id === 'stop' || it.id === 'right') {
-    if (msOf(p) && it.id !== 'stop') { pr[it.id] = 0.15; msHold[p] = it.id === 'left' ? -1 : 1; return { kind: 'msdir', p }; }   // (the minisub: held, user Oct 27)
-    if (m === 'plane' || m === 'civ') { pr[it.id] = 0.15; act(p, 'planeDir', it.id === 'left' ? -1 : it.id === 'stop' ? 0 : 1); return null; }
-    if (m !== 'ship' && m !== 'sub' && m !== 'sail' && m !== 'tank' && m !== 'heli') return null;   // (LAND TEST's tank and helicopter too: user Oct 25)
-    pr[it.id] = 0.15; act(p, 'drive', it.id === 'left' ? 0 : it.id === 'stop' ? 3 : 6); return null;
-  }
+  if (it.id === 'left' || it.id === 'right') { pr[it.id] = 0.15; drivePush(p, it.id === 'left' ? -1 : 1); return { kind: 'drivehold', p }; }   // (held: hold to drive - 12-drive-and-aim)
   if (it.id === 'up' || it.id === 'down') { diveHold[p] = it.id === 'up' ? -1 : 1; return { kind: 'dive', p }; }
   if (it.weapon) {
     pr[it.id] = 0.15;
@@ -4915,13 +4929,13 @@ const PAD_ART = {
   // each label: [the button's name on that pad, what it does, the point on the picture (its own pixels), left or right]
   xb: { img: () => img.padXb, labels: [
     ['LT', 'CANNON - MISSILE - UP TORPEDO', 112, 6, 'l'], ['LB', 'PREVIOUS VEHICLE', 150, 16, 'l'], ['D-PAD', 'ZOOM: UP IN - DOWN OUT', 188, 175, 'l'],
-    ['LEFT STICK', 'DRIVE - CLIMB - DIVE', 128, 92, 'l'], ['PRESS IT IN', 'STOP', 128, 104, 'l'],
+    ['LEFT STICK', 'HOLD TO DRIVE - CLIMB - DIVE', 128, 92, 'l'],
     ['RT', 'MACHINE GUN', 398, 6, 'r'], ['RB', 'NEXT VEHICLE', 360, 16, 'r'], ['MENU', 'MENU', 292, 100, 'r'],
     ['Y', 'SMOKE SCREEN', 380, 66, 'r'], ['B', 'CANNON - MISSILE - UP TORPEDO', 418, 100, 'r'], ['X', 'DEPTH CHARGE - MINE - BOMB - MAGNET - TANK SMOKE', 347, 100, 'r'],
     ['A', 'MACHINE GUN - TORPEDO - LAUNCH', 380, 132, 'r'], ['RIGHT STICK', 'ANGLE AND POWER', 320, 172, 'r']] },
   ps: { img: () => img.padPs, labels: [
     ['L2', 'CANNON - MISSILE - UP TORPEDO', 150, 6, 'l'], ['L1', 'PREVIOUS VEHICLE', 175, 20, 'l'], ['D-PAD', 'ZOOM: UP IN - DOWN OUT', 165, 135, 'l'],
-    ['LEFT STICK', 'DRIVE - CLIMB - DIVE', 280, 235, 'l'], ['PRESS IT IN', 'STOP', 280, 250, 'l'],
+    ['LEFT STICK', 'HOLD TO DRIVE - CLIMB - DIVE', 280, 235, 'l'],
     ['R2', 'MACHINE GUN', 620, 6, 'r'], ['R1', 'NEXT VEHICLE', 595, 20, 'r'], ['OPTIONS', 'MENU', 520, 50, 'r'],
     ['TRIANGLE', 'SMOKE SCREEN', 605, 88, 'r'], ['CIRCLE', 'CANNON - MISSILE - UP TORPEDO', 655, 133, 'r'], ['SQUARE', 'DEPTH CHARGE - MINE - BOMB - MAGNET - TANK SMOKE', 555, 133, 'r'],
     ['CROSS', 'MACHINE GUN - TORPEDO - LAUNCH', 605, 183, 'r'], ['RIGHT STICK', 'ANGLE AND POWER', 490, 235, 'r']] },
@@ -5010,7 +5024,7 @@ function drawKeysArt(L0) {
   ];
   const tableRows = [
     ['MENU', 'ESC', 'ESC'], ['TOWER SHIP SUB PLANE', '1 2 3 4', '8 9 0 7'], ['OPEN WORLD: TANK HELICOPTER', '5 6', '-'], ['OPEN WORLD: ARMY - CIVILIAN', 'V', '-'],
-    ['DRIVE LEFT - RIGHT', 'A D', 'LEFT RIGHT'], ['STOP', 'R', ']'],
+    ['DRIVE LEFT - RIGHT: HOLD - LET GO TO STOP', 'A D', 'LEFT RIGHT'],
     ['AIM - CLIMB - DIVE', 'W S', 'UP DOWN'], ['ZOOM OUT - IN', 'Q E', ', .'], ['POWER - HELICOPTER GUN UP DOWN', 'Z C', "; '"],
     ['FIRE - MISSILE - TORPEDO', 'SPACE', 'ENTER'], ['DEPTH CHARGE - BOMB - UP TORPEDO - MAGNET', 'X', '/ OR CTRL'],
     ['MACHINE GUN - MINE', 'F', 'RIGHT SHIFT'], ['SMOKE SCREEN', 'G', '\\'], ['A CIVILIAN VEHICLE: ITS BUTTONS 1 2 3 4', 'F SPACE X G', "SHIFT ENTER / \\"],
@@ -5054,7 +5068,7 @@ function drawKeysArt(L0) {
 function drawTouchPage(L0) {
   const [ax, ay, aw, ah] = L0.area;
   const rows = [
-    ['DRIVE LEFT - STOP - RIGHT', 'THE ARROW BUTTONS'], ['CLIMB - DIVE', 'THE UP AND DOWN BUTTONS'],
+    ['DRIVE LEFT - RIGHT', 'HOLD AN ARROW BUTTON - LET GO TO STOP'], ['CLIMB - DIVE', 'THE UP AND DOWN BUTTONS'],
     ['FIRE', 'THE WEAPON BUTTONS - EACH VEHICLE ITS OWN'], ['AIM', 'SLIDE THE ANGLE TAPE'], ['POWER', 'DRAG THE POWER SLIDER'],
     ['TAKE A VEHICLE', 'TAP IT IN THE ROW OF VEHICLE BUTTONS'], ['ARMY - CIVILIAN', 'OPEN WORLD: THE LAST BUTTON OF THAT ROW'],
     ['SEND IT HOME', 'THE HOME BUTTON'], ['LOOK AROUND', 'NOT DRIVING: DRAG THE WORLD - OR HOLD THE RIGHT MOUSE BUTTON'],
@@ -5888,7 +5902,7 @@ function endPointer0(e) {
   }
   if (p.kind === 'cbtn') { act(p.p, 'release'); return; }
   if (p.kind === 'dive') { diveHold[p.p] = 0; return; }
-  if (p.kind === 'msdir') { msHold[p.p] = 0; return; }
+  if (p.kind === 'drivehold') { driveRelease(p.p); return; }
   if (p.kind === 'mg') { if (planes[p.p]) planes[p.p].mg = false; return; }
   if (p.kind === 'mghold') { mgHold[p.p] = false; return; }
   if (p.kind === 'horn') { act(p.p, 'cw', 'hornUp'); return; }
@@ -5931,7 +5945,6 @@ const LEVER_KEYS = { KeyA: [0, -1], KeyD: [0, 1], ArrowLeft: [1, -1], ArrowRight
 const HOLD_KEYS = new Set(['KeyW', 'KeyS', 'ArrowUp', 'ArrowDown', 'KeyQ', 'KeyE', 'KeyZ', 'KeyC', 'Comma', 'Period', 'Semicolon', 'Quote']);
 const FIRE_KEYS = { Space: 0, Enter: 1, NumpadEnter: 1 };
 const DC_KEYS = { KeyX: 0, Slash: 1, ControlRight: 1, ControlLeft: 1 };
-const STOP_KEYS = { KeyR: 0, BracketRight: 1 };     // (user Oct 26: STOP for every vehicle, as the stick pressed in; the plane circles)
 const MG_KEYS = { KeyF: 0, ShiftRight: 1 };          // the machine gun      // (Ctrl: player 2's second weapon too)
 // the switcher: 1 2 3 (player 1) and 8 9 0 (player 2) step into the tower, the battleship, the sub
 const SWITCH_KEYS = { KeyV: [0, 'civ'], Digit1: [0, 'tower'], Digit2: [0, 'ship'], Digit3: [0, 'sub'], Digit4: [0, 'plane'], Digit5: [0, 'tank'], Digit6: [0, 'heli'], Digit8: [1, 'tower'], Digit9: [1, 'ship'], Digit0: [1, 'sub'], Digit7: [1, 'plane'] };
@@ -5983,7 +5996,6 @@ window.addEventListener('keydown', e => {
   if (code === 'KeyG' || code === 'Backslash') { e.preventDefault(); if (!ui.menu && !e.repeat) keyDo(code === 'KeyG' ? 0 : 1, p => { if (crew[p].mode === 'ship' || crew[p].mode === 'tank') act(p, 'smoke'); else if (crew[p].mode === 'civ' || crew[p].mode === 'sail') civSlot(p, 3, true); }); return; }   // (a vehicle's fourth green button, user Oct 27)
   // (the number keys pick by place on the row of vehicle buttons, user Oct 25: LAND TEST's are tank, helicopter, plane)
   if (code in SWITCH_KEYS) { e.preventDefault(); const [s, k0] = SWITCH_KEYS[code], ki = ['tower', 'ship', 'sub', 'plane', 'tank', 'heli', 'civ'].indexOf(k0); if (!ui.menu && !e.repeat) keyDo(s, p => pressSwitcher({ p, k: k0 === 'civ' ? 'mode' : (ki >= 0 && hudVeh(p)[ki]) || k0, home: false })); return; }
-  if (code in STOP_KEYS) { e.preventDefault(); if (!ui.menu && !e.repeat) keyDo(STOP_KEYS[code], p => stopVeh(p)); return; }
   if (code in MG_KEYS) { e.preventDefault(); if (!ui.menu) keyDo(MG_KEYS[code], p => { if (crew[p].mode === 'plane') planes[p].mg = true; else if (crew[p].mode === 'sub') { if (!e.repeat) act(p, 'mine'); } else if (crew[p].mode === 'civ' || crew[p].mode === 'sail') { if (!e.repeat) civSlot(p, 0, true); } else mgHold[p] = true; }); return; }   // (a vehicle's first green button, user Oct 27)
   if (code in DC_KEYS) {
     e.preventDefault();
@@ -6011,11 +6023,7 @@ window.addEventListener('keydown', e => {
     // (a civilian boat, ship, blimp, balloon, helicopter or sub: a step along the lever - left, stop, right - as the
     // battleship's; one flying as a plane turns round)
     if (msOf(p)) return;                                                // (the minisub: held keys, below - user Oct 27)
-    if (c.mode === 'civ' && c.civ && civLever(c.civ)) { act(p, 'planeDir', clamp(Math.round(telegraphs[p].idx / 3) + d, 0, 2) - 1); return; }
-    if (c.mode === 'plane' || c.mode === 'civ') { act(p, 'planeDir', d); return; }
-    if (c.mode !== 'ship' && c.mode !== 'sub' && c.mode !== 'sail' && c.mode !== 'tank' && c.mode !== 'heli') return;
-    const t = telegraphs[p];
-    act(p, 'drive', clamp(Math.round(t.idx / 3) + d, 0, 2) * 3);      // left, stop, right
+    drivePush(p, d);                                                   // (held: hold to drive - 12-drive-and-aim)
   });
 });
 const runKeys = [0, 0];
@@ -6027,13 +6035,6 @@ const runKeys = [0, 0];
    torpedo), X the third (the depth charge, and the plane's bomb, which is one under water). The shoulder buttons step through your vehicles (left goes left, right goes
    right). The D-pad zooms: up or right in, down or left out. Start: the menu. */
 const padState = [{}, {}];
-// STOP, whatever you're in (the stick pressed in, R / ]): a boat, the tank or a helicopter stops; the plane circles
-// on the spot; a civilian vehicle stops as its lever does (a civilian plane on the ground stops rolling)
-function stopVeh(p) {
-  const m = crew[p].mode;
-  if (m === 'plane' || m === 'civ') act(p, 'planeDir', 0);
-  else if (m === 'ship' || m === 'sub' || m === 'sail' || m === 'tank' || m === 'heli') act(p, 'drive', 3);
-}
 function padKey(code, down) { try { window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code, key: code, bubbles: true })); } catch (e) {} }
 // which pad (its place in the list of connected pads) drives player p; -1: none. Picked under the flags
 // (CONTROLLER 1 / 2); if nobody has picked a controller, the first pad plays player 1 and the second player 2
@@ -6268,8 +6269,8 @@ function pollPads(dt) {
       const dl = edge('dl', lx < -0.5), dr = edge('dr', lx > 0.5);
       if (drives && !ui.menu && msOf(p)) { want.left = lx < -0.5; want.right = lx > 0.5; }   // (the minisub: held, as the keys)
       else if (drives && !ui.menu) {
-        if (dl === 1) { if (m === 'plane' || m === 'civ') act(p, 'planeDir', -1); else act(p, 'drive', 0); }
-        if (dr === 1) { if (m === 'plane' || m === 'civ') act(p, 'planeDir', 1); else act(p, 'drive', 6); }
+        if (dl === 1) drivePush(p, -1); if (dr === 1) drivePush(p, 1);      // (held: hold to drive - 12-drive-and-aim)
+        if ((dl === -1 && lx <= 0.5) || (dr === -1 && lx >= -0.5)) driveRelease(p);
       } else if (m !== 'tower') { want.left = lx < -0.5; want.right = lx > 0.5; }
       // up / down: the sub's depth and the plane's climb
       if (m === 'sub' || m === 'plane' || m === 'heli' || m === 'civ' || looking(p)) { want.up = ly < -0.5; want.down = ly > 0.5; }   // (and looking around)
@@ -6284,7 +6285,6 @@ function pollPads(dt) {
         if (aE === 1 && padPick[p]) { padLaunch(p); st.aEaten = true; }
         if (!btn(0)) st.aEaten = false;
         // the left stick pressed in (L3): STOP - the plane circles on the spot, a boat stops (user Oct 24)
-        if (edge('l3', btn(10)) === 1) stopVeh(p);
         const e1 = edge('w1', (btn(0) && !st.aEaten) || btn(7)), e2 = edge('w2', btn(1) || btn(6)), e3 = edge('w3', btn(2));
         if (e1) padWeapon(p, 1, e1 > 0);
         if (e2) padWeapon(p, 2, e2 > 0);
@@ -6322,6 +6322,8 @@ window.addEventListener('keyup', e => {
   if (cs) keyDo(cs[0], p => { if (crew[p].mode === 'civ' || crew[p].mode === 'sail') civSlot(p, cs[1], false); });
   const lk = LEVER_KEYS[code];
   if (lk && runKeys[lk[0]] === lk[1]) runKeys[lk[0]] = 0;
+  // (hold to drive: let go, it stops - unless the other way's key is still down, which takes over)
+  if (lk && !ui.menu) keyDo(lk[0], p => { if (msOf(p)) return; const o = Object.keys(LEVER_KEYS).find(k => LEVER_KEYS[k][0] === lk[0] && LEVER_KEYS[k][1] === -lk[1] && held.has(k)); if (o) drivePush(p, -lk[1]); else driveRelease(p); });
 });
 
 // free look: where the view goes when you're not driving anything (it starts at your harbour)
@@ -10059,6 +10061,7 @@ function stepWatch(p, dt) {
 // yours once she's clear of the pier; one out on the water is yours straight away, at the speed she's making.
 function takeOver(p, k) {
   const c = crew[p], t = telegraphs[p], d = homeDock[p];
+  if (t.idx !== 3) setOrder(t, 3);                         // (hold to drive, user Oct 31: leaving is letting go - what you were in stops)
   if (k === 'sail') {
     // the yacht you had; or (user Oct 25) a new one, out of your hangar's gate as the battleship comes out, as many
     // times as you like - she's yours once she's clear of the pier
