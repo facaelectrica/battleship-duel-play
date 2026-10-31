@@ -3226,8 +3226,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 431;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 17:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 432;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 17:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -16138,6 +16138,51 @@ void main() {
 }`;
 const GL_SHFS_I = GL_SHFS.replace('uniform ivec4 u_box; uniform ivec2 u_ft; uniform ivec3 u_at;\nin vec2 v_cell;', 'in vec2 v_cell; flat in ivec4 v_box; flat in ivec4 v_ft; flat in ivec3 v_at;')
   .replace(/u_box/g, 'v_box').replace(/u_ft/g, 'v_ft').replace(/u_at/g, 'v_at');
+// (user Oct 31, 17:10: "Rain veils on the GPU" - rounding-level differences approved) THE FAR RAIN SHAFTS' DROPS FROM THEIR
+// NUMBERS ALONE: each shaft's box, foot, fade (A), middle and width (cx, w), its number in its cloud (k) and the wind's shift,
+// four texels a shaft (drawShaftPack); the GPU works out each row's fade and shift and each column's edge as shaftGL's tables
+// did - in 32-bit floats now, an alpha level apart now and then - and the ragged foot from a table of hash2 made once
+// (GLR.shHash: the same numbers as the JS). No rows or columns built in JS or uploaded a frame
+const GL_SHVS_2 = `#version 300 es
+precision highp float; precision highp int;
+layout(location=0) in vec2 a_q;
+uniform vec2 u_size; uniform vec4 u_m; uniform highp isampler2D u_par; uniform int u_p0;
+out vec2 v_cell; flat out ivec4 v_box; flat out ivec4 v_ft; flat out vec4 v_f; flat out ivec2 v_k;
+ivec4 par(int i) { return texelFetch(u_par, ivec2(i & 2047, i >> 11), 0); }
+void main() {
+  int i = (u_p0 + gl_InstanceID) * 4;
+  ivec4 A = par(i), B = par(i + 1), F = par(i + 2), D = par(i + 3);
+  vec2 c0 = vec2(float(A.x), float(A.y)), c1 = vec2(float(A.x + B.z), float(A.y + B.y));
+  vec2 q0 = u_m.xy * c0 + u_m.zw, w = u_m.xy * (c1 - c0);
+  vec2 p = (q0 + a_q * w) / u_size;
+  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+  v_cell = mix(c0, c1, a_q);
+  v_box = A; v_ft = ivec4(B.x, B.y, B.w, D.x);
+  v_f = vec4(intBitsToFloat(F.x), intBitsToFloat(F.y), intBitsToFloat(F.z), intBitsToFloat(D.y));
+  v_k = ivec2(F.w, 0);
+}`;
+const GL_SHFS_2 = `#version 300 es
+precision highp float; precision highp int;
+uniform highp usampler2D u_hash; uniform sampler2D u_lut; uniform int u_hoff; uniform int u_hw;
+in vec2 v_cell; flat in ivec4 v_box; flat in ivec4 v_ft; flat in vec4 v_f; flat in ivec2 v_k;
+out vec4 o;
+void main() {
+  int X = int(floor(v_cell.x)), Y = int(floor(v_cell.y));
+  int r = Y - v_box.y;
+  if (r < 0 || r >= v_ft.y) discard;
+  int foot = v_ft.x, base = v_ft.w;
+  float u = float(Y - base) / max(1.0, float(foot - base));
+  int x = X - int(floor(v_f.w * u + 0.5));
+  if (x < v_box.z || x >= v_box.w) discard;
+  int hx = clamp(x + u_hoff, 0, u_hw - 1);
+  int rag = int(texelFetch(u_hash, ivec2(hx, v_k.x), 0).r);
+  if (Y >= foot - 1 && Y > foot - 1 - rag) discard;
+  float cx = v_f.y, w = v_f.z, fx = float(x);
+  float ed = min(1.0, max(0.2, min(fx - cx, cx + w - fx) / max(1.0, w * 0.25)));
+  float fa = v_f.x * (0.75 + 0.25 * (1.0 - u)) * 255.0;
+  int a = int(floor(fa * ed + 0.5)) & 255;
+  o = texelFetch(u_lut, ivec2(a, v_ft.z), 0);
+}`;
 function glShaftSetup() {
   const gl = GLR.gl, p = gl.createProgram();
   gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_SHFS));
@@ -16149,6 +16194,11 @@ function glShaftSetup() {
     gl.attachShader(q, glShader(gl.VERTEX_SHADER, GL_SHVS_I)); gl.attachShader(q, glShader(gl.FRAGMENT_SHADER, GL_SHFS_I)); gl.linkProgram(q);
     if (!gl.getProgramParameter(q, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(q));
     GLR.shprogI = q; GLR.shUI = {}; for (const k of ['u_size', 'u_m', 'u_par', 'u_p0', 'u_rows', 'u_cols', 'u_lut']) GLR.shUI[k] = gl.getUniformLocation(q, k); }
+  { const q = gl.createProgram();
+    gl.attachShader(q, glShader(gl.VERTEX_SHADER, GL_SHVS_2)); gl.attachShader(q, glShader(gl.FRAGMENT_SHADER, GL_SHFS_2)); gl.linkProgram(q);
+    if (!gl.getProgramParameter(q, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(q));
+    GLR.shprog2 = q; GLR.shU2 = {}; for (const k of ['u_size', 'u_m', 'u_par', 'u_p0', 'u_hash', 'u_lut', 'u_hoff', 'u_hw']) GLR.shU2[k] = gl.getUniformLocation(q, k); }
+  GLR.shHash = null; GLR.shHashW = 0; GLR.shHashOff = 0;
 }
 // (Oct 31) the premultiply-on-upload switch, set only through here and kept in GLR.pm: asking the GPU for it (gl.getParameter)
 // makes the page wait for the GPU process - the shadows' and the sky texture's uploads did that every draw. (UNPACK_FLIP_Y is
@@ -17736,22 +17786,35 @@ class GLCtx {
   // shaft's rows, its columns, its colour's table of alphas - 2048 a texture row; a shaft then reads its own stretch (u_at). It was
   // three uploads and a flush a shaft: ~310 uploads a frame in a storm. A ring of packs, so a pack's upload never waits on the last
   drawShaftPack(ops, n) {
-    if (GLR.lost || !GLR.shprog) return;
-    const gl = GLR.gl, P = GLR.shP || (GLR.shP = { R: new Int32Array(0), C: new Int32Array(0), L: new Uint32Array(0), dks: new Map() });
-    let nr = 0, nc = 0, nl = 0; P.dks.clear();
-    for (let k = 0; k < n; k++) { const o = ops[k]; if (!o || o[0] !== 3) continue; const sp = o[1]; sp.ro = nr; sp.co = nc; nr += sp.bh; nc += sp.nw; let li = P.dks.get(sp.dk); if (li === undefined) { li = nl++; P.dks.set(sp.dk, li); } sp.li = li; }
-    if (!nr) return;
-    const hr = (nr + 2047) >> 11, hc = (nc + 2047) >> 11;
-    if (P.R.length < hr * 2048 * 4) P.R = new Int32Array(hr * 2048 * 8);
-    if (P.C.length < hc * 2048 * 4) P.C = new Int32Array(hc * 2048 * 8);
+    if (GLR.lost || !GLR.shprog2) return;
+    const gl = GLR.gl, P = GLR.shP || (GLR.shP = { L: new Uint32Array(0), dks: new Map(), S: null, f: new Float32Array(1) });
+    if (!P.fi) P.fi = new Int32Array(P.f.buffer);
+    const fb = v => { P.f[0] = v; return P.fi[0]; };
+    let nl = 0, ns = 0, x0 = 1e9, x1 = -1e9; P.dks.clear();
+    for (let k = 0; k < n; k++) { const o = ops[k]; if (!o || o[0] !== 3) continue; const sp = o[1]; ns++; let li = P.dks.get(sp.dk); if (li === undefined) { li = nl++; P.dks.set(sp.dk, li); } sp.li = li; if (sp.xs < x0) x0 = sp.xs; if (sp.xe > x1) x1 = sp.xe; }
+    if (!ns) return;
+    // the ragged foot's table (hash2 of each column, for k 0..2): made once, wider when a shaft reaches past it
+    if (!GLR.shHash || x0 + GLR.shHashOff < 0 || x1 + GLR.shHashOff > GLR.shHashW) {
+      const off = Math.max(1024, -x0 + 512), W = Math.max(4096, x1 + off + 1024), H = new Uint8Array(W * 3);
+      for (let k = 0; k < 3; k++) for (let x = 0; x < W; x++) { const v = x - off, s = Math.sin((v * 7 + k) * 127.1 + 311.7) * 43758.5453; H[k * W + x] = Math.floor((s - Math.floor(s)) * 2); }
+      if (GLR.shHash) gl.deleteTexture(GLR.shHash);
+      GLR.shHash = gl.createTexture(); gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, GLR.shHash); gl.bindSampler(13, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const pm0 = GLR.pm; if (pm0) glPM(false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, W, 3, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, H);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4); if (pm0) glPM(true); gl.activeTexture(gl.TEXTURE0);
+      GLR.shHashW = W; GLR.shHashOff = off; GLR.stats.uploads++;
+    }
     if (P.L.length < nl * 256) P.L = new Uint32Array(nl * 512);
-    let ns = 0; for (let k = 0; k < n; k++) { const o = ops[k]; if (o && o[0] === 3) ns++; }
-    const hs = (ns * 3 + 2047) >> 11; if (!P.S || P.S.length < hs * 2048 * 4) P.S = new Int32Array(Math.max(1, hs) * 2048 * 8);
+    const hs = (ns * 4 + 2047) >> 11; if (!P.S || P.S.length < hs * 2048 * 4) P.S = new Int32Array(Math.max(1, hs) * 2048 * 8);
     let pi = 0;
-    for (let k = 0; k < n; k++) { const o = ops[k]; if (!o || o[0] !== 3) continue; const sp = o[1]; P.R.set(sp.rows.subarray(0, sp.bh * 4), sp.ro * 4); P.C.set(sp.cols.subarray(0, sp.nw * 4), sp.co * 4); P.L.set(sp.lut, sp.li * 256);
-      // (its numbers for the instanced draw: an empty one - no columns or rows, drawn by drawShaft as nothing - an empty quad)
-      const ok = sp.nw > 0 && sp.bh > 0, S = P.S, b = pi * 12; sp.pi = pi++;
-      S[b] = sp.bx0; S[b + 1] = sp.by0; S[b + 2] = sp.xs; S[b + 3] = sp.xe; S[b + 4] = sp.foot; S[b + 5] = ok ? sp.bh : 0; S[b + 6] = sp.ro; S[b + 7] = sp.co; S[b + 8] = sp.li; S[b + 9] = ok ? sp.bw : 0; S[b + 10] = 0; S[b + 11] = 0; }
+    for (let k = 0; k < n; k++) { const o = ops[k]; if (!o || o[0] !== 3) continue; const sp = o[1]; P.L.set(sp.lut, sp.li * 256);
+      const ok = sp.nw > 0 && sp.bh > 0, S = P.S, b = pi * 16; sp.pi = pi++;
+      S[b] = sp.bx0; S[b + 1] = sp.by0; S[b + 2] = sp.xs; S[b + 3] = sp.xe;
+      S[b + 4] = sp.foot; S[b + 5] = ok ? sp.bh : 0; S[b + 6] = ok ? sp.bw : 0; S[b + 7] = sp.li;
+      S[b + 8] = fb(sp.A); S[b + 9] = fb(sp.cx); S[b + 10] = fb(sp.w); S[b + 11] = sp.k;
+      S[b + 12] = sp.baseY; S[b + 13] = fb(sp.wind * 4 * sp.zl); S[b + 14] = 0; S[b + 15] = 0; }
     glFlush();
     const ring = GLR.shRing, i = GLR.shI = (GLR.shI + 1) % 8;
     let T = ring[i];
@@ -17779,59 +17842,36 @@ class GLCtx {
     };
     const pm = GLR.pm;
     if (pm) glPM(false);
-    tex('rows', 'rowsH', hr, 13, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.R.subarray(0, hr * 2048 * 4), nr);
-    tex('cols', 'colsH', hc, 14, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.C.subarray(0, hc * 2048 * 4), nc);
-    tex('par', 'parH', Math.max(1, hs), 12, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.S.subarray(0, Math.max(1, hs) * 2048 * 4), ns * 3);
+    tex('par', 'parH', Math.max(1, hs), 12, gl.RGBA32I, gl.RGBA_INTEGER, gl.INT, P.S.subarray(0, Math.max(1, hs) * 2048 * 4), ns * 4);
     glPM(true);   // (the tables as the picture's pixels were: straight, premultiplied on upload)
     tex('lut', 'lutH', nl, 15, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(P.L.buffer, 0, nl * 1024));
     if (!pm) glPM(false);
     gl.activeTexture(gl.TEXTURE0);
     GLR.shT = T;
-    GLR.stats.uploads += 4;
+    GLR.stats.uploads += 2;
   }
   // a run of shafts (ops k0..k1-1, all records 3, laid with the same operation) in one instanced draw - GL_SHVS_I
   drawShafts(ops, k0, k1) {
     const T = GLR.shT, m = this.s.m;
-    let ok = !GLR.lost && !!GLR.shprogI && !!T && !!T.par && m[1] === 0 && m[2] === 0;
-    for (let k = k0; ok && k < k1; k++) { const sp = ops[k][1]; ok = sp.pi === ops[k0][1].pi + (k - k0) && sp.ro !== undefined; }
-    if (!ok) { for (let k = k0; k < k1; k++) this.drawShaft(ops[k][1]); return; }
-    const gl = GLR.gl, t = this.target, U = GLR.shUI;
+    let ok = !GLR.lost && !!GLR.shprog2 && !!T && !!T.par && !!GLR.shHash && m[1] === 0 && m[2] === 0;
+    for (let k = k0; ok && k < k1; k++) { const sp = ops[k][1]; ok = sp.pi === ops[k0][1].pi + (k - k0); }
+    if (!ok) return;
+    const gl = GLR.gl, t = this.target, U = GLR.shU2;
     glBegin(this, this.s.op); glFlush();
     glApplyState();
     gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, T.par); gl.bindSampler(12, null);
-    gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, T.rows); gl.bindSampler(13, null);
-    gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, T.cols); gl.bindSampler(14, null);
+    gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, GLR.shHash); gl.bindSampler(13, null);
     gl.activeTexture(gl.TEXTURE15); gl.bindTexture(gl.TEXTURE_2D, T.lut); gl.bindSampler(15, null);
     gl.activeTexture(gl.TEXTURE0);
-    gl.useProgram(GLR.shprogI); GLR.cur.prog = 24;
-    gl.uniform1i(U.u_par, 12); gl.uniform1i(U.u_rows, 13); gl.uniform1i(U.u_cols, 14); gl.uniform1i(U.u_lut, 15);
+    gl.useProgram(GLR.shprog2); GLR.cur.prog = 25;
+    gl.uniform1i(U.u_par, 12); gl.uniform1i(U.u_hash, 13); gl.uniform1i(U.u_lut, 15);
+    gl.uniform1i(U.u_hoff, GLR.shHashOff); gl.uniform1i(U.u_hw, GLR.shHashW);
     gl.uniform2f(U.u_size, t._w, t._h); gl.uniform4f(U.u_m, m[0], m[3], m[4], m[5]); gl.uniform1i(U.u_p0, ops[k0][1].pi);
     gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, k1 - k0);
     GLR.stats.draws++; GLR.stats.quads += k1 - k0;
   }
-  // a far rain shaft's drops in one pass (GL_SHFS; s: sky/11-drawing.js shaftGL), from the pack made for its layer (drawShaftPack)
-  drawShaft(sp) {
-    const T = GLR.shT;
-    if (GLR.lost || !GLR.shprog || !T || !(sp.nw > 0) || !(sp.bh > 0) || sp.ro === undefined) return;
-    const gl = GLR.gl, t = this.target, U = GLR.shU;
-    glBegin(this, this.s.op); glFlush();
-    glApplyState();
-    gl.activeTexture(gl.TEXTURE13); gl.bindTexture(gl.TEXTURE_2D, T.rows); gl.bindSampler(13, null);
-    gl.activeTexture(gl.TEXTURE14); gl.bindTexture(gl.TEXTURE_2D, T.cols); gl.bindSampler(14, null);
-    gl.activeTexture(gl.TEXTURE15); gl.bindTexture(gl.TEXTURE_2D, T.lut); gl.bindSampler(15, null);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.useProgram(GLR.shprog); GLR.cur.prog = 23;
-    gl.uniform1i(U.u_rows, 13); gl.uniform1i(U.u_cols, 14); gl.uniform1i(U.u_lut, 15);
-    gl.uniform2f(U.u_size, t._w, t._h);
-    this._corners(sp.bx0, sp.by0, sp.bw, sp.bh);
-    gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
-    gl.uniform4f(U.u_cells, sp.bx0, sp.by0, sp.bx0 + sp.bw, sp.by0 + sp.bh);
-    gl.uniform4i(U.u_box, sp.bx0, sp.by0, sp.xs, sp.xe); gl.uniform2i(U.u_ft, sp.foot, sp.bh); gl.uniform3i(U.u_at, sp.ro, sp.co, sp.li);
-    gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    GLR.stats.draws++; GLR.stats.quads++;
-  }
+  drawShaft(sp) { this.drawShafts([[3, sp]], 0, 1); }
   drawSunGL(dx, dy, dw, dh, x0, y0, x1, y1, sun, s, k, core, sky) {
     if (GLR.lost || !GLR.sprog) return;
     const gl = GLR.gl, t = this.target, U = GLR.sU;
@@ -20805,26 +20845,11 @@ function shaftGL(lay, foot, A, k, bx0, by0, bx1, by1, xs, xe, dk, cx, w) {
     }
     if (rows.length) DCTX.drawPixels(bp, bw, nb, bx0, by0, bw, bh, true, rows);
   }
-  // the drops: a row's fade (float bits) and shift, a column's edge (float bits) and how many of the last rows it leaves out
-  let s = SHP.list[SHP.n]; if (!s) s = SHP.list[SHP.n] = { rows: new Int32Array(0), cols: new Int32Array(0), lut: new Uint32Array(256), f: new Float32Array(1), fi: null };
-  if (!s.fi) s.fi = new Int32Array(s.f.buffer);
+  // the drops: worked out on the GPU from the shaft's numbers alone (40-gl.js GL_SHFS_2 - user Oct 31, 17:10, "Rain veils on the
+  // GPU"): its fade, its middle and width, its number in the cloud, the wind's shift - no rows or columns built here
+  let s = SHP.list[SHP.n]; if (!s) s = SHP.list[SHP.n] = { lut: new Uint32Array(256) };
   SHP.n++;
-  const nw = xe - xs; if (s.rows.length < bh * 4) s.rows = new Int32Array(bh * 8); if (s.cols.length < Math.max(1, nw) * 4) s.cols = new Int32Array(Math.max(1, nw) * 8);
-  const R = s.rows, Cc = s.cols;
-  if (!s.rowsF || s.rowsF.buffer !== R.buffer) s.rowsF = new Float32Array(R.buffer);
-  if (!s.colsF || s.colsF.buffer !== Cc.buffer) s.colsF = new Float32Array(Cc.buffer);
-  const RF = s.rowsF, CF = s.colsF;
-  // (Oct 31, 60-fps chat: each row's place down the shaft and its shift with the wind are the same for every shaft of this veil -
-  // worked out once a veil (SHROW), not once a shaft; the fade's float bits written through a float view of the same numbers)
-  const SR = SHROW;
-  if (SR.by0 !== by0 || SR.by1 !== by1 || SR.base !== lay.baseY || SR.foot !== foot || SR.wind !== P.wind || SR.zl !== zl || SR.n !== SHP.n0) {
-    SR.by0 = by0; SR.by1 = by1; SR.base = lay.baseY; SR.foot = foot; SR.wind = P.wind; SR.zl = zl; SR.n = SHP.n0;
-    if (SR.k.length < bh) { SR.k = new Float64Array(bh * 2); SR.sh = new Int32Array(bh * 2); }
-    for (let y = by0; y <= by1; y++) { const u = (y - lay.baseY) / Math.max(1, foot - lay.baseY); SR.k[y - by0] = 0.75 + 0.25 * (1 - u); SR.sh[y - by0] = Math.round(P.wind * u * 4 * zl); }
-  }
-  const KU = SR.k, SH = SR.sh;
-  for (let r = 0, o = 0; r < bh; r++, o += 4) { RF[o] = A * KU[r] * 255; R[o + 1] = SH[r]; R[o + 2] = 0; R[o + 3] = 0; }
-  for (let x = xs; x < xe; x++) { const o = (x - xs) * 4; CF[o] = EDGE[x - xs]; Cc[o + 1] = Math.floor(hash2(x * 7 + k) * 2); Cc[o + 2] = 0; Cc[o + 3] = 0; }
+  const nw = xe - xs;
   if (s.dk !== dk) { s.dk = dk; for (let a = 0; a < 256; a++) s.lut[a] = ((a & 255) << 24) | dk; }   // (its colour's table: only when the colour changes)
   // (what its numbers are made from, for the deck's record: the same numbers, the same shaft - not a hash of every row and column)
   s.A = A; s.cx = cx; s.w = w; s.k = k; s.baseY = lay.baseY; s.wind = P.wind; s.zl = zl;
@@ -20911,11 +20936,11 @@ function drawVeil2(lay, horY, X0, vis) {
               if (bw <= 0 || bh <= 0) continue;
               // (each column's edge once, each row's fade once; the drop's colour from its alpha byte)
               const xs = Math.round(cx), xe = Math.ceil(cx + w), dk = (dark[2] << 16) | (dark[1] << 8) | dark[0];
+              if (SHAFT_GL && DCTX.drawShaft) { shaftGL(lay, foot, A, k, bx0, by0, bx1, by1, xs, xe, dk, cx, w); continue; }
               if (EDGE.length < xe - xs + 1) EDGE = new Float32Array((xe - xs + 1) * 2);
               for (let x = xs; x < xe; x++) { const ed = Math.min(x - cx, cx + w - x) / Math.max(1, w * 0.25); EDGE[x - xs] = Math.min(1, Math.max(0.2, ed)); }
               // (Oct 31, 60-fps chat: the GPU works out the drops - shaftGL. Every pixel of every shaft was built here and uploaded:
               // in a storm ~80 shafts, 2.6 million pixels, ~27 ms a frame. ?shaftgl=0: this way, for comparison)
-              if (SHAFT_GL && DCTX.drawShaft) { shaftGL(lay, foot, A, k, bx0, by0, bx1, by1, xs, xe, dk, cx, w); continue; }
               if (SHAFT.length < bw * bh) SHAFT = new Uint32Array(bw * bh * 2);
               const sb = SHAFT;
               // (the veil under it, row by row from the strip's band rows - what the buffer held there - not a pixel at a time)
