@@ -3208,8 +3208,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 405;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 12:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 406;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 12:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -15831,6 +15831,36 @@ void main() {
   if ((c >> 24u) == 0u) discard;
   o = vec4(float(c & 255u), float((c >> 8u) & 255u), float((c >> 16u) & 255u), float(c >> 24u)) / 255.0;
 }`;
+// (Oct 31, 60-fps chat) the storm's far rain shafts (sky/11-drawing.js shaftGL, drawShaft below): a drop pixel's alpha byte is
+// round(its row's fade x its column's edge) - the row (fade as float bits, shift) and the column (edge as float bits, the
+// ragged foot's rows) from two integer rows of numbers - and its texel from the shaft's table of the 256 alphas, uploaded as
+// the JS picture was (premultiplied on upload: the same texels). Laid 'copy', as the picture was
+const GL_SHFS = `#version 300 es
+precision highp float; precision highp int;
+uniform highp isampler2D u_rows; uniform highp isampler2D u_cols; uniform sampler2D u_lut;
+uniform ivec4 u_box; uniform ivec2 u_ft;
+in vec2 v_cell;
+out vec4 o;
+void main() {
+  int X = int(floor(v_cell.x)), Y = int(floor(v_cell.y));   // (the box's own pixels, whatever the context's transform)
+  int r = Y - u_box.y;
+  if (r < 0 || r >= u_ft.y) discard;
+  ivec4 R = texelFetch(u_rows, ivec2(r, 0), 0);
+  int x = X - R.y;
+  if (x < u_box.z || x >= u_box.w) discard;
+  ivec4 c = texelFetch(u_cols, ivec2(x - u_box.z, 0), 0);
+  if (Y >= u_ft.x - 1 && Y > u_ft.x - 1 - c.y) discard;
+  int a = int(floor(intBitsToFloat(R.x) * intBitsToFloat(c.x) + 0.5)) & 255;
+  o = texelFetch(u_lut, ivec2(a, 0), 0);
+}`;
+function glShaftSetup() {
+  const gl = GLR.gl, p = gl.createProgram();
+  gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_RVS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_SHFS));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  GLR.shprog = p; GLR.shU = {}; for (const k of ['u_size', 'u_quad', 'u_cells', 'u_rows', 'u_cols', 'u_lut', 'u_box', 'u_ft']) GLR.shU[k] = gl.getUniformLocation(p, k);
+  GLR.shRing = []; GLR.shI = 0;
+}
 // (Oct 31) the premultiply-on-upload switch, set only through here and kept in GLR.pm: asking the GPU for it (gl.getParameter)
 // makes the page wait for the GPU process - the shadows' and the sky texture's uploads did that every draw. (UNPACK_FLIP_Y is
 // never set: always false.)
@@ -16626,7 +16656,7 @@ precision highp float; out vec4 o; void main() { o = vec4(0.0); }`));
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
   GLR.pix = null; GLR.pixPool = [];
-  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glSkySetup(); glShadeSetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
+  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glSkySetup(); glShadeSetup(); glShaftSetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
@@ -17410,6 +17440,49 @@ class GLCtx {
     gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     GLR.stats.draws++; GLR.stats.quads++; GLR.stats.uploads++;
+  }
+  // (Oct 31, 60-fps chat) a far rain shaft's drops in one pass (GL_SHFS; s: sky/11-drawing.js shaftGL). Its three small
+  // textures come from a ring, so a shaft's upload never waits for the draw of the one before it
+  drawShaft(sp) {
+    if (GLR.lost || !GLR.shprog || !(sp.nw > 0) || !(sp.bh > 0)) return;
+    const gl = GLR.gl, t = this.target, U = GLR.shU;
+    glBegin(this, this.s.op); glFlush();
+    glApplyState();
+    const ring = GLR.shRing, i = GLR.shI = (GLR.shI + 1) % 8;
+    let T = ring[i];
+    if (!T || T.epoch !== GLR.epoch) T = ring[i] = { rows: null, rowsW: 0, cols: null, colsW: 0, lut: glNewTex(256, 1, gl.NEAREST), epoch: GLR.epoch };
+    const itex = (k, kw, need, unit, data) => {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      if (!T[k] || T[kw] < need) {
+        if (T[k]) gl.deleteTexture(T[k]);
+        T[kw] = Math.max(256, need);
+        T[k] = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, T[k]);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32I, T[kw], 1, 0, gl.RGBA_INTEGER, gl.INT, null);
+      } else gl.bindTexture(gl.TEXTURE_2D, T[k]);
+      gl.bindSampler(unit, null);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, need, 1, gl.RGBA_INTEGER, gl.INT, data, 0);
+    };
+    const pm = GLR.pm;
+    if (pm) glPM(false);
+    itex('rows', 'rowsW', sp.bh, 13, sp.rows);
+    itex('cols', 'colsW', sp.nw, 14, sp.cols);
+    glPM(true);   // (the table as the picture's pixels were: straight, premultiplied on upload)
+    gl.activeTexture(gl.TEXTURE15); gl.bindTexture(gl.TEXTURE_2D, T.lut); gl.bindSampler(15, null);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(sp.lut.buffer, sp.lut.byteOffset, 1024));
+    if (!pm) glPM(false);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.useProgram(GLR.shprog); GLR.cur.prog = 23;
+    gl.uniform1i(U.u_rows, 13); gl.uniform1i(U.u_cols, 14); gl.uniform1i(U.u_lut, 15);
+    gl.uniform2f(U.u_size, t._w, t._h);
+    this._corners(sp.bx0, sp.by0, sp.bw, sp.bh);
+    gl.uniform4f(U.u_quad, GLC4.x[0], GLC4.y[0], GLC4.x[2] - GLC4.x[0], GLC4.y[2] - GLC4.y[0]);
+    gl.uniform4f(U.u_cells, sp.bx0, sp.by0, sp.bx0 + sp.bw, sp.by0 + sp.bh);
+    gl.uniform4i(U.u_box, sp.bx0, sp.by0, sp.xs, sp.xe); gl.uniform2i(U.u_ft, sp.foot, sp.bh);
+    gl.bindVertexArray(GLR.rvao); GLR.cur.vao = 4;
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    GLR.stats.draws++; GLR.stats.quads++; GLR.stats.uploads += 3;
   }
   drawSunGL(dx, dy, dw, dh, x0, y0, x1, y1, sun, s, k, core, sky) {
     if (GLR.lost || !GLR.sprog) return;
@@ -19248,6 +19321,12 @@ const DREC = {
     this.ops[this.nOps++] = [1, copy, w, h, dx, dy, dw, dh, straight, rows ? rows.map(r => r.slice()) : null, this.op];
     this.sig.push(-1, this.op, w, h, dx, dy, dw, dh, straight ? 1 : 0, hs); if (rows) for (const r of rows) this.sig.push(r[0], r[1], r[2], r[3]);
   },
+  // (Oct 31, 60-fps chat) a far rain shaft (11-drawing.js shaftGL): its box, its rows' and columns' numbers and its colour - laid
+  // by the GL context's drawShaft. The record keeps the shaft (the veil's pool, reused next veil: it is laid at this veil's commit)
+  drawShaft(s) {
+    this.ops[this.nOps++] = [3, s, this.op];
+    this.sig.push(-3, this.op, s.bx0, s.by0, s.bw, s.bh, s.xs, s.xe, s.foot, s.lut[0], pixHash(s.rows, s.bh * 4), pixHash(s.cols, s.nw * 4));
+  },
 };
 // lay the recorded drawing into the deck's layer T, unless the layer already holds exactly that
 function deckCommit(T) {
@@ -19262,6 +19341,7 @@ function deckCommit(T) {
     const o = DREC.ops[k];
     if (o[0] === 0) { let e = k + 1; while (e < DREC.nOps && DREC.ops[e][0] === 0) e++; if (cx.drawPuffsMany) cx.drawPuffsMany(DREC.ops, k, e); else for (let q = k; q < e; q++) { const p = DREC.ops[q]; cx.drawPuffs(p[1], p[2], p[3], p[4]); } k = e; continue; }
     if (o[0] === 2) { cx.globalCompositeOperation = 'source-over'; cx.imageSmoothingEnabled = false; const T = o[1], ks = o[4] || 1; if (ks === 1) cx.drawImage(T, o[2], o[3]); else cx.drawImage(T, 0, 0, T.width, T.height, o[2], o[3], T.width * ks, T.height * ks); k++; continue; }
+    if (o[0] === 3) { cx.globalCompositeOperation = o[2]; cx.drawShaft(o[1]); cx.globalCompositeOperation = 'source-over'; k++; continue; }
     cx.globalCompositeOperation = o[10]; cx.drawPixels(o[1], o[2], o[3], o[4], o[5], o[6], o[7], o[8], o[9]); cx.globalCompositeOperation = 'source-over'; k++;
   }
   for (let k = 0; k < DREC.nOps; k++) { const o = DREC.ops[k]; if (o[0] === 0) o[1] = null; else DREC.ops[k] = null; }   // (let go of the batches and pictures)
@@ -20290,8 +20370,46 @@ function drawLiveGPU(c, ax, ayO) {
 }
 // the veil under a deck: from its base line down to the horizon, in the colour of the clouds' base so there's no seam.
 // Drawn into the deck's own layer, behind its clouds and over everything behind it.
+// (Oct 31, 60-fps chat) a far rain shaft for the GPU (the deck's recorder, 04-buffers.js DREC.drawShaft, laid by 40-gl.js
+// drawShaft): the same picture as the JS one below it in drawVeil2 - the veil under it first (its band rows, as the strip
+// holds them, laid 'copy' over the shaft's box), then the drops ('copy' too), each drop's alpha byte round(fade x edge) worked
+// out on the GPU from its row's fade and shift and its column's edge and ragged foot; its colour from a table of the 256
+// alphas uploaded as the picture was (so the same texels). The GPU multiplies in single precision: a drop exactly on a half
+// can round the other way - one alpha level, a few pixels a frame
+const SHAFT_GL = !(typeof location !== 'undefined' && /[?&]shaftgl=0/.test(location.search));
+const SHP = { list: [], n: 0 }, SHBAND = { px: new Uint32Array(0), rows: [] };
+function shaftGL(lay, foot, A, k, bx0, by0, bx1, by1, xs, xe, dk) {
+  const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1, zl = lay.zl, nb = VBANDS.length / 3;
+  // the veil under it: one row a band, VSTRIP's columns of the box at the band's k (as the JS picture's rows were made)
+  if (SHBAND.px.length < bw * nb) SHBAND.px = new Uint32Array(bw * nb * 2);
+  const bp = SHBAND.px, rows = SHBAND.rows; rows.length = 0;
+  for (let q = 0; q < nb; q++) {
+    const y0 = Math.max(by0, VBANDS[q * 3]), y1 = Math.min(by1, VBANDS[q * 3 + 1]), kk = VBANDS[q * 3 + 2], o = q * bw;
+    if (kk === 1) bp.set(VSTRIP.subarray(bx0, bx1 + 1), o);
+    else for (let x = bx0; x <= bx1; x++) { const v = VSTRIP[x]; bp[o + x - bx0] = v ? ((Math.round((v >>> 24) * kk) & 255) << 24) | (v & 0xffffff) : 0; }
+    if (y1 >= y0) rows.push([q, y0, y1 - y0 + 1, 1]);
+  }
+  const op = DCTX.globalCompositeOperation; DCTX.globalCompositeOperation = 'copy';   // (both laid as the picture was: replacing what is there)
+  DCTX.drawPixels(bp, bw, nb, bx0, by0, bw, bh, true, rows);
+  // the drops: a row's fade (float bits) and shift, a column's edge (float bits) and how many of the last rows it leaves out
+  let s = SHP.list[SHP.n]; if (!s) s = SHP.list[SHP.n] = { rows: new Int32Array(0), cols: new Int32Array(0), lut: new Uint32Array(256), f: new Float32Array(1), fi: null };
+  if (!s.fi) s.fi = new Int32Array(s.f.buffer);
+  SHP.n++;
+  const nw = xe - xs; if (s.rows.length < bh * 4) s.rows = new Int32Array(bh * 8); if (s.cols.length < Math.max(1, nw) * 4) s.cols = new Int32Array(Math.max(1, nw) * 8);
+  const R = s.rows, Cc = s.cols, f = s.f, fi = s.fi;
+  for (let y = by0; y <= by1; y++) {
+    const u = (y - lay.baseY) / Math.max(1, foot - lay.baseY), o = (y - by0) * 4;
+    f[0] = A * (0.75 + 0.25 * (1 - u)) * 255; R[o] = fi[0]; R[o + 1] = Math.round(P.wind * u * 4 * zl); R[o + 2] = 0; R[o + 3] = 0;
+  }
+  for (let x = xs; x < xe; x++) { const o = (x - xs) * 4; f[0] = EDGE[x - xs]; Cc[o] = fi[0]; Cc[o + 1] = Math.floor(hash2(x * 7 + k) * 2); Cc[o + 2] = 0; Cc[o + 3] = 0; }
+  for (let a = 0; a < 256; a++) s.lut[a] = ((a & 255) << 24) | dk;
+  s.bx0 = bx0; s.by0 = by0; s.bw = bw; s.bh = bh; s.xs = xs; s.xe = xe; s.foot = foot; s.nw = nw;
+  DCTX.drawShaft(s);
+  DCTX.globalCompositeOperation = op;
+}
 function drawVeil(lay, horY, X0, vis) { const t0 = performance.now(); try { drawVeil2(lay, horY, X0, vis); } finally { FTV.veil = (FTV.veil || 0) + performance.now() - t0; } }
 function drawVeil2(lay, horY, X0, vis) {
+  SHP.n = 0;
   const foot = Math.max(lay.footY || horY, lay.baseY + 2);
   const gk = Math.min(1, (P.glow ?? 1) * E.sunset);                       // (SUNSET GLOW: a clear, bright low sky)
   const a = E.veil * (lay.name === 'horizon' ? 0.55 : lay.name === 'far2' ? 0.62 : lay.name === 'far' ? 0.7 : lay.name === 'mid2' ? 0.85 : 1) * (1 - 0.65 * gk);
@@ -20355,14 +20473,17 @@ function drawVeil2(lay, horY, X0, vis) {
               const shA = Math.round(P.wind * 4 * zl), bx0 = Math.max(0, Math.round(cx) + Math.min(0, shA)), bx1 = Math.min(TW - 1, Math.ceil(cx + w) - 1 + Math.max(0, shA));
               const by0 = Math.max(0, lay.baseY), by1 = Math.min((DLH || H) - 1, foot), bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
               if (bw <= 0 || bh <= 0) continue;
-              if (SHAFT.length < bw * bh) SHAFT = new Uint32Array(bw * bh * 2);
-              const sb = SHAFT;
-              // (the veil under it, row by row from the strip's band rows - what the buffer held there - not a pixel at a time)
-              for (let y = by0; y <= by1; y++) { let kk = -1; for (let q = 0; q < VBANDS.length; q += 3) if (y >= VBANDS[q] && y <= VBANDS[q + 1]) { kk = VBANDS[q + 2]; break; } const o = (y - by0) * bw; if (kk < 0) sb.fill(0, o, o + bw); else if (kk === 1) sb.set(VSTRIP.subarray(bx0, bx1 + 1), o); else for (let x = bx0; x <= bx1; x++) { const v = VSTRIP[x]; sb[o + x - bx0] = v ? ((Math.round((v >>> 24) * kk) & 255) << 24) | (v & 0xffffff) : 0; } }
               // (each column's edge once, each row's fade once; the drop's colour from its alpha byte)
               const xs = Math.round(cx), xe = Math.ceil(cx + w), dk = (dark[2] << 16) | (dark[1] << 8) | dark[0];
               if (EDGE.length < xe - xs + 1) EDGE = new Float32Array((xe - xs + 1) * 2);
               for (let x = xs; x < xe; x++) { const ed = Math.min(x - cx, cx + w - x) / Math.max(1, w * 0.25); EDGE[x - xs] = Math.min(1, Math.max(0.2, ed)); }
+              // (Oct 31, 60-fps chat: the GPU works out the drops - shaftGL. Every pixel of every shaft was built here and uploaded:
+              // in a storm ~80 shafts, 2.6 million pixels, ~27 ms a frame. ?shaftgl=0: this way, for comparison)
+              if (SHAFT_GL && DCTX.drawShaft) { shaftGL(lay, foot, A, k, bx0, by0, bx1, by1, xs, xe, dk); continue; }
+              if (SHAFT.length < bw * bh) SHAFT = new Uint32Array(bw * bh * 2);
+              const sb = SHAFT;
+              // (the veil under it, row by row from the strip's band rows - what the buffer held there - not a pixel at a time)
+              for (let y = by0; y <= by1; y++) { let kk = -1; for (let q = 0; q < VBANDS.length; q += 3) if (y >= VBANDS[q] && y <= VBANDS[q + 1]) { kk = VBANDS[q + 2]; break; } const o = (y - by0) * bw; if (kk < 0) sb.fill(0, o, o + bw); else if (kk === 1) sb.set(VSTRIP.subarray(bx0, bx1 + 1), o); else for (let x = bx0; x <= bx1; x++) { const v = VSTRIP[x]; sb[o + x - bx0] = v ? ((Math.round((v >>> 24) * kk) & 255) << 24) | (v & 0xffffff) : 0; } }
               for (let y = lay.baseY; y <= foot; y++) {
                 if (y < by0 || y > by1) continue;
                 const u = (y - lay.baseY) / Math.max(1, foot - lay.baseY), sh = Math.round(P.wind * u * 4 * zl), fa = A * (0.75 + 0.25 * (1 - u)) * 255, o = (y - by0) * bw - bx0 + sh, ragged = y >= foot - 1;
