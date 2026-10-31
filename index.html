@@ -194,6 +194,7 @@ function swEvents(E) {
       if (e[0] === 's') emit('sound', { id: e[1], x: arg(e[2]), a: arg(e[3]) });
       else if (e[0] === 'k') shakeAt(e[1], e[2]);
       else if (e[0] === 't') showToast(e[1]);
+      else if (e[0] === 'c') cutTo(e[1]);
     } catch (err) { }
   }
 }
@@ -253,7 +254,9 @@ function swGuestFrame(dt, held) {
   if (SW.framesNoSnap > 300 && !held) { swFail('no snapshot for 300 frames'); return; }
   // the newest snapshot (all of them in order if more than one came: each is a delta on the one before)
   if (SW.snaps.length) {
-    const ctl = [0, 1].map(p => { try { return ctlState(p); } catch (e) { return null; } });
+    // (put back as they were: the stick as the HUD's up / down left it - ctlState's d has the keys held added, and put into
+    // diveHold here it stayed held after the key was let go, Oct 31)
+    const ctl = [0, 1].map(p => { try { const s = ctlState(p); if (s) s.d = diveHold[p] || 0; return s; } catch (e) { return null; } });
     for (const m of SW.snaps.splice(0)) { swApply(m.s); SW.tickMs = m.tickMs; SW.behind = m.behind; SW.got++; if (m.ev && m.ev.length) swEvents(m.ev); }
     for (let p = 0; p < 2; p++) if (ctl[p]) try { setCtlState(p, ctl[p]); } catch (e) { }
     SW.framesNoSnap = 0;
@@ -310,6 +313,9 @@ function swHostReady() {
   on('sound', e => { SWH.ev.push(['s', e.id, arg(e.x), arg(e.a)]); }, 'simworker');
   const shake0 = shakeAt; shakeAt = (amt, x) => { SWH.ev.push(['k', amt, x]); return shake0(amt, x); };
   const toast0 = showToast; showToast = msg => { SWH.ev.push(['t', msg]); return toast0(msg); };
+  // (Oct 31, tools/space2p.mjs: the camera is the page's own, so a cut to what a player has just taken - a vehicle button, the
+  // space button's shuttle - made here only cut the worker's: the page's camera slid across the world to it instead)
+  const cut0 = cutTo; cutTo = p => { SWH.ev.push(['c', p]); return cut0(p); };
   self.__swReady = answer;
   for (const m of self.__swQ.splice(0)) answer(m);
   postMessage({ t: 'ready', touch: self.__SW_TOUCH });
@@ -3029,6 +3035,10 @@ function specTry(p, k) {
 }
 function act(p, name, ...a) {
   if (name === 'switch' && specTry(p, a[0])) return;           // (watching is this screen's own business)
+  // (Oct 31, tools/space2p.mjs) the person button - the army / civilian toggle - only changes which vehicle buttons this
+  // screen shows (civUI: the HUD's, the number keys' and the shoulder buttons' row): this screen's own business too. Sent on to
+  // the simulation worker (or the host) it toggled that game's copy, never this screen's - the buttons stayed the army's
+  if (name === 'switch' && a[0] === 'mode') { civUI[p] = !civUI[p]; sound('click', gunCtl[p]); return; }
   if (NET.log) NET.log.push([p, name, ...a]);
   if (SW.live) { SW.acts.push([p, name, a]); return; }           // (the simulation worker's game: the command goes there - 00-sw-boot.js)
   if (NET.role === 'guest') { if (p === NET.me && NET.send) NET.send({ t: 'act', name, a }); return; }
@@ -3226,8 +3236,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 436;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 18:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 437;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 18:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -3538,8 +3548,11 @@ function linkClose(msg) {
 // the control state: what's held and where the gun is pointed (the guest sends it to the host a few times a second)
 function ctlState(p) {
   const m = crew[p].mode, g = hasGuns(p) ? activeGun(p) : null, pl = planes[p];
-  // (d: the climb / dive held - the plane's keys too, user Oct 24: a guest's plane couldn't go up or down)
-  return { m, e: g ? +g.elev.toFixed(2) : null, w: g ? +g.power.toFixed(3) : null, d: m === 'plane' ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : diveHold[p] || 0, mg: m === 'plane' ? !!(pl && pl.mg) : !!mgHold[p], z: m === 'sub' ? Math.round(subs[p].depthT) : null, cl: hiddenPlane(pl), h: msOf(p) ? msHold[p] + msKeys[p] : 0, le: lampOf(p) ? Math.round(lampOf(p).elev) : null };
+  // (d: the climb / dive held - the plane's keys too, user Oct 24: a guest's plane couldn't go up or down; Oct 31,
+  // tools/space2p.mjs: and every other vehicle's - the civilians' stick (the orbiter, the planes, the helicopters, the
+  // satellites) and the army helicopter's read the keys as the HUD's up / down, and with the simulation worker the keys
+  // never reached them. Not the sub's: its keys move its depth here, sent as z)
+  return { m, e: g ? +g.elev.toFixed(2) : null, w: g ? +g.power.toFixed(3) : null, d: m !== 'sub' ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : diveHold[p] || 0, mg: m === 'plane' ? !!(pl && pl.mg) : !!mgHold[p], z: m === 'sub' ? Math.round(subs[p].depthT) : null, cl: hiddenPlane(pl), h: msOf(p) ? msHold[p] + msKeys[p] : 0, le: lampOf(p) ? Math.round(lampOf(p).elev) : null };
 }
 function setCtlState(p, s) {
   if (s && s.cl && planes[p] && planes[p].state === 'fly') planes[p].cloudT = time;   // (in a cloud on its own player's screen)
@@ -38436,6 +38449,18 @@ function drawLinerRigging(c, x0, x1) {
   if (!linerOn(c) || !c.lp) return;
   C.fillStyle = 'rgba(24,24,28,0.95)';
   const w = Math.max(1, SV * 0.55);
+  // (Oct 31, tools/space2p.mjs: with the simulation worker her ropes swing there - civShips' snapshot skips them, as her save
+  // does - and this page's copy of her has none: drawn from where each is made fast, hanging a little, as they are made; one
+  // stretched past its length by a piece torn off is parted. A draw error every frame she was on screen before)
+  if (SW.live || !c.lp.ropes) {
+    for (const rp of LPI.ropes) {
+      const [ax, ay] = linerPoint(c, rp.pa, ...rp.a), [bx, by] = linerPoint(c, rp.pb, ...rp.b);
+      if (Math.max(ax, bx) < x0 - 20 || Math.min(ax, bx) > x1 + 20 || Math.hypot(bx - ax, by - ay) > rp.len * CIV[c.kind].k * 1.2) continue;
+      let px = ax, py = ay;
+      for (let i = 1; i <= 8; i++) { const u = i / 8, x = ax + (bx - ax) * u, y = ay + (by - ay) * u + Math.sin(u * Math.PI) * 2; thickLine(PX(px), PY(py), PX(x), PY(y), w); px = x; py = y; }
+    }
+    return;
+  }
   for (const R of c.lp.ropes) for (let i = 0; i < R.N.length - 1; i++) { const p = R.N[i], q = R.N[i + 1]; if (Math.max(p[0], q[0]) < x0 - 20 || Math.min(p[0], q[0]) > x1 + 20) continue; thickLine(PX(p[0]), PY(p[1]), PX(q[0]), PY(q[1]), w); }
 }
 function drawLinerLoose(x0, x1) {
@@ -41482,8 +41507,13 @@ function drawBurning(sp, x, y, heat) {
 }
 
 /* ---- drawing ---- */
+// (Oct 31, tools/space2p.mjs: the pictures cut up when first wanted - by the drawing too, not only by stepSpace: with the
+// simulation worker this page never steps space, and the pads, the stacks, the orbiters, the satellites and the station were
+// never drawn - only their smoke and fire)
+const spaceArtNow = () => { if (LAND && !spaceArt && img.space) buildSpaceArt(); };
 // the pads: on the ground beside each airport (with the land: under what flies); their lamps glow at night
 function drawPads(x0, x1) {
+  spaceArtNow();
   if (!LAND || !spaceArt) return;
   const night = clamp(E.night * 1.2 + E.dusk * 0.8 + E.sunset * 0.5, 0, 1);
   for (const R of [false, true]) {
@@ -41511,6 +41541,7 @@ const rocketPuffR = p => p.r * (1 + Math.min(p.ground ? 6 : 7, Math.sqrt(p.age) 
 const trailGround = x => dryLand(x) && !isleCol(x) ? landTop(x) : surfaceY(x);   // (an island line's island is behind the water, user Oct 29: "The smoke on a ship must render in front of an island" - smoke, trails and deck 1 stop at the water there, not at its top)
 // the stack, standing or climbing, its flames under it; the orbiter flying, rolling out, landed; the pieces in space
 function drawSpace(x0, x1, pass) {
+  spaceArtNow();
   if (!LAND || !spaceArt) return;
   const A = spaceArt;
   for (const j of spaceJunk) {
