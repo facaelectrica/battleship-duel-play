@@ -3219,8 +3219,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 419;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 14:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 420;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 15:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -43733,6 +43733,10 @@ function dockMoveBy(R, dx) {
 function landTowersBuild() {
   for (let i = towers.length - 1; i >= 0; i--) if (towers[i] && towers[i].edge) towers.splice(i, 1);
   const add = (t, p) => { const x = towerDefX(t); towers.push({ player: p, edge: true, x, base: landTop(x), facing: t.R ? -1 : 1, hp: VTUNE.tower.hp, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0, pg: null, def: t, restEl: p < 0 ? 20 : undefined }); };
+  // (STORY, user Oct 31 14:45: "The towers should stay. They just don't belong to any player ... There's no longer a concept of
+  // player one and player two. Those towers belong to the factions that own them": every tower stands, none a player's - its
+  // faction (fac) the side it was given in the editor, for when factions come)
+  if (STORY) { for (const t of towersUsed()) { add(t, -1); towers[towers.length - 1].fac = ownerOf(t); } return; }
   for (let p = 0; p < 2; p++) for (const t of towersUsed()) if (ownerOf(t) === SIDE(p)) add(t, p);
   for (const t of towersUsed()) if (ownerOf(t) === -1) add(t, -1);
 }
@@ -46719,6 +46723,36 @@ function spawnWave() { }
 window.__story = story; window.__storyDots = () => storyDots(); window.__storyQ = () => storyQ;                                   // (tools)                                 // (gone with the waves; kept by name for the tools' hook)
 // the day, top-left; the coins, top-right under the version and frame rate (each its own ink shadow)
 const STORY_COIN = ['..###..', '.#ooo#.', '#oo#oo#', '#o#o#o#', '#oo#oo#', '.#ooo#.', '..###..'];
+/* ---- the automatic zoom, STORY only (user Oct 31 08:36; the spec: "Close when stopped, Medium when driving, Far set by
+   hand"): at a structure, close on it (three times its width); aboard, Close while she's still and Medium once she's under
+   way (the speed held 0.8 s either way: no flicker), each from her length; the player zooming by hand takes it over (Far,
+   or wherever they like) until they're at another structure or in another vehicle. The levels are the stepped zoom's own
+   (setScope). This screen's camera: run as it's drawn. ---- */
+const STORY_ZOOM = { key: null, lv: null, manual: false, mv: 0, moving: false };
+function storyZoomWidth() {
+  const c = crew[0];
+  if (c.mode === 'civ' && c.civ && c.civ.story) { const L = storyBoatSize(c.civ)[0]; return STORY_ZOOM.moving ? Math.max(130 * UPM, 12 * L) : Math.max(45 * UPM, 4 * L); }
+  if (c.mode === 'dock') { const o = storyAt(); if (o) { const B = strBox(o); return Math.max(60 * UPM, 3 * (B.x1 - B.x0)); } }
+  return null;
+}
+function storyZoom(dt) {
+  if (!STORY || ui.title || NSKY.editor.TUNE.open || PHOTO.on) return;
+  const c = crew[0], Z = STORY_ZOOM, key = c.mode === 'civ' ? 'v' + (c.civ ? c.civ.sid : '') : c.mode + story.at;
+  if (key !== Z.key) { Z.key = key; Z.manual = false; Z.lv = null; Z.moving = false; Z.mv = 0; }
+  if (Z.lv != null && scopes[0].level !== Z.lv) Z.manual = true;   // (zoomed by hand: theirs till the next structure or vehicle)
+  if (Z.manual) return;
+  const v = c.mode === 'civ' ? c.civ : null, fast = !!v && Math.abs(v.vDrive || 0) > (v.v || 60) * 0.15;
+  if (fast !== Z.moving) { Z.mv += dt; if (Z.mv > 0.8) { Z.moving = fast; Z.mv = 0; } } else Z.mv = 0;
+  const w = storyZoomWidth(); if (!w) return;
+  // (Medium at least a step further out than Close: the stepped zoom's levels near the top are far apart)
+  const lvOf = w => clamp(zoomLevelOf(clamp(VIEW_W / w, ZOOM_PLAY_MIN, ZOOM_TOP)), 1, ZN);
+  let lv = lvOf(w);
+  if (Z.moving && c.civ) { const wc = Math.max(45 * UPM, 4 * storyBoatSize(c.civ)[0]); lv = Math.min(lv, lvOf(wc) - 1); }
+  lv = Math.max(1, lv);
+  if (scopes[0].level !== lv) setScope(0, lv);
+  Z.lv = lv;
+}
+window.__storyZoom = STORY_ZOOM;                         // (tools)
 // the sun button: at a HOME BASE, where the home button is (bottom left), in the controls' layer's pixels
 function storySunBtn() { if (!STORY || ui.title || story.wake || crew[0].mode !== 'dock' || !storyIsHome(storyAt())) return null; const z = Math.round(Math.min(56, ubh * 0.14)); return [Math.round(16 + ubw * 0.02), ubh - z - 16, z, z]; }
 function drawStorySun(r) {
@@ -46731,6 +46765,7 @@ function drawStorySun(r) {
 function drawStoryBanner() {
   if (!STORY || ui.title) return;
   storySaveWatch();                                      // (a save asked for: into the slot - 50-story-saves.js)
+  storyZoom(frameDt);                                    // (STORY's automatic zoom)
   const sun = storySunBtn(); if (sun) drawStorySun(sun);
   if (story.wake) { const t = 'SLEEPING...'; drawText(ug, t, ubw / 2 + 1, Math.round(ubh * 0.3) + 1, '#04070f', 3, 'center'); drawText(ug, t, ubw / 2, Math.round(ubh * 0.3), '#ffd23a', 3, 'center'); }
   // the dots: white, pulsing, an ink ring (on the controls' layer: toUI)
