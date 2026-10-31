@@ -3236,8 +3236,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 438;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 18:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 439;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 19:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -28303,10 +28303,17 @@ function stepTrails(dt) {
   // the trail slowly spreads, rises a little and is carried off by the wind (each point by the wind at its own height)
   // (windAt's gust - the same for every point this step - worked out once: the same numbers, Oct 31)
   const WG = E.windU * (1 + 0.25 * Math.sin(time * 0.31) + 0.15 * Math.sin(time * 1.13 + 2));
+  // (user Oct 31, 17:10 - differences at the level of rounding approved: each point's two slow wobbles turned on by the step's
+  // angle, not two sines a point a step - the same wobble to a millionth of a millionth; thousands of trail pieces in a long
+  // fight, 120 steps a second. A point not stepped last time - new, or its age set - starts again from the sines)
+  const c1 = Math.cos(dt * 0.4), s1 = Math.sin(dt * 0.4), c2 = Math.cos(dt * 0.3), s2 = Math.sin(dt * 0.3);
   const move = p => {
-      p.age += dt;
-      p.vx += (WG * (0.45 + 0.55 * clamp((WATER_Y - p.y) / 500, 0, 1.6)) * 0.7 + Math.sin(p.age * 0.4 + p.seed) * 2 - p.vx) * 0.5 * dt;
-      p.vy += (-1.6 + Math.sin(p.age * 0.3 + p.seed * 1.7) * 1.2 - p.vy) * 0.5 * dt;
+      let a, b;
+      if (p._ta === p.age) { const sa = p._s1 * c1 + p._c1 * s1, ca = p._c1 * c1 - p._s1 * s1, sb = p._s2 * c2 + p._c2 * s2, cb = p._c2 * c2 - p._s2 * s2; p._s1 = a = sa; p._c1 = ca; p._s2 = b = sb; p._c2 = cb; p.age += dt; }
+      else { p.age += dt; const t1 = p.age * 0.4 + p.seed, t2 = p.age * 0.3 + p.seed * 1.7; p._s1 = a = Math.sin(t1); p._c1 = Math.cos(t1); p._s2 = b = Math.sin(t2); p._c2 = Math.cos(t2); }
+      p._ta = p.age;
+      p.vx += (WG * (0.45 + 0.55 * clamp((WATER_Y - p.y) / 500, 0, 1.6)) * 0.7 + a * 2 - p.vx) * 0.5 * dt;
+      p.vy += (-1.6 + b * 1.2 - p.vy) * 0.5 * dt;
       p.x += p.vx * dt; p.y += p.vy * dt;
   };
   // a shell flying through an old trail punches through it: the smoke near its path is shoved aside and
@@ -47036,6 +47043,42 @@ function storyPlaneIn(f) {
   if (q != null) { crew[q].civ = null; crew[q].mode = 'dock'; crew[q].watch = null; civUI[q] = true; if (h) storyGo(q, h.id, true); }
 }
 
+/* ---- a plane's fuel and its loss (the spec section 5: "When fuel runs out ... An aircraft glides and gradually loses altitude
+   until it lands or crashes"; 09:31: a destroyed vehicle must be bought again). Flying it burns PLANE_FUEL_S a tank (taxiing
+   a little); empty, its nose goes down into a glide and it can't start a take-off run; in its hangar with ALLOW REFUEL it
+   fills, with ALLOW REPAIR it's mended the next morning. Lost (fallen, sunk, a wreck), it's nobody's: aboard it you're at
+   your home base after STORY_LOST_S, and the next morning a new one is for sale in the spot it started in. ---- */
+const PLANE_FUEL_S = 240;
+const storyPlaneAlive = f => f.state === 'free' || f.state === 'parked';
+function storyPlaneFuel(dt) {
+  for (const f of traffic) {
+    if (!f.story || !storyPlaneAlive(f)) continue;
+    if (f.fuel == null) f.fuel = 1;
+    if (f.state === 'free') {
+      f.fuel = Math.max(0, f.fuel - dt / PLANE_FUEL_S * (f.ground ? 0.15 : 1));
+      if (f.fuel <= 0) { if (f.ground === 'roll') f.ground = 'taxi'; if (!f.ground) f.pitch += (0.16 - f.pitch) * Math.min(1, dt * 1.2); }   // (no power: no take-off; aloft, a glide down)
+      continue;
+    }
+    const o = f.berth != null ? strsUsed().find(q => q.id === f.berth) : null; if (!o) continue;
+    if (o.ref && f.fuel < 1) f.fuel = Math.min(1, f.fuel + dt / REFUEL_S);
+    if (o.rep && (f.dmg || 0) > 0) { if (f.fixDay == null) f.fixDay = W.day + 1; else if (W.day >= f.fixDay && env.time >= STORY_WAKE_H) { f.dmg = 0; f.hits = 0; f.wings = 0; f.fixDay = null; } }
+  }
+}
+function storyPlaneLosses() {
+  let top = 2000; for (const f of traffic) if (f.story) top = Math.max(top, f.sid || 0);
+  for (const f of traffic) {
+    if (!f.story || storyPlaneAlive(f)) continue;
+    if (f.lostT == null) { f.lostT = time; f.lostDay = W.day; f.own = false; f.berth = null; }
+    if (!f.renewed && W.day > f.lostDay && env.time >= STORY_WAKE_H) {
+      const o = strsUsed().find(q => q.id === f.hb), D = STR_VEHS[f.sv];
+      if (!o || !D) { f.renewed = true; continue; }
+      const n = newFlight('cessna', 0, 1e9, -1);
+      Object.assign(n, { story: true, plane: true, sid: ++top, own: false, price: D.price, sv: f.sv, berth: o.id, spot: f.hs, hb: o.id, hs: f.hs, fuel: 1, col: f.col, state: 'parked', x: storySpotX(o, f.hs), y: strBox(o).top + 4 * UPM, route: null });
+      traffic.push(n); f.renewed = true;
+    }
+  }
+}
+
 /* ================================================================
    STORY's SAVES (user Oct 31 09:31: "When you do story mode, you either can start a new save or load an existing save. There
    will be 5 slots for the saves. The save file will show you the day and the time it was saved, and the current day in the
@@ -47375,6 +47418,7 @@ function storyNets(dt) {
    REFUEL it fills in REFUEL_S; damaged and tied up at ALLOW REPAIR, it's mended the next morning. ---- */
 const FUEL_S = 300, REFUEL_S = 40;
 function storyFuel(dt) {
+  storyPlaneFuel(dt);                                    // (the planes: 50-story-planes.js)
   for (const j of jetboats.concat(storyCars)) {
     if (!j.story || j.state !== 'run') continue;
     if (j.fuel == null) j.fuel = 1;
@@ -47614,6 +47658,7 @@ ACTS.storySleep = p => storySleep(p);
 const STORY_LOST_S = 4;
 function storyLosses() {
   let top = 0; for (const j of jetboats) if (j.story) top = Math.max(top, j.sid || 0);
+  storyPlaneLosses();                                    // (the planes: 50-story-planes.js)
   for (const j of jetboats) {
     if (!j.story || j.state === 'run') continue;
     if (j.lostT == null) { j.lostT = time; j.lostDay = W.day; j.own = false; j.berth = null; }
