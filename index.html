@@ -1939,7 +1939,7 @@ function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ fl
    SEAS: a column table, a row per stretch of sea along the ground line in x order - lo, hi (its two shores, world x), its
    floor's ends bedA, bedB, its deep's trA, trB and its deepest point deepX, deepY. LANDS: the stretches between them (and
    out to the world's ends), lo, hi. Derived, never saved or sent: built with the world (seasBuild, buildWorld - the page
-   and the worker alike), the floor's columns after the floor (seasFloor).
+   and the worker alike), the floor's columns with the floor (seaBeds, floorRebuild - 09-sea-surface.js: its table tab / tabS).
    Until the switch (plan step 6) the one sea row is today's strip, SEA0..SEA1; a world with no ground line (TEST, CHILL)
    is all sea, the row 0..WORLD_W.
    One rounding rule for where a ground position s (screens from the left end) is in the world: gPosX(s) - as the strip's
@@ -1966,21 +1966,32 @@ function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ fl
      landOwnD(x)          the look x's ground has unmarked: the desert's where its nearest shore has the sea to its left
                           (today's two countries, and an island the nearer coast's; the look rule until plan step 8)
    (seaAt(y) and shoreDist(x) of the sea's colours and the floor's dressing - 44-shadows-seafloor - are other things.) ---- */
-const SEAS = new ColTable({ lo: 'f64', hi: 'f64', bedA: 'f64', bedB: 'f64', trA: 'f64', trB: 'f64', deepX: 'f64', deepY: 'f64' });
+const SEAS = new ColTable({ lo: 'f64', hi: 'f64', bedA: 'f64', bedB: 'f64', trA: 'f64', trB: 'f64', deepX: 'f64', deepY: 'f64', tab: 'obj', tabS: 'obj' });
 const LANDS = new ColTable({ lo: 'f64', hi: 'f64' });
 const gPosX = s => Math.round(warpX(EXT_L + Math.round(VIEW_W * s)));
+// (the checker only - tools/seasame.mjs: [[lo, hi], ...] in ground screens, seas in place of the strip, for a world of more
+// than one ocean; __game.seasTest. Never saved; null: the strip)
+let SEAS_TEST = null;
 // (buildWorld, once SEA0 / SEA1 are set) the rows from the strip; the land the rest of the world
 function seasBuild() {
   SEAS.n = 0; LANDS.n = 0;
-  const S = SEAS.c, L = LANDS.c;
-  const i = SEAS.add(); S.lo[i] = SEA0; S.hi[i] = SEA1;
-  if (OWM) { let k = LANDS.add(); L.lo[k] = 0; L.hi[k] = SEA0; k = LANDS.add(); L.lo[k] = SEA1; L.hi[k] = WORLD_W; }
+  const S = SEAS.c, L = LANDS.c, R = OWM && SEAS_TEST ? SEAS_TEST.map(([a, b]) => [gPosX(a), gPosX(b)]) : [[SEA0, SEA1]];
+  for (const [a, b] of R) { const i = SEAS.add(); S.lo[i] = a; S.hi[i] = b; }
+  if (OWM) { let x = 0; for (let i = 0; i < SEAS.n; i++) { const k = LANDS.add(); L.lo[k] = x; L.hi[k] = S.lo[i]; x = S.hi[i]; } const k = LANDS.add(); L.lo[k] = x; L.hi[k] = WORLD_W; }
 }
-// (after floorRebuild) each sea's floor: its ends, its deep, its deepest point
-function seasFloor() {
+// (floorRebuild, first) each sea's floor's ends: at a shore that's a coast of the docks' layout (SEA0 / SEA1) where buildWorld
+// put them from its harbour (BED_A / BED_B), at any other shore the shore itself
+function seaBeds() {
   const S = SEAS.c;
-  for (let i = 0; i < SEAS.n; i++) { S.bedA[i] = BED_A; S.bedB[i] = BED_B; S.trA[i] = TR_A; S.trB[i] = TR_B; S.deepX[i] = floorDeep[0]; S.deepY[i] = floorDeep[1]; }
+  for (let i = 0; i < SEAS.n; i++) { S.bedA[i] = S.lo[i] === SEA0 ? BED_A : S.lo[i]; S.bedB[i] = S.hi[i] === SEA1 ? BED_B : S.hi[i]; }
 }
+// (no-countries step 5) is x over any sea's floor (between its floor's ends); is a sea's floor wide enough for caves
+function inBed(x) { for (let i = 0; i < SEAS.n; i++) if (x >= SEAS.c.bedA[i] && x <= SEAS.c.bedB[i]) return true; return false; }
+// is x more than m inside its own sea's floor (the island shelves: past BED_SHELF)
+function bedInside(x, m) { const i = seaSpanOf(x); return x > SEAS.c.bedA[i] + m && x < SEAS.c.bedB[i] - m; }
+function bedWide(w) { for (let i = 0; i < SEAS.n; i++) if (SEAS.c.bedB[i] - SEAS.c.bedA[i] > w) return true; return false; }
+// two places in the same sea (the one each is in, or nearest): what a boat can reach
+const sameSea = (a, b) => seaSpanOf(a) === seaSpanOf(b);
 const seaQ = x => x < 0 ? 0 : x > WORLD_W ? WORLD_W : x;
 function seaSpanAt(x) {
   const q = seaQ(x), lo = SEAS.c.lo, hi = SEAS.c.hi;
@@ -2039,7 +2050,7 @@ function seaIn(x, m, at) { const i = seaSpanOf(at); return clamp(x, SEAS.c.lo[i]
 function landIn(x, k, m, e) { const lo = LANDS.c.lo[k], hi = LANDS.c.hi[k]; return clamp(x, lo <= 0 ? e : lo + m, hi >= WORLD_W ? WORLD_W - e : hi - m); }
 function landRange(k, m, e) { const lo = LANDS.c.lo[k], hi = LANDS.c.hi[k]; return [lo <= 0 ? e : lo + m, hi >= WORLD_W ? WORLD_W - e : hi - m]; }
 const landOwnD = x => nearestShore(x).dir < 0;
-function seaDeepest() { let d = 0; for (let i = 1; i < SEAS.n; i++) if (SEAS.c.deepY[i] > SEAS.c.deepY[d]) d = i; return d; }
+function seaDeepest() { const S = SEAS.c, v = i => S.tab[i] ? S.deepY[i] : -Infinity; let d = 0; for (let i = 1; i < SEAS.n; i++) if (v(i) > v(d)) d = i; return d; }
 
 function makeShip(id, x, facing, dock) {
   const sh = {
@@ -2563,7 +2574,7 @@ function buildWorld(restore) {
   if (COAST_RAMP && !COAST_RAMP.length) COAST_RAMP = null;
   DOCK_PADS = docks.some(d => d.extra) ? docks.filter(d => d.extra).map(d => [d.L, d.dir, d.root]) : null;   // (its harbour's depth under its hangar)   // (a dock placed at sea: its own ground - 09-sea-surface)
   pirateWrecks.length = 0;                            // (the last world's: not levelling this one's floor while its rocks are laid out - buildDeep places them again)
-  btMark('start'); floorRebuild(); seasFloor(); btMark('floor');                                     // (OPEN WORLD: the ocean floor's shape, from the user's drawing - FLOOR_PTS; and the deep ocean's range, TR_A..TR_B)
+  btMark('start'); floorRebuild(); btMark('floor');                                     // (OPEN WORLD: the ocean floor's shape, from the user's drawing - FLOOR_PTS; and the deep ocean's range, TR_A..TR_B)
   buildCalm();
   // each harbour's buoy marks how far its tower's gun reaches (on a calm day): an enemy past it is in range
   buoys = docks.map(d => ({ x: d.towerX - d.dir * towerReachCalm(), col: 'orange', state: 'float', ph: buR() * 6, player: d.player }));
@@ -2911,8 +2922,9 @@ const floorPtsUsed = () => NET.role === 'local' ? FLOOR_PTS : FLOOR_DEF;
 // the sea's own. FLOOR_MARKED: any piece marked F or D (none: the floor exactly as it was)
 let FLOOR_MARKED = false;
 function floorSkinAt(x) {
-  if (!(BED_B - BED_A > 0)) return null;
-  if (x < BED_A || x > BED_B) return null;
+  const i = seaSpanOf(x), A = SEAS.c.bedA[i], B = SEAS.c.bedB[i];   // (its own sea's floor - SEAS)
+  if (!(B - A > 0)) return null;
+  if (x < A || x > B) return null;
   return groundSkinAt(x);                                         // (the one ground line's - 50-land-zz-ground)
 }
 // the forest's or the desert's lake bed at x, on the ocean floor ('F', 'D'), or null - the sea's own
@@ -2951,33 +2963,46 @@ function floorRebuild() {
   // stretch under the sea, GROUND - 50-land-zz-ground.js)
   groundPrep();
   FLOOR_MARKED = OWM && GSH.marked; floorSkinStrips = null; FLOOR_HILLY = OWM && GSH.hilly;
-  if (!OWM || !(BED_B - BED_A > 2 * BED_SHELF + 400)) return;
-  const L = BED_B - BED_A, n = Math.ceil(L / FLOOR_STEP) + 2, H = SEABED_Y - WATER_Y;
-  const T = new Float32Array(n), Ts = new Float32Array(n);
-  let mx = 0, mi = 0;
-  for (let i = 0; i < n; i++) {
-    // (the line's own depth right up to the shore: no fixed harbour shelf any more - the one line shapes the coast)
-    const x = BED_A + i * FLOOR_STEP, v = groundDepthAt(x) - H;
-    T[i] = v > -0.5 ? Math.max(0, v) : v;                           // (shallower than the harbours: raised - toward an island)
-    if (T[i] > mx) { mx = T[i]; mi = i; }
+  // (no-countries plan step 5, Nov 1: the floor per sea - each SEAS row its own ends, table, deep and deepest point;
+  // BED_A / BED_B stay the docks' sea's ends, TR_A / TR_B, floorTab / floorTabS and floorDeep the deepest sea's)
+  seaBeds();
+  const S = SEAS.c; let built = -1, fmax = -Infinity;
+  for (let k = 0; k < SEAS.n; k++) {
+    S.tab[k] = S.tabS[k] = null; S.trA[k] = S.trB[k] = 0;
+    const A = S.bedA[k], B = S.bedB[k];
+    if (!OWM || !(B - A > 2 * BED_SHELF + 400)) continue;
+    const L = B - A, n = Math.ceil(L / FLOOR_STEP) + 2, H = SEABED_Y - WATER_Y;
+    const T = new Float32Array(n), Ts = new Float32Array(n);
+    let mx = 0, mi = 0;
+    for (let i = 0; i < n; i++) {
+      // (the line's own depth right up to the shore: no fixed harbour shelf any more - the one line shapes the coast)
+      const x = A + i * FLOOR_STEP, v = groundDepthAt(x) - H;
+      T[i] = v > -0.5 ? Math.max(0, v) : v;                           // (shallower than the harbours: raised - toward an island)
+      if (T[i] > mx) { mx = T[i]; mi = i; }
+    }
+    // (the layers behind rest on the shape smoothed over some 300 units: no stairs, no pits narrower than they are)
+    const R = 20, tmp = new Float32Array(n);
+    for (let pass = 0; pass < 2; pass++) {
+      const src = pass ? tmp : T, dst = pass ? Ts : tmp;
+      let s = 0; for (let i = -R; i <= R; i++) s += src[clamp(i, 0, n - 1)];
+      for (let i = 0; i < n; i++) { dst[i] = s / (2 * R + 1); s += src[Math.min(n - 1, i + R + 1)] - src[Math.max(0, i - R)]; }
+    }
+    S.tab[k] = T; S.tabS[k] = Ts; S.deepX[k] = A + mi * FLOOR_STEP; S.deepY[k] = SEABED_Y + mx;
+    fmax = Math.max(fmax, SEABED_Y + mx + 120);
+    // the deep ocean: from where the floor first goes past the old deep floor's depth to where it last comes up past it
+    const deepD = SEABED_DEEP - SEABED_Y;
+    let a = -1, b = -1;
+    for (let i = 0; i < n; i++) if (T[i] > deepD) { if (a < 0) a = i; b = i; }
+    if (a >= 0 && b - a > 400 / FLOOR_STEP) { S.trA[k] = A + a * FLOOR_STEP; S.trB[k] = A + b * FLOOR_STEP; }
+    else { S.trA[k] = A + 0.3 * L; S.trB[k] = B - 0.3 * L; }
+    built = k;
   }
-  // (the layers behind rest on the shape smoothed over some 300 units: no stairs, no pits narrower than they are)
-  const R = 20, tmp = new Float32Array(n);
-  for (let pass = 0; pass < 2; pass++) {
-    const src = pass ? tmp : T, dst = pass ? Ts : tmp;
-    let s = 0; for (let i = -R; i <= R; i++) s += src[clamp(i, 0, n - 1)];
-    for (let i = 0; i < n; i++) { dst[i] = s / (2 * R + 1); s += src[Math.min(n - 1, i + R + 1)] - src[Math.max(0, i - R)]; }
+  if (built >= 0) {
+    const d = seaDeepest();
+    floorTab = S.tab[d]; floorTabS = S.tabS[d]; floorDeep = [S.deepX[d], S.deepY[d]]; SEA_FLOOR_MAX = fmax; setTrench(S.trA[d], S.trB[d]);
   }
-  floorTab = T; floorTabS = Ts;
-  floorDeep = [BED_A + mi * FLOOR_STEP, SEABED_Y + mx];
-  SEA_FLOOR_MAX = SEABED_Y + mx + 120;
-  // the deep ocean: from where the floor first goes past the old deep floor's depth to where it last comes up past it
-  const deepD = SEABED_DEEP - SEABED_Y;
-  let a = -1, b = -1;
-  for (let i = 0; i < n; i++) if (T[i] > deepD) { if (a < 0) a = i; b = i; }
-  if (a >= 0 && b - a > 400 / FLOOR_STEP) setTrench(BED_A + a * FLOOR_STEP, BED_A + b * FLOOR_STEP);
-  else setTrench(BED_A + 0.3 * L, BED_B - 0.3 * L);
-  krPadSet();
+  for (let k = 0; k < SEAS.n; k++) if (!S.tab[k]) { S.deepX[k] = floorDeep[0]; S.deepY[k] = floorDeep[1]; }   // (a sea with no drawn floor: the deepest point known, as before)
+  if (built >= 0) krPadSet();
 }
 // (user Oct 28: "Just make the floor just below the Kraken body flat") the kraken's pad: at the deepest point (where it
 // sits), the floor under its body levelled to the lowest of the floor there (bedDrop0, zigzag and all), easing back into
@@ -2991,15 +3016,16 @@ function krPadSet() {
   let flat = -Infinity; for (let q = x - half; q <= x + half; q += 8) flat = Math.max(flat, bedDrop0(q));
   KR_PAD = { x, half, flat };
 }
-function floorAt(T, x) {
-  const f = (x - BED_A) / FLOOR_STEP;
+// (T: a sea's table, A: its floor's left end)
+function floorAt(T, x, A) {
+  const f = (x - A) / FLOOR_STEP;
   if (!(f > 0)) return T[0];
   const i = f | 0;
   if (i >= T.length - 1) return T[T.length - 1];
   return T[i] + (T[i + 1] - T[i]) * (f - i);
 }
 // the shape's depth under the calm sea at x, world units (no zigzag, no rocks): what the caves will cut into
-function floorProfile(x) { return SEABED_Y - WATER_Y + (floorTab ? floorAt(floorTab, x) : bedSmooth(x)); }
+function floorProfile(x) { const i = seaSpanOf(x), T = SEAS.c.tab[i]; return SEABED_Y - WATER_Y + (T ? floorAt(T, x, SEAS.c.bedA[i]) : bedSmooth(x)); }
 // the deepest ground anywhere - the ocean floor's, or the land's when it's dug deeper (50-land-terrain): how far down the
 // GAME EDITOR's camera goes
 const worldDeepY = () => Math.max(SEA_FLOOR_MAX, OWM && land.deepY ? land.deepY : 0);
@@ -3018,7 +3044,7 @@ function krUSave() { try { localStorage.removeItem('bd_kraken_dy'); if (KR_U ===
 const krReset = () => { KR_U = KR_DEF[0]; KR_DY = KR_DEF[1]; krUSave(); };
 const krUsed = () => NET.role === 'local' ? [KR_U, KR_DY] : KR_DEF;
 const krPlaced = () => krUsed()[0] !== null && !!floorTab;
-const krSeatX = () => krPlaced() ? clamp(floorX(krUsed()[0]), BED_A + 700, BED_B - 700) : floorDeep[0];
+const krSeatX = () => { if (!krPlaced()) return floorDeep[0]; const d = seaDeepest(); return clamp(floorX(krUsed()[0]), SEAS.c.bedA[d] + 700, SEAS.c.bedB[d] - 700); };   // (in the deepest sea - SEAS)
 const krSeatY = () => krPlaced() && krUsed()[1] !== null ? WATER_Y + krUsed()[1] : null;
 let TR_A = 0, TR_B = 0;
 function setTrench(a, b) { TR_A = a; TR_B = b; }
@@ -3060,18 +3086,21 @@ function bedDrop(x) {
 // the floor's smooth slope only (no zigzag): what a background layer moving at its own parallax rests on (user Oct 27:
 // "when I'm driving a submarine underwater, all the background planes are sliding in this weird way. They should stay
 // static since they're background" - taking each column's depth from the near floor's zigzag reshaped them as they slid)
+// (no-countries plan step 5: each from its own sea's floor - the sea holding x, or the nearest; SEAS)
 function bedSmooth(x) {
-  if (floorTab) return floorAt(floorTabS, x);                     // (OPEN WORLD: the drawing's shape, smoothed)
-  const half = (BED_B - BED_A) / 2;
+  const i = seaSpanOf(x), A = SEAS.c.bedA[i], B = SEAS.c.bedB[i];
+  if (SEAS.c.tab[i]) return floorAt(SEAS.c.tabS[i], x, A);          // (OPEN WORLD: the drawing's shape, smoothed)
+  const half = (B - A) / 2;
   if (!(half > BED_SHELF)) return 0;
-  return BED_EXTRA * smoothstep(BED_SHELF, half, half - Math.abs(x - (BED_A + BED_B) / 2));
+  return BED_EXTRA * smoothstep(BED_SHELF, half, half - Math.abs(x - (A + B) / 2));
 }
 function bedDrop0(x) {
-  const half = (BED_B - BED_A) / 2;
+  const i = seaSpanOf(x), A = SEAS.c.bedA[i], B = SEAS.c.bedB[i], T = SEAS.c.tab[i];
+  const half = (B - A) / 2;
   if (!(half > BED_SHELF)) return 0;
-  const d = half - Math.abs(x - (BED_A + BED_B) / 2);            // from the nearer shore
+  const d = half - Math.abs(x - (A + B) / 2);                    // from the nearer shore
   // (OPEN WORLD: the drawing's shape; the sea duel: sloping from each shore to the middle)
-  const drop = floorTab ? floorAt(floorTab, x) : BED_EXTRA * smoothstep(BED_SHELF, half, d);
+  const drop = T ? floorAt(T, x, A) : BED_EXTRA * smoothstep(BED_SHELF, half, d);
   // (not a smooth slope, user Oct 24 night: ups and downs, zigzagging - straight stretches between random heights,
   // a long swell of them and a shorter, sharper one on top; none on the harbour's shelf, more the deeper it gets)
   const r = smoothstep(BED_SHELF, BED_SHELF + 500, d) * (0.55 + 0.45 * Math.min(1, drop / BED_EXTRA)) * (FLOOR_HILLY ? floorHillsAt(x) : 1);
@@ -3956,8 +3985,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 535;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 15:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 536;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 15:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -27850,7 +27879,7 @@ const REEF_K = 1.24;                                  // world units a sprite pi
 let reef = [], rockForms = [], coastFront = [];
 function seededRng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 // how far out from the nearer shore (a harbour's pier end); negative under the pier
-function shoreDist(x) { const half = (BED_B - BED_A) / 2; return half - Math.abs(x - (BED_A + BED_B) / 2); }
+function shoreDist(x) { const i = seaSpanOf(x), A = SEAS.c.bedA[i], B = SEAS.c.bedB[i], half = (B - A) / 2; return half - Math.abs(x - (A + B) / 2); }   // (its own sea's floor's ends - SEAS)
 // the rock formations' tops, where they stand (Infinity where there's none): part of the floor (seabedY)
 function rockTopY(x) {
   let top = Infinity;
@@ -28111,8 +28140,10 @@ function floorSkinRuns() {
   const P = groundUsed(), out = [];                               // (the one ground line - 50-land-zz-ground)
   for (let k = 0; k < P.length - 1; k++) {
     const sk = P[k][2]; if (sk !== 'F' && sk !== 'D') continue;
-    const a = Math.max(BED_A, gX(P[k][0])), b = Math.min(BED_B, gX(P[k + 1][0])), last = out[out.length - 1]; if (!(b > a)) continue;
-    if (last && last[2] === sk && Math.abs(last[1] - a) < 1) last[1] = b; else out.push([a, b, sk]);
+    for (let i = 0; i < SEAS.n; i++) {                            // (over each sea's floor - SEAS)
+      const a = Math.max(SEAS.c.bedA[i], gX(P[k][0])), b = Math.min(SEAS.c.bedB[i], gX(P[k + 1][0])), last = out[out.length - 1]; if (!(b > a)) continue;
+      if (last && last[2] === sk && Math.abs(last[1] - a) < 1) last[1] = b; else out.push([a, b, sk]);
+    }
   }
   return out;
 }
@@ -30899,6 +30930,9 @@ function cpuEnemy(p) {
   return { ship: sh && sh.state === 'afloat' && !inHarbour(sh) && open(sh) && !hiddenShip(sh) ? sh : null, sub: sb && sb.state === 'out' && !inHarbour(sb) && open(sb) ? sb : null,
     plane: pl && pl.state === 'fly' && !hiddenPlane(pl) ? pl : null, tower: towers[e] && towers[e].hp > 0 ? towers[e] : null };
 }
+// (no-countries plan step 5: the AI by reachability) what a boat can reach: the enemy's battleship, sub and tower in her own
+// sea only (the one she's in, or nearest - SEAS); one in another sea isn't chased, she keeps to her own
+function cpuSeaOf(E, v) { const r = o => o && sameSea(o.x, v.x) ? o : null; return { ship: r(E.ship), sub: r(E.sub), plane: E.plane, tower: r(E.tower) }; }
 // the choice: which vehicle now
 function cpuChoose(B) {
   if (LAND) return cpuLandChoose(B);
@@ -31027,7 +31061,7 @@ function cpuMG(B, dt, gun, mx, my, facing, pl) {
   if (fire) cpuCount(p, 'mg');
 }
 function cpuShip(B, dt) {
-  const p = B.p, sh = B.unit || ships[p], g = gunOf(sh), d = homeDock[p], T = B.T, E = cpuEnemy(p), toE = -d.dir;
+  const p = B.p, sh = B.unit || ships[p], g = gunOf(sh), d = homeDock[p], T = B.T, E = cpuSeaOf(cpuEnemy(p), sh), toE = -d.dir;
   if (sh.state !== 'afloat' || sh.gate || sh.moored) { cpuSetMG(B, false); return; }
   // badly hurt or out of shells: home to be repaired
   if (shipLife(sh) < T.retreat || g.ammo <= 0) { cpuSetMG(B, false); cpuDrive(B, d.dir); return; }
@@ -31080,7 +31114,7 @@ function cpuSub(B, dt) {
   if (sb && sb.state === 'out' && sb.blockT > 0) sb.depthT = clamp(Math.min(sb.depthT, sb.blockTop - SUB_DN - 12), WATER_Y, subMaxY(sb.x));
 }
 function cpuSub0(B, dt) {
-  const p = B.p, sb = B.unit || subs[p], d = homeDock[p], T = B.T, E = cpuEnemy(p);
+  const p = B.p, sb = B.unit || subs[p], d = homeDock[p], T = B.T, E = cpuSeaOf(cpuEnemy(p), sb);
   if (sb.state !== 'out' || sb.gate) return;
   // hurt, or out of torpedoes: home (a raider never goes home)
   if (!B.unit && (subLife(sb) < 0.4 || sb.torps <= 0)) { cpuDrive(B, d.dir); sb.depthT = SUB_GATE_Y; return; }
@@ -31106,7 +31140,7 @@ function cpuSub0(B, dt) {
   }
   if (B.unit) {
     // a raider with nothing to hunt: it lurks off the enemy harbour mouth, waiting for something to come out
-    const e = homeDock[1 - p], dx = e.quay - e.dir * 650 - sb.x;
+    const e = homeDock[1 - p], lx = e.quay - e.dir * 650, dx = sameSea(lx, sb.x) ? lx - sb.x : 0;   // (their harbour in another sea: she keeps to her own)
     sb.depthT = clamp(WATER_Y + 120, WATER_Y, subMaxY(sb.x));
     cpuDrive(B, Math.abs(dx) > 80 ? Math.sign(dx) : 0);
     return;
@@ -32305,7 +32339,7 @@ function paramsSave() {
 // ---- the world: the floor the caves cut into is the game's own (sandY: the drawn shape, the zigzag, the wrecks' and the
 // kraken's levelled floors), as depth under the calm sea; beyond the piers' ends, the land (rock from just above the water)
 const LAND_D = -14;
-const inOcean = X => X >= BED_A && X <= BED_B;
+const inOcean = X => inBed(X);   // (over any sea's floor - SEAS, 05-zz-seas.js)
 const floorDepth = X => inOcean(X) ? sandY(X) - WATER_Y : LAND_D;
 // (user Oct 28, 17:14 - "This should also work for caves, so we could have 'underwater' caves or dry land cave systems") a
 // system can hang from any part of the ground: a system whose mouth is on the land or a lake's bed (s.x, not on the ocean
@@ -34437,7 +34471,7 @@ function cbwCheck(k, m) {
 
 // ---- the caves' life in the game: built a little at a time (a few milliseconds a frame, so nothing stops), then their
 // water and what falls and rises in it stepped, and drawn over the world where the lamp finds them
-function cavesWanted() { return OWM && BED_B - BED_A > 2000 && artReady(); }
+function cavesWanted() { return OWM && bedWide(2000) && artReady(); }   // (any sea's floor wide enough - SEAS)
 // build (or build again: the floor's shape, the screen's width - the ocean is wider on a wider screen -, the caves' shapes
 // or a rebuilding slider changed) one system after the other; the old ones stay in use till each new one is done
 // (Oct 30: with the workers on, each system is built on a second core - cbwBuild, 13-build-worker.js; sync: here, at once - the tools)
@@ -34565,7 +34599,7 @@ function draw() {
   if (LIT.on && !all) { LPA.all = performance.now() - t0; for (const k in LP) if (k !== 'n') LP[k] += ((LPA[k] || 0) - LP[k]) * 0.1; LP.n++; }
 }
 // is x near a system's mouth (the game keeps its rock formations off them, as off the kraken's pad - buildReef)
-function nearMouth(x, r) { if (!(BED_B - BED_A > 2000)) return false; return CAVES.systems.some(s => Math.abs(sysX(s) - x) < r); }
+function nearMouth(x, r) { if (!bedWide(2000)) return false; return CAVES.systems.some(s => Math.abs(sysX(s) - x) < r); }
 const CAVE_API = {
   nearMouth, worker: CWW, buildWorker: CBW,   // (engine stage 4: the caves' workers - the swell's, the build's - for the perf panel)
   step, pump, draw, holeSnap, holes, buildNow, subNear, subMove, rebuild: () => refresh(null),
@@ -38654,11 +38688,11 @@ function floorSave() { try { if (JSON.stringify(FLOOR_PTS) === JSON.stringify(FL
 // pit bottom: on the drawn floor's cliffs a wreck can't lie level
 function floorFlatSpot(x0, half) {
   if (!floorTab) return x0;
-  const lo = TR_A + half + 100, hi = TR_B - half - 100, kx = krSeatX();
+  const S = SEAS.c, i = seaSpanOf(x0), lo = S.trA[i] + half + 100, hi = S.trB[i] - half - 100, kx = krSeatX();   // (over her own sea's deep - SEAS)
   if (!(hi > lo)) return x0;
   let best = clamp(x0, lo, hi), bs = Infinity;
   for (let x = Math.max(lo, x0 - 1600); x <= Math.min(hi, x0 + 1600); x += 25) {
-    if (Math.abs(x - kx) < half + 500 || floorProfile(x) > floorDeepest()[1] - WATER_Y - 700) continue;   // (the pit's bottom: the kraken's)
+    if (Math.abs(x - kx) < half + 500 || floorProfile(x) > S.deepY[i] - WATER_Y - 700) continue;   // (the pit's bottom: the kraken's)
     let mn = Infinity, mx = -Infinity;
     for (let k = -4; k <= 4; k++) { const d = floorProfile(x + k * half / 4); if (d < mn) mn = d; if (d > mx) mx = d; }
     const s = (mx - mn) + 0.08 * Math.abs(x - x0) + (pirateWrecks.some(w => Math.abs(w.x - x) < (w.half || 200) * 2 + 200) ? 1e6 : 0);
@@ -38668,7 +38702,7 @@ function floorFlatSpot(x0, half) {
 }
 // the shape changed (the editor): its tables, then everything laid out on the floor, again
 function floorEdited() {
-  floorRebuild(); seasFloor();
+  floorRebuild();
   if (!LAND) return;
   // the pirate wrecks: each to the nearest level ground and the floor levelled under her again
   const ws = pirateWrecks.slice(); pirateWrecks.length = 0;
@@ -38684,7 +38718,7 @@ function floorEdited() {
   if (land.cell) { const had = ISLE !== null; isleBuild(); if (had || ISLE !== null) landEdited(); }
   // (user Oct 30: REFRESH saw no change) the floor as now built - the sand, wherever across the ocean, with every levelled
   // spot on it - for the caves cut into it (their sig, src/caves/30-api.js): built from a different floor, they're built again
-  let h = 0; for (let x = BED_A; x <= BED_B; x += 16) h = (Math.imul(h, 31) + Math.round(sandY(x))) | 0;
+  let h = 0; for (let i = 0; i < SEAS.n; i++) for (let x = SEAS.c.bedA[i]; x <= SEAS.c.bedB[i]; x += 16) h = (Math.imul(h, 31) + Math.round(sandY(x))) | 0;   // (every sea's floor)
   FLOOR_ED.print = h;
 }
 // ---- the ocean's part of the TERRAIN tab (its buttons: 50-land-unified.js)
@@ -42382,7 +42416,8 @@ const wrecksUsed = () => NET.role === 'local' ? WRECK_SET : WRECK_DEF;
 // a wreck put where it was placed (or not): its x, its keel's y (null: on the floor) and the floor levelled under her or not
 function wreckSeat(w) {
   const s = floorTab ? wrecksUsed()[w.k] : null;
-  if (s) { w.x = clamp(floorX(s[0]), BED_A + 200, BED_B - 200); w.y = WATER_Y + s[1]; w.flat = null; return true; }
+  if (s) { const X = floorX(s[0]), i = seaSpanOf(X); w.x = clamp(X, SEAS.c.bedA[i] + 200, SEAS.c.bedB[i] - 200);   // (on her own sea's floor - SEAS)
+    w.y = WATER_Y + s[1]; w.flat = null; return true; }
   w.y = null; return false;
 }
 // her keel's y: where she was put, or on the floor
@@ -42443,6 +42478,9 @@ function chestAt(w) {
 // the crane's hook (where the sub hangs, docked) and the sub's middle hanging under it (on her half, once she's broken)
 const hookAt = c => civHalfPoint(c, RS_HOOK[0], RS_HOOK[1]);
 const rsAfloat = c => !!c && c.state === 'sail';
+// (no-countries plan step 5) a minisub explores its own sea's deep (the sea it's in - SEAS): x kept to it, or u along it
+function msubDeep(s, x) { const i = seaSpanOf(s.x); return clamp(x, SEAS.c.trA[i], SEAS.c.trB[i]); }
+function msubDeepAt(s, u) { const i = seaSpanOf(s.x), a = SEAS.c.trA[i], b = SEAS.c.trB[i]; return a + u * (b - a); }
 /* (user Oct 27, 2: "She sinks with the sub aboard... the sub goes down with her, riding her deck or hook. If the sub
    isn't destroyed, it comes away from her as she goes under and carries on with its own exploration... The sub is out
    in the water when she sinks: it carries on exploring and isn't reeled in... With no ship to go back to, when its
@@ -42452,7 +42490,7 @@ const rsAfloat = c => !!c && c.state === 'sail';
 function minisubFree(s) {
   const p = s.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === s;
   s.state = 'out'; s.cable = 0; s.vx = Math.sign(s.x - s.ship.x || 1) * 45; s.vy = 6; s.turn = null; s.splashed = true; s.armed = true; s.clearT = 4;   // (away from her hull: a moment to get clear of it)
-  s.ai = mine ? null : { tx: clamp(s.x + vehMsubRnd(-900, 900), TR_A, TR_B), t: vehMsubRnd(40, 80) };
+  s.ai = mine ? null : { tx: msubDeep(s, s.x + vehMsubRnd(-900, 900)), t: vehMsubRnd(40, 80) };
   sound('latch', s.x);                                                  // (the hook lets go)
   if (!SIM_ONLY) for (let k = 0; k < 16; k++) addBubble(s.x + vehMsubRnd(-8, 8), s.y + vehMsubRnd(-5, 5), vehMsubRnd(-15, 15), -vehMsubRnd(15, 40), vehMsubRnd(0.8, 2));
 }
@@ -42499,7 +42537,7 @@ function stepMinisub(s, dt) {
   if (s.state === 'docked') {
     [s.x, s.y] = hungAt(c); s.facing = c.face;
     // (left to itself, now and then it goes down to look about)
-    if (!mine && (s.wait -= dt) <= 0) { s.state = 'lower'; s.cable = 0; s.ai = { tx: TR_A + vehMsubR() * (TR_B - TR_A), t: vehMsubRnd(40, 80) }; }
+    if (!mine && (s.wait -= dt) <= 0) { s.state = 'lower'; s.cable = 0; s.ai = { tx: msubDeepAt(s, vehMsubR()), t: vehMsubRnd(40, 80) }; }
     if (mine) { const L = civStick(p); if (L > 0.2 || Math.abs(msLever(p)) > 0.2) { s.state = 'lower'; s.cable = 0; } }
     return;
   }
@@ -42521,7 +42559,7 @@ function stepMinisub(s, dt) {
     // (its look round over: back to her - or, with her gone, up to the surface where it is, to float there)
     const home = s.ai.t <= 0, orphan = !rsAfloat(c), tx = home ? (orphan ? s.x : hookAt(c)[0]) : s.ai.tx, ty = home ? surfaceY(s.x) + (orphan ? 0 : 10) : Math.min(seabedY(clamp(s.x, 0, WORLD_W)), seabedY(clamp(s.x + Math.sign(tx - s.x) * 140, 0, WORLD_W))) - vehMsubRnd(60, 70);   // (the ground ahead too: up the drawn floor's walls, not stuck against them)
     lever = clamp((tx - s.x) / 200, -1, 1); stick = clamp((ty - s.y) / 120, -1, 1);
-    if (!home && Math.abs(tx - s.x) < 40) s.ai.tx = clamp(s.x + vehMsubRnd(-900, 900), TR_A, TR_B);
+    if (!home && Math.abs(tx - s.x) < 40) s.ai.tx = msubDeep(s, s.x + vehMsubRnd(-900, 900));
     if (home && orphan && s.y < surfaceY(s.x) + 8) s.ai = null;     // (up: it stays floating, below)
   } else stick = -0.5;                                                // (let go: it floats up)
   // (user Oct 27, 12:21: "When a sub releases it goes a bit deep so it doesn't snap back to the boat even if you don't
@@ -44839,7 +44877,7 @@ function isleBuild(R = land.R) {
   ISLE = null; land.isles = []; land.islRuns = []; land.itop = null;
   if (!OWM) return;
   let any = false; const I = new Uint8Array(land.cols);
-  if (floorTab) for (let c = 0; c < land.cols; c++) { const x = c * LT_CELL; if (((x > BED_A + BED_SHELF && x < BED_B - BED_SHELF) || rampAt(x) > 0 || dockPadAt(x)) && sandY(x) < WATER_Y - 1) { I[c] = 1; any = true; } }   // (and a beach where a coast has no harbour)
+  if (floorTab) for (let c = 0; c < land.cols; c++) { const x = c * LT_CELL; if ((bedInside(x, BED_SHELF) || rampAt(x) > 0 || dockPadAt(x)) && sandY(x) < WATER_Y - 1) { I[c] = 1; any = true; } }   // (and a beach where a coast has no harbour)
   // (land.isles: each stretch of the ground's own line out of the water at sea, [left, right] in world x - the land's
   // pass draws there too, renderLandObjects)
   for (let c = 0; c < land.cols; c++) if (I[c] === 1 && I[c - 1] !== 1) { let e = c; while (I[e + 1] === 1) e++; land.isles.push([c * LT_CELL, (e + 1) * LT_CELL]); }
@@ -53380,7 +53418,7 @@ async function start(data) {
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
   Object.assign(window.__game, { structs: () => LAND_STRUCTS, structDragTo: (i, u, y) => structDragTo(LAND_STRUCTS[i], u, y), structUp: old => { structSave(); structEdited(old); }, airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landShape: () => ({ pts: LAND_PTS, def: LAND_DEF, lakes: (land.lakes || []).map(L => [L[0], L[1], L.today ? 1 : 0]), ms: landEditMs, any: LSH.any }), landSet: P => { LAND_PTS = P; landSave(); landEdited(); }, landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landUp: () => { landSave(); landEdited(); }, landPtX: (R, u) => landPtX(R, u), landLock: x => landLock(x), landProfile0: x => landProfile0(x, land.R), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), setOwner: (i, v) => { const o = LAND_STRUCTS[i]; if (v === (o.R ? 1 : 0)) delete o.own; else o.own = v; }, islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x),
     dockOwnSet: (R, v) => dockOwnSet(R, v), worldExtSet: (R, n) => worldExtSet(R, n), buildTimes: () => BUILD_T.slice(), landHillsAt: x => landHillsAt(x), landNatAt: x => landNat(x, land.R), stretchSel: (sel, n) => { const sp = selBaseSpan(sel); return sp ? stretchAt(sp[0], sp[1], n * VIEW_W) : false; }, stretchReset: () => { stretchReset(); builtViewW = 0; resize(); }, stretchNone: () => { STRETCH_SET = null; stretchSave(); builtViewW = 0; resize(); }, copyText: () => terrainCopyText(), terrainSel: s => { TERRAIN_ED.sel = s; terrainSyncSkin(); }, split: n => { ED_SPLIT.v = n; terrainSplit(); return TERRAIN_ED.sel; }, delSeg: () => { terrainDelSeg(); return TERRAIN_ED.sel; }, floorPts: () => FLOOR_PTS, lakes: () => (land.lakes || []).map(L => [Math.round(L[0]), Math.round(L[1])]), krakenMoveTo: (x, y) => krakenMoveTo(x, y), wreckMoveTo: (k, x, y) => wreckMoveTo(k, x, y), wrecks: () => pirateWrecks.map(w => ({ k: w.k, x: Math.round(w.x), y: w.y, by: Math.round(wreckBy(w)), flat: w.flat, chest: chestAt(w).map(Math.round) })),  krSeat: () => ({ x: Math.round(KR.bx), y: Math.round(KR.by), u: KR_U }), landEvictNow: () => { if (!land.seen) return 0; land.seen.fill(-1e6); const n = land.chunks.filter(Boolean).length; landEvict(); return n - land.chunks.filter(Boolean).length; }, landCounts: () => ({ stones: (land.stones || []).length, props: (land.props || []).length, tufts: (land.tufts || []).length, boulders: (land.boulders || []).length, outcrops: (land.outcrops || []).length, cells: land.cell ? land.cell.length : 0 }), worldInfo: () => ({ W: WORLD_W, EXT_L, EXT_R, SEA0, SEA1, VIEW_W, BED_A, BED_B, cols: land.cols, pts: LAND_PTS }), docksXSet: L => { DOCKS_X = L; docksXSave(); }, sandY: x => sandY(x), myTw: p => myTw(p), ownTowers: p => ownTowers(p), dockInfo: () => ({ owned: DOCKS_OWNED, docks: docks.map(d => ({ x: Math.round(d.quay), dir: d.dir, player: d.player, tw: towers.indexOf(d._tw) })), home: homeDock.map(d => ({ x: Math.round(d.quay), dir: d.dir, stand: !!d.stand, player: d.player })), towers: towers.map(t => ({ p: t.player, x: Math.round(t.x), hp: t.hp, edge: !!t.edge })), ships: ships.map(s => s.state), subs: subs.map(s => s.state), fleet: [0, 1].map(p => [fleet[p].ship, fleet[p].sub]) }) });
-  Object.assign(window.__game, { ground: () => ({ P: GROUND, def: GROUND_DEF, gX: s => gX(s), gS: x => gS(x), lineY: x => gLineY(x), free: k => gFree(k), sea: [SEA0, SEA1], seas: () => Array.from({ length: SEAS.n }, (_, i) => SEAS.plain(i)), lands: () => Array.from({ length: LANDS.n }, (_, i) => LANDS.plain(i)), bed: [BED_A, BED_B], depth: x => groundDepthAt(x), sand: x => sandY(x), dirty: () => [LAND_ED.dirty, FLOOR_ED.dirty] }), terrainRefresh: () => terrainRefresh() });   // (the one ground line - 50-land-zz-ground)
+  Object.assign(window.__game, { ground: () => ({ P: GROUND, def: GROUND_DEF, gX: s => gX(s), gS: x => gS(x), lineY: x => gLineY(x), free: k => gFree(k), sea: [SEA0, SEA1], seas: () => Array.from({ length: SEAS.n }, (_, i) => SEAS.plain(i)), seasTest: L => { SEAS_TEST = L; }, lands: () => Array.from({ length: LANDS.n }, (_, i) => LANDS.plain(i)), bed: [BED_A, BED_B], depth: x => groundDepthAt(x), sand: x => sandY(x), dirty: () => [LAND_ED.dirty, FLOOR_ED.dirty] }), terrainRefresh: () => terrainRefresh() });   // (the one ground line - 50-land-zz-ground)
   Object.assign(window.__game, { floor: () => ({ pts: FLOOR_PTS, def: FLOOR_DEF, A: BED_A, B: BED_B, TR: [TR_A, TR_B], max: SEA_FLOOR_MAX, deepest: floorDeepest(), tab: !!floorTab }), floorProfile: x => floorProfile(x), floorSet: P => { FLOOR_PTS = P; floorEdited(); }, floorEdited: () => floorEdited(), bedSmooth: x => bedSmooth(x), floorEdOn: () => floorEdOn(), floorED: () => FLOOR_ED, S: () => S, viewW: () => VIEW_W, editorTab: t => { const b = [...document.querySelectorAll('#skyEd button.tab')].find(q => q.textContent === t); if (b) b.click(); return !!b; }, editorOpen: () => { if (!NSKY.editor.TUNE.built) skyNewFrame(); if (NSKY.editor.TUNE.root.hidden) NSKY.editor.TUNE.openBtn.click(); },
     civHalfGap: c => [0, 1].map(i => { const h = c.hv && c.hv[i]; if (!h) return null; const kl = civHalfKeel(c, i, civArt(c), CIV[c.kind]), mx = h.x + kl.m * Math.cos(h.a), my = h.y + kl.m * Math.sin(h.a), ca = Math.cos(h.a), sa = Math.sin(h.a), d = kl.pts.map(([lx, ly]) => civFloor(mx + lx * ca - ly * sa) - (my + lx * sa + ly * ca)); return { a: h.a, rest: !!h.rest, min: Math.min(...d), max: Math.max(...d) }; }),
     civHalfPoint: (c, x, y) => civHalfPoint(c, x, y), msPings: () => msPings, partRestOf: sb => sb.parts.map(q => ({ y: q.y, a: q.a, rest: q.rest, r: partRest(sb, q) })), floorRest: (pts, cx, amax, a0) => floorRest(pts, cx, null, amax, a0), ms: { hold: msHold, keys: msKeys }, chargeAt: (x, y) => detonateCharge({ x, y, owner: -1 }) });
