@@ -393,6 +393,10 @@ function swHostResync(m) {
   SWH.t0 = performance.now() - SWH.done * SUBSTEP * 1000;            // (no catching up on the time the rebuild took)
 }
 
+/* THE BUILT-IN WORLDS (00-world.js): the user's SNAPSHOT as kept - each world's keys, stamped with when it was taken (Toronto
+   time). Written by tools/bake-world.py <snapshot.json>; not by hand. */
+const WORLD_PACK = {"stamp":{"open":"","story":""},"open":{},"story":{}};
+
 /* ---- TWO WORLDS (user Oct 31 20:41: "maybe story world should be a separate world from open world. Open world is more of a
    'everything' smashed together and I will be more tailored in the story mode. But I don't want to lose the open one (and
    battle mode uses it). So let's have a separate world for story"). Everything the editors keep of a world in this browser
@@ -403,29 +407,78 @@ function swHostResync(m) {
    the simulation worker alike (its localStorage is the page's, copied - 00-sw-boot.js), so every file reads its own key as
    it always did. Changing worlds reloads the page (worldSwitch, from menuPlay): nothing of one world stays in the other.
    The Story copy starts as the open world as it was the first time STORY is chosen. ---- */
-const WORLD_KEYS = ['bd_dock_own', 'bd_docks', 'bd_docks_x', 'bd_floor_pts', 'bd_ground', 'bd_islands', 'bd_kraken_dy', 'bd_kraken_u', 'bd_land_pts', 'bd_land_structs', 'bd_land_towers', 'bd_structs', 'bd_stretch', 'bd_weather_areas', 'bd_world_ext', 'bd_wrecks', 'bd_sky_colours', 'bd_sky_p', 'bd_nature', 'bd_grade'];
+const WORLD_KEYS = ['bd_dock_own', 'bd_docks', 'bd_docks_x', 'bd_floor_pts', 'bd_ground', 'bd_islands', 'bd_kraken_dy', 'bd_kraken_u', 'bd_land_pts', 'bd_land_structs', 'bd_land_towers', 'bd_structs', 'bd_stretch', 'bd_weather_areas', 'bd_world_ext', 'bd_wrecks', 'bd_sky_colours', 'bd_sky_p', 'bd_nature', 'bd_grade', 'bd_wbase'];
 const swKey = k => 'bd_sw_' + k.slice(3);
+/* (user Oct 31 21:38: "can we have a way that the snapshot has a timestamp? So if I get a build that has a snapshot that is more
+   recent than my machine... if I change machines, then I'm always with the out-of-date version") THE BUILT-IN WORLDS: a
+   SNAPSHOT the user pastes is put in here as it was kept (its store: each world's keys), stamped with when it was taken.
+   A world key this browser hasn't kept reads the built-in one - a new machine, or one with no edits of its own, has the
+   latest world at once, the artifact and the Pages alike. bd_wbase (a world key: each world its own) is the stamp of the
+   built-in world this browser's edits were made over; a newer one built in, the title asks (worldStale): USE NEW (this
+   browser's edits of that world let go) or KEEP MINE. Empty: nothing built in yet - the code's own defaults, as before */
+// (WORLD_PACK: 00-world-pack.js - written by tools/bake-world.py from a pasted SNAPSHOT)
+const worldPackOf = story => story ? WORLD_PACK.story : WORLD_PACK.open;
 // a key as it is kept, whichever world is loaded (the SNAPSHOT: both worlds in one paste - 41-sky-new.js gameSnapshot)
 let lsRawGet = k => localStorage.getItem(k);
 const STORY_WORLD = (() => { try { return localStorage.getItem('bd_world') === 'story'; } catch (e) { return false; } })();
 (function worldShim() {
-  if (!STORY_WORLD) return;
-  const map = k => typeof k === 'string' && WORLD_KEYS.includes(k) ? swKey(k) : k;
+  const PK = worldPackOf(STORY_WORLD), packed = Object.keys(PK).length > 0;
+  if (!STORY_WORLD && !packed) return;                          // (the open world, nothing built in: the storage as it is)
+  const isW = k => typeof k === 'string' && WORLD_KEYS.includes(k);
+  const map = k => STORY_WORLD && isW(k) ? swKey(k) : k;
+  const back = (k, v) => v == null && isW(k) && k in PK ? PK[k] : v;   // (not kept here: the built-in world's)
   try {
     const LS = localStorage;
     if (typeof Storage !== 'undefined' && LS instanceof Storage) {
       const P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
       lsRawGet = k => g.call(LS, k);
-      P.getItem = function (k) { return g.call(this, this === LS ? map(k) : k); };
+      P.getItem = function (k) { return this === LS ? back(k, g.call(this, map(k))) : g.call(this, k); };
       P.setItem = function (k, v) { return s.call(this, this === LS ? map(k) : k, v); };
       P.removeItem = function (k) { return r.call(this, this === LS ? map(k) : k); };
     } else {                                                     // (the worker's stand-in: a plain object)
       const g = LS.getItem, s = LS.setItem, r = LS.removeItem;
       lsRawGet = k => g(k);
-      LS.getItem = k => g(map(k)); LS.setItem = (k, v) => s(map(k), v); LS.removeItem = k => r(map(k));
+      LS.getItem = k => back(k, g(map(k))); LS.setItem = (k, v) => s(map(k), v); LS.removeItem = k => r(map(k));
     }
   } catch (e) { }
 })();
+// (the page, on load) this world's edits here against the built-in world: none of its own - its stamp taken; older than a
+// newer one built in - the title asks (WORLD_STALE)
+let WORLD_STALE = null;
+(function worldStaleCheck() {
+  try {
+    if (SW_IN_WORKER) return;
+    const built = WORLD_PACK.stamp[STORY_WORLD ? 'story' : 'open'], raw = k => lsRawGet(STORY_WORLD ? swKey(k) : k);
+    if (!built) return;
+    const base = raw('bd_wbase'), mine = WORLD_KEYS.some(k => k !== 'bd_wbase' && raw(k) != null);
+    if (!mine) { if (base !== built) localStorage.setItem('bd_wbase', built); return; }
+    if (!base || base < built) WORLD_STALE = { built, base };
+  } catch (e) { }
+})();
+function worldStaleAnswer(useNew) {
+  const S = WORLD_STALE; WORLD_STALE = null; if (!S) return;
+  try {
+    if (useNew) for (const k of WORLD_KEYS) localStorage.removeItem(k);   // (this world's edits here let go: the built-in one read)
+    localStorage.setItem('bd_wbase', S.built);
+  } catch (e) { }
+  if (useNew) location.reload();
+}
+const worldStaleLayout = () => { const w = Math.min(ubw - 16, 380), h = 92, x = Math.round((ubw - w) / 2), y = Math.round(ubh * 0.08); return { x, y, w, h, yes: [x + w / 2 - 128, y + h - 32, 120, 24], no: [x + w / 2 + 8, y + h - 32, 120, 24] }; };
+function drawWorldStale() {
+  if (!WORLD_STALE || !ui.title) return;
+  const L = worldStaleLayout(), S = WORLD_STALE;
+  ug.fillStyle = 'rgba(18,26,42,0.96)'; ug.fillRect(L.x, L.y, L.w, L.h);
+  ug.fillStyle = '#ffd23a'; ug.fillRect(L.x, L.y, L.w, 2); ug.fillRect(L.x, L.y + L.h - 2, L.w, 2); ug.fillRect(L.x, L.y, 2, L.h); ug.fillRect(L.x + L.w - 2, L.y, 2, L.h);
+  drawText(ug, 'THIS VERSION HAS A NEWER ' + (STORY_WORLD ? 'STORY' : 'OPEN') + ' WORLD (' + S.built + ')', L.x + L.w / 2, L.y + 12, '#ffffff', 1, 'center');
+  drawText(ug, 'YOUR EDITS ON THIS DEVICE ARE OLDER' + (S.base ? ' (' + S.base + ')' : ''), L.x + L.w / 2, L.y + 28, '#ff9a7a', 1, 'center');
+  modeButton(...L.yes, 'USE NEW', true, 1); modeButton(...L.no, 'KEEP MINE', false, 1);
+}
+if (typeof window !== 'undefined' && !SW_IN_WORKER) window.addEventListener('pointerdown', ev => {
+  if (!WORLD_STALE || !ui.title || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
+  const [X, Y] = toUI(ev.clientX, ev.clientY), L = worldStaleLayout(), inR = r => X >= r[0] && X <= r[0] + r[2] && Y >= r[1] && Y <= r[1] + r[3];
+  if (inR(L.yes)) worldStaleAnswer(true); else if (inR(L.no)) worldStaleAnswer(false); else return;
+  ev.stopImmediatePropagation(); ev.preventDefault();
+}, { capture: true, passive: false });
 // the world a menu mode plays in
 const worldOfMode = m => m === 'story' ? 'story' : 'open';
 // (menuPlay) the mode picked wants the other world: its keys made (the first time: the open world's, copied), the choice
@@ -433,7 +486,7 @@ const worldOfMode = m => m === 'story' ? 'story' : 'open';
 function worldSwitch(mode, then) {
   try {
     if (mode === 'story') {
-      if (!localStorage.getItem('bd_sw_init')) { for (const k of WORLD_KEYS) { const v = localStorage.getItem(k); if (v != null) localStorage.setItem(swKey(k), v); } localStorage.setItem('bd_sw_init', '1'); }
+      if (!localStorage.getItem('bd_sw_init')) { if (!Object.keys(WORLD_PACK.story).length) for (const k of WORLD_KEYS) { const v = localStorage.getItem(k); if (v != null && k !== 'bd_wbase') localStorage.setItem(swKey(k), v); } localStorage.setItem('bd_sw_init', '1'); }   // (a Story world built in: that one, nothing copied)
       localStorage.setItem('bd_world', 'story');
     } else localStorage.removeItem('bd_world');
     sessionStorage.setItem('bd_world_go', (then ? then + ':' : '') + mode);
@@ -502,6 +555,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) {
   }, 700);
 }
 if (typeof window !== 'undefined') window.__worldEdit = m => worldEdit(m);   // (tools)
+if (typeof window !== 'undefined') window.__worldStale = () => WORLD_STALE;   // (tools)
 
 /* ================================================================
    Assets (cut out from the supplied art)
@@ -3385,8 +3439,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 469;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 21:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 470;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 21:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24330,7 +24384,7 @@ if (/[?&]skygpu=0/.test(location.search)) NSKY.gpu = false;   // (the decks draw
 // sparks and splashes in the air - they start again from whatever is burning.
 function gameSnapshot() {
   const store = {}; try { for (const k of Object.keys(localStorage)) if (k.startsWith('bd_')) store[k] = lsRawGet(k); } catch (e) { }   // (as kept: the open world's bd_ and the Story world's bd_sw_ both, whichever is loaded - 00-world.js, Story chat Oct 31)
-  return JSON.stringify({ kind: 'battleship-duel', v: 1, game: GAME_VERSION, world: STORY_WORLD ? 'story' : 'open', at: new Date().toISOString().slice(0, 16), size: [bw, bh], dpr, mode: MODE,
+  return JSON.stringify({ kind: 'battleship-duel', v: 1, game: GAME_VERSION, world: STORY_WORLD ? 'story' : 'open', built: WORLD_PACK.stamp, at: new Date().toISOString().slice(0, 16), size: [bw, bh], dpr, mode: MODE,
     view: PHOTO.on ? { x: +PHOTO.x.toFixed(1), y: +PHOTO.y.toFixed(1), z: +PHOTO.z.toFixed(4) } : null,
     world: netSnapshot(false, { ev: [], sky: true }), tables: tablesSave(), sky: NSKY.snapshot(), store });   // (tables: every converted system's state - 36-zz-tables.js)
 }
@@ -48000,7 +48054,7 @@ const sslIn = (r, X, Y) => X >= r[0] && X <= r[0] + r[2] && Y >= r[1] && Y <= r[
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 function storyWhen(t) { const d = new Date(t), z = v => String(v).padStart(2, '0'); return MONTHS[d.getMonth()] + ' ' + d.getDate() + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); }
 function drawStorySlots() {
-  drawWorldTag();
+  drawWorldTag(); drawWorldStale();
   if (!SSL.open) return;
   const L = storySlotsLayout(), M = storyMeta();
   ug.fillStyle = 'rgba(4,7,15,0.6)'; ug.fillRect(0, 0, ubw, ubh);
