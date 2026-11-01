@@ -3239,8 +3239,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 449;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 20:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 450;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 20:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18155,6 +18155,19 @@ const GLC4 = { x: [0, 0, 0, 0], y: [0, 0, 0, 0], ux: [0, 0, 0, 0], uy: [0, 0, 0,
    numbers, the alpha to 3 decimals as the text has it, read as the parser reads it (0..1), packed with the global alpha. On a
    Canvas 2D context: the string, as before. fillRectA leaves the fill style as it was */
 const FRA = [0, 0, 0, 1];
+// (Oct 31) fillRectA's colour, packed once for many rectangles of it (glColA), and its rectangles one by one (fillRectP, the
+// batch made ready once a run by the caller with glBegin): the same quads with the same colour bytes as fillRectA
+function glColA(ctx, c, a) {
+  FRA[0] = Math.min(255, Math.max(0, c[0] | 0)); FRA[1] = Math.min(255, Math.max(0, c[1] | 0)); FRA[2] = Math.min(255, Math.max(0, c[2] | 0));
+  FRA[3] = Math.max(0, Math.min(1, Math.round(a * 1000) / 1000));
+  return glPack(FRA, ctx.s.ga);
+}
+function fillRectP(ctx, col, x, y, w, h) {
+  if (!(w > 0 && h > 0)) return;
+  ctx._corners(x, y, w, h);
+  const X = GLC4.x, Y = GLC4.y;
+  glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], 0, 0, 0, 0, 0, 0, 0, 0, col, 0, 0);
+}
 function fillRectA(ctx, c, a, x, y, w, h) {
   if (!(ctx instanceof GLCtx)) { const f = ctx.fillStyle; ctx.fillStyle = rgbs(c, a); ctx.fillRect(x, y, w, h); ctx.fillStyle = f; return; }
   if (GLR.lost) return;
@@ -27050,7 +27063,29 @@ function drawBoat(p) { blitBoatLayer(img.lifeboat.body, boatPose(p)); }
 function sandDisc(cx, cy, R) {
   for (let j = -R; j < R; j += PB) { const w = Math.floor(Math.sqrt(Math.max(0, R * R - (j + 1) * (j + 1))) / PB) * PB; if (w > 0) C.fillRect(cx - w, cy + j, w * 2, PB); }
 }
+// (Oct 31, 60-fps chat: on the GPU each puff's colour is packed once and its rows go straight to the batch - a colour string
+// made and read back a puff, a pass, and a rectangle call a row, was ~2.7 ms a frame with 770 puffs of a long fight)
+const DUST_C = [[150, 124, 84], [206, 180, 132], [236, 218, 174]];
+function sandDiscP(col, cx, cy, R) {
+  if (!(col >>> 24) && C.s.op !== 'copy' && C.s.op !== 'source-in' && C.s.op !== 'destination-in') return;
+  glBegin(C, C.s.op);
+  for (let j = -R; j < R; j += PB) { const w = Math.floor(Math.sqrt(Math.max(0, R * R - (j + 1) * (j + 1))) / PB) * PB; if (w > 0) fillRectP(C, col, cx - w, cy + j, w * 2, PB); }
+}
 function drawDust(x0, x1) {
+  if (GLR.on && !GLR.lost && C instanceof GLCtx) {
+    for (let pass = 0; pass < 3; pass++) {
+      for (const u of dust) {
+        if (u.x < x0 - 40 || u.x > x1 + 40) continue;
+        const t = u.age / u.life;
+        const a = 0.8 * Math.pow(1 - t, 1.2) * Math.min(1, u.age * 5);
+        if (a < 0.02) continue;
+        const R = Math.max(PB, Math.round(u.r * SV / PB) * PB), cx = Math.floor(PX(u.x) / PB) * PB, cy = Math.floor(PY(u.y) / PB) * PB;
+        if (pass === 0) sandDiscP(glColA(C, DUST_C[0], a * 0.7), cx, cy + Math.round(R * 0.3 / PB) * PB, R);
+        else if (pass === 1) sandDiscP(glColA(C, DUST_C[1], a), cx, cy, Math.round(R * 0.9 / PB) * PB || PB);
+        else sandDiscP(glColA(C, DUST_C[2], a * 0.8), cx - Math.round(R * 0.2 / PB) * PB, cy - Math.round(R * 0.35 / PB) * PB, Math.round(R * 0.5 / PB) * PB || PB);
+      }
+    }
+  } else
   for (let pass = 0; pass < 3; pass++) {
     for (const u of dust) {
       if (u.x < x0 - 40 || u.x > x1 + 40) continue;
@@ -27671,6 +27706,14 @@ function drawDebris(d, x0, x1) {
   const c = Math.abs(Math.cos(d.a)), s = Math.abs(Math.sin(d.a));
   const w = Math.max(PB, Math.round((d.sw * c + d.sh * s) * SV / PB) * PB), h = Math.max(PB, Math.round((d.sw * s + d.sh * c) * SV / PB) * PB);
   const fog = fogFor(d.y);
+  if (GLR.on && !GLR.lost && C instanceof GLCtx && /^#[0-9a-fA-F]{6}$/.test(d.col)) {   // (Oct 31: the colour packed, no string made and read a piece - the same bytes)
+    if (d._cs !== d.col) { d._cs = d.col; d._rgb = rgb(d.col); }
+    const col = glColA(C, fog > 0.02 ? mix3(d._rgb, SEA_FOG, fog) : d._rgb, 1);
+    if (!(col >>> 24) && C.s.op !== 'copy' && C.s.op !== 'source-in' && C.s.op !== 'destination-in') return;
+    glBegin(C, C.s.op);
+    fillRectP(C, col, Math.floor((PX(d.x) - w / 2) / PB) * PB, Math.floor((PY(d.y) - h / 2) / PB) * PB, w, h);
+    return;
+  }
   const base = rgb(d.col);
   C.fillStyle = fog > 0.02 ? rgbs(mix3(base, SEA_FOG, fog)) : d.col;
   C.fillRect(Math.floor((PX(d.x) - w / 2) / PB) * PB, Math.floor((PY(d.y) - h / 2) / PB) * PB, w, h);
