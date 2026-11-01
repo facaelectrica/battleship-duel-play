@@ -3238,7 +3238,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 451;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const GAME_VERSION = 452;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
 const BUILD = 'OCT 31 20:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
@@ -17951,6 +17951,7 @@ class GLCtx {
   }
   drawShaft(sp) { this.drawShafts([[3, sp]], 0, 1); }
   drawVeilStrip(colA, n, vc, bands) { wglVeilStrip(this, colA, n, vc, bands); }
+  drawVeilBox(bx0, by0, bx1, by1) { return wglVeilBox(this, bx0, by0, bx1, by1); }
   drawSunGL(dx, dy, dw, dh, x0, y0, x1, y1, sun, s, k, core, sky) {
     if (GLR.lost || !GLR.sprog) return;
     const gl = GLR.gl, t = this.target, U = GLR.sU;
@@ -18502,7 +18503,7 @@ void main() {
 const WGL_VEIL_FS = `#version 300 es
 precision highp float; precision highp int;
 in vec2 v_u; out vec4 o;
-uniform highp sampler2D u_a; uniform int u_n; uniform vec3 u_col; uniform vec3 u_b[8]; uniform int u_nb; uniform float u_ga;
+uniform highp sampler2D u_a; uniform int u_n; uniform vec3 u_col; uniform vec3 u_b[8]; uniform int u_nb; uniform float u_ga; uniform int u_box;
 void main() {
   int x = int(floor(v_u.x)); float y = floor(v_u.y);
   if (x < 0 || x >= u_n) discard;
@@ -18510,11 +18511,11 @@ void main() {
   for (int q = 0; q < 8; q++) { if (q >= u_nb) break; if (y >= u_b[q].x && y <= u_b[q].y) { k = u_b[q].z; break; } }
   if (k < 0.0) discard;
   float av = texelFetch(u_a, ivec2(x, 0), 0).r;
-  if (av < 0.002) discard;
+  if (av < 0.002) { if (u_box == 1) { o = vec4(0.0); return; } discard; }   // (a box laid again, 'copy': its clear pixels clear, as its picture's did)
   float A = mod(floor(av * 255.0 + 0.5), 256.0);
   if (k != 1.0) A = mod(floor(A * k + 0.5), 256.0);
   A = floor(A * u_ga + 0.5);
-  if (A <= 0.0) discard;
+  if (A <= 0.0) { if (u_box == 1) { o = vec4(0.0); return; } discard; }
   float a = A / 255.0;
   o = vec4(floor(u_col * A / 255.0) / 255.0, a);   // (the colour premultiplied as the upload did it: truncated - 0 pixels differ, storm)
 }`;
@@ -18530,7 +18531,7 @@ function wglSetup() {
   WGL.di = prog(WGL_VS, WGL_DI_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_a', 'u_w', 'u_sh', 'u_np', 'u_pc', 'u_nr', 'u_rg', 'u_rp']);
   WGL.ti = prog(WGL_VS, WGL_TI_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_ss', 'u_t0', 'u_t1', 'u_ty', 'u_wm', 'u_grad', 'u_row']);
   WGL.line = prog(WGL_VS, WGL_LINE_FS, base.concat(['u_lc', 'u_uc', 'u_p']));
-  WGL.veil = prog(WGL_VS, WGL_VEIL_FS, ['u_size', 'u_rect', 'u_m', 'u_a', 'u_n', 'u_col', 'u_b', 'u_nb', 'u_ga']); WGL.veilRing = []; WGL.veilI = 0;
+  WGL.veil = prog(WGL_VS, WGL_VEIL_FS, ['u_size', 'u_rect', 'u_m', 'u_a', 'u_n', 'u_col', 'u_b', 'u_nb', 'u_ga', 'u_box']); WGL.veilRing = []; WGL.veilI = 0;
   WGL.lamp = prog(WGL_VS, WGL_LAMP_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_ss', 'u_off', 'u_nl', 'u_mode', 'u_l0', 'u_l1']);
   WGL.qvao = gl.createVertexArray(); gl.bindVertexArray(WGL.qvao);
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
@@ -18632,9 +18633,27 @@ function wglVeilStrip(ctx, colA, n, vc, bands) {
   const U = pr.U, nb = Math.min(8, bands.length / 3);
   let y0 = 1e9, y1 = -1e9;
   for (let q = 0; q < nb; q++) { WVB[q * 3] = bands[q * 3]; WVB[q * 3 + 1] = bands[q * 3 + 1]; WVB[q * 3 + 2] = bands[q * 3 + 2]; if (bands[q * 3] < y0) y0 = bands[q * 3]; if (bands[q * 3 + 1] > y1) y1 = bands[q * 3 + 1]; }
-  gl.uniform1i(U.u_a, 9); gl.uniform1i(U.u_n, n); gl.uniform3f(U.u_col, vc[0], vc[1], vc[2]); gl.uniform3fv(U.u_b, WVB); gl.uniform1i(U.u_nb, nb); gl.uniform1f(U.u_ga, ctx.s.ga);
+  gl.uniform1i(U.u_a, 9); gl.uniform1i(U.u_n, n); gl.uniform3f(U.u_col, vc[0], vc[1], vc[2]); gl.uniform3fv(U.u_b, WVB); gl.uniform1i(U.u_nb, nb); gl.uniform1f(U.u_ga, ctx.s.ga); gl.uniform1i(U.u_box, 0);
   if (y1 >= y0) { gl.uniform4f(U.u_rect, 0, y0, n, y1 - y0 + 1); gl.bindVertexArray(WGL.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
   wglEnd();
+  WGL.veilLast = { R, n, vc: [vc[0], vc[1], vc[2]], nb, ep: GLR.epoch, b: WVB.slice(0, nb * 3) };
+}
+/* (Oct 31, 60-fps chat) the veil laid again in a box (a rain shaft's, drawn over an earlier one's drops - 11-drawing.js shaftGL):
+   from the strip the veil's commit just laid (its columns already on the GPU), not a picture of it built, copied, hashed and
+   uploaded - 230 a frame in the heavy battle, the GPU's biggest cost. The box's band rows, every column of it, written as the
+   picture's rows were ('copy': a clear pixel clears) - the same pixels */
+function wglVeilBox(ctx, bx0, by0, bx1, by1) {
+  const L = WGL.veilLast; if (!gpuwOn('cols') || !L || L.ep !== GLR.epoch) return false;
+  const gl = GLR.gl, pr = WGL.veil;
+  wglBegin(ctx, ctx.s.op, pr);
+  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, L.R.tex); GLR.unit[9] = L.R.tex; gl.bindSampler(9, null);
+  const U = pr.U;
+  for (let q = 0; q < L.nb * 3; q++) WVB[q] = L.b[q];
+  gl.uniform1i(U.u_a, 9); gl.uniform1i(U.u_n, L.n); gl.uniform3f(U.u_col, L.vc[0], L.vc[1], L.vc[2]); gl.uniform3fv(U.u_b, WVB); gl.uniform1i(U.u_nb, L.nb); gl.uniform1f(U.u_ga, ctx.s.ga); gl.uniform1i(U.u_box, 1);
+  gl.uniform4f(U.u_rect, bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1); gl.bindVertexArray(WGL.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.uniform1i(U.u_box, 0);
+  wglEnd();
+  return true;
 }
 // the ships' shadows: the casters [[cx, half, reachK, y0, dk, tn]...] as drawShipShadows gathers them, in one draw
 function wglShadows(list, strength, moonLit, lean, col, clipSurf) {
@@ -19911,6 +19930,11 @@ const DREC = {
     const c = o[1]; c.set(colA.subarray(0, n)); o[2] = n; o[3] = vc.slice(); o[4] = bands.slice(); o[5] = this.op;
     this.sig.push(-4, this.op, n, vc[0], vc[1], vc[2], pixHash(new Uint32Array(c.buffer, 0, n), n)); for (const b of bands) this.sig.push(b);
   },
+  // (Oct 31) the veil laid again in a shaft's box, from this veil's strip (op 4, just before it) - 40-zz-water-gl.js wglVeilBox
+  drawVeilBox(bx0, by0, bx1, by1) {
+    this.ops[this.nOps++] = [5, bx0, by0, bx1, by1, this.op];
+    this.sig.push(-5, this.op, bx0, by0, bx1, by1);
+  },
   drawShaft(s) {
     this.ops[this.nOps++] = [3, s, this.op];
     this.sig.push(-3, this.op, s.bx0, s.by0, s.bw, s.bh, s.xs, s.xe, s.foot, s.dk, s.A, s.cx, s.w, s.k, s.baseY, s.wind, s.zl);
@@ -19931,6 +19955,7 @@ function deckCommit(T) {
     if (o[0] === 0) { let e = k + 1; while (e < DREC.nOps && DREC.ops[e][0] === 0) e++; if (cx.drawPuffsMany) cx.drawPuffsMany(DREC.ops, k, e); else for (let q = k; q < e; q++) { const p = DREC.ops[q]; cx.drawPuffs(p[1], p[2], p[3], p[4]); } k = e; continue; }
     if (o[0] === 2) { cx.globalCompositeOperation = 'source-over'; cx.imageSmoothingEnabled = false; const T = o[1], ks = o[4] || 1; if (ks === 1) cx.drawImage(T, o[2], o[3]); else cx.drawImage(T, 0, 0, T.width, T.height, o[2], o[3], T.width * ks, T.height * ks); k++; continue; }
     if (o[0] === 4) { cx.globalCompositeOperation = o[5]; cx.drawVeilStrip(o[1], o[2], o[3], o[4]); cx.globalCompositeOperation = 'source-over'; k++; continue; }
+    if (o[0] === 5) { cx.globalCompositeOperation = o[5]; cx.drawVeilBox(o[1], o[2], o[3], o[4]); cx.globalCompositeOperation = 'source-over'; k++; continue; }
     if (o[0] === 3) {   // (a run of shafts laid the same way: one draw - 40-gl.js drawShafts)
       let e = k + 1; while (e < DREC.nOps && DREC.ops[e][0] === 3 && DREC.ops[e][2] === o[2]) e++;
       cx.globalCompositeOperation = o[2]; if (cx.drawShafts) cx.drawShafts(DREC.ops, k, e); else for (let q = k; q < e; q++) cx.drawShaft(DREC.ops[q][1]); cx.globalCompositeOperation = 'source-over'; k = e; continue;
@@ -20988,7 +21013,10 @@ function shaftGL(lay, foot, A, k, bx0, by0, bx1, by1, xs, xe, dk, cx, w) {
   // storm, each copied, hashed, uploaded and drawn, mostly for nothing
   let over = false;
   for (let q = 0; q < SHP.n && !over; q++) { const o = SHP.list[q]; over = o.bx0 <= bx1 && o.bx0 + o.bw - 1 >= bx0 && o.by0 <= by1 && o.by0 + o.bh - 1 >= by0; }
-  if (over) {
+  if (over && VEILK.tw === -1 && DCTX.drawVeilBox && DCTX === DREC) {   // (the strip on the GPU: the box laid again from it - wglVeilBox)
+    let any = false; for (let q = 0; q < nb && !any; q++) any = Math.min(by1, VBANDS[q * 3 + 1]) >= Math.max(by0, VBANDS[q * 3]);
+    if (any) DCTX.drawVeilBox(bx0, by0, bx1, by1);
+  } else if (over) {
     if (SHBAND.px.length < bw * nb) SHBAND.px = new Uint32Array(bw * nb * 2);
     const bp = SHBAND.px, rows = SHBAND.rows; rows.length = 0;
     for (let q = 0; q < nb; q++) {
