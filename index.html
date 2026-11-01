@@ -1554,6 +1554,54 @@ class ColTable {
     }
     o.i = i; return o;
   }
+  // (Nov 1) a row put in at place i, the rows from there on moved up one (their order kept), its id given (it must sit between
+  // its neighbours' - a row coming back to its place by number: the settled world's debris), every other field as declared; its place
+  insert(i, id) {
+    if (this.n >= this.cap) this.grow(this.n + 1);
+    const n = this.n;
+    for (const F of this.f) { const a = this.c[F.k]; a.copyWithin(i + 1, i, n); a[i] = F.kind === 'id' ? id : F.d; }
+    this.gone.copyWithin(i + 1, i, n); this.gone[i] = 0;
+    this.n = n + 1;
+    return i;
+  }
+  // (Nov 1) row i's fields (all but obj) as row j of another table of the same fields - its strings by their text
+  copyFrom(S, j, i) {
+    for (const F of this.f) {
+      if (F.kind === 'obj') continue;
+      const v = S.c[F.k][j];
+      this.c[F.k][i] = F.kind === 'str' ? this.intern(S.str(v)) : v;
+    }
+  }
+  // (Nov 1) an accessor for a row: cur.i = a row's place, then cur.x reads and cur.x = v writes that row's column (a str field as
+  // its text, a u8 as a number - true / false put as 1 / 0). For a system's step or drawing written field by field (the
+  // debris' step, the flashes' glow); its fields' getters made once a table, an accessor is one small object
+  cursor() {
+    if (!this._cp) {
+      const T = this, P = this._cp = {};
+      for (const F of this.f) {
+        if (F.kind === 'obj') continue;
+        const k = F.k;
+        Object.defineProperty(P, k, F.kind === 'str'
+          ? { get() { return T.str(T.c[k][this.i]); }, set(v) { T.c[k][this.i] = T.intern(v); } }
+          : { get() { return T.c[k][this.i]; }, set(v) { T.c[k][this.i] = typeof v === 'boolean' ? +v : v; } });
+      }
+    }
+    const cur = Object.create(this._cp); cur.i = 0;
+    return cur;
+  }
+  // (Nov 1) the rows 0..n-1 in order, as one accessor moved along: for a loop that only reads them (it mustn't keep the accessor)
+  *rows() { const cur = this.cursor(); for (let i = 0; i < this.n; i++) { cur.i = i; yield cur; } }
+  // (Nov 1) THE ROW MAKER: a row from a plain object's fields by name - each thrower's literal as it was, so its random numbers
+  // come in the same order; a field not declared is left out, one not given is as declared for a new row; its place
+  addRow(o) {
+    const j = this.add(), c = this.c;
+    for (const k in o) {
+      const F = this.byK[k], v = o[k];
+      if (!F || F.kind === 'id' || F.kind === 'obj') continue;
+      c[k][j] = F.kind === 'str' ? this.intern(v) : typeof v === 'boolean' ? +v : v;
+    }
+    return j;
+  }
   // (Nov 1) a save from before the table was columns - its rows, each a plain object - as plainCols' data, field by field by
   // name: a number as it is, a yes / no as 1 / 0, a text interned, a field the row hasn't as declared for a new row; the ids
   // given in the rows' order (a table whose rows nothing links to: the sparks, the embers)
@@ -1763,9 +1811,30 @@ const bubbles = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64
 // stepParticles moves and ends them, the foam's pixel layer draws them (43-render-objects.js FOAM_L). k: how much bigger
 // than a small boat's it is (FXK when spawned - 1: a small speck, more: a big ship's clump)
 const foam = new ColTable({ sq: 'id', x: 'f64', s: 'f64', k: 'f64', life: 'f64', max: 'f64', vx: 'f64', seed: 'f64' });
-const grains = [], ash = [];
-const welds = [];
-const debris = [], flashes = [], shells = [], bullets = [], pieces = [], flames = [], rings = [], dust = [];
+const shells = [], bullets = [], pieces = [];
+// (Nov 1) the fire's flames: a column table, a row a flame (35-particles.js spawnFlame, its step; 46-smoke-fire-draw.js drawFire).
+// clean: no smoke when it dies; behind: burning inside a ship (drawn before her); src: 'ship' (a burning section's own)
+const flames = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', heat: 'f64', r: 'f64', decay: 'f64', h0: 'f64', clean: 'u8', behind: 'u8', src: 'str' });
+// (Nov 1) the sea floor's sand clouds, the grains sifting out of them, the soot flakes falling out of the smoke: column tables,
+// made by their table's row maker (addRow), stepped in 35-particles.js; the dust drawn in 45-draw-vehicles.js, the grains and the
+// ash by pixel layers (GRAIN_L there, ASH_L in 47-render-overlays.js)
+const dust = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', r: 'f64', r1: 'f64', age: 'f64', life: 'f64', seed: 'f64', grainT: 'f64' });
+const grains = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vy: 'f64', ph: 'f64', life: 'f64' });
+const ash = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', ph: 'f64', life: 'f64', max: 'f64', big: 'u8' });
+// (Nov 1) a flash (a muzzle, a hit, a blast: a glow a moment) and a blast's ring of sparks: column tables, made by their
+// table's row maker (addRow), stepped in 35-particles.js, drawn in 47-render-overlays.js
+const flashes = new ColTable({ sq: 'id', x: 'f64', y: 'f64', r: 'f64', life: 'f64', max: 'f64' });
+const rings = new ColTable({ sq: 'id', x: 'f64', y: 'f64', r: 'f64', max: 'f64', life: 'f64' });
+// (Nov 1) the debris: a column table, a row a piece, in the order of its number n (given when it's thrown - 35-particles.js
+// debrisRow, the one way in: the order they were thrown; a piece back from rest goes in at its place by n). The pieces at rest
+// are the settled world's records (36-zzzz-settled.js): restDeb, the same fields, also in n's order. state: 0 thrown, 1 sinking,
+// 2 at rest, 4 floating; light: it floats (wood, cork); big: a heavy chunk; deck: on a harbour's deck; hopped: thrown up again
+// off the bottom; floatT: when a floating piece waterlogs; c0: the settled world's clock when it came to rest; rs: filed at rest
+// this very step (still in the list till the loop ends). A piece that was thrown without seed or age keeps them NaN, as it
+// always had them undefined
+const DEBRIS_FIELDS = { n: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', a: 'f64', w: 'f64', sw: 'f64', sh: 'f64', col: 'str', state: 'u8', bub: 'f64',
+  seed: 'f64 NaN', age: 'f64 NaN', light: 'u8', big: 'u8', deck: 'u8', hopped: 'u8', floatT: 'f64 NaN', c0: 'f64', rs: 'u8' };
+const debris = new ColTable(DEBRIS_FIELDS), restDeb = new ColTable(DEBRIS_FIELDS);
 // (Nov 1) the sparks and the embers: column tables (04-zz-coltable.js), a row each in the order spawned - 35-particles.js makes
 // and moves them, the pixel layer draws them (40-zzzz-layers.js; their kinds in 47-render-overlays.js). px, py: where a spark
 // was a step ago, NaN before its first step (it isn't drawn yet)
@@ -2069,7 +2138,7 @@ function pierAfterFall(d, gone) {
   const tw = d._tw || towers.find(t => t && !t.edge && homeDock[t.player] === d);
   if (tw && tw.pg && !tw.pg.gone && gone(tw.pg._x)) pierGunFalls(tw, d);
   for (const k of restChunksWhere(k => !k.uw && !k.float && gone(k.x))) { if (k._rest) restWakeChunk(k); k.rest = false; k.vx = dockRnd(-6, 6); k.vy = 0; k.w = dockRnd(-0.6, 0.6); k.delay = dockRnd(0, 0.5); }
-  for (const q of debris) if (q.deck && gone(q.x)) { q.deck = false; q.state = 0; q.vy = 0; }
+  { const D = debris.c; for (let i = 0; i < debris.n; i++) if (D.deck[i] && gone(D.x[i])) { D.deck[i] = 0; D.state[i] = 0; D.vy[i] = 0; } }
   for (const cr of cranes) if (cr.d === d) craneDeckCheck(cr);
 }
 function collapsePier(d) {
@@ -2379,7 +2448,7 @@ function buildWorld(restore) {
   shocks.length = 0;
   storm.bolts.length = 0; storm.flash = 0; storm.next = 3;
   mapTracks[0] = mapTracks[1] = null;
-  for (const arr of [screens, weedBits, torps, torpWrecks, gasBalls, jets, streaks, blastRings, deadFish, wclouds, dcharges, mines, welds, spray, bubbles, foam, wakes, debris, sparks, flashes, shells, bullets, smoke, pieces, flames, embers, rings, trails, dust, grains, ash, blood, duds]) arr.length = 0;
+  for (const arr of [screens, weedBits, torps, torpWrecks, gasBalls, jets, streaks, blastRings, deadFish, wclouds, dcharges, mines, spray, bubbles, foam, wakes, debris, sparks, flashes, shells, bullets, smoke, pieces, flames, embers, rings, trails, dust, grains, ash, duds]) arr.length = 0;
   for (let p = 0; p < 2; p++) {
     Object.assign(crew[p], freshCrew());               // the round opens with the captain in his hangar, choosing
     Object.assign(guns[p], { reload: 0, rk: [0, 0], pk: [0, 0], press: 0, ammo: VTUNE.ship.shells, dcAmmo: VTUNE.ship.dc, dk: 0, resupT: 0 });   // (the smoke: on each vehicle now, smokeSupply)
@@ -3663,7 +3732,7 @@ function netList(arr, data, kind, onNew, create = true) {
 }
 // what a new shot sounds and looks like when the guest first hears of it
 const netShot = {
-  shells: o => { if (o.from === 'bomb') sound('bombDrop', o.x); else if (o.from === 'rocket') sound('missile', o.x); else { sound('cannon', o.x, o.from === 'tower'); flashes.push({ x: o.x, y: o.y, r: 9, life: 0, max: 0.07 }); } sound('whoosh', o); },
+  shells: o => { if (o.from === 'bomb') sound('bombDrop', o.x); else if (o.from === 'rocket') sound('missile', o.x); else { sound('cannon', o.x, o.from === 'tower'); flashes.addRow({ x: o.x, y: o.y, r: 9, life: 0, max: 0.07 }); } sound('whoosh', o); },
   torps: o => sound('impact', o.x),
   bullets: o => sound('mg', o.x),
   dcharges: o => sound('splash', o.x, 0.3),
@@ -3739,8 +3808,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 505;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 13:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 506;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 13:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7292,7 +7361,7 @@ function stepShip(sh, dt) {
         // (SHIP FIRE: the flames from the column's own spot - one tall fire where it burns, not flames along the whole section)
         const [x, y] = deckPoint(sh, i, SHIPFIRE.on ? 0.5 + vehShipRnd(-SHIPFIRE.fw, SHIPFIRE.fw) : vehShipR());
         if (SHIPFIRE.on) spawnFlame(x, y - FXK, sh.vx * 0.6 + vehShipRnd(-SHIPFIRE.jx, SHIPFIRE.jx) * FXK, -vehShipRnd(SHIPFIRE.v0, SHIPFIRE.v1) * (0.6 + 0.5 * f) * FXK, vehShipRnd(0.95, 1.2), vehShipRnd(SHIPFIRE.fr0, SHIPFIRE.fr1) * (0.45 + 0.6 * f), vehShipRnd(SHIPFIRE.d0, SHIPFIRE.d1));
-        else spawnFlame(x, y - 1, sh.vx * 0.6 + vehShipRnd(-8, 8), -vehShipRnd(25, 60) * (0.6 + 0.5 * f), vehShipRnd(0.9, 1.15), vehShipRnd(2.5, 6) * (0.45 + 0.6 * f), vehShipRnd(1.4, 2.1)); flames[flames.length - 1].src = 'ship';   // (its light on the smoke: the section's own, sky/21-smoke.js fireLights)
+        else spawnFlame(x, y - 1, sh.vx * 0.6 + vehShipRnd(-8, 8), -vehShipRnd(25, 60) * (0.6 + 0.5 * f), vehShipRnd(0.9, 1.15), vehShipRnd(2.5, 6) * (0.45 + 0.6 * f), vehShipRnd(1.4, 2.1)); flameLast().src = 'ship';   // (its light on the smoke: the section's own, sky/21-smoke.js fireLights)
         if (vehShipR() < 0.25 * f) spawnEmber(x, y - 4, sh.vx * 0.5);
       }
     }
@@ -7366,7 +7435,7 @@ function ram(speed, x) {
   for (let i = 0; i < 14 + amt * 30; i++) spawnSpray(x + vehShipRnd(-15, 15), sy - 2, vehShipRnd(-110, 110) * amt, 1 + amt);
   const y = WATER_Y - vehShipRnd(6, 14);
   spawnSparks(x, y, 30 + speed * 0.4, 280 + speed * 1.5);
-  flashes.push({ x, y, r: 16 + amt * 14, life: 0, max: 0.1 });
+  flashes.addRow({ x, y, r: 16 + amt * 14, life: 0, max: 0.1 });
   spawnSparks(x, y - 4, 20 + speed * 0.3, 200 + speed * 1.2);           // steel on steel: a second shower, no smoke
   spawnDebris(x, y, Math.round(4 + amt * 8), 0);
   // a solid ram is one level on the bow; a full-speed one reaches back a section
@@ -8048,7 +8117,7 @@ function subRam(sb, dt) {
     // steel on steel under the water: a grinding crash, sparks, a burst of bubbles and a pressure wave
     sound('crash', cx, Math.min(1, speed / 25));
     spawnSparks(cx, cy, 24, 200);
-    flashes.push({ x: cx, y: cy, r: 10, life: 0, max: 0.08 });
+    flashes.addRow({ x: cx, y: cy, r: 10, life: 0, max: 0.08 });
     for (let i = 0; i < 50; i++) addBubble(cx + vehSubRnd(-30, 30), cy + vehSubRnd(-4, 8), vehSubRnd(-30, 30), -vehSubRnd(15, 60), vehSubRnd(0.8, 3));
     water.shock(cx, cy + 4, 1.1, false, SUB_L * 0.5);
     for (let k = -30; k <= 30; k += DX) water.push(cx + k, -1500 * (1 - Math.abs(k) / 32));
@@ -8088,7 +8157,7 @@ function subsCollide() {
   for (const sb of [A, B]) { const t = telegraphs[sb.id]; if (t && crew[sb.id].mode === 'sub' && !sb.auto) { setOrder(t, 3); } }
   sound('crash', cx, Math.min(1, speed / 40));
   spawnSparks(cx, cy, 24, 200);
-  flashes.push({ x: cx, y: cy, r: 10, life: 0, max: 0.08 });
+  flashes.addRow({ x: cx, y: cy, r: 10, life: 0, max: 0.08 });
   for (let i = 0; i < 50; i++) addBubble(cx + vehSubRnd(-20, 20), cy + vehSubRnd(-6, 6), vehSubRnd(-30, 30), -vehSubRnd(15, 60), vehSubRnd(0.8, 3));
   water.shock(cx, cy, 1, false, SUB_L * 0.4);
   emit('scare', { x: cx, y: cy, r: 200, kind: 'fish' });
@@ -8505,7 +8574,7 @@ function splitPart(sb, q, x, y) {
 function crashFx(cx, cy, speed) {
   sound('crash', cx, Math.min(1, speed / 30));
   spawnSparks(cx, cy, 20, 180);
-  flashes.push({ x: cx, y: cy, r: 9, life: 0, max: 0.08 });
+  flashes.addRow({ x: cx, y: cy, r: 9, life: 0, max: 0.08 });
   for (let i = 0; i < 40; i++) addBubble(cx + wkRnd(-24, 24), cy + wkRnd(-6, 6), wkRnd(-30, 30), -wkRnd(15, 60), wkRnd(0.8, 3));
   water.shock(cx, cy, 0.9, false, SUB_L * 0.4);
   emit('scare', { x: cx, y: cy, r: 200, kind: 'fish' });
@@ -8590,18 +8659,21 @@ let wwR_ = null; const wwR = () => (wwR_ || (wwR_ = sysRng('whitewater')))(), ww
 const wclouds = [];
 const FOAM_TONES = [[255, 255, 255], [228, 242, 252], [190, 218, 242], [146, 186, 226], [98, 146, 204]];
 function spawnWcloud(o) { if (wclouds.length < 360) wclouds.push(Object.assign({ age: 0, seed: Math.floor(wwR() * 7) }, o)); }
-const blastRings = [];
+// (Nov 1) a blast's pressure rings (the water's distortion bends round them: 47-render-overlays.js) and a depth charge's gas
+// balls: column tables, made by their row makers (addRow), saved and sent with the tables (36-zzz-splash-tables.js)
+const blastRings = new ColTable({ sq: 'id', x: 'f64', y: 'f64', r: 'f64', speed: 'f64', max: 'f64', life: 'f64', amp: 'f64' });
 function stepBlastRings(dt) {
-  for (let i = blastRings.length - 1; i >= 0; i--) { const b = blastRings[i]; b.life += dt; b.r += b.speed * dt; b.speed *= 1 - 0.7 * dt; if (b.r >= b.max || b.life > 2.5) blastRings.splice(i, 1); }   // (slowing as it goes, a ring may never reach its max: it's done after a while)
+  { const c = blastRings.c; for (let i = blastRings.n - 1; i >= 0; i--) { c.life[i] += dt; c.r[i] += c.speed[i] * dt; c.speed[i] *= 1 - 0.7 * dt; if (c.r[i] >= c.max[i] || c.life[i] > 2.5) blastRings.drop(i); } blastRings.sweep(); }   // (slowing as it goes, a ring may never reach its max: it's done after a while)
 }
 // A depth charge's gas bubble: a ball of white water punches out in a fraction of a second, churns
 // (mottled light and shadow inside it), drifts up a little, then tears apart into bubbles
-const gasBalls = [];
+const gasBalls = new ColTable({ sq: 'id', x: 'f64', y: 'f64', R: 'f64', r: 'f64', t: 'f64', seed: 'f64', bAcc: 'f64' });
 const BALL_TONES = ['#ffffff', '#e6f4fd', '#c4e0f6', '#96c4ec', '#6aa4dc'].map(s => s), BALL_RGB = BALL_TONES.map(h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)));
-function gasBall(x, y, R) { gasBalls.push({ x, y, R, r: 2, t: 0, seed: wwR() * 40 }); if (gasBalls.length > 8) gasBalls.shift(); }
+function gasBall(x, y, R) { gasBalls.addRow({ x, y, R, r: 2, t: 0, seed: wwR() * 40 }); if (gasBalls.n > 8) { gasBalls.drop(0); gasBalls.sweep(); } }
 function stepGasBalls(dt) {
-  for (let i = gasBalls.length - 1; i >= 0; i--) {
-    const b = gasBalls[i];
+  const b = WW_CUR.b || (WW_CUR.b = gasBalls.cursor());   // (Nov 1: the rows through an accessor - their sums as they were)
+  for (let i = gasBalls.n - 1; i >= 0; i--) {
+    b.i = i;
     b.t += dt;
     const grow = Math.min(1, b.t / 0.22);
     b.r = b.R * (1 - Math.pow(1 - grow, 3)) * (1 + 0.06 * Math.sin(b.t * 9));
@@ -8611,45 +8683,58 @@ function stepGasBalls(dt) {
       b.bAcc = (b.bAcc || 0) + 200 * dt;
       for (; b.bAcc >= 1; b.bAcc--) { const a = wwRnd(0, 6.28), d = b.r * wwRnd(0.5, 1); addBubble(b.x + Math.cos(a) * d, b.y + Math.sin(a) * d, Math.cos(a) * wwRnd(5, 25), -wwRnd(20, 60), wwRnd(1, 3)); }
     }
-    if (b.t > 1.7) gasBalls.splice(i, 1);
+    if (b.t > 1.7) gasBalls.drop(i);
   }
+  gasBalls.sweep();
 }
+const WW_CUR = {};
+// (Nov 1: its pixel layer, GASBALL_L - the loop's own sums write the cells, each in its tone's colour)
 function drawGasBalls(x0, x1) {
-  // drawn the way a pixel artist would: a few flat tones, lit from above-left, with a dithered blend
-  // between them; pressure ripples run outward through it as rings, and streaks fan out from the
-  // centre in the direction of the blast. As it tears apart it thins from the rim inward.
-  for (const b of gasBalls) {
-    if (b.x + b.r < x0 || b.x - b.r > x1) continue;
-    // (seen through the water at its depth, user Oct 28 - uwLight; the deep's dark comes after, over it: drawAbyss)
-    const tones = BALL_RGB.map(c => rgbs(uwLight(b.y, c, false))), core = rgbs(uwLight(b.y, [255, 243, 176], false).map((v, j) => v + ([255, 243, 176][j] - v) * 0.4));
-    const cx = PX(b.x), cy = PY(b.y), R = b.r * SV, brk = clamp((b.t - 0.9) / 0.8, 0, 1);
-    const s = PB, j0 = Math.floor((cy - R * 1.1) / s) * s, i0 = Math.floor((cx - R * 1.1) / s) * s;
-    const rip = Math.max(0, 1 - b.t / 1.3);                                   // the ripples die away
-    fsLast = null;
-    for (let y = j0; y < cy + R * 1.1; y += s) for (let x = i0; x < cx + R * 1.1; x += s) {
-      const dx = x + s / 2 - cx, dy = y + s / 2 - cy, dist = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
-      // a lumpy rim: bumps fixed around the circle (they don't crawl), breathing a little
-      const ray = noise2(ang * 2.6 + b.seed, b.seed * 0.3), ray2 = noise2(ang * 7 + b.seed * 2, 4.5);
-      const rim = R * (0.88 + 0.1 * ray + 0.04 * ray2 + 0.02 * Math.sin(b.t * 14 + ang * 3));
-      if (dist > rim) continue;
-      const d = dist / rim;
-      // tearing apart: the rim falls away first, between the streaks
-      if (brk > 0 && d > 1.05 - brk * 1.2 + (ray - 0.5) * 0.5 + (ray2 - 0.5) * 0.15) continue;
-      const lit = -(dx + dy) / (R * 2);                                         // -0.7 (shadow) .. 0.7 (lit)
-      const ring = Math.sin((d * 3.4 + (ray - 0.5) * 0.7 + (ray2 - 0.5) * 0.25 - b.t * 5.5) * Math.PI * 2);   // wobbly pressure rings running outward
-      const streak = (ray2 - 0.5) * (0.3 + d);                                  // radial streaks fanning out from the centre
-      let v = 0.55 - lit * 0.6 - ring * 0.17 * rip - streak * 0.7 + d * d * 0.25;
-      if (d > 0.84) v -= 0.45;                                                  // a bright skin at the rim
-      v += brk * 0.5;                                                           // and it greys out as it breaks
-      v += BAYER[((x / s) & 3) + ((y / s) & 3) * 4] * 0.32;                     // ordered dither between the tones
-      fs1(tones[clamp(Math.floor(v * 5), 0, 4)]);
-      C.fillRect(x, y, s, s);
-    }
-    // the instant of the blast: a small, hot, square-ish core
-    if (b.t < 0.12) { fs1(core); const r = Math.max(s, Math.round(R * 0.3 / s) * s); C.fillRect(Math.round(cx / s) * s - r, Math.round(cy / s) * s - r, r * 2, r * 2); }
-    fsLast = null;
-  }
+  GASBALL_L.last = null;
+  pxDraw(GASBALL_L, x0, x1);
+  if (GASBALL_L.last !== null) { C.fillStyle = GASBALL_L.last; fsLast = null; }   // (the fill style as the loop left it)
 }
+const GASBALL_L = pxLayer({
+  table: gasBalls, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', rgba: 'view rgba' }, pal: [],
+  view: (T, own, n, x0, x1, L) => {
+    // drawn the way a pixel artist would: a few flat tones, lit from above-left, with a dithered blend
+    // between them; pressure ripples run outward through it as rings, and streaks fan out from the
+    // centre in the direction of the blast. As it tears apart it thins from the rim inward.
+    const ga = C.s.ga; let m = 0, R_ = own;
+    const put = (x, y, w, h, css) => { const col = glPack(glParse(css), ga); L.last = css; if (!(col >>> 24)) return; if (m >= R_.x.length) R_ = pxRoom(L, m + 1); R_.x[m] = x; R_.y[m] = y; R_.w[m] = w; R_.h[m] = h; R_.rgba[m] = col; m++; };
+    for (const b of T.rows()) {
+      if (b.x + b.r < x0 || b.x - b.r > x1) continue;
+      // (seen through the water at its depth, user Oct 28 - uwLight; the deep's dark comes after, over it: drawAbyss)
+      const tones = BALL_RGB.map(c => rgbs(uwLight(b.y, c, false))), core = rgbs(uwLight(b.y, [255, 243, 176], false).map((v, j) => v + ([255, 243, 176][j] - v) * 0.4));
+      const cx = PX(b.x), cy = PY(b.y), R = b.r * SV, brk = clamp((b.t - 0.9) / 0.8, 0, 1);
+      const s = PB, j0 = Math.floor((cy - R * 1.1) / s) * s, i0 = Math.floor((cx - R * 1.1) / s) * s;
+      const rip = Math.max(0, 1 - b.t / 1.3);                                 // the ripples die away
+      for (let y = j0; y < cy + R * 1.1; y += s) for (let x = i0; x < cx + R * 1.1; x += s) {
+        const dx = x + s / 2 - cx, dy = y + s / 2 - cy, dist = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
+        // a lumpy rim: bumps fixed around the circle (they don't crawl), breathing a little
+        const ray = noise2(ang * 2.6 + b.seed, b.seed * 0.3), ray2 = noise2(ang * 7 + b.seed * 2, 4.5);
+        const rim = R * (0.88 + 0.1 * ray + 0.04 * ray2 + 0.02 * Math.sin(b.t * 14 + ang * 3));
+        if (dist > rim) continue;
+        const d = dist / rim;
+        // tearing apart: the rim falls away first, between the streaks
+        if (brk > 0 && d > 1.05 - brk * 1.2 + (ray - 0.5) * 0.5 + (ray2 - 0.5) * 0.15) continue;
+        const lit = -(dx + dy) / (R * 2);                                       // -0.7 (shadow) .. 0.7 (lit)
+        const ring = Math.sin((d * 3.4 + (ray - 0.5) * 0.7 + (ray2 - 0.5) * 0.25 - b.t * 5.5) * Math.PI * 2);   // wobbly pressure rings running outward
+        const streak = (ray2 - 0.5) * (0.3 + d);                                // radial streaks fanning out from the centre
+        let v = 0.55 - lit * 0.6 - ring * 0.17 * rip - streak * 0.7 + d * d * 0.25;
+        if (d > 0.84) v -= 0.45;                                                // a bright skin at the rim
+        v += brk * 0.5;                                                         // and it greys out as it breaks
+        v += BAYER[((x / s) & 3) + ((y / s) & 3) * 4] * 0.32;                   // ordered dither between the tones
+        put(x, y, s, s, tones[clamp(Math.floor(v * 5), 0, 4)]);
+      }
+      // the instant of the blast: a small, hot, square-ish core
+      if (b.t < 0.12) { const r = Math.max(s, Math.round(R * 0.3 / s) * s); put(Math.round(cx / s) * s - r, Math.round(cy / s) * s - r, r * 2, r * 2, core); }
+    }
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = -1; return true; }
+`,
+});
 function underwaterBlast(x, y, power, ball) {
   disturb(x, 1.2 * power, 180 * power);
   { const r = 30 + 40 * power; if (y > seabedY(x) - r - 120) seabedHit(x, r + 60, 1, 0, undefined, { x, y, r, power }); }   // (the bottom's growth in reach breaks)
@@ -8661,7 +8746,7 @@ function underwaterBlast(x, y, power, ball) {
   if (ball) {
     // the depth charge: one round, churning ball of white water, a ring of spray bubbles, nothing cloud-like
     gasBall(x, y, 34 * power);
-    flashes.push({ x, y, r: 9 * power, life: 0, max: 0.1 });
+    flashes.addRow({ x, y, r: 9 * power, life: 0, max: 0.1 });
     for (let i = 0; i < 60 * power; i++) { const a = wwRnd(0, 6.28), s = wwRnd(40, 140); addBubble(x + Math.cos(a) * wwRnd(8, 30), y + Math.sin(a) * wwRnd(8, 30), Math.cos(a) * s, Math.sin(a) * s - 20, wwRnd(0.8, 2.4)); }
     for (let k = -18; k <= 18; k += DX) water.push(x + k, -1800 * power * clamp(1 - (y - WATER_Y) / 300, 0.2, 1) * (1 - Math.abs(k) / 20));
     emit('scare', { x, y, r: 220, kind: 'fish' });
@@ -8669,7 +8754,7 @@ function underwaterBlast(x, y, power, ball) {
     return;
   }
   // a small, hot centre...
-  flashes.push({ x, y, r: 7 * power, life: 0, max: 0.12 });
+  flashes.addRow({ x, y, r: 7 * power, life: 0, max: 0.12 });
   for (let i = 0; i < 6; i++) spawnFlame(x + wwRnd(-2, 2), y + wwRnd(-2, 2), wwRnd(-25, 25), wwRnd(-25, 25), 1.3, wwRnd(2, 3.5), wwRnd(6, 9));
   // ...then white water boils out of it, rolls upward and thins out, and the bubbles race for the surface
   const n = Math.round(46 * power);
@@ -9062,7 +9147,7 @@ function stepTorps(dt) {
       // fired up and found no hull: it breaks the surface in a geyser of white water
       sound('explosion', tp.x, 0.6);
       splash(tp.x, 0, -600);
-      flashes.push({ x: tp.x, y: sy - 4, r: 12, life: 0, max: 0.1 });
+      flashes.addRow({ x: tp.x, y: sy - 4, r: 12, life: 0, max: 0.1 });
       guysNear(tp.x, sy, 26);
       continue;
     }
@@ -9100,8 +9185,8 @@ function stepRocket(tp, dt) {
   if (pl) emit('hit', { kind: 'plane', o: pl, amt: VTUNE.plane.hits, x: tp.x, y: tp.y });
   // the burst: a flash, a puff of black smoke, sparks; a plane close by catches some of it
   sound('explosion', tp.x, 0.7); shakeAt(3, tp.x);
-  flashes.push({ x: tp.x, y: tp.y, r: 22, life: 0, max: 0.14 });
-  rings.push({ x: tp.x, y: tp.y, r: 3, max: 30, life: 0 });
+  flashes.addRow({ x: tp.x, y: tp.y, r: 22, life: 0, max: 0.14 });
+  rings.addRow({ x: tp.x, y: tp.y, r: 3, max: 30, life: 0 });
   spawnSparks(tp.x, tp.y, 30, 320);
   for (let k = 0; k < 10; k++) spawnFlame(tp.x + armTorpRnd(-4, 4), tp.y + armTorpRnd(-4, 4), armTorpRnd(-90, 90), armTorpRnd(-90, 60), 1.1, armTorpRnd(3, 6), armTorpRnd(3.5, 5));
   for (let k = 0; k < 7; k++) spawnSmoke(tp.x + armTorpRnd(-10, 10), tp.y + armTorpRnd(-8, 8), { kind: 'gun', dark: 0.7, r: armTorpRnd(6, 10), lift: 8, vx: armTorpRnd(-25, 25), alpha: armTorpRnd(0.35, 0.5), life: armTorpRnd(4, 7) });
@@ -9387,7 +9472,7 @@ function detonateCharge(c) {
   sound('explosion', x, 0.85);
   if (!c.noBall) water.shock(x, y, 1.8);
   // the pressure wave: rings that bend the water as they spread
-  if (!c.noBall) for (let k = 0; k < 3; k++) blastRings.push({ x, y, r: 4 + k * 12, speed: 150 - k * 25, max: 280 - k * 50, life: 0, amp: 6 - k * 1.6 });
+  if (!c.noBall) for (let k = 0; k < 3; k++) blastRings.addRow({ x, y, r: 4 + k * 12, speed: 150 - k * 25, max: 280 - k * 50, life: 0, amp: 6 - k * 1.6 });
   underwaterBlast(x, y, 1.4, c.noBall ? 'none' : true);   // (a mine on the surface: no ball under the water, its splash instead - detonateMine)
   killFishNear(x, y, 110);
   emit('scare', { x, y, r: 260, kind: 'fish' });
@@ -9987,7 +10072,7 @@ function hitPlane(pl, amt, x, y) {
   spawnSparks(x, y, amt >= 1 ? 22 : 5, 220);
   planeBits(pl, amt >= 1 ? 9 : vehPlaneR() < 0.6 ? 1 : 0, x, y);
   pl.dmg += amt;
-  if (amt >= 1) { flashes.push({ x, y, r: 12, life: 0, max: 0.1 }); sound('impact', x); }
+  if (amt >= 1) { flashes.addRow({ x, y, r: 12, life: 0, max: 0.1 }); sound('impact', x); }
   while (pl.dmg >= 1 && pl.state === 'fly') {
     pl.dmg -= 1; pl.hits++;
     sound('impact', x);
@@ -9999,7 +10084,7 @@ function hitPlane(pl, amt, x, y) {
 }
 // little bits of the plane breaking off and falling away
 function planeBits(pl, n, x, y) {
-  for (let i = 0; i < n; i++) debris.push({ x: (x || pl.x) + vehPlaneRnd(-4, 4), y: (y || pl.y) + vehPlaneRnd(-3, 3), vx: pl.vx * 0.35 + vehPlaneRnd(-50, 50), vy: pl.vy * 0.3 - vehPlaneRnd(10, 60), a: vehPlaneRnd(0, 6), w: vehPlaneRnd(-12, 12), sw: vehPlaneRnd(0.8, 2.2), sh: vehPlaneRnd(0.6, 1.3), col: ['#9aa0a6', '#c43a2a', '#5d6168', '#2a2c30', '#d8d4c8'][i % 5], state: 0, bub: 0, seed: vehPlaneR() * 6, age: 0 });
+  for (let i = 0; i < n; i++) debrisRow({ x: (x || pl.x) + vehPlaneRnd(-4, 4), y: (y || pl.y) + vehPlaneRnd(-3, 3), vx: pl.vx * 0.35 + vehPlaneRnd(-50, 50), vy: pl.vy * 0.3 - vehPlaneRnd(10, 60), a: vehPlaneRnd(0, 6), w: vehPlaneRnd(-12, 12), sw: vehPlaneRnd(0.8, 2.2), sh: vehPlaneRnd(0.6, 1.3), col: ['#9aa0a6', '#c43a2a', '#5d6168', '#2a2c30', '#d8d4c8'][i % 5], state: 0, bub: 0, seed: vehPlaneR() * 6, age: 0 });
 }
 // a torn-off wing as a falling piece: from where it was on the plane (facing face), its size its picture's (k: world
 // units a pixel) - for every plane's wings (the fighter's, the Cessna's, the 747's, the seaplane's)
@@ -10277,7 +10362,7 @@ function stepPlanes(dt) {
         const mx = pl.x + ux * 30 * PLANE_SC(), my = pl.y + uy * 30 * PLANE_SC() + 2;
         bullets.push({ x: mx, y: my, vx: (ux - uy * spr * pl.facing) * sp, vy: (uy + ux * spr * pl.facing) * sp, owner: p, age: 0, plane: true });
         sound('mg', mx);
-        flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
+        flashes.addRow({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
       }
     } else pl.mgT = 0;
     planeSmoke(pl, dt);
@@ -10336,30 +10421,49 @@ function trailPoint(pl, w, a, jit, col, life) {
 const planeFrozen = pl => pl.eng === 'off' || pl.ice >= 0.75;
 // the ice coming off as it thaws (user Oct 24 night): flakes cracking off and tumbling away behind it, with a
 // little crackle now and then
-const iceBits = [];
+// (Nov 1) a column table, made by its row maker (addRow); s: its size in blocks; tw: its twinkle. Drawn by a pixel layer (ICE_L)
+const iceBits = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', life: 'f64', max: 'f64', s: 'f64', tw: 'f64' });
 function iceShed(pl, amt) {
   pl.iceAcc = (pl.iceAcc || 0) + amt * 70;
-  while (pl.iceAcc >= 1 && iceBits.length < 260) {
+  while (pl.iceAcc >= 1 && iceBits.n < 260) {
     pl.iceAcc -= 1;
     const along = vehPlaneRnd(-34, 30), up = vehPlaneRnd(-12, 9);
-    iceBits.push({ x: pl.x + along * pl.facing, y: pl.y + up, vx: pl.vx * vehPlaneRnd(0.55, 0.85) + vehPlaneRnd(-25, 25), vy: pl.vy * 0.6 + vehPlaneRnd(-30, 25), life: 0, max: vehPlaneRnd(0.9, 1.8), s: vehPlaneR() < 0.3 ? 2 : 1, tw: vehPlaneR() * 6 });
+    iceBits.addRow({ x: pl.x + along * pl.facing, y: pl.y + up, vx: pl.vx * vehPlaneRnd(0.55, 0.85) + vehPlaneRnd(-25, 25), vy: pl.vy * 0.6 + vehPlaneRnd(-30, 25), life: 0, max: vehPlaneRnd(0.9, 1.8), s: vehPlaneR() < 0.3 ? 2 : 1, tw: vehPlaneR() * 6 });
   }
   if (amt > 0 && vehPlaneR() < amt * 25) sound('iceCrack', pl.x);
 }
 function stepIceBits(dt) {
-  for (let i = iceBits.length - 1; i >= 0; i--) {
-    const b = iceBits[i];
+  const b = ICE_CUR.b || (ICE_CUR.b = iceBits.cursor());   // (Nov 1: the rows through an accessor - their sums as they were)
+  for (let i = iceBits.n - 1; i >= 0; i--) {
+    b.i = i;
     b.life += dt; b.vx *= 1 - 1.4 * dt; b.vy += 260 * dt; b.x += b.vx * dt; b.y += b.vy * dt;
-    if (b.life > b.max || b.y > surfaceY(b.x)) iceBits.splice(i, 1);
+    if (b.life > b.max || b.y > surfaceY(b.x)) iceBits.drop(i);
   }
+  iceBits.sweep();
 }
+const ICE_CUR = {};
+// (Nov 1) THE ICE BITS' PIXEL LAYER (40-zzzz-layers.js): a block each (one or two wide), white as it twinkles, else pale blue,
+// fading out; one more than 10 outside the view isn't drawn; the fill style left as the loop left it, the alpha at 1
+const ICE_L = pxLayer({
+  table: iceBits, cols: { x: 'view i32', y: 'view i32', s: 'view i32', rgba: 'view rgba' }, pal: [],
+  view: (T, own, n, x0, x1, L) => {
+    const keep = { ga: C.s.ga }; let m = 0;
+    for (const b of T.rows()) {
+      if (b.x < x0 - 10 || b.x > x1 + 10) continue;
+      const a = 1 - b.life / b.max, css = Math.sin(time * 18 + b.tw) > 0.6 ? '#ffffff' : '#cfe8f6', col = pxRGBA(css, Math.max(0, a), keep);
+      L.last = css;
+      if (!(col >>> 24)) continue;
+      own.x[m] = Math.floor(PX(b.x) / PB) * PB; own.y[m] = Math.floor(PY(b.y) / PB) * PB; own.s[m] = PB * b.s; own.rgba[m] = col; m++;
+    }
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_s, a_s); c = -1; return true; }
+`,
+});
 function drawIceBits(x0, x1) {
-  for (const b of iceBits) {
-    if (b.x < x0 - 10 || b.x > x1 + 10) continue;
-    const a = 1 - b.life / b.max, flash = Math.sin(time * 18 + b.tw) > 0.6;
-    C.globalAlpha = Math.max(0, a); C.fillStyle = flash ? '#ffffff' : '#cfe8f6';
-    C.fillRect(Math.floor(PX(b.x) / PB) * PB, Math.floor(PY(b.y) / PB) * PB, PB * b.s, PB * b.s);
-  }
+  ICE_L.last = null;
+  pxDraw(ICE_L, x0, x1);
+  if (ICE_L.last !== null) C.fillStyle = ICE_L.last;
   C.globalAlpha = 1;
 }
 function sfxIceCrack(x) {
@@ -10396,7 +10500,7 @@ function planeSmoke(pl, dt) {
   }
   // (its flames leave no smoke of their own, as the Cloud Lab's falling plane (20-fx-sources.js): a dying flame's puff, off on
   // its own, rising and swelling for ten seconds, broke the one streak into separate big puffs - user Oct 27, with pictures)
-  if (pl.state === 'down' && vehPlaneR() < dt * 30) { spawnFlame(tx + vehPlaneRnd(-4, 4), ty + vehPlaneRnd(-4, 4), pl.vx * 0.3 + vehPlaneRnd(-20, 20), pl.vy * 0.3 - vehPlaneRnd(10, 40), 1.3, vehPlaneRnd(3, 5), vehPlaneRnd(2, 3)); flames[flames.length - 1].clean = true; }
+  if (pl.state === 'down' && vehPlaneR() < dt * 30) { spawnFlame(tx + vehPlaneRnd(-4, 4), ty + vehPlaneRnd(-4, 4), pl.vx * 0.3 + vehPlaneRnd(-20, 20), pl.vy * 0.3 - vehPlaneRnd(10, 40), 1.3, vehPlaneRnd(3, 5), vehPlaneRnd(2, 3)); flameLast().clean = true; }
 }
 // going down: on fire, spinning, falling ever faster, until it meets the sea or the land
 function stepPlaneDown(pl, dt) {
@@ -10719,7 +10823,7 @@ function rocketIgnite(s) {
   const ux = s.ux, uy = s.uy;
   s.ia = s.age;
   sound('missile', s.x); sound('whoosh', s);
-  flashes.push({ x: s.x - ux * 6, y: s.y - uy * 6, r: 6, life: 0, max: 0.07 });
+  flashes.addRow({ x: s.x - ux * 6, y: s.y - uy * 6, r: 6, life: 0, max: 0.07 });
   for (let i = 0; i < 5; i++) spawnSmoke(s.x - ux * vehPlaneRnd(2, 12), s.y - uy * vehPlaneRnd(2, 12), { kind: 'gun', mist: true, keep: true, r: vehPlaneRnd(3, 5), grow: vehPlaneRnd(1.2, 2), rmax: vehPlaneRnd(8, 12), lift: 3, vx: s.vx * 0.12 + vehPlaneRnd(-6, 6), vy: s.vy * 0.12 + vehPlaneRnd(-4, 4), life: vehPlaneRnd(3, 5), alpha: 0.5 });
 }
 // the release: a metallic clunk of the rail's catch
@@ -11032,8 +11136,8 @@ function smashSailboat(b, x, y, amt) {
   b.holed = (b.holed || 0) + amt;
   b.a += b.face * 0.12 * Math.min(1, amt);
   spawnSparks(x, y, amt >= 1 ? 14 : 3, 160);
-  if (amt >= 1) { sound('impact', x); flashes.push({ x, y, r: 10, life: 0, max: 0.08 }); }
-  for (let i = 0; i < (amt >= 1 ? 12 : 2); i++) debris.push({ x: x + sbRnd(-5, 5), y: y - sbRnd(0, 4), vx: sbRnd(-70, 70), vy: -sbRnd(40, 150), a: sbRnd(0, 6), w: sbRnd(-10, 10), sw: sbRnd(1.5, 3.5), sh: sbRnd(1, 1.6), col: ['#e8e2d2', '#8a5a30', '#5b3a22', '#c43a2a'][i % 4], state: 0, bub: 0, seed: sbR() * 6, age: 0 });
+  if (amt >= 1) { sound('impact', x); flashes.addRow({ x, y, r: 10, life: 0, max: 0.08 }); }
+  for (let i = 0; i < (amt >= 1 ? 12 : 2); i++) debrisRow({ x: x + sbRnd(-5, 5), y: y - sbRnd(0, 4), vx: sbRnd(-70, 70), vy: -sbRnd(40, 150), a: sbRnd(0, 6), w: sbRnd(-10, 10), sw: sbRnd(1.5, 3.5), sh: sbRnd(1, 1.6), col: ['#e8e2d2', '#8a5a30', '#5b3a22', '#c43a2a'][i % 4], state: 0, bub: 0, seed: sbR() * 6, age: 0 });
   for (let i = 0; i < (amt >= 1 ? 16 : 3); i++) addBubble(b.x + sbRnd(-sailHalf(b), sailHalf(b)), WATER_Y + sbRnd(2, 8), sbRnd(-10, 10), -sbRnd(20, 40), sbRnd(0.8, 2));
 }
 function sinkSailboat(b, x, y, vx) {
@@ -11042,7 +11146,7 @@ function sinkSailboat(b, x, y, vx) {
   b.state = 'sinking'; b.t = 0; b.wreck = true; b.under = false; b.holed = 0;
   // a yacht doesn't explode: a crack, a flash, sparks and a shower of splinters (no black smoke)
   sound('impact', x); shakeAt(3, x);
-  flashes.push({ x, y, r: 12, life: 0, max: 0.1 });
+  flashes.addRow({ x, y, r: 12, life: 0, max: 0.1 });
   spawnSparks(x, y, 18, 220);
   // the mast and sails break away: the whole rig topples over the side and goes down on its own
   const art = img.sails[b.kind], s = art[b.face], rig = makeCanvas(s.width, art.split);
@@ -11052,7 +11156,7 @@ function sinkSailboat(b, x, y, vx) {
   chunks.push({ img: rig, k: SAIL_K, x: rx, y: ry, vx: b.vx + side * sbRnd(8, 22), vy: -sbRnd(15, 40), a: b.a, w: side * sbRnd(0.9, 1.6), delay: 0, floor: WATER_Y, water: true, kind: 'mast', side, hh: art.split / 2 * SAIL_K * 0.6 });
   b.fireT = sbRnd(5, 8);
   // splintered planks and a torn sail
-  for (let i = 0; i < 12; i++) debris.push({ x: x + sbRnd(-6, 6), y: y - sbRnd(0, 6), vx: sbRnd(-60, 60) + vx * 0.1, vy: -sbRnd(40, 140), a: sbRnd(0, 6), w: sbRnd(-10, 10), sw: sbRnd(1.5, 3.5), sh: sbRnd(1, 1.6), col: ['#e8e2d2', '#8a5a30', '#f4f0e6', '#c43a2a'][i % 4], state: 0, bub: 0, seed: sbR() * 6, age: 0 });
+  for (let i = 0; i < 12; i++) debrisRow({ x: x + sbRnd(-6, 6), y: y - sbRnd(0, 6), vx: sbRnd(-60, 60) + vx * 0.1, vy: -sbRnd(40, 140), a: sbRnd(0, 6), w: sbRnd(-10, 10), sw: sbRnd(1.5, 3.5), sh: sbRnd(1, 1.6), col: ['#e8e2d2', '#8a5a30', '#f4f0e6', '#c43a2a'][i % 4], state: 0, bub: 0, seed: sbR() * 6, age: 0 });
 }
 // a small boat rides every wave: it rises and falls with the water under it and pitches with the slope
 function sailRide(b, dt) {
@@ -11173,10 +11277,10 @@ function stepSailboat(b, dt, SB) {
         b.sink += dt * (0.45 + b.t * 0.07) * (1 + 1.6 * Math.min(4, b.holed || 0));   // slowly: about ten seconds to go under (faster, holed again)
         if (b.fireT > 0 && b.sink < hullH) {
           b.fireT -= dt;
-          if (sbR() < dt * 14) { const [fx, fy] = sailPoint(b, a.w * sbRnd(0.25, 0.75), a.split + 6); spawnFlame(fx, fy, sbRnd(-6, 6), -sbRnd(15, 40), 1, sbRnd(1.5, 3), 1.8); flames[flames.length - 1].clean = true; }
+          if (sbR() < dt * 14) { const [fx, fy] = sailPoint(b, a.w * sbRnd(0.25, 0.75), a.split + 6); spawnFlame(fx, fy, sbRnd(-6, 6), -sbRnd(15, 40), 1, sbRnd(1.5, 3), 1.8); flameLast().clean = true; }
         }
         // planks and bits float off her as she goes
-        if (sbR() < dt * 2.5) debris.push({ x: b.x + sbRnd(-sailHalf(b), sailHalf(b)), y: b.y - 1, vx: sbRnd(-15, 15), vy: -sbRnd(10, 40), a: sbRnd(0, 6), w: sbRnd(-6, 6), sw: sbRnd(1.5, 3), sh: sbRnd(0.8, 1.4), col: ['#e8e2d2', '#8a5a30', '#5b3a22', '#2a2522'][Math.floor(sbR() * 4)], state: 0, bub: 0, seed: sbR() * 6, age: 0 });
+        if (sbR() < dt * 2.5) debrisRow({ x: b.x + sbRnd(-sailHalf(b), sailHalf(b)), y: b.y - 1, vx: sbRnd(-15, 15), vy: -sbRnd(10, 40), a: sbRnd(0, 6), w: sbRnd(-6, 6), sw: sbRnd(1.5, 3), sh: sbRnd(0.8, 1.4), col: ['#e8e2d2', '#8a5a30', '#5b3a22', '#2a2522'][Math.floor(sbR() * 4)], state: 0, bub: 0, seed: sbR() * 6, age: 0 });
         if (sbR() < dt * 30) addBubble(b.x + sbRnd(-sailHalf(b), sailHalf(b)), WATER_Y + sbRnd(2, 10), sbRnd(-10, 10), -sbRnd(20, 40), sbRnd(0.8, 2.2));
         if (b.sink > hullH + 5) {
           for (let i = 0; i < 20; i++) addBubble(b.x + sbRnd(-10, 10), WATER_Y + sbRnd(4, 16), sbRnd(-15, 15), -sbRnd(30, 60), sbRnd(1, 2.6));
@@ -11251,7 +11355,7 @@ function destroyBuoy(b, x, y) {
   b.state = 'sink'; b.y = surfaceY(b.x) + 2.5; b.vy = 6; b.rot = 0; b.w = buRnd(-0.6, 0.6);
   impact(x, y);
   spawnDebris(b.x, surfaceY(b.x) - 8, 14, 0);
-  for (let i = 0; i < 10; i++) debris.push({ x: b.x + buRnd(-5, 5), y: surfaceY(b.x) - buRnd(2, 14), vx: buRnd(-90, 90), vy: -buRnd(80, 200), a: buRnd(0, 6.28), w: buRnd(-12, 12), sw: buRnd(1.5, 3.5), sh: buRnd(1, 2), col: ['#e8802c', '#be5a1a', '#60280c'][i % 3], state: 0, bub: 0, seed: buR() * 6.28, age: 0, light: i % 2 === 0 });
+  for (let i = 0; i < 10; i++) debrisRow({ x: b.x + buRnd(-5, 5), y: surfaceY(b.x) - buRnd(2, 14), vx: buRnd(-90, 90), vy: -buRnd(80, 200), a: buRnd(0, 6.28), w: buRnd(-12, 12), sw: buRnd(1.5, 3.5), sh: buRnd(1, 2), col: ['#e8802c', '#be5a1a', '#60280c'][i % 3], state: 0, bub: 0, seed: buR() * 6.28, age: 0, light: i % 2 === 0 });
   splash(b.x, 0, 300);
 }
 function stepBuoys(dt) {
@@ -11363,7 +11467,6 @@ function buildLifeboatArt() {
 const freshCrew = () => ({ mode: 'dock', x: 0, face: 1, anim: 0, bv: 0, boatZoomT: 0, safeT: 0, dead: false, watch: null, look: null });
 const crew = [0, 1].map(freshCrew);
 NET.home = [crew[0], crew[1]];                   // (the records of whoever plays at this screen, whatever asSeat stands in)
-const blood = [];
 // (engine stage 3) the crews' own random source (stepCrew - the boat, the towers' fires it tends, the blood - killGuy,
 // chillTower), made on first use: this file is read before the tables; their tables crew and crewBlood in 36-zz-vehicles.js
 let vehCrewR_ = null;
@@ -11500,17 +11603,6 @@ function stepCrew(dt) {
       }
     }
   }
-  // blood: drops fly, land on the deck, run down the pier face and dry
-  for (const b of blood) {
-    if (b.state === 0) {
-      b.vy += 420 * dt; b.x += b.vx * dt; b.y += b.vy * dt;
-      if (b.y >= DECK_Y) { b.y = DECK_Y; b.state = 1; b.drip = vehCrewR() < 0.35 ? vehCrewRnd(2, 7) : 0; }
-    } else {
-      b.age += dt;
-      if (b.drip > 0 && b.len < b.drip) b.len += dt * (b.drip - b.len) * 0.6 + dt * 0.4;
-    }
-  }
-  while (blood.length > 600) blood.shift();
 }
 // (user Oct 27: "When a tower has black smoke, it should go higher in the air") how much higher than the sea's smoke a
 // tower's rises before it slows to a drift: its own height above the sea (a mountain's tower stands far up), and 260 more
@@ -11549,7 +11641,7 @@ function killGuy(p) {
   const c = crew[p];
   if (c.mode !== 'boat') return;
   const sy = surfaceY(c.x);
-  for (let i = 0; i < 6; i++) debris.push({ x: c.x + vehCrewRnd(-4, 4), y: sy - 2, vx: vehCrewRnd(-40, 40), vy: -vehCrewRnd(40, 120), a: vehCrewRnd(0, 6), w: vehCrewRnd(-10, 10), sw: vehCrewRnd(1.5, 3), sh: 1.2, col: i % 2 ? '#e8e2d2' : '#8a5a30', state: 0, bub: 0, seed: vehCrewR() * 6, age: 0 });
+  for (let i = 0; i < 6; i++) debrisRow({ x: c.x + vehCrewRnd(-4, 4), y: sy - 2, vx: vehCrewRnd(-40, 40), vy: -vehCrewRnd(40, 120), a: vehCrewRnd(0, 6), w: vehCrewRnd(-10, 10), sw: vehCrewRnd(1.5, 3), sh: 1.2, col: i % 2 ? '#e8e2d2' : '#8a5a30', state: 0, bub: 0, seed: vehCrewR() * 6, age: 0 });
   c.mode = 'gone';
   killCaptain(p);
 }
@@ -11583,8 +11675,8 @@ function launch(x, y, el, power, facing, baseVx, owner, from) {
   const dx = Math.cos(el) * facing, dy = -Math.sin(el);
   shells.push({ x, y, vx: dx * sp + baseVx, vy: dy * sp, owner, from, age: 0, trail: 0, under: false, ut: 0, g: SHELL_G * gunK(from) });
   sound('cannon', x, from === 'tower'); sound('whoosh', shells[shells.length - 1]);
-  flashes.push({ x: x + dx * 4, y: y + dy * 4, r: 10, life: 0, max: 0.1 });
-  for (let i = 0; i < 10; i++) { spawnFlame(x + dx * armShellRnd(2, 10), y + dy * armShellRnd(2, 10), dx * armShellRnd(40, 120), dy * armShellRnd(40, 120), 1.2, armShellRnd(2, 4), armShellRnd(5, 7)); flames[flames.length - 1].clean = true; }
+  flashes.addRow({ x: x + dx * 4, y: y + dy * 4, r: 10, life: 0, max: 0.1 });
+  for (let i = 0; i < 10; i++) { spawnFlame(x + dx * armShellRnd(2, 10), y + dy * armShellRnd(2, 10), dx * armShellRnd(40, 120), dy * armShellRnd(40, 120), 1.2, armShellRnd(2, 4), armShellRnd(5, 7)); flameLast().clean = true; }
   // the muzzle smoke stays at the muzzle: a short puff, not a second trail chasing the shell
   for (let i = 0; i < 7; i++) spawnSmoke(x + dx * armShellRnd(3, 12), y + dy * armShellRnd(3, 12), { kind: 'gun', mist: true, keep: true, r: armShellRnd(4, 8), grow: armShellRnd(1.2, 2.4), rmax: armShellRnd(13, 19), lift: 4, vx: dx * armShellRnd(6, 18) + baseVx, vy: dy * armShellRnd(6, 18) - 2, life: armShellRnd(6, 9), alpha: 0.6 });
   gridImpulse(x, y, dx * 60, dy * 60, 2);
@@ -11628,7 +11720,7 @@ function shipMG(sh) {
   const sp = MG_SPEED * (0.75 + g.power * 0.4), spr = armShellRnd(-0.02, 0.02);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spr) * sp + sh.vx, vy: (uy + ux * spr) * sp, owner: sh.id, age: 0, pass: passingShips(sh) });
   sh.muzzle = k; sh.recoil[k] = 0.35; g.press = 0.08;
-  flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
+  flashes.addRow({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
   if (armShellR() < 0.4) spawnSmoke(mx, my, { kind: 'gun', dark: 0.85, r: 1.6, lift: 6, life: 0.7, alpha: 0.25, grow: 4 });
   sound('mg', mx);
 }
@@ -11723,7 +11815,7 @@ function stepShells(dt) {
         const v = Math.min(top, want); s.vx = s.ux * v; s.vy = s.uy * v; }
       // the motor's fire: a short tongue of flame streaming out of the tail
       if (!SIM_ONLY) { const sp = Math.hypot(s.vx, s.vy) || 1, ux = s.vx / sp, uy = s.vy / sp;
-        for (let k = 0; k < 2; k++) { spawnFlame(s.x - ux * armShellRnd(7, 12), s.y - uy * armShellRnd(7, 12), -ux * armShellRnd(60, 140) + armShellRnd(-15, 15), -uy * armShellRnd(60, 140) + armShellRnd(-15, 15), 1.1, armShellRnd(1.4, 2.4), armShellRnd(7, 10)); flames[flames.length - 1].clean = true; } }
+        for (let k = 0; k < 2; k++) { spawnFlame(s.x - ux * armShellRnd(7, 12), s.y - uy * armShellRnd(7, 12), -ux * armShellRnd(60, 140) + armShellRnd(-15, 15), -uy * armShellRnd(60, 140) + armShellRnd(-15, 15), 1.1, armShellRnd(1.4, 2.4), armShellRnd(7, 10)); flameLast().clean = true; } }
       if (s.burn <= 0) { s.seg = null; if (!SIM_ONLY) spawnSmoke(s.x, s.y, { kind: 'gun', mist: true, r: 1.6, grow: 2, lift: 2, vx: s.vx * 0.05, vy: s.vy * 0.05, life: 1, alpha: 0.3 }); }
     } else {
       s.vx += (windAt(s.y) * 0.5 - s.vx) * 0.002;
@@ -11928,12 +12020,12 @@ function shipBlast(sh, x, y, power) {
   shakeAt(4 + 5 * power, x);
   const deck = sh.y - 9, oy = Math.min(Math.max(y, deck - 4), sh.y);
   sh.darkT = 0.55;
-  flashes.push({ x, y: deck - 4, r: 12 + 10 * power, life: 0, max: 0.12 });
+  flashes.addRow({ x, y: deck - 4, r: 12 + 10 * power, life: 0, max: 0.12 });
   // inside: a hot heap that wells up out of the hull (its foot hidden by her side)
   const n = Math.round(18 + 22 * power);
   for (let i = 0; i < n; i++) {
     spawnFlame(x + armShellRnd(-7, 7) * (0.6 + power * 0.5), oy + armShellRnd(-4, 6), armShellRnd(-22, 22) + sh.vx * 0.5, -armShellRnd(30, 150) * (0.6 + 0.45 * power), armShellRnd(1.15, 1.45), armShellRnd(2.6, 5) * (0.65 + 0.35 * power), armShellRnd(1.3, 1.9));
-    flames[flames.length - 1].behind = true;
+    flameLast().behind = true;
   }
   // above the deck: a few tongues licking up, and the column
   for (let i = 0; i < 8 * power + 3; i++) spawnFlame(x + armShellRnd(-5, 5), deck - armShellRnd(0, 6), armShellRnd(-14, 14) + sh.vx * 0.5, -armShellRnd(40, 120), armShellRnd(1.0, 1.3), armShellRnd(2, 3.8), armShellRnd(1.6, 2.2));
@@ -11949,7 +12041,7 @@ function impact(x, y) {
   sound('impact', x);
   if (y > WATER_Y - 60) water.shock(x, WATER_Y + 4, 0.8);
   shakeAt(5, x);
-  flashes.push({ x, y, r: 18, life: 0, max: 0.12 });
+  flashes.addRow({ x, y, r: 18, life: 0, max: 0.12 });
   spawnSparks(x, y, 26, 300);
   for (let i = 0; i < 14; i++) spawnFlame(x + armShellRnd(-4, 4), y + armShellRnd(-4, 4), armShellRnd(-90, 90), armShellRnd(-90, 30), 1.1, armShellRnd(3, 6), armShellRnd(3.5, 5));
   for (let i = 0; i < 8; i++) spawnSmoke(x + armShellRnd(-10, 10), y + armShellRnd(-8, 4), { kind: 'blast', dark: 0.6, r: armShellRnd(6, 10), lift: 25, vx: armShellRnd(-30, 30), alpha: armShellRnd(0.3, 0.45), life: armShellRnd(5, 8) });
@@ -11962,8 +12054,8 @@ function sectionBlast(x, y, power, baseVx) {
   shakeAt(5 + 6 * power, x);
   if (y > WATER_Y - 70) water.shock(x, WATER_Y + 4, 0.8 + 0.5 * power);
   // about half the size it was: a tight yellow fireball, like a real hit seen from a distance
-  flashes.push({ x, y, r: 30 * power, life: 0, max: 0.16 });
-  rings.push({ x, y, r: 3, max: 35 * power, life: 0 });
+  flashes.addRow({ x, y, r: 30 * power, life: 0, max: 0.16 });
+  rings.addRow({ x, y, r: 3, max: 35 * power, life: 0 });
   const n = Math.round(30 + 36 * power);
   for (let i = 0; i < n; i++) {
     const a = armShellRnd(0, Math.PI * 2), sp = Math.pow(armShellR(), 0.6) * (70 + 70 * power);
@@ -12159,14 +12251,14 @@ function stepPierGuns(dt) {
    times as wide. As many pieces as before, each bigger: the same look, magnified, at the same cost.
    ================================================================ */
 let BLAST = null;
-const BLAST_FREE = () => [flames];                                             // (flung: speeds x K - and the smoke's puffs: below)
-const BLAST_THROWN = () => [debris, dust];                            // (thrown under gravity: speeds x sqrt K)
-const BLAST_ALL = () => [...BLAST_FREE(), ...BLAST_THROWN(), flashes, rings, spikeBursts];
+const BLAST_FREE = () => [];                                             // (flung: speeds x K - and the smoke's puffs: below)
+const BLAST_THROWN = () => [];                            // (thrown under gravity: speeds x sqrt K)
+const BLAST_ALL = () => [...BLAST_FREE(), ...BLAST_THROWN(), spikeBursts];
 // (Nov 1) the column tables (04-zz-coltable.js) and how fast their new rows are flung: the smoke's puffs as the flames (K), the
-// sparks, the embers and the spray thrown (sqrt K); a table's new rows are those past the last id it had given at blastOpen
-const BLAST_COLS = () => [[smoke, false], [sparks, true], [embers, true], [spray, true]];
+// sparks, the embers, the spray and the debris thrown (sqrt K); a table's new rows are those past the last id it had given at blastOpen
+const BLAST_COLS = () => [[smoke, false], [flames, false], [sparks, true], [embers, true], [spray, true], [debris, true], [dust, true]];
 function blastOpen() {
-  BLAST = { fx: FXK, last: BLAST_ALL().map(a => a[a.length - 1]), top: BLAST_COLS().map(([T]) => T.top), jet: jets.n ? jets.c.sq[jets.n - 1] : 0 };   // (the last piece in each: new ones come after it, even if old ones were dropped)
+  BLAST = { fx: FXK, last: BLAST_ALL().map(a => a[a.length - 1]), top: BLAST_COLS().map(([T]) => T.top), fl: flashes.top, ri: rings.top, jet: jets.n ? jets.c.sq[jets.n - 1] : 0 };   // (the last piece in each: new ones come after it, even if old ones were dropped)
   FXK = FXK * BLAST_K;
 }
 // the pieces added to a since blastOpen (walked back from the end to the piece that was last then)
@@ -12185,13 +12277,14 @@ function blastClose(x, y) {
   // (the jets thrown since: faster and wider - after the last jet there was then; if that one has since been dropped (a cap of 64),
   // every jet, as the list's walk back from its end found)
   { const c = jets.c; for (let i = B.jet && jets.row(B.jet) < 0 ? 0 : jets.after(B.jet); i < jets.n; i++) { c.v0[i] *= R; c.w[i] *= K; c.base[i] *= K; } }
+  // (the flashes and the rings made since: as much wider, and as far out - Nov 1, column tables)
+  { const c = flashes.c; for (let i = flashes.after(B.fl); i < flashes.n; i++) { c.x[i] = x + (c.x[i] - x) * K; c.y[i] = y + (c.y[i] - y) * K; c.r[i] *= K; } }
+  { const c = rings.c; for (let i = rings.after(B.ri); i < rings.n; i++) { c.x[i] = x + (c.x[i] - x) * K; c.y[i] = y + (c.y[i] - y) * K; c.r[i] *= K; c.max[i] *= K; } }
   all.forEach((a, j) => {
     const fresh = blastNew(a, B.last[j]);
     if (!fresh.length) return;
     if (j < nF) for (const p of fresh) spread(p, K);
     else if (j < nF + nT) for (const p of fresh) spread(p, R);
-    else if (a === flashes) for (const f of fresh) { f.x = x + (f.x - x) * K; f.y = y + (f.y - y) * K; f.r *= K; }
-    else if (a === rings) for (const r of fresh) { r.x = x + (r.x - x) * K; r.y = y + (r.y - y) * K; r.r *= K; r.max *= K; }
     else for (const b of fresh) for (const S of b.spikes) { S.w *= K; for (const g of S.g) { g.x = x + (g.x - x) * K; g.vx *= R; g.vy *= R; } }   // (spikeBursts)
   });
 }
@@ -12384,7 +12477,7 @@ function sinkShip(sh) {
   for (let i = 0; i < 6; i++) {
     const s = Math.floor(armPieceRnd(1, SECTIONS - 1));
     const [x, y] = deckPoint(sh, s, armPieceR());
-    debris.push({ x, y, vx: sh.vx * 0.3 + armPieceRnd(-60, 60), vy: -armPieceRnd(40, 120), a: armPieceRnd(0, 6), w: armPieceRnd(-4, 4), sw: armPieceRnd(6, 12), sh: armPieceRnd(3, 6), col: DEBRIS_COLS[(armPieceR() * 3) | 0], state: 0, bub: 0, seed: armPieceR() * 6, age: 0, big: true });
+    debrisRow({ x, y, vx: sh.vx * 0.3 + armPieceRnd(-60, 60), vy: -armPieceRnd(40, 120), a: armPieceRnd(0, 6), w: armPieceRnd(-4, 4), sw: armPieceRnd(6, 12), sh: armPieceRnd(3, 6), col: DEBRIS_COLS[(armPieceR() * 3) | 0], state: 0, bub: 0, seed: armPieceR() * 6, age: 0, big: true });
   }
   // back ashore to pick what's left (or that's the end)
   sh.auto = null;
@@ -12419,7 +12512,7 @@ function wreckBubbles(p, dt) {
       const x = p.x + l * ca - h * sa, y = p.y + l * sa + h * ca;
       if (y < surfaceY(x) + 3) continue;
       const light = armPieceR() < 0.4;
-      debris.push({
+      debrisRow({
         x, y, vx: p.vx * 0.5 + armPieceRnd(-25, 25), vy: armPieceRnd(-12, 12), a: armPieceRnd(0, 6.28), w: armPieceRnd(-6, 6),
         sw: light ? armPieceRnd(1, 2.4) : armPieceRnd(1, 3), sh: armPieceRnd(0.8, 1.6),
         col: light ? LIGHT_JUNK[(armPieceR() * LIGHT_JUNK.length) | 0] : DEBRIS_COLS[(armPieceR() * DEBRIS_COLS.length) | 0],
@@ -12714,17 +12807,24 @@ function spawnSparks(x, y, n, speed) {
   }
 }
 function spawnFlame(x, y, vx, vy, heat, r, decay) {
-  flames.push({ x, y, vx, vy, heat, r: r * FXK, decay, h0: heat });
+  flames.addRow({ x, y, vx, vy, heat, r: r * FXK, decay, h0: heat });
 }
+// (Nov 1) the flame just made, through an accessor (its thrower marks it: clean, behind, src)
+const FLAME_CUR = { c: null };
+const flameLast = () => { const c = FLAME_CUR.c || (FLAME_CUR.c = flames.cursor()); c.i = flames.n - 1; return c; };
 function spawnEmber(x, y, vx, speed = 1) {
   const j = embers.add(), c = embers.c;
   c.x[j] = x; c.y[j] = y; c.vx[j] = vx + ptRnd(-40, 40) * speed; c.vy[j] = -ptRnd(40, 120) * speed; c.life[j] = 0; c.max[j] = ptRnd(1.2, 3); c.ph[j] = ptR() * 6;
 }
 const DEBRIS_COLS = ['#8d8d84', '#6e6e66', '#4a4a44', '#2a2a28', '#8a3a1c', '#5c2a16', '#b0b0a6'];
+/* (Nov 1) A PIECE OF DEBRIS, THE ONE WAY IN: its fields by name (DEBRIS_FIELDS, 05-game-state.js) through the table's row maker
+   (ColTable.addRow) - every thrower writes them as it always did, so the random numbers come in the same order; a field not
+   declared (clod, seen: nothing ever read them) is left out, a field not given is as declared for a new row. Its row's place */
+const debrisRow = o => debris.addRow(o);
 function spawnDebris(x, y, n, baseVx) {
   // (no limit, user Oct 30: "no smoke or fire or debris limits" - the sea floor keeps all that lands on it)
   for (let i = 0; i < n; i++) {
-    debris.push({
+    debrisRow({
       x: x + ptRnd(-6, 6), y: y + ptRnd(-6, 4), vx: baseVx * 0.4 + ptRnd(-110, 110), vy: -ptRnd(60, 230),
       a: ptRnd(0, 6.28), w: ptRnd(-14, 14), sw: ptRnd(1.6, 4.5), sh: ptRnd(1, 2.6),
       col: DEBRIS_COLS[(ptR() * DEBRIS_COLS.length) | 0], state: 0, bub: 0, seed: ptR() * 6.28, age: 0,
@@ -12732,6 +12832,7 @@ function spawnDebris(x, y, n, baseVx) {
   }
 }
 
+const DCUR = {};   // (Nov 1: the accessors the step walks its column tables with)
 function stepParticles(dt) {
   const W = E.windU, sb = surfBand(), wTop = WATER_Y - sb, wBot = WATER_Y + sb;   // (outside wTop..wBot nothing is at the water: the exact surface not asked for - perf pass, Oct 29)
   { const c = spray.c, X = c.x, Y = c.y, VX = c.vx, VY = c.vy, L = c.life;
@@ -12764,12 +12865,13 @@ function stepParticles(dt) {
     }
     sparks.sweep(); }
   // Fire: hot pixels that rise, lean with the wind and cool into smoke
-  for (let i = flames.length - 1; i >= 0; i--) {
-    const f = flames[i];
+  { const f = DCUR.fl || (DCUR.fl = flames.cursor());   // (Nov 1: the flames' rows through an accessor - their sums as they were)
+  for (let i = flames.n - 1; i >= 0; i--) {
+    f.i = i;
     f.heat -= f.decay * dt;
     if (f.heat <= 0.3) {
       if (!f.clean && f.r > 4 && ptR() < 0.3) spawnSmoke(f.x, f.y, { dark: 0, grow: ptRnd(3, 5), r: f.r * 0.65, lift: 55, vx: f.vx * 0.5, vy: f.vy * 0.5, alpha: ptRnd(0.4, 0.65) });
-      flames.splice(i, 1); continue;
+      flames.drop(i); continue;
     }
     const drag = 3.2 * dt;
     f.vx += (windAt(f.y) * 1.1 - f.vx) * drag; f.vy += (-60 * f.heat - f.vy) * drag * 0.6;
@@ -12777,6 +12879,7 @@ function stepParticles(dt) {
     f.r += 5 * dt;
     if (f.y > wTop - 1 && f.y > surfaceY(f.x) - 1) { f.y = surfaceY(f.x) - 1; f.vy = Math.min(f.vy, 0); }
   }
+  flames.sweep(); }
   { const c = embers.c, X = c.x, Y = c.y, VX = c.vx, VY = c.vy, L = c.life;
     for (let i = embers.n - 1; i >= 0; i--) {
       L[i] += dt;
@@ -12785,10 +12888,10 @@ function stepParticles(dt) {
       if (L[i] > c.max[i]) embers.drop(i);
     }
     embers.sweep(); }
-  for (let i = flashes.length - 1; i >= 0; i--) { flashes[i].life += dt; if (flashes[i].life > flashes[i].max) flashes.splice(i, 1); }
-  for (let i = welds.length - 1; i >= 0; i--) { welds[i].life += dt; if (welds[i].life > welds[i].max) welds.splice(i, 1); }
-  for (let i = rings.length - 1; i >= 0; i--) { const r = rings[i]; r.life += dt; r.r += (r.max - r.r) * 7 * dt; if (r.life > 0.35) rings.splice(i, 1); }
-  // (the settled world, Oct 30: what comes to rest is filed away - 36-zzzz-settled.js - and no longer stepped)
+  { const c = flashes.c; for (let i = flashes.n - 1; i >= 0; i--) { c.life[i] += dt; if (c.life[i] > c.max[i]) flashes.drop(i); } flashes.sweep(); }
+  { const c = rings.c; for (let i = rings.n - 1; i >= 0; i--) { c.life[i] += dt; c.r[i] += (c.max[i] - c.r[i]) * 7 * dt; if (c.life[i] > 0.35) rings.drop(i); } rings.sweep(); }
+  // (the settled world, Oct 30: what comes to rest is filed away - 36-zzzz-settled.js - and no longer stepped; d: the row's
+  // accessor - Nov 1)
   restDebrisLoop(dt, d => {
     d.age += dt;
     // (user Oct 27) lying on the harbour's deck: it stays while the deck does; the pier gone, it falls into the sea
@@ -12823,7 +12926,7 @@ function stepParticles(dt) {
       d.bub += (1.5 + d.sw * 0.4) * dt;
       if (d.bub >= 1) { d.bub = 0; addBubble(d.x + ptRnd(-1, 1), d.y - 1, ptRnd(-4, 4), -ptRnd(15, 30), ptRnd(0.6, 1.3)); }
       const rest = seabedY(d.x) - 1;
-      if (d.y >= rest) { d.y = rest; d.state = 2; addBubble(d.x, d.y - 2, 0, -20, 1); if (d.hopped) { if (d.big || d.sw > 3) kickDust(d.x, d.sw * 0.4, 3); } else if (d.big) { kickDust(d.x, d.sw, 10 + d.vy); scatterBed(d.x, 40, 0.45, d); } else if (d.sw > 2.5) kickDust(d.x, d.sw * 0.5, 4); }
+      if (d.y >= rest) { d.y = rest; d.state = 2; addBubble(d.x, d.y - 2, 0, -20, 1); if (d.hopped) { if (d.big || d.sw > 3) kickDust(d.x, d.sw * 0.4, 3); } else if (d.big) { kickDust(d.x, d.sw, 10 + d.vy); scatterBed(d.x, 40, 0.45, d.n); } else if (d.sw > 2.5) kickDust(d.x, d.sw * 0.5, 4); }
     }
   });
   // Storm: wind tears spray off the crests
@@ -12832,8 +12935,9 @@ function stepParticles(dt) {
     if (ambient(x, time) > 6 * E.waveAmp * 0.6) for (let k = 0; k < 4; k++) spawnSpray(x + ptRnd(-6, 6), surfaceY(x) - 2, E.windU * 0.8, 0.6);
   }
 
-  for (let i = dust.length - 1; i >= 0; i--) {
-    const u = dust[i]; u.age += dt;
+  const u = DCUR.u || (DCUR.u = dust.cursor());   // (Nov 1: the dust's rows through an accessor - its sums as they were)
+  for (let i = dust.n - 1; i >= 0; i--) {
+    u.i = i; u.age += dt;
     // the burst slows fast; then the cloud swells, drifts with the current and sinks back very slowly
     u.vx *= 1 - 1.6 * dt; u.vy = u.vy * (1 - 1.8 * dt) + 2.2 * dt;
     u.x += (u.vx + E.windU * 0.02) * dt; u.y += u.vy * dt;
@@ -12842,37 +12946,46 @@ function stepParticles(dt) {
     if (u.y > bed) { u.y = bed; u.vy = 0; }
     // sand grains sift out of it and drift down
     u.grainT -= dt;
-    if (u.grainT <= 0 && u.age < u.life * 0.75 && grains.length < 400) {
+    if (u.grainT <= 0 && u.age < u.life * 0.75 && grains.n < 400) {
       u.grainT = ptRnd(0.5, 1.3);
-      grains.push({ x: u.x + ptRnd(-u.r, u.r), y: u.y + ptRnd(-u.r * 0.6, u.r * 0.3), vy: ptRnd(4, 9), ph: ptR() * 6, life: 0 });
+      grains.addRow({ x: u.x + ptRnd(-u.r, u.r), y: u.y + ptRnd(-u.r * 0.6, u.r * 0.3), vy: ptRnd(4, 9), ph: ptR() * 6, life: 0 });
     }
-    if (u.age > u.life) dust.splice(i, 1);
+    if (u.age > u.life) dust.drop(i);
   }
-  for (let i = ash.length - 1; i >= 0; i--) {
-    const f = ash[i]; f.life += dt;
+  dust.sweep();
+  const f = DCUR.f || (DCUR.f = ash.cursor());
+  for (let i = ash.n - 1; i >= 0; i--) {
+    f.i = i; f.life += dt;
     // light flakes: they flutter down slowly and the wind carries them
     f.vx += (windAt(f.y) * 0.5 - f.vx) * 0.8 * dt;
     f.x += (f.vx + Math.sin(f.life * 2.6 + f.ph) * 5) * dt; f.y += (f.vy + Math.sin(f.life * 1.7 + f.ph) * 2) * dt;
-    if ((f.y > wTop && f.y > surfaceY(f.x)) || f.life > f.max) ash.splice(i, 1);
+    if ((f.y > wTop && f.y > surfaceY(f.x)) || f.life > f.max) ash.drop(i);
   }
-  for (let i = grains.length - 1; i >= 0; i--) {
-    const gq = grains[i]; gq.life += dt;
+  ash.sweep();
+  const gq = DCUR.g || (DCUR.g = grains.cursor());
+  for (let i = grains.n - 1; i >= 0; i--) {
+    gq.i = i; gq.life += dt;
     gq.x += Math.sin(gq.life * 2 + gq.ph) * 3 * dt; gq.y += gq.vy * dt;
-    if (gq.y >= seabedY(gq.x) || gq.life > 12) grains.splice(i, 1);
+    if (gq.y >= seabedY(gq.x) || gq.life > 12) grains.drop(i);
   }
+  grains.sweep();
   stepSea(dt);
 }
 // Something heavy lands on the bottom: the bits of wreckage already lying around it are thrown
 // up and outward, tumble a little and settle again
+// (except: the landing piece's number. Nov 1: the records by number, a woken one's fields set in the debris' table, where it is now)
+const SCAT = { d: null };
 function scatterBed(x, range, power, except) {
   // (the settled world: those at rest within reach, in the order they were thrown - each draws its random numbers in turn)
-  for (const d of restDebrisIn(x - range, x + range)) {
-    if (d === except || d.state !== 2 || d.deck) continue;   // (not what lies up on the harbour's deck)
-    const dx = d.x - x, dist = Math.abs(dx);
+  const R = restDeb.c, d = SCAT.d || (SCAT.d = debris.cursor());
+  for (const id of restDebrisIn(x - range, x + range)) {
+    const r = restDeb.row(id);
+    if (id === except || R.state[r] !== 2 || R.deck[r]) continue;   // (not what lies up on the harbour's deck)
+    const dx = R.x[r] - x, dist = Math.abs(dx);
     if (dist > range) continue;
-    const k = power * (1 - dist / range) * (d.big ? 0.4 : 1);
+    const k = power * (1 - dist / range) * (R.big[r] ? 0.4 : 1);
     if (k < 0.05) continue;
-    restWakeDebris(d);
+    d.i = restWakeDebris(id);
     d.state = 1; d.light = false; d.hopped = true; d.bub = -1e9;      // a hop, not a new sinking: no bubbles, no chain reaction
     d.vx = (Math.sign(dx) || (ptR() < 0.5 ? -1 : 1)) * ptRnd(25, 70) * k;
     d.vy = -ptRnd(25, 60) * k;
@@ -12887,7 +13000,7 @@ function kickDust(x, hl, power) {
   for (let i = 0; i < n; i++) {
     const u = ptRnd(-1, 1), side = Math.sign(u) || 1;
     const px = x + u * hl;
-    dust.push({ x: px, y: seabedY(px) - ptRnd(0, 3), vx: side * ptRnd(8, 30) * k * (0.4 + Math.abs(u)), vy: -ptRnd(10, 34) * k * (1.2 - 0.5 * Math.abs(u)),
+    dust.addRow({ x: px, y: seabedY(px) - ptRnd(0, 3), vx: side * ptRnd(8, 30) * k * (0.4 + Math.abs(u)), vy: -ptRnd(10, 34) * k * (1.2 - 0.5 * Math.abs(u)),
                 r: ptRnd(2, 4), r1: ptRnd(10, 22) * (0.7 + 0.4 * k), age: 0, life: ptRnd(10, 16), seed: ptR() * 10, grainT: ptRnd(0, 0.6) });
   }
   scareFish(x, seabedY(x) - 40, 200);
@@ -12897,8 +13010,8 @@ function kickDust(x, hl, power) {
 // A ring that spreads through the water from an impact; fish flee it and the algae bend away from it.
 function shock(x, y, power, faint, len = 0) {
   disturb(x, (faint ? 0.25 : 0.7) * power, 70 + 120 * power);       // (the water bends round it: distortWater)
-  if (shocks.length > 40) shocks.shift();
-  shocks.push({ x, y: Math.max(y, WATER_Y - 2), r: 4, max: 70 + 130 * power, speed: 75 + 45 * power, life: 0, power, faint: !!faint, seed: ptR() * 100, len });
+  if (shocks.length > 40) { shocks.drop(0); shocks.sweep(); }
+  shocks.addRow({ x, y: Math.max(y, WATER_Y - 2), r: 4, max: 70 + 130 * power, speed: 75 + 45 * power, life: 0, power, faint: !!faint, seed: ptR() * 100, len });
 }
 function scareFish(x, y, r) { for (const s of schools) if (Math.abs(s.x - x) < r && Math.abs(s.y - y) < r) { s.flee = 2.5; s.dir = s.x < x ? -1 : 1; } }
 on('splash', e => scareFish(e.x, e.y + 40, 160), 'fish', 10);   // (engine stage 3: a splash - 36-zz-events.js)
@@ -12907,10 +13020,11 @@ on('lost', e => { if (e.kind === 'ship') scareFish(e.o.x, WATER_Y + 120, 400); }
 // blasts under water, a sub moving, a ship or a sub going down, a wreck blown, the kraken's grab)
 on('scare', e => { if (e.kind !== 'birds') scareFish(e.x, e.y, e.r); }, 'fish', 10);
 function stepShocks(dt) {
-  for (let i = shocks.length - 1; i >= 0; i--) {
-    const w = shocks[i];
+  const w = DCUR.w || (DCUR.w = shocks.cursor());   // (Nov 1: the rows through an accessor - their sums as they were)
+  for (let i = shocks.n - 1; i >= 0; i--) {
+    w.i = i;
     w.life += dt; w.r += w.speed * dt; w.speed *= 1 - 0.55 * dt;
-    if (w.r >= w.max || w.life > 8) { shocks.splice(i, 1); continue; }
+    if (w.r >= w.max || w.life > 8) { shocks.drop(i); continue; }
     const fade = 1 - w.r / w.max, band = 14;
     for (const s of schools) {
       const d = Math.hypot(s.x - w.x, s.y - w.y);
@@ -12922,6 +13036,7 @@ function stepShocks(dt) {
       if (Math.abs(d - w.r) < band) p.bendV = (p.bendV || 0) + Math.sign(p.x - w.x || 1) * w.power * fade * (w.faint ? 18 : 70) * dt * 8;
     }
   }
+  shocks.sweep();
   // a submarine down among them: they're pushed aside, and the ones taller than her keel is high are torn off
   for (const sb of subs.concat(oldSubs)) {
     if (sb.state !== 'out' && sb.state !== 'sinking') continue;
@@ -12983,7 +13098,11 @@ function stepWeedBits(dt) {
    flat tones, chunks of it tumbling as they sink, the kraken's own (krBlood) - and its body rolls belly up and sinks to
    the bottom, still bleeding a while, where it lies and in time fades away. Drawn with the sea life, before the deep's
    dark, so down there it's as dark as everything else. */
-const deadBig = [], seaBlood = [], seaGore = [];
+const deadBig = [];
+// (Nov 1) the blood's clouds and its sinking chunks: column tables, made by their row makers (addRow); drawn by pixel layers
+// (SEABLOOD_L, SEAGORE_L). sd: its pattern; lob: its cloud's lobes; s: a chunk's size; dark: a dark one
+const seaBlood = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', r: 'f64', t: 'f64', life: 'f64', sd: 'f64', lob: 'f64' });
+const seaGore = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', s: 'f64', t: 'f64', life: 'f64', sd: 'f64', dark: 'u8' });
 const SEA_BLOOD_COLS = ['', 'rgba(150,10,18,0.3)', 'rgba(150,10,18,0.55)', 'rgba(150,10,18,0.8)'];   // the blood's three tones, by index
 const bigLen = (kind) => { const a = kind === 'whale' ? img.whale : img.shark; return a ? a.swim[0].r.width * a.px : 60; };
 // is (x, y) on this shark or whale? (r: how far round it still counts)
@@ -13005,9 +13124,9 @@ function killBig(s, kind, fx, fy, power = 1) {
 // a burst of blood: clouds and chunks (krBlood's)
 function seaBloodAt(x, y, n, vx, vy, spread) {
   if (SIM_ONLY) return;
-  for (let i = 0; i < n && seaBlood.length < 260; i++) { const a = seaR() * 6.28, sp = seaR() * spread; seaBlood.push({ x, y, vx: vx + Math.cos(a) * sp, vy: vy + Math.sin(a) * sp, r: 3 + seaR() * 5, t: 0, life: 6 + seaR() * 5, sd: seaR() * 6.28, lob: 2 + Math.floor(seaR() * 3) }); }
+  for (let i = 0; i < n && seaBlood.n < 260; i++) { const a = seaR() * 6.28, sp = seaR() * spread; seaBlood.addRow({ x, y, vx: vx + Math.cos(a) * sp, vy: vy + Math.sin(a) * sp, r: 3 + seaR() * 5, t: 0, life: 6 + seaR() * 5, sd: seaR() * 6.28, lob: 2 + Math.floor(seaR() * 3) }); }
   const nc = Math.round(n * 0.35 * (0.5 + seaR()));
-  for (let i = 0; i < nc && seaGore.length < 160; i++) { const a = seaR() * 6.28, sp = spread * (0.5 + seaR() * 1.4); seaGore.push({ x, y, vx: vx + Math.cos(a) * sp, vy: vy + Math.sin(a) * sp - 10, s: 1.5 + seaR() * 4.5, t: 0, life: 18 + seaR() * 10, sd: Math.floor(seaR() * 1e3), dark: seaR() < 0.4 }); }
+  for (let i = 0; i < nc && seaGore.n < 160; i++) { const a = seaR() * 6.28, sp = spread * (0.5 + seaR() * 1.4); seaGore.addRow({ x, y, vx: vx + Math.cos(a) * sp, vy: vy + Math.sin(a) * sp - 10, s: 1.5 + seaR() * 4.5, t: 0, life: 18 + seaR() * 10, sd: Math.floor(seaR() * 1e3), dark: seaR() < 0.4 }); }
 }
 // the sharks and whales near a blast (or a round): killed (from killFishNear)
 function killBigNear(x, y, r) {
@@ -13039,50 +13158,73 @@ function stepSeaKills(dt) {
     if (d.t > 90) d.fade -= dt / 10;
     if (d.fade <= 0) deadBig.splice(i, 1);
   }
-  for (const q of seaBlood) { q.t += dt; q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= 1 - Math.min(1, dt * 0.9); q.vy *= 1 - Math.min(1, dt * 0.9); q.vy -= 1.5 * dt; q.r += dt * (5 + 7 * Math.exp(-q.t * 0.4)); }
-  for (let i = seaBlood.length - 1; i >= 0; i--) if (seaBlood[i].t >= seaBlood[i].life) seaBlood.splice(i, 1);
-  for (const g of seaGore) {
+  for (const q of seaBlood.rows()) { q.t += dt; q.x += q.vx * dt; q.y += q.vy * dt; q.vx *= 1 - Math.min(1, dt * 0.9); q.vy *= 1 - Math.min(1, dt * 0.9); q.vy -= 1.5 * dt; q.r += dt * (5 + 7 * Math.exp(-q.t * 0.4)); }
+  { const c = seaBlood.c; for (let i = seaBlood.n - 1; i >= 0; i--) if (c.t[i] >= c.life[i]) seaBlood.drop(i); seaBlood.sweep(); }
+  for (const g of seaGore.rows()) {
     g.t += dt; g.vy += 26 * dt; g.vx *= 1 - Math.min(1, dt * 1.4); g.vy *= 1 - Math.min(1, dt * 1.1); g.x += g.vx * dt; g.y += g.vy * dt;
     const bed = seabedY(g.x) - 1;
     if (g.y > bed) { g.y = bed; g.vy = 0; g.vx *= 0.8; }
-    else if (g.t < 4 && seaR() < dt * 3 && seaBlood.length < 260) seaBlood.push({ x: g.x, y: g.y, vx: 0, vy: 0, r: 1.5 + g.s * 0.4, t: 0, life: 3 + seaR() * 2, sd: seaR() * 6.28, lob: 2 });
+    else if (g.t < 4 && seaR() < dt * 3 && seaBlood.n < 260) seaBlood.addRow({ x: g.x, y: g.y, vx: 0, vy: 0, r: 1.5 + g.s * 0.4, t: 0, life: 3 + seaR() * 2, sd: seaR() * 6.28, lob: 2 });
   }
-  for (let i = seaGore.length - 1; i >= 0; i--) if (seaGore[i].t >= seaGore[i].life) seaGore.splice(i, 1);
+  { const c = seaGore.c; for (let i = seaGore.n - 1; i >= 0; i--) if (c.t[i] >= c.life[i]) seaGore.drop(i); seaGore.sweep(); }
 }
-// the blood behind, then the bodies
-function drawSeaKills() {
-  const vl = CAMPX / SV, vr = vl + VWW;
-  if (seaBlood.length) {
+/* (Nov 1) THE BLOOD'S PIXEL LAYERS (40-zzzz-layers.js): the clouds' blocks and the chunks, worked out by the loops that painted
+   them. A cloud: blocks of 2 particle blocks, lumpy round its middle, in three flat tones by how thick it is there - a run of one
+   tone along a row is one rectangle; one more than 60 outside the view isn't drawn. A chunk: a block as big as it is, dark or
+   red, fading in its last 3 seconds; more than 20 outside: not drawn. SEAK.css: the fill style the loops left */
+const SEAK = { css: null };
+const SEABLOOD_L = pxLayer({
+  table: seaBlood, cols: { x: 'view i32', y: 'view i32', w: 'view i32', c: 'view u8' }, pal: SEA_BLOOD_COLS.slice(1),
+  view: (T, own, n, vl, vr, L) => {
     const BL = PB * 2, TONES = [0.3, 0.55, 0.8];   // (the kraken's head-wound tones: brighter, as in the lit water it has to show)
-    const COLS = SEA_BLOOD_COLS;   // one string per tone, not one per block
-    for (const q of seaBlood) {
+    let m = 0, R = own;
+    const run = (x, y, w, t) => { if (m >= R.x.length) R = pxRoom(L, m + 1); R.x[m] = x; R.y[m] = y; R.w[m] = w; R.c[m] = t - 1; m++; SEAK.css = SEA_BLOOD_COLS[t]; };
+    for (const q of T.rows()) {
       if (q.x < vl - 60 || q.x > vr + 60) continue;
       const a = 0.95 * (1 - q.t / q.life) * Math.min(1, q.t * 4); if (a < 0.03) continue;
-      const rr = q.r * SV, cx = PX(q.x), cy = PY(q.y), R = Math.ceil(rr * 1.3 / BL) * BL;
-      const x0 = Math.floor((cx - R) / BL) * BL, y0 = Math.floor((cy - R) / BL) * BL;
-      // the blocks of a row never overlap, so a run of one tone is one rectangle: the same pixels, the same colour
-      for (let by = y0; by <= cy + R; by += BL) {
+      const rr = q.r * SV, cx = PX(q.x), cy = PY(q.y), RR = Math.ceil(rr * 1.3 / BL) * BL;
+      const x0 = Math.floor((cx - RR) / BL) * BL, y0 = Math.floor((cy - RR) / BL) * BL;
+      for (let by = y0; by <= cy + RR; by += BL) {
         let runT = 0, runX = 0, bx = x0;
-        for (; bx <= cx + R; bx += BL) {
+        for (; bx <= cx + RR; bx += BL) {
           const dx = bx + BL / 2 - cx, dy = by + BL / 2 - cy, an = Math.atan2(dy, dx), lump = 1 + 0.28 * Math.sin(an * q.lob + q.sd) + 0.12 * Math.sin(an * (q.lob + 3) - q.sd * 2);
           const d = Math.hypot(dx, dy) / Math.max(0.6, rr * lump);
           let t = 0;
           if (d < 1) { const v = a * (1 - d * d); t = v > TONES[2] ? 3 : v > TONES[1] ? 2 : v > TONES[0] ? 1 : 0; }
-          if (t !== runT) {
-            if (runT) { C.fillStyle = COLS[runT]; C.fillRect(runX, by, bx - runX, BL); }
-            runT = t; runX = bx;
-          }
+          if (t !== runT) { if (runT) run(runX, by, bx - runX, runT); runT = t; runX = bx; }
         }
-        if (runT) { C.fillStyle = COLS[runT]; C.fillRect(runX, by, bx - runX, BL); }
+        if (runT) run(runX, by, bx - runX, runT);
       }
     }
-  }
-  for (const g of seaGore) {
-    if (g.x < vl - 20 || g.x > vr + 20) continue;
-    const sz = Math.max(PB, Math.round(g.s * SV / PB) * PB), fade = Math.min(1, (g.life - g.t) / 3);
-    C.fillStyle = g.dark ? `rgba(40,2,6,${0.95 * fade})` : `rgba(110,8,16,${0.95 * fade})`;
-    C.fillRect(Math.round((PX(g.x) - sz / 2) / PB) * PB, Math.round((PY(g.y) - sz / 2) / PB) * PB, sz, sz);
-  }
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, u_pb * 2); c = int(a_c); return true; }
+`,
+});
+const SEAGORE_L = pxLayer({
+  table: seaGore, cols: { x: 'view i32', y: 'view i32', s: 'view i32', rgba: 'view rgba' }, pal: [],
+  view: (T, own, n, vl, vr, L) => {
+    const ga = C.s.ga; let m = 0;
+    for (const g of T.rows()) {
+      if (g.x < vl - 20 || g.x > vr + 20) continue;
+      const sz = Math.max(PB, Math.round(g.s * SV / PB) * PB), fade = Math.min(1, (g.life - g.t) / 3);
+      const css = g.dark ? `rgba(40,2,6,${0.95 * fade})` : `rgba(110,8,16,${0.95 * fade})`, col = glPack(glParse(css), ga);
+      SEAK.css = css;
+      if (!(col >>> 24)) continue;
+      own.x[m] = Math.round((PX(g.x) - sz / 2) / PB) * PB; own.y[m] = Math.round((PY(g.y) - sz / 2) / PB) * PB; own.s[m] = sz; own.rgba[m] = col; m++;
+    }
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_s, a_s); c = -1; return true; }
+`,
+});
+// the blood behind, then the bodies
+function drawSeaKills() {
+  const vl = CAMPX / SV, vr = vl + VWW;
+  SEAK.css = null;
+  if (seaBlood.n) pxDraw(SEABLOOD_L, vl, vr);
+  pxDraw(SEAGORE_L, vl, vr);
+  if (SEAK.css !== null) C.fillStyle = SEAK.css;
   for (const d of deadBig) {
     const A = d.kind === 'whale' ? img.whale : img.shark; if (!A) continue;
     const L = bigLen(d.kind); if (d.x < vl - L || d.x > vr + L) continue;
@@ -13305,7 +13447,7 @@ function strike(x, y, sh, hit) {
   if (sh || hit) {
     if (sh) sh.zap = 0;                               // the lights flicker and die, then come back 3 s later
     spawnSparks(x, y, 26, 220);
-    flashes.push({ x, y, r: 14, life: 0, max: 0.15 });
+    flashes.addRow({ x, y, r: 14, life: 0, max: 0.15 });
     shakeAt(4, x);
   } else {
     for (let i = 0; i < 14; i++) spawnSpray(x + stormRnd(-6, 6), y - 2, stormRnd(-60, 60), 1.4);
@@ -13710,7 +13852,7 @@ function defTable(name, list, o = {}) {
   TABLES[name] = { name, list: list || (() => TBL_NO_ROWS), depth: o.depth ?? 4, make: o.make || (() => ({})), after: o.after || null, skip,
     net: o.net ?? true, netSkip: new Set(o.netSkip || []), perPlayer: o.perPlayer || 0, netIds: new Set(o.netIds || []),
     save: ct ? () => [ct.plainCols()] : o.save || null, load: ct ? ctLoad : o.load || null, cols: ct, drawn: o.drawn || null, near: !!o.near,
-    snapCols: ct ? (full, drawn, bufs) => swColTable(TABLES[name], full, drawn, bufs) : o.snapCols || null, colsInto: ct ? C => swColAdopt(TABLES[name], C) : o.colsInto || null };
+    snapCols: ct ? (full, drawn, bufs) => swColTable(TABLES[name], full, drawn, bufs) : o.snapCols || null, colsInto: ct ? C => { swColAdopt(TABLES[name], C); if (o.adopted) o.adopted(); } : o.colsInto || null };   // (adopted: the page's own after a snapshot's columns - Nov 1)
   // (the GAME EDITOR's VEHICLES tab asks, the table's owner writes - rules.md "Systems" 1): 'tableAdd' {t, o} puts a made row in;
   // 'tableMove' {t, o, x, y} moves one (y null: it keeps its own - on the water, on its tower's pier); o.moveTo, o.add: the owner's
   // own way (a list made for the table - the tanks', the ones there are - puts a row in its own place)
@@ -13832,10 +13974,9 @@ defTable('planes', () => planes, { perPlayer: 2, keep: ['strand','cover','splat'
 defTable('oldPlanes', () => oldPlanes, { keep: ['strand','cover','splat'], make: d => makePlane(d.id || 0) });
 defTable('planeTrails', () => planeTrails, { net: false, make: () => ({ pts: [], id: 0, col: 0, drift: 0.12 }) });
 defTable('planeWisps', () => planeWisps, { net: false, make: () => ({ x: 0, y: 0, age: 0, max: 0.5, L: 20, ux: 1, uy: 0 }) });
-defTable('iceBits', () => iceBits, { net: false });
+defTable('iceBits', null, { cols: iceBits, drawn: ['x', 'y', 'life', 'max', 's', 'tw'], rows: rows => iceBits.plainOfRows(rows), net: false });   // (Nov 1: a column table)
 // the crews (32-crew freshCrew): crew[p] each side's (loaded into the same two objects: NET.home holds them); the blood on the pier
 defTable('crew', () => crew, { net: false, make: () => freshCrew() });
-defTable('crewBlood', () => blood, { net: false });
 // the captains (06-fleet-captains buildCaptains): both sides' in one table, each back in her side's list once loaded
 defTable('captains', () => captains[0].concat(captains[1]), { netIds: ['p'], make: d => ({ p: d.p || 0, face: 0, state: 'free', veh: null, t: 0, blood: 0, band: 0 }),
   after: arr => { captains[0] = arr.filter(c => (c.p || 0) === 0); captains[1] = arr.filter(c => c.p === 1); } });
@@ -13854,8 +13995,8 @@ defTable('seaSharks', () => sharks, { make: () => ({ x: 0, y: 0, dir: 1, speed: 
 defTable('seaWhales', () => whales, { make: () => ({ x: 0, y: 0, dir: 1, speed: 10, turnT: 30, turn: 0, ph: 0, dy: 0, flee: 0 }) });
 defTable('seaDeadFish', () => deadFish, { make: () => ({ type: 'sardine', dir: 1, x: 0, y: 0, vx: 0, vy: 0, rot: 0, w: 0, t: 0, fade: 1, surf: false }) });
 defTable('seaDeadBig', () => deadBig, { make: () => ({ kind: 'shark', x: 0, y: 0, dir: 1, vx: 0, vy: 0, rot: 0, w: 0, t: 0, bleed: 1, fade: 1, rest: false, ph: 0 }) });
-defTable('seaBlood', () => seaBlood, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, r: 3, t: 0, life: 6, sd: 0, lob: 2 }) });
-defTable('seaGore', () => seaGore, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, s: 2, t: 0, life: 18, sd: 0, dark: false }) });
+defTable('seaBlood', null, { cols: seaBlood, drawn: ['x', 'y', 'r', 't', 'life', 'sd', 'lob'], rows: rows => seaBlood.plainOfRows(rows), net: false });   // (Nov 1: column tables)
+defTable('seaGore', null, { cols: seaGore, drawn: ['x', 'y', 's', 't', 'life', 'dark'], rows: rows => seaGore.plainOfRows(rows), net: false });
 // the yachts (31-sailboats-buoys; a player's own yacht is one of them, crew[p].yacht her place in the list)
 defTable('sailboats', () => sailboats, { make: d => ({ kind: d.kind || 0, x: 0, y: WATER_Y, a: 0, av: 0, vx: 0, face: 1, state: 'sail', sink: 0, lean: 0, ph: 0, t: 0, respawn: 0, hold: 10, sailsUp: true, furl: 0 }) });
 // the buoys (31-sailboats-buoys, built in 07-world-build): one off each harbour (buoys[k] is docks[k]'s), the red one mid-sea
@@ -14057,11 +14198,9 @@ defTable('dockCalm', () => [CALM_ROW], { net: false,
 });
 
 /* (engine stage 3) The particles' tables (35-particles.js owns them; registered here because the tables (36-zz-tables.js) come
-   after that file): every list stepParticles moves - wakes, flames, flashes, welds, blast rings, debris,
-   the sea floor's dust, its sand grains and the falling ash. Each a list of plain values: nothing to skip, nothing to rebuild.
+   after that file): every list stepParticles moves - wakes. Each a list of plain values: nothing to skip, nothing to rebuild.
    Their random source: sysRng('particles') (ptR, 35-particles.js) */
-for (const [name, list] of [['wakes', wakes], ['flames', flames],
-  ['flashes', flashes], ['welds', welds], ['rings', rings], ['debris', debris], ['dust', dust], ['grains', grains], ['ash', ash]])
+for (const [name, list] of [['wakes', wakes]])
   defTable(name, () => list, { net: false });   // (stage 5: each screen makes its own)
 // (Nov 1) the sparks, the embers, the foam, the bubbles and the spray: column tables (05-game-state.js). drawn: the fields their
 // pixel layer reads (47-render-overlays.js SPARK_L, EMBER_L; 43-render-objects.js FOAM_L, BUBBLE_L; 34-splashes-sinking.js SPRAY_L) - what a live snapshot carries to the page; rows: a save from before they were columns
@@ -14069,7 +14208,16 @@ defTable('sparks', null, { cols: sparks, drawn: ['x', 'y', 'px', 'py', 'life', '
 defTable('foam', null, { cols: foam, drawn: ['x', 's', 'k', 'life', 'max', 'seed'], rows: rows => foam.plainOfRows(rows), net: false });
 defTable('bubbles', null, { cols: bubbles, drawn: ['x', 'y', 'r'], rows: rows => bubbles.plainOfRows(rows), net: false });
 defTable('spray', null, { cols: spray, drawn: ['x', 'y', 's'], rows: rows => spray.plainOfRows(rows), net: false });
+defTable('flashes', null, { cols: flashes, drawn: ['x', 'y', 'r', 'life', 'max'], rows: rows => flashes.plainOfRows(rows), net: false });
+defTable('rings', null, { cols: rings, drawn: ['x', 'y', 'r', 'life'], rows: rows => rings.plainOfRows(rows), net: false });
+for (const [name, T, drawn] of [['dust', dust, ['x', 'y', 'r', 'age', 'life']], ['grains', grains, ['x', 'y', 'life']], ['ash', ash, ['x', 'y', 'life', 'ph', 'big']]])
+  defTable(name, null, { cols: T, drawn, rows: rows => T.plainOfRows(rows), net: false });   // (Nov 1: the sea floor's dust, its sand grains, the falling ash)
+defTable('flames', null, { cols: flames, drawn: ['x', 'y', 'r', 'heat', 'behind', 'src'], rows: rows => flames.plainOfRows(rows), net: false });   // (Nov 1)
 defTable('embers', null, { cols: embers, drawn: ['x', 'y', 'life', 'max'], rows: rows => embers.plainOfRows(rows), net: false });
+// (Nov 1) the debris: a column table (05-game-state.js), the pieces not at rest (those are the settled world's records,
+// 36-zzzz-settled.js restDeb); drawn: what its layer reads (45-draw-vehicles.js DEBRIS_L) and the settled world's merge (state);
+// rows: a save from before, its numbers n (restRowsN, 36-zzzz-settled.js)
+defTable('debris', null, { cols: debris, drawn: ['x', 'y', 'a', 'sw', 'sh', 'col', 'state'], rows: rows => restRowsN(debris, rows), net: false });
 
 /* (engine stage 3) The splashes' tables (34-splashes-sinking.js and 34-zz-mine-splash.js own them; registered here because the
    tables (36-zz-tables.js) come after those files): the foam streaks a shell leaves under water, the jets of a splash and a
@@ -14078,6 +14226,9 @@ defTable('embers', null, { cols: embers, drawn: ['x', 'y', 'life', 'max'], rows:
 defTable('streaks', () => streaks, { net: false });
 defTable('jets', null, { cols: jets, drawn: ['x', 'v0', 'w', 'base', 't', 'lean', 'seed'], rows: rows => jets.plainOfRows(rows), net: false });   // (Nov 1: a column table)
 defTable('msplashes', () => msplashes, { net: false });
+// (Nov 1) a blast's pressure rings and a depth charge's gas balls (26-white-water.js): column tables
+defTable('blastRings', null, { cols: blastRings, drawn: ['x', 'y', 'r', 'max', 'amp'], rows: rows => blastRings.plainOfRows(rows), net: false });
+defTable('gasBalls', null, { cols: gasBalls, drawn: ['x', 'y', 'r', 't', 'seed'], rows: rows => gasBalls.plainOfRows(rows), net: false });
 
 /* ONLINE PLAY FROM THE TABLES (engine migration, stage 5 - plan: https://claude.ai/artifact/7osEef5ubafK3gkAEjY3Dt, "Online play
    on the same state"). Behind a switch, off unless the page is opened with ?nettables=1: with it off, nothing here runs and online
@@ -14331,9 +14482,9 @@ window.__ntb = { snapshot: ntbSnapshot, apply: ntbApply, receive: ntbReceive, st
    tables. Its owner here (rules.md section 6, "Systems" 1); others ask through restWake* (an event in reach: a blast's
    scatterBed, the ground dug from under it).
    Step 1, the debris at rest on the sea floor and on the land (35-particles.js):
-   - Records: the debris objects themselves, in world strips REST_SW wide, each strip in push order (d.n, given in list order
-     when first stepped - the debris list is never cut, so its order is the order they were thrown). The table 'restDebris'
-     (saved, each screen's own as the debris), 'restState' (the particle clock, the next number).
+   - Records: (Nov 1) the column table restDeb (05-game-state.js), the debris' own fields, in number order (n, given when a
+     piece is thrown - the order they were thrown), its pieces' numbers listed per world strip REST_SW wide. The table
+     'restDebris' (saved, each screen's own as the debris), 'restState' (the particle clock, the last number given).
    - Settling: a piece whose state turns 2 (not on a harbour's deck - that one is still watched every step) is filed here at the
      end of its step. Its age stops; when it wakes, age = its age then + the particle clock since (stepParticles' own sum of
      the frame steps: the same to the last bits of a float).
@@ -14347,80 +14498,123 @@ window.__ntb = { snapshot: ntbSnapshot, apply: ntbApply, receive: ntbReceive, st
      order, drawDebris each - the same loop as before) while zooming, without the GPU, with a piece the live loop culls
      reaching into the view, or a live one (on a deck) under a newer record. ?restlayer=0: always the live way. ---- */
 const REST_SW = 256, REST_TW = 1024, REST_TH = 512, REST_FREE = 600;
-const RST = { on: !/[?&]restlayer=0/.test(location.search), clock: 0, h: 0, debN: 0, loopI: -1,
-  deb: new Map(),                      // (strip -> records in number order)
+const RST = { on: !/[?&]restlayer=0/.test(location.search), clock: 0, h: 0, loopI: -1,
+  deb: new Map(),                      // (strip -> the records' numbers there, rising - Nov 1: the records themselves are restDeb's rows)
   L: [{ sets: new Map(), last: [0, 0] }, { sets: new Map(), last: [0, 0] }],   // (the two passes' layers: zoom -> tiles)
   stats: { settle: 0, wake: 0, lay: 0, live: 0, paint: 0, add: 0, free: 0 } };
 const restStrip = x => Math.floor(x / REST_SW);
-// the first index in a number-ordered list whose number is greater than n (no number yet: last of all)
+// the first index in a number-ordered list whose number is greater than n (no number yet: last of all) - the chunks
 function restAfter(arr, n) { let a = 0, b = arr.length; while (a < b) { const m = (a + b) >> 1, v = arr[m].n; if (v !== undefined && v <= n) a = m + 1; else b = m; } return a; }
-function restCount() { let n = 0; for (const s of RST.deb.values()) n += s.length; return n; }
-function restReset() { wixDirty(); RST.deb.clear(); RST.clock = 0; RST.debN = 0; RST.loopI = -1; restLayersFree(); RST.chk.clear(); RST.chkN = 0; RST.chkI = -1; }
-// ---- records
-function restSettleDebris(d) {
-  d.c0 = RST.clock + RST.h;                                // (its age already holds this frame's step)
-  let s = RST.deb.get(restStrip(d.x)); if (!s) RST.deb.set(restStrip(d.x), s = []);
-  s.splice(restAfter(s, d.n), 0, d);
-  d._rest = 1; RST.stats.settle++;
-  restLayersAdd(d);
+// (Nov 1) the same in a rising list of numbers (a strip's, a tile's)
+function restAfterN(arr, n) { let a = 0, b = arr.length; while (a < b) { const m = (a + b) >> 1; if (arr[m] <= n) a = m + 1; else b = m; } return a; }
+function restCount() { return restDeb.n; }
+function restReset() { wixDirty(); RST.deb.clear(); restDeb.length = 0; RST.clock = 0; RST.loopI = -1; restLayersFree(); RST.chk.clear(); RST.chkN = 0; RST.chkI = -1; }
+// ---- records (Nov 1: a piece's row copied from the debris' table into restDeb's at its place by number, and back)
+function restSettleDebris(i) {
+  const D = debris.c, n = D.n[i];
+  D.c0[i] = RST.clock + RST.h;                             // (its age already holds this frame's step)
+  restDeb.copyFrom(debris, i, restDeb.insert(restDeb.after(n), n));
+  const k = restStrip(D.x[i]); let s = RST.deb.get(k); if (!s) RST.deb.set(k, s = []);
+  s.splice(restAfterN(s, n), 0, n);
+  RST.stats.settle++;
+  restLayersAdd(n);
 }
-// back to the debris list, at its place by number (its age caught up)
-function restWakeDebris(d) {
-  const s = RST.deb.get(restStrip(d.x)), i = s ? s.indexOf(d) : -1;
-  if (i >= 0) s.splice(i, 1);
-  if (s && !s.length) RST.deb.delete(restStrip(d.x));
-  restLayersDrop(d);
+// back to the debris' table, at its place by number (its age caught up); its row there
+function restWakeDebris(n) {
+  const r = restDeb.row(n), k = restStrip(restDeb.c.x[r]), s = RST.deb.get(k), q = s ? s.indexOf(n) : -1;
+  if (q >= 0) s.splice(q, 1);
+  if (s && !s.length) RST.deb.delete(k);
+  restLayersDrop(n);
   RST.stats.wake++;
-  if (d._rest === 2) { d._rest = 0; return; }            // (filed this very frame, still in the list: it stays where it is)
-  d._rest = 0;
-  const p = restAfter(debris, d.n), passed = RST.loopI >= 0 && p <= RST.loopI;
-  d.age = d.age + ((passed ? RST.clock + RST.h : RST.clock) - d.c0);
-  debris.splice(p, 0, d);
-  if (passed) RST.loopI++;
+  let i = debris.row(n);
+  if (i >= 0) debris.c.rs[i] = 0;                          // (filed this very frame, still in the table: it stays where it is)
+  else {
+    const p = debris.after(n), passed = RST.loopI >= 0 && p <= RST.loopI;
+    i = debris.insert(p, n); debris.copyFrom(restDeb, r, i);
+    const D = debris.c; D.age[i] = D.age[i] + ((passed ? RST.clock + RST.h : RST.clock) - D.c0[i]);
+    if (passed) RST.loopI++;
+  }
+  restDeb.drop(r); restDeb.sweep();
+  return i;
 }
-// the records with x in [a, b], in number order
+// the records' numbers with x in [a, b], in number order
 function restDebrisIn(a, b) {
-  const out = [];
-  for (let s = restStrip(a), s1 = restStrip(b); s <= s1; s++) { const L = RST.deb.get(s); if (L) for (const d of L) if (d.x >= a && d.x <= b) out.push(d); }
-  if (restStrip(a) !== restStrip(b)) out.sort((p, q) => p.n - q.n);
+  const out = [], X = restDeb.c.x;
+  for (let s = restStrip(a), s1 = restStrip(b); s <= s1; s++) { const L = RST.deb.get(s); if (L) for (const n of L) { const x = X[restDeb.row(n)]; if (x >= a && x <= b) out.push(n); } }
+  if (restStrip(a) !== restStrip(b)) out.sort((p, q) => p - q);
   return out;
 }
-// stepParticles' debris loop: numbers given in list order, the loop's index where a woken piece can move it, the settled filed
-// at the end of their step and taken out of the list after the loop
+// stepParticles' debris loop: each row's accessor to its step (d.i its place; the loop's index moves with a woken piece put in
+// before it), the settled filed at the end of their step and taken out of the table after the loop
+const RCUR = { d: null };
 function restDebrisLoop(h, step) {
   RST.h = h;
+  const d = RCUR.d || (RCUR.d = debris.cursor());
   let any = false;
-  for (RST.loopI = 0; RST.loopI < debris.length; RST.loopI++) {
-    const d = debris[RST.loopI];
-    if (d._rest) continue;                                 // (filed earlier this frame: already stepped)
-    if (d.n === undefined) d.n = RST.debN++;
-    step(d);
-    if (d.state === 2 && !d.deck) { restSettleDebris(d); d._rest = 2; any = true; }
+  for (RST.loopI = 0; RST.loopI < debris.n; RST.loopI++) {
+    if (debris.c.rs[RST.loopI]) continue;                  // (filed earlier this frame: already stepped)
+    d.i = RST.loopI; step(d);
+    const i = RST.loopI, D = debris.c;
+    if (D.state[i] === 2 && !D.deck[i]) { restSettleDebris(i); D.rs[i] = 2; any = true; }
   }
   RST.loopI = -1;
-  if (any) { let j = 0; for (let i = 0; i < debris.length; i++) { const d = debris[i]; if (d._rest === 2) { d._rest = 1; continue; } debris[j++] = d; } debris.length = j; }
+  if (any) { const RS = debris.c.rs; for (let i = 0; i < debris.n; i++) if (RS[i] === 2) debris.drop(i); debris.sweep(); }
   RST.clock += h; RST.h = 0;
 }
 // the land's wake (50-land-rest): the ground gone from under them, they fall again
 function restLandWake(wake) {
-  for (const w of wake) for (const d of restDebrisIn(w[0] - 1, w[1] + 1)) if (onLand(d.x) && landWoke(d.x, 1) && !landSolid(d.x, d.y + 1.5)) { restWakeDebris(d); d.state = 0; d.vy = 0; }
+  for (const w of wake) for (const n of restDebrisIn(w[0] - 1, w[1] + 1)) {
+    const r = restDeb.row(n), x = restDeb.c.x[r];
+    if (onLand(x) && landWoke(x, 1) && !landSolid(x, restDeb.c.y[r] + 1.5)) { const i = restWakeDebris(n); debris.c.state[i] = 0; debris.c.vy[i] = 0; }
+  }
 }
-// ---- tables: the records (each screen's own, as the debris) and the clock
-defTable('restDebris', () => { const out = []; for (const k of [...RST.deb.keys()].sort((a, b) => a - b)) out.push(...RST.deb.get(k)); return out; }, { net: false,
-  after: arr => { RST.deb.clear(); restLayersFree(); for (const d of arr) { d._rest = 1; let s = RST.deb.get(restStrip(d.x)); if (!s) RST.deb.set(restStrip(d.x), s = []); s.push(d); } for (const s of RST.deb.values()) s.sort((p, q) => p.n - q.n); } });
+// ---- tables: the records (each screen's own, as the debris) and the clock. (Nov 1) The records are restDeb: saved and sent as a
+// column table; a save from before (each record a plain object, its number n) as its rows; then its strips made again. On the
+// page, what the simulation worker sends is the records near the views: their strips and kept layers made again when it changed
+function restIndex() {
+  RST.deb.clear(); restLayersFree();
+  const N = restDeb.c.n, X = restDeb.c.x;
+  for (let r = 0; r < restDeb.n; r++) { const k = restStrip(X[r]); let s = RST.deb.get(k); if (!s) RST.deb.set(k, s = []); s.push(N[r]); }
+  if (restDeb.top > debris.top) debris.top = restDeb.top;   // (the numbers go on from the highest given - the debris' table gives them;
+  restDeb.top = 0;                                         // the records' never does)
+}
+// (a save from before: its pieces in number order - n from 0 there, from 1 here; one not yet numbered there (thrown after the
+// step) after all others, in its order)
+function restRowsN(T, rows) {
+  const ord = rows.map((o, i) => [typeof o.n === 'number' ? o.n : Infinity, i]).sort((a, b) => (a[0] - b[0]) || (a[1] - b[1])).map(e => rows[e[1]]);
+  const P = T.plainOfRows(ord);
+  let top = 0, late = 2 ** 40;
+  P.cols.n = ord.map(o => typeof o.n === 'number' ? (top = Math.max(top, o.n + 1), o.n + 1) : ++late);
+  P.top = late > 2 ** 40 ? late : top;
+  return P;
+}
+defTable('restDebris', null, { cols: restDeb, drawn: ['x', 'y', 'a', 'sw', 'sh', 'col'], rows: rows => restRowsN(restDeb, rows), net: false, after: restIndex,
+  adopted: () => { if (!restSameIds()) restIndex(); } });
+// (the page) the records' numbers as last indexed: a snapshot that brings the same set leaves the strips and the kept layers be
+const RSAME = { ids: new Float64Array(0), n: -1 };
+function restSameIds() {
+  const n = restDeb.n, N = restDeb.c.n;
+  let same = n === RSAME.n;
+  if (same) for (let r = 0; r < n; r++) if (RSAME.ids[r] !== N[r]) { same = false; break; }
+  if (!same) { if (RSAME.ids.length < n) RSAME.ids = new Float64Array(n * 2); RSAME.ids.set(N.subarray(0, n)); RSAME.n = n; }
+  return same;
+}
 const REST_ROW = [{ clock: 0, debN: 0, chkN: 0 }];
-defTable('restState', () => { REST_ROW[0].clock = RST.clock; REST_ROW[0].debN = RST.debN; REST_ROW[0].chkN = RST.chkN; return REST_ROW; }, { net: false, after: arr => { if (arr[0]) { RST.clock = arr[0].clock; RST.debN = arr[0].debN; RST.chkN = arr[0].chkN || 0; } } });
+defTable('restState', () => { REST_ROW[0].clock = RST.clock; REST_ROW[0].debN = debris.top; REST_ROW[0].chkN = RST.chkN; return REST_ROW; }, { net: false, after: arr => { if (arr[0]) { RST.clock = arr[0].clock; debris.top = Math.max(debris.top, restDeb.top, arr[0].debN || 0); RST.chkN = arr[0].chkN || 0; } } });
 
-// ---- kept layers
-// a record's box in world pixels at this zoom, either camera parity (drawDebris' own sums, a pixel wider each side)
-function restBox(d, sv) {
-  const c = Math.abs(Math.cos(d.a)), s = Math.abs(Math.sin(d.a));
-  const w = Math.max(PB, Math.round((d.sw * c + d.sh * s) * sv / PB) * PB), h = Math.max(PB, Math.round((d.sw * s + d.sh * c) * sv / PB) * PB);
-  const X = Math.floor((Math.round(d.x * sv) - w / 2) / PB) * PB, Y = Math.floor((Math.round(d.y * sv) - h / 2) / PB) * PB;
+// ---- kept layers (Nov 1: the tiles hold the records' numbers; a record's fields are restDeb's row with that number)
+// a piece's box in world pixels at this zoom, either camera parity (the debris layer's own sums, a pixel wider each side): row r
+// of the table T (debris or restDeb)
+function restBox(T, r, sv) {
+  const D = T.c, c = Math.abs(Math.cos(D.a[r])), s = Math.abs(Math.sin(D.a[r]));
+  const w = Math.max(PB, Math.round((D.sw[r] * c + D.sh[r] * s) * sv / PB) * PB), h = Math.max(PB, Math.round((D.sw[r] * s + D.sh[r] * c) * sv / PB) * PB);
+  const X = Math.floor((Math.round(D.x[r] * sv) - w / 2) / PB) * PB, Y = Math.floor((Math.round(D.y[r] * sv) - h / 2) / PB) * PB;
   return [X - 1, Y - 1, X + w + 1, Y + h + 1];
 }
-const restInPass = (p, d) => p === 0 || onLand(d.x);
-// the tiles of one pass at one zoom: 'tx,ty' -> { tx, ty, recs (number order), maxN, cv[4], k[4] painted, ep[4], seen }
+const restBoxN = (n, sv) => restBox(restDeb, restDeb.row(n), sv);
+const restInPass = (p, x) => p === 0 || onLand(x);
+const restInPassN = (p, n) => p === 0 || onLand(restDeb.c.x[restDeb.row(n)]);
+// the tiles of one pass at one zoom: 'tx,ty' -> { tx, ty, recs (numbers, rising), maxN, cv[4], k[4] painted, ep[4], seen }
 // (a column of tiles is made the first time it's asked for, from the records in its strips: a new zoom costs only what's in view)
 function restTilesFor(p, sv) {
   const S = RST.L[p].sets; let T = S.get(sv);
@@ -14431,30 +14625,30 @@ function restCol(T, tx) {
   if (T.cols.has(tx)) return;
   T.cols.add(tx);
   const m = 40 + 8 / T.sv;
-  for (const d of restDebrisIn((tx * REST_TW - 4) / T.sv - m, ((tx + 1) * REST_TW + 4) / T.sv + m)) if (restInPass(T.p, d)) restTileAdd(T, d, T.sv, true, tx);
-  for (const t of T.values()) if (t.tx === tx) { t.recs.sort((a, b) => a.n - b.n); t.maxN = t.recs.length ? t.recs[t.recs.length - 1].n : -1; }
+  for (const n of restDebrisIn((tx * REST_TW - 4) / T.sv - m, ((tx + 1) * REST_TW + 4) / T.sv + m)) if (restInPassN(T.p, n)) restTileAdd(T, n, T.sv, true, tx);
+  for (const t of T.values()) if (t.tx === tx) { t.recs.sort((a, b) => a - b); t.maxN = t.recs.length ? t.recs[t.recs.length - 1] : -1; }
 }
-function restTileAdd(T, d, sv, bulk, only) {
-  const b = restBox(d, sv);
+function restTileAdd(T, n, sv, bulk, only) {
+  const b = restBoxN(n, sv);
   for (let tx = Math.floor((b[0] - 1) / REST_TW), tx1 = Math.floor((b[2] - 1) / REST_TW); tx <= tx1; tx++)   // (a tile reaches a pixel further at parity 1)
     if (bulk ? tx === only : T.cols.has(tx)) for (let ty = Math.floor((b[1] - 1) / REST_TH), ty1 = Math.floor((b[3] - 1) / REST_TH); ty <= ty1; ty++) {
       const key = tx + ',' + ty; let t = T.get(key);
       if (!t) T.set(key, t = { tx, ty, recs: [], maxN: -1, cv: [null, null, null, null], k: [0, 0, 0, 0], ep: [-1, -1, -1, -1], seen: 0 });
-      if (bulk) { t.recs.push(d); continue; }
-      if (d.n > t.maxN) { t.recs.push(d); t.maxN = d.n; }                        // (newer than all: painted on top when next shown)
-      else { t.recs.splice(restAfter(t.recs, d.n), 0, d); t.k.fill(-1); }       // (older than some: painted again)
+      if (bulk) { t.recs.push(n); continue; }
+      if (n > t.maxN) { t.recs.push(n); t.maxN = n; }                                // (newer than all: painted on top when next shown)
+      else { t.recs.splice(restAfterN(t.recs, n), 0, n); t.k.fill(-1); }           // (older than some: painted again)
     }
 }
-function restLayersAdd(d) {
-  for (let p = 0; p < 2; p++) if (restInPass(p, d)) for (const [sv, T] of RST.L[p].sets) restTileAdd(T, d, sv, false);
+function restLayersAdd(n) {
+  for (let p = 0; p < 2; p++) if (restInPassN(p, n)) for (const [sv, T] of RST.L[p].sets) restTileAdd(T, n, sv, false);
 }
-function restLayersDrop(d) {
+function restLayersDrop(n) {
   for (let p = 0; p < 2; p++) for (const [sv, T] of RST.L[p].sets) {
-    const b = restBox(d, sv);
+    const b = restBoxN(n, sv);
     for (let tx = Math.floor((b[0] - 1) / REST_TW), tx1 = Math.floor((b[2] - 1) / REST_TW); tx <= tx1; tx++)
       for (let ty = Math.floor((b[1] - 1) / REST_TH), ty1 = Math.floor((b[3] - 1) / REST_TH); ty <= ty1; ty++) {
         const t = T.get(tx + ',' + ty); if (!t) continue;
-        const i = t.recs.indexOf(d); if (i < 0) continue;
+        const i = t.recs.indexOf(n); if (i < 0) continue;
         t.recs.splice(i, 1); t.k.fill(-1);
       }
   }
@@ -14469,40 +14663,43 @@ function restTilePaint(t, ph, sv) {
   let k = t.k[ph];
   if (k < 0 || t.ep[ph] !== GLR.epoch || !cv.tex) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, REST_TW, REST_TH); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.imageSmoothingEnabled = false; k = 0; }
   C = c; SV = sv; CAMPX = t.tx * REST_TW + (ph & 1); TOPPX = t.ty * REST_TH + (ph >> 1); fsLast = null;
-  try { for (let i = k; i < t.recs.length; i++) drawDebris(t.recs[i], -Infinity, Infinity); }
+  try { debSel(); for (let i = k; i < t.recs.length; i++) debSelAdd(restDeb, restDeb.row(t.recs[i])); drawDebrisSel(-Infinity, Infinity); }
   finally { C = s.C; SV = s.SV; CAMPX = s.CAMPX; TOPPX = s.TOPPX; fsLast = s.fsLast; }
   t.k[ph] = t.recs.length; t.ep[ph] = GLR.epoch; RST.stats.paint += t.recs.length - k;
 }
-// a pass's records at rest, with the live list's ones that are at rest (on a deck) - as the loop over the list drew them
+// a pass's records at rest, with the debris table's rows at rest (on a deck) - as the loop over the list drew them, by number
 function restDrawDebris(p, x0, x1) {
-  const live = []; for (const d of debris) if (d.state === 2 && restInPass(p, d)) live.push(d);
+  const live = [], D = debris.c; for (let i = 0; i < debris.n; i++) if (D.state[i] === 2 && restInPass(p, D.x[i])) live.push(i);
   if (!restDrawLayers(p, x0, x1, live)) {
     RST.stats.live++;
-    const all = restDebrisIn(x0 - 12, x1 + 12).filter(d => restInPass(p, d));
-    if (live.length) { all.push(...live); all.sort((a, b) => (a.n ?? 1e15) - (b.n ?? 1e15)); }
-    for (const d of all) drawDebris(d, x0, x1);
+    const all = restDebrisIn(x0 - 12, x1 + 12).filter(n => restInPassN(p, n));
+    debSel();
+    let q = 0;                                             // (the two lists merged by number: the records', the live ones')
+    for (const n of all) { while (q < live.length && D.n[live[q]] < n) debSelAdd(debris, live[q++]); debSelAdd(restDeb, restDeb.row(n)); }
+    while (q < live.length) debSelAdd(debris, live[q++]);
+    drawDebrisSel(x0, x1);
   }
 }
+const debDrawRows = (rows, x0, x1) => { debSel(); for (const i of rows) debSelAdd(debris, i); drawDebrisSel(x0, x1); };
 function restDrawLayers(p, x0, x1, live) {
   const P = RST.L[p], held = P.last[viewIdx] === SV; P.last[viewIdx] = SV;   // (kept whichever way it draws: __game.restLayer flips it for one frame)
   if (!RST.on || !GL_TEXFIX || !GLR.on || GLR.lost || !(C instanceof GLCtx) || C.globalAlpha !== 1 || C.globalCompositeOperation !== 'source-over') return false;
   if (!held) return false;                                 // (zooming: the live way till the zoom holds)
-  if (!RST.deb.size) { for (const d of live) drawDebris(d, x0, x1); return true; }
+  if (!RST.deb.size) { debDrawRows(live, x0, x1); return true; }
   if (P.sets.size >= 2 && !P.sets.has(SV)) for (const [k, T] of P.sets) if (k !== P.last[0] && k !== P.last[1]) { for (const t of T.values()) restTileFree(t); P.sets.delete(k); }   // (the two views' zooms kept)
-  const T = restTilesFor(p, SV);
+  const T = restTilesFor(p, SV), D = debris.c;
   const L = CAMPX - SHX, R = CAMPX + VWP - SHX, Tp = TOPPX - SHY, B = TOPPX + bh - SHY;
-  const vis = (b, cx) => b[2] + cx > L && b[0] + cx < R;
   // a record the live loop culls (x more than 10 outside) reaching into the view: the live way this frame
   const ex = 40 + 8 / SV;
   for (const [a, b] of [[x0 - 10 - ex, x0 - 10], [x1 + 10, x1 + 10 + ex]])
-    for (const d of restDebrisIn(a, b)) if ((d.x < x0 - 10 || d.x > x1 + 10) && restInPass(p, d)) { const q = restBox(d, SV); if (q[2] > L && q[0] < R && q[3] > Tp && q[1] < B) return false; }
+    for (const n of restDebrisIn(a, b)) { const x = restDeb.c.x[restDeb.row(n)]; if ((x < x0 - 10 || x > x1 + 10) && restInPass(p, x)) { const q = restBoxN(n, SV); if (q[2] > L && q[0] < R && q[3] > Tp && q[1] < B) return false; } }
   // a live one at rest (on a deck) under a newer record: the live way
-  for (const d of live) {
-    if (d.x < x0 - 10 || d.x > x1 + 10) continue;
-    const q = restBox(d, SV);
+  for (const i of live) {
+    if (D.x[i] < x0 - 10 || D.x[i] > x1 + 10) continue;
+    const q = restBox(debris, i, SV), dn = D.n[i];
     for (let tx = Math.floor((q[0] - 1) / REST_TW), tx1 = Math.floor((q[2] - 1) / REST_TW); tx <= tx1; tx++) { restCol(T, tx); for (let ty = Math.floor((q[1] - 1) / REST_TH), ty1 = Math.floor((q[3] - 1) / REST_TH); ty <= ty1; ty++) {
       const t = T.get(tx + ',' + ty); if (!t) continue;
-      for (const r of t.recs) if ((d.n === undefined || r.n > d.n) && restInPass(p, r)) { const b = restBox(r, SV); if (b[2] > q[0] && b[0] < q[2] && b[3] > q[1] && b[1] < q[3]) return false; }
+      for (const n of t.recs) if (n > dn && restInPassN(p, n)) { const b = restBoxN(n, SV); if (b[2] > q[0] && b[0] < q[2] && b[3] > q[1] && b[1] < q[3]) return false; }
     } }
   }
   const ph = (((CAMPX % 2) + 2) % 2) | ((((TOPPX % 2) + 2) % 2) << 1), ox = ph & 1, oy = ph >> 1;
@@ -14513,7 +14710,7 @@ function restDrawLayers(p, x0, x1, live) {
       t.seen = REG.frame;
       C.drawImage(t.cv[ph], tx * REST_TW + ox - CAMPX, ty * REST_TH + oy - TOPPX);
     }
-  for (const d of live) drawDebris(d, x0, x1);
+  debDrawRows(live, x0, x1);
   RST.stats.lay++;
   // (tiles not shown for a while give their GPU memory back; their records stay)
   if (REG.frame % 120 === 0) for (const T2 of P.sets.values()) for (const t of T2.values()) if (t.cv[0] || t.cv[1] || t.cv[2] || t.cv[3]) if (REG.frame - t.seen > REST_FREE) { restTileFree(t); RST.stats.free++; }
@@ -14650,12 +14847,12 @@ const SW_LOCAL = new Set(['camera', 'smokeAir']);
    buys nothing and the per-row text is the cost. Whole each time, field by field: numbers and booleans in one Float64Array
    (exact), strings as ids into the message's own list, anything else (an array, a small object) as plain data beside them.
    The page refills its own list's objects in place, by position (they're effects: nothing refers to one by id) */
-const SW_COLS = new Set(['wakes', 'flames', 'flashes', 'welds', 'rings', 'debris', 'dust', 'grains', 'ash',
-  'streaks', 'msplashes', 'leaves', 'earthGrains', 'fwBits', 'hoseDrops', 'hoseSteams', 'seaBlood', 'seaGore', 'birdFeathers', 'birdGore', 'crewBlood', 'planeWisps', 'iceBits', 'rocketTrail',
+const SW_COLS = new Set(['wakes',
+  'streaks', 'msplashes', 'fwBits', 'hoseDrops', 'hoseSteams', 'planeWisps', 'rocketTrail',
   'trails', 'planeTrails', 'spikeBursts', 'seaSchools', 'msPings']);
 // lists the game keeps outside the tables that the page draws (spawned by the game's steps, so only the worker has them): sent
 // as columns the same way
-const SW_EXTRA = { wclouds: () => wclouds, blastRings: () => blastRings, gasBalls: () => gasBalls, shocks: () => shocks, airStreaks: () => airStreaks, landWake: () => landWake };
+const SW_EXTRA = { wclouds: () => wclouds, airStreaks: () => airStreaks, landWake: () => landWake };
 const SW_EXTRA_T = { skip: TBL_SKIP, depth: 4, after: null };
 /* The page only DRAWS these lists in live mode (it never steps them: design section 2), so a live snapshot carries each row's
    DRAWN fields only - the ones the drawing reads, listed here per list from the draw functions named; the velocities, timers
@@ -14665,36 +14862,18 @@ const SW_EXTRA_T = { skip: TBL_SKIP, depth: 4, after: null };
    drawing follows stay in. 'a.b' names a field of the small objects inside the list field a (the fish of a school: swNestOf).
    When in doubt a field is kept. */
 const SW_DRAW = {
-  // 35-particles.js' lists: 43-render-objects.js (buildWakeField, drawDebris via
-  // 45-draw-vehicles.js, drawShocks, drawBlood), 47-render-overlays.js (the welds, flashes, rings, drawAsh,
-  // the flames' glow), 46-smoke-fire-draw.js drawFire + sky/21-smoke.js fireLights (flames), 45-draw-vehicles.js drawDust
-  // (dust, grains), 50-land-firewater.js drawHoseCollision (flames)
+  // 35-particles.js' lists: 43-render-objects.js (buildWakeField, drawShocks, drawBlood), 47-render-overlays.js (drawAsh,
+  // the flames' glow), 46-smoke-fire-draw.js drawFire + sky/21-smoke.js fireLights (flames), 50-land-firewater.js drawHoseCollision (flames)
   wakes: ['x', 'life', 'max', 'w', 'k'],
-  flames: ['x', 'y', 'r', 'heat', 'behind', 'src'],
-  flashes: ['x', 'y', 'r', 'life', 'max'],
-  welds: ['x', 'y', 'r', 'life', 'max'],
-  rings: ['x', 'y', 'r', 'life'],
-  debris: ['x', 'y', 'a', 'sw', 'sh', 'col', 'state'],
-  dust: ['x', 'y', 'r', 'age', 'life'],
-  grains: ['x', 'y', 'life'],
-  ash: ['x', 'y', 'life', 'ph', 'big'],
   // 50-land-units.js drawLeaves, drawEarthGrains, drawSpikeBursts (P is rebuilt by the table's after from mat)
-  leaves: ['x', 'y', 't', 'life', 'c', 'blade', 'ph'],
-  earthGrains: ['x', 'y', 't', 'life', 'c', 'light', 'big', 'rest'],
   spikeBursts: ['x', 't', 'spikes', 'mat'],
   // 50-land-fireworks.js drawFireworks (the bits); 50-land-firewater.js drawHose (drops; the steams are never drawn - they spawn smoke)
   fwBits: ['x', 'y', 't', 'life', 'col', 'ember'],
   hoseDrops: ['x', 'y', 'vx', 'vy', 'age', 'br', 'sp'],
   hoseSteams: ['x', 'y'],
   // 35-zz-sea-kills.js drawSeaKills; 37-birds.js drawBirds (feathers, gore); 45-draw-vehicles.js drawBlood (the crew's)
-  seaBlood: ['x', 'y', 'r', 't', 'life', 'sd', 'lob'],
-  seaGore: ['x', 'y', 's', 't', 'life', 'dark'],
-  birdFeathers: ['x', 'y', 'dark'],
-  birdGore: ['x', 'y', 'life', 'max'],
-  crewBlood: ['x', 'y', 'age', 'state', 'len'],
   // 29-plane.js drawPlanesAir (the trails' points and colour), drawIceBits
   planeTrails: ['pts', 'col'],
-  iceBits: ['x', 'y', 'life', 'max', 's', 'tw'],
   // 50-land-space.js rocketPuffR (the rocket's puffs)
   rocketTrail: ['x', 'y', 'r', 'age', 'life', 'k', 'ground', 'w', 'h'],
   // (Oct 31) the shells' trails, flat arrays: what a live snapshot carries of them (trSnap - sky/21-smoke.js gatherSmokeNew,
@@ -14704,11 +14883,8 @@ const SW_DRAW = {
   trails: ['n', 'np', 'a1', 'a2', 'fl', 'x', 'y', 'age', 'seed', 'la'],
   // 44-shadows-seafloor.js drawSeaLife (each fish of a school; its x, y are undefined until its first step)
   seaSchools: ['type', 'x', 'y', 'dir', 'fish.x', 'fish.y', 'fish.dx', 'fish.dy', 'fish.face'],
-  // SW_EXTRA: 26-white-water.js drawWclouds, drawGasBalls; 47-render-overlays.js (blastRings: the distortion's rings); 43-render-objects.js drawShocks
+  // SW_EXTRA: 26-white-water.js drawWclouds
   wclouds: ['x', 'y', 'r', 'age', 'life', 'alpha', 'seed', 'water'],
-  gasBalls: ['x', 'y', 'r', 't', 'seed'],
-  blastRings: ['x', 'y', 'r', 'max', 'amp'],
-  shocks: ['x', 'y', 'r', 'max', 'len', 'faint', 'seed', 'life'],
 };
 // each list's drawn fields as sets: top (the row's fields) and sub (per list field, the fields of the small objects in it)
 const SW_DRAWK = {};
@@ -15352,8 +15528,14 @@ function swApply(snap) {
    bring them down.
    ================================================================ */
 const BIRD_TOTAL = 300, GULLS_PER_DOCK = 14;
-const feathers = [], gore = [];
-const shocks = [];
+// (Nov 1) a shot bird's feathers and its splats of blood: column tables, made by their row makers (addRow), drawn by pixel layers
+// (FEATHER_L, BGORE_L); dark: a dark feather
+const feathers = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', life: 'f64', max: 'f64', ph: 'f64', dark: 'u8' });
+const gore = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', life: 'f64', max: 'f64' });
+// (Nov 1) the pressure waves in the water (35-particles.js shock, stepShocks; 43-render-objects.js SHOCK_L): a column table, made
+// by its row maker (addRow); faint: a faint one; len: a long hull's (a stadium, not a ring)
+const shocks = new ColTable({ sq: 'id', x: 'f64', y: 'f64', r: 'f64', max: 'f64', speed: 'f64', life: 'f64', power: 'f64', faint: 'u8', seed: 'f64', len: 'f64' });
+defTable('shocks', null, { cols: shocks, drawn: ['x', 'y', 'r', 'max', 'len', 'faint', 'seed', 'life'], rows: rows => shocks.plainOfRows(rows), net: false });
 let shelterNow = false;
 let flocks = [];
 // (Nov 1) the birds and the spots they sit on are column tables (04-zz-coltable.js), a row each. A bird: its kind (BK) and what
@@ -15395,8 +15577,8 @@ function bdPerchRows(rows) {
 function bdOldLinks() {
   for (const [T, k, map] of [[birds, 'spot', BD_OLD.p], [perches, 'bird', BD_OLD.b]]) { const a = T.c[k]; for (let i = 0; i < T.n; i++) if (a[i] < 0) a[i] = map ? map.get(-a[i]) || 0 : 0; }
 }
-defTable('birdFeathers', () => feathers, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 0, ph: 0, dark: false }) });
-defTable('birdGore', () => gore, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 0 }) });
+defTable('birdFeathers', null, { cols: feathers, drawn: ['x', 'y', 'dark'], rows: rows => feathers.plainOfRows(rows), net: false });
+defTable('birdGore', null, { cols: gore, drawn: ['x', 'y', 'life', 'max'], rows: rows => gore.plainOfRows(rows), net: false });
 const BIRD_ROWS = {
   gull: [
     ['k...........k', '.g.........g.', '..g.......g..', '...gg.w.gg...', '....wwwwwo...', '.....ww......'],
@@ -15580,9 +15762,9 @@ function killBird(i, vx = 0, vy = 0) {
   B.st[i] = BS.dead; B.vx[i] = B.vx[i] * 0.3 + vx; B.vy[i] = Math.min(B.vy[i], 0) * 0.3 + vy - 20; B.spin[i] = bdRnd(-12, 12); B.rot[i] = 0;
   // a little burst of blood that rains down after it
   const gull = B.kind[i] === BK.gull, x = B.x[i], y = B.y[i];
-  for (let k = 0; k < (gull ? 14 : 9); k++) { const a = bdRnd(0, 6.28), sp = bdRnd(10, 45); gore.push({ x: x + bdRnd(-1, 1), y: y + bdRnd(-1, 1), vx: Math.cos(a) * sp + vx * 0.08, vy: Math.sin(a) * sp + vy * 0.08, life: 0, max: bdRnd(0.35, 0.7) }); }
-  if (gore.length > 400) gore.splice(0, gore.length - 400);
-  for (let k = 0; k < (gull ? 10 : 5); k++) feathers.push({ x: x + bdRnd(-2, 2), y: y + bdRnd(-2, 2), vx: bdRnd(-30, 30) + vx * 0.2, vy: bdRnd(-40, 5), life: 0, max: bdRnd(5, 9), ph: bdR() * 6, dark: !gull || bdR() < 0.3 });
+  for (let k = 0; k < (gull ? 14 : 9); k++) { const a = bdRnd(0, 6.28), sp = bdRnd(10, 45); gore.addRow({ x: x + bdRnd(-1, 1), y: y + bdRnd(-1, 1), vx: Math.cos(a) * sp + vx * 0.08, vy: Math.sin(a) * sp + vy * 0.08, life: 0, max: bdRnd(0.35, 0.7) }); }
+  if (gore.n > 400) { for (let i = 0; i < gore.n - 400; i++) gore.drop(i); gore.sweep(); }   // (the oldest go)
+  for (let k = 0; k < (gull ? 10 : 5); k++) feathers.addRow({ x: x + bdRnd(-2, 2), y: y + bdRnd(-2, 2), vx: bdRnd(-30, 30) + vx * 0.2, vy: bdRnd(-40, 5), life: 0, max: bdRnd(5, 9), ph: bdR() * 6, dark: !gull || bdR() < 0.3 });
 }
 function birdStrike(x, y, r, vx, vy) {
   const B = birds.c;
@@ -15680,19 +15862,22 @@ function stepBirds(dt) {
     }
     S.t += performance.now() - t0;
   }
-  for (let i = gore.length - 1; i >= 0; i--) {
-    const g = gore[i];
+  const g = BCUR.g || (BCUR.g = gore.cursor()), f = BCUR.f || (BCUR.f = feathers.cursor());   // (Nov 1: the rows through accessors)
+  for (let i = gore.n - 1; i >= 0; i--) {
+    g.i = i;
     // a splat that's gone in a moment
     g.life += dt; g.vy += 40 * dt; g.vx *= 1 - 4 * dt; g.vy *= 1 - 4 * dt; g.x += g.vx * dt; g.y += g.vy * dt;
-    if (g.life > g.max) gore.splice(i, 1);
+    if (g.life > g.max) gore.drop(i);
   }
-  for (let i = feathers.length - 1; i >= 0; i--) {
-    const f = feathers[i];
+  gore.sweep();
+  for (let i = feathers.n - 1; i >= 0; i--) {
+    f.i = i;
     f.life += dt;
     f.vy += (14 - f.vy) * 1.5 * dt; f.vx += (windAt(f.y) * 0.6 - f.vx) * 0.8 * dt;
     f.x += (f.vx + Math.sin(f.life * 4 + f.ph) * 10) * dt; f.y += f.vy * dt;
-    if (f.y > surfaceY(f.x) || f.life > f.max) feathers.splice(i, 1);
+    if (f.y > surfaceY(f.x) || f.life > f.max) feathers.drop(i);
   }
+  feathers.sweep();
 }
 function stepBird(i, dt, shelter, gale) {
     const B = birds.c, P = perches.c;
@@ -15807,15 +15992,45 @@ function drawBirds(x0, x1) {
       C.save(); C.translate(PX(bx), PY(by)); C.rotate(Math.round(B.rot[i] * 2) / 2); C.drawImage(sp, -(w >> 1), -(h >> 1), w, h); C.restore();
     } else C.drawImage(sp, px, py, w, h);
   }
+  // (Nov 1: the splats then the feathers, their pixel layers; the fill style as the loops left it)
   C.fillStyle = '#b3141a';
-  for (const g of gore) if (g.x > x0 - 5 && g.x < x1 + 5) { C.globalAlpha = clamp(1.3 - g.life / g.max, 0, 1); blk(g.x, g.y, 1); }
+  pxDraw(BGORE_L, x0, x1);
   C.globalAlpha = 1;
-  for (const f of feathers) {
-    if (f.x < x0 - 5 || f.x > x1 + 5) continue;
-    C.fillStyle = f.dark ? '#7d858c' : '#f4f4ef';
-    blk(f.x, f.y, 1);
-  }
+  FEATHER_L.last = -1;
+  pxDraw(FEATHER_L, x0, x1);
+  if (FEATHER_L.last >= 0) C.fillStyle = FEATHER_L.pal[FEATHER_L.last];
 }
+const BCUR = {};
+// a splat: a particle block of red, fading (its alpha as the loop gave it); a feather: a block, grey or white. More than 5 outside
+// the view: not drawn
+const BGORE_L = pxLayer({
+  table: gore, cols: { x: 'view i32', y: 'view i32', rgba: 'view rgba' }, pal: [],
+  view: (T, own, n, x0, x1, L) => {
+    const keep = { ga: C.s.ga }; let m = 0;
+    for (const g of T.rows()) {
+      if (!(g.x > x0 - 5 && g.x < x1 + 5)) continue;
+      const col = pxRGBA('#b3141a', clamp(1.3 - g.life / g.max, 0, 1), keep);
+      if (!(col >>> 24)) continue;
+      own.x[m] = Math.floor(PX(g.x) / PB) * PB; own.y[m] = Math.floor(PY(g.y) / PB) * PB; own.rgba[m] = col; m++;
+    }
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, u_pb, u_pb); c = -1; return true; }
+`,
+});
+const FEATHER_L = pxLayer({
+  table: feathers, cols: { on: 'view u8', x: 'view i32', y: 'view i32', c: 'view u8' }, pal: ['#7d858c', '#f4f4ef'],
+  view: (T, own, n, x0, x1, L) => {
+    const F = T.c;
+    for (let i = 0; i < n; i++) {
+      if (F.x[i] < x0 - 5 || F.x[i] > x1 + 5) { own.on[i] = 0; continue; }
+      own.on[i] = 1; own.x[i] = Math.floor(PX(F.x[i]) / PB) * PB; own.y[i] = Math.floor(PY(F.y[i]) / PB) * PB; own.c[i] = L.last = F.dark[i] ? 0 : 1;
+    }
+    return n;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, u_pb, u_pb); c = int(a_c); return a_on != 0u; }
+`,
+});
 
 /* ================================================================
    Smoke: particles carried by a coarse air-flow grid. Wind, hot rising
@@ -16024,9 +16239,9 @@ function stepSmoke(dt) {
       else if (LO[n]) LO[n] = Math.max(0, LO[n] - dt * 2);
     }
     if (age > LF[n]) { smoke.drop(n); continue; }
-    if (ASH[n] >= 0 && (ASH[n] -= dt) < 0 && age < LF[n] * 0.7 && ash.length < 50) {
+    if (ASH[n] >= 0 && (ASH[n] -= dt) < 0 && age < LF[n] * 0.7 && ash.n < 50) {
       ASH[n] = smRnd(9, 18);
-      ash.push({ x: X[n] + smRnd(-R[n], R[n]) * 0.8, y: Y[n] + smRnd(-R[n], R[n]) * 0.5, vx: VX[n] * 0.5, vy: smRnd(2, 8), ph: smR() * 6, life: 0, max: smRnd(6, 12), big: smR() < 0.25 });
+      ash.addRow({ x: X[n] + smRnd(-R[n], R[n]) * 0.8, y: Y[n] + smRnd(-R[n], R[n]) * 0.5, vx: VX[n] * 0.5, vy: smRnd(2, 8), ph: smR() * 6, life: 0, max: smRnd(6, 12), big: smR() < 0.25 });
     }
     let x = X[n], y = Y[n], vx = VX[n], vy = VY[n], r = R[n];
     // (a drifting puff: the air a calm column of the grid holds - the wind, no updraft)
@@ -19825,7 +20040,8 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
    A layer: pxLayer({ table, cols, per, pal, frame, view, rect }).
      table  the column table drawn (rows 0..n-1, in order: a later row is painted over an earlier one, as the loop did)
      cols   { name: kind } the layer's own columns the shader reads, as `a_name`: 'frame u8' / 'frame i32' filled once a frame
-            (frame), 'view u8' / 'view i32' filled for each view (view); u8 -> uint, i32 -> int
+            (frame), 'view u8' / 'view i32' filled for each view (view); u8 -> uint, i32 -> int; 'view rgba' (Nov 1, the
+            debris): a colour each, packed as glPack packs it (r g b a bytes), read as GLCtx's quads read theirs - a vec4
      per    rectangles a row (the shader's j: 0..per-1, in the order the loop painted them)
      pal    the colours, as fillStyle strings; the shader picks one by its index
      frame  (T, own, n) => the values that don't depend on the view (a life / max compared with 0.4)
@@ -19835,7 +20051,7 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
             how many entries it wrote: n for a layer of rows; for a layer of rectangles (Nov 1, the foam: as many as a row
             needs this view) the rectangles it wrote, one each, made room for with pxRoom(L, m)
      rect   GLSL: bool rect(int j, out ivec4 r, out int c) - the row's j-th rectangle as fillRect(r.x, r.y, r.z, r.w) in the
-            view's pixels, in colour c; false: none. Whole numbers only (u_pb: PB)
+            view's pixels, in colour c (-1: its own, the 'view rgba' column); false: none. Whole numbers only (u_pb: PB)
    pxDraw(L, lo, hi) draws it into the current context C at this point of the frame: the batch so far drawn first (glFlush),
    then this draw on the same target, with the same blend, scissor and clip - nothing drawn before or after changes order.
    The second view is the same small loop and a second draw; what is gone is the JavaScript per rectangle.
@@ -19846,7 +20062,7 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
 const PXL = { pal: new Float32Array(128) };
 function pxLayer(o) {
   const L = { table: o.table, cols: o.cols, per: o.per || 1, pal: o.pal, frame: o.frame || null, view: o.view, rect: o.rect, own: {}, ep: -1, tick: -1, prog: null, vao: null, bufs: null, U: null };
-  for (const k in L.cols) L.own[k] = new (L.cols[k].endsWith('u8') ? Uint8Array : Int32Array)(16);
+  for (const k in L.cols) L.own[k] = new (L.cols[k].endsWith('u8') ? Uint8Array : L.cols[k].endsWith('rgba') ? Uint32Array : Int32Array)(16);
   return L;
 }
 const PXL_HEAD = `#version 300 es
@@ -19862,14 +20078,14 @@ const PXL_MAIN = `
 void main() {
   ivec4 r; int c;
   int j = gl_InstanceID % PER;
-  if (!rect(j, r, c) || r.z <= 0 || r.w <= 0 || ((u_skip >> c) & 1) != 0) { gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); v_col = vec4(0.0); return; }
+  if (!rect(j, r, c) || r.z <= 0 || r.w <= 0 || (c >= 0 && ((u_skip >> c) & 1) != 0)) { gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); v_col = vec4(0.0); return; }
   // (its corners as GLCtx._corners works them out, in GL_VS's order and sums)
   float ax = u_m.x * float(r.x) + u_m.z, ay = u_m.y * float(r.y) + u_m.w, bx = ax + u_m.x * float(r.z), by = ay + u_m.y * float(r.w);
   int k = gl_VertexID < 3 ? gl_VertexID : gl_VertexID == 3 ? 0 : gl_VertexID == 4 ? 2 : 3;
   vec2 a_pos = k == 0 ? vec2(ax, ay) : k == 1 ? vec2(bx, ay) : k == 2 ? vec2(bx, by) : vec2(ax, by);
   vec2 p = a_pos / u_size;
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-  v_col = u_pal[c];
+  v_col = c >= 0 ? u_pal[c] : RGBA;
 }`;
 // (the colour: an interpolated varying, as GL_FS's v_col is - the same sums on the same numbers)
 const PXL_FS = `#version 300 es
@@ -19881,9 +20097,10 @@ function pxReady(L) {
   if (L.ep === GLR.epoch) return;
   const gl = GLR.gl, names = Object.keys(L.cols);
   let att = '';
-  names.forEach((k, i) => { att += `layout(location=${i}) in ${L.cols[k].endsWith('u8') ? 'uint' : 'int'} a_${k};\n`; });
+  let rgba = 'vec4(0.0)';
+  names.forEach((k, i) => { const t = L.cols[k]; att += `layout(location=${i}) in ${t.endsWith('u8') ? 'uint' : t.endsWith('rgba') ? 'vec4' : 'int'} a_${k};\n`; if (t.endsWith('rgba')) rgba = 'a_' + k; });
   const p = gl.createProgram();
-  gl.attachShader(p, glShader(gl.VERTEX_SHADER, PXL_HEAD + att + `#define PER ${L.per}\n` + L.rect + PXL_MAIN));
+  gl.attachShader(p, glShader(gl.VERTEX_SHADER, PXL_HEAD + att + `#define PER ${L.per}\n#define RGBA ${rgba}\n` + L.rect + PXL_MAIN));
   gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, PXL_FS));
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
@@ -19894,7 +20111,8 @@ function pxReady(L) {
     const b = gl.createBuffer(), u8 = L.cols[k].endsWith('u8');
     gl.bindBuffer(gl.ARRAY_BUFFER, b);
     gl.enableVertexAttribArray(i);
-    gl.vertexAttribIPointer(i, 1, u8 ? gl.UNSIGNED_BYTE : gl.INT, u8 ? 1 : 4, 0);
+    if (L.cols[k].endsWith('rgba')) gl.vertexAttribPointer(i, 4, gl.UNSIGNED_BYTE, true, 4, 0);   // (as GL_VS's a_col: bytes / 255)
+    else gl.vertexAttribIPointer(i, 1, u8 ? gl.UNSIGNED_BYTE : gl.INT, u8 ? 1 : 4, 0);
     gl.vertexAttribDivisor(i, L.per);
     return b;
   });
@@ -23725,7 +23943,7 @@ function fireLights() {
   // (the game: its flames, gathered by where they burn - a fire is a few hundred flames - and its blasts)
   const L = [], kx = FXV.SV / FXV.pxX, cxOf = wx => wpx(wx) / FXV.pxX + SMG.mx, cyOf = wy => wpy(wy) / FXV.pxY + SMG.my;
   const G = FIRE_L; G.clear();
-  for (const f of flames) {
+  for (const f of flames.rows()) {
     if (!(f.heat > 0.15) || f.src === 'ship') continue;
     const k = Math.floor(f.x / 70) * 4096 + Math.floor(f.y / 70); let g = G.get(k);
     if (!g) G.set(k, g = [0, 0, 0]);
@@ -23748,7 +23966,7 @@ function fireLights() {
   for (const s of shells) if (s.burn > 0 && !(s.drop > 0) && !s.under) L.push(cxOf(s.x), cyOf(s.y), 24 * kx, 0.8);
   for (const pl of allPlanes()) if (pl && pl.state === 'down') L.push(cxOf(pl.x), cyOf(pl.y), 34 * kx, 1.0);
   for (const f of traffic) if (f.state === 'fall' && SHEET_PLANES[f.kind]) L.push(cxOf(f.x), cyOf(f.y), 34 * kx, 1.0);
-  for (const f of flashes) L.push(cxOf(f.x), cyOf(f.y), f.r * 3.5 * kx, 2 * (1 - f.life / f.max));
+  for (const f of flashes.rows()) L.push(cxOf(f.x), cyOf(f.y), f.r * 3.5 * kx, 2 * (1 - f.life / f.max));
   return L;
 }
 const FIRE_L = new Map();
@@ -26029,7 +26247,6 @@ function renderObjects() {
   drawMinisubs(x0, x1);                                   // (the research ships' subs, on their cranes or down in the water)
   drawReefItems(coastFront, x0, x1);                      // (boulders in front of the pier's pillars)
   for (const b of buoys) drawBuoy(b, x0, x1);
-  for (const b of blood) if (b.x > x0 - 4 && b.x < x1 + 4) drawBlood(b);
   restDrawDebris(0, x0, x1);                             // (the debris at rest: kept layers of the settled world - 36-zzzz-settled.js)
   for (const p of pieces) if (p.x + p.hl > x0 - 20 && p.x - p.hl < x1 + 20) drawPiece(p);
   ot = ema('obBits', ot);   // (minisubs, front rocks, buoys, blood, debris, pieces)
@@ -26070,7 +26287,7 @@ function renderObjects() {
   drawDust(x0, x1);
   drawBirds(x0, x1);
   drawScreens(x0, x1);                                    // (the smoke screens: over the ships, hiding them)
-  for (const d of debris) if (d.state === 1) drawDebris(d, x0, x1);
+  { const S = debris.c.state; debSel(); for (let i = 0; i < debris.n; i++) if (S[i] === 1) debSelAdd(debris, i); drawDebrisSel(x0, x1); }   // (sinking - 45-draw-vehicles.js DEBRIS_L)
   ot = ema('obMid', ot);
   // front water uses the surface sampled above, one pixel column at a time
   if (E.sunset > 0.03) {
@@ -26170,7 +26387,7 @@ function renderObjects() {
   drawFoamBits(x0, x1);
   drawOil(x0, x1);                                        // (OPEN WORLD: a tanker's spill)
   drawSplashes(x0, x1, SPLASH_DAY);
-  for (const d of debris) if (d.state === 0 || d.state === 4) drawDebris(d, x0, x1);
+  { const S = debris.c.state; debSel(); for (let i = 0; i < debris.n; i++) if (S[i] === 0 || S[i] === 4) debSelAdd(debris, i); drawDebrisSel(x0, x1); }   // (thrown, floating)
   ema('obSurf', ot);
 }
 
@@ -26323,10 +26540,16 @@ function drawWakeField(x0, x1, top) {
   plFlush();
   fsLast = null;
 }
-function drawShocks(x0, x1) {
-  // pressure waves in the water: chunky, wobbly, broken rings that ripple outward slowly
-  const B = PB * 2;
-  for (const w of shocks) {
+function drawShocks(x0, x1) { pxDraw(SHOCK_L, x0, x1); }
+/* (Nov 1) THE SHOCKS' PIXEL LAYER (40-zzzz-layers.js): pressure waves in the water - chunky, wobbly, broken rings that ripple
+   outward slowly; the loop that painted their blocks writes them, each block's colour at its own alpha packed as fillRectA
+   packs it (glColA) */
+const SHOCK_L = pxLayer({
+  table: shocks, cols: { x: 'view i32', y: 'view i32', rgba: 'view rgba' }, pal: [],
+  view: (T, own, n, x0, x1, L) => {
+  const B = PB * 2, keepClear = C.s.op === 'copy' || C.s.op === 'source-in' || C.s.op === 'destination-in';
+  let m = 0, R_ = own;
+  for (const w of T.rows()) {
     const hl = (w.len || 0) / 2;
     if (w.x + w.r + hl < x0 || w.x - w.r - hl > x1) continue;
     const fade = 1 - w.r / w.max;
@@ -26356,11 +26579,18 @@ function drawShocks(x0, x1) {
           else { const a2 = Math.PI / 2 - ((d - q - 2 * HL) / q) * Math.PI / 2; px = cx + HL + Math.cos(a2) * rr; py = cy + Math.sin(a2) * rr * 0.75; }
         } else { px = cx + Math.cos(ang) * rr; py = cy + Math.sin(ang) * rr * 0.75; }
         if (py < PY(surfaceY((px + CAMPX) / SV)) + B) continue;
-        fillRectA(C, col, a * (ring ? 0.6 : 1) * (0.6 + 0.4 * gap), Math.floor(px / B) * B, Math.floor(py / B) * B, B, B);   // (no colour string a cell - 40-gl.js)
+        const cc = glColA(C, col, a * (ring ? 0.6 : 1) * (0.6 + 0.4 * gap));   // (fillRectA's colour)
+        if (!(cc >>> 24) && !keepClear) continue;
+        if (m >= R_.x.length) R_ = pxRoom(L, m + 1);
+        R_.x[m] = Math.floor(px / B) * B; R_.y[m] = Math.floor(py / B) * B; R_.rgba[m] = cc; m++;
       }
     }
   }
-}
+  return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, u_pb * 2, u_pb * 2); c = -1; return true; }
+`,
+});
 // glints on the far sea, on a layer of their own (DEPTH rules): p is how far out they sit
 // (sky & far sea pass, Oct 30: everything about a column that never changes - its three hashes, its twinkle's rate and
 // phase, its place in its layer and its height - is kept between frames in a window of columns that follows the camera
@@ -27606,7 +27836,7 @@ function rockBlast(x, y, r) {
     // the broken rock: chunks tumbling down through the water, and a cloud of silt where it went
     if (!SIM_ONLY) {
       const n = Math.min(26, 4 + Math.round(lost / 30));
-      for (let i = 0; i < n; i++) debris.push({ x: x + rnd(-r, r), y: y - rnd(0, r * 1.5), vx: rnd(-40, 40), vy: rnd(-30, 20), a: rnd(0, 6), w: rnd(-4, 4), sw: rnd(1.5, 4.5), sh: rnd(1.2, 3), col: ['#3a4256', '#2a3040', '#4a5468'][i % 3], state: 1, bub: 0, seed: Math.random() * 6, age: 0, big: Math.random() < 0.3 });
+      for (let i = 0; i < n; i++) debrisRow({ x: x + rnd(-r, r), y: y - rnd(0, r * 1.5), vx: rnd(-40, 40), vy: rnd(-30, 20), a: rnd(0, 6), w: rnd(-4, 4), sw: rnd(1.5, 4.5), sh: rnd(1.2, 3), col: ['#3a4256', '#2a3040', '#4a5468'][i % 3], state: 1, bub: 0, seed: Math.random() * 6, age: 0, big: Math.random() < 0.3 });
       kickDust(x, r * 0.8, 6);
     }
   }
@@ -28185,7 +28415,7 @@ function drawDust(x0, x1) {
     let n = 0;
     if (DUSTQ.a.length < dust.length) { const m = dust.length * 2; DUSTQ.a = new Float64Array(m); DUSTQ.R = new Int32Array(m); DUSTQ.cx = new Int32Array(m); DUSTQ.cy = new Int32Array(m); }
     const QA = DUSTQ.a, QR = DUSTQ.R, QX = DUSTQ.cx, QY = DUSTQ.cy;
-    for (const u of dust) {
+    for (const u of dust.rows()) {
       if (u.x < x0 - 40 || u.x > x1 + 40) continue;
       const t = u.age / u.life;
       const a = 0.8 * Math.pow(1 - t, 1.2) * Math.min(1, u.age * 5);
@@ -28202,7 +28432,7 @@ function drawDust(x0, x1) {
     }
   } else
   for (let pass = 0; pass < 3; pass++) {
-    for (const u of dust) {
+    for (const u of dust.rows()) {
       if (u.x < x0 - 40 || u.x > x1 + 40) continue;
       const t = u.age / u.life;
       const a = 0.8 * Math.pow(1 - t, 1.2) * Math.min(1, u.age * 5);
@@ -28213,13 +28443,26 @@ function drawDust(x0, x1) {
       else { C.fillStyle = `rgba(236,218,174,${(a * 0.8).toFixed(3)})`; sandDisc(cx - Math.round(R * 0.2 / PB) * PB, cy - Math.round(R * 0.35 / PB) * PB, Math.round(R * 0.5 / PB) * PB || PB); }
     }
   }
-  fsLast = null;
-  for (const gq of grains) {
-    if (gq.x < x0 - 5 || gq.x > x1 + 5) continue;
-    fs1(gq.life < 9 ? 'rgba(214,190,142,0.85)' : 'rgba(214,190,142,0.4)');
-    C.fillRect(Math.floor(PX(gq.x) / PB) * PB, Math.floor(PY(gq.y) / PB) * PB, PB, PB);
-  }
+  // (Nov 1) the sand grains sifting out: their pixel layer (GRAIN_L); the fill style as the loop left it (its last grain's)
+  fsLast = null; GRAIN_L.last = -1;
+  pxDraw(GRAIN_L, x0, x1);
+  if (GRAIN_L.last >= 0) fs1(GRAIN_L.pal[GRAIN_L.last]);
 }
+// (Nov 1) THE SAND GRAINS' PIXEL LAYER (40-zzzz-layers.js): a block each, paler in its last seconds; one more than 5 outside the
+// view isn't drawn
+const GRAIN_L = pxLayer({
+  table: grains, cols: { on: 'view u8', x: 'view i32', y: 'view i32', c: 'view u8' }, pal: ['rgba(214,190,142,0.85)', 'rgba(214,190,142,0.4)'],
+  view: (T, own, n, x0, x1, L) => {
+    const X = T.c.x, Y = T.c.y, LF = T.c.life;
+    for (let i = 0; i < n; i++) {
+      if (X[i] < x0 - 5 || X[i] > x1 + 5) { own.on[i] = 0; continue; }
+      own.on[i] = 1; own.x[i] = Math.floor(PX(X[i]) / PB) * PB; own.y[i] = Math.floor(PY(Y[i]) / PB) * PB; own.c[i] = LF[i] < 9 ? 0 : 1; L.last = own.c[i];
+    }
+    return n;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, u_pb, u_pb); c = int(a_c); return a_on != 0u; }
+`,
+});
 // Wrecks on the seabed slowly rust to a dull red-gray.
 function rusted(src, level) {
   if (!level) return src;
@@ -28668,12 +28911,14 @@ function smokeNear(x, half, top, bot) {
   for (let i = 0; i < smoke.n; i++) { const r = R[i]; if (Math.abs(X[i] - x) < half + r && Y[i] > top - r && Y[i] < bot + r) return true; }
   return false;
 }
+// (Nov 1) a flame within half of x, below top (the flames' columns)
+function flamesNear(x, half, top) { const X = flames.c.x, Y = flames.c.y; for (let i = 0; i < flames.n; i++) if (Math.abs(X[i] - x) < half && Y[i] > top) return true; return false; }
 function drawSailsOver(x0, x1) {
   const near = [];
   for (const b of sailboats) {
     if (b.state === 'gone' || b.state === 'down' || b.state === 'wrecked' || b.x < x0 - 40 || b.x > x1 + 40) continue;
     const half = sailHalf(b) + 20, top = b.y - img.sails[b.kind].wl * SAIL_K - 10;
-    if (smokeNear(b.x, half, top, b.y) || flames.some(f => Math.abs(f.x - b.x) < half && f.y > top)) near.push(b);
+    if (smokeNear(b.x, half, top, b.y) || flamesNear(b.x, half, top)) near.push(b);
   }
   if (!near.length) return;
   const main = C, lc = lightLayer(), tr = main.getTransform();
@@ -28815,32 +29060,47 @@ function drawSailboat(b, mode) {
 function drawGuyVests(x0, x1) {
   for (let p = 0; p < 2; p++) if (crew[p].mode === 'boat') blitBoatLayer(img.lifeboat.vest, boatPose(p));
 }
-function drawBlood(b) {
-  const t = clamp((b.age || 0) / 22, 0, 1);
-  C.fillStyle = t < 0.3 ? '#c8181c' : t < 0.7 ? '#8e1616' : '#561212';
-  if (b.state === 0) { blk(b.x, b.y, 1); return; }
-  blkPx(PX(b.x), PY(DECK_Y) - PB, 1);
-  if (b.len > 0) { const L = Math.round(b.len * SV / PB) * PB; C.fillRect(Math.floor(PX(b.x) / PB) * PB, PY(DECK_Y), PB, L); }
-}
-const DEBC = [0, 0, 0];
-function drawDebris(d, x0, x1) {
-  if (d.x < x0 - 10 || d.x > x1 + 10) return;
-  const c = Math.abs(Math.cos(d.a)), s = Math.abs(Math.sin(d.a));
-  const w = Math.max(PB, Math.round((d.sw * c + d.sh * s) * SV / PB) * PB), h = Math.max(PB, Math.round((d.sw * s + d.sh * c) * SV / PB) * PB);
-  const fog = fogFor(d.y);
-  if (d._cs !== d.col) { d._cs = d.col; d._hx = /^#[0-9a-fA-F]{6}$/.test(d.col); d._rgb = d._hx ? rgb(d.col) : null; }
-  if (d._hx && GLR.on && !GLR.lost && C instanceof GLCtx) {   // (Oct 31: the colour packed, no string made and read a piece - the same bytes)
-    const b = d._rgb; let c = b;
-    if (fog > 0.02) { c = DEBC; c[0] = b[0] + (SEA_FOG[0] - b[0]) * fog; c[1] = b[1] + (SEA_FOG[1] - b[1]) * fog; c[2] = b[2] + (SEA_FOG[2] - b[2]) * fog; }   // (mix3's sums, in place)
-    const col = glColA(C, c, 1);
-    if (!(col >>> 24) && C.s.op !== 'copy' && C.s.op !== 'source-in' && C.s.op !== 'destination-in') return;
-    glBegin(C, C.s.op);
-    fillRectP(C, col, Math.floor((PX(d.x) - w / 2) / PB) * PB, Math.floor((PY(d.y) - h / 2) / PB) * PB, w, h);
-    return;
-  }
-  const base = rgb(d.col);
-  C.fillStyle = fog > 0.02 ? rgbs(mix3(base, SEA_FOG, fog)) : d.col;
-  C.fillRect(Math.floor((PX(d.x) - w / 2) / PB) * PB, Math.floor((PY(d.y) - h / 2) / PB) * PB, w, h);
+/* (Nov 1) THE DEBRIS' PIXEL LAYER (40-zzzz-layers.js). The pieces to draw are chosen first, in the order to paint them - rows of
+   the debris' table (the moving ones, those on a deck) or of the settled world's records (restDeb; 36-zzzz-settled.js merges
+   the two by number, and paints the records into its kept layers this same way): debSel(), debSelAdd(table, row) for each,
+   then drawDebrisSel(x0, x1) - one draw. Each piece as the loop drew it: an upright block as wide and tall as the piece turned
+   through its angle, in its colour, fogged toward the deep sea's blue the deeper it is (a #rrggbb colour mixed and packed as
+   GLCtx packs it; any other colour text as the fill style it made); one more than 10 outside the view isn't drawn */
+const DSEL = { n: 0, t: [], i: new Int32Array(64), css: null };
+function debSel() { DSEL.n = 0; }
+function debSelAdd(T, r) { if (DSEL.n >= DSEL.i.length) { const a = new Int32Array(DSEL.i.length * 2); a.set(DSEL.i); DSEL.i = a; } DSEL.t[DSEL.n] = T; DSEL.i[DSEL.n++] = r; }
+const DEB_RGB = new Map(), DEBC = [0, 0, 0];   // (a colour's text -> its rgb when it is #rrggbb, else null)
+const DEBRIS_L = pxLayer({
+  table: DSEL, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', rgba: 'view rgba' }, pal: [],
+  view: (S, own, n, x0, x1, L) => {
+    const op = C.s.op, keepClear = op === 'copy' || op === 'source-in' || op === 'destination-in';
+    let m = 0;
+    for (let k = 0; k < n; k++) {
+      const T = S.t[k], r = S.i[k], D = T.c, dx = D.x[r];
+      if (dx < x0 - 10 || dx > x1 + 10) continue;
+      const a = D.a[r], c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a)), sw = D.sw[r], sh = D.sh[r];
+      const w = Math.max(PB, Math.round((sw * c + sh * s) * SV / PB) * PB), h = Math.max(PB, Math.round((sw * s + sh * c) * SV / PB) * PB);
+      const fog = fogFor(D.y[r]), css = T.str(D.col[r]);
+      let b = DEB_RGB.get(css);
+      if (b === undefined) { b = /^#[0-9a-fA-F]{6}$/.test(css) ? rgb(css) : null; DEB_RGB.set(css, b); }
+      let col;
+      if (b) {
+        let q = b;
+        if (fog > 0.02) { q = DEBC; q[0] = b[0] + (SEA_FOG[0] - b[0]) * fog; q[1] = b[1] + (SEA_FOG[1] - b[1]) * fog; q[2] = b[2] + (SEA_FOG[2] - b[2]) * fog; }   // (mix3's sums, in place)
+        col = glColA(C, q, 1);
+      } else { const fs = fog > 0.02 ? rgbs(mix3(rgb(css), SEA_FOG, fog)) : css; col = glPack(glParse(fs), C.s.ga); DSEL.css = fs; }
+      if (!(col >>> 24) && !keepClear) continue;
+      own.x[m] = Math.floor((PX(dx) - w / 2) / PB) * PB; own.y[m] = Math.floor((PY(D.y[r]) - h / 2) / PB) * PB; own.w[m] = w; own.h[m] = h; own.rgba[m] = col; m++;
+    }
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = -1; return true; }
+`,
+});
+function drawDebrisSel(x0, x1) {
+  DSEL.css = null;
+  pxDraw(DEBRIS_L, x0, x1);
+  if (DSEL.css !== null) C.fillStyle = DSEL.css;   // (the fill style as the loop left it: a colour that wasn't #rrggbb set it)
 }
 
 /* ---------------- 3. Smoke, fog, lights and fire on top ---------------- */
@@ -28971,10 +29231,10 @@ const FIRE = { heat: new Float32Array(0), px: new Uint32Array(0), cvs: new Map()
 // behind: only the flames burning inside a ship (drawn before the ships, so the hull hides their foot); otherwise
 // all the rest
 function drawFire(x0, x1, behind) {
-  if (!flames.length) return;
+  if (!flames.n) return;
   const L = FIRE.list; L.length = 0;
   let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
-  for (const f of flames) {
+  for (const f of flames.rows()) {
     if (!!behind !== !!f.behind) continue;
     if (f.x + f.r < x0 - 10 || f.x - f.r > x1 + 10) continue;
     const R = Math.max(1.2, f.r * SV / FPX), cx = (PX(f.x) + 3 * FPX) / FPX, cy = (PY(f.y) + 3 * FPX) / FPX, a = clamp(f.heat * 0.5, 0, 1) * uwGlow(f.y);   // (a blast's hot core under the water: less of it in the deep's dark, user Oct 28)
@@ -29238,11 +29498,12 @@ function renderOverlays() {
     for (const b of sailboats) drawSailLights(b, x0, x1);
   }
   // fire lights up the night around it
-  if (flames.length) {
+  if (flames.n) {
     C.save(); C.globalCompositeOperation = 'lighter';
     const glowA = 0.06 + 0.22 * dark;
-    for (let i = 0; i < flames.length; i += 6) {
-      const f = flames[i];
+    const f = flames.cursor();
+    for (let i = 0; i < flames.n; i += 6) {
+      f.i = i;
       if (f.heat < 0.7 || f.x < x0 - 80 || f.x > x1 + 80) continue;
       glowDisc(PX(f.x), PY(f.y), (36 + f.r * 3) * SV, [255, 130, 45], glowA * Math.min(1, f.heat) * uwGlow(f.y));   // (under the water, dimmed in the deep's dark)
     }
@@ -29255,12 +29516,7 @@ function renderOverlays() {
   // embers: single pixels riding the wind (Nov 1: their pixel layer - EMBER_L)
   pxDraw(EMBER_L, x0 - 5, x1 + 5);
   C.save(); C.globalCompositeOperation = 'lighter';
-  for (const w of welds) {
-    if (w.x < x0 - 10 || w.x > x1 + 10) continue;
-    const a = (1 - w.life / w.max) * (0.6 + 0.4 * Math.random());
-    glowDisc(PX(w.x), PY(w.y), w.r * Math.min(SV, 2.2) * (1.5 + 2 * dark), [170, 210, 255], (0.35 + 0.4 * dark) * a);
-  }
-  for (const f of flashes) {
+  for (const f of flashes.rows()) {
     const a = 1 - f.life / f.max;
     // (under the water: in the sea's colour at its depth, a little brighter than it - it's light - and dimmed in the deep's
     // dark, never daylight-white at the bottom of the pit: user Oct 28)
@@ -29269,14 +29525,9 @@ function renderOverlays() {
     glowDisc(PX(f.x), PY(f.y), f.r * SV * (1.2 + 0.8 * (1 - a)), col, ga);
   }
   C.restore();
-  C.fillStyle = '#f4faff';
-  for (const w of welds) if (w.life < w.max * 0.7 && w.x > x0 - 4 && w.x < x1 + 4) blk(w.x, w.y, 1);
-  for (const r of rings) {
-    const R = r.r * SV, cx = PX(r.x), cy = PY(r.y);
-    C.fillStyle = r.life < 0.2 ? '#fff4d2' : '#e8c890';
-    const n = Math.max(12, Math.round(R * 0.7));
-    for (let k = 0; k < n; k++) { const ang = k / n * Math.PI * 2; blkPx(cx + Math.cos(ang) * R, cy + Math.sin(ang) * R * 0.75, 1); }
-  }
+  C.fillStyle = '#f4faff';                        // (the fill style the welds' loop set - Nov 1: the welds were never made, and are gone)
+  pxDraw(RING_L, x0, x1);
+  if (rings.n) C.fillStyle = rings.c.life[rings.n - 1] < 0.2 ? '#fff4d2' : '#e8c890';   // (the fill style as the loop left it: the last ring's)
   for (const s of shells) {
     if (s.click || s.x < x0 - 10 || s.x > x1 + 10) continue;
     const sp = Math.hypot(s.vx, s.vy) || 1; let ux = s.vx / sp; let uy = s.vy / sp;
@@ -29359,6 +29610,23 @@ const SPARK_L = pxLayer({
   r = j == 0 ? ivec4(a_bx, a_by, u_pb, u_pb) : ivec4(a_mx, a_my, u_pb, u_pb);
   return a_on != 0u && (j == 0 || (a_st & 4u) != 0u);
 }
+`,
+});
+/* (Nov 1) THE BLAST RINGS' PIXEL LAYER (40-zzzz-layers.js): a blast's ring of sparks, its blocks worked out by the loop that
+   painted them - round its edge, as many as it is wide (12 at least), a block each, squashed to 3/4 tall; pale while new, then
+   amber. Every ring, in view or not, as the loop drew them */
+const RING_L = pxLayer({
+  table: rings, cols: { x: 'view i32', y: 'view i32', c: 'view u8' }, pal: ['#fff4d2', '#e8c890'],
+  view: (T, own, n, x0, x1, L) => {
+    const G = T.c; let m = 0, R = own;
+    for (let q = 0; q < n; q++) {
+      const RR = G.r[q] * SV, cx = PX(G.x[q]), cy = PY(G.y[q]), col = G.life[q] < 0.2 ? 0 : 1, nb = Math.max(12, Math.round(RR * 0.7));
+      R = pxRoom(L, m + nb);
+      for (let k = 0; k < nb; k++) { const ang = k / nb * Math.PI * 2; R.x[m] = Math.floor((cx + Math.cos(ang) * RR) / PB) * PB; R.y[m] = Math.floor((cy + Math.sin(ang) * RR * 0.75) / PB) * PB; R.c[m] = col; m++; }
+    }
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, u_pb, u_pb); c = int(a_c); return true; }
 `,
 });
 // the sparks (hits on metal, the guns' muzzles) and the machine guns' rounds: over the world, and with the new sky under
@@ -29549,18 +29817,31 @@ function drawRainIn() {
   rainEnd();
 }
 // soot flakes falling out of the smoke: a dark pixel, sometimes two
+// (Nov 1: its pixel layer, ASH_L - a flake's block as big as the smoke's pixel, a big one a second beside it, up or down as it
+// flutters; one more than 5 outside the view isn't drawn)
 function drawAsh(x0, x1) {
-  if (!ash.length) return;
+  if (!ash.n) return;
   const fx = E.fx;
   C.fillStyle = rgbs([34 * fx[0] + 6, 32 * fx[1] + 6, 38 * fx[2] + 8], 0.9);
-  const S2 = Math.max(PB, Math.round(SMK / PB) * PB);
-  for (const f of ash) {
-    if (f.x < x0 - 5 || f.x > x1 + 5) continue;
-    const px = Math.floor(PX(f.x) / PB) * PB, py = Math.floor(PY(f.y) / PB) * PB;
-    C.fillRect(px, py, S2, S2);
-    if (f.big) C.fillRect(px + S2, py + (Math.sin(f.life * 3 + f.ph) > 0 ? 0 : S2), S2, S2);
-  }
+  ASH_L.pal = [C.fillStyle];
+  pxDraw(ASH_L, x0, x1);
 }
+const ASH_L = pxLayer({
+  table: ash, cols: { x: 'view i32', y: 'view i32', s: 'view i32' }, pal: [],
+  view: (T, own, n, x0, x1, L) => {
+    const A = T.c, S2 = Math.max(PB, Math.round(SMK / PB) * PB);
+    let m = 0, R = pxRoom(L, n * 2);
+    for (let i = 0; i < n; i++) {
+      if (A.x[i] < x0 - 5 || A.x[i] > x1 + 5) continue;
+      const px = Math.floor(PX(A.x[i]) / PB) * PB, py = Math.floor(PY(A.y[i]) / PB) * PB;
+      R.x[m] = px; R.y[m] = py; R.s[m] = S2; m++;
+      if (A.big[i]) { R.x[m] = px + S2; R.y[m] = py + (Math.sin(A.life[i] * 3 + A.ph[i]) > 0 ? 0 : S2); R.s[m] = S2; m++; }
+    }
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_s, a_s); c = 0; return true; }
+`,
+});
 // A trail looks the same as ever for its first 10 seconds (its slow thinning still runs on the old 28-second
 // scale), then fades away over the next 4 and is gone: no trail lingers past 14 seconds.
 const TRAIL_SHAPE = 28, TRAIL_HOLD = 10, TRAIL_LIFE = 14;
@@ -29906,7 +30187,7 @@ function distortGL(sx, wpx, y0) {
       pieces.push(xa, xb, Math.min(7, I * 3.2) * Math.max(0.6, Math.min(SV, 2.2)));
     }
   }
-  for (const b of blastRings) {
+  for (const b of blastRings.rows()) {
     const cx = PX(b.x) - sx, cy = PY(b.y), R = b.r * SV, fade = 1 - b.r / b.max, w = Math.max(PB * 3, Math.round(10 * SV));
     const push = Math.max(1, Math.round(b.amp * SV * fade));
     if (fade <= 0.03 || cx + R + w < 0 || cx - R - w > wpx) continue;
@@ -29977,7 +30258,7 @@ function distortWater(sx, wpx) {
     }
   }
   // a blast's pressure rings: a band of water that bends the picture behind it outward as it spreads
-  for (const b of blastRings) {
+  for (const b of blastRings.rows()) {
     const cx = PX(b.x) - sx, cy = PY(b.y), R = b.r * SV, fade = 1 - b.r / b.max, w = Math.max(PB * 3, Math.round(10 * SV));
     const push = Math.max(1, Math.round(b.amp * SV * fade));
     if (fade <= 0.03 || cx + R + w < 0 || cx - R - w > wpx) continue;
@@ -30031,7 +30312,7 @@ function drawGrade(views) {
   for (const [, , sx, w, i] of views) {
     const L = brightLights[i]; let k = 0;
     for (let j = 0; j < L.length; j += 4) k += L[j + 2];
-    for (const f of flashes) k += 0.6 * (1 - f.life / f.max);
+    for (const f of flashes.rows()) k += 0.6 * (1 - f.life / f.max);
     k = clamp(k, 0, 1.2);
     g.save(); g.beginPath(); g.rect(sx, 0, w, bh); g.clip();
     if (k > 0.02) { g.fillStyle = `rgba(6,8,16,${(0.22 * k * G).toFixed(3)})`; g.fillRect(sx, 0, w, bh); }   // (the eye's adapting: all else darker)
@@ -31248,7 +31529,7 @@ function balloonPop(b, fire, x, y) {
   if (SIM_ONLY) return;
   // shreds of its fabric, in its colours
   const cols = A ? balloonCols(A) : ['#e04030', '#f0c040'];
-  for (let k = 0; k < 16; k++) debris.push({ x: q.cx + balRnd(-q.hw, q.hw) * 0.8, y: q.cy + balRnd(-q.hh, q.hh) * 0.7, vx: balRnd(-90, 90), vy: -balRnd(20, 120), a: balRnd(0, 6), w: balRnd(-8, 8), sw: balRnd(2, 5), sh: balRnd(1.5, 3), col: cols[k % cols.length], state: 0, bub: 0, seed: balR() * 6.28, age: 0 });
+  for (let k = 0; k < 16; k++) debrisRow({ x: q.cx + balRnd(-q.hw, q.hw) * 0.8, y: q.cy + balRnd(-q.hh, q.hh) * 0.7, vx: balRnd(-90, 90), vy: -balRnd(20, 120), a: balRnd(0, 6), w: balRnd(-8, 8), sw: balRnd(2, 5), sh: balRnd(1.5, 3), col: cols[k % cols.length], state: 0, bub: 0, seed: balR() * 6.28, age: 0 });
   // the hot air rushing out
   for (let k = 0; k < 10; k++) spawnSmoke(q.cx + balRnd(-q.hw, q.hw) * 0.6, q.cy - q.hh * balRnd(0.2, 0.9), { kind: 'blast', mist: true, r: balRnd(4, 8), grow: 6, lift: 30, vx: balRnd(-30, 30), vy: -balRnd(30, 70), life: balRnd(1.2, 2), alpha: 0.45 });
 }
@@ -31461,7 +31742,7 @@ function blimpBurst(b) {
   sound('impact', b.x); sound('explosion', b.x, 0.5);
   if (!SIM_ONLY) {
     for (let k = 0; k < 22; k++) { const u = blRnd(0.1, 0.9), [px, py] = blimpPoint(b, u * 170, blRnd(6, 36)); spawnSmoke(px, py, { kind: 'blast', mist: true, r: blRnd(5, 10), grow: 9, lift: 26, vx: blRnd(-60, 60), vy: -blRnd(30, 90), life: blRnd(1.4, 2.4), alpha: 0.5 }); }
-    for (let k = 0; k < 14; k++) { const [px, py] = blimpPoint(b, blRnd(20, 150), blRnd(4, 40)); debris.push({ x: px, y: py, vx: blRnd(-80, 80), vy: -blRnd(20, 110), a: blRnd(0, 6), w: blRnd(-8, 8), sw: blRnd(2, 5), sh: blRnd(1.5, 3), col: k % 3 ? '#c9cdd3' : '#9aa0a8', state: 0, bub: 0, seen: 0 }); }
+    for (let k = 0; k < 14; k++) { const [px, py] = blimpPoint(b, blRnd(20, 150), blRnd(4, 40)); debrisRow({ x: px, y: py, vx: blRnd(-80, 80), vy: -blRnd(20, 110), a: blRnd(0, 6), w: blRnd(-8, 8), sw: blRnd(2, 5), sh: blRnd(1.5, 3), col: k % 3 ? '#c9cdd3' : '#9aa0a8', state: 0, bub: 0, seen: 0 }); }
   }
   civFollowDown(b);
 }
@@ -35316,7 +35597,7 @@ function heliDust(x, footY, H, spin, dt, half = 30) {
     }
     if (apron && Math.random() < dt * 14 * k) {
       const d = Math.random() < 0.5 ? -1 : 1;
-      debris.push({ x: x + d * rnd(half * 0.5, half), y: g - 1, vx: d * rnd(60, 160) * k, vy: -rnd(10, 50), a: rnd(0, 6), w: rnd(-10, 10), sw: rnd(0.6, 1.2), sh: rnd(0.5, 1), col: ['#bfbbb2', '#9e9a92', '#d8d4cc'][Math.floor(Math.random() * 3)], state: 0, bub: 0, seen: 0 });
+      debrisRow({ x: x + d * rnd(half * 0.5, half), y: g - 1, vx: d * rnd(60, 160) * k, vy: -rnd(10, 50), a: rnd(0, 6), w: rnd(-10, 10), sw: rnd(0.6, 1.2), sh: rnd(0.5, 1), col: ['#bfbbb2', '#9e9a92', '#d8d4cc'][Math.floor(Math.random() * 3)], state: 0, bub: 0, seen: 0 });
     }
   }
   else if (Math.random() < dt * 20 * k) { const d = Math.random() < 0.5 ? -1 : 1; spawnSpray(x + d * rnd(half * 0.6, half * 1.1), surfaceY(x) - 1, d * rnd(30, 80), 0.4 * k); }
@@ -37286,7 +37567,7 @@ const FLH = { m: new Map(), n: 0 };
 const flhKey = (x, y) => Math.floor(x / 16) * 8192 + Math.floor(y / 16) + 4096;
 function hoseFlameHash() {
   FLH.m.clear(); FLH.n = 0;
-  for (const f of flames) { if (f.heat <= 0.35) continue; const k = flhKey(f.x, f.y); let a = FLH.m.get(k); if (!a) FLH.m.set(k, a = []); a.push(f); FLH.n++; }
+  const F = flames.c; for (let i = 0; i < flames.n; i++) { if (F.heat[i] <= 0.35) continue; const k = flhKey(F.x[i], F.y[i]); let a = FLH.m.get(k); if (!a) FLH.m.set(k, a = []); a.push(F.sq[i]); FLH.n++; }   // (Nov 1: each flame by its id)
 }
 // water on flames: the ones it touches die at once (no dark smoke from them: a little steam)
 function hoseQuench(x, y, r) {
@@ -37294,7 +37575,7 @@ function hoseQuench(x, y, r) {
   let n = 0; const gx = Math.floor(x / 16), gy = Math.floor(y / 16);
   for (let a = gx - 1; a <= gx + 1; a++) for (let b = gy - 1; b <= gy + 1; b++) {
     const L = FLH.m.get(a * 8192 + b + 4096); if (!L) continue;
-    for (const f of L) { if (f.heat <= 0.35) continue; const dx = f.x - x, dy = f.y - y; if (dx * dx + dy * dy < r * r + f.r * f.r) { f.heat = 0.31; f.clean = true; n++; } }
+    for (const id of L) { const i = flames.row(id), F = flames.c; if (i < 0 || F.heat[i] <= 0.35) continue; const dx = F.x[i] - x, dy = F.y[i] - y; if (dx * dx + dy * dy < r * r + F.r[i] * F.r[i]) { F.heat[i] = 0.31; F.clean[i] = 1; n++; } }
   }
   if (n && HOSE.steamTok >= 1 && hoseR() < 0.3) { HOSE.steamTok -= 1; steamAt(x, y - 3, 0.9); }
   return n;
@@ -37478,7 +37759,7 @@ function drawHoseCollision(x0, x1) {
   C.strokeStyle = '#ff9a2e';
   for (const q of S) { if (q.x1 < x0 || q.x0 > x1) continue; C.strokeRect(PX(q.x0) + 0.5, PY(q.y0) + 0.5, Math.max(1, Math.round((q.x1 - q.x0) * SV)), Math.max(1, Math.round((q.y1 - q.y0) * SV))); }
   C.strokeStyle = 'rgba(255,70,70,0.8)';
-  for (const f of flames) { if (f.heat <= 0.35 || f.x < x0 - 20 || f.x > x1 + 20) continue; C.beginPath(); C.arc(PX(f.x), PY(f.y), Math.max(1.5, Math.sqrt(49 + f.r * f.r) * SV), 0, 6.283); C.stroke(); }
+  for (const f of flames.rows()) { if (f.heat <= 0.35 || f.x < x0 - 20 || f.x > x1 + 20) continue; C.beginPath(); C.arc(PX(f.x), PY(f.y), Math.max(1.5, Math.sqrt(49 + f.r * f.r) * SV), 0, 6.283); C.stroke(); }
   const px = Math.max(1, Math.round(SV));
   C.fillStyle = '#4a7dff'; for (const d of HOSE.drops) if (!d.sp) C.fillRect(PX(d.x) - px, PY(d.y) - px, px * 2, px * 2);
   const COLS = { fire: '#ff9a2e', flame: '#ff3b3b', sea: '#9fd8ff' };
@@ -41150,7 +41431,7 @@ function plantBits(it, x, y, n, vx, big, wood) {
   const lc = it.char > 0.5 ? PL_CHAR : PL_LEAF[it.pk], wc = it.char > 0.5 ? PL_CHAR : PL_WOOD;
   for (let i = 0; i < n; i++) {
     const w = wood != null ? plR() < wood : plR() < 0.4, s = big ? plRnd(1.5, 3) : 1;
-    debris.push({ x: x + plRnd(-4, 4) * s, y: y + plRnd(-4, 4) * s, vx: vx * 0.4 + plRnd(-90, 90) * s, vy: -plRnd(40, 160) * s, a: plRnd(0, 6), w: plRnd(-10, 10), sw: w ? plRnd(3, 6) * s : plRnd(1.5, 3) * s, sh: w ? plRnd(1, 2) * Math.sqrt(s) : plRnd(1.2, 2.4) * s, col: (w ? wc : lc)[(plR() * 4) | 0], state: 0, bub: 0, seed: plR() * 6, age: 0, clod: true });
+    debrisRow({ x: x + plRnd(-4, 4) * s, y: y + plRnd(-4, 4) * s, vx: vx * 0.4 + plRnd(-90, 90) * s, vy: -plRnd(40, 160) * s, a: plRnd(0, 6), w: plRnd(-10, 10), sw: w ? plRnd(3, 6) * s : plRnd(1.5, 3) * s, sh: w ? plRnd(1, 2) * Math.sqrt(s) : plRnd(1.2, 2.4) * s, col: (w ? wc : lc)[(plR() * 4) | 0], state: 0, bub: 0, seed: plR() * 6, age: 0, clod: true });
   }
   if (it.leaf > 0.2 && it.pk !== 'grass') for (let i = 0; i < n * 0.7; i++) leafFly(x + plRnd(-10, 10), y + plRnd(-8, 8), vx * 0.2 + plRnd(-30, 30), -plRnd(10, 60));
 }
@@ -42200,10 +42481,9 @@ function stepLandRest(dt) {
   if (landWake.length) for (const k of restChunksWhere(k => k.land && !k.uw && landWoke(k.x, 6), landWake)) { const f = k.y + k.hh * 0.45; if (landBelow(k.x, f - 6) > f + 1) { if (k._rest) restWakeChunk(k); k.rest = false; k.vx = k.vy = 0; k.w = lrRnd(-1, 1); } }
   // the debris, the grains of earth and the leaves lying on the ground: the ground gone, they fall again
   if (landWake.length) {
-    for (const d of debris) if (d.state === 2 && onLand(d.x) && landWoke(d.x, 1) && !landSolid(d.x, d.y + 1.5)) { d.state = 0; d.vy = 0; }
+    { const D = debris.c; for (let i = 0; i < debris.n; i++) if (D.state[i] === 2 && onLand(D.x[i]) && landWoke(D.x[i], 1) && !landSolid(D.x[i], D.y[i] + 1.5)) { D.state[i] = 0; D.vy[i] = 0; } }
     restLandWake(landWake);                              // (and those filed away at rest - 36-zzzz-settled.js)
-    for (const q of earthGrains) if (q.rest && landWoke(q.x, 1) && !landSolid(q.x, q.y + 1.5)) { q.rest = 0; q.vy = 0; q.vx = 0; }
-    for (const f of leaves) if (f.rest && landWoke(f.x, 1) && !landSolid(f.x, f.y + 1.5)) { f.rest = 0; f.vy = 0; f.vx = 0; }
+    for (const T of [earthGrains, leaves]) { const c = T.c; for (let i = 0; i < T.n; i++) if (c.rest[i] && landWoke(c.x[i], 1) && !landSolid(c.x[i], c.y[i] + 1.5)) { c.rest[i] = 0; c.vy[i] = 0; c.vx[i] = 0; } }   // (Nov 1: column tables)
   }
 }
 // an army wreck (a tank's, a helicopter's): on a ship's deck it rides her, and goes down with her; over water it falls
@@ -42436,7 +42716,7 @@ function landCrash(x, gy, o) {
   if (o.blast !== false) {
     sectionBlast(x, gy - 4, 0.6 + 0.35 * size, (o.vx || 0) * 0.3); spawnDebris(x, gy - 6, Math.round(8 + 6 * size), (o.vx || 0) * 0.3);
     if (!SIM_ONLY) {
-      flashes.push({ x, y: gy - 10, r: 24 + 12 * size, life: 0, max: 0.2 });
+      flashes.addRow({ x, y: gy - 10, r: 24 + 12 * size, life: 0, max: 0.2 });
       for (let i = 0; i < (30 + 30 * size) * fwFlames(); i++) { const a = -Math.PI / 2 + crshRnd(-1.4, 1.4), v = Math.pow(crshR(), 0.55) * (90 + 40 * size); spawnFlame(x + crshRnd(-10, 10) * size, gy - crshRnd(0, 10), Math.cos(a) * v + (o.vx || 0) * 0.2, Math.sin(a) * v * 0.8 - crshRnd(30, 80), crshRnd(1.3, 1.6), crshRnd(4, 7) * Math.sqrt(size), crshRnd(0.9, 1.3)); }
       for (let i = 0; i < 8 + 6 * size; i++) spawnSmoke(x + crshRnd(-16, 16) * size, gy - crshRnd(10, 40), { kind: 'blast', dark: 0, r: crshRnd(6, 10), grow: crshRnd(4, 7), lift: 46, vx: crshRnd(-12, 12), vy: crshRnd(-70, -25), life: crshRnd(10, 15), alpha: crshRnd(0.65, 0.85) });
       if (!deck && !o.noCrater) spikeBurst(x, gy, Math.min(1.4, 0.5 + 0.3 * size), groundAt(x, gy));   // (no earth thrown up off a deck or the harbour's stone)
@@ -42563,10 +42843,10 @@ function padBlast(v) {
   P.a += padRnd(-0.12, 0.12);
   gridExplosion(gx, gy - 60, 260, 1400);
   if (!SIM_ONLY) {
-    flashes.push({ x: gx, y: gy - 90, r: 320, life: 0, max: 0.5 });
+    flashes.addRow({ x: gx, y: gy - 90, r: 320, life: 0, max: 0.5 });
     for (let i = 0; i < 260 * fwFlames(); i++) { const a = -Math.PI / 2 + padRnd(-1.6, 1.6), sp = Math.pow(padR(), 0.5) * 320; spawnFlame(cx + padRnd(-20, 20), cy + padRnd(-60, 60), Math.cos(a) * sp, Math.sin(a) * sp * 0.8 - padRnd(40, 120), padRnd(1.5, 1.9), padRnd(8, 18), padRnd(0.6, 1)); }
     spawnSparks(gx, gy - 60, 160, 720);                             // (the streaks of burning debris flying out every way)
-    const k0 = debris.length; spawnDebris(gx, gy - 40, 60, 0); for (let k = k0; k < debris.length; k++) { debris[k].vx *= 2.6; debris[k].vy *= 2.2; }
+    const k0 = debris.n; spawnDebris(gx, gy - 40, 60, 0); for (let k = k0; k < debris.n; k++) { debris.c.vx[k] *= 2.6; debris.c.vy[k] *= 2.2; }   // (the rows just thrown: the last ones)
     for (let i = 0; i < 70; i++) spawnEmber(gx + padRnd(-60, 60), gy - padRnd(20, 160), padRnd(-120, 120), 2.4);
     spikeBurst(gx, gy, 2, groundAt(gx, gy));
   }
@@ -43116,7 +43396,7 @@ function stepShuttle(v, dt) {
       if (spaceR() < dt * 22) spawnEmber(nx - ux2 * spcRnd(20, 90) + spcRnd(-12, 12), ny - uy2 * spcRnd(20, 90), -ux2 * 40 + spcRnd(-30, 30), 0.6);   // (sparks off the plume)
     }
     if (v.t < 9) launchBillows(v, dt, 1 - v.t / 11);
-    if (v.t < 1.6 && !SIM_ONLY && spaceR() < dt * 14) { const P = padSpot(stackPad(v)), d = spaceR() < 0.5 ? -1 : 1; debris.push({ x: P.x + d * spcRnd(10, 40), y: P.y - 4, vx: d * spcRnd(80, 260), vy: -spcRnd(120, 320), a: spcRnd(0, 6), w: spcRnd(-8, 8), sw: spcRnd(2.5, 5), sh: spcRnd(2, 4), col: ['#5a5650', '#3e3a36', '#7a746c'][Math.floor(spaceR() * 3)], state: 0, bub: 0, seen: 0 }); }   // (rocks blown off the pad)
+    if (v.t < 1.6 && !SIM_ONLY && spaceR() < dt * 14) { const P = padSpot(stackPad(v)), d = spaceR() < 0.5 ? -1 : 1; debrisRow({ x: P.x + d * spcRnd(10, 40), y: P.y - 4, vx: d * spcRnd(80, 260), vy: -spcRnd(120, 320), a: spcRnd(0, 6), w: spcRnd(-8, 8), sw: spcRnd(2.5, 5), sh: spcRnd(2, 4), col: ['#5a5650', '#3e3a36', '#7a746c'][Math.floor(spaceR() * 3)], state: 0, bub: 0, seen: 0 }); }   // (rocks blown off the pad)
     if (v.y > WATER_Y - 900) shakeAt(0.6 * (1 - (WATER_Y - v.y) / 900), v.x);
     // at the edge of space the boosters come away, then the tank, and the orbiter is on its own
     if (v.srb && v.y < ATMO_TOP) { v.srb = false; v.t2 = 0; dropJunk(v, 'srb'); sound('impact', v.x); }
@@ -44204,7 +44484,7 @@ function landCarve(x, y, rad) {
     for (let k = 0; k < tot; k++) {
       let m = 2; { let t = Math.random() * n; for (let q = 1; q < 5; q++) { t -= kinds[q]; if (t < 0) { m = q; break; } } }
       const a = -Math.PI / 2 + rnd(-1.2, 1.2), v = rnd(80, 260) * (rad > 30 ? 1.5 : 1);
-      debris.push({ x: x + rnd(-rad, rad) * 0.5, y: y - rnd(0, rad * 0.5), vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: rnd(0, 6), w: rnd(-8, 8), sw: rnd(1.2, 2.6), sh: rnd(1, 2), col: cols[m], state: 0, bub: 0, seed: Math.random() * 6, age: 0, clod: true });
+      debrisRow({ x: x + rnd(-rad, rad) * 0.5, y: y - rnd(0, rad * 0.5), vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: rnd(0, 6), w: rnd(-8, 8), sw: rnd(1.2, 2.6), sh: rnd(1, 2), col: cols[m], state: 0, bub: 0, seed: Math.random() * 6, age: 0, clod: true });
     }
   }
   return n;
@@ -45302,7 +45582,7 @@ function cutTuft(t, vx, hard) {
   if (SIM_ONLY) return;
   const cols = ['#a8d654', '#70a838', '#3a6828', '#cbe878'];
   const y = landTop(t.x) - 4 * t.s;
-  for (let i = 0; i < (hard ? 12 : 7); i++) debris.push({ x: t.x + tfRnd(-6, 6), y: y - tfRnd(0, 6), vx: vx * 0.5 + tfRnd(-50, 50) * (hard ? 2 : 1), vy: -tfRnd(30, 110) * (hard ? 2 : 1), a: tfRnd(0, 6), w: tfRnd(-10, 10), sw: tfRnd(1, 2.4), sh: tfRnd(0.6, 1.1), col: cols[i & 3], state: 0, bub: 0, seed: tfR() * 6, age: 0, clod: true });
+  for (let i = 0; i < (hard ? 12 : 7); i++) debrisRow({ x: t.x + tfRnd(-6, 6), y: y - tfRnd(0, 6), vx: vx * 0.5 + tfRnd(-50, 50) * (hard ? 2 : 1), vy: -tfRnd(30, 110) * (hard ? 2 : 1), a: tfRnd(0, 6), w: tfRnd(-10, 10), sw: tfRnd(1, 2.4), sh: tfRnd(0.6, 1.1), col: cols[i & 3], state: 0, bub: 0, seed: tfR() * 6, age: 0, clod: true });
 }
 // every frame: tanks flatten what they drive through, a helicopter's skids too as it lands; ground dug away under
 // a clump takes it
@@ -45631,7 +45911,7 @@ function sheetFall(f, dt) {
   if (trR() < dt * 6) planeBits(f, 1);
   if (f.wings !== 3 && trR() < dt * 0.6) sheetLoseWing(f, f.wings & 1 ? 1 : f.wings & 2 ? 0 : trR() < 0.5 ? 0 : 1);
   f.smokeT = 99; f.smokeDark = true; planeSmoke(f, dt);
-  if (!SIM_ONLY && trR() < dt * 30) { spawnFlame(f.x + trRnd(-4, 4), f.y + trRnd(-4, 4), f.vx * 0.3 + trRnd(-20, 20), f.vy * 0.3 - trRnd(10, 40), 1.3, trRnd(3, 5), trRnd(2, 3)); flames[flames.length - 1].clean = true; }   // (no smoke of their own: one streak, as the fighter's - 29-plane.js planeSmoke)
+  if (!SIM_ONLY && trR() < dt * 30) { spawnFlame(f.x + trRnd(-4, 4), f.y + trRnd(-4, 4), f.vx * 0.3 + trRnd(-20, 20), f.vy * 0.3 - trRnd(10, 40), 1.3, trRnd(3, 5), trRnd(2, 3)); flameLast().clean = true; }   // (no smoke of their own: one streak, as the fighter's - 29-plane.js planeSmoke)
 }
 function sheetLoseWing(f, which, quiet) {
   if ((f.wings || 0) & (1 << which)) return;
@@ -47732,11 +48012,11 @@ function tankFire(t) {
 function tankMuzzleBall(mx, my, ux, uy, t) {
   if (SIM_ONLY) return;
   const cx = mx + ux * 16, cy = my + uy * 16;
-  flashes.push({ x: cx, y: cy, r: 22, life: 0, max: 0.14 });
+  flashes.addRow({ x: cx, y: cy, r: 22, life: 0, max: 0.14 });
   for (let i = 0; i < 60; i++) {
     const a = luRnd(0, Math.PI * 2), sp = Math.pow(landUnitR(), 0.5) * luRnd(30, 80), r0 = luRnd(0, 9);
     spawnFlame(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, Math.cos(a) * sp + ux * 55 + t.vx, Math.sin(a) * sp * 0.85 + uy * 55 - luRnd(0, 14), luRnd(1.35, 1.65), luRnd(4.5, 8), luRnd(1.5, 2.1));
-    flames[flames.length - 1].clean = true;
+    flameLast().clean = true;
   }
   for (let i = 0; i < 7; i++) spawnSmoke(mx + ux * luRnd(0, 26), my + uy * luRnd(0, 26), { kind: 'gun', mist: true, keep: true, r: luRnd(2, 4), grow: luRnd(2, 3.5), rmax: luRnd(9, 14), lift: 3, vx: ux * luRnd(60, 130), vy: uy * luRnd(60, 130), life: luRnd(1.6, 2.6), alpha: 0.75 });
   const gy = landBelow(cx, cy - 4);
@@ -47748,7 +48028,7 @@ function tankMG(t) {
   const mx = px + ux * 10 + uy * 6 * t.facing * 0, my = py - 7 + uy * 10;
   const sp = MG_SPEED * (0.75 + g.power * 0.4), spr = luRnd(-0.025, 0.025);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spr) * sp + t.vx, vy: (uy + ux * spr) * sp, owner: t.id, age: 0 });
-  flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
+  flashes.addRow({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
   sound('mg', mx);
 }
 // damage: a missile or bomb close is a heavy blow, a round a scratch; at none it blows up
@@ -47768,7 +48048,7 @@ function tankHitBlast(t, power) {
   sound('explosion', x, 0.6 + 0.4 * power);
   shakeAt(4 + 5 * power, x);
   if (SIM_ONLY) return;
-  flashes.push({ x, y: y - 6, r: 22 + 12 * power, life: 0, max: 0.16 });
+  flashes.addRow({ x, y: y - 6, r: 22 + 12 * power, life: 0, max: 0.16 });
   const n = Math.round(30 + 30 * power);
   for (let i = 0; i < n; i++) {
     const a = -Math.PI / 2 + luRnd(-0.9, 0.9), sp = Math.pow(landUnitR(), 0.6) * (90 + 80 * power);
@@ -47779,9 +48059,9 @@ function tankHitBlast(t, power) {
   for (let i = 0; i < 6 + 6 * power; i++) spawnSmoke(x + luRnd(-6, 6), y - luRnd(14, 34), { kind: 'blast', dark: 0.1, r: luRnd(3.5, 6) * (0.7 + 0.4 * power), grow: luRnd(3, 5), lift: 40, vx: luRnd(-10, 10), vy: luRnd(-70, -35), life: luRnd(6, 9), alpha: luRnd(0.55, 0.75) });
   // the debris: dark shards and a few in the tank's own paint, flung high
   const col = tankArtOf(t.id).col, own = css3(col.map(v => v * 0.8));
-  const k0 = debris.length;
+  const k0 = debris.n;
   spawnDebris(x, y - 4, Math.round(10 + 8 * power), t.vx * 0.3);
-  for (let k = k0; k < debris.length; k++) { const d = debris[k]; d.vy *= 1.6; d.vx *= 1.15; d.sw *= 1.4; d.sh *= 1.3; if (landUnitR() < 0.35) d.col = own; }
+  { const D = debris.c; for (let k = k0; k < debris.n; k++) { D.vy[k] *= 1.6; D.vx[k] *= 1.15; D.sw[k] *= 1.4; D.sh[k] *= 1.3; if (landUnitR() < 0.35) D.col[k] = debris.intern(own); } }
   gridExplosion(x, y, 50 * power, 300 * power);
 }
 function killTank(t) {
@@ -47961,7 +48241,7 @@ function rotorWash(h, dt) {
   while (h.bitT >= 1) {
     h.bitT -= 1;
     const side = landUnitR() < 0.5 ? -1 : 1, x0 = h.x + side * luRnd(0, 30), gy = landBelow(x0, gm - 12);
-    earthGrains.push({ x: x0, y: gy - 1.5, vx: side * luRnd(90, 240) * k, vy: -luRnd(30, 120) * k, c: ['#5a4030', '#6b4a2e', '#4a3424'][(landUnitR() * 3) | 0], light: false, big: landUnitR() < 0.2, t: 0, rest: 0, life: luRnd(1.4, 2.6) });
+    earthGrains.addRow({ x: x0, y: gy - 1.5, vx: side * luRnd(90, 240) * k, vy: -luRnd(30, 120) * k, c: ['#5a4030', '#6b4a2e', '#4a3424'][(landUnitR() * 3) | 0], light: false, big: landUnitR() < 0.2, t: 0, rest: 0, life: luRnd(1.4, 2.6) });
     if (landUnitR() < 0.35) bladeFly(x0, gy - 2, side * luRnd(60, 160) * k, -luRnd(70, 170) * k);
   }
   // the trees behind lose leaves to it near the ground
@@ -48009,24 +48289,29 @@ function planeLandWash(pl, dt, size = 1) {
 }
 /* ---- leaves (user Oct 25): torn off the trees behind by a helicopter or a low plane, and blown about now and then
    by the wind - small pixels in the trees' own greens, fluttering as they drift and settling on the ground ---- */
-const leaves = [];
+// (Nov 1) a column table, made by its row maker (addRow); rest: lying on the ground; blade: a blade of grass (lift: how long it
+// rides the gust up); c: its colour. Drawn by a pixel layer (LEAF_L)
+const leaves = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', ph: 'f64', c: 'str', t: 'f64', life: 'f64', rest: 'u8', blade: 'u8', lift: 'f64' });
 // (engine stage 3: the leaves and blades, the ground hits' spike bursts and flash, and the earth grains draw from their own
 // random source, and are tables: a burst's palette found again from its ground (mat); its spikes' grains kept (depth 6))
 const landBitsR = sysRng('landBits'), landBitsRnd = (a, b) => a + landBitsR() * (b - a);
-defTable('leaves', () => leaves, { net: false, make: () => ({}) });
-defTable('earthGrains', () => earthGrains, { net: false, make: () => ({}) });
+// (Nov 1) the earth grains (shedSpike, stepEarthGrains): a column table, made by its row maker (addRow); light: a pale dusty one;
+// big; rest: lying; hop: it has hopped once. Drawn by a pixel layer (EGRAIN_L)
+const earthGrains = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', c: 'str', light: 'u8', big: 'u8', t: 'f64', rest: 'u8', life: 'f64', hop: 'u8' });
+defTable('leaves', null, { cols: leaves, drawn: ['x', 'y', 't', 'life', 'c', 'blade', 'ph'], rows: rows => leaves.plainOfRows(rows), net: false });
+defTable('earthGrains', null, { cols: earthGrains, drawn: ['x', 'y', 't', 'life', 'c', 'light', 'big', 'rest'], rows: rows => earthGrains.plainOfRows(rows), net: false });
 defTable('spikeBursts', () => spikeBursts, { net: false, make: () => ({}), depth: 6, skip: ['P'], after: arr => { for (const B of arr) B.P = SPIKE_PAL[B.mat] || SPIKE_PAL.dirt; } });
 const LEAF_COLS = ['#54724e', '#8ba34f', '#2a474b', '#6f8c47'];
 function leafFly(x, y, vx, vy) {
-  if (SIM_ONLY || leaves.length > 260) return;
-  leaves.push({ x, y, vx, vy, ph: landBitsR() * 6, c: LEAF_COLS[(landBitsR() * 4) | 0], t: 0, life: landBitsRnd(5, 9), rest: 0 });
+  if (SIM_ONLY || leaves.n > 260) return;
+  leaves.addRow({ x, y, vx, vy, ph: landBitsR() * 6, c: LEAF_COLS[(landBitsR() * 4) | 0], t: 0, life: landBitsRnd(5, 9), rest: 0 });
 }
 // a blade of grass torn up by a rotor's wash: carried up and out on the air, tumbling (a short green stroke that
 // turns as it goes), then drifting down
 const BLADE_COLS = ['#a8d654', '#70a838', '#8cc048', '#5a8a2e'];
 function bladeFly(x, y, vx, vy) {
-  if (SIM_ONLY || leaves.length > 320) return;
-  leaves.push({ x, y, vx, vy, ph: landBitsR() * 6, c: BLADE_COLS[(landBitsR() * 4) | 0], t: 0, life: landBitsRnd(2.5, 4.5), rest: 0, blade: true, lift: landBitsRnd(0.6, 1.1) });
+  if (SIM_ONLY || leaves.n > 320) return;
+  leaves.addRow({ x, y, vx, vy, ph: landBitsR() * 6, c: BLADE_COLS[(landBitsR() * 4) | 0], t: 0, life: landBitsRnd(2.5, 4.5), rest: 0, blade: true, lift: landBitsRnd(0.6, 1.1) });
 }
 function stepLeaves(dt) {
   const wind = E.windU || 0;
@@ -48035,10 +48320,11 @@ function stepLeaves(dt) {
     const v = cam.view[landBitsR() < 0.5 ? 0 : 1], x = v.l + landBitsR() * halfWorldW(v.z);
     leafFly(x, landTop(clamp(x, 0, WORLD_W - 1)) - landBitsRnd(40, 140), wind * 0.4, landBitsRnd(-10, 10));
   }
-  for (let i = leaves.length - 1; i >= 0; i--) {
-    const f = leaves[i];
+  const f = LUCUR.f || (LUCUR.f = leaves.cursor());   // (Nov 1: the rows through an accessor - their sums as they were)
+  for (let i = leaves.n - 1; i >= 0; i--) {
+    f.i = i;
     f.t += dt;
-    if (f.t > f.life) { leaves.splice(i, 1); continue; }
+    if (f.t > f.life) { leaves.drop(i); continue; }
     if (f.rest) continue;
     f.ph += dt * 6;
     f.vx += (wind * 0.5 - f.vx) * dt * 0.9 + Math.sin(f.ph) * 30 * dt;
@@ -48047,24 +48333,47 @@ function stepLeaves(dt) {
     f.x += f.vx * dt; f.y += f.vy * dt;
     if (landSolid(f.x, f.y)) { f.rest = 1; f.y = landBelow(f.x, f.y - 6) - 0.5; f.life = Math.min(f.life, f.t + 3); }
   }
+  leaves.sweep();
 }
-function drawLeaves(x0, x1) {
-  if (!leaves.length) return;
-  const s = Math.max(1, Math.round(1.25 * SV));
-  for (const f of leaves) {
-    if (f.x < x0 - 10 || f.x > x1 + 10) continue;
-    C.globalAlpha = Math.min(1, (f.life - f.t) / 1.5); C.fillStyle = f.c;
-    const X = Math.floor(PX(f.x) / s) * s, Y = Math.floor(PY(f.y) / s) * s;
-    if (f.blade) {
-      // (a blade: a stroke three pixels long, turning end over end)
-      const a = Math.floor(((f.ph % 6.283) + 6.283) % 6.283 / 1.571);
-      if (a === 0) C.fillRect(X, Y - s, s, s * 3); else if (a === 2) C.fillRect(X - s, Y, s * 3, s);
-      else { C.fillRect(X, Y, s, s); C.fillRect(X + (a === 1 ? s : -s), Y - s, s, s); C.fillRect(X - (a === 1 ? s : -s), Y + s, s, s); }
-      continue;
+const LUCUR = {};
+/* (Nov 1) THE LEAVES' AND THE EARTH GRAINS' PIXEL LAYERS (40-zzzz-layers.js): their rectangles worked out by the loops that
+   painted them, each in its own colour at its own alpha (packed as GLCtx packs a fill style at a global alpha: pxRGBA). One more
+   than 10 outside the view isn't drawn; the fill style is left as the loop left it (its last), the alpha at 1 */
+const LAND_RECT = { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', rgba: 'view rgba' };
+const LAND_RECT_GL = `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = -1; return true; }
+`;
+// (a colour text at an alpha as fillRect would pack it: GLCtx's globalAlpha setter keeps the alpha it had when given one outside
+// 0..1, as here; 0: not drawn)
+function pxRGBA(css, a, keep) { if (a >= 0 && a <= 1) keep.ga = a; return glPack(glParse(css), keep.ga); }
+const LEAF_L = pxLayer({
+  table: leaves, cols: LAND_RECT, pal: [],
+  view: (T, own, n, x0, x1, L) => {
+    const s = Math.max(1, Math.round(1.25 * SV)), keep = { ga: C.s.ga };
+    let m = 0, R = pxRoom(L, n * 3);
+    const put = (x, y, w, h, col) => { if (!(col >>> 24)) return; R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.rgba[m] = col; m++; };
+    for (const f of T.rows()) {
+      if (f.x < x0 - 10 || f.x > x1 + 10) continue;
+      const css = f.c, col = pxRGBA(css, Math.min(1, (f.life - f.t) / 1.5), keep); L.last = css;
+      const X = Math.floor(PX(f.x) / s) * s, Y = Math.floor(PY(f.y) / s) * s;
+      if (f.blade) {
+        // (a blade: a stroke three pixels long, turning end over end)
+        const a = Math.floor(((f.ph % 6.283) + 6.283) % 6.283 / 1.571);
+        if (a === 0) put(X, Y - s, s, s * 3, col); else if (a === 2) put(X - s, Y, s * 3, s, col);
+        else { put(X, Y, s, s, col); put(X + (a === 1 ? s : -s), Y - s, s, s, col); put(X - (a === 1 ? s : -s), Y + s, s, s, col); }
+        continue;
+      }
+      const wide = Math.abs(Math.sin(f.ph)) > 0.5;                     // (it turns as it flutters)
+      put(X, Y, wide ? s * 2 : s, s, col);
     }
-    const wide = Math.abs(Math.sin(f.ph)) > 0.5;                       // (it turns as it flutters)
-    C.fillRect(X, Y, wide ? s * 2 : s, s);
-  }
+    return m;
+  },
+  rect: LAND_RECT_GL,
+});
+function drawLeaves(x0, x1) {
+  if (!leaves.n) return;
+  LEAF_L.last = null;
+  pxDraw(LEAF_L, x0, x1);
+  if (LEAF_L.last !== null) C.fillStyle = LEAF_L.last;
   C.globalAlpha = 1;
 }
 // (user Oct 25) hit once: white smoke from the engine; near the end: black smoke and fire. It rises - the rotor's
@@ -48089,7 +48398,7 @@ function heliMG(h) {
   const [mx, my] = heliPoint(h, heliHalf() * 0.9, 8);
   const ux = Math.cos(el) * h.facing, uy = -Math.sin(el), sp = MG_SPEED * (0.8 + g.power * 0.35), spr = luRnd(-0.02, 0.02);
   bullets.push({ x: mx, y: my, vx: (ux - uy * spr) * sp + h.vx, vy: (uy + ux * spr) * sp + h.vy, owner: h.id, age: 0 });
-  flashes.push({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
+  flashes.addRow({ x: mx, y: my, r: 3, life: 0, max: 0.04 });
   sound('mg', mx);
 }
 function heliRocket(h) {
@@ -48263,7 +48572,7 @@ function planeGroundCrash(pl, x, y, deck) {
   sound('explosion', x, 1.3); shakeAt(10, x);
   guysNear(x, fy, 50);
   if (!SIM_ONLY) {
-    flashes.push({ x, y: fy - 10, r: 46, life: 0, max: 0.2 });
+    flashes.addRow({ x, y: fy - 10, r: 46, life: 0, max: 0.2 });
     // the fireball: a big hot heap rolling up and forward with the plane's speed
     for (let i = 0; i < 130; i++) {
       const a = -Math.PI / 2 + rnd(-1.4, 1.4), sp = Math.pow(Math.random(), 0.55) * 170;
@@ -48275,9 +48584,9 @@ function planeGroundCrash(pl, x, y, deck) {
     for (let i = 0; i < 26; i++) spawnSmoke(x + rnd(-16, 16), fy - rnd(10, 46), { kind: 'blast', dark: 0, r: rnd(6, 10), grow: rnd(4, 7), lift: 46, vx: rnd(-12, 12) + pl.vx * 0.05, vy: rnd(-70, -25), life: rnd(10, 15), alpha: rnd(0.65, 0.85) });
     spikeBurst(x, fy, 0.7, groundAt(x, fy));
     // bits of the plane thrown out
-    const k0 = debris.length; spawnDebris(x, fy - 6, 14, pl.vx * 0.3);
+    const k0 = debris.n; spawnDebris(x, fy - 6, 14, pl.vx * 0.3);
     const tc = (img.teamCol && img.teamCol[pl.id]) || [150, 60, 50];
-    for (let k = k0; k < debris.length; k++) if (Math.random() < 0.4) debris[k].col = css3(tc.map(v => v * 0.7));
+    for (let k = k0; k < debris.n; k++) if (Math.random() < 0.4) debris.c.col[k] = debris.intern(css3(tc.map(v => v * 0.7)));
   }
   gridExplosion(x, fy, 80, 420);
   // hurt what's close (not the plane's own side)
@@ -48363,7 +48672,7 @@ function spikeBurst(x, y, size, mat) {
   // the clods: dark lumps of earth thrown out with it (as in the user's picture)
   for (let k = 0; k < 10 + 10 * size; k++) {
     const a = -Math.PI / 2 + landBitsRnd(-1, 1), v = landBitsRnd(140, 380) * (0.7 + 0.4 * size);
-    debris.push({ x: x + landBitsRnd(-6, 6), y: y - 2, vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: landBitsRnd(0, 6), w: landBitsRnd(-8, 8), sw: landBitsRnd(2, 4.2), sh: landBitsRnd(2, 3.6), col: css3(P.foot.map(c => c * landBitsRnd(0.75, 1.1))), state: 0, bub: 0, seed: landBitsR() * 6, age: 0, clod: true });
+    debrisRow({ x: x + landBitsRnd(-6, 6), y: y - 2, vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: landBitsRnd(0, 6), w: landBitsRnd(-8, 8), sw: landBitsRnd(2, 4.2), sh: landBitsRnd(2, 3.6), col: css3(P.foot.map(c => c * landBitsRnd(0.75, 1.1))), state: 0, bub: 0, seed: landBitsR() * 6, age: 0, clod: true });
   }
 }
 function groundFlash(x, y, power) {
@@ -48372,11 +48681,10 @@ function groundFlash(x, y, power) {
   gridExplosion(x, y, 50 * power, 300 * power);
   guysNear(x, y, 40);
   if (SIM_ONLY) return;
-  flashes.push({ x, y: y - 6, r: 22 * power, life: 0, max: 0.12 });
-  for (let i = 0; i < 26 * power; i++) { const a = -Math.PI / 2 + landBitsRnd(-1.3, 1.3), sp = Math.pow(landBitsR(), 0.6) * 120 * power; spawnFlame(x + landBitsRnd(-4, 4), y - landBitsRnd(0, 5), Math.cos(a) * sp, Math.sin(a) * sp - 20, landBitsRnd(1.2, 1.5), landBitsRnd(3, 5.5) * (0.7 + 0.3 * power), landBitsRnd(1.8, 2.6)); flames[flames.length - 1].clean = true; }
+  flashes.addRow({ x, y: y - 6, r: 22 * power, life: 0, max: 0.12 });
+  for (let i = 0; i < 26 * power; i++) { const a = -Math.PI / 2 + landBitsRnd(-1.3, 1.3), sp = Math.pow(landBitsR(), 0.6) * 120 * power; spawnFlame(x + landBitsRnd(-4, 4), y - landBitsRnd(0, 5), Math.cos(a) * sp, Math.sin(a) * sp - 20, landBitsRnd(1.2, 1.5), landBitsRnd(3, 5.5) * (0.7 + 0.3 * power), landBitsRnd(1.8, 2.6)); flameLast().clean = true; }
   spawnSparks(x, y - 3, 10 * power, 240);
 }
-const earthGrains = [];
 function shedSpike(B, S) {
   if (SIM_ONLY) return;
   const g = S.g, P = B.P;
@@ -48390,7 +48698,7 @@ function shedSpike(B, S) {
       for (let c = 0; c < across; c++) {
         const ff = S.dark ? a.f * 0.55 : a.f, tip = ff > 0.55, col = ff < 0.2 ? P.foot : ff < 0.55 ? P.mid : P.tip;
         const k2 = 0.85 + 0.3 * landBitsR();
-        earthGrains.push({ x: a.x + (b.x - a.x) * t + (landBitsR() - 0.5) * w, y: a.y + (b.y - a.y) * t, vx: (a.vx + (b.vx - a.vx) * t) * 0.55 + landBitsRnd(-30, 30), vy: (a.vy + (b.vy - a.vy) * t) * 0.55 + landBitsRnd(-30, 20),
+        earthGrains.addRow({ x: a.x + (b.x - a.x) * t + (landBitsR() - 0.5) * w, y: a.y + (b.y - a.y) * t, vx: (a.vx + (b.vx - a.vx) * t) * 0.55 + landBitsRnd(-30, 30), vy: (a.vy + (b.vy - a.vy) * t) * 0.55 + landBitsRnd(-30, 20),
           c: 'rgb(' + Math.round(col[0] * k2) + ',' + Math.round(col[1] * k2) + ',' + Math.round(col[2] * k2) + ')', light: tip && landBitsR() < 0.75, big: ff < 0.25 && landBitsR() < 0.35, t: 0, rest: 0, life: tip ? landBitsRnd(1.2, 2.6) : landBitsRnd(7, 12) });
         n++;
       }
@@ -48398,12 +48706,12 @@ function shedSpike(B, S) {
   }
 }
 function stepEarthGrains(dt) {
-  if (!earthGrains.length) return;
-  const wind = windAt(WATER_Y - 200) * 0.6;
-  for (let i = earthGrains.length - 1; i >= 0; i--) {
-    const q = earthGrains[i];
+  if (!earthGrains.n) return;
+  const wind = windAt(WATER_Y - 200) * 0.6, q = LUCUR.q || (LUCUR.q = earthGrains.cursor());
+  for (let i = earthGrains.n - 1; i >= 0; i--) {
+    q.i = i;
     q.t += dt;
-    if (q.t > q.life) { earthGrains.splice(i, 1); continue; }
+    if (q.t > q.life) { earthGrains.drop(i); continue; }
     if (q.rest) continue;
     const dr = Math.exp(-(q.light ? 2.6 : 0.7) * dt);
     q.vx = (q.vx - wind) * dr + wind; q.vy = q.vy * dr + (q.light ? 110 : 380) * dt;
@@ -48416,18 +48724,31 @@ function stepEarthGrains(dt) {
     }
     q.x = nx; q.y = ny;
   }
+  earthGrains.sweep();
 }
+const EGRAIN_L = pxLayer({
+  table: earthGrains, cols: LAND_RECT, pal: [],
+  view: (T, own, n, x0, x1, L) => {
+    const PBw = Math.max(1, Math.round(1.25 * SV)), keep = { ga: C.s.ga };
+    let m = 0;
+    for (const q of T.rows()) {
+      if (q.x < x0 - 10 || q.x > x1 + 10) continue;
+      const left = q.life - q.t, a = q.light ? Math.min(1, left / 1.2) * 0.85 : Math.min(1, left / 2);
+      if (a <= 0.02) continue;
+      const css = q.c, col = pxRGBA(css, a, keep); L.last = css;
+      if (!(col >>> 24)) continue;
+      const s = q.big ? PBw * 3 : q.light ? PBw : PBw * 2;
+      own.x[m] = Math.floor(PX(q.x) / PBw) * PBw; own.y[m] = Math.floor(PY(q.y) / PBw) * PBw - (q.rest ? s - PBw : 0); own.w[m] = s; own.h[m] = s; own.rgba[m] = col; m++;
+    }
+    return m;
+  },
+  rect: LAND_RECT_GL,
+});
 function drawEarthGrains(x0, x1) {
-  if (!earthGrains.length) return;
-  const PBw = Math.max(1, Math.round(1.25 * SV));
-  for (const q of earthGrains) {
-    if (q.x < x0 - 10 || q.x > x1 + 10) continue;
-    const left = q.life - q.t, a = q.light ? Math.min(1, left / 1.2) * 0.85 : Math.min(1, left / 2);
-    if (a <= 0.02) continue;
-    C.globalAlpha = a; C.fillStyle = q.c;
-    const s = q.big ? PBw * 3 : q.light ? PBw : PBw * 2;
-    C.fillRect(Math.floor(PX(q.x) / PBw) * PBw, Math.floor(PY(q.y) / PBw) * PBw - (q.rest ? s - PBw : 0), s, s);
-  }
+  if (!earthGrains.n) return;
+  EGRAIN_L.last = null;
+  pxDraw(EGRAIN_L, x0, x1);
+  if (EGRAIN_L.last !== null) C.fillStyle = EGRAIN_L.last;
   C.globalAlpha = 1;
 }
 function stepSpikeBursts(dt) {
@@ -48828,7 +49149,7 @@ function renderLandObjects0() {
   guardDraw('drawSeaplanes', () => drawSeaplanes(x0, x1, 'air'));
   guardDraw('drawBlimps', () => drawBlimps(x0, x1));
   guardDraw('drawSpace', () => drawSpace(x0, x1, 'land'));                             // (OPEN WORLD: the stack, the orbiter, the satellites, the station)
-  for (const d of debris) if (d.state === 0 || d.state === 1) drawDebris(d, x0, x1);
+  { const S = debris.c.state; debSel(); for (let i = 0; i < debris.n; i++) if (S[i] === 0 || S[i] === 1) debSelAdd(debris, i); drawDebrisSel(x0, x1); }   // (45-draw-vehicles.js DEBRIS_L)
   drawDust(x0, x1);
   drawBirds(x0, x1);
   drawScreens(x0, x1);
