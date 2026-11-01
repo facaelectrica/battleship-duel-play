@@ -2963,6 +2963,12 @@ const teamCss = p => img.teamCol && img.teamCol[p] ? `rgb(${img.teamCol[p].join(
 // The minimap shows each player's latest shot as a flat line in their colour, traced as the shell flies.
 // It stays until that player fires again; five seconds after the shell is gone it fades away.
 const mapTracks = [null, null];
+// a point onto a shell's minimap line (its points a Float64Array, x y x y ...: a plain list from an older save taken as it is)
+function trackPush(tr, x, y) {
+  const a = tr.pts;
+  if (Array.isArray(a)) { a.push(x, y); return; }
+  const n = a.length, b = new Float64Array(n + 2); b.set(a); b[n] = x; b[n + 1] = y; tr.pts = b;
+}
 function mapMark() { }                                              // (splash marks are gone: the line says it all)
 function drawMiniMap() {
   const W = Math.round(ubw * 0.6), x0 = Math.round((ubw - W) / 2), y = Math.max(ui.top + (!ONEVIEW() ? 102 : 58), hudTop() + 44);     // wide enough to read; under the vehicle buttons
@@ -2976,7 +2982,7 @@ function drawMiniMap() {
     const tr = mapTracks[p];
     if (!tr) continue;
     const flying = shells.includes(tr.s) && !tr.s.under;
-    if (flying) { const n = tr.pts.length; if (tr.pts[n - 2] !== tr.s.x) tr.pts.push(tr.s.x, tr.s.y); }
+    if (flying) { const n = tr.pts.length; if (tr.pts[n - 2] !== tr.s.x) trackPush(tr, tr.s.x, tr.s.y); }
     else tr.done += frameDt;
     const a = tr.done < 5 ? 1 : 1 - (tr.done - 5);                  // five seconds, then a one-second fade
     if (a <= 0) { mapTracks[p] = null; continue; }
@@ -3441,8 +3447,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 477;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 22:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 478;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 22:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11518,9 +11524,11 @@ function stepShells(dt) {
   // the minimap's line for each player's latest shell: a new shot replaces that player's old line
   for (const s of shells) {
     if (s.under || s.owner < 0 || s.owner > 1) continue;
-    if (!s.track) { s.track = { pts: [s.x, s.y], s, done: 0 }; mapTracks[s.owner] = s.track; }
+    // (Oct 31, 80-fps work: the line's points a typed array - one value for the worker's snapshot to compare and send, not a
+    // list growing a point at a time, which sent the whole shell again as text every snapshot - 13-scope-minimap.js trackPush)
+    if (!s.track) { s.track = { pts: Float64Array.of(s.x, s.y), s, done: 0 }; mapTracks[s.owner] = s.track; }
     s.mmT = (s.mmT || 0) - dt;
-    if (s.mmT <= 0) { s.mmT = 0.04; s.track.pts.push(s.x, s.y); if (s.track.pts.length > 600) s.track.pts.splice(0, 2); }
+    if (s.mmT <= 0) { s.mmT = 0.04; trackPush(s.track, s.x, s.y); if (s.track.pts.length > 600) s.track.pts = s.track.pts.slice(2); }
   }
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
@@ -14325,12 +14333,92 @@ for (const k in SW_DRAW) {
 const swKindOf = v => { const ty = typeof v; return ty === 'number' ? 1 : ty === 'boolean' ? 4 : ty === 'string' ? 2 : ty === 'undefined' || ty === 'function' ? 0 : v === null ? 5 : 3; };
 const SWK = { ks: [], kinds: [], first: [], ord: [] };
 const swKindMix = (was, kind) => was == null || was === kind ? kind : was === 5 && kind !== 3 ? kind : kind === 5 && was !== 3 ? was : 3;
+// (Oct 31, 80-fps work) THE GENERATED WALKS: for a list's drawn fields, a function reading each by its own name - the kinds
+// pass (swKeysOf) and the number columns (swColsOf), one walk over the things each instead of one a field. ?swgen=0: as before
+let SW_GEN = !/[?&]swgen=0/.test((typeof location !== 'undefined' && location.search) || '');
+const SW_KIND_OF = [null, 1, 2, 3, 4, 5];
+const swGenK = new Map(), swGenC = new Map();
+function swGenKinds(only) {
+  const key = only.join('\u0001'); let G = swGenK.get(key);
+  if (G) return G;
+  let b = 'for (let i = 0; i < n; i++) { const o = arr[i]; if (!o) continue; let v, ty, kd;\n';
+  only.forEach((k, j) => {
+    b += `v = o[${JSON.stringify(k)}]; ty = typeof v; kd = ty === 'number' ? 1 : ty === 'boolean' ? 4 : ty === 'string' ? 2 : ty === 'undefined' || ty === 'function' ? 0 : v === null ? 5 : 3;
+      if (kd) { if (first[${j}] < 0) first[${j}] = i; const w = kinds[${j}]; kinds[${j}] = w === 0 || w === kd ? kd : w === 5 && kd !== 3 ? kd : kd === 5 && w !== 3 ? w : 3; }\n`;
+  });
+  b += '}';
+  G = { f: new Function('arr', 'n', 'kinds', 'first', b), kinds: new Int8Array(only.length), first: new Int32Array(only.length) };
+  swGenK.set(key, G);
+  return G;
+}
+// the number and true/false columns of these fields (ks, kind 1 or 4 each), all in one walk: each column as swColOf makes it
+function swGenCols(arr, ks, kinds, bufs) {
+  const n = arr.length, m = ks.length, key = ks.join('\u0001');
+  let G = swGenC.get(key);
+  if (!G) {
+    let bb = 'for (let i = 0; i < n; i++) { const o = arr[i]; if (!o) continue; let v;\n';
+    let fb = 'for (let i = 0; i < n; i++) { const o = arr[i]; let v;\n';
+    ks.forEach((k, j) => {
+      bb += `v = o[${JSON.stringify(k)}]; if (!big[${j}] && typeof v === 'number' && (v >= 16777216 || v <= -16777216) && Number.isInteger(v)) big[${j}] = 1;\n`;
+      fb += `v = o ? o[${JSON.stringify(k)}] : undefined; if (typeof v === 'number') cols[${j}][i] = v; else if (typeof v === 'boolean') cols[${j}][i] = v ? 1 : 0; else if (v === null) (nul[${j}] || (nul[${j}] = mk(n)))[i] = 1; else (miss[${j}] || (miss[${j}] = mk(n)))[i] = 1;\n`;
+    });
+    bb += '}'; fb += '}';
+    G = { big: new Function('arr', 'n', 'big', bb), fill: new Function('arr', 'n', 'cols', 'miss', 'nul', 'mk', fb) };
+    swGenC.set(key, G);
+  }
+  const big = new Uint8Array(m);
+  if (SWF32) G.big(arr, n, big);
+  const cols = new Array(m), miss = new Array(m).fill(null), nul = new Array(m).fill(null);
+  for (let j = 0; j < m; j++) cols[j] = swNew(SWF32 && !big[j] ? Float32Array : Float64Array, n);
+  G.fill(arr, n, cols, miss, nul, swGenMk);
+  const out = new Array(m);
+  for (let j = 0; j < m; j++) {
+    bufs.push(cols[j].buffer); if (miss[j]) bufs.push(miss[j].buffer); if (nul[j]) bufs.push(nul[j].buffer);
+    out[j] = kinds[j] === 4 ? { b: cols[j], m: miss[j], z: nul[j] } : { f: cols[j], m: miss[j], z: nul[j] };
+  }
+  return out;
+}
+const swGenMk = n => swNew(Uint8Array, n);
+// (tests: every effect list's drawn fields both ways - the generated walks and the plain ones - compared value by value)
+if (typeof self !== 'undefined') self.__swGenCheck = () => {
+  const out = {}, f32 = SWF32; SWF32 = true;
+  try {
+    for (const k of SW_COLS) {
+      const t = TABLES[k], dr = SW_DRAWK[k]; if (!t || !dr || t.snapCols) continue;
+      const arr = swInView(t.list(), false);
+      SW_GEN = false; const kA = swKeysOf(arr, t.skip, dr.top); SW_GEN = true; const kB = swKeysOf(arr, t.skip, dr.top);
+      const same = [...kA].join() === [...kB].join(); let bad = same ? 0 : 1, cols = 0;
+      const ks = [], kd = []; for (const [q, kind] of kB) if (kind === 1 || kind === 4) { ks.push(q); kd.push(kind); }
+      if (ks.length && arr.length) {
+        const D = swGenCols(arr, ks, kd, []);
+        ks.forEach((q, j) => { const a = swColOf(arr, q, kd[j], [], new Map(), []), b = D[j]; cols++;
+          for (const f of ['f', 'b', 'm', 'z']) { const x = a[f], y = b[f]; if (!x !== !y) { bad++; continue; } if (!x) continue; if (x.constructor !== y.constructor || x.length !== y.length) { bad++; continue; } for (let i = 0; i < x.length; i++) if (!Object.is(x[i], y[i])) { bad++; break; } } });
+      }
+      out[k] = { n: arr.length, keys: kB.size, cols, bad };
+    }
+  } finally { SWF32 = f32; SW_GEN = true; }
+  return out;
+};
 // the fields of the things in `arr` and each one's kind (1 number, 4 boolean, 2 string, 3 other or mixed); only: these fields
 function swKeysOf(arr, skip, only) {
   const n = arr.length, keys = new Map();
   // (60-fps chat, Oct 31: the named fields, a field at a time - its kind over all the things in one pass, no table looked up a
   // value; the fields then in the order the table would have met them (the first thing that has each, then the names' order).
   // A long fight's trails - thousands of pieces, their points - spent ~4 ms a snapshot here)
+  if (only && SW_GEN) {
+    if (!Array.isArray(only)) only = only._arr || (only._arr = [...only]);   // (a set of names: as a list, in its order)
+    // (Oct 31, 80-fps work: the same pass made once for these names - each field read by its own name, one walk over the things
+    // for all of them; the same kinds and first places, field by field, as the walk a field at a time below)
+    const G = swGenKinds(only), m = only.length, kinds = G.kinds, first = G.first;
+    kinds.fill(0); first.fill(-1);
+    G.f(arr, n, kinds, first);
+    const ks = SWK.ks, kk = SWK.kinds, ff = SWK.first; ks.length = kk.length = ff.length = 0;
+    for (let q = 0; q < m; q++) if (first[q] >= 0) { ks.push(only[q]); kk.push(SW_KIND_OF[kinds[q]]); ff.push(first[q] * 1024 + q); }
+    const ord = SWK.ord; ord.length = 0; for (let j = 0; j < ks.length; j++) ord.push(j);
+    ord.sort((a, b) => ff[a] - ff[b]);
+    for (const j of ord) keys.set(ks[j], kk[j]);
+    return keys;
+  }
   if (only) {
     const ks = SWK.ks, kinds = SWK.kinds, first = SWK.first; ks.length = kinds.length = first.length = 0;
     let q = 0;
@@ -14411,7 +14499,13 @@ function trSnapInto(C) { if (C && typeof C.n === 'number') trFill(trails, C); }
 function swColsOf(t, arr, strs, sIdx, bufs, draw, all) {
   const n = arr.length, keys = swKeysOf(arr, t.skip, draw ? draw.top : null);
   const C = { n, k: [], d: [] };
+  let pre = null;
+  if (draw && SW_GEN && n >= 32) {
+    const ks = [], kd = []; for (const [k, kind] of keys) if (kind === 1 || kind === 4) { ks.push(k); kd.push(kind); }
+    if (ks.length) { const D = swGenCols(arr, ks, kd, bufs); pre = new Map(); for (let j = 0; j < ks.length; j++) pre.set(ks[j], D[j]); }
+  }
   for (const [k, kind] of keys) {
+    if (pre && pre.has(k)) { C.k.push(k); C.d.push(pre.get(k)); continue; }
     if (kind === 1 || kind === 4 || kind === 2) { C.k.push(k); C.d.push(swColOf(arr, k, kind, strs, sIdx, bufs)); continue; }
     const nest = swNestOf(arr, k, draw ? draw.sub[k] : null, strs, sIdx, bufs);
     if (nest) { C.k.push(k); C.d.push({ nest }); continue; }
@@ -14710,8 +14804,8 @@ function swArraysInto(a) {
 }
 // ---- the worker's side: what it last sent, per table (row id -> its text; the order as text)
 const SWS = { rows: {}, order: {}, ms: 0, bytes: 0, n: 0, by: {}, tms: {} };
-if (typeof self !== 'undefined') self.__sws = () => ({ tms: SWS.tms, by: SWS.by, colB: SWS.colBytes, ms: SWS.ms });
-if (typeof self !== 'undefined') self.__swWhy = on => { if (on != null) { SWS.whyOn = !!on; SWS.why = {}; } return SWS.why; };
+if (typeof self !== 'undefined') self.__sws = () => ({ acc: SWS.acc, tms: SWS.tms, by: SWS.by, colB: SWS.colBytes, ms: SWS.ms });
+if (typeof self !== 'undefined') self.__swWhy = on => { if (on != null) { SWS.whyOn = !!on; SWS.why = {}; SWS.acc = {}; } return SWS.why; };
 function swSnapReset() { SWS.rows = {}; SWS.order = {}; }
 /* Rows without text (main chat 18:50: "typed columns ... rather than reusing ntbSnapshot's JSON"). A row is walked the way tblPlain
    walks it, into its LEAVES: each a key, its depth and kind (0 a plain value, 1 another thing - its id, 2 a small typed array,
@@ -14841,6 +14935,7 @@ function swSnapshot(full, drawn = !full) {
       (SWS.leaf || (SWS.leaf = {}))[k] = { u: U, i: I, f: F, o: co.some(x => x !== undefined) ? co : null };
     }
     SWS.tms[k] = performance.now() - tk;
+    if (SWS.whyOn) { const A = SWS.acc || (SWS.acc = {}); const q = A[k] || (A[k] = { t: 0, rows: 0, n: 0, whole: 0 }); q.t += SWS.tms[k]; q.rows += arr.length; q.n++; q.whole += ch.length; }
     const gone = []; for (const u of had.keys()) if (!here.has(u)) { had.delete(u); gone.push(u); }
     const oc = SWS.order[k] !== ord; SWS.order[k] = ord;
     if (!ch.length && !gone.length && !oc) { if (cu.length) SWS.by[k] = cu.length * 20; continue; }
