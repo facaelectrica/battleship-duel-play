@@ -1107,18 +1107,21 @@ const FISH_DEFS = {
 const SEA_INK = '#06101c';
 const deadFish = [];
 // a blast in the water stuns the fish around it: they're thrown outward, then float up belly first
+// (Nov 1: the schools and their fish are column tables - 05-game-state.js; each school's fish from last to first, as before)
 function killFishNear(x, y, r) {
-  for (const s of schools) {
-    if (Math.abs(s.x - x) > r + 60 || Math.abs(s.y - y) > r + 60) continue;
-    for (let i = s.fish.length - 1; i >= 0; i--) {
-      const f = s.fish[i], fx = f.x, fy = f.y, d = Math.hypot(fx - x, fy - y);
+  const S = schools.c, F = seaFish.c, FI = schoolFish();
+  for (let si = 0; si < schools.n; si++) {
+    if (Math.abs(S.x[si] - x) > r + 60 || Math.abs(S.y[si] - y) > r + 60) continue;
+    for (let q = FI.at[si + 1] - 1; q >= FI.at[si]; q--) {
+      const j = FI.rows[q], fx = F.x[j], fy = F.y[j], d = Math.hypot(fx - x, fy - y);
       if (d > r) continue;
-      s.fish.splice(i, 1);
+      seaFish.drop(j);
       if (deadFish.length > 120) deadFish.shift();
       const push = (1 - d / r) * 160 + 30, ux = (fx - x) / (d || 1), uy = (fy - y) / (d || 1);
-      deadFish.push({ type: s.type, dir: f.face || s.dir, x: fx, y: fy, vx: ux * push, vy: uy * push, rot: 0, w: seaRnd(-8, 8), t: 0, fade: 1, surf: false });
+      deadFish.push({ type: schools.str(S.type[si]), dir: F.face[j] || S.dir[si], x: fx, y: fy, vx: ux * push, vy: uy * push, rot: 0, w: seaRnd(-8, 8), t: 0, fade: 1, surf: false });
     }
   }
+  seaFish.sweep();
   killBigNear(x, y, r * 0.4);                                     // (the sharks and whales in it killed too, user Oct 29 - 35-zz-sea-kills.js)
   for (const sh of sharks) if (Math.hypot(sh.x - x, sh.y - y) < r * 1.5 && !sh.turn) sh.dir = sh.x < x ? -1 : 1;   // the others turn away
 }
@@ -1879,7 +1882,34 @@ const smoke = new ColTable(SMOKE_FIELDS);
 const SMOKE_DRAWN = ['x', 'y', 'r', 'age', 'life', 'alpha', 'dark', 'mist', 'quick', 'fam', 'src', 'fadeFrom', 'keep', 'kill', 'lonely', 'link', 'lumpy', 'prev', 'hd0', 'hd1', 'hd2'];
 // (the shells' trails: a column table, a piece a row - 47-render-overlays.js trFields; `trails.length` is how many pieces)
 const trails = new ColTable(trFields());
-let schools = [], sharks = [], whales = [], plants = [];
+let sharks = [], whales = [], plants = [];
+/* (Nov 1) THE SCHOOLS OF FISH AND THEIR FISH: two column tables. A school's row (its id sid): its kind (type), where it is and goes,
+   its range (area: a fish area's id, NaN the sea's - 50-zz-nature.js), story fishing's count before it was fished (n0, NaN none)
+   and last refill (backT), the scheduler's own (_sa, _sk - 36-zz-regions.js schedStep). A fish's row: its school's id, its place
+   in the school (dx, dy), its wander (ph), where it is (x, y: NaN until its first step), its way (vx, vy, face) and its scare.
+   The fish table is in the order fish were made (a fish back from the kraken or a refill is a new row at the end): a school's
+   fish, its rows in that order - the order its list had. schoolFish() lists them per school, once a step or a drawing */
+const schools = new ColTable({ sid: 'id', type: 'str', x: 'f64', y: 'f64', dir: 'f64', speed: 'f64', turnT: 'f64', flee: 'f64', vy: 'f64', area: 'f64 NaN', n0: 'f64 NaN', backT: 'f64', _sa: 'f64', _sk: 'f64 NaN' });
+const seaFish = new ColTable({ fid: 'id', school: 'ref', dx: 'f64', dy: 'f64', ph: 'f64', x: 'f64 NaN', y: 'f64 NaN', vx: 'f64', vy: 'f64', face: 'f64', scare: 'f64' });
+// each school's fish rows, in their order: rows[at[i] .. at[i + 1] - 1] are school row i's (a fish whose school is gone: in none)
+const SFI = { at: new Int32Array(17), rows: new Int32Array(16), of: new Int32Array(16) };
+function schoolFish() {
+  const n = schools.n, m = seaFish.n, S = seaFish.c.school;
+  if (SFI.at.length < n + 1) SFI.at = new Int32Array(n * 2 + 1);
+  if (SFI.rows.length < m) { SFI.rows = new Int32Array(m * 2); SFI.of = new Int32Array(m * 2); }
+  const at = SFI.at, of = SFI.of; at.fill(0, 0, n + 1);
+  for (let j = 0; j < m; j++) { const i = schools.row(S[j]); of[j] = i; if (i >= 0) at[i + 1]++; }
+  for (let i = 0; i < n; i++) at[i + 1] += at[i];
+  const put = SFI.put || (SFI.put = []); put.length = n; for (let i = 0; i < n; i++) put[i] = at[i];
+  for (let j = 0; j < m; j++) { const i = of[j]; if (i >= 0) SFI.rows[put[i]++] = j; }
+  return SFI;
+}
+// a school's row made: its fields, then its fish (each { dx, dy, ph, ... }) as rows of its own; its place
+function schoolAdd(o, fish) {
+  const i = schools.addRow(o), sid = schools.c.sid[i];
+  for (const f of fish) seaFish.addRow(Object.assign({ school: sid }, f));
+  return i;
+}
 const guns = [0, 1].map(() => ({ elev: 28, power: 0.55, reload: 0, aimShow: 0, press: 0, rk: [0, 0], pk: [0, 0] }));
 const tguns = [0, 1].map(() => ({ elev: 22, power: 0.5, reload: 0, aimShow: 0, press: 0, mg: 0 }));
 // (LAND TEST: the helicopter's nose gun has its own angle and power, so turning it never moves the tank's turret)
@@ -2600,19 +2630,17 @@ function buildWorld(restore) {
 // Sea life, plants and clouds
 function buildSea() {
   const types = Object.keys(FISH_DEFS);
-  schools = [];
+  schools.length = 0; seaFish.length = 0;                   // (Nov 1: column tables - 05-game-state.js)
   const nSchools = Math.round(19 * seaW() / (VIEW_W * 3));          // 20% more than before
   for (let i = 0; i < nSchools; i++) {
     const type = types[i % types.length];
     const n = type === 'sardine' ? 10 + Math.floor(hash(i * 3.7) * 10) : 3 + Math.floor(hash(i * 7.3) * 6);
     const fish = [];
     for (let k = 0; k < n; k++) fish.push({ dx: seaRnd(-1, 1) * (16 + n * 3), dy: seaRnd(-1, 1) * (8 + n), ph: seaR() * 6.28 });
-    schools.push({
-      type, x: seaXAt(seaRnd(0.05, 0.95)), y: 0, dir: seaR() < 0.5 ? 1 : -1,
-      speed: seaRnd(8, 18), turnT: seaRnd(6, 20), flee: 0, fish, vy: 0,
-    });
-    const s = schools[schools.length - 1]; s.y = seaRnd(WATER_Y + 60, Math.min(seabedY(s.x), SEABED_DEEP + 600) - 40);   // (in the lit water: not born down in the drawn floor's pit)
-    for (const f of s.fish) { f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; f.vx = s.dir * s.speed; f.vy = 0; f.face = s.dir; }
+    const s = { type, x: seaXAt(seaRnd(0.05, 0.95)), y: 0, dir: seaR() < 0.5 ? 1 : -1, speed: seaRnd(8, 18), turnT: seaRnd(6, 20), flee: 0, vy: 0 };
+    s.y = seaRnd(WATER_Y + 60, Math.min(seabedY(s.x), SEABED_DEEP + 600) - 40);   // (in the lit water: not born down in the drawn floor's pit)
+    for (const f of fish) { f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; f.vx = s.dir * s.speed; f.vy = 0; f.face = s.dir; }
+    schoolAdd(s, fish);
   }
   natureSchools();                                         // (and the fish areas' own - 50-zz-nature)
   sharks = [];
@@ -3922,8 +3950,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 521;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 14:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 522;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 14:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13251,7 +13279,7 @@ function shock(x, y, power, faint, len = 0) {
   if (shocks.length > 40) { shocks.drop(0); shocks.sweep(); }
   shocks.addRow({ x, y: Math.max(y, WATER_Y - 2), r: 4, max: 70 + 130 * power, speed: 75 + 45 * power, life: 0, power, faint: !!faint, seed: ptR() * 100, len });
 }
-function scareFish(x, y, r) { for (const s of schools) if (Math.abs(s.x - x) < r && Math.abs(s.y - y) < r) { s.flee = 2.5; s.dir = s.x < x ? -1 : 1; } }
+function scareFish(x, y, r) { const S = schools.c; for (let i = 0; i < schools.n; i++) if (Math.abs(S.x[i] - x) < r && Math.abs(S.y[i] - y) < r) { S.flee[i] = 2.5; S.dir[i] = S.x[i] < x ? -1 : 1; } }
 on('splash', e => scareFish(e.x, e.y + 40, 160), 'fish', 10);   // (engine stage 3: a splash - 36-zz-events.js)
 on('lost', e => { if (e.kind === 'ship') scareFish(e.o.x, WATER_Y + 120, 400); }, 'fish', 20);   // (a battleship going down)
 // (engine stage 3) 'scare' {x, y, r, kind: 'fish'|'birds'|'both'} (36-zz-events.js): the fish within r flee (depth charges,
@@ -13264,10 +13292,10 @@ function stepShocks(dt) {
     w.life += dt; w.r += w.speed * dt; w.speed *= 1 - 0.55 * dt;
     if (w.r >= w.max || w.life > 8) { shocks.drop(i); continue; }
     const fade = 1 - w.r / w.max, band = 14;
-    for (const s of schools) {
-      const d = Math.hypot(s.x - w.x, s.y - w.y);
-      if (Math.abs(d - w.r) < band + 30 && !w.faint) { s.flee = Math.max(s.flee, 1.8); s.dir = s.x < w.x ? -1 : 1; }
-    }
+    { const S = schools.c; for (let i = 0; i < schools.n; i++) {
+      const d = Math.hypot(S.x[i] - w.x, S.y[i] - w.y);
+      if (Math.abs(d - w.r) < band + 30 && !w.faint) { S.flee[i] = Math.max(S.flee[i], 1.8); S.dir[i] = S.x[i] < w.x ? -1 : 1; }
+    } }
     for (const p of plants) {
       if (Math.abs(p.x - w.x) > w.r + band) continue;
       const d = Math.hypot(p.x - w.x, seabedY(p.x) - w.y);
@@ -13500,7 +13528,10 @@ function stepSea(dt) {
   // region's tier - within a screen of a view every frame step as before, within 3 screens every 4th frame, further twice a
   // second, with the time since. Pinned (every step wherever it is): one fleeing (a threat near, a blast, a scare)
   const t0 = performance.now(), S = schedSystem('seaLife', 0.5, 1 / 15, true);
-  for (const s of schools) schedStep(S, s, s.x, dt, h => stepSchool(s, h, T, top), s.flee > 0);
+  // (Nov 1: the schools' rows through their table's accessor - ColTable.at, the scheduler's _sa / _sk in its columns; their
+  // fish by schoolFish's list - column tables)
+  { const FI = schoolFish();
+    for (let i = 0; i < schools.n; i++) { const s = schools.at(i); schedStep(S, s, s.x, dt, h => stepSchool(s, h, T, top, FI, i), s.flee > 0); } }
   for (const k of sharks) schedStep(S, k, k.x, dt, h => stepShark(k, h, T, top), k.flee > 0);
   // the whales (user Oct 27: "have 3 whales"): slow, deep, each its own way; a slow turn now and then, at the sea's
   // ends, and away from a boat or a blast close by (they hurry a little, never dart); they drift up and down a long way
@@ -13510,14 +13541,17 @@ function stepSea(dt) {
   S.t += performance.now() - t0;
 }
 
-function stepSchool(s, dt, T, top) {
+const SEA_CUR = {};
+function stepSchool(s, dt, T, top, FI, si) {
+    const f = SEA_CUR.f || (SEA_CUR.f = seaFish.cursor()), o = SEA_CUR.o || (SEA_CUR.o = seaFish.cursor()), F0 = FI.at[si], n = FI.at[si + 1] - F0;
     s.turnT -= dt;
     // the nearest threat: the school bolts away from it (faster the closer), the fish nearest it dart outward
     for (let i = 0; i < T.length; i += 5) {
       const tx = T[i], ty = T[i + 1], R = T[i + 2], k = T[i + 3];
       if (Math.abs(tx - s.x) > R + 90 || Math.abs(ty - s.y) > R + 60) continue;
       s.flee = Math.max(s.flee, 1.4 + 1.6 * k); s.dir = s.x < tx ? -1 : 1; s.vy = (s.y < ty ? -1 : 1) * 30 * k;
-      for (const f of s.fish) {
+      for (let j = 0; j < n; j++) {
+        f.i = FI.rows[F0 + j];
         const dx = f.x - tx, dy = f.y - ty, d = Math.hypot(dx, dy) || 1;
         if (d < R && (f.scare || 0) <= 0) { const imp = (190 + 120 * seaR()) * k * (1 - d / R * 0.5); f.vx += dx / d * imp; f.vy += dy / d * imp * 0.7; f.scare = seaRnd(0.5, 0.9); }
       }
@@ -13525,7 +13559,7 @@ function stepSchool(s, dt, T, top) {
     if (s.turnT <= 0 && s.flee <= 0) { s.dir *= -1; s.turnT = seaRnd(8, 24); }
     // (user Oct 31: fish areas) one rule for every school: it keeps to its range - a fish area's box (natureRange,
     // 50-zz-nature) or, for the world's own, its own sea (the one it's in - SEAS)
-    const rg = s.area != null ? natureRange(s.area) : null, hs = rg ? -1 : seaSpanOf(s.x), rx0 = rg ? rg.x0 + 30 : SEAS.c.lo[hs] + 60, rx1 = rg ? rg.x1 - 30 : SEAS.c.hi[hs] - 60;
+    const rg = s.area === s.area ? natureRange(s.area) : null, hs = rg ? -1 : seaSpanOf(s.x), rx0 = rg ? rg.x0 + 30 : SEAS.c.lo[hs] + 60, rx1 = rg ? rg.x1 - 30 : SEAS.c.hi[hs] - 60;
     if (s.x < rx0) s.dir = 1; else if (s.x > rx1) s.dir = -1;
     s.flee = Math.max(0, s.flee - dt);
     const sp = s.speed * (1 + 4 * Math.min(1, s.flee));
@@ -13534,18 +13568,18 @@ function stepSchool(s, dt, T, top) {
     s.y = clamp(s.y + s.vy * dt, rg ? Math.max(top, rg.y0 + 20) : top, Math.max(rg ? Math.max(top, rg.y0 + 20) : top, Math.min(rg ? rg.y1 - 20 : Infinity, seabedY(s.x) - 30)));
     // each fish: pulled toward its place in the school (a spring), damped, a little wander, a top speed; it
     // turns to face the way it's swimming
-    const spread = 1 + 0.8 * Math.min(1, s.flee), n = s.fish.length;
+    const spread = 1 + 0.8 * Math.min(1, s.flee);
     for (let j = 0; j < n; j++) {
-      const f = s.fish[j];
-      if (f.x === undefined) { f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; f.vx = 0; f.vy = 0; f.face = s.dir; }
+      f.i = FI.rows[F0 + j];
+      if (f.x !== f.x) { f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; f.vx = 0; f.vy = 0; f.face = s.dir; }
       f.scare = (f.scare || 0) - dt;
       const wx = s.x + f.dx * 0.6 * spread + Math.sin(time * 0.7 + f.ph) * 6, wy = s.y + f.dy * 0.6 * spread + Math.sin(time * 1.1 + f.ph * 1.7) * 3;
       const pull = f.scare > 0 ? 0.6 : 3.2;
       f.vx += ((wx - f.x) * pull + (s.dir * sp - f.vx) * 1.4) * dt;
       f.vy += ((wy - f.y) * pull - f.vy * 1.4) * dt;
       // (a neighbour too close: a nudge apart)
-      const o = s.fish[(j + 1) % n];
-      if (o && o !== f) { const ddx = f.x - o.x, ddy = f.y - o.y, dd = ddx * ddx + ddy * ddy; if (dd < 25 && dd > 0.01) { f.vx += ddx * 8 * dt; f.vy += ddy * 8 * dt; } }
+      o.i = FI.rows[F0 + (j + 1) % n];
+      if (n > 1) { const ddx = f.x - o.x, ddy = f.y - o.y, dd = ddx * ddx + ddy * ddy; if (dd < 25 && dd > 0.01) { f.vx += ddx * 8 * dt; f.vy += ddy * 8 * dt; } }
       const v = Math.hypot(f.vx, f.vy), vm = f.scare > 0 ? 320 : 40 + sp * 1.6;
       if (v > vm) { f.vx *= vm / v; f.vy *= vm / v; }
       f.x += f.vx * dt; f.y = clamp(f.y + f.vy * dt, top - 20, seabedY(f.x) - 8);
@@ -14248,7 +14282,12 @@ defTable('fleet', () => fleet, { perPlayer: 2, make: () => ({ ship: 0, sub: 0, p
    for them - each system still the one owner of its lists; their random sources are in their own files */
 // the sea life (36-sea-storm-weather, 07-world-build's buildSea): the schools (each with its fish), sharks and whales; the
 // stunned fish floating up (04-art-prep); the dead sharks and whales and their blood (35-zz-sea-kills)
-defTable('seaSchools', () => schools, { net: false, make: () => ({ type: 'sardine', x: 0, y: 0, dir: 1, speed: 10, turnT: 10, flee: 0, fish: [], vy: 0 }) });
+// (Nov 1: the schools and their fish as column tables - 05-game-state.js; a save from before, each school with its fish in it,
+// into both: the fish in their schools' order, each its school's id)
+defTable('seaSchools', null, { cols: schools, drawn: ['type', 'x', 'y', 'dir'], net: false, rows: rows => {
+  const fish = [], S = rows.map((d, k) => { for (const f of (d && d.fish) || []) fish.push(Object.assign({}, f, { school: k + 1 })); return Object.assign({}, d, { _sa: d && d.sa_, _sk: d && d.sk_ }); });
+  seaFish.fromPlainCols(seaFish.plainOfRows(fish)); return schools.plainOfRows(S); } });
+defTable('seaFish', null, { cols: seaFish, drawn: ['school', 'x', 'y', 'dx', 'dy', 'face'], net: false });
 defTable('seaSharks', () => sharks, { make: () => ({ x: 0, y: 0, dir: 1, speed: 20, turnT: 10, turn: 0, ph: 0 }) });
 defTable('seaWhales', () => whales, { make: () => ({ x: 0, y: 0, dir: 1, speed: 10, turnT: 30, turn: 0, ph: 0, dy: 0, flee: 0 }) });
 defTable('seaDeadFish', () => deadFish, { make: () => ({ type: 'sardine', dir: 1, x: 0, y: 0, vx: 0, vy: 0, rot: 0, w: 0, t: 0, fade: 1, surf: false }) });
@@ -15117,7 +15156,7 @@ const SW_LOCAL = new Set(['camera', 'smokeAir']);
    buys nothing and the per-row text is the cost. Whole each time, field by field: numbers and booleans in one Float64Array
    (exact), strings as ids into the message's own list, anything else (an array, a small object) as plain data beside them.
    The page refills its own list's objects in place, by position (they're effects: nothing refers to one by id) */
-const SW_COLS = new Set(['seaSchools']);
+const SW_COLS = new Set([]);   // (Nov 1: none left - the sea's schools were the last, now column tables)
 // lists the game keeps outside the tables that the page draws (spawned by the game's steps, so only the worker has them): sent
 // as columns the same way
 const SW_EXTRA = {};   // (Nov 1: none left - each a table now)
@@ -15133,8 +15172,6 @@ const SW_DRAW = {
   // 35-particles.js' lists: 43-render-objects.js (drawShocks, drawBlood), 47-render-overlays.js (drawAsh,
   // the flames' glow), 46-smoke-fire-draw.js drawFire + sky/21-smoke.js fireLights (flames), 50-land-firewater.js drawHoseCollision (flames)
   // 35-zz-sea-kills.js drawSeaKills; 37-birds.js drawBirds (feathers, gore); 45-draw-vehicles.js drawBlood (the crew's)
-  // 44-shadows-seafloor.js drawSeaLife (each fish of a school; its x, y are undefined until its first step)
-  seaSchools: ['type', 'x', 'y', 'dir', 'fish.x', 'fish.y', 'fish.dx', 'fish.dy', 'fish.face'],
 };
 // each list's drawn fields as sets: top (the row's fields) and sub (per list field, the fields of the small objects in it)
 const SW_DRAWK = {};
@@ -27382,11 +27419,15 @@ function drawSeaLife() {
     C.save(); C.translate(PX(f.x), PY(f.y)); C.rotate(f.rot); C.scale(1, -1);
     C.globalAlpha = f.fade; C.drawImage(sp, -(w >> 1), -(h >> 1), w, h); C.restore();
   }
-  for (const s of schools) {
+  // (Nov 1: the schools and their fish from their column tables, school by school, each one's fish in their order)
+  const FI = schoolFish(), s = schools.cursor(), f = seaFish.cursor();
+  for (let si = 0; si < schools.n; si++) {
+    s.i = si;
     const def = img.fish[s.type];
     const k = pixK(def.px), w = Math.max(1, Math.round(def.r.width * k)), h = Math.max(1, Math.round(def.r.height * k));
-    for (const f of s.fish) {
-      const x = f.x === undefined ? s.x + f.dx * 0.6 : f.x, y = f.y === undefined ? s.y + f.dy * 0.6 : f.y;
+    for (let q = FI.at[si]; q < FI.at[si + 1]; q++) {
+      f.i = FI.rows[q];
+      const x = f.x !== f.x ? s.x + f.dx * 0.6 : f.x, y = f.y !== f.y ? s.y + f.dy * 0.6 : f.y;
       if (x < vl - 30 || x > vl + VWW + 30) continue;
       const sp = (f.face || s.dir) > 0 ? def.r : def.l;
       C.drawImage(sp, Math.round(PX(x) - (w >> 1)), Math.round(PY(y) - (h >> 1)), w, h);
@@ -33294,27 +33335,83 @@ const LB = { n: 480, occ: new Float32Array(480), ox: 0, oy: 0, ux: 1, uy: 0 };  
 const PEN = 7;                                   // (how far into the rock its face is lit, world units)
 // (user Nov 1, 12:12: "light stops at rock" - one rule for every lamp, the game's beams too: 27-sub-light.js) how far each of
 // a lamp's 480 rays gets before the rock: the caves' cells in a window, the game's ground outside them (matAt). The ground is
-// read from a row over the rays' reach, a value a caves' cell (2 units) - the windows' own grain - worked out once for them all
-const GROW = { i0: 0, n: 0, y: new Float32Array(0) };
-function groundRow(xa, xb) {
-  const G = CV.G, i0 = Math.floor(xa / G), n = Math.ceil(xb / G) - i0 + 1;
-  if (GROW.y.length < n) GROW.y = new Float32Array(n * 1.25 | 0);
-  for (let k = 0; k < n; k++) GROW.y[k] = groundD((i0 + k + 0.5) * G);
-  GROW.i0 = i0; GROW.n = n;
+// read a caves' cell (2 units, the windows' own grain) at a time, at the cell's middle - worked out the first time a frame any
+// lamp's rays or bounce ask for that column and kept for the rest of the frame (Nov 1: a whole row over each lamp's reach was
+// worked out every frame - ~1,500 of the ground's sums a lamp, most of them never asked)
+const GROW = { y: new Float32Array(0), t: new Int32Array(0) };
+function groundCol(i) {
+  const n = Math.ceil(WORLD_W / CV.G) + 2;
+  if (GROW.y.length !== n) { GROW.y = new Float32Array(n); GROW.t = new Int32Array(n).fill(-1); }
+  if (i < 0 || i >= n) return groundD((i + 0.5) * CV.G);
+  if (GROW.t[i] !== renderTick) { GROW.t[i] = renderTick; GROW.y[i] = groundD((i + 0.5) * CV.G); }
+  return GROW.y[i];
 }
-// what stops a ray at (X, Y): hardAt, the ground from the row
+// what stops a ray at (X, Y): hardAt, the ground a column at a time (as winAt: the first window it's in)
 function rayHard(X, Y) {
-  const Wn = winAt(X, Y);
-  if (Wn) { const m = Wn.mat[Math.floor((Y - Wn.Y0) / CV.G) * Wn.w + Math.floor((X - Wn.X0) / CV.G)]; return m !== 0 && m !== 2; }
-  const k = Math.floor(X / CV.G) - GROW.i0;
-  return Y >= (k >= 0 && k < GROW.n ? GROW.y[k] : groundD((Math.floor(X / CV.G) + 0.5) * CV.G));
+  const W = CV.wins, G = CV.G;
+  for (let q = 0; q < W.length; q++) {
+    const Wn = W[q];
+    if (Wn && X >= Wn.X0 && X < Wn.X1 && Y >= Wn.Y0 && Y < Wn.Y1) { const m = Wn.mat[Math.floor((Y - Wn.Y0) / G) * Wn.w + Math.floor((X - Wn.X0) / G)]; return m !== 0 && m !== 2; }
+  }
+  return Y >= groundCol(Math.floor(X / G));
+}
+// (Nov 1, the lamps' cost: a ray was stepped 2.5 units at a time to its end - ~180,000 steps a lamp in open water) how many of
+// a ray's next steps, from the point (X, Y) on along (dx, dy) st apart, are sure to find no rock: those inside a box that holds
+// none - an 8 x 8 block of a window's cells with no rock or sand in it, or a run of GB ground columns above the least of their
+// ground and clear of every window. A step a hundredth of a unit from the box's edge isn't counted (the rounding)
+const HB = 8, GB = 32;
+function clearSteps(X, Y, dx, dy, st) {
+  const W = CV.wins, G = CV.G;
+  let x0, x1, y0, y1, Wq = null;
+  for (let q = 0; q < W.length; q++) { const Wn = W[q]; if (Wn && X >= Wn.X0 && X < Wn.X1 && Y >= Wn.Y0 && Y < Wn.Y1) { Wq = Wn; break; } }
+  if (Wq) {
+    const S = HB * G, bi = Math.floor((X - Wq.X0) / S), bj = Math.floor((Y - Wq.Y0) / S);
+    if (!blockClear(Wq, bi, bj)) return 0;
+    x0 = Wq.X0 + bi * S; x1 = Math.min(Wq.X1, x0 + S); y0 = Wq.Y0 + bj * S; y1 = Math.min(Wq.Y1, y0 + S);
+    for (const Wn of W) if (Wn && Wn !== Wq && Wn.X0 < x1 && Wn.X1 > x0 && Wn.Y0 < y1 && Wn.Y1 > y0) return 0;   // (windows that overlap: stepped)
+  } else {
+    const cb = Math.floor(Math.floor(X / G) / GB);
+    x0 = cb * GB * G; x1 = x0 + GB * G; y0 = -Infinity; y1 = groundBlock(cb);
+    for (const Wn of W) if (Wn && Wn.X0 < x1 && Wn.X1 > x0 && Wn.Y0 < y1) y1 = Wn.Y0;
+    if (!(Y < y1)) return 0;
+  }
+  let t = Infinity;
+  if (dx > 0) t = Math.min(t, (x1 - X) / dx); else if (dx < 0) t = Math.min(t, (x0 - X) / dx);
+  if (dy > 0) t = Math.min(t, (y1 - Y) / dy); else if (dy < 0 && y0 > -Infinity) t = Math.min(t, (y0 - Y) / dy);
+  t -= 0.01;
+  return t > 0 ? Math.floor(t / st) + 1 : 0;
+}
+// a window's block (bi, bj) of HB x HB cells: none of them rock or sand (worked out the first time it's asked, kept with the window)
+function blockClear(Wn, bi, bj) {
+  const bw = Math.ceil(Wn.w / HB), bh = Math.ceil(Wn.h / HB);
+  let B = Wn._hb; if (!B) B = Wn._hb = new Uint8Array(bw * bh);          // (0 not known yet, 1 clear, 2 not)
+  const o = bj * bw + bi; if (B[o]) return B[o] === 1;
+  const mat = Wn.mat, i0 = bi * HB, j0 = bj * HB, i1 = Math.min(Wn.w, i0 + HB), j1 = Math.min(Wn.h, j0 + HB);
+  let clear = 1;
+  for (let j = j0; j < j1 && clear; j++) for (let i = i0; i < i1; i++) { const m = mat[j * Wn.w + i]; if (m === 1 || m === 3) { clear = 0; break; } }
+  B[o] = clear ? 1 : 2; return !!clear;
+}
+// the least depth of the ground over the run of GB columns cb (this frame's)
+function groundBlock(cb) {
+  if (!GROW.b) GROW.b = new Map();
+  const B = GROW.b, e = B.get(cb);
+  if (e && e[0] === renderTick) return e[1];
+  let m = Infinity; for (let i = cb * GB, n = i + GB; i < n; i++) { const y = groundCol(i); if (y < m) m = y; }
+  B.set(cb, [renderTick, m]);
+  return m;
 }
 function raysFrom(ox, oy, far, occ) {
   const st = 2.5;                                          // (a step a little over a cell: was 1.5)
   for (let b = 0; b < LB.n; b++) {
     const a = (b + 0.5) / LB.n * Math.PI * 2, dx = Math.cos(a), dy = Math.sin(a);
     let d = 0;
-    while (d < far) { d += st; if (rayHard(ox + dx * d, oy + dy * d)) break; }   // (the stalactites cast no shadow: 09:14)
+    while (d < far) {
+      // (the steps ahead that land in a stretch with no rock - an empty block of a window's cells, or open water above the ground
+      // and clear of the windows: skipped, each found open as it would be stepped; the same steps, the same answer)
+      const s = clearSteps(ox + dx * (d + st), oy + dy * (d + st), dx, dy, st);
+      if (s > 0) { d += Math.min(s, Math.ceil((far - d) / st)) * st; continue; }
+      d += st; if (rayHard(ox + dx * d, oy + dy * d)) break;   // (the stalactites cast no shadow: 09:14)
+    }
     // (then where exactly the rock begins, halving the last step: so a shadow's edge doesn't jump as the sub moves)
     if (d < far) { let a = d - st, b = d; for (let k = 0; k < 4; k++) { const m = (a + b) / 2; if (rayHard(ox + dx * m, oy + dy * m)) b = m; else a = m; } d = b; }
     occ[b] = d;
@@ -33330,9 +33427,7 @@ function lampReach(l) {
   if (!R) { R = { occ: new Float32Array(LB.n), tick: -1 }; LREACH.set(l.s, R); }
   let ox = l.x, oy = l.y - WATER_Y;
   if (hardAt(ox, oy)) { ox = l.x - Math.cos(l.a) * 7; oy = l.y - WATER_Y - Math.sin(l.a) * 7; }
-  const far = lampFar(), ext = Math.max(far, P.reach + 2.2 * P.breach) + 20;
-  groundRow(ox - ext, ox + ext);
-  raysFrom(ox, oy, far, R.occ);
+  raysFrom(ox, oy, lampFar(), R.occ);
   Object.assign(R, { tick: renderTick, x: l.x, y: l.y, a: l.a, ox, oy });
   return R;
 }
@@ -33383,7 +33478,7 @@ function bounceField() {
   const V = BN.v, O = BN.open;
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
     const X = BN.x0 + (i + 0.5) * cs, Y = BN.y0 + (j + 0.5) * cs, Wn = winAt(X, Y), o = j * n + i;
-    let m; if (Wn) m = Wn.mat[Math.floor((Y - Wn.Y0) / CV.G) * Wn.w + Math.floor((X - Wn.X0) / CV.G)]; else { const k = Math.floor(X / CV.G) - GROW.i0; m = Y >= (k >= 0 && k < GROW.n ? GROW.y[k] : groundD((Math.floor(X / CV.G) + 0.5) * CV.G)) ? 1 : 0; }   // (matAt, the ground from the lamp's row)
+    let m; if (Wn) m = Wn.mat[Math.floor((Y - Wn.Y0) / CV.G) * Wn.w + Math.floor((X - Wn.X0) / CV.G)]; else m = Y >= groundCol(Math.floor(X / CV.G)) ? 1 : 0;   // (matAt, the ground a column at a time)
     O[o] = m === 0 || m === 2 ? 1 : 0;                      // (a stalactite is thin: the light goes round it)
     if (!O[o]) { V[o] = 0; continue; }
     const L = lampAt(X, Y); V[o] = Math.max(L[1], L[0] * 0.6);
@@ -39782,11 +39877,13 @@ function krGather() {
   for (const o of KR.objs) o.seen = false;
   for (const sb of subs) if (sb && sb.state === 'out' && !sb.gate && near(sb.x, sb.y)) krProxy(sb, 'SUB', KR_SUB_ART);
   for (const s of minisubs) if (s.state === 'out' && near(s.x, s.y)) krProxy(s, 'MINISUB', { w: 18, h: 8 });
-  for (const s of schools) {
-    if (Math.abs(s.x - KR.bx) > R + 120) continue;
-    const def = img.fish && img.fish[s.type]; if (!def) continue;
-    for (const f of s.fish) if (f.x !== undefined && near(f.x, f.y)) krProxy(f, 'FISH', { w: def.r.width * def.px, h: def.r.height * def.px }, { school: s });
-  }
+  // (Nov 1: a fish by its id in the fish table, its school by the school's - column tables, 05-game-state.js)
+  { const S = schools.c, F = seaFish.c, FI = schoolFish();
+    for (let si = 0; si < schools.n; si++) {
+      if (Math.abs(S.x[si] - KR.bx) > R + 120) continue;
+      const type = schools.str(S.type[si]), def = img.fish && img.fish[type]; if (!def) continue;
+      for (let q = FI.at[si]; q < FI.at[si + 1]; q++) { const j = FI.rows[q]; if (F.x[j] === F.x[j] && near(F.x[j], F.y[j])) krProxy(F.fid[j], 'FISH', { w: def.r.width * def.px, h: def.r.height * def.px }, { school: S.sid[si], ftype: type }); }
+    } }
   if (img.shark) for (const k of sharks) if (near(k.x, k.y)) krProxy(k, 'SHARK', { w: img.shark.swim[0].r.width * img.shark.px, h: img.shark.swim[0].r.height * img.shark.px });
   for (const p of pieces) if (!p.settled && p.y > WATER_Y + 30 && near(p.x, p.y)) krProxy(p, 'PIECE', { w: 2 * p.hl, h: 34, oy: 0.65 });
   for (const sb of subs.concat(oldSubs)) if (sb && sb.parts) for (const q of sb.parts) if (!q.rest && near(q.x, q.y)) krProxy(q, 'SUBHALF', { w: (q.s1 - q.s0) / SUB_SECTIONS * SUB_L, h: KR_SUB_ART.h, oy: KR_SUB_ART.oy }, { sb });
@@ -39802,7 +39899,7 @@ function krValid(o) {
   switch (o.type) {
     case 'SUB': return r.state === 'out' && !r.gate && (subs.includes(r));
     case 'MINISUB': return r.state === 'out';
-    case 'FISH': return o.school.fish.includes(r);
+    case 'FISH': { const j = seaFish.row(r); return j >= 0 && seaFish.c.school[j] === o.school; }
     case 'SHARK': return sharks.includes(r);
     case 'PIECE': return pieces.includes(r);
     case 'SUBHALF': return !!o.sb.parts && o.sb.parts.includes(r);
@@ -39813,7 +39910,9 @@ function krValid(o) {
 }
 function krSync1(o) {
   if (o.taken || o.held.length || o.st !== 'free') return;
-  const r = o.ref; o.x = r.x; o.y = r.y;
+  const r = o.ref;
+  if (o.type === 'FISH') { const j = seaFish.row(r); o.x = seaFish.c.x[j]; o.y = seaFish.c.y[j]; }   // (Nov 1: a fish by its id)
+  else { o.x = r.x; o.y = r.y; }
   o.a = o.type === 'FISH' || o.type === 'SHARK' || o.type === 'MINISUB' ? 0 : r.a || 0;
 }
 function krSync() {
@@ -39822,7 +39921,7 @@ function krSync() {
     // (a fish or a shark it let go of - its arm cut, or it died - swims off again, back with the others)
     if (o.taken && o.st === 'free' && !o.held.length && !o.claim) {
       const r = o.ref; o.taken = false; o.dead = true;
-      if (o.type === 'FISH') { if (schools.includes(o.school)) { r.x = o.x; r.y = o.y; r.vx = r.vy = 0; r.scare = 1; o.school.fish.push(r); o.school.flee = 2.5; } }
+      if (o.type === 'FISH') { const si = schools.row(o.school); if (si >= 0) { seaFish.addRow(Object.assign({}, o.fd, { school: o.school, x: o.x, y: o.y, vx: 0, vy: 0, scare: 1 })); schools.c.flee[si] = 2.5; } }   // (back at its school's end, as a new row)
       else { r.x = o.x; r.y = o.y; r.flee = 2.5; sharks.push(r); }
       continue;
     }
@@ -39854,7 +39953,11 @@ function krPull(sb) {
 // taken hold of: a fish leaves its school, a shark the sharks - from now on it's the kraken's to draw
 function krTaken(o) {
   if (o.taken) return;
-  if (o.type === 'FISH') { const s = o.school, i = s.fish.indexOf(o.ref); if (i >= 0) s.fish.splice(i, 1); o.taken = true; o.dirF = o.ref.face || s.dir; }
+  if (o.type === 'FISH') {   // (Nov 1: its fields kept with it - fd - while it's held; its row gone from the fish table)
+    const j = seaFish.row(o.ref), F = seaFish.c, si = schools.row(o.school);
+    if (j >= 0) { o.fd = { dx: F.dx[j], dy: F.dy[j], ph: F.ph[j], face: F.face[j] }; seaFish.drop(j); seaFish.sweep(); }
+    o.taken = true; o.dirF = (o.fd && o.fd.face) || (si >= 0 ? schools.c.dir[si] : 1);
+  }
   else if (o.type === 'SHARK') { const i = sharks.indexOf(o.ref); if (i >= 0) sharks.splice(i, 1); o.taken = true; o.dirF = o.ref.dir; }
 }
 // eaten: gone from the world, through the game's own paths - from where it is, in its mouth. (Oct 31) The thing is put there
@@ -40044,7 +40147,7 @@ function krDrawHeld() {
     if (o.dead || o.type === 'SUB') continue;
     if (!o.taken) continue;
     let sp, k;
-    if (o.type === 'FISH') { const def = img.fish[o.school.type]; sp = o.dirF > 0 ? def.r : def.l; k = pixK(def.px); }
+    if (o.type === 'FISH') { const def = img.fish[o.ftype]; sp = o.dirF > 0 ? def.r : def.l; k = pixK(def.px); }
     else { const set = img.shark.swim[Math.floor(KR.t * 6) % img.shark.swim.length]; sp = o.dirF > 0 ? set.r : set.l; k = pixK(img.shark.px); }
     const w = Math.max(1, Math.round(sp.width * k * o.s)), h = Math.max(1, Math.round(sp.height * k * o.s));
     C.save(); C.translate(PX(o.x), PY(o.y)); C.rotate(o.a); C.drawImage(sp, -(w >> 1), -(h >> 1), w, h); C.restore();
@@ -50296,22 +50399,30 @@ function storyNets(dt) {
     N.d = N.st === 1 ? Math.min(NET_D * UPM, N.d + 5 * UPM * dt) : Math.max(0, N.d - 7 * UPM * dt);
     if (N.st !== 1 || N.d < 2 * UPM || N.n >= NET_FULL) continue;
     const [nx, ny] = storyNetPos(j), r = NET_R * UPM;
-    for (const s of schools) {
-      if (Math.abs(s.x - nx) > 300 || s.fish.length <= 1) continue;
-      for (let i = s.fish.length - 1; i >= 0 && s.fish.length > 1; i--) {
-        const f = s.fish[i]; if (Math.abs(f.x - nx) > r || Math.abs(f.y - ny) > r) continue;
-        if (s.n0 == null) s.n0 = s.fish.length;
-        s.fish.splice(i, 1); s.backT = time; N.n++;
+    // (Nov 1: the schools and their fish from their column tables - 05-game-state.js; a school's fish from last to first)
+    const S = schools.c, F = seaFish.c, FI = schoolFish();
+    for (let si = 0; si < schools.n; si++) {
+      let len = FI.at[si + 1] - FI.at[si];
+      if (Math.abs(S.x[si] - nx) > 300 || len <= 1) continue;
+      for (let q = FI.at[si + 1] - 1; q >= FI.at[si] && len > 1; q--) {
+        const fj = FI.rows[q]; if (Math.abs(F.x[fj] - nx) > r || Math.abs(F.y[fj] - ny) > r) continue;
+        if (S.n0[si] !== S.n0[si]) S.n0[si] = len;
+        seaFish.drop(fj); len--; S.backT[si] = time; N.n++;
         if (N.n >= NET_FULL) { N.st = 0; break; }                    // (full: up it comes)
       }
       if (N.n >= NET_FULL) break;
     }
+    seaFish.sweep();
   }
   // the schools filling back, a fish at a time
-  for (const s of schools) if (s.n0 != null && s.fish.length < s.n0 && time - (s.backT || 0) > FISH_BACK_S && s.fish.length) {
-    const f0 = s.fish[0], f = Object.assign({}, f0, { dx: (storyR() - 0.5) * 30, dy: (storyR() - 0.5) * 12, ph: storyR() * 6.28 });
-    f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; s.fish.push(f); s.backT = time;
-  }
+  { const S = schools.c, F = seaFish.c, FI = schoolFish(), fresh = [];
+    for (let si = 0; si < schools.n; si++) {
+      const len = FI.at[si + 1] - FI.at[si];
+      if (!(S.n0[si] === S.n0[si] && len < S.n0[si] && time - (S.backT[si] || 0) > FISH_BACK_S && len)) continue;
+      const j0 = FI.rows[FI.at[si]], f = { school: S.sid[si], x: F.x[j0], y: F.y[j0], vx: F.vx[j0], vy: F.vy[j0], face: F.face[j0], scare: F.scare[j0], dx: (storyR() - 0.5) * 30, dy: (storyR() - 0.5) * 12, ph: storyR() * 6.28 };
+      f.x = S.x[si] + f.dx * 0.6; f.y = S.y[si] + f.dy * 0.6; fresh.push(f); S.backT[si] = time;   // (a copy of its first fish, a new place in the school)
+    }
+    for (const f of fresh) seaFish.addRow(f); }
 }
 /* ---- fuel and repairs (user Oct 31, the spec section 5: "All vehicles consume fuel ... When fuel runs out, the vehicle loses
    powered operation"; "Docked or parked vehicles repair gradually when Allow Repair is enabled and refuel gradually when Allow
@@ -51150,7 +51261,9 @@ function natureSave() { try { if (!NATURE.length) localStorage.removeItem('bd_na
 const natureRange = id => natureUsed().find(a => a.id === id) || null;
 // the areas' schools (buildSea, and after an edit): each area's n schools of its fish, born in its box, kept to it
 function natureSchools() {
-  for (let i = schools.length - 1; i >= 0; i--) if (schools[i].area != null) schools.splice(i, 1);
+  // (Nov 1: column tables - a school of an area, and its fish, gone)
+  { const A = schools.c.area, gone = new Set(); for (let i = 0; i < schools.n; i++) if (A[i] === A[i]) { gone.add(schools.c.sid[i]); schools.drop(i); } schools.sweep();
+    const S = seaFish.c.school; for (let j = 0; j < seaFish.n; j++) if (gone.has(S[j])) seaFish.drop(j); seaFish.sweep(); }
   for (const a of natureUsed()) {
     for (let i = 0; i < (a.n | 0); i++) {
       const n = a.type === 'sardine' ? 10 + Math.floor(seaR() * 10) : 3 + Math.floor(seaR() * 6), fish = [];
@@ -51158,11 +51271,11 @@ function natureSchools() {
       const s = { type: a.type || 'sardine', x: seaRnd(a.x0 + 40, Math.max(a.x0 + 41, a.x1 - 40)), y: 0, dir: seaR() < 0.5 ? 1 : -1, speed: seaRnd(8, 18), turnT: seaRnd(6, 20), flee: 0, fish, vy: 0, area: a.id };
       s.y = seaRnd(Math.max(WATER_Y + 50, a.y0 + 20), Math.max(WATER_Y + 51, Math.min(a.y1 - 20, seabedY(s.x) - 30)));
       for (const f of fish) { f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; f.vx = s.dir * s.speed; f.vy = 0; f.face = s.dir; }
-      schools.push(s);
+      delete s.fish; schoolAdd(s, fish);
     }
   }
 }
-function natureChanged() { natureSave(); if (OWM && schools) natureSchools(); natureSync(); }
+function natureChanged() { natureSave(); if (OWM) natureSchools(); natureSync(); }
 // ---- the editor: the TERRAIN tab's NATURE section
 const NE = { sel: null, drag: null, ui: {} };
 const natureOpen = () => NSKY.editor.TUNE.world();   // (on WORLD EDITOR, user Nov 1)
@@ -53084,7 +53197,7 @@ async function start(data) {
     rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, SEA0, SEA1, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? SEA1 + 10 : SEA0 - 10)), get LAND_Y() { return LAND_Y; }, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), civLose: v => { const k = civClass(v); if (k === 'air') trafficDown(v); else if (k === 'ship') civSink(v, 0); else if (k === 'boat') jetboatSink(v); else if (k === 'balloon') balloonPop(v); else if (k === 'heli') civHeliDown(v); else if (k === 'sub') minisubLost(v); else if (k === 'seaplane') spDown(v); else if (k === 'blimp') blimpBurst(v); else if (k === 'yacht') sinkSailboat(v, v.x, v.y, 0); else if (k === 'shuttle') groundCrash(v, 1); return k; },   /* (tools: a civilian vehicle lost by its own rule - tools/civloss.mjs) */ lampScene: (gap = 150, hour = 23) => { const x = (SEA0 + SEA1) / 2, y = WATER_Y + (seabedY(x) - WATER_Y) * 0.5, a = subs[0], b = subs[1], dx = SUB_L + gap; for (const [s, sx, f] of [[a, x - dx / 2, 1], [b, x + dx / 2, -1]]) Object.assign(s, { state: 'out', gate: null, auto: null, x: sx, y, depthT: y, vx: 0, vy: 0, facing: f, turn: null, input: 0, throttle: 0, a: 0 }); a.light = true; b.light = false; a.lamp = { elev: 0, power: 0, aimShow: 0 }; const [lx, ly] = subArtPt(a, ...SUB_LAMP_AT), el = clamp(Math.atan2(b.y - ly, b.x - lx) * 180 / Math.PI, 0, 180); a.lamp.elev = el; a.aimA = el * Math.PI / 180; env.time = hour; computeEnv(); camOverride[0] = [x, y]; paused = true; return { x: Math.round(x), y: Math.round(y), elev: +el.toFixed(1) }; },   /* (the sub lamp's check, user Oct 30: two subs a gap apart at mid-depth, the left one's light on the other, at night; paused there) */ boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, civSpawn: (kind, x, lo, hi, dir) => { const c = newCivShip(kind, x, lo, hi, dir); civShips.push(c); return c; }, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
     debugJetArt: () => { if (!trafficArt) buildTrafficArt(); const d = c => { const k = makeCanvas(c.width, c.height); k.getContext('2d').drawImage(c.src && c._tp ? c.src : c, 0, 0); return k.toDataURL(); }, a = trafficArt.jet[0].r, w = windowsArtDots(a); return { jet: d(a), jetWin: w ? d(w) : d(makeCanvas(1, 1)) }; }, SPACE: { ATMO_TOP, SPACE_TOP, SKY_TOP }, carve: (x, y, r) => landCarve(x, y, r), landShell: (x, y, owner, from) => { shells.push({ x, y, vx: 0, vy: 300, owner, from: from || 'tank', age: 1, trail: 0, under: false, ut: 0 }); }, tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), fgDump: () => { if (!fgStrip) buildFgStrip(); return fgStrip.sp.toDataURL(); }, reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
-    gasBalls, camOverride, settled: () => Object.assign({ restDebris: restCount(), restChunks: restChunkCount() }, RST.stats), restLayer: on => { RST.on = !!on; return RST.on; }, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => schools, whales: () => whales, smokePuff: (x, y) => spawnSmoke(x, y, { dark: 0.9, r: 5, grow: 5, lift: 40, vy: -30, life: 10, alpha: 0.7, rise: false }), deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
+    gasBalls, camOverride, settled: () => Object.assign({ restDebris: restCount(), restChunks: restChunkCount() }, RST.stats), restLayer: on => { RST.on = !!on; return RST.on; }, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => { const FI = schoolFish(); return Array.from({ length: schools.n }, (_, i) => Object.assign(schools.plain(i), { fish: Array.from(FI.rows.subarray(FI.at[i], FI.at[i + 1]), j => seaFish.plain(j)) })); }, seaFish, whales: () => whales, smokePuff: (x, y) => spawnSmoke(x, y, { dark: 0.9, r: 5, grow: 5, lift: 40, vy: -30, life: 10, alpha: 0.7, rise: false }), deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
   }, { get(o, k, r) { if (!WORLD_READY && !LOADING) worldNow(); return Reflect.get(o, k, r); } });
   // (user Oct 30: the subs' beam - its length and its picture, for a check of its reach)
