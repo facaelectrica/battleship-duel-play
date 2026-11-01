@@ -83,6 +83,12 @@ async function gh(path, opt = {}, tok = token) {
     throw e; }
   return j;
 }
+// git's id of a file (what GitHub reports as its sha): sha1 of "blob <bytes>\0" + the bytes
+async function blobSha(text) {
+  const u = new TextEncoder().encode(text), h = new TextEncoder().encode('blob ' + u.length + '\0'), all = new Uint8Array(h.length + u.length);
+  all.set(h); all.set(u, h.length);
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-1', all))].map(b => b.toString(16).padStart(2, '0')).join('');
+}
 const b64 = s => { const u = new TextEncoder().encode(s); let o = ''; for (let i = 0; i < u.length; i += 0x8000)
   o += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(o); };
 
@@ -112,33 +118,39 @@ $('submit').onclick = async () => {
   $('submit').disabled = true; say('Sending...');
   try {
     let sha; try { sha = (await gh('/contents/' + PATH + '?ref=main')).sha; } catch (e) { if (e.status !== 404) throw e; }
+    const body = JSON.stringify(snap, null, 1) + '\n';
+    if (sha && sha === await blobSha(body)) { say('Same snapshot as the last one: nothing to build'); $('submit').disabled = !token; return; }
     const r = await gh('/contents/' + PATH, { method: 'PUT', body: JSON.stringify({ branch: 'main', sha,
-      message: 'World page: SNAPSHOT of ' + (snap.at || '?') + ' UTC', content: b64(JSON.stringify(snap, null, 1) + '\n') }) });
+      message: 'World page: SNAPSHOT of ' + (snap.at || '?') + ' UTC', content: b64(body) }) });
     ls.set('wp_run', JSON.stringify({ sha: r.commit.sha, t: Date.now() }));
     $('snap').value = ''; follow();
   } catch (e) { say('Couldn\'t send: ' + e.message, 'bad'); $('submit').disabled = !token; }
 };
 
 // follow the workflow run of the last submitted commit (kept across a reload of this page)
+let followN = 0;
 async function follow() {
   const run0 = JSON.parse(ls.get('wp_run') || 'null'); if (!run0 || !token) return;
+  const me = ++followN, tell = (...a) => { if (me === followN) say(...a); };   // (only the latest submit speaks)
   $('submit').disabled = true;
   const since = () => Math.round((Date.now() - run0.t) / 1000) + ' s';
   for (;;) {
     let run;
     try { run = (await gh('/actions/workflows/' + WF + '/runs?head_sha=' + run0.sha + '&per_page=1')).workflow_runs[0]; }
-    catch (e) { say('Lost track of the build: ' + e.message, 'bad'); break; }
-    if (!run) { say('Waiting for the build to start... ' + since()); if (Date.now() - run0.t > 5 * 60e3) {
-      say('The build never started', 'bad', ['Actions', 'https://github.com/' + OWNER + '/' + REPO + '/actions']); break; } }
-    else if (run.status !== 'completed') say('Building... ' + since());
+    catch (e) { tell('Lost track of the build: ' + e.message, 'bad'); break; }
+    if (!run) { tell('Waiting for the build to start... ' + since()); if (Date.now() - run0.t > 5 * 60e3) {
+      tell('The build never started', 'bad', ['Actions', 'https://github.com/' + OWNER + '/' + REPO + '/actions']); break; } }
+    else if (run.status !== 'completed') tell('Building... ' + since());
     else if (run.conclusion === 'success') {
       let v = '';
       try { for (const c of await gh('/commits?sha=main&per_page=20')) {
         const m = /^Built: Version (\d+) \(world page\)/.exec(c.commit.message); if (m) { v = m[1]; break; } } } catch (e) {}
-      say('Version ' + v + ' is out. Pages has it in about a minute.', 'ok', ['Play', './?v=' + v]); break;
-    } else { say('Build failed', 'bad', ['See why', run.html_url]); break; }
+      tell('Version ' + v + ' is out. Pages has it in about a minute.', 'ok', ['Play', './?v=' + v]); break;
+    } else { tell('Build failed', 'bad', ['See why', run.html_url]); break; }
     await new Promise(r => setTimeout(r, 8000));
+    if (me !== followN) return;
   }
+  if (me !== followN) return;
   ls.set('wp_run', null); $('submit').disabled = !token;
 }
 showToken(); follow();
