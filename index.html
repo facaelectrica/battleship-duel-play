@@ -3450,8 +3450,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 485;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 23:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 486;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 00:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -34162,6 +34162,7 @@ function stepCivHeli(h, dt) {
     h.ph += dt;
     h.rotor += h.spin * dt * 9;
     if (h.state === 'gone') return;
+    if (h.state === 'rescue') { h.spin = Math.min(1, h.spin + dt * 0.5); h.gear = 0; return; }   // (STORY: flown on a rescue call - 50-story.js storyRescue)
     // (its wreck stays: no other helicopter comes in its place - user Oct 27: "The rest, when destroyed, is never spawned again")
     if (h.state === 'wreck' && h.onDeck && harbourTop(h.x, h.y - 6) === Infinity) { h.onDeck = false; h.state = 'sink'; h.vy = 20; ditchFx(h.x, 0, 1, 36, 60); return; }   // (its wreck on the pier, the pier gone: into the sea - user Oct 27)
     if (h.state === 'wreck') {
@@ -48007,10 +48008,10 @@ function storyHelisBuild() {
   }
 }
 function storyHeliNew(o, i, D, sv, sid, own) {
-  const x = storySpotX(o, i), R = x > (SEA0 + SEA1) / 2, h = newCivHeli(D.ch, x, R, 0);
-  return Object.assign(h, { story: true, heli: true, sid, own, price: storyPrice(o, i, sv), sv, berth: o.id, spot: i, hb: o.id, hs: i, fuel: 1, hp: 2, home: x, wait: 1e12, facing: o.flip ? -1 : 1, y: landTop(x) - chStand(h) });
+  const x = storySpotX(o, i), R = x > (SEA0 + SEA1) / 2, h = newCivHeli(D.ch, x, R, 0), e = strVehs(o)[i], role = e && e.v === sv && e.role || null;
+  return Object.assign(h, { story: true, heli: true, sid, own: own && !role, role, price: storyPrice(o, i, sv), sv, berth: o.id, spot: i, hb: o.id, hs: i, fuel: 1, hp: 2, home: x, wait: 1e12, facing: o.flip ? -1 : 1, y: landTop(x) - chStand(h) });
 }
-const storyHeliAlive = h => h.state === 'parked' || h.state === 'landed' || h.state === 'fly';
+const storyHeliAlive = h => h.state === 'parked' || h.state === 'landed' || h.state === 'fly' || h.state === 'rescue';   // (rescue: on a call - 50-story.js storyRescue)
 // each step (stepStory): left on the ground, it stays there; its fuel; refuelled, mended at its structure; lost - again
 // the next morning
 function storyHelis(dt) {
@@ -48609,11 +48610,23 @@ window.addEventListener('keyup', ev => { if (ev.code === 'KeyT') storyGiveUp(); 
    FH_KIND) drawn with the boat (drawStoryRescue); you ride in it (the view on it) to the nearest FIRE STATION (else your home
    base), and you're there. The boat stays where she is. ---- */
 const SOS_WAIT = 10, SOS_ALT = 16, SOS_V = 45;   // (the hover 16 m over her: the rope and blip read as hers)
-const storySosOk = v => !!v && v.story && jetboats.includes(v) && v.state === 'run' && (v.fuel || 0) <= 0 && !v.res && v.berth == null;
+// (user Oct 31 22:48: "If you're at sea and you have no more fuel, an helicopter comes. So we need a helipad in the world for the
+// helicopter to come. And the helicopter is part of the helipad structure. And this one has the rule of I only exit the
+// helipad if there's an emergency that requires me") the rescue helicopters: story helicopters whose spot's ROLE is RESCUE,
+// waiting on their pad; the nearest takes off for the call, and flies back to its pad when it's done. None: NO RESCUE
+const storyRescuers = () => civHelis.filter(h => h.story && h.role === 'rescue' && h.state === 'parked' && h.driven == null);
+const storyStranded = v => !!v && v.story && jetboats.includes(v) && v.state === 'run' && (v.fuel || 0) <= 0 && !v.res && v.berth == null;
+const storySosOk = v => storyStranded(v) && storyRescuers().length > 0;
+// where a rescue takes you: the nearest HOSPITAL, else FIRE STATION, else your home base
+function storySafeAt(x) {
+  const S = strsUsed(), H = S.filter(o => o.hosp || o.k === 'hospital'), F = S.filter(o => o.k === 'fire');
+  return (H.length ? H : F.length ? F : [storyHome()].filter(Boolean)).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0] || null;
+}
 function storySOS(p) {
   const v = crew[p].mode === 'civ' ? crew[p].civ : null; if (!STORY || !storySosOk(v)) return;
-  const fires = strsUsed().filter(o => o.k === 'fire'), to = (fires.length ? fires : [storyHome()].filter(Boolean)).sort((a, b) => Math.abs(a.x - v.x) - Math.abs(b.x - v.x))[0];
-  v.res = { st: 'flare', t: 0, x: v.x + (to && to.x < v.x ? -1 : 1) * 160 * UPM, y: WATER_Y - 60 * UPM, r: 0, to: to ? to.id : null };
+  const h = storyRescuers().sort((a, b) => Math.abs(a.x - v.x) - Math.abs(b.x - v.x))[0], to = storySafeAt(v.x);
+  h.state = 'rescue'; h.berth = null; h.ai = null;
+  v.res = { st: 'flare', t: 0, heli: h.sid, x: h.x, y: h.y, r: 0, to: to ? to.id : null };
   sound('fwLaunch', v.x);
 }
 ACTS.storySOS = p => storySOS(p);
@@ -48621,15 +48634,26 @@ function storyRescue(dt) {
   for (const j of jetboats) {
     const R = j.res; if (!j.story || !R) continue;
     R.t += dt;
-    const hy = j.y - SOS_ALT * UPM, toward = (tx, ty) => { const dx = tx - R.x, dy = ty - R.y, d = Math.hypot(dx, dy), m = SOS_V * UPM * dt; if (d <= m) { R.x = tx; R.y = ty; return true; } R.x += dx / d * m; R.y += dy / d * m; return false; };
-    if (R.st === 'flare' && R.t > SOS_WAIT) R.st = 'come';
-    else if (R.st === 'come' && toward(j.x, hy)) R.st = 'hover';
-    else if (R.st === 'hover') { R.x = j.x; R.y = hy; R.r = Math.min(SOS_ALT * UPM - 3 * UPM, R.r + 6 * UPM * dt); if (R.r >= SOS_ALT * UPM - 3 * UPM) { R.st = 'lift'; if (j.driven != null) { const p = j.driven; civRelease(p); crew[p].mode = 'dock'; crew[p].watch = null; story.at = 0; R.who = p; } } }
+    const h = civHelis.find(q => q.sid === R.heli && q.state === 'rescue');
+    if (!h) { if (R.who != null && crew[R.who].mode === 'dock') crew[R.who].look = null; j.res = null; continue; }   // (it was lost: the call ends)
+    const gnd = x => dryLand(x) ? landTop(x) : WATER_Y;
+    const toward = (tx, ty) => { const dx = tx - R.x, dy = ty - R.y, d = Math.hypot(dx, dy), m = SOS_V * UPM * dt; if (d <= m) { R.x = tx; R.y = ty; return true; } R.x += dx / d * m; R.y += dy / d * m; return false; };
+    // (up off the ground first, across at a height clear of both ends, then down - never through the ground)
+    const go = (tx, ty) => { const cr = Math.min(WATER_Y - 60 * UPM, gnd(R.x) - 40 * UPM, gnd(tx) - 40 * UPM); if (Math.abs(tx - R.x) > 1) { if (R.y > cr + 1) toward(R.x, cr); else toward(tx, cr); return false; } return toward(tx, ty); };
+    const hy = j.y - SOS_ALT * UPM;
+    if (R.st === 'flare') { if (R.t > SOS_WAIT) R.st = 'come'; }
+    else if (R.st === 'come') { if (go(j.x, hy)) R.st = 'hover'; }
+    else if (R.st === 'hover') { R.x = j.x; R.y = hy; R.r = Math.min(SOS_ALT * UPM - 3 * UPM, R.r + 6 * UPM * dt); if (R.r >= SOS_ALT * UPM - 3 * UPM) { R.st = 'lift'; if (j.driven != null) { const p = j.driven; civRelease(p); crew[p].mode = 'dock'; story.at = 0; R.who = p; } } }
     else if (R.st === 'lift') { R.r = Math.max(0, R.r - 8 * UPM * dt); if (!R.r) R.st = 'fly'; }
     else if (R.st === 'fly') {
       const o = strsUsed().find(q => q.id === R.to);
-      if (!o || toward(o.x, strBox(o).top - 20 * UPM)) { const p = R.who; j.res = null; if (p != null && o) storyGo(p, o.id, true); continue; }
+      if (!o || go(o.x, strBox(o).top - 20 * UPM)) { const p = R.who; R.who = null; if (p != null && o) { crew[p].look = null; storyGo(p, o.id, true); } R.st = 'back'; }
     }
+    else if (R.st === 'back') {                          // (back to its pad: down on its spot, waiting again)
+      const o = strsUsed().find(q => q.id === h.hb), px = o ? storySpotX(o, h.hs) : h.home, py = gnd(px) - chStand(h);
+      if (go(px, py)) { j.res = null; Object.assign(h, { state: 'parked', berth: o ? o.id : null, spot: h.hs, x: px, y: py, vx: 0, vy: 0, tilt: 0 }); continue; }
+    }
+    if (R.st !== 'flare') { if (Math.abs(R.x - h.x) > 0.5) h.facing = R.x > h.x ? 1 : -1; h.x = R.x; h.y = R.y; }
     if (R.who != null && crew[R.who].mode === 'dock') crew[R.who].look = { x: R.x, y: R.y };   // (aboard it: the view rides with it)
   }
 }
@@ -48639,15 +48663,11 @@ function drawStoryRescue(j) {
   if (R.t < 6) { const fy = j.y - Math.min(R.t, 3) * 30 * UPM, X = PX(j.x), Y = PY(fy), q = Math.max(2, Math.round(PX(j.x + 0.4 * UPM) - PX(j.x)));
     C.fillStyle = `rgba(255,${80 + Math.floor(Math.sin(time * 30) * 40 + 40)},60,${R.t < 3 ? 1 : (6 - R.t) / 3})`; C.fillRect(X - q, Y - q, 2 * q, 2 * q);
     C.fillStyle = 'rgba(255,190,160,0.35)'; for (let k = 1; k < 8; k++) C.fillRect(X - (q >> 1), Y + k * q * 1.5, q, q); }
-  if (R.st === 'flare') return;
-  if (!chArt) { if (!img.civhelis) return; buildCivHeliArt(); }
-  const A = chArt[FH_KIND], h = { kind: FH_KIND }, s = chK(h) * SV, face = R.st === 'fly' ? ((strsUsed().find(q => q.id === R.to) || { x: R.x }).x < R.x ? -1 : 1) : 1;
-  const I = scaled(face > 0 ? A.lvR[0] : A.lv[0], s, true), X = Math.round(PX(R.x) - I.width / 2), Y = Math.round(PY(R.y) - A.H * 0.5 * s);
-  if (R.r > 0) { const q = Math.max(1, Math.round(PX(R.x + 0.08 * UPM) - PX(R.x))), y0 = Y + Math.round(A.H * s), y1 = PY(R.y + R.r); C.fillStyle = '#e8e4d6'; C.fillRect(Math.round(PX(R.x)) - (q >> 1), y0, q, Math.max(0, y1 - y0));
-    C.fillStyle = Math.floor(time * 4) % 2 ? '#ff4a3a' : '#ffd23a'; C.fillRect(Math.round(PX(R.x)) - 2 * q, Math.round(y1) - q, 4 * q, 3 * q); }   // (the blip)
-  C.drawImage(I, X, Y);
-  const Rr = scaled(face > 0 ? A.rotR : A.rot, s, true), sq = Math.abs(Math.cos(time * 40)) * 0.82 + 0.18;
-  for (const [, ry, rw, rh, hub] of A.rotors) { const hl = face > 0 ? A.W - hub : hub; C.save(); C.translate(X + hl * s, 0); C.scale(sq, 1); C.globalAlpha = 0.7; C.drawImage(Rr, -Math.round(hl * s), Y); C.restore(); }
+  if (R.st === 'flare' || !(R.r > 0)) return;
+  const h = civHelis.find(q => q.sid === R.heli); if (!h) return;
+  const q = Math.max(1, Math.round(PX(h.x + 0.08 * UPM) - PX(h.x))), X = Math.round(PX(h.x)), y0 = Math.round(PY(h.y + chSkid(h))), y1 = Math.round(PY(h.y + R.r));
+  C.fillStyle = '#e8e4d6'; C.fillRect(X - (q >> 1), y0, q, Math.max(0, y1 - y0));
+  C.fillStyle = Math.floor(time * 4) % 2 ? '#ff4a3a' : '#ffd23a'; C.fillRect(X - 2 * q, y1 - q, 4 * q, 3 * q);   // (the blip)
 }
 // the EMERGENCY button: over the right drive arrow while you're aboard - lit when she's out of fuel at sea
 function storySosBtn() {
@@ -48660,7 +48680,7 @@ function drawStorySos(r) {
   const [x, y, w, h] = r, on = storySosOk(crew[0].civ);
   ug.fillStyle = on ? (Math.floor(time * 2) % 2 ? '#e0402e' : '#b02a20') : 'rgba(90,90,96,0.55)'; ug.fillRect(x, y, w, h);
   ug.fillStyle = '#04070f'; ug.fillRect(x, y + h - 3, w, 3);
-  const s = Math.max(1, Math.round(h / 22)); drawText(ug, crew[0].civ.res ? 'HELP COMING' : 'EMERGENCY', x + w / 2, y + h / 2 - 3 * s, on || crew[0].civ.res ? '#ffffff' : '#c8c8cc', s, 'center');
+  const s = Math.max(1, Math.round(h / 22)); drawText(ug, crew[0].civ.res ? 'HELP COMING' : storyStranded(crew[0].civ) && !on ? 'NO RESCUE' : 'EMERGENCY', x + w / 2, y + h / 2 - 3 * s, on || crew[0].civ.res ? '#ffffff' : '#c8c8cc', s, 'center');
 }
 window.addEventListener('pointerdown', ev => {
   const r = storySosBtn(); if (!r) return;
@@ -48709,7 +48729,7 @@ function storyDots() {
   if (c.mode !== 'dock') return [];
   const here = storyAt(); if (!here) return [];
   const L = storyLinks(here).map(o => Object.assign(at(o.x, strBox(o).top - 30), { act: 'storyGo', id: o.id }));
-  for (const j of storyVehs()) if (j.berth === here.id && j.driven == null) L.push(Object.assign(at(j.x, j.y - storyBoatSize(j)[1] - 20), j.own ? { act: 'storyBoard', id: j.sid } : { act: 'storyAsk', id: j.sid, price: j.price }));   // (for sale: its dot asks - storyAsk)
+  for (const j of storyVehs()) if (j.berth === here.id && j.driven == null && !j.role) L.push(Object.assign(at(j.x, j.y - storyBoatSize(j)[1] - 20), j.own ? { act: 'storyBoard', id: j.sid } : { act: 'storyAsk', id: j.sid, price: j.price }));   // (for sale: its dot asks - storyAsk)
   return L;
 }
 /* ---- buying (user Oct 31 13:17: "when you have the dot to select the vehicle, if you select it, it should show the price.
@@ -49550,7 +49570,7 @@ let STRS = [];
 function strsValid(L) { return Array.isArray(L) && L.every(o => o && STR_KINDS[o.k] && Number.isFinite(o.x)); }
 try { const o = JSON.parse(localStorage.getItem('bd_structs') || 'null'); if (strsValid(o)) STRS = o; } catch (e) { }
 const strsUsed = () => OWM && NET.role === 'local' ? STRS : [];
-function strSave() { try { if (!STRS.length) localStorage.removeItem('bd_structs'); else localStorage.setItem('bd_structs', JSON.stringify(STRS)); } catch (e) { } }
+function strSave() { try { if (!STRS.length) localStorage.removeItem('bd_structs'); else localStorage.setItem('bd_structs', JSON.stringify(STRS)); } catch (e) { } if (typeof SE !== 'undefined' && SE.ui && SE.ui.chk) strWorldCheck(SE.ui); }   // (the WORLD CHECK kept up to date)
 // the editor's own random source for new colours (not the game's: nothing in the world moves for it)
 const strRng = seededRng(7311 + (Date.now() % 9973));
 // where it stands: its box in the world (left, right, top, foot)
@@ -49665,8 +49685,27 @@ function strEdDraw() {
   }
 }
 // ---- the pane
+/* (user Oct 31 22:48: "there should be kind of something that checks what's missing in the world. If you die, you have to go
+   to a hospital, so we need to have a hospital. If you're at sea and you have no more fuel, an helicopter comes. So we need a
+   helipad in the world") WORLD CHECK, over the STRUCTURES section in the Story world: each thing Story needs, OK or MISSING */
+const STORY_NEEDS = [
+  ['HOME BASE', 'a story starts here', L => L.some(o => o.home ?? o.k === 'home')],
+  ['HOSPITAL', 'where you go when you die', L => L.some(o => o.hosp || o.k === 'hospital')],
+  ['RESCUE HELICOPTER', 'a helicopter spot with ROLE: RESCUE', L => L.some(o => (strTakes(o) || []).includes('heli') && strVehs(o).some(e => e && e.role === 'rescue'))],
+];
+function strWorldCheck(U) {
+  if (!U.box || !U.box.parentNode) return;
+  if (!U.chk) { U.chk = U.el('div', 'cat'); U.box.parentNode.insertBefore(U.chk, U.box); }
+  U.chk.hidden = !STORY_WORLD; if (!STORY_WORLD) return;
+  U.chk.textContent = ''; U.chk.appendChild(U.el('h4', '', 'WORLD CHECK'));
+  for (const [lab, tip, ok] of STORY_NEEDS) {
+    const r = U.el('div', 'row'), l = U.el('label', '', lab), v = ok(STRS), t = U.el('span', '', v ? 'OK' : 'MISSING'); l.title = tip;
+    t.style.cssText = 'font-weight:bold;color:' + (v ? '#6fd08a' : '#ff6a5a'); r.append(l, t); U.chk.appendChild(r);
+  }
+}
 function strSync() {
   const U = SE.ui; if (!U.box) return;
+  strWorldCheck(U);
   const P = SE.sel.map(strById).filter(Boolean), o = P.length === 1 ? P[0] : null, el = U.el;
   U.sel.textContent = !P.length ? 'NONE' : o ? strName(o) : P.length + ' PICKED';
   U.box.textContent = '';
@@ -49728,8 +49767,17 @@ function strSync() {
       s.onchange = save; own.addEventListener('input', save);
       const ol = el('span', '', 'OWNED'); ol.style.cssText = 'font-size:10px;color:#8fa0bf';
       r.append(el('label', '', 'SPOT ' + (i + 1)), s, ol, own); v.appendChild(r);
+      // (user Oct 31 22:48: a vehicle leaves its structure only for a reason - ROLE: RESCUE, the helicopter that answers an
+      // emergency at sea and flies back to its pad; the world's, never for sale - 50-story.js storySOS)
+      if (e && STR_VEHS[e.v] && STR_VEHS[e.v].fam === 'heli') {
+        const rr = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss;
+        for (const [val, lab] of [['', 'NONE'], ['rescue', 'RESCUE (EMERGENCIES ONLY)']]) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); }
+        q.value = e.role || '';
+        q.onchange = () => { const M = strVehs(o).slice(); const E2 = Object.assign({}, M[i]); if (q.value) { E2.role = q.value; E2.own = false; } else delete E2.role; M[i] = E2; o.veh = M; strSave(); strSync(); };
+        rr.append(el('label', '', 'ROLE'), q); v.appendChild(rr);
+      }
       // (the spec section 4: "Assign each vehicle an activity for each of four daily periods" - not yours: its routine)
-      if (e && !e.own && STR_VEHS[e.v] && STR_VEHS[e.v].fam !== 'plane') {
+      if (e && !e.own && !e.role && STR_VEHS[e.v] && STR_VEHS[e.v].fam !== 'plane') {
         const rr = el('div', 'row'); rr.append(el('label', '', 'ROUTINE'));
         const fam = STR_VEHS[e.v].fam, others = STRS.filter(q => q !== o && (strTakes(q) || []).includes(fam));
         ['MORNING', 'MIDDAY', 'EVENING', 'NIGHT'].forEach((pl, k) => {
