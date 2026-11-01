@@ -1533,6 +1533,24 @@ class ColTable {
     }
     o.i = i; return o;
   }
+  // (Nov 1) a save from before the table was columns - its rows, each a plain object - as plainCols' data, field by field by
+  // name: a number as it is, a yes / no as 1 / 0, a text interned, a field the row hasn't as declared for a new row; the ids
+  // given in the rows' order (a table whose rows nothing links to: the sparks, the embers)
+  plainOfRows(rows) {
+    const n = rows.length, cols = {}, strs = [], sIdx = new Map();
+    for (const F of this.f) {
+      if (F.kind === 'obj') continue;
+      const o = cols[F.k] = new Array(n);
+      for (let i = 0; i < n; i++) {
+        const v = rows[i] ? rows[i][F.k] : undefined;
+        if (F.kind === 'id') o[i] = i + 1;
+        else if (F.kind === 'str') { if (typeof v !== 'string') o[i] = -1; else { let k = sIdx.get(v); if (k === undefined) { k = strs.length; strs.push(v); sIdx.set(v, k); } o[i] = k; } }
+        else if (typeof v === 'boolean') o[i] = v ? 1 : 0;
+        else o[i] = typeof v === 'number' ? v : F.d;
+      }
+    }
+    return { soa: 1, n, top: n, strs, cols };
+  }
   // one row as a plain object (the console: __game.row)
   plain(i) {
     if (!(i >= 0 && i < this.n)) return undefined;
@@ -1714,7 +1732,12 @@ function shakeAt(amt, x) {
 const spray = [], bubbles = [], foam = [], wakes = [];
 const grains = [], ash = [];
 const welds = [];
-const debris = [], sparks = [], flashes = [], shells = [], bullets = [], pieces = [], flames = [], embers = [], rings = [], dust = [];
+const debris = [], flashes = [], shells = [], bullets = [], pieces = [], flames = [], rings = [], dust = [];
+// (Nov 1) the sparks and the embers: column tables (04-zz-coltable.js), a row each in the order spawned - 35-particles.js makes
+// and moves them, the pixel layer draws them (40-zzzz-layers.js; their kinds in 47-render-overlays.js). px, py: where a spark
+// was a step ago, NaN before its first step (it isn't drawn yet)
+const sparks = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', life: 'f64', max: 'f64', px: 'f64 NaN', py: 'f64 NaN' });
+const embers = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', life: 'f64', max: 'f64', ph: 'f64' });
 // (Nov 1) the smoke's puffs: a column table (04-zz-coltable.js), a row a puff in the order spawned - 38-smoke-sim.js spawnSmoke
 // makes them, stepSmoke moves and ends them, sky/21-smoke.js gatherSmokeNew draws them. Its fields (a yes / no is 'u8' 0 or 1):
 const SMOKE_FIELDS = {
@@ -3681,8 +3704,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 489;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 09:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 490;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 09:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12101,10 +12124,13 @@ function stepPierGuns(dt) {
    ================================================================ */
 let BLAST = null;
 const BLAST_FREE = () => [flames];                                             // (flung: speeds x K - and the smoke's puffs: below)
-const BLAST_THROWN = () => [sparks, debris, spray, embers, dust];             // (thrown under gravity: speeds x sqrt K)
+const BLAST_THROWN = () => [debris, spray, dust];                            // (thrown under gravity: speeds x sqrt K)
 const BLAST_ALL = () => [...BLAST_FREE(), ...BLAST_THROWN(), flashes, rings, jets, spikeBursts];
+// (Nov 1) the column tables (04-zz-coltable.js) and how fast their new rows are flung: the smoke's puffs as the flames (K), the
+// sparks and the embers thrown (sqrt K); a table's new rows are those past the last id it had given at blastOpen
+const BLAST_COLS = () => [[smoke, false], [sparks, true], [embers, true]];
 function blastOpen() {
-  BLAST = { fx: FXK, last: BLAST_ALL().map(a => a[a.length - 1]), sq: smoke.top };   // (the last piece in each: new ones come after it, even if old ones were dropped; the puffs by their ids - Nov 1)
+  BLAST = { fx: FXK, last: BLAST_ALL().map(a => a[a.length - 1]), top: BLAST_COLS().map(([T]) => T.top) };   // (the last piece in each: new ones come after it, even if old ones were dropped)
   FXK = FXK * BLAST_K;
 }
 // the pieces added to a since blastOpen (walked back from the end to the piece that was last then)
@@ -12115,8 +12141,11 @@ function blastClose(x, y) {
   BLAST = null; FXK = B.fx;
   const spread = (p, v) => { p.x = x + (p.x - x) * K; p.y = y + (p.y - y) * K; if (p.vx != null) p.vx *= v; if (p.vy != null) p.vy *= v; };
   const nF = BLAST_FREE().length, nT = BLAST_THROWN().length;
-  // (the puffs spawned since blastOpen - the rows past the last id given then: flung as the flames are)
-  { const c = smoke.c; for (let i = smoke.after(B.sq); i < smoke.n; i++) { c.x[i] = x + (c.x[i] - x) * K; c.y[i] = y + (c.y[i] - y) * K; c.vx[i] *= K; c.vy[i] *= K; } }
+  // (the column tables' rows made since blastOpen - past the last id given then)
+  BLAST_COLS().forEach(([T, thrown], j) => {
+    const c = T.c, v = thrown ? R : K;
+    for (let i = T.after(B.top[j]); i < T.n; i++) { c.x[i] = x + (c.x[i] - x) * K; c.y[i] = y + (c.y[i] - y) * K; c.vx[i] *= v; c.vy[i] *= v; }
+  });
   all.forEach((a, j) => {
     const fresh = blastNew(a, B.last[j]);
     if (!fresh.length) return;
@@ -12581,17 +12610,21 @@ function spawnSpray(x, y, vx, power) { if (fxHidden(x)) return; if (spray.length
 // (real scale, user Oct 29: "I wanted particles" - a big ship's foam is particles as much bigger as she is (k = FXK), lying
 // on the water longer and breaking up as they fade; a small boat's stay the old small specks: k 1)
 function spawnFoam(x, s) { if (fxHidden(x)) return; const k = FXK; if (foam.length < (k > 1 ? 900 : 380)) foam.push({ x, s: s * k, k, life: 0, max: ptRnd(0.8, 2.2) * (k > 1 ? 2.2 : 1), vx: ptRnd(-3, 3), seed: ptR() * 97 }); }
+// (Nov 1: the sparks and the embers are column tables - 05-game-state.js; a row added, its fields set, the random numbers drawn
+// in the order they always were)
 function spawnSparks(x, y, n, speed) {
+  const c = sparks.c;
   for (let i = 0; i < n; i++) {
-    const a = ptRnd(-Math.PI, 0) + ptRnd(-0.4, 0.4), sp = ptRnd(0.3, 1) * speed;
-    sparks.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0, max: ptRnd(0.3, 0.9) });
+    const a = ptRnd(-Math.PI, 0) + ptRnd(-0.4, 0.4), sp = ptRnd(0.3, 1) * speed, j = sparks.add();
+    c.x[j] = x; c.y[j] = y; c.vx[j] = Math.cos(a) * sp; c.vy[j] = Math.sin(a) * sp; c.life[j] = 0; c.max[j] = ptRnd(0.3, 0.9);
   }
 }
 function spawnFlame(x, y, vx, vy, heat, r, decay) {
   flames.push({ x, y, vx, vy, heat, r: r * FXK, decay, h0: heat });
 }
 function spawnEmber(x, y, vx, speed = 1) {
-  embers.push({ x, y, vx: vx + ptRnd(-40, 40) * speed, vy: -ptRnd(40, 120) * speed, life: 0, max: ptRnd(1.2, 3), ph: ptR() * 6 });
+  const j = embers.add(), c = embers.c;
+  c.x[j] = x; c.y[j] = y; c.vx[j] = vx + ptRnd(-40, 40) * speed; c.vy[j] = -ptRnd(40, 120) * speed; c.life[j] = 0; c.max[j] = ptRnd(1.2, 3); c.ph[j] = ptR() * 6;
 }
 const DEBRIS_COLS = ['#8d8d84', '#6e6e66', '#4a4a44', '#2a2a28', '#8a3a1c', '#5c2a16', '#b0b0a6'];
 function spawnDebris(x, y, n, baseVx) {
@@ -12623,12 +12656,14 @@ function stepParticles(dt) {
   }
   for (let i = foam.length - 1; i >= 0; i--) { const f = foam[i]; f.life += dt; f.x += (f.vx + W * 0.08) * dt; if (f.life > f.max) foam.splice(i, 1); }
   for (let i = wakes.length - 1; i >= 0; i--) { const w = wakes[i]; w.life += dt; w.x += (w.drift + W * 0.05) * dt; w.drift *= 1 - 0.4 * dt; if (w.life > w.max) wakes.splice(i, 1); }
-  for (let i = sparks.length - 1; i >= 0; i--) {
-    const s = sparks[i]; s.life += dt;
-    s.vy += 420 * dt; s.vx += (W - s.vx) * 0.5 * dt;
-    s.px = s.x; s.py = s.y; s.x += s.vx * dt; s.y += s.vy * dt;
-    if (s.life > s.max || (s.y > wTop && s.y > surfaceY(s.x))) sparks.splice(i, 1);
-  }
+  { const c = sparks.c, X = c.x, Y = c.y, VX = c.vx, VY = c.vy, L = c.life, LX = c.px, LY = c.py;
+    for (let i = sparks.n - 1; i >= 0; i--) {
+      L[i] += dt;
+      VY[i] += 420 * dt; VX[i] += (W - VX[i]) * 0.5 * dt;
+      LX[i] = X[i]; LY[i] = Y[i]; X[i] += VX[i] * dt; Y[i] += VY[i] * dt;
+      if (L[i] > c.max[i] || (Y[i] > wTop && Y[i] > surfaceY(X[i]))) sparks.drop(i);
+    }
+    sparks.sweep(); }
   // Fire: hot pixels that rise, lean with the wind and cool into smoke
   for (let i = flames.length - 1; i >= 0; i--) {
     const f = flames[i];
@@ -12643,12 +12678,14 @@ function stepParticles(dt) {
     f.r += 5 * dt;
     if (f.y > wTop - 1 && f.y > surfaceY(f.x) - 1) { f.y = surfaceY(f.x) - 1; f.vy = Math.min(f.vy, 0); }
   }
-  for (let i = embers.length - 1; i >= 0; i--) {
-    const e = embers[i]; e.life += dt;
-    e.vx += (windAt(e.y) * 1.3 - e.vx) * 1.2 * dt; e.vy += (-35 - e.vy) * 1.2 * dt;
-    e.x += (e.vx + Math.sin(e.life * 7 + e.ph) * 12) * dt; e.y += e.vy * dt;
-    if (e.life > e.max) embers.splice(i, 1);
-  }
+  { const c = embers.c, X = c.x, Y = c.y, VX = c.vx, VY = c.vy, L = c.life;
+    for (let i = embers.n - 1; i >= 0; i--) {
+      L[i] += dt;
+      VX[i] += (windAt(Y[i]) * 1.3 - VX[i]) * 1.2 * dt; VY[i] += (-35 - VY[i]) * 1.2 * dt;
+      X[i] += (VX[i] + Math.sin(L[i] * 7 + c.ph[i]) * 12) * dt; Y[i] += VY[i] * dt;
+      if (L[i] > c.max[i]) embers.drop(i);
+    }
+    embers.sweep(); }
   for (let i = flashes.length - 1; i >= 0; i--) { flashes[i].life += dt; if (flashes[i].life > flashes[i].max) flashes.splice(i, 1); }
   for (let i = welds.length - 1; i >= 0; i--) { welds[i].life += dt; if (welds[i].life > welds[i].max) welds.splice(i, 1); }
   for (let i = rings.length - 1; i >= 0; i--) { const r = rings[i]; r.life += dt; r.r += (r.max - r.r) * 7 * dt; if (r.life > 0.35) rings.splice(i, 1); }
@@ -13921,12 +13958,16 @@ defTable('dockCalm', () => [CALM_ROW], { net: false,
 });
 
 /* (engine stage 3) The particles' tables (35-particles.js owns them; registered here because the tables (36-zz-tables.js) come
-   after that file): every list stepParticles moves - spray, bubbles, foam, wakes, sparks, flames, embers, flashes, welds,
-   blast rings, debris, the sea floor's dust, its sand grains and the falling ash. Each a list of plain values: nothing to skip,
-   nothing to rebuild. Their random source: sysRng('particles') (ptR, 35-particles.js) */
-for (const [name, list] of [['spray', spray], ['bubbles', bubbles], ['foam', foam], ['wakes', wakes], ['sparks', sparks], ['flames', flames],
-  ['embers', embers], ['flashes', flashes], ['welds', welds], ['rings', rings], ['debris', debris], ['dust', dust], ['grains', grains], ['ash', ash]])
+   after that file): every list stepParticles moves - spray, bubbles, foam, wakes, flames, flashes, welds, blast rings, debris,
+   the sea floor's dust, its sand grains and the falling ash. Each a list of plain values: nothing to skip, nothing to rebuild.
+   Their random source: sysRng('particles') (ptR, 35-particles.js) */
+for (const [name, list] of [['spray', spray], ['bubbles', bubbles], ['foam', foam], ['wakes', wakes], ['flames', flames],
+  ['flashes', flashes], ['welds', welds], ['rings', rings], ['debris', debris], ['dust', dust], ['grains', grains], ['ash', ash]])
   defTable(name, () => list, { net: false });   // (stage 5: each screen makes its own)
+// (Nov 1) the sparks and the embers: column tables (05-game-state.js). drawn: the fields their pixel layer reads (47-render-overlays.js
+// SPARK_L, EMBER_L) - what a live snapshot carries to the page; rows: a save from before they were columns
+defTable('sparks', null, { cols: sparks, drawn: ['x', 'y', 'px', 'py', 'life', 'max'], rows: rows => sparks.plainOfRows(rows), net: false });
+defTable('embers', null, { cols: embers, drawn: ['x', 'y', 'life', 'max'], rows: rows => embers.plainOfRows(rows), net: false });
 
 /* (engine stage 3) The splashes' tables (34-splashes-sinking.js and 34-zz-mine-splash.js own them; registered here because the
    tables (36-zz-tables.js) come after those files): the foam streaks a shell leaves under water, the jets of a splash and a
@@ -14507,7 +14548,7 @@ const SW_LOCAL = new Set(['camera', 'smokeAir']);
    buys nothing and the per-row text is the cost. Whole each time, field by field: numbers and booleans in one Float64Array
    (exact), strings as ids into the message's own list, anything else (an array, a small object) as plain data beside them.
    The page refills its own list's objects in place, by position (they're effects: nothing refers to one by id) */
-const SW_COLS = new Set(['spray', 'bubbles', 'foam', 'wakes', 'sparks', 'flames', 'embers', 'flashes', 'welds', 'rings', 'debris', 'dust', 'grains', 'ash',
+const SW_COLS = new Set(['spray', 'bubbles', 'foam', 'wakes', 'flames', 'flashes', 'welds', 'rings', 'debris', 'dust', 'grains', 'ash',
   'streaks', 'jets', 'msplashes', 'leaves', 'earthGrains', 'fwBits', 'hoseDrops', 'hoseSteams', 'seaBlood', 'seaGore', 'birdFeathers', 'birdGore', 'crewBlood', 'planeWisps', 'iceBits', 'rocketTrail',
   'trails', 'planeTrails', 'spikeBursts', 'seaSchools', 'msPings']);
 // lists the game keeps outside the tables that the page draws (spawned by the game's steps, so only the worker has them): sent
@@ -14523,16 +14564,14 @@ const SW_EXTRA_T = { skip: TBL_SKIP, depth: 4, after: null };
    When in doubt a field is kept. */
 const SW_DRAW = {
   // 35-particles.js' lists: 43-render-objects.js (drawBubbles, drawFoamBits + drawBigFoam, buildWakeField, drawDebris via
-  // 45-draw-vehicles.js, drawShocks, drawBlood), 47-render-overlays.js (the embers, welds, flashes, rings, drawSparks, drawAsh,
+  // 45-draw-vehicles.js, drawShocks, drawBlood), 47-render-overlays.js (the welds, flashes, rings, drawAsh,
   // the flames' glow), 46-smoke-fire-draw.js drawFire + sky/21-smoke.js fireLights (flames), 45-draw-vehicles.js drawDust
   // (dust, grains), 34-splashes-sinking.js drawSplashes (spray), 50-land-firewater.js drawHoseCollision (flames)
   spray: ['x', 'y', 's'],
   bubbles: ['x', 'y', 'r'],
   foam: ['x', 's', 'k', 'life', 'max', 'seed'],
   wakes: ['x', 'life', 'max', 'w', 'k'],
-  sparks: ['x', 'y', 'px', 'py', 'life', 'max'],
   flames: ['x', 'y', 'r', 'heat', 'behind', 'src'],
-  embers: ['x', 'y', 'life', 'max'],
   flashes: ['x', 'y', 'r', 'life', 'max'],
   welds: ['x', 'y', 'r', 'life', 'max'],
   rings: ['x', 'y', 'r', 'life'],
@@ -19600,6 +19639,125 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
   const slot = glSlot(G8.rT, false), X = GLC4.x, Y = GLC4.y, n = bot - top + 1, u1 = w / G8.rW, v0 = top / G8.rH, v1 = (bot + 1) / G8.rH;
   ctx._corners(0, top * rp, w * rp, n * rp);
   glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], 0, v0, u1, v0, u1, v1, 0, v1, glAlpha(s.ga), 1 + 8 * slot, 0);
+}
+
+/* ================================================================
+   PIXEL LAYERS (Nov 1 - the target architecture's GPU layers: claude/target-architecture.md "Layers"; rules.md section 6,
+   Systems, rule 7). A kind of thing kept as a column table (04-zz-coltable.js) is drawn by ONE instanced draw a view, from
+   columns, instead of a JavaScript loop of fillRect calls through GLCtx (each a call, a colour looked up, a quad packed).
+
+   A layer: pxLayer({ table, cols, per, pal, frame, view, rect }).
+     table  the column table drawn (rows 0..n-1, in order: a later row is painted over an earlier one, as the loop did)
+     cols   { name: kind } the layer's own columns the shader reads, as `a_name`: 'frame u8' / 'frame i32' filled once a frame
+            (frame), 'view u8' / 'view i32' filled for each view (view); u8 -> uint, i32 -> int
+     per    rectangles a row (the shader's j: 0..per-1, in the order the loop painted them)
+     pal    the colours, as fillStyle strings; the shader picks one by its index
+     frame  (T, own, n) => the values that don't depend on the view (a life / max compared with 0.4)
+     view   (T, own, n, lo, hi) => this view's whole pixel numbers (PX, PY, the block snapping, the cull against lo / hi): every
+            number the old loop got from doubles, worked out by the same JavaScript - float32 can't give them exactly
+            (Math.round(x * SV) comes out wrong for ~0.2% of rows). A tight loop over typed arrays: microseconds
+     rect   GLSL: bool rect(int j, out ivec4 r, out int c) - the row's j-th rectangle as fillRect(r.x, r.y, r.z, r.w) in the
+            view's pixels, in colour c; false: none. Whole numbers only (u_pb: PB)
+   pxDraw(L, lo, hi) draws it into the current context C at this point of the frame: the batch so far drawn first (glFlush),
+   then this draw on the same target, with the same blend, scissor and clip - nothing drawn before or after changes order.
+   The second view is the same small loop and a second draw; what is gone is the JavaScript per rectangle.
+   (An earlier try worked the doubles on the GPU in whole-number steps: exact, but too heavy a shader for a real driver - the
+   GTX 1660's context was lost at its link, Nov 1.)
+   WebGL2 only: under Canvas 2D (?gl=0) a layer draws nothing.
+   ================================================================ */
+const PXL = { pal: new Float32Array(32) };
+function pxLayer(o) {
+  const L = { table: o.table, cols: o.cols, per: o.per || 1, pal: o.pal, frame: o.frame || null, view: o.view, rect: o.rect, own: {}, ep: -1, tick: -1, prog: null, vao: null, bufs: null, U: null };
+  for (const k in L.cols) L.own[k] = new (L.cols[k].endsWith('u8') ? Uint8Array : Int32Array)(16);
+  return L;
+}
+const PXL_HEAD = `#version 300 es
+precision highp float; precision highp int;
+uniform vec2 u_size;           // (the target's size - as GL_VS)
+uniform vec4 u_m;              // (the context's transform: scale x, scale y, move x, move y - upright, as beginView sets it)
+uniform int u_pb;              // (PB)
+uniform vec4 u_pal[8];         // (the colours, premultiplied, as GLCtx packs them - fround(byte / 255))
+uniform int u_skip;            // (a bit a colour: not drawn - fully clear, as glFillQuad skips it)
+out vec4 v_col;
+`;
+const PXL_MAIN = `
+void main() {
+  ivec4 r; int c;
+  int j = gl_InstanceID % PER;
+  if (!rect(j, r, c) || r.z <= 0 || r.w <= 0 || ((u_skip >> c) & 1) != 0) { gl_Position = vec4(-2.0, -2.0, 0.0, 1.0); v_col = vec4(0.0); return; }
+  // (its corners as GLCtx._corners works them out, in GL_VS's order and sums)
+  float ax = u_m.x * float(r.x) + u_m.z, ay = u_m.y * float(r.y) + u_m.w, bx = ax + u_m.x * float(r.z), by = ay + u_m.y * float(r.w);
+  int k = gl_VertexID < 3 ? gl_VertexID : gl_VertexID == 3 ? 0 : gl_VertexID == 4 ? 2 : 3;
+  vec2 a_pos = k == 0 ? vec2(ax, ay) : k == 1 ? vec2(bx, ay) : k == 2 ? vec2(bx, by) : vec2(ax, by);
+  vec2 p = a_pos / u_size;
+  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+  v_col = u_pal[c];
+}`;
+// (the colour: an interpolated varying, as GL_FS's v_col is - the same sums on the same numbers)
+const PXL_FS = `#version 300 es
+precision highp float; precision highp int;
+in vec4 v_col; out vec4 o;
+void main() { o = v_col; }`;
+// the layer's program, attributes and buffers, made again after a lost context (GLR.epoch)
+function pxReady(L) {
+  if (L.ep === GLR.epoch) return;
+  const gl = GLR.gl, names = Object.keys(L.cols);
+  let att = '';
+  names.forEach((k, i) => { att += `layout(location=${i}) in ${L.cols[k].endsWith('u8') ? 'uint' : 'int'} a_${k};\n`; });
+  const p = gl.createProgram();
+  gl.attachShader(p, glShader(gl.VERTEX_SHADER, PXL_HEAD + att + `#define PER ${L.per}\n` + L.rect + PXL_MAIN));
+  gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, PXL_FS));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  L.prog = p; L.U = {};
+  for (const u of ['u_size', 'u_m', 'u_pb', 'u_pal', 'u_skip']) L.U[u] = gl.getUniformLocation(p, u);
+  L.vao = gl.createVertexArray(); gl.bindVertexArray(L.vao);
+  L.bufs = names.map((k, i) => {
+    const b = gl.createBuffer(), u8 = L.cols[k].endsWith('u8');
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.enableVertexAttribArray(i);
+    gl.vertexAttribIPointer(i, 1, u8 ? gl.UNSIGNED_BYTE : gl.INT, u8 ? 1 : 4, 0);
+    gl.vertexAttribDivisor(i, L.per);
+    return b;
+  });
+  gl.bindVertexArray(null); GLR.cur.vao = undefined;
+  L.ep = GLR.epoch; L.tick = -1;
+}
+// the layer's 'frame' or 'view' columns to the GPU, rows 0..n-1
+function pxUpload(L, n, when) {
+  const gl = GLR.gl;
+  Object.keys(L.cols).forEach((k, i) => {
+    if (!L.cols[k].startsWith(when)) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, L.bufs[i]);
+    gl.bufferData(gl.ARRAY_BUFFER, L.own[k], gl.STREAM_DRAW, 0, n);
+  });
+  GLR.stats.uploads++;
+}
+function pxDraw(L, lo, hi) {
+  const ctx = C, T = L.table, n = T.n;
+  if (!n || !GLR.on || GLR.lost || !(ctx instanceof GLCtx)) return;
+  const gl = GLR.gl, s = ctx.s, m = s.m;
+  pxReady(L);
+  for (const k in L.own) { const a = L.own[k]; if (a.length < n) { L.own[k] = new a.constructor(Math.max(n, a.length * 2)); L.tick = -1; } }
+  if (L.tick !== renderTick) { if (L.frame) L.frame(T, L.own, n); pxUpload(L, n, 'frame'); L.tick = renderTick; }   // (once a frame)
+  L.view(T, L.own, n, lo, hi); pxUpload(L, n, 'view');
+  // the batch so far drawn first, and this draw's target, blend, scissor and clip set as a fillRect here would have them
+  glBegin(ctx, s.op); glFlush(); glApplyState();
+  gl.useProgram(L.prog); GLR.cur.prog = L; gl.bindVertexArray(L.vao); GLR.cur.vao = L;
+  const U = L.U, t = ctx.target, pal = PXL.pal;
+  let skip = 0;
+  L.pal.forEach((css, i) => {
+    const col = glPack(glParse(css), s.ga);
+    for (let q = 0; q < 4; q++) pal[i * 4 + q] = Math.fround(((col >>> (8 * q)) & 255) / 255);
+    if (!(col >>> 24) && s.op !== 'copy' && s.op !== 'source-in' && s.op !== 'destination-in') skip |= 1 << i;
+  });
+  gl.uniform2f(U.u_size, t._w, t._h);
+  gl.uniform4f(U.u_m, m[0], m[3], m[4], m[5]);   // (upright: the world's contexts are, as beginView sets them - 42-render-sky.js)
+  gl.uniform1i(U.u_pb, PB);
+  gl.uniform4fv(U.u_pal, pal);
+  gl.uniform1i(U.u_skip, skip);
+  gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n * L.per);
+  GLR.stats.draws++; GLR.stats.quads += n * L.per;
 }
 
 /* ================================================================
@@ -28869,13 +29027,8 @@ function renderOverlays() {
   shipCut(x0, x1, () => drawFire(x0, x1)); ot = ema('ovFire', ot);   // (and of her own fire)
   drawSailsOver(x0, x1);                         // the yachts sit in front of the warships' smoke and fire
   ot = ema('ovSails', ot);
-  // embers: single pixels riding the wind
-  for (const e of embers) {
-    if (e.x < x0 - 5 || e.x > x1 + 5) continue;
-    const t = e.life / e.max;
-    C.fillStyle = t < 0.4 ? '#ffe27a' : t < 0.75 ? '#ff9a2a' : '#c4401a';
-    blk(e.x, e.y, 1);
-  }
+  // embers: single pixels riding the wind (Nov 1: their pixel layer - EMBER_L)
+  pxDraw(EMBER_L, x0 - 5, x1 + 5);
   C.save(); C.globalCompositeOperation = 'lighter';
   for (const w of welds) {
     if (w.x < x0 - 10 || w.x > x1 + 10) continue;
@@ -28932,18 +29085,59 @@ function renderOverlays() {
   ema('ovEnd', ot);
 }
 
+/* (Nov 1) THE EMBERS' AND THE SPARKS' PIXEL LAYERS (40-zzzz-layers.js): each drawn from its column table in one draw a view.
+   What the loops did, row by row in order: skipped one outside the view by more than its margin, coloured it by how far
+   through its life it is (life / max under 0.4, under 0.75, else), and painted it as one particle block (blk) - a spark also
+   a second block halfway back to where it was a step ago while under 0.6 of its life, and none before its first step. The
+   life's stage once a frame (frame), each view's blocks (view) by the same JavaScript as blk; the shader picks and places */
+const pxStage = (T, own, n, a, b) => { const L = T.c.life, M = T.c.max, st = own.st; for (let i = 0; i < n; i++) { const t = L[i] / M[i]; st[i] = t < a ? 0 : t < b ? 1 : 2; } };
+// (blk's block corner: floor(PX(x) / PB) * PB, and the same down)
+const pxBX = x => Math.floor(PX(x) / PB) * PB, pxBY = y => Math.floor(PY(y) / PB) * PB;
+const EMBER_L = pxLayer({
+  table: embers, cols: { st: 'frame u8', on: 'view u8', bx: 'view i32', by: 'view i32' }, pal: ['#ffe27a', '#ff9a2a', '#c4401a'],
+  frame: (T, own, n) => pxStage(T, own, n, 0.4, 0.75),
+  view: (T, own, n, lo, hi) => {
+    const X = T.c.x, Y = T.c.y, on = own.on, bx = own.bx, by = own.by;
+    for (let i = 0; i < n; i++) {
+      const x = X[i];
+      if (x < lo || x > hi) { on[i] = 0; continue; }
+      on[i] = 1; bx[i] = pxBX(x); by[i] = pxBY(Y[i]);
+    }
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) {
+  c = int(a_st); r = ivec4(a_bx, a_by, u_pb, u_pb);
+  return a_on != 0u;
+}
+`,
+});
+// (st: the colour 0-2, +4 while under 0.6 of its life: the second block; 255 before its first step)
+const SPARK_L = pxLayer({
+  table: sparks, per: 2, cols: { st: 'frame u8', on: 'view u8', bx: 'view i32', by: 'view i32', mx: 'view i32', my: 'view i32' }, pal: ['#fffbe0', '#ffd24a', '#ff7a1a'],
+  frame: (T, own, n) => {
+    pxStage(T, own, n, 0.4, 0.75);
+    const c = T.c, st = own.st;
+    for (let i = 0; i < n; i++) { if (c.px[i] !== c.px[i]) st[i] = 255; else if (c.life[i] / c.max[i] < 0.6) st[i] |= 4; }
+  },
+  view: (T, own, n, lo, hi) => {
+    const c = T.c, X = c.x, Y = c.y, st = own.st, on = own.on;
+    for (let i = 0; i < n; i++) {
+      const x = X[i];
+      if (x < lo || x > hi || st[i] === 255) { on[i] = 0; continue; }
+      on[i] = 1; own.bx[i] = pxBX(x); own.by[i] = pxBY(Y[i]);
+      if (st[i] & 4) { own.mx[i] = pxBX((x + c.px[i]) / 2); own.my[i] = pxBY((Y[i] + c.py[i]) / 2); }
+    }
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) {
+  c = int(a_st & 3u);
+  r = j == 0 ? ivec4(a_bx, a_by, u_pb, u_pb) : ivec4(a_mx, a_my, u_pb, u_pb);
+  return a_on != 0u && (j == 0 || (a_st & 4u) != 0u);
+}
+`,
+});
 // the sparks (hits on metal, the guns' muzzles) and the machine guns' rounds: over the world, and with the new sky under
 // deck 1's clouds (user Oct 27: "the machine gun fire should render behind the first cloud layer too... The same with the
 // sparks that they make")
-function drawSparks(x0, x1) {
-  for (const s of sparks) {
-    if (s.x < x0 - 20 || s.x > x1 + 20 || s.px === undefined) continue;
-    const t = s.life / s.max;
-    C.fillStyle = t < 0.4 ? '#fffbe0' : t < 0.75 ? '#ffd24a' : '#ff7a1a';
-    blk(s.x, s.y, 1);
-    if (t < 0.6) blk((s.x + s.px) / 2, (s.y + s.py) / 2, 1);
-  }
-}
+function drawSparks(x0, x1) { pxDraw(SPARK_L, x0 - 20, x1 + 20); }
 function drawBullets(x0, x1) {
   // (each round's yellow streak BULLET_LEN times the way it went this step - twice as long, user Oct 29)
   const K = BULLET_LEN, tail = b => blkLine(PX(b.x + (b.px - b.x) * K), PY(b.y + (b.py - b.y) * K), PX(b.x), PY(b.y));
