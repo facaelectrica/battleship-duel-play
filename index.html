@@ -425,13 +425,13 @@ const STORY_WORLD = (() => { try { return localStorage.getItem('bd_world') === '
 const worldOfMode = m => m === 'story' ? 'story' : 'open';
 // (menuPlay) the mode picked wants the other world: its keys made (the first time: the open world's, copied), the choice
 // kept, the page loaded again - and on it, the menu where it was (worldResume)
-function worldSwitch(mode) {
+function worldSwitch(mode, then) {
   try {
     if (mode === 'story') {
       if (!localStorage.getItem('bd_sw_init')) { for (const k of WORLD_KEYS) { const v = localStorage.getItem(k); if (v != null) localStorage.setItem(swKey(k), v); } localStorage.setItem('bd_sw_init', '1'); }
       localStorage.setItem('bd_world', 'story');
     } else localStorage.removeItem('bd_world');
-    sessionStorage.setItem('bd_world_go', mode);
+    sessionStorage.setItem('bd_world_go', (then ? then + ':' : '') + mode);
   } catch (e) { return false; }
   location.reload();
   return true;
@@ -440,11 +440,63 @@ function worldNeedsSwitch(mode) { return !SW_IN_WORKER && worldOfMode(mode) !== 
 // after the reload: the mode picked again, and STORY's slots open
 function worldResume() {
   let m = null; try { m = sessionStorage.getItem('bd_world_go'); sessionStorage.removeItem('bd_world_go'); } catch (e) { }
-  if (!m || worldNeedsSwitch(m)) return;
+  if (!m) return;
+  if (m.startsWith('edit:')) { const md = m.slice(5); if (!worldNeedsSwitch(md)) setTimeout(() => worldEdit(md), 300); return; }   // (the GAME EDITOR asked for in the other world)
+  if (worldNeedsSwitch(m)) return;
   menuSel.mode = m;
   if (m === 'story') { SSL.open = true; SSL.confirm = null; SSL.sel = 0; }
   else showToast('OPEN WORLD LOADED - PRESS PLAY');
 }
+
+/* (user Oct 31 21:00: "The game editor button should be right there on the main screen. If open world is highlighted, it's
+   the one that opens. If story is highlighted, that's the one that opens. Then inside the editor, I should have a drop down
+   that allows me to change which world I'm editing.") worldEdit(mode): the highlighted mode's world (STORY: the Story world;
+   OPEN WORLD and BATTLE: the open one) - the page loaded again in it if it's the other one - built as a game in it starts
+   (STORY: with no save slot - nothing saved), and the GAME EDITOR opened on it (the world's start: edModeEnter) */
+const edWorldMode = m => m === 'story' ? 'story' : 'land';
+let worldEditing = false;
+function worldEdit(mode) {
+  const md = edWorldMode(mode);
+  if (worldNeedsSwitch(md)) { worldSwitch(md, 'edit'); return; }
+  if (worldEditing) return;
+  worldEditing = true;
+  menuSel.mode = md;
+  if (md === 'story') { SSL.open = false; storySlot = null; }
+  loadThen(() => { menuApply(); ui.resume = false; freshWeather(); restartGame(); });   // (as menuPlay starts one - with nobody needed on a side: it's for the editor)
+  let tries = 0;
+  const open = () => {
+    const T = NSKY.editor.TUNE;
+    if (WORLD_READY && !LOADING && !ui.title && T.openBtn) { worldEditing = false; if (!T.open) T.openBtn.onclick(); return; }
+    if (++tries < 200) setTimeout(open, 100); else worldEditing = false;
+  };
+  setTimeout(open, 100);
+}
+// (user Oct 31 21:07: "The button should be on the bottom left like we have it now") the title shows the GAME EDITOR's own
+// corner button too; pressed there it opens the highlighted mode's world (worldEdit) instead of the editor over no world
+const worldEdOnTitle = () => !!(ui.title && !ui.menu && ui.picker < 0 && !SSL.open && !joinedRoom() && NET.role === 'local' && !LOADING);
+if (typeof window !== 'undefined' && !SW_IN_WORKER) {
+  window.addEventListener('click', ev => {
+    if (!worldEdOnTitle() || !ev.target || ev.target.id !== 'skyEdBtn') return;
+    ev.stopImmediatePropagation(); ev.preventDefault(); menuClick();
+    worldEdit(menuSel.mode);
+  }, { capture: true });
+  // inside the editor: WORLD - OPEN WORLD / STORY WORLD (the other one: the page loaded again in it, the editor open on it)
+  let wsel = null;
+  setInterval(() => {
+    const T = NSKY && NSKY.editor && NSKY.editor.TUNE; if (!T) return;
+    if (!T.built && document.body && worldEdOnTitle()) NSKY.editor.build({ rescreen: () => { }, snapshot: gameSnapshot, load: gameLoad });   // (the title, before any frame of the sky: the button made)
+    if (T.openBtn && ui.title) T.openBtn.hidden = !worldEdOnTitle();
+    if (!T.root || (wsel && wsel.isConnected)) return;
+    const box = document.createElement('div'); box.style.cssText = 'display:flex;align-items:center;gap:6px;margin:0 0 6px 0';
+    const lb = document.createElement('span'); lb.textContent = 'WORLD'; lb.style.color = '#7a8294';
+    wsel = document.createElement('select');
+    for (const [v, t] of [['land', 'OPEN WORLD (OPEN WORLD, BATTLE)'], ['story', 'STORY WORLD']]) { const o = document.createElement('option'); o.value = v; o.textContent = t; wsel.appendChild(o); }
+    wsel.value = STORY_WORLD ? 'story' : 'land';
+    wsel.addEventListener('change', () => { if (worldNeedsSwitch(wsel.value)) worldSwitch(wsel.value, 'edit'); });
+    box.appendChild(lb); box.appendChild(wsel); T.root.prepend(box);
+  }, 700);
+}
+if (typeof window !== 'undefined') window.__worldEdit = m => worldEdit(m);   // (tools)
 
 /* ================================================================
    Assets (cut out from the supplied art)
@@ -24290,7 +24342,7 @@ const SKYV = [null, null];                                // (each view's record
 // once a frame, before the views: the screen, the shared deck zoom, the weather, the newest bolt's light
 function skyNewFrame() {
   if (!NSKY.editor.TUNE.built && document.body) NSKY.editor.build({ rescreen: () => { }, snapshot: gameSnapshot, load: gameLoad });
-  NSKY.editor.show(ui.settings || NSKY.editor.open);
+  NSKY.editor.show(ui.settings || NSKY.editor.open || worldEdOnTitle());   // (and on the title: the highlighted mode's world - 00-world.js, Story chat Oct 31)
   const z0 = cam.view[0].z / ZOOM_DEFAULT, z1 = cam.merge >= 1 ? z0 : cam.view[1].z / ZOOM_DEFAULT;
   // the decks' drawing zoom: in steps (an eighth of a zoom step apart, 2^(1/6)), held while the camera's zoom stays within its
   // step - between steps the picture is only magnified (M), smoothly. Every frame at the exact zoom, a camera easing its zoom
@@ -47755,8 +47807,8 @@ window.addEventListener('keydown', ev => {
   ev.stopImmediatePropagation(); ev.preventDefault();
 }, { capture: true });
 window.__storySlots = { SSL, meta: storyMeta, slot: () => storySlot, saveN: () => [story.saveN, storySavedN], layout: storySlotsLayout, toClient: (X, Y) => [X * PIXU / dpr + STAGE_X, Y * PIXU / dpr + STAGE_Y] };   // (tools)
-// (user Oct 31 20:41: Story's own world - 00-world.js) which world is loaded, on the menu: STORY WORLD or OPEN WORLD, bottom left
-function drawWorldTag() { drawText(ug, STORY_WORLD ? 'STORY WORLD' : 'OPEN WORLD', 8, ubh - 14, STORY_WORLD ? '#ffd23a' : '#9fb3cf', 1); }
+// (user Oct 31 20:41: Story's own world - 00-world.js) which world is loaded, on the menu: STORY WORLD or OPEN WORLD, bottom right
+function drawWorldTag() { drawText(ug, (STORY_WORLD ? 'STORY WORLD' : 'OPEN WORLD') + ' LOADED', ubw - 8, ubh - 14, STORY_WORLD ? '#ffd23a' : '#9fb3cf', 1, 'right'); }   // (bottom right: the GAME EDITOR's button is bottom left)
 // (the page loaded again for the other world: the menu as it was left - worldResume; the Story world opened anew: STORY picked)
 if (typeof document !== 'undefined' && !SW_IN_WORKER) setTimeout(() => { worldResume(); if (STORY_WORLD && menuSel.mode !== 'story' && !SSL.open) menuSel.mode = 'story'; }, 0);
 
