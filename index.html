@@ -1877,8 +1877,8 @@ const smoke = new ColTable(SMOKE_FIELDS);
 // the fields the drawing reads (sky/21-smoke.js gatherSmokeNew, famOf, srcOf; 45-draw-vehicles.js drawSailsOver): what a live
 // snapshot of the simulation worker carries to the page, and the page to the smoke-drawing worker (with h)
 const SMOKE_DRAWN = ['x', 'y', 'r', 'age', 'life', 'alpha', 'dark', 'mist', 'quick', 'fam', 'src', 'fadeFrom', 'keep', 'kill', 'lonely', 'link', 'lumpy', 'prev', 'hd0', 'hd1', 'hd2'];
-// (the shells' trails: flat arrays, not objects - 47-render-overlays.js trStore; `trails.length` is how many pieces)
-const trails = trStore();
+// (the shells' trails: a column table, a piece a row - 47-render-overlays.js trFields; `trails.length` is how many pieces)
+const trails = new ColTable(trFields());
 let schools = [], sharks = [], whales = [], plants = [];
 const guns = [0, 1].map(() => ({ elev: 28, power: 0.55, reload: 0, aimShow: 0, press: 0, rk: [0, 0], pk: [0, 0] }));
 const tguns = [0, 1].map(() => ({ elev: 22, power: 0.5, reload: 0, aimShow: 0, press: 0, mg: 0 }));
@@ -2440,7 +2440,7 @@ function buildWorld(restore) {
   const noHarbour = p => STORY || (PLAYERS === 1 && p) || !!homeDock[p].stand;   // (STORY: no army - the player's own vehicles are parked at structures)          // (OPEN WORLD: a side with no harbour has no boats)
   for (let p = 0; p < 2; p++) if (homeDock[p].stand) { ships[p].state = 'gone'; subs[p].state = 'gone'; }
   for (let p = 0; p < 2; p++) { fleet[p].ship = noHarbour(p) ? 0 : FLEET.ship; fleet[p].sub = noHarbour(p) ? 0 : FLEET.sub; fleet[p].plane = STORY || (PLAYERS === 1 && p) ? 0 : FLEET.plane; fleetWait[p].ship = fleetWait[p].sub = 0; }
-  planes.length = 0; planes.push(makePlane(0), makePlane(1)); planeTrails.length = 0; planeWisps.length = 0; iceBits.length = 0;
+  planes.length = 0; planes.push(makePlane(0), makePlane(1)); planeTrails.length = 0; planeTrailPts.length = 0; planeWisps.length = 0; iceBits.length = 0;
   if (PLAYERS === 1) planes[1].state = 'gone', planes[1].wait = -1e9;
   if (STORY) for (let p = 0; p < 2; p++) { ships[p].state = 'gone'; subs[p].state = 'gone'; planes[p].state = 'gone'; planes[p].wait = -1e9; }   // (STORY: no army at all)
   oldShips.length = 0; oldSubs.length = 0; oldPlanes.length = 0;
@@ -3812,8 +3812,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 513;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 14:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 514;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 14:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8670,9 +8670,18 @@ function drawSubParts(sb) {
 let wwR_ = null; const wwR = () => (wwR_ || (wwR_ = sysRng('whitewater')))(), wwRnd = (a, b) => a + (b - a) * wwR();
 /* ---------------- White water: the billowing cloud of an underwater blast, and the foam a surfacing
    submarine throws off. Painted like the smoke (layered tones, lumpy pixel blobs) in sea-foam colours. ---------------- */
-const wclouds = [];
+/* (Nov 1, batch 2) the clouds of white water as a COLUMN TABLE (04-zz-coltable.js): a cloud a row - where it is and goes, its
+   size (r, growing at grow to rmax), life and age, lift, alpha, water, its blob's seed, drag (NaN: the usual 2.4) and g. Drawn
+   from the columns (drawWclouds), sent to the page as columns (the table's drawn ones) */
+const wclouds = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', r: 'f64', rmax: 'f64', grow: 'f64', life: 'f64', lift: 'f64', alpha: 'f64', water: 'u8', age: 'f64', seed: 'f64', drag: 'f64 NaN', g: 'f64' });
 const FOAM_TONES = [[255, 255, 255], [228, 242, 252], [190, 218, 242], [146, 186, 226], [98, 146, 204]];
-function spawnWcloud(o) { if (wclouds.length < 360) wclouds.push(Object.assign({ age: 0, seed: Math.floor(wwR() * 7) }, o)); }
+// (the arguments in the order the fields were given when a cloud was an object made for it: the same random calls in the same
+// order - the seed's after them)
+function spawnWcloud(x, y, vx, vy, r, rmax, grow, life, lift, alpha, water) {
+  if (wclouds.n >= 360) return;
+  const seed = Math.floor(wwR() * 7), i = wclouds.add(), c = wclouds.c;
+  c.x[i] = x; c.y[i] = y; c.vx[i] = vx; c.vy[i] = vy; c.r[i] = r; c.rmax[i] = rmax; c.grow[i] = grow; c.life[i] = life; c.lift[i] = lift; c.alpha[i] = alpha; c.water[i] = water ? 1 : 0; c.seed[i] = seed;
+}
 // (Nov 1) a blast's pressure rings (the water's distortion bends round them: 47-render-overlays.js) and a depth charge's gas
 // balls: column tables, made by their row makers (addRow), saved and sent with the tables (36-zzz-splash-tables.js)
 const blastRings = new ColTable({ sq: 'id', x: 'f64', y: 'f64', r: 'f64', speed: 'f64', max: 'f64', life: 'f64', amp: 'f64' });
@@ -8775,7 +8784,7 @@ function underwaterBlast(x, y, power, ball) {
   for (let i = 0; i < n; i++) {
     // a lumpy ball that billows out, then a plume that rolls up toward the surface
     const a = wwRnd(0, Math.PI * 2), d0 = Math.pow(wwR(), 0.7) * 16 * power, sp = Math.pow(wwR(), 0.6) * wwRnd(30, 100) * power, plume = i % 3 === 0;
-    spawnWcloud({ x: x + Math.cos(a) * d0, y: y + Math.sin(a) * d0, vx: Math.cos(a) * sp * 0.8, vy: Math.sin(a) * sp * 0.7 - (plume ? wwRnd(20, 50) : 0), r: wwRnd(2.5, 4.5), rmax: wwRnd(7, 15) * (0.85 + 0.25 * power), grow: wwRnd(24, 40), life: wwRnd(2.6, 5), lift: plume ? wwRnd(45, 75) : wwRnd(10, 26), alpha: 1, water: true });
+    spawnWcloud(x + Math.cos(a) * d0, y + Math.sin(a) * d0, Math.cos(a) * sp * 0.8, Math.sin(a) * sp * 0.7 - (plume ? wwRnd(20, 50) : 0), wwRnd(2.5, 4.5), wwRnd(7, 15) * (0.85 + 0.25 * power), wwRnd(24, 40), wwRnd(2.6, 5), plume ? wwRnd(45, 75) : wwRnd(10, 26), 1, true);
   }
   for (let i = 0; i < 70 * power; i++) { const a = wwRnd(0, 6.28), s = wwRnd(10, 90); addBubble(x + Math.cos(a) * wwRnd(0, 10), y + Math.sin(a) * wwRnd(0, 10), Math.cos(a) * s, Math.sin(a) * s - 30, wwRnd(1, 3.6)); }
   for (let k = -18; k <= 18; k += DX) water.push(x + k, -1800 * power * clamp(1 - (y - WATER_Y) / 300, 0.2, 1) * (1 - Math.abs(k) / 20));
@@ -8793,56 +8802,64 @@ function emergeFoam(sb, amt) {
   }
 }
 function stepWclouds(dt) {
-  for (let i = wclouds.length - 1; i >= 0; i--) {
-    const w = wclouds[i];
-    w.age += dt;
-    if (w.age > w.life) { wclouds.splice(i, 1); continue; }
-    const t = w.age / w.life;
-    const dr = w.drag === undefined ? 2.4 : w.drag;
-    w.vx *= 1 - dr * dt; w.vy *= 1 - dr * dt;
-    w.vy -= w.lift * (1 - t) * dt;
-    if (w.g) w.vy += w.g * dt;
-    w.x += w.vx * dt; w.y += w.vy * dt;
-    w.r = Math.min(w.rmax, w.r + w.grow * dt * (1 - 0.6 * t));
-    const sy = surfaceY(w.x);
-    if (w.water) {
+  const W = wclouds, c = W.c, X = c.x, Y = c.y, VX = c.vx, VY = c.vy, R = c.r, AGE = c.age;
+  for (let i = W.n - 1; i >= 0; i--) {
+    AGE[i] += dt;
+    if (AGE[i] > c.life[i]) { W.drop(i); continue; }
+    const t = AGE[i] / c.life[i];
+    const dr = c.drag[i] !== c.drag[i] ? 2.4 : c.drag[i];
+    VX[i] *= 1 - dr * dt; VY[i] *= 1 - dr * dt;
+    VY[i] -= c.lift[i] * (1 - t) * dt;
+    if (c.g[i]) VY[i] += c.g[i] * dt;
+    X[i] += VX[i] * dt; Y[i] += VY[i] * dt;
+    R[i] = Math.min(c.rmax[i], R[i] + c.grow[i] * dt * (1 - 0.6 * t));
+    const sy = surfaceY(X[i]);
+    if (c.water[i]) {
       // underwater: it can't rise out of the sea; at the top it spreads and breaks into foam
-      if (w.y < sy + w.r * 0.45) { w.y = sy + w.r * 0.45; w.vy = 0; w.vx *= 1 + dt; w.age += dt; if (wwR() < dt * 6) spawnFoam(w.x + wwRnd(-w.r, w.r), wwRnd(1.4, 3)); }
-    } else if (w.y > sy - w.r * 0.25) {
+      if (Y[i] < sy + R[i] * 0.45) { Y[i] = sy + R[i] * 0.45; VY[i] = 0; VX[i] *= 1 + dt; AGE[i] += dt; if (wwR() < dt * 6) spawnFoam(X[i] + wwRnd(-R[i], R[i]), wwRnd(1.4, 3)); }
+    } else if (Y[i] > sy - R[i] * 0.25) {
       // above it: it falls back, slides off along the surface and turns to foam
-      w.y = sy - w.r * 0.25; w.vy = Math.min(w.vy, 0); w.vx *= 1 + 0.6 * dt;
-      if (wwR() < dt * 8) spawnFoam(w.x + wwRnd(-w.r, w.r), wwRnd(1.6, 3.2));
+      Y[i] = sy - R[i] * 0.25; VY[i] = Math.min(VY[i], 0); VX[i] *= 1 + 0.6 * dt;
+      if (wwR() < dt * 8) spawnFoam(X[i] + wwRnd(-R[i], R[i]), wwRnd(1.6, 3.2));
     }
   }
+  W.sweep();
 }
+// (Nov 1) the clouds in this view, a frame: each one's place, size, alpha, seed and palette (WCP: the palette's list) - grown, not
+// made a frame
+const WCL = { n: 0, cap: 0, cx: null, cy: null, R: null, a: null, seed: null }, WCP = [];
 function drawWclouds(x0, x1) {
-  if (!wclouds.length) return;
+  if (!wclouds.n) return;
   const fx = E.fxq, pal = FOAM_TONES.map(c => Math.round(c[0] * fx[0]) + ',' + Math.round(c[1] * fx[1]) + ',' + Math.round(c[2] * fx[2]));
   // (under the water: the sea's colour and dark at its depth, user Oct 28 - uwLight; by 40-unit steps of depth so the
   // blobs' coloured copies stay few)
   const palAt = {}, palOf = y => { const q = Math.max(0, Math.round((y - WATER_Y) / 40)); return palAt[q] || (palAt[q] = FOAM_TONES.map(c => uwLight(WATER_Y + q * 40, c, true).map((v, j) => Math.round(v * fx[j] / 3) * 3).join(','))); };
-  const list = [];
-  for (const w of wclouds) {
-    if (w.x + w.r * 1.4 < x0 || w.x - w.r * 1.4 > x1) continue;
-    const t = w.age / w.life, late = t > 0.45 ? (t - 0.45) / 0.55 : 0;
-    const R = w.r * SV / SMK * Math.min(1, 0.5 + w.age * 4);
+  const c = wclouds.c, L = WCL;
+  if (L.cap < wclouds.n) { L.cap = wclouds.n * 2; for (const k of ['cx', 'cy', 'R', 'a', 'seed']) L[k] = new Float64Array(L.cap); }
+  let m = 0;
+  for (let i = 0; i < wclouds.n; i++) {
+    const wx = c.x[i], wy = c.y[i], r = c.r[i], age = c.age[i], water = c.water[i];
+    if (wx + r * 1.4 < x0 || wx - r * 1.4 > x1) continue;
+    const t = age / c.life[i], late = t > 0.45 ? (t - 0.45) / 0.55 : 0;
+    const R = r * SV / SMK * Math.min(1, 0.5 + age * 4);
     if (R < 0.8) continue;
     // under the water it's seen through the sea: a touch fainter the deeper it is, in the water's colour there
-    const deep = w.water ? clamp((w.y - WATER_Y) / 300, 0, 1) : 0;
-    list.push({ cx: PX(w.x), cy: PY(w.y), R, a: w.alpha * (1 - late * late) * (1 - 0.35 * deep), seed: w.seed, pal: w.water && w.y > WATER_Y + 8 ? palOf(w.y) : pal });
+    const deep = water ? clamp((wy - WATER_Y) / 300, 0, 1) : 0;
+    L.cx[m] = PX(wx); L.cy[m] = PY(wy); L.R[m] = R; L.a[m] = c.alpha[i] * (1 - late * late) * (1 - 0.35 * deep); L.seed[m] = c.seed[i]; WCP[m] = water && wy > WATER_Y + 8 ? palOf(wy) : pal; m++;
   }
   // light from above: the lit side is the top, the shadowed side underneath
-  if (!list.length) return;
+  if (!m) return;
   puffBegin();
   for (const [size, shift, tone] of PUFF_LAYERS) {
-    for (const p of list) {
-      const R = Math.min(60, Math.round(p.R * size));
+    for (let j = 0; j < m; j++) {
+      const pR = L.R[j], R = Math.min(60, Math.round(pR * size));
       if (R < 1) continue;
-      const sp = blobSprite(R, p.seed, p.pal[tone]), off = p.R * shift * SMK;
-      const ox = Math.floor(p.cx / SMK) * SMK, oy = Math.floor((p.cy - off) / SMK) * SMK;
-      puffBlob(sp, ox, oy, R, p.a);
+      const sp = blobSprite(R, L.seed[j], WCP[j][tone]), off = pR * shift * SMK;
+      const ox = Math.floor(L.cx[j] / SMK) * SMK, oy = Math.floor((L.cy[j] - off) / SMK) * SMK;
+      puffBlob(sp, ox, oy, R, L.a[j]);
     }
   }
+  WCP.length = 0;
   puffEnd();
 }
 
@@ -9707,7 +9724,7 @@ function mineSplash(x, amt) {
   // (user Oct 29: "we also need some bubbles and a bit of foam under the water and some distortion in that water effect we
   // do") under it: the water bent round it, white water churned just under the surface, and bubbles racing up
   disturb(x, 1.6 * amt, 220);
-  for (let i = 0; i < 6 * amt; i++) spawnWcloud({ x: x + armMineRnd(-36, 36) * amt, y: sy + armMineRnd(3, 14), vx: armMineRnd(-25, 25), vy: armMineRnd(-6, 6), r: armMineRnd(2, 3.5), rmax: armMineRnd(5, 8), grow: armMineRnd(16, 26), life: armMineRnd(1.2, 2.2), lift: armMineRnd(6, 14), alpha: 0.55, water: true });
+  for (let i = 0; i < 6 * amt; i++) spawnWcloud(x + armMineRnd(-36, 36) * amt, sy + armMineRnd(3, 14), armMineRnd(-25, 25), armMineRnd(-6, 6), armMineRnd(2, 3.5), armMineRnd(5, 8), armMineRnd(16, 26), armMineRnd(1.2, 2.2), armMineRnd(6, 14), 0.55, true);
   for (let i = 0; i < 70 * amt; i++) addBubble(x + armMineRnd(-50, 50) * amt, sy + armMineRnd(6, 60), armMineRnd(-14, 14), -armMineRnd(20, 60), armMineRnd(0.8, 2.6));
   for (let i = 0; i < 60 * amt; i++) {   // (droplets of all sizes thrown all round - its rays: 34-zz-mine-splash.js)
     if (spray.n > 700) break;
@@ -9798,7 +9815,26 @@ const planes = [];
 let vehPlaneR_ = null;
 function vehPlaneR() { return (vehPlaneR_ || (vehPlaneR_ = sysRng('vehPlanes')))(); }
 function vehPlaneRnd(a, b) { return a + (b - a) * vehPlaneR(); }
-const planeTrails = [];                        // the white lines planes leave: strands of points that spread and fade
+/* the white lines planes leave: strands of points that spread and fade. (Nov 1, batch 2) Two column tables (04-zz-coltable.js):
+   the STRANDS (planeTrails: the plane's id, its colour if it has one - col, cr, cg, cb - its drift, lp: its last point's id) and
+   their POINTS (planeTrailPts: strand - its strand's id - where, age, life (max), width, alpha), the points of a strand in the
+   order laid, those of all strands in one table. A plane's strand (pl.strand) is the strand's id */
+const planeTrails = new ColTable({ sq: 'id', pid: 'f64', col: 'u8', cr: 'u8', cg: 'u8', cb: 'u8', drift: 'f64', lp: 'ref' });
+const planeTrailPts = new ColTable({ sq: 'id', strand: 'ref', x: 'f64', y: 'f64', age: 'f64', max: 'f64', w: 'f64', a: 'f64' });
+// each strand's points in their order, for a pass over the strands in theirs (the counting sort's arrays: PTO the points'
+// places, strand by strand; PTS each strand's first place in it, n + 1 of them)
+let PTO = new Int32Array(64), PTK = new Int32Array(64), PTS = new Int32Array(17), PTW = new Int32Array(16), PTT = new Uint8Array(16);
+function ptRoom(n, m) {
+  if (PTO.length < n) { PTO = new Int32Array(n * 2); PTK = new Int32Array(n * 2); }
+  if (PTW.length < m) { PTS = new Int32Array(m * 2 + 1); PTW = new Int32Array(m * 2); PTT = new Uint8Array(m * 2); }
+}
+function ptOrder() {
+  const S = planeTrails, P = planeTrailPts, n = P.n, m = S.n, ref = P.c.strand;
+  ptRoom(n, m); PTS.fill(0, 0, m + 1);
+  for (let i = 0; i < n; i++) { const k = S.row(ref[i]); PTK[i] = k; if (k >= 0) PTS[k + 1]++; }
+  for (let k = 0; k < m; k++) { PTS[k + 1] += PTS[k]; PTW[k] = PTS[k]; }
+  for (let i = 0; i < n; i++) { const k = PTK[i]; if (k >= 0) PTO[PTW[k]++] = i; }
+}
 // streaks of air rushing past a fast plane (Nov 1: a column table, a row a wisp in the order made - wispRow; a big plane's wing
 // vapour too, 50-land-civlife.js): where its head is, its age and life, its length L back along ux, uy
 const planeWisps = new ColTable({ sq: 'id', x: 'f64', y: 'f64', age: 'f64', max: 'f64', L: 'f64', ux: 'f64', uy: 'f64' });
@@ -10435,12 +10471,14 @@ function stepPlaneStall(pl, dt) {
 // a point on the trail behind the tail: a strand runs on as long as the trail does
 function trailPoint(pl, w, a, jit, col, life) {
   const sp = Math.max(1, Math.hypot(pl.vx, pl.vy)), tx = pl.x - pl.vx / sp * 30, ty = pl.y - pl.vy / sp * 30 - 3;
-  let s = pl.strand;
-  if (s && !!s.col !== !!col) s = null;             // the cloud's smudge and the cold trail are separate strands
-  if (!s) { s = pl.strand = { pts: [], id: pl.id, col, drift: col ? 0.45 : 0.12 }; planeTrails.push(s); }
-  const q = s.pts[s.pts.length - 1];
-  if (q && Math.abs(tx - q.x) + Math.abs(ty - q.y) < 4) return;
-  s.pts.push({ x: tx, y: ty + vehPlaneRnd(-jit, jit), age: 0, max: life * vehPlaneRnd(0.85, 1.1), w: w * vehPlaneRnd(0.85, 1.15), a });
+  const S = planeTrails, sc = S.c, P = planeTrailPts, pc = P.c;
+  let si = typeof pl.strand === 'number' ? S.row(pl.strand) : -1;
+  if (si >= 0 && !!sc.col[si] !== !!col) si = -1;   // the cloud's smudge and the cold trail are separate strands
+  if (si < 0) { si = S.add(); sc.pid[si] = pl.id; if (col) { sc.col[si] = 1; sc.cr[si] = col[0]; sc.cg[si] = col[1]; sc.cb[si] = col[2]; } sc.drift[si] = col ? 0.45 : 0.12; pl.strand = sc.sq[si]; }
+  const q = P.row(sc.lp[si]);                       // (its last point: gone - faded - only once all of it has)
+  if (q >= 0 && Math.abs(tx - pc.x[q]) + Math.abs(ty - pc.y[q]) < 4) return;
+  const y = ty + vehPlaneRnd(-jit, jit), max = life * vehPlaneRnd(0.85, 1.1), ww = w * vehPlaneRnd(0.85, 1.15), i = P.add();
+  pc.strand[i] = sc.sq[si]; pc.x[i] = tx; pc.y[i] = y; pc.age[i] = 0; pc.max[i] = max; pc.w[i] = ww; pc.a[i] = a; sc.lp[si] = pc.sq[i];
 }
 // frozen (user Oct 24 night): iced up past three quarters, or the engine stopped, its guns, rails and bomb
 // shackles won't work
@@ -10501,16 +10539,16 @@ function sfxIceCrack(x) {
 }
 function stepPlaneTrails(dt) {
   stepIceBits(dt);
-  let total = 0;
-  for (let i = planeTrails.length - 1; i >= 0; i--) {
-    const s = planeTrails[i], P = s.pts;
-    for (const q of P) { q.age += dt; q.x += windAt(q.y) * s.drift * dt + (s.col ? 2 : 0) * dt; q.y += 0.4 * dt; }
-    let k = 0; while (k < P.length && P[k].age > P[k].max) k++;
-    if (k) P.splice(0, k);
-    const live = planes.some(pl => pl && pl.strand === s);
-    if (P.length < 2 && !live) { planeTrails.splice(i, 1); continue; }
-    total += P.length;
-  }
+  // (Nov 1: the points moved, each strand's faded ones off its start taken away, and a strand of fewer than two points no plane
+  // is laying any more gone with what's left of it - as when each strand held its points: the same sums)
+  { const S = planeTrails, sc = S.c, P = planeTrailPts, pc = P.c, n = P.n, m = S.n, X = pc.x, Y = pc.y, AGE = pc.age, MAX = pc.max, ref = pc.strand;
+    ptRoom(n, m); const trim = PTT, cnt = PTW; trim.fill(1, 0, m); cnt.fill(0, 0, m);
+    for (let i = 0; i < n; i++) { const k = PTK[i] = S.row(ref[i]); if (k < 0) continue; AGE[i] += dt; X[i] += windAt(Y[i]) * sc.drift[k] * dt + (sc.col[k] ? 2 : 0) * dt; Y[i] += 0.4 * dt; }
+    for (let i = 0; i < n; i++) { const k = PTK[i]; if (k < 0) { P.drop(i); continue; } if (trim[k] && AGE[i] > MAX[i]) P.drop(i); else { trim[k] = 0; cnt[k]++; } }
+    let gone = 0;
+    for (let k = m - 1; k >= 0; k--) { const id = sc.sq[k]; if (cnt[k] < 2 && !planes.some(pl => pl && pl.strand === id)) { S.drop(k); gone++; } }
+    if (gone) for (let i = 0; i < n; i++) { const k = PTK[i]; if (k >= 0 && S.gone[k]) P.drop(i); }
+    S.sweep(); P.sweep(); }
   // (no cap on the points, user Oct 30: "no smoke or fire or debris limits" - every strand fades out whole)
   { const A = planeWisps.c.age, M = planeWisps.c.max; for (let i = planeWisps.n - 1; i >= 0; i--) { A[i] += dt; if (A[i] > M[i]) planeWisps.drop(i); } planeWisps.sweep(); }
 }
@@ -10630,6 +10668,9 @@ function planeInCloud(pl, g, cov) {
   xb.globalCompositeOperation = 'source-over';
   C.drawImage(B.b, g.x, g.y);
 }
+// (Nov 1) the alpha trailStyle(col, ai)'s text carries, as a number (40-gl.js glA3); PTSC: a strand's own colour, an array kept
+// a strand place (filled from its columns each draw)
+const trailA = ai => glA3(Math.min(32, ai) / 32), PTSC = [];
 function trailStyle(col, ai) {
   const key = col.join(',');
   let st = trailStyles[key];
@@ -10656,19 +10697,26 @@ function drawPlanesAir(x0, x1) {
   // the trails, under the planes: one line each, spreading and fading as the minute goes by
   const tc = mix3(mix3([248, 250, 255], [255, 210, 180], E.sunset * 0.55), [96, 108, 136], clamp(E.night * 1.1, 0, 0.8)).map(Math.round);
   if (Object.keys(trailStyles).length > 400) trailStyles = {};
-  for (const s of planeTrails) {
-    const P = s.pts, col = s.col || tc, grow = s.col ? 5 : 9;
-    for (let j = 1; j < P.length; j++) {
-      const a = P[j - 1], b = P[j];
-      if ((a.x < x0 - 30 && b.x < x0 - 30) || (a.x > x1 + 30 && b.x > x1 + 30)) continue;
-      const u = clamp(a.age / a.max, 0, 1), sprd = 1 + a.age / grow;
-      const al = a.a * Math.pow(1 - u, 1.2) / Math.sqrt(sprd) * (j < 5 ? j / 5 : 1);
-      const ai = Math.round(al * 32);
-      if (ai < 1) continue;
-      C.fillStyle = trailStyle(col, ai);
-      pixLine(PX(a.x), PY(a.y), PX(b.x), PY(b.y), Math.max(PB, Math.round(a.w * sprd * SV / PB) * PB));
+  // (Nov 1: the strands' points in their order - ptOrder - each piece's rectangles in a colour given as numbers (pixLine's c, a:
+  // fillRectA, the alpha as trailStyle's text carries it), no colour text set a piece; the last piece's text left set at the end)
+  { const S = planeTrails, sc = S.c, pc = planeTrailPts.c, X = pc.x, Y = pc.y, AGE = pc.age, MAX = pc.max, PW = pc.w, PA = pc.a, SC = PTSC;
+    ptOrder();
+    let lc = null, la = 0;
+    for (let k = 0; k < S.n; k++) {
+      const own = sc.col[k], col = own ? (SC[k] || (SC[k] = [0, 0, 0])) : tc, grow = own ? 5 : 9;
+      if (own) { col[0] = sc.cr[k]; col[1] = sc.cg[k]; col[2] = sc.cb[k]; }
+      for (let j = 1, i0 = PTS[k], L = PTS[k + 1] - i0; j < L; j++) {
+        const a = PTO[i0 + j - 1], b = PTO[i0 + j];
+        if ((X[a] < x0 - 30 && X[b] < x0 - 30) || (X[a] > x1 + 30 && X[b] > x1 + 30)) continue;
+        const u = clamp(AGE[a] / MAX[a], 0, 1), sprd = 1 + AGE[a] / grow;
+        const al = PA[a] * Math.pow(1 - u, 1.2) / Math.sqrt(sprd) * (j < 5 ? j / 5 : 1);
+        const ai = Math.round(al * 32);
+        if (ai < 1) continue;
+        pixLine(PX(X[a]), PY(Y[a]), PX(X[b]), PY(Y[b]), Math.max(PB, Math.round(PW[a] * sprd * SV / PB) * PB), col, trailA(ai));
+        lc = own ? col.slice() : col; la = ai;
+      }
     }
-  }
+    if (lc) C.fillStyle = trailStyle(lc, la); }
   drawIceBits(x0, x1);
   // streaks of air rushing past
   { const c = planeWisps.c, WX = c.x, WY = c.y;
@@ -10755,7 +10803,9 @@ function drawPlanesAir(x0, x1) {
   }
 }
 // a line of pixel blocks from one point to another, th thick
-function pixLine(xa, ya, xb, yb, th) {
+// (Nov 1) c, a: its rectangles in that colour and alpha (fillRectA - no colour text); without: in the fill colour set
+function pxlRect(c, a, x, y, w, h) { if (c) fillRectA(C, c, a, x, y, w, h); else C.fillRect(x, y, w, h); }
+function pixLine(xa, ya, xb, yb, th, c, a) {
   const dx = xb - xa, dy = yb - ya, n = Math.max(1, Math.round(Math.max(Math.abs(dx), Math.abs(dy)) / PB)), h = th >> 1;
   // (the line's blocks in a row - the next one PB further along, on the same line of blocks - go as one rectangle: the same
   // pixels painted the same number of times; a block drawn again (a step shorter than PB) stays its own rectangle, as before)
@@ -10765,19 +10815,19 @@ function pixLine(xa, ya, xb, yb, th) {
     for (let i = 0; i < n; i++) {
       const x = xa + dx * i / n, y = ya + dy * i / n, bx = Math.floor(x / PB) * PB, by = Math.floor((y - h) / PB) * PB;
       if (rn && by === ry && bx === rx + rd) { rn++; rd += d; continue; }
-      if (rn) C.fillRect(d > 0 ? rx : rx + rd + PB, ry, rn * PB, th);
+      if (rn) pxlRect(c, a, d > 0 ? rx : rx + rd + PB, ry, rn * PB, th);
       rx = bx; ry = by; rn = 1; rd = d;
     }
-    if (rn) C.fillRect(d > 0 ? rx : rx + rd + PB, ry, rn * PB, th);
+    if (rn) pxlRect(c, a, d > 0 ? rx : rx + rd + PB, ry, rn * PB, th);
   } else {
     const d = dy >= 0 ? PB : -PB;
     for (let i = 0; i < n; i++) {
       const x = xa + dx * i / n, y = ya + dy * i / n, bx = Math.floor((x - h) / PB) * PB, by = Math.floor(y / PB) * PB;
       if (rn && bx === rx && by === ry + rd) { rn++; rd += d; continue; }
-      if (rn) C.fillRect(rx, d > 0 ? ry : ry + rd + PB, th, rn * PB);
+      if (rn) pxlRect(c, a, rx, d > 0 ? ry : ry + rd + PB, th, rn * PB);
       rx = bx; ry = by; rn = 1; rd = d;
     }
-    if (rn) C.fillRect(rx, d > 0 ? ry : ry + rd + PB, th, rn * PB);
+    if (rn) pxlRect(c, a, rx, d > 0 ? ry : ry + rd + PB, th, rn * PB);
   }
 }
 function sfxPlaneIn(x) {
@@ -11860,23 +11910,24 @@ function stepShells(dt) {
     // which filled the trail list in a few seconds of heavy firing and left new shells with no trail)
     // pieces share their end points, so the trail stays one unbroken line however the wind bends it
     // (a bomb is only dropped: no puff, and its trail starts a second later, as it gathers speed)
-    // (60-fps chat, Oct 31: the trails are flat arrays - 47-render-overlays.js trStore; s.seg is the number of the piece it's
-    // laying, found by it. A piece of it that faded away under a shell that hardly moves - none ever has - starts a new trail)
-    const seg = s.seg, TS = trails, k = seg ? trFind(TS, seg) : -1;
+    // (60-fps chat, Oct 31: the trails are a table of numbers - 47-render-overlays.js, a column table since Nov 1; s.seg is the id
+    // of the piece it's laying, found by it. A piece of it that faded away under a shell that hardly moves - none ever has - starts
+    // a new trail)
+    const seg = s.seg, TS = trails, k = seg ? trFind(TS, seg) : -1, tc = TS.c;
     // (a missile's white trail starts half a second out, user Oct 24: the launch puff stays by the plane, the flame
     // alone leads it away; and it ends when the motor burns out)
     // (a bomb leaves no trail at all, user Oct 24 night: it only falls, carried by the plane's speed)
     if (s.from === 'bomb' || (s.from === 'rocket' && (!powered || s.age - (s.ia || 0) < 0.5))) { /* no trail (yet, or any more) */ }
-    else if (k >= 0 && Math.hypot(s.x - TS.X[TS.A1[k]], s.y - TS.Y[TS.A1[k]]) < 34) { TS.X[TS.A2[k]] = s.x; TS.Y[TS.A2[k]] = s.y; }
+    else if (k >= 0 && Math.hypot(s.x - tc.x1[k], s.y - tc.y1[k]) < 34) { tc.x2[k] = s.x; tc.y2[k] = s.y; }
     else {
       // (user Oct 30: "Smoke from trails must ALWAYS disappear smoothly" - many missiles' old trails "suddenly faded out
       // very fast"; Oct 29: "Details are never capped". There was a cap here: at 700 pieces the oldest was dropped for each
       // new one - a missile lays a piece every 34 units, so a handful of them cut every older trail off. Gone: each piece
       // lives its whole fade (stepTrails), made cheap enough instead - stepTrails, drawTrails, 47-render-overlays.js)
-      const p1 = k >= 0 ? TS.A2[k] : trPoint(TS, px, py, trlR() * 100, s.from !== 'bomb' && s.from !== 'rocket' ? 1 : 0);
-      const p2 = trPoint(TS, s.x, s.y, trlR() * 100, 0);
-      s.seg = trAdd(TS, p1, p2, k < 0, s.from === 'rocket' || s.from === 'tank');   // (the tank's missile too, user Oct 25: thin and soon gone)
-      if (k >= 0) TS.NX[k] = s.seg;
+      // (a new trail's first point and seed, then the far end's: the seeds in that order; going on, its first end the last piece's far one)
+      const s1 = k >= 0 ? 0 : trlR() * 100, s2 = trlR() * 100;
+      s.seg = trAdd(TS, k, px, py, s1, s.from !== 'bomb' && s.from !== 'rocket' ? 1 : 0, s.x, s.y, s2, k < 0, s.from === 'rocket' || s.from === 'tank');   // (the tank's missile too, user Oct 25: thin and soon gone)
+      if (k >= 0) TS.c.nx[k] = s.seg;
     }
     let done = false; blastOpen();   // (what goes off here is BLAST_K bigger - 33-zz-blast-scale)
     // the harbour (deck, block, hangar) stops a shell: it bursts on the stone, doing no harm
@@ -13925,7 +13976,7 @@ const TABLES = {};
 const TBL_NO_ROWS = Object.freeze([]);
 function defTable(name, list, o = {}) {
   const keep = new Set(o.keep || []), skip = new Set([...TBL_SKIP, ...(o.skip || [])].filter(k => !keep.has(k)));
-  const ct = o.cols || null, ctLoad = ct && ((d, byU) => ct.fromPlainCols(Array.isArray(d) && d.length === 1 && d[0] && d[0].soa ? d[0] : o.rows && Array.isArray(d) ? o.rows(d, byU) : { n: 0 }));
+  const ct = o.cols || null, ctLoad = ct && ((d, byU) => ct.fromPlainCols(Array.isArray(d) && d.length === 1 && d[0] && d[0].soa && d[0].cols ? d[0] : o.rows && Array.isArray(d) ? o.rows(d, byU) : { n: 0 }));
   TABLES[name] = { name, list: list || (() => TBL_NO_ROWS), depth: o.depth ?? 4, make: o.make || (() => ({})), after: o.after || null, skip,
     net: o.net ?? true, netSkip: new Set(o.netSkip || []), perPlayer: o.perPlayer || 0, netIds: new Set(o.netIds || []),
     save: ct ? () => [ct.plainCols()] : o.save || null, load: ct ? ctLoad : o.load || null, cols: ct, drawn: o.drawn || null, near: !!o.near,
@@ -14051,7 +14102,25 @@ defTable('oldSubs', () => oldSubs, { keep: ['scorch','parts'], make: vehSubMake,
 // the ice shed off its wings
 defTable('planes', () => planes, { perPlayer: 2, keep: ['strand','cover','splat'], make: d => makePlane(d.id || 0) });
 defTable('oldPlanes', () => oldPlanes, { keep: ['strand','cover','splat'], make: d => makePlane(d.id || 0) });
-defTable('planeTrails', () => planeTrails, { net: false, make: () => ({ pts: [], id: 0, col: 0, drift: 0.12 }) });
+// (Nov 1) the trails: two column tables (29-plane.js) - the strands and their points; a save from before (a strand a row, its
+// points in it) read into both
+defTable('planeTrails', null, { cols: planeTrails, drawn: ['col', 'cr', 'cg', 'cb'], rows: ptFromRows, net: false });
+defTable('planeTrailPts', null, { cols: planeTrailPts, drawn: ['strand', 'x', 'y', 'age', 'max', 'w', 'a'], net: false });
+function ptFromRows(rows) {
+  const S = { soa: 1, n: 0, top: 0, strs: [], cols: {} }, Q = { soa: 1, n: 0, top: 0, strs: [], cols: {} };
+  for (const F of planeTrails.f) S.cols[F.k] = []; for (const F of planeTrailPts.f) Q.cols[F.k] = [];
+  const num = v => typeof v === 'number' ? v : 0;
+  rows.forEach((r, k) => {
+    const id = k + 1, col = r && Array.isArray(r.col) ? r.col : null; let lp = 0;
+    for (const p of (r && r.pts) || []) { Q.n++; Q.top++; lp = Q.top; for (const F of planeTrailPts.f) Q.cols[F.k].push(F.k === 'sq' ? Q.top : F.k === 'strand' ? id : num(p && p[F.k])); }
+    S.n++; S.top = id;
+    const v = { sq: id, pid: num(r && r.id), col: col ? 1 : 0, cr: col ? col[0] : 0, cg: col ? col[1] : 0, cb: col ? col[2] : 0, drift: r && typeof r.drift === 'number' ? r.drift : 0.12, lp };
+    for (const F of planeTrails.f) S.cols[F.k].push(v[F.k]);
+  });
+  planeTrailPts.fromPlainCols(Q);
+  return S;
+}
+defTable('planeWisps', () => planeWisps, { net: false, make: () => ({ x: 0, y: 0, age: 0, max: 0.5, L: 20, ux: 1, uy: 0 }) });
 defTable('planeWisps', null, { cols: planeWisps, rows: rows => planeWisps.plainOfRows(rows), net: false });   // (Nov 1: a column table)
 defTable('iceBits', null, { cols: iceBits, drawn: ['x', 'y', 'life', 'max', 's', 'tw'], rows: rows => iceBits.plainOfRows(rows), net: false });   // (Nov 1: a column table)
 // the crews (32-crew freshCrew): crew[p] each side's (loaded into the same two objects: NET.home holds them); the blood on the pier
@@ -14191,7 +14260,7 @@ defTable('camera', () => [CAM_ROW], { net: false, make: () => CAM_ROW });
 /* (engine stage 3) The weapons' and hits' tables - their systems' files are read before the tables (36-zz-tables.js), so they
    are registered here; each file still the one owner of its lists, its random source made on first use in its own file. */
 // shells, bullets and duds (33-guns-shells.js; random source sysRng('armShells'), armShellR). A shell's trail piece (seg) is the
-// number of a piece of the trails table (Oct 31: they're flat arrays now - 47-render-overlays.js trStore), saved as that number;
+// id of a piece of the trails table (a column table - 47-render-overlays.js trFields), saved as that number;
 // its minimap line (track) holds the shell back, saved as a reference; a bullet's passing civilian ships (pass) likewise. Owners are plain numbers (a player, or a vehicle's id)
 defTable('shells', () => shells, {
   make: () => ({ x: 0, y: 0, vx: 0, vy: 0, owner: 0, from: 'ship', age: 0, trail: 0, under: false, ut: 0 }),
@@ -14314,6 +14383,12 @@ defTable('msplRays', null, { cols: msplRays, net: false });
 // (Nov 1) a blast's pressure rings and a depth charge's gas balls (26-white-water.js): column tables
 defTable('blastRings', null, { cols: blastRings, drawn: ['x', 'y', 'r', 'max', 'amp'], rows: rows => blastRings.plainOfRows(rows), net: false });
 defTable('gasBalls', null, { cols: gasBalls, drawn: ['x', 'y', 'r', 't', 'seed'], rows: rows => gasBalls.plainOfRows(rows), net: false });
+
+/* (Nov 1, batch 2) the clouds of white water's table (26-white-water.js wclouds, a column table - registered here because the
+   tables (36-zz-tables.js) come after that file): drawn by drawWclouds from where it is, its size, age and life, alpha, seed and
+   whether it's in the water; a page's copy is those columns (net: false - effects, made on each screen). Before Nov 1 it was a
+   list the snapshots carried beside the tables (SW_EXTRA), never saved */
+defTable('wclouds', null, { cols: wclouds, drawn: ['x', 'y', 'r', 'age', 'life', 'alpha', 'seed', 'water'], net: false });
 
 /* ONLINE PLAY FROM THE TABLES (engine migration, stage 5 - plan: https://claude.ai/artifact/7osEef5ubafK3gkAEjY3Dt, "Online play
    on the same state"). Behind a switch, off unless the page is opened with ?nettables=1: with it off, nothing here runs and online
@@ -14932,37 +15007,24 @@ const SW_LOCAL = new Set(['camera', 'smokeAir']);
    buys nothing and the per-row text is the cost. Whole each time, field by field: numbers and booleans in one Float64Array
    (exact), strings as ids into the message's own list, anything else (an array, a small object) as plain data beside them.
    The page refills its own list's objects in place, by position (they're effects: nothing refers to one by id) */
-const SW_COLS = new Set([
-  'rocketTrail',
-  'trails', 'planeTrails', 'seaSchools']);
+const SW_COLS = new Set(['seaSchools']);
 // lists the game keeps outside the tables that the page draws (spawned by the game's steps, so only the worker has them): sent
 // as columns the same way
-const SW_EXTRA = { wclouds: () => wclouds, airStreaks: () => airStreaks };
+const SW_EXTRA = {};   // (Nov 1: none left - each a table now)
 const SW_EXTRA_T = { skip: TBL_SKIP, depth: 4, after: null };
 /* The page only DRAWS these lists in live mode (it never steps them: design section 2), so a live snapshot carries each row's
    DRAWN fields only - the ones the drawing reads, listed here per list from the draw functions named; the velocities, timers
    and seeds the step uses stay in the worker. A full snapshot (the gate's mirror, a resync) carries every field. A list not
-   named here goes whole (everything of it is drawn: airStreaks; the shells'
-   trails, flat arrays, go by their own columns - trSnap; a column table, the smoke's puffs, by its own: swColTable). References
+   named here goes whole (everything of it is drawn; a column table - the smoke's puffs,
+   the shells' trails - by its own: swColTable). References
    drawing follows stay in. 'a.b' names a field of the small objects inside the list field a (the fish of a school: swNestOf).
    When in doubt a field is kept. */
 const SW_DRAW = {
   // 35-particles.js' lists: 43-render-objects.js (drawShocks, drawBlood), 47-render-overlays.js (drawAsh,
   // the flames' glow), 46-smoke-fire-draw.js drawFire + sky/21-smoke.js fireLights (flames), 50-land-firewater.js drawHoseCollision (flames)
   // 35-zz-sea-kills.js drawSeaKills; 37-birds.js drawBirds (feathers, gore); 45-draw-vehicles.js drawBlood (the crew's)
-  // 29-plane.js drawPlanesAir (the trails' points and colour), drawIceBits
-  planeTrails: ['pts', 'col'],
-  // 50-land-space.js rocketPuffR (the rocket's puffs)
-  rocketTrail: ['x', 'y', 'r', 'age', 'life', 'k', 'ground', 'w', 'h'],
-  // (Oct 31) the shells' trails, flat arrays: what a live snapshot carries of them (trSnap - sky/21-smoke.js gatherSmokeNew,
-  // 47-render-overlays.js trailR, 41-sky-new.js read the points' x, y, age, seed, launch and the pieces' points, root and thin;
-  // the velocities, the wobble and the pieces' numbers are the step's alone) - named as the fields of the table's saved row, for
-  // the checks (tools/sw-check.js); the snapshot itself goes by trSnap
-  trails: ['n', 'np', 'a1', 'a2', 'fl', 'x', 'y', 'age', 'seed', 'la'],
   // 44-shadows-seafloor.js drawSeaLife (each fish of a school; its x, y are undefined until its first step)
   seaSchools: ['type', 'x', 'y', 'dir', 'fish.x', 'fish.y', 'fish.dx', 'fish.dy', 'fish.face'],
-  // SW_EXTRA: 26-white-water.js drawWclouds
-  wclouds: ['x', 'y', 'r', 'age', 'life', 'alpha', 'seed', 'water'],
 };
 // each list's drawn fields as sets: top (the row's fields) and sub (per list field, the fields of the small objects in it)
 const SW_DRAWK = {};
@@ -15054,7 +15116,7 @@ function swKeysOf(arr, skip, only) {
 /* (60-fps chat, Oct 31) A SNAPSHOT'S NUMBERS IN ONE BLOCK: every column, mask and slice of a live snapshot is a view into one big
    buffer (or a few, as it fills), not a buffer each - hundreds of small buffers moved to the page and dropped every frame. The
    page reads the same numbers through the same kinds of arrays; nothing of it keeps one (it copies the values out) */
-let SWF32 = false;   // (a live snapshot's number columns as 32-bit floats - swColOf, trSnap)
+let SWF32 = false;   // (a live snapshot's number columns as 32-bit floats - swColOf)
 const SWA = { buf: null, off: 0, list: [], size: 1 << 16, used: 0 };
 function swNew(T, n) {
   const by = T.BYTES_PER_ELEMENT * n; let off = (SWA.off + 7) & ~7;
@@ -15063,29 +15125,6 @@ function swNew(T, n) {
   return new T(SWA.buf, off, n);
 }
 const swCopy = (a, i0, i1) => { const v = swNew(a.constructor, i1 - i0); v.set(a.subarray(i0, i1)); return v; };
-/* (60-fps chat, Oct 31, user 19:46: the heavy battle choppy) THE SHELLS' TRAILS' COLUMNS: the trails are flat arrays
-   (47-render-overlays.js trStore), sent as copies of them - the pieces within the page's views (as swInView picks a row: either
-   end within SW_MARGIN of a view's span; a full snapshot: all of them) and their points, each once (trPack): the drawn numbers
-   (x, y, age, seed as 32-bit floats in a live snapshot - SWF32 - launch; the pieces' two points, root and thin); a full one
-   everything the step needs too, 64-bit. Built in one tight loop over the arrays, no thing walked: with the trails as objects
-   this was ~6-7 ms of the worker a snapshot in the heavy battle. The page puts them in its own arrays in place (trSnapInto) */
-function trSnap(full, drawn, bufs) {
-  const S = trails, n = S.n, sp = REG.spans, sel = S.SEL;
-  let m = 0;
-  if (full || !sp.length) m = n;
-  else {
-    const A1 = S.A1, A2 = S.A2, X = S.X, ns = sp.length;
-    for (let i = 0; i < n; i++) {
-      const xa = X[A1[i]], xb = X[A2[i]], x = (xa < xb ? xa : xb) - SW_MARGIN, x2 = (xa < xb ? xb : xa) + SW_MARGIN;
-      for (let k = 0; k < ns; k += 2) if (x2 >= sp[k] && x <= sp[k + 1]) { sel[m++] = i; break; }
-    }
-  }
-  const o = trPack(S, m === n ? null : sel, m, swNew, SWF32, !drawn);
-  for (const k in o) if (ArrayBuffer.isView(o[k])) bufs.push(o[k].buffer);
-  return o;
-}
-// (the page) the trails' columns into its own arrays
-function trSnapInto(C) { if (C && typeof C.n === 'number') trFill(trails, C); }
 /* (Nov 1) A COLUMN TABLE'S HAND-OFF (04-zz-coltable.js - the smoke's puffs): its columns copied into one buffer (ColTable.pack:
    a live snapshot the drawn ones - the table's drawn, 36-zz-tables.js - a full one every one), moved to the page, which takes
    them as its own (adopt) and hands the buffer it held before back with its next inputs (SWCB: swHostIn here, swGuestFrame
@@ -15094,13 +15133,17 @@ function trSnapInto(C) { if (C && typeof C.n === 'number') trFill(trails, C); }
    a view's span; a link to a row not sent is a row gone there) */
 const SWCB = { spare: {}, back: {}, sel: new Int32Array(1024) };   // (the worker: a buffer per table to pack into; the page: the buffers to hand back)
 function swColTable(t, full, drawn, bufs) {
-  const T = t.cols, sp = REG.spans, n = T.n, X = T.c.x, R = T.c.r;
+  // (a row's place: x, give or take r; or, a table of pieces with two ends (the shells' trails), from x1 to x2 - either end within
+  // SW_MARGIN of a view's span, as the trails' own columns were picked before, Nov 1)
+  const T = t.cols, sp = REG.spans, n = T.n, X = T.c.x || T.c.x1, X2 = T.c.x ? null : T.c.x2, R = T.c.r;
   let sel = null, m = 0;
   if (!full && t.near && sp.length && X) {
     sel = SWCB.sel.length >= n ? SWCB.sel : (SWCB.sel = new Int32Array(n * 2));
     for (let i = 0; i < n; i++) {
-      const x = X[i], r = (R ? Math.abs(R[i]) : 0) + SW_MARGIN;
-      for (let k = 0; k < sp.length; k += 2) if (x + r >= sp[k] && x - r <= sp[k + 1]) { sel[m++] = i; break; }
+      let lo, hi;
+      if (X2) { const a = X[i], b = X2[i]; lo = (a < b ? a : b) - SW_MARGIN; hi = (a < b ? b : a) + SW_MARGIN; }
+      else { const x = X[i], r = (R ? Math.abs(R[i]) : 0) + SW_MARGIN; lo = x - r; hi = x + r; }
+      for (let k = 0; k < sp.length; k += 2) if (hi >= sp[k] && lo <= sp[k + 1]) { sel[m++] = i; break; }
     }
   }
   const P = T.pack(drawn && t.drawn ? t.drawn : T.sent(), SWCB.spare[t.name], sel, m);
@@ -19285,6 +19328,9 @@ function fillRectP(ctx, col, x, y, w, h) {
   const X = GLC4.x, Y = GLC4.y;
   glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], 0, 0, 0, 0, 0, 0, 0, 0, col, 0, 0);
 }
+// (Nov 1) the alpha a colour's text made by rgbs(c, a) carries - its three decimals as toFixed gives them, read back as the
+// GL context reads the text (42-render-sky.js rgbsK: the same but on a tie): for fillRectA in place of fillStyle = rgbs(c, a)
+const glA3 = a => { const p = a * 1000; return p - Math.floor(p) === 0.5 ? +a.toFixed(3) : Math.round(p) / 1000; };
 function fillRectA(ctx, c, a, x, y, w, h) {
   if (!(ctx instanceof GLCtx)) { const f = ctx.fillStyle; ctx.fillStyle = rgbs(c, a); ctx.fillRect(x, y, w, h); ctx.fillStyle = f; return; }
   if (GLR.lost) return;
@@ -23972,11 +24018,11 @@ function gatherSmokeNew(want) {
     }
   }
   // the shell and missile trails (src/47-render-overlays.js drawTrails' blobs along each piece)
-  // (Oct 31: the trails are flat arrays - 47-render-overlays.js trStore: each piece's two points' numbers read from them)
-  const TS = trails, TA1 = TS.A1, TA2 = TS.A2, TFL = TS.FL, TX = TS.X, TY = TS.Y, TAG = TS.AGE, TSD = TS.SEED, TLA = TS.LA;
+  // (Nov 1: the trails are a column table - 47-render-overlays.js trFields: each piece's two ends' numbers in its own columns)
+  const TS = trails, TC = TS.c, TFL = TC.fl, TX1 = TC.x1, TY1 = TC.y1, TAG1 = TC.age1, TSD1 = TC.seed1, TLA1 = TC.la1, TX2 = TC.x2, TY2 = TC.y2, TAG2 = TC.age2;
   if (want('tower')) for (let ti = 0; ti < TS.n; ti++) {
-    const q1 = TA1[ti], q2 = TA2[ti], thin = TFL[ti] & 2, root = TFL[ti] & 1, ak = thin ? THIN_AGE : 1, rk = thin ? THIN_R : 1;
-    const p1x = TX[q1], p1y = TY[q1], p1a = TAG[q1], p1s = TSD[q1], p2x = TX[q2], p2y = TY[q2], p2a = TAG[q2];
+    const thin = TFL[ti] & 2, root = TFL[ti] & 1, ak = thin ? THIN_AGE : 1, rk = thin ? THIN_R : 1;
+    const p1x = TX1[ti], p1y = TY1[ti], p1a = TAG1[ti], p1s = TSD1[ti], p2x = TX2[ti], p2y = TY2[ti], p2a = TAG2[ti];
     const x1 = cxOf(p1x), y1 = cyOf(p1y), x2 = cxOf(p2x), y2 = cyOf(p2y), lenW = Math.hypot(p2x - p1x, p2y - p1y);
     if (Math.max(x1, x2) < -40 || Math.min(x1, x2) > SMN.cw + 40 || Math.max(y1, y2) < -40 || Math.min(y1, y2) > SMN.h + 40) continue;
     const ageMid = (p1a + p2a) / 2 * ak, rMin = Math.max(0.5, trailR(Math.min(p1a, p2a) * ak) * 0.8 * rk * kx);
@@ -23999,7 +24045,7 @@ function gatherSmokeNew(want) {
       if (R < 2.2) smnAdd(cxOf(wx), cyOf(wy), Math.max(0.55, R), (h3 - 0.5) * R, aa, 3, h1);
       else smnPuff(cxOf(wx), cyOf(wy), R, (h3 - 0.5) * R * 0.6, aa, 3, h1);
     }
-    if (TLA[q1] && root) {
+    if (TLA1[ti] && root) {
       const age = p1a, u = Math.min(1, age / 16);
       if (u < 1) for (let k = 0; k < 7; k++) {
         const h = fxHash(k * 2.17 + p1s), g = fxHash(k * 4.9 + p1s * 0.7), br = (4 + 15 * (1 - Math.exp(-age / 1.6))) * (0.6 + 0.6 * g), ang = h * Math.PI * 2, d = br * (0.4 + 0.8 * g);
@@ -24009,12 +24055,13 @@ function gatherSmokeNew(want) {
     }
   }
   // the space rocket's column and the heaps along the water (src/50-land-space.js drawRocketTrail's puffs)
-  if (want('space')) for (const p of rocketTrail) {
-    if (p.h === undefined) p.h = fxHash(++smHc * 0.6180339 + 0.37);
-    const R = rocketPuffR(p) * kx, a = clamp(0.85 * Math.min(1, p.age * 3) * Math.pow(1 - p.age / p.life, 1.3) * 1.5, 0, 1);
+  // (Nov 1: a column table - 50-land-space.js ROCKET_FIELDS; here or, packed, in the worker)
+  if (want('space')) { const c = rocketTrail.c, H = c.h; for (let i = 0; i < rocketTrail.n; i++) {
+    if (H[i] !== H[i]) H[i] = fxHash(++smHc * 0.6180339 + 0.37);
+    const age = c.age[i], R = rocketPuffR(c, i) * kx, a = clamp(0.85 * Math.min(1, age * 3) * Math.pow(1 - age / c.life[i], 1.3) * 1.5, 0, 1);
     if (a < 0.03) continue;
-    smnPuff(cxOf(p.x), cyOf(p.y), Math.max(0.55, R * Math.sqrt(a)), (p.h - 0.5) * R, a, p.w ? 3 : 4, p.h);
-  }
+    smnPuff(cxOf(c.x[i]), cyOf(c.y[i]), Math.max(0.55, R * Math.sqrt(a)), (H[i] - 0.5) * R, a, c.w[i] ? 3 : 4, H[i]);
+  } }
 }
 // the fires that light the smoke near them: [x, y, radius (cells), strength]
 function fireLights() {
@@ -24221,7 +24268,7 @@ function smdTake(S_, dn, gw, gx0, gy0, gx1, gy1) {
 // a puff is in (want), its kind of smoke (famOf), whether the puff before it is still there. Late or failed: the main
 // thread gathers on the second frame, as before. ?smdcheck=1: the main thread gathers too, on the first frame, from the
 // same puffs, and the balls that differ are counted (SMD.chk - stats().smd); ?smgw=0 (P.smgw) keeps the gather here.
-const SMG_K = 7, SMG_KS = ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV'];
+const ROCKET_SENT = ['x', 'y', 'r', 'k', 'ground', 'age', 'life', 'h', 'w'], SMG_KS = ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV'];
 const SMD_CHECK = (() => { try { return /[?&]smdcheck=1/.test(location.search); } catch (e) { return false; } })();
 if ((() => { try { return /[?&]smgw=0/.test(location.search); } catch (e) { return false; } })()) P.smgw = 0;
 // the worker's text before smdBody: the gather's functions as they are here, and what they read, filled by each job
@@ -24234,14 +24281,14 @@ function smgText() {
     `const trailLate = (() => { const clamp = ${O.clamp}, smoothstep = ${O.smoothstep}, TRAIL_HOLD = ${v(TRAIL_HOLD)}, TRAIL_LIFE = ${v(TRAIL_LIFE)}; return ${trailLate}; })();`,
     `const TRAIL_SHAPE = ${v(TRAIL_SHAPE)}, TRAIL_LIFE = ${v(TRAIL_LIFE)}, THIN_AGE = ${v(THIN_AGE)}, THIN_R = ${v(THIN_R)}, SMN_TILE_OFS = ${v(SMN_TILE_OFS)};`,
     `let SV = 1, CAMPX = 0, TOPPX = 0, SMN = null, smHc = 0; const PX = ${PX}, PY = ${PY}, wpx = ${wpx}, wpy = ${wpy};`,
-    `const FXV = {}, SMG = {}, P = {}, SMSUN = {}, E = {}, SMN_HC = new Map(), TGM = new Map(), rocketTrail = []; let trails = { n: 0 };`,
+    `const FXV = {}, SMG = {}, P = {}, SMSUN = {}, E = {}, SMN_HC = new Map(), TGM = new Map();`,
     // (Nov 1: the puffs as the same column table as the game's - its class and fields, from their text - filled from the columns
     // the page packs (smoke.pack, adopted: smgRun); a puff's kind and pass worked out here by the same functions)
-    `${ColTable}`, `const SMOKE_FIELDS = ${v(SMOKE_FIELDS)}, smoke = new ColTable(SMOKE_FIELDS), FAM_N = ${v(FAM_N)};`,
+    `${ColTable}`, `const SMOKE_FIELDS = ${v(SMOKE_FIELDS)}, smoke = new ColTable(SMOKE_FIELDS), FAM_N = ${v(FAM_N)}, rocketTrail = new ColTable(${v(ROCKET_FIELDS)}), trails = new ColTable(${v(trFields())});`,
     famOf, smLate, smRollH, `const srcOf = ${srcOf}, smWant = ${smWant};`,
     // (worked out on the main thread and sent: the rocket's puff's size, the ground under a launch's foot; the light is laid
     // after the gather (smgAfter's smBodies) - the worker is used only when it is, SMN.lazyL)
-    `const rocketPuffR = p => p.rr, trailGround = x => TGM.get(x);`,
+    `const rocketPuffR = ${rocketPuffR}, trailGround = x => TGM.get(x);`,
     // (the slots' table, SMG's last step: the pass's table and slots, kept here between jobs - SMS; the arrays the main thread
     // gave back to fill again - SMS_RB)
     `let SMS = null, SMS_RB = null; const smsH = ${smsH};`,
@@ -24255,14 +24302,13 @@ function smgRun(m) {
   if (m.sync) SMS = smsFrom(m.sync);   // (the main thread painted this pass itself last: its table, taken over)
   if (m.rb) SMS_RB = m.rb;
   SMN = { cap: 0, n: 0, X: null, Y: null, R: null, Z: null, A: null, F: null, LX: null, LY: null, LZ: null, TK: null, TU: null, TV: null, SID: null, cw: m.cw, h: m.h, tkz: m.tkz, lazyL: true };
-  const T = m.T, K = m.K;
-  rocketTrail.length = 0; TGM.clear();
+  TGM.clear();
   // (the puffs: the page's columns, packed - this table's columns views into that buffer; the one it held goes back)
   const sb = smoke.adopt(m.S);
-  // (the trails: the main thread's arrays, copied - the same numbers, the same order; the ground under each launch puff)
-  trails = { n: m.nt, A1: T.A1, A2: T.A2, FL: T.FL, X: T.X, Y: T.Y, AGE: T.AGE, SEED: T.SEED, LA: T.LA };
-  for (let i = 0; i < m.nt; i++) { const q = T.A1[i]; if (T.LA[q] && (T.FL[i] & 1)) TGM.set(T.X[q], T.G[i]); }
-  for (let i = 0; i < m.nk; i++) { const o = i * 7; rocketTrail.push({ x: K[o], y: K[o + 1], rr: K[o + 2], age: K[o + 3], life: K[o + 4], h: K[o + 5], w: K[o + 6] }); }
+  // (the trails: the page's columns, packed - views into that buffer; the ground under each launch puff)
+  if (m.TR) { trails.adopt(m.TR); const c = trails.c; for (let i = 0; i < trails.n; i++) if (c.la1[i] && (c.fl[i] & 1)) TGM.set(c.x1[i], m.G[i]); } else trails.length = 0;
+  // (the rocket's puffs: the page's columns, packed - views into that buffer)
+  if (m.R) rocketTrail.adopt(m.R); else rocketTrail.length = 0;
   gatherSmokeNew(smWant(m.pass, m.wantB));
   const n = SMN.n, res = { g: 1, id: m.id, seq: m.seq, n, part: 1, sb }, tr = sb ? [sb] : [];
   if (!n) { res.part = 0; return [res, tr]; }
@@ -24320,30 +24366,27 @@ function smgSend(want, cw, h, fast, tkA0) {
   // columns and those numbers copied into one buffer (the one the worker gave back last, if big enough) - Nov 1
   smRollH(want);
   const S = smoke.pack(SMOKE_DRAWN_H, SMN.sbuf); SMN.sbuf = null;
-  // (the trails, Oct 31: copies of their flat arrays - the pieces' and the points' in use (47-render-overlays.js trStore) - and the
-  // ground under each first piece's launch puff (trailGround reads the land: here))
-  let nt = 0; const TS = trails, T = {};
+  // (the trails, Nov 1: their drawn columns packed (47-render-overlays.js TR_DRAWN) - and the ground under each first piece's
+  // launch puff (trailGround reads the land: here))
+  let TR = null, G = null;
   if (want('tower')) {
-    nt = TS.n; const np = TS.np;
-    T.A1 = TS.A1.slice(0, nt); T.A2 = TS.A2.slice(0, nt); T.FL = TS.FL.slice(0, nt); T.G = new Float64Array(nt);
-    T.X = TS.X.slice(0, np); T.Y = TS.Y.slice(0, np); T.AGE = TS.AGE.slice(0, np); T.SEED = TS.SEED.slice(0, np); T.LA = TS.LA.slice(0, np);
-    for (let i = 0; i < nt; i++) { const q = T.A1[i]; if (T.LA[q] && (T.FL[i] & 1)) T.G[i] = trailGround(T.X[q]); }
+    const c = trails.c, n = trails.n; TR = trails.pack(TR_DRAWN, null); G = new Float64Array(n);
+    for (let i = 0; i < n; i++) if (c.la1[i] && (c.fl[i] & 1)) G[i] = trailGround(c.x1[i]);
   }
-  let nk = 0, K = new Float64Array(0);
+  // (the rocket's puffs, Nov 1: each given its hash first, as the gather does, then the drawn columns packed - the worker works
+  // out each one's size by the same rocketPuffR)
+  let R = null;
   if (want('space')) {
-    K = new Float64Array(rocketTrail.length * SMG_K);
-    for (const p of rocketTrail) {
-      if (p.h === undefined) p.h = fxHash(++smHc * 0.6180339 + 0.37);
-      const o = nk++ * SMG_K; K[o] = p.x; K[o + 1] = p.y; K[o + 2] = rocketPuffR(p); K[o + 3] = p.age; K[o + 4] = p.life; K[o + 5] = p.h; K[o + 6] = p.w ? 1 : 0;
-    }
+    const H = rocketTrail.c.h; for (let i = 0; i < rocketTrail.n; i++) if (H[i] !== H[i]) H[i] = fxHash(++smHc * 0.6180339 + 0.37);
+    R = rocketTrail.pack(ROCKET_SENT, null);
   }
   SMN.gseq = (SMN.gseq || 0) + 1; SMN.gres = null; SMN.gwait = true; SMN.gwt = 0; SMN.chk = null; SMD.gsent++;
   // (the light's numbers too - the sun in this view, the hour's: the bodies and their light are worked out there, as here now)
-  const m = { g: 1, id: SMN.did, seq: SMN.gseq, S, pass: SMN.pass, wantB: P.behind, T, nt, K, nk, sv: SV, campx: CAMPX, toppx: TOPPX, fsv: FXV.SV, pxX: FXV.pxX, pxY: FXV.pxY, mx: SMG.mx, my: SMG.my, cw, h, tkz: SMN.tkz, smbump: P.smbump, smtex: P.smtex, fast, tkA0,
+  const m = { g: 1, id: SMN.did, seq: SMN.gseq, S, pass: SMN.pass, wantB: P.behind, TR, G, R, sv: SV, campx: CAMPX, toppx: TOPPX, fsv: FXV.SV, pxX: FXV.pxX, pxY: FXV.pxY, mx: SMG.mx, my: SMG.my, cw, h, tkz: SMN.tkz, smbump: P.smbump, smtex: P.smtex, fast, tkA0,
     sun: [SMSUN.x, SMSUN.y, SMSUN.H, SMSUN.Z, SMSUN.s4], behind: E.behind, overcast: E.overcast, lightz: P.lightz, chk: SMD_CHECK, sl: 1, thin: (P.smthin ?? 1) > 0 };
   // (the slots: the worker's table. Painted here last (or never yet), this thread's table goes over with the job (smsSnap), a
   // copy kept here (G_.mir); the arrays of the last paint go back to be filled again)
-  const G_ = gsmState(SMN), tl = [S.buf, K.buffer]; for (const k in T) tl.push(T[k].buffer);
+  const G_ = gsmState(SMN), tl = [S.buf]; if (R) tl.push(R.buf); if (TR) tl.push(TR.buf, G.buffer);
   if (G_.own !== 'w') { m.sync = smsSnap(G_); G_.mir = smsCopy(m.sync); G_.own = 'w'; tl.push(m.sync.key.buffer, m.sync.ins.buffer, m.sync.p.buffer, m.sync.use.buffer, m.sync.free.buffer); }
   if (G_.rb) { m.rb = G_.rb; tl.push(G_.rb[0].buffer, G_.rb[1].buffer); G_.rb = null; }
   // (?smdcheck=1: the main thread's own gather of the same puffs now, into a scratch store, and its steps after (smgAfter, with
@@ -25523,8 +25566,8 @@ function smearAir(a, vx, vy, sp, dt) {
   // (no smoke near it - none in its cell of the smoke's air or those round it, no trail close: nothing to do)
   let any = false;
   for (let j = -1; j <= 1 && !any; j++) for (let i = -1; i <= 1; i++) { const g = gIdx(x + i * SG.cell, y + j * SG.cell); if (g >= 0 && SG.dens[g] > 0.02) { any = true; break; } }
-  const TS = trails, TA2 = TS.A2, TX = TS.X, TY = TS.Y;   // (the trails: flat arrays - 47-render-overlays.js trStore)
-  if (!any) for (let i = 0; i < TS.n; i++) { const p = TA2[i]; if (Math.abs(TX[p] - x) < R * 2 && Math.abs(TY[p] - y) < R * 2) { any = true; break; } }
+  const TS = trails, TX2 = TS.c.x2, TY2 = TS.c.y2;   // (the trails: a column table - 47-render-overlays.js trFields)
+  if (!any) for (let i = 0; i < TS.n; i++) { if (Math.abs(TX2[i] - x) < R * 2 && Math.abs(TY2[i] - y) < R * 2) { any = true; break; } }
   if (!any) { if (a._smCh) a._smCh.last = 0; return; }
   gridImpulse(x, y, vx * 0.85, vy * 0.85, 2.2);
   let near = -1, nd = 1e9;
@@ -25556,16 +25599,24 @@ function smearAir(a, vx, vy, sp, dt) {
   // (Oct 31, 60-fps chat: a point plainly out of reach is passed by before its size is worked out - trailR is never more than
   // 11 + age / 5 - the same points touched; thousands of trail pieces in a long fight, for every plane, every step)
   // (a trail's point: touch's sums on its numbers in the trails' arrays - a point is never a puff)
-  const TVX = TS.VX, TVY = TS.VY, TAG = TS.AGE, TA1 = TS.A1, TFL = TS.FL;
-  const far = q => { const m = R + (11 + TAG[q] * 0.2) * 0.6 + 1, dx = TX[q] - x, dy = TY[q] - y; return dx > m || dx < -m || dy > m || dy < -m; };
-  const touchT = (q, r) => {
-    const dx = TX[q] - x, dy = TY[q] - y, rr = R + r * 0.6; if (dx > rr || dx < -rr || dy > rr || dy < -rr) return;
-    const d = Math.hypot(dx, dy) || 1, f = 1 - d / rr; if (f <= 0) return;
+  // (Nov 1: a piece's ends in its own columns - a point touched once, by the piece whose end 2 it is (and a root's end 1), and
+  // copied to the next piece's end 1 when it moved - 47-render-overlays.js trCopy)
+  const tc = TS.c, TFL = tc.fl, TNX = tc.nx;
+  const far = (Q, q) => { const m = R + (11 + Q.AGE[q] * 0.2) * 0.6 + 1, dx = Q.X[q] - x, dy = Q.Y[q] - y; return dx > m || dx < -m || dy > m || dy < -m; };
+  const touchT = (Q, q, r) => {
+    const TX = Q.X, TY = Q.Y, TVX = Q.VX, TVY = Q.VY;
+    const dx = TX[q] - x, dy = TY[q] - y, rr = R + r * 0.6; if (dx > rr || dx < -rr || dy > rr || dy < -rr) return false;
+    const d = Math.hypot(dx, dy) || 1, f = 1 - d / rr; if (f <= 0) return false;
     const k = Math.min(1, 4 * f * dt / (1 + r / 14));
     TVX[q] += (vx * 0.7 - TVX[q]) * k; TVY[q] += (vy * 0.7 - TVY[q]) * k;
     TX[q] += vx * 0.2 * f * dt / (1 + r / 14); TY[q] += vy * 0.2 * f * dt / (1 + r / 14);
+    return true;
   };
-  for (let i = 0; i < TS.n; i++) { const q2 = TA2[i]; if (TAG[q2] > 0.8 && !far(q2)) touchT(q2, trailR(TAG[q2])); if (TFL[i] & 1) { const q1 = TA1[i]; if (TAG[q1] > 0.8 && !far(q1)) touchT(q1, trailR(TAG[q1])); } }
+  const T1 = trEnd(tc, '1'), T2 = trEnd(tc, '2'), A1 = T1.AGE, A2 = T2.AGE;
+  for (let i = 0; i < TS.n; i++) {
+    if (A2[i] > 0.8 && !far(T2, i) && touchT(T2, i, trailR(A2[i])) && TNX[i]) { const j = trFind(TS, TNX[i], i + 1); if (j >= 0) trCopy(tc, i, j); }
+    if (TFL[i] & 1) { if (A1[i] > 0.8 && !far(T1, i)) touchT(T1, i, trailR(A1[i])); }
+  }
   // while it is in the smoke, a streak of it comes out behind (as many puffs as the smoke there is thick)
   const g = gIdx(x, y), dens = g >= 0 ? SG.dens[g] : 0;
   if (near >= 0 && dens > 0.15) {
@@ -25740,35 +25791,41 @@ function drawFarSeaDetail() {
   const hb = PY(WATER_Y + 26);
   if (nt > 0.05) {
     // night: long broken streaks across the sea
+    // (Nov 1: each streak a rectangle of a colour given as numbers - fillRectA, its alpha as the text's (glA3) - not a colour's
+    // text made, set and read back a streak; the text of the last one set at the end, as the streaks left it: farSeaLast)
     abBegin();
+    let lc = null, la = 0;
     for (let row = 0; row < 16; row++) {
       const wy = WATER_Y - 20 + row * 3, py = PY(wy);
       if (py > hb) break;
-      const u = row / 16, col = rgbsK(mix3([46, 128, 206], [30, 70, 160], u), nt * 0.8);   // (one colour a row: made once, not per streak)
+      const u = row / 16, c = mix3([46, 128, 206], [30, 70, 160], u), a = nt * 0.8, a3 = glA3(a);   // (one colour a row: made once, not per streak)
       for (let k = 0; k < 10; k++) {
         const x = (FSH.night[row * 20 + k * 2] * (VWP + 200) + time * (3 + row) * (row % 2 ? 1 : -1)) % (VWP + 200) - 100;
         const len = 8 + Math.floor(FSH.night[row * 20 + k * 2 + 1] * 40);
-        abRect(col, Math.round(x), py, len, 1);
+        fillRectA(C, c, a3, Math.round(x), py, len, 1); lc = c; la = a;
       }
     }
+    farSeaLast(lc, la, true);
     abFlush();
   }
   if (ss > 0.05) {
     // broken horizontal streaks of light on the water, denser and paler near the horizon
     const tick = Math.floor(time * 2);
     abBegin();
+    let lc = null, la = 0;
     for (let row = 0; row < 14; row++) {
       const wy = WATER_Y - 20 + row * 3.2, py = PY(wy);
       if (py > hb) break;
-      const u = row / 14, col = rgbsK(mix3([238, 150, 168], [150, 120, 190], u), ss * 0.9);
+      const u = row / 14, c = mix3([238, 150, 168], [150, 120, 190], u), a = ss * 0.9, a3 = glA3(a);
       for (let k = 0; k < 18; k++) {
         const h = hash(row * 31.7 + k * 7.3 + Math.floor((tick + row) / 3) * 0.13);
         if (h > 0.55) continue;
         const x = (FSH.dusk[row * 36 + k * 2] * VWP + time * (6 + row) * (row % 2 ? 1 : -1)) % (VWP + 40) - 20;
         const len = 3 + Math.floor(FSH.dusk[row * 36 + k * 2 + 1] * 10);
-        abRect(col, Math.round(x), py, len, 1);
+        fillRectA(C, c, a3, Math.round(x), py, len, 1); lc = c; la = a;
       }
     }
+    farSeaLast(lc, la, true);
     abFlush();
   }
   if (ss < 0.95 && nt < 0.95) {
@@ -25794,6 +25851,9 @@ function drawFarSeaDetail() {
 }
 // A path of reflected light on the far water, under a light at screen x: a soft glow and a column of
 // glinting streaks, narrow at the horizon and widening toward you, brightest straight under the light
+// (Nov 1) the fill colour the far sea's rectangles leave, as the colour texts set one by one left it: the last one's (c, a;
+// none drawn: none set), and the pixel helpers' note of it (fsLast: abRect's fs1 kept it)
+function farSeaLast(c, a, ab) { if (!c) return; const s = rgbsK(c, a); C.fillStyle = s; if (ab) fsLast = s; }
 function drawLightPath(lx, k, hot, glint, W) {
   const hz = PY(HZ_Y()), yN = PY(WATER_Y + 2);
   if (lx < -W * 2 || lx > VWP + W * 2 || yN <= hz) return;
@@ -25814,6 +25874,7 @@ function drawLightPath(lx, k, hot, glint, W) {
   const tick = time * 4;
   fsLast = null;
   abBegin();
+  let lc = null, la = 0;
   for (let r = 0; r < rows; r++) {
     const u = r / Math.max(1, rows - 1), py = Math.round(hz + 1 + u * (yN - hz - 2));
     const half = W * (0.45 + 0.75 * u);
@@ -25832,9 +25893,11 @@ function drawLightPath(lx, k, hot, glint, W) {
       const c = 1 - Math.abs(o) / half;
       if (h > 0.45 + 0.5 * c) continue;
       const len = Math.max(2, Math.round((3 + h * 12 + 12 * c) * Math.min(SV, 2) * (0.6 + 0.6 * u)));
-      abRect(rgbsK(c > 0.45 && h < 0.35 ? hot : glint, Math.min(1, k * (0.6 + 0.6 * c) * (1 - 0.25 * u))), Math.round(x - len / 2), py, len, 1);
+      const gc = c > 0.45 && h < 0.35 ? hot : glint, ga = Math.min(1, k * (0.6 + 0.6 * c) * (1 - 0.25 * u));
+      fillRectA(C, gc, glA3(ga), Math.round(x - len / 2), py, len, 1); lc = gc; la = ga;
     }
   }
+  farSeaLast(lc, la, true);
   abFlush();
   fsLast = null;
 }
@@ -26734,6 +26797,7 @@ function drawSparkles(p, cell, yTop, yRange, alpha) {
   const c0 = Math.floor(layerX(0, L, Sl) / cell) - 1, c1 = Math.ceil(layerX(VWP, L, Sl) / cell) + 1;
   const a0 = alpha * (0.25 + 0.75 * E.light);
   const K = spkCols(p, cell, yTop, yRange, c0, c1), F = K.f, PH = K.ph, XO = K.xo, WY = K.wy, H2 = K.h2, ON = K.on, t = time, pr = p * layerRefX;
+  let la = 0, on = false;
   for (let c = c0, i = c0 - K.base; c <= c1; c++, i++) {
     // (engine stage 6, Oct 30: h2 - only where it is placed - worked out after the twinkle test, not before it: about two
     // columns in three are dark this frame, and zoomed out that was thousands of sin() a frame for nothing. Same values)
@@ -26743,9 +26807,11 @@ function drawSparkles(p, cell, yTop, yRange, alpha) {
     const h2 = H2[i];
     const x = Math.round(layerPivX + Sl * (XO[i] - pr)), y = PY(WY[i]);
     if (x >= VWP - SHX || x < -SHX - 2 || y < -SHY || y >= bh - SHY) continue;     // (off this view: nothing to paint)
-    C.fillStyle = rgbsK(SPK_W, a0 * (tw - 0.45) / 0.55);
-    C.fillRect(x, y, h2 > 0.6 ? 2 : 1, 1);
+    // (Nov 1: a colour given as numbers - fillRectA - not a text made and read back a sparkle; the last one's text set at the end)
+    const a = a0 * (tw - 0.45) / 0.55;
+    fillRectA(C, SPK_W, glA3(a), x, y, h2 > 0.6 ? 2 : 1, 1); la = a; on = true;
   }
+  if (on) farSeaLast(SPK_W, la, false);
 }
 function hullSpans() {
   const spans = [];
@@ -29949,157 +30015,71 @@ const TRAIL_SHAPE = 28, TRAIL_HOLD = 10, TRAIL_LIFE = 14;
 // a missile's trail (t.thin, user Oct 24): a third as thick and gone three times as fast as a shell's
 const THIN_AGE = 3, THIN_R = 0.35;
 const trailLate = age => age <= TRAIL_HOLD ? 1 : 1 - smoothstep(TRAIL_HOLD, TRAIL_LIFE, age);
-/* (60-fps chat, Oct 31, user 19:46: the heavy battle choppy) THE SHELLS' TRAILS AS FLAT ARRAYS. A long fight's trails pile up to
-   ~10,000 pieces; as objects (a piece { p1, p2, root, thin, next }, each point { x, y, vx, vy, age, seed, ... }) every pass over
-   them - the step, the simulation worker's snapshot (~6-7 ms of it: only ~25 snapshots a second reached the page), the page's
-   fold-in, the smoke's gather - walked thousands of objects. Now they are numbers in typed arrays, one array a field:
-   - the POINTS (X, Y, VX, VY, AGE, SEED, LA - a trail's first point is its launch puff's: 1 or 0 - and the wobble's turning
-     state QS1, QC1, QS2, QC2, TA - the age it was last turned at, NaN: start again from the sines) at stable places, a place
-     freed when no piece names it any more (REF: how many pieces do - two pieces in a row share a point: one's p2 is the next
-     one's p1) and given again to the next point made (FREE);
-   - the PIECES in order, oldest first (A1, A2: their two points' places; FL: 1 root - the first piece of what's left of a
-     trail, which steps its p1 as well, 2 thin - a missile's; ID: each piece's own number, rising, so a piece is found by it
-     with a halving search; NX: the number of the piece after it, 0 none). A shell keeps the number of the piece it's laying
-     (s.seg, 33-guns-shells.js).
-   The same numbers as the objects held, worked out by the same sums in the same order (the user: "Details are never capped" -
-   no limit on how many; every piece still lives its whole fade). Readers: stepTrails, 33-guns-shells.js stepShells (making
-   them), 41-sky-new.js smearAir, sky/21-smoke.js gatherSmokeNew + smgSend, 36-zzzzz-sw-snap.js trSnap / trSnapInto (the
-   simulation worker's snapshots), the trails table here (saves). */
-// (functions only, no constants: the store is made in 05-game-state.js, before this file's constants exist)
-function trF64() { return ['X', 'Y', 'VX', 'VY', 'AGE', 'SEED', 'QS1', 'QC1', 'QS2', 'QC2', 'TA']; }
-function trStore() {
-  const S = { n: 0, np: 0, nid: 1, cap: 0, pcap: 0, fn: 0, A1: null, A2: null, FL: null, ID: null, NX: null, SEL: null,
-    LA: null, REF: null, FREE: null, MAP: null, PL: null,
-    get length() { return this.n; }, set length(v) { trCut(this, v); } };   // (as a list's: how many pieces; 0 clears them - 07-world-build.js)
-  for (const k of trF64()) S[k] = null;
-  trGrowK(S, 64); trGrowP(S, 128);
-  return S;
+/* (60-fps chat, Oct 31, user 19:46: the heavy battle choppy) THE SHELLS' TRAILS - (Nov 1, batch 2) A COLUMN TABLE
+   (04-zz-coltable.js). A long fight's trails pile up to ~10,000 pieces; as objects every pass over them walked thousands of
+   things. A PIECE a row, oldest first: its two ends' numbers in its own columns - end 1 (x1, y1, vx1, vy1, age1, seed1, the wobble's
+   turning state qa1, ca1, qb1, cb1 and ta1 - the age it was last turned at, NaN: start again from the sines - and la1: 1, a launch
+   puff's) and end 2 (the same, but la); fl: 1 root - the first piece of what's left of a trail, which steps its end 1 as well, 2
+   thin - a missile's; nx: the id of the piece after it, 0 none. Two pieces in a row meet at a point: the later one's end 1 is
+   the earlier one's end 2, held in both rows - the earlier row's is the one stepped, smeared and stretched, and each time it is,
+   its numbers are copied into the later row's end 1 (trCopy: stepTrails, 41-sky-new.js smearAir; a new piece takes them when
+   it's laid). The same numbers as one point shared, worked out by the same sums in the same order (the user: "Details are never
+   capped" - no limit on how many; every piece still lives its whole fade). A shell keeps the id of the piece it's laying (s.seg,
+   33-guns-shells.js). Readers: stepTrails, stepShells (making them), 41-sky-new.js smearAir, sky/21-smoke.js gatherSmokeNew
+   (on the page, or packed for the smoke worker - smgSend), the snapshots and saves (the table's own rule: its columns) */
+// (a function: the table is made in 05-game-state.js, before this file's constants exist)
+function trFields() {
+  const F = { sq: 'id', fl: 'u8', nx: 'ref', la1: 'u8' };
+  for (const e of ['1', '2']) for (const k of trPtKeys()) F[k + e] = k === 'ta' ? 'f64 NaN' : 'f64';
+  return F;
 }
-function trMore(a, n) { const b = new a.constructor(n); b.set(a); return b; }
-// room for `need` pieces / points (doubled as it grows)
-function trGrowK(S, need) {
-  if (need <= S.cap) return;
-  const c = Math.max(need, S.cap * 2);
-  if (!S.A1) { S.A1 = new Int32Array(c); S.A2 = new Int32Array(c); S.FL = new Uint8Array(c); S.ID = new Float64Array(c); S.NX = new Float64Array(c); }
-  else { S.A1 = trMore(S.A1, c); S.A2 = trMore(S.A2, c); S.FL = trMore(S.FL, c); S.ID = trMore(S.ID, c); S.NX = trMore(S.NX, c); }
-  S.SEL = new Int32Array(c); S.cap = c;
+// a point's numbers (each end's columns are these with 1 or 2 after)
+function trPtKeys() { return ['x', 'y', 'vx', 'vy', 'age', 'seed', 'qa', 'ca', 'qb', 'cb', 'ta']; }
+// one end's columns (e: '1' or '2') by the names the step's sums use
+function trEnd(c, e) {
+  return { X: c['x' + e], Y: c['y' + e], VX: c['vx' + e], VY: c['vy' + e], AGE: c['age' + e], SEED: c['seed' + e], QS1: c['qa' + e], QC1: c['ca' + e], QS2: c['qb' + e], QC2: c['cb' + e], TA: c['ta' + e] };
 }
-function trGrowP(S, need) {
-  if (need <= S.pcap) return;
-  const c = Math.max(need, S.pcap * 2);
-  for (const k of trF64()) S[k] = S[k] ? trMore(S[k], c) : new Float64Array(c);
-  S.LA = S.LA ? trMore(S.LA, c) : new Uint8Array(c); S.REF = S.REF ? trMore(S.REF, c) : new Int32Array(c);
-  S.FREE = S.FREE ? trMore(S.FREE, c) : new Int32Array(c);
-  const M = new Int32Array(c).fill(-1); if (S.MAP) M.set(S.MAP); S.MAP = M;   // (a point's place in a packed copy: -1 between uses - trPack)
-  S.PL = new Int32Array(c); S.pcap = c;
+// piece i's end 2 into piece j's end 1 (the point they meet at)
+function trCopy(c, i, j) {
+  c.x1[j] = c.x2[i]; c.y1[j] = c.y2[i]; c.vx1[j] = c.vx2[i]; c.vy1[j] = c.vy2[i]; c.age1[j] = c.age2[i]; c.seed1[j] = c.seed2[i];
+  c.qa1[j] = c.qa2[i]; c.ca1[j] = c.ca2[i]; c.qb1[j] = c.qb2[i]; c.cb1[j] = c.cb2[i]; c.ta1[j] = c.ta2[i];
 }
-// a new point (no piece names it yet)
-function trPoint(S, x, y, seed, la) {
-  let p;
-  if (S.fn) p = S.FREE[--S.fn]; else { if (S.np >= S.pcap) trGrowP(S, S.np + 1); p = S.np++; }
-  S.X[p] = x; S.Y[p] = y; S.VX[p] = 0; S.VY[p] = 0; S.AGE[p] = 0; S.SEED[p] = seed; S.LA[p] = la; S.TA[p] = NaN; S.REF[p] = 0;
-  return p;
+// a new piece at the end: from piece k's end 2 (k >= 0) or a new point at x1, y1 (seed s1, la: a launch puff's), to a new point
+// at x2, y2 (seed s2); its id
+function trAdd(S, k, x1, y1, s1, la, x2, y2, s2, root, thin) {
+  const i = S.add(), c = S.c;
+  if (k >= 0) trCopy(c, k, i);
+  else { c.x1[i] = x1; c.y1[i] = y1; c.vx1[i] = 0; c.vy1[i] = 0; c.age1[i] = 0; c.seed1[i] = s1; c.la1[i] = la; }
+  c.x2[i] = x2; c.y2[i] = y2; c.vx2[i] = 0; c.vy2[i] = 0; c.age2[i] = 0; c.seed2[i] = s2;
+  c.fl[i] = (root ? 1 : 0) | (thin ? 2 : 0); c.nx[i] = 0;
+  return c.sq[i];
 }
-// a new piece at the end, p1 to p2; its number
-function trAdd(S, p1, p2, root, thin) {
-  if (S.n >= S.cap) trGrowK(S, S.n + 1);
-  const i = S.n++, id = S.nid++;
-  S.A1[i] = p1; S.A2[i] = p2; S.FL[i] = (root ? 1 : 0) | (thin ? 2 : 0); S.ID[i] = id; S.NX[i] = 0;
-  S.REF[p1]++; S.REF[p2]++;
-  return id;
-}
-// the place of the piece numbered id (from lo on), or -1: gone
+// the place of the piece numbered id (from lo on: it's never before), or -1 - a dropped one still found until the sweep
 function trFind(S, id, lo = 0) {
-  const ID = S.ID; let hi = S.n - 1;
+  const ID = S.c.sq; let hi = S.n - 1;
   while (lo <= hi) { const m = (lo + hi) >> 1, v = ID[m]; if (v === id) return m; if (v < id) lo = m + 1; else hi = m - 1; }
   return -1;
 }
-// the pieces marked gone (FL 4) taken out, the rest kept in their order; a point no piece names any more is freed
-function trSweep(S) {
-  const n = S.n, A1 = S.A1, A2 = S.A2, FL = S.FL, ID = S.ID, NX = S.NX, REF = S.REF, FREE = S.FREE;
-  let w = 0;
-  for (let i = 0; i < n; i++) {
-    const f = FL[i];
-    if (f & 4) { const a = A1[i], b = A2[i]; if (--REF[a] <= 0) FREE[S.fn++] = a; if (--REF[b] <= 0) FREE[S.fn++] = b; continue; }
-    if (w !== i) { A1[w] = A1[i]; A2[w] = A2[i]; FL[w] = f; ID[w] = ID[i]; NX[w] = NX[i]; }
-    w++;
-  }
-  S.n = w;
-}
-// `trails.length = v`: the pieces from v on dropped (0: all of them)
-function trCut(S, v) {
-  v = Math.max(0, v | 0);
-  if (!v) { S.n = 0; S.np = 0; S.fn = 0; return; }
-  if (v >= S.n) return;
-  for (let i = v; i < S.n; i++) S.FL[i] |= 4;
-  trSweep(S);
-}
-/* The pieces at `sel` (their places, m of them; null: all, in order) and their points PACKED: each point once, in the order the
-   pieces first name it, the pieces' A1 / A2 its place there. mk(Type, n) makes each array (a snapshot's block - swNew - or a plain
-   one for a save); f32: the points' x, y, age, seed as 32-bit floats (a live snapshot); full: everything the step needs too (the
-   velocities, the wobble, the pieces' numbers and links) - a save, a whole snapshot */
-function trPack(S, sel, m, mk, f32, full) {
-  const MAP = S.MAP, PL = S.PL, A1 = S.A1, A2 = S.A2, FL = S.FL;
-  let q = 0;
-  for (let j = 0; j < m; j++) {
-    const i = sel ? sel[j] : j, a = A1[i], b = A2[i];
-    if (MAP[a] < 0) { MAP[a] = q; PL[q++] = a; }
-    if (MAP[b] < 0) { MAP[b] = q; PL[q++] = b; }
-  }
-  const FT = f32 ? Float32Array : Float64Array;
-  const o = { n: m, np: q, a1: mk(Int32Array, m), a2: mk(Int32Array, m), fl: mk(Uint8Array, m), x: mk(FT, q), y: mk(FT, q), age: mk(FT, q), seed: mk(FT, q), la: mk(Uint8Array, q) };
-  { const a1 = o.a1, a2 = o.a2, fl = o.fl; for (let j = 0; j < m; j++) { const i = sel ? sel[j] : j; a1[j] = MAP[A1[i]]; a2[j] = MAP[A2[i]]; fl[j] = FL[i] & 3; } }
-  { const X = S.X, Y = S.Y, AG = S.AGE, SD = S.SEED, LA = S.LA, x = o.x, y = o.y, age = o.age, seed = o.seed, la = o.la;
-    for (let k = 0; k < q; k++) { const p = PL[k]; x[k] = X[p]; y[k] = Y[p]; age[k] = AG[p]; seed[k] = SD[p]; la[k] = LA[p]; } }
-  if (full) {
-    for (const [f, K] of [['vx', 'VX'], ['vy', 'VY'], ['s1', 'QS1'], ['c1', 'QC1'], ['s2', 'QS2'], ['c2', 'QC2'], ['ta', 'TA']]) { const src = S[K], d = o[f] = mk(Float64Array, q); for (let k = 0; k < q; k++) d[k] = src[PL[k]]; }
-    const id = o.id = mk(Float64Array, m), nx = o.nx = mk(Float64Array, m);
-    for (let j = 0; j < m; j++) { const i = sel ? sel[j] : j; id[j] = S.ID[i]; nx[j] = S.NX[i]; }
-    o.nid = S.nid;
-  }
-  for (let k = 0; k < q; k++) MAP[PL[k]] = -1;
-  return o;
-}
-// a packed copy (trPack's, or its plain arrays from a save) into the store, in place of what it held. Without the step's numbers
-// (a live snapshot - the page only draws them): at rest, the wobble from its sines, each piece its place's number and the links
-// found from the shared points
-function trFill(S, o) {
-  const n = o.n | 0, q = o.np | 0;
-  S.n = 0; S.np = 0; S.fn = 0; trGrowK(S, n); trGrowP(S, q);
-  S.A1.set(o.a1); S.A2.set(o.a2); S.FL.set(o.fl);
-  S.X.set(o.x); S.Y.set(o.y); S.AGE.set(o.age); S.SEED.set(o.seed); S.LA.set(o.la);
-  if (o.vx) { S.VX.set(o.vx); S.VY.set(o.vy); S.QS1.set(o.s1); S.QC1.set(o.c1); S.QS2.set(o.s2); S.QC2.set(o.c2); S.TA.set(o.ta); }
-  else { S.VX.fill(0, 0, q); S.VY.fill(0, 0, q); S.TA.fill(NaN, 0, q); }
-  if (o.id) { S.ID.set(o.id); S.NX.set(o.nx); S.nid = Math.max(o.nid || 1, n ? S.ID[n - 1] + 1 : 1); }
-  else {
-    const MAP = S.MAP, A1 = S.A1, A2 = S.A2, ID = S.ID, NX = S.NX;
-    for (let j = 0; j < n; j++) { ID[j] = j + 1; MAP[A1[j]] = j; }
-    for (let j = 0; j < n; j++) { const k = MAP[A2[j]]; NX[j] = k >= 0 && k !== j ? k + 1 : 0; }
-    for (let j = 0; j < n; j++) MAP[A1[j]] = -1;
-    S.nid = n + 1;
-  }
-  const REF = S.REF; REF.fill(0, 0, q);
-  for (let j = 0; j < n; j++) { REF[S.A1[j]]++; REF[S.A2[j]]++; }
-  S.n = n; S.np = q;
-}
-// (engine stage 3) the trails' own random source (a new piece's seeds, 33-guns-shells.js) and their table. A save holds one
-// row: the packed arrays (trPack, full) as plain lists - every number exact, a point once; the wobble's NaN as null. A save from
-// before (Oct 31: a list of pieces as objects, a point twice - each next's p1 its piece's p2 again) is read too: each piece
-// numbered by its place, its old id standing for that number (a shell's seg)
+// what the smoke's gather reads of a piece (here, in the smoke worker - packed - and on a page that only draws)
+const TR_DRAWN = ['fl', 'x1', 'y1', 'age1', 'seed1', 'la1', 'x2', 'y2', 'age2'];
+// (engine stage 3) the trails' own random source (a new piece's seeds, 33-guns-shells.js) and their table: saved as its columns.
+// A save from before is read too: Oct 31 - Nov 1, the pieces and their shared points packed ({ soa: 1, a1, a2, x, y, ... }: each
+// piece's ends from its two points); before Oct 31, a list of pieces as objects (trFromRows, into that packed form first)
 const trlR = sysRng('trails');
-const TR_NO_ROWS = Object.freeze([]);
-function trSave() {
-  const o = trPack(trails, null, trails.n, (T, n) => new T(n), false, true), d = { soa: 1 };
-  for (const k in o) d[k] = ArrayBuffer.isView(o[k]) ? Array.from(o[k]) : o[k];
-  return [d];
-}
-function trLoad(d, byU) {
-  if (Array.isArray(d)) d = d.length === 1 && d[0] && d[0].soa ? d[0] : trFromRows(d, byU);
-  if (!d || typeof d !== 'object') { trCut(trails, 0); return; }
-  const o = Object.assign({}, d), num = v => typeof v === 'number' ? v : NaN;
-  o.ta = (d.ta || []).map(num);
-  for (const k of ['x', 'y', 'age', 'seed', 'vx', 'vy', 's1', 'c1', 's2', 'c2']) if (d[k]) o[k] = d[k].map(v => typeof v === 'number' ? v : 0);
-  trFill(trails, o);
+function trOld(d, byU) {
+  const o = d.length === 1 && d[0] && d[0].soa && !d[0].cols ? d[0] : trFromRows(d, byU), n = o.n | 0, F = trFields(), cols = {};
+  const at = (a, q, dflt) => { const v = a ? a[q] : undefined; return typeof v === 'number' ? v : dflt; };
+  for (const k in F) cols[k] = new Array(n);
+  const a1 = o.a1 || [], a2 = o.a2 || [], ID = o.id, NX = o.nx;
+  // (a packed copy without the pieces' numbers - a live snapshot's: each numbered by its place, the links from the shared points)
+  const nxOf = j => { if (NX) return at(NX, j, 0); for (let k = 0; k < n; k++) if (k !== j && a1[k] === a2[j]) return k + 1; return 0; };
+  const src = { x: 'x', y: 'y', vx: 'vx', vy: 'vy', age: 'age', seed: 'seed', qa: 's1', ca: 'c1', qb: 's2', cb: 'c2', ta: 'ta' };
+  for (let j = 0; j < n; j++) {
+    cols.sq[j] = ID ? at(ID, j, j + 1) : j + 1; cols.fl[j] = at(o.fl, j, 0) & 3; cols.nx[j] = nxOf(j); cols.la1[j] = at(o.la, a1[j], 0);
+    for (const k of trPtKeys()) { const dflt = k === 'ta' ? null : 0; cols[k + '1'][j] = at(o[src[k]], a1[j], dflt); cols[k + '2'][j] = at(o[src[k]], a2[j], dflt); }
+  }
+  let top = o.nid ? o.nid - 1 : n; for (let j = 0; j < n; j++) if (cols.sq[j] > top) top = cols.sq[j];
+  return { soa: 1, n, top, strs: [], cols };
 }
 function trFromRows(rows, byU) {
   const P = [], o = { n: rows.length, a1: [], a2: [], fl: [], id: [], nx: [], nid: rows.length + 1 }, idOf = new Map(), p2Of = new Map();
@@ -30118,13 +30098,15 @@ function trFromRows(rows, byU) {
     s1: col('_s1', 0), c1: col('_c1', 0), s2: col('_s2', 0), c2: col('_c2', 0), ta: col('_ta', null) });
   return o;
 }
-defTable('trails', () => TR_NO_ROWS, { net: false, save: trSave, load: trLoad, snapCols: (full, drawn, bufs) => trSnap(full, drawn, bufs), colsInto: C => trSnapInto(C) });
+defTable('trails', null, { cols: trails, drawn: TR_DRAWN, near: true, rows: trOld, net: false });
 // once per frame (not every physics step): the trail slowly spreads, rises a little and drifts
 const TRSX = [], TRSI = [], TRSC = []; let TRCELL = new Uint8Array(256);
 function stepTrails(dt) {
   const S = trails, n = S.n;
   if (!n) return;
-  const A1 = S.A1, A2 = S.A2, FL = S.FL, X = S.X, Y = S.Y, VX = S.VX, VY = S.VY, AGE = S.AGE, SEED = S.SEED, QS1 = S.QS1, QC1 = S.QC1, QS2 = S.QS2, QC2 = S.QC2, TA = S.TA;
+  // (Nov 1: each piece's two ends in its own columns - E1, E2: the same sums on a point's numbers, a point stepped once, by the
+  // piece whose end 2 it is (and a root's end 1), then copied to the next piece's end 1 - trCopy)
+  const c = S.c, FL = c.fl, NX = c.nx, E1 = trEnd(c, '1'), E2 = trEnd(c, '2');
   // the trail slowly spreads, rises a little and is carried off by the wind (each point by the wind at its own height)
   // (windAt's gust - the same for every point this step - worked out once: the same numbers, Oct 31)
   const WG = E.windU * (1 + 0.25 * Math.sin(time * 0.31) + 0.15 * Math.sin(time * 1.13 + 2));
@@ -30132,7 +30114,8 @@ function stepTrails(dt) {
   // angle, not two sines a point a step - the same wobble to a millionth of a millionth; thousands of trail pieces in a long
   // fight, 120 steps a second. A point not stepped last time - new, or its age set - starts again from the sines)
   const c1 = Math.cos(dt * 0.4), s1 = Math.sin(dt * 0.4), c2 = Math.cos(dt * 0.3), s2 = Math.sin(dt * 0.3);
-  const move = p => {
+  const move = (Q, p) => {
+      const X = Q.X, Y = Q.Y, VX = Q.VX, VY = Q.VY, AGE = Q.AGE, SEED = Q.SEED, QS1 = Q.QS1, QC1 = Q.QC1, QS2 = Q.QS2, QC2 = Q.QC2, TA = Q.TA;
       let a, b;
       if (TA[p] === AGE[p]) { const sa = QS1[p] * c1 + QC1[p] * s1, ca = QC1[p] * c1 - QS1[p] * s1, sb = QS2[p] * c2 + QC2[p] * s2, cb = QC2[p] * c2 - QS2[p] * s2; QS1[p] = a = sa; QC1[p] = ca; QS2[p] = b = sb; QC2[p] = cb; AGE[p] += dt; }
       else { AGE[p] += dt; const t1 = AGE[p] * 0.4 + SEED[p], t2 = AGE[p] * 0.3 + SEED[p] * 1.7; QS1[p] = a = Math.sin(t1); QC1[p] = Math.cos(t1); QS2[p] = b = Math.sin(t2); QC2[p] = Math.cos(t2); }
@@ -30152,9 +30135,10 @@ function stepTrails(dt) {
   SI.sort((a, b) => shells[a].x - shells[b].x || a - b);
   SX.length = SI.length; for (let j = 0; j < SI.length; j++) SX[j] = shells[SI[j]].x;
   const CAND = TRSC;
-  const shove = q => {
+  const shove = (Q, q) => {
+    const AGE = Q.AGE, VX = Q.VX, VY = Q.VY;
     if (AGE[q] < 0.8) return;                                        // not the trail it's laying right now
-    const qx = X[q], qy = Y[q], xa = qx - R - 1, xb = qx + R + 1;
+    const qx = Q.X[q], qy = Q.Y[q], xa = qx - R - 1, xb = qx + R + 1;
     let lo = 0, hi = SX.length; while (lo < hi) { const m = (lo + hi) >> 1; if (SX[m] < xa) lo = m + 1; else hi = m; }
     CAND.length = 0; for (let j = lo; j < SX.length && SX[j] <= xb; j++) CAND.push(SI[j]);
     if (CAND.length > 1) CAND.sort((a, b) => a - b);
@@ -30183,22 +30167,24 @@ function stepTrails(dt) {
       for (let j = 0; j < SX.length; j++) { const c0 = Math.max(0, Math.floor((SX[j] - R - 1 - bx0) / TRC) - 1), c1 = Math.min(nc - 1, Math.floor((SX[j] + R + 1 - bx0) / TRC) + 1); for (let c = c0; c <= c1; c++) CL[c] = 1; }
     }
     const CL = TRCELL;
-    const near = q => { const x = X[q], y = Y[q]; return x >= bx0 && x <= bx1 && y >= by0 && y <= by1 && (!cells || CL[Math.floor((x - bx0) / TRC)] === 1); };
-    if (bx0 <= bx1) for (let i = 0; i < n; i++) { const q2 = A2[i]; if (near(q2)) shove(q2); if (FL[i] & 1) { const q1 = A1[i]; if (near(q1)) shove(q1); } }
+    const near = (Q, q) => { const x = Q.X[q], y = Q.Y[q]; return x >= bx0 && x <= bx1 && y >= by0 && y <= by1 && (!cells || CL[Math.floor((x - bx0) / TRC)] === 1); };
+    if (bx0 <= bx1) for (let i = 0; i < n; i++) { if (near(E2, i)) shove(E2, i); if (FL[i] & 1) { if (near(E1, i)) shove(E1, i); } }
   }
   // every point once: a piece owns its far end, the first piece of a trail (root) both; newest first, as the list was walked
   // when a gone piece was cut out of it on the spot (a piece's p1 is the piece before's p2 - moved after the test below, then);
   // a gone piece's next becomes the first (root). The gone ones are taken out after, in one pass, the rest in their order
   let gone = 0;
+  const AGE1 = E1.AGE;
   for (let i = n - 1; i >= 0; i--) {
-    const f = FL[i];
-    move(A2[i]); if (f & 1) move(A1[i]);
-    if (AGE[A1[i]] * (f & 2 ? THIN_AGE : 1) > TRAIL_LIFE) {
-      FL[i] = f | 4; gone++;
-      const nx = S.NX[i]; if (nx) { const j = trFind(S, nx, i + 1); if (j >= 0) FL[j] |= 1; }
+    const f = FL[i], nx = NX[i], j = nx ? trFind(S, nx, i + 1) : -1;
+    move(E2, i); if (f & 1) move(E1, i);
+    if (AGE1[i] * (f & 2 ? THIN_AGE : 1) > TRAIL_LIFE) {
+      S.drop(i); gone++;
+      if (j >= 0) FL[j] |= 1;
     }
+    if (j >= 0) trCopy(c, i, j);                                     // (the point it meets the next piece at: that piece's end 1 too)
   }
-  if (gone) trSweep(S);
+  if (gone) S.sweep();
 }
 // How thick the trail is (world units, radius) at a given age: a thin line behind the shell that billows
 // out over the first few seconds and then keeps slowly spreading
@@ -35803,39 +35789,48 @@ function civBounce(p) { if (p == null) return; const t = telegraphs[p]; if (t.id
    movement when going up and down... it's just in the air. And it helps us know the direction of the wind"): faint
    streaks of air here and there in the sky around each view, carried along by the wind at their height - stretched
    with it when it blows, short and slow in a calm */
-const airStreaks = [];
+// (Nov 1, batch 2) a COLUMN TABLE (04-zz-coltable.js): a streak a row - where it is, its age and life (max); drawn from the
+// columns in colours given as numbers (fillRectA, pixLine's c, a)
+const airStreaks = new ColTable({ sq: 'id', x: 'f64', y: 'f64', age: 'f64', max: 'f64' });
+const AIRDUST = [206, 212, 232];
 function stepAirStreaks(dt) {
   if (SIM_ONLY) return;
   // (user Oct 26: "in space the little movement lines should be dots, to resemble space dust - there is no atmosphere, so
   // no wind") above the air they hang still, as dots
-  for (let i = airStreaks.length - 1; i >= 0; i--) { const s = airStreaks[i]; s.age += dt; if (!(OWM && s.y < ATMO_TOP)) s.x += windAt(s.y) * 1.1 * dt; if (s.age >= s.max) airStreaks.splice(i, 1); }
+  { const A = airStreaks, c = A.c, X = c.x, Y = c.y, AGE = c.age;
+    for (let i = A.n - 1; i >= 0; i--) { AGE[i] += dt; if (!(OWM && Y[i] < ATMO_TOP)) X[i] += windAt(Y[i]) * 1.1 * dt; if (AGE[i] >= c.max[i]) A.drop(i); }
+    A.sweep(); }
   for (const v of cam.view) {
     if (!v || !(v.z > 0)) continue;
     const w = halfWorldW(v.z) * 2, h = VIEW_H / v.z, n = dt * w * h / 90000;
     for (let k = 0; k < 3 && Math.random() < n - k; k++) {
       const x = v.l + Math.random() * w, y = v.top + Math.random() * h;
-      if (y > (dryLand(x) ? landTop(x) - 40 : surfaceY(x) - 30) || airStreaks.length > 220) continue;
-      airStreaks.push({ x, y, age: 0, max: rnd(1.2, 2.4) });
+      if (y > (dryLand(x) ? landTop(x) - 40 : surfaceY(x) - 30) || airStreaks.n > 220) continue;
+      const max = rnd(1.2, 2.4), i = airStreaks.add(), c = airStreaks.c; c.x[i] = x; c.y[i] = y; c.age[i] = 0; c.max[i] = max;
     }
   }
 }
 function drawAirStreaks(x0, x1) {
-  if (!airStreaks.length) return;
+  if (!airStreaks.n) return;
   const tc = mix3(mix3([248, 250, 255], [255, 210, 180], E.sunset * 0.55), [96, 108, 136], clamp(E.night * 1.1, 0, 0.8)).map(Math.round);
-  for (const s of airStreaks) {
-    if (s.x < x0 - 60 || s.x > x1 + 60) continue;
-    const w = windAt(s.y), L = 8 + Math.min(40, Math.abs(w) * 0.9), dir = Math.sign(w) || 1;
-    if (OWM && s.y < ATMO_TOP) {                                   // (space dust: a still mote, a pixel or two)
-      const ai = Math.round(0.5 * Math.sin(Math.PI * s.age / s.max) * 32);
+  // (Nov 1: each in a colour given as numbers - no colour text set a streak; the last one's text left set at the end)
+  const c = airStreaks.c, X = c.x, Y = c.y, AGE = c.age, MAX = c.max;
+  let lc = null, la = 0;
+  for (let i = 0; i < airStreaks.n; i++) {
+    const sx = X[i], sy = Y[i];
+    if (sx < x0 - 60 || sx > x1 + 60) continue;
+    const w = windAt(sy), L = 8 + Math.min(40, Math.abs(w) * 0.9), dir = Math.sign(w) || 1;
+    if (OWM && sy < ATMO_TOP) {                                   // (space dust: a still mote, a pixel or two)
+      const ai = Math.round(0.5 * Math.sin(Math.PI * AGE[i] / MAX[i]) * 32);
       if (ai < 1) continue;
-      C.fillStyle = trailStyle([206, 212, 232], ai); C.fillRect(Math.round(PX(s.x) / PB) * PB, Math.round(PY(s.y) / PB) * PB, PB, PB);
+      fillRectA(C, AIRDUST, trailA(ai), Math.round(PX(sx) / PB) * PB, Math.round(PY(sy) / PB) * PB, PB, PB); lc = AIRDUST; la = ai;
       continue;
     }
-    const ai = Math.round(0.22 * Math.sin(Math.PI * s.age / s.max) * 32);
+    const ai = Math.round(0.22 * Math.sin(Math.PI * AGE[i] / MAX[i]) * 32);
     if (ai < 1) continue;
-    C.fillStyle = trailStyle(tc, ai);
-    pixLine(PX(s.x), PY(s.y), PX(s.x - dir * L), PY(s.y), PB);
+    pixLine(PX(sx), PY(sy), PX(sx - dir * L), PY(sy), PB, tc, trailA(ai)); lc = tc; la = ai;
   }
+  if (lc) C.fillStyle = trailStyle(lc, la);
 }
 
 /* GTA pass (user Oct 25 late: "all vehicles have the night silhouette from the moon and sun... All planes glint from
@@ -35920,6 +35915,9 @@ function shipNavLights(c, L) {
   // the working ships' deck lights: a row of warm lamps along her deck
   if (c.kind === 'container' || c.kind === 'tanker') for (let px = 30; px < A.width - 30; px += 46) { const [x, y] = civPoint(c, px, K.wl - (c.kind === 'container' ? 16 : 12)); airLamps[viewIdx].push(PX(x), PY(y), n * 0.75, 2); }
 }
+// (Nov 1, batch 2) the streaks' table (a column table: airStreaks above); before, a list the snapshots carried beside the tables
+// (SW_EXTRA), never saved. All of it is drawn
+defTable('airStreaks', null, { cols: airStreaks, drawn: ['x', 'y', 'age', 'max'], net: false });
 
 /* ---- the big civilian ships (OPEN WORLD, user Oct 25 late) ----
    "Everything interacts with everything... every vehicle will have a damage model, will crash against other vehicles,
@@ -40247,19 +40245,23 @@ function drawLakeIn(L, x0, x1, over) {
   for (const [t, c] of seaOverStops(E.sunset, ov, oz)) og.addColorStop(t, rgbs(c.slice(0, 3), c[3]));
   lakePath(a, b, step, 0); C.fillStyle = og; C.fill();
   // the pale band under the surface, the bright line along it (as the sea's: render-objects)
-  const lw = SV > 1.6 ? 3 : SV > 0.9 ? 2 : 1, lineCol = E.sunset > 0.2 ? rgbs(mix3([238, 249, 255], [255, 200, 170], E.sunset)) : '#eef9ff';
+  // (Nov 1: the band and the line a column as colours given as numbers - fillRectA - not two colour texts set and read back a
+  // column; the line's text left set at the end, as the last column left it)
+  const lw = SV > 1.6 ? 3 : SV > 0.9 ? 2 : 1, ss = E.sunset > 0.2, lineC = ss ? mix3([238, 249, 255], [255, 200, 170], E.sunset) : LAKE_LINE;
   const c0 = Math.floor(PX(a)), c1 = Math.ceil(PX(b));
-  let py = null;
+  let py = null, any = false;
   for (let c = c0; c < c1; c++) {
     const wx = (c + CAMPX + 0.5) / SV;
     if (lakeDry(wx)) { py = null; continue; }                 // (dry ground here: no line over it)
     const y = Math.round(PY(surfaceY(wx)));
-    C.fillStyle = 'rgba(165,225,255,0.4)'; C.fillRect(c, y + lw, 1, lw + 2);
+    fillRectA(C, LAKE_BAND, 0.4, c, y + lw, 1, lw + 2);
     const top = py == null ? y : Math.min(y, py), hgt = (py == null ? 0 : Math.abs(y - py)) + lw;
-    C.fillStyle = lineCol; C.fillRect(c, top, 1, hgt);
+    fillRectA(C, lineC, 1, c, top, 1, hgt); any = true;
     py = y;
   }
+  if (any) C.fillStyle = ss ? rgbs(lineC) : '#eef9ff';
 }
+const LAKE_BAND = [165, 225, 255], LAKE_LINE = [238, 249, 255];   // ('rgba(165,225,255,0.4)', '#eef9ff')
 /* ---- going under ---- */
 // a tank in over its tracks: it goes down, bubbling, and is lost
 function tankSink(t) {
@@ -40619,7 +40621,10 @@ function lakeWeedArt(w) {
 }
 // the water's colour at a depth (0 the surface .. 1 the deepest of this lake), mixed into what's far
 const lakeWaterAt = u => mix3([70, 170, 230], [18, 52, 132], clamp(u, 0, 1));
-function lakeFill(X, Y, W, H, col, a) { C.fillStyle = a == null ? css3(col) : rgbs(col, a); C.fillRect(Math.round(X), Math.round(Y), Math.max(1, Math.round(W)), Math.max(1, Math.round(H))); }
+// (Nov 1) lakeRect: the rectangle in a colour given as numbers (fillRectA; the alpha as the colour's text carries it, glA3) - no
+// text made, set and read back; lakeFill: the same, and the fill colour then set to its text, as it always left it
+function lakeRect(X, Y, W, H, col, a) { fillRectA(C, col, a == null ? 1 : glA3(a), Math.round(X), Math.round(Y), Math.max(1, Math.round(W)), Math.max(1, Math.round(H))); }
+function lakeFill(X, Y, W, H, col, a) { lakeRect(X, Y, W, H, col, a); C.fillStyle = a == null ? css3(col) : rgbs(col, a); }
 // behind what's in the lake (after its deep fill): the hue by depth, far rocks and weeds, the light's shafts
 function drawLakeBack(x0, x1) {
   if (!lakeDeco || lakeDeco.length !== (land.lakes || []).length) buildLakeDeco();
@@ -40719,14 +40724,19 @@ function drawFieldFlowers(x0, x1) {
   if (!fieldFlowers) buildFieldFlowers();
   const p = LK.p(), t = time, wnd = clamp((E.windU || 0) / 60, -1, 1), dim = clamp(0.35 + 0.65 * E.light, 0.25, 1);
   const shade = c => c.map(v => Math.round(v * dim));
+  // (Nov 1: the five colours shaded once a draw, not a fresh array a rectangle; each rectangle by lakeRect - numbers, no colour
+  // text - and the fill colour left at the end as the last one's text, as lakeFill a rectangle left it)
+  const STALK = shade([62, 120, 52]), LUP = shade([150, 104, 206]), LUPT = shade([196, 160, 236]), DAISY = shade([244, 244, 236]), BUTTER = shade([246, 214, 70]);
+  let last = null;
   for (const f of fieldFlowers) {
     if (f.x < x0 - 10 || f.x > x1 + 10) continue;
     const fc = clamp(Math.floor(f.x / LT_CELL), 0, land.cols - 1); if (fieldK(f.x) < 0.5) continue;   // (none where the field gives out by the airfield)
     const foot = land.surfS[fc] - fieldH(fc) * LT_CELL * (0.12 + 0.7 * f.back), sw = (wnd * 0.4 + Math.sin(t * 1.2 + f.ph) * 0.3);
-    lakeFill(PX(f.x), PY(foot - f.h * 0.6), p, f.h * 0.6 * SV, shade([62, 120, 52]));            // (its stalk)
-    if (f.kind === 0) { for (let yy = f.h * 0.4; yy < f.h; yy += p / SV) lakeFill(PX(f.x + sw * yy / f.h) - p * 0.5, PY(foot - yy) - p, p * 2, p, shade(yy > f.h * 0.85 ? [196, 160, 236] : [150, 104, 206])); }   // (a lupine's purple spike)
-    else lakeFill(PX(f.x + sw) - p, PY(foot - f.h) - p, p * 2, p * 2, shade(f.kind === 1 ? [244, 244, 236] : [246, 214, 70]));   // (a daisy or a buttercup)
+    lakeRect(PX(f.x), PY(foot - f.h * 0.6), p, f.h * 0.6 * SV, last = STALK);            // (its stalk)
+    if (f.kind === 0) { for (let yy = f.h * 0.4; yy < f.h; yy += p / SV) lakeRect(PX(f.x + sw * yy / f.h) - p * 0.5, PY(foot - yy) - p, p * 2, p, last = yy > f.h * 0.85 ? LUPT : LUP); }   // (a lupine's purple spike)
+    else lakeRect(PX(f.x + sw) - p, PY(foot - f.h) - p, p * 2, p * 2, last = f.kind === 1 ? DAISY : BUTTER);   // (a daisy or a buttercup)
   }
+  if (last) C.fillStyle = css3(last);
 }
 
 /* ---- the harbour lighthouse (OPEN WORLD, user Oct 26, with pictures: gen/open/ref/dock_crane_lighthouse_design_oct26.png
@@ -43536,7 +43546,20 @@ let SPACE_TOP = WATER_Y - 11000;               // (as high as anything goes)
 let SAT_Y = WATER_Y - 6800, ISS_Y = WATER_Y - 9200;   // (all three with OUTER SPACE - atmoSync)
 const SPI = {"sat": [0, 0, 120, 42], "orbiter": [122, 0, 171, 68], "etsrb": [295, 0, 39, 218], "et": [336, 0, 39, 195], "srb": [377, 0, 23, 182], "pad": [402, 0, 487, 433], "padStack": [155, 360]};                     // (gen/open/space.py: the atlas's rects; padStack: where the stack stands on the pad)
 let spaceArt = null;
-const shuttles = [], spaceJunk = [], orbiters = [], rocketTrail = [];
+const shuttles = [], spaceJunk = [], orbiters = [];
+/* (Nov 1, batch 2) THE ROCKET'S SMOKE COLUMN AS A COLUMN TABLE (04-zz-coltable.js): a puff a row - where it is, its age and life,
+   size (r, k: rocketPuffR), its look (v, f), drift (sx), a heap on the ground (ground, its slide vx, vy; w: white), and h, its
+   hash, the drawing's own (given when first gathered - sky/21-smoke.js; 'local': the page keeps its own by id). The smoke's
+   gather reads the columns (gatherSmokeNew), and its worker gets them packed (smgSend), not copied into an array of its own */
+const ROCKET_FIELDS = { sq: 'id', x: 'f64', y: 'f64', age: 'f64', life: 'f64', r: 'f64', k: 'f64', v: 'u8', f: 'u8', sx: 'f64', ground: 'u8', vx: 'f64', vy: 'f64', w: 'u8', h: 'f64 NaN local' };
+const rocketTrail = new ColTable(ROCKET_FIELDS);
+// a new puff at the end (the arguments in the order its fields were given when a puff was an object: the same random calls in
+// the same order)
+function rocketPuff(x, y, age, life, r, k, v, f, sx, ground, vx, vy, w) {
+  const i = rocketTrail.add(), c = rocketTrail.c;
+  c.x[i] = x; c.y[i] = y; c.age[i] = age; c.life[i] = life; c.r[i] = r; c.k[i] = k; c.v[i] = v; c.f[i] = f ? 1 : 0; c.sx[i] = sx; c.ground[i] = ground ? 1 : 0; c.vx[i] = vx; c.vy[i] = vy; c.w[i] = w ? 1 : 0;
+  return i;
+}
 // (engine stage 3: space's own random source - the drawing's shake and a wreck's drawn smoke keep Math.random - and its
 // tables: the shuttle stacks (a bay's satellite by its id), junk, orbiters (satellites, the station), the rocket's trail and
 // a broken satellite's pieces (each piece's picture found again by its part's key)
@@ -43544,7 +43567,7 @@ const spaceR = sysRng('space'), spcRnd = (a, b) => a + spaceR() * (b - a);
 defTable('shuttles', () => shuttles, { make: () => ({}) });
 defTable('spaceJunk', () => spaceJunk, { make: () => ({}) });
 defTable('orbiters', () => orbiters, { make: () => ({}) });
-defTable('rocketTrail', () => rocketTrail, { net: false, make: () => ({}) });
+defTable('rocketTrail', null, { cols: rocketTrail, drawn: ['x', 'y', 'r', 'k', 'ground', 'age', 'life', 'w'], rows: d => rocketTrail.plainOfRows(d), net: false });
 defTable('satPieces', () => satPieces, { make: () => ({}), after: arr => { const P = spaceArt && spaceArt.satParts; for (const q of arr) if (P && P[q.key]) q.img = P[q.key].c; } });
 const SHUTTLEI = {"CW": 152, "CH": 84, "k": 0.5, "rows": [[[150, 65], [130, 81], [127, 81], [147, 82]], [[150, 66], [129, 79], [132, 81], [143, 81]], [[150, 67], [129, 80], [130, 82], [143, 79]]]};
 // (sized against the 747 - itself two thirds of the battleship, user Oct 26: the orbiter about half a 747, the stack
@@ -43653,9 +43676,11 @@ function stepSpace(dt) {
   for (const o of orbiters) stepOrbiter(o, dt);
   stepSatPieces(dt);
   // the smoke column: drifting with the wind, slowly spreading, fading over a minute and more
-  for (let i = rocketTrail.length - 1; i >= 0; i--) { const p = rocketTrail[i]; p.age += dt; p.x += windAt(p.y) * 0.35 * dt + (p.sx || 0) * dt; p.y -= 1.5 * dt;
-    if (p.ground) { p.x += p.vx * dt; p.vx *= 1 - Math.min(1, 1.3 * dt); const g = trailGround(p.x); p.y = g - rocketPuffR(p) * 0.55 - Math.max(0, p.age - 7) * 2.5; if (p.age > p.life) rocketTrail.splice(i, 1); continue; }   // (user Oct 26: "the smoke on the ground must stay near the ground and expand")
-    if (p.vx) { p.x += p.vx * dt; p.y += (p.vy || 0) * dt; const f = 1 - Math.min(1, 1.1 * dt); p.vx *= f; p.vy = (p.vy || 0) * f; } if (p.age > p.life) rocketTrail.splice(i, 1); }
+  { const RT = rocketTrail, c = RT.c, X = c.x, Y = c.y, AGE = c.age, VX = c.vx, VY = c.vy;
+    for (let i = RT.n - 1; i >= 0; i--) { AGE[i] += dt; X[i] += windAt(Y[i]) * 0.35 * dt + (c.sx[i] || 0) * dt; Y[i] -= 1.5 * dt;
+      if (c.ground[i]) { X[i] += VX[i] * dt; VX[i] *= 1 - Math.min(1, 1.3 * dt); const g = trailGround(X[i]); Y[i] = g - rocketPuffR(c, i) * 0.55 - Math.max(0, AGE[i] - 7) * 2.5; if (AGE[i] > c.life[i]) RT.drop(i); continue; }   // (user Oct 26: "the smoke on the ground must stay near the ground and expand")
+      if (VX[i]) { X[i] += VX[i] * dt; Y[i] += (VY[i] || 0) * dt; const f = 1 - Math.min(1, 1.1 * dt); VX[i] *= f; VY[i] = (VY[i] || 0) * f; } if (AGE[i] > c.life[i]) RT.drop(i); }
+    RT.sweep(); }
 }
 function stepShuttle(v, dt) {
   const p = v.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === v;
@@ -43695,7 +43720,7 @@ function stepShuttle(v, dt) {
     if (v.y > ATMO_TOP) { v.smokeT -= dt; while (v.smokeT <= 0) { v.smokeT += v.srb ? 0.035 : 0.07; const [fx, fy] = stackPoint(v, eu, 1.1); const low = Math.exp(-Math.max(0, padSpot(v.R).y - fy) / 280), r0 = (v.srb ? spcRnd(11, 18) : spcRnd(7, 11)) * (1 + 1.4 * low);
         v.smokeT += (v.srb ? 0.035 : 0.07) * spcRnd(-0.4, 0.4);   // (unevenly: no stamped rhythm, user Oct 26)
         const fe = (v.state === 'climb' ? 330 : 70) * STACK_K * spcRnd(0.75, 1.05);   // (from the flame's end, not over it - user Oct 26: "only behind it do we get the smoke trail")
-        rocketTrail.push({ x: fx - ux2 * fe + spcRnd(-1, 1) * r0 * 0.45, y: fy - uy2 * fe + spcRnd(-5, 5), age: 0, life: v.srb ? spcRnd(70, 100) : spcRnd(35, 50), r: r0, k: v.srb ? 1 : 0.7, v: Math.floor(spaceR() * 6), f: spaceR() < 0.5, sx: spcRnd(-1, 1) * (3 + 9 * low) }); } }
+        rocketPuff(fx - ux2 * fe + spcRnd(-1, 1) * r0 * 0.45, fy - uy2 * fe + spcRnd(-5, 5), 0, v.srb ? spcRnd(70, 100) : spcRnd(35, 50), r0, v.srb ? 1 : 0.7, Math.floor(spaceR() * 6), spaceR() < 0.5, spcRnd(-1, 1) * (3 + 9 * low), 0, 0, 0, 0); } }
     if (!SIM_ONLY && v.y > ATMO_TOP - 400) {
       const [nx, ny] = stackPoint(v, eu, 1.02);
       if (spaceR() < dt * 22) spawnEmber(nx - ux2 * spcRnd(20, 90) + spcRnd(-12, 12), ny - uy2 * spcRnd(20, 90), -ux2 * 40 + spcRnd(-30, 30), 0.6);   // (sparks off the plume)
@@ -43745,7 +43770,7 @@ function launchBillows(v, dt, k) {
   while (v.billowT >= 1) {
     v.billowT -= 1;
     const d = spaceR() < 0.5 ? -1 : 1, sp = spcRnd(150, 400) * (0.6 + 0.4 * k);
-    rocketTrail.push({ ground: true, x: P.x + d * spcRnd(18, 40), y: gy, vx: d * sp, vy: 0, age: spcRnd(0, 0.4), life: spcRnd(18, 28), r: spcRnd(15, 26), k: 1, v: Math.floor(spaceR() * 6), f: spaceR() < 0.5, w: spaceR() < 0.6 });
+    rocketPuff(P.x + d * spcRnd(18, 40), gy, spcRnd(0, 0.4), spcRnd(18, 28), spcRnd(15, 26), 1, Math.floor(spaceR() * 6), spaceR() < 0.5, 0, 1, d * sp, 0, spaceR() < 0.6);
   }
 }
 // a point on the stack, from its foot (u across 0..1 of its width from the tank's side, w up from 0 at the top to 1 at the foot)
@@ -44106,7 +44131,7 @@ function drawPads(x0, x1) {
   }
 }
 // a puff's size now: grown with age - the ground's heaps and the column's lowest the most (it opens out at the bottom)
-const rocketPuffR = p => p.r * (1 + Math.min(p.ground ? 6 : 7, Math.sqrt(p.age) * (p.ground ? 1.5 : 1.3))) * (0.6 + 0.4 * p.k);
+const rocketPuffR = (c, i) => c.r[i] * (1 + Math.min(c.ground[i] ? 6 : 7, Math.sqrt(c.age[i]) * (c.ground[i] ? 1.5 : 1.3))) * (0.6 + 0.4 * c.k[i]);   // (c: rocketTrail's columns, i a row)
 const trailGround = x => dryLand(x) && !isleCol(x) ? landTop(x) : surfaceY(x);   // (an island line's island is behind the water, user Oct 29: "The smoke on a ship must render in front of an island" - smoke, trails and deck 1 stop at the water there, not at its top)
 // the stack, standing or climbing, its flames under it; the orbiter flying, rolling out, landed; the pieces in space
 function drawSpace(x0, x1, pass) {
@@ -53063,7 +53088,7 @@ async function start(data) {
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
     bedLife: () => ({ reef, coastFront, weedBits, chunks, plants }), seabedHit: (x, hl, pw, vx, cut, bl) => seabedHit(x, hl, pw, vx, cut, bl), uwBlast: (x, y, pw) => underwaterBlast(x, y, pw),   // (Oct 27: the bottom's growth)
-    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeWisps, gore, get homeDock() { return homeDock; }, calmAt: x => calmAt(x), harbourTop: (x, y) => harbourTop(x, y), crumbleTower: tw => crumbleTower(tw), vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers[p]), seaHeli: (x, y) => { const h = helis[0] = makeHeli(0, x); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.merge ? 'single' : 'split', cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
+    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, screens, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, TEST, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeTrailPts, planeWisps, gore, get homeDock() { return homeDock; }, calmAt: x => calmAt(x), harbourTop: (x, y) => harbourTop(x, y), crumbleTower: tw => crumbleTower(tw), vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers[p]), seaHeli: (x, y) => { const h = helis[0] = makeHeli(0, x); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.merge ? 'single' : 'split', cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
     landState: () => land, landPlants: () => ({ PLT, PK, plantGeo, treeAt, plantsBlast, plantIgnite, plantFell, plantHeat, fireSpots: () => fireSpots([]) }), land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => L.s.c.toDataURL()); }, wrecks: () => landWrecks.length, top: x => landTop(x), below: (x, y) => landBelow(x, y), sandActive: () => land.sand.length,
       sandX: () => { let best = -1, bx = WORLD_W / 2; for (let c = 0; c < land.cols; c++) { let r = ltR0(c); while (r < ltR1(c) && land.cell[ltIdx(c, r)] === M_AIR) r++; let n = 0; while (r + n < ltR1(c) && land.cell[ltIdx(c, r + n)] === M_SAND) n++; if (n > best) { best = n; bx = (c + 0.5) * LT_CELL; } } return bx; }, sandCount: () => { let n = 0; for (const v of land.cell) if (v === M_SAND) n++; return n; }, rockX: () => land.outcrops[0] ? land.outcrops[0].x : WORLD_W / 2, rockAt: x => ltCell(ltCol(x), ltRow(landTop(x)) ) }),
     rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, SEA0, SEA1, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? SEA1 + 10 : SEA0 - 10)), get LAND_Y() { return LAND_Y; }, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), civLose: v => { const k = civClass(v); if (k === 'air') trafficDown(v); else if (k === 'ship') civSink(v, 0); else if (k === 'boat') jetboatSink(v); else if (k === 'balloon') balloonPop(v); else if (k === 'heli') civHeliDown(v); else if (k === 'sub') minisubLost(v); else if (k === 'seaplane') spDown(v); else if (k === 'blimp') blimpBurst(v); else if (k === 'yacht') sinkSailboat(v, v.x, v.y, 0); else if (k === 'shuttle') groundCrash(v, 1); return k; },   /* (tools: a civilian vehicle lost by its own rule - tools/civloss.mjs) */ lampScene: (gap = 150, hour = 23) => { const x = (SEA0 + SEA1) / 2, y = WATER_Y + (seabedY(x) - WATER_Y) * 0.5, a = subs[0], b = subs[1], dx = SUB_L + gap; for (const [s, sx, f] of [[a, x - dx / 2, 1], [b, x + dx / 2, -1]]) Object.assign(s, { state: 'out', gate: null, auto: null, x: sx, y, depthT: y, vx: 0, vy: 0, facing: f, turn: null, input: 0, throttle: 0, a: 0 }); a.light = true; b.light = false; a.lamp = { elev: 0, power: 0, aimShow: 0 }; const [lx, ly] = subArtPt(a, ...SUB_LAMP_AT), el = clamp(Math.atan2(b.y - ly, b.x - lx) * 180 / Math.PI, 0, 180); a.lamp.elev = el; a.aimA = el * Math.PI / 180; env.time = hour; computeEnv(); camOverride[0] = [x, y]; paused = true; return { x: Math.round(x), y: Math.round(y), elev: +el.toFixed(1) }; },   /* (the sub lamp's check, user Oct 30: two subs a gap apart at mid-depth, the left one's light on the other, at night; paused there) */ boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, civSpawn: (kind, x, lo, hi, dir) => { const c = newCivShip(kind, x, lo, hi, dir); civShips.push(c); return c; }, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
