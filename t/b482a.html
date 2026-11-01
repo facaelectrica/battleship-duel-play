@@ -3451,7 +3451,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 481;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 23:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'OCT 31 23:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -23628,22 +23628,59 @@ function smcObjects() {
 // after a gather here: the h's it rolled, kept by number
 function smcFromObjects() { if (!SMC.C) return; for (const s of smoke) if (s.h !== undefined) SMC.H.set(s.sq, s.h); }
 // the puffs packed for the gather straight from the columns - smgSend's walk, in the list's order
+// a column's reader, resolved once: puff i's value as the object would hold it
+function smcCol(k) {
+  const d = SMC.d[k]; if (!d) return () => undefined;
+  const m = d.m, z = d.z;
+  if (d.f) { const f = d.f; return i => (m && m[i] ? undefined : z && z[i] ? null : f[i]); }
+  if (d.b) { const f = d.b; return i => (m && m[i] ? undefined : z && z[i] ? null : f[i] !== 0); }
+  if (d.s) { const f = d.s, T = SMC.strs; return i => { if (m && m[i]) return undefined; if (z && z[i]) return null; const id = f[i]; return id === -2 ? null : id < 0 ? undefined : T[id]; }; }
+  if (d.ri) { const f = d.ri; return i => (m && m[i] ? undefined : z && z[i] ? null : f[i] === -2 ? null : f[i] < 0 ? undefined : f[i]); }
+  return () => undefined;
+}
+// each puff's numbers as smgPackOne works them out, once a snapshot (the h - rolled as it's packed - and the passes' choice
+// aside): PK 16 a puff - x y r age life alpha, fadeFrom ?? 0.62, keep, kill || 0, lonely || 0, link || 60, lumpy, famOf's
+// fixed answer (-1: by its sum), its sum's first part (dark * 0.8 + t * 0.9), its last (the quick's 0.3), dead. A number
+// field absent is NaN, null 0 - as a typed array and the sums take them
+const SMC_K = 16;
+function smcPrep() {
+  const n = SMC.n, K = SMC_K;
+  if (!SMC.PK || SMC.PK.length < n * K) { SMC.PK = new Float64Array(Math.max(n, 256) * 2 * K); SMC.SRC = new Array(Math.max(n, 256) * 2); SMC.PREV = new Int32Array(Math.max(n, 256) * 2); }
+  const PK = SMC.PK, SRC = SMC.SRC, PREV = SMC.PREV, PQ = SMC.PQ = new Map();
+  const gx = smcCol('x'), gy = smcCol('y'), gr = smcCol('r'), ga = smcCol('age'), gl = smcCol('life'), gal = smcCol('alpha'), gff = smcCol('fadeFrom'), gk = smcCol('keep'), gki = smcCol('kill'),
+    glo = smcCol('lonely'), gli = smcCol('link'), glu = smcCol('lumpy'), gfa = smcCol('fam'), gmi = smcCol('mist'), gda = smcCol('dark'), gq = smcCol('quick'), gsr = smcCol('src'), gde = smcCol('dead'), gpr = smcCol('prev');
+  const pj = SMC.d.prev && SMC.d.prev.j;
+  for (let i = 0; i < n; i++) {
+    const o = i * K, age = ga(i), life = gl(i), fam = gfa(i), ff = gff(i), kill = gki(i), lon = glo(i), link = gli(i);
+    PK[o] = gx(i); PK[o + 1] = gy(i); PK[o + 2] = gr(i); PK[o + 3] = age; PK[o + 4] = life; PK[o + 5] = gal(i);
+    PK[o + 6] = ff ?? 0.62; PK[o + 7] = gk(i) ? 1 : 0; PK[o + 8] = kill || 0; PK[o + 9] = lon || 0; PK[o + 10] = link || 60; PK[o + 11] = glu(i) ? 1 : 0;
+    PK[o + 12] = fam && FAM_N[fam] !== undefined ? FAM_N[fam] : gmi(i) ? 3 : -1;
+    { const t = age / life; PK[o + 13] = gda(i) * 0.8 + t * 0.9; PK[o + 14] = gq(i) && age < 3.5 ? 0.3 : 0; }
+    PK[o + 15] = gde(i) ? 1 : 0;
+    { const sr = gsr(i); SRC[i] = sr === 'smear' ? 'plane' : sr || 'ship'; }   // (srcOf)
+    if (pj) { const v = pj[i]; PREV[i] = -1; if (v && typeof v === 'object') { if (v.ri != null && Object.keys(v).length === 1) PREV[i] = v.ri < n ? v.ri : -1; else PQ.set(i, tblRefs(v, SWM.byU, 6)); } else if (v) PQ.set(i, v); }
+    else { const r = gpr(i); PREV[i] = r !== undefined && r !== null && r < n ? r : -1; }
+  }
+}
+// the puffs packed for the gather straight from the columns - smgSend's walk, in the list's order: smgPackOne's numbers
 function smcPack(S, want) {
-  const n = SMC.n, sq = SMC.d.sq.f, H = SMC.H, HD = SMC.HD, pr = SMC.d.prev;
+  if (SMC.prepFor !== SMC.C) { smcPrep(); SMC.prepFor = SMC.C; }
+  const n = SMC.n, sq = SMC.d.sq.f, H = SMC.H, HD = SMC.HD, PK = SMC.PK, SRC = SMC.SRC, PREV = SMC.PREV, PQ = SMC.PQ, K = SMC_K;
   let ns = 0;
   for (let i = 0; i < n; i++) {
-    const s = smcFill(SMC_P, i);
-    if (!want(srcOf(s))) continue;
+    if (!want(SRC[i])) continue;
     const id = sq[i];
     let h = H.get(id); if (h === undefined) { h = fxHash(++smHc * 0.6180339 + 0.1); H.set(id, h); }
-    s.h = h;
-    let q = null;
-    if (pr && pr.j) {   // (plain copies: a puff gone from the list still pointed to - as swColsInto puts them: {ri} a place, else the copy)
-      const v = pr.j[i];
-      if (v && typeof v === 'object') q = v.ri != null && Object.keys(v).length === 1 ? (v.ri < n ? smcFill(SMC_Q, v.ri) : null) : tblRefs(v, SWM.byU, 6);
-      else q = v;
-    } else if (pr) { const r = smcGet('prev', i); if (r !== undefined && r !== null) q = r < n ? smcFill(SMC_Q, r) : null; else q = r; }
-    smgPackOne(S, ns++ * SMG_S, s, q, HD.get(id) || false);
+    const p = i * K, o = ns++ * SMG_S;
+    if (PQ.size && PQ.has(i)) { const s = smcFill(SMC_P, i); s.h = h; smgPackOne(S, o, s, PQ.get(i), HD.get(id) || false); continue; }   // (a copy for its prev: the plain way)
+    S[o] = PK[p]; S[o + 1] = PK[p + 1]; S[o + 2] = PK[p + 2]; S[o + 3] = PK[p + 3]; S[o + 4] = PK[p + 4]; S[o + 5] = PK[p + 5]; S[o + 6] = PK[p + 6]; S[o + 7] = PK[p + 7]; S[o + 8] = PK[p + 8]; S[o + 9] = PK[p + 9];
+    S[o + 10] = h;
+    { const f = PK[p + 12]; if (f >= 0) S[o + 11] = f; else { const g = PK[p + 13] + (h - 0.5) * 0.12 - PK[p + 14]; S[o + 11] = g < 0.34 ? 0 : g < 0.62 ? 1 : 2; } }   // (famOf)
+    S[o + 12] = PK[p + 10]; S[o + 13] = PK[p + 11];
+    const r = PREV[i];
+    if (r >= 0) { const q = r * K; if (!PK[q + 15] && PK[q + 3] < PK[q + 4]) { S[o + 14] = 1; S[o + 15] = PK[q]; S[o + 16] = PK[q + 1]; S[o + 17] = PK[q + 2]; S[o + 18] = PK[q + 3]; S[o + 19] = PK[q + 4]; S[o + 20] = PK[q + 5]; S[o + 21] = PK[q + 6]; S[o + 22] = PK[q + 7]; S[o + 23] = PK[q + 8]; S[o + 24] = PK[q + 9]; } }
+    const hd = HD.size ? HD.get(id) : undefined;
+    if (hd) { S[o + 25] = 1; S[o + 26] = hd[0]; S[o + 27] = hd[1]; S[o + 28] = hd[2]; }
   }
   return ns;
 }
