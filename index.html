@@ -3950,8 +3950,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 527;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 15:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 528;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 15:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -5469,6 +5469,8 @@ function drawPerfPanel(x, y) {
     (T => 'NEW SKY ' + f(T.back) + '+' + f(T.decks) + '+' + f(T.front) + '+' + f(T.veil1) + '  LAY ' + f(T.out) + '  SMOKE ' + f(T.smoke) + '  BUILD ' + f(T.build) + '/' + Math.round(T.builds || 0) + ' LIT ' + Math.round(T.lit || 0) + ' KEYS ' + Math.round(T.kL || 0) + '/' + Math.round(T.kU || 0) + '/' + Math.round(T.kN || 0) + '/' + Math.round(T.kS || 0) + ' LOBES ' + f(T.lobes) + ' VEIL ' + f(T.veil) + ' GL ' + f(T.gl) + '  SM ' + f(T.smG) + '/' + f(T.smS) + '/' + f(T.smB) + '/' + f(T.smT) + (D => '  PUFF SIZES ' + D.sizes.map(v => v.toFixed(1)).join('/') + ' LOD ' + D.lod + '/' + D.n)(NSKY.deckSizes()))(NSKY.FT),
     'TINT ' + f(P.tint) + '  FX ' + f(P.overlays) + '  HUD ' + f((P.console || 0) + (P.dots || 0) + (P.topui || 0)),
     'PUFFS ' + f(P.ovSmoke) + '  TRAILS ' + f(P.ovTrails) + '  FIRE ' + f(P.ovFire) + '  RAIN ' + f(P.ovRain),
+    // (Nov 1: the graphics card's time on each part, from the GPU timers - 40-gl.js GPUT; their total the sum of the parts)
+    !GLR.on ? '' : GPUT.tried && !GPUT.ext ? 'GPU TIMERS: NONE ON THIS DRIVER' : (G => 'GPU ' + f(G.total) + '  SKY ' + f(G.sky) + '  WORLD ' + f(G.objects) + '  WATER ' + f(G.distort) + '  LAND ' + f(G.land) + '  TINT ' + f(G.tint) + '  FX ' + f(G.overlays))(GPUT.parts),
     'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + (GLR.on ? '  WEBGL' : '  MODE ' + MODE_NAMES[getMode()] + (BATCH_AUTO ? (abTrial.phase ? ' TRYING' : ' AUTO') : '') + '  [TAP HERE: NEXT MODE]'),
     GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + '  DECKS ' + Math.round(FT.dDraw || 0) + '/' + Math.round(FT.dSkip || 0) + (GLR.lost ? '  LOST' : '') : '',
     'SMOKE ' + smoke.n + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
@@ -18799,9 +18801,64 @@ function glBeginFrame() {
   const s = GLR.stats, sh = GLR.shown;
   for (const k in s) { sh[k] = (sh[k] || 0) + (s[k] - (sh[k] || 0)) * 0.1; s[k] = 0; }
   glClearTarget(GLR.screen, 0, 0, GLR.screen._w, GLR.screen._h);
+  if (GPUT.want || GPUT.cur || GPUT.frames.length || ui.perfPanel) gptBegin();   // (the GPU timers: off, nothing)
 }
 const PIX_RING = 24;
-function glEndFrame() { if (GLR.on && !GLR.lost) glFlush(); }
+function glEndFrame() { if (GLR.on && !GLR.lost) glFlush(); if (GPUT.cur) gptEnd(); }
+/* (Nov 1) GPU TIMERS PER RENDER PART: what the graphics card spends on each part of the frame, not only the CPU. While the perf
+   panel is open or __game.gpuTimers(true), each frame's drawing is timed by EXT_disjoint_timer_query_webgl2 TIME_ELAPSED
+   queries one after another (they can't nest): one runs from the frame's start, and wherever a part's lap closes (48-render.js
+   lap - sky, objects, distort, land, tint, overlays - and the sub-parts' sema / ema: sk*, ob*, ov*) the batch is drawn
+   (glFlush - its quads belong to that part) and the query ended and the next begun; the last ends at glEndFrame. A few frames
+   later, when the results are there, each sub-part gets its own time and a part the times since the part before closed (its
+   sub-parts in it, as its CPU time); total, their sum (no gl.finish). A frame the driver marks disjoint is dropped. Averaged
+   as the CPU parts (perf.parts): GPUT.parts, perfNow().gpuParts. Off: no query, no flush, nothing else; no extension: nothing */
+const GPUT = { want: false, ext: null, tried: false, ep: -1, cur: null, segs: null, frames: [], pool: [], parts: {}, n: 0 };
+function gptQuery() { return GPUT.pool.pop() || GLR.gl.createQuery(); }
+// the frame's first query (and the results of frames before, read when ready) - from glBeginFrame
+function gptBegin() {
+  const gl = GLR.gl;
+  if (GPUT.ep !== GLR.epoch) { GPUT.ep = GLR.epoch; GPUT.tried = false; GPUT.ext = null; GPUT.cur = null; GPUT.segs = null; GPUT.frames.length = 0; GPUT.pool.length = 0; }   // (a new context: its own queries)
+  if (GPUT.cur) { gl.endQuery(GPUT.ext.TIME_ELAPSED_EXT); for (const s of GPUT.segs) GPUT.pool.push(s.q); GPUT.pool.push(GPUT.cur); GPUT.cur = null; }   // (a frame that never ended: dropped)
+  gptRead();
+  if (!(GPUT.want || ui.perfPanel)) return;
+  if (!GPUT.tried) { GPUT.tried = true; GPUT.ext = gl.getExtension('EXT_disjoint_timer_query_webgl2'); }
+  if (!GPUT.ext) return;
+  GPUT.segs = []; GPUT.cur = gptQuery(); gl.beginQuery(GPUT.ext.TIME_ELAPSED_EXT, GPUT.cur);
+}
+// a part's lap: k its name, top 1 for a part (48-render.js), 0 for a sub-part
+function gptLap(k, top) {
+  const gl = GLR.gl, X = GPUT.ext;
+  glFlush(); gl.endQuery(X.TIME_ELAPSED_EXT); GPUT.segs.push({ k, top, q: GPUT.cur });
+  GPUT.cur = gptQuery(); gl.beginQuery(X.TIME_ELAPSED_EXT, GPUT.cur);
+}
+function gptEnd() {
+  GLR.gl.endQuery(GPUT.ext.TIME_ELAPSED_EXT); GPUT.segs.push({ k: 'rest', top: 1, q: GPUT.cur });
+  GPUT.frames.push(GPUT.segs); GPUT.cur = null; GPUT.segs = null;
+}
+// the frames whose results are in, oldest first: each part's ms into the averages (a part not in a frame averaged as 0)
+function gptRead() {
+  const gl = GLR.gl, X = GPUT.ext, F = GPUT.frames;
+  while (F.length) {
+    const segs = F[0], last = segs[segs.length - 1].q;
+    if (!gl.getQueryParameter(last, gl.QUERY_RESULT_AVAILABLE)) break;
+    F.shift();
+    const dis = gl.getParameter(X.GPU_DISJOINT_EXT), T = {};
+    if (!dis) {
+      let acc = 0, total = 0;
+      for (const s of segs) {
+        const ms = gl.getQueryParameter(s.q, gl.QUERY_RESULT) / 1e6;
+        acc += ms; total += ms;
+        if (s.top) { T[s.k] = (T[s.k] || 0) + acc; acc = 0; } else T[s.k] = (T[s.k] || 0) + ms;
+      }
+      T.total = total;
+      const P = GPUT.parts; for (const k in T) if (!(k in P)) P[k] = 0;
+      for (const k in P) P[k] += ((T[k] || 0) - P[k]) * 0.05;
+      GPUT.n++;
+    }
+    for (const s of segs) GPUT.pool.push(s.q);
+  }
+}
 
 /* ---- the context: the Canvas 2D calls the world uses, drawn with the batch ---- */
 class GLCtx {
@@ -26166,7 +26223,7 @@ function renderSky() {
     }
   }
   if (E.fog > 0.02) drawFogHills();
-  let st = performance.now(); const sema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
+  let st = performance.now(); const sema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } if (GPUT.cur) gptLap(k, 0); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
   st = sema('skBase', T0sky);
   if (OWM) clipRegion(DEPTH.farSea);                // (OPEN WORLD: the far water only over the sea - where the sea is at ITS depth)
   drawFarSea();
@@ -26509,7 +26566,7 @@ const BUBBLE_COLS = [0, 1, 2, 3, 4, 5].map(i => { const k = i / 5 * 0.72, m = c 
 let ysW = new Float64Array(64);   // (this view's surface heights a column, this frame: renderObjects' own)
 function renderObjects() {
   const x0 = CAMPX / SV, x1 = x0 + VWW;
-  const ema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
+  const ema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } if (GPUT.cur) gptLap(k, 0); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
   let ot = performance.now();
   const Bt = bh - SHY + 2;
   const yW = PY(WATER_Y);
@@ -29706,7 +29763,7 @@ function shipCut(x0, x1, draw) {
 }
 function renderOverlays() {
   const x0 = CAMPX / SV, x1 = x0 + VWW;
-  const ema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
+  const ema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } if (GPUT.cur) gptLap(k, 0); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
   let ot = performance.now();
   if (OWM) clipRegion();                              // (LAND TEST: the sea's light only over the sea - the near sea's, at the world's own coast)
   drawRays(true); drawMoonlight(x0, x1);
@@ -30590,7 +30647,7 @@ function render() {
   const cam1 = cam.merge >= 1 ? cam0 + half : Math.round(v1.l * S * v1.z);
   const camF0 = v0.l * S * v0.z, camF1 = cam.merge >= 1 ? camF0 + half : v1.l * S * v1.z;
   const views = [[v0, cam0, 0, half, 0, camF0], [v1, cam1, half, bw - half, 1, camF1]];
-  const T = performance.now(), lap = (k, t0) => { let rb = 0; if (probe.on) { const n0 = probe.n; probeFlush(g); probeFlush(oc); rb = (probe.n - n0) * probe.cost; } const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
+  const T = performance.now(), lap = (k, t0) => { let rb = 0; if (probe.on) { const n0 = probe.n; probeFlush(g); probeFlush(oc); rb = (probe.n - n0) * probe.cost; } if (GPUT.cur) gptLap(k, 1); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
   let tt = T;
   FT.env = (FT.env || 0) + (T - T0);
   for (let i = 0; i < 2; i++) { planeLamps[i].length = 0; lighthouseGlow[i].length = 0; airLamps[i].length = 0; lateLit[i].length = 0; brightLights[i].length = 0; fwLate[i].length = 0; }
@@ -53221,7 +53278,9 @@ async function start(data) {
   // (Nov 1) a column table's row as a plain object, for the console: __game.row('smoke', 0) - 04-zz-coltable.js
   Object.assign(window.__game, { row: (name, i) => { const t = TABLES[name]; return t && t.cols ? t.cols.plain(i) : t ? t.list()[i] : undefined; } });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
-  Object.assign(window.__game, { planesP: planes, perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}), budget: FRAME_BUDGET }) });
+  Object.assign(window.__game, { planesP: planes, perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}), gpuParts: Object.assign({}, GPUT.parts), budget: FRAME_BUDGET }),
+    // (Nov 1) the GPU timers per render part (40-gl.js GPUT): on / off; what it gives - ext: whether the driver has the timer queries, frames: how many timed
+    gpuTimers: on => { if (on != null) GPUT.want = !!on; return { on: GPUT.want, ext: GPUT.tried ? !!GPUT.ext : null, frames: GPUT.n }; } });
   Object.assign(window.__game, { smokeWorker: on => { if (on != null) { SMW.on = !!on; if (CAVE.worker && !CAVE.worker.fail) CAVE.worker.on = !!on; if (CAVE.buildWorker && !CAVE.buildWorker.fail) CAVE.buildWorker.on = !!on; } const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
   Object.assign(window.__game, { kraken: () => KR, krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (the simulation worker, sim-worker branch: the tables and the snapshot's parts, for tools/sw-measure.mjs)
