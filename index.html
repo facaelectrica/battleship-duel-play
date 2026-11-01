@@ -3236,8 +3236,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 444;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 19:59';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 445;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 20:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14299,6 +14299,53 @@ function swNestCol(arr, k, N, n, strs, clean) {
 // rolled when it's first drawn (sky/21-smoke.js) - and keeps: a puff by its spawn number (sq)
 const SW_MATCH = { smoke: { by: 'sq', keys: ['h'] } };
 const SW_KEEP = SW_MATCH;
+/* (Oct 31) the number columns put down a list a thing at a time, in one small function made once for the list's columns: each
+   thing is visited once with all its numbers written by name (the browser's fast path for a named field of things of one shape),
+   instead of the whole list walked once per column - a thousand puffs, twenty columns, every snapshot. The same values in the same
+   places. (made per list and set of columns - which are numbers, which yes/no, which carry gaps (m) or nulls (z)) */
+const SWROW = new Map();
+function swRowPut(arr, K, D, n, list) {
+  let key = list || '';
+  for (let c = 0; c < K.length; c++) { const d = D[c]; key += d.f ? '|f' : d.b ? '|b' : '|-'; if (d.f || d.b) key += (d.m ? 'm' : '') + (d.z ? 'z' : '') + K[c]; }
+  let P = SWROW.get(key);
+  if (P === undefined) {
+    let pre = '', body = '';
+    for (let c = 0; c < K.length; c++) {
+      const d = D[c]; if (!d.f && !d.b) continue;
+      pre += `const c${c} = D[${c}].${d.f ? 'f' : 'b'}${d.m ? `, m${c} = D[${c}].m` : ''}${d.z ? `, z${c} = D[${c}].z` : ''}; `;
+      let v = d.f ? `c${c}[i]` : `c${c}[i] !== 0`;
+      if (d.z) v = `z${c}[i] ? null : ${v}`;
+      if (d.m) v = `m${c}[i] ? undefined : ${v}`;
+      body += `o[${JSON.stringify(K[c])}] = ${v}; `;
+    }
+    try { P = body ? new Function('arr', 'D', 'n', `${pre}for (let i = 0; i < n; i++) { const o = arr[i]; ${body}}`) : null; } catch (e) { P = null; }
+    SWROW.set(key, P);
+  }
+  if (P) P(arr, D, n);
+  return P !== null;
+}
+/* (Oct 31) a list's new things made by one small constructor of the list's own, every field there from the start - a number
+   column's field as a number (0), a yes/no one's as false, the rest undefined - so the browser keeps the numbers as numbers
+   in place: a field first given undefined holds anything, and every number then put in it is a new boxed number, a thousand
+   puffs times twenty fields of garbage each snapshot. A constructor of the list's own also keeps its things' shape apart from
+   every other list's (fields of the same name elsewhere holding other kinds of values). The values are put over these at once */
+const SWMK = new Map();
+function swMakerOf(list, K, D, extra) {
+  let key = (list || '') + ':'; for (let c = 0; c < K.length; c++) key += (D[c].f ? 'f' : D[c].b ? 'b' : '-') + K[c] + ',';
+  if (extra) key += '|' + extra.join(',');
+  let M = SWMK.get(key);
+  if (M === undefined) {
+    let body = '';
+    const seen = new Set();
+    for (let c = 0; c < K.length; c++) { if (seen.has(K[c])) continue; seen.add(K[c]); body += `this[${JSON.stringify(K[c])}] = ${D[c].f ? '0' : D[c].b ? 'false' : 'undefined'}; `; }
+    if (extra) for (const k of extra) if (!seen.has(k)) { seen.add(k); body += `this[${JSON.stringify(k)}] = undefined; `; }
+    try { M = new Function(body); } catch (e) { M = null; }
+    SWMK.set(key, M);
+  }
+  return M;
+}
+function swBlank(K, more) { const o = {}; for (const k of K) o[k] = undefined; if (more) for (const k of more) o[k] = undefined; return o; }
+const SWOLD = [];
 const swColsSig = new Map();                                         // (list -> its columns last refill: a field is cleaned off only when they change)
 function swColsInto(arr, C, strs, name) {
   const n = C.n, K = C.k, D = C.d, has = new Set(K), at = new Int32Array(K.length);   // (at: each nested column's next item)
@@ -14312,22 +14359,36 @@ function swColsInto(arr, C, strs, name) {
   let sig = K.join(','); for (let c = 0; c < K.length; c++) if (D[c].nest) sig += '|' + K[c] + ':' + D[c].nest.k.join(',') + (D[c].nest.obj ? '' : '[]');
   const clean = swColsSig.get(arr) !== sig; swColsSig.set(arr, sig);
   // (matched by number: the page's things by that number first, then each incoming row takes its own or a new one)
-  let byN = null;
-  if (kd && kd.f) { byN = new Map(); for (const o of arr) if (o && typeof o === 'object') byN.set(o[keep.by], o); }
+  let byN = null, mOld = null;
+  if (kd && kd.f) {
+    // (Oct 31: both lists are in spawn order - a puff's number only grows down the list - so the page's own things are found by
+    // walking the two lists side by side, not through a table of a thousand made every snapshot; any other order: the table)
+    const by = keep.by, f = kd.f, m0 = arr.length; let sorted = true;
+    for (let i = 1; i < n && sorted; i++) if (!(f[i] > f[i - 1])) sorted = false;
+    for (let i = 0; i < m0 && sorted; i++) { const o = arr[i]; if (!o || typeof o !== 'object' || (i && !(o[by] > arr[i - 1][by]))) sorted = false; }
+    if (sorted) { mOld = SWOLD; mOld.length = m0; for (let i = 0; i < m0; i++) mOld[i] = arr[i]; }
+    else { byN = new Map(); for (const o of arr) if (o && typeof o === 'object') byN.set(o[by], o); }
+  }
   if (arr.length > n) arr.length = n;
   // (first the things, each in its place: its own by number, or a new one with every field there from the start, in one order -
   // one shape for them all)
+  let jOld = 0;
+  const Mk = swMakerOf(name, K, D, keep ? keep.keys : null);
   for (let i = 0; i < n; i++) {
     let o;
-    if (byN) { o = byN.get(kd.f[i]); if (!o) { o = {}; for (const k of K) o[k] = undefined; for (const kk of keep.keys) o[kk] = undefined; } arr[i] = o; }
-    else { o = arr[i]; if (!o || typeof o !== 'object') { o = arr[i] = {}; for (const k of K) o[k] = undefined; } }
+    if (mOld) { const v = kd.f[i], by = keep.by; while (jOld < mOld.length && mOld[jOld][by] < v) jOld++; o = jOld < mOld.length && mOld[jOld][by] === v ? mOld[jOld++] : null;
+      if (!o) o = Mk ? new Mk() : swBlank(K, keep.keys); arr[i] = o; }
+    else if (byN) { o = byN.get(kd.f[i]); if (!o) o = Mk ? new Mk() : swBlank(K, keep.keys); arr[i] = o; }
+    else { o = arr[i]; if (!o || typeof o !== 'object') o = arr[i] = Mk ? new Mk() : swBlank(K, null); }
     if (clean) for (const k in o) if (!has.has(k)) delete o[k];
   }
-  // (then the fields, a column at a time: one field written down the whole list, the same kind each time)
+  if (mOld) mOld.length = 0;
+  // (then the fields: the numbers a thing at a time (swRowPut), the rest a column at a time)
+  const rowsDone = n > 0 && swRowPut(arr, K, D, n, name);
   for (let c = 0; c < K.length; c++) {
     const d = D[c], k = K[c], m = d.m, z = d.z;
-    if (d.f) { const f = d.f; if (!m && !z) for (let i = 0; i < n; i++) arr[i][k] = f[i]; else for (let i = 0; i < n; i++) arr[i][k] = m && m[i] ? undefined : z && z[i] ? null : f[i]; }
-    else if (d.b) { const f = d.b; for (let i = 0; i < n; i++) arr[i][k] = m && m[i] ? undefined : z && z[i] ? null : f[i] !== 0; }
+    if (d.f) { if (rowsDone) continue; const f = d.f; if (!m && !z) for (let i = 0; i < n; i++) arr[i][k] = f[i]; else for (let i = 0; i < n; i++) arr[i][k] = m && m[i] ? undefined : z && z[i] ? null : f[i]; }
+    else if (d.b) { if (rowsDone) continue; const f = d.b; for (let i = 0; i < n; i++) arr[i][k] = m && m[i] ? undefined : z && z[i] ? null : f[i] !== 0; }
     else if (d.j) { const j = d.j; for (let i = 0; i < n; i++) arr[i][k] = j[i]; }
     else if (d.nest) swNestCol(arr, k, d.nest, n, strs, clean);
     else if (d.s) { const f = d.s; for (let i = 0; i < n; i++) { const id = f[i]; arr[i][k] = m && m[i] ? undefined : z && z[i] ? null : id === -2 ? null : id < 0 ? undefined : strs[id]; } }   // (swColPut's string, a column at a time - Oct 31)
@@ -21091,12 +21152,20 @@ function batchToneAt(c, x, y) {
 const nearCloud = (c, x, y, m) => !!c.axd && x >= c.axd[VI] + c.minX - m && x <= c.axd[VI] + c.maxX + m && y <= c.y + m && y >= c.y - c.h - m;
 // the share of the sun's disc (radius r about sunX, sunY) under any cloud of any deck, from the records
 let SUNCOV = new Uint8Array(0);
+// (Oct 31: the disc's cells counted first - those on the screen - and the walk over the records stops once every one of them is
+// covered: in a storm the sun is behind thousands of cloud records, and the answer (all of it) is known after the first few)
+let SUNDISC = new Uint8Array(0);
 function sunCoverGPU(vis, sunX, sunY, r) {
-  const S2 = 2 * r + 1; if (SUNCOV.length < S2 * S2) SUNCOV = new Uint8Array(S2 * S2); const cov = SUNCOV; cov.fill(0, 0, S2 * S2);
+  const S2 = 2 * r + 1; if (SUNCOV.length < S2 * S2) { SUNCOV = new Uint8Array(S2 * S2); SUNDISC = new Uint8Array(S2 * S2); } const cov = SUNCOV, disc = SUNDISC; cov.fill(0, 0, S2 * S2);
   const bx0 = sunX - r, by0 = sunY - r;
+  let nd = 0;
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { const x = sunX + dx, y = sunY + dy, on = dx * dx + dy * dy <= r * r && x >= 0 && x < CW && y >= 0 && y < H; disc[(dy + r) * S2 + dx + r] = on ? 1 : 0; if (on) nd++; }
+  if (!nd) return 0;
+  let left = nd;
   for (const c of vis) {
     if (!c.visible || !nearCloud(c, sunX, sunY, r + 2)) continue;
-    for (const pb of [c.pbv && c.pbv[VI], c.pbx]) {
+    for (let pk = 0; pk < 2; pk++) {
+      const pb = pk === 0 ? c.pbv && c.pbv[VI] : c.pbx;
       if (!pb || !pb.n) continue;
       const ax = c.axd[VI], ay = c.y, d = pb.data;
       for (let i = 0, n = pb.n; i < n; i++) {
@@ -21106,13 +21175,11 @@ function sunCoverGPU(vis, sunX, sunY, r) {
         else { const cx = ax + d[o], cy = ay + d[o + 1]; x0 = Math.floor(cx - d[o + 2]) - 1; x1 = Math.ceil(cx + d[o + 2]) + 1; y0 = Math.floor(cy - d[o + 3]); y1 = Math.min(Math.round(cy + d[o + 3]), ay + d[o + 4]); }
         x0 = Math.max(x0, bx0); x1 = Math.min(x1, bx0 + S2 - 1); y0 = Math.max(y0, by0); y1 = Math.min(y1, by0 + S2 - 1);
         if (x0 > x1 || y0 > y1) continue;
-        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const q = (y - by0) * S2 + (x - bx0); if (!cov[q] && batchRecCovers(d, o, ax, ay, x, y)) cov[q] = 1; }
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) { const q = (y - by0) * S2 + (x - bx0); if (!cov[q] && batchRecCovers(d, o, ax, ay, x, y)) { cov[q] = 1; if (disc[q] && --left === 0) return 1; } }
       }
     }
   }
-  let n = 0, k = 0;
-  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) { if (dx * dx + dy * dy > r * r) continue; const x = sunX + dx, y = sunY + dy; if (x < 0 || x >= CW || y < 0 || y >= H) continue; n++; if (cov[(dy + r) * S2 + dx + r]) k++; }
-  return n ? k / n : 0;
+  return (nd - left) / nd;
 }
 function batchRecCovers(d, o, ax, ay, x, y) {
   if (d[o + 7] < 0.5) { const R = d[o + 2] * 0.5, nn = Math.floor(R), dx = x - (ax + d[o]), dy = y - (ay + d[o + 1]); return !(Math.abs(dy) > nn || dx * dx + dy * dy > (R + 0.5) * (R + 0.5)); }
