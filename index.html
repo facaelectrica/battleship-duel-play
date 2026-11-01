@@ -1209,7 +1209,8 @@ const inCountry = x => OWM && (x < SEA0 || x > SEA1);
 // (ISLE 1: the ground's own line out of the water at sea - solid for all, a coast; 2: an island line's, user Oct 28 21:04 -
 // the middle plane: solid for what flies and drives, the ships and the subs go through it - 50-land-islands)
 const onLand = x => OWM && (x < SEA0 || x > SEA1 || (ISLE !== null && ISLE[Math.floor(x / 2.5)] > 0));
-const isleCol = x => ISLE !== null && ISLE[Math.floor(x / 2.5)] === 2;
+const isleCol = x => { if (ISLE === null) return false; const i = Math.floor(x / 2.5); return ISLE[i] === 2 && !(land.idry && land.idry[i]); };   // (a segment over dry land: its top is the ground - not behind the water)
+const isleAny = x => ISLE !== null && ISLE[Math.floor(x / 2.5)] === 2;   // (any segment's column, over water or land: nothing of the ground's own grows there)
 // (user Oct 28) the ground's own line out of the water at sea, `half` ahead of x going `dir`: a coast every boat stops or
 // turns at (an island line's island they go past)
 const coastAhead = (x, dir, half) => { if (ISLE === null) return false; const q = x + dir * half, i = Math.floor(q / 2.5); return ISLE[i] === 1 || !!(land.isolid && land.isolid[i]); };   // (or a SOLID segment - 50-land-islands, user Oct 31 20:03)
@@ -3236,8 +3237,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 446;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 20:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 447;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 20:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36269,14 +36270,17 @@ const islGroundAt = (x, R) => inCountry(x) ? landProfile(x, R) : sandY(x);
 // wherever its line rises out of the water and the ground in front is under the water - the sea between the harbours, a
 // lake, or a sea in a country. Where the ground in front stands out of the water, it hides the island: nothing to mark
 function islMarkCols(I_, any, R) {
-  land.itop = null; land.islRuns = []; land.isolid = null;
+  land.itop = null; land.islRuns = []; land.isolid = null; land.idry = null;
   const L = islandsUsed(); if (!L.length) return any;
-  const T = land.itop = new Float32Array(land.cols), SO = land.isolid = new Uint8Array(land.cols);   // (isolid: a SOLID segment's columns - coastAhead)
+  const T = land.itop = new Float32Array(land.cols), SO = land.isolid = new Uint8Array(land.cols), DR = land.idry = new Uint8Array(land.cols);   // (isolid: a SOLID segment's columns - coastAhead; idry: a segment over dry land - isleCol)
+  // (user Oct 31 20:04-20:08: segments over land too - "the highest ground wins": in a country, where a segment rises over the
+  // ground in front, its top is the ground there - cars drive up on it, shells and planes hit it - still drawn behind)
   for (const I of L) {
     const m = floorTangents(I.p), a = I.p[0][0], b = I.p[I.p.length - 1][0];
     for (let c = Math.max(0, Math.ceil(a / LT_CELL)); c < land.cols && c * LT_CELL < b; c++) {
-      const x = c * LT_CELL; if (I_[c] || islGroundAt(x, R) < WATER_Y - 1) continue;
-      const t = islTopAt(I, m, x); if (t < WATER_Y - 1 && t < islBotAt(I, x) - 1) { I_[c] = 2; T[c] = t; any = true; if (I.solid) SO[c] = 1; }
+      const x = c * LT_CELL; if (I_[c]) continue;
+      const g = islGroundAt(x, R), dry = g < WATER_Y - 1; if (dry && !inCountry(x)) continue;
+      const t = islTopAt(I, m, x); if (t < WATER_Y - 1 && t < islBotAt(I, x) - 1 && (!dry || t < g - 1)) { I_[c] = 2; T[c] = t; any = true; if (I.solid) SO[c] = 1; if (dry) DR[c] = 1; }
     }
   }
   for (let c = 0; c < land.cols; c++) if (I_[c] === 2 && I_[c - 1] !== 2) { let e = c; while (I_[e + 1] === 2) e++; land.islRuns.push([c * LT_CELL, (e + 1) * LT_CELL]); }
@@ -36375,7 +36379,7 @@ function islSplitChunk(k, id, w, h) {
   const yW = Math.ceil((WATER_Y + 2 - LT_Y0) / LT_CELL) - land.rT[k] + 4;   // (the canvas row of the water's line: row r is r + 4 - rT)
   for (let q = 0; q < w; q++) {
     if (ISLE[c0 + q] !== 2) continue;
-    const yE = inCountry((c0 + q) * LT_CELL) ? Math.min(h, yW) : h;   // (in a country the column keeps its own ground under the water - a lake's bed - in front)
+    const yE = inCountry((c0 + q) * LT_CELL) ? Math.min(h, yW, Math.ceil((land.surf[c0 + q] - LT_Y0) / LT_CELL) - land.rT[k] + 4) : h;   // (in a country the column keeps its own ground in front - a lake's bed, or the dry ground under a segment over land)
     for (let y = 0; y < yE; y++) { const o = (y * w + q) * 4; d[o] = s[o]; d[o + 1] = s[o + 1]; d[o + 2] = s[o + 2]; d[o + 3] = s[o + 3]; s[o + 3] = 0; }
   }
   g.putImageData(iid, 0, 0);
@@ -38036,7 +38040,7 @@ function buildDesertArt() {
 function buildLandProps() {
   land.props = [];
   const R = seededRng(8123), DL = (land.lakes || []).filter(l => lookD((l[0] + l[1]) / 2)), L = DL[0];   // (the oases: every lake whose ground looks the desert's - lookD)
-  const ok = x => onLand(x) && !isleCol(x) && !onApron(x) && Math.abs(x - padX(true)) > 260 && !(land.proud || []).some(([a, b]) => x > a - 6 && x < b + 6);
+  const ok = x => onLand(x) && !isleAny(x) && !onApron(x) && Math.abs(x - padX(true)) > 260 && !(land.proud || []).some(([a, b]) => x > a - 6 && x < b + 6);
   // palms round the oasis, on both its shores - on the dry bank, a little way up from the water (the kit's guide: "16
   // palms around the oasis, on both shores... concentrate them by water")
   // (user Oct 28: every oasis - the first as it was, any more with palms by their size: a pond two, a big one sixteen)
@@ -39077,7 +39081,7 @@ function forestTreeArt() {
 // near it, the launch pad, the lake, a rock face, a steep slope or the mountain's top by the tower)
 function buildForestTrees(R) {
   const air = AIR_W + 160, P = padX(false), P2 = padX(true);
-  const ok = x => onLand(x) && !isleCol(x) && !landTrop(x) && !towersUsed().some(t => Math.abs(x - towerDefX(t)) < 140) && !lookD(x) && apronD(x) > 120 && Math.abs(x - (lcRight(x) ? P2 : P)) > 300 && Math.abs(lcX(x) - LAND_TOWER_X) > 140 && !lakeAt(x) && !lakeAt(x - 30) && !lakeAt(x + 30)
+  const ok = x => onLand(x) && !isleAny(x) && !landTrop(x) && !towersUsed().some(t => Math.abs(x - towerDefX(t)) < 140) && !lookD(x) && apronD(x) > 120 && Math.abs(x - (lcRight(x) ? P2 : P)) > 300 && Math.abs(lcX(x) - LAND_TOWER_X) > 140 && !lakeAt(x) && !lakeAt(x - 30) && !lakeAt(x + 30)
     && !(land.proud || []).some(([a, b]) => x > a - 10 && x < b + 10) && Math.abs(landTop(x - 12) - landTop(x + 12)) < 10
     && [M_GRASS, M_DIRT].includes(ltCell(ltCol(x), ltRow(landTop(x) + 1)));
   tropPalms();                                                  // (the TROPICAL pieces: palms - their own seed)
@@ -42203,7 +42207,7 @@ function buildLand() {
     // it, then the column's own ground - the lake's bed - in front, as everywhere: one column, two grounds)
     for (let r = ltR0(c), r1 = rEnd; r < r1; r++) {
       const y = LT_Y0 + r * LT_CELL;
-      if (wetIsl && y >= land.itop[c] && r < rW) { land.cell[ltIdx(c, r)] = y < land.itop[c] + ltGrassD(c) * LT_CELL && sandy < 0.35 ? M_GRASS : M_DIRT; continue; }
+      if (wetIsl && y >= land.itop[c] && r < rW && y < top) { land.cell[ltIdx(c, r)] = y < land.itop[c] + ltGrassD(c) * LT_CELL && sandy < 0.35 ? M_GRASS : M_DIRT; continue; }   // (y < top: over dry land the segment stops at the ground in front)
       if (y < top) continue;
       let m;
       if (y >= rockAt || (rocky > 0.5 && y < top + 60 + 40 * rocky)) m = M_ROCK;
@@ -42257,7 +42261,7 @@ function buildLand() {
   land.boulders = [];
   for (let i = 0; i < W / 240; i++) {
     const x = R0() * W, back = R0(), w = (30 + R0() * 50) * (1 - 0.4 * back);
-    if (!onLand(x) || isleCol(x) || apronD(x) < -40) continue;
+    if (!onLand(x) || isleAny(x) || apronD(x) < -40) continue;
     land.boulders.push({ x, w, h: w * (0.5 + R0() * 0.2), back, seed: R0() * 99 });
   }
   land.boulders = land.boulders.filter(b => lakeU(b.x) > 1.15 && Math.abs(b.x - padX(false)) > 380 && Math.abs(b.x - padX(true)) > 380);   // (none in the lake's bowl, none on the launch pads)
