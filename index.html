@@ -3378,8 +3378,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 464;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 21:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 465;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 21:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7118,8 +7118,12 @@ function otherDocksStop(v, hl) {
 }
 // out of her harbour: the whole hull past the end of the pier. Weapons stay safe until then
 function outOfDock(d, x, hl) { return (d.quay - x) * d.dir > hl - 2; }
-function shipClear(sh) { return outOfDock(sh.dock, sh.x, SHIP_L / 2); }
-function subClear(sb) { return outOfDock(homeDock[sb.id], sb.x, SUB_L / 2); }
+// (user Oct 31 21:21: "the moment a battleship or a submarine leave the hangar, you should be able to start firing. Right now,
+// it waits until you leave the dock area") weapons safe only while the hull is still in the hangar: armed once all of her is
+// seaward of its sea wall (hgSea), the pier or not
+function outOfHangar(d, x, hl) { return (d.hgSea - x) * d.dir > hl - 2; }
+function shipClear(sh) { return outOfHangar(sh.dock, sh.x, SHIP_L / 2); }
+function subClear(sb) { return outOfHangar(homeDock[sb.id], sb.x, SUB_L / 2); }
 // in her harbour, wholly or partly: the stone hides her and she's out of the fight
 const inHarbour = v => !!v.gate || (v.moored === true) || v.state === 'docked' || !outOfDock(v.dock, v.x, (v === ships[v.id] ? SHIP_L : SUB_L) / 2 - 3);
 
@@ -34328,7 +34332,23 @@ const seaUnder = (x, y) => Math.min(seabedY(x), shipY(x, y), harbourTop(x, y)); 
 // shells pass them (s.pass); CIV_SKIP holds them while that one is tested (civHitFor), and civAt / contHit / inHull skip them
 let CIV_SKIP = null;
 function passingShips(sh) { return LAND ? civShips.filter(c => c.state !== 'gone' && c.state !== 'wreck' && Math.abs(c.x - sh.x) < (civLen(c) + SHIP_L) / 2) : null; }
-function civHitFor(s, x, y, dmg, vx) { CIV_SKIP = s.pass && s.pass.length ? s.pass : null; try { return civHit(x, y, dmg, vx); } finally { CIV_SKIP = null; } }
+// (user Oct 31 21:19: "the bullet and the missiles should be able to exit my vehicle without immediately hitting the other one.
+// But once they land, they would hit the other one ... a universal rule") a shell passes a ship it was fired beside only until
+// it is clear of her - out of the box of her picture and what's stacked on her deck (CLEAR_TOP over her top), or past either
+// end: from then on she's a ship like any other, and a shell coming down on her hits her
+const CLEAR_TOP = c => (c.cargo ? CONT_ROWS * CONT_H : 0) + 20;   // (world units over her picture's top: her deck's boxes, a box ship's whole stacks)
+function passPrune(s, x, y) {
+  const P = s.pass;
+  for (let k = P.length - 1; k >= 0; k--) {
+    const c = P[k];
+    if (c.state === 'gone') { P.splice(k, 1); continue; }
+    let inside;
+    if (c.hv) inside = Math.abs(x - c.x) < civLen(c) * 0.75 && civHullHas(c, x, y);
+    else { const K = CIV[c.kind], A = civArt(c), [u, q] = civLocal(c, x, y); inside = !!A && u >= -0.02 && u <= 1.02 && q >= -CLEAR_TOP(c) / K.k && q <= A.height + 2; }
+    if (!inside) P.splice(k, 1);
+  }
+}
+function civHitFor(s, x, y, dmg, vx) { if (s.pass && s.pass.length) passPrune(s, x, y); CIV_SKIP = s.pass && s.pass.length ? s.pass : null; try { return civHit(x, y, dmg, vx); } finally { CIV_SKIP = null; } }
 // (engine stage 3) 'hit' {kind: 'civ', x, y, amt: dmg in shells, vx, shell} (36-zz-events.js): a blow to whatever big ship is
 // at (x, y) - shell: the shell or round, whose passing ships it skips (civHitFor). e.took: she (or a box on her deck) took it
 on('hit', e => {
@@ -34401,9 +34421,13 @@ function armyHullAt(x, y, side) {
 }
 // a hit: dmg in shells (a round about 0.04, a shell or missile 1, a bomb 2, a torpedo 3). True if it hit a ship.
 function civHit(x, y, dmg, vx) {
-  if (contHit(x, y, dmg, vx)) return true;                       // (a box on her deck: its own hit, not hers - user Oct 26)
+  if (contHit(x, y, dmg, vx)) return true;                       // (a box on her deck: its own hit - user Oct 26; a shell's blast reaches her too - contBlast)
   const h = civAt(x, y);
   if (!h) return false;
+  return civHitHull(h, x, y, dmg, vx);
+}
+// the blow on her hull itself, at (x, y) in section h[1]
+function civHitHull(h, x, y, dmg, vx) {
   const [c, i] = h, K = CIV[c.kind];
   if (dmg >= 0.5) linerHitParts(c, x, y, vx);                     // (the liner: a funnel or mast near the blow torn off)
   if (dmg >= 0.5) { sectionBlast(x, y, Math.min(1.4, 0.6 + dmg * 0.25), (vx || 0) * 0.2); spawnDebris(x, y, 4 + Math.round(dmg * 3), (vx || 0) * 0.2); sound('impact', x); }
@@ -35579,6 +35603,28 @@ function contFind(x, y) {
   for (const k of containers) if ((k.where === 'free' || k.where === 'rest' || k.where === 'hook') && contIn(x, y, k.x, k.y)) return [k, k.x, k.y, k.a, k.where];
   return null;
 }
+/* (user Oct 31 21:17: "If I fire a missile at a container ship and I hit a container, the explosion should destroy more than one
+   container, but like 5 or 6, and ... even damage the container ship. Right now it's like the containers become a protection")
+   a blow of a shell's size (dmg 0.5 and up) on a ship's box: the boxes of hers nearest it - CONT_BLAST_N more, within
+   CONT_BLAST_R - are thrown off burnt, away from the blast, and the ship herself takes the blow where her deck is under it
+   (civHitHull: the hits that sink her, as any shell on her hull) */
+const CONT_BLAST_N = 5, CONT_BLAST_R = () => CONT_W * 2.6;
+function contBlast(c, x, y, dmg, vx) {
+  const cg = c.cargo, near = [], R = CONT_BLAST_R();
+  for (let i = 0; i < cg.length; i++) for (let j = 0; j < cg[i].length; j++) { const [cx, cy, a] = cargoAt(c, i, j), d = Math.hypot(cx - x, cy - y); if (d < R) near.push([d, i, j, cx, cy, a]); }
+  near.sort((p, q) => p[0] - q[0]);
+  const take = near.slice(0, CONT_BLAST_N).sort((p, q) => p[1] - q[1] || q[2] - p[2]);   // (each stack from the top down: the places below stay right)
+  for (const [, i, j, cx, cy, a] of take) {
+    const k = cg[i][j]; if (!k) continue;
+    cg[i].splice(j, 1);
+    const sx = Math.sign(cx - x) || (crR() < 0.5 ? -1 : 1);
+    Object.assign(k, { dead: true, where: 'free', x: cx, y: cy, vx: sx * crRnd(40, 110) + (vx || 0) * 0.05, vy: -crRnd(60, 150), a, va: crRnd(-3, 3), knocked: true, on: null });
+  }
+  sectionBlast(x, y, Math.min(1.4, 0.7 + dmg * 0.3), (vx || 0) * 0.2);
+  spawnDebris(x, y, 6, (vx || 0) * 0.2);
+  // the ship: the first point of her hull straight down from the blow
+  for (let yy = y; yy < y + CONT_ROWS * CONT_H + 40; yy += 2) { const h = civAt(x, yy); if (h && h[0] === c) { civHitHull(h, x, yy, dmg, vx); break; } }
+}
 function contHit(x, y, dmg, vx, P) {
   if (!LAND || !containers.length) return false;
   if (!P) { const q = contFind(x, y); if (!q) return false; P = [q]; }
@@ -35591,6 +35637,7 @@ function contHit(x, y, dmg, vx, P) {
     if (where === 'ship') {
       const st = owner.cargo[i], j = st.indexOf(k); st.splice(j, 1);
       Object.assign(k, { dead: true, where: 'free', x: cx, y: cy, vx: away(), vy: -crRnd(40, 90), a: ca, va: crRnd(-2.5, 2.5), knocked: true, on: null });
+      if (dmg >= 0.5) contBlast(owner, x, y, dmg, vx);   // (a shell, missile or bomb: the boxes round it go too, and the ship under them is hit)
     } else if (where === 'held') { owner.load = null; Object.assign(k, { dead: true, where: 'free', x: cx, y: cy, vx: 0, vy: 0, a: 0, va: crRnd(-1, 1), on: null }); }
     else if (where === 'hook') { k.dead = true; magDrop(k); }           // (the magnet lets go of it: magHoldable no longer holds it)
     else if (where === 'rest' && k.deck) { Object.assign(k, { dead: true, where: 'free', deck: null, vx: away(), vy: -crRnd(40, 90), va: crRnd(-2.5, 2.5), knocked: true, on: null }); }
