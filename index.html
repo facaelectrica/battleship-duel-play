@@ -3985,8 +3985,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 538;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 15:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 539;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 15:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10251,6 +10251,9 @@ function planeTouch(v, foot = PLANE_WHEELS) {
    else, it falls. PLANE_DROP_SAFE: the runway's own number before (140 units, about 21.6 m), now every such ground's.
    planeDropY(v, foot): the y it sets down at, or null */
 const PLANE_DROP_SAFE = 140;
+// (user Nov 1 14:47-14:49: dropped higher, it comes down hurt by the height - from PLANE_DROP_WRECK (3x, about 65 m) a
+// wreck; never a blast - 50-land-magnet's stepPlaneDrops)
+const PLANE_DROP_WRECK = 3 * PLANE_DROP_SAFE;
 function planeDropY(v, foot = PLANE_WHEELS) { const gy = planeGroundY(v.x, foot); return gy != null && gy - v.y <= PLANE_DROP_SAFE ? gy : null; }
 function planeSetDown(v, foot = PLANE_WHEELS, dust = 6) {
   const gy = planeGroundY(v.x, foot), f = v.facing || v.dir || 1;
@@ -41616,17 +41619,70 @@ function magDrop(o) {
   if (seaplanes.includes(o) && wet && !onShip) { o.state = 'water'; o.y = surfaceY(o.x) - 3; o.spd = 0; o.ai = null; splash(o.x, 0, -120); return; }
   // (user Nov 1 14:40: by how high it was let go and what's under it - the planes' shared planeDropY, 29-plane.js: the
   // concrete or flat ground, from no higher than PLANE_DROP_SAFE)
-  const foot = seaplanes.includes(o) ? SP_FOOT : PLANE_WHEELS, gy = wet ? null : planeDropY(o, foot);
-  if (gy != null) {
-    if (shuttles.includes(o)) { o.state = 'landed'; o.y = gy; o.pitch = planeGroundPitch(o.x, o.facing || 1); o.wait = 45; return; }
-    if (seaplanes.includes(o)) { o.state = 'gone'; o.wait = 30; return; }
-    o.ground = 'taxi'; o.y = gy; o.spd = 0; o.pitch = planeGroundPitch(o.x, o.facing || 1); o.gWant = 0; susKick(o, 60); kickLandDust(o.x, gy + foot, 4); return;
+  const foot = dropFoot(o), gy = wet ? null : planeDropY(o, foot);
+  if (gy != null) { magSetDown(o, gy, foot); return; }
+  // (anywhere else, or higher: it drops - stepPlaneDrops)
+  o.carried = 'drop'; o.dropFrom = o.y; o.vy = Math.max(0, o.vy || 0);
+}
+// a plane on its wheels where it was let go (the seaplane on its floats, the orbiter landed)
+function magSetDown(o, gy, foot) {
+  if (shuttles.includes(o)) { o.state = 'landed'; o.y = gy; o.pitch = planeGroundPitch(o.x, o.facing || 1); o.wait = 45; return; }
+  if (seaplanes.includes(o)) { o.state = 'gone'; o.wait = 30; return; }
+  o.ground = 'taxi'; o.y = gy; o.spd = 0; o.pitch = planeGroundPitch(o.x, o.facing || 1); o.gWant = 0; susKick(o, 60); kickLandDust(o.x, gy + foot, 4);
+}
+/* (user Nov 1 14:47: "If a plane is dropped by a crane from a high height, it should not explode. It should have damage,
+   do some smoke and dust, but not have an explosion. Explosions is only when it's hit by something or when it crashes at
+   high speed into the ground"; asked, by the height) a plane let go too high, or over ground it can't stand on, drops as
+   it hung - turned as it was, no spin, nothing coming off (carried 'drop': its own flying and rolling stay still, as on a
+   magnet) - and where it comes down decides:
+   - the water: as any plane into the water (no blast there either);
+   - the concrete or flat ground (planeGroundY): on its wheels, hurt by how far it fell past PLANE_DROP_SAFE - smoking, as
+     after hits - and from PLANE_DROP_WRECK a wreck;
+   - anywhere else (a slope, a tree, a ship's top, the harbour's stone): a wreck.
+   Never a blast: a wreck from a drop lies there smoking in a cloud of dust (landCrash's quiet), with no crater and no fire.
+   Shot while it drops, its own falling takes over (magHoldable no longer). Every plane: the warplane, Cessna / 747,
+   seaplane, orbiter */
+const DROP_G = 160;
+function stepPlaneDrops(dt) {
+  for (const L of [planes, traffic, seaplanes, shuttles]) for (const o of L) {
+    if (!o || o.carried !== 'drop') continue;
+    if (!magHoldable(o)) { o.carried = null; o.hookA = null; continue; }
+    o.vy = Math.min(o.vy + DROP_G * dt, 700); o.vx = (o.vx || 0) * (1 - 0.4 * dt);
+    o.x = clamp(o.x + o.vx * dt, 40, WORLD_W - 40); o.y += o.vy * dt;
+    const foot = dropFoot(o), wet = !dryLand(o.x), ht = wet ? harbourTop(o.x, o.y - 10) : Infinity;
+    const dk = wet && !onLand(o.x) ? shipTopAt(o.x, o.y - 30) : null, onShip = !!dk && dk.y < surfaceY(o.x) && dk.y < ht;
+    const floor = onShip ? dk.y : ht < Infinity ? ht : wet ? surfaceY(o.x) : landTop(o.x);
+    if (o.y + foot < floor) continue;
+    o.carried = null; o.hookA = null;
+    if (wet && !onShip && ht === Infinity) { planeDropWater(o); continue; }
+    const gy = onShip || ht < Infinity ? null : planeGroundY(o.x, foot), k = (o.y - o.dropFrom - PLANE_DROP_SAFE) / (PLANE_DROP_WRECK - PLANE_DROP_SAFE);
+    if (!SIM_ONLY) { kickLandDust(o.x, floor, 10 + 8 * clamp(k, 0, 1)); for (let i = 0; i < 6; i++) spawnSmoke(o.x + magRnd(-14, 14), floor - magRnd(2, 10), { kind: 'blast', dark: 0.45, r: magRnd(4, 7), grow: magRnd(3, 5), lift: 20, vx: magRnd(-15, 15), vy: magRnd(-30, -10), life: magRnd(3, 5), alpha: 0.5 }); }
+    sound('impact', o.x);
+    if (gy != null && k < 1) { magSetDown(o, gy, foot); planeDropHurt(o, k); continue; }
+    planeDropWreck(o, floor, onShip ? dk.c : null, ht < Infinity);
   }
-  // (dropped anywhere else: it falls)
-  if (planes.includes(o)) { o.ground = null; downPlane(o); }
-  else if (traffic.includes(o)) { o.ground = null; trafficDown(o); }
-  else if (seaplanes.includes(o)) spDown(o);
-  else if (shuttles.includes(o)) { o.state = 'fall'; o.vx = o.vx || 0; o.vy = o.vy || 0; o.spin = magRnd(-0.5, 0.5); }
+}
+const dropFoot = o => seaplanes.includes(o) ? SP_FOOT : PLANE_WHEELS;   // (what touches: wheels, or the seaplane's floats)
+// hurt by the fall (k: 0 at PLANE_DROP_SAFE, 1 at PLANE_DROP_WRECK) - smoking as after hits: up to two hits' worth
+function planeDropHurt(o, k) {
+  if (k <= 0) return;
+  if (planes.includes(o) || traffic.includes(o)) { const n = k < 0.5 ? 1 : 2; if ((o.hits || 0) < n) { o.hits = n; o.smokeT = n === 1 ? 3 : 4; o.smokeDark = n === 2; } }
+  else if (seaplanes.includes(o)) o.hp = Math.min(o.hp, 1);
+  else if (shuttles.includes(o)) o.hp = Math.max(1, o.hp - Math.ceil(k * 4));
+}
+// into the water: as any plane into it, no blast
+function planeDropWater(o) {
+  if (planes.includes(o)) { planeSplash(o); planeLost(o); }
+  else if (traffic.includes(o)) trafficDitch(o);
+  else if (seaplanes.includes(o)) { o.state = 'water'; o.y = surfaceY(o.x) - 3; o.spd = 0; o.ai = null; splash(o.x, 0, -120); }
+  else if (shuttles.includes(o)) groundCrash(o, 2, true);
+}
+// a wreck where it came down, quiet: each plane's own crash with no blast
+function planeDropWreck(o, gy, deck, stone) {
+  if (planes.includes(o)) { planeGroundCrash(o, o.x, gy, deck ? { y: gy, c: deck } : null, true); planeLost(o); }
+  else if (traffic.includes(o)) trafficCrash(o, gy, deck, stone, true);
+  else if (seaplanes.includes(o)) spWreck(o, gy, deck, stone, true);
+  else if (shuttles.includes(o)) groundCrash(o, 2, true);
 }
 
 /* ---- the civilian helicopters' magnets (user Oct 25 late: "All helicopters have hooks with a magnet that can also
@@ -41644,6 +41700,7 @@ function civMagnet(h) {
   sound('clink', telegraphs[h.driven != null ? h.driven : 0]);
 }
 function stepCivMagnets(dt) {
+  stepPlaneDrops(dt);                                              // (planes let go too high: dropping - above)
   for (const h of civHelis) {
     const M = h.mag; if (!M) continue;
     if (h.state !== 'fly' && h.state !== 'landed') { cutRope(h, 1, true); h.magBroken = false; continue; }   // (its cable and magnet fall loose with it - user Oct 27, [15]; the shared cutRope)
@@ -43302,6 +43359,9 @@ function landCrash(x, gy, o) {
   const size = o.size || 1, sp = Math.hypot(o.vx || 0, o.vy || 0), hard = clamp(0.8 + sp / 700, 0.8, 1.3), face = o.face || ((o.vx || 0) >= 0 ? 1 : -1);
   const deck = o.deck || null;
   if (o.stone) o.noCrater = true;                                 // (the harbour's stone: no crater)
+  // (quiet - user Nov 1 14:47, a plane dropped by a magnet: "should not explode ... damage, smoke and dust"): no blast, no
+  // crater, no fire - it lies there smoking (its smoke from where the fire would have died down)
+  if (o.quiet) { o.blast = false; o.noCrater = true; }
   if (!deck && !o.noCrater) landCarve(x, gy, (6 + 7 * size) * hard);
   if (o.blast !== false) {
     sectionBlast(x, gy - 4, 0.6 + 0.35 * size, (o.vx || 0) * 0.3); spawnDebris(x, gy - 6, Math.round(8 + 6 * size), (o.vx || 0) * 0.3);
@@ -43314,6 +43374,7 @@ function landCrash(x, gy, o) {
     gridExplosion(x, gy, 40 + 25 * size, 220 + 120 * size);
   }
   const W = { x, y: gy, size, t: 0, fire: 22 + 11 * size, deck, at: o.at || null, pieces: [], face };
+  if (o.quiet) W.t = W.fire;
   if (o.art) {
     const B = breakArt(o.art, o.n || 2), K = o.k, spread = 1 + 0.25 * hard;
     for (const b of B) {
@@ -43570,8 +43631,7 @@ function stepSeaplane(s, dt) {
       // stays, burning - landCrash; into the water it sinks)
       const ht = dryLand(s.x) ? Infinity : harbourTop(s.x, s.y - 10), dk = !onLand(s.x) ? shipTopAt(s.x, s.y - 30) : null, onShip = !!dk && dk.y < surfaceY(s.x) && dk.y < ht;
       const ground = onShip ? dk.y : ht < Infinity ? ht : dryLand(s.x) ? landTop(s.x) : surfaceY(s.x);
-      if (s.y >= ground) { if (onShip || ht < Infinity || dryLand(s.x)) { const face = s.vx >= 0 ? 1 : -1, A = seaplaneArt(s.col);
-          s.crash = landCrash(s.x, ground, { size: 0.8, vx: s.vx, vy: s.vy, art: A.plane[2][0][face], k: CESSNA_K, face, n: 2, wings: A.wings ? [A.wings[0]] : [], deck: onShip ? dk.c : null, stone: !onShip && ht < Infinity }); s.state = 'wreck'; s.y = ground; } else spDitch(s); }
+      if (s.y >= ground) { if (onShip || ht < Infinity || dryLand(s.x)) spWreck(s, ground, onShip ? dk.c : null, !onShip && ht < Infinity); else spDitch(s); }
       return; }
     if (s.state === 'sink') { s.y += 28 * dt; s.ang *= 1 - dt; if (splnR() < dt * 8) addBubble(s.x + splnRnd(-8, 8), s.y, splnRnd(-5, 5), -splnRnd(15, 30), splnRnd(0.8, 1.6)); if (s.y > seabedY(s.x) - 6) { s.y = seabedY(s.x) - 6; s.state = 'sunk'; kickDust(s.x, 16, 0.5); } return; }
     spHits(s);
@@ -43753,6 +43813,12 @@ const spWallAt = x => dryLand(x) || !!harbourAt(x);
 function spWall(s, mine) {
   if (s.spd >= SP_WALL_CRASH) { sound('impact', s.x); spawnDebris(s.x + s.dir * 14, s.y - 6, 8, -s.dir * 30); s.vx = -s.dir * s.spd * 0.15; s.vy = 30; spDitch(s); civFollowDown(s); return; }
   s.spd = 0; s.run = 0; if (mine) civBounce(s.driven);
+}
+// down on land, a deck or the harbour's stone: what's left of it stays (landCrash; quiet - no blast - when it was only
+// dropped by a magnet, 50-land-magnet's stepPlaneDrops)
+function spWreck(s, gy, deck, stone, quiet) {
+  const face = s.vx >= 0 ? 1 : -1, A = seaplaneArt(s.col);
+  s.crash = landCrash(s.x, gy, { size: 0.8, vx: s.vx, vy: s.vy, art: A.plane[2][0][face], k: CESSNA_K, face, n: 2, wings: A.wings ? [A.wings[0]] : [], deck, stone, quiet }); s.state = 'wreck'; s.y = gy;
 }
 function spDown(s, soft) {
   if (s.state === 'fall' || s.state === 'sink' || s.state === 'sunk' || s.state === 'wreck' || s.state === 'gone') return;   // (already down: never twice)
@@ -44184,14 +44250,14 @@ function stepOrbiterFlight(v, dt, mine, stick) {
   if (hitsGround(v.x, v.y + 10)) groundCrash(v, 2);
 }
 const hitsGround = (x, y) => dryLand(x) ? y >= landTop(x) : y >= surfaceY(x);
-function groundCrash(v, pw) {
+function groundCrash(v, pw, quiet) {   // (quiet: dropped by a magnet - no blast: 50-land-magnet's stepPlaneDrops)
   const wet = !dryLand(v.x);
   if (wet) { ditchFx(v.x, v.vx, 2.2, 75, v.vy); v.state = 'sink'; v.vy = 30; }
   else {
     // (user Oct 27: what's left of it stays on land - broken in two, burning, in a crater by its size - landCrash)
     const g = landTop(v.x), A = spaceArt, face = v.facing || v.dr || 1, art = A && A.orbSheet ? A.orbSheet.plane[2][0][face] : A ? (face > 0 ? A.orbR : A.orb) : null;
-    v.crash = landCrash(v.x, g, { size: 1.4, vx: v.vx, vy: v.vy, art, k: A && A.orbSheet ? SHUTTLEI.k : STACK_K, face, n: 2 });
-    sound('explosion', v.x, 1.5); v.state = 'wreck'; v.y = g - 8; v.burn = 0; v.wait = 120;
+    v.crash = landCrash(v.x, g, { size: 1.4, vx: v.vx, vy: v.vy, art, k: A && A.orbSheet ? SHUTTLEI.k : STACK_K, face, n: 2, quiet });
+    if (!quiet) sound('explosion', v.x, 1.5); v.state = 'wreck'; v.y = g - 8; v.burn = 0; v.wait = 120;
   }
   civFollowDown(v);
 }
@@ -46544,9 +46610,9 @@ function wingIntoWater(f) { if (!SHEET_PLANES[f.kind]) return; const w = f.wings
 // (user Oct 27) down on land, the harbour's stone or a ship's deck: what's left of it stays - the hull broken in two (a
 // Cessna) or three (the 747) where it hit, its wings torn off, burning; the crater by its size (none in the stone) -
 // landCrash
-function trafficCrash(f, gy, deck, stone) {
+function trafficCrash(f, gy, deck, stone, quiet) {
   const jet = f.kind === 'jet', face = (f.vx || f.dir || 1) >= 0 ? 1 : -1, S = SHEET_PLANES[f.kind], A = sheetArt(f);
-  f.crash = landCrash(f.x, gy, { size: jet ? 3.5 : 0.8, vx: f.vx, vy: f.vy, art: A.plane[2][0][face], k: S.I.k, face, n: jet ? 3 : 2, wings: [0, 1].map(w => (f.wings || 0) & (1 << w) ? null : A.wings[w]), deck, stone });
+  f.crash = landCrash(f.x, gy, { size: jet ? 3.5 : 0.8, vx: f.vx, vy: f.vy, art: A.plane[2][0][face], k: S.I.k, face, n: jet ? 3 : 2, wings: [0, 1].map(w => (f.wings || 0) & (1 << w) ? null : A.wings[w]), deck, stone, quiet });
   f.state = 'wreck'; f.y = gy; f.vx = 0; f.vy = 0; f.split = false;
 }
 // (shot down or flown in, no other comes in its place - user Oct 27: "The rest, when destroyed, is never spawned
@@ -49056,8 +49122,10 @@ function stepLandWorld(dt) {
 
 /* ---- a plane into the ground (user Oct 25, their photo): a small crater with the broken plane in it, a fireball
    that rolls up into black smoke, and the wreck burning on, its smoke column standing over it for a long while ---- */
-function planeGroundCrash(pl, x, y, deck) {
+function planeGroundCrash(pl, x, y, deck, quiet) {
   const gy = deck ? deck.y : landBelow(x, y - 12), fy = gy;
+  // (quiet: let go by a magnet, user Nov 1 14:47 - no blast, only the wreck in its dust and smoke: magnet's stepPlaneDrops)
+  if (!quiet) {
   sound('explosion', x, 1.3); shakeAt(10, x);
   guysNear(x, fy, 50);
   if (!SIM_ONLY) {
@@ -49084,9 +49152,10 @@ function planeGroundCrash(pl, x, y, deck) {
     if (t && t.state === 'alive' && Math.abs(t.x - x) < 50) tankHurt(t, 1, x, fy);
     if (h && (h.state === 'fly' || h.state === 'landed') && Math.hypot(h.x - x, h.y - fy) < 50) heliHurt(h, 1, x, fy);
   }
+  }
   // (user Oct 27: what's left of it stays - its hull broken in two, its wings beside it, burning, in its crater: landCrash)
   const face = pl.vx >= 0 ? 1 : -1, A = planeArt(pl);
-  landCrash(x, gy, { size: 1, vx: pl.vx, vy: pl.vy, art: A.plane[2][0][face], k: PLANE_K * PLANE_SC(), face, n: 2, wings: [0, 1].map(w => pl.wings & (1 << w) ? null : A.wings && A.wings[w]), deck: deck ? deck.c : null, blast: false });
+  landCrash(x, gy, { size: 1, vx: pl.vx, vy: pl.vy, art: A.plane[2][0][face], k: PLANE_K * PLANE_SC(), face, n: 2, wings: [0, 1].map(w => pl.wings & (1 << w) ? null : A.wings && A.wings[w]), deck: deck ? deck.c : null, blast: false, quiet });
   pl.state = 'gone'; pl.wait = 0; pl.smokeT = 0; pl.strand = null;
 }
 /* ---- what shells, bombs and rounds hit on land ---- */
