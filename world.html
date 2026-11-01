@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>World Snapshot</title>
+<!-- THE WORLD PAGE (user, Nov 1 14:00): paste a SNAPSHOT, SUBMIT - it goes to worlds/snapshot.json on main, and the
+     "World release" workflow (.github/workflows/world.yml) bakes it in, builds the next version and puts it on Pages.
+     The user's GitHub token stays in this browser (localStorage wp_token); SAVE also stores it as the repo's PLAY_TOKEN
+     secret, so the workflow can push to the Pages repo. Source: battleship-duel tools/world-page/world.html. -->
+<style>
+:root { --bg: #0b1622; --panel: #13233a; --line: #26405f; --text: #dce8f5; --dim: #8aa1ba; --accent: #f2b33d;
+  --ok: #6fd08c; --bad: #ff7a6b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+main { max-width: 720px; margin: 0 auto; padding: 24px 16px 40px; }
+h1 { font-size: 18px; letter-spacing: .12em; margin: 0 0 16px; color: var(--accent); }
+textarea { width: 100%; height: 42vh; min-height: 180px; resize: vertical; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; padding: 10px; font: 12px/1.3 ui-monospace, Menlo, monospace; }
+input { flex: 1; min-width: 0; background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 10px; font: inherit; }
+button { background: var(--accent); color: #1a1205; border: 0; border-radius: 6px; padding: 10px 18px; font: inherit;
+  font-weight: 700; letter-spacing: .08em; cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }
+button.ghost { background: none; color: var(--dim); padding: 4px 6px; font-weight: 400; text-decoration: underline; }
+.row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+#status { margin-top: 14px; min-height: 1.4em; }
+#status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+a { color: var(--accent); }
+#setup { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--dim); }
+#setup p { margin: 0 0 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>WORLD SNAPSHOT</h1>
+  <textarea id="snap" placeholder="Paste the SNAPSHOT here" spellcheck="false"></textarea>
+  <div class="row"><button id="submit">SUBMIT</button><span id="tokState"></span></div>
+  <div id="status"></div>
+  <section id="setup">
+    <p>GitHub token (stays in this browser)</p>
+    <div class="row"><input id="tok" type="password" autocomplete="off" placeholder="github_pat_..."><button id="save">SAVE</button></div>
+    <p style="margin-top:8px"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Make a token</a></p>
+  </section>
+</main>
+<script>
+const OWNER = 'facaelectrica', REPO = 'battleship-duel', PATH = 'worlds/snapshot.json', WF = 'world.yml';
+const API = 'https://api.github.com/repos/' + OWNER + '/' + REPO;
+const $ = id => document.getElementById(id);
+const ls = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} } };
+let token = ls.get('wp_token');
+
+function say(text, cls, link) {
+  const s = $('status'); s.className = cls || ''; s.textContent = text;
+  if (link) { const a = document.createElement('a'); a.href = link[1]; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = link[0]; s.append(' ', a); }
+}
+function showToken() {
+  $('tokState').textContent = token ? '' : 'Set a token below first';
+  $('setup').style.display = token ? 'none' : '';
+  $('submit').disabled = !token;
+  if (token && !$('change')) {
+    const b = document.createElement('button'); b.id = 'change'; b.className = 'ghost'; b.textContent = 'token';
+    b.onclick = () => { $('setup').style.display = ''; b.remove(); };
+    $('tokState').after(b);
+  }
+}
+async function gh(path, opt = {}, tok = token) {
+  const r = await fetch(path.startsWith('http') ? path : API + path, { ...opt, headers: { Accept: 'application/vnd.github+json',
+    Authorization: 'Bearer ' + tok, 'X-GitHub-Api-Version': '2022-11-28', ...(opt.body ? { 'Content-Type': 'application/json' } : {}) } });
+  if (r.status === 204) return {};
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.message || ('HTTP ' + r.status)); e.status = r.status; throw e; }
+  return j;
+}
+const b64 = s => { const u = new TextEncoder().encode(s); let o = ''; for (let i = 0; i < u.length; i += 0x8000)
+  o += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(o); };
+
+// SAVE: check the token, then keep it as the repo's PLAY_TOKEN secret (the workflow pushes the Pages repo with it)
+$('save').onclick = async () => {
+  const t = $('tok').value.trim(); if (!t) return;
+  $('save').disabled = true; say('Checking the token...');
+  try {
+    await gh('', {}, t);
+    const key = await gh('/actions/secrets/public-key', {}, t);
+    const sodium = (await import('https://esm.sh/libsodium-wrappers@0.7.15')).default; await sodium.ready;
+    const sealed = sodium.crypto_box_seal(sodium.from_string(t), sodium.from_base64(key.key, sodium.base64_variants.ORIGINAL));
+    await gh('/actions/secrets/PLAY_TOKEN', { method: 'PUT', body: JSON.stringify({ key_id: key.key_id,
+      encrypted_value: sodium.to_base64(sealed, sodium.base64_variants.ORIGINAL) }) }, t);
+    token = t; ls.set('wp_token', t); $('tok').value = ''; showToken(); say('Token saved', 'ok');
+  } catch (e) {
+    say(e.status === 403 || e.status === 404 ? 'Token can\'t reach the repo or its secrets' : 'Token: ' + e.message, 'bad');
+  }
+  $('save').disabled = false;
+};
+
+// SUBMIT: the snapshot to main, then follow the build
+$('submit').onclick = async () => {
+  const text = $('snap').value.trim();
+  let snap; try { snap = JSON.parse(text); } catch (e) { return say('Not a snapshot (not JSON)', 'bad'); }
+  if (!snap || snap.kind !== 'battleship-duel' || !snap.store) return say('Not a game snapshot', 'bad');
+  $('submit').disabled = true; say('Sending...');
+  try {
+    let sha; try { sha = (await gh('/contents/' + PATH + '?ref=main')).sha; } catch (e) { if (e.status !== 404) throw e; }
+    const r = await gh('/contents/' + PATH, { method: 'PUT', body: JSON.stringify({ branch: 'main', sha,
+      message: 'World page: SNAPSHOT of ' + (snap.at || '?') + ' UTC', content: b64(JSON.stringify(snap, null, 1) + '\n') }) });
+    ls.set('wp_run', JSON.stringify({ sha: r.commit.sha, t: Date.now() }));
+    $('snap').value = ''; follow();
+  } catch (e) { say('Couldn\'t send: ' + e.message, 'bad'); $('submit').disabled = !token; }
+};
+
+// follow the workflow run of the last submitted commit (kept across a reload of this page)
+async function follow() {
+  const run0 = JSON.parse(ls.get('wp_run') || 'null'); if (!run0 || !token) return;
+  $('submit').disabled = true;
+  const since = () => Math.round((Date.now() - run0.t) / 1000) + ' s';
+  for (;;) {
+    let run;
+    try { run = (await gh('/actions/workflows/' + WF + '/runs?head_sha=' + run0.sha + '&per_page=1')).workflow_runs[0]; }
+    catch (e) { say('Lost track of the build: ' + e.message, 'bad'); break; }
+    if (!run) { say('Waiting for the build to start... ' + since()); if (Date.now() - run0.t > 5 * 60e3) {
+      say('The build never started', 'bad', ['Actions', 'https://github.com/' + OWNER + '/' + REPO + '/actions']); break; } }
+    else if (run.status !== 'completed') say('Building... ' + since());
+    else if (run.conclusion === 'success') {
+      let v = '';
+      try { for (const c of await gh('/commits?sha=main&per_page=20')) {
+        const m = /^Built: Version (\d+) \(world page\)/.exec(c.commit.message); if (m) { v = m[1]; break; } } } catch (e) {}
+      say('Version ' + v + ' is out. Pages has it in about a minute.', 'ok', ['Play', './?v=' + v]); break;
+    } else { say('Build failed', 'bad', ['See why', run.html_url]); break; }
+    await new Promise(r => setTimeout(r, 8000));
+  }
+  ls.set('wp_run', null); $('submit').disabled = !token;
+}
+showToken(); follow();
+</script>
+</body>
+</html>
