@@ -228,12 +228,24 @@ function swHold(why) {
   return SWB.taking;
 }
 function swRelease(why) { SWB.holds.delete(why); }
+// (the page) who plays each side changed in a round in progress (19-menu.js liveSeats): the worker's copy the same
+function swSeats() { if (SW.worker && SW.live) swAsk('seats', { ctl: ctlPick.slice(), extra: EXTRA, cpuLv: cpuLvSide.slice() }).catch(() => { }); }
+// (the worker) the page's seats: its sides, its second person, the slots from them; a side no longer the CPU's loses its brain
+function swHostSeats(m) {
+  if (m.cpuLv) { cpuLvSide[0] = m.cpuLv[0]; cpuLvSide[1] = m.cpuLv[1]; }
+  for (let s = 0; s < 2; s++) {
+    const was = ctlPick[s], team = teamOfSide(s); ctlPick[s] = m.ctl[s];
+    if (was === 'cpu' && m.ctl[s] !== 'cpu') { if (brains[team]) { brains[team] = null; mgHold[team] = false; holding[team] = null; } }
+    else if (was !== 'cpu' && m.ctl[s] === 'cpu' && VERSUS(MODE)) brains[team] = makeBrain(team, cpuLvSide[s]);
+  }
+  EXTRA = m.extra || null; slotsMake();
+}
 // the page built a new world (a round, a mode, the editor's REFRESH): the worker builds the same and takes the page's tables
 async function swResync() {
   SW.resyncing = true;
   try {
     const store = swBootData().store;
-    await swAsk('resync', { mode: MODE, ctl: ctlPick.slice(), store, ui: [!!ui.title, !!ui.menu, !!ui.settings], s: JSON.stringify(tablesSave()) });
+    await swAsk('resync', { mode: MODE, ctl: ctlPick.slice(), extra: EXTRA, store, ui: [!!ui.title, !!ui.menu, !!ui.settings], s: JSON.stringify(tablesSave()) });
     SW.liveGen = SW.gen; swMirrorReset();
     const s0 = await swAsk('snap', { reset: true }); SW.snaps.length = 0;
     swApply(s0);
@@ -302,6 +314,7 @@ function swHostReady() {
       else if (m.t === 'touch') v = self.__SW_TOUCH;
       else if (m.t === 'go') { swHostGo(m); v = true; }
       else if (m.t === 'resync') { swHostResync(m); v = true; }
+      else if (m.t === 'seats') { swHostSeats(m); v = true; }
       else if (m.t === 'in') { swHostIn(m); return; }
       else err = 'unknown ' + m.t;
     } catch (e) { err = String(e && e.stack || e); }
@@ -366,7 +379,7 @@ function swHostUi(u) { ui.title = u[0]; ui.menu = u[1]; ui.settings = u[2]; }
 // the page built a new world: the same mode, controls and saved world here, built the same, then the page's tables put in
 function swHostResync(m) {
   localStorage.clear(); for (const k in m.store) localStorage.setItem(k, m.store[k]);
-  ctlPick[0] = m.ctl[0]; ctlPick[1] = m.ctl[1]; MODE = m.mode;
+  ctlPick[0] = m.ctl[0]; ctlPick[1] = m.ctl[1]; MODE = m.mode; EXTRA = m.extra || null;   // (a second person on a side: their seat here too)
   if (m.ui) swHostUi(m.ui);
   applyMode(); builtViewW = 0; resize();
   tablesLoad(JSON.parse(m.s)); computeEnv(); swSnapReset();
@@ -1331,6 +1344,11 @@ function applyMode() {
   TEST = MODE === 'test'; STORY = MODE === 'story'; LAND = MODE === 'land' || STORY; CHILL = MODE === 'chill'; OWM = LAND || MODE === 'duel';   // (STORY, user Oct 31: the OPEN WORLD's map with its own rules - 50-story.js)
   // player 0 is a person when there is one: their harbour's side is SIDE(0) (online, a guest's is the side it picked)
   SWAP = NET.role === 'guest' ? NET.side === 1 : PLAYERS === 2 && !LOCALC(ctlFor(0)) && LOCALC(ctlFor(1));
+  slotsMake();
+}
+// the people at this screen, a slot each (the split screen's halves), from who plays each side - the round's harbours (SWAP)
+// kept as they are: someone joining a round in progress (RESUME, liveSeats) takes their side's seat without moving anything
+function slotsMake() {
   SLOTS.length = 0;
   const add = (dev, team, extra) => SLOTS.push({ dev, team, extra: !!extra });
   if (NET.role === 'guest') add(NET.dev ? NET.dev : TOUCH0 ? 'touch' : 'kb', 0);   // (what it pressed JOIN with)
@@ -3296,8 +3314,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 461;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 21:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 462;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 21:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -5455,7 +5473,36 @@ function freshWeather() {
   computeEnv();
 }
 // RESUME: back to the round in progress, as it was
-function menuResume(fromNet) { liveCpu(); menuFromLive(); startGame(); if (!fromNet) netPause(false); }
+function menuResume(fromNet) {
+  const c0 = ctlPick.slice(), e0 = JSON.stringify(EXTRA);
+  liveCpu(); liveSeats();
+  if ((ctlPick[0] !== c0[0] || ctlPick[1] !== c0[1] || JSON.stringify(EXTRA) !== e0) && typeof swSeats === 'function') swSeats();   // (the CPU added or taken off, someone joined or left: the worker too)
+  menuFromLive(); startGame(); if (!fromNet) netPause(false);
+}
+/* (user Oct 31 21:14: "If I start open world alone and then in the main menu someone joins, that person is unable to control the
+   vehicles on the split screen ... we are forced to do new game") RESUME after someone joined (or left) at the menu: each side
+   gets who the menu now has on it - its first person, a second one their own seat (EXTRA), or the CPU / nobody as before - in
+   the round as it is (the harbours stay where they are: slotsMake, not applyMode), and the simulation worker is told the same
+   (swSeats: its own copy of who plays each side decides whose commands it takes and where its CPU plays) */
+function liveSeats() {
+  if (NET.role === 'guest' || joinedRoom() || menuSel.mode !== MODE) return;
+  const R = menuSel.roster.filter(q => { const s = mSideOf(q); return (s === 0 || s === 1) && mJoinable(s); });
+  let extra = null, changed = false;
+  for (let s = 0; s < 2; s++) {
+    const on = R.filter(q => mSideOf(q) === s), was = ctlPick[s];
+    let want = on.length ? on[0].dev : VERSUS(MODE) && menuSel.cpu[s] ? 'cpu' : was === 'net' ? 'net' : 'none';
+    if (on.length > 1) extra = { dev: on[1].dev, side: s };
+    if (want === was) continue;
+    changed = true; ctlPick[s] = want;
+    const team = teamOfSide(s);
+    if (brains[team] && want !== 'cpu') { brains[team] = null; mgHold[team] = false; holding[team] = null; }
+    else if (want === 'cpu' && !brains[team]) brains[team] = makeBrain(team, cpuLvSide[s]);
+  }
+  if (!changed && JSON.stringify(extra) === JSON.stringify(EXTRA)) return;
+  EXTRA = extra;
+  slotsMake();
+  try { layoutControls(); layoutBoatCtl(); } catch (e) { }   // (the touch controls laid out for the screens there are now, as a resize does)
+}
 // RESUME after the CPU was added to (or taken off) a side in the menu: it takes that side over in the round now
 function liveCpu() {
   if (!VERSUS(MODE) || NET.role === 'guest') return;
@@ -50338,7 +50385,7 @@ async function start(data) {
     scope: p => scopes[p], tg: p => telegraphs[p], perf, probe, probeStart, fillTest, runFillTest, get batch() { return getMode(); }, get gl() { return GLR.on; }, glStats: () => GLR.shown, renderN: n => { for (let i = 0; i < n; i++) render(); glEndFrame(); }, GLR, set batch(v) { setMode(v === true ? 2 : v === false ? 0 : v); BATCH_AUTO = false; }, get paused() { return paused; }, set paused(v) { paused = v; }, set hold(v) { holdFrames = v; }, stepFixed: (dt, n) => { const was = paused; paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } paused = true; return was; },
     stepQuiet: (dt, n) => { NO_DRAW = true; try { paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } } finally { paused = true; NO_DRAW = false; } },   // (stepFixed without drawing each step: tools/smokebench.mjs)
     smokeKit: { spawnSmoke: (x, y, o) => spawnSmoke(x, y, o), smStream: (o, k) => smStream(o, k), get SV() { return SV; }, get SMOKE_COLS() { return SMOKE_COLS; } },
-    towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, setFlag: (sd, k) => setFlag(sd, k), menuPlayNow: () => menuPlay(), openMenu: () => openMainMenu(), resumeMenu: () => menuResume(), titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
+    towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, setFlag: (sd, k) => setFlag(sd, k), menuPlayNow: () => menuPlay(), menuJoinNow: (sd, dev) => menuJoin(sd, dev), menuResumeNow: () => menuResume(), openMenuNow: () => openMainMenu(), seats: () => ({ ctl: ctlPick.slice(), extra: EXTRA, slots: SLOTS.map(q => q.dev + ':' + q.team) }), openMenu: () => openMainMenu(), resumeMenu: () => menuResume(), titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
     bedLife: () => ({ reef, coastFront, weedBits, chunks, plants }), seabedHit: (x, hl, pw, vx, cut, bl) => seabedHit(x, hl, pw, vx, cut, bl), uwBlast: (x, y, pw) => underwaterBlast(x, y, pw),   // (Oct 27: the bottom's growth)
