@@ -407,7 +407,7 @@ const WORLD_PACK = {"stamp":{"open":"","story":""},"open":{},"story":{}};
    the simulation worker alike (its localStorage is the page's, copied - 00-sw-boot.js), so every file reads its own key as
    it always did. Changing worlds reloads the page (worldSwitch, from menuPlay): nothing of one world stays in the other.
    The Story copy starts as the open world as it was the first time STORY is chosen. ---- */
-const WORLD_KEYS = ['bd_dock_own', 'bd_docks', 'bd_docks_x', 'bd_floor_pts', 'bd_ground', 'bd_islands', 'bd_kraken_dy', 'bd_kraken_u', 'bd_land_pts', 'bd_land_structs', 'bd_land_towers', 'bd_structs', 'bd_stretch', 'bd_weather_areas', 'bd_world_ext', 'bd_wrecks', 'bd_sky_colours', 'bd_sky_p', 'bd_nature', 'bd_grade', 'bd_caves', 'bd_cave_params', 'bd_wbase'];
+const WORLD_KEYS = ['bd_dock_own', 'bd_docks', 'bd_docks_x', 'bd_floor_pts', 'bd_ground', 'bd_islands', 'bd_kraken_dy', 'bd_kraken_u', 'bd_land_pts', 'bd_land_structs', 'bd_land_towers', 'bd_structs', 'bd_stretch', 'bd_weather_areas', 'bd_world_ext', 'bd_wrecks', 'bd_sky_colours', 'bd_sky_p', 'bd_nature', 'bd_grade', 'bd_caves', 'bd_cave_params', 'bd_prices', 'bd_wbase'];
 const swKey = k => 'bd_sw_' + k.slice(3);
 /* (user Oct 31 21:38: "can we have a way that the snapshot has a timestamp? So if I get a build that has a snapshot that is more
    recent than my machine... if I change machines, then I'm always with the out-of-date version") THE BUILT-IN WORLDS: a
@@ -3439,8 +3439,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 474;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 22:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 475;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 22:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -40599,7 +40599,7 @@ function stepMinisub(s, dt) {
   }
   // out in the water: yours on the lever and up / down; or exploring by itself
   let lever = 0, stick = 0;
-  if (mine) { lever = msLever(p); stick = civStick(p); }
+  if (mine) { lever = msLever(p); stick = civStick(p); if (s.story && s.fuel <= 0) { lever = 0; stick = -0.5; } }   // (STORY: out of fuel - no power, it floats up - 50-story-subs.js)
   else if (s.ai) {
     s.ai.t -= dt;
     // (its look round over: back to her - or, with her gone, up to the surface where it is, to float there)
@@ -48185,6 +48185,53 @@ function drawWorldTag() { drawText(ug, (STORY_WORLD ? 'STORY WORLD' : 'OPEN WORL
 if (typeof document !== 'undefined' && !SW_IN_WORKER) setTimeout(() => { worldResume(); if (STORY_WORLD && menuSel.mode !== 'story' && !SSL.open) menuSel.mode = 'story'; }, 0);
 
 /* ================================================================
+   STORY's SUBS (the spec's vehicles at structures; user Oct 31 22:05: subs after the helicopters). A structure that TAKES
+   SUBS holds minisubs in its spots (STR_VEHS fam 'sub'): minisub rows (the minisubs table, newMinisub) with no research ship
+   (ship null) and the story vehicles' fields, floating at their spot (state 'out', nobody's: it floats there, its top out of
+   the water). Boarded (storyBoard), it dives and drives as any taken minisub (stepMinisub: the caves, the lamp); up at the
+   surface by a structure that takes subs, slow, its dot ties it up there (storyParks / storyPark). Fuel as the boats' (FUEL_S
+   of driving; empty: no power - it floats up), refuelled and mended at its structure; lost, the same one there again for
+   sale the next morning. Out at sea only (a minisub keeps between the harbours - stepMinisub).
+   ================================================================ */
+function storySubsBuild() {
+  for (let i = minisubs.length - 1; i >= 0; i--) if (minisubs[i].story) minisubs.splice(i, 1);
+  let k = 4000;
+  for (const o of strsUsed().filter(o => (strTakes(o) || []).includes('sub'))) {
+    const V = strVehs(o);
+    for (let i = 0; i < storyBerths(o); i++) {
+      const e = V[i], D = e && STR_VEHS[e.v]; if (!D || D.fam !== 'sub') continue;
+      minisubs.push(storySubNew(o, i, e.v, ++k, !!e.own));
+    }
+  }
+}
+function storySubNew(o, i, sv, sid, own) {
+  const x = storySpotX(o, i), s = newMinisub({ x, face: o.flip ? -1 : 1 });
+  return Object.assign(s, { ship: null, state: 'out', y: surfaceY(x) - 1, splashed: true, armed: true, ai: null, story: true, sub: true, sid, own, price: storyPrice(o, i, sv), sv, berth: o.id, spot: i, hb: o.id, hs: i, fuel: 1, hp: 2 });
+}
+const storySubAlive = s => s.state === 'out';
+// each step (stepStory): its fuel; refuelled, mended at its structure (held at its spot); lost - again the next morning
+function storySubs(dt) {
+  let top = 4000; for (const s of minisubs) if (s.story) top = Math.max(top, s.sid || 0);
+  for (const s of minisubs) {
+    if (!s.story) continue;
+    if (storySubAlive(s)) {
+      if (s.driven != null) { s.fuel = Math.max(0, (s.fuel ?? 1) - clamp(Math.abs(s.vx || 0) / 60, 0, 1.3) * dt / FUEL_S); continue; }
+      const o = s.berth != null ? strsUsed().find(q => q.id === s.berth) : null; if (!o) continue;
+      s.x += (storySpotX(o, s.spot) - s.x) * Math.min(1, dt * 2);   // (tied up: it stays at its spot)
+      if (o.ref && s.fuel < 1) s.fuel = Math.min(1, s.fuel + dt / REFUEL_S);
+      continue;
+    }
+    if (s.lostT == null) { s.lostT = time; s.lostDay = W.day; s.own = false; s.berth = null; }
+    if (!s.renewed && W.day > s.lostDay && env.time >= STORY_WAKE_H) {
+      const o = strsUsed().find(q => q.id === s.hb);
+      if (!o || !STR_VEHS[s.sv]) { s.renewed = true; continue; }
+      if (minisubs.some(q => q.story && storySubAlive(q) && q.berth === o.id && q.spot === s.hs)) continue;
+      minisubs.push(storySubNew(o, s.hs, s.sv, ++top, false)); s.renewed = true;
+    }
+  }
+}
+
+/* ================================================================
    STORY (user Oct 31, the Story spec "Battleship Duel implementation notes", gen/story-spec-oct31.md): the OPEN WORLD's map
    with no army and no enemy (PEACE: nobody wins, nothing runs out - 06-fleet-captains.js), one player. It opens looking at
    your home (a HOME structure - 50-zz-struct.js; else the first house; else the harbour) at sunrise; the day's number
@@ -48245,10 +48292,15 @@ ACTS.storyGo = (p, id) => storyGo(p, id);
    pressing it ties her up at its nearest free berth and takes you ashore there. Left anywhere else she stays where she is. ---- */
 const STORY_PARK_M = 15;                                 // (how far past a structure's ends you can still tie up to it)
 const storyBerths = o => Math.max(1, o.n ?? (strVehs(o).length || 1));
-// (user Oct 31 22:14: "I'll definitely be editing the prices") a spot's price: its own PRICE in the editor, else the type's
-function storyPrice(o, i, sv) { const e = o && strVehs(o)[i]; return e && e.v === sv && Number.isFinite(e.price) ? e.price : (STR_VEHS[sv] ? STR_VEHS[sv].price : 0); }
+// (user Oct 31 22:14-22:17: "I'll definitely be editing the prices" - "the price for the vehicle is on the vehicle editor tab,
+// not on the structure that has the vehicle. The vehicle price would be universal") each vehicle type's price: the GAME
+// EDITOR's VEHICLES tab, STORY box - PRICE (kept with the world: bd_prices, 00-world.js); unset, the type's own (STR_VEHS)
+let STORY_PRICES = {};
+try { const o = JSON.parse(localStorage.getItem('bd_prices') || 'null'); if (o && typeof o === 'object') STORY_PRICES = o; } catch (e) { }
+const storyTypePrice = sv => Number.isFinite(STORY_PRICES[sv]) ? STORY_PRICES[sv] : (STR_VEHS[sv] ? STR_VEHS[sv].price : 0);
+const storyPrice = (o, i, sv) => storyTypePrice(sv);
 function storySpotX(o, i) { const B = strBox(o); return B.x0 + (i + 0.5) * (B.x1 - B.x0) / storyBerths(o); }
-const storyVehs = () => jetboats.filter(j => j.story && j.state === 'run').concat(storyCars.filter(c => c.state === 'run'), traffic.filter(f => f.story && (f.state === 'parked' || f.state === 'free')), shuttles.filter(v => v.story && shuttleAlive(v)), civHelis.filter(h => h.story && storyHeliAlive(h)));   // (and the helicopters - 50-story-helis.js)   // (the boats, the cars, the planes)   // (the boats and the cars - 50-story-cars.js)
+const storyVehs = () => jetboats.filter(j => j.story && j.state === 'run').concat(storyCars.filter(c => c.state === 'run'), traffic.filter(f => f.story && (f.state === 'parked' || f.state === 'free')), shuttles.filter(v => v.story && shuttleAlive(v)), civHelis.filter(h => h.story && storyHeliAlive(h)), minisubs.filter(m => m.story && storySubAlive(m)));   // (and the helicopters - 50-story-helis.js)   // (the boats, the cars, the planes)   // (the boats and the cars - 50-story-cars.js)
 function storyBoats() {
   if (!STORY) return;
   const home = storyHome(), hx = home ? home.x : 0;
@@ -48260,7 +48312,7 @@ function storyBoats() {
     for (let i = 0; i < storyBerths(o); i++) { const e = V[i], D = e && STR_VEHS[e.v]; if (D && D.fam === 'car') storyCars.push(newStoryCar({ sid: 1000 + (++k), own: !!e.own, rt: e.rt || null, price: storyPrice(o, i, e.v), sv: e.v, art: D.art, berth: o.id, spot: i, hb: o.id, hs: i, x: storySpotX(o, i), dir: o.flip ? 1 : -1 })); }
   }
   owned = storyCars.some(c => c.own);
-  storyPlanesBuild(); storyHelisBuild(); owned = owned || traffic.some(f => f.story && f.own) || civHelis.some(h => h.story && h.own);
+  storyPlanesBuild(); storyHelisBuild(); storySubsBuild(); owned = owned || traffic.some(f => f.story && f.own) || civHelis.some(h => h.story && h.own) || minisubs.some(m => m.story && m.own);
   for (const o of L) {
     const V = strVehs(o);
     for (let i = 0; i < storyBerths(o); i++) {
@@ -48285,8 +48337,8 @@ function storyBoard(p, sid) {
 // the structures the vehicle you drive can tie up at now: they take its kind, it's slow, it's by them
 function storyParks(v) {
   if (!v || !v.story || v.plane) return [];   // (a plane parks by taxiing into its hangar)
-  if (v.heli ? !(v.state === 'landed' || v.state === 'parked') : v.state !== 'run') return [];   // (sinking: nowhere to tie up; a helicopter: set down)
-  if (!v.heli && (Math.abs(v.vDrive || 0) > v.v * 0.35 || v.turn > 0 || v.air)) return [];
+  if (v.heli ? !(v.state === 'landed' || v.state === 'parked') : v.sub ? !(v.state === 'out' && v.y < surfaceY(v.x) + 14 && Math.abs(v.vx || 0) < 20) : v.state !== 'run') return [];   // (a sub: up at the surface, slow)   // (sinking: nowhere to tie up; a helicopter: set down)
+  if (!v.heli && !v.sub && (Math.abs(v.vDrive || 0) > v.v * 0.35 || v.turn > 0 || v.air)) return [];
   const cat = civCat(v);
   const len = storyBoatSize(v)[0] / UPM;
   return strsUsed().filter(o => { if (!(strTakes(o) || []).includes(cat) || len > strMaxL(o) || !strAllows(o, v.sv)) return false; const B = strBox(o), r = STORY_PARK_M * UPM; return v.x > B.x0 - r && v.x < B.x1 + r; });
@@ -48298,7 +48350,8 @@ function storyPark(p, id) {
   for (let i = 0; i < storyBerths(o); i++) if (!used.has(i)) { const d = Math.abs(storySpotX(o, i) - v.x); if (d < bd) { bd = d; best = i; } }
   if (best < 0) { sound('empty', v.x); return; }                         // (every berth taken)
   v.berth = o.id; v.spot = best; v.x = storySpotX(o, best); v.drv = 0; v.vDrive = 0; v.cin = 0; v.turn = 0;
-  if (v.heli) { v.state = 'parked'; v.ai = null; v.home = v.x; }   // (a helicopter: on its spot, rotor winding down)
+  if (v.heli) { v.state = 'parked'; v.ai = null; v.home = v.x; }
+  if (v.sub) { v.vx = 0; v.vy = 0; v.ai = null; v.y = surfaceY(v.x) - 1; }   // (a sub: tied up, afloat)   // (a helicopter: on its spot, rotor winding down)
   setOrder(telegraphs[p], 3); civRelease(p); civUI[p] = true;
   storySellFish(v, o);                                   // (ACCEPTS FISH: the catch sold)
   storyGo(p, o.id, true); sound('click', gunCtl[p]);
@@ -48308,7 +48361,7 @@ ACTS.storyPark = (p, id) => storyPark(p, id);
 // a fishing boat drawn (drawJetboats - 50-land-traffic.js): the tropical set's picture at its own metres, riding the water,
 // swinging round through a narrow side-on when it turns
 const STORY_BOAT_ART = ['fishing-boat-red', 'fishing-boat-teal'];
-function storyBoatSize(j) { if (j.car) return storyCarSize(j); if (j.heli) return [chHalf(j) * 2, chSkid(j) * 2, null]; if (j.plane) return [10 * UPM, 3 * UPM, null]; if (j.kind === 'shuttle') return [8 * UPM, 40 * UPM, null]; if (j.kind !== 'fish') return [(j.kind === 'motor' ? 4.3 : 3.5) * UPM, 3 * UPM, null]; const P = tropPic(STORY_BOAT_ART[(j.col | 0) % 2]); return P ? [P.width * P._m * UPM, P.height * P._m * UPM, P] : [11 * UPM, 7 * UPM, null]; }
+function storyBoatSize(j) { if (j.car) return storyCarSize(j); if (j.heli) return [chHalf(j) * 2, chSkid(j) * 2, null]; if (j.sub) return [18 * REAL.minisub, 10 * REAL.minisub, null]; if (j.plane) return [10 * UPM, 3 * UPM, null]; if (j.kind === 'shuttle') return [8 * UPM, 40 * UPM, null]; if (j.kind !== 'fish') return [(j.kind === 'motor' ? 4.3 : 3.5) * UPM, 3 * UPM, null]; const P = tropPic(STORY_BOAT_ART[(j.col | 0) % 2]); return P ? [P.width * P._m * UPM, P.height * P._m * UPM, P] : [11 * UPM, 7 * UPM, null]; }
 function drawFishBoat(j) {
   const [w, h, P] = storyBoatSize(j); if (!P) return;   // (the tropical sheet not loaded yet)
   const u = j.turn > 0 ? j.turn / JB_TURN : 0, sq = j.turn > 0 ? Math.max(0.15, Math.abs(Math.cos(Math.PI * u))) : 1;
@@ -48674,7 +48727,7 @@ function storyNPC(dt) {
 }
 function stepStory(dt) {
   if (!STORY) return;
-  storyNPC(dt); storyLosses(); storyNets(dt); storyFuel(dt); storyGive(dt); storyRescue(dt); stepStoryCars(dt); storyHelis(dt);
+  storyNPC(dt); storyLosses(); storyNets(dt); storyFuel(dt); storyGive(dt); storyRescue(dt); stepStoryCars(dt); storyHelis(dt); storySubs(dt);
   if (!story.wake) return;
   stepWeather(dt * (STORY_SLEEP_X - 1));                 // (the clock, the sky and the weather run on: the frame's own step is the 1)
   if (W.day >= story.wake && env.time >= STORY_WAKE_H && env.time < 12) { story.wake = 0; story.saveN++; }
@@ -48726,7 +48779,7 @@ function storyZoomBox() {
   if (typeof document === 'undefined' || SIM_ONLY) return;   // (the worker, a headless match: no editor)
   if (!VE.pane) { setTimeout(storyZoomBox, 700); return; }
   const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.textContent = h; return e; };
-  const box = el('div', 'cat'); box.appendChild(el('h4', '', 'STORY ZOOM'));
+  const box = el('div', 'cat'); box.appendChild(el('h4', '', 'STORY'));
   const r0 = el('div', 'row'), sp = el('select'); sp.style.cssText = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px;max-width:180px';
   for (const k in STR_VEHS) { const o = el('option', '', STR_VEHS[k].lab); o.value = k; sp.appendChild(o); }
   r0.append(el('label', '', 'VEHICLE'), sp); box.appendChild(r0);
@@ -48736,7 +48789,12 @@ function storyZoomBox() {
     inp.oninput = () => { const z = storyZoomOf(sp.value).slice(); z[i] = +inp.value; STORY_ZW[sp.value] = z; out.textContent = inp.value + ' M'; try { localStorage.setItem('bd_story_zoom', JSON.stringify(STORY_ZW)); } catch (e) { } STORY_ZOOM.key = null; };
     r.append(l, inp, out); box.appendChild(r); return [inp, out, i];
   });
-  const sync = () => { const z = storyZoomOf(sp.value); for (const [inp, out, i] of rows) { inp.value = z[i]; out.textContent = z[i] + ' M'; } };
+  // PRICE: this vehicle type's, everywhere it's for sale (empty: its own)
+  const rp = el('div', 'row'), pi = el('input'), pl = el('label', '', 'PRICE'); pl.title = 'Coins, everywhere it is for sale (empty: its own)';
+  pi.type = 'number'; pi.min = '0'; pi.step = '5'; pi.style.cssText = sp.style.cssText + ';width:80px';
+  pi.onchange = () => { const v = pi.value.trim(); if (v === '') delete STORY_PRICES[sp.value]; else STORY_PRICES[sp.value] = Math.max(0, Math.round(+v)); try { if (Object.keys(STORY_PRICES).length) localStorage.setItem('bd_prices', JSON.stringify(STORY_PRICES)); else localStorage.removeItem('bd_prices'); } catch (e) { } for (const v of storyVehs()) if (v.sv === sp.value && !v.own) v.price = storyTypePrice(v.sv); };
+  rp.append(pl, pi, el('span', '', 'COINS')); box.appendChild(rp);
+  const sync = () => { const z = storyZoomOf(sp.value); for (const [inp, out, i] of rows) { inp.value = z[i]; out.textContent = z[i] + ' M'; } pi.placeholder = String(STR_VEHS[sp.value] ? STR_VEHS[sp.value].price : ''); pi.value = Number.isFinite(STORY_PRICES[sp.value]) ? String(STORY_PRICES[sp.value]) : ''; };
   sp.onchange = sync; sync();
   VE.pane.appendChild(box);
 }
@@ -49366,7 +49424,8 @@ const STR_VEHS = {
   heliPolice: { lab: 'POLICE (BELL 429)', fam: 'heli', ch: 2, price: 250 },
   heliFire: { lab: 'FIRE (DAUPHIN)', fam: 'heli', ch: 4, price: 300 },
   heliVIP: { lab: 'VIP (AW139)', fam: 'heli', ch: 5, price: 400 },
-  heliChinook: { lab: 'CHINOOK', fam: 'heli', ch: 0, price: 800 },     // (the user, 09:32: a Cessna 100 coins - 50-story-planes.js)
+  heliChinook: { lab: 'CHINOOK', fam: 'heli', ch: 0, price: 800 },
+  minisub: { lab: 'MINISUB', fam: 'sub', price: 350 },   // (STORY's subs - 50-story-subs.js)     // (the user, 09:32: a Cessna 100 coins - 50-story-planes.js)
 };
 // the vehicle types a structure accepts (its RESTRICT switch on: only its kind's own - fire engines at a fire station...)
 const STR_FACTIONS = [['', 'NONE'], ['civ1', 'CIV 1'], ['civ2', 'CIV 2']];
@@ -49558,17 +49617,13 @@ function strSync() {
     for (let i = 0; i < n; i++) {
       const e = L[i] || null, r = el('div', 'row'), s = el('select'); s.style.cssText = U.selCss;
       const add = (val, lab) => { const op = document.createElement('option'); op.value = val; op.textContent = lab; s.appendChild(op); };
-      add('', 'EMPTY'); for (const k in STR_VEHS) if (takes.includes(STR_VEHS[k].fam) && strAllows(o, k)) add(k, STR_VEHS[k].lab + '  ' + STR_VEHS[k].price + 'C');
+      add('', 'EMPTY'); for (const k in STR_VEHS) if (takes.includes(STR_VEHS[k].fam) && strAllows(o, k)) add(k, STR_VEHS[k].lab + '  ' + storyTypePrice(k) + 'C');   // (its price: the VEHICLES tab's - 50-story.js)
       s.value = e ? e.v : '';
       const own = NSKY.editor.TUNE.toggle(e && e.own ? 1 : 0); own.title = 'OWNED: the player\'s at the start (else for sale)';
-      // (user Oct 31 22:14: the prices are the level designer's - PRICE: this spot's own, empty: the type's)
-      const pr = el('input'); pr.type = 'number'; pr.min = '0'; pr.step = '5'; pr.style.cssText = U.selCss + ';width:64px'; pr.title = 'PRICE in coins (empty: the type\'s)';
-      pr.placeholder = e && STR_VEHS[e.v] ? String(STR_VEHS[e.v].price) : ''; pr.value = e && Number.isFinite(e.price) ? String(e.price) : '';
-      const save = () => { const M = strVehs(o).slice(); while (M.length < n) M.push(null); const P = pr.value.trim() === '' ? null : Math.max(0, Math.round(+pr.value)); M[i] = s.value ? Object.assign({ v: s.value, own: !!+own.value, rt: e && e.rt }, Number.isFinite(P) ? { price: P } : {}) : null; o.veh = M; strSave(); };
-      s.onchange = () => { pr.value = ''; pr.placeholder = STR_VEHS[s.value] ? String(STR_VEHS[s.value].price) : ''; save(); }; own.addEventListener('input', save); pr.addEventListener('change', save);
+      const save = () => { const M = strVehs(o).slice(); while (M.length < n) M.push(null); M[i] = s.value ? { v: s.value, own: !!+own.value, rt: e && e.rt } : null; o.veh = M; strSave(); };
+      s.onchange = save; own.addEventListener('input', save);
       const ol = el('span', '', 'OWNED'); ol.style.cssText = 'font-size:10px;color:#8fa0bf';
-      const pl = el('span', '', 'PRICE'); pl.style.cssText = 'font-size:10px;color:#8fa0bf';
-      r.append(el('label', '', 'SPOT ' + (i + 1)), s, ol, own, pl, pr); v.appendChild(r);
+      r.append(el('label', '', 'SPOT ' + (i + 1)), s, ol, own); v.appendChild(r);
       // (the spec section 4: "Assign each vehicle an activity for each of four daily periods" - not yours: its routine)
       if (e && !e.own && STR_VEHS[e.v] && STR_VEHS[e.v].fam !== 'plane') {
         const rr = el('div', 'row'); rr.append(el('label', '', 'ROUTINE'));
