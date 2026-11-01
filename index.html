@@ -1523,6 +1523,16 @@ class ColTable {
     let top = Math.max(this.top, S.top || 0); const id = this.c[this.id]; for (let i = 0; i < n; i++) if (id[i] > top) top = id[i];
     this.top = top;
   }
+  // row i seen as an object - each field read and written in its column (one view a table, pointed at row i each call: for
+  // code that takes a thing, the scheduler's schedStep its _sa / _sk; a str column's value is its place in strs)
+  at(i) {
+    let o = this.cur;
+    if (!o) {
+      const T = this; o = this.cur = { i: 0 };
+      for (const F of this.f) Object.defineProperty(o, F.k, { get() { return T.c[F.k][o.i]; }, set(v) { T.c[F.k][o.i] = v; } });
+    }
+    o.i = i; return o;
+  }
   // one row as a plain object (the console: __game.row)
   plain(i) {
     if (!(i >= 0 && i < this.n)) return undefined;
@@ -3671,8 +3681,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 488;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 07:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 489;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 09:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13495,7 +13505,7 @@ function schedStep(S, o, x, dt, fn, pin) {
   const t = pin ? 0 : tierAt(x);                                       // (pin: stepped every tick wherever it is - yours, hit, falling...)
   S.n[t]++;
   if (t === 0 && !o._sa) { fn(dt); return true; }                      // (ACTIVE and up to date: as it always was)
-  if (o._sk === undefined) o._sk = REG.sid++;
+  if (!(o._sk >= 0)) o._sk = REG.sid++;                                // (none yet: undefined on a thing, NaN in a column table's row - ColTable.at)
   o._sa = (o._sa || 0) + dt;
   if (t !== 0 && (S.frame ? (REG.frame + o._sk) % REG.perF[t] : (REG.tick + o._sk) % REG.per[t])) return false;   // (not its turn: its time builds up)
   let T = o._sa; o._sa = 0;
@@ -13553,7 +13563,8 @@ const TABLES = {};
 // for the simulation worker's snapshots snapCols: (full, drawn, bufs) => its columns, colsInto: columns => put back on the page
 // (36-zzzzz-sw-snap.js); its list is empty)
 // (Nov 1) a COLUMN TABLE (04-zz-coltable.js - the smoke's puffs) gives cols: the table, drawn: the fields a live snapshot carries
-// to the page (the drawing's), rows: (rows, byU) => a save from before it was columns, as plainCols' data. It is saved, loaded and
+// to the page (the drawing's), near: a live snapshot carries only the rows near the page's views (by x and r, as the effect
+// lists - the smoke's), rows: (rows, byU) => a save from before it was columns, as plainCols' data. It is saved, loaded and
 // sent by the one rule for them all: its columns as plain lists in a save; to the page its columns in one buffer, moved, which
 // the page takes as its own (adopt) and hands back to be packed into again (swColTable, swColAdopt)
 const TBL_NO_ROWS = Object.freeze([]);
@@ -13562,7 +13573,7 @@ function defTable(name, list, o = {}) {
   const ct = o.cols || null, ctLoad = ct && ((d, byU) => ct.fromPlainCols(Array.isArray(d) && d.length === 1 && d[0] && d[0].soa ? d[0] : o.rows && Array.isArray(d) ? o.rows(d, byU) : { n: 0 }));
   TABLES[name] = { name, list: list || (() => TBL_NO_ROWS), depth: o.depth ?? 4, make: o.make || (() => ({})), after: o.after || null, skip,
     net: o.net ?? true, netSkip: new Set(o.netSkip || []), perPlayer: o.perPlayer || 0, netIds: new Set(o.netIds || []),
-    save: ct ? () => [ct.plainCols()] : o.save || null, load: ct ? ctLoad : o.load || null, cols: ct, drawn: o.drawn || null,
+    save: ct ? () => [ct.plainCols()] : o.save || null, load: ct ? ctLoad : o.load || null, cols: ct, drawn: o.drawn || null, near: !!o.near,
     snapCols: ct ? (full, drawn, bufs) => swColTable(TABLES[name], full, drawn, bufs) : o.snapCols || null, colsInto: ct ? C => swColAdopt(TABLES[name], C) : o.colsInto || null };
   // (the GAME EDITOR's VEHICLES tab asks, the table's owner writes - rules.md "Systems" 1): 'tableAdd' {t, o} puts a made row in;
   // 'tableMove' {t, o, x, y} moves one (y null: it keeps its own - on the water, on its tower's pier); o.moveTo, o.add: the owner's
@@ -14688,14 +14699,14 @@ function trSnapInto(C) { if (C && typeof C.n === 'number') trFill(trails, C); }
 /* (Nov 1) A COLUMN TABLE'S HAND-OFF (04-zz-coltable.js - the smoke's puffs): its columns copied into one buffer (ColTable.pack:
    a live snapshot the drawn ones - the table's drawn, 36-zz-tables.js - a full one every one), moved to the page, which takes
    them as its own (adopt) and hands the buffer it held before back with its next inputs (SWCB: swHostIn here, swGuestFrame
-   there), to be packed into again: two buffers that swap, nothing made a snapshot once they're big enough. A live one carries
-   the rows the page can draw, as swInView picks the effect lists' (a table with an x column: within SW_MARGIN and its r of a
-   view's span; a link to a row not sent is a row gone there) */
+   there), to be packed into again: two buffers that swap, nothing made a snapshot once they're big enough. A live one of a
+   table declared near carries the rows the page can draw, as swInView picks the effect lists' (within SW_MARGIN and its r of
+   a view's span; a link to a row not sent is a row gone there) */
 const SWCB = { spare: {}, back: {}, sel: new Int32Array(1024) };   // (the worker: a buffer per table to pack into; the page: the buffers to hand back)
 function swColTable(t, full, drawn, bufs) {
   const T = t.cols, sp = REG.spans, n = T.n, X = T.c.x, R = T.c.r;
   let sel = null, m = 0;
-  if (!full && sp.length && X) {
+  if (!full && t.near && sp.length && X) {
     sel = SWCB.sel.length >= n ? SWCB.sel : (SWCB.sel = new Int32Array(n * 2));
     for (let i = 0; i < n; i++) {
       const x = X[i], r = (R ? Math.abs(R[i]) : 0) + SW_MARGIN;
@@ -15942,7 +15953,7 @@ function smSolve(G, dt, SPANS, W, SH, WY) {
 // keeps on itself, smStream) belongs to the source, so it isn't saved: a loaded puff keeps the live one's at its place, and each
 // stream's newest puff is found again from the rows. The air-flow grid (SG) isn't saved either: once loaded every column starts
 // again from the wind as it wakes (smokeSpans) - unless the save held it (smokeAir, below). Sent to the page: SMOKE_DRAWN
-defTable('smoke', null, { cols: smoke, drawn: SMOKE_DRAWN, rows: smFromRows, net: false,
+defTable('smoke', null, { cols: smoke, drawn: SMOKE_DRAWN, near: true, rows: smFromRows, net: false,
   after: () => {
     const c = smoke.c, ST = c.st, newest = new Map();
     for (let i = 0; i < smoke.n; i++) if (ST[i]) newest.set(ST[i], c.sq[i]);
@@ -32225,37 +32236,29 @@ function waterStep(dt) {
 const cavePk = p => { if (!p || !p.win) return null; const k = CV.wins.indexOf(p.win); return k < 0 ? null : [k, p.win.pockets.indexOf(p)]; };
 const cavePkOf = a => { const Wn = Array.isArray(a) ? CV.wins[a[0]] : null; return Wn && Wn.pockets ? Wn.pockets[a[1]] || null : null; };
 const CAVE_FX = ['bubbles', 'drops', 'spray', 'silt', 'rings'];
-// (Oct 31, 80-fps work: a pocket's heights or speeds as text again only when they changed - the bits compared with a copy of
-// what was last made into text; every pocket's was made anew every snapshot. The same text)
-const F32B64 = new WeakMap();   // (the copies and their text, beside the pocket - nothing added to it)
-function f32B64Kept(p, k) {
-  const a = p[k];
-  if (!a) return null;
-  let e = F32B64.get(a);
-  if (e && e.c.length === a.length) {
-    const A = new Uint32Array(a.buffer, a.byteOffset, a.length), B = new Uint32Array(e.c.buffer, e.c.byteOffset, e.c.length);
-    let same = true; for (let i = 0; i < A.length; i++) if (A[i] !== B[i]) { same = false; break; }
-    if (same) return e.s;
-  }
-  if (!e || e.c.length !== a.length) { e = { c: new Float32Array(a.length), s: '' }; F32B64.set(a, e); }
-  e.c.set(a); e.s = f32ToB64(a); return e.s;
+// each pocket's springs as they are (h, v: its own arrays), whether it lies flat and at what level - by its window and its
+// place in the window's list (null: a window without pockets, or a pocket without springs)
+const cavePockets = () => CV.wins.map(Wn => Wn && Wn.pockets ? Wn.pockets.map(p => p.h ? { n: p.h.length, h: p.h, v: p.v, flat: !!p.flat, flatL: p.flatL == null ? null : p.flatL } : null) : null);
+// those put back (a save's, or the simulation worker's snapshot - cwSnap): each pocket of the same width takes its springs
+// (cp(from, to): from text or from a copy), lies flat or not, and works its surface out again
+function cavePocketsPut(a, cp) {
+  if (!Array.isArray(a)) return;
+  a.forEach((ps, k) => {
+    const Wn = CV.wins[k]; if (!Wn || !Wn.pockets || !Array.isArray(ps)) return;
+    ps.forEach((d, i) => {
+      const p = Wn.pockets[i]; if (!p || !d || !p.h || p.h.length !== d.n) return;
+      cp(d.h, p.h); cp(d.v, p.v); p.still = false; delete p._sa;
+      p.flat = d.flat; if (d.flatL == null) delete p.flatL; else p.flatL = d.flatL;
+      if (p.sy) { if (p.flat) p.sy.fill(p.flatL != null ? p.flatL : pocketLevel(p)); else surfTable(p); }   // (this frame's surface again)
+    });
+  });
 }
 const CAVE_WATER_ROW = worldRow({
   acc: [() => wAcc, v => { if (typeof v === 'number') wAcc = v; }],
   time: [() => wTime, v => { if (typeof v === 'number') wTime = v; }],
-  pockets: [() => wjson(CV.wins.map(Wn => Wn && Wn.pockets ? Wn.pockets.map(p => p.h ? { n: p.h.length, h: f32B64Kept(p, 'h'), v: f32B64Kept(p, 'v'), flat: !!p.flat, flatL: p.flatL == null ? null : p.flatL } : null) : null)),
-    v => {
-      const a = wunjson(v); if (!Array.isArray(a)) return;
-      a.forEach((ps, k) => {
-        const Wn = CV.wins[k]; if (!Wn || !Wn.pockets || !Array.isArray(ps)) return;
-        ps.forEach((d, i) => {
-          const p = Wn.pockets[i]; if (!p || !d || !p.h || p.h.length !== d.n) return;
-          b64IntoF32(d.h, p.h); b64IntoF32(d.v, p.v); p.still = false; delete p._sa;
-          p.flat = d.flat; if (d.flatL == null) delete p.flatL; else p.flatL = d.flatL;
-          if (p.sy) { if (p.flat) p.sy.fill(p.flatL != null ? p.flatL : pocketLevel(p)); else surfTable(p); }   // (this frame's surface again)
-        });
-      });
-    }],
+  // (saved as text: the springs as base64 text of their bytes - exact)
+  pockets: [() => wjson(cavePockets().map(ps => ps && ps.map(d => d && Object.assign({}, d, { h: f32ToB64(d.h), v: f32ToB64(d.v) })))),
+    v => cavePocketsPut(wunjson(v), b64IntoF32)],
   tips: [() => wjson(CV.wins.map(Wn => Wn && Wn.tips ? Wn.tips.map(t => t.next) : null)),
     v => { const a = wunjson(v); if (Array.isArray(a)) a.forEach((ns, k) => { const Wn = CV.wins[k]; if (Wn && Wn.tips && Array.isArray(ns) && ns.length === Wn.tips.length) Wn.tips.forEach((t, i) => { t.next = ns[i]; }); }); }],
   fx: [() => wjson(CAVE_FX.map(k => FX[k].map(o => { const c = Object.assign({}, o); if ('p' in o) c.p = cavePk(o.p); return c; }))),
@@ -32267,7 +32270,43 @@ const CAVE_WATER_ROW = worldRow({
       });
     }],
 });
-defTable('caveWater', () => [CAVE_WATER_ROW], { net: false, make: () => CAVE_WATER_ROW });
+// (Nov 1) to the page with the simulation worker on: the springs as copies of their arrays, moved with the snapshot - not as text
+// made and read back - and, as the row's text did, only when something in them changed since they were last sent (each pocket's
+// bytes and flat and level compared with what was sent: CWS); the drip timers and what's in flight as the row's text, when it
+// changed. full: all of it (a whole snapshot - the page takes the game afresh). The page puts them in as a save's are (cwInto)
+const CWS = { pk: null, tips: null, fx: null };
+function cwSnap(full, drawn, bufs) {
+  const out = { acc: wAcc, time: wTime }, pk = cavePockets();
+  let same = !full && CWS.pk && CWS.pk.length === pk.length;
+  for (let k = 0; same && k < pk.length; k++) {
+    const a = pk[k], b = CWS.pk[k];
+    if (!a || !b) { same = a === b || (!a && !b); continue; }
+    if (a.length !== b.length) { same = false; break; }
+    for (let i = 0; same && i < a.length; i++) {
+      const d = a[i], e = b[i];
+      if (!d || !e) { same = !d && !e; continue; }
+      if (d.n !== e.n || d.flat !== e.flat || d.flatL !== e.flatL) { same = false; break; }
+      const H = new Uint32Array(d.h.buffer, d.h.byteOffset, d.n), V = new Uint32Array(d.v.buffer, d.v.byteOffset, d.n), H2 = new Uint32Array(e.h.buffer), V2 = new Uint32Array(e.v.buffer);
+      for (let j = 0; j < d.n; j++) if (H[j] !== H2[j] || V[j] !== V2[j]) { same = false; break; }
+    }
+  }
+  if (!same) {
+    out.pk = pk.map(ps => ps && ps.map(d => { if (!d) return null; const h = swNew(Float32Array, d.n), v = swNew(Float32Array, d.n); h.set(d.h); v.set(d.v); bufs.push(h.buffer, v.buffer); return { n: d.n, h, v, flat: d.flat, flatL: d.flatL }; }));
+    CWS.pk = pk.map(ps => ps && ps.map(d => d && { n: d.n, h: d.h.slice(), v: d.v.slice(), flat: d.flat, flatL: d.flatL }));
+  }
+  const tips = CAVE_WATER_ROW.tips, fx = CAVE_WATER_ROW.fx;
+  if (full || tips !== CWS.tips) out.tips = CWS.tips = tips;
+  if (full || fx !== CWS.fx) out.fx = CWS.fx = fx;
+  return out;
+}
+function cwInto(C) {
+  const R = CAVE_WATER_ROW;
+  R.acc = C.acc; R.time = C.time;
+  if (C.pk) cavePocketsPut(C.pk, (from, to) => to.set(from));
+  if (C.tips != null) R.tips = C.tips;
+  if (C.fx != null) R.fx = C.fx;
+}
+defTable('caveWater', () => [CAVE_WATER_ROW], { net: false, make: () => CAVE_WATER_ROW, snapCols: cwSnap, colsInto: cwInto });
 // ---- (engine stage 4) the caves' worker: the swell on the pockets on screen (the open world's biggest steady simulation cost
 // after the smoke's air, ~2.4 ms a tick by the harbour) worked out on a second core. Behind the same switch as the smoke's
 // air (?worker=1, SMW.on). Each frame the pockets on screen are sent with this frame's time; the swell comes back for the next
@@ -34865,7 +34904,7 @@ const csR = sysRng('civShips'), csRnd = (a, b) => a + (b - a) * csR();
 defTable('civShips', () => civShips, { make: d => newCivShip(d.kind, d.x, d.lo, d.hi, d.face), skip: ['_smS', 'ropes'] });
 const CIV_GAP = 15 * UPM;   // (the least water kept between two big ships, bow to stern)
 function buildCivShips() {
-  civShips.length = 0; oilSlicks.length = 0; fireworks.length = 0; fwBits.length = 0;
+  civShips.length = 0; oilSlicks.length = 0; oilInk.length = 0; oilDrops.length = 0; fireworks.length = 0; fwBits.length = 0;
   if (!LAND) { buildCranes(); buildDeep(); return; }   // (BATTLE: no big ships, but the map's sunken wrecks - OWM)   // (and no cranes: buildCranes empties OPEN WORLD's - left standing, unseen, where it had them, they stopped planes and rain in BATTLE, user Oct 30)
   const H = DOCKS_OWNED ? coastDocks : docks, L = H.find(d => d.dir < 0), R = H.find(d => d.dir > 0);   // (the harbours' owners set: the coasts, a harbour there or not)
   if (!L || !R) return;
@@ -35065,7 +35104,7 @@ function civHitHull(h, x, y, dmg, vx) {
   if (c.secH[i] >= 2 && !c.fire[i]) c.fire[i] = 1;
   // (user Oct 26: "I don't seem to be able to make the oil tanker spill") the tanker holed at all leaks: a slick where
   // she was hit, growing with each hit; sunk, the whole of her cargo
-  if (K.oil && dmg >= 0.5) { const o = oilSlicks.find(q => q.leak === c && Math.abs(q.x - x) < 120); if (o) o.r = Math.max(o.r, 60 + 40 * c.hitsT); else oilSlicks.push({ x, r: 30, t: 0, leak: c }); }
+  if (K.oil && dmg >= 0.5) { const S = oilSlicks.c, u = uidOf(c); let o = -1; for (let q = 0; q < oilSlicks.n; q++) if (S.leak[q] === u && Math.abs(S.x[q] - x) < 120) { o = q; break; } if (o >= 0) S.r[o] = Math.max(S.r[o], 60 + 40 * c.hitsT); else oilSlick(x, 30, u); }
   if (c.secH[i] >= 3) civSink(c, i);
   else if (c.hitsT >= 5) civSink(c, c.secH.indexOf(Math.max(...c.secH)));
   return true;
@@ -35138,7 +35177,7 @@ function civSink(c, brk) {
   if (c.state !== 'sail') return;
   const K = CIV[c.kind];
   c.state = 'sink'; c.sinkT = 0; c.brk = brk == null ? Math.floor(K.n / 2) : brk; c.bend = 0;
-  if (K.oil) oilSlicks.push({ x: c.x, r: 40, t: 0 });             // (the tanker: her oil spills out and spreads)
+  if (K.oil) oilSlick(c.x, 40, 0);                               // (the tanker: her oil spills out and spreads)
   c.tiltTo = 0;                                                  // (broken in two: both ends rise as the break goes down)
   c.yb = surfaceY(c.x); c.hv = [{ x: 0, y: 0, a: 0 }, { x: 0, y: 0, a: 0 }]; civHalvesRide(c);
   // the break: a blast, debris and bubbles where she parts
@@ -35465,11 +35504,37 @@ function drawCivShip(c, x0, x1, cut) {
 
 /* ---- an oil spill (user Oct 25 late: "if that one gets destroyed, it spills black into the ocean that spreads and
    stays in that area, tinting the whole ocean in that area") ---- */
-const oilSlicks = [];
-// (engine stage 3: the slicks' own table and random source - 36-zz-tables.js; a slick's ink and drops saved with it, the ship
-// leaking it (leak) by her id)
+// (Nov 1) column tables (04-zz-coltable.js): the slicks; the billows of ink under them and the drops of tar falling through it,
+// each a row with its slick's id. A slick's leak: the ship leaking it, by her id (0: her cargo, sunk - civByUid). Its lobes - the
+// scallops of its underside - are worked out from its x where they're drawn (oilLobes). They went to the page as one row each,
+// its ink and drops nested in it: every snapshot each slick's row whole as text, its shape changed by every new billow or drop
+const oilSlicks = new ColTable({ id: 'id', x: 'f64', r: 'f64', t: 'f64', leak: 'f64', _sa: 'f64', _sk: 'f64 NaN' });
+const oilInk = new ColTable({ id: 'id', slick: 'ref', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', sk: 'f64', r: 'f64', R: 'f64', a: 'f64', A: 'f64', ph: 'f64', sp: 'f64', age: 'f64' });
+const oilDrops = new ColTable({ id: 'id', slick: 'ref', x: 'f64', y: 'f64', vy: 'f64', s: 'f64' });
+function oilSlick(x, r, leak) { const i = oilSlicks.add(), c = oilSlicks.c; c.x[i] = x; c.r[i] = r; c.t[i] = 0; c.leak[i] = leak; return i; }
+const civByUid = u => { for (const c of civShips) if (c._uid === u) return c; return null; };
+// (engine stage 3: the slicks' own tables and random source - 36-zz-tables.js)
 const oilR = sysRng('oil'), oilRnd = (a, b) => a + (b - a) * oilR();
-defTable('oilSlicks', () => oilSlicks, { make: d => ({ x: d.x, r: d.r, t: 0 }) });
+defTable('oilSlicks', null, { cols: oilSlicks, drawn: ['x', 'r', 't', 'leak'], rows: oilFromRows });
+defTable('oilInk', null, { cols: oilInk, drawn: ['slick', 'x', 'y', 'r', 'a'] });
+defTable('oilDrops', null, { cols: oilDrops, drawn: ['slick', 'x', 'y', 's'] });
+// a save from before (a slick a row with its ink and drops in it, its leak a { ref } to the ship's id): as the tables' columns
+function oilFromRows(rows) {
+  const S = { soa: 1, n: 0, top: 0, strs: [], cols: { id: [], x: [], r: [], t: [], leak: [], _sa: [], _sk: [] } };
+  const I = { soa: 1, n: 0, top: 0, strs: [], cols: {} }, D = { soa: 1, n: 0, top: 0, strs: [], cols: {} };
+  for (const F of oilInk.f) I.cols[F.k] = []; for (const F of oilDrops.f) D.cols[F.k] = [];
+  const num = v => typeof v === 'number' ? v : 0;
+  rows.forEach((o, k) => {
+    const id = k + 1; S.n++; S.top = id;
+    S.cols.id.push(id); S.cols.x.push(num(o.x)); S.cols.r.push(num(o.r)); S.cols.t.push(num(o.t)); S.cols.leak.push(o.leak && o.leak.ref != null ? o.leak.ref : 0);
+    S.cols._sa.push(typeof o.sa_ === 'number' ? o.sa_ : num(o._sa)); S.cols._sk.push(typeof o.sk_ === 'number' ? o.sk_ : typeof o._sk === 'number' ? o._sk : null);
+    for (const [T, L, list] of [[oilInk, I, o.ink], [oilDrops, D, o.drops]]) for (const p of list || []) {
+      L.n++; L.top++; for (const F of T.f) L.cols[F.k].push(F.k === 'id' ? L.top : F.k === 'slick' ? id : num(p[F.k]));
+    }
+  });
+  oilInk.fromPlainCols(I); oilDrops.fromPlainCols(D);
+  return S;
+}
 // (user Oct 26, then "The spill should stay at the top like my image, not come down as a cloud" - most of it hangs just
 // under the slick, only a thinner plume going deeper; with a picture - gen/open/ref/oil_spill_ink_target_oct26.png: "how the oil spill should feel. Like black
 // ink slowly taking over the space. It would grow maybe 50% more than this and then stay in this area of the water. It
@@ -35481,59 +35546,77 @@ const INK_MAX = 220, INK_LEAK_MAX = 70;
 function stepOil(dt) {
   // (engine stage 2: a slick - its film, its plume of ink and its drops - by its region's tier, catching up when a view comes
   // near; its tier the nearest of its middle and its two edges, so one reaching toward a view is stepped as before)
-  const t0 = performance.now(), S = schedSystem('oil', 0.5, 1 / 20);
-  for (const o of oilSlicks) {
-    const R = o.r + 60; let x = o.x, tb = tierAt(x);
-    for (const e of [o.x - R, o.x + R]) { const t = tierAt(e); if (t < tb) { tb = t; x = e; } }
-    schedStep(S, o, x, dt, h => stepSlick(o, h), false);
+  const t0 = performance.now(), S = schedSystem('oil', 0.5, 1 / 20), c = oilSlicks.c;
+  for (let i = 0; i < oilSlicks.n; i++) {
+    const R = c.r[i] + 60; let x = c.x[i], tb = tierAt(x);
+    for (const e of [c.x[i] - R, c.x[i] + R]) { const t = tierAt(e); if (t < tb) { tb = t; x = e; } }
+    schedStep(S, oilSlicks.at(i), x, dt, h => stepSlick(i, h), false);
   }
   S.t += performance.now() - t0;
   stepOilStains(dt);
 }
-function stepSlick(o, dt) {
+// how many rows of table T are slick id's, and the place of its k-th (-1: none)
+function oilCount(T, id) { const S = T.c.slick; let n = 0; for (let i = 0; i < T.n; i++) if (S[i] === id) n++; return n; }
+function oilNth(T, id, k) { const S = T.c.slick; for (let i = 0; i < T.n; i++) if (S[i] === id && k-- === 0) return i; return -1; }
+function stepSlick(i, dt) {
   {
-    o.t += dt; o.r = Math.min(o.leak ? 420 : 1100, o.r + dt * (o.leak ? 8 : 30 - Math.min(26, o.t * 0.25)));   // (a leak spreads slowly; her sunk cargo far)
+    const O = oilSlicks.c, id = O.id[i], lk = O.leak[i], L = lk ? civByUid(lk) : null;   // (her leak: a ship gone from the list is gone)
+    O.t[i] += dt; O.r[i] = Math.min(lk ? 420 : 1100, O.r[i] + dt * (lk ? 8 : 30 - Math.min(26, O.t[i] * 0.25)));   // (a leak spreads slowly; her sunk cargo far)
     if (!LAND) return;
-    const ink = o.ink || (o.ink = []), drops = o.drops || (o.drops = []);
-    const src = o.leak && o.leak.state !== 'gone' ? o.leak.x + (o.x - o.leak.x) * 0.3 : o.x, pouring = o.leak ? o.leak.state === 'sail' || o.leak.state === 'sink' : o.t < 70;
+    const ox = O.x[i], or = O.r[i];
+    const src = L && L.state !== 'gone' ? L.x + (ox - L.x) * 0.3 : ox, pouring = lk ? !!L && (L.state === 'sail' || L.state === 'sink') : O.t[i] < 70;
     // (new billows from the hole while she pours, up to the plume's size)
-    if (pouring && ink.length < (o.leak ? INK_LEAK_MAX : INK_MAX) && oilR() < dt * (o.leak ? 2.5 : 4.5)) {
+    let nInk = oilCount(oilInk, id);
+    if (pouring && nInk < (lk ? INK_LEAK_MAX : INK_MAX) && oilR() < dt * (lk ? 2.5 : 4.5)) {
       const core = oilR() < 0.55;                           // (dense dark clumps, among paler billows)
-      ink.push({ x: src + oilRnd(-18, 18), y: WATER_Y + oilRnd(14, 34), vx: oilRnd(-5, 5), vy: oilRnd(8, 16), sk: oilR() < 0.25 ? oilRnd(0.6, 2) : oilRnd(3, 9), r: oilRnd(4, 7), R: core ? oilRnd(8, 17) : oilRnd(14, 26), a: 0, A: core ? oilRnd(0.5, 0.75) : oilRnd(0.18, 0.34), ph: oilR() * 6, sp: oilRnd(-1, 1) });
+      const q = oilInk.add(), P = oilInk.c; P.slick[q] = id;
+      P.x[q] = src + oilRnd(-18, 18); P.y[q] = WATER_Y + oilRnd(14, 34); P.vx[q] = oilRnd(-5, 5); P.vy[q] = oilRnd(8, 16); P.sk[q] = oilR() < 0.25 ? oilRnd(0.6, 2) : oilRnd(3, 9);
+      P.r[q] = oilRnd(4, 7); P.R[q] = core ? oilRnd(8, 17) : oilRnd(14, 26); P.a[q] = 0; P.A[q] = core ? oilRnd(0.5, 0.75) : oilRnd(0.18, 0.34); P.ph[q] = oilR() * 6; P.sp[q] = oilRnd(-1, 1);
+      nInk++;
     }
-    for (const p of ink) {
+    const P = oilInk.c;
+    for (let q = 0; q < oilInk.n; q++) {
+      if (P.slick[q] !== id) continue;
       // (slowing as it spreads, still sinking a little, swelling to its size; its reach the slick's - growing with it)
       // (it settles to a slow sink of its own - the plume keeps going down till it reaches the bed - and drifts outward
       // as it goes, so the column widens with depth; the deeper, the bigger and paler)
-      p.age = (p.age || 0) + dt;
-      const dep = Math.max(0, p.y - WATER_Y), dx0 = p.x - o.x, hang = Math.exp(-p.age / 50);   // (it sinks less and less: the cloud stays where it's spread)
-      p.vx += ((clamp(dx0 / 60, -1, 1) * 0.6 + p.sp * 0.4) * (1 + dep * 0.012) - p.vx) * Math.min(1, dt * 0.15);   // (outward the further off the middle it is: one widening column, not two)
-      p.vy += (p.sk * (0.12 + 0.88 * hang) - p.vy) * Math.min(1, dt * 0.25);
-      p.x += (p.vx + Math.sin(time * 0.3 + p.ph) * 1.5) * dt; p.y += p.vy * dt;
-      const Rw = p.R + dep * 0.06;
-      p.r += (Rw - p.r) * Math.min(1, dt * 0.06); p.a += (p.A * (1 - 0.45 * Math.min(1, dep / 450)) - p.a) * Math.min(1, dt * 0.4);
-      const reach = o.r * 0.75, dx = p.x - o.x;
-      if (Math.abs(dx) > reach) { p.x = o.x + Math.sign(dx) * reach; p.vx *= -0.3; }
-      const bed = seabedY(p.x) - p.r * 0.45;
-      if (p.y > bed) { p.y = bed; p.vy = 0; p.vx += Math.sign(p.vx || dx || 1) * dt * 4; }   // (on the bottom it creeps along it)
-      if (p.y < WATER_Y + p.r * 0.5) p.y = WATER_Y + p.r * 0.5;
+      P.age[q] += dt;
+      const dep = Math.max(0, P.y[q] - WATER_Y), dx0 = P.x[q] - ox, hang = Math.exp(-P.age[q] / 50);   // (it sinks less and less: the cloud stays where it's spread)
+      P.vx[q] += ((clamp(dx0 / 60, -1, 1) * 0.6 + P.sp[q] * 0.4) * (1 + dep * 0.012) - P.vx[q]) * Math.min(1, dt * 0.15);   // (outward the further off the middle it is: one widening column, not two)
+      P.vy[q] += (P.sk[q] * (0.12 + 0.88 * hang) - P.vy[q]) * Math.min(1, dt * 0.25);
+      P.x[q] += (P.vx[q] + Math.sin(time * 0.3 + P.ph[q]) * 1.5) * dt; P.y[q] += P.vy[q] * dt;
+      const Rw = P.R[q] + dep * 0.06;
+      P.r[q] += (Rw - P.r[q]) * Math.min(1, dt * 0.06); P.a[q] += (P.A[q] * (1 - 0.45 * Math.min(1, dep / 450)) - P.a[q]) * Math.min(1, dt * 0.4);
+      const reach = or * 0.75, dx = P.x[q] - ox;
+      if (Math.abs(dx) > reach) { P.x[q] = ox + Math.sign(dx) * reach; P.vx[q] *= -0.3; }
+      const bed = seabedY(P.x[q]) - P.r[q] * 0.45;
+      if (P.y[q] > bed) { P.y[q] = bed; P.vy[q] = 0; P.vx[q] += Math.sign(P.vx[q] || dx || 1) * dt * 4; }   // (on the bottom it creeps along it)
+      if (P.y[q] < WATER_Y + P.r[q] * 0.5) P.y[q] = WATER_Y + P.r[q] * 0.5;
       // (a submarine going through pushes the ink aside)
-      for (const q of subs) if (q && q.state !== 'sunk' && Math.abs(q.x - p.x) < p.r + 30 && Math.abs(q.y - p.y) < p.r + 14) { const k = q.x < p.x ? 1 : -1; p.vx += k * 22 * dt * 3; p.vy += (p.y > q.y ? 1 : -1) * 8 * dt * 3; }
-      for (const q of minisubs) if (q && Math.abs(q.x - p.x) < p.r + 20 && Math.abs(q.y - p.y) < p.r + 10) { p.vx += (q.x < p.x ? 1 : -1) * 40 * dt; }
+      for (const v of subs) if (v && v.state !== 'sunk' && Math.abs(v.x - P.x[q]) < P.r[q] + 30 && Math.abs(v.y - P.y[q]) < P.r[q] + 14) { const k = v.x < P.x[q] ? 1 : -1; P.vx[q] += k * 22 * dt * 3; P.vy[q] += (P.y[q] > v.y ? 1 : -1) * 8 * dt * 3; }
+      for (const v of minisubs) if (v && Math.abs(v.x - P.x[q]) < P.r[q] + 20 && Math.abs(v.y - P.y[q]) < P.r[q] + 10) { P.vx[q] += (v.x < P.x[q] ? 1 : -1) * 40 * dt; }
     }
     // (black drops: falling from the slick while she pours, and shed from the billows as they sink - specks all through it)
-    if (drops.length < 140 && ink.length && oilR() < dt * (pouring ? 16 : 5)) { const q = ink[Math.floor(oilR() * ink.length)]; const top = pouring && oilR() < 0.4; drops.push({ x: top ? src + oilRnd(-o.r * 0.2, o.r * 0.2) : q.x + oilRnd(-q.r, q.r), y: top ? WATER_Y + oilRnd(14, 40) : q.y + oilRnd(-q.r, q.r) * 0.6, vy: oilRnd(6, 18), s: oilR() < 0.4 ? oilRnd(2.5, 4.5) : oilRnd(1, 2) }); }   // (blobs of tar, some a fair size, sinking)
-    for (let i = drops.length - 1; i >= 0; i--) { const d = drops[i]; d.y += d.vy * dt; if (d.y > seabedY(d.x) - 2) drops.splice(i, 1); }
+    if (oilCount(oilDrops, id) < 140 && nInk && oilR() < dt * (pouring ? 16 : 5)) {
+      const q = oilNth(oilInk, id, Math.floor(oilR() * nInk)), top = pouring && oilR() < 0.4;
+      const x = top ? src + oilRnd(-or * 0.2, or * 0.2) : P.x[q] + oilRnd(-P.r[q], P.r[q]), y = top ? WATER_Y + oilRnd(14, 40) : P.y[q] + oilRnd(-P.r[q], P.r[q]) * 0.6, vy = oilRnd(6, 18), s = oilR() < 0.4 ? oilRnd(2.5, 4.5) : oilRnd(1, 2);
+      const d = oilDrops.add(), D = oilDrops.c; D.slick[d] = id; D.x[d] = x; D.y[d] = y; D.vy[d] = vy; D.s[d] = s;   // (blobs of tar, some a fair size, sinking)
+    }
+    const D = oilDrops.c;
+    for (let d = oilDrops.n - 1; d >= 0; d--) { if (D.slick[d] !== id) continue; D.y[d] += D.vy[d] * dt; if (D.y[d] > seabedY(D.x[d]) - 2) oilDrops.drop(d); }
+    oilDrops.sweep();
   }
 }
 /* (user Oct 27: "Submarines get black dirty with oil spill") how much oil is in the water at a point (0..1): the film on
    the surface (oilAt) just under it, and the ink's billows (each thickest at its middle) down through the plume */
 function oilInkAt(x, y) {
   let k = 0;
-  for (const o of oilSlicks) {
-    if (Math.abs(x - o.x) > o.r + 40) continue;
+  const O = oilSlicks.c, P = oilInk.c;
+  for (let i = 0; i < oilSlicks.n; i++) {
+    if (Math.abs(x - O.x[i]) > O.r[i] + 40) continue;
     if (y < surfaceY(x) + 24) k = Math.max(k, oilAt(x));
-    if (o.ink) for (const p of o.ink) { const d = Math.hypot(x - p.x, y - p.y); if (d < p.r) k = Math.max(k, p.a * 1.6 * (1 - d / p.r)); }
+    const id = O.id[i];
+    for (let q = 0; q < oilInk.n; q++) { if (P.slick[q] !== id) continue; const d = Math.hypot(x - P.x[q], y - P.y[q]); if (d < P.r[q]) k = Math.max(k, P.a[q] * 1.6 * (1 - d / P.r[q])); }
   }
   return Math.min(1, k);
 }
@@ -35542,7 +35625,7 @@ function oilInkAt(x, y) {
 // back on its crane - it's washed off quickly
 const OIL_STAIN_IN = 0.6, OIL_STAIN_FADE = 1 / 240, OIL_STAIN_WASH = 1 / 4;
 function oilStain(v, dt, home) {
-  const k = oilSlicks.length && !home ? oilInkAt(v.x, v.y) : 0;
+  const k = oilSlicks.n && !home ? oilInkAt(v.x, v.y) : 0;
   if (k > 0.02) v.oil = Math.min(1, (v.oil || 0) + k * OIL_STAIN_IN * dt);
   else if (v.oil > 0) v.oil = Math.max(0, v.oil - (home ? OIL_STAIN_WASH : OIL_STAIN_FADE) * dt);
 }
@@ -35576,15 +35659,18 @@ function buildInkHaloArt() {
 // how much oil lies on the water at x (0..1): thick at the middle, thinning to its ragged edge
 function oilAt(x) {
   let a = 0;
-  for (const o of oilSlicks) { const d = Math.abs(x - o.x) / o.r + 0.12 * Math.sin(x * 0.013 + o.x) * Math.sin(x * 0.0047); if (d < 1) a = Math.max(a, smoothstep(1, 0.55, d) * Math.min(1, o.t / 4)); }
+  const O = oilSlicks.c;
+  for (let i = 0; i < oilSlicks.n; i++) { const d = Math.abs(x - O.x[i]) / O.r[i] + 0.12 * Math.sin(x * 0.013 + O.x[i]) * Math.sin(x * 0.0047); if (d < 1) a = Math.max(a, smoothstep(1, 0.55, d) * Math.min(1, O.t[i] / 4)); }
   return a;
 }
 // the ink, kept to the water: clipped to columns from the surface down to the bed
 function drawInk(x0, x1) {
   const I = inkArt || buildInkArt(), H = inkHaloArt || buildInkHaloArt();
-  for (const o of oilSlicks) {
-    if (!o.ink || (!o.ink.length && !(o.drops && o.drops.length))) continue;
-    const L = Math.max(x0, o.x - o.r), R = Math.min(x1, o.x + o.r); if (R <= L) continue;
+  const O = oilSlicks.c, P = oilInk.c, D = oilDrops.c;
+  for (let i = 0; i < oilSlicks.n; i++) {
+    const id = O.id[i], ox = O.x[i], or = O.r[i];
+    if (!oilCount(oilInk, id) && !oilCount(oilDrops, id)) continue;
+    const L = Math.max(x0, ox - or), R = Math.min(x1, ox + or); if (R <= L) continue;
     C.save(); C.beginPath();
     const st = 24 / SV;
     for (let wx = L - st; wx < R + st; wx += st) { const X = Math.round(PX(wx)), top = Math.round(PY(WATER_Y + 2)), bot = Math.round(PY(seabedY(wx + st / 2))); if (bot > top) C.rect(X, top, Math.round(PX(wx + st)) - X, bot - top); }
@@ -35593,17 +35679,21 @@ function drawInk(x0, x1) {
     // (user Oct 27: "Light from the research sub doesn't work in oil spill (doesn't see through)") a sub's lamp (any: subLamps) cuts
     // through it: where its beam falls (chestLit - the beam's own reach and spread) the ink thins away, so what's in it
     // and behind it shows in the light; its beam (drawn after, over everything) then lights the murk that's left
-    const lamps = subLamps().length > 0, seen = q => lamps ? 1 - 0.85 * chestLit(q.x, q.y) : 1;
-    for (const p of o.ink) {
-      if (p.x + p.r * 2 < x0 || p.x - p.r * 2 > x1 || p.a < 0.02) continue;
-      const d = Math.round(p.r * 3.6 * SV); C.globalAlpha = Math.min(1, p.a * 0.3) * seen(p); C.drawImage(H, Math.round(PX(p.x) - d / 2), Math.round(PY(p.y) - d / 2), d, d);
+    const lamps = subLamps().length > 0, seen = (x, y) => lamps ? 1 - 0.85 * chestLit(x, y) : 1;
+    for (let q = 0; q < oilInk.n; q++) {
+      if (P.slick[q] !== id) continue;
+      const px = P.x[q], py = P.y[q], pr = P.r[q], pa = P.a[q];
+      if (px + pr * 2 < x0 || px - pr * 2 > x1 || pa < 0.02) continue;
+      const d = Math.round(pr * 3.6 * SV); C.globalAlpha = Math.min(1, pa * 0.3) * seen(px, py); C.drawImage(H, Math.round(PX(px) - d / 2), Math.round(PY(py) - d / 2), d, d);
     }
-    for (const p of o.ink) {
-      if (p.x + p.r < x0 || p.x - p.r > x1 || p.a < 0.02) continue;
-      const d = Math.round(p.r * 2 * SV); C.globalAlpha = p.a * seen(p); C.drawImage(I, Math.round(PX(p.x) - d / 2), Math.round(PY(p.y) - d / 2), d, d);
+    for (let q = 0; q < oilInk.n; q++) {
+      if (P.slick[q] !== id) continue;
+      const px = P.x[q], py = P.y[q], pr = P.r[q], pa = P.a[q];
+      if (px + pr < x0 || px - pr > x1 || pa < 0.02) continue;
+      const d = Math.round(pr * 2 * SV); C.globalAlpha = pa * seen(px, py); C.drawImage(I, Math.round(PX(px) - d / 2), Math.round(PY(py) - d / 2), d, d);
     }
     C.globalAlpha = 1; C.fillStyle = '#100e14';
-    if (o.drops) for (const d of o.drops) { const s = Math.max(PB, Math.round(d.s * SV)), k = seen(d); if (k < 0.3) continue; if (s > PB * 2) { C.globalAlpha = 0.9 * k; C.drawImage(I, Math.round(PX(d.x) - s / 2), Math.round(PY(d.y) - s / 2), s, s); C.globalAlpha = 1; } else C.fillRect(Math.round(PX(d.x)), Math.round(PY(d.y)), s, s); }
+    for (let q = 0; q < oilDrops.n; q++) { if (D.slick[q] !== id) continue; const dx = D.x[q], dy = D.y[q], s = Math.max(PB, Math.round(D.s[q] * SV)), k = seen(dx, dy); if (k < 0.3) continue; if (s > PB * 2) { C.globalAlpha = 0.9 * k; C.drawImage(I, Math.round(PX(dx) - s / 2), Math.round(PY(dy) - s / 2), s, s); C.globalAlpha = 1; } else C.fillRect(Math.round(PX(dx)), Math.round(PY(dy)), s, s); }
     C.restore();
   }
 }
@@ -35613,18 +35703,19 @@ function drawInk(x0, x1) {
 // black slab riding the surface: thin at its ends, a heavy mass over where she went down running into the plume, and its
 // underside scalloped - lobes of oil hanging down, the water under them stained in steps that echo the scallops - and
 // from the lobes chains of drops slowly dripping away
-function oilLobes(o) {
-  if (o.lobes) return o.lobes;
-  const R = seededRng(Math.floor(o.x) * 3 + 11), L = [];
-  for (let x = o.x - 1160; x < o.x + 1160;) { const w = 50 + R() * 80; L.push({ c: x + w / 2, w, d: 0.5 + R() * 0.9, drip: R() < 0.6, n: 3 + Math.floor(R() * 5), len: 90 + R() * 200, sp: 8 + R() * 12, ph: R() }); x += w; }
-  return (o.lobes = L);
+// (a slick's lobes, a function of its x alone: worked out where they're drawn, each drawing - Nov 1; they were kept on the slick)
+function oilLobes(ox) {
+  const R = seededRng(Math.floor(ox) * 3 + 11), L = [];
+  for (let x = ox - 1160; x < ox + 1160;) { const w = 50 + R() * 80; L.push({ c: x + w / 2, w, d: 0.5 + R() * 0.9, drip: R() < 0.6, n: 3 + Math.floor(R() * 5), len: 90 + R() * 200, sp: 8 + R() * 12, ph: R() }); x += w; }
+  return L;
 }
-function oilLensAt(o, x) {
-  const u = Math.abs(x - o.x) / o.r; if (u >= 1) return 0;
-  const grow = Math.min(1, o.t / 4), mass = Math.min(1, o.t / 25) * (o.leak ? 0.35 : 1), L = oilLobes(o);
+// slick i's thickness at x, its lobes L
+function oilLensAt(i, x, L) {
+  const O = oilSlicks.c, ox = O.x[i], ot = O.t[i], u = Math.abs(x - ox) / O.r[i]; if (u >= 1) return 0;
+  const grow = Math.min(1, ot / 4), mass = Math.min(1, ot / 25) * (O.leak[i] ? 0.35 : 1);
   let lobe = 0; for (const q of L) { const v = Math.abs(x - q.c) / (q.w / 2); if (v < 1) { lobe = q.d * Math.pow(1 - v * v, 0.7); break; } }
   const taper = Math.pow(1 - u * u, 0.6);
-  return grow * (taper * (12 + 42 * lobe * Math.min(1, o.t / 8)) + 70 * mass * Math.exp(-Math.pow((x - o.x) / (o.r * 0.12 + 18), 2)));
+  return grow * (taper * (12 + 42 * lobe * Math.min(1, ot / 8)) + 70 * mass * Math.exp(-Math.pow((x - ox) / (O.r[i] * 0.12 + 18), 2)));
 }
 // (Oct 31, 80-fps work: the oil's rectangles in colours given as numbers - fillRectA - not as rgba text made and read back for
 // each, ~2,000 new texts a frame; the alpha the text carried, its 3 decimals: the same fills. The last one's text set at the end)
@@ -35635,13 +35726,14 @@ function oilFill(r, g, b, a, x, y, w, h) {
   OILC[0] = r; OILC[1] = g; OILC[2] = b; fillRectA(C, OILC, +a, x, y, w, h);
 }
 function drawOil(x0, x1) {
-  if (!oilSlicks.length) return;
+  if (!oilSlicks.n) return;
   if (LAND) drawInk(x0, x1);
+  const O = oilSlicks.c, LB = []; for (let i = 0; i < oilSlicks.n; i++) LB.push(oilLobes(O.x[i]));   // (each slick's lobes, this drawing)
   const step = PB, band = Math.max(PB, Math.round(13 * SV));
   for (let c = -2; c < VWP + 2; c += step) {
     const wx = (c + CAMPX) / SV, a = oilAt(wx);
     if (a < 0.02) continue;
-    let T = 0; for (const o of oilSlicks) T = Math.max(T, oilLensAt(o, wx));
+    let T = 0; for (let i = 0; i < oilSlicks.n; i++) T = Math.max(T, oilLensAt(i, wx, LB[i]));
     const y = ys[clamp(c + 3, 0, ys.length - 1)], th = Math.max(PB, Math.round(T * SV)), lip = hash(Math.floor(wx / 3)) < 0.3 ? PB : 0;
     // the water under it stained in steps, following the scallops
     for (let k = 0; k < 3; k++) oilFill(6, 10, 30, ((0.34 - k * 0.1) * Math.min(1, a * 1.5)).toFixed(3), c, y + th + k * band, step, band);
@@ -35653,10 +35745,10 @@ function drawOil(x0, x1) {
   if (OILF.k) { C.fillStyle = `rgba(${OILF.r},${OILF.g},${OILF.b},${OILF.a})`; OILF.k = 0; }   // (the fill style as the rectangles one by one left it)
   // the drips: chains of drops falling from the lobes, the first fat and the rest smaller, sliding down and fading
   if (LAND) { const I = inkArt || buildInkArt();
-    for (const o of oilSlicks) { if (o.t < 6) continue; const fade = Math.min(1, (o.t - 6) / 10);
-      for (const q of oilLobes(o)) {
-        if (!q.drip || q.c < x0 - 40 || q.c > x1 + 40 || Math.abs(q.c - o.x) > o.r * 0.85) continue;
-        const T = oilLensAt(o, q.c); if (T < 16) continue;
+    for (let i = 0; i < oilSlicks.n; i++) { const ot = O.t[i]; if (ot < 6) continue; const fade = Math.min(1, (ot - 6) / 10);
+      for (const q of LB[i]) {
+        if (!q.drip || q.c < x0 - 40 || q.c > x1 + 40 || Math.abs(q.c - O.x[i]) > O.r[i] * 0.85) continue;
+        const T = oilLensAt(i, q.c, LB[i]); if (T < 16) continue;
         const top = surfaceY(q.c) + T - 2;
         for (let k = 0; k < q.n; k++) {
           const f = ((time * q.sp / q.len + q.ph + k / q.n) % 1), yy = top + f * q.len, r = (k === 0 ? 8 : 3 + 5 * hash(q.c + k)) * (1 - 0.4 * f) * q.d * 1.3;
