@@ -1212,7 +1212,7 @@ const onLand = x => OWM && (x < SEA0 || x > SEA1 || (ISLE !== null && ISLE[Math.
 const isleCol = x => ISLE !== null && ISLE[Math.floor(x / 2.5)] === 2;
 // (user Oct 28) the ground's own line out of the water at sea, `half` ahead of x going `dir`: a coast every boat stops or
 // turns at (an island line's island they go past)
-const coastAhead = (x, dir, half) => { if (ISLE === null) return false; const q = x + dir * half; return ISLE[Math.floor(q / 2.5)] === 1; };
+const coastAhead = (x, dir, half) => { if (ISLE === null) return false; const q = x + dir * half, i = Math.floor(q / 2.5); return ISLE[i] === 1 || !!(land.isolid && land.isolid[i]); };   // (or a SOLID segment - 50-land-islands, user Oct 31 20:03)
 let VIS_L = 0, VIS_R = 4000;                 // what the cameras may show: the world between the two harbours' far ends
 let wh, wv, wf, wtmp;
 let docks = [];          // the harbours in the world (one in a one-player game)
@@ -3236,7 +3236,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 445;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const GAME_VERSION = 446;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
 const BUILD = 'OCT 31 20:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
@@ -36269,14 +36269,14 @@ const islGroundAt = (x, R) => inCountry(x) ? landProfile(x, R) : sandY(x);
 // wherever its line rises out of the water and the ground in front is under the water - the sea between the harbours, a
 // lake, or a sea in a country. Where the ground in front stands out of the water, it hides the island: nothing to mark
 function islMarkCols(I_, any, R) {
-  land.itop = null; land.islRuns = [];
+  land.itop = null; land.islRuns = []; land.isolid = null;
   const L = islandsUsed(); if (!L.length) return any;
-  const T = land.itop = new Float32Array(land.cols);
+  const T = land.itop = new Float32Array(land.cols), SO = land.isolid = new Uint8Array(land.cols);   // (isolid: a SOLID segment's columns - coastAhead)
   for (const I of L) {
     const m = floorTangents(I.p), a = I.p[0][0], b = I.p[I.p.length - 1][0];
     for (let c = Math.max(0, Math.ceil(a / LT_CELL)); c < land.cols && c * LT_CELL < b; c++) {
       const x = c * LT_CELL; if (I_[c] || islGroundAt(x, R) < WATER_Y - 1) continue;
-      const t = islTopAt(I, m, x); if (t < WATER_Y - 1 && t < islBotAt(I, x) - 1) { I_[c] = 2; T[c] = t; any = true; }
+      const t = islTopAt(I, m, x); if (t < WATER_Y - 1 && t < islBotAt(I, x) - 1) { I_[c] = 2; T[c] = t; any = true; if (I.solid) SO[c] = 1; }
     }
   }
   for (let c = 0; c < land.cols; c++) if (I_[c] === 2 && I_[c - 1] !== 2) { let e = c; while (I_[e + 1] === 2) e++; land.islRuns.push([c * LT_CELL, (e + 1) * LT_CELL]); }
@@ -36392,6 +36392,15 @@ function islAdd() {
   const I = { p: [[Math.round(cx - w / 2), 220], [Math.round(cx - w / 5), -60], [Math.round(cx), -160], [Math.round(cx + w / 5), -60], [Math.round(cx + w / 2), 220]] };
   ISLANDS.push(I); islChanged();
   TERRAIN_ED.sel = { I: ISLANDS.length - 1, k: 0, k1: I.p.length - 2 }; terrainSyncSkin();
+}
+// (user Oct 31 20:03: a segment with ISLAND off is 'Solid land ... Allowing to create separate land parts behind the main one'):
+// the picked segment made SOLID (drawn where it is, behind the main ground - but every boat stops at it as at a coast) or an
+// ISLAND again (the boats and subs pass behind it)
+function islSetSolid(on) {
+  const s = TERRAIN_ED.sel, L = s && s.Is ? s.Is : s && s.I != null ? [s.I] : [];
+  if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Press a segment\'s line first, then SOLID or ISLAND.'; return; }
+  for (const n of L) if (ISLANDS[n]) { if (on) ISLANDS[n].solid = true; else delete ISLANDS[n].solid; }
+  islChanged(); if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = on ? 'SOLID: boats stop at it (REFRESH to build).' : 'ISLAND: water passes through it (REFRESH to build).';
 }
 function islDelete() {
   const s = TERRAIN_ED.sel;
@@ -45188,6 +45197,8 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT', [
 NSKY.editor.TUNE.buttons('TERRAIN', 'ISLAND SEGMENTS', [
   ['CREATE SEGMENT', 'A new segment in the middle of the view (an island: water passes through it) - picked whole, so a terrain button types all of it', islAdd],
   ['DELETE SEGMENT', 'Removes the segment whose line you pressed last', islDelete],
+  ['SOLID', 'The picked segment solid land: every boat stops at it, as at a coast (still drawn behind the main ground)', () => islSetSolid(true)],
+  ['ISLAND', 'The picked segment an island again: water passes through it', () => islSetSolid(false)],
 ]);
 // (user Oct 28, 20:23) whose a structure is: press its blue box, then an OWNER button (LEFT, RIGHT or NOBODY); its planes,
 // its tanks and helicopters (out of its hangar) are that side's wherever it stands. Kept with the boxes (bd_land_structs)
