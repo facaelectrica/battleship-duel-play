@@ -1212,7 +1212,6 @@ const inCountry = x => OWM && (x < SEA0 || x > SEA1);
 // the middle plane: solid for what flies and drives, the ships and the subs go through it - 50-land-islands)
 const onLand = x => OWM && (x < SEA0 || x > SEA1 || (ISLE !== null && ISLE[Math.floor(x / 2.5)] > 0));
 const isleCol = x => { if (ISLE === null) return false; const i = Math.floor(x / 2.5); return ISLE[i] === 2 && !(land.idry && land.idry[i]); };   // (a segment over dry land: its top is the ground - not behind the water)
-const isleAny = x => ISLE !== null && ISLE[Math.floor(x / 2.5)] === 2;   // (any segment's column, over water or land: nothing of the ground's own grows there)
 // (user Oct 28) the ground's own line out of the water at sea, `half` ahead of x going `dir`: a coast every boat stops or
 // turns at (an island line's island they go past)
 const coastAhead = (x, dir, half) => { if (ISLE === null) return false; const q = x + dir * half, i = Math.floor(q / 2.5); return ISLE[i] === 1 || !!(land.isolid && land.isolid[i]); };   // (or a SOLID segment - 50-land-islands, user Oct 31 20:03)
@@ -3239,8 +3238,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 450;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 20:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 451;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 20:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36369,6 +36368,73 @@ function islRootsBuild(R = land.R) {
     islRoots.push({ x0: c0 * LT_CELL, y0: r0 * LT_CELL, cv, my: Math.min(yB, WATER_Y + 400) });
   }
 }
+/* (user Oct 31 20:19: "Each segment should have its own grass and ground and everything... Including boulders" - "a forest
+   in front and the Mediterranean behind"; the forest's earth is rocks, the desert's (the Mediterranean) dry dark dirt, the
+   tropical's rocks and sand) a segment in a country takes its own skin - its pieces' FOREST / DESERT / SEA / TROPICAL; AUTO:
+   the ground's look there - whatever the ground in front is: land.iskin (0 AUTO, 1 F, 2 D, 3 S, 4 T) per column, its cells
+   (islCellM), its rows painted in its look (islPaintLook / islSegEndRow, paintLandChunk), its stones (islandStones) and
+   what grows on it (islandProps). Out at sea an island's columns are the ground's own, its skin their look already */
+const TROP_SAND = 22;                                         // (the tropical's band of sand under its grass, world units)
+const ISK = { F: 1, D: 2, S: 3, T: 4 };
+function islSkinCols() {
+  land.iskin = null;
+  if (ISLE === null || !land.itop) return;
+  const K = land.iskin = new Uint8Array(land.cols);
+  for (let c = 0; c < land.cols; c++) if (ISLE[c] === 2 && inCountry(c * LT_CELL)) K[c] = ISK[islSkinAt(c * LT_CELL)] || 0;
+}
+const islSkinC = c => land.iskin && c >= 0 && c < land.cols ? land.iskin[c] : 0;
+// a segment's cell dd under its top, by its skin (AUTO: as it always was - grass over earth, the ground's sandiness)
+function islCellM(c, dd, sandy) {
+  const k = islSkinC(c), g = ltGrassD(c) * LT_CELL;
+  if (k === 3) return M_ROCK;
+  if (k === 2) return dd < 24 ? M_SAND : M_DIRT;
+  if (k === 4) return dd < g ? M_GRASS : dd < g + TROP_SAND ? M_SAND : M_DIRT;
+  if (k === 1) return dd < g ? M_GRASS : M_DIRT;
+  return dd < g && sandy < 0.35 ? M_GRASS : M_DIRT;
+}
+// (paintLandChunk) the look a segment's rows are painted in (1 the desert's, 0 the rest), -1: the column's own
+const islPaintLook = c => { const k = islSkinC(c); return !k ? -1 : k === 2 ? 1 : 0; };
+// the first row under the segment's own earth: the ground in front's top (over land), the water's line (over a lake)
+const islSegEndRow = c => Math.min(Math.ceil((WATER_Y + 2 - LT_Y0) / LT_CELL), land.idry && land.idry[c] ? Math.ceil((land.surf[c] - LT_Y0) / LT_CELL) : 1e9);
+// a segment's look at x: the desert's, the tropical's
+const islDesert = x => { const k = islSkinC(ltCol(x)); return k ? k === 2 : lookD(x); };
+const islTropAt = x => { const k = islSkinC(ltCol(x)); return k ? k === 4 : landTrop(x); };
+// (buildLand, after buildStones) the stones of the segments in a country - in their own earth, never crossing into the
+// ground in front ("You can never slice a rock"): boulders half sunk in their tops (some standing half out), the earth
+// packed with stones; none in the desert's dry earth. Their own seed: nothing else moves
+function islandStones() {
+  if (!land.iskin || !land.islRuns || !land.islRuns.length) return;
+  const Rs = seededRng(5311), SS = NET.role === 'local' ? bgP('bgss', 1) : 1, SV2 = NET.role === 'local' ? bgP('bgsv', 1) : 1;
+  const bot = c => islSegEndRow(c) * LT_CELL + LT_Y0;
+  const own = (x, y, rx, ry) => { for (const u of [-1, -0.5, 0, 0.5, 1]) { const xx = x + u * rx, c = ltCol(xx); if (c < 0 || c >= land.cols || ISLE[c] !== 2 || !inCountry(xx) || y + ry + 3 > bot(c)) return false; } return true; };
+  const rocky = c => islSkinC(c) !== 2 && !(islSkinC(c) === 0 && lookD(c * LT_CELL));
+  for (const [a, b] of land.islRuns) {
+    if (!inCountry((a + b) / 2)) continue;                    // (out at sea: the ground's own packing has them)
+    for (let x = a + 40 + Rs() * 60; x < b - 40; x += 140 + Rs() * 180) {
+      const keep = Rs(), n = Rs() < 0.5 ? 1 : 2 + Math.floor(Rs() * 2);
+      if (keep < 0.2 || !rocky(ltCol(x))) continue;
+      for (let k = 0; k < n; k++) {
+        const rx = (8 + Rs() * 9) * (k ? 0.75 : 1) * boulderScale(Rs) * SS, ry = rx * (0.62 + Rs() * 0.18), bx = x + (k - (n - 1) / 2) * rx * 2.3 + Rs() * 4, c = ltCol(bx);
+        if (c < 0 || c >= land.cols || ISLE[c] !== 2) continue;
+        const top = land.itop[c], by = top + ry * (0.88 + Rs() * 0.14);
+        if (Rs() < 0.45 && rx > 9) { if (own(bx, top + ry * 0.35, rx * 1.15, ry * 1.1)) proudBoulder(bx, rx * 1.15, ry * 1.1, Rs); continue; }
+        const fy = sinkToFit(bx, by, rx, ry); if (fy != null && own(bx, fy, rx, ry) && stoneFree(bx, fy, rx, ry, 2)) addStone(bx, fy, rx, ry, true, false);
+      }
+    }
+    const cand = [];
+    for (let c = Math.max(0, Math.ceil(a / LT_CELL)); c < land.cols && c * LT_CELL < b; c += 2) {
+      if (!rocky(c)) continue;
+      const top = land.itop[c], dep = bot(c) - top; if (dep < 12) continue;
+      for (let q = 0; q < 14; q++) { const d = Math.pow(Rs(), 0.85) * dep, rx = 3 * SS * Math.pow(1 + 11 * SV2, Math.pow(Rs(), 0.9)) * (0.7 + 0.75 * Math.min(1, d / 250)); cand.push([c * LT_CELL + Rs() * 2 * LT_CELL, top + d, rx, rx * (0.66 + Rs() * 0.26), Rs()]); }
+      for (let q = 0; q < 12; q++) { const rx = (1.8 + Rs() * 2.8) * SS; cand.push([c * LT_CELL + Rs() * 2 * LT_CELL, top + Rs() * dep, rx, rx * (0.7 + Rs() * 0.25), Rs()]); }
+    }
+    cand.sort((p, q) => q[2] - p[2]);
+    for (const [x, y, rx, ry, g] of cand) {
+      if (!stoneFits(x, y, rx, ry) || !own(x, y, rx, ry) || !stoneFreeP(x, y, rx, ry, rx < 5 ? 0.5 : 0.7)) continue;
+      addStone(x, y, rx, ry, ltCell(ltCol(x), ltRow(y)) === M_ROCK || g < 0.06, false);
+    }
+  }
+}
 // (the sea's pass, 43-render-objects: after the far rows of the floor, before the floor in front) the islands, behind the
 // water: their roots, then their ground out of the water - the land's slices that hold an island's columns
 function drawIslands(x0, x1) {
@@ -36380,11 +36446,22 @@ function drawIslands(x0, x1) {
     // (hazed with the water's own colour, as the floor's far rows: it stands back, behind the water - the subs go through it)
     C.drawImage(sbTint(R.cv, seaTint(R.my, 1), R.my, 0.45), X0, Y0, X1 - X0, Y1 - Y0);
   }
+  C.imageSmoothingEnabled = ga;
+  drawIslChunks(x0, x1, false);
+}
+// the islands' ground out of the water - the land's slices that hold an island's columns: out at sea (sea: in the sea's
+// pass, behind the water) or in a country (land: in the land's pass, drawIslandsLand - user Oct 31 20:24: "the background
+// on the back is always relative to the main terrain" - the far trees, the mountains, the field behind it, then the
+// segment, then the ground in front)
+function drawIslChunks(x0, x1, inLand) {
+  if (!land.islRuns || !land.islRuns.length) return;
+  const ga = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
   const done = new Set();
-  for (const [a, b] of land.islRuns || []) {
+  for (const [a, b] of land.islRuns) {
     if (b < x0 || a > x1) continue;
     for (let k = Math.max(0, Math.floor(ltCol(Math.max(a, x0)) / LT_CHUNK)); k <= Math.min(land.dirty.length - 1, Math.floor(ltCol(Math.min(b, x1)) / LT_CHUNK)); k++) {
       if (done.has(k)) continue; done.add(k);
+      if (inCountry((k + 0.5) * LT_CHUNK * LT_CELL) !== inLand) continue;   // (a slice in a country: the land's pass)
       if (land.dirty[k] || !land.chunks[k]) { paintLandChunk(k); land.dirty[k] = 0; }
       if (land.seen) land.seen[k] = renderTick;            // (seen: kept - landEvict)
       const cv = land.ichunks && land.ichunks[k]; if (!cv) continue;
@@ -36394,8 +36471,9 @@ function drawIslands(x0, x1) {
     }
   }
   C.imageSmoothingEnabled = ga;
-  if (land.islRuns && land.islRuns.length) drawLandProps(x0, x1, true);   // (what grows on them, in their plane)
+  drawLandProps(x0, x1, inLand ? 'land' : 'sea');           // (what grows on them, in their plane)
 }
+const drawIslandsLand = (x0, x1) => drawIslChunks(x0, x1, true);
 // (user Oct 28) what grows on an island, by its look: the forest's trees on its gentle grass, the desert's scrub and cacti
 // (a palm now and then by the water) - each marked isl, drawn in the island's plane (drawIslands) and nowhere else; its own
 // seed, so nothing else moves
@@ -36406,7 +36484,9 @@ function islandProps() {
     for (let x = a + 40 + R() * 80; x < b - 40; x += 110 + R() * 220) {
       const pick = Math.floor(R() * 1000), s = 0.8 + R() * 0.35, flip = R() < 0.5, z = R(), roll = R();
       const t = landTop(x); if (Math.abs(landTop(x - 12) - landTop(x + 12)) > 12 || t > WATER_Y - 14) continue;   // (no steep bank, nothing at the water's edge)
-      if (lookD(x)) { const nearW = Math.min(x - a, b - x) < 260; land.props.push({ x, kind: nearW && roll < 0.5 ? 'palm' : roll < 0.25 ? 'cactus' : 'scrub', pick, s, flip, z, alive: true, isl: true }); }
+      if ((land.proud || []).some(([p, q]) => x > p - 10 && x < q + 10)) continue;   // (not on a boulder standing out of it)
+      if (islTropAt(x) && !islDesert(x)) { land.props.push({ x, kind: 'tree', trop: true, pick, s, flip, z, alive: true, isl: true }); continue; }   // (the tropical's: palms)
+      if (islDesert(x)) { const nearW = Math.min(x - a, b - x) < 260; land.props.push({ x, kind: nearW && roll < 0.5 ? 'palm' : roll < 0.25 ? 'cactus' : 'scrub', pick, s, flip, z, alive: true, isl: true }); }
       else if (ltCell(ltCol(x), ltRow(t + 1)) === M_GRASS || ltCell(ltCol(x), ltRow(t + 1)) === M_DIRT) land.props.push({ x, kind: 'tree', pick, s: s + 0.08, flip, z, alive: true, isl: true });
     }
   }
@@ -38085,7 +38165,7 @@ function buildDesertArt() {
 function buildLandProps() {
   land.props = [];
   const R = seededRng(8123), DL = (land.lakes || []).filter(l => lookD((l[0] + l[1]) / 2)), L = DL[0];   // (the oases: every lake whose ground looks the desert's - lookD)
-  const ok = x => onLand(x) && !isleAny(x) && !onApron(x) && Math.abs(x - padX(true)) > 260 && !(land.proud || []).some(([a, b]) => x > a - 6 && x < b + 6);
+  const ok = x => onLand(x) && !isleCol(x) && !onApron(x) && Math.abs(x - padX(true)) > 260 && !(land.proud || []).some(([a, b]) => x > a - 6 && x < b + 6);
   // palms round the oasis, on both its shores - on the dry bank, a little way up from the water (the kit's guide: "16
   // palms around the oasis, on both shores... concentrate them by water")
   // (user Oct 28: every oasis - the first as it was, any more with palms by their size: a pond two, a big one sixteen)
@@ -39126,9 +39206,9 @@ function forestTreeArt() {
 // near it, the launch pad, the lake, a rock face, a steep slope or the mountain's top by the tower)
 function buildForestTrees(R) {
   const air = AIR_W + 160, P = padX(false), P2 = padX(true);
-  const ok = x => onLand(x) && !isleAny(x) && !landTrop(x) && !towersUsed().some(t => Math.abs(x - towerDefX(t)) < 140) && !lookD(x) && apronD(x) > 120 && Math.abs(x - (lcRight(x) ? P2 : P)) > 300 && Math.abs(lcX(x) - LAND_TOWER_X) > 140 && !lakeAt(x) && !lakeAt(x - 30) && !lakeAt(x + 30)
-    && !(land.proud || []).some(([a, b]) => x > a - 10 && x < b + 10) && Math.abs(landTop(x - 12) - landTop(x + 12)) < 10
-    && [M_GRASS, M_DIRT].includes(ltCell(ltCol(x), ltRow(landTop(x) + 1)));
+  const ok = x => onLand(x) && !isleCol(x) && !landTrop(x) && !towersUsed().some(t => Math.abs(x - towerDefX(t)) < 140) && !lookD(x) && apronD(x) > 120 && Math.abs(x - (lcRight(x) ? P2 : P)) > 300 && Math.abs(lcX(x) - LAND_TOWER_X) > 140 && !lakeAt(x) && !lakeAt(x - 30) && !lakeAt(x + 30)
+    && !(land.proud || []).some(([a, b]) => x > a - 10 && x < b + 10) && Math.abs(frontTop(x - 12) - frontTop(x + 12)) < 10
+    && [M_GRASS, M_DIRT].includes(ltCell(ltCol(x), ltRow(frontTop(x) + 1)));   // (the ground in front's: under a segment over land too)
   tropPalms();                                                  // (the TROPICAL pieces: palms - their own seed)
   for (let x = 120 + R() * 100, end = structsDefault() ? SEA0 - air : SEA0 - 300; x < end; x += 150 + R() * 320) {   // (the airport moved inland: trees between it and the coast too)
     const n = R() < 0.3 ? 2 : 1;
@@ -39195,7 +39275,7 @@ function plantGeo(it) {
 // is (wx, wy) on a standing plant's picture?
 function plantSolidAt(it, wx, wy) {
   const G = plantGeo(it); if (!G) return false;
-  const foot = landTop(it.x) + G.sink, X0 = it.x - (it.flip ? G.w - G.fo : G.fo), Y0 = foot - G.h;
+  const foot = propTop(it) + G.sink, X0 = it.x - (it.flip ? G.w - G.fo : G.fo), Y0 = foot - G.h;
   if (wx < X0 || wx >= X0 + G.w || wy < Y0 || wy >= foot) return false;
   const im = it.leaf != null && it.leaf < 0.4 && G.bare ? G.bare : G.im;
   let px = Math.floor((wx - X0) / G.k); const py = Math.floor((wy - Y0) / G.k);
@@ -39210,7 +39290,7 @@ function buildPlants() {
   const add = it => { const c = Math.floor(it.x / PL_CELL); (PLT.grid[c] || (PLT.grid[c] = [])).push(it); };
   for (const it of land.props || []) {
     if (it.kind === 'rock') continue;
-    Object.assign(it, { pk: it.kind, state: 'stand', hp: PK[it.kind].hp, heat: 0, fire: 0, burnT: 0, burnMax: PK[it.kind].burn * (0.8 + 0.4 * hash(it.x * 0.13)), char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0, ph: hash(it.x * 0.37) * 6, gy: landTop(it.x) });
+    Object.assign(it, { pk: it.kind, state: 'stand', hp: PK[it.kind].hp, heat: 0, fire: 0, burnT: 0, burnMax: PK[it.kind].burn * (0.8 + 0.4 * hash(it.x * 0.13)), char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0, ph: hash(it.x * 0.37) * 6, gy: propTop(it) });
     add(it);
   }
   for (const t of land.tufts || []) { Object.assign(t, { pk: 'grass', hp: 1, heat: 0, fire: 0, burnT: 0, burnMax: PK.grass.burn * (0.8 + 0.4 * hash(t.x * 0.29)), char: 0, wet: 0, burnt: false }); add(t); }
@@ -39232,7 +39312,7 @@ function plantPerchY(p) {
   const it = p.plant, G = plantGeo(it); if (!G) return null;
   const T = crownTops(G.im), col = it.flip ? G.im.width - 1 - p.col : p.col, top = T[col];
   if (top >= G.im.height - 2) return null;
-  return landTop(it.x) + G.sink - G.h + top * G.k + 0.5;
+  return propTop(it) + G.sink - G.h + top * G.k + 0.5;
 }
 // (built with the plants, after the birds - buildWorld makes the birds first: some of the small birds move into the trees)
 function plantPerches() {
@@ -39307,7 +39387,7 @@ function treeClip(x, y, hw, hh, a) {
 }
 // the tree it hit: knocked over the way it was going, and alight
 function treeStruck(it, vx, heavy) {
-  const top = landTop(it.x), hh = plantH(it);
+  const top = propTop(it), hh = plantH(it);
   plantBits(it, it.x, top - hh * 0.7, heavy ? 18 : 12, vx * 0.3, true, 0.3);
   emit('scare', { x: it.x, y: top - hh * 0.7, r: 200, kind: 'birds' });
   if (heavy || plR() < 0.7) plantFell(it, Math.sign(vx) || 1); else it.hp = Math.max(1, it.hp - PK[it.pk].hp * 0.5);
@@ -39329,7 +39409,7 @@ function treeTopIn(x0, x1) {
   if (!PLT.grid.length) return Infinity;
   const a = Math.min(x0, x1), b = Math.max(x0, x1);
   let m = Infinity;
-  plantsNear((a + b) / 2, (b - a) / 2 + 60, it => { if ((it.pk === 'tree' || it.pk === 'palm') && plantUp(it)) m = Math.min(m, landTop(it.x) - plantH(it)); });
+  plantsNear((a + b) / 2, (b - a) / 2 + 60, it => { if ((it.pk === 'tree' || it.pk === 'palm') && plantUp(it)) m = Math.min(m, propTop(it) - plantH(it)); });
   return m;
 }
 const clearTop = (x, r) => Math.min(landTop(x), treeTopIn(x - (r || 40), x + (r || 40)), hangarTopIn(x - (r || 40), x + (r || 40)));   // (and the hangars: user Oct 29)
@@ -39362,7 +39442,7 @@ function plantBulletHit(b) {
     const L = PLT.grid[c]; if (!L) continue;
     for (const it of L) {
       if (!plantLive(it) || (it.pk !== 'grass' && !plantUp(it)) || Math.abs(it.x - b.x) > 80) continue;
-      const top = landTop(it.x), hh = plantH(it);
+      const top = propTop(it), hh = plantH(it);
       if (Math.max(y0, b.y) < top - hh - 4 || Math.min(y0, b.y) > top + 2) continue;
       for (let k = 1; k <= n; k++) {
         const u = k / n, x = x0 + (b.x - x0) * u, y = y0 + (b.y - y0) * u;
@@ -39373,10 +39453,10 @@ function plantBulletHit(b) {
   return false;
 }
 function plantRound(it, x, y, vx) {
-  emit('scare', { x, y, r: 60, kind: 'birds' }); if (it.pk !== 'grass') emit('scare', { x: it.x, y: landTop(it.x) - plantH(it) * 0.8, r: 120, kind: 'birds' });   // (the birds in it, whichever part was hit)
+  emit('scare', { x, y, r: 60, kind: 'birds' }); if (it.pk !== 'grass') emit('scare', { x: it.x, y: propTop(it) - plantH(it) * 0.8, r: 120, kind: 'birds' });   // (the birds in it, whichever part was hit)
   if (it.pk === 'grass') { cutTuft(it, vx * 0.05, false); return; }
   it.hp -= 1; it.shake = 1;
-  const top = landTop(it.x), crown = y < top - plantH(it) * 0.45;
+  const top = propTop(it), crown = y < top - plantH(it) * 0.45;
   plantBits(it, x, y, crown ? 3 : 2, -vx * 0.03, false, crown ? 0.15 : 0.85);
   if (it.hp <= 0) plantFell(it, Math.sign(vx) || 1);
 }
@@ -39388,7 +39468,7 @@ function plantShellHit(s) {
     const L = PLT.grid[c]; if (!L) continue;
     for (const it of L) {
       if (it.pk === 'grass' || it.pk === 'scrub' || !plantUp(it) || Math.abs(it.x - s.x) > 80) continue;
-      const top = landTop(it.x), hh = plantH(it);
+      const top = propTop(it), hh = plantH(it);
       if (Math.max(y0, s.y) < top - hh - 4 || Math.min(y0, s.y) > top + 2) continue;
       for (let k = 1; k <= n; k++) {
         const u = k / n, x = x0 + (s.x - x0) * u, y = y0 + (s.y - y0) * u;
@@ -39408,7 +39488,7 @@ function plantsBlast(x, y, r) {
   if (r >= 20 && onLand(x) && Math.abs(y - landTop(x)) < r && plR() < 0.7) { groundFire(x - r * 0.6, -1); groundFire(x + r * 0.6, 1); for (let c = ltCol(x - r * 0.6); c <= ltCol(x + r * 0.6); c++) if (c >= 0 && c < land.cols && grassTop(c * LT_CELL + 1)) PLT.scar[c] = Math.max(PLT.scar[c], 180); }
   plantsNear(x, r * 1.5 + 40, it => {
     if (!plantLive(it)) return;
-    const top = landTop(it.x), hh = it.state === 'stand' || it.pk === 'grass' ? plantH(it) : 8;
+    const top = propTop(it), hh = it.state === 'stand' || it.pk === 'grass' ? plantH(it) : 8;
     if (lakeAt(it.x)) return;
     // (the nearest point of it: its upright line from the foot to the top)
     const cy = clamp(y, top - hh, top), d = Math.hypot(it.x - x, cy - y), dir = Math.sign(it.x - x) || 1;
@@ -39434,14 +39514,14 @@ function plantsBlast(x, y, r) {
 function plantFell(it, dir) {
   if (it.state !== 'stand') return;
   if (it.pk === 'scrub') { plantGone(it); return; }
-  if (it.pk === 'cactus') { plantBits(it, it.x, landTop(it.x) - 12, 8, dir * 60, false, 0.2); }
+  if (it.pk === 'cactus') { plantBits(it, it.x, propTop(it) - 12, 8, dir * 60, false, 0.2); }
   it.state = 'fall'; it.fdir = dir; it.fa = 0; it.fav = 0.4; it.hp = 0;
-  emit('scare', { x: it.x, y: landTop(it.x) - plantH(it) * 0.6, r: 160, kind: 'birds' });
+  emit('scare', { x: it.x, y: propTop(it) - plantH(it) * 0.6, r: 160, kind: 'birds' });
 }
 function plantStump(it) { it.state = 'stump'; it.fa = 0; it.leaf = 0; if (it.burnT > it.burnMax * 0.5) it.burnT = it.burnMax * 0.5; }
 function plantGone(it) {
   if (it.pk === 'grass') { cutTuft(it, 0, true); return; }
-  plantBits(it, it.x, landTop(it.x) - 6, 8, 0, false);
+  plantBits(it, it.x, propTop(it) - 6, 8, 0, false);
   it.state = 'gone'; it.alive = false; plantOut(it, false);
 }
 
@@ -39456,7 +39536,7 @@ function plantIgnite(it, f) {
   if (it.fire > 0 || !plantLive(it) || it.burnT >= it.burnMax) return false;
   if (PLT.burning.length >= PL_MAX) { it.heat = PK[it.pk].ign; PLT.warm.add(it); return false; }   // (too many burning: it waits, hot)
   it.fire = f; it.heat = 0; PLT.warm.delete(it); PLT.burning.push(it);
-  if (it.pk !== 'grass') emit('scare', { x: it.x, y: landTop(it.x) - plantH(it) * 0.6, r: 160, kind: 'birds' });
+  if (it.pk !== 'grass') emit('scare', { x: it.x, y: propTop(it) - plantH(it) * 0.6, r: 160, kind: 'birds' });
   else { groundFire(it.x - 6, -1); groundFire(it.x + 6, 1); }   // (the grass round it catches: along the ground both ways)
   return true;
 }
@@ -39474,7 +39554,7 @@ function plantBurntOut(it) {
 // a plant's fire: where its flames come from (standing: up its picture - the crown while it has leaves; lying: along
 // its trunk; a stump: at the ground)
 function plantFirePoint(it) {
-  const top = landTop(it.x);
+  const top = propTop(it);
   if (it.pk === 'grass') return [it.x + plRnd(-5, 5) * it.s, top - plRnd(0, 8) * it.s];
   if (it.state === 'stump') return [it.x + plRnd(-4, 4), top - plRnd(0, 6)];
   const hh = plantH(it);
@@ -39490,7 +39570,7 @@ function plantsFromWrecks() {
     if (q.plant) continue;
     const mx = (q.x0 + q.x1) / 2; if (!dryLand(mx)) continue;
     const half = (q.x1 - q.x0) / 2 + 40;
-    plantsNear(mx, half, it => { const top = landTop(it.x); if (top < q.y0 - 40 || top > q.y1 + 60) return; plantHeat(it, q.k * 2.5 * 0.5); });
+    plantsNear(mx, half, it => { const top = propTop(it); if (top < q.y0 - 40 || top > q.y1 + 60) return; plantHeat(it, q.k * 2.5 * 0.5); });
   }
   for (const R of [false, true]) { const P = padRestOf(R), B = P.boom; if (B && B.t < 20) plantsNear(B.x, 140, it => plantHeat(it, 2)); }
 }
@@ -39528,8 +39608,8 @@ function stepPlants(dt) {
   for (const t of tanks) {
     if (!t || t.state !== 'alive') continue;
     plantsNear(t.x, TANK_L * 0.5 + 10, it => {
-      if (it.pk === 'grass' || !plantUp(it) || Math.abs(it.x - t.x) > TANK_L * 0.45 + 3 || Math.abs(landTop(it.x) - t.y) > 26) return;
-      plantBits(it, it.x, landTop(it.x) - 10, 5, t.vx, false, 0.6);
+      if (it.pk === 'grass' || !plantUp(it) || Math.abs(it.x - t.x) > TANK_L * 0.45 + 3 || Math.abs(propTop(it) - t.y) > 26) return;
+      plantBits(it, it.x, propTop(it) - 10, 5, t.vx, false, 0.6);
       if (it.pk === 'scrub') plantGone(it); else plantFell(it, Math.sign(t.vx) || t.facing || 1);
     });
   }
@@ -39537,7 +39617,7 @@ function stepPlants(dt) {
   // the ground dug from under one: it goes over (into the hole); a lying trunk or stump just goes down with the ground
   if (landWake.length) for (const w of landWake) plantsNear((w[0] + w[1]) / 2, (w[1] - w[0]) / 2 + 20, it => {
     if (it.pk === 'grass' || !plantUp(it)) return;
-    const g = landTop(it.x), l = landTop(it.x - 8), r = landTop(it.x + 8);
+    const g = propTop(it), l = landTop(it.x - 8), r = landTop(it.x + 8);
     if (it.gy == null) it.gy = g;
     if (g - it.gy > 10 || Math.abs(l - r) > 14) plantFell(it, l > r ? -1 : 1);
     it.gy = g;
@@ -39547,7 +39627,7 @@ function stepPlants(dt) {
     if (it.shake > 0) it.shake = Math.max(0, it.shake - dt * 3);
     if (it.wet > 0) it.wet -= dt * (1 + 2 * (1 - rain));
     if (it.state !== 'fall') continue;
-    const top = landTop(it.x), hh = plantH(it), dx = it.fdir * hh * 0.85, gt = onLand(it.x + dx) ? landTop(it.x + dx) : top;
+    const top = propTop(it), hh = plantH(it), dx = it.fdir * hh * 0.85, gt = onLand(it.x + dx) ? landTop(it.x + dx) : top;
     const want = Math.atan2(gt - top - 4, dx) + Math.PI / 2, aim = it.fdir * clamp(Math.abs(want > Math.PI ? want - 2 * Math.PI : want), 1.1, 2);   // (lying along the ground's slope, within reason)
     it.fav += dt * (2 + 7 * Math.abs(Math.sin(it.fa))); it.fa += it.fdir * it.fav * dt;
     if ((it.fa - aim) * it.fdir >= 0) {
@@ -39587,7 +39667,7 @@ function stepPlants(dt) {
   const T = PLT.acc; PLT.acc = 0;
   const rk = 1 - 0.9 * clamp(rain, 0, 1), heated = new Set();
   for (const it of PLT.burning) {
-    const K = PK[it.pk], top = landTop(it.x), lying = it.state === 'down';
+    const K = PK[it.pk], top = propTop(it), lying = it.state === 'down';
     const cx = lying ? it.x + Math.cos(it.fa - Math.PI / 2) * plantH(it) * 0.45 : it.x;
     plantsNear(cx, K.reach + 40 + (lying ? plantH(it) * 0.45 : 0), q => {
       if (q === it || q.fire > 0 || !plantLive(q)) return;
@@ -39606,7 +39686,7 @@ function stepPlants(dt) {
 // steams, and wet it won't catch again for a while
 function plantSpots(add) {
   for (const it of PLT.burning) {
-    const top = landTop(it.x), hh = it.state === 'stand' ? plantH(it) : it.state === 'down' ? 16 : 10;
+    const top = propTop(it), hh = it.state === 'stand' ? plantH(it) : it.state === 'down' ? 16 : 10;
     let x0 = it.x - 14, x1 = it.x + 14;
     if (it.state === 'down') { const ex = it.x + Math.cos(it.fa - Math.PI / 2) * plantH(it); x0 = Math.min(it.x, ex) - 6; x1 = Math.max(it.x, ex) + 6; }
     else if (it.state === 'stand' && it.pk !== 'grass') { const G = plantGeo(it); if (G) { x0 = it.x - G.w * 0.4; x1 = it.x + G.w * 0.4; } }
@@ -39633,6 +39713,9 @@ function drawScar(x0, x1) {
     C.fillStyle = 'rgba(52,38,24,0.55)'; C.fillRect(X, Math.round(PY(g + 2.5)), w, hp);
   }
 }
+// (user Oct 31) the ground a thing that grows stands on: a segment's own (isl), else the ground in front's - under a
+// segment over land, not on the segment's top behind it
+const propTop = it => it.isl ? landTop(it.x) : frontTop(it.x);
 function drawLandProps(x0, x1, isl) {
   if (!isl) drawScar(x0, x1);
   if (!land.props || !land.props.length) return;
@@ -39641,12 +39724,13 @@ function drawLandProps(x0, x1, isl) {
   const wnd = clamp((E.windU || 0) / 60, -1, 1);
   let lamps = 0;
   for (const it of land.props) {
-    if (it.x < x0 - 220 || it.x > x1 + 220 || lakeAt(it.x) || !it.isl !== !isl) continue;   // (an island's: drawn with it, behind the water)
+    if (it.x < x0 - 220 || it.x > x1 + 220 || lakeAt(it.x) || !it.isl !== !isl) continue;
+    if (isl && (isl === 'land') !== inCountry(it.x)) continue;   // (a segment's in a country: drawn in the land's pass - drawIslandsLand)   // (an island's: drawn with it, behind the water)
     if (it.kind === 'rock') {
       const arr = DA && DA.rockC; if (!arr || !arr.length || !it.alive) continue;
       const im = arr[it.pick % arr.length], k = desertArt.kit ? DESERT_PK : it.s / im.width;   // (a rock at its own pixel too)
       const w = Math.round(im.width * k * SV), h = Math.round(im.height * k * SV), fo = (im._fx != null ? im._fx / im.width : 0.5) * w;
-      const fX = Math.round(PX(it.x)), X = Math.round(fX - (it.flip ? w - fo : fo)), Y = Math.round(PY(landTop(it.x) + im.height * k * 0.28)) - h;
+      const fX = Math.round(PX(it.x)), X = Math.round(fX - (it.flip ? w - fo : fo)), Y = Math.round(PY(propTop(it) + im.height * k * 0.28)) - h;
       const t = GLR.on ? glTint(im, 'desF', fx, none, false) : im;
       if (it.flip) { C.save(); C.translate(X + w, 0); C.scale(-1, 1); C.drawImage(t, 0, Y, w, h); C.restore(); } else C.drawImage(t, X, Y, w, h);
       continue;
@@ -39654,7 +39738,7 @@ function drawLandProps(x0, x1, isl) {
     if (it.state === 'gone' || !it.pk) continue;
     const G = plantGeo(it); if (!G) continue;
     const im = G.im, bare = G.bare, k = G.k * SV, w = Math.round(im.width * k), h = Math.round(im.height * k), fo = (G.fo / G.k) * k;
-    const fX = Math.round(PX(it.x)), foot = Math.round(PY(landTop(it.x) + G.sink));
+    const fX = Math.round(PX(it.x)), foot = Math.round(PY(propTop(it) + G.sink));
     // its colour: the hour's light, darker as it chars; a little glow while it burns
     const ch = 1 - 0.78 * it.char, gl = it.fire > 0 ? 0.12 * it.fire * (0.8 + 0.2 * Math.sin(time * 13 + it.ph)) : 0;
     const mul = [fx[0] * ch, fx[1] * ch * (1 - 0.1 * it.char), fx[2] * ch * (1 - 0.2 * it.char)], add = [gl, gl * 0.4, 0];
@@ -39702,7 +39786,7 @@ function tropPalms() {
   const R3 = seededRng(9431);
   for (let x = 100 + R3() * 80; x < WORLD_W - 100; x += 110 + R3() * 260) {
     const pick = Math.floor(R3() * 1000), s = 0.85 + R3() * 0.3, flip = R3() < 0.5, z = R3();
-    if (!landTrop(x) || landTop(x) >= WATER_Y - 4 || lakeAt(x) || apronD(x) < 120 || Math.abs(landTop(x - 12) - landTop(x + 12)) > 12) continue;
+    if (!landTrop(x) || isleCol(x) || frontTop(x) >= WATER_Y - 4 || lakeAt(x) || apronD(x) < 120 || Math.abs(frontTop(x - 12) - frontTop(x + 12)) > 12) continue;   // (on the ground in front, under a segment over land too)
     land.props.push({ x, kind: 'tree', trop: true, pick, s, flip, z, alive: true });
   }
 }
@@ -42211,6 +42295,9 @@ function landTop(x) {
   if (land.topV[c] === v) return land.topC[c];
   const t = landBelow(x, -Infinity); land.topC[c] = t; land.topV[c] = v; return t;
 }
+// (user Oct 31) the ground in front's own top at x - under a segment over land (whose top is the ground there: landTop),
+// the main ground's, where what grows on it stands
+function frontTop(x) { const c = ltCol(x); if (!land.idry || c < 0 || c >= land.cols || !land.idry[c] || !land.surf) return landTop(x); return landBelow(x, LT_Y0 + Math.ceil((land.surf[c] - LT_Y0) / LT_CELL) * LT_CELL); }
 // what the ground's made of where a blast meets it (for its colour): sand, grass on top, or dirt
 function groundAt(x, y) { const c = ltCol(x), r = ltRow(landBelow(x, y - 6)); for (let q = 0; q < 4; q++) { const m = ltCell(c, r + q); if (m === M_SAND) return 'sand'; } return 'dirt'; }
 // the same past the world's ends, where the land is drawn mirrored (what rain and the eye meet there)
@@ -42231,6 +42318,7 @@ function buildLand() {
   land.lookP = null;
   land.look = new Uint8Array(land.cols); land.sea = new Uint8Array(land.cols); land.trop = new Uint8Array(land.cols); land.marked = false;   // (each column's look: 1 the desert's - lookD; sea: marked SEA)
   for (let c = 0; c < land.cols; c++) { const x = c * LT_CELL, sk = landSkinAt(x), own = ISLE !== null && ISLE[c] ? +(x > (SEA0 + SEA1) / 2) : +lcRight(x), d = sk === 'D' ? 1 : sk === 'F' || sk === 'T' ? 0 : own; land.look[c] = d; if (sk === 'T') { land.trop[c] = 1; land.marked = true; } if (sk === 'S') { land.sea[c] = 1; land.marked = true; } if (d !== own) land.marked = true; }   // (an island unmarked: the nearer coast's look; the sea's columns as they always were)
+  islSkinCols();                                            // (a segment in a country: its own skin, whatever the ground in front - 50-land-islands)
   const n = ltBands();                                      // (each slice's rows, from the shape)
   land.cell = new Uint8Array(n); land.scorch = new Uint8Array(n);
   land.prof0 = null;                                         // (the land as it was, for the LAND tab's line: made when asked)
@@ -42252,13 +42340,13 @@ function buildLand() {
     // it, then the column's own ground - the lake's bed - in front, as everywhere: one column, two grounds)
     for (let r = ltR0(c), r1 = rEnd; r < r1; r++) {
       const y = LT_Y0 + r * LT_CELL;
-      if (wetIsl && y >= land.itop[c] && r < rW && y < top) { land.cell[ltIdx(c, r)] = y < land.itop[c] + ltGrassD(c) * LT_CELL && sandy < 0.35 ? M_GRASS : M_DIRT; continue; }   // (y < top: over dry land the segment stops at the ground in front)
+      if (wetIsl && y >= land.itop[c] && r < rW && y < top) { land.cell[ltIdx(c, r)] = islCellM(c, y - land.itop[c], sandy); continue; }   // (y < top: over dry land the segment stops at the ground in front)
       if (y < top) continue;
       let m;
       if (y >= rockAt || (rocky > 0.5 && y < top + 60 + 40 * rocky)) m = M_ROCK;
       else if (apron && y < top + 8 * LT_CELL) m = M_CONC;          // (the airfield: slabs of concrete over the earth)
       else if (y < top + sandDepth) m = M_SAND;
-      else m = y < top + ltGrassD(c) * LT_CELL && sandy < 0.35 ? M_GRASS : M_DIRT;
+      else m = y < top + ltGrassD(c) * LT_CELL && sandy < 0.35 ? M_GRASS : land.trop[c] && y < top + ltGrassD(c) * LT_CELL + TROP_SAND ? M_SAND : M_DIRT;   // (user Oct 31 20:19: the tropical ground is rocks and sand - a band of sand under its grass, the rocks under that)
       land.cell[ltIdx(c, r)] = m;
     }
   }
@@ -42301,12 +42389,12 @@ function buildLand() {
   // (the ground's first top, humps and all, before anything is dug: the desert's crust and sand follow it - desertCell)
   land.top0 = new Float32Array(land.cols);
   for (let c = 0; c < land.cols; c++) { let r = ltR0(c); const r1 = ltR1(c); while (r < r1 && land.cell[ltIdx(c, r)] === M_AIR) r++; land.top0[c] = LT_Y0 + r * LT_CELL; }
-  btMark('land:fill'); buildStones(R); btMark('land:stones');
+  btMark('land:fill'); buildStones(R); islandStones(); btMark('land:stones');
   // boulders lying out on the field behind (further back: higher up the field and smaller)
   land.boulders = [];
   for (let i = 0; i < W / 240; i++) {
     const x = R0() * W, back = R0(), w = (30 + R0() * 50) * (1 - 0.4 * back);
-    if (!onLand(x) || isleAny(x) || apronD(x) < -40) continue;
+    if (!onLand(x) || isleCol(x) || apronD(x) < -40) continue;
     land.boulders.push({ x, w, h: w * (0.5 + R0() * 0.2), back, seed: R0() * 99 });
   }
   land.boulders = land.boulders.filter(b => lakeU(b.x) > 1.15 && Math.abs(b.x - padX(false)) > 380 && Math.abs(b.x - padX(true)) > 380);   // (none in the lake's bowl, none on the launch pads)
@@ -42804,12 +42892,15 @@ function paintLandChunk(k) {
   const put = (cx, cy, col, a = 255) => { if (cx < 0 || cx >= w || cy < 0 || cy >= h) return; const o = (cy * w + cx) * 4; d[o] = col[0]; d[o + 1] = col[1]; d[o + 2] = col[2]; d[o + 3] = a; };
   const DIST = ltDist(c0, w, rT, rB);
   for (let q = 0; q < w; q++) {
-    const c = c0 + q, DS = lookD(c * LT_CELL), SEAB = land.sea && land.sea[c] === 1 && land.surf[c] > WATER_Y + 1;
+    const c = c0 + q, L0 = land.look ? land.look[c] : 0, SL = islPaintLook(c), SE = SL < 0 ? -1e9 : islSegEndRow(c);   // (a segment in a country: its rows over SE in its own look - 50-land-islands)
+    let DS = lookD(c * LT_CELL), SEAB = land.sea && land.sea[c] === 1 && land.surf[c] > WATER_Y + 1;
     let depth = 0;
     for (let r = rT; r < rB; r++) {
+      if (SE > -1e9) { const lk = r < SE ? SL : L0; if (land.look[c] !== lk) { land.look[c] = lk; DS = lk === 1; } SEAB = r >= SE && land.sea[c] === 1 && land.surf[c] > WATER_Y + 1; }
       const i = ltIdx(c, r), m = land.cell[i];
       if (m === M_AIR) { depth = 0; continue; }
-      const up = r > rT ? land.cell[i - w] : M_AIR, dn = r < rB - 1 ? land.cell[i + w] : M_ROCK;
+      if (r === SE) depth = 0;                                  // (the ground in front's top under a segment over land: its own top - grass, light, no fade)
+      const up = r > rT && r !== SE ? land.cell[i - w] : M_AIR, dn = r < rB - 1 ? land.cell[i + w] : M_ROCK;
       const lf = ltCell(c - 1, r), rt = ltCell(c + 1, r);
       const P = ltPal(m, c), hsh = hash(c * 1.37 + r * 7.91);
       let col;
@@ -42858,7 +42949,7 @@ function paintLandChunk(k) {
       const sc = land.scorch[i] / 255;
       col = [col[0] * k2 * (1 - 0.72 * sc) + 14 * sc, col[1] * k2 * (1 - 0.75 * sc) + 10 * sc, col[2] * k2 * (1 - 0.75 * sc) + 8 * sc];
       // (user Oct 25, their picture: the earth fades to black going down, in steps, as pixel art shades)
-      const fd = ltFadeAt(DIST.d[(r - rT) * DIST.W + q + DIST.M] * LT_CELL, c, r);
+      const fd = ltFadeAt((r >= SE ? Math.min(DIST.d[(r - rT) * DIST.W + q + DIST.M], r - SE) : DIST.d[(r - rT) * DIST.W + q + DIST.M]) * LT_CELL, c, r);   // (under a segment: from the ground in front's own top)
       if (fd > 0) col = mix3(col, DS ? LT_DEEP_D : LT_DEEP, fd);
       put(q, r + T4, col);
       depth++;
@@ -42868,6 +42959,7 @@ function paintLandChunk(k) {
         for (let b = 1; b <= bl; b++) put(q, r + T4 - b, gc.map(v => v * (1 - b * 0.06)));
       }
     }
+    if (SE > -1e9) land.look[c] = L0;                         // (the column's own look back)
   }
   islSplitChunk(k, id, w, h);                             // (an island's columns: into its own canvas, drawn behind the water - 50-land-islands)
   x.putImageData(id, 0, 0);
@@ -43033,6 +43125,7 @@ function drawLandGround(x0, x1, onField) {
   for (const [k, xl, flip] of list) { if (!land.back[k]) paintLandBack(k); put(land.back[k], xl, flip, k); }
   if (EXT_L + EXT_R) { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; if (renderTick % 300 === 0) landEvict(); }   // (the world made bigger: far slices' pictures let go)
   if (onField) onField();                                 // (what stands on the field behind: in front of it, behind the ground)
+  drawIslandsLand(x0, x1);                                // (the segments in a country: behind the ground in front, in front of what's behind - 50-land-islands)
   { const sc = bgP('bgsc', 1) + ',' + ugReach(); if (land.ssig !== sc) { if (land.ssig !== undefined) land.dirty.fill(1); land.ssig = sc; } }   // (STONE COLOURS or UNDERGROUND LIGHT moved: the ground painted again)
   for (const [k, xl, flip] of list) {
     if (land.dirty[k] || !land.chunks[k]) { paintLandChunk(k); land.dirty[k] = 0; }
