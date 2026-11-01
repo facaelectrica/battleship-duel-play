@@ -3439,8 +3439,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 472;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 21:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 473;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 22:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -34119,13 +34119,14 @@ function stepCivHeli(h, dt) {
       { const [fy, dc] = chUnder(h); if (h.deck && dc !== h.deck) { h.deck = null; h.state = 'fall'; h.vx = 0; h.vy = 0; h.spinV = chRnd(-0.4, 0.4); return; } h.y = fy - chStand(h); }   // (she gone from under it: in it goes)
       h.spin = Math.max(0, h.spin - dt * 0.4); h.gear = 1; susStep(h, dt, CH_SUS_K, CH_SUS_C);
       civLoadHome(h, mine, dt);
-      if (mine) { if (civStick(h.driven) < -0.2 || Math.abs(h.cin || 0) > 0.2) h.state = 'landed'; }
+      if (mine) { if ((civStick(h.driven) < -0.2 || Math.abs(h.cin || 0) > 0.2) && !(h.story && h.fuel <= 0)) h.state = 'landed'; }
       else { h.wait -= dt; if (h.wait <= 0) { if (civHelis.some(o => o !== h && o.R === h.R && (o.state === 'fly' || (o.state === 'landed' && o.ai)) && o.driven == null)) h.wait = chRnd(15, 40); else { h.state = 'landed'; civHeliTrip(h); } } }   // (one up at a time on each side, user Oct 26: "too many helicopters in the air")
       civHeliHits(h);
       return;
     }
     // spinning up on the ground ('landed') or flying: the lever and the stick (yours, or its plan's)
     let [lever, stick] = mine ? [h.cin || 0, civStick(h.driven)] : civHeliPlan(h, dt);
+    if (mine && h.story && h.fuel <= 0) { lever = 0; stick = Math.max(stick, 0.6); }   // (STORY: out of fuel - no lift, down it comes - 50-story-helis.js)
     if (h.state === 'landed' && h.deck) h.x += h.deck.dx || 0;     // (down on a ship: it goes with her)
     const [fy, deckC] = chUnder(h), gy = fy - chStand(h);
     if (h.state === 'landed' && h.deck && deckC !== h.deck) { h.deck = null; h.state = 'fly'; }   // (she gone from under it)
@@ -47881,6 +47882,57 @@ function drawStoryCars(x0, x1) {
 }
 
 /* ================================================================
+   STORY's HELICOPTERS (the spec's vehicles at structures; user Oct 31 22:05: helicopters next). A structure that TAKES HELIS
+   holds helicopters in its spots (STR_VEHS fam 'heli' - the civilian helicopters' kinds, ch): civilian helicopter rows (the
+   civHelis table, newCivHeli) with the story vehicles' fields and heli: true, standing at their spot (state 'parked': on
+   its wheels, its rotor still, never off on a trip of its own - wait). Boarded (storyBoard), it flies as any taken civilian
+   helicopter (stepCivHeli: the stick lifts it, its wheels, landing on anything); set down by a structure that takes
+   helicopters, its dot parks it there (storyParks / storyPark). Left landed anywhere, it stays there. Fuel as the boats'
+   (FUEL_S of flying; empty: no lift - it comes down), refuelled and mended at its structure as they are; lost, the same
+   one there again for sale the next morning. In STORY no other civilian helicopter flies.
+   ================================================================ */
+function storyHelisBuild() {
+  for (let i = civHelis.length - 1; i >= 0; i--) if (civHelis[i].story || STORY) civHelis.splice(i, 1);
+  let k = 3000;
+  for (const o of strsUsed().filter(o => (strTakes(o) || []).includes('heli'))) {
+    const V = strVehs(o);
+    for (let i = 0; i < storyBerths(o); i++) {
+      const e = V[i], D = e && STR_VEHS[e.v]; if (!D || D.fam !== 'heli') continue;
+      civHelis.push(storyHeliNew(o, i, D, e.v, ++k, !!e.own));
+    }
+  }
+}
+function storyHeliNew(o, i, D, sv, sid, own) {
+  const x = storySpotX(o, i), R = x > (SEA0 + SEA1) / 2, h = newCivHeli(D.ch, x, R, 0);
+  return Object.assign(h, { story: true, heli: true, sid, own, price: D.price, sv, berth: o.id, spot: i, hb: o.id, hs: i, fuel: 1, hp: 2, home: x, wait: 1e12, facing: o.flip ? -1 : 1, y: landTop(x) - chStand(h) });
+}
+const storyHeliAlive = h => h.state === 'parked' || h.state === 'landed' || h.state === 'fly';
+// each step (stepStory): left on the ground, it stays there; its fuel; refuelled, mended at its structure; lost - again
+// the next morning
+function storyHelis(dt) {
+  let top = 3000; for (const h of civHelis) if (h.story) top = Math.max(top, h.sid || 0);
+  for (const h of civHelis) {
+    if (!h.story) continue;
+    if (storyHeliAlive(h)) {
+      if (h.driven == null && h.state === 'landed') { h.state = 'parked'; h.ai = null; }   // (nobody aboard: it waits where it is)
+      h.wait = 1e12;
+      if (h.driven != null && h.state === 'fly') h.fuel = Math.max(0, (h.fuel ?? 1) - dt / FUEL_S);
+      const o = h.berth != null && h.driven == null ? strsUsed().find(q => q.id === h.berth) : null;
+      if (o && o.ref && h.fuel < 1) h.fuel = Math.min(1, h.fuel + dt / REFUEL_S);
+      if (o && o.rep && h.dmg > 0) { if (h.fixDay == null) h.fixDay = W.day + 1; else if (W.day >= h.fixDay && env.time >= STORY_WAKE_H) { h.dmg = 0; h.fixDay = null; } }
+      continue;
+    }
+    if (h.lostT == null) { h.lostT = time; h.lostDay = W.day; h.own = false; h.berth = null; }
+    if (!h.renewed && W.day > h.lostDay && env.time >= STORY_WAKE_H) {
+      const o = strsUsed().find(q => q.id === h.hb), D = STR_VEHS[h.sv];
+      if (!o || !D) { h.renewed = true; continue; }
+      if (civHelis.some(q => q.story && storyHeliAlive(q) && q.berth === o.id && q.spot === h.hs)) continue;   // (its spot taken: later)
+      civHelis.push(storyHeliNew(o, h.hs, D, h.sv, ++top, false)); h.renewed = true;
+    }
+  }
+}
+
+/* ================================================================
    STORY's PLANES (user Oct 31 09:31: "if you go to an hangar, you can select a plane, but it will show you the cost of that
    plane. If you have that money ... then that plane becomes yours"; 09:32: "the Cessna costs 100 coins"; the spec section 2:
    "Aircraft hangar - can store many planes, such as ten Cessnas, provided each plane fits through the entrance. They do not
@@ -48194,7 +48246,7 @@ ACTS.storyGo = (p, id) => storyGo(p, id);
 const STORY_PARK_M = 15;                                 // (how far past a structure's ends you can still tie up to it)
 const storyBerths = o => Math.max(1, o.n ?? (strVehs(o).length || 1));
 function storySpotX(o, i) { const B = strBox(o); return B.x0 + (i + 0.5) * (B.x1 - B.x0) / storyBerths(o); }
-const storyVehs = () => jetboats.filter(j => j.story && j.state === 'run').concat(storyCars.filter(c => c.state === 'run'), traffic.filter(f => f.story && (f.state === 'parked' || f.state === 'free')), shuttles.filter(v => v.story && shuttleAlive(v)));   // (the boats, the cars, the planes)   // (the boats and the cars - 50-story-cars.js)
+const storyVehs = () => jetboats.filter(j => j.story && j.state === 'run').concat(storyCars.filter(c => c.state === 'run'), traffic.filter(f => f.story && (f.state === 'parked' || f.state === 'free')), shuttles.filter(v => v.story && shuttleAlive(v)), civHelis.filter(h => h.story && storyHeliAlive(h)));   // (and the helicopters - 50-story-helis.js)   // (the boats, the cars, the planes)   // (the boats and the cars - 50-story-cars.js)
 function storyBoats() {
   if (!STORY) return;
   const home = storyHome(), hx = home ? home.x : 0;
@@ -48206,7 +48258,7 @@ function storyBoats() {
     for (let i = 0; i < storyBerths(o); i++) { const e = V[i], D = e && STR_VEHS[e.v]; if (D && D.fam === 'car') storyCars.push(newStoryCar({ sid: 1000 + (++k), own: !!e.own, rt: e.rt || null, price: D.price, sv: e.v, art: D.art, berth: o.id, spot: i, hb: o.id, hs: i, x: storySpotX(o, i), dir: o.flip ? 1 : -1 })); }
   }
   owned = storyCars.some(c => c.own);
-  storyPlanesBuild(); owned = owned || traffic.some(f => f.story && f.own);
+  storyPlanesBuild(); storyHelisBuild(); owned = owned || traffic.some(f => f.story && f.own) || civHelis.some(h => h.story && h.own);
   for (const o of L) {
     const V = strVehs(o);
     for (let i = 0; i < storyBerths(o); i++) {
@@ -48230,8 +48282,9 @@ function storyBoard(p, sid) {
 }
 // the structures the vehicle you drive can tie up at now: they take its kind, it's slow, it's by them
 function storyParks(v) {
-  if (!v || !v.story || v.state !== 'run' || v.plane) return [];   // (sinking: nowhere to tie up; a plane parks by taxiing into its hangar)
-  if (Math.abs(v.vDrive || 0) > v.v * 0.35 || v.turn > 0 || v.air) return [];
+  if (!v || !v.story || v.plane) return [];   // (a plane parks by taxiing into its hangar)
+  if (v.heli ? !(v.state === 'landed' || v.state === 'parked') : v.state !== 'run') return [];   // (sinking: nowhere to tie up; a helicopter: set down)
+  if (!v.heli && (Math.abs(v.vDrive || 0) > v.v * 0.35 || v.turn > 0 || v.air)) return [];
   const cat = civCat(v);
   const len = storyBoatSize(v)[0] / UPM;
   return strsUsed().filter(o => { if (!(strTakes(o) || []).includes(cat) || len > strMaxL(o) || !strAllows(o, v.sv)) return false; const B = strBox(o), r = STORY_PARK_M * UPM; return v.x > B.x0 - r && v.x < B.x1 + r; });
@@ -48243,6 +48296,7 @@ function storyPark(p, id) {
   for (let i = 0; i < storyBerths(o); i++) if (!used.has(i)) { const d = Math.abs(storySpotX(o, i) - v.x); if (d < bd) { bd = d; best = i; } }
   if (best < 0) { sound('empty', v.x); return; }                         // (every berth taken)
   v.berth = o.id; v.spot = best; v.x = storySpotX(o, best); v.drv = 0; v.vDrive = 0; v.cin = 0; v.turn = 0;
+  if (v.heli) { v.state = 'parked'; v.ai = null; v.home = v.x; }   // (a helicopter: on its spot, rotor winding down)
   setOrder(telegraphs[p], 3); civRelease(p); civUI[p] = true;
   storySellFish(v, o);                                   // (ACCEPTS FISH: the catch sold)
   storyGo(p, o.id, true); sound('click', gunCtl[p]);
@@ -48252,7 +48306,7 @@ ACTS.storyPark = (p, id) => storyPark(p, id);
 // a fishing boat drawn (drawJetboats - 50-land-traffic.js): the tropical set's picture at its own metres, riding the water,
 // swinging round through a narrow side-on when it turns
 const STORY_BOAT_ART = ['fishing-boat-red', 'fishing-boat-teal'];
-function storyBoatSize(j) { if (j.car) return storyCarSize(j); if (j.plane) return [10 * UPM, 3 * UPM, null]; if (j.kind === 'shuttle') return [8 * UPM, 40 * UPM, null]; if (j.kind !== 'fish') return [(j.kind === 'motor' ? 4.3 : 3.5) * UPM, 3 * UPM, null]; const P = tropPic(STORY_BOAT_ART[(j.col | 0) % 2]); return P ? [P.width * P._m * UPM, P.height * P._m * UPM, P] : [11 * UPM, 7 * UPM, null]; }
+function storyBoatSize(j) { if (j.car) return storyCarSize(j); if (j.heli) return [chHalf(j) * 2, chSkid(j) * 2, null]; if (j.plane) return [10 * UPM, 3 * UPM, null]; if (j.kind === 'shuttle') return [8 * UPM, 40 * UPM, null]; if (j.kind !== 'fish') return [(j.kind === 'motor' ? 4.3 : 3.5) * UPM, 3 * UPM, null]; const P = tropPic(STORY_BOAT_ART[(j.col | 0) % 2]); return P ? [P.width * P._m * UPM, P.height * P._m * UPM, P] : [11 * UPM, 7 * UPM, null]; }
 function drawFishBoat(j) {
   const [w, h, P] = storyBoatSize(j); if (!P) return;   // (the tropical sheet not loaded yet)
   const u = j.turn > 0 ? j.turn / JB_TURN : 0, sq = j.turn > 0 ? Math.max(0.15, Math.abs(Math.cos(Math.PI * u))) : 1;
@@ -48618,7 +48672,7 @@ function storyNPC(dt) {
 }
 function stepStory(dt) {
   if (!STORY) return;
-  storyNPC(dt); storyLosses(); storyNets(dt); storyFuel(dt); storyGive(dt); storyRescue(dt); stepStoryCars(dt);
+  storyNPC(dt); storyLosses(); storyNets(dt); storyFuel(dt); storyGive(dt); storyRescue(dt); stepStoryCars(dt); storyHelis(dt);
   if (!story.wake) return;
   stepWeather(dt * (STORY_SLEEP_X - 1));                 // (the clock, the sky and the weather run on: the frame's own step is the 1)
   if (W.day >= story.wake && env.time >= STORY_WAKE_H && env.time < 12) { story.wake = 0; story.saveN++; }
@@ -49300,7 +49354,17 @@ const STR_VEHS = {
   dumpTruck: { lab: 'DUMP TRUCK', fam: 'car', art: 'dump_truck', price: 60 }, cityBus: { lab: 'CITY BUS', fam: 'car', art: 'city_bus', price: 70 },
   schoolBus: { lab: 'SCHOOL BUS', fam: 'car', art: 'school_bus', price: 65 },
   shuttle: { lab: 'SHUTTLE (ROCKET)', fam: 'space', price: 600 },   // (the rocket with the shuttle on it - stands on a LAUNCH PAD)
-  cessna: { lab: 'CESSNA', fam: 'plane', price: 100 },     // (the user, 09:32: a Cessna 100 coins - 50-story-planes.js)
+  cessna: { lab: 'CESSNA', fam: 'plane', price: 100 },
+  // (STORY's helicopters - 50-story-helis.js: the civilian helicopters' kinds, chArt: 6 Bell 206, 9 MD 500, 10 tour EC130,
+  // 11 EC135, 2 police Bell 429, 4 the red Dauphin with its water cannon, 5 VIP AW139, 0 Chinook)
+  heliMD500: { lab: 'MD 500', fam: 'heli', ch: 9, price: 120 },
+  heliBell206: { lab: 'BELL 206', fam: 'heli', ch: 6, price: 150 },
+  heliTour: { lab: 'TOUR (EC130)', fam: 'heli', ch: 10, price: 200 },
+  heliEC135: { lab: 'EC135', fam: 'heli', ch: 11, price: 220 },
+  heliPolice: { lab: 'POLICE (BELL 429)', fam: 'heli', ch: 2, price: 250 },
+  heliFire: { lab: 'FIRE (DAUPHIN)', fam: 'heli', ch: 4, price: 300 },
+  heliVIP: { lab: 'VIP (AW139)', fam: 'heli', ch: 5, price: 400 },
+  heliChinook: { lab: 'CHINOOK', fam: 'heli', ch: 0, price: 800 },     // (the user, 09:32: a Cessna 100 coins - 50-story-planes.js)
 };
 // the vehicle types a structure accepts (its RESTRICT switch on: only its kind's own - fire engines at a fire station...)
 const STR_FACTIONS = [['', 'NONE'], ['civ1', 'CIV 1'], ['civ2', 'CIV 2']];
