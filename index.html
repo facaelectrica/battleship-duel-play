@@ -373,6 +373,60 @@ function swHostResync(m) {
   SWH.t0 = performance.now() - SWH.done * SUBSTEP * 1000;            // (no catching up on the time the rebuild took)
 }
 
+/* ---- TWO WORLDS (user Oct 31 20:41: "maybe story world should be a separate world from open world. Open world is more of a
+   'everything' smashed together and I will be more tailored in the story mode. But I don't want to lose the open one (and
+   battle mode uses it). So let's have a separate world for story"). Everything the editors keep of a world in this browser
+   (WORLD_KEYS: the ground, the segments, the structures, the docks, the towers, the weather areas, the wrecks, the sky's and
+   the background's settings...) has a second copy for STORY, under bd_sw_ in place of bd_. Which one the game reads is set
+   before anything loads (bd_world: 'story', or none - the open world, OPEN WORLD, BATTLE and the rest): here, first of all,
+   every read and write of a world key is sent to the Story copy when the Story world is the one loaded - on the page and in
+   the simulation worker alike (its localStorage is the page's, copied - 00-sw-boot.js), so every file reads its own key as
+   it always did. Changing worlds reloads the page (worldSwitch, from menuPlay): nothing of one world stays in the other.
+   The Story copy starts as the open world as it was the first time STORY is chosen. ---- */
+const WORLD_KEYS = ['bd_dock_own', 'bd_docks', 'bd_docks_x', 'bd_floor_pts', 'bd_ground', 'bd_islands', 'bd_kraken_dy', 'bd_kraken_u', 'bd_land_pts', 'bd_land_structs', 'bd_land_towers', 'bd_structs', 'bd_stretch', 'bd_weather_areas', 'bd_world_ext', 'bd_wrecks', 'bd_sky_colours', 'bd_sky_p', 'bd_nature', 'bd_grade'];
+const swKey = k => 'bd_sw_' + k.slice(3);
+const STORY_WORLD = (() => { try { return localStorage.getItem('bd_world') === 'story'; } catch (e) { return false; } })();
+(function worldShim() {
+  if (!STORY_WORLD) return;
+  const map = k => typeof k === 'string' && WORLD_KEYS.includes(k) ? swKey(k) : k;
+  try {
+    const LS = localStorage;
+    if (typeof Storage !== 'undefined' && LS instanceof Storage) {
+      const P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
+      P.getItem = function (k) { return g.call(this, this === LS ? map(k) : k); };
+      P.setItem = function (k, v) { return s.call(this, this === LS ? map(k) : k, v); };
+      P.removeItem = function (k) { return r.call(this, this === LS ? map(k) : k); };
+    } else {                                                     // (the worker's stand-in: a plain object)
+      const g = LS.getItem, s = LS.setItem, r = LS.removeItem;
+      LS.getItem = k => g(map(k)); LS.setItem = (k, v) => s(map(k), v); LS.removeItem = k => r(map(k));
+    }
+  } catch (e) { }
+})();
+// the world a menu mode plays in
+const worldOfMode = m => m === 'story' ? 'story' : 'open';
+// (menuPlay) the mode picked wants the other world: its keys made (the first time: the open world's, copied), the choice
+// kept, the page loaded again - and on it, the menu where it was (worldResume)
+function worldSwitch(mode) {
+  try {
+    if (mode === 'story') {
+      if (!localStorage.getItem('bd_sw_init')) { for (const k of WORLD_KEYS) { const v = localStorage.getItem(k); if (v != null) localStorage.setItem(swKey(k), v); } localStorage.setItem('bd_sw_init', '1'); }
+      localStorage.setItem('bd_world', 'story');
+    } else localStorage.removeItem('bd_world');
+    sessionStorage.setItem('bd_world_go', mode);
+  } catch (e) { return false; }
+  location.reload();
+  return true;
+}
+function worldNeedsSwitch(mode) { return !SW_IN_WORKER && worldOfMode(mode) !== (STORY_WORLD ? 'story' : 'open'); }
+// after the reload: the mode picked again, and STORY's slots open
+function worldResume() {
+  let m = null; try { m = sessionStorage.getItem('bd_world_go'); sessionStorage.removeItem('bd_world_go'); } catch (e) { }
+  if (!m || worldNeedsSwitch(m)) return;
+  menuSel.mode = m;
+  if (m === 'story') { SSL.open = true; SSL.confirm = null; SSL.sel = 0; }
+  else showToast('OPEN WORLD LOADED - PRESS PLAY');
+}
+
 /* ================================================================
    Assets (cut out from the supplied art)
    ================================================================ */
@@ -3238,8 +3292,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 452;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 20:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 453;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 20:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -5346,6 +5400,7 @@ function menuApply() {
 // PLAY: a new round as the menu has it (load: pressed on the menu - LOADING... first, loadThen)
 function menuPlay(load) {
   if (NET.role === 'guest' || joinedRoom()) return;
+  if (worldNeedsSwitch(menuSel.mode)) { worldSwitch(menuSel.mode); return; }   // (STORY plays in its own world, the rest in the open one: the page loaded again in it - 00-world.js)
   if (storySlotsFirst()) return;                        // (STORY: its five save slots first - 50-story-saves.js)
   // (BATTLE: nobody here or online has picked a side - it would be the CPU against itself. Anyone left in the middle
   // just sits this one out: user Oct 25, the keyboard showed in the middle and the game wouldn't start)
@@ -24377,6 +24432,15 @@ function drawMidSea() {
   C.fillStyle = crest;
   for (let i = 0; i < crests.length; i += 3) { const w = crests[i + 2]; if (w < 0) C.fillRect(crests[i], crests[i + 1], -w, 2); else C.fillRect(crests[i], crests[i + 1], w, 1); }
 }
+/* (user's spec, Oct 31 - "When zoomed out and above water, the ocean should appear dark like the ground, but with a bit
+   more visibility"; given to the Story chat by the 60-fps chat, 20:55) how dark the water's body is for this view's zoom: 0 at
+   the usual zoom and nearer, SEA_DARK_MAX from SEA_DARK_Z out - read once a frame by the water's colours (seaDeepStops,
+   seaOverStops: 44-shadows-seafloor.js), one rule for every view. Its colour SEA_DARK_C: nearly the ground's black, a
+   little blue left in it */
+const SEA_DARK_MAX = 0.74, SEA_DARK_Z = 0.42, SEA_DARK_C = [5, 12, 26];
+function seaZoomDark() { const v = cam.view[viewIdx] || cam.view[0], z = v ? v.z : ZOOM_DEFAULT; return SEA_DARK_MAX * smoothstep(ZOOM_DEFAULT * 0.92, SEA_DARK_Z, z); }
+// a stop's colour (and alpha) darkened by d, k of the way: the very top of the water left as it is (its line still reads)
+const seaDarkC = (c, k) => k <= 0 ? c : c.map((v, j) => j < 3 ? v + (SEA_DARK_C[j] - v) * k : v);
 function drawFarSea() {
   const Lp = -SHX - 2, Wp = VWP + 4, ss = E.sunset, nt = E.night * (1 - E.fog), fg = E.fog;
   const hz = PY(HZ_Y()), hb = PY(WATER_Y + 26);
@@ -26136,12 +26200,22 @@ function sgStops(st, t) {
 // laid over everything in it. (User Oct 25, with a picture: from the harbour's floor on down a fairly even clear
 // blue, so the rocks and the layers behind them read, rather than sinking into a near-black)
 function seaDeepStops(ss, dz) {
-  const m = (a, b) => mix3(a, b, ss);
+  const m = (a, b) => mix3(a, b, ss), d = seaZoomDark();
+  if (d > 0) return seaDeepStops0(m, dz).map(([t, c]) => [t, seaDarkC(c, d * smoothstep(0, 0.05, t))]);   // (zoomed out: dark like the ground - seaZoomDark, 42-render-sky.js)
+  return seaDeepStops0(m, dz);
+}
+function seaDeepStops0(m, dz) {
   return [[0, m([45, 139, 240], [92, 80, 160])], [0.18 * dz, m([35, 120, 230], [70, 70, 150])], [0.5 * dz, m([24, 88, 198], [48, 52, 124])], [0.8 * dz, m([20, 72, 168], [40, 42, 108])],
     [dz, m([16, 60, 140], [30, 30, 84])], [dz + (1 - dz) * 0.55, m([16, 58, 140], [24, 24, 70])], [1, m([15, 54, 132], [20, 20, 62])]];
 }
 function seaOverStops(sso, ov, oz) {
-  const mo = (a, b, al) => mix3(a, b, sso).concat([al]);
+  const mo = (a, b, al) => mix3(a, b, sso).concat([al]), d = seaZoomDark();
+  const L = seaOverStops0(mo, ov, oz);
+  if (!(d > 0)) return L;
+  const t0 = 12 / (SEABED_DEEP + 150 - WATER_Y + 12);        // (the water's line on this gradient: above it nothing changes)
+  return L.map(([t, c]) => { const k = d * smoothstep(t0, t0 + 0.05, t), o = seaDarkC(c, k); o[3] = c[3] + (0.86 - c[3]) * k * 0.75; return [t, o]; });   // (zoomed out: everything in the water darker too, still seen)
+}
+function seaOverStops0(mo, ov, oz) {
   return [[0, mo([70, 160, 255], [150, 100, 170], 0.3 + ov)], [0.35 * oz, mo([30, 100, 220], [90, 70, 150], 0.4 + ov)], [0.75 * oz, mo([16, 58, 160], [44, 40, 104], 0.52 + ov)],
     [oz, mo([12, 46, 124], [24, 22, 62], 0.6 + ov)], [1, mo([12, 46, 124], [20, 18, 56], Math.min(0.95, 0.6 + ov))]];
 }
@@ -47456,6 +47530,7 @@ const sslIn = (r, X, Y) => X >= r[0] && X <= r[0] + r[2] && Y >= r[1] && Y <= r[
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 function storyWhen(t) { const d = new Date(t), z = v => String(v).padStart(2, '0'); return MONTHS[d.getMonth()] + ' ' + d.getDate() + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()); }
 function drawStorySlots() {
+  drawWorldTag();
   if (!SSL.open) return;
   const L = storySlotsLayout(), M = storyMeta();
   ug.fillStyle = 'rgba(4,7,15,0.6)'; ug.fillRect(0, 0, ubw, ubh);
@@ -47512,6 +47587,10 @@ window.addEventListener('keydown', ev => {
   ev.stopImmediatePropagation(); ev.preventDefault();
 }, { capture: true });
 window.__storySlots = { SSL, meta: storyMeta, slot: () => storySlot, saveN: () => [story.saveN, storySavedN], layout: storySlotsLayout, toClient: (X, Y) => [X * PIXU / dpr + STAGE_X, Y * PIXU / dpr + STAGE_Y] };   // (tools)
+// (user Oct 31 20:41: Story's own world - 00-world.js) which world is loaded, on the menu: STORY WORLD or OPEN WORLD, bottom left
+function drawWorldTag() { drawText(ug, STORY_WORLD ? 'STORY WORLD' : 'OPEN WORLD', 8, ubh - 14, STORY_WORLD ? '#ffd23a' : '#9fb3cf', 1); }
+// (the page loaded again for the other world: the menu as it was left - worldResume; the Story world opened anew: STORY picked)
+if (typeof document !== 'undefined' && !SW_IN_WORKER) setTimeout(() => { worldResume(); if (STORY_WORLD && menuSel.mode !== 'story' && !SSL.open) menuSel.mode = 'story'; }, 0);
 
 /* ================================================================
    STORY (user Oct 31, the Story spec "Battleship Duel implementation notes", gen/story-spec-oct31.md): the OPEN WORLD's map
