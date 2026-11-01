@@ -3718,8 +3718,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 496;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 10:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 497;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 10:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -32518,19 +32518,11 @@ function splashAt(p, X, k) {
 function caveBubble(x, y, vx, vy, r) { if (FX.bubbles.length < 500) FX.bubbles.push({ x, y, vx, vy, r, life: 0, stuck: 0, ph: caveWaterR() * 6 }); }
 function bump(x, y) { for (let i = 0; i < 10; i++) FX.silt.push({ x: x + (caveWaterR() - 0.5) * 8, y: y + (caveWaterR() - 0.5) * 6, vx: (caveWaterR() - 0.5) * 18, vy: (caveWaterR() - 0.5) * 10, life: 0, max: 1.5 + caveWaterR() * 1.5 }); }
 
-function waterStep(dt) {
-  // the surfaces: the springs at the game's step, then this frame's table of the surface (swell + springs)
-  wAcc = Math.min(wAcc + dt, 0.1); wTime += dt;
-  const pk = allPockets();
-  // (engine stage 2: a pocket's springs by its region's tier - every 1/240 s step this tick within a screen of a view (by its
-  // middle or either end), 15 Hz within 3, 2 Hz further, catching up its time in the same 1/240 s steps; one lying still
-  // (nothing pushed it since its waves died away) is not stepped till something does)
-  let m = 0; while (wAcc >= WSTEP) { wAcc -= WSTEP; m++; }
-  if (m) { const S = schedSystem('cavesprings', 0.3, 1e9), G = CV.G;
-    for (const p of pk) { if (!p.h) continue;
-      const a = p.win.X0 + p.xa * G, b = a + p.h.length * G, c = (a + b) / 2;
-      schedStep(S, p, c, m * WSTEP, T => springsFor(p, T), tierAt(a) === 0 || tierAt(b) === 0); }
-  }
+// (Nov 1, user 09:03: "if it's completely static, then it's going to look weird") this moment's surface of every pocket near a view:
+// the swell at the water's clock (wTime) and the springs - wherever the caves are drawn. With the simulation worker on, the page
+// gets the springs and the clock with each snapshot and works the surfaces out itself (cwInto), so the swell moves on it as it
+// does in the worker; before, the page only redid a pocket whose springs had changed, and an undisturbed one stood frozen
+function caveSurfaces(pk) {
   // (perf, Oct 28 22:50, claude/perf-cave-water-v191-oct28.md: the swell on every pocket's surface was a fifth of the frame -
   // ~4,300 columns of the open sea's swell for water nobody could see) only the pockets within a screen of a view; the
   // rest lie flat at their level until one comes near
@@ -32550,6 +32542,21 @@ function waterStep(dt) {
     else { const L = pocketLevel(p); if (!p.flat || p.flatL !== L) { p.sy.fill(L); p.flat = true; p.flatL = L; } }   // (its level kept as it rises or falls)
   }
   if (CWW.on) cwwSend(pk);
+}
+function waterStep(dt) {
+  // the surfaces: the springs at the game's step, then this frame's table of the surface (swell + springs)
+  wAcc = Math.min(wAcc + dt, 0.1); wTime += dt;
+  const pk = allPockets();
+  // (engine stage 2: a pocket's springs by its region's tier - every 1/240 s step this tick within a screen of a view (by its
+  // middle or either end), 15 Hz within 3, 2 Hz further, catching up its time in the same 1/240 s steps; one lying still
+  // (nothing pushed it since its waves died away) is not stepped till something does)
+  let m = 0; while (wAcc >= WSTEP) { wAcc -= WSTEP; m++; }
+  if (m) { const S = schedSystem('cavesprings', 0.3, 1e9), G = CV.G;
+    for (const p of pk) { if (!p.h) continue;
+      const a = p.win.X0 + p.xa * G, b = a + p.h.length * G, c = (a + b) / 2;
+      schedStep(S, p, c, m * WSTEP, T => springsFor(p, T), tierAt(a) === 0 || tierAt(b) === 0); }
+  }
+  caveSurfaces(pk);
   // drips from the stalactites hanging over a pocket's air (only once the water's under their tips)
   if (P.drips > 0) for (const t of CV.wins.flatMap(Wn => Wn.tips)) {
     const p = t.p; if (!p || t.Y > pocketLevel(p) - 2) continue;
@@ -32615,7 +32622,6 @@ function cavePocketsPut(a, cp) {
       const p = Wn.pockets[i]; if (!p || !d || !p.h || p.h.length !== d.n) return;
       cp(d.h, p.h); cp(d.v, p.v); p.still = false; delete p._sa;
       p.flat = d.flat; if (d.flatL == null) delete p.flatL; else p.flatL = d.flatL;
-      if (p.sy) { if (p.flat) p.sy.fill(p.flatL != null ? p.flatL : pocketLevel(p)); else surfTable(p); }   // (this frame's surface again)
     });
   });
 }
@@ -32624,7 +32630,7 @@ const CAVE_WATER_ROW = worldRow({
   time: [() => wTime, v => { if (typeof v === 'number') wTime = v; }],
   // (saved as text: the springs as base64 text of their bytes - exact)
   pockets: [() => wjson(cavePockets().map(ps => ps && ps.map(d => d && Object.assign({}, d, { h: f32ToB64(d.h), v: f32ToB64(d.v) })))),
-    v => cavePocketsPut(wunjson(v), b64IntoF32)],
+    v => { cavePocketsPut(wunjson(v), b64IntoF32); caveSurfaces(allPockets()); }],
   tips: [() => wjson(CV.wins.map(Wn => Wn && Wn.tips ? Wn.tips.map(t => t.next) : null)),
     v => { const a = wunjson(v); if (Array.isArray(a)) a.forEach((ns, k) => { const Wn = CV.wins[k]; if (Wn && Wn.tips && Array.isArray(ns) && ns.length === Wn.tips.length) Wn.tips.forEach((t, i) => { t.next = ns[i]; }); }); }],
   fx: [() => wjson(CAVE_FX.map(k => FX[k].map(o => { const c = Object.assign({}, o); if ('p' in o) c.p = cavePk(o.p); return c; }))),
@@ -32669,6 +32675,7 @@ function cwInto(C) {
   const R = CAVE_WATER_ROW;
   R.acc = C.acc; R.time = C.time;
   if (C.pk) cavePocketsPut(C.pk, (from, to) => to.set(from));
+  caveSurfaces(allPockets());                                     // (every snapshot: the swell at its clock - caveSurfaces)
   if (C.tips != null) R.tips = C.tips;
   if (C.fx != null) R.fx = C.fx;
 }
