@@ -1729,7 +1729,15 @@ function shakeAt(amt, x) {
     shakeV[i] = Math.min(8, Math.max(shakeV[i], amt * (seen ? 1 : 0.2)));
   }
 }
-const spray = [], bubbles = [], wakes = [];
+const wakes = [];
+// (Nov 1) the spray thrown out of the water: a column table, a row a drop in the order thrown - 35-particles.js sprayRow (every
+// splash, blast, jet and mine that throws it), stepParticles moves them, the spray's pixel layer draws them (34-splashes-sinking.js
+// SPRAY_L). s: the drop's size
+const spray = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', life: 'f64', s: 'f64' });
+// (Nov 1) the bubbles under the water: a column table, a row a bubble in the order made - 35-particles.js bubbleRow (addBubble,
+// a sinking piece's leaks), stepParticles moves them, their pixel layer draws them (43-render-objects.js BUBBLE_L). slow: a
+// leak's slow climb, its speed (0: a quick one)
+const bubbles = new ColTable({ sq: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', r: 'f64', ph: 'f64', life: 'f64', slow: 'f64' });
 // (Nov 1) the foam on the water: a column table, a row a bit in the order spawned - 35-particles.js spawnFoam makes them,
 // stepParticles moves and ends them, the foam's pixel layer draws them (43-render-objects.js FOAM_L). k: how much bigger
 // than a small boat's it is (FXK when spawned - 1: a small speck, more: a big ship's clump)
@@ -3710,8 +3718,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 492;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 09:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 494;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 09:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -9367,7 +9375,7 @@ function detonateCharge(c) {
   const depth = y - WATER_Y, amt = clamp(1 - depth / 320, 0.25, 1);
   for (let k = -40; k <= 40; k += DX) water.push(x + k, -9000 * amt * (1 - Math.abs(k) / 42));
   const sy = surfaceY(x);
-  if (!c.noBall) for (let i = 0; i < 90 * amt; i++) spray.length < 700 && spray.push({ x: x + armDchRnd(-14, 14), y: sy - armDchRnd(0, 4), vx: armDchRnd(-40, 40), vy: -armDchRnd(120, 480) * amt, life: 0, s: armDchRnd(1.6, 4) });
+  if (!c.noBall) for (let i = 0; i < 90 * amt; i++) spray.n < 700 && sprayRow(x + armDchRnd(-14, 14), sy - armDchRnd(0, 4), armDchRnd(-40, 40), -armDchRnd(120, 480) * amt, armDchRnd(1.6, 4));
   for (let i = 0; i < 14; i++) spawnFoam(x + armDchRnd(-24, 24), armDchRnd(1.6, 3.4));
   sound('splash', x, amt);
   // submarines inside the blast are holed
@@ -9572,9 +9580,9 @@ function mineSplash(x, amt) {
   for (let i = 0; i < 6 * amt; i++) spawnWcloud({ x: x + armMineRnd(-36, 36) * amt, y: sy + armMineRnd(3, 14), vx: armMineRnd(-25, 25), vy: armMineRnd(-6, 6), r: armMineRnd(2, 3.5), rmax: armMineRnd(5, 8), grow: armMineRnd(16, 26), life: armMineRnd(1.2, 2.2), lift: armMineRnd(6, 14), alpha: 0.55, water: true });
   for (let i = 0; i < 70 * amt; i++) addBubble(x + armMineRnd(-50, 50) * amt, sy + armMineRnd(6, 60), armMineRnd(-14, 14), -armMineRnd(20, 60), armMineRnd(0.8, 2.6));
   for (let i = 0; i < 60 * amt; i++) {   // (droplets of all sizes thrown all round - its rays: 34-zz-mine-splash.js)
-    if (spray.length > 700) break;
+    if (spray.n > 700) break;
     const a = armMineRnd(-Math.PI * 0.9, -Math.PI * 0.1), s = armMineRnd(60, 240) * amt;
-    spray.push({ x: x + armMineRnd(-30, 30), y: sy - armMineRnd(0, 20), vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 0, s: armMineRnd(1.4, 3.4) });
+    sprayRow(x + armMineRnd(-30, 30), sy - armMineRnd(0, 20), Math.cos(a) * s, Math.sin(a) * s, armMineRnd(1.4, 3.4));
   }
   emit('scare', { x, y: sy, r: 200, kind: 'birds' });
 }
@@ -11983,9 +11991,9 @@ function splash(x, vx, vy) {
   if (jets.length > 64) { const k = jets.findIndex(j => !j.small); jets.splice(k >= 0 ? k : 0, 1); }
   // a ring of low droplets thrown out at the foot
   for (let i = 0; i < 40 * amt; i++) {
-    if (spray.length > 700) break;
+    if (spray.n > 700) break;
     const s = armShellR() < 0.5 ? -1 : 1;
-    spray.push({ x: x + armShellRnd(-4, 4), y: sy - armShellRnd(0, 3), vx: s * armShellRnd(25, 110) + vx * 0.05, vy: -armShellRnd(60, 200) * amt, life: 0, s: armShellRnd(1.4, 3) });
+    sprayRow(x + armShellRnd(-4, 4), sy - armShellRnd(0, 3), s * armShellRnd(25, 110) + vx * 0.05, -armShellRnd(60, 200) * amt, armShellRnd(1.4, 3));
   }
   for (let i = 0; i < 10; i++) spawnFoam(x + armShellRnd(-14, 14), armShellRnd(1.5, 3.2));
   for (let i = 0; i < 18; i++) addBubble(x + armShellRnd(-8, 8), sy + armShellRnd(4, 30), armShellRnd(-20, 20), -armShellRnd(10, 40), armShellRnd(0.8, 2.6));
@@ -12130,11 +12138,11 @@ function stepPierGuns(dt) {
    ================================================================ */
 let BLAST = null;
 const BLAST_FREE = () => [flames];                                             // (flung: speeds x K - and the smoke's puffs: below)
-const BLAST_THROWN = () => [debris, spray, dust];                            // (thrown under gravity: speeds x sqrt K)
+const BLAST_THROWN = () => [debris, dust];                            // (thrown under gravity: speeds x sqrt K)
 const BLAST_ALL = () => [...BLAST_FREE(), ...BLAST_THROWN(), flashes, rings, jets, spikeBursts];
 // (Nov 1) the column tables (04-zz-coltable.js) and how fast their new rows are flung: the smoke's puffs as the flames (K), the
-// sparks and the embers thrown (sqrt K); a table's new rows are those past the last id it had given at blastOpen
-const BLAST_COLS = () => [[smoke, false], [sparks, true], [embers, true]];
+// sparks, the embers and the spray thrown (sqrt K); a table's new rows are those past the last id it had given at blastOpen
+const BLAST_COLS = () => [[smoke, false], [sparks, true], [embers, true], [spray, true]];
 function blastOpen() {
   BLAST = { fx: FXK, last: BLAST_ALL().map(a => a[a.length - 1]), top: BLAST_COLS().map(([T]) => T.top) };   // (the last piece in each: new ones come after it, even if old ones were dropped)
   FXK = FXK * BLAST_K;
@@ -12203,7 +12211,7 @@ function stepJets(dt) {
     if (j.t > tApex * 0.9 && !j.rained) {
       j.rained = true;
       const H = j.v0 * j.v0 / (2 * JET_G), sy = surfaceY(j.x);
-      for (let k = 0; k < (j.small ? 8 : 45); k++) { if (spray.length > 700) break; const u = spR(); spray.push({ x: j.x + j.lean * H * u + spRnd(-j.w, j.w) * (1 - u), y: sy - H * u, vx: spRnd(-30, 30), vy: spRnd(-40, 20), life: 0, s: spRnd(1.5, 3.6) }); }
+      for (let k = 0; k < (j.small ? 8 : 45); k++) { if (spray.n > 700) break; const u = spR(); sprayRow(j.x + j.lean * H * u + spRnd(-j.w, j.w) * (1 - u), sy - H * u, spRnd(-30, 30), spRnd(-40, 20), spRnd(1.5, 3.6)); }
     }
     if (j.t > tApex * 2) jets.splice(i, 1);
   }
@@ -12219,14 +12227,35 @@ function splashPal() {
   const m = (c, a) => rgbs(c.map((v, i) => Math.round(v * L[i] / 255)), a);
   return [m([255, 255, 255], 1), m([206, 234, 252], 0.9), m([236, 247, 255], 0.95), m([207, 233, 251], 1), m([182, 205, 239], 1)];
 }
+/* (Nov 1) THE SPRAY'S PIXEL LAYER (40-zzzz-layers.js): every drop in one draw a view - a particle block, two blocks wide for a
+   big drop, the splash's white, every fourth drop (by its place in the table) its pale blue; one more than 5 outside the view
+   isn't drawn. pal: the splash's whites (by day, or in the waterline's light at night - splashPal) */
+const SPRAY_L = pxLayer({
+  table: spray, cols: { on: 'view u8', x: 'view i32', y: 'view i32', n: 'view u8' }, pal: [],
+  view: (T, own, n, x0, x1, L) => {
+    const X = T.c.x, Y = T.c.y, S = T.c.s;
+    L.last = -1;
+    for (let i = 0; i < n; i++) {
+      if (X[i] < x0 - 5 || X[i] > x1 + 5) { own.on[i] = 0; continue; }
+      own.on[i] = 1; own.n[i] = S[i] > 2.6 ? 2 : 1; own.x[i] = Math.floor(PX(X[i]) / PB) * PB; own.y[i] = Math.floor(PY(Y[i]) / PB) * PB;
+      L.last = i;
+    }
+    return n;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) {
+  int k = int(a_n) * u_pb;
+  r = ivec4(a_x, a_y, k, k); c = (gl_InstanceID & 3) != 0 ? 0 : 1;
+  return a_on != 0u;
+}
+`,
+});
 function drawSplashes(x0, x1, pal) {
   drawJets(x0, x1, pal);
   fsLast = null;
-  spray.forEach((p, i) => {
-    if (p.x < x0 - 5 || p.x > x1 + 5) return;
-    const n = p.s > 2.6 ? 2 : 1, px = PX(p.x), py = PY(p.y);
-    plRect((i & 3) ? pal[0] : pal[3], Math.floor(px / PB) * PB, Math.floor(py / PB) * PB, PB * n, PB * n);
-  });
+  SPRAY_L.pal = [pal[0], pal[3]]; SPRAY_L.last = -1;
+  pxDraw(SPRAY_L, x0, x1);
+  // (the fill style as the loop left it: the last drop's colour)
+  if (SPRAY_L.last >= 0) { const col = SPRAY_L.pal[(SPRAY_L.last & 3) ? 0 : 1]; C.fillStyle = col; fsLast = col; }
   plFlush();
 }
 function drawJets(x0, x1, pal = SPLASH_DAY) {
@@ -12327,9 +12356,9 @@ function wreckBubbles(p, dt) {
     const l = ends[Math.floor(armPieceR() * ends.length)] * armPieceRnd(0.88, 1);
     const h = armPieceRnd(-22, 6);                                    // anywhere up the torn section, deck to keel
     const x = p.x + l * ca - h * sa, y = p.y + l * sa + h * ca;
-    if (y < surfaceY(x) + 6 || bubbles.length >= 520) continue;
+    if (y < surfaceY(x) + 6 || bubbles.n >= 520) continue;
     const fresh = p.leakT < 8;
-    bubbles.push({ x: x + armPieceRnd(-2, 2), y, vx: armPieceRnd(-6, 6), vy: -armPieceRnd(6, 14), r: fresh ? armPieceRnd(0.8, 3) : armPieceRnd(0.8, 2.2), ph: armPieceR() * 6.28, life: 0, slow: fresh ? armPieceRnd(14, 28) : armPieceRnd(9, 16) });
+    bubbleRow(x + armPieceRnd(-2, 2), y, armPieceRnd(-6, 6), -armPieceRnd(6, 14), fresh ? armPieceRnd(0.8, 3) : armPieceRnd(0.8, 2.2), armPieceR() * 6.28, fresh ? armPieceRnd(14, 28) : armPieceRnd(9, 16));
   }
   // bits of plating, wood, cork and rubbish torn loose at the break
   if (p.leakT < 9 && (p.brokenL || p.brokenR)) {
@@ -12523,9 +12552,9 @@ function stepMineSplashes(dt) {
       if (h > 1) live = true;
       // droplets thrown off it: off its tip as it climbs, off it all over as it comes down
       const rate = f > 0 ? 70 * (1 - f) : h > 4 ? 9 : 0;
-      if (spR() < dt * rate * L.r / 26 && spray.length < 700) {
+      if (spR() < dt * rate * L.r / 26 && spray.n < 700) {
         const v = f > 0 ? spRnd(0.4, 1) : spRnd(0.75, 1), wx = m.x + L.c + L.l * h * v + spRnd(-0.5, 0.5) * L.r * (1 - v);
-        spray.push({ x: wx, y: sy - h * v, vx: (Math.sign(L.c + L.l * 30) || spRnd(-1, 1)) * spRnd(15, 80), vy: f > 0 ? spRnd(-50, 20) : -spRnd(30, 130), life: 0, s: spRnd(1.4, 3.8) });
+        sprayRow(wx, sy - h * v, (Math.sign(L.c + L.l * 30) || spRnd(-1, 1)) * spRnd(15, 80), f > 0 ? spRnd(-50, 20) : -spRnd(30, 130), spRnd(1.4, 3.8));
       }
       // foam where it falls back in
       if (f > 0.2 && spR() < dt * 6) spawnFoam(m.x + L.c + spRnd(-1, 1) * L.r * 1.6, spRnd(1.6, 3.4));
@@ -12611,8 +12640,12 @@ const ptR = () => (ptR_ || (ptR_ = sysRng('particles')))(), ptRnd = (a, b) => a 
 let FX_HIDE = null;
 function fxMask(v) { FX_HIDE = v && v.dock && inHarbour(v) ? { x: gateOf(v)[1], dir: v.dock.dir } : null; }
 const fxHidden = x => FX_HIDE !== null && (x - FX_HIDE.x) * FX_HIDE.dir > 0;
-function addBubble(x, y, vx, vy, r) { if (fxHidden(x)) return; if (bubbles.length < 560 * FX) bubbles.push({ x, y, vx, vy, r, ph: ptR() * 6.28, life: 0 }); }
-function spawnSpray(x, y, vx, power) { if (fxHidden(x)) return; if (spray.length < 320) spray.push({ x, y, vx: vx + ptRnd(-20, 20), vy: -ptRnd(80, 220) * power, life: 0, s: ptRnd(1.2, 3) }); }
+function addBubble(x, y, vx, vy, r) { if (fxHidden(x)) return; if (bubbles.n < 560 * FX) bubbleRow(x, y, vx, vy, r, ptR() * 6.28, 0); }
+// (Nov 1) a bubble's row, its fields as given (the callers draw their random numbers in the order they always did)
+function bubbleRow(x, y, vx, vy, r, ph, slow) { const j = bubbles.add(), c = bubbles.c; c.x[j] = x; c.y[j] = y; c.vx[j] = vx; c.vy[j] = vy; c.r[j] = r; c.ph[j] = ph; c.life[j] = 0; c.slow[j] = slow; }
+// (Nov 1) a drop of spray's row, its fields as given (the callers draw their random numbers in the order they always did)
+function sprayRow(x, y, vx, vy, s) { const j = spray.add(), c = spray.c; c.x[j] = x; c.y[j] = y; c.vx[j] = vx; c.vy[j] = vy; c.life[j] = 0; c.s[j] = s; }
+function spawnSpray(x, y, vx, power) { if (fxHidden(x)) return; if (spray.n < 320) sprayRow(x, y, vx + ptRnd(-20, 20), -ptRnd(80, 220) * power, ptRnd(1.2, 3)); }
 // (real scale, user Oct 29: "I wanted particles" - a big ship's foam is particles as much bigger as she is (k = FXK), lying
 // on the water longer and breaking up as they fade; a small boat's stay the old small specks: k 1)
 function spawnFoam(x, s) {
@@ -12651,20 +12684,23 @@ function spawnDebris(x, y, n, baseVx) {
 
 function stepParticles(dt) {
   const W = E.windU, sb = surfBand(), wTop = WATER_Y - sb, wBot = WATER_Y + sb;   // (outside wTop..wBot nothing is at the water: the exact surface not asked for - perf pass, Oct 29)
-  for (let i = spray.length - 1; i >= 0; i--) {
-    const p = spray[i];
-    p.vy += 520 * dt; p.vx += (W * 0.6 - p.vx) * 0.6 * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.life += dt;
-    if (p.vy > 0 && p.y > wTop && p.y > surfaceY(p.x)) { water.push(p.x, -450 * p.s); if (ptR() < 0.5) spawnFoam(p.x, ptRnd(1, 2)); spray.splice(i, 1); }
-    else if (p.life > 4) spray.splice(i, 1);
-  }
-  for (let i = bubbles.length - 1; i >= 0; i--) {
-    const b = bubbles[i];
-    b.life += dt; b.vx *= 1 - 1.5 * dt;
-    if (b.slow) b.vy += (-b.slow - b.vy) * dt; else b.vy -= 10 * dt;
-    b.x += (b.vx + Math.sin(b.life * (b.slow ? 2.5 : 6) + b.ph) * (b.slow ? 3 : 6)) * dt; b.y += b.vy * dt;
-    if (b.y < wBot + 1.5 && b.y < surfaceY(b.x) + 1.5) { if (ptR() < 0.35) spawnFoam(b.x, ptRnd(0.9, 1.8)); bubbles.splice(i, 1); }
-    else if (b.life > (b.slow ? 40 : 9)) bubbles.splice(i, 1);
-  }
+  { const c = spray.c, X = c.x, Y = c.y, VX = c.vx, VY = c.vy, L = c.life;
+    for (let i = spray.n - 1; i >= 0; i--) {
+      VY[i] += 520 * dt; VX[i] += (W * 0.6 - VX[i]) * 0.6 * dt; X[i] += VX[i] * dt; Y[i] += VY[i] * dt; L[i] += dt;
+      if (VY[i] > 0 && Y[i] > wTop && Y[i] > surfaceY(X[i])) { water.push(X[i], -450 * c.s[i]); if (ptR() < 0.5) spawnFoam(X[i], ptRnd(1, 2)); spray.drop(i); }
+      else if (L[i] > 4) spray.drop(i);
+    }
+    spray.sweep(); }
+  { const c = bubbles.c, X = c.x, Y = c.y, VX = c.vx, VY = c.vy, L = c.life, SL = c.slow;
+    for (let i = bubbles.n - 1; i >= 0; i--) {
+      const slow = SL[i];
+      L[i] += dt; VX[i] *= 1 - 1.5 * dt;
+      if (slow) VY[i] += (-slow - VY[i]) * dt; else VY[i] -= 10 * dt;
+      X[i] += (VX[i] + Math.sin(L[i] * (slow ? 2.5 : 6) + c.ph[i]) * (slow ? 3 : 6)) * dt; Y[i] += VY[i] * dt;
+      if (Y[i] < wBot + 1.5 && Y[i] < surfaceY(X[i]) + 1.5) { if (ptR() < 0.35) spawnFoam(X[i], ptRnd(0.9, 1.8)); bubbles.drop(i); }
+      else if (L[i] > (slow ? 40 : 9)) bubbles.drop(i);
+    }
+    bubbles.sweep(); }
   { const c = foam.c, X = c.x, L = c.life;
     for (let i = foam.n - 1; i >= 0; i--) { L[i] += dt; X[i] += (c.vx[i] + W * 0.08) * dt; if (L[i] > c.max[i]) foam.drop(i); }
     foam.sweep(); }
@@ -13971,16 +14007,18 @@ defTable('dockCalm', () => [CALM_ROW], { net: false,
 });
 
 /* (engine stage 3) The particles' tables (35-particles.js owns them; registered here because the tables (36-zz-tables.js) come
-   after that file): every list stepParticles moves - spray, bubbles, wakes, flames, flashes, welds, blast rings, debris,
+   after that file): every list stepParticles moves - wakes, flames, flashes, welds, blast rings, debris,
    the sea floor's dust, its sand grains and the falling ash. Each a list of plain values: nothing to skip, nothing to rebuild.
    Their random source: sysRng('particles') (ptR, 35-particles.js) */
-for (const [name, list] of [['spray', spray], ['bubbles', bubbles], ['wakes', wakes], ['flames', flames],
+for (const [name, list] of [['wakes', wakes], ['flames', flames],
   ['flashes', flashes], ['welds', welds], ['rings', rings], ['debris', debris], ['dust', dust], ['grains', grains], ['ash', ash]])
   defTable(name, () => list, { net: false });   // (stage 5: each screen makes its own)
-// (Nov 1) the sparks, the embers and the foam: column tables (05-game-state.js). drawn: the fields their pixel layer reads
-// (47-render-overlays.js SPARK_L, EMBER_L; 43-render-objects.js FOAM_L) - what a live snapshot carries to the page; rows: a save from before they were columns
+// (Nov 1) the sparks, the embers, the foam, the bubbles and the spray: column tables (05-game-state.js). drawn: the fields their
+// pixel layer reads (47-render-overlays.js SPARK_L, EMBER_L; 43-render-objects.js FOAM_L, BUBBLE_L; 34-splashes-sinking.js SPRAY_L) - what a live snapshot carries to the page; rows: a save from before they were columns
 defTable('sparks', null, { cols: sparks, drawn: ['x', 'y', 'px', 'py', 'life', 'max'], rows: rows => sparks.plainOfRows(rows), net: false });
 defTable('foam', null, { cols: foam, drawn: ['x', 's', 'k', 'life', 'max', 'seed'], rows: rows => foam.plainOfRows(rows), net: false });
+defTable('bubbles', null, { cols: bubbles, drawn: ['x', 'y', 'r'], rows: rows => bubbles.plainOfRows(rows), net: false });
+defTable('spray', null, { cols: spray, drawn: ['x', 'y', 's'], rows: rows => spray.plainOfRows(rows), net: false });
 defTable('embers', null, { cols: embers, drawn: ['x', 'y', 'life', 'max'], rows: rows => embers.plainOfRows(rows), net: false });
 
 /* (engine stage 3) The splashes' tables (34-splashes-sinking.js and 34-zz-mine-splash.js own them; registered here because the
@@ -14562,7 +14600,7 @@ const SW_LOCAL = new Set(['camera', 'smokeAir']);
    buys nothing and the per-row text is the cost. Whole each time, field by field: numbers and booleans in one Float64Array
    (exact), strings as ids into the message's own list, anything else (an array, a small object) as plain data beside them.
    The page refills its own list's objects in place, by position (they're effects: nothing refers to one by id) */
-const SW_COLS = new Set(['spray', 'bubbles', 'wakes', 'flames', 'flashes', 'welds', 'rings', 'debris', 'dust', 'grains', 'ash',
+const SW_COLS = new Set(['wakes', 'flames', 'flashes', 'welds', 'rings', 'debris', 'dust', 'grains', 'ash',
   'streaks', 'jets', 'msplashes', 'leaves', 'earthGrains', 'fwBits', 'hoseDrops', 'hoseSteams', 'seaBlood', 'seaGore', 'birdFeathers', 'birdGore', 'crewBlood', 'planeWisps', 'iceBits', 'rocketTrail',
   'trails', 'planeTrails', 'spikeBursts', 'seaSchools', 'msPings']);
 // lists the game keeps outside the tables that the page draws (spawned by the game's steps, so only the worker has them): sent
@@ -14577,12 +14615,10 @@ const SW_EXTRA_T = { skip: TBL_SKIP, depth: 4, after: null };
    drawing follows stay in. 'a.b' names a field of the small objects inside the list field a (the fish of a school: swNestOf).
    When in doubt a field is kept. */
 const SW_DRAW = {
-  // 35-particles.js' lists: 43-render-objects.js (drawBubbles, buildWakeField, drawDebris via
+  // 35-particles.js' lists: 43-render-objects.js (buildWakeField, drawDebris via
   // 45-draw-vehicles.js, drawShocks, drawBlood), 47-render-overlays.js (the welds, flashes, rings, drawAsh,
   // the flames' glow), 46-smoke-fire-draw.js drawFire + sky/21-smoke.js fireLights (flames), 45-draw-vehicles.js drawDust
-  // (dust, grains), 34-splashes-sinking.js drawSplashes (spray), 50-land-firewater.js drawHoseCollision (flames)
-  spray: ['x', 'y', 's'],
-  bubbles: ['x', 'y', 'r'],
+  // (dust, grains), 50-land-firewater.js drawHoseCollision (flames)
   wakes: ['x', 'life', 'max', 'w', 'k'],
   flames: ['x', 'y', 'r', 'heat', 'behind', 'src'],
   flashes: ['x', 'y', 'r', 'life', 'max'],
@@ -19733,7 +19769,7 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
    GTX 1660's context was lost at its link, Nov 1.)
    WebGL2 only: under Canvas 2D (?gl=0) a layer draws nothing.
    ================================================================ */
-const PXL = { pal: new Float32Array(32) };
+const PXL = { pal: new Float32Array(128) };
 function pxLayer(o) {
   const L = { table: o.table, cols: o.cols, per: o.per || 1, pal: o.pal, frame: o.frame || null, view: o.view, rect: o.rect, own: {}, ep: -1, tick: -1, prog: null, vao: null, bufs: null, U: null };
   for (const k in L.cols) L.own[k] = new (L.cols[k].endsWith('u8') ? Uint8Array : Int32Array)(16);
@@ -19744,7 +19780,7 @@ precision highp float; precision highp int;
 uniform vec2 u_size;           // (the target's size - as GL_VS)
 uniform vec4 u_m;              // (the context's transform: scale x, scale y, move x, move y - upright, as beginView sets it)
 uniform int u_pb;              // (PB)
-uniform vec4 u_pal[8];         // (the colours, premultiplied, as GLCtx packs them - fround(byte / 255))
+uniform vec4 u_pal[32];        // (up to 32 colours, premultiplied, as GLCtx packs them - fround(byte / 255))
 uniform int u_skip;            // (a bit a colour: not drawn - fully clear, as glFillQuad skips it)
 out vec4 v_col;
 `;
@@ -26346,25 +26382,38 @@ function drawDuds(x0, x1) {
     C.fillStyle = '#8a5a14'; blkPx(x - ux * L * 0.15, y - uy * L * 0.15, 1);
   }
 }
+/* (Nov 1) THE BUBBLES' PIXEL LAYER (40-zzzz-layers.js): one draw a view, its rectangles worked out by the loops that painted
+   them. First every bubble's shadow (one colour: a dark pixel down and to the right), then the bubbles themselves - darker
+   the deeper they are (user Oct 24 night: the light doesn't reach down there), in six bands (BUBBLE_COLS): a big one a rim
+   and a highlight, a small one a pixel. One more than 5 outside the view isn't drawn */
+const BUBBLE_PAL = ['rgba(4,28,64,0.38)', ...BUBBLE_COLS.flat()];   // (0 the shadow; 1 + band * 3 + rim / highlight / small)
+const BUBBLE_L = pxLayer({
+  table: bubbles, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', c: 'view u8' }, pal: BUBBLE_PAL,
+  view: (T, own, n, x0, x1, L) => {
+    const X = T.c.x, Y = T.c.y, RR = T.c.r, R = pxRoom(L, n * 3);
+    let m = 0;
+    const put = (x, y, w, h, c) => { R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.c[m] = c; m++; };
+    for (let i = 0; i < n; i++) {
+      if (X[i] < x0 - 5 || X[i] > x1 + 5) continue;
+      const s = RR[i] > 1.9 ? 2 : 1;
+      put(PX(X[i]) + 1, PY(Y[i]) + 1, s, s, 0);
+    }
+    for (let i = 0; i < n; i++) {
+      if (X[i] < x0 - 5 || X[i] > x1 + 5) continue;
+      const px = PX(X[i]), py = PY(Y[i]), b = 1 + clamp(Math.floor((Y[i] - WATER_Y) / (SEABED_DEEP - WATER_Y) * 6), 0, 5) * 3;
+      if (RR[i] > 1.9) { put(px, py, 2, 2, b); put(px, py, 1, 1, b + 1); } else put(px, py, 1, 1, b + 2);
+    }
+    L.last = m ? R.c[m - 1] : -1;
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = int(a_c); return true; }
+`,
+});
 function drawBubbles(x0, x1) {
-  // shadows first (one colour), then the bubbles themselves
-  C.fillStyle = 'rgba(4,28,64,0.38)';
-  for (const b of bubbles) {
-    if (b.x < x0 - 5 || b.x > x1 + 5) continue;
-    const px = PX(b.x), py = PY(b.y), s = b.r > 1.9 ? 2 : 1;
-    C.fillRect(px + 1, py + 1, s, s);                  // shows as a dark pixel down and to the right
-  }
-  fsLast = null;
-  // (darker the deeper they are, user Oct 24 night: the light doesn't reach down there)
-  for (const b of bubbles) {
-    if (b.x < x0 - 5 || b.x > x1 + 5) continue;
-    const px = PX(b.x), py = PY(b.y), dc = BUBBLE_COLS[clamp(Math.floor((b.y - WATER_Y) / (SEABED_DEEP - WATER_Y) * 6), 0, 5)];
-    if (b.r > 1.9) {
-      fs1(dc[0]); C.fillRect(px, py, 2, 2);
-      fs1(dc[1]); C.fillRect(px, py, 1, 1);
-    } else { fs1(dc[2]); C.fillRect(px, py, 1, 1); }
-  }
-  fsLast = null;
+  BUBBLE_L.last = -1;
+  pxDraw(BUBBLE_L, x0, x1);
+  // (the fill style as the loops left it: the shadows' colour, set first whatever was in view - then the last bubble's)
+  C.fillStyle = BUBBLE_PAL[Math.max(0, BUBBLE_L.last)]; fsLast = null;
 }
 /* (Nov 1) THE FOAM'S PIXEL LAYER (40-zzzz-layers.js): the foam on the water in one draw a view, its rectangles worked out by the
    loop that painted them (the same sums: the surface's height under each, the clumps' hashes), written instead of painted.
