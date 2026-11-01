@@ -357,6 +357,7 @@ function swHostInputs() {
   if (SWH.ctl) for (let p = 0; p < SWH.ctl.length; p++) if (SWH.ctl[p]) setCtlState(p, SWH.ctl[p]);
   if (SWH.cam) { try { CAM_ROW.cam = SWH.cam; } catch (e) { } SWH.cam = null; }
 }
+const SWH_PAIR = /[?&]swpair=1/.test(self.location ? self.location.search || '' : '') ? 1 : 2;   // (physics steps a frame in the worker: ?swpair=1, one as before)
 function swHostLoop() {
   if (!SWH.on) return;
   const ms = SUBSTEP * 1000, now = performance.now();
@@ -364,17 +365,21 @@ function swHostLoop() {
   else {
     const want = Math.floor((now - SWH.t0) / ms);
     let n = 0;
-    while (SWH.done < want && n < 8) {
+    // (Oct 31, 60-fps chat: two physics steps a frame, as the page ran it - a frame of 1/60 s, its two steps of 1/120 inside
+    // (frameBody's own loop), and what only looks (sparks, smoke, the trails, birds - stepVisuals, stepFrameWorld, stepSmoke,
+    // stepTrails) once a frame, as it always was on the page. It was once a step here: twice the work for those, a fifth of the
+    // worker's time in a heavy fight. The physics itself the same steps)
+    while (SWH.done + SWH_PAIR <= want && n < 8) {
       const a = performance.now();
       swHostInputs();
-      paused = false; last = 1000; frameBody(1000 + ms);
-      SWH.done++; n++;
-      SWH.tickMs += (performance.now() - a - SWH.tickMs) * 0.05;
+      paused = false; last = 1000; frameBody(1000 + ms * SWH_PAIR);
+      SWH.done += SWH_PAIR; n += SWH_PAIR;
+      SWH.tickMs += ((performance.now() - a) / SWH_PAIR - SWH.tickMs) * 0.05;
     }
-    if (SWH.done < want) { SWH.behind += want - SWH.done; SWH.t0 += (want - SWH.done) * ms; }   // (fallen behind: slower, never different)
+    if (SWH.done + SWH_PAIR <= want) { SWH.behind += want - SWH.done; SWH.t0 += (want - SWH.done) * ms; }   // (a step short of a frame waits for its pair)   // (fallen behind: slower, never different)
     if (n && SWH.credit) { SWH.credit = 0; SWH.sent++; const S = swSnapshot(); postMessage({ t: 'snap', s: S, ev: SWH.ev.splice(0), tickMs: SWH.tickMs, behind: SWH.behind, done: SWH.done }, S.bufs); }
   }
-  SWH.timer = setTimeout(swHostLoop, Math.max(0, SWH.t0 + (SWH.done + 1) * ms - performance.now()));
+  SWH.timer = setTimeout(swHostLoop, Math.max(0, SWH.t0 + (SWH.done + SWH_PAIR) * ms - performance.now()));
 }
 // (the page's menus: some of the game's steps look at them - a held trigger, the weather's clock under the settings)
 function swHostUi(u) { ui.title = u[0]; ui.menu = u[1]; ui.settings = u[2]; }
@@ -3380,8 +3385,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 468;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 21:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 469;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 21:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13474,6 +13479,15 @@ const ROUND_ROW = worldRow({
   acc: [() => acc, v => { acc = v; }],   // (the physics steps' accumulator: the fraction of a step carried to the next frame)
 });
 defTable('round', () => [ROUND_ROW], { netSkip: ['acc'], make: () => ROUND_ROW });
+// (user Oct 31 21:36: "the player on the right side could not control its tower after having a ship, a submarine and other stuff
+// out. I could press the buttons, but I would not see anything exiting the tower") which tower each player mans (OPEN WORLD: a
+// side has several, and the tower tab goes round them - 30-vehicle-switching.js manTw) was nobody's table: with the
+// simulation worker it changed there and not on the page, so the page showed and aimed one tower and the worker fired from
+// another. Now a row of its own: each player's tower by its place in the towers' list (-1: the harbour's own, myTw's rule)
+const manTwIdx = p => { const t = manTw[p]; return t ? towers.indexOf(t) : -1; };
+const manTwSet = (p, v) => { if (typeof v !== 'number') return; manTw[p] = v >= 0 && towers[v] ? towers[v] : undefined; };
+const MANTW_ROW = worldRow({ m0: [() => manTwIdx(0), v => manTwSet(0, v)], m1: [() => manTwIdx(1), v => manTwSet(1, v)] });
+defTable('mantw', () => [MANTW_ROW], { make: () => MANTW_ROW });
 // ---- the cameras (39-camera updateCamera): each view's place and zoom and what it eases by. Not only a look: the regions'
 // tiers (regionsTick reads the views of the frame before), a sailboat's respawn out of sight, the storm's bolts and the
 // land's bits all go by where the views are - a fresh page's views were somewhere else for the first steps after a load
