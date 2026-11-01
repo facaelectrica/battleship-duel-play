@@ -2033,8 +2033,10 @@ function pierSettle(d) {
 // the deck asks harbourTop each step, which no longer finds it, and falls
 function pierAfterFall(d, gone) {
   d.lamps = d.lamps.filter(([lx]) => !gone(lx));
-  for (const pr of perches) if (pr.dock === d.key && gone(pr.x)) { pr.gone = true; if (pr.bird) { const b = pr.bird; pr.bird = null; b.spot = null; takeOff(b, null); } }   // (gone: a gull flying in to it turns away - perchGone)
-  perches = perches.filter(pr => !(pr.dock === d.key && gone(pr.x)));
+  const P = perches.c;
+  for (let j = 0; j < perches.n; j++) if (P.dock[j] === d.key && gone(P.x[j])) { P.gone[j] = 1; if (P.bird[j]) { const i = bdOn(j); P.bird[j] = 0; birds.c.spot[i] = 0; takeOff(i, null); } }   // (gone: a gull flying in to it turns away - perchGone)
+  for (let j = 0; j < perches.n; j++) if (P.dock[j] === d.key && gone(P.x[j])) perches.drop(j);
+  perches.sweep();
   const tw = d._tw || towers.find(t => t && !t.edge && homeDock[t.player] === d);
   if (tw && tw.pg && !tw.pg.gone && gone(tw.pg._x)) pierGunFalls(tw, d);
   for (const k of restChunksWhere(k => !k.uw && !k.float && gone(k.x))) { if (k._rest) restWakeChunk(k); k.rest = false; k.vx = dockRnd(-6, 6); k.vy = 0; k.w = dockRnd(-0.6, 0.6); k.delay = dockRnd(0, 0.5); }
@@ -3708,8 +3710,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 491;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 09:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 492;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 09:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7872,7 +7874,7 @@ function crumbleTower(tw) {
   for (let i = 0; i < 14; i++) spawnSmoke(tw.x + armTowerRnd(-26, 26), twBase(tw) - armTowerRnd(2, 26), { kind: 'blast', mist: i % 3 === 0, dark: 0.5, r: armTowerRnd(7, 12), lift: 6, vx: armTowerRnd(-30, 30), alpha: armTowerRnd(0.3, 0.45), life: armTowerRnd(5, 9) });
   shakeAt(8, tw.x);
   sound('crash', tw.x, 1);
-  for (const pr of perches) if (pr.tower === tw && pr.bird) takeOff(pr.bird, tw.x);
+  for (let j = 0; j < perches.n; j++) if (perches.c.tower[j] === tw && perches.c.bird[j]) takeOff(bdOn(j), tw.x);
 }
 
 /* ---------------- The submarine ---------------- */
@@ -10220,9 +10222,9 @@ function stepPlanes(dt) {
     else if (pl.y > planeThawY() && pl.ice > 0) { const was = pl.ice; pl.ice = Math.max(0, pl.ice - dt / 3); iceShed(pl, was - pl.ice); }
     if (pl.ice > 0.12 && time > (pl.coughT || 0)) { pl.coughT = time + vehPlaneRnd(1.4, 2.4) * (1.4 - pl.ice); engineCough(pl, 2); }
     if (pl.ice >= 1) { pl.eng = 'off'; pl.offT = 0; pl.mg = false; engineCough(pl, 3); sound('engineDie', pl.x); }
-    for (const b of birds) if (birdLive(b) && Math.abs(b.x - pl.x) < 38 && Math.abs(b.y - pl.y) < 12) {
+    for (let i = 0; i < birds.n; i++) if (birdLive(i) && Math.abs(birds.c.x[i] - pl.x) < 38 && Math.abs(birds.c.y[i] - pl.y) < 12) {
       // a bird in its way: killed, in a little burst of blood, and some of it on the plane
-      killBird(b, pl.vx * 0.25 + vehPlaneRnd(-20, 20), pl.vy * 0.25 - 30);
+      killBird(i, pl.vx * 0.25 + vehPlaneRnd(-20, 20), pl.vy * 0.25 - 30);
       for (let i = 0; i < 6 && pl.splat.length < 24; i++) pl.splat.push([vehPlaneRnd(-38, -14), vehPlaneRnd(-7, 4), vehPlaneR() < 0.35]);
     }
     // a mid-air collision: both go down in flames
@@ -15266,17 +15268,49 @@ function swApply(snap) {
    bring them down.
    ================================================================ */
 const BIRD_TOTAL = 300, GULLS_PER_DOCK = 14;
-const birds = [], feathers = [], gore = [];
+const feathers = [], gore = [];
 const shocks = [];
 let shelterNow = false;
-let flocks = [], perches = [];
+let flocks = [];
+// (Nov 1) the birds and the spots they sit on are column tables (04-zz-coltable.js), a row each. A bird: its kind (BK) and what
+// it's doing (BS) as numbers; its gulls' harbour (home) and its swift's flock (an index into flocks) - NaN: none; its spot, a
+// perch's id (0: none); a tree bird's own (tree, hx); a dead one's spin and turn; the scheduler's _sa, _sk. A perch: where, its
+// harbour (dock, -1: a tree's), the bird on it (an id, 0: none), the tower or tree it's on (obj: kept with the live perch, as
+// before), its place on a tower's rail (ox, ox0) and the tower's frame and strength it was found on (fk, hk), on a tree its
+// column (col); gone / broken
+const BK = { swift: 0, gull: 1 }, BS = { cruise: 0, perch: 1, flee: 2, circle: 3, land: 4, dead: 5, sink: 6, bed: 7, gone: 8 };
+const birds = new ColTable({ id: 'id', kind: 'u8', home: 'f64 NaN', flock: 'f64 NaN', ox: 'f64', oy: 'f64', st: 'u8', spot: 'ref', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64',
+  face: 'f64', ph: 'f64', t: 'f64', scared: 'f64', spin: 'f64', rot: 'f64', tree: 'u8', hx: 'f64', _sa: 'f64', _sk: 'f64 NaN' });
+const perches = new ColTable({ id: 'id', x: 'f64', y: 'f64', dock: 'f64', bird: 'ref', ox: 'f64', ox0: 'f64', fk: 'f64 NaN', hk: 'f64 NaN', col: 'f64', gone: 'u8', broken: 'u8', tower: 'obj', plant: 'obj' });
 // (engine stage 3) the birds' own random source, and their tables: the birds, their flocks (a bird's flock is its index there),
-// the perches (a bird's spot and a perch's bird kept as references; the tower or tree a perch is on stays with the live perch),
-// the feathers and the splats
+// the perches, the feathers and the splats. The birds go to the page as the columns it draws (drawBirds); the perches, never drawn, as their ids
 const bdR = sysRng('birds'), bdRnd = (a, b) => a + (b - a) * bdR();
-defTable('birds', () => birds, { net: false, make: () => ({ kind: 'swift', state: 'cruise', spot: null, x: 0, y: 0, vx: 0, vy: 0, face: 1, ph: 0, t: 0, scared: 0 }) });
+defTable('birds', null, { cols: birds, drawn: ['kind', 'st', 'x', 'y', 'vy', 'face', 'ph', 'scared', 'rot', 'tree'], rows: bdBirdRows, net: false, after: bdOldLinks });
 defTable('birdFlocks', () => flocks, { net: false, make: () => ({ x: 0, y: 0, top: 30, dir: 1, speed: 30, ph: 0 }) });
-defTable('birdPerches', () => perches, { net: false, make: () => ({ x: 0, y: 0, dock: -1, bird: null }), skip: ['tower', 'plant', 'dock'] });   // (dock: the network's NET_SKIP leaves it out of a save, so it's kept here with the live perch)
+defTable('birdPerches', null, { cols: perches, drawn: [], rows: bdPerchRows, net: false, after: bdOldLinks });
+// a perch row at x, y of harbour dock (-1: a tree's); its place
+function bdPerch(x, y, dock) { const j = perches.add(), P = perches.c; P.x[j] = x; P.y[j] = y; P.dock[j] = dock; return j; }
+// the bird on perch j and the perch bird i is on, by their ids: their places (-1: none)
+const bdOn = j => perches.c.bird[j] ? birds.row(perches.c.bird[j]) : -1, bdSpot = i => birds.c.spot[i] ? perches.row(birds.c.spot[i]) : -1;
+// bird i onto perch j (both ids written), or off its spot (j -1)
+function bdSit(i, j) { const B = birds.c, P = perches.c; if (j < 0) { B.spot[i] = 0; return; } B.spot[i] = P.id[j]; P.bird[j] = B.id[i]; }
+// (a save from before - the birds and perches as objects, a bird's spot and a perch's bird as { ref } to the other's row id): each
+// row with this table's names and numbers (ColTable.plainOfRows makes the columns), the links kept as the old ids (negative) till
+// both tables are in, then made the new ones (bdOldLinks)
+const BD_OLD = { b: null, p: null };
+const bdRef = v => v && v.ref != null ? -v.ref : 0, bdSa = o => typeof o.sa_ === 'number' ? o.sa_ : o._sa, bdSk = o => typeof o.sk_ === 'number' ? o.sk_ : o._sk;
+function bdBirdRows(rows) {
+  BD_OLD.b = new Map(rows.map((o, k) => [o.u_, k + 1]));
+  return birds.plainOfRows(rows.map(o => Object.assign({}, o, { kind: BK[o.kind] || 0, st: BS[o.state] || 0, spot: bdRef(o.spot), _sa: bdSa(o), _sk: bdSk(o) })));
+}
+function bdPerchRows(rows) {
+  BD_OLD.p = new Map(rows.map((o, k) => [o.u_, k + 1]));
+  // (a perch's harbour wasn't saved then - the live perch kept its own: here the one at its place, -1 past them)
+  return perches.plainOfRows(rows.map((o, k) => Object.assign({}, o, { bird: bdRef(o.bird), dock: typeof o.dock === 'number' ? o.dock : k < perches.n ? perches.c.dock[k] : -1 })));
+}
+function bdOldLinks() {
+  for (const [T, k, map] of [[birds, 'spot', BD_OLD.p], [perches, 'bird', BD_OLD.b]]) { const a = T.c[k]; for (let i = 0; i < T.n; i++) if (a[i] < 0) a[i] = map ? map.get(-a[i]) || 0 : 0; }
+}
 defTable('birdFeathers', () => feathers, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 0, ph: 0, dark: false }) });
 defTable('birdGore', () => gore, { net: false, make: () => ({ x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 0 }) });
 const BIRD_ROWS = {
@@ -15314,7 +15348,7 @@ function artTops(c) {
   return (c._tops = T);
 }
 function buildPerches() {
-  perches = [];
+  perches.length = 0;
   for (const d of docks) {
     // things standing on the deck (bollards, the ladder's rail): where the drawing rises above the deck
     const T = artTops(pierDeck()), W = T.length, list = [];        // (the pier's deck, composed - the dock chat, Oct 29)
@@ -15323,35 +15357,37 @@ function buildPerches() {
       const t = T[c];
       if (t >= BASE.DECK - 5 || t < 20) continue;                 // above the deck, below the lamp posts
       if (Math.abs(T[c - 1] - t) > 1 || Math.abs(T[c + 1] - t) > 1 || Math.abs(T[c - 2] - t) > 1 || Math.abs(T[c + 2] - t) > 1) continue;
-      list.push({ x: d.ax(c), y: DOCK_TOP_Y + t * BASE.K, dock: d.key, bird: null });
+      list.push([d.ax(c), DOCK_TOP_Y + t * BASE.K]);
     }
-    list.sort((a, b) => a.x - b.x);
-    for (const p of list) if (p.x - lastX >= 5) { perches.push(p); lastX = p.x; }
+    list.sort((a, b) => a[0] - b[0]);
+    for (const [x, y] of list) if (x - lastX >= 5) { bdPerch(x, y, d.key); lastX = x; }
     // the hangar roof, every few metres, sitting right on the roofline (vents and all)
     const [ha] = hangarSpan(d), hTop = img.hangarTops;
     for (let x = ha + 6; x <= ha + HANGAR_W - 6; x += 9) {
       const col = Math.round((d.dir > 0 ? x - ha : ha + HANGAR_W - x) / HGR.K);
       if (hTop[col] >= HGR.H - 2) continue;
-      perches.push({ x, y: HANGAR_TOP + hTop[col] * HGR.K, dock: d.key, bird: null });
+      bdPerch(x, HANGAR_TOP + hTop[col] * HGR.K, d.key);
     }
     // the tower's top rail
     const tw = d._tw;
     if (tw) {
-      for (const ox of lhOn(tw) ? [-21, -16, 16, 21] : [-20, -12, 12, 20]) { const p = { x: tw.x + ox, ox, ox0: ox, y: 0, dock: d.key, bird: null, tower: tw }; p.y = towerPerchY(p); if (p.y != null) { p.fk = towerFrame(tw); p.hk = tw.hp; perches.push(p); } }   // (the lighthouse's gallery - user Oct 26: the birds were floating)
+      for (const ox of lhOn(tw) ? [-21, -16, 16, 21] : [-20, -12, 12, 20]) { const j = bdPerch(tw.x + ox, 0, d.key), P = perches.c; P.ox[j] = ox; P.ox0[j] = ox; P.tower[j] = tw; const y = towerPerchY(j); if (y != null) { P.y[j] = y; P.fk[j] = towerFrame(tw); P.hk[j] = tw.hp; } else perches.length = j; }   // (the lighthouse's gallery - user Oct 26: the birds were floating; no firm spot: none)
     }
     // lamp heads
-    for (const [lx, ly] of d.lamps) perches.push({ x: lx, y: ly - 1.5, dock: d.key, bird: null });
+    for (const [lx, ly] of d.lamps) bdPerch(lx, ly - 1.5, d.key);
   }
 }
 function buildBirds() {
   birds.length = 0; feathers.length = 0; gore.length = 0;
   buildPerches();
+  const B = birds.c, P = perches.c;
   for (const d of docks) {
-    const free = perches.filter(p => p.dock === d.key && !p.bird);
-    for (let i = 0; i < GULLS_PER_DOCK && free.length; i++) {
-      const p = free.splice(Math.floor(bdR() * free.length), 1)[0];
-      const b = { kind: 'gull', home: d.key, state: 'perch', spot: p, x: p.x, y: p.y, vx: 0, vy: 0, face: bdR() < 0.5 ? 1 : -1, ph: bdR() * 6, t: bdRnd(2, 8), scared: 0 };
-      p.bird = b; birds.push(b);
+    const free = []; for (let j = 0; j < perches.n; j++) if (P.dock[j] === d.key && !P.bird[j]) free.push(j);
+    for (let k = 0; k < GULLS_PER_DOCK && free.length; k++) {
+      const j = free.splice(Math.floor(bdR() * free.length), 1)[0], i = birds.add();
+      B.kind[i] = BK.gull; B.home[i] = d.key; B.st[i] = BS.perch; B.x[i] = P.x[j]; B.y[i] = P.y[j]; B.vx[i] = 0; B.vy[i] = 0;
+      B.face[i] = bdR() < 0.5 ? 1 : -1; B.ph[i] = bdR() * 6; B.t[i] = bdRnd(2, 8); B.scared[i] = 0;
+      bdSit(i, j);
     }
   }
   flocks = [];
@@ -15361,11 +15397,10 @@ function buildBirds() {
     const y = f % 2 ? bdRnd(60, 300) : bdRnd(WATER_Y - 2200, WATER_Y - 500);
     flocks.push({ x: bdRnd(0.05, 0.95) * WORLD_W, y, top: Math.min(30, y - 150), dir: bdR() < 0.5 ? 1 : -1, speed: bdRnd(30, 46), ph: bdR() * 6 });
   }
-  for (let i = birds.length; i < BIRD_TOTAL; i++) {
+  for (let i = birds.n; i < BIRD_TOTAL; i++) {
     const f = flocks[i % flocks.length];
-    const b = { kind: 'swift', flock: i % flocks.length, ox: bdRnd(-45, 45), oy: bdRnd(-20, 20), state: 'cruise', spot: null, ph: bdR() * 6, t: 0, scared: 0 };
-    b.x = f.x + b.ox; b.y = f.y + b.oy; b.vx = f.dir * f.speed; b.vy = 0; b.face = f.dir;
-    birds.push(b);
+    birds.add(); B.kind[i] = BK.swift; B.flock[i] = i % flocks.length; B.ox[i] = bdRnd(-45, 45); B.oy[i] = bdRnd(-20, 20); B.st[i] = BS.cruise; B.ph[i] = bdR() * 6; B.t[i] = 0; B.scared[i] = 0;
+    B.x[i] = f.x + B.ox[i]; B.y[i] = f.y + B.oy[i]; B.vx[i] = f.dir * f.speed; B.vy[i] = 0; B.face[i] = f.dir;
   }
 }
 function birdThreat(x, dock) {
@@ -15379,14 +15414,16 @@ function birdThreat(x, dock) {
   }
   return null;
 }
-function takeOff(b, awayX) {
-  if (b.spot) { b.spot.bird = null; b.spot = null; }
-  const dir = awayX === null || awayX === undefined ? (bdR() < 0.5 ? -1 : 1) : Math.sign(b.x - awayX || 1);
-  b.state = 'flee'; b.vx = dir * bdRnd(40, 75); b.vy = -bdRnd(50, 95); b.t = bdRnd(1.4, 3); b.face = dir;
+// bird i flies off its spot (if it has one), away from awayX (null: either way)
+function takeOff(i, awayX) {
+  const B = birds.c;
+  if (B.spot[i]) { const j = bdSpot(i); if (j >= 0) perches.c.bird[j] = 0; B.spot[i] = 0; }
+  const dir = awayX === null || awayX === undefined ? (bdR() < 0.5 ? -1 : 1) : Math.sign(B.x[i] - awayX || 1);
+  B.st[i] = BS.flee; B.vx[i] = dir * bdRnd(40, 75); B.vy[i] = -bdRnd(50, 95); B.t[i] = bdRnd(1.4, 3); B.face[i] = dir;
 }
 // (user Oct 27: "Birds ... may sit on air" - every kind: a tower's spot broken off or the tower down, a pier's spot gone
 // into the sea with it, a tree's felled or burnt)
-function perchGone(p) { return !!p.gone || !!(p.tower && (p.tower.hp <= 0 || p.broken)) || (!!p.plant && plantPerchGone(p)); }
+function perchGone(j) { const P = perches.c, tw = P.tower[j]; return j < 0 || !!P.gone[j] || !!(tw && (tw.hp <= 0 || P.broken[j])) || (!!P.plant[j] && plantPerchGone(j)); }   // (j -1: no perch)
 // how many solid rows there are from the top of each column of a drawing down (what a bird's feet would stand on)
 function artFoot(c) {
   if (c._foot) return c._foot;
@@ -15399,16 +15436,16 @@ function artFoot(c) {
 // sit on air") the spot must be firm: a few solid rows under the feet and the columns either side level with it - not a
 // loose pixel or a hanging scrap of a damage frame. Not firm at its own place, it looks a few columns either way (and
 // moves there); nothing firm near: the perch is gone
-function towerPerchY(p) {
-  const tw = p.tower, LH = lhOn(tw);
+function towerPerchY(j) {
+  const P = perches.c, tw = P.tower[j], LH = lhOn(tw);
   const c = LH ? lhArt(tw).c : img.towers[towerFrame(tw)][tw.facing], K = LH ? LH_K : TW.K, T = artTops(c), F = artFoot(c);
   const G = LH ? lhGeo(tw) : null, ax = LH ? (tw.facing > 0 ? G.base[0] : G.w - G.base[0]) : TW.FW / 2, by = LH ? G.base[1] : TW.FH;
   const firm = col => col >= 1 && col < T.length - 1 && T[col] < c.height - 1 && F[col] >= 3 && F[col - 1] >= 2 && F[col + 1] >= 2 && Math.abs(T[col - 1] - T[col]) <= 1 && Math.abs(T[col + 1] - T[col]) <= 1;
-  const c0 = Math.round(ax + p.ox0 / K);
+  const c0 = Math.round(ax + P.ox0[j] / K);
   for (const d of [0, 1, -1, 2, -2, 3, -3, 4, -4]) {
     const col = c0 + d;
     if (!firm(col)) continue;
-    p.ox = p.ox0 + d * K; p.x = tw.x + p.ox;
+    P.ox[j] = P.ox0[j] + d * K; P.x[j] = tw.x + P.ox[j];
     return twBase(tw) - (by - T[col]) * K;
   }
   return null;
@@ -15417,56 +15454,64 @@ function towerPerchY(p) {
 // changes (a new damage frame) its perches are found again on the new outline. Watched here, on its strength, so every
 // way a tower is hurt - shells, bombs, a plane, online - does it
 function trackTowerPerches() {
-  for (const p of perches) {
-    if (!p.tower || p.tower.hp <= 0) continue;
-    if (p.hk === p.tower.hp) continue;
-    const hit = p.hk != null && p.tower.hp < p.hk;
-    p.hk = p.tower.hp;
-    const fk = towerFrame(p.tower);
+  const P = perches.c;
+  for (let j = 0; j < perches.n; j++) {
+    const tw = P.tower[j];
+    if (!tw || tw.hp <= 0) continue;
+    if (P.hk[j] === tw.hp) continue;
+    const hit = P.hk[j] === P.hk[j] && tw.hp < P.hk[j];               // (NaN: never found on it yet)
+    P.hk[j] = tw.hp;
+    const fk = towerFrame(tw);
     let moved = false;
-    if (p.fk !== fk) { p.fk = fk; const x0 = p.x, y0 = p.y, y = towerPerchY(p); p.broken = y == null; if (y != null) p.y = y; moved = Math.abs(p.x - x0) + Math.abs(p.y - y0) > 1.5; }
-    if (p.bird && (hit || p.broken || moved)) { const b = p.bird; takeOff(b, p.tower.x); b.scared = 2.5; }   // (moved: mended, its outline changed under it)
+    if (P.fk[j] !== fk) { P.fk[j] = fk; const x0 = P.x[j], y0 = P.y[j], y = towerPerchY(j); P.broken[j] = y == null ? 1 : 0; if (y != null) P.y[j] = y; moved = Math.abs(P.x[j] - x0) + Math.abs(P.y[j] - y0) > 1.5; }
+    if (P.bird[j] && (hit || P.broken[j] || moved)) { const i = bdOn(j); takeOff(i, tw.x); birds.c.scared[i] = 2.5; }   // (moved: mended, its outline changed under it)
   }
 }
-function findPerch(b, preferDock) {
-  let best = null, bd = 1e9;
-  for (const p of perches) {
-    if (p.bird) continue;
-    if (perchGone(p)) continue;                                   // nothing left to sit on
-    if (birdThreat(p.x, p.dock) !== null) continue;
-    let d = Math.abs(p.x - b.x) + Math.abs(p.y - b.y);
-    if (preferDock !== undefined && p.dock !== preferDock) d += 4000;
-    if (d < bd) { bd = d; best = p; }
+// the nearest free perch for bird i, nothing threatening it (preferDock: that harbour's first), or -1
+function findPerch(i, preferDock) {
+  const B = birds.c, P = perches.c, bx = B.x[i], by = B.y[i];
+  let best = -1, bd = 1e9;
+  for (let j = 0; j < perches.n; j++) {
+    if (P.bird[j]) continue;
+    if (perchGone(j)) continue;                                   // nothing left to sit on
+    if (birdThreat(P.x[j], P.dock[j]) !== null) continue;
+    let d = Math.abs(P.x[j] - bx) + Math.abs(P.y[j] - by);
+    if (preferDock !== undefined && P.dock[j] !== preferDock) d += 4000;
+    if (d < bd) { bd = d; best = j; }
   }
   return best;
 }
-function steerBird(b, tx, ty, maxSp, k, dt) {
-  const dx = tx - b.x, dy = ty - b.y, d = Math.hypot(dx, dy) || 1;
+function steerBird(i, tx, ty, maxSp, k, dt) {
+  const B = birds.c, dx = tx - B.x[i], dy = ty - B.y[i], d = Math.hypot(dx, dy) || 1;
   const sp = Math.min(maxSp, d * 1.6);
-  b.vx += (dx / d * sp - b.vx) * Math.min(1, k * dt);
-  b.vy += (dy / d * sp - b.vy) * Math.min(1, k * dt);
+  B.vx[i] += (dx / d * sp - B.vx[i]) * Math.min(1, k * dt);
+  B.vy[i] += (dy / d * sp - B.vy[i]) * Math.min(1, k * dt);
 }
-const birdLive = b => b.state !== 'dead' && b.state !== 'gone' && b.state !== 'sink' && b.state !== 'bed';
-function killBird(b, vx = 0, vy = 0) {
-  if (!birdLive(b)) return;
-  if (b.spot) { b.spot.bird = null; b.spot = null; }
-  b.state = 'dead'; b.vx = b.vx * 0.3 + vx; b.vy = Math.min(b.vy, 0) * 0.3 + vy - 20; b.spin = bdRnd(-12, 12); b.rot = 0;
+const birdLive = i => { const s = birds.c.st[i]; return s !== BS.dead && s !== BS.gone && s !== BS.sink && s !== BS.bed; };
+function killBird(i, vx = 0, vy = 0) {
+  if (!birdLive(i)) return;
+  const B = birds.c;
+  if (B.spot[i]) { const j = bdSpot(i); if (j >= 0) perches.c.bird[j] = 0; B.spot[i] = 0; }
+  B.st[i] = BS.dead; B.vx[i] = B.vx[i] * 0.3 + vx; B.vy[i] = Math.min(B.vy[i], 0) * 0.3 + vy - 20; B.spin[i] = bdRnd(-12, 12); B.rot[i] = 0;
   // a little burst of blood that rains down after it
-  for (let i = 0; i < (b.kind === 'gull' ? 14 : 9); i++) { const a = bdRnd(0, 6.28), sp = bdRnd(10, 45); gore.push({ x: b.x + bdRnd(-1, 1), y: b.y + bdRnd(-1, 1), vx: Math.cos(a) * sp + vx * 0.08, vy: Math.sin(a) * sp + vy * 0.08, life: 0, max: bdRnd(0.35, 0.7) }); }
+  const gull = B.kind[i] === BK.gull, x = B.x[i], y = B.y[i];
+  for (let k = 0; k < (gull ? 14 : 9); k++) { const a = bdRnd(0, 6.28), sp = bdRnd(10, 45); gore.push({ x: x + bdRnd(-1, 1), y: y + bdRnd(-1, 1), vx: Math.cos(a) * sp + vx * 0.08, vy: Math.sin(a) * sp + vy * 0.08, life: 0, max: bdRnd(0.35, 0.7) }); }
   if (gore.length > 400) gore.splice(0, gore.length - 400);
-  for (let i = 0; i < (b.kind === 'gull' ? 10 : 5); i++) feathers.push({ x: b.x + bdRnd(-2, 2), y: b.y + bdRnd(-2, 2), vx: bdRnd(-30, 30) + vx * 0.2, vy: bdRnd(-40, 5), life: 0, max: bdRnd(5, 9), ph: bdR() * 6, dark: b.kind === 'swift' || bdR() < 0.3 });
+  for (let k = 0; k < (gull ? 10 : 5); k++) feathers.push({ x: x + bdRnd(-2, 2), y: y + bdRnd(-2, 2), vx: bdRnd(-30, 30) + vx * 0.2, vy: bdRnd(-40, 5), life: 0, max: bdRnd(5, 9), ph: bdR() * 6, dark: !gull || bdR() < 0.3 });
 }
 function birdStrike(x, y, r, vx, vy) {
-  for (const b of birds) if (Math.abs(b.x - x) < r && Math.abs(b.y - y) < r && birdLive(b)) killBird(b, vx === undefined ? bdRnd(-30, 30) : vx * 0.25 + bdRnd(-20, 20), vy === undefined ? 0 : vy * 0.25 - 20);
+  const B = birds.c;
+  for (let i = 0; i < birds.n; i++) if (Math.abs(B.x[i] - x) < r && Math.abs(B.y[i] - y) < r && birdLive(i)) killBird(i, vx === undefined ? bdRnd(-30, 30) : vx * 0.25 + bdRnd(-20, 20), vy === undefined ? 0 : vy * 0.25 - 20);
 }
 function scareBirds(x, y, r) {
-  for (const b of birds) {
-    if (!birdLive(b)) continue;
-    const dx = b.x - x, dy = b.y - y, d = Math.hypot(dx, dy);
+  const B = birds.c;
+  for (let i = 0; i < birds.n; i++) {
+    if (!birdLive(i)) continue;
+    const dx = B.x[i] - x, dy = B.y[i] - y, d = Math.hypot(dx, dy);
     if (d > r) continue;
-    if (b.state === 'perch' || b.state === 'land') takeOff(b, x);
-    else { b.vx += dx / (d || 1) * 70; b.vy -= 45; }
-    b.scared = 2.5;
+    if (B.st[i] === BS.perch || B.st[i] === BS.land) takeOff(i, x);
+    else { B.vx[i] += dx / (d || 1) * 70; B.vy[i] -= 45; }
+    B.scared[i] = 2.5;
   }
 }
 // A gun goes off: every flock in earshot turns away from it and climbs; a few birds break from each flock
@@ -15480,9 +15525,10 @@ function startleFlocks(x) {
     f.dir = Math.sign(f.x - x) || (bdR() < 0.5 ? -1 : 1);
     f.boost = 1;
     let splinter = null;
-    for (const b of birds) {
-      if (b.kind !== 'swift' || b.flock !== fi || b.state !== 'cruise') continue;
-      b.scared = 2.5;
+    const B = birds.c;
+    for (let i = 0; i < birds.n; i++) {
+      if (B.kind[i] !== BK.swift || B.flock[i] !== fi || B.st[i] !== BS.cruise) continue;
+      B.scared[i] = 2.5;
       if (bdR() > 0.16) continue;
       if (!splinter || bdR() < 0.3) {
         let slot = flocks.findIndex(g => g.merged);
@@ -15491,18 +15537,20 @@ function startleFlocks(x) {
                      speed: f.speed * bdRnd(0.85, 1.2), ph: bdR() * 6, boost: 1, split: bdRnd(6, 12), slot };
         flocks[slot] = splinter;
       }
-      b.flock = splinter.slot; b.ox = bdRnd(-22, 22); b.oy = bdRnd(-12, 12);
+      B.flock[i] = splinter.slot; B.ox[i] = bdRnd(-22, 22); B.oy[i] = bdRnd(-12, 12);
     }
   }
   // gulls wheeling over the harbour scatter away from the bang too
-  for (const b of birds) {
-    if (b.kind !== 'gull' || (b.state !== 'circle' && b.state !== 'flee') || Math.abs(b.x - x) > hear * 0.6) continue;
-    const dir = Math.sign(b.x - x) || 1;
-    b.state = 'flee'; b.vx = dir * bdRnd(50, 80); b.vy = -bdRnd(30, 70); b.t = bdRnd(1.5, 3); b.face = dir; b.scared = 2.5;
+  const B = birds.c;
+  for (let i = 0; i < birds.n; i++) {
+    if (B.kind[i] !== BK.gull || (B.st[i] !== BS.circle && B.st[i] !== BS.flee) || Math.abs(B.x[i] - x) > hear * 0.6) continue;
+    const dir = Math.sign(B.x[i] - x) || 1;
+    B.st[i] = BS.flee; B.vx[i] = dir * bdRnd(50, 80); B.vy[i] = -bdRnd(30, 70); B.t[i] = bdRnd(1.5, 3); B.face[i] = dir; B.scared[i] = 2.5;
   }
 }
 function killBirdsNear(x, y, r) {
-  for (const b of birds) if (birdLive(b) && Math.hypot(b.x - x, b.y - y) < r) killBird(b, (b.x - x) * 2, (b.y - y) * 2);
+  const B = birds.c;
+  for (let i = 0; i < birds.n; i++) if (birdLive(i) && Math.hypot(B.x[i] - x, B.y[i] - y) < r) killBird(i, (B.x[i] - x) * 2, (B.y[i] - y) * 2);
 }
 // (engine stage 3) a blast ('blast', 36-zz-events.js): birds scared off far round it, the nearest killed
 on('blast', e => { scareBirds(e.x, e.y, e.r * 3.5); killBirdsNear(e.x, e.y, e.r * 0.35); }, 'birds', 10);
@@ -15529,7 +15577,7 @@ function stepBirds(dt) {
     for (let j = 0; j < flocks.length; j++) {
       const g = flocks[j];
       if (j === i || g.dir !== f.dir || g.merged || Math.abs(g.x - f.x) > 60 || Math.abs(g.y - f.y) > 50) continue;
-      for (const b of birds) if (b.flock === i) b.flock = j;
+      { const B = birds.c; for (let q = 0; q < birds.n; q++) if (B.flock[q] === i) B.flock[q] = j; }
       f.merged = true; break;
     }
   }
@@ -15540,9 +15588,10 @@ function stepBirds(dt) {
   // follow), their merging and the perches' tracking stay every step, so a far swift catches up with where its flock is now.
   // Pinned (every step wherever it is): one scared, falling dead, sinking, fleeing or coming in to land
   { const t0 = performance.now(), S = schedSystem('birds', 0.5, 1 / 15, true);
-    for (let i = birds.length - 1; i >= 0; i--) {
-      const b = birds[i];
-      schedStep(S, b, b.x, dt, h => stepBird(b, h, shelter, gale), b.scared > 0 || b.state === 'dead' || b.state === 'sink' || b.state === 'flee' || b.state === 'land');
+    const B = birds.c;
+    for (let i = birds.n - 1; i >= 0; i--) {
+      const st = B.st[i];
+      schedStep(S, birds.at(i), B.x[i], dt, h => stepBird(i, h, shelter, gale), B.scared[i] > 0 || st === BS.dead || st === BS.sink || st === BS.flee || st === BS.land);
     }
     S.t += performance.now() - t0;
   }
@@ -15560,110 +15609,116 @@ function stepBirds(dt) {
     if (f.y > surfaceY(f.x) || f.life > f.max) feathers.splice(i, 1);
   }
 }
-function stepBird(b, dt, shelter, gale) {
-    b.scared = Math.max(0, b.scared - dt);
-    b.ph += dt;
-    if (b.state === 'gone') return;
-    if (b.state === 'dead') {
-      b.vy += 300 * dt; b.vx += (windAt(b.y) * 0.3 - b.vx) * 0.5 * dt;
-      b.x += b.vx * dt; b.y += b.vy * dt; b.rot += b.spin * dt;
-      const sy = surfaceY(b.x);
-      if (b.y > sy) { spawnFoam(b.x, bdRnd(1, 2)); water.push(b.x, -150); addBubble(b.x, sy + 3, 0, -15, 1); b.state = 'sink'; b.vy = Math.min(b.vy, 40); b.vx *= 0.3; }
+function stepBird(i, dt, shelter, gale) {
+    const B = birds.c, P = perches.c;
+    B.scared[i] = Math.max(0, B.scared[i] - dt);
+    B.ph[i] += dt;
+    const st = B.st[i];
+    if (st === BS.gone) return;
+    if (st === BS.dead) {
+      B.vy[i] += 300 * dt; B.vx[i] += (windAt(B.y[i]) * 0.3 - B.vx[i]) * 0.5 * dt;
+      B.x[i] += B.vx[i] * dt; B.y[i] += B.vy[i] * dt; B.rot[i] += B.spin[i] * dt;
+      const sy = surfaceY(B.x[i]);
+      if (B.y[i] > sy) { spawnFoam(B.x[i], bdRnd(1, 2)); water.push(B.x[i], -150); addBubble(B.x[i], sy + 3, 0, -15, 1); B.st[i] = BS.sink; B.vy[i] = Math.min(B.vy[i], 40); B.vx[i] *= 0.3; }
       return;
     }
     // into the sea: it goes slowly down to the bottom and lies there a while
-    if (b.state === 'sink') {
-      b.vy += (16 - b.vy) * 1.5 * dt; b.vx *= 1 - 1.5 * dt;
-      b.x += (b.vx + Math.sin(b.ph * 1.7) * 4) * dt; b.y += b.vy * dt; b.rot += Math.sin(b.ph) * 0.8 * dt;
-      if (bdR() < dt * 0.8) addBubble(b.x, b.y - 1, 0, -12, 0.7);
-      const bed = seabedY(b.x) - 1;
-      if (b.y >= bed) { b.y = bed; b.state = 'bed'; b.t = bdRnd(60, 120); kickDust(b.x, 4, 0.4); }
+    if (st === BS.sink) {
+      B.vy[i] += (16 - B.vy[i]) * 1.5 * dt; B.vx[i] *= 1 - 1.5 * dt;
+      B.x[i] += (B.vx[i] + Math.sin(B.ph[i] * 1.7) * 4) * dt; B.y[i] += B.vy[i] * dt; B.rot[i] += Math.sin(B.ph[i]) * 0.8 * dt;
+      if (bdR() < dt * 0.8) addBubble(B.x[i], B.y[i] - 1, 0, -12, 0.7);
+      const bed = seabedY(B.x[i]) - 1;
+      if (B.y[i] >= bed) { B.y[i] = bed; B.st[i] = BS.bed; B.t[i] = bdRnd(60, 120); kickDust(B.x[i], 4, 0.4); }
       return;
     }
-    if (b.state === 'bed') { b.t -= dt; if (b.t <= 0) b.state = 'gone'; return; }
-    if (b.state === 'perch') {
-      if (perchGone(b.spot)) { takeOff(b, null); return; }
-      b.x = b.spot.x; b.y = b.spot.y;
-      const th = birdThreat(b.x, b.spot.dock);
-      if (th !== null) { takeOff(b, th); return; }
-      b.t -= dt;
-      if (b.t <= 0) {
-        b.t = bdRnd(2, 8);
-        if (bdR() < 0.35) b.face *= -1;                       // look around
-        if (!shelter && (b.tree ? bdR() < 0.05 : b.kind === 'swift' ? bdR() < 0.5 : bdR() < 0.06)) takeOff(b, null);
+    if (st === BS.bed) { B.t[i] -= dt; if (B.t[i] <= 0) B.st[i] = BS.gone; return; }
+    if (st === BS.perch) {
+      const j = bdSpot(i);
+      if (perchGone(j)) { takeOff(i, null); return; }
+      B.x[i] = P.x[j]; B.y[i] = P.y[j];
+      const th = birdThreat(B.x[i], P.dock[j]);
+      if (th !== null) { takeOff(i, th); return; }
+      B.t[i] -= dt;
+      if (B.t[i] <= 0) {
+        B.t[i] = bdRnd(2, 8);
+        if (bdR() < 0.35) B.face[i] *= -1;                       // look around
+        if (!shelter && (B.tree[i] ? bdR() < 0.05 : B.kind[i] === BK.swift ? bdR() < 0.5 : bdR() < 0.06)) takeOff(i, null);
       }
       return;
     }
-    const flying = { maxSp: b.kind === 'gull' ? 70 : 85 };
-    if (b.state === 'flee') {
-      b.t -= dt;
-      b.vy += 15 * dt;
-      if (b.t <= 0) { b.state = b.kind === 'gull' || b.tree ? 'circle' : 'cruise'; b.t = bdRnd(5, 14); }
-    } else if (b.state === 'circle' && b.tree) {
+    const maxSp = B.kind[i] === BK.gull ? 70 : 85;
+    if (st === BS.flee) {
+      B.t[i] -= dt;
+      B.vy[i] += 15 * dt;
+      if (B.t[i] <= 0) { B.st[i] = B.kind[i] === BK.gull || B.tree[i] ? BS.circle : BS.cruise; B.t[i] = bdRnd(5, 14); }
+    } else if (st === BS.circle && B.tree[i]) {
       // (a bird of the trees: round over them a while, then down onto a free spot in a tree near its own - 50-land-plants)
-      const gy = landTop(clamp(b.hx, 1, WORLD_W - 1));
-      steerBird(b, b.hx + Math.sin(time * 0.3 + b.ph * 3) * 200, gy - 170 + Math.sin(time * 0.5 + b.ph * 5) * 40, flying.maxSp * 0.7, 0.8, dt);
-      b.t -= dt;
-      if (b.t <= 0) {
-        b.t = bdRnd(2, 5);
-        let best = null, bd = 1e9;
-        for (const p of perches) { if (!p.plant || p.bird || perchGone(p) || birdThreat(p.x, -1) !== null) return; const d = Math.abs(p.x - b.hx); if (d < bd && d < 2500) { bd = d; best = p; } }
-        if (best) { b.state = 'land'; b.spot = best; best.bird = b; b.hx = best.x; }
+      const gy = landTop(clamp(B.hx[i], 1, WORLD_W - 1));
+      steerBird(i, B.hx[i] + Math.sin(time * 0.3 + B.ph[i] * 3) * 200, gy - 170 + Math.sin(time * 0.5 + B.ph[i] * 5) * 40, maxSp * 0.7, 0.8, dt);
+      B.t[i] -= dt;
+      if (B.t[i] <= 0) {
+        B.t[i] = bdRnd(2, 5);
+        let best = -1, bd = 1e9;
+        for (let j = 0; j < perches.n; j++) { if (!P.plant[j] || P.bird[j] || perchGone(j) || birdThreat(P.x[j], -1) !== null) return; const d = Math.abs(P.x[j] - B.hx[i]); if (d < bd && d < 2500) { bd = d; best = j; } }
+        if (best >= 0) { B.st[i] = BS.land; bdSit(i, best); B.hx[i] = P.x[best]; }
       }
-    } else if (b.state === 'circle') {
-      const home = docks[b.home] || docks[0], hx = home.x0 + home.w / 2;
-      const tx = hx + Math.sin(time * 0.25 + b.ph * 3) * 220, ty = 170 + Math.sin(time * 0.4 + b.ph * 5) * 60;
-      steerBird(b, tx, ty, flying.maxSp * 0.75, 0.8, dt);
-      b.t -= dt;
-      if (b.t <= 0) {
-        b.t = bdRnd(3, 8);
-        const p = findPerch(b, shelter ? undefined : b.home);
-        if (p && (shelter || p.dock === b.home)) { b.state = 'land'; b.spot = p; p.bird = b; }
+    } else if (st === BS.circle) {
+      const home = docks[B.home[i]] || docks[0], hx = home.x0 + home.w / 2;
+      const tx = hx + Math.sin(time * 0.25 + B.ph[i] * 3) * 220, ty = 170 + Math.sin(time * 0.4 + B.ph[i] * 5) * 60;
+      steerBird(i, tx, ty, maxSp * 0.75, 0.8, dt);
+      B.t[i] -= dt;
+      if (B.t[i] <= 0) {
+        B.t[i] = bdRnd(3, 8);
+        const j = findPerch(i, shelter ? undefined : B.home[i]);
+        if (j >= 0 && (shelter || P.dock[j] === B.home[i])) { B.st[i] = BS.land; bdSit(i, j); }
       }
-    } else if (b.state === 'cruise') {
-      const f = flocks[b.flock];
-      steerBird(b, f.x + b.ox + Math.sin(time * 0.7 + b.ph) * 8, f.y + b.oy + Math.sin(time * 1.1 + b.ph * 2) * 5, (f.v || f.speed) * 1.8, 1.4 + f.boost * 1.5, dt);
+    } else if (st === BS.cruise) {
+      const f = flocks[B.flock[i]];
+      steerBird(i, f.x + B.ox[i] + Math.sin(time * 0.7 + B.ph[i]) * 8, f.y + B.oy[i] + Math.sin(time * 1.1 + B.ph[i] * 2) * 5, (f.v || f.speed) * 1.8, 1.4 + f.boost * 1.5, dt);
       if (shelter) {
-        b.t -= dt;
-        if (b.t <= 0) { b.t = bdRnd(0.5, 2); const p = findPerch(b); if (p) { b.state = 'land'; b.spot = p; p.bird = b; } }
+        B.t[i] -= dt;
+        if (B.t[i] <= 0) { B.t[i] = bdRnd(0.5, 2); const j = findPerch(i); if (j >= 0) { B.st[i] = BS.land; bdSit(i, j); } }
       }
-    } else if (b.state === 'land') {
-      const p = b.spot;
-      if (perchGone(p) || birdThreat(p.x, p.dock) !== null) { takeOff(b, null); return; }   // (its spot broke away while it flew in: another, user Oct 27)
-      steerBird(b, p.x, p.y, flying.maxSp * (shelterNow ? 1.8 : 1.2), 2.2, dt);
-      if (Math.hypot(p.x - b.x, p.y - b.y) < 2.2) { b.state = 'perch'; b.vx = b.vy = 0; b.t = bdRnd(3, 9); return; }
+    } else if (st === BS.land) {
+      const j = bdSpot(i);
+      if (perchGone(j) || birdThreat(P.x[j], P.dock[j]) !== null) { takeOff(i, null); return; }   // (its spot broke away while it flew in: another, user Oct 27)
+      steerBird(i, P.x[j], P.y[j], maxSp * (shelterNow ? 1.8 : 1.2), 2.2, dt);
+      if (Math.hypot(P.x[j] - B.x[i], P.y[j] - B.y[i]) < 2.2) { B.st[i] = BS.perch; B.vx[i] = B.vy[i] = 0; B.t[i] = bdRnd(3, 9); return; }
     }
     // the wind shoves anything in the air around
-    b.x += windAt(b.y) * (b.state === 'land' ? 0.12 : 0.25 + 0.35 * gale) * dt + Math.sin(time * 3 + b.ph * 7) * gale * 14 * dt;
-    b.x += b.vx * dt; b.y += b.vy * dt;
-    const floor = (b.state === 'land' ? b.spot.y : b.y < WATER_Y - 140 ? WATER_Y : surfaceY(b.x) - 14);   // (high up, the sea's height doesn't matter: not worked out - the perf pass, Oct 26)
-    if (b.y > floor && b.state !== 'land') { b.y = floor; b.vy = Math.min(b.vy, -10); }
-    b.y = Math.max(b.y, SKY_TOP + 100);
-    if (Math.abs(b.vx) > 3) b.face = Math.sign(b.vx);
+    const now = B.st[i];
+    B.x[i] += windAt(B.y[i]) * (now === BS.land ? 0.12 : 0.25 + 0.35 * gale) * dt + Math.sin(time * 3 + B.ph[i] * 7) * gale * 14 * dt;
+    B.x[i] += B.vx[i] * dt; B.y[i] += B.vy[i] * dt;
+    const floor = (now === BS.land ? P.y[bdSpot(i)] : B.y[i] < WATER_Y - 140 ? WATER_Y : surfaceY(B.x[i]) - 14);   // (high up, the sea's height doesn't matter: not worked out - the perf pass, Oct 26)
+    if (B.y[i] > floor && now !== BS.land) { B.y[i] = floor; B.vy[i] = Math.min(B.vy[i], -10); }
+    B.y[i] = Math.max(B.y[i], SKY_TOP + 100);
+    if (Math.abs(B.vx[i]) > 3) B.face[i] = Math.sign(B.vx[i]);
 }
 function drawBirds(x0, x1) {
-  for (const b of birds) {
-    if (b.state === 'gone' || b.x < x0 - 20 || b.x > x1 + 20) continue;
-    const gull = b.kind === 'gull';
+  const B = birds.c;
+  for (let i = 0; i < birds.n; i++) {
+    const st = B.st[i], bx = B.x[i], by = B.y[i];
+    if (st === BS.gone || bx < x0 - 20 || bx > x1 + 20) continue;
+    const gull = B.kind[i] === BK.gull, tree = B.tree[i], ph = B.ph[i], scared = B.scared[i], down = st === BS.dead || st === BS.sink || st === BS.bed;
     // gulls at half their old size: the full sprite once it's at least a pixel per pixel, a small one below that
     const gs = 0.375 * SV, mini = gull && gs < 0.75;
     // (zoomed out they keep shrinking with the view, user Oct 24 night: the small sprite is drawn at the size the big
     // one would have, not stuck at one pixel a pixel)
-    let s = gull ? (mini ? 1 : Math.max(1, Math.round(gs))) : b.tree ? Math.max(1, Math.round(0.6 * SV)) : pixK(0.65);
+    let s = gull ? (mini ? 1 : Math.max(1, Math.round(gs))) : tree ? Math.max(1, Math.round(0.6 * SV)) : pixK(0.65);
     let set;
-    if (b.tree && b.state !== 'dead' && b.state !== 'sink' && b.state !== 'bed') set = b.state === 'perch' ? img.birds.songPerch : img.birds.song[Math.floor(b.ph * (b.scared > 0 ? 14 : 9)) % 2];
-    else if (b.state === 'perch') set = gull ? (mini ? img.birds.gullMiniPerch : img.birds.gullPerch) : img.birds.swiftPerch;
+    if (tree && !down) set = st === BS.perch ? img.birds.songPerch : img.birds.song[Math.floor(ph * (scared > 0 ? 14 : 9)) % 2];
+    else if (st === BS.perch) set = gull ? (mini ? img.birds.gullMiniPerch : img.birds.gullPerch) : img.birds.swiftPerch;
     else if (gull) {
-      const flapping = b.state === 'flee' || b.state === 'land' || b.vy < -8 || b.scared > 0 || Math.abs(env.wind) > 0.5;
-      const fr = flapping ? [0, 1, 2, 1][Math.floor(b.ph * 11) % 4] : (Math.sin(b.ph * 0.9) > 0.85 ? [0, 1, 2, 1][Math.floor(b.ph * 8) % 4] : 1);
+      const flapping = st === BS.flee || st === BS.land || B.vy[i] < -8 || scared > 0 || Math.abs(env.wind) > 0.5;
+      const fr = flapping ? [0, 1, 2, 1][Math.floor(ph * 11) % 4] : (Math.sin(ph * 0.9) > 0.85 ? [0, 1, 2, 1][Math.floor(ph * 8) % 4] : 1);
       set = (mini ? img.birds.gullMini : img.birds.gull)[fr];
-    } else set = img.birds.swift[Math.floor(b.ph * (b.scared > 0 ? 14 : 9)) % 2];
-    const sp0 = b.face > 0 ? set.r : set.l, sp = b.tree && GLR.on ? glTint(sp0, 'bdT', E.fx || [1, 1, 1], [0, 0, 0], false) : sp0;   // (a tree bird in its colours: lit by the hour)
+    } else set = img.birds.swift[Math.floor(ph * (scared > 0 ? 14 : 9)) % 2];
+    const sp0 = B.face[i] > 0 ? set.r : set.l, sp = tree && GLR.on ? glTint(sp0, 'bdT', E.fx || [1, 1, 1], [0, 0, 0], false) : sp0;   // (a tree bird in its colours: lit by the hour)
     if (mini) { const full = img.birds.gull[1].r.width * gs; s = Math.min(1, full / sp.width); }
     const w = Math.max(1, Math.round(sp.width * s)), h = Math.max(1, Math.round(sp.height * s));
-    const px = PX(b.x) - (w >> 1), py = b.state === 'perch' ? PY(b.y) - h : PY(b.y) - (h >> 1);
-    if (b.state === 'dead' || b.state === 'sink' || b.state === 'bed') {
-      C.save(); C.translate(PX(b.x), PY(b.y)); C.rotate(Math.round(b.rot * 2) / 2); C.drawImage(sp, -(w >> 1), -(h >> 1), w, h); C.restore();
+    const px = PX(bx) - (w >> 1), py = st === BS.perch ? PY(by) - h : PY(by) - (h >> 1);
+    if (down) {
+      C.save(); C.translate(PX(bx), PY(by)); C.rotate(Math.round(B.rot[i] * 2) / 2); C.drawImage(sp, -(w >> 1), -(h >> 1), w, h); C.restore();
     } else C.drawImage(sp, px, py, w, h);
   }
   C.fillStyle = '#b3141a';
@@ -40642,16 +40697,17 @@ function crownTops(im) {
   for (let x = 0; x < W; x++) { let y = 0; while (y < H && !m[y * W + x]) y++; T[x] = y; }
   return (im._ct = T);
 }
-function plantPerchY(p) {
-  const it = p.plant, G = plantGeo(it); if (!G) return null;
-  const T = crownTops(G.im), col = it.flip ? G.im.width - 1 - p.col : p.col, top = T[col];
+// (perch j: a row of the birds' perches - 37-birds.js, its tree in plant and its column in col)
+function plantPerchY(j) {
+  const it = perches.c.plant[j], G = plantGeo(it); if (!G) return null;
+  const T = crownTops(G.im), col = it.flip ? G.im.width - 1 - perches.c.col[j] : perches.c.col[j], top = T[col];
   if (top >= G.im.height - 2) return null;
   return propTop(it) + G.sink - G.h + top * G.k + 0.5;
 }
 // (built with the plants, after the birds - buildWorld makes the birds first: some of the small birds move into the trees)
 function plantPerches() {
-  if (typeof perches === 'undefined' || !birds.length) return;
-  const mine = [];
+  if (!birds.n) return;
+  const mine = [], P = perches.c;
   for (const it of land.props || []) {
     if (it.kind !== 'tree' && it.kind !== 'palm') continue;
     const G = plantGeo(it); if (!G) continue;
@@ -40662,24 +40718,27 @@ function plantPerches() {
       let best = -1, bt = 1e9;
       for (let x = Math.floor(W * (f - 0.12)); x <= Math.ceil(W * (f + 0.12)); x++) if (x >= 1 && x < W - 1 && T[x] < bt && Math.abs(T[x - 1] - T[x]) <= 1 && Math.abs(T[x + 1] - T[x]) <= 1) { bt = T[x]; best = x; }
       if (best < 0 || bt > tmin + G.im.height * 0.25) continue;
-      const col = it.flip ? W - 1 - best : best, p = { x: it.x - (it.flip ? G.w - G.fo : G.fo) + (col + 0.5) * G.k, y: 0, dock: -1, bird: null, plant: it, col: best };
-      p.y = plantPerchY(p); if (p.y == null) continue;
-      perches.push(p); mine.push(p);
+      const col = it.flip ? W - 1 - best : best, j = bdPerch(it.x - (it.flip ? G.w - G.fo : G.fo) + (col + 0.5) * G.k, 0, -1);
+      P.plant[j] = it; P.col[j] = best;
+      const y = plantPerchY(j); if (y == null) { perches.length = j; continue; }   // (no spot there: none)
+      P.y[j] = y; mine.push(j);
     }
   }
   // (about every third spot taken by a small bird from the flocks, sitting there at the start)
-  let k = birds.length - 1;
-  for (const p of mine) {
-    if (hash(p.x * 0.017) > 0.4) continue;
-    while (k >= 0 && (birds[k].kind !== 'swift' || birds[k].tree)) k--;
+  let k = birds.n - 1;
+  const B = birds.c;
+  for (const j of mine) {
+    if (hash(P.x[j] * 0.017) > 0.4) continue;
+    while (k >= 0 && (B.kind[k] !== BK.swift || B.tree[k])) k--;
     if (k < 0) break;
-    const b = birds[k--];
-    Object.assign(b, { tree: true, hx: p.x, state: 'perch', spot: p, x: p.x, y: p.y, vx: 0, vy: 0, flock: b.flock, t: bdRnd(3, 9), face: bdR() < 0.5 ? 1 : -1 });   // (the birds' own random source - 37-birds)
-    p.bird = b;
+    const i = k--;
+    B.tree[i] = 1; B.hx[i] = P.x[j]; B.st[i] = BS.perch; B.x[i] = P.x[j]; B.y[i] = P.y[j]; B.vx[i] = 0; B.vy[i] = 0;
+    B.t[i] = bdRnd(3, 9); B.face[i] = bdR() < 0.5 ? 1 : -1;   // (the birds' own random source - 37-birds)
+    bdSit(i, j);
   }
 }
 // a tree spot gone (the tree down, burning, its leaves gone)
-const plantPerchGone = p => !p.plant || p.plant.state !== 'stand' || p.plant.fire > 0 || p.plant.leaf < 0.5 || lakeAt(p.plant.x);
+const plantPerchGone = j => { const it = perches.c.plant[j]; return !it || it.state !== 'stand' || it.fire > 0 || it.leaf < 0.5 || lakeAt(it.x); };
 // something close to the tree: what the birds in it fly from (null: nothing)
 function plantPerchThreat(x) {
   for (const t of tanks) if (t && t.state === 'alive' && Math.abs(t.x - x) < 160 && Math.abs(t.vx) > 4) return t.x;
@@ -40691,10 +40750,11 @@ function plantPerchThreat(x) {
 // each frame (stepBirds): every tree spot on its crown as it is now; a bird whose tree went flies off
 function trackPlantPerches() {
   if (!OWM) return;
-  for (const p of perches) {
-    if (!p.plant) continue;
-    if (plantPerchGone(p)) { if (p.bird) takeOff(p.bird, p.plant.x); continue; }
-    const y = plantPerchY(p); if (y != null) p.y = y;
+  const P = perches.c;
+  for (let j = 0; j < perches.n; j++) {
+    if (!P.plant[j]) continue;
+    if (plantPerchGone(j)) { if (P.bird[j]) takeOff(bdOn(j), P.plant[j].x); continue; }
+    const y = plantPerchY(j); if (y != null) P.y[j] = y;
   }
 }
 
@@ -45962,8 +46022,9 @@ function landEdited() {
   if (!LAND || !land.cell) return;
   const t0 = performance.now();
   // the trees' spots for the birds go with the trees (the birds in them fly off)
-  for (const b of birds) if (b.spot && b.spot.plant) takeOff(b, null);
-  if (typeof perches !== 'undefined') perches = perches.filter(p => !p.plant);
+  for (let i = 0; i < birds.n; i++) { const j = bdSpot(i); if (j >= 0 && perches.c.plant[j]) takeOff(i, null); }
+  for (let j = 0; j < perches.n; j++) if (perches.c.plant[j]) perches.drop(j);
+  perches.sweep();
   looseStones.length = 0; landWake.length = 0;
   buildLand();
   // the lakes' boats: made again on the lakes as they are now (none where a lake is gone, some on a new one)
