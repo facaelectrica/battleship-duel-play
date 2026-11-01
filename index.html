@@ -2329,9 +2329,12 @@ function addForce(x, f) { const i = Math.round(x / DX); if (i > 0 && i < N - 1) 
 // (a function, not an event: the pushes come a column at a time, hundreds a frame, in the callers' own loops - the same
 // arithmetic, in the same order, with no event object for each)
 const water = { push: addForce, shock };
+// (Oct 31, 80-fps work: the gust is the clock's alone - worked out once for each moment, not for every puff, shell and spark that
+// asks: the same number)
+const WGUST = { t: NaN, g: 1 };
 function windAt(y) {
-  const gust = 1 + 0.25 * Math.sin(time * 0.31) + 0.15 * Math.sin(time * 1.13 + 2);
-  return E.windU * gust * (0.45 + 0.55 * clamp((WATER_Y - y) / 500, 0, 1.6));
+  if (WGUST.t !== time) { WGUST.t = time; WGUST.g = 1 + 0.25 * Math.sin(time * 0.31) + 0.15 * Math.sin(time * 1.13 + 2); }
+  return E.windU * WGUST.g * (0.45 + 0.55 * clamp((WATER_Y - y) / 500, 0, 1.6));
 }
 /* The sea floor (user Oct 24): at harbour depth off each pier, it slopes gently away from the land and lies twice as
    deep in the middle of the sea, room for the subs to fight. BED_A / BED_B: where the two shores are (the harbours'
@@ -3447,8 +3450,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 479;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 23:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 480;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 23:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11373,7 +11376,10 @@ function sfxCrush(x) {
   noiseShot(out, t0, 0.18, 'lowpass', 500, 160, 1.5, 0.5, 0.003);
   thump(out, t0, 70, 35, 0.2, 0.4);
 }
+const SHT = { n: 0, np: 0, loop: 0, a: 0, civ: 0, b: 0, land: 0 };   // (perf work: stepShells' parts, summed - self.__sht)
+if (typeof self !== 'undefined') self.__sht = () => { const r = Object.assign({}, SHT); for (const k in SHT) SHT[k] = 0; return r; };
 function stepShells(dt) {
+  const tS0 = performance.now(); SHT.n++; SHT.np += shells.length;
   for (let i = shells.length - 1; i >= 0; i--) {
     const s = shells[i];
     if (s.click) { if (--s.click <= 0) shells.splice(i, 1); continue; }   // (a click's shell: there one frame for what it's in to take)
@@ -11466,6 +11472,7 @@ function stepShells(dt) {
       s.seg = trAdd(TS, p1, p2, k < 0, s.from === 'rocket' || s.from === 'tank');   // (the tank's missile too, user Oct 25: thin and soon gone)
       if (k >= 0) TS.NX[k] = s.seg;
     }
+    const tH0 = performance.now();
     let done = false; blastOpen();   // (what goes off here is BLAST_K bigger - 33-zz-blast-scale)
     // the harbour (deck, block, hangar) stops a shell: it bursts on the stone, doing no harm
     for (const d of docks) {
@@ -11488,13 +11495,17 @@ function stepShells(dt) {
       if (towerHit(tw, s.x, s.y)) { emit('hit', { kind: 'tower', o: tw, amt: vtDmg(s.from, 'tower'), x: s.x, y: s.y }); done = true; break; }   // (23-harbour-gates)
     }
     if (!done) for (const tw of towers) if (tw.player !== s.owner && pierGunHit(tw, s.x, s.y)) { emit('hit', { kind: 'piergun', o: tw, amt: 1, x: s.x, y: s.y }); sectionBlast(s.x, s.y, 0.6, 0); done = true; break; }
+    SHT.a += performance.now() - tH0; const tH1 = performance.now();
     if (!done && LAND && emit('hit', { kind: 'civ', shell: s, x: s.x, y: s.y, amt: s.from === 'bomb' ? 2 : 1, vx: s.vx }).took) done = true;   // (OPEN WORLD: the big ships, section by section)
+    SHT.civ += performance.now() - tH1; const tH2 = performance.now();
     if (!done && s.age > 0.35) for (const sb of sailboats) if (sb.state === 'sail' && sailHit(sb, s.x, s.y)) { emit('hit', { kind: 'sailboat', o: sb, x: s.x, y: s.y, vx: s.vx }); done = true; break; }
     if (!done && s.age > 0.35) for (const sb of sailboats) if (sailWreckHit(sb, s.x, s.y)) { emit('hit', { kind: 'sailboat', o: sb, x: s.x, y: s.y, amt: 2, smash: true }); impact(s.x, s.y); done = true; break; }
     if (!done) for (const b of buoys) if (b.player !== s.owner && buoyHit(b, s.x, s.y)) { emit('hit', { kind: 'buoy', o: b, x: s.x, y: s.y }); done = true; break; }   // (your own buoy your shells pass)
     // a ship going down can still be hit: she's blown further apart (user Oct 24)
     if (!done && s.age > 0.35 && s.y > WATER_Y - 60) { const w = wreckAt(s.x, s.y); if (w) { emit('hit', { kind: 'wreck', o: w[0], sb: w[1], x: s.x, y: s.y, amt: 1, vx: s.vx }); done = true; } }
-    if (!done && OWM && s.age > 0.04 && emit('hit', { kind: 'land', o: s }).took) { blastClose(s.x, s.y); shells.splice(i, 1); continue; }   // (LAND TEST: its own blast)
+    SHT.b += performance.now() - tH2; const tH3 = performance.now();
+    const landHit = !done && OWM && s.age > 0.04 && emit('hit', { kind: 'land', o: s }).took; SHT.land += performance.now() - tH3;
+    if (landHit) { blastClose(s.x, s.y); shells.splice(i, 1); continue; }   // (LAND TEST: its own blast)
     if (done) { guysNear(s.x, s.y, 30); blastClose(s.x, s.y); shells.splice(i, 1); continue; }
     const sy = surfaceY(s.x);
     if (s.y >= sy) {
@@ -11507,6 +11518,7 @@ function stepShells(dt) {
     blastClose(s.x, s.y);                                         // (nothing went off: nothing to grow)
     if (s.x < -200 || s.x > WORLD_W + 200 || s.y < -4000) shells.splice(i, 1);
   }
+  SHT.loop += performance.now() - tS0;
   // two shells that touch in the air set each other off
   for (let i = shells.length - 1; i >= 1; i--) {
     const a = shells[i];
@@ -13134,7 +13146,7 @@ function physics(dt) {
   // (LAND TEST: the sea in the middle and a country each side - their tanks, helicopters, lakes)
   if (OWM) { if (LAND) stepLandUnits(dt); stepLandWorld(dt); }
   ut = uLap('uLand', ut);   // (BATTLE too: the ground's own - what rests on it, the plants, a plane's wreck burning - 50-land-units)
-  if (LAND) { stepLakeFish(dt); stepTraffic(dt); stepBalloons(dt); stepCivHelis(dt); stepHose(dt); stepCivDrivers(); stepAirports(dt); armyWreckHits(); stepSpace(dt); stepSeaplanes(dt); stepBlimps(dt); stepCranes(dt); stepCivMagnets(dt); krTick(dt); }
+  if (LAND) { let uo = performance.now(); stepLakeFish(dt); uo = uLap('o:stepLakeFish', uo); stepTraffic(dt); uo = uLap('o:stepTraffic', uo); stepBalloons(dt); uo = uLap('o:stepBalloons', uo); stepCivHelis(dt); uo = uLap('o:stepCivHelis', uo); stepHose(dt); uo = uLap('o:stepHose', uo); stepCivDrivers(); uo = uLap('o:stepCivDrivers', uo); stepAirports(dt); uo = uLap('o:stepAirports', uo); armyWreckHits(); uo = uLap('o:armyWreckHits', uo); stepSpace(dt); uo = uLap('o:stepSpace', uo); stepSeaplanes(dt); uo = uLap('o:stepSeaplanes', uo); stepBlimps(dt); uo = uLap('o:stepBlimps', uo); stepCranes(dt); uo = uLap('o:stepCranes', uo); stepCivMagnets(dt); uo = uLap('o:stepCivMagnets', uo); krTick(dt); uo = uLap('o:krTick', uo); }
   uLap('uOpenWorld', ut);
   time += dt;
 }
@@ -15641,14 +15653,18 @@ function stepSmoke(dt) {
   const { nx, ny, cell, u, v, p, dens } = SG;
   // Only the columns with smoke (or a shell) in or near them are worked on: out in the empty sky the air
   // just blows with the wind, so solving it there changed nothing. A column that wakes up starts from that.
+  const tA = performance.now();
   const SPANS = smokeSpans(nx, ny, cell, u, v, p);
+  const tB = performance.now();
   dens.fill(0);
   for (const s of smoke) { if (s.drift && s.age >= s.drift) continue; const k = gIdx(s.x, s.y); if (k >= 0) dens[k] += s.alpha * (1 - s.age / s.life) * (0.5 + s.r / 30) * s.buoy; }
   if (!smwStep(dt, SPANS)) {
     const W = SMW.wind && SMW.wind.length === ny ? SMW.wind : (SMW.wind = new Float64Array(ny));
     for (let j = 0; j < ny; j++) W[j] = windAt(SG.top + (j + 0.5) * cell);
     smSolve(SG, dt, SPANS, W, smShips(), WATER_Y);
+    SMT.solved++;
   }
+  const tC = performance.now();
   const wTop = WATER_Y - surfBand();                  // (above this, a puff is clear of the water anywhere: no need for the exact surface)
   for (let n = smoke.length - 1; n >= 0; n--) {
     const s = smoke[n];
@@ -15657,7 +15673,8 @@ function stepSmoke(dt) {
     {
       const k = gIdx(s.x, s.y);
       let around = 0;
-      if (k >= 0) for (const o of SG.near) around += dens[k + o] || 0;
+      // (the nine cells round it, in SG.near's order - added one by one as the loop over it did: the same sum)
+      if (k >= 0) { const W = nx; around = around + (dens[k - W - 1] || 0) + (dens[k - W] || 0) + (dens[k - W + 1] || 0) + (dens[k - 1] || 0) + (dens[k] || 0) + (dens[k + 1] || 0) + (dens[k + W - 1] || 0) + (dens[k + W] || 0) + (dens[k + W + 1] || 0); }
       const own = s.alpha * (1 - s.age / s.life) * (0.5 + s.r / 30) * s.buoy;
       // (a lone puff fades away early - but not one of a stream: it would leave a hole in the middle of the trail)
       if (!s.keep && !s.stream && around - own < 0.25 && s.age > 1.5) { s.lonely = (s.lonely || 0) + dt; if (s.lonely > 1.6) { smoke.splice(n, 1); s.dead = true; continue; } }
@@ -15702,7 +15719,10 @@ function stepSmoke(dt) {
     const sy = f !== null ? f - s.r * 1.05 : surfaceY(s.x) - s.r * 0.4;
     if (s.y > sy) { s.y = sy; if (s.vy > 0) s.vy = 0; }
   }
+  const tD = performance.now(); SMT.n++; SMT.spans += tB - tA; SMT.solve += tC - tB; SMT.puffs += tD - tC; SMT.np += smoke.length;
 }
+const SMT = { n: 0, spans: 0, solve: 0, puffs: 0, np: 0, solved: 0 };   // (perf work: stepSmoke's parts, summed - self.__smt)
+if (typeof self !== 'undefined') self.__smt = () => { const r = Object.assign({}, SMT); for (const k in SMT) SMT[k] = 0; return r; };
 // (engine stage 4) the air's step over the columns with smoke (SPANS): wind and the smoke's lift (W: the wind at each row's
 // height), the hulls dragging the air at the water (SH: each afloat ship's first and last column and its speed), swirls,
 // carrying, then made incompressible. A pure function of the grid G - SG on the main thread, or the worker's own copy (the
@@ -15809,6 +15829,20 @@ function smAirLoad(txt) {
 }
 const SMOKE_AIR_ROW = worldRow({ air: [smAirSave, smAirLoad] });
 defTable('smokeAir', () => [SMOKE_AIR_ROW], { net: false, make: () => SMOKE_AIR_ROW });
+// (perf work, test pages only: what each puff's helpers cost, over all the puffs once)
+if (typeof self !== 'undefined') self.__smBench = () => {
+  const r = {}, T = (k, f) => { const t0 = performance.now(); let acc = 0; for (const s of smoke) acc += f(s) || 0; r[k] = +(performance.now() - t0).toFixed(3); return acc; };
+  r.n = smoke.length; r.land = smoke.filter(s => dryLand(s.x)).length;
+  T('dryLand', s => dryLand(s.x) ? 1 : 0);
+  T('landTopM', s => landTopM(s.x));
+  T('isleCol', s => isleCol(s.x) ? 1 : 0);
+  T('windAt', s => windAt(s.y));
+  T('gSample2', s => gSample(SG.u, s.x, s.y) + gSample(SG.v, s.x, s.y));
+  T('surfaceY', s => surfaceY(s.x));
+  T('near', s => { const k = gIdx(s.x, s.y); let a = 0; if (k >= 0) for (const o of SG.near) a += SG.dens[k + o] || 0; return a; });
+  T('fireTop', s => s.colH ? fireTop(s) : 0);
+  return r;
+};
 
 /* THE SIMULATION WORKER, ITS FIRST SYSTEM: THE SMOKE'S AIR (engine migration, stage 4 - plan:
    https://claude.ai/artifact/7osEef5ubafK3gkAEjY3Dt, "Simulation in a worker"). On by default since Version 337 (user Oct
@@ -17977,7 +18011,18 @@ class GLCtx {
     if (GLR.lost) return;
     if (w < 0) { x += w; w = -w; } if (h < 0) { y += h; h = -h; }
     if (!(w > 0 && h > 0)) return;
-    glBegin(this, this.s.op);
+    const s = this.s;
+    glBegin(this, s.op);
+    // (Oct 31, 80-fps work: the commonest fill - the same colour text as the last fill, at the same alpha, upright - straight to
+    // its quad: the colour glFillQuad would have taken from its own last-fill memory, the corners as _corners works them out)
+    const m = s.m, fs = s.fs;
+    if (m[1] === 0 && m[2] === 0 && fs === this._lf && s.ga === this._lga && typeof fs === 'string') {
+      const col = this._lc;
+      if (!(col >>> 24) && s.op !== 'copy' && s.op !== 'source-in' && s.op !== 'destination-in') return;
+      const ax = m[0] * x + m[4], ay = m[3] * y + m[5], bx = ax + m[0] * w, by = ay + m[3] * h;
+      glQuad(ax, ay, bx, ay, bx, by, ax, by, 0, 0, 0, 0, 0, 0, 0, 0, col, 0, 0);
+      return;
+    }
     this._corners(x, y, w, h);
     glFillQuad(this, GLC4.ux, GLC4.uy, GLC4.x, GLC4.y);
   }
@@ -24719,7 +24764,9 @@ function smearAir(a, vx, vy, sp, dt) {
       }
     }
   };
-  for (const s of smoke) if (!(s.src === 'smear' && s.age < 1.2) && s.age > 0.5) touch(s, s.r, true);
+  // (Oct 31, 80-fps work: a puff plainly out of its reach - touch's own first test - passed by here, without the call: thousands
+  // of puffs for every plane and missile, every frame. The same puffs touched)
+  for (const s of smoke) { const rr = R + s.r * 0.6, dx = s.x - x; if (dx > rr || dx < -rr) continue; const dy = s.y - y; if (dy > rr || dy < -rr) continue; if (!(s.src === 'smear' && s.age < 1.2) && s.age > 0.5) touch(s, s.r, true); }
   // (Oct 31, 60-fps chat: a point plainly out of reach is passed by before its size is worked out - trailR is never more than
   // 11 + age / 5 - the same points touched; thousands of trail pieces in a long fight, for every plane, every step)
   // (a trail's point: touch's sums on its numbers in the trails' arrays - a point is never a puff)
@@ -31901,7 +31948,7 @@ function pocketsChanged() {
   // (each pocket's columns along its water line: wet where the line crosses its open space, the rock either side a wall)
   for (const p of allPockets()) {
     const n = p.xb - p.xa + 1, Wn = p.win;
-    if (!p.h || p.h.length !== n) { p.h = new Float32Array(n); p.v = new Float32Array(n); p.tmp = new Float32Array(n); p.sy = new Float32Array(n); }
+    if (!p.h || p.h.length !== n) { p._hb = p._vb = null; p.h = new Float32Array(n); p.v = new Float32Array(n); p.tmp = new Float32Array(n); p.sy = new Float32Array(n); }
     p.wet = new Uint8Array(n);
     const L = pocketLevel(p), row = clamp(Math.floor((L - 1 - Wn.Y0) / CV.G), 0, Wn.h - 1);   // (the row just over the line: the pocket's own)
     for (let k = 0; k < n; k++) { const i = row * Wn.w + p.xa + k; p.wet[k] = (!Wn.mat[i] || Wn.mat[i] === 2) && Wn.pid[i] === p.id ? 1 : 0; }   // (the water goes on round a stalactite: 09:14)
@@ -31943,13 +31990,13 @@ function surfaceOf(p, X) {
   return p.sy[k] * (1 - u) + p.sy[k + 1] * u;
 }
 // a push on a pocket's surface at X: down (amt > 0), as something falls in or bursts up through it; spread over rad columns
-function pokeWave(p, X, amt, rad) {
+function pokeWave(p, X, amt, rad) { p._hb = p._vb = null;   // (changed here: the last snapshot's text no longer what it holds)
   if (!p.h) return;
   const c = Math.round((X - p.win.X0) / CV.G - p.xa - 0.5), r = rad || 3;
   for (let k = -r; k <= r; k++) { const j = c + k; if (j >= 0 && j < p.h.length && p.wet[j]) { p.v[j] -= amt * (1 - Math.abs(k) / (r + 1)); p.still = false; } }
 }
 // the springs, one step (the game's stepWater on a pocket's columns)
-function stepSurface(p, dt) {
+function stepSurface(p, dt) { p._hb = p._vb = null;   // (changed here: the last snapshot's text no longer what it holds)
   const H = p.h, V = p.v, T = p.tmp, W = p.wet, N = H.length, c2 = (WAVE_C * WAVE_C) / (CV.G * CV.G);
   for (let j = 0; j < N; j++) {
     if (!W[j]) { H[j] = 0; V[j] = 0; continue; }
@@ -31968,7 +32015,7 @@ function springsFor(p, T) {
   for (let i = 0; i < k; i++) { stepSurface(p, WSTEP); if ((i & 63) === 63 && pocketStill(p)) return; }
   pocketStill(p);
 }
-function pocketStill(p) {
+function pocketStill(p) { p._hb = p._vb = null;   // (changed here: the last snapshot's text no longer what it holds)
   const H = p.h, V = p.v;
   for (let j = 0; j < H.length; j++) if (H[j] > 1e-3 || H[j] < -1e-3 || V[j] > 1e-3 || V[j] < -1e-3) return false;
   H.fill(0); V.fill(0); p.still = true; return true;
@@ -32079,7 +32126,9 @@ const CAVE_WATER_ROW = worldRow({
         const Wn = CV.wins[k]; if (!Wn || !Wn.pockets || !Array.isArray(ps)) return;
         ps.forEach((d, i) => {
           const p = Wn.pockets[i]; if (!p || !d || !p.h || p.h.length !== d.n) return;
-          b64IntoF32(d.h, p.h); b64IntoF32(d.v, p.v); p.still = false; delete p._sa;
+          // (Oct 31, 80-fps work: a pocket whose heights and speeds came as the very same text as last time holds them already -
+          // not read again; every pocket was, every snapshot)
+          if (p._hb !== d.h) { b64IntoF32(d.h, p.h); p._hb = d.h; } if (p._vb !== d.v) { b64IntoF32(d.v, p.v); p._vb = d.v; } p.still = false; delete p._sa;
           p.flat = d.flat; if (d.flatL == null) delete p.flatL; else p.flatL = d.flatL;
           if (p.sy) { if (p.flat) p.sy.fill(p.flatL != null ? p.flatL : pocketLevel(p)); else surfTable(p); }   // (this frame's surface again)
         });
