@@ -3561,10 +3561,10 @@ function canTake(p, k) {
     const v = k === 'tank' ? tanks[p] : helis[p];
     if (!LAND) return false;
     if (landUp(p, k)) return !useCaptains() || v.cap != null || capFree(p) >= 0;
-    return landCanCome(p, k) && (!useCaptains() || capFree(p) >= 0);   // (a new one comes in from your end of the world)
+    return landCanCome(p, k) && armyCan(p, k) && (!useCaptains() || capFree(p) >= 0);   // (a hangar of its team with its spot - Nov 1)   // (a new one comes in from your end of the world)
   }
   const crewed = v => !useCaptains() || (v && v.cap != null) || capFree(p) >= 0;   // (out with a captain already, or one free to take her)
-  if (k === 'plane') { const pl = planes[p]; return !!pl && (pl.state === 'fly' || (pl.state === 'hangar' && (fleet[p].plane > 0 || TEST) && crewed(pl))); }
+  if (k === 'plane') { const pl = planes[p]; return !!pl && (pl.state === 'fly' || (pl.state === 'hangar' && (fleet[p].plane > 0 || TEST) && armyCan(p, 'plane') && crewed(pl))); }
   if (k === 'ship') return ships[p].state === 'afloat' && crewed(ships[p]);
   const sb = subs[p]; return (sb.state === 'out' || sb.state === 'docked') && crewed(sb);
 }
@@ -3922,8 +3922,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 517;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 14:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 518;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 14:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10144,7 +10144,7 @@ const PLANE_ROT_T = 0.8, PLANE_TAXI = 70;
 const PLANE_GK = { gacc: (120 * AIR_SK.plane), vrot: (245 * AIR_SK.plane), rotT: PLANE_ROT_T, vmax: (330 * AIR_SK.plane), rotP: 0.16 };
 // the hangar shut to this plane: a warplane on the other side's airfield (the civilians' planes go in at either)
 const HANGAR_STOP = 44;                                           // (its middle that far out from the door: its nose at it)
-const hangarShut = (pl, af) => planes.includes(pl) && !!af.R !== !!SIDE(pl.id);
+const hangarShut = (pl, af) => planes.includes(pl) && af.own !== SIDE(pl.id);   // (a warplane goes in only where its team owns the hangar - Nov 1, was the country)
 function stepPlaneGround(pl, dt, K, inHangar) {
   K = K || PLANE_GK;
   if (pl.carried != null) return;                                // (on a helicopter's magnet: it hangs, nothing else)
@@ -31039,7 +31039,7 @@ function airfieldFor(o, R) {
 // the airfield standing in a country (R: the right one), and a side's own (wherever it stands - user Oct 28, 20:23;
 // a side owning none: its own country's, as a fallback, so nothing is left without a field)
 const airfieldIn = R => airfieldFor(structIn('airport', R), R);
-const airfieldOf = side => airfieldFor(structOf('airport', side) || structIn('airport', side), side);
+const airfieldOf = side => armyAirfield(side) || airfieldFor(structOf('airport', side) || structIn('airport', side), side);   // (its own hangar's runway first - 50-zz-struct.js armyAirfield, Nov 1)
 const AIRI = {"hangar": [0, 0, 151, 67], "terminal": [153, 0, 304, 151], "door": [18, 18, 115, 46]};                   // (gen/open/airport.py: the hangar's and the terminal's rects, the hangar's door)
 // the hangar's middle: just past the runway's inland end (a plane at the far end is inside it); the terminal set back
 // beside it, toward the runway
@@ -36991,7 +36991,7 @@ function cpuLandChoose(B) {
   return best;
 }
 // toward its own side: -1 or 1
-const cpuHomeDir = (p, x) => Math.sign(landHomeX(p) - x) || -homeOut(p);   // (toward its own hangar)
+const cpuHomeDir = (p, x, k = 'tank') => Math.sign(landHomeX(p, k) - x) || -homeOut(p, k);   // (toward its own hangar)
 function cpuTank(B, dt) {
   const p = B.p, t = tanks[p], E = cpuLandEnemy(p), g = guns[p];
   if (!t || t.state !== 'alive') { cpuSetMG(B, false); return; }
@@ -47986,16 +47986,19 @@ defTable('landWait', () => landWait, { perPlayer: 2, make: () => ({ tank: 0, hel
 // (user Oct 28, 20:46: "The tanks and helicopters would also come from the hangar at the airport for now, since the edge of
 // the world is not that important") home: the hangar of the side's own airport, wherever it stands; they come out of its
 // door down the runway (homeOut: that way) and go home driving or flying back in through it
-const landHomeX = (p, k) => hangarX(airfieldOf(SIDE(p)));
-const homeOut = p => airfieldOf(SIDE(p)).dir;
+// (Nov 1: an AIRCRAFT HANGAR the team owns with that family's spot - its middle, out the way it faces; else the built-in airport)
+const landHangar = (p, k) => armyHangar(SIDE(p), ARMY_FAM[k]);
+const landHomeX = (p, k = 'tank') => { const h = landHangar(p, k); return h ? h.x : hangarX(airfieldOf(SIDE(p))); };
+const homeOut = (p, k = 'tank') => { const h = landHangar(p, k); return h ? (h.flip ? -1 : 1) : airfieldOf(SIDE(p)).dir; };
 // in through the hangar's door, heading in, within its depth (not anywhere inland of it)
-const atHangarIn = (p, x, vx) => { const hx = landHomeX(p), o = homeOut(p), d = (hx - x) * o; return vx * o < 0 && d > -3 && d < 90; };
+const atHangarIn = (p, x, vx, k = 'tank') => { const hx = landHomeX(p, k), o = homeOut(p, k), d = (hx - x) * o; return vx * o < 0 && d > -3 && d < 90; };
 // own ground (mended and rearmed there): on or by one of the side's own structures, or at the foot of its own tower on its
 // mountain (the towers: structures of their own next)
 function onOwnGround(p, x) {
   const s = SIDE(p) ? 1 : 0;
   for (const tw of towers) if (tw && tw.edge && tw.player === p && Math.abs(x - tw.x) < MTN_FOOT - LAND_TOWER_X) return true;   // (by one of its own towers)
   for (const o of structsUsed()) { if (ownerOf(o) !== s) continue; const [a, b] = structSpan(o); if (x > a + 40 && x < b - 40) return true; }
+  for (const o of strsUsed()) { if (o.k !== 'hangarAir' || strOwner(o) !== s) continue; const B = strBox(o); if (x > B.x0 - 40 && x < B.x1 + 40) return true; }   // (or by an AIRCRAFT HANGAR it owns - Nov 1)
   return false;
 }
 // the helicopter's olive paint repainted toward a team's colour, each pixel keeping its own light and shade (the
@@ -48062,7 +48065,7 @@ function landArrive(p, k) {
   { const old = k === 'tank' ? tanks[p] : helis[p]; if (landGoing(old)) oldLand.push(old); }
   if (k === 'tank') { const t = tanks[p] = makeTank(p, landHomeX(p, 'tank')); t.enter = true; return t; }
   const x = landHomeX(p, 'heli'), h = helis[p] = makeHeli(p, x);
-  Object.assign(h, { state: 'fly', y: landTop(x) - 40, spin: 1, enter: true, facing: homeOut(p), vx: homeOut(p) * (120 * AIR_SK.heli) * 0.5 });   // (out of the hangar's door, low)
+  Object.assign(h, { state: 'fly', y: landTop(x) - 40, spin: 1, enter: true, facing: homeOut(p, 'heli'), vx: homeOut(p, 'heli') * (120 * AIR_SK.heli) * 0.5 });   // (out of the hangar's door, low)
   return h;
 }
 // is one standing (or flying) now, or can one come in?
@@ -48325,8 +48328,8 @@ function stepHeli(h, dt) {
   const want = mine || h.cpu || flying ? 1 : 0;
   h.spin += clamp(want - h.spin, -dt * 0.35, dt * 0.6);
   h.rotor += dt * (4 + 26 * h.spin);
-  if (h.enter && (h.x - landHomeX(p)) * homeOut(p) > 320) h.enter = false;   // (out of the hangar's door)
-  const lever = h.enter ? homeOut(p) * 0.8 : mine ? h.input : h.cpuIn || 0, stick = h.enter ? 0 : mine ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : h.cpuStick || 0;
+  if (h.enter && (h.x - landHomeX(p, 'heli')) * homeOut(p, 'heli') > 320) h.enter = false;   // (out of the hangar's door)
+  const lever = h.enter ? homeOut(p, 'heli') * 0.8 : mine ? h.input : h.cpuIn || 0, stick = h.enter ? 0 : mine ? clamp((diveHold[p] || 0) + (diveKeys[p] || 0), -1, 1) : h.cpuStick || 0;
   susStep(h, dt);
   if (h.state === 'landed') {
     h.vx = 0; h.vy = 0;
@@ -48368,12 +48371,12 @@ function stepHeli(h, dt) {
   if (h.turn) { h.turn.t += dt; if (h.turn.t >= HELI_TURN_T) { h.facing = -h.turn.from; h.turn = null; } }
   h.x = clamp(h.x + h.vx * dt, 30, WORLD_W - 30);
   // (held at the door with a load and then let go of it, right there: in it goes - tester, Oct 28)
-  const doorNow = h.doorT > time - 0.6 && !heliLoad(h) && Math.abs(h.x - landHomeX(h.id)) < 120;
-  if (!h.enter && !h.sea && (doorNow || (Math.abs(h.vx) > 20 && atHangarIn(h.id, h.x, h.vx) && h.y > landTop(h.x) - 140 - (heliLoad(h) ? ROPE_L + 60 : 0)))) {   // (low - or, with something on its rope, as low as that lets it)
+  const doorNow = h.doorT > time - 0.6 && !heliLoad(h) && Math.abs(h.x - landHomeX(h.id, 'heli')) < 120;
+  if (!h.enter && !h.sea && (doorNow || (Math.abs(h.vx) > 20 && atHangarIn(h.id, h.x, h.vx, 'heli') && h.y > landTop(h.x) - 140 - (heliLoad(h) ? ROPE_L + 60 : 0)))) {   // (low - or, with something on its rope, as low as that lets it)
     // (in low through its own hangar's door: home - since Oct 28, the hangar. User Oct 27 night: "A helicopter going home
     // off its end drops its load on the mountain": with something on its magnet it holds at the door instead, its load
     // still on; let go of it, it goes home)
-    if (heliLoad(h)) { h.x = landHomeX(h.id) + homeOut(h.id) * 3; h.vx = 0; h.doorT = time; if (!(h.edgeT > time)) { h.edgeT = time + 1; sound('empty', h.x); } }
+    if (heliLoad(h)) { h.x = landHomeX(h.id, 'heli') + homeOut(h.id, 'heli') * 3; h.vx = 0; h.doorT = time; if (!(h.edgeT > time)) { h.edgeT = time + 1; sound('empty', h.x); } }
     else { landGoHome(h.id, 'heli'); return; }
   }
   // (the ceiling: the climb fades out over the last 80 units)
@@ -51463,6 +51466,43 @@ function strEdDraw() {
     drawText(C, strName(o), (X0 + X1) / 2, (Y0 + Y1) / 2 - 3 * q, c, q, 'center');
   }
 }
+/* ---- THE ARMIES' HANGARS (user Nov 1 13:10: "For a plane to exist, it must have an hangar"; structures-everywhere-plan-nov1.md
+   step 3): a team's warplane, army helicopter and tank start at an AIRCRAFT HANGAR it owns with a spot for that family (its
+   first), the warplane on the RUNWAY nearest it (within PLANE_RW_M, as STORY's planes); they go home and are mended there.
+   A team owning no AIRCRAFT HANGAR still uses its built-in airport (until those are structures too - step 3b). ---- */
+const ARMY_FAM = { plane: 'warplane', heli: 'warheli', tank: 'tank' };
+// the team's hangar for a family: undefined - it owns none (the built-in airport); null - none with that family's spot
+function armyHangar(team, fam) {
+  let any = false;
+  for (const o of strsUsed()) {
+    if (o.k !== 'hangarAir' || strOwner(o) !== team) continue;
+    any = true;
+    if (strVehs(o).some(e => e && STR_VEHS[e.v] && STR_VEHS[e.v].fam === fam)) return o;
+  }
+  return any ? null : undefined;
+}
+// the RUNWAY nearest a structure (within PLANE_RW_M), and the AIRCRAFT HANGAR nearest a runway - whose runway it is
+function strRunwayNear(o) {
+  let best = null, bd = PLANE_RW_M * UPM;
+  for (const q of strsUsed()) { if (q.k !== 'runway') continue; const B = strBox(q), d = Math.max(0, Math.max(B.x0, o.x) - Math.min(B.x1, o.x)); if (d < bd) { bd = d; best = q; } }
+  return best;
+}
+function strRunwayOwner(rw) {
+  const B = strBox(rw); let best = -1, bd = PLANE_RW_M * UPM;
+  for (const q of strsUsed()) { if (q.k !== 'hangarAir') continue; const d = Math.max(0, Math.max(B.x0, q.x) - Math.min(B.x1, q.x)); if (d < bd) { bd = d; best = strOwner(q); } }
+  return best;
+}
+// a team's warplane field: its hangar's runway (own: the team); undefined - it owns no hangar; null - none it can fly from
+function armyAirfield(team) {
+  const h = armyHangar(team, 'warplane'); if (!h) return h;
+  const r = strRunwayNear(h); return r ? Object.assign(strAirfield(r), { own: team }) : null;
+}
+// can player p have this army vehicle (plane, heli, tank) at all - a hangar of its team with its spot (the plane: and a runway)
+function armyCan(p, k) {
+  const h = armyHangar(SIDE(p), ARMY_FAM[k]);
+  if (h === undefined) return true;
+  return !!h && (k !== 'plane' || !!strRunwayNear(h));
+}
 // ---- the pane
 /* (user Oct 31 22:48: "there should be kind of something that checks what's missing in the world. If you die, you have to go
    to a hospital, so we need to have a hospital. If you're at sea and you have no more fuel, an helicopter comes. So we need a
@@ -51618,7 +51658,7 @@ function strAirfield(o) {
   const B = strRunwayBox(o), dir = o.flip ? -1 : 1, w = B.x1 - B.x0, s = dir > 0 ? B.x0 : B.x1, e = dir > 0 ? B.x1 : B.x0;
   // (as the countries' airfields: dir points from the hangar end (far) down the runway to its take-off end (near) - unflipped,
   // the hangar end is its left end and planes take off to the right)
-  return { near: e - dir * w * 0.06, far: s + dir * w * 0.06, len: w, y: B.top - PLANE_WHEELS, dir, R: o.x > SEA1, own: -1, sid: o.id };
+  return { near: e - dir * w * 0.06, far: s + dir * w * 0.06, len: w, y: B.top - PLANE_WHEELS, dir, R: o.x > SEA1, own: strRunwayOwner(o), sid: o.id };   // (own: its hangar's owner - Nov 1)
 }
 // its own hangar door (the countries' are airDoor[R]): made when first asked for
 const STR_DOORS = {};
