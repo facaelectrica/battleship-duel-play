@@ -3985,8 +3985,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 536;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 15:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 537;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 15:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10245,6 +10245,13 @@ function planeTouch(v, foot = PLANE_WHEELS) {
   if (gy == null || v.y < gy - 4 || !planeSafeOver(v, foot)) return null;
   return planeClimbing(v) ? 'climb' : 'land';
 }
+/* (user Nov 1 14:40: a plane let go by a magnet "should depend from how high it was dropped AND what is the terrain it
+   was dropped in. At least 10m on a flat surface should be allowed") over ground it can be on (planeGroundY: the concrete
+   or flat ground) and falling no more than PLANE_DROP_SAFE to it, it comes down on its wheels; higher, or over anything
+   else, it falls. PLANE_DROP_SAFE: the runway's own number before (140 units, about 21.6 m), now every such ground's.
+   planeDropY(v, foot): the y it sets down at, or null */
+const PLANE_DROP_SAFE = 140;
+function planeDropY(v, foot = PLANE_WHEELS) { const gy = planeGroundY(v.x, foot); return gy != null && gy - v.y <= PLANE_DROP_SAFE ? gy : null; }
 function planeSetDown(v, foot = PLANE_WHEELS, dust = 6) {
   const gy = planeGroundY(v.x, foot), f = v.facing || v.dir || 1;
   planeSusKick(v, (v.vy || 0) + 60); v.y = gy; v.pitch = planeGroundPitch(v.x, f); v.turn = null; v.gear = 1;
@@ -41604,13 +41611,16 @@ function magDrop(o) {
   // tracks unhurt, as from the army helicopter's rope)
   if (isBox(o)) { Object.assign(o, { where: 'free', vx: clamp(o.vx || 0, -200, 200), vy: clamp(o.vy || 0, -100, 200), va: magRnd(-0.4, 0.4) }); return; }
   if (isTank(o)) { o.hook = false; o.dropT = 3; o.x = clamp(o.x, 40, WORLD_W - 40); o.vx = clamp(o.vx || 0, -VTUNE.tank.speed, VTUNE.tank.speed); o.vy = clamp(o.vy || 0, -60, 260); return; }
-  const wet = !dryLand(o.x), af = airfieldAt(o.x), H = (wet ? surfaceY(o.x) : landTop(o.x)) - o.y;
+  const wet = !dryLand(o.x);
   const dk = wet && !onLand(o.x) ? shipTopAt(o.x, o.y - 10) : null, onShip = !!dk && dk.y < surfaceY(o.x);   // (over a ship: it comes down on her, not into the water under her - user Oct 27, [19])
   if (seaplanes.includes(o) && wet && !onShip) { o.state = 'water'; o.y = surfaceY(o.x) - 3; o.spd = 0; o.ai = null; splash(o.x, 0, -120); return; }
-  if (!wet && onApron(o.x) && H < 140) {
-    if (shuttles.includes(o)) { o.state = 'landed'; o.y = af.y; o.wait = 45; return; }
+  // (user Nov 1 14:40: by how high it was let go and what's under it - the planes' shared planeDropY, 29-plane.js: the
+  // concrete or flat ground, from no higher than PLANE_DROP_SAFE)
+  const foot = seaplanes.includes(o) ? SP_FOOT : PLANE_WHEELS, gy = wet ? null : planeDropY(o, foot);
+  if (gy != null) {
+    if (shuttles.includes(o)) { o.state = 'landed'; o.y = gy; o.pitch = planeGroundPitch(o.x, o.facing || 1); o.wait = 45; return; }
     if (seaplanes.includes(o)) { o.state = 'gone'; o.wait = 30; return; }
-    o.ground = 'taxi'; o.y = af.y; o.spd = 0; o.pitch = 0; o.gWant = 0; susKick(o, 60); kickLandDust(o.x, af.y + PLANE_WHEELS, 4); return;
+    o.ground = 'taxi'; o.y = gy; o.spd = 0; o.pitch = planeGroundPitch(o.x, o.facing || 1); o.gWant = 0; susKick(o, 60); kickLandDust(o.x, gy + foot, 4); return;
   }
   // (dropped anywhere else: it falls)
   if (planes.includes(o)) { o.ground = null; downPlane(o); }
@@ -41622,7 +41632,7 @@ function magDrop(o) {
 /* ---- the civilian helicopters' magnets (user Oct 25 late: "All helicopters have hooks with a magnet that can also
    grab landed airplanes") - the same button as the army's: a cable down from its belly with the magnet on its end,
    swinging behind as it flies; brought onto a landed plane it takes hold, the plane hangs under it; pressed again
-   it lets go (onto an airfield's concrete it sets down, anywhere else it falls) and winds in ---- */
+   it lets go (low enough over the concrete or flat ground it sets down, otherwise it falls - magDrop) and winds in ---- */
 const CMAG_L = 120;
 const civTag = h => -10 - civHelis.indexOf(h);                    // (what a civilian helicopter's magnet marks its load with)
 function civMagnet(h) {
@@ -53383,6 +53393,7 @@ async function start(data) {
     stepQuiet: (dt, n) => { NO_DRAW = true; try { paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } } finally { paused = true; NO_DRAW = false; } },   // (stepFixed without drawing each step: tools/smokebench.mjs)
     smokeKit: { spawnSmoke: (x, y, o) => spawnSmoke(x, y, o), smStream: (o, k) => smStream(o, k), get SV() { return SV; }, get SMOKE_COLS() { return SMOKE_COLS; } },
     planeGround: x => planeGroundY(x),   // (Nov 1: where a plane can be on its wheels - 29-plane.js)
+    magDrop: o => magDrop(o),   // (Nov 1: let a magnet's load go - 50-land-magnet.js)
     towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, setFlag: (sd, k) => setFlag(sd, k), menuPlayNow: () => menuPlay(), menuJoinNow: (sd, dev) => menuJoin(sd, dev), menuResumeNow: () => menuResume(), openMenuNow: () => openMainMenu(), seats: () => ({ ctl: ctlPick.slice(), extra: EXTRA, slots: SLOTS.map(q => q.dev + ':' + q.team) }), openMenu: () => openMainMenu(), resumeMenu: () => menuResume(), titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
