@@ -279,7 +279,9 @@ function swGuestFrame(dt, held) {
   regionsTick();                                                     // (the regions' tiers by this page's views: what the drawing culls by)
   const ctl = [];                                                    // (unrounded: online rounds them for the wire)
   for (let p = 0; p < 2; p++) { try { const s = ctlState(p); if (s) { const g = hasGuns(p) ? activeGun(p) : null; if (g) { s.e = g.elev; s.w = g.power; } if (s.z != null) s.z = subs[p].depthT; if (s.le != null) s.le = lampOf(p).elev; } ctl.push(s); } catch (e) { ctl.push(null); } }
-  SW.worker.postMessage({ t: 'in', credit: 1, hold: !!held, acts: SW.acts.splice(0), ctl, cam: CAM_ROW.cam, ui: [!!ui.title, !!ui.menu, !!ui.settings] });
+  // (the column tables' buffers this page is done with, back to be packed into again - 36-zzzzz-sw-snap.js SWCB)
+  const cb = SWCB.back; SWCB.back = {};
+  SW.worker.postMessage({ t: 'in', credit: 1, hold: !!held, acts: SW.acts.splice(0), ctl, cam: CAM_ROW.cam, ui: [!!ui.title, !!ui.menu, !!ui.settings], cb }, Object.values(cb));
 }
 function swFromWorker(m) {
   if (m.t === 'snap') { SW.snaps.push(m); return; }
@@ -350,6 +352,7 @@ function swHostIn(m) {
   if (m.acts) for (const a of m.acts) SWH.q.push(a);
   if (m.ctl) SWH.ctl = m.ctl;
   if (m.cam) SWH.cam = m.cam;                                        // (the page's camera: the regions' tiers go by its views)
+  if (m.cb) for (const k in m.cb) { const b = m.cb[k], o = SWCB.spare[k]; if (!o || b.byteLength > o.byteLength) SWCB.spare[k] = b; }   // (a column table's buffer back from the page)
   if (m.ui) swHostUi(m.ui);
 }
 function swHostInputs() {
@@ -1343,6 +1346,192 @@ async function loadBigArt() {
   }
 }
 
+/* COLUMN TABLES (Nov 1 - the target architecture's first stage, claude/target-architecture.md; rules.md section 6, Systems,
+   rule 7). Anything there are many of is a table of columns: one typed array per declared field, the rows 0..n-1 dense and
+   in the order they were added, nothing made per row during play (the arrays double, copied, when full). The first is the
+   smoke's puffs (05-game-state.js SMOKE_FIELDS, 38-smoke-sim.js).
+   Its fields are declared with it, { name: kind }, the kind one of:
+     'f64'   a number (Float64Array), 0 in a new row - 'f64 NaN' (a number after the kind): that in a new row
+     'u8'    a small whole number or a yes / no (Uint8Array), 0
+     'str'   a text from the table's own short list (strs): the column holds its place there, -1 none - str(k), intern(s)
+     'id'    the row's own number, given by add() and only ever rising (Float64Array): row(id) finds a row by it
+     'ref'   another row's id (Float64Array), 0 none; an id no row has is a row gone
+     'obj'   a plain array beside the rows, for things outside the table (a source's stream); never packed or saved
+   and ' local' after any of them: the receiving side's own (the drawing's) - not packed unless named, kept by id across adopt.
+   Removing keeps the order of the rest: drop(i) marks a row, sweep() closes the gaps in one pass.
+   Between threads: pack(fields, buf, sel, m) copies rows 0..n-1 (or the m rows at the places in sel, in order) of those fields
+   into one buffer (buf reused if big enough) to transfer;
+   adopt(pack) on the other side makes those columns views into it and gives back the buffer it held before, to hand back.
+   This class also runs in the smoke-drawing worker, sent there as its text (sky/21-smoke.js smgText): it reads no game globals. */
+class ColTable {
+  static T(kind) { return kind === 'u8' ? Uint8Array : kind === 'str' ? Int32Array : kind === 'obj' ? Array : Float64Array; }
+  constructor(spec) {
+    this.f = []; this.byK = {}; this.c = {}; this.id = null;
+    for (const k in spec) {
+      const w = String(spec[k]).split(' '), kind = w[0], d = w[1] !== undefined && w[1] !== 'local' ? Number(w[1]) : kind === 'str' ? -1 : kind === 'obj' ? undefined : 0;
+      const F = { k, kind, d, local: w.includes('local'), num: kind === 'f64' || kind === 'id' || kind === 'ref' };
+      this.f.push(F); this.byK[k] = F;
+      if (kind === 'id') this.id = k;
+    }
+    this.n = 0; this.cap = 0; this.top = 0;              // (top: the last id given)
+    this.strs = []; this.sIdx = null;
+    this.gone = new Uint8Array(0); this.ng = 0; this.runs = [];
+    this.buf = null; this.alt = {};                       // (buf: the buffer the columns are views into, after adopt; alt: the local columns' second arrays)
+    this.grow(16);
+  }
+  // room for `need` rows in arrays of the table's own (an adopted table's columns copied out of its buffer)
+  grow(need) {
+    if (need <= this.cap && !this.buf) return;
+    const cap = Math.max(need, this.cap * 2, 16), n = this.n;
+    for (const F of this.f) {
+      const o = this.c[F.k];
+      if (F.kind === 'obj') { const a = o || (this.c[F.k] = []); while (a.length < cap) a.push(undefined); continue; }
+      const a = new (ColTable.T(F.kind))(cap); if (o) a.set(o.subarray(0, Math.min(n, o.length)));
+      this.c[F.k] = a;
+    }
+    const g = new Uint8Array(cap); g.set(this.gone.subarray(0, Math.min(n, this.gone.length))); this.gone = g;
+    this.cap = cap; this.buf = null;
+  }
+  // a new row at the end, every field as declared for a new row and its id the next; its place
+  add() {
+    if (this.n >= this.cap) this.grow(this.n + 1);
+    const i = this.n++, c = this.c;
+    for (const F of this.f) c[F.k][i] = F.kind === 'id' ? ++this.top : F.d;
+    this.gone[i] = 0;
+    return i;
+  }
+  // the place of the row with this id, or -1: gone (ids rise along the rows - a halving search)
+  row(id) {
+    const a = this.c[this.id]; let lo = 0, hi = this.n - 1;
+    while (lo <= hi) { const m = (lo + hi) >> 1, v = a[m]; if (v === id) return this.gone[m] ? -1 : m; if (v < id) lo = m + 1; else hi = m - 1; }
+    return -1;
+  }
+  // the place of the first row with an id over this one (n: none)
+  after(id) {
+    const a = this.c[this.id]; let lo = 0, hi = this.n;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] <= id) lo = m + 1; else hi = m; }
+    return lo;
+  }
+  str(k) { return k < 0 ? null : this.strs[k]; }
+  intern(s) {
+    if (s == null) return -1;
+    if (!this.sIdx) { this.sIdx = new Map(); this.strs.forEach((t, k) => this.sIdx.set(t, k)); }
+    let k = this.sIdx.get(s);
+    if (k === undefined) { k = this.strs.length; this.strs.push(s); this.sIdx.set(s, k); }
+    return k;
+  }
+  drop(i) { if (!this.gone[i]) { this.gone[i] = 1; this.ng++; } }
+  // the rows dropped taken out, the rest closed up in their order: each column moved a run of kept rows at a time
+  sweep() {
+    if (!this.ng) return;
+    const n = this.n, g = this.gone, runs = this.runs; runs.length = 0;
+    let w = 0, i = 0;
+    while (i < n) {
+      if (g[i]) { g[i] = 0; i++; continue; }
+      let j = i; while (j < n && !g[j]) j++;
+      if (w !== i) runs.push(w, i, j);
+      w += j - i; i = j;
+    }
+    for (const F of this.f) {
+      const a = this.c[F.k];
+      for (let q = 0; q < runs.length; q += 3) a.copyWithin(runs[q], runs[q + 1], runs[q + 2]);
+      if (F.kind === 'obj') a.fill(undefined, w, n);     // (nothing kept alive by a row that's gone)
+    }
+    this.n = w; this.ng = 0;
+  }
+  // (as a list's: how many rows; set lower, the rows from there on are gone - 07-world-build.js's `length = 0`)
+  get length() { return this.n; }
+  set length(v) {
+    v = Math.max(0, Math.min(this.n, v | 0));
+    for (const F of this.f) if (F.kind === 'obj') this.c[F.k].fill(undefined, v, this.n);
+    this.gone.fill(0, v, this.n); this.n = v;
+    this.ng = 0; for (let i = 0; i < v; i++) this.ng += this.gone[i];
+  }
+  // the fields packed when none are named: all but the local and obj ones
+  sent() { return this.f.filter(F => !F.local && F.kind !== 'obj').map(F => F.k); }
+  // rows 0..n-1 of these fields (and the id) copied into one buffer - buf if it is big enough, else a new one; sel: only the m
+  // rows at these places (rising)
+  pack(fields, buf, sel = null, m = 0) {
+    const n = sel ? m : this.n, lay = []; let off = 0;
+    for (const k of fields.includes(this.id) ? fields : [this.id, ...fields]) {
+      const F = this.byK[k]; if (!F || F.kind === 'obj') throw new Error('ColTable.pack: ' + k);
+      off = (off + 7) & ~7; lay.push([k, F.kind, off]); off += ColTable.T(F.kind).BYTES_PER_ELEMENT * n;
+    }
+    if (!buf || buf.byteLength < off) buf = new ArrayBuffer(Math.max(4096, Math.ceil(off * 1.5 / 4096) * 4096));
+    for (const [k, kind, o] of lay) { const d = new (ColTable.T(kind))(buf, o, n), a = this.c[k]; if (sel) for (let j = 0; j < n; j++) d[j] = a[sel[j]]; else d.set(a.subarray(0, n)); }
+    return { buf, n, top: this.top, strs: this.strs.slice(), lay };
+  }
+  // a pack from the other side as this table's rows: its columns views into its buffer. A local column it doesn't carry keeps
+  // each row's value by id (both id lists rise: walked side by side), a new row's as declared; every other column it doesn't
+  // carry is as declared for a new row (it isn't the other side's). Back: the buffer held before (to hand back), or null
+  adopt(m) {
+    const n = m.n, c = this.c, was = this.buf, oldN = this.n, idL = m.lay.find(l => l[0] === this.id);
+    const newId = new Float64Array(m.buf, idL[2], n), oldId = c[this.id];
+    const inMsg = {}; for (const l of m.lay) inMsg[l[0]] = true;
+    for (const F of this.f) {
+      if (inMsg[F.k]) continue;
+      const a = c[F.k];
+      if (F.kind === 'obj') { while (a.length < n) a.push(undefined); a.fill(undefined, 0, Math.max(n, oldN)); continue; }
+      const T = ColTable.T(F.kind), own = arr => arr && arr.length >= n && arr.buffer !== was ? arr : new T(Math.max(16, Math.ceil(n * 1.5)));
+      if (F.local) {
+        const b = own(this.alt[F.k]);
+        for (let i = 0, j = 0; i < n; i++) { const id = newId[i]; while (j < oldN && oldId[j] < id) j++; b[i] = j < oldN && oldId[j] === id ? a[j] : F.d; }
+        this.alt[F.k] = a.buffer === was ? null : a; c[F.k] = b;
+      } else { const b = own(a); b.fill(F.d, 0, n); c[F.k] = b; }
+    }
+    for (const [k, kind, o] of m.lay) c[k] = new (ColTable.T(kind))(m.buf, o, n);
+    if (this.gone.length < n) this.gone = new Uint8Array(Math.max(16, n)); else this.gone.fill(0, 0, n);
+    this.n = n; this.cap = n; this.ng = 0; this.top = m.top; this.strs = m.strs; this.sIdx = null; this.buf = m.buf;
+    return was;
+  }
+  // as plain data for a save: every column but the obj ones as a list (a number that isn't finite as tblPlain keeps one -
+  // NaN as null, the infinities as +-1e300), the strings, the last id given
+  plainCols() {
+    const cols = {}, n = this.n;
+    for (const F of this.f) {
+      if (F.kind === 'obj') continue;
+      const a = this.c[F.k], o = new Array(n);
+      for (let i = 0; i < n; i++) { const v = a[i]; o[i] = v !== v ? null : v === Infinity ? 1e300 : v === -Infinity ? -1e300 : v; }
+      cols[F.k] = o;
+    }
+    return { soa: 1, n, top: this.top, strs: this.strs.slice(), cols };
+  }
+  // a save's plain data (plainCols') as the rows, in place of what the table held: a column the save hasn't, as declared for a
+  // new row; an obj column's value kept for a row the table had by the same id (a loaded thing of a list keeps the live one's
+  // - 36-zz-tables.js tablesLoad), else none; the ids go on from the highest given on either side
+  fromPlainCols(S) {
+    const n = S.n | 0, m = this.n, oldId = this.c[this.id].slice(0, m), objs = this.f.filter(F => F.kind === 'obj').map(F => this.c[F.k].slice(0, m));
+    this.n = 0; this.ng = 0; this.grow(n);
+    for (const F of this.f) {
+      if (F.kind === 'obj') continue;
+      const a = this.c[F.k], v = S.cols && S.cols[F.k];
+      for (let i = 0; i < n; i++) { const x = v ? v[i] : undefined; a[i] = x == null ? (v && F.num ? NaN : F.d) : x; }
+    }
+    // (each loaded row takes the old row with its id, else the old row at its own place if no loaded row took that one yet, as
+    // tablesLoad matches a list's things; the obj columns go with it)
+    if (objs.length) {
+      const id = this.c[this.id], used = new Uint8Array(m), from = new Int32Array(n).fill(-1);
+      for (let i = 0, k = 0; i < n; i++) {
+        while (k < m && oldId[k] < id[i]) k++;
+        if (k < m && oldId[k] === id[i] && !used[k]) from[i] = k; else if (i < m && !used[i]) from[i] = i;
+        if (from[i] >= 0) used[from[i]] = 1;
+      }
+      this.f.filter(F => F.kind === 'obj').forEach((F, j) => { const a = this.c[F.k], o = objs[j]; a.fill(undefined); for (let i = 0; i < n; i++) if (from[i] >= 0) a[i] = o[from[i]]; });
+    }
+    this.gone.fill(0); this.n = n;
+    this.strs = (S.strs || []).slice(); this.sIdx = null;
+    let top = Math.max(this.top, S.top || 0); const id = this.c[this.id]; for (let i = 0; i < n; i++) if (id[i] > top) top = id[i];
+    this.top = top;
+  }
+  // one row as a plain object (the console: __game.row)
+  plain(i) {
+    if (!(i >= 0 && i < this.n)) return undefined;
+    const o = {};
+    for (const F of this.f) { const v = this.c[F.k][i]; o[F.k] = F.kind === 'str' ? this.str(v) : v; }
+    return o;
+  }
+}
+
 /* ================================================================
    World state
    ================================================================ */
@@ -1515,7 +1704,40 @@ function shakeAt(amt, x) {
 const spray = [], bubbles = [], foam = [], wakes = [];
 const grains = [], ash = [];
 const welds = [];
-const debris = [], sparks = [], flashes = [], shells = [], bullets = [], smoke = [], pieces = [], flames = [], embers = [], rings = [], dust = [];
+const debris = [], sparks = [], flashes = [], shells = [], bullets = [], pieces = [], flames = [], embers = [], rings = [], dust = [];
+// (Nov 1) the smoke's puffs: a column table (04-zz-coltable.js), a row a puff in the order spawned - 38-smoke-sim.js spawnSmoke
+// makes them, stepSmoke moves and ends them, sky/21-smoke.js gatherSmokeNew draws them. Its fields (a yes / no is 'u8' 0 or 1):
+const SMOKE_FIELDS = {
+  sq: 'id',                                             // (its number in the order spawned: a link to it - a chain's prev, a stream's last - is this)
+  x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', r: 'f64', grow: 'f64', age: 'f64', life: 'f64', dark: 'f64', lift: 'f64', alpha: 'f64',
+  mist: 'u8', quick: 'u8', rmax: 'f64', ashT: 'f64', keep: 'u8', ground: 'u8', rise: 'u8',
+  fam: 'str',                                           // (its kind of smoke by name: sand, dust, a Cessna's colour - sky/21-smoke.js FAM_N)
+  src: 'str',                                           // (the new sky: 'smear' - pulled out of a column by a plane; 'plane' - a Cessna's colours)
+  climb: 'f64',                                         // (how much higher than the sea's smoke it rises before it slows: a tower's - stepSmoke)
+  hs: 'f64',                                            // (real scale: how much taller its rise is - a ship's smoke as much as she's bigger)
+  link: 'f64',                                          // (a chain: how far apart two puffs may be and still be joined - a big funnel's puffs are far apart)
+  seed: 'f64',                                          // (the old renderer's puff pattern, 1-6: drawn from the smoke's own source, not at draw time)
+  steady: 'u8',                                         // (its lift held over its life and no slowing high up: it climbs all its life - stepSmoke)
+  trailV: 'f64',                                        // (its ship's speed - the air never carries it forward faster than 0.4 of it: a funnel's smoke streams back from her)
+  fadeFrom: 'f64 NaN',                                  // (how far into its life it starts to dissolve - NaN: 0.62, sky/21-smoke.js)
+  jet: 'f64',                                           // (a funnel's puff keeps its ship's way on for this long, then the air takes it)
+  lumpy: 'u8',                                          // (its chain's body drawn as uneven round billows - a big ship's funnel smoke, sky/21-smoke.js smnLumpy)
+  drift: 'f64',                                         // (past this age it drifts with the wind on its own - no air grid under it)
+  buoy: 'f64',                                          // (how hard it heats the air round it - the grid's updraft)
+  y0: 'f64', colH: 'f64', jit: 'f64',                   // (a fire's puff: where its column starts and how tall it is - 0: not a fire's)
+  stream: 'u8',                                         // (one of a stream's: never fades early on its own - stepSmoke)
+  prev: 'ref',                                          // (a chain's: the puff before it, drawn joined to it)
+  lonely: 'f64', kill: 'f64', tear: 'f64',              // (how long it has been alone; a countdown to its end, 0 none; what a plane has torn off it)
+  fr: 'u8 2',                                           // (in front of an island line's island: 1 yes, 0 no, 2 not looked yet - 38-smoke-sim.js smFloor)
+  hd0: 'f64 NaN', hd1: 'f64 NaN', hd2: 'f64 NaN',       // (the newest of a stream whose source marks its mouth: that mouth, x, y, r - smHeads; NaN none)
+  h: 'f64 NaN local',                                   // (the drawing's own number for its billows, given when it's first drawn - sky/21-smoke.js smRollH)
+  torn: 'ref',                                          // (the newest of the bits a plane has torn off it, a stream of their own - 41-sky-new.js smearAir)
+  st: 'obj',                                            // (the stream it's one of: { last: the newest's id, head } kept by its source - smStream)
+};
+const smoke = new ColTable(SMOKE_FIELDS);
+// the fields the drawing reads (sky/21-smoke.js gatherSmokeNew, famOf, srcOf; 45-draw-vehicles.js drawSailsOver): what a live
+// snapshot of the simulation worker carries to the page, and the page to the smoke-drawing worker (with h)
+const SMOKE_DRAWN = ['x', 'y', 'r', 'age', 'life', 'alpha', 'dark', 'mist', 'quick', 'fam', 'src', 'fadeFrom', 'keep', 'kill', 'lonely', 'link', 'lumpy', 'prev', 'hd0', 'hd1', 'hd2'];
 // (the shells' trails: flat arrays, not objects - 47-render-overlays.js trStore; `trails.length` is how many pieces)
 const trails = trStore();
 let schools = [], sharks = [], whales = [], plants = [];
@@ -2089,7 +2311,6 @@ function buildWorld(restore) {
   shocks.length = 0;
   storm.bolts.length = 0; storm.flash = 0; storm.next = 3;
   mapTracks[0] = mapTracks[1] = null;
-  for (const s of smoke) s.dead = true;                     // (a source's stream must not join a puff of the last round)
   for (const arr of [screens, weedBits, torps, torpWrecks, gasBalls, jets, streaks, blastRings, deadFish, wclouds, dcharges, mines, welds, spray, bubbles, foam, wakes, debris, sparks, flashes, shells, bullets, smoke, pieces, flames, embers, rings, trails, dust, grains, ash, blood, duds]) arr.length = 0;
   for (let p = 0; p < 2; p++) {
     Object.assign(crew[p], freshCrew());               // the round opens with the captain in his hangar, choosing
@@ -3450,8 +3671,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 487;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 00:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 488;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 07:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4971,7 +5192,7 @@ function drawPerfPanel(x, y) {
     'PUFFS ' + f(P.ovSmoke) + '  TRAILS ' + f(P.ovTrails) + '  FIRE ' + f(P.ovFire) + '  RAIN ' + f(P.ovRain),
     'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + (GLR.on ? '  WEBGL' : '  MODE ' + MODE_NAMES[getMode()] + (BATCH_AUTO ? (abTrial.phase ? ' TRYING' : ' AUTO') : '') + '  [TAP HERE: NEXT MODE]'),
     GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + '  DECKS ' + Math.round(FT.dDraw || 0) + '/' + Math.round(FT.dSkip || 0) + (GLR.lost ? '  LOST' : '') : '',
-    'SMOKE ' + smoke.length + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
+    'SMOKE ' + smoke.n + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
     probe.on || probe.done ? '' : 'TAP AGAIN: MEASURE DRAWING TOO',
   ].filter(l => l);
   // (user Oct 29: "that FPS window is getting extremely wide... why not put some lines below others": a line wider than about
@@ -11869,11 +12090,11 @@ function stepPierGuns(dt) {
    times as wide. As many pieces as before, each bigger: the same look, magnified, at the same cost.
    ================================================================ */
 let BLAST = null;
-const BLAST_FREE = () => [flames, smoke];                                       // (flung: speeds x K)
+const BLAST_FREE = () => [flames];                                             // (flung: speeds x K - and the smoke's puffs: below)
 const BLAST_THROWN = () => [sparks, debris, spray, embers, dust];             // (thrown under gravity: speeds x sqrt K)
 const BLAST_ALL = () => [...BLAST_FREE(), ...BLAST_THROWN(), flashes, rings, jets, spikeBursts];
 function blastOpen() {
-  BLAST = { fx: FXK, last: BLAST_ALL().map(a => a[a.length - 1]) };              // (the last piece in each: new ones come after it, even if old ones were dropped)
+  BLAST = { fx: FXK, last: BLAST_ALL().map(a => a[a.length - 1]), sq: smoke.top };   // (the last piece in each: new ones come after it, even if old ones were dropped; the puffs by their ids - Nov 1)
   FXK = FXK * BLAST_K;
 }
 // the pieces added to a since blastOpen (walked back from the end to the piece that was last then)
@@ -11884,6 +12105,8 @@ function blastClose(x, y) {
   BLAST = null; FXK = B.fx;
   const spread = (p, v) => { p.x = x + (p.x - x) * K; p.y = y + (p.y - y) * K; if (p.vx != null) p.vx *= v; if (p.vy != null) p.vy *= v; };
   const nF = BLAST_FREE().length, nT = BLAST_THROWN().length;
+  // (the puffs spawned since blastOpen - the rows past the last id given then: flung as the flames are)
+  { const c = smoke.c; for (let i = smoke.after(B.sq); i < smoke.n; i++) { c.x[i] = x + (c.x[i] - x) * K; c.y[i] = y + (c.y[i] - y) * K; c.vx[i] *= K; c.vy[i] *= K; } }
   all.forEach((a, j) => {
     const fresh = blastNew(a, B.last[j]);
     if (!fresh.length) return;
@@ -13329,15 +13552,22 @@ const TABLES = {};
 // gives its own save: () => plain data, load: (data, byU) => put back (byU: an old save's ids, for references to its rows), and
 // for the simulation worker's snapshots snapCols: (full, drawn, bufs) => its columns, colsInto: columns => put back on the page
 // (36-zzzzz-sw-snap.js); its list is empty)
+// (Nov 1) a COLUMN TABLE (04-zz-coltable.js - the smoke's puffs) gives cols: the table, drawn: the fields a live snapshot carries
+// to the page (the drawing's), rows: (rows, byU) => a save from before it was columns, as plainCols' data. It is saved, loaded and
+// sent by the one rule for them all: its columns as plain lists in a save; to the page its columns in one buffer, moved, which
+// the page takes as its own (adopt) and hands back to be packed into again (swColTable, swColAdopt)
+const TBL_NO_ROWS = Object.freeze([]);
 function defTable(name, list, o = {}) {
   const keep = new Set(o.keep || []), skip = new Set([...TBL_SKIP, ...(o.skip || [])].filter(k => !keep.has(k)));
-  TABLES[name] = { name, list, depth: o.depth ?? 4, make: o.make || (() => ({})), after: o.after || null, skip,
+  const ct = o.cols || null, ctLoad = ct && ((d, byU) => ct.fromPlainCols(Array.isArray(d) && d.length === 1 && d[0] && d[0].soa ? d[0] : o.rows && Array.isArray(d) ? o.rows(d, byU) : { n: 0 }));
+  TABLES[name] = { name, list: list || (() => TBL_NO_ROWS), depth: o.depth ?? 4, make: o.make || (() => ({})), after: o.after || null, skip,
     net: o.net ?? true, netSkip: new Set(o.netSkip || []), perPlayer: o.perPlayer || 0, netIds: new Set(o.netIds || []),
-    save: o.save || null, load: o.load || null, snapCols: o.snapCols || null, colsInto: o.colsInto || null };
+    save: ct ? () => [ct.plainCols()] : o.save || null, load: ct ? ctLoad : o.load || null, cols: ct, drawn: o.drawn || null,
+    snapCols: ct ? (full, drawn, bufs) => swColTable(TABLES[name], full, drawn, bufs) : o.snapCols || null, colsInto: ct ? C => swColAdopt(TABLES[name], C) : o.colsInto || null };
   // (the GAME EDITOR's VEHICLES tab asks, the table's owner writes - rules.md "Systems" 1): 'tableAdd' {t, o} puts a made row in;
   // 'tableMove' {t, o, x, y} moves one (y null: it keeps its own - on the water, on its tower's pier); o.moveTo, o.add: the owner's
   // own way (a list made for the table - the tanks', the ones there are - puts a row in its own place)
-  on('tableAdd', e => { if (e.t === name) { if (o.add) o.add(e.o, e); else list().push(e.o); e.done = true; } }, name);
+  on('tableAdd', e => { if (e.t === name) { if (o.add) o.add(e.o, e); else TABLES[name].list().push(e.o); e.done = true; } }, name);
   on('tableMove', e => { if (e.t === name) { (o.moveTo || tblMoveTo)(e.o, e); e.done = true; } }, name);
 }
 function tblMoveTo(v, e) { v.x = e.x; if (e.y != null) v.y = e.y; if ('vx' in v) v.vx = 0; if ('vy' in v) v.vy = 0; }
@@ -13400,7 +13630,7 @@ function tablesLoad(S) {
   // first every thing matched or made (so a reference to any of them can be found), then each filled in
   for (const k in S.tables) {
     const t = TABLES[k]; if (!t) continue;
-    if (t.load) { t.load(S.tables[k], byU); continue; }    // (its own: flat arrays - before the references are turned back, a shell's to its trail)
+    if (t.load) { t.load(S.tables[k], byU); plan.push([t, t.list(), null]); continue; }    // (its own: flat arrays, columns - before the references are turned back, a shell's to its trail; its after with the rest's)
     const arr = t.list(), have = new Map(arr.map(o => [o._uid, o])), used = new Set(), rows = [];
     S.tables[k].forEach((d, i) => {
       // (the same thing by its id; a fresh game's things have other ids, so else the one at the same place in the list, if it's
@@ -13413,6 +13643,7 @@ function tablesLoad(S) {
     plan.push([t, arr, rows]);
   }
   for (const [t, arr, rows] of plan) {
+    if (!rows) continue;
     for (const [o, d] of rows) {
       const sa = d.sa_, sk = d.sk_, u = d.u_; delete d.u_; delete d.sa_; delete d.sk_;
       tblRefs(d, byU, t.depth + 2);
@@ -14267,7 +14498,7 @@ const SW_LOCAL = new Set(['camera', 'smokeAir']);
    The page refills its own list's objects in place, by position (they're effects: nothing refers to one by id) */
 const SW_COLS = new Set(['spray', 'bubbles', 'foam', 'wakes', 'sparks', 'flames', 'embers', 'flashes', 'welds', 'rings', 'debris', 'dust', 'grains', 'ash',
   'streaks', 'jets', 'msplashes', 'leaves', 'earthGrains', 'fwBits', 'hoseDrops', 'hoseSteams', 'seaBlood', 'seaGore', 'birdFeathers', 'birdGore', 'crewBlood', 'planeWisps', 'iceBits', 'rocketTrail',
-  'smoke', 'trails', 'planeTrails', 'spikeBursts', 'seaSchools', 'msPings']);
+  'trails', 'planeTrails', 'spikeBursts', 'seaSchools', 'msPings']);
 // lists the game keeps outside the tables that the page draws (spawned by the game's steps, so only the worker has them): sent
 // as columns the same way
 const SW_EXTRA = { wclouds: () => wclouds, blastRings: () => blastRings, gasBalls: () => gasBalls, shocks: () => shocks, airStreaks: () => airStreaks, landWake: () => landWake };
@@ -14276,9 +14507,9 @@ const SW_EXTRA_T = { skip: TBL_SKIP, depth: 4, after: null };
    DRAWN fields only - the ones the drawing reads, listed here per list from the draw functions named; the velocities, timers
    and seeds the step uses stay in the worker. A full snapshot (the gate's mirror, a resync) carries every field. A list not
    named here goes whole (everything of it is drawn: streaks, planeWisps, msPings, msplashes, airStreaks, landWake; the shells'
-   trails, flat arrays, go by their own columns - trSnap). References drawing follows stay in: a puff's prev (same-list {ri}); the smoke's
-   after hook reads st, which the table skips anyway. 'a.b' names a field of the small objects inside the list field a (the
-   fish of a school: swNestOf). When in doubt a field is kept. */
+   trails, flat arrays, go by their own columns - trSnap; a column table, the smoke's puffs, by its own: swColTable). References
+   drawing follows stay in. 'a.b' names a field of the small objects inside the list field a (the fish of a school: swNestOf).
+   When in doubt a field is kept. */
 const SW_DRAW = {
   // 35-particles.js' lists: 43-render-objects.js (drawBubbles, drawFoamBits + drawBigFoam, buildWakeField, drawDebris via
   // 45-draw-vehicles.js, drawShocks, drawBlood), 47-render-overlays.js (the embers, welds, flashes, rings, drawSparks, drawAsh,
@@ -14317,9 +14548,7 @@ const SW_DRAW = {
   // 29-plane.js drawPlanesAir (the trails' points and colour), drawIceBits
   planeTrails: ['pts', 'col'],
   iceBits: ['x', 'y', 'life', 'max', 's', 'tw'],
-  // sky/21-smoke.js gatherSmokeNew + famOf + smgSend (the puffs and the puff before each: prev; h is the page's own number),
   // 50-land-space.js rocketPuffR (the rocket's puffs)
-  smoke: ['x', 'y', 'r', 'age', 'life', 'alpha', 'dark', 'mist', 'quick', 'fam', 'fadeFrom', 'keep', 'kill', 'lonely', 'link', 'lumpy', 'prev', 'src', 'dead', 'sq'],   // (h: the page's own, kept by sq - SW_KEEP)
   rocketTrail: ['x', 'y', 'r', 'age', 'life', 'k', 'ground', 'w', 'h'],
   // (Oct 31) the shells' trails, flat arrays: what a live snapshot carries of them (trSnap - sky/21-smoke.js gatherSmokeNew,
   // 47-render-overlays.js trailR, 41-sky-new.js read the points' x, y, age, seed, launch and the pieces' points, root and thin;
@@ -14421,15 +14650,6 @@ function swKeysOf(arr, skip, only) {
   }
   return keys;
 }
-/* Values the drawing reads through a thing the table skips (a puff's stream, st): worked out per row on the worker as number
-   columns of their own, and put back on the page as the drawing reads them. A funnel's newest puff is drawn joined down to the
-   funnel's mouth (sky/21-smoke.js: s.st.last === s && s.st.head) - its head goes as hd0..hd2, and the page gives that puff a
-   stream of its own { last: it, head } */
-const SW_DV3 = [0, 0, 0];
-const SW_DERIVE = {
-  smoke: { keys: ['hd0', 'hd1', 'hd2'], own: ['st'], get: (s, k) => { const st = s.st, h = st && st.last === s && st.head; return h ? h[k] : undefined; },
-    put: (s, v) => { if (v[0] === undefined) s.st = undefined; else if (s.st && s.st.last === s) { const h = s.st.head; h[0] = v[0]; h[1] = v[1]; h[2] = v[2]; } else s.st = { last: s, head: v }; } },
-};
 /* (60-fps chat, Oct 31) A SNAPSHOT'S NUMBERS IN ONE BLOCK: every column, mask and slice of a live snapshot is a view into one big
    buffer (or a few, as it fills), not a buffer each - hundreds of small buffers moved to the page and dropped every frame. The
    page reads the same numbers through the same kinds of arrays; nothing of it keeps one (it copies the values out) */
@@ -14465,6 +14685,28 @@ function trSnap(full, drawn, bufs) {
 }
 // (the page) the trails' columns into its own arrays
 function trSnapInto(C) { if (C && typeof C.n === 'number') trFill(trails, C); }
+/* (Nov 1) A COLUMN TABLE'S HAND-OFF (04-zz-coltable.js - the smoke's puffs): its columns copied into one buffer (ColTable.pack:
+   a live snapshot the drawn ones - the table's drawn, 36-zz-tables.js - a full one every one), moved to the page, which takes
+   them as its own (adopt) and hands the buffer it held before back with its next inputs (SWCB: swHostIn here, swGuestFrame
+   there), to be packed into again: two buffers that swap, nothing made a snapshot once they're big enough. A live one carries
+   the rows the page can draw, as swInView picks the effect lists' (a table with an x column: within SW_MARGIN and its r of a
+   view's span; a link to a row not sent is a row gone there) */
+const SWCB = { spare: {}, back: {}, sel: new Int32Array(1024) };   // (the worker: a buffer per table to pack into; the page: the buffers to hand back)
+function swColTable(t, full, drawn, bufs) {
+  const T = t.cols, sp = REG.spans, n = T.n, X = T.c.x, R = T.c.r;
+  let sel = null, m = 0;
+  if (!full && sp.length && X) {
+    sel = SWCB.sel.length >= n ? SWCB.sel : (SWCB.sel = new Int32Array(n * 2));
+    for (let i = 0; i < n; i++) {
+      const x = X[i], r = (R ? Math.abs(R[i]) : 0) + SW_MARGIN;
+      for (let k = 0; k < sp.length; k += 2) if (x + r >= sp[k] && x - r <= sp[k + 1]) { sel[m++] = i; break; }
+    }
+  }
+  const P = T.pack(drawn && t.drawn ? t.drawn : T.sent(), SWCB.spare[t.name], sel, m);
+  SWCB.spare[t.name] = null; bufs.push(P.buf);
+  return P;
+}
+function swColAdopt(t, P) { const was = t.cols.adopt(P); if (was) SWCB.back[t.name] = was; }
 // draw: the list's drawn fields (SW_DRAWK) - a live snapshot; null: every field
 function swColsOf(t, arr, strs, sIdx, bufs, draw, all) {
   const n = arr.length, keys = swKeysOf(arr, t.skip, draw ? draw.top : null);
@@ -14478,7 +14720,7 @@ function swColsOf(t, arr, strs, sIdx, bufs, draw, all) {
     if (kind === 2) { C.k.push(k); C.d.push(swColOf(arr, k, kind, strs, sIdx, bufs)); continue; }
     const nest = swNestOf(arr, k, draw ? draw.sub[k] : null, strs, sIdx, bufs);
     if (nest) { C.k.push(k); C.d.push({ nest }); continue; }
-    // (a thing of the same list - a puff's prev, a trail's next - goes as its place in the list; another table's thing as its id)
+    // (a thing of the same list goes as its place in the list; another table's thing as its id)
     const idx = C.idx || (C.idx = new Map(arr.map((o, i) => [o, i])));
     // (Oct 31, 60-fps chat: a thing of the same list that isn't sent - out of the page's views - goes as absent, as if it had none:
     // the page draws only what is near its views, and what it would point to is off them. It went as a whole plain copy of that
@@ -14493,13 +14735,6 @@ function swColsOf(t, arr, strs, sIdx, bufs, draw, all) {
     C.k.push(k); C.d.push({ j: vals });
   }
   delete C.idx; delete C.outs;
-  const dv = t.name && SW_DERIVE[t.name];
-  if (dv) dv.keys.forEach((k, j) => {
-    const col = swNew(Float64Array, n); let miss = null;
-    for (let i = 0; i < n; i++) { const v = arr[i] ? dv.get(arr[i], j) : undefined; if (typeof v === 'number') col[i] = v; else (miss || (miss = swNew(Uint8Array, n)))[i] = 1; }
-    bufs.push(col.buffer); if (miss) bufs.push(miss.buffer);
-    C.k.push(k); C.d.push({ f: col, m: miss, dv: 1 });
-  });
   return C;
 }
 // one field of the things in `arr` as a column: numbers and booleans in a Float64Array (m: where a thing hasn't it), strings as
@@ -14591,11 +14826,6 @@ function swNestCol(arr, k, N, n, strs, clean) {
   items.length = 0;
 }
 // (the page) a list refilled from its columns
-// lists whose rows the page matches by a number of their own rather than by place (the rows shift as old ones die): each incoming
-// row takes the page's thing with the same number, so what the page's drawing gives a thing itself stays on it - a puff's h,
-// rolled when it's first drawn (sky/21-smoke.js) - and keeps: a puff by its spawn number (sq)
-const SW_MATCH = { smoke: { by: 'sq', keys: ['h'] } };
-const SW_KEEP = SW_MATCH;
 /* (Oct 31) the number columns put down a list a thing at a time, in one small function made once for the list's columns: each
    thing is visited once with all its numbers written by name (the browser's fast path for a named field of things of one shape),
    instead of the whole list walked once per column - a thousand puffs, twenty columns, every snapshot. The same values in the same
@@ -14627,21 +14857,19 @@ function swRowPut(arr, K, D, n, list) {
    puffs times twenty fields of garbage each snapshot. A constructor of the list's own also keeps its things' shape apart from
    every other list's (fields of the same name elsewhere holding other kinds of values). The values are put over these at once */
 const SWMK = new Map();
-function swMakerOf(list, K, D, extra) {
+function swMakerOf(list, K, D) {
   let key = (list || '') + ':'; for (let c = 0; c < K.length; c++) key += (D[c].f ? 'f' : D[c].b ? 'b' : '-') + K[c] + ',';
-  if (extra) key += '|' + extra.join(',');
   let M = SWMK.get(key);
   if (M === undefined) {
     let body = '';
     const seen = new Set();
     for (let c = 0; c < K.length; c++) { if (seen.has(K[c])) continue; seen.add(K[c]); body += `this[${JSON.stringify(K[c])}] = ${D[c].f ? '0' : D[c].b ? 'false' : 'undefined'}; `; }
-    if (extra) for (const k of extra) if (!seen.has(k)) { seen.add(k); body += `this[${JSON.stringify(k)}] = undefined; `; }
     try { M = new Function(body); } catch (e) { M = null; }
     SWMK.set(key, M);
   }
   return M;
 }
-function swBlank(K, more) { const o = {}; for (const k of K) o[k] = undefined; if (more) for (const k of more) o[k] = undefined; return o; }
+function swBlank(K) { const o = {}; for (const k of K) o[k] = undefined; return o; }
 /* (Oct 31) a row's changed leaf put at its path by a small function made once a table and path - its field names written in,
    the browser's fast store for things of one shape - instead of a walk with the names in variables (every bird's x, a
    bullet's y: ~2,800 leaves a snapshot in a heavy fight). The same walk: each step only through a thing that's there, the
@@ -14658,44 +14886,21 @@ function swLeafSetter(table, path) {
   SWLS.set(key, S);
   return S;
 }
-const SWOLD = [];
 const swColsSig = new Map();                                         // (list -> its columns last refill: a field is cleaned off only when they change)
 function swColsInto(arr, C, strs, name) {
-  const n = C.n, K = C.k, D = C.d, has = new Set(K), at = new Int32Array(K.length);   // (at: each nested column's next item)
-  // (the page's own fields of a row - kept values, derived things - are never deleted: a field deleted and put back every frame
-  // turns the thing into a slow dictionary object for the drawing too; they're overwritten in place instead)
-  { const kp = name && SW_KEEP[name], dv0 = name && SW_DERIVE[name]; if (kp) for (const k of kp.keys) has.add(k); if (dv0) { for (const k of dv0.own) has.add(k); for (const k of dv0.keys) has.add(k); } }
-  const keep = name && SW_MATCH[name], kby = keep ? K.indexOf(keep.by) : -1, kd = kby >= 0 ? D[kby] : null;
-  const dvp = name && SW_DERIVE[name] && K.includes(SW_DERIVE[name].keys[0]) ? SW_DERIVE[name] : null;
+  const n = C.n, K = C.k, D = C.d, has = new Set(K);
   // (a field is cleaned off a reused thing only when this list's columns changed since its last refill - a full snapshot after
   // live ones, or back: otherwise every thing already has exactly these fields, and walking them all is the refill's cost)
   let sig = K.join(','); for (let c = 0; c < K.length; c++) if (D[c].nest) sig += '|' + K[c] + ':' + D[c].nest.k.join(',') + (D[c].nest.obj ? '' : '[]');
   const clean = swColsSig.get(arr) !== sig; swColsSig.set(arr, sig);
-  // (matched by number: the page's things by that number first, then each incoming row takes its own or a new one)
-  let byN = null, mOld = null;
-  if (kd && kd.f) {
-    // (Oct 31: both lists are in spawn order - a puff's number only grows down the list - so the page's own things are found by
-    // walking the two lists side by side, not through a table of a thousand made every snapshot; any other order: the table)
-    const by = keep.by, f = kd.f, m0 = arr.length; let sorted = true;
-    for (let i = 1; i < n && sorted; i++) if (!(f[i] > f[i - 1])) sorted = false;
-    for (let i = 0; i < m0 && sorted; i++) { const o = arr[i]; if (!o || typeof o !== 'object' || (i && !(o[by] > arr[i - 1][by]))) sorted = false; }
-    if (sorted) { mOld = SWOLD; mOld.length = m0; for (let i = 0; i < m0; i++) mOld[i] = arr[i]; }
-    else { byN = new Map(); for (const o of arr) if (o && typeof o === 'object') byN.set(o[by], o); }
-  }
   if (arr.length > n) arr.length = n;
-  // (first the things, each in its place: its own by number, or a new one with every field there from the start, in one order -
+  // (first the things, each in its place: the one there, or a new one with every field there from the start, in one order -
   // one shape for them all)
-  let jOld = 0;
-  const Mk = swMakerOf(name, K, D, keep ? keep.keys : null);
+  const Mk = swMakerOf(name, K, D);
   for (let i = 0; i < n; i++) {
-    let o;
-    if (mOld) { const v = kd.f[i], by = keep.by; while (jOld < mOld.length && mOld[jOld][by] < v) jOld++; o = jOld < mOld.length && mOld[jOld][by] === v ? mOld[jOld++] : null;
-      if (!o) o = Mk ? new Mk() : swBlank(K, keep.keys); arr[i] = o; }
-    else if (byN) { o = byN.get(kd.f[i]); if (!o) o = Mk ? new Mk() : swBlank(K, keep.keys); arr[i] = o; }
-    else { o = arr[i]; if (!o || typeof o !== 'object') o = arr[i] = Mk ? new Mk() : swBlank(K, null); }
+    let o = arr[i]; if (!o || typeof o !== 'object') o = arr[i] = Mk ? new Mk() : swBlank(K);
     if (clean) for (const k in o) if (!has.has(k)) delete o[k];
   }
-  if (mOld) mOld.length = 0;
   // (then the fields: the numbers a thing at a time (swRowPut), the rest a column at a time)
   const rowsDone = n > 0 && swRowPut(arr, K, D, n, name);
   for (let c = 0; c < K.length; c++) {
@@ -14708,7 +14913,6 @@ function swColsInto(arr, C, strs, name) {
     else if (d.ri) { for (let i = 0; i < n; i++) arr[i][k] = m && m[i] ? undefined : z && z[i] ? null : d.ri[i] === -2 ? null : undefined; }   // (places: put below, once every row exists)
     else for (let i = 0; i < n; i++) swColPut(arr[i], k, d, i, strs);
   }
-  if (dvp) for (let i = 0; i < n; i++) { const o = arr[i], v = SW_DV3; for (let j = 0; j < dvp.keys.length; j++) v[j] = o[dvp.keys[j]]; dvp.put(o, v[0] === undefined ? v : v.slice()); }
   // places in the list and ids back into things
   for (let c = 0; c < K.length; c++) {
     const d = D[c], k = K[c];
@@ -15433,14 +15637,16 @@ const FIRE_COL = 153;
 // that source live S on average and every other source of the kind in step - user Oct 29: "the actual time in seconds")
 const SM_LIFE = { funnel: ['slsFun', 24], fire: ['slsFire', 38], blast: ['slsBlast', 22], gun: ['slsGun', 7.5], trail: ['slsTrail', 12.5], dust: ['slsDust', 8] };
 let SMOKE_TOP_Y = WATER_Y - 2400;
-const fireTop = s => s.y0 - s.colH;   // (Oct 29, V298 - user: "lets remove the deck1 height barrier": the column's own height, no ceiling)
+const fireTop = (y0, colH) => y0 - colH;   // (Oct 29, V298 - user: "lets remove the deck1 height barrier": the column's own height, no ceiling)
 // a puff's ground: the land's top, or null (the water). An island line's island is behind the water, user Oct 29 ("The smoke
 // on a ship must render in front of an island"): a puff that comes to it below its top (a ship's, in front of it) stays in
 // front, on the water's line; one on its top (a fire up there) keeps to its top
-const smFloor = s => {
-  if (!dryLand(s.x)) return null;
-  if (isleCol(s.x)) { if (s.fr === undefined) s.fr = s.y > landTopM(s.x) + 6; if (s.fr) return null; }
-  return landTopM(s.x);
+// (Nov 1: row i of the puffs, at x, y - fr its own flag: 2 not looked yet, 1 in front, 0 on top)
+const smFloor = (i, x, y) => {
+  if (!dryLand(x)) return null;
+  const FR = smoke.c.fr;
+  if (isleCol(x)) { if (FR[i] === 2) FR[i] = y > landTopM(x) + 6 ? 1 : 0; if (FR[i]) return null; }
+  return landTopM(x);
 };
 function buildSmokeGrid() {
   SG.nx = Math.ceil(WORLD_W / SG.cell) + 2;
@@ -15455,7 +15661,7 @@ function smokeSpans(nx, ny, cell, u, v, p) {
   const nxt = SG.next, act = SG.active, M = 5;
   nxt.fill(0);
   const mark = (x, r) => { const a = Math.max(1, Math.floor((x - r) / cell) - M), b = Math.min(nx - 2, Math.floor((x + r) / cell) + M); for (let i = a; i <= b; i++) nxt[i] = 1; };
-  for (const s of smoke) if (!s.drift || s.age < s.drift) mark(s.x, s.r);
+  { const c = smoke.c, X = c.x, R = c.r, AG = c.age, DR = c.drift; for (let i = 0; i < smoke.n; i++) if (!DR[i] || AG[i] < DR[i]) mark(X[i], R[i]); }
   for (const s of shells) if (!s.under) mark(s.x, 0);
   const spans = [];
   for (let i = 1; i < nx - 1; i++) {
@@ -15518,145 +15724,154 @@ on('blast', e => {
 // (ground) has its own wash (rotorWash, heliDust). grid: false where the caller puts its own downdraft in the grid (the army's)
 function rotorDownwash(x, ry, half, spin, vx, dt, grid = true) {
   if (spin < 0.3 || !smoke.length) return;
-  const D = 150 + 60 * spin, R = half * 1.2, up = half * 0.45;
+  const D = 150 + 60 * spin, R_ = half * 1.2, up = half * 0.45;
   if (grid) for (let o = -half * 0.8; o <= half * 0.8 + 0.1; o += SG.cell) gridImpulse(x + o, ry + 14, vx * 0.3 + o / half * 50 * spin, 210 * spin, 1.3);
-  for (const s of smoke) {
-    if (s.ground || s.dead) continue;
-    const dx = s.x - x, dy = s.y - ry, ax = Math.abs(dx);
-    if (dy < -up - s.r || dy > D + s.r || ax > R + s.r) continue;
+  const c = smoke.c, X = c.x, Y = c.y, R = c.r, VX = c.vx, VY = c.vy, GR = c.ground, RI = c.rise;
+  for (let i = 0; i < smoke.n; i++) {
+    if (GR[i]) continue;
+    const r = R[i], dx = X[i] - x, dy = Y[i] - ry, ax = Math.abs(dx);
+    if (dy < -up - r || dy > D + r || ax > R_ + r) continue;
     // under the disc: strongest just below it, fading with depth; past the tips, fading out sideways
-    const wy = dy < 0 ? 1 + dy / (up + s.r) : 1 - dy / (D + s.r), wx = ax < half ? 1 : 1 - (ax - half) / (R - half + s.r);
+    const wy = dy < 0 ? 1 + dy / (up + r) : 1 - dy / (D + r), wx = ax < half ? 1 : 1 - (ax - half) / (R_ - half + r);
     const w = spin * clamp(wy, 0, 1) * clamp(wx, 0, 1);
     if (w <= 0.01) continue;
     const out = (dx === 0 ? 1 : Math.sign(dx)) * (0.35 + 0.65 * Math.min(1, ax / half));   // (from the hub outward: more toward the tips)
-    s.x += out * 95 * w * dt + vx * 0.25 * w * dt;
-    if (!s.rise) { s.y += 85 * w * dt; if (s.vy < 40 * w) s.vy += (40 * w - s.vy) * Math.min(1, 3 * dt); }
-    s.vx += (out * 70 * w - s.vx) * Math.min(1, 3 * w * dt);
+    X[i] += out * 95 * w * dt + vx * 0.25 * w * dt;
+    if (!RI[i]) { Y[i] += 85 * w * dt; if (VY[i] < 40 * w) VY[i] += (40 * w - VY[i]) * Math.min(1, 3 * dt); }
+    VX[i] += (out * 70 * w - VX[i]) * Math.min(1, 3 * w * dt);
   }
 }
-// a source's own stream (or chain) of puffs, kept on the source: smStream(plane), smStream(ship, 'fire' + i)
+// a source's own stream (or chain) of puffs, kept on the source: smStream(plane), smStream(ship, 'fire' + i) - { last: the id
+// (sq) of its newest puff, 0 none; head: a funnel's mouth, when its source sets one }
 // the smoke's own random source (engine stage 3: never Math.random; its state saved with the tables)
 const smR = sysRng('smoke'), smRnd = (a, b) => a + (b - a) * smR();
-let smSq = 0;
-function smStream(o, k = '') { const m = o._smS || (o._smS = {}); return m[k] || (m[k] = { last: null }); }
+function smStream(o, k = '') { const m = o._smS || (o._smS = {}); return m[k] || (m[k] = { last: 0 }); }
+// (Nov 1) the puffs are a column table, a row each (05-game-state.js SMOKE_FIELDS); o.chain / o.stream a source's stream, or
+// o.after: a stream kept by its newest puff's id (0 none yet) instead - the bits torn off a puff, 41-sky-new.js. Back: its id
 function spawnSmoke(x, y, o) {
   // (no budget, no thinning, user Oct 30: "no smoke or fire or debris limits" - every puff spawned, every puff lives its life)
-  const p = {
-    x, y, vx: o.vx || 0, vy: o.vy || -15, r: (o.r || 8) * FXK, grow: (o.grow || smRnd(6, 10)) * FXK, age: 0, life: o.life || smRnd(10, 15),
-    dark: o.dark || 0, lift: o.lift || 40, alpha: o.alpha || smRnd(0.55, 0.75), mist: !!o.mist, quick: !!o.quick, rmax: (o.rmax || 26) * FXK,
-    ashT: o.ash ? smRnd(0.5, 2) : -1, keep: !!o.keep, fam: o.fam || null, ground: !!o.ground, rise: !!o.rise,
-    src: o.src || null,                                   // (the new sky: 'smear' - pulled out of a column by a plane)
-    climb: o.climb || 0,                                  // (how much higher than the sea's smoke it rises before it slows: a tower's - stepSmoke)
-    hs: FXK,                                              // (real scale: how much taller its rise is - a ship's smoke as much as she's bigger)
-    link: o.link || 60,
-    seed: 1 + Math.floor(smR() * 6),                      // (the old renderer's puff pattern, 1-6: drawn from the smoke's own source here, not at draw time - 46-smoke-fire-draw.js)
-    sq: ++smSq,                                           // (its number in the order spawned: the simulation worker's page keeps a puff's own drawing values (h) by it - 36-zzzzz-sw-snap.js)
-    steady: !!o.steady,                                   // (its lift held over its life and no slowing high up: it climbs all its life - stepSmoke)
-    trailV: o.trailV || 0,                                // (Oct 29, V266: its ship's speed - the air never carries it forward faster than 0.4 of it, so a
-                                                          // funnel's smoke always streams back from her, whatever the wind - user: "why is the smoke up if the boat is moving??")
-    fadeFrom: o.fadeFrom,                                 // (Oct 29: how far into its life it starts to dissolve - 0.62 unless set; 21-smoke.js)
-    jet: o.jet || 0,                                      // (Oct 29: a funnel's puff keeps its ship's way on for this long, then the air takes it -
-                                                          // the column stands up off the funnel and bends back into the trail, user: "thin ... and does this curvature")
-    lumpy: !!o.lumpy,                                     // (Oct 29, V258: its chain's body drawn as uneven round billows, not an even tube - a big ship's funnel smoke, 21-smoke.js smnLumpy)
-    drift: o.drift || 0,                                  // (Oct 29, V253: past this age it drifts with the wind on its own - no air grid under it, which kept
-                                                          // ~25 columns awake a puff all along a big ship's 40 s trail; the grid only added swirls out there)
-    buoy: o.buoy === undefined ? 1 : o.buoy,             // (how hard it heats the air round it - the grid's updraft; a big funnel's puffs only a little, or the air grid,
-                                                          // made for small puffs, shoots them straight up)                                   // (a chain: how far apart two puffs may be and still be joined - a big funnel's puffs are far apart)
-  };
+  // (each field set in the order the puff's object was written before: the smoke's random numbers drawn in the same order)
+  const T = smoke, i = T.add(), c = T.c;
+  c.x[i] = x; c.y[i] = y; c.vx[i] = o.vx || 0; c.vy[i] = o.vy || -15; c.r[i] = (o.r || 8) * FXK; c.grow[i] = (o.grow || smRnd(6, 10)) * FXK;
+  c.age[i] = 0; c.life[i] = o.life || smRnd(10, 15); c.dark[i] = o.dark || 0; c.lift[i] = o.lift || 40; c.alpha[i] = o.alpha || smRnd(0.55, 0.75);
+  c.mist[i] = o.mist ? 1 : 0; c.quick[i] = o.quick ? 1 : 0; c.rmax[i] = (o.rmax || 26) * FXK; c.ashT[i] = o.ash ? smRnd(0.5, 2) : -1;
+  c.keep[i] = o.keep ? 1 : 0; c.fam[i] = T.intern(o.fam || null); c.ground[i] = o.ground ? 1 : 0; c.rise[i] = o.rise ? 1 : 0;
+  c.src[i] = T.intern(o.src || null); c.climb[i] = o.climb || 0; c.hs[i] = FXK; c.link[i] = o.link || 60;
+  c.seed[i] = 1 + Math.floor(smR() * 6);
+  c.steady[i] = o.steady ? 1 : 0; c.trailV[i] = o.trailV || 0; c.fadeFrom[i] = o.fadeFrom ?? NaN; c.jet[i] = o.jet || 0;
+  c.lumpy[i] = o.lumpy ? 1 : 0; c.drift[i] = o.drift || 0; c.buoy[i] = o.buoy === undefined ? 1 : o.buoy;
   // LIFETIMES by kind (user Oct 29: "change the lifetimes ... have a slider for them ingame"): each source tags its smoke's
   // kind (o.kind; a fire's is 'fire'); the SMOKE tab's LIFETIMES sliders stretch or shorten its life (SM_LIFE)
   const lk = SM_LIFE[o.fire > 0 ? 'fire' : o.kind], lm = lk ? (NSKY.P[lk[0]] ?? lk[1]) / lk[1] : 1;
-  p.life *= lm;
+  c.life[i] *= lm;
   // a fire's puff: its column (FIRE_COL, above): it climbs it in about 18 s or faster, and lives to get there and spread
   if (o.fire > 0) {
-    p.y0 = y; p.colH = FIRE_COL * Math.sqrt(o.fire) * smRnd(0.85, 1.15); p.jit = 1 + smRnd(0, 0.15);
-    const H = Math.max(40, y - fireTop(p));
-    p.lift = Math.max(p.lift * 1.5, 2.2 * H / 18);
-    p.life = Math.max(p.life, (1.4 * H / (p.lift / 2.2) + 4) * lm);
+    c.y0[i] = y; c.colH[i] = FIRE_COL * Math.sqrt(o.fire) * smRnd(0.85, 1.15); c.jit[i] = 1 + smRnd(0, 0.15);
+    const H = Math.max(40, y - fireTop(c.y0[i], c.colH[i]));
+    c.lift[i] = Math.max(c.lift[i] * 1.5, 2.2 * H / 18);
+    c.life[i] = Math.max(c.life[i], (1.4 * H / (c.lift[i] / 2.2) + 4) * lm);
   }
   // A stream: the puffs one source pours out (a falling plane, a fire, a funnel). o.chain also joins each puff to the one
   // before it, so the new smoke draws them as one unbroken body (the Cloud Lab's falling plane: 19-fx-sim.js); o.stream only
   // keeps the order. (user Oct 27: "When I do a smoke trail, the way it disappears doesn't make sense. Middle parts 'pop
   // out'" - every puff got its own random life, so one in the middle could end before older ones: now a puff never ends
   // before the puff before it, so a trail or a column always goes from its oldest end)
+  // (Nov 1: the puff before it by its id - a row gone is a puff gone)
   const st = o.chain || o.stream;
-  if (st) {
-    const q = st.last;
-    if (q && !q.dead) {
-      p.life = Math.max(p.life, q.life - q.age);
-      if (o.chain && Math.hypot(q.x - x, q.y - y) < p.link) p.prev = q;
+  if (st || o.after !== undefined) {
+    const last = st ? st.last : o.after, q = last ? T.row(last) : -1;
+    if (q >= 0) {
+      c.life[i] = Math.max(c.life[i], c.life[q] - c.age[q]);
+      if (o.chain && Math.hypot(c.x[q] - x, c.y[q] - y) < c.link[i]) c.prev[i] = c.sq[q];
     }
-    st.last = p; p.stream = true; p.st = st;   // (st.head, when its source sets one: the newest puff is drawn joined to it - 21-smoke.js)
+    if (st) { st.last = c.sq[i]; c.st[i] = st; }   // (st.head, when its source sets one: the newest puff is drawn joined to it - smHeads)
+    c.stream[i] = 1;
   }
-  smoke.push(p);
+  return c.sq[i];
 }
 function stepSmoke(dt) {
-  if (!smoke.length && !shells.length) { SG.u.fill(0); SG.v.fill(0); if (SG.active) SG.active.fill(0); smwClear(); return; }
+  if (!smoke.n && !shells.length) { SG.u.fill(0); SG.v.fill(0); if (SG.active) SG.active.fill(0); smwClear(); return; }
   dt = Math.min(dt, 1 / 30);
   const { nx, ny, cell, u, v, p, dens } = SG;
   // Only the columns with smoke (or a shell) in or near them are worked on: out in the empty sky the air
   // just blows with the wind, so solving it there changed nothing. A column that wakes up starts from that.
   const SPANS = smokeSpans(nx, ny, cell, u, v, p);
+  const c = smoke.c, X = c.x, Y = c.y, VX = c.vx, VY = c.vy, R = c.r, AG = c.age, LF = c.life, AL = c.alpha, BU = c.buoy, DR = c.drift;
   dens.fill(0);
-  for (const s of smoke) { if (s.drift && s.age >= s.drift) continue; const k = gIdx(s.x, s.y); if (k >= 0) dens[k] += s.alpha * (1 - s.age / s.life) * (0.5 + s.r / 30) * s.buoy; }
+  for (let i = 0; i < smoke.n; i++) { if (DR[i] && AG[i] >= DR[i]) continue; const k = gIdx(X[i], Y[i]); if (k >= 0) dens[k] += AL[i] * (1 - AG[i] / LF[i]) * (0.5 + R[i] / 30) * BU[i]; }
   if (!smwStep(dt, SPANS)) {
     const W = SMW.wind && SMW.wind.length === ny ? SMW.wind : (SMW.wind = new Float64Array(ny));
     for (let j = 0; j < ny; j++) W[j] = windAt(SG.top + (j + 0.5) * cell);
     smSolve(SG, dt, SPANS, W, smShips(), WATER_Y);
   }
   const wTop = WATER_Y - surfBand();                  // (above this, a puff is clear of the water anywhere: no need for the exact surface)
-  for (let n = smoke.length - 1; n >= 0; n--) {
-    const s = smoke[n];
-    s.age += dt;
-    if (s.kill && (s.kill -= dt) <= 0) { smoke.splice(n, 1); s.dead = true; continue; }
+  const KL = c.kill, LO = c.lonely, KP = c.keep, SR = c.stream, ASH = c.ashT, TV = c.trailV, JT = c.jet, GD = c.ground, RM = c.rmax, GR = c.grow;
+  const RI = c.rise, SD = c.steady, CH = c.colH, Y0 = c.y0, LI = c.lift, CL = c.climb, HS = c.hs;
+  // (newest to oldest, as ever; a puff that ends is marked here and the rest closed up after - smoke.sweep - in their order)
+  for (let n = smoke.n - 1; n >= 0; n--) {
+    const age = AG[n] += dt;
+    if (KL[n] && (KL[n] -= dt) <= 0) { smoke.drop(n); continue; }
     {
-      const k = gIdx(s.x, s.y);
+      const k = gIdx(X[n], Y[n]);
       let around = 0;
       if (k >= 0) for (const o of SG.near) around += dens[k + o] || 0;
-      const own = s.alpha * (1 - s.age / s.life) * (0.5 + s.r / 30) * s.buoy;
+      const own = AL[n] * (1 - age / LF[n]) * (0.5 + R[n] / 30) * BU[n];
       // (a lone puff fades away early - but not one of a stream: it would leave a hole in the middle of the trail)
-      if (!s.keep && !s.stream && around - own < 0.25 && s.age > 1.5) { s.lonely = (s.lonely || 0) + dt; if (s.lonely > 1.6) { smoke.splice(n, 1); s.dead = true; continue; } }
-      else if (s.lonely) s.lonely = Math.max(0, s.lonely - dt * 2);
+      if (!KP[n] && !SR[n] && around - own < 0.25 && age > 1.5) { LO[n] = LO[n] + dt; if (LO[n] > 1.6) { smoke.drop(n); continue; } }
+      else if (LO[n]) LO[n] = Math.max(0, LO[n] - dt * 2);
     }
-    if (s.age > s.life) { smoke.splice(n, 1); s.dead = true; continue; }
-    if (s.ashT >= 0 && (s.ashT -= dt) < 0 && s.age < s.life * 0.7 && ash.length < 50) {
-      s.ashT = smRnd(9, 18);
-      ash.push({ x: s.x + smRnd(-s.r, s.r) * 0.8, y: s.y + smRnd(-s.r, s.r) * 0.5, vx: s.vx * 0.5, vy: smRnd(2, 8), ph: smR() * 6, life: 0, max: smRnd(6, 12), big: smR() < 0.25 });
+    if (age > LF[n]) { smoke.drop(n); continue; }
+    if (ASH[n] >= 0 && (ASH[n] -= dt) < 0 && age < LF[n] * 0.7 && ash.length < 50) {
+      ASH[n] = smRnd(9, 18);
+      ash.push({ x: X[n] + smRnd(-R[n], R[n]) * 0.8, y: Y[n] + smRnd(-R[n], R[n]) * 0.5, vx: VX[n] * 0.5, vy: smRnd(2, 8), ph: smR() * 6, life: 0, max: smRnd(6, 12), big: smR() < 0.25 });
     }
+    let x = X[n], y = Y[n], vx = VX[n], vy = VY[n], r = R[n];
     // (a drifting puff: the air a calm column of the grid holds - the wind, no updraft)
-    const drifting = s.drift && s.age >= s.drift;
-    let gu = drifting ? windAt(s.y) * 1.25 : gSample(u, s.x, s.y); const gv = drifting ? 0 : gSample(v, s.x, s.y);
-    if (s.trailV) { const cap = s.trailV * 0.4; gu = s.trailV > 0 ? Math.min(gu, cap) : Math.max(gu, cap); }
-    const k = Math.min(1, 2.2 * dt), kx = s.jet && s.age < s.jet ? k * (s.age / s.jet) * (s.age / s.jet) : k;
+    const drifting = DR[n] && age >= DR[n];
+    let gu = drifting ? windAt(y) * 1.25 : gSample(u, x, y); const gv = drifting ? 0 : gSample(v, x, y);
+    if (TV[n]) { const cap = TV[n] * 0.4; gu = TV[n] > 0 ? Math.min(gu, cap) : Math.max(gu, cap); }
+    const k = Math.min(1, 2.2 * dt), kx = JT[n] && age < JT[n] ? k * (age / JT[n]) * (age / JT[n]) : k;
     // (user Oct 25: dust lifted by a rotor's wash hugs the ground - it rolls out along it, swells and fades, never rises)
-    if (s.ground) {
-      s.vx += (gu - s.vx) * k * 0.5; s.vx *= 1 - Math.min(1, dt * 0.9);
-      s.x += s.vx * dt;
-      s.r = Math.min(s.rmax, s.r + s.grow * dt * (1 - 0.5 * s.age / s.life));
-      { const f = smFloor(s); s.y = (f !== null ? f : surfaceY(s.x)) - s.r * 0.95; } s.vy = 0;
+    if (GD[n]) {
+      vx += (gu - vx) * k * 0.5; vx *= 1 - Math.min(1, dt * 0.9);
+      x += vx * dt;
+      r = Math.min(RM[n], r + GR[n] * dt * (1 - 0.5 * age / LF[n]));
+      { const f = smFloor(n, x, y); y = (f !== null ? f : surfaceY(x)) - r * 0.95; }
+      X[n] = x; Y[n] = y; VX[n] = vx; VY[n] = 0; R[n] = r;
       continue;
     }
     // (rise: a damaged helicopter's smoke - its own rotor's downdraft doesn't pull it down)
-    s.vx += (gu - s.vx) * kx; s.vy += ((s.rise ? Math.min(gv, 0) : gv) - s.vy) * k;
+    vx += (gu - vx) * kx; vy += ((RI[n] ? Math.min(gv, 0) : gv) - vy) * k;
     // (steady: a big ship's funnel smoke keeps most of its lift, so its column climbs on one slant all the way - V258)
     // (a fire's puff: its lift held all the way up its column, fading out over the column's last fifth - it billows out
     // there; under deck 1's clouds for a big fire - FIRE_COL, user Oct 29)
-    { const t = s.age / s.life; let lf = s.steady ? 1 : (1 - t) * (1 - t);
-      if (s.colH) { const top = fireTop(s), H = Math.max(40, s.y0 - top); lf = clamp((s.y - top) / (0.2 * H), 0, 1); }
-      s.vy -= s.lift * lf * dt; }
+    { const t = age / LF[n]; let lf = SD[n] ? 1 : (1 - t) * (1 - t);
+      if (CH[n]) { const top = fireTop(Y0[n], CH[n]), H = Math.max(40, Y0[n] - top); lf = clamp((y - top) / (0.2 * H), 0, 1); }
+      vy -= LI[n] * lf * dt; }
     // the higher it gets, the more it loses its push: it slows to a lazy drift up there
     // (user Oct 27: "When a tower has black smoke, it should go higher in the air" - a tower's puffs carry a climb: they
     // keep their push that much higher up, measured from their own tower's foot - a mountain's tower too)
-    const high = clamp((WATER_Y - 40 - s.climb - s.y) / (420 * s.hs), 0, 1);
-    if (s.vy < 0 && !s.steady && !s.colH) s.vy += (-3 - s.vy) * high * 1.4 * dt;
-    s.x += s.vx * dt; s.y += s.vy * dt;
-    s.r = Math.min(s.rmax, s.r + s.grow * dt * (1 - 0.5 * s.age / s.life));
+    const high = clamp((WATER_Y - 40 - CL[n] - y) / (420 * HS[n]), 0, 1);
+    if (vy < 0 && !SD[n] && !CH[n]) vy += (-3 - vy) * high * 1.4 * dt;
+    x += vx * dt; y += vy * dt;
+    r = Math.min(RM[n], r + GR[n] * dt * (1 - 0.5 * age / LF[n]));
     // (on land, user Oct 25: a puff never goes into the ground - its whole round stays above it)
-    const f = smFloor(s);
-    if (f === null && s.y + s.r * 0.4 < wTop) continue;   // (well above the water: it can't be under it - perf pass, Oct 29)
-    const sy = f !== null ? f - s.r * 1.05 : surfaceY(s.x) - s.r * 0.4;
-    if (s.y > sy) { s.y = sy; if (s.vy > 0) s.vy = 0; }
+    const f = smFloor(n, x, y);
+    if (!(f === null && y + r * 0.4 < wTop)) {   // (well above the water: it can't be under it - perf pass, Oct 29)
+      const sy = f !== null ? f - r * 1.05 : surfaceY(x) - r * 0.4;
+      if (y > sy) { y = sy; if (vy > 0) vy = 0; }
+    }
+    X[n] = x; Y[n] = y; VX[n] = vx; VY[n] = vy; R[n] = r;
   }
+  smoke.sweep();
+}
+// (Nov 1) each puff that is the newest of a stream whose source marks its mouth (a big ship's funnel, 50-land-civships.js
+// st.head): that mouth, x, y, r, in hd0..hd2 - NaN for the rest. The drawing joins the column down to it (sky/21-smoke.js).
+// Worked out once a frame after everything that moves the puffs and the mouths (frameBody), the one place for the page that
+// runs the game and for the simulation worker, whose snapshot carries these columns
+function smHeads() {
+  const c = smoke.c, n = smoke.n, ST = c.st, SQ = c.sq, H0 = c.hd0, H1 = c.hd1, H2 = c.hd2;
+  for (let i = 0; i < n; i++) { const st = ST[i], hd = st && st.last === SQ[i] && st.head; if (hd) { H0[i] = hd[0]; H1[i] = hd[1]; H2[i] = hd[2]; } else { H0[i] = NaN; H1[i] = NaN; H2[i] = NaN; } }
 }
 // (engine stage 4) the air's step over the columns with smoke (SPANS): wind and the smoke's lift (W: the wind at each row's
 // height), the hulls dragging the air at the water (SH: each afloat ship's first and last column and its speed), swirls,
@@ -15722,20 +15937,45 @@ function smSolve(G, dt, SPANS, W, SH, WY) {
   }
   for (let i = 0; i < nx; i++) { const k = (ny - 2) * nx + i; if (v[k] > 0) v[k] = 0; }
 }
-// (engine stage 3) the smoke's table: its puffs. A puff's chain link (prev) is another puff, saved as its id; its stream
-// (st: the { last, head } its source keeps on itself, smStream) belongs to the source, so it isn't saved: a loaded puff keeps
-// the live one's, and each stream's newest puff is found again from the list. The air-flow grid (SG) isn't saved either: once
-// loaded every column starts again from the wind as it wakes (smokeSpans) - unless the save held it (smokeAir, below)
-defTable('smoke', () => smoke, { net: false, skip: ['st'],
-  after: arr => {
-    const newest = new Map(), live = new Set(arr);
-    for (const s of arr) if (s.sq > smSq) smSq = s.sq;              // (the spawn count goes on from the highest loaded: both sides of the worker count alike)
-    for (const s of arr) if (s.st) newest.set(s.st, s);
-    for (const [st, s] of newest) if (!live.has(st.last)) st.last = s;
+// (engine stage 3) the smoke's table: its puffs - a column table (Nov 1: 04-zz-coltable.js; saved, loaded and sent to the page
+// by 36-zz-tables.js colTable). A puff's chain link (prev) is another puff's id; its stream (st: the { last, head } its source
+// keeps on itself, smStream) belongs to the source, so it isn't saved: a loaded puff keeps the live one's at its place, and each
+// stream's newest puff is found again from the rows. The air-flow grid (SG) isn't saved either: once loaded every column starts
+// again from the wind as it wakes (smokeSpans) - unless the save held it (smokeAir, below). Sent to the page: SMOKE_DRAWN
+defTable('smoke', null, { cols: smoke, drawn: SMOKE_DRAWN, rows: smFromRows, net: false,
+  after: () => {
+    const c = smoke.c, ST = c.st, newest = new Map();
+    for (let i = 0; i < smoke.n; i++) if (ST[i]) newest.set(ST[i], c.sq[i]);
+    for (const [st, sq] of newest) if (!(st.last && smoke.row(st.last) >= 0)) st.last = sq;
     if (SG.active && !SG.loaded) SG.active.fill(0);
     SG.loaded = false;
   },
 });
+// (Nov 1) a save from before the puffs were columns (a Story slot, a SNAPSHOT): its rows - each puff as a plain object, its
+// chain link and torn bits as { ref } to another row's id (u_) - as the table's columns; byU learns each id's puff number, so
+// a source's stream that names one (its last) is that number
+function smFromRows(rows, byU) {
+  const n = rows.length, cols = {}, num = v => typeof v === 'number' ? v : NaN, sqOf = new Map();
+  for (const F of smoke.f) if (F.kind !== 'obj') cols[F.k] = new Array(n);
+  const strs = [], sIdx = new Map(), str = v => { if (typeof v !== 'string') return -1; let k = sIdx.get(v); if (k === undefined) { k = strs.length; strs.push(v); sIdx.set(v, k); } return k; };
+  let top = 0;
+  rows.forEach((r, i) => { const sq = typeof r.sq === 'number' ? r.sq : top + 1; top = Math.max(top, sq); sqOf.set(r.u_, sq); if (byU) byU.set(r.u_, sq); });
+  rows.forEach((r, i) => {
+    const ref = v => v && v.ref != null ? sqOf.get(v.ref) || 0 : 0, own = r._smS && r._smS[''];
+    for (const F of smoke.f) {
+      if (F.kind === 'obj') continue;
+      const v = r[F.k], o = cols[F.k];
+      if (F.k === 'sq') o[i] = sqOf.get(r.u_);
+      else if (F.k === 'prev') o[i] = ref(v);
+      else if (F.k === 'torn') o[i] = own ? ref(own.last) : 0;
+      else if (F.k === 'fr') o[i] = v === undefined ? 2 : v ? 1 : 0;
+      else if (F.kind === 'str') o[i] = str(v);
+      else if (F.kind === 'u8') o[i] = v ? 1 : 0;
+      else o[i] = v === undefined || v === null ? F.d : num(v);
+    }
+  });
+  return { soa: 1, n, top, strs, cols };
+}
 // the air-flow grid itself (s3-drift Oct 30: not saved, a loaded game's smoke rode other air from the first step): the
 // columns that hold anything - the flow u, v, and the pressure p and swirl curl, which the edges of the worked columns read
 // from the step before - and which columns are awake. Base64 text of their bytes (36-zz-world f32ToB64): exact. Taken back
@@ -23012,53 +23252,73 @@ function smnLumpy(cx, cy, R, qx, qy, qR, d, st, z, a, fam, h, qa = a) {
     if (h3 < 0.35 && r > 2) { const o2 = -Math.sign(off || 1) * r * (0.35 + 0.25 * h1); smnPuff(x + nx * o2, y + ny * o2, Math.max(0.55, r * (0.45 + 0.25 * h2)), z * (1 - u), au, fam, h2); }
   }
 }
-function famOf(s) {
-  if (s.fam && FAM_N[s.fam] !== undefined) return FAM_N[s.fam];
-  if (s.mist) return 3;
-  const t = s.age / s.life, g = s.dark * 0.8 + t * 0.9 + (s.h - 0.5) * 0.12 - (s.quick && s.age < 3.5 ? 0.3 : 0);
+// (Nov 1: the puffs are a column table - 05-game-state.js SMOKE_FIELDS - and these take a puff's row)
+function famOf(i) {
+  const c = smoke.c, fm = smoke.str(c.fam[i]);
+  if (fm && FAM_N[fm] !== undefined) return FAM_N[fm];
+  if (c.mist[i]) return 3;
+  const age = c.age[i], t = age / c.life[i], g = c.dark[i] * 0.8 + t * 0.9 + (c.h[i] - 0.5) * 0.12 - (c.quick[i] && age < 3.5 ? 0.3 : 0);
   return g < 0.34 ? 0 : g < 0.62 ? 1 : 2;
 }
 // the smoke particles as the game sizes and fades them (src/46-smoke-fire-draw.js drawSmoke), then as balls
 // the smoke's source, for which pass it goes in (BEHIND DECK 1): the ship's fire, the tower's shells and missiles, the plane, the space rocket
-const srcOf = s => s.src === 'smear' ? 'plane' : s.src || 'ship';
+const srcOf = i => { const s = smoke.str(smoke.c.src[i]); return s === 'smear' ? 'plane' : s || 'ship'; };
+// which sources a pass draws (BEHIND DECK 1: P.behind's, in the back pass; the rest in the front) - the view's and the
+// smoke-drawing worker's one rule
+const smWant = (pass, behind) => pass === 'back' ? (src => !!behind[src]) : (src => !behind[src]);
+// what the smoke-drawing worker reads of the puffs: the drawn columns and the drawing's own number (Nov 1)
+const SMOKE_DRAWN_H = [...SMOKE_DRAWN, 'h'];
+// each puff of the pass its own number for its billows (h), the first time it's drawn - in the order drawn, the counter this
+// thread's (the drawing's own: never the simulation's)
+function smRollH(want) {
+  const H = smoke.c.h;
+  for (let i = 0; i < smoke.n; i++) if (H[i] !== H[i] && want(srcOf(i))) H[i] = fxHash(++smHc * 0.6180339 + 0.1);
+}
+// how far into its fading a puff is (0 not yet .. 1 gone): past fadeFrom of its life (0.62 unless its source says), its kill's
+// countdown, how long it has been alone
+function smLate(i) {
+  const c = smoke.c, f0 = c.fadeFrom[i] !== c.fadeFrom[i] ? 0.62 : c.fadeFrom[i], t = c.age[i] / c.life[i], kl = c.kill[i], lo = c.lonely[i];
+  return Math.max(c.keep[i] ? t : t > f0 ? (t - f0) / (1 - f0) : 0, kl ? 1 - kl / 2.5 : 0, lo ? Math.min(1, lo / 1.6) : 0);
+}
 function gatherSmokeNew(want) {
   const SV = FXV.SV, kx = SV / FXV.pxX, cxOf = wx => wpx(wx) / FXV.pxX + SMG.mx, cyOf = wy => wpy(wy) / FXV.pxY + SMG.my;
-  for (const s of smoke) {
-    if (!want(srcOf(s))) continue;
-    if (s.h === undefined) s.h = fxHash(++smHc * 0.6180339 + 0.1);   // (the game's puffs: a number of their own, for their billows)
+  smRollH(want);   // (the game's puffs: a number of their own, for their billows)
+  const T = smoke, c = T.c, X = c.x, Y = c.y, RR = c.r, AG = c.age, LF = c.life, AL = c.alpha, H = c.h, LK = c.link, LU = c.lumpy, PV = c.prev, H0 = c.hd0, H1 = c.hd1, H2 = c.hd2;
+  for (let i = 0; i < T.n; i++) {
+    if (!want(srcOf(i))) continue;
+    const h = H[i], age = AG[i], alpha = AL[i], link = LK[i] || 60;
     // (fading - user Oct 29, "proper smoke fading vs having the puffs disappear": past fadeFrom of its life (0.62 unless its
     // source says) a puff dissolves in clumps (its alpha: SM_COMP_FS) and only shrinks a little, rather than shrinking away)
-    const f0 = s.fadeFrom ?? 0.62, t = s.age / s.life, late = Math.max(s.keep ? t : t > f0 ? (t - f0) / (1 - f0) : 0, s.kill ? 1 - s.kill / 2.5 : 0, s.lonely ? Math.min(1, s.lonely / 1.6) : 0);
-    let R = s.r * kx * Math.min(1, 0.55 + s.age * 3) * Math.min(1, 0.45 + s.alpha * 0.75);
-    const a0 = Math.min(1, 0.35 + s.alpha * 1.1) * (1 - late) * (1 - late * 0.5), a = clamp(a0 * 1.5, 0, 1);
+    const late = smLate(i);
+    let R = RR[i] * kx * Math.min(1, 0.55 + age * 3) * Math.min(1, 0.45 + alpha * 0.75);
+    const a0 = Math.min(1, 0.35 + alpha * 1.1) * (1 - late) * (1 - late * 0.5), a = clamp(a0 * 1.5, 0, 1);
     R *= 0.75 + 0.25 * Math.sqrt(a);
     if (R < 0.35 || a < 0.03) continue;
-    const cx = cxOf(s.x), cy = cyOf(s.y), fam = famOf(s), z = (s.h - 0.5) * R * 0.9;
+    const cx = cxOf(X[i]), cy = cyOf(Y[i]), fam = famOf(i), z = (h - 0.5) * R * 0.9;
     // (engine stage 8, Oct 30: a puff whose ball and billows all lie off this picture is passed over here - smnAdd would turn
     // every one of them away; its billows and heaps reach at most 2.2 of its radius from its middle. The same balls, in the
     // same order. What joins it to the puff before it or to its funnel is still laid below)
     const RB = 2.2 * Math.max(0.55, R) + 1;
-    if (cx + RB >= 0 && cx - RB <= SMN.cw && cy + RB >= 0 && cy - RB <= SMN.h) smnPuff(cx, cy, Math.max(0.55, R), z, a, fam, s.h);
-    // joined to the puff before it: fill the gap so the body is unbroken
-    const q = s.prev;
-    if (q && !q.dead && q.age < q.life) {
-      const qx = cxOf(q.x), qy = cyOf(q.y), d = Math.hypot(qx - cx, qy - cy);
-      const qt = q.age / q.life, qf = q.fadeFrom ?? 0.62, ql = Math.max(q.keep ? qt : qt > qf ? (qt - qf) / (1 - qf) : 0, q.kill ? 1 - q.kill / 2.5 : 0, q.lonely ? Math.min(1, q.lonely / 1.6) : 0);
-      const qa = clamp(Math.min(1, 0.35 + q.alpha * 1.1) * (1 - ql) * (1 - ql * 0.5) * 1.5, 0, 1);
-      const qR = Math.max(0.55, q.r * kx * Math.min(1, 0.55 + q.age * 3) * Math.min(1, 0.45 + q.alpha * 0.75) * (0.75 + 0.25 * Math.sqrt(qa))), rr = Math.min(R, qR);
+    if (cx + RB >= 0 && cx - RB <= SMN.cw && cy + RB >= 0 && cy - RB <= SMN.h) smnPuff(cx, cy, Math.max(0.55, R), z, a, fam, h);
+    // joined to the puff before it: fill the gap so the body is unbroken (a puff gone is a row gone - T.row -1)
+    const q = PV[i] ? T.row(PV[i]) : -1;
+    if (q >= 0 && AG[q] < LF[q]) {
+      const qx = cxOf(X[q]), qy = cyOf(Y[q]), d = Math.hypot(qx - cx, qy - cy);
+      const ql = smLate(q), qal = AL[q];
+      const qa = clamp(Math.min(1, 0.35 + qal * 1.1) * (1 - ql) * (1 - ql * 0.5) * 1.5, 0, 1);
+      const qR = Math.max(0.55, RR[q] * kx * Math.min(1, 0.55 + AG[q] * 3) * Math.min(1, 0.45 + qal * 0.75) * (0.75 + 0.25 * Math.sqrt(qa))), rr = Math.min(R, qR);
       const st = Math.max(0.5, rr * 0.7);
-      if (d > st && d < (s.link || 60) * kx) {
+      if (d > st && d < link * kx) {
         // (at fixed steps from this puff: filling the gap, the fillers already there don't slide as it widens)
-        if (s.lumpy) smnLumpy(cx, cy, R, qx, qy, qR, d, st, z, a, fam, s.h, qa);
-        else for (let k = 1; k * st < d - st * 0.5 && k <= 24; k++) { const u = k * st / d; smnPuff(cx + (qx - cx) * u, cy + (qy - cy) * u, Math.max(0.55, R + (qR - R) * u), z * (1 - u), a + (qa - a) * u, fam, fxHash(s.h * 13 + k)); }
+        if (LU[i]) smnLumpy(cx, cy, R, qx, qy, qR, d, st, z, a, fam, h, qa);
+        else for (let k = 1; k * st < d - st * 0.5 && k <= 24; k++) { const u = k * st / d; smnPuff(cx + (qx - cx) * u, cy + (qy - cy) * u, Math.max(0.55, R + (qR - R) * u), z * (1 - u), a + (qa - a) * u, fam, fxHash(h * 13 + k)); }
       }
     }
     // the newest puff of a stream whose source marks its mouth (a big ship's funnel): joined down to it, so the column
-    // stands on its funnel between puffs (Oct 29, V254)
-    const hd = s.st && s.st.last === s && s.st.head;
-    if (hd) {
-      const hx = cxOf(hd[0]), hy = cyOf(hd[1]), hR = Math.max(0.55, hd[2] * kx * 0.55), d = Math.hypot(hx - cx, hy - cy), st = Math.max(0.5, Math.min(R, hR) * 0.7);
-      if (d > st && d < (s.link || 60) * kx) smnLumpy(cx, cy, R, hx, hy, hR, d, st, z, a, fam, s.h + 0.5);
+    // stands on its funnel between puffs (Oct 29, V254; Nov 1: the mouth in hd0..hd2 - 38-smoke-sim.js smHeads - NaN none)
+    if (H0[i] === H0[i]) {
+      const hx = cxOf(H0[i]), hy = cyOf(H1[i]), hR = Math.max(0.55, H2[i] * kx * 0.55), d = Math.hypot(hx - cx, hy - cy), st = Math.max(0.5, Math.min(R, hR) * 0.7);
+      if (d > st && d < link * kx) smnLumpy(cx, cy, R, hx, hy, hR, d, st, z, a, fam, h + 0.5);
     }
   }
   // the shell and missile trails (src/47-render-overlays.js drawTrails' blobs along each piece)
@@ -23273,7 +23533,7 @@ function smdBody() {
 function smdStart(id) {
   try {
     const w = new Worker(URL.createObjectURL(new Blob([smgText() + '\n' + smDensity.toString() + '\n' + smdBody.toString() + '\nsmdBody();'], { type: 'text/javascript' })));
-    w.onmessage = e => { const m = e.data, S_ = SMD.by.get(m.id); if (!S_) return; if (m.g) { if (m.seq !== S_.gseq) return; if (m.part === 2) { if (S_.gres) { delete m.part; Object.assign(S_.gres, m); S_.gres.done = 1; } return; } SMD.ggot++; S_.gres = m; if (!m.part) m.done = 1; return; } if (m.seq !== S_.dseq) return; SMD.got++; S_.dres = m.out; };
+    w.onmessage = e => { const m = e.data, S_ = SMD.by.get(m.id); if (!S_) return; if (m.g) { if (m.seq !== S_.gseq) return; if (m.part === 2) { if (S_.gres) { delete m.part; Object.assign(S_.gres, m); S_.gres.done = 1; } return; } SMD.ggot++; S_.gres = m; if (m.sb) { S_.sbuf = m.sb; m.sb = null; } if (!m.part) m.done = 1; return; } if (m.seq !== S_.dseq) return; SMD.got++; S_.dres = m.out; };
     w.onerror = e => { SMD.fail = String(e.message || 'error'); };
     SMD.ws.set(id, w);
   } catch (e) { SMD.fail = String(e.message || e); }
@@ -23311,7 +23571,7 @@ function smdTake(S_, dn, gw, gx0, gy0, gx1, gy1) {
 // a puff is in (want), its kind of smoke (famOf), whether the puff before it is still there. Late or failed: the main
 // thread gathers on the second frame, as before. ?smdcheck=1: the main thread gathers too, on the first frame, from the
 // same puffs, and the balls that differ are counted (SMD.chk - stats().smd); ?smgw=0 (P.smgw) keeps the gather here.
-const SMG_S = 29, SMG_K = 7, SMG_KS = ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV'];
+const SMG_K = 7, SMG_KS = ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV'];
 const SMD_CHECK = (() => { try { return /[?&]smdcheck=1/.test(location.search); } catch (e) { return false; } })();
 if ((() => { try { return /[?&]smgw=0/.test(location.search); } catch (e) { return false; } })()) P.smgw = 0;
 // the worker's text before smdBody: the gather's functions as they are here, and what they read, filled by each job
@@ -23324,10 +23584,14 @@ function smgText() {
     `const trailLate = (() => { const clamp = ${O.clamp}, smoothstep = ${O.smoothstep}, TRAIL_HOLD = ${v(TRAIL_HOLD)}, TRAIL_LIFE = ${v(TRAIL_LIFE)}; return ${trailLate}; })();`,
     `const TRAIL_SHAPE = ${v(TRAIL_SHAPE)}, TRAIL_LIFE = ${v(TRAIL_LIFE)}, THIN_AGE = ${v(THIN_AGE)}, THIN_R = ${v(THIN_R)}, SMN_TILE_OFS = ${v(SMN_TILE_OFS)};`,
     `let SV = 1, CAMPX = 0, TOPPX = 0, SMN = null, smHc = 0; const PX = ${PX}, PY = ${PY}, wpx = ${wpx}, wpy = ${wpy};`,
-    `const FXV = {}, SMG = {}, P = {}, SMSUN = {}, E = {}, SMN_HC = new Map(), TGM = new Map(), smoke = [], rocketTrail = []; let trails = { n: 0 };`,
-    // (worked out on the main thread and sent: a puff's kind, the rocket's puff's size, the ground under a launch's foot;
-    // the light is laid after the gather (smgAfter's smBodies) - the worker is used only when it is, SMN.lazyL)
-    `const famOf = s => s.fm, srcOf = s => '', rocketPuffR = p => p.rr, trailGround = x => TGM.get(x);`,
+    `const FXV = {}, SMG = {}, P = {}, SMSUN = {}, E = {}, SMN_HC = new Map(), TGM = new Map(), rocketTrail = []; let trails = { n: 0 };`,
+    // (Nov 1: the puffs as the same column table as the game's - its class and fields, from their text - filled from the columns
+    // the page packs (smoke.pack, adopted: smgRun); a puff's kind and pass worked out here by the same functions)
+    `${ColTable}`, `const SMOKE_FIELDS = ${v(SMOKE_FIELDS)}, smoke = new ColTable(SMOKE_FIELDS), FAM_N = ${v(FAM_N)};`,
+    famOf, smLate, smRollH, `const srcOf = ${srcOf}, smWant = ${smWant};`,
+    // (worked out on the main thread and sent: the rocket's puff's size, the ground under a launch's foot; the light is laid
+    // after the gather (smgAfter's smBodies) - the worker is used only when it is, SMN.lazyL)
+    `const rocketPuffR = p => p.rr, trailGround = x => TGM.get(x);`,
     // (the slots' table, SMG's last step: the pass's table and slots, kept here between jobs - SMS; the arrays the main thread
     // gave back to fill again - SMS_RB)
     `let SMS = null, SMS_RB = null; const smsH = ${smsH};`,
@@ -23341,20 +23605,16 @@ function smgRun(m) {
   if (m.sync) SMS = smsFrom(m.sync);   // (the main thread painted this pass itself last: its table, taken over)
   if (m.rb) SMS_RB = m.rb;
   SMN = { cap: 0, n: 0, X: null, Y: null, R: null, Z: null, A: null, F: null, LX: null, LY: null, LZ: null, TK: null, TU: null, TV: null, SID: null, cw: m.cw, h: m.h, tkz: m.tkz, lazyL: true };
-  const S = m.S, T = m.T, K = m.K;
-  smoke.length = 0; rocketTrail.length = 0; TGM.clear();
-  for (let i = 0; i < m.ns; i++) {
-    const o = i * 29, s = { x: S[o], y: S[o + 1], r: S[o + 2], age: S[o + 3], life: S[o + 4], alpha: S[o + 5], fadeFrom: S[o + 6], keep: S[o + 7], kill: S[o + 8], lonely: S[o + 9], h: S[o + 10], fm: S[o + 11], link: S[o + 12], lumpy: S[o + 13], prev: null, st: null };
-    if (S[o + 14]) s.prev = { x: S[o + 15], y: S[o + 16], r: S[o + 17], age: S[o + 18], life: S[o + 19], alpha: S[o + 20], fadeFrom: S[o + 21], keep: S[o + 22], kill: S[o + 23], lonely: S[o + 24], dead: false };
-    if (S[o + 25]) s.st = { last: s, head: [S[o + 26], S[o + 27], S[o + 28]] };
-    smoke.push(s);
-  }
+  const T = m.T, K = m.K;
+  rocketTrail.length = 0; TGM.clear();
+  // (the puffs: the page's columns, packed - this table's columns views into that buffer; the one it held goes back)
+  const sb = smoke.adopt(m.S);
   // (the trails: the main thread's arrays, copied - the same numbers, the same order; the ground under each launch puff)
   trails = { n: m.nt, A1: T.A1, A2: T.A2, FL: T.FL, X: T.X, Y: T.Y, AGE: T.AGE, SEED: T.SEED, LA: T.LA };
   for (let i = 0; i < m.nt; i++) { const q = T.A1[i]; if (T.LA[q] && (T.FL[i] & 1)) TGM.set(T.X[q], T.G[i]); }
   for (let i = 0; i < m.nk; i++) { const o = i * 7; rocketTrail.push({ x: K[o], y: K[o + 1], rr: K[o + 2], age: K[o + 3], life: K[o + 4], h: K[o + 5], w: K[o + 6] }); }
-  gatherSmokeNew(() => true);
-  const n = SMN.n, res = { g: 1, id: m.id, seq: m.seq, n, part: 1 }, tr = [];
+  gatherSmokeNew(smWant(m.pass, m.wantB));
+  const n = SMN.n, res = { g: 1, id: m.id, seq: m.seq, n, part: 1, sb }, tr = sb ? [sb] : [];
   if (!n) { res.part = 0; return [res, tr]; }
   for (const k of ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV']) { const a = SMN[k].slice(0, n); res[k] = a; tr.push(a.buffer); }
   // the light as it was on the main thread when the puffs were packed (the sun in this view, the hour's)
@@ -23406,20 +23666,10 @@ function smgAfter(n, B, m, res, tr, mid) {
 function smgSend(want, cw, h, fast, tkA0) {
   if (!SMN.did) { SMN.did = ++SMD.ids; SMD.by.set(SMN.did, SMN); }
   if (!SMD.ws.has(SMN.did)) { smdStart(SMN.did); if (SMD.fail) return false; }
-  // the puffs, in gatherSmokeNew's order, each given its number as it does (the same count, the same order)
-  const S = new Float64Array(smoke.length * SMG_S); let ns = 0;
-  for (const s of smoke) {
-    if (!want(srcOf(s))) continue;
-    if (s.h === undefined) s.h = fxHash(++smHc * 0.6180339 + 0.1);
-    const o = ns++ * SMG_S;
-    // (a flag kept as 1 or 0, a missing number as what the gather takes for it: the same branches, the same sums)
-    S[o] = s.x; S[o + 1] = s.y; S[o + 2] = s.r; S[o + 3] = s.age; S[o + 4] = s.life; S[o + 5] = s.alpha; S[o + 6] = s.fadeFrom ?? 0.62; S[o + 7] = s.keep ? 1 : 0; S[o + 8] = s.kill || 0; S[o + 9] = s.lonely || 0;
-    S[o + 10] = s.h; S[o + 11] = famOf(s); S[o + 12] = s.link || 60; S[o + 13] = s.lumpy ? 1 : 0;
-    const q = s.prev;
-    if (q && !q.dead && q.age < q.life) { S[o + 14] = 1; S[o + 15] = q.x; S[o + 16] = q.y; S[o + 17] = q.r; S[o + 18] = q.age; S[o + 19] = q.life; S[o + 20] = q.alpha; S[o + 21] = q.fadeFrom ?? 0.62; S[o + 22] = q.keep ? 1 : 0; S[o + 23] = q.kill || 0; S[o + 24] = q.lonely || 0; }
-    const hd = s.st && s.st.last === s && s.st.head;
-    if (hd) { S[o + 25] = 1; S[o + 26] = hd[0]; S[o + 27] = hd[1]; S[o + 28] = hd[2]; }
-  }
+  // the puffs: each of this pass given its number first, as gatherSmokeNew does (the same count, the same order), then the drawn
+  // columns and those numbers copied into one buffer (the one the worker gave back last, if big enough) - Nov 1
+  smRollH(want);
+  const S = smoke.pack(SMOKE_DRAWN_H, SMN.sbuf); SMN.sbuf = null;
   // (the trails, Oct 31: copies of their flat arrays - the pieces' and the points' in use (47-render-overlays.js trStore) - and the
   // ground under each first piece's launch puff (trailGround reads the land: here))
   let nt = 0; const TS = trails, T = {};
@@ -23439,11 +23689,11 @@ function smgSend(want, cw, h, fast, tkA0) {
   }
   SMN.gseq = (SMN.gseq || 0) + 1; SMN.gres = null; SMN.gwait = true; SMN.gwt = 0; SMN.chk = null; SMD.gsent++;
   // (the light's numbers too - the sun in this view, the hour's: the bodies and their light are worked out there, as here now)
-  const m = { g: 1, id: SMN.did, seq: SMN.gseq, S, ns, T, nt, K, nk, sv: SV, campx: CAMPX, toppx: TOPPX, fsv: FXV.SV, pxX: FXV.pxX, pxY: FXV.pxY, mx: SMG.mx, my: SMG.my, cw, h, tkz: SMN.tkz, smbump: P.smbump, smtex: P.smtex, fast, tkA0,
+  const m = { g: 1, id: SMN.did, seq: SMN.gseq, S, pass: SMN.pass, wantB: P.behind, T, nt, K, nk, sv: SV, campx: CAMPX, toppx: TOPPX, fsv: FXV.SV, pxX: FXV.pxX, pxY: FXV.pxY, mx: SMG.mx, my: SMG.my, cw, h, tkz: SMN.tkz, smbump: P.smbump, smtex: P.smtex, fast, tkA0,
     sun: [SMSUN.x, SMSUN.y, SMSUN.H, SMSUN.Z, SMSUN.s4], behind: E.behind, overcast: E.overcast, lightz: P.lightz, chk: SMD_CHECK, sl: 1, thin: (P.smthin ?? 1) > 0 };
   // (the slots: the worker's table. Painted here last (or never yet), this thread's table goes over with the job (smsSnap), a
   // copy kept here (G_.mir); the arrays of the last paint go back to be filled again)
-  const G_ = gsmState(SMN), tl = [S.buffer, K.buffer]; for (const k in T) tl.push(T[k].buffer);
+  const G_ = gsmState(SMN), tl = [S.buf, K.buffer]; for (const k in T) tl.push(T[k].buffer);
   if (G_.own !== 'w') { m.sync = smsSnap(G_); G_.mir = smsCopy(m.sync); G_.own = 'w'; tl.push(m.sync.key.buffer, m.sync.ins.buffer, m.sync.p.buffer, m.sync.use.buffer, m.sync.free.buffer); }
   if (G_.rb) { m.rb = G_.rb; tl.push(G_.rb[0].buffer, G_.rb[1].buffer); G_.rb = null; }
   // (?smdcheck=1: the main thread's own gather of the same puffs now, into a scratch store, and its steps after (smgAfter, with
@@ -23511,8 +23761,8 @@ function smgCompare(C, W) {
   if (Cr.nb !== W.nb || !same(Cr.gOf, W.gOf) || !same(Cr.bb, W.bb)) c.body = (c.body || 0) + 1;
   if (!same(Cr.LX, W.LX) || !same(Cr.LY, W.LY) || !same(Cr.LZ, W.LZ)) c.light = (c.light || 0) + 1;
 }
-function drawSmokeNew(pass = 'front', want = () => true) {
-  SMN = SMNPV[VI][pass];
+function drawSmokeNew(pass, want) {
+  SMN = SMNPV[VI][pass]; SMN.pass = pass;
   const t0 = performance.now();
   { const zk = FXV.pxX + ',' + FXV.SV.toFixed(5) + ',' + SMG.cw + ',' + SMG.h; if (SMN.zk !== zk) { SMN.zk = zk; SMN.force = true; } }   // (zooming: a new picture every frame)
   // (the game: the last picture again, moved with the camera since it was made)
@@ -24009,8 +24259,7 @@ function smokeView(V, pass) {
   // (a shared view's second half: the first half's picture, laid again - it was painted across the whole screen. Painted on
   // its own, its light stopped at the middle of the screen: a pale line down the smoke there, user Oct 29)
   if (V.again && (P.smshare ?? 1) > 0) { const S0 = SMNPV[0][pass]; if (S0.last) smShow(S0); return; }
-  const want = pass === 'back' ? (src => !!P.behind[src]) : (src => !P.behind[src]);
-  drawSmokeNew(pass, want);
+  drawSmokeNew(pass, smWant(pass, P.behind));
 }
 // the clouds' spans on the screen (for the game's shade on the far sea): [left, right, parallax]
 function skySpans(V, out) {
@@ -24604,30 +24853,34 @@ function smearAir(a, vx, vy, sp, dt) {
   for (let j = -1; j <= 1 && !any; j++) for (let i = -1; i <= 1; i++) { const g = gIdx(x + i * SG.cell, y + j * SG.cell); if (g >= 0 && SG.dens[g] > 0.02) { any = true; break; } }
   const TS = trails, TA2 = TS.A2, TX = TS.X, TY = TS.Y;   // (the trails: flat arrays - 47-render-overlays.js trStore)
   if (!any) for (let i = 0; i < TS.n; i++) { const p = TA2[i]; if (Math.abs(TX[p] - x) < R * 2 && Math.abs(TY[p] - y) < R * 2) { any = true; break; } }
-  if (!any) { if (a._smCh) a._smCh.last = null; return; }
+  if (!any) { if (a._smCh) a._smCh.last = 0; return; }
   gridImpulse(x, y, vx * 0.85, vy * 0.85, 2.2);
-  let near = null, nd = 1e9;
-  const touch = (q, r, puff) => {
-    const dx = q.x - x, dy = q.y - y, rr = R + r * 0.6; if (dx > rr || dx < -rr || dy > rr || dy < -rr) return;
+  let near = -1, nd = 1e9;
+  // (Nov 1: a puff is a row of the smoke's table - its columns read afresh after each puff torn off it: a new row can grow them)
+  const touch = q => {
+    let c = smoke.c;
+    const r = c.r[q], dx = c.x[q] - x, dy = c.y[q] - y, rr = R + r * 0.6; if (dx > rr || dx < -rr || dy > rr || dy < -rr) return;
     const d = Math.hypot(dx, dy) || 1, f = 1 - d / rr; if (f <= 0) return;
-    if (puff && d < nd) { nd = d; near = q; }
+    if (d < nd) { nd = d; near = q; }
     // a puff in its way is dragged with it - the big ones less than the small - and torn: it shrinks, and what it loses
-    // comes off as smaller puffs flung into the wake
+    // comes off as smaller puffs flung into the wake (a stream of their own, by the newest's id: its torn column)
     const k = Math.min(1, 4 * f * dt / (1 + r / 14));
-    q.vx += (vx * 0.7 - q.vx) * k; q.vy += (vy * 0.7 - q.vy) * k;
-    q.x += vx * 0.2 * f * dt / (1 + r / 14); q.y += vy * 0.2 * f * dt / (1 + r / 14);
-    if (puff && f > 0.3 && q.r > 5 && q.src !== 'smear') {
-      const lose = Math.min(q.r - 4, q.r * 0.9 * f * dt); q.r -= lose; q.rmax = Math.max(4, q.rmax - lose);
-      q.tear = (q.tear || 0) + lose / 2.2;
-      while (q.tear >= 1) {
-        q.tear -= 1;
-        const ex = q.x + (x - q.x) * 0.35 + rnd(-4, 4), ey = q.y + (y - q.y) * 0.35 + rnd(-4, 4);
-        spawnSmoke(ex, ey, { mist: q.mist, dark: q.dark, fam: q.fam, r: rnd(2.5, 4.5), grow: rnd(1.5, 3), rmax: rnd(9, 15), lift: 3,
-          vx: vx * rnd(0.35, 0.65) + rnd(-15, 15), vy: vy * rnd(0.35, 0.65) + rnd(-12, 12), life: rnd(4, 7), alpha: Math.min(1, q.alpha + 0.1), src: 'smear', stream: smStream(q) });
+    c.vx[q] += (vx * 0.7 - c.vx[q]) * k; c.vy[q] += (vy * 0.7 - c.vy[q]) * k;
+    c.x[q] += vx * 0.2 * f * dt / (1 + r / 14); c.y[q] += vy * 0.2 * f * dt / (1 + r / 14);
+    if (f > 0.3 && c.r[q] > 5 && smoke.str(c.src[q]) !== 'smear') {
+      const lose = Math.min(c.r[q] - 4, c.r[q] * 0.9 * f * dt); c.r[q] -= lose; c.rmax[q] = Math.max(4, c.rmax[q] - lose);
+      c.tear[q] += lose / 2.2;
+      while (c.tear[q] >= 1) {
+        c.tear[q] -= 1;
+        const ex = c.x[q] + (x - c.x[q]) * 0.35 + rnd(-4, 4), ey = c.y[q] + (y - c.y[q]) * 0.35 + rnd(-4, 4);
+        const id = spawnSmoke(ex, ey, { mist: c.mist[q], dark: c.dark[q], fam: smoke.str(c.fam[q]), r: rnd(2.5, 4.5), grow: rnd(1.5, 3), rmax: rnd(9, 15), lift: 3,
+          vx: vx * rnd(0.35, 0.65) + rnd(-15, 15), vy: vy * rnd(0.35, 0.65) + rnd(-12, 12), life: rnd(4, 7), alpha: Math.min(1, c.alpha[q] + 0.1), src: 'smear', after: c.torn[q] });
+        c = smoke.c; c.torn[q] = id;
       }
     }
   };
-  for (const s of smoke) if (!(s.src === 'smear' && s.age < 1.2) && s.age > 0.5) touch(s, s.r, true);
+  // (the puffs torn off here are rows after the last: walked too, and passed over - smear puffs under 1.2 s)
+  for (let i = 0; i < smoke.n; i++) { const c = smoke.c, age = c.age[i]; if (!(smoke.str(c.src[i]) === 'smear' && age < 1.2) && age > 0.5) touch(i); }
   // (Oct 31, 60-fps chat: a point plainly out of reach is passed by before its size is worked out - trailR is never more than
   // 11 + age / 5 - the same points touched; thousands of trail pieces in a long fight, for every plane, every step)
   // (a trail's point: touch's sums on its numbers in the trails' arrays - a point is never a puff)
@@ -24643,16 +24896,17 @@ function smearAir(a, vx, vy, sp, dt) {
   for (let i = 0; i < TS.n; i++) { const q2 = TA2[i]; if (TAG[q2] > 0.8 && !far(q2)) touchT(q2, trailR(TAG[q2])); if (TFL[i] & 1) { const q1 = TA1[i]; if (TAG[q1] > 0.8 && !far(q1)) touchT(q1, trailR(TAG[q1])); } }
   // while it is in the smoke, a streak of it comes out behind (as many puffs as the smoke there is thick)
   const g = gIdx(x, y), dens = g >= 0 ? SG.dens[g] : 0;
-  if (near && dens > 0.15) {
-    const ch = a._smCh || (a._smCh = { last: null });
+  if (near >= 0 && dens > 0.15) {
+    const ch = a._smCh || (a._smCh = { last: 0 });
     a._smAcc = (a._smAcc || 0) + dt * 45 * Math.min(1, dens / 1.2);
     while (a._smAcc >= 1) {
       a._smAcc -= 1;
       const bx = x - ux * rnd(14, 24), by = y - uy * rnd(14, 24) + rnd(-3, 3);
-      spawnSmoke(bx, by, { mist: near.mist, dark: near.dark, fam: near.fam, r: Math.min(near.r * 0.35, rnd(3, 5)), grow: rnd(1.5, 3), rmax: rnd(10, 16), lift: 4,
-        vx: vx * 0.55, vy: vy * 0.55, life: rnd(5, 8), alpha: Math.min(1, near.alpha + 0.1), chain: ch, src: 'smear' });
+      const c = smoke.c;   // (read again each time: a new row can grow the columns)
+      spawnSmoke(bx, by, { mist: c.mist[near], dark: c.dark[near], fam: smoke.str(c.fam[near]), r: Math.min(c.r[near] * 0.35, rnd(3, 5)), grow: rnd(1.5, 3), rmax: rnd(10, 16), lift: 4,
+        vx: vx * 0.55, vy: vy * 0.55, life: rnd(5, 8), alpha: Math.min(1, c.alpha[near] + 0.1), chain: ch, src: 'smear' });
     }
-  } else if (a._smCh) a._smCh.last = null;
+  } else if (a._smCh) a._smCh.last = 0;
 }
 
 function beginView(c, v, camPx, sx, wpx, vi, camF = camPx) {
@@ -28014,12 +28268,18 @@ function drawSubShadow(sb, x0, x1) {
 // The yachts sail in front of the warships, so they must also cover the warships' smoke. Smoke is
 // painted over the lit world, so the above-water part of any yacht near smoke is drawn again here,
 // lit and tinted exactly as the world layer was (dusk silhouette, night, warm light, fog).
+// (is a puff within half + its size of x, between top and bottom with its size to spare - the smoke's columns, Nov 1)
+function smokeNear(x, half, top, bot) {
+  const c = smoke.c, X = c.x, Y = c.y, R = c.r;
+  for (let i = 0; i < smoke.n; i++) { const r = R[i]; if (Math.abs(X[i] - x) < half + r && Y[i] > top - r && Y[i] < bot + r) return true; }
+  return false;
+}
 function drawSailsOver(x0, x1) {
   const near = [];
   for (const b of sailboats) {
     if (b.state === 'gone' || b.state === 'down' || b.state === 'wrecked' || b.x < x0 - 40 || b.x > x1 + 40) continue;
     const half = sailHalf(b) + 20, top = b.y - img.sails[b.kind].wl * SAIL_K - 10;
-    if (smoke.some(s => Math.abs(s.x - b.x) < half + s.r && s.y > top - s.r && s.y < b.y + s.r) || flames.some(f => Math.abs(f.x - b.x) < half && f.y > top)) near.push(b);
+    if (smokeNear(b.x, half, top, b.y) || flames.some(f => Math.abs(f.x - b.x) < half && f.y > top)) near.push(b);
   }
   if (!near.length) return;
   const main = C, lc = lightLayer(), tr = main.getTransform();
@@ -35960,6 +36220,25 @@ function cargoAway(c) {
 // list of boxes first - an array for every box on every pier. contFind walks the same boxes in the same order (contPlaces')
 // and stops at the first one the point is in: the same box taken, nothing made for the others)
 const contIn = (x, y, cx, cy) => !(Math.abs(x - cx) > CONT_W / 2 + 1 || Math.abs(y - cy) > CONT_H / 2 + 1);
+/* (Nov 1, the architecture chat: a shell over a container ship worked out every box's place (cargoAt) every physics step - ~5 ms a
+   frame in the everything scene) can any of her boxes hold the point? A box's middle is turned with her about one point - her
+   middle at the waterline (civPoint), or once she's broken each half's break point (civHalfPoint) - so it always lies as far from
+   that point as its slot lies from it on her picture. A point farther from those points than her farthest box, plus a box's
+   half-diagonal, is in none of her boxes: the same answer as asking every box, without working any out */
+function contNear(c, x, y) {
+  const K = CIV[c.kind], A = civArt(c), cg = c.cargo, broken = c.brk != null && c.hv;
+  const p0 = broken ? (c.brk + 0.5) / K.n * A.width : A.width / 2, y0 = CSLOT.deck - CONT_PH * 0.5 - K.wl;
+  let R = -1;
+  for (let i = 0; i < cg.length; i++) {
+    const L = cg[i].length; if (!L) continue;
+    const dy = Math.max(Math.abs(y0), Math.abs(y0 - CONT_PH * (L - 1)));   // (the stack's bottom or top box: the farther)
+    R = Math.max(R, Math.hypot(CSLOT.cols[i] - p0, dy));
+  }
+  if (R < 0) return false;
+  R = R * K.k + Math.hypot(CONT_W / 2 + 1, CONT_H / 2 + 1) + 1;           // (+1: room for the sums' last digits)
+  if (!broken) return Math.hypot(x - c.x, y - civY(c)) <= R;
+  return Math.hypot(x - c.hv[0].x, y - c.hv[0].y) <= R || Math.hypot(x - c.hv[1].x, y - c.hv[1].y) <= R;
+}
 function contFind(x, y) {
   for (const cr of cranes) {
     for (const s of cr.slots) { const st = s.stack; for (let j = 0; j < st.length; j++) { const cy = DECK_Y - CONT_H * (j + 0.5); if (contIn(x, y, s.x, cy)) return [st[j], s.x, cy, 0, 'dock']; } }
@@ -35968,6 +36247,7 @@ function contFind(x, y) {
   for (const c of civShips) {
     if (!c.cargo || (c.state !== 'sail' && c.state !== 'sink') || !(x >= c.x - CONT_REACH(c) && x <= c.x + CONT_REACH(c))) continue;
     if (CIV_SKIP && CIV_SKIP.includes(c)) continue;                     // (a ship the battleship is passing: her boxes too)
+    if (!contNear(c, x, y)) continue;
     const cg = c.cargo;
     for (let i = 0; i < cg.length; i++) { const st = cg[i]; for (let j = 0; j < st.length; j++) { const [cx, cy, a] = cargoAt(c, i, j); if (contIn(x, y, cx, cy)) return [st[j], cx, cy, a, 'ship', c, i]; } }
   }
@@ -44542,7 +44822,7 @@ function cessnaSmoke(f) {
   if (!S.on && S.left <= 0.05) { sound('empty', f.x); return; }
   if (smokeToggle(f, CESSNA_SMOKE_S)) {
     const L = CESSNA_SMOKE_COLS.filter(c => c !== S.col);           // (a different one from the last)
-    S.col = L[Math.floor(trR() * L.length)]; f._smkCh = { last: null }; sound('smoke', f.x);
+    S.col = L[Math.floor(trR() * L.length)]; f._smkCh = { last: 0 }; sound('smoke', f.x);
   } else { f._smkCh = null; sound('click', null); }
 }
 function cessnaSmokeStep(f, dt) {
@@ -44555,7 +44835,7 @@ function cessnaSmokeStep(f, dt) {
   if (SIM_ONLY) return;
   // out of its tail (the sheet's: 22 back from its middle, a little up), turned with the drawing
   const d = f.dir || f.facing || 1, a = f.ang || 0, c = Math.cos(a), s = Math.sin(a), lx = -d * 22 * CESSNA_SC, ly = -1.5;
-  const tx = f.x + lx * c - ly * s, ty = f.y + lx * s + ly * c, ch = f._smkCh || (f._smkCh = { last: null });
+  const tx = f.x + lx * c - ly * s, ty = f.y + lx * s + ly * c, ch = f._smkCh || (f._smkCh = { last: 0 });
   f.smkAcc = (f.smkAcc || 0) + dt * 30;
   while (f.smkAcc >= 1) {
     f.smkAcc -= 1;
@@ -50981,6 +51261,7 @@ function frameBody(now) {
   }
   const t1 = performance.now();
   if (!held_ && !SIM_ONLY && !SW.live) { stepSmoke(dt); stepTrails(dt); planesInSmoke(dt); }
+  if (!SW.live) smHeads();                                          // (the funnels' mouths for the drawing and the snapshot, once everything has moved - 38-smoke-sim.js; live, they come with the worker's puffs)
   const t2 = performance.now();
   for (const gun of [...guns, ...tguns, ...hguns]) { gun.aimShow = Math.max(0, gun.aimShow - dt); gun.press = Math.max(0, gun.press - dt); }
   const q0 = performance.now();
@@ -51068,7 +51349,9 @@ async function start(data) {
   // (the collision tests - tools/collide.mjs, collideshot.mjs: what's solid where, and the COLLISION view's switches)
   Object.assign(window.__game, { col: { COLV, SHIP_L, UPM, CONTACT, hangarRoofAt: (d, x) => hangarRoofAt(d, x), hangarSolid: (x, y) => hangarSolid(x, y), harbourHit: (d, x, y) => harbourHit(d, x, y), enemyLimit: (p, h) => enemyLimit(p, h), onLand: x => onLand(x), isleCol: x => isleCol(x), isle: x => ISLE === null ? null : ISLE[Math.floor(x / 2.5)], owned: () => DOCKS_OWNED, docks: () => docks, civShips: () => civShips, civLen: c => civLen(c), sea: () => [SEA0, SEA1], WATER_Y, HANGAR_ROOF: () => HANGAR_ROOF(), edOpen: on => { NSKY.editor.TUNE.open = !!on; }, launch: (p, k) => launchOut(k === 'ship' ? ships[p] : subs[p]), ownTop: v => ownTop(v) } });
   // (OPEN WORLD: the kraken - tools/kraken.mjs)
-  Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
+  Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });
+  // (Nov 1) a column table's row as a plain object, for the console: __game.row('smoke', 0) - 04-zz-coltable.js
+  Object.assign(window.__game, { row: (name, i) => { const t = TABLES[name]; return t && t.cols ? t.cols.plain(i) : t ? t.list()[i] : undefined; } });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
   Object.assign(window.__game, { planesP: planes, perfNow: () => ({ gap: fpsMeter.gap, worst: fpsMeter.worst, phys: perf.phys, smoke: perf.smoke, render: perf.render, steps: perf.steps, parts: Object.assign({}, perf.parts || {}), budget: FRAME_BUDGET }) });
   Object.assign(window.__game, { smokeWorker: on => { if (on != null) { SMW.on = !!on; if (CAVE.worker && !CAVE.worker.fail) CAVE.worker.on = !!on; if (CAVE.buildWorker && !CAVE.buildWorker.fail) CAVE.buildWorker.on = !!on; } const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
