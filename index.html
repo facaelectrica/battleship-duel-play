@@ -3950,8 +3950,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 528;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 15:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 529;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 15:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10160,6 +10160,28 @@ const planeUp = pl => pl && (pl.state === 'fly' || pl.state === 'down');
 // reach the runway, PLANE_WHEELS under its middle
 const PLANE_SC = () => 0.85;                              // (real scale, Oct 29: the fighter is the 1:1 of every size, in every mode - was 1 in BATTLE)
 const PLANE_WHEELS = 10;                                   // (the plane's middle above its wheels)
+/* (user Nov 1 13:44: "The airport ground ... they land automatically. The player cannot crash a plane on the airport
+   ground. But the other grounds, if you fly parallel to it and you stop accelerating, you should be able to land")
+   Where a plane can be on its wheels - one rule for every plane (the warplane, a Cessna or 747, the seaplane, the
+   orbiter): an airfield's concrete, where any touchdown lands it, or any dry ground flat enough under it - no water, no
+   tree, across its wheels (PLANE_SPAN either side) no steeper than PLANE_FLAT and no bump over PLANE_BUMP. There it lands
+   only coming down gently (planeSoft): no steeper than PLANE_GLIDE (about 1 in 4), not in the middle of a turn. On the
+   ground it rolls along that ground and stops at its edge, as at the runway's sea end.
+   planeGroundY(x): its middle's y on its wheels at x, or null where it can't be on them */
+const PLANE_FLAT = 0.12, PLANE_SPAN = 30, PLANE_BUMP = 6, PLANE_GLIDE = 0.25;
+function planeGroundY(x) {
+  if (onApron(x)) return airfieldAt(x).y;
+  if (!OWM) return null;
+  const xa = x - PLANE_SPAN, xb = x + PLANE_SPAN;
+  if (!dryLand(xa) || !dryLand(x) || !dryLand(xb)) return null;
+  const a = landTop(xa), m = landTop(x), b = landTop(xb);
+  if (Math.abs(b - a) > 2 * PLANE_SPAN * PLANE_FLAT || Math.abs(m - (a + b) / 2) > PLANE_BUMP) return null;
+  if (treeAt(x, m - 8)) return null;
+  return m - PLANE_WHEELS;
+}
+const planeSoft = pl => !pl.turn && (pl.vy || 0) <= Math.abs(pl.vx || 0) * PLANE_GLIDE + 5;
+// the ground's lean under it, as its nose (+ down) facing f: level on the concrete
+const planeGroundPitch = (x, f) => onApron(x) ? 0 : Math.atan2(landTop(x + f * PLANE_SPAN) - landTop(x - f * PLANE_SPAN), 2 * PLANE_SPAN);
 function airfield(p) { return airfieldOf(SIDE(p)); }   // (its own side's airport, wherever it's placed - 50-land-airport)
 /* On the ground (OPEN WORLD, user Oct 25 late): 'roll' - the take-off run, at least two seconds gathering speed, then
    the nose comes up and a moment later it's off; 'land' - just down, rolling out; 'taxi' - rolling slowly or stopped,
@@ -10193,6 +10215,7 @@ function stepPlaneGround(pl, dt, K, inHangar) {
     return;
   }
   if (pl.exitK > 0) { pl.exitK = Math.max(0, pl.exitK - dt / 1.2); openHangar(af, 1); }   // (coming out of its hangar)
+  const sp = planeGroundPitch(pl.x, pl.facing);                   // (the ground's lean: 0 on the concrete)
   if (pl.turn) {
     pl.spd = Math.max(0, pl.spd - 200 * dt); pl.turn.t += dt * 0.8;
     if (pl.turn.t >= PLANE_TURN_T) { pl.facing = -pl.turn.from; pl.turn = null; }
@@ -10202,18 +10225,22 @@ function stepPlaneGround(pl, dt, K, inHangar) {
       // rotating: the nose lifts, the wheels still on the runway, then it flies
       pl.rot = (pl.rot || 0) + dt; pl.pitch += (-K.rotP - pl.pitch) * Math.min(1, dt * 3);
       if (pl.rot >= K.rotT) { pl.ground = null; pl.rot = 0; pl.pitch = -0.3; pl.climbT = 2.2; pl.offField = false; return; }
-    } else pl.pitch += (-0.02 - pl.pitch) * Math.min(1, dt * 4);
+    } else pl.pitch += (sp - 0.02 - pl.pitch) * Math.min(1, dt * 4);
   } else if (pl.ground === 'land') {
-    pl.spd = Math.max(0, pl.spd - 150 * dt); pl.pitch *= 1 - Math.min(1, dt * 6);
+    pl.spd = Math.max(0, pl.spd - 150 * dt); pl.pitch += (sp - pl.pitch) * Math.min(1, dt * 6);
     if (pl.spd <= PLANE_TAXI) { pl.ground = 'taxi'; pl.gWant = 0; }
   } else {
-    pl.pitch *= 1 - Math.min(1, dt * 6);
+    pl.pitch += (sp - pl.pitch) * Math.min(1, dt * 6);
     // sent home: it taxis to its hangar, turning round first if it's facing away
     if (pl.auto === 'home') { const toH = Math.sign(hangarX(af) - pl.x) || 1; if (toH !== pl.facing) { pl.gWant = 0; if (pl.spd < 3) planeTurn(pl); } else pl.gWant = PLANE_TAXI; }
     const want = pl.gWant || 0;
     pl.spd += clamp(want - pl.spd, -160 * dt, 60 * dt);
   }
-  pl.x += pl.facing * pl.spd * dt; pl.y = af.y;
+  // (it rolls along the ground under it - planeGroundY; at the edge of where it can roll, it stops, as at the runway's sea end)
+  { const nx = pl.x + pl.facing * pl.spd * dt, gy = planeGroundY(nx);
+    if (gy == null) { pl.spd = 0; pl.ground = 'taxi'; pl.gWant = 0; pl.rot = 0; const g0 = planeGroundY(pl.x); if (g0 != null) pl.y = g0; }
+    else { pl.x = nx; pl.y = gy; } }
+  if (!onApron(pl.x)) { pl.vx = pl.facing * pl.spd; pl.vy = 0; pl.gear = 1; if (!SIM_ONLY && vehPlaneR() < dt * pl.spd / 20) kickLandDust(pl.x - pl.facing * 14, pl.y + PLANE_WHEELS, 1); return; }   // (off the concrete: no runway end, no hangar)
   // the runway's sea end: it stops there (it never rolls off onto the harbour)
   if ((pl.x - af.near) * af.dir > 40 && pl.facing === af.dir) { pl.x = af.near + af.dir * 40; pl.spd = 0; pl.ground = 'taxi'; pl.gWant = 0; }
   // at the hangar's door, heading in: in it goes
@@ -10240,7 +10267,7 @@ function planeGroundCmd(pl, d) {
   if (!d) { pl.gWant = 0; if (pl.ground === 'roll' && !pl.rot) pl.ground = 'taxi'; return; }
   if (pl.turn) return;
   if (d === pl.facing) {
-    if (pl.facing === af.dir) pl.ground = 'roll';
+    if (pl.facing === af.dir || !onApron(pl.x)) pl.ground = 'roll';   // (off the concrete there's no hangar to taxi to: ahead is the take-off run)
     else { if (pl.ground === 'roll') pl.ground = 'taxi'; pl.gWant = PLANE_TAXI; }
   } else if (pl.spd < 5) planeTurn(pl);
   else { pl.gWant = 0; if (pl.ground === 'roll' && !pl.rot) pl.ground = 'taxi'; }
@@ -10345,9 +10372,12 @@ function planeCrash(pl) {
     if (!what && OWM && hangarSolid(x, y)) what = 'land';                       // (but a hangar's walls do - user Oct 29)
     if (what) { X = x; Y = y; break; }
   }
-  // (OPEN WORLD, user Oct 25 late: "in the airport, planes always land. You cannot crash a plane in the airport")
-  if (!what && LAND && pl.state === 'fly' && onApron(pl.x)) { const af = airfieldAt(pl.x); if (pl.y >= af.y - 4 && ((pl.vy || 0) < -1 || pl.climbT > 0)) { pl.y = Math.min(pl.y, af.y); return false; } if (pl.y >= af.y - 4) {   // (not while it's climbing away: user Oct 26, the take-off was taken for a landing)
-    planeSusKick(pl, (pl.vy || 0) + 60); pl.ground = 'land'; pl.y = af.y; pl.pitch = 0; pl.turn = null; pl.gear = 1; pl.flare = 0.6; sound('impact', pl.x); kickLandDust(pl.x, af.y + PLANE_WHEELS, 6); return false; } }
+  // (OPEN WORLD, user Oct 25 late: "in the airport, planes always land. You cannot crash a plane in the airport"; Nov 1:
+  // and on any flat ground, coming down gently - planeGroundY / planeSoft)
+  if (!what && LAND && pl.state === 'fly') { const gy = planeGroundY(pl.x); if (gy != null && pl.y >= gy - 4) {
+    if ((pl.vy || 0) < -1 || pl.climbT > 0) { pl.y = Math.min(pl.y, gy); return false; }   // (not while it's climbing away: user Oct 26, the take-off was taken for a landing)
+    if (onApron(pl.x) || (planeSoft(pl) && !pts.some(([x, y]) => treeAt(x, y)))) {
+      planeSusKick(pl, (pl.vy || 0) + 60); pl.ground = 'land'; pl.y = gy; pl.pitch = planeGroundPitch(pl.x, pl.facing); pl.turn = null; pl.gear = 1; pl.flare = 0.6; sound('impact', pl.x); kickLandDust(pl.x, gy + PLANE_WHEELS, 6); return false; } } }
   if (!what && OWM) { const at = landPlaneCrash(pl, pts); if (at) { what = at[2] ? 'ground' : 'land'; X = at[0]; Y = at[1]; } }   // (LAND TEST: the ground, or a tank or helicopter)
   let deck = null;                                               // (OPEN WORLD: onto a ship's top it comes down on her deck - user Oct 27, [19])
   if (!what && LAND && !onLand(pl.x)) { const d = shipTopAt(pl.x, pl.y - 20); if (d && pl.y + 4 >= d.y) { what = 'ground'; deck = d; X = pl.x; Y = d.y; } }
@@ -10473,8 +10503,9 @@ function stepPlanes(dt) {
     // ahead and not pulling up, it settles onto it by itself; pull up and it climbs away instead
     let gearWant = 0;
     if (LAND && !pl.auto && !pl.turn) {
-      const af = airfieldAt(pl.x), H = af.y - pl.y, ahead = onApron(pl.x) && onApron(pl.x + pl.facing * 600);
-      if (!pl.offField && (!onApron(pl.x) || H > 380)) pl.offField = true;
+      // (Nov 1: over any ground it can land on - the concrete or flat ground, planeGroundY - the same)
+      const gy = planeGroundY(pl.x), H = gy == null ? Infinity : gy - pl.y, ahead = gy != null && planeGroundY(pl.x + pl.facing * 600) != null;
+      if (!pl.offField && (gy == null || H > 380)) pl.offField = true;
       // (user Oct 26: "they never automatically land... They will adjust the nose to align for landing, but actual
       // landing is ONLY if you touch the runway") low over it, coming down or level: wheels down and the nose up for
       // the flare, nothing more - you fly it down; its wheels on the concrete land it (planeCrash)
@@ -10766,7 +10797,7 @@ function planePose(pl) {
     // (coming in to land: nose up, flaring over the runway - user Oct 25 late; on the ground after touchdown it lets
     // the nose down)
     const fk = pl.flare || 0;
-    if (fk > 0) { const H = LAND ? airfieldAt(pl.x).y - pl.y : 999; deg = deg * (1 - fk) - pl.facing * fk * (2.5 + 4 * smoothstep(90, 0, H)); }
+    if (fk > 0) { const g = LAND ? planeGroundY(pl.x) : null, H = g == null ? 999 : g - pl.y; deg = deg * (1 - fk) - pl.facing * fk * (2.5 + 4 * smoothstep(90, 0, H)); }
   }
   if (pl.carried != null && pl.hookA != null) deg = pl.hookA * 180 / Math.PI;   // (on a magnet: turned with it)
   return { fr, deg: Math.round(deg), side, key: 'P' + pl.id + key, side0: !pl.turn || Math.floor(clamp(pl.turn.t / PLANE_TURN_T, 0, 0.999) * 5) % 4 === 0 };
@@ -35188,8 +35219,9 @@ function stepCivAir(f, dt) {
   let want = stick ? clamp(f.pitch + stick * 0.5, -0.55, 0.55) : 0, forced = false;
   if (!mine && f.auto === 'home') want = civAutoAir(f, dt);
   // over an airfield's concrete, low, with runway ahead and not pulling up: down it comes by itself (as the warplane)
-  const af = airfieldAt(f.x), H = af.y - f.y, ahead = onApron(f.x) && onApron(f.x + f.facing * 500);
-  if (!f.offField && (!onApron(f.x) || H > 380)) f.offField = true;
+  // (Nov 1: over any ground it can land on - the concrete or flat ground, planeGroundY in 29-plane.js)
+  const gy = planeGroundY(f.x), H = gy == null ? Infinity : gy - f.y, ahead = gy != null && planeGroundY(f.x + f.facing * 500) != null;
+  if (!f.offField && (gy == null || H > 380)) f.offField = true;
   let gearWant = 0;
   // (user Oct 26: it only lines up - wheels down, the nose up for the flare; its wheels on the concrete land it, below)
   if (!f.turn && ahead && f.offField && H < 300 && stick >= 0 && (f.vy || 0) >= -5) gearWant = 1;
@@ -35217,15 +35249,16 @@ function stepCivAir(f, dt) {
   f.dir = f.turn ? (f.turn.t / K.turnT < 0.5 ? f.turn.from : -f.turn.from) : f.facing;
   // (coming in to land, nose up - user Oct 25 late: it touches down on its main wheels, not its nose)
   f.flare = clamp((f.flare || 0) + (gearWant ? 1 : -1) * dt * 1.5, 0, 1);
-  f.ang = f.pitch * f.dir * (1 - f.flare) - f.dir * f.flare * (0.04 + 0.07 * smoothstep(90, 0, af.y - f.y));
+  f.ang = f.pitch * f.dir * (1 - f.flare) - f.dir * f.flare * (0.04 + 0.07 * smoothstep(90, 0, H));
   // left to itself it flies on level; off the world's end, it's gone (another flight later)
   if (f.x < -300 || f.x > WORLD_W + 300) { if (f.driven != null) { const q = f.driven; crew[q].civ = null; lostUnit(q, clamp(f.x, 0, WORLD_W), 'civ'); } Object.assign(f, newFlight(f.kind, Math.random() < 0.5 ? 0 : 1, rnd(20, 40), f.owner), { col: f.col, alt: f.alt, driven: null }); return; }
   // the ground or the water: down it goes (not on its wheels over a runway: that's landing)
   // (user Oct 25 late: "in the airport, planes always land. You cannot crash a plane in the airport") - down onto the
   // concrete anyhow, it's a landing
-  if (onApron(f.x) && f.y >= af.y - 4 && (f.vy || 0) >= -1 && !(f.climbT > 0)) { planeSusKick(f, (f.vy || 0) + 60); f.ground = 'land'; f.y = af.y; f.pitch = 0; f.turn = null; f.gear = 1; f.flare = 0.6; sound('impact', f.x); kickLandDust(f.x, af.y + PLANE_WHEELS, 6); return; }
+  // (Nov 1: and on any flat ground, coming down gently - planeGroundY / planeSoft)
+  { const g = planeGroundY(f.x); if (g != null && f.y >= g - 4 && (f.vy || 0) >= -1 && !(f.climbT > 0) && (onApron(f.x) || planeSoft(f))) { planeSusKick(f, (f.vy || 0) + 60); f.ground = 'land'; f.y = g; f.pitch = planeGroundPitch(f.x, f.facing); f.turn = null; f.gear = 1; f.flare = 0.6; sound('impact', f.x); kickLandDust(f.x, g + PLANE_WHEELS, 6); return; } }
   const ht = dryLand(f.x) ? Infinity : harbourTop(f.x, f.y - 10), wet = !dryLand(f.x) && ht === Infinity, floor = ht < Infinity ? ht : wet ? surfaceY(f.x) : landTop(f.x);   // (the harbour's deck: ground - user Oct 27)
-  if (f.y + T.h * T.k * 0.3 >= floor && !onApron(f.x)) { if (wet) trafficDitch(f); else { f.state = 'fly'; trafficDown(f); f.vy = Math.max(f.vy, 40); } }   // (into the water, not hit: it sinks - user Oct 26)   // (over the concrete never: it lands, or it's climbing away)
+  if (f.y + T.h * T.k * 0.3 >= floor && !onApron(f.x) && !(planeGroundY(f.x) != null && planeSoft(f))) { if (wet) trafficDitch(f); else { f.state = 'fly'; trafficDown(f); f.vy = Math.max(f.vy, 40); } }   // (into the water, not hit: it sinks - user Oct 26)   // (over the concrete never: it lands, or it's climbing away; nor coming down gently onto flat ground - it lands, above)
 }
 // a Cessna or a 747 left in the air: home (a Cessna its own airfield, a 747 the one it was flying to), the way the
 // traffic comes in - out over its sea at its height, round, down the glide onto the runway's sea end (stepCivAir lands
@@ -43581,7 +43614,7 @@ function spAir(s, dt, stick, mine) {
   if (wet && s.y >= surfaceY(s.x) && s.vy >= -1 && !(s.climbT > 0)) { spTouch(s, d); return; }
   // into the ground: down it goes (onto an airfield's concrete, it lands on its floats like a belly landing - stopped)
   if (wet && (s.y >= harbourTop(s.x, s.y - 10) - 6 || hangarSolid(s.x + d * 20, s.y - 6) || hangarSolid(s.x, s.y))) { spDown(s); return; }   // (into the harbour's deck or the hangar: down it goes - user Oct 27)
-  if (!wet && s.y >= landTop(s.x) - 6) { if (onApron(s.x)) { s.y = landTop(s.x) - 6; s.spd = 0; s.pitch = 0; spDown(s, true); } else spDown(s); }
+  if (!wet && s.y >= landTop(s.x) - 6) { if (onApron(s.x) || (planeGroundY(s.x) != null && planeSoft(s))) { s.y = landTop(s.x) - 6; s.spd = 0; s.pitch = 0; spDown(s, true); } else spDown(s); }   // (Nov 1: flat ground, coming down gently, as the concrete - planeGroundY, 29-plane.js)
 }
 // setting down on the water: a turn under way finishes the way it's facing, the speed carries it on as a boat, and
 // the floats throw up a sheet of foam (user Oct 26: "not the missile water hit - this nice thick foam")
@@ -43896,10 +43929,11 @@ function stepShuttle(v, dt) {
   if (v.state === 'roll') {
     // down on the runway: braking, its chute out behind, to a stop
     v.spd = Math.max(0, v.spd - (60 + 70 * v.chute) * dt); v.chute = Math.min(1, v.chute + dt * 2);
-    v.x += v.facing * v.spd * dt; v.y = airfieldAt(v.x).y; v.pitch *= 1 - Math.min(1, dt * 2); susStep(v, dt, ...PLANE_SUS);
+    { const nx = v.x + v.facing * v.spd * dt, g = planeGroundY(nx); if (g == null) v.spd = 0; else { v.x = nx; v.y = g; } }   // (along the ground under it; at its edge it stops - planeGroundY)
+    v.pitch += (planeGroundPitch(v.x, v.facing) - v.pitch) * Math.min(1, dt * 2); susStep(v, dt, ...PLANE_SUS);
     v.flare = Math.max(0, (v.flare || 0) - dt * 0.8);
     if (v.spd <= 0) { v.state = 'landed'; v.wait = 45; }
-    if (!onApron(v.x + v.facing * 40)) v.spd = Math.max(0, v.spd - 200 * dt);   // (the runway's end: it stops short)
+    if (planeGroundY(v.x + v.facing * 40) == null) v.spd = Math.max(0, v.spd - 200 * dt);   // (the runway's end - or the flat ground's: it stops short)
     return;
   }
   if (v.state === 'landed') { v.chute = Math.max(0, v.chute - dt * 0.5); if (!mine && v.carried == null) { v.wait -= dt; if (v.wait <= 0) { v.state = 'gone'; v.wait = 40; } } return; }   // (on a magnet its clock stops: being carried changes where it is, nothing else - user Oct 27, [17])
@@ -44016,7 +44050,7 @@ function stepOrbiterFlight(v, dt, mine, stick) {
   // the nose: the stick (or, left to itself, it holds level in space and glides down gently in the air)
   let want = stick ? clamp(v.pitch + stick * 0.6, -0.6, 0.6) : (inAir ? 0.08 : 0), forced = false;
   // low over an airfield's concrete, runway ahead: it lands by itself (as the planes)
-  const af = airfieldAt(v.x), H = af.y - v.y, ahead = onApron(v.x) && onApron(v.x + v.facing * 500);
+  const g0 = planeGroundY(v.x), H = g0 == null ? Infinity : g0 - v.y, ahead = g0 != null && planeGroundY(v.x + v.facing * 500) != null;   // (the concrete or flat ground - Nov 1)
   let gearWant = 0;
   // (user Oct 26: it only lines up - gear down, the nose up; it lands when its wheels touch the concrete, below)
   if (!v.turn && onLand(v.x) && ahead && H < 320 && stick >= 0 && (v.vy || 0) >= -5) gearWant = 1;
@@ -44055,8 +44089,9 @@ function stepOrbiterFlight(v, dt, mine, stick) {
   }
   if (inAir) planeWash(v, dt, 1.4);                                // (low over the water or the land: its wash, as every plane's)
   // its wheels on an airfield's concrete: it lands (as the planes, it can't crash there)
-  const afT = airfieldAt(v.x);
-  if (onApron(v.x) && v.y >= afT.y - 4 && (v.vy || 0) >= -1) { planeSusKick(v, (v.vy || 0) + 60); v.state = 'roll'; v.y = afT.y; v.pitch = 0; v.turn = null; v.gear = 1; v.flare = 1; sound('impact', v.x); kickLandDust(v.x, afT.y + 10, 8); return; }
+  // (Nov 1: and on any flat ground, coming down gently - planeGroundY / planeSoft, 29-plane.js)
+  const gT = planeGroundY(v.x);
+  if (gT != null && v.y >= gT - 4 && (v.vy || 0) >= -1 && (onApron(v.x) || planeSoft(v))) { planeSusKick(v, (v.vy || 0) + 60); v.state = 'roll'; v.y = gT; v.pitch = planeGroundPitch(v.x, v.facing); v.turn = null; v.gear = 1; v.flare = 1; sound('impact', v.x); kickLandDust(v.x, gT + 10, 8); return; }
   if (hitsGround(v.x, v.y + 10)) groundCrash(v, 2);
 }
 const hitsGround = (x, y) => dryLand(x) ? y >= landTop(x) : y >= surfaceY(x);
@@ -53254,6 +53289,7 @@ async function start(data) {
     scope: p => scopes[p], tg: p => telegraphs[p], perf, probe, probeStart, fillTest, runFillTest, get batch() { return getMode(); }, get gl() { return GLR.on; }, glStats: () => GLR.shown, renderN: n => { for (let i = 0; i < n; i++) render(); glEndFrame(); }, GLR, set batch(v) { setMode(v === true ? 2 : v === false ? 0 : v); BATCH_AUTO = false; }, get paused() { return paused; }, set paused(v) { paused = v; }, set hold(v) { holdFrames = v; }, stepFixed: (dt, n) => { const was = paused; paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } paused = true; return was; },
     stepQuiet: (dt, n) => { NO_DRAW = true; try { paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } } finally { paused = true; NO_DRAW = false; } },   // (stepFixed without drawing each step: tools/smokebench.mjs)
     smokeKit: { spawnSmoke: (x, y, o) => spawnSmoke(x, y, o), smStream: (o, k) => smStream(o, k), get SV() { return SV; }, get SMOKE_COLS() { return SMOKE_COLS; } },
+    planeGround: x => planeGroundY(x),   // (Nov 1: where a plane can be on its wheels - 29-plane.js)
     towerBase: TW.BASE, s2w: (cx, cy) => screenToWorld(cx, cy), hitAt: (x, y) => ships.map(sh => hitTest(sh, x, y)), flagPick, setFlag: (sd, k) => setFlag(sd, k), menuPlayNow: () => menuPlay(), menuJoinNow: (sd, dev) => menuJoin(sd, dev), menuResumeNow: () => menuResume(), openMenuNow: () => openMainMenu(), seats: () => ({ ctl: ctlPick.slice(), extra: EXTRA, slots: SLOTS.map(q => q.dev + ':' + q.team) }), openMenu: () => openMainMenu(), resumeMenu: () => menuResume(), titlePos: () => { const T = titleLayout(), c = (x, y) => [x * PIXU / dpr, y * PIXU / dpr], [fx, fy] = fsLayout();
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
