@@ -1454,7 +1454,9 @@ function shakeAt(amt, x) {
 const spray = [], bubbles = [], foam = [], wakes = [];
 const grains = [], ash = [];
 const welds = [];
-const debris = [], sparks = [], flashes = [], shells = [], bullets = [], smoke = [], pieces = [], flames = [], embers = [], rings = [], trails = [], dust = [];
+const debris = [], sparks = [], flashes = [], shells = [], bullets = [], smoke = [], pieces = [], flames = [], embers = [], rings = [], dust = [];
+// (the shells' trails: flat arrays, not objects - 47-render-overlays.js trStore; `trails.length` is how many pieces)
+const trails = trStore();
 let schools = [], sharks = [], whales = [], plants = [];
 const guns = [0, 1].map(() => ({ elev: 28, power: 0.55, reload: 0, aimShow: 0, press: 0, rk: [0, 0], pk: [0, 0] }));
 const tguns = [0, 1].map(() => ({ elev: 22, power: 0.5, reload: 0, aimShow: 0, press: 0, mg: 0 }));
@@ -3378,8 +3380,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 465;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 21:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 466;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 21:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11358,21 +11360,23 @@ function stepShells(dt) {
     // which filled the trail list in a few seconds of heavy firing and left new shells with no trail)
     // pieces share their end points, so the trail stays one unbroken line however the wind bends it
     // (a bomb is only dropped: no puff, and its trail starts a second later, as it gathers speed)
-    const seg = s.seg;
+    // (60-fps chat, Oct 31: the trails are flat arrays - 47-render-overlays.js trStore; s.seg is the number of the piece it's
+    // laying, found by it. A piece of it that faded away under a shell that hardly moves - none ever has - starts a new trail)
+    const seg = s.seg, TS = trails, k = seg ? trFind(TS, seg) : -1;
     // (a missile's white trail starts half a second out, user Oct 24: the launch puff stays by the plane, the flame
     // alone leads it away; and it ends when the motor burns out)
     // (a bomb leaves no trail at all, user Oct 24 night: it only falls, carried by the plane's speed)
     if (s.from === 'bomb' || (s.from === 'rocket' && (!powered || s.age - (s.ia || 0) < 0.5))) { /* no trail (yet, or any more) */ }
-    else if (seg && Math.hypot(s.x - seg.p1.x, s.y - seg.p1.y) < 34) { seg.p2.x = s.x; seg.p2.y = s.y; }
+    else if (k >= 0 && Math.hypot(s.x - TS.X[TS.A1[k]], s.y - TS.Y[TS.A1[k]]) < 34) { TS.X[TS.A2[k]] = s.x; TS.Y[TS.A2[k]] = s.y; }
     else {
       // (user Oct 30: "Smoke from trails must ALWAYS disappear smoothly" - many missiles' old trails "suddenly faded out
       // very fast"; Oct 29: "Details are never capped". There was a cap here: at 700 pieces the oldest was dropped for each
       // new one - a missile lays a piece every 34 units, so a handful of them cut every older trail off. Gone: each piece
       // lives its whole fade (stepTrails), made cheap enough instead - stepTrails, drawTrails, 47-render-overlays.js)
-      const p1 = seg ? seg.p2 : { x: px, y: py, vx: 0, vy: 0, age: 0, seed: trlR() * 100, launch: s.from !== 'bomb' && s.from !== 'rocket' };
-      s.seg = { p1, p2: { x: s.x, y: s.y, vx: 0, vy: 0, age: 0, seed: trlR() * 100 }, root: !seg, thin: s.from === 'rocket' || s.from === 'tank' };   // (the tank's missile too, user Oct 25: thin and soon gone)
-      if (seg) seg.next = s.seg;
-      trails.push(s.seg);
+      const p1 = k >= 0 ? TS.A2[k] : trPoint(TS, px, py, trlR() * 100, s.from !== 'bomb' && s.from !== 'rocket' ? 1 : 0);
+      const p2 = trPoint(TS, s.x, s.y, trlR() * 100, 0);
+      s.seg = trAdd(TS, p1, p2, k < 0, s.from === 'rocket' || s.from === 'tank');   // (the tank's missile too, user Oct 25: thin and soon gone)
+      if (k >= 0) TS.NX[k] = s.seg;
     }
     let done = false; blastOpen();   // (what goes off here is BLAST_K bigger - 33-zz-blast-scale)
     // the harbour (deck, block, hangar) stops a shell: it bursts on the stone, doing no harm
@@ -13224,10 +13228,15 @@ const TBL_SKIP = new Set([...NET_SKIP, '_wq', '_wk']);   // (and the wreck index
 // ---- tables
 const TABLES = {};
 // (keep: fields the network leaves out (NET_SKIP) that are this system's own state - a sunk sub's halves, a plane's trail)
+// (Oct 31, 60-fps chat: a table kept as flat arrays rather than a list of things - the shells' trails, 47-render-overlays.js -
+// gives its own save: () => plain data, load: (data, byU) => put back (byU: an old save's ids, for references to its rows), and
+// for the simulation worker's snapshots snapCols: (full, drawn, bufs) => its columns, colsInto: columns => put back on the page
+// (36-zzzzz-sw-snap.js); its list is empty)
 function defTable(name, list, o = {}) {
   const keep = new Set(o.keep || []), skip = new Set([...TBL_SKIP, ...(o.skip || [])].filter(k => !keep.has(k)));
   TABLES[name] = { name, list, depth: o.depth ?? 4, make: o.make || (() => ({})), after: o.after || null, skip,
-    net: o.net ?? true, netSkip: new Set(o.netSkip || []), perPlayer: o.perPlayer || 0, netIds: new Set(o.netIds || []) };
+    net: o.net ?? true, netSkip: new Set(o.netSkip || []), perPlayer: o.perPlayer || 0, netIds: new Set(o.netIds || []),
+    save: o.save || null, load: o.load || null, snapCols: o.snapCols || null, colsInto: o.colsInto || null };
   // (the GAME EDITOR's VEHICLES tab asks, the table's owner writes - rules.md "Systems" 1): 'tableAdd' {t, o} puts a made row in;
   // 'tableMove' {t, o, x, y} moves one (y null: it keeps its own - on the water, on its tower's pier); o.moveTo, o.add: the owner's
   // own way (a list made for the table - the tanks', the ones there are - puts a row in its own place)
@@ -13264,7 +13273,7 @@ function tblPlain(o, depth, skip, top) {
 function tablesSave() {
   const T = {};
   for (const k in TABLES) for (const o of TABLES[k].list()) uidOf(o);   // (every thing its id first: a reference to one is saved as its id)
-  for (const k in TABLES) { const t = TABLES[k]; T[k] = t.list().map(o => { const d = tblPlain(o, t.depth, t.skip, true); d.u_ = o._uid; if (o._sa != null) d.sa_ = o._sa; if (o._sk != null) d.sk_ = o._sk; return d; }); }
+  for (const k in TABLES) { const t = TABLES[k]; T[k] = t.save ? t.save() : t.list().map(o => { const d = tblPlain(o, t.depth, t.skip, true); d.u_ = o._uid; if (o._sa != null) d.sa_ = o._sa; if (o._sk != null) d.sk_ = o._sk; return d; }); }
   const R = {}; for (const k in RNGS) R[k] = RNGS[k].s;
   return { v: 1, t: time, reg: { tick: REG.tick, frame: REG.frame, sid: REG.sid }, tables: T, rng: R, uid: netUid };
 }
@@ -13294,6 +13303,7 @@ function tablesLoad(S) {
   // first every thing matched or made (so a reference to any of them can be found), then each filled in
   for (const k in S.tables) {
     const t = TABLES[k]; if (!t) continue;
+    if (t.load) { t.load(S.tables[k], byU); continue; }    // (its own: flat arrays - before the references are turned back, a shell's to its trail)
     const arr = t.list(), have = new Map(arr.map(o => [o._uid, o])), used = new Set(), rows = [];
     S.tables[k].forEach((d, i) => {
       // (the same thing by its id; a fresh game's things have other ids, so else the one at the same place in the list, if it's
@@ -13476,9 +13486,9 @@ defTable('camera', () => [CAM_ROW], { net: false, make: () => CAM_ROW });
 
 /* (engine stage 3) The weapons' and hits' tables - their systems' files are read before the tables (36-zz-tables.js), so they
    are registered here; each file still the one owner of its lists, its random source made on first use in its own file. */
-// shells, bullets and duds (33-guns-shells.js; random source sysRng('armShells'), armShellR). A shell's trail piece (seg) is a
-// thing of the trails table and its minimap line (track) holds the shell back, both saved as references; a bullet's passing
-// civilian ships (pass) likewise. Owners are plain numbers (a player, or a vehicle's id)
+// shells, bullets and duds (33-guns-shells.js; random source sysRng('armShells'), armShellR). A shell's trail piece (seg) is the
+// number of a piece of the trails table (Oct 31: they're flat arrays now - 47-render-overlays.js trStore), saved as that number;
+// its minimap line (track) holds the shell back, saved as a reference; a bullet's passing civilian ships (pass) likewise. Owners are plain numbers (a player, or a vehicle's id)
 defTable('shells', () => shells, {
   make: () => ({ x: 0, y: 0, vx: 0, vy: 0, owner: 0, from: 'ship', age: 0, trail: 0, under: false, ut: 0 }),
   // (the minimap's line for each player's latest shell: a newer shot's line replaces an older one, as stepShells does)
@@ -14159,8 +14169,8 @@ const SW_EXTRA_T = { skip: TBL_SKIP, depth: 4, after: null };
 /* The page only DRAWS these lists in live mode (it never steps them: design section 2), so a live snapshot carries each row's
    DRAWN fields only - the ones the drawing reads, listed here per list from the draw functions named; the velocities, timers
    and seeds the step uses stay in the worker. A full snapshot (the gate's mirror, a resync) carries every field. A list not
-   named here goes whole (everything of it is drawn: streaks, trails (p1 p2 thin root next), planeWisps, msPings, msplashes,
-   airStreaks, landWake). References drawing follows stay in: a puff's prev, a trail's next (same-list {ri}); the smoke's
+   named here goes whole (everything of it is drawn: streaks, planeWisps, msPings, msplashes, airStreaks, landWake; the shells'
+   trails, flat arrays, go by their own columns - trSnap). References drawing follows stay in: a puff's prev (same-list {ri}); the smoke's
    after hook reads st, which the table skips anyway. 'a.b' names a field of the small objects inside the list field a (the
    fish of a school: swNestOf). When in doubt a field is kept. */
 const SW_DRAW = {
@@ -14205,10 +14215,11 @@ const SW_DRAW = {
   // 50-land-space.js rocketPuffR (the rocket's puffs)
   smoke: ['x', 'y', 'r', 'age', 'life', 'alpha', 'dark', 'mist', 'quick', 'fam', 'fadeFrom', 'keep', 'kill', 'lonely', 'link', 'lumpy', 'prev', 'src', 'dead', 'sq'],   // (h: the page's own, kept by sq - SW_KEEP)
   rocketTrail: ['x', 'y', 'r', 'age', 'life', 'k', 'ground', 'w', 'h'],
-  // (60-fps chat, Oct 31) the shells' trails: sky/21-smoke.js gatherSmokeNew (the points' x, y, age, seed, launch; thin, root),
-  // 47-render-overlays.js trailR (age), 41-sky-new.js (x, y, age) - the points' vx, vy are the step's alone (stepTrails' wind and
-  // shove). Thousands of pieces in a long fight: two of the six numbers of every point never sent
-  trails: ['p1.x', 'p1.y', 'p1.age', 'p1.seed', 'p1.launch', 'p2.x', 'p2.y', 'p2.age', 'p2.seed', 'p2.launch', 'root', 'thin', 'next'],
+  // (Oct 31) the shells' trails, flat arrays: what a live snapshot carries of them (trSnap - sky/21-smoke.js gatherSmokeNew,
+  // 47-render-overlays.js trailR, 41-sky-new.js read the points' x, y, age, seed, launch and the pieces' points, root and thin;
+  // the velocities, the wobble and the pieces' numbers are the step's alone) - named as the fields of the table's saved row, for
+  // the checks (tools/sw-check.js); the snapshot itself goes by trSnap
+  trails: ['n', 'np', 'a1', 'a2', 'fl', 'x', 'y', 'age', 'seed', 'la'],
   // 44-shadows-seafloor.js drawSeaLife (each fish of a school; its x, y are undefined until its first step)
   seaSchools: ['type', 'x', 'y', 'dir', 'fish.x', 'fish.y', 'fish.dx', 'fish.dy', 'fish.face'],
   // SW_EXTRA: 26-white-water.js drawWclouds, drawGasBalls; 47-render-overlays.js (blastRings: the distortion's rings); 43-render-objects.js drawShocks
@@ -14275,15 +14286,10 @@ const SW_DERIVE = {
   smoke: { keys: ['hd0', 'hd1', 'hd2'], own: ['st'], get: (s, k) => { const st = s.st, h = st && st.last === s && st.head; return h ? h[k] : undefined; },
     put: (s, v) => { if (v[0] === undefined) s.st = undefined; else if (s.st && s.st.last === s) { const h = s.st.head; h[0] = v[0]; h[1] = v[1]; h[2] = v[2]; } else s.st = { last: s, head: v }; } },
 };
-/* (60-fps chat, Oct 31) THE SHELLS' TRAILS' COLUMNS, written straight: thousands of pieces in a long fight, each two points -
-   the general walk (each field of each thing looked up by its name) cost ~5 ms of the simulation worker a snapshot. The same
-   columns swColsOf makes for them (its fields in its order, the same kinds, masks and places): p1 and p2 as flat columns of
-   their points (x, y, age, seed; launch where a point has it), root and thin, next as a place in the list (absent: none, or a
-   piece not sent - off the views). Anything not as a trail piece always is, and it's the general walk instead (null) */
 /* (60-fps chat, Oct 31) A SNAPSHOT'S NUMBERS IN ONE BLOCK: every column, mask and slice of a live snapshot is a view into one big
    buffer (or a few, as it fills), not a buffer each - hundreds of small buffers moved to the page and dropped every frame. The
    page reads the same numbers through the same kinds of arrays; nothing of it keeps one (it copies the values out) */
-let SWF32 = false;   // (a live snapshot's number columns as 32-bit floats - swColOf, swTrailCols)
+let SWF32 = false;   // (a live snapshot's number columns as 32-bit floats - swColOf, trSnap)
 const SWA = { buf: null, off: 0, list: [], size: 1 << 16, used: 0 };
 function swNew(T, n) {
   const by = T.BYTES_PER_ELEMENT * n; let off = (SWA.off + 7) & ~7;
@@ -14292,58 +14298,31 @@ function swNew(T, n) {
   return new T(SWA.buf, off, n);
 }
 const swCopy = (a, i0, i1) => { const v = swNew(a.constructor, i1 - i0); v.set(a.subarray(i0, i1)); return v; };
-const SWIX = new Map();
-function swTrailCols(arr, bufs) {
-  const n = arr.length; if (!n) return null;
-  const P = ['x', 'y', 'age', 'seed'];
-  const cols = side => {
-    const FT = SWF32 ? Float32Array : Float64Array, X = swNew(FT, n), Y = swNew(FT, n), A = swNew(FT, n), S = swNew(FT, n);
-    let L = null, LM = null, any = false;
+/* (60-fps chat, Oct 31, user 19:46: the heavy battle choppy) THE SHELLS' TRAILS' COLUMNS: the trails are flat arrays
+   (47-render-overlays.js trStore), sent as copies of them - the pieces within the page's views (as swInView picks a row: either
+   end within SW_MARGIN of a view's span; a full snapshot: all of them) and their points, each once (trPack): the drawn numbers
+   (x, y, age, seed as 32-bit floats in a live snapshot - SWF32 - launch; the pieces' two points, root and thin); a full one
+   everything the step needs too, 64-bit. Built in one tight loop over the arrays, no thing walked: with the trails as objects
+   this was ~6-7 ms of the worker a snapshot in the heavy battle. The page puts them in its own arrays in place (trSnapInto) */
+function trSnap(full, drawn, bufs) {
+  const S = trails, n = S.n, sp = REG.spans, sel = S.SEL;
+  let m = 0;
+  if (full || !sp.length) m = n;
+  else {
+    const A1 = S.A1, A2 = S.A2, X = S.X, ns = sp.length;
     for (let i = 0; i < n; i++) {
-      const q = side ? arr[i].p2 : arr[i].p1;
-      if (!q || typeof q !== 'object' || Array.isArray(q) || ArrayBuffer.isView(q) || q._uid != null) return null;
-      const x = q.x, y = q.y, a = q.age, sd = q.seed;
-      if (typeof x !== 'number' || typeof y !== 'number' || typeof a !== 'number' || typeof sd !== 'number') return null;
-      X[i] = x; Y[i] = y; A[i] = a; S[i] = sd;
-      const la = q.launch;
-      if (la !== undefined) { if (typeof la !== 'boolean') return null; if (!L) { L = swNew(Float64Array, n); LM = swNew(Uint8Array, n); for (let j = 0; j < i; j++) LM[j] = 1; } L[i] = la ? 1 : 0; any = true; }
-      else if (L) LM[i] = 1;
+      const xa = X[A1[i]], xb = X[A2[i]], x = (xa < xb ? xa : xb) - SW_MARGIN, x2 = (xa < xb ? xb : xa) + SW_MARGIN;
+      for (let k = 0; k < ns; k += 2) if (x2 >= sp[k] && x <= sp[k + 1]) { sel[m++] = i; break; }
     }
-    const c = swNew(Int32Array, n).fill(1), N = { c, obj: true, k: P.slice(), d: [] };
-    for (const f of [X, Y, A, S]) { bufs.push(f.buffer); N.d.push({ f, m: null, z: null }); }
-    if (any) { let miss = null; for (let i = 0; i < n; i++) if (LM[i]) { miss = LM; break; } bufs.push(L.buffer); if (miss) bufs.push(miss.buffer); N.k.push('launch'); N.d.push({ b: L, m: miss, z: null }); }
-    bufs.push(c.buffer);
-    return N;
-  };
-  // (the plain fields first, checked, so nothing is half made when one isn't as it should be)
-  const R = swNew(Float64Array, n), Tn = swNew(Float64Array, n), ri = swNew(Int32Array, n); let hasNext = false;
-  SWIX.clear(); for (let i = 0; i < n; i++) SWIX.set(arr[i], i);
-  for (let i = 0; i < n; i++) {
-    const o = arr[i];
-    if (typeof o.root !== 'boolean' || typeof o.thin !== 'boolean') return null;
-    R[i] = o.root ? 1 : 0; Tn[i] = o.thin ? 1 : 0;
-    const v = o.next;
-    if (v === undefined) { ri[i] = -1; continue; }
-    if (v === null) { ri[i] = -2; hasNext = true; continue; }
-    if (typeof v !== 'object') return null;
-    hasNext = true;
-    const j = SWIX.get(v);
-    if (j !== undefined) ri[i] = j;
-    else if (v.p1 && v.p2 && v._uid != null) ri[i] = -1;                // (a piece not sent: off the views)
-    else return null;
   }
-  const bk = bufs.length;
-  const N1 = cols(0); if (!N1) { bufs.length = bk; return null; }
-  const N2 = cols(1); if (!N2) { bufs.length = bk; return null; }
-  bufs.push(R.buffer, Tn.buffer);
-  const C = { n, k: ['p1', 'p2', 'root', 'thin'], d: [{ nest: N1 }, { nest: N2 }, { b: R, m: null, z: null }, { b: Tn, m: null, z: null }] };
-  if (hasNext) { bufs.push(ri.buffer); C.k.push('next'); C.d.push({ ri }); }
-  SWIX.clear();
-  return C;
+  const o = trPack(S, m === n ? null : sel, m, swNew, SWF32, !drawn);
+  for (const k in o) if (ArrayBuffer.isView(o[k])) bufs.push(o[k].buffer);
+  return o;
 }
+// (the page) the trails' columns into its own arrays
+function trSnapInto(C) { if (C && typeof C.n === 'number') trFill(trails, C); }
 // draw: the list's drawn fields (SW_DRAWK) - a live snapshot; null: every field
 function swColsOf(t, arr, strs, sIdx, bufs, draw, all) {
-  if (draw && t.name === 'trails' && draw === SW_DRAWK.trails) { const C = swTrailCols(arr, bufs); if (C) return C; }
   const n = arr.length, keys = swKeysOf(arr, t.skip, draw ? draw.top : null);
   const C = { n, k: [], d: [] };
   for (const [k, kind] of keys) {
@@ -14711,9 +14690,6 @@ function swInView(arr, full) {
   for (const o of arr) {
     if (!o) continue;
     let x = o.x, x2 = x;
-    // (a row whose place is its two points - a shell's trail piece, p1 to p2: thousands of them in a long fight, every one sent
-    // every snapshot, Oct 31)
-    if (typeof x !== 'number' && o.p1 && o.p2 && typeof o.p1.x === 'number' && typeof o.p2.x === 'number') { x = Math.min(o.p1.x, o.p2.x); x2 = Math.max(o.p1.x, o.p2.x); }
     if (typeof x !== 'number') { out.push(o); continue; }
     const r = (typeof o.r === 'number' ? Math.abs(o.r) : 0) + SW_MARGIN;
     for (let i = 0; i < sp.length; i += 2) if (x2 + r >= sp[i] && x - r <= sp[i + 1]) { out.push(o); break; }
@@ -14730,6 +14706,7 @@ function swSnapshot(full, drawn = !full) {
   for (const k in TABLES) {
     if (SW_LOCAL.has(k)) continue;
     const tk = performance.now();
+    if (TABLES[k].snapCols) { cols[k] = TABLES[k].snapCols(full, drawn, bufs); SWS.tms[k] = performance.now() - tk; continue; }   // (its own columns: the trails' flat arrays)
     if (SW_COLS.has(k)) { { const all = TABLES[k].list(); cols[k] = swColsOf(TABLES[k], swInView(all, full), strs, sIdx, bufs, drawn ? SW_DRAWK[k] : null, all); } SWS.tms[k] = performance.now() - tk; continue; }
     if (k === 'water' || k === 'dockCalm') continue;                   // (their arrays: below, swArraysOf)
     const t = TABLES[k], arr = t.list(), had = SWS.rows[k] || (SWS.rows[k] = new Map()), here = new Set(), ch = [];
@@ -14846,7 +14823,9 @@ function swApply(snap) {
   // the effect columns and the sea's arrays (after the rows: an effect may name a row's thing by its id)
   if (snap.cols) for (const k in snap.cols) {
     if (k[0] === '+') { const f = SW_EXTRA[k.slice(1)]; if (f) swColsInto(f(), snap.cols[k], snap.strs, k); continue; }
-    const t = TABLES[k]; if (!t) continue; const arr = t.list(); swColsInto(arr, snap.cols[k], snap.strs, k); if (t.after) t.after(arr);
+    const t = TABLES[k]; if (!t) continue;
+    if (t.colsInto) { t.colsInto(snap.cols[k]); tq = lap('c:' + k, tq); continue; }
+    const arr = t.list(); swColsInto(arr, snap.cols[k], snap.strs, k); if (t.after) t.after(arr);
     tq = lap('c:' + k, tq);
   }
   if (snap.arrays) swArraysInto(snap.arrays);
@@ -22914,11 +22893,14 @@ function gatherSmokeNew(want) {
     }
   }
   // the shell and missile trails (src/47-render-overlays.js drawTrails' blobs along each piece)
-  if (want('tower')) for (const tr of trails) {
-    const p1 = tr.p1, p2 = tr.p2, ak = tr.thin ? THIN_AGE : 1, rk = tr.thin ? THIN_R : 1;
-    const x1 = cxOf(p1.x), y1 = cyOf(p1.y), x2 = cxOf(p2.x), y2 = cyOf(p2.y), lenW = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+  // (Oct 31: the trails are flat arrays - 47-render-overlays.js trStore: each piece's two points' numbers read from them)
+  const TS = trails, TA1 = TS.A1, TA2 = TS.A2, TFL = TS.FL, TX = TS.X, TY = TS.Y, TAG = TS.AGE, TSD = TS.SEED, TLA = TS.LA;
+  if (want('tower')) for (let ti = 0; ti < TS.n; ti++) {
+    const q1 = TA1[ti], q2 = TA2[ti], thin = TFL[ti] & 2, root = TFL[ti] & 1, ak = thin ? THIN_AGE : 1, rk = thin ? THIN_R : 1;
+    const p1x = TX[q1], p1y = TY[q1], p1a = TAG[q1], p1s = TSD[q1], p2x = TX[q2], p2y = TY[q2], p2a = TAG[q2];
+    const x1 = cxOf(p1x), y1 = cyOf(p1y), x2 = cxOf(p2x), y2 = cyOf(p2y), lenW = Math.hypot(p2x - p1x, p2y - p1y);
     if (Math.max(x1, x2) < -40 || Math.min(x1, x2) > SMN.cw + 40 || Math.max(y1, y2) < -40 || Math.min(y1, y2) > SMN.h + 40) continue;
-    const ageMid = (p1.age + p2.age) / 2 * ak, rMin = Math.max(0.5, trailR(Math.min(p1.age, p2.age) * ak) * 0.8 * rk * kx);
+    const ageMid = (p1a + p2a) / 2 * ak, rMin = Math.max(0.5, trailR(Math.min(p1a, p2a) * ak) * 0.8 * rk * kx);
     // (blobs at fixed steps along the piece from its start - 4.2 units as the game, closer for a thin line - so they don't
     // slide along it as it stretches)
     // (never closer than half a cell: zoomed out (real scale starts ~3x further out) 4.2 units is a fraction of a cell, and
@@ -22926,24 +22908,24 @@ function gatherSmokeNew(want) {
     // on the user's PC, Oct 29. A ball is at least 0.55 cells, so the trail stays unbroken)
     const stW = Math.max(0.5 / kx, Math.min(4.2, Math.max(0.8, rMin * 0.8 / kx))), n = Math.min(80, Math.max(1, Math.floor(lenW / stW)));
     for (let i = 0; i < n; i++) {
-      const f = Math.min(1, (i + 0.5) * stW / Math.max(lenW, 1e-6)), age = (p1.age + (p2.age - p1.age) * f) * ak, u = age / TRAIL_SHAPE;
+      const f = Math.min(1, (i + 0.5) * stW / Math.max(lenW, 1e-6)), age = (p1a + (p2a - p1a) * f) * ak, u = age / TRAIL_SHAPE;
       if (age >= TRAIL_LIFE) continue;
       const a = Math.pow(1 - u, 1.1) * (1 - 0.55 * TRAIL_GROW(age)) * trailLate(age);
-      const h1 = fxHash(i * 7.13 + p1.seed * 3.7), h2 = fxHash(i * 3.3 + p1.seed), h3 = fxHash(i * 5.1 + p1.seed * 1.3);
+      const h1 = fxHash(i * 7.13 + p1s * 3.7), h2 = fxHash(i * 3.3 + p1s), h3 = fxHash(i * 5.1 + p1s * 1.3);
       const keep = clamp((0.5 + 0.5 * a - h1) * 5 + 1, 0, 1);
       if (keep <= 0.01) continue;
       const r = trailR(age) * (0.8 + 0.5 * h2) * rk, spread = Math.min(1, age / 3) * r * 0.55;
-      const wx = p1.x + (p2.x - p1.x) * f + (h3 - 0.5) * spread, wy = p1.y + (p2.y - p1.y) * f + (h2 - 0.5) * spread;
+      const wx = p1x + (p2x - p1x) * f + (h3 - 0.5) * spread, wy = p1y + (p2y - p1y) * f + (h2 - 0.5) * spread;
       const aa = clamp(Math.min(1, a * 1.3) * keep * 1.6, 0, 1), R = r * kx * Math.sqrt(aa);
       if (R < 2.2) smnAdd(cxOf(wx), cyOf(wy), Math.max(0.55, R), (h3 - 0.5) * R, aa, 3, h1);
       else smnPuff(cxOf(wx), cyOf(wy), R, (h3 - 0.5) * R * 0.6, aa, 3, h1);
     }
-    if (p1.launch && tr.root) {
-      const age = p1.age, u = Math.min(1, age / 16);
+    if (TLA[q1] && root) {
+      const age = p1a, u = Math.min(1, age / 16);
       if (u < 1) for (let k = 0; k < 7; k++) {
-        const h = fxHash(k * 2.17 + p1.seed), g = fxHash(k * 4.9 + p1.seed * 0.7), br = (4 + 15 * (1 - Math.exp(-age / 1.6))) * (0.6 + 0.6 * g), ang = h * Math.PI * 2, d = br * (0.4 + 0.8 * g);
+        const h = fxHash(k * 2.17 + p1s), g = fxHash(k * 4.9 + p1s * 0.7), br = (4 + 15 * (1 - Math.exp(-age / 1.6))) * (0.6 + 0.6 * g), ang = h * Math.PI * 2, d = br * (0.4 + 0.8 * g);
         const ab = clamp(Math.pow(1 - u, 1.2) * trailLate(age) * 1.6, 0, 1);
-        smnPuff(cxOf(p1.x + Math.cos(ang) * d * 1.2), cyOf(Math.min(p1.y + Math.sin(ang) * d * 0.7 - age * 0.6, trailGround(p1.x) - br * 0.8)), br * kx * Math.sqrt(ab), (g - 0.5) * br * kx, ab, 3, h);
+        smnPuff(cxOf(p1x + Math.cos(ang) * d * 1.2), cyOf(Math.min(p1y + Math.sin(ang) * d * 0.7 - age * 0.6, trailGround(p1x) - br * 0.8)), br * kx * Math.sqrt(ab), (g - 0.5) * br * kx, ab, 3, h);
       }
     }
   }
@@ -23160,7 +23142,7 @@ function smdTake(S_, dn, gw, gx0, gy0, gx1, gy1) {
 // a puff is in (want), its kind of smoke (famOf), whether the puff before it is still there. Late or failed: the main
 // thread gathers on the second frame, as before. ?smdcheck=1: the main thread gathers too, on the first frame, from the
 // same puffs, and the balls that differ are counted (SMD.chk - stats().smd); ?smgw=0 (P.smgw) keeps the gather here.
-const SMG_S = 29, SMG_T = 11, SMG_K = 7, SMG_KS = ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV'];
+const SMG_S = 29, SMG_K = 7, SMG_KS = ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV'];
 const SMD_CHECK = (() => { try { return /[?&]smdcheck=1/.test(location.search); } catch (e) { return false; } })();
 if ((() => { try { return /[?&]smgw=0/.test(location.search); } catch (e) { return false; } })()) P.smgw = 0;
 // the worker's text before smdBody: the gather's functions as they are here, and what they read, filled by each job
@@ -23173,7 +23155,7 @@ function smgText() {
     `const trailLate = (() => { const clamp = ${O.clamp}, smoothstep = ${O.smoothstep}, TRAIL_HOLD = ${v(TRAIL_HOLD)}, TRAIL_LIFE = ${v(TRAIL_LIFE)}; return ${trailLate}; })();`,
     `const TRAIL_SHAPE = ${v(TRAIL_SHAPE)}, TRAIL_LIFE = ${v(TRAIL_LIFE)}, THIN_AGE = ${v(THIN_AGE)}, THIN_R = ${v(THIN_R)}, SMN_TILE_OFS = ${v(SMN_TILE_OFS)};`,
     `let SV = 1, CAMPX = 0, TOPPX = 0, SMN = null, smHc = 0; const PX = ${PX}, PY = ${PY}, wpx = ${wpx}, wpy = ${wpy};`,
-    `const FXV = {}, SMG = {}, P = {}, SMSUN = {}, E = {}, SMN_HC = new Map(), TGM = new Map(), smoke = [], trails = [], rocketTrail = [];`,
+    `const FXV = {}, SMG = {}, P = {}, SMSUN = {}, E = {}, SMN_HC = new Map(), TGM = new Map(), smoke = [], rocketTrail = []; let trails = { n: 0 };`,
     // (worked out on the main thread and sent: a puff's kind, the rocket's puff's size, the ground under a launch's foot;
     // the light is laid after the gather (smgAfter's smBodies) - the worker is used only when it is, SMN.lazyL)
     `const famOf = s => s.fm, srcOf = s => '', rocketPuffR = p => p.rr, trailGround = x => TGM.get(x);`,
@@ -23191,18 +23173,16 @@ function smgRun(m) {
   if (m.rb) SMS_RB = m.rb;
   SMN = { cap: 0, n: 0, X: null, Y: null, R: null, Z: null, A: null, F: null, LX: null, LY: null, LZ: null, TK: null, TU: null, TV: null, SID: null, cw: m.cw, h: m.h, tkz: m.tkz, lazyL: true };
   const S = m.S, T = m.T, K = m.K;
-  smoke.length = 0; trails.length = 0; rocketTrail.length = 0; TGM.clear();
+  smoke.length = 0; rocketTrail.length = 0; TGM.clear();
   for (let i = 0; i < m.ns; i++) {
     const o = i * 29, s = { x: S[o], y: S[o + 1], r: S[o + 2], age: S[o + 3], life: S[o + 4], alpha: S[o + 5], fadeFrom: S[o + 6], keep: S[o + 7], kill: S[o + 8], lonely: S[o + 9], h: S[o + 10], fm: S[o + 11], link: S[o + 12], lumpy: S[o + 13], prev: null, st: null };
     if (S[o + 14]) s.prev = { x: S[o + 15], y: S[o + 16], r: S[o + 17], age: S[o + 18], life: S[o + 19], alpha: S[o + 20], fadeFrom: S[o + 21], keep: S[o + 22], kill: S[o + 23], lonely: S[o + 24], dead: false };
     if (S[o + 25]) s.st = { last: s, head: [S[o + 26], S[o + 27], S[o + 28]] };
     smoke.push(s);
   }
-  for (let i = 0; i < m.nt; i++) {
-    const o = i * 11, p1 = { x: T[o], y: T[o + 1], age: T[o + 2], seed: T[o + 3], launch: T[o + 4] }, tr = { p1, p2: { x: T[o + 5], y: T[o + 6], age: T[o + 7] }, thin: T[o + 8], root: T[o + 9] };
-    if (p1.launch && tr.root) TGM.set(p1.x, T[o + 10]);
-    trails.push(tr);
-  }
+  // (the trails: the main thread's arrays, copied - the same numbers, the same order; the ground under each launch puff)
+  trails = { n: m.nt, A1: T.A1, A2: T.A2, FL: T.FL, X: T.X, Y: T.Y, AGE: T.AGE, SEED: T.SEED, LA: T.LA };
+  for (let i = 0; i < m.nt; i++) { const q = T.A1[i]; if (T.LA[q] && (T.FL[i] & 1)) TGM.set(T.X[q], T.G[i]); }
   for (let i = 0; i < m.nk; i++) { const o = i * 7; rocketTrail.push({ x: K[o], y: K[o + 1], rr: K[o + 2], age: K[o + 3], life: K[o + 4], h: K[o + 5], w: K[o + 6] }); }
   gatherSmokeNew(() => true);
   const n = SMN.n, res = { g: 1, id: m.id, seq: m.seq, n, part: 1 }, tr = [];
@@ -23271,13 +23251,14 @@ function smgSend(want, cw, h, fast, tkA0) {
     const hd = s.st && s.st.last === s && s.st.head;
     if (hd) { S[o + 25] = 1; S[o + 26] = hd[0]; S[o + 27] = hd[1]; S[o + 28] = hd[2]; }
   }
-  let nt = 0, T = new Float64Array(0);
+  // (the trails, Oct 31: copies of their flat arrays - the pieces' and the points' in use (47-render-overlays.js trStore) - and the
+  // ground under each first piece's launch puff (trailGround reads the land: here))
+  let nt = 0; const TS = trails, T = {};
   if (want('tower')) {
-    T = new Float64Array(trails.length * SMG_T);
-    for (const tr of trails) {
-      const p1 = tr.p1, p2 = tr.p2, o = nt++ * SMG_T, la = p1.launch && tr.root;
-      T[o] = p1.x; T[o + 1] = p1.y; T[o + 2] = p1.age; T[o + 3] = p1.seed; T[o + 4] = p1.launch ? 1 : 0; T[o + 5] = p2.x; T[o + 6] = p2.y; T[o + 7] = p2.age; T[o + 8] = tr.thin ? 1 : 0; T[o + 9] = tr.root ? 1 : 0; T[o + 10] = la ? trailGround(p1.x) : 0;
-    }
+    nt = TS.n; const np = TS.np;
+    T.A1 = TS.A1.slice(0, nt); T.A2 = TS.A2.slice(0, nt); T.FL = TS.FL.slice(0, nt); T.G = new Float64Array(nt);
+    T.X = TS.X.slice(0, np); T.Y = TS.Y.slice(0, np); T.AGE = TS.AGE.slice(0, np); T.SEED = TS.SEED.slice(0, np); T.LA = TS.LA.slice(0, np);
+    for (let i = 0; i < nt; i++) { const q = T.A1[i]; if (T.LA[q] && (T.FL[i] & 1)) T.G[i] = trailGround(T.X[q]); }
   }
   let nk = 0, K = new Float64Array(0);
   if (want('space')) {
@@ -23293,7 +23274,7 @@ function smgSend(want, cw, h, fast, tkA0) {
     sun: [SMSUN.x, SMSUN.y, SMSUN.H, SMSUN.Z, SMSUN.s4], behind: E.behind, overcast: E.overcast, lightz: P.lightz, chk: SMD_CHECK, sl: 1, thin: (P.smthin ?? 1) > 0 };
   // (the slots: the worker's table. Painted here last (or never yet), this thread's table goes over with the job (smsSnap), a
   // copy kept here (G_.mir); the arrays of the last paint go back to be filled again)
-  const G_ = gsmState(SMN), tl = [S.buffer, T.buffer, K.buffer];
+  const G_ = gsmState(SMN), tl = [S.buffer, K.buffer]; for (const k in T) tl.push(T[k].buffer);
   if (G_.own !== 'w') { m.sync = smsSnap(G_); G_.mir = smsCopy(m.sync); G_.own = 'w'; tl.push(m.sync.key.buffer, m.sync.ins.buffer, m.sync.p.buffer, m.sync.use.buffer, m.sync.free.buffer); }
   if (G_.rb) { m.rb = G_.rb; tl.push(G_.rb[0].buffer, G_.rb[1].buffer); G_.rb = null; }
   // (?smdcheck=1: the main thread's own gather of the same puffs now, into a scratch store, and its steps after (smgAfter, with
@@ -24429,7 +24410,7 @@ function skyNewSmoke() { const V = SKYV[viewIdx]; if (!V) return; V.ctx = C; NSK
 // out behind it.
 const PLSM_R = 34;
 function planesInSmoke(dt) {
-  if (!(dt > 0) || (!smoke.length && !trails.length)) return;
+  if (!(dt > 0) || (!smoke.length && !trails.n)) return;
   const list = [];
   for (const pl of allPlanes()) if (pl && (pl.state === 'fly' || pl.state === 'down')) list.push(pl);
   for (const f of traffic) if ((f.state === 'fly' || f.state === 'free') && !f.ground) list.push(f);
@@ -24452,7 +24433,8 @@ function smearAir(a, vx, vy, sp, dt) {
   // (no smoke near it - none in its cell of the smoke's air or those round it, no trail close: nothing to do)
   let any = false;
   for (let j = -1; j <= 1 && !any; j++) for (let i = -1; i <= 1; i++) { const g = gIdx(x + i * SG.cell, y + j * SG.cell); if (g >= 0 && SG.dens[g] > 0.02) { any = true; break; } }
-  if (!any) for (const t of trails) if (Math.abs(t.p2.x - x) < R * 2 && Math.abs(t.p2.y - y) < R * 2) { any = true; break; }
+  const TS = trails, TA2 = TS.A2, TX = TS.X, TY = TS.Y;   // (the trails: flat arrays - 47-render-overlays.js trStore)
+  if (!any) for (let i = 0; i < TS.n; i++) { const p = TA2[i]; if (Math.abs(TX[p] - x) < R * 2 && Math.abs(TY[p] - y) < R * 2) { any = true; break; } }
   if (!any) { if (a._smCh) a._smCh.last = null; return; }
   gridImpulse(x, y, vx * 0.85, vy * 0.85, 2.2);
   let near = null, nd = 1e9;
@@ -24479,8 +24461,17 @@ function smearAir(a, vx, vy, sp, dt) {
   for (const s of smoke) if (!(s.src === 'smear' && s.age < 1.2) && s.age > 0.5) touch(s, s.r, true);
   // (Oct 31, 60-fps chat: a point plainly out of reach is passed by before its size is worked out - trailR is never more than
   // 11 + age / 5 - the same points touched; thousands of trail pieces in a long fight, for every plane, every step)
-  const far = q => { const m = R + (11 + q.age * 0.2) * 0.6 + 1, dx = q.x - x, dy = q.y - y; return dx > m || dx < -m || dy > m || dy < -m; };
-  for (const t of trails) { if (t.p2.age > 0.8 && !far(t.p2)) touch(t.p2, trailR(t.p2.age)); if (t.root && t.p1.age > 0.8 && !far(t.p1)) touch(t.p1, trailR(t.p1.age)); }
+  // (a trail's point: touch's sums on its numbers in the trails' arrays - a point is never a puff)
+  const TVX = TS.VX, TVY = TS.VY, TAG = TS.AGE, TA1 = TS.A1, TFL = TS.FL;
+  const far = q => { const m = R + (11 + TAG[q] * 0.2) * 0.6 + 1, dx = TX[q] - x, dy = TY[q] - y; return dx > m || dx < -m || dy > m || dy < -m; };
+  const touchT = (q, r) => {
+    const dx = TX[q] - x, dy = TY[q] - y, rr = R + r * 0.6; if (dx > rr || dx < -rr || dy > rr || dy < -rr) return;
+    const d = Math.hypot(dx, dy) || 1, f = 1 - d / rr; if (f <= 0) return;
+    const k = Math.min(1, 4 * f * dt / (1 + r / 14));
+    TVX[q] += (vx * 0.7 - TVX[q]) * k; TVY[q] += (vy * 0.7 - TVY[q]) * k;
+    TX[q] += vx * 0.2 * f * dt / (1 + r / 14); TY[q] += vy * 0.2 * f * dt / (1 + r / 14);
+  };
+  for (let i = 0; i < TS.n; i++) { const q2 = TA2[i]; if (TAG[q2] > 0.8 && !far(q2)) touchT(q2, trailR(TAG[q2])); if (TFL[i] & 1) { const q1 = TA1[i]; if (TAG[q1] > 0.8 && !far(q1)) touchT(q1, trailR(TAG[q1])); } }
   // while it is in the smoke, a streak of it comes out behind (as many puffs as the smoke there is thick)
   const g = gIdx(x, y), dens = g >= 0 ? SG.dens[g] : 0;
   if (near && dens > 0.15) {
@@ -28715,14 +28706,182 @@ const TRAIL_SHAPE = 28, TRAIL_HOLD = 10, TRAIL_LIFE = 14;
 // a missile's trail (t.thin, user Oct 24): a third as thick and gone three times as fast as a shell's
 const THIN_AGE = 3, THIN_R = 0.35;
 const trailLate = age => age <= TRAIL_HOLD ? 1 : 1 - smoothstep(TRAIL_HOLD, TRAIL_LIFE, age);
-// (engine stage 3) the trails' own random source (a new piece's seeds, 33-guns-shells.js) and their table: the pieces. Two
-// pieces in a row share a point (one's p2 is the next one's p1), which a save holds twice: once loaded, each next's p1 is its
-// piece's p2 again
+/* (60-fps chat, Oct 31, user 19:46: the heavy battle choppy) THE SHELLS' TRAILS AS FLAT ARRAYS. A long fight's trails pile up to
+   ~10,000 pieces; as objects (a piece { p1, p2, root, thin, next }, each point { x, y, vx, vy, age, seed, ... }) every pass over
+   them - the step, the simulation worker's snapshot (~6-7 ms of it: only ~25 snapshots a second reached the page), the page's
+   fold-in, the smoke's gather - walked thousands of objects. Now they are numbers in typed arrays, one array a field:
+   - the POINTS (X, Y, VX, VY, AGE, SEED, LA - a trail's first point is its launch puff's: 1 or 0 - and the wobble's turning
+     state QS1, QC1, QS2, QC2, TA - the age it was last turned at, NaN: start again from the sines) at stable places, a place
+     freed when no piece names it any more (REF: how many pieces do - two pieces in a row share a point: one's p2 is the next
+     one's p1) and given again to the next point made (FREE);
+   - the PIECES in order, oldest first (A1, A2: their two points' places; FL: 1 root - the first piece of what's left of a
+     trail, which steps its p1 as well, 2 thin - a missile's; ID: each piece's own number, rising, so a piece is found by it
+     with a halving search; NX: the number of the piece after it, 0 none). A shell keeps the number of the piece it's laying
+     (s.seg, 33-guns-shells.js).
+   The same numbers as the objects held, worked out by the same sums in the same order (the user: "Details are never capped" -
+   no limit on how many; every piece still lives its whole fade). Readers: stepTrails, 33-guns-shells.js stepShells (making
+   them), 41-sky-new.js smearAir, sky/21-smoke.js gatherSmokeNew + smgSend, 36-zzzzz-sw-snap.js trSnap / trSnapInto (the
+   simulation worker's snapshots), the trails table here (saves). */
+// (functions only, no constants: the store is made in 05-game-state.js, before this file's constants exist)
+function trF64() { return ['X', 'Y', 'VX', 'VY', 'AGE', 'SEED', 'QS1', 'QC1', 'QS2', 'QC2', 'TA']; }
+function trStore() {
+  const S = { n: 0, np: 0, nid: 1, cap: 0, pcap: 0, fn: 0, A1: null, A2: null, FL: null, ID: null, NX: null, SEL: null,
+    LA: null, REF: null, FREE: null, MAP: null, PL: null,
+    get length() { return this.n; }, set length(v) { trCut(this, v); } };   // (as a list's: how many pieces; 0 clears them - 07-world-build.js)
+  for (const k of trF64()) S[k] = null;
+  trGrowK(S, 64); trGrowP(S, 128);
+  return S;
+}
+function trMore(a, n) { const b = new a.constructor(n); b.set(a); return b; }
+// room for `need` pieces / points (doubled as it grows)
+function trGrowK(S, need) {
+  if (need <= S.cap) return;
+  const c = Math.max(need, S.cap * 2);
+  if (!S.A1) { S.A1 = new Int32Array(c); S.A2 = new Int32Array(c); S.FL = new Uint8Array(c); S.ID = new Float64Array(c); S.NX = new Float64Array(c); }
+  else { S.A1 = trMore(S.A1, c); S.A2 = trMore(S.A2, c); S.FL = trMore(S.FL, c); S.ID = trMore(S.ID, c); S.NX = trMore(S.NX, c); }
+  S.SEL = new Int32Array(c); S.cap = c;
+}
+function trGrowP(S, need) {
+  if (need <= S.pcap) return;
+  const c = Math.max(need, S.pcap * 2);
+  for (const k of trF64()) S[k] = S[k] ? trMore(S[k], c) : new Float64Array(c);
+  S.LA = S.LA ? trMore(S.LA, c) : new Uint8Array(c); S.REF = S.REF ? trMore(S.REF, c) : new Int32Array(c);
+  S.FREE = S.FREE ? trMore(S.FREE, c) : new Int32Array(c);
+  const M = new Int32Array(c).fill(-1); if (S.MAP) M.set(S.MAP); S.MAP = M;   // (a point's place in a packed copy: -1 between uses - trPack)
+  S.PL = new Int32Array(c); S.pcap = c;
+}
+// a new point (no piece names it yet)
+function trPoint(S, x, y, seed, la) {
+  let p;
+  if (S.fn) p = S.FREE[--S.fn]; else { if (S.np >= S.pcap) trGrowP(S, S.np + 1); p = S.np++; }
+  S.X[p] = x; S.Y[p] = y; S.VX[p] = 0; S.VY[p] = 0; S.AGE[p] = 0; S.SEED[p] = seed; S.LA[p] = la; S.TA[p] = NaN; S.REF[p] = 0;
+  return p;
+}
+// a new piece at the end, p1 to p2; its number
+function trAdd(S, p1, p2, root, thin) {
+  if (S.n >= S.cap) trGrowK(S, S.n + 1);
+  const i = S.n++, id = S.nid++;
+  S.A1[i] = p1; S.A2[i] = p2; S.FL[i] = (root ? 1 : 0) | (thin ? 2 : 0); S.ID[i] = id; S.NX[i] = 0;
+  S.REF[p1]++; S.REF[p2]++;
+  return id;
+}
+// the place of the piece numbered id (from lo on), or -1: gone
+function trFind(S, id, lo = 0) {
+  const ID = S.ID; let hi = S.n - 1;
+  while (lo <= hi) { const m = (lo + hi) >> 1, v = ID[m]; if (v === id) return m; if (v < id) lo = m + 1; else hi = m - 1; }
+  return -1;
+}
+// the pieces marked gone (FL 4) taken out, the rest kept in their order; a point no piece names any more is freed
+function trSweep(S) {
+  const n = S.n, A1 = S.A1, A2 = S.A2, FL = S.FL, ID = S.ID, NX = S.NX, REF = S.REF, FREE = S.FREE;
+  let w = 0;
+  for (let i = 0; i < n; i++) {
+    const f = FL[i];
+    if (f & 4) { const a = A1[i], b = A2[i]; if (--REF[a] <= 0) FREE[S.fn++] = a; if (--REF[b] <= 0) FREE[S.fn++] = b; continue; }
+    if (w !== i) { A1[w] = A1[i]; A2[w] = A2[i]; FL[w] = f; ID[w] = ID[i]; NX[w] = NX[i]; }
+    w++;
+  }
+  S.n = w;
+}
+// `trails.length = v`: the pieces from v on dropped (0: all of them)
+function trCut(S, v) {
+  v = Math.max(0, v | 0);
+  if (!v) { S.n = 0; S.np = 0; S.fn = 0; return; }
+  if (v >= S.n) return;
+  for (let i = v; i < S.n; i++) S.FL[i] |= 4;
+  trSweep(S);
+}
+/* The pieces at `sel` (their places, m of them; null: all, in order) and their points PACKED: each point once, in the order the
+   pieces first name it, the pieces' A1 / A2 its place there. mk(Type, n) makes each array (a snapshot's block - swNew - or a plain
+   one for a save); f32: the points' x, y, age, seed as 32-bit floats (a live snapshot); full: everything the step needs too (the
+   velocities, the wobble, the pieces' numbers and links) - a save, a whole snapshot */
+function trPack(S, sel, m, mk, f32, full) {
+  const MAP = S.MAP, PL = S.PL, A1 = S.A1, A2 = S.A2, FL = S.FL;
+  let q = 0;
+  for (let j = 0; j < m; j++) {
+    const i = sel ? sel[j] : j, a = A1[i], b = A2[i];
+    if (MAP[a] < 0) { MAP[a] = q; PL[q++] = a; }
+    if (MAP[b] < 0) { MAP[b] = q; PL[q++] = b; }
+  }
+  const FT = f32 ? Float32Array : Float64Array;
+  const o = { n: m, np: q, a1: mk(Int32Array, m), a2: mk(Int32Array, m), fl: mk(Uint8Array, m), x: mk(FT, q), y: mk(FT, q), age: mk(FT, q), seed: mk(FT, q), la: mk(Uint8Array, q) };
+  { const a1 = o.a1, a2 = o.a2, fl = o.fl; for (let j = 0; j < m; j++) { const i = sel ? sel[j] : j; a1[j] = MAP[A1[i]]; a2[j] = MAP[A2[i]]; fl[j] = FL[i] & 3; } }
+  { const X = S.X, Y = S.Y, AG = S.AGE, SD = S.SEED, LA = S.LA, x = o.x, y = o.y, age = o.age, seed = o.seed, la = o.la;
+    for (let k = 0; k < q; k++) { const p = PL[k]; x[k] = X[p]; y[k] = Y[p]; age[k] = AG[p]; seed[k] = SD[p]; la[k] = LA[p]; } }
+  if (full) {
+    for (const [f, K] of [['vx', 'VX'], ['vy', 'VY'], ['s1', 'QS1'], ['c1', 'QC1'], ['s2', 'QS2'], ['c2', 'QC2'], ['ta', 'TA']]) { const src = S[K], d = o[f] = mk(Float64Array, q); for (let k = 0; k < q; k++) d[k] = src[PL[k]]; }
+    const id = o.id = mk(Float64Array, m), nx = o.nx = mk(Float64Array, m);
+    for (let j = 0; j < m; j++) { const i = sel ? sel[j] : j; id[j] = S.ID[i]; nx[j] = S.NX[i]; }
+    o.nid = S.nid;
+  }
+  for (let k = 0; k < q; k++) MAP[PL[k]] = -1;
+  return o;
+}
+// a packed copy (trPack's, or its plain arrays from a save) into the store, in place of what it held. Without the step's numbers
+// (a live snapshot - the page only draws them): at rest, the wobble from its sines, each piece its place's number and the links
+// found from the shared points
+function trFill(S, o) {
+  const n = o.n | 0, q = o.np | 0;
+  S.n = 0; S.np = 0; S.fn = 0; trGrowK(S, n); trGrowP(S, q);
+  S.A1.set(o.a1); S.A2.set(o.a2); S.FL.set(o.fl);
+  S.X.set(o.x); S.Y.set(o.y); S.AGE.set(o.age); S.SEED.set(o.seed); S.LA.set(o.la);
+  if (o.vx) { S.VX.set(o.vx); S.VY.set(o.vy); S.QS1.set(o.s1); S.QC1.set(o.c1); S.QS2.set(o.s2); S.QC2.set(o.c2); S.TA.set(o.ta); }
+  else { S.VX.fill(0, 0, q); S.VY.fill(0, 0, q); S.TA.fill(NaN, 0, q); }
+  if (o.id) { S.ID.set(o.id); S.NX.set(o.nx); S.nid = Math.max(o.nid || 1, n ? S.ID[n - 1] + 1 : 1); }
+  else {
+    const MAP = S.MAP, A1 = S.A1, A2 = S.A2, ID = S.ID, NX = S.NX;
+    for (let j = 0; j < n; j++) { ID[j] = j + 1; MAP[A1[j]] = j; }
+    for (let j = 0; j < n; j++) { const k = MAP[A2[j]]; NX[j] = k >= 0 && k !== j ? k + 1 : 0; }
+    for (let j = 0; j < n; j++) MAP[A1[j]] = -1;
+    S.nid = n + 1;
+  }
+  const REF = S.REF; REF.fill(0, 0, q);
+  for (let j = 0; j < n; j++) { REF[S.A1[j]]++; REF[S.A2[j]]++; }
+  S.n = n; S.np = q;
+}
+// (engine stage 3) the trails' own random source (a new piece's seeds, 33-guns-shells.js) and their table. A save holds one
+// row: the packed arrays (trPack, full) as plain lists - every number exact, a point once; the wobble's NaN as null. A save from
+// before (Oct 31: a list of pieces as objects, a point twice - each next's p1 its piece's p2 again) is read too: each piece
+// numbered by its place, its old id standing for that number (a shell's seg)
 const trlR = sysRng('trails');
-defTable('trails', () => trails, { net: false, after: arr => { for (const t of arr) if (t.next) t.next.p1 = t.p2; } });
+const TR_NO_ROWS = Object.freeze([]);
+function trSave() {
+  const o = trPack(trails, null, trails.n, (T, n) => new T(n), false, true), d = { soa: 1 };
+  for (const k in o) d[k] = ArrayBuffer.isView(o[k]) ? Array.from(o[k]) : o[k];
+  return [d];
+}
+function trLoad(d, byU) {
+  if (Array.isArray(d)) d = d.length === 1 && d[0] && d[0].soa ? d[0] : trFromRows(d, byU);
+  if (!d || typeof d !== 'object') { trCut(trails, 0); return; }
+  const o = Object.assign({}, d), num = v => typeof v === 'number' ? v : NaN;
+  o.ta = (d.ta || []).map(num);
+  for (const k of ['x', 'y', 'age', 'seed', 'vx', 'vy', 's1', 'c1', 's2', 'c2']) if (d[k]) o[k] = d[k].map(v => typeof v === 'number' ? v : 0);
+  trFill(trails, o);
+}
+function trFromRows(rows, byU) {
+  const P = [], o = { n: rows.length, a1: [], a2: [], fl: [], id: [], nx: [], nid: rows.length + 1 }, idOf = new Map(), p2Of = new Map();
+  const pt = q => { P.push(q || {}); return P.length - 1; };
+  rows.forEach((r, i) => { if (r && r.u_ != null) { idOf.set(r.u_, i + 1); if (byU) byU.set(r.u_, i + 1); } });
+  rows.forEach((r, i) => { const b = pt(r && r.p2); p2Of.set(i + 1, b); o.a2.push(b); });
+  const nxOf = r => r && r.next && r.next.ref != null ? idOf.get(r.next.ref) || 0 : 0, prevOf = new Map();
+  rows.forEach((r, i) => { const nx = nxOf(r); if (nx) prevOf.set(nx, i + 1); });
+  rows.forEach((r, i) => {
+    const pv = prevOf.get(i + 1);
+    o.a1.push(pv ? p2Of.get(pv) : pt(r && r.p1));
+    o.fl.push((r && r.root ? 1 : 0) | (r && r.thin ? 2 : 0)); o.id.push(i + 1); o.nx.push(nxOf(r));
+  });
+  const col = (k, d) => P.map(q => typeof q[k] === 'number' ? q[k] : d);
+  Object.assign(o, { np: P.length, x: col('x', 0), y: col('y', 0), vx: col('vx', 0), vy: col('vy', 0), age: col('age', 0), seed: col('seed', 0), la: P.map(q => q.launch ? 1 : 0),
+    s1: col('_s1', 0), c1: col('_c1', 0), s2: col('_s2', 0), c2: col('_c2', 0), ta: col('_ta', null) });
+  return o;
+}
+defTable('trails', () => TR_NO_ROWS, { net: false, save: trSave, load: trLoad, snapCols: (full, drawn, bufs) => trSnap(full, drawn, bufs), colsInto: C => trSnapInto(C) });
 // once per frame (not every physics step): the trail slowly spreads, rises a little and drifts
-const TRSX = [], TRSI = [], TRSC = [];
+const TRSX = [], TRSI = [], TRSC = []; let TRCELL = new Uint8Array(256);
 function stepTrails(dt) {
+  const S = trails, n = S.n;
+  if (!n) return;
+  const A1 = S.A1, A2 = S.A2, FL = S.FL, X = S.X, Y = S.Y, VX = S.VX, VY = S.VY, AGE = S.AGE, SEED = S.SEED, QS1 = S.QS1, QC1 = S.QC1, QS2 = S.QS2, QC2 = S.QC2, TA = S.TA;
   // the trail slowly spreads, rises a little and is carried off by the wind (each point by the wind at its own height)
   // (windAt's gust - the same for every point this step - worked out once: the same numbers, Oct 31)
   const WG = E.windU * (1 + 0.25 * Math.sin(time * 0.31) + 0.15 * Math.sin(time * 1.13 + 2));
@@ -28732,12 +28891,12 @@ function stepTrails(dt) {
   const c1 = Math.cos(dt * 0.4), s1 = Math.sin(dt * 0.4), c2 = Math.cos(dt * 0.3), s2 = Math.sin(dt * 0.3);
   const move = p => {
       let a, b;
-      if (p._ta === p.age) { const sa = p._s1 * c1 + p._c1 * s1, ca = p._c1 * c1 - p._s1 * s1, sb = p._s2 * c2 + p._c2 * s2, cb = p._c2 * c2 - p._s2 * s2; p._s1 = a = sa; p._c1 = ca; p._s2 = b = sb; p._c2 = cb; p.age += dt; }
-      else { p.age += dt; const t1 = p.age * 0.4 + p.seed, t2 = p.age * 0.3 + p.seed * 1.7; p._s1 = a = Math.sin(t1); p._c1 = Math.cos(t1); p._s2 = b = Math.sin(t2); p._c2 = Math.cos(t2); }
-      p._ta = p.age;
-      p.vx += (WG * (0.45 + 0.55 * clamp((WATER_Y - p.y) / 500, 0, 1.6)) * 0.7 + a * 2 - p.vx) * 0.5 * dt;
-      p.vy += (-1.6 + b * 1.2 - p.vy) * 0.5 * dt;
-      p.x += p.vx * dt; p.y += p.vy * dt;
+      if (TA[p] === AGE[p]) { const sa = QS1[p] * c1 + QC1[p] * s1, ca = QC1[p] * c1 - QS1[p] * s1, sb = QS2[p] * c2 + QC2[p] * s2, cb = QC2[p] * c2 - QS2[p] * s2; QS1[p] = a = sa; QC1[p] = ca; QS2[p] = b = sb; QC2[p] = cb; AGE[p] += dt; }
+      else { AGE[p] += dt; const t1 = AGE[p] * 0.4 + SEED[p], t2 = AGE[p] * 0.3 + SEED[p] * 1.7; QS1[p] = a = Math.sin(t1); QC1[p] = Math.cos(t1); QS2[p] = b = Math.sin(t2); QC2[p] = Math.cos(t2); }
+      TA[p] = AGE[p];
+      VX[p] += (WG * (0.45 + 0.55 * clamp((WATER_Y - Y[p]) / 500, 0, 1.6)) * 0.7 + a * 2 - VX[p]) * 0.5 * dt;
+      VY[p] += (-1.6 + b * 1.2 - VY[p]) * 0.5 * dt;
+      X[p] += VX[p] * dt; Y[p] += VY[p] * dt;
   };
   // a shell flying through an old trail punches through it: the smoke near its path is shoved aside and
   // dragged along a little, then settles back to drifting on the wind
@@ -28751,19 +28910,19 @@ function stepTrails(dt) {
   SX.length = SI.length; for (let j = 0; j < SI.length; j++) SX[j] = shells[SI[j]].x;
   const CAND = TRSC;
   const shove = q => {
-    if (q.age < 0.8) return;                                         // not the trail it's laying right now
-    const xa = q.x - R - 1, xb = q.x + R + 1;
+    if (AGE[q] < 0.8) return;                                        // not the trail it's laying right now
+    const qx = X[q], qy = Y[q], xa = qx - R - 1, xb = qx + R + 1;
     let lo = 0, hi = SX.length; while (lo < hi) { const m = (lo + hi) >> 1; if (SX[m] < xa) lo = m + 1; else hi = m; }
     CAND.length = 0; for (let j = lo; j < SX.length && SX[j] <= xb; j++) CAND.push(SI[j]);
     if (CAND.length > 1) CAND.sort((a, b) => a - b);
     for (let c = 0; c < CAND.length; c++) {
       const s = shells[CAND[c]];
-      const dx = q.x - s.x, dy = q.y - s.y;
+      const dx = qx - s.x, dy = qy - s.y;
       if (dx > R || dx < -R || dy > R || dy < -R) continue;
       const d = Math.hypot(dx, dy) || 1, f = 1 - d / R;
       if (f <= 0) continue;
       const sp = Math.hypot(s.vx, s.vy) || 1, nx = -s.vy / sp, ny = s.vx / sp, side = dx * nx + dy * ny >= 0 ? 1 : -1;
-      q.vx += (nx * side * 260 + s.vx * 0.5) * f * dt; q.vy += (ny * side * 260 + s.vy * 0.5) * f * dt;
+      VX[q] += (nx * side * 260 + s.vx * 0.5) * f * dt; VY[q] += (ny * side * 260 + s.vy * 0.5) * f * dt;
     }
   };
   // (user Oct 30, no cap on the trails: a piece only asks the shells if one is near it at all - the box round the shells
@@ -28772,14 +28931,31 @@ function stepTrails(dt) {
     let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
     for (const s of shells) if (!s.under) { if (s.x < bx0) bx0 = s.x; if (s.x > bx1) bx1 = s.x; if (s.y < by0) by0 = s.y; if (s.y > by1) by1 = s.y; }
     bx0 -= R; bx1 += R; by0 -= R; by1 += R;
-    const near = q => q.x >= bx0 && q.x <= bx1 && q.y >= by0 && q.y <= by1;
-    if (bx0 <= bx1) for (const t of trails) { if (near(t.p2)) shove(t.p2); if (t.root && near(t.p1)) shove(t.p1); }
+    // (Oct 31, the trails as flat arrays: and along the box, strips TRC wide marked where a shell is within reach - a strip either
+    // side to spare - so a point in a strip with none asks no shell at all: the same points shoved, by the same shells)
+    const TRC = 32, nc = Math.floor((bx1 - bx0) / TRC) + 1, cells = nc > 0 && nc < 1e6;
+    if (cells) {
+      if (TRCELL.length < nc) TRCELL = new Uint8Array(nc * 2);
+      const CL = TRCELL; CL.fill(0, 0, nc);
+      for (let j = 0; j < SX.length; j++) { const c0 = Math.max(0, Math.floor((SX[j] - R - 1 - bx0) / TRC) - 1), c1 = Math.min(nc - 1, Math.floor((SX[j] + R + 1 - bx0) / TRC) + 1); for (let c = c0; c <= c1; c++) CL[c] = 1; }
+    }
+    const CL = TRCELL;
+    const near = q => { const x = X[q], y = Y[q]; return x >= bx0 && x <= bx1 && y >= by0 && y <= by1 && (!cells || CL[Math.floor((x - bx0) / TRC)] === 1); };
+    if (bx0 <= bx1) for (let i = 0; i < n; i++) { const q2 = A2[i]; if (near(q2)) shove(q2); if (FL[i] & 1) { const q1 = A1[i]; if (near(q1)) shove(q1); } }
   }
-  for (let i = trails.length - 1; i >= 0; i--) {
-    const t = trails[i];
-    move(t.p2); if (t.root) move(t.p1);                   // every point once: a piece owns its far end, the first piece both
-    if (t.p1.age * (t.thin ? THIN_AGE : 1) > TRAIL_LIFE) { trails.splice(i, 1); if (t.next) t.next.root = true; }
+  // every point once: a piece owns its far end, the first piece of a trail (root) both; newest first, as the list was walked
+  // when a gone piece was cut out of it on the spot (a piece's p1 is the piece before's p2 - moved after the test below, then);
+  // a gone piece's next becomes the first (root). The gone ones are taken out after, in one pass, the rest in their order
+  let gone = 0;
+  for (let i = n - 1; i >= 0; i--) {
+    const f = FL[i];
+    move(A2[i]); if (f & 1) move(A1[i]);
+    if (AGE[A1[i]] * (f & 2 ? THIN_AGE : 1) > TRAIL_LIFE) {
+      FL[i] = f | 4; gone++;
+      const nx = S.NX[i]; if (nx) { const j = trFind(S, nx, i + 1); if (j >= 0) FL[j] |= 1; }
+    }
   }
+  if (gone) trSweep(S);
 }
 // How thick the trail is (world units, radius) at a given age: a thin line behind the shell that billows
 // out over the first few seconds and then keeps slowly spreading
