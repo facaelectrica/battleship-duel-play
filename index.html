@@ -4021,8 +4021,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 546;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 17:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 547;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 18:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14948,14 +14948,15 @@ window.__ntb = { snapshot: ntbSnapshot, apply: ntbApply, receive: ntbReceive, st
    - Drawing: per draw pass (0: renderObjects' 'state 2' loop - all of them; 1: renderLandObjects' - those on the land), per
      zoom, kept layers of 1024 x 512 world pixels painted by drawDebris itself, one per camera pixel parity (drawDebris puts
      its 2x2 blocks on the screen's even pixels). A newer piece is painted on top of the layer; a woken one marks it to be
-     painted again. Layers not shown for REST_FREE frames give their GPU memory back. The live way (the records in view in
+     painted again (the world tiles, 40-zzzz-world-tiles.js). Layers not shown for WT_FREE frames give their GPU memory back. The live way (the records in view in
      order, drawDebris each - the same loop as before) while zooming, without the GPU, with a piece the live loop culls
      reaching into the view, or a live one (on a deck) under a newer record. ?restlayer=0: always the live way. ---- */
-const REST_SW = 256, REST_TW = 1024, REST_TH = 512, REST_FREE = 600;
-const RST = { on: !/[?&]restlayer=0/.test(location.search), clock: 0, h: 0, loopI: -1,
+const REST_SW = 256, REST_TW = 1024, REST_TH = 512;
+const RST = { clock: 0, h: 0, loopI: -1,
   deb: new Map(),                      // (strip -> the records' numbers there, rising - Nov 1: the records themselves are restDeb's rows)
-  L: [{ sets: new Map(), last: [0, 0] }, { sets: new Map(), last: [0, 0] }],   // (the two passes' layers: zoom -> tiles)
   stats: { settle: 0, wake: 0, lay: 0, live: 0, paint: 0, add: 0, free: 0 } };
+// (the two passes' layers: world tiles, a canvas per camera pixel parity - 40-zzzz-world-tiles.js)
+RST.L = [0, 1].map(() => wtLayer(!/[?&]restlayer=0/.test(location.search), true, RST.stats));
 const restStrip = x => Math.floor(x / REST_SW);
 // the first index in a number-ordered list whose number is greater than n (no number yet: last of all) - the chunks
 function restAfter(arr, n) { let a = 0, b = arr.length; while (a < b) { const m = (a + b) >> 1, v = arr[m].n; if (v !== undefined && v <= n) a = m + 1; else b = m; } return a; }
@@ -15071,8 +15072,8 @@ const restInPassN = (p, n) => p === 0 || onLand(restDeb.c.x[restDeb.row(n)]);
 // the tiles of one pass at one zoom: 'tx,ty' -> { tx, ty, recs (numbers, rising), maxN, cv[4], k[4] painted, ep[4], seen }
 // (a column of tiles is made the first time it's asked for, from the records in its strips: a new zoom costs only what's in view)
 function restTilesFor(p, sv) {
-  const S = RST.L[p].sets; let T = S.get(sv);
-  if (!T) { T = new Map(); T.cols = new Set(); T.p = p; T.sv = sv; S.set(sv, T); }
+  const T = wtZoom(RST.L[p], sv);
+  if (!T.cols) { T.cols = new Set(); T.p = p; }
   return T;
 }
 function restCol(T, tx) {
@@ -15087,7 +15088,7 @@ function restTileAdd(T, n, sv, bulk, only) {
   for (let tx = Math.floor((b[0] - 1) / REST_TW), tx1 = Math.floor((b[2] - 1) / REST_TW); tx <= tx1; tx++)   // (a tile reaches a pixel further at parity 1)
     if (bulk ? tx === only : T.cols.has(tx)) for (let ty = Math.floor((b[1] - 1) / REST_TH), ty1 = Math.floor((b[3] - 1) / REST_TH); ty <= ty1; ty++) {
       const key = tx + ',' + ty; let t = T.get(key);
-      if (!t) T.set(key, t = { tx, ty, recs: [], maxN: -1, cv: [null, null, null, null], k: [0, 0, 0, 0], ep: [-1, -1, -1, -1], seen: 0 });
+      if (!t) T.set(key, t = wtTile(RST.L[T.p], { tx, ty, recs: [], maxN: -1, k: [0, 0, 0, 0], x: tx * REST_TW, y: ty * REST_TH, w: REST_TW, h: REST_TH }));
       if (bulk) { t.recs.push(n); continue; }
       if (n > t.maxN) { t.recs.push(n); t.maxN = n; }                                // (newer than all: painted on top when next shown)
       else { t.recs.splice(restAfterN(t.recs, n), 0, n); t.k.fill(-1); }           // (older than some: painted again)
@@ -15107,19 +15108,12 @@ function restLayersDrop(n) {
       }
   }
 }
-function restTileFree(t) { for (let i = 0; i < 4; i++) { if (t.cv[i] && t.cv[i].free) t.cv[i].free(); t.cv[i] = null; t.k[i] = 0; t.ep[i] = -1; } }
-function restLayersFree() { for (const P of RST.L) { for (const T of P.sets.values()) for (const t of T.values()) restTileFree(t); P.sets.clear(); } }
-// paint a tile's records from k on (all of them when k is -1) into its canvas for this camera parity
-function restTilePaint(t, ph, sv) {
-  let cv = t.cv[ph];
-  if (!cv) cv = t.cv[ph] = makeLayer(REST_TW, REST_TH);
-  const c = cv.getContext('2d'), s = { C, SV, CAMPX, TOPPX, fsLast };
-  let k = t.k[ph];
-  if (k < 0 || t.ep[ph] !== GLR.epoch || !cv.tex) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, REST_TW, REST_TH); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.imageSmoothingEnabled = false; k = 0; }
-  C = c; SV = sv; CAMPX = t.tx * REST_TW + (ph & 1); TOPPX = t.ty * REST_TH + (ph >> 1); fsLast = null;
-  try { debSel(); for (let i = k; i < t.recs.length; i++) debSelAdd(restDeb, restDeb.row(t.recs[i])); drawDebrisSel(-Infinity, Infinity); }
-  finally { C = s.C; SV = s.SV; CAMPX = s.CAMPX; TOPPX = s.TOPPX; fsLast = s.fsLast; }
-  t.k[ph] = t.recs.length; t.ep[ph] = GLR.epoch; RST.stats.paint += t.recs.length - k;
+function restLayersFree() { for (const L of RST.L) wtFreeAll(L); }
+// paint a tile's records from k on (all of them on a cleared canvas) for this camera parity
+function restTilePaint(t, ph, cleared) {
+  const k = cleared ? 0 : t.k[ph];
+  debSel(); for (let i = k; i < t.recs.length; i++) debSelAdd(restDeb, restDeb.row(t.recs[i])); drawDebrisSel(-Infinity, Infinity);
+  t.k[ph] = t.recs.length; RST.stats.paint += t.recs.length - k;
 }
 // a pass's records at rest, with the debris table's rows at rest (on a deck) - as the loop over the list drew them, by number
 function restDrawDebris(p, x0, x1) {
@@ -15136,11 +15130,9 @@ function restDrawDebris(p, x0, x1) {
 }
 const debDrawRows = (rows, x0, x1) => { debSel(); for (const i of rows) debSelAdd(debris, i); drawDebrisSel(x0, x1); };
 function restDrawLayers(p, x0, x1, live) {
-  const P = RST.L[p], held = P.last[viewIdx] === SV; P.last[viewIdx] = SV;   // (kept whichever way it draws: __game.restLayer flips it for one frame)
-  if (!RST.on || !GL_TEXFIX || !GLR.on || GLR.lost || !(C instanceof GLCtx) || C.globalAlpha !== 1 || C.globalCompositeOperation !== 'source-over') return false;
-  if (!held) return false;                                 // (zooming: the live way till the zoom holds)
+  const P = RST.L[p];
+  if (!wtReady(P)) return false;                           // (zooming: the live way till the zoom holds)
   if (!RST.deb.size) { debDrawRows(live, x0, x1); return true; }
-  if (P.sets.size >= 2 && !P.sets.has(SV)) for (const [k, T] of P.sets) if (k !== P.last[0] && k !== P.last[1]) { for (const t of T.values()) restTileFree(t); P.sets.delete(k); }   // (the two views' zooms kept)
   const T = restTilesFor(p, SV), D = debris.c;
   const L = CAMPX - SHX, R = CAMPX + VWP - SHX, Tp = TOPPX - SHY, B = TOPPX + bh - SHY;
   // a record the live loop culls (x more than 10 outside) reaching into the view: the live way this frame
@@ -15156,18 +15148,15 @@ function restDrawLayers(p, x0, x1, live) {
       for (const n of t.recs) if (n > dn && restInPassN(p, n)) { const b = restBoxN(n, SV); if (b[2] > q[0] && b[0] < q[2] && b[3] > q[1] && b[1] < q[3]) return false; }
     } }
   }
-  const ph = (((CAMPX % 2) + 2) % 2) | ((((TOPPX % 2) + 2) % 2) << 1), ox = ph & 1, oy = ph >> 1;
+  const ph = wtPh(P), ox = ph & 1, oy = ph >> 1;
   for (let tx = Math.floor((L - ox) / REST_TW), tx1 = Math.floor((R - 1 - ox) / REST_TW); tx <= tx1; tx++)
     for (let ty = (restCol(T, tx), Math.floor((Tp - oy) / REST_TH)), ty1 = Math.floor((B - 1 - oy) / REST_TH); ty <= ty1; ty++) {
       const t = T.get(tx + ',' + ty); if (!t || !t.recs.length) continue;
-      if (t.k[ph] !== t.recs.length || t.ep[ph] !== GLR.epoch || !t.cv[ph] || !t.cv[ph].tex) restTilePaint(t, ph, SV);
-      t.seen = REG.frame;
-      C.drawImage(t.cv[ph], tx * REST_TW + ox - CAMPX, ty * REST_TH + oy - TOPPX);
+      wtPut(P, t, ph, t.k[ph] !== t.recs.length, t.k[ph] < 0, restTilePaint);
     }
   debDrawRows(live, x0, x1);
   RST.stats.lay++;
-  // (tiles not shown for a while give their GPU memory back; their records stay)
-  if (REG.frame % 120 === 0) for (const T2 of P.sets.values()) for (const t of T2.values()) if (t.cv[0] || t.cv[1] || t.cv[2] || t.cv[3]) if (REG.frame - t.seen > REST_FREE) { restTileFree(t); RST.stats.free++; }
+  wtSweep(P);                                              // (tiles not shown for a while give their GPU memory back; their records stay)
   return true;
 }
 
@@ -20653,6 +20642,110 @@ function pxDraw(L, lo, hi) {
   gl.uniform1i(U.u_skip, skip);
   gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, cnt * L.per);
   GLR.stats.draws++; GLR.stats.quads += cnt * L.per;
+}
+
+/* ---- WORLD TILES (Nov 1, target architecture stage 4, "the static world as built layers"): the one kept-tile system the
+   world's still things are drawn from - the sea floor's boulders and corals (44-zz-reef-layer.js), its small rocks
+   (44-zz-rock-layer.js), the debris at rest (36-zzzz-settled.js). What it keeps for each of them:
+   - tiles of the world in world pixels at one zoom (a set per SV), each a kept texture painted by the layer's own drawing with
+     C, SV, CAMPX and TOPPX the tile's (so the same sums the live loop does give the same pixels, against the tile's corner),
+     laid on the screen as one quad at its whole-pixel place;
+   - a zoom held for a frame before its tiles are made (while zooming the live way draws), the two views' zooms kept and any
+     other dropped;
+   - painted again when the GL context is new (GLR.epoch), the texture is gone, or the layer says its content changed;
+   - optionally one canvas per camera pixel parity (a layer whose drawing puts blocks on the screen's even pixels);
+   - a tile not shown for WT_FREE frames gives its GPU memory back (painted again when next shown).
+   The layer decides what goes in a tile and when its own cull disagrees with the tiles (the live way that frame). ---- */
+const WT_FREE = 600;
+// a layer: on (its ?xxx=0 switch), par (true: a canvas per camera pixel parity), stats (where its counts go)
+function wtLayer(on, par, stats) { return { on, par: par ? 4 : 1, sets: new Map(), last: [0, 0], stats: stats || { lay: 0, live: 0, paint: 0, free: 0 } }; }
+// this view's zoom noted; true when the tiles may be laid: the zoom held since this view's last frame, and the world is drawn
+// plainly on the GPU (the sprites' texel choice fixed - GL_TEXFIX)
+function wtReady(L) {
+  const held = L.last[viewIdx] === SV; L.last[viewIdx] = SV;
+  return held && L.on && GL_TEXFIX && GLR.on && !GLR.lost && C instanceof GLCtx && C.globalAlpha === 1 && C.globalCompositeOperation === 'source-over';
+}
+// the tiles at this zoom (a Map the layer fills); a new zoom drops the ones neither view shows
+function wtZoom(L, sv) {
+  let T = L.sets.get(sv);
+  if (!T) {
+    if (L.sets.size >= 2) for (const [k, T2] of L.sets) if (k !== L.last[0] && k !== L.last[1]) { wtFreeSet(T2); L.sets.delete(k); }
+    T = new Map(); T.sv = sv; L.sets.set(sv, T);
+  }
+  return T;
+}
+// a tile: the layer's own record o, given its place and size in world pixels at its zoom (x, y, w, h)
+function wtTile(L, o) { o.cv = new Array(L.par).fill(null); o.ep = new Array(L.par).fill(-1); o.seen = 0; return o; }
+// this camera's pixel parity (0 for a layer without)
+const wtPh = L => L.par === 1 ? 0 : (((CAMPX % 2) + 2) % 2) | ((((TOPPX % 2) + 2) % 2) << 1);
+// lay tile t (parity ph); painted first when its canvas is missing, the wrong size, from an older GL context or without its
+// texture (cleared), or when dirty (cleared when full). paint(t, ph, cleared) draws with C, CAMPX, TOPPX the tile's (SV is
+// the tile's zoom: tiles are laid at the zoom they're made for)
+function wtPut(L, t, ph, dirty, full, paint) {
+  let cv = t.cv[ph];
+  if (cv && (cv.width !== t.w || cv.height !== t.h)) { if (cv.free) cv.free(); cv = t.cv[ph] = null; }
+  const fresh = !cv || t.ep[ph] !== GLR.epoch || !cv.tex;
+  if (fresh || dirty) {
+    if (!cv) cv = t.cv[ph] = makeLayer(t.w, t.h);
+    const c = cv.getContext('2d'), s = { C, SV, CAMPX, TOPPX, fsLast }, clear = fresh || full;
+    if (clear) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, t.w, t.h); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.imageSmoothingEnabled = false; }
+    C = c; CAMPX = t.x + (ph & 1); TOPPX = t.y + (ph >> 1); fsLast = null;
+    try { paint(t, ph, clear); }
+    finally { C = s.C; SV = s.SV; CAMPX = s.CAMPX; TOPPX = s.TOPPX; fsLast = s.fsLast; }
+    t.ep[ph] = GLR.epoch;
+  }
+  t.seen = REG.frame;
+  C.drawImage(cv, t.x + (ph & 1) - CAMPX, t.y + (ph >> 1) - TOPPX);
+}
+// after a frame's laying: every 120 frames, tiles not shown for WT_FREE frames give their GPU memory back
+function wtSweep(L) {
+  if (REG.frame % 120) return;
+  for (const T of L.sets.values()) for (const t of T.values()) if (t.cv.some(c => c) && REG.frame - t.seen > WT_FREE) { wtFreeTile(t); L.stats.free = (L.stats.free || 0) + 1; }
+}
+function wtFreeTile(t) { for (let i = 0; i < t.cv.length; i++) { if (t.cv[i] && t.cv[i].free) t.cv[i].free(); t.cv[i] = null; t.ep[i] = -1; } }
+function wtFreeSet(T) { for (const t of T.values()) wtFreeTile(t); }
+function wtFreeAll(L) { for (const T of L.sets.values()) wtFreeSet(T); L.sets.clear(); }
+/* ---- content checks (stage 4): a tile of things standing still (the reef's, the rocks') holds the items anchored in it - their
+   x's whole pixel at this zoom in [r * WT_RW, (r + 1) * WT_RW) - and is painted from a key: the numbers its drawing reads, in
+   order (each item's place, size, sprite, what grows on it, the floor's height under it). The keys of the tiles in view are
+   made each frame from the items themselves; a tile whose key differs from the one it was painted from is boxed and painted
+   again the same frame. Nothing marks a tile stale by hand, and no frame shows a stale one. The tiles are laid left to right:
+   their items come in the list's own (x) order, so overlapping neighbours draw over each other as the live loop did. ---- */
+const WT_RW = 1024;
+// a sprite's (a canvas's) number, the same while it's the same picture
+const WT_IDS = new WeakMap(); let wtIdN = 0;
+function wtId(o) { let n = WT_IDS.get(o); if (n === undefined) WT_IDS.set(o, n = ++wtIdN); return n; }
+// the layer's buckets for tiles r0..r1: { its, key }, emptied
+function wtBuckets(L, n) { const B = L.bk || (L.bk = []); for (let i = 0; i < n; i++) { const b = B[i] || (B[i] = { its: [], key: [] }); b.its.length = 0; b.key.length = 0; } return B; }
+// tile r from its bucket: null when nothing's anchored there; boxed again by box(t) (t.items set; box sets t.x0[], t.x1[] for
+// each item and t.x, t.y, t.w, t.h) and marked to be painted when its key differs
+function wtKeyed(L, T, r, b, box) {
+  if (!b.its.length) return null;
+  let t = T.get(r);
+  if (!t) T.set(r, t = wtTile(L, { r, items: null, key: null, dirty: true, x0: [], x1: [], x: 0, y: 0, w: 0, h: 0 }));
+  const k = t.key, q = b.key; let same = !!k && k.length === q.length;
+  for (let i = 0; same && i < q.length; i++) if (k[i] !== q[i]) same = false;
+  if (!same) { t.key = q.slice(); t.items = b.its.slice(); t.x0.length = t.x1.length = 0; box(t); t.dirty = true; }
+  return t;
+}
+// may tiles ts be laid for this view? not when one is too big for a texture, or holds an item the live loop culls (x outside
+// [cx0, cx1]) reaching into the view
+function wtFits(L, ts, cx0, cx1) {
+  const Lx = CAMPX - SHX, Rr = CAMPX + VWP - SHX, Tp = TOPPX - SHY, B = TOPPX + bh - SHY;
+  for (const t of ts) {
+    if (t.y + t.h <= Tp || t.y >= B || t.x + t.w <= Lx || t.x >= Rr) continue;
+    if (t.h > 2048 || t.w > 4096) return false;
+    for (let i = 0; i < t.items.length; i++) { const x = t.items[i].x; if ((x < cx0 || x > cx1) && t.x1[i] > Lx && t.x0[i] < Rr) return false; }
+  }
+  return true;
+}
+// lay them (those reaching into the view), each painted first if its key changed
+function wtLayKeyed(L, ts, paint) {
+  const Lx = CAMPX - SHX, Rr = CAMPX + VWP - SHX, Tp = TOPPX - SHY, B = TOPPX + bh - SHY;
+  for (const t of ts) {
+    if (t.y + t.h <= Tp || t.y >= B || t.x + t.w <= Lx || t.x >= Rr) continue;
+    wtPut(L, t, 0, t.dirty, true, paint); t.dirty = false;
+  }
 }
 
 /* ================================================================
@@ -27804,84 +27897,87 @@ function bdcDrop(c) {
   const L = SHX + 8, n = VWP + L + 16;
   if (!B || B.t !== renderTick || B.cx !== CAMPX || B.sv !== SV || B.pb !== PB || B.n !== n || B.l !== L) {
     B = BDC[viewIdx] = B && B.v.length >= n ? B : { v: new Int32Array(n + 64), has: new Uint8Array(n + 64) };
-    B.t = renderTick; B.cx = CAMPX; B.sv = SV; B.pb = PB; B.n = n; B.l = L; B.has.fill(0); B.ver = (B.ver || 0) + 1;
+    B.t = renderTick; B.cx = CAMPX; B.sv = SV; B.pb = PB; B.n = n; B.l = L; B.has.fill(0);
   }
   const i = c + L;
   if (i !== (i | 0) || i < 0 || i >= n) return Math.round(bedDrop((c + CAMPX) / SV) * SV / PB) * PB;
   if (B.has[i]) return B.v[i];
   const v = Math.round(bedDrop((c + CAMPX) / SV) * SV / PB) * PB; B.v[i] = v; B.has[i] = 1; return v;
 }
-// (Oct 31) the next screen column, a whole number of PB on from c, where the floor's drop changes (bdcDrop's) - worked out once a
-// view a frame from right to left, so a tile's run of one drop is found in a step, not a column at a time by every layer
-function bdcNext(c) {
-  bdcDrop(c);
-  const B = BDC[viewIdx], n = B.n, L = B.l;
-  if (B.nxV !== B.ver) {
-    if (!B.nx || B.nx.length < n) B.nx = new Int32Array(B.v.length);
-    const nx = B.nx;
-    for (let i = n - 1; i >= 0; i--) { const j = i + PB; nx[i] = j >= n ? n : bdcDrop(j - L) !== bdcDrop(i - L) ? j : nx[j]; }
-    B.nxV = B.ver;
-  }
-  const i = c + L;
-  return i >= 0 && i < n && i === (i | 0) ? B.nx[i] - L : null;
-}
 const TILEP = [{ src: null, T: null, G: null, W: 0, H: 0 }, { src: null, T: null, G: null, W: 0, H: 0 }];
+// (Nov 1) a row's numbers this frame (drawTiles), for tileRow: the two pictures and their GL images, the tile's width and its step
+// in the world, the parallax offset, wl (locked to the world, p 1: its pixels are the world's, before the camera), fo (the row's
+// fractional origin: the float camera for a row at its own parallax), Y (its top, the world's whole pixel), the fill
+const TROW = { a: null, b: null, Pa: null, Pb: null, tileW: 0, step: 0, off: 0, wl: false, fo: 0, Y: 0, fill: null, gap: 0 };
 function drawTiles(im, imFlip, p, topW, k, fill, gap = 0) {
   const y = PY(topW);
   if (y > bh + 4) return y;
   // the tile is redrawn at a scale rounded to 1/40ths: a fresh high-quality resample every frame while zooming
   // was the single biggest cost; each tile is still stretched to its exact width below
   const kq = Math.round(k * SV * 40) / 40, a = drawSprite(im, kq), b = drawSprite(imFlip, kq);
+  // (Nov 1: each piece through GLCtx's own quad maths - glImageRect - with the two pictures looked up once a call, not a drawImage
+  // a piece; WebGL only, as the pixel layers - 40-zzzz-layers.js. The fill's colour set once, before its first rectangle)
+  if (!(C instanceof GLCtx) || GLR.lost) return y + a.height;
   // the tile's true width in the world; its scaled copy is a whole number of pixels, so each tile is
   // placed from its own exact world position (rounding the scaled width and multiplying it by the tile
   // index made the whole seabed slide by many pixels every time the zoom changed)
-  const tileW = im.width * k, step = tileW * (1 + gap);       // (step: a tile and the room after it - the BG tab's GAP)
-  const off = parRef * (1 - p), vl = CAMPX / SV;
-  const i0 = Math.floor((vl - off) / step) - 1, i1 = Math.ceil((vl + VWW - off) / step);
-  const sx = i => Math.round((i * step + off) * SV - CAMF);
+  const R = TROW;
+  R.a = a; R.b = b; R.Pa = glImageOf(a.big ? a.src : a, TILEP[0]); R.Pb = glImageOf(b.big ? b.src : b, TILEP[1]);
+  R.tileW = im.width * k; R.step = R.tileW * (1 + gap);       // (step: a tile and the room after it - the BG tab's GAP)
+  R.off = parRef * (1 - p); R.wl = p === 1; R.fo = R.wl ? 0 : CAMF; R.Y = y + TOPPX; R.fill = fill; R.gap = gap;
   // (a layer locked to the world, p 1, follows the near floor exactly; one at its own parallax rests on the floor's smooth
   // slope - the zigzag is the near floor's, and a picture sliding over it was reshaped as it went: user Oct 27)
   // (user Oct 30: the layers behind - reef strips, the sea bed's back row - are distant layers like the mountains: "They should never
   // slide along the curvature of the ground plane ... not following the contour of the land". One at its own parallax (p < 1)
   // keeps its own fixed line; only the floor itself, locked to the world (p 1), follows the floor's shape)
-  const dep = p === 1 ? bedDrop : () => 0;
-  // (Oct 31, 60-fps chat: the floor's drop at a screen column is the same for every layer locked to it this frame - the floor,
-  // its skins, the sand's rows - kept a column at a time (BDC, this view's, this frame): bedDrop's zigzag hashes were
-  // asked ~10,000 times a frame. The same answers)
-  const Bt = bh - SHY + 2, dropAt = p === 1 ? bdcDrop : c => Math.round(dep((c + CAMPX) / SV) * SV / PB) * PB;
-  // (Nov 1: each piece through GLCtx's own quad maths - glImageRect - with the two pictures looked up once a call, not a drawImage
-  // a piece; WebGL only, as the pixel layers - 40-zzzz-layers.js. The fill's colour set once, before its first rectangle)
-  if (!(C instanceof GLCtx) || GLR.lost) return y + a.height;
-  const m = C.s.m, Pa = glImageOf(a.big ? a.src : a, TILEP[0]), Pb = glImageOf(b.big ? b.src : b, TILEP[1]);
+  // (Oct 31, 60-fps chat: the floor's drop at a screen column is the same for every layer locked to it this frame - kept a column at
+  // a time, BDC, this view's, this frame: bedDrop's zigzag hashes were asked ~10,000 times a frame. The same answers)
+  // (a row locked to the world: from its world tiles once the zoom holds - 44-zz-floor-layer.js)
+  if (R.wl && floorLayerDraw(im, R)) return y + a.height;
+  const io = R.wl ? CAMPX : 0;
+  tileRow(R, io - SHX - 4, io + VWP + 4, TOPPX + bh - SHY + 2, R.wl ? wx => bdcDrop(wx - CAMPX) : null);
+  return y + a.height;
+}
+// the row's tiles over its own pixels c0..c1 (the world's for a row locked to it), drawn on C against CAMPX and TOPPX, the fill
+// down to bot (the world's pixel). drop: the floor's drop at a pixel of the row (whole PB), null for a row at its own parallax
+// (asked with a second argument for a tile's ends and middle). rec: nothing drawn - each piece's box given to rec(x, y, w, h) in
+// the row's pixels (the world tiles' measure of a column: 44-zz-floor-layer.js).
+// (Nov 1, the floor as world tiles: a tile's steps down the floor's drop on a grid of PB from the tile's own left edge, the whole
+// tile walked from there - not from the view's edge - so what a tile shows doesn't depend on where the camera is or how it shakes)
+function tileRow(R, c0, c1, bot, drop, rec) {
+  const { a, b, Pa, Pb, tileW, step, off, fo, Y, fill, gap } = R, io = R.wl ? CAMPX : 0, y = Y - TOPPX, m = C.s.m;
+  const i0 = Math.floor(((c0 + fo) / SV - off) / step) - 1, i1 = Math.ceil(((c1 + fo) / SV - off) / step);
+  // (a row locked to the world, p 1, at the world's whole pixels - the tile's left edge rounded in the world, the camera's whole
+  // pixel taken off, as everything standing on the floor is (PX); one at its own parallax slides with the camera's own fraction)
+  const sx = i => Math.round((i * step + off) * SV - fo);
   let fs = false;
   const fillR = (x, y, w, h) => { if (!fs) { C.fillStyle = fill; fs = true; } C.fillRect(x, y, w, h); };
   for (let i = i0; i <= i1; i++) {
-    const x = sx(i), w = (gap ? Math.round((i * step + tileW + off) * SV - CAMF) : sx(i + 1)) - x, sp = (i & 1) ? b : a, S = sp.big ? sp.src : sp, H = sp.height, P = (i & 1) ? Pb : Pa;
-    if (w <= 0 || x + w < -SHX - 4 || x > VWP + 4) continue;
-    const xa = Math.max(x, -SHX - 4), xb = Math.min(x + w, VWP + 4);
-    // (opt-algae: each column's depth asked once - its first column's was asked twice, and the column a run stops at twice, once
-    // ending the run and again starting the next; the last one, past the tile's end, for nothing. The same answers)
-    const da = dropAt(xa);
-    if (da === 0 && dropAt(xb) === 0 && dropAt((xa + xb) / 2) === 0) {
+    const x = sx(i), w = (gap ? Math.round((i * step + tileW + off) * SV - fo) : sx(i + 1)) - x, sp = (i & 1) ? b : a, S = sp.big ? sp.src : sp, H = sp.height, P = (i & 1) ? Pb : Pa;
+    if (w <= 0 || x + w < c0 || x > c1) continue;
+    const xb = x + w, d0 = drop ? drop(x, 1) : 0;
+    if (!drop || (d0 === 0 && drop(xb, 1) === 0 && drop((x + xb) / 2, 1) === 0)) {
       // at harbour depth: the tile in one piece, as it always was
-      if (P) { if (sp.big) glImageRect(C, m, P, false, 0, 0, P.W, P.H, x, y, w, H); else glImageRect(C, m, P, true, 0, 0, sp.width, H, x, y, w, H); }
-      if (fill) fillR(x, y + H - 1, w, Bt - y - H + 1);
+      if (rec) { rec(x, Y, w, H); continue; }
+      if (P) { if (sp.big) glImageRect(C, m, P, false, 0, 0, P.W, P.H, x - io, y, w, H); else glImageRect(C, m, P, true, 0, 0, sp.width, H, x - io, y, w, H); }
+      if (fill) fillR(x - io, y + H - 1, w, bot - Y - H + 1);
       continue;
     }
+    // (opt-algae: each grid column's depth asked once, the one a run stops at starting the next. The same answers)
     const kx = S.width / w;
-    let c = xa, d = da;
-    while (c < xb) {
-      let e = c + PB, de = 0, hit = false;
-      const nxt = p === 1 ? bdcNext(c) : null;
-      if (nxt !== null) { if (nxt < xb) { e = nxt; de = dropAt(e); hit = true; } else e = xb; }
-      else { while (e < xb) { de = dropAt(e); if (de !== d) { hit = true; break; } e += PB; } e = Math.min(e, xb); }
-      if (P) glImageRect(C, m, P, true, (c - x) * kx, 0, (e - c) * kx, S.height, c, y + d, e - c, H);
-      if (fill) fillR(c, y + d + H - 1, e - c, Bt - y - d - H + 1);
-      if (!hit) break;                                       // (the run reached the tile's end)
+    for (let c = x, d = d0; c < c1;) {
+      let e = c + PB, de = d;
+      while (e < xb && (de = drop(e)) === d) e += PB;
+      if (e > xb) e = xb;
+      if (e > c0 && rec) rec(c, Y + d, e - c, H);
+      else if (e > c0) {
+        if (P) glImageRect(C, m, P, true, (c - x) * kx, 0, (e - c) * kx, S.height, c - io, y + d, e - c, H);
+        if (fill) fillR(c - io, y + d + H - 1, e - c, bot - Y - d - H + 1);
+      }
+      if (e >= xb) break;                                    // (the run reached the tile's end)
       c = e; d = de;
     }
   }
-  return y + a.height;
 }
 
 // A seabed rock: a lumpy mound, lit on top and on the side facing the light, darker underneath - each rectangle (in world units,
@@ -28321,17 +28417,21 @@ function drawReefItems(list, x0, x1, lkOnly) {
   const ga = C.globalAlpha;
   for (const it of list) {
     if (it.x < x0 - 120 || it.x > x1 + 120 || !it.lk !== !lkOnly) continue;
-    const k = REEF_K * SV * (it.s || 1), w = Math.max(1, Math.round(it.sp.width * k)), h = Math.max(1, Math.round(it.sp.height * k));
-    const base = seabedY(it.x) + (it.sink || 0), X = Math.round(PX(it.x) - w / 2), Y = Math.round(PY(base) - h);
-    C.drawImage(it.sp, X, Y, w, h);
-    // what grows on a rock: standing on its top at its own column, a little sunk into it
-    if (it.deco) for (const g of it.deco) {
-      const kk = REEF_K * SV * g.s, gw = Math.max(1, Math.round(g.sp.width * kk)), gh = Math.max(1, Math.round(g.sp.height * kk));
-      const gx = X + Math.round((g.c + 0.5) * k), gy = Y + Math.round((it.top[g.c] + 1.5) * k);
-      C.drawImage(g.sp, gx - (gw >> 1), gy - gh, gw, gh);
-    }
+    drawReefItem(it);
   }
   C.globalAlpha = ga;
+}
+// one item at its whole pixels (the world's camera, or a kept tile's corner - 40-zzzz-world-tiles.js)
+function drawReefItem(it) {
+  const k = REEF_K * SV * (it.s || 1), w = Math.max(1, Math.round(it.sp.width * k)), h = Math.max(1, Math.round(it.sp.height * k));
+  const base = seabedY(it.x) + (it.sink || 0), X = Math.round(PX(it.x) - w / 2), Y = Math.round(PY(base) - h);
+  C.drawImage(it.sp, X, Y, w, h);
+  // what grows on a rock: standing on its top at its own column, a little sunk into it
+  if (it.deco) for (const g of it.deco) {
+    const kk = REEF_K * SV * g.s, gw = Math.max(1, Math.round(g.sp.width * kk)), gh = Math.max(1, Math.round(g.sp.height * kk));
+    const gx = X + Math.round((g.c + 0.5) * k), gy = Y + Math.round((it.top[g.c] + 1.5) * k);
+    C.drawImage(g.sp, gx - (gw >> 1), gy - gh, gw, gh);
+  }
 }
 /* ---- what grows on the bottom reacts to whatever touches it (user Oct 27: "lets have the sub being also able to destroy
    the corals. The seaweed when destroyed should be 'floaty' as it falls to the ground, not stiff. While the coral breaks
@@ -28394,17 +28494,15 @@ function seabedHit(x, hl, power, vx = 0, cutY, blast) {
       if (!near(B)) continue;
       const st = breakCoral(it.sp, B, cutY === undefined || blast ? B.base : cutY, vx, blast && blast.x, blast && blast.y, kick);
       if (st) it.sp = st; else list.splice(i, 1);
-      REEF_GEN++;                                                 // (the reef's kept layers painted again - 44-zz-reef-layer.js)
     } else if (it.deco) for (let j = it.deco.length - 1; j >= 0; j--) {
       const g = it.deco[j], B = coralBox(it, g);
       if (!near(B)) continue;
       if (g.weed) {                                                   // (weed on a rock: torn off, a floaty piece)
         weedBit({ x: B.left + B.w / 2, kind: 'weed', n: 3, ph: j }, B.base, B.h * (cutY === undefined || blast ? 1 : clamp((B.base - cutY) / B.h, 0, 1)), vx, kick);
-        it.deco.splice(j, 1); REEF_GEN++; continue;
+        it.deco.splice(j, 1); continue;
       }
       const st = breakCoral(g.sp, B, cutY === undefined || blast ? B.base : cutY, vx, blast && blast.x, blast && blast.y, kick);
       if (st) g.sp = st; else it.deco.splice(j, 1);
-      REEF_GEN++;
     }
   }
   // the weed and kelp: torn off at the cut (or near the sand under what landed on it, or in the blast's reach) - floaty
@@ -28740,13 +28838,111 @@ function drawAbyss() {
   C.imageSmoothingEnabled = sm;
 }
 
+/* ---- the floor's tile rows as world tiles (Nov 1, target architecture stage 4): the near floor's row of sand (drawTiles with
+   img.seabed) and the black rocks in front (drawFgRocks) - rows locked to the world, p 1 - never move between frames: each tile
+   at its world whole pixel, its steps down the floor's drop on a grid from its own left edge (tileRow, 44-shadows-seafloor.js).
+   So they are painted into the world tiles (40-zzzz-world-tiles.js): a set per zoom, a column of tiles WT_RW world pixels wide
+   at a time, made the first time it's in view once the zoom has held for a frame (while zooming the live way draws), each laid
+   as one quad at its whole-pixel place with the camera (and its shake). A tile is painted by tileRow itself, against the tile's
+   corner - one path.
+   What a column shows is checked each frame against what it was painted from (nothing marks it stale by hand):
+   - the row's own numbers (its pictures, their size, the tile's step, its top, its fill) - another and every tile of the row is
+     painted again;
+   - the floor's drop at every grid column the painting asked for that the view shows (and two to its left: the grid step a
+     visible column's run starts from), and at each tile's ends and middle (the "in one piece at harbour depth" test) - another
+     and that column is painted again, the same frame.
+   The fill below the tiles' lowest pixel down to the view's bottom is a plain rectangle a column, drawn after them as it was.
+   ?floorlayer=0 turns it off. ---- */
+const FLT = { on: !/[?&]floorlayer=0/.test(location.search), TH: 512, rows: new Map(), stats: { lay: 0, live: 0, paint: 0, cols: 0, free: 0 } };   // (rows: the row's picture -> its world-tile layer)
+// the floor's drop at a world pixel (whole PB): bdcDrop's sums without the view's kept columns
+const bedDropPx = wx => Math.round(bedDrop(wx / SV) * SV / PB) * PB;
+// the row's own numbers its tiles are painted from (the floor's drop is checked column by column)
+function floorRowKey(q, R) {
+  q.length = 0;
+  q.push(SV, PB, R.tileW, R.step, R.off, R.Y, R.fill, R.gap);
+  for (const [sp, P] of [[R.a, R.Pa], [R.b, R.Pb]]) {        // (a picture: its size at this zoom, what it's drawn from - its stamp, its stand-ins)
+    q.push(sp.big ? 1 : 0, sp.width, sp.height);
+    if (P) q.push(wtId(P.src), P.src._stamp, P.T ? wtId(P.T) : 0, P.G ? wtId(P.G) : 0, P.W, P.H); else q.push(0);
+  }
+  return q;
+}
+// column tx of the row: tileRow walked over it to measure (nothing drawn) - the pieces' rows and the fill's columns - with each
+// drop it asks for kept: dr / has for the grid columns tx * WT_RW - 2 .. (tx + 1) * WT_RW, samp for the tiles' ends and middles
+function floorColBuild(R, tx) {
+  const RW = WT_RW, base = tx * RW - 2;
+  const K = { tx, y0: 1e9, y1: -1e9, dr: new Int32Array(RW + 2), has: new Uint8Array(RW + 2), samp: [], spans: [] };
+  const drop = (wx, s) => {
+    const v = bedDropPx(wx);
+    if (s) K.samp.push(wx, v); else { const i = wx - base; if (i >= 0 && i < RW + 2) { K.dr[i] = v; K.has[i] = 1; } }
+    return v;
+  };
+  const rec = (x, top, w, h) => {
+    if (top < K.y0) K.y0 = top; if (top + h > K.y1) K.y1 = top + h;
+    if (!R.fill) return;
+    const a = Math.max(x, tx * RW), b = Math.min(x + w, (tx + 1) * RW), S = K.spans;
+    if (b <= a) return;
+    if (S.length && S[S.length - 1] === a) S[S.length - 1] = b; else S.push(a, b);
+  };
+  tileRow(R, tx * RW, (tx + 1) * RW, 0, drop, rec);
+  FLT.stats.cols++;
+  return K;
+}
+// is column K as it was painted, for the world columns a..b the view shows?
+function floorColSame(K, a, b) {
+  const base = K.tx * WT_RW - 2;
+  for (let wx = Math.max(a, base), e = Math.min(b, base + WT_RW + 2); wx < e; wx++) { const i = wx - base; if (K.has[i] && bdcDrop(wx - CAMPX) !== K.dr[i]) return false; }
+  for (let i = 0; i < K.samp.length; i += 2) if (bedDropPx(K.samp[i]) !== K.samp[i + 1]) return false;
+  return true;
+}
+// (a tile painted by tileRow itself, C, CAMPX and TOPPX the tile's: the fill down to the column's lowest pixel)
+const FLP = { R: null, K: null };
+const floorTilePaint = t => { tileRow(FLP.R, t.x, t.x + t.w, FLP.K.y1, bedDropPx); FLT.stats.paint++; };
+const FLT_KEY = [];
+// true: row R drawn from its world tiles; false: the caller draws the live way
+function floorLayerDraw(im, R) {
+  let L = FLT.rows.get(im); if (!L) FLT.rows.set(im, L = wtLayer(FLT.on, false, FLT.stats));
+  L.seenF = REG.frame;
+  if (REG.frame % 120 === 0) for (const [k, L2] of FLT.rows) if (REG.frame - L2.seenF > WT_FREE) { wtFreeAll(L2); FLT.rows.delete(k); }   // (a row no longer drawn: the black rocks' strip made again)
+  if (!wtReady(L)) { FLT.stats.live++; return false; }     // (zooming: a new SV each frame - the live way till it holds)
+  const q = floorRowKey(FLT_KEY, R), k = L.key;
+  let same = !!k && k.length === q.length;
+  for (let i = 0; same && i < q.length; i++) if (k[i] !== q[i] && !(k[i] !== k[i] && q[i] !== q[i])) same = false;
+  if (!same) { wtFreeAll(L); L.key = q.slice(); }
+  const T = wtZoom(L, SV), cols = T.cols || (T.cols = new Map()), RW = WT_RW, TH = FLT.TH;
+  const Lx = CAMPX - SHX, Rr = CAMPX + VWP - SHX, Tp = TOPPX - SHY, B = TOPPX + bh - SHY, bot = TOPPX + bh - SHY + 2;
+  FLP.R = R;
+  if (R.fill) C.fillStyle = R.fill;                         // (the fill style as the live way leaves it)
+  for (let tx = Math.floor(Lx / RW), tx1 = Math.floor((Rr - 1) / RW); tx <= tx1; tx++) {
+    let K = cols.get(tx);
+    if (!K || !floorColSame(K, Lx - 2, Rr)) cols.set(tx, K = floorColBuild(R, tx));
+    FLP.K = K;
+    for (let ty = Math.floor(Math.max(K.y0, Tp) / TH), ty1 = Math.floor((Math.min(K.y1, B) - 1) / TH); ty <= ty1; ty++) {
+      const id = tx + ',' + ty;
+      let t = T.get(id);
+      if (!t) T.set(id, t = wtTile(L, { x: tx * RW, y: ty * TH, w: RW, h: TH, K: null }));
+      wtPut(L, t, 0, t.K !== K, true, floorTilePaint); t.K = K;
+    }
+    // (below the column's lowest pixel: the fill, down to the view's bottom)
+    if (K.y1 < bot) for (let i = 0; i < K.spans.length; i += 2) {
+      const a = Math.max(K.spans[i], Lx - 4), b = Math.min(K.spans[i + 1], Rr + 4);
+      if (b > a) C.fillRect(a - CAMPX, K.y1 - TOPPX, b - a, bot - K.y1);
+    }
+  }
+  FLP.R = FLP.K = null;
+  wtSweep(L);
+  FLT.stats.lay++;
+  return true;
+}
+window.__floorStats = () => FLT.stats;   // (for the tests: how often the floor's rows were laid, drawn the live way, painted)
+
 /* ---- engine stage 6, kept layers (Oct 30): the sea floor's boulders, corals and sponges (drawReefItems) never move between
    frames - each one stands at its own whole world pixel (PX, PY: the world rounded, then the camera's whole pixel taken off).
    So they are painted once, per region of the world 1024 pixels wide at this zoom, into a kept texture, and each region is
    laid on the screen as one quad at its whole-pixel place: the same pixels the live loop drew, a handful of draws instead of
-   hundreds. A region is painted again when what it shows changes: the zoom (a new SV, once it has held for a frame - while
-   zooming the live loop draws), the list (a coral broken - seabedHit -, a lake's reef built), the floor's shape, the GL
-   context lost. ?reeflayer=0 turns it off; so does ?texfix=0 (it needs the texel choice below fixed).
+   hundreds. (Nov 1, stage 4: the world tiles, 40-zzzz-world-tiles.js) A tile holds the items anchored in it and is painted again when
+   its content key differs - each item's x, size, sprite, sink, what grows on it and the floor's height under it, made each
+   frame for the tiles in view (a coral broken, a lake's reef built, the floor reshaped: that frame) -, at a new zoom (once it
+   has held for a frame - while zooming the live loop draws) and when the GL context is new. ?reeflayer=0 turns it off; so does ?texfix=0 (it needs the texel choice below fixed).
    (Oct 30, the user's GPU - GTX 1660 Super: not exact - battle 84 px, max 105, all at sprite edges in the floor's band; SwiftShader
    0 px. A sprite drawn scaled with NEAREST picks its texel from the interpolated texture coordinate: where a pixel's centre falls
    exactly on a texel edge (common at rational scales), which texel wins depends on float rounding of the vertex positions, and
@@ -28754,167 +28950,108 @@ function drawAbyss() {
    the sprite shader's texel choice from the pixel's place relative to the sprite's own corner - GL_TEXFIX, 40-gl.js - so on again)
    Exact only where the live loop's cull (it.x within 120 world units of the view) and the layer agree: a frame with an item
    culled by the loop but reaching into the view is drawn the live way. */
-let REEF_GEN = 0;
-const RLY = { on: GL_TEXFIX && !/[?&]reeflayer=0/.test(location.search), RW: 1024, map: new Map(), last: new Map(), stats: { lay: 0, live: 0, paint: 0 } };
-function reefLayerSig(list) {
-  return [list, list.length, REEF_GEN, rockForms, rockForms.length, floorTab, floorTabS, DOCK_PADS, KR_PAD, COAST_RAMP, pirateWrecks.length, BED_A, BED_B, BED_EXTRA, BED_SHELF, FLOOR_HILLY, SEABED_Y, OWM, GLR.epoch];
+const RLY = { on: !/[?&]reeflayer=0/.test(location.search), map: new Map(), stats: { lay: 0, live: 0, paint: 0, free: 0 } };   // (map: list -> its world-tile layer)
+// an item's key: what drawReefItem reads (its floor height asked now)
+function reefKey(q, it) {
+  q.push(it.x, it.s || 1, seabedY(it.x) + (it.sink || 0), wtId(it.sp), it.deco ? it.deco.length : 0);
+  if (it.deco) for (const g of it.deco) q.push(g.c, g.s, wtId(g.sp), it.top[g.c]);
 }
-const sigEq = (a, b) => { if (!a || a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && !(a[i] !== a[i] && b[i] !== b[i])) return false; return true; };
-// every item's box at this zoom, in world pixels (the screen's, before the camera), grouped by region
-function reefLayerIndex(list, sv) {
-  const SV0 = SV; SV = sv;
-  const regs = new Map(), RW = RLY.RW, ck = regs.ck = { its: [], base: [], i: 0 };
-  try {
-    for (const it of list) {
-      if (it.lk) continue;
-      const k = REEF_K * SV * (it.s || 1), w = Math.max(1, Math.round(it.sp.width * k)), h = Math.max(1, Math.round(it.sp.height * k));
-      const base = seabedY(it.x) + (it.sink || 0), X = Math.round(Math.round(it.x * SV) - w / 2), Y = Math.round(Math.round(base * SV) - h);
-      ck.its.push(it); ck.base.push(base);
-      let x0 = X, x1 = X + w, y0 = Y, y1 = Y + h;
-      if (it.deco) for (const g of it.deco) {
-        const kk = REEF_K * SV * g.s, gw = Math.max(1, Math.round(g.sp.width * kk)), gh = Math.max(1, Math.round(g.sp.height * kk));
-        const gx = X + Math.round((g.c + 0.5) * k) - (gw >> 1), gy = Y + Math.round((it.top[g.c] + 1.5) * k) - gh;
-        x0 = Math.min(x0, gx); x1 = Math.max(x1, gx + gw); y0 = Math.min(y0, gy); y1 = Math.max(y1, gy + gh);
-      }
-      for (let r = Math.floor(x0 / RW), r1 = Math.floor((x1 - 1) / RW); r <= r1; r++) {
-        let R = regs.get(r);
-        if (!R) regs.set(r, R = { r, items: [], x0: [], x1: [], wx: [], y0: 1e9, y1: -1e9, cv: null });
-        R.items.push(it); R.x0.push(x0); R.x1.push(x1); R.wx.push(it.x);
-        if (y0 < R.y0) R.y0 = y0; if (y1 > R.y1) R.y1 = y1;
-      }
+// a tile's items' boxes at this zoom in world pixels (the screen's, before the camera): drawReefItem's sums
+function reefBox(t) {
+  let X0 = 1e9, X1 = -1e9, Y0 = 1e9, Y1 = -1e9;
+  for (const it of t.items) {
+    const k = REEF_K * SV * (it.s || 1), w = Math.max(1, Math.round(it.sp.width * k)), h = Math.max(1, Math.round(it.sp.height * k));
+    const base = seabedY(it.x) + (it.sink || 0), X = Math.round(Math.round(it.x * SV) - w / 2), Y = Math.round(Math.round(base * SV) - h);
+    let x0 = X, x1 = X + w, y0 = Y, y1 = Y + h;
+    if (it.deco) for (const g of it.deco) {
+      const kk = REEF_K * SV * g.s, gw = Math.max(1, Math.round(g.sp.width * kk)), gh = Math.max(1, Math.round(g.sp.height * kk));
+      const gx = X + Math.round((g.c + 0.5) * k) - (gw >> 1), gy = Y + Math.round((it.top[g.c] + 1.5) * k) - gh;
+      x0 = Math.min(x0, gx); x1 = Math.max(x1, gx + gw); y0 = Math.min(y0, gy); y1 = Math.max(y1, gy + gh);
     }
-  } finally { SV = SV0; }
-  return regs;
+    t.x0.push(x0); t.x1.push(x1);
+    X0 = Math.min(X0, x0); X1 = Math.max(X1, x1); Y0 = Math.min(Y0, y0); Y1 = Math.max(Y1, y1);
+  }
+  t.x = X0; t.w = X1 - X0; t.y = Y0; t.h = Y1 - Y0;
 }
-function reefLayerPaint(R, sv) {
-  const w = RLY.RW, h = R.y1 - R.y0;
-  if (!R.cv) R.cv = makeLayer(w, h);
-  const c = R.cv.getContext('2d'), C0 = C, SV0 = SV;
-  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.imageSmoothingEnabled = false;
-  const ox = R.r * w, oy = R.y0;
-  SV = sv;
-  try {
-    // the live loop's own sums, against the region's corner instead of the camera's
-    for (const it of R.items) {
-      const k = REEF_K * SV * (it.s || 1), iw = Math.max(1, Math.round(it.sp.width * k)), ih = Math.max(1, Math.round(it.sp.height * k));
-      const base = seabedY(it.x) + (it.sink || 0), X = Math.round(Math.round(it.x * SV) - iw / 2) - ox, Y = Math.round(Math.round(base * SV) - ih) - oy;
-      c.drawImage(it.sp, X, Y, iw, ih);
-      if (it.deco) for (const g of it.deco) {
-        const kk = REEF_K * SV * g.s, gw = Math.max(1, Math.round(g.sp.width * kk)), gh = Math.max(1, Math.round(g.sp.height * kk));
-        const gx = X + Math.round((g.c + 0.5) * k), gy = Y + Math.round((it.top[g.c] + 1.5) * k);
-        c.drawImage(g.sp, gx - (gw >> 1), gy - gh, gw, gh);
-      }
-    }
-  } finally { SV = SV0; C = C0; }
-  R.epoch = GLR.epoch; RLY.stats.paint++;
-}
-// true: drawn from the kept layers; false: the caller draws the live way
+// (the live loop's own drawing, against the tile's corner)
+const reefLayerPaint = t => { for (const it of t.items) drawReefItem(it); RLY.stats.paint++; };
+const RLY_TS = [];
+// true: drawn from the kept tiles; false: the caller draws the live way
 function reefLayerDraw(list, x0, x1) {
-  if (!RLY.on || !GLR.on || GLR.lost || !(C instanceof GLCtx) || C.globalAlpha !== 1 || C.globalCompositeOperation !== 'source-over' || !list.length) return false;
-  let ls = RLY.last.get(list); if (!ls) RLY.last.set(list, ls = [0, 0]);
-  const held = ls[viewIdx] === SV; ls[viewIdx] = SV;
-  if (!held) return false;                                 // (zooming: a new SV each frame - the live way till it holds)
-  let st = RLY.map.get(list);
-  const sig = reefLayerSig(list);
-  if (!st || !sigEq(st.sig, sig) || !(st.sv.has(SV))) {
-    if (!st || !sigEq(st.sig, sig)) { if (st) reefLayerFree(st); st = { sig, sv: new Map() }; RLY.map.set(list, st); }
-    if (st.sv.size >= 2) for (const [k, regs] of st.sv) if (k !== ls[0] && k !== ls[1]) { for (const R of regs.values()) if (R.cv && R.cv.free) R.cv.free(); st.sv.delete(k); }   // (the two views' zooms kept)
-    st.sv.set(SV, reefLayerIndex(list, SV));
+  let L = RLY.map.get(list); if (!L) RLY.map.set(list, L = wtLayer(RLY.on, false, RLY.stats));
+  L.seenF = REG.frame;
+  if (REG.frame % 120 === 0) for (const [l2, L2] of RLY.map) if (REG.frame - L2.seenF > WT_FREE) { wtFreeAll(L2); RLY.map.delete(l2); }   // (a list no longer drawn: a world built again)
+  if (!wtReady(L) || !list.length) return false;           // (zooming: a new SV each frame - the live way till it holds)
+  const T = wtZoom(L, SV), RW = WT_RW, cx0 = x0 - 120, cx1 = x1 + 120;
+  const r0 = Math.floor(Math.round(cx0 * SV) / RW), r1 = Math.floor(Math.round(cx1 * SV) / RW), Bk = wtBuckets(L, r1 - r0 + 1);
+  // the items anchored in those tiles (the list is in x order: from the first that can be)
+  let a = 0, b = list.length; const xs = (r0 * RW - 1) / SV;
+  while (a < b) { const m = (a + b) >> 1; if (list[m].x < xs) a = m + 1; else b = m; }
+  for (let i = a; i < list.length; i++) {
+    const it = list[i], r = Math.floor(Math.round(it.x * SV) / RW);
+    if (r > r1) break;
+    if (r < r0 || it.lk) continue;
+    const q = Bk[r - r0]; q.its.push(it); reefKey(q.key, it);
   }
-  const regs = st.sv.get(SV), RW = RLY.RW, ck = regs.ck;
-  // (anything else the floor's height reads - a wreck's pad, the land's edits by a lake: a few items asked again each frame,
-  // in turn; one standing elsewhere now and every layer is painted again - this frame the live way)
-  for (let n = 0; n < 6 && ck.its.length; n++) { const i = ck.i = (ck.i + 1) % ck.its.length, it = ck.its[i]; if (seabedY(it.x) + (it.sink || 0) !== ck.base[i]) { REEF_GEN++; return false; } }
-  // the view in world pixels; the regions it touches
-  const L = CAMPX - SHX, Rr = CAMPX + VWP - SHX, T = TOPPX - SHY, B = TOPPX + bh - SHY, cx0 = x0 - 120, cx1 = x1 + 120;
-  const r0 = Math.floor(L / RW), r1 = Math.floor((Rr - 1) / RW);
-  for (let r = r0; r <= r1; r++) {                          // (an item the live loop culls, reaching into the view: the live way)
-    const R = regs.get(r); if (!R || R.y1 <= T || R.y0 >= B) continue;
-    if (R.y1 - R.y0 > 2048) { RLY.stats.live++; return false; }      // (zoomed right in: a region too tall for a texture)
-    for (let i = 0; i < R.items.length; i++) if ((R.wx[i] < cx0 || R.wx[i] > cx1) && R.x1[i] > L && R.x0[i] < Rr) { RLY.stats.live++; return false; }
-  }
-  for (let r = r0; r <= r1; r++) {
-    const R = regs.get(r); if (!R || R.y1 <= T || R.y0 >= B) continue;
-    if (!R.cv || R.epoch !== GLR.epoch || !R.cv.tex) reefLayerPaint(R, SV);
-    C.drawImage(R.cv, R.r * RW - CAMPX, R.y0 - TOPPX);
-  }
+  RLY_TS.length = 0;
+  for (let r = r0; r <= r1; r++) { const t = wtKeyed(L, T, r, Bk[r - r0], reefBox); if (t) RLY_TS.push(t); }
+  if (!wtFits(L, RLY_TS, cx0, cx1)) { RLY.stats.live++; return false; }
+  wtLayKeyed(L, RLY_TS, reefLayerPaint);
+  wtSweep(L);
   RLY.stats.lay++;
   return true;
 }
-function reefLayerFree(st) { for (const regs of st.sv.values()) for (const R of regs.values()) if (R.cv && R.cv.free) R.cv.free(); }
 
 /* ---- engine stage 6, kept layers (Oct 30): the small seabed rocks among the weed (plants of kind 'rock', drawAlgae's drawRock).
    They never move: opaque rectangles at whole world pixels (plRectW: PX, PY). So, as the reef's (44-zz-reef-layer.js), they are
-   painted once per region of the world 1024 pixels wide at this zoom into a kept texture, and each region laid as one quad.
+   painted once per tile of the world 1024 pixels wide at this zoom into a kept texture, and each tile laid as one quad
+   (Nov 1, stage 4: the world tiles, 40-zzzz-world-tiles.js - a tile painted again when its content key differs: each rock's
+   x, size, shading seed and the floor's height under it, made each frame for the tiles in view).
    What draws over what is kept: the regions are laid before the weed (and after whatever the pixel layer held, flushed first);
    the plants are in x order, so a rock only some weed before it in the list can reach is drawn again the live way, in its
    turn, over that weed - the live draw's own order, pixel for pixel. A frame with a rock the live loop culls (x within 60 of
    the view) reaching into the view, a zoom not yet held, or anything faded: the live way. ?rocklayer=0 turns it off; so does
    ?texfix=0. ---- */
-const RKL = { on: GL_TEXFIX && !/[?&]rocklayer=0/.test(location.search), RW: 1024, st: null, last: [0, 0], maxR: -1e9, lay: false, stats: { lay: 0, live: 0, paint: 0, again: 0 } };
-function rockLayerSig() { return [plants, plants.length, ISLE, FLOOR_MARKED, GSH.P, BED_A, BED_B, rockForms, rockForms.length, floorTab, floorTabS, DOCK_PADS, KR_PAD, COAST_RAMP, pirateWrecks.length, FLOOR_HILLY, SEABED_Y, OWM, GLR.epoch]; }
+const RKL = { maxR: -1e9, lay: false, stats: { lay: 0, live: 0, paint: 0, again: 0, free: 0 } };
+RKL.L = wtLayer(!/[?&]rocklayer=0/.test(location.search), false, RKL.stats);
 // a rock's box in world pixels (conservative: drawRock's rows are at most 0.55 of its width either side, rh tall above base - 1)
 function rockBoxPx(p, base) { return [Math.round((p.x - 0.56 * p.rw) * SV) - 2, Math.round((p.x + 0.56 * p.rw) * SV) + 3, Math.round((base - p.rh - 2) * SV) - 2, Math.round(base * SV) + 2]; }
-// the rocks drawAlgae draws (the same tests), by region
-function rockLayerIndex(sv) {
-  const SV0 = SV; SV = sv;
-  const regs = new Map(), RW = RKL.RW, ck = regs.ck = { its: [], base: [], h: [], i: 0 };
-  try {
-    for (const p of plants) {
-      if (p.kind !== 'rock' || p.lk || (FLOOR_MARKED && plantLook(p))) continue;
-      const base = seabedY(p.x) + 3;
-      if (ISLE !== null && base - (p.h || 0) < WATER_Y + 4) continue;
-      ck.its.push(p); ck.base.push(base); ck.h.push(p.h);
-      const b = rockBoxPx(p, base);
-      for (let r = Math.floor(b[0] / RW), r1 = Math.floor((b[1] - 1) / RW); r <= r1; r++) {
-        let R = regs.get(r);
-        if (!R) regs.set(r, R = { r, items: [], base: [], x0: [], x1: [], y0: 1e9, y1: -1e9, cv: null, epoch: -1 });
-        R.items.push(p); R.base.push(base); R.x0.push(b[0]); R.x1.push(b[1]);
-        if (b[2] < R.y0) R.y0 = b[2]; if (b[3] > R.y1) R.y1 = b[3];
-      }
-    }
-  } finally { SV = SV0; }
-  return regs;
+// a tile's rocks' boxes; t.base[] the floor's height each was keyed (and is drawn) with
+function rockBox(t) {
+  let X0 = 1e9, X1 = -1e9, Y0 = 1e9, Y1 = -1e9;
+  t.base = []; for (let i = 0; i < t.items.length; i++) t.base.push(t.key[i * 5 + 4]);
+  for (let i = 0; i < t.items.length; i++) {
+    const b = rockBoxPx(t.items[i], t.base[i]);
+    t.x0.push(b[0]); t.x1.push(b[1]);
+    X0 = Math.min(X0, b[0]); X1 = Math.max(X1, b[1]); Y0 = Math.min(Y0, b[2]); Y1 = Math.max(Y1, b[3]);
+  }
+  t.x = X0; t.w = X1 - X0; t.y = Y0; t.h = Y1 - Y0;
 }
-function rockLayerPaint(R, sv) {
-  const w = RKL.RW, h = R.y1 - R.y0;
-  if (!R.cv) R.cv = makeLayer(w, h);
-  const c = R.cv.getContext('2d'), s = { C, SV, CAMPX, TOPPX, fsLast };
-  c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.imageSmoothingEnabled = false;
-  // (drawRock itself, its PX and PY against the region's corner: plRect on a canvas that isn't the world's fills plainly)
-  C = c; SV = sv; CAMPX = R.r * w; TOPPX = R.y0; fsLast = null;
-  try { for (let i = 0; i < R.items.length; i++) drawRock(R.items[i], R.base[i], rockPaintW); }
-  finally { C = s.C; SV = s.SV; CAMPX = s.CAMPX; TOPPX = s.TOPPX; fsLast = null; }
-  R.epoch = GLR.epoch; RKL.stats.paint++;
-}
-// true: the regions are laid (drawAlgae then skips the rocks, but for one some weed before it reaches)
+// (drawRock itself, its PX and PY against the tile's corner: plRect on a canvas that isn't the world's fills plainly)
+const rockLayerPaint = t => { for (let i = 0; i < t.items.length; i++) drawRock(t.items[i], t.base[i], rockPaintW); RKL.stats.paint++; };
+const RKL_TS = [];
+// true: the tiles are laid (drawAlgae then skips the rocks, but for one some weed before it reaches)
 function rockLayerDraw(x0, x1) {
   RKL.lay = false; RKL.maxR = -1e9;
-  if (!RKL.on || !GLR.on || GLR.lost || !(C instanceof GLCtx) || C.globalAlpha !== 1 || C.globalCompositeOperation !== 'source-over' || !plants.length) return false;
-  const held = RKL.last[viewIdx] === SV; RKL.last[viewIdx] = SV;
-  if (!held) return false;
-  const sig = rockLayerSig();
-  let st = RKL.st;
-  if (!st || !sigEq(st.sig, sig)) { if (st) rockLayerFree(st); st = RKL.st = { sig, sv: new Map() }; }
-  if (!st.sv.has(SV)) {
-    if (st.sv.size >= 2) for (const [k, regs] of st.sv) if (k !== RKL.last[0] && k !== RKL.last[1]) { for (const R of regs.values()) if (R.cv && R.cv.free) R.cv.free(); st.sv.delete(k); }
-    st.sv.set(SV, rockLayerIndex(SV));
+  const L = RKL.L;
+  if (!wtReady(L) || !plants.length) return false;
+  const T = wtZoom(L, SV), RW = WT_RW, cx0 = x0 - 60, cx1 = x1 + 60;
+  const r0 = Math.floor(Math.round(cx0 * SV) / RW), r1 = Math.floor(Math.round(cx1 * SV) / RW), Bk = wtBuckets(L, r1 - r0 + 1);
+  // the rocks drawAlgae draws (the same tests) anchored in those tiles, in the plants' order; each one's key: what drawRock reads
+  for (const p of plants) {
+    if (p.kind !== 'rock' || p.lk) continue;
+    const r = Math.floor(Math.round(p.x * SV) / RW);
+    if (r < r0 || r > r1 || (FLOOR_MARKED && plantLook(p))) continue;
+    const base = seabedY(p.x) + 3;
+    if (ISLE !== null && base - (p.h || 0) < WATER_Y + 4) continue;
+    const q = Bk[r - r0]; q.its.push(p); q.key.push(p.x, p.rw, p.rh, p.rs, base);
   }
-  const regs = st.sv.get(SV), ck = regs.ck, RW = RKL.RW;
-  for (let n = 0; n < 6 && ck.its.length; n++) { const i = ck.i = (ck.i + 1) % ck.its.length, p = ck.its[i]; if (seabedY(p.x) + 3 !== ck.base[i] || p.h !== ck.h[i]) { RKL.st = null; rockLayerFree(st); return false; } }
-  const L = CAMPX - SHX, Rr = CAMPX + VWP - SHX, T = TOPPX - SHY, B = TOPPX + bh - SHY, cx0 = x0 - 60, cx1 = x1 + 60;
-  const r0 = Math.floor(L / RW), r1 = Math.floor((Rr - 1) / RW);
-  for (let r = r0; r <= r1; r++) {
-    const R = regs.get(r); if (!R || R.y1 <= T || R.y0 >= B) continue;
-    if (R.y1 - R.y0 > 2048) { RKL.stats.live++; return false; }
-    for (let i = 0; i < R.items.length; i++) { const x = R.items[i].x; if ((x < cx0 || x > cx1) && R.x1[i] > L && R.x0[i] < Rr) { RKL.stats.live++; return false; } }
-  }
+  RKL_TS.length = 0;
+  for (let r = r0; r <= r1; r++) { const t = wtKeyed(L, T, r, Bk[r - r0], rockBox); if (t) RKL_TS.push(t); }
+  if (!wtFits(L, RKL_TS, cx0, cx1)) { RKL.stats.live++; return false; }
   plFlush();                                               // (what the pixel layer holds goes under the rocks, as it did)
-  for (let r = r0; r <= r1; r++) {
-    const R = regs.get(r); if (!R || R.y1 <= T || R.y0 >= B) continue;
-    if (!R.cv || R.epoch !== GLR.epoch || !R.cv.tex) rockLayerPaint(R, SV);
-    C.drawImage(R.cv, R.r * RW - CAMPX, R.y0 - TOPPX);
-  }
+  wtLayKeyed(L, RKL_TS, rockLayerPaint);
+  wtSweep(L);
   RKL.lay = true; RKL.stats.lay++;
   return true;
 }
@@ -28925,7 +29062,6 @@ function rockAgain(p, base) {
   if (RKL.maxR > left) { RKL.stats.again++; return true; }
   return false;
 }
-function rockLayerFree(st) { for (const regs of st.sv.values()) for (const R of regs.values()) if (R.cv && R.cv.free) R.cv.free(); }
 window.__layerStats = () => ({ rock: RKL.stats, reef: RLY.stats });   // (for the tests: how often the kept layers were laid, painted, or the live way taken)
 
 function drawShip(sh, mode) {
@@ -30934,6 +31070,7 @@ function render() {
   const T = performance.now(), lap = (k, t0) => { let rb = 0; if (probe.on) { const n0 = probe.n; probeFlush(g); probeFlush(oc); rb = (probe.n - n0) * probe.cost; } if (GPUT.cur) gptLap(k, 1); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
   let tt = T;
   FT.env = (FT.env || 0) + (T - T0);
+  if (OWM) { landPaintStep(views); tt = lap('landPaint', tt); }   // (the ground's pictures painted from their dirty marks, before any drawing - 50-land-terrain)
   for (let i = 0; i < 2; i++) { planeLamps[i].length = 0; lighthouseGlow[i].length = 0; airLamps[i].length = 0; lateLit[i].length = 0; brightLights[i].length = 0; fwLate[i].length = 0; }
   noteZoom();
   skyNewFrame();                                          // (THE NEW SKY: its frame - 41-sky-new.js)
@@ -39132,25 +39269,29 @@ function drawIslChunks(x0, x1, inLand) {
   if (!land.islRuns || !land.islRuns.length) return;
   const ga = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
   drawTropForestAt(x0, x1, inLand ? 'land' : 'sea');      // (their TROPICAL back forest: before their slices, which cover its foot - 50-land-trop)
-  const done = new Set();
-  for (const [a, b] of land.islRuns) {
-    if (b < x0 || a > x1) continue;
-    for (let k = Math.max(0, Math.floor(ltCol(Math.max(a, x0)) / LT_CHUNK)); k <= Math.min(land.dirty.length - 1, Math.floor(ltCol(Math.min(b, x1)) / LT_CHUNK)); k++) {
-      if (done.has(k)) continue; done.add(k);
-      if (!seaAtX((k + 0.5) * LT_CHUNK * LT_CELL) !== inLand) continue;   // (a slice in a country: the land's pass)
-      if (land.dirty[k] || !land.chunks[k]) { paintLandChunk(k); land.dirty[k] = 0; }
-      if (land.seen) land.seen[k] = renderTick;            // (seen: kept - landEvict)
-      const cv = land.ichunks && land.ichunks[k]; if (!cv) continue;
-      const xl = k * LT_CHUNK * LT_CELL, X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL));
-      const T = Math.round(PY(LT_Y0 + (land.rT[k] - 4) * LT_CELL)), B = Math.round(PY(LT_Y0 + land.rB[k] * LT_CELL));
-      C.drawImage(cv, X0, T, X1 - X0, B - T);
-      tropDrawOv(k, 'isl');                                // (the TROPICAL rock's own pixels - 50-land-trop)
-    }
+  for (const k of islSlices(x0, x1)) {                    // (painted before the frame's drawing: landPaintStep, 50-land-terrain)
+    if (!seaAtX((k + 0.5) * LT_CHUNK * LT_CELL) !== inLand) continue;   // (a slice in a country: the land's pass)
+    const cv = land.ichunks && land.ichunks[k]; if (!cv) continue;
+    const xl = k * LT_CHUNK * LT_CELL, X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL));
+    const T = Math.round(PY(LT_Y0 + (land.rT[k] - 4) * LT_CELL)), B = Math.round(PY(LT_Y0 + land.rB[k] * LT_CELL));
+    C.drawImage(cv, X0, T, X1 - X0, B - T);
+    tropDrawOv(k, 'isl');                                  // (the TROPICAL rock's own pixels - 50-land-trop)
   }
   C.imageSmoothingEnabled = ga;
   drawLandProps(x0, x1, inLand ? 'land' : 'sea');           // (what grows on them, in their plane)
 }
 const drawIslandsLand = (x0, x1) => drawIslChunks(x0, x1, true);
+// the slices holding island columns in [x0, x1], each once, in the island lines' order
+function islSlices(x0, x1) {
+  const out = [];
+  if (!land.islRuns || !land.islRuns.length) return out;
+  const done = new Set();
+  for (const [a, b] of land.islRuns) {
+    if (b < x0 || a > x1) continue;
+    for (let k = Math.max(0, Math.floor(ltCol(Math.max(a, x0)) / LT_CHUNK)); k <= Math.min(land.dirty.length - 1, Math.floor(ltCol(Math.min(b, x1)) / LT_CHUNK)); k++) if (!done.has(k)) { done.add(k); out.push(k); }
+  }
+  return out;
+}
 // (user Oct 28) what grows on an island, by its look: the forest's trees on its gentle grass, the desert's scrub and cacti
 // (a palm now and then by the water) - each marked isl, drawn in the island's plane (drawIslands) and nowhere else; its own
 // seed, so nothing else moves
@@ -45998,34 +46139,54 @@ function forestRockArt() {
 }
 // (user Oct 25: past the world's ends the land goes on - each end's slices mirrored, so there's never sky or sea
 // beside the ground, however far out the view is)
+// the slices a view [x0, x1] shows: [slice, its left world x, mirrored]
+function landSlices(x0, x1) {
+  const n = land.dirty.length, Xend = land.cols * LT_CELL, list = [];
+  for (let k = Math.max(0, Math.floor(ltCol(x0) / LT_CHUNK)); k <= Math.min(n - 1, Math.floor(ltCol(x1) / LT_CHUNK)); k++) list.push([k, k * LT_CHUNK * LT_CELL, false]);
+  for (let k = 0; k < n; k++) { const w = Math.min(LT_CHUNK, land.cols - k * LT_CHUNK) * LT_CELL, xl = -k * LT_CHUNK * LT_CELL - w; if (xl + w <= x0) break; if (xl < x1) list.push([k, xl, true]); }
+  for (let k = n - 1; k >= 0; k--) { const xr0 = k * LT_CHUNK * LT_CELL, w = Math.min(LT_CHUNK, land.cols - k * LT_CHUNK) * LT_CELL, xl = 2 * Xend - xr0 - w; if (xl > x1) break; if (xl + w > x0) list.push([k, xl, true]); }
+  return list;
+}
+/* (Nov 1, target architecture stage 4 - drawing reads, never writes) the ground's pictures painted where their dirty marks are
+   consumed: once a frame, before any drawing (render), for the slices each view will show - the land's pass's (landSlices,
+   when the view holds land: landSpansIn) and the islands' (islSlices, the sea's pass and the land's). Here too what paints them
+   all again (the meadow's, STONE COLOURS' and UNDERGROUND LIGHT's sliders, the TROPICAL rock's picture come), the slices
+   seen, and the far ones let go (landEvict). The drawing only places the canvases. */
+function landPaintStep(views) {
+  if (!OWM || !land.cell) return;
+  const n = land.dirty.length;
+  { const ms = bgP('bgmh', 1) + ',' + bgP('bgmw', 1) + ',' + bgP('bgsh', 1) + ',' + bgP('bgsw', 1); if (land.msig !== ms) { if (land.msig !== undefined) land.back.length = 0; land.msig = ms; } }   // (the meadow's sliders moved: painted again)
+  if (!TROP_TILE && land.trop && land.marked && tropTile()) { land.dirty.fill(1); islRootsBuild(); }   // (the TROPICAL rock's picture come: painted again with it - 50-land-trop)
+  { const sc = bgP('bgsc', 1) + ',' + ugReach(); if (land.ssig !== sc) { if (land.ssig !== undefined) land.dirty.fill(1); land.ssig = sc; } }   // (STONE COLOURS or UNDERGROUND LIGHT moved: the ground painted again)
+  const paint = k => { if (land.dirty[k] || !land.chunks[k]) { paintLandChunk(k); land.dirty[k] = 0; } };
+  for (const [v, cp, , w] of views) {
+    const sv = S * v.z, x0 = cp / sv, x1 = x0 + w / sv;
+    const list = landSpansIn(x0, x1).length ? landSlices(x0, x1) : [], isl = islSlices(x0, x1);
+    if (EXT_L + EXT_R) { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; for (const k of isl) S_[k] = renderTick; if (renderTick % 300 === 0) landEvict(); }   // (the world made bigger: far slices' pictures let go)
+    for (const [k] of list) if (!land.back[k]) paintLandBack(k);
+    for (const k of isl) paint(k);
+    for (const [k] of list) paint(k);
+  }
+}
 function drawLandGround(x0, x1, onField) {
   if (!land.cell) return;
-  const n = land.dirty.length, Xend = land.cols * LT_CELL;
   const ga = C.imageSmoothingEnabled;
   C.imageSmoothingEnabled = false;
   const Ytop = Math.round(PY(LT_Y0 - 4 * LT_CELL)), Ybot = Math.round(PY(LT_Y0 + LT_ROWS * LT_CELL));
   // (each slice from its own top row to its bottom: today's rows unless its ground rises or falls past them)
   const yT = k => land.flat ? Ytop : Math.round(PY(LT_Y0 + (land.rT[k] - 4) * LT_CELL)), yB = k => land.flat ? Ybot : Math.round(PY(LT_Y0 + land.rB[k] * LT_CELL));
-  // the slices to draw: [slice, its left world x, mirrored]
-  const list = [];
-  for (let k = Math.max(0, Math.floor(ltCol(x0) / LT_CHUNK)); k <= Math.min(n - 1, Math.floor(ltCol(x1) / LT_CHUNK)); k++) list.push([k, k * LT_CHUNK * LT_CELL, false]);
-  for (let k = 0; k < n; k++) { const w = Math.min(LT_CHUNK, land.cols - k * LT_CHUNK) * LT_CELL, xl = -k * LT_CHUNK * LT_CELL - w; if (xl + w <= x0) break; if (xl < x1) list.push([k, xl, true]); }
-  for (let k = n - 1; k >= 0; k--) { const xr0 = k * LT_CHUNK * LT_CELL, w = Math.min(LT_CHUNK, land.cols - k * LT_CHUNK) * LT_CELL, xl = 2 * Xend - xr0 - w; if (xl > x1) break; if (xl + w > x0) list.push([k, xl, true]); }
+  // the slices to draw (painted before the frame's drawing: landPaintStep)
+  const list = landSlices(x0, x1);
   const put = (cv, xl, flip, k) => {
     const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL)), T = yT(k), B = yB(k);
     if (!flip) { C.drawImage(cv, X0, T, X1 - X0, B - T); return; }
     C.save(); C.translate(X1, 0); C.scale(-1, 1); C.drawImage(cv, 0, T, X1 - X0, B - T); C.restore();
   };
-  { const ms = bgP('bgmh', 1) + ',' + bgP('bgmw', 1) + ',' + bgP('bgsh', 1) + ',' + bgP('bgsw', 1); if (land.msig !== ms) { if (land.msig !== undefined) land.back.length = 0; land.msig = ms; } }   // (the meadow's sliders moved: painted again)
-  for (const [k, xl, flip] of list) { if (!land.back[k]) paintLandBack(k); put(land.back[k], xl, flip, k); }
-  if (EXT_L + EXT_R) { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; if (renderTick % 300 === 0) landEvict(); }   // (the world made bigger: far slices' pictures let go)
+  for (const [k, xl, flip] of list) put(land.back[k], xl, flip, k);
   if (onField) onField();                                 // (what stands on the field behind: in front of it, behind the ground)
   drawIslandsLand(x0, x1);                                // (the segments in a country: behind the ground in front, in front of what's behind - 50-land-islands)
   drawTropForestAt(x0, x1);                               // (the TROPICAL back forest of the ground in front: before its slices, which cover its foot - 50-land-trop)
-  if (!TROP_TILE && land.trop && land.marked && tropTile()) { land.dirty.fill(1); islRootsBuild(); }   // (the TROPICAL rock's picture come: painted again with it - 50-land-trop)
-  { const sc = bgP('bgsc', 1) + ',' + ugReach(); if (land.ssig !== sc) { if (land.ssig !== undefined) land.dirty.fill(1); land.ssig = sc; } }   // (STONE COLOURS or UNDERGROUND LIGHT moved: the ground painted again)
   for (const [k, xl, flip] of list) {
-    if (land.dirty[k] || !land.chunks[k]) { paintLandChunk(k); land.dirty[k] = 0; }
     put(land.chunks[k], xl, flip, k);
     if (!flip) tropDrawOv(k, 'main');                     // (the TROPICAL rock's own pixels - 50-land-trop)
   }
@@ -49931,12 +50092,17 @@ function renderLandObjects() {
   C.save();
   try { hangarLandCut(CAMPX / SV, CAMPX / SV + VWW); renderLandObjects0(); } finally { C.restore(); }
 }
-function renderLandObjects0() {
-  const x0 = CAMPX / SV, x1 = x0 + VWW;
-  // (only where the land is: every land - LANDS)
+// the land in [x0, x1]: every land's (LANDS) and any island's out in the sea (one line, user Oct 28)
+function landSpansIn(x0, x1) {
   const spans = [];
   for (let i = 0; i < LANDS.n; i++) { const a = Math.max(x0, LANDS.c.lo[i]), b = Math.min(x1, LANDS.c.hi[i]); if (b > a) spans.push([a, b]); }
-  for (const [a, b] of land.isles || []) if (b > x0 && a < x1) spans.push([Math.max(a, x0), Math.min(b, x1)]);   // (and any island out in the sea - one line, user Oct 28)
+  for (const [a, b] of land.isles || []) if (b > x0 && a < x1) spans.push([Math.max(a, x0), Math.min(b, x1)]);
+  return spans;
+}
+function renderLandObjects0() {
+  const x0 = CAMPX / SV, x1 = x0 + VWW;
+  // (only where the land is)
+  const spans = landSpansIn(x0, x1);
   if (!spans.length) { drawStructs(x0, x1); drawTropFront(x0, x1); }   // (a dock or a house on an island out at sea, no land in view)
   if (spans.length) {
     guardDraw('lakeRoots', () => drawLakeRoots(x0, x1));   // (an island in a country's water: its rock under the water, behind the ground - 50-land-lake)
@@ -53888,7 +54054,7 @@ async function start(data) {
     rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, LAYOUT_L, LAYOUT_R, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? LAYOUT_R + 10 : LAYOUT_L - 10)), get LAND_Y() { return LAND_Y; }, treasures, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), civLose: v => { const k = civClass(v); if (k === 'air') trafficDown(v); else if (k === 'ship') civSink(v, 0); else if (k === 'boat') jetboatSink(v); else if (k === 'balloon') balloonPop(v); else if (k === 'heli') civHeliDown(v); else if (k === 'sub') minisubLost(v); else if (k === 'seaplane') spDown(v); else if (k === 'blimp') blimpBurst(v); else if (k === 'yacht') sinkSailboat(v, v.x, v.y, 0); else if (k === 'shuttle') groundCrash(v, 1); return k; },   /* (tools: a civilian vehicle lost by its own rule - tools/civloss.mjs) */ lampScene: (gap = 150, hour = 23) => { const x = (LAYOUT_L + LAYOUT_R) / 2, y = WATER_Y + (seabedY(x) - WATER_Y) * 0.5, a = subs[0], b = subs[1], dx = SUB_L + gap; for (const [s, sx, f] of [[a, x - dx / 2, 1], [b, x + dx / 2, -1]]) Object.assign(s, { state: 'out', gate: null, auto: null, x: sx, y, depthT: y, vx: 0, vy: 0, facing: f, turn: null, input: 0, throttle: 0, a: 0 }); a.light = true; b.light = false; a.lamp = { elev: 0, power: 0, aimShow: 0 }; const [lx, ly] = subArtPt(a, ...SUB_LAMP_AT), el = clamp(Math.atan2(b.y - ly, b.x - lx) * 180 / Math.PI, 0, 180); a.lamp.elev = el; a.aimA = el * Math.PI / 180; env.time = hour; computeEnv(); camOverride[0] = [x, y]; paused = true; return { x: Math.round(x), y: Math.round(y), elev: +el.toFixed(1) }; },   /* (the sub lamp's check, user Oct 30: two subs a gap apart at mid-depth, the left one's light on the other, at night; paused there) */ boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, civSpawn: (kind, x, lo, hi, dir) => { const c = newCivShip(kind, x, lo, hi, dir); civShips.push(c); return c; }, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
     debugJetArt: () => { if (!trafficArt) buildTrafficArt(); const d = c => { const k = makeCanvas(c.width, c.height); k.getContext('2d').drawImage(c.src && c._tp ? c.src : c, 0, 0); return k.toDataURL(); }, a = trafficArt.jet[0].r, w = windowsArtDots(a); return { jet: d(a), jetWin: w ? d(w) : d(makeCanvas(1, 1)) }; }, SPACE: { ATMO_TOP, SPACE_TOP, SKY_TOP }, carve: (x, y, r) => landCarve(x, y, r), landShell: (x, y, owner, from) => { shells.push({ x, y, vx: 0, vy: 300, owner, from: from || 'tank', age: 1, trail: 0, under: false, ut: 0 }); }, tabDump: p => [tabArt(p).tabSteel, img.hud.tabSteel, tabArt(p).tabGold].map(c => c.toDataURL()), fgDump: () => { if (!fgStrip) buildFgStrip(); return fgStrip.sp.toDataURL(); }, reefInfo: () => ({ forms: rockForms.map(f => [Math.round(f.x0), Math.round(f.x1), Math.round(Math.min(...f.topW))]), reef: reef.length, front: coastFront.length }), strikeAt: x => strike(x, surfaceY(x), null), sinkShip: p => sinkShip(ships[p]), sinkSub: p => sinkSub(subs[p]), fleet, oldSubs, oldShips, surfaceAt: x => surfaceY(x), diveKeys, mgHold, NETST, wreckAt: (x, y) => !!wreckAt(x, y), partSand: q => partSand(q), seabedAt: x => seabedY(x), subMaxY: x => subMaxY(x), SUB_DN,
     hud: p => hudLayout(p), uiToClient: (x, y) => [x * PIXU / dpr, y * PIXU / dpr], gun: p => activeGun(p), order: p => telegraphs[p].idx, crewMode: p => crew[p].mode,
-    gasBalls, camOverride, settled: () => Object.assign({ restDebris: restCount(), restChunks: restChunkCount() }, RST.stats), restLayer: on => { RST.on = !!on; return RST.on; }, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => { const FI = schoolFish(); return Array.from({ length: schools.n }, (_, i) => Object.assign(schools.plain(i), { fish: Array.from(FI.rows.subarray(FI.at[i], FI.at[i + 1]), j => seaFish.plain(j)) })); }, seaFish, whales: () => whales, smokePuff: (x, y) => spawnSmoke(x, y, { dark: 0.9, r: 5, grow: 5, lift: 40, vy: -30, life: 10, alpha: 0.7, rise: false }), deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
+    gasBalls, camOverride, settled: () => Object.assign({ restDebris: restCount(), restChunks: restChunkCount() }, RST.stats), restLayer: on => { for (const L of RST.L) L.on = !!on; return RST.L[0].on; }, counts: () => ({ wakes: wakes.length, foam: foam.length, spray: spray.length, bubbles: bubbles.length, smoke: smoke.length, flames: flames.length, debris: debris.length, trails: trails.length, wclouds: wclouds.length, streaks: streaks.length, dust: dust.length, shocks: shocks.length }), schools: () => { const FI = schoolFish(); return Array.from({ length: schools.n }, (_, i) => Object.assign(schools.plain(i), { fish: Array.from(FI.rows.subarray(FI.at[i], FI.at[i + 1]), j => seaFish.plain(j)) })); }, seaFish, whales: () => whales, smokePuff: (x, y) => spawnSmoke(x, y, { dark: 0.9, r: 5, grow: 5, lift: 40, vy: -30, life: 10, alpha: 0.7, rise: false }), deadFish, blastRings, subs, torpWrecks, sailboats, chunks, players: n => setPlayers(n), padPick, menuSel, menuInfo: () => JSON.parse(JSON.stringify(menuSel)), killBuoy: b => destroyBuoy(b, b.x, surfaceY(b.x) - 8), boltCount: () => storm.bolts.length, padMenuFocus: () => padMenu.focus, towerScorch: (p, x, y, r) => towerScorch(towers[p], x, y, r), towerImg: () => [img.towers[0][1].width, img.towers[0][1].height], setExtra: e => { EXTRA = e; applyMode(); }, SLOTS, asSlot: (v, f) => asSlot(v, f), hudArt: () => img.hud, scaledOf: (s, k, h) => scaled(s, k, h), cvCache, NET, LINK, linkJoin, lobbyPick, lobbyReady, linkStartRound: () => menuPlay(), camFocus: i => camFocus(i), lookBy: (p, dx, dy) => lookBy(p, dx, dy), canTake: (p, k) => canTake(p, k), hostGame: () => { menuSel.mode = 'duel'; roomOpen(); }, roomOpen, menuPlay: () => menuPlay(), linkGuests, roomPlayers: () => roomPlayers(), startGame: () => startGame(), act, ACTS, ctlState, setCtlState, netSnapshot, netApply, select: (p, k) => switchTo(p, k), placeOut: (p, k, x) => { const v = k === 'ship' ? ships[p] : subs[p]; switchTo(p, k); v.gate = null; v.auto = null; v.vx = 0; v.x = x; if (k === 'ship') v.moored = false; else { v.state = 'out'; v.facing = -v.dock.dir; } }, gates: p => homeDock[p].gates, home: p => pressHome(p), hitTower: p => { const tw = towers[p]; if (tw.hp > 0) { tw.hp--; if (tw.hp <= 0) crumbleTower(tw); } }, torps, torpedo: (p, up) => fireTorpedo(subs[p], up), hitSub: (p, k) => hitSub(subs[p], k, subs[p].x, subs[p].y - 4), diveHold, depth: (p, y) => { subs[p].depthT = y; }, dcharge: p => dropDepthCharge(ships[p]), dcharges, sinkSail: i => { const b = sailboats[i]; sinkSailboat(b, b.x, b.y - 4, 0); },
     SFX, W, stepWeather, topLayout, sand: (x, hl, pw) => kickDust(x, hl, pw), buoys: () => buoys, flocks: () => flocks, ambientAt: (x, t) => ambient(x, t), power: p => shipPower(ships[p]), strikeShip: p => { const sh = ships[p], [mx, my] = shipPoint(sh, MAST[0], MAST[1]); strike(mx, my, sh); }, life: p => shipLife(ships[p]), seabedY: x => seabedY(x),
   }, { get(o, k, r) { if (!WORLD_READY && !LOADING) worldNow(); return Reflect.get(o, k, r); } });
   // (user Oct 30: the subs' beam - its length and its picture, for a check of its reach)
