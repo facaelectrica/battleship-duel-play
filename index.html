@@ -4011,8 +4011,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 544;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 17:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 545;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 17:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -5529,6 +5529,7 @@ function drawPerfPanel(x, y) {
     'SKY ' + f(P.sky) + '  WORLD ' + f(P.objects) + '  WATER ' + f(P.distort),
     (T => 'NEW SKY ' + f(T.back) + '+' + f(T.decks) + '+' + f(T.front) + '+' + f(T.veil1) + '  LAY ' + f(T.out) + '  SMOKE ' + f(T.smoke) + '  BUILD ' + f(T.build) + '/' + Math.round(T.builds || 0) + ' LIT ' + Math.round(T.lit || 0) + ' KEYS ' + Math.round(T.kL || 0) + '/' + Math.round(T.kU || 0) + '/' + Math.round(T.kN || 0) + '/' + Math.round(T.kS || 0) + ' LOBES ' + f(T.lobes) + ' VEIL ' + f(T.veil) + ' GL ' + f(T.gl) + '  SM ' + f(T.smG) + '/' + f(T.smS) + '/' + f(T.smB) + '/' + f(T.smT) + (D => '  PUFF SIZES ' + D.sizes.map(v => v.toFixed(1)).join('/') + ' LOD ' + D.lod + '/' + D.n)(NSKY.deckSizes()))(NSKY.FT),
     'TINT ' + f(P.tint) + '  FX ' + f(P.overlays) + '  HUD ' + f((P.console || 0) + (P.dots || 0) + (P.topui || 0)),
+    'IN TINT: COPY ' + f(P.tnCopy) + '  LAMPS ' + f(P.tnLamps) + '  BACK SMOKE ' + f(P.tnSmokeB) + '  SPARKS ' + f(P.tnSparks) + '  DECK 1 ' + f(P.tnDeck1) + '  FW ' + f(P.tnFw) + '  CAVES ' + f(P.tnCaves) + '  GRADE ' + f(P.tnGrade),   // (Nov 1: the tint part's sub-parts - 48-render.js tl)
     'PUFFS ' + f(P.ovSmoke) + '  TRAILS ' + f(P.ovTrails) + '  FIRE ' + f(P.ovFire) + '  RAIN ' + f(P.ovRain),
     // (Nov 1: the graphics card's time on each part, from the GPU timers - 40-gl.js GPUT; their total the sum of the parts)
     !GLR.on ? '' : GPUT.tried && !GPUT.ext ? 'GPU TIMERS: NONE ON THIS DRIVER' : (G => 'GPU ' + f(G.total) + '  SKY ' + f(G.sky) + '  WORLD ' + f(G.objects) + '  WATER ' + f(G.distort) + '  LAND ' + f(G.land) + '  TINT ' + f(G.tint) + '  FX ' + f(G.overlays))(GPUT.parts),
@@ -18820,9 +18821,11 @@ function glBegin(ctx, blend) {
     glFlush();
     st.tgt = t; st.blend = blend; st.sc = s.sc; st.clip = clip; st.sten = 0;
   }
-  if (clip && t.stencilClip !== s.clip) glBuildClip(t, s.clip);
+  if (clip && (t.stencilClip !== s.clip || (t.stencilBox && !scIn(s.sc, t.stencilBox)))) glBuildClip(t, s.clip);
   if (GLR.n >= GLR.MAXQ) glFlush();
 }
+// (a scissor box a inside box b - [x, y, w, h]; a null: the whole target, inside no box)
+const scIn = (a, b) => !!a && a[0] >= b[0] && a[1] >= b[1] && a[0] + a[2] <= b[0] + b[2] && a[1] + a[3] <= b[1] + b[3];
 function glQuad(x0, y0, x1, y1, x2, y2, x3, y3, u0, v0, u1, v1, u2, v2, u3, v3, col, aux, k, mul = 0, add = 0, ox = 0, oy = 0, ou = 0, ov = 0, su = 0, sv = 0) {
   if (GLR.n >= GLR.MAXQ) glFlush();
   const f = GLR.f32, u = GLR.u32;
@@ -18899,12 +18902,16 @@ function glWind(tris) {
   GLR.cur.sten = -1;
 }
 // the clip: bit 0x80 of the stencil marks the inside of every clip path in force
+// (Nov 1, the GPU's time: built over the whole target each time - its stencil cleared and covered, two screens of a layer for a
+// ship's outline cut out of a few hundred pixels of fire. Built under a scissor box the draws to come are held to, it's built in
+// that box alone; the box is kept with it (stencilBox), and a draw outside it builds the clip again - glBegin)
 function glBuildClip(t, list) {
   glFlush();
-  const gl = GLR.gl;
+  const gl = GLR.gl, sc = GLR.st.sc;
   t.ensureStencil();
   glBind(t);
-  gl.disable(gl.SCISSOR_TEST); GLR.cur.sc = undefined;
+  if (sc) { gl.enable(gl.SCISSOR_TEST); gl.scissor(sc[0], t._h - sc[1] - sc[3], sc[2], sc[3]); } else gl.disable(gl.SCISSOR_TEST);
+  GLR.cur.sc = undefined;
   gl.stencilMask(0xff); gl.clearStencil(0); gl.clear(gl.STENCIL_BUFFER_BIT);
   const W = t._w, H = t._h, full = new Float32Array([0, 0, W, 0, W, H, 0, 0, W, H, 0, H]);
   list.forEach((tris, i) => {
@@ -18918,7 +18925,7 @@ function glBuildClip(t, list) {
     gl.colorMask(true, true, true, true);
   });
   GLR.cur.sten = -1;
-  t.stencilClip = list;
+  t.stencilClip = list; t.stencilBox = sc ? sc.slice() : null;
   GLR.stats.clips++;
 }
 function glClearTarget(t, x, y, w, h) {
@@ -20511,7 +20518,9 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
    columns, instead of a JavaScript loop of fillRect calls through GLCtx (each a call, a colour looked up, a quad packed).
 
    A layer: pxLayer({ table, cols, per, pal, frame, view, rect }).
-     table  the column table drawn (rows 0..n-1, in order: a later row is painted over an earlier one, as the loop did)
+     table  the column table drawn (rows 0..n-1, in order: a later row is painted over an earlier one, as the loop did); none
+            (Nov 1, the ship's wash): a layer of rectangles its view gathers from records that aren't a table (n 0 to frame / view),
+            drawn whenever the view writes any
      cols   { name: kind } the layer's own columns the shader reads, as `a_name`: 'frame u8' / 'frame i32' filled once a frame
             (frame), 'view u8' / 'view i32' filled for each view (view); u8 -> uint, i32 -> int; 'view rgba' (Nov 1, the
             debris): a colour each, packed as glPack packs it (r g b a bytes), read as GLCtx's quads read theirs - a vec4
@@ -20608,8 +20617,8 @@ function pxRoom(L, m) {
   return L.own;
 }
 function pxDraw(L, lo, hi) {
-  const ctx = C, T = L.table, n = T.n;
-  if (!n || !GLR.on || GLR.lost || !(ctx instanceof GLCtx)) return;
+  const ctx = C, T = L.table, n = T ? T.n : 0;
+  if ((T && !n) || !GLR.on || GLR.lost || !(ctx instanceof GLCtx)) return;
   const gl = GLR.gl, s = ctx.s, m = s.m;
   pxReady(L);
   for (const k in L.own) { const a = L.own[k]; if (a.length < n) { L.own[k] = new a.constructor(Math.max(n, a.length * 2)); L.tick = -1; } }
@@ -25843,11 +25852,15 @@ function skyNewView() {
 }
 // after the world, in this view: the smoke behind deck 1, deck 1's clouds (a flying plane under one of their pixels is in
 // the cloud: hidden, as the old front heaps hid it - hiddenPlane), and the rays
-function skyNewFront() {
-  const V = SKYV[viewIdx]; if (!V) return;
+// (Nov 1: its own sub-parts, CPU and GPU - 48-render.js subLap: tnSmokeB the smoke behind deck 1, tnSparks the sparks and bullets,
+// tnDeck1 deck 1 laid in front of the world's sky, the planes in it, the rays; t0 when it began, back: when it ended)
+function skyNewFront(t0) {
+  const V = SKYV[viewIdx]; if (!V) return t0;
   V.ctx = C;
   NSKY.smoke(V, 'back');
+  t0 = subLap('tnSmokeB', t0);
   { const x0 = CAMPX / SV, x1 = x0 + VWW; drawSparks(x0, x1); drawBullets(x0, x1); }   // (under deck 1's clouds, as the smoke behind them)
+  t0 = subLap('tnSparks', t0);
   V.planes = [];
   for (const pl of allPlanes()) {
     if (!pl || pl.state !== 'fly') continue;
@@ -25859,6 +25872,7 @@ function skyNewFront() {
   C.save(); frontClip(); C.clip();
   NSKY.front(V, V.again);                                  // (a shared view: its first half tested every plane)
   C.restore();
+  return subLap('tnDeck1', t0);
 }
 // the sky over the near world, as a path: down each side, and along the ground (the land's top, or the sea's) and the towers'
 // outlines between, right to left
@@ -26288,6 +26302,16 @@ function drawFogHills() {
   }
   C.globalAlpha = 1;
 }
+// (Nov 1) each of the 340 stars' hashes - its place across and up, its twinkle, its colour, its size - worked out once (hash is a
+// plain function of k: the same numbers as worked out each frame); the star colour's array, filled a star at a time; a meteor's
+let STARH = null;
+const STARC = [255, 255, 0], METC = [255, 250, 225];
+function starH() {
+  if (STARH) return STARH;
+  const H = STARH = new Float64Array(340 * 5);
+  for (let k = 0; k < 340; k++) { H[k * 5] = hash(k * 3.17); H[k * 5 + 1] = hash(k * 7.31); H[k * 5 + 2] = hash(k); H[k * 5 + 3] = hash(k * 2); H[k * 5 + 4] = hash(k * 9); }
+  return H;
+}
 function renderSky() {
   const T0sky = performance.now();
   moonXs[viewIdx] = -1e9; sunXs[viewIdx] = -1e9;
@@ -26324,16 +26348,22 @@ function renderSky() {
   // stars (above the clouds the night is always clear; the clouds are drawn over them)
   const starA = E.night * E.night;
   if (starA > 0.02 || spaceAt(T) > 0.3) {
+    // (Nov 1: each star's five hashes worked out once - starH - and each drawn in a colour given as numbers (fillRectA, the alpha
+    // as its colour text's - glA3), not a colour text made and read back a star; the last one's text set at the end, as left)
+    const SH = starH(), SC = STARC;
+    let la = -1, lb = 0;
     for (let k = 0; k < 340; k++) {
-      let sx = hash(k * 3.17) * bw - VSX, sy = hzS - 8 - hash(k * 7.31) * bh * 1.5;
+      const h1 = SH[k * 5], h2 = SH[k * 5 + 1];
+      let sx = h1 * bw - VSX, sy = hzS - 8 - h2 * bh * 1.5;
       // (up in space the whole sky is stars, drifting a little as you climb)
-      if (OWM && spaceAt(T) > 0.3 && sy < T - 2) { sy = ((hash(k * 7.31) * bh * 1.5 + lift * 0.04) % (bh + 40)) - 20 - SHY; sx = ((hash(k * 3.17) * bw - CAMPX * 0.01) % bw + bw) % bw - VSX; }
+      if (OWM && spaceAt(T) > 0.3 && sy < T - 2) { sy = ((h2 * bh * 1.5 + lift * 0.04) % (bh + 40)) - 20 - SHY; sx = ((h1 * bw - CAMPX * 0.01) % bw + bw) % bw - VSX; }
       if (sx < -2 || sx > VWP + 2) continue;
-      const tw = 0.55 + 0.45 * Math.sin(time * (1 + hash(k) * 3) + k), sa = Math.max(starA, clamp((spaceAt(sy) - 0.3) * 1.4, 0, 0.9));
+      const tw = 0.55 + 0.45 * Math.sin(time * (1 + SH[k * 5 + 2] * 3) + k), sa = Math.max(starA, clamp((spaceAt(sy) - 0.3) * 1.4, 0, 0.9));
       if (sa < 0.02) continue;
-      C.fillStyle = rgbs([255, 255, 240 - hash(k * 2) * 60], sa * tw);
-      C.fillRect(Math.round(sx), Math.round(sy), hash(k * 9) > 0.92 ? 2 : 1, 1);
+      SC[2] = 240 - SH[k * 5 + 3] * 60; const a = sa * tw;
+      fillRectA(C, SC, glA3(a), Math.round(sx), Math.round(sy), SH[k * 5 + 4] > 0.92 ? 2 : 1, 1); la = a; lb = SC[2];
     }
+    if (la >= 0) { SC[2] = lb; C.fillStyle = rgbs(SC, la); }
   }
   // shooting stars: now and then one streaks across the night and burns out
   const shA = Math.max(starA, spaceAt(T) * 0.8);
@@ -26349,11 +26379,13 @@ function renderSky() {
       if (st.t > st.life || shA < 0.2) ss.s = null;
       else {
         const u = st.t / st.life, head = Math.sin(Math.PI * Math.min(1, u * 1.2)), L = 16, pb = Math.max(1, Math.round(S));
+        let la = 0;
         for (let k = 0; k < L; k++) {
           const f = k / L, x = st.x + st.vx * (st.t - f * 0.12), y = st.y + st.vy * (st.t - f * 0.12);
-          C.fillStyle = rgbs([255, 250, 225], shA * head * (1 - f) * 0.95);
-          C.fillRect(Math.round(x), Math.round(y), k < 2 ? pb * 2 : pb, pb);
+          la = shA * head * (1 - f) * 0.95;   // (Nov 1: a colour given as numbers, as the stars)
+          fillRectA(C, METC, glA3(la), Math.round(x), Math.round(y), k < 2 ? pb * 2 : pb, pb);
         }
+        C.fillStyle = rgbs(METC, la);
       }
     }
   }
@@ -26865,35 +26897,8 @@ function renderObjects() {
   }
   if (runH >= 0) plRect(lineCol, runC, runT, VWP + 2 - runC, runH);
   }
-  // foam on lively ripples
-  for (let c = -2; c < VWP + 2; c += 2) {
-    const wx = (c + CAMPX + 0.5) / SV;
-    const vv = Math.abs(simVelAt(wx));
-    const h = hash(Math.floor(wx / 3) * 3.7 + Math.floor(time * 10));
-    if (vv < 12 || h > clamp((vv - 12) / 36, 0, 0.85)) continue;
-    plRect('#ffffff', c, ys[c + 3] - lw, h > 0.4 ? 2 : 1, lw);
-  }
-  // whitecaps: when the sea is rough, foam rides on top of every big crest and trails down its back
-  fsLast = null;
-  if (E.storm > 0.25) {
-    const capH = E.waveAmp * (4.6 - 2.2 * E.storm);
-    const tick = Math.floor(time * 5);
-    for (let c = -PB * 2; c < VWP + PB * 2; c += PB) {
-      const wx = (c + CAMPX + 0.5) / SV;
-      const disp = WATER_Y - (c >= -3 && c < VWP + 3 ? ysW[c + 3] : surfaceY(wx));
-      if (disp < capH) continue;
-      const u = clamp((disp - capH) / (E.waveAmp * 2.4), 0, 1);
-      const cell = Math.floor((c + CAMPX) / PB);
-      const h = hash(cell * 1.91 + tick * 0.37);
-      if (h > 0.35 + 0.65 * u) continue;
-      const y = ys[c + 3];
-      plRect('#ffffff', c, y - PB, PB, PB);
-      if (u > 0.25) plRect('#e4f4ff', c, y, PB, PB);
-      if (u > 0.5 && h < 0.5) plRect('#ffffff', c, y - PB * 2, PB, PB);
-      const trail = Math.round(u * 3);
-      for (let k = 1; k <= trail; k++) if (hash(cell * 3.3 + k * 7.1 + tick * 0.11) < 0.55) plRect('#cfe9fb', c, y + k * PB * 2, PB, PB);
-    }
-  }
+  // foam on lively ripples, and the whitecaps (their pixel layer, CREST_L)
+  drawCrests(lw);
   plFlush();
   // wake: a white band of churned foam lying on the surface behind each hull, breaking up as it ages
   drawWakeField(x0, x1, true);
@@ -26907,99 +26912,115 @@ function renderObjects() {
 
 // A ship under way: the bow piles the sea up into a white wave that rolls off to the sides, a band of
 // foam runs back along the waterline, and the screws boil up white water under and behind the stern.
-// translucent foam whites in 12 steps, so per-pixel effects reuse a handful of colour strings
-const FOAMA = Array.from({ length: 13 }, (_, i) => `rgba(218,241,255,${(i / 12).toFixed(3)})`);
-const foamA = a => FOAMA[Math.max(0, Math.min(12, Math.round(a * 12)))];
+// (Nov 1) the sea surface's foam colours, one palette for the pixel layers that paint it (the wash, the wake): translucent foam
+// whites in 12 steps (0-12, so per-pixel effects reuse a handful of colours), then the shading's three, then the wash's and the
+// wake's own
+const SURF_PAL = [...Array.from({ length: 13 }, (_, i) => `rgba(218,241,255,${(i / 12).toFixed(3)})`), '#9ccbec', '#d4ebfb', '#ffffff', 'rgba(242,251,255,0.95)', 'rgba(228,245,255,0.94)', 'rgba(232,246,255,0.92)'];
+const SP_WHITE = 15, SP_WASH = 16, SP_BAND = 17, SP_WAKE = 18;
+const foamA = a => Math.max(0, Math.min(12, Math.round(a * 12)));   // (SURF_PAL's index)
 // Shading for a mass of foam: thin, wavy blue lines where the noise crosses its contour levels (the
-// folds between rolls of foam), a pale fringe beside them, white everywhere else
+// folds between rolls of foam), a pale fringe beside them, white everywhere else (SURF_PAL's index)
 function foamShade(t) {
   const f = t * 4 - Math.floor(t * 4), d = Math.abs(f - 0.5);
-  return d < 0.08 ? '#9ccbec' : d < 0.17 ? '#d4ebfb' : '#ffffff';
+  return d < 0.08 ? 13 : d < 0.17 ? 14 : SP_WHITE;
 }
+// (Nov 1) THE WASH'S PIXEL LAYER (40-zzzz-layers.js): every ship's wash in one draw a view, its blocks worked out by the loop that
+// painted them one fillRect at a time (the same sums: the surface's height, the noise), written instead of painted, in order
+const WASH_L = pxLayer({
+  table: null, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', c: 'view u8' }, pal: SURF_PAL,
+  view: (T, own, n, x0, x1, L) => {
+    // All of it is one solid mass of white water whose shape and shading come from smooth noise that flows
+    // back along the hull (bow) or churns in place in the sea (stern), so it reads as foam being made as she
+    // moves rather than as scattered, flickering pixels.
+    let m = 0, R = pxRoom(L, 256);
+    const put = (x, y, w, h, c) => { if (m >= R.x.length) R = pxRoom(L, m + 1); R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.c[m] = c; m++; };
+    for (const sh of ships) {
+      if (sh.state !== 'afloat' || sh.moored) continue;
+      const sp = Math.abs(sh.vx);
+      if (sp < 6 || sh.x + SHIP_L < x0 || sh.x - SHIP_L > x1) continue;
+      const k = clamp((sp - 6) / 55, 0, 1), dir = Math.sign(sh.vx), bow = sh.x + dir * SHIP_L * 0.49, stern = sh.x - dir * SHIP_L * 0.47;
+      const flow = time * (1.2 + 3 * k), stepW = dir * PB / SV;
+      // the bow wave: a mound of white water heaped against the stem, rolling back and down along the hull
+      const ahead = 4 + 12 * k, behind = SHIP_L * (0.16 + 0.22 * k), Hb = 2.5 + 8 * k, Db = 2.5 + 7 * k;
+      for (let wx = bow - dir * behind; dir > 0 ? wx < bow + ahead : wx > bow - ahead; wx += stepW) {
+        const u = (wx - bow) * dir, r = -u;                              // r: distance back from the stem
+        const prof = u > 0 ? 1 - u / ahead : Math.exp(u / (behind * 0.4));
+        const X = Math.floor(PX(wx) / PB) * PB, sy = Math.floor(PY(surfaceY(wx)) / PB) * PB;
+        if (X < -PB * 2 || X > VWP + PB) continue;
+        const crest = cloudNoise(r * 0.11 + flow * 0.5, 1.7, 11);
+        const hh = Math.round(Hb * prof * SV * (0.7 + 0.6 * crest) / PB) * PB, dd = Math.round(Db * prof * SV * (0.8 + 0.4 * crest) / PB) * PB;
+        if (hh + dd < PB) continue;
+        for (let y = sy - hh; y < sy + dd; y += PB) {
+          const yw = y / SV, t = cloudNoise((r + yw * 0.8) * 0.06 + flow * 0.2, yw * 0.16, 9);   // streaks sweeping back and down
+          let col;
+          if (y < sy) {
+            if (y - (sy - hh) < PB * 2 && cloudNoise(r * 0.4 + flow, yw * 0.3, 5) < 0.4) continue;   // a ragged, tumbling crest
+            col = foamShade(t);
+          } else {
+            const dv = (y - sy) / Math.max(1, dd);
+            if (dv > 0.45 && t < dv * 0.9 - 0.1) continue;
+            col = dv < 0.3 && t > 0.3 ? SP_WASH : foamA(0.9 * (1 - dv * 0.75));
+          }
+          put(X, y, PB, PB, col);
+        }
+        // spray thrown up off the top of it
+        if (prof > 0.45 && k > 0.2) for (let jj = 1; jj <= 2; jj++)
+          if (cloudNoise(r * 0.5 - flow * 1.5, jj * 1.7, 13) > 0.84 - 0.12 * k) put(X, sy - hh - jj * PB * 2, PB, PB, SP_WHITE);
+      }
+      // a band of foam along the waterline, from the bow wave back to the stern, thinning aft (painted over the bow wave)
+      for (let wx = bow - dir * behind * 0.6; dir > 0 ? wx > stern : wx < stern; wx -= stepW) {
+        const r = (bow - wx) * dir, X = Math.floor(PX(wx) / PB) * PB;
+        if (X < -PB * 2 || X > VWP + PB) continue;
+        const n = cloudNoise(r * 0.09 + flow * 0.45, 3.3, 17), fade = 1 - 0.5 * r / SHIP_L;
+        const t = Math.round((0.6 + 1.6 * k) * SV * (0.2 + 1.1 * n) * fade / PB) * PB;
+        if (t < PB) continue;
+        const sy = Math.floor(PY(surfaceY(wx)) / PB) * PB;
+        put(X, sy - t, PB, t + PB, n > 0.5 ? SP_WHITE : SP_BAND);
+        if (n > 0.55) put(X, sy + PB, PB, PB, foamA(0.55));
+      }
+      // the screws: a heap of white water boiling up behind the stern and spreading out astern, with a plume of
+      // aerated water under it. Its texture is anchored in the sea, so the ship leaves it behind as she goes.
+      const th = Math.abs(sh.throttle), boil = clamp(0.3 * k + 0.8 * th, 0, 1);
+      if (boil < 0.05) continue;
+      const len = 22 + 70 * boil;
+      for (let wx = stern + dir * 8; dir > 0 ? wx > stern - len : wx < stern + len; wx -= stepW) {
+        const v = (stern - wx) * dir / len, vv = clamp(v, 0, 1);
+        const env = v < 0 ? clamp(1 + v * len / 8, 0, 1) : Math.pow(1 - vv, 0.8);
+        const X = Math.floor(PX(wx) / PB) * PB;
+        if (X < -PB * 2 || X > VWP + PB) continue;
+        const sy = Math.floor(PY(surfaceY(wx)) / PB) * PB;
+        const c1 = cloudNoise(wx * 0.13, time * 1.3, 21), c2 = cloudNoise(wx * 0.31, time * 2.1, 22);
+        // low where it still runs under her counter, heaped up just astern of it
+        const up = Math.round((1.5 + 5 * boil) * env * (v < 0 ? 0.35 : 1) * SV * (0.55 + 0.7 * c1) / PB) * PB;
+        const down = Math.round((4 + 16 * boil) * (0.35 + 0.65 * env) * SV / PB) * PB;
+        for (let y = sy - up; y < sy + down; y += PB) {
+          const yw = y / SV;
+          let col;
+          if (y < sy) {
+            if (y - (sy - up) < PB * 2 && c2 < 0.35) continue;
+            const t = cloudNoise(wx * 0.045 - yw * 0.1, time * 0.5 + yw * 0.14, 23);   // rolls of foam, one over the next
+            col = foamShade(t);
+          } else {
+            const dv = (y - sy) / Math.max(1, down), t2 = cloudNoise(wx * 0.12, yw * 0.3 + time * 0.7, 24);
+            if (t2 < dv * 1.1 - 0.15) continue;
+            col = foamA((1 - dv) * (0.95 - 0.5 * vv));
+          }
+          put(X, y, PB, PB, col);
+        }
+        if (env > 0.3 && cloudNoise(wx * 0.5, time * 5, 25) > 0.82) put(X, sy - up - PB * 2, PB, PB, SP_WHITE);
+      }
+    }
+    L.last = m ? R.c[m - 1] : -1;
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = int(a_c); return true; }
+`,
+});
 function drawShipWash(x0, x1) {
-  // All of it is one solid mass of white water whose shape and shading come from smooth noise that flows
-  // back along the hull (bow) or churns in place in the sea (stern), so it reads as foam being made as she
-  // moves rather than as scattered, flickering pixels.
-  fsLast = null;
-  for (const sh of ships) {
-    if (sh.state !== 'afloat' || sh.moored) continue;
-    const sp = Math.abs(sh.vx);
-    if (sp < 6 || sh.x + SHIP_L < x0 || sh.x - SHIP_L > x1) continue;
-    const k = clamp((sp - 6) / 55, 0, 1), dir = Math.sign(sh.vx), bow = sh.x + dir * SHIP_L * 0.49, stern = sh.x - dir * SHIP_L * 0.47;
-    const flow = time * (1.2 + 3 * k), stepW = dir * PB / SV;
-    // the bow wave: a mound of white water heaped against the stem, rolling back and down along the hull
-    const ahead = 4 + 12 * k, behind = SHIP_L * (0.16 + 0.22 * k), Hb = 2.5 + 8 * k, Db = 2.5 + 7 * k;
-    for (let wx = bow - dir * behind; dir > 0 ? wx < bow + ahead : wx > bow - ahead; wx += stepW) {
-      const u = (wx - bow) * dir, r = -u;                              // r: distance back from the stem
-      const prof = u > 0 ? 1 - u / ahead : Math.exp(u / (behind * 0.4));
-      const X = Math.floor(PX(wx) / PB) * PB, sy = Math.floor(PY(surfaceY(wx)) / PB) * PB;
-      if (X < -PB * 2 || X > VWP + PB) continue;
-      const crest = cloudNoise(r * 0.11 + flow * 0.5, 1.7, 11);
-      const hh = Math.round(Hb * prof * SV * (0.7 + 0.6 * crest) / PB) * PB, dd = Math.round(Db * prof * SV * (0.8 + 0.4 * crest) / PB) * PB;
-      if (hh + dd < PB) continue;
-      for (let y = sy - hh; y < sy + dd; y += PB) {
-        const yw = y / SV, t = cloudNoise((r + yw * 0.8) * 0.06 + flow * 0.2, yw * 0.16, 9);   // streaks sweeping back and down
-        let col;
-        if (y < sy) {
-          if (y - (sy - hh) < PB * 2 && cloudNoise(r * 0.4 + flow, yw * 0.3, 5) < 0.4) continue;   // a ragged, tumbling crest
-          col = foamShade(t);
-        } else {
-          const dv = (y - sy) / Math.max(1, dd);
-          if (dv > 0.45 && t < dv * 0.9 - 0.1) continue;
-          col = dv < 0.3 && t > 0.3 ? 'rgba(242,251,255,0.95)' : foamA(0.9 * (1 - dv * 0.75));
-        }
-        fillPx(col, X, y, PB, PB);
-      }
-      // spray thrown up off the top of it
-      if (prof > 0.45 && k > 0.2) for (let jj = 1; jj <= 2; jj++)
-        if (cloudNoise(r * 0.5 - flow * 1.5, jj * 1.7, 13) > 0.84 - 0.12 * k) fillPx('#ffffff', X, sy - hh - jj * PB * 2, PB, PB);
-    }
-    plFlush();                                            // (the band below is painted over the bow wave)
-    // a band of foam along the waterline, from the bow wave back to the stern, thinning aft
-    for (let wx = bow - dir * behind * 0.6; dir > 0 ? wx > stern : wx < stern; wx -= stepW) {
-      const r = (bow - wx) * dir, X = Math.floor(PX(wx) / PB) * PB;
-      if (X < -PB * 2 || X > VWP + PB) continue;
-      const n = cloudNoise(r * 0.09 + flow * 0.45, 3.3, 17), fade = 1 - 0.5 * r / SHIP_L;
-      const t = Math.round((0.6 + 1.6 * k) * SV * (0.2 + 1.1 * n) * fade / PB) * PB;
-      if (t < PB) continue;
-      const sy = Math.floor(PY(surfaceY(wx)) / PB) * PB;
-      fillPx(n > 0.5 ? '#ffffff' : 'rgba(228,245,255,0.94)', X, sy - t, PB, t + PB);
-      if (n > 0.55) fillPx(foamA(0.55), X, sy + PB, PB, PB);
-    }
-    // the screws: a heap of white water boiling up behind the stern and spreading out astern, with a plume of
-    // aerated water under it. Its texture is anchored in the sea, so the ship leaves it behind as she goes.
-    plFlush();
-    const th = Math.abs(sh.throttle), boil = clamp(0.3 * k + 0.8 * th, 0, 1);
-    if (boil < 0.05) continue;
-    const len = 22 + 70 * boil;
-    for (let wx = stern + dir * 8; dir > 0 ? wx > stern - len : wx < stern + len; wx -= stepW) {
-      const v = (stern - wx) * dir / len, vv = clamp(v, 0, 1);
-      const env = v < 0 ? clamp(1 + v * len / 8, 0, 1) : Math.pow(1 - vv, 0.8);
-      const X = Math.floor(PX(wx) / PB) * PB;
-      if (X < -PB * 2 || X > VWP + PB) continue;
-      const sy = Math.floor(PY(surfaceY(wx)) / PB) * PB;
-      const c1 = cloudNoise(wx * 0.13, time * 1.3, 21), c2 = cloudNoise(wx * 0.31, time * 2.1, 22);
-      // low where it still runs under her counter, heaped up just astern of it
-      const up = Math.round((1.5 + 5 * boil) * env * (v < 0 ? 0.35 : 1) * SV * (0.55 + 0.7 * c1) / PB) * PB;
-      const down = Math.round((4 + 16 * boil) * (0.35 + 0.65 * env) * SV / PB) * PB;
-      for (let y = sy - up; y < sy + down; y += PB) {
-        const yw = y / SV;
-        let col;
-        if (y < sy) {
-          if (y - (sy - up) < PB * 2 && c2 < 0.35) continue;
-          const t = cloudNoise(wx * 0.045 - yw * 0.1, time * 0.5 + yw * 0.14, 23);   // rolls of foam, one over the next
-          col = foamShade(t);
-        } else {
-          const dv = (y - sy) / Math.max(1, down), t2 = cloudNoise(wx * 0.12, yw * 0.3 + time * 0.7, 24);
-          if (t2 < dv * 1.1 - 0.15) continue;
-          col = foamA((1 - dv) * (0.95 - 0.5 * vv));
-        }
-        fillPx(col, X, y, PB, PB);
-      }
-      if (env > 0.3 && cloudNoise(wx * 0.5, time * 5, 25) > 0.82) fillPx('#ffffff', X, sy - up - PB * 2, PB, PB);
-    }
-  }
-  plFlush();
+  WASH_L.last = -1;
+  pxDraw(WASH_L, x0, x1);
+  // (the fill style as the rectangles one by one left it: the last one's colour)
+  if (WASH_L.last >= 0) C.fillStyle = SURF_PAL[WASH_L.last];
   fsLast = null;
 }
 // The wake as one field: every wake patch adds to a per-column amount of churned water, so overlapping
@@ -27024,35 +27045,99 @@ function buildWakeField(x0, x1) {
 }
 function drawWakeField(x0, x1, top) {
   if (!top) buildWakeField(x0, x1);               // the under-water pass runs first each view; the surface pass reuses it
+  WAKE_L.top = top; WAKE_L.last = -1;
+  pxDraw(WAKE_L, x0, x1);
+  // (the fill style as the rectangles one by one left it: the last one's colour)
+  if (WAKE_L.last >= 0) C.fillStyle = SURF_PAL[WAKE_L.last];
   fsLast = null;
-  for (let i = 0; i < WF_N; i++) {
-    const I = WF_I[i];
-    if (I < 0.03) continue;
-    const X = WF_X0 + i * PB, m = 1 - Math.exp(-I * 0.8), K = WF_K[i] / I;
-    const wx = (X + PB / 2 + CAMPX) / SV, c = clamp(X + PB / 2, -3, VWP + 2), sy = Math.floor(ys[c + 3] / PB) * PB;
-    const nA = cloudNoise(wx * 0.07, time * 0.35, 3);
-    if (top) {
-      const cov = m * (0.55 + 0.9 * nA);
-      if (cov < 0.3) continue;
-      const th = Math.max(PB, Math.round((0.6 + 2.6 * Math.min(1, cov)) * SV / PB) * PB);
-      if (cov < 0.45) fillPx('rgba(232,246,255,0.92)', X, sy - th, PB, th + 1);
-      else for (let y = sy - th; y < sy; y += PB) fillPx(foamShade(cloudNoise(wx * 0.04 - (y / SV) * 0.08, time * 0.2 + (y / SV) * 0.14, 4)), X, y, PB, y + PB >= sy ? PB + 1 : PB);
-      const lip = Math.round(2 * m * SV / PB) * PB;
-      if (lip > 0) fillPx(foamA(0.7 * m), X, sy + 1, PB, lip);
-    } else {
-      const Dp = Math.round((3 + 14 * m) * K * SV);
-      let runY = 0, runCol = null;
-      const flush = yEnd => { if (runCol) rbRect(runCol, X, runY, PB, yEnd - runY); };
-      for (let y = sy + PB; y < sy + Dp; y += PB) {
-        const dd = (y - sy) / Dp, n3 = cloudNoise(wx * 0.12, (y / SV) * 0.22 + time * 0.15, 7);
-        const dens = m * Math.pow(1 - dd, 1.3) * (0.5 + n3);
-        const col = dens < 0.08 ? null : foamA(Math.min(0.7, dens * 0.75));
-        if (col !== runCol) { flush(y); runY = y; runCol = col; }
+}
+// (Nov 1) THE WAKE FIELD'S PIXEL LAYER (40-zzzz-layers.js): both its passes (top: the foam on the surface; else the churned water
+// under it, a run of blocks of one colour as one rectangle), each in one draw a view, worked out by the loop that painted them
+const WAKE_L = pxLayer({
+  table: null, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', c: 'view u8' }, pal: SURF_PAL,
+  view: (T, own, n, x0, x1, L) => {
+    const top = L.top;
+    let m = 0, R = pxRoom(L, 256);
+    const put = (x, y, w, h, c) => { if (m >= R.x.length) R = pxRoom(L, m + 1); R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.c[m] = c; m++; };
+    for (let i = 0; i < WF_N; i++) {
+      const I = WF_I[i];
+      if (I < 0.03) continue;
+      const X = WF_X0 + i * PB, m_ = 1 - Math.exp(-I * 0.8), K = WF_K[i] / I;
+      const wx = (X + PB / 2 + CAMPX) / SV, c = clamp(X + PB / 2, -3, VWP + 2), sy = Math.floor(ys[c + 3] / PB) * PB;
+      const nA = cloudNoise(wx * 0.07, time * 0.35, 3);
+      if (top) {
+        const cov = m_ * (0.55 + 0.9 * nA);
+        if (cov < 0.3) continue;
+        const th = Math.max(PB, Math.round((0.6 + 2.6 * Math.min(1, cov)) * SV / PB) * PB);
+        if (cov < 0.45) put(X, sy - th, PB, th + 1, SP_WAKE);
+        else for (let y = sy - th; y < sy; y += PB) put(X, y, PB, y + PB >= sy ? PB + 1 : PB, foamShade(cloudNoise(wx * 0.04 - (y / SV) * 0.08, time * 0.2 + (y / SV) * 0.14, 4)));
+        const lip = Math.round(2 * m_ * SV / PB) * PB;
+        if (lip > 0) put(X, sy + 1, PB, lip, foamA(0.7 * m_));
+      } else {
+        const Dp = Math.round((3 + 14 * m_) * K * SV);
+        let runY = 0, runCol = -1;
+        for (let y = sy + PB; y < sy + Dp; y += PB) {
+          const dd = (y - sy) / Dp, n3 = cloudNoise(wx * 0.12, (y / SV) * 0.22 + time * 0.15, 7);
+          const dens = m_ * Math.pow(1 - dd, 1.3) * (0.5 + n3);
+          const col = dens < 0.08 ? -1 : foamA(Math.min(0.7, dens * 0.75));
+          if (col !== runCol) { if (runCol >= 0) put(X, runY, PB, y - runY, runCol); runY = y; runCol = col; }
+        }
+        if (runCol >= 0) put(X, runY, PB, sy + Dp - runY, runCol);
       }
-      flush(sy + Dp);
     }
-  }
-  plFlush();
+    L.last = m ? R.c[m - 1] : -1;
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = int(a_c); return true; }
+`,
+});
+/* (Nov 1) THE CRESTS' PIXEL LAYER (40-zzzz-layers.js): the foam on lively ripples and the whitecaps, one draw a view, their
+   blocks worked out by the loops that painted them (the same sums on the surface sampled this view, ys / ysW) */
+const CREST_PAL = ['#ffffff', '#e4f4ff', '#cfe9fb'];
+const CREST_L = pxLayer({
+  table: null, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', c: 'view u8' }, pal: CREST_PAL,
+  view: (T, own, n, x0, x1, L) => {
+    const lw = L.lw;
+    let m = 0, R = pxRoom(L, 256);
+    const put = (x, y, w, h, c) => { L.last = c; if (y !== y) return; if (m >= R.x.length) R = pxRoom(L, m + 1); R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.c[m] = c; m++; };   // (no surface sampled there - ys past its start: the rectangle at NaN drew nothing)
+    // foam on lively ripples
+    for (let c = -2; c < VWP + 2; c += 2) {
+      const wx = (c + CAMPX + 0.5) / SV;
+      const vv = Math.abs(simVelAt(wx));
+      const h = hash(Math.floor(wx / 3) * 3.7 + Math.floor(time * 10));
+      if (vv < 12 || h > clamp((vv - 12) / 36, 0, 0.85)) continue;
+      put(c, ys[c + 3] - lw, h > 0.4 ? 2 : 1, lw, 0);
+    }
+    // whitecaps: when the sea is rough, foam rides on top of every big crest and trails down its back
+    if (E.storm > 0.25) {
+      const capH = E.waveAmp * (4.6 - 2.2 * E.storm);
+      const tick = Math.floor(time * 5);
+      for (let c = -PB * 2; c < VWP + PB * 2; c += PB) {
+        const wx = (c + CAMPX + 0.5) / SV;
+        const disp = WATER_Y - (c >= -3 && c < VWP + 3 ? ysW[c + 3] : surfaceY(wx));
+        if (disp < capH) continue;
+        const u = clamp((disp - capH) / (E.waveAmp * 2.4), 0, 1);
+        const cell = Math.floor((c + CAMPX) / PB);
+        const h = hash(cell * 1.91 + tick * 0.37);
+        if (h > 0.35 + 0.65 * u) continue;
+        const y = ys[c + 3];
+        put(c, y - PB, PB, PB, 0);
+        if (u > 0.25) put(c, y, PB, PB, 1);
+        if (u > 0.5 && h < 0.5) put(c, y - PB * 2, PB, PB, 0);
+        const trail = Math.round(u * 3);
+        for (let k = 1; k <= trail; k++) if (hash(cell * 3.3 + k * 7.1 + tick * 0.11) < 0.55) put(c, y + k * PB * 2, PB, PB, 2);
+      }
+    }
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = int(a_c); return true; }
+`,
+});
+function drawCrests(lw) {
+  CREST_L.lw = lw; CREST_L.last = -1;
+  pxDraw(CREST_L, 0, 0);
+  // (the fill style as the rectangles one by one left it: the last one's colour)
+  if (CREST_L.last >= 0) C.fillStyle = CREST_PAL[CREST_L.last];
   fsLast = null;
 }
 function drawShocks(x0, x1) { pxDraw(SHOCK_L, x0, x1); }
@@ -27789,16 +27874,19 @@ function drawTiles(im, imFlip, p, topW, k, fill, gap = 0) {
   return y + a.height;
 }
 
-// A seabed rock: a lumpy mound, lit on top and on the side facing the light, darker underneath
-function drawRock(p, base) {
+// A seabed rock: a lumpy mound, lit on top and on the side facing the light, darker underneath - each rectangle (in world units,
+// as plRectW takes them; its colour ALG_PAL's index) to put: the weed's pixel layer, or a kept layer's painting (rockPaintW)
+const ALG_PAL = ['#2f7a34', '#3d9142', '#6fb34a', '#4f9a3c', '#56a84c', '#76808a', '#5a636d', '#434b55', '#8c96a0', '#68727c'];
+const rockPaintW = (c, wx, wy, ww, wh) => plRectW(ALG_PAL[c], wx, wy, ww, wh);
+function drawRock(p, base, put) {
   const w = p.rw, h = p.rh, rows = Math.max(2, Math.round(h));
   for (let r = 0; r < rows; r++) {
     const u = (r + 0.5) / rows;                                    // 0 at the bottom, 1 at the top
     const half = w / 2 * Math.sqrt(Math.max(0, 1 - u * u)) * (0.9 + 0.2 * hash(p.rs + r));
     if (half < 0.6) continue;
     const y = base - 1 - (r + 1) * (h / rows);
-    plRectW(u > 0.7 ? '#76808a' : u > 0.35 ? '#5a636d' : '#434b55', p.x - half, y, half * 2, h / rows + 0.5);
-    if (u > 0.3) plRectW(u > 0.7 ? '#8c96a0' : '#68727c', p.x - half, y, Math.max(1, half * 0.6), h / rows + 0.5);   // lit flank
+    put(u > 0.7 ? 5 : u > 0.35 ? 6 : 7, p.x - half, y, half * 2, h / rows + 0.5);
+    if (u > 0.3) put(u > 0.7 ? 8 : 9, p.x - half, y, Math.max(1, half * 0.6), h / rows + 0.5);   // lit flank
   }
 }
 // (engine stage 6, Oct 30: zoomed out a blade's segments round to the same pixels, and each rectangle was drawn over by the next -
@@ -27810,100 +27898,98 @@ function plantLook(p) {
   if (p._flx !== p.x || p._flP !== GSH.P || p._flA !== BED_A || p._flB !== BED_B) { p._flx = p.x; p._flP = GSH.P; p._flA = BED_A; p._flB = BED_B; p._fl = floorLook(p.x); }
   return p._fl;
 }
-// (engine stage 6, Oct 30, opt-algae: under WebGL a kept rectangle went plRect -> fs1 -> fillRect -> glBegin -> _corners ->
-// glFillQuad -> glQuad, every one of the frame's tens of thousands. Now straight to glQuad: the batch made ready once (glBegin,
-// again after anything else drawn - algOut), the colour packed as glFillQuad packs it, the corners by _corners' own sums (an
-// upright transform). The fill style the plain way would have left is set at algOut. The same quads, in the same order)
-const ALG = { on: false, c: null, x: 0, y: 0, w: 0, h: 0, gl: false, need: true, m: null, lc: null, lv: 0, pend: null };
-function algQuad(col, x, y, w, h) {
-  if (!ALG.gl) { plRect(col, x, y, w, h); return; }
-  if (ALG.need) {
-    const m = C.s.m;
-    if (m[1] !== 0 || m[2] !== 0) { ALG.gl = false; plRect(col, x, y, w, h); return; }   // (turned: the plain way)
-    glBegin(C, C.s.op); ALG.m = m; ALG.need = false;
-  }
-  if (col !== ALG.lc) { ALG.lc = col; ALG.lv = glParse(col).p1; }
-  const m = ALG.m, ax = m[0] * x + m[4], ay = m[3] * y + m[5], bx = ax + m[0] * w, by = ay + m[3] * h;
-  glQuad(ax, ay, bx, ay, bx, by, ax, by, 0, 0, 0, 0, 0, 0, 0, 0, ALG.lv, 0, 0);
-  ALG.pend = col;
-}
-function algPut(col, x, y, w, h) {
-  if (!ALG.on) { plRect(col, x, y, w, h); return; }
-  if (ALG.c !== null && !(x <= ALG.x && y <= ALG.y && x + w >= ALG.x + ALG.w && y + h >= ALG.y + ALG.h)) algQuad(ALG.c, ALG.x, ALG.y, ALG.w, ALG.h);
-  ALG.c = col; ALG.x = x; ALG.y = y; ALG.w = w; ALG.h = h;
-}
-function algOut() {
-  if (ALG.c !== null) algQuad(ALG.c, ALG.x, ALG.y, ALG.w, ALG.h);
-  ALG.c = null;
-  if (ALG.pend !== null) { fs1(ALG.pend); ALG.pend = null; }   // (the fill style as the plain way leaves it)
-  ALG.need = true;                                         // (something else may draw next: the batch made ready again)
-}
-const algW = (col, wx, wy, ww, wh) => { const X = PX(wx), w = Math.max(1, Math.round(ww * SV)); if (X + w > RKL.maxR) RKL.maxR = X + w; algPut(col, X, PY(wy), w, Math.max(1, Math.round(wh * SV))); };   // (maxR: how far right the weed has reached - 44-zz-rock-layer.js)
-const ALG_C35 = Math.cos(0.35), ALG_S35 = Math.sin(0.35), ALG_C60 = Math.cos(0.6), ALG_S60 = Math.sin(0.6);
 function drawAlgae(x0, x1, lkOnly) {
-  // algae and kelp swaying in the current
-  const current = E.windU * 0.004 + E.storm * 0.3 * Math.sin(time * 0.9);
-  // a rough sea stirs the bottom too: the weed sways further and quicker the more the water's churning
-  const tur = clamp(0.35 * ((E.waveAmp || 1) - 1) + 1.3 * (E.storm || 0) + Math.abs(E.windU || 0) * 0.006, 0, 2.2);
-  const swA = 1 + 1.1 * tur, swF = 1 + 0.55 * tur;
   fsLast = null;
-  ALG.on = C.globalAlpha === 1 && C.globalCompositeOperation === 'source-over'; ALG.c = null; ALG.pend = null; ALG.need = true;
   if (!lkOnly) rockLayerDraw(x0, x1); else { RKL.lay = false; }   // (engine stage 6: the rocks from their kept layers - 44-zz-rock-layer.js)
-  ALG.gl = ALG.on && GLR.on && !GLR.lost && !BATCH && C instanceof GLCtx;   // (the plain way would be fillRect on the GL context: algQuad)
-  // (opt-algae: what a blade's segments share worked out once a plant or a blade, not every segment - the same sums in the same
-  // order, so the same numbers: the first wave's angle up to the segment's own step, the second's, the current's 8; the second
-  // wave left out when the sea is calm (tur 0: it adds nothing); the segment's size in pixels once a plant; PX, PY as algW does)
-  const T35 = tur * 0.35, C8 = current * 8;
-  for (const p of plants) {
-    if (p.x < x0 - 60 || p.x > x1 + 60 || !p.lk !== !lkOnly || (FLOOR_MARKED && !p.lk && plantLook(p))) continue;   // (none on a floor piece marked FOREST or DESERT)
-    const base = seabedY(p.x) + 3;
-    if (ISLE !== null && base - (p.h || 0) < WATER_Y + 4) continue;   // (by an island: nothing of the sea's out of the water)
-    if (p.kind === 'rock') { algOut(); if (rockAgain(p, base)) drawRock(p, base); continue; }
-    const kelp = p.kind === 'kelp', blades = kelp ? 1 + (p.n > 4 ? 1 : 0) : p.n;
-    const segs = kelp ? Math.round(p.h / 6) : Math.round(p.h / 3.5), segH = kelp ? 6 : 3.5;
-    const tA = time * (kelp ? 0.9 : 1.6) * swF + p.ph, tB = time * 2.7 * swF + p.ph * 1.7, bend = p.bend || 0;
-    const dX = kelp ? 1.5 : 0.7, wP = Math.max(1, Math.round((kelp ? 3 : 1.4) * SV)), hP = Math.max(1, Math.round((segH + 0.5) * SV));
-    for (let b = 0; b < blades; b++) {
-      const A = tA + b;
-      let x = p.x + (b - (blades - 1) / 2) * (kelp ? 7 : 2.5), y = base;
-      // (user Oct 31, 17:10: the two waves stepped down the blade by turning, not a sine a segment - the same sway to a
-      // millionth, a segment now and then a pixel over: the weed was ~0.8 ms a frame)
-      let sa = Math.sin(A), ca = Math.cos(A), sb = T35 !== 0 ? Math.sin(tB) : 0, cb = T35 !== 0 ? Math.cos(tB) : 0;
-      for (let s = 0; s < segs; s++) {
-        const u = s / segs;
-        const sway = (sa + (T35 !== 0 ? T35 * sb : 0)) * (0.9 + 1.6 * u) * swA + C8 * u + bend * u * 1.6;
-        { const t = sa * ALG_C35 + ca * ALG_S35; ca = ca * ALG_C35 - sa * ALG_S35; sa = t; }
-        if (T35 !== 0) { const t = sb * ALG_C60 + cb * ALG_S60; cb = cb * ALG_C60 - sb * ALG_S60; sb = t; }
-        x += sway * 0.55; y -= segH;
-        const X = Math.round((x - dX) * SV) - CAMPX;
-        if (X + wP > RKL.maxR) RKL.maxR = X + wP;
-        algPut(kelp ? (s % 2 ? '#2f7a34' : '#3d9142') : (u > 0.6 ? '#6fb34a' : '#4f9a3c'), X, Math.round(y * SV) - TOPPX, wP, hP);
-        if (kelp && s % 3 === 1) algW('#56a84c', x + (s % 2 ? 1.5 : -4.5), y + 1, 3, 2);
-      }
-    }
-  }
-  if (lkOnly) { algOut(); return; }                       // (the cut-off pieces: with the sea's pass)
-  // the cut-off pieces, drawn as the plant draws its blades, along the piece's own angle (upright as cut, lying on the sand)
-  for (const b of weedBits) {
-    if (b.x < x0 - b.len - 10 || b.x > x1 + b.len + 10) continue;
-    // (floaty: each blade a chain of segments, each turned a little more than the last - curling and waving along its
-    // length as it sinks; lying on the sand it only stirs)
-    const segH = b.kelp ? 6 : 3.5, segs = Math.max(1, Math.round(b.len / segH)), amp = b.rest ? 0.06 : 0.32, th = b.kelp ? 3 : 1.4;
-    for (let k = 0; k < b.n; k++) {
-      const off = (k - (b.n - 1) / 2) * (b.kelp ? 7 : 2.5);
-      let x = b.x - Math.cos(b.a) * off, y = b.y - Math.sin(b.a) * off;
-      for (let s = 0; s < segs; s++) {
-        const u = s / segs, ang = b.a + Math.sin(time * 1.6 + b.ph + k * 0.7 - s * 0.55) * amp * (0.3 + u) + (b.rest ? 0 : 0.25 * u * Math.sin(b.t * 0.9 + b.ph));
-        const dx = Math.sin(ang), dy = -Math.cos(ang), mx = x + dx * segH / 2, my = y + dy * segH / 2;
-        const flat = Math.abs(dx) > Math.abs(dy), rw = flat ? segH + 0.5 : th, rh = flat ? th : segH + 0.5;   // (lying: the blade along x)
-        algW(b.kelp ? (s % 2 ? '#2f7a34' : '#3d9142') : (u > 0.6 ? '#6fb34a' : '#4f9a3c'), mx - rw / 2, my - rh / 2, rw, rh);
-        x += dx * segH; y += dy * segH;
-      }
-    }
-  }
-  algOut();
-  plFlush();
+  ALGAE_L.lk = !!lkOnly; ALGAE_L.last = -1;
+  pxDraw(ALGAE_L, x0, x1);
+  // (the fill style as the rectangles one by one left it: the last one's colour)
+  if (ALGAE_L.last >= 0) fs1(ALG_PAL[ALGAE_L.last]);
+  if (!lkOnly) plFlush();
 }
+/* (Nov 1) THE WEED'S PIXEL LAYER (40-zzzz-layers.js): algae and kelp swaying in the current, the rocks among them a kept layer
+   doesn't hold (drawRock, in their turn) and the cut-off pieces, one draw a view - every rectangle worked out by the loops that
+   painted them, written instead of painted, in order. (engine stage 6, Oct 30: zoomed out a blade's segments round to the same
+   pixels, and each rectangle was drawn over by the next - thousands of 1-pixel quads a frame. A rectangle wholly covered by the
+   very next one is left out - opaque colours, drawn plainly (alpha 1, source-over), nothing between: the same picture) */
+const ALG_C35 = Math.cos(0.35), ALG_S35 = Math.sin(0.35), ALG_C60 = Math.cos(0.6), ALG_S60 = Math.sin(0.6);
+const ALGAE_L = pxLayer({
+  table: null, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', c: 'view u8' }, pal: ALG_PAL,
+  view: (T, own, n, x0, x1, L) => {
+    const lkOnly = L.lk, elide = C.s.ga === 1 && C.s.op === 'source-over';
+    let m = 0, R = pxRoom(L, 1024), pc = -1, px = 0, py = 0, pw = 0, ph = 0;   // (pc: the rectangle held back, until the next shows whether it's covered)
+    const out = (c, x, y, w, h) => { if (m >= R.x.length) R = pxRoom(L, m + 1); R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.c[m] = c; m++; L.last = c; };
+    const put = (c, x, y, w, h) => {
+      if (!elide) { out(c, x, y, w, h); return; }
+      if (pc >= 0 && !(x <= px && y <= py && x + w >= px + pw && y + h >= py + ph)) out(pc, px, py, pw, ph);
+      pc = c; px = x; py = y; pw = w; ph = h;
+    };
+    const held = () => { if (pc >= 0) out(pc, px, py, pw, ph); pc = -1; };
+    const putW = (c, wx, wy, ww, wh) => { const X = PX(wx), w = Math.max(1, Math.round(ww * SV)); if (X + w > RKL.maxR) RKL.maxR = X + w; put(c, X, PY(wy), w, Math.max(1, Math.round(wh * SV))); };   // (maxR: how far right the weed has reached - 44-zz-rock-layer.js)
+    const rockW = (c, wx, wy, ww, wh) => out(c, PX(wx), PY(wy), Math.max(1, Math.round(ww * SV)), Math.max(1, Math.round(wh * SV)));   // (plRectW's sums)
+    const current = E.windU * 0.004 + E.storm * 0.3 * Math.sin(time * 0.9);
+    // a rough sea stirs the bottom too: the weed sways further and quicker the more the water's churning
+    const tur = clamp(0.35 * ((E.waveAmp || 1) - 1) + 1.3 * (E.storm || 0) + Math.abs(E.windU || 0) * 0.006, 0, 2.2);
+    const swA = 1 + 1.1 * tur, swF = 1 + 0.55 * tur;
+    // (opt-algae: what a blade's segments share worked out once a plant or a blade, not every segment - the same sums in the same
+    // order, so the same numbers: the first wave's angle up to the segment's own step, the second's, the current's 8; the second
+    // wave left out when the sea is calm (tur 0: it adds nothing); the segment's size in pixels once a plant; PX, PY as putW does)
+    const T35 = tur * 0.35, C8 = current * 8;
+    for (const p of plants) {
+      if (p.x < x0 - 60 || p.x > x1 + 60 || !p.lk !== !lkOnly || (FLOOR_MARKED && !p.lk && plantLook(p))) continue;   // (none on a floor piece marked FOREST or DESERT)
+      const base = seabedY(p.x) + 3;
+      if (ISLE !== null && base - (p.h || 0) < WATER_Y + 4) continue;   // (by an island: nothing of the sea's out of the water)
+      if (p.kind === 'rock') { held(); if (rockAgain(p, base)) drawRock(p, base, rockW); continue; }
+      const kelp = p.kind === 'kelp', blades = kelp ? 1 + (p.n > 4 ? 1 : 0) : p.n;
+      const segs = kelp ? Math.round(p.h / 6) : Math.round(p.h / 3.5), segH = kelp ? 6 : 3.5;
+      const tA = time * (kelp ? 0.9 : 1.6) * swF + p.ph, tB = time * 2.7 * swF + p.ph * 1.7, bend = p.bend || 0;
+      const dX = kelp ? 1.5 : 0.7, wP = Math.max(1, Math.round((kelp ? 3 : 1.4) * SV)), hP = Math.max(1, Math.round((segH + 0.5) * SV));
+      for (let b = 0; b < blades; b++) {
+        const A = tA + b;
+        let x = p.x + (b - (blades - 1) / 2) * (kelp ? 7 : 2.5), y = base;
+        // (user Oct 31, 17:10: the two waves stepped down the blade by turning, not a sine a segment - the same sway to a
+        // millionth, a segment now and then a pixel over: the weed was ~0.8 ms a frame)
+        let sa = Math.sin(A), ca = Math.cos(A), sb = T35 !== 0 ? Math.sin(tB) : 0, cb = T35 !== 0 ? Math.cos(tB) : 0;
+        for (let s = 0; s < segs; s++) {
+          const u = s / segs;
+          const sway = (sa + (T35 !== 0 ? T35 * sb : 0)) * (0.9 + 1.6 * u) * swA + C8 * u + bend * u * 1.6;
+          { const t = sa * ALG_C35 + ca * ALG_S35; ca = ca * ALG_C35 - sa * ALG_S35; sa = t; }
+          if (T35 !== 0) { const t = sb * ALG_C60 + cb * ALG_S60; cb = cb * ALG_C60 - sb * ALG_S60; sb = t; }
+          x += sway * 0.55; y -= segH;
+          const X = Math.round((x - dX) * SV) - CAMPX;
+          if (X + wP > RKL.maxR) RKL.maxR = X + wP;
+          put(kelp ? (s % 2 ? 0 : 1) : (u > 0.6 ? 2 : 3), X, Math.round(y * SV) - TOPPX, wP, hP);
+          if (kelp && s % 3 === 1) putW(4, x + (s % 2 ? 1.5 : -4.5), y + 1, 3, 2);
+        }
+      }
+    }
+    if (!lkOnly) {
+      // the cut-off pieces, drawn as the plant draws its blades, along the piece's own angle (upright as cut, lying on the sand)
+      // (the lake's pass leaves them to the sea's)
+      for (const b of weedBits) {
+        if (b.x < x0 - b.len - 10 || b.x > x1 + b.len + 10) continue;
+        // (floaty: each blade a chain of segments, each turned a little more than the last - curling and waving along its
+        // length as it sinks; lying on the sand it only stirs)
+        const segH = b.kelp ? 6 : 3.5, segs = Math.max(1, Math.round(b.len / segH)), amp = b.rest ? 0.06 : 0.32, th = b.kelp ? 3 : 1.4;
+        for (let k = 0; k < b.n; k++) {
+          const off = (k - (b.n - 1) / 2) * (b.kelp ? 7 : 2.5);
+          let x = b.x - Math.cos(b.a) * off, y = b.y - Math.sin(b.a) * off;
+          for (let s = 0; s < segs; s++) {
+            const u = s / segs, ang = b.a + Math.sin(time * 1.6 + b.ph + k * 0.7 - s * 0.55) * amp * (0.3 + u) + (b.rest ? 0 : 0.25 * u * Math.sin(b.t * 0.9 + b.ph));
+            const dx = Math.sin(ang), dy = -Math.cos(ang), mx = x + dx * segH / 2, my = y + dy * segH / 2;
+            const flat = Math.abs(dx) > Math.abs(dy), rw = flat ? segH + 0.5 : th, rh = flat ? th : segH + 0.5;   // (lying: the blade along x)
+            putW(b.kelp ? (s % 2 ? 0 : 1) : (u > 0.6 ? 2 : 3), mx - rw / 2, my - rh / 2, rw, rh);
+            x += dx * segH; y += dy * segH;
+          }
+        }
+      }
+    }
+    held();
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = int(a_c); return true; }
+`,
+});
 
 /* ================================================================
    The sea floor's dressing (user Oct 24 night): by the coast big boulders (some in front of the pier's pillars),
@@ -28787,7 +28873,7 @@ function rockLayerPaint(R, sv) {
   c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, w, h); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.imageSmoothingEnabled = false;
   // (drawRock itself, its PX and PY against the region's corner: plRect on a canvas that isn't the world's fills plainly)
   C = c; SV = sv; CAMPX = R.r * w; TOPPX = R.y0; fsLast = null;
-  try { for (let i = 0; i < R.items.length; i++) drawRock(R.items[i], R.base[i]); }
+  try { for (let i = 0; i < R.items.length; i++) drawRock(R.items[i], R.base[i], rockPaintW); }
   finally { C = s.C; SV = s.SV; CAMPX = s.CAMPX; TOPPX = s.TOPPX; fsLast = null; }
   R.epoch = GLR.epoch; RKL.stats.paint++;
 }
@@ -29454,14 +29540,17 @@ function drawSailsOver(x0, x1) {
   const BW = bx1 - bx, BH = by1 - by;
   lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(bx, by, BW, BH); lc.setTransform(tr);
   C = lc; fsLast = null;
+  // (Nov 1: the clip's top at the box's - a pixel above it - not far above the screen: only the box is copied back, so the same
+  // pixels, and its stencil worked over the box only - 40-gl.js glBuildClip)
+  const yTop = (by - 1 - tr.f) / tr.d;
   for (const b of near) {
     // only what's above the water: below it, the sea in front already covers the smoke
     const half = sailHalf(b) * 1.4;
     lc.save(); lc.beginPath();
     const L = PX(b.x - half), R = PX(b.x + half);
-    lc.moveTo(L, -SHY - 400);
+    lc.moveTo(L, yTop);
     for (let c = L; c <= R; c += 2) lc.lineTo(c, PY(surfaceY((c + CAMPX + 0.5) / SV)));
-    lc.lineTo(R, -SHY - 400); lc.closePath(); lc.clip();
+    lc.lineTo(R, yTop); lc.closePath(); lc.clip();
     drawSailboat(b);
     lc.restore();
   }
@@ -29498,9 +29587,13 @@ function drawMoonlight(x0, x1) {
   lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(bx, by, bx1 - bx, by1 - by); lc.setTransform(tr);
   C = lc; fsLast = null;
   lc.save();
-  lc.beginPath(); lc.moveTo(-3, -SHY - 400);
-  for (let c = -3; c <= VWP + 3; c += 2) lc.lineTo(c, PY(surfaceY((c + CAMPX + 0.5) / SV)));
-  lc.lineTo(VWP + 3, -SHY - 400); lc.closePath(); lc.clip();
+  // (Nov 1: the clip only over the box that's copied back - its top a pixel above the box's, the surface line's points from the
+  // last one left of the box to the first one right of it, the same points (c = -3, -1, 1, ...): inside the box the same edges, so
+  // the same pixels; its stencil worked over the box only - 40-gl.js glBuildClip)
+  const yTop = (by - 1 - tr.f) / tr.d, cL = Math.max(-3, -3 + 2 * Math.floor(((bx - tr.e) / tr.a + 3) / 2) - 2), cR = Math.min(VWP + 3, -3 + 2 * Math.ceil(((bx1 - tr.e) / tr.a + 3) / 2) + 2);
+  lc.beginPath(); lc.moveTo(cL, yTop);
+  for (let c = cL; c <= cR; c += 2) lc.lineTo(c, PY(surfaceY((c + CAMPX + 0.5) / SV)));
+  lc.lineTo(cR, yTop); lc.closePath(); lc.clip();
   const side = x => (mx > -1e8 ? mx < x : lean > 0) ? 'mL' : 'mR';
   for (const sh of ships_) {
     lc.globalAlpha = 0.2 * m; drawShip(sh, 'mB');
@@ -29753,8 +29846,10 @@ let PUFF_PERIOD = 2;
 const FIRE = { heat: new Float32Array(0), px: new Uint32Array(0), cvs: new Map(), list: [] };
 // behind: only the flames burning inside a ship (drawn before the ships, so the hull hides their foot); otherwise
 // all the rest
-function drawFire(x0, x1, behind) {
-  if (!flames.n) return;
+function drawFire(x0, x1, behind) { const F = fireImage(x0, x1, behind); if (F) firePut(F); }
+// the fire's picture this view (its pixels, a pixel a FPX block, and where it goes in the view: dx, dy, dw, dh) - null: none
+function fireImage(x0, x1, behind) {
+  if (!flames.n) return null;
   const L = FIRE.list; L.length = 0;
   let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
   for (const f of flames.rows()) {
@@ -29765,12 +29860,12 @@ function drawFire(x0, x1, behind) {
     L.push(cx, cy, R, a);
     if (cx - R < bx0) bx0 = cx - R; if (cy - R < by0) by0 = cy - R; if (cx + R > bx1) bx1 = cx + R; if (cy + R > by1) by1 = cy + R;
   }
-  if (!L.length) return;
+  if (!L.length) return null;
   const fw = Math.ceil(VWP / FPX) + 6, fh = Math.ceil(bh / FPX) + 6;
   bx0 = clamp(Math.floor(bx0), 0, fw - 1); by0 = clamp(Math.floor(by0), 0, fh - 1);
   bx1 = clamp(Math.ceil(bx1), 1, fw); by1 = clamp(Math.ceil(by1), 1, fh);
   const W = bx1 - bx0, H = by1 - by0;
-  if (W <= 0 || H <= 0) return;
+  if (W <= 0 || H <= 0) return null;
   if (FIRE.heat.length < W * H) { FIRE.heat = new Float32Array(W * H * 2); FIRE.px = new Uint32Array(W * H * 2); }
   const heat = FIRE.heat, px = FIRE.px;
   heat.fill(0, 0, W * H);
@@ -29793,14 +29888,20 @@ function drawFire(x0, x1, behind) {
     let k = 0; while (k < 6 && v >= FIRE_T[k + 1]) k++;
     px[i] = pal[k];
   }
-  if (GLR.on) { C.drawPixels(px, W, H, bx0 * FPX - 3 * FPX, by0 * FPX - 3 * FPX, W * FPX, H * FPX); return; }
+  const F = FIRE.img || (FIRE.img = {});
+  F.px = px; F.W = W; F.H = H; F.dx = bx0 * FPX - 3 * FPX; F.dy = by0 * FPX - 3 * FPX; F.dw = W * FPX; F.dh = H * FPX;
+  return F;
+}
+function firePut(F) {
+  const { px, W, H } = F;
+  if (GLR.on) { C.drawPixels(px, W, H, F.dx, F.dy, F.dw, F.dh); return; }
   let bwid = 32, bhgt = 32;
   while (bwid < W) bwid *= 2; while (bhgt < H) bhgt *= 2;
   const key = bwid * 65536 + bhgt;
   let cv = FIRE.cvs.get(key);
   if (!cv) { cv = document.createElement('canvas'); cv.width = bwid; cv.height = bhgt; FIRE.cvs.set(key, cv); }
   cv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(px.buffer, 0, W * H * 4), W, H), 0, 0);
-  C.drawImage(cv, 0, 0, W, H, bx0 * FPX - 3 * FPX, by0 * FPX - 3 * FPX, W * FPX, H * FPX);
+  C.drawImage(cv, 0, 0, W, H, F.dx, F.dy, F.dw, F.dh);
 }
 
 // The light on the sea's skin: at night the surface line catches the moonlight (brightest under the moon,
@@ -29871,7 +29972,7 @@ const shipBurns = sh => sh.fire.some(f => f > 0) || sh.lvl.some((l, i) => l - (s
 function shipCutters(x0, x1) {
   const out = [];
   for (const sh of ships) {
-    if (sh.state !== 'afloat' || sh.moored || sh.x + SHIP_L < x0 || sh.x - SHIP_L > x1 || !shipBurns(sh)) continue;
+    if (sh.state !== 'afloat' || sh.moored || sh.x + SHIP_L < x0 || sh.x - SHIP_L > x1 || !shipBurns(sh)) continue;   // (x0, x1: the view's - or the box's, shipCut)
     out.push(() => { const cl = harbourClip(sh); drawShip(sh); drawGuns(sh); if (cl) C.restore(); });
   }
   if (LAND && civShips.length) for (const c of civShips) {
@@ -29882,11 +29983,26 @@ function shipCutters(x0, x1) {
   }
   return out;
 }
-function shipCut(x0, x1, draw) {
+// box ([x, y, w, h] in the view's own coordinates, C's): the only place draw paints - null, anywhere in the view. (Nov 1, the GPU's
+// time: the fire's layer was cleared, cut and laid back over the whole view - two full screens a view - for a picture a few
+// hundred pixels across. Outside what draw paints the layer is clear, and laying clear pixels over the picture changes nothing:
+// the layer is cleared, cut and laid back over the box alone, and with no cutter over the box's stretch of the world it's
+// drawn straight)
+function shipCut(x0, x1, draw, box) {
+  const m = C.getTransform();
+  let X = VSX, Y = 0, w = VWP, h = bh;
+  if (box) {
+    const a = Math.max(VSX, Math.floor(box[0] + m.e)), b = Math.max(0, Math.floor(box[1] + m.f)), c = Math.min(VSX + VWP, Math.ceil(box[0] + box[2] + m.e)), d = Math.min(bh, Math.ceil(box[1] + box[3] + m.f));
+    if (c <= a || d <= b) return;                                     // (nothing of it in the view)
+    X = a; Y = b; w = c - a; h = d - b;
+    x0 = Math.max(x0, (box[0] + CAMPX) / SV); x1 = Math.min(x1, (box[0] + box[2] + CAMPX) / SV);   // (the box's stretch of the world: its cutters)
+  }
   const cut = SHIPCUT && GLR.on ? shipCutters(x0, x1) : null;
   if (!cut || !cut.length) { draw(); return; }
-  const main = C, lc = cutLayer(), x = VSX, w = VWP;
-  lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(x, 0, w, bh); lc.setTransform(main.getTransform());
+  const main = C, lc = cutLayer();
+  lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(X, Y, w, h);
+  lc.save(); lc.beginPath(); lc.rect(X, Y, w, h); lc.clip();          // (an upright box: a scissor - the cutters' quads paint only in it)
+  lc.setTransform(main.getTransform());
   C = lc; fsLast = null;
   try {
     draw();
@@ -29894,9 +30010,10 @@ function shipCut(x0, x1, draw) {
     for (const f of cut) f();
   } finally {
     lc.globalCompositeOperation = 'source-over'; lc.globalAlpha = 1;
+    lc.restore();
     C = main; fsLast = null;
   }
-  main.save(); main.setTransform(1, 0, 0, 1, 0, 0); main.drawImage(lc.canvas, x, 0, w, bh, x, 0, w, bh); main.restore();
+  main.save(); main.setTransform(1, 0, 0, 1, 0, 0); main.drawImage(lc.canvas, X, Y, w, h, X, Y, w, h); main.restore();
 }
 function renderOverlays() {
   const x0 = CAMPX / SV, x1 = x0 + VWW;
@@ -30007,15 +30124,19 @@ function renderOverlays() {
       // the yachts cut themselves out of it, and what's left is added to the picture
       const front = sailboats.filter(b => b.state !== 'gone' && Math.abs(b.x - sh.x) < SHIP_L * 0.55 + 40);
       if (!front.length) { drawShipLights(sh); if (cl) C.restore(); continue; }
-      const main = C, lc = lightLayer();
-      lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, bw, bh); lc.setTransform(main.getTransform());
+      // (Nov 1: only the box her lights can reach is cleared and added - shipLightsBox - not the whole screen twice: outside it
+      // the layer is clear, and adding clear changes nothing)
+      const main = C, lc = lightLayer(), tr = main.getTransform(), B = shipLightsBox(sh, tr);
+      if (!B) { if (cl) C.restore(); continue; }
+      const [bx, by, BW, BH] = B;
+      lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(bx, by, BW, BH); lc.setTransform(tr);
       C = lc; fsLast = null;
       drawShipLights(sh);
       lc.globalCompositeOperation = 'destination-out';
       for (const b of front) drawSailboat(b);
       lc.globalCompositeOperation = 'source-over';
       C = main; fsLast = null;
-      main.save(); main.setTransform(1, 0, 0, 1, 0, 0); main.globalCompositeOperation = 'lighter'; main.drawImage(lc.canvas, 0, 0); main.restore();
+      main.save(); main.setTransform(1, 0, 0, 1, 0, 0); main.globalCompositeOperation = 'lighter'; main.drawImage(lc.canvas, bx, by, BW, BH, bx, by, BW, BH); main.restore();
       if (cl) C.restore();
     }
     for (const b of sailboats) drawSailLights(b, x0, x1);
@@ -30033,7 +30154,7 @@ function renderOverlays() {
     C.restore();
   }
   ot = ema('ovMid', ot);
-  shipCut(x0, x1, () => drawFire(x0, x1)); ot = ema('ovFire', ot);   // (and of her own fire)
+  { const F = fireImage(x0, x1); if (F) shipCut(x0, x1, () => firePut(F), [F.dx, F.dy, F.dw, F.dh]); } ot = ema('ovFire', ot);   // (and of her own fire: cut only where it is)
   drawSailsOver(x0, x1);                         // the yachts sit in front of the warships' smoke and fire
   ot = ema('ovSails', ot);
   // embers: single pixels riding the wind (Nov 1: their pixel layer - EMBER_L)
@@ -30084,6 +30205,19 @@ function renderOverlays() {
   ema('ovEnd', ot);
 }
 
+// (Nov 1) the box on the canvas a warship's lights (drawShipLights) can paint, or null: every light is a point of her picture
+// (columns 0..SHIP_SRC_W, rows 0..SHIP_SRC_H), so inside the box round its four corners as shipPoint places them, and each paints
+// at most its glow's rings round it (softGlow: up to its R and a block from the block its centre is in) and a block or a pixel
+function shipLightsBox(sh, tr) {
+  let L = 1e9, R = -1e9, T = 1e9, D = -1e9;
+  for (const c of [0, SHIP_SRC_W]) for (const r of [0, SHIP_SRC_H]) {
+    const [wx, wy] = shipPoint(sh, c, r), x = tr.a * PX(wx) + tr.e, y = tr.d * PY(wy) + tr.f;
+    if (x < L) L = x; if (x > R) R = x; if (y < T) T = y; if (y > D) D = y;
+  }
+  const m = Math.ceil(((9 + 16 * E.fog) * Math.min(SV, 2.2) * clamp(SV / 1.8, 0.4, 1) + 4 * PB) * Math.max(1, Math.abs(tr.a), Math.abs(tr.d)));
+  const x0 = Math.max(0, Math.floor(L) - m), y0 = Math.max(0, Math.floor(T) - m), x1 = Math.min(bw, Math.ceil(R) + m), y1 = Math.min(bh, Math.ceil(D) + m);
+  return x1 > x0 && y1 > y0 ? [x0, y0, x1 - x0, y1 - y0] : null;
+}
 /* (Nov 1) THE EMBERS' AND THE SPARKS' PIXEL LAYERS (40-zzzz-layers.js): each drawn from its column table in one draw a view.
    What the loops did, row by row in order: skipped one outside the view by more than its margin, coloured it by how far
    through its life it is (life / max under 0.4, under 0.75, else), and painted it as one particle block (blk) - a spark also
@@ -30768,6 +30902,9 @@ function drawGrade(views) {
     g.restore();
   }
 }
+// (Nov 1) a sub-part's lap, CPU and GPU, from t0 (performance.now() when it began): the tint part's tn* - here and 41-sky-new.js
+// skyNewFront - as the sky's, the world's and the overlays' own sema / ema
+function subLap(k, t0) { let rb = 0; if (probe.on) { probeFlush(g); rb = probe.cost; } if (GPUT.cur) gptLap(k, 0); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; }
 function render() {
   if (!worldLive()) { drawNoWorld(); return; }            // (no world yet, or LOADING: the menu over black - user Oct 31, 19-menu.js)
   const T0 = performance.now();
@@ -30801,6 +30938,11 @@ function render() {
     if (OWM) { beginView(oc, v, cp, sx, w, i, cf); guardDraw('land', renderLandObjects); oc.restore(); tt = lap('land', tt); }
   }
   // night and dusk tint the world (not the sky, which is already lit)
+  // (Nov 1: the tint part's own sub-parts, CPU and GPU, as the sky's, the world's and the overlays' - tn*: the tint and the world's
+  // copy to the screen (and the fog), the lamps' lights, the sky's front (deck 1, the smoke behind it, sparks, bullets, rays), the
+  // late fireworks, the caves, the eye's grade)
+  const tl = subLap;
+  let ts = tt;
   oc.setTransform(1, 0, 0, 1, 0, 0);
   // (on the GPU, with no fog to draw between: the tint and the copy to the screen in one pass - 40-zz-water-gl.js)
   const tintGL = gpuwOn('tint') && !(E.fog > 0.02);
@@ -30830,12 +30972,15 @@ function render() {
   g.drawImage(ob, 0, 0);
   }
   g.setTransform(1, 0, 0, 1, 0, 0);
-  for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); drawLampLight(); drawLighthouseGlow(); drawLateLit(); drawAirLamps(); drawPlaneLamps(); guardDraw('newsky', skyNewFront); drawFwLate(); g.restore(); }
+  ts = tl('tnCopy', ts);
+  for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); drawLampLight(); drawLighthouseGlow(); drawLateLit(); drawAirLamps(); drawPlaneLamps(); ts = tl('tnLamps', ts); guardDraw('newsky', () => { ts = skyNewFront(ts); }); drawFwLate(); g.restore(); ts = tl('tnFw', ts); }
   // (OPEN WORLD: the underwater caves where the exploration sub's lamp finds them - over the world and its night, as the
   // lamp's own light is; unlit, a cave is the world's own ground - 50-land-caves)
   if (OWM && CAVE.ready) for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); guardDraw('caves', CAVE.draw); g.restore(); }
   if (OWM) CAVE.pump();
+  ts = tl('tnCaves', ts);
   guardDraw('grade', () => drawGrade(views));
+  tl('tnGrade', ts);
   tt = lap('tint', tt);
   for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); renderOverlays(); guardDraw('landEd', landEdDraw); guardDraw('islEd', islEdDraw); if (LAND) guardDraw('caveEd', CAVE.edDraw); guardDraw('colView', colvDraw); guardDraw('vehEd', vehEdDraw); g.restore(); }   // (the GAME EDITOR's FLOOR handles - 50-land-floor.js)
   tt = lap('overlays', tt);
