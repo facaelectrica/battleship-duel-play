@@ -3296,8 +3296,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 455;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 20:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 456;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 20:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18223,23 +18223,38 @@ function glColA(ctx, c, a) {
 }
 // (Oct 31) a shape in one colour as one quad: its mask (white where it is, clear elsewhere - a texture, 1:1) times the colour,
 // which on white is exactly the colour fillRect would have laid and on clear nothing at all (mode 1: texel x colour)
-const GLMASK = new Map();
+// (all the masks side by side in one texture, each laid in once - one texture for the batch, so a run of shapes of every size
+// stays one draw; one too big for what's left of it: a texture of its own)
+const GLMASK = new Map(), GLMA = { tex: null, ep: -1, W: 2048, H: 1024, x: 0, y: 0, rowH: 0 };
 function glMaskTex(key, w, h, fill) {
   let M = GLMASK.get(key);
   if (M && M.ep === GLR.epoch) return M;
   const gl = GLR.gl, px = new Uint8Array(w * h * 4); fill(px, w, h);
-  const tex = glNewTex(0, 0, gl.NEAREST);
-  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, tex); glPM(false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  const A = GLMA;
+  if (A.ep !== GLR.epoch) { A.tex = glNewTex(A.W, A.H, gl.NEAREST); A.ep = GLR.epoch; A.x = 0; A.y = 0; A.rowH = 0; }
+  if (A.x + w > A.W) { A.y += A.rowH + 1; A.x = 0; A.rowH = 0; }
+  gl.activeTexture(gl.TEXTURE9); glPM(false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  if (w <= A.W && A.y + h <= A.H) {
+    gl.bindTexture(gl.TEXTURE_2D, A.tex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, A.x, A.y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    M = { tex: A.tex, w, h, ep: GLR.epoch, u0: A.x / A.W, v0: A.y / A.H, u1: (A.x + w) / A.W, v1: (A.y + h) / A.H };
+    A.x += w + 1; if (h > A.rowH) A.rowH = h;
+  } else {
+    const tex = glNewTex(0, 0, gl.NEAREST);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    M = { tex, w, h, ep: GLR.epoch, u0: 0, v0: 0, u1: 1, v1: 1 };
+  }
+  GLR.unit[9] = null;
   GLR.stats.uploads++; GLR.stats.upPx += w * h;
-  M = { tex, w, h, ep: GLR.epoch }; GLMASK.set(key, M);
+  GLMASK.set(key, M);
   return M;
 }
 function fillMaskP(ctx, col, M, x, y) {
   const slot = glSlot(M.tex, false);
   ctx._corners(x, y, M.w, M.h);
   const X = GLC4.x, Y = GLC4.y;
-  glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], 0, 0, 1, 0, 1, 1, 0, 1, col, 1 + 8 * slot, 0);
+  glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], M.u0, M.v0, M.u1, M.v0, M.u1, M.v1, M.u0, M.v1, col, 1 + 8 * slot, 0);
 }
 function fillRectP(ctx, col, x, y, w, h) {
   if (!(w > 0 && h > 0)) return;
@@ -27190,7 +27205,7 @@ function sandDisc(cx, cy, R) {
 }
 // (Oct 31, 60-fps chat: on the GPU each puff's colour is packed once and its rows go straight to the batch - a colour string
 // made and read back a puff, a pass, and a rectangle call a row, was ~2.7 ms a frame with 770 puffs of a long fight)
-const DUST_C = [[150, 124, 84], [206, 180, 132], [236, 218, 174]];
+const DUST_C = [[150, 124, 84], [206, 180, 132], [236, 218, 174]], DUSTQ = { a: new Float64Array(0), R: null, cx: null, cy: null };
 // (and the disc's rows as one quad: sandDisc's rows laid once into a white mask a radius - fillMaskP - the same pixels, one quad
 // a puff instead of a rectangle a row: 800 puffs of a long fight were ~3 ms more)
 const sandMaskFill = R => (px, w) => { for (let j = -R; j < R; j += PB) { const hw = Math.floor(Math.sqrt(Math.max(0, R * R - (j + 1) * (j + 1))) / PB) * PB; if (hw <= 0) continue; for (let y = j + R; y < j + R + PB; y++) px.fill(255, (y * w + R - hw) * 4, (y * w + R + hw) * 4); } };
@@ -27207,13 +27222,20 @@ function sandDiscP(col, cx, cy, R) {
 }
 function drawDust(x0, x1) {
   if (GLR.on && !GLR.lost && C instanceof GLCtx) {
+    // (each puff's numbers worked out once for the three passes - the same sums)
+    let n = 0;
+    if (DUSTQ.a.length < dust.length) { const m = dust.length * 2; DUSTQ.a = new Float64Array(m); DUSTQ.R = new Int32Array(m); DUSTQ.cx = new Int32Array(m); DUSTQ.cy = new Int32Array(m); }
+    const QA = DUSTQ.a, QR = DUSTQ.R, QX = DUSTQ.cx, QY = DUSTQ.cy;
+    for (const u of dust) {
+      if (u.x < x0 - 40 || u.x > x1 + 40) continue;
+      const t = u.age / u.life;
+      const a = 0.8 * Math.pow(1 - t, 1.2) * Math.min(1, u.age * 5);
+      if (a < 0.02) continue;
+      QA[n] = a; QR[n] = Math.max(PB, Math.round(u.r * SV / PB) * PB); QX[n] = Math.floor(PX(u.x) / PB) * PB; QY[n] = Math.floor(PY(u.y) / PB) * PB; n++;
+    }
     for (let pass = 0; pass < 3; pass++) {
-      for (const u of dust) {
-        if (u.x < x0 - 40 || u.x > x1 + 40) continue;
-        const t = u.age / u.life;
-        const a = 0.8 * Math.pow(1 - t, 1.2) * Math.min(1, u.age * 5);
-        if (a < 0.02) continue;
-        const R = Math.max(PB, Math.round(u.r * SV / PB) * PB), cx = Math.floor(PX(u.x) / PB) * PB, cy = Math.floor(PY(u.y) / PB) * PB;
+      for (let i = 0; i < n; i++) {
+        const a = QA[i], R = QR[i], cx = QX[i], cy = QY[i];
         if (pass === 0) sandDiscP(glColA(C, DUST_C[0], a * 0.7), cx, cy + Math.round(R * 0.3 / PB) * PB, R);
         else if (pass === 1) sandDiscP(glColA(C, DUST_C[1], a), cx, cy, Math.round(R * 0.9 / PB) * PB || PB);
         else sandDiscP(glColA(C, DUST_C[2], a * 0.8), cx - Math.round(R * 0.2 / PB) * PB, cy - Math.round(R * 0.35 / PB) * PB, Math.round(R * 0.5 / PB) * PB || PB);
