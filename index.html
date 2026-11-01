@@ -3450,8 +3450,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 480;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 23:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 481;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 23:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13120,10 +13120,13 @@ function physics(dt) {
   for (let k = 0; k < WATER_SUBSTEPS; k++) stepWater(dt / WATER_SUBSTEPS, k === WATER_SUBSTEPS - 1);
   ut = uLap('uWater', ut);
   for (const sh of ships) { sh.x0 = sh.x; fxMask(sh); if (sh.state === 'afloat') stepShip(sh, dt); else if (sh.state === 'sinking') stepSinkingShip(sh, dt); }
+  ut = uLap('h:ships', ut);
   for (const sb of subs) { fxMask(sb); stepSub(sb, dt); }
   seaHeliStep(dt);
   FX_HIDE = null;
+  ut = uLap('h:subs', ut);
   stepPlanes(dt);
+  ut = uLap('h:planes', ut);
   collide();
   for (const sh of ships) sh.dx = sh.x - sh.x0;                          // (how far she went, rams and all: what's on her deck goes with her - shipTopAt)
   subsCollide();
@@ -13166,8 +13169,9 @@ function stepVisuals(dt) {
   const n = Math.max(1, Math.ceil(dt / (1 / 55))), h = dt / n;
   for (let k = 0; k < n; k++) {
     if (SIM_ONLY) { stepBuoys(h); stepStorm(h); stepBirds(h); continue; }      // (a headless match: only what matters to play)
-    stepWclouds(h); stepGasBalls(h); stepJets(h); stepStreaks(h); stepDeadFish(h); stepBlastRings(h);
-    stepBuoys(h); stepStorm(h); stepParticles(h); stepBirds(h);
+    let uo = performance.now();
+    stepWclouds(h); uo = uLap('v:wclouds', uo); stepGasBalls(h); stepJets(h); stepStreaks(h); stepDeadFish(h); stepBlastRings(h); uo = uLap('v:misc', uo);
+    stepBuoys(h); stepStorm(h); uo = uLap('v:storm', uo); stepParticles(h); uo = uLap('v:particles', uo); stepBirds(h); uo = uLap('v:birds', uo);
   }
   if (!SIM_ONLY) stepStir(dt);
   uLap('uVisuals', ut);
@@ -35506,6 +35510,14 @@ function oilLensAt(o, x) {
   const taper = Math.pow(1 - u * u, 0.6);
   return grow * (taper * (12 + 42 * lobe * Math.min(1, o.t / 8)) + 70 * mass * Math.exp(-Math.pow((x - o.x) / (o.r * 0.12 + 18), 2)));
 }
+// (Oct 31, 80-fps work: the oil's rectangles in colours given as numbers - fillRectA - not as rgba text made and read back for
+// each, ~2,000 new texts a frame; the alpha the text carried, its 3 decimals: the same fills. The last one's text set at the end)
+const OILF = { k: 0, r: 0, g: 0, b: 0, a: '' }, OILC = [0, 0, 0];
+function oilFill(r, g, b, a, x, y, w, h) {
+  OILF.k = 1; OILF.r = r; OILF.g = g; OILF.b = b; OILF.a = a;
+  if (!(C instanceof GLCtx)) { C.fillStyle = `rgba(${r},${g},${b},${a})`; C.fillRect(x, y, w, h); return; }
+  OILC[0] = r; OILC[1] = g; OILC[2] = b; fillRectA(C, OILC, +a, x, y, w, h);
+}
 function drawOil(x0, x1) {
   if (!oilSlicks.length) return;
   if (LAND) drawInk(x0, x1);
@@ -35516,12 +35528,13 @@ function drawOil(x0, x1) {
     let T = 0; for (const o of oilSlicks) T = Math.max(T, oilLensAt(o, wx));
     const y = ys[clamp(c + 3, 0, ys.length - 1)], th = Math.max(PB, Math.round(T * SV)), lip = hash(Math.floor(wx / 3)) < 0.3 ? PB : 0;
     // the water under it stained in steps, following the scallops
-    for (let k = 0; k < 3; k++) { C.fillStyle = `rgba(6,10,30,${((0.34 - k * 0.1) * Math.min(1, a * 1.5)).toFixed(3)})`; C.fillRect(c, y + th + k * band, step, band); }
-    C.fillStyle = `rgba(5,5,10,${Math.min(1, a * 2).toFixed(3)})`; C.fillRect(c, y - PB - lip, step, th + PB + lip);   // (the slab: solid black)
-    if (T > 6 && hash(Math.floor(wx / 2.3) * 1.7) < 0.12) { C.fillStyle = 'rgba(28,28,44,0.9)'; C.fillRect(c, y + Math.round(hash(Math.floor(wx / 2.3)) * th * 0.7), step, PB); }   // (a faint fleck in it)
-    { const by = PY(seabedY(wx)); if (a > 0.15) { C.fillStyle = `rgba(10,8,12,${(0.7 * a).toFixed(3)})`; const tb = Math.round((2 + 3 * a + 2 * hash(Math.floor(wx / 7))) * SV); C.fillRect(c, Math.round(by) - tb, step, tb + Math.round(2 * SV)); } }
-    if (hash(Math.floor(wx / 9) * 3.3 + Math.floor(time)) < 0.05 * a) { C.fillStyle = 'rgba(90,80,130,0.5)'; C.fillRect(c, y - PB - lip, step, PB); }   // (a glint of sheen on top)
+    for (let k = 0; k < 3; k++) oilFill(6, 10, 30, ((0.34 - k * 0.1) * Math.min(1, a * 1.5)).toFixed(3), c, y + th + k * band, step, band);
+    oilFill(5, 5, 10, Math.min(1, a * 2).toFixed(3), c, y - PB - lip, step, th + PB + lip);   // (the slab: solid black)
+    if (T > 6 && hash(Math.floor(wx / 2.3) * 1.7) < 0.12) oilFill(28, 28, 44, '0.9', c, y + Math.round(hash(Math.floor(wx / 2.3)) * th * 0.7), step, PB);   // (a faint fleck in it)
+    { const by = PY(seabedY(wx)); if (a > 0.15) { const tb = Math.round((2 + 3 * a + 2 * hash(Math.floor(wx / 7))) * SV); oilFill(10, 8, 12, (0.7 * a).toFixed(3), c, Math.round(by) - tb, step, tb + Math.round(2 * SV)); } }
+    if (hash(Math.floor(wx / 9) * 3.3 + Math.floor(time)) < 0.05 * a) oilFill(90, 80, 130, '0.5', c, y - PB - lip, step, PB);   // (a glint of sheen on top)
   }
+  if (OILF.k) { C.fillStyle = `rgba(${OILF.r},${OILF.g},${OILF.b},${OILF.a})`; OILF.k = 0; }   // (the fill style as the rectangles one by one left it)
   // the drips: chains of drops falling from the lobes, the first fat and the rest smaller, sliding down and fading
   if (LAND) { const I = inkArt || buildInkArt();
     for (const o of oilSlicks) { if (o.t < 6) continue; const fade = Math.min(1, (o.t - 6) / 10);
@@ -44630,8 +44643,9 @@ function stepTraffic(dt) {
     }
     S.t += performance.now() - t0;
   }
-  stepJetboats(dt);
-  stepCivShips(dt); stepLinerParts(dt); stepOil(dt); stepMinisubs(dt); stepFireworks(dt);
+  let uo = performance.now();
+  stepJetboats(dt); uo = uLap('o:jetboats', uo);
+  stepCivShips(dt); uo = uLap('o:civShips', uo); stepLinerParts(dt); uo = uLap('o:linerParts', uo); stepOil(dt); uo = uLap('o:oil', uo); stepMinisubs(dt); uo = uLap('o:minisubs', uo); stepFireworks(dt); uo = uLap('o:fireworks', uo);
 
 }
 function stepFlight(f, dt) {
