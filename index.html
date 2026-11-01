@@ -116,7 +116,9 @@ function swPrelude(B) {
   self.HTMLImageElement = class SwImage { };
   self.Image = class SwImageEl {
     constructor() { this.onload = null; this.onerror = null; this.width = 0; this.height = 0; }
-    set src(u) { note('Image.src'); fetch(u).then(r => r.blob()).then(b => createImageBitmap(b)).then(bm => { this.width = bm.width; this.height = bm.height; this.bitmap = bm; this.onload && this.onload(); }, e => this.onerror && this.onerror(e)); }
+    set src(u) { note('Image.src');
+      const blob = typeof u === 'string' && u.startsWith('data:') ? (() => { const i = u.indexOf(','), meta = u.slice(5, i), body = u.slice(i + 1); let bytes; if (/;base64/i.test(meta)) { const bin = atob(body); bytes = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k); } else bytes = new TextEncoder().encode(decodeURIComponent(body)); return Promise.resolve(new Blob([bytes], { type: meta.split(';')[0] || 'application/octet-stream' })); })() : fetch(u).then(r => r.blob());   // (no fetch for a data: URL - the artifact's rules on the iPad refuse it)
+      blob.then(b => createImageBitmap(b)).then(bm => { this.width = bm.width; this.height = bm.height; this.bitmap = bm; this.onload && this.onload(); }, e => this.onerror && this.onerror(e)); }
   };
   const store = new Map(Object.entries(B.store || {}));
   self.localStorage = { getItem: k => store.has(k) ? store.get(k) : null, setItem: (k, v) => { store.set(k, String(v)); }, removeItem: k => { store.delete(k); }, clear: () => store.clear(), key: i => [...store.keys()][i] ?? null, get length() { return store.size; } };
@@ -889,10 +891,20 @@ let dpr = 1, cw = 0, ch = 0, S = 1, VIEW_W = 1333, builtViewW = -1;
    Images and generated pixel art
    ================================================================ */
 const img = {};
+// (user's iPad, Oct 31 21:15, in the claude.ai artifact: 'SIM WORKER FAILED: TypeError: Load failed' - the page's rules there
+// don't let a worker fetch a data: URL. Its bytes are right in the URL: read them out, no fetch at all)
+function dataUrlBlob(src) {
+  if (typeof src !== 'string' || !src.startsWith('data:')) return fetch(src).then(r => r.blob());
+  const i = src.indexOf(','), meta = src.slice(5, i), body = src.slice(i + 1);
+  let bytes;
+  if (/;base64/i.test(meta)) { const bin = atob(body); bytes = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k); }
+  else bytes = new TextEncoder().encode(decodeURIComponent(body));
+  return Promise.resolve(new Blob([bytes], { type: meta.split(';')[0] || 'application/octet-stream' }));
+}
 function loadImage(src) {
   // (in the simulation worker, 00-sw-boot.js: decoded off the page and kept as a canvas - the same pixels for the game's
   // hit tests and keels)
-  if (SW_IN_WORKER) return fetch(src).then(r => r.blob()).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })).then(bm => { const c = makeCanvas(bm.width, bm.height); c.getContext('2d').drawImage(bm, 0, 0); bm.close(); return c; });
+  if (SW_IN_WORKER) return dataUrlBlob(src).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })).then(bm => { const c = makeCanvas(bm.width, bm.height); c.getContext('2d').drawImage(bm, 0, 0); bm.close(); return c; });
   return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
 }
 function makeCanvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
@@ -3314,8 +3326,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 462;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 21:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 463;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 21:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
