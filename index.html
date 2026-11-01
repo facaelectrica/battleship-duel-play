@@ -3450,8 +3450,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 481;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'OCT 31 23:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 482;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'OCT 31 23:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4971,7 +4971,7 @@ function drawPerfPanel(x, y) {
     'PUFFS ' + f(P.ovSmoke) + '  TRAILS ' + f(P.ovTrails) + '  FIRE ' + f(P.ovFire) + '  RAIN ' + f(P.ovRain),
     'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + (GLR.on ? '  WEBGL' : '  MODE ' + MODE_NAMES[getMode()] + (BATCH_AUTO ? (abTrial.phase ? ' TRYING' : ' AUTO') : '') + '  [TAP HERE: NEXT MODE]'),
     GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + '  DECKS ' + Math.round(FT.dDraw || 0) + '/' + Math.round(FT.dSkip || 0) + (GLR.lost ? '  LOST' : '') : '',
-    'SMOKE ' + smoke.length + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
+    'SMOKE ' + (NSKY.smcCount() ?? smoke.length) + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
     probe.on || probe.done ? '' : 'TAP AGAIN: MEASURE DRAWING TOO',
   ].filter(l => l);
   // (user Oct 29: "that FPS window is getting extremely wide... why not put some lines below others": a line wider than about
@@ -15038,7 +15038,7 @@ function swApply(snap) {
   if (snap.cols) for (const k in snap.cols) {
     if (k[0] === '+') { const f = SW_EXTRA[k.slice(1)]; if (f) swColsInto(f(), snap.cols[k], snap.strs, k); continue; }
     const t = TABLES[k]; if (!t) continue;
-    if (t.colsInto) { t.colsInto(snap.cols[k]); tq = lap('c:' + k, tq); continue; }
+    if (t.colsInto) { t.colsInto(snap.cols[k], snap.strs); tq = lap('c:' + k, tq); continue; }
     const arr = t.list(); swColsInto(arr, snap.cols[k], snap.strs, k); if (t.after) t.after(arr);
     tq = lap('c:' + k, tq);
   }
@@ -15795,7 +15795,7 @@ function smSolve(G, dt, SPANS, W, SH, WY) {
 // (st: the { last, head } its source keeps on itself, smStream) belongs to the source, so it isn't saved: a loaded puff keeps
 // the live one's, and each stream's newest puff is found again from the list. The air-flow grid (SG) isn't saved either: once
 // loaded every column starts again from the wind as it wakes (smokeSpans) - unless the save held it (smokeAir, below)
-defTable('smoke', () => smoke, { net: false, skip: ['st'],
+defTable('smoke', () => smoke, { net: false, skip: ['st'], colsInto: (C, strs) => NSKY.smcInto(C, strs),   // (a live snapshot's puffs: kept as columns - sky/21-smoke.js SMC)
   after: arr => {
     const newest = new Map(), live = new Set(arr);
     for (const s of arr) if (s.sq > smSq) smSq = s.sq;              // (the spawn count goes on from the highest loaded: both sides of the worker count alike)
@@ -23162,6 +23162,12 @@ function famOf(s) {
 // the smoke particles as the game sizes and fades them (src/46-smoke-fire-draw.js drawSmoke), then as balls
 // the smoke's source, for which pass it goes in (BEHIND DECK 1): the ship's fire, the tower's shells and missiles, the plane, the space rocket
 const srcOf = s => s.src === 'smear' ? 'plane' : s.src || 'ship';
+// (a gather on this thread: with the puffs as columns (SMC), as objects first - and the h's it rolls kept by number. Not in the
+// smoke worker's text: gatherSmokeNew is, as it was)
+function gatherSmokeHere(want) {
+  if (smcLive() && !SMC.check) { smcObjects(); try { return gatherSmokeNew(want); } finally { smcFromObjects(); } }
+  return gatherSmokeNew(want);
+}
 function gatherSmokeNew(want) {
   const SV = FXV.SV, kx = SV / FXV.pxX, cxOf = wx => wpx(wx) / FXV.pxX + SMG.mx, cyOf = wy => wpy(wy) / FXV.pxY + SMG.my;
   for (const s of smoke) {
@@ -23543,23 +23549,164 @@ function smgAfter(n, B, m, res, tr, mid) {
   if (m.chk) { res.gOf = bo.gOf; res.bb = bo.bb; }   // (?smdcheck=1: each ball's body and the bodies' boxes, to compare)
   return [res, tr];
 }
+// one puff's numbers for the gather (smgSend): s the puff, q the puff before it (prev), hd its stream's head (or a false value)
+// (a flag kept as 1 or 0, a missing number as what the gather takes for it: the same branches, the same sums)
+function smgPackOne(S, o, s, q, hd) {
+  S[o] = s.x; S[o + 1] = s.y; S[o + 2] = s.r; S[o + 3] = s.age; S[o + 4] = s.life; S[o + 5] = s.alpha; S[o + 6] = s.fadeFrom ?? 0.62; S[o + 7] = s.keep ? 1 : 0; S[o + 8] = s.kill || 0; S[o + 9] = s.lonely || 0;
+  S[o + 10] = s.h; S[o + 11] = famOf(s); S[o + 12] = s.link || 60; S[o + 13] = s.lumpy ? 1 : 0;
+  if (q && !q.dead && q.age < q.life) { S[o + 14] = 1; S[o + 15] = q.x; S[o + 16] = q.y; S[o + 17] = q.r; S[o + 18] = q.age; S[o + 19] = q.life; S[o + 20] = q.alpha; S[o + 21] = q.fadeFrom ?? 0.62; S[o + 22] = q.keep ? 1 : 0; S[o + 23] = q.kill || 0; S[o + 24] = q.lonely || 0; }
+  if (hd) { S[o + 25] = 1; S[o + 26] = hd[0]; S[o + 27] = hd[1]; S[o + 28] = hd[2]; }
+}
+/* (Oct 31, 80-fps work - user 23:15: "Smoke seems like the way to go") THE PUFFS AS COLUMNS ON THE PAGE. With the simulation in the
+   worker the page's puffs were only ever read to be packed for the gather (smgSend); every snapshot rebuilt ~3,000 objects
+   from the columns (swColsInto) and every paint read them back. Now a live snapshot's smoke columns are kept as they came
+   (smcInto) and packed straight from them (smcPack). What the objects kept from one snapshot to the next is kept here by the
+   puff's number (sq): its h (rolled when first packed, in the same order - smHc counts alike) and its stream's head (st, which
+   stays when a snapshot has no head column at all). Anything the columns can't say plainly (a full snapshot's plain copies,
+   nested fields), or a gather done here (late worker), or ?smcols=0: the objects again, made from the columns as before
+   (smcObjects). ?smcolcheck=1: both ways every paint, compared number for number (SMC.chk) */
+const SMC = { C: null, strs: null, n: 0, d: {}, H: new Map(), HD: new Map(), off: /[?&]smcols=0/.test((typeof location !== 'undefined' && location.search) || ''),
+  check: /[?&]smcolcheck=1/.test((typeof location !== 'undefined' && location.search) || ''), chk: { runs: 0, bad: 0, cnt: 0 } };
+if (typeof window !== 'undefined') window.__smc = SMC;
+let SMC_OK = null;
+const smcLive = () => SMC.C !== null && typeof SW !== 'undefined' && SW.live;
+// a field's value for puff i as the object would hold it (undefined absent, null, the number, true/false, the text)
+function smcGet(k, i) {
+  const d = SMC.d[k]; if (!d) return undefined;
+  if (d.m && d.m[i]) return undefined; if (d.z && d.z[i]) return null;
+  if (d.f) return d.f[i];
+  if (d.b) return d.b[i] !== 0;
+  if (d.s) { const id = d.s[i]; return id === -2 ? null : id < 0 ? undefined : SMC.strs[id]; }
+  if (d.ri) { const r = d.ri[i]; return r === -2 ? null : r < 0 ? undefined : r; }   // (the place of the puff it points to; a field that is only ever absent or null comes this way too)
+  return undefined;
+}
+const SMC_P = {}, SMC_Q = {};
+const SMC_PF = ['x', 'y', 'r', 'age', 'life', 'alpha', 'fadeFrom', 'keep', 'kill', 'lonely', 'link', 'lumpy', 'fam', 'mist', 'dark', 'quick', 'src', 'dead'];
+function smcFill(o, i) { for (const k of SMC_PF) o[k] = smcGet(k, i); return o; }
+// the snapshot's smoke columns in (the smoke table's colsInto - 36-zzzzz-sw-snap.js swApply)
+function smcInto(C, strs) {
+  if (!SMC_OK) SMC_OK = new Set([...SW_DRAW.smoke, 'hd0', 'hd1', 'hd2']);
+  let ok = !SMC.off && typeof SW !== 'undefined' && SW.live;
+  SMC.why = ok ? '' : 'off/not live'; SMC.calls = (SMC.calls || 0) + 1;
+  if (ok) for (let j = 0; j < C.k.length; j++) { const k = C.k[j], d = C.d[j]; if (!SMC_OK.has(k) || (d.j && k !== 'prev') || d.nest || (k === 'prev' && !d.ri && !d.j) || (k !== 'prev' && d.ri && d.ri.some(r => r >= 0))) { ok = false; SMC.why = k + ':' + Object.keys(d).join('/'); break; } }
+  const D = {}; for (let j = 0; j < C.k.length; j++) D[C.k[j]] = C.d[j];
+  const sqd = D.sq;
+  if (ok && (!sqd || !sqd.f)) SMC.why = 'sq';
+  if (!ok || !sqd || !sqd.f) {   // (the objects, as always - and what this keeps by number taken from them)
+    smcObjectsDrop(); swColsInto(smoke, C, strs, 'smoke'); smokeAfter(smoke); return;
+  }
+  // (what the objects would have kept: the puffs still here keep their h and stream head; the rest are forgotten)
+  const n = C.n, sq = sqd.f, H = SMC.H, HD = SMC.HD, nH = new Map(), nHD = new Map(), hasHd = 'hd0' in D;
+  SMC.C = C; SMC.strs = strs; SMC.n = n; SMC.d = D;
+  let mx = smSq;
+  for (let i = 0; i < n; i++) {
+    const q = sq[i]; if (q > mx) mx = q;
+    const h = H.get(q); if (h !== undefined) nH.set(q, h);
+    if (hasHd) { const v0 = smcGet('hd0', i); if (v0 !== undefined) nHD.set(q, [v0, smcGet('hd1', i), smcGet('hd2', i)]); }
+    else { const v = HD.get(q); if (v) nHD.set(q, v); }
+  }
+  SMC.H = nH; SMC.HD = nHD; smSq = mx;
+  if (SMC.check) { swColsInto(smoke, C, strs, 'smoke'); smokeAfter(smoke); }   // (both ways: the objects too)
+  else if (SG.active && !SG.loaded) SG.active.fill(0);
+  SG.loaded = false;
+}
+// the smoke table's own after (38-smoke-sim.js), for the objects' way
+function smokeAfter(arr) { const t = TABLES.smoke; if (t && t.after) t.after(arr); }
+// back to the objects: the columns let go (the objects keep their h and heads by number from what was kept here)
+function smcObjectsDrop() {
+  if (!SMC.C) return;
+  if (!SMC.check) smcObjects();
+  SMC.C = null; SMC.d = {}; SMC.n = 0;
+}
+// the puffs as objects from the kept columns, each with the h and stream head kept by its number (a gather on this thread)
+function smcObjects() {
+  if (!SMC.C) return smoke;
+  swColsInto(smoke, SMC.C, SMC.strs, 'smoke'); smokeAfter(smoke);
+  for (const s of smoke) { const h = SMC.H.get(s.sq); if (h !== undefined) s.h = h; else delete s.h; const hd = SMC.HD.get(s.sq); s.st = hd ? { last: s, head: hd } : undefined; }
+  return smoke;
+}
+// after a gather here: the h's it rolled, kept by number
+function smcFromObjects() { if (!SMC.C) return; for (const s of smoke) if (s.h !== undefined) SMC.H.set(s.sq, s.h); }
+// the puffs packed for the gather straight from the columns - smgSend's walk, in the list's order
+// a column's reader, resolved once: puff i's value as the object would hold it
+function smcCol(k) {
+  const d = SMC.d[k]; if (!d) return () => undefined;
+  const m = d.m, z = d.z;
+  if (d.f) { const f = d.f; return i => (m && m[i] ? undefined : z && z[i] ? null : f[i]); }
+  if (d.b) { const f = d.b; return i => (m && m[i] ? undefined : z && z[i] ? null : f[i] !== 0); }
+  if (d.s) { const f = d.s, T = SMC.strs; return i => { if (m && m[i]) return undefined; if (z && z[i]) return null; const id = f[i]; return id === -2 ? null : id < 0 ? undefined : T[id]; }; }
+  if (d.ri) { const f = d.ri; return i => (m && m[i] ? undefined : z && z[i] ? null : f[i] === -2 ? null : f[i] < 0 ? undefined : f[i]); }
+  return () => undefined;
+}
+// each puff's numbers as smgPackOne works them out, once a snapshot (the h - rolled as it's packed - and the passes' choice
+// aside): PK 16 a puff - x y r age life alpha, fadeFrom ?? 0.62, keep, kill || 0, lonely || 0, link || 60, lumpy, famOf's
+// fixed answer (-1: by its sum), its sum's first part (dark * 0.8 + t * 0.9), its last (the quick's 0.3), dead. A number
+// field absent is NaN, null 0 - as a typed array and the sums take them
+const SMC_K = 16;
+function smcPrep() {
+  const n = SMC.n, K = SMC_K;
+  if (!SMC.PK || SMC.PK.length < n * K) { SMC.PK = new Float64Array(Math.max(n, 256) * 2 * K); SMC.SRC = new Array(Math.max(n, 256) * 2); SMC.PREV = new Int32Array(Math.max(n, 256) * 2); }
+  const PK = SMC.PK, SRC = SMC.SRC, PREV = SMC.PREV, PQ = SMC.PQ = new Map();
+  const gx = smcCol('x'), gy = smcCol('y'), gr = smcCol('r'), ga = smcCol('age'), gl = smcCol('life'), gal = smcCol('alpha'), gff = smcCol('fadeFrom'), gk = smcCol('keep'), gki = smcCol('kill'),
+    glo = smcCol('lonely'), gli = smcCol('link'), glu = smcCol('lumpy'), gfa = smcCol('fam'), gmi = smcCol('mist'), gda = smcCol('dark'), gq = smcCol('quick'), gsr = smcCol('src'), gde = smcCol('dead'), gpr = smcCol('prev');
+  const pj = SMC.d.prev && SMC.d.prev.j;
+  for (let i = 0; i < n; i++) {
+    const o = i * K, age = ga(i), life = gl(i), fam = gfa(i), ff = gff(i), kill = gki(i), lon = glo(i), link = gli(i);
+    PK[o] = gx(i); PK[o + 1] = gy(i); PK[o + 2] = gr(i); PK[o + 3] = age; PK[o + 4] = life; PK[o + 5] = gal(i);
+    PK[o + 6] = ff ?? 0.62; PK[o + 7] = gk(i) ? 1 : 0; PK[o + 8] = kill || 0; PK[o + 9] = lon || 0; PK[o + 10] = link || 60; PK[o + 11] = glu(i) ? 1 : 0;
+    PK[o + 12] = fam && FAM_N[fam] !== undefined ? FAM_N[fam] : gmi(i) ? 3 : -1;
+    { const t = age / life; PK[o + 13] = gda(i) * 0.8 + t * 0.9; PK[o + 14] = gq(i) && age < 3.5 ? 0.3 : 0; }
+    PK[o + 15] = gde(i) ? 1 : 0;
+    { const sr = gsr(i); SRC[i] = sr === 'smear' ? 'plane' : sr || 'ship'; }   // (srcOf)
+    if (pj) { const v = pj[i]; PREV[i] = -1; if (v && typeof v === 'object') { if (v.ri != null && Object.keys(v).length === 1) PREV[i] = v.ri < n ? v.ri : -1; else PQ.set(i, tblRefs(v, SWM.byU, 6)); } else if (v) PQ.set(i, v); }
+    else { const r = gpr(i); PREV[i] = r !== undefined && r !== null && r < n ? r : -1; }
+  }
+}
+// the puffs packed for the gather straight from the columns - smgSend's walk, in the list's order: smgPackOne's numbers
+function smcPack(S, want) {
+  if (SMC.prepFor !== SMC.C) { smcPrep(); SMC.prepFor = SMC.C; }
+  const n = SMC.n, sq = SMC.d.sq.f, H = SMC.H, HD = SMC.HD, PK = SMC.PK, SRC = SMC.SRC, PREV = SMC.PREV, PQ = SMC.PQ, K = SMC_K;
+  let ns = 0;
+  for (let i = 0; i < n; i++) {
+    if (!want(SRC[i])) continue;
+    const id = sq[i];
+    let h = H.get(id); if (h === undefined) { h = fxHash(++smHc * 0.6180339 + 0.1); H.set(id, h); }
+    const p = i * K, o = ns++ * SMG_S;
+    if (PQ.size && PQ.has(i)) { const s = smcFill(SMC_P, i); s.h = h; smgPackOne(S, o, s, PQ.get(i), HD.get(id) || false); continue; }   // (a copy for its prev: the plain way)
+    S[o] = PK[p]; S[o + 1] = PK[p + 1]; S[o + 2] = PK[p + 2]; S[o + 3] = PK[p + 3]; S[o + 4] = PK[p + 4]; S[o + 5] = PK[p + 5]; S[o + 6] = PK[p + 6]; S[o + 7] = PK[p + 7]; S[o + 8] = PK[p + 8]; S[o + 9] = PK[p + 9];
+    S[o + 10] = h;
+    { const f = PK[p + 12]; if (f >= 0) S[o + 11] = f; else { const g = PK[p + 13] + (h - 0.5) * 0.12 - PK[p + 14]; S[o + 11] = g < 0.34 ? 0 : g < 0.62 ? 1 : 2; } }   // (famOf)
+    S[o + 12] = PK[p + 10]; S[o + 13] = PK[p + 11];
+    const r = PREV[i];
+    if (r >= 0) { const q = r * K; if (!PK[q + 15] && PK[q + 3] < PK[q + 4]) { S[o + 14] = 1; S[o + 15] = PK[q]; S[o + 16] = PK[q + 1]; S[o + 17] = PK[q + 2]; S[o + 18] = PK[q + 3]; S[o + 19] = PK[q + 4]; S[o + 20] = PK[q + 5]; S[o + 21] = PK[q + 6]; S[o + 22] = PK[q + 7]; S[o + 23] = PK[q + 8]; S[o + 24] = PK[q + 9]; } }
+    const hd = HD.size ? HD.get(id) : undefined;
+    if (hd) { S[o + 25] = 1; S[o + 26] = hd[0]; S[o + 27] = hd[1]; S[o + 28] = hd[2]; }
+  }
+  return ns;
+}
 // (main thread, the paint's first frame) what the gather reads, packed and posted; false: no worker - gather here
 function smgSend(want, cw, h, fast, tkA0) {
   if (!SMN.did) { SMN.did = ++SMD.ids; SMD.by.set(SMN.did, SMN); }
   if (!SMD.ws.has(SMN.did)) { smdStart(SMN.did); if (SMD.fail) return false; }
   // the puffs, in gatherSmokeNew's order, each given its number as it does (the same count, the same order)
-  const S = new Float64Array(smoke.length * SMG_S); let ns = 0;
-  for (const s of smoke) {
+  // (Oct 31, 80-fps work: the snapshot's columns of the puffs read straight - SMC, smcInto - when the page keeps no objects of them)
+  const live = smcLive(), N = live ? SMC.n : smoke.length;
+  const S = new Float64Array(N * SMG_S); let ns = 0;
+  const hc0 = smHc;
+  if (live) ns = smcPack(S, want);
+  if (live && SMC.check) {   // (?smcolcheck=1: the objects' way too, from the same count; every number compared, to the bit)
+    const hc1 = smHc, S2 = new Float64Array(smoke.length * SMG_S); let n2 = 0; smHc = hc0;
+    for (const s of smoke) { if (!want(srcOf(s))) continue; if (s.h === undefined) s.h = fxHash(++smHc * 0.6180339 + 0.1); smgPackOne(S2, n2++ * SMG_S, s, s.prev, s.st && s.st.last === s && s.st.head); }
+    const c = SMC.chk; c.runs++; c.cnt += ns;
+    let bad = n2 !== ns || smHc !== hc1 ? 1 : 0;
+    if (!bad) { const a = new Uint32Array(S.buffer, 0, ns * SMG_S * 2), b = new Uint32Array(S2.buffer, 0, n2 * SMG_S * 2); for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) { bad++; if (!c.ex) c.ex = { i: (i / 2 / SMG_S) | 0, f: ((i / 2) | 0) % SMG_S, a: S[(i / 2) | 0], b: S2[(i / 2) | 0] }; break; } }
+    else if (!c.ex) c.ex = { n: ns, n2, hc1, hc2: smHc };
+    c.bad += bad;
+  }
+  else for (const s of smoke) {
     if (!want(srcOf(s))) continue;
     if (s.h === undefined) s.h = fxHash(++smHc * 0.6180339 + 0.1);
-    const o = ns++ * SMG_S;
-    // (a flag kept as 1 or 0, a missing number as what the gather takes for it: the same branches, the same sums)
-    S[o] = s.x; S[o + 1] = s.y; S[o + 2] = s.r; S[o + 3] = s.age; S[o + 4] = s.life; S[o + 5] = s.alpha; S[o + 6] = s.fadeFrom ?? 0.62; S[o + 7] = s.keep ? 1 : 0; S[o + 8] = s.kill || 0; S[o + 9] = s.lonely || 0;
-    S[o + 10] = s.h; S[o + 11] = famOf(s); S[o + 12] = s.link || 60; S[o + 13] = s.lumpy ? 1 : 0;
-    const q = s.prev;
-    if (q && !q.dead && q.age < q.life) { S[o + 14] = 1; S[o + 15] = q.x; S[o + 16] = q.y; S[o + 17] = q.r; S[o + 18] = q.age; S[o + 19] = q.life; S[o + 20] = q.alpha; S[o + 21] = q.fadeFrom ?? 0.62; S[o + 22] = q.keep ? 1 : 0; S[o + 23] = q.kill || 0; S[o + 24] = q.lonely || 0; }
-    const hd = s.st && s.st.last === s && s.st.head;
-    if (hd) { S[o + 25] = 1; S[o + 26] = hd[0]; S[o + 27] = hd[1]; S[o + 28] = hd[2]; }
+    smgPackOne(S, ns++ * SMG_S, s, s.prev, s.st && s.st.last === s && s.st.head);
   }
   // (the trails, Oct 31: copies of their flat arrays - the pieces' and the points' in use (47-render-overlays.js trStore) - and the
   // ground under each first piece's launch puff (trailGround reads the land: here))
@@ -23590,7 +23737,7 @@ function smgSend(want, cw, h, fast, tkA0) {
   // (?smdcheck=1: the main thread's own gather of the same puffs now, into a scratch store, and its steps after (smgAfter, with
   // the light as it is here now), for smgTake to compare)
   if (SMD_CHECK) {
-    const keep = SMN, C = makeSMN(); C.cw = keep.cw; C.h = keep.h; C.tkz = keep.tkz; C.lazyL = keep.lazyL; SMN = C; try { gatherSmokeNew(want); } finally { SMN = keep; }
+    const keep = SMN, C = makeSMN(); C.cw = keep.cw; C.h = keep.h; C.tkz = keep.tkz; C.lazyL = keep.lazyL; SMN = C; try { gatherSmokeHere(want); } finally { SMN = keep; }
     C.res = {}; if (C.n) smgAfter(C.n, C, m, C.res, []); SMN.chk = C;
   }
   SMD.ws.get(SMN.did).postMessage(m, tl);
@@ -23686,7 +23833,7 @@ function drawSmokeNew(pass = 'front', want = () => true) {
   const rest = (W, t0) => {
   // (WF: the worker packed the balls for the GPU too - nothing of theirs is needed here but their count)
   const WF = W && W.BD ? W : null;
-  if (WF) SMN.n = W.n; else if (W) smgPut(W); else gatherSmokeNew(want);
+  if (WF) SMN.n = W.n; else if (W) smgPut(W); else gatherSmokeHere(want);
   const tgL = performance.now() - t0; SMN.tg = W ? SMN.tgp + tgL : tgL;
   const n = SMN.n; SMN.balls = n;
   if (!n) { SMN.last = null; SMN.ms = SMN.ms * 0.9 + (performance.now() - t0) * 0.1; return; }
@@ -24169,6 +24316,7 @@ const FTV = {};
 let OFF0 = false;   // (view 0 skipped the sky this frame - its horizon above the screen; a shared view's second half has nothing to replay)
 function ftFrame() { for (const k in FTV) { FT[k] = (FT[k] ?? FTV[k]) * 0.9 + FTV[k] * 0.1; FTV[k] = 0; } }
 const NSKY_API = {
+  smcInto: (C, strs) => smcInto(C, strs), smcCount: () => (smcLive() ? SMC.n : null),   // (the puffs as columns on the page - 21-smoke.js SMC)
   P, P_DEF, SL, SM_SL, FW_SL, BG_SL, E, PAL, SKY_KEYS, FT, saveP,
   bake: () => bakeStats(),   // (BAKED SKY: the panel's line)
   screen: skyScreen,
