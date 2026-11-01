@@ -3740,7 +3740,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 504;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 13:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 01 13:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -31557,6 +31557,13 @@ const CAVE = (() => {
    WATER_Y). Each system is built on its own window of cells, 2 world units a cell (the user's art: one art pixel a cell),
    a little at a time between frames (cavesStep).
    ================================================================ */
+// (the lamp's pass, its parts: ms a view drawn with a lamp in it, this frame's (LPA, summed as they come) smoothed into LP -
+// CAVE.lampParts. pick: choosing the lamp; rays: the 480 rays (lampRays); bounce: bounceField; nodes: the light at the nodes
+// (lightNodes); wall: wallSetup; gl: the cells' pass on the chip with its uploads (cglDraw, cglWindow); life: the weed (drawLifeBox);
+// fx: bubbles, drips, rings, spray, silt (drawFXBox); ovl: the overlay's buffer cleared and laid over (overlayBegin, overlayEnd);
+// cpu: the CPU's pass, when the chip can't; subs: the subs and wrecks drawn again over a cave; n: views timed)
+const LP = { pick: 0, rays: 0, bounce: 0, nodes: 0, wall: 0, gl: 0, life: 0, fx: 0, ovl: 0, cpu: 0, subs: 0, all: 0, n: 0 }, LPA = {};
+const lpLap = (k, t) => { const n = performance.now(); LPA[k] = (LPA[k] || 0) + n - t; return n; };
 const CV = { G: 2, drawMs: 0, underMs: 0, wins: [], ready: false, job: null, jobK: -1, want: false, sig: '', budget: 6, sinceDraw: 0 };
 const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -32940,13 +32947,19 @@ function drawBox(Wn, vx0, vy0, vx1, vy1, lamp) {
 }
 // the light at nodes every LCELLS cells over the box (pinned to the world): the lamp on surfaces, its glow in the water,
 // its falloff, the bounce - four numbers a node in N4 (the CPU's pass and the GPU's read the same)
-function lightNodes(Wn, bx, all) {
+// the nodes' grid over the box (their places: NG)
+function nodeGrid(Wn, bx) {
   const G = CV.G, BW = bx[2] - bx[0], BH = bx[3] - bx[1], XA = Wn.X0 + (bx[0] + 0.5) * G, YA = Wn.Y0 + (bx[1] + 0.5) * G;
   const LSZ = LCELLS * G, gx0 = Math.floor(XA / LSZ) * LSZ, gy0 = Math.floor(YA / LSZ) * LSZ;
   const LW = Math.ceil((BW * G) / LSZ) + 3, LH = Math.ceil((BH * G) / LSZ) + 3;
-  if (N4.length < LW * LH * 4) N4 = new Float32Array(Math.ceil(LW * LH * 1.3) * 4);
   NG.gx0 = gx0; NG.gy0 = gy0; NG.LSZ = LSZ; NG.LW = LW; NG.LH = LH;
+}
+// (the CPU's pass, 2D: the light at every node into N4; the chip works it out itself - 12-gl.js nodeAt)
+function lightNodes(Wn, bx, all) {
+  nodeGrid(Wn, bx);
   if (all) return;
+  const { gx0, gy0, LSZ, LW, LH } = NG;
+  if (N4.length < LW * LH * 4) N4 = new Float32Array(Math.ceil(LW * LH * 1.3) * 4);
   const wf = P.wfall, bk = BN.on ? P.bounce : 0;
   for (let b = 0; b < LH; b++) { const Y = gy0 + b * LSZ; for (let a = 0; a < LW; a++) {
     const X = gx0 + a * LSZ, r = lampAt(X, Y), o = (b * LW + a) * 4, dx = (X - LB.ox) / wf, dy = (Y - LB.oy) / wf;
@@ -33152,17 +33165,22 @@ function blitBox(w, h, X, Y) {
 
 // ---- the picture on the graphics chip (WebGL2). renderBox's pass over the cells, a fragment a cave cell: in the game
 // it was 20 ms a view in JS where the lamp lit a big chamber. The CPU still works out what is cheap and changes each frame -
-// the lamp's rays, the bounce, the light at the nodes every 3 cells (N4), the pockets' surfaces, the weed, the bubbles - and
+// the lamp's rays, the bounce, the light at the nodes every 3 cells (on the chip: nodeAt), the pockets' surfaces, the weed, the bubbles - and
 // the chip does the rest with the window's cells kept on it as eight one-byte textures (uploaded a slice a frame after a
 // build; the CPU's pass draws the window till they're all there). The 2D canvas (?gl=0) keeps the CPU's pass.
-const CGL = { prog: null, epoch: -1, U: null, wc: null, pal: null, nodes: null, nW: 0, nH: 0, surf: null, sW: 0, sH: 0, tile: null, lum: null, tileKey: '', live: new Set(), bad: false };
+const CGL = { prog: null, epoch: -1, U: null, wc: null, pal: null, lampT: null, lH: 0, surf: null, sW: 0, sH: 0, tile: null, lum: null, tileKey: '', live: new Set(), bad: false };
+let LAMPT = new Float32Array(512);
 const CGL_NAMES = ['mat', 'sea', 'inK', 'dS', 'nrm', 'alb', 'pid', 'dSea'];
 const CAVE_FS = `#version 300 es
 precision highp float; precision highp int;
-uniform sampler2D u_mat, u_sea, u_inK, u_dS, u_nrm, u_alb, u_pid, u_dSea, u_pal, u_nodes, u_wc, u_tile, u_lum, u_surf;
+uniform sampler2D u_mat, u_sea, u_inK, u_dS, u_nrm, u_alb, u_pid, u_dSea, u_pal, u_lampT, u_wc, u_tile, u_lum, u_surf;
 uniform vec4 u_win;      // X0, Y0, G, (ALL LIT)
 uniform vec4 u_ng;       // the light's nodes: gx0, gy0, LSZ, (no lamp: the world's light alone)
 uniform vec4 u_lamp;     // ox, oy, RIM, STEP DITHER
+uniform vec4 u_lb0;      // the lamp: its aim (ux, uy), the sub's middle (the pool's)
+uniform vec4 u_lb1;      //   LAMP REACH, POOL, LAMP STRENGTH, WALL FALLOFF
+uniform vec4 u_lb2;      //   the bounce's strength (0: none), PEN, its rays (LB.n)
+uniform vec4 u_bn;       // the bounce's grid: x0, y0, its cell, n (u_lampT: row 0 the rays' reach, rows 1.. the grid, 512 a row)
 uniform vec4 u_k;        // LIGHT STEPS, the cave's ambient, GLOW, BACK WALL LIGHT
 uniform vec4 u_k2;       // EDGE, INSET, the mouth's Y
 uniform vec4 u_L0[3];    // a wall level: on, scale, x offset, y offset
@@ -33181,6 +33199,42 @@ float surfAt(int p, float X) {
   if (k < 0.0) return surfS(p, 0);
   if (k >= n - 1.0) return surfS(p, int(n) - 1);
   int ki = int(k); return surfS(p, ki) * (1.0 - u) + surfS(p, ki + 1) * u;
+}
+// (Nov 1, the user's PC: the light at the nodes worked out on the CPU, every node of the lamp's box, and sent up each frame was
+// ~3.7 ms a view) the light at a node, here: what lampAt, the falloff and bounceAt (10-light.js) give - from the rays' reach and
+// the bounce's grid, a small texture - at the same nodes, smoothed between them as before
+float beamFall(float q) { return q <= 0.0 ? 0.0 : pow(q, 0.8) * smoothstep(0.0, 0.35, q); }
+float lampT(int k) { return texelFetch(u_lampT, ivec2(k & 511, k >> 9), 0).r; }
+vec4 nodeAt(float X, float Y) {
+  vec4 r = vec4(0.0);
+  float ox = u_lamp.x, oy = u_lamp.y, reach = u_lb1.x, pool = u_lb1.y, PEN = u_lb2.y, NB = u_lb2.z;
+  float dx = X - ox, dy = Y - oy, d2 = dx * dx + dy * dy, far = max(reach, pool) + PEN;
+  { float fx = dx / u_lb1.w, fy = dy / u_lb1.w; r.z = 1.0 / (1.0 + fx * fx + fy * fy); }
+  if (d2 <= far * far) {
+    float d = sqrt(d2), f = atan(dy, dx) / 6.283185307179586 * NB - 0.5;
+    if (f < 0.0) f += NB;
+    float fb = floor(f), u = f - fb;
+    int b0 = int(mod(fb, NB)), b1 = int(mod(fb + 1.0, NB));
+    float occ = lampT(b0) * (1.0 - u) + lampT(b1) * u;
+    if (d <= occ + PEN) {
+      float vis = d <= occ ? 1.0 : 1.0 - (d - occ) / PEN, open = d <= occ ? 1.0 : 0.0, beam = 0.0;
+      if (d < reach) {
+        float cosA = d < 0.5 ? 1.0 : (dx * u_lb0.x + dy * u_lb0.y) / d, e0 = clamp((cosA - 0.55) / 0.3, 0.0, 1.0);
+        if (e0 > 0.0) { float core = clamp((cosA - 0.8) / 0.18, 0.0, 1.0), q = 1.0 - d / reach; beam = beamFall(q) * e0 * e0 * (3.0 - 2.0 * e0) * (0.55 + 0.45 * core) * (1.0 - exp(-d / 5.0)); }
+      }
+      float px = X - u_lb0.z, py = Y - u_lb0.w, pd = sqrt(px * px + py * py), pl = pool > 0.0 && pd < pool ? pow(1.0 - pd / pool, 2.0) * 0.9 : 0.0;
+      r.x = (beam * 1.5 + pl) * vis * u_lb1.z;
+      r.y = (beam + pl * 0.35) * open;
+    }
+  }
+  if (u_lb2.x > 0.0 && u_bn.w > 0.0) {
+    float n = u_bn.w, gx = (X - u_bn.x) / u_bn.z - 0.5, gy = (Y - u_bn.y) / u_bn.z - 0.5, i = floor(gx), j = floor(gy);
+    if (i >= 0.0 && j >= 0.0 && i < n - 1.0 && j < n - 1.0) {
+      float a = gx - i, b = gy - j; int o = 512 + int(j * n + i), N = int(n);
+      r.w = ((lampT(o) * (1.0 - a) + lampT(o + 1) * a) * (1.0 - b) + (lampT(o + N) * (1.0 - a) + lampT(o + N + 1) * a) * b) * u_lb2.x;
+    }
+  }
+  return r;
 }
 float abyssDark(float y) { float u = clamp((y - 1420.0) / 1270.0, 0.0, 1.0); return u < 0.5 ? 0.62 * u * 2.0 : 0.62 + 0.36 * (u - 0.5) * 2.0; }
 // the cell's colour by the light on it (Ls on surfaces, Lg the beam's glow in the water, its falloff, bn the bounce) and the
@@ -33262,8 +33316,8 @@ void main() {
   bool dark = u_ng.w > 0.5;                                  // (the caves by the world's own light alone: under the tint)
   if (!all && !dark) {
     float LSZ = u_ng.z, fa = (X - u_ng.x) / LSZ, fb = (Y - u_ng.y) / LSZ, a0 = floor(fa), b0 = floor(fb), au = fa - a0, bu = fb - b0;
-    ivec2 q = ivec2(int(a0), int(b0));
-    vec4 n00 = texelFetch(u_nodes, q, 0), n10 = texelFetch(u_nodes, q + ivec2(1, 0), 0), n01 = texelFetch(u_nodes, q + ivec2(0, 1), 0), n11 = texelFetch(u_nodes, q + ivec2(1, 1), 0);
+    float NX = u_ng.x + a0 * LSZ, NY = u_ng.y + b0 * LSZ;
+    vec4 n00 = nodeAt(NX, NY), n10 = nodeAt(NX + LSZ, NY), n01 = nodeAt(NX, NY + LSZ), n11 = nodeAt(NX + LSZ, NY + LSZ);
     float w00 = (1.0 - au) * (1.0 - bu), w10 = au * (1.0 - bu), w01 = (1.0 - au) * bu, w11 = au * bu;
     vec4 L = n00 * w00 + n10 * w10 + n01 * w01 + n11 * w11;
     Ls = L.x; bn = L.w;
@@ -33284,7 +33338,7 @@ void main() {
 }`;
 function cglSetup() {
   const gl = GLR.gl;
-  CGL.epoch = GLR.epoch; CGL.prog = null; CGL.wc = CGL.pal = CGL.nodes = CGL.surf = CGL.tile = CGL.lum = null; CGL.nW = CGL.nH = CGL.sW = CGL.sH = 0; CGL.tileKey = '';
+  CGL.epoch = GLR.epoch; CGL.prog = null; CGL.wc = CGL.pal = CGL.lampT = CGL.surf = CGL.tile = CGL.lum = null; CGL.lH = CGL.sW = CGL.sH = 0; CGL.tileKey = '';
   for (const Wn of CGL.live) Wn._gl = null;
   CGL.live.clear();
   try {
@@ -33293,9 +33347,9 @@ function cglSetup() {
     gl.linkProgram(p);
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
     CGL.prog = p; CGL.U = {};
-    for (const k of ['u_size', 'u_quad', 'u_cells', 'u_win', 'u_ng', 'u_lamp', 'u_k', 'u_k2', 'u_L0', 'u_L1', 'u_L2']) CGL.U[k] = gl.getUniformLocation(p, k);
+    for (const k of ['u_size', 'u_quad', 'u_cells', 'u_win', 'u_ng', 'u_lamp', 'u_lb0', 'u_lb1', 'u_lb2', 'u_bn', 'u_k', 'u_k2', 'u_L0', 'u_L1', 'u_L2']) CGL.U[k] = gl.getUniformLocation(p, k);
     gl.useProgram(p);
-    ['u_mat', 'u_sea', 'u_inK', 'u_dS', 'u_nrm', 'u_alb', 'u_pid', 'u_dSea', 'u_pal', 'u_nodes', 'u_wc', 'u_tile', 'u_lum', 'u_surf'].forEach((k, i) => gl.uniform1i(gl.getUniformLocation(p, k), i < 8 ? i : i + 2));
+    ['u_mat', 'u_sea', 'u_inK', 'u_dS', 'u_nrm', 'u_alb', 'u_pid', 'u_dSea', 'u_pal', 'u_lampT', 'u_wc', 'u_tile', 'u_lum', 'u_surf'].forEach((k, i) => gl.uniform1i(gl.getUniformLocation(p, k), i < 8 ? i : i + 2));
     gl.useProgram(GLR.prog); GLR.cur.prog = 1;
     // the water's colour by depth: once
     CGL.wc = glNewTex(0, 0, gl.NEAREST); const wc = new Float32Array(1024 * 4);
@@ -33349,7 +33403,7 @@ function cglOn() {
   if (CGL.epoch !== GLR.epoch) cglSetup();
   return !!CGL.prog;
 }
-// the box of a window (bx, in its cells) onto the view's context at screen (dx, dy, dw, dh); the light's nodes in N4 (NG),
+// the box of a window (bx, in its cells) onto the view's context at screen (dx, dy, dw, dh); the light's nodes' places in NG,
 // the wall's levels as wallSetup gives them
 function cglDraw(ctx, Wn, bx, all, WS, dx, dy, dw, dh, dark) {
   const gl = GLR.gl, t = ctx.target, U = CGL.U, G = CV.G;
@@ -33359,10 +33413,15 @@ function cglDraw(ctx, Wn, bx, all, WS, dx, dy, dw, dh, dark) {
   glPM(false);
   // the frame's small things: the light's nodes, the palette, the pockets' surfaces, the wall's tiles (when they change)
   gl.activeTexture(gl.TEXTURE9);
-  const { LW, LH } = NG;
-  if (CGL.nW < LW || CGL.nH < LH) { CGL.nW = Math.max(LW, CGL.nW); CGL.nH = Math.max(LH, CGL.nH); CGL.nodes = cglFloatTex(CGL.nodes, CGL.nW, CGL.nH, 4); }
+  // (the lamp's light worked out here, per node (nodeAt): its rays' reach (row 0) and the bounce's grid (from 512 on) - LAMPT)
+  const bnN = BN.on && BN.v ? BN.nx : 0, lH = 1 + Math.ceil(bnN * bnN / 512);
+  if (CGL.lH < lH) { CGL.lH = lH; CGL.lampT = cglFloatTex(CGL.lampT, 512, lH, 1); }
   gl.activeTexture(gl.TEXTURE9);
-  if (!all && !dark) { gl.bindTexture(gl.TEXTURE_2D, CGL.nodes); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, LW, LH, gl.RGBA, gl.FLOAT, N4, 0); }
+  if (!all && !dark) {
+    if (LAMPT.length < lH * 512) LAMPT = new Float32Array(lH * 512);
+    LAMPT.set(LB.occ, 0); if (bnN) LAMPT.set(BN.v.subarray(0, bnN * bnN), 512);
+    gl.bindTexture(gl.TEXTURE_2D, CGL.lampT); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 512, lH, gl.RED, gl.FLOAT, LAMPT, 0);
+  }
   gl.bindTexture(gl.TEXTURE_2D, CGL.pal); if (CGL.palSrc !== Wn.pal) { CGL.palSrc = Wn.pal; CGL.pal8 = new Uint8Array(Wn.pal.buffer, Wn.pal.byteOffset, 1024); }
   gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, CGL.pal8);
   const PK = Wn.pockets, SW = 3 + PK.reduce((m, p) => Math.max(m, p.sy ? p.sy.length : 0), 0), SH = Math.max(1, PK.length);
@@ -33386,7 +33445,7 @@ function cglDraw(ctx, Wn, bx, all, WS, dx, dy, dw, dh, dark) {
   // the textures onto their units (0-7 the window's cells - the quad batch's units, so it's told; 10-15 the rest)
   const T = Wn._gl.tex;
   for (let i = 0; i < 8; i++) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, T[i]); GLR.unit[i] = T[i]; if (GLR.unitS[i] !== GLR.near) { gl.bindSampler(i, GLR.near); GLR.unitS[i] = GLR.near; } }
-  [CGL.pal, CGL.nodes, CGL.wc, CGL.tile, CGL.lum, CGL.surf].forEach((tx, i) => { gl.activeTexture(gl.TEXTURE10 + i); gl.bindTexture(gl.TEXTURE_2D, tx); gl.bindSampler(10 + i, null); });
+  [CGL.pal, CGL.lampT, CGL.wc, CGL.tile, CGL.lum, CGL.surf].forEach((tx, i) => { gl.activeTexture(gl.TEXTURE10 + i); gl.bindTexture(gl.TEXTURE_2D, tx); gl.bindSampler(10 + i, null); });
   gl.useProgram(CGL.prog); GLR.cur.prog = 5;
   gl.uniform2f(U.u_size, t._w, t._h);
   ctx._corners(dx, dy, dw, dh);
@@ -33395,6 +33454,8 @@ function cglDraw(ctx, Wn, bx, all, WS, dx, dy, dw, dh, dark) {
   gl.uniform4f(U.u_win, Wn.X0, Wn.Y0, G, all ? 1 : 0);
   gl.uniform4f(U.u_ng, NG.gx0, NG.gy0, NG.LSZ, dark ? 1 : 0);
   gl.uniform4f(U.u_lamp, LB.ox, LB.oy, P.rim, P.ldith);
+  gl.uniform4f(U.u_lb0, LB.ux, LB.uy, SUB.x, SUB.y); gl.uniform4f(U.u_lb1, P.reach, P.pool, P.lampk, P.wfall);
+  gl.uniform4f(U.u_lb2, BN.on ? P.bounce : 0, PEN, LB.n, 0); gl.uniform4f(U.u_bn, BN.x0, BN.y0, BN.cs, bnN);
   gl.uniform4f(U.u_k, P.lsteps, all ? 1 : P.ambient, P.glow, P.backk);
   gl.uniform4f(U.u_k2, P.bedge, P.binset, WS.mo[1], 0);
   const L0 = CGL.L0 || (CGL.L0 = new Float32Array(12)), L1 = CGL.L1 || (CGL.L1 = new Float32Array(12)), L2 = CGL.L2 || (CGL.L2 = new Float32Array(12));
@@ -33439,15 +33500,19 @@ function overlayEnd(bx, X, Y) {
 }
 // a window's box on the chip: the light's nodes, then the picture, then what's over it. false: not yet (the CPU draws it)
 function renderBoxGL(Wn, bx, t, all, dark) {
+  const tw = performance.now();
   if (!cglWindow(Wn)) return false;
-  if (dark) NG.LW = NG.LH = 1; else lightNodes(Wn, bx, all);   // (no lamp: the nodes aren't read)
+  let tq = dark ? tw : lpLap('gl', tw);                      // (the cells onto the chip: counted with its pass)
+  if (!dark) { nodeGrid(Wn, bx); tq = lpLap('nodes', tq); }   // (the nodes' places: their light is worked out on the chip - nodeAt)
   const WS = wallSetup(Wn), G = CV.G, X = Wn.X0 + bx[0] * G, Y = Wn.Y0 + bx[1] * G + WATER_Y;
+  if (!dark) tq = lpLap('wall', tq);
   cglDraw(C, Wn, bx, all, WS, X * SV - CAMPX, Y * SV - TOPPX, (bx[2] - bx[0]) * G * SV, (bx[3] - bx[1]) * G * SV, dark);
   if (dark) return true;
-  overlayBegin(bx);
-  drawLifeBox(Wn, bx, t, all);
-  drawFXBox(Wn, bx, all);
-  overlayEnd(bx, X, Y);
+  tq = lpLap('gl', tq);
+  overlayBegin(bx); tq = lpLap('ovl', tq);
+  drawLifeBox(Wn, bx, t, all); tq = lpLap('life', tq);
+  drawFXBox(Wn, bx, all); tq = lpLap('fx', tq);
+  overlayEnd(bx, X, Y); lpLap('ovl', tq);
   return true;
 }
 
@@ -33679,13 +33744,15 @@ function draw() {
   const V = viewNow(); if (!V) return;
   const [vx0, vy0, vx1, vy1] = V, all = allLit();
   const t0 = performance.now();
+  for (const k in LPA) LPA[k] = 0;
   pickLamp(VIEW.cam[0], VIEW.cam[1]);
+  let tq = lpLap('pick', t0);
   // (the lamp's rays and bounce are worked out only when its light reaches the view: they cost ~24 ms a frame on a PC with a
   // sub out off screen in BATTLE, Oct 29)
   if (LIT.on && !all) { const R = P.reach + P.breach * 1.4 + 40; if (!CV.wins.some(Wn => Wn && Math.min(Wn.X1, vx1, SUB.x + R) > Math.max(Wn.X0, vx0, SUB.x - R) && Math.min(Wn.Y1, vy1, SUB.y + R) > Math.max(Wn.Y0, vy0, SUB.y - R))) LIT.on = false; }
   if (LIT.on && !all) {
     const key = renderTick + ':' + LIT.s.x.toFixed(1) + ':' + LIT.s.y.toFixed(1) + ':' + SUB.aimA.toFixed(3);
-    if (key !== litKey) { litKey = key; lampRays(); bounceField(); }
+    if (key !== litKey) { litKey = key; tq = performance.now(); lampRays(); tq = lpLap('rays', tq); bounceField(); tq = lpLap('bounce', tq); }
   }
   const t = time, gpu = cglOn() && !CV.cpu;
   if (gpu) cglTidy();
@@ -33696,17 +33763,22 @@ function draw() {
     CV.cells += (bx[2] - bx[0]) * (bx[3] - bx[1]); CV.gpu = gpu;
     if (gpu && renderBoxGL(Wn, bx, t, all)) continue;
     CV.gpu = false;
+    const tc = performance.now();
     const [w, h] = renderBox(Wn, bx, t, all);
     if (!all) C.globalCompositeOperation = 'lighter';           // (the lamp's light: added over the picture under it)
     blitBox(w, h, Wn.X0 + bx[0] * CV.G, Wn.Y0 + bx[1] * CV.G + WATER_Y);
     C.globalCompositeOperation = 'source-over';
+    lpLap('cpu', tc);
   }
   // the exploration subs in a cave, again over it (the game drew them in the sea's pass, under this)
+  tq = performance.now();
   for (const s of minisubs) if (s.state === 'out' && HULL.some(([dx, dy]) => inCave(s.x + dx, s.y - WATER_Y + dy)) && s.x > vx0 - 50 && s.x < vx1 + 50) drawMinisub(s);
   // (user Oct 29: a pirate wreck put in a cave in the TERRAIN tab) she and her chest, again over it
   const inC = w => w.y != null && (inCave(w.x, w.y - 30 - WATER_Y) || inCave(chestAt(w)[0], chestAt(w)[1] - WATER_Y));
   if (pirateWrecks.some(inC)) { drawPirateWrecks(vx0, vx1, inC); drawDeepLights(vx0, vx1, inC); }
+  lpLap('subs', tq);
   CV.drawMs += (performance.now() - t0 - CV.drawMs) * 0.1;   // (a view's caves, smoothed: the tools' measure)
+  if (LIT.on && !all) { LPA.all = performance.now() - t0; for (const k in LP) if (k !== 'n') LP[k] += ((LPA[k] || 0) - LP[k]) * 0.1; LP.n++; }
 }
 // is x near a system's mouth (the game keeps its rock formations off them, as off the kraken's pad - buildReef)
 function nearMouth(x, r) { if (!(BED_B - BED_A > 2000)) return false; return CAVES.systems.some(s => Math.abs(sysX(s) - x) < r); }
@@ -33722,7 +33794,7 @@ const CAVE_API = {
   shiftX: dx => { let n = 0; for (const s of CAVES.systems) if (Number.isFinite(s.x)) { s.x += dx; n++; } if (n) cavesSave(); },   // (the world made bigger at its left end: the land's caves move with the ground)
   hard: (x, y) => subHard(x, y - WATER_Y),
   lamp: () => LIT.on && LIT.s ? { x: LB.ox, y: LB.oy + WATER_Y, s: LIT.s } : null,   // (the lamp lighting the caves in the last view drawn: tools/cavesplay.mjs)
-  sig: () => sigNow(), view: VIEW, get cells() { return CV.cells; }, get drawMs() { return CV.drawMs; }, get underCells() { return CV.under || 0; }, get underMs() { return CV.underMs; }, get gpu() { return !!CV.gpu; }, set cpu(v) { CV.cpu = !!v; }, get SVnow() { return SV; },
+  sig: () => sigNow(), view: VIEW, get cells() { return CV.cells; }, get drawMs() { return CV.drawMs; }, get underCells() { return CV.under || 0; }, get underMs() { return CV.underMs; }, get lampParts() { const o = {}; for (const k in LP) o[k] = k === 'n' ? LP.n : +LP[k].toFixed(3); return o; }, get gpu() { return !!CV.gpu; }, set cpu(v) { CV.cpu = !!v; }, get SVnow() { return SV; },
 };
 
 // ---- the GAME EDITOR's CAVES tab (user Oct 28, 08:44: "you know how we have a Editor in the game itself? This tab should be
