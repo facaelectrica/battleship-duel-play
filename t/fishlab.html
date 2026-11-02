@@ -4116,7 +4116,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 602;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 11:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 02 11:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36061,6 +36061,8 @@ function personIcon(draw) {
 // the green buttons' pictures for the vehicles' own actions (user Oct 27: all green, on the right): a shape in the
 // buttons' cream, as the smoke screen's cloud and the water's drop - each a test of a point (u, v) in a 103 x 96 square
 const ACT_GLYPH = {
+  // a fish (a fishing boat's hold)
+  hold: (u, v) => (((u - 46) / 22) ** 2 + ((v - 48) / 13) ** 2 <= 1 && (u - 58) ** 2 + (v - 44) ** 2 >= 6) || (u >= 66 && u < 84 && Math.abs(v - 48) <= (u - 66) * 0.75),
   // the satellite (the shuttle's bay): its body, its two panels on their arms, its mast and dish
   bay: (u, v) => (u >= 44 && u < 60 && v >= 38 && v < 56) || (((u >= 20 && u < 41) || (u >= 63 && u < 84)) && v >= 42 && v < 52 && (Math.floor(u) % 7) !== 0) ||
     (((u >= 41 && u < 44) || (u >= 60 && u < 63)) && v >= 46 && v < 48) || (u >= 51 && u < 53 && v >= 28 && v < 38) || (v >= 22 && v < 28 && Math.abs(u - 52) <= (28 - v) * 1.4 + 1),
@@ -36138,13 +36140,14 @@ function civWeapons(v) {
   if (k === 'ship') return FW_SHIPS.has(v.kind) ? ['anchor', 'fw', 'horn'] : v.msub ? ['anchor', 'launch', 'horn'] : ['anchor', 'horn'];
   if (k === 'sub') return ['ping'];
   if (k === 'air') return v.kind === 'cessna' ? ['csmoke'] : [];
+  if (k === 'boat' && v.kind === 'fish') return ['hold'];   // (a fishing boat's hold: how many fish she has aboard - 50-story-net.js, user Nov 2)
   if (k === 'shuttle') return [v.state === 'pad' || v.state === 'count' || v.state === 'climb' ? 'launch' : 'bay'];
   return [];
 }
 // the row for what player p is in (a civilian, or CHILL's yacht)
 // the vehicles' buttons that act while held, and what letting go of each sends
 const CW_HELD = { horn: 'hornUp' };
-const CW_SET = new Set(['magnet', 'sails', 'ping', 'anchor', 'horn', 'fw', 'csmoke', 'bay']);   // (the actions that go through act 'cw')
+const CW_SET = new Set(['magnet', 'sails', 'ping', 'anchor', 'horn', 'fw', 'csmoke', 'bay', 'hold']);   // (the actions that go through act 'cw')
 const civRow = p => crew[p].mode === 'sail' ? ['anchor', 'sails'] : crew[p].mode === 'civ' ? civWeapons(crew[p].civ) : [];
 // a button of that row pressed (or let go): slot i (0 = A); true if there was one there
 function civSlot(p, i, down) {
@@ -36170,6 +36173,7 @@ function civWeapon(p, wk) {
   else if (wk === 'fw') fireworkLaunch(v);
   else if (wk === 'csmoke') cessnaSmoke(v);
   else if (wk === 'bay') shuttleBay(v);
+  else if (wk === 'hold') sound('empty', v.x);   // (it only shows the catch)
 }
 // its button: f how far through its reload (or the share used), off when it can't, on while it's running, n a count
 function civWeaponState(p, wk) {
@@ -36183,6 +36187,7 @@ function civWeaponState(p, wk) {
   if (wk === 'sails') return { f: 0, off: v.state !== 'sail', n: -1, on: v.sailsUp === false };
   if (wk === 'magnet') return { f: 0, off: !!v.magBroken, n: -1, on: !!(v.mag && v.mag.out) };   // (its cable shot through: grey till it's mended at home)
   if (wk === 'ping') return { f: 0, off: false, n: -1 };
+  if (wk === 'hold') return netHoldState(v);
   return no;
 }
 /* ---- a boat's anchor, let go and weighed from its button (the anchors themselves: 50-land-anchors). She lies to it
@@ -51601,6 +51606,7 @@ const NETP = {
   MOUTH: 9,      // m between the float and the sinker (twice the picture's, the user's ask)
   BAG: 16,       // m from the mouth to the bag's end (the picture's proportions, twice)
   M: 8, K: 14,   // the mesh: points across (even) and along
+  HOLD: 50,      // fish her hold takes (user 10:30)
   DN: 2.6, UP: 2.2, STOW: 1.1,   // the winch: m/s paying out, m/s hauling (empty), s for the net to close (or open)
   T0: 2200,      // N: the pull that halves the hauling speed
   // masses (kg), weights in water (a share of g: + sinks, - floats) and drags (kg/m: F = D v^2)
@@ -51675,11 +51681,25 @@ function netCmd(v, c) {
   N.cmd = c; sound('anchorWinch', v.x, 1);
 }
 // the catch turned to coins, the net gathered aboard (hauled all the way up; or tied up at a structure)
-function netCash(j) {
+// (user 10:30: "The boat should have a indicator ... showing how many fish we caught so far. The max load should be 50") the net
+// landed on deck empties into her hold (j.hold) as far as it holds (NETP.HOLD); what doesn't fit stays in the net
+function netLand(j) {
   const N = j.net; if (!N || !(N.n > 0)) return;
-  if (j.own && STORY) story.coins += N.n * NET_COIN; N.cashN = N.n; N.cashT = time; N.n = 0; N.ck = []; N.ct = []; N.cy = []; sound('clink', j.x, 1);
+  const room = Math.max(0, Math.floor(NETP.HOLD) - (j.hold || 0)), k = Math.min(room, N.n); if (!k) return;
+  j.hold = (j.hold || 0) + k; N.n -= k;
+  const keep = Math.max(0, N.ck.length - k); N.ck.length = keep; N.ct.length = keep; N.cy.length = keep;   // (the ones at the front of the bag stay)
+  sound('clink', j.x, 0.6);
 }
-// tied up: the net on her deck, its catch sold
+// tied up at a structure that takes fish: her hold and her net's catch sold, a coin a fish
+function netCash(j) {
+  const N = j.net, n = (j.hold || 0) + (N ? N.n : 0); if (!n) return;
+  if (j.own && STORY) story.coins += n * NET_COIN;
+  j.hold = 0; if (N) { N.cashN = n; N.cashT = time; N.n = 0; N.ck = []; N.ct = []; N.cy = []; }
+  sound('clink', j.x, 1);
+}
+// the hold's green square on the right (civWeapons 'hold'): filling as it fills, the count on it
+function netHoldState(v) { const n = v && v.hold || 0, H = Math.max(1, Math.floor(NETP.HOLD)); return { f: n > 0 && n < H ? 1 - n / H : 0, off: false, n, on: n >= H }; }
+// tied up: the net on her deck, her catch sold
 function netAboard(j) {
   const N = j.net; if (!N) return;
   netCash(j); N.s = 1; N.L = 0; N.cmd = 0; N.ab = 1;
@@ -51712,7 +51732,7 @@ function fishNetStep(j, dt) {
     if (N.cmd > 0) N.ab = Math.max(0, N.ab - dt / NET_SWING_S); else if (N.cmd < 0 && N.ab < 1) N.ab = Math.min(1, N.ab + dt / NET_SWING_S);
     const [dx, dy] = netDeck(j), e = N.ab * N.ab * (3 - 2 * N.ab), up = Math.sin(Math.PI * N.ab) * 1.2 * UPM;   // (an arc over the rail)
     netFold(N, j, hx + (dx - hx) * e, hy + (dy - hy) * e - up, hx, hy);
-    if (N.ab >= 1) netCash(j);
+    if (N.ab >= 1) netLand(j);
     N.hx = hx; N.hy = hy; N.T = 0; N.d = 0; N.fx = j.x; N.lo = N.hi = j.x; j.ntv = 0; return;
   }
   if (N.hx == null) { N.hx = hx; N.hy = hy; }
@@ -51978,21 +51998,27 @@ function drawStoryNet(j, h) {
   // gulls round her while she has fish in the net, at the size of every gull in the game (37-birds.js: user 10:29, "The seagulls
   // look gigantic ... They should be smaller like other birds"); stopped, they come down and sit on her - the bow, the wheelhouse
   // roof, the stern rail (N.gl)
-  if (N && N.n > 0 && img.birds && img.birds.gull) {
+  // (user 10:30: "the more fish we catch (that is actually in the boat, not on the net only), the more seagulls we have, to a max
+  // of 20") one gull for every 2.5 fish of a full hold's 50 - as many in the same share of any hold
+  const ng = Math.min(20, Math.ceil((j.hold || 0) / Math.max(1, NETP.HOLD) * 20));
+  if (ng > 0 && N && img.birds && img.birds.gull) {
     const L = storyBoatSize(j)[0], e = (N.gl || 0) * (N.gl || 0) * (3 - 2 * (N.gl || 0)), gs = 0.375 * SV, mini = gs < 0.75;
-    const SITS = [[0.06, 0.58], [0.62, 0.46], [0.92, 0.62]];
-    for (let k = 0; k < 3; k++) {
-      const a = time * (1.1 + 0.2 * k) + k * 2.1, cx = j.x + Math.cos(a) * L * (0.5 + 0.15 * k), cy = j.y - h * (1.25 + 0.2 * k) + Math.sin(a * 1.7) * h * 0.18;
-      const [ax, ay] = SITS[k], px = j.x - j.dir * (ax - 0.5) * L, py = j.y + h * FISH_DRAFT - h + ay * h;   // (the art faces left: its bow at ax 0)
+    for (let k = 0; k < ng; k++) {
+      const r = ((k * 2654435761) >>> 0) / 4294967296, a = time * (0.9 + 0.5 * r) + k * 2.1;
+      const cx = j.x + Math.cos(a) * L * (0.45 + 0.5 * r), cy = j.y - h * (1.2 + 0.6 * ((k * 7) % 5) / 5) + Math.sin(a * 1.7) * h * 0.18;
+      // where it sits: the bow, the wheelhouse roof, the stern rail, then along her rail
+      const [ax, ay] = k === 0 ? [0.06, 0.58] : k === 1 ? [0.62, 0.46] : k === 2 ? [0.92, 0.62] : k < 6 ? [0.57 + (k - 3) * 0.06, 0.46] : [0.1 + (k - 6) / 14 * 0.8, 0.6];
+      const px = j.x - j.dir * (ax - 0.5) * L, py = j.y + h * FISH_DRAFT - h + ay * h;   // (the art faces left: its bow at ax 0)
       const gx = cx + (px - cx) * e, gy = cy + (py - cy) * e, sits = e > 0.97;
       const set = sits ? (mini ? img.birds.gullMiniPerch : img.birds.gullPerch) : (mini ? img.birds.gullMini : img.birds.gull)[[0, 1, 2, 1][Math.floor(time * 8 + k * 1.3) % 4]];
-      const face = sits ? -j.dir : -Math.sin(a) > 0 ? 1 : -1, sp = face > 0 ? set.r : set.l;
+      const face = sits ? (k % 3 ? -j.dir : j.dir) : -Math.sin(a) > 0 ? 1 : -1, sp = face > 0 ? set.r : set.l;
       let sc = mini ? 1 : Math.max(1, Math.round(gs));
       if (mini) { const full = img.birds.gull[1].r.width * gs; sc = Math.min(1, full / sp.width); }
       const w = Math.max(1, Math.round(sp.width * sc)), hh = Math.max(1, Math.round(sp.height * sc));
       C.drawImage(sp, Math.round(PX(gx)) - (w >> 1), sits ? Math.round(PY(gy)) - hh : Math.round(PY(gy)) - (hh >> 1), w, hh);
     }
   }
+
 }
 
 /* ================================================================
@@ -56579,6 +56605,7 @@ window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude
   // (user 10:06: "if I touch any of them, it should show me what they represent ... when we pass the mouse on the PC, we see
   // the tooltip") each its one short line: the tooltip on a PC, the line under the panel when touched or dragged
   const SL = [   // [label, NETP key, min, max, step, what it is]
+    ['MAX LOAD', 'HOLD', 10, 200, 5, 'Fish her hold takes (the green square fills)'],
     ['SINKER kg', 'skM', 20, 1000, 10, 'Bottom orange dot weight: more = net sits deeper'],
     ['FLOAT kg', 'lift', 0, 150, 1, 'Top orange dot pulls up this hard: more = taller mouth'],
     ['NET DRAG', 'twD', 0.2, 6, 0.1, 'How hard the water pulls on the mesh'],
@@ -56610,7 +56637,7 @@ window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude
     const P = __game.fishnet.P;
     for (const s of d.querySelectorAll('input')) {
       const k = s.dataset.p, o = s.nextElementSibling, get = () => k === 'lift' ? -P.flM * P.flW : P[k];   // (FLOAT: the kilograms the top dot pulls up - its weight in water, turned round)
-      const show = () => { const v = get(); o.textContent = k === 'BOAT_M' ? (v / 1000).toFixed(1) : (+v).toFixed(k === 'skM' || k === 'lift' ? 0 : 2); };
+      const show = () => { const v = get(); o.textContent = k === 'BOAT_M' ? (v / 1000).toFixed(1) : (+v).toFixed(k === 'skM' || k === 'lift' || k === 'HOLD' ? 0 : 2); };
       s.value = get(); show(); s.oninput = () => { if (k === 'lift') P.flW = -s.value / P.flM; else P[k] = +s.value; show(); };
     }
     d.querySelector('[data-k=fish]').onclick = () => addFish(4);
@@ -56625,7 +56652,7 @@ window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude
     // the schools kept round her (they'd wander off along the sea)
     { const T = __game.fishnet.schools(), C = T.c; for (let i = 0; i < T.n; i++) if (Math.abs(C.x[i] - boat.x) > 140 * U) C.dir[i] = C.x[i] < boat.x ? 1 : -1; }
     const sp = Math.abs((boat.vDrive || 0) * boat.dir + (boat.ntv || 0)) / U;
-    el.innerHTML = `ROPE ${(N.L / U).toFixed(1)} m &nbsp; DEPTH ${(N.d / U).toFixed(1)} m<br>PULL ${(N.T / 1000).toFixed(2)} kN &nbsp; SPEED ${sp.toFixed(1)} m/s<br>IN NET ${N.n} &nbsp; COINS ${coins}`;
+    el.innerHTML = `ROPE ${(N.L / U).toFixed(1)} m &nbsp; DEPTH ${(N.d / U).toFixed(1)} m<br>PULL ${(N.T / 1000).toFixed(2)} kN &nbsp; SPEED ${sp.toFixed(1)} m/s<br>IN NET ${N.n} &nbsp; IN BOAT ${boat.hold || 0} / ${__game.fishnet.P.HOLD}`;
   }
   (async () => {
     await wait();
@@ -56641,7 +56668,7 @@ window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude
       g.fishnet.clear(boat);
       setInterval(() => g.fishnet.clear(boat), 250);
       g.fishnet.board(boat);
-      g.fishnet.hudOnly(['left', 'right', 'up', 'down']);   // (user 09:57: "just the boat and its controls" - no menu, no battleship UI)
+      g.fishnet.hudOnly(['left', 'right', 'up', 'down', 'w:hold']);   // (user 09:57: "just the boat and its controls" - no menu, no battleship UI)
       for (let k = 0; k < ZOOM_IN; k++) g.zoomStep(0, 1);   // (close enough to see the mesh, wide enough for the rope out)
       addFish(8);
       panel();
