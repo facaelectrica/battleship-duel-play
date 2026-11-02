@@ -4169,8 +4169,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 670;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 17:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 671;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 17:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -40329,7 +40329,13 @@ function islAddHole() {
 // front, black under its skin, every boat and sub stops at it; solids that overlap one body) or ISLAND (behind the water)
 function islSetKind(k) {
   const s = TERRAIN_ED.sel, L = s && s.Is ? s.Is : s && s.I != null ? [s.I] : [];
-  if (s && s.G) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'The ground is always SOLID.'; return; }   // (the ground's own shape: the world's land, in front)
+  if (s && s.G) {                                                 // (a ground shape: SOLID as it is; ISLAND / HOLE make it an ordinary shape - groundBake)
+    const gi = groundWholePick(s), nt = t => { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = t; };
+    if (gi < 0) { nt('Pick the whole ground shape (its cross).'); return; }
+    if (k === 'S') { nt('It is SOLID.'); return; }
+    const n = groundBake(gi, k); if (n == null) return;
+    TERRAIN_ED.sel = { Is: [n] }; terrainSyncSkin(); nt(SHP_NAME[k] + ' (REFRESH to build).'); return;
+  }
   if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Press a shape\'s line first.'; return; }
   for (const n of L) if (ISLANDS[n] && !(ISLANDS[n].t && k !== 'H')) { ISLANDS[n].k = k; delete ISLANDS[n].solid; }   // (a tunnel is a hole only)
   islChanged(); terrainSyncSkin(); if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = SHP_NAME[k] + ' (REFRESH to build).';
@@ -47099,7 +47105,8 @@ function buildLand() {
   land.ver = (land.ver || 0) + 1; land.topV = null;          // (a new world: no column's top known yet)
   land.backS = Float32Array.from(land.surf);
   for (const L of land.lakes) {
-    const c0 = Math.max(0, Math.floor(L[0] / LT_CELL) - 1), c1 = Math.min(land.cols - 1, Math.ceil(L[1] / LT_CELL)), h0 = land.surf[c0], h1 = land.surf[c1];
+    const rim = c => ISLE !== null && ISLE[c] === 2 && !inCountry(c * LT_CELL) ? Math.max(land.surf[c], WATER_Y) : land.surf[c];   // (a rim at sea under an island behind the water: the water's line, not the island's top)
+    const c0 = Math.max(0, Math.floor(L[0] / LT_CELL) - 1), c1 = Math.min(land.cols - 1, Math.ceil(L[1] / LT_CELL)), h0 = rim(c0), h1 = rim(c1);
     for (let c = c0 + 1; c < c1; c++) land.backS[c] = Math.min(land.surf[c], h0 + (h1 - h0) * (c - c0) / (c1 - c0));
   }
   // (the back of the field, smoothed: where the nearest trees stand)
@@ -52535,7 +52542,7 @@ function groundLoad(G) {
 }
 
 /* ---- the TERRAIN tab: the one line and its handles ---- */
-const GROUND_ED = { drag: -1, hover: -1, ptr: null, lastDown: null, hold: 0 };
+const GROUND_ED = { drag: -1, hover: -1, ptr: null, lastDown: null, hold: 0, whole: null };
 // the natural line under x (dy 0), and how fixed the ground is there (a country's dock area, edge tower's foot, structures)
 const gNat = x => inCountry(x) ? landNat(x, land.R) : LAND_Y;
 const gLockAt = x => inCountry(x) ? landLock(x) : 0;
@@ -52584,7 +52591,10 @@ window.addEventListener('pointerdown', e => {
   if (!landEdOn() || onEdUI(e)) return;
   const q = groundPick(e), now = performance.now(), P = GROUND;
   { const gi = q.k < 0 ? groundCrossPick(q.x, q.y, q.r) : -1;     // (a ground shape's cross: the whole shape picked)
-    if (gi >= 0) { e.stopImmediatePropagation(); e.preventDefault(); edClaim('line'); if (typeof MQ !== 'undefined') MQ.on = false; const g = groundShapes()[gi]; TERRAIN_ED.sel = { G: true, k: g.k0, k1: g.k1 - 1 }; terrainSyncSkin(); return; } }
+    const gsq = gi < 0 && q.k < 0 ? groundSquarePick(q.x, q.y, q.r) : -1, gh = gi >= 0 ? gi : gsq;
+    if (gh >= 0) { e.stopImmediatePropagation(); e.preventDefault(); edClaim('line'); if (typeof MQ !== 'undefined') MQ.on = false; const g = groundShapes()[gh]; TERRAIN_ED.sel = { G: true, k: g.k0, k1: g.k1 - 1 }; terrainSyncSkin();
+      if (e.button !== 2) GROUND_ED.whole = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, scale: gsq >= 0, g, mid: groundCrossAt(g), p0: GROUND.slice(g.k0, g.k1 + 1).map(p => { const x = gX(p[0]); return [x, gNat(x) + p[1]]; }) };
+      return; } }
   const onLine = q.x > gX(P[0][0]) && q.x < gX(P[P.length - 1][0]) && gLockAt(q.x) < 0.5 && Math.abs(gLineY(q.x) - q.y) < q.r * 1.6;
   if (q.k < 0 && !onLine) { GROUND_ED.lastDown = null; return; }
   e.stopImmediatePropagation(); e.preventDefault();              // (the editor's, not the game's: no shot where you click)
@@ -52611,6 +52621,7 @@ window.addEventListener('pointerdown', e => {
 }, { capture: true, passive: false });
 window.addEventListener('pointermove', e => {
   if (!landEdOn()) { if (GROUND_ED.hover >= 0) { GROUND_ED.hover = -1; document.body.style.cursor = ''; } return; }
+  { const w = GROUND_ED.whole; if (w && w.id === e.pointerId) { e.stopImmediatePropagation(); if (Math.hypot(e.clientX - w.cx, e.clientY - w.cy) > 8) w.moved = true; if (w.moved) { const [x, y] = screenToWorld(e.clientX, e.clientY); groundWholeTo(w, x, y); } return; } }
   const q = GROUND_ED.ptr;
   if (!q || q.id !== e.pointerId || GROUND_ED.drag < 0) {
     if (e.pointerType === 'mouse' && !onEdUI(e) && !e.buttons) { const k = groundPick(e).k; if (k !== GROUND_ED.hover) { GROUND_ED.hover = k; document.body.style.cursor = k >= 0 ? 'grab' : ''; } }
@@ -52623,6 +52634,7 @@ window.addEventListener('pointermove', e => {
   groundDragBy(q.st, x - q.x, y - q.y);
 }, { capture: true, passive: true });
 function groundEdUp(e) {
+  { const w = GROUND_ED.whole; if (w && w.id === e.pointerId) { e.stopImmediatePropagation(); GROUND_ED.whole = null; if (w.moved) { const P = GROUND; groundChanged(P[Math.max(0, w.g.k0 - 1)][0], P[Math.min(P.length - 1, w.g.k1 + 1)][0]); } return; } }
   const q = GROUND_ED.ptr;
   if (!q || q.id !== e.pointerId) return;
   e.stopImmediatePropagation();
@@ -52667,7 +52679,58 @@ function groundShapesDraw() {
     const [cx, cy] = groundCrossAt(g), X = PX(cx), Y = PY(cy), a = Math.round(hs * 1.6); if (X < -40 || X > VWP + 40) return;
     C.fillStyle = '#04070f'; C.fillRect(X - a - 1, Y - t - 1, 2 * a + 2, 2 * t + 2); C.fillRect(X - t - 1, Y - a - 1, 2 * t + 2, 2 * a + 2);
     C.fillStyle = on ? '#ffb347' : '#ffffff'; C.fillRect(X - a, Y - t, 2 * a, 2 * t); C.fillRect(X - t, Y - a, 2 * t, 2 * a);
+    { const [sx, sy] = groundSquareAt(g), Xs = Math.round(PX(sx)), Ys = Math.round(PY(sy)), r2 = Math.round(hs * 1.15), col = '#ffb347';   // (the square: scales it)
+      C.fillStyle = '#04070f'; C.fillRect(Xs - r2 - 2, Ys - r2 - 2, 2 * r2 + 4, 2 * r2 + 4); C.fillStyle = col; C.fillRect(Xs - r2, Ys - r2, 2 * r2, 2 * r2); C.fillStyle = '#04070f'; C.fillRect(Xs - r2 + 2, Ys - r2 + 2, 2 * r2 - 4, 2 * r2 - 4);
+      C.fillStyle = col; edSeg(Xs - r2 * 0.5, Ys + r2 * 0.5, Xs + r2 * 0.5, Ys - r2 * 0.5, Math.max(1, t), false); }
   });
+}
+// its square (scales it about its cross), just right of the cross - as a shape's (shpScaleAt)
+const groundSquareAt = g => { const [x, y] = groundCrossAt(g), k = 20 / Math.max(0.05, S * cam.view[0].z); return [x + k * 1.6, y - k * 1.6]; };
+function groundSquarePick(x, y, r) { let best = -1, bd = (r * 1.6) ** 2; groundShapes().forEach((g, i) => { const [cx, cy] = groundSquareAt(g), d = (cx - x) ** 2 + (cy - y) ** 2; if (d <= bd) { bd = d; best = i; } }); return best; }
+/* (user 14:15: "the same way we can drag a cave part ... just like cave parts, we should be able to scale them") a ground shape
+   moved whole by its cross, scaled about it by its square - every point of it as it stands in the world (its height over the
+   ground's natural line worked out again where it lands). Along the world it moves or grows only into the ocean beside it (a
+   gap): where it meets another ground shape, or a fixed stretch (a dock's, a tower's), it keeps its place along and only rises
+   or sinks; the line's two ends stay at the world's ends */
+function groundWholeTo(w, x, y) {
+  const P = GROUND, g = w.g, n = g.k1 - g.k0, [mx, my] = w.mid;
+  const freeAlong = gGap(P[g.k0 - 1]) && gGap(P[g.k1]) && w.p0.every((q, i) => gFree(g.k0 + i));
+  const lo = freeAlong ? gX(P[g.k0 - 1][0]) + 4 : -Infinity, hi = freeAlong ? gX(P[g.k1 + 1][0]) - 4 : Infinity;
+  let pts;
+  if (w.scale) {
+    const d0 = Math.hypot(w.x - mx, w.y - my) || 1, k = clamp(Math.hypot(x - mx, y - my) / d0, 0.1, 10);
+    pts = w.p0.map(([px, py]) => [freeAlong ? mx + (px - mx) * k : px, my + (py - my) * k]);
+    if (freeAlong && (pts[0][0] < lo || pts[n][0] > hi)) { const f = Math.min(1, (mx - lo) / Math.max(1e-6, mx - w.p0[0][0]) / k, (hi - mx) / Math.max(1e-6, w.p0[n][0] - mx) / k); pts = w.p0.map(([px, py]) => [mx + (px - mx) * k * f, my + (py - my) * k]); }
+    if (!freeAlong) { const a = w.p0[0][0], b = w.p0[n][0]; pts = pts.map(([px, py], i) => [i === 0 ? a : i === n ? b : clamp(mx + (w.p0[i][0] - mx) * k, a + 1, b - 1), py]); }
+  } else {
+    let dx = freeAlong ? x - w.x : 0; if (freeAlong) dx = clamp(dx, lo - w.p0[0][0], hi - w.p0[n][0]);
+    pts = w.p0.map(([px, py]) => [px + dx, py + (y - w.y)]);
+  }
+  for (let i = 0; i <= n; i++) {
+    const k = g.k0 + i; if (!gFree(k)) continue;                  // (an end of the line, a fixed stretch: stays)
+    if ((i === 0 && !gGap(P[g.k0 - 1])) || (i === n && !gGap(P[g.k1]))) continue;   // (an end shared with the ground shape beside it: stays - each keeps its own)
+    const [px, py] = pts[i], u = gS(clamp(px, 1, WORLD_W - 1));
+    if (freeAlong || w.scale) P[k][0] = +u.toFixed(6);
+    P[k][1] = Math.round(clamp(py - gNat(gX(P[k][0])), G_DY[0], G_DY[1]));
+  }
+  for (let k = Math.max(1, g.k0); k <= Math.min(P.length - 1, g.k1); k++) if (P[k][0] <= P[k - 1][0] + 1e-6) P[k][0] = +(P[k - 1][0] + 2e-6).toFixed(6);   // (kept in order)
+  groundPrep(); if (land.cell) groundPreview(gX(P[Math.max(0, g.k0 - 1)][0]), gX(P[Math.min(P.length - 1, g.k1 + 1)][0]));
+}
+/* (user 14:02-14:09: SOLID / ISLAND / HOLE on any shape) a ground shape made an ISLAND or a HOLE becomes an ordinary shape: its
+   top line as it stands, sampled and thinned to the points it needs, closed down to the base seabed, each piece keeping its
+   look (its skin); the ground there taken away (a gap). From then on it's a shape like any other */
+function groundBake(gi, kind) {
+  const P = GROUND, g = groundShapes()[gi]; if (!g) return null;
+  const x0 = gX(P[g.k0][0]), x1 = gX(P[g.k1][0]), base = (SHP.base || SEA_FLOOR_MAX) - WATER_Y;
+  const top = []; for (let x = x0; x <= x1 + 1e-6; x += 10) { const xx = Math.min(x, x1); top.push([xx, gLineY(xx) - WATER_Y]); } if (top[top.length - 1][0] < x1) top.push([x1, gLineY(x1) - WATER_Y]);
+  const keep = new Uint8Array(top.length); keep[0] = keep[top.length - 1] = 1;
+  const rdp = (a, b) => { let bi = -1, bd = 2.5; for (let i = a + 1; i < b; i++) { const t = (top[i][0] - top[a][0]) / (top[b][0] - top[a][0]), yy = top[a][1] + (top[b][1] - top[a][1]) * t, d = Math.abs(top[i][1] - yy); if (d > bd) { bd = d; bi = i; } } if (bi >= 0) { keep[bi] = 1; rdp(a, bi); rdp(bi, b); } };
+  rdp(0, top.length - 1);
+  const pts = top.filter((q, i) => keep[i]).map(([x, y]) => { const sk = P[groundPieceAt(P, gS(x))][2]; const q = [Math.round(x), Math.round(clamp(y, ISL_MIN_D, ISL_MAX_D))]; if (sk && sk !== 'S') q.push(sk); return q; });
+  for (let i = 1; i < pts.length; i++) if (pts[i][0] <= pts[i - 1][0]) pts[i][0] = pts[i - 1][0] + 1;
+  const I = { k: kind, p: [...pts, [pts[pts.length - 1][0], Math.round(base)], [pts[0][0], Math.round(base)]] };
+  ISLANDS.push(I); groundGapSet(g.k0, g.k1, true); islChanged();
+  return ISLANDS.length - 1;
 }
 // the ground shape whose cross is under a press (its index, -1: none)
 function groundCrossPick(x, y, r) { let best = -1, bd = (r * 1.8) ** 2; groundShapes().forEach((g, i) => { const [cx, cy] = groundCrossAt(g), d = (cx - x) ** 2 + (cy - y) ** 2; if (d <= bd) { bd = d; best = i; } }); return best; }
@@ -59942,7 +60005,7 @@ async function start(data) {
   Object.assign(window.__game, { terr: { solidBlock: (x, y) => solidBlock(x, y), solidBelow: (x, y) => solidBelow(x, y), solidAbove: (x, y) => solidAbove(x, y), seabedY: x => seabedY(x), sandY: x => sandY(x), landTop: x => landTop(x) } });
   Object.assign(window.__game, { waterInfo: () => WATER.rows.map(R => { let w = 0, mn = Infinity, mx = -Infinity; for (let i = 0; i < R.n; i++) if (!R.sea[i] && R.g[i] - R.s[i] > 0.5) { w++; mn = Math.min(mn, R.s[i]); mx = Math.max(mx, R.s[i]); } return { c0: R.c0, n: R.n, wet: w, top: Math.round(mn), low: Math.round(mx), rest: +R.rest.toFixed(2) }; }) });
   Object.assign(window.__game, { lakesInfo: () => ({ lakes: (land.lakes || []).map(L => ({ a: L[0], b: L[1], lv: lakeLv(L), surf: surfaceY((L[0] + L[1]) / 2), at: lakeAt((L[0] + L[1]) / 2) })), pockets: (land.pockets || []).map(K => ({ x0: K.x0, x1: K.x1, spill: Math.round(K.spill), bot: Math.round(K.bot), lv: K.lv })), set: LAKE_SET, dev: LAKE_DEV }) });
-  Object.assign(window.__game, { shapeEd: { sel: v => { TERRAIN_ED.sel = v; }, getSel: () => TERRAIN_ED.sel, split: () => islSplitShape(), gshapes: () => groundShapes(), del: () => WK.line.del(), note: () => TERRAIN_ED.skinNote ? TERRAIN_ED.skinNote.textContent : '' } });   // (tests: the TERRAIN tab's shape tools)
+  Object.assign(window.__game, { shapeEd: { sel: v => { TERRAIN_ED.sel = v; }, getSel: () => TERRAIN_ED.sel, split: () => islSplitShape(), gshapes: () => groundShapes(), kind: k => islSetKind(k), whole: (gi, scale, x0, y0, x1, y1) => { const g = groundShapes()[gi], w = { x: x0, y: y0, scale, g, mid: groundCrossAt(g), p0: GROUND.slice(g.k0, g.k1 + 1).map(p => { const x = gX(p[0]); return [x, gNat(x) + p[1]]; }) }; groundWholeTo(w, x1, y1); groundChanged(); return groundCrossAt(g); }, del: () => WK.line.del(), note: () => TERRAIN_ED.skinNote ? TERRAIN_ED.skinNote.textContent : '' } });   // (tests: the TERRAIN tab's shape tools)
   Object.assign(window.__game, { islands: () => ISLANDS, islChanged: () => islChanged(), envAt: x => { const c = Math.floor(x / LT_CELL); return land.look && land.look[c] === 1 ? 'desert' : land.trop && land.trop[c] ? 'trop' : land.sea && land.sea[c] ? 'sea' : 'land'; } });   // (tests: the shapes, and the place's look at x - caveLook)
   Object.assign(window.__game, { shapesInfo: (xs) => ({ base: SHP.base, shapes: ISLANDS.map((I, n) => ({ k: shpK(I), x0: Math.round(shpPoly(I).x0), x1: Math.round(shpPoly(I).x1), cols: SHP.cols[n] ? SHP.cols[n].iv.filter(v => v.length).length : 0 })), isles: land.isles, islRuns: land.islRuns, solRoots: solRoots.length, islRoots: islRoots.length, at: (xs || [12600, 15300, 15800, 16300]).map(x => ({ x, isle: ISLE === null ? null : ISLE[Math.floor(x / 2.5)], stop: land.stop ? land.stop[Math.floor(x / 2.5)] : null, sunder: land.sunder ? land.sunder[Math.floor(x / 2.5)] : null, top: landTop(x), sand: sandY(x), bed: seabedY(x), hole: shpHoleAt(Math.floor(x / 2.5), 400) })) }) });
   if (SW_WANT) swStart();
