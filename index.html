@@ -433,7 +433,7 @@ const isGameKey = k => typeof k === 'string' && k.startsWith('bd_') && !k.starts
 // (WORLD_PACK: 00-world-pack.js - written by tools/bake-world.py from a pasted SNAPSHOT)
 const worldPackOf = story => story ? WORLD_PACK.story : WORLD_PACK.open;
 // a key as it is kept, whichever world is loaded (the SNAPSHOT: both worlds in one paste - 41-sky-new.js gameSnapshot)
-let lsRawGet = k => localStorage.getItem(k);
+let lsRawGet = k => localStorage.getItem(k), lsRawSet = (k, v) => localStorage.setItem(k, v), lsRawDel = k => localStorage.removeItem(k);
 const STORY_WORLD = (() => { try { return localStorage.getItem('bd_world') === 'story'; } catch (e) { return false; } })();
 (function worldShim() {
   const PK = worldPackOf(STORY_WORLD), GK = WORLD_PACK.game || {}, packed = Object.keys(PK).length + Object.keys(GK).length > 0;
@@ -445,13 +445,13 @@ const STORY_WORLD = (() => { try { return localStorage.getItem('bd_world') === '
     const LS = localStorage;
     if (typeof Storage !== 'undefined' && LS instanceof Storage) {
       const P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
-      lsRawGet = k => g.call(LS, k);
+      lsRawGet = k => g.call(LS, k); lsRawSet = (k, v) => s.call(LS, k, v); lsRawDel = k => r.call(LS, k);
       P.getItem = function (k) { return this === LS ? back(k, g.call(this, map(k))) : g.call(this, k); };
       P.setItem = function (k, v) { return s.call(this, this === LS ? map(k) : k, v); };
       P.removeItem = function (k) { return r.call(this, this === LS ? map(k) : k); };
     } else {                                                     // (the worker's stand-in: a plain object)
       const g = LS.getItem, s = LS.setItem, r = LS.removeItem;
-      lsRawGet = k => g(k);
+      lsRawGet = k => g(k); lsRawSet = (k, v) => s(k, v); lsRawDel = k => r(k);
       LS.getItem = k => back(k, g(map(k))); LS.setItem = (k, v) => s(map(k), v); LS.removeItem = k => r(map(k));
     }
   } catch (e) { }
@@ -513,11 +513,64 @@ function worldNeedsSwitch(mode) { return !SW_IN_WORKER && worldOfMode(mode) !== 
 function worldResume() {
   let m = null; try { m = sessionStorage.getItem('bd_world_go'); sessionStorage.removeItem('bd_world_go'); } catch (e) { }
   if (!m) return;
-  if (m.startsWith('edit:')) { const md = m.slice(5); if (!worldNeedsSwitch(md)) setTimeout(() => worldEdit(md), 300); return; }   // (the GAME EDITOR asked for in the other world)
+  if (m.startsWith('edit:')) { const md = m.slice(5); if (!worldNeedsSwitch(md)) { setTimeout(() => worldEdit(md), 300); snapResume(); } return; }   // (the GAME EDITOR asked for in the other world)
   if (worldNeedsSwitch(m)) return;
   menuSel.mode = m;
   if (m === 'story') { SSL.open = true; SSL.confirm = null; SSL.sel = 0; }
   else showToast('OPEN WORLD LOADED - PRESS PLAY');
+}
+
+/* (user Nov 1 22:22: a snapshot taken in 567 loaded in a newer version showed another world - "maybe its not even loading it
+   properly?") LOAD BRINGS THE SNAPSHOT'S WORLD. A snapshot carries every bd_ key its browser kept (both worlds, raw - store);
+   LOAD used to take only the game (the vehicles, the weather, the sky), so it was laid over whatever world this browser had:
+   other structures, another island - or, from the open world, the open world's. Now, when this browser's keys aren't the
+   snapshot's or the other world is loaded, LOAD puts the snapshot's keys in (every bd_ key but LOCAL_KEYS: the ones it lacks
+   let go - the built-in or the code's own read, as in its browser), loads its world, reloads into the GAME EDITOR on it and
+   loads the game there (snapResume). The keys it replaced are kept in IndexedDB bd_snapload 'prev' (nothing shows it). */
+const snapDb = (then) => { try { const q = indexedDB.open('bd_snapload', 1); q.onupgradeneeded = () => q.result.createObjectStore('p'); q.onsuccess = () => then(q.result); q.onerror = () => then(null); } catch (e) { then(null); } };
+const snapKeys = () => { const o = {}; try { for (const k of Object.keys(localStorage)) if (k.startsWith('bd_') && !LOCAL_KEYS.includes(k)) o[k] = lsRawGet(k); } catch (e) { } return o; };
+// (gameLoad, first) null: this browser has the snapshot's world loaded - go on; else the note while its world is put in
+function snapWorldLoad(s, txt) {
+  if (SW_IN_WORKER || !s.store || typeof indexedDB === 'undefined') return null;
+  const story = s.worldName ? s.worldName === 'story' : s.mode === 'story', mine = snapKeys(), want = {};
+  for (const k in s.store) if (k.startsWith('bd_') && !LOCAL_KEYS.includes(k)) want[k] = s.store[k];
+  const same = Object.keys(want).length === Object.keys(mine).length && Object.keys(want).every(k => mine[k] === want[k]);
+  if (same && story === STORY_WORLD) return null;
+  const text = typeof txt === 'string' ? txt : JSON.stringify(s);
+  snapDb(db => {
+    const put = () => {
+      try {
+        for (const k in mine) if (!(k in want)) lsRawDel(k);
+        for (const k in want) lsRawSet(k, want[k]);
+        if (story) { lsRawSet('bd_world', 'story'); lsRawSet('bd_sw_init', '1'); } else lsRawDel('bd_world');
+        sessionStorage.setItem('bd_world_go', 'edit:' + (story ? 'story' : edWorldMode(s.mode)));
+      } catch (e) { console.warn('snapshot world', e); return; }
+      location.reload();
+    };
+    if (!db) { showToast('COULD NOT KEEP THE SNAPSHOT'); return; }
+    const tx = db.transaction('p', 'readwrite'), st = tx.objectStore('p');
+    st.put(mine, 'prev'); st.put(text, 'snap');
+    tx.oncomplete = put; tx.onerror = () => showToast('COULD NOT KEEP THE SNAPSHOT');
+  });
+  return 'Putting in the snapshot\'s world (' + (story ? 'STORY' : 'OPEN') + ') - the page reloads into the editor and loads it there.';
+}
+// (after that reload, from worldResume) once the editor is open on the world: the snapshot's game loaded
+function snapResume() {
+  snapDb(db => {
+    if (!db) return;
+    const g = db.transaction('p', 'readonly').objectStore('p').get('snap');
+    g.onsuccess = () => {
+      const txt = g.result; if (!txt) return;
+      db.transaction('p', 'readwrite').objectStore('p').delete('snap');
+      let tries = 0;
+      const go = () => {
+        const T = NSKY && NSKY.editor && NSKY.editor.TUNE;
+        if (!(T && T.open && WORLD_READY && !LOADING && !worldEdCover)) { if (++tries < 1200) setTimeout(go, 100); return; }
+        setTimeout(() => { let n; try { n = gameLoad(txt); } catch (e) { n = 'Not a snapshot: ' + e.message; } console.log('snapshot:', n); showToast(/^Loaded/.test(n) ? 'SNAPSHOT LOADED' : 'SNAPSHOT: SEE CONSOLE'); }, 500);
+      };
+      go();
+    };
+  });
 }
 
 /* (user Oct 31 21:00: "The game editor button should be right there on the main screen. If open world is highlighted, it's
@@ -4035,8 +4088,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 582;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 23:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 583;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 23:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -25992,7 +26045,7 @@ if (/[?&]skygpu=0/.test(location.search)) NSKY.gpu = false;   // (the decks draw
 // screen, the mode, the editor's view, the hour and the weather, the world as the online game sends it (netSnapshot: the
 // vehicles with their damage and fires, the towers, the docks, everything in flight, the captains, who's in what), the sky
 // (NSKY.snapshot: the sky editor's settings, the clouds' growth, the decks' drift, the sun) and the settings this browser keeps
-// (bd_*: terrain edits and the like - Claude's loader puts them in first; LOAD here leaves yours alone). Not kept: the smoke,
+// (bd_*: terrain edits and the like - put in first by LOAD too, user Nov 1: snapWorldLoad, 00-world.js). Not kept: the smoke,
 // sparks and splashes in the air - they start again from whatever is burning.
 function gameSnapshot() {
   const store = {}; try { for (const k of Object.keys(localStorage)) if (k.startsWith('bd_')) store[k] = lsRawGet(k); } catch (e) { }   // (as kept: the open world's bd_ and the Story world's bd_sw_ both, whichever is loaded - 00-world.js, Story chat Oct 31)
@@ -26003,6 +26056,7 @@ function gameSnapshot() {
 function gameLoad(txt) {
   const s = typeof txt === 'string' ? JSON.parse(txt) : txt;
   if (!s || s.kind !== 'battleship-duel') throw new Error('not a game snapshot');
+  { const w = snapWorldLoad(s, txt); if (w) return w; }                    // (its world first: put in and the page reloaded, if this browser's isn't it - 00-world.js)
   if (!WORLD_READY) return 'No world yet (user Oct 31: it is built when a game is picked): start a game in ' + String(s.mode).toUpperCase() + ' first, then LOAD again.';
   if (s.mode !== MODE) return 'Taken in ' + String(s.mode).toUpperCase() + ', this game is in ' + MODE.toUpperCase() + ': start a game in that mode first, then LOAD again.';
   NET.lists = {};                                                       // (the world's lists taken as they are: nothing counted as gone)
