@@ -3040,14 +3040,14 @@ const FLOOR_MIN_D = -10500, FLOOR_MAX_D = 72000, FLOOR_STEP = 8;
 // skin of the piece of line from it to the next point - 'F' forest, 'D' desert, 'S' sea; none: AUTO, the look it has always
 // had there (the GAME EDITOR's TERRAIN tab marks them - 50-land-unified.js)
 const SKINS = ['F', 'D', 'S', 'T'];   // (T: TROPICAL - the Story spec section 8, 50-land-plants.js)
-const ptOk = p => Array.isArray(p) && (p.length === 2 || (p.length === 3 && SKINS.includes(p[2])) || (p.length >= 4 && p.length <= 7 && (p.length < 7 || p[6] === 0 || p[6] === 1 || p[6] === 2) && (p[2] === null || SKINS.includes(p[2])) && isFinite(p[3]) && p[3] >= 0 && p[3] <= 2 && [4, 5].every(i => p.length <= i || (isFinite(p[i]) && p[i] >= -1 && p[i] <= 1)))) && isFinite(p[0]) && isFinite(p[1]);
+const ptOk = p => Array.isArray(p) && (p.length === 2 || (p.length === 3 && SKINS.includes(p[2])) || (p.length >= 4 && p.length <= 6 && (p[2] === null || SKINS.includes(p[2])) && isFinite(p[3]) && p[3] >= 0 && p[3] <= 2 && [4, 5].every(i => p.length <= i || (isFinite(p[i]) && p[i] >= -1 && p[i] <= 1)))) && isFinite(p[0]) && isFinite(p[1]);
 // (user Oct 31, 09:38: "a couple more sliders to make it more spiky up or down (so it feels like a ramp) and another to make
 // it more of a round hole or more of a mound ... all these three sliders and future ones ... can all be mixed") a point's
 // fifth and sixth items: SPIKY and ROUND for the piece of line from it to the next (-1..1; none: 0). Its items in order
 // [s, dy, skin, hills, spiky, round], the ones at their defaults (null, 1, 0, 0) left off the end
 const ptSpiky = p => p.length > 4 ? p[4] : 0, ptRound = p => p.length > 5 ? p[5] : 0;
 function ptFill(p) { if (p.length < 3) p[2] = null; if (p.length < 4) p[3] = 1; if (p.length < 5) p[4] = 0; if (p.length < 6) p[5] = 0; return p; }
-function ptTrim(p) { if (p.length === 7 && !p[6]) p.length = 6; if (p.length === 6 && !p[5]) p.length = 5; if (p.length === 5 && !p[4]) p.length = 4; if (p.length === 4 && p[3] === 1) p.length = 3; if (p.length === 3 && p[2] === null) p.length = 2; return p; }
+function ptTrim(p) { if (p.length === 6 && !p[5]) p.length = 5; if (p.length === 5 && !p[4]) p.length = 4; if (p.length === 4 && p[3] === 1) p.length = 3; if (p.length === 3 && p[2] === null) p.length = 2; return p; }
 // (user Oct 29: "For each segment we would control the smoothness") a point's fourth item: how much of the ground's own small
 // hills - the land's waves, the floor's zigzag - the piece of line from it to the next keeps (1, or none: as it always was;
 // 0: smooth). Where two pieces meet their amounts blend over a quarter of each, so the ground never steps.
@@ -10587,6 +10587,27 @@ function planeSetDown(v, foot = PLANE_WHEELS, dust = 6) {
   sound('impact', v.x); kickLandDust(v.x, gy + foot, dust);
   return gy;
 }
+// (user Nov 2 16:09: "I would like the landing to feel more realistic and meaty. Right now it feels very rigid") EVERY PLANE
+// TOUCHING DOWN ON ITS WHEELS GOES THROUGH THIS (as planeTouch): coming down harder than PLANE_BOUNCE it bounces back up off its
+// springs and floats a moment (the next touch lands it); otherwise it lands - its main wheels first, its springs taking its
+// weight, a puff of tyre smoke off each main wheel as they spin up, the ground shaking with how hard, and its nose still up:
+// half a second on, the nose comes down with its own thump (noseT - stepPlaneGround). Returns 'land' or 'bounce'
+const PLANE_BOUNCE = 6 * UPM;                                     // (coming down faster than 6 m/s it bounces)
+function planeLand(v, foot = PLANE_WHEELS, dust = 6) {
+  const vy = Math.max(0, v.vy || 0), gy = planeGroundY(v.x, foot), f = v.facing || v.dir || 1, vx = Math.abs(v.vx || 0), hard = clamp(vy / PLANE_BOUNCE, 0, 2);
+  if (!SIM_ONLY) {                                                // (the main wheels spinning up: a puff of tyre smoke off each, grey on the concrete, the ground's own off it)
+    const n = 2 + Math.round(3 * Math.min(1, vx / 300) + 2 * hard), paved = onApron(v.x);
+    for (let i = 0; i < n; i++) { const x = v.x + f * vehPlaneRnd(-10, 2), r0 = vehPlaneRnd(1.5, 3); spawnSmoke(x, gy + foot - r0 - 0.5, { kind: 'dust', mist: true, fam: paved ? 'gray' : 'sand', r: r0, grow: vehPlaneRnd(3, 6), rmax: vehPlaneRnd(10, 18), lift: 2, ground: true, vx: -f * vehPlaneRnd(5, 25) + (v.vx || 0) * 0.15, vy: -vehPlaneRnd(2, 8), life: vehPlaneRnd(1, 2), alpha: vehPlaneRnd(0.3, 0.45) }); }
+    if (hard > 0.3) shakeAt(Math.min(3, hard * 1.5), v.x);
+  }
+  if (vy > PLANE_BOUNCE && !(v.bounceT > 0) && vx > 20) {
+    planeSusKick(v, vy + 60); sound('impact', v.x); kickLandDust(v.x, gy + foot, dust);
+    v.y = gy - 1; v.vy = -vy * 0.35; v.spd = Math.hypot(vx, v.vy); flyFrom(v, Math.atan2(v.vy, vx), 0.1); v.bounceT = 1.5; v.turn = null;
+    return 'bounce';
+  }
+  planeSetDown(v, foot, dust); v.noseT = 0.45 + 0.25 * Math.min(1, vx / 300);
+  return 'land';
+}
 function airfield(p) { return airfieldOf(SIDE(p)); }   // (its own side's airport, wherever it's placed - 50-land-airport)
 /* On the ground (OPEN WORLD, user Oct 25 late): 'roll' - the take-off run, at least two seconds gathering speed, then
    the nose comes up and a moment later it's off; 'land' - just down, rolling out; 'taxi' - rolling slowly or stopped,
@@ -10604,6 +10625,7 @@ function stepPlaneGround(pl, dt, K, inHangar) {
   if (pl.carried != null) return;                                // (on a helicopter's magnet: it hangs, nothing else)
   const af = airfieldAt(pl.x);
   pl.flare = Math.max(0, (pl.flare || 0) - dt * 1.1);              // (touched down nose high: the nose comes down onto the runway)
+  if (pl.noseT > 0 && (pl.noseT -= dt) <= 0) { planeSusKick(pl, 30 + Math.min(40, pl.spd * 0.1)); sound('impact', pl.x); if (!SIM_ONLY) kickLandDust(pl.x + pl.facing * 18, pl.y + PLANE_WHEELS, 2); }   // (the nose wheel down: its own thump - planeLand)
   if (pl !== undefined && !traffic.includes(pl)) susStep(pl, dt, ...PLANE_SUS);   // (its suspension, settling after the touchdown)
   // going into the hangar: the door up, it rolls straight in through it (user Oct 26: "stop doing that 90 turn but
   // instead just 'enter' the hangar straight on"), hidden past the door (hangarClip); the door comes down behind it
@@ -10629,7 +10651,7 @@ function stepPlaneGround(pl, dt, K, inHangar) {
     if (pl.spd >= K.vrot) {
       // rotating: the nose lifts, the wheels still on the runway, then it flies
       pl.rot = (pl.rot || 0) + dt; pl.pitch += (-K.rotP - pl.pitch) * Math.min(1, dt * 3);
-      if (pl.rot >= K.rotT) { pl.ground = null; pl.rot = 0; pl.pitch = -0.3; pl.climbT = 2.2; pl.offField = false; return; }
+      if (pl.rot >= K.rotT) { pl.ground = null; pl.rot = 0; pl.pitch = -0.3; flyFrom(pl, -0.12, 0.18); pl.climbT = 2.2; pl.offField = false; return; }   // (into the air: its path just up, its wings lifting - flyStep)
     } else pl.pitch += (sp - 0.02 - pl.pitch) * Math.min(1, dt * 4);
   } else if (pl.ground === 'land') {
     pl.spd = Math.max(0, pl.spd - 150 * dt); pl.pitch += (sp - pl.pitch) * Math.min(1, dt * 6);
@@ -10681,19 +10703,19 @@ function launchPlane(pl) {
   const p = pl.id, home = planeHome(p);
   if (LAND) {                                              // (from the airfield's far end, rolling toward the sea)
     const af = airfield(p);
-    Object.assign(pl, { loiter: null, state: 'fly', ground: 'roll', rot: 0, gear: 1, gWant: 0, exitK: 1, x: hangarX(af) + af.dir * 10, y: af.y, facing: af.dir, pitch: 0, turn: null, auto: null, spd: 0, vy: 0, mg: false, ice: 0, strand: null, vaporT: 0, inCloud: 0, eng: 'on', offT: 0, recoverT: 0 });
+    Object.assign(pl, { loiter: null, state: 'fly', ground: 'roll', rot: 0, gear: 1, gWant: 0, exitK: 1, gam: 0, aoa: 0, roll: null, x: hangarX(af) + af.dir * 10, y: af.y, facing: af.dir, pitch: 0, turn: null, auto: null, spd: 0, vy: 0, mg: false, ice: 0, strand: null, vaporT: 0, inCloud: 0, eng: 'on', offT: 0, recoverT: 0 });
     pl.vx = pl.facing * pl.spd;
     sound('planeIn', pl.x);
     return;
   }
-  Object.assign(pl, { loiter: null, state: 'fly', x: home, y: HANGAR_TOP - 110, facing: SIDE(p) ? -1 : 1, pitch: 0, turn: null, auto: null, spd: (330 * AIR_SK.plane), vy: 0, mg: false, ice: 0, strand: null, vaporT: 0, inCloud: 0, eng: 'on', offT: 0, recoverT: 0 });
+  Object.assign(pl, { loiter: null, state: 'fly', x: home, y: HANGAR_TOP - 110, facing: SIDE(p) ? -1 : 1, pitch: 0, gam: 0, aoa: 0, roll: null, turn: null, auto: null, spd: (330 * AIR_SK.plane), vy: 0, mg: false, ice: 0, strand: null, vaporT: 0, inCloud: 0, eng: 'on', offT: 0, recoverT: 0 });
   pl.vx = pl.facing * (330 * AIR_SK.plane);
   sound('planeIn', pl.x);
 }
 // STOP (user Oct 24; back, for planes only, Oct 31): a plane told to stop circles where it was stopped (v.loiter), turning
 // back each time it's gone a little way past it - the warplane, a Cessna or 747, a seaplane in the air
 const loiterBack = (v, facing) => !!v.loiter && (v.x - v.loiter.x) * facing > 200;
-function planeTurn(pl) { if ((pl.state === 'fly' || pl.state === 'free') && !pl.turn) pl.turn = { t: 0, from: pl.facing }; }
+function planeTurn(pl) { if ((pl.state === 'fly' || pl.state === 'free') && !pl.turn && !pl.roll) pl.turn = { t: 0, from: pl.facing }; }   // (not mid-roll: flyStep, 29-zz-flight.js)
 // a hit: amt 1 for a shell or a bomb, a fraction for each machine-gun round. (engine stage 3: a shell's or a round's
 // comes as 'hit' {kind: 'plane', o, amt, x, y} - 36-zz-events.js)
 on('hit', e => { if (e.kind === 'plane') hitPlane(e.o, e.amt, e.x, e.y); }, 'planes');
@@ -10781,7 +10803,7 @@ function planeCrash(pl) {
   // and on any flat ground, coming down gently - planeGroundY / planeSoft)
   if (!what && LAND && pl.state === 'fly') { const t = planeTouch(pl);
     if (t === 'climb') { pl.y = Math.min(pl.y, planeGroundY(pl.x)); return false; }   // (not while it's climbing away: user Oct 26, the take-off was taken for a landing)
-    if (t === 'land') { planeSetDown(pl); pl.ground = 'land'; pl.flare = 0.6; return false; } }
+    if (t === 'land' && planeLand(pl) === 'land') { pl.ground = 'land'; pl.flare = 0.6; return false; } }
   if (!what && OWM) { const at = landPlaneCrash(pl, pts); if (at) { what = at[2] ? 'ground' : 'land'; X = at[0]; Y = at[1]; } }   // (LAND TEST: the ground, or a tank or helicopter)
   let deck = null;                                               // (OPEN WORLD: onto a ship's top it comes down on her deck - user Oct 27, [19])
   if (!what && LAND && !onLand(pl.x)) { const d = shipTopAt(pl.x, pl.y - 20); if (d && pl.y + 4 >= d.y) { what = 'ground'; deck = d; X = pl.x; Y = d.y; } }
@@ -10888,7 +10910,7 @@ function stepPlanes(dt) {
           const yT = af.y - Math.max(0, D) * 0.15;
           want = clamp((yT - pl.y) / 90, -0.45, 0.45);
           pl.spd += (215 - pl.spd) * Math.min(1, dt * 0.8);
-          if (D < 80 && pl.y >= af.y - 3) { planeSusKick(pl, (pl.vy || 0) + 50); pl.ground = 'land'; pl.y = af.y; pl.pitch = 0; sound('impact', pl.x); }
+          if (D < 80 && pl.y >= af.y - 3 && planeGroundY(pl.x) != null && planeLand(pl) === 'land') { pl.ground = 'land'; pl.flare = 0.6; }   // (the one touchdown - planeLand)
         }
       }
       // (user Oct 25) flying home it never runs into another plane (or a helicopter): one ahead at its height, it
@@ -10939,29 +10961,16 @@ function stepPlanes(dt) {
       const roof = Math.min(HANGAR_TOP, tw && tw.hp > 0 ? TW.BASE - TW.H : DECK_Y) - 36;
       if (over && pl.y > roof) { want = Math.min(want, -0.8 * clamp((pl.y - roof) / 50, 0.45, 1)); forced = true; }
     }
-    if (stick && !forced) pl.pitch = want;                                     // held: it keeps pitching
-    else pl.pitch += clamp(want - pl.pitch, -1, 1) * Math.min(1, dt * (forced ? 2.6 : 2.2));
-    // a dive gathers speed and a climb loses it, and it keeps what it's got: levelled out, it only drifts back
-    // toward its cruising speed slowly, so two planes level side by side can be flying at different speeds
-    // (the steeper the climb the more it loses; it never stalls, it just slows to its slowest)
-    pl.spd += ((pl.pitch < 0 ? 150 : 320) * AIR_SK.plane * Math.sin(pl.pitch) + ((330 * AIR_SK.plane) - pl.spd) * 0.07 - 60 * AIR_SK.plane * pl.ice) * dt;   // (a climb bleeds speed slowly, a dive builds it fast)
-    pl.spd = clamp(pl.spd, (170 * AIR_SK.plane), (580 * AIR_SK.plane));
-    if (pl.turn) {
-      // turning round: the nose swings toward us and out the other side, the speed runs down and back up the other way
-      pl.turn.t += dt;
-      const u = clamp(pl.turn.t / PLANE_TURN_T, 0, 1);
-      pl.vx = pl.turn.from * pl.spd * Math.cos(pl.pitch) * Math.cos(u * Math.PI);
-      if (u >= 1) { pl.facing = -pl.turn.from; pl.turn = null; }
-    } else {
-      pl.vx = pl.facing * pl.spd * Math.cos(pl.pitch);
-      // heading for the enemy's edge it turns round in time, so it never leaves the world on their side;
-      // heading back toward your own edge, it flies home
-      if (pl.facing === enemy && (planeEdge(p) - pl.x) * enemy < planeTurnRoom(pl)) planeTurn(pl);
-      // stopped (the stop button): it circles where it is, turning back each time it's gone a little way
-      else if (!pl.auto && loiterBack(pl, pl.facing)) planeTurn(pl);
-    }
-    pl.vy = pl.spd * Math.sin(pl.pitch);
-    pl.x += pl.vx * dt; pl.y += pl.vy * dt;
+    // (Nov 2: the one flight model - flyStep, 29-zz-flight.js: held, the stick pulls the wings (a tap a little, held the whole
+    // pull - over the top into a loop at speed); let go or flown by itself, it flies the path it wants (want: + down - level,
+    // home, dodging). Its speed is its own: a dive builds it, a climb spends it, the engine holds its cruise)
+    const ai = !forced && pl.aiGamT > time - 0.25;                              // (the CPU's pilot: the path it wants - 49-cpu.js)
+    const ctl = ai ? { gam: pl.aiGam } : stick && !forced ? { pull: flyPull(pl, stick, dt) } : { gam: want };
+    if (gearWant && LAND) { const g = planeGroundY(pl.x); if (g != null) ctl.cush = g - pl.y; }   // (wheels down over ground it can land on: the flare)
+    flyStep(pl, dt, ctl, 'plane', 'facing', PLANE_TURN_T);
+    // heading for the enemy's edge it turns round in time, so it never leaves the world on their side; stopped (the stop
+    // button): it circles where it is, turning back each time it's gone a little way
+    if (!pl.turn) { if (pl.facing === enemy && (planeEdge(p) - pl.x) * enemy < planeTurnRoom(pl)) planeTurn(pl); else if (!pl.auto && loiterBack(pl, pl.facing)) planeTurn(pl); }
     if ((pl.x - planeEdge(p)) * enemy > 0) pl.x = planeEdge(p);
     // skimming the sea: the prop wash whips up spray and foam behind it and dents the water under it; low over the
     // land, dust and leaves (planeWash - every plane's, user Oct 26)
@@ -11028,10 +11037,8 @@ function engineCough(pl, n) {
 // starter whines, it catches, and the plane levels out by itself
 function stepPlaneStall(pl, dt) {
   pl.offT += dt;
-  pl.vy = Math.min(720, pl.vy + 290 * dt); pl.vx *= 1 - 0.3 * dt;
-  pl.x = clamp(pl.x + pl.vx * dt, VIS_L + 20, VIS_R - 20); pl.y += pl.vy * dt;
-  pl.pitch += (Math.atan2(pl.vy, Math.abs(pl.vx) + 1) - pl.pitch) * Math.min(1, dt * 2);
-  pl.spd = clamp(Math.hypot(pl.vx, pl.vy), (170 * AIR_SK.plane), (580 * AIR_SK.plane));
+  flyStep(pl, dt, { gam: 0.45, thr: 0 }, 'plane', 'facing', PLANE_TURN_T);   // (no power: it glides down nose first, the one flight model)
+  pl.x = clamp(pl.x, VIS_L + 20, VIS_R - 20);
   if (pl.y > planeThawY()) pl.ice = Math.max(0, pl.ice - dt / 3);
   if (pl.offT > 2.3 && !pl.cranking) { pl.cranking = true; engineCough(pl, 3); sound('restart', pl.x); }
   if (pl.offT > 3) {
@@ -11305,6 +11312,8 @@ function drawPlanesAir(x0, x1) {
   for (const pl of allPlanes()) {
     if (!planeUp(pl) || pl.x < x0 - 80 || pl.x > x1 + 80) continue;
     const P = planePose(pl), cx = PX(pl.x), cy = PY(pl.y + (pl.susY || 0));
+    // (rolling upright out of a half loop: its picture closes toward its edge and opens again the right way up - flyRollK)
+    const rk = flyRollK(pl); if (rk < 1) { C.save(); C.translate(cx, cy); C.scale(1, rk); C.translate(-cx, -cy); }
     // (going into its hangar or coming out: straight through the door, hidden past it - user Oct 26)
     const hc = !pl.ground ? false : hangarClip(pl.x, pl.y, 36);
     const G = blitPlane(P.fr[P.side], P.key, P.side, P.deg, cx, cy);
@@ -11375,6 +11384,7 @@ function drawPlanesAir(x0, x1) {
     const cov = pl.cover[viewIdx];
     if (cov && cov.length && !G.sz) planeInCloud(pl, G, cov);   // (not with a zoom stand-in: a frame or two)
     if (hc) C.restore();
+    if (rk < 1) C.restore();
   }
 }
 // a line of pixel blocks from one point to another, th thick
@@ -11522,6 +11532,110 @@ function dropBomb(pl) {
   shells.push(b);
   sound('whoosh', b);                                     // (its whistle: rising as it gathers speed, heard near it)
 }
+
+/* ================================================================
+   ONE FLIGHT MODEL FOR EVERY FIXED-WING PLANE (user Nov 2 16:09-16:16: "if you gain speed when you're diving and you raise the
+   plane up, you'd be able to do a loop on a Cessna or an army plane"; "landing to feel more realistic and meaty. Right now it
+   feels very rigid"). The warplane, a Cessna or a 747, the seaplane: each calls flyStep with its own make (FLIGHT) - never a
+   flight of its own (rules section 6: one rule for everything).
+   The model (point mass along its path, as in the references the user sent: Marco Monster's car paper's sister - the textbook
+   flight-path equations -, leopnt/plane-model-2d-godot (stable because lift acts behind its weight: the nose keeps turning
+   into its air), Flightle (pitch trades height for speed, a trim it returns to, the stall, the flare)):
+   - its path: speed V along it at gam (the path's angle from its facing, + down - as pitch always was), turned by lift
+     (toward its canopy) against gravity: dgam/dt = (g cos gam - L) / V; dV/dt = T cos a - D + g sin gam;
+   - its wings: lift L = KL V^2 CL(a), CL rising with the angle of attack a to 1 at the stall (as), falling past it; KL so it
+     just holds level at its stall speed vs. Drag D = KL V^2 (cd0 + ki CL^2): pulling hard bleeds speed (its best
+     lift-to-drag ratio ld);
+   - its engine: a propeller's push no more than its power over its speed (kw, W/kg) nor tw of its weight standing; a jet's
+     tw always. The pilot's hand on the throttle holds its cruise (vc), all the way open when it's slower, shut when faster;
+   - the stick sets the angle of attack it asks of its wings (as a real elevator does), from what holds its path (let go:
+     the autopilot's level, or its line) to the most lift (pulled) or pushed over; the wings take it over tau (slower when
+     slow). Held hard at speed the path curves right round - a loop, over the top upside down (its body angle past 90). Too
+     slow, the wings can't hold it and the nose drops - the stall;
+   - upside down and let go, it rolls upright the way it's flying (the half loop and roll: the reversal);
+   - its body (pitch, drawn) is its path less its angle of attack - the nose up in a flare, nose high at slow speed.
+   Speeds in metres a second inside, world units outside (v.spd, v.vx, v.vy - as before). The game's gravity (CAR_G).
+   Hooks for the weather (later - user 16:16: "I would like the weather to eventually affect the plane"): its speed is its
+   speed through the air (gam, spd); the air's own movement is the place a wind or a storm's gusts will come in.
+   ================================================================ */
+// each kind: its stall and cruise speeds (m/s - cruise from AIR_KMH / VTUNE, so the GAME EDITOR's TOP SPEED is its cruise), engine
+// (kw W/kg, tw its push standing over its weight, jet: always tw), best lift-to-drag, how fast its nose answers (tau, s), its
+// stalling angle of attack (as, rad), the most its wings may pull (n: times its weight - the pilot's and the airframe's limit; a
+// loop needs speed for it: the Cessna's only from a dive)
+const FLIGHT = {
+  plane: { vs: 40, vc: () => VTUNE.plane.kmh / 3.6, kw: 900, tw: 1.0, ld: 12, tau: 0.12, as: 0.28, n: 5.5 },
+  cessna: { vs: 25, vc: () => AIR_KMH.cessna / 3.6, kw: 380, tw: 0.55, ld: 10, tau: 0.2, as: 0.28, n: 3.2 },
+  jet: { vs: 50, vc: () => AIR_KMH.jet / 3.6, kw: 0, tw: 0.32, ld: 15, tau: 0.8, as: 0.24, n: 1.6, jet: 1 },
+  seaplane: { vs: 22, vc: () => AIR_KMH.seaplane / 3.6, kw: 320, tw: 0.5, ld: 9, tau: 0.22, as: 0.28, n: 2.8 },
+};
+const FLY_KI = 0.1;                       // (induced drag: CL^2 times this)
+const FLY_ROLL_T = 0.45;                  // (the roll upright, s)
+const flyWrap = a => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
+// its lift coefficient at angle of attack a: 1 at the stall, falling past it to half
+function flyCL(a, as) { const k = Math.abs(a) / as, c = k <= 1 ? k : Math.max(0.45, 1 - (k - 1) * 0.9); return Math.sign(a) * c; }
+// one step in the air. ctl: { pull } (the stick, -1 pushed .. 1 pulled - the player's) or { gam } (the path it's flown to - an
+// autopilot's, or let go: level); { thr } overrides the throttle (0: the engine's dead); { cush } its height over ground it's
+// coming in to land on, wheels down (the flare). fk: its facing's key ('facing' or 'dir');
+// turnT its turn round's time (v.turn: the nose swings through us - the way it was, its path held through it)
+function flyStep(v, dt, ctl, kind, fk, turnT) {
+  if (v.bounceT > 0) v.bounceT -= dt;                                  // (just bounced off its wheels: the next touch lands it - planeLand, 29-plane.js)
+  const F = FLIGHT[kind], g = CAR_G / UPM, KL = g / (F.vs * F.vs), cd0 = 1 / (4 * F.ld * F.ld * FLY_KI), vc = F.vc();
+  if (v.gam == null || !isFinite(v.gam)) { const f = v[fk] || 1; v.gam = Math.atan2(v.vy || 0, (v.vx || 0) * f || Math.max(1, v.spd || 0)); v.aoa = 0; }
+  let V = Math.max(0.5, (v.spd || 0) / UPM), gam = v.gam;
+  // the throttle: held at cruise by the pilot
+  const vT = ctl.cush != null ? Math.min(vc, 1.4 * F.vs) : vc;            // (coming in to land: back to its approach speed)
+  const thr = ctl.thr != null ? ctl.thr : clamp(0.5 + (vT - V) * 0.25, 0, 1);
+  const T = F.jet ? thr * F.tw * g : thr * Math.min(F.tw * g, F.kw / Math.max(1, V));
+  // the angle of attack it asks of its wings: what turns its path at rate r (+ down)
+  const aFor = r => (g * Math.cos(gam) - V * r) / (KL * V * V) * F.as;
+  const lo = -0.8 * F.as, hi = 0.95 * F.as;
+  let aC;
+  if (ctl.gam != null) aC = clamp(aFor(clamp(-2.2 * flyWrap(gam - ctl.gam), -1.2, 1.2)), lo, hi);
+  else {
+    // (pulled: up to the most lift, no more than n of its weight; pushed: half that the other way)
+    const nq = F.n * g / (KL * V * V) * F.as, aMax = Math.min(1.0 * F.as, nq), aMin = Math.max(lo, -0.5 * nq);
+    const aH = clamp(aFor(0), aMin, Math.min(hi, aMax)), p = clamp(ctl.pull || 0, -1, 1);
+    aC = p >= 0 ? aH + p * (aMax - aH) : aH - p * (aMin - aH);
+  }
+  // the flare: low over ground it can land on with its wheels down (ctl.cush: its height over it, world units), coming down
+  // steeper than a gentle touch, the nose comes up - whoever's flying - so it settles on rather than drops on (a firm one still
+  // bounces: planeLand). Pulling up is still the pilot's
+  if (ctl.cush != null && ctl.cush < 90 && gam > 0) { const gL = 0.02 + Math.max(0, ctl.cush) / 1100; if (gam > gL) aC = Math.max(aC, clamp(aFor(clamp(-3 * (gam - gL), -1.2, 0)), lo, hi)); }
+  v.aoa = (v.aoa || 0) + (aC - (v.aoa || 0)) * Math.min(1, dt / (F.tau * clamp(vc / V, 1, 3)));
+  const a = v.aoa, CL = flyCL(a, F.as), q = KL * V * V, stall = Math.max(0, Math.abs(a) / F.as - 1);
+  const L = q * CL, D = q * (cd0 + FLY_KI * CL * CL + 0.3 * stall + (ctl.cush != null ? 0.05 : 0));   // (wheels and flaps down to land: more drag)
+  V += (T * Math.cos(a) - D + g * Math.sin(gam)) * dt;
+  if (!v.turn) gam = flyWrap(gam + ((g * Math.cos(gam) - L - T * Math.sin(a)) / Math.max(V, 3)) * dt);   // (its path turns: lift and gravity; held through a turn round)
+  V = clamp(V, 0.5, 3 * vc);
+  v.gam = gam; v.spd = V * UPM; v.pitch = flyWrap(gam - a); v.stall = stall;
+  // where it goes: along its path; turning round, its way across through nothing and out the other side
+  if (v.turn) {
+    v.turn.t += dt;
+    const u = clamp(v.turn.t / turnT, 0, 1);
+    v.vx = v.turn.from * v.spd * Math.cos(gam) * Math.cos(u * Math.PI);
+    if (u >= 1) { v[fk] = -v.turn.from; v.turn = null; }
+  } else v.vx = v[fk] * v.spd * Math.cos(gam);
+  v.vy = v.spd * Math.sin(gam);
+  v.x += v.vx * dt; v.y += v.vy * dt;
+  // upside down and let go (or flown by its autopilot): it rolls upright, flying on the way it was going
+  const inv = Math.cos(v.pitch) < -0.25, free = ctl.gam != null || Math.abs(ctl.pull || 0) < 0.15;
+  if (!v.turn && !v.roll && inv && free) { v.invT = (v.invT || 0) + dt; if (v.invT > 0.35) v.roll = { t: 0, done: false }; } else v.invT = 0;
+  if (v.roll) {
+    v.roll.t += dt;
+    if (!v.roll.done && v.roll.t >= FLY_ROLL_T / 2) { v.roll.done = true; v[fk] = -v[fk]; v.pitch = flyWrap(Math.PI - v.pitch); v.gam = flyWrap(Math.PI - v.gam); v.aoa = -v.aoa; }
+    if (v.roll.t >= FLY_ROLL_T) v.roll = null;
+  }
+}
+// how much of its height it shows in a roll (the drawings squash it toward its edge and open it again, upright)
+const flyRollK = v => v.roll ? Math.max(0.12, Math.abs(Math.cos(Math.PI * v.roll.t / FLY_ROLL_T))) : 1;
+// the stick from a hold-to-pitch control: a tap a little, held the whole pull (about a second) - the player's
+function flyPull(v, stick, dt) {
+  const s = Math.sign(stick);
+  v.pullT = s && s === v.pullS ? (v.pullT || 0) + dt : 0; v.pullS = s;
+  return -stick * (0.35 + 0.65 * Math.min(1, v.pullT / 0.9));          // (the controls: + down; pulling is nose up)
+}
+// set off from the ground into the air: its path from how it's moving, its wings at the angle they had
+function flyFrom(v, gam, aoa) { v.gam = gam; v.aoa = aoa || 0; v.roll = null; v.invT = 0; }
 
 /* ---------------- The captain: one life, in the tower, a boat or ashore in the harbour ---------------- */
 // What a player still has: a standing tower, or a boat afloat (out on the water or berthed at home).
@@ -31966,8 +32080,8 @@ function cpuPlane(B, dt) {
   }
   if (kind !== 'ram' && pl.y > (OWM ? Math.min(clearTop(pl.x, 60), clearTop(pl.x + pl.vx, 60)) - 110 : WATER_Y - 95)) pitchWant = Math.min(pitchWant, -0.35);
   if (pl.y < PLANE_COLD + 150) pitchWant = Math.max(pitchWant, 0.2);
-  const dp = pitchWant - pl.pitch;
-  stick(Math.abs(dp) < 0.05 ? 0 : dp < 0 ? -1 : 1);
+  // (Nov 2: the one flight model - it flies the path it wants (flyStep's autopilot, 29-zz-flight.js), not the stick's pulls)
+  stick(0); pl.aiGam = pitchWant; pl.aiGamT = time;
   // the machine gun: when the target sits on the nose line, close enough; a missile when it's a little further off
   if ((kind === 'dog' || kind === 'strafe') && !pl.turn) {
     const dx = (tx - pl.x) * pl.facing;
@@ -36170,7 +36284,7 @@ function boardCiv(p, v) {
 // a scripted flight taken over: from here on it flies (or rolls) by the warplane's rules
 function civToFree(f) {
   const T = TRAFFIC[f.kind], d = f.dir || 1, onRunway = f.y >= airport(f.from).y - (T.gy || 8) - 1 && Math.abs(f.ang) < 0.2;
-  Object.assign(f, { state: 'free', facing: d, pitch: f.ang * d, spd: Math.abs(f.vx) || T.v, turn: null, climbT: 0, offField: !onRunway, gear: onRunway ? 1 : 0, rot: 0 });
+  Object.assign(f, { state: 'free', facing: d, pitch: f.ang * d, spd: Math.abs(f.vx) || T.v, turn: null, roll: null, gam: null, climbT: 0, offField: !onRunway, gear: onRunway ? 1 : 0, rot: 0 });
   if (onRunway) { f.ground = f.s < 1000 ? 'roll' : 'land'; f.y = airfieldAt(f.x).y; }
 }
 // the lever: left / right / stop (for a plane, the warplane's way: turn round, or on the ground, run up or taxi)
@@ -36225,35 +36339,24 @@ function stepCivAir(f, dt) {
   if (f.climbT > 0) { f.climbT -= dt; if (!stick) { want = Math.min(want, -0.25); forced = true; } }
   if (f.y < SKY_TOP + 120 && want < 0.1) want = 0.1;
   const p0 = f.pitch;
-  // (user Oct 26: "going up and down on the cessna should be a bit smoother, now it feels artificial... smooth out as it
-  // changes the angle") the nose has weight: its turning speed eases in and out (about half a second), never snaps
-  { const R = K.rate * (forced || !stick ? 1 : 1.6), wantV = clamp((want - f.pitch) * 3.2, -R, R);
-    f.pv = (f.pv || 0) + (wantV - (f.pv || 0)) * Math.min(1, dt * (f.kind === 'jet' ? 2.2 : 3.4));
-    f.pitch += f.pv * dt; }
-  if (f.kind === 'jet') wingVapour(f, (f.pitch - p0) / Math.max(dt, 1e-3), 46);   // (a hard pull on the big one: vapour off its wings)
-  // (it won't leave the world: at an end it turns back)
-  if (!f.turn && ((f.x < 260 && f.facing < 0) || (f.x > WORLD_W - 260 && f.facing > 0) || (mine && loiterBack(f, f.facing)))) f.turn = { t: 0, from: f.facing };   // (and stopped: round on the spot)
+  // (Nov 2: the one flight model - flyStep, 29-zz-flight.js: the stick pulls its wings - a Cessna loops from a dive, the 747
+  // can't; let go or flown home, it flies the path it wants. Its speed its own: a dive builds it, a climb spends it)
+  if (!f.turn && !f.roll && ((f.x < 260 && f.facing < 0) || (f.x > WORLD_W - 260 && f.facing > 0) || (mine && loiterBack(f, f.facing)))) f.turn = { t: 0, from: f.facing };   // (it won't leave the world: at an end it turns back; stopped: round on the spot)
   f.gear = clamp((f.gear || 0) + (gearWant ? 1.5 : -1.5) * dt, 0, 1);
-  f.spd = clamp(f.spd + ((f.pitch < 0 ? 120 : 260) * K.sk * Math.sin(f.pitch) + (K.v - f.spd) * 0.08) * dt, K.vmin, K.vmax);
-  if (f.turn) {
-    f.turn.t += dt;
-    const u = clamp(f.turn.t / K.turnT, 0, 1);
-    f.vx = f.turn.from * f.spd * Math.cos(f.pitch) * Math.cos(u * Math.PI);
-    if (u >= 1) { f.facing = -f.turn.from; f.turn = null; }
-  } else f.vx = f.facing * f.spd * Math.cos(f.pitch);
-  f.vy = f.spd * Math.sin(f.pitch);
-  f.x += f.vx * dt; f.y += f.vy * dt;
+  const ctl = stick && !forced ? { pull: flyPull(f, stick, dt) } : { gam: want }; if (gearWant) ctl.cush = H;   // (wheels down over ground it can land on: the flare)
+  flyStep(f, dt, ctl, f.kind === 'jet' ? 'jet' : 'cessna', 'facing', K.turnT);
+  if (f.kind === 'jet') wingVapour(f, flyWrap(f.pitch - p0) / Math.max(dt, 1e-3), 46);   // (a hard pull on the big one: vapour off its wings)
   f.dir = f.turn ? (f.turn.t / K.turnT < 0.5 ? f.turn.from : -f.turn.from) : f.facing;
   // (coming in to land, nose up - user Oct 25 late: it touches down on its main wheels, not its nose)
   f.flare = clamp((f.flare || 0) + (gearWant ? 1 : -1) * dt * 1.5, 0, 1);
-  f.ang = f.pitch * f.dir * (1 - f.flare) - f.dir * f.flare * (0.04 + 0.07 * smoothstep(90, 0, H));
+  f.ang = f.pitch * f.dir * (1 - f.flare) - f.dir * f.flare * (0.04 + 0.07 * smoothstep(90, 0, H));   // (its body: flyStep's pitch - upside down at a loop's top)
   // left to itself it flies on level; off the world's end, it's gone (another flight later)
   if (f.x < -300 || f.x > WORLD_W + 300) { if (f.driven != null) { const q = f.driven; crew[q].civ = null; lostUnit(q, clamp(f.x, 0, WORLD_W), 'civ'); } Object.assign(f, newFlight(f.kind, Math.random() < 0.5 ? 0 : 1, rnd(20, 40), f.owner), { col: f.col, alt: f.alt, driven: null }); return; }
   // the ground or the water: down it goes (not on its wheels over a runway: that's landing)
   // (user Oct 25 late: "in the airport, planes always land. You cannot crash a plane in the airport") - down onto the
   // concrete anyhow, it's a landing
   // (Nov 1: and on any flat ground, coming down gently - the planes' shared planeTouch / planeSetDown, 29-plane.js)
-  if (planeTouch(f) === 'land') { planeSetDown(f); f.ground = 'land'; f.flare = 0.6; return; }
+  if (planeTouch(f) === 'land' && planeLand(f) === 'land') { f.ground = 'land'; f.flare = 0.6; return; }   // (or it bounced, and floats a moment - planeLand, 29-plane.js)
   const ht = dryLand(f.x) ? Infinity : harbourTop(f.x, f.y - 10), wet = !dryLand(f.x) && ht === Infinity, floor = ht < Infinity ? ht : wet ? surfaceY(f.x) : landTop(f.x);   // (the harbour's deck: ground - user Oct 27)
   if (f.y + T.h * T.k * 0.3 >= floor && !planeSafeOver(f)) { if (wet) trafficDitch(f); else { f.state = 'fly'; trafficDown(f); f.vy = Math.max(f.vy, 40); } }   // (into the water, not hit: it sinks - user Oct 26)   // (over the concrete never: it lands, or it's climbing away; nor coming down gently onto flat ground - it lands, above)
 }
@@ -40238,73 +40341,6 @@ function islDelete() {
   ISLANDS.splice(s.I, 1); TERRAIN_ED.sel = null; islChanged(); terrainSyncSkin();
 }
 // the handle and the loop's line nearest the pointer (Nov 2: any way round - 50-land-shapes)
-/* ---- (user Nov 2 16:12: "an editor button to allow split at a segment so we can separate giant shapes") SPLIT SHAPE: the shape
-   cut straight down through the middle of the picked piece into its two sides, each a shape of its own with everything the
-   first had (its kind, look, group); a tunnel cut across its line there. The new points sit on the shape's own line, so each
-   side keeps its outline but for the cut. Built on REFRESH ---- */
-// a loop cut at x = xc: its shapes on either side ([left..., right...] - a concave one may give more than two), or null
-function shpCutLoop(I, xc) {
-  const L = I.p, n = L.length, hole = shpK(I) === 'H'; if (n < 3) return null;
-  if (L.some(q => Math.abs(q[0] - xc) < 0.5)) xc += 0.75;          // (never through a point itself)
-  const ed = [];                                                    // (the edges the cut crosses: their start, the chord's y there)
-  for (let i = 0; i < n; i++) { const a = L[i], b = L[(i + 1) % n]; if ((a[0] - xc) * (b[0] - xc) < 0) ed.push({ i, y: a[1] + (b[1] - a[1]) * (xc - a[0]) / (b[0] - a[0]) }); }
-  if (ed.length < 2 || ed.length & 1) return null;
-  // (each crossing on the shape's own line: the line's spans there, in the chords' order top to bottom)
-  const sp = shpSpansAt(shpPoly(I), xc).s, byY = ed.slice().sort((a, b) => a.y - b.y);
-  if (sp.length === ed.length) byY.forEach((c, r) => { c.y = sp[r] - WATER_Y; });
-  byY.forEach((c, r) => { c.r = r; });                              // (its place down the cut: 0-1, 2-3... are inside)
-  const side = q => q[0] < xc ? 0 : 1, at = new Map(ed.map(c => [c.i, c]));
-  // (the loop from just after the first crossing: runs of points on one side, each from a crossing to a crossing)
-  const runs = []; let cur = null;
-  const i0 = (ed[0].i + 1) % n;
-  for (let q = 0; q < n; q++) {
-    const i = (i0 + q) % n, c0 = at.get((i + n - 1) % n);
-    if (c0) { cur = { s: side(L[i]), a: c0, pts: [], b: null }; runs.push(cur); }
-    cur.pts.push(L[i]);
-    const c1 = at.get(i); if (c1) cur.b = c1;
-  }
-  const pt = (c, attrs) => [Math.round(xc), Math.round(c.y), ...attrs];
-  const out = [];
-  for (const sd of [0, 1]) {
-    const mine = runs.filter(r => r.s === sd), used = new Set();
-    for (const r0 of mine) {
-      if (used.has(r0)) continue;
-      const P = []; let r = r0, guard = 0;
-      while (r && !used.has(r) && guard++ < 64) {
-        used.add(r);
-        P.push(pt(r.a, L[r.a.i].slice(2)), ...r.pts.map(q => q.slice()));   // (in from the cut: the piece it lies on keeps its marks)
-        // (out at the cut: along it to the crossing paired with this one, and on with the run that starts there)
-        const pr = r.b.r ^ 1;
-        if (hole) { const yb = r.b.y, yp = byY[pr].y; P.push(pt(r.b, []), [Math.round(xc), Math.round(yb + (yp - yb) / 3)], [Math.round(xc), Math.round(yb + 2 * (yp - yb) / 3)]); }   // (a hole's curve is round: the cut kept straight)
-        else P.push(pt(r.b, []));
-        r = mine.find(q => q.a.r === pr && !used.has(q));
-      }
-      if (P.length >= 3) out.push(P);
-    }
-  }
-  return out.length >= 2 ? out : null;
-}
-function islSplitShape() {
-  const s = TERRAIN_ED.sel, note = t => { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = t; };
-  if (s && s.G) { groundSplitShape(); return; }
-  if (!s || s.I == null || !ISLANDS[s.I]) { note('Press a piece of a shape first.'); return; }
-  const I = ISLANDS[s.I], P = I.p, k = selLo(s), a = P[k], b = P[(k + 1) % P.length];
-  const props = {}; for (const key of Object.keys(I)) if (key !== 'p' && key !== 'rs') props[key] = I[key];
-  let parts;
-  if (I.t) {                                                         // (a tunnel: cut across its line there, each half its widths)
-    const m = [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)], rs = I.rs || TUN_RS0, mid = Math.round((rs[0] + rs[2]) / 2);
-    const A = P.slice(0, k + 1).map(q => q.slice()).concat([m]), B = [m.slice()].concat(P.slice(k + 1).map(q => q.slice()));
-    if (A.length < 2 || B.length < 2) { note('Pick a piece inside the tunnel.'); return; }
-    parts = [Object.assign({}, props, { p: A, rs: [rs[0], rs[1], mid] }), Object.assign({}, props, { p: B, rs: [mid, rs[1], rs[2]] })];
-  } else {
-    const L = shpCutLoop(I, (a[0] + b[0]) / 2);
-    if (!L) { note('Can\'t split there: pick a piece that isn\'t upright.'); return; }
-    parts = L.map(p => Object.assign({}, props, { p }));
-  }
-  ISLANDS.splice(s.I, 1, ...parts);
-  TERRAIN_ED.sel = { Is: parts.map((q, j) => s.I + j) };
-  islChanged(); terrainSyncSkin(); note('Split in ' + parts.length + ' (REFRESH to build).');
-}
 // (user 14:15: "the same way we can drag a cave part ... just like cave parts, we should be able to scale them ... the same global system
 // for all these parts") each shape's cross in its middle drags it whole, its square scales it about its middle - the caves' rooms' own
 // handles (caves/40-editor.js: roomC, roomS)
@@ -40434,7 +40470,8 @@ function islEdDraw() {
   if (OWM) lakeEdDraw();                                         // (the pockets' water lines - 50-land-lake, Nov 2)
   const x0 = CAMPX / SV, x1 = x0 + VWW, t = Math.max(1, Math.round(1.5 * dpr / PIXW)), s = TERRAIN_ED.sel;
   if (SHP.base) { const Y = Math.round(PY(SHP.base)); C.fillStyle = 'rgba(255,200,120,0.5)'; for (let X = 0; X < VWP; X += 14) C.fillRect(X, Y - (t >> 1), 7, t); }
-  // (the ground's own shapes: their sides and crosses drawn with the ground line - groundShapesDraw, 50-land-zz-ground)   // (the base seabed: the lowest point of any shape - user Nov 2 13:16)
+  // (the ground's own line is a SOLID shape too: closed down to the base seabed at the world's two ends, in a SOLID's colour)
+  if (SHP.base) for (const wx of [1, WORLD_W - 1]) { const X = Math.round(PX(wx)); if (X < -4 || X > VWP + 4) continue; const Y0 = Math.round(PY(landTop(wx))), Y1 = Math.round(PY(SHP.base)); if (Y1 > Y0) { C.fillStyle = SHP_ED_COL.S; C.fillRect(X - (t >> 1), Y0, t, Y1 - Y0); } }   // (the base seabed: the lowest point of any shape - user Nov 2 13:16)
   ISLANDS.forEach((I, n) => {
     const Q = shpPoly(I), k = shpK(I); if (Q.x1 < x0 || Q.x0 > x1) return;
     const P = I.p, N = Q.X.length;
@@ -45273,13 +45310,16 @@ function spWater(s, dt, lever, stick, mine) {
   if (!mine && lever && spWallAt(s.x + s.dir * (40 + s.spd * s.spd / (120 * AIR_SK.seaplane)))) lever = 0;   // (left to itself it eases off short of a wall - never runs onto one: spWall)
   const want = lever ? (mine ||(s.ai && (s.ai.phase === 'out' || s.ai.phase === 'tolake' || s.ai.phase === 'fromlake')) ? SP_V : 40) : 0;
   s.spd += clamp(want - s.spd, -60 * AIR_SK.seaplane * dt, 45 * AIR_SK.seaplane * dt);
+  if (s.touchT > 0) s.spd = Math.max(0, s.spd - 0.0025 * s.spd * s.spd * dt);   // (just down: the floats ploughing - the water's drag, its square of speed)
+  susStep(s, dt, 55, 3.2);                                     // (bobbing on its floats after the touch)
+  if (s.dig > 0) s.dig = Math.max(0, s.dig - dt * 0.12);       // (its nose up out of the water again)
   s.run = s.spd > 95 * AIR_SK.seaplane ? s.run + dt : 0;
   // (a wall ahead - the shore, a harbour: stopped against it, or, fast, wrecked on it - spWall)
   if (s.spd > 0.5 && spWallAt(s.x + s.dir * (30 + s.spd * dt))) { spWall(s, mine); if (s.state !== 'water' && s.state !== 'moored') return; }
-  s.x += s.dir * s.spd * dt; s.y = surfaceY(s.x) + SP_DRAFT; s.pitch = -0.04 * Math.min(1, s.run / SP_RUN); s.ang = s.pitch * s.dir + Math.sin(time * 3 + s.home) * 0.02;
+  s.x += s.dir * s.spd * dt; s.y = surfaceY(s.x) + SP_DRAFT; s.pitch = -0.04 * Math.min(1, s.run / SP_RUN) + (s.dig || 0); s.ang = s.pitch * s.dir + Math.sin(time * 3 + s.home) * 0.02;   // (dig: its nose in after the touch - spTouch)
   if (s.spd > 30) spFoam(s, dt, smoothstep(30, 120, s.spd) * (s.touchT > 0 ? 1.6 : 1));   // (the floats ploughing: thick white foam behind them)
   if (s.touchT > 0) s.touchT -= dt;
-  if (s.run >= SP_RUN && (stick <= 0 || !mine)) { s.state = 'fly'; s.y = surfaceY(s.x) - 1; s.vy = -20; s.pitch = -0.2; s.spd = Math.max(s.spd, 110 * AIR_SK.seaplane); s.climbT = 1.5; }
+  if (s.run >= SP_RUN && (stick <= 0 || !mine)) { s.state = 'fly'; s.y = surfaceY(s.x) - 1; s.vy = -20; s.pitch = -0.2; s.spd = Math.max(s.spd, 110 * AIR_SK.seaplane); flyFrom(s, -0.1, 0.12); s.climbT = 1.5; }   // (into the air: its path just up - flyStep)
   s.vx = s.dir * s.spd;
 }
 // in the air: the planes' way, light. (user Oct 26: "You should be able to fly very close to the water, and it doesn't
@@ -45293,13 +45333,10 @@ function spAir(s, dt, stick, mine) {
   if (s.climbT > 0) { s.climbT -= dt; if (!stick) want = -0.2; }
   const flare = wet && H < 70 && (s.vy || 0) >= -5 && !(s.climbT > 0) && !s.turn ? 1 : 0;
   if (s.y < SKY_TOP + 120 && want < 0.1) want = 0.1;
-  s.pitch += clamp(want - s.pitch, -0.9 * dt, 0.9 * dt);
-  s.spd = clamp(s.spd + ((s.pitch < 0 ? 110 : 220) * AIR_SK.seaplane * Math.sin(s.pitch) + (SP_V - s.spd) * 0.1) * dt, SP_VMIN, SP_VMAX);
-  if (s.turn) { s.turn.t += dt; const u = clamp(s.turn.t / SP_TURN, 0, 1); s.vx = s.turn.from * s.spd * Math.cos(s.pitch) * Math.cos(u * Math.PI); if (u >= 1) { s.dir = -s.turn.from; s.turn = null; } }
-  else s.vx = s.dir * s.spd * Math.cos(s.pitch);
-  if (!s.turn && ((s.x < 260 && s.dir < 0) || (s.x > WORLD_W - 260 && s.dir > 0) || (mine && loiterBack(s, s.dir)))) s.turn = { t: 0, from: s.dir };   // (and stopped: round on the spot)
-  s.vy = s.spd * Math.sin(s.pitch);
-  s.x += s.vx * dt; s.y += s.vy * dt;
+  if (!s.turn && !s.roll && ((s.x < 260 && s.dir < 0) || (s.x > WORLD_W - 260 && s.dir > 0) || (mine && loiterBack(s, s.dir)))) s.turn = { t: 0, from: s.dir };   // (and stopped: round on the spot)
+  // (Nov 2: the one flight model - flyStep, 29-zz-flight.js: the stick pulls its wings, let go it flies the path it wants)
+  const ctl = stick && mine ? { pull: flyPull(s, stick, dt) } : { gam: want }; if (flare) ctl.cush = H;   // (low over the water: its floats' flare)
+  flyStep(s, dt, ctl, 'seaplane', 'dir', SP_TURN);
   planeWash(s, dt, 0.8);                                         // (low over the water: its wash, as every plane's)
   s.flare = clamp((s.flare || 0) + (flare ? 1 : -1) * dt * 1.5, 0, 1);
   const d = s.turn ? (s.turn.t / SP_TURN < 0.5 ? s.turn.from : -s.turn.from) : s.dir;
@@ -45316,12 +45353,25 @@ function spAir(s, dt, stick, mine) {
 }
 // setting down on the water: a turn under way finishes the way it's facing, the speed carries it on as a boat, and
 // the floats throw up a sheet of foam (user Oct 26: "not the missile water hit - this nice thick foam")
+// (user Nov 2 16:09: "Even an hydroplane landing on water looks super fake with no weight to it") it comes down with its
+// weight: harder than SP_SKIP and fast, its floats skip it back up off the water in a burst of spray and it comes down again
+// (the next touch stays); otherwise its floats bite - its nose digs in (dig) and it bobs on them (its springs - susY), the
+// water dragging hard at the floats at first (spWater: the plough, its square of speed while touchT lasts) - no sudden stop
+const SP_SKIP = 5 * UPM;
 function spTouch(s, d) {
-  const hard = clamp((s.vy || 0) / 60, 0, 1);
-  s.state = 'water'; s.dir = d; s.turn = null; s.pitch = 0; s.flare = 0; s.vy = 0; s.y = surfaceY(s.x) + SP_DRAFT;
-  s.spd = Math.min(s.spd, 120); s.run = 0; s.touchT = 1.4;
+  const vy = Math.max(0, s.vy || 0), hard = clamp(vy / SP_SKIP, 0, 2);
+  if (vy > SP_SKIP && !(s.bounceT > 0) && s.spd > 60) {
+    spFoam(s, 1 / 30, 4 + 2 * hard, true); sound('splash', s.x, 0.4 + 0.3 * Math.min(1, hard));
+    s.y = surfaceY(s.x) - 1; s.vy = -vy * 0.3; s.spd = Math.hypot(s.spd * Math.cos(s.gam || 0), s.vy); flyFrom(s, Math.atan2(s.vy, Math.abs(s.vx || s.spd)), 0.1); s.bounceT = 1.5; s.turn = null;
+    planeSusKick(s, vy + 40);
+    return;
+  }
+  s.state = 'water'; s.dir = d; s.turn = null; s.roll = null; s.pitch = 0; s.flare = 0; s.y = surfaceY(s.x) + SP_DRAFT;
+  s.spd = Math.abs(s.vx || s.spd) || s.spd; s.vy = 0; s.run = 0; s.touchT = 1.6; s.dig = 0.05 + 0.1 * Math.min(1, hard);
+  planeSusKick(s, vy + 50);
   spFoam(s, 1 / 30, 3 + 3 * hard, true);
-  sound('splash', s.x, 0.25 + 0.35 * hard);
+  sound('splash', s.x, 0.25 + 0.35 * Math.min(1, hard));
+  if (hard > 0.4) shakeAt(Math.min(2.5, hard), s.x);
 }
 // the floats' foam: spray thrown back and low off the floats' rear half, foam lying on the water behind them, white
 // churn (the wake) - k how hard (1 a fast run); burst: the touch-down's first splash
@@ -45412,7 +45462,7 @@ function drawSeaplanes(x0, x1, mode) {
     // its lamps, turned with it about the same point (user Oct 26: "the red light is wrong when the plane tilts" - and
     // in the turn frames they'd sit off it: side views only)
     if (s.state === 'fly' && fi === 0) planeLights(s.x, s.y, d, 5 * REAL.cessna, 22 * REAL.cessna, fbU + 9.5 * REAL.cessna, false, s.home * 0.01, s.ang || 0, -(fbU + 3 * REAL.cessna));   // (real scale: where the drawing's lamps are)
-    C.save(); C.translate(PX(s.x), PY(s.y)); C.rotate(heldAng(s, s.ang || 0));
+    C.save(); C.translate(PX(s.x), PY(s.y + (s.susY || 0))); C.rotate(heldAng(s, s.ang || 0)); C.scale(1, flyRollK(s));   // (bobbing on its floats - susY; rolling upright - 29-zz-flight.js)
     const X = -Math.round(sp.width / 2), Y = -Math.round(sp.height / 2 + fbU * SV);
     C.drawImage(sp, X, Y);
     civLitLook(im, CESSNA_K * SV, X, Y, PX(s.x));
@@ -48688,7 +48738,7 @@ function drawTraffic(x0, x1, mode) {
         jet ? 23 * REAL.jet : 5 * CESSNA_SC, CP ? (jet ? 60 * REAL.jet : 22 * CESSNA_SC) : jet ? 70 * REAL.jet : 24 * REAL.cessna, CP ? (jet ? 23 * REAL.jet : 9.5 * CESSNA_SC) : jet ? 17 * REAL.jet : 7 * REAL.cessna, jet, f.col || 0, CP ? CP.ang : f.ang, jet ? 11 * REAL.jet : 2 * CESSNA_SC);   // (real scale: the lamps where the drawing's are)
     }
     const hc = hangarClip(f.x, f.y, im.width * (CP ? SHEET_PLANES[f.kind].I.k : T.k) / 2);   // (in through its hangar's door: hidden past it)
-    C.save(); C.translate(PX(f.x), PY(f.y - lift + (f.susY || 0))); C.rotate(heldAng(f, CP ? CP.ang : f.ang));   // (on a magnet: turned with it)
+    C.save(); C.translate(PX(f.x), PY(f.y - lift + (f.susY || 0))); C.rotate(heldAng(f, CP ? CP.ang : f.ang)); C.scale(1, flyRollK(f));   // (on a magnet: turned with it; rolling upright: closing to its edge and open again - 29-zz-flight.js)
     if (f.kind === 'jet' && (f.gear || 0) > 0.03) {
       const g = f.gear, d0 = f.dir || 1;
       const B0 = CP ? 31 : 14;                                       // (the belly under the middle: the Oct 26 sheet's, or the old drawing's)
@@ -50164,7 +50214,7 @@ function terrainSyncSkin() {
     R.inp.disabled = !ok; if (set.size === 1) R.inp.value = [...set][0];
     R.out.textContent = !ok ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED';
   }
-  const n = s ? selHi(s) - selLo(s) + 1 : 0, what = (s && s.I != null && ISLANDS[s.I] ? SHP_NAME[shpK(ISLANDS[s.I])] + ' ' + (s.I + 1) + ', ' : s && s.G ? (gGap(GROUND[selLo(s)]) ? 'NO GROUND (OCEAN), ' : 'GROUND ' + (groundShapeOf(selLo(s)) + 1) + ' (SOLID), ') : '') + (n > 1 ? 'the ' + n + ' white pieces: ' : 'the white piece: ');
+  const n = s ? selHi(s) - selLo(s) + 1 : 0, what = (s && s.I != null && ISLANDS[s.I] ? SHP_NAME[shpK(ISLANDS[s.I])] + ' ' + (s.I + 1) + ', ' : s && s.G ? 'GROUND (SOLID), ' : '') + (n > 1 ? 'the ' + n + ' white pieces: ' : 'the white piece: ');
   if (TERRAIN_ED.skinNote && s && s.Is) { TERRAIN_ED.skinNote.textContent = s.Is.length + (s.Is.length > 1 ? ' shapes' : ' shape') + ' picked: drag to move.'; return; }
   if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = !s ? 'Pick a piece of line.' : what + (sk === 'F' ? 'FOREST' : sk === 'D' ? 'DESERT' : sk === 'T' ? 'TROPICAL' : sk === 'S' ? 'SEA' : sk === 'mixed' ? 'MIXED' : 'AUTO') + '.';
 }
@@ -50277,7 +50327,7 @@ function terrainSplit() {
       const uu = +u.toFixed(6); if (!(uu > a && uu < b)) continue;
       if (s.G ? gLockAt(gX(uu)) >= 0.5 : !s.F && landLock(landPtX(!!s.R, uu)) >= 0.5) continue;  // (not in a country's fixed stretch)
       const y = floorCurve(P, m, uu);
-      np.push([uu, Math.round(s.G ? clamp(y, G_DY[0], G_DY[1]) : s.F ? clamp(y, FLOOR_MIN_D, FLOOR_MAX_D) : clamp(y, LAND_DY[0], LAND_DY[1])), ...(s.G ? gCarry(P[k]) : P[k].slice(2))]);
+      np.push([uu, Math.round(s.G ? clamp(y, G_DY[0], G_DY[1]) : s.F ? clamp(y, FLOOR_MIN_D, FLOOR_MAX_D) : clamp(y, LAND_DY[0], LAND_DY[1])), ...P[k].slice(2)]);
     }
     adds.push([k, np]);
   }
@@ -50342,7 +50392,6 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN SHAPES', [
   kindBtn('ISLAND', 'I', 'Picked shape: behind the water'),
   kindBtn('HOLE', 'H', 'Picked shape: cuts the terrain it overlaps'),
   seeBtn(),
-  ['SPLIT SHAPE', 'Cut the shape in two at the picked piece', islSplitShape],
 ]);
 // (user Oct 28, 20:25: "docs don't have to be mandatory") a coast's dock taken away, or put back (the nearer coast without one)
 function terrainDelDock() {
@@ -52196,44 +52245,6 @@ function gAttrs(a) {
   return SKINS.includes(a[0]) ? [a[0]] : [];
 }
 const gAttrsAt = (P, u) => { let lo = 0, hi = P.length - 1; if (u <= P[0][0]) return P[0].slice(2); while (hi - lo > 1) { const k = (lo + hi) >> 1; if (P[k][0] <= u) lo = k; else hi = k; } return P[lo].slice(2); };
-/* ---- (user Nov 2 16:12: "we need the ground to be a fully shape" - terrain-shapes chat) the one line is cut into GROUND SHAPES:
-   SOLID shapes, each closed down to the base seabed, picked, split and taken away like any other. A point's seventh item:
-   1 - a CUT: a new ground shape starts at it (SPLIT SHAPE); 2 - a GAP: no ground on the piece from it to the next (a ground
-   shape taken away): there the ocean, its floor down at the deepest (the base seabed's depth), marked SEA (seaRuns). ---- */
-const gCut = p => !!p && p[6] === 1, gGap = p => !!p && p[6] === 2;
-const G_GAP_DY = () => clamp((SHP.base || SEA_FLOOR_MAX) - WATER_Y - G_SEA, 0, G_DY[1]);   // (down at the base seabed: the lowest point of any ground)
-// a point's marks carried onto a new point on its piece (a gap goes on; a cut stays where it was)
-function gCarry(p) { const q = [0, 0, ...p.slice(2)]; if (q[6] === 1) { q[6] = 0; ptTrim(q); } return q.slice(2); }
-// the ground shapes: [{ k0, k1 }] - from point k0 to point k1, left to right
-function groundShapes(P = GROUND) {
-  const out = []; let k0 = null;
-  for (let k = 0; k < P.length - 1; k++) {
-    if (gGap(P[k])) { if (k0 != null) out.push({ k0, k1: k }); k0 = null; continue; }
-    if (k0 == null) k0 = k; else if (gCut(P[k])) { out.push({ k0, k1: k }); k0 = k; }
-  }
-  if (k0 != null) out.push({ k0, k1: P.length - 1 });
-  return out;
-}
-// the ground shape over piece k (its index in groundShapes, -1: a gap)
-const groundShapeOf = (k, L = groundShapes()) => L.findIndex(g => k >= g.k0 && k < g.k1);
-// SPLIT SHAPE on the ground: a cut at the middle of the picked piece
-function groundSplitShape() {
-  const s = TERRAIN_ED.sel, P = GROUND, note = t => { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = t; };
-  const k = selLo(s); if (!P[k + 1] || gGap(P[k])) { note('Pick a piece of ground first.'); return; }
-  const i = groundSplitAt(P, (P[k][0] + P[k + 1][0]) / 2); if (i < 0) return;
-  ptFill(P[i])[6] = 1;
-  groundChanged(P[i - 1][0], P[i + 1][0]);
-  TERRAIN_ED.sel = { G: true, k: i, k1: i }; terrainSyncSkin(); note('Ground split in 2 (REFRESH to build).');
-}
-// a ground shape taken away (its pieces made gaps), or put back (a gap's pieces ground again: grow)
-function groundGapSet(k0, k1, on) {
-  const P = GROUND;
-  for (let k = k0; k < k1; k++) { ptFill(P[k])[6] = on ? 2 : 0; ptTrim(P[k]); }
-  if (on) { if (P[k1] && gCut(P[k1])) { P[k1][6] = 0; ptTrim(P[k1]); } if (gCut(P[k0])) { P[k0][6] = 0; ptTrim(P[k0]); } }   // (its cuts gone with it: the gap is the edge now)
-  groundChanged(P[k0][0], P[k1][0]);
-}
-// is the pick a whole ground shape: its index, else -1
-function groundWholePick(s = TERRAIN_ED.sel) { if (!s || !s.G) return -1; const L = groundShapes(); return L.findIndex(g => selLo(s) === g.k0 && selHi(s) === g.k1 - 1); }
 // the one line from the three old ones: each country's [u, dy] (u from its own end of the world, 1 at its old harbour) and
 // the ocean floor's [u, depth] (u from one old pier's end to the other's) - every piece keeping its marks
 function groundFrom(L, F, R) {
@@ -52281,7 +52292,7 @@ const groundUsed = () => NET.role === 'local' ? GROUND : GROUND_DEF;
 function seaRuns(P) {
   const out = [];
   for (let k = 0; k < P.length - 1; k++) {
-    if (P[k][2] !== 'S' && !gGap(P[k])) continue;   // (a gap - a ground shape taken away: the ocean)
+    if (P[k][2] !== 'S') continue;
     const last = out[out.length - 1];
     if (last && last[1] === P[k][0]) last[1] = P[k + 1][0]; else out.push([P[k][0], P[k + 1][0]]);
   }
@@ -52293,7 +52304,7 @@ function groundSplitAt(P, s) {
   if (Math.abs(P[i][0] - s) < 1e-9) return i;
   if (i + 1 < P.length && Math.abs(P[i + 1][0] - s) < 1e-9) return i + 1;
   if (s <= P[0][0] || s >= P[P.length - 1][0]) return -1;
-  const m = floorTangents(P), q = [s, Math.round(floorCurve(P, m, s)), ...gCarry(P[i])];
+  const m = floorTangents(P), q = [s, Math.round(floorCurve(P, m, s)), ...P[i].slice(2)];
   P.splice(i + 1, 0, q); return i + 1;
 }
 // the pieces from a to b marked SEA (their other marks kept); clear: the SEA marks from a to b taken off (AUTO)
@@ -52346,7 +52357,7 @@ function groundPins() {
   const m = floorTangents(Q); Q.forEach((p, i) => { if (p.pin) m[i] = 0; });   // (level where it leaves the pad)
   GSH.P = Q; GSH.m = m;
 }
-function groundDyAt(x) { if (!GSH.P) groundPrep(); const s = gS(x); if (gGap(GSH.P[groundPieceAt(GSH.P, s)])) return G_GAP_DY(); return floorCurve(GSH.P, GSH.m, s) + groundShape(s, x); }   // (a gap: down at the deepest)
+function groundDyAt(x) { if (!GSH.P) groundPrep(); const s = gS(x); return floorCurve(GSH.P, GSH.m, s) + groundShape(s, x); }
 // SPIKY and ROUND on top of the line's own curve (user Oct 31; each piece's own - its start point's fifth and sixth items,
 // ptSpiky / ptRound): ROUND a mound (+) or a round hole (-) as deep as the piece's length allows; SPIKY a row of ramps (teeth
 // about 18 m wide, up to about 8 m tall) rising (+) or falling (-). Each fades in from the piece's ends, so the line never
@@ -52372,7 +52383,7 @@ function lineShape(P, u, x, xOf) {
 }
 function groundShape(s, x) { const dy = lineShape(GROUND, s, x, gX); return dy && OWM && land.R ? dy * (1 - structPadAt(x).k) : dy; }
 const groundDepthAt = x => groundDyAt(x) + G_SEA;                 // (under the calm sea's level)
-function groundSkinAt(x) { if (!GSH.P) groundPrep(); const p = GSH.P[groundPieceAt(GSH.P, gS(x))]; return gGap(p) ? 'S' : p[2] || null; }   // (a gap: the sea's)
+function groundSkinAt(x) { if (!GSH.P) groundPrep(); return GSH.P[groundPieceAt(GSH.P, gS(x))][2] || null; }
 function groundHillsAt(x) { if (!GSH.P) groundPrep(); return hillsAt(GSH.P, gS(x)); }
 // the line reaches the world's ends (made bigger or smaller: WORLD_EXT): a point at each end, handles every 1/4 screen
 // where a stretch past an old end has none
@@ -52388,7 +52399,7 @@ function groundFit() {
     const a = P[i][0], b = P[i + 1][0];
     if (!(a < 0 || b > 22) || b - a < 0.375) continue;
     const m = floorTangents(P), add = [];
-    for (let u = a + 0.25; u < b - 0.125; u += 0.25) if (u < 0 || u > 22) add.push([+u.toFixed(6), Math.round(floorCurve(P, m, u)), ...gCarry(P[i])]);
+    for (let u = a + 0.25; u < b - 0.125; u += 0.25) if (u < 0 || u > 22) add.push([+u.toFixed(6), Math.round(floorCurve(P, m, u)), ...P[i].slice(2)]);
     if (add.length) { P.splice(i + 1, 0, ...add); i += add.length; ch = true; }
   }
   if (ch) groundSave();
@@ -52466,8 +52477,6 @@ window.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse' && e.button === 1) return;      // (the middle button only pans)
   if (!landEdOn() || onEdUI(e)) return;
   const q = groundPick(e), now = performance.now(), P = GROUND;
-  { const gi = q.k < 0 ? groundCrossPick(q.x, q.y, q.r) : -1;     // (a ground shape's cross: the whole shape picked)
-    if (gi >= 0) { e.stopImmediatePropagation(); e.preventDefault(); edClaim('line'); if (typeof MQ !== 'undefined') MQ.on = false; const g = groundShapes()[gi]; TERRAIN_ED.sel = { G: true, k: g.k0, k1: g.k1 - 1 }; terrainSyncSkin(); return; } }
   const onLine = q.x > gX(P[0][0]) && q.x < gX(P[P.length - 1][0]) && gLockAt(q.x) < 0.5 && Math.abs(gLineY(q.x) - q.y) < q.r * 1.6;
   if (q.k < 0 && !onLine) { GROUND_ED.lastDown = null; return; }
   e.stopImmediatePropagation(); e.preventDefault();              // (the editor's, not the game's: no shot where you click)
@@ -52482,7 +52491,7 @@ window.addEventListener('pointerdown', e => {
     const ld = GROUND_ED.lastDown;
     if (ld && now - ld.t < 380 && Math.hypot(e.clientX - ld.cx, e.clientY - ld.cy) < 24) {
       const u = gS(q.x); let i = 1; while (i < P.length - 1 && P[i][0] < u) i++;
-      if (u > P[i - 1][0] + 2e-6 && u < P[i][0] - 2e-6) { P.splice(i, 0, [+u.toFixed(6), Math.round(clamp(groundDyAt(q.x), G_DY[0], G_DY[1])), ...gCarry(P[i - 1])]); groundChanged(P[i - 1][0], P[i + 1][0]); }
+      if (u > P[i - 1][0] + 2e-6 && u < P[i][0] - 2e-6) { P.splice(i, 0, [+u.toFixed(6), Math.round(clamp(groundDyAt(q.x), G_DY[0], G_DY[1])), ...P[i - 1].slice(2)]); groundChanged(P[i - 1][0], P[i + 1][0]); }
       GROUND_ED.lastDown = null;
     } else GROUND_ED.lastDown = { t: now, cx: e.clientX, cy: e.clientY };
     return;
@@ -52532,30 +52541,14 @@ function groundEdDraw() {
     if (wx < a || wx > b) { yp = null; continue; }
     const y = PY(gLineY(wx));
     if (yp !== null) {
-      const pk = P[groundPieceAt(P, gS(wx))], sel = groundSelAt(wx), sk = pk[2] || null, gap = gGap(pk), tt = sel ? t * 3 : sk && !gap ? t * 2 : t;
-      if (gap && !sel && (c & 15) > 7) { yp = y; continue; }      // (a gap: no ground there - dashed)
-      C.fillStyle = sel ? '#ffffff' : gap ? 'rgba(255,200,120,0.5)' : TERRAIN_SKIN_COL[sk] || 'rgba(255,179,71,0.85)';
+      const sel = groundSelAt(wx), sk = P[groundPieceAt(P, gS(wx))][2] || null, tt = sel ? t * 3 : sk ? t * 2 : t;
+      C.fillStyle = sel ? '#ffffff' : TERRAIN_SKIN_COL[sk] || 'rgba(255,179,71,0.85)';
       C.fillRect(c - st, Math.min(yp, y) - (tt >> 1), st, Math.abs(y - yp) + tt);
     }
     yp = y;
   }
 }
-// each ground shape's sides down to the base seabed (a SOLID's colour) and its cross (press: the whole shape)
-const groundCrossAt = g => { const P = GROUND, x = gX((P[g.k0][0] + P[g.k1][0]) / 2); return [x, gLineY(x) + 60]; };
-function groundShapesDraw() {
-  const P = GROUND, t = Math.max(1, Math.round(1.5 * dpr / PIXW)), hs = Math.max(5, Math.round(4.5 * dpr / PIXW)), base = SHP.base || WATER_Y + FLOOR_MAX_D, wp = groundWholePick();
-  groundShapes().forEach((g, i) => {
-    const on = i === wp;
-    for (const k of [g.k0, g.k1]) { const x = gX(P[k][0]), X = Math.round(PX(x)); if (X < -4 || X > VWP + 4) continue; const Y0 = Math.round(PY(gLineY(x))), Y1 = Math.round(PY(base)); if (Y1 > Y0) { C.fillStyle = on ? '#ffffff' : SHP_ED_COL.S; C.fillRect(X - (t >> 1), Y0, on ? t * 2 : t, Y1 - Y0); } }
-    const [cx, cy] = groundCrossAt(g), X = PX(cx), Y = PY(cy), a = Math.round(hs * 1.6); if (X < -40 || X > VWP + 40) return;
-    C.fillStyle = '#04070f'; C.fillRect(X - a - 1, Y - t - 1, 2 * a + 2, 2 * t + 2); C.fillRect(X - t - 1, Y - a - 1, 2 * t + 2, 2 * a + 2);
-    C.fillStyle = on ? '#ffb347' : '#ffffff'; C.fillRect(X - a, Y - t, 2 * a, 2 * t); C.fillRect(X - t, Y - a, 2 * t, 2 * a);
-  });
-}
-// the ground shape whose cross is under a press (its index, -1: none)
-function groundCrossPick(x, y, r) { let best = -1, bd = (r * 1.8) ** 2; groundShapes().forEach((g, i) => { const [cx, cy] = groundCrossAt(g), d = (cx - x) ** 2 + (cy - y) ** 2; if (d <= bd) { bd = d; best = i; } }); return best; }
 function groundEdHandles() {
-  groundShapesDraw();
   const P = GROUND, hs = Math.max(5, Math.round(4.5 * dpr / PIXW)), x0 = CAMPX / SV - 40, x1 = x0 + VWW + 80;
   P.forEach((p, k) => {
     const hx = gX(p[0]); if (hx < x0 || hx > x1 || !gFree(k)) return;
@@ -58499,7 +58492,6 @@ const WK = {
     items() {
       const s = TERRAIN_ED.sel; if (!s) return [];
       if (s.Is) return s.Is.filter(n => ISLANDS[n]).map(() => ({ noun: 'SHAPE', del: true }));
-      if (s.G && groundWholePick(s) >= 0) return [{ noun: 'SHAPE', del: true }];   // (a whole ground shape - its cross)
       if (!selPts(s)) return [];
       return Array.from({ length: selHi(s) - selLo(s) + 1 }, () => ({ noun: 'SEGMENT', del: true }));
     },
@@ -58508,7 +58500,6 @@ const WK = {
       const s = TERRAIN_ED.sel; if (!s) return;
       const P = selPts(s), n0 = P ? P.length : 0;
       if (s.Is || (s.I != null && P && selLo(s) === 0 && selHi(s) >= P.length - 2)) { islDelete(); return; }   // (whole islands; an island's every piece: the island)
-      { const gi = groundWholePick(s); if (gi >= 0) { const g = groundShapes()[gi]; groundGapSet(g.k0, g.k1, true); TERRAIN_ED.sel = null; terrainSyncSkin(); return; } }   // (a whole ground shape: taken away - the ocean there, down to the base seabed)
       terrainDelSeg();                                    // (it says why when it can't: a line's ends, too few handles left)
       if (P && P.length !== n0) { TERRAIN_ED.sel = null; terrainSyncSkin(); }
     },
@@ -59763,7 +59754,6 @@ async function start(data) {
   Object.assign(window.__game, { terr: { solidBlock: (x, y) => solidBlock(x, y), solidBelow: (x, y) => solidBelow(x, y), solidAbove: (x, y) => solidAbove(x, y), seabedY: x => seabedY(x), sandY: x => sandY(x), landTop: x => landTop(x) } });
   Object.assign(window.__game, { waterInfo: () => WATER.rows.map(R => { let w = 0, mn = Infinity, mx = -Infinity; for (let i = 0; i < R.n; i++) if (!R.sea[i] && R.g[i] - R.s[i] > 0.5) { w++; mn = Math.min(mn, R.s[i]); mx = Math.max(mx, R.s[i]); } return { c0: R.c0, n: R.n, wet: w, top: Math.round(mn), low: Math.round(mx), rest: +R.rest.toFixed(2) }; }) });
   Object.assign(window.__game, { lakesInfo: () => ({ lakes: (land.lakes || []).map(L => ({ a: L[0], b: L[1], lv: lakeLv(L), surf: surfaceY((L[0] + L[1]) / 2), at: lakeAt((L[0] + L[1]) / 2) })), pockets: (land.pockets || []).map(K => ({ x0: K.x0, x1: K.x1, spill: Math.round(K.spill), bot: Math.round(K.bot), lv: K.lv })), set: LAKE_SET, dev: LAKE_DEV }) });
-  Object.assign(window.__game, { shapeEd: { sel: v => { TERRAIN_ED.sel = v; }, getSel: () => TERRAIN_ED.sel, split: () => islSplitShape(), gshapes: () => groundShapes(), del: () => WK.line.del(), note: () => TERRAIN_ED.skinNote ? TERRAIN_ED.skinNote.textContent : '' } });   // (tests: the TERRAIN tab's shape tools)
   Object.assign(window.__game, { islands: () => ISLANDS, islChanged: () => islChanged(), envAt: x => { const c = Math.floor(x / LT_CELL); return land.look && land.look[c] === 1 ? 'desert' : land.trop && land.trop[c] ? 'trop' : land.sea && land.sea[c] ? 'sea' : 'land'; } });   // (tests: the shapes, and the place's look at x - caveLook)
   Object.assign(window.__game, { shapesInfo: (xs) => ({ base: SHP.base, shapes: ISLANDS.map((I, n) => ({ k: shpK(I), x0: Math.round(shpPoly(I).x0), x1: Math.round(shpPoly(I).x1), cols: SHP.cols[n] ? SHP.cols[n].iv.filter(v => v.length).length : 0 })), isles: land.isles, islRuns: land.islRuns, solRoots: solRoots.length, islRoots: islRoots.length, at: (xs || [12600, 15300, 15800, 16300]).map(x => ({ x, isle: ISLE === null ? null : ISLE[Math.floor(x / 2.5)], stop: land.stop ? land.stop[Math.floor(x / 2.5)] : null, sunder: land.sunder ? land.sunder[Math.floor(x / 2.5)] : null, top: landTop(x), sand: sandY(x), bed: seabedY(x), hole: shpHoleAt(Math.floor(x / 2.5), 400) })) }) });
   if (SW_WANT) swStart();
