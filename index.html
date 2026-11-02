@@ -4145,8 +4145,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 636;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 15:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 637;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 15:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54285,9 +54285,39 @@ function vehSelect(e) { VE.sel = e; vehSync(); }
 const vehFloats = e => e.k === 'ship' || e.k === 'boat' || e.k === 'yacht' || e.k === 'tower' || e.k === 'tank' || civShips.includes(e.v);
 // (moved by its owner: the editor asks with 'tableMove' - 36-zz-tables.js)
 const vehTable = e => tableOf(e.v);
-function vehMoveTo(e, X, Y, t = vehTable(e)) {
+function vehMoveTo(e, X, Y, t = vehTable(e), lift = false) {
   if (e.k === 'crane' || !t) return;                                       // (it runs on its rails)
-  emit('tableMove', { t, o: e.v, x: X, y: vehFloats(e) ? null : Y });
+  emit('tableMove', { t, o: e.v, x: X, y: vehFloats(e) && !lift ? null : Y });   // (lift: the editor's drag - held where it's carried, the world held)
+}
+/* ---- ONE RULE for putting things down, the structures' (user Nov 2 14:13: "That should be global (the red if invalid etc)"): what
+   a vehicle rests on - 'water' (boats, ships, yachts: floating on it), 'ground' (cars, the tank, the towers: standing on it), 'sub'
+   (on the water or anywhere down in it), 'air' (aircraft, balloons, blimps, space: anywhere over the ground); where it rests at x
+   (its own height over its water or ground as it rests - vehRestOff, taken when it's picked up); what's wrong with where it is
+   (vehPlaceBad: the structures' words - NEEDS WATER, NEEDS DRY LAND, OFF THE GROUND / OFF THE WATER, IN THE GROUND). ---- */
+const VEH_AIR = new Set(['air', 'plane', 'seaplane', 'heli', 'balloon', 'blimp', 'shuttle', 'orb']);
+function vehRestKind(e) {
+  const v = e.v;
+  if (VEH_AIR.has(e.k) || seaplanes.includes(v) || orbiters.includes(v) || blimps.includes(v)) return 'air';
+  if (e.k === 'sub' || minisubs.includes(v) || v.sub) return 'sub';
+  if (e.k === 'car' || e.k === 'tank' || e.k === 'tower' || storyCars.includes(v)) return 'ground';
+  return 'water';
+}
+const vehLevel = (k, x) => k === 'ground' ? landTop(clamp(x, 0, WORLD_W - 1)) : WATER_Y;
+// its height over its level as it rests (taken at pick-up: as it is, or - held off it - as its maker would put it down)
+function vehRestOff(e) {
+  const k = vehRestKind(e), v = e.v, [x, y] = vehPos(e); if (k === 'air') return null;
+  const r = placedRec(v);
+  if (r && r.off) { try { const rows = placedNew(Object.assign({}, r, { y: undefined, off: false })); if (rows && rows[0]) return rows[0][1].y - vehLevel(k, r.x); } catch (err) { } }
+  return y - vehLevel(k, x);
+}
+const vehRestY = (e, x, off) => off == null ? null : vehLevel(vehRestKind(e), x) + off;
+// what's wrong with where it is, or ''
+function vehPlaceBad(e) {
+  const v = e.v, k = vehRestKind(e), [x, y] = vehPos(e), g = landTop(clamp(x, 0, WORLD_W - 1)), r = placedRec(v);
+  if (k === 'air') return y > g + UPM ? 'IN THE GROUND' : '';
+  if (k === 'ground') return g > WATER_Y - 0.2 * UPM ? 'NEEDS DRY LAND' : v._lifted || v._off || (r && r.off) ? 'OFF THE GROUND' : '';
+  if (g < WATER_Y + UPM) return 'NEEDS WATER';
+  return v._lifted || v._off || (r && r.off) ? 'OFF THE WATER' : '';
 }
 // ---- the pointer over the world while the tab is open (before the game's own, as the caves' editor)
 const vehWorld = ev => { const [x, y] = screenToWorld(ev.clientX, ev.clientY), i = ONEVIEW() || ev.clientX * dpr / PIXW < Math.floor(bw / 2) ? 0 : 1; return [x, y, (ev.pointerType === 'touch' ? 26 : 14) * dpr / PIXW / (S * cam.view[i].z)]; };
@@ -54319,20 +54349,25 @@ function vehEdDraw() {
   natureEdDraw();                                            // (the fish areas - 50-zz-nature)
   wxaEdDraw();                                               // (the weather areas' lines - 50-zz-weather-areas)
   grpEdDraw();                                               // (GROUPING: the groups' frames - 50-zzz-objects-tab)
-  if (!VE.sel || !vehTabOpen()) return;
-  for (const P of [VE.sel, ...VE.more]) vehRing(P);
+  if (!vehTabOpen()) return;
+  const picked = new Set([VE.sel, ...VE.more].filter(Boolean).map(P => P.v));
+  for (const e of vehAll()) { if (picked.has(e.v) || !(e.v.placed != null || e.v._lifted)) continue; const bad = vehPlaceBad(e); if (bad) vehRing(e, bad); }   // (red where it can't be, as a structure)
+  for (const P of [VE.sel, ...VE.more]) if (P) vehRing(P, vehPlaceBad(P));
 }
-function vehRing(P) {
+function vehRing(P, bad = '') {
   const [x0, x1, y0, y1] = vehBox(P), w = Math.max(2, Math.round(2 * dpr / PIXW)), g = w + 1;
   const L = Math.round(PX(x0)) - g, R = Math.round(PX(x1)) + g, T = Math.round(PY(y0)) - g, Bm = Math.round(PY(y1)) + g;
   if (R < 0 || L > VWP) return;
   // (four corner brackets on the vehicle's own box: the view's canvas fills, it doesn't stroke)
   const a = Math.max(4, Math.round(Math.min(R - L, Bm - T) * 0.3));
-  for (const [col, q] of [['#04070f', w + 2], ['#ffffff', w]]) {   // (picked: white, as everything picked - user Nov 1)
+  for (const [col, q] of [['#04070f', w + 2], [bad ? '#ff5046' : '#ffffff', w]]) {   // (picked: white, as everything picked - user Nov 1; where it can't be: red)
     C.fillStyle = col; const o = (q - w) / 2;
     for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) { const xc = sx < 0 ? L : R, yc = sy < 0 ? T : Bm; C.fillRect(Math.min(xc, xc - sx * a) - o, yc - q / 2, a + 2 * o, q); C.fillRect(xc - q / 2, Math.min(yc, yc - sy * a) - o, q, a + 2 * o); }
   }
-  drawText(C, vehName(P), (L + R) / 2, T - 9 * Math.max(1, Math.round(2 * dpr / PIXW)), [255, 255, 255], Math.max(1, Math.round(2 * dpr / PIXW)), 'center');
+  const tq = Math.max(1, Math.round(2 * dpr / PIXW));
+  if (bad) { C.fillStyle = 'rgba(255,60,50,0.28)'; C.fillRect(L, T, R - L, Bm - T); }
+  drawText(C, vehName(P), (L + R) / 2, T - 9 * tq, bad ? [255, 120, 110] : [255, 255, 255], tq, 'center');
+  if (bad) drawText(C, bad, (L + R) / 2, (T + Bm) / 2, [255, 120, 110], tq, 'center');
 }
 // player 0 into a vehicle: the game's own ways in - an army one by switching, one of yours at a structure as STORY boards it (out
 // of its hangar or berth), any other civilian one boarded (the top bar's PLAY - 50-zzz-world-ed.js)
@@ -54578,7 +54613,6 @@ window.addEventListener('pointerdown', ev => {
   const [X, Y, r] = vehWorld(ev), h = naturePick(X, Y, r); if (!h) return;
   NE.sel = h.a.id; natureSync();
   NE.drag = { id: ev.pointerId, h, X, Y, o: { x0: h.a.x0, x1: h.a.x1, y0: h.a.y0, y1: h.a.y1 }, moved: false };
-  MQ.on = false;                                              // (the TERRAIN tab's box-pick: not when an area is taken)
   ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('nature');
 }, { capture: true, passive: false });
 window.addEventListener('pointermove', ev => {
@@ -54701,7 +54735,8 @@ function placedBuild() {
   if (!OWM || NET.role !== 'local') return;
   // (the structures' vehicles: an OWNER given to one in the editor - its spot's fac; PLAYER is the spot's own flag, as before)
   for (const t of PLACED_TABLES) { const T = TABLES[t]; if (T) for (const v of T.list()) if (v.hb != null && v.placed == null) { const o = strById(v.hb), e = o && Array.isArray(o.veh) ? o.veh[v.hs] : null; if (e && typeof e.fac === 'number') v.fac = e.fac; } }
-  for (const r of PLACED) for (const [t, o] of placedNew(r) || []) if (TABLES[t]) TABLES[t].list().push(o);
+  // (one held off its rest - r.off: the structures' rule - is left out of play; the editor shows it where it was let go, red)
+  for (const r of PLACED) { if (r.off && !(typeof EDMODE !== 'undefined' && EDMODE.on)) continue; const rows = placedNew(r) || []; if (r.off && rows[0] && Number.isFinite(r.y)) { rows[0][1].y = r.y; rows[0][1]._off = true; } for (const [t, o] of rows) if (TABLES[t]) TABLES[t].list().push(o); }
 }
 // every placed one in the world (the editor lists them in STORY too, where the person button lists only yours)
 const PLACED_TABLES = ['jetboats', 'storyCars', 'civHelis', 'minisubs', 'civShips', 'sailboats', 'traffic', 'seaplanes', 'balloons', 'blimps', 'orbiters'];
@@ -54715,7 +54750,7 @@ function placedAdd(sv, x, y) {
   for (const [t, o] of rows) emit('tableAdd', { t, o });   // (its table's owner puts it in - 36-zz-tables.js)
   return rows[0][1];
 }
-function placedMoved(v, x, y) { const r = placedRec(v); if (!r) return; r.x = x; r.y = y; if (v.py != null) v.py = y; placedSave(); }   // (py: the height a placed blimp keeps)
+function placedMoved(v, x, y, off) { const r = placedRec(v); if (!r) return; r.x = x; r.y = y; if (off) r.off = true; else delete r.off; if (v.py != null) v.py = y; placedSave(); }   // (py: the height a placed blimp keeps; off: let go off its rest - 50-zz-editor-vehicles.js vehPlaceBad)
 function placedGone(v) {
   const r = placedRec(v); if (!r) return; PLACED.splice(PLACED.indexOf(r), 1); placedSave();
   if (v.msub) { const t = tableOf(v.msub); if (t) emit('tableRemove', { t, o: v.msub }); }   // (the research ship's sub goes with her)
@@ -55860,7 +55895,6 @@ window.addEventListener('pointerdown', ev => {
   if (!o) { if (!ev.shiftKey) { SE.sel = []; strSync(); } return; }
   if (ev.shiftKey) { SE.sel = SE.sel.includes(o.id) ? SE.sel.filter(i => i !== o.id) : SE.sel.concat(o.id); strSync(); }
   else if (!SE.sel.includes(o.id)) { SE.sel = [o.id]; strSync(); }
-  MQ.on = false;                                              // (the TERRAIN tab's box-pick, started by this same press: not when a structure is taken)
   // (the pick and everything in its groups - any kind: structures, islands, placed vehicles - grpDragStart)
   SE.drag = { id: ev.pointerId, X, Y, G: grpDragStart(SE.sel.map(strById).filter(Boolean).map(grpM.s)), cx: ev.clientX, cy: ev.clientY, moved: false };
   ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('struct');
@@ -56621,7 +56655,7 @@ window.addEventListener('pointerdown', ev => {
   if ((ev.pointerType === 'mouse' && ev.button !== 0) || !wxaOpen() || onEdUI(ev)) return;
   const [X, , r] = vehWorld(ev);
   const li = WXA.lines.findIndex(x => Math.abs(x - X) < r * 1.5);
-  if (li >= 0) { WXE.drag = { id: ev.pointerId, i: li }; WXE.line = li; MQ.on = false; ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('wxline'); return; }
+  if (li >= 0) { WXE.drag = { id: ev.pointerId, i: li }; WXE.line = li; ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('wxline'); return; }
   let i = 0; while (i < WXA.lines.length && X > WXA.lines[i]) i++;
   WXE.sel = i; wxaSync();
 }, { capture: true, passive: false });
@@ -56810,7 +56844,7 @@ function grpDragStart(seeds) {
   for (const o of STRS) if (sIn.has(o) || onI(o)) S.s.push([o, o.x, strBox(o).foot, onI(o)]);   // (on a moved island: it rides it)
   for (const I of isl) S.i.push([I, I.p.map(p => [p[0], p[1]])]);
   const vIn = new Set(M.filter(m => m.k === 'v' && m.v).map(m => m.v)), ids = new Set(S.s.map(a => a[0].id));
-  for (const e of vehAll()) if (vIn.has(e.v) || (e.v.placed == null && e.v.hb != null && ids.has(e.v.hb))) { const [x, y] = vehPos(e); S.v.push({ e, x, y, t: vehTable(e) }); }
+  for (const e of vehAll()) if (vIn.has(e.v) || (e.v.placed == null && e.v.hb != null && ids.has(e.v.hb))) { const [x, y] = vehPos(e); S.v.push({ e, x, y, t: vehTable(e), off: vehRestOff(e) }); }
   return S;
 }
 function grpDragMove(S, dx, dy, r) {
@@ -56819,12 +56853,25 @@ function grpDragMove(S, dx, dy, r) {
   // within STR_SNAP press-radii of it (a few dozen screen pixels at any zoom), else it stays at the cursor's height
   for (const [o, x, f, ride] of S.s) { o.x = Math.round(x + dx); if (ride) continue; delete o.fy; const want = f + dy; if (Math.abs(want - strBox0(o).foot) > STR_SNAP * r) o.fy = Math.round(want); }
   for (const [I, P0] of S.i) P0.forEach(([x, d], k) => { if (!I.p[k]) return; I.p[k][0] = Math.round(x + dx); I.p[k][1] = Math.round(clamp(d + dy, ISL_MIN_D, ISL_MAX_D)); });
-  for (const q of S.v) { q.lx = q.x + dx; q.ly = q.y + dy; vehMoveTo(q.e, q.lx, q.ly, q.t); }
+  // (user Nov 2 14:13: "It does not allow me to lift it ... we made a change for that with structures. That should be global (the red
+  // if invalid etc)") a vehicle the same: with the cursor up and down too, dropping onto where it rests at its new place (its water,
+  // its ground) when it comes within STR_SNAP press-radii of it, else held at the cursor's height - off its rest, red (vehPlaceBad)
+  for (const q of S.v) {
+    q.lx = q.x + dx; q.ly = q.y + dy;
+    const R = vehRestY(q.e, q.lx, q.off); q.lifted = false;
+    if (R != null) {
+      const near = Math.abs(q.ly - R) <= STR_SNAP * r;
+      if (vehRestKind(q.e) === 'sub') { if (q.ly < R) { if (near) q.ly = R; else q.lifted = true; } }   // (a sub: anywhere down in the water; up out of it, off)
+      else if (near) q.ly = R; else q.lifted = true;
+    }
+    q.e.v._lifted = q.lifted;
+    vehMoveTo(q.e, q.lx, q.ly, q.t, true);
+  }
 }
 function grpDragEnd(S) {
   if (S.s.length) strChanged();
   if (S.i.length) islChanged();
-  for (const q of S.v) if (q.lx != null) placedMoved(q.e.v, q.lx, q.ly);   // (a placed one: kept where it's let go)
+  for (const q of S.v) if (q.lx != null) { placedMoved(q.e.v, q.lx, q.ly, q.lifted); delete q.e.v._lifted; if (q.lifted) q.e.v._off = true; else delete q.e.v._off; }   // (a placed one: kept where it's let go)
   edDirty(); setTimeout(undoCommit, 0);
 }
 // ---- drawn over the world on GROUPING (from vehEdDraw, each view): each grouped island and vehicle framed in its group's colour
@@ -56989,7 +57036,9 @@ function wedRefresh() {
   wedSync();
 }
 TERRAIN_ED.more = [];                                     // (terrain boxes picked with shift, besides TERRAIN_ED.struct)
-function edClaim(kind) { WED.claim = kind; }
+// (user Nov 2 14:13: "a selection drag should be outside existing items ... a UNIVERSAL CONSISTENT logic in the editor") a press any
+// editor of the world's things takes is never also the start of the TERRAIN tab's box-pick (MQ, 50-land-unified.js) - one place for all
+function edClaim(kind) { WED.claim = kind; if (typeof MQ !== 'undefined') MQ.on = false; }
 // (a terrain box picked: drawn white like everything picked - 50-land-tshape.js structEdDraw)
 const edPickedObj = o => TERRAIN_ED.struct === o || TERRAIN_ED.more.includes(o);
 // ---- each kind: its tab, what it has picked ({ noun, del: can it be deleted }), letting go, deleting
