@@ -4145,8 +4145,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 633;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 15:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 634;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 15:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54760,34 +54760,70 @@ function vehOwnerSet(v, val) {
    windows and lamps (nightPic, STR_WINDOWS - 50-zz-lights.js) with their warm glow.
    A look: { P: the picture (its size is the window's), draw(g, open, night) } - null while its art is still loading.
    ================================================================ */
-const LOOK = { open: 0, want: 0, night: false, raf: 0 };
-const LOOK_NIGHT = [0.3, 0.36, 0.6];                         // (E.fx with no light - 03-environment.js)
+// (user Nov 2 13:58: "the ability to quickly check the quality of the assets in the game, independently from where they're placed";
+// "a button ... that says mask ... makes the background pink so we can see if there's any holes"; "day ... a blue sky. The night
+// ... a dark sky ... circle between day, sunset, and night ... the purple look"; "a slider to zoom in and out ... just below the
+// day-night button")
+const LOOK = { open: 0, want: 0, hour: 0, mask: false, zoom: 1, raf: 0 };
+const LOOK_HOURS = [['DAY', 12], ['SUNSET', null], ['NIGHT', 0]];   // (SUNSET: the hour the game's sunset is strongest - lookLight)
+const LOOK_ENV = {};
+// the game's own light of an hour in a clear sky (computeEnv - 03-environment.js), worked out once: its picture tint fx, the world's
+// tint over what's drawn (tint, tintA, warm), the sky's colours and how far the lamps are on. The game's own E and env are put back
+function lookLight(i) {
+  if (LOOK_ENV[i]) return LOOK_ENV[i];
+  const keepE = Object.assign({}, E), keepEnv = { time: env.time, weather: env.weather, rain: env.rain, fog: env.fog, sea: env.sea, wind: env.wind };
+  const at = h => { Object.assign(env, { time: h, weather: 0.1, rain: 0, fog: 0, sea: 0.2, wind: 0.2 }); computeEnv(); return { fx: E.fx.slice(), tint: E.tint.slice(), tintA: E.tintA, warm: E.warm, top: E.skyTop.slice(), hor: E.skyHor.slice(), lamps: E.lampsOn || 0, sunset: E.sunset }; };
+  let L;
+  try {
+    let h = LOOK_HOURS[i][1];
+    if (h == null) { let best = -1; for (let q = 16; q <= 21; q += 0.1) { const r = at(q); if (r.sunset > best) { best = r.sunset; h = q; } } }
+    L = at(h);
+  } finally { Object.assign(env, keepEnv); Object.assign(E, keepE); }
+  return (LOOK_ENV[i] = L);
+}
+const lookRGB = (c, a = 1) => `rgba(${c.map(v => Math.round(clamp(v, 0, 255))).join(',')},${a})`;
 // the window: get() -> a look (or null: art loading - tried again shortly; undefined: nothing to show, no window)
 function lookBox(box, el, get) {
   // (rules.md, every new asset: it has a LOOK - one missing says so in red, never silently nothing)
   if (get() === undefined) { const c = el('div', 'cat'), m = el('div', '', 'MISSING'); m.style.cssText = 'color:#ff6a5a;font-weight:bold'; c.append(el('h4', '', 'LOOK'), m); box.appendChild(c); return; }
-  const c = el('div', 'cat'), cv = el('canvas'), bar = el('div', 'cvbar'), db = el('button', '', 'OPEN'), nb = el('button', '', 'NIGHT');
+  const c = el('div', 'cat'), view = el('div', ''), cv = el('canvas'), bar = el('div', 'cvbar'), hb = el('button', '', 'DAY'), mb = el('button', '', 'MASK'), db = el('button', '', 'OPEN');
   c.appendChild(el('h4', '', 'LOOK'));
-  const bg = () => LOOK.night ? '#05070d' : '#1a2234';
-  cv.style.cssText = 'image-rendering:pixelated;image-rendering:crisp-edges;border:1px solid #2c3850;border-radius:4px;justify-self:start;max-width:100%';
-  db.title = 'Open or close its door'; nb.title = 'Day or night: its lights';
-  bar.style.cssText = 'border:0;margin:4px 0 0;padding:0'; bar.append(nb, db); c.append(cv, bar); box.appendChild(c);
+  view.style.cssText = 'max-width:100%;max-height:220px;overflow:auto;border:1px solid #2c3850;border-radius:4px;justify-self:start';
+  cv.style.cssText = 'display:block;image-rendering:pixelated;image-rendering:crisp-edges';
+  view.appendChild(cv);
+  hb.title = 'Day, sunset or night'; mb.title = 'Pink behind it: any holes show'; db.title = 'Open or close its door';
+  bar.style.cssText = 'border:0;margin:4px 0 0;padding:0'; bar.append(hb, mb, db);
+  const zr = el('div', 'row'), zi = el('input'), zo = el('output', '', '1X'); zi.type = 'range'; zi.min = 0.5; zi.max = 6; zi.step = 0.25; zi.value = LOOK.zoom; zi.title = 'Zoom';
+  zr.append(el('label', '', 'ZOOM'), zi, zo);
+  c.append(view, bar, zr); box.appendChild(c);
   const draw = () => {
     const L = get(); if (!L) { setTimeout(() => { if (cv.isConnected) draw(); }, 400); return; }
-    const w = L.w || L.P.width, h = L.h || L.P.height, pad = 2;
-    const S = Math.min(300 / (w + pad * 2), 190 / (h + pad * 2)), k = S >= 2 ? Math.floor(S) : S;   // (as big as the box takes; whole pixels from 2x)
-    if (cv.width !== w + pad * 2 || cv.height !== h + pad * 2) { cv.width = w + pad * 2; cv.height = h + pad * 2; }
-    cv.style.imageRendering = k < 1 ? 'auto' : 'pixelated'; cv.style.width = Math.round(cv.width * k) + 'px'; cv.style.height = Math.round(cv.height * k) + 'px'; cv.style.background = bg();
-    const g = cv.getContext('2d'); g.imageSmoothingEnabled = false; g.clearRect(0, 0, cv.width, cv.height);
-    // (drawn on its own layer so the night's tint falls on its pixels only)
+    const w = L.w || L.P.width, h = L.h || L.P.height, pad = Math.max(4, Math.round(Math.max(w, h) * 0.06)), W = w + pad * 2, H = h + pad * 2;
+    const fit = Math.min(300 / W, 190 / H), k = fit * LOOK.zoom, kk = k >= 2 ? Math.floor(k) : k;   // (the box's size at 1X; whole pixels from 2x)
+    if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+    cv.style.imageRendering = kk < 1 ? 'auto' : 'pixelated'; cv.style.width = Math.round(W * kk) + 'px'; cv.style.height = Math.round(H * kk) + 'px';
+    zo.textContent = (+LOOK.zoom).toFixed(2).replace(/\.?0+$/, '') + 'X';
+    const g = cv.getContext('2d'); g.imageSmoothingEnabled = false; g.clearRect(0, 0, W, H);
     const t = lookLayer(w, h), tg = t.getContext('2d'); tg.imageSmoothingEnabled = false; tg.clearRect(0, 0, w, h);
-    L.draw(tg, LOOK.open, LOOK.night);
-    if (LOOK.night) { const m = lookLayer(w, h, 1), mg = m.getContext('2d'); mg.clearRect(0, 0, w, h); mg.drawImage(t, 0, 0); mg.globalCompositeOperation = 'multiply'; mg.fillStyle = `rgb(${LOOK_NIGHT.map(v => Math.round(v * 255))})`; mg.fillRect(0, 0, w, h); mg.globalCompositeOperation = 'destination-in'; mg.drawImage(t, 0, 0); mg.globalCompositeOperation = 'source-over'; g.drawImage(m, pad, pad); if (L.lights) { g.save(); g.translate(pad, pad); L.lights(g); g.restore(); } }
-    else g.drawImage(t, pad, pad);
+    L.draw(tg, LOOK.open, false);
+    if (LOOK.mask) { g.fillStyle = '#ff00ff'; g.fillRect(0, 0, W, H); g.drawImage(t, pad, pad); }   // (MASK: the picture as it is, on pink)
+    else {
+      const E0 = lookLight(LOOK.hour), sky = g.createLinearGradient(0, 0, 0, H);
+      sky.addColorStop(0, lookRGB(E0.top)); sky.addColorStop(1, lookRGB(E0.hor)); g.fillStyle = sky; g.fillRect(0, 0, W, H);
+      // as the world draws it: the picture in the hour's tint (fx), then the world's tint over what's drawn and the sunset's warmth
+      const m = lookLayer(w, h, 1), mg = m.getContext('2d'); mg.clearRect(0, 0, w, h); mg.drawImage(t, 0, 0);
+      mg.globalCompositeOperation = 'multiply'; mg.fillStyle = lookRGB(E0.fx.map(v => v * 255)); mg.fillRect(0, 0, w, h);
+      mg.globalCompositeOperation = 'source-atop'; if (E0.tintA > 0.01) { mg.fillStyle = lookRGB(E0.tint, E0.tintA); mg.fillRect(0, 0, w, h); } if (E0.warm > 0.01) { mg.fillStyle = `rgba(255,120,140,${E0.warm})`; mg.fillRect(0, 0, w, h); }
+      mg.globalCompositeOperation = 'destination-in'; mg.drawImage(t, 0, 0); mg.globalCompositeOperation = 'source-over';
+      g.drawImage(m, pad, pad);
+      if (L.lights && E0.lamps > 0.05) { g.save(); g.globalAlpha = E0.lamps; g.translate(pad, pad); L.lights(g); g.restore(); }   // (its lamps, as far on as the hour has them)
+    }
     db.style.display = L.door ? '' : 'none'; db.textContent = LOOK.want ? 'CLOSE' : 'OPEN'; db.classList.toggle('on', !!LOOK.want);
-    nb.textContent = LOOK.night ? 'NIGHT' : 'DAY'; nb.classList.toggle('on', LOOK.night);
+    hb.textContent = LOOK_HOURS[LOOK.hour][0]; hb.classList.toggle('on', LOOK.hour > 0); mb.classList.toggle('on', LOOK.mask);
   };
-  nb.onclick = () => { LOOK.night = !LOOK.night; draw(); };
+  hb.onclick = () => { LOOK.hour = (LOOK.hour + 1) % LOOK_HOURS.length; draw(); };
+  mb.onclick = () => { LOOK.mask = !LOOK.mask; draw(); };
+  zi.oninput = () => { LOOK.zoom = +zi.value; draw(); };
   db.onclick = () => {
     LOOK.want = LOOK.want ? 0 : 1; let t = performance.now();
     cancelAnimationFrame(LOOK.raf);
@@ -56734,11 +56770,15 @@ const OBJ_CATS = [['s', 'STRUCTURES'], ['sub', 'SUBMARINES'], ['boat', 'BOATS'],
 // which dropdown a spawnable vehicle type is in (the structures' types by family, the rest by kind)
 function objCatOf(sv) {
   const D = STR_VEHS[sv];
-  if (D) return D.fam === 'sub' ? 'sub' : D.fam === 'boat' ? 'boat' : D.fam === 'car' ? 'car' : D.fam === 'heli' || D.fam === 'plane' ? 'air' : D.fam === 'space' ? 'space' : null;
+  if (D) return D.fam === 'sub' || D.fam === 'warsub' ? 'sub' : D.fam === 'boat' || D.fam === 'warship' ? 'boat' : D.fam === 'car' || D.fam === 'tank' ? 'car' : ['heli', 'plane', 'warplane', 'warheli'].includes(D.fam) ? 'air' : D.fam === 'space' ? 'space' : null;
   const k = sv.split(':')[0];
   return k === 'ship' || k === 'yacht' ? 'boat' : k === 'plane' || k === 'seaplane' || k === 'balloon' || k === 'blimp' ? 'air' : k === 'orb' ? 'space' : null;
 }
-const objList = c => c === 's' ? pfSorted().map(p => [p.id, p.name]) : placedTypes().filter(sv => objCatOf(sv) === c).map(sv => [sv, placedLab(sv)]);
+// (user Nov 2 13:56: "the submarine section is missing the war submarine. same with planes, why dont we have them all there?") every
+// vehicle type is listed: the placed ones (50-zz-placed.js) and the armies' (STR_VEHS army) - an army vehicle starts at a hangar
+// of its team's (armyHangar: OPEN WORLD and BATTLE), so SPAWN puts down that hangar with it at its spot (objSpawn)
+const OBJ_ARMY_HOME = { battleship: 'k:hangarSea:L', warsub: 'k:hangarSea:L', warplane: 'k:hangarAir:L', warheli: 'k:hangarAir:L', tank: 'k:hangarAir:L' };   // (the LARGE ones: what the armies start at)
+const objList = c => c === 's' ? pfSorted().map(p => [p.id, p.name]) : [...placedTypes(), ...Object.keys(STR_VEHS).filter(sv => STR_VEHS[sv].army)].filter(sv => objCatOf(sv) === c).map(sv => [sv, placedLab(sv) + (STR_VEHS[sv] && STR_VEHS[sv].army ? ' (IN ITS HANGAR)' : '')]);
 const objCur = c => { const L = objList(c); return L.some(q => q[0] === OBJ.pick[c]) ? OBJ.pick[c] : L[0] ? L[0][0] : null; };
 function objFill() {
   const U = OBJ.ui; if (!U) return;
@@ -56754,7 +56794,12 @@ const objMark = () => { const U = OBJ.ui; if (U) for (const [c] of OBJ_CATS) U.s
 function objSpawn() {
   const c = OBJ.cat, id = objCur(c); if (id == null) return;
   for (const k in WK) WK[k].clear();
-  if (c === 's') strSpawn(id); else vehSpawn({ sv: id });
+  const D = STR_VEHS[id];
+  if (c === 's') strSpawn(id);
+  else if (D && D.army) {                                     // (its hangar, TEAM 1's, the vehicle at its first spot - OWNER changes the team)
+    const o = strSpawn(OBJ_ARMY_HOME[id] || 'k:hangarAir');
+    if (o) { o.own = 0; const M = strVehs(o).slice(); M[0] = { v: id, own: false }; o.veh = M; strSave(); }
+  } else vehSpawn({ sv: id });
   strSync(); vehSync(); wedSync();
 }
 function objSelText() {
