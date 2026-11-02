@@ -4171,8 +4171,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 675;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 19:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 676;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 19:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11597,7 +11597,11 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
   if (ctl.gam != null) aC = clamp(aFor(clamp(-kP * flyWrap(gam - ctl.gam), -1.2 * kP / 2.2 * 1.5, 1.2 * kP / 2.2 * 1.5)), lo, hi);
   else {
     // (pulled: up to the most lift, no more than n of its weight; pushed: half that the other way)
-    const nq = F.n * g / (KL * V * V) * F.as, aMax = Math.min(1.0 * F.as, nq), aMin = Math.max(lo, -0.5 * nq);
+    // (too slow - under about 1.3 times its stall speed - a held pull asks more of its wings than they have: past their stalling
+    // angle, the lift goes and the nose drops; it won't loop from there - user Nov 2 18:09: "If the plane airspeed is too low wouldn't
+    // it be impossible and just lose altitude and stall?". Let go it never stalls)
+    const over = 0.45 * clamp((1.3 * F.vs - V) / (0.3 * F.vs), 0, 1);
+    const nq = F.n * g / (KL * V * V) * F.as, aMax = Math.min((1 + over) * F.as, nq), aMin = Math.max(lo, -0.5 * nq);
     const aH = clamp(aFor(0), aMin, Math.min(hi, aMax)), p = clamp(ctl.pull || 0, -1, 1);
     aC = p >= 0 ? aH + p * (aMax - aH) : aH - p * (aMin - aH);
   }
@@ -11607,7 +11611,14 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
   // (it settles on at about 3-4 m/s - firm, never floating down the runway)
   if (ctl.cush != null && ctl.cush < 90 + 180 * F.tau && gam > 0) {   // (a heavy plane, slow to answer, starts its flare higher)
     const gL = 0.04 + Math.max(0, ctl.cush) / 1000; if (gam > gL) aC = Math.max(aC, clamp(aFor(clamp(-3 * (gam - gL), -1.2, 0)), lo, hi)); }
+  // (the stall's break: its wings well past their stalling angle let go - for a moment they lift almost nothing whatever the stick
+  // says and the nose drops; it falls and must get its speed back - then it answers again. Held pulled and still slow, it breaks
+  // again - Nov 2)
+  if (v.stallT > 0) { v.stallT -= dt; aC = Math.min(aC, 0.25 * F.as); }
   v.aoa = (v.aoa || 0) + (aC - (v.aoa || 0)) * Math.min(1, dt / (F.tau * clamp(vc / V, 1, 3)));
+  // (it breaks past its stalling angle - or with too little speed left to fly at all, climbing: pulled up too slow, it runs out of
+  // speed and drops, it doesn't go over the top - the pilot's stick only: let go or flown by an autopilot it never stalls; the top of a loop needs 1.15 times its stall speed - a Cessna only from a dive)
+  if (!(v.stallT > 0) && ctl.gam == null && (Math.abs(v.aoa) > 1.25 * F.as || ((V < 0.85 * F.vs && gam < 0.3 || V < 1.15 * F.vs && (Math.sin(gam) < -0.84 || Math.cos(gam) < -0.5)) && !v.turn && !v.roll))) v.stallT = 0.5 + 0.5 * clamp(F.vs / V - 0.7, 0, 1);
   const a = v.aoa, CL = flyCL(a, F.as), q = KL * V * V, stall = Math.max(0, Math.abs(a) / F.as - 1);
   // (wheels and flaps down to land: more drag; an autopilot coming down too fast puts its airbrakes out - Nov 2, the 747s came in at
   // 120 m/s and went round)
@@ -11615,8 +11626,11 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
   const L = q * CL, D = q * (cd0 + FLY_KI * CL * CL + 0.3 * stall + (ctl.cush != null ? 0.05 : 0) + brake);
   V += (T * Math.cos(a) - D + g * Math.sin(gam)) * dt;
   if (!v.turn) gam = flyWrap(gam + ((g * Math.cos(gam) - L - T * Math.sin(a)) / Math.max(V, 3)) * dt);   // (its path turns: lift and gravity; held through a turn round)
+  // (in the break the nose falls forward, through its front - toward straight down - never over the top on its back)
+  if (v.stallT > 0 && !v.turn) { const d = Math.PI / 2 - gam; if (Math.abs(d) > 0.15) gam = flyWrap(gam + Math.sign(gam > -Math.PI && gam < Math.PI / 2 ? 1 : -1) * Math.min(Math.abs(d), 2.4 * dt)); }
   V = clamp(V, 0.5, 3 * vc);
   v.gam = gam; v.spd = V * UPM; v.pitch = flyWrap(gam - a); v.stall = stall;
+  if (stall > 0.05 || v.stallT > 0) v.pitch = flyWrap(v.pitch + 0.05 * Math.sin(time * 37 + v.x * 0.1));   // (the buffet: it shudders)
   // where it goes: along its path; turning round, its way across through nothing and out the other side
   if (v.turn) {
     v.turn.t += dt;
@@ -51088,6 +51102,9 @@ function stepHeli(h, dt) {
   // through the three-quarter and head-on views, on the spot)
   let tvx = lever * (120 * AIR_SK.heli), tvy = stick * HELI_VY;
   [tvx, tvy] = heliLoadFly(h, tvx, tvy, stick);                 // (a tank on the magnet: heavier going)
+  // (flying itself out of its hangar it keeps clear of what's ahead - trees, roofs (airClear), as every autopilot: the tree by the
+  // door took it down, user Nov 2: "I've had this happen quite a few times. Some invisible collision?")
+  if (h.enter) { const top = airClear(h.x + h.facing * 160, heliHalf()) - heliSkid() - 12; if (h.y > top) { tvy = Math.min(tvy, -clamp((h.y - top) * 2.5, 25, HELI_VY)); if (h.y - top > 30) tvx *= 0.45; } }
   if (lever && Math.sign(lever) !== h.facing && !h.turn) { tvx = 0; if (Math.abs(h.vx) < 14 && Math.abs(h.tilt) < 0.2) h.turn = { t: 0, from: h.facing }; }
   if (h.turn) tvx = 0;
   // (Nov 2: by the forces on it - heliStep, 29-zz-flight.js: its rotor tilted and pushing, gravity, the air's drag and the wind, its
