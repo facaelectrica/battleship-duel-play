@@ -4148,8 +4148,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 646;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 16:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 647;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 16:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -51823,7 +51823,7 @@ function waterRowNew(c0, c1) {
     if (!onLand(x)) { sea[i] = 1; g[i] = sandY(x); s[i] = WATER_Y; continue; }   // (the ocean: its line, and always enough of it)
     g[i] = landTop(x); const L = lakeOf(x); s[i] = L && g[i] > lakeLv(L) ? Math.min(g[i], waterSurfAt(c, lakeLv(L))) : g[i];
   }
-  return { id: WATER.nextId++, c0, n, g, s, sea, f: new Float32Array(Math.max(0, n - 1)), rest: 0, v: 0 };
+  return { id: WATER.nextId++, c0, n, g, s, sea, f: new Float32Array(Math.max(0, n - 1)), rest: 0, v: 0, a0: 0, a1: n - 1, lv: land.ver };
 }
 // the surface a column has now: a stretch's own where there is one, else the level given
 function waterSurfAt(c, lv) { for (const R of WATER.rows) if (c >= R.c0 && c < R.c0 + R.n) return R.s[c - R.c0]; return lv; }
@@ -51851,28 +51851,32 @@ function waterWake(x0, x1) {
 // a stretch stepped: WSUB small steps of dt
 function waterStepRow(R, dt) {
   const n = R.n, g = R.g, s = R.s, f = R.f, sea = R.sea, h = dt / WSUB, dx = LT_CELL;
-  // (the ground as it is now: a crater under the water deepens it)
-  for (let i = 0; i < n; i++) if (!sea[i]) { const gy = landTop((R.c0 + i) * LT_CELL + 1); if (gy !== g[i]) { const d = g[i] - s[i]; g[i] = gy; s[i] = Math.min(gy, gy - Math.max(0, d)); } }
-  let moved = 0;
+  // (the ground as it is now - a crater under the water deepens it: looked at again only when the ground has changed, land.ver)
+  if (R.lv !== land.ver) { R.lv = land.ver; for (let i = 0; i < n; i++) if (!sea[i]) { const gy = landTop((R.c0 + i) * LT_CELL + 1); if (gy !== g[i]) { const d = g[i] - s[i]; g[i] = gy; s[i] = Math.min(gy, gy - Math.max(0, d)); R.a0 = Math.min(R.a0 ?? i, i); R.a1 = Math.max(R.a1 ?? i, i); } } }
+  // (only where it moves: the stretch's columns from the first that flows to the last, a few either side - a lake at rest round it
+  // costs nothing; the moving part spreads a column a substep as it goes)
+  let a = Math.max(0, (R.a0 ?? 0) - 2), b = Math.min(n - 1, (R.a1 ?? n - 1) + 2), moved = 0, lo = n, hi = -1;
   for (let k = 0; k < WSUB; k++) {
-    for (let i = 0; i < n - 1; i++) {
+    a = Math.max(0, a - 1); b = Math.min(n - 1, b + 1);
+    for (let i = a; i < b; i++) {
       const top = Math.min(s[i], s[i + 1]), bed = Math.min(g[i], g[i + 1]), deep = bed - top;   // (the water over the higher of their two grounds)
       if (deep <= 0 && Math.abs(f[i]) < 1e-6) { f[i] = 0; continue; }
       f[i] = (f[i] + h * WG * Math.max(0, deep) * (s[i + 1] - s[i]) / dx) * WDAMP;   // (+: from i to i + 1 - its surface higher, smaller y)
     }
     // (never more out of a column than it holds)
-    for (let i = 0; i < n; i++) {
+    for (let i = a; i <= b; i++) {
       if (sea[i]) continue;
       const out = (i < n - 1 ? Math.max(0, f[i]) : 0) + (i > 0 ? Math.max(0, -f[i - 1]) : 0), have = (g[i] - s[i]) * dx;
       if (out * h > have) { const k2 = have / (out * h + 1e-9); if (i < n - 1 && f[i] > 0) f[i] *= k2; if (i > 0 && f[i - 1] < 0) f[i - 1] *= k2; }
     }
-    for (let i = 0; i < n; i++) {
+    for (let i = a; i <= b; i++) {
       if (sea[i]) { s[i] = WATER_Y; continue; }
       const q = ((i > 0 ? f[i - 1] : 0) - (i < n - 1 ? f[i] : 0)) * h / dx;
-      if (q) { s[i] = Math.min(g[i], s[i] - q); moved = Math.max(moved, Math.abs(q)); }
+      if (q) { s[i] = Math.min(g[i], s[i] - q); const m = Math.abs(q) / h; if (m > moved) moved = m; if (m > WREST * 0.25) { if (i < lo) lo = i; if (i > hi) hi = i; } }
     }
   }
-  return moved / h;
+  if (hi >= lo) { R.a0 = lo; R.a1 = hi; } else { R.a0 = R.a1 = Math.floor(n / 2); }
+  return moved;
 }
 // each step (stepLandRest): the woken stretches flow; one at rest a second goes to sleep, as it stands; the lakes and the sea's
 // columns follow it
