@@ -26,6 +26,9 @@ button.ghost { background: none; color: var(--dim); padding: 4px 6px; font-weigh
 .row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
 #status { margin-top: 14px; min-height: 1.4em; }
 #status.ok { color: var(--ok); } #status.bad { color: var(--bad); }
+#steps { list-style: none; margin: 8px 0 0; padding: 0; color: var(--dim); font-size: 13px; }
+#steps li { display: flex; gap: 8px; padding: 1px 0; } #steps .t { margin-left: auto; }
+#steps .done { color: var(--text); } #steps .now { color: var(--accent); } #steps .fail { color: var(--bad); }
 a { color: var(--accent); }
 #setup { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--dim); }
 #setup p { margin: 0 0 6px; }
@@ -38,6 +41,7 @@ a { color: var(--accent); }
   <textarea id="snap" placeholder="Paste the SNAPSHOT here" spellcheck="false"></textarea>
   <div class="row"><button id="submit">SUBMIT</button><span id="tokState"></span></div>
   <div id="status"></div>
+  <ul id="steps"></ul>
   <section id="setup">
     <p>GitHub token (stays in this browser)</p>
     <div class="row"><input id="tok" type="password" autocomplete="off" placeholder="github_pat_..."><button id="save">SAVE</button></div>
@@ -110,6 +114,26 @@ $('save').onclick = async () => {
   $('save').disabled = false;
 };
 
+// the build's steps as GitHub reports them: done / running / waiting, each with its time
+const STEP_NAME = { 'Set up job': 'Start the machine' };
+function showSteps(steps) {
+  const ul = $('steps'); ul.textContent = '';
+  for (const st of steps || []) {
+    if (/^(Post |Complete job)/.test(st.name)) continue;          // GitHub's own clean-up
+    const fail = st.conclusion === 'failure', done = st.status === 'completed', now = st.status === 'in_progress';
+    const li = document.createElement('li'); li.className = fail ? 'fail' : done ? 'done' : now ? 'now' : '';
+    const t0 = st.started_at && Date.parse(st.started_at), t1 = st.completed_at ? Date.parse(st.completed_at) : Date.now();
+    li.append((fail ? '\u2717' : st.conclusion === 'skipped' ? '-' : done ? '\u2713' : now ? '\u25b8' : '\u00b7') + ' ' +
+      (STEP_NAME[st.name] || st.name.replace(/^Run /, '')));
+    if (t0 && (done || now)) { const t = document.createElement('span'); t.className = 't';
+      t.textContent = Math.max(0, Math.round((t1 - t0) / 1000)) + ' s'; li.append(t); }
+    ul.append(li);
+  }
+}
+async function runSteps(run) {
+  try { const j = (await gh(run.jobs_url)).jobs[0]; return j ? j.steps : null; } catch (e) { return null; }
+}
+
 // SUBMIT: the snapshot to main, then follow the build
 $('submit').onclick = async () => {
   const text = $('snap').value.trim();
@@ -123,7 +147,7 @@ $('submit').onclick = async () => {
     const r = await gh('/contents/' + PATH, { method: 'PUT', body: JSON.stringify({ branch: 'main', sha,
       message: 'World page: SNAPSHOT of ' + (snap.at || '?') + ' UTC', content: b64(body) }) });
     ls.set('wp_run', JSON.stringify({ sha: r.commit.sha, t: Date.now() }));
-    $('snap').value = ''; follow();
+    $('snap').value = ''; showSteps(null); follow();
   } catch (e) { say('Couldn\'t send: ' + e.message, 'bad'); $('submit').disabled = !token; }
 };
 
@@ -140,14 +164,21 @@ async function follow() {
     catch (e) { tell('Lost track of the build: ' + e.message, 'bad'); break; }
     if (!run) { tell('Waiting for the build to start... ' + since()); if (Date.now() - run0.t > 5 * 60e3) {
       tell('The build never started', 'bad', ['Actions', 'https://github.com/' + OWNER + '/' + REPO + '/actions']); break; } }
-    else if (run.status !== 'completed') tell('Building... ' + since());
+    else if (run.status !== 'completed') {
+      const steps = await runSteps(run); if (me !== followN) return;
+      const cur = steps && steps.find(st => st.status === 'in_progress');
+      if (run.status === 'queued' || !steps || !steps.length) tell('Waiting for a GitHub machine... ' + since());
+      else tell('Building... ' + since() + (cur && /^(Post |Complete job)/.test(cur.name) ? ' (finishing)' : ''));
+      showSteps(steps);
+    }
     else if (run.conclusion === 'success') {
+      showSteps(await runSteps(run));
       let v = '';
       try { for (const c of await gh('/commits?sha=main&per_page=20')) {
         const m = /^Built: Version (\d+) \(world page\)/.exec(c.commit.message); if (m) { v = m[1]; break; } } } catch (e) {}
       tell('Version ' + v + ' is out. Pages has it in about a minute.', 'ok', ['Play', './?v=' + v]); break;
-    } else { tell('Build failed', 'bad', ['See why', run.html_url]); break; }
-    await new Promise(r => setTimeout(r, 8000));
+    } else { showSteps(await runSteps(run)); tell('Build failed', 'bad', ['See why', run.html_url]); break; }
+    await new Promise(r => setTimeout(r, 4000));
     if (me !== followN) return;
   }
   if (me !== followN) return;
