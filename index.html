@@ -4168,8 +4168,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 663;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 17:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 664;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 17:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -53799,6 +53799,17 @@ function storyNew(n) {
   storySlot = n; storySavedN = -1;
   menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false;
 }
+/* (user Nov 2 15:40: the taxi "snaps" back to its hut, as if after dying - found on his GPU: a LOAD put the saved game into the page
+   while the simulation worker was still taking the fresh world menuPlay had just built; its snapshot of that fresh world came in
+   after, and the worker went on from it - every vehicle back at its spot, nobody's) the worker is let finish taking the new world
+   first (the frames it needs to see it, then no hand-over or resync running - 00-sw-boot.js), then held, as the editor waits */
+function swSettled() {
+  return new Promise(r => {
+    let n = 0;
+    const f = () => { n++; const busy = typeof SW !== 'undefined' && (SW.going || SW.resyncing || SWB.taking || (SW.live && SW.gen !== SW.liveGen)); if (n > 3 && !busy) r(); else requestAnimationFrame(f); };
+    requestAnimationFrame(f);
+  });
+}
 // LOAD slot n: a fresh Story world, then the saved game put into it (the worker held while it's put in)
 async function storyLoad(n) {
   if (SSL.busy) return;
@@ -53812,7 +53823,7 @@ async function storyLoad(n) {
   menuSel.mode = 'story';
   loadThen(() => {
     storyPlayNow = true; menuPlay(false); storyPlayNow = false;
-    swHold('storyLoad').then(() => {
+    swSettled().then(() => swHold('storyLoad')).then(() => {
       try { edGameBack(JSON.parse(G)); cutTo(0); } catch (e) { console.warn('story load', e); showToast('COULD NOT LOAD'); }
       storySavedN = story.saveN; storyLoading = false;
       swRelease('storyLoad');
@@ -53957,7 +53968,7 @@ const STORY_COINS0 = 0;                                  // (what a new story st
 const storyR = sysRng('story');
 const STORY_ROW = worldRow({ coins: [() => story.coins, v => { story.coins = v; }], at: [() => story.at, v => { story.at = v; }], saveN: [() => story.saveN, v => { story.saveN = v; }], wake: [() => story.wake, v => { story.wake = v; }] });
 defTable('story', () => [STORY_ROW], { make: () => STORY_ROW });
-function storyReset() { story.coins = STORY_COINS0; story.at = 0; story.saveN = 0; story.wake = 0; storyHomeO = undefined; Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false }); }   // (the automatic zoom again till the player zooms - storyZoom)
+function storyReset() { story.coins = STORY_COINS0; story.at = 0; story.saveN = 0; story.wake = 0; storyHomeO = undefined; Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true }); }   // (the automatic zoom again till the player zooms - storyZoom)
 // where a story opens: the HOME structure, else a house, else nothing (the harbour's view, as ever)
 let storyHomeO;                                          // (the base this story opened at: picked once - storyReset)
 const storyHome = () => storyHomeO !== undefined ? storyHomeO : (storyHomeO = storyPickHome());
@@ -54333,8 +54344,8 @@ function storyDots() { return storyArrowsAt().filter(T => !T.cur).map(T => Objec
    screen's own (storyQ), the purchase a command like the rest. ---- */
 let storyQ = null;                                       // ({ sid, lab, price } while the question's up)
 function storyBuy(p, sid) {
-  const v = storyVehs().find(j => j.sid === sid); if (!v || !STORY || v.own || story.coins < v.price || !storyTargets().some(T => T.v === v)) return;   // (one of the arrows' - from where you are)
-  story.coins -= v.price; v.own = true;
+  const v = storyVehs().find(j => j.sid === sid); if (!v || !STORY || v.own || story.coins < storyVehPrice(v) || !storyTargets().some(T => T.v === v)) return;   // (one of the arrows' - from where you are)
+  story.coins -= storyVehPrice(v); v.own = true;
   sound('click', gunCtl[p]);
 }
 ACTS.storyBuy = (p, sid) => storyBuy(p, sid);
@@ -54378,7 +54389,7 @@ function storyPress(d) {
     if (story.coins < d.price) { STSW.deny = { key: d.key, t: time }; sound('empty', d.wx); return; }
     storyQ = { sid: d.v.sid, key: d.key, lab: d.name, price: d.price }; sound('click', 0); return;
   }
-  act(0, 'storySwap', d.key);
+  cam.glide = STORY_GLIDE; act(0, 'storySwap', d.key);   // (this screen's camera eases over; the swap itself is the simulation's)
 }
 /* (user Nov 2: "The keyboard keys / should button should only allow you to 'jump' between objects, not pan the camera around the
    world. The camera is always locked at the selected object.") In STORY nothing looks round the world - the drive keys, the left
@@ -54394,7 +54405,7 @@ function storyStep(d) {
   if (k === storySel) return;
   // (user Nov 2 15:34: "If I'm switching between owned objects, the switch is immediate") one of yours (or a home): stepped onto,
   // you're in it - the swap at once; only one for sale is picked first, its price shown, A to buy
-  if (q.price == null && !q.cur) { storySel = null; act(0, 'storySwap', q.key); return; }
+  if (q.price == null && !q.cur) { storySel = null; cam.glide = STORY_GLIDE; act(0, 'storySwap', q.key); return; }
   storySel = k; cam.glide = STORY_GLIDE; sound('click', 0);
 }
 const STORY_GLIDE = 1.2;                                 // (how long the camera eases to the object picked - updateCamera's follow, no cut)
@@ -54526,7 +54537,7 @@ const STORY_COIN = ['..###..', '.#ooo#.', '#oo#oo#', '#o#o#o#', '#oo#oo#', '.#oo
    way (the speed held 0.8 s either way: no flicker), each from her length; the player zooming by hand takes it over (Far,
    or wherever they like) for the rest of the story (user Nov 2). The levels are the stepped zoom's own
    (setScope). This screen's camera: run as it's drawn. ---- */
-const STORY_ZOOM = { key: null, lv: null, manual: false, mv: 0, moving: false };
+const STORY_ZOOM = { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true };   // (snap: the story's first zoom is a cut - storyZoom)
 /* each vehicle type's own CLOSE and MEDIUM (the spec section 9: "Configure each vehicle type's gameplay zoom levels in the
    Vehicles section"): the view's width in metres, set in the GAME EDITOR's VEHICLES tab (its STORY ZOOM box), kept in this
    browser (bd_story_zoom: { type: [close, medium] }); unset, from the vehicle's length */
@@ -54542,7 +54553,7 @@ function storyZoomWidth() {
 }
 function storyZoom(dt) {
   if (!STORY || ui.title || NSKY.editor.TUNE.open || PHOTO.on) return;
-  const c = crew[0], Z = STORY_ZOOM, key = c.mode === 'civ' ? 'v' + (c.civ ? c.civ.sid : '') : c.mode + story.at, first = Z.key == null;   // (first: the story just opened - storyReset)
+  const c = crew[0], Z = STORY_ZOOM, key = c.mode === 'civ' ? 'v' + (c.civ ? c.civ.sid : '') : c.mode + story.at;
   if (key !== Z.key) { Z.key = key; Z.lv = null; Z.moving = false; Z.mv = 0; }
   // (user Nov 2: "While in Editor Play mode, I should be able to zoom in and out at will" - and the rule: "The zoom changes only
   // when the player changes it") zoomed by hand, the zoom is the player's from then on - the next structure or vehicle no longer
@@ -54563,7 +54574,7 @@ function storyZoom(dt) {
   if (scopes[0].level !== lv) { if (Z.lv != null) zoomSlow(0); setScope(0, lv); }
   // (user Nov 2 15:34: "When the game starts, it should be zoomed at the right level at the right vehicle. Right now the zoom is far
   // and does this super zoom in") the story opens already at its zoom, on what you control: no ease in from the menu's far view
-  if (first) { for (const i of [0, 1]) { cam.zt[i] = cam.zt[0]; cam.za[i] = cam.zt[0]; ZE.from[i] = ZE.to[i] = cam.zt[0]; ZE.t[i] = 1; } cutTo(0); }
+  if (Z.snap) { Z.snap = false; for (const i of [0, 1]) { cam.zt[i] = cam.zt[0]; cam.za[i] = cam.zt[0]; ZE.from[i] = ZE.to[i] = cam.zt[0]; ZE.t[i] = 1; } cutTo(0); }
   Z.lv = lv;
 }
 window.__storyZoom = STORY_ZOOM;
@@ -56159,7 +56170,12 @@ function bySize(list) {
             (swapHold - stepCivDriven).
    ================================================================ */
 const STSW_T = { LAND: 0.42, ENGINE: 0.9, HUD: 0.95, HUD_IN: 0.35, END: 1.5 };
-const STSW = { on: false, t: 0, from: null, key: null, kind: null, v: null, o: null, step: 0, deny: null, sus: [] };
+const STSW = { on: false, t: 0, from: null, key: null, kind: null, vs: null, oi: null, step: 0, chim: 0, deny: null };
+// (the swap is the simulation's - the worker's when it runs the game: a table, so the page that draws it has it too - rules.md, Systems 6)
+const STSW_ROW = worldRow(Object.fromEntries(['on', 't', 'from', 'key', 'kind', 'vs', 'oi', 'step', 'chim'].map(k => [k, [() => STSW[k], v => { STSW[k] = v; }]])));
+defTable('storySwap', () => [STSW_ROW], { make: () => STSW_ROW });
+const swV = () => STSW.vs == null ? null : storyVehs().find(v => v.sid === STSW.vs) || null;   // (what's being entered)
+const swO = () => STSW.oi == null ? null : strsUsed().find(o => o.id === STSW.oi) || null;
 const swapR = sysRng('storySwap');
 // what you control now: { v } a vehicle, { o } a structure, or null
 function storyCur() {
@@ -56186,19 +56202,21 @@ function storyPlace(cur) {
   for (const o of strsUsed()) { const B = strBox(o); if (x1 > B.x0 - r && x0 < B.x1 + r) { S.add(o); for (const q of storyLinks(o)) S.add(q); } }
   return [...S];
 }
+// what one for sale costs: its own price; one placed in the editor with no owner, its type's (the GAME EDITOR's VEHICLES - PRICE)
+const storyVehPrice = v => v.price || (v.placed != null ? storyTypePrice(v.sv) : 0);
 const storyVehName = v => String((STR_VEHS[v.sv] || { lab: 'VEHICLE' }).lab).toUpperCase();
 const storyStrName = o => String((STR_KINDS[o.k] || { lab: 'HOME' }).lab || 'HOME').toUpperCase();
 // the arrows: what you control (cur) and what you can swap to, each with where its arrow points (wx, wy: the top middle of its
 // own box - strBox, vehBox: one rule for every kind) and where the camera looks when it's picked (mx, my: its box's middle)
 function storyTargets() {
-  if (!STORY || ui.title || story.wake) return [];
+  if (!STORY || story.wake) return [];                 // (the simulation asks too: nothing of the screen's in here)
   const cur = storyCur(); if (!cur) return [];
   const mk = (q, cur) => {
     let x0, x1, y0, y1;
     if (q.o) { const B = strBox(q.o); x0 = B.x0; x1 = B.x1; y0 = B.top; y1 = B.foot; }
     else [x0, x1, y0, y1] = vehBox({ v: q.v });
     const T = { key: q.o ? 's:' + q.o.id : 'v:' + q.v.sid, o: q.o || null, v: q.v || null, cur: !!cur, wx: (x0 + x1) / 2, wy: y0, mx: (x0 + x1) / 2, my: (y0 + y1) / 2, name: q.o ? storyStrName(q.o) : storyVehName(q.v) };
-    if (q.v && !q.v.own) T.price = q.v.price || 0;
+    if (q.v && !q.v.own) T.price = storyVehPrice(q.v);
     return T;
   };
   const out = [mk(cur, true)];
@@ -56208,7 +56226,7 @@ function storyTargets() {
   const near = v => { const [a, b] = vehBox({ v }); return S.some(o => { const B = strBox(o); return b > B.x0 - r && a < B.x1 + r; }) || (cur.v && Math.abs(v.x - cur.v.x) < r + storyBoatSize(cur.v)[0] / 2); };
   for (const v of storyVehs()) {
     if (v === cur.v || v.driven != null || v.role || v.res) continue;
-    if (!v.own && v.berth == null) continue;              // (one that isn't yours is for sale only at its spot)
+    if (!v.own && v.berth == null && !(v.placed != null && v.fac == null)) continue;   // (one that isn't yours is for sale at its spot, or wherever it was placed if it's nobody's - user Nov 2 15:40)
     if (near(v)) out.push(mk({ v }));
   }
   for (const T of out) { const P = S.find(o => T.v ? T.v.berth === o.id : T.o === o) || S[0]; T.at = P ? P.id : null; }   // (the structure it's at: story.at once you're in it)
@@ -56268,13 +56286,13 @@ function storySwap(p, key) {
   if (T.v) { storyEnterVeh(p, T.v); if (T.at != null) storyArrive(T.at); }
   else storyGo(p, T.o.id, true, true);
   cam.glide = STORY_GLIDE; storySel = null;
-  Object.assign(STSW, { on: true, t: 0, from: C0 ? [C0.wx, C0.wy] : null, key: T.key, kind: swapKind(T), v: T.v, o: T.o, step: 0 });
+  Object.assign(STSW, { on: true, t: 0, from: C0 ? [C0.wx, C0.wy] : null, key: T.key, kind: swapKind(T), vs: T.v ? T.v.sid : null, oi: T.o ? T.o.id : null, step: 0, chim: 0 });
   sound('storyEnter', T.wx, STSW.kind);                 // (the whole entering, in time with the arrow: sfxStoryEnter)
 }
 ACTS.storySwap = (p, key) => storySwap(p, key);
 // the vehicle being entered: its lever does nothing till its engine has caught; then revved a moment
-const swapHold = v => STSW.on && STSW.v === v && STSW.t < STSW_T.ENGINE;
-const swapRev = v => STSW.on && STSW.v === v && STSW.t >= STSW_T.ENGINE && STSW.t < STSW_T.ENGINE + 0.55 ? 0.9 : 0;
+const swapHold = v => STSW.on && STSW.vs != null && STSW.vs === v.sid && STSW.t < STSW_T.ENGINE;
+const swapRev = v => STSW.on && STSW.vs != null && STSW.vs === v.sid && STSW.t >= STSW_T.ENGINE && STSW.t < STSW_T.ENGINE + 0.55 ? 0.9 : 0;
 // the controls: hidden till HUD, then sliding up into place (0..1)
 function storyHudIn() {
   if (!STORY || !STSW.on) return 1;
@@ -56282,17 +56300,17 @@ function storyHudIn() {
 }
 // the swap's steps (stepStory)
 function stepSwap(dt) {
-  for (let i = STSW.sus.length - 1; i >= 0; i--) { const v = STSW.sus[i]; susStep(v, dt, 60, 5.5); if (!v.susV && !v.susY) STSW.sus.splice(i, 1); }   // (a boat or sub's dip in the water: its own spring - drawPicBoat, drawMinisub)
+  for (const v of jetboats.concat(minisubs)) if (v.story && (v.susV || v.susY)) susStep(v, dt, 60, 5.5);   // (a boat or sub's dip in the water: its own spring - drawPicBoat, drawMinisub)
   if (!STSW.on) return;
   STSW.t += dt;
-  const v = STSW.v, o = STSW.o;
+  const v = swV(), o = swO();
   if (STSW.step === 0 && STSW.t >= STSW_T.LAND) {
     STSW.step = 1;
     if (v && !SIM_ONLY) {
       if (v.car) susKick(v, 120);
       else if (v.plane) planeSusKick(v, 60);
       else if (v.heli) susKick(v, 110);
-      else if (jetboats.includes(v) || minisubs.includes(v)) { v.susV = (v.susV || 0) + 7; if (!STSW.sus.includes(v)) STSW.sus.push(v); }
+      else if (jetboats.includes(v) || minisubs.includes(v)) v.susV = (v.susV || 0) + 7;
     }
     if (o && !SIM_ONLY) { STR_SMOKE.set(o.id, 0); STSW.chim = 3; }   // (the stove lit: a puff now and a few after)
   }
@@ -56373,7 +56391,7 @@ function drawStoryArrows() {
     for (let k = 4; k >= 1; k--) { const q = at(Math.max(0, u - k * 0.06)); pxArrow(q[0], q[1], ARROW_B - 1, ARROW_COL.cur, 0, 0.12 * (5 - k)); }
     const q = at(u); pxArrow(q[0], q[1], ARROW_B, ARROW_COL.cur, -0.25 * Math.sin(u * Math.PI));   // (stretched in flight)
   }
-  if (STSW.on && STSW.o && tS >= STSW_T.LAND) swapWindows(w, STSW.o, tS - STSW_T.LAND);
+  const so = STSW.on ? swO() : null; if (so && tS >= STSW_T.LAND) swapWindows(w, so, tS - STSW_T.LAND);
 }
 // the landing's spark ring: eight blocks flying out from the point, orange then white, gone in a quarter second
 function swapSparks(X, Y, k) {
@@ -56443,6 +56461,8 @@ function sfxStoryEnter(x, kind) {
   else if (kind === 'plane') { crank(te - 0.36, 4, 1300); chug(te, 6, 0.12, 0.05, 0.4); motor('sawtooth', 45, 82, te + 0.2, 1.3, 0.17, 700, 0.5); }
   else if (kind === 'heli') { motor('sine', 260, 1150, te - 0.2, 1.6, 0.07, 3000, 1.2); chug(te, 10, 0.2, 0.09, 0.3); }   // (the turbine's whine winding up, the blades' thud quickening)
 }
+// (tools) what the swap sees
+window.__storySwap = { targets: () => storyTargets(), cur: () => storyCur(), cars: () => storyCars, boats: () => jetboats.filter(j => j.story), state: STSW, crew: () => crew[0], zoom: () => [cam.zt[0], cam.za[0], scopes[0].level] };
 
 /* ---- STRUCTURES FROM THE WORLD TILES (Nov 1, target architecture stage 4, "the static world as built layers": the last piece).
    Each structure's still picture (strStillDraw, 50-zz-struct.js) is painted into world tiles (40-zzzz-world-tiles.js) and laid as
