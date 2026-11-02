@@ -4171,8 +4171,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 673;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 18:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 674;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 18:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11675,6 +11675,8 @@ function flyFrom(v, gam, aoa) { v.gam = gam; v.aoa = aoa || 0; v.roll = null; v.
    mast tilts, 1/s), m (its mass with its load, 1 alone), lev (a tilt to settle to near the ground: its slope) ---- */
 function heliStep(h, dt, tvx, tvy, K) {
   const G = CAR_G, A = airAt(h.x, h.y), m = K.m || 1;
+  // (Nov 2: the ground cushion - coming down near the ground its sink eases, the last few metres to about 2 m/s, as a plane's flare)
+  if (K.hg != null && tvy > 0) tvy = Math.min(tvy, 2 * UPM + Math.max(0, K.hg) * 0.6);
   const Kd = G * Math.tan(0.34) / (K.v * K.v);                     // (its drag: at its top speed its mast leans about 19 degrees)
   const rx = (h.vx || 0) - A.wx, ry = (h.vy || 0) - A.wy, rs = Math.hypot(rx, ry), Dx = Kd * rs * rx, Dy = 1.6 * Kd * rs * ry;
   const ax = clamp((tvx - (h.vx || 0)) * 1.8, -0.6 * G, 0.6 * G), ay = clamp((tvy - (h.vy || 0)) * 2.5, -0.9 * G, 0.7 * G);
@@ -11684,7 +11686,10 @@ function heliStep(h, dt, tvx, tvy, K) {
   if (K.lev != null) th = th * (1 - K.levK) + K.lev * K.levK;       // (settling onto the ground: level with it)
   if (h.turn) th *= 0.3;                                            // (turning round on the spot: nearly level)
   h.tilt = (h.tilt || 0) + (th - (h.tilt || 0)) * Math.min(1, dt * K.resp);
-  h.col = (h.col ?? G) + (Math.min(Math.hypot(tx, ty), cap) - (h.col ?? G)) * Math.min(1, dt * 5);
+  // (the collective gives the lift it wants at the tilt it has now - the tilt lags the wanted one, so a collective set for the
+  // wanted tilt lifts too much while it leans in: it climbed leaving the hangar and hit the door, Nov 2)
+  const colW = Math.min(cap, Math.max(0, -ty) / Math.max(0.5, Math.cos(h.tilt)));
+  h.col = (h.col ?? G) + (colW - (h.col ?? G)) * Math.min(1, dt * 8);
   const Tx = h.col * Math.sin(h.tilt), Ty = -h.col * Math.cos(h.tilt);
   h.vx = (h.vx || 0) + (Tx - Dx) / m * dt; h.vy = (h.vy || 0) + ((Ty - Dy) / m + G) * dt;
   h.turb = A.turb;
@@ -37081,7 +37086,7 @@ function stepCivHeli(h, dt) {
     if (h.turn) { tvx = 0; h.turn.t += dt; if (h.turn.t >= CH_TURN_T) { h.facing = -h.turn.from; h.turn = null; } }
     // (Nov 2: by the forces on it, as every helicopter - heliStep, 29-zz-flight.js; a plane on its magnet is weight it carries)
     { const lm = h.mag && h.mag.obj ? (h.mag.obj.kind === 'jet' ? 2.6 : 1.6) : 1, lowG = gy - h.y;
-      heliStep(h, dt, tvx, tvy, { v: CH_V, tmax: lm > 1 ? 1.5 : 1.8, resp: 3, m: lm, lev: 0, levK: clamp(1 - lowG / 60, 0, 1) }); }
+      heliStep(h, dt, tvx, tvy, { v: CH_V, tmax: lm > 1 ? 1.5 : 1.8, resp: 3, m: lm, lev: 0, levK: clamp(1 - lowG / 60, 0, 1), hg: lowG }); }
     // (over the airport it can't crash, user Oct 25 late: low over the concrete it eases its sink and levels itself,
     // and sets down)
     const apron = onApron(h.x) && dryLand(h.x);
@@ -51088,7 +51093,7 @@ function stepHeli(h, dt) {
   // (Nov 2: by the forces on it - heliStep, 29-zz-flight.js: its rotor tilted and pushing, gravity, the air's drag and the wind, its
   // load's weight; near the ground it settles level with it)
   { const half = heliHalf() * 0.8, gm0 = heliGround(h.x, h.y), Hg0 = gm0 - (h.y + heliSkid()), slope = LAND && onLand(h.x) ? Math.atan2(heliGround(h.x + half, h.y) - heliGround(h.x - half, h.y), half * 2) : 0;
-    heliStep(h, dt, tvx, tvy, { v: 120 * AIR_SK.heli, tmax: heliLoad(h) ? 1.5 : 1.9, resp: 4, m: heliLoad(h) ? 1.8 : 1, lev: slope, levK: clamp(1 - Hg0 / 45, 0, 1) }); }
+    heliStep(h, dt, tvx, tvy, { v: 120 * AIR_SK.heli, tmax: heliLoad(h) ? 1.5 : 1.9, resp: 4, m: heliLoad(h) ? 1.8 : 1, lev: slope, levK: clamp(1 - Hg0 / 45, 0, 1), hg: Hg0 }); }
   if (heliLoad(h)) h.vx += h.rope.pull * dt;                     // (and its swing tugs)
   if (h.turn) { h.turn.t += dt; if (h.turn.t >= HELI_TURN_T) { h.facing = -h.turn.from; h.turn = null; } }
   h.x = clamp(h.x + h.vx * dt, 30, WORLD_W - 30);
