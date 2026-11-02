@@ -4024,8 +4024,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 549;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 18:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 550;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 20:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -20685,8 +20685,10 @@ function wtTile(L, o) { o.cv = new Array(L.par).fill(null); o.ep = new Array(L.p
 const wtPh = L => L.par === 1 ? 0 : (((CAMPX % 2) + 2) % 2) | ((((TOPPX % 2) + 2) % 2) << 1);
 // lay tile t (parity ph); painted first when its canvas is missing, the wrong size, from an older GL context or without its
 // texture (cleared), or when dirty (cleared when full). paint(t, ph, cleared) draws with C, CAMPX, TOPPX the tile's (SV is
-// the tile's zoom: tiles are laid at the zoom they're made for)
-function wtPut(L, t, ph, dirty, full, paint) {
+// the tile's zoom: tiles are laid at the zoom they're made for). tint (optional): the picture laid in its place, made from the
+// tile's (a layer whose pictures are drawn tinted by one multiply each - laid as one tinted quad: exact where its texels are
+// fully opaque or clear)
+function wtPut(L, t, ph, dirty, full, paint, tint) {
   let cv = t.cv[ph];
   if (cv && (cv.width !== t.w || cv.height !== t.h)) { if (cv.free) cv.free(); cv = t.cv[ph] = null; }
   const fresh = !cv || t.ep[ph] !== GLR.epoch || !cv.tex;
@@ -20700,7 +20702,7 @@ function wtPut(L, t, ph, dirty, full, paint) {
     t.ep[ph] = GLR.epoch;
   }
   t.seen = REG.frame;
-  C.drawImage(cv, t.x + (ph & 1) - CAMPX, t.y + (ph >> 1) - TOPPX);
+  C.drawImage(tint ? tint(cv) : cv, t.x + (ph & 1) - CAMPX, t.y + (ph >> 1) - TOPPX);
 }
 // after a frame's laying: every 120 frames, tiles not shown for WT_FREE frames give their GPU memory back
 function wtSweep(L) {
@@ -20744,12 +20746,12 @@ function wtFits(L, ts, cx0, cx1) {
   }
   return true;
 }
-// lay them (those reaching into the view), each painted first if its key changed
-function wtLayKeyed(L, ts, paint) {
+// lay them (those reaching into the view), each painted first if its key changed (tint: as wtPut's)
+function wtLayKeyed(L, ts, paint, tint) {
   const Lx = CAMPX - SHX, Rr = CAMPX + VWP - SHX, Tp = TOPPX - SHY, B = TOPPX + bh - SHY;
   for (const t of ts) {
     if (t.y + t.h <= Tp || t.y >= B || t.x + t.w <= Lx || t.x >= Rr) continue;
-    wtPut(L, t, 0, t.dirty, true, paint); t.dirty = false;
+    wtPut(L, t, 0, t.dirty, true, paint, tint); t.dirty = false;
   }
 }
 
@@ -29067,7 +29069,7 @@ function rockAgain(p, base) {
   if (RKL.maxR > left) { RKL.stats.again++; return true; }
   return false;
 }
-window.__layerStats = () => ({ rock: RKL.stats, reef: RLY.stats });   // (for the tests: how often the kept layers were laid, painted, or the live way taken)
+window.__layerStats = () => ({ rock: RKL.stats, reef: RLY.stats, struct: STL.stats });   // (for the tests: how often the kept layers were laid, painted, or the live way taken)
 
 function drawShip(sh, mode) {
   const art = shipArt(sh, mode), W = art.I.width, s = art.s;
@@ -31649,13 +31651,20 @@ function drawWindsock(x, y) {
 const teamPlayer = t => t === 0 || t === 1 ? (SWAP ? 1 - t : t) : -1;
 const terminalSize = () => AIRI.terminal.slice(2, 4);
 // the terminal with its control tower, its windsock and its flag, standing on gy, its middle at tx - in player p's colours (-1:
-// nobody's: the picture as painted, no flag). The built-in airports' and the TERMINAL structure's (50-zz-struct.js drawStructs)
-function drawTerminalAt(tx, gy, p) {
-  if (!img.airport) return;
+// nobody's: the picture as painted, no flag). The TERMINAL structure's (50-zz-struct.js drawStructs): its picture (still -
+// drawn from the world tiles, 50-zz-struct-tiles.js) and what moves on it (the windsock, the flag, the lamps - drawn live)
+function terminalPic(p) {
   if (!airportArt || airportArt.key !== teamKey) buildAirportArt();
-  const T = p >= 0 ? airportArt.term[p] : airportArt.term0, night = clamp(E.night * 1.2 + E.dusk * 0.8 + E.sunset * 0.5, 0, 1);
-  const I = scaled(T, SV, true), L = Math.round(PX(tx) - I.width / 2), Tp = Math.round(PY(gy) - I.height);
+  return p >= 0 ? airportArt.term[p] : airportArt.term0;
+}
+function drawTerminalBody(tx, gy, p) {
+  if (!img.airport) return;
+  const T = terminalPic(p), I = scaled(T, SV, true), L = Math.round(PX(tx) - I.width / 2), Tp = Math.round(PY(gy) - I.height);
   C.drawImage(I, L, Tp);
+}
+function drawTerminalLive(tx, gy, p) {
+  if (!img.airport) return;
+  const T = terminalPic(p), night = clamp(E.night * 1.2 + E.dusk * 0.8 + E.sunset * 0.5, 0, 1);
   const wx = tx - T.width / 2, wy = gy - T.height;                  // (the picture's top left, in the world)
   drawWindsock(wx + 138, wy + 74);
   if (p >= 0) drawPoleFlag(wx + 30, wy + 88, p);
@@ -31675,13 +31684,20 @@ function drawRunwayLights(af, ry) {
   });
 }
 // a LARGE AIRCRAFT HANGAR structure (the built-in airports' hangar): its left end at wl, standing on gy, facing left when flipped,
-// its roll-up door open by `open` (0..1), in player p's colours (-1: as painted)
-function drawBigHangar(wl, gy, flip, open, p) {
-  if (!img.hangar2) return;
+// its roll-up door open by `open` (0..1), in player p's colours (-1: as painted). Its picture (still - drawn from the world
+// tiles, 50-zz-struct-tiles.js) and its door and lamp (drawn live)
+function bigHangarPic(flip, p) {
   if (!airportArt || airportArt.key !== teamKey) buildAirportArt();
-  const H = p >= 0 ? (flip ? airportArt.hangarF[p] : airportArt.hangar[p]) : airportArt.hangar0[flip ? 1 : 0];
-  const I = scaled(H, SV, true), L = Math.round(PX(wl)), Tp = Math.round(PY(gy) - I.height);
-  C.drawImage(I, L, Tp);
+  return p >= 0 ? (flip ? airportArt.hangarF[p] : airportArt.hangar[p]) : airportArt.hangar0[flip ? 1 : 0];
+}
+function drawBigHangarBody(wl, gy, flip, p) {
+  if (!img.hangar2) return;
+  const I = scaled(bigHangarPic(flip, p), SV, true);
+  C.drawImage(I, Math.round(PX(wl)), Math.round(PY(gy) - I.height));
+}
+function drawBigHangarLive(wl, gy, flip, open, p) {
+  if (!img.hangar2) return;
+  const I = scaled(bigHangarPic(flip, p), SV, true), L = Math.round(PX(wl)), Tp = Math.round(PY(gy) - I.height);
   const [dx, dy, dw, dh] = HGI.door, DX = L + Math.round((flip ? HGI.w - dx - dw : dx) * SV), DY = Tp + Math.round(dy * SV);
   if (open > 0.01) {
     const W = Math.round(dw * SV), Hh = Math.round(dh * SV), oh = Math.round(dh * open * SV);
@@ -52087,6 +52103,107 @@ function natureSync() {
   NSKY.editor.TUNE.buttons('TERRAIN', 'NATURE', [['ADD FISH AREA', 'A box where fish swim', addBtn]]);
 }
 
+/* ---- STRUCTURES FROM THE WORLD TILES (Nov 1, target architecture stage 4, "the static world as built layers": the last piece).
+   Each structure's still picture (strStillDraw, 50-zz-struct.js) is painted into world tiles (40-zzzz-world-tiles.js) and laid as
+   one quad a tile; what moves or changes on it (strLiveDraw) is drawn live in its turn, as before. Two layers, each with its
+   tiles 1024 world pixels wide at this zoom (a structure in the tile its middle is in):
+   - the tropical set's pictures (houses, stations, shelters, docks...): each drawn in the hour's light by one multiply (glTint,
+     E.fx) - painted plain and the tile laid with that multiply. Exact: the set's texels are all fully opaque or clear;
+   - the pictures drawn as painted: the TERMINAL's, the LARGE AIRCRAFT HANGAR's (their GPU-scaled pictures, cut hard).
+   A tile's key is the numbers its drawing reads, for each structure over it in the list's order: its picture (wtId and the
+   picture's own stamp), mirrored or not, its box (left, right, top, foot, the picture's metres a pixel) - the foot is the land's
+   height under it (landTop) as it is now, so a crater under one, a slice painted again or a structure moved in the editor changes
+   its tile's key and the tile is painted again that frame. Nothing marks a tile stale by hand.
+   What draws over what is kept: a tile is laid in the turn of its first structure (where that one was drawn), and a structure
+   later in the list stays in its tile only when nothing drawn between the tile's laying and its own turn overlaps it - a
+   structure drawn live (a runway, a road, a pad, the terminal's windsock and flag, a hangar's door: their boxes and what reaches
+   past them) or another tile laid in between; else it is drawn whole the live way in its turn. So every pixel is drawn over
+   by the same things as before. Live, always: the runways and roads (their colours rounded per channel in the hour's light -
+   not one multiply), the launch pads, the terminal's windsock, flag and lamps, the LARGE hangar's door and lamp, the gates
+   (drawn after the cars), the editor's frames and marks (strEdDraw). The live way for the whole frame: zooming (the zoom not yet
+   held), without the GPU or its scaling (?gs=0: the scaled copies are rebuilt in place), anything faded, a tile too big for a
+   texture, or a structure the live loop culls reaching into the view. ?structlayer=0 turns it off. ---- */
+const STL = { on: !/[?&]structlayer=0/.test(location.search), stats: { lay: 0, live: 0, paint: 0, again: 0, free: 0 },
+  plan: { lay: [], in: [] }, ev: [], its: [], tiles: new Map() };
+STL.L = [wtLayer(STL.on, false, STL.stats), wtLayer(STL.on, false, STL.stats)];
+// a structure's still picture and the numbers its drawing reads (null: none drawn): the layer it's in (0 the tropical set's, 1 as
+// painted), its box in world pixels at this zoom (a few pixels wider each side than the drawing's own sums), its key
+function strTileOf(o, B) {
+  const k = strStill(o); if (!k) return null;
+  let P, F = null;
+  if (o.k === 'terminal') { if (!img.airport) return null; P = terminalPic(teamPlayer(strOwner(o))); }
+  else if (o.k === 'hangarAir' && o.big) { if (!img.hangar2) return null; P = bigHangarPic(!!o.flip, teamPlayer(strOwner(o))); }
+  else { P = B.P; const K = STR_KINDS[o.k]; if (K.front && o.k !== 'dock') F = tropPic(K.front); }
+  if (!P) return null;
+  return { g: k === 1 ? 0 : 1, box: strPxBox(B, 3), key: [wtId(P), P._stamp || 0, F ? wtId(F) : 0, o.k === 'dock' ? 1 : 0, o.flip ? 1 : 0, o.x, B.x0, B.x1, B.top, B.foot, B.m] };
+}
+const strPxBox = (B, pad) => [Math.floor(B.x0 * SV) - pad, Math.ceil(B.x1 * SV) + pad, Math.floor(B.top * SV) - pad, Math.ceil(B.foot * SV) + pad];
+// what a structure draws live in its turn, in world pixels: its box and what reaches past it (the terminal's windsock and flag
+// stream out over its edge; a runway's bank goes down to the ground and its approach lights run along it, a road follows the
+// ground: their whole columns, and the lights' reach past their ends)
+function strLiveBox(o, B) {
+  if (o.k === 'runway' || o.k === 'road' || o.k === 'launchPad') return [Math.floor((B.x0 - 600) * SV) - 3, Math.ceil((B.x1 + 600) * SV) + 3, -1e9, 1e9];
+  return strPxBox(B, Math.ceil(30 * SV) + 3);
+}
+const boxHit = (a, b) => a[0] < b[1] && b[0] < a[1] && a[2] < b[3] && b[2] < a[3];
+// (wtKeyed's box: the union of its structures' boxes; t.x0 / t.x1 each one's)
+function strTileBox(t) {
+  let X0 = 1e9, X1 = -1e9, Y0 = 1e9, Y1 = -1e9;
+  for (const it of t.items) { const b = it.box; t.x0.push(b[0]); t.x1.push(b[1]); X0 = Math.min(X0, b[0]); X1 = Math.max(X1, b[1]); Y0 = Math.min(Y0, b[2]); Y1 = Math.max(Y1, b[3]); }
+  t.x = X0; t.w = X1 - X0; t.y = Y0; t.h = Y1 - Y0;
+}
+// (each one's still picture against the tile's corner, as the live loop draws it - the tropical set's plain: its tile is laid in
+// the hour's light)
+const strPlainPut = (P, key, X, Y, W, H) => C.drawImage(P, X, Y, W, H);
+const strTilePaint = t => { for (const it of t.items) strStillDraw(it.o, it.B, strPlainPut); STL.stats.paint++; };
+/* (drawStructs) the plan for the structures L in view [x0, x1]: for each (by its place in L) the tile laid in its turn (lay) and
+   whether its still picture is in a tile (in); null: the live way this frame. Drawn in the list's order, the drawings so far
+   (ev: when - the structure's place, and what - live (a box) or a tile laid (its structures' boxes)) */
+function strTilesDraw(L, x0, x1) {
+  const A = STL.L[0], Bp = STL.L[1], okA = wtReady(A), okB = wtReady(Bp);   // (both: each notes this view's zoom)
+  if (!okA || !okB || !GPU_SCALE) return null;
+  const P = STL.plan, ev = STL.ev, its = STL.its, Tm = STL.tiles, RW = WT_RW;
+  P.lay.length = P.in.length = L.length; P.lay.fill(null); P.in.fill(false); ev.length = 0; its.length = 0; Tm.clear();
+  // each tile's first structure; a later one joins it only when nothing drawn after the tile's laying and before its turn overlaps it
+  const clash = (f, i, box) => { for (const e of ev) { if (e.at < f || e.at >= i || (e.at === f && e.tile)) continue; if (e.tile) { for (const it of e.tile.its) if (boxHit(it.box, box)) return true; } else if (boxHit(e.box, box)) return true; } return false; };
+  for (let i = 0; i < L.length; i++) {
+    const o = L[i], B = strBox(o); if (!strDrawn(o, B)) continue;
+    const w = strTileOf(o, B);
+    if (w) {
+      const r = Math.floor(Math.round(o.x * SV) / RW), id = w.g * 1e6 + r;
+      let t = Tm.get(id);
+      if (!t) { t = { g: w.g, r, f: i, its: [], key: [] }; Tm.set(id, t); ev.push({ at: i, tile: t }); P.lay[i] = t; }
+      if (t.f === i || !clash(t.f, i, w.box)) { const it = { o, B, box: w.box }; t.its.push(it); t.key.push(...w.key); its.push(it); P.in[i] = true; }
+      else STL.stats.again++;
+    }
+    if (!P.in[i] || strHasLive(o)) ev.push({ at: i, box: strLiveBox(o, B) });
+  }
+  // the tiles, from their structures' keys (painted again when one differs)
+  const Lx = CAMPX - SHX, Rr = CAMPX + VWP - SHX, Tp = TOPPX - SHY, Bt = TOPPX + bh - SHY;
+  for (const t of Tm.values()) {
+    const T = wtZoom(STL.L[t.g], SV);
+    t.t = wtKeyed(STL.L[t.g], T, t.r, t, strTileBox);   // (t: its structures (its) and their keys (key) - a bucket)
+    const k = t.t; if (k && !(k.y + k.h <= Tp || k.y >= Bt || k.x + k.w <= Lx || k.x >= Rr) && (k.h > 2048 || k.w > 4096)) { STL.stats.live++; return null; }
+  }
+  // the live loop's cull (a box outside [x0 - 50, x1 + 50]) and the tiles' agree
+  for (const it of its) if ((it.B.x1 < x0 - 50 || it.B.x0 > x1 + 50) && it.box[1] > Lx && it.box[0] < Rr) { STL.stats.live++; return null; }
+  STL.stats.lay++;
+  return P;
+}
+// (drawStructs, in its first structure's turn) a tile laid, if it reaches into the view - painted first if its key changed; the
+// tropical set's in the hour's light
+function strTileLay(t) {
+  const k = t.t; if (!k) return;
+  const Lx = CAMPX - SHX, Rr = CAMPX + VWP - SHX, Tp = TOPPX - SHY, Bt = TOPPX + bh - SHY, L = STL.L[t.g];
+  if (!(k.y + k.h <= Tp || k.y >= Bt || k.x + k.w <= Lx || k.x >= Rr)) {
+    const fx = E.fx || [1, 1, 1];
+    wtPut(L, k, 0, k.dirty, true, strTilePaint, t.g === 0 ? cv => glTint(cv, 'strT', fx, STR_NONE, false) : null); k.dirty = false;
+  }
+}
+const STR_NONE = [0, 0, 0];
+// (after drawStructs) tiles not shown for a while give their GPU memory back
+function strTilesSweep() { wtSweep(STL.L[0]); wtSweep(STL.L[1]); }
+
 /* ---- STRUCTURES (user Oct 31, the Story spec section 2: "Everything is a Structure. Save Point, Hospital, Allow Repair,
    Allow Refuel, and Accepts Fish are properties assigned directly to structures in the editor"; section 9: "a dropdown of
    available structures. Select one, press Spawn, and place it in the game view"; "Group and Ungroup buttons"; "Each
@@ -52213,33 +52330,56 @@ function strBox(o) {
 }
 // a tile's first sw pixels (a dock's last tile, cut short), kept
 function strCut(P, sw) { const m = P._cut || (P._cut = {}); let c = m[sw]; if (!c) { c = m[sw] = makeCanvas(sw, P.height); c.getContext('2d').drawImage(P, 0, 0); } return c; }
-// (the land's pass, renderLandObjects0 - 50-land-units) each structure in view, in the hour's light
+// (the land's pass, renderLandObjects0 - 50-land-units) each structure in view, in the hour's light. Each one's still picture
+// (strStillDraw) and what moves or changes on it (strLiveDraw), in its turn; the still pictures from the world tiles when they
+// can be (strTilesDraw, 50-zz-struct-tiles.js: a tile laid in its first structure's turn, those in it not drawn again here)
 function drawStructs(x0, x1) {
   const L = strsUsed(); if (!L.length || !img.tropical) return;
   const fx = E.fx || [1, 1, 1], none = [0, 0, 0];
   const put = (P, key, X, Y, W, H) => C.drawImage(GLR.on ? glTint(P, key, fx, none, false) : P, X, Y, W, H);
-  for (const o of L) {
-    if (isHarbourPart(o)) continue;                   // (drawn by the harbours themselves - 50-zz-structh.js)
-    const B = strBox(o); if ((!B.P && o.k !== 'runway' && o.k !== 'road' && o.k !== 'launchPad' && o.k !== 'terminal' && o.k !== 'gunTower' && !(o.k === 'hangarAir' && o.big)) || B.x1 < x0 - 50 || B.x0 > x1 + 50) continue;   // (a runway: no picture, drawn by hand)
-    const X0 = Math.round(PX(B.x0)), X1 = Math.round(PX(B.x1)), Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot));
-    if (o.k === 'runway') { drawRunway(o, B); continue; }
-    if (o.k === 'road') { drawRoad(o, B); continue; }
-    if (o.k === 'launchPad') { drawStrPad(o, B); continue; }
-    if (o.k === 'gunTower') continue;                      // (drawn with the towers - it is one: towers[])
-    if (o.k === 'hangarAir' && o.big) { const rw = strRunwayNear(o); drawBigHangar(B.x0, B.foot, !!o.flip, rw ? strDoor(rw.id).open : 0, teamPlayer(strOwner(o))); continue; }
-    if (o.k === 'terminal') { drawTerminalAt(o.x, B.foot, teamPlayer(strOwner(o))); continue; }   // (its owner's colours and flag; nobody's: plain, no flag)
-    if (o.k === 'dock') {                                     // (its tile repeated along its length, the last one cut short)
-      const tw = B.P.width * B.m; let x = B.x0;
-      while (x < B.x1 - 0.01) { const w = Math.min(tw, B.x1 - x), a = Math.round(PX(x)), b = Math.round(PX(x + w)); put(w < tw - 0.01 ? strCut(B.P, Math.max(1, Math.round(B.P.width * w / tw))) : B.P, 'strT', a, Y0, b - a, Y1 - Y0); x += w; }
-      continue;
-    }
-    if (o.flip) { C.save(); C.translate(X0 + X1, 0); C.scale(-1, 1); }
-    put(B.P, 'strT', X0, Y0, X1 - X0, Y1 - Y0);
-    const K = STR_KINDS[o.k]; if (K.front) { const F = tropPic(K.front); if (F) put(F, 'strT', X0, Y0, X1 - X0, Y1 - Y0); }
-    if (o.flip) C.restore();
+  const T = strTilesDraw(L, x0, x1);
+  for (let i = 0; i < L.length; i++) {
+    const o = L[i], B = strBox(o); if (!strDrawn(o, B)) continue;
+    if (T && T.lay[i]) strTileLay(T.lay[i]);
+    if (B.x1 < x0 - 50 || B.x0 > x1 + 50) continue;
+    if (!(T && T.in[i])) strStillDraw(o, B, put);
+    strLiveDraw(o, B);
   }
+  if (T) strTilesSweep();
   drawStoryCars(x0, x1);                                 // (STORY's cars - 50-story-cars.js)
   for (const o of L) if (STR_KINDS[o.k].enclosed) drawStrGate(o, x0, x1);   // (the enclosed ones' gates, in front of what's parked in them)
+}
+// does drawStructs draw it: not the harbours' parts (drawn by the harbours themselves - 50-zz-structh.js) nor the gun towers (drawn
+// with the towers - each is one: towers[]); a picture kind only once its picture is there (a runway, road, pad, terminal, LARGE
+// hangar: drawn by hand)
+const strDrawn = (o, B) => !isHarbourPart(o) && o.k !== 'gunTower' && (!!B.P || o.k === 'runway' || o.k === 'road' || o.k === 'launchPad' || o.k === 'terminal' || (o.k === 'hangarAir' && o.big));
+// its still picture's kind: 1 a picture of the tropical set in the hour's light (put), 2 a picture as painted (the terminal's,
+// the LARGE hangar's), 0 none (a runway, a road - their colours rounded per channel in the hour's light, so drawn live -, a pad)
+const strStill = o => o.k === 'terminal' || (o.k === 'hangarAir' && o.big) ? 2 : o.k === 'runway' || o.k === 'road' || o.k === 'launchPad' ? 0 : 1;
+// does it draw anything that moves or changes in its turn (a runway's lights, a road, a pad; the terminal's windsock, flag and
+// lamps; the LARGE hangar's door and lamp)
+const strHasLive = o => strStill(o) !== 1;
+function strStillDraw(o, B, put) {
+  if (o.k === 'hangarAir' && o.big) { drawBigHangarBody(B.x0, B.foot, !!o.flip, teamPlayer(strOwner(o))); return; }
+  if (o.k === 'terminal') { drawTerminalBody(o.x, B.foot, teamPlayer(strOwner(o))); return; }   // (its owner's colours; nobody's: plain)
+  if (!strStill(o)) return;
+  if (o.k === 'dock') {                                     // (its tile repeated along its length, the last one cut short)
+    const tw = B.P.width * B.m, Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot)); let x = B.x0;
+    while (x < B.x1 - 0.01) { const w = Math.min(tw, B.x1 - x), a = Math.round(PX(x)), b = Math.round(PX(x + w)); put(w < tw - 0.01 ? strCut(B.P, Math.max(1, Math.round(B.P.width * w / tw))) : B.P, 'strT', a, Y0, b - a, Y1 - Y0); x += w; }
+    return;
+  }
+  const X0 = Math.round(PX(B.x0)), X1 = Math.round(PX(B.x1)), Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot));
+  if (o.flip) { C.save(); C.translate(X0 + X1, 0); C.scale(-1, 1); }
+  put(B.P, 'strT', X0, Y0, X1 - X0, Y1 - Y0);
+  const K = STR_KINDS[o.k]; if (K.front) { const F = tropPic(K.front); if (F) put(F, 'strT', X0, Y0, X1 - X0, Y1 - Y0); }
+  if (o.flip) C.restore();
+}
+function strLiveDraw(o, B) {
+  if (o.k === 'runway') { drawRunway(o, B); return; }
+  if (o.k === 'road') { drawRoad(o, B); return; }
+  if (o.k === 'launchPad') { drawStrPad(o, B); return; }
+  if (o.k === 'hangarAir' && o.big) { const rw = strRunwayNear(o); drawBigHangarLive(B.x0, B.foot, !!o.flip, rw ? strDoor(rw.id).open : 0, teamPlayer(strOwner(o))); return; }
+  if (o.k === 'terminal') drawTerminalLive(o.x, B.foot, teamPlayer(strOwner(o)));   // (its flag: its owner's; nobody's: no flag)
 }
 
 /* ---- the STRUCTURES tab (its own tab since Nov 1 - the panel shows it when one is picked): SPAWN one of a kind in the middle of the view, press one in the view to pick it (shift, or
