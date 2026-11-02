@@ -4143,8 +4143,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 627;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 14:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 628;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 14:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54417,6 +54417,218 @@ function vehOwnerSet(v, val) {
 }
 
 /* ================================================================
+   LOOK - a prefab's picture in the editor (user Nov 2 13:22-13:31: "Can the prefab viewer show us the sprite of how it looks like?
+   ... a little window that shows us the sprite. And if it has a gate, a button we can press to open close just to see how it
+   looks"; "we should have one for all vehicles too"; "a day/night toggle for the visualizer to see how the lights look like").
+   One window for every structure and vehicle prefab (PREFABS, and OBJECTS' spawn prefab): its picture as the world draws it, from
+   the same art the world draws it from - a structure's picture with its flag's cloth, its gate over its door and its front layer;
+   the harbour's hangar with its room and gate; the airport's LARGE hangar with its roll-up door; a vehicle's own picture.
+   DOOR (a gate or a door): OPEN / CLOSE rolls it at the world's speeds (up 1 a second, down 0.7 - drawStrGate).
+   NIGHT: the night's tint over it (the hour's fx at no light - 03-environment.js) and its lights on - a building's or boat's
+   windows and lamps (nightPic, STR_WINDOWS - 50-zz-lights.js) with their warm glow.
+   A look: { P: the picture (its size is the window's), draw(g, open, night) } - null while its art is still loading.
+   ================================================================ */
+const LOOK = { open: 0, want: 0, night: false, raf: 0 };
+const LOOK_NIGHT = [0.3, 0.36, 0.6];                         // (E.fx with no light - 03-environment.js)
+// the window: get() -> a look (or null: art loading - tried again shortly; undefined: nothing to show, no window)
+function lookBox(box, el, get) {
+  if (get() === undefined) return;
+  const c = el('div', 'cat'), cv = el('canvas'), bar = el('div', 'cvbar'), db = el('button', '', 'OPEN'), nb = el('button', '', 'NIGHT');
+  c.appendChild(el('h4', '', 'LOOK'));
+  const bg = () => LOOK.night ? '#05070d' : '#1a2234';
+  cv.style.cssText = 'image-rendering:pixelated;image-rendering:crisp-edges;border:1px solid #2c3850;border-radius:4px;justify-self:start;max-width:100%';
+  db.title = 'Open or close its door'; nb.title = 'Day or night: its lights';
+  bar.style.cssText = 'border:0;margin:4px 0 0;padding:0'; bar.append(nb, db); c.append(cv, bar); box.appendChild(c);
+  const draw = () => {
+    const L = get(); if (!L) { setTimeout(() => { if (cv.isConnected) draw(); }, 400); return; }
+    const w = L.w || L.P.width, h = L.h || L.P.height, pad = 2;
+    const S = Math.min(300 / (w + pad * 2), 190 / (h + pad * 2)), k = S >= 2 ? Math.floor(S) : S;   // (as big as the box takes; whole pixels from 2x)
+    if (cv.width !== w + pad * 2 || cv.height !== h + pad * 2) { cv.width = w + pad * 2; cv.height = h + pad * 2; }
+    cv.style.imageRendering = k < 1 ? 'auto' : 'pixelated'; cv.style.width = Math.round(cv.width * k) + 'px'; cv.style.height = Math.round(cv.height * k) + 'px'; cv.style.background = bg();
+    const g = cv.getContext('2d'); g.imageSmoothingEnabled = false; g.clearRect(0, 0, cv.width, cv.height);
+    // (drawn on its own layer so the night's tint falls on its pixels only)
+    const t = lookLayer(w, h), tg = t.getContext('2d'); tg.imageSmoothingEnabled = false; tg.clearRect(0, 0, w, h);
+    L.draw(tg, LOOK.open, LOOK.night);
+    if (LOOK.night) { const m = lookLayer(w, h, 1), mg = m.getContext('2d'); mg.clearRect(0, 0, w, h); mg.drawImage(t, 0, 0); mg.globalCompositeOperation = 'multiply'; mg.fillStyle = `rgb(${LOOK_NIGHT.map(v => Math.round(v * 255))})`; mg.fillRect(0, 0, w, h); mg.globalCompositeOperation = 'destination-in'; mg.drawImage(t, 0, 0); mg.globalCompositeOperation = 'source-over'; g.drawImage(m, pad, pad); if (L.lights) { g.save(); g.translate(pad, pad); L.lights(g); g.restore(); } }
+    else g.drawImage(t, pad, pad);
+    db.style.display = L.door ? '' : 'none'; db.textContent = LOOK.want ? 'CLOSE' : 'OPEN'; db.classList.toggle('on', !!LOOK.want);
+    nb.textContent = LOOK.night ? 'NIGHT' : 'DAY'; nb.classList.toggle('on', LOOK.night);
+  };
+  nb.onclick = () => { LOOK.night = !LOOK.night; draw(); };
+  db.onclick = () => {
+    LOOK.want = LOOK.want ? 0 : 1; let t = performance.now();
+    cancelAnimationFrame(LOOK.raf);
+    const step = now => {
+      const dt = Math.min(0.1, (now - t) / 1000); t = now;
+      LOOK.open = clamp(LOOK.open + (LOOK.want ? 1 : -0.7) * dt, 0, 1);
+      if (cv.isConnected) draw();
+      if (cv.isConnected && LOOK.open !== LOOK.want) LOOK.raf = requestAnimationFrame(step);
+    };
+    LOOK.raf = requestAnimationFrame(step);
+  };
+  draw();
+}
+const LOOK_L = [];
+const lookLayer = (w, h, i = 0) => { let c = LOOK_L[i]; if (!c || c.width !== w || c.height !== h) c = LOOK_L[i] = makeCanvas(w, h); return c; };
+// the lights of a picture with windows (STR_WINDOWS, by its art's name): its panes lit, a warm glow round each
+const lookLights = (P, art) => g => {
+  const N = nightPic(P, art); if (!N) return;
+  g.globalAlpha = 0.9; g.drawImage(N.c, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'lighter';
+  for (const [x, y, n] of N.spots) { const r = Math.max(4, n * 1.6), q = g.createRadialGradient(x, y, 0, x, y, r); q.addColorStop(0, 'rgba(255,190,110,0.5)'); q.addColorStop(1, 'rgba(255,190,110,0)'); g.fillStyle = q; g.fillRect(x - r, y - r, r * 2, r * 2); }
+  g.globalCompositeOperation = 'source-over';
+};
+// a picture alone, its lights from its art's windows when it has some
+const lookPic = (P, art) => P ? { P, draw: g => g.drawImage(P, 0, 0), lights: art && STR_WINDOWS[art] ? lookLights(P, art) : null } : null;
+
+// ---- structures
+function strLook(p) {
+  const K = STR_KINDS[p.k]; if (!K) return undefined;
+  const L = STR_LOOKS[p.k] && STR_LOOKS[p.k](p);
+  if (L !== undefined) return L;
+  if (!K.art) return undefined;
+  const art = p.k === 'dock' ? p.spr || K.art : p.art || K.art, P = tropPic(art); if (!P) return null;
+  const gate = !!K.enclosed && !!(P._gate || P._door);
+  return {
+    P, door: gate,
+    draw(g, open) {
+      g.drawImage(P, 0, 0);
+      if (P._flag) g.drawImage(P._flag.c, P._flag.x, P._flag.y);   // (its cloth, still)
+      if (gate && P._gate) { const G = P._gate, D = P._door, rows = Math.round(G.height * (1 - open)); if (rows >= 1) g.drawImage(G, 0, G.height - rows, G.width, rows, D[0], D[1], G.width, rows); }   // (rolled up into the lintel)
+      else if (gate) {                                          // (no painted gate: a grey one over its door, its bottom edge rising)
+        const D = P._door, h = Math.round((D[3] - D[1]) * (1 - open));
+        if (h > 0) { g.fillStyle = 'rgb(150,156,164)'; g.fillRect(D[0], D[1], D[2] - D[0], h); g.fillStyle = 'rgb(112,118,126)'; const q = Math.max(1, Math.round((D[2] - D[0]) / 40)); for (let y = D[1] + q * 2; y < D[1] + h; y += q * 3) g.fillRect(D[0], y, D[2] - D[0], q); }
+      }
+      if (K.front) { const F = tropPic(K.front); if (F) g.drawImage(F, 0, 0, P.width, P.height); }   // (its front layer, as in the world)
+    },
+    lights: STR_WINDOWS[art] ? lookLights(P, art) : null,
+  };
+}
+// the kinds drawn from other art than the tropical sheet (filled in below): p -> a look, null (loading), undefined (none)
+const STR_LOOKS = {};
+function pfLook(p, box, el) { lookBox(box, el, () => { try { return strLook(p); } catch (e) { return undefined; } }); }
+
+// ---- vehicles: sv -> a look (filled in below)
+const VEH_LOOKS = {};
+function vehLookOf(sv) {
+  try { const D = STR_VEHS[sv], f = D ? (D.army ? sv : D.fam) : String(sv).split(':')[0]; return VEH_LOOKS[f] ? VEH_LOOKS[f](sv, D) : undefined; }
+  catch (e) { return undefined; }
+}
+function vehLook(sv, box, el) { lookBox(box, el, () => vehLookOf(sv)); }
+
+// the kinds painted by code: a short stretch of each, in the colours the world paints it with (drawRunway, drawRoad - 50-zz-struct.js)
+const lookPainted = (key, w, h, paint) => { const c = LOOK_L['p' + key] || (LOOK_L['p' + key] = (() => { const k = makeCanvas(w, h); paint(k.getContext('2d')); return k; })()); return { P: c, draw: g => g.drawImage(c, 0, 0) }; };
+STR_LOOKS.runway = p => lookPainted(p.strip ? 'strip' : 'runway', 220, 16, g => {
+  g.fillStyle = 'rgb(112,92,64)'; g.fillRect(0, 8, 220, 8); g.fillStyle = 'rgb(84,68,48)'; g.fillRect(0, 8, 220, 2);   // (its bank)
+  g.fillStyle = p.strip ? 'rgb(150,118,76)' : 'rgb(58,60,64)'; g.fillRect(0, 2, 220, 6);
+  g.fillStyle = p.strip ? 'rgb(96,138,60)' : 'rgb(214,214,206)'; g.fillRect(0, 2, 220, 1);
+  if (!p.strip) { g.fillStyle = 'rgb(236,236,228)'; for (let x = 12; x < 208; x += 24) g.fillRect(x, 5, 12, 1); }
+});
+STR_LOOKS.road = () => lookPainted('road', 200, 8, g => {
+  g.fillStyle = 'rgb(70,70,74)'; g.fillRect(0, 4, 200, 4);
+  g.fillStyle = 'rgb(232,196,64)'; for (let x = 0; x < 200; x += 12) g.fillRect(x, 4, 6, 1);
+});
+
+// ---- the structures drawn from other art (the harbour's, the airport's, the space set's)
+// a picture as the world shows it, mirrored (the art facing the other way): its draw and lights mirrored with it
+const lookFlip = L => L && { P: L.P, w: L.w, h: L.h, door: L.door, draw: (g, o) => { g.save(); g.translate(L.w || L.P.width, 0); g.scale(-1, 1); L.draw(g, o); g.restore(); }, lights: L.lights && (g => { g.save(); g.translate(L.w || L.P.width, 0); g.scale(-1, 1); L.lights(g); g.restore(); }) };
+// a lamp's glow at x, y (picture pixels) in a colour
+const lookGlow = (g, x, y, r, rgb, a = 0.6) => { g.save(); g.globalCompositeOperation = 'lighter'; const q = g.createRadialGradient(x, y, 0, x, y, r); q.addColorStop(0, `rgba(${rgb},${a})`); q.addColorStop(1, `rgba(${rgb},0)`); g.fillStyle = q; g.fillRect(x - r, y - r, r * 2, r * 2); g.restore(); };
+STR_LOOKS.hangarAir = p => {
+  if (!p.big) return undefined;                             // (SMALL: the tropical sheet's hangar)
+  if (!img.hangar2 && !img.airport) return null;
+  const H = bigHangarPic(false, -1), D = airportArt.door0[0], [dx, dy, dw, dh] = HGI.door;
+  return {
+    P: H, door: true,
+    draw(g, open) {                                         // (drawBigHangarLive: the door rolls up, the dark inside behind it)
+      g.drawImage(H, 0, 0);
+      if (open > 0.01) {
+        g.fillStyle = '#0b0c10'; g.fillRect(dx, dy, dw, dh);
+        const rest = Math.max(0, D.height - Math.round(dh * open)); if (rest > 0) g.drawImage(D, 0, D.height - rest, D.width, rest, dx, dy, D.width, rest);
+        g.fillStyle = '#3a3d44'; g.fillRect(dx, dy + rest - 1, dw, 2);
+      }
+    },
+    lights: g => lookGlow(g, HGI.lamp[0], HGI.lamp[1], 14, '255,200,120'),
+  };
+};
+STR_LOOKS.hangarSea = p => {
+  if (!p.big) return undefined;                             // (SMALL: the tropical sheet's hangar)
+  if (!img.hangarArt || !img.hangarArt[1]) return null;
+  const [c0, r0, c1, r1] = HGR.HOLE, w = c1 - c0, h = r1 - r0;
+  return {                                                  // (drawHarbourFront: the room, the gate sliding up into the wall, the hangar over them)
+    P: img.hangarArt[1], door: true,
+    draw(g, open) {
+      g.drawImage(img.hangarRoom[1], c0, r0, w, h);
+      if (open < 0.999) { g.save(); g.beginPath(); g.rect(c0, r0, w, h); g.clip(); g.drawImage(img.hgGate[1], c0, r0 - Math.round(h * smooth01(open)), w, h); g.restore(); }
+      g.drawImage(img.hangarArt[1], 0, 0);
+    },
+  };
+};
+STR_LOOKS.terminal = () => {
+  if (!img.airport) return null;
+  const T = terminalPic(-1);
+  return { P: T, draw: g => g.drawImage(T, 0, 0), lights: g => { lookGlow(g, 190, 2, 8, '255,60,50', 0.8); lookGlow(g, 190, 54, 16, '255,200,120'); } };   // (the mast's red lamp, the cab lit - drawTerminalLive)
+};
+STR_LOOKS.gunTower = p => {
+  if (p.lh) { if (!img.lighthouseL && !img.dockart) return null; const L = lhArt({ facing: 1, x: 0, hp: VTUNE.tower.hp, lh: true }).c; return { P: L, draw: g => g.drawImage(L, 0, 0) }; }
+  const T = img.towers && img.towers[0] && img.towers[0][1]; return T ? { P: T, draw: g => g.drawImage(T, 0, 0) } : null;
+};
+STR_LOOKS.dock = p => {
+  if (p.spr !== 'pier') return undefined;                   // (a wooden dock: its tile from the tropical sheet)
+  if (!img.dock) return null;
+  const P = pierDeck(); return P ? { P, draw: g => g.drawImage(P, 0, 0) } : null;
+};
+STR_LOOKS.launchPad = () => {
+  if (!spaceArt && img.space) buildSpaceArt(); if (!spaceArt) return null;
+  const A = spaceArt, pad = A.pad, st = A.stack, sk = STACK_K / PAD_K, sw = st.width * sk, sh = st.height * sk;
+  const top = Math.max(0, Math.ceil(sh - SPI.padStack[1])), ax = SPI.padStack[0], ay = top + SPI.padStack[1];
+  return { P: pad, w: pad.width, h: pad.height + top, draw: g => { g.drawImage(pad, 0, top); g.drawImage(st, Math.round(ax - sw / 2), Math.round(ay - sh), Math.round(sw), Math.round(sh)); } };   // (its rocket standing on it)
+};
+
+// ---- vehicles (each family's own picture, facing right where the art lets it)
+VEH_LOOKS.boat = (sv, D) => {
+  if (D.kind === 'fish') { const P = tropPic('fishing-boat-0'); return P ? lookFlip(lookPic(P, 'fishing-boat-0')) : null; }   // (the art faces left)
+  if (!jbArt) buildJetboatArt();
+  const P = (D.kind === 'motor' ? mbArt : jbArt)[D.col || 0].r; return lookPic(P);
+};
+// a car: her picture, at night her headlamp and red tail lamp (CAR_LAMP - carLights) and a little of her beam ahead
+VEH_LOOKS.car = (sv, D) => {
+  const P = tropPic(D.art); if (!P) return null;
+  const w = P.width, h = P.height, ext = Math.round(w * 0.6);
+  return {
+    P, w: w + ext, h,
+    draw: g => { g.save(); g.translate(w, 0); g.scale(-1, 1); g.drawImage(P, 0, 0); g.restore(); },   // (the art faces left)
+    lights: g => {
+      const hx = w / 2 + w * CAR_LAMP[0], hy = h - h * CAR_LAMP[1], tx = w / 2 + w * CAR_LAMP[2], ty = h - h * CAR_LAMP[3];
+      g.save(); g.globalCompositeOperation = 'lighter';
+      const q = g.createLinearGradient(hx, 0, hx + ext, 0); q.addColorStop(0, 'rgba(255,240,200,0.45)'); q.addColorStop(1, 'rgba(255,240,200,0)');
+      g.fillStyle = q; g.beginPath(); g.moveTo(hx, hy - 1); g.lineTo(hx + ext, hy - h * 0.15); g.lineTo(hx + ext, hy + h * 0.35); g.closePath(); g.fill(); g.restore();
+      lookGlow(g, hx, hy, Math.max(4, h * 0.2), '255,240,200', 0.9); lookGlow(g, tx, ty, Math.max(3, h * 0.15), '255,40,30', 0.9);
+    },
+  };
+};
+VEH_LOOKS.heli = (sv, D) => { if (!chArt && img.civhelis) buildCivHeliArt(); return chArt ? lookPic(chArt[D.ch].lvR[0]) : null; };
+VEH_LOOKS.sub = () => { if (!msArt && img.minisub) buildMinisubArt(); return msArt ? lookPic(msArt.sideR) : null; };
+VEH_LOOKS.plane = sv => lookPic(sheetArt(sv === 'plane:jet' ? { kind: 'jet', owner: 0 } : { kind: 'cessna', col: 0 }).plane[0][0][1]);
+VEH_LOOKS.space = () => { const L = STR_LOOKS.launchPad(); return L && { P: L.P, w: L.w, h: L.h, draw: L.draw }; };   // (the rocket on its pad)
+VEH_LOOKS.battleship = () => lookPic((img.baseP && img.baseP[0] || img.base)[1].intact);
+VEH_LOOKS.warsub = () => lookPic((img.subArtP && img.subArtP[0] || img.subArt)[1].I);
+VEH_LOOKS.warplane = () => lookPic(planeArt({ id: 0 }).plane[0][0][1]);
+VEH_LOOKS.warheli = () => { if (!heliArt) buildHeliArt(); const A = heliTeamArt(0) || { lv: heliArt.lv }, F = A.lv[0][0][1]; return F ? { P: F.body, draw: g => { g.drawImage(F.body, 0, 0); if (F.rotor) g.drawImage(F.rotor, 0, 0); } } : null; };
+VEH_LOOKS.tank = () => lookPic(tankArtOf(0).lv[0].body);
+// the rest SPAWN places (50-zz-placed.js PLACE_TYPES), by their kind
+VEH_LOOKS.ship = sv => { const k = sv.split(':')[1]; return lookPic(k === 'container' ? img.container : k === 'liner' ? img.liner : CIV[k].art()); };   // (the container ship loaded, the liner whole)
+VEH_LOOKS.yacht = sv => lookPic(img.sails[+sv.split(':')[1]][1]);
+VEH_LOOKS.seaplane = () => lookPic(seaplaneArt(0).plane[0][0][1]);
+VEH_LOOKS.balloon = sv => { if (!balloonArt && img.balloons) buildBalloonArt(); return balloonArt ? lookPic(balloonArt[+sv.split(':')[1]].whole) : null; };
+VEH_LOOKS.blimp = sv => lookPic(blimpPic({ team: +sv.split(':')[1], face: 1 }).im);
+VEH_LOOKS.orb = sv => { if (!spaceArt && img.space) buildSpaceArt(); return spaceArt ? lookPic(sv === 'orb:iss' ? spaceArt.iss : spaceArt.sat) : null; };
+STR_LOOKS.crane = () => {                                   // (its frame and its trolley under the girder - buildCraneArt)
+  if (!craneArt) { if (!img.dockart) return null; buildCraneArt(); }
+  const A = craneArt, tx = Math.round(A.g.width * 0.62);
+  return { P: A.g, draw: g => { g.drawImage(A.g, 0, 0); g.drawImage(A.b, tx, CRX.rows[1]); } };
+};
+
+/* ================================================================
    PREFABS (user Nov 1 21:55-22:01: "the structures you make are all the same thing with different properties"; "we would define the
    properties for a Prefab in the VEHICLE Editor ... So I never edit anything in the world apart from very specific properties";
    "the boat that I place in the dock is designed in the VEHICLE Editor"; "we're just reorganizing how information is being
@@ -54556,62 +54768,7 @@ function pfSync() {
   if (id.startsWith('s:')) { const p = pfGet(id.slice(2)); nm.value = p ? p.name : ''; info.textContent = p ? pfCopies(p) + ' IN THIS WORLD' : ''; if (p) pfStructBox(p, box, el, css); }
   else if (id.startsWith('v:')) { const sv = id.slice(2); nm.value = STR_VEHS[sv] ? STR_VEHS[sv].lab : ''; info.textContent = ''; pfVehBox(sv, box, el, css); }
 }
-/* (user Nov 2 13:22: "Can the prefab viewer show us the sprite of how it looks like? ... a little window that shows us the sprite.
-   And if it has a gate, a button we can press to open close just to see how it looks") LOOK: the prefab's picture as the world
-   draws it - its picture, its flag's cloth, its gate over its door (an enclosed kind's: the painted gate rolled up into the lintel,
-   or a grey one where none is painted - drawStrGate's way, at its speeds), its front layer - at the picture's own pixels, blown up
-   (or down) to fit. Kinds drawn by code, not from a picture (runway, launch pad, gun tower, terminal, road, the harbour's parts,
-   the LARGE hangar): none. */
-const PF_LOOK = { open: 0, want: 0, raf: 0, draw: null };
-function pfLookPic(p) {
-  const K = STR_KINDS[p.k];
-  if (!K || !K.art || ['runway', 'launchPad', 'gunTower', 'terminal', 'road', 'hangarSea'].includes(p.k) || (p.k === 'hangarAir' && p.big) || (p.k === 'dock' && p.spr === 'pier')) return undefined;
-  return tropPic(p.k === 'dock' ? p.spr || K.art : p.art || K.art);   // (null: the sheet not loaded yet)
-}
-function pfLook(p, box, el) {
-  if (pfLookPic(p) === undefined) return;
-  const K = STR_KINDS[p.k], c = el('div', 'cat'), cv = el('canvas'), bar = el('div', 'row'), lab = el('label', '', 'GATE');
-  c.appendChild(el('h4', '', 'LOOK'));
-  cv.style.cssText = 'image-rendering:pixelated;image-rendering:crisp-edges;background:#0a0e18;border:1px solid #2c3850;border-radius:4px;justify-self:start;max-width:100%';
-  c.appendChild(cv);
-  const gb = el('button', '', 'OPEN'); gb.title = 'Open or close its gate';
-  bar.append(lab, gb); bar.hidden = true; bar.style.display = 'none'; c.appendChild(bar);
-  box.appendChild(c);
-  const draw = () => {
-    const P = pfLookPic(p); if (!P) { setTimeout(() => { if (cv.isConnected) draw(); }, 400); return; }
-    const S = Math.min(300 / P.width, 190 / P.height), k = S >= 2 ? Math.floor(S) : S;   // (as big as the box takes; whole pixels from 2x)
-    if (cv.width !== P.width || cv.height !== P.height) { cv.width = P.width; cv.height = P.height; }
-    cv.style.width = Math.round(P.width * k) + 'px'; cv.style.height = Math.round(P.height * k) + 'px';
-    const g = cv.getContext('2d'); g.imageSmoothingEnabled = false; g.clearRect(0, 0, cv.width, cv.height);
-    g.drawImage(P, 0, 0);
-    if (P._flag) g.drawImage(P._flag.c, P._flag.x, P._flag.y);  // (its cloth, still)
-    const gate = !!K.enclosed && !!(P._gate || P._door);
-    bar.hidden = !gate; bar.style.display = gate ? '' : 'none';
-    if (gate) {
-      const open = PF_LOOK.open;
-      if (P._gate) { const G = P._gate, D = P._door, rows = Math.round(G.height * (1 - open)); if (rows >= 1) g.drawImage(G, 0, G.height - rows, G.width, rows, D[0], D[1], G.width, rows); }
-      else {                                                   // (no painted gate: a grey one over its door, its bottom edge rising)
-        const D = P._door, h = Math.round((D[3] - D[1]) * (1 - open));
-        if (h > 0) { g.fillStyle = 'rgb(150,156,164)'; g.fillRect(D[0], D[1], D[2] - D[0], h); g.fillStyle = 'rgb(112,118,126)'; const q = Math.max(1, Math.round((D[2] - D[0]) / 40)); for (let y = D[1] + q * 2; y < D[1] + h; y += q * 3) g.fillRect(D[0], y, D[2] - D[0], q); }
-      }
-      gb.textContent = PF_LOOK.want ? 'CLOSE' : 'OPEN'; gb.classList.toggle('on', !!PF_LOOK.want);
-    }
-    if (K.front) { const F = tropPic(K.front); if (F) g.drawImage(F, 0, 0, P.width, P.height); }   // (its front layer, as in the world)
-  };
-  // OPEN / CLOSE: rolls the gate as the world does (up at 1 a second, down at 0.7)
-  gb.onclick = () => {
-    PF_LOOK.want = PF_LOOK.want ? 0 : 1; PF_LOOK.draw = draw; let t = performance.now();
-    cancelAnimationFrame(PF_LOOK.raf);
-    const step = now => {
-      const dt = Math.min(0.1, (now - t) / 1000); t = now;
-      PF_LOOK.open = clamp(PF_LOOK.open + (PF_LOOK.want ? 1 : -0.7) * dt, 0, 1);
-      if (cv.isConnected) PF_LOOK.draw();
-      if (cv.isConnected && PF_LOOK.open !== PF_LOOK.want) PF_LOOK.raf = requestAnimationFrame(step);
-    };
-    PF_LOOK.raf = requestAnimationFrame(step);
-  };
-  draw();
-}
+// (LOOK - the prefab's picture: pfLook / vehLook, 50-zz-prefab-look.js)
 // a structure prefab: its picture and what it is (the copies' own properties are in WORLD EDITOR > OBJECTS)
 function pfStructBox(p, box, el, css) {
   const T = NSKY.editor.TUNE, K = STR_KINDS[p.k], ed = () => pfEdited(p);
@@ -54661,6 +54818,7 @@ function pfStructBox(p, box, el, css) {
 // a vehicle prefab: its model (a NEW one's), price and Story zoom (the families' own numbers: WORLD PROPERTIES > VEHICLES)
 function pfVehBox(sv, box, el, css) {
   const D = STR_VEHS[sv]; if (!D) return;
+  vehLook(sv, box, el);
   const c = el('div', 'cat'); c.appendChild(el('h4', '', 'WHAT IT IS'));
   const row = (lab, ...xs) => { const r = el('div', 'row'); r.append(el('label', '', lab), ...xs); c.appendChild(r); return r; };
   row('MODEL', el('output', '', D.pf && STR_VEHS[D.base] ? (STR_VEHS[D.base].lab0 || STR_VEHS[D.base].lab) : D.lab0 || D.lab));
@@ -56261,7 +56419,7 @@ function objSync() {
   U.spawn.appendChild(el('div', 'tabnote', 'NOTHING PICKED: ' + name + ' (ITS PREFAB)'));
   if (c === 's') { const p = pfGet(id); if (p) pfStructBox(p, U.spawn, el, U.css); }
   else if (STR_VEHS[id]) pfVehBox(id, U.spawn, el, U.css);
-  else { const k = el('div', 'cat'); k.append(el('h4', '', name), el('div', 'tabnote', 'Nothing to set.')); U.spawn.appendChild(k); }
+  else { vehLook(id, U.spawn, el); const k = el('div', 'cat'); k.append(el('h4', '', name), el('div', 'tabnote', 'Nothing to set.')); U.spawn.appendChild(k); }   // (its LOOK - 50-zz-prefab-look.js)
 }
 const OBJ_CSS = `
 #skyEd .ocat { display: flex; flex-direction: column; gap: 1px; font-size: 10px; letter-spacing: .06em; color: #7a8294; }
