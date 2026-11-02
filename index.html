@@ -4148,8 +4148,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 642;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 15:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 643;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 15:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -33144,12 +33144,47 @@ function cavesValid(o) {
 // (the default: CAVE_DEF, src/50-land-caves.js - the user's design from the Lab; edits kept in this browser, as the floor's)
 let CAVES = clone(CAVE_DEF);
 try { const o = JSON.parse(localStorage.getItem('bd_caves') || 'null'); if (cavesValid(o)) CAVES = o; } catch (e) { /* (private window) */ }
-function cavesSave() { try { if (JSON.stringify(CAVES) === JSON.stringify(CAVE_DEF)) localStorage.removeItem('bd_caves'); else localStorage.setItem('bd_caves', JSON.stringify(CAVES)); } catch (e) { /* (private window) */ } }
+// (the user's own systems - not the ones the game makes from its HOLE shapes, holeSystems)
+const cavesOwn = () => Object.assign({}, CAVES, { systems: CAVES.systems.filter(s => !s.gen) });
+function cavesSave() { try { const o = cavesOwn(); if (JSON.stringify(o) === JSON.stringify(CAVE_DEF)) localStorage.removeItem('bd_caves'); else localStorage.setItem('bd_caves', JSON.stringify(o)); } catch (e) { /* (private window) */ } }
+/* (terrain shapes, user Nov 2 14:19: "maybe all caves are holes ... any hole we make underwater gets water") every dark HOLE shape of the
+   game's terrain (50-land-shapes; SEE-THROUGH ones aren't caves) is a cave system too: one room, its outline, hung from its own middle
+   (ax, ay - not the ground's, so it stays where it was drawn), dry where it's all out of the water or in the land. Made again whenever
+   the shapes change (cavesSyncHoles, from sigNow): so a hole gets the caves' look when a lamp finds it - its back wall, its stalactites,
+   its sand settled, its air pockets where it rises above its way in - and the sub you drive moves in it as in any cave. Never saved
+   with the user's own (cavesOwn) nor shown in the CAVES tab's handles: they are edited as shapes */
+function holeSystems() {
+  if (typeof islandsUsed !== 'function' || !OWM) return [];
+  // (each dark hole's outline, a point every few grid columns; holes that touch or overlap are one system: one cave, its water one)
+  const H = [];
+  islandsUsed().forEach((I, n) => {
+    if (shpK(I) !== 'H' || I.see) return;
+    const Q = shpPoly(I), N = Q.X.length; if (N < 3) return;
+    const step = Math.max(1, Math.round(N / Math.min(240, Math.max(8, N / 10)))), pts = [];
+    for (let i = 0; i < N; i += step) pts.push([Q.X[i], Q.Y[i]]);
+    if (pts.length >= 3) H.push({ n, pts, x0: Q.x0, x1: Q.x1, y0: Q.y0, y1: Q.y1, g: H.length });
+  });
+  const root = i => { while (H[i].g !== i) i = H[i].g = H[H[i].g].g; return i; }, M = 60;
+  for (let i = 0; i < H.length; i++) for (let j = i + 1; j < H.length; j++) { const a = H[i], b = H[j]; if (a.x0 - M < b.x1 && b.x0 - M < a.x1 && a.y0 - M < b.y1 && b.y0 - M < a.y1) { const ra = root(i), rb = root(j); if (ra !== rb) H[rb].g = ra; } }
+  const groups = new Map(); H.forEach((h, i) => { const r = root(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(h); });
+  const out = [];
+  for (const G of groups.values()) {
+    let cx = 0, cy = 0, k = 0; for (const h of G) for (const p of h.pts) { cx += p[0]; cy += p[1]; k++; } cx /= k; cy /= k;
+    const ay = Math.round(cy - WATER_Y), dry = G.every(h => h.y1 < WATER_Y) || !inOcean(cx);
+    out.push({ name: 'HOLE ' + G.map(h => h.n + 1).join('+'), u: 0, x: Math.round(cx), ay, gen: true, dry, rooms: G.map(h => h.pts.map(p => [Math.round(p[0] - cx), Math.round(p[1] - cy)])), tunnels: [] });
+  }
+  return out;
+}
+function cavesSyncHoles() {
+  const H = holeSystems(), sig = JSON.stringify(H); if (sig === CV.holeSig) return CV.holeSig;
+  CV.holeSig = sig; CAVES.systems = CAVES.systems.filter(s => !s.gen).concat(H); CV.wins.length = Math.min(CV.wins.length, CAVES.systems.filter(s => !s.gen).length);
+  return sig;
+}
 
 // a system's mouth (world) and its points in the world
 // (x: a mouth anywhere in the world - on the land, in a lake; u: on the ocean floor, as the default systems)
 const sysX = s => Number.isFinite(s.x) ? s.x : uX(s.u);
-const sysMouth = s => { const X = sysX(s); return [X, depthFor(s)(X)]; };
+const sysMouth = s => { const X = sysX(s); return [X, Number.isFinite(s.ay) ? s.ay : depthFor(s)(X)]; };   // (ay: hung from its own point - a HOLE shape's cave, holeSystems)
 const sysPt = (s, p) => { const [ax, ay] = sysMouth(s); return [ax + p[0], ay + p[1]]; };
 // a centripetal Catmull-Rom through points (closed: a loop), n samples a span
 function crCurve(P, closed, n) {
@@ -33864,6 +33899,7 @@ const HULL = [[-8.5, 0], [8.5, 0], [-6, -3.5], [6, -3.5], [-6, 3.5], [6, 3.5], [
 // what stops the sub: in a window its cells (rock, sand); over the open sea's floor, the game's own bottom - the sand and the
 // rock formations on it (seabedY)
 function subHard(X, Y) {
+  if (typeof solidBlock === 'function' && solidBlock(X, Y + WATER_Y)) return true;   // (a SOLID shape: rock to the sub in a cave too - 50-land-shapes, Nov 2)
   const Wn = winAt(X, Y);
   if (Wn) { const c = cellOf(Wn, X, Y), m = Wn.mat[c]; if (m === 1 || m === 3) return true; if (!Wn.sea[c]) return false; }
   else if (!isSea(X, Y)) return true;
@@ -34284,6 +34320,7 @@ function groundCol(i) {
 }
 // what stops a ray at (X, Y): hardAt, the ground a column at a time (as winAt: the first window it's in)
 function rayHard(X, Y) {
+  if (land.sspan && solidBlock(X, Y + WATER_Y)) return true;   // (a SOLID shape stops the light too - Nov 2)
   const W = CV.wins, G = CV.G;
   for (let q = 0; q < W.length; q++) {
     const Wn = W[q];
@@ -35278,7 +35315,7 @@ function* buildAllJob(list, sync) {
 CV.built = JSON.stringify(CAVES);
 // (Oct 30: and the floor as the TERRAIN tab's REFRESH last built it - FLOOR_ED.print, 50-land-floor: the one ground line's
 // sea, the kraken's and the wrecks' spots - the floor's points alone no longer shape it)
-const sigNow = () => [Math.round(BED_A), Math.round(BED_B), typeof floorTab !== 'undefined' && floorTab ? floorTab.length : 0, JSON.stringify(FLOOR_PTS), typeof FLOOR_ED !== 'undefined' ? FLOOR_ED.print || 0 : 0, CV.built, ['rough', 'stal', 'stallen', 'smite', 'sand', 'weed', 'coral'].map(k => P[k]).join()].join('|');
+const sigNow = () => [cavesSyncHoles(), Math.round(BED_A), Math.round(BED_B), typeof floorTab !== 'undefined' && floorTab ? floorTab.length : 0, JSON.stringify(FLOOR_PTS), typeof FLOOR_ED !== 'undefined' ? FLOOR_ED.print || 0 : 0, CV.built, ['rough', 'stal', 'stallen', 'smite', 'sand', 'weed', 'coral'].map(k => P[k]).join()].join('|');
 let sigT = 0;
 // (every second or so: has anything the caves are cut from changed? then they're built again) - on every thread that has the
 // world, whether it steps it or only draws it: the simulation worker steps the game and the page only draws it, and both need
@@ -35529,6 +35566,7 @@ function edHandles() {
   const H = [], sr = subRing();
   if (sr) H.push({ si: -1, kind: 'sub', X: sr[0], Y: sr[1] });
   CAVES.systems.forEach((s, si) => {
+    if (s.gen) return;                                          // (a HOLE shape's cave: edited as a shape - holeSystems)
     const [mx, my] = sysMouth(s);
     H.push({ si, kind: 'mouth', X: mx, Y: my });
     if (CV.wins[si]) for (let k = 1; k <= 2; k++) H.push({ si, kind: 'lvl', k, X: CV.wins[si].X1 - 60, Y: my + levelDepth(si, k, P['w' + (k + 1) + 'd']) });
@@ -35546,6 +35584,7 @@ function nearestHandle(X, Y, r) {
 function nearestShape(X, Y, r, inside) {
   let best = null;
   CAVES.systems.forEach((s, si) => {
+    if (s.gen) return;
     const one = (Pt, closed, kind, i) => {
       const L = crCurve(Pt.map(p => sysPt(s, p)), closed, 8), n = closed ? L.length : L.length - 1;
       for (let q = 0; q < n; q++) {
@@ -35746,6 +35785,7 @@ function edDraw() {
   const hs = Math.max(4, Math.round(4.5 * D)), W1 = Math.max(1, 1.25 * D), W2 = Math.max(1.5, 2 * D);
   const isSel = (si, kind, i) => caveSels().some(q => q.si === si && q.kind === kind && q.i === i);
   CAVES.systems.forEach((s, si) => {
+    if (s.gen) return;
     const sh = sysShapes(s), [mx, my] = sysMouth(s), Wn = CV.wins[si];
     sh.rooms.forEach((L, i) => polyline(L, true, isSel(si, 'room', i) ? W2 : W1, isSel(si, 'room', i) ? '#ffffff' : 'rgba(255,179,71,0.9)'));
     sh.tunnels.forEach((t, i) => {
