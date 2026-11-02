@@ -4163,8 +4163,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 654;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 16:35';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 653;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 16:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -40081,6 +40081,7 @@ function drawIslChunks(x0, x1, inLand) {
     const xl = k * LT_CHUNK * LT_CELL, X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL));
     const T = Math.round(PY(LT_Y0 + (land.rT[k] - 4) * LT_CELL)), B = Math.round(PY(LT_Y0 + land.rB[k] * LT_CELL));
     C.drawImage(groundLit(cv), X0, T, X1 - X0, B - T);   // (in the hour's light - groundLit, 50-land-trop.js)
+    gedgeDraw(cv, xl);                                     // (its smooth edge - 50-land-zz-edges.js)
     tropDrawOv(k, 'isl');                                  // (the TROPICAL rock's own pixels - 50-land-trop)
   }
   C.imageSmoothingEnabled = ga;
@@ -40132,6 +40133,7 @@ function islSplitChunk(k, id, w, h) {
     for (let y = 0; y < yE; y++) { const o = (y * w + q) * 4; d[o] = s[o]; d[o + 1] = s[o + 1]; d[o + 2] = s[o + 2]; d[o + 3] = s[o + 3]; s[o + 3] = 0; }
   }
   g.putImageData(iid, 0, 0);
+  gedgeMake(cv, d, w, h, c0, land.rT[k]);                // (its edge smooth over its cells' steps, the roots under the water too - 50-land-zz-edges.js)
 }
 
 /* ---- the TERRAIN tab's islands: ADD ISLAND puts one in the middle of the view (its ends under the water, its top
@@ -47307,7 +47309,7 @@ function landEvict() {
   const S_ = land.seen; if (!S_) return;
   for (let k = 0; k < S_.length; k++) {
     if (renderTick - S_[k] < 1800) continue;
-    for (const A of [land.chunks, land.back, land.ichunks]) if (A && A[k]) { glFreeSrc(A[k]); A[k] = null; }
+    for (const A of [land.chunks, land.back, land.ichunks]) if (A && A[k]) { glFreeSrc(A[k]); if (A[k]._gedgeCv) glFreeSrc(A[k]._gedgeCv); A[k] = null; }   // (and its smooth edge - 50-land-zz-edges.js)
     land.dirty[k] = 1;
   }
 }
@@ -47414,6 +47416,7 @@ function paintLandChunk(k) {
     if (SE > -1e9) land.look[c] = L0;                         // (the column's own look back)
   }
   islSplitChunk(k, id, w, h);                             // (an island's columns: into its own canvas, drawn behind the water - 50-land-islands)
+  gedgeMake(cv, d, w, h, c0, rT);                        // (its edge smooth over its cells' steps - 50-land-zz-edges.js, user Nov 2)
   tropMaskEnd(k);
   x.putImageData(id, 0, 0);
   cv._lt = true;
@@ -47628,7 +47631,7 @@ function drawLandGround(x0, x1, onField) {
   drawTropForestAt(x0, x1);                               // (the TROPICAL back forest of the ground in front: before its slices, which cover its foot - 50-land-trop)
   for (const [k, xl, flip] of list) {
     put(land.chunks[k], xl, flip, k);
-    if (!flip) tropDrawOv(k, 'main');                     // (the TROPICAL rock's own pixels - 50-land-trop)
+    if (!flip) { gedgeDraw(land.chunks[k], xl); tropDrawOv(k, 'main'); }   // (its smooth edge - 50-land-zz-edges.js; the TROPICAL rock's own pixels - 50-land-trop)                     // (the TROPICAL rock's own pixels - 50-land-trop)
   }
   // below the grid: the rock goes on down, in the dark (under the two countries, not the sea)
   C.fillStyle = UG_CSS;
@@ -51962,6 +51965,59 @@ defTable('water', () => WATER.rows, {
   after: () => { for (const R of WATER.rows) waterRowFix(R); WATER.ver++; waterApply(); },
 });
 
+/* ---- THE GROUND'S EDGE, SMOOTH (user Nov 2 14:34: "The terrain should never be stepped like in this image, but smooth. This should
+   be a global rule"; 15:25: "Can you do it now?"). The ground is kept and painted in cells (LT_CELL, 0.4 m - a painted slice is a cell a
+   pixel), so a slope's top came out as stairs. Every painted slice - the ground in front (land.chunks) and the islands' (land.ichunks:
+   out at sea, their roots under the water too) - gets its edge drawn over its stairs in finer pixels (GEDGE_S a cell): each column's
+   top runs on a straight line between the higher of its own and its neighbour's top at each side (the line through the stairs'
+   outer corners), the notch under that line filled with that column's top pixel. Only ever filled, never cut, so the cells under it
+   stay as painted; the tropical rock's own pixels do the same at theirs (tropOverlay), and the sand lies on the same line (tropRuns).
+   Made with the slice (paintLandChunk -> gedgeMake), drawn right over it in the hour's light (gedgeDraw - drawLandGround,
+   drawIslChunks). One rule for every look. ---- */
+const GEDGE_S = 4;                                            // (the edge's pixels a cell: a quarter of a cell, ~10 cm)
+// a slice's canvas cv (its pixels d: w x h, canvas row y is the ground's row y - 4 + rT), its first column c0: its edge picture, or null
+function gedgeMake(cv, d, w, h, c0, rT) {
+  if (!cv) return;
+  cv._gedge = null;
+  const T4 = 4 - rT, top = new Int32Array(w + 2).fill(-1);
+  // (a column's top in this canvas: the first of its pixels on a solid cell - a grass blade stands over air, it isn't the top)
+  const topOf = (q, own) => {
+    const c = c0 + q;
+    if (own) { for (let y = 4; y < h; y++) if (d[(y * w + q) * 4 + 3] && ltCell(c, y - T4) !== M_AIR) return y; return -1; }
+    if (c < 0 || c >= land.cols) return -1;
+    for (let y = 4; y < h; y++) if (ltCell(c, y - T4) !== M_AIR) return y; return -1;   // (the next slice's column: its cells)
+  };
+  for (let q = -1; q <= w; q++) top[q + 1] = topOf(q, q >= 0 && q < w);
+  let y0 = 1e9, y1 = -1, any = false;
+  const H = (q, s) => { const t = top[q + 1], n = top[q + 1 + s]; return n >= 0 && n < t ? n : t; };
+  for (let q = 0; q < w; q++) { const t = top[q + 1]; if (t < 0) continue; const a = H(q, -1), b = H(q, 1); if (a < t || b < t) { any = true; y0 = Math.min(y0, a, b); y1 = Math.max(y1, t); } }
+  if (!any) return;
+  const S = GEDGE_S, W = w * S, HH = (y1 - y0) * S; if (HH <= 0) return;
+  const out = new ImageData(W, HH), o = out.data;
+  for (let q = 0; q < w; q++) {
+    const t = top[q + 1]; if (t < 0) continue;
+    const a = H(q, -1), b = H(q, 1); if (a >= t && b >= t) continue;
+    const p = (t * w + q) * 4, r = d[p], g = d[p + 1], bl = d[p + 2];
+    for (let i = 0; i < S; i++) {
+      const yy = Math.round((a + (b - a) * (i + 0.5) / S) * S) - y0 * S, ye = (t - y0) * S;
+      for (let y = Math.max(0, yy); y < ye; y++) { const k = (y * W + q * S + i) * 4; o[k] = r; o[k + 1] = g; o[k + 2] = bl; o[k + 3] = 255; }
+    }
+  }
+  const e = makeCanvas(W, HH); e.getContext('2d').putImageData(out, 0, 0);
+  if (cv._gedgeCv) glFreeSrc(cv._gedgeCv);
+  cv._gedgeCv = e; cv._gedge = { cv: e, y0, rT, w };
+}
+// over a slice drawn at world x xl: its edge, in the hour's light (groundLit, 50-land-trop.js) as the slice
+function gedgeDraw(cv, xl) {
+  const E2 = cv && cv._gedge; if (!E2) return;
+  const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + E2.w * LT_CELL)); if ((X1 - X0) / E2.w < 2) return;   // (a cell under 2 screen pixels: its steps don't show)
+  const Y0 = Math.round(PY(LT_Y0 + (E2.y0 - 4 + E2.rT) * LT_CELL)), Y1 = Math.round(PY(LT_Y0 + (E2.y0 - 4 + E2.rT) * LT_CELL + E2.cv.height / GEDGE_S * LT_CELL));
+  if (Y1 <= Y0) return;
+  const ga = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
+  C.drawImage(groundLit(E2.cv), X0, Y0, X1 - X0, Y1 - Y0);
+  C.imageSmoothingEnabled = ga;
+}
+
 /* ================================================================
    OPEN WORLD: ONE GROUND LINE (the dock chat, Oct 29 - the user: "I mean the SEA, FOREST, DESERT would be a single unified
    spline ... that was the goal from the start"; "the FOREST flows into the SEA and the DOCK covers the transition because it
@@ -54177,9 +54233,6 @@ function storyStep(d) {
   const L = storyTargets().sort((a, b) => a.wx - b.wx); if (L.length < 2) return;
   const i = Math.max(0, L.findIndex(q => storySel ? q.key === storySel : q.cur)), q = L[clamp(i + d, 0, L.length - 1)], k = q.cur ? null : q.key;
   if (k === storySel) return;
-  // (user Nov 2 15:34: "If I'm switching between owned objects, the switch is immediate") one of yours (or a home): stepped onto,
-  // you're in it - the swap at once; only one for sale is picked first, its price shown, A to buy
-  if (q.price == null && !q.cur) { storySel = null; act(0, 'storySwap', q.key); return; }
   storySel = k; cam.glide = STORY_GLIDE; sound('click', 0);
 }
 const STORY_GLIDE = 1.2;                                 // (how long the camera eases to the object picked - updateCamera's follow, no cut)
@@ -54327,7 +54380,7 @@ function storyZoomWidth() {
 }
 function storyZoom(dt) {
   if (!STORY || ui.title || NSKY.editor.TUNE.open || PHOTO.on) return;
-  const c = crew[0], Z = STORY_ZOOM, key = c.mode === 'civ' ? 'v' + (c.civ ? c.civ.sid : '') : c.mode + story.at, first = Z.key == null;   // (first: the story just opened - storyReset)
+  const c = crew[0], Z = STORY_ZOOM, key = c.mode === 'civ' ? 'v' + (c.civ ? c.civ.sid : '') : c.mode + story.at;
   if (key !== Z.key) { Z.key = key; Z.lv = null; Z.moving = false; Z.mv = 0; }
   // (user Nov 2: "While in Editor Play mode, I should be able to zoom in and out at will" - and the rule: "The zoom changes only
   // when the player changes it") zoomed by hand, the zoom is the player's from then on - the next structure or vehicle no longer
@@ -54346,9 +54399,6 @@ function storyZoom(dt) {
   // (user Nov 2: stopped <-> moving "too aggressive ... almost feels like a snap") the change between Close and Medium in the same
   // vehicle eases slowly (ZOOM_EASE_AUTO, 39-camera.js), centred on her; a new vehicle or structure keeps the quick one
   if (scopes[0].level !== lv) { if (Z.lv != null) zoomSlow(0); setScope(0, lv); }
-  // (user Nov 2 15:34: "When the game starts, it should be zoomed at the right level at the right vehicle. Right now the zoom is far
-  // and does this super zoom in") the story opens already at its zoom, on what you control: no ease in from the menu's far view
-  if (first) { for (const i of [0, 1]) { cam.zt[i] = cam.zt[0]; cam.za[i] = cam.zt[0]; ZE.from[i] = ZE.to[i] = cam.zt[0]; ZE.t[i] = 1; } cutTo(0); }
   Z.lv = lv;
 }
 window.__storyZoom = STORY_ZOOM;
