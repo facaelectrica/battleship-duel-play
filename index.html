@@ -4024,8 +4024,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 552;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 21:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 553;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 21:35';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -51897,15 +51897,20 @@ function vehRing(P) {
 function vehCanDrive(e) { return !!e && (e.army ? e.own : (e.v.driven == null || e.v.driven === 0)); }
 function vehDrive() {
   const e = VE.sel; if (!vehCanDrive(e)) return;
-  edModeClose();
+  edModeClose(); vehBoard(e);
+}
+// player 0 into a vehicle: the game's own ways in - an army one by switching, one of yours at a structure as STORY boards it (out
+// of its hangar or berth), any other civilian one boarded (DRIVE and the top bar's PLAY - 50-zzz-world-ed.js)
+function vehBoard(e) {
+  const c = crew[0];
   if (e.army) {
-    const c = crew[0];
     if (e.k === 'tower' && c.mode === 'tower' && myTw(0) !== e.v) { myTw(0).inUse = false; manTw[0] = e.v; }
     else if (e.k === 'tower') manTw[0] = e.v;
     if (c.mode !== e.k) switchTo(0, e.k);                                  // (the game's own switch; in it already: the view back on it)
     cutTo(0); return;
   }
-  if (crew[0].mode !== 'civ') { crew[0].mode = 'dock'; crew[0].watch = null; crew[0].look = null; }
+  if (STORY && e.v.story && e.v.berth != null) { story.at = e.v.berth; storyBoard(0, e.v.sid); return; }
+  if (c.mode !== 'civ') { c.mode = 'dock'; c.watch = null; c.look = null; }
   civUI[0] = true; boardCiv(0, e.v); cutTo(0);
 }
 // ---- SPAWN: a copy of one already in the world (its table's own make and fill-in, as a save's load does; put in by its owner)
@@ -53294,6 +53299,7 @@ function wedSync() {
     const d = WED.dirty || FLOOR_ED.dirty || LAND_ED.dirty || ISL_ED.dirty || (CAVE.dirty && CAVE.dirty()), busy = CAVE.busy && CAVE.busy();
     WED.rbtn.classList.toggle('on', !!d); WED.rbtn.textContent = d ? 'REFRESH (NOT BUILT)' : busy ? 'BUILDING...' : 'REFRESH';
   }
+  if (WED.pbtn) WED.pbtn.disabled = !edPlayKey();
   if (!b) return;
   b.hidden = !T.world(); if (b.hidden) return;
   const D = wedPicked().filter(i => i.del);
@@ -53310,8 +53316,60 @@ function wedSync() {
   bar.insertBefore(b, del ? del.nextSibling : bar.lastChild); WED.btn = b;
   const r = document.createElement('button'); r.textContent = 'REFRESH'; r.title = 'Build the world as edited'; r.onclick = wedRefresh; WED.rbtn = r;
   const redo = typeof UNDO !== 'undefined' && UNDO.rbtn; if (redo) redo.after(r); else bar.insertBefore(r, bar.firstChild);
+  const close = [...bar.querySelectorAll('button')].find(q => q.textContent === 'CLOSE');
+  const pb = document.createElement('button'); pb.textContent = 'PLAY'; pb.title = 'Play from what\'s picked'; pb.disabled = true; pb.onclick = edPlay;
+  bar.insertBefore(pb, close || null); WED.pbtn = pb;
   T.onPick.push(() => wedSync()); wedSync();
 })();
+/* PLAY (user Nov 1 20:05: "a button that says PLAY and you are playing immediately. I should be able to select any structure or
+   vehicle in the world that is 'valid' for the player and press PLAY and it jumps me in the world. PLAY is greyed out if I dont
+   have any valid selection (e.g. terrain, NPC vehicle)"). One thing picked, and it's the player's:
+     - a vehicle: one of their side's army (not in STORY: no army there), or one at a structure marked theirs (OWNED);
+     - a structure: a HOME BASE, one holding a vehicle of theirs, or (where there are teams - not STORY, whose owners are factions)
+       their team's.
+   Pressed: the editor closes and a fresh game of this mode starts in the world as edited (the world's start, as the editor shows
+   it - the game that was going on is dropped), with a person on player 0, who is put in the vehicle (vehBoard: DRIVE's way in)
+   or at the structure (STORY: there as its dots take you; elsewhere the view on it, nothing driven). The vehicle or structure is
+   found again in the new world by what it is (its army kind; a structure's id; a parked one's class and number). */
+const strMine = o => (o.home ?? o.k === 'home') || strVehs(o).some(q => q && q.own) || (!STORY && strOwner(o) >= 0 && teamPlayer(strOwner(o)) === 0);
+const vehMine = e => e.army ? e.own && !STORY : !!(e.v.story && e.v.own && e.v.sid != null);
+function edPlayKey() {
+  if (NET.role !== 'local' || (LINK.hosting && linkGuests().length) || joinedRoom() || wedPicked().length !== 1) return null;   // (a room open with nobody in it is no one else's game)
+  if (VE.sel) { const e = vehAll().find(q => q.v === VE.sel.v); return e && vehMine(e) ? (e.army ? { a: e.k, x: e.v.x } : { c: civClass(e.v), sid: e.v.sid }) : null; }
+  if (SE.sel.length === 1) { const o = strById(SE.sel[0]); return o && strMine(o) ? { s: o.id } : null; }
+  return null;
+}
+function edPlayFind(K) {
+  const L = vehAll().filter(vehMine);
+  if (K.a === 'tower') { let best = null; for (const e of L) if (e.k === 'tower' && (!best || Math.abs(e.v.x - K.x) < Math.abs(best.v.x - K.x))) best = e; return best; }
+  return L.find(e => K.a ? e.army && e.k === K.a : !e.army && civClass(e.v) === K.c && e.v.sid === K.sid) || null;
+}
+function edPlayAt(K) {
+  if (K.s == null) { const e = edPlayFind(K); if (!e) return false; vehBoard(e); return true; }
+  const o = strsUsed().find(q => q.id === K.s); if (!o) return false;
+  const c = crew[0]; if (c.mode === 'civ') civRelease(0);
+  if (STORY) { storyGo(0, o.id, true); return true; }
+  const B = strBox(o); c.mode = 'dock'; c.watch = null; c.look = { x: o.x, y: (B.top + B.foot) / 2 }; cutTo(0);
+  return true;
+}
+function edPlay() {
+  const K = edPlayKey(); if (!K) return;
+  EDMODE.game = null;                                     // (not put back: a fresh game)
+  swHold('edPlay');                                       // (the game stays on this page till player 0 is placed; then the worker takes it)
+  edModeClose();
+  loadThen(() => {
+    if (!SLOTS.length) {                                  // (nobody playing - the editor opened from the title: a person on player 0)
+      const d = TOUCH0 ? 'touch' : 'kb'; ctlPick[SIDE(0)] = d;
+      if (!menuSel.roster.some(q => q.dev === d)) menuSel.roster.push({ dev: d, side: SIDE(0) });
+      applyMode();
+    }
+    if (STORY) storySlot = null;                          // (a story played from the editor is nobody's save: no slot written over)
+    ui.resume = false; restartGame();
+    if (!edPlayAt(K)) showToast('COULD NOT START THERE');
+    swRelease('edPlay');
+  });
+}
+if (typeof window !== 'undefined') window.__edPlay = { key: edPlayKey, play: edPlay };   // (tools)
 setInterval(wedSync, 250);                                // (the name follows the pick however it changed: a list's button, UNDO, a tab's own DELETE)
 
 /* ---- OPEN WORLD: the kraken's sounds (50-land-kraken.js) ----
