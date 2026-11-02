@@ -778,7 +778,7 @@ const VTUNE_DEF = {
   ship: { thrust: 45, reload: 5, shells: 20, dc: 6 },                 // (thrust: the engine's push, her top speed comes from it)
   sub: { speedK: 3, torps: 15, torpReload: 1.6, mines: 10, mineReload: 0 },
   plane: { kmh: 300, hits: 3, rockets: 6, rocketReload: 0.8, bombs: 6, bombReload: 0.05, mgRate: 0.075 },
-  tank: { speed: 46, hp: 3, ammo: 12, reload: 1.4 },
+  tank: { speed: 46, hp: 3, ammo: 12, reload: 1.4, kw: 900, grip: 1.25 },   // (kw: its engine at the tracks; grip: its tracks' against tyres' - the one drive, 50-story-cars.js driveStep)
   heli: { kmh: 120, hp: 3, rockets: 8, reload: 0.6 },
   minisub: { speed: 120, climb: 80 },                                  // (the research ship's explorer sub: across and up/down; user Oct 30 17:13 - 2x, was 60 and 40)
   tower: { hp: 10, reload: 1.5 },
@@ -4168,8 +4168,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 664;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 17:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 665;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 17:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -50575,6 +50575,9 @@ function tankSettle(t, dt, snap) {
   } else { t.y += (want - t.y) * Math.min(1, dt * 14); t.vy = 0; }
   t.a += (a - t.a) * Math.min(1, dt * 8);
 }
+// the tank's make for the one drive (driveStep): 30 t, its middle between its road wheels, low; its tracks all driven, gripping
+// TANK grip times what tyres do; the ground under its back end (VTUNE.tank: kw, grip - the GAME EDITOR)
+const tankMake = (t, way) => ({ M: 30000, cg: 0, hL: 0.3, R: 0.35, d: 2, kw: VTUNE.tank.kw ?? 900, grip: VTUNE.tank.grip ?? 1.25, grd: carGrd(t.x - way * TANK_L * 0.4, t.y), hM: 2.4 });
 // in the water over its tracks: a lake, or the sea where it isn't standing on a ship's deck
 const tankUnder = t => lakeAt(t.x) ? t.y > lakeLevelAt(t.x) + 6 : !onLand(t.x) && !t.deck && t.y > surfaceY(t.x) + 6;
 function stepTank(t, dt) {
@@ -50601,10 +50604,11 @@ function stepTank(t, dt) {
   { const hung = helis.some(h => heliLoad(h) && tanks[h.rope.hold] === t);
     if (!t.enter && t.state === 'alive' && !hung && !t.deck && atHangarIn(p, t.x, want)) { landGoHome(p, 'tank'); return; } }
   // (user Oct 25) it never turns round: like the battleship it drives forward and backs up, its gun keeping its angle
-  // up a slope it slows, down one it runs on a little; too steep (a wall) and it stops
-  const slope = t.a * t.facing;                                 // (positive: nose down - going downhill)
-  const vmax = want * (1 - 0.6 * Math.max(0, -slope * Math.sign(want) * t.facing) / 0.5);
-  t.vx += clamp(vmax - t.vx, -90 * dt, 90 * dt);
+  // (user Nov 2 16:09: the cars' drive for the tank too - one driving system for everything on the ground) its engine through its
+  // tracks - all of it driven, gripping more than tyres (TANK grip) - up a slope as far as they hold, spinning past it (driveStep,
+  // 50-story-cars.js); in the air (hopping, falling) it keeps its way. Too steep a step ahead (a wall) and it stops - below
+  const way = want ? Math.sign(want) : Math.sign(t.vx) || t.facing;
+  if (t.vy === 0) t.vx = driveStep(t, dt, Math.abs(want), 0, way, tankMake(t, way));
   if (Math.abs(t.vx) > 0.5) {
     const k = landSpanAt(t.x), nx = k < 0 ? clamp(t.x + t.vx * dt, TANK_X0, WORLD_W - TANK_X0) : landIn(t.x + t.vx * dt, k, TANK_W * 0.5, TANK_X0), G = tankGround(t, nx);   // (on a ship at sea it drives her deck - off her end, into the water)   // (it stops at its country's edge, by the harbour)
     const lead = t.vx > 0 ? G.front : G.back;
@@ -50613,9 +50617,6 @@ function stepTank(t, dt) {
       if (want && t.stuckT > 0.35 && t.vy >= 0) { t.vy = -170; t.y -= 2; t.stuckT = 0; kickLandDust(t.x + Math.sign(want) * TANK_L * 0.4, t.y, 6); }
     }
     else { t.x = nx; t.stuckT = 0; }
-    // (a steep climb slows it a little, never stops it)
-    if (lead < t.y - 4 && t.vy >= 0) t.vx *= 1 - Math.min(0.5, dt * 2);
-    t.track = (t.track || 0) + t.vx * dt;
     if (landUnitR() < dt * Math.abs(t.vx) / 12) kickLandDust(t.x - Math.sign(t.vx) * TANK_L * 0.4, t.y, 2);
     // (user Oct 25: on sand its tracks throw up a cloud behind it)
     const bx = t.x - Math.sign(t.vx) * TANK_L * 0.45;
@@ -50624,6 +50625,9 @@ function stepTank(t, dt) {
       while (t.sandT >= 1) { t.sandT -= 1; const r0 = luRnd(3, 5); spawnSmoke(bx + luRnd(-6, 6), t.y - r0 - 1, { kind: 'gun', mist: true, fam: 'sand', r: r0, grow: luRnd(5, 8), rmax: luRnd(20, 30), lift: 4, vx: -t.vx * luRnd(0.2, 0.5) + luRnd(-12, 12), vy: -luRnd(8, 24), life: luRnd(2.2, 3.6), alpha: luRnd(0.4, 0.6), stream: smStream(t, 'sand') }); }
     }
   }
+  // its tracks turn by their own run (spinning loose, faster than it goes) - and spinning they throw the ground up behind them
+  t.track = (t.track || 0) + (t.wsp != null ? t.wsp * UPM * (t.way || way) : t.vx) * dt;
+  if (!SIM_ONLY && Math.abs(t.slipV || 0) > 0.6 && t.vy === 0 && landUnitR() < dt * (4 + Math.abs(t.slipV) * 3)) { const bx = t.x - (t.way || way) * TANK_L * 0.4, s = carGrd(bx, t.y); if (s === 'sand' || s === 'paved') { const r0 = luRnd(3, 5); spawnSmoke(bx + luRnd(-6, 6), t.y - r0 - 1, { kind: 'gun', mist: true, fam: s === 'sand' ? 'sand' : 'gray', r: r0, grow: luRnd(5, 8), rmax: luRnd(20, 30), lift: 4, vx: -(t.way || way) * luRnd(10, 30), vy: -luRnd(8, 24), life: luRnd(2, 3.2), alpha: luRnd(0.35, 0.55), stream: smStream(t, 'sand') }); } else kickLandDust(bx, t.y, 3); }
   tankSettle(t, dt, false);
   tankWheels(t, dt);
   if (tankUnder(t)) { tankSink(t); return; }                   // (into the lake or the sea - off a ship, dropped: over its tracks, it sinks)
@@ -52643,7 +52647,7 @@ const carGround = (c, x, m, hw, step) => { const G = wheelGround(x + m, c.y, hw,
 // break loose WHILE that still gets her somewhere - and when it doesn't (the hill is beyond her tyres), they floor it and her
 // wheels spin. Faster than asked, or lever the other way: the brakes, on all four wheels, as far as the tyres hold. Nobody asking
 // her to go: parked, she holds on any slope (rules).
-// Her driven wheels turn by their own spin (c.wd, metres a second at the tyre), the free ones by her speed - drawStoryCars.
+// Her driven wheels turn by their own spin (c.wsp, metres a second at the tyre), the free ones by her speed - drawStoryCars.
 // her make: mass (kg), her middle forward of her axles' middle as a share of her wheelbase (+ toward the nose), its height as
 // a share of her height. Real figures for the kind (a taxi a big saloon, the tractor heavy at the back)
 const CAR_SPEC = { taxi: [1700, 0, 0.38], suv: [2100, 0.02, 0.42], van: [2300, 0.02, 0.42], motorcycle: [250, 0, 0.45], tractor: [4500, -0.15, 0.4], ambulance: [4000, 0.05, 0.4], fire_engine: [16000, 0.05, 0.4], box_truck: [9000, 0.05, 0.42], dump_truck: [16000, -0.05, 0.42], city_bus: [13000, -0.08, 0.38], school_bus: [11000, 0.05, 0.4] };
@@ -52667,51 +52671,65 @@ const carDriveOf = c => clamp(Math.round(VTUNE.car[c.art + 'Drive'] ?? 0), 0, 2)
 // the ground under x for her tyres: 'paved', 'dirt', 'grass', 'sand'
 const carGrd = (x, gy) => carPaved(x) ? 'paved' : carSurf(x, gy) || 'dirt';
 // one step of her drive on the ground. want: the speed asked (world units a second, + along her way); returns her new vx
-function carDrive(c, dt, want, deep) {
-  const S = CAR_SPEC[c.art] || [1500, 0, 0.4], M = S[0], g = CAR_G / UPM, W = carWheelsOf(c), [L, H] = storyCarSize(c);
-  const [, hw] = carAxle(c, L), wb = Math.max(0.5, 2 * hw / UPM), hL = S[2] * H / UPM / wb, R = W ? Math.max(0.15, W.r) : 0.33;
-  const d = carDriveOf(c), ca = Math.max(0.2, Math.cos(c.a)), sn = -Math.sin(c.a) * c.dir;        // (sn: the slope's rise along her way)
-  const u = c.vx * c.dir / ca / UPM;                                                               // (her speed along the ground, m/s, + forward)
-  const grd = carGrd(c.x - c.dir * L * 0.3, c.y), mu = CAR_MU[grd] * (VTUNE.car.grip ?? 1) * (1 - 0.7 * deep), crr = CAR_RR[grd];
+// a Story car's make for the drive (driveStep): mass, where her middle is, its height over her wheelbase, wheel radius, driven
+// wheels, power, the ground under her driven wheels, her frontal height
+function carMake(c) {
+  const S = CAR_SPEC[c.art] || [1500, 0, 0.4], W = carWheelsOf(c), [L, H] = storyCarSize(c), [, hw] = carAxle(c, L), wb = Math.max(0.5, 2 * hw / UPM);
+  return { M: S[0], cg: S[1], hL: S[2] * H / UPM / wb, R: W ? Math.max(0.15, W.r) : 0.33, d: carDriveOf(c), kw: VTUNE.car[c.art + 'Kw'] ?? 150, grip: VTUNE.car.grip ?? 1, grd: carGrd(c.x - c.dir * L * 0.3, c.y), hM: H / UPM };
+}
+const carDrive = (c, dt, want, deep) => driveStep(c, dt, want, deep, c.dir, carMake(c));
+// ONE DRIVE FOR EVERYTHING ON WHEELS OR TRACKS (user Nov 2 16:02-16:09: "So we have a consistent 2D driving system for all vehicles"
+// - "yes", the tank too): one step of v along the ground. want: the speed asked along `way` (+1 / -1 in the world's x, the way
+// she's driven - a car her nose's, the tank either: it backs up); K her make (carMake, tankMake): M kg, cg (her middle forward of
+// her axles' middle, a share of the wheelbase), hL (its height over the wheelbase), R (wheel radius, m), d (driven: 0 rear, 1
+// front, 2 all - tracks are all), kw, grip (times the ground's), grd (the ground), hM (her height, m: her air drag). v.a is the
+// lie of the ground under her (the world's angle, y down), v.vx her speed in the world's x; returns her new vx. Her own state:
+// wd (her driven wheels' spin, m/s at the tyre, along `way`), wslip, thr, brk, slipV
+function driveStep(v, dt, want, deep, way, K) {
+  const M = K.M, g = CAR_G / UPM, R = K.R, d = K.d, hL = K.hL;
+  if (v.way !== way) { v.wsp = -(v.wsp || 0); v.way = way; }                                     // (driven the other way: her wheels' spin seen from it)
+  const ca = Math.max(0.2, Math.cos(v.a)), sn = -Math.sin(v.a) * way;                            // (sn: the slope's rise along her way)
+  const u = v.vx * way / ca / UPM;                                                               // (her speed along the ground, m/s, + her way)
+  const mu = CAR_MU[K.grd] * K.grip * (1 - 0.7 * deep), crr = CAR_RR[K.grd];
   const target = Math.max(0, want) / UPM, park = want < CAR_PARK && Math.abs(u) < 1;   // (parked: nothing asked and stopped - till then she brakes to a stop)
   // her weight on each axle, for a push F (N) along her way (her speeding up shifts it back)
-  const wRear = F => clamp(M * g * ca * (0.5 - S[1]) + hL * F, 0, M * g * ca);   // (where her middle is, plus the transfer: the slope's (hL M g sn) and her speeding up's (hL M a) add up to hL times the push at the tyres)
+  const cgB = way === v.dir || v.dir === undefined ? K.cg : -K.cg;                               // (her middle's place seen from her way: backing up, the 'rear' is her nose)
+  const wRear = F => clamp(M * g * ca * (0.5 - cgB) + hL * F, 0, M * g * ca);   // (where her middle is, plus the transfer: the slope's (hL M g sn) and her speeding up's (hL M a) add up to hL times the push at the tyres)
   const load = F => d === 2 ? M * g * ca : d === 0 ? wRear(F) : M * g * ca - wRear(F);
-  const resist = M * g * (sn + crr * ca * Math.sign(u)) + 0.5 * 1.2 * 0.4 * (H / UPM) * 1.8 * u * Math.abs(u);   // (gravity along the slope, rolling, air)
-  c.wd ??= u; c.thr ??= 0; c.brk ??= 0;
+  const resist = M * g * (sn + crr * ca * Math.sign(u)) + 0.5 * 1.2 * 0.4 * K.hM * 1.8 * u * Math.abs(u);   // (gravity along the slope, rolling, air)
+  v.wsp ??= u; v.thr ??= 0; v.brk ??= 0;
   // the driver's feet
   const err = target - u;
   let thr = park ? 0 : clamp(0.6 * err + Math.max(0, resist) / (CAR_FCAP * M * g), 0, 1), brk = park ? 1 : err < -0.6 ? clamp(-0.25 * err, 0, 1) : 0;
-  const Fmax = F => F <= 0 ? 0 : F;   // (no reverse gear: she turns round to go back)
-  const eng = t => t * Math.min(CAR_FCAP * M * g, (VTUNE.car[c.art + 'Kw'] ?? 150) * 1000 / Math.max(2, Math.abs(c.wd)));
+  const eng = t => t * Math.min(CAR_FCAP * M * g, K.kw * 1000 / Math.max(0.5, Math.abs(v.wsp)));
   // easing off so the wheels hold - while holding gets her somewhere: the most push her tyres keep (with the weight that push
   // shifts onto them), against what she needs to move up the slope
   const A = load(0), hold = 0.97 * (d === 2 ? mu * A : d === 0 ? mu * A / Math.max(0.05, 1 - mu * hL) : mu * A / (1 + mu * hL));   // (F = mu x load(F), solved: the push shifts weight onto the rear wheels, off the front)
-  if (!c.wslip && eng(thr) > hold && hold > resist + 0.01 * M * g) thr = Math.min(thr, thr * hold / eng(thr));
+  if (!v.wslip && eng(thr) > hold && hold > resist + 0.01 * M * g) thr = Math.min(thr, thr * hold / eng(thr));
   // (a hill start: setting off up a slope, the foot stays on the brake till the pedal gives enough to hold her - she doesn't roll
   // back while it comes up. When the pedal is all the way and still not enough, they let go: she slides, her wheels spinning)
-  if (!park && target > 0 && u < 0.3 && !c.wslip && eng(c.thr) < resist && c.thr < thr - 0.02) brk = 1;
-  c.thr += (thr - c.thr) * Math.min(1, dt * CAR_FOOT); c.brk = park || brk === 1 ? brk : c.brk + (brk - c.brk) * Math.min(1, dt * CAR_FOOT * 2);   // (parking - the handbrake - and a hill start's hold: at once)
-  const Fe = Fmax(eng(c.thr));
+  if (!park && target > 0 && u < 0.3 && !v.wslip && eng(v.thr) < resist && v.thr < thr - 0.02) brk = 1;
+  v.thr += (thr - v.thr) * Math.min(1, dt * CAR_FOOT); v.brk = park || brk === 1 ? brk : v.brk + (brk - v.brk) * Math.min(1, dt * CAR_FOOT * 2);   // (parking - the handbrake - and a hill start's hold: at once)
+  const Fe = Math.max(0, eng(v.thr));
   // the driven wheels: gripping (turning with her) or slipping (spinning on their own)
   let Ft;
-  if (!c.wslip) { const grip = mu * load(Fe); if (Fe > grip) c.wslip = 1; else { Ft = Fe; c.wd = u; } }
-  if (c.wslip) {
-    const sv = c.wd - u, Fl = mu * CAR_MU_SLIP * load(0);
+  if (!v.wslip) { const grip = mu * load(Fe); if (Fe > grip) v.wslip = 1; else { Ft = Fe; v.wsp = u; } }
+  if (v.wslip) {
+    const sv = v.wsp - u, Fl = mu * CAR_MU_SLIP * load(0);
     Ft = Math.abs(sv) < 0.05 ? Fe : Fl * Math.sign(sv);
     const I = CAR_INERTIA * M * R * R;
-    c.wd += (Fe - Ft) * R * R / I * dt;                                   // (the wheel's spin: the engine's torque less the ground's, over its inertia - at the tyre)
-    c.wd = clamp(c.wd, u - 2, u + CAR_REV);
-    if (Math.abs(c.wd - u) < 0.4 && Fe <= mu * load(Fe)) { c.wslip = 0; c.wd = u; }   // (back down to her speed and the push within their grip: they hold again)
+    v.wsp += (Fe - Ft) * R * R / I * dt;                                   // (the wheel's spin: the engine's torque less the ground's, over its inertia - at the tyre)
+    v.wsp = clamp(v.wsp, u - 2, u + CAR_REV);
+    if (Math.abs(v.wsp - u) < 0.4 && Fe <= mu * load(Fe)) { v.wslip = 0; v.wsp = u; }   // (back down to her speed and the push within their grip: they hold again)
   }
-  // the brakes: all four wheels, as far as the tyres hold
-  const Fb = c.brk * mu * M * g * ca;
-  let a = (Ft - resist) / M, u2 = u + a * dt;
+  // the brakes: all the wheels, as far as the tyres hold
+  const Fb = v.brk * mu * M * g * ca;
+  let u2 = u + (Ft - resist) / M * dt;
   if (Fb > 0) { const du = Fb / M * dt; u2 = Math.abs(u2) <= du ? 0 : u2 - Math.sign(u2) * du; }
   if (park && Math.abs(u2) < 1 / UPM) u2 = 0;                              // (parked: held - on any slope)
-  if (!c.wslip) c.wd = u2;
-  c.slipV = c.wslip ? c.wd - u2 : 0;
-  return u2 * UPM * ca * c.dir;
+  if (!v.wslip) v.wsp = u2;
+  v.slipV = v.wslip ? v.wsp - u2 : 0;
+  return u2 * UPM * ca * way;
 }
 // her driven wheels spinning loose: what they throw - the ground's own (sand, earth, grass) or tyre smoke on the road -, more the
 // faster they spin, from each driven wheel where it meets the ground, flung back off her way
@@ -52749,7 +52767,7 @@ function storyCarBody(c, dt) {
   if (G0.ship && onGround) c.x += G0.ship.dx || 0;                                                // (on a ship's deck: she goes with her)
   if (onGround) {
     if (run) c.vx = carDrive(c, dt, want, deep);                                                    // (her engine, her driven wheels' grip, her brakes - and parked she holds, on any slope)
-    else { c.vx += CAR_G * 0.25 * Math.sin(c.a) * dt; c.wslip = 0; c.slipV = 0; c.wd = c.vx * c.dir / Math.max(0.2, Math.cos(c.a)) / UPM; }                                               // (drowned, no brakes: she rolls down whatever slope she's on, lighter in the water - user 22:27, "it stops sinking halfway")
+    else { c.vx += CAR_G * 0.25 * Math.sin(c.a) * dt; c.wslip = 0; c.slipV = 0; c.wsp = c.vx * c.dir / Math.max(0.2, Math.cos(c.a)) / UPM; }                                               // (drowned, no brakes: she rolls down whatever slope she's on, lighter in the water - user 22:27, "it stops sinking halfway")
   }
   if (deep) c.vx *= Math.exp(-dt * 4 * deep);                                                       // (the water holds her back)
   let nx = c.x + c.vx * dt;
@@ -52758,10 +52776,10 @@ function storyCarBody(c, dt) {
   let G1 = carGround(c, nx, am, hw, half);
   if (onGround && c.vx && (c.vx > 0 ? -G1.k : G1.k) > CAR_CLIMB) { c.vx = 0; nx = c.x; G1 = G0; }
   if (!onGround && run) {                                                                          // (in the air: her driven wheels run free - the pedal still down revs them up, let go they keep turning)
-    const k = c.thr > 0.05 ? CAR_REV : 0; c.wd = (c.wd ?? 0) + ((c.vx * c.dir / UPM + k * (c.thr || 0)) - (c.wd ?? 0)) * Math.min(1, dt * (k ? 3 : 0.3)); c.wslip = 1; c.slipV = 0;
+    const k = c.thr > 0.05 ? CAR_REV : 0; c.wsp = (c.wsp ?? 0) + ((c.vx * c.dir / UPM + k * (c.thr || 0)) - (c.wsp ?? 0)) * Math.min(1, dt * (k ? 3 : 0.3)); c.wslip = 1; c.slipV = 0;
   }
   c.roll = (c.roll || 0) + c.vx * dt;                                                               // (how far her free wheels have turned: her speed)
-  c.rollD = (c.rollD || 0) + (c.wd ?? c.vx * c.dir / UPM) * UPM * c.dir * dt;                       // (her driven wheels: their own spin)
+  c.rollD = (c.rollD || 0) + (c.wsp ?? c.vx * c.dir / UPM) * UPM * c.dir * dt;                       // (her driven wheels: their own spin)
   c.x = nx;
   // up and down: gravity, and the ground pushing her up where it rises under her; over a crest faster than she can fall,
   // she leaves it
@@ -52870,7 +52888,7 @@ function drawStoryCars(x0, x1, pass) {
       const kx = W / P.width, ky = H / P.height, sx = c.dir > 0 ? -1 : 1;
       const DW = carWheelsOf(c);
       K.wheels.forEach((q, qi) => {
-        const rw = q.r * P._m * UPM, dr = DW && DW.on[qi], rl = dr ? c.rollD ?? c.roll : c.roll, sp = dr && c.wd != null ? c.wd * UPM * c.dir : c.vx;   // (her wheel's radius, world units; a driven one turns by its own spin - carDrive)
+        const rw = q.r * P._m * UPM, dr = DW && DW.on[qi], rl = dr ? c.rollD ?? c.roll : c.roll, sp = dr && c.wsp != null ? c.wsp * UPM * c.dir : c.vx;   // (her wheel's radius, world units; a driven one turns by its own spin - carDrive)
         C.save(); C.translate(-W / 2 + q.x * kx, -H + q.y * ky);
         if (!drawWheel(q.r * kx, q.r * P._m, (rl || 0) / rw * sx, (sp || 0) / rw, fc, WHEEL_OFFROAD[c.art])) { C.rotate((rl || 0) / rw * sx); C.drawImage(tint(q.c), -q.n / 2 * kx, -q.n / 2 * ky, q.n * kx, q.n * ky); }
         C.restore();
@@ -55180,7 +55198,7 @@ function vehFields(e) {
 // browser; a row without a family is shown as it is (not in the table)
 const VEH_TUNE = {
   STRUCT: () => [['TOWER RELOAD', 'tower', 'reload', 10, 0.05, 's'], ['TOWER HEALTH', 'tower', 'hp', 40, 1], ['TANK SPEED', 'tank', 'speed', 200, 1],
-    ['TANK HEALTH', 'tank', 'hp', 20, 0.5], ['TANK AMMO', 'tank', 'ammo', 60, 1], ['TANK RELOAD', 'tank', 'reload', 10, 0.05, 's']],
+    ['TANK POWER', 'tank', 'kw', 3000, 10, 'kW'], ['TANK TRACK GRIP', 'tank', 'grip', 3, 0.05, 'x'], ['TANK HEALTH', 'tank', 'hp', 20, 0.5], ['TANK AMMO', 'tank', 'ammo', 60, 1], ['TANK RELOAD', 'tank', 'reload', 10, 0.05, 's']],
   PLANES: () => [['TOP SPEED', 'plane', 'kmh', 900, 10, 'km/h'], ['HITS TO DOWN', 'plane', 'hits', 12, 1], ['ROCKETS', 'plane', 'rockets', 30, 1],
     ['ROCKET RELOAD', 'plane', 'rocketReload', 5, 0.05, 's'], ['BOMBS', 'plane', 'bombs', 30, 1], ['BOMB RELOAD', 'plane', 'bombReload', 2, 0.01, 's'],
     ['MACHINE GUN', 'plane', 'mgRate', 0.5, 0.005, 's'], ['CESSNA', null, AIR_KMH.cessna + ' km/h'], ['747', null, AIR_KMH.jet + ' km/h']],
@@ -59046,8 +59064,8 @@ function audioUpdate(dt) {
       // spinning loose on a hill rev it high while she goes nowhere, and the pedal (c.thr) loads it - carDrive, 50-story-cars.js)
       const cv = crew[i].mode === 'civ' && crew[i].civ && storyCars.includes(crew[i].civ) && crew[i].civ.state === 'run' ? crew[i].civ : null;
       const tk = cv ? null : tanks[i], src = cv || tk;
-      const on = cv ? (cv.eng ? 0.25 + 0.55 * Math.min(1, Math.abs(cv.wd || 0) * UPM / Math.max(20, cv.v || 60)) + 0.2 * (cv.thr || 0) : 0)
-        : tk && tk.state === 'alive' ? 0.3 + 0.7 * Math.min(1, Math.abs(tk.vx) / VTUNE.tank.speed) : 0, h = src ? hear(src.x) : { pan: 0, att: 0 };
+      const on = cv ? (cv.eng ? 0.25 + 0.55 * Math.min(1, Math.abs(cv.wsp || 0) * UPM / Math.max(20, cv.v || 60)) + 0.2 * (cv.thr || 0) : 0)
+        : tk && tk.state === 'alive' ? 0.3 + 0.7 * Math.min(1, Math.abs(tk.wsp != null ? tk.wsp * UPM : tk.vx) / VTUNE.tank.speed) : 0, h = src ? hear(src.x) : { pan: 0, att: 0 };
       const aboard = (cv || crew[i].mode === 'tank') && L.includes(i) ? 2 / Math.sqrt(L.length) : 1;
       e.osc.frequency.setTargetAtTime(34 + 40 * on, t, 0.2); e.lp.frequency.setTargetAtTime(130 + 300 * on, t, 0.2); e.lfo.frequency.setTargetAtTime(5 + 10 * on, t, 0.2);
       e.g.gain.setTargetAtTime(on ? (0.01 + 0.05 * on) * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard : 0, t, 0.2);
