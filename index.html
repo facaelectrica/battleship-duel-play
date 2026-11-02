@@ -800,6 +800,8 @@ const VTUNE_DEF = {
   car: { grip: 1, taxiDrive: 0, taxiKw: 220, suvDrive: 2, suvKw: 260, vanDrive: 0, vanKw: 200, motorcycleDrive: 0, motorcycleKw: 90, tractorDrive: 2, tractorKw: 160,
     ambulanceDrive: 0, ambulanceKw: 320, fire_engineDrive: 0, fire_engineKw: 480, box_truckDrive: 0, box_truckKw: 320, dump_truckDrive: 0, dump_truckKw: 480,
     city_busDrive: 0, city_busKw: 380, school_busDrive: 0, school_busKw: 320 },
+  // the air (29-zz-flight.js airAt): the storm layer's top over the sea (m) - over it the air is calm -, and how hard its gusts are
+  air: { top: 200, gust: 1 },
   mg: { rate: 0.085, shipRate: 0.0425, plane: 1 / 6, ship: 0.05, heli: 1 / 6 },   // (rate: seconds between rounds - shipRate the battleship's own, user Oct 30 17:13: 2x; plane, heli: a share of one hit)
 };
 const VTUNE = JSON.parse(JSON.stringify(VTUNE_DEF));
@@ -4169,8 +4171,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 671;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 17:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 672;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 18:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11591,7 +11593,8 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
   const aFor = r => (g * Math.cos(gam) - V * r) / (KL * V * V) * F.as;
   const lo = -0.8 * F.as, hi = 0.95 * F.as;
   let aC;
-  if (ctl.gam != null) aC = clamp(aFor(clamp(-2.2 * flyWrap(gam - ctl.gam), -1.2, 1.2)), lo, hi);
+  const kP = 2.2 / (1 + 4 * F.tau);                                   // (a heavy plane's autopilot leans on it gently - Nov 2, the 747 swung up and down)
+  if (ctl.gam != null) aC = clamp(aFor(clamp(-kP * flyWrap(gam - ctl.gam), -1.2 * kP / 2.2 * 1.5, 1.2 * kP / 2.2 * 1.5)), lo, hi);
   else {
     // (pulled: up to the most lift, no more than n of its weight; pushed: half that the other way)
     const nq = F.n * g / (KL * V * V) * F.as, aMax = Math.min(1.0 * F.as, nq), aMin = Math.max(lo, -0.5 * nq);
@@ -11601,10 +11604,15 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
   // the flare: low over ground it can land on with its wheels down (ctl.cush: its height over it, world units), coming down
   // steeper than a gentle touch, the nose comes up - whoever's flying - so it settles on rather than drops on (a firm one still
   // bounces: planeLand). Pulling up is still the pilot's
-  if (ctl.cush != null && ctl.cush < 90 && gam > 0) { const gL = 0.02 + Math.max(0, ctl.cush) / 1100; if (gam > gL) aC = Math.max(aC, clamp(aFor(clamp(-3 * (gam - gL), -1.2, 0)), lo, hi)); }
+  // (it settles on at about 3-4 m/s - firm, never floating down the runway)
+  if (ctl.cush != null && ctl.cush < 90 + 180 * F.tau && gam > 0) {   // (a heavy plane, slow to answer, starts its flare higher)
+    const gL = 0.04 + Math.max(0, ctl.cush) / 1000; if (gam > gL) aC = Math.max(aC, clamp(aFor(clamp(-3 * (gam - gL), -1.2, 0)), lo, hi)); }
   v.aoa = (v.aoa || 0) + (aC - (v.aoa || 0)) * Math.min(1, dt / (F.tau * clamp(vc / V, 1, 3)));
   const a = v.aoa, CL = flyCL(a, F.as), q = KL * V * V, stall = Math.max(0, Math.abs(a) / F.as - 1);
-  const L = q * CL, D = q * (cd0 + FLY_KI * CL * CL + 0.3 * stall + (ctl.cush != null ? 0.05 : 0));   // (wheels and flaps down to land: more drag)
+  // (wheels and flaps down to land: more drag; an autopilot coming down too fast puts its airbrakes out - Nov 2, the 747s came in at
+  // 120 m/s and went round)
+  const brake = ctl.gam != null && gam > 0.02 && V > vT * 1.1 ? Math.min(0.08, (V / vT - 1.1) * 0.4) : 0;
+  const L = q * CL, D = q * (cd0 + FLY_KI * CL * CL + 0.3 * stall + (ctl.cush != null ? 0.05 : 0) + brake);
   V += (T * Math.cos(a) - D + g * Math.sin(gam)) * dt;
   if (!v.turn) gam = flyWrap(gam + ((g * Math.cos(gam) - L - T * Math.sin(a)) / Math.max(V, 3)) * dt);   // (its path turns: lift and gravity; held through a turn round)
   V = clamp(V, 0.5, 3 * vc);
@@ -11617,6 +11625,9 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
     if (u >= 1) { v[fk] = -v.turn.from; v.turn = null; }
   } else v.vx = v[fk] * v.spd * Math.cos(gam);
   v.vy = v.spd * Math.sin(gam);
+  // the air it flies in carries it - the wind, and in a storm's layer the gusts, which also shake its nose (airAt)
+  const A = airAt(v.x, v.y); v.vx += A.wx; v.vy += A.wy; v.turb = A.turb;
+  if (A.turb > 0.02) v.pitch = flyWrap(v.pitch + A.turb * 0.07 * Math.sin(time * 9.1 + v.x * 0.02) * Math.sin(time * 5.3));
   v.x += v.vx * dt; v.y += v.vy * dt;
   // upside down and let go (or flown by its autopilot): it rolls upright, flying on the way it was going
   const inv = Math.cos(v.pitch) < -0.25, free = ctl.gam != null || Math.abs(ctl.pull || 0) < 0.15;
@@ -11626,6 +11637,21 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
     if (!v.roll.done && v.roll.t >= FLY_ROLL_T / 2) { v.roll.done = true; v[fk] = -v[fk]; v.pitch = flyWrap(Math.PI - v.pitch); v.gam = flyWrap(Math.PI - v.gam); v.aoa = -v.aoa; }
     if (v.roll.t >= FLY_ROLL_T) v.roll = null;
   }
+}
+// ---- THE AIR (user Nov 2 16:16-16:32: "I would like the weather to eventually affect the plane, like having to fly above the
+// clouds for safety"; "on storms the weather below is stronger, same with the wind"): what the air itself is doing at (x, y) -
+// every flyer's speed is through it (flyStep, the helicopters' heliStep). The wind (windAt - the sea's, stronger higher up),
+// and in a storm the storm layer: from the sea up to its top (VTUNE.air.top m) the air gusts - up and down and across, harder
+// the worse the storm (rain, thunder, the sea, the wind) - and over its top it's nearly still: fly above the weather to be safe.
+// Gusts: the sim clock's and the place's (the same for everyone there), smooth. Returns AIR {wx, wy, turb} (world units a second)
+const AIR = { wx: 0, wy: 0, turb: 0 };
+function airAt(x, y) {
+  const top = WATER_Y - (VTUNE.air.top || 200) * UPM, inL = smoothstep(top - 60 * UPM, top, y);   // (in the layer: 1 - fading out over 60 m above its top)
+  const storm = Math.max(E.stormK || 0, 0.7 * (E.storm || 0), 0.6 * Math.abs(env.wind || 0)) * (VTUNE.air.gust ?? 1);
+  const turb = storm * (0.06 + 0.94 * inL);
+  const t = time, n1 = Math.sin(x * 0.0041 + t * 1.3) * 0.6 + Math.sin(x * 0.0117 - t * 2.3 + 1.7) * 0.4, n2 = Math.sin(x * 0.0053 - t * 1.7 + 0.6) * 0.55 + Math.sin(x * 0.0139 + t * 2.9 + 2.2) * 0.45;
+  AIR.turb = turb; AIR.wx = windAt(y) * (1 + 0.8 * storm * inL) + turb * 9 * UPM * n1; AIR.wy = turb * 7 * UPM * n2;
+  return AIR;
 }
 // how much of its height it shows in a roll (the drawings squash it toward its edge and open it again, upright)
 const flyRollK = v => v.roll ? Math.max(0.12, Math.abs(Math.cos(Math.PI * v.roll.t / FLY_ROLL_T))) : 1;
@@ -11637,6 +11663,40 @@ function flyPull(v, stick, dt) {
 }
 // set off from the ground into the air: its path from how it's moving, its wings at the angle they had
 function flyFrom(v, gam, aoa) { v.gam = gam; v.aoa = aoa || 0; v.roll = null; v.invT = 0; }
+/* ---- HELICOPTERS: the same principles (user Nov 2 16:32: "Lets apply the same principles" - the sky-hook example: a rotor's lift
+   tilted to fly, a rope hanging under it). Every helicopter - the army's (stepHeli), the civilians' (stepCivHeli) - moves by the
+   forces on it, never by being set to a speed: its rotor's push along its mast (tilted forward to go, back to stop, more of it to
+   climb), gravity (the game's, CAR_G), the air's drag on it through the air it's in (airAt: the wind leans on it, a storm's gusts
+   shove it about - fly above the weather), and what hangs on its rope (mass: heavier, so slower to climb and to stop). The pilot -
+   yours or its own - asks for a way and a speed across (tvx) and a climb or sink (tvy), as before; the flight controller tilts the
+   mast and sets the collective for them, as far as the rotor can (tmax of its weight): it leans into the wind to hold a hover,
+   overshoots a little and settles, and with a load it labours. Its mast's tilt (h.tilt) is what's drawn - the nose down going
+   forward, as before, now because it is. K: v its top speed across (world units a second: its drag), tmax, resp (how fast its
+   mast tilts, 1/s), m (its mass with its load, 1 alone), lev (a tilt to settle to near the ground: its slope) ---- */
+function heliStep(h, dt, tvx, tvy, K) {
+  const G = CAR_G, A = airAt(h.x, h.y), m = K.m || 1;
+  const Kd = G * Math.tan(0.34) / (K.v * K.v);                     // (its drag: at its top speed its mast leans about 19 degrees)
+  const rx = (h.vx || 0) - A.wx, ry = (h.vy || 0) - A.wy, rs = Math.hypot(rx, ry), Dx = Kd * rs * rx, Dy = 1.6 * Kd * rs * ry;
+  const ax = clamp((tvx - (h.vx || 0)) * 1.8, -0.6 * G, 0.6 * G), ay = clamp((tvy - (h.vy || 0)) * 2.5, -0.9 * G, 0.7 * G);
+  let tx = m * ax + Dx, ty = m * (ay - G) + Dy;                    // (the push it wants from its rotor - y down)
+  const tm = Math.hypot(tx, ty), cap = K.tmax * G; if (tm > cap) { tx *= cap / tm; ty *= cap / tm; }
+  let th = clamp(Math.atan2(tx, -ty), -0.6, 0.6);
+  if (K.lev != null) th = th * (1 - K.levK) + K.lev * K.levK;       // (settling onto the ground: level with it)
+  if (h.turn) th *= 0.3;                                            // (turning round on the spot: nearly level)
+  h.tilt = (h.tilt || 0) + (th - (h.tilt || 0)) * Math.min(1, dt * K.resp);
+  h.col = (h.col ?? G) + (Math.min(Math.hypot(tx, ty), cap) - (h.col ?? G)) * Math.min(1, dt * 5);
+  const Tx = h.col * Math.sin(h.tilt), Ty = -h.col * Math.cos(h.tilt);
+  h.vx = (h.vx || 0) + (Tx - Dx) / m * dt; h.vy = (h.vy || 0) + ((Ty - Dy) / m + G) * dt;
+  h.turb = A.turb;
+  if (A.turb > 0.02) h.tilt += A.turb * 0.06 * Math.sin(time * 8.3 + h.x * 0.03) * Math.sin(time * 4.7) * dt * 8;   // (rocked by the gusts)
+}
+// the highest thing a flyer must clear over x within r - the ground, trees, hangars (clearTop) and, at sea, the big ships' tops
+// (Nov 2: seaplanes on their way across flew into a liner's superstructure). Every autopilot's floor (civRouteAir, civAutoAir, spClear)
+function airClear(x, r) {
+  let m = clearTop(x, r);
+  if (!onLand(x)) for (let k = -1; k <= 1; k++) { const d = shipTopAt(x + k * (r || 40), SKY_TOP); if (d) m = Math.min(m, d.y); }
+  return m;
+}
 
 /* ---------------- The captain: one life, in the tower, a boat or ashore in the harbour ---------------- */
 // What a player still has: a standing tower, or a boat afloat (out on the water or berthed at home).
@@ -36315,13 +36375,13 @@ function stepCivAir(f, dt) {
   // pilot takes it back: on the ground it taxis into the hangar there (its next flight from it later, as every flight
   // ends); in the air it flies home and lands (civAutoAir), then taxis in
   if (f.driven == null && f.placed != null) { if (!f.ground) return; f.auto = null; }   // (placed in the editor, nobody aboard: it waits where it was put - 50-zz-placed.js)
-  else if (f.driven == null) f.auto = 'home';
+  else if (f.driven == null && f.auto !== 'route') f.auto = 'home';   // (its timetable's own flight keeps its route - civRouteAir)
   if (f.ground) {
     f.id = p != null ? p : 0;
     stepPlaneGround(f, dt, K.gk, o => {                            // (into its hangar: parked, its next flight later)
       if (o.story) { storyPlaneIn(o); return; }                  // (STORY: into its hangar, you ashore there - 50-story-planes.js)
       const q = o.driven; o.driven = null;
-      Object.assign(o, newFlight(o.kind, airfieldAt(o.x).R ? 1 : 0, rnd(20, 40), o.owner), { col: o.col, alt: o.alt, ground: null, gear: 0, auto: null, ap: null });
+      trafficArrive(o, q != null);                                 // (its next flight from this hangar - 50-land-traffic.js)
       if (q != null) { crew[q].civ = null; stepAshore(q, 'civ'); }
     });
     f.dir = f.facing; f.ang = f.pitch * f.facing - f.facing * (f.flare || 0) * 0.1;
@@ -36330,6 +36390,7 @@ function stepCivAir(f, dt) {
   const stick = mine ? civStick(p) : 0;
   let want = stick ? clamp(f.pitch + stick * 0.5, -0.55, 0.55) : 0, forced = false;
   if (!mine && f.auto === 'home') want = civAutoAir(f, dt);
+  else if (!mine && f.auto === 'route') want = civRouteAir(f, dt);
   // over an airfield's concrete, low, with runway ahead and not pulling up: down it comes by itself (as the warplane)
   // (Nov 1: over any ground it can land on - the concrete or flat ground: the planes' shared planeApproach, 29-plane.js)
   const { H, ahead } = planeApproach(f, 500);
@@ -36365,23 +36426,49 @@ function stepCivAir(f, dt) {
 // traffic comes in - out over its sea at its height, round, down the glide onto the runway's sea end (stepCivAir lands
 // it on the concrete), then the taxi into the hangar. Too high coming in, or past the runway, it goes round again.
 // Returns the nose it wants (+ down)
+// (user Nov 2 16:32: "The AI airliners and Cessnas flying their own routes still follow their old fixed paths. Lets update them
+// to use the new systems") a Cessna on its loop: flown by the one flight model (flyStep) like any plane, its pilot this
+// autopilot - along its route's turn points (f.route, f.ri) at its own height (f.alt, drifting a little), round at each; at
+// its approach gate it goes in when the runway's free (civAutoAir - the glide, the flare, planeLand) or flies another loop out
+// and back (as cessnaHold). A 747 has no loop: home to the other airport straight away (civAutoAir, at its height). Returns the
+// path it wants (+ down)
+function civRouteAir(f, dt) {
+  if (!f.route || f.kind === 'jet') { f.auto = 'home'; f.ap = null; return civAutoAir(f, dt); }
+  const A = airport(f.from), n = f.route.length, now = f.turn ? -f.turn.from : f.facing;
+  f.ri = clamp(f.ri || 0, 0, n - 1);
+  if (f.ri >= n - 2) {                                             // (at its gate: in, or round again)
+    if (cessnaRunwayFree(f)) { f.auto = 'home'; f.ap = null; return civAutoAir(f, dt); }
+    const { d0, sea } = cessnaZone(f.to), gate = f.route[n - 2], room = Math.abs(sea - gate), H = room > 900 ? gate + d0 * trRnd(900, Math.min(2200, room)) : gate - d0 * trRnd(900, 2000);
+    f.route.splice(n - 2, 0, H); f.holds = (f.holds || 0) + 1;
+  }
+  const tx = f.route[f.ri], dir = Math.sign(tx - f.x) || now;
+  if (Math.abs(tx - f.x) < 60) f.ri++;                            // (at its turn point: on to the next)
+  else if (dir !== now && !f.turn && !f.roll) { if (Math.abs(tx - f.x) < 60 + f.spd * 0.6) f.ri++; else f.turn = { t: 0, from: f.facing }; }
+  const yT = A.y - f.alt * (1 + 0.1 * Math.sin(f.x / 2300 + (f.ph || 0)));
+  let y = yT;
+  if (!onApron(f.x)) y = Math.min(y, airClear(f.x + now * 300, 150) - 120);   // (clear of the hills, trees, hangars - and the big ships at sea)
+  { const bt = hangarTopIn(f.x, f.x + now * 1200); if (bt < Infinity) y = Math.min(y, bt - AIR_ROOM - (TRAFFIC[f.kind].gy || 8)); }
+  return clamp((y - f.y) / 150, -0.35, 0.3);
+}
 function civAutoAir(f, dt) {
-  const A = airfieldAt(airport(f.kind === 'cessna' ? f.from : f.to).far), K = CIVAIR[f.kind], up = f.kind === 'jet' ? 450 : 300;
-  const G = 0.2, IN = 700, D = (f.x - A.near) * A.dir, out = up / G + 400 - IN, now = f.turn ? -f.turn.from : f.facing;
+  const A = airfieldAt(airport(f.kind === 'cessna' ? f.from : f.to).far), K = CIVAIR[f.kind], up = f.kind === 'jet' ? 450 : 300, cruise = Math.max(up, f.alt || 0);   // (up: the circuit's height - round again, out and back in; cruise: its own height on its way, the 747's way up high)
+  const G = f.kind === 'jet' ? 0.14 : 0.15, IN = 700, D = (f.x - A.near) * A.dir, out = up / G + 400 - IN, now = f.turn ? -f.turn.from : f.facing;   // (its glide: about 8 degrees - steep enough to come in over a harbour's hangar by the runway, shallow enough to flare: Nov 2, at one in five the 747 hit the runway too hard to stay on it, at one in eleven it flew into the hangar)
   const ap = f.ap || (f.ap = { phase: D > 300 && now === -A.dir ? 'in' : 'out' });
   let yT = A.y - up;
   if (ap.phase === 'out') { if (D > out) ap.phase = 'in'; }
   else {
     // (the glide: one in five, down to touch 700 in from the runway's sea end - a 747's belly 60 over the harbour's
     // lighthouse - aimed a little under the concrete so it does touch)
-    yT = A.y + 6 - Math.min(up + 6, Math.max(0, D + IN) * G);
+    yT = A.y + 6 - Math.min(cruise + 6, Math.max(0, D + IN) * G);
     if ((D < 700 && A.y - f.y > Math.max(0, D + IN) * G + 140) || D < -((A.len || AIR_W) - 300)) ap.phase = 'out';   // (too high to make it down, or past it: round again)
   }
-  if (dryLand(f.x) && !onApron(f.x)) yT = Math.min(yT, clearTop(f.x + now * 300, 150) - 120);
+  if (!onApron(f.x) && (dryLand(f.x) || ap.phase === 'out' || D > 1500)) yT = Math.min(yT, airClear(f.x + now * 300, 150) - 120);   // (and the big ships at sea - not on its final glide over the water)
   { const bt = hangarTopIn(f.x, f.x + now * 1200); if (bt < Infinity) yT = Math.min(yT, bt - AIR_ROOM - (TRAFFIC[f.kind].gy || 8)); }   // (and over a hangar: user Oct 29)   // (over the land away from the field: clear of the hills and trees ahead)
   const want = ap.phase === 'out' ? A.dir : -A.dir;
-  if (now !== want && !f.turn) f.turn = { t: 0, from: f.facing };
-  if (ap.phase === 'in' && D < 900 && !f.turn) f.spd += (K.vmin + 20 - f.spd) * Math.min(1, dt * 1.5);   // (slowing for the runway)
+  if (now !== want && !f.turn && !f.roll) f.turn = { t: 0, from: f.facing };
+  f.final = ap.phase === 'in';                                  // (on its way in: the runway's taken - cessnaRunwayFree)
+  // (on the glide its path is the glide's own slope, eased onto the line - not chased up and down to it: Nov 2, the 747 porpoised)
+  if (ap.phase === 'in' && D + IN > 0 && Math.max(0, D + IN) * G < cruise) return clamp(G + (yT - f.y) / (f.kind === 'jet' ? 420 : 260), -0.25, 0.3);
   return clamp((yT - f.y) / 150, -0.35, 0.3);
 }
 // the big ships, the boats, the balloons, driven: their own small rules, the drive lever (and up / down)
@@ -36992,19 +37079,20 @@ function stepCivHeli(h, dt) {
     // water aimed at the right place") with her water on she keeps her facing: told the other way, she flies backwards
     if (lever && Math.sign(lever) !== h.facing && !h.turn && !h.hose) { tvx = 0; if (Math.abs(h.vx) < 14) h.turn = { t: 0, from: h.facing }; }
     if (h.turn) { tvx = 0; h.turn.t += dt; if (h.turn.t >= CH_TURN_T) { h.facing = -h.turn.from; h.turn = null; } }
-    h.vx += clamp(tvx - h.vx, -100 * AIR_SK.civheli * dt, 100 * AIR_SK.civheli * dt);
-    h.vy += clamp(tvy - h.vy, -130 * dt, 130 * dt);
+    // (Nov 2: by the forces on it, as every helicopter - heliStep, 29-zz-flight.js; a plane on its magnet is weight it carries)
+    { const lm = h.mag && h.mag.obj ? (h.mag.obj.kind === 'jet' ? 2.6 : 1.6) : 1, lowG = gy - h.y;
+      heliStep(h, dt, tvx, tvy, { v: CH_V, tmax: lm > 1 ? 1.5 : 1.8, resp: 3, m: lm, lev: 0, levK: clamp(1 - lowG / 60, 0, 1) }); }
     // (over the airport it can't crash, user Oct 25 late: low over the concrete it eases its sink and levels itself,
     // and sets down)
     const apron = onApron(h.x) && dryLand(h.x);
     if (apron && gy - h.y < 140) { h.vy = Math.min(h.vy, 30 + (gy - h.y) * 0.4); if (gy - h.y < 70) h.tilt *= 1 - Math.min(1, dt * 4); }
     h.x = clamp(h.x + h.vx * dt, 40, WORLD_W - 40); h.y = Math.max(HELI_CEIL, h.y + h.vy * dt);
-    h.tilt += (clamp(h.vx / CH_V, -1, 1) * 0.2 - h.tilt) * Math.min(1, dt * 3);
     h.spin = Math.min(1, h.spin + dt);
     // touching down: gently on land it sets down; hard, or on the water, it's lost
     if (h.y >= gy) {
       if (!dryLand(h.x) && !deckC) { ditchFx(h.x, h.vx, 1.2, 36, h.vy); h.state = 'sink'; h.vy = 40; h.vx *= 0.3; civLetGo(h); return; }   // (onto the water: in it goes, and sinks - no blast, user Oct 26)
       if (h.vy > 90 && !apron) { civHeliDown(h); h.y = gy; return; }
+      if (h.vy > 50) shakeAt(Math.min(2, h.vy / 70), h.x);       // (down hard: the ground feels it)
       h.susV = (h.susV || 0) + clamp(h.vy + 25, 20, 110) * 0.16; h.y = gy; h.vy = 0; h.vx = 0; h.state = 'landed'; h.deck = deckC;   // (down on its wheels: the body sinks on its legs - up to two units - and bounces back up)
     }
     heliDust(h.x, h.y + chStand(h), gy - h.y, h.spin, dt, chHalf(h));   // (low over the ground: its downwash raises the dust)
@@ -43559,7 +43647,8 @@ function aircraftVsTrees() {
   if (netGuestHold()) return;
   for (const h of helis) if (h && h.state === 'fly') { const it = treeClip(h.x, h.y, heliHalf() * 0.9, heliSkid(), h.tilt); if (it) { treeStruck(it, h.vx, false); heliHurt(h, h.hp + 1, h.x, h.y); } }
   for (const h of civHelis) if (h.state === 'fly') { const it = treeClip(h.x, h.y, chHalf(h) * 0.85, chSkid(h), h.tilt); if (it) { treeStruck(it, h.vx, false); civHeliHit(h, 1, h.x, h.y); civHeliDown(h); } }
-  for (const f of traffic) if (f.state === 'fly' || f.state === 'free') { const T = TRAFFIC[f.kind]; if (!T) continue; const it = treeClip(f.x, f.y, T.hit[0], T.hit[1], f.ang || 0); if (it) { treeStruck(it, f.vx || (f.dir || 1) * T.v, f.kind === 'jet'); trafficDown(f); } }
+  // (a plane over an airfield's concrete: its runway is kept clear - Nov 2, a tree's crown over the apron brought down Cessnas taking off and landing)
+  for (const f of traffic) if ((f.state === 'fly' || f.state === 'free') && !onApron(f.x)) { const T = TRAFFIC[f.kind]; if (!T) continue; const it = treeClip(f.x, f.y, T.hit[0], T.hit[1], f.ang || 0); if (it) { treeStruck(it, f.vx || (f.dir || 1) * T.v, f.kind === 'jet'); trafficDown(f); } }
   for (const s of seaplanes) if (s.state === 'fly') { const it = treeClip(s.x, s.y, 22, 9, s.ang || 0); if (it) { treeStruck(it, s.vx || s.dir * s.spd, false); spDown(s); } }
   for (const b of blimps) if (b.state === 'fly') { const it = treeClip(b.x, b.y, blimpArt ? blimpArt.W * BLIMP_K * 0.45 : 64, 16, b.ang || 0); if (it) { treeStruck(it, b.vx || 0, false); blimpBurst(b); } }
   for (const b of balloons) if (b.state === 'fly') { const q = balloonBox(b), it = treeClip(q.cx, q.cy, q.hw, q.hh, 0) || treeAt(b.x, b.y); if (it) { treeStruck(it, b.vx || 0, false); balloonPop(b, false, b.x, b.y); } }
@@ -45308,7 +45397,7 @@ const SP_LAKE_MIN = 700;
 const spLakes = not => (land.lakes || []).filter(L => L[1] - L[0] > SP_LAKE_MIN && L !== not && !(not && Math.abs(L[0] - not[0]) < 1));
 const spLake = s => { const A = spLakes(null); if (A.length < 3) return A.find(L => (L[0] + L[1]) / 2 < WORLD_W / 2 === s.home < WORLD_W / 2) || A[0]; return A[Math.floor(splnR() * A.length)]; };
 // the highest ground in the next stretch ahead (it keeps 220 over it, crossing the land)
-function spClear(s) { let m = Math.min(WATER_Y, treeTopIn(s.x, s.x + s.dir * 700), hangarTopIn(s.x, s.x + s.dir * 2500)); for (let k = 0; k <= 700; k += 100) { const x = s.x + s.dir * k; if (dryLand(x)) m = Math.min(m, landTop(x)); } return m; }   // (and the trees on the way: user Oct 27, into one it comes down)
+function spClear(s) { let m = Math.min(WATER_Y, treeTopIn(s.x, s.x + s.dir * 700), hangarTopIn(s.x, s.x + s.dir * 2500)); for (let k = 0; k <= 700; k += 100) { const x = s.x + s.dir * k; if (dryLand(x)) m = Math.min(m, landTop(x)); else m = Math.min(m, airClear(x, 60)); } return m; }   // (and the big ships at sea - airClear)   // (and the trees on the way: user Oct 27, into one it comes down)
 const spHold = (s, alt) => { const tgt = Math.min(alt, spClear(s) - 220); return s.y > tgt + 30 ? -0.5 : s.y < tgt - 30 ? 0.4 : 0; };
 const spFace = (s, want) => { if (!spOnWater(s) && want && s.dir !== want && !s.turn) s.turn = { t: 0, from: s.dir }; };
 function spPlan(s, dt) {
@@ -45364,7 +45453,9 @@ function spPlan(s, dt) {
   if (ai.phase === 'back') {
     if (spOnWater(s)) { ai.phase = 'home'; return [0, 0]; }
     const toH = (s.home - s.x) * -s.out;                                  // (how far it still has to come)
-    if (toH < 900) return [0, s.y < WATER_Y - 30 ? 0.35 : 0.15];          // (coming down to land)
+    // (coming down to land: a steady glide - one in six - down to the water a good way short of its harbour, so it has slowed on the
+    // water before it gets there: Nov 2, it keeps its speed when it touches now)
+    if (toH < 3200) { const yT = WATER_Y + 25 - Math.max(0, Math.min(WATER_Y + 25 - ai.alt, (toH - 900) / 6)); return [0, clamp((yT - s.y) / 90, -1, 0.75)]; }   // (aimed a little under the water, so it does touch - never floating on into its harbour)
     // (user Oct 28: back from a lake in the other country it starts this side of the sea: turned for home, and clear of
     // the land on its way - spHold - as on any trip over the land)
     spFace(s, -s.out);
@@ -45401,7 +45492,7 @@ function spWater(s, dt, lever, stick, mine) {
 // it, it always sets down (as a plane over its airfield's concrete always lands): turning, climbing out, whatever.
 const SP_FOOT = 6;                                               // (its middle above its floats' bottom: what touches the ground)
 function spAir(s, dt, stick, mine) {
-  let want = stick ? clamp(s.pitch + stick * 0.5, -0.5, 0.5) : 0;
+  let want = clamp(stick, -1, 1) * (stick < 0 ? 0.8 : 0.45);     // (its own pilot's stick is the path it wants, climbing steeper than it comes down - flyStep: a held stick of yours pulls the wings, below)
   const H = surfaceY(s.x) - s.y, wet = !dryLand(s.x);
   if (s.climbT > 0) { s.climbT -= dt; if (!stick) want = -0.2; }
   const flare = wet && H < 70 && (s.vy || 0) >= -5 && !(s.climbT > 0) && !s.turn ? 1 : 0;
@@ -48396,7 +48487,7 @@ function buildTraffic() {
   for (let i = 0; i < 2 * CESSNAS_A_SIDE; i++) {
     const R = i & 1, k = i >> 1, f = newFlight('cessna', R, 6 + trR() * 6);
     f.col = i % CESSNA_COLS.length; f.alt = cessnaAlt(); f.ph = trR() * 6;
-    if (k > 0) { f.state = 'fly'; f.s = trRnd(TRAFFIC.cessna.roll * 4, f.sGate - 800); }
+    if (k > 0) { f.state = 'fly'; f.s = trRnd(TRAFFIC.cessna.roll * 4, f.sGate - 800); const [rx, rd] = routeAt(f, f.s); f.x = rx; f.dir = rd; f.y = airport(R).y - (TRAFFIC.cessna.gy || 8) - f.alt; f.vx = rd * TRAFFIC.cessna.v; }   // (already up, somewhere along its loop: taken up by its pilot on its first step - stepFlight)
     traffic.push(f);
   }
   traffic.push(newFlight('jet', 0, 12, 0), newFlight('jet', 1, 12, 1));   // (user Oct 25 late: always flying opposite ways - they leave together)
@@ -48415,6 +48506,27 @@ function newFlight(kind, from, wait, owner) {
   if (kind === 'jet') f.alt = trRnd(1250, 1850) * JET_ALT_K;                  // (user Oct 26: "rather than a specific precise height, they have a 'range'")
   if (kind === 'cessna') cessnaRoute(f);
   return f;
+}
+// (Nov 2) out of its hangar onto the runway and its take-off run, flown by its own pilot (stepCivAir: stepPlaneGround's roll, then
+// civRouteAir in the air) - the one way every plane flies
+function trafficDepart(f) {
+  const A = airport(f.from), d = Math.sign(A.near - A.far) || 1, K = CIVAIR[f.kind];
+  Object.assign(f, { state: 'free', ground: 'roll', x: A.far, y: airfieldAt(A.far).y, facing: d, dir: d, pitch: 0, ang: 0, spd: 0, vx: 0, vy: 0, gear: 1, rot: 0, gWant: 0, turn: null, roll: null, gam: null, climbT: 0, offField: false, auto: 'route', ri: 0, ap: null, final: false, exitK: 1 });
+  if (!K) f.state = 'fly';
+}
+// in its hangar at the end of a flight (its own pilot's, or yours left): its next flight from here, a new height; the 747s
+// leave together, opposite ways (user Oct 25 late)
+function trafficArrive(o, yours) {
+  const R = airfieldAt(o.x).R ? 1 : 0, keep = { col: o.col, alt: o.kind === 'jet' ? trRnd(1250, 1850) * JET_ALT_K : cessnaAlt(), ph: trR() * 6 };
+  Object.assign(o, newFlight(o.kind, R, yours ? trRnd(20, 40) : o.kind === 'jet' ? 25 : 6 + trR() * 8, o.owner), keep, { ground: null, gear: 0, auto: null, ap: null, gam: null });
+  if (o.kind === 'jet') for (const q of traffic) if (q !== o && q.kind === 'jet' && q.syncWait) Object.assign(q, newFlight('jet', 1 - o.from, o.wait, q.owner), { syncWait: false });
+}
+// which turn point a plane taken over mid-route is heading for: the first one ahead of it along its way
+function trafficRi(f) {
+  if (!f.route) return 0;
+  const s = f.s || 0; let acc = 0, prev = f.route0;
+  for (let i = 0; i < f.route.length; i++) { acc += Math.abs(f.route[i] - prev); prev = f.route[i]; if (acc > s) return i; }
+  return f.route.length - 1;
 }
 // (user Oct 26: "Cessna and small crafts stay in their half of the map, they don't cross countries. Only the 747 goes
 // between airports.") A Cessna leaves its own airfield and comes back to it: either out over its own half of the sea
@@ -48447,17 +48559,8 @@ function cessnaRoute(f) {
 }
 // the runway its own: nobody else in its hangar, landing or still on its take-off run
 function cessnaRunwayFree(f) {
-  for (const g of traffic) if (g !== f && g.kind === 'cessna' && g.to === f.to && ((g.state === 'parked' && g.wait < 16) || (g.state === 'fly' && (g.final || g.s < TRAFFIC.cessna.roll * 1.6)))) return false;
+  for (const g of traffic) if (g !== f && g.kind === 'cessna' && g.to === f.to && ((g.state === 'parked' && g.wait < 16) || ((g.state === 'fly' || g.state === 'free') && (g.final || (g.ground && g.ground !== 'enter'))))) return false;   // (one coming in, or on the runway: landing, rolling out, or on its take-off run)
   return true;
-}
-// at the gate: the runway clear, it goes in (final); not, it flies a loop out and back at its height and asks again
-function cessnaHold(f, T, dt) {
-  if (f.final || !f.route || f.s + T.v * dt < f.sGate - 2) return;
-  if (cessnaRunwayFree(f)) { f.final = true; return; }
-  const { A, d0, sea, inl } = cessnaZone(f.to), n = f.route.length, gate = f.route[n - 2];
-  const room = Math.abs(sea - gate), H = room > 900 ? gate + d0 * trRnd(900, Math.min(2200, room)) : gate - d0 * trRnd(900, 2000);
-  f.route.splice(n - 1, 0, H, gate);
-  const add = 2 * Math.abs(H - gate); f.D += add; f.sGate += add; f.holds++;
 }
 // where a Cessna is a distance s along its route, which way it's heading, and how far it is past its nearest turn (off,
 // negative before it) and which way it was heading into that turn
@@ -48472,10 +48575,6 @@ function routeAt(f, s) {
   }
   return [x, d, off, from];
 }
-const CESSNA_TURN_R = 80;          // (a scripted Cessna's turn: the 80 units either side of its turn point, through the turn frames)
-// its height above the runway a distance s along a flight of length D: climbing out after its take-off run, cruising,
-// gliding down to touch down before its landing run
-function flightAlt(T, s, D, top) { return Math.max(0, Math.min(top || T.alt, T.climb * (s - T.roll), T.climb * 0.8 * (D - T.stop - s))); }
 function stepTraffic(dt) {
   if (!LAND) return;
   { const t0 = performance.now(), S = schedSystem('traffic', 1, 1 / 30);
@@ -48501,10 +48600,11 @@ function stepFlight(f, dt) {
       if (f.syncWait && !traffic.some(o => o !== f && o.kind === 'jet' && !o.syncWait && (o.state === 'fly' || o.state === 'free' || o.state === 'parked'))) { f.syncWait = false; f.wait = 30; }
       f.wait -= dt;
       if (f.wait < 1.6) openHangar(airfieldAt(airport(f.from).far), 1);   // (its door going up before it rolls out)
-      if (f.kind === 'cessna' && f.wait < 1 && traffic.some(g => g !== f && g.kind === 'cessna' && g.to === f.to && g.state === 'fly' && g.final)) f.wait = 1;   // (one on the runway at a time: it waits for the one coming in)
-      if (f.wait <= 0) { f.state = 'fly'; f.s = 0; }
+      if (f.kind === 'cessna' && f.wait < 1 && traffic.some(g => g !== f && g.kind === 'cessna' && g.to === f.to && (g.state === 'fly' || g.state === 'free') && g.final)) f.wait = 1;   // (one on the runway at a time: it waits for the one coming in)
+      if (f.wait <= 0) trafficDepart(f);
       return;
     }
+    if (f.state === 'fly') { civToFree(f); f.auto = 'route'; f.ri = trafficRi(f); }   // (Nov 2: no scripted flights - a plane on its timetable is flown by its own pilot through the one flight model: civRouteAir)
     if (SHEET_PLANES[f.kind] && f.smokeT > 0 && (f.state === 'fly' || f.state === 'free')) { if (f.state === 'fly') f.facing = f.dir || 1; planeSmoke(f, dt); }   // (hit: white smoke, then black)
     if (f.smk) cessnaSmokeStep(f, dt);                               // (its coloured smoke, user Oct 27)
     if (f.state === 'free') { stepCivAir(f, dt); if (f.state === 'free') { trafficHits(f, dt); if (!f.ground) { trafficHull(f); planeWash(f, dt, f.kind === 'jet' ? 3.5 : 0.8); } } return; }   // (OPEN WORLD: one you've taken - see 50-land-civdrive)
@@ -48532,37 +48632,6 @@ function stepFlight(f, dt) {
       }
       return;
     }
-    const A = airport(f.from), B = airport(f.to), D = f.route ? f.D : Math.abs(B.far - A.far);
-    let d = Math.sign(B.far - A.far);
-    // speed: up to speed on its take-off run, down again on its landing run
-    const vU = 0.12 + 0.88 * smoothstep(0, T.roll, f.s), vD = 0.12 + 0.88 * smoothstep(D, D - T.stop, f.s);
-    if (f.kind === 'cessna') cessnaHold(f, T, dt);
-    const D2 = f.route ? f.D : D;                                 // (a hold makes the way longer)
-    f.s += T.v * Math.min(vU, vD) * dt;
-    const top = f.alt ? f.alt * (1 + 0.1 * Math.sin(f.s / 2300 + (f.ph || 0))) : undefined;   // (its height drifts a little along the way)
-    const alt = flightAlt(T, f.s, D2, top), alt2 = flightAlt(T, f.s + 8, D2, top);
-    if (f.route) { const [rx, rd, off, from] = routeAt(f, f.s); f.x = rx; d = rd; f.rt = Math.abs(off) < CESSNA_TURN_R ? { u: 0.5 + off / (2 * CESSNA_TURN_R), from } : null; } else f.x = A.far + d * f.s;
-    f.y = A.y - (T.gy || 8) - alt; f.dir = d; f.vx = d * T.v * Math.min(vU, vD);
-    f.ang = Math.atan2(-(alt2 - alt), 8) * d;                       // (nose up climbing)
-    // (user Oct 25 late: coming in to land the nose is UP, not down - it sinks toward the runway nose high, flares
-    // just over it, touches down on its main wheels, and only then lets the nose down onto the runway)
-    const tdS = D - T.stop;
-    if (alt2 < alt) f.ang = -d * (0.035 + 0.065 * smoothstep(90, 0, alt));
-    else if (alt <= 0 && f.s >= tdS) f.ang = -d * 0.1 * clamp(1 - (f.s - tdS) / (f.kind === 'jet' ? 160 : 90), 0, 1);
-    if (f.altP > 0 && alt <= 0) planeSusKick(f, 70); f.altP = alt; susStep(f, dt, ...PLANE_SUS);   // (touching down: onto its wheels' springs)
-    f.gear = clamp((f.gear == null ? 1 : f.gear) + (alt < 120 && (f.s < T.roll * 1.6 || f.s > D - T.stop * 3) ? 1.5 : -1.5) * dt, 0, 1);   // (wheels down near the ground, up once it's climbing)
-    // (out of its hangar at the start, into the other's at the end: straight in through the open door - user Oct 26)
-    if (f.s < 200 || D2 - f.s < 420) openHangar(airfieldAt(f.x), 0.8);
-    if (alt <= 0 && f.s < T.roll) f.ang -= (f.kind === 'jet' ? 0.1 : 0.07) * d * smoothstep(T.roll * 0.7, T.roll, f.s);   // (user Oct 25 late: the nose lifts at the end of its take-off run)
-    if (f.s >= D) {
-      const keep = { col: f.col, alt: f.kind === 'jet' ? trRnd(1250, 1850) * JET_ALT_K : cessnaAlt(), ph: trR() * 6 }; Object.assign(f, newFlight(f.kind, f.to, f.kind === 'jet' ? 25 : 6 + trR() * 8, f.owner), keep);   // (a new height each flight)
-      // (a 747 lost earlier waits for this one to land, then leaves the other way at the same moment)
-      if (f.kind === 'jet') for (const o of traffic) if (o !== f && o.kind === 'jet' && o.syncWait) { Object.assign(o, newFlight('jet', 1 - f.from, f.wait, o.owner), { syncWait: false }); }
-      return;
-    }
-    trafficHits(f, dt);
-    if (f.state === 'fly') trafficHull(f);
-    if (f.y + (T.gy || 8) < (dryLand(f.x) ? landTop(f.x) : surfaceY(f.x)) - 2) planeWash(f, dt, f.kind === 'jet' ? 3.5 : 0.8);   // (low over the water or the land: its wash - every plane's)
   }
 // hit: a round or a shell through it, and it's going down
 /* ---- a Cessna's coloured smoke (user Oct 27: "A Cessna has a button to do coloured smoke trails, like those plane
@@ -51009,10 +51078,12 @@ function stepHeli(h, dt) {
   // through the three-quarter and head-on views, on the spot)
   let tvx = lever * (120 * AIR_SK.heli), tvy = stick * HELI_VY;
   [tvx, tvy] = heliLoadFly(h, tvx, tvy, stick);                 // (a tank on the magnet: heavier going)
-  if (lever && Math.sign(lever) !== h.facing && !h.turn) { tvx = 0; if (Math.abs(h.vx) < 14 && Math.abs(h.tilt) < 0.07) h.turn = { t: 0, from: h.facing }; }
+  if (lever && Math.sign(lever) !== h.facing && !h.turn) { tvx = 0; if (Math.abs(h.vx) < 14 && Math.abs(h.tilt) < 0.2) h.turn = { t: 0, from: h.facing }; }
   if (h.turn) tvx = 0;
-  h.vx += clamp(tvx - h.vx, -140 * AIR_SK.heli * dt, 140 * AIR_SK.heli * dt);
-  h.vy += clamp(tvy - h.vy, -160 * dt, 160 * dt);
+  // (Nov 2: by the forces on it - heliStep, 29-zz-flight.js: its rotor tilted and pushing, gravity, the air's drag and the wind, its
+  // load's weight; near the ground it settles level with it)
+  { const half = heliHalf() * 0.8, gm0 = heliGround(h.x, h.y), Hg0 = gm0 - (h.y + heliSkid()), slope = LAND && onLand(h.x) ? Math.atan2(heliGround(h.x + half, h.y) - heliGround(h.x - half, h.y), half * 2) : 0;
+    heliStep(h, dt, tvx, tvy, { v: 120 * AIR_SK.heli, tmax: heliLoad(h) ? 1.5 : 1.9, resp: 4, m: heliLoad(h) ? 1.8 : 1, lev: slope, levK: clamp(1 - Hg0 / 45, 0, 1) }); }
   if (heliLoad(h)) h.vx += h.rope.pull * dt;                     // (and its swing tugs)
   if (h.turn) { h.turn.t += dt; if (h.turn.t >= HELI_TURN_T) { h.facing = -h.turn.from; h.turn = null; } }
   h.x = clamp(h.x + h.vx * dt, 30, WORLD_W - 30);
@@ -51040,17 +51111,12 @@ function stepHeli(h, dt) {
   // sinking it flies more level; turning, level; and coming down near the ground it settles to the ground's slope.
   // (a positive turn on the screen tips the right-hand end down, so the speed itself, not times the facing, gives
   // the nose-down tilt either way)
-  let tilt = clamp(h.vx / (120 * AIR_SK.heli), -1, 1) * 0.335 + clamp((tvx - h.vx) / (120 * AIR_SK.heli), -1, 1) * 0.1;
-  tilt *= 1 - 0.6 * clamp(Math.abs(h.vy) / HELI_VY, 0, 1);
-  if (h.turn) tilt = 0;
-  const Hg = gm - foot;
-  if (Hg < 45) { const slope = onLand(h.x) ? Math.atan2(gr - gl, half * 2) : 0, bl = clamp(1 - Hg / 45, 0, 1); tilt = tilt * (1 - bl) + slope * bl; }
-  h.tilt += (tilt - h.tilt) * Math.min(1, dt * 4);
   if (foot >= gm && !LAND) { h.y = gm - 2 - heliSkid(); h.vy = Math.min(h.vy, 0); }   // (over water it holds just above it)
   else if (foot >= gm && LAND && !onLand(h.x) && gm < surfaceY(h.x)) { const d = shipTopAt(h.x, h.y - 4); susKick(h, h.vy + 30); h.y = gm - heliSkid(); h.state = 'landed'; h.vy = 0; h.vx = 0; h.deck = d && Math.abs(d.y - gm) < 1 ? d.c : null; }   // (onto a ship's top - or the harbour's deck: it lands there)
   else if (foot >= gm && LAND && (lakeAt(h.x) || !onLand(h.x))) { heliSink(h); return; }   // (onto a lake - or the sea - it goes in)
   else if (foot >= gm) {
     susKick(h, h.vy + 30);                                       // (onto its skids' springs, as the civilians)
+    if (h.vy > 60) shakeAt(Math.min(2.5, h.vy / 80), h.x);       // (down hard: the ground feels it)
     h.y = gm - heliSkid(); h.state = 'landed'; h.vy = 0; h.vx = 0; kickLandDust(h.x, gm, 6);
   }
   rotorWash(h, dt);
@@ -55509,7 +55575,7 @@ const VEH_TUNE = {
     ['TANK POWER', 'tank', 'kw', 3000, 10, 'kW'], ['TANK TRACK GRIP', 'tank', 'grip', 3, 0.05, 'x'], ['TANK HEALTH', 'tank', 'hp', 20, 0.5], ['TANK AMMO', 'tank', 'ammo', 60, 1], ['TANK RELOAD', 'tank', 'reload', 10, 0.05, 's']],
   PLANES: () => [['TOP SPEED', 'plane', 'kmh', 900, 10, 'km/h'], ['HITS TO DOWN', 'plane', 'hits', 12, 1], ['ROCKETS', 'plane', 'rockets', 30, 1],
     ['ROCKET RELOAD', 'plane', 'rocketReload', 5, 0.05, 's'], ['BOMBS', 'plane', 'bombs', 30, 1], ['BOMB RELOAD', 'plane', 'bombReload', 2, 0.01, 's'],
-    ['MACHINE GUN', 'plane', 'mgRate', 0.5, 0.005, 's'], ['CESSNA', null, AIR_KMH.cessna + ' km/h'], ['747', null, AIR_KMH.jet + ' km/h']],
+    ['MACHINE GUN', 'plane', 'mgRate', 0.5, 0.005, 's'], ['STORM LAYER TOP', 'air', 'top', 600, 5, 'm'], ['STORM GUSTS', 'air', 'gust', 3, 0.05, 'x'], ['CESSNA', null, AIR_KMH.cessna + ' km/h'], ['747', null, AIR_KMH.jet + ' km/h']],
   SUB: () => [['SPEED', 'sub', 'speedK', 5, 0.05, 'x'], ['TORPEDOES', 'sub', 'torps', 60, 1], ['TORPEDO RELOAD', 'sub', 'torpReload', 10, 0.05, 's'],
     ['MINES', 'sub', 'mines', 40, 1], ['MINE RELOAD', 'sub', 'mineReload', 5, 0.05, 's'], ['HEALTH', null, 'per section'],
     ['EXPLORER SPEED', 'minisub', 'speed', 400, 1], ['EXPLORER CLIMB', 'minisub', 'climb', 300, 1]],
