@@ -435,6 +435,29 @@ const worldPackOf = story => story ? WORLD_PACK.story : WORLD_PACK.open;
 // a key as it is kept, whichever world is loaded (the SNAPSHOT: both worlds in one paste - 41-sky-new.js gameSnapshot)
 let lsRawGet = k => localStorage.getItem(k), lsRawSet = (k, v) => localStorage.setItem(k, v), lsRawDel = k => localStorage.removeItem(k);
 const STORY_WORLD = (() => { try { return localStorage.getItem('bd_world') === 'story'; } catch (e) { return false; } })();
+/* (user, Nov 2 12:35: "make it so that the snapshot actually copies the content of the tab that I'm in ... update what's in the
+   memory at the same time that's capturing the snapshot") THIS TAB'S SAVE: two tabs share one browser save and each writes whole
+   keys from its own memory, so the save can hold the other tab's world. Every bd_ key this tab reads or writes is kept here as
+   the tab last had it (as stored: a Story key under its bd_sw_ name; null = not kept). SNAPSHOT first writes them back
+   (tabSaveBack), then copies the save. Keys this tab never touched (the other world's) are left as they are. Installed under
+   the world shim, so it sees the stored names; the page only, not the worker's stand-in. */
+const TAB_SEEN = new Map();
+(function tabSeen() {
+  try {
+    const LS = localStorage; if (typeof Storage === 'undefined' || !(LS instanceof Storage)) return;
+    const P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
+    const mine = (o, k) => o === LS && typeof k === 'string' && k.startsWith('bd_') && !LOCAL_KEYS.includes(k);
+    P.getItem = function (k) { const v = g.call(this, k); if (mine(this, k)) TAB_SEEN.set(k, v); return v; };
+    P.setItem = function (k, v) { const o = s.call(this, k, v); if (mine(this, k)) TAB_SEEN.set(k, String(v)); return o; };
+    P.removeItem = function (k) { const o = r.call(this, k); if (mine(this, k)) TAB_SEEN.set(k, null); return o; };
+  } catch (e) { }
+})();
+function tabSaveBack() {                                          // (this tab's world into the save; how many keys differed)
+  let n = 0;
+  for (const [k, v] of TAB_SEEN) { if (lsRawGet(k) === v) continue; try { if (v == null) lsRawDel(k); else lsRawSet(k, v); n++; } catch (e) { } }
+  if (n) console.log('SNAPSHOT: ' + n + ' key(s) another tab had changed put back as this tab has them');
+  return n;
+}
 (function worldShim() {
   const PK = worldPackOf(STORY_WORLD), GK = WORLD_PACK.game || {}, packed = Object.keys(PK).length + Object.keys(GK).length > 0;
   if (!STORY_WORLD && !packed) return;                          // (the open world, nothing built in: the storage as it is)
@@ -4120,8 +4143,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 623;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 13:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 624;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 13:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -26210,6 +26233,7 @@ if (/[?&]skygpu=0/.test(location.search)) NSKY.gpu = false;   // (the decks draw
 // (bd_*: terrain edits and the like - put in first by LOAD too, user Nov 1: snapWorldLoad, 00-world.js). Not kept: the smoke,
 // sparks and splashes in the air - they start again from whatever is burning.
 function gameSnapshot() {
+  tabSaveBack();                                                         // (this tab's world, not whatever another tab saved last - 00-world.js)
   const store = {}; try { for (const k of Object.keys(localStorage)) if (k.startsWith('bd_')) store[k] = lsRawGet(k); } catch (e) { }   // (as kept: the open world's bd_ and the Story world's bd_sw_ both, whichever is loaded - 00-world.js, Story chat Oct 31)
   return JSON.stringify({ kind: 'battleship-duel', v: 1, game: GAME_VERSION, worldName: STORY_WORLD ? 'story' : 'open', built: WORLD_PACK.stamp, at: new Date().toISOString().slice(0, 16), size: [bw, bh], dpr, mode: MODE,
     view: PHOTO.on ? { x: +PHOTO.x.toFixed(1), y: +PHOTO.y.toFixed(1), z: +PHOTO.z.toFixed(4) } : null,
