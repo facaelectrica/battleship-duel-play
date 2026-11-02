@@ -4116,7 +4116,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 602;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 11:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 02 11:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -47861,7 +47861,7 @@ function stepJetboat(j, dt) {
       const want = Math.atan2(yb - ys, 2 * half) * j.dir - f[0] * go * j.dir + Math.sin(j.ph * f[1]) * 0.03 * go * Math.min(1, 25 / L) * j.dir;
       j.a += (want - j.a) * (1 - Math.exp(-dt * JB_EASE));
     }
-    if (!SIM_ONLY && j.turn === 0 && !j.air && sp > 4) { j.spr = (j.spr || 0) + dt * (j.kind === 'motor' ? 10 : 30); while (j.spr >= 1) { j.spr -= 1; spawnSpray(j.x - j.dir * 13, j.y - 1, -j.dir * jbRnd(30, 70), 0.5); } }
+    if (!SIM_ONLY && j.kind !== 'fish' && j.turn === 0 && !j.air && sp > 4) { j.spr = (j.spr || 0) + dt * (j.kind === 'motor' ? 10 : 30); while (j.spr >= 1) { j.spr -= 1; spawnSpray(j.x - j.dir * 13, j.y - 1, -j.dir * jbRnd(30, 70), 0.5); } }
     if (j.hp < 2) { j.smokeT = (j.smokeT || 0) - dt; if (j.smokeT <= 0 && !SIM_ONLY) { j.smokeT = 0.15; spawnSmoke(j.x - j.dir * 4, j.y - 8, { kind: 'trail', dark: 0.2, r: jbRnd(2, 3.5), grow: 3, lift: 20, vx: -j.dir * 10, life: jbRnd(2, 3), alpha: 0.5, chain: smStream(j) }); } }
     // hit: a round damages it, a second (or a shell) sinks it
     for (const b of bullets) if (!b._jb && Math.abs(b.x - j.x) < 13 && Math.abs(b.y - (j.y - 4)) < 6 && mayHit(b, j)) { b._jb = true; j.hp--; harmed(j, b.x, b.y, b); spawnSparks(b.x, b.y, 4, 120); if (j.hp <= 0) jetboatSink(j); break; }
@@ -51721,6 +51721,7 @@ function fishNetStep(j, dt) {
   // held up hauls it in, let go the winch holds
   if (j.driven != null) { const st = civStick(j.driven), c = st > 0.3 ? 1 : st < -0.3 ? -1 : 0; if (c && c !== N.cmd && (c < 0 ? N.s < 1 : N.L < NETP.ROPE * UPM - 0.01)) sound('anchorWinch', j.x, 1); N.cmd = c; }
   if (j.state !== 'run') N.cmd = 0;
+  if (j.state === 'run') fishBoatFx(j, dt);
   // (user 10:29: the gulls "would land on the boat when the boat is stopped") gl: 0 circling her .. 1 sitting on her
   { const still = j.state === 'run' && !(j.turn > 0) && Math.abs(j.vDrive || 0) + Math.abs(j.ntv || 0) < 0.5 * UPM;
     N.gl = clamp((N.gl || 0) + (still ? dt / 2.5 : -dt / 0.8), 0, 1); }
@@ -51858,6 +51859,32 @@ function fishNetStep(j, dt) {
     N.ck[i] += (back - N.ck[i]) * Math.min(1, dt * 0.35); N.ct[i] += (across - N.ct[i]) * Math.min(1, dt * 0.6);
   }
 }
+// her own way through the water (user 10:34): smoke from her funnel and bubbles off her screw while she's under way, foam heaped off
+// her bow, at her screw and a wake laid down behind her - the big ships' rule (22-ship-physics.js, 50-land-civships.js) at her size
+const FISH_FUNNEL = [0.79, 0.37], FISH_SCREW = [0.88, 0.87];   // (the side picture's funnel top and screw, from its bow - the art faces left)
+function fishBoatFx(j, dt) {
+  const v = j.fpx == null || !(dt > 0) ? 0 : (j.x - j.fpx) / dt; j.fpx = j.x;
+  if (SIM_ONLY || j.turn > 0 || j.air) return;
+  const sp = Math.abs(v), dir = Math.sign(v) || j.dir, [L, h, P] = storyBoatSize(j); if (!P) return;
+  const at = ([ax, ay]) => [j.x - j.dir * (ax - 0.5) * L, j.y + h * FISH_DRAFT - h + ay * h];
+  const go = clamp(sp / (j.v || 60), 0, 1), on = Math.abs(j.drv || 0) > 0.05;
+  if (on || sp > 3) {   // (her engine working: a puff from the funnel, oftener the harder it works)
+    j.fsm = (j.fsm || 0) + dt * (1.5 + 6 * go);
+    while (j.fsm >= 1) { j.fsm -= 1; const [x, y] = at(FISH_FUNNEL); exhPuff(x, y, -dir * (4 + sp * 0.3), P._m * UPM * 1.6, 1 + go); }
+    j.fbb = (j.fbb || 0) + dt * (4 + 30 * go);
+    while (j.fbb >= 1) { j.fbb -= 1; const [x, y] = at(FISH_SCREW); addBubble(x + storyR() * 6 - 3, y + storyR() * 4 - 2, -dir * (10 + 20 * storyR()), -(10 + 25 * storyR()), 0.6 + storyR() * 1.4); }
+  }
+  if (sp < 5) return;
+  const was = FXK; FXK = 1.2;
+  const stern = j.x - dir * L * 0.47, bow = j.x + dir * L * 0.48;
+  j.ffo = (j.ffo || 0) + (8 + sp * 0.12) * 2 * dt;
+  while (j.ffo >= 1) { j.ffo -= 1; spawnFoam(stern + (storyR() * 22 - 11) * FXK, 1.4 + storyR() * 1.6); }
+  if (sp > 18) { j.fbo = (j.fbo || 0) + sp * 0.16 * dt; while (j.fbo >= 1) { j.fbo -= 1; spawnFoam(bow + dir * storyR() * 10 * FXK, 1.2 + storyR() * 1.4); spawnFoam(bow + dir * storyR() * 30 * FXK, 1.6 + storyR() * 1.4); } }
+  j.fwk = (j.fwk || 0) + sp * 0.5 * dt;
+  const k = clamp(sp / 50, 0.25, 1);
+  while (j.fwk >= 1) { j.fwk -= 1; if (wakes.n < 650 && !fxHidden(stern)) wakeRow(stern + (storyR() * 12 - 6 - dir * storyR() * 18) * FXK, (6 + storyR() * 5) * k, (10 + storyR() * 12) * (0.6 + 0.4 * k) * FXK, -dir * (2 + storyR() * 4), k); }
+  FXK = was;
+}
 // a fish inside the bag's outline is in the net (a school keeps its last fish, so it's there to come back)
 // (user 10:11: "the only fish you catch are the ones that pass by the sinker and the float. If it touches another part of the
 // net, it should not count") a fish is caught when it crosses the mouth - the frame rope from the float to the sinker - from the
@@ -51922,7 +51949,7 @@ function netsRefill() {
    layer of rectangles (rules.md section 6, Systems, rule 7: no GLCtx rectangle calls for something new), each line stepped
    in the view's pixel blocks with a row's run as one rectangle. Thin: one block. Drawn in the sea's pass (drawFishBoat),
    so the water's tint and depth fall on it as on the rest. ---- */
-const NET_INK = { rope: '#6f5a3e', mesh: 'rgba(214,198,152,0.8)', frame: '#a8875a', float: '#ff9a1e', floatD: '#b85a0a', sink: '#e8801a', fish: '#d4dde3', fishD: '#8a9aa6', coin: '#ffd23a', coinD: '#b8860b' };
+const NET_INK = { rope: '#6f5a3e', mesh: 'rgba(214,198,152,0.8)', frame: '#a8875a', float: '#ff9a1e', floatD: '#b85a0a', floatH: '#ffd9a0', sink: '#e8801a', fish: '#d4dde3', fishD: '#8a9aa6', coin: '#ffd23a', coinD: '#b8860b' };
 let NET_DRAW = null;                        // (the boat being drawn: read by the layer's view)
 const NET_VX = new Float64Array(NETG.NN + NETG.RN + 1), NET_VY = new Float64Array(NETG.NN + NETG.RN + 1);
 const NET_L = pxLayer({
@@ -51947,7 +51974,19 @@ const NET_L = pxLayer({
       }
       put(rx0 * s, ry * s, (rx1 - rx0 + 1) * s, s, col);
     };
-    const blob = (X, Y, r, c, cd) => { const x = Math.round(X / s) * s, y = Math.round(Y / s) * s, k = Math.max(1, Math.round(r / s)) * s; put(x - k, y - k, 2 * k, 2 * k, cd); put(x - k + s, y - k, 2 * k - s, 2 * k - s, c); };
+    // a ball (the float, the sinker - user 10:34: "more circular and less blocky ... properly scale when we zoom"): its real radius
+    // in this view's pixels, never under two blocks, a darker rim and a light spot up on it
+    const ball = (X, Y, r, c, cd, hi) => {
+      const R = Math.max(2 * s, r), cx = X, cy = Y;
+      for (let y = -R; y < R; y += s) {
+        const yy = y + s / 2, hw = Math.sqrt(Math.max(0, R * R - yy * yy)), x0 = Math.round((cx - hw) / s) * s, x1 = Math.round((cx + hw) / s) * s;
+        if (x1 <= x0) continue;
+        const Y0 = Math.round((cy + y) / s) * s;
+        put(x0, Y0, x1 - x0, s, cd);
+        const ri = R - 1.5 * s; if (ri > 0 && Math.abs(yy) < ri) { const hw2 = Math.sqrt(ri * ri - yy * yy), a0 = Math.round((cx - hw2) / s) * s, a1 = Math.round((cx + hw2) / s) * s; if (a1 > a0) put(a0, Y0, a1 - a0, s, c); }
+      }
+      if (R >= 3 * s) put(Math.round((cx - R * 0.4) / s) * s, Math.round((cy - R * 0.45) / s) * s, s, s, hi);
+    };
     const [hx, hy] = netHook(j), HX = PX(hx), HY = PY(hy);
     // the coins the last catch turned into, rising off the boom (1.6 s)
     const age = time - N.cashT;
@@ -51970,9 +52009,9 @@ const NET_L = pxLayer({
     // the mesh, then its frame ropes over it
     for (let l = 0; l < G.A.length; l++) { const a = G.A[l], b = G.B[l]; line(NET_VX[a], NET_VY[a], NET_VX[b], NET_VY[b], l < G.frame ? ink.mesh : ink.frame); }
     // the two orange dots: the float and the sinker
-    const dot = Math.max(s * 1.5, PX(hx + 0.32 * UPM) - HX);
-    blob(NET_VX[G.top], NET_VY[G.top], dot, ink.float, ink.floatD);
-    blob(NET_VX[G.sink], NET_VY[G.sink], dot * 1.15, ink.sink, ink.floatD);
+    const rad = m => PX(hx + m * UPM) - HX;   // (metres in this view's pixels)
+    ball(NET_VX[G.top], NET_VY[G.top], rad(0.45), ink.float, ink.floatD, ink.floatH);
+    ball(NET_VX[G.sink], NET_VY[G.sink], rad(0.55), ink.sink, ink.floatD, ink.floatH);
     return m;
   },
   rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = -1; return true; }
@@ -52450,7 +52489,7 @@ ACTS.storyPark = (p, id) => storyPark(p, id);
 // a fishing boat drawn (drawJetboats - 50-land-traffic.js): the tropical set's picture at its own metres, riding the water,
 // swinging round through a narrow side-on when it turns
 // (user Nov 2 10:27: one fishing boat, with its turn - side, two between, bow on; the art faces left)
-const STORY_BOAT_ART = ['fishing-boat-0'], FISH_TURN_ART = ['fishing-boat-0', 'fishing-boat-1', 'fishing-boat-2', 'fishing-boat-3'], FISH_DRAFT = 0.24;
+const STORY_BOAT_ART = ['fishing-boat-0'], FISH_TURN_ART = ['fishing-boat-0', 'fishing-boat-1', 'fishing-boat-2', 'fishing-boat-3'], FISH_DRAFT = 0.2;   // (her art's height under the water - user 10:34: a little higher than 0.24)
 function storyBoatSize(j) { if (j.car) return storyCarSize(j); if (j.heli) return [chHalf(j) * 2, chSkid(j) * 2, null]; if (j.sub) return [18 * REAL.minisub, 10 * REAL.minisub, null]; if (j.plane) return [10 * UPM, 3 * UPM, null]; if (j.kind === 'shuttle') return [8 * UPM, 40 * UPM, null]; if (j.kind !== 'fish') return [(j.kind === 'motor' ? 4.3 : 3.5) * UPM, 3 * UPM, null]; const P = tropPic(STORY_BOAT_ART[(j.col | 0) % STORY_BOAT_ART.length]); return P ? [P.width * P._m * UPM, P.height * P._m * UPM, P] : [11 * UPM, 7 * UPM, null]; }
 function drawFishBoat(j) {
   const [w, h, P] = storyBoatSize(j); if (!P) return;   // (the tropical sheet not loaded yet)
