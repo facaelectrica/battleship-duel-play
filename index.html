@@ -4035,8 +4035,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 581;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 23:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 582;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 23:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -50846,6 +50846,12 @@ function carThrow(c, x, gy, surf, s) {
 }
 // a point on her body (lx along her from her middle toward her nose, ly up from her wheels' foot) in the world
 function carPt(c, lx, ly) { const r = c.a - c.dir * c.pit, ca = Math.cos(r), sa = Math.sin(r), ox = lx * c.dir, oy = -ly; return [c.x + ox * ca - oy * sa, c.y + ox * sa + oy * ca]; }
+// her body's corners in the world, as she's drawn (tilted, rocked): their span across (x0..x1) and the lowest (lx, ly)
+function carBox(c, L, H) {
+  let x0 = 1e9, x1 = -1e9, lx = c.x, ly = -1e9;
+  for (const [u, v] of [[-0.5, 0], [0.5, 0], [-0.5, 1], [0.5, 1]]) { const [px, py] = carPt(c, u * L, v * H); if (px < x0) x0 = px; if (px > x1) x1 = px; if (py > ly) { ly = py; lx = px; } }
+  return { x0, x1, lx, ly };
+}
 // her exhaust: a puff from the pipe at her tail, going back from her way
 function carPuff(c, L, k) {
   const [px, py] = carPt(c, -L * 0.48, 0.45 * UPM);
@@ -50921,11 +50927,15 @@ function storyCarBody(c, dt) {
   const deepN = wy == null ? 0 : clamp((c.y - wy) / H, 0, 1);
   // (user 22:27: "a single 'big' splash depending on the vehicle size"; "the water bounces a bit too much, the car would just
   // sink") one splash as she goes in - as wide as she is long, as tall as her size allows - the surface barely dipped
-  if (deepN > 0 && !c.wet) {
-    c.wet = 1; const sp = Math.hypot(c.vx, c.vy);
-    if (sp > 10 && !c.quiet) { if (lakeAt(c.x)) lakeScare(c.x); splash(c.x, c.vx, Math.max(c.vy, 200), { size: clamp(L / 70, 0.3, 1), wide: clamp(L / 40, 0.7, 2.2), wave: clamp(sp / 700, 0.04, 0.2) }); }
+  // (user 22:43: "the splash must match the point of entry of the car", "match the width of the car, so we feel that it's the
+  // car that's making the splash") it rises the moment any part of her body meets the water, across the span she covers
+  // there (her body's own width at the angle she's at), a little ahead where she's going
+  const B = carBox(c, L, H), wB = carWater(clamp(B.lx, 0, WORLD_W - 1)), inW = wB != null && B.ly > wB;
+  if (inW && !c.wet) {
+    c.wet = 1; const sp = Math.hypot(c.vx, c.vy), span = B.x1 - B.x0;
+    if (sp > 10 && !c.quiet) { const sx = (B.x0 + B.x1) / 2 + c.vx * 0.2; if (lakeAt(sx)) lakeScare(sx); splash(sx, c.vx, Math.max(c.vy, 200), { size: clamp(L / 70, 0.3, 1), wide: clamp(span / 30, 0.5, 3), wave: clamp(sp / 700, 0.04, 0.2) }); }
   }
-  else if (wy == null || c.y < wy - 2) c.wet = 0;
+  else if (!inW && (wB == null || B.ly < wB - 2)) c.wet = 0;
   if (run && deepN >= 0.5) { c.state = 'sink'; c.vDrive = 0; c.drv = 0; c.sinkT = 0; }
   if (c.state === 'sink') {
     c.sinkT = (c.sinkT || 0) + dt;
@@ -50950,7 +50960,13 @@ function storyCarBody(c, dt) {
 // (user Nov 1: "cars are not getting tinted when they fall into the water") each car is drawn in the pass of the water she's
 // in, as everything else that goes under is (the planes' wrecks, the traffic): wet in the sea - the sea's pass, under its tint;
 // wet in a lake - inside the lake's water (lakeClip, under drawLake's top); dry - the land's pass, with the structures
-const carPass = c => !(c.state === 'sink' || c.state === 'sunk' || c.y > WATER_Y + 1) ? 'dry' : lakeAt(clamp(c.x, 0, WORLD_W - 1)) ? 'lake' : 'sea';
+// (user 22:43: "The splash must render in FRONT of the car") she's the water's - drawn in its pass, before the surface and its
+// splashes - as soon as any part of her is in it, not only once her wheels are under
+function carPass(c) {
+  if (c.state === 'sink' || c.state === 'sunk') return lakeAt(clamp(c.x, 0, WORLD_W - 1)) ? 'lake' : 'sea';
+  const [L, H] = storyCarSize(c), B = carBox(c, L, H), lx = clamp(B.lx, 0, WORLD_W - 1), w = carWater(lx);
+  return w == null || B.ly <= w ? 'dry' : lakeAt(lx) ? 'lake' : 'sea';
+}
 function drawStoryCars(x0, x1, pass) {
   if (!storyCars.length || !img.tropical) return;
   const fx = E.fx || [1, 1, 1], none = [0, 0, 0];
