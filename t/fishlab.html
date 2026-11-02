@@ -4119,8 +4119,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 617;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 13:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 618;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 13:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -32628,12 +32628,13 @@ function inBalloon(b, x, y) {
   return dx * dx + dy * dy < 1;
 }
 // popped: torn open in a burst of shreds and a gust of hot air; down it comes (alight, too, if fire did it)
-function balloonPop(b, fire, x, y) {
+// (burst: a shell's own blast already there - vehHitBy makes it - so not a second)
+function balloonPop(b, fire, x, y, burst) {
   if (b.state !== 'fly' || netGuestHold()) return;
   b.state = 'pop'; b.popT = 0; b.fire = fire ? 1 : 0; b.vy = Math.max(b.vy, 0);
   const q = balloonBox(b), A = balloonArt && balloonArt[b.i];
   sound('impact', b.x);
-  if (fire) sectionBlast(x != null ? x : q.cx, y != null ? y : q.cy, 0.7, 0);
+  if (fire && !burst) sectionBlast(x != null ? x : q.cx, y != null ? y : q.cy, 0.7, 0);
   if (SIM_ONLY) return;
   // shreds of its fabric, in its colours
   const cols = A ? balloonCols(A) : ['#e04030', '#f0c040'];
@@ -32709,8 +32710,10 @@ function stepBalloon(b, dt) {
       if (held) { b.vy = 0; b.burn = 0; }
       b.y += b.vy * dt;
       // shot or flown into: it pops (a shell, a missile or a bomb sets it alight as well)
-      for (const s of bullets) if (!s._bl && inBalloon(b, s.x, s.y)) { s._bl = true; spawnSparks(s.x, s.y, 3, 80); balloonPop(b, false, s.x, s.y); break; }
-      for (let k = shells.length - 1; k >= 0 && b.state === 'fly'; k--) { const s = shells[k]; if (!s.under && inBalloon(b, s.x, s.y)) { shells.splice(k, 1); balloonPop(b, true, s.x, s.y); } }
+      // (user Nov 2 12:07: "Planes, helicopters, seaplanes, the shuttle, balloons and the blimp... Why not?") where it's hit is
+      // its picture as it's drawn - the envelope, the ropes and the basket, turned with it (balloonPose) - not an ellipse round
+      // the envelope: the one rule, vehHitBy (50-zz-damage.js) - a round stops in it, a shell bursts on it there
+      { const H = vehHitBy(b, dt, balloonPose); if (H) { const s = H.s; if (!H.shell) spawnSparks(s.x, s.y, 3, 80); balloonPop(b, H.shell, s.x, s.y, H.shell); } }
       // (the army's planes and helicopters pass through them, user Oct 25 late: aircraft never collide - only weapons)
       // (a big ship's hull or superstructure: it tears on it and comes down - the shared hullStrike, user Oct 27 night)
       if (b.state === 'fly' && !dryLand(b.x)) { const q = balloonBox(b); if (hullStrike([[b.x, b.y - 2], [q.cx - q.hw * 0.8, q.cy], [q.cx + q.hw * 0.8, q.cy], [q.cx, q.cy + q.hh * 0.8]], 0.3, 0)) balloonPop(b, false, b.x, b.y - 4); }
@@ -32737,6 +32740,20 @@ function stepBalloon(b, dt) {
     }
     if (b.x < -200 || b.x > WORLD_W + 200) { b.state = 'gone'; b.wait = balRnd(5, 20); }
 }
+// the picture it's drawn with now: whole, popped (torn, for a moment) or falling (deflated) - and which of the three
+function balloonPic(b) {
+  const A = balloonArt[b.i], f = b.state === 'fly' ? 0 : b.state === 'pop' ? 1 : 2;
+  return { A, f, src: [A.whole, A.popped, A.fall][f] };
+}
+// where that picture is, for the hit test (vehHitBy): it hangs from b.x, b.y (the basket's foot) up, turned about there, so its
+// middle half its height above it. Only flying can it be hit (popped, it's already coming down). Its art not made yet (its
+// sheet not loaded): the picture's box
+function balloonPose(b) {
+  if (b.state !== 'fly') return null;
+  if (!balloonArt && img.balloons) buildBalloonArt();
+  const { W, H } = balSize(b), up = H / 2 * BAL_K, a = b.a || 0;
+  return { P: balloonArt ? balloonPic(b).src : { width: W, height: H }, k: BAL_K, cx: b.x + up * Math.sin(a), cy: b.y - up * Math.cos(a), a, flip: false };
+}
 // drawn with the planes, over the sea and again over the land; at sunset a dark shape against the sky, its burner's
 // flame the only light on it. (mode 'air': what's not in the water - the land's redraw; 'under': what's sinking or
 // sunk - in a lake)
@@ -32748,12 +32765,13 @@ function drawBalloons(x0, x1, mode) {
     const wet = b.state === 'sink' || (b.state === 'wreck' && !dryLand(b.x));
     if ((mode === 'air' && wet) || (mode === 'under' && !wet)) continue;
     if (b.x < x0 - 80 || b.x > x1 + 80) continue;
-    const A = balloonArt[b.i], s = BAL_K * SV, f = b.state === 'fly' ? 0 : b.state === 'pop' ? 1 : 2, src = [A.whole, A.popped, A.fall][f];
+    const { A, f, src } = balloonPic(b), s = BAL_K * SV;
+    // (its damage, the one rule - dmgPic, 50-zz-damage.js: charred as the fire scorches it coming down; sunk or a wreck, all of it)
+    const dk = b.state === 'sink' || b.state === 'wreck' ? 1 : b.scorch || 0;
     C.save(); C.translate(PX(b.x), PY(b.y)); C.rotate(b.a);
     if (b.state === 'wreck') C.scale(1.15, 0.55);                          // (lying crumpled on the ground)
-    const I = scaled(src, s, true);
+    const I = scaled(dmgPic(src, dk, { m: BAL_K / UPM }), s, true);
     C.drawImage(I, -Math.round(I.width / 2), -I.height);
-    if (b.scorch) { C.globalAlpha = clamp(b.scorch * 0.85, 0, 0.9); const D = scaled(darkArt(src), s, true); C.drawImage(D, -Math.round(D.width / 2), -D.height); }
     if (E.sunset > 0.03) { C.globalAlpha = 0.88 * E.sunset; const D = scaled(A.sil[f], s, true); C.drawImage(D, -Math.round(D.width / 2), -D.height); }
     civLitLook(src, s, -Math.round(I.width / 2), -I.height, PX(b.x), clamp(E.night * 1.1, 0, 0.92));
     C.globalAlpha = 1;
@@ -32807,7 +32825,7 @@ function buildBlimps() {
   }
 }
 function newBlimp(R, lo, hi) {
-  return { team: R, face: R ? -1 : 1, x: (lo + hi) / 2, y: WATER_Y - 950 - R * 120, lo, hi, dir: R ? -1 : 1, vx: 0, vy: 0, state: 'fly', hp: 10, sag: 0, ang: 0, driven: null, ph: R * 2.1 };
+  return { team: R, face: R ? -1 : 1, x: (lo + hi) / 2, y: WATER_Y - 950 - R * 120, lo, hi, dir: R ? -1 : 1, vx: 0, vy: 0, state: 'fly', hp: 10, hpMax: 10, sag: 0, ang: 0, driven: null, ph: R * 2.1 };   // (hpMax: its health whole, for its charring - dmgOf, 50-zz-damage.js)
 }
 // its drawing, the band and fins in its country's colour; and its lights (the little lamps under the envelope and the
 // gondola's windows), lit at night. The tail lamp's place: BLIMP_TAIL (the drawing's pixels)
@@ -32896,12 +32914,27 @@ function stepBlimp(b, dt) {
     b.x = clamp(b.x + b.vx * dt + windAt(b.y) * (b.placed != null && !mine ? 0 : 0.08) * dt, 200, WORLD_W - 200); b.y = clamp(b.y + b.vy * dt, SKY_TOP + 200, (dryLand(b.x) ? landTop(b.x) : surfaceY(b.x)) - 40);
     b.ang = Math.sin(time * 0.4 + b.ph) * 0.02 - clamp(b.vy / 200, -0.08, 0.08) * b.face;   // (nose up climbing)
     // shot: rounds barely, a shell or a missile a lot; its gas gone, down it comes
+    // (user Nov 2 12:07: "Planes, helicopters, seaplanes, the shuttle, balloons and the blimp... Why not?") where it's hit is
+    // its picture as it's drawn - envelope, fins and gondola, turned with it (blimpPose) - by the one rule, vehHitBy
+    // (50-zz-damage.js): a round stops in it, a shell bursts on it there
     const hw = blimpArt ? blimpArt.W * BLIMP_K * 0.45 : 64, hh = 16 * REAL.blimp;
-    for (const q of bullets) if (!q._bp && Math.abs(q.x - b.x) < hw && Math.abs(q.y - b.y) < hh) { q._bp = true; b.hp -= 0.25; spawnSparks(q.x, q.y, 2, 60); }
-    for (let k = shells.length - 1; k >= 0; k--) { const q = shells[k]; if (!q.under && Math.abs(q.x - b.x) < hw && Math.abs(q.y - b.y) < hh) { shells.splice(k, 1); b.hp -= 4; sectionBlast(q.x, q.y, 0.7, 0); } }
+    for (let H; b.hp > 0 && (H = vehHitBy(b, dt, blimpPose)); ) { const q = H.s; if (H.shell) b.hp -= 4; else { b.hp -= 0.25; spawnSparks(q.x, q.y, 2, 60); } }
     if (b.hp <= 0) blimpBurst(b);
     // (a big ship's superstructure: it tears on it and comes down - the shared hullStrike, user Oct 27 night)
     else if (!dryLand(b.x) && hullStrike([[b.x - hw * 0.9, b.y], [b.x, b.y + hh], [b.x + hw * 0.9, b.y]], 0.5, b.vx)) blimpBurst(b);
+}
+// the picture it's drawn with now: its country's, its nose the way it faces (the drawing's nose on its right)
+function blimpPic(b) {
+  if (!blimpArt || blimpArt.key !== teamKey) buildBlimpArt();
+  const A = blimpArt.arts[b.team || 0];
+  return { A, im: b.face > 0 ? A.r : A.l };
+}
+// where that picture is, for the hit test (vehHitBy): drawn with 0.6 of its height above b.y, so its middle a tenth of its
+// height above it, turned with it. Only flying can it be hit - and flying it never sags, so it's drawn unsquashed
+function blimpPose(b) {
+  if (b.state !== 'fly') return null;
+  const { im } = blimpPic(b), up = im.height * 0.1 * BLIMP_K, a = b.ang || 0;
+  return { P: im, k: BLIMP_K, cx: b.x + up * Math.sin(a), cy: b.y - up * Math.cos(a), a, flip: false };
 }
 function drawBlimps(x0, x1) {
   if (!LAND || !blimps.length) return;
@@ -32909,12 +32942,14 @@ function drawBlimps(x0, x1) {
   for (const b of bySize(blimps)) {   // (smaller in front - 50-zz-size-order.js)
     const under = b.state === 'sink' || b.state === 'sunk';
     if (b.state === 'gone' || (under && onLand(b.x)) || b.x < x0 - 200 || b.x > x1 + 200) continue;   // (in the sea it's seen going down and lying on the bottom; in a lake, under the lake's water - not drawn)
-    const A = blimpArt.arts[b.team || 0], im = b.face > 0 ? A.r : A.l, sp = scaled(im, BLIMP_K * SV, true);   // (the drawing's nose on its right)
+    // (its damage, the one rule - dmgPic, 50-zz-damage.js: charred as its health goes; down - falling, sunk or a wreck - all of it)
+    const { A, im } = blimpPic(b), lost = b.state === 'fall' || b.state === 'wreck' || under;
+    const sp = scaled(dmgPic(im, lost ? 1 : dmgOf(b), { m: BLIMP_K / UPM }), BLIMP_K * SV, true);
     C.save(); C.translate(PX(b.x), PY(b.y)); C.rotate(b.ang); if (b.sag > 0) C.scale(1 - 0.12 * b.sag, 1 - 0.45 * b.sag);
     if (b.state === 'wreck' || under) C.scale(1.05, 0.4);
     const X = -Math.round(sp.width / 2), Y = -Math.round(sp.height * 0.6);
     C.drawImage(sp, X, Y);
-    if (b.state === 'wreck' || under || b.state === 'fall') { C.globalAlpha = b.state === 'fall' ? 0.18 * b.sag : 0.75; C.drawImage(scaled(darkArt(im), BLIMP_K * SV, true), X, Y); C.globalAlpha = 1; }   // (deflating, not burnt: a shade only as its fabric folds)
+    if (b.state === 'fall') { C.globalAlpha = 0.18 * b.sag; C.drawImage(scaled(darkArt(im), BLIMP_K * SV, true), X, Y); C.globalAlpha = 1; }   // (deflating, not burnt: a shade only as its fabric folds)
     civLitLook(im, BLIMP_K * SV, X, Y, PX(b.x));
     const L = cabinLit(); if (L > 0.05 && b.state === 'fly') { C.globalAlpha = L; C.drawImage(scaled(b.face > 0 ? A.sr : A.sl, BLIMP_K * SV, true), X, Y); C.globalAlpha = 1; }   // (its little lights at night)
     C.restore();
@@ -36651,7 +36686,7 @@ function stepCivHeli(h, dt) {
       civLoadHome(h, mine, dt);
       if (mine) { if ((civStick(h.driven) < -0.2 || Math.abs(h.cin || 0) > 0.2) && !(h.story && h.fuel <= 0)) h.state = 'landed'; }
       else { h.wait -= dt; if (h.wait <= 0) { if (civHelis.some(o => o !== h && o.R === h.R && (o.state === 'fly' || (o.state === 'landed' && o.ai)) && o.driven == null)) h.wait = chRnd(15, 40); else { h.state = 'landed'; civHeliTrip(h); } } }   // (one up at a time on each side, user Oct 26: "too many helicopters in the air")
-      civHeliHits(h);
+      civHeliHits(h, dt);
       return;
     }
     // spinning up on the ground ('landed') or flying: the lever and the stick (yours, or its plan's)
@@ -36669,7 +36704,7 @@ function stepCivHeli(h, dt) {
       if (h.spin > 0.85 && stick < -0.2) { h.state = 'fly'; h.vy = -20; h.deck = null; }
       else if (!mine && h.ai && h.ai.phase === 'home' && h.spin > 0.5 && Math.abs(h.x - h.home) < 80) { h.state = 'parked'; h.wait = chRnd(20, 70); h.ai = null; }
       else if (!mine && !h.ai) { h.state = 'parked'; h.wait = chRnd(20, 70); }   // (user Oct 27: only the player puts out fires - it flies its trips like the others)
-      civHeliHits(h);
+      civHeliHits(h, dt);
       return;
     }
     // flying: the lever sets the way and speed across, the stick climbs and sinks; told the other way, it slows to a
@@ -36703,16 +36738,19 @@ function stepCivHeli(h, dt) {
     // (driven to the world's end: it turns back)
     if (mine && ((h.x <= 41 && lever < 0) || (h.x >= WORLD_W - 41 && lever > 0))) civBounce(h.driven);
     civHeliSmoke(h, dt);
-    civHeliHits(h);
+    civHeliHits(h, dt);
     // (aircraft never collide with each other, army or civilian - user Oct 25 late: "There's no collision between
     // civilian aircrafts and military aircrafts"; only weapons bring them down). A big ship's hull still does - the shared
     // hullStrike, as every flying thing (user Oct 27 night)
     if (h.state === 'fly' && hullStrike([[h.x, h.y - chSkid(h) * 0.8], [h.x + h.facing * chHalf(h) * 0.7, h.y - chSkid(h) * 0.8], [h.x - h.facing * chHalf(h) * 0.7, h.y - chSkid(h)]], 1.5, h.vx)) civHeliDown(h);
 }
-// rounds and shells: a round hurts it a little, a shell, missile or bomb brings it down
-function civHeliHits(h) {
-  for (const b of bullets) if (!b._ch && inCivHeli(h, b.x, b.y) && mayHit(b, h)) { b._ch = true; harmed(h, b.x, b.y, b); civHeliHit(h, 1, b.x, b.y); b.spent = 0; }
-  for (let k = shells.length - 1; k >= 0; k--) { const s = shells[k]; if (!s.under && inCivHeli(h, s.x, s.y) && mayHit(s, h)) { shells.splice(k, 1); harmed(h, s.x, s.y, s); civHeliHit(h, CH_HP, s.x, s.y); break; } }
+// rounds and shells: a round hurts it a little, a shell, missile or bomb brings it down. (user Nov 2 12:07: "Planes,
+// helicopters, seaplanes... Why not?") what's hit is its picture as it's drawn this frame, where it's solid - chPose, by the
+// one rule (vehHitBy, 50-zz-damage.js); it was a box about its middle
+function civHeliHits(h, dt) {
+  const H = vehHitBy(h, dt, chPose); if (!H) return;
+  const s = H.s; harmed(h, s.x, s.y, s);
+  civHeliHit(h, H.shell ? CH_HP : 1, s.x, s.y);
 }
 // hit: white smoke from its engine; nearly done, black smoke and fire
 function civHeliSmoke(h, dt) {
@@ -36725,9 +36763,25 @@ function civHeliSmoke(h, dt) {
   h.smokeT = lv === 2 ? 0.07 : 0.13;
   spawnSmoke(ex, ey - 3, lv === 2 ? { kind: 'trail', rise: true, dark: 0, r: chRnd(3, 5), grow: 5, lift: 32, vx: h.vx * 0.15, vy: -chRnd(20, 40), life: chRnd(4, 6), alpha: 0.6, chain: smStream(h) } : { rise: true, mist: true, r: chRnd(2.5, 4), grow: 4, lift: 28, vx: h.vx * 0.15, vy: -chRnd(16, 30), life: chRnd(2.5, 4), alpha: 0.5, chain: smStream(h) });
 }
+// the body's picture now: its damage level (the user's clean, hit and wrecked drawings), and the view - turning, the
+// three-quarter view, head-on, three-quarters the other way. Drawn by it, and hit by it (chPose): the one choice for both
+function chPic(h) {
+  const A = chArt[h.kind], lv = h.state === 'wreck' || h.state === 'sink' ? 2 : h.state === 'fall' ? Math.max(1, chLevel(h)) : chLevel(h);
+  let face = h.facing, vi = 0;
+  if (h.turn) { const u = h.turn.t / CH_TURN_T; vi = u < 0.3 || u > 0.7 ? 1 : 2; face = u < 0.5 ? h.turn.from : -h.turn.from; }
+  // (the art faces left: its right-facing copy is the flipped one)
+  const body = vi === 2 ? A.front : vi === 1 ? (face > 0 ? A.qR[lv] : A.q[lv]) : (face > 0 ? A.lvR[lv] : A.lv[lv]);
+  return { A, lv, face, vi, body };
+}
+// where that picture is, for the hits (vehHitBy): drawn about its middle - at h.x, h.y on its legs, turned with its tilt (its
+// height A.H, set A.H / 2 above that point; every view the same height) - chK world units a pixel, the facing in the picture
+// itself (its own flipped copy). Hit only up and whole - flying, or standing on a pad or a deck (inCivHeli's states)
+function chPose(h) {
+  if (!chArt || (h.state !== 'fly' && h.state !== 'parked' && h.state !== 'landed')) return null;
+  return { P: chPic(h).body, k: chK(h), cx: h.x, cy: h.y + (h.susY || 0), a: h.tilt || 0, flip: false };
+}
 // drawn with the helicopters: the body (its damage level), and the rotor spinning about its hub - squeezed as the
-// blades sweep toward and away from us, a blur at speed. Turning: the three-quarter view, head-on, three-quarters
-// the other way. (mode as the balloons': 'air' not in the water, 'under' in it)
+// blades sweep toward and away from us, a blur at speed. (mode as the balloons': 'air' not in the water, 'under' in it)
 function drawCivHelis(x0, x1, mode) {
   if (!LAND || !civHelis.length) return;
   if (!chArt) { if (!img.civhelis) return; buildCivHeliArt(); }
@@ -36735,12 +36789,11 @@ function drawCivHelis(x0, x1, mode) {
     if (h.state === 'gone' || h.x < x0 - 140 || h.x > x1 + 140) continue;
     const wet = h.state === 'sink' || (h.state === 'wreck' && !dryLand(h.x) && !h.deck && !h.onDeck);
     if ((mode === 'air' && wet) || (mode === 'under' && !wet)) continue;
-    const A = chArt[h.kind], s = chK(h) * SV, lv = h.state === 'wreck' || h.state === 'sink' ? 2 : h.state === 'fall' ? Math.max(1, chLevel(h)) : chLevel(h);
-    let face = h.facing, vi = 0;
-    if (h.turn) { const u = h.turn.t / CH_TURN_T; vi = u < 0.3 || u > 0.7 ? 1 : 2; face = u < 0.5 ? h.turn.from : -h.turn.from; }
-    // (the art faces left: its right-facing copy is the flipped one)
-    const body = vi === 2 ? A.front : vi === 1 ? (face > 0 ? A.qR[lv] : A.q[lv]) : (face > 0 ? A.lvR[lv] : A.lv[lv]);
-    const I = scaled(body, s, true);
+    const s = chK(h) * SV, { A, lv, face, vi, body } = chPic(h);
+    // (user Oct 31: "when the helicopter explodes, it doesn't go dark") charred by its hits, the one rule (dmgPic, 50-zz-damage.js),
+    // over its hit and wrecked drawings - the more rounds in it the more; lost - falling, sinking, a wreck - burnt nearly all over
+    const lost = h.state === 'fall' || h.state === 'sink' || h.state === 'wreck';
+    const I = scaled(dmgPic(body, lost ? 1 : Math.min(1, (h.dmg || 0) / CH_HP), { m: chK(h) / UPM }), s, true);
     if ((h.state === 'fly' || h.state === 'landed') && vi === 0) planeLights(h.x, h.y + (h.susY || 0), face, 0, A.W * chK(h) * 0.42, chSkid(h) * 0.9, false, h.kind * 0.37, h.tilt, 2 - chSkid(h) * 0.9);   // (its lamps, as a plane's: turned with it about its middle, user Oct 26)
     C.save(); C.translate(PX(h.x), PY(h.y + (h.susY || 0))); C.rotate(h.tilt);
     const X = -Math.round(I.width / 2), Y = -Math.round(A.H * 0.5 * s);
@@ -36758,9 +36811,6 @@ function drawCivHelis(x0, x1, mode) {
       }
     }
     C.drawImage(I, X, Y);
-    // (user Oct 31: "when the helicopter explodes, it doesn't go dark") lost - falling, sinking, a wreck - she's burnt dark,
-    // as every destroyed vehicle (an army helicopter's or a tank's wreck, 50-land-units)
-    if (h.state === 'fall' || h.state === 'sink' || h.state === 'wreck') { C.globalAlpha = 0.8; C.drawImage(darkArt(I), X, Y); C.globalAlpha = 1; }
     civLitLook(body, s, X, Y, PX(h.x));
     if (h.state === 'fly' && vi === 0) civGlint(-face * I.width * 0.28, Y + I.height * 0.4, h.x * 0.005 + h.tilt * 6 + h.kind, false);
     { const L = cabinLit(), Wn = L > 0.05 && vi !== 2 && lv < 2 ? windowsArt(body) : null; if (Wn) { C.globalAlpha = L; C.drawImage(scaled(Wn, s, true), X, Y); C.globalAlpha = 1; } }   // (its cabin lit at night)
@@ -44502,7 +44552,7 @@ function buildSeaplanes() {
   }
 }
 function newSeaplane(home, out, wait, col) {
-  return { home, out, x: home, y: WATER_Y + SP_DRAFT, state: 'moored', dir: out, spd: 0, run: 0, pitch: 0, ang: 0, vx: 0, vy: 0, wait, col, hp: 2, ai: null, driven: null, turn: null };
+  return { home, out, x: home, y: WATER_Y + SP_DRAFT, state: 'moored', dir: out, spd: 0, run: 0, pitch: 0, ang: 0, vx: 0, vy: 0, wait, col, hp: 2, hpMax: 2, ai: null, driven: null, turn: null };   // (hpMax: its hits whole - its charring, 50-zz-damage.js)
 }
 /* (user Oct 26: "we have different Cessnas? They should all use the new one I gave you, with different colour tints" -
    and "I also gave you the rotation sprite sheet for the turns, but it's not implemented yet?") the seaplane is the
@@ -44557,7 +44607,7 @@ function stepSeaplanes(dt) {
 function stepSeaplane(s, dt) {
     const p = s.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === s;
     // (on a helicopter's magnet: being carried changes where it is, nothing else - it can still be hit, user Oct 27 [17])
-    if (s.carried != null) { spHits(s); if (s.hp <= 0) spDown(s); return; }
+    if (s.carried != null) { spHits(s, dt); if (s.hp <= 0) spDown(s); return; }
     if (s.state === 'wreck' || s.state === 'sunk') return;        // (its wreck stays: no other comes in its place - user Oct 27: "The rest, when destroyed, is never spawned again"; one down on land, its wreck is in crashes - 50-land-rest)
     if (s.state === 'gone') { s.wait -= dt; if (s.wait <= 0) Object.assign(s, { state: 'moored', x: s.home, y: WATER_Y + SP_DRAFT, dir: s.out, spd: 0, run: 0, pitch: 0, ang: 0, hp: 2, wait: splnRnd(20, 50), ai: null }); return; }
     if (s.state === 'fall') { s.vy += 220 * dt; s.x += s.vx * dt; s.y += s.vy * dt; s.ang += s.spin * dt; if (!SIM_ONLY && splnR() < dt * 25) spawnSmoke(s.x, s.y, { kind: 'trail', dark: 0, r: splnRnd(3, 5), grow: 5, lift: 18, vx: splnRnd(-8, 8), life: splnRnd(4, 6), alpha: 0.6, chain: smStream(s) });
@@ -44568,7 +44618,7 @@ function stepSeaplane(s, dt) {
       if (s.y >= ground) { if (onShip || ht < Infinity || dryLand(s.x)) spWreck(s, ground, onShip ? dk.c : null, !onShip && ht < Infinity); else spDitch(s); }
       return; }
     if (s.state === 'sink') { s.y += 28 * dt; s.ang *= 1 - dt; if (splnR() < dt * 8) addBubble(s.x + splnRnd(-8, 8), s.y, splnRnd(-5, 5), -splnRnd(15, 30), splnRnd(0.8, 1.6)); if (s.y > seabedY(s.x) - 6) { s.y = seabedY(s.x) - 6; s.state = 'sunk'; kickDust(s.x, 16, 0.5); } return; }
-    spHits(s);
+    spHits(s, dt);
     if (s.hp <= 0) { spDown(s); return; }
     // what it's told: yours from the controls; left to itself, its own trip
     let lever = 0, stick = 0;
@@ -44728,10 +44778,13 @@ function spFoam(s, dt, k, burst) {
     if (splnR() < 0.5) spawnFoam(fx + back * splnRnd(6, 30), splnRnd(1.8, 3.2));
   }
 }
-// hit: a round or two brings it down
-function spHits(s) {
-  for (const b of bullets) if (!b._sp && Math.abs(b.x - s.x) < 24 * REAL.cessna && Math.abs(b.y - s.y + 6 * REAL.cessna) < 10 * REAL.cessna) { b._sp = true; s.hp -= 1; spawnSparks(b.x, b.y, 4, 90); }
-  for (let k = shells.length - 1; k >= 0; k--) { const q = shells[k]; if (!q.under && Math.abs(q.x - s.x) < 26 * REAL.cessna && Math.abs(q.y - s.y + 6 * REAL.cessna) < 12 * REAL.cessna) { shells.splice(k, 1); s.hp = 0; sectionBlast(q.x, q.y, 0.6, 0); } }
+// hit: a round or two brings it down, a shell at once. (user Nov 2 12:07: "Planes, helicopters, seaplanes... Why not?") what's
+// hit is its picture as it's drawn this frame, where it's solid - splPose, by the one rule (vehHitBy, 50-zz-damage.js, which
+// takes the shell out and sets off its blast there); it was a box about its middle
+function spHits(s, dt) {
+  const H = vehHitBy(s, dt, splPose); if (!H) return;
+  if (H.shell) s.hp = 0;
+  else { s.hp -= 1; spawnSparks(H.s.x, H.s.y, 4, 90); }
 }
 // into the water, broken: a wing splits off (user Oct 26, every plane), a splash, and it sinks to the bottom - no blast
 function spDitch(s) {
@@ -44761,6 +44814,27 @@ function spDown(s, soft) {
   else { s.state = 'fall'; s.vx = s.vx || s.dir * s.spd; s.vy = Math.max(10, s.vy || 0); s.spin = s.dir * splnRnd(0.5, 1.1); spawnSparks(s.x, s.y, 16, 200); sound('impact', s.x); }
   civFollowDown(s);
 }
+// the frame: as the Cessna's - turning, the turn frames; the damage row by its hits; falling, the spin (s.spinF, moved on as
+// it's drawn). fbU: how far the picture's middle sits over its floats' bottom (s.y), world units. Drawn by it, and hit by it
+// (splPose): the one choice for both
+function splPic(s) {
+  const d = s.turn ? (s.turn.t / SP_TURN < 0.5 ? s.turn.from : -s.turn.from) : s.dir, A = seaplaneArt(s.col), row = s.hp >= 2 ? 0 : 1;
+  let im, fi = 0, side = d;
+  if (s.state === 'fall') { const k = Math.floor(s.spinF || 0) % 8; im = A.plane[3][[0, 1, 2, 3, 4, 3, 2, 1][k]][s.vx >= 0 ? 1 : -1]; fi = -1; }
+  else if (s.turn) { const k = Math.floor(clamp(s.turn.t / SP_TURN, 0, 0.999) * 5); fi = k === 0 || k === 4 ? 0 : k; side = k === 4 ? -s.turn.from : s.turn.from; im = A.plane[row][fi][side]; }
+  else im = A.plane[row][0][d];
+  return { d, A, im, fi, fbU: (fi >= 0 ? A.fb[row * 4 + fi] : 0) * CESSNA_K };
+}
+// where that picture is, for the hits (vehHitBy): drawn turned about s.x, s.y (its floats' bottom) with its middle fbU above
+// that point in the picture's own frame - so, turned, the middle is fbU up along the turned picture's upright; CESSNA_K world
+// units a pixel, the facing in the picture itself (its own flipped copy). Not drawn here (gone, or a wreck on land - drawCrashes):
+// nothing to hit
+function splPose(s) {
+  if (!img.cessna2 || s.state === 'gone' || s.state === 'wreck') return null;
+  const { im, fbU } = splPic(s), a = heldAng(s, s.ang || 0);
+  return { P: im, k: CESSNA_K, cx: s.x + fbU * Math.sin(a), cy: s.y - fbU * Math.cos(a), a, flip: false };
+}
+const spLost = s => s.state === 'fall' || s.state === 'sink' || s.state === 'sunk' || s.state === 'wreck';
 function drawSeaplanes(x0, x1, mode) {
   if (!LAND || !seaplanes.length) return;
   if (!img.cessna2) return;
@@ -44768,13 +44842,10 @@ function drawSeaplanes(x0, x1, mode) {
     if (s.state === 'gone' || s.state === 'wreck' || s.x < x0 - 60 || s.x > x1 + 60) continue;   // (down on land: drawn with the ground - drawCrashes)
     const wet = s.state === 'sink' || s.state === 'sunk';
     if ((mode === 'air' && wet) || (mode === 'under' && !wet)) continue;
-    // the frame: as the Cessna's - turning, the turn frames; the damage row by its hits; falling, the spin
-    const d = s.turn ? (s.turn.t / SP_TURN < 0.5 ? s.turn.from : -s.turn.from) : s.dir, A = seaplaneArt(s.col), row = s.hp >= 2 ? 0 : 1;
-    let im, fi = 0, side = d;
-    if (s.state === 'fall') { const k = Math.floor((s.spinF = (s.spinF || 0) + 1 / 60 * 9)) % 8; im = A.plane[3][[0, 1, 2, 3, 4, 3, 2, 1][k]][s.vx >= 0 ? 1 : -1]; fi = -1; }
-    else if (s.turn) { const k = Math.floor(clamp(s.turn.t / SP_TURN, 0, 0.999) * 5); fi = k === 0 || k === 4 ? 0 : k; side = k === 4 ? -s.turn.from : s.turn.from; im = A.plane[row][fi][side]; }
-    else im = A.plane[row][0][d];
-    const sp = scaled(im, CESSNA_K * SV, true), fbU = (fi >= 0 ? A.fb[row * 4 + fi] : 0) * CESSNA_K;
+    if (s.state === 'fall') s.spinF = (s.spinF || 0) + 1 / 60 * 9;   // (the spin, a frame on as it's drawn)
+    const { d, im, fi, fbU } = splPic(s);
+    // charred by its hits, the one rule (dmgPic, 50-zz-damage.js), over its damage row; lost - falling, sinking - nearly all over
+    const sp = scaled(dmgPic(im, spLost(s) ? 1 : clamp(1 - s.hp / (s.hpMax || 2), 0, 1), { m: CESSNA_K / UPM }), CESSNA_K * SV, true);
     // its lamps, turned with it about the same point (user Oct 26: "the red light is wrong when the plane tilts" - and
     // in the turn frames they'd sit off it: side views only)
     if (s.state === 'fly' && fi === 0) planeLights(s.x, s.y, d, 5 * REAL.cessna, 22 * REAL.cessna, fbU + 9.5 * REAL.cessna, false, s.home * 0.01, s.ang || 0, -(fbU + 3 * REAL.cessna));   // (real scale: where the drawing's lamps are)
@@ -44924,13 +44995,13 @@ function buildSpace() {
   if (!LAND) return;
   if (!padsConverted()) for (const R of [false, true]) shuttles.push(newStack(R));   // (converted: each LAUNCH PAD structure's rocket, at its spot - storyPlanesBuild)
   // the two satellites (one each side's), and the station between
-  orbiters.push({ kind: 'sat', owner: 0, x: WORLD_W * 0.3, y: SAT_Y, vx: 55, face: 1, state: 'orbit', hp: 3, ph: 0 });
-  orbiters.push({ kind: 'sat', owner: 1, x: WORLD_W * 0.72, y: SAT_Y - 500, vx: 55, face: 1, state: 'orbit', hp: 3, ph: 2 });
-  orbiters.push({ kind: 'iss', owner: -1, x: WORLD_W * 0.5, y: ISS_Y, vx: 30, face: 1, state: 'orbit', hp: 8, ph: 1 });
+  orbiters.push({ kind: 'sat', owner: 0, x: WORLD_W * 0.3, y: SAT_Y, vx: 55, face: 1, state: 'orbit', hp: 3, hpMax: 3, ph: 0 });
+  orbiters.push({ kind: 'sat', owner: 1, x: WORLD_W * 0.72, y: SAT_Y - 500, vx: 55, face: 1, state: 'orbit', hp: 3, hpMax: 3, ph: 2 });
+  orbiters.push({ kind: 'iss', owner: -1, x: WORLD_W * 0.5, y: ISS_Y, vx: 30, face: 1, state: 'orbit', hp: 8, hpMax: 8, ph: 1 });
 }
 function newStack(R) {
   const s = padSpot(R);
-  return { kind: 'shuttle', R, state: 'pad', x: s.x, y: s.y, vx: 0, vy: 0, a: 0, t: 0, dr: R ? -1 : 1, facing: R ? -1 : 1, pitch: 0, spd: 0, hp: 6, srb: true, et: true, driven: null, smokeT: 0, heat: 0, chute: 0, wait: 0,
+  return { kind: 'shuttle', R, state: 'pad', x: s.x, y: s.y, vx: 0, vy: 0, a: 0, t: 0, dr: R ? -1 : 1, facing: R ? -1 : 1, pitch: 0, spd: 0, hp: 6, hpMax: 6, srb: true, et: true, driven: null, smokeT: 0, heat: 0, chute: 0, wait: 0,
     sat: true, bay: 0, bayOp: null };                              // (a satellite in its bay, user Oct 27: let out once, in space)
 }
 // its axis pointing up its nose, the stack's lean a (0 upright, + toward +x)
@@ -44971,7 +45042,7 @@ function stepSpace(dt) {
 function stepShuttle(v, dt) {
   const p = v.driven, mine = p != null && crew[p].mode === 'civ' && crew[p].civ === v;
   const stick = mine ? civStick(p) : 0;
-  shuttleHits(v);
+  shuttleHits(v, dt);
   if (v.state === 'pad') {
     const s = padSpot(stackPad(v)); v.x = s.x; v.y = s.y; v.a = s.a;
     // (the pad tipped or dropped into a crater: the stack on it goes over - and it's full of fuel - user Oct 27)
@@ -45111,7 +45182,7 @@ function stepBay(v, dt) {
     v.bay = Math.min(1, B.t / BAY_OPEN);
     if (B.t >= BAY_OPEN) {
       const [x, y] = bayPoint(v, 0);
-      B.o = { kind: 'sat', owner: v.R ? 1 : 0, x, y, vx: v.vx, vy: 0, face: v.facing || 1, state: 'deploy', hp: 3, ph: spcRnd(0, 6), once: true, rise: 0, unf: 0 };
+      B.o = { kind: 'sat', owner: v.R ? 1 : 0, x, y, vx: v.vx, vy: 0, face: v.facing || 1, state: 'deploy', hp: 3, hpMax: 3, ph: spcRnd(0, 6), once: true, rise: 0, unf: 0 };
       orbiters.push(B.o); B.st = 'rise'; B.t = 0;
     }
   } else if (B.st === 'rise') {
@@ -45200,17 +45271,34 @@ function groundCrash(v, pw, quiet) {   // (quiet: dropped by a magnet - no blast
   }
   civFollowDown(v);
 }
+/* (user Nov 2 12:07: "Planes, helicopters, seaplanes, the shuttle... Why not?") The space vehicles on the one rule
+   (50-zz-damage.js): each hit where its picture is solid as it's drawn this frame - the stack's (stackPose), the orbiter's
+   with its gear and its open bay (orbPoses), a satellite's or the station's (satPoses) - its health hp of hpMax, and drawn
+   charred as it's hurt (spaceDmg), burnt all over once lost. */
+const SPACE_HP = { shuttle: 6, sat: 3, iss: 8 };   // (their health new: the placed ones, 50-zz-placed, come without an hpMax)
+// its damage for the drawing, 0..1: lost - coming down, sunk, a wreck - or with no health left, 1; else its hits
+function spaceDmg(v, lost) {
+  if (lost || v.hp <= 0) return 1;
+  return dmgOf(v.hpMax ? v : { hp: v.hp, hpMax: SPACE_HP[v.kind] });
+}
+// the first round or shell into any of its pictures this frame (poses: a list of them, each tried in turn - vehHitBy)
+function spaceHitBy(v, dt, poses) {
+  for (const Q of poses) { const H = vehHitBy(v, dt, () => Q); if (H) return H; }
+  return null;
+}
 // hit by the stack's or orbiter's weapons: a round barely, a shell or a missile more; with none left it blows
-function shuttleHits(v) {
+function shuttleHits(v, dt) {
   if (v.state === 'gone' || v.state === 'wreck' || v.state === 'sink' || v.state === 'fall') return;
-  const [cx, cy] = v.state === 'pad' || v.state === 'count' || v.state === 'climb' ? stackPoint(v, 0.5, 0.5) : [v.x, v.y];
-  const big = STACK_K / 0.47, hw = (v.state === 'fly' || v.state === 'roll' || v.state === 'landed' ? 38 : 22) * big, hh = (v.state === 'fly' || v.state === 'roll' || v.state === 'landed' ? 11 : 52) * big;   // (sized with the rocket)
   // (user Oct 26: "A single bullet or missile to the rocket should blow it up immediately, it's a rocket! (blowing the
   // shuttle too)") the whole stack - its tank full of fuel - goes up at the first round or shell; the orbiter alone
   // takes its hits as before
   const fuel = v.et;
-  for (const b of bullets) if (!b._sh && Math.abs(b.x - cx) < hw && Math.abs(b.y - cy) < hh) { b._sh = true; v.hp -= 0.12; spawnSparks(b.x, b.y, 3, 80); if (fuel) { shuttleBlow(v, true); return; } }
-  for (let k = shells.length - 1; k >= 0; k--) { const s = shells[k]; if (!s.under && Math.abs(s.x - cx) < hw && Math.abs(s.y - cy) < hh) { shells.splice(k, 1); v.hp -= 2.5; sectionBlast(s.x, s.y, 0.6, 0); if (fuel) { shuttleBlow(v, true); return; } } }
+  const H = spaceHitBy(v, dt, v.state === 'pad' || v.state === 'count' || v.state === 'climb' ? [stackPose(v)] : orbPoses(v));
+  if (H) {
+    if (H.shell) v.hp -= 2.5;                                      // (the shell's taken out, its blast at it - vehHitBy)
+    else { v.hp -= 0.12; spawnSparks(H.s.x, H.s.y, 3, 80); }
+    if (fuel) { shuttleBlow(v, true); return; }
+  }
   if (v.hp <= 0) shuttleBlow(v);
 }
 function shuttleBlow(v, all) {
@@ -45275,10 +45363,10 @@ function stepOrbiter(o, dt) {
     { const ny = o.y + o.vy * dt, e = 80 * Math.max(1, ATMO_K) * dt; o.y = ny < lo ? Math.min(lo, ny + e) : ny > hi ? Math.max(hi, ny - e) : ny; }
     o.x += o.vx * dt;
     if (o.x < -300) o.x += WORLD_W + 600; else if (o.x > WORLD_W + 300) o.x -= WORLD_W + 600;
-    // hit: rounds barely, a shell or a missile hard; with none left it drops out of its orbit
-    const hw = o.kind === 'iss' ? 114 : 28, hh = o.kind === 'iss' ? 36 : 10;
-    for (const b of bullets) if (!b._or && Math.abs(b.x - o.x) < hw && Math.abs(b.y - o.y) < hh) { b._or = true; o.hp -= 0.1; spawnSparks(b.x, b.y, 3, 80); }
-    for (let k = shells.length - 1; k >= 0; k--) { const s = shells[k]; if (Math.abs(s.x - o.x) < hw && Math.abs(s.y - o.y) < hh) { shells.splice(k, 1); o.hp -= 1.5; sectionBlast(s.x, s.y, 0.6, 0); } }
+    // hit (where its picture is solid as drawn - satPoses): rounds barely, a shell or a missile hard; with none left it
+    // drops out of its orbit
+    const H = spaceHitBy(o, dt, satPoses(o));
+    if (H) { if (H.shell) o.hp -= 1.5; else { o.hp -= 0.1; spawnSparks(H.s.x, H.s.y, 3, 80); } }   // (a shell's blast: vehHitBy's)
     if (o.hp <= 0 && o.kind === 'sat') { satReentry(o); return; }        // (shot down: it comes down the same way, burning)
     if (o.hp <= 0) { o.state = 'fall'; o.vy = 20; o.spin = spcRnd(-0.6, 0.6); o.a = 0; civFollowDown(o); }
     return;
@@ -45444,7 +45532,7 @@ function drawSpace(x0, x1, pass) {
   }
   for (const q of satPieces) {
     if (q.x < x0 - 100 || q.x > x1 + 100) continue;
-    const sp = scaled(q.img, SAT_K * SV, true);
+    const sp = scaled(dmgPic(q.img, 1, { m: SAT_K / UPM }), SAT_K * SV, true);   // (a lost satellite's: burnt all over, as its body)
     C.save(); C.translate(PX(q.x), PY(q.y)); C.rotate(q.a); if (q.flip) C.scale(-1, 1);
     drawBurning(sp, -Math.round(sp.width / 2), -Math.round(sp.height / 2), q.heat);
     C.restore();
@@ -45452,11 +45540,12 @@ function drawSpace(x0, x1, pass) {
   }
   for (const o of orbiters) {
     if (o.state === 'gone' || o.state === 'deploy' || o.x < x0 - 300 || o.x > x1 + 300) continue;   // (coming out of the bay: drawn with the orbiter)
-    if (o.kind === 'sat' && o.state === 'orbit' && o.unf != null && o.unf < 1) { drawSatUnfolding(o); continue; }
-    const I = o.kind === 'iss' ? (o.face > 0 ? A.iss : A.issR) : (o.face > 0 ? A.sat : A.satR), k = o.kind === 'iss' ? ISS_K : SAT_K, sp = scaled(I, k * SV, true);
+    if (satUnfolding(o)) { drawSatUnfolding(o); continue; }
+    // (charred as it's hurt; coming down, burnt all over - spaceDmg)
+    const [I, k] = orbitPic(o), f = spaceDmg(o, o.state === 'fall' || o.state === 'reentry'), sp = scaled(dmgPic(I, f, { m: k / UPM }), k * SV, true);
     if (o.state === 'reentry') {
       // coming down: burning, then (broken) only its body
-      const side = (o.face || 1) > 0 ? 1 : -1, B = A.satParts.B, bp = o.broken ? scaled(B.c, k * SV, true) : sp;
+      const side = (o.face || 1) > 0 ? 1 : -1, B = A.satParts.B, bp = o.broken ? scaled(dmgPic(B.c, f, { m: k / UPM }), k * SV, true) : sp;
       C.save(); C.translate(PX(o.x), PY(o.y)); C.rotate(o.a || 0); if (o.broken && side < 0) C.scale(-1, 1);
       const ox = o.broken ? Math.round(B.dx * k * SV) : 0, oy = o.broken ? Math.round(B.dy * k * SV) : 0;
       drawBurning(bp, ox - Math.round(bp.width / 2), oy - Math.round(bp.height / 2), o.heat || 0);
@@ -45473,20 +45562,48 @@ function drawSpace(x0, x1, pass) {
     if (o.state === 'orbit') planeLights(o.x, o.y, o.face, o.kind === 'iss' ? 46 * REAL.iss : 18 * REAL.sat, 0, 3 * (o.kind === 'iss' ? REAL.iss : REAL.sat), o.kind === 'iss', o.ph, (o.a || 0) + (o.tilt || 0));
   }
 }
+// a satellite's or the station's picture as it's drawn - its way round, and its scale (world units a pixel): the drawing's
+// and its hit's (satPoses)
+const orbitPic = o => { const A = spaceArt; return o.kind === 'iss' ? [o.face > 0 ? A.iss : A.issR, ISS_K] : [o.face > 0 ? A.sat : A.satR, SAT_K]; };
+// just out of the shuttle's bay, its panels still opening (drawSatUnfolding); and which of its pieces show as they do
+const satUnfolding = o => o.kind === 'sat' && o.state === 'orbit' && o.unf != null && o.unf < 1;
+const satUnfParts = o => o.unf > 0.6 ? ['D', 'B'] : ['B'];
+// where its pictures are as drawn (poseHitAt): its picture about its place, turned with it; unfolding, its body and its dish
+// as drawSatUnfolding has them (the panels, drawn stretched as they open, are no picture at its own size: not in it yet)
+function satPoses(o) {
+  const A = spaceArt, a = (o.a || 0) + (o.tilt || 0);
+  if (!A) { const iss = o.kind === 'iss'; return [{ P: { width: iss ? 228 : 56, height: iss ? 72 : 20 }, k: 1, cx: o.x, cy: o.y, a: 0 }]; }   // (no pictures yet: its old box)
+  if (satUnfolding(o)) {
+    const P = A.satParts, side = (o.face || 1) > 0 ? 1 : -1, c = Math.cos(a), s = Math.sin(a);
+    return satUnfParts(o).map(key => { const q = P[key], lx = side * q.dx * SAT_K, ly = q.dy * SAT_K; return { P: q.c, k: SAT_K, cx: o.x + lx * c - ly * s, cy: o.y + lx * s + ly * c, a, flip: side < 0 }; });
+  }
+  const [I, k] = orbitPic(o);
+  return [{ P: I, k, cx: o.x, cy: o.y, a, flip: false }];
+}
 // the satellite just out of the shuttle's bay: its body, its panels folding out from its sides, then its dish up
 function drawSatUnfolding(o) {
-  const P = spaceArt.satParts, k = SAT_K * SV, u = o.unf, side = (o.face || 1) > 0 ? 1 : -1;
+  const P = spaceArt.satParts, k = SAT_K * SV, u = o.unf, side = (o.face || 1) > 0 ? 1 : -1, f = spaceDmg(o), m = SAT_K / UPM;
   C.save(); C.translate(PX(o.x), PY(o.y)); if (o.a || o.tilt) C.rotate((o.a || 0) + (o.tilt || 0)); if (side < 0) C.scale(-1, 1);
   const bL = (P.B.dx - P.B.c.width / 2) * k, bR = (P.B.dx + P.B.c.width / 2) * k;
   for (const key of ['L', 'R']) {
-    const q = P[key], s = scaled(q.c, k, true), w = Math.max(1, Math.round(s.width * u));
+    const q = P[key], s = scaled(dmgPic(q.c, f, { m }), k, true), w = Math.max(1, Math.round(s.width * u));
     C.drawImage(s, Math.round(key === 'L' ? bL - w : bR), Math.round(q.dy * k - s.height / 2), w, s.height);
   }
-  for (const key of u > 0.6 ? ['D', 'B'] : ['B']) { const q = P[key], s = scaled(q.c, k, true); C.drawImage(s, Math.round(q.dx * k - s.width / 2), Math.round(q.dy * k - s.height / 2)); }
+  for (const key of satUnfParts(o)) { const q = P[key], s = scaled(dmgPic(q.c, f, { m }), k, true); C.drawImage(s, Math.round(q.dx * k - s.width / 2), Math.round(q.dy * k - s.height / 2)); }
   C.restore();
 }
+// the stack's picture as it's drawn (the whole of it, tank and boosters and orbiter, its side's way round): drawStack's and
+// its hit's (stackPose)
+const stackPic = v => v.dr > 0 ? spaceArt.stack : spaceArt.stackR;
+// where it is as drawn (poseHitAt): stood on its foot (its place), its middle half its height up its axis, turned with its lean
+// (the countdown's shake, a pixel or two of the drawing's own, left out)
+function stackPose(v) {
+  if (!spaceArt) { const [cx, cy] = stackPoint(v, 0.5, 0.5); return { P: { width: 44, height: 104 }, k: STACK_K / 0.47, cx, cy, a: 0 }; }   // (no pictures yet: its old box)
+  const I = stackPic(v), h = I.height * STACK_K, [ux, uy] = axisOf(v.a);
+  return { P: I, k: STACK_K, cx: v.x + ux * h / 2, cy: v.y + uy * h / 2, a: v.a, flip: false };
+}
 function drawStack(v) {
-  const A = spaceArt, I = v.dr > 0 ? A.stack : A.stackR, sp = scaled(I, STACK_K * SV, true);
+  const A = spaceArt, I = stackPic(v), sp = scaled(dmgPic(I, spaceDmg(v), { m: STACK_K / UPM }), STACK_K * SV, true);   // (charred as it's hurt - spaceDmg)
   const shake = v.state === 'count' || (v.state === 'climb' && v.t < 4) ? (Math.random() - 0.5) * 1.6 * SV : 0;
   C.save(); C.translate(PX(v.x) + shake, PY(v.y)); C.rotate(v.a);
   const L = -Math.round(sp.width / 2), T = -sp.height;
@@ -45612,7 +45729,9 @@ function orbBayArt(open, face) {
   }
   return (orbBay[key] = face > 0 ? flipCanvas(c) : c);
 }
-function drawOrbiter(v) {
+// how the orbiter is drawn now - which picture (its view on the user's sheet, its damage row), at what scale (world units a
+// pixel), which way, turned how, its place, its gear and its bay: one choice for drawOrbiter and its hit (orbPoses)
+function orbLook(v) {
   const A = spaceArt, face = v.turn ? (v.turn.t / 2.2 < 0.5 ? v.turn.from : -v.turn.from) : v.facing;
   // (user Oct 26: the user's sheet - turning round: side, three-quarter, head on, three-quarter, side the other way; a
   // row for each damage level, by what's left of it)
@@ -45623,21 +45742,45 @@ function drawOrbiter(v) {
     else I = R[0][face];
     K = SHUTTLEI.k;
   } else { I = face > 0 ? A.orbR : A.orb; sq = v.turn ? Math.abs(Math.cos(Math.PI * clamp(v.turn.t / 2.2, 0, 1))) * 0.9 + 0.1 : 1; }
-  const sp = scaled(I, K * SV, true);
   let ang = (v.state === 'fly' ? v.pitch : v.pitch || 0) * face;
   if (v.state === 'wreck') ang = 0.12 * face;
   ang -= face * (v.flare || 0) * 0.1;                                   // (nose up coming in to land)
-  // (its gear down, it stands on its wheels: drawn that much higher - gearLift)
-  C.save(); C.translate(PX(v.x), PY(v.y + (v.susY || 0) - (A.orbSheet ? gearLift(v) : 0))); C.rotate(heldAng(v, ang)); C.scale(sq, (v.roll || 0) > 0.5 ? -1 : 1);
-  // (the sheet's frames sit in the middle of their cells, the belly 30 pixels under it: drawn with the belly 7.7 under
-  // the orbiter's place, as the old drawing was)
-  const L = -Math.round(sp.width / 2), T = A.orbSheet ? Math.round((7.7 - 30 * K) * SV - sp.height / 2) : -Math.round(sp.height * 0.62);
+  const gk = gearDown(v);
+  return { I, K, sq, face, ang, turn: heldAng(v, ang), upside: (v.roll || 0) > 0.5, gk,
+    // (its gear down, it stands on its wheels: drawn that much higher - gearLift)
+    Y: v.y + (v.susY || 0) - (A.orbSheet ? gearLift(v) : 0),
+    // (the sheet's frames sit in the middle of their cells, the belly 30 pixels under it: drawn with the belly 7.7 under
+    // the orbiter's place, as the old drawing was) its picture's middle under its place, in world units, before the turn
+    my: A.orbSheet ? 7.7 - 30 * K : -0.12 * I.height * K,
+    gear: gk > 0.02 && !!A.orbSheet && !v.turn, bay: (v.bay || 0) > 0.02 && !!A.orbSheet && !v.turn };
+}
+// where it is as drawn (poseHitAt): its picture about its place, turned, upside down while it rolls over (drawn flipped top
+// to bottom: the same as mirrored and turned half round); with its gear out, the gear's picture, and its bay open, the
+// door's (the sheet's other pictures, laid over its cell). (Turning round with no sheet, the old picture drawn squeezed:
+// its whole width)
+function orbPoses(v) {
+  const A = spaceArt;
+  if (!A) return [{ P: { width: 76, height: 22 }, k: STACK_K / 0.47, cx: v.x, cy: v.y, a: 0 }];   // (no pictures yet: its old box)
+  const O = orbLook(v), { I, K } = O, c = Math.cos(O.turn), s = Math.sin(O.turn), out = [];
+  // a picture of K's scale whose middle is (mx, my) from its place, in its own frame before the turn
+  const put = (P, mx, my) => { const lx = mx * O.sq, ly = O.upside ? -my : my; out.push({ P, k: K, cx: v.x + lx * c - ly * s, cy: O.Y + lx * s + ly * c, a: O.turn + (O.upside ? Math.PI : 0), flip: O.upside }); };
+  put(I, 0, O.my);
+  const L = -I.width * K / 2, T = O.my - I.height * K / 2;          // (the cell's top left, as drawOrbiter lays the others on it)
+  if (O.gear) { const G = orbGearArt(O.face); put(G, L + G.width * K / 2, T - (1 - O.gk) * ORB_GEAR_PX * K + G.height * K / 2); }
+  if (O.bay) { const B = orbBayArt(v.bay, O.face); put(B, L + B.width * K / 2, T + B.height * K / 2); }
+  return out;
+}
+function drawOrbiter(v) {
+  const A = spaceArt, O = orbLook(v), { I, K, sq, face, ang, gk } = O;
+  // (charred as it's hurt; coming down, sunk or a wreck, burnt all over - spaceDmg)
+  const sp = scaled(dmgPic(I, spaceDmg(v, v.state === 'fall' || v.state === 'sink' || v.state === 'wreck'), { m: K / UPM }), K * SV, true);
+  C.save(); C.translate(PX(v.x), PY(O.Y)); C.rotate(O.turn); C.scale(sq, O.upside ? -1 : 1);
+  const L = -Math.round(sp.width / 2), T = A.orbSheet ? Math.round(O.my * SV - sp.height / 2) : -Math.round(sp.height * 0.62);
   const belly = A.orbSheet ? Math.round(7.7 * SV) : T + Math.round(sp.height * 0.86);
   // (its gear, down to land - user Oct 27, with a picture, gen/open/ref/shuttle_stick_wheels_bug_oct27.png: "the space
   // shuttle seems to have sticks for wheels? It should have proper wheels") the nose gear and the main gear in the
   // sheet's own pixels: struts, doors and tyres, sliding down out of the belly (drawn first: the body hides what's still in)
-  const gk = gearDown(v);
-  if (gk > 0.02 && A.orbSheet && !v.turn) {
+  if (O.gear) {
     const G = orbGearArt(face), gs = scaled(G, K * SV, true);
     C.drawImage(gs, L, T - Math.round((1 - gk) * ORB_GEAR_PX * K * SV));
   } else if (gk > 0.02 && !A.orbSheet) for (const dx of [-0.25, 0.2]) { C.fillStyle = '#3a3a40'; C.fillRect(Math.round(dx * 75 * SV * face), belly, Math.max(1, Math.round(1.2 * SV)), Math.round(5 * SV * gk)); }
@@ -45650,10 +45793,9 @@ function drawOrbiter(v) {
     g.addColorStop(0, `rgba(255,240,200,${(0.9 * h).toFixed(3)})`); g.addColorStop(0.3, `rgba(255,150,60,${(0.6 * h).toFixed(3)})`); g.addColorStop(1, 'rgba(255,80,20,0)');
     C.fillStyle = g; C.fillRect(L - sp.width * 0.4, T - sp.height * 0.2, sp.width * 1.8, sp.height * 1.6);
   }
-  drawBurning(sp, L, T, A.orbSheet ? (v.heat || 0) : 0);
-  if (v.state === 'wreck') { C.globalAlpha = 0.75; C.drawImage(scaled(darkArt(I), K * SV, true), L, T); C.globalAlpha = 1; }
+  drawBurning(sp, L, T, A.orbSheet ? (v.heat || 0) : 0);   // (a wreck: its charring, burnt all over - no darkened copy over it now)
   // the bay open (user Oct 27): its dark inside, the door standing up behind, the satellite rising out over the rim
-  if ((v.bay || 0) > 0.02 && A.orbSheet && !v.turn) {
+  if (O.bay) {
     C.drawImage(scaled(orbBayArt(v.bay, face), K * SV, true), L, T);
     const o = v.bayOp && v.bayOp.o;
     if (o && o.state === 'deploy') {
@@ -47450,7 +47592,7 @@ function stepFlight(f, dt) {
     }
     if (SHEET_PLANES[f.kind] && f.smokeT > 0 && (f.state === 'fly' || f.state === 'free')) { if (f.state === 'fly') f.facing = f.dir || 1; planeSmoke(f, dt); }   // (hit: white smoke, then black)
     if (f.smk) cessnaSmokeStep(f, dt);                               // (its coloured smoke, user Oct 27)
-    if (f.state === 'free') { stepCivAir(f, dt); if (f.state === 'free') { trafficHits(f); if (!f.ground) { trafficHull(f); planeWash(f, dt, f.kind === 'jet' ? 3.5 : 0.8); } } return; }   // (OPEN WORLD: one you've taken - see 50-land-civdrive)
+    if (f.state === 'free') { stepCivAir(f, dt); if (f.state === 'free') { trafficHits(f, dt); if (!f.ground) { trafficHull(f); planeWash(f, dt, f.kind === 'jet' ? 3.5 : 0.8); } } return; }   // (OPEN WORLD: one you've taken - see 50-land-civdrive)
     if (f.state === 'wreck') { if (f.onDeck && !f.crash && harbourTop(f.x, f.y - 6) === Infinity) { f.onDeck = false; f.state = 'sink'; f.vy = 20; ditchFx(f.x, 0, f.kind === 'jet' ? 2 : 1.2, f.kind === 'jet' ? 150 : 49, 60); } return; }   // (its wreck on the pier, the pier gone: into the sea - user Oct 27)
     if (f.state === 'sink') {
       // (user Oct 25 late: "if the balloon falls in the water, it sinks. The same with the 747") down through the water to the bottom
@@ -47503,7 +47645,7 @@ function stepFlight(f, dt) {
       if (f.kind === 'jet') for (const o of traffic) if (o !== f && o.kind === 'jet' && o.syncWait) { Object.assign(o, newFlight('jet', 1 - f.from, f.wait, o.owner), { syncWait: false }); }
       return;
     }
-    trafficHits(f);
+    trafficHits(f, dt);
     if (f.state === 'fly') trafficHull(f);
     if (f.y + (T.gy || 8) < (dryLand(f.x) ? landTop(f.x) : surfaceY(f.x)) - 2) planeWash(f, dt, f.kind === 'jet' ? 3.5 : 0.8);   // (low over the water or the land: its wash - every plane's)
   }
@@ -47550,15 +47692,17 @@ function trafficHull(f) {
   if (P.some(([x, y]) => hangarSolid(x, y))) { f.ground = null; trafficDown(f); return; }   // (into a hangar's walls - user Oct 29)
   if (hullStrike(P, f.kind === 'jet' ? 3 : 1.5, f.vx)) { f.ground = null; trafficDown(f); }
 }
-function trafficHits(f) {
-  const [hw, hh] = TRAFFIC[f.kind].hit;
-  if (SHEET_PLANES[f.kind]) {
-    // (user Oct 26: as the fighter - a round does a sixth of a hit; one hit, white smoke and the first damaged
-    // drawings; two, black smoke and the worse ones; three and it goes down. A shell or a missile at once)
-    for (const b of bullets) if (!b._tr && Math.abs(b.x - f.x) < hw && Math.abs(b.y - f.y) < hh && mayHit(b, f)) { b._tr = true; sheetHurt(f, SHEET_PLANES[f.kind].hurt, b.x, b.y); harmed(f, b.x, b.y, b); if (f.state !== 'fly' && f.state !== 'free') return; }
-  } else
-  for (const b of bullets) if (Math.abs(b.x - f.x) < hw && Math.abs(b.y - f.y) < hh && mayHit(b, f)) { harmed(f, b.x, b.y, b); trafficDown(f); break; }
-  if (f.state === 'fly' || f.state === 'free') for (const s of shells) if (Math.abs(s.x - f.x) < hw && Math.abs(s.y - f.y) < hh && mayHit(s, f)) { harmed(f, s.x, s.y, s); trafficDown(f); sectionBlast(f.x, f.y, 0.8, f.vx * 0.3); break; }
+// (user Nov 2 12:07: "Planes, helicopters, seaplanes, the shuttle, balloons and the blimp... Why not?") where it's hit is its
+// picture as it's drawn - its turn frame, its damage row, the way it faces, its tilt (trafficPose) - by the one rule, vehHitBy
+// (50-zz-damage.js): a round stops in it, a shell bursts on it there (its blast vehHitBy's)
+function trafficHits(f, dt) {
+  // (user Oct 26: as the fighter - a round does a sixth of a hit; one hit, white smoke and the first damaged
+  // drawings; two, black smoke and the worse ones; three and it goes down. A shell or a missile at once)
+  for (let H; (f.state === 'fly' || f.state === 'free') && (H = vehHitBy(f, dt, trafficPose)); ) {
+    const s = H.s;
+    if (!H.shell && SHEET_PLANES[f.kind]) { sheetHurt(f, SHEET_PLANES[f.kind].hurt, s.x, s.y); harmed(f, s.x, s.y, s); }
+    else { harmed(f, s.x, s.y, s); trafficDown(f); }
+  }
 }
 function sheetHurt(f, amt, x, y) {
   spawnSparks(x, y, 5, 200); planeBits(f, trR() < 0.6 ? 1 : 0, x, y);
@@ -47709,6 +47853,29 @@ function sheetPose(f) {
   const side = (f.dir || 1) > 0 ? 1 : -1;
   return { im: A.plane[row][0][side], ang: f.ang, side0: true, dir: side };
 }
+// the picture a Cessna or a 747 is drawn with now and how: its sheet pose (sheetPose - null for the old blocky drawings), the
+// picture, world units a pixel, its tilt, and how far up from its middle it's drawn (driven: over its wheels). drawTraffic's
+// and trafficPose's both, so where it's hit is where it's seen
+function trafficPic(f) {
+  const T = TRAFFIC[f.kind], CP = SHEET_PLANES[f.kind] ? sheetPose(f) : null;
+  if (!CP && !trafficArt) return null;
+  const A = CP ? null : f.kind === 'jet' ? trafficArt.jet[f.owner === 1 ? 1 : 0] : trafficArt.cessna[f.col || 0];
+  return { T, CP, im: CP ? CP.im : (f.dir || 1) > 0 ? A.r : A.l, k: CP ? SHEET_PLANES[f.kind].I.k : T.k, ang: CP ? CP.ang : f.ang,
+    lift: f.state === 'free' ? (T.gy || PLANE_WHEELS) - PLANE_WHEELS : 0 };
+}
+// where that picture is, for the hit test (vehHitBy): drawn about its middle, up by its lift, on its springs, turned (and on a
+// magnet with the magnet's turn). Only flying - on its timetable or yours - can it be hit
+function trafficPose(f) {
+  if (f.state !== 'fly' && f.state !== 'free') return null;
+  const Q = trafficPic(f); if (!Q) return null;
+  return { P: Q.im, k: Q.k, cx: f.x, cy: f.y - Q.lift + (f.susY || 0), a: heldAng(f, Q.ang), flip: false };
+}
+// how hurt it is, 0 whole to 1 down, for its charring: its hits counted as sheetHurt counts them (two it flies on, smoking; the
+// third brings it down) and the part of the next its rounds have done; going down, sinking or a wreck, 1
+function trafficDmg(f) {
+  if (f.state === 'fall' || f.state === 'sink' || f.state === 'wreck') return 1;
+  return clamp(((f.hits || 0) + (f.dmg || 0)) / 3, 0, 1);
+}
 function drawTraffic(x0, x1, mode) {
   if (!LAND || !traffic.length) return;
   if (!trafficArt || trafficArt.key !== teamKey) buildTrafficArt();   // (the flags changed: the 747s' colours too)
@@ -47716,13 +47883,11 @@ function drawTraffic(x0, x1, mode) {
     if (f.state === 'parked' || f.crash || f.x < x0 - 140 || f.x > x1 + 140) continue;   // (down on land: its broken wreck is drawn with the ground - drawCrashes)
     const wet = f.state === 'sink' || f.state === 'wreck';
     if ((mode === 'air' && wet) || (mode === 'under' && !wet)) continue;
-    const T = TRAFFIC[f.kind], A = f.kind === 'jet' ? trafficArt.jet[f.owner === 1 ? 1 : 0] : trafficArt.cessna[f.col || 0];
-    const CP = SHEET_PLANES[f.kind] ? sheetPose(f) : null;
-    const im = CP ? CP.im : (f.dir || 1) > 0 ? A.r : A.l, s = (CP ? SHEET_PLANES[f.kind].I.k : T.k) * SV, w = Math.round(im.width * s), h = Math.round(im.height * s);
+    const Q = trafficPic(f), T = Q.T, CP = Q.CP, im = Q.im, s = Q.k * SV, w = Math.round(im.width * s), h = Math.round(im.height * s);
     // (its lamps: a red beacon, white strobes - the 747s brighter; and its gear, the big one's)
     // (driven, it runs on the warplane's ground rules, its middle PLANE_WHEELS over the concrete: drawn up by the rest of
     // its own height over its wheels, so the 747 stands on the runway, not in it - user Oct 26)
-    const lift = f.state === 'free' ? (T.gy || PLANE_WHEELS) - PLANE_WHEELS : 0;
+    const lift = Q.lift;
     // (its lamps: on the user's Oct 26 drawings the tail's top - the Cessna's 22 back and 9.5 up from its middle, the
     // 747's 60 back and 23 up - and the near wing; turned with the drawing about its own middle, as it's drawn, and only
     // in the side views: user Oct 26, "the red light is wrong when the plane tilts... same issue when diving")
@@ -47751,7 +47916,9 @@ function drawTraffic(x0, x1, mode) {
     // (user Nov 2: the one wheel set for every vehicle, planes too) a Cessna seen side on with its wheels down: its painted wheels
     // cut out of the picture and the set's drawn in their place, turned as it rolls (planeWheelParts, 50-zz-wheels.js)
     const WP = f.kind === 'cessna' && CP && CP.side0 && (f.gear == null || f.gear > 0.5) && f.state !== 'sink' && f.state !== 'wreck' ? planeWheelParts(im) : null;
-    const SI = scaled(WP ? WP.body : im, s, true), sus = f.susY || 0;
+    // (its damage, the one rule - dmgPic, 50-zz-damage.js: charred over its damage row's drawing as its hits mount; going down,
+    // sunk or a wreck, all of it)
+    const SI = scaled(dmgPic(WP ? WP.body : im, trafficDmg(f), { m: Q.k / UPM }), s, true), sus = f.susY || 0;
     if (CP && CP.split) {
       // (user Oct 26: "A Jumbo Jet, because it's so wide, when it crashes on water it should split into 2 parts like a ship
       // as it sinks") two halves turned apart about the break at the wing root, a gap opening, the torn ends dark
@@ -47893,7 +48060,7 @@ function stepJetboat(j, dt) {
     if (j.state === 'gone' || j.state === 'wreck') return;
     if (j.state === 'sink') {
       // down to the bottom (the sea's or the lake's), settling there on its keel along the floor - its wreck stays
-      j.y += 18 * dt; j.a += (0.35 * j.dir - j.a) * dt * 0.6;
+      j.y += 18 * dt; j.a += ((j.brk != null ? 0 : 0.35 * j.dir) - j.a) * dt * 0.6; if (j.brk != null) j.brkT = (j.brkT || 0) + dt;   // (broken: each half tips its own way - drawFishBoat)
       if (!SIM_ONLY && j.y < WATER_Y + 30 && jbR() < dt * 8) spawnSmoke(j.x, WATER_Y - 3, { kind: 'trail', mist: true, r: jbRnd(2, 4), grow: 2, lift: 4, vx: jbRnd(-6, 6), life: 1, alpha: 0.5 });
       if (!SIM_ONLY && jbR() < dt * 5) addBubble(j.x + jbRnd(-6, 6), j.y - 3, jbRnd(-4, 4), -jbRnd(12, 26), jbRnd(0.6, 1.4));
       if (floorPen(JB_KEEL, j.x, j.y, j.a) >= 0) { const r = floorRest(JB_KEEL, j.x, null, 0.5, j.a); j.y = r.y; j.a = r.a; j.state = 'wreck'; kickDust(j.x, 14, 0.5); }
@@ -47939,11 +48106,16 @@ function stepJetboat(j, dt) {
     if (!SIM_ONLY && j.kind !== 'fish' && j.turn === 0 && !j.air && sp > 4) { j.spr = (j.spr || 0) + dt * (j.kind === 'motor' ? 10 : 30); while (j.spr >= 1) { j.spr -= 1; spawnSpray(j.x - j.dir * 13, j.y - 1, -j.dir * jbRnd(30, 70), 0.5); } }
     if (j.hp < 2) { j.smokeT = (j.smokeT || 0) - dt; if (j.smokeT <= 0 && !SIM_ONLY) { j.smokeT = 0.15; spawnSmoke(j.x - j.dir * 4, j.y - 8, { kind: 'trail', dark: 0.2, r: jbRnd(2, 3.5), grow: 3, lift: 20, vx: -j.dir * 10, life: jbRnd(2, 3), alpha: 0.5, chain: smStream(j) }); } }
     // hit: one round or shell anywhere on her picture and she's destroyed (vehHitBy - the one rule, 50-zz-damage.js; user Nov 2 11:56)
-    if (j.state === 'run') { const s = vehHitBy(j, dt); if (s) { harmed(j, s.x, s.y, s); spawnSparks(s.x, s.y, 4, 120); jetboatSink(j); } }
+    if (j.state === 'run') { const H = vehHitBy(j, dt); if (H) { const s = H.s; harmed(j, s.x, s.y, s); spawnSparks(s.x, s.y, 4, 120); jetboatSink(j, H.shell ? s.x : null); } }   // (a missile, shell or bomb: a boat long enough breaks in two there - jbBreak)
   }
-function jetboatSink(j) {
+// (user Nov 2 12:13: "a fishing boat should be able to be broken in two if hit by a missile") as the big ships: a boat VEH_BREAK_M or
+// longer, hit by a missile, a shell or a bomb, breaks where it struck (brk: there along her picture, 0..1 from its left; brkT: how
+// long since) - her two halves going down apart, each tipping its end up, the torn edges charred (drawFishBoat)
+const VEH_BREAK_M = 8;
+function jetboatSink(j, atX = null) {
   if (j.state !== 'run' || netGuestHold()) return;
   j.state = 'sink'; j.hp = 0;
+  if (atX != null && j.kind === 'fish') { const w = storyBoatSize(j)[0]; if (w >= VEH_BREAK_M * UPM) { j.brk = clamp(0.5 + (atX - j.x) / w * (j.dir > 0 ? -1 : 1), 0.3, 0.7); j.brkT = 0; } }
   sectionBlast(j.x, j.y - 4, 0.5, 0); spawnDebris(j.x, j.y - 4, 8, j.dir * j.v * 0.2); sound('impact', j.x);
 }
 let jbArt = null, mbArt = null;
@@ -51449,7 +51621,7 @@ function stepStoryCars(dt) {
     // (user Nov 1 22:37: a car on a rock formation "if that rock is destroyed (e.g. sub missile) it should fall down lower") one
     // lying on the bottom: the floor under her ends and middle looked at again - gone from under her (rockBlast), she sinks on
     if (c.state === 'sunk') { const h = storyCarSize(c)[0] * 0.36, F = c.fl || []; if (seabedY(c.x - h) > (F[0] ?? 1e9) + 1 || seabedY(c.x) > (F[1] ?? 1e9) + 1 || seabedY(c.x + h) > (F[2] ?? 1e9) + 1) c.state = 'sink'; else continue; }
-    if (c.state === 'run' && !(c.hp <= 0)) { const s = vehHitBy(c, dt); if (s) carWreck(c, s); }   // (one hit: destroyed - as a boat, user Nov 2 11:56)
+    if (c.state === 'run' && !(c.hp <= 0)) { const H = vehHitBy(c, dt); if (H) carWreck(c, H.s); }   // (one hit: destroyed - as a boat, user Nov 2 11:56)
     if (c.hp <= 0 && c.burnT > 0) { c.burnT -= dt; c.smT = (c.smT || 0) - dt; if (c.smT <= 0 && !SIM_ONLY) { const [L, H] = storyCarSize(c); c.smT = 0.18; spawnSmoke(c.x + (storyR() - 0.5) * L * 0.5, c.y - H * 0.8, { kind: 'trail', dark: 0.35, r: 0.4 * UPM, grow: 0.5 * UPM, lift: 18, vx: 0, life: 3 + storyR() * 2, alpha: 0.55, chain: smStream(c) }); } }   // (the wreck smoulders)
     if (c.state === 'run' || c.state === 'sink') storyCarBody(c, dt);
   }
@@ -51764,9 +51936,24 @@ function netDeck(j) {
   return [j.x + lx * ca - ly * sa, j.y + h * FISH_DRAFT + lx * sa + ly * ca];
 }
 // the bag hanging ready under the hook (m), how full a bag looks (fish), the rail it goes down behind
-const NET_HANG = 0.5, NET_BAG_FISH = 150;
-const netFill = N => clamp((N.n || 0) / NET_BAG_FISH, 0, 1);
-const netBagH = f => (1.3 + 1.3 * f) * UPM, netBagW = f => (0.75 + 1.05 * f) * UPM;
+// (user 12:12: "Once the Float has hit the water line THEN the sinker is the only one going up like 'closing' the bag with the fish.
+// Once that is done, the bag should always have this specific size that matches the shape of that image ... Only then does it go
+// up, so we never have such a hard cut") the closed bag: one size always (m), the shape of his picture - a water drop
+const NET_HANG = 0.5, NET_BAG_H = 2.4, NET_BAG_W = 1.7, NET_SHAPE_S = 1.0;
+const netBagH = () => NET_BAG_H * UPM;
+// each point of the mesh in the closed bag: the mouth gathered at its neck (the float and the sinker together at the top), the bag's
+// end round at its bottom; (cx, top) its neck
+function netBagAt(n, cx, top) {
+  const G = NETG, t = G.KK[n] / NETP.K * 0.97, a = Math.acos(1 - 2 * t), hw = NET_BAG_W / 2 * UPM * Math.sin(a) * Math.sin(a / 2) / 0.77;
+  return [cx + (G.I[n] / NETP.M * 2 - 1) * hw, top + t * NET_BAG_H * UPM];
+}
+// the net laid in that shape, hanging from the hook on a short rope (still: it moves with her)
+function netBagPlace(N, cx, top, hx, hy) {
+  const G = NETG, P = N.P;
+  for (let n = 0; n < G.NN; n++) { const [x, y] = netBagAt(n, cx, top); P[4 * n] = P[4 * n + 2] = x; P[4 * n + 1] = P[4 * n + 3] = y; }
+  for (let r = 0; r < G.RN; r++) { const q = 4 * (G.NN + r); P[q] = P[q + 2] = hx; P[q + 1] = P[q + 3] = hy; }
+  N.na = 0; N.L = Math.max(0, top - hy);
+}
 function netDeckY(j) { const h = storyBoatSize(j)[1]; return j.y + h * FISH_DRAFT - h + 0.64 * h; }
 // the net breaking the surface: a burst of foam and spray round it
 function netBreakOut(j, N, x, y) {
@@ -51814,7 +52001,7 @@ function netHoldState(v) { netTune(); const n = netCaught(v), H = Math.max(1, Ma
 function netAboard(j) {
   const N = j.net; if (!N) return;
   netCash(j); N.s = 1; N.L = 0; N.cmd = 0; N.ph = 4; N.bo = NET_HANG * UPM;
-  if (N.P) { const [hx, hy] = netHook(j); netFold(N, j, hx, hy + N.bo, hx, hy); }
+  if (N.P) { const [hx, hy] = netHook(j); netBagPlace(N, hx, hy + N.bo, hx, hy); }
 }
 // scratch, per step: each point's mass, weight (u/s^2), drag (1/u), and the water's surface / the floor under it
 const NETS = (() => { const T = NETG.NN + NETG.RN; return { m: new Float64Array(T), g: new Float64Array(T), k: new Float64Array(T), sf: new Float64Array(T), bd: new Float64Array(T), fill: new Float64Array(NETP.K + 1), cap: new Float64Array(NETP.K), put: new Float64Array(NETP.K), at: new Float64Array(2 * NET_KEEP) }; })();
@@ -51850,16 +52037,30 @@ function fishNetStep(j, dt) {
   { const still = j.state === 'run' && !(j.turn > 0) && Math.abs(j.vDrive || 0) + Math.abs(j.ntv || 0) < 0.5 * UPM;
     N.gl = clamp((N.gl || 0) + (still ? dt / 2.5 : -dt / 0.8), 0, 1); }
   // (user 11:27: "Once it reaches the water line, it becomes a automatic anim ... the winch just brings it up directly, in this water
-  // drop shape ... of a net with fish ... The net then goes down inside the boat ... when it comes out, its ready to be used again")
-  // ph: 0 out (the net's own physics), 1 lifted from the water line to under the hook as a bag (its fish in it), 2 lowered into her
-  // hold (out of sight behind the rail - the catch into the hold), 3 brought back out empty, 4 hanging empty under the hook, ready.
-  // bo: the bag's top below the hook (world units)
+  // drop shape ... The net then goes down inside the boat ... when it comes out, its ready to be used again"; 12:12: no hard cut)
+  // ph: 0 out (the net's own physics); 5 its float at the water line, held there while the sinker comes up to it - the mouth
+  // closing on the catch (still the physics); 6 the closed net easing into the bag's one shape under its float (NET_SHAPE_S);
+  // 1 that bag lifted to under the hook; 2 lowered into her (drawn behind her side: it goes inside her), the catch into her hold;
+  // 3 back out empty; 4 hanging under the hook, ready. bo: the bag's neck below the hook (world units). The same net all the way
+  // - its own points moved - so nothing is ever swapped for a picture
   if (N.ph == null) N.ph = N.s >= 1 && N.L <= 0 ? 4 : 0;
-  if (N.ph !== 0) {
-    const hang = NET_HANG * UPM, deckIn = netDeckY(j) - hy + netBagH(0) + 0.3 * UPM, bo0 = N.bo ?? hang;
-    if (N.ph === 1) {   // up out of the water: the crane's lift, easing in near the top; its drips
+  if (N.ph === 6) {   // easing into the bag's shape, its neck where the float is (moving with her)
+    N.fp[0] += hx - (N.hx ?? hx);
+    N.sht = Math.min(1, (N.sht || 0) + dt / NET_SHAPE_S); const e = N.sht * N.sht * (3 - 2 * N.sht), P = N.P, P0 = N.sh0;
+    for (let n = 0; n < NN; n++) { const [x, y] = netBagAt(n, N.fp[0], N.fp[1]), q = 4 * n; const x0 = P0[2 * n] + hx - N.sh0x; P[q] = P[q + 2] = x0 + (x - x0) * e; P[q + 1] = P[q + 3] = P0[2 * n + 1] + (y - P0[2 * n + 1]) * e; }
+    for (let r = 0; r < N.na; r++) { const q = 4 * (NN + r), u = (r + 1) / (N.na + 1); P[q] = P[q + 2] = hx + (N.fp[0] - hx) * u; P[q + 1] = P[q + 3] = hy + (N.fp[1] - hy) * u; }   // (its rope straight up to the hook)
+    if (N.sht >= 1) { N.ph = 1; N.bo = N.bo0 = N.fp[1] - hy; N.bx0 = N.fp[0] - hx; netBreakOut(j, N, N.fp[0], surfaceY(N.fp[0])); }
+    N.hx = hx; N.hy = hy; N.T = 0; N.fx = j.x; N.lo = Math.min(j.x, N.fp[0] - NET_BAG_W * UPM); N.hi = Math.max(j.x, N.fp[0] + NET_BAG_W * UPM); N.d = Math.max(0, N.fp[1] + netBagH() - WATER_Y); j.ntv = (j.ntv || 0) * (1 - Math.min(1, dt * 2)); return;
+  }
+  if (N.ph >= 1 && N.ph <= 4) {
+    const hang = NET_HANG * UPM, deckIn = netDeckY(j) - hy + 0.3 * UPM;
+    if (N.ph === 1) {   // up out of the water: the crane's lift, easing in near the top; the sea running off it
       N.bo = Math.max(hang, N.bo - NETP.LIFT * 1.6 * UPM * (0.35 + 0.65 * clamp((N.bo - hang) / (2 * UPM), 0, 1)) * dt);
-      if (!SIM_ONLY && storyR() < dt * 14) { const by = hy + N.bo + netBagH(netFill(N)); if (by < surfaceY(hx) - 0.2 * UPM) spawnSpray(hx + (storyR() - 0.5) * 0.6 * UPM, by, (storyR() - 0.5) * 10, 0.15); }
+      if (!SIM_ONLY) {
+        const bx = hx + (N.bx0 || 0) * clamp((N.bo - hang) / Math.max(1e-6, (N.bo0 || hang) - hang), 0, 1), sy = surfaceY(bx), top = hy + N.bo, bot = top + netBagH();
+        if (bot > sy && top < sy + 0.3 * UPM && storyR() < dt * 10) { const was = FXK; FXK = 1.15; spawnFoam(bx + (storyR() - 0.5) * 2 * UPM, 1 + storyR()); FXK = was; }   // (foam round it where it comes out of the sea)
+        if (bot < sy - 0.2 * UPM && storyR() < dt * 14) spawnSpray(bx + (storyR() - 0.5) * 0.6 * UPM, bot, (storyR() - 0.5) * 10, 0.15);   // (dripping)
+      }
       if (N.bo <= hang) { N.ph = 2; }
     } else if (N.ph === 2) {   // down into her hold
       N.bo = Math.min(deckIn, N.bo + 0.9 * UPM * dt);
@@ -51867,16 +52068,18 @@ function fishNetStep(j, dt) {
     } else if (N.ph === 3) {   // back out, empty
       N.bo = Math.max(hang, N.bo - 1.2 * UPM * dt);
       if (N.bo <= hang) { N.ph = 4; N.auto = 0; }
-    } else {   // ready under the hook: DOWN lets it go
+    } else {   // ready under the hook: DOWN lets it go - from just as it hangs (the physics takes it from there)
       N.bo = hang;
-      if (N.cmd > 0) { N.ph = 0; N.s = 1; N.L = hang; netFold(N, j, hx, hy + hang, hx, hy); N.auto = 0; }
+      if (N.cmd > 0) { N.ph = 0; N.s = 1; N.auto = 0; netBagPlace(N, hx, hy + hang, hx, hy); N.hx = hx; N.hy = hy; }
     }
     if (N.ph !== 0) {
-      N.tBo = (N.tBo ?? bo0); netTicks(j, N);
-      netFold(N, j, hx, hy + N.bo, hx, hy);
+      netTicks(j, N);
+      const sw = N.ph === 1 && N.bo0 > NET_HANG * UPM ? (N.bx0 || 0) * clamp((N.bo - NET_HANG * UPM) / (N.bo0 - NET_HANG * UPM), 0, 1) : 0;   // (swinging in under the hook as it comes up)
+      netBagPlace(N, hx + sw, hy + N.bo, hx, hy);
       N.hx = hx; N.hy = hy; N.T = 0; N.d = 0; N.fx = j.x; N.lo = N.hi = j.x; j.ntv = 0; return;
     }
   }
+  if (N.ph === 5) N.fp[0] += hx - (N.hx ?? hx);   // (the float held at the water line, moving with her)
   if (N.hx == null) { N.hx = hx; N.hy = hy; }
   const P = N.P;
   // per frame: masses, weights and drags (the catch at the bag's end), and the water and floor under each point
@@ -51906,19 +52109,19 @@ function fishNetStep(j, dt) {
     // goes closed - the float and the sinker together - and where its float reaches the water the rope stops while it opens;
     // coming up, where its float reaches the water line the rope stops while it closes, then it comes on up
     const atLine = P[4 * G.top + 1] > S.sf[G.top] - 0.3 * UPM;   // (its float at the water line or below it)
-    if (N.cmd > 0) {
+    if (N.ph === 5) N.s = Math.min(1, N.s + h / Q.STOW);   // (closing: the rope still, the sinker comes up to the float)
+    else if (N.cmd > 0) {
       // (11:14) above the water it drops as fast as it falls (the winch runs free), opening as it goes in - the rope doesn't wait
       if (N.s > 0 && atLine) N.s = Math.max(0, N.s - h / (Q.STOW * 0.5));
       N.L = Math.min(Q.ROPE * UPM, N.L + (atLine ? Q.DN : Math.max(Q.DN, 9)) * UPM * h);
     } else if (N.cmd < 0) {
       const rate = Q.UP * (0.5 + 0.5 * Q.T0 / (Q.T0 + (N.T || 0)));                       // (a heavy net comes up slower)
-      if (P[4 * G.top + 1] < S.sf[G.top] + 0.6 * UPM) { netBreakOut(j, N, P[4 * G.top], P[4 * G.top + 1]); N.ph = 1; N.bo = Math.max(NET_HANG * UPM, P[4 * G.top + 1] - Hy); N.s = 1; N.hx = hx; N.hy = hy; return; }   // (at the water line: the bag's lift - user 11:27)
-      else if (N.L > 0) {
+      if (P[4 * G.top + 1] < S.sf[G.top] + 0.6 * UPM || N.L <= 0) { N.ph = 5; N.fp = [P[4 * G.top], P[4 * G.top + 1]]; }   // (at the water line - or all the rope in: it closes there, user 12:12)
+      else {
         // out of the water (its float above the line): a crane's slow lift, easing in over its last 3 m
         const out = P[4 * G.top + 1] < S.sf[G.top], r = out ? Math.min(rate, Q.LIFT * (0.3 + 0.7 * clamp(N.L / (3 * UPM), 0, 1))) : rate;
         N.L = Math.max(0, N.L - r * UPM * h);
       }
-      else { N.ph = 1; N.bo = NET_HANG * UPM; N.s = 1; N.hx = hx; N.hy = hy; return; }   // (all the rope in: the bag's lift)
     }
     const f = 1 - 0.92 * N.s;                                            // (the mesh's cords, shortened while it's closed)
     // the rope's points in use: the one nearest the block is let out from it, or taken in at it
@@ -51978,7 +52181,10 @@ function fishNetStep(j, dt) {
     }
     // the floor: nothing goes through it, and what drags on it is held back
     for (let n = 0; n < last; n++) { const q = 4 * n; if (P[q + 1] > S.bd[n]) { P[q + 1] = S.bd[n]; P[q + 2] += (P[q] - P[q + 2]) * 0.6; } }
+    if (N.ph === 5) { const q = 4 * G.top; P[q] = P[q + 2] = N.fp[0]; P[q + 1] = P[q + 3] = N.fp[1]; }   // (the float held at the line)
   }
+  // closed: from here it eases into the bag's shape (ph 6), the net's points as they are now its start
+  if (N.ph === 5 && N.s >= 1) { N.ph = 6; N.sht = 0; N.sh0x = hx; N.sh0 = new Float64Array(2 * NN); for (let n = 0; n < NN; n++) { N.sh0[2 * n] = P[4 * n]; N.sh0[2 * n + 1] = P[4 * n + 1]; } }
   netTicks(j, N);
   // the pull on the boom (N), averaged over the frame's steps: it drags her back, and when she's stopped she drifts back on it
   Fx /= h * h * ns * UPM; Fy /= h * h * ns * UPM;
@@ -52118,7 +52324,7 @@ function sfxBoatTurn(x, a = 1) {
 const NET_CAM_S = 0.6;
 const NET_CAM = [{ own: null, set: null, ox: 0, oy: 0, t: null }, { own: null, set: null, ox: 0, oy: 0, t: null }];
 function netCam(p, v) {
-  const N = v.net, Z = NET_CAM[p] || NET_CAM[0], out = N && N.ph === 0 && N.lo != null;
+  const N = v.net, Z = NET_CAM[p] || NET_CAM[0], out = N && (N.ph === 0 || N.ph >= 5) && N.lo != null;
   if (Z.set != null && scopes[p].level !== Z.set) Z.own = scopes[p].level;   // (the player zoomed: theirs from now on)
   if (Z.own == null) Z.own = scopes[p].level;
   const ease = (tx, ty) => {   // (the frame wanted, eased: one rule both ways)
@@ -52260,24 +52466,6 @@ const NET_L = pxLayer({
         for (let r = 0; r < 7; r++) for (let q = 0; q < 7; q++) { const ch = STORY_COIN[r][q]; if (ch !== '.') put(Math.round(cx / s) * s + q * k, Math.round(cy / s) * s + r * k, k, k, ch === '#' ? ink.coinD : ink.coin); }
       }
     }
-    if (N.ph && N.ph !== 0) {   // the bag (user 11:27's water drop of a net with its fish), hanging under the hook on a short rope
-      const f = netFill(N),   /* (empty coming back out - unless her hold was full: what's left stays in it) */ bh = netBagH(f), bw = netBagW(f), top = hy + (N.bo ?? 0), clipY = N.ph === 2 || N.ph === 3 ? netDeckY(j) : 1e12;
-      line(HX, HY, HX, PY(top), ink.rope);
-      const T0 = PY(top), T1 = PY(Math.min(top + bh, clipY)), WP = PX(hx + bw / 2) - HX, HP = PY(top + bh) - T0, cell = Math.max(3, Math.round((PX(hx + 0.32 * UPM) - HX) / s)) ;
-      for (let Y = T0; Y < T1; Y += s) {
-        // (a water drop: pointed at its neck up top, round below - x = sin a * sin a/2, its widest 0.77)
-        const t = (Y - T0) / Math.max(1, HP), a = Math.acos(clamp(1 - 2 * t, -1, 1)), hw = Math.max(s, WP * Math.sin(a) * Math.sin(a / 2) / 0.77), yi = Math.round((Y - T0) / s);
-        const full = t > 1 - (0.15 + 0.8 * f) && f > 0;
-        for (let X = HX - hw; X <= HX + hw; X += s) {
-          const xi = Math.round((X - HX) / s), edge = X - (HX - hw) < s || HX + hw - X < s;
-          const mesh = ((xi + yi) % cell + cell) % cell === 0 || ((xi - yi) % cell + cell) % cell === 0;
-          const col = edge ? ink.bagEdge : mesh ? ink.frame : full ? (((xi * 7 + yi * 13) % 11) === 0 ? ink.fish : ink.bagFish) : 0;
-          if (col) put(Math.round(X / s) * s, Math.round(Y / s) * s, s, s, col);
-        }
-      }
-      put(Math.round(HX / s) * s - s, Math.round(T0 / s) * s - s, 3 * s, 2 * s, ink.frame);   // (its neck, gathered to the hook)
-      return m;
-    }
     // the points in this view's pixels (the block first)
     for (let n = 0; n < NN + na; n++) { NET_VX[n] = PX(P[4 * n]); NET_VY[n] = PY(P[4 * n + 1]); }
     let mn = HX, mx = HX; for (let n = 0; n < NN + na; n++) { if (NET_VX[n] < mn) mn = NET_VX[n]; if (NET_VX[n] > mx) mx = NET_VX[n]; }
@@ -52312,11 +52500,12 @@ function drawNetFish(N) {
 }
 // the bag on its way up and into her (ph 1-4): drawn before her, so her hull hides it - it comes up behind her side and goes down
 // into her (user 11:27: "we stop seeing it because its 'inside'")
-function drawNetBag(j) { const N = j.net; if (N && N.P && N.ph) { NET_DRAW = j; pxDraw(NET_L, -1e12, 1e12); NET_DRAW = null; } }
+const netInBag = N => N.ph >= 1 && N.ph <= 4;
+function drawNetBag(j) { const N = j.net; if (N && N.P && netInBag(N)) { if (N.ck && N.ck.length) drawNetFish(N); NET_DRAW = j; pxDraw(NET_L, -1e12, 1e12); NET_DRAW = null; } }
 function drawStoryNet(j, h) {
   const N = j.net;
-  if (N && N.P && N.ph === 0 && N.ck && N.ck.length) drawNetFish(N);   // (under the mesh: inside the bag)
-  if (N && N.P && !N.ph) { NET_DRAW = j; pxDraw(NET_L, -1e12, 1e12); NET_DRAW = null; }   // (out: over her)
+  if (N && N.P && !netInBag(N) && N.ck && N.ck.length) drawNetFish(N);   // (under the mesh: inside the bag)
+  if (N && N.P && !netInBag(N)) { NET_DRAW = j; pxDraw(NET_L, -1e12, 1e12); NET_DRAW = null; }   // (out: over her)
   // gulls round her while she has fish in the net, at the size of every gull in the game (37-birds.js: user 10:29, "The seagulls
   // look gigantic ... They should be smaller like other birds"); stopped, they come down and sit on her - the bow, the wheelhouse
   // roof, the stern rail (N.gl)
@@ -52774,6 +52963,22 @@ ACTS.storyPark = (p, id) => storyPark(p, id);
 // (user Nov 2 10:27: one fishing boat, with its turn - side, two between, bow on; the art faces left)
 const STORY_BOAT_ART = ['fishing-boat-0'], FISH_TURN_ART = ['fishing-boat-0', 'fishing-boat-1', 'fishing-boat-2', 'fishing-boat-3'], FISH_DRAFT = 0.2;   // (her art's height under the water - user 10:34: a little higher than 0.24)
 function storyBoatSize(j) { if (j.car) return storyCarSize(j); if (j.heli) return [chHalf(j) * 2, chSkid(j) * 2, null]; if (j.sub) return [18 * REAL.minisub, 10 * REAL.minisub, null]; if (j.plane) return [10 * UPM, 3 * UPM, null]; if (j.kind === 'shuttle') return [8 * UPM, 40 * UPM, null]; if (j.kind !== 'fish') return [(j.kind === 'motor' ? 4.3 : 3.5) * UPM, 3 * UPM, null]; const P = tropPic(STORY_BOAT_ART[(j.col | 0) % STORY_BOAT_ART.length]); return P ? [P.width * P._m * UPM, P.height * P._m * UPM, P] : [11 * UPM, 7 * UPM, null]; }
+// broken in two (jetboatSink - user Nov 2 12:13): her two halves either side of a ragged tear where she was struck, drawn apart,
+// each turned about the tear so its far end rises as she goes down, the torn edges charred - the big ships' break (50-land-civships)
+function fishHalves(j, D, Dg, W, H) {
+  const t = j.brkT || 0, ang = Math.min(0.55, t * 0.32), gap = Math.min(1, t * 0.7) * UPM * SV, bx = -W / 2 + j.brk * W;
+  const st = Math.max(2, Math.round(3 * SV)), seed = j.brk * 37.1, jag = y => Math.round(Math.sin(y / st * 0.9 + seed) * 2.2 * SV + Math.sin(y / st * 2.3 + seed * 3) * 1.6 * SV);
+  const ew = Math.max(2, Math.round(1.6 * SV));
+  for (const side of [-1, 1]) {
+    C.save(); C.translate(bx + side * gap / 2, 0); C.rotate(-side * ang); C.translate(-bx, 0);
+    C.beginPath(); C.moveTo(side * W * 2, -H - 4); C.lineTo(bx + jag(0), -H - 4);
+    for (let y = -H; y <= 4; y += st) C.lineTo(bx + jag(y + H), y);
+    C.lineTo(side * W * 2, 4); C.closePath(); C.clip();
+    C.drawImage(Dg, -W / 2, -H, W, H); objLit(D, -W / 2, -H, W, H, PX(j.x));
+    C.fillStyle = '#1c120c'; for (let y = -H; y <= 0; y += st) C.fillRect(bx + jag(y + H) - ew, y, 2 * ew, st);   // (the torn edge, burnt)
+    C.restore();
+  }
+}
 function drawFishBoat(j) {
   const [w, h, P] = storyBoatSize(j); if (!P) return;   // (the tropical sheet not loaded yet)
   // turning: round through the user's views (side, two between, bow on), the far side mirrored (user Nov 2 10:27: "rotation sheets
@@ -52785,8 +52990,9 @@ function drawFishBoat(j) {
   C.save(); C.translate(PX(j.x), PY(j.y + h * FISH_DRAFT)); C.rotate(j.a); C.scale(j.dir > 0 ? -1 : 1, 1);   // (the art faces left)
   // (hit: her damaged picture and charred - the one rule, dmgPic (50-zz-damage.js); never a box over the screen - user 11:43)
   const D = dmgPic(F, dmgOf(j));
-  C.drawImage(GLR.on ? glTint(D, 'strT', E.fx || [1, 1, 1], [0, 0, 0], false) : D, -W / 2, -H, W, H);
-  objLit(D, -W / 2, -H, W, H, PX(j.x));                   // (user Nov 2 10:55: the hour's light as every vehicle - the night's dark shape, the moon's sheen and rims, a low sun's rim)
+  const Dg = GLR.on ? glTint(D, 'strT', E.fx || [1, 1, 1], [0, 0, 0], false) : D;
+  if (j.brk != null) fishHalves(j, D, Dg, W, H);
+  else { C.drawImage(Dg, -W / 2, -H, W, H); objLit(D, -W / 2, -H, W, H, PX(j.x)); }                   // (user Nov 2 10:55: the hour's light as every vehicle - the night's dark shape, the moon's sheen and rims, a low sun's rim)
   C.restore();
   // her windows and portholes lit as the lamps come on (STR_WINDOWS, marked by eye - gen/tropical/windows.py), seen side on; her
   // navigation lights - the masthead, the sidelight on our side (green going right, red going left), the stern light - as the ships'
@@ -53398,6 +53604,7 @@ function dmgPic(P, f, o) {
   }
   x.putImageData(im, 0, 0);
   out._m = P._m; out._door = P._door; out._chim = P._chim; out._flag = P._flag;
+  if (P._hi && P._hi.c) { const n = P._hi.n || 1, Bh = B && B._hi && B._hi.c; out._hi = { c: dmgPic(P._hi.c, f, { B: Bh || undefined, cuts, m: ((o && o.m) || P._m || 0.02) / n }), n }; }   // (its big-art drawing charred alike)
   if (memo.size >= 16) memo.delete(memo.keys().next().value);
   memo.set(key, out); return out;
 }
@@ -53443,17 +53650,39 @@ function vehHitAt(v, x, y, pad = VEH_HIT_PAD * UPM) {
   }
   return false;
 }
-// a shot's path this frame through it
-function vehPathIn(v, o, dt) {
-  const [w, h] = vehFrame(v); if (Math.abs(o.x - v.x) > w + 60 || Math.abs(o.y - v.y) > h + 60) return false;
-  const ex = (o.vx || 0) * dt, ey = (o.vy || 0) * dt, n = Math.min(12, Math.ceil(Math.hypot(ex, ey) / (0.4 * UPM)) + 1);
-  for (let i = 0; i < n; i++) { const t = n > 1 ? i / (n - 1) : 1; if (vehHitAt(v, o.x - ex * (1 - t), o.y - ey * (1 - t))) return true; }
+/* A vehicle drawn as a picture turned about its middle (aircraft, helicopters, the space vehicles, balloons): its pose - where
+   that picture is, as it's drawn - is what the hit test reads. { P: the picture drawn (its own pixels: the one for its view and
+   damage), k: world units a picture pixel, cx, cy: the picture's middle in the world, a: its turn (radians, as drawn), flip: drawn
+   mirrored }. Each kind gives its pose (one small function beside its drawing); the test is this one. */
+function poseHitAt(o, x, y, pad = VEH_HIT_PAD * UPM) {
+  if (!o || !o.P || !o.P.width) return false;
+  const c = Math.cos(o.a || 0), s = Math.sin(o.a || 0), dx = x - o.cx, dy = y - o.cy;
+  let u = dx * c + dy * s; const q = -dx * s + dy * c; if (o.flip) u = -u;
+  const P = o.P, PW = P.width, PH = P.height, px = Math.round(u / o.k + PW / 2), py = Math.round(q / o.k + PH / 2), r = Math.max(1, Math.round(pad / o.k));
+  if (px < -r || py < -r || px >= PW + r || py >= PH + r) return false;
+  if (!P.getContext && !(P instanceof HTMLImageElement)) return true;   // (no pixels to look at: its box)
+  const A = civAlphaOf(P);
+  for (const [ox, oy] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]]) {
+    const X = px + ox, Y = py + oy; if (X < 0 || Y < 0 || X >= PW || Y >= PH) continue;
+    if (A[(Y * PW + X) * 4 + 3] > 0) return true;
+  }
   return false;
 }
-// the round or shell that hit it this frame (a round stops in it), or null
-function vehHitBy(v, dt) {
-  for (const b of bullets) if (!b._hitV && !(b.spent > 0) && vehPathIn(v, b, dt) && mayHit(b, v)) { b._hitV = true; b.spent = 1e-6; return b; }
-  for (const s of shells) if (vehPathIn(v, s, dt) && mayHit(s, v)) return s;
+// a shot's path this frame through it (pose: the kind's pose function - none: the boats' and cars' standing picture)
+function vehPathIn(v, o, dt, pose) {
+  const Q = pose ? pose(v) : null; if (pose && !Q) return false;
+  const R = Q ? Math.max(Q.P.width, Q.P.height) * Q.k * 0.75 : null, [w, h] = Q ? [R, R] : vehFrame(v), mx = Q ? Q.cx : v.x, my = Q ? Q.cy : v.y;
+  if (Math.abs(o.x - mx) > w + 60 || Math.abs(o.y - my) > h + 60) return false;
+  const ex = (o.vx || 0) * dt, ey = (o.vy || 0) * dt, n = Math.min(12, Math.ceil(Math.hypot(ex, ey) / (0.4 * UPM)) + 1);
+  for (let i = 0; i < n; i++) { const t = n > 1 ? i / (n - 1) : 1, x = o.x - ex * (1 - t), y = o.y - ey * (1 - t); if (Q ? poseHitAt(Q, x, y) : vehHitAt(v, x, y)) return true; }
+  return false;
+}
+// the round or shell that hit it this frame, or null: { s: the shot, shell: a shell (a missile, a bomb) rather than a round }.
+// A round stops in it; a shell bursts on it (taken out, its blast there). What a hit does to it is its kind's: the boats and the
+// cars are destroyed by one; the aircraft keep their health (hp of hpMax) and lose a round's or a shell's worth (VEH_HURT)
+function vehHitBy(v, dt, pose) {
+  for (const b of bullets) if (!b._hitV && !(b.spent > 0) && vehPathIn(v, b, dt, pose) && mayHit(b, v)) { b._hitV = true; b.spent = 1e-6; return { s: b, shell: false }; }
+  for (let k = shells.length - 1; k >= 0; k--) { const s = shells[k]; if (!s.under && vehPathIn(v, s, dt, pose) && mayHit(s, v)) { shells.splice(k, 1); sectionBlast(s.x, s.y, 0.6, 0); return { s, shell: true }; } }
   return null;
 }
 
