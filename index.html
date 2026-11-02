@@ -4117,8 +4117,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 614;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 12:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 615;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 12:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10086,7 +10086,7 @@ function mineContact(m, dt) {
   // (a big ship running onto it - user Oct 27: "Big ships should not ignore depth charges and mines")
   if (LAND) for (const cv of civShips) if (cv.state === 'sail' && Math.abs(m.x - cv.x) < civLen(cv) * 0.55 && [[0, R], [-R, 0], [R, 0], [0, 0]].some(([ox, oy]) => civHullHas(cv, m.x + ox, m.y + oy))) return ['civ', cv];   // (a research sub touching it: it goes off - user Oct 27)
   // (user Oct 29: "The tiny jet boats should blow up if they hit a mine")
-  if (LAND) for (const j of jetboats) if (j.state === 'run' && !j.lake && Math.abs(m.x - j.x) < 13 + R && Math.abs(m.y - (j.y - 3)) < 8) return ['jet', j];
+  if (LAND) for (const j of jetboats) if (j.state === 'run' && !j.lake && vehHitAt(j, m.x, m.y, R)) return ['jet', j];   // (her own size - vehHitAt)
   for (const b of sailboats) if (b.state === 'sail' && Math.abs(m.x - b.x) < sailHalf(b) + R && (sailHullHit(b, m.x - R, m.y) || sailHullHit(b, m.x + R, m.y) || sailHullHit(b, m.x, m.y - R))) return ['sail', b];
   for (const pl of planes.concat(oldPlanes)) {
     if (!pl || (pl.state !== 'fly' && pl.state !== 'down') || !mayHit(m, pl)) continue;
@@ -47948,9 +47948,8 @@ function stepJetboat(j, dt) {
     }
     if (!SIM_ONLY && j.kind !== 'fish' && j.turn === 0 && !j.air && sp > 4) { j.spr = (j.spr || 0) + dt * (j.kind === 'motor' ? 10 : 30); while (j.spr >= 1) { j.spr -= 1; spawnSpray(j.x - j.dir * 13, j.y - 1, -j.dir * jbRnd(30, 70), 0.5); } }
     if (j.hp < 2) { j.smokeT = (j.smokeT || 0) - dt; if (j.smokeT <= 0 && !SIM_ONLY) { j.smokeT = 0.15; spawnSmoke(j.x - j.dir * 4, j.y - 8, { kind: 'trail', dark: 0.2, r: jbRnd(2, 3.5), grow: 3, lift: 20, vx: -j.dir * 10, life: jbRnd(2, 3), alpha: 0.5, chain: smStream(j) }); } }
-    // hit: a round damages it, a second (or a shell) sinks it
-    for (const b of bullets) if (!b._jb && Math.abs(b.x - j.x) < 13 && Math.abs(b.y - (j.y - 4)) < 6 && mayHit(b, j)) { b._jb = true; j.hp--; harmed(j, b.x, b.y, b); spawnSparks(b.x, b.y, 4, 120); if (j.hp <= 0) jetboatSink(j); break; }
-    if (j.state === 'run') for (const s of shells) if (Math.abs(s.x - j.x) < 16 && Math.abs(s.y - (j.y - 4)) < 10 && mayHit(s, j)) { harmed(j, s.x, s.y, s); jetboatSink(j); break; }
+    // hit: one round or shell anywhere on her picture and she's destroyed (vehHitBy - the one rule, 50-zz-damage.js; user Nov 2 11:56)
+    if (j.state === 'run') { const s = vehHitBy(j, dt); if (s) { harmed(j, s.x, s.y, s); spawnSparks(s.x, s.y, 4, 120); jetboatSink(j); } }
   }
 function jetboatSink(j) {
   if (j.state !== 'run' || netGuestHold()) return;
@@ -51460,8 +51459,17 @@ function stepStoryCars(dt) {
     // (user Nov 1 22:37: a car on a rock formation "if that rock is destroyed (e.g. sub missile) it should fall down lower") one
     // lying on the bottom: the floor under her ends and middle looked at again - gone from under her (rockBlast), she sinks on
     if (c.state === 'sunk') { const h = storyCarSize(c)[0] * 0.36, F = c.fl || []; if (seabedY(c.x - h) > (F[0] ?? 1e9) + 1 || seabedY(c.x) > (F[1] ?? 1e9) + 1 || seabedY(c.x + h) > (F[2] ?? 1e9) + 1) c.state = 'sink'; else continue; }
+    if (c.state === 'run' && !(c.hp <= 0)) { const s = vehHitBy(c, dt); if (s) carWreck(c, s); }   // (one hit: destroyed - as a boat, user Nov 2 11:56)
+    if (c.hp <= 0 && c.burnT > 0) { c.burnT -= dt; c.smT = (c.smT || 0) - dt; if (c.smT <= 0 && !SIM_ONLY) { const [L, H] = storyCarSize(c); c.smT = 0.18; spawnSmoke(c.x + (storyR() - 0.5) * L * 0.5, c.y - H * 0.8, { kind: 'trail', dark: 0.35, r: 0.4 * UPM, grow: 0.5 * UPM, lift: 18, vx: 0, life: 3 + storyR() * 2, alpha: 0.55, chain: smStream(c) }); } }   // (the wreck smoulders)
     if (c.state === 'run' || c.state === 'sink') storyCarBody(c, dt);
   }
+}
+// a car destroyed: a blast, bits of her, she's a charred wreck where she stopped (dmgPic draws her so) - smouldering a while
+function carWreck(c, s) {
+  if (netGuestHold()) return;
+  c.hp = 0; c.vDrive = 0; c.drv = 0; c.npcV = 0; c.burnT = 25; c.rest = 0;
+  harmed(c, s.x, s.y, s); spawnSparks(s.x, s.y, 4, 120);
+  const H = storyCarSize(c)[1]; sectionBlast(c.x, c.y - H * 0.5, 0.4, 0); spawnDebris(c.x, c.y - H * 0.5, 6, (c.vx || 0) * 0.2); sound('impact', c.x);
 }
 function storyCarBody(c, dt) {
   const [L, H] = storyCarSize(c), half = L * 0.36;
@@ -51475,7 +51483,7 @@ function storyCarBody(c, dt) {
   // anywhere
   if (run && c.rest && c.driven == null && !c.npcV && !landWoke(c.x, half)) return;
   c.rest = 0;
-  if (run && c.driven != null) stepCivDriven(c, dt); else { c.vDrive = run ? c.npcV || 0 : 0; c.drv = 0; }   // (not driven: still, or on its routine - storyNPC, 50-story.js)
+  if (run && c.driven != null && !(c.hp <= 0)) stepCivDriven(c, dt); else { c.vDrive = run && !(c.hp <= 0) ? c.npcV || 0 : 0; c.drv = 0; }   // (a wreck goes nowhere)   // (not driven: still, or on its routine - storyNPC, 50-story.js)
   if (run && c.driven == null && c.vDrive && !dryLand(c.x + c.dir * L * 0.5)) c.vDrive = 0;   // (the story's own drivers stop at the water's edge)
   if (c.berth != null && !c.vDrive) c.vx = 0;                                                     // (tied up at her spot)
   const wy = carWater(c.x), deep = wy == null ? 0 : clamp((c.y - wy) / H, 0, 1);                  // (how deep she's in: 0 dry, 1 over her roof)
@@ -53378,7 +53386,9 @@ function dmgPic(P, f) {
     }
     return s / 0.8775;
   };
-  const cov = 0.18 + 0.72 * F;   // (how much of it is charred: a few patches when hit, nearly all of it lost)
+  // (how much of it is charred: with the user's damaged picture, patches over it - it carries its own damage; without one,
+  // the charring is the damage: most of it, destroyed)
+  const cov = B !== P ? 0.12 + 0.33 * F : 0.18 + 0.55 * F;
   for (let yy = 0; yy < H; yy++) for (let xx = 0; xx < W; xx++) {
     const i = (yy * W + xx) * 4; if (!d[i + 3]) continue;
     const k = clamp((cov - blot(xx, yy)) / 0.1, 0, 1) * 0.92; if (!k) continue;
@@ -53387,6 +53397,43 @@ function dmgPic(P, f) {
   x.putImageData(im, 0, 0);
   out._m = P._m; out._door = P._door; out._gate = P._gate; out._chim = P._chim; out._flag = P._flag;
   return (memo[q] = out);
+}
+
+/* ---- HITS: one rule for every vehicle (user Nov 2 11:56: "The hit area should definitely match the size of the boat. That should
+   be a rule for all vehicles"; "One hit and they get destroyed"). Its hit area is its picture where it's solid, at its size in the
+   world, turned with it (vehHitAt) - a shot's whole path this frame looked at, so a fast round can't jump a thin mast. A round or a
+   shell that touches it destroys it (vehHitBy). ---- */
+const VEH_HIT_PAD = 0.2;   // m round the solid picture
+// where its picture stands: [width, height, picture, how far it sits below its line (world units)]
+function vehFrame(v) {
+  const [w, h, P] = storyBoatSize(v);
+  return [w, h, P, v.kind === 'fish' ? h * FISH_DRAFT : v.car ? 0 : 0.25 * UPM];
+}
+function vehHitAt(v, x, y, pad = VEH_HIT_PAD * UPM) {
+  const [w, h, P, dr] = vehFrame(v), a = (v.a || 0) - (v.car ? v.dir * (v.pit || 0) : 0), c = Math.cos(a), s = Math.sin(a);
+  const dx = x - v.x, dy = y - (v.y + dr + (v.susY || 0)), u = dx * c + dy * s, q = -dx * s + dy * c;   // (into its own frame: q 0 its bottom, -h its top)
+  if (u < -w / 2 - pad || u > w / 2 + pad || q < -h - pad || q > pad) return false;
+  if (!P || !P.getContext) return true;   // (no picture to look at: its box)
+  const A = civAlphaOf(P), PW = P.width, PH = P.height, k = PW / w, r = Math.max(1, Math.round(pad * k));
+  const px = Math.round((v.dir > 0 ? w / 2 - u : u + w / 2) * k), py = Math.round((q + h) * k);   // (the art faces left: mirrored going right)
+  for (const [ox, oy] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]]) {
+    const X = px + ox, Y = py + oy; if (X < 0 || Y < 0 || X >= PW || Y >= PH) continue;
+    if (A[(Y * PW + X) * 4 + 3] > 0) return true;
+  }
+  return false;
+}
+// a shot's path this frame through it
+function vehPathIn(v, o, dt) {
+  const [w, h] = vehFrame(v); if (Math.abs(o.x - v.x) > w + 60 || Math.abs(o.y - v.y) > h + 60) return false;
+  const ex = (o.vx || 0) * dt, ey = (o.vy || 0) * dt, n = Math.min(12, Math.ceil(Math.hypot(ex, ey) / (0.4 * UPM)) + 1);
+  for (let i = 0; i < n; i++) { const t = n > 1 ? i / (n - 1) : 1; if (vehHitAt(v, o.x - ex * (1 - t), o.y - ey * (1 - t))) return true; }
+  return false;
+}
+// the round or shell that hit it this frame (a round stops in it), or null
+function vehHitBy(v, dt) {
+  for (const b of bullets) if (!b._hitV && !(b.spent > 0) && vehPathIn(v, b, dt) && mayHit(b, v)) { b._hitV = true; b.spent = 1e-6; return b; }
+  for (const s of shells) if (vehPathIn(v, s, dt) && mayHit(s, v)) return s;
+  return null;
 }
 
 /* ---- THE DOCKS' LAMPS (user Nov 2, with gen/ref/dock-lamp-chimney-nov2.png: "Every dock should have a light every 6 segments that
