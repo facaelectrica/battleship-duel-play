@@ -4113,8 +4113,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 595;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 10:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 596;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 10:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -5270,7 +5270,7 @@ function hudPressAt(hit, ux) {
     if (it.weapon === 'smoke') { act(p, 'smoke'); return null; }
     if (it.weapon === 'launch') { act(p, 'launch'); return null; }
     if (it.weapon === 'magnet' && m === 'heli') { act(p, 'magnet'); return null; }
-    if (it.weapon === 'horn') { act(p, 'cw', 'horn'); return { kind: 'horn', p }; }   // (the horn: as long as it's held, user Oct 27)
+    if (CW_HELD[it.weapon]) { act(p, 'cw', it.weapon); return { kind: 'cwheld', p, up: CW_HELD[it.weapon] }; }   // (held buttons - the horn, the net's winch: as long as they're held; CW_HELD, 50-land-civdrive.js)
     if (CW_SET.has(it.weapon)) { act(p, 'cw', it.weapon); return null; }   // (a vehicle's own green button)
     if (it.weapon === 'dc') act(p, 'dc');
     else if (it.weapon === 'mine') act(p, 'mine');
@@ -5663,6 +5663,10 @@ function drawTopUI() {
   if (ui.settings) { const [ex, ey] = eyeSpot(L); ug.drawImage(eyeBtn().open, ex, ey); }   // (the eye: shut it for photo mode)
   ug.drawImage(uiArt.menuBtn, L.menu[0], L.menu[1]);
   if (ui.settings) { ug.fillStyle = '#ffd36b'; ug.fillRect(L.gear[0] + 6, L.gear[1] + 45, 30, 2); }
+  drawSliders(L);
+}
+// the WORLD panel's sliders (time, sky, fog, rain, sea, wind, grade): the game's, and the GAME EDITOR's (its WORLD button - 50-zzz-world-ed.js)
+function drawSliders(L) {
   if (ui.settings) {
     const P = L.panel;
     SLIDERS.forEach((s, i) => {
@@ -5766,6 +5770,7 @@ function edModeEnter() {
   EDMODE.keep = { zt: cam.zt.slice(), lv: scopes.map(q => q.level), ov: camOverride[0] };
   if (!PHOTO.on) photoEnter();
   PHOTO.ed = true; PHOTO.hint = 0;
+  ui.settings = false; ui.dragSlider = null;                         // (the game's WORLD panel shut: the editor's WORLD button opens it over the editor - 50-zzz-world-ed.js)
   dropAll();                                                         // (a press, a held key in the game when it opened: let go)
   // (the game here whole first: the simulation worker held - 00-sw-boot.js swHold)
   // (user Oct 31 22:29: opened while the game was still being handed to the simulation worker, the worker's world came in
@@ -6830,9 +6835,12 @@ window.addEventListener('pointerdown', e => {
   // (user Nov 1 20:51: "Why cant I see the FPS details in Editor mode?") the FPS text and its panel take their press on every
   // screen - the GAME EDITOR's and photo mode's too - before the view's drag (one rule: fpsPress)
   if (PHOTO.on && fpsPress(e)) return;
+  // (the GAME EDITOR's WORLD panel open: its sliders take their press first, as in the game - user Nov 2)
+  if (PHOTO.ed && ui.settings) { const [sx, sy] = toUI(e.clientX, e.clientY), sl = sliderAt(sx, sy); if (sl) { menuClick(); setSlider(sl, sx); ui.dragSlider = sl.s.key; pointers.set(e.pointerId, { kind: 'slider', h: sl }); return; } }
   if (PHOTO.on) { photoPointerDown(e); return; }
-  // the right mouse button held down drags the view of the half it's in (let go and it eases back)
-  if (e.pointerType === 'mouse' && e.button === 2 && !ui.title && !ui.menu && ui.winner == null) {
+  // the right mouse button held down drags the view of the half it's in (let go and it eases back); not in STORY, where the
+  // camera is always on the object picked (user Nov 2 - 50-story.js storyStep)
+  if (e.pointerType === 'mouse' && e.button === 2 && !STORY && !ui.title && !ui.menu && ui.winner == null) {
     const half = ONEVIEW() || e.clientX < window.innerWidth / 2 ? 0 : 1;
     pointers.set(e.pointerId, { kind: 'pan', half, x0: e.clientX, p0: cam.pan[half] });
     cam.panHeld[half] = true;
@@ -6950,7 +6958,7 @@ window.addEventListener('pointermove', e => {
   pointerMove(e);
 }, { passive: true });
 function pointerMove(e) {
-  if (PHOTO.on) { photoPointerMove(e); return; }
+  if (PHOTO.on && !pointers.has(e.pointerId)) { photoPointerMove(e); return; }   // (a slider of the editor's WORLD panel: below)
   const p = pointers.get(e.pointerId);
   if (!p) return;
   if (p.kind === 'pan') {
@@ -7005,7 +7013,7 @@ function endPointer0(e) {
   if (p.kind === 'drivehold') { driveRelease(p.p); return; }
   if (p.kind === 'mg') { if (planes[p.p]) planes[p.p].mg = false; return; }
   if (p.kind === 'mghold') { mgHold[p.p] = false; return; }
-  if (p.kind === 'horn') { act(p.p, 'cw', 'hornUp'); return; }
+  if (p.kind === 'cwheld') { act(p.p, 'cw', p.up); return; }   // (a held vehicle button let go - CW_HELD)
   if (p.kind !== 'pinch') return;
   const wasPinch = pinch[p.half];
   startPinch(p.half);
@@ -7016,8 +7024,8 @@ function endPointer0(e) {
     else lastTap[p.half] = now;
   }
 }
-window.addEventListener('pointerup', e => { if (PHOTO.on) { photoPointerUp(e); return; } endPointer(e); });
-window.addEventListener('pointercancel', e => { if (PHOTO.on) { photoPointerUp(e); return; } endPointer(e); });
+window.addEventListener('pointerup', e => { if (PHOTO.on && !pointers.has(e.pointerId)) { photoPointerUp(e); return; } endPointer(e); });
+window.addEventListener('pointercancel', e => { if (PHOTO.on && !pointers.has(e.pointerId)) { photoPointerUp(e); return; } endPointer(e); });
 function dropAll() { mgHold[0] = mgHold[1] = false; for (const pl of planes) if (pl) pl.mg = false; cam.panHeld[0] = cam.panHeld[1] = false; diveHold[0] = diveHold[1] = 0; pointers.clear(); pinch[0] = pinch[1] = null; held.clear(); holding[0] = holding[1] = null; ui.dragSlider = null; }
 window.addEventListener('blur', dropAll);
 document.addEventListener('visibilitychange', () => {
@@ -7032,8 +7040,23 @@ window.addEventListener('wheel', e => {
   if (PHOTO.on) { photoZoom(Math.exp(-e.deltaY * (e.ctrlKey ? 0.012 : 0.0016))); return; }
   const half = ONEVIEW() || e.clientX < window.innerWidth / 2 ? 0 : 1;
   const k = e.ctrlKey ? 0.012 : 0.0016;
-  asSlot(half, q => setZoom(q, zoomTarget(q) * Math.exp(-e.deltaY * k)));
+  asSlot(half, q => wheelZoom(q, -e.deltaY * k));
 }, { passive: false });
+/* (user Nov 2: "While in Editor Play mode, I should be able to zoom in and out at will") the wheel went through setZoom: the zoom
+   it asked for rounded to the nearest stepped level, so a wheel notch (or a trackpad's small scrolls) between two levels far apart
+   - the close ones, a car's and a Story view's, 2x and 1.5x apart - rounded back to the same level and nothing happened. The
+   wheel now adds up what it's turned, and every notch's worth (WHEEL_STEP, in the zoom's log scale) is one level, as Q / E and the
+   D-pad are - one rule, every mode and every level */
+const WHEEL_STEP = 0.15, wheelAcc = [0, 0];
+function wheelZoom(p, d) {
+  if (zoomLocked(p) || menuNoZoom()) { wheelAcc[p] = 0; return; }
+  if (wheelAcc[p] * d < 0) wheelAcc[p] = 0;                // (turned the other way: from there)
+  wheelAcc[p] += d;
+  const n = Math.trunc(wheelAcc[p] / WHEEL_STEP); if (!n) return;
+  wheelAcc[p] -= n * WHEEL_STEP;
+  if (crew[p]) crew[p].zoomHold = false;
+  setScope(p, scopes[p].level + clamp(n, -2, 2));
+}
 
 // Keyboard.
 //   P1: A/D lever (or move between the dots ashore), W/S gun angle (dive/rise in the sub), Q/E zoom out/in, Z/C power, Space fire
@@ -7065,7 +7088,7 @@ function kbSlot(set) {
   return tc >= 0 ? tc : SLOTS.length ? 0 : -1;
 }
 // a key's action for the slot its set plays: f(p) with p the team index to use
-function keyDo(set, f) { const v = kbSlot(set); if (v >= 0) asSlot(v, f); }
+function keyDo(set, f) { const v = kbSlot(set); if (v >= 0) return asSlot(v, f); }
 window.addEventListener('keydown', e => {
   // (typing in a field - the editor's, the SNAPSHOT box, any text box on the page: its keys are the field's, Ctrl+V too - user Nov 1 22:08)
   if (e.target && (/^(TEXTAREA|SELECT)$/.test(e.target.tagName) || (e.target.tagName === 'INPUT' && e.target.type !== 'range') || e.target.isContentEditable)) return;
@@ -7107,6 +7130,8 @@ window.addEventListener('keydown', e => {
   }
   if (LEVER_KEYS[code] || HOLD_KEYS.has(code) || code in FIRE_KEYS) e.preventDefault(); else return;
   if (ui.menu) return;
+  // (STORY at a structure: left / right jump between the dots, fire takes the one picked - 50-story.js storyDotKeys)
+  if (!e.repeat && (LEVER_KEYS[code] || code in FIRE_KEYS) && keyDo(LEVER_KEYS[code] ? LEVER_KEYS[code][0] : FIRE_KEYS[code], p => storyDotKeys(p, LEVER_KEYS[code] ? 'step' : 'take', LEVER_KEYS[code] ? LEVER_KEYS[code][1] : 0))) return;
   if (HOLD_KEYS.has(code)) { held.add(code); return; }
   if (e.repeat) return;
   if (code in FIRE_KEYS) {
@@ -7150,6 +7175,7 @@ function padOf(v) {
 // the weapon slots: 1 the machine gun (the sub's torpedo), 2 the missile, 3 the depth charge
 function padWeapon(p, slot, down) {
   const m = crew[p].mode;
+  if (down && slot === 1 && storyDotKeys(p, 'take')) return;   // (STORY at a structure: A takes the dot picked - 50-story.js)
   // (user Oct 27: a civilian's or a yacht's own green buttons, A B X Y in order - the fire helicopter's water held)
   if (m === 'civ' || m === 'sail') { if (civSlot(p, slot - 1, down)) return; if (slot === 2 && down && m === 'civ') act(p, 'launch'); if (!down) mgHold[p] = false; return; }
   if (slot === 1) {
@@ -7321,6 +7347,7 @@ function drawPadFocus() {
   ug.globalAlpha = 1;
 }
 function padCycle(p, d) {
+  if (storyDotKeys(p, 'step', d)) return;                            // (STORY at a structure: the shoulders jump between the objects - 50-story.js)
   const c = crew[p], free = c.mode === 'dock' || c.mode === 'gone';      // (not driving: a teammate's can be watched)
   const list = hudVeh(p).filter(k => k === c.mode || canTake(p, k) || (free && takenByOther(p, k)));
   if (!list.length) return;
@@ -7370,7 +7397,8 @@ function pollPads(dt) {
       // explorer sub, looking round, the tower, a menu: one held over from before is no command to what you switch to; let
       // go and pushed again, it is
       const dl = edge('dl', lx < -0.5), dr = edge('dr', lx > 0.5);
-      if (drives && !ui.menu && msOf(p)) { want.left = lx < -0.5; want.right = lx > 0.5; }   // (the minisub: held, as the keys)
+      if (!drives && (dl === 1 || dr === 1) && storyDotKeys(p, 'step', dl === 1 ? -1 : 1)) { }   // (STORY at a structure: jump between the dots)
+      else if (drives && !ui.menu && msOf(p)) { want.left = lx < -0.5; want.right = lx > 0.5; }   // (the minisub: held, as the keys)
       else if (drives && !ui.menu) {
         if (dl === 1) drivePush(p, -1); if (dr === 1) drivePush(p, 1);      // (held: hold to drive - 12-drive-and-aim)
         if ((dl === -1 && lx <= 0.5) || (dr === -1 && lx >= -0.5)) driveRelease(p);
@@ -7431,7 +7459,8 @@ window.addEventListener('keyup', e => {
 });
 
 // free look: where the view goes when you're not driving anything (it starts at your harbour)
-const looking = p => { const c = crew[p]; return !!c && !c.dead && (c.mode === 'dock' || c.mode === 'gone') && p < HUMANS(); };
+// (never in STORY, user Nov 2: the camera stays on what you're at - the keys jump between the dots there, storyStep, 50-story.js)
+const looking = p => { const c = crew[p]; return !STORY && !!c && !c.dead && (c.mode === 'dock' || c.mode === 'gone') && p < HUMANS(); };
 function lookBy(p, dx, dy) {
   const c = crew[p];
   if (c.spec) { const F = camFocus(p); c.look = { x: F[0], y: F[1] }; c.spec = null; }   // (watching a teammate: off from where the view is)
@@ -17112,12 +17141,20 @@ const smooth01 = m => m * m * (3 - 2 * m);
    are the same pixel-true ones (13-scope-minimap.js), so the art is sharp once it stops. The default from Version 403 (the user
    tried it, Oct 31); ?zoomsmooth=0 the stepped cut */
 const ZOOM_SMOOTH = !/[?&]zoomsmooth=0/.test(location.search), ZOOM_EASE = 0.28;   // (the default since Version 403 - user Oct 31: "Smooth zoom"; ?zoomsmooth=0: stepped)
-const ZE = { from: [0, 0], to: [0, 0], t: [1, 1] };
+/* (user Nov 2: "The zooming speed when going from stop to movement is too aggressive, it should be slower, and more smooth and
+   the vehicle should stay centered, now it almost feels like a snap") a zoom the game makes by itself (Story's automatic zoom,
+   stopped <-> moving - 50-story.js) eases over ZOOM_EASE_AUTO instead of the player's quick ZOOM_EASE: zoomSlow(i) before the
+   setScope that asks for it. Each frame of an ease is a cut to the new framing (updateCamera: the zoom changed), so the view
+   stays centred on what you're in - it zooms about the vehicle, never the screen's corner or an old centre */
+const ZOOM_EASE_AUTO = 2;
+const ZE = { from: [0, 0], to: [0, 0], t: [1, 1], dur: [ZOOM_EASE, ZOOM_EASE], next: [0, 0] };
+const zoomSlow = (i, s = ZOOM_EASE_AUTO) => { ZE.next[i] = s; };
 function zoomEase(i, dt) {
   const tgt = cam.zt[i], cur = cam.za[i] || tgt;
-  if (tgt !== ZE.to[i]) { ZE.from[i] = cur; ZE.to[i] = tgt; ZE.t[i] = ZE.from[i] === tgt ? 1 : 0; }
+  if (tgt !== ZE.to[i]) { ZE.from[i] = cur; ZE.to[i] = tgt; ZE.t[i] = ZE.from[i] === tgt ? 1 : 0; ZE.dur[i] = ZE.next[i] || ZOOM_EASE; }
+  ZE.next[i] = 0;                                            // (asked for one change only: the player's next zoom is quick again)
   if (ZE.t[i] >= 1) return tgt;
-  ZE.t[i] = Math.min(1, ZE.t[i] + dt / ZOOM_EASE);
+  ZE.t[i] = Math.min(1, ZE.t[i] + dt / ZE.dur[i]);
   if (ZE.t[i] >= 1) return tgt;
   const u = smooth01(ZE.t[i]), a = Math.log(ZE.from[i]), b = Math.log(tgt);
   return Math.exp(a + (b - a) * u);
@@ -17132,6 +17169,7 @@ on('sunk', e => {
 }, 'camera');
 function camFocus(i) {
   const c = crew[i];
+  if (i === 0) { const S = storySelFocus(); if (S) return S; }   // (STORY: an object picked with the keys - the camera locked on it, 50-story.js)
   if (camOverride[i] != null) return Array.isArray(camOverride[i]) ? [camOverride[i][0], camOverride[i][1], 0, 0, null] : [camOverride[i], FOCUS_Y, 0, 0, null];          // testing hook (an x, or [x, y])
   if (c.mode === 'boat') return [c.x, WATER_Y - 4, 0, clamp((c.bv || 0) / BOAT_SPEED, -1, 1) * 0.32, [c.x, 14]];   // leaning ahead when she's moving
   if (c.mode === 'gone') return [c.x, WATER_Y - 4, 0, undefined, [c.x, 14]];
@@ -17243,7 +17281,7 @@ function updateCamera(dt, snap) {
     const was = cam.tg[key]; cam.tg[key] = tgt;
     if (kf >= 1 || was === undefined) return tgt;
     const d = tgt - was;
-    if (Math.abs(d) < hw * 0.5) cur += d;
+    if (Math.abs(d) < hw * 0.5 && !(cam.glide > 0)) cur += d;   // (cam.glide: a jump to a new aim eased all the way - STORY's keys, storyStep)
     return cur + (tgt - cur) * kf;
   };
   if (one) {
@@ -17282,6 +17320,7 @@ function updateCamera(dt, snap) {
     v.ref = c + (i ? -hw / 2 : hw / 2) * (cam.merge ?? 1);
   }
   cam.cut[0] = cam.cut[1] = false;
+  if (cam.glide > 0) cam.glide -= dt;
   const decay = Math.exp(-Math.max(0, dt) * 8);
   const tt = performance.now() / 1000;
   for (let i = 0; i < 2; i++) {
@@ -31359,7 +31398,7 @@ function render() {
   ug.clearRect(0, 0, ubw, ubh);
   ug.imageSmoothingEnabled = false;
   if (ui.title) { if (!LOADING) guardDraw('seaDecksWarm', seaDecksWarm); drawTitle(); if (ui.picker < 0) drawFullscreenBtn(); drawControls(); drawPadFocus(); drawToast(); drawFps(); return; }
-  if (PHOTO.on) { drawPhotoHint(frameDt); drawFps(ui.top + 12); return; }   // (the version and FPS on every screen)       // (photo mode: the world and nothing else)
+  if (PHOTO.on) { drawPhotoHint(frameDt); if (PHOTO.ed) drawSliders(topLayout()); drawFps(ui.top + 12); return; }   // (the GAME EDITOR's WORLD panel: the sliders over its view - 50-zzz-world-ed.js)   // (the version and FPS on every screen)       // (photo mode: the world and nothing else)
   if (!ui.settings) {
   layoutBoatCtl();
   tt = lap('hudpre', tt);
@@ -36014,9 +36053,12 @@ function personIcon(draw) {
 
 // the green buttons' pictures for the vehicles' own actions (user Oct 27: all green, on the right): a shape in the
 // buttons' cream, as the smoke screen's cloud and the water's drop - each a test of a point (u, v) in a 103 x 96 square
+// the net in the winch's two pictures: its rope, the bag of mesh widening down
+const netGlyph = (u, v) => (u >= 61 && u < 64 && v >= 14 && v < 34) || (v >= 34 && v < 78 && (() => { const hw = 7 + (v - 34) * 0.42, d = Math.abs(u - 62.5); return d <= hw && (hw - d < 2.2 || v >= 75 || (u + v) % 8 < 1.7 || (u - v + 200) % 8 < 1.7); })());
 const ACT_GLYPH = {
-  // the fishing net: its rope, a bag of mesh widening to the bottom (STORY - 50-story.js)
-  net: (u, v) => (u >= 50 && u < 53 && v >= 14 && v < 30) || (v >= 30 && v < 79 && (() => { const hw = 8 + (v - 30) * 0.55, d = Math.abs(u - 51.5); return d <= hw && (hw - d < 2.2 || v >= 76 || (u + v) % 8 < 1.7 || (u - v + 200) % 8 < 1.7); })()),
+  // the fishing net's winch (user Nov 2): the net on its rope beside an arrow - DOWN pays it out, UP hauls it in (50-story-net.js)
+  netDn: (u, v) => netGlyph(u, v) || (u >= 27 && u < 33 && v >= 18 && v < 56) || (v >= 52 && v < 76 && Math.abs(u - 30) <= (76 - v) * 0.6),
+  netUp: (u, v) => netGlyph(u, v) || (u >= 27 && u < 33 && v >= 38 && v < 78) || (v >= 16 && v < 40 && Math.abs(u - 30) <= (v - 16) * 0.6),
   // the satellite (the shuttle's bay): its body, its two panels on their arms, its mast and dish
   bay: (u, v) => (u >= 44 && u < 60 && v >= 38 && v < 56) || (((u >= 20 && u < 41) || (u >= 63 && u < 84)) && v >= 42 && v < 52 && (Math.floor(u) % 7) !== 0) ||
     (((u >= 41 && u < 44) || (u >= 60 && u < 63)) && v >= 46 && v < 48) || (u >= 51 && u < 53 && v >= 28 && v < 38) || (v >= 22 && v < 28 && Math.abs(u - 52) <= (28 - v) * 1.4 + 1),
@@ -36094,12 +36136,14 @@ function civWeapons(v) {
   if (k === 'ship') return FW_SHIPS.has(v.kind) ? ['anchor', 'fw', 'horn'] : v.msub ? ['anchor', 'launch', 'horn'] : ['anchor', 'horn'];
   if (k === 'sub') return ['ping'];
   if (k === 'air') return v.kind === 'cessna' ? ['csmoke'] : [];
-  if (k === 'boat' && v.kind === 'fish') return ['net'];      // (STORY's fishing boats: the net - 50-story.js)
+  if (k === 'boat' && v.kind === 'fish') return ['netDn', 'netUp'];   // (a fishing boat's winch: held, DOWN pays the net out, UP hauls it in - 50-story-net.js, user Nov 2)
   if (k === 'shuttle') return [v.state === 'pad' || v.state === 'count' || v.state === 'climb' ? 'launch' : 'bay'];
   return [];
 }
 // the row for what player p is in (a civilian, or CHILL's yacht)
-const CW_SET = new Set(['magnet', 'sails', 'ping', 'anchor', 'horn', 'fw', 'csmoke', 'bay', 'net']);   // (the actions that go through act 'cw')
+// the vehicles' buttons that act while held, and what letting go of each sends (the horn; the net's winch - user Nov 2)
+const CW_HELD = { horn: 'hornUp', netDn: 'netDn0', netUp: 'netUp0' };
+const CW_SET = new Set(['magnet', 'sails', 'ping', 'anchor', 'horn', 'fw', 'csmoke', 'bay', 'netDn', 'netUp']);   // (the actions that go through act 'cw')
 const civRow = p => crew[p].mode === 'sail' ? ['anchor', 'sails'] : crew[p].mode === 'civ' ? civWeapons(crew[p].civ) : [];
 // a button of that row pressed (or let go): slot i (0 = A); true if there was one there
 function civSlot(p, i, down) {
@@ -36107,7 +36151,7 @@ function civSlot(p, i, down) {
   if (!wk) return false;
   if (wk === 'water') { mgHold[p] = down; return true; }         // (the fire helicopter's water: held, as a machine gun)
   if (wk === 'light') { if (down) act(p, 'light'); return true; }   // (a helicopter's light: on / off - 27-zz-heli-light)
-  if (wk === 'horn') { act(p, 'cw', down ? 'horn' : 'hornUp'); return true; }   // (the horn: held, user Oct 27 14:53)
+  if (CW_HELD[wk]) { act(p, 'cw', down ? wk : CW_HELD[wk]); return true; }   // (held: the horn, user Oct 27 14:53; the net's winch, user Nov 2)
   if (down) act(p, 'cw', wk);
   return true;
 }
@@ -36125,7 +36169,7 @@ function civWeapon(p, wk) {
   else if (wk === 'fw') fireworkLaunch(v);
   else if (wk === 'csmoke') cessnaSmoke(v);
   else if (wk === 'bay') shuttleBay(v);
-  else if (wk === 'net') storyNetToggle(v);
+  else if (wk === 'netDn' || wk === 'netUp' || wk === 'netDn0' || wk === 'netUp0') netCmd(v, (wk.startsWith('netDn') ? 1 : -1) * (wk.endsWith('0') ? 2 : 1));
 }
 // its button: f how far through its reload (or the share used), off when it can't, on while it's running, n a count
 function civWeaponState(p, wk) {
@@ -36139,7 +36183,8 @@ function civWeaponState(p, wk) {
   if (wk === 'sails') return { f: 0, off: v.state !== 'sail', n: -1, on: v.sailsUp === false };
   if (wk === 'magnet') return { f: 0, off: !!v.magBroken, n: -1, on: !!(v.mag && v.mag.out) };   // (its cable shot through: grey till it's mended at home)
   if (wk === 'ping') return { f: 0, off: false, n: -1 };
-  if (wk === 'net') return storyNetState(v);
+  if (wk === 'netDn') return netBtnState(v, 1);
+  if (wk === 'netUp') return netBtnState(v, -1);
   return no;
 }
 /* ---- a boat's anchor, let go and weighed from its button (the anchors themselves: 50-land-anchors). She lies to it
@@ -51367,6 +51412,318 @@ function storyHelis(dt) {
   }
 }
 
+/* ---- THE FISHING NET, all physics (user Nov 2, 09:13; his picture: gen/tropical_src/ref-fishing-net-nov2.png): "the concept
+   is that you lower this net that then opens (between the orange dots). The space between those two orange dots should be
+   twice as big as in this image ... The most important is that its all physics. The net, the rope, the weight of it. So that
+   when you move the boat around and the net, it all feels 'right' ... on the right side, we will have a Up / Down button so
+   you can lower and raise the net ... A fish is caught if it enters the net area. Each fish is 1 coin. You can always bring
+   the net up all the way and the fish disappear (turn to coins) and you can keep doing it."
+   A fishing boat's net (j.net) is a string of points: the rope from her stern boom's block, paid out and hauled in by her
+   winch (UP / DOWN held), then the net - a float on top of the mouth, a heavy sinker at its foot (the two orange dots,
+   NETP.MOUTH apart) and a bag of diamond mesh behind them narrowing to its end. Every point has its mass, its weight in
+   water (the float lifts, the sinker and the rope sink, the twine a little) and the water's drag on it, the rope and every
+   mesh line a cord that can go slack but not stretch (verlet points, the cords solved a few times a step). Its pull on the
+   boom is felt by the boat (she's slowed by it, and drifts back on it when stopped); the winch hauls slower under a heavy
+   load. A fish inside the bag's outline is caught: it stays in the bag as weight and drag at its end. Hauled all the way up
+   - the rope in, then the net gathered up onto the boom - the catch turns to coins (NET_COIN a fish, your own boats only).
+   One state, on the boat's row: { cmd -1 hauling / 0 / 1 paying out, L rope out, s 0 out .. 1 gathered aboard, n fish in it,
+   P the points (x, y, previous x, previous y; Float64Array), na rope points in use, T the pull (N), d how deep (camera),
+   cashN / cashT the last catch turned to coins }. Any boat with j.net is stepped (netsStep from stepStory, every mode). ---- */
+const NETP = {
+  SEG: 1.5,      // m: the rope's points apart
+  ROPE: 45,      // m of rope on the winch
+  MOUTH: 9,      // m between the float and the sinker (twice the picture's, the user's ask)
+  BAG: 16,       // m from the mouth to the bag's end (the picture's proportions, twice)
+  M: 8, K: 14,   // the mesh: points across (even) and along
+  DN: 2.6, UP: 2.2, STOW: 1.1,   // the winch: m/s paying out, m/s hauling (empty), s to gather the net aboard (or let it go)
+  T0: 2200,      // N: the pull that halves the hauling speed
+  // masses (kg), weights in water (a share of g: + sinks, - floats) and drags (kg/m: F = D v^2)
+  twM: 3.5, twW: 0.15, twD: 2.2,
+  flM: 8, flW: -3, flD: 3,
+  skM: 70, skW: 0.87, skD: 3,
+  rpM: 2.2, rpW: 0.35, rpD: 0.35,
+  fiM: 2, fiW: 0.1, fiD: 1.1,      // each fish in the bag
+  BOAT_M: 9000, HULL: 0.7,          // the boat as the net feels her: her mass (kg) and how fast her hull's drag takes a drift away (1/s)
+  IT: 12, HZ: 180,                   // the cords solved IT times a step, at least HZ steps a second
+};
+const NET_COIN = 1;
+// the mesh's layout (worked out once): points (i across, k along) with i + k even - each tied to its two neighbours in the
+// next column, so the lines run in diamonds as a real net's; the mouth's frame rope, the head rope and the foot rope along
+// its edges; the outline (top edge out, bottom edge back) the catch is tested against
+const NETG = (() => {
+  const { M, K, MOUTH, BAG } = NETP, I = [], KK = [], at = new Map();
+  for (let k = 0; k <= K; k++) for (let i = 0; i <= M; i++) if ((i + k) % 2 === 0) { at.set(i * 100 + k, I.length); I.push(i); KK.push(k); }
+  const NN = I.length, RN = Math.ceil(NETP.ROPE / NETP.SEG) + 1, id = (i, k) => at.get(i * 100 + k);
+  const hh = k => MOUTH / 2 * (0.1 + 0.9 * Math.pow(1 - k / K, 0.85));
+  const rx = new Float64Array(NN), ry = new Float64Array(NN);             // (the bag laid out flat: x back from the mouth, y down from the float, m)
+  for (let n = 0; n < NN; n++) { rx[n] = KK[n] * BAG / K; ry[n] = MOUTH / 2 + (I[n] / M * 2 - 1) * hh(KK[n]); }
+  const A = [], B = [], R = [], link = (a, b) => { A.push(a); B.push(b); R.push(Math.hypot(rx[a] - rx[b], ry[a] - ry[b])); };
+  for (let n = 0; n < NN; n++) for (const di of [-1, 1]) { const m = id(I[n] + di, KK[n] + 1); if (m != null) link(n, m); }
+  const frame = A.length;                                                  // (from here: the frame, head and foot ropes - drawn thicker)
+  for (let i = 0; i + 2 <= M; i += 2) link(id(i, 0), id(i + 2, 0));
+  for (let k = 0; k + 2 <= K; k += 2) { link(id(0, k), id(0, k + 2)); link(id(M, k), id(M, k + 2)); }
+  const top = [], bot = [];
+  for (let k = 0; k <= K; k++) { top.push(id(k % 2, k)); bot.push(id(M - k % 2, k)); }
+  const outline = top.concat(bot.reverse());
+  // what each point is: 0 twine, 1 the float, 2 the sinker; the bag's end (the last 4 columns) holds the catch
+  const kind = new Uint8Array(NN), endW = new Float64Array(NN); kind[id(0, 0)] = 1; kind[id(M, 0)] = 2;
+  let ne = 0; for (let n = 0; n < NN; n++) if (KK[n] >= K - 3) ne++;
+  for (let n = 0; n < NN; n++) if (KK[n] >= K - 3) endW[n] = 1 / ne;
+  return { NN, RN, I, KK, rx, ry, A: Int16Array.from(A), B: Int16Array.from(B), R: Float64Array.from(R), frame, outline: Int16Array.from(outline), kind, endW, top: id(0, 0), sink: id(M, 0), id };
+})();
+const netOf = j => { let N = j.net; if (!N || N.cmd == null) N = j.net = { cmd: 0, L: 0, s: 1, n: N ? N.n || 0 : 0, na: 0, T: 0, d: 0, cashN: 0, cashT: -9, P: null }; return N; };   // (an older save's { st, d, n }: its catch kept)
+// the block at the end of her boom (the picture's top-left, over her stern), riding with her - round the middle as she turns
+function netHook(j) {
+  const [w, h] = storyBoatSize(j), u = j.turn > 0 ? j.turn / JB_TURN : 0, sq = j.turn > 0 ? Math.abs(Math.cos(Math.PI * u)) : 1;
+  const lx = -0.423 * w * sq * j.dir, ly = -0.61 * h, a = j.a || 0, ca = Math.cos(a), sa = Math.sin(a);
+  return [j.x + lx * ca - ly * sa, j.y + h * 0.12 + lx * sa + ly * ca];
+}
+// the net gathered up at the block: a small bundle, the bag's own shape shrunk (so it opens as itself when let go)
+function netFold(N, j, hx, hy) {
+  const G = NETG, P = N.P, b = -j.dir * 0.05 * UPM, d = 0.05 * UPM;
+  for (let n = 0; n < G.NN; n++) { const x = hx + G.rx[n] * b, y = hy + G.ry[n] * d; P[4 * n] = P[4 * n + 2] = x; P[4 * n + 1] = P[4 * n + 3] = y; }
+  for (let r = 0; r < G.RN; r++) { const q = 4 * (G.NN + r); P[q] = P[q + 2] = hx; P[q + 1] = P[q + 3] = hy; }
+  N.na = 0;
+}
+// the buttons: held DOWN pays the rope out, held UP hauls it in (let go: the winch holds)
+function netCmd(v, c) {
+  if (!v || v.kind !== 'fish' || v.state !== 'run') return;
+  const N = netOf(v);
+  if (c === 2 || c === -2) { if (N.cmd === c / 2) N.cmd = 0; return; }   // (that button let go)
+  if (c > 0 && N.L >= NETP.ROPE * UPM - 0.01) { sound('empty', v.x); return; }   // (all the rope's out)
+  if (c < 0 && N.s >= 1) { sound('empty', v.x); return; }                      // (it's aboard)
+  N.cmd = c; sound('anchorWinch', v.x, 1);
+}
+function netBtnState(v, c) {
+  const N = v && v.net, n = N ? N.n : 0;
+  if (!v) return { f: 0, off: true, n: -1 };
+  const off = v.state !== 'run' || (c < 0 ? !N || N.s >= 1 : !!N && N.L >= NETP.ROPE * UPM - 0.01);
+  return { f: 0, off, n: c < 0 && n ? n : -1, on: !!(N && N.cmd === c) };   // (UP shows the catch: what hauling it in will pay)
+}
+// the catch turned to coins, the net gathered aboard (hauled all the way up; or tied up at a structure)
+function netAboard(j) {
+  const N = j.net; if (!N) return;
+  if (N.n > 0) { if (j.own && STORY) story.coins += N.n * NET_COIN; N.cashN = N.n; N.cashT = time; N.n = 0; sound('clink', j.x, 1); }
+  N.s = 1; N.L = 0; N.cmd = 0;
+  if (N.P) { const [hx, hy] = netHook(j); netFold(N, j, hx, hy); }
+}
+// scratch, per step: each point's mass, weight (u/s^2), drag (1/u), and the water's surface / the floor under it
+const NETS = (() => { const T = NETG.NN + NETG.RN; return { m: new Float64Array(T), g: new Float64Array(T), k: new Float64Array(T), sf: new Float64Array(T), bd: new Float64Array(T) }; })();
+function netsStep(dt) {
+  if (!(dt > 0)) return;
+  for (const j of jetboats) if (j.net && j.kind === 'fish' && j.state !== 'gone' && j.state !== 'wreck') fishNetStep(j, Math.min(dt, 1 / 20));
+  netsRefill();
+}
+function fishNetStep(j, dt) {
+  const G = NETG, NN = G.NN, RN = G.RN, Q = NETP, N = netOf(j), S = NETS, g = 9.81 * UPM, seg = Q.SEG * UPM;
+  const [hx, hy] = netHook(j);
+  if (!N.P || N.P.length !== 4 * (NN + RN)) { N.P = new Float64Array(4 * (NN + RN)); netFold(N, j, hx, hy); }
+  if (j.state !== 'run') N.cmd = 0;
+  if (N.s >= 1 && N.cmd <= 0) { netFold(N, j, hx, hy); N.hx = hx; N.hy = hy; N.T = 0; N.d = 0; j.ntv = 0; return; }   // (aboard: nothing to work out)
+  if (N.hx == null) { N.hx = hx; N.hy = hy; }
+  const P = N.P;
+  // per frame: masses, weights and drags (the catch at the bag's end), and the water and floor under each point
+  for (let n = 0; n < NN; n++) {
+    const kd = G.kind[n], fe = G.endW[n] * N.n;
+    const m = (kd === 1 ? Q.flM : kd === 2 ? Q.skM : Q.twM) + fe * Q.fiM;
+    S.m[n] = m;
+    S.g[n] = g * ((kd === 1 ? Q.flM * Q.flW : kd === 2 ? Q.skM * Q.skW : Q.twM * Q.twW) + fe * Q.fiM * Q.fiW) / m;
+    S.k[n] = ((kd === 1 ? Q.flD : kd === 2 ? Q.skD : Q.twD) + fe * Q.fiD) / m / UPM;
+  }
+  for (let r = 0; r < RN; r++) { const n = NN + r; S.m[n] = Q.rpM; S.g[n] = g * Q.rpW; S.k[n] = Q.rpD / Q.rpM / UPM; }
+  const na0 = N.na;
+  for (let n = 0; n < NN + na0; n++) { const x = P[4 * n]; S.sf[n] = surfaceY(x); S.bd[n] = seabedY(x) - 0.3 * UPM; }
+  // the steps
+  const ns = Math.max(1, Math.ceil(dt * Q.HZ)), h = dt / ns, f = 1 - 0.92 * N.s;   // (f: the mesh's cords, shortened while gathered)
+  let Fx = 0, Fy = 0;
+  for (let st = 0; st < ns; st++) {
+    const t1 = (st + 1) / ns, Hx = N.hx + (hx - N.hx) * t1, Hy = N.hy + (hy - N.hy) * t1;
+    // the winch
+    if (N.cmd > 0) { if (N.s > 0) N.s = Math.max(0, N.s - h / Q.STOW); else N.L = Math.min(Q.ROPE * UPM, N.L + Q.DN * UPM * h); }
+    else if (N.cmd < 0) {
+      const rate = Q.UP / (1 + (N.T || 0) / Q.T0);                       // (a heavy net comes up slower)
+      if (N.L > 0) N.L = Math.max(0, N.L - rate * UPM * h);
+      else { N.s = Math.min(1, N.s + h / Q.STOW * Math.min(1, rate / Q.UP * 1.5)); if (N.s >= 1) { netAboard(j); N.hx = hx; N.hy = hy; return; } }
+    }
+    // the rope's points in use: the one nearest the block is let out from it, or taken in at it
+    const na = N.L > 0 ? Math.max(0, Math.ceil(N.L / seg) - 1) : 0, Lf = N.L - na * seg;
+    for (let r = N.na; r < na; r++) { const q = 4 * (NN + r); P[q] = Hx; P[q + 1] = Hy; P[q + 2] = Hx - (hx - N.hx) / ns; P[q + 3] = Hy - (hy - N.hy) / ns; }   // (new: at the block, moving with it)
+    if (na !== N.na) { for (let r = N.na; r < na; r++) { const n = NN + r; S.sf[n] = surfaceY(Hx); S.bd[n] = seabedY(Hx) - 0.3 * UPM; } N.na = na; }
+    // moving: drag through the water (or a little through the air), their weight
+    const last = NN + na;
+    for (let n = 0; n < last; n++) {
+      const q = 4 * n, x = P[q], y = P[q + 1];
+      let vx = (x - P[q + 2]) / h, vy = (y - P[q + 3]) / h;
+      if (y > S.sf[n]) { const c = 1 / (1 + S.k[n] * Math.hypot(vx, vy) * h + 0.05 * h); vx *= c; vy *= c; vy += S.g[n] * h; }
+      else { vx *= 1 - 0.02 * h; vy += g * h; }
+      P[q + 2] = x; P[q + 3] = y; P[q] = x + vx * h; P[q + 1] = y + vy * h;
+    }
+    // the cords: none stretches (the rope from the block out first, then the mesh)
+    const cord = (a, b, L) => {
+      const qa = 4 * a, qb = 4 * b, dx = P[qb] - P[qa], dy = P[qb + 1] - P[qa + 1], d = Math.hypot(dx, dy);
+      if (d <= L || d < 1e-9) return;
+      const wa = 1 / S.m[a], wb = 1 / S.m[b], e = (d - L) / (d * (wa + wb));
+      P[qa] += dx * e * wa; P[qa + 1] += dy * e * wa; P[qb] -= dx * e * wb; P[qb + 1] -= dy * e * wb;
+    };
+    // (swept from the block out, then back in, by turns: the sinker's weight reaches the block and the block's hold reaches
+    // the bag in the same few passes)
+    const block = () => {   // the block holds: what it takes is the net's pull on the boat
+      const a = na ? NN + na - 1 : G.top, qa = 4 * a, dx = P[qa] - Hx, dy = P[qa + 1] - Hy, d = Math.hypot(dx, dy);
+      if (d > Lf && d > 1e-9) { const cx = dx * (d - Lf) / d, cy = dy * (d - Lf) / d; P[qa] -= cx; P[qa + 1] -= cy; Fx += S.m[a] * cx; Fy += S.m[a] * cy; }
+    };
+    const nl = G.A.length;
+    for (let it = 0; it < Q.IT; it++) {
+      if (!(it & 1)) {
+        block();
+        for (let r = na - 1; r > 0; r--) cord(NN + r, NN + r - 1, seg);
+        if (na) cord(NN, G.top, seg);
+        for (let l = 0; l < nl; l++) cord(G.A[l], G.B[l], G.R[l] * UPM * f);
+      } else {
+        for (let l = nl - 1; l >= 0; l--) cord(G.A[l], G.B[l], G.R[l] * UPM * f);
+        if (na) cord(NN, G.top, seg);
+        for (let r = 1; r < na; r++) cord(NN + r, NN + r - 1, seg);
+        block();
+      }
+    }
+    // the floor: nothing goes through it, and what drags on it is held back
+    for (let n = 0; n < last; n++) { const q = 4 * n; if (P[q + 1] > S.bd[n]) { P[q + 1] = S.bd[n]; P[q + 2] += (P[q] - P[q + 2]) * 0.6; } }
+  }
+  // the pull on the boom (N), averaged over the frame's steps: it drags her back, and when she's stopped she drifts back on it
+  Fx /= h * h * ns * UPM; Fy /= h * h * ns * UPM;
+  N.T = Math.hypot(Fx, Fy);
+  if (j.state === 'run' && j.berth == null) {
+    j.ntv = (j.ntv || 0) + (Fx * UPM / Q.BOAT_M - (j.ntv || 0) * Q.HULL) * dt;
+    const nx = j.x + j.ntv * dt;
+    if (!coastAhead(j.x, Math.sign(j.ntv) || 1, 25)) j.x = j.lo2 != null && j.driven != null ? clamp(nx, j.lo2, j.hi2) : nx;
+  }
+  N.hx = hx; N.hy = hy;
+  // how deep it hangs (the camera holds the boat and the net), and the fish it takes
+  let deep = 0; for (let n = 0; n < NN + N.na; n++) deep = Math.max(deep, P[4 * n + 1] - WATER_Y);
+  N.d = Math.max(0, deep);
+  if (N.s < 0.3) netCatch(j, N);
+}
+// a fish inside the bag's outline is in the net (a school keeps its last fish, so it's there to come back)
+function netCatch(j, N) {
+  const P = N.P, O = NETG.outline, no = O.length;
+  let x0 = 1e12, x1 = -1e12, y0 = 1e12, y1 = -1e12;
+  for (let e = 0; e < no; e++) { const q = 4 * O[e], x = P[q], y = P[q + 1]; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  const inside = (x, y) => {
+    if (x < x0 || x > x1 || y < y0 || y > y1) return false;
+    let c = false;
+    for (let a = 0, b = no - 1; a < no; b = a++) { const qa = 4 * O[a], qb = 4 * O[b], ya = P[qa + 1], yb = P[qb + 1]; if ((ya > y) !== (yb > y) && x < P[qa] + (P[qb] - P[qa]) * (y - ya) / (yb - ya)) c = !c; }
+    return c;
+  };
+  const S = schools.c, F = seaFish.c, FI = schoolFish();
+  let took = 0;
+  for (let si = 0; si < schools.n; si++) {
+    let len = FI.at[si + 1] - FI.at[si];
+    if (len <= 1 || S.x[si] < x0 - 300 || S.x[si] > x1 + 300) continue;
+    for (let q = FI.at[si + 1] - 1; q >= FI.at[si] && len > 1; q--) {
+      const fj = FI.rows[q]; if (!inside(F.x[fj], F.y[fj])) continue;
+      if (S.n0[si] !== S.n0[si]) S.n0[si] = len;
+      seaFish.drop(fj); len--; S.backT[si] = time; N.n++; took++;
+    }
+  }
+  if (took) seaFish.sweep();
+}
+// the schools filling back, a fish at a time (a copy of its first fish, a new place in the school)
+const FISH_BACK_S = 25;
+function netsRefill() {
+  const S = schools.c, F = seaFish.c, FI = schoolFish(), fresh = [];
+  for (let si = 0; si < schools.n; si++) {
+    const len = FI.at[si + 1] - FI.at[si];
+    if (!(S.n0[si] === S.n0[si] && len < S.n0[si] && time - (S.backT[si] || 0) > FISH_BACK_S && len)) continue;
+    const j0 = FI.rows[FI.at[si]], f = { school: S.sid[si], x: F.x[j0], y: F.y[j0], vx: F.vx[j0], vy: F.vy[j0], face: F.face[j0], scare: F.scare[j0], dx: (storyR() - 0.5) * 30, dy: (storyR() - 0.5) * 12, ph: storyR() * 6.28 };
+    f.x = S.x[si] + f.dx * 0.6; f.y = S.y[si] + f.dy * 0.6; fresh.push(f); S.backT[si] = time;
+  }
+  for (const f of fresh) seaFish.addRow(f);
+}
+/* ---- drawn: the rope, the mesh, the float and the sinker, the catch in the bag, the coins it turned into - one pixel
+   layer of rectangles (rules.md section 6, Systems, rule 7: no GLCtx rectangle calls for something new), each line stepped
+   in the view's pixel blocks with a row's run as one rectangle. Thin: one block. Drawn in the sea's pass (drawFishBoat),
+   so the water's tint and depth fall on it as on the rest. ---- */
+const NET_INK = { rope: '#6f5a3e', mesh: 'rgba(214,198,152,0.8)', frame: '#a8875a', float: '#ff9a1e', floatD: '#b85a0a', sink: '#e8801a', fish: '#d4dde3', fishD: '#8a9aa6', coin: '#ffd23a', coinD: '#b8860b' };
+let NET_DRAW = null;                        // (the boat being drawn: read by the layer's view)
+const NET_VX = new Float64Array(NETG.NN + NETG.RN + 1), NET_VY = new Float64Array(NETG.NN + NETG.RN + 1);
+const NET_L = pxLayer({
+  table: null, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', rgba: 'view rgba' }, pal: [],
+  view: (T, own, n0, lo, hi, L) => {
+    const j = NET_DRAW, N = j && j.net; if (!N || !N.P) return 0;
+    const G = NETG, P = N.P, ga = C.s.ga, s = PB, NN = G.NN, na = N.na;
+    let m = 0, R = own;
+    const ink = {}; for (const k in NET_INK) ink[k] = glPack(glParse(NET_INK[k]), ga);
+    const put = (x, y, w, hh, col) => { if (m >= R.x.length) R = pxRoom(L, m + 1); R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = hh; R.rgba[m] = col; m++; };
+    // a line in blocks, a row's run one rectangle
+    const line = (X0, Y0, X1, Y1, col) => {
+      let ax = Math.round(X0 / s), ay = Math.round(Y0 / s); const bx = Math.round(X1 / s), by = Math.round(Y1 / s);
+      const dx = Math.abs(bx - ax), dy = Math.abs(by - ay), sx = ax < bx ? 1 : -1, sy = ay < by ? 1 : -1;
+      if (dx + dy > 4000) return;
+      let err = dx - dy, rx0 = ax, rx1 = ax, ry = ay;
+      for (;;) {
+        if (ax === bx && ay === by) break;
+        const e2 = 2 * err; if (e2 > -dy) { err -= dy; ax += sx; } if (e2 < dx) { err += dx; ay += sy; }
+        if (ay === ry) { if (ax < rx0) rx0 = ax; if (ax > rx1) rx1 = ax; }
+        else { put(rx0 * s, ry * s, (rx1 - rx0 + 1) * s, s, col); rx0 = rx1 = ax; ry = ay; }
+      }
+      put(rx0 * s, ry * s, (rx1 - rx0 + 1) * s, s, col);
+    };
+    const blob = (X, Y, r, c, cd) => { const x = Math.round(X / s) * s, y = Math.round(Y / s) * s, k = Math.max(1, Math.round(r / s)) * s; put(x - k, y - k, 2 * k, 2 * k, cd); put(x - k + s, y - k, 2 * k - s, 2 * k - s, c); };
+    const [hx, hy] = netHook(j), HX = PX(hx), HY = PY(hy);
+    // the coins the last catch turned into, rising off the boom (1.6 s)
+    const age = time - N.cashT;
+    if (age >= 0 && age < 1.6 && N.cashN > 0) {
+      const k = Math.max(1, Math.round(PX(hx + 0.35 * UPM) - HX) / 7 / s | 0) * s;
+      for (let c = 0; c < Math.min(N.cashN, 12); c++) {
+        const t = age - c * 0.06; if (t < 0) continue;
+        const cx = HX + Math.sin(c * 2.4) * (8 + c * 3) * k / s, cy = HY - t * 110 * k / s - c * 3 * k / s;
+        for (let r = 0; r < 7; r++) for (let q = 0; q < 7; q++) { const ch = STORY_COIN[r][q]; if (ch !== '.') put(Math.round(cx / s) * s + q * k, Math.round(cy / s) * s + r * k, k, k, ch === '#' ? ink.coinD : ink.coin); }
+      }
+    }
+    if (N.s >= 1) return m;
+    // the points in this view's pixels (the block first)
+    for (let n = 0; n < NN + na; n++) { NET_VX[n] = PX(P[4 * n]); NET_VY[n] = PY(P[4 * n + 1]); }
+    let mn = HX, mx = HX; for (let n = 0; n < NN + na; n++) { if (NET_VX[n] < mn) mn = NET_VX[n]; if (NET_VX[n] > mx) mx = NET_VX[n]; }
+    if (mx < PX(lo) - 20 || mn > PX(hi) + 20) return m;
+    // the rope: block -> its points -> the float
+    let ax = HX, ay = HY;
+    for (let r = na - 1; r >= 0; r--) { const n = NN + r; line(ax, ay, NET_VX[n], NET_VY[n], ink.rope); ax = NET_VX[n]; ay = NET_VY[n]; }
+    line(ax, ay, NET_VX[G.top], NET_VY[G.top], ink.rope);
+    // the mesh, then its frame ropes over it
+    for (let l = 0; l < G.A.length; l++) { const a = G.A[l], b = G.B[l]; line(NET_VX[a], NET_VY[a], NET_VX[b], NET_VY[b], l < G.frame ? ink.mesh : ink.frame); }
+    // the catch, filling the bag from its end forward: little silver fish between its top and bottom edges
+    const K = NETP.K, per = 7, nf = Math.min(N.n, per * (K - 2));
+    for (let c = 0; c < nf; c++) {
+      const k = K - 1 - Math.floor(c / per), hs = ((c * 2654435761) >>> 0) / 4294967296, hs2 = ((c * 40503 + 17) % 97) / 97;
+      const a0 = G.id(k % 2, k), b0 = G.id(NETP.M - k % 2, k), a1 = G.id((k + 1) % 2, k + 1), b1 = G.id(NETP.M - (k + 1) % 2, k + 1);
+      const u = 0.2 + 0.6 * hs, w = hs2;
+      const X = (NET_VX[a0] + (NET_VX[b0] - NET_VX[a0]) * u) * (1 - w) + (NET_VX[a1] + (NET_VX[b1] - NET_VX[a1]) * u) * w;
+      const Y = (NET_VY[a0] + (NET_VY[b0] - NET_VY[a0]) * u) * (1 - w) + (NET_VY[a1] + (NET_VY[b1] - NET_VY[a1]) * u) * w;
+      const x = Math.round(X / s) * s, y = Math.round(Y / s) * s;
+      put(x - s, y, 3 * s, s, ink.fish); put(x + (c % 2 ? 2 : -2) * s, y, s, s, ink.fishD);
+    }
+    // the two orange dots: the float and the sinker
+    const dot = Math.max(s * 1.5, PX(hx + 0.32 * UPM) - HX);
+    blob(NET_VX[G.top], NET_VY[G.top], dot, ink.float, ink.floatD);
+    blob(NET_VX[G.sink], NET_VY[G.sink], dot * 1.15, ink.sink, ink.floatD);
+    return m;
+  },
+  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = -1; return true; }
+`,
+});
+function drawStoryNet(j, h) {
+  const N = j.net;
+  if (N && N.P && (N.s < 1 || time - N.cashT < 1.6)) { NET_DRAW = j; pxDraw(NET_L, -1e12, 1e12); NET_DRAW = null; }
+  // gulls round her while she has fish in the net
+  if (N && N.n > 0 && img.birds && img.birds.gull) {
+    const L = storyBoatSize(j)[0];
+    for (let k = 0; k < 3; k++) {
+      const a = time * (1.1 + 0.2 * k) + k * 2.1, gx = j.x + Math.cos(a) * L * (0.5 + 0.15 * k), gy = j.y - h * (1.25 + 0.2 * k) + Math.sin(a * 1.7) * h * 0.18;
+      const fr = img.birds.gull[(Math.floor(time * 6) + k) % 3], I = Math.cos(a) < 0 ? fr.r : fr.l, sc = (PX(gx + 0.1 * UPM) - PX(gx));
+      C.drawImage(I, Math.round(PX(gx) - I.width * sc / 2), Math.round(PY(gy)), Math.round(I.width * sc), Math.round(I.height * sc));
+    }
+  }
+}
+
 /* ================================================================
    STORY's PLANES (user Oct 31 09:31: "if you go to an hangar, you can select a plane, but it will show you the cost of that
    plane. If you have that money ... then that plane becomes yours"; 09:32: "the Cessna costs 100 coins"; the spec section 2:
@@ -51680,7 +52037,7 @@ const STORY_COINS0 = 0;                                  // (what a new story st
 const storyR = sysRng('story');
 const STORY_ROW = worldRow({ coins: [() => story.coins, v => { story.coins = v; }], at: [() => story.at, v => { story.at = v; }], saveN: [() => story.saveN, v => { story.saveN = v; }], wake: [() => story.wake, v => { story.wake = v; }] });
 defTable('story', () => [STORY_ROW], { make: () => STORY_ROW });
-function storyReset() { story.coins = STORY_COINS0; story.at = 0; story.saveN = 0; story.wake = 0; storyHomeO = undefined; }
+function storyReset() { story.coins = STORY_COINS0; story.at = 0; story.saveN = 0; story.wake = 0; storyHomeO = undefined; Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false }); }   // (the automatic zoom again till the player zooms - storyZoom)
 // where a story opens: the HOME structure, else a house, else nothing (the harbour's view, as ever)
 let storyHomeO;                                          // (the base this story opened at: picked once - storyReset)
 const storyHome = () => storyHomeO !== undefined ? storyHomeO : (storyHomeO = storyPickHome());
@@ -51788,7 +52145,7 @@ function storyPark(p, id) {
   if (v.heli) { v.state = 'parked'; v.ai = null; v.home = v.x; }
   if (v.sub) { v.vx = 0; v.vy = 0; v.ai = null; v.y = surfaceY(v.x) - 1; }   // (a sub: tied up, afloat)   // (a helicopter: on its spot, rotor winding down)
   setOrder(telegraphs[p], 3); civRelease(p); civUI[p] = true;
-  storySellFish(v, o);                                   // (ACCEPTS FISH: the catch sold)
+  netAboard(v);                                          // (tied up: the net aboard, its catch turned to coins - 50-story-net.js)
   storyGo(p, o.id, true); sound('click', gunCtl[p]);
 }
 ACTS.storyBoard = (p, sid) => storyBoard(p, sid);
@@ -51807,66 +52164,7 @@ function drawFishBoat(j) {
   C.restore();
   drawStoryNet(j, h);
 }
-/* ---- fishing (user Oct 31, the spec section 12: "Fishing boats have a net button. Press it to lower the net, which goes down
-   like the anchor. Press it again to raise the net. With the net lowered, drive the boat so the net passes over fish in the
-   area to catch them ... Caught fish disappear from the water, and the net visibly becomes fuller. Fish slowly reappear ...
-   The net holds 10 fish. On catching the tenth fish, it is full and immediately rises. It cannot be lowered again until
-   emptied. The net button fills up as fish are caught ... Bring a full net to the city dock and empty it for money: 10 per
-   full net ... When the boat has fish, seagulls fly around it"; 08:41: the camera frames the boat and the net).
-   A fishing boat's net (j.net, on its row: st 1 going down / down, 0 coming up / stowed; d how deep, n the fish in it) hangs
-   behind her stern, trailing further back and rising a little the faster she goes; its mouth takes every fish of the sea's
-   schools within NET_R (a school keeps its last fish). Tied up at a structure with ACCEPTS FISH, the catch is sold: a coin a
-   fish (STORY_FISH_C), 10 a full net. A school that's lost fish gets one back every FISH_BACK_S. ---- */
-const NET_D = 14, NET_R = 3, NET_FULL = 10, FISH_BACK_S = 25, STORY_FISH_C = 1;
-const netOf = j => j.net || (j.net = { st: 0, d: 0, n: 0 });
-function storyNetToggle(v) {
-  if (!v || v.kind !== 'fish' || v.state !== 'run') return;
-  const N = netOf(v);
-  if (N.st === 0 && N.n >= NET_FULL) { sound('empty', v.x); return; }   // (full: emptied at a dock first)
-  N.st = N.st ? 0 : 1; sound('anchorWinch', v.x, 1);
-}
-function storyNetState(v) {
-  const N = v && v.net; if (!v) return { f: 0, off: true, n: -1 };
-  const n = N ? N.n : 0;
-  return { f: n > 0 && n < NET_FULL ? 1 - n / NET_FULL : 0, off: v.state !== 'run', n, on: !!(N && N.st === 1) };
-}
-// where the net's mouth is
-function storyNetPos(j) {
-  const d = j.net.d, fr = clamp(Math.abs(j.vDrive || 0) / (j.v || 60), 0, 1), L = storyBoatSize(j)[0];
-  return [j.x - j.dir * (L * 0.45 + d * (0.15 + 0.7 * fr)), j.y + d * (1 - 0.35 * fr)];
-}
-function storyNets(dt) {
-  for (const j of jetboats) {
-    const N = j.net; if (!j.story || !N) continue;
-    if (j.state !== 'run') { N.st = 0; continue; }
-    N.d = N.st === 1 ? Math.min(NET_D * UPM, N.d + 5 * UPM * dt) : Math.max(0, N.d - 7 * UPM * dt);
-    if (N.st !== 1 || N.d < 2 * UPM || N.n >= NET_FULL) continue;
-    const [nx, ny] = storyNetPos(j), r = NET_R * UPM;
-    // (Nov 1: the schools and their fish from their column tables - 05-game-state.js; a school's fish from last to first)
-    const S = schools.c, F = seaFish.c, FI = schoolFish();
-    for (let si = 0; si < schools.n; si++) {
-      let len = FI.at[si + 1] - FI.at[si];
-      if (Math.abs(S.x[si] - nx) > 300 || len <= 1) continue;
-      for (let q = FI.at[si + 1] - 1; q >= FI.at[si] && len > 1; q--) {
-        const fj = FI.rows[q]; if (Math.abs(F.x[fj] - nx) > r || Math.abs(F.y[fj] - ny) > r) continue;
-        if (S.n0[si] !== S.n0[si]) S.n0[si] = len;
-        seaFish.drop(fj); len--; S.backT[si] = time; N.n++;
-        if (N.n >= NET_FULL) { N.st = 0; break; }                    // (full: up it comes)
-      }
-      if (N.n >= NET_FULL) break;
-    }
-    seaFish.sweep();
-  }
-  // the schools filling back, a fish at a time
-  { const S = schools.c, F = seaFish.c, FI = schoolFish(), fresh = [];
-    for (let si = 0; si < schools.n; si++) {
-      const len = FI.at[si + 1] - FI.at[si];
-      if (!(S.n0[si] === S.n0[si] && len < S.n0[si] && time - (S.backT[si] || 0) > FISH_BACK_S && len)) continue;
-      const j0 = FI.rows[FI.at[si]], f = { school: S.sid[si], x: F.x[j0], y: F.y[j0], vx: F.vx[j0], vy: F.vy[j0], face: F.face[j0], scare: F.scare[j0], dx: (storyR() - 0.5) * 30, dy: (storyR() - 0.5) * 12, ph: storyR() * 6.28 };
-      f.x = S.x[si] + f.dx * 0.6; f.y = S.y[si] + f.dy * 0.6; fresh.push(f); S.backT[si] = time;   // (a copy of its first fish, a new place in the school)
-    }
-    for (const f of fresh) seaFish.addRow(f); }
-}
+// fishing: the net, all physics (user Nov 2) - 50-story-net.js
 /* ---- fuel and repairs (user Oct 31, the spec section 5: "All vehicles consume fuel ... When fuel runs out, the vehicle loses
    powered operation"; "Docked or parked vehicles repair gradually when Allow Repair is enabled and refuel gradually when Allow
    Refuel is enabled"; 09:31: "In story mode, fixing a broken vehicle takes 1 day"). A story vehicle's fuel (j.fuel, 0-1) burns
@@ -52044,48 +52342,21 @@ window.addEventListener('pointerdown', ev => {
   if (storySosOk(crew[0].civ)) act(0, 'storySOS'); else sound('empty', 0);
   ev.stopImmediatePropagation(); ev.preventDefault();
 }, { capture: true, passive: false });
-// tied up: a structure that takes fish buys the catch
-function storySellFish(v, o) {
-  const N = v && v.net; if (!N || !N.n || !o || !o.fish) return;
-  story.coins += N.n * STORY_FISH_C; N.n = 0; N.st = 0;
-  sound('click', null);                                  // (click takes a button, not a place)
-}
-// the net and its rope (drawFishBoat), and the gulls round a boat with fish in her
-function drawStoryNet(j, h) {
-  const N = j.net; if (!N) return;
-  const L = storyBoatSize(j)[0], sx = j.x - j.dir * L * 0.45, sy = j.y - h * 0.15;
-  if (N.d > 0.3 * UPM) {
-    const [nx, ny] = storyNetPos(j), q = Math.max(1, Math.round(PX(j.x + 0.06 * UPM) - PX(j.x)));
-    const X0 = PX(sx), Y0 = PY(sy), X1 = PX(nx), Y1 = PY(ny), n = Math.max(2, Math.ceil(Math.hypot(X1 - X0, Y1 - Y0) / q));
-    C.fillStyle = '#2b2620';
-    for (let i = 0; i <= n; i++) { const t = i / n; C.fillRect(Math.round(X0 + (X1 - X0) * t), Math.round(Y0 + (Y1 - Y0) * t), q, q); }
-    // the bag: mesh widening down, the catch filling it from the bottom
-    const bw = PX(nx + 2.4 * UPM) - PX(nx), bh = PY(ny + 3.2 * UPM) - PY(ny), full = N.n / NET_FULL;
-    for (let y = 0; y < bh; y += q) {
-      const t = y / bh, hw = bw * (0.25 + 0.25 * t), yy = Math.round(Y1 + y);
-      if (t > 1 - full) { C.fillStyle = 'rgba(205,215,225,0.9)'; C.fillRect(Math.round(X1 - hw), yy, Math.round(2 * hw), q); }
-      C.fillStyle = 'rgba(230,225,205,0.75)';
-      C.fillRect(Math.round(X1 - hw), yy, q, q); C.fillRect(Math.round(X1 + hw - q), yy, q, q);
-      if ((Math.round(y / q)) % 3 === 0) for (let x = -hw; x < hw; x += 3 * q) C.fillRect(Math.round(X1 + x), yy, q, q);
-    }
-  }
-  if (N.n > 0 && img.birds && img.birds.gull) for (let k = 0; k < 3; k++) {     // (gulls round her while she has fish)
-    const a = time * (1.1 + 0.2 * k) + k * 2.1, gx = j.x + Math.cos(a) * L * (0.5 + 0.15 * k), gy = j.y - h * (1.25 + 0.2 * k) + Math.sin(a * 1.7) * h * 0.18;
-    const fr = img.birds.gull[(Math.floor(time * 6) + k) % 3], I = Math.cos(a) < 0 ? fr.r : fr.l, s = (PX(gx + 0.1 * UPM) - PX(gx));
-    C.drawImage(I, Math.round(PX(gx) - I.width * s / 2), Math.round(PY(gy)), Math.round(I.width * s), Math.round(I.height * s));
-  }
-}
 // the dots: where each is on the page (CSS pixels), from the world as the camera has it - at a structure, the ones it
 // connects to and your boats tied up there; aboard, the structures you can tie up at
 function storyDots() {
   if (!STORY || ui.title || story.wake) return [];
   const c = crew[0], a = screenToWorld(0, 0), b = screenToWorld(1000, 1000), sx = 1000 / (b[0] - a[0]), sy = 1000 / (b[1] - a[1]);
-  const at = (x, y) => ({ cx: (x - a[0]) * sx, cy: (y - a[1]) * sy });
-  if (c.mode === 'civ') return storyParks(c.civ).map(o => Object.assign(at(o.x, strBox(o).top - 30), { act: 'storyPark', id: o.id }));
+  // (user Nov 2: "The blinking white dot should be in the middle of the object, not on top") every dot at the middle of its
+  // object's own box - a structure's (strBox), a vehicle's (vehBox, the GAME EDITOR's outline of it): one rule for every kind
+  const at = (x, y) => ({ cx: (x - a[0]) * sx, cy: (y - a[1]) * sy, wx: x, wy: y });   // (wx, wy: in the world - where the camera goes when it's picked with the keys, storyStep)
+  const atStr = o => { const B = strBox(o); return at((B.x0 + B.x1) / 2, (B.top + B.foot) / 2); };
+  const atVeh = v => { const [x0, x1, y0, y1] = vehBox({ v }); return at((x0 + x1) / 2, (y0 + y1) / 2); };
+  if (c.mode === 'civ') return storyParks(c.civ).map(o => Object.assign(atStr(o), { act: 'storyPark', id: o.id }));
   if (c.mode !== 'dock') return [];
   const here = storyAt(); if (!here) return [];
-  const L = storyLinks(here).map(o => Object.assign(at(o.x, strBox(o).top - 30), { act: 'storyGo', id: o.id }));
-  for (const j of storyVehs()) if (j.berth === here.id && j.driven == null && !j.role) L.push(Object.assign(at(j.x, j.y - storyBoatSize(j)[1] - 20), { name: String((STR_VEHS[j.sv] || { lab: 'VEHICLE' }).lab).toUpperCase() }, j.own ? { act: 'storyBoard', id: j.sid } : { act: 'storyAsk', id: j.sid, price: j.price }));   // (for sale: its dot asks - storyAsk)
+  const L = storyLinks(here).map(o => Object.assign(atStr(o), { act: 'storyGo', id: o.id }));
+  for (const j of storyVehs()) if (j.berth === here.id && j.driven == null && !j.role) L.push(Object.assign(atVeh(j), { name: String((STR_VEHS[j.sv] || { lab: 'VEHICLE' }).lab).toUpperCase() }, j.own ? { act: 'storyBoard', id: j.sid } : { act: 'storyAsk', id: j.sid, price: j.price }));   // (for sale: its dot asks - storyAsk)
   return L;
 }
 /* ---- buying (user Oct 31 13:17: "when you have the dot to select the vehicle, if you select it, it should show the price.
@@ -52129,10 +52400,45 @@ window.addEventListener('pointerdown', ev => {
   const r = ev.pointerType === 'touch' ? 48 : 31, dd = q => Math.hypot(ev.clientX - q.cx, ev.clientY - q.cy);
   const d = storyDots().filter(q => dd(q) < r).sort((a, b) => dd(a) - dd(b))[0];   // (the nearest: boats side by side have their dots close together)
   if (!d) return;
-  if (d.act === 'storyAsk') { const v = storyVehs().find(j => j.sid === d.id); if (v) { storyQ = { sid: v.sid, lab: (STR_VEHS[v.sv] || { lab: 'VEHICLE' }).lab, price: v.price }; sound('click', 0); } }
-  else act(0, d.act, d.id);
+  storyPress(d);
   ev.stopImmediatePropagation(); ev.preventDefault();
 }, { capture: true, passive: false });
+// a dot pressed (a finger, the mouse, or the keys' pick and fire - storyStep): what it does
+function storyPress(d) {
+  storySel = null;
+  if (d.act === 'storyAsk') { const v = storyVehs().find(j => j.sid === d.id); if (v) { storyQ = { sid: v.sid, lab: (STR_VEHS[v.sv] || { lab: 'VEHICLE' }).lab, price: v.price }; sound('click', 0); } }
+  else act(0, d.act, d.id);
+}
+/* (user Nov 2: "The keyboard keys / should button should only allow you to 'jump' between objects, not pan the camera around the
+   world. The camera is always locked at the selected object.") In STORY nothing looks round the world - the drive keys, the left
+   stick, a finger dragged (looking, 21-input-keys-pads.js) or the right mouse button (20-input-pointer.js). At a structure, left /
+   right (A / D, the arrows, the left stick, a pad's shoulder buttons) jump the pick to the next object that way - the structure
+   you're at, the ones it connects to, your vehicles tied up there (its dots) - and the camera goes to it, eased, centred, and stays
+   on it (storySelFocus, camFocus - 39-camera.js); the fire key or a pad's A takes it, as pressing its dot does. Nothing picked: the
+   camera on the structure you're at. */
+let storySel = null;                                     // (the object picked with the keys: its dot's act + id; null - the structure you're at)
+const storyDotKey = d => d.act + ':' + d.id;
+function storyStep(d) {
+  const here = storyAt(); if (!here) return;
+  const B = strBox(here), L = storyDots().concat([{ key: null, wx: (B.x0 + B.x1) / 2 }]).map(q => Object.assign(q, { key: q.act ? storyDotKey(q) : null })).sort((a, b) => a.wx - b.wx);
+  const i = Math.max(0, L.findIndex(q => q.key === storySel)), k = L[clamp(i + d, 0, L.length - 1)].key;
+  if (k === storySel) return;
+  storySel = k; cam.glide = STORY_GLIDE; sound('click', 0);
+}
+const STORY_GLIDE = 1.2;                                 // (how long the camera eases to the object picked - updateCamera's follow, no cut)
+// the camera's aim while an object is picked with the keys (camFocus): the middle of its box, as its dot
+function storySelFocus() {
+  if (!STORY || !storySel || crew[0].mode !== 'dock') return null;
+  const d = storyDots().find(q => storyDotKey(q) === storySel); if (!d) { storySel = null; return null; }
+  return [d.wx, d.wy, 0, 0, null];
+}
+function storyTake() { const d = storyDots().find(q => storyDotKey(q) === storySel); if (!d) return false; storyPress(d); return true; }
+// the keys and the pad, in STORY at a structure: true when the press was the dots'
+function storyDotKeys(p, kind, d) {
+  if (!STORY || p !== 0 || ui.menu || ui.title || storyQ || crew[0].mode !== 'dock') return false;
+  if (kind === 'step') { storyStep(d); return true; }
+  return storyTake();
+}
 window.addEventListener('keydown', ev => {
   if (!storyQ) return;
   if (ev.code === 'Enter' || ev.code === 'NumpadEnter' || ev.code === 'KeyY') storyAnswer(!(story.coins < storyQ.price));
@@ -52202,8 +52508,8 @@ function storyNPC(dt) {
       let A = null, bd = 1e12; for (const q of natureUsed()) { const d = Math.abs((q.x0 + q.x1) / 2 - j.x); if (d < bd) { bd = d; A = q; } }
       if (A) {
         j.berth = null;
-        if (j.x < A.x0 || j.x > A.x1) { j.dir = Math.sign((A.x0 + A.x1) / 2 - j.x) || 1; j.npcV = j.v * 0.6; if (j.net) j.net.st = 0; }
-        else { if ((j.dir > 0 && j.x > A.x1 - 30) || (j.dir < 0 && j.x < A.x0 + 30)) j.dir = -j.dir; j.npcV = j.v * 0.25; if (j.kind === 'fish') { const N = netOf(j); if (N.n >= NET_FULL) N.n = 0; N.st = 1; } }   // (a full net: the NPC's catch is its own)
+        if (j.x < A.x0 || j.x > A.x1) { j.dir = Math.sign((A.x0 + A.x1) / 2 - j.x) || 1; j.npcV = j.v * 0.6; if (j.net) j.net.cmd = -1; }
+        else { if ((j.dir > 0 && j.x > A.x1 - 30) || (j.dir < 0 && j.x < A.x0 + 30)) j.dir = -j.dir; j.npcV = j.v * 0.25; if (j.kind === 'fish') { const N = netOf(j); N.cmd = N.n >= 40 ? -1 : N.L < 18 * UPM ? 1 : 0; } }   // (its net out 18 m; 40 fish and it hauls in - the NPC's catch is its own)
         continue;
       }
     }
@@ -52213,14 +52519,14 @@ function storyNPC(dt) {
     let sp = o.id === j.hb && !used.has(j.hs) ? j.hs : -1; for (let i = 0; sp < 0 && i < storyBerths(o); i++) if (!used.has(i)) sp = i;
     if (sp < 0) { j.npcV = 0; continue; }                   // (no room there: it waits)
     const tx = storySpotX(o, sp), d = tx - j.x;
-    if (j.net) j.net.st = 0;
+    if (j.net) j.net.cmd = -1;
     if (Math.abs(d) < 1.5 * UPM) { j.x = tx; j.berth = o.id; j.spot = sp; j.npcV = 0; continue; }
     j.berth = null; j.dir = Math.sign(d); j.npcV = Math.min(j.v * 0.6, Math.abs(d) * 2 + 4);
   }
 }
 function stepStory(dt) {
-  if (!STORY) { if (LAND) stepStoryCars(dt); return; }   // (the cars step wherever there are any - OPEN WORLD's at structures, placed ones - editor chat, Nov 1)
-  storyNPC(dt); storyLosses(); storyNets(dt); storyFuel(dt); storyGive(dt); storyRescue(dt); stepStoryCars(dt); storyHelis(dt); storySubs(dt);
+  if (!STORY) { if (LAND) { stepStoryCars(dt); netsStep(dt); } return; }   // (a fishing boat's net wherever there is one - 50-story-net.js)   // (the cars step wherever there are any - OPEN WORLD's at structures, placed ones - editor chat, Nov 1)
+  storyNPC(dt); storyLosses(); netsStep(dt); storyFuel(dt); storyGive(dt); storyRescue(dt); stepStoryCars(dt); storyHelis(dt); storySubs(dt);
   if (!story.wake) return;
   stepWeather(dt * (STORY_SLEEP_X - 1));                 // (the clock, the sky and the weather run on: the frame's own step is the 1)
   if (W.day >= story.wake && env.time >= STORY_WAKE_H && env.time < 12) { story.wake = 0; story.saveN++; }
@@ -52233,7 +52539,7 @@ const STORY_COIN = ['..###..', '.#ooo#.', '#oo#oo#', '#o#o#o#', '#oo#oo#', '.#oo
 /* ---- the automatic zoom, STORY only (user Oct 31 08:36; the spec: "Close when stopped, Medium when driving, Far set by
    hand"): at a structure, close on it (three times its width); aboard, Close while she's still and Medium once she's under
    way (the speed held 0.8 s either way: no flicker), each from her length; the player zooming by hand takes it over (Far,
-   or wherever they like) until they're at another structure or in another vehicle. The levels are the stepped zoom's own
+   or wherever they like) for the rest of the story (user Nov 2). The levels are the stepped zoom's own
    (setScope). This screen's camera: run as it's drawn. ---- */
 const STORY_ZOOM = { key: null, lv: null, manual: false, mv: 0, moving: false };
 /* each vehicle type's own CLOSE and MEDIUM (the spec section 9: "Configure each vehicle type's gameplay zoom levels in the
@@ -52252,8 +52558,12 @@ function storyZoomWidth() {
 function storyZoom(dt) {
   if (!STORY || ui.title || NSKY.editor.TUNE.open || PHOTO.on) return;
   const c = crew[0], Z = STORY_ZOOM, key = c.mode === 'civ' ? 'v' + (c.civ ? c.civ.sid : '') : c.mode + story.at;
-  if (key !== Z.key) { Z.key = key; Z.manual = false; Z.lv = null; Z.moving = false; Z.mv = 0; }
-  if (Z.lv != null && scopes[0].level !== Z.lv) Z.manual = true;   // (zoomed by hand: theirs till the next structure or vehicle)
+  if (key !== Z.key) { Z.key = key; Z.lv = null; Z.moving = false; Z.mv = 0; }
+  // (user Nov 2: "While in Editor Play mode, I should be able to zoom in and out at will" - and the rule: "The zoom changes only
+  // when the player changes it") zoomed by hand, the zoom is the player's from then on - the next structure or vehicle no longer
+  // takes it back (it did: every new vehicle or structure the automatic zoom set its own again). A new story starts automatic
+  // (storyReset). One rule for Story played from the menu and from the GAME EDITOR's PLAY
+  if (Z.lv != null && scopes[0].level !== Z.lv) Z.manual = true;
   if (Z.manual) return;
   const v = c.mode === 'civ' ? c.civ : null, fast = !!v && Math.abs(v.vDrive || 0) > (v.v || 60) * 0.15;
   if (fast !== Z.moving) { Z.mv += dt; if (Z.mv > 0.8) { Z.moving = fast; Z.mv = 0; } } else Z.mv = 0;
@@ -52263,7 +52573,9 @@ function storyZoom(dt) {
   let lv = lvOf(w);
   if (Z.moving && c.civ) lv = Math.min(lv, lvOf(storyZoomOf(c.civ.sv)[0] * UPM) - 1);
   lv = Math.max(1, lv);
-  if (scopes[0].level !== lv) setScope(0, lv);
+  // (user Nov 2: stopped <-> moving "too aggressive ... almost feels like a snap") the change between Close and Medium in the same
+  // vehicle eases slowly (ZOOM_EASE_AUTO, 39-camera.js), centred on her; a new vehicle or structure keeps the quick one
+  if (scopes[0].level !== lv) { if (Z.lv != null) zoomSlow(0); setScope(0, lv); }
   Z.lv = lv;
 }
 window.__storyZoom = STORY_ZOOM;
@@ -52297,7 +52609,8 @@ function drawStoryBanner() {
   // grows smoothly (user Nov 2: "it looks stepped"): the next pixel ring fades in as the size passes between two whole
   // pixels. 40% bigger than before (Nov 2). Below a vehicle's dot: its name, then BUY FOR (coin) N or OWNED.
   const pulse = 0.5 + 0.5 * Math.sin(time * 4), R = 7 + 4.2 * pulse;
-  for (const q of storyDots()) {
+  const dots = storyDots();
+  for (const q of dots) {
     const [x, yy] = toUI(q.cx, q.cy), X = Math.round(x), Y = Math.round(yy);
     pxDiscSmooth(ug, X, Y, R + 3, '#04070f'); pxDiscSmooth(ug, X, Y, R, '#ffffff');
     if (q.name) {
@@ -54647,6 +54960,7 @@ function wedSync() {
     WED.rbtn.classList.toggle('on', !!d); WED.rbtn.textContent = d ? 'REFRESH (NOT BUILT)' : busy ? 'BUILDING...' : 'REFRESH';
   }
   if (WED.pbtn) WED.pbtn.disabled = !edPlayKey();
+  if (WED.wbtn) WED.wbtn.classList.toggle('on', !!ui.settings);
   if (!b) return;
   b.hidden = !T.world(); if (b.hidden) return;
   const D = wedPicked().filter(i => i.del);
@@ -54666,6 +54980,12 @@ function wedSync() {
   const close = [...bar.querySelectorAll('button')].find(q => q.textContent === 'CLOSE');
   const pb = document.createElement('button'); pb.textContent = 'PLAY'; pb.title = 'Play from what\'s picked'; pb.disabled = true; pb.onclick = edPlay;
   bar.insertBefore(pb, close || null); WED.pbtn = pb;
+  // (user Nov 2: "The World button should be available in the Editor mode too, so we can change the time of day, cloud coverage
+  // etc while in the editor") WORLD: the game's own WORLD panel (its sliders - time, sky, fog, rain, sea, wind) over the editor's
+  // view, set as in the game (setSlider: the weather held as you set it); pressed again it closes. CLOSE leaves it shut
+  const wb = document.createElement('button'); wb.textContent = 'WORLD'; wb.title = 'Time of day, clouds, weather';
+  wb.onclick = () => { ui.settings = !ui.settings; ui.dragSlider = null; wedSync(); };
+  bar.insertBefore(wb, pb); WED.wbtn = wb;
   T.onPick.push(() => wedSync()); wedSync();
 })();
 /* PLAY (user Nov 1 20:05: "a button that says PLAY and you are playing immediately. I should be able to select any structure or
@@ -55716,6 +56036,11 @@ async function start(data) {
   Object.assign(window.__game, { col: { COLV, SHIP_L, UPM, CONTACT, hangarRoofAt: (d, x) => hangarRoofAt(d, x), hangarSolid: (x, y) => hangarSolid(x, y), harbourHit: (d, x, y) => harbourHit(d, x, y), enemyLimit: (p, h) => seaReach(ships[p], h, -homeDock[p].dir), onLand: x => onLand(x), isleCol: x => isleCol(x), isle: x => ISLE === null ? null : ISLE[Math.floor(x / 2.5)], owned: () => DOCKS_OWNED, docks: () => docks, civShips: () => civShips, civLen: c => civLen(c), sea: () => [LAYOUT_L, LAYOUT_R], WATER_Y, HANGAR_ROOF: () => HANGAR_ROOF(), edOpen: on => { NSKY.editor.TUNE.open = !!on; }, launch: (p, k) => launchOut(k === 'ship' ? ships[p] : subs[p]), ownTop: v => ownTop(v) } });
   // (OPEN WORLD: the kraken - tools/kraken.mjs)
   Object.assign(window.__game, { shipCut: v => { SHIPCUT = !!v; }, shipsList: () => ships, FT: () => FT });
+  // (user Nov 2) the fishing net (50-story-net.js), for the Fishing Lab (lab/fishlab): its numbers, a fishing boat made and boarded, the winch, the drive, schools
+  Object.assign(window.__game, { fishnet: { P: NETP, boats: () => jetboats.filter(j => j.kind === 'fish'), board: j => { boardCiv(0, j); j.drv = 0; j.vDrive = 0; j.cin = 0; setOrder(telegraphs[0], 3); }, cmd: c => netCmd(crew[0].civ, c), drive: d => d ? drivePush(0, d) : driveRelease(0),
+    spawn: (x, dir) => { const j = newJetboat(x - 1e5, x + 1e5, 0, 'fish'); j.x = x; j.dir = dir || 1; j.own = true; jetboats.push(j); netOf(j); return j; },
+    school: (x, y, n) => { const fish = []; for (let k = 0; k < n; k++) { const dx = (Math.random() - 0.5) * (16 + n * 3) * 2, dy = (Math.random() - 0.5) * (8 + n) * 2; fish.push({ dx, dy, ph: Math.random() * 6.28, x: x + dx * 0.6, y: y + dy * 0.6, vx: 0, vy: 0, face: 1 }); } return schoolAdd({ type: 'sardine', x, y, dir: Math.random() < 0.5 ? 1 : -1, speed: 10, turnT: 12, flee: 0, vy: 0 }, fish); },
+    schools: () => schools, get WATER_Y() { return WATER_Y; }, bed: x => seabedY(x) } });
   // (Nov 1) a column table's row as a plain object, for the console: __game.row('smoke', 0) - 04-zz-coltable.js
   Object.assign(window.__game, { row: (name, i) => { const t = TABLES[name]; return t && t.cols ? t.cols.plain(i) : t ? t.list()[i] : undefined; } });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
