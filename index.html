@@ -3208,7 +3208,10 @@ function dockPadAt(x) {
   return null;
 }
 const rampAt = x => { if (!COAST_RAMP) return 0; for (const [c, q] of COAST_RAMP) if ((x - c) * (q - c) >= 0 && Math.abs(x - c) <= Math.abs(q - c)) return smoothstep(q, c, x); return 0; };
-function bedDrop(x) {
+// (stage 3, Nov 2: "splines that create holes in the terrain") a HOLE shape where it crosses the sea floor dents it: the floor goes down to the
+// hole's bottom there (land.fdent - holeDentsBuild, 50-land-islands) - its sand, its black and what sinks all follow
+function bedDrop(x) { const D = OWM && land.fdent; if (D) { const c = Math.floor(x / 2.5); if (c >= 0 && c < D.length && D[c]) return bedDropB(x) + D[c]; } return bedDropB(x); }
+function bedDropB(x) {
   let v = bedDrop0(x);
   if (COAST_RAMP) { const t = rampAt(x); if (t > 0) v += (DECK_Y + 4 - SEABED_Y - v) * t; }   // (the beach: up to just over the quay's old deck)
   if (DOCK_PADS) { const P = dockPadAt(x); if (P && P[0] > 0) return v + (P[1] - v) * P[0]; }   // (a dock placed at sea: its ground)
@@ -3253,8 +3256,8 @@ function bedZZ(x, cell, i0) { const u = x / cell, i = Math.floor(u), f = u - i; 
 function sandY(x) { return SEABED_Y + bedDrop(x) + 1.5 * Math.sin(x * 0.013) + Math.sin(x * 0.041 + 1); }
 function seabedY(x) { const u = solUnder(x); if (OWM && onLand(x) && lakeAt(x)) { const t = landTop(x); return Math.min(u, land.lkRocks && rockForms.length ? Math.min(t, rockTopY(x)) : t); }   // (OPEN WORLD: a lake's bed - the sea's own floor under dry land stays hidden under it; a lake marked SEA: its rock formations too - buildLakeSea)
   const s = sandY(x); return Math.min(u, rockForms.length ? Math.min(s, rockTopY(x)) : s); }
-// (Nov 2) a SOLID shape's top under the water at x - what stops a sub, a torpedo, a wreck going down (50-land-shapes); Infinity: none
-const solUnder = x => { const S = OWM && land.sunder; if (!S) return Infinity; const c = Math.floor(x / 2.5); return c >= 0 && c < S.length ? S[c] : Infinity; };
+// (Nov 2) a SOLID shape's top under the water at x where it stands on the floor - the floor there (50-land-islands solSpansBuild); Infinity: none
+const solUnder = x => { const S = OWM && land.sfloor; if (!S) return Infinity; const c = Math.floor(x / 2.5); return c >= 0 && c < S.length ? S[c] : Infinity; };   // (stage 3: only what rests on the floor - a solid with a gap under it is passed under: solidBlock)
 
 function shipLocalX(sh, sx) { return (sh.facing < 0 ? sx - SHIP_PIVOT_X : SHIP_PIVOT_X - sx) * SHIP_K; }
 function shipPoint(sh, sx, sy) {
@@ -4145,8 +4148,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 637;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 15:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 638;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 15:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8473,7 +8476,7 @@ function makeSub(id, d) {
 const subArtOf = sb => (img.subArtP && img.subArtP[sb.id]) || img.subArt, subTurnOf = sb => (img.subTurnFP && img.subTurnFP[sb.id]) || img.subTurnF;
 function subHits(sb) { let n = 0; for (const l of sb.lvl) n += Math.ceil(l - 1e-6); return n; }
 function subLife(sb) { return sb.state === 'docked' || sb.state === 'out' ? clamp(1 - subHits(sb) / SUB_HITS, 0, 1) : 0; }
-const subMaxY = x => seabedY(x) - (SUB_KEEL_ROW - SUB_WL_ROW) * SUB_K + 1;      // keel on the sand
+const subMaxY = (x, y) => Math.min(seabedY(x), y == null ? Infinity : solidBelow(x, y)) - (SUB_KEEL_ROW - SUB_WL_ROW) * SUB_K + 1;      // keel on the sand (y: from there down - a solid floating over the floor, Nov 2)
 // a point on the hull -> world, following the pitch. u runs 0..1 left to right as drawn; row is the art's
 function subAt(sb, u, row) {
   const lx = (u - 0.5) * SUB_L, ly = (row - SUB_WL_ROW) * SUB_K;
@@ -8709,7 +8712,7 @@ function stepSub(sb, dt) {
       const s = Math.sign(sb.vx), bx = sb.x + s * SUB_L * 0.47;
       // (only rock stops her: the sand's ups and downs she rides over - and, OPEN WORLD, the deep trench's slopes:
       // driven along the bottom into rising ground she stops against it rather than jumping up it, user Oct 25 late)
-      const rt = rockTopY(bx), wall = OWM && seabedY(bx) - (SUB_KEEL_ROW - SUB_WL_ROW) * SUB_K + 1 < sb.y - 8;
+      const rt = rockTopY(bx), wall = OWM && (seabedY(bx) - (SUB_KEEL_ROW - SUB_WL_ROW) * SUB_K + 1 < sb.y - 8 || solidBlock(bx, sb.y) || solidBlock(bx, sb.y - SUB_UP * 0.7) || solidBlock(bx, sb.y + SUB_DN * 0.7));   // (a SOLID shape's side, floating or not - Nov 2)
       if (wall || (rt < sandY(bx) && rt - (SUB_KEEL_ROW - SUB_WL_ROW) * SUB_K + 1 < sb.y - 5)) {
         const speed = Math.abs(sb.vx), wasT = sb.blockT || 0;   // (wasT: already against it a moment ago - pushing on, no new puff)
         sb.x = xPrev; sb.vx = 0; sb.blockT = 1; sb.blockTop = seabedY(bx);
@@ -8774,8 +8777,10 @@ function stepSub(sb, dt) {
   }
   sb.y += sb.vy * dt;
   subRam(sb, dt);
+  // (a SOLID shape over her - floating with a gap under it, Nov 2: its underside is her ceiling)
+  if (OWM && land.sspan) { const top = sb.y - SUB_UP, ceil = Math.max(solidAbove(sb.x - SUB_L * 0.4, top + 4), solidAbove(sb.x, top + 4), solidAbove(sb.x + SUB_L * 0.4, top + 4)); if (ceil > top) { sb.y = ceil + SUB_UP; sb.vy = Math.max(0, sb.vy); } }
   // (the floor under her whole length: a narrow spire under her bow or stern holds her up too)
-  const floor = Math.min(subMaxY(sb.x - SUB_L * 0.4), subMaxY(sb.x), subMaxY(sb.x + SUB_L * 0.4));
+  const floor = Math.min(subMaxY(sb.x - SUB_L * 0.4, sb.y - SUB_UP), subMaxY(sb.x, sb.y - SUB_UP), subMaxY(sb.x + SUB_L * 0.4, sb.y - SUB_UP));
   if (sb.y >= floor) {
     // touching bottom: a thump of sand where she lands, and a trail of it when she drags along
     // (only where she lands: pressing on down while already on the floor, her vy climbs past 3 every step - Oct 30, found when
@@ -9595,7 +9600,7 @@ function stepTorps(dt) {
         if (!gone) { const ms = msHitAt(tp.x, tp.y, 2); if (ms) { minisubLost(ms); gone = true; } }   // (the research sub too, user Oct 27)
         if (gone) { torps.splice(i, 1); tp.dead = true; continue; }
       }
-      const bed = seabedY(tp.x) - 1;
+      const bed = Math.min(seabedY(tp.x), OWM ? solidBelow(tp.x, tp.y - 4) : Infinity) - 1;   // (or a floating SOLID under it - Nov 2)
       if (tp.y >= bed || inQuay(tp.x, tp.y)) {
         torps.splice(i, 1); tp.dead = true;
         if (tp.y >= bed) {
@@ -9635,7 +9640,7 @@ function stepTorps(dt) {
       tp.vy *= 0.3;
       continue;
     }
-    const end = hit || (tp.up && tp.y < sy + 1) || tp.y > seabedY(tp.x) - 2 || inQuay(tp.x, tp.y) || tp.x < 20 || tp.x > WORLD_W - 20;
+    const end = hit || (tp.up && tp.y < sy + 1) || tp.y > seabedY(tp.x) - 2 || (OWM && solidBlock(tp.x, tp.y)) || inQuay(tp.x, tp.y) || tp.x < 20 || tp.x > WORLD_W - 20;
     if (!end) continue;
     torps.splice(i, 1); tp.dead = true;
     if (hit && hit[0] === 'sub') { emit('hit', { kind: 'sub', o: hit[1], sec: hit[2], x: tp.x, y: tp.y }); continue; }
@@ -39591,7 +39596,7 @@ const islGroundAt = (x, R) => !seaAtX(x) ? landProfileG(x, R) : sandY(x);   // (
 // wherever its line rises out of the water and the ground in front is under the water - the sea between the harbours, a
 // lake, or a sea in a country. Where the ground in front stands out of the water, it hides the island: nothing to mark
 function islMarkCols(I_, any, R) {
-  land.itop = null; land.islRuns = []; land.isolid = null; land.idry = null; land.stop = null; land.sunder = null;
+  land.itop = null; land.islRuns = []; land.isolid = null; land.idry = null; land.stop = null; land.sunder = null; land.sspan = null; land.sfloor = null; land.fdent = null;
   shpBuild();                                                    // (every loop's spans in each column - 50-land-shapes)
   const L = islandsUsed(); if (!L.length) return any;
   const T = land.itop = new Float32Array(land.cols), SO = land.isolid = new Uint8Array(land.cols), DR = land.idry = new Uint8Array(land.cols);   // (isolid: a SOLID shape's columns - coastAhead; idry: a segment over dry land - isleCol)
@@ -39624,7 +39629,41 @@ function islMarkCols(I_, any, R) {
     }
   });
   for (let c = 0; c < land.cols; c++) if (I_[c] === 2 && I_[c - 1] !== 2) { let e = c; while (I_[e + 1] === 2) e++; land.islRuns.push([c * LT_CELL, (e + 1) * LT_CELL]); }
+  holeDentsBuild();
+  solSpansBuild(L);
   return any;
+}
+// (stage 3, Nov 2) each HOLE crossing the sea floor's surface: how far the floor drops there (to the hole's bottom) - bedDrop
+function holeDentsBuild() {
+  land.fdent = null; if (!SHP.holes.length) return;
+  const D = new Float32Array(land.cols); let any = false;
+  for (const n of SHP.holes) {
+    const S = SHP.cols[n];
+    for (let c = Math.max(0, S.c0); c <= Math.min(land.cols - 1, S.c1); c++) {
+      const x = c * LT_CELL; if (!seaAtX(x)) continue;
+      const v = S.iv[c - S.c0], s0 = sandY(x); if (!v) continue;
+      for (let i = 0; i + 1 < v.length; i += 2) if (v[i] <= s0 && v[i + 1] > s0) { D[c] = Math.max(D[c], v[i + 1] - s0); any = true; }
+    }
+  }
+  if (any) land.fdent = D;
+}
+// (stage 3, Nov 2) each column's solids as one list (every SOLID's spans joined, the HOLEs cut out - land.sspan), and what of them
+// rests on the sea floor there (land.sfloor: the top of the stack standing on the sand - seabedY; Infinity: none). A solid with a
+// gap under it is not the floor: what's under it passes (solidBlock / solidBelow / solidAbove, 50-land-shapes)
+function solSpansBuild(L) {
+  land.sspan = null; land.sfloor = null;
+  if (!L.some((I, n) => SHP.cols[n] && SHP.cols[n].k === 'S')) return;
+  const SP = land.sspan = new Array(land.cols).fill(null), SF = land.sfloor = new Float32Array(land.cols).fill(Infinity);
+  const acc = new Map();
+  L.forEach((I, n) => { const S = SHP.cols[n]; if (!S || S.k !== 'S') return; for (let c = S.c0; c <= S.c1; c++) { const v = S.iv[c - S.c0]; if (!v || v.length < 2) continue; const a = acc.get(c); if (a) a.push(...v); else acc.set(c, Array.from(v)); } });
+  for (const [c, A] of acc) {
+    let H = []; for (const n of SHP.holes) { const v = shpIv(n, c); if (v) H.push(...v); }
+    const v = ivCut(ivMerge(A), ivMerge(H)); if (!v.length) continue;
+    SP[c] = Float32Array.from(v);
+    let f = seaAtX(c * LT_CELL) ? sandY(c * LT_CELL) : Infinity;   // (at sea: the sand under it; in a country the land's own grid is the floor)
+    for (let i = v.length - 2; i >= 0; i -= 2) { if (v[i + 1] >= f - 2) f = Math.min(f, v[i]); else break; }
+    if (f < Infinity && f < (seaAtX(c * LT_CELL) ? sandY(c * LT_CELL) : Infinity) - 0.01) SF[c] = Math.max(f, WATER_Y + 2);
+  }
 }
 // the solids' top over column c (Infinity: none) and whether a solid fills (c, y) - the land's fill (50-land-terrain)
 const solTopC = c => land.stop && c >= 0 && c < land.cols ? land.stop[c] : Infinity;
@@ -39670,7 +39709,7 @@ function islRootsBuild(R = land.R) {
         // (its depth from the top of its own span: a solid's skin, then black - "Solid for me means the surfaces that have 'black'")
         let st = t; for (let i = 0; i + 1 < v.length; i += 2) if (y >= v[i] && y < v[i + 1]) { st = v[i]; break; }
         const dd = y - st, n2 = hash(c * 1.37 + (r0 + r) * 7.91);
-        const ko = solid ? 1 - smoothstep(0, 180, dd) : 1 - 0.8 * smoothstep(0, 700, dd);
+        const ko = 1 - 0.8 * smoothstep(0, 700, dd);   // (user 14:09: a SOLID keeps its look - the same rock as the island it was, only in front)
         if (sk === 'T' && tropTile()) { const col = tropTileLo(c, r0 + r - islRowY0()), k = ko, o = (r * W + q) * 4; d[o] = col[0] * k; d[o + 1] = col[1] * k; d[o + 2] = col[2] * k; d[o + 3] = 255; mk = mk || new Uint8ClampedArray(W * H * 4); mk[o] = mk[o + 1] = mk[o + 2] = 255 * k; mk[o + 3] = 255; continue; }   // (TROPICAL: the rock - 50-land-trop; mk: its cells' shade, for its own pixels close up - islRootPiece)
         const pal = sk === 'S' ? PR : sk === 'T' ? (hash(Math.floor(c / 3) * 3.1 + Math.floor((r0 + r) / 3) * 1.7) < 0.55 ? PS : PR) : dd < 10 && !own ? PS : PD;   // (TROPICAL: sand and rock - user Nov 1)
         const col = pal[Math.floor(n2 * Math.min(pal.length, 3))], k = ko;
@@ -39679,7 +39718,7 @@ function islRootsBuild(R = land.R) {
     }
     g.putImageData(id, 0, 0);
     const RT = { x0: c0 * LT_CELL, y0: r0 * LT_CELL, cv, my: Math.min(yB, WATER_Y + 400), c0, r0, W, H, mk, pc: {}, solid };
-    if (mk && !solid) RT.edges = islRootEdges(mk, W, H, c0, r0, I);
+    if (mk) RT.edges = islRootEdges(mk, W, H, c0, r0, I);
     (solid ? solRoots : islRoots).push(RT);
   });
 }
@@ -39694,6 +39733,7 @@ function drawSolidRoots(x0, x1) {
     const w = R.cv.width * LT_CELL; if (R.x0 + w < x0 || R.x0 > x1) continue;
     const X0 = Math.round(PX(R.x0)), X1 = Math.round(PX(R.x0 + w)), Y0 = Math.round(PY(R.y0)), Y1 = Math.round(PY(R.y0 + R.cv.height * LT_CELL));
     C.drawImage(R.cv, X0, Y0, X1 - X0, Y1 - Y0);
+    drawIslRootDetail(R, x0, x1, cv => cv);                 // (its own pixels close up and its outcrops, as an island's - untinted: in front of the water)
   }
   C.imageSmoothingEnabled = ga;
 }
@@ -39983,7 +40023,7 @@ function islSetKind(k) {
   const s = TERRAIN_ED.sel, L = s && s.Is ? s.Is : s && s.I != null ? [s.I] : [];
   if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Press a shape\'s line first.'; return; }
   for (const n of L) if (ISLANDS[n]) { ISLANDS[n].k = k; delete ISLANDS[n].solid; }
-  islChanged(); if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = SHP_NAME[k] + ' (REFRESH to build).';
+  islChanged(); terrainSyncSkin(); if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = SHP_NAME[k] + ' (REFRESH to build).';
 }
 const islSetSolid = on => islSetKind(on ? 'S' : 'I');
 function islDelete() {
@@ -39993,10 +40033,16 @@ function islDelete() {
   ISLANDS.splice(s.I, 1); TERRAIN_ED.sel = null; islChanged(); terrainSyncSkin();
 }
 // the handle and the loop's line nearest the pointer (Nov 2: any way round - 50-land-shapes)
+// (user 14:15: "the same way we can drag a cave part ... just like cave parts, we should be able to scale them ... the same global system
+// for all these parts") each shape's cross in its middle drags it whole, its square scales it about its middle - the caves' rooms' own
+// handles (caves/40-editor.js: roomC, roomS)
+const shpMid = I => { let x = 0, y = 0; for (const p of I.p) { x += p[0]; y += WATER_Y + p[1]; } return [x / I.p.length, y / I.p.length]; };
+function shpScaleAt(I) { const [cx, cy] = shpMid(I); let b = I.p[0], bv = -1e9; for (const p of I.p) { const v = (p[0] - cx) - (WATER_Y + p[1] - cy); if (v > bv) { bv = v; b = p; } } const k = 20 / Math.max(0.05, S * cam.view[0].z) * 0.5; return [b[0] + Math.max(20, k), WATER_Y + b[1] - Math.max(20, k)]; }
 function islPick(e) {
   const [x, y] = screenToWorld(e.clientX, e.clientY), i = ONEVIEW() || e.clientX * dpr / PIXW < Math.floor(bw / 2) ? 0 : 1;
   const r = (e.pointerType === 'touch' ? 22 : 11) * dpr / PIXW / (S * cam.view[i].z);
   let best = null, bd = r * r;
+  ISLANDS.forEach((I, n) => { for (const [kind, q] of [['C', shpMid(I)], ['Sc', shpScaleAt(I)]]) { const d = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (d <= bd * 1.6) { bd = d / 1.6; best = { n, k: -1, kind }; } } });
   ISLANDS.forEach((I, n) => I.p.forEach((p, k) => { const dx = p[0] - x, dy = WATER_Y + p[1] - y, d = dx * dx + dy * dy; if (d <= bd) { bd = d; best = { n, k }; } }));
   const ed = best ? null : shpNearEdge(x, y, r * 1.6);
   return { x, y, r, h: best, line: ed ? ed.n : null, edge: ed };
@@ -40046,6 +40092,19 @@ window.addEventListener('pointerdown', e => {
     } else ISL_ED.lastDown = { t: now, cx: e.clientX, cy: e.clientY };
     return;
   }
+  if (q.h.kind === 'C' && e.button !== 2) {                   // (the cross: the whole shape, and what stands on it and its group - grpDragStart)
+    TERRAIN_ED.sel = { Is: [q.h.n] }; terrainSyncSkin();
+    ISL_ED.drag = { n: q.h.n, k: -1, all: true, kind: 'C' };
+    ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, r: q.r, G: grpDragStart([grpM.i(ISLANDS[q.h.n])]) };
+    return;
+  }
+  if (q.h.kind === 'Sc' && e.button !== 2) {                  // (the square: every point about the middle, as far as the pointer is from it)
+    const I = ISLANDS[q.h.n]; TERRAIN_ED.sel = { Is: [q.h.n] }; terrainSyncSkin();
+    ISL_ED.drag = { n: q.h.n, k: -1, kind: 'Sc' };
+    ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, sc: { mid: shpMid(I), p0: I.p.map(p => p.slice()) } };
+    return;
+  }
+  if (q.h.kind) return;
   if (e.button === 2) { islRemovePt(q.h.n, q.h.k); return; }
   ISL_ED.drag = q.h; ISL_ED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, x: q.x, y: q.y, st: dragGroup({ I: q.h.n }, q.h.k).map(k => [k, ISLANDS[q.h.n].p[k][0], WATER_Y + ISLANDS[q.h.n].p[k][1]]) };   // (the picked pieces' handles with it - dragGroup, 50-land-unified)
   clearTimeout(ISL_ED.hold);
@@ -40063,6 +40122,7 @@ window.addEventListener('pointermove', e => {
   if (!q.moved) return;
   const [x, y] = screenToWorld(e.clientX, e.clientY);
   if (q.G) { grpDragMove(q.G, x - q.x, y - q.y, q.r); return; }
+  if (q.sc) { const I = ISLANDS[ISL_ED.drag.n]; if (!I) return; const [cx, cy] = q.sc.mid, f = clamp(Math.hypot(x - cx, y - cy) / Math.max(1, Math.hypot(q.x - cx, q.y - cy)), 0.15, 6); q.sc.p0.forEach((p, k) => { I.p[k][0] = Math.round(cx + (p[0] - cx) * f); I.p[k][1] = Math.round(clamp(cy + (WATER_Y + p[1] - cy) * f - WATER_Y, ISL_MIN_D, ISL_MAX_D)); }); return; }
   islDragBy(ISL_ED.drag.n, q.st, x - q.x, y - q.y);
 }, { capture: true, passive: true });
 // shape n's handles (st: [k, x, y] each, as pressed) moved by (dx, dy) - anywhere: a loop's points go any way round (Nov 2)
@@ -40079,7 +40139,7 @@ function islUp(e) {
   const q = ISL_ED.ptr; if (!q || q.id !== e.pointerId) return;
   e.stopImmediatePropagation(); clearTimeout(ISL_ED.hold);
   const was = ISL_ED.drag; ISL_ED.drag = null; ISL_ED.ptr = null;
-  if (was && q.moved) { if (q.G) grpDragEnd(q.G); else islChanged(); }   // (whole islands: and what moved with them)
+  if (was && q.moved) { if (q.G) grpDragEnd(q.G); else islChanged(); }   // (whole islands: and what moved with them; a scale: kept, built on REFRESH)
 }
 window.addEventListener('pointerup', islUp, { capture: true });
 window.addEventListener('pointercancel', islUp, { capture: true });
@@ -40102,7 +40162,13 @@ function islEdDraw() {
       C.fillStyle = sel ? '#ffffff' : TERRAIN_SKIN_COL[sk] || SHP_ED_COL[k];
       edSeg(PX(Q.X[i]), PY(Q.Y[i]), PX(Q.X[j]), PY(Q.Y[j]), tt, k === 'H' && (i >> 2) % 2 === 1);
     }
-    const hs = Math.max(5, Math.round(4.5 * dpr / PIXW));
+    const hs = Math.max(5, Math.round(4.5 * dpr / PIXW)), hd = ISL_ED.drag || ISL_ED.hover;
+    { const [mx, my] = shpMid(I), X = PX(mx), Y = PY(my), a = Math.round(hs * 1.6), hot = hd && hd.n === n && hd.kind === 'C';   // (the cross: drags it whole)
+      C.fillStyle = '#04070f'; C.fillRect(X - a - 1, Y - t - 1, 2 * a + 2, 2 * t + 2); C.fillRect(X - t - 1, Y - a - 1, 2 * t + 2, 2 * a + 2);
+      C.fillStyle = hot ? '#ffb347' : '#ffffff'; C.fillRect(X - a, Y - t, 2 * a, 2 * t); C.fillRect(X - t, Y - a, 2 * t, 2 * a); }
+    { const [sx, sy] = shpScaleAt(I), X = Math.round(PX(sx)), Y = Math.round(PY(sy)), r2 = Math.round(hs * 1.15), hot = hd && hd.n === n && hd.kind === 'Sc', col = hot ? '#ffffff' : '#ffb347';   // (the square: scales it)
+      C.fillStyle = '#04070f'; C.fillRect(X - r2 - 2, Y - r2 - 2, 2 * r2 + 4, 2 * r2 + 4); C.fillStyle = col; C.fillRect(X - r2, Y - r2, 2 * r2, 2 * r2); C.fillStyle = '#04070f'; C.fillRect(X - r2 + 2, Y - r2 + 2, 2 * r2 - 4, 2 * r2 - 4);
+      C.fillStyle = col; edSeg(X - r2 * 0.5, Y + r2 * 0.5, X + r2 * 0.5, Y - r2 * 0.5, Math.max(1, t), false); }
     P.forEach((p, k2) => {
       const X = PX(p[0]), Y = PY(WATER_Y + p[1]); if (X < -hs || X > VWP + hs) return;
       const h = ISL_ED.drag || ISL_ED.hover, hot = h && h.n === n && h.k === k2;
@@ -41482,6 +41548,7 @@ function lakeIsSea(L) { if (L._sea !== undefined && L._seaOf === land.sea) retur
    behind the main land") - drawLakeRoots, before the ground (renderLandObjects0) */
 const LAKE_IS_SEA = true;                                     // (every country water the sea's - false: the old lake water)
 function drawLakeRoots(x0, x1) {
+  if (!SIM_ONLY) waterPageSync();                                  // (the water as the simulation worker's snapshot has it - 50-land-water)
   const step = Math.max(1, 2 / SV), dz = (SEABED_Y + 150 - WATER_Y) / (SEABED_DEEP + 150 - WATER_Y);
   const ov = 0.08 * E.storm, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12);
   for (const L of land.lakes || []) {
@@ -43802,9 +43869,9 @@ function stepMinisub(s, dt) {
   s.vy += clamp(stick * VTUNE.minisub.climb - s.vy, -60 * dt * VTUNE.minisub.climb / 40, 60 * dt * VTUNE.minisub.climb / 40);
   const xp = s.x; s.x = seaIn(s.x + s.vx * dt, 100, xp); s.y += s.vy * dt;
   msAimStep(s, dt);
-  if (s.vx && seabedY(s.x + Math.sign(s.vx) * 14) - 10 < s.y - 6) { s.x = xp; s.vx = 0; }   // (rising ground ahead: it stops against it)
+  if (s.vx && (seabedY(s.x + Math.sign(s.vx) * 14) - 10 < s.y - 6 || (OWM && (solidBlock(s.x + Math.sign(s.vx) * 14, s.y) || solidBlock(s.x + Math.sign(s.vx) * 14, s.y - 8) || solidBlock(s.x + Math.sign(s.vx) * 14, s.y + 8))))) { s.x = xp; s.vx = 0; }   // (rising ground ahead - or a SOLID shape's side, Nov 2: it stops against it)
   // (nobody's, with no ship to go back to: it floats on the surface, its top out of the water - user Oct 27)
-  const top = surfaceY(s.x) + (!mine && !s.ai && !rsAfloat(c) ? -1 : 6), bot = seabedY(s.x) - 10;
+  const top = Math.max(surfaceY(s.x) + (!mine && !s.ai && !rsAfloat(c) ? -1 : 6), OWM ? solidAbove(s.x, s.y - 8) + 9 : -Infinity), bot = Math.min(seabedY(s.x), OWM ? solidBelow(s.x, s.y - 8) : Infinity) - 10;   // (a floating SOLID over or under it: its ceiling or floor - Nov 2)
   if (s.splashed === false) { if (s.y > surfaceY(s.x)) { s.splashed = true; msSplash(s); } }    // (dropping in off the hook)
   else if (s.y < top) { s.y = top; s.vy = Math.max(0, s.vy); }
   // (the floor stops it - but not under a cave's mouth for the one you drive: going down into it, the caves take over)
@@ -44236,7 +44303,8 @@ const awR = sysRng('armyWrecks'), awRnd = (a, b) => a + (b - a) * awR();
 const crshR = sysRng('crashes'), crshRnd = (a, b) => a + (b - a) * crshR();
 const padR = sysRng('padRest'), padRnd = (a, b) => a + (b - a) * padR(), padPerSec = (rate, dt) => Math.floor(rate * dt + padR());
 function landChanged(x0, x1) {
-  if (land.lakes && land.lakes.some(L => x1 > L[0] - 120 && x0 < L[1] + 120)) land.lakeDirty = true;   // (by a lake: its water looked at again)
+  // (by a lake or the sea: the water there woken - it finds its level over the ground as it is now, 50-land-water - Nov 2)
+  if ((land.lakes && land.lakes.some(L => x1 > L[0] - 120 && x0 < L[1] + 120)) || !onLand(x0 - 120) || !onLand(x1 + 120) || !onLand((x0 + x1) / 2)) { const W = land.waterW; land.waterW = W ? [Math.min(W[0], x0), Math.max(W[1], x1)] : [x0, x1]; }
   const c = landWake.c, A = c.x0, B = c.x1;
   for (let i = 0; i < landWake.n; i++) if (x1 >= A[i] - 8 && x0 <= B[i] + 8) { A[i] = Math.min(A[i], x0); B[i] = Math.max(B[i], x1); c.t[i] = 1.5; return; }
   landWakeRow(x0, x1, 1.5);
@@ -44280,7 +44348,8 @@ function restLanded(x, y, v, big) { if (v < 60) return; kickLandDust(x, y, Math.
 function stepLandRest(dt) {
   if (!OWM || !land.cell) return;
   { const T = landWake.c.t; for (let i = landWake.n - 1; i >= 0; i--) if ((T[i] -= dt) <= 0) landWake.drop(i); landWake.sweep(); }
-  if (land.lakeDirty && !((land.lakeT = (land.lakeT || 0) - dt) > 0)) { land.lakeDirty = false; land.lakeT = 0.3; lakeRebuild(); }
+  if (land.waterW && !((land.lakeT = (land.lakeT || 0) - dt) > 0)) { const W = land.waterW; land.waterW = null; land.lakeT = 0.3; waterWake(W[0], W[1]); lakeDeco = null; }
+  stepFlood(dt);                                                 // (the woken water flowing - 50-land-water)
   stepLooseStones(dt);
   const woke = (o, half) => o._rv || landWoke(o.x, half);
   // the army's wrecks: on land they drop into a hole dug under them; on a ship's deck they ride her; over water they
@@ -45189,6 +45258,34 @@ function shpNearEdge(x, y, r, only) {
   });
   return best;
 }
+
+// span lists [top, bottom, ...]: merged (sorted, overlaps joined), and one with another's spans cut out
+function ivMerge(A) {
+  const P = []; for (let i = 0; i + 1 < A.length; i += 2) if (A[i + 1] > A[i]) P.push([A[i], A[i + 1]]);
+  P.sort((a, b) => a[0] - b[0]); const o = [];
+  for (const [a, b] of P) { const n = o.length; if (n && a <= o[n - 1] + 0.01) o[n - 1] = Math.max(o[n - 1], b); else o.push(a, b); }
+  return o;
+}
+function ivCut(A, H) {
+  let cur = A;
+  for (let j = 0; j + 1 < H.length; j += 2) {
+    const h0 = H[j], h1 = H[j + 1], o = [];
+    for (let i = 0; i + 1 < cur.length; i += 2) { const a = cur[i], b = cur[i + 1]; if (b <= h0 || a >= h1) { o.push(a, b); continue; } if (a < h0) o.push(a, h0); if (b > h1) o.push(h1, b); }
+    cur = o;
+  }
+  return cur;
+}
+/* (stage 3, Nov 2: "I could, in theory, make a solid shape and then raise it, allowing to have a tunnel between the seabed and the
+   solid shape") the solids in each column as one list of spans - every SOLID shape's joined, every HOLE's cut out (land.sspan, made
+   with the land: islMarkCols). Under the water they are solid where they are, nothing more: what rests on the floor is the floor
+   (land.sfloor - seabedY), what floats over it is a block a sub, a torpedo or a fish meets from any side and passes under */
+const solSpans = c => land.sspan && c >= 0 && c < land.sspan.length ? land.sspan[c] : null;
+// is (x, y) inside a solid
+function solidBlock(x, y) { const v = solSpans(Math.floor(x / LT_CELL)); if (!v) return false; for (let i = 0; i + 1 < v.length; i += 2) { if (y < v[i]) return false; if (y < v[i + 1]) return true; } return false; }
+// the first solid top at or under y at x (Infinity: none - the floor, seabedY, is the caller's)
+function solidBelow(x, y) { const v = solSpans(Math.floor(x / LT_CELL)); if (!v) return Infinity; for (let i = 0; i + 1 < v.length; i += 2) { if (v[i + 1] <= y) continue; return Math.max(v[i], y); } return Infinity; }
+// the bottom of the solid over y at x (-Infinity: none) - a ceiling
+function solidAbove(x, y) { const v = solSpans(Math.floor(x / LT_CELL)); if (!v) return -Infinity; let b = -Infinity; for (let i = 0; i + 1 < v.length; i += 2) { if (v[i] > y) break; if (v[i + 1] <= y) b = v[i + 1]; } return b; }
 
 /* ---- space (OPEN WORLD, user Oct 25 late) ----
    "No clouds all the way to space: a clear passage between atmospheres." Over the weather the sky goes on up through
@@ -46366,7 +46463,7 @@ function ltCell(c, r) {
 // the islands: every grid column whose ocean floor stands out of the water, past the harbours' shelves (ISLE, read by
 // onLand - 05-game-state); none: null, the sea as it always was
 function isleBuild(R = land.R) {
-  ISLE = null; land.isles = []; land.islRuns = []; land.itop = null;
+  ISLE = null; land.isles = []; land.islRuns = []; land.itop = null; land.fdent = null;   // (the holes' dents in the floor: made again below - holeDentsBuild)
   if (!OWM) return;
   let any = false; const I = new Uint8Array(land.cols);
   if (floorTab) for (let c = 0; c < land.cols; c++) { const x = c * LT_CELL; if ((bedInside(x, BED_SHELF) || rampAt(x) > 0 || dockPadAt(x)) && sandY(x) < WATER_Y - 1) { I[c] = 1; any = true; } }   // (and a beach where a coast has no harbour)
@@ -46430,6 +46527,7 @@ function buildLand() {
   const R = [R0() * 6, R0() * 6, R0() * 6, R0() * 6];
   land.cols = Math.ceil(WORLD_W / LT_CELL) + 1;
   land.surf = new Float32Array(land.cols);
+  waterReset(); land.waterW = null;                         // (a new ground: no water woken on it yet - 50-land-water)
   land.sand.length = 0; land.outcrops = [];
   const W = WORLD_W;
   // the rock under it all: a ragged floor 50-90 units under the top, never dug through
@@ -48905,7 +49003,7 @@ function landShapePrep() {
 }
 // the skin marked on the piece of line over x (the TERRAIN tab: 'F', 'D', 'S'), or null - AUTO
 function landSkinAt(x) {
-  if (!inCountry(x)) return !onLand(x) ? null : isleCol(x) ? islSkinAt(x) : floorSkinAt(x);   // (out at sea: the island line's piece, or the ocean floor's)
+  if (!inCountry(x)) { if (!onLand(x)) return null; const c = ltCol(x); if (isleCol(x) || (land.isolid && land.isolid[c] && land.stop && land.stop[c] <= sandY(x))) return islSkinAt(x); return floorSkinAt(x); }   // (out at sea: the island line's piece - a SOLID's too, user 14:09: it keeps its look - or the ocean floor's)
   return groundSkinAt(x);
 }
 // how far the ground at x is moved from today's (0: today's land)
@@ -49616,7 +49714,7 @@ function terrainMark(sk) {
   const s = TERRAIN_ED.sel;
   if (!s || s.Is) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Pick a piece of line first.'; return; }
   const P = selPts(s);
-  for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) { ptFill(P[k])[2] = sk || null; ptTrim(P[k]); }   // (AUTO: its HILLS kept)
+  for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) { ptFill(P[k])[2] = sk || null; ptTrim(P[k]); }   // (AUTO: its HILLS kept)
   if (s.G) groundChanged(P[selLo(s)][0], P[Math.min(selHi(s) + 1, P.length - 1)][0]); else if (s.I != null) islChanged(); else if (s.F) floorChanged(); else { landShapePrep(); landEdChanged(); }
   terrainSyncSkin();
 }
@@ -49626,7 +49724,7 @@ function terrainMark(sk) {
 function terrainSetHills(v) {
   const s = TERRAIN_ED.sel; if (!s || s.Is) { terrainSyncSkin(); return; }
   const P = selPts(s);
-  for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) {
+  for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) {
     const p = ptFill(P[k]); p[3] = v === 1 ? 1 : +v.toFixed(2); ptTrim(p);
   }
   if (s.G) groundChanged(P[selLo(s)][0], P[Math.min(selHi(s) + 1, P.length - 1)][0]); else if (s.I != null) islChanged(); else if (s.F) floorChanged(); else { landShapePrep(); landEdChanged(); landPreview(landSpanAt(s.R ? WORLD_W : 0)); }   // (the land's line follows the slider at once - user Oct 29)
@@ -49658,7 +49756,7 @@ function terrainShapeRows(cat) {
 function terrainSetShape(i, v) {
   const s = TERRAIN_ED.sel; if (!s || !(s.G || s.I != null)) { terrainSyncSkin(); return; }   // (the ground's line or a segment's)
   const P = selPts(s);
-  for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) { ptFill(P[k])[i] = +v.toFixed(2); ptTrim(P[k]); }
+  for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) { ptFill(P[k])[i] = +v.toFixed(2); ptTrim(P[k]); }
   if (s.G) groundChanged(P[selLo(s)][0], P[Math.min(selHi(s) + 1, P.length - 1)][0]); else islChanged();
   terrainSyncSkin();
 }
@@ -49666,22 +49764,24 @@ function terrainSyncSkin() {
   const s = TERRAIN_ED.sel, P = s && selPts(s);
   if (TERRAIN_ED.growBtns) terrainSyncGrow();
   if (TERRAIN_ED.splitBtns) terrainSyncSplit();
-  let sk; if (P) { const set = new Set(); for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) set.add(P[k][2] || null); sk = set.size === 1 ? [...set][0] : 'mixed'; }
+  let sk; if (P) { const set = new Set(); for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(P[k][2] || null); sk = set.size === 1 ? [...set][0] : 'mixed'; }
   for (const [b, v] of TERRAIN_ED.skinBtns || []) b.classList.toggle('on', sk !== undefined && sk === v);
+  { const L = s && s.Is ? s.Is : s && s.I != null ? [s.I] : [], ks = new Set(L.filter(n => ISLANDS[n]).map(n => shpK(ISLANDS[n])));   // (the picked shapes' kind)
+    for (const [b, k] of TERRAIN_ED.kindBtns || []) b.classList.toggle('on', ks.size === 1 && ks.has(k)); }
   if (TERRAIN_ED.hills) {                                         // (the HILLS slider: the picked pieces' amount, or blank when they differ)
     const H = TERRAIN_ED.hills, ok = !!P, set = new Set();
-    if (ok) for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) set.add(Math.round((P[k].length > 3 ? P[k][3] : 1) * 100));
+    if (ok) for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(Math.round((P[k].length > 3 ? P[k][3] : 1) * 100));
     H.inp.disabled = !ok; if (set.size === 1) H.inp.value = [...set][0];
     H.out.textContent = !ok ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED';
   }
   for (const R of TERRAIN_ED.shapes || []) {                     // (SPIKY, ROUND: the picked pieces' amount, or blank when they differ)
     const ok = !!(s && P && (s.G || s.I != null)), set = new Set();
-    if (ok) for (let k = selLo(s); k <= selHi(s) && k < P.length - 1; k++) set.add(Math.round((R.i === 4 ? ptSpiky(P[k]) : ptRound(P[k])) * 100));
+    if (ok) for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(Math.round((R.i === 4 ? ptSpiky(P[k]) : ptRound(P[k])) * 100));
     R.inp.disabled = !ok; if (set.size === 1) R.inp.value = [...set][0];
     R.out.textContent = !ok ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED';
   }
-  const n = s ? selHi(s) - selLo(s) + 1 : 0, what = (s && s.I != null ? 'Island ' + (s.I + 1) + ', ' : '') + (n > 1 ? 'the ' + n + ' white pieces: ' : 'the white piece: ');
-  if (TERRAIN_ED.skinNote && s && s.Is) { TERRAIN_ED.skinNote.textContent = s.Is.length + (s.Is.length > 1 ? ' islands' : ' island') + ' picked: drag to move.'; return; }
+  const n = s ? selHi(s) - selLo(s) + 1 : 0, what = (s && s.I != null && ISLANDS[s.I] ? SHP_NAME[shpK(ISLANDS[s.I])] + ' ' + (s.I + 1) + ', ' : '') + (n > 1 ? 'the ' + n + ' white pieces: ' : 'the white piece: ');
+  if (TERRAIN_ED.skinNote && s && s.Is) { TERRAIN_ED.skinNote.textContent = s.Is.length + (s.Is.length > 1 ? ' shapes' : ' shape') + ' picked: drag to move.'; return; }
   if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = !s ? 'Pick a piece of line.' : what + (sk === 'F' ? 'FOREST' : sk === 'D' ? 'DESERT' : sk === 'T' ? 'TROPICAL' : sk === 'S' ? 'SEA' : sk === 'mixed' ? 'MIXED' : 'AUTO') + '.';
 }
 // the REFRESH button: lit while the floor or the land has changes waiting
@@ -49845,11 +49945,15 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT', [
 // (the Story spec section 8: 'Replace "Create Island" with "Create Segment"' - a new segment comes picked whole, so FOREST /
 // DESERT / TROPICAL type all of it; today every created segment is an island - water passes through it)
 // (user Nov 2 13:00-13:20: every line closed - SOLID in front, ISLAND behind the water, HOLE cutting the terrain - 50-land-shapes)
+// (user 14:02: "the Island should be highlighted by default so we know. And when we change to Solid, it should change") the picked
+// shape's kind lit, as the skin buttons are (terrainSyncSkin)
+const kindBtn = (lab, k, desc) => { const f = () => islSetKind(k); f.init = b => (TERRAIN_ED.kindBtns || (TERRAIN_ED.kindBtns = [])).push([b, k]); return [lab, desc, f]; };
 NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN SHAPES', [
   ['CREATE TERRAIN', 'A new shape in the view (an island)', islAdd],
   ['CREATE HOLE', 'A hole: cuts the terrain it overlaps', islAddHole],
-  ['SOLID', 'Picked shape: black, in front, boats stop', () => islSetKind('S')],
-  ['ISLAND', 'Picked shape: behind the water', () => islSetKind('I')],
+  kindBtn('SOLID', 'S', 'Picked shape: black, in front, boats stop'),
+  kindBtn('ISLAND', 'I', 'Picked shape: behind the water'),
+  kindBtn('HOLE', 'H', 'Picked shape: cuts the terrain it overlaps'),
 ]);
 // (user Oct 28, 20:25: "docs don't have to be mandatory") a coast's dock taken away, or put back (the nearer coast without one)
 function terrainDelDock() {
@@ -51452,6 +51556,145 @@ function landGoHome(p, k) {
   if (k === 'tank') tanks[p] = null; else helis[p] = null;
   homeVeh(p, k);
 }
+
+/* ---- WATER FINDS ITS LEVEL (terrain shapes stage 4, user Nov 2 13:19: "So this means we could flood a section of the world? I think
+   we should be able to do this"; 13:20 "Yes, let's definitely do that"). The levels the editor sets (LAKE LEVELS, 50-land-lake) are
+   where the water starts. When the ground changes by water - a crater, a fallen deck, a broken rock (landChanged, 50-land-rest) - the
+   stretch round it wakes (waterWake): from then on the water there is worked column by column (the land's grid columns, LT_CELL)
+   and flows from where it stands higher to where it stands lower, over the ground between, at a rate that grows with how deep it
+   runs over the lip (a small crater trickles, a big breach floods); the ocean, past its shores, stands at its own line and never
+   runs dry. So a pocket below the ocean opened to it fills to the ocean's line, a lake above it opened to it empties down to the
+   breach, two pockets joined share their water till they're level, and nothing is lost or made. When it has come to rest the
+   stretch sleeps again, its water as it now stands.
+   One rule, the shallow water's: each column's surface (y, down +) and depth over its ground; between two columns a flow that the
+   difference of their surfaces speeds up, as deep as the water over the higher of their two grounds (WG), slowed a little each
+   step (WDAMP) so it settles; never more out of a column than it holds. Stepped only where awake (WATER.act), WSUB times a step.
+   The water as it stands where it was ever woken is a table ('water': a row a stretch - its first column, its surfaces, at rest or
+   not), saved and sent, so the page draws it and a save comes back flooded. The sea's surface code reads it (WBASE, surfaceY0:
+   each column's water level), the lakes (land.lakes, their levels), the wet mask (wetA) ---- */
+const WG = 600, WDAMP = 0.996, WSUB = 6, WREST = 0.02, WMARGIN = 160;
+const WATER = { rows: [], act: [], ver: 0, pageVer: -1, nextId: 1 };
+// a stretch's columns as they are now: ground (the land's top, dug), surface, the sea's columns standing at the ocean's line
+function waterRowNew(c0, c1) {
+  const n = c1 - c0 + 1, g = new Float32Array(n), s = new Float32Array(n), sea = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const c = c0 + i, x = c * LT_CELL + 1;
+    if (!onLand(x)) { sea[i] = 1; g[i] = sandY(x); s[i] = WATER_Y; continue; }   // (the ocean: its line, and always enough of it)
+    g[i] = landTop(x); const L = lakeOf(x); s[i] = L && g[i] > lakeLv(L) ? Math.min(g[i], waterSurfAt(c, lakeLv(L))) : g[i];
+  }
+  return { id: WATER.nextId++, c0, n, g, s, sea, f: new Float32Array(Math.max(0, n - 1)), rest: 0, v: 0 };
+}
+// the surface a column has now: a stretch's own where there is one, else the level given
+function waterSurfAt(c, lv) { for (const R of WATER.rows) if (c >= R.c0 && c < R.c0 + R.n) return R.s[c - R.c0]; return lv; }
+// the water round x0..x1 woken: the stretch from the lakes and shores near it out to where the ground stands higher than any water
+// in it could reach (a woken stretch beside it joins it)
+function waterWake(x0, x1) {
+  if (!OWM || !land.cell || NET.role === 'guest') return;
+  let c0 = Math.max(1, ltCol(x0 - WMARGIN)), c1 = Math.min(land.cols - 2, ltCol(x1 + WMARGIN));
+  for (const K of land.pockets || []) if (K.x1 > c0 * LT_CELL - WMARGIN && K.x0 < c1 * LT_CELL + WMARGIN) { c0 = Math.min(c0, ltCol(K.x0) - 2); c1 = Math.max(c1, ltCol(K.x1) + 2); }   // (the whole pocket it's in or by)
+  for (const L of land.lakes || []) if (L[1] > c0 * LT_CELL - WMARGIN && L[0] < c1 * LT_CELL + WMARGIN) { c0 = Math.min(c0, ltCol(L[0]) - 2); c1 = Math.max(c1, ltCol(L[1]) + 2); }
+  // (out past it while the ground is lower than the highest water in it: where it could run)
+  let top = Infinity; for (let c = c0; c <= c1; c++) { const x = c * LT_CELL + 1; top = Math.min(top, !onLand(x) ? WATER_Y : (lakeAt(x) ? lakeLevelAt(x) : Infinity)); }
+  if (top === Infinity) return;                                    // (no water near it: nothing to do)
+  const low = c => { const x = c * LT_CELL + 1; return !onLand(x) || landTop(x) > top - 2; };
+  const reach = Math.max(0, Math.floor((3800 - (c1 - c0)) / 2));   // (out each side at most as far as keeps the stretch under ~9.5 km: its lists go whole in a save or a snapshot)
+  let k = 0; while (c0 > 1 && low(c0 - 1) && onLand((c0 - 1) * LT_CELL + 1) && k++ < reach) c0--;
+  k = 0; while (c1 < land.cols - 2 && low(c1 + 1) && onLand((c1 + 1) * LT_CELL + 1) && k++ < reach) c1++;
+  c0 = Math.max(1, c0 - 1); c1 = Math.min(land.cols - 2, c1 + 1);   // (one column of the sea - or the bank - either side: its edge)
+  // (stretches it meets: one with it, their water as it stands)
+  for (let i = WATER.rows.length - 1; i >= 0; i--) { const R = WATER.rows[i]; if (R.c0 <= c1 + 1 && R.c0 + R.n - 1 >= c0 - 1) { c0 = Math.min(c0, R.c0); c1 = Math.max(c1, R.c0 + R.n - 1); } }
+  const R = waterRowNew(c0, c1);
+  WATER.rows = WATER.rows.filter(Q => !(Q.c0 >= c0 && Q.c0 + Q.n - 1 <= c1));
+  WATER.rows.push(R); R.rest = 0; WATER.ver++;
+}
+// a stretch stepped: WSUB small steps of dt
+function waterStepRow(R, dt) {
+  const n = R.n, g = R.g, s = R.s, f = R.f, sea = R.sea, h = dt / WSUB, dx = LT_CELL;
+  // (the ground as it is now: a crater under the water deepens it)
+  for (let i = 0; i < n; i++) if (!sea[i]) { const gy = landTop((R.c0 + i) * LT_CELL + 1); if (gy !== g[i]) { const d = g[i] - s[i]; g[i] = gy; s[i] = Math.min(gy, gy - Math.max(0, d)); } }
+  let moved = 0;
+  for (let k = 0; k < WSUB; k++) {
+    for (let i = 0; i < n - 1; i++) {
+      const top = Math.min(s[i], s[i + 1]), bed = Math.min(g[i], g[i + 1]), deep = bed - top;   // (the water over the higher of their two grounds)
+      if (deep <= 0 && Math.abs(f[i]) < 1e-6) { f[i] = 0; continue; }
+      f[i] = (f[i] + h * WG * Math.max(0, deep) * (s[i + 1] - s[i]) / dx) * WDAMP;   // (+: from i to i + 1 - its surface higher, smaller y)
+    }
+    // (never more out of a column than it holds)
+    for (let i = 0; i < n; i++) {
+      if (sea[i]) continue;
+      const out = (i < n - 1 ? Math.max(0, f[i]) : 0) + (i > 0 ? Math.max(0, -f[i - 1]) : 0), have = (g[i] - s[i]) * dx;
+      if (out * h > have) { const k2 = have / (out * h + 1e-9); if (i < n - 1 && f[i] > 0) f[i] *= k2; if (i > 0 && f[i - 1] < 0) f[i - 1] *= k2; }
+    }
+    for (let i = 0; i < n; i++) {
+      if (sea[i]) { s[i] = WATER_Y; continue; }
+      const q = ((i > 0 ? f[i - 1] : 0) - (i < n - 1 ? f[i] : 0)) * h / dx;
+      if (q) { s[i] = Math.min(g[i], s[i] - q); moved = Math.max(moved, Math.abs(q)); }
+    }
+  }
+  return moved / h;
+}
+// each step (stepLandRest): the woken stretches flow; one at rest a second goes to sleep, as it stands; the lakes and the sea's
+// columns follow it
+function stepFlood(dt) {
+  if (!WATER.rows.length) return;
+  let ch = false;
+  for (const R of WATER.rows) {
+    if (R.rest >= 1) continue;
+    const m = waterStepRow(R, dt);
+    R.rest = m < WREST ? R.rest + dt : 0; R.v++; ch = true;
+    if (R.rest >= 1 && !R.everWet) { let w = false; for (let i = 0; i < R.n; i++) if (!R.sea[i] && R.g[i] - R.s[i] > 0.5) { w = true; break; } if (!w) R.gone = true; }   // (asleep with no water in it: nothing to keep)
+    else if (!R.everWet) for (let i = 0; i < R.n; i++) if (!R.sea[i] && R.g[i] - R.s[i] > 0.5) { R.everWet = 1; break; }
+  }
+  if (WATER.rows.some(R => R.gone)) WATER.rows = WATER.rows.filter(R => !R.gone);
+  if (ch) { WATER.ver++; if (!((WATER.applyT = (WATER.applyT || 0) - dt) > 0)) { WATER.applyT = 0.1; waterApply(); } }   // (into the lakes and columns ten times a second: never every step)
+}
+// the water as the stretches stand, into everything that reads it: each lake's span and level (the wet runs in a stretch), the
+// columns' water levels (WBASE: dry ones at their ground, so no water shows over a bank it has left), the wet mask
+function waterApply() {
+  if (!OWM || !land.lakes || !WATER.rows.length) return;
+  for (const R of WATER.rows) {
+    const x0 = R.c0 * LT_CELL, x1 = (R.c0 + R.n) * LT_CELL;
+    land.lakes = land.lakes.filter(L => L[1] <= x0 || L[0] >= x1);
+    for (let i = 0; i < R.n;) {
+      if (R.sea[i] || !(R.g[i] - R.s[i] > 0.5)) { i++; continue; }
+      let j = i, sum = 0; while (j < R.n && !R.sea[j] && R.g[j] - R.s[j] > 0.5) { sum += R.s[j]; j++; }
+      if ((j - i) * LT_CELL >= LAKE_MIN / 2) { const L = [(R.c0 + i) * LT_CELL, (R.c0 + j) * LT_CELL]; L.lv = sum / (j - i); L.wr = R; land.lakes.push(L); LAKE_DEV = Math.max(LAKE_DEV, Math.abs(L.lv - WATER_Y)); }
+      i = j;
+    }
+  }
+  land.lakes.sort((a, b) => a[0] - b[0]);
+  land.ver = (land.ver || 0) + 1;                                 // (each lake's wet span found again - lakeWet)
+  if (!wetA || !ambK || !calmA) return;
+  if (!WBASE) WBASE = new Float32Array(N).fill(WATER_Y);
+  let flip = false;
+  for (const R of WATER.rows) {
+    for (let i = Math.max(0, Math.floor(R.c0 * LT_CELL / DX)); i <= Math.min(N - 1, Math.ceil((R.c0 + R.n) * LT_CELL / DX)); i++) {
+      const x = i * DX, k = clamp(Math.floor(x / LT_CELL) - R.c0, 0, R.n - 1);
+      if (R.sea[k]) continue;
+      const wet = R.g[k] - R.s[k] > 0.5;
+      WBASE[i] = R.s[k];
+      if (wetA[i] !== (wet ? 1 : 0)) flip = true;
+      wetA[i] = wet ? 1 : 0; ambK[i] = wet ? 0.3 : 0; if (wet && calmA[i] !== 0.8) { calmA[i] = 0.8; flip = true; }
+    }
+  }
+  if (!flip) return;                                             // (the wet runs as they were: nothing walked over the whole world)
+  calmRuns = [];
+  for (let i = 0; i < N;) { if (calmA[i] < 0.999) { let j = i; while (j < N && calmA[j] < 0.999) j++; calmRuns.push([i, j]); i = j; } else i++; }
+  wetRuns = [];
+  for (let i = 0; i < N;) { if (wetA[i]) { let j = i; while (j < N && wetA[j]) j++; wetRuns.push([Math.max(0, i - 1), Math.min(N - 1, j)]); i = j; } else i++; }
+}
+// (the page, with the simulation worker stepping: the stretches came in a snapshot - into the lakes and the columns once each change)
+function waterPageSync() { let v = WATER.rows.length; for (const R of WATER.rows) v += (R.v || 0) * 7 + R.c0; if (WATER.pageVer === v) return; WATER.pageVer = v; for (const R of WATER.rows) waterRowFix(R); waterApply(); }
+// a stretch from a save or a snapshot: its lists as typed arrays again
+function waterRowFix(R) { for (const k of ['g', 's', 'f']) if (R[k] && !(R[k] instanceof Float32Array)) R[k] = Float32Array.from(R[k].v || R[k]); if (R.sea && !(R.sea instanceof Uint8Array)) R.sea = Uint8Array.from(R.sea.v || R.sea); }
+// a new world: nothing woken yet
+function waterReset() { WATER.rows = []; WATER.ver++; }
+defTable('water', () => WATER.rows, {
+  make: () => ({}),
+  save: () => WATER.rows.map(R => ({ id: R.id, c0: R.c0, n: R.n, g: Array.from(R.g), s: Array.from(R.s, v => Math.round(v * 10) / 10), sea: Array.from(R.sea), rest: R.rest })),
+  load: d => { WATER.rows = (Array.isArray(d) ? d : []).map(R => { const o = Object.assign({}, R, { f: new Float32Array(Math.max(0, R.n - 1)), v: 0 }); waterRowFix(o); return o; }); WATER.ver++; WATER.nextId = WATER.rows.reduce((m, R) => Math.max(m, R.id + 1), 1); waterApply(); },
+  after: () => { for (const R of WATER.rows) waterRowFix(R); WATER.ver++; waterApply(); },
+});
 
 /* ================================================================
    OPEN WORLD: ONE GROUND LINE (the dock chat, Oct 29 - the user: "I mean the SEA, FOREST, DESERT would be a single unified
@@ -58308,6 +58551,8 @@ async function start(data) {
   if (SW_IN_WORKER) { swHostReady(); return; }
   // (terrain shapes, Nov 2 - 50-land-shapes.js) what the shapes built: per shape its kind, width, columns with spans; a few
   // columns' values (the solids' top, the floor under the water, the ground's top, holes) - tools and the user's GPU check
+  Object.assign(window.__game, { terr: { solidBlock: (x, y) => solidBlock(x, y), solidBelow: (x, y) => solidBelow(x, y), solidAbove: (x, y) => solidAbove(x, y), seabedY: x => seabedY(x), sandY: x => sandY(x), landTop: x => landTop(x) } });
+  Object.assign(window.__game, { waterInfo: () => WATER.rows.map(R => { let w = 0, mn = Infinity, mx = -Infinity; for (let i = 0; i < R.n; i++) if (!R.sea[i] && R.g[i] - R.s[i] > 0.5) { w++; mn = Math.min(mn, R.s[i]); mx = Math.max(mx, R.s[i]); } return { c0: R.c0, n: R.n, wet: w, top: Math.round(mn), low: Math.round(mx), rest: +R.rest.toFixed(2) }; }) });
   Object.assign(window.__game, { lakesInfo: () => ({ lakes: (land.lakes || []).map(L => ({ a: L[0], b: L[1], lv: lakeLv(L), surf: surfaceY((L[0] + L[1]) / 2), at: lakeAt((L[0] + L[1]) / 2) })), pockets: (land.pockets || []).map(K => ({ x0: K.x0, x1: K.x1, spill: Math.round(K.spill), bot: Math.round(K.bot), lv: K.lv })), set: LAKE_SET, dev: LAKE_DEV }) });
   Object.assign(window.__game, { shapesInfo: (xs) => ({ base: SHP.base, shapes: ISLANDS.map((I, n) => ({ k: shpK(I), x0: Math.round(shpPoly(I).x0), x1: Math.round(shpPoly(I).x1), cols: SHP.cols[n] ? SHP.cols[n].iv.filter(v => v.length).length : 0 })), isles: land.isles, islRuns: land.islRuns, solRoots: solRoots.length, islRoots: islRoots.length, at: (xs || [12600, 15300, 15800, 16300]).map(x => ({ x, isle: ISLE === null ? null : ISLE[Math.floor(x / 2.5)], stop: land.stop ? land.stop[Math.floor(x / 2.5)] : null, sunder: land.sunder ? land.sunder[Math.floor(x / 2.5)] : null, top: landTop(x), sand: sandY(x), bed: seabedY(x), hole: shpHoleAt(Math.floor(x / 2.5), 400) })) }) });
   if (SW_WANT) swStart();
