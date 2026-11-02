@@ -4143,8 +4143,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 626;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 14:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 627;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 14:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54556,9 +54556,66 @@ function pfSync() {
   if (id.startsWith('s:')) { const p = pfGet(id.slice(2)); nm.value = p ? p.name : ''; info.textContent = p ? pfCopies(p) + ' IN THIS WORLD' : ''; if (p) pfStructBox(p, box, el, css); }
   else if (id.startsWith('v:')) { const sv = id.slice(2); nm.value = STR_VEHS[sv] ? STR_VEHS[sv].lab : ''; info.textContent = ''; pfVehBox(sv, box, el, css); }
 }
-// a structure prefab: its picture and what it is (the copies' own properties are in WORLD EDITOR > STRUCTURES)
+/* (user Nov 2 13:22: "Can the prefab viewer show us the sprite of how it looks like? ... a little window that shows us the sprite.
+   And if it has a gate, a button we can press to open close just to see how it looks") LOOK: the prefab's picture as the world
+   draws it - its picture, its flag's cloth, its gate over its door (an enclosed kind's: the painted gate rolled up into the lintel,
+   or a grey one where none is painted - drawStrGate's way, at its speeds), its front layer - at the picture's own pixels, blown up
+   (or down) to fit. Kinds drawn by code, not from a picture (runway, launch pad, gun tower, terminal, road, the harbour's parts,
+   the LARGE hangar): none. */
+const PF_LOOK = { open: 0, want: 0, raf: 0, draw: null };
+function pfLookPic(p) {
+  const K = STR_KINDS[p.k];
+  if (!K || !K.art || ['runway', 'launchPad', 'gunTower', 'terminal', 'road', 'hangarSea'].includes(p.k) || (p.k === 'hangarAir' && p.big) || (p.k === 'dock' && p.spr === 'pier')) return undefined;
+  return tropPic(p.k === 'dock' ? p.spr || K.art : p.art || K.art);   // (null: the sheet not loaded yet)
+}
+function pfLook(p, box, el) {
+  if (pfLookPic(p) === undefined) return;
+  const K = STR_KINDS[p.k], c = el('div', 'cat'), cv = el('canvas'), bar = el('div', 'row'), lab = el('label', '', 'GATE');
+  c.appendChild(el('h4', '', 'LOOK'));
+  cv.style.cssText = 'image-rendering:pixelated;image-rendering:crisp-edges;background:#0a0e18;border:1px solid #2c3850;border-radius:4px;justify-self:start;max-width:100%';
+  c.appendChild(cv);
+  const gb = el('button', '', 'OPEN'); gb.title = 'Open or close its gate';
+  bar.append(lab, gb); bar.hidden = true; bar.style.display = 'none'; c.appendChild(bar);
+  box.appendChild(c);
+  const draw = () => {
+    const P = pfLookPic(p); if (!P) { setTimeout(() => { if (cv.isConnected) draw(); }, 400); return; }
+    const S = Math.min(300 / P.width, 190 / P.height), k = S >= 2 ? Math.floor(S) : S;   // (as big as the box takes; whole pixels from 2x)
+    if (cv.width !== P.width || cv.height !== P.height) { cv.width = P.width; cv.height = P.height; }
+    cv.style.width = Math.round(P.width * k) + 'px'; cv.style.height = Math.round(P.height * k) + 'px';
+    const g = cv.getContext('2d'); g.imageSmoothingEnabled = false; g.clearRect(0, 0, cv.width, cv.height);
+    g.drawImage(P, 0, 0);
+    if (P._flag) g.drawImage(P._flag.c, P._flag.x, P._flag.y);  // (its cloth, still)
+    const gate = !!K.enclosed && !!(P._gate || P._door);
+    bar.hidden = !gate; bar.style.display = gate ? '' : 'none';
+    if (gate) {
+      const open = PF_LOOK.open;
+      if (P._gate) { const G = P._gate, D = P._door, rows = Math.round(G.height * (1 - open)); if (rows >= 1) g.drawImage(G, 0, G.height - rows, G.width, rows, D[0], D[1], G.width, rows); }
+      else {                                                   // (no painted gate: a grey one over its door, its bottom edge rising)
+        const D = P._door, h = Math.round((D[3] - D[1]) * (1 - open));
+        if (h > 0) { g.fillStyle = 'rgb(150,156,164)'; g.fillRect(D[0], D[1], D[2] - D[0], h); g.fillStyle = 'rgb(112,118,126)'; const q = Math.max(1, Math.round((D[2] - D[0]) / 40)); for (let y = D[1] + q * 2; y < D[1] + h; y += q * 3) g.fillRect(D[0], y, D[2] - D[0], q); }
+      }
+      gb.textContent = PF_LOOK.want ? 'CLOSE' : 'OPEN'; gb.classList.toggle('on', !!PF_LOOK.want);
+    }
+    if (K.front) { const F = tropPic(K.front); if (F) g.drawImage(F, 0, 0, P.width, P.height); }   // (its front layer, as in the world)
+  };
+  // OPEN / CLOSE: rolls the gate as the world does (up at 1 a second, down at 0.7)
+  gb.onclick = () => {
+    PF_LOOK.want = PF_LOOK.want ? 0 : 1; PF_LOOK.draw = draw; let t = performance.now();
+    cancelAnimationFrame(PF_LOOK.raf);
+    const step = now => {
+      const dt = Math.min(0.1, (now - t) / 1000); t = now;
+      PF_LOOK.open = clamp(PF_LOOK.open + (PF_LOOK.want ? 1 : -0.7) * dt, 0, 1);
+      if (cv.isConnected) PF_LOOK.draw();
+      if (cv.isConnected && PF_LOOK.open !== PF_LOOK.want) PF_LOOK.raf = requestAnimationFrame(step);
+    };
+    PF_LOOK.raf = requestAnimationFrame(step);
+  };
+  draw();
+}
+// a structure prefab: its picture and what it is (the copies' own properties are in WORLD EDITOR > OBJECTS)
 function pfStructBox(p, box, el, css) {
   const T = NSKY.editor.TUNE, K = STR_KINDS[p.k], ed = () => pfEdited(p);
+  pfLook(p, box, el);
   const c = el('div', 'cat'); c.appendChild(el('h4', '', 'WHAT IT IS'));
   const row = (lab, ...xs) => { const r = el('div', 'row'); r.append(el('label', '', lab), ...xs); return r; };
   const sel = (L, v, f) => { const q = el('select'); q.style.cssText = css; for (const [val, lab] of L) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = v; q.onchange = () => f(q.value); return q; };
