@@ -4116,7 +4116,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 602;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 11:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 02 12:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -51620,7 +51620,9 @@ const NETP = {
   BAG: 16,       // m from the mouth to the bag's end (the picture's proportions, twice)
   M: 8, K: 14,   // the mesh: points across (even) and along
   HOLD: 200,     // fish her hold takes (user 10:30; 10:53: 200)
-  DN: 2.6, UP: 2.2, STOW: 1.1,   // the winch: m/s paying out, m/s hauling (empty), s for the net to close (or open)
+  DN: 2.6, UP: 11, STOW: 1.1,   // (UP: user 11:04, 5x)
+  LIFT: 1.0,     // m/s: out of the water the net comes up as a crane lifts a load - slow, easing in at the top (user 11:04)
+    // the winch: m/s paying out, m/s hauling (empty), s for the net to close (or open)
   T0: 8000,      // N: a heavy net hauls slower, never under half speed (user 10:53: "extremely slow going up after having caught the fish")
   // masses (kg), weights in water (a share of g: + sinks, - floats) and drags (kg/m: F = D v^2)
   twM: 3.5, twW: 0.15, twD: 2.2,
@@ -51686,7 +51688,7 @@ function netDeck(j) {
   const lx = 0.05 * w * sq * j.dir, ly = -0.34 * h - 0.45 * UPM, a = j.a || 0, ca = Math.cos(a), sa = Math.sin(a);   // (the open deck between the mast and the wheelhouse)
   return [j.x + lx * ca - ly * sa, j.y + h * FISH_DRAFT + lx * sa + ly * ca];
 }
-const NET_SWING_S = 0.7;   // (s: the closed net swung between the block and the deck)
+const NET_SWING_S = 2.2;   // (s: the closed net swung between the block and the deck - slow and smooth, user 11:04)
 // the buttons: held DOWN pays the rope out, held UP hauls it in (let go: the winch holds)
 function netCmd(v, c) {
   if (!v || v.kind !== 'fish' || v.state !== 'run') return;
@@ -51738,7 +51740,11 @@ function fishNetStep(j, dt) {
   // the winch on the game's up / down (user Nov 2 09:54: "it should be the left controller and the up and down as we have in
   // everything else. and on the left of the UI too") - the orange UP / DOWN, the keys, a pad's left stick: held down pays it out,
   // held up hauls it in, let go the winch holds
-  if (j.driven != null) { const st = civStick(j.driven), c = st > 0.3 ? 1 : st < -0.3 ? -1 : 0; if (c && c !== N.cmd && (c < 0 ? N.s < 1 : N.L < NETP.ROPE * UPM - 0.01)) sound('anchorWinch', j.x, 1); N.cmd = c; }
+  if (j.driven != null) { const st = civStick(j.driven), c = st > 0.3 ? 1 : st < -0.3 ? -1 : 0; if (c && c !== N.cmd && (c < 0 ? N.s < 1 : N.L < NETP.ROPE * UPM - 0.01)) sound('anchorWinch', j.x, 1);
+    // (user 11:04: "it automatically deposits the fish in the boat, I dont have to keep pushing up") closed at the water line, it comes
+    // on up and onto the deck by itself (auto) - DOWN stops that
+    if (c > 0) N.auto = 0;
+    N.cmd = c || (N.auto ? -1 : 0); }
   if (j.state !== 'run') N.cmd = 0;
   if (j.state === 'run') fishBoatFx(j, dt);
   // (user 10:29: the gulls "would land on the boat when the boat is stopped") gl: 0 circling her .. 1 sitting on her
@@ -51752,7 +51758,7 @@ function fishNetStep(j, dt) {
     if (N.cmd > 0) N.ab = Math.max(0, N.ab - dt / NET_SWING_S); else if (N.cmd < 0 && N.ab < 1) N.ab = Math.min(1, N.ab + dt / NET_SWING_S);
     const [dx, dy] = netDeck(j), e = N.ab * N.ab * (3 - 2 * N.ab), up = Math.sin(Math.PI * N.ab) * 1.2 * UPM;   // (an arc over the rail)
     netFold(N, j, hx + (dx - hx) * e, hy + (dy - hy) * e - up, hx, hy);
-    if (N.ab >= 1) netLand(j);
+    if (N.ab >= 1) { netLand(j); N.auto = 0; }
     N.hx = hx; N.hy = hy; N.T = 0; N.d = 0; N.fx = j.x; N.lo = N.hi = j.x; j.ntv = 0; return;
   }
   if (N.hx == null) { N.hx = hx; N.hy = hy; }
@@ -51789,9 +51795,13 @@ function fishNetStep(j, dt) {
       else N.L = Math.min(Q.ROPE * UPM, N.L + Q.DN * UPM * h);
     } else if (N.cmd < 0) {
       const rate = Q.UP * (0.5 + 0.5 * Q.T0 / (Q.T0 + (N.T || 0)));                       // (a heavy net comes up slower)
-      if (N.s < 1 && P[4 * G.top + 1] < S.sf[G.top] + 0.6 * UPM) N.s = Math.min(1, N.s + h / Q.STOW * Math.min(1, rate / Q.UP * 1.5));
-      else if (N.L > 0) N.L = Math.max(0, N.L - rate * UPM * h);
-      else if (N.s < 1) N.s = Math.min(1, N.s + h / Q.STOW);             // (up at the block still open - a short rope: closes there)
+      if (N.s < 1 && P[4 * G.top + 1] < S.sf[G.top] + 0.6 * UPM) { N.s = Math.min(1, N.s + h / Q.STOW); if (N.s >= 1) N.auto = 1; }
+      else if (N.L > 0) {
+        // out of the water (its float above the line): a crane's slow lift, easing in over its last 3 m
+        const out = P[4 * G.top + 1] < S.sf[G.top], r = out ? Math.min(rate, Q.LIFT * (0.3 + 0.7 * clamp(N.L / (3 * UPM), 0, 1))) : rate;
+        N.L = Math.max(0, N.L - r * UPM * h);
+      }
+      else if (N.s < 1) { N.s = Math.min(1, N.s + h / Q.STOW); if (N.s >= 1) N.auto = 1; }   // (up at the block still open - a short rope: closes there)
       else { N.ab = 1e-6; N.hx = hx; N.hy = hy; return; }                // (closed, at the block: swung onto the deck from the next frame)
     }
     const f = 1 - 0.92 * N.s;                                            // (the mesh's cords, shortened while it's closed)
@@ -51805,7 +51815,7 @@ function fishNetStep(j, dt) {
       const q = 4 * n, x = P[q], y = P[q + 1];
       let vx = (x - P[q + 2]) / h, vy = (y - P[q + 3]) / h;
       if (y > S.sf[n]) { const c = 1 / (1 + S.k[n] * Math.hypot(vx, vy) * h + 0.05 * h); vx *= c; vy *= c; vy += S.g[n] * h; }
-      else { vx *= 1 - 0.02 * h; vy += g * h; }
+      else { const c = 1 / (1 + 1.2 * h); vx *= c; vy = vy * c + g * h; }   // (the air holds it back too: no spinning like a kite when she turns - user 11:04)
       P[q + 2] = x; P[q + 3] = y; P[q] = x + vx * h; P[q + 1] = y + vy * h;
     }
     // the cords: none stretches (the rope from the block out first, then the mesh)
@@ -51890,8 +51900,16 @@ function fishNetStep(j, dt) {
 const FISH_FUNNEL = [0.79, 0.41], FISH_SCREW = [0.88, 0.87], FISH_WL = [0.1, 0.86];   // (FISH_WL: her waterline's ends - the stem, the stern - from the bow)   // (the side picture's funnel top and screw, from its bow - the art faces left)
 function fishBoatFx(j, dt) {
   const v = j.fpx == null || !(dt > 0) ? 0 : (j.x - j.fpx) / dt; j.fpx = j.x;
-  if (SIM_ONLY || j.turn > 0 || j.air) return;
+  if (SIM_ONLY || j.air) return;
   const sp = Math.abs(v), dir = Math.sign(v) || j.dir, [L, h, P] = storyBoatSize(j); if (!P) return;
+  // (user 11:04: "When the boat turns, we should get foam too that respects the pixel art sprites") turning: churned foam along her
+  // waterline as wide as the view of her that's showing (side on, narrowing to bow on, and out again)
+  if (j.turn > 0) {
+    const u = j.turn / jbTurn(j), c = Math.abs(Math.cos(Math.PI * u)), F = tropPic(FISH_TURN_ART[c > 0.82 ? 0 : c > 0.5 ? 1 : c > 0.2 ? 2 : 3]) || P, half = F.width / P.width * L * 0.42;
+    const was = FXK; FXK = 1.15; j.ftf = (j.ftf || 0) + dt * 30;
+    while (j.ftf >= 1) { j.ftf -= 1; spawnFoam(j.x + (storyR() * 2 - 1) * half, 1 + storyR() * 1.2); }
+    FXK = was; return;
+  }
   const at = ([ax, ay]) => [j.x - j.dir * (ax - 0.5) * L, j.y + h * FISH_DRAFT - h + ay * h];
   const go = clamp(sp / (j.v || 60), 0, 1), on = Math.abs(j.drv || 0) > 0.05;
   if (on || sp > 3) {   // (her engine working: a puff from the funnel, oftener the harder it works)
@@ -51899,7 +51917,7 @@ function fishBoatFx(j, dt) {
     // her funnel's size: a stream that rises steadily and slants back behind her as she goes
     j.fsm = (j.fsm || 0) - dt;
     if (j.fsm <= 0) {
-      const W = 0.6 * UPM, RISE = 7.5, r0 = 0.35 * W, r1 = 1.7 * W, life = 22 + storyR() * 4, [x, y] = at(FISH_FUNNEL), vs = dir * sp;
+      const W = 0.6 * UPM, RISE = 7.5, r0 = 0.35 * W, r1 = 5 * W, life = 11 + storyR() * 2,   /* (user 11:04: hers fades in half the time and swells as it goes - her concept picture) */ [x, y] = at(FISH_FUNNEL), vs = dir * sp;
       j.fsm = clamp(0.45 * W / Math.max(sp, 15), 0.05, 1);
       spawnSmoke(x + (storyR() - 0.5) * 0.2 * W, y + 0.3 * r0, {   // (at the funnel's mouth - 10:50: there was a gap)
  kind: 'funnel', rise: true, r: r0, grow: (r1 - r0) / (life * 0.5), rmax: r1, lift: 2.2 * RISE, steady: true, trailV: vs, vx: vs + (storyR() - 0.5) * 4, jet: 1.1, vy: -1.8 * RISE * (0.9 + storyR() * 0.2), life, fadeFrom: 0.1, alpha: 0.7, dark: 0.4, buoy: 0.15, drift: 4, lumpy: true, climb: Math.max(0, WATER_Y - 40 - y), chain: smStream(j, 0), link: 3 * r1 });
@@ -56722,7 +56740,7 @@ window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude
     ['NET DRAG', 'twD', 0.2, 6, 0.1, 'How hard the water pulls on the mesh'],
     ['ROPE SINK', 'rpW', 0, 1, 0.05, 'How much the rope sinks (its sag)'],
     ['BOAT t', 'BOAT_M', 1000, 30000, 500, 'Boat mass: lower = the net drags her more'],
-    ['WINCH UP', 'UP', 0.5, 6, 0.1, 'Hauling speed with an empty net (m/s)'],
+    ['WINCH UP', 'UP', 0.5, 20, 0.5, 'Hauling speed with an empty net (m/s)'],
     ['WINCH DN', 'DN', 0.5, 6, 0.1, 'Paying-out speed of the rope (m/s)'],
   ];
   const ZOOM_IN = +(new URLSearchParams(location.search).get('z') || 5);
