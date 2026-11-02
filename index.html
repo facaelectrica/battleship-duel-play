@@ -4168,8 +4168,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 665;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 17:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 666;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 17:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7310,6 +7310,7 @@ function padOf(v) {
 function padWeapon(p, slot, down) {
   const m = crew[p].mode;
   if (down && slot === 1 && storyDotKeys(p, 'take')) return;   // (STORY at a structure: A takes the dot picked - 50-story.js)
+  if (down && slot === 2 && storyDotKeys(p, 'back')) return;   // (STORY: B closes a showroom - 50-zz-story-swap.js)
   // (user Oct 27: a civilian's or a yacht's own green buttons, A B X Y in order - the fire helicopter's water held)
   if (m === 'civ' || m === 'sail') { if (civSlot(p, slot - 1, down)) return; if (slot === 2 && down && m === 'civ') act(p, 'launch'); if (!down) mgHold[p] = false; return; }
   if (slot === 1) {
@@ -54353,7 +54354,7 @@ window.addEventListener('pointerdown', ev => {
 }, { capture: true, passive: false });
 // (user Nov 2 14:58: the dots are arrows now - 50-zz-story-swap.js) what you can swap to, where each is on the page (CSS pixels):
 // kept by name for the tools
-function storyDots() { return storyArrowsAt().filter(T => !T.cur).map(T => Object.assign(T, { act: T.price != null ? 'storyAsk' : 'storySwap', id: T.v ? T.v.sid : T.o.id })); }
+function storyDots() { return storyArrowsAt().filter(T => !T.cur && !T.hidden).map(T => Object.assign(T, { act: T.price != null ? 'storyAsk' : 'storySwap', id: T.v ? T.v.sid : T.o.id })); }
 /* ---- buying (user Oct 31 13:17: "when you have the dot to select the vehicle, if you select it, it should show the price.
    And then on the whole screen, it says, do you want to purchase? Yes or no. If you don't have enough money, it says
    insufficient funds"). A vehicle for sale at the structure you're at has a dot like your own, its price beside it;
@@ -54394,7 +54395,8 @@ window.addEventListener('pointerdown', ev => {
   if (sun) { const [X, Y] = toUI(ev.clientX, ev.clientY); if (X >= sun[0] && X <= sun[0] + sun[2] && Y >= sun[1] && Y <= sun[1] + sun[3]) { act(0, 'storySleep'); sound('click', 0); ev.stopImmediatePropagation(); ev.preventDefault(); return; } }
   // an arrow pressed: anywhere on it or its label (the nearest: boats side by side have theirs close together)
   const r = ev.pointerType === 'touch' ? 34 : 22, dd = q => Math.abs(ev.clientX - q.cx) + Math.max(0, ev.clientY - q.cy, q.cy - q.up - ev.clientY);
-  const d = storyArrowsAt().filter(q => !q.cur && Math.abs(ev.clientX - q.cx) < r + 30 && ev.clientY < q.cy + r * 0.5 && ev.clientY > q.cy - q.up - r * 0.5).sort((a, b) => dd(a) - dd(b))[0];
+  { const [X, Y] = toUI(ev.clientX, ev.clientY); if (storyShowPress(X, Y)) { ev.stopImmediatePropagation(); ev.preventDefault(); return; } }   // (a showroom up: its presses)
+  const d = storyArrowsAt().filter(q => !q.cur && !q.hidden && Math.abs(ev.clientX - q.cx) < r + 30 && ev.clientY < q.cy + r * 0.5 && ev.clientY > q.cy - q.up - r * 0.5).sort((a, b) => dd(a) - dd(b))[0];
   if (!d) return;
   storyPress(d);
   ev.stopImmediatePropagation(); ev.preventDefault();
@@ -54403,6 +54405,7 @@ window.addEventListener('pointerdown', ev => {
 function storyPress(d) {
   storySel = null;
   if (d.cur || STSW.on) return;
+  if (d.show) { storyShowOpen(d); return; }             // (a hangar: its showroom - 50-zz-story-swap.js)
   if (d.price != null) {                                 // (for sale: ARE YOU SURE? - or, short of coins, it shakes its head)
     if (story.coins < d.price) { STSW.deny = { key: d.key, t: time }; sound('empty', d.wx); return; }
     storyQ = { sid: d.v.sid, key: d.key, lab: d.name, price: d.price }; sound('click', 0); return;
@@ -54418,12 +54421,12 @@ function storyPress(d) {
    camera on the structure you're at. */
 let storySel = null;                                     // (the arrow picked with the keys: its key; null - what you control)
 function storyStep(d) {
-  const L = storyTargets().sort((a, b) => a.wx - b.wx); if (L.length < 2) return;
+  const L = storyTargets().filter(q => !q.hidden).sort((a, b) => a.wx - b.wx); if (L.length < 2) return;
   const i = Math.max(0, L.findIndex(q => storySel ? q.key === storySel : q.cur)), q = L[clamp(i + d, 0, L.length - 1)], k = q.cur ? null : q.key;
   if (k === storySel) return;
   // (user Nov 2 15:34: "If I'm switching between owned objects, the switch is immediate") one of yours (or a home): stepped onto,
   // you're in it - the swap at once; only one for sale is picked first, its price shown, A to buy
-  if (q.price == null && !q.cur) { storySel = null; cam.glide = STORY_GLIDE; act(0, 'storySwap', q.key); return; }
+  if (q.price == null && !q.cur && !q.show) { storySel = null; cam.glide = STORY_GLIDE; act(0, 'storySwap', q.key); return; }
   storySel = k; cam.glide = STORY_GLIDE; sound('click', 0);
 }
 const STORY_GLIDE = 1.2;                                 // (how long the camera eases to the object picked - updateCamera's follow, no cut)
@@ -54440,6 +54443,8 @@ function storyTake() { const d = storyTargets().find(q => q.key === storySel); i
 function storyDotKeys(p, kind, d) {
   if (!STORY || p !== 0 || ui.menu || ui.title || storyQ) return false;
   const m = crew[0].mode;
+  if (SHOWR.id != null) { if (kind === 'take') storyShowTake(); else if (kind === 'back') storyShowClose(); else storyShowFlip(d); return true; }   // (a showroom up: the keys are its)
+  if (kind === 'back') return false;
   if (STSW.on && (m === 'dock' || kind === 'pick')) return true;
   if (m === 'dock') { if (kind === 'take') return storyTake(); storyStep(d); return true; }
   if (m !== 'civ') return false;
@@ -56241,11 +56246,15 @@ function storyTargets() {
   if (cur.v && !storyStill(cur.v)) return out;           // (on the move: only what you're in)
   const S = storyPlace(cur), r = STORY_PARK_M * UPM;
   for (const o of S) if (o !== cur.o && storyEnterable(o)) out.push(mk({ o }));
+  // (user Nov 2 16:04-16:08) a structure that keeps its vehicles out of sight (STR_KINDS enclosed: the hangars, the fire and police
+  // stations) wears one arrow for what's stored in it - the vehicles that started there and stand there now (its spots'): picked,
+  // its showroom opens (storyShowOpen); the vehicles in it are still things you can swap to, without arrows of their own (hidden)
+  for (const o of S) if (strEnclosed(o)) { const L = storyInside(o); if (L.length) out.push(Object.assign(mk({ o }), { key: 'h:' + o.id, show: L.map(v => v.sid) })); }
   const near = v => { const [a, b] = vehBox({ v }); return S.some(o => { const B = strBox(o); return b > B.x0 - r && a < B.x1 + r; }) || (cur.v && Math.abs(v.x - cur.v.x) < r + storyBoatSize(cur.v)[0] / 2); };
   for (const v of storyVehs()) {
     if (v === cur.v || v.driven != null || v.role || v.res) continue;
     if (!v.own && v.berth == null && !(v.placed != null && v.fac == null)) continue;   // (one that isn't yours is for sale at its spot, or wherever it was placed if it's nobody's - user Nov 2 15:40)
-    if (near(v)) out.push(mk({ v }));
+    if (near(v)) out.push(Object.assign(mk({ v }), v.berth != null && strEnclosed(strsUsed().find(o => o.id === v.berth)) ? { hidden: true } : {}));
   }
   for (const T of out) { const P = S.find(o => T.v ? T.v.berth === o.id : T.o === o) || S[0]; T.at = P ? P.id : null; }   // (the structure it's at: story.at once you're in it)
   return out;
@@ -56262,6 +56271,9 @@ function swapKind(T) {
   if (v.kind === 'fish') return 'diesel';
   return 'outboard';
 }
+const strEnclosed = o => !!o && !!(STR_KINDS[o.k] || {}).enclosed;
+// what's stored in a structure now: the story vehicles at its spots, nobody in them (yours, or for sale)
+const storyInside = o => storyVehs().filter(v => v.berth === o.id && v.driven == null && !v.role && !v.res);
 const storyCanEnter = v => !(v.plane && v.state === 'parked' && !storyRunwayFor(strsUsed().find(o => o.id === v.berth) || {}));
 // at a structure now (its id): story.at, and a SAVE POINT saves the story on arriving
 function storyArrive(id) {
@@ -56388,7 +56400,7 @@ function drawStoryArrows() {
       if (STSW.on && k < 1) swapSparks(X, Y, k);
       continue;
     }
-    if (pop <= 0) continue;
+    if (pop <= 0 || T.hidden || SHOWR.id != null) continue;   // (a showroom up: only its sheet)
     const picked = storySel === T.key, B = picked ? ARROW_B + 1 : ARROW_B;
     let dx = 0; if (STSW.deny && STSW.deny.key === T.key && time - STSW.deny.t < 0.35) dx = Math.round(Math.sin((time - STSW.deny.t) * 60) * 4);   // (no funds: it shakes its head)
     const bob = Math.round(ARROW_BOB * Math.abs(Math.sin(time * 3.4)));
@@ -56410,6 +56422,7 @@ function drawStoryArrows() {
     const q = at(u); pxArrow(q[0], q[1], ARROW_B, ARROW_COL.cur, -0.25 * Math.sin(u * Math.PI));   // (stretched in flight)
   }
   const so = STSW.on ? swO() : null; if (so && tS >= STSW_T.LAND) swapWindows(w, so, tS - STSW_T.LAND);
+  drawShowroom(w, L);
 }
 // the landing's spark ring: eight blocks flying out from the point, orange then white, gone in a quarter second
 function swapSparks(X, Y, k) {
@@ -56481,6 +56494,122 @@ function sfxStoryEnter(x, kind) {
 }
 // (tools) what the swap sees
 window.__storySwap = { targets: () => storyTargets(), cur: () => storyCur(), cars: () => storyCars, boats: () => jetboats.filter(j => j.story), state: STSW, crew: () => crew[0], zoom: () => [cam.zt[0], cam.za[0], scopes[0].level] };
+
+/* ---- THE SHOWROOM (user Nov 2 16:04-16:08: "a 'cutout' of the hangar ... the vehicle drawn on top of the hangar with arrows on the
+   side to rotate between the available ones ... a 'blueprint' vibe"; "a simple blueprint with a white background, like a paper with
+   the blueprint on it"; "it has to be vehicles that we have allowed to spawn at that location"). A sheet of paper over the structure,
+   the stored vehicle on it as a blueprint - its own picture (the editor's LOOK of its type: vehLookOf) traced in blue: its outline
+   and the edges inside it, a pale wash - its name, its price and PRESS A TO PURCHASE / NO FUNDS, or PRESS A TO TAKE OUT for one of
+   yours. Arrows either side (left / right, the shoulders, a tap) go through what's stored; A (or a tap on the sheet) takes it out or
+   buys it (ARE YOU SURE?), then the swap as any; B / Esc / a tap off it closes it. This screen's own (SHOWR): the camera on the
+   structure while it's open. ---- */
+const SHOWR = { id: null, i: 0, t: 0, dir: 0, deny: 0 };
+const BP_INK = [29, 79, 145], BP_LINE = [91, 134, 196], BP_PAPER = '#f6f4ec';
+const BLUEPRINTS = new Map();
+// a picture as a blueprint: its outline in ink, the edges inside it in a lighter line, the rest a faint wash
+function blueprintOf(P) {
+  const w = P.width, h = P.height; if (!w || !h) return null;
+  const src = makeCanvas(w, h), sg = src.getContext('2d'); sg.drawImage(P, 0, 0);
+  const d = sg.getImageData(0, 0, w, h).data, out = makeCanvas(w, h), og = out.getContext('2d'), od = og.createImageData(w, h), o = od.data;
+  const A = (x, y) => x < 0 || y < 0 || x >= w || y >= h ? 0 : d[(y * w + x) * 4 + 3];
+  const Lm = (x, y) => { const i = (y * w + x) * 4; return 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]; };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (A(x, y) < 60) continue;
+    const i = (y * w + x) * 4, edge = A(x - 1, y) < 60 || A(x + 1, y) < 60 || A(x, y - 1) < 60 || A(x, y + 1) < 60;
+    const line = !edge && ((A(x + 1, y) >= 60 && Math.abs(Lm(x, y) - Lm(x + 1, y)) > 34) || (A(x, y + 1) >= 60 && Math.abs(Lm(x, y) - Lm(x, y + 1)) > 34));
+    const c = edge ? BP_INK : line ? BP_LINE : BP_LINE;
+    o[i] = c[0]; o[i + 1] = c[1]; o[i + 2] = c[2]; o[i + 3] = edge ? 255 : line ? 235 : 34;
+  }
+  og.putImageData(od, 0, 0);
+  return out;
+}
+// a vehicle's picture for its blueprint (once per type): its type's LOOK in the day's light (else its own picture), cut to what's drawn
+const BP_SRC = new Map();
+function storyBlueprintSrc(v) {
+  const key = v.sv || v.kind; if (BP_SRC.has(key)) return BP_SRC.get(key);
+  let P = null;
+  try { const L = vehLookOf(v.sv); if (L && L.P) { const c = makeCanvas(L.w || L.P.width, L.h || L.P.height); L.draw(c.getContext('2d'), 0, 0); P = c; } } catch (e) { P = null; }
+  if (!P) { const q = storyBoatSize(v)[2]; if (q) { P = makeCanvas(q.width, q.height); P.getContext('2d').drawImage(q, 0, 0); } }
+  if (!P) return null;                                     // (its pictures not loaded yet: asked again next frame)
+  const g = P.getContext('2d'), d = g.getImageData(0, 0, P.width, P.height).data;
+  let x0 = P.width, x1 = -1, y0 = P.height, y1 = -1;
+  for (let y = 0; y < P.height; y++) for (let x = 0; x < P.width; x++) if (d[(y * P.width + x) * 4 + 3] > 40) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  if (x1 < 0) { BP_SRC.set(key, null); return null; }
+  const T = makeCanvas(x1 - x0 + 1, y1 - y0 + 1); T.getContext('2d').drawImage(P, -x0, -y0);
+  BP_SRC.set(key, T); return T;
+}
+// its blueprint at the size it's drawn on the sheet: the picture laid down at that size first, then traced - lines a screen pixel
+// wide whatever the picture's own size (one per type and size)
+function storyBlueprint(v, w, h) {
+  const S0 = storyBlueprintSrc(v); if (!S0) return null;
+  const s = Math.min(w / S0.width, h / S0.height), dw = Math.max(1, Math.round(S0.width * s)), dh = Math.max(1, Math.round(S0.height * s)), key = (v.sv || v.kind) + '@' + dw + 'x' + dh;
+  if (BLUEPRINTS.has(key)) return BLUEPRINTS.get(key);
+  const c = makeCanvas(dw, dh), g = c.getContext('2d'); g.imageSmoothingEnabled = s < 1; g.drawImage(S0, 0, 0, dw, dh);
+  if (BLUEPRINTS.size > 40) BLUEPRINTS.clear();
+  const B = blueprintOf(c); BLUEPRINTS.set(key, B); return B;
+}
+const showList = T => T && T.show ? T.show.map(sid => storyVehs().find(v => v.sid === sid)).filter(Boolean) : [];
+function storyShowOpen(T) { SHOWR.id = T.o.id; SHOWR.i = 0; SHOWR.t = time; SHOWR.dir = 0; storySel = T.key; cam.glide = STORY_GLIDE; sound('click', 0); }
+function storyShowClose() { if (SHOWR.id == null) return; SHOWR.id = null; storySel = null; cam.glide = STORY_GLIDE; sound('click', 0); }
+const storyShowT = () => SHOWR.id == null ? null : storyTargets().find(q => q.key === 'h:' + SHOWR.id) || null;
+function storyShowFlip(d) { const L = showList(storyShowT()); if (L.length < 2) return; SHOWR.i = (SHOWR.i + d + L.length) % L.length; SHOWR.t = time; SHOWR.dir = d; sound('click', 0); }
+// A on the sheet: take one of yours out (the swap), or ask to buy it
+function storyShowTake() {
+  const L = showList(storyShowT()), v = L[clamp(SHOWR.i, 0, L.length - 1)]; if (!v) return;
+  if (v.own) { if (!storyCanEnter(v)) { sound('empty', v.x); return; } storyShowClose(); cam.glide = STORY_GLIDE; act(0, 'storySwap', 'v:' + v.sid); return; }
+  const price = storyVehPrice(v);
+  if (story.coins < price) { SHOWR.deny = time; sound('empty', v.x); return; }
+  storyQ = { sid: v.sid, key: 'v:' + v.sid, lab: storyVehName(v), price }; sound('click', 0);
+}
+// the sheet's place on the screen (the controls' layer's pixels): over the structure, its arrows either side
+function showLayout(w, T) {
+  const B = strBox(T.o), p = w((B.x0 + B.x1) / 2, B.top), W = Math.round(clamp(ubw * 0.34, 220, 380)), H = Math.round(W * 0.62) + 52;
+  const x = Math.round(clamp(p.X - W / 2, 34, ubw - W - 34)), y = Math.round(clamp(p.Y - H - 12, hudTop() + 8, ubh - H - 8));
+  return { x, y, W, H, area: [x + 14, y + 14, W - 28, H - 14 - 60], left: [x - 30, y + H / 2 - 22, 26, 44], right: [x + W + 4, y + H / 2 - 22, 26, 44] };
+}
+function drawShowroom(w, Ls) {
+  if (SHOWR.id == null) return;
+  const T = Ls.find(q => q.key === 'h:' + SHOWR.id), L = showList(T);
+  if (!T || !L.length || STSW.on) { SHOWR.id = null; if (storySel && storySel[0] === 'h') storySel = null; return; }
+  SHOWR.i = clamp(SHOWR.i, 0, L.length - 1);
+  const v = L[SHOWR.i], Q = showLayout(w, T), [ax, ay, aw, ah] = Q.area;
+  // the paper, a draftsman's frame inside its edge
+  ug.fillStyle = 'rgba(4,7,15,0.35)'; ug.fillRect(Q.x + 3, Q.y + 3, Q.W, Q.H);
+  ug.fillStyle = BP_PAPER; ug.fillRect(Q.x, Q.y, Q.W, Q.H);
+  const ink = `rgb(${BP_INK.join(',')})`;
+  ug.fillStyle = ink; ug.fillRect(Q.x + 6, Q.y + 6, Q.W - 12, 1); ug.fillRect(Q.x + 6, Q.y + Q.H - 7, Q.W - 12, 1); ug.fillRect(Q.x + 6, Q.y + 6, 1, Q.H - 12); ug.fillRect(Q.x + Q.W - 7, Q.y + 6, 1, Q.H - 12);
+  ug.fillRect(Q.x + 6, Q.y + Q.H - 60, Q.W - 12, 1);       // (the title block's line)
+  // the drawing, slid in from the side it was flipped to
+  const P = storyBlueprint(v, aw - 16, ah - 10);
+  if (P) {
+    const dw = P.width, dh = P.height;
+    const u = clamp((time - SHOWR.t) / 0.18, 0, 1), e = 1 - Math.pow(1 - u, 3), off = Math.round((1 - e) * SHOWR.dir * aw * 0.35);
+    ug.save(); ug.beginPath(); ug.rect(ax, ay, aw, ah); ug.clip(); ug.imageSmoothingEnabled = false; ug.globalAlpha = 0.35 + 0.65 * e;
+    ug.drawImage(P, Math.round(ax + (aw - dw) / 2 + off), Math.round(ay + (ah - dh) / 2), dw, dh); ug.restore(); ug.globalAlpha = 1;
+  }
+  // the title block: its name, its price and how to buy it - or take it out
+  const cx = Q.x + Q.W / 2, ty = Q.y + Q.H - 52, deny = time - SHOWR.deny < 0.35 ? Math.round(Math.sin((time - SHOWR.deny) * 60) * 3) : 0;
+  drawTextC(ug, storyVehName(v), cx, ty, ink, 2, 'center');
+  if (v.own) drawTextC(ug, storyBuyHint().replace('PURCHASE', 'TAKE OUT'), cx, ty + 30, ink, 2, 'center');
+  else { const price = storyVehPrice(v), broke = story.coins < price; drawTextC(ug, '$ ' + price, cx, ty + 15, ink, 2, 'center'); drawTextC(ug, broke ? 'NO FUNDS' : storyBuyHint(), cx + deny, ty + 30, broke ? '#c0392b' : '#2f7a3a', 2, 'center'); }
+  if (L.length > 1) {
+    drawTextC(ug, (SHOWR.i + 1) + '/' + L.length, Q.x + Q.W - 12, Q.y + 12, ink, 1, 'right');
+    for (const [r, d] of [[Q.left, -1], [Q.right, 1]]) { const px = d < 0 ? r[0] + 4 : r[0] + r[2] - 4, py = r[1] + r[3] / 2; menuArrow(px + 1, py + 1, d, '#04070f'); menuArrow(px, py, d, '#ffffff'); }
+  }
+}
+// presses while the sheet is up: its arrows, the sheet itself, anywhere else closes it (true: the press was the showroom's)
+function storyShowPress(X, Y) {
+  if (SHOWR.id == null) return false;
+  const T = storyShowT(); if (!T) { storyShowClose(); return true; }
+  const Q = showLayout(storyToUI(), T), inR = (r, m = 6) => X >= r[0] - m && X <= r[0] + r[2] + m && Y >= r[1] - m && Y <= r[1] + r[3] + m;
+  if (inR(Q.left)) storyShowFlip(-1); else if (inR(Q.right)) storyShowFlip(1);
+  else if (inR([Q.x, Q.y, Q.W, Q.H], 0)) storyShowTake(); else storyShowClose();
+  return true;
+}
+window.addEventListener('keydown', ev => {
+  if (SHOWR.id == null || storyQ || !STORY || ui.title || ui.menu) return;
+  if (ev.code === 'Escape' || ev.code === 'Backspace' || ev.code === 'KeyB') { storyShowClose(); ev.stopImmediatePropagation(); ev.preventDefault(); }
+}, { capture: true });
 
 /* ---- STRUCTURES FROM THE WORLD TILES (Nov 1, target architecture stage 4, "the static world as built layers": the last piece).
    Each structure's still picture (strStillDraw, 50-zz-struct.js) is painted into world tiles (40-zzzz-world-tiles.js) and laid as
