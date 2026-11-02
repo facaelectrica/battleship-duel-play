@@ -415,7 +415,7 @@ const WORLD_PACK = {"stamp":{"open":"2026-11-02 12:28","story":"2026-11-02 12:28
    the simulation worker alike (its localStorage is the page's, copied - 00-sw-boot.js), so every file reads its own key as
    it always did. Changing worlds reloads the page (worldSwitch, from menuPlay): nothing of one world stays in the other.
    The Story copy starts as the open world as it was the first time STORY is chosen. ---- */
-const WORLD_KEYS = ['bd_dock_own', 'bd_docks', 'bd_docks_x', 'bd_floor_pts', 'bd_ground', 'bd_islands', 'bd_kraken_dy', 'bd_kraken_u', 'bd_land_pts', 'bd_land_structs', 'bd_land_towers', 'bd_structs', 'bd_stretch', 'bd_weather_areas', 'bd_world_ext', 'bd_wrecks', 'bd_sky_colours', 'bd_sky_p', 'bd_nature', 'bd_grade', 'bd_caves', 'bd_cave_params', 'bd_prices', 'bd_wbase', 'bd_air_conv', 'bd_sea_conv', 'bd_harbour_conv', 'bd_pads_conv', 'bd_ground_conv', 'bd_tower_conv', 'bd_air_ungroup', 'bd_placed', 'bd_gun_conv'];
+const WORLD_KEYS = ['bd_dock_own', 'bd_docks', 'bd_docks_x', 'bd_floor_pts', 'bd_ground', 'bd_islands', 'bd_lakes', 'bd_kraken_dy', 'bd_kraken_u', 'bd_land_pts', 'bd_land_structs', 'bd_land_towers', 'bd_structs', 'bd_stretch', 'bd_weather_areas', 'bd_world_ext', 'bd_wrecks', 'bd_sky_colours', 'bd_sky_p', 'bd_nature', 'bd_grade', 'bd_caves', 'bd_cave_params', 'bd_prices', 'bd_wbase', 'bd_air_conv', 'bd_sea_conv', 'bd_harbour_conv', 'bd_pads_conv', 'bd_ground_conv', 'bd_tower_conv', 'bd_air_ungroup', 'bd_placed', 'bd_gun_conv'];
 const swKey = k => 'bd_sw_' + k.slice(3);
 /* (user, Nov 1 14:05: "the snapshot holds any change from sky, background, properties, any property I change") EVERY bd_ key
    the SNAPSHOT carries is built in: each world's (WORLD_KEYS) in its world, every other one (the vehicles' tuning, the zoom
@@ -2917,15 +2917,16 @@ function stepCalm(dt) {
    the sea: the same surface, simulated in the same columns, so a splash rings out across a lake and boats ride its
    waves. wetA: which columns are water (the sea's, a lake's); the dry ones between are walls the waves stop at.
    ambK: how much of the swell a column gets (a lake only the wind's small ripples). */
-let wetA = null, ambK = null;
+let wetA = null, ambK = null, WBASE = null;   // (WBASE: each column's water level - a lake's own, Nov 2 LAKE LEVELS (50-land-lake); null: the ocean's everywhere)
 function buildWet() {
-  wetA = ambK = null;
+  wetA = ambK = WBASE = null;
   if (!OWM || !calmA) return;
   wetA = new Uint8Array(N); ambK = new Float32Array(N);
   for (let i = 0; i < N; i++) {
     const x = i * DX, lake = onLand(x) && lakeAt(x);
     wetA[i] = !onLand(x) || lake ? 1 : 0; ambK[i] = lake ? 0.3 : wetA[i];
     if (lake) calmA[i] = 0.8;                       // (inland of a harbour counts as its sheltered water: not a lake)
+    if (lake) { const lv = lakeLevelAt(x); if (lv !== WATER_Y) { if (!WBASE) WBASE = new Float32Array(N).fill(WATER_Y); WBASE[i] = lv; } }
   }
   calmRuns = [];
   for (let i = 0; i < N;) { if (calmA[i] < 0.999) { let j = i; while (j < N && calmA[j] < 0.999) j++; calmRuns.push([i, j]); i = j; } else i++; }
@@ -2936,7 +2937,7 @@ function buildWet() {
 }
 let wetRuns = null;
 const ambAt = x => ambK ? ambK[clamp(Math.round(x / DX), 0, N - 1)] : 1;
-function surfaceY0(x) { return WATER_Y - (ambient(x, time) * ambAt(x) + simAt(x)) * calmAt(x); }
+function surfaceY0(x) { return (WBASE ? WBASE[clamp(Math.round(x / DX), 0, N - 1)] : WATER_Y) - (ambient(x, time) * ambAt(x) + simAt(x)) * calmAt(x); }
 /* While a frame is drawn the sea surface is sampled thousands of times (the waterline, foam, rain, glints,
    clips), and each exact value costs some twenty sines. So each view's surface is worked out once per frame,
    one value per screen column (exact there), and read from that table; between two columns it is
@@ -2964,7 +2965,7 @@ function surfTab() {
 const WH_MAX = 60;   // (stepWater, stepWaterRun: a column's height is clamped to +-WH_MAX - 40 till Oct 31: the stronger pushes, WATER_PUSH)
 function surfBand() {
   const A = Math.abs(E.waveAmp || 1), st = Math.abs(E.storm || 0);
-  return 1.1 * (A * 5.5 * 1.5 + 0.35 * (1 + 3 * st) + 9 * st * st * 1.5) + WH_MAX + 2;
+  return 1.1 * (A * 5.5 * 1.5 + 0.35 * (1 + 3 * st) + 9 * st * st * 1.5) + WH_MAX + 2 + (typeof LAKE_DEV === 'number' ? LAKE_DEV : 0);   // (and the lakes at their own levels - Nov 2)
 }
 function surfaceY(x) {
   if (SURF.on) {
@@ -4145,8 +4146,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 631;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 14:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 632;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 14:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -26896,7 +26897,7 @@ function clipRegion(L) {
   const T = -SHY - 60, H = bh + 120, lo = SEAS.c.lo, hi = SEAS.c.hi;
   C.save(); C.beginPath();
   for (let i = 0; i < SEAS.n; i++) { const a = Math.floor(L ? layerCoastX(L, lo[i]) : PX(lo[i])), b = Math.ceil(L ? layerCoastX(L, hi[i]) : PX(hi[i])); C.rect(a, T, Math.max(0, b - a), H); }   // (every sea - SEAS, 05-zz-seas.js)
-  if (!L && OWM) for (const k of land.lakes || []) { const kw = lakeWet(k), la = Math.floor(PX(kw[0])), lb = Math.ceil(PX(kw[1])), lt = Math.round(PY(WATER_Y - 8)); if (lb > -60 && la < VWP + 60) C.rect(la, lt, lb - la, H); }   // (and the lakes, below their surface: the sea's light on them too, user Oct 26)
+  if (!L && OWM) for (const k of land.lakes || []) { const kw = lakeWet(k), la = Math.floor(PX(kw[0])), lb = Math.ceil(PX(kw[1])), lt = Math.round(PY(lakeLv(k) - 8)); if (lb > -60 && la < VWP + 60) C.rect(la, lt, lb - la, H); }   // (and the lakes, below their surface: the sea's light on them too, user Oct 26)
   C.clip();
 }
 const cloudSpans = [[], []], planeLamps = [[], []];
@@ -39639,7 +39640,7 @@ function islRootsBuild(R = land.R) {
   islandsUsed().forEach((I, n) => {
     const S = SHP.cols[n]; if (!S || S.k === 'H') return;
     const solid = S.k === 'S';
-    const c0 = S.c0, c1 = S.c1, W = c1 - c0 + 1;
+    const c0 = S.c0, c1 = S.c1, W = c1 - c0 + 1; if (W <= 0) return;   // (wholly outside the world's columns)
     let yA = Infinity, yB = -Infinity;
     const top = new Float32Array(W), bot = new Float32Array(W), gnd = new Float32Array(W);
     for (let q = 0; q < W; q++) {
@@ -40090,6 +40091,7 @@ function edSeg(X0, Y0, X1, Y1, w, gap) { if (gap) return; const n = Math.max(1, 
 const SHP_ED_COL = { I: 'rgba(214,140,255,0.9)', S: 'rgba(235,235,235,0.9)', H: 'rgba(110,235,255,0.95)' }, SHP_HANDLE = { I: '#d68cff', S: '#e8e8e8', H: '#6eebff' };
 function islEdDraw() {
   if (!floorEdOn()) return;
+  if (OWM) lakeEdDraw();                                         // (the pockets' water lines - 50-land-lake, Nov 2)
   const x0 = CAMPX / SV, x1 = x0 + VWW, t = Math.max(1, Math.round(1.5 * dpr / PIXW)), s = TERRAIN_ED.sel;
   if (SHP.base) { const Y = Math.round(PY(SHP.base)); C.fillStyle = 'rgba(255,200,120,0.5)'; for (let X = 0; X < VWP; X += 14) C.fillRect(X, Y - (t >> 1), 7, t); }   // (the base seabed: the lowest point of any shape - user Nov 2 13:16)
   ISLANDS.forEach((I, n) => {
@@ -41343,7 +41345,43 @@ function drawKraken(x0, x1) {
 // is there water here (the lake, and the ground under it lower than its surface)?
 // (user Oct 25: a lake in each country - the desert's an oasis)
 function lakeOf(x) { if (!OWM || !land.lakes) return null; for (const L of land.lakes) if (x > L[0] && x < L[1]) return L; return null; }
-function lakeAt(x) { return !!lakeOf(x) && landTop(x) > WATER_Y + 0.5; }
+function lakeAt(x) { const L = lakeOf(x); return !!L && landTop(x) > lakeLv(L) + 0.5; }
+/* ---- LAKE LEVELS (user Nov 2 13:13-13:16: "the water that gets created between two solids, we should be able to change the
+   height of that water. So we could have a lake that's lower than the ocean line ... There will be a line showing the water level
+   that I can change. The only water level that is locked is the official ocean water level"). Every pocket the ocean can't reach
+   (lakePockets: a dip in the ground and the solids, walled on both sides by higher ground) holds water at its own level: LAKE_SET's
+   entry for it ({ x: a point in it, y: its level, world y }), else the ocean's line - or its rim, where its rim is lower. Never
+   above its rim (where it would spill); below its bottom it is dry. SEA or LAKE is only the look (its pieces' skin). Kept in
+   bd_lakes (a world key). The sea's surface code works a lake as the sea's water, from its own level (WBASE, surfaceY0) ---- */
+let LAKE_SET = [];
+try { const o = JSON.parse(localStorage.getItem('bd_lakes') || 'null'); if (Array.isArray(o) && o.every(q => q && isFinite(q.x) && isFinite(q.y))) LAKE_SET = o; } catch (e) { }
+const lakeSetUsed = () => NET.role === 'local' ? LAKE_SET : [];
+function lakeSave() { try { if (!LAKE_SET.length) localStorage.removeItem('bd_lakes'); else localStorage.setItem('bd_lakes', JSON.stringify(LAKE_SET)); } catch (e) { } }
+// a lake's level (world y), and the level of the water over x (the ocean's where no lake)
+const lakeLv = L => L && L.lv != null ? L.lv : WATER_Y;
+const lakeLevelAt = x => { const L = lakeOf(x); return L ? lakeLv(L) : WATER_Y; };
+let LAKE_DEV = 0;                                                 // (the furthest any lake's level is from the ocean's: surfBand)
+// every pocket the ground (the solids with it) holds: [x0, x1] of its full span, spill (its rim's level), bot (its deepest), deep
+// (the x there) - the water's walls worked from each sea (the ocean's line) and the world's ends inward
+function lakePockets() {
+  const n = land.cols, S = land.surf, onL = c => onLand(c * LT_CELL), Lw = new Float32Array(n), Rw = new Float32Array(n);
+  let m = Infinity; for (let c = 0; c < n; c++) { m = onL(c) ? Math.min(m, S[c]) : WATER_Y; Lw[c] = m; }
+  m = Infinity; for (let c = n - 1; c >= 0; c--) { m = onL(c) ? Math.min(m, S[c]) : WATER_Y; Rw[c] = m; }
+  const P = [];
+  for (let c = 1; c < n - 1; c++) {
+    const cap = Math.max(Lw[c], Rw[c]); if (!onL(c) || !(cap < S[c])) continue;
+    let b = c, spill = cap, bot = S[c], deep = c;
+    while (b + 1 < n - 1 && onL(b + 1) && Math.max(Lw[b + 1], Rw[b + 1]) < S[b + 1]) { b++; spill = Math.max(spill, Math.max(Lw[b], Rw[b])); if (S[b] > bot) { bot = S[b]; deep = b; } }
+    if ((b + 1 - c) * LT_CELL >= LAKE_MIN && onL(c - 1) && onL(b + 1)) P.push({ x0: c * LT_CELL, x1: (b + 1) * LT_CELL, spill, bot, deep: deep * LT_CELL });
+    c = b;
+  }
+  return P;
+}
+// a pocket's level: its entry in LAKE_SET (never above its rim), else the ocean's line - or its rim if that's lower
+function pocketLevel(K) {
+  let e = null; for (const q of lakeSetUsed()) if (q.x > K.x0 && q.x < K.x1) e = q;
+  return e ? Math.max(e.y, K.spill) : Math.max(K.spill, WATER_Y);
+}
 // dry ground (not the sea, not a lake): where dust flies and smoke lies on the earth
 const dryLand = x => onLand(x) && !lakeAt(x);
 // the lake's open water, for the yachts: its shores, a boat's length in
@@ -41353,20 +41391,26 @@ const dryLand = x => onLand(x) && !lakeAt(x);
 // lake, its surface at WATER_Y: each [left shore, right shore]
 const LAKE_MIN = 24;                                              // (narrower than this: a puddle, not a lake)
 function findLake() {
-  land.lakes = [];
-  const wet = c => land.surf[c] > WATER_Y && onLand(c * LT_CELL);
-  for (let c = 1; c < land.cols - 1; c++) {
-    if (!wet(c)) continue;
-    let b = c; while (b < land.cols - 1 && wet(b + 1)) b++;
-    const x0 = c * LT_CELL, x1 = (b + 1) * LT_CELL;
-    // (not one running into the sea's stretch or off the world's end: those are no lakes)
-    if (x1 - x0 >= LAKE_MIN && onLand(x0 - LT_CELL) && onLand(x1 + LT_CELL) && b < land.cols - 2) {
-      const L = [x0, x1], cx = warpX(lcRight(x0) ? WORLD_Wb - EXT_R - lakeC() : EXT_L + lakeC());
-      L.today = Math.abs((x0 + x1) / 2 - cx) < 60 && Math.abs((x1 - x0) / 2 - LAKE_W0) < 60;   // (one of today's lakes, as it was: lakeU measures round it as ever)
-      land.lakes.push(L);
+  land.lakes = []; LAKE_DEV = 0;
+  land.pockets = lakePockets();                                  // (Nov 2: every pocket, each at its own level - LAKE LEVELS above)
+  for (const K of land.pockets) {
+    const lv = K.lv = pocketLevel(K), c0 = Math.round(K.x0 / LT_CELL), c1 = Math.round(K.x1 / LT_CELL) - 1;
+    const wet = c => land.surf[c] > lv;
+    for (let c = c0; c <= c1; c++) {
+      if (!wet(c)) continue;
+      let b = c; while (b < c1 && wet(b + 1)) b++;
+      const x0 = c * LT_CELL, x1 = (b + 1) * LT_CELL;
+      // (not one running into the sea's stretch or off the world's end: those are no lakes - a pocket never does)
+      if (x1 - x0 >= LAKE_MIN) {
+        const L = [x0, x1], cx = warpX(lcRight(x0) ? WORLD_Wb - EXT_R - lakeC() : EXT_L + lakeC());
+        L.today = Math.abs((x0 + x1) / 2 - cx) < 60 && Math.abs((x1 - x0) / 2 - LAKE_W0) < 60;   // (one of today's lakes, as it was: lakeU measures round it as ever)
+        L.lv = lv; L.pk = K; LAKE_DEV = Math.max(LAKE_DEV, Math.abs(lv - WATER_Y));
+        land.lakes.push(L);
+      }
+      c = b;
     }
-    c = b;
   }
+  land.lakes.sort((a, b) => a[0] - b[0]);
 }
 // (today's lakes' half-width at the waterline: lakeU measures from the shore by it)
 const LAKE_W0 = 2025;
@@ -41382,7 +41426,7 @@ function ditchFx(x, vx, size = 1, len = 0, vy = 0) {
   if (len > 0) { lakeScare(x); crashSplash(x, len, vx, vy, Math.min(size, 2)); }   // (a long thing going in: the crown of spikes along it)
   else lakeSplash(x, size);
   if (SIM_ONLY) return;
-  for (let i = 0; i < 16 * size; i++) addBubble(x + lkRnd(-14, 14) * size, WATER_Y + lkRnd(2, 18), lkRnd(-20, 20) + (vx || 0) * 0.05, -lkRnd(20, 60), lkRnd(1, 3));
+  for (let i = 0; i < 16 * size; i++) addBubble(x + lkRnd(-14, 14) * size, (OWM ? lakeLevelAt(x) : WATER_Y) + lkRnd(2, 18), lkRnd(-20, 20) + (vx || 0) * 0.05, -lkRnd(20, 60), lkRnd(1, 3));
   for (let i = 0; i < 8 * size; i++) spawnFoam(x + lkRnd(-22, 22) * size, lkRnd(1.5, 3));
 }
 // a civilian vehicle lost with you in it: you're put ashore (as when it's shot down)
@@ -41405,12 +41449,12 @@ function drawLake(x0, x1, over) {
 }
 // the lake's own bed at x: under an island standing in it, the ground below the island (its water goes on under it - user Nov 1:
 // a segment in a sea had black under it, the water stopping at its top)
-const lakeBedAt = x => { const c = ltCol(x); return ISLE !== null && ISLE[c] === 2 ? landBelow(x, WATER_Y + LT_CELL) : landTop(x); };
+const lakeBedAt = x => { const c = ltCol(x); return ISLE !== null && ISLE[c] === 2 ? landBelow(x, lakeLevelAt(x) + LT_CELL) : landTop(x); };
 function lakePath(a, b, step, yOff) {
   C.beginPath();
   let first = true;
   for (let x = a; x <= b + 0.01; x += step) { const X = PX(x), Y = PY(surfaceY(x)) + yOff; if (first) { C.moveTo(X, Y); first = false; } else C.lineTo(X, Y); }
-  for (let x = b; x >= a - 0.01; x -= step) C.lineTo(PX(x), PY(Math.max(WATER_Y, lakeBedAt(x))) + 2);
+  for (let x = b; x >= a - 0.01; x -= step) C.lineTo(PX(x), PY(Math.max(lakeLevelAt(x), lakeBedAt(x))) + 2);
   C.closePath();
 }
 // (user Oct 29, a desert lake's shore: "The waterline should not be rendering on top of the terrain" - the lake's span runs from
@@ -41423,8 +41467,9 @@ function lakeWet(L) {
   const v = (land.ver || 0) + 1;
   if (L._wv === v) return L._w;
   let a = L[0], b = L[1];
-  while (a < b && landTop(a) <= WATER_Y + 0.5) a += 2;
-  while (b > a && landTop(b) <= WATER_Y + 0.5) b -= 2;
+  const lv = lakeLv(L);
+  while (a < b && landTop(a) <= lv + 0.5) a += 2;
+  while (b > a && landTop(b) <= lv + 0.5) b -= 2;
   L._w = [Math.max(L[0], a - 2), Math.min(L[1], b + 2)]; L._wv = v;
   return L._w;
 }
@@ -41446,13 +41491,14 @@ function drawLakeRoots(x0, x1) {
     // water, its decks and its tint laid again over the lake's own water, as the sea's pass lays them - 43-render-objects)
     C.save(); lakePath(a, b, step, 1); C.clip();
     try {
-      const deep = C.createLinearGradient(0, PY(WATER_Y), 0, PY(SEABED_DEEP + 150));
+      const dl = lakeLv(L) - WATER_Y;                            // (its own level: the sea's colours from its surface down - Nov 2)
+      const deep = C.createLinearGradient(0, PY(WATER_Y + dl), 0, PY(SEABED_DEEP + 150 + dl));
       for (const [t, c] of seaDeepStops(E.sunset, dz)) deep.addColorStop(t, rgbs(c));
-      const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12)), B = bh + SHY + 50;
+      const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12 + dl)), B = bh + SHY + 50;
       C.fillStyle = deep; C.fillRect(X0, Y, X1 - X0, B - Y);
       if (E.overcast > 0.05) { C.fillStyle = `rgba(4,10,26,${(0.38 * E.overcast).toFixed(3)})`; C.fillRect(X0, Y, X1 - X0, B - Y); }
       drawSeaDecks();
-      const og = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(SEABED_DEEP + 150));
+      const og = C.createLinearGradient(0, PY(WATER_Y - 12 + dl), 0, PY(SEABED_DEEP + 150 + dl));
       for (const [t, c] of seaOverStops(E.sunset, ov, oz)) og.addColorStop(t, rgbs(c.slice(0, 3), c[3]));
       C.fillStyle = og; C.fillRect(X0, Y, X1 - X0, B - Y);
     } finally { C.restore(); }
@@ -41516,7 +41562,7 @@ function stepTankSink(t, dt) {
   t.sinkT += dt;
   const floor = onLand(t.x) ? landBelow(t.x, t.y - 10) : seabedY(t.x);
   t.y = Math.min(floor, t.y + 26 * dt); t.a *= 1 - dt;
-  if (lakeSinkR() < dt * 12) spawnSmoke(t.x + lkRnd(-20, 20), WATER_Y - 2, { kind: 'dust', mist: true, r: lkRnd(2, 4), grow: 2, lift: 4, vx: lkRnd(-6, 6), vy: -lkRnd(4, 12), life: lkRnd(0.8, 1.4), alpha: 0.5 });
+  if (lakeSinkR() < dt * 12) spawnSmoke(t.x + lkRnd(-20, 20), lakeLevelAt(t.x) - 2, { kind: 'dust', mist: true, r: lkRnd(2, 4), grow: 2, lift: 4, vx: lkRnd(-6, 6), vy: -lkRnd(4, 12), life: lkRnd(0.8, 1.4), alpha: 0.5 });
   if (t.y >= floor - 0.5 || t.sinkT > 8) { t.state = 'dead'; landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: 0, facing: t.facing, t: 0, burn: 0, wet: true }); }   // (wet: it goes on down to the bottom - stepArmyWreck)
 }
 // a helicopter that touches the water: it goes in and sinks
@@ -41532,7 +41578,7 @@ function stepHeliSink(h, dt) {
   const floor = (onLand(h.x) ? landBelow(h.x, h.y) : seabedY(h.x)) - heliSkid();
   h.vx *= 1 - dt * 2; h.x += h.vx * dt; h.y = Math.min(floor, h.y + 30 * dt);
   h.tilt += (h.facing * 0.5 - h.tilt) * Math.min(1, dt); h.spin = Math.max(0, h.spin - dt); h.rotor += dt * 4 * h.spin;
-  if (lakeSinkR() < dt * 10) spawnSmoke(h.x + lkRnd(-15, 15), WATER_Y - 2, { kind: 'dust', mist: true, r: lkRnd(2, 4), grow: 2, lift: 4, vx: lkRnd(-6, 6), vy: -lkRnd(4, 12), life: lkRnd(0.8, 1.4), alpha: 0.5 });
+  if (lakeSinkR() < dt * 10) spawnSmoke(h.x + lkRnd(-15, 15), lakeLevelAt(h.x) - 2, { kind: 'dust', mist: true, r: lkRnd(2, 4), grow: 2, lift: 4, vx: lkRnd(-6, 6), vy: -lkRnd(4, 12), life: lkRnd(0.8, 1.4), alpha: 0.5 });
   if (h.y >= floor - 0.5 || h.sinkT > 8) { h.state = 'dead'; landWrecks.push({ kind: 'heli', id: h.id, x: h.x, y: h.y + heliSkid(), a: h.tilt, facing: h.facing, t: 0, burn: 0, wet: true }); h.wrecked = true; }
 }
 /* ---- the tank's smoke screen (user Oct 25: "works the same way" as the battleship's) ---- */
@@ -41551,7 +41597,7 @@ function stepTankSmoke(t, dt) {
   while (t.smokeAcc >= 1) { t.smokeAcc -= 1; FXK = REAL.tank; screenPuff(t.x - t.facing * lkRnd(10, 30) * FXK, t.y - lkRnd(4, 10) * FXK, t.vx); FXK = 1; }
 }
 // what a smoke screen sits on: the ground, or the lake
-const screenFloor = x => OWM ? (lakeAt(x) ? WATER_Y : landTopM(x)) : WATER_Y;
+const screenFloor = x => OWM ? (lakeAt(x) ? lakeLevelAt(x) : landTopM(x)) : WATER_Y;
 
 /* ---- fish in the lake (user Oct 25: "fish on the bottom of the lake"): the sea's fish, a dozen or so, nosing about
    near the bottom; they turn back from the shallows, and dart away from a splash ---- */
@@ -41595,19 +41641,19 @@ function stepLakeFishOne(f, dt) {
       const L = f.lead, tx = L.x + f.off[0] * Math.sign(L.vx || 1) + Math.sin(f.ph * 1.7) * 3, ty = L.y + f.off[1] + Math.sin(f.ph * 2.3) * 2;
       if (f.scare > 0) { f.scare -= dt; f.x += f.vx * dt; f.y += f.vy * dt; }
       else { f.x += (tx - f.x) * Math.min(1, dt * 2.2); f.y += (ty - f.y) * Math.min(1, dt * 2.2); f.vx = L.vx; }
-      const g = landTop(f.x); f.y = clamp(f.y, WATER_Y + 6, g - 3);
+      const g = landTop(f.x), lv = lakeLevelAt(f.x); f.y = clamp(f.y, lv + 6, g - 3);
       if (!lakeAt(f.x)) f.x = L.x;
       return;
     }
     const g = landTop(f.x), ahead = landTop(f.x + Math.sign(f.vx) * 30);
     // the shallows ahead (or the shore): about turn
-    if (ahead < WATER_Y + 22 && f.scare <= 0) f.vx = -f.vx;
+    if (ahead < lakeLevelAt(f.x) + 22 && f.scare <= 0) f.vx = -f.vx;
     if (f.scare > 0) f.scare -= dt;
     else { const cruise = Math.sign(f.vx) * (8 + 6 * Math.sin(f.ph * 0.7)); f.vx += (cruise - f.vx) * Math.min(1, dt * 1.5); if (lfR() < dt * 0.05) f.vx = -f.vx; }
     // near the bottom, gently up and down
-    const want = clamp(g - f.lift + 4 * Math.sin(f.ph * 1.3), WATER_Y + 10, g - 4);
+    const want = clamp(g - f.lift + 4 * Math.sin(f.ph * 1.3), lakeLevelAt(f.x) + 10, g - 4);
     f.vy += ((want - f.y) * 1.5 - f.vy) * Math.min(1, dt * 2);
-    f.x += f.vx * dt; f.y = clamp(f.y + f.vy * dt, WATER_Y + 8, g - 3);
+    f.x += f.vx * dt; f.y = clamp(f.y + f.vy * dt, lakeLevelAt(f.x) + 8, g - 3);
     if (!lakeAt(f.x)) { f.x -= f.vx * dt * 2; f.vx = -f.vx; }
   }
 // a splash near them: they bolt away from it
@@ -41793,6 +41839,59 @@ function drawLakeSea(x0, x1) {
 }
 // its rock formations: over the lake's water, as the sea's are drawn over the sea's tint (renderObjects)
 function drawLakeRocks(x0, x1) { if (land.lkRocks) lakeClip(x0, x1, () => drawRockForms(x0, x1, true)); }
+
+/* ---- the TERRAIN tab's water lines (user Nov 2 13:13: "There will be a line showing the water level that I can change. The only
+   water level that is locked is the official ocean water level"): over every pocket the ground holds, its level as a blue line
+   from rim to rim with a handle in its middle; drag it up or down (never over its rim - where it would spill, shown dotted; under
+   its bottom it is dry). Kept at once (LAKE_SET), built on REFRESH ---- */
+const LAKE_ED = { drag: null, ptr: null, hover: null };
+const LAKE_POCKET_MIN = 20;                                       // (a dip shallower than this from its rim: no handle - the hills' small hollows)
+const lakeEdPockets = () => (land.pockets || []).filter(K => K.bot - K.spill >= LAKE_POCKET_MIN);
+function lakeEdLevel(K) { if (LAKE_ED.drag === K && LAKE_ED.ptr) return LAKE_ED.ptr.y; return K.lv != null ? K.lv : pocketLevel(K); }
+function lakeEdPick(e) {
+  const [x, y] = screenToWorld(e.clientX, e.clientY), i = ONEVIEW() || e.clientX * dpr / PIXW < Math.floor(bw / 2) ? 0 : 1;
+  const r = (e.pointerType === 'touch' ? 22 : 11) * dpr / PIXW / (S * cam.view[i].z);
+  for (const K of lakeEdPockets()) { const lv = lakeEdLevel(K), hx = (K.x0 + K.x1) / 2; if (Math.abs(x - hx) < r * 1.4 && Math.abs(y - lv) < r * 1.4) return { K, x, y }; }
+  return null;
+}
+function lakeSetLevel(K, y) {
+  const lv = Math.round(clamp(y, K.spill, K.bot + 40));
+  LAKE_SET = LAKE_SET.filter(q => !(q.x > K.x0 && q.x < K.x1));
+  if (Math.abs(lv - Math.max(K.spill, WATER_Y)) > 0.5) LAKE_SET.push({ x: Math.round(K.deep), y: lv });   // (at its default: no entry)
+  K.lv = lv; lakeSave(); ISL_ED.dirty = true; if (typeof terrainSync === 'function') terrainSync();   // (REFRESH builds it - terrainRefresh)
+}
+window.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'mouse' && e.button === 1) return;
+  if (!floorEdOn() || onEdUI(e) || !land.pockets) return;
+  const q = lakeEdPick(e); if (!q) return;
+  e.stopImmediatePropagation(); e.preventDefault(); edClaim('line');
+  if (e.button === 2) { lakeSetLevel(q.K, Math.max(q.K.spill, WATER_Y)); return; }   // (right-click: back to its default)
+  LAKE_ED.drag = q.K; LAKE_ED.ptr = { id: e.pointerId, y0: lakeEdLevel(q.K), py: q.y, y: lakeEdLevel(q.K) };
+}, { capture: true, passive: false });
+window.addEventListener('pointermove', e => {
+  const q = LAKE_ED.ptr;
+  if (!q || q.id !== e.pointerId) { if (e.pointerType === 'mouse' && floorEdOn() && !onEdUI(e) && !e.buttons && land.pockets) { const h = lakeEdPick(e), was = LAKE_ED.hover; LAKE_ED.hover = h && h.K; if (!!h !== !!was) document.body.style.cursor = h ? 'ns-resize' : ''; } return; }
+  e.stopImmediatePropagation();
+  const [, y] = screenToWorld(e.clientX, e.clientY), K = LAKE_ED.drag;
+  q.y = clamp(q.y0 + y - q.py, K.spill, K.bot + 40);
+}, { capture: true, passive: true });
+function lakeEdUp(e) { const q = LAKE_ED.ptr; if (!q || q.id !== e.pointerId) return; e.stopImmediatePropagation(); const K = LAKE_ED.drag; LAKE_ED.drag = LAKE_ED.ptr = null; if (Math.abs(q.y - q.y0) > 0.5) lakeSetLevel(K, q.y); }
+window.addEventListener('pointerup', lakeEdUp, { capture: true });
+window.addEventListener('pointercancel', lakeEdUp, { capture: true });
+// drawn with the shapes (islEdDraw): each pocket's level line, its rim dotted, the ocean's line locked (a padlock-grey dash)
+function lakeEdDraw() {
+  if (!land.pockets) return;
+  const t = Math.max(1, Math.round(1.5 * dpr / PIXW)), hs = Math.max(5, Math.round(4.5 * dpr / PIXW));
+  for (const K of lakeEdPockets()) {
+    const X0 = Math.round(PX(K.x0)), X1 = Math.round(PX(K.x1)); if (X1 < 0 || X0 > VWP) continue;
+    const lv = lakeEdLevel(K), Y = Math.round(PY(lv)), Ys = Math.round(PY(K.spill)), hot = LAKE_ED.drag === K || LAKE_ED.hover === K;
+    C.fillStyle = 'rgba(110,200,255,0.5)'; for (let X = X0; X < X1; X += 10) C.fillRect(X, Ys - (t >> 1), 4, t);   // (its rim: the highest it can go)
+    C.fillStyle = hot ? '#ffffff' : 'rgba(80,190,255,0.95)'; C.fillRect(X0, Y - (t >> 1), X1 - X0, hot ? t * 2 : t);
+    const HX = Math.round(PX((K.x0 + K.x1) / 2));
+    C.fillStyle = '#04070f'; C.fillRect(HX - hs - 1, Y - hs - 1, 2 * hs + 2, 2 * hs + 2);
+    C.fillStyle = hot ? '#ffffff' : '#50beff'; C.fillRect(HX - hs, Y - hs, 2 * hs, 2 * hs);
+  }
+}
 
 /* ---- the lake's life (OPEN WORLD, user Oct 26, with pictures: gen/open/ref/lake_bottom_proposal_oct26.png, and how it
    was: lake_bottom_current_oct26.png) - "The transition to the ground should have more variety, we should have schools
@@ -44359,7 +44458,7 @@ function lakeRebuild() {
   let grew = false;
   for (const L of land.lakes) {
     let a = Math.floor(L[0] / LT_CELL), b = Math.ceil(L[1] / LT_CELL) - 1;
-    const wet = c => c >= 0 && c < land.cols && onLand(c * LT_CELL + 1) && landTop(c * LT_CELL + 1) > WATER_Y + 0.5;
+    const lv = lakeLv(L), wet = c => c >= 0 && c < land.cols && onLand(c * LT_CELL + 1) && landTop(c * LT_CELL + 1) > lv + 0.5;   // (its own level - Nov 2)
     while (wet(a - 1)) a--;
     while (wet(b + 1)) b++;
     if (a * LT_CELL < L[0] - 0.01 || (b + 1) * LT_CELL > L[1] + 0.01) { L[0] = a * LT_CELL; L[1] = (b + 1) * LT_CELL; grew = true; }
@@ -44370,6 +44469,7 @@ function lakeRebuild() {
       const x = i * DX, lake = onLand(x) && lakeAt(x);
       wetA[i] = !onLand(x) || lake ? 1 : 0; ambK[i] = lake ? 0.3 : wetA[i];
       if (lake) calmA[i] = 0.8;
+      if (lake && lakeLv(L) !== WATER_Y) { if (!WBASE) WBASE = new Float32Array(N).fill(WATER_Y); WBASE[i] = lakeLv(L); }
     }
     calmRuns = [];
     for (let i = 0; i < N;) { if (calmA[i] < 0.999) { let j = i; while (j < N && calmA[j] < 0.999) j++; calmRuns.push([i, j]); i = j; } else i++; }
@@ -44378,7 +44478,7 @@ function lakeRebuild() {
   }
   // the bed's still layers painted again (a lake grown: its life laid out again)
   if (grew) lakeDeco = null;
-  else if (lakeDeco) for (const D of lakeDeco) { for (let x = D.a; x < D.b; x += 6) D.maxD = Math.max(D.maxD, landTop(x) - WATER_Y); D._bed = null; D._back = null; }
+  else if (lakeDeco) for (const D of lakeDeco) { for (let x = D.a; x < D.b; x += 6) D.maxD = Math.max(D.maxD, landTop(x) - lakeLevelAt(x)); D._bed = null; D._back = null; }
 }
 
 /* ---- the launch pads: each on the ground under its whole width (it tips into a hole dug under one end) ---- */
@@ -46296,6 +46396,8 @@ function ltBands() {
   return tot;
 }
 const ltCol = x => Math.floor(x / LT_CELL), ltRow = y => Math.floor((y - LT_Y0) / LT_CELL);
+// (Nov 2, LAKE LEVELS) the water's level over column c for the field behind: its pocket's (a lake's own), else the ocean's
+function lakeColLv(c) { const x = c * LT_CELL; for (const K of land.pockets || []) if (x >= K.x0 && x < K.x1) return K.lv != null ? K.lv : WATER_Y; return WATER_Y; }
 function landSolid(x, y) { return ltCell(ltCol(x), ltRow(y)) !== M_AIR; }
 // the first ground at or below y in column x (world y of its top), or the grid's bottom
 function landBelow(x, y) {
@@ -47022,7 +47124,7 @@ function paintLandBack(k) {
   let G = LT_PAL[M_GRASS];
   for (let q = 0; q < w; q++) {
     const c = c0 + q;
-    if (!onLand(c * LT_CELL) || isleCol(c * LT_CELL) || land.surf[c] > WATER_Y - 2) continue;   // (and any water in a country - a lake is the sea's now, its own decks behind it: user Nov 1 12:54)   // (the sea's stretch: nothing; an island: no field behind; a sea in a country - its bed marked SEA: none either, user Nov 1)
+    if (!onLand(c * LT_CELL) || isleCol(c * LT_CELL) || land.surf[c] > lakeColLv(c) - 2) continue;   // (and any water in a country - a lake is the sea's now, its own decks behind it: user Nov 1 12:54)   // (the sea's stretch: nothing; an island: no field behind; a sea in a country - its bed marked SEA: none either, user Nov 1)
     G = lookD(c * LT_CELL) ? DESERT_FIELD : LT_PAL[M_GRASS];   // (the desert's field is sand, with darker patches; none over the airfield - fieldK)
     D = ltPal(M_DIRT, c);
     const DSb = lookD(c * LT_CELL), FH = fieldH(c);
@@ -49615,7 +49717,7 @@ function terrainReset() { if (KR_U !== KR_DEF[0] || KR_DY !== KR_DEF[1]) krReset
 // COPY gives {"F": the floor's points, "L"/"R": each country's, "S": the structures}; LOAD takes that, or either old
 // tab's text (the floor's [[u, depth]...], or the land's {"L", "R", "S"})
 // (G: the one ground line, end to end - 50-land-zz-ground)
-function terrainCopyText() { const o = { G: GROUND, S: LAND_STRUCTS }; if (STRS.length) o.ST = STRS; if (NATURE.length) o.N = NATURE; if (WORLD_EXT) o.W = WORLD_EXT; if (ISLANDS.length) o.I = ISLANDS; if (DOCK_SET) o.D = DOCK_SET; if (DOCK_OWN) o.DO = DOCK_OWN; if (STRETCH_SET) o.X = STRETCH_SET; if (KR_U !== null) o.K = KR_DY === null ? KR_U : [KR_U, KR_DY]; if (WRECK_SET.some(e => e)) o.P = WRECK_SET; if (DOCKS_X.length) o.DX = DOCKS_X; return JSON.stringify(o); /* (the towers: GUN TOWER structures, in ST - Nov 1) */ }
+function terrainCopyText() { const o = { G: GROUND, S: LAND_STRUCTS }; if (STRS.length) o.ST = STRS; if (NATURE.length) o.N = NATURE; if (WORLD_EXT) o.W = WORLD_EXT; if (ISLANDS.length) o.I = ISLANDS; if (LAKE_SET.length) o.LK = LAKE_SET; if (DOCK_SET) o.D = DOCK_SET; if (DOCK_OWN) o.DO = DOCK_OWN; if (STRETCH_SET) o.X = STRETCH_SET; if (KR_U !== null) o.K = KR_DY === null ? KR_U : [KR_U, KR_DY]; if (WRECK_SET.some(e => e)) o.P = WRECK_SET; if (DOCKS_X.length) o.DX = DOCKS_X; return JSON.stringify(o); /* (the towers: GUN TOWER structures, in ST - Nov 1) */ }
 function terrainLoad(text) {
   const o = JSON.parse(text);
   if (Array.isArray(o)) { if (!floorValid(o)) throw new Error('paste the text COPY gives'); groundLoad(groundFrom(groundPart('L'), o, groundPart('R'))); return; }   // (an old floor-only COPY)
@@ -49648,6 +49750,7 @@ function terrainLoad(text) {
   if (JSON.stringify(o.DX || []) !== JSON.stringify(DOCKS_X)) { DOCKS_X = (o.DX || []).map(d => Object.assign({}, d)); docksXSave(); }
   if (JSON.stringify(o.DO || null) !== JSON.stringify(DOCK_OWN)) { const D = o.DO || { L: 0, R: 1 }; DOCK_OWN = { L: D.L, R: 0 }; dockOwnSet(true, D.R); }
   // (T, the old towers: they are GUN TOWER structures since Nov 1 - in ST)
+  if (o.LK !== undefined || LAKE_SET.length) { LAKE_SET = Array.isArray(o.LK) ? o.LK.filter(q => q && isFinite(q.x) && isFinite(q.y)).map(q => ({ x: +q.x, y: +q.y })) : []; lakeSave(); ISL_ED.dirty = true; }   // (the lakes' own levels - 50-land-lake, Nov 2)
   if (o.I !== undefined || ISLANDS.length) { ISLANDS = (o.I || []).map(I => Object.assign({ p: I.p.map(q => q.slice()) }, I.k ? { k: I.k } : I.solid ? { k: 'S' } : {}, I.g != null ? { g: I.g } : {})); /* (a shape's kind and group with it - 50-land-shapes) */ islChanged(); }
   if (o.N !== undefined || NATURE.length) { NATURE = natureValid(o.N) ? JSON.parse(JSON.stringify(o.N)) : []; NE.sel = null; natureChanged(); }   // (the fish areas - 50-zz-nature)
   if (o.ST !== undefined || STRS.length) { STRS = strsValid(o.ST) ? strsFix(JSON.parse(JSON.stringify(o.ST))) : []; SE.sel = []; strChanged(); }   // (the placed structures - 50-zz-struct)
@@ -50058,7 +50161,7 @@ function tankSettle(t, dt, snap) {
   t.a += (a - t.a) * Math.min(1, dt * 8);
 }
 // in the water over its tracks: a lake, or the sea where it isn't standing on a ship's deck
-const tankUnder = t => lakeAt(t.x) ? t.y > WATER_Y + 6 : !onLand(t.x) && !t.deck && t.y > surfaceY(t.x) + 6;
+const tankUnder = t => lakeAt(t.x) ? t.y > lakeLevelAt(t.x) + 6 : !onLand(t.x) && !t.deck && t.y > surfaceY(t.x) + 6;
 function stepTank(t, dt) {
   if (t.state === 'sink') { stepTankSink(t, dt); return; }
   if (t.state !== 'alive') return;
@@ -58024,6 +58127,7 @@ async function start(data) {
   if (SW_IN_WORKER) { swHostReady(); return; }
   // (terrain shapes, Nov 2 - 50-land-shapes.js) what the shapes built: per shape its kind, width, columns with spans; a few
   // columns' values (the solids' top, the floor under the water, the ground's top, holes) - tools and the user's GPU check
+  Object.assign(window.__game, { lakesInfo: () => ({ lakes: (land.lakes || []).map(L => ({ a: L[0], b: L[1], lv: lakeLv(L), surf: surfaceY((L[0] + L[1]) / 2), at: lakeAt((L[0] + L[1]) / 2) })), pockets: (land.pockets || []).map(K => ({ x0: K.x0, x1: K.x1, spill: Math.round(K.spill), bot: Math.round(K.bot), lv: K.lv })), set: LAKE_SET, dev: LAKE_DEV }) });
   Object.assign(window.__game, { shapesInfo: (xs) => ({ base: SHP.base, shapes: ISLANDS.map((I, n) => ({ k: shpK(I), x0: Math.round(shpPoly(I).x0), x1: Math.round(shpPoly(I).x1), cols: SHP.cols[n] ? SHP.cols[n].iv.filter(v => v.length).length : 0 })), isles: land.isles, islRuns: land.islRuns, solRoots: solRoots.length, islRoots: islRoots.length, at: (xs || [12600, 15300, 15800, 16300]).map(x => ({ x, isle: ISLE === null ? null : ISLE[Math.floor(x / 2.5)], stop: land.stop ? land.stop[Math.floor(x / 2.5)] : null, sunder: land.sunder ? land.sunder[Math.floor(x / 2.5)] : null, top: landTop(x), sand: sandY(x), bed: seabedY(x), hole: shpHoleAt(Math.floor(x / 2.5), 400) })) }) });
   if (SW_WANT) swStart();
   requestAnimationFrame(t => { last = t; requestAnimationFrame(frame); });
