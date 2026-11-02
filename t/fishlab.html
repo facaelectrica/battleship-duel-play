@@ -4119,8 +4119,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 609;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 12:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 611;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 12:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -52043,10 +52043,10 @@ function fishBoatFx(j, dt) {
     // her funnel's size: a stream that rises steadily and slants back behind her as she goes
     j.fsm = (j.fsm || 0) - dt;
     if (j.fsm <= 0) {
-      const W = 0.6 * UPM, RISE = 3.2,   /* (user 11:29: slower out of the funnel - heavier) */ r0 = 0.35 * W, r1 = 5 * W, life = 11 + storyR() * 2,   /* (user 11:04: hers fades in half the time and swells as it goes - her concept picture) */ [x, y] = at(FISH_FUNNEL), vs = dir * sp;
+      const W = 0.6 * UPM, RISE = 3.2,   /* (user 11:29: heavier - a slow lift; 11:42: "its exiting" - it leaves the funnel fast (EXIT, m/s) and slows over its first half second) */ EXIT = 4.5 * UPM, r0 = 0.35 * W, r1 = 5 * W, life = 11 + storyR() * 2,   /* (user 11:04: hers fades in half the time and swells as it goes - her concept picture) */ [x, y] = at(FISH_FUNNEL), vs = dir * sp;
       j.fsm = clamp(0.45 * W / Math.max(sp, 15), 0.05, 1) / thr;
       spawnSmoke(x + (storyR() - 0.5) * 0.2 * W, y + 0.3 * r0, {   // (at the funnel's mouth - 10:50: there was a gap)
- kind: 'funnel', rise: true, r: r0, grow: (r1 - r0) / (life * 0.5), rmax: r1, lift: 2.2 * RISE, steady: true, trailV: vs, vx: vs + (storyR() - 0.5) * 4, jet: 0.6, vy: -1.2 * RISE * (0.9 + storyR() * 0.2), life, fadeFrom: 0.1, alpha: 0.7, dark: 0.4, buoy: 0.15, drift: 4, lumpy: true, climb: Math.max(0, WATER_Y - 40 - y), chain: smStream(j, 0), link: 3 * r1 });
+ kind: 'funnel', rise: true, r: r0, grow: (r1 - r0) / (life * 0.5), rmax: r1, lift: 2.2 * RISE, steady: true, trailV: vs, vx: vs + (storyR() - 0.5) * 4, jet: 0.6, vy: -EXIT * (0.85 + storyR() * 0.3), life, fadeFrom: 0.1, alpha: 0.7, dark: 0.4, buoy: 0.15, drift: 4, lumpy: true, climb: Math.max(0, WATER_Y - 40 - y), chain: smStream(j, 0), link: 3 * r1 });
     }
     j.fbb = (j.fbb || 0) + dt * (4 + 30 * go);
     while (j.fbb >= 1) { j.fbb -= 1; const [x, y] = at(FISH_SCREW); addBubble(x - dir * (0.4 + storyR() * 1.2) * UPM, y + storyR() * 4 - 2, -dir * (10 + 20 * storyR()), -(10 + 25 * storyR()), 0.6 + storyR() * 1.4); }
@@ -52114,18 +52114,26 @@ function sfxBoatTurn(x, a = 1) {
 // deck; with it down, on the middle of the boat (mast top to waterline) and the whole net together - and when that's more than the
 // player's zoom shows, out just far enough to hold it all (eased), back to the player's own zoom as it comes up. (The one place the
 // zoom moves without the player: the user's ask.) Returns [x, y] or null (the usual view)
-const NET_CAM = [{ own: null, set: null }, { own: null, set: null }];
+// (user 11:42: "The camera should NEVER EVER snap like that. Must be always smooth") where it looks is eased - kept as an offset from
+// the boat (ox, oy) so it never lags her, gliding to the net's frame and back over NET_CAM_S
+const NET_CAM_S = 0.6;
+const NET_CAM = [{ own: null, set: null, ox: 0, oy: 0, t: null }, { own: null, set: null, ox: 0, oy: 0, t: null }];
 function netCam(p, v) {
   const N = v.net, Z = NET_CAM[p] || NET_CAM[0], out = N && N.ph === 0 && N.lo != null;
   if (Z.set != null && scopes[p].level !== Z.set) Z.own = scopes[p].level;   // (the player zoomed: theirs from now on)
   if (Z.own == null) Z.own = scopes[p].level;
-  if (!out) { if (Z.set != null && scopes[p].level !== Z.own) { zoomSlow(p); setScope(p, Z.own); } Z.set = null; Z.own = null; return null; }
+  const ease = (tx, ty) => {   // (the frame wanted, eased: one rule both ways)
+    const dt = Z.t == null || Z.v !== v ? 1e9 : clamp(time - Z.t, 0, 0.25); Z.t = time; if (Z.v !== v) { Z.v = v; Z.ox = tx - v.x; Z.oy = ty - FOCUS_Y; }
+    const a = 1 - Math.exp(-dt / NET_CAM_S); Z.ox += (tx - v.x - Z.ox) * a; Z.oy += (ty - FOCUS_Y - Z.oy) * a;
+    return [v.x + Z.ox, FOCUS_Y + Z.oy];
+  };
+  if (!out) { if (Z.set != null && scopes[p].level !== Z.own) { zoomSlow(p); setScope(p, Z.own); } Z.set = null; Z.own = null; return ease(v.x, FOCUS_Y); }
   const h = storyBoatSize(v)[1], top = v.y + h * FISH_DRAFT - h, bot = Math.max(v.y, WATER_Y + N.d), lo = Math.min(N.lo, v.x - storyBoatSize(v)[0] / 2), hi = Math.max(N.hi, v.x + storyBoatSize(v)[0] / 2);
   const needH = (bot - top) * 1.25, needW = (hi - lo) * 1.2;
   let lv = Z.own; while (lv > 1 && (VIEW_H / ZOOM_LEVELS[lv - 1] < needH || VIEW_W / ZOOM_LEVELS[lv - 1] < needW)) lv--;
   if (scopes[p].level !== lv) { zoomSlow(p); setScope(p, lv); }
   Z.set = lv;
-  return [(lo + hi) / 2, Math.max(FOCUS_Y, (top + bot) / 2)];
+  return ease((lo + hi) / 2, Math.max(FOCUS_Y, (top + bot) / 2));
 }
 // (user 10:11: "the only fish you catch are the ones that pass by the sinker and the float. If it touches another part of the
 // net, it should not count") a fish is caught when it crosses the mouth - the frame rope from the float to the sinker - from the
@@ -54350,7 +54358,7 @@ function strTilesSweep() { wtSweep(STL.L[0]); wtSweep(STL.L[1]); }
    under its middle - the land, an island (landTop), or for a dock the water. Sized by the art's own metres (assets19/
    tropical.json from gen/tropical/prep.py) and UPM. Kept in this browser (bd_structs), in the TERRAIN COPY as "ST" (T is the towers'); online
    none yet. The art: one sheet (img.tropical), cut on first use. ---- */
-const TROP = {"home-hut":{"w":203,"h":98,"m":0.05911,"x":621,"y":1050},"hangar-cessna-small":{"w":201,"h":65,"m":0.08955,"x":533,"y":1186},"control-tower":{"w":67,"h":154,"m":0.0974,"x":1901,"y":856},"windsock":{"w":87,"h":236,"m":0.02542,"x":0,"y":416},"palm-tropical":{"w":127,"h":198,"m":0.06061,"x":410,"y":654},"taxi-shelter-front":{"w":209,"h":93,"m":0.04785,"x":826,"y":1050},"taxi-shelter-back":{"w":209,"h":93,"m":0.04785,"x":1037,"y":1050},"dock-wood":{"w":160,"h":80,"m":0.025,"x":1719,"y":1050},"ground-tropical":{"w":275,"h":23,"m":0.08772,"x":1742,"y":1186},"fishing-boat-0":{"w":615,"h":381,"m":0.01945,"x":1033,"y":0},"fishing-boat-1":{"w":469,"h":394,"m":0.01945,"x":562,"y":0},"fishing-boat-2":{"w":329,"h":411,"m":0.01945,"x":231,"y":0},"fishing-boat-3":{"w":229,"h":414,"m":0.01945,"x":0,"y":0},"hospital":{"w":192,"h":134,"m":0.05435,"x":0,"y":1050},"school":{"w":200,"h":90,"m":0.05435,"x":1248,"y":1050},"house-orange-roof":{"w":184,"h":77,"m":0.05435,"x":206,"y":1186},"house-blue-roof":{"w":204,"h":79,"m":0.05435,"x":0,"y":1186},"house-tin-roof":{"w":110,"h":58,"m":0.08772,"x":736,"y":1186},"fire-station":{"w":140,"h":125,"m":0.08772,"x":194,"y":1050},"police-station":{"w":130,"h":90,"m":0.08772,"x":1450,"y":1050},"church":{"w":75,"h":115,"m":0.08772,"x":458,"y":1050},"market":{"w":74,"h":52,"m":0.08772,"x":848,"y":1186},"lighthouse":{"w":37,"h":85,"m":0.08772,"x":1680,"y":1050},"building-1":{"w":78,"h":145,"m":0.08772,"x":1970,"y":856},"building-2":{"w":85,"h":175,"m":0.08772,"x":768,"y":856},"forest-back-tropical":{"w":704,"h":197,"m":0.08122,"x":539,"y":654},"forest-foliage-tropical":{"w":400,"h":46,"m":0.12174,"x":1018,"y":1186},"sand-stripe":{"w":408,"h":20,"m":0.03,"x":186,"y":1267},"rock-tile":{"w":228,"h":228,"m":0.0614,"x":89,"y":416},"uw-tile":{"w":120,"h":120,"m":0.0614,"x":336,"y":1050},"uw-edge-1":{"w":84,"h":106,"m":0.0614,"x":535,"y":1050},"uw-edge-2":{"w":139,"h":69,"m":0.0614,"x":392,"y":1186},"uw-edge-3":{"w":96,"h":87,"m":0.0614,"x":1582,"y":1050},"facebush-1":{"w":90,"h":34,"m":0.04706,"x":1650,"y":1186},"facebush-2":{"w":92,"h":47,"m":0.03404,"x":924,"y":1186},"facebush-3":{"w":67,"h":45,"m":0.03556,"x":1500,"y":1186},"facebush-4":{"w":79,"h":42,"m":0.0381,"x":1569,"y":1186},"facebush-5":{"w":78,"h":46,"m":0.03478,"x":1420,"y":1186},"taxi":{"w":360,"h":156,"m":0.01389,"x":855,"y":856},"suv":{"w":328,"h":156,"m":0.01402,"x":1217,"y":856},"van":{"w":352,"h":156,"m":0.01591,"x":1547,"y":856},"ambulance":{"w":408,"h":200,"m":0.01642,"x":0,"y":654},"box_truck":{"w":412,"h":212,"m":0.0182,"x":773,"y":416},"dump_truck":{"w":452,"h":220,"m":0.01991,"x":319,"y":416},"fire_engine":{"w":488,"h":192,"m":0.02049,"x":0,"y":856},"city_bus":{"w":504,"h":196,"m":0.02421,"x":1245,"y":654},"school_bus":{"w":604,"h":208,"m":0.01821,"x":1187,"y":416},"motorcycle":{"w":276,"h":188,"m":0.00797,"x":490,"y":856},"tractor":{"w":376,"h":240,"m":0.01144,"x":1650,"y":0},"shore-rocks-1":{"w":146,"h":20,"m":0.075,"x":596,"y":1267},"shore-rocks-2":{"w":105,"h":15,"m":0.075,"x":744,"y":1267},"shore-rocks-3":{"w":144,"h":15,"m":0.075,"x":851,"y":1267},"bushes-1":{"w":95,"h":21,"m":0.06364,"x":89,"y":1267},"bushes-2":{"w":87,"h":22,"m":0.06364,"x":0,"y":1267}};
+const TROP = {"control-tower":{"w":67,"h":154,"m":0.0974,"x":1901,"y":856},"windsock":{"w":87,"h":236,"m":0.02542,"x":0,"y":416},"palm-tropical":{"w":127,"h":198,"m":0.06061,"x":410,"y":654},"taxi-shelter-front":{"w":209,"h":93,"m":0.04785,"x":826,"y":1050},"taxi-shelter-back":{"w":209,"h":93,"m":0.04785,"x":1037,"y":1050},"dock-wood":{"w":160,"h":80,"m":0.025,"x":1719,"y":1050},"ground-tropical":{"w":275,"h":23,"m":0.08772,"x":1742,"y":1186},"fishing-boat-0":{"w":615,"h":381,"m":0.01945,"x":1033,"y":0},"fishing-boat-1":{"w":469,"h":394,"m":0.01945,"x":562,"y":0},"fishing-boat-2":{"w":329,"h":411,"m":0.01945,"x":231,"y":0},"fishing-boat-3":{"w":229,"h":414,"m":0.01945,"x":0,"y":0},"market":{"w":74,"h":52,"m":0.08772,"x":848,"y":1186},"forest-back-tropical":{"w":704,"h":197,"m":0.08122,"x":539,"y":654},"forest-foliage-tropical":{"w":400,"h":46,"m":0.12174,"x":1018,"y":1186},"sand-stripe":{"w":408,"h":20,"m":0.03,"x":186,"y":1267},"rock-tile":{"w":228,"h":228,"m":0.0614,"x":89,"y":416},"uw-tile":{"w":120,"h":120,"m":0.0614,"x":336,"y":1050},"uw-edge-1":{"w":84,"h":106,"m":0.0614,"x":535,"y":1050},"uw-edge-2":{"w":139,"h":69,"m":0.0614,"x":392,"y":1186},"uw-edge-3":{"w":96,"h":87,"m":0.0614,"x":1582,"y":1050},"facebush-1":{"w":90,"h":34,"m":0.04706,"x":1650,"y":1186},"facebush-2":{"w":92,"h":47,"m":0.03404,"x":924,"y":1186},"facebush-3":{"w":67,"h":45,"m":0.03556,"x":1500,"y":1186},"facebush-4":{"w":79,"h":42,"m":0.0381,"x":1569,"y":1186},"facebush-5":{"w":78,"h":46,"m":0.03478,"x":1420,"y":1186},"taxi":{"w":360,"h":156,"m":0.01389,"x":855,"y":856},"suv":{"w":328,"h":156,"m":0.01402,"x":1217,"y":856},"van":{"w":352,"h":156,"m":0.01591,"x":1547,"y":856},"ambulance":{"w":408,"h":200,"m":0.01642,"x":0,"y":654},"box_truck":{"w":412,"h":212,"m":0.0182,"x":773,"y":416},"dump_truck":{"w":452,"h":220,"m":0.01991,"x":319,"y":416},"fire_engine":{"w":488,"h":192,"m":0.02049,"x":0,"y":856},"city_bus":{"w":504,"h":196,"m":0.02421,"x":1245,"y":654},"school_bus":{"w":604,"h":208,"m":0.01821,"x":1187,"y":416},"motorcycle":{"w":276,"h":188,"m":0.00797,"x":490,"y":856},"tractor":{"w":376,"h":240,"m":0.01144,"x":1650,"y":0},"home-hut":{"w":203,"h":98,"m":0.06364,"door":[55,52,67,85],"x":621,"y":1050},"hangar-cessna-small":{"w":201,"h":65,"m":0.08955,"door":[164,25,190,65],"x":533,"y":1186},"hospital":{"w":192,"h":134,"m":0.06176,"door":[83,91,106,125],"x":0,"y":1050},"school":{"w":200,"h":90,"m":0.07778,"door":[88,55,110,82],"x":1248,"y":1050},"house-orange-roof":{"w":184,"h":77,"m":0.07241,"door":[94,40,109,69],"x":206,"y":1186},"house-blue-roof":{"w":204,"h":79,"m":0.07241,"door":[100,41,118,70],"x":0,"y":1186},"house-tin-roof":{"w":110,"h":58,"m":0.105,"door":[66,32,79,52],"x":736,"y":1186},"fire-station":{"w":140,"h":125,"m":0.14114,"door":[37,95,86,125],"x":194,"y":1050},"police-station":{"w":130,"h":90,"m":0.09273,"door":[48,55,81,85],"x":1450,"y":1050},"church":{"w":75,"h":115,"m":0.09545,"door":[31,90,44,112],"x":458,"y":1050},"lighthouse":{"w":37,"h":85,"m":0.21,"door":[15,74,21,84],"x":1680,"y":1050},"building-1":{"w":78,"h":145,"m":0.11667,"door":[35,124,47,142],"x":1970,"y":856},"building-2":{"w":85,"h":175,"m":0.12353,"door":[36,154,49,171],"x":768,"y":856},"shore-rocks-1":{"w":146,"h":20,"m":0.075,"x":596,"y":1267},"shore-rocks-2":{"w":105,"h":15,"m":0.075,"x":744,"y":1267},"shore-rocks-3":{"w":144,"h":15,"m":0.075,"x":851,"y":1267},"bushes-1":{"w":95,"h":21,"m":0.06364,"x":89,"y":1267},"bushes-2":{"w":87,"h":22,"m":0.06364,"x":0,"y":1267}};
 const tropArt = {};
 function tropPic(n) {
   const c0 = tropArt[n]; if (c0) return c0;
@@ -54362,6 +54370,7 @@ function tropPic(n) {
   if (ch) g.drawImage(ch, Math.round(A.add[0] - ch.width / 2), up + A.add[1] - ch.height);   // (behind the roof: the thatch over its foot)
   g.drawImage(s, t.x, t.y, t.w, t.h, 0, up, t.w, t.h);
   c._m = t.m; c._chim = A ? (ch ? [A.add[0], 0] : A.top) : null;
+  c._door = t.door ? [t.door[0], t.door[1] + up, t.door[2], t.door[3] + up] : null;   // (its door, marked by eye - gen/tropical/prep.py DOORS: the gate covers it)
   c._flag = flagCut(c, n, up);
   return (tropArt[n] = c);
 }
@@ -55050,15 +55059,17 @@ function drawRunway(o, B) {
 window.__strRunway = { place: (id, x) => { const o = STRS.find(q => q.id === id); if (o) o.x = x; }, at: x => strRunwayAt(x), af: id => { const o = STRS.find(q => q.id === id); return o ? strAirfield(o) : null; } };   // (tools)
 
 /* ---- gates (the spec section 2: "Vehicle building or garage - stores assigned vehicles and has a gate"; "Only enclosed
-   structures have gates"): an enclosed structure's roll-up gate across its lower middle, in front of what's parked inside;
+   structures have gates"): an enclosed structure's roll-up gate over its painted door (P._door - user Nov 2 11:35: the
+   building is sized so that door fits its tallest vehicle, gen/tropical/prep.py DOORS), in front of what's parked inside;
    it rolls up while one of the story's vehicles is moving close to it (coming in or going out), and down again. This
    screen's own look (o._gate, never saved). ---- */
 function drawStrGate(o, x0, x1) {
   const B = strBox(o); if (!B.P || B.x1 < x0 - 50 || B.x0 > x1 + 50) return;
   const near = typeof storyVehs === 'function' && STORY && storyVehs().some(v => !v.plane && Math.abs(v.x - o.x) < (B.x1 - B.x0) / 2 + 18 * UPM && Math.abs(v.vDrive || 0) > 1);
   o._gate = clamp((o._gate || 0) + (near ? 1 : -0.7) * frameDt, 0, 1);
-  const gw = (B.x1 - B.x0) * 0.42, gh = (B.foot - B.top) * 0.42, gx = o.x - gw / 2, open = o._gate;
-  const X0 = Math.round(PX(gx)), X1 = Math.round(PX(gx + gw)), Yb = Math.round(PY(B.foot)), H = Math.round((PY(B.foot) - PY(B.foot - gh)) * (1 - open));
+  const D = B.P._door || [B.P.width * 0.29, B.P.height * 0.58, B.P.width * 0.71, B.P.height], kx = (B.x1 - B.x0) / B.P.width, ky = (B.foot - B.top) / B.P.height;   // (no door marked: the lower middle, as before)
+  const gx = o.flip ? B.x1 - D[2] * kx : B.x0 + D[0] * kx, gw = (D[2] - D[0]) * kx, gb = B.top + D[3] * ky, gh = (D[3] - D[1]) * ky, open = o._gate;
+  const X0 = Math.round(PX(gx)), X1 = Math.round(PX(gx + gw)), Yb = Math.round(PY(gb)), H = Math.round((PY(gb) - PY(gb - gh)) * (1 - open));
   if (H <= 1) return;
   const fx = E.fx || [1, 1, 1], col = (r, g, b) => `rgb(${Math.round(r * fx[0])},${Math.round(g * fx[1])},${Math.round(b * fx[2])})`;
   C.fillStyle = col(150, 156, 164); C.fillRect(X0, Yb - H, X1 - X0, H);
