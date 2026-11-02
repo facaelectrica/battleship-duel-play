@@ -4032,8 +4032,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 565;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 01 22:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 566;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 01 22:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -51263,7 +51263,7 @@ ACTS.storyGo = (p, id) => storyGo(p, id);
    dot: pressing it takes you aboard. Driving one slowly by a structure that takes it shows a dot over that structure:
    pressing it ties her up at its nearest free berth and takes you ashore there. Left anywhere else she stays where she is. ---- */
 const STORY_PARK_M = 15;                                 // (how far past a structure's ends you can still tie up to it)
-const storyBerths = o => Math.max(1, o.n ?? (strVehs(o).length || 1));
+const storyBerths = o => Math.max(1, strSpots(o));   // (a dock: as many as fit along it - strSpots, 50-zz-struct.js)
 // (user Oct 31 22:14-22:17: "I'll definitely be editing the prices" - "the price for the vehicle is on the vehicle editor tab,
 // not on the structure that has the vehicle. The vehicle price would be universal") each vehicle type's price: the GAME
 // EDITOR's VEHICLES tab, STORY box - PRICE (kept with the world: bd_prices, 00-world.js); unset, the type's own (STR_VEHS)
@@ -52570,7 +52570,28 @@ const strOwner = o => o.own === 0 || o.own === 1 ? o.own : -1;
 // what structure') o.restrict on: only the types ticked in o.allow (turned on first: the kind's own - fire engines at a fire station)
 const strAllows = (o, sv) => !o.restrict || (o.allow || []).includes(sv);
 const strTakes = o => o.takes || (STR_KINDS[o.k] && STR_KINDS[o.k].takes) || null;
-const strMaxL = o => o.maxL || 30;
+// (user Nov 1 21:31: "I'm going to make a dock with a certain size, and then only vehicles that have the size for that dock are
+// allowed to dock in there") a dock's spots come from its size: MAX SIZE (the longest it takes, never longer than the dock) is
+// a spot's length, its spots as many as fit along it - strSpots; a spot offers only what fits (strTypeLenM)
+const DOCK_SPOT_M = 12;                                       // (a new dock's spot: a fishing boat, ~10-11 m, and a little room)
+const dockLenM = o => isPierS(o) ? pierLenOf(o) / UPM : (o.len || 24);
+const strMaxL = o => o.k === 'dock' ? Math.min(o.maxL || DOCK_SPOT_M, dockLenM(o)) : o.maxL || 30;
+const strSpots = o => o.k === 'dock' ? Math.max(1, Math.floor(dockLenM(o) / strMaxL(o) + 1e-6)) : o.n ?? (strVehs(o).length || 1);
+// a vehicle type's length in metres, where it's known before one is made (the boats, the minisub): null - not known here
+function strTypeLenM(sv) {
+  const D = STR_VEHS[sv]; if (!D) return null;
+  if (D.fam === 'sub') return 18 * REAL.minisub / UPM;
+  if (D.fam !== 'boat') return null;
+  if (D.kind !== 'fish') return D.kind === 'motor' ? 4.3 : 3.5;
+  const P = tropPic(STORY_BOAT_ART[(D.col | 0) % 2]); return P ? P.width * P._m : 11;
+}
+const strFits = (o, sv) => { const m = strTypeLenM(sv); return m == null || m <= strMaxL(o) + 1e-6; };
+// (a dock's length or MAX SIZE changed) its spots as many as fit, what no longer fits taken out of them
+function dockRefit(o) {
+  const n = strSpots(o), L = strVehs(o).slice(0, n).map(e => e && strFits(o, e.v) ? e : null);
+  while (L.length < n) L.push(null);
+  o.veh = L; o.n = n;
+}
 // the vehicles at a structure's spots (an older dock with none listed: its BOATS fishing boats, red and teal by turn)
 function strVehs(o) {
   if (Array.isArray(o.veh)) return o.veh;
@@ -52876,8 +52897,9 @@ function strSync() {
   if (o.k === 'runway') { sl(c, 'LENGTH', 'len', 120, 900, ' M', 260); sl(c, 'HEIGHT', 'hgt', -10, 40, ' M', 0); sw('LANDING STRIP', 'strip'); sw('SMALL PLANES ONLY', 'small'); }   // (the spec section 8: 'Tropical Landing Strip - manually defined size, restricting which plane types can land')
   if (o.k === 'road') sl(c, 'LENGTH', 'len', 10, 600, ' M', 80);
   if (o.k === 'dock') {
-    if (!isPierS(o)) sl(c, 'LENGTH', 'len', 6, 160, ' M', 24);
-    else { const E = pierLandEnd(o); sl(c, 'LENGTH', 'len', 60, 900, ' M', PIER_M); const i = c.lastChild.querySelector('input'), on = i.oninput; i.oninput = () => { on(); o.x = E - pierDir(o) * pierLenOf(o) / 2; strSave(); }; }   // (the harbour pier: a pillar every bay, its land end kept where it is - at its hangar's quay; REFRESH builds it; user Nov 1 16:26)
+    const refit = () => { dockRefit(o); strSave(); strSync(); };   // (its spots follow its length)
+    if (!isPierS(o)) sl(c, 'LENGTH', 'len', 6, 160, ' M', 24, refit);
+    else { const E = pierLandEnd(o); sl(c, 'LENGTH', 'len', 60, 900, ' M', PIER_M, refit); const i = c.lastChild.querySelector('input'), on = i.oninput; i.oninput = () => { on(); o.x = E - pierDir(o) * pierLenOf(o) / 2; strSave(); }; }   // (the harbour pier: a pillar every bay, its land end kept where it is - at its hangar's quay; REFRESH builds it; user Nov 1 16:26)
     const r = el('div', 'row'), s = el('select'); s.style.cssText = U.selCss;
     for (const n of DOCK_SPRITES) { const op = document.createElement('option'); op.value = n; op.textContent = n.toUpperCase(); s.appendChild(op); }
     s.value = o.spr || DOCK_SPRITES[0]; s.onchange = () => { o.spr = s.value; strSave(); strSync(); };
@@ -52896,7 +52918,8 @@ function strSync() {
     const sw2 = (lab, key) => { const r = el('div', 'row'), t = NSKY.editor.TUNE.toggle(o[key] ? 1 : 0); t.addEventListener('input', () => { o[key] = !!+t.value; strSave(); }); r.append(el('label', '', lab), t); v.appendChild(r); };
     sw2('ALLOW REPAIR', 'rep'); sw2('ALLOW REFUEL', 'ref');
     if (takes.includes('boat')) sw2('ACCEPTS FISH', 'fish');
-    sl(v, 'MAX SIZE', 'maxL', 4, 80, ' M', 30);
+    if (o.k === 'dock') sl(v, 'MAX SIZE', 'maxL', 4, Math.max(4, Math.floor(dockLenM(o))), ' M', Math.round(strMaxL(o)), () => { dockRefit(o); strSave(); strSync(); });   // (a spot's length: no longer than the dock)
+    else sl(v, 'MAX SIZE', 'maxL', 4, 80, ' M', 30);
     { const r = el('div', 'row'), t = NSKY.editor.TUNE.toggle(o.restrict ? 1 : 0); t.title = 'On: only the vehicle types ticked below';
       t.addEventListener('input', () => { o.restrict = !!+t.value; if (o.restrict && !o.allow) o.allow = (STR_KINDS[o.k].only || Object.keys(STR_VEHS).filter(k => takes.includes(STR_VEHS[k].fam))).slice(); strSave(); strSync(); });
       r.append(el('label', '', 'RESTRICT'), t); v.appendChild(r);
@@ -52906,12 +52929,13 @@ function strSync() {
         rr.append(el('label', '', '  ' + STR_VEHS[k].lab), tt); v.appendChild(rr);
       }
     }
-    sl(v, 'SPOTS', 'n', 1, 12, '', strVehs(o).length || 1, () => { const L = strVehs(o).slice(0, o.n); while (L.length < o.n) L.push(null); o.veh = L; strSave(); strSync(); });
-    const L = strVehs(o), n = o.n ?? (L.length || 1);
+    if (o.k === 'dock') { const r = el('div', 'row'); r.append(el('label', '', 'SPOTS'), el('output', '', String(strSpots(o)))); v.appendChild(r); }   // (as many as fit: LENGTH / MAX SIZE)
+    else sl(v, 'SPOTS', 'n', 1, 12, '', strVehs(o).length || 1, () => { const L = strVehs(o).slice(0, o.n); while (L.length < o.n) L.push(null); o.veh = L; strSave(); strSync(); });
+    const L = strVehs(o), n = strSpots(o);
     for (let i = 0; i < n; i++) {
       const e = L[i] || null, r = el('div', 'row'), s = el('select'); s.style.cssText = U.selCss;
       const add = (val, lab) => { const op = document.createElement('option'); op.value = val; op.textContent = lab; s.appendChild(op); };
-      add('', 'EMPTY'); for (const k in STR_VEHS) if (takes.includes(STR_VEHS[k].fam) && strAllows(o, k)) add(k, STR_VEHS[k].lab + (STR_VEHS[k].army ? '' : '  ' + storyTypePrice(k) + 'C'));   // (its price: the VEHICLES tab's - 50-story.js)
+      add('', 'EMPTY'); for (const k in STR_VEHS) if (takes.includes(STR_VEHS[k].fam) && strAllows(o, k) && strFits(o, k)) add(k, STR_VEHS[k].lab + (STR_VEHS[k].army ? '' : '  ' + storyTypePrice(k) + 'C'));   // (its price: the VEHICLES tab's - 50-story.js)
       s.value = e ? e.v : '';
       const own = NSKY.editor.TUNE.toggle(e && e.own ? 1 : 0); own.title = 'OWNED: the player\'s at the start (else for sale)';
       const save = () => { const M = strVehs(o).slice(); while (M.length < n) M.push(null); M[i] = s.value ? { v: s.value, own: !!+own.value, rt: e && e.rt } : null; o.veh = M; strSave(); };
