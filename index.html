@@ -3248,10 +3248,18 @@ const KR_DEF_SET = [{ id: 1, u: 0.5439, dy: 7138 }];
 // appear in the game until I place it in a valid position ... It should be a global rule for everything") what lives in the sea - a
 // kraken, a pirate wreck - is valid anywhere in water that isn't rock (the one collision, solidBlock: rock, SOLID shapes, a cave's
 // walls - a cave's water is fine); elsewhere red with the reason, kept, and left out of play. Its rest is the floor under it
-function seaPlaceBad(x, y) {
+function seaPlaceBad(x, y, lift = 2 * UPM) {   // (lift: how far up from its foot it's looked at - a kraken's up its body)
   if (x < 0 || x > WORLD_W || y < WATER_Y + UPM || (typeof seaAtX === 'function' && !seaAtX(x))) return 'NEEDS WATER';
-  if (typeof solidBlock === 'function' && solidBlock(x, y - 2 * UPM)) return 'IN THE GROUND';
+  if (typeof solidBlock === 'function' && solidBlock(x, y - lift)) return 'IN THE GROUND';
   return '';
+}
+// (an old placement - u along the floor, a depth - made a real one once, just where it was shown before: inside its sea's bed as the
+// old code kept it (margin), and onto the floor there when that old depth is in rock now - so nothing placed before goes missing)
+function seaFromOld(r, margin, dk, lift) {
+  if (!r || r.x != null || r.u == null || !floorTab) return;
+  const X = floorX(r.u), i = seaSpanOf(X), x = Math.round(clamp(X, SEAS.c.bedA[i] + margin, SEAS.c.bedB[i] - margin));
+  const y = r[dk] != null ? WATER_Y + r[dk] : null;
+  r.x = x; r.y = y != null && !seaPlaceBad(x, y, lift) ? Math.round(y) : null; delete r.u; delete r[dk];
 }
 const seaEdOn = () => typeof NSKY !== 'undefined' && NSKY.editor && NSKY.editor.TUNE && NSKY.editor.TUNE.open;   // (the editor shows what play leaves out)
 const krSetOk = L => Array.isArray(L) && L.every(r => r && Number.isFinite(r.id) && (r.x == null || Number.isFinite(r.x)) && (r.y == null || Number.isFinite(r.y)) && (r.u == null || (r.u > 0 && r.u < 1)) && (r.dy == null || Number.isFinite(r.dy)));
@@ -4237,8 +4245,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 715;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 03 09:59';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 716;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 03 10:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -40909,6 +40917,7 @@ function krFloorY(x) {
 
 // ================================================================ the Lab's kraken (lab/cloudlab/26-kraken.js), as it is there
 const krS = () => KP.krsize ?? 1;
+const krLift = () => 90 * krS();                     // (where it's looked at for its place - seaPlaceBad: up its body, its foot is sunk in the lowest sand under it)
 const KR_BW = 112, KR_BH = 350, KR_R0 = 13, KR_SIDE = 40;   // (KR_SIDE: how far past the middle an arm may go: each arm keeps to its own side, user 20:47)          // the head's half-width at its shoulders and its height (the user's head design, 19:06), an arm's radius at its root
 const krLen = () => 720 * (KP.krlen ?? 1) * krS();
 const krBase = () => ({ x: KR.bx, y: KR.by - 12 * krS() });
@@ -41687,7 +41696,7 @@ function placeKraken(fresh) {
   KRAKENS.length = 0;
   for (const r of L) {
     const k = old.get(r.id) || krNew(); k.rid = r.id; KR = k; placeKraken1(fresh || !old.has(r.id), r);
-    k.bad = seaPlaceBad(k.bx, k.by);                                // (somewhere it can't be: shown red in the editor, left out of play)
+    k.bad = seaPlaceBad(k.bx, k.by, krLift());                                // (somewhere it can't be: shown red in the editor, left out of play)
     if (!k.bad || seaEdOn()) KRAKENS.push(k);
   }
   KR = KR_NONE;
@@ -41695,6 +41704,7 @@ function placeKraken(fresh) {
 function placeKraken1(fresh, r) {
   KR.objs.length = 0; KR.map.clear(); KR.torps.length = 0;
   KR.on = true;
+  seaFromOld(r, 700, 'dy', krLift());                                         // (an old placement: a real one, where it was shown)
   let x = -1;
   if (krPlaced(r)) x = krSeatX(r);                                  // (where it was put - anywhere: seaPlaceBad says if it can be)
   else if (typeof floorDeepest === 'function' && floorTab) x = krSeatX(r);   // (not put: the deepest point)
@@ -44423,7 +44433,7 @@ const wreckRec = w => wrecksUsed().find(r => r.id === w.k) || null;
 const wreckNewId = () => 1 + WRECK_SET.reduce((m, r) => Math.max(m, r.id), 0);
 // a wreck put where it was placed (or not): its x, its keel's y (null: on the floor) and the floor levelled under her or not
 function wreckSeat(w) {
-  const s = wreckRec(w);
+  const s = wreckRec(w); seaFromOld(s, 200, 'd');          // (an old placement: a real one, where she was shown)
   if (s && s.x != null) { w.x = s.x; w.y = s.y != null ? s.y : null; w.flat = null; return true; }   // (just where she was put - anywhere: seaPlaceBad says if she can be)
   if (s && s.u != null && floorTab) { w.x = floorX(s.u); w.y = s.d != null ? WATER_Y + s.d : null; w.flat = null; return true; }   // (from before: along the floor)
   w.y = null; return false;
@@ -50518,7 +50528,7 @@ function structEdDraw() {
       const X0 = PX(B[0] + off), X1 = PX(B[1] + off), Y0 = PY(B[2] + oy), Y = PY(B[3] + oy);
       if (X1 < 0 || X0 > VWP) continue;
       const hot = !ghost && SEAPICK.krakens.includes(K.rid), w = hot ? t * 2 : t;   // (picked: white, as everything picked)
-      const bad = ghost ? '' : d ? seaPlaceBad(K.bx + off, K.by + oy) : K.bad;   // (where it can't be: red, the reason on it - seaPlaceBad)
+      const bad = ghost ? '' : d ? seaPlaceBad(K.bx + off, K.by + oy, krLift()) : K.bad;   // (where it can't be: red, the reason on it - seaPlaceBad)
       C.fillStyle = ghost ? 'rgba(255,140,200,0.06)' : bad ? 'rgba(255,60,60,0.22)' : hot ? 'rgba(255,255,255,0.22)' : 'rgba(255,140,200,0.14)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
       C.fillStyle = ghost ? 'rgba(255,140,200,0.4)' : bad ? '#ff4040' : hot ? '#ffffff' : 'rgba(255,170,215,0.95)';
       C.fillRect(X0, Y0, X1 - X0, w); C.fillRect(X0, Y0, w, Y - Y0); C.fillRect(X1 - w, Y0, w, Y - Y0); C.fillRect(X0, Y - w, X1 - X0, w);
@@ -60417,7 +60427,7 @@ async function start(data) {
     // (Nov 1) the GPU timers per render part (40-gl.js GPUT): on / off; what it gives - ext: whether the driver has the timer queries, frames: how many timed
     gpuTimers: on => { if (on != null) GPUT.want = !!on; return { on: GPUT.want, ext: GPUT.tried ? !!GPUT.ext : null, frames: GPUT.n }; } });
   Object.assign(window.__game, { smokeWorker: on => { if (on != null) { SMW.on = !!on; if (CAVE.worker && !CAVE.worker.fail) CAVE.worker.on = !!on; if (CAVE.buildWorker && !CAVE.buildWorker.fail) CAVE.buildWorker.on = !!on; } const cw = CAVE.worker; return { on: SMW.on, sent: SMW.sent, got: SMW.got, late: SMW.late, fail: SMW.fail, cave: { on: cw.on, sent: cw.sent, got: cw.got, late: cw.late, fail: cw.fail } }; } });   // (engine stage 4: the worker switch, for tests and the perf panel)
-  Object.assign(window.__game, { kraken: () => KRAKENS[0] || KR, krakens: () => KRAKENS, krSet: () => KR_SET, wreckSet: () => WRECK_SET, wrecks: () => pirateWrecks, seaBad: (x, y) => seaPlaceBad(x, y), krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
+  Object.assign(window.__game, { kraken: () => KRAKENS[0] || KR, krakens: () => KRAKENS, krSet: () => KR_SET, wreckSet: () => WRECK_SET, wrecksLive: () => pirateWrecks, seaBad: (x, y) => seaPlaceBad(x, y), krakenP: KP, krTick: dt => krTick(dt), placeKraken: f => placeKraken(f), krClick: (x, y) => krClickAt(x, y), krLen: () => krLen(), krHeadHit: (x, y, vx, vy) => krHeadHit(x, y, vx, vy), krBlast: (x, y, pw, ball) => underwaterBlast(x, y, pw, ball), krCentre: () => krCentre(), krArmPt: (i, u) => { const T = KR.tents[i], q = T.J[Math.round((T.J.length - 1) * u)]; return [q.x, q.y]; } });
   // (the simulation worker, sim-worker branch: the tables and the snapshot's parts, for tools/sw-measure.mjs)
   Object.assign(window.__game, { swT: { TABLES, RNGS, tablesSave, tablesLoad, tblPlain, uidOf, REG, planes, subs, ships, evStats, SW_DRAW, SW_COLS } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
