@@ -4316,8 +4316,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 754;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 03 19:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 755;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 03 19:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54120,8 +54120,9 @@ async function storyGet(n) {
   finally { db.close(); }
 }
 // the whole game into this story's slot
-async function storySaveNow() {
+async function storySaveNow(quiet) {
   if (storySlot == null || storySaving || !STORY) return;
+  storySavedAt = performance.now();
   storySaving = true; const n = storySlot, ask = story.saveN;
   try {
     await swHold('storySave');
@@ -54129,12 +54130,28 @@ async function storySaveNow() {
     swRelease('storySave');
     await storyPut(n, G);
     storyMetaSet(n, { day: W.day || 1, coins: story.coins, base: at ? strName(at) : '', saved: Date.now(), hour: Math.floor(env.time) });
-    storySavedN = ask; showToast('SAVED');
+    storySavedN = ask; if (!quiet) showToast('SAVED');
   } catch (e) { swRelease('storySave'); storySavedN = ask; console.warn('story save', e); showToast('COULD NOT SAVE'); }
   storySaving = false;
 }
 // each frame (drawStoryBanner): a new ask, saved
-function storySaveWatch() { if (STORY && storySlot != null && !storyLoading && !ui.title && story.saveN !== storySavedN && !story.wake) storySaveNow(); }
+/* (user Nov 3 18:45: "the game should save wherever you are ... when you restart, it's always where you last were. The world is
+   waiting exactly where you left off") besides the story's own asks, the game is saved quietly every STORY_AUTOSAVE_S of play, as
+   the menu opens and as the page is put away (another app, the tab hidden or closed) - LOAD puts it back as it was, aboard
+   whatever you were in, wherever it was */
+const STORY_AUTOSAVE_S = 60;
+let storySavedAt = 0, storyMenuWas = false;
+function storySaveWatch() {
+  if (!(STORY && storySlot != null && !storyLoading && !ui.title && !story.wake)) { storyMenuWas = !!ui.menu; return; }
+  if (story.saveN !== storySavedN) storySaveNow();
+  else if ((ui.menu && !storyMenuWas) || performance.now() - storySavedAt > STORY_AUTOSAVE_S * 1000) storySaveNow(true);
+  storyMenuWas = !!ui.menu;
+}
+if (typeof document !== 'undefined' && !SW_IN_WORKER) {
+  const away = () => { if (STORY && storySlot != null && !storyLoading && !ui.title && !story.wake) storySaveNow(true); };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') away(); });
+  window.addEventListener('pagehide', away);
+}
 // NEW in slot n: a fresh story there (its first save comes as it starts)
 function storyNew(n) {
   SSL.open = false; SSL.confirm = null;
@@ -54166,7 +54183,7 @@ async function storyLoad(n) {
   loadThen(() => {
     storyPlayNow = true; menuPlay(false); storyPlayNow = false;
     swSettled().then(() => swHold('storyLoad')).then(() => {
-      try { edGameBack(JSON.parse(G)); cutTo(0); } catch (e) { console.warn('story load', e); showToast('COULD NOT LOAD'); }
+      try { edGameBack(JSON.parse(G)); cutTo(0); } catch (e) { console.warn('story load', e); showToast('COULD NOT LOAD'); storySlot = null; }   // (not loaded: the fresh world never saved over the slot)
       storySavedN = story.saveN; storyLoading = false;
       swRelease('storyLoad');
     });
@@ -54209,8 +54226,10 @@ function drawStorySlots() {
   if (L.q) {
     ug.fillStyle = 'rgba(4,7,15,0.7)'; ug.fillRect(L.x, L.y, L.w, L.h);
     drawPanelBox(ug, L.q.x, L.q.y, L.q.w, L.q.h, 'rgba(18,26,42,0.96)');
-    drawText(ug, 'START OVER IN SLOT ' + (SSL.confirm + 1) + '?', L.q.x + L.q.w / 2, L.q.y + 12, '#ffffff', 1, 'center');
-    drawText(ug, 'ITS SAVED STORY IS REPLACED', L.q.x + L.q.w / 2, L.q.y + 26, '#ff9a7a', 1, 'center');
+    // (user Nov 3 18:52: "when you press new on a slot that has a save game, it has to say, are you sure?") the question in big
+    // letters, what goes under it in red
+    drawText(ug, 'ARE YOU SURE?', L.q.x + L.q.w / 2, L.q.y + 8, '#ffffff', 2, 'center');
+    drawText(ug, 'SLOT ' + (SSL.confirm + 1) + "'S SAVED STORY WILL BE LOST", L.q.x + L.q.w / 2, L.q.y + 28, '#ff9a7a', 1, 'center');
     modeButton(...L.q.yes, 'YES', true); modeButton(...L.q.no, 'NO', false);
   }
   if (SSL.busy) drawText(ug, 'LOADING...', L.x + L.w / 2, L.y + L.h + 6, '#ffffff', 1, 'center');
@@ -54800,6 +54819,16 @@ function storySleep(p) {
   story.wake = env.time < 5 ? W.day : W.day + 1;
 }
 ACTS.storySleep = p => storySleep(p);
+// (user Nov 3 18:44: "I should be allowed to interrupt it at any time, clicking anywhere") a press anywhere while asleep - the mouse, a
+// finger, a key, a pad's button - wakes you at the hour it is; saved as on waking (a command: the clock is the simulation's)
+function storyWake(p) { if (!STORY || !story.wake) return; story.wake = 0; story.saveN++; }
+ACTS.storyWake = p => storyWake(p);
+function storyWakePress(ev) {
+  if (!STORY || ui.title || !story.wake || NSKY.editor.TUNE.open) return false;
+  act(0, 'storyWake'); sound('click', 0); ev.stopImmediatePropagation(); ev.preventDefault(); return true;
+}
+window.addEventListener('pointerdown', ev => { storyWakePress(ev); }, { capture: true, passive: false });
+window.addEventListener('keydown', ev => { if (!ev.repeat && !/^(Shift|Control|Alt|Meta)/.test(ev.code)) storyWakePress(ev); }, { capture: true });
 /* ---- a vehicle lost (user Oct 31 09:31: "If you destroy a plane, then you have to buy a new one"): one of the story's that's
    sunk is nobody's; aboard it, you watch it go STORY_LOST_S, then you're back at your home base; a new one of its kind is for
    sale at the spot it started at from the next morning, once that spot is free. ---- */
