@@ -3244,7 +3244,17 @@ const floorDeepest = () => floorDeep.slice();
 // the floor) }, as many as the editor puts (OBJECTS > CREATURES), in bd_krakens (a world key). From before: the one kraken's
 // bd_kraken_u / bd_kraken_dy / bd_kraken_off. KR_DEF_SET: where the user put it (Oct 29, 13:59, COPY POINTS) - online too
 const KR_DEF_SET = [{ id: 1, u: 0.5439, dy: 7138 }];
-const krSetOk = L => Array.isArray(L) && L.every(r => r && Number.isFinite(r.id) && (r.u === null || (r.u > 0 && r.u < 1)) && (r.dy === null || Number.isFinite(r.dy)));
+// (user Nov 3 08:51: "I can drag anything to an invalid position. It turns red. And I can save it in the invalid position. It just won't
+// appear in the game until I place it in a valid position ... It should be a global rule for everything") what lives in the sea - a
+// kraken, a pirate wreck - is valid anywhere in water that isn't rock (the one collision, solidBlock: rock, SOLID shapes, a cave's
+// walls - a cave's water is fine); elsewhere red with the reason, kept, and left out of play. Its rest is the floor under it
+function seaPlaceBad(x, y) {
+  if (x < 0 || x > WORLD_W || y < WATER_Y + UPM || (typeof seaAtX === 'function' && !seaAtX(x))) return 'NEEDS WATER';
+  if (typeof solidBlock === 'function' && solidBlock(x, y - 2 * UPM)) return 'IN THE GROUND';
+  return '';
+}
+const seaEdOn = () => typeof NSKY !== 'undefined' && NSKY.editor && NSKY.editor.TUNE && NSKY.editor.TUNE.open;   // (the editor shows what play leaves out)
+const krSetOk = L => Array.isArray(L) && L.every(r => r && Number.isFinite(r.id) && (r.x == null || Number.isFinite(r.x)) && (r.y == null || Number.isFinite(r.y)) && (r.u == null || (r.u > 0 && r.u < 1)) && (r.dy == null || Number.isFinite(r.dy)));
 let KR_SET = JSON.parse(JSON.stringify(KR_DEF_SET));
 try {
   const L = JSON.parse(localStorage.getItem('bd_krakens') || 'null');
@@ -3256,10 +3266,11 @@ try {
 function krSetSave() { try { localStorage.setItem('bd_krakens', JSON.stringify(KR_SET)); } catch (e) { } }
 const krSetUsed = () => NET.role === 'local' ? KR_SET : KR_DEF_SET;
 const krNewId = () => 1 + KR_SET.reduce((m, r) => Math.max(m, r.id), 0);
-const krPlaced = r => !!r && r.u !== null && !!floorTab;
-// where a kraken sits: along the floor where it was put, in that sea (SEAS); not put: the floor's deepest point
-const krSeatX = r => { if (!krPlaced(r)) return floorDeep[0]; const X = floorX(r.u), i = seaSpanOf(X); return clamp(X, SEAS.c.bedA[i] + 700, SEAS.c.bedB[i] - 700); };
-const krSeatY = r => krPlaced(r) && r.dy !== null ? WATER_Y + r.dy : null;
+const krPlaced = r => !!r && (r.x != null || (r.u != null && !!floorTab));
+// where a kraken sits: just where it was put (x, y - y null: on the floor there), or from before along the floor (u, dy); not put:
+// the floor's deepest point. Never moved back into a sea: where it can't be is seaPlaceBad's
+const krSeatX = r => r && r.x != null ? r.x : krPlaced(r) ? floorX(r.u) : floorDeep[0];
+const krSeatY = r => !r ? null : r.x != null ? (r.y != null ? r.y : null) : krPlaced(r) && r.dy != null ? WATER_Y + r.dy : null;
 const krSeatsX = () => krSetUsed().map(krSeatX);
 let TR_A = 0, TR_B = 0;
 function setTrench(a, b) { TR_A = a; TR_B = b; }
@@ -4226,8 +4237,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 713;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 03 09:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 714;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 03 09:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -41701,16 +41712,21 @@ function placeKraken(fresh) {
   const L = LAND && seaW() > 0 ? krSetUsed() : [], old = new Map(KRAKENS.map(k => [k.rid, k]));
   for (const k of KRAKENS) { KR = k; for (const o of KR.objs) krUnpin(o); krLetGo(); }
   KRAKENS.length = 0;
-  for (const r of L) { const k = old.get(r.id) || krNew(); k.rid = r.id; KR = k; placeKraken1(fresh || !old.has(r.id), r); KRAKENS.push(k); }
+  for (const r of L) {
+    const k = old.get(r.id) || krNew(); k.rid = r.id; KR = k; placeKraken1(fresh || !old.has(r.id), r);
+    k.bad = seaPlaceBad(k.bx, k.by);                                // (somewhere it can't be: shown red in the editor, left out of play)
+    if (!k.bad || seaEdOn()) KRAKENS.push(k);
+  }
   KR = KR_NONE;
 }
 function placeKraken1(fresh, r) {
   KR.objs.length = 0; KR.map.clear(); KR.torps.length = 0;
   KR.on = true;
   let x = -1;
-  if (typeof floorDeepest === 'function' && floorTab) x = krSeatX(r);   // (where the TERRAIN tab put it, or the deepest point)
-  const d = x > 0 ? seaSpanOf(x) : seaDeepest(), S = SEAS.c;      // (in its own sea, or the deepest - SEAS)
-  if (!(x > S.lo[d] && x < S.hi[d])) {                               // (no drawn floor: the deepest of the floor itself)
+  if (krPlaced(r)) x = krSeatX(r);                                  // (where it was put - anywhere: seaPlaceBad says if it can be)
+  else if (typeof floorDeepest === 'function' && floorTab) x = krSeatX(r);   // (not put: the deepest point)
+  const d = seaDeepest(), S = SEAS.c;
+  if (!krPlaced(r) && !(x > S.lo[d] && x < S.hi[d])) {                               // (no drawn floor: the deepest of the floor itself)
     let best = -Infinity; const a = S.trB[d] > S.trA[d] ? S.trA[d] : S.lo[d], b = S.trB[d] > S.trA[d] ? S.trB[d] : S.hi[d];
     for (let q = a; q <= b; q += 16) { const y = seabedY(q); if (y > best) { best = y; x = q; } }
   }
@@ -42081,7 +42097,7 @@ function drawKraken1(x0, x1) {
 }
 
 // ---- the rest of the game's calls: once per kraken (krEach)
-function krTick(dt) { krEach(() => krTick1(dt)); }
+function krTick(dt) { krEach(k => { if (!k.bad) krTick1(dt); }); }   // (one put where it can't be: still, in the editor only)
 function krPull(sb) { return krEach((k, r) => Math.max(r || 0, krPull1(sb))) || 0; }   // (the strongest pull on that sub)
 function krBlast(x, y, power, ball) { krEach(() => krBlast1(x, y, power, ball)); }
 function krClickAt(x, y) { return !!krEach((k, r) => r || krClickAt1(x, y)); }
@@ -44424,7 +44440,7 @@ const pirateWrecks = [], treasures = [0, 0];
 const wreckFromOld = v => v.map((e, k) => e === false ? null : { id: k + 1, v: k, u: e ? e[0] : null, d: e ? e[1] : null, slot: k, gold: true, face: null }).filter(Boolean);
 const WRECK_DEF = wreckFromOld([null, [0.3774, 3148], [0.5509, 3591], null]);
 const wreckOld = v => Array.isArray(v) && v.length === 4 && v.every(e => e === null || e === false || (Array.isArray(e) && e.length === 2 && e[0] > 0 && e[0] < 1 && isFinite(e[1])));
-function wreckSetOk(v) { return wreckOld(v) || (Array.isArray(v) && v.every(r => r && Number.isFinite(r.id) && r.v >= 0 && r.v < 4 && (r.u === null || (r.u > 0 && r.u < 1)) && (r.d === null || Number.isFinite(r.d)))); }
+function wreckSetOk(v) { return wreckOld(v) || (Array.isArray(v) && v.every(r => r && Number.isFinite(r.id) && r.v >= 0 && r.v < 4 && (r.x == null || Number.isFinite(r.x)) && (r.y == null || Number.isFinite(r.y)) && (r.u == null || (r.u > 0 && r.u < 1)) && (r.d == null || Number.isFinite(r.d)))); }
 const wreckList = v => wreckOld(v) ? wreckFromOld(v) : v;
 let WRECK_SET = JSON.parse(JSON.stringify(WRECK_DEF));
 try { const v = JSON.parse(localStorage.getItem('bd_wrecks') || 'null'); if (wreckSetOk(v)) WRECK_SET = wreckList(v); } catch (e) { }
@@ -44434,9 +44450,9 @@ const wreckRec = w => wrecksUsed().find(r => r.id === w.k) || null;
 const wreckNewId = () => 1 + WRECK_SET.reduce((m, r) => Math.max(m, r.id), 0);
 // a wreck put where it was placed (or not): its x, its keel's y (null: on the floor) and the floor levelled under her or not
 function wreckSeat(w) {
-  const s = floorTab ? wreckRec(w) : null;
-  if (s && s.u !== null) { const X = floorX(s.u), i = seaSpanOf(X); w.x = clamp(X, SEAS.c.bedA[i] + 200, SEAS.c.bedB[i] - 200);   // (on her own sea's floor - SEAS)
-    w.y = s.d !== null ? WATER_Y + s.d : null; w.flat = null; return w.y !== null; }
+  const s = wreckRec(w);
+  if (s && s.x != null) { w.x = s.x; w.y = s.y != null ? s.y : null; w.flat = null; return true; }   // (just where she was put - anywhere: seaPlaceBad says if she can be)
+  if (s && s.u != null && floorTab) { w.x = floorX(s.u); w.y = s.d != null ? WATER_Y + s.d : null; w.flat = null; return true; }   // (from before: along the floor)
   w.y = null; return false;
 }
 // one wreck in the world from its record (k: its id; v: its picture; her chest as the record says)
@@ -44487,8 +44503,9 @@ function buildDeep() {
   for (const r of WL) {                                  // (every one placed - WRECK_SET)
     const w = wreckMake(r, 0), k = r.slot ?? WL.indexOf(r);
     w.x = floorFlatSpot(TR_A + 700 + (TR_B - TR_A - 1400) * (k + 0.5) / NS + rnd(-200, 200), w.half);   // (not put: the nearest fairly level ground to its slot - 50-land-floor.js)
-    if (!wreckSeat(w) && w.y == null && !(r.u !== null && floorTab)) w.flat = bedDrop0(w.x);   // (on the floor levelled under her)
-    pirateWrecks.push(w);
+    if (!wreckSeat(w)) w.flat = bedDrop0(w.x);             // (not put: on the floor levelled under her)
+    w.bad = seaPlaceBad(w.x, wreckBy(w));                   // (somewhere she can't be: shown red in the editor, left out of play)
+    if (!w.bad || seaEdOn()) pirateWrecks.push(w);
   }
   // (the rocks were laid out before the wrecks: none standing on a wreck's levelled floor - buildReef keeps them off it too)
   rockForms = rockForms.filter(f => !pirateWrecks.some(w => w.y == null && f.x1 > w.x - w.half - 160 && f.x0 < w.x + w.half + 160));
@@ -50362,11 +50379,13 @@ const TOWER_BOX = { w: 80, h: 150 };
 // down to its base; dragged anywhere, it stays where it's let go (its KR_SET record - 09-sea-surface), the floor left as it is
 function krakenBox(k) { const hw = KR_BW * krS() * 1.1; return [k.bx - hw, k.bx + hw, k.by - 520 * krS(), k.by + 20]; }
 function krakenPick(x, y, r) { if (!LAND) return null; for (const k of KRAKENS.slice().reverse()) { const B = krakenBox(k); if (x > B[0] - r && x < B[1] + r && y > B[2] - r && y < B[3] + r) return k; } return null; }
-function krakenMoveTo(id, x, y) {
+// (user Nov 3 08:51) moved anywhere, as everything is: just where it's let go (x, y), or onto the floor when it's let go within
+// STR_SNAP press-radii of it (y null: it sits on the floor there); somewhere it can't be, red (seaPlaceBad) and out of play
+const seaRest = x => floorUnder(clamp(x, 0, WORLD_W - 1), null);
+function seaLetGo(r, x, y, rr, kx, ky) { r.x = Math.round(clamp(x, 0, WORLD_W)); const R = seaRest(r.x); r[ky] = Number.isFinite(R) && Math.abs(y - R) <= STR_SNAP * (rr || 0) ? null : Math.round(y); delete r.u; delete r[kx]; }
+function krakenMoveTo(id, x, y, rr) {
   const r = KR_SET.find(q => q.id === id); if (!r) return;
-  const i = seaSpanOf(x); x = clamp(x, SEAS.c.bedA[i] + 700, SEAS.c.bedB[i] - 700);   // (on its own sea's floor - SEAS)
-  r.u = +clamp(floorU(x), 0.001, 0.999).toFixed(4);
-  r.dy = Math.round(clamp(y, WATER_Y + 200, worldDeepY() + 300) - WATER_Y); krSetSave();
+  seaLetGo(r, x, y, rr, 'dy', 'y'); krSetSave();
   // (user Oct 30, 17:24: "when I move the kraken the Build / Refresh doesn't detect changes") as every edit in the tab: it
   // sits there at once, and the floor with everything on it - the rocks, the wrecks, the caves - is marked to be built
   // again on REFRESH (or closing the editor)
@@ -50376,25 +50395,24 @@ function krakenMoveTo(id, x, y) {
 // her picture's size, over her keel; dragged anywhere, she (and her chest) stays where she's let go (WRECK_SET)
 function wreckBox(w) { if (!pirateArt) buildPirateArt(); const A = pirateArt[(w.v || 0) % pirateArt.length], k = A.k || 1, hw = A.W * k / 2, by = wreckBy(w); return [w.x - hw, w.x + hw, by - A.H * k, by + 10]; }
 function wreckPick(x, y, r) { if (!LAND) return null; for (const w of pirateWrecks) { const B = wreckBox(w); if (x > B[0] - r && x < B[1] + r && y > B[2] - r && y < B[3] + r) return w; } return null; }
-function wreckMoveTo(k, x, y) {
+function wreckMoveTo(k, x, y, rr) {
   const r = WRECK_SET.find(q => q.id === k); if (!r) return;
-  const i = seaSpanOf(x); x = clamp(x, SEAS.c.bedA[i] + 200, SEAS.c.bedB[i] - 200);
-  r.u = +clamp(floorU(x), 0.001, 0.999).toFixed(4); r.d = Math.round(clamp(y, WATER_Y + 60, worldDeepY() + 300) - WATER_Y); wreckSave();
-  for (const w of pirateWrecks) if (w.k === k) wreckSeat(w);    // (she lies there at once; the floor under her, as the kraken's: on REFRESH)
+  seaLetGo(r, x, y, rr, 'd', 'y'); wreckSave();
+  for (const w of pirateWrecks) if (w.k === k) { wreckSeat(w); w.bad = seaPlaceBad(w.x, wreckBy(w)); }    // (she lies there at once; the floor under her, as the kraken's: on REFRESH)
   floorChanged();
 }
 // SPAWN (OBJECTS > CREATURES / WRECKS): on the floor under the middle of the view, picked alone; the kraken and each of the four
 // wrecks are one of a kind - one already there is brought here. DELETE (WK 'sea'): gone from this world until spawned again
 function seaViewX() { const v = cam.view[0], vw = (ONEVIEW() ? bw : bw / 2) / (S * v.z); return v.l + vw / 2; }
 function krakenSpawn() {
-  const x = seaViewX(), r = { id: krNewId(), u: null, dy: null }; KR_SET.push(r);
-  krakenMoveTo(r.id, x, seabedY(clamp(x, 0, WORLD_W - 1)));
+  const x = seaViewX(), r = { id: krNewId(), x: null, y: null }; KR_SET.push(r);
+  krakenMoveTo(r.id, x, seaRest(x), 1);
   SEAPICK.krakens = [r.id]; SEAPICK.wrecks = [];
 }
 function wreckSpawn(v) {
-  const x = seaViewX(), r = { id: wreckNewId(), v, u: null, d: null, slot: WRECK_SET.length, gold: true, face: 1 }; WRECK_SET.push(r);
+  const x = seaViewX(), r = { id: wreckNewId(), v, x: null, y: null, slot: WRECK_SET.length, gold: true, face: 1 }; WRECK_SET.push(r);
   pirateWrecks.push(wreckMake(r, x));
-  wreckMoveTo(r.id, x, seabedY(clamp(x, 0, WORLD_W - 1)) + 6);
+  wreckMoveTo(r.id, x, seaRest(x), 1);
   SEAPICK.krakens = []; SEAPICK.wrecks = [r.id];
 }
 function seaDelete() {
@@ -50457,13 +50475,13 @@ window.addEventListener('pointerdown', e => {
   const wk = wreckPick(q.x, q.y, q.r);
   if (wk) {                                                      // (a pirate wreck: dragged anywhere; let go, she lies there)
     e.stopImmediatePropagation(); e.preventDefault();
-    seaPick(null, wk.k); SED.wreck = { w: wk, x0: q.x, y0: q.y, dx: 0, dy: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
+    seaPick(null, wk.k); SED.wreck = { w: wk, r: q.r, x0: q.x, y0: q.y, dx: 0, dy: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
     return;
   }
   const kp = krakenPick(q.x, q.y, q.r);
   if (kp) {                                                      // (the kraken: dragged along the ocean floor; let go, it sits there)
     e.stopImmediatePropagation(); e.preventDefault();
-    seaPick(kp.rid, null); SED.kraken = { k: kp, x0: q.x, y0: q.y, dx: 0, dy: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
+    seaPick(kp.rid, null); SED.kraken = { k: kp, r: q.r, x0: q.x, y0: q.y, dx: 0, dy: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
     return;
   }
   const o = structPick(q.x, q.y, q.r); if (!o) return;
@@ -50494,8 +50512,8 @@ function structUp(e) {
   const P = SED.ptr; if (!P || P.id !== e.pointerId) return;
   e.stopImmediatePropagation();
   const o = SED.o, old = SED.old; SED.o = null; SED.ptr = null;
-  if (SED.wreck) { const k = SED.wreck; SED.wreck = null; if (P.moved && Math.hypot(k.dx, k.dy) > 20) wreckMoveTo(k.w.k, k.w.x + k.dx, wreckBy(k.w) + k.dy); return; }
-  if (SED.kraken) { const k = SED.kraken; SED.kraken = null; if (P.moved && Math.hypot(k.dx, k.dy) > 20) krakenMoveTo(k.k.rid, k.k.bx + k.dx, k.k.by + k.dy); return; }
+  if (SED.wreck) { const k = SED.wreck; SED.wreck = null; if (P.moved && Math.hypot(k.dx, k.dy) > 20) wreckMoveTo(k.w.k, k.w.x + k.dx, wreckBy(k.w) + k.dy, k.r); return; }
+  if (SED.kraken) { const k = SED.kraken; SED.kraken = null; if (P.moved && Math.hypot(k.dx, k.dy) > 20) krakenMoveTo(k.k.rid, k.k.bx + k.dx, k.k.by + k.dy, k.r); return; }
   if (SED.dock) { const d = SED.dock; SED.dock = null; if (!P.moved || Math.abs(d.dx) <= 20) return;
     if (d.m.u !== undefined) { const A = unwarpX(BED_A), B = unwarpX(BED_B); d.m.u = +clamp((unwarpX(dockXAt(d.m) + d.dx) - A) / (B - A), 0.01, 0.99).toFixed(4); docksXSave(); } else dockMoveBy(!!d.m.dockR, d.dx);   // (a placed dock: along the floor; a coast's: its coast)
     return; }
@@ -50527,10 +50545,11 @@ function structEdDraw() {
       const X0 = PX(B[0] + off), X1 = PX(B[1] + off), Y0 = PY(B[2] + oy), Y = PY(B[3] + oy);
       if (X1 < 0 || X0 > VWP) continue;
       const hot = !ghost && SEAPICK.krakens.includes(K.rid), w = hot ? t * 2 : t;   // (picked: white, as everything picked)
-      C.fillStyle = ghost ? 'rgba(255,140,200,0.06)' : hot ? 'rgba(255,255,255,0.22)' : 'rgba(255,140,200,0.14)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
-      C.fillStyle = ghost ? 'rgba(255,140,200,0.4)' : hot ? '#ffffff' : 'rgba(255,170,215,0.95)';
+      const bad = ghost ? '' : d ? seaPlaceBad(K.bx + off, K.by + oy) : K.bad;   // (where it can't be: red, the reason on it - seaPlaceBad)
+      C.fillStyle = ghost ? 'rgba(255,140,200,0.06)' : bad ? 'rgba(255,60,60,0.22)' : hot ? 'rgba(255,255,255,0.22)' : 'rgba(255,140,200,0.14)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
+      C.fillStyle = ghost ? 'rgba(255,140,200,0.4)' : bad ? '#ff4040' : hot ? '#ffffff' : 'rgba(255,170,215,0.95)';
       C.fillRect(X0, Y0, X1 - X0, w); C.fillRect(X0, Y0, w, Y - Y0); C.fillRect(X1 - w, Y0, w, Y - Y0); C.fillRect(X0, Y - w, X1 - X0, w);
-      if (!ghost) drawText(C, dx || dy ? 'KRAKEN - LET GO TO PUT IT HERE' : 'KRAKEN - DRAG IT ANYWHERE', Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), hot ? '#ffffff' : '#ffe0f0', Math.max(1, Math.round(dpr / PIXW)), 'center');
+      if (!ghost) drawText(C, bad ? 'KRAKEN - ' + bad : dx || dy ? 'KRAKEN - LET GO TO PUT IT HERE' : 'KRAKEN - DRAG IT ANYWHERE', Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), hot ? '#ffffff' : '#ffe0f0', Math.max(1, Math.round(dpr / PIXW)), 'center');
     }
   }
   // (the pirate wrecks: a box over each, her chest with her - dragged, a ghost where she'll go)
@@ -50540,10 +50559,11 @@ function structEdDraw() {
       const X0 = PX(B[0] + off), X1 = PX(B[1] + off), Y0 = PY(B[2] + oy), Y = PY(B[3] + oy);
       if (X1 < 0 || X0 > VWP) continue;
       const hot = !ghost && SEAPICK.wrecks.includes(w.k), lw = hot ? t * 2 : t;
-      C.fillStyle = ghost ? 'rgba(255,200,90,0.06)' : hot ? 'rgba(255,255,255,0.22)' : 'rgba(255,200,90,0.12)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
-      C.fillStyle = ghost ? 'rgba(255,200,90,0.4)' : hot ? '#ffffff' : 'rgba(255,214,120,0.95)';
+      const bad = ghost ? '' : d ? seaPlaceBad(w.x + off, wreckBy(w) + oy) : w.bad;   // (where she can't be: red, the reason on her)
+      C.fillStyle = ghost ? 'rgba(255,200,90,0.06)' : bad ? 'rgba(255,60,60,0.22)' : hot ? 'rgba(255,255,255,0.22)' : 'rgba(255,200,90,0.12)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
+      C.fillStyle = ghost ? 'rgba(255,200,90,0.4)' : bad ? '#ff4040' : hot ? '#ffffff' : 'rgba(255,214,120,0.95)';
       C.fillRect(X0, Y0, X1 - X0, lw); C.fillRect(X0, Y0, lw, Y - Y0); C.fillRect(X1 - lw, Y0, lw, Y - Y0); C.fillRect(X0, Y - lw, X1 - X0, lw);
-      if (!ghost) drawText(C, dx || dy ? 'WRECK - LET GO TO PUT IT HERE' : 'PIRATE WRECK ' + (pirateWrecks.indexOf(w) + 1) + (w.gold ? ' + TREASURE' : '') + ' - DRAG IT ANYWHERE', Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), hot ? '#ffffff' : '#fff0cc', Math.max(1, Math.round(dpr / PIXW)), 'center');
+      if (!ghost) drawText(C, bad ? 'PIRATE WRECK - ' + bad : dx || dy ? 'WRECK - LET GO TO PUT IT HERE' : 'PIRATE WRECK ' + (pirateWrecks.indexOf(w) + 1) + (w.gold ? ' + TREASURE' : '') + ' - DRAG IT ANYWHERE', Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), hot ? '#ffffff' : '#fff0cc', Math.max(1, Math.round(dpr / PIXW)), 'center');
     }
   }
 
