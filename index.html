@@ -4171,8 +4171,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 681;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 02 20:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 682;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 02 20:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10943,7 +10943,7 @@ function stepPlanes(dt) {
     if (pl.auto === 'home' && LAND) { const af = airfield(p), D = (pl.x - af.near) * af.dir; if (D < 1400 && D > -af.len) gearWant = 1; }
     pl.gear = clamp((pl.gear || 0) + (gearWant ? 1.5 : -1.5) * dt, 0, 1);
     pl.flare = clamp((pl.flare || 0) + (gearWant && LAND ? 1 : -1) * dt * 1.5, 0, 1);   // (nose up coming in to land)
-    if (pl.climbT > 0) { pl.climbT -= dt; if (!stick) { want = Math.min(want, -0.32); forced = true; } }   // (just off the runway: climbing out)
+    { const co = flyClimbOut(pl, 'plane', dt, -0.32, !!stick); if (co != null && !stick) { want = Math.min(want, co); forced = true; } }   // (just off the runway: climbing out)
     if (pl.y < planeIceY() && want < 0.15) { want = 0.15; forced = true; }          // the ceiling (the stratosphere)
     // (user Oct 29: flown by hand it dodges nothing - your own hangar, tower and crane are yours to fly round; flying
     // itself - home, a raid, the CPU - it still does)
@@ -10968,7 +10968,7 @@ function stepPlanes(dt) {
     // pull - over the top into a loop at speed); let go or flown by itself, it flies the path it wants (want: + down - level,
     // home, dodging). Its speed is its own: a dive builds it, a climb spends it, the engine holds its cruise)
     const ai = !forced && pl.aiGamT > time - 0.25;                              // (the CPU's pilot: the path it wants - 49-cpu.js)
-    const ctl = ai ? { gam: pl.aiGam } : stick && !forced ? { pull: flyPull(pl, stick, dt) } : { gam: want };
+    const ctl = ai ? { gam: pl.aiGam } : (stick || mine || sd) && !forced ? { pull: flyPull(pl, stick, dt) } : { gam: want };   // (yours let go: its trim - flyStep; it falls as it slows, user Nov 2 19:35)
     if (gearWant && LAND) { const g = planeGroundY(pl.x); if (g != null) ctl.cush = g - pl.y; }   // (wheels down over ground it can land on: the flare)
     flyStep(pl, dt, ctl, 'plane', 'facing', PLANE_TURN_T);
     // heading for the enemy's edge it turns round in time, so it never leaves the world on their side; stopped (the stop
@@ -11566,13 +11566,13 @@ function dropBomb(pl) {
 // stalling angle of attack (as, rad), the most its wings may pull (n: times its weight - the pilot's and the airframe's limit; a
 // loop needs speed for it: the Cessna's only from a dive)
 const FLIGHT = {
-  plane: { vs: 40, vc: () => VTUNE.plane.kmh / 3.6, kw: 900, tw: 1.0, ld: 12, tau: 0.12, as: 0.28, n: 5.5 },
+  plane: { vs: 40, vc: () => VTUNE.plane.kmh / 3.6, kw: 900, tw: 0.55, ld: 12, tau: 0.12, as: 0.28, n: 5.5 },
   cessna: { vs: 25, vc: () => AIR_KMH.cessna / 3.6, kw: 380, tw: 0.55, ld: 10, tau: 0.2, as: 0.28, n: 3.2 },
   jet: { vs: 50, vc: () => AIR_KMH.jet / 3.6, kw: 0, tw: 0.32, ld: 15, tau: 0.8, as: 0.24, n: 1.6, jet: 1 },
   seaplane: { vs: 22, vc: () => AIR_KMH.seaplane / 3.6, kw: 320, tw: 0.5, ld: 9, tau: 0.22, as: 0.28, n: 2.8 },
 };
 const FLY_KI = 0.1;                       // (induced drag: CL^2 times this)
-const FLY_ROLL_T = 0.45;                  // (the roll upright, s)
+const FLY_ROLL_T = 0.45;
 const flyWrap = a => { a = (a + Math.PI) % (2 * Math.PI); if (a < 0) a += 2 * Math.PI; return a - Math.PI; };
 // its lift coefficient at angle of attack a: 1 at the stall, falling past it to half
 function flyCL(a, as) { const k = Math.abs(a) / as, c = k <= 1 ? k : Math.max(0.45, 1 - (k - 1) * 0.9); return Math.sign(a) * c; }
@@ -11582,6 +11582,7 @@ function flyCL(a, as) { const k = Math.abs(a) / as, c = k <= 1 ? k : Math.max(0.
 // turnT its turn round's time (v.turn: the nose swings through us - the way it was, its path held through it)
 function flyStep(v, dt, ctl, kind, fk, turnT) {
   if (v.bounceT > 0) v.bounceT -= dt;                                  // (just bounced off its wheels: the next touch lands it - planeLand, 29-plane.js)
+  if (v.turn && !v.turn.t && !v.roll && Math.cos(v.pitch || 0) < -0.25) { v.turn = null; v.roll = { t: 0, done: false }; }   // (told to turn round on its back: the half roll upright - below)
   const F = FLIGHT[kind], g = CAR_G / UPM, KL = g / (F.vs * F.vs), cd0 = 1 / (4 * F.ld * F.ld * FLY_KI), vc = F.vc();
   if (v.gam == null || !isFinite(v.gam)) { const f = v[fk] || 1; v.gam = Math.atan2(v.vy || 0, (v.vx || 0) * f || Math.max(1, v.spd || 0)); v.aoa = 0; }
   let V = Math.max(0.5, (v.spd || 0) / UPM), gam = v.gam;
@@ -11602,7 +11603,11 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
     // it be impossible and just lose altitude and stall?". Let go it never stalls)
     const over = 0.45 * clamp((1.3 * F.vs - V) / (0.3 * F.vs), 0, 1);
     const nq = F.n * g / (KL * V * V) * F.as, aMax = Math.min((1 + over) * F.as, nq), aMin = Math.max(lo, -0.5 * nq);
-    const aH = clamp(aFor(0), aMin, Math.min(hi, aMax)), p = clamp(ctl.pull || 0, -1, 1);
+    // (the stick let go is the trim: the angle its wings fly level at in cruise - not a hold on its path. Slower, the same angle
+    // lifts less and gravity takes the nose down; upside down it lifts toward the ground and it falls out - user Nov 2 19:35: "He
+    // should fall if I stop giving it speed"; "the tip of the nose doesn't feel heavier... like if gravity was pulling it down")
+    const aT = (F.vs / vc) * (F.vs / vc) * F.as;
+    const aH = clamp(aT, aMin, Math.min(hi, aMax)), p = clamp(ctl.pull || 0, -1, 1);
     aC = p >= 0 ? aH + p * (aMax - aH) : aH - p * (aMin - aH);
   }
   // the flare: low over ground it can land on with its wheels down (ctl.cush: its height over it, world units), coming down
@@ -11644,7 +11649,9 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
   if (A.turb > 0.02) v.pitch = flyWrap(v.pitch + A.turb * 0.07 * Math.sin(time * 9.1 + v.x * 0.02) * Math.sin(time * 5.3));
   v.x += v.vx * dt; v.y += v.vy * dt;
   // upside down and let go (or flown by its autopilot): it rolls upright, flying on the way it was going
-  const inv = Math.cos(v.pitch) < -0.25, free = ctl.gam != null || Math.abs(ctl.pull || 0) < 0.15;
+  // (only a pilot of its own - an autopilot - rolls it upright by itself; yours stays on its back till you turn it round: turning
+  // round upside down is the half roll - user Nov 2 19:35: "I'm inverted, and ... the plane realigns himself")
+  const inv = Math.cos(v.pitch) < -0.25, free = ctl.gam != null;
   if (!v.turn && !v.roll && inv && free) { v.invT = (v.invT || 0) + dt; if (v.invT > 0.35) v.roll = { t: 0, done: false }; } else v.invT = 0;
   if (v.roll) {
     v.roll.t += dt;
@@ -11676,6 +11683,14 @@ function flyPull(v, stick, dt) {
   return -stick * (0.35 + 0.65 * Math.min(1, v.pullT / 0.9));          // (the controls: + down; pulling is nose up)
 }
 // set off from the ground into the air: its path from how it's moving, its wings at the angle they had
+// just off the ground, let go: it climbs out by itself - its take-off's climb (climbT, at gam), then gently on till it has 0.85 of its
+// cruise (its trim is set for cruise: slower, let go, it would sink back - Nov 2). Returns the path it climbs at, or null
+function flyClimbOut(v, kind, dt, gam, held) {
+  const fast = v.spd / UPM >= 0.85 * FLIGHT[kind].vc();
+  if (v.climbT > 0) { v.climbT -= dt; if (v.climbT <= 0 && !fast) v.climbX = true; return gam; }
+  if (v.climbX && (fast || held)) v.climbX = false;
+  return v.climbX ? -0.05 : null;
+}
 function flyFrom(v, gam, aoa) { v.gam = gam; v.aoa = aoa || 0; v.roll = null; v.invT = 0; }
 /* ---- HELICOPTERS: the same principles (user Nov 2 16:32: "Lets apply the same principles" - the sky-hook example: a rotor's lift
    tilted to fly, a rope hanging under it). Every helicopter - the army's (stepHeli), the civilians' (stepCivHeli) - moves by the
@@ -36417,14 +36432,14 @@ function stepCivAir(f, dt) {
   let gearWant = 0;
   // (user Oct 26: it only lines up - wheels down, the nose up for the flare; its wheels on the concrete land it, below)
   if (!f.turn && ahead && f.offField && H < 300 && stick >= 0 && (f.vy || 0) >= -5) gearWant = 1;
-  if (f.climbT > 0) { f.climbT -= dt; if (!stick) { want = Math.min(want, -0.25); forced = true; } }
+  { const co = flyClimbOut(f, f.kind === 'jet' ? 'jet' : 'cessna', dt, -0.25, !!stick); if (co != null && !stick) { want = Math.min(want, co); forced = true; } }   // (just off the runway: climbing out)
   if (f.y < SKY_TOP + 120 && want < 0.1) want = 0.1;
   const p0 = f.pitch;
   // (Nov 2: the one flight model - flyStep, 29-zz-flight.js: the stick pulls its wings - a Cessna loops from a dive, the 747
   // can't; let go or flown home, it flies the path it wants. Its speed its own: a dive builds it, a climb spends it)
   if (!f.turn && !f.roll && ((f.x < 260 && f.facing < 0) || (f.x > WORLD_W - 260 && f.facing > 0) || (mine && loiterBack(f, f.facing)))) f.turn = { t: 0, from: f.facing };   // (it won't leave the world: at an end it turns back; stopped: round on the spot)
   f.gear = clamp((f.gear || 0) + (gearWant ? 1.5 : -1.5) * dt, 0, 1);
-  const ctl = stick && !forced ? { pull: flyPull(f, stick, dt) } : { gam: want }; if (gearWant) ctl.cush = H;   // (wheels down over ground it can land on: the flare)
+  const ctl = (stick || mine) && !forced ? { pull: flyPull(f, stick, dt) } : { gam: want }; if (gearWant) ctl.cush = H;   // (wheels down over ground it can land on: the flare)   // (yours let go: its trim)
   flyStep(f, dt, ctl, f.kind === 'jet' ? 'jet' : 'cessna', 'facing', K.turnT);
   if (f.kind === 'jet') wingVapour(f, flyWrap(f.pitch - p0) / Math.max(dt, 1e-3), 46);   // (a hard pull on the big one: vapour off its wings)
   f.dir = f.turn ? (f.turn.t / K.turnT < 0.5 ? f.turn.from : -f.turn.from) : f.facing;
@@ -45549,12 +45564,12 @@ const SP_FOOT = 6;                                               // (its middle 
 function spAir(s, dt, stick, mine) {
   let want = clamp(stick, -1, 1) * (stick < 0 ? 0.8 : 0.45);     // (its own pilot's stick is the path it wants, climbing steeper than it comes down - flyStep: a held stick of yours pulls the wings, below)
   const H = surfaceY(s.x) - s.y, wet = !dryLand(s.x);
-  if (s.climbT > 0) { s.climbT -= dt; if (!stick) want = -0.2; }
+  const co = flyClimbOut(s, 'seaplane', dt, -0.2, !!stick); if (co != null && !stick) want = co;   // (just off the water: climbing out)
   const flare = wet && H < 70 && (s.vy || 0) >= -5 && !(s.climbT > 0) && !s.turn ? 1 : 0;
   if (s.y < SKY_TOP + 120 && want < 0.1) want = 0.1;
   if (!s.turn && !s.roll && ((s.x < 260 && s.dir < 0) || (s.x > WORLD_W - 260 && s.dir > 0) || (mine && loiterBack(s, s.dir)))) s.turn = { t: 0, from: s.dir };   // (and stopped: round on the spot)
   // (Nov 2: the one flight model - flyStep, 29-zz-flight.js: the stick pulls its wings, let go it flies the path it wants)
-  const ctl = stick && mine ? { pull: flyPull(s, stick, dt) } : { gam: want }; if (flare) ctl.cush = H;   // (low over the water: its floats' flare)
+  const ctl = mine && (stick || co == null) ? { pull: flyPull(s, stick, dt) } : { gam: want }; if (flare) ctl.cush = H;   // (low over the water: its floats' flare)   // (yours let go: its trim)
   flyStep(s, dt, ctl, 'seaplane', 'dir', SP_TURN);
   planeWash(s, dt, 0.8);                                         // (low over the water: its wash, as every plane's)
   s.flare = clamp((s.flare || 0) + (flare ? 1 : -1) * dt * 1.5, 0, 1);
