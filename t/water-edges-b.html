@@ -28582,7 +28582,10 @@ function shNextStep(shear, x, dy, xe) {
 // always butt together (a pivot that drifted row by row made rows overlap or part as the hull pitched)
 const shearFn = (tn, pivot) => { if (Math.abs(tn) < 0.004) return SHEAR_NONE; const f = x => Math.round(tn * (x + PB / 2 - pivot) / PB) * PB; f.tn = tn; f.pivot = pivot; return f; };
 const SHEAR_NONE = () => 0; SHEAR_NONE.level = true;   // (a level shadow: shadowRow walks it edge to edge)
-function drawShipShadows(x0, x1) {
+// (lake: the casters on a lake, drawn in the lakes' pass - the same shadows, from each hull at its own water's surface: user Nov 3,
+// every water as the ocean; otherwise the ones at sea)
+function drawShipShadows(x0, x1, lake) {
+  const here = x => onLakeW(x) === !!lake;
   const dayS = E.day * (1 - 0.75 * E.overcast) * (1 - 0.5 * E.storm) * (1 - E.fog);
   const nightS = E.night * (1 - 0.6 * E.overcast) * (1 - E.fog);
   const moonLit = nightS > dayS, strength = Math.max(dayS, nightS);
@@ -28593,20 +28596,21 @@ function drawShipShadows(x0, x1) {
   const col = moonLit ? [0, 2, 10] : [8, 26, 70];
   // casters: each afloat ship, and a sailor's lifeboat
   const casters = [];
-  for (const sh of ships) if (sh && sh.state === 'afloat' && !inHarbour(sh)) casters.push([sh.x, SHIP_L * 0.46, 0.62, sh.y + 3, 1, Math.tan(sh.a)]);
-  for (let p = 0; p < 2; p++) if (crew[p].mode === 'boat') casters.push([crew[p].x, 6, 0.14, surfaceY(crew[p].x) + 2, crew[p].air ? 0.6 : 1, 0]);
-  for (const b of sailboats) if (b.state === 'sail' && !onLakeW(b.x)) casters.push([b.x, sailHalf(b) * 0.9, 0.22, b.y + 3, 0.8, Math.tan(b.a)]);
+  for (const sh of ships) if (sh && sh.state === 'afloat' && !inHarbour(sh) && here(sh.x)) casters.push([sh.x, SHIP_L * 0.46, 0.62, sh.y + 3, 1, Math.tan(sh.a)]);
+  for (let p = 0; p < 2; p++) if (crew[p].mode === 'boat' && here(crew[p].x)) casters.push([crew[p].x, 6, 0.14, surfaceY(crew[p].x) + 2, crew[p].air ? 0.6 : 1, 0]);
+  for (const b of sailboats) if (b.state === 'sail' && here(b.x)) casters.push([b.x, sailHalf(b) * 0.9, 0.22, b.y + 3, 0.8, Math.tan(b.a)]);
   // (OPEN WORLD, user Oct 25 late: "all ships must have a drop shadow") the big ships, the research ships, the jet boats
   if (LAND) {
-    for (const c of civShips) if (c.state === 'sail' && Math.abs(c.x - (x0 + x1) / 2) < (x1 - x0) + 600) casters.push([c.x, civLen(c) * 0.44, 0.8, surfaceY(c.x) + 3 + c.sink, 1, Math.tan(c.a)]);
-    for (const j of jetboats) if (j.state === 'run' && !onLakeW(j.x)) { const pb = !!picBoat(j), L = pb ? storyBoatSize(j)[0] : 22; casters.push([j.x, L * 0.46, pb ? 0.4 : 0.12, j.y + 2, pb ? 0.9 : 0.6, Math.tan(j.a || 0)]); }   // (a picture boat by its picture - PIC_BOATS)   // (each by her own size - user Nov 2 11:29: the fishing boat's was too small)
+    for (const c of civShips) if (c.state === 'sail' && here(c.x) && Math.abs(c.x - (x0 + x1) / 2) < (x1 - x0) + 600) casters.push([c.x, civLen(c) * 0.44, 0.8, surfaceY(c.x) + 3 + c.sink, 1, Math.tan(c.a)]);
+    for (const j of jetboats) if (j.state === 'run' && here(j.x)) { const pb = !!picBoat(j), L = pb ? storyBoatSize(j)[0] : 22; casters.push([j.x, L * 0.46, pb ? 0.4 : 0.12, j.y + 2, pb ? 0.9 : 0.6, Math.tan(j.a || 0)]); }   // (a picture boat by its picture - PIC_BOATS)   // (each by her own size - user Nov 2 11:29: the fishing boat's was too small)
+    for (const q of seaplanes) if ((q.state === 'water' || q.state === 'moored') && here(q.x)) casters.push([q.x, 14, 0.2, surfaceY(q.x) + 2, 0.7, 0]);   // (a seaplane on the water - every water)
   }
   // (on the GPU: every caster in one draw, its rows and bands worked out per pixel, clipped under the surface there -
   // 40-zz-water-gl.js; the pier's deck shade in its own, inside its box)
   if (gpuwOn('shadows')) {
     const list = casters.filter(([cx, half, , y0]) => !(cx + half + 200 < x0 || cx - half - 200 > x1) && !inQuay(cx, y0 + 4));
     wglShadows(list, strength, moonLit, lean, col, true);
-    for (const d of docks) {
+    for (const d of lake ? [] : docks) {
       const a = d.quay, b = d.blockFace + d.dir * 80, cx = (a + b) / 2, half = Math.abs(b - a) / 2;
       if (d.pierGone || cx + half + 200 < x0 || cx - half - 200 > x1) continue;
       C.save(); C.beginPath();
@@ -28649,7 +28653,7 @@ function drawShipShadows(x0, x1) {
   }
   // the pier's deck shades the water under it, between its pillars, down to the stone block (which takes
   // none: its face stands in the light)
-  for (const d of docks) {
+  for (const d of lake ? [] : docks) {
     const a = d.quay, b = d.blockFace + d.dir * 80, cx = (a + b) / 2, half = Math.abs(b - a) / 2;
     if (d.pierGone || cx + half + 200 < x0 || cx - half - 200 > x1) continue;
     C.save(); C.beginPath();
@@ -29573,8 +29577,9 @@ function seaDecksWarm() {
   const n = clamp(Math.round(bgP('bgsdn', SEA_DECK_N)), 1, SEA_DECKS.length);
   for (let i = 0; i < n; i++) { const st = clamp(Math.round(bgP('bgsd' + (i + 1) + 's', SEA_DECKS[i][5])), 0, 2); if (!seaDecks[i] || seaDecks[i].st !== st) { seaDecks[i] = buildSeaDeck(i, st); return; } }
 }
-function drawSeaDecks() {
-  const n = clamp(Math.round(bgP('bgsdn', SEA_DECK_N)), 1, SEA_DECKS.length), Bt = bh - SHY + 2, L = [], DD = seaDeckDepth();
+// (bot: how far down they fill, on the screen - the view's bottom; a water drawn lifted to its own surface passes its own: drawLakeRoots)
+function drawSeaDecks(bot) {
+  const n = clamp(Math.round(bgP('bgsdn', SEA_DECK_N)), 1, SEA_DECKS.length), Bt = bot != null ? bot : bh - SHY + 2, L = [], DD = seaDeckDepth();
   for (let i = 0; i < n; i++) {
     const D = SEA_DECKS[i], B = 'bgsd' + (i + 1), st = clamp(Math.round(bgP(B + 's', D[5])), 0, 2);
     if (!seaDecks[i] || seaDecks[i].st !== st) seaDecks[i] = buildSeaDeck(i, st);
@@ -42413,7 +42418,6 @@ function lakePath(a, b, step, yOff) {
 // (user Oct 29, a desert lake's shore: "The waterline should not be rendering on top of the terrain" - the lake's span runs from
 // shore to shore, where the ground is still above the water; its line, pale band and tint were drawn across that dry slope.
 // Now only where the ground is under the surface: the ends trimmed in to the first wet ground, and the line skips a dry column)
-const lakeDry = x => landTop(x) <= surfaceY(x) + 0.5;
 // a lake's wet span: from the first ground under the water at one shore to the last at the other (the sea's clip uses it too,
 // 42-render-sky.js clipRegion); worked out again only when the ground changes (land.ver)
 function lakeWet(L) {
@@ -42427,32 +42431,33 @@ function lakeWet(L) {
   return L._w;
 }
 // a lake whose bed is marked SEA (most of its columns): the sea's, not a lake's
-function lakeIsSea(L) { if (L._sea !== undefined && L._seaOf === land.sea) return L._sea; let n = 0, k = 0; for (let x = L[0]; x < L[1]; x += 40) { k++; if (land.sea && land.sea[ltCol(x)]) n++; } L._seaOf = land.sea; return (L._sea = k > 0 && n > k / 2); }
 /* (user Nov 1 12:49-12:54: "Its like you are doing two separate systems" - "all terrains must have their 'underwater background
    decks' like Sea does ... they cant just be flat water") a country's water is the sea's: the sea's pass (renderObjects) covers the
    whole view - its deep colours, decks, rays, surface line and tint - and the land's pass leaves its water open, so that is what
    shows in every lake; no lake water, tint, depth or bed pictures of its own (drawLakeIn, drawLakeBack). An island standing in
    one: its rock under the water drawn first in the land's pass, so the ground in front covers it (user: "A should be rendered
    behind the main land") - drawLakeRoots, before the ground (renderLandObjects0) */
-const LAKE_IS_SEA = true;                                     // (every country water the sea's - false: the old lake water)
 function drawLakeRoots(x0, x1) {
   if (!SIM_ONLY) waterPageSync();                                  // (the water as the simulation worker's snapshot has it - 50-land-water)
   const step = Math.max(1, 2 / SV), dz = (SEABED_Y + 150 - WATER_Y) / (SEABED_DEEP + 150 - WATER_Y);
   const ov = 0.08 * E.storm, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12);
   for (const L of land.lakes || []) {
     const a = Math.max(x0 - 8, L[0]), b = Math.min(x1 + 8, L[1]); if (b <= a) continue;
-    // (the sea's floor out here still lies where the old sea's was - a band just under the surface, earth under it: the sea's
-    // water, its decks and its tint laid again over the lake's own water, as the sea's pass lays them - 43-render-objects)
+    // (user Nov 3 13:28: "All the bodies of water should have the exact same rendering like the main ocean has, independent of their
+    // height") the ocean's own water - its deep colours, depth decks, light rays and tint (renderObjects, 43-render-objects) - drawn
+    // in this water, lifted (or lowered) by how far its surface is from the ocean's: the same drawing, from its own surface
+    const dl = lakeLv(L) - WATER_Y, dy = Math.round(dl * SV);
     C.save(); lakePath(a, b, step, 1); C.clip();
     try {
-      const dl = lakeLv(L) - WATER_Y;                            // (its own level: the sea's colours from its surface down - Nov 2)
-      const deep = C.createLinearGradient(0, PY(WATER_Y + dl), 0, PY(SEABED_DEEP + 150 + dl));
+      C.translate(0, dy);
+      const deep = C.createLinearGradient(0, PY(WATER_Y), 0, PY(SEABED_DEEP + 150));
       for (const [t, c] of seaDeepStops(E.sunset, dz)) deep.addColorStop(t, rgbs(c));
-      const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12 + dl)), B = bh + SHY + 50;
+      const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12)), B = bh + SHY + 50 + Math.abs(dy);
       C.fillStyle = deep; C.fillRect(X0, Y, X1 - X0, B - Y);
       if (E.overcast > 0.05) { C.fillStyle = `rgba(4,10,26,${(0.38 * E.overcast).toFixed(3)})`; C.fillRect(X0, Y, X1 - X0, B - Y); }
-      drawSeaDecks();
-      const og = C.createLinearGradient(0, PY(WATER_Y - 12 + dl), 0, PY(SEABED_DEEP + 150 + dl));
+      drawSeaDecks(bh - SHY + 2 - dy);                       // (down to the view's bottom, wherever this water's surface is)
+      drawRays(false);
+      const og = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(SEABED_DEEP + 150));
       for (const [t, c] of seaOverStops(E.sunset, ov, oz)) og.addColorStop(t, rgbs(c.slice(0, 3), c[3]));
       C.fillStyle = og; C.fillRect(X0, Y, X1 - X0, B - Y);
     } finally { C.restore(); }
@@ -42465,26 +42470,22 @@ function drawLakeRoots(x0, x1) {
     if (solRoots.length) { C.save(); lakePath(a, b, step, 1); C.clip(); try { drawSolidRoots(a, b); } finally { C.restore(); } }   // (a SOLID shape in this water: in front of it, as at sea - 50-land-islands, Nov 2)
   }
 }
+// the boats' shadows in every lake's water - the ocean's own (drawShipShadows), each from its hull at this water's surface, down to
+// its bed (in the lakes' pass, after the ground: they fall on the bed as at sea)
+function drawLakeShadows(x0, x1) {
+  const step = Math.max(1, 2 / SV);
+  for (const L of land.lakes || []) {
+    const a = Math.max(x0 - 8, L[0]), b = Math.min(x1 + 8, L[1]); if (b <= a) continue;
+    C.save(); lakePath(a, b, step, 1); C.clip();
+    try { drawShipShadows(a, b, true); } finally { C.restore(); }
+  }
+}
+// (over) a lake's surface: the pale band under it and its bright line (as the sea's: render-objects) - its water itself is the ocean's,
+// drawn from its own surface (drawLakeRoots)
 function drawLakeIn(L, x0, x1, over) {
-  if (LAKE_IS_SEA && !over) return;                           // (the sea's own water shows - above; the second pass: only its line - below)
+  if (!over) return;
   const W = lakeWet(L), a = Math.max(x0 - 8, W[0]), b = Math.min(x1 + 8, W[1]);
   if (b <= a) return;
-  const step = Math.max(1, 2 / SV);
-  if (!over) {
-    const deep = C.createLinearGradient(0, PY(WATER_Y), 0, PY(SEABED_DEEP + 150)), ss = E.sunset, dz = (SEABED_Y + 150 - WATER_Y) / (SEABED_DEEP + 150 - WATER_Y);
-    for (const [t, c] of seaDeepStops(ss, dz)) deep.addColorStop(t, rgbs(c));
-    // (user Nov 1: "Why doesn't the sea have the correct BG decks underwater?" - a sea in a country, its bed marked SEA: no lake's
-    // water of its own - the sea's pass (renderObjects, the whole view) shows through, its decks and an island's feet in it, as out
-    // at sea; nor the lake's depth and bed pictures (drawLakeBack, drawLakeBed); the sea's tint over it comes in the second pass)
-    if (lakeIsSea(L)) return;   // (an island standing in it: its rock under the water, over the sea's floor - which out here lies at the old sea's depth)
-    lakePath(a, b, step, 1); C.fillStyle = deep; C.fill();
-    if (E.overcast > 0.05) { C.fillStyle = `rgba(4,10,26,${(0.38 * E.overcast).toFixed(3)})`; C.fill(); }
-    return;
-  }
-  const ov = 0.08 * E.storm, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12), og = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(SEABED_DEEP + 150));
-  for (const [t, c] of seaOverStops(E.sunset, ov, oz)) og.addColorStop(t, rgbs(c.slice(0, 3), c[3]));
-  if (!LAKE_IS_SEA) { lakePath(a, b, step, 0); C.fillStyle = og; C.fill(); }
-  // the pale band under the surface, the bright line along it (as the sea's: render-objects)
   // (Nov 1: the band and the line a column as colours given as numbers - fillRectA - not two colour texts set and read back a
   // column; the line's text left set at the end, as the last column left it)
   const lw = SV > 1.6 ? 3 : SV > 0.9 ? 2 : 1, ss = E.sunset > 0.2, lineC = ss ? mix3([238, 249, 255], [255, 200, 170], E.sunset) : LAKE_LINE;
@@ -42492,7 +42493,7 @@ function drawLakeIn(L, x0, x1, over) {
   let py = null, any = false;
   for (let c = c0; c < c1; c++) {
     const wx = (c + CAMPX + 0.5) / SV;
-    if (LAKE_IS_SEA ? lakeBedAt(wx) <= surfaceY(wx) + 0.5 : lakeDry(wx)) { py = null; continue; }   // (dry ground here: no line over it - an island standing in the water: the line in front of it, user Nov 1 13:18: "the water line ALWAYS renders in front of a island")
+    if (lakeBedAt(wx) <= surfaceY(wx) + 0.5) { py = null; continue; }   // (dry ground here: no line over it - an island standing in the water: the line in front of it, user Nov 1 13:18: "the water line ALWAYS renders in front of a island")
     const y = Math.round(PY(surfaceY(wx)));
     fillRectA(C, LAKE_BAND, 0.4, c, y + lw, 1, lw + 2);
     const top = py == null ? y : Math.min(y, py), hgt = (py == null ? 0 : Math.abs(y - py)) + lw;
@@ -42568,17 +42569,17 @@ function buildLakeFish() {
   // (user Oct 28: any number of lakes - spread by size: today's get three schools and four big ones; a pond fewer; one
   // too shallow for a fish none)
   for (const [a, b] of land.lakes || []) {
-    let deep = 0; for (let x = a; x < b; x += 10) deep = Math.max(deep, landTop(x) - WATER_Y);
+    let deep = 0; for (let x = a; x < b; x += 10) deep = Math.max(deep, landTop(x) - lakeLevelAt(x));
     if (deep < 24) continue;
     const nS = clamp(Math.round((b - a) / 1200), 1, 3), nB = clamp(Math.round((b - a) / 900), 0, 4);
     for (let s = 0; s < nS; s++) {
       const x = a + (b - a) * (0.15 + 0.7 * lfR()), g = landTop(x), type = types[s % types.length];
-      const lead = { type, x, y: Math.max(WATER_Y + 12, g - lfRnd(30, 70)), vx: lfRnd(8, 16) * (lfR() < 0.5 ? -1 : 1), vy: 0, lift: lfRnd(30, 70), ph: lfR() * 6, scare: 0, small: true };
+      const lead = { type, x, y: Math.max(lakeLevelAt(x) + 12, g - lfRnd(30, 70)), vx: lfRnd(8, 16) * (lfR() < 0.5 ? -1 : 1), vy: 0, lift: lfRnd(30, 70), ph: lfR() * 6, scare: 0, small: true };
       lakeFish.push(lead);
       const n = 5 + Math.floor(lfR() * 4);
       for (let k = 0; k < n; k++) lakeFish.push({ type, lead, off: [lfRnd(-22, 22), lfRnd(-9, 9)], x: lead.x, y: lead.y, vx: lead.vx, vy: 0, ph: lfR() * 6, scare: 0, small: true });
     }
-    for (let i = 0; i < nB; i++) { const x = a + (b - a) * (0.12 + 0.76 * lfR()), g = landTop(x); lakeFish.push({ type: types[(i + 3) % types.length], x, y: Math.max(WATER_Y + 10, g - lfRnd(6, 26)), vx: lfRnd(6, 16) * (lfR() < 0.5 ? -1 : 1), vy: 0, lift: lfRnd(6, 26), ph: lfR() * 6, scare: 0 }); }
+    for (let i = 0; i < nB; i++) { const x = a + (b - a) * (0.12 + 0.76 * lfR()), g = landTop(x); lakeFish.push({ type: types[(i + 3) % types.length], x, y: Math.max(lakeLevelAt(x) + 10, g - lfRnd(6, 26)), vx: lfRnd(6, 16) * (lfR() < 0.5 ? -1 : 1), vy: 0, lift: lfRnd(6, 26), ph: lfR() * 6, scare: 0 }); }
   }
 }
 function stepLakeFish(dt) {
@@ -42717,14 +42718,14 @@ function buildLakeSea() {
   if (plants.some(p => p.lk)) plants = plants.filter(p => !p.lk);
   if (rockForms.some(f => f.lk)) rockForms = rockForms.filter(f => !f.lk);
   land.lkRocks = false;
-  if (!land.marked || !land.sea || !land.lakes) return;
-  const R = seededRng(6161), seaAt = x => land.sea[clamp(ltCol(x), 0, land.cols - 1)] === 1 && lakeAt(x);
+  if (!land.lakes) return;
+  const R = seededRng(6161), seaAt = x => lakeAt(x);   // (every lake's bed the sea's - user Nov 3: every water as the ocean, not only a bed marked SEA)
   // (user Oct 28, 19:02: "yes" - the sea's big rock formations too: mesas, spires and mounds out in a SEA lake's deeper
   // water, taller the deeper, solid - the floor the subs stand on (seabedY) - and broken by blasts (rockBlast) as the sea's;
   // their own seed, so the lakes' other dressing stays where it was)
   { const RR = seededRng(6262), [RKs, RKg] = rockFormsK();
     for (const L of land.lakes) for (let x = L[0] + 300 + RR() * 300; x < L[1] - 300; x += (520 + RR() * 520) * RKg) {
-      const dep = landTop(x) - WATER_Y; if (!seaAt(x) || dep < 280) continue;
+      const dep = landTop(x) - lakeLevelAt(x); if (!seaAt(x) || dep < 280) continue;
       if (Math.abs(landTop(x + 200) - landTop(x - 200)) > 400) continue;          // (none on a steep wall: the wall is the rock there)
       if (typeof CAVE !== 'undefined' && CAVE.nearMouth(x, 520)) continue;          // (none on a cave's mouth)
       const deep = clamp(dep / BED_EXTRA, 0, 1), kind = RR() < 0.4 ? 'mesa' : RR() < 0.6 ? 'spire' : 'mound';
@@ -42744,7 +42745,7 @@ function buildLakeSea() {
   for (const L of land.lakes) {
     for (let x = L[0] + 10 + R() * 30; x < L[1] - 10; x += 26 + R() * 70) {
       if (!seaAt(x)) continue;
-      const dep = landTop(x) - WATER_Y, shore = Math.min(x - L[0], L[1] - x), df = clamp(dep / 1200, 0, 1);
+      const dep = landTop(x) - lakeLevelAt(x), shore = Math.min(x - L[0], L[1] - x), df = clamp(dep / 1200, 0, 1);
       if (dep < 24) continue;
       if (shore < 320 && R() < 0.55) {
         // a boulder, big near the shore, with corals and weed on it (as the sea's by its coasts)
@@ -42766,7 +42767,7 @@ function buildLakeSea() {
     }
     // the kelp and grass (and the odd small rock), denser the deeper - as the sea's
     for (let x = L[0] + 20; x < L[1] - 20;) {
-      const dep = landTop(x) - WATER_Y, df = clamp(dep / 1200, 0, 1), h = R();
+      const dep = landTop(x) - lakeLevelAt(x), df = clamp(dep / 1200, 0, 1), h = R();
       const kind = h < 0.3 + 0.35 * df ? 'kelp' : h < 0.7 ? 'grass' : 'rock';
       if (seaAt(x) && dep > 20) {
         const rw = 5 + R() * 12, big = R() < 0.22 ? 1.8 + R() * 1.2 : 0.6 + R() * 0.65;
@@ -42781,7 +42782,7 @@ function buildLakeSea() {
 // drawn in the land's pass, after the lake's deep water and before its tint over (renderLandObjects); the weed's blades
 // drawn plainly (not into the pixel batch), so the lake's clip holds them
 function drawLakeSea(x0, x1) {
-  if (!land.marked || !(land.sea && land.lakes)) return;
+  if (!land.lakes) return;
   const b0 = BATCH; BATCH = false;
   try { lakeClip(x0, x1, () => { drawReefItems(reef, x0, x1, true); drawAlgae(x0, x1, true); }); } finally { BATCH = b0; }
 }
@@ -42853,160 +42854,10 @@ function lakeEdDraw() {
   }
 }
 
-/* ---- the lake's life (OPEN WORLD, user Oct 26, with pictures: gen/open/ref/lake_bottom_proposal_oct26.png, and how it
-   was: lake_bottom_current_oct26.png) - "The transition to the ground should have more variety, we should have schools
-   of fish, since it's a lake some caustics pixel art effect... ALL boats should get the drop shadow, just like the
-   ocean... Notice the nice green algae that would move with the current. And notice the flowers I added on the
-   background grass plane to break it up a bit. And how the blue hue of the water is different as it goes deeper. It
-   should also have underwater BG textures... other algae and rocks that get that atmospheric depth effect."
-   In the water, back to front: its blue deepening with the depth (lighter and greener up by the surface, deep blue
-   down by the bed); far rocks and weeds, faded into the water's colour the way distance fades the hills; shafts of
-   light down from the surface, slowly swaying; on the bed sand, pebbles and mossy patches, swaying algae in clumps of
-   several greens (and the odd red), the shallows by the shore thicker with stones and weed; caustics - the surface's
-   light rippling in bright lines over the bed. The fish in schools. The yachts' and motorboats' shadows down through
-   it. On the far grass behind, flowers - purple spikes, white and yellow heads - here and there. ---- */
-let lakeDeco = null;
-const LK = { p: () => Math.max(1, Math.round(SV * 1.1)) };
-function buildLakeDeco() {
-  lakeDeco = (land.lakes || []).map(([a, b]) => {
-    let h = Math.floor(a) % 233280 + 7; const r01 = () => (h = (h * 9301 + 49297) % 233280) / 233280, rr = (lo, hi) => lo + (hi - lo) * r01();
-    const depth = x => landTop(x) - WATER_Y, D = { a, b, back: [], bweed: [], weed: [], peb: [], moss: [], maxD: 1 };
-    for (let x = a; x < b; x += 6) D.maxD = Math.max(D.maxD, depth(x));
-    for (let x = a + rr(10, 30); x < b - 10; x += rr(26, 60)) if (depth(x) > 18) D.back.push({ x, w: rr(14, 40), h: rr(7, 24), k: r01() });
-    for (let x = a + rr(10, 30); x < b - 10; x += rr(14, 34)) if (depth(x) > 24) D.bweed.push({ x, h: rr(14, Math.min(60, depth(x) * 0.8)), ph: rr(0, 6), n: 2 + Math.floor(r01() * 3) });
-    for (let x = a + rr(4, 12); x < b - 4; x += rr(10, 26)) {
-      const d = depth(x); if (d < 6) continue;
-      const shallow = d < 34, n = shallow ? 3 + Math.floor(r01() * 4) : 2 + Math.floor(r01() * 5);
-      D.weed.push({ x, n, h: rr(12, Math.max(14, Math.min(52, d * 0.8))), ph: rr(0, 6), c: r01() < 0.1 ? 3 : Math.floor(r01() * 3), sp: rr(1.5, 3.5) });
-      if (shallow && r01() < 0.6) D.weed.push({ x: x + rr(-6, 6), n: 2, h: rr(5, 12), ph: rr(0, 6), c: Math.floor(r01() * 3), sp: rr(1.5, 3) });
-    }
-    for (let x = a + 2; x < b - 2; x += rr(3, 11)) if (depth(x) > 2) D.peb.push({ x, w: rr(2, 7), h: rr(1.5, 3.5), c: Math.floor(r01() * 3), s: depth(x) < 30 ? 1 : 0 });
-    for (let x = a + 4; x < b - 4; x += rr(12, 30)) if (depth(x) > 2) D.moss.push({ x, w: rr(5, 16) });
-    return D;
-  });
-}
-const LAKE_WEED_COLS = [[58, 140, 62], [92, 176, 72], [38, 104, 66], [170, 72, 58]];
-// a lake's still layers, painted once at a pixel a world unit: 'back' its far rocks and weeds faded into the water,
-// 'bed' the pebbles and moss on its bed (x from the lake's left shore, y from its surface)
-function lakeBaked(D, which) {
-  const key = '_' + which; if (D[key]) return D[key];
-  const W = Math.ceil(D.b - D.a) + 2, H = Math.ceil(D.maxD) + 4, c = makeCanvas(W, H), x = c.getContext('2d');
-  const R = (wx, wy, w, h, col) => { x.fillStyle = css3(col); x.fillRect(Math.round(wx - D.a), Math.round(wy - WATER_Y), Math.max(1, Math.round(w)), Math.max(1, Math.round(h))); };
-  if (which === 'back') {
-    for (const r of D.back) {
-      const bed = landTop(r.x) - 3, u = (bed - WATER_Y) / D.maxD, wc = lakeWaterAt(u), col = mix3([96, 104, 98], wc, 0.62), hi = mix3([150, 160, 150], wc, 0.6);
-      for (let yy = 0; yy < r.h; yy++) { const f = 1 - Math.pow(yy / r.h, 2), w = r.w * Math.sqrt(Math.max(0, f)) * (0.85 + 0.15 * r.k); R(r.x - w / 2, bed - yy - 1, w, 1, yy > r.h * 0.7 ? hi : col); }
-    }
-    for (const w of D.bweed) {
-      const bed = landTop(w.x) - 2, u = (bed - WATER_Y) / D.maxD, col = mix3([40, 110, 80], lakeWaterAt(u), 0.6);
-      for (let k = 0; k < w.n; k++) for (let yy = 0; yy < w.h; yy++) R(w.x + k * 3 + Math.sin(w.ph + k * 1.7 + yy * 0.06) * yy * 0.12, bed - yy - 1, 1, 1, col);
-    }
-  } else {
-    for (const m of D.moss) { const bed = landTop(m.x); R(m.x - m.w / 2, bed - 1, m.w, 1, [74, 120, 58]); R(m.x - m.w / 3, bed - 2, m.w * 0.66, 1, [96, 150, 70]); }
-    for (const q of D.peb) { const bed = landTop(q.x), col = [[176, 168, 150], [140, 136, 128], [120, 108, 92]][q.c]; R(q.x - q.w / 2, bed - q.h, q.w, q.h, col); R(q.x - q.w / 2, bed - q.h, q.w, 1, mix3(col, [255, 255, 255], 0.3)); }
-  }
-  return (D[key] = { c });
-}
-// one clump of algae, painted once: its blades, darker and lighter, curving a little (the sway is the skew it's drawn with)
-function lakeWeedArt(w) {
-  if (w._art) return w._art;
-  const col = LAKE_WEED_COLS[w.c], dk = mix3(col, [10, 30, 30], 0.35), hi = mix3(col, [220, 255, 180], 0.25);
-  const W = Math.ceil(w.n * w.sp + 10), H = Math.ceil(w.h + 2), c = makeCanvas(W, H), x = c.getContext('2d');
-  for (let k = 0; k < w.n; k++) {
-    const bx = W / 2 + (k - w.n / 2) * w.sp, hh = w.h * (0.6 + 0.4 * Math.sin(k * 2.7 + w.ph) ** 2);
-    for (let yy = 0; yy < hh; yy++) { const u = yy / hh, cv = Math.sin(w.ph + k * 0.9 - yy * 0.08) * u * u * 2.5; x.fillStyle = css3(u > 0.85 ? hi : k % 2 ? dk : col); x.fillRect(Math.round(bx + cv - 1), H - 1 - yy, u < 0.75 ? 2 : 1, 1); }
-  }
-  return (w._art = { c });
-}
-// the water's colour at a depth (0 the surface .. 1 the deepest of this lake), mixed into what's far
-const lakeWaterAt = u => mix3([70, 170, 230], [18, 52, 132], clamp(u, 0, 1));
-// (Nov 1) lakeRect: the rectangle in a colour given as numbers (fillRectA; the alpha as the colour's text carries it, glA3) - no
-// text made, set and read back; lakeFill: the same, and the fill colour then set to its text, as it always left it
-function lakeRect(X, Y, W, H, col, a) { fillRectA(C, col, a == null ? 1 : glA3(a), Math.round(X), Math.round(Y), Math.max(1, Math.round(W)), Math.max(1, Math.round(H))); }
-function lakeFill(X, Y, W, H, col, a) { lakeRect(X, Y, W, H, col, a); C.fillStyle = a == null ? css3(col) : rgbs(col, a); }
-// behind what's in the lake (after its deep fill): the hue by depth, far rocks and weeds, the light's shafts
-function drawLakeBack(x0, x1) {
-  if (!lakeDeco || lakeDeco.length !== (land.lakes || []).length) buildLakeDeco();
-  const p = LK.p(), t = time, lit = clamp(E.light + 0.15, 0.25, 1);
-  for (let i = 0; i < lakeDeco.length; i++) {
-    const D = lakeDeco[i]; if (lakeSeaAt(i)) continue;   // (a sea in a country: the sea's own water, decks and floor - renderObjects - not a lake's; its baked pictures as wide as that sea were black - user Nov 1)
-    const a = Math.max(x0 - 10, D.a), b = Math.min(x1 + 10, D.b); if (b <= a) continue;
-    C.save(); lakePath(a, b, Math.max(1, 2 / SV), 1); C.clip();
-    // its blue, deeper going down (user: "how the blue hue of the water is different as it goes deeper")
-    const g = C.createLinearGradient(0, PY(WATER_Y), 0, PY(WATER_Y + D.maxD));
-    g.addColorStop(0, `rgba(90,200,240,${(0.28 * lit).toFixed(3)})`); g.addColorStop(0.45, `rgba(40,120,210,${(0.18 * lit).toFixed(3)})`); g.addColorStop(1, `rgba(8,28,96,${(0.42).toFixed(3)})`);
-    C.fillStyle = g; C.fillRect(Math.round(PX(a)), Math.round(PY(WATER_Y - 4)), Math.round((b - a) * SV) + 2, Math.round((D.maxD + 8) * SV));
-    // far rocks and weeds (faded into the water) - baked once (the optimization pass: one picture, not thousands of
-    // little rectangles every frame on the iPad)
-    { const B = lakeBaked(D, 'back'); C.drawImage(scaled(B.c, SV, true), Math.round(PX(D.a)), Math.round(PY(WATER_Y))); }
-    // shafts of light from the surface, slanting with the sun, slowly swaying (a little brighter by day)
-    C.globalCompositeOperation = 'lighter';
-    for (let k = 0; k < 6; k++) {
-      const cx = D.a + (D.b - D.a) * ((k + 0.5) / 6) + Math.sin(t * 0.25 + k * 2.1) * 30, w0 = 10 + 8 * Math.sin(k * 3.3), lean = 0.35;
-      if (cx + 120 < a || cx - 120 > b) continue;
-      const al = (0.09 + 0.05 * Math.sin(t * 0.6 + k)) * lit;
-      C.fillStyle = `rgba(160,230,255,${al.toFixed(3)})`;
-      C.beginPath(); C.moveTo(PX(cx - w0), PY(WATER_Y)); C.lineTo(PX(cx + w0), PY(WATER_Y)); C.lineTo(PX(cx + w0 * 1.8 + D.maxD * lean), PY(WATER_Y + D.maxD)); C.lineTo(PX(cx - w0 * 1.8 + D.maxD * lean), PY(WATER_Y + D.maxD)); C.closePath(); C.fill();
-    }
-    C.globalCompositeOperation = 'source-over';
-    C.restore();
-  }
-}
-// on the bed (after the ground, under the water's pass): pebbles and moss, the algae swaying, the caustics
-const lakeSeaAt = i => { const L = (land.lakes || [])[i]; return !!L && (LAKE_IS_SEA || lakeIsSea(L)); };   // (every lake the sea's now - 50-land-lake)
-function drawLakeBed(x0, x1) {
-  if (!lakeDeco) return;
-  const p = LK.p(), t = time, lit = clamp(E.light + 0.1, 0.2, 1);
-  for (let i = 0; i < lakeDeco.length; i++) {
-    const D = lakeDeco[i]; if (lakeSeaAt(i)) continue;   // (a sea in a country: the sea's own - drawLakeBack)
-    const a = Math.max(x0 - 10, D.a), b = Math.min(x1 + 10, D.b); if (b <= a) continue;
-    { const B = lakeBaked(D, 'bed'); C.drawImage(scaled(B.c, SV, true), Math.round(PX(D.a)), Math.round(PY(WATER_Y))); }   // (pebbles and moss: baked once)
-    // the algae: each clump a little baked picture, bending with the current - skewed about its foot, swaying
-    // (user: "move with the current")
-    for (const w of D.weed) {
-      if (w.x < a - 20 || w.x > b + 20) continue;
-      const W = lakeWeedArt(w), bed = landTop(w.x) + 1, sw = (Math.sin(t * 1.3 + w.ph) * 0.6 + Math.sin(t * 0.5 + w.x * 0.01) * 0.4) * 0.22;
-      const I = scaled(W.c, SV, true), X = Math.round(PX(w.x - W.c.width / 2)), Y = Math.round(PY(bed));
-      C.save(); C.translate(X + I.width / 2, Y); C.transform(1, 0, -sw, 1, 0, 0); C.drawImage(I, -Math.round(I.width / 2), -I.height); C.restore();
-    }
-    // caustics: the surface's light rippling over the bed in bright broken lines
-    C.globalCompositeOperation = 'lighter';
-    const st = Math.max(2, 3 / SV);
-    for (let x = a; x < b; x += st) {
-      const v = Math.sin(x * 0.09 + t * 1.3) + Math.sin(x * 0.053 - t * 0.9) + Math.sin(x * 0.17 + t * 2.1);
-      if (v < 1.25) continue;
-      const bed = landTop(x), d = bed - WATER_Y; if (d < 3) continue;
-      const al = Math.min(0.8, (v - 1.25) * 0.7) * lit * clamp(1.2 - d / (D.maxD * 1.4), 0.3, 1);
-      lakeFill(PX(x), PY(bed) - p - Math.round(((x * 7) % 3)) * p, st * SV, p, [170, 235, 255], al);
-    }
-    C.globalCompositeOperation = 'source-over';
-  }
-}
-// the yachts' and motorboats' shadows down through the lake (user Oct 26: "ALL boats should get the drop shadow, just
-// like the ocean, no exception") - as the sea's: under the hull, slanting with the light, fading with the depth
-function drawLakeShadows(x0, x1) {
-  const dayS = E.day * (1 - 0.75 * E.overcast) * (1 - E.fog), nightS = E.night * (1 - 0.6 * E.overcast) * (1 - E.fog), str = Math.max(dayS, nightS);
-  if (str < 0.04 || !land.lakes) return;
-  const casters = [];
-  for (const b of sailboats) if (onLakeW(b.x) && b.state === 'sail') casters.push([b.x, sailHalf(b) * 0.85]);
-  for (const j of jetboats) if (onLakeW(j.x) && j.state === 'run') casters.push([j.x, picBoat(j) ? storyBoatSize(j)[0] * 0.46 : 11]);   // (each by its own size)
-  for (const s of seaplanes) if ((s.state === 'water' || s.state === 'moored') && lakeAt(s.x)) casters.push([s.x, 14]);
-  const step = Math.max(1, Math.round(SV * 2)), lean = 0.3;
-  for (const L of land.lakes) {
-    const a = Math.max(x0, L[0]), b = Math.min(x1, L[1]); if (b <= a) continue;
-    C.save(); lakePath(a, b, Math.max(1, 2 / SV), 2); C.clip();
-    for (const [cx, half] of casters) {
-      if (cx < a - 40 || cx > b + 40) continue;
-      const bed = landTop(cx), top = PY(WATER_Y + 2), bot = PY(bed);
-      for (let y = top; y < bot; y += step) {
-        const u = (y - top) / Math.max(1, bot - top), sp = half * (1 + 0.25 * u), off = lean * (y - top) / SV;
-        const al = str * 0.42 * Math.pow(1 - u, 1.8); if (al < 0.01) continue;
-        C.fillStyle = `rgba(6,22,60,${al.toFixed(3)})`; C.fillRect(Math.round(PX(cx - sp + off)), Math.round(y), Math.round(sp * 2 * SV), step);
-      }
-    }
-    C.restore();
-  }
-}
+/* ---- (user Nov 3 13:28: "All the bodies of water should have the exact same rendering like the main ocean has, independent of
+   their height, as well as all the properties") a lake's own decoration, light shafts and boat shadows are gone: every water is
+   drawn by the ocean's own drawing from its own surface (drawLakeRoots, 50-land-lake.js; the shadows: drawShipShadows with
+   lake set, 44-shadows-seafloor.js). Left here: the flowers on the far grass ---- */
 // flowers on the far grass (user Oct 26: "the flowers I added on the background grass plane to break it up a bit"):
 // purple spikes and white and yellow heads, in little groups, across the green country's field
 let fieldFlowers = null;
@@ -45469,9 +45320,6 @@ function lakeRebuild() {
     wetRuns = [];
     for (let i = 0; i < N;) { if (wetA[i]) { let j = i; while (j < N && wetA[j]) j++; wetRuns.push([Math.max(0, i - 1), Math.min(N - 1, j)]); i = j; } else i++; }
   }
-  // the bed's still layers painted again (a lake grown: its life laid out again)
-  if (grew) lakeDeco = null;
-  else if (lakeDeco) for (const D of lakeDeco) { for (let x = D.a; x < D.b; x += 6) D.maxD = Math.max(D.maxD, landTop(x) - lakeLevelAt(x)); D._bed = null; D._back = null; }
 }
 
 /* ---- the launch pads: each on the ground under its whole width (it tips into a hole dug under one end) ---- */
@@ -50145,7 +49993,6 @@ function landEdited() {
   for (let i = sailboats.length - 1; i >= 0; i--) if (madeHere(sailboats[i])) sailboats.splice(i, 1);
   for (let i = jetboats.length - 1; i >= 0; i--) if (madeHere(jetboats[i])) jetboats.splice(i, 1);
   buildLakeBoats();
-  lakeDeco = null;
   landReseat();
   // eslint-disable-next-line no-undef
   if (typeof cavesRebuild === 'function') cavesRebuild();          // (the caves, ported by another thread, hang off the land's shape)
@@ -52161,7 +52008,7 @@ function renderLandObjects0() {
     if (!edTiny(6 * UPM)) drawLandPlants(x0, x1); lt('plants');                     // (the trees, palms, cacti and scrub: in front of the structures - user Nov 2)
     if (!edTiny(2 * UPM)) drawTropFront(x0, x1); lt('tropFront');                                // (the TROPICAL tops' small bushes, in front of the structures - 50-land-trop)
     drawLake(x0, x1, false);                              // (the lakes' water, under what's in them)
-    guardDraw('lakeBack', () => drawLakeBack(x0, x1)); guardDraw('lakeBed', () => drawLakeBed(x0, x1)); guardDraw('lakeShadows', () => drawLakeShadows(x0, x1));   // (its depth, far rocks and weeds, light; the bed's life; the boats' shadows - 50-land-lakelife)
+    guardDraw('lakeShadows', () => drawLakeShadows(x0, x1));   // (the boats' shadows in its water - the ocean's own, 50-land-lake)
     guardDraw('lakeSea', () => drawLakeSea(x0, x1));     // (a lake bed marked SEA: the sea's corals, boulders and weed - 50-land-lake)
     // (a lake is the sea's water too, user Oct 25: what lies on its bed and sinks through it)
     lakeClip(x0, x1, () => { drawDuds(x0, x1); for (const p of pieces) if (p.x + p.hl > x0 - 20 && p.x - p.hl < x1 + 20) drawPiece(p); drawDcharges(x0, x1); drawTraffic(x0, x1, 'under'); drawBalloons(x0, x1, 'under'); drawCivHelis(x0, x1, 'under'); drawAnchors(x0, x1, true); drawCrashes(x0, x1, true); drawStoryCars(x0, x1, 'lake'); });
