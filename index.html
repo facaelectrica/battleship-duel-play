@@ -1888,7 +1888,8 @@ const isleCol = x => { if (ISLE === null) return false; const i = Math.floor(x /
 // (user Oct 28) the ground's own line out of the water at sea, `half` ahead of x going `dir`: a coast every boat stops or
 // turns at (an island line's island they go past)
 const coastAhead = (x, dir, half) => { if (ISLE === null) return false; const q = x + dir * half, i = Math.floor(q / 2.5); return ISLE[i] === 1 || !!(land.isolid && land.isolid[i]); };   // (or a SOLID segment - 50-land-islands, user Oct 31 20:03)
-let VIS_L = 0, VIS_R = 4000;                 // what the cameras may show: the world between the two harbours' far ends
+const VIS_PAD = 40 * UPM;                  // (the cameras show this much past the outermost structure - 07-world-build.js)
+let VIS_L = 0, VIS_R = 4000;                // what the cameras may show: the world between the two harbours' far ends
 let wh, wv, wf, wtmp;
 let docks = [];          // the harbours in the world (one in a one-player game)
 let DOCKS_OWNED = false, coastDocks = [];   // (coastDocks: the two coasts' harbours as laid out, there or not - their quays are the sea's ends)   // (OPEN WORLD: the harbours' owners set - DOCK_OWN; every harbour not a boat's own is closed to her)
@@ -2786,6 +2787,10 @@ function buildWorld(restore) {
   docks.forEach((d, i) => { d.key = i; });   // (each harbour's own mark: its gulls, its perches)
   VIS_L = LAND ? 0 : left.viewEdge; VIS_R = LAND ? WORLD_W : right.viewEdge;   // (OPEN WORLD: the whole world; BATTLE: between the harbours)
   if (ENDLESS) { VIS_L = -Infinity; VIS_R = Infinity; }   // (STORY: no edge - the open ocean past the world's ends, 05-zzz-endless.js)
+  // (user Nov 3 17:01: "the tower has to be in frame, obviously, as well as a bit of padding") the cameras' ends take in everything
+  // placed in the world - every structure whole, VIS_PAD beyond the outermost - past the shapes' ends if it stands there (past
+  // them is the open ocean in every mode)
+  else for (const o of strsUsed()) { try { const B = strBox(o); if (Number.isFinite(B.x0) && Number.isFinite(B.x1)) { VIS_L = Math.min(VIS_L, B.x0 - VIS_PAD); VIS_R = Math.max(VIS_R, B.x1 + VIS_PAD); } } catch (e) { } }
   // the sea floor's shores: the pier ends, and one player's open side
   // is open ocean (its shore mirrored, so the deep runs out to that edge of the world)
   // (the dock chat, Oct 29) a harbour's shore is its quay's face: the harbour's depth under the quay and hangar, the ocean
@@ -2801,9 +2806,7 @@ function buildWorld(restore) {
   pirateWrecks.length = 0;                            // (the last world's: not levelling this one's floor while its rocks are laid out - buildDeep places them again)
   btMark('start'); floorRebuild(); btMark('floor');                                     // (OPEN WORLD: the ocean floor's shape, from the user's drawing - FLOOR_PTS; and the deep ocean's range, TR_A..TR_B)
   buildCalm(); btMark('calm');
-  // each harbour's buoy marks how far its tower's gun reaches (on a calm day): an enemy past it is in range
-  buoys = docks.map(d => ({ x: d.towerX - d.dir * towerReachCalm(), col: 'orange', state: 'float', ph: buR() * 6, player: d.player }));
-  buoys.push({ x: LAND ? WORLD_W / 2 : (left.quay + right.quay) / 2, col: 'red', state: 'float', ph: buR() * 6 });   // marks the middle of the sea
+  buoysBuild();                                          // (the buoys placed by hand - PROPS > BUOY, 31-sailboats-buoys.js; none made by themselves)
   if (!restore) { ui.winner = null; ui.winT = 0; }
   towers.length = 0;
   // (the harbours as parts: a harbour's tower is its lighthouse, where it stands; one with none has a stand-in, far off and down)
@@ -4302,8 +4305,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 744;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 03 18:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 745;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 03 18:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -5053,8 +5056,10 @@ function drawPowerSlider(p, it, k) {
 // an enemy past your orange buoy (closing on your harbour): your tower's marker blinks. Shoot the buoy away and
 // the warning goes with it
 function enemyPastBuoy(p) {
-  const d = homeDock[p], k = docks.indexOf(d), bu = k >= 0 ? buoys[k] : null;
-  if (!bu || bu.state !== 'float') return false;
+  // (the team's own orange buoy - placed by hand, its OWNER the team - the one nearest its harbour's tower: 31-sailboats-buoys.js)
+  const d = homeDock[p]; let bu = null;
+  if (d) for (const b of buoys) if (b.player === p && b.col === 'orange' && b.state === 'float' && (!bu || Math.abs(b.x - d.towerX) < Math.abs(bu.x - d.towerX))) bu = b;
+  if (!bu) return false;
   const e = 1 - p, past = x => (x - bu.x) * d.dir > 0;
   // (a plane up above the clouds, or a sub creeping along the bottom, slips past unseen; STORY: every raider counts)
   return ships.some(sh => sh.id === e && sh.state === 'afloat' && !inHarbour(sh) && past(sh.x)) ||
@@ -6588,6 +6593,9 @@ const LOCAL_MAX = () => PHONE() ? 1 : 2;
 const lobbyMode = () => joinedRoom() ? LINK.mode : menuSel.mode;
 const lobbyOne = () => !VERSUS(lobbyMode());
 const lobbyFlagSide = () => 0;                          // (STORY: the left, player one's)
+// (user Nov 3 16:59: "Story mode does not have a 'Country' just a 'Press to Join' so you select the controller you use") STORY's lobby
+// has no sides: no TEAM, no flag - PRESS TO JOIN in the middle and under it each controller that joined (X: leave)
+const lobbyNoSides = () => lobbyMode() === 'story';
 const lobbyMe = () => LINK.players.find(q => q.id === LINK.myId);
 function lobbyHas(dev) { return joinedRoom() ? NET.dev === dev : menuSel.roster.some(q => q.dev === dev); }
 function lobbyAdd(dev) {
@@ -6639,7 +6647,7 @@ function tapDev(e) {
 // a blinking PRESS TO JOIN while this screen has room for another player, and under it, with arrows either side,
 // whatever was pressed to join and hasn't picked its side yet - { name, dev (someone at this screen), free }
 function lobbyRows() {
-  const one = lobbyOne(), S = { 0: [], 1: [] }, mid = [], put = (s, e) => (s === 0 || s === 1 ? (one ? S[lobbyFlagSide()] : S[s]) : mid).push(e);
+  const one = lobbyOne(), ns = lobbyNoSides(), S = { 0: [], 1: [] }, mid = [], put = (s, e) => (!ns && (s === 0 || s === 1) ? (one ? S[lobbyFlagSide()] : S[s]) : mid).push(e);
   let free = false;
   if (joinedRoom()) {
     for (const q of LINK.players) {
@@ -6686,7 +6694,7 @@ function titleLayout() {
     sides: sides.map((sd, i) => {
       const cx = cxs[i], r0 = fy + FH + (cmp ? 7 : 10);
       return { s: sd, cx, flag: [cx - (FLAG_W >> 1), fy], rows: [0, 1, 2].map(k => r0 + k * rh), rs, rw: 150,
-        show: !(sd === 1 && (one || lobbyMode() === 'story')), enemy: one && sd === 1 && lobbyMode() !== 'story' };   // (STORY: one player, no enemy)
+        show: !lobbyNoSides() && !(sd === 1 && one), enemy: one && sd === 1 && lobbyMode() !== 'story' };   // (STORY: one player, no enemy)
     }),
     // the middle: PRESS TO JOIN level with TEAM, then the ones that pressed, each between its two arrows
     mid: { cx: x + (w >> 1), rows: [0, 1, 2, 3, 4, 5].map(k => fy - 20 + (k ? 14 : 0) + k * (rh + 10)), rs, rw: 230 },
@@ -6745,7 +6753,7 @@ function drawTitle() {
   lobbyArrows.length = 0;
   const rowText = (e, cx, y, rs, mid) => {
     if (e.free) { ug.globalAlpha = blink; drawText(ug, 'PRESS TO JOIN', cx, y, '#ffffff', rs, 'center'); ug.globalAlpha = 1; return; }
-    if (mid && e.dev) {
+    if (mid && e.dev && !lobbyNoSides()) {
       // the sketch's picker: the controller's name between two solid arrows, left and right to pick a team
       const tw = drawText(ug, e.name, cx, y, '#ffd23a', rs, 'center'), ax = (tw >> 1) + 12;
       menuArrow(cx - ax - 13, y + 4, -1); menuArrow(cx + ax + 13, y + 4, 1);
@@ -6836,6 +6844,7 @@ function lobbyHit(ux, uy, T) {
       if (e.free) return { act: 'lAdd' };
       if (e.cpu != null && !mid) return { act: 'cpuToggle', s: e.cpu };
       if (!e.dev) return { act: 'none' };
+      if (mid && lobbyNoSides()) return { act: 'lBack', dev: e.dev };   // (STORY: no side to pick - a press leaves)
       if (mid) { const dx = ux - cx; return Math.abs(dx) < rw * 0.18 ? { act: 'lBack', dev: e.dev } : { act: 'lMove', dev: e.dev, dir: Math.sign(dx) }; }
       return { act: 'lBack', dev: e.dev };
     }
@@ -12402,8 +12411,18 @@ function stepSailboat(b, dt, SB) {
   }
 }
 
-/* ---------------- Harbour buoys: an orange marker off each dock, lit at night ---------------- */
+/* ---------------- Buoys: placed by hand, lit at night ---------------- */
 let buoys = [];
+// (user Nov 3 16:53: "a buoy should be an object I place manually. They should not appear automatically") the world's buoys are the
+// BUOY / RED BUOY props placed in it (50-zz-struct.js STR_KINDS buoy), each one where it's placed, its colour its kind's; a team's
+// orange buoy (its OWNER) marks its tower's reach - an enemy past it sets off its warning (enemyPastBuoy, 17-hud.js)
+function buoysBuild() {
+  buoys = strsUsed().filter(o => STR_KINDS[o.k] && STR_KINDS[o.k].buoy).map(o => {
+    const b = { x: o.x, col: STR_KINDS[o.k].buoy, state: 'float', ph: buR() * 6, sid: o.id }, t = teamPlayer(strOwner(o));
+    if (t >= 0) b.player = t;
+    return b;
+  });
+}
 // (engine stage 3) the buoys' own random source, made on first use; their table in 36-zz-wild.js (the wreck's drawing, made
 // once at the start, keeps the shared rnd: a picture, not the game's state)
 let buR_ = null;
@@ -12469,6 +12488,7 @@ function stepBuoys(dt) {
 }
 function drawBuoy(b, x0, x1) {
   if (!b || b.x < x0 - 30 || b.x > x1 + 30) return;
+  if (EDMODE.on && b.sid != null) { const o = strById(b.sid); if (o && o.x !== b.x) b = Object.assign({}, b, { x: o.x }); }   // (the editor: where its prop is while it's dragged)
   if (b.state !== 'float') {
     const src = img.buoyWreck[b.col], sp = drawSprite(src, BUOY_K * SV, true);
     const w = Math.round(src.width * BUOY_K * SV), h = Math.round(src.height * BUOY_K * SV), fog = fogFor(b.y - 10, b.x);
@@ -32565,7 +32585,7 @@ function drawPoleFlag(x, y, p) {
 }
 // the windsock: a striped sock on its pole, streaming out downwind - drooping in a calm, flapping in a gale
 function drawWindsock(x, y) {
-  const wa = windAt(y), dir = Math.abs(wa) < 1 ? 1 : Math.sign(wa), w = clamp(Math.abs(wa) / 35, 0, 1);
+  const { dir, w } = sockWind(x, y);                         // (the one rule for every windsock: the air where it hangs - 50-zz-windsock.js)
   plRect('#4a4a50', PX(x), PY(y), Math.max(1, Math.round(SV)), Math.round(18 * SV));
   for (let k = 0; k < 6; k++) {
     const u = k / 5, droop = (1 - w) * (k * 2.2) + Math.sin(time * (3 + 6 * w) - k) * (0.4 + w) * u;
@@ -55557,7 +55577,7 @@ function objNight(P, art, X0, Y0, X1, Y1, flip, glow = true) {
   });
 }
 // the structures' part of it (drawStructs, each one in view after its picture): a picture structure's light and its night
-const STR_NO_NIGHT = { dock: 1, windsock: 1 };            // (no windows to light)
+const STR_NO_NIGHT = { dock: 1, windsock: 1, buoy: 1, buoyRed: 1, streetLamp: 1 };            // (no windows to light)
 function strLit(o, B) {
   if (!B.P || o.k === 'dock' || (o.k === 'hangarAir' && o.big) || o.k === 'terminal') return;
   const X0 = Math.round(PX(B.x0)), X1 = Math.round(PX(B.x1)), Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot)), cx = (X0 + X1) / 2;
@@ -56475,6 +56495,33 @@ function pfVehBox(sv, box, el, css) {
 }
 
 /* ================================================================
+   PROPS' LOOKS (user Nov 3 16:53: the PROPS - BUOY, RED BUOY, STREET LAMP: structure kinds marked prop, 50-zz-struct.js). Each one's
+   LOOK in PREFABS / OBJECTS is the game's own drawing of it: a buoy's picture (buoyCanvas, 31-sailboats-buoys.js) with its lamp's
+   flash at night; a street lamp the piers' post as it stands (drawDockLamps: its head and foot at their painted size, the pole run up
+   DLAMP_TALL times) with its lantern lit at night.
+   ================================================================ */
+const propBuoyLook = col => () => {
+  if (!img.buoys) buildBuoyArt();
+  const P = img.buoys && img.buoys[col]; if (!P) return null;
+  return { P, draw: g => g.drawImage(P, 0, 0), lights: g => lookGlow(g, 8, 2, 10, col === 'red' ? '255,70,50' : '255,196,90', 0.8) };
+};
+STR_LOOKS.buoy = propBuoyLook('orange');
+STR_LOOKS.buoyRed = propBuoyLook('red');
+let propLampC = null;
+STR_LOOKS.streetLamp = () => {
+  const S = dockLampPic(false, false); if (!S) return null;
+  if (!propLampC) {
+    const W = DLAMP.post[2], H = DLAMP.post[3], [pa, pb] = DLAMP_POLE, c = makeCanvas(W, DLAMP_H), g = c.getContext('2d'), fy = DLAMP_H - (H - pb);
+    g.drawImage(S, 0, 0, W, pa, 0, 0, W, pa);                           // (its head)
+    g.drawImage(S, 0, pa, W, pb - pa, 0, pa, W, fy - pa);                // (the pole, run up)
+    g.drawImage(S, 0, pb, W, H - pb, 0, fy, W, H - pb);                  // (its foot)
+    propLampC = c;
+  }
+  const P = propLampC;
+  return { P, draw: g => g.drawImage(P, 0, 0), lights: g => lookGlow(g, DLAMP.lamp[0], DLAMP.lamp[1], 14, '255,200,120', 0.8) };
+};
+
+/* ================================================================
    SMALLER IN FRONT OF BIGGER (user Nov 1 22:55: "smaller vehicles should render in front of bigger vehicles so we can see both
    (like we do with ships)"; 23:01: "Is this universal? Are planes doing the same? Can we make this a rule?"). One rule for every
    kind of vehicle: within each kind's drawing, the biggest first, so a smaller one overlapping it is in front. The size is the
@@ -57212,6 +57259,13 @@ const STR_KINDS = {
   tower: { lab: 'CONTROL TOWER', art: 'control-tower' }, lighthouse: { lab: 'LIGHTHOUSE', art: 'lighthouse' },
   bldg1: { lab: 'BUILDING 1', art: 'building-1' }, bldg2: { lab: 'BUILDING 2', art: 'building-2' },
   windsock: { lab: 'WINDSOCK', art: 'windsock' },
+  // (user Nov 3 16:53: "a buoy should be an object I place manually ... Lets add a PROPS category that contains small objects ... Lets also
+  // make 'street lamps' another object (the ones that piers place) that we can add manually") PROPS: small things placed by hand -
+  // structures like any other (picked, dragged, red where they can't be, DELETE, DUPLICATE, groups, saved), listed under OBJECTS > PROPS
+  // (prop). A buoy floats on its water and is the world's buoys (buoysBuild, 31-sailboats-buoys.js); a street lamp is the piers' lamp post
+  // standing on its ground (drawDockLamps, 50-zz-docklamp.js)
+  buoy: { lab: 'BUOY', prop: true, water: true, buoy: 'orange' }, buoyRed: { lab: 'RED BUOY', prop: true, water: true, buoy: 'red' },
+  streetLamp: { lab: 'STREET LAMP', prop: true, lamp: true },
   terminal: { lab: 'TERMINAL', term: true },
   gunTower: { lab: 'TOWER', gun: true },   // (Nov 1 22:35: the tower's body; its weapons are GUN structures on it - 50-zz-structh.js)
   gun: { lab: 'GUN', mount: true },   // (user Nov 1 22:19-22:35: MISSILE CANNON - the tower's gun - or MACHINE GUN CANNON, on a tower, lighthouse or pier)   // (the gun towers - its owner's; drawn and fought as the game's towers: landTowersBuild, 50-land-tshape.js - Nov 1)   // (an airport's terminal with its control tower, windsock and flag - the built-in airport's picture, its owner's colours: drawTerminalAt, 50-land-airport.js)
@@ -57314,7 +57368,7 @@ const strsUsed = () => EDMODE.on ? STRS : strsPlay();   // (online: the host's w
 // (play: those off their ground left out - strFree; the editor shows them all, red)
 const STR_PLAY = { gen: -1, src: null, L: [] };
 function strsPlay() { const c = STR_PLAY; if (c.gen !== STR_GEN || c.src !== STRS) { c.gen = STR_GEN; c.src = STRS; c.L = STRS.some(strFree) ? STRS.filter(o => !strFree(o)) : STRS; } return c.L; }
-function strSave() { STR_GEN++; try { pfAttachAll(); } catch (e) { } try { if (!STRS.length) localStorage.removeItem('bd_structs'); else localStorage.setItem('bd_structs', JSON.stringify(STRS)); } catch (e) { } if (typeof SE !== 'undefined' && SE.ui && SE.ui.chk) strWorldCheck(SE.ui); try { edDirty(); wedSync(); } catch (e) { } }   // (the WORLD CHECK kept up to date; REFRESH lit by every structure edit - a property, a LOOK, an owner - as by a move: user Nov 1 21:17, a dock switched to PIER and back left the old pier standing with REFRESH dark - 50-zzz-world-ed.js; with the editor shut wedSync puts it out)
+function strSave() { STR_GEN++; if (typeof buoysBuild === 'function' && typeof EDMODE !== 'undefined' && EDMODE.on) buoysBuild();   /* (the placed buoys at once - 31-sailboats-buoys.js) */ try { pfAttachAll(); } catch (e) { } try { if (!STRS.length) localStorage.removeItem('bd_structs'); else localStorage.setItem('bd_structs', JSON.stringify(STRS)); } catch (e) { } if (typeof SE !== 'undefined' && SE.ui && SE.ui.chk) strWorldCheck(SE.ui); try { edDirty(); wedSync(); } catch (e) { } }   // (the WORLD CHECK kept up to date; REFRESH lit by every structure edit - a property, a LOOK, an owner - as by a move: user Nov 1 21:17, a dock switched to PIER and back left the old pier standing with REFRESH dark - 50-zzz-world-ed.js; with the editor shut wedSync puts it out)
 // the editor's own random source for new colours (not the game's: nothing in the world moves for it)
 const strRng = seededRng(7311 + (Date.now() % 9973));
 // where it stands: its box in the world (left, right, top, foot). (user Nov 2: "click and drag any structure ... move it freely and
@@ -57360,7 +57414,10 @@ function strBox0(o) {
   }
   if (o.k === 'terminal') { const [w, h] = terminalSize(), gy = strGround(o.x, w) + (o.dy || 0); return { x0: o.x - w / 2, x1: o.x + w / 2, top: gy - h, foot: gy, P: null, m: 1 }; }
   if (o.k === 'road') { const w = (o.len || 80) * UPM, gy = landTop(clamp(o.x, 0, WORLD_W - 1)); return { x0: o.x - w / 2, x1: o.x + w / 2, top: gy - 0.4 * UPM, foot: gy, P: null, m: 1 }; }
-  const K = STR_KINDS[o.k], P = tropPic(o.k === 'dock' ? o.spr || K.art : o.art || K.art);   // (art: its prefab's picture)
+  { const K0 = STR_KINDS[o.k];                            // (the PROPS: a buoy at its water's level as it floats - drawBuoy -, a street lamp on its ground)
+    if (K0 && K0.buoy) { const w = 16 * BUOY_K, h = 34 * BUOY_K, foot = waterLv(clamp(o.x, 0, WORLD_W - 1)) + 2.5 + (o.dy || 0); return { x0: o.x - w / 2, x1: o.x + w / 2, top: foot - h, foot, P: null, m: 1 }; }
+    if (K0 && K0.lamp) { const k = BASE.K, gy = strGround(o.x, 4 * UPM) + (o.dy || 0), x0 = o.x - (o.flip ? DLAMP.post[2] - DLAMP.foot : DLAMP.foot) * k; return { x0, x1: x0 + DLAMP.post[2] * k, top: gy - DLAMP_H * k, foot: gy, P: null, m: k }; } }
+  const K = STR_KINDS[o.k], P0 = tropPic(o.k === 'dock' ? o.spr || K.art : o.art || K.art), P = P0 && o.k === 'windsock' ? sockParts(P0).pole : P0;   // (art: its prefab's picture; a windsock's still picture its pole - its sock turns with the wind, 50-zz-windsock.js)
   const m = P ? P._m * UPM : 1, w = o.k === 'dock' ? (o.len || 24) * UPM : (P ? P.width : 40) * m, h = (P ? P.height : 40) * m;
   const foot = (K.water ? waterLv(clamp(o.x, 0, WORLD_W - 1)) + (h - DOCK_ABOVE * UPM) : strGround(o.x, w)) + (o.dy || 0);   // (afloat on its own water's level - a lake's as the sea's, user Nov 3)
   return { x0: o.x - w / 2, x1: o.x + w / 2, top: foot - h, foot, P, m };
@@ -57509,13 +57566,13 @@ function stepStructs(dt) { strChimneys(dt); }
 // does drawStructs draw it: not the harbours' parts (drawn by the harbours themselves - 50-zz-structh.js) nor the gun towers (drawn
 // with the towers - each is one: towers[]); a picture kind only once its picture is there (a runway, road, pad, terminal, LARGE
 // hangar: drawn by hand)
-const strDrawn = (o, B) => !isHarbourPart(o) && !(o.k === 'dock' && woodPierOf(o)) && o.k !== 'gunTower' && !isGunS(o) && (!!B.P || o.k === 'runway' || o.k === 'road' || o.k === 'launchPad' || o.k === 'terminal' || (o.k === 'hangarAir' && o.big));
+const strDrawn = (o, B) => !isHarbourPart(o) && !(o.k === 'dock' && woodPierOf(o)) && o.k !== 'gunTower' && !isGunS(o) && (!!B.P || o.k === 'runway' || o.k === 'road' || o.k === 'launchPad' || o.k === 'terminal' || (o.k === 'hangarAir' && o.big) || !!STR_KINDS[o.k].lamp);
 // its still picture's kind: 1 a picture of the tropical set in the hour's light (put), 2 a picture as painted (the terminal's,
 // the LARGE hangar's), 0 none (a runway, a road - their colours rounded per channel in the hour's light, so drawn live -, a pad)
-const strStill = o => o.k === 'terminal' || (o.k === 'hangarAir' && o.big) ? 2 : o.k === 'runway' || o.k === 'road' || o.k === 'launchPad' ? 0 : 1;
+const strStill = o => o.k === 'terminal' || (o.k === 'hangarAir' && o.big) ? 2 : o.k === 'runway' || o.k === 'road' || o.k === 'launchPad' || STR_KINDS[o.k].lamp ? 0 : 1;
 // does it draw anything that moves or changes in its turn (a runway's lights, a road, a pad; the terminal's windsock, flag and
 // lamps; the LARGE hangar's door and lamp; a dock's lamp posts)
-const strHasLive = o => strStill(o) !== 1 || o.k === 'dock';   // (a dock: its lamp posts)
+const strHasLive = o => strStill(o) !== 1 || o.k === 'dock' || o.k === 'windsock';   // (a dock: its lamp posts; a windsock: its sock in the wind)
 function strStillDraw(o, B, put) {
   if (o.k === 'hangarAir' && o.big) { drawBigHangarBody(B.x0, B.foot, !!o.flip, teamPlayer(strOwner(o))); return; }
   if (o.k === 'terminal') { drawTerminalBody(o.x, B.foot, teamPlayer(strOwner(o))); return; }   // (its owner's colours; nobody's: plain)
@@ -57533,6 +57590,8 @@ function strStillDraw(o, B, put) {
 function strLiveDraw(o, B) {
   if (o.k === 'runway') { drawRunway(o, B); return; }
   if (o.k === 'road') { drawRoad(o, B); return; }
+  if (o.k === 'windsock') { sockLive(o, B); return; }
+  if (STR_KINDS[o.k].lamp) { drawDockLamps([dockLampAt(o.x, B.foot, B.m, !!o.flip)], B.m, !!o.flip); return; }   // (a STREET LAMP: the piers' post, lit at night)
   if (o.k === 'launchPad') { drawStrPad(o, B); return; }
   if (o.k === 'hangarAir' && o.big) { const rw = strRunwayNear(o); drawBigHangarLive(B.x0, B.foot, !!o.flip, rw ? strDoor(rw.id).open : 0, teamPlayer(strOwner(o))); return; }
   if (o.k === 'terminal') drawTerminalLive(o.x, B.foot, teamPlayer(strOwner(o)));   // (its flag: its owner's; nobody's: no flag)
@@ -58497,6 +58556,69 @@ function planeWheelParts(P) {
 }
 
 /* ================================================================
+   THE WINDSOCK FOLLOWS THE WIND (user Nov 3 16:53: "the windsock should dynamically be affected by the wind"). One rule for every
+   windsock - the WINDSOCK structure's (the user's picture) and the terminal's own (drawWindsock, 50-land-airport.js): sockWind(x, y)
+   is the air where it hangs (airAt: the wind, and the storm's gusts below the storm layer's top), which way it blows and how hard
+   (0 a calm - limp, hanging down; 1 at SOCK.FULL world units a second and over - out level), and a flutter that grows with it.
+   The structure's picture: its swivel - the arm, ring, brace and sock, right of the pole and over SOCK.cut (marked by eye on
+   gen/tropical_src/windsock.png, fractions of the trimmed picture) - is cut off once; the pole is its still picture (strBox0 takes
+   it), the swivel is drawn live (strLiveDraw -> sockLive) turned about its collar on the pole (SOCK.pivot) to the wind's angle and,
+   when the wind blows left, mirrored about the pole's middle (SOCK.pole) - turned, never squashed. In the hour's tint with the
+   moon's and a low sun's rims (objLit), as its pole. Its LOOK in the editor is the same drawing in the wind blowing now.
+   ================================================================ */
+const SOCK_D = Math.PI / 180;
+const SOCK = { cut: [0.145, 0.30], pivot: [0.145, 0.075], pole: 0.08, hang0: 27 * SOCK_D, limp: 72 * SOCK_D, full: 3 * SOCK_D, FULL: 35 };
+// its pole and its swivel, each a picture the size of the whole (made once per picture)
+const SOCK_ART = new WeakMap();
+function sockParts(P) {
+  let S = SOCK_ART.get(P); if (S) return S;
+  const w = P.width, h = P.height, cx = Math.round(w * SOCK.cut[0]), cy = Math.round(h * SOCK.cut[1]);
+  const pole = makeCanvas(w, h), sock = makeCanvas(w, h);
+  { const g = pole.getContext('2d'); g.drawImage(P, 0, 0); g.clearRect(cx, 0, w - cx, cy); }
+  { const g = sock.getContext('2d'); g.drawImage(P, cx, 0, w - cx, cy, cx, 0, w - cx, cy); }
+  pole._m = P._m; pole._name = P._name;
+  S = { pole, sock, px: w * SOCK.pivot[0], py: h * SOCK.pivot[1], ax: w * SOCK.pole };
+  SOCK_ART.set(P, S); return S;
+}
+// the air where it hangs: { dir: +1 blowing right / -1 left, w: 0 calm .. 1 full }
+function sockWind(x, y) {
+  const wa = airAt(x, y).wx;
+  return { dir: Math.abs(wa) < 1 ? 1 : Math.sign(wa), w: clamp(Math.abs(wa) / SOCK.FULL, 0, 1) };
+}
+// how far below level it hangs now (radians): from limp to out level with the wind, fluttering more the harder it blows
+function sockAngle(x, y) {
+  const s = sockWind(x, y), flap = Math.sin(time * (3 + 6 * s.w) + x * 0.013) * (0.03 + 0.08 * s.w) + Math.sin(time * (7 + 9 * s.w) + x * 0.029) * 0.02 * s.w;
+  return { dir: s.dir, a: SOCK.limp + (SOCK.full - SOCK.limp) * s.w + flap };
+}
+// its swivel drawn over its pole's picture laid at X, Y, W, H (screen pixels), turned a below level, mirrored when dir < 0
+function sockSwivel(g, S, X, Y, W, H, dir, a, draw) {
+  const k = W / S.pole.width, ax = X + S.ax * k;
+  g.save();
+  if (dir < 0) { g.translate(2 * ax, 0); g.scale(-1, 1); }
+  g.translate(X + S.px * k, Y + S.py * k); g.rotate(a - SOCK.hang0);
+  draw(S.sock, -S.px * k, -S.py * k, W, H);
+  g.restore();
+}
+// in the world (the structure's live turn - strLiveDraw)
+function sockLive(o, B) {
+  const P = tropPic(o.art || STR_KINDS[o.k].art); if (!P) return;
+  const S = sockParts(P), X0 = Math.round(PX(B.x0)), X1 = Math.round(PX(B.x1)), Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot));
+  const W = sockAngle(o.x, B.top + (B.foot - B.top) * SOCK.pivot[1]), fx = E.fx || [1, 1, 1];
+  if (o.flip) { C.save(); C.translate(X0 + X1, 0); C.scale(-1, 1); }   // (its pole drawn the other way: the wind's side mirrored with it)
+  sockSwivel(C, S, X0, Y0, X1 - X0, Y1 - Y0, o.flip ? -W.dir : W.dir, W.a, (c, x, y, w, h) => {
+    C.drawImage(GLR.on ? glTint(c, 'strT', fx, [0, 0, 0], false) : c, x, y, w, h);
+    objLit(c, x, y, w, h, (X0 + X1) / 2, 0);
+  });
+  if (o.flip) C.restore();
+}
+// its LOOK (PREFABS / OBJECTS): the pole and its swivel in the wind blowing now
+STR_LOOKS.windsock = p => {
+  const P = tropPic(p.art || 'windsock'); if (!P) return null;
+  const S = sockParts(P);
+  return { P, draw: g => { g.drawImage(S.pole, 0, 0); const { dir, a } = sockAngle(0, WATER_Y - 6 * UPM); sockSwivel(g, S, 0, 0, P.width, P.height, dir, a, (c, x, y, w, h) => g.drawImage(c, x, y, w, h)); } };
+};
+
+/* ================================================================
    WORLD EDITOR > OBJECTS and GROUPING (user Nov 2 12:54).
    OBJECTS - "Structures and Vehicles should be the same tab as OBJECTS. The properties just change depending on what I want to
    spawn OR what I have selected": SPAWN and one dropdown per kind - STRUCTURES (the prefabs), SUBMARINES, BOATS, CARS, PLANES
@@ -58652,7 +58774,7 @@ function grpEdDraw() {
 
 // ---- OBJECTS
 const OBJ = { cat: 's', pick: {}, ui: null };
-const OBJ_CATS = [['s', 'STRUCTURES'], ['sub', 'SUBMARINES'], ['boat', 'BOATS'], ['car', 'CARS'], ['air', 'PLANES'], ['space', 'SPACE'], ['crt', 'CREATURES'], ['bg', 'BACKGROUNDS']];
+const OBJ_CATS = [['s', 'STRUCTURES'], ['prop', 'PROPS'], ['sub', 'SUBMARINES'], ['boat', 'BOATS'], ['car', 'CARS'], ['air', 'PLANES'], ['space', 'SPACE'], ['crt', 'CREATURES'], ['bg', 'BACKGROUNDS']];
 // (user Nov 3 07:20: "Kraken should be under CREATURES in the OBJECTS section. Otherwise, there's no way I can place it"; "Sunken
 // Pirate ships also") the kraken and the four pirate wrecks, each one of a kind: SPAWN brings it into the view (back if deleted)
 // (user Nov 3 08:10-08:12: "shipwrecks moves under structures, and creatures will have the kraken and the different types of ocean
@@ -58671,7 +58793,10 @@ function objCatOf(sv) {
 // (user Nov 2 13:56: "the submarine section is missing the war submarine. same with planes, why dont we have them all there?") every
 // vehicle type is listed, each placed where SPAWN puts it - the armies' too (user Nov 3 12:03: "There is no 'in hangar' concept" -
 // 50-zz-placed.js ARMY_PLACE); one starting at a hangar is that hangar's SPOT (50-zzz-spots.js)
-const objList = c => OBJ_ONE[c] ? OBJ_ONE[c]() : c === 's' ? [...pfSorted().map(p => [p.id, p.name]), ...OBJ_WRECKS()] : placedTypes().filter(sv => objCatOf(sv) === c).map(sv => [sv, placedLab(sv)]);
+// (PROPS - user Nov 3 16:53: the small things - buoys, street lamps: structure kinds marked prop, 50-zz-struct.js; STRUCTURES the rest)
+const objIsProp = p => !!(STR_KINDS[p.k] && STR_KINDS[p.k].prop);
+const objStrCat = c => c === 's' || c === 'prop';
+const objList = c => OBJ_ONE[c] ? OBJ_ONE[c]() : c === 's' ? [...pfSorted().filter(p => !objIsProp(p)).map(p => [p.id, p.name]), ...OBJ_WRECKS()] : c === 'prop' ? pfSorted().filter(objIsProp).map(p => [p.id, p.name]) : placedTypes().filter(sv => objCatOf(sv) === c).map(sv => [sv, placedLab(sv)]);
 const objCur = c => { const L = objList(c); return L.some(q => q[0] === OBJ.pick[c]) ? OBJ.pick[c] : L[0] ? L[0][0] : null; };
 function objFill() {
   const U = OBJ.ui; if (!U) return;
@@ -58691,7 +58816,7 @@ function objSpawn() {
   else if (id.startsWith('area:')) natureAdd(id.slice(5));
   else if (id.startsWith('wreck:')) wreckSpawn(+id.split(':')[1]);
   else if (id.startsWith('bgpic:')) bgSpawn(+id.split(':')[1]);
-  else if (c === 's') strSpawn(id);
+  else if (objStrCat(c)) strSpawn(id);
   else vehSpawn({ sv: id });
   strSync(); vehSync(); wedSync();
 }
@@ -58730,10 +58855,10 @@ function objSync() {
   if (SEAPICK.wrecks.length === 1 && !SEAPICK.krakens.length && objWreckFill(U.spawn, el, SEAPICK.wrecks[0])) return;   // (a wreck: its own)
   if (sea.length) { const k = el('div', 'cat'); k.append(el('h4', '', sea.join(', ')), el('div', 'tabnote', 'Nothing to set.')); U.spawn.appendChild(k); return; }   // (a kraken, several)
   const c = OBJ.cat, id = objCur(c); if (id == null) return;
-  const one = objOneName(c, id), name = one ? one[1] : c === 's' ? (pfGet(id) || { name: id }).name : placedLab(id);
+  const one = objOneName(c, id), name = one ? one[1] : objStrCat(c) ? (pfGet(id) || { name: id }).name : placedLab(id);
   U.spawn.appendChild(el('div', 'tabnote', 'NOTHING PICKED: ' + name + (one ? '' : ' (ITS PREFAB)')));
   if (one) { const k = el('div', 'cat'); k.append(el('h4', '', name), el('div', 'tabnote', id.startsWith('area:') ? 'A box: SPAWN, then set MIN / MAX.' : id.startsWith('bgpic:') ? 'Far behind the world: SPAWN, drag, FLIP.' : 'SPAWN puts a new one in the view.')); U.spawn.appendChild(k); }
-  else if (c === 's') { const p = pfGet(id); if (p) pfStructBox(p, U.spawn, el, U.css); }
+  else if (objStrCat(c)) { const p = pfGet(id); if (p) pfStructBox(p, U.spawn, el, U.css); }
   else if (STR_VEHS[id]) pfVehBox(id, U.spawn, el, U.css);
   else { vehLook(id, U.spawn, el); const k = el('div', 'cat'); k.append(el('h4', '', name), el('div', 'tabnote', 'Nothing to set.')); U.spawn.appendChild(k); }   // (its LOOK - 50-zz-prefab-look.js)
 }
@@ -58770,11 +58895,13 @@ NSKY.editor.TUNE.pane('OBJECTS', (pane, el) => {
   // (user Nov 2: "use the horizontal space") one grid across the panel: the WORLD CHECK, the picked one's sections, side by side
   const grid = el('div', 'cats'), chk = el('div', 'cat'), part = () => { const d = el('div', ''); d.style.display = 'contents'; return d; };
   const sBox = part(), vBox = part(), spawn = part();
-  grid.append(chk, sBox, vBox, spawn);
+  const dupCat = el('div', 'cat'), dup = el('button', '', 'DUPLICATE'); dup.title = 'A copy of what\'s picked beside it (Ctrl+D)'; dup.disabled = true; dup.onclick = () => wedDuplicate();   // (50-zzzz-zdup.js)
+  dupCat.appendChild(dup);
+  grid.append(chk, dupCat, sBox, vBox, spawn);
   pane.append(top, grid);
   Object.assign(SE.ui, { el, box: sBox, chk, selCss: css }); SE.pane = pane;
   Object.assign(VE.ui, { el, box: vBox }); VE.pane = pane;
-  OBJ.ui = { el, css, sels, sel, spawn };
+  OBJ.ui = { el, css, sels, sel, spawn, dup };
   new MutationObserver(() => { if (!pane.hidden) { objFill(); strSync(); vehSync(); } }).observe(pane, { attributes: true, attributeFilter: ['hidden'] });
   objFill(); strSync(); vehSync();
 });
@@ -59032,6 +59159,7 @@ function wedSync() {
     WED.rbtn.classList.toggle('on', !!d); WED.rbtn.textContent = busy ? 'BUILDING...' : 'REFRESH VIEW';   // (user Nov 3 07:16; lit while there's something to build)
     if (WED.sbtn) WED.sbtn.classList.toggle('on', sceneDirty());   // (SAVE CHANGES lit while there's something unsaved - 00-world-journal.js)
   }
+  if (typeof dupSync === 'function') dupSync();             // (DUPLICATE named as DELETE is - 50-zzzz-zdup.js)
   if (WED.pbtn) { const K = edPlayKey(); WED.pbtn.disabled = !K; WED.pbtn.textContent = K ? 'PLAY ' + btnVar('as ' + edPlayName(K)) : 'PLAY'; }   // (user Nov 3 12:42: "e.g. Play as Spitfire")
   if (!b) return;
   b.hidden = !T.world(); if (b.hidden) return;
@@ -59371,6 +59499,108 @@ function worldShift(dx) {
   if (typeof PHOTO !== 'undefined' && Number.isFinite(PHOTO.x)) PHOTO.x += dx;
   console.log('WORLD: moved ' + dx + ' to start at its first shape');
 }
+
+/* ================================================================
+   DUPLICATE (user Nov 3 16:55: "when an object is selected, have a 'Duplicate' option next to the world check") - one rule for
+   everything picked in OBJECTS: each kind in WK that can be copied has `dup(dx)` (its picked records copied, dx world units to the
+   right, the copies picked in place of the originals) and `span()` (the picked ones' [x0, x1] in world units). The whole pick is
+   copied as one block, beside itself: dx is the pick's width plus DUP_GAP. A copy is a new record of its kind with a new id, the
+   original's properties, no group (it's a new thing - GROUP it if wanted). What can't stand where it lands is red, as anything
+   dragged there (the kinds' PlaceBad). Kinds without dup (the terrain's lines, caves, weather lines) aren't copied.
+   ================================================================ */
+const DUP_GAP = 4 * UPM;
+const dupClone = r => JSON.parse(JSON.stringify(r));
+const dupId = L => 1 + L.reduce((m, q) => Math.max(m, q.id || 0), 0);
+// structures: a hangar with its spots, a dock with its length - all of it (its spots' vehicles are made again for the copy)
+WK.struct.span = () => { const B = SE.sel.map(strById).filter(Boolean).map(strBox); return B.length ? [Math.min(...B.map(b => b.x0)), Math.max(...B.map(b => b.x1))] : null; };
+WK.struct.dup = dx => {
+  const out = [];
+  for (const o of SE.sel.map(strById).filter(Boolean)) { const c = dupClone(o); c.id = dupId(STRS); c.x = Math.round(o.x + dx); c.g = null; STRS.push(c); out.push(c.id); }
+  if (!out.length) return;
+  SE.sel = out; strChanged(); spotsChanged();
+};
+// vehicles: the placed ones (PLACED records); a structure's own (a spot's, a tower) is copied with its structure or its spot
+const dupVehRecs = () => [VE.sel, ...VE.more].filter(Boolean).map(e => placedRec(e.v)).filter(Boolean);
+WK.vehicle.span = () => { const L = [VE.sel, ...VE.more].filter(e => e && placedRec(e.v)).map(vehBox); return L.length ? [Math.min(...L.map(b => b[0])), Math.max(...L.map(b => b[1]))] : null; };
+WK.vehicle.canDup = () => dupVehRecs().length > 0;
+WK.vehicle.dup = dx => {
+  const made = [];
+  for (const r of dupVehRecs()) {
+    const c = dupClone(r); c.id = dupId(PLACED); c.x = r.x + dx; c.g = null; delete c.off;
+    const rows = placedNew(c); if (!rows || !rows[0]) continue;
+    PLACED.push(c); for (const [t, o] of rows) emit('tableAdd', { t, o }); made.push(rows[0][1]);
+  }
+  if (!made.length) return;
+  placedSave(); edDirty();
+  VE.sel = null; VE.more = [];
+  setTimeout(() => { const L = vehAll().filter(e => made.includes(e.v)); if (L.length) { VE.sel = L[0]; VE.more = L.slice(1); } vehSync(); wedSync(); }, 0);   // (in their tables once the owner has put them in)
+};
+// a structure's spot: another spot holding the same, if the structure has room for it
+WK.spot.span = () => null;
+WK.spot.canDup = () => { const o = SP.sel && strById(SP.sel.s); return !!o && strVehs(o).filter(Boolean).length < strSpots(o); };
+WK.spot.dup = () => {
+  const o = SP.sel && strById(SP.sel.s), e = o && strVehs(o)[SP.sel.i]; if (!e) return;
+  const M = strVehs(o).filter(Boolean).slice(); if (M.length >= strSpots(o)) return;
+  M.push(dupClone(e)); o.veh = M; SP.sel = { s: o.id, i: M.length - 1 }; spotsChanged();
+};
+// creature areas (fish, sharks, whales)
+WK.nature.span = () => { const a = NE.sel != null && NATURE.find(q => q.id === NE.sel); return a ? [a.x0, a.x1] : null; };
+WK.nature.dup = dx => {
+  const a = NE.sel != null && NATURE.find(q => q.id === NE.sel); if (!a) return;
+  const c = dupClone(a); c.id = dupId(NATURE); c.x0 = a.x0 + dx; c.x1 = a.x1 + dx; c.g = null;
+  NATURE.push(c); NE.sel = c.id; natureChanged();
+};
+// krakens and pirate wrecks (as they lie: the floor under them, or where they were let go)
+WK.sea.span = () => {
+  const B = [...KRAKENS.filter(k => SEAPICK.krakens.includes(k.rid)).map(krakenBox), ...pirateWrecks.filter(w => SEAPICK.wrecks.includes(w.k)).map(wreckBox)];
+  return B.length ? [Math.min(...B.map(b => b[0])), Math.max(...B.map(b => b[1]))] : null;
+};
+WK.sea.dup = dx => {
+  const K = [], W = [];
+  for (const id of SEAPICK.krakens) {
+    const r = KR_SET.find(q => q.id === id), k = KRAKENS.find(q => q.rid === id); if (!r) continue;
+    const c = dupClone(r); c.id = krNewId(); c.x = Math.round((r.x != null ? r.x : k ? k.bx : 0) + dx); c.g = null; KR_SET.push(c); K.push(c.id);
+  }
+  for (const id of SEAPICK.wrecks) {
+    const r = WRECK_SET.find(q => q.id === id), w = pirateWrecks.find(q => q.k === id); if (!r) continue;
+    const c = dupClone(r); c.id = wreckNewId(); c.slot = WRECK_SET.length; c.x = Math.round((r.x != null ? r.x : w ? w.x : 0) + dx); c.g = null;
+    WRECK_SET.push(c); pirateWrecks.push(wreckMake(c, c.x)); W.push(c.id);
+  }
+  if (K.length) { krSetSave(); placeKraken(); }
+  if (W.length) { wreckSave(); for (const w of pirateWrecks) if (W.includes(w.k)) { wreckSeat(w); w.bad = seaPlaceBad(w.x, wreckBy(w)); } }
+  if (K.length || W.length) floorChanged();
+  SEAPICK.krakens = K; SEAPICK.wrecks = W; objSync();
+};
+// backgrounds (far behind the world: moved along their own layer - bgPerWorld)
+WK.bg.span = () => { const B = BGE.sel.map(id => BGE.box.get(id)).filter(Boolean); return B.length ? [Math.min(...B.map(b => b[0])), Math.max(...B.map(b => b[1]))] : null; };
+WK.bg.dup = dx => {
+  const out = [];
+  for (const id of BGE.sel) { const r = BGS.find(q => q.id === id); if (!r) continue; const c = dupClone(r); c.id = bgNewId(); c.x = Math.round(r.x + dx * bgPerWorld()); c.g = null; BGS.push(c); out.push(c.id); }
+  if (!out.length) return;
+  BGE.sel = out; bgSave(); objSync();
+};
+// what DUPLICATE would copy: the WK kinds with something picked that can be copied
+const dupKinds = () => Object.keys(WK).filter(k => WK[k].dup && WK[k].items().length && (!WK[k].canDup || WK[k].canDup()));
+function wedDuplicate() {
+  const ks = dupKinds(); if (!ks.length) return;
+  const S = ks.map(k => WK[k].span()).filter(Boolean), dx = S.length ? Math.max(...S.map(s => s[1])) - Math.min(...S.map(s => s[0])) + DUP_GAP : 0;
+  for (const k of ks) WK[k].dup(dx);
+  edDirty(); wedSync();
+  if (typeof undoCommit === 'function') setTimeout(undoCommit, 0);
+}
+// the button: in the OBJECTS tab's grid, beside the WORLD CHECK; DUPLICATE (Aircraft Hangar) as DELETE names what it acts on
+function dupSync() {
+  const b = OBJ.ui && OBJ.ui.dup; if (!b) return;
+  const ks = dupKinds(), D = ks.flatMap(k => WK[k].items());
+  b.disabled = !D.length;
+  b.textContent = !D.length ? 'DUPLICATE' : 'DUPLICATE (' + (D.length === 1 ? btnVar(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + btnVar(D[0].noun) + 's' : D.length + ' Items') + ')';
+}
+// (Ctrl+D / Cmd+D on WORLD EDITOR too, not while typing in a field)
+window.addEventListener('keydown', e => {
+  if (e.code !== 'KeyD' || !(e.ctrlKey || e.metaKey) || !NSKY.editor.TUNE.world()) return;
+  const t = e.target; if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && t.type !== 'range' || t.isContentEditable)) return;
+  e.preventDefault(); e.stopImmediatePropagation(); wedDuplicate();
+}, { capture: true });
 
 /* ---- OPEN WORLD: the kraken's sounds (50-land-kraken.js) ----
    User Oct 27, 21:20: "For sfx it should give a deep 'roar' when it gets hurt. Then a final 'sad roar' like a dying lion but
