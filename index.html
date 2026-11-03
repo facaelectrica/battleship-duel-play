@@ -1911,6 +1911,7 @@ const ctlPick = [0, 1].map(i => CTLS.includes((PREFS0.ctl || [])[i]) ? PREFS0.ct
 const cpuLvSide = [0, 1].map(i => { const v = (PREFS0.cpuLv || [])[i]; return v === 0 || v === 2 ? v : v === 1 ? 1 : PREFS0.cpuLevel === 0 || PREFS0.cpuLevel === 2 ? PREFS0.cpuLevel : 1; });
 let STORY_LV = PREFS0.storyLv === 0 || PREFS0.storyLv === 2 ? PREFS0.storyLv : 1;
 let PLAYERS = 2, TEST = false, STORY = false, SWAP = false, LAND = false, CHILL = false;   // (LAND: LAND TEST, user Oct 25)
+let ENDLESS = false;   // (STORY: no edge - the open ocean past the world's ends, 05-zzz-endless.js; set by applyMode)
 // (user Oct 29, 14:39) OWM: the Open World's map is built - its ground, sea floor, islands, caves, sky and look - in OPEN
 // WORLD and in BATTLE. BATTLE plays on it by its own rules: only between the two players' harbours (the cameras and the
 // planes stop at them, VIS_L..VIS_R), no civilians, traffic, tanks, helicopters or kraken - fish, birds, the sides'
@@ -1944,6 +1945,7 @@ function applyMode() {
   // player 0 is a person when there is one: their harbour's side is SIDE(0) (online, a guest's is the side it picked)
   SWAP = NET.role === 'guest' ? NET.side === 1 : PLAYERS === 2 && !LOCALC(ctlFor(0)) && LOCALC(ctlFor(1));
   slotsMake();
+  ENDLESS = STORY;                                    // (STORY's world has no edge: open sea past its ends - 05-zzz-endless.js)
 }
 // the people at this screen, a slot each (the split screen's halves), from who plays each side - the round's harbours (SWAP)
 // kept as they are: someone joining a round in progress (RESUME, liveSeats) takes their side's seat without moving anything
@@ -2123,7 +2125,8 @@ function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ fl
    (TEST, CHILL) is all sea, the row 0..WORLD_W.
    One rounding rule for where a ground position s (screens from the left end) is in the world: gPosX(s) - as the strip's
    ends always were made.
-   Outside the world the ground goes on as it is at its end: every query reads x clamped to 0..WORLD_W. A shore is sea.
+   Outside the world the ground goes on as it is at its end: every query reads x clamped to 0..WORLD_W. A shore is sea. (STORY:
+   past the ends is the open ocean - seaAtX, landSpanAt; 05-zzz-endless.js)
    The queries (none makes anything):
      seaAtX(x)            x is over sea ground                              (was: x between the old strip's ends, !inCountry)
      seaSpanAt(x)         the SEAS row holding x, or -1
@@ -2193,9 +2196,9 @@ function seaSpanAt(x) {
   for (let i = 0; i < SEAS.n; i++) if (!(q < lo[i] || q > hi[i])) return i;
   return -1;
 }
-const seaAtX = x => seaSpanAt(x) >= 0;
+const seaAtX = x => pastEnds(x) || seaSpanAt(x) >= 0;   // (past the world's ends in STORY: the open ocean - 05-zzz-endless.js)
 function landSpanAt(x) {
-  if (seaSpanAt(x) >= 0) return -1;
+  if (pastEnds(x) || seaSpanAt(x) >= 0) return -1;
   const q = seaQ(x), lo = LANDS.c.lo, hi = LANDS.c.hi;
   for (let i = 0; i < LANDS.n; i++) if (q >= lo[i] && q <= hi[i]) return i;
   return -1;
@@ -2255,6 +2258,74 @@ function landRange(k, m, e) { const lo = LANDS.c.lo[k], hi = LANDS.c.hi[k]; retu
 function LOOK_MID() { let w = -1, m = WORLD_W / 2; for (let i = 0; i < SEAS.n; i++) { const d = SEAS.c.hi[i] - SEAS.c.lo[i]; if (d > w) { w = d; m = (SEAS.c.lo[i] + SEAS.c.hi[i]) / 2; } } return m; }
 const landOwnD = x => x > LOOK_MID();
 function seaDeepest() { const S = SEAS.c, v = i => S.tab[i] ? S.deepY[i] : -Infinity; let d = 0; for (let i = 1; i < SEAS.n; i++) if (v(i) > v(d)) d = i; return d; }
+
+/* ================================================================
+   THE ENDLESS SEA (user Nov 3 10:30-10:36: "in story mode, could we have a way that you can drive to the left and right
+   indefinitely? So you would just be in the ocean forever"; "The world should be endless, so you can go as far as the fuel
+   allows you to"; "I want to make sure that battle and open world remain exactly the same").
+   The world is what the editor made, 0..WORLD_W. Past its ends it goes on as the open ocean: water over the base seabed (the
+   lowest point of any shape - G_GAP_DY), no ground, no edge. STORY is played that way (ENDLESS); BATTLE and OPEN WORLD keep their
+   own edges (VIS_L / VIS_R, the play's ends PLAY_L / PLAY_R: nobody gets past them, and past the world's ends is as it was there).
+   One rule for what's past the ends, pastEnds(x): open sea - the queries answer it (seaAtX, landSpanAt, gndTopAt, the floor's
+   bedDrop0 / bedSmooth, deepFactor and the water's shader), and the land is drawn only as far as the world's end.
+   THE REACH: the water's columns (wh, wv, wf and their calm / wet / swell - DX apart from WX0, N of them) and the smoke's air grid
+   (SG, from SG.x0) are kept over the world and as far past its ends as a view has come: they start as the world and grow out by
+   REACH_GROW whenever a view comes within its margin of their end (reachViews, from stepWater - the page and the simulation
+   worker alike; the worker's snapshot carries WX0 and N, swArraysOf, and the page grows its own to match). What they hold stays
+   where it is in the world; a frame works only on the columns round the views (stepWater, smokeSpans), wherever they are.
+   ================================================================ */
+// (ENDLESS: declared with the modes, 05-game-state.js - applyMode runs before this part)
+const pastEnds = x => ENDLESS && (x < 0 || x > WORLD_W);
+// how far the play goes each way: the world's ends, or none
+const PLAY_L = () => ENDLESS ? -Infinity : 0, PLAY_R = () => ENDLESS ? Infinity : WORLD_W;
+let WX0 = 0;                                           // the world x of the water's first column (buildWorld: 0)
+const REACH_GROW = 8 * 1333;                           // (about eight screens at a time; a multiple of DX and of the air's cell)
+const wCol = x => (x - WX0) / DX;                      // a world x as a water column (fractional)
+let REACH_W = 0;                                       // how wide they are once grown (0: the world, WORLD_W)
+const reachW = () => REACH_W || WORLD_W;
+// the water and the air kept over lo..hi too (world x); grown out to it, never shrunk in a round
+function reachWant(lo, hi) {
+  if (!ENDLESS || !wh) return;
+  const a = WX0, b = WX0 + (N - 1) * DX;
+  if (lo >= a && hi <= b) return;
+  const q = 160;                                       // (the new ends on the water's columns, the air's cells and the stirred water's alike)
+  const nl = lo < a ? Math.floor((lo - REACH_GROW) / q) * q : a, nr = hi > b ? Math.ceil((hi + REACH_GROW) / q) * q : b;
+  reachSet(nl, nr);
+}
+// each view's stretch and a margin either side - what stepWater works on, and as much again
+function reachViews() {
+  if (!ENDLESS || !cam.view) return;
+  for (let v = 0; v < 2; v++) { const V = cam.view[v]; if (!V) continue; const w = 2 * halfWorldW(V.z), m = Math.max(1500, w) * 2; reachWant(V.l - m, V.l + w + m); }
+}
+// the water's columns over nl..nr (world x on the columns' grid), what's in them kept where it is; the air's grid the same
+function reachSet(nl, nr) {
+  const n = Math.round((nr - nl) / DX) + 1, off = Math.round((WX0 - nl) / DX);
+  if (nl === WX0 && n === N) return;
+  const keep = (A, T) => { const B = new T(n); if (A) { const s = Math.max(0, -off), e = Math.min(A.length, n - off); if (e > s) B.set(A.subarray(s, e), off + s); } return B; };
+  wh = keep(wh, Float32Array); wv = keep(wv, Float32Array); wf = keep(wf, Float32Array); wtmp = new Float32Array(n);
+  const sOff = Math.round((WX0 - nl) / STIR_CELL), sA = stirA;
+  WX0 = nl; N = n; REACH_W = nr - nl;
+  buildCalm(); buildWet();                              // (each column's shelter, water and swell - for all of them, as at the build)
+  smokeReach(nl, nr);
+  stirA = new Float32Array(0); stirReady();            // (the stirred water's cells, kept where they are)
+  for (let c = 0; c < sA.length; c++) { const C = c + sOff; if (C >= 0 && C < stirA.length) stirA[C] = sA[c]; }
+}
+// the smoke's air over x0..x1 (its cells kept where they are in the world) - buildSmokeGrid's grid, grown
+function smokeReach(x0, x1) {
+  if (!SG.u) return;
+  const c = SG.cell, nx = Math.ceil((x1 - x0) / c) + 2, ny = SG.ny, off = Math.round(((SG.x0 || 0) - x0) / c);
+  if (nx === SG.nx && off === 0) return;
+  const ox = SG.nx;
+  for (const k of ['u', 'v', 'u0', 'v0', 'p', 'div', 'dens', 'curl']) {
+    const A = SG[k], B = new Float32Array(nx * ny);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < ox; i++) { const I = i + off; if (I >= 0 && I < nx) B[j * nx + I] = A[j * ox + i]; }
+    SG[k] = B;
+  }
+  const act = new Uint8Array(nx), A0 = SG.active; for (let i = 0; i < ox; i++) { const I = i + off; if (I >= 0 && I < nx) act[I] = A0[i]; }
+  SG.active = act; SG.next = new Uint8Array(nx);
+  SG.nx = nx; SG.x0 = x0;
+  SG.near = [-nx - 1, -nx, -nx + 1, -1, 0, 1, nx - 1, nx, nx + 1];
+}
 
 function makeShip(id, x, facing, dock) {
   const sh = {
@@ -2730,7 +2801,7 @@ function buildWorld(restore) {
     LAYOUT_L0 = LAYOUT_Lb = LAYOUT_L; LAYOUT_R0 = LAYOUT_Rb = LAYOUT_R; DOCKS_MOVED = OWM; }
   skinFillAll(true);                                     // (every shape's pieces typed - no AUTO; in memory - 50-land-zzz-skin-fill.js)
   builtViewW = VIEW_W;
-  N = Math.ceil(WORLD_W / DX) + 1;
+  N = Math.ceil(WORLD_W / DX) + 1; WX0 = 0; REACH_W = 0;   // (the water's columns over the world; STORY's endless sea grows them as you go - 05-zzz-endless.js)
   wh = new Float32Array(N); wv = new Float32Array(N); wf = new Float32Array(N); wtmp = new Float32Array(N);
 
   // each harbour runs from its land end (the coast) out to the end of its pier (dockAt, 06-fleet-captains)
@@ -2749,6 +2820,7 @@ function buildWorld(restore) {
   harbourFromStrs(left, right, mkDock);                  // (the harbours as parts - 50-zz-structh.js: docks, homeDock, coastDocks from the structures)
   docks.forEach((d, i) => { d.key = i; });   // (each harbour's own mark: its gulls, its perches)
   VIS_L = farL || LAND ? 0 : left.viewEdge; VIS_R = farR || LAND ? WORLD_W : right.viewEdge;   // (LAND TEST: the whole world, both countries)
+  if (ENDLESS) { VIS_L = -Infinity; VIS_R = Infinity; }   // (STORY: no edge - the open ocean past the world's ends, 05-zzz-endless.js)
   // the sea floor's shores: the pier ends; the test range has none (shallow at its ends), and one player's open side
   // is open ocean (its shore mirrored, so the deep runs out to that edge of the world)
   // (the dock chat, Oct 29) a harbour's shore is its quay's face: the harbour's depth under the quay and hangar, the ocean
@@ -2934,20 +3006,20 @@ function ambient(x, t) {
        + st * st * 9 * swell(x * 0.0062 - dir * t * 0.75 + 0.7, s * 0.6));
 }
 function simAt(x) {
-  const f = x / DX;
+  const f = wCol(x);
   let i = Math.floor(f);
   if (i < 0) return wh[0];
   if (i >= N - 1) return wh[N - 1];
   const u = f - i;
   return wh[i] * (1 - u) + wh[i + 1] * u;
 }
-function simVelAt(x) { return wv[clamp(Math.round(x / DX), 0, N - 1)]; }
+function simVelAt(x) { return wv[clamp(Math.round(wCol(x)), 0, N - 1)]; }
 // the harbours are sheltered: the swell dies away from the end of the pier to the still water in the hangar
 let calmA = null, calmRuns = [], calmGoal = null;
 function buildCalm() {
   calmA = new Float32Array(N); calmGoal = null;
   for (let i = 0; i < N; i++) {
-    const x = i * DX;
+    const x = WX0 + i * DX;
     let c = 1;
     for (const d of docks) {
       // from the block to just past the pier's end (user Oct 27: the pier gone, the open sea's waves come right up to the block)
@@ -2960,7 +3032,7 @@ function buildCalm() {
   calmRuns = [];
   for (let i = 0; i < N;) { if (calmA[i] < 0.999) { let j = i; while (j < N && calmA[j] < 0.999) j++; calmRuns.push([i, j]); i = j; } else i++; }
 }
-function calmAt(x) { return calmA ? calmA[clamp(Math.round(x / DX), 0, N - 1)] : 1; }
+function calmAt(x) { return calmA ? calmA[clamp(Math.round(wCol(x)), 0, N - 1)] : 1; }
 // (the pier came down) the shelter worked out again, the swell easing back in over a few seconds rather than at once
 function rebuildCalm() {
   const old = calmA && calmA.slice();
@@ -2989,7 +3061,7 @@ function buildWet() {
   if (!OWM || !calmA) return;
   wetA = new Uint8Array(N); ambK = new Float32Array(N);
   for (let i = 0; i < N; i++) {
-    const x = i * DX, lake = onLand(x) && lakeAt(x);
+    const x = WX0 + i * DX, lake = onLand(x) && lakeAt(x);
     wetA[i] = !onLand(x) || lake ? 1 : 0; ambK[i] = lake ? 0.3 : wetA[i];
     if (lake) calmA[i] = 0.8;                       // (inland of a harbour counts as its sheltered water: not a lake)
     if (lake) { const lv = lakeLevelAt(x); if (lv !== WATER_Y) { if (!WBASE) WBASE = new Float32Array(N).fill(WATER_Y); WBASE[i] = lv; } }
@@ -3002,8 +3074,8 @@ function buildWet() {
   for (let i = 0; i < N;) { if (wetA[i]) { let j = i; while (j < N && wetA[j]) j++; wetRuns.push([Math.max(0, i - 1), Math.min(N - 1, j)]); i = j; } else i++; }
 }
 let wetRuns = null;
-const ambAt = x => ambK ? ambK[clamp(Math.round(x / DX), 0, N - 1)] : 1;
-function surfaceY0(x) { return (WBASE ? WBASE[clamp(Math.round(x / DX), 0, N - 1)] : WATER_Y) - (ambient(x, time) * ambAt(x) + simAt(x)) * calmAt(x); }
+const ambAt = x => ambK ? ambK[clamp(Math.round(wCol(x)), 0, N - 1)] : 1;
+function surfaceY0(x) { return (WBASE ? WBASE[clamp(Math.round(wCol(x)), 0, N - 1)] : WATER_Y) - (ambient(x, time) * ambAt(x) + simAt(x)) * calmAt(x); }
 /* While a frame is drawn the sea surface is sampled thousands of times (the waterline, foam, rain, glints,
    clips), and each exact value costs some twenty sines. So each view's surface is worked out once per frame,
    one value per screen column (exact there), and read from that table; between two columns it is
@@ -3040,7 +3112,7 @@ function surfaceY(x) {
   }
   return surfaceY0(x);
 }
-function addForce(x, f) { const i = Math.round(x / DX); if (i > 0 && i < N - 1) wf[i] += f * WATER_PUSH; }
+function addForce(x, f) { const i = Math.round(wCol(x)); if (i > 0 && i < N - 1) wf[i] += f * WATER_PUSH; }
 // (engine stage 3) the water system's one entry for the rest of the game, instead of reaching into its arrays:
 //   water.push(x, f)                        - a push on the surface at x (it waits in wf for stepWater: 22-ship-physics)
 //   water.shock(x, y, power, faint, len)    - a ring spreading through the water from an impact (35-particles' shock: the
@@ -3225,7 +3297,7 @@ function floorAt(T, x, A) {
   return T[i] + (T[i + 1] - T[i]) * (f - i);
 }
 // the shape's depth under the calm sea at x, world units (no zigzag, no rocks): what the caves will cut into
-function floorProfile(x) { const i = seaSpanOf(x), T = SEAS.c.tab[i]; return SEABED_Y - WATER_Y + (T ? floorAt(T, x, SEAS.c.bedA[i]) : bedSmooth(x)); }
+function floorProfile(x) { if (pastEnds(x)) return SEABED_Y - WATER_Y + openDrop(); const i = seaSpanOf(x), T = SEAS.c.tab[i]; return SEABED_Y - WATER_Y + (T ? floorAt(T, x, SEAS.c.bedA[i]) : bedSmooth(x)); }
 // the deepest point of the shape (the kraken's)
 const floorDeepest = () => floorDeep.slice();
 // (user Oct 29: "I should also be able to move the kraken to position it") where a kraken sits: its u along the ocean
@@ -3319,13 +3391,17 @@ function bedDropB(x) {
 // static since they're background" - taking each column's depth from the near floor's zigzag reshaped them as they slid)
 // (no-countries plan step 5: each from its own sea's floor - the sea holding x, or the nearest; SEAS)
 function bedSmooth(x) {
+  if (pastEnds(x)) return openDrop();
   const i = seaSpanOf(x), A = SEAS.c.bedA[i], B = SEAS.c.bedB[i];
   if (SEAS.c.tab[i]) return floorAt(SEAS.c.tabS[i], x, A);          // (OPEN WORLD: the drawing's shape, smoothed)
   const half = (B - A) / 2;
   if (!(half > BED_SHELF)) return 0;
   return BED_EXTRA * smoothstep(BED_SHELF, half, half - Math.abs(x - (A + B) / 2));
 }
+// (STORY, past the world's ends: the open ocean's floor - the base seabed, the lowest point of any shape, as a gap in the ground has it)
+const openDrop = () => G_GAP_DY() + G_SEA - (SEABED_Y - WATER_Y);
 function bedDrop0(x) {
+  if (pastEnds(x)) return Math.max(0, openDrop() + 150 * bedZZ(x, 310, 11.3) + 50 * bedZZ(x, 85, 57.1));
   const i = seaSpanOf(x), A = SEAS.c.bedA[i], B = SEAS.c.bedB[i], T = SEAS.c.tab[i];
   const half = (B - A) / 2;
   if (!(half > BED_SHELF)) return 0;
@@ -3761,9 +3837,18 @@ function trackPush(tr, x, y) {
   const n = a.length, b = new Float64Array(n + 2); b.set(a); b[n] = x; b[n + 1] = y; tr.pts = b;
 }
 function mapMark() { }                                              // (splash marks are gone: the line says it all)
+// the minimap's two ends: the two sides' towers (a side with none - its stand-in far off: the world's end on that side)
+function miniEnds() {
+  const a = towers[0], b = towers[1], ok = t => t && Number.isFinite(t.x) && t.x >= 0 && t.x <= WORLD_W;
+  const L = [a, b].filter(ok).map(t => t.x); if (!L.length) return [0, WORLD_W];
+  const lo = L.length > 1 ? Math.min(...L) : L[0] < WORLD_W / 2 ? L[0] : 0, hi = L.length > 1 ? Math.max(...L) : L[0] < WORLD_W / 2 ? WORLD_W : L[0];
+  return hi - lo > 100 ? [lo, hi] : [0, WORLD_W];
+}
 function drawMiniMap() {
   const W = Math.round(ubw * 0.6), x0 = Math.round((ubw - W) / 2), y = Math.max(ui.top + (!ONEVIEW() ? 102 : 58), hudTop() + 44);     // wide enough to read; under the vehicle buttons
-  const mx = wx => x0 + Math.round(clamp(wx / WORLD_W, 0, 1) * (W - 1));
+  // (user Nov 3 10:36: "The minimap should be based on the towers in both modes, not on the size of the map") the strip runs
+  // from one side's tower to the other's; what's past a tower sits at that end
+  const [mL, mR] = miniEnds(), mx = wx => x0 + Math.round(clamp((wx - mL) / (mR - mL), 0, 1) * (W - 1));
   ug.fillStyle = '#7fb6e8'; ug.fillRect(x0, y, W, 2);
   if (OWM) { for (let i = 0; i < LANDS.n; i++) { ug.fillStyle = landFace(i).dir < 0 ? '#d6b072' : '#8fae5a'; ug.fillRect(mx(LANDS.c.lo[i]), y, mx(LANDS.c.hi[i]) - mx(LANDS.c.lo[i]) + (LANDS.c.hi[i] >= WORLD_W ? 1 : 0), 2); } ug.fillStyle = '#7fb6e8'; for (const L of land.lakes || []) ug.fillRect(mx(L[0]), y, Math.max(1, mx(L[1]) - mx(L[0])), 2); }   // (and every lake, user Oct 28)   // (LAND TEST: the two countries' ground)
   // height above the sea, eased so even a shell fired straight up (about 1350 high) still draws its whole arc:
@@ -4238,8 +4323,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 730;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 03 11:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 731;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 03 12:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7730,6 +7815,7 @@ function coupleShip(sh) {
 
 const waterAct = { r: [[0, 0], [0, 0]], n: 0, t: 0 };
 function stepWater(dt, clearForces) {
+  reachViews();                                          // (STORY's endless sea: the water kept out to where the views are - 05-zzz-endless.js)
   if (wetA && wetRuns) {
     // (the big world, the perf pass Oct 26: the waves are worked out only round what's on screen - each view and a
     // screen's margin either side; far off, the water just settles down (a decay every half second), and nobody
@@ -7737,7 +7823,7 @@ function stepWater(dt, clearForces) {
     const net = NET.role === 'host' || NET.role === 'guest', A = waterAct;
     if (net || !cam.view || !cam.view[0]) { for (const [a, b] of wetRuns) stepWaterRun(dt, clearForces, a, b); return; }
     A.n = 0;
-    for (let v = 0; v < 2; v++) { const V = cam.view[v]; if (!V) continue; const w = 2 * halfWorldW(V.z), m = Math.max(1500, w); const R = A.r[A.n++]; R[0] = Math.floor((V.l - m) / DX); R[1] = Math.ceil((V.l + w + m) / DX); }
+    for (let v = 0; v < 2; v++) { const V = cam.view[v]; if (!V) continue; const w = 2 * halfWorldW(V.z), m = Math.max(1500, w); const R = A.r[A.n++]; R[0] = Math.floor(wCol(V.l - m)); R[1] = Math.ceil(wCol(V.l + w + m)); }
     if (A.n === 2 && A.r[1][0] <= A.r[0][1] && A.r[0][0] <= A.r[1][1]) { A.r[0][0] = Math.min(A.r[0][0], A.r[1][0]); A.r[0][1] = Math.max(A.r[0][1], A.r[1][1]); A.n = 1; }
     for (const [a, b] of wetRuns) for (let k = 0; k < A.n; k++) { const lo = Math.max(a, A.r[k][0]), hi = Math.min(b, A.r[k][1]); if (hi > lo + 2) stepWaterRun(dt, clearForces, lo, hi); }
     A.t += dt;
@@ -8102,14 +8188,14 @@ function shipDamaged(sh) { return sh.lvl.some(l => l > 0.001) || sh.dead.some(Bo
    side's second, and a missing side's stand-in far past the world's end - stops her bow at the end of its pier, never past
    the world's edge (8 + hl in): seaLimit(v, hl) holds her there; seaReach(v, hl, dir) is how far she may go that way.
    (Her own sea's shores join this when the floor is per sea - plan step 5.) */
-const pierStop = (d, hl) => clamp(d.quay - d.dir * (hl + 4), 8 + hl, WORLD_W - 8 - hl);
+const pierStop = (d, hl) => clamp(d.quay - d.dir * (hl + 4), PLAY_L() + 8 + hl, PLAY_R() - 8 - hl);   // (the play's ends: the world's, or none - STORY, 05-zzz-endless.js)
 function seaStopOne(v, d, hl) { if (d === v.dock) return; const lim = pierStop(d, hl); if ((v.x - lim) * d.dir > 0) { v.x = lim; if (v.vx * d.dir > 0) v.vx = 0; } }
 function seaLimit(v, hl) {
   for (const d of homeDock) if (!docks.includes(d)) seaStopOne(v, d, hl);
   for (const d of docks) seaStopOne(v, d, hl);
 }
 function seaReach(v, hl, dir) {
-  let r = dir > 0 ? WORLD_W - 8 - hl : 8 + hl;
+  let r = dir > 0 ? PLAY_R() - 8 - hl : PLAY_L() + 8 + hl;
   const one = d => { if (d === v.dock || d.dir !== dir) return; const l = pierStop(d, hl); r = dir > 0 ? Math.min(r, l) : Math.max(r, l); };
   for (const d of homeDock) if (!docks.includes(d)) one(d);
   for (const d of docks) one(d);
@@ -8777,7 +8863,7 @@ function stepSub(sb, dt) {
       if (vToward > vmax) sb.vx += (vmax * d.dir - sb.vx) * Math.min(1, 5 * dt);
     }
     const xPrev = sb.x;
-    sb.x = clamp(sb.x + sb.vx * dt, 30, WORLD_W - 30);
+    sb.x = clamp(sb.x + sb.vx * dt, PLAY_L() + 30, PLAY_R() - 30);   // (the play's ends - STORY has none, 05-zzz-endless.js)
     // a rock in her way (user Oct 24 night: the deep's formations are solid): her bow can't go into it. She stops
     // against it with a thump, unhurt, and has to rise over it or go round
     if ((rockForms.length || OWM) && sb.vx) {
@@ -9712,7 +9798,7 @@ function stepTorps(dt) {
       tp.vy *= 0.3;
       continue;
     }
-    const end = hit || (tp.up && tp.y < sy + 1) || tp.y > floorUnder(tp.x, tp.y - 4) - 2 || (OWM && solidBlock(tp.x, tp.y)) || inQuay(tp.x, tp.y) || tp.x < 20 || tp.x > WORLD_W - 20;
+    const end = hit || (tp.up && tp.y < sy + 1) || tp.y > floorUnder(tp.x, tp.y - 4) - 2 || (OWM && solidBlock(tp.x, tp.y)) || inQuay(tp.x, tp.y) || tp.x < PLAY_L() + 20 || tp.x > PLAY_R() - 20;
     if (!end) continue;
     torps.splice(i, 1); tp.dead = true;
     if (hit && hit[0] === 'sub') { emit('hit', { kind: 'sub', o: hit[1], sec: hit[2], x: tp.x, y: tp.y }); continue; }
@@ -10553,7 +10639,7 @@ function makePlane(p) {
     bk: 0, mgT: 0, mg: false, turn: null, auto: null, smokeT: 0, smokeDark: false, spin: 0, inCloud: 0, cloudT: -9, vaporT: 0, wait: 0, sink: 0,
     ice: 0, strand: null, cover: [[], []], lampPh: vehPlaneR(), wings: 0, splat: [], eng: 'on', offT: 0, recoverT: 0, holdT: 0, holdS: 0 };
 }
-function planeHome(p) { return SIDE(p) ? VIS_R + 30 : VIS_L - 30; }            // your edge of the world: home
+function planeHome(p) { return SIDE(p) ? Math.min(VIS_R, WORLD_W) + 30 : Math.max(VIS_L, 0) - 30; }   // (STORY has no edge: its world's end)            // your edge of the world: home
 function planeEdge(p) { return SIDE(p) ? VIS_L + 12 : VIS_R - 12; }   // (right up to it: you can turn at the last minute, user Oct 24 night)            // the furthest it can go toward the enemy's edge
 // how far it travels toward where it was heading while it turns round (a half cosine of its speed)
 function planeTurnRoom(pl) { return pl.spd * PLANE_TURN_T / Math.PI + 4; }
@@ -12409,8 +12495,8 @@ function stepCrew(dt) {
       const run = runCtl[p].v;
       // half the battleship's top speed, but it gets going (and stops) much quicker
       c.bv += clamp(run * BOAT_SPEED - c.bv, -BOAT_ACC * dt, BOAT_ACC * dt);
-      c.x = clamp(c.x + c.bv * dt, 20, WORLD_W - 20);
-      if (c.x <= 20 || c.x >= WORLD_W - 20) c.bv = 0;
+      c.x = clamp(c.x + c.bv * dt, PLAY_L() + 20, PLAY_R() - 20);
+      if (c.x <= PLAY_L() + 20 || c.x >= PLAY_R() - 20) c.bv = 0;
       if (Math.abs(c.bv) > 2) { c.face = Math.sign(c.bv); c.anim += dt * 5; }
       // riding the swell: she follows the surface until it falls away faster than she can drop, then
       // flies off the crest and slaps back down
@@ -12797,7 +12883,7 @@ function stepShells(dt) {
       continue;
     }
     blastClose(s.x, s.y);                                         // (nothing went off: nothing to grow)
-    if (s.x < -200 || s.x > WORLD_W + 200 || s.y < -4000) shells.splice(i, 1);
+    if (s.x < PLAY_L() - 200 || s.x > PLAY_R() + 200 || s.y < -4000) shells.splice(i, 1);
   } hitDone();   // (36-zz-factions.js: what it hurt knows its shooter)
   // two shells that touch in the air set each other off
   for (let i = shells.length - 1; i >= 1; i--) {
@@ -14658,10 +14744,11 @@ function stepVisuals(dt) {
    keep a little going round them; it spreads a little and settles. distortWater bends the picture more there. */
 const STIR_CELL = 32;
 let stirA = new Float32Array(0), stirB = new Float32Array(0);
-function stirReady() { const n = Math.ceil(WORLD_W / STIR_CELL) + 2; if (stirA.length !== n) { stirA = new Float32Array(n); stirB = new Float32Array(n); } }
+function stirReady() { const n = Math.ceil(reachW() / STIR_CELL) + 2; if (stirA.length !== n) { stirA = new Float32Array(n); stirB = new Float32Array(n); } }   // (from the water's first column, WX0 - STORY's endless sea grows it: reachSet)
 function disturb(x, amt, rad = 90) {
   if (SIM_ONLY) return;
   stirReady();
+  x -= WX0;
   const c0 = Math.max(0, Math.floor((x - rad) / STIR_CELL)), c1 = Math.min(stirA.length - 1, Math.ceil((x + rad) / STIR_CELL));
   for (let c = c0; c <= c1; c++) { const d = Math.abs(c * STIR_CELL - x) / rad; if (d < 1) stirA[c] = Math.min(3, stirA[c] + amt * (1 - d * d)); }
 }
@@ -14676,7 +14763,7 @@ function stepStir(dt) {
   for (let c = 0; c < n; c++) stirB[c] = (stirA[c] * (1 - s) + (stirA[Math.max(0, c - 1)] + stirA[Math.min(n - 1, c + 1)]) * s / 2) * k;
   const t = stirA; stirA = stirB; stirB = t;
 }
-const stirAt = x => { const c = Math.round(x / STIR_CELL); return c >= 0 && c < stirA.length ? stirA[c] : 0; };
+const stirAt = x => { const c = Math.round((x - WX0) / STIR_CELL); return c >= 0 && c < stirA.length ? stirA[c] : 0; };
 
 /* THE ENGINE'S EVENTS (engine migration, stage 3 - plan: https://claude.ai/artifact/7osEef5ubafK3gkAEjY3Dt; rules.md section 6,
    "Systems"): a system owns its table, and others ask it through an event instead of calling into it. emit(type, data) hands
@@ -15097,8 +15184,10 @@ function b64IntoF32(s, a) {
   const u = new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
   for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
 }
+let WATER_N = null;   // (the saved water's column count, read before its origin x0)
 const WATER_ROW = worldRow({
-  n: [() => N, () => { }],
+  n: [() => N, v => { WATER_N = v; }],
+  x0: [() => WX0, v => { if (typeof v === 'number' && typeof WATER_N === 'number' && (v !== WX0 || WATER_N !== N)) reachSet(v, v + (WATER_N - 1) * DX); }],   // (STORY's endless sea: the columns where they were - 05-zzz-endless.js)
   wh: [() => f32ToB64(wh), v => b64IntoF32(v, wh)],
   wv: [() => f32ToB64(wv), v => b64IntoF32(v, wv)],
   wf: [() => f32ToB64(wf), v => b64IntoF32(v, wf)],
@@ -16261,14 +16350,14 @@ function swColsInto(arr, C, strs, name) {
 // (the page draws the sea from wh (simAt) and wv (simVelAt) near its views only - never wf, the forces, which only the step reads:
 // a live snapshot carries wh and wv as the slices under the views' spans (REG.spans, SW_MARGIN to spare) and no wf; a full one all three whole)
 function swArraysOf(bufs, full) {
-  const a = { stir: full ? stirA.slice() : swCopy(stirA, 0, stirA.length), settleT: waterAct.t };
+  const a = { stir: full ? stirA.slice() : swCopy(stirA, 0, stirA.length), settleT: waterAct.t, wx0: WX0, n: N };   // (wx0, n: where the water's columns are - the endless sea grows them, 05-zzz-endless.js)
   bufs.push(a.stir.buffer);
   const sp = REG.spans;
   if (full || !sp.length) { a.wh = wh.slice(); a.wv = wv.slice(); a.wf = wf.slice(); bufs.push(a.wh.buffer, a.wv.buffer, a.wf.buffer); }
   else {
     const cuts = [];
     for (let i = 0; i < sp.length; i += 2) {
-      const i0 = clamp(Math.floor((sp[i] - SW_MARGIN) / DX), 0, N - 1), i1 = clamp(Math.ceil((sp[i + 1] + SW_MARGIN) / DX) + 1, 0, N);
+      const i0 = clamp(Math.floor(wCol(sp[i] - SW_MARGIN)), 0, N - 1), i1 = clamp(Math.ceil(wCol(sp[i + 1] + SW_MARGIN)) + 1, 0, N);
       if (i1 <= i0) continue;
       const h = swCopy(wh, i0, i1), v = swCopy(wv, i0, i1); bufs.push(h.buffer, v.buffer); cuts.push({ i0, h, v });
     }
@@ -16283,6 +16372,7 @@ function swArraysOf(bufs, full) {
   return a;
 }
 function swArraysInto(a) {
+  if (typeof a.n === 'number' && (a.wx0 !== WX0 || a.n !== N)) reachSet(a.wx0, a.wx0 + (a.n - 1) * DX);   // (the worker's water grown out: the page's too)
   if (a.cuts) { for (const c of a.cuts) { if (c.i0 + c.h.length <= wh.length) { wh.set(c.h, c.i0); wv.set(c.v, c.i0); } } }
   else {
     if (a.wh.length === wh.length) wh.set(a.wh);
@@ -17073,7 +17163,7 @@ const smFloor = (i, x, y) => {
   return landTopM(x);
 };
 function buildSmokeGrid() {
-  SG.nx = Math.ceil(WORLD_W / SG.cell) + 2;
+  SG.nx = Math.ceil(WORLD_W / SG.cell) + 2; SG.x0 = 0;   // (x0: the world x of its first column - STORY's endless sea grows it, smokeReach)
   SG.ny = Math.ceil((WATER_Y + 20 - SG.top) / SG.cell) + 1;
   const n = SG.nx * SG.ny;
   for (const k of ['u', 'v', 'u0', 'v0', 'p', 'div', 'dens', 'curl']) SG[k] = new Float32Array(n);
@@ -17084,7 +17174,7 @@ function buildSmokeGrid() {
 function smokeSpans(nx, ny, cell, u, v, p) {
   const nxt = SG.next, act = SG.active, M = 5;
   nxt.fill(0);
-  const mark = (x, r) => { const a = Math.max(1, Math.floor((x - r) / cell) - M), b = Math.min(nx - 2, Math.floor((x + r) / cell) + M); for (let i = a; i <= b; i++) nxt[i] = 1; };
+  const X0 = SG.x0, mark = (x, r) => { const a = Math.max(1, Math.floor((x - r - X0) / cell) - M), b = Math.min(nx - 2, Math.floor((x + r - X0) / cell) + M); for (let i = a; i <= b; i++) nxt[i] = 1; };
   { const c = smoke.c, X = c.x, R = c.r, AG = c.age, DR = c.drift; for (let i = 0; i < smoke.n; i++) if (!DR[i] || AG[i] < DR[i]) mark(X[i], R[i]); }
   for (const s of shells) if (!s.under) mark(s.x, 0);
   const spans = [];
@@ -17097,12 +17187,12 @@ function smokeSpans(nx, ny, cell, u, v, p) {
   return spans;
 }
 function gIdx(x, y) {
-  const i = Math.floor(x / SG.cell), j = Math.floor((y - SG.top) / SG.cell);
+  const i = Math.floor((x - SG.x0) / SG.cell), j = Math.floor((y - SG.top) / SG.cell);
   if (i < 1 || j < 1 || i >= SG.nx - 1 || j >= SG.ny - 1) return -1;
   return j * SG.nx + i;
 }
 function gSample(f, x, y) {
-  const fx = x / SG.cell - 0.5, fy = (y - SG.top) / SG.cell - 0.5;
+  const fx = (x - SG.x0) / SG.cell - 0.5, fy = (y - SG.top) / SG.cell - 0.5;
   const i = clamp(Math.floor(fx), 0, SG.nx - 2), j = clamp(Math.floor(fy), 0, SG.ny - 2);
   const u = clamp(fx - i, 0, 1), v = clamp(fy - j, 0, 1), k = j * SG.nx + i;
   return (f[k] * (1 - u) + f[k + 1] * u) * (1 - v) + (f[k + SG.nx] * (1 - u) + f[k + SG.nx + 1] * u) * v;
@@ -17114,7 +17204,7 @@ function gridImpulse(x, y, du, dv, rad) {
 // (engine stage 4) the grid's own parts of an impulse and a blast, pure functions of the grid G (SG here, the worker's copy
 // there): one code for both
 function smImp(G, x, y, du, dv, rad) {
-  const ci = x / G.cell, cj = (y - G.top) / G.cell, R = Math.ceil(rad);
+  const ci = (x - (G.x0 || 0)) / G.cell, cj = (y - G.top) / G.cell, R = Math.ceil(rad);
   for (let j = Math.floor(cj) - R; j <= Math.floor(cj) + R; j++) for (let i = Math.floor(ci) - R; i <= Math.floor(ci) + R; i++) {
     if (i < 1 || j < 1 || i >= G.nx - 1 || j >= G.ny - 1) continue;
     const d = Math.hypot(i + 0.5 - ci, j + 0.5 - cj);
@@ -17124,6 +17214,7 @@ function smImp(G, x, y, du, dv, rad) {
   }
 }
 function smBlast(G, x, y, radius, strength) {
+  x -= G.x0 || 0;                                       // (the grid's own x: from its first column - SG.x0)
   const R = Math.ceil(radius / G.cell), ci = Math.floor(x / G.cell), cj = Math.floor((y - G.top) / G.cell);
   for (let j = cj - R; j <= cj + R; j++) for (let i = ci - R; i <= ci + R; i++) {
     if (i < 1 || j < 1 || i >= G.nx - 1 || j >= G.ny - 1) continue;
@@ -17444,7 +17535,7 @@ function smShips() {
   const out = [];
   for (const sh of ships) {
     if (sh.state !== 'afloat') continue;
-    out.push(Math.floor((sh.x - SHIP_L / 2) / SG.cell), Math.floor((sh.x + SHIP_L / 2) / SG.cell), sh.vx);
+    out.push(Math.floor((sh.x - SHIP_L / 2 - SG.x0) / SG.cell), Math.floor((sh.x + SHIP_L / 2 - SG.x0) / SG.cell), sh.vx);
   }
   return Float64Array.from(out);
 }
@@ -17455,7 +17546,7 @@ function smWorkerBody() {
   self.onmessage = e => {
     const m = e.data;
     if (m.init) {
-      G = { nx: m.nx, ny: m.ny, cell: m.cell, top: m.top };
+      G = { nx: m.nx, ny: m.ny, cell: m.cell, top: m.top, x0: m.x0 || 0 };
       for (const k of ['u', 'v', 'u0', 'v0', 'p', 'div', 'dens', 'curl']) G[k] = new Float32Array(m.nx * m.ny);
       G.act = new Uint8Array(m.nx); G.nxt = new Uint8Array(m.nx);
       return;
@@ -17501,7 +17592,7 @@ function smwStep(dt, SPANS) {
   if (!SMW.w) { smwStart(); if (!SMW.on) return false; }
   if (SMW.g !== SG.u) {                               // (a new world's grid: the worker's copy made again)
     SMW.g = SG.u; SMW.busy = false; SMW.seq++; SMW.imp.length = 0;
-    SMW.w.postMessage({ init: 1, nx: SG.nx, ny: SG.ny, cell: SG.cell, top: SG.top });
+    SMW.w.postMessage({ init: 1, nx: SG.nx, ny: SG.ny, cell: SG.cell, top: SG.top, x0: SG.x0 });
   }
   // (still on the last one: this frame the puffs ride the air they have - and the air keeps the time it missed, for its next step:
   // in the simulation worker several steps go by between its answers, Oct 31)
@@ -20355,6 +20446,7 @@ uniform vec4 u_ds;           // the strips: step, first strip's x, the last stri
 uniform vec4 u_dw;           // deepFactor: -, -, CAMPX, SV
 uniform vec2 u_sea[8];       // each sea's middle and half width (SEAS, up to 8)
 uniform int u_nsea;
+uniform vec2 u_wend;        // (STORY's endless sea: the world's right end, and 1 when past the ends is open ocean - 05-zzz-endless.js)
 uniform float u_bot;         // the bottom of the fills (Bt)
 uniform vec2 u_xr;           // the fills' columns: -3 .. VWP + 3
 vec4 grad(vec4 g, float y) {
@@ -20374,6 +20466,7 @@ vec4 layer(int k, int i, float x, float y) {
     vec2 sm = u_sea[sk];
     float uu = abs(wx - sm.x) / sm.y;
     float tt = clamp((uu - 0.2) / 0.6, 0.0, 1.0), f = sm.y > 0.0 ? 1.0 - tt * tt * (3.0 - 2.0 * tt) : 0.0;
+    if (u_wend.y > 0.5 && (wx < 0.0 || wx > u_wend.x)) { float te = clamp(((wx < 0.0 ? -wx : wx - u_wend.x) - 400.0) / 2000.0, 0.0, 1.0); f = te * te * (3.0 - 2.0 * te); }   // (deepFactor's open ocean)
     if (f < 0.01) return vec4(0.0);
     float a = floor(0.3 * f * 1000.0 + 0.5) / 1000.0;
     a = floor(a * 255.0 + 0.5) / 255.0;
@@ -20652,7 +20745,7 @@ function wglSetup() {
   const prog = (vs, fs, names) => { const p = gl.createProgram(); gl.attachShader(p, glShader(gl.VERTEX_SHADER, vs)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const U = {}; for (const k of names) U[k] = gl.getUniformLocation(p, k); return { p, U }; };
   const base = ['u_size', 'u_rect', 'u_m', 'u_surf', 'u_n'];
-  WGL.cols = prog(WGL_VS, WGL_COLS_FS, base.concat(['u_grad', 'u_kind', 'u_yoff', 'u_g0', 'u_g1', 'u_c1', 'u_ds', 'u_dw', 'u_sea', 'u_nsea', 'u_bot', 'u_xr']));
+  WGL.cols = prog(WGL_VS, WGL_COLS_FS, base.concat(['u_grad', 'u_kind', 'u_yoff', 'u_g0', 'u_g1', 'u_c1', 'u_ds', 'u_dw', 'u_sea', 'u_nsea', 'u_wend', 'u_bot', 'u_xr']));
   WGL.sh = prog(WGL_SH_VS, WGL_SH_FS, ['u_size', 'u_m', 'u_surf', 'u_n', 'u_p', 'u_v', 'u_col']);
   WGL.ab = prog(WGL_VS, WGL_AB_FS, ['u_size', 'u_rect', 'u_m', 'u_g', 'u_gn', 'u_dk', 'u_nl', 'u_l0', 'u_l1']);
   WGL.di = prog(WGL_VS, WGL_DI_FS, ['u_size', 'u_rect', 'u_m', 'u_src', 'u_a', 'u_w', 'u_sh', 'u_np', 'u_pc', 'u_nr', 'u_rg', 'u_rp']);
@@ -20714,7 +20807,7 @@ const WGL_SEA = new Float32Array(16);
 function wglSeas(gl, U) {
   const n = Math.min(8, SEAS.n);
   for (let i = 0; i < n; i++) { const M = seaMidHalf(i); WGL_SEA[2 * i] = M.mid; WGL_SEA[2 * i + 1] = WORLD_W ? M.half : 0; }
-  gl.uniform2fv(U.u_sea, WGL_SEA); gl.uniform1i(U.u_nsea, n);
+  gl.uniform2fv(U.u_sea, WGL_SEA); gl.uniform1i(U.u_nsea, n); gl.uniform2f(U.u_wend, WORLD_W, ENDLESS ? 1 : 0);
 }
 function wglColumns(layers, Bt) {
   const gl = GLR.gl, pr = WGL.cols, ctx = C, S = wglSurf();
@@ -27190,6 +27283,7 @@ function clipRegion(L) {
   const T = -SHY - 60, H = bh + 120, lo = SEAS.c.lo, hi = SEAS.c.hi;
   C.save(); C.beginPath();
   for (let i = 0; i < SEAS.n; i++) { const a = Math.floor(L ? layerCoastX(L, lo[i]) : PX(lo[i])), b = Math.ceil(L ? layerCoastX(L, hi[i]) : PX(hi[i])); C.rect(a, T, Math.max(0, b - a), H); }   // (every sea - SEAS, 05-zz-seas.js)
+  if (ENDLESS) { const a = Math.floor(L ? layerCoastX(L, 0) : PX(0)), b = Math.ceil(L ? layerCoastX(L, WORLD_W) : PX(WORLD_W)), M = 1e5; if (a > -M) C.rect(-M, T, a + M, H); if (b < M) C.rect(b, T, M - b, H); }   // (STORY: and the open ocean past the world's ends)
   if (!L && OWM) for (const k of land.lakes || []) { const kw = lakeWet(k), la = Math.floor(PX(kw[0])), lb = Math.ceil(PX(kw[1])), lt = Math.round(PY(lakeLv(k) - 8)); if (lb > -60 && la < VWP + 60) C.rect(la, lt, lb - la, H); }   // (and the lakes, below their surface: the sea's light on them too, user Oct 26)
   C.clip();
 }
@@ -27347,7 +27441,7 @@ function drawCoastsLand(pivY) {
   }
 }
 function drawCoasts(pivY, zr) {
-  if (!coasts.length) return;
+  if (!coasts.length || ENDLESS) return;   // (the land past the world's ends, pinned to them: STORY has none there - the open ocean, 05-zzz-endless.js)
   const vis = 1 - 0.85 * E.fog;
   if (vis < 0.03) return;
   const Sc = S * COAST.k * Math.pow(zr, 0.9), Xc = VWP / 2;     // zoom scales the land almost as much as the harbour
@@ -27359,7 +27453,7 @@ function drawCoasts(pivY, zr) {
     // little slower than the dock itself: the land stays behind the harbour instead of following the boat.
     const m = cam.merge;
     const edgeL = -VSX * m, edgeR = VWP + (bw - VSX - VWP) * m;   // this view's edges, or the whole screen's
-    const worldEdgeX = co.side ? PX(VIS_R) : PX(VIS_L);
+    const worldEdgeX = co.side ? PX(Math.min(VIS_R, WORLD_W)) : PX(Math.max(VIS_L, 0));   // (STORY has no edge: its world's end)
     // out on the open sea the land sinks below the horizon: it fades as the harbour falls far behind
     const away = Math.abs(d.quay - (CAMF + Xc) / SV) / VIEW_W;
     const sink = 1 - smoothstep(1.1, 2.1, away);
@@ -28045,6 +28139,7 @@ function lightLean(lx) { return lx > -1e8 ? clamp((lx + VSX - bw / 2) / (bw / 2)
 // fading back to the normal harbour blue toward both docks
 function deepFactor(x) {
   if (!WORLD_W) return 0;
+  if (pastEnds(x)) return smoothstep(400, 2400, x < 0 ? -x : x - WORLD_W);   // (STORY, past the world's ends: the open ocean, deep a little way out)
   const M = seaMidHalf(seaSpanOf(x)), u = Math.abs(x - M.mid) / M.half;   // (its own sea's middle - SEAS)
   return 1 - smoothstep(0.2, 0.8, u);
 }
@@ -28799,7 +28894,7 @@ const REEF_K = 1.24;                                  // world units a sprite pi
 let reef = [], rockForms = [], coastFront = [];
 function seededRng(seed) { let s = seed >>> 0; return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 // how far out from the nearer shore (a harbour's pier end); negative under the pier
-function shoreDist(x) { const i = seaSpanOf(x), A = SEAS.c.bedA[i], B = SEAS.c.bedB[i], half = (B - A) / 2; return half - Math.abs(x - (A + B) / 2); }   // (its own sea's floor's ends - SEAS)
+function shoreDist(x) { if (pastEnds(x)) return x < 0 ? -x : x - WORLD_W; const i = seaSpanOf(x), A = SEAS.c.bedA[i], B = SEAS.c.bedB[i], half = (B - A) / 2; return half - Math.abs(x - (A + B) / 2); }   // (its own sea's floor's ends - SEAS)
 // the rock formations' tops, where they stand (Infinity where there's none): part of the floor (seabedY)
 function rockTopY(x) {
   let top = Infinity;
@@ -33063,7 +33158,7 @@ function stepBalloon(b, dt) {
     const wind = windAt(b.y) * 0.9 + 6 * Math.sin(b.ph * 0.07 + b.i);
     const held = b.placed != null && b.driven == null;              // (placed in the editor, nobody aboard: it waits where it was put - 50-zz-placed.js)
     if (!held) b.x += (wind + (b.driven != null ? b.push || 0 : 0)) * dt;
-    if (b.driven != null) b.x = clamp(b.x, 150, WORLD_W - 150);   // (yours never drifts off the world)
+    if (b.driven != null) b.x = clamp(b.x, PLAY_L() + 150, PLAY_R() - 150);   // (yours never drifts off the world - STORY's has no edge)
     if (b.state === 'fly') {
       // the burner: a few seconds' roar lifts it toward the height it wants, then it cools and sinks
       if (b.driven != null) stepCivDriven(b, dt);                  // (yours: up burns, down vents - 50-land-civdrive)
@@ -33276,7 +33371,7 @@ function stepBlimp(b, dt) {
     b.vx += clamp(lever * BLIMP_V - b.vx, -8 * dt, 8 * dt);
     if (Math.abs(b.vx) > 3) b.dir = Math.sign(b.vx);              // (which way it's going - its nose stays toward the other country)
     b.vy += (st * 30 - b.vy) * Math.min(1, dt * 0.8);
-    b.x = clamp(b.x + b.vx * dt + windAt(b.y) * (b.placed != null && !mine ? 0 : 0.08) * dt, 200, WORLD_W - 200); b.y = clamp(b.y + b.vy * dt, SKY_TOP + 200, (dryLand(b.x) ? landTop(b.x) : surfaceY(b.x)) - 40);
+    b.x = clamp(b.x + b.vx * dt + windAt(b.y) * (b.placed != null && !mine ? 0 : 0.08) * dt, (mine ? PLAY_L() : 0) + 200, (mine ? PLAY_R() : WORLD_W) - 200); b.y = clamp(b.y + b.vy * dt, SKY_TOP + 200, (dryLand(b.x) ? landTop(b.x) : surfaceY(b.x)) - 40);
     b.ang = Math.sin(time * 0.4 + b.ph) * 0.02 - clamp(b.vy / 200, -0.08, 0.08) * b.face;   // (nose up climbing)
     // shot: rounds barely, a shell or a missile a lot; its gas gone, down it comes
     // (user Nov 2 12:07: "Planes, helicopters, seaplanes, the shuttle, balloons and the blimp... Why not?") where it's hit is
@@ -36523,7 +36618,8 @@ function stepCivAir(f, dt) {
   const p0 = f.pitch;
   // (Nov 2: the one flight model - flyStep, 29-zz-flight.js: the stick pulls its wings - a Cessna loops from a dive, the 747
   // can't; let go or flown home, it flies the path it wants. Its speed its own: a dive builds it, a climb spends it)
-  if (!f.turn && !f.roll && ((f.x < 260 && f.facing < 0) || (f.x > WORLD_W - 260 && f.facing > 0) || (mine && loiterBack(f, f.facing)))) f.turn = { t: 0, from: f.facing };   // (it won't leave the world: at an end it turns back; stopped: round on the spot)
+  const eL = mine ? PLAY_L() : 0, eR = mine ? PLAY_R() : WORLD_W;   // (yours goes as far as the play does - STORY has no edge; the world's traffic keeps to the world)
+  if (!f.turn && !f.roll && ((f.x < eL + 260 && f.facing < 0) || (f.x > eR - 260 && f.facing > 0) || (mine && loiterBack(f, f.facing)))) f.turn = { t: 0, from: f.facing };   // (it won't leave the world: at an end it turns back; stopped: round on the spot)
   f.gear = clamp((f.gear || 0) + (gearWant ? 1.5 : -1.5) * dt, 0, 1);
   const ctl = (stick || mine) && !forced ? { pull: flyPull(f, stick, dt) } : { gam: want }; if (gearWant) ctl.cush = H;   // (wheels down over ground it can land on: the flare)   // (yours let go: its trim)
   flyStep(f, dt, ctl, f.kind === 'jet' ? 'jet' : 'cessna', 'facing', K.turnT);
@@ -36533,7 +36629,7 @@ function stepCivAir(f, dt) {
   f.flare = clamp((f.flare || 0) + (gearWant ? 1 : -1) * dt * 1.5, 0, 1);
   f.ang = f.pitch * f.dir * (1 - f.flare) - f.dir * f.flare * (0.04 + 0.07 * smoothstep(90, 0, H));   // (its body: flyStep's pitch - upside down at a loop's top)
   // left to itself it flies on level; off the world's end, it's gone (another flight later)
-  if (f.x < -300 || f.x > WORLD_W + 300) { if (f.driven != null) { const q = f.driven; crew[q].civ = null; lostUnit(q, clamp(f.x, 0, WORLD_W), 'civ'); } Object.assign(f, newFlight(f.kind, Math.random() < 0.5 ? 0 : 1, rnd(20, 40), f.owner), { col: f.col, alt: f.alt, driven: null }); return; }
+  if (f.x < eL - 300 || f.x > eR + 300) { if (f.driven != null) { const q = f.driven; crew[q].civ = null; lostUnit(q, clamp(f.x, 0, WORLD_W), 'civ'); } Object.assign(f, newFlight(f.kind, Math.random() < 0.5 ? 0 : 1, rnd(20, 40), f.owner), { col: f.col, alt: f.alt, driven: null }); return; }
   // the ground or the water: down it goes (not on its wheels over a runway: that's landing)
   // (user Oct 25 late: "in the airport, planes always land. You cannot crash a plane in the airport") - down onto the
   // concrete anyhow, it's a landing
@@ -36599,7 +36695,7 @@ function stepCivDriven(v, dt) {
     const held = ancHeld(v);                                         // (her anchor down: she lies to it till it's up, user Oct 27)
     v.drv = (v.drv || 0) + ((held ? 0 : lever) - (v.drv || 0)) * Math.min(1, dt * (held ? 0.8 : 0.35));      // (a big ship answers slowly)
     v.dir = Math.sign(v.drv) || v.dir;
-    const hs = seaSpanOf(v.x), lo = Math.max(SEAS.c.lo[hs] + 400, v.lo != null ? v.lo : -1e9), hi = Math.min(SEAS.c.hi[hs] - 400, v.hi != null ? v.hi : 1e9);   // (her own sea - SEAS)   // (never into a pier: her berth's the end of her way)
+    const hs = seaSpanOf(v.x), sl = ENDLESS && SEAS.c.lo[hs] <= 0 ? -Infinity : SEAS.c.lo[hs] + 400, sr = ENDLESS && SEAS.c.hi[hs] >= WORLD_W ? Infinity : SEAS.c.hi[hs] - 400, lo = Math.max(sl, v.lo != null ? v.lo : -1e9), hi = Math.min(sr, v.hi != null ? v.hi : 1e9);   // (a sea at the world's end in STORY runs on into the open ocean)   // (her own sea - SEAS)   // (never into a pier: her berth's the end of her way)
     v.x = clamp(v.x + v.drv * K.v * 1.3 * dt, lo, hi);
     if ((v.x <= lo + 1 && v.drv < 0) || (v.x >= hi - 1 && v.drv > 0)) civBounce(p);
     return true;
@@ -37206,7 +37302,7 @@ function stepCivHeli(h, dt) {
     // and sets down)
     const apron = onApron(h.x) && dryLand(h.x);
     if (apron && gy - h.y < 140) { h.vy = Math.min(h.vy, 30 + (gy - h.y) * 0.4); if (gy - h.y < 70) h.tilt *= 1 - Math.min(1, dt * 4); }
-    h.x = clamp(h.x + h.vx * dt, 40, WORLD_W - 40); h.y = Math.max(HELI_CEIL, h.y + h.vy * dt);
+    h.x = clamp(h.x + h.vx * dt, (mine ? PLAY_L() : 0) + 40, (mine ? PLAY_R() : WORLD_W) - 40);   // (yours as far as the play goes - STORY has no edge) h.y = Math.max(HELI_CEIL, h.y + h.vy * dt);
     h.spin = Math.min(1, h.spin + dt);
     // touching down: gently on land it sets down; hard, or on the water, it's lost
     if (h.y >= gy) {
@@ -37218,7 +37314,7 @@ function stepCivHeli(h, dt) {
     heliDust(h.x, h.y + chStand(h), gy - h.y, h.spin, dt, chHalf(h));   // (low over the ground: its downwash raises the dust)
     rotorDownwash(h.x, h.y - chSkid(h), chHalf(h) * 0.9, h.spin, h.vx, dt);   // (and the smoke round it pushed away, user Oct 27 - 38-smoke-sim)
     // (driven to the world's end: it turns back)
-    if (mine && ((h.x <= 41 && lever < 0) || (h.x >= WORLD_W - 41 && lever > 0))) civBounce(h.driven);
+    if (mine && ((h.x <= PLAY_L() + 41 && lever < 0) || (h.x >= PLAY_R() - 41 && lever > 0))) civBounce(h.driven);
     civHeliSmoke(h, dt);
     civHeliHits(h, dt);
     // (aircraft never collide with each other, army or civilian - user Oct 25 late: "There's no collision between
@@ -43052,7 +43148,7 @@ function ropeRelease(h) {
   if (R.hold < 0) return;
   const t = tanks[R.hold], e = R.n[ROPE_N];
   if (t && t.carry === h.id) {
-    t.carry = null; t.dropT = 3; t.x = clamp(t.x, 40, WORLD_W - 40);
+    t.carry = null; t.dropT = 3; t.x = clamp(t.x, PLAY_L() + 40, PLAY_R() - 40);
     t.vy = clamp((e[1] - e[3]) / R.dt, -60, 260); t.vx = clamp((e[0] - e[2]) / R.dt, -VTUNE.tank.speed, VTUNE.tank.speed);
     sound('clink', telegraphs[h.id]);
   }
@@ -43388,7 +43484,7 @@ function magDrop(o) {
   // (a box falls as a loose one - into the sea it floats and sinks, on the ground it lands; a tank drops onto its
   // tracks unhurt, as from the army helicopter's rope)
   if (isBox(o)) { Object.assign(o, { where: 'free', vx: clamp(o.vx || 0, -200, 200), vy: clamp(o.vy || 0, -100, 200), va: magRnd(-0.4, 0.4) }); return; }
-  if (isTank(o)) { o.hook = false; o.dropT = 3; o.x = clamp(o.x, 40, WORLD_W - 40); o.vx = clamp(o.vx || 0, -VTUNE.tank.speed, VTUNE.tank.speed); o.vy = clamp(o.vy || 0, -60, 260); return; }
+  if (isTank(o)) { o.hook = false; o.dropT = 3; o.x = clamp(o.x, PLAY_L() + 40, PLAY_R() - 40); o.vx = clamp(o.vx || 0, -VTUNE.tank.speed, VTUNE.tank.speed); o.vy = clamp(o.vy || 0, -60, 260); return; }
   const wet = !dryLand(o.x);
   const dk = wet && !onLand(o.x) ? shipTopAt(o.x, o.y - 10) : null, onShip = !!dk && dk.y < surfaceY(o.x);   // (over a ship: it comes down on her, not into the water under her - user Oct 27, [19])
   if (seaplanes.includes(o) && wet && !onShip) { o.state = 'water'; o.y = surfaceY(o.x) - 3; o.spd = 0; o.ai = null; splash(o.x, 0, -120); return; }
@@ -43423,7 +43519,7 @@ function stepPlaneDrops(dt) {
     if (!o || o.carried !== 'drop') continue;
     if (!magHoldable(o)) { o.carried = null; o.hookA = null; continue; }
     o.vy = Math.min(o.vy + DROP_G * dt, 700); o.vx = (o.vx || 0) * (1 - 0.4 * dt);
-    o.x = clamp(o.x + o.vx * dt, 40, WORLD_W - 40); o.y += o.vy * dt;
+    o.x = clamp(o.x + o.vx * dt, PLAY_L() + 40, PLAY_R() - 40); o.y += o.vy * dt;
     const foot = dropFoot(o), wet = !dryLand(o.x), ht = wet ? harbourTop(o.x, o.y - 10) : Infinity;
     const dk = wet && !onLand(o.x) ? shipTopAt(o.x, o.y - 30) : null, onShip = !!dk && dk.y < surfaceY(o.x) && dk.y < ht;
     const floor = onShip ? dk.y : ht < Infinity ? ht : wet ? surfaceY(o.x) : landTop(o.x);
@@ -45209,8 +45305,8 @@ function lakeRebuild() {
   }
   // the water's mask (where the sea's code works the water), round each lake
   if (wetA && ambK && calmA) {
-    for (const L of land.lakes) for (let i = Math.max(0, Math.floor(L[0] / DX) - 2); i <= Math.min(N - 1, Math.ceil(L[1] / DX) + 2); i++) {
-      const x = i * DX, lake = onLand(x) && lakeAt(x);
+    for (const L of land.lakes) for (let i = Math.max(0, Math.floor(wCol(L[0])) - 2); i <= Math.min(N - 1, Math.ceil(wCol(L[1])) + 2); i++) {
+      const x = WX0 + i * DX, lake = onLand(x) && lakeAt(x);
       wetA[i] = !onLand(x) || lake ? 1 : 0; ambK[i] = lake ? 0.3 : wetA[i];
       if (lake) calmA[i] = 0.8;
       if (lake && lakeLv(L) !== WATER_Y) { if (!WBASE) WBASE = new Float32Array(N).fill(WATER_Y); WBASE[i] = lakeLv(L); }
@@ -45676,7 +45772,8 @@ function spAir(s, dt, stick, mine) {
   const co = flyClimbOut(s, 'seaplane', dt, -0.2, !!stick); if (co != null && !stick) want = co;   // (just off the water: climbing out)
   const flare = wet && H < 70 && (s.vy || 0) >= -5 && !(s.climbT > 0) && !s.turn ? 1 : 0;
   if (s.y < SKY_TOP + 120 && want < 0.1) want = 0.1;
-  if (!s.turn && !s.roll && ((s.x < 260 && s.dir < 0) || (s.x > WORLD_W - 260 && s.dir > 0) || (mine && loiterBack(s, s.dir)))) s.turn = { t: 0, from: s.dir };   // (and stopped: round on the spot)
+  const eL = mine ? PLAY_L() : 0, eR = mine ? PLAY_R() : WORLD_W;   // (yours as far as the play goes - STORY has no edge)
+  if (!s.turn && !s.roll && ((s.x < eL + 260 && s.dir < 0) || (s.x > eR - 260 && s.dir > 0) || (mine && loiterBack(s, s.dir)))) s.turn = { t: 0, from: s.dir };   // (and stopped: round on the spot)
   // (Nov 2: the one flight model - flyStep, 29-zz-flight.js: the stick pulls its wings, let go it flies the path it wants)
   const ctl = mine && (stick || co == null) ? { pull: flyPull(s, stick, dt) } : { gam: want }; if (flare) ctl.cush = H;   // (low over the water: its floats' flare)   // (yours let go: its trim)
   flyStep(s, dt, ctl, 'seaplane', 'dir', SP_TURN);
@@ -47281,7 +47378,7 @@ function frontTop(x) { const c = ltCol(x); if (!land.idry || c < 0 || c >= land.
 // what the ground's made of where a blast meets it (for its colour): sand, grass on top, or dirt
 function groundAt(x, y) { const c = ltCol(x), r = ltRow(landBelow(x, y - 6)); for (let q = 0; q < 4; q++) { const m = ltCell(c, r + q); if (m === M_SAND) return 'sand'; } return 'dirt'; }
 // the same past the world's ends, where the land is drawn mirrored (what rain and the eye meet there)
-function landTopM(x) { const E2 = land.cols * LT_CELL; if (x < 0) x = -x; else if (x > E2) x = 2 * E2 - x; return landTop(clamp(x, 0, E2 - 0.1)); }
+function landTopM(x) { if (ENDLESS) return landTop(x); const E2 = land.cols * LT_CELL; if (x < 0) x = -x; else if (x > E2) x = 2 * E2 - x; return landTop(clamp(x, 0, E2 - 0.1)); }
 
 function buildLand() {
   const R0 = seededRng(9001 + (land.seed | 0));
@@ -48095,6 +48192,7 @@ function forestRockArt() {
 function landSlices(x0, x1) {
   const n = land.dirty.length, Xend = land.cols * LT_CELL, list = [];
   for (let k = Math.max(0, Math.floor(ltCol(x0) / LT_CHUNK)); k <= Math.min(n - 1, Math.floor(ltCol(x1) / LT_CHUNK)); k++) list.push([k, k * LT_CHUNK * LT_CELL, false]);
+  if (ENDLESS) return list;                           // (STORY: past the world's ends is the open ocean - no land mirrored there)
   for (let k = 0; k < n; k++) { const w = Math.min(LT_CHUNK, land.cols - k * LT_CHUNK) * LT_CELL, xl = -k * LT_CHUNK * LT_CELL - w; if (xl + w <= x0) break; if (xl < x1) list.push([k, xl, true]); }
   for (let k = n - 1; k >= 0; k--) { const xr0 = k * LT_CHUNK * LT_CELL, w = Math.min(LT_CHUNK, land.cols - k * LT_CHUNK) * LT_CELL, xl = 2 * Xend - xr0 - w; if (xl > x1) break; if (xl + w > x0) list.push([k, xl, true]); }
   return list;
@@ -48171,7 +48269,7 @@ function drawLandGround(x0, x1, onField) {
   const Llo = LANDS.c.lo, Lhi = LANDS.c.hi;
   if (land.flat) {
     for (let i = 0; i < LANDS.n; i++) {
-      const XA = Llo[i] <= 0 ? -SHX - 2 : Math.round(PX(Llo[i])), XB = Lhi[i] >= WORLD_W ? VWP + 4 : Math.round(PX(Lhi[i]));
+      const XA = Llo[i] <= 0 && !ENDLESS ? -SHX - 2 : Math.round(PX(Llo[i])), XB = Lhi[i] >= WORLD_W && !ENDLESS ? VWP + 4 : Math.round(PX(Lhi[i]));   // (STORY: no further than the world's end)
       if (XB > XA) C.fillRect(XA, Ybot - 1, XB - XA, Math.max(0, bh - Ybot + 4));
     }
   } else for (const [k, xl] of list) {
@@ -48373,6 +48471,11 @@ function bgLookShare(desert, x, B) {
     land.lookP = { D, F, T };
   }
   const A = desert === 'T' ? land.lookP.T : desert ? land.lookP.D : land.lookP.F, xc = clamp(x, 0, (n - 1) * LT_CELL);
+  if (ENDLESS && (x - B < 0 || x + B > (n - 1) * LT_CELL)) {   // (STORY: past the world's ends is the open ocean - no land there to stand up behind)
+    const r0 = Math.floor((x - B) / LT_CELL), r1 = Math.max(r0 + 1, Math.ceil((x + B) / LT_CELL)), q0 = clamp(r0, 0, n), q1 = clamp(r1, 0, n);
+    if (desert === 'Fn') return (A[q1] - A[q0] - (land.lookP.T[q1] - land.lookP.T[q0])) / (r1 - r0);
+    return (A[q1] - A[q0]) / (r1 - r0);
+  }
   const c0 = clamp(Math.floor((xc - B) / LT_CELL), 0, n), c1 = clamp(Math.ceil((xc + B) / LT_CELL), c0 + 1, n);
   if (desert === 'Fn') return (A[c1] - A[c0] - (land.lookP.T[c1] - land.lookP.T[c0])) / (c1 - c0);   // (the forest's trees: not over the tropical)
   return (A[c1] - A[c0]) / (c1 - c0);
@@ -48403,6 +48506,7 @@ function drawLandBg0(near, desert, foreign, Xs) {
     const skirt = css3(L.s.bot.map((v, j) => v * fx[j] * (1 - Lh) + hz[j] * Lh));
     const sinkF = px => { const u = clamp((px - zA) / (zB - zA), 0, 1); return 1 - u * u * (3 - 2 * u); };
     C.save();
+    if (ENDLESS) { const a = Math.floor(layerCoastX(L, 0)), b = Math.ceil(layerCoastX(L, WORLD_W)); C.beginPath(); C.rect(a, -SHY - 8, Math.max(0, b - a), bh + 16); C.clip(); }   // (STORY: the land behind ends with the world, where this layer sees its ends - past them is the open ocean)
     const t = GLR.on ? glTint(im, (desert ? 'landD' : 'land') + L.q, fx.map(v => v * (1 - Lh)), hz.map(v => v * Lh / 255), false) : im;
     // (the trees sway with the wind, user Oct 25: each tile leans a little about its foot, a slow gusting rock;
     // the far ones less, the mountains not at all)
@@ -48509,7 +48613,8 @@ function drawLandTrees(x0, x1) {
     for (let sx = 0; sx < im.width; sx += SL) {
       const wx = i * tileW + sx * k, ww = Math.min(SL, im.width - sx) * k;
       if (wx + ww < x0 - 40 || wx > x1 + 40) continue;
-      let cx = wx + ww / 2; if (cx < 0) cx = -cx; else if (cx > E2) cx = 2 * E2 - cx;
+      let cx = wx + ww / 2; if (ENDLESS && (cx < 0 || cx > E2)) continue;   // (STORY: past the world's ends is the open ocean - no trees mirrored there)
+      if (cx < 0) cx = -cx; else if (cx > E2) cx = 2 * E2 - cx;
       if (land.marked ? lookD(cx) || landTrop(cx) || (land.sea && land.sea[clamp(ltCol(cx), 0, land.cols - 1)]) || !onLand(cx) || (cx > LAYOUT_R && cx < LAYOUT_R + 300) : cx > LAYOUT_L - 30) continue;   // (and not over the TROPICAL: its jungle behind - land.bgT)   // (the forest's trees: where the ground looks the forest's - its own country, and any stretch marked FOREST)
       // (user Oct 27, 16:37, "for some reason you cut a chunk of these trees?" - the row used to be cropped lower and lower
       // toward the coast, slicing the tops off the crowns. Now the trees stand whole and the row ends at a gap between
@@ -49639,6 +49744,7 @@ function drawTropForestAt(x0, x1, isl) {
   const ga = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
   const m = F._m * TROP_M, W = F.width, H = F.height, sink = 0.4 * TROP_M, capM = TROP_FCAP * TROP_M, cw = Math.round(capM / m), PL = TROP_FPIECE * TROP_M;
   const c0 = Math.max(0, ltCol(x0) - 2), c1 = Math.min(land.cols - 1, ltCol(x1) + 2);
+  if (c1 < c0) { C.imageSmoothingEnabled = ga; return; }   // (a view past the world's end - STORY's open ocean: no land there)
   const look = Math.ceil((PL + capM + 12 * TROP_M) / LT_CELL) + 2;   // (a stretch's end this far past the view still shapes what's in it)
   const a0 = c0 - look, N = c1 - c0 + 1 + 2 * look, T = new Float64Array(N);
   for (let k = 0; k < N; k++) { const t = tropSandy(a0 + k, isl); T[k] = t == null ? NaN : t; }
@@ -50745,7 +50851,7 @@ function stepTank(t, dt) {
   const way = want ? Math.sign(want) : Math.sign(t.vx) || t.facing;
   if (t.vy === 0) t.vx = driveStep(t, dt, Math.abs(want), 0, way, tankMake(t, way));
   if (Math.abs(t.vx) > 0.5) {
-    const k = landSpanAt(t.x), nx = k < 0 ? clamp(t.x + t.vx * dt, TANK_X0, WORLD_W - TANK_X0) : landIn(t.x + t.vx * dt, k, TANK_W * 0.5, TANK_X0), G = tankGround(t, nx);   // (on a ship at sea it drives her deck - off her end, into the water)   // (it stops at its country's edge, by the harbour)
+    const k = landSpanAt(t.x), nx = k < 0 ? clamp(t.x + t.vx * dt, PLAY_L() + TANK_X0, PLAY_R() - TANK_X0) : landIn(t.x + t.vx * dt, k, TANK_W * 0.5, TANK_X0), G = tankGround(t, nx);   // (on a ship at sea it drives her deck - off her end, into the water)   // (it stops at its country's edge, by the harbour)
     const lead = t.vx > 0 ? G.front : G.back;
     if (lead < t.y - TANK_STEP - 1) {                           // a wall: it can't climb that - pushed on, it hops
       t.vx = 0; t.stuckT = (t.stuckT || 0) + dt;
@@ -50963,7 +51069,7 @@ function stepHeli(h, dt) {
     heliStep(h, dt, tvx, tvy, { v: 120 * AIR_SK.heli, tmax: heliLoad(h) ? 1.5 : 1.9, resp: 4, m: heliLoad(h) ? 1.8 : 1, lev: slope, levK: clamp(1 - Hg0 / 45, 0, 1), hg: Hg0 }); }
   if (heliLoad(h)) h.vx += h.rope.pull * dt;                     // (and its swing tugs)
   if (h.turn) { h.turn.t += dt; if (h.turn.t >= HELI_TURN_T) { h.facing = -h.turn.from; h.turn = null; } }
-  h.x = clamp(h.x + h.vx * dt, 30, WORLD_W - 30);
+  h.x = clamp(h.x + h.vx * dt, PLAY_L() + 30, PLAY_R() - 30);
   // (held at the door with a load and then let go of it, right there: in it goes - tester, Oct 28)
   const doorNow = h.doorT > time - 0.6 && !heliLoad(h) && Math.abs(h.x - landHomeX(h.id, 'heli')) < 120;
   if (!h.enter && !h.sea && (doorNow || (Math.abs(h.vx) > 20 && atHangarIn(h.id, h.x, h.vx, 'heli') && h.y > landTop(h.x) - 140 - (heliLoad(h) ? ROPE_L + 60 : 0)))) {   // (low - or, with something on its rope, as low as that lets it)
@@ -51299,7 +51405,7 @@ function landCollide(dt) {
       for (const [t, dir] of [[t0, -s], [t1, s]]) {
         const push = ox * 0.5 + 0.5, h = t.carry != null ? helis[t.carry] : null, R = h && h.rope;
         if (R && R.hold === t.id) { const e = R.n[ROPE_N]; e[0] += dir * push; e[2] = e[0] - dir * 30 * R.dt; }
-        else { const G = tankGround(t, t.x + dir * push); if (Math.min(G.back, G.front) >= t.y - TANK_STEP) t.x = clamp(t.x + dir * push, 40, WORLD_W - 40); if (t.vx * dir < 0) t.vx = 0; }
+        else { const G = tankGround(t, t.x + dir * push); if (Math.min(G.back, G.front) >= t.y - TANK_STEP) t.x = clamp(t.x + dir * push, PLAY_L() + 40, PLAY_R() - 40); if (t.vx * dir < 0) t.vx = 0; }
       }
     }
   }
@@ -52140,8 +52246,8 @@ function waterApply() {
   if (!WBASE) WBASE = new Float32Array(N).fill(WATER_Y);
   let flip = false;
   for (const R of WATER.rows) {
-    for (let i = Math.max(0, Math.floor(R.c0 * LT_CELL / DX)); i <= Math.min(N - 1, Math.ceil((R.c0 + R.n) * LT_CELL / DX)); i++) {
-      const x = i * DX, k = clamp(Math.floor(x / LT_CELL) - R.c0, 0, R.n - 1);
+    for (let i = Math.max(0, Math.floor(wCol(R.c0 * LT_CELL))); i <= Math.min(N - 1, Math.ceil(wCol((R.c0 + R.n) * LT_CELL))); i++) {
+      const x = WX0 + i * DX, k = clamp(Math.floor(x / LT_CELL) - R.c0, 0, R.n - 1);
       if (R.sea[k]) continue;
       const wet = R.g[k] - R.s[k] > 0.5;
       WBASE[i] = R.s[k];
@@ -52280,7 +52386,8 @@ function gndBuild() {
   GND.marks = M; GND.ver = ISL_VER;
 }
 const gndMarks = () => { gndBuild(); return GND.marks; };
-function gndTopAt(x) { gndBuild(); const f = clamp(x / LT_CELL, 0, GND.n - 1), c = Math.floor(f), u = f - c, a = GND.top[c], b = GND.top[Math.min(GND.n - 1, c + 1)]; if (a === Infinity || b === Infinity) return a === Infinity ? b : a; return a + (b - a) * u; }
+function gndTopAt(x) { if (pastEnds(x)) return Infinity; gndBuild();   // (past the world's ends in STORY: no ground - the base seabed, G_GAP_DY)
+  const f = clamp(x / LT_CELL, 0, GND.n - 1), c = Math.floor(f), u = f - c, a = GND.top[c], b = GND.top[Math.min(GND.n - 1, c + 1)]; if (a === Infinity || b === Infinity) return a === Infinity ? b : a; return a + (b - a) * u; }
 function gndSnap() { gndBuild(); return GND.top ? GND.top.slice() : null; }
 function gndChanged(was) {
   gndBuild(); const T = GND.top; if (!was || !T) return;
@@ -52680,7 +52787,7 @@ function storyCarBody(c, dt) {
   }
   if (deep) c.vx *= Math.exp(-dt * 4 * deep);                                                       // (the water holds her back)
   let nx = c.x + c.vx * dt;
-  if (nx < 20 || nx > WORLD_W - 20) { nx = clamp(nx, 20, WORLD_W - 20); c.vx = 0; }
+  if (nx < PLAY_L() + 20 || nx > PLAY_R() - 20) { nx = clamp(nx, PLAY_L() + 20, PLAY_R() - 20); c.vx = 0; }
   // her way: too steep ahead (a wall) and she stops
   let G1 = carGround(c, nx, am, hw, half);
   if (onGround && c.vx && (c.vx > 0 ? -G1.k : G1.k) > CAR_CLIMB) { c.vx = 0; nx = c.x; G1 = G0; }
@@ -60146,6 +60253,7 @@ async function start(data) {
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
   Object.assign(window.__game, { airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landUp: () => landEdited(), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x), buildTimes: () => BUILD_T.slice(), landHillsAt: x => landHillsAt(x), copyText: () => terrainCopyText(), terrainSel: s => { TERRAIN_ED.sel = s; terrainSyncSkin(); }, split: n => { ED_SPLIT.v = n; terrainSplit(); return TERRAIN_ED.sel; }, delSeg: () => { terrainDelSeg(); return TERRAIN_ED.sel; }, lakes: () => (land.lakes || []).map(L => [Math.round(L[0]), Math.round(L[1])]), krakenMoveTo: (x, y) => KR_SET[0] && krakenMoveTo(KR_SET[0].id, x, y), wreckMoveTo: (k, x, y) => wreckMoveTo(k, x, y), wrecks: () => pirateWrecks.map(w => ({ k: w.k, x: Math.round(w.x), y: w.y, by: Math.round(wreckBy(w)), flat: w.flat, chest: chestAt(w).map(Math.round) })),  krSeat: () => { const k = KRAKENS[0] || KR; return { x: Math.round(k.bx), y: Math.round(k.by), u: KR_SET[0] ? KR_SET[0].u : null }; }, landEvictNow: () => { if (!land.seen) return 0; land.seen.fill(-1e6); const n = land.chunks.filter(Boolean).length; landEvict(); return n - land.chunks.filter(Boolean).length; }, landCounts: () => ({ stones: (land.stones || []).length, props: (land.props || []).length, tufts: (land.tufts || []).length, boulders: (land.boulders || []).length, outcrops: (land.outcrops || []).length, cells: land.cell ? land.cell.length : 0 }), worldInfo: () => ({ W: WORLD_W, EXT_L, EXT_R, LAYOUT_L, LAYOUT_R, VIEW_W, BED_A, BED_B, cols: land.cols }), sandY: x => sandY(x), myTw: p => myTw(p), ownTowers: p => ownTowers(p), dockInfo: () => ({ owned: DOCKS_OWNED, docks: docks.map(d => ({ x: Math.round(d.quay), dir: d.dir, player: d.player, tw: towers.indexOf(d._tw) })), home: homeDock.map(d => ({ x: Math.round(d.quay), dir: d.dir, stand: !!d.stand, player: d.player })), towers: towers.map(t => ({ p: t.player, x: Math.round(t.x), hp: t.hp, edge: !!t.edge })), ships: ships.map(s => s.state), subs: subs.map(s => s.state), fleet: [0, 1].map(p => [fleet[p].ship, fleet[p].sub]) }) });
   Object.assign(window.__game, { ground: () => ({ gX: s => gX(s), gS: x => gS(x), sea: [LAYOUT_L, LAYOUT_R], seas: () => Array.from({ length: SEAS.n }, (_, i) => SEAS.plain(i)), seasTest: L => { SEAS_TEST = L; }, lands: () => Array.from({ length: LANDS.n }, (_, i) => LANDS.plain(i)), bed: [BED_A, BED_B], depth: x => groundDepthAt(x), sand: x => sandY(x), skin: x => groundSkinAt(x), hills: x => groundHillsAt(x), lsk: x => landSkinAt(x), flags: () => ({ marked: FLOOR_MARKED, hilly: FLOOR_HILLY, isles: land.isles, gm: GSH.marked }), dirty: () => [LAND_ED.dirty, FLOOR_ED.dirty] }), terrainRefresh: () => terrainRefresh() });   // (the one ground line - 50-land-zz-ground)
+  Object.assign(window.__game, { reach: () => ({ endless: ENDLESS, wx0: WX0, n: N, w: reachW(), sg: [SG.x0, SG.nx], stir: stirA.length, vis: [VIS_L, VIS_R] }) });   // (STORY's endless sea - 05-zzz-endless.js)
   Object.assign(window.__game, { camAt: (x, y, z) => { camOverride[0] = x == null ? null : [x, y]; if (z) setZoom(0, z); updateCamera(0, true); }, seaRows: () => Array.from({ length: SEAS.n }, (_, i) => [SEAS.c.lo[i], SEAS.c.hi[i], SEAS.c.bedA[i], SEAS.c.bedB[i], SEAS.c.trA[i], SEAS.c.trB[i]]), landRows: () => Array.from({ length: LANDS.n }, (_, i) => [LANDS.c.lo[i], LANDS.c.hi[i], landFace(i).dir]) });
   Object.assign(window.__game, { floor: () => ({ A: BED_A, B: BED_B, TR: [TR_A, TR_B], max: SEA_FLOOR_MAX, deepest: floorDeepest(), tab: !!floorTab }), floorProfile: x => floorProfile(x), floorEdited: () => floorEdited(), bedSmooth: x => bedSmooth(x), floorEdOn: () => floorEdOn(), floorED: () => FLOOR_ED, S: () => S, viewW: () => VIEW_W, editorTab: t => { const b = [...document.querySelectorAll('#skyEd button.tab')].find(q => q.textContent === t); if (b) b.click(); return !!b; }, editorOpen: () => { if (!NSKY.editor.TUNE.built) skyNewFrame(); if (NSKY.editor.TUNE.root.hidden) NSKY.editor.TUNE.openBtn.click(); },
     civHalfGap: c => [0, 1].map(i => { const h = c.hv && c.hv[i]; if (!h) return null; const kl = civHalfKeel(c, i, civArt(c), CIV[c.kind]), mx = h.x + kl.m * Math.cos(h.a), my = h.y + kl.m * Math.sin(h.a), ca = Math.cos(h.a), sa = Math.sin(h.a), d = kl.pts.map(([lx, ly]) => civFloor(mx + lx * ca - ly * sa) - (my + lx * sa + ly * ca)); return { a: h.a, rest: !!h.rest, min: Math.min(...d), max: Math.max(...d) }; }),
