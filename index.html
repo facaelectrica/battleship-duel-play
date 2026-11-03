@@ -4275,8 +4275,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 733;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 03 13:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 734;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 03 13:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10936,6 +10936,7 @@ function stepPlanes(dt) {
       continue;
     }
     if (pl.state === 'hangar') continue;
+    if (i >= 2 && pl.placed != null && pl.state === 'fly') continue;   // (a placed one nobody flies waits where it was put - 50-zz-placed.js)
     pl.bk = Math.max(0, pl.bk - dt); pl.rk = Math.max(0, (pl.rk || 0) - dt);
     if (pl.state === 'down') { stepPlaneDown(pl, dt); continue; }
     if (pl.ground) { stepPlaneGround(pl, dt); continue; }        // (LAND TEST: taking off or landed, on the runway)
@@ -50629,7 +50630,11 @@ const landWait = [{ tank: 0, heli: 0 }, { tank: 0, heli: 0 }];
 // side's time till the next can come. Their own random source: landUnitR (the tanks' and helicopters' own steps)
 const landUnitR = sysRng('landUnits'), luRnd = (a, b) => a + (b - a) * landUnitR();
 const landMake = d => d.kind === 'heli' ? makeHeli(d.id || 0, d.x || 0) : makeTank(d.id || 0, d.x || 0);
-const landSides = L => ({ make: landMake, netIds: ['carry'], add: v => { L[v.id ? 1 : 0] = v; }, after: arr => { L[0] = L[1] = null; for (const v of arr) L[v.id ? 1 : 0] = v; } });
+// (a placed one - the editor's, 50-zz-placed.js ARMY_PLACE - beyond the two sides' places)
+const landSides = L => ({ make: landMake, netIds: ['carry'], add: v => { if (v.placed != null) L.push(v); else L[v.id ? 1 : 0] = v; },
+  remove: v => { const i = L.indexOf(v); if (i >= 2) L.splice(i, 1); else if (i >= 0) L[i] = null; },
+  after: arr => { L.length = 2; L[0] = L[1] = null; for (const v of arr) { if (v.placed != null) L.push(v); else L[v.id ? 1 : 0] = v; } } });
+const landN = () => Math.max(tanks.length, helis.length);   // (the sides' two and any placed ones)
 defTable('tanks', () => tanks.filter(Boolean), landSides(tanks));
 defTable('helis', () => helis.filter(Boolean), landSides(helis));
 defTable('oldLand', () => oldLand, { make: landMake, netIds: ['carry'] });
@@ -50743,6 +50748,7 @@ function buildLandUnits() {
 // (a new round on the Open World's map - BATTLE's too: no wrecks, nothing falling, no tank or helicopter)
 function landListsReset() {
   landWrecks.length = 0; crashes.length = 0; looseStones.length = 0; landWake.length = 0; oldLand.length = 0;   // (a new round: no wrecks, nothing falling - 50-land-rest)
+  tanks.length = helis.length = 2;                       // (the placed ones are made again with the world - placedBuild)
   for (let p = 0; p < 2; p++) {
     tanks[p] = null; helis[p] = null;                    // (none yet: each comes in from your end of the world when you take it)
     landWait[p].tank = landWait[p].heli = 0;
@@ -51402,12 +51408,12 @@ function landCollide(dt) {
 function stepLandUnits(dt) {
   stepLooseRopes(dt);
   landCollide(dt);
-  for (let p = 0; p < 2; p++) {
+  for (let p = 0; p < landN(); p++) {
     const t = tanks[p], h = helis[p];
-    if (t) stepTank(t, dt);
-    if (h) { stepHeli(h, dt); stepRope(h, dt); }
+    if (t && !(armyWaits(t, p) && t.state === 'alive')) stepTank(t, dt);   // (a placed one waits - 50-zz-placed.js)
+    if (h && !(armyWaits(h, p) && (h.state === 'fly' || h.state === 'landed'))) { stepHeli(h, dt); stepRope(h, dt); }
     // (a lost one: a few seconds before the next can come in)
-    for (const k of ['tank', 'heli']) if (landWait[p][k] > 0) landWait[p][k] -= dt;
+    if (p < 2) for (const k of ['tank', 'heli']) if (landWait[p][k] > 0) landWait[p][k] -= dt;
   }
   for (let i = oldLand.length - 1; i >= 0; i--) { const v = oldLand[i]; if (v.kind === 'heli') stepHeli(v, dt); else stepTank(v, dt); if (!landGoing(v)) oldLand.splice(i, 1); }   // (the lost ones still going down)
   // tanks don't drive through each other: they push apart
@@ -51469,7 +51475,7 @@ function planeGroundCrash(pl, x, y, deck, quiet) {
   }
   gridExplosion(x, fy, 80, 420);
   // hurt what's close (not the plane's own side)
-  for (let p = 0; p < 2; p++) {
+  for (let p = 0; p < landN(); p++) {
     const t = tanks[p], h = helis[p];
     if (t && t.state === 'alive' && Math.abs(t.x - x) < 50) tankHurt(t, 1, x, fy);
     if (h && (h.state === 'fly' || h.state === 'landed') && Math.hypot(h.x - x, h.y - fy) < 50) heliHurt(h, 1, x, fy);
@@ -51490,7 +51496,7 @@ const LAND_BLAST = { tank: [45, 44], rocket: [12, 22], bomb: [20, 34], ship: [14
 on('hit', e => { if (e.kind === 'land') e.took = e.bullet ? landBulletHit(e.o) : landShellHit(e.o); }, 'land');
 // a shell, missile or bomb this frame: a tank or helicopter in its way, or the ground. True: it's gone off
 function landShellHit(s) {
-  for (let p = 0; p < 2; p++) {
+  for (let p = 0; p < landN(); p++) {
     const t = tanks[p], h = helis[p];
     let q;
     if (t && mayHit(s, t) && t.state === 'alive' && sweepReach(s, t.x, t.y, tankReach()) && (q = sweepHit(s, (x, y) => tankHit(t, x, y)))) { s.x = q[0]; s.y = q[1]; landBlast(s, s.x, s.y, t); return true; }
@@ -51513,7 +51519,7 @@ function landBlast(s, x, y, hitV) {
     if (gy - y < crater + 10) spikeBurst(x, Math.min(y, gy), s.from === 'bomb' ? 1.3 : s.from === 'tank' ? 1 : 0.55, groundAt(x, Math.min(y, gy)));
     kickLandDust(x, y, 18);
   }
-  for (let p = 0; p < 2; p++) {
+  for (let p = 0; p < landN(); p++) {
     const t = tanks[p], h = helis[p];
     if (t && t.state === 'alive') { const d = Math.hypot(t.x - x, t.y - 10 - y); if (t === hitV) tankHurt(t, dmg, x, y); else if (d < reach + TANK_L * 0.3 && mayHit(s, t)) tankHurt(t, 0.25, x, y); }
     if (h && (h.state === 'fly' || h.state === 'landed')) { const d = Math.hypot(h.x - x, h.y - y); if (h === hitV) heliHurt(h, VTUNE.heli.hp, x, y); else if (d < reach + 20 && mayHit(s, h)) heliHurt(h, 1, x, y); }
@@ -51740,7 +51746,7 @@ function drawSpikeBursts(x0, x1) {
 // a machine-gun round: a tank or helicopter (a scratch each), or the ground (a puff of dust). True: it's spent
 function landBulletHit(b) {
   if (ropeBulletHit(b)) return true;
-  for (let p = 0; p < 2; p++) {
+  for (let p = 0; p < landN(); p++) {
     const t = tanks[p], h = helis[p];
     let q;
     if (t && mayHit(b, t) && t.state === 'alive' && sweepReach(b, t.x, t.y, tankReach()) && (q = sweepHit(b, (x, y) => tankHit(t, x, y)))) { tankHurt(t, VTUNE.tank.hp / (VTUNE.plane.hits * 6 * 4), q[0], q[1]); spawnSparks(q[0], q[1], 3, 120); return true; }
@@ -51785,7 +51791,7 @@ function kickLandDust(x, y, n) {
 // a plane on land: it crashes into the ground (and onto a tank or helicopter it hits)
 function landPlaneCrash(pl, pts) {
   for (const [x, y] of pts) {
-    for (let p = 0; p < 2; p++) {
+    for (let p = 0; p < landN(); p++) {
       if (tanks[p] && tanks[p].state === 'alive' && tankHit(tanks[p], x, y)) { tankHitBlast(tanks[p], 1); tankHurt(tanks[p], 2, x, y); return [x, y]; }
       const h = helis[p];
       if (h && (h.state === 'fly' || h.state === 'landed') && heliHit(h, x, y)) { if (!netGuestHold()) { h.hp = 0; noteHit(h.id, 'heli'); blowHeli(h); } return [x, y]; }
@@ -51951,7 +51957,7 @@ function drawLandUnits(x0, x1) {
   }
   drawLooseRopes();
   for (const v of oldLand) { if (v.kind === 'heli') drawLandHeli(v); else drawLandTank(v, false); }
-  for (let p = 0; p < 2; p++) {
+  for (let p = 0; p < landN(); p++) {
     const t = tanks[p], h = helis[p];
     if (t && (t.state === 'alive' || t.state === 'sink')) { drawLandTank(t, false); if (t.state === 'alive') tankLights(t); }
     if (h && h.rope) drawHeliRope(h);
@@ -55265,7 +55271,7 @@ NSKY.editor.TUNE.pane('BATTLE ZOOM LEVELS', (pane, el) => {
 const VE = { sel: null, more: [], drag: null, pane: null, ui: {} };   // (more: picked with shift too - user Nov 1)
 // every vehicle in the world: { v, k: what it is, fam: its page, own: player 0's (can be driven by switching) }
 function vehAll() {
-  const L = [], add = (v, k, fam, own, army = true) => { if (v) L.push({ v, k, fam, own: !!own, army }); };
+  const L = [], add = (v, k, fam, own, army = true) => { if (v) L.push({ v, k, fam, own: !!own && v.placed == null, army: army && v.placed == null }); };   // (a placed army vehicle: anyone's, as every placed one - 50-zz-placed.js ARMY_PLACE)
   ships.forEach((v, i) => { if (v.state === 'afloat') add(v, 'ship', 'BOATS', i === 0); });
   subs.forEach((v, i) => { if (v.state === 'out' || v.state === 'docked') add(v, 'sub', 'SUB', i === 0); });
   planes.forEach((v, i) => { if (v.state !== 'gone' && v.state !== 'wreck') add(v, 'plane', 'PLANES', i === 0); });
@@ -55275,13 +55281,13 @@ function vehAll() {
     helis.forEach((v, i) => { if (v && v.state !== 'gone' && v.state !== 'wreck') add(v, 'heli', 'HELIS', i === 0); });
     const fam = { air: 'PLANES', seaplane: 'PLANES', ship: 'BOATS', boat: 'BOATS', yacht: 'BOATS', sub: 'SUB', heli: 'HELIS', balloon: 'SPACE', blimp: 'SPACE', shuttle: 'SPACE', orb: 'SPACE', crane: 'STRUCT' };
     // (STORY: every story vehicle - yours, for sale - and every placed one, not only yours as its person button lists them)
-    for (const [c, v] of STORY ? [...new Set([...storyVehs(), ...placedRows()])].map(v => [civClass(v), v]) : civList()) add(v, c === 'air' ? 'air' : c, fam[c] || 'BOATS', false, false);
+    for (const [c, v] of STORY ? [...new Set([...storyVehs(), ...placedRows().filter(q => !planes.includes(q))])].map(v => [civClass(v), v]) : civList()) add(v, c === 'air' ? 'air' : c, fam[c] || 'BOATS', false, false);
   }
   return L;
 }
 const vehPos = e => e.k === 'tower' ? [e.v.x, twBase(e.v) - 60] : e.k === 'crane' ? [e.v.tx != null ? e.v.tx : e.v.x, e.v.top != null ? e.v.top + 40 : DECK_Y - 60] : [e.v.x, e.v.y != null ? e.v.y : WATER_Y];
 const VEH_ARMY = { ship: 'BATTLESHIP', sub: 'SUB', plane: 'WARPLANE', tower: 'TOWER', tank: 'TANK', heli: 'ARMY HELI' };
-const vehName = e => (e.army ? VEH_ARMY[e.k] : e.k === 'air' ? 'PLANE' : String(e.k).toUpperCase()) + (e.v.kind && e.v.kind !== e.k ? ' ' + String(e.v.kind).toUpperCase() : '') + (e.own || (e.v.story && e.v.own === true) ? ' (YOURS)' : '');
+const vehName = e => e.v.placed != null && STR_VEHS[e.v.sv] ? STR_VEHS[e.v.sv].lab : (e.army ? VEH_ARMY[e.k] : e.k === 'air' ? 'PLANE' : String(e.k).toUpperCase()) + (e.v.kind && e.v.kind !== e.k ? ' ' + String(e.v.kind).toUpperCase() : '') + (e.own || (e.v.story && e.v.own === true) ? ' (YOURS)' : '');
 // (user Nov 1 21:11-21:20: "The car selection box is GIGANTIC, I cant select anything else around it"; "The box size should always
 // match the vehicle size") each vehicle's own outline in the world, [x0, x1, y0, y1]: from its family's own size (its picture at
 // its scale), anchored as it's drawn. The pick and the white brackets are that box; the smallest box under the press wins
@@ -55291,9 +55297,10 @@ function vehBox(e) {
   try {
     if (e.k === 'tower') { const B = twOutline(x, twBase(v), v.facing, lhOn(v), v); return [B.x0, B.x1, B.top, B.foot]; }   // (its drawing, as its structure's - 50-zz-struct.js)
     if (e.k === 'crane') { const [cx, cy] = vehPos(e); return [cx - SHIP_L * 0.12, cx + SHIP_L * 0.12, cy - 60, cy + 200]; }
-    if (e.army) { const L = SHIP_L * VEH_R[e.k] * (e.k === 'plane' ? wpSize(v) : 1); return e.k === 'ship' ? B(L, L * 0.6, L * 0.15) : e.k === 'sub' ? B(L, L * 0.12, L * 0.12) : B(L, L * 0.5, L * 0.3); }
+    if (e.k === 'plane') { const L = wpKind(v).len * UPM; return B(L * 0.55, L * 0.3, L * 0.25); }   // (a warplane by its own length - its kind's, 29-zzz-warplanes.js)
+    if (e.army || (v.placed != null && armyFamOf(v))) { const L = SHIP_L * VEH_R[e.k]; return e.k === 'ship' ? B(L, L * 0.6, L * 0.15) : e.k === 'sub' ? B(L, L * 0.12, L * 0.12) : B(L, L * 0.5, L * 0.3); }
     if (civShips.includes(v)) { const A = civArt(v), K = CIV[v.kind]; if (A && A.width) { const yw = civY(v); return [x - A.width * K.k / 2, x + A.width * K.k / 2, yw - K.wl * K.k, yw + (A.height - K.wl) * K.k]; } }
-    if (planes.includes(v) || oldPlanes.includes(v)) { const L = SHIP_L * VEH_R.plane * wpSize(v); return B(L, L * 0.5, L * 0.3); }   // (an army plane by its kind's size: bySize)
+    if (planes.includes(v) || oldPlanes.includes(v)) { const L = wpKind(v).len * UPM; return B(L * 0.55, L * 0.3, L * 0.25); }   // (an army plane by its kind's size: bySize)
     if (traffic.includes(v)) { const T = TRAFFIC[v.kind]; return B(T.hit[0], T.hit[1] * 2, T.hit[1] * 0.3); }
     if (seaplanes.includes(v)) { const T = TRAFFIC.cessna; return B(T.hit[0], T.hit[1] * 2, T.hit[1] * 0.6); }
     if (balloons.includes(v)) { const q = balloonBox(v), H = balSize(v).H * BAL_K; return [q.cx - q.hw, q.cx + q.hw, y - H, y]; }
@@ -55413,6 +55420,8 @@ function vehRing(P, bad = '') {
 // of its hangar or berth), any other civilian one boarded (the top bar's PLAY - 50-zzz-world-ed.js)
 function vehBoard(e) {
   const c = crew[0];
+  // (a placed army vehicle: it becomes player 0's - its side's own set aside - and is played from where it was put: armyTake, 50-zz-placed.js)
+  if (e.v.placed != null && armyFamOf(e.v)) { const k = armyTake(e.v); if (c.mode !== k) switchTo(0, k); cutTo(0); return; }
   if (e.army) {
     if (e.k === 'tower' && c.mode === 'tower' && myTw(0) !== e.v) { myTw(0).inUse = false; manTw[0] = e.v; }
     else if (e.k === 'tower') manTw[0] = e.v;
@@ -55787,7 +55796,7 @@ function natureFill(box, el) {
    50-land-balloons.js, 50-land-blimp.js, 50-land-space.js; the structures' families wait already: `story`), and boarded it starts
    still (boardCiv). Made by its family's own maker; nobody's (own false), never for sale, nothing in its place when lost. Drivable
    (DRIVE, the top bar's PLAY - 50-zzz-world-ed.js vehMine). Offline only (online both screens build the default worlds).
-   Not loose: a rocket stands on its LAUNCH PAD (spawn the structure), the armies' vehicles start at their teams' hangars.
+   Not loose: a rocket stands on its LAUNCH PAD (spawn the structure). The armies' vehicles are placed loose too (Nov 3 - ARMY_PLACE).
    ================================================================ */
 let PLACED = [];                                          // ({ id, sv: its type - PLACE_TYPES, x, y, dir })
 worldLoad(() => { PLACED = []; try { const L = JSON.parse(localStorage.getItem('bd_placed') || 'null'); if (Array.isArray(L)) PLACED = L.filter(r => r && typeof r.sv === 'string' && Number.isFinite(r.x) && Number.isFinite(r.id)); } catch (e) { } });
@@ -55806,8 +55815,36 @@ function placedStrVeh(r, D) {
   if (D.fam === 'boat') return [['jetboats', Object.assign(newJetboat(r.x - 100, r.x + 100, D.col, D.kind), base, { x: r.x, dir })]];
   if (D.fam === 'car') return [['storyCars', storyCarMade(Object.assign(base, { art: D.art, rt: null, x: r.x, dir }))]];
   if (D.fam === 'heli') { const h = newCivHeli(D.ch, r.x, landOwnD(r.x), 0), gy = landTop(r.x) - chStand(h), air = placedAir(r, gy); return [['civHelis', Object.assign(h, base, { heli: true, role: null, hp: 2, home: r.x, wait: 1e12, facing: dir, y: air ? r.y : gy }, air ? { state: 'fly', spin: 1, gear: 0 } : {})]]; }
+  if (ARMY_PLACE[D.fam]) { const A = ARMY_PLACE[D.fam], t = r.own === 1 || r.own === '1' ? 1 : 0, v = A.make(t, r, dir); Object.assign(v, placedBase(r), { sv: r.sv, fac: t }); return [[A.t, v]]; }   // (an army's vehicle - below)
   if (D.fam === 'sub') { const s = newMinisub({ x: r.x, face: dir }); return [['minisubs', Object.assign(s, base, { ship: null, state: 'out', y: placedY(r, surfaceY(r.x) - 1), splashed: true, armed: true, ai: null, sub: true, hp: 2 })]]; }
   return null;
+}
+/* (user Nov 3 12:03-12:17: "In Editor, I should be able to place ANY VEHICLES anywhere in the world I want. There is no 'in hangar'
+   concept"; "Shouldn't this be a universal rule?") ONE RULE for the armies' vehicles - the warplanes, the battleship, the attack sub,
+   the army helicopter, the tank: a placed one is a row of its family's table beyond the two sides' own (as STORY's raiders were),
+   made by its family's own maker where it was put - in the air high over its ground (what flies), at sea (what floats), on the
+   ground - and waiting there till it's played (armyWaits: its family's step leaves it be). PLAY from it: it becomes player 0's
+   (armyTake - in its side's place, the one there set aside) */
+const ARMY_PLACE = {
+  warplane: { t: 'planes', L: () => planes, mode: 'plane', make: (t, r, dir) => {
+    const pl = Object.assign(makePlane(t), { kind: r.sv }), gy = planeGroundY(r.x), air = gy == null || placedAir(r, gy), v = FLIGHT[wpKind(pl).flight].vc() * UPM;
+    return Object.assign(pl, { state: 'fly', x: r.x, facing: dir, pitch: 0, gam: 0, aoa: 0, turn: null, roll: null, auto: null, flare: 0 },
+      air ? { y: Number.isFinite(r.y) ? r.y : (gy ?? WATER_Y) - 400, spd: v, vx: dir * v, vy: 0, gear: 0, ground: null } : { y: gy, spd: 0, vx: 0, vy: 0, gear: 1, ground: 'taxi', gWant: 0, rot: 0 });
+  } },
+  warship: { t: 'ships', L: () => ships, mode: 'ship', make: (t, r, dir) => makeShip(t, r.x, dir, homeDock[t] || homeDock[0]) },
+  warsub: { t: 'subs', L: () => subs, mode: 'sub', make: (t, r, dir) => { const y = placedY(r, surfaceY(r.x) + 4); return Object.assign(makeSub(t, homeDock[t] || homeDock[0]), { state: 'out', x: r.x, y, depthT: y, facing: dir, away: true }); } },
+  tank: { t: 'tanks', L: () => tanks, mode: 'tank', make: (t, r, dir) => Object.assign(makeTank(t, r.x), { facing: dir }) },
+  warheli: { t: 'helis', L: () => helis, mode: 'heli', make: (t, r, dir) => { const h = Object.assign(makeHeli(t, r.x), { facing: dir }); if (placedAir(r, h.y)) Object.assign(h, { state: 'fly', y: r.y, rotor: 1 }); return h; } },
+};
+const armyFamOf = v => { for (const f in ARMY_PLACE) if (ARMY_PLACE[f].L().includes(v)) return f; return null; };
+// (its family's step: a placed one beyond the sides' own, nobody aboard, waits where it was put)
+const armyWaits = (v, i) => i >= 2 && v && v.placed != null;
+// played: in player 0's place in its family's list (the one there set aside), player 0's side
+function armyTake(v) {
+  const f = armyFamOf(v); if (!f) return null;
+  const L = ARMY_PLACE[f].L(), j = L.indexOf(v), o = L[0];
+  if (j > 0) { L[0] = v; L.splice(j, 1); if (L.length < 2) L.length = 2; v.id = 0; v.fac = o ? o.fac : 0; delete v.placed; }
+  return ARMY_PLACE[f].mode;
 }
 const PLACE_TYPES = {};
 (() => {
@@ -55838,7 +55875,8 @@ const PLACE_TYPES = {};
   T('orb:iss', 'SPACE STATION', r => [['orbiters', Object.assign({ kind: 'iss', owner: -1, x: r.x, y: ISS_Y, vx: 0, face: 1, state: 'orbit', hp: 8, ph: 1 }, placedBase(r))]]);
 })();
 // what SPAWN lists: the structures' types first (STR_VEHS, not the armies'), then the rest
-const placedTypes = () => [...Object.keys(STR_VEHS).filter(sv => ['boat', 'car', 'heli', 'sub'].includes(STR_VEHS[sv].fam)), ...Object.keys(PLACE_TYPES)];
+const PLACED_FAMS = ['boat', 'car', 'heli', 'sub', ...Object.keys(ARMY_PLACE)];   // (the structures' types placed loose - the warplanes too, user Nov 3 12:03)
+const placedTypes = () => [...Object.keys(STR_VEHS).filter(sv => PLACED_FAMS.includes(STR_VEHS[sv].fam)), ...Object.keys(PLACE_TYPES)];
 const placedLab = sv => STR_VEHS[sv] ? STR_VEHS[sv].lab : PLACE_TYPES[sv] ? PLACE_TYPES[sv].lab : sv;
 function placedNew(r) {
   let rows = null;
@@ -55857,7 +55895,7 @@ function placedBuild() {
   for (const r of PLACED) { if (r.off && !(typeof EDMODE !== 'undefined' && EDMODE.on)) continue; const rows = placedNew(r) || []; if (r.off && rows[0] && Number.isFinite(r.y)) { rows[0][1].y = r.y; rows[0][1]._off = true; } for (const [t, o] of rows) if (TABLES[t]) TABLES[t].list().push(o); }
 }
 // every placed one in the world (the editor lists them in STORY too, where the person button lists only yours)
-const PLACED_TABLES = ['jetboats', 'storyCars', 'civHelis', 'minisubs', 'civShips', 'sailboats', 'traffic', 'seaplanes', 'balloons', 'blimps', 'orbiters'];
+const PLACED_TABLES = ['jetboats', 'storyCars', 'civHelis', 'minisubs', 'civShips', 'sailboats', 'traffic', 'seaplanes', 'balloons', 'blimps', 'orbiters', 'planes', 'ships', 'subs', 'tanks', 'helis'];
 function placedRows() { const L = []; for (const t of PLACED_TABLES) { const T = TABLES[t]; if (T) for (const o of T.list()) if (o.placed != null && o.state !== 'gone') L.push(o); } return L; }
 // ---- the editor's side
 const placedRec = v => v && v.placed != null ? PLACED.find(r => r.id === v.placed) || null : null;
@@ -57581,7 +57619,10 @@ function strPick(X, Y, r) {
 // ---- the pointer over the world while the tab is open (before the game's own, as the vehicles' tab)
 window.addEventListener('pointerdown', ev => {
   if ((ev.pointerType === 'mouse' && ev.button !== 0) || !strTabOpen() || onEdUI(ev)) return;
-  const [X, Y, r] = vehWorld(ev), o = strPick(X, Y, r);
+  const [X, Y, r] = vehWorld(ev);
+  // (a spot's vehicle drawn over its structure: picked, never dragged - it's part of the structure; 50-zzzz-spots.js)
+  { const b = spotAt(X, Y, r * 0.5); if (b) { SP.sel = { s: b.s, i: b.i }; SE.sel = []; strSync(); ev.stopImmediatePropagation(); ev.preventDefault(); edClaim('spot'); return; } }
+  const o = strPick(X, Y, r);
   if (!o) { if (!ev.shiftKey) { SE.sel = []; strSync(); } return; }
   if (ev.shiftKey) { SE.sel = SE.sel.includes(o.id) ? SE.sel.filter(i => i !== o.id) : SE.sel.concat(o.id); strSync(); }
   else if (!SE.sel.includes(o.id)) { SE.sel = [o.id]; strSync(); }
@@ -57616,6 +57657,7 @@ function strPlaceBad(o) {
   return '';
 }
 function strEdDraw() {
+  SP.boxes[viewIdx] = [];                                 // (the spots drawn this frame, for the press - 50-zzzz-spots.js)
   if (!strTabOpen() || !STRS.length) return;
   const q = Math.max(1, Math.round(2 * dpr / PIXW)), x0 = CAMPX / SV, x1 = x0 + VWW;
   for (const o of STRS) {
@@ -57628,9 +57670,8 @@ function strEdDraw() {
     C.fillRect(X0, Y0, X1 - X0, w); C.fillRect(X0, Y1 - w, X1 - X0, w); C.fillRect(X0, Y0, w, Y1 - Y0); C.fillRect(X1 - w, Y0, w, Y1 - Y0);
     drawText(C, strName(o), (X0 + X1) / 2, (Y0 + Y1) / 2 - 3 * q, c, q, 'center');
     if (bad) drawText(C, bad, (X0 + X1) / 2, (Y0 + Y1) / 2 + 6 * q, [255, 120, 110], q, 'center');
-    // (Nov 1, step 6: what starts here - its spots' vehicles, under its name)
-    const V = strVehs(o).filter(e => e && STR_VEHS[e.v]).map(e => STR_VEHS[e.v].lab);
-    if (V.length) drawText(C, V.join(' - '), (X0 + X1) / 2, Y0 - 9 * q, c, q, 'center');
+    // (user Nov 3 12:03: what it spawns shown above it - each spot's vehicle, SPOT n by it, not its names in text - 50-zzzz-spots.js)
+    spotsEdDraw(o, X0, X1, Y0, q);
   }
 }
 /* ---- THE ARMIES' HANGARS (user Nov 1 13:10: "For a plane to exist, it must have an hangar"; structures-everywhere-plan-nov1.md
@@ -57699,7 +57740,7 @@ function strFill() {
   strWorldCheck(U); pfAttachAll();
   const P = SE.sel.map(strById).filter(Boolean), o = P.length === 1 ? P[0] : null, el = U.el;
   U.box.textContent = '';
-  if (!o) return;
+  if (!o) { if (SP.sel) spotFill(U); return; }   // (a spot picked over the world: its own panel - 50-zzzz-spots.js)
   // (user Nov 1 21:57: "I never edit anything in the world apart from very specific properties") this copy's own: its prefab (what
   // it is - the PREFABS tab), where it stands and which way, its owner, HOME BASE / SAVE POINT, its length, what starts at each spot
   const c = el('div', 'cat'); c.appendChild(el('h4', '', 'PROPERTIES'));
@@ -57728,46 +57769,9 @@ function strFill() {
   }
   U.box.appendChild(c);
   U.box.appendChild(cargoBox(el, U.selCss, k => cargoN(o, k), (k, n) => { cargoPut(o, k, n); strSave(); }));   // (what it holds - 50-zz-cargo.js)
-  // what starts at each spot (what's allowed there: its prefab's VALID VEHICLES, SIZE, MAX SIZE, RESTRICT)
-  const takes = strTakes(o) || [];
-  if (!takes.length) return;
-  const v = el('div', 'cat'); v.appendChild(el('h4', '', 'SPOTS'));
-    const L = strVehs(o), n = strSpots(o);
-    for (let i = 0; i < n; i++) {
-      const e = L[i] || null, r = el('div', 'row'), s = el('select'); s.style.cssText = U.selCss;
-      const add = (val, lab) => { const op = document.createElement('option'); op.value = val; op.textContent = lab; s.appendChild(op); };
-      add('', 'EMPTY'); for (const k in STR_VEHS) if (takes.includes(STR_VEHS[k].fam) && strAllows(o, k) && strFits(o, k)) add(k, STR_VEHS[k].lab + (STR_VEHS[k].army ? '' : '  ' + storyTypePrice(k) + 'C'));   // (its price: the VEHICLES tab's - 50-story.js)
-      s.value = e ? e.v : '';
-      const own = NSKY.editor.TUNE.toggle(e && e.own ? 1 : 0); own.title = 'OWNED: the player\'s at the start (else for sale)';
-      const save = () => { const M = strVehs(o).slice(); while (M.length < n) M.push(null); M[i] = s.value ? { v: s.value, own: !!+own.value, rt: e && e.rt } : null; o.veh = M; strSave(); };
-      s.onchange = save; own.addEventListener('input', save);
-      const ol = el('span', '', 'OWNED'); ol.style.cssText = 'font-size:10px;color:#8fa0bf';
-      r.append(el('label', '', 'SPOT ' + (i + 1)), s, ol, own); v.appendChild(r);
-      // (user Oct 31 22:48: a vehicle leaves its structure only for a reason - ROLE: RESCUE, the helicopter that answers an
-      // emergency at sea and flies back to its pad; the world's, never for sale - 50-story.js storySOS)
-      if (e && STR_VEHS[e.v] && STR_VEHS[e.v].fam === 'heli') {
-        const rr = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss;
-        for (const [val, lab] of [['', 'NONE'], ['rescue', 'RESCUE (EMERGENCIES ONLY)']]) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); }
-        q.value = e.role || '';
-        q.onchange = () => { const M = strVehs(o).slice(); const E2 = Object.assign({}, M[i]); if (q.value) { E2.role = q.value; E2.own = false; } else delete E2.role; M[i] = E2; o.veh = M; strSave(); strSync(); };
-        rr.append(el('label', '', 'ROLE'), q); v.appendChild(rr);
-      }
-      // (the spec section 4: "Assign each vehicle an activity for each of four daily periods" - not yours: its routine)
-      if (e && !e.own && !e.role && STR_VEHS[e.v] && STR_VEHS[e.v].fam !== 'plane') {
-        const rr = el('div', 'row'); rr.append(el('label', '', 'ROUTINE'));
-        const fam = STR_VEHS[e.v].fam, others = STRS.filter(q => q !== o && (strTakes(q) || []).includes(fam));
-        ['MORNING', 'MIDDAY', 'EVENING', 'NIGHT'].forEach((pl, k) => {
-          const q = el('select'); q.style.cssText = U.selCss + ';max-width:96px'; q.title = pl;
-          const op = (val, lab) => { const z = document.createElement('option'); z.value = val; z.textContent = pl.slice(0, 3) + ': ' + lab; q.appendChild(z); };
-          op('stay', 'STAY'); if (fam === 'boat') op('fish', 'FISH'); for (const t of others) op('s:' + t.id, strName(t));
-          q.value = (e.rt && e.rt[k]) || 'stay';
-          q.onchange = () => { const M = strVehs(o).slice(); const E2 = Object.assign({}, M[i]); E2.rt = (E2.rt || ['stay', 'stay', 'stay', 'stay']).slice(); E2.rt[k] = q.value; M[i] = E2; o.veh = M; strSave(); };
-          rr.appendChild(q);
-        });
-        v.appendChild(rr);
-      }
-    }
-  U.box.appendChild(v);
+  // what starts at each spot (what's allowed there: its prefab's VALID VEHICLES, SIZE, MAX SIZE, RESTRICT): its SPOTS - ADD SPOT, REMOVE;
+  // each spot's own properties are the spot's, picked over the world (user Nov 3 12:03 - 50-zzzz-spots.js)
+  if ((strTakes(o) || []).length) spotsBox(o, U);
 }
 // (tools) where a world point is on the page, in CSS pixels - for tests that press and drag in the editor's view
 window.__ed = { strs: () => STRS, box: o => strBox(o), box0: o => strBox0(o), bad: o => strPlaceBad(o), used: () => strsUsed(), spawn: id => strSpawn(id), save: () => strSave(), snap: () => STR_SNAP, prefabs: () => pfAllS(), pick: ids => { SE.sel = ids; strSync(); return !!SE.pane; }, pane: () => SE.pane, toWorld: (cx, cy) => screenToWorld(cx, cy), toClient: (x, y) => { const a = screenToWorld(0, 0), b = screenToWorld(1000, 1000); return [(x - a[0]) * 1000 / (b[0] - a[0]), (y - a[1]) * 1000 / (b[1] - a[1])]; } };
@@ -58192,7 +58196,7 @@ const undoKept = () => { const o = {}; for (const k in UNDO_KEPT) { let v = null
 function edVehRebuild() {
   if (NET.role !== 'local' || typeof storyBoats !== 'function') return;
   const subs = new Set(); for (const c of civShips) if (c.placed != null && c.msub) subs.add(c.msub);
-  for (const t of PLACED_TABLES) { const T = TABLES[t]; if (!T) continue; const L = T.list(); for (let i = L.length - 1; i >= 0; i--) { const v = L[i]; if (v && (v.placed != null || subs.has(v) || (v.story && v.hb != null))) L.splice(i, 1); } }
+  for (const t of PLACED_TABLES) { const T = TABLES[t]; if (!T) continue; for (const v of T.list().slice()) if (v && (v.placed != null || subs.has(v) || (v.story && v.hb != null))) emit('tableRemove', { t, o: v }); }   // (each out by its table's owner - the tanks' and helicopters' lists are their sides' places)
   storyBoats(); placedBuild();
   if (VE.sel || VE.more.length) { VE.sel = null; VE.more = []; }
   vehSync();
@@ -58674,10 +58678,9 @@ function objCatOf(sv) {
   return k === 'ship' || k === 'yacht' ? 'boat' : k === 'plane' || k === 'seaplane' || k === 'balloon' || k === 'blimp' ? 'air' : k === 'orb' ? 'space' : null;
 }
 // (user Nov 2 13:56: "the submarine section is missing the war submarine. same with planes, why dont we have them all there?") every
-// vehicle type is listed: the placed ones (50-zz-placed.js) and the armies' (STR_VEHS army) - an army vehicle starts at a hangar
-// of its team's (armyHangar: OPEN WORLD and BATTLE), so SPAWN puts down that hangar with it at its spot (objSpawn)
-const OBJ_ARMY_HOME = { battleship: 'k:hangarSea:L', warsub: 'k:hangarSea:L', warplane: 'k:hangarAir:L', spitfire: 'k:hangarAir:L', warheli: 'k:hangarAir:L', tank: 'k:hangarAir:L' };   // (the LARGE ones: what the armies start at)
-const objList = c => OBJ_ONE[c] ? OBJ_ONE[c]() : c === 's' ? [...pfSorted().map(p => [p.id, p.name]), ...OBJ_WRECKS()] : [...placedTypes(), ...Object.keys(STR_VEHS).filter(sv => STR_VEHS[sv].army)].filter(sv => objCatOf(sv) === c).map(sv => [sv, placedLab(sv) + (STR_VEHS[sv] && STR_VEHS[sv].army ? ' (IN ITS HANGAR)' : '')]);
+// vehicle type is listed, each placed where SPAWN puts it - the armies' too (user Nov 3 12:03: "There is no 'in hangar' concept" -
+// 50-zz-placed.js ARMY_PLACE); one starting at a hangar is that hangar's SPOT (50-zzz-spots.js)
+const objList = c => OBJ_ONE[c] ? OBJ_ONE[c]() : c === 's' ? [...pfSorted().map(p => [p.id, p.name]), ...OBJ_WRECKS()] : placedTypes().filter(sv => objCatOf(sv) === c).map(sv => [sv, placedLab(sv)]);
 const objCur = c => { const L = objList(c); return L.some(q => q[0] === OBJ.pick[c]) ? OBJ.pick[c] : L[0] ? L[0][0] : null; };
 function objFill() {
   const U = OBJ.ui; if (!U) return;
@@ -58693,16 +58696,12 @@ const objMark = () => { const U = OBJ.ui; if (U) for (const [c] of OBJ_CATS) U.s
 function objSpawn() {
   const c = OBJ.cat, id = objCur(c); if (id == null) return;
   for (const k in WK) WK[k].clear();
-  const D = STR_VEHS[id];
   if (id === 'kraken') krakenSpawn();
   else if (id.startsWith('area:')) natureAdd(id.slice(5));
   else if (id.startsWith('wreck:')) wreckSpawn(+id.split(':')[1]);
   else if (id.startsWith('bgpic:')) bgSpawn(+id.split(':')[1]);
   else if (c === 's') strSpawn(id);
-  else if (D && D.army) {                                     // (its hangar, TEAM 1's, the vehicle at its first spot - OWNER changes the team)
-    const o = strSpawn(OBJ_ARMY_HOME[id] || 'k:hangarAir');
-    if (o) { o.own = 0; const M = strVehs(o).slice(); M[0] = { v: id, own: false }; o.veh = M; strSave(); }
-  } else vehSpawn({ sv: id });
+  else vehSpawn({ sv: id });
   strSync(); vehSync(); wedSync();
 }
 const seaNames = () => { const a = NE.sel != null && NATURE.find(q => q.id === NE.sel); return [...BGE.sel.filter(id => BGS.some(r => r.id === id)).map(() => 'BACKGROUND'), ...SEAPICK.krakens.filter(id => KRAKENS.some(k => k.rid === id)).map(id => 'KRAKEN ' + (KRAKENS.findIndex(k => k.rid === id) + 1)), ...SEAPICK.wrecks.filter(id => pirateWrecks.some(w => w.k === id)).map(id => 'PIRATE WRECK ' + (pirateWrecks.findIndex(w => w.k === id) + 1)), ...(a ? [NAT_KINDS[a.k].lab] : [])]; };
@@ -58724,7 +58723,7 @@ function objWreckFill(box, el, id) {
 }
 function objSelText() {
   const sea = seaNames(), n = SE.sel.length + (VE.sel ? 1 + VE.more.length : 0) + sea.length;
-  if (!n) return 'NONE';
+  if (!n) { const o = SP.sel && strById(SP.sel.s), e = o && strVehs(o)[SP.sel.i]; return e && STR_VEHS[e.v] ? 'SPOT ' + (SP.sel.i + 1) + ' - ' + STR_VEHS[e.v].lab : 'NONE'; }   // (a structure's spot - 50-zzzz-spots.js)
   if (n > 1) return n + ' PICKED';
   return SE.sel.length ? strName(strById(SE.sel[0])) : VE.sel ? vehName(VE.sel) : sea[0];
 }
@@ -59152,6 +59151,120 @@ document.addEventListener('click', e => {
   e.stopImmediatePropagation(); e.preventDefault();
   sceneAsk(() => { SASK.pass = true; try { b.click(); } finally { SASK.pass = false; } }, null, t === 'SNAPSHOT');
 }, true);
+
+/* ================================================================
+   A STRUCTURE'S SPOTS IN THE EDITOR (user Nov 3 12:03: "the UI for the spots is all wrong in format. It should have 'Add Spot' and a
+   dropdown of what we can add"; "instead of having text on the hangar, it shows the vehicles that will be spawned ABOVE that hangar
+   with the word SPOT 1 next to them. If I move the hangar, those planes move too as part of that group. They are selectable to see
+   their properties and that is where the Routine, owned, etc. appears in the Properties, never in the SPOTS for the Hangar. They
+   cant be moved in the view because they are 'part' of the Hangar"; "This would be universal for all hangars").
+   One rule for every structure with spots (its prefab's VALID VEHICLES - strTakes; docks, hangars, helipads, showrooms...):
+   - its panel's SPOTS: a line per spot (SPOT n, its type, REMOVE) and ADD SPOT with a dropdown of what may go there (VALID VEHICLES,
+     RESTRICT, SIZE / MAX SIZE - strAllows, strFits), as many as it has room for (strSpots);
+   - over the world: each spot's vehicle drawn small over the structure, SPOT n by it - drawn from the structure, so it moves with it;
+     pressed, it's picked (SP.sel: { s: structure id, i: spot }), never dragged; its panel is the spot's own: TYPE, OWNED, ROLE,
+     ROUTINE, CARGO - and DELETE (WK.spot) empties the spot.
+   ================================================================ */
+const SP = { sel: null, boxes: [[], []] };
+const SPOT_PIC = new Map();
+// a type's picture, as its LOOK shows it (50-zz-prefab-look.js vehLookPic), made once
+function spotPic(sv) {
+  if (SPOT_PIC.has(sv)) return SPOT_PIC.get(sv);
+  let c = null;
+  try {
+    const L = vehLookPic(sv);
+    if (L && L.P) { const w = L.w || L.P.width, h = L.h || L.P.height; c = makeCanvas(w, h); L.draw(c.getContext('2d')); }
+  } catch (e) { c = null; }
+  if (c) SPOT_PIC.set(sv, c);                               // (not kept while its art isn't loaded yet: asked again)
+  return c;
+}
+// the filled spots of a structure: [{ i, e }]
+const spotList = o => strVehs(o).map((e, i) => ({ i, e })).filter(q => q.e && STR_VEHS[q.e.v]);
+// drawn over the world, above its structure's frame (X0..X1 its frame across, Y0 its top, screen pixels; q the text's pixel size)
+function spotsEdDraw(o, X0, X1, Y0, q) {
+  const L = spotList(o); if (!L.length) return;
+  const H = 16 * q, cells = L.map(({ i, e }) => {
+    const P = spotPic(e.v), w = P ? Math.max(4, Math.round(P.width * H / P.height)) : H, lab = 'SPOT ' + (i + 1);
+    const cw = Math.max(Math.min(w, 70 * q), textWidth(lab) * q);
+    return { i, P, w: Math.min(w, 70 * q), h: P ? Math.round(Math.min(H, P.height * 70 * q / P.width)) : H, lab, cw };
+  });
+  const gap = 6 * q, tot = cells.reduce((a, c) => a + c.cw, 0) + gap * (cells.length - 1);
+  let x = Math.round((X0 + X1) / 2 - tot / 2);
+  const yb = Y0 - 4 * q, B = SP.boxes[viewIdx] || (SP.boxes[viewIdx] = []);
+  for (const c of cells) {
+    const on = SP.sel && SP.sel.s === o.id && SP.sel.i === c.i, cx = x + c.cw / 2, ix = Math.round(cx - c.w / 2), iy = yb - c.h;
+    if (c.P) C.drawImage(c.P, ix, iy, c.w, c.h);
+    else { C.fillStyle = 'rgba(200,210,230,0.5)'; C.fillRect(ix, iy, c.w, c.h); }
+    const col = on ? [255, 255, 255] : [220, 230, 250];
+    drawText(C, c.lab, cx, iy - 8 * q, col, q, 'center');
+    const bx0 = Math.min(ix, Math.round(cx - textWidth(c.lab) * q / 2)) - q, bx1 = Math.max(ix + c.w, Math.round(cx + textWidth(c.lab) * q / 2)) + q, by0 = iy - 9 * q, by1 = yb + q;
+    if (on) { C.fillStyle = '#fff'; C.fillRect(bx0, by0, bx1 - bx0, q); C.fillRect(bx0, by1 - q, bx1 - bx0, q); C.fillRect(bx0, by0, q, by1 - by0); C.fillRect(bx1 - q, by0, q, by1 - by0); }
+    // (kept in world units for the press - this view's)
+    B.push({ s: o.id, i: c.i, x0: (bx0 + CAMPX) / SV, x1: (bx1 + CAMPX) / SV, y0: (by0 + TOPPX) / SV, y1: (by1 + TOPPX) / SV });
+    x += c.cw + gap;
+  }
+}
+// the spot drawn under a press (world units; r the press's reach)
+function spotAt(X, Y, r) {
+  for (const B of SP.boxes) if (B) for (const b of B) if (X >= b.x0 - r && X <= b.x1 + r && Y >= b.y0 - r && Y <= b.y1 + r) return b;
+  return null;
+}
+function spotPick(b) { for (const id in WK) if (id !== 'spot') WK[id].clear(); SP.sel = { s: b.s, i: b.i }; strSync(); }
+// ---- the structure's panel: its SPOTS
+function spotsBox(o, U) {
+  const el = U.el, takes = strTakes(o) || [], n = strSpots(o), L = spotList(o);
+  const v = el('div', 'cat'); v.appendChild(el('h4', '', 'SPOTS ' + L.length + ' / ' + n));
+  for (const { i, e } of L) {
+    const r = el('div', 'row'), b = el('button', '', 'REMOVE'); b.title = 'Empty this spot';
+    b.onclick = () => { spotRemove(o, i); strSave(); strSync(); };
+    const t = el('span', '', STR_VEHS[e.v].lab); t.style.cssText = 'flex:1;cursor:pointer'; t.title = 'Its properties'; t.onclick = () => spotPick({ s: o.id, i });
+    r.append(el('label', '', 'SPOT ' + (i + 1)), t, b); v.appendChild(r);
+  }
+  const r = el('div', 'row'), s = el('select'), add = el('button', '', 'ADD SPOT'); s.style.cssText = U.selCss;
+  for (const k in STR_VEHS) if (takes.includes(STR_VEHS[k].fam) && strAllows(o, k) && strFits(o, k)) { const op = document.createElement('option'); op.value = k; op.textContent = STR_VEHS[k].lab + (STR_VEHS[k].army ? '' : '  ' + storyTypePrice(k) + 'C'); s.appendChild(op); }
+  add.title = 'Add a spot with this vehicle'; add.disabled = L.length >= n || !s.options.length;
+  if (L.length >= n) add.textContent = 'FULL';
+  add.onclick = () => { if (!s.value) return; const M = strVehs(o).filter(Boolean).slice(); if (M.length >= n) return; M.push({ v: s.value, own: false }); o.veh = M; strSave(); strSync(); };
+  r.append(s, add); v.appendChild(r);
+  U.box.appendChild(v);
+}
+// a spot emptied: the ones after it move up (its spots are kept in order)
+function spotRemove(o, i) { const M = strVehs(o).slice(); M.splice(i, 1); o.veh = M.filter(Boolean); if (SP.sel && SP.sel.s === o.id) SP.sel = null; }
+// ---- a picked spot's own panel (in the OBJECTS tab's box, where a structure's would be)
+function spotFill(U) {
+  const o = SP.sel && strById(SP.sel.s), e = o && strVehs(o)[SP.sel.i];
+  if (!e || !STR_VEHS[e.v]) { SP.sel = null; return false; }
+  const el = U.el, i = SP.sel.i, D = STR_VEHS[e.v], c = el('div', 'cat');
+  c.appendChild(el('h4', '', 'SPOT ' + (i + 1) + ' OF ' + strName(o).toUpperCase()));
+  const put = f => { const M = strVehs(o).slice(), E2 = Object.assign({}, M[i]); f(E2); M[i] = E2; o.veh = M; strSave(); strSync(); };
+  const sel = (lab, opts, val, f, tip) => { const r = el('div', 'row'), q = el('select'); q.style.cssText = U.selCss; for (const [v2, l2] of opts) { const z = document.createElement('option'); z.value = v2; z.textContent = l2; q.appendChild(z); } q.value = val; q.onchange = () => f(q.value, q); const l = el('label', '', lab); if (tip) l.title = tip; r.append(l, q); c.appendChild(r); return q; };
+  const takes = strTakes(o) || [];
+  sel('TYPE', Object.keys(STR_VEHS).filter(k => takes.includes(STR_VEHS[k].fam) && strAllows(o, k) && strFits(o, k)).map(k => [k, STR_VEHS[k].lab]), e.v, x => put(E => { E.v = x; }), 'What starts at this spot');
+  if (!D.army) {
+    const r = el('div', 'row'), own = NSKY.editor.TUNE.toggle(e.own ? 1 : 0), l = el('label', '', 'OWNED'); l.title = 'The player\'s at the start (else for sale)';
+    own.addEventListener('input', () => put(E => { E.own = !!+own.value; if (E.own) delete E.role; })); r.append(l, own); c.appendChild(r);
+  }
+  // (user Oct 31 22:48: ROLE: RESCUE - the helicopter that answers an emergency at sea and flies back to its pad - 50-story.js storySOS)
+  if (D.fam === 'heli') sel('ROLE', [['', 'NONE'], ['rescue', 'RESCUE (EMERGENCIES ONLY)']], e.role || '', x => put(E => { if (x) { E.role = x; E.own = false; } else delete E.role; }));
+  // (the spec section 4: "Assign each vehicle an activity for each of four daily periods" - not yours, not rescue, not a plane or the armies')
+  if (!e.own && !e.role && !D.army && D.fam !== 'plane') {
+    const fam = D.fam, others = STRS.filter(q => q !== o && (strTakes(q) || []).includes(fam));
+    ['MORNING', 'MIDDAY', 'EVENING', 'NIGHT'].forEach((pl, k) => {
+      const opts = [['stay', 'STAY']]; if (fam === 'boat') opts.push(['fish', 'FISH']); for (const t of others) opts.push(['s:' + t.id, strName(t)]);
+      sel('ROUTINE: ' + pl.slice(0, 3), opts, (e.rt && e.rt[k]) || 'stay', x => put(E => { E.rt = (E.rt || ['stay', 'stay', 'stay', 'stay']).slice(); E.rt[k] = x; }), pl);
+    });
+  }
+  U.box.appendChild(c);
+  U.box.appendChild(cargoBox(el, U.selCss, k => cargoN(e, k), (k, n) => { put(E => cargoPut(E, k, n)); }));   // (what it starts holding - 50-zz-cargo.js)
+  return true;
+}
+WK.spot = {
+  tab: 'OBJECTS',
+  items: () => { const o = SP.sel && strById(SP.sel.s); return o && strVehs(o)[SP.sel.i] ? [{ noun: 'SPOT', del: true }] : []; },
+  clear() { if (SP.sel) { SP.sel = null; strSync(); } },
+  del() { const o = SP.sel && strById(SP.sel.s); if (o) { spotRemove(o, SP.sel.i); strSave(); } SP.sel = null; strSync(); },
+  show: () => strSync(),
+};
 
 /* ================================================================
    THE WORLD'S SIZE IS ITS SHAPES (user Nov 3 06:49: "The world size should change depending on the furthest terrain that has been
