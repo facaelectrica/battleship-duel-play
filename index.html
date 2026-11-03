@@ -4226,8 +4226,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 710;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 03 09:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 711;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 03 09:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -50118,22 +50118,34 @@ let PADS_ON = (() => { try { return localStorage.getItem('bd_ground_conv') === '
 const PADS_C = { gen: -1, src: null, ll: 0, lr: 0, L: null };
 function structsLocal() {
   if (!PADS_ON || !OWM) return LAND_STRUCTS;
-  if (PADS_C.L && PADS_C.gen === STR_GEN && PADS_C.src === LAND_STRUCTS && PADS_C.ll === LAYOUT_L && PADS_C.lr === LAYOUT_R) return PADS_C.L;
+  const iv = typeof ISL_VER !== 'undefined' ? ISL_VER : 0;
+  if (PADS_C.L && PADS_C.gen === STR_GEN && PADS_C.src === LAND_STRUCTS && PADS_C.ll === LAYOUT_L && PADS_C.lr === LAYOUT_R && PADS_C.iv === iv) return PADS_C.L;
   const host = new Map(); for (const s of STRS) if (s.pad && Number.isInteger(s.pad.i)) host.set(s.pad.i, s);
   // (user Nov 3 06:37: the runway's floor "now just exists separately from the structure") the flat ground a host carries is its
   // own footprint, end to end (strFootX - a RUNWAY's deck, a LAUNCH PAD's picture), worked out each time: moved or made longer, its
-  // floor goes with it. The offsets kept at the conversion (pad.a / pad.b) only where a host has no footprint. An airport's own
-  // numbers kept as the record has them: its flat w = its concrete's len + 160 (50-land-unified)
-  PADS_C.L = LAND_STRUCTS.map((o, i) => { const s = host.get(i); if (!s) return o; const F = strFootX(s), p0 = F ? F[0] : s.x + s.pad.a, p1 = F ? F[1] : s.x + s.pad.b, w = Math.round(p1 - p0);
-    const r = Object.assign({}, o, { u: o.R ? p0 - LAYOUT_R : LAYOUT_L - p1, w }); if (o.kind === 'airport') r.len = Math.max(300, w - 160); return r; });
-  PADS_C.gen = STR_GEN; PADS_C.src = LAND_STRUCTS; PADS_C.ll = LAYOUT_L; PADS_C.lr = LAYOUT_R;
+  // floor goes with it. An airport's own numbers kept as the record has them: its flat w = its concrete's len + 160 (50-land-unified).
+  // (user Nov 3 08:40: "I spawn a runway and I set the length of the runway. And the ground below adapts to that ... But now I have
+  // this airport shape that I don't even know what it means") ONE RULE: a pad's flat floor exists only under the structure that makes
+  // it - every RUNWAY and every LAUNCH PAD in play, the built-in ones (carrying their old record: its height) and any spawned (at the
+  // ground's height under its middle, gndTopAt). A built-in record whose structure was deleted is gone with it: no flat, no concrete,
+  // no box. A structure lifted off its rest (strFree) is out of play, and so is its floor
+  const rec = (o, s) => { const F = strFootX(s), p0 = F ? F[0] : s.x + s.pad.a, p1 = F ? F[1] : s.x + s.pad.b, w = Math.round(p1 - p0);
+    const r = Object.assign({}, o, { u: o.R ? p0 - LAYOUT_R : LAYOUT_L - p1, w }); if (o.kind === 'airport') r.len = Math.max(300, w - 160); return r; };
+  const L = [];
+  LAND_STRUCTS.forEach((o, i) => { const s = host.get(i); if (s && !strFree(s)) L.push(rec(o, s)); });
+  for (const s of STRS) {
+    if ((s.k !== 'runway' && s.k !== 'launchPad') || (s.pad && host.get(s.pad.i) === s) || strFree(s)) continue;
+    const F = strFootX(s), m = (F[0] + F[1]) / 2, y = gndTopAt(clamp(m, 0, WORLD_W - 1)); if (!Number.isFinite(y) || y > WATER_Y) continue;   // (over the water: no floor)
+    const R = lcRight(m) ? 1 : 0; L.push(Object.assign(rec({ kind: s.k === 'runway' ? 'airport' : 'pads', R, y: Math.round(y), own: s.own }, s), { free: true }));   // (free: banked on both sides)
+  }
+  PADS_C.L = L; PADS_C.gen = STR_GEN; PADS_C.src = LAND_STRUCTS; PADS_C.ll = LAYOUT_L; PADS_C.lr = LAYOUT_R; PADS_C.iv = iv;
   return PADS_C.L;
 }
 // (REFRESH) where the carrying structures stand: moved since the world was built - it's built again (its flat ground with them)
-const padsSig = () => PADS_ON ? JSON.stringify(STRS.filter(s => s.pad).map(s => [s.id, s.x, s.len || 0])) : '';
+const padsSig = () => PADS_ON ? JSON.stringify(STRS.filter(s => s.k === 'runway' || s.k === 'launchPad').map(s => [s.id, s.x, s.len || 0, s.fy ?? null])) : '';   // (every carrier: spawned, moved, lengthened, lifted, deleted)
 let PADS_SIG = '';
 // a record carried by a structure (its TERRAIN box gone: the structure is moved instead)
-const structHosted = o => PADS_ON && OWM && STRS.some(s => s.pad && LAND_STRUCTS[s.pad.i] === o);
+const structHosted = o => PADS_ON && OWM && NET.role === 'local';   // (Nov 3: every built-in record is its structure's - carried or gone with it: never a box of its own)
 const structsUsed = () => NET.role === 'local' ? structsLocal() : STRUCT_DEF;
 const structsDefault = () => JSON.stringify(structsUsed()) === JSON.stringify(STRUCT_DEF);
 const structIn = (kind, R) => structsUsed().find(o => o.kind === kind && !!o.R === !!R);
@@ -50153,7 +50165,7 @@ function structAt(x) {
   const R = lcRight(x), d = lcFromSea(x);
   for (const o of structsUsed()) {
     if (!!o.R !== R) continue;
-    const a = o.u, b = o.u + o.w, out = d < a ? (a <= DOCK_W ? 0 : a - d) : d > b ? d - b : 0;
+    const a = o.u, b = o.u + o.w, out = d < a ? (a <= DOCK_W && !o.free ? 0 : a - d) : d > b ? d - b : 0;
     const k = out <= 0 ? 1 : 1 - smoothstep(0, STRUCT_BANK, out);
     if (k > STRUCT_AT.k) { STRUCT_AT.k = k; STRUCT_AT.y = o.y; }
   }
@@ -50166,7 +50178,7 @@ function structPadAt(x) {
   STRUCT_PAD.k = 0; STRUCT_PAD.y = LAND_Y;
   if (!inCountry(x)) return STRUCT_PAD;
   const R = lcRight(x), d = lcFromSea(x);
-  for (const o of structsUsed()) if (!!o.R === R && d <= o.u + o.w && (d >= o.u || o.u <= DOCK_W)) { STRUCT_PAD.k = 1; STRUCT_PAD.y = o.y; break; }
+  for (const o of structsUsed()) if (!!o.R === R && d <= o.u + o.w && (d >= o.u || (o.u <= DOCK_W && !o.free))) { STRUCT_PAD.k = 1; STRUCT_PAD.y = o.y; break; }
   return STRUCT_PAD;
 }
 // is any structure's pad or bank within `r` of x (trees, rocks and lakes keep off: structAt's bank)
@@ -50175,9 +50187,14 @@ function structNear(x, r) { for (let q = -r; q <= r; q += 40) if (structAt(x + q
 // runway from the harbour end to past the hangar, AIR_W + 40 inland of the airport's sea end
 function apronD(x) {
   if (!inCountry(x)) return 1e9;
-  const o = structIn('airport', lcRight(x)); if (!o) return 1e9;
-  const d = lcFromSea(x), a = o.u <= DOCK_W ? -1e9 : o.u - 40, b = o.u + airW(o) + 40;
-  return d < a ? a - d : d > b ? d - b : -Math.min(d - a, b - d);
+  // (Nov 3: every airport's concrete - every RUNWAY's floor, structsLocal - the nearest of them)
+  const R = lcRight(x), d = lcFromSea(x); let best = 1e9;
+  for (const o of structsUsed()) {
+    if (o.kind !== 'airport' || !!o.R !== R) continue;
+    const a = o.u <= DOCK_W && !o.free ? -1e9 : o.u - 40, b = o.u + airW(o) + 40, v = d < a ? a - d : d > b ? d - b : -Math.min(d - a, b - d);
+    if (v < best) best = v;
+  }
+  return best;
 }
 const landPtX = (R, u) => warpX(R ? WORLD_Wb - EXT_R - u * LAND_CW0 : EXT_L + u * LAND_CW0);   // (a stretched piece: the layout's x onto the world)
 function landSave() { try { if (JSON.stringify(LAND_PTS) === JSON.stringify(LAND_DEF)) localStorage.removeItem('bd_land_pts'); else localStorage.setItem('bd_land_pts', JSON.stringify(LAND_PTS)); } catch (e) { } }
@@ -59220,6 +59237,14 @@ function wedAfter(moved) {
 }
 // ---- DELETE: everything picked
 function wedPicked() { const L = []; for (const id in WK) for (const it of WK[id].items()) L.push(it); return L; }
+// (user Nov 3 08:40: "delete button on the keyboard doesnt seem to match the Delete button in the editor") the keyboard's Delete (and
+// Backspace) on WORLD EDITOR is the top bar's DELETE - whatever is picked goes; not while typing in a field
+window.addEventListener('keydown', e => {
+  if ((e.code !== 'Delete' && e.code !== 'Backspace') || !NSKY.editor.TUNE.world()) return;
+  const t = e.target; if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && t.type !== 'range' || t.isContentEditable)) return;
+  if (!wedPicked().some(i => i.del)) return;
+  e.preventDefault(); e.stopImmediatePropagation(); wedDelete(); setTimeout(undoCommit, 0);
+}, { capture: true });
 function wedDelete() {
   let any = false;
   for (const id in WK) if (WK[id].items().some(i => i.del)) { WK[id].del(); any = true; }
