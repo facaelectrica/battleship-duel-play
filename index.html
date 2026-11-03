@@ -1051,6 +1051,7 @@ const DOCK_SPAN = HANGAR_W - HGR_INLAND - HGR_EDGE * HGR.K + QB_L + PIER_L;   //
 // without a harbour keeps its beach there
 const OLD_RUN = (BASE.W - BASE.PIER_END) * BASE.K;
 const SUB_GATE_Y = WATER_Y;                               // the sub goes through the hangar's door surfaced
+const subGateY = sb => SUB_GATE_Y + dkY(sb && sb.dock);   // (her harbour's: its own water's - dkY, 50-zz-structh)
 const GATE_T = 2.4;                   // seconds for a gate to slide open or shut (slowly: they're heavy)
 
 // Cameras
@@ -2437,7 +2438,7 @@ function pierArt(d) {
   if (d.pierBase) return d.pierBase;
   const K = BASE.K, s = img.dock, R0 = PIER_DECK_ROWS, FH = BASE.H - PIER_FOOT;
   const P = [[0, 29, 0]].concat(Array.from({ length: d.nb }, (_, i) => [39, 66, PIER_CAP + i * PIER_BAY - 4]));   // (a bay's pillar strip begins 4 columns before it)   // [the drawing's columns, where it goes]
-  const feet = P.map(([a, b, x]) => { const u = d.ax(x), v = d.ax(x + b - a); return Math.round((pillarFoot(Math.min(u, v), Math.max(u, v), DOCK_TOP_Y + R0 * K) - DOCK_TOP_Y) / K); });   // (down into the floor under each: pillarFoot - 50-zz-structh)
+  const feet = P.map(([a, b, x]) => { const u = d.ax(x), v = d.ax(x + b - a); return Math.round((pillarFoot(Math.min(u, v), Math.max(u, v), pierTop(d) + R0 * K) - pierTop(d)) / K); });   // (at its own water's - dkY)   // (down into the floor under each: pillarFoot - 50-zz-structh)
   const H = Math.min(4000, Math.max(R0 + 2, ...feet));
   const c = makeCanvas(d.ppx, H), g = c.getContext('2d');
   P.forEach(([a, b, x], i) => {
@@ -2508,7 +2509,7 @@ function tearArt(g, c0, c1, rTop, rBot, j, ap = AP) {
 }
 // (Nov 1, the wooden docks - user 23:01: "The wood dock should behave like the pier dock") each pier's picture its own scale (K) and
 // top (topY): the harbours' stone piers the old drawing's (BASE.K, DOCK_TOP_Y), a wooden dock its tile's - pierK, pierTop
-const pierK = d => d && d.K || BASE.K, pierTop = d => d && d.topY != null ? d.topY : DOCK_TOP_Y, pierRows = d => d && d.deckRows || PIER_DECK_ROWS;
+const pierK = d => d && d.K || BASE.K, pierTop = d => d && d.topY != null ? d.topY : DOCK_TOP_Y + dkY(d), pierRows = d => d && d.deckRows || PIER_DECK_ROWS;
 const artCol = (d, x) => (x - d.px0) / pierK(d), artRow = (y, d) => (y - pierTop(d)) / pierK(d);
 const AP = 0.4 / BASE.K, apOf = d => 0.4 / pierK(d);                     // (the tears were sized for the old drawing's 0.4 units a pixel)
 // (engine stage 3) 'hit' {kind: 'pillar', o: the dock, i, x, y}: a shell, torpedo or depth charge on one of a pier's pillars (36-zz-events.js)
@@ -2594,7 +2595,7 @@ function collapsePier(d) {
   const fall = d.pillars.filter(P => onPier(d, (P.x0 + P.x1) / 2));
   for (const P of fall) {
     const c0 = Math.floor(artCol(d, P.x0)) - 1, c1 = Math.ceil(artCol(d, P.x1)) + 1;
-    const cut = P.broken ? artRow(P.by, d) + 18 * AP : artRow(dockRnd(WATER_Y + 60, (WATER_Y + SEABED_Y) / 2), d), top = ROWS;
+    const cut = P.broken ? artRow(P.by, d) + 18 * AP : artRow(dockRnd(WATER_Y + 60, (WATER_Y + SEABED_Y) / 2) + dkY(d), d), top = ROWS;
     const H = Math.round(cut - top);
     if (H > 8) {
       const piece = makeCanvas(c1 - c0, H);
@@ -2722,7 +2723,7 @@ function spareReady(p, k) {
     const old = ships[p];
     if (old.state === 'sinking') oldShips.push(old);   // she goes on going down by herself
     const sh = makeShip(p, d.berth, -d.dir, d);
-    Object.assign(sh, { berthed: true, docked: 1, moored: true, away: false, y: WATER_Y });
+    Object.assign(sh, { berthed: true, docked: 1, moored: true, away: false, y: waterLv(sh.x) });   // (her harbour's water - a lake's too)
     ships[p] = sh;
     // (user Oct 27: "A new battleship should not keep the ammo the last one had left, but a new count" - the magazine
     // is on the side's gun record, not the ship: a new ship comes with it full)
@@ -2817,7 +2818,7 @@ function buildWorld(restore) {
 
   ships.length = 0;
   for (let p = 0; p < 2; p++) ships.push(makeShip(p, homeDock[p].berth, -homeDock[p].dir, homeDock[p]));
-  for (const sh of ships) { sh.berthed = true; sh.docked = 1; sh.moored = true; sh.away = false; sh.y = WATER_Y; }
+  for (const sh of ships) { sh.berthed = true; sh.docked = 1; sh.moored = true; sh.away = false; sh.y = waterLv(sh.x); }   // (her harbour's water)
   subs.length = 0;
   subs.push(makeSub(0, homeDock[0]), makeSub(1, homeDock[1]));
   if (PLAYERS === 1) { ships[1].state = 'gone'; subs[1].state = 'gone'; }    // player 2's boats never take to the water
@@ -4301,8 +4302,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 739;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 03 16:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 740;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 03 16:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8135,21 +8136,22 @@ function stepWaterRun(dt, clearForces, a, b) {
 /* ---------------- The hangar: both your boats berth inside and are repaired there ---------------- */
 function hangarSpan(d) { return [Math.min(d.hgSea, d.hgFar), Math.max(d.hgSea, d.hgFar)]; }
 // behind the quay's face, below the water: the quay, the hangar's foot, its foundation, the land (torpedoes and dived boats stop there)
-function inQuay(x, y) { if (y < WATER_Y + 2) return false; for (const d of docks) if ((x - d.blockFace) * d.dir > 0 && (!(d.extra || d.pad) || (x - d.blockFace) * d.dir < Math.abs(d.blockFace - (d.dir < 0 ? d.x0 : d.x0 + d.w)) + PAD_LAND)) return true; return false; }   // (a dock placed at sea: its block and the ground behind it, not on to the world's end)
+function inQuay(x, y) { if (y < WATER_Y + (HARB.oyMin || 0) + 2) return false; for (const d of docks) if (y >= WATER_Y + dkY(d) + 2 && (x - d.blockFace) * d.dir > 0 && (!(d.extra || d.pad) || (x - d.blockFace) * d.dir < Math.abs(d.blockFace - (d.dir < 0 ? d.x0 : d.x0 + d.w)) + PAD_LAND)) return true; return false; }   // (a dock placed at sea: its block and the ground behind it, not on to the world's end)
 function shipDamaged(sh) { return sh.lvl.some(l => l > 0.001) || sh.dead.some(Boolean); }
 /* (no-countries plan, Nov 1: one rule for every hull at sea) every harbour that isn't hers - the enemy's, nobody's, her own
    side's second, and a missing side's stand-in far past the world's end - stops her bow at the end of its pier, never past
    the world's edge (8 + hl in): seaLimit(v, hl) holds her there; seaReach(v, hl, dir) is how far she may go that way.
    (Her own sea's shores join this when the floor is per sea - plan step 5.) */
 const pierStop = (d, hl) => clamp(d.quay - d.dir * (hl + 4), PLAY_L() + 8 + hl, PLAY_R() - 8 - hl);   // (the play's ends: the world's, or none - STORY, 05-zzz-endless.js)
-function seaStopOne(v, d, hl) { if (d === v.dock) return; const lim = pierStop(d, hl); if ((v.x - lim) * d.dir > 0) { v.x = lim; if (v.vx * d.dir > 0) v.vx = 0; } }
+function seaStopOne(v, d, hl) { if (d === v.dock || !dockSameWater(d, v.x)) return;   // (only the harbours in her water)
+  const lim = pierStop(d, hl); if ((v.x - lim) * d.dir > 0) { v.x = lim; if (v.vx * d.dir > 0) v.vx = 0; } }
 function seaLimit(v, hl) {
   for (const d of homeDock) if (!docks.includes(d)) seaStopOne(v, d, hl);
   for (const d of docks) seaStopOne(v, d, hl);
 }
 function seaReach(v, hl, dir) {
   let r = dir > 0 ? PLAY_R() - 8 - hl : PLAY_L() + 8 + hl;
-  const one = d => { if (d === v.dock || d.dir !== dir) return; const l = pierStop(d, hl); r = dir > 0 ? Math.min(r, l) : Math.max(r, l); };
+  const one = d => { if (d === v.dock || d.dir !== dir || !dockSameWater(d, v.x)) return; const l = pierStop(d, hl); r = dir > 0 ? Math.min(r, l) : Math.max(r, l); };
   for (const d of homeDock) if (!docks.includes(d)) one(d);
   for (const d of docks) one(d);
   return r;
@@ -8195,7 +8197,7 @@ function harbourMove(v, x, dt) {
 // her end nearest the land, measured from the sea side of her gate (> 0: in the doorway or inside)
 function intoGate(v) { const d = v.dock; return (v.x + d.dir * halfL(v) - gateOf(v)[0]) * d.dir; }
 // the sub only passes her gate at the gate's depth
-function atGateDepth(v) { return vKind(v) === 'ship' || Math.abs(v.y - SUB_GATE_Y) < 5; }
+function atGateDepth(v) { return vKind(v) === 'ship' || Math.abs(v.y - subGateY(v)) < 5; }   // (surfaced in her harbour's water)
 function stepGate(v, dt) {
   const d = v.dock, k = vKind(v);
   // while the gate is shut (or the sub isn't down at its depth) she waits outside it, or inside it
@@ -8245,12 +8247,12 @@ function launchOut(v) {
   if (vKind(v) === 'ship') { v.moored = false; return; }
   // the sub: turned to face the sea while she was inside out of sight; caught on her way in, she swings round
   if (v.state === 'docked') v.facing = -v.dock.dir; else if (v.facing !== -v.dock.dir && !v.turn) startSubTurn(v);
-  v.state = 'out'; v.depthT = SUB_GATE_Y;
+  v.state = 'out'; v.depthT = subGateY(v);
 }
 // a boat starts in through her gate (she's at or inside the end of the pier)
 function bringIn(v) {
   v.gate = 'in'; v.auto = null;
-  if (vKind(v) === 'sub') { v.depthT = SUB_GATE_Y; if (v.facing !== v.dock.dir && !v.turn) startSubTurn(v); }
+  if (vKind(v) === 'sub') { v.depthT = subGateY(v); if (v.facing !== v.dock.dir && !v.turn) startSubTurn(v); }
 }
 // the gates: open while a boat is in the doorway or about to be, shut otherwise
 function stepGates(d, dt) {
@@ -8313,9 +8315,10 @@ function stepDocks(dt) {
 function harbourHit(d, x, y) {
   const q = pierEdge(d), a = Math.min(q, d.x0 + (d.dir > 0 ? d.w : 0)), b = Math.max(q, d.x0 + (d.dir > 0 ? d.w : 0));
   if (x < a || x > b || deckGone(d, x)) return false;
-  if (y >= DECK_Y - 1 && y < WATER_Y + 2) return true;                                   // the deck
+  const u = dkY(d);                                                                     // (at its own water's - 50-zz-structh)
+  if (y >= DECK_Y + u - 1 && y < WATER_Y + u + 2) return true;                           // the deck
   const t = hangarRoofAt(d, x);
-  return t != null && y > t && y < DECK_Y;                                              // the hangar, as drawn (inHangar's rule)
+  return t != null && y > t && y < DECK_Y + u;                                              // the hangar, as drawn (inHangar's rule)
 }
 // (user Oct 27: "The pier's deck (and the stone block, and the hangar roof) is solid ground for everything. Only ships
 // pass through it, to dock with it") the one test for what stands on a harbour - helicopters, tanks, magnets and their
@@ -8346,8 +8349,8 @@ function spriteHit(src, k, cx, cy, deg, x, y, pad = 2) {
   for (let r = Math.max(0, row - pad); r <= Math.min(H - 1, row + pad); r++) for (let c = Math.max(0, col - pad); c <= Math.min(W - 1, col + pad); c++) if (m[r * W + c]) return true;
   return false;
 }
-function inHangar(x, y) { if (y <= HANGAR_ROOF()) return false; for (const d of docks) { const t = hangarRoofAt(d, x); if (t != null && y > t) return true; } return false; }
-const hangarSolid = (x, y) => y < WATER_Y + 2 && inHangar(x, y);
+function inHangar(x, y) { if (y <= HANGAR_ROOF() + (HARB.oyMin || 0)) return false; for (const d of docks) { const t = hangarRoofAt(d, x); if (t != null && y > t) return true; } return false; }
+const hangarSolid = (x, y) => y < waterLv(x) + 2 && inHangar(x, y);   // (above its own water)
 // the highest of the drawn roof between x0 and x1 (each drawing's tops in blocks of HG_BLK columns, their lowest row each)
 const HG_BLK = 32;
 let hgBlk_ = null;
@@ -8362,7 +8365,7 @@ function hangarTopIn(x0, x1) {
     const c0 = clamp(ca, 0, n - 1), c1 = clamp(cb, 0, n - 1), m = hgBlocks();
     let r = 32767;
     for (let c = c0; c <= c1;) { if (c % HG_BLK === 0 && c + HG_BLK - 1 <= c1) { r = Math.min(r, m[c / HG_BLK]); c += HG_BLK; } else { if (T[c] < HGR.H - 1) r = Math.min(r, T[c]); c++; } }
-    if (r < 32767) top = Math.min(top, HANGAR_TOP + r * HGR.K);
+    if (r < 32767) top = Math.min(top, HANGAR_TOP + dkY(d) + r * HGR.K);
   }
   return top;
 }
@@ -8377,7 +8380,7 @@ function harbourTop(x, y = -1e9) {
   if (d) {
     const roof = d.noHangar ? null : hangarRoofAt(d, x);                               // (its drawn roof - inHangar's rule; a pier on its own has none)
     if (roof != null && y <= roof + 2) return roof;
-    const dy = d.deckY != null ? d.deckY : DECK_Y;                                     // (its deck: a wooden dock's its own height - 50-zz-structh)
+    const dy = pierDeckY(d);                                                           // (its deck: a wooden dock's its own height, any other's at its water's - 50-zz-structh)
     return y <= dy + 2 ? dy : Infinity;
   }
   return Infinity;
@@ -8438,7 +8441,7 @@ function stepChunks(dt) {
     if (k.kind === 'tower' && armChunkR() < dt * 1.5) spawnSmoke(k.x, k.y, { kind: 'trail', dark: 0.6, r: armChunkRnd(4, 7), lift: 8, alpha: armChunkRnd(0.2, 0.35), life: armChunkRnd(3, 5), stream: smStream(k) });
     // over the quay it lands on the stones; past the edge it goes into the sea
     let floor = k.floor, wet = k.water;
-    if (k.kind === 'tower' && (k.dock || homeDock[k.player])) { const d = k.dock || homeDock[k.player], overSea = (k.x - pierEdge(d)) * -d.dir > 0; wet = overSea; floor = overSea ? surfaceY(k.x) : DECK_Y; }
+    if (k.kind === 'tower' && (k.dock || homeDock[k.player])) { const d = k.dock || homeDock[k.player], overSea = (k.x - pierEdge(d)) * -d.dir > 0; wet = overSea; floor = overSea ? surfaceY(k.x) : DECK_Y + dkY(d); }
     if (k.kind === 'mast') { wet = true; floor = surfaceY(k.x); }
     if (k.land) { wet = !dryLand(k.x); floor = wet ? surfaceY(k.x) : landTop(k.x); }   // (OPEN WORLD: the ground under it where it comes down - a wing, the mountain tower's pieces, user Oct 27 [10])
     // (user Oct 27: the harbour is solid for falling pieces - a wing, a gun - over the sea they land on its deck)
@@ -8545,7 +8548,7 @@ function crumbleTower(tw) {
     g2.putImageData(idd, 0, 0);
     const cx = (ax + bx) / 2, cy = (ay + by) / 2;
     const x = tw.x + (cx - BX) * K, y = twBase(tw) - (BY - cy) * K;
-    const k = { img: c, k: K, x, y, vx: 0, vy: 0, a: 0, w: 0, delay: 0, floor: DECK_Y, water: false, kind: 'tower', player: tw.player, dock: tw.edge ? null : tw.dock, hh: c.height / 2 * K, land: !!(LAND && tw.edge) };   // (land: the mountain's tower - its pieces land on the mountain, user Oct 27 [10])
+    const k = { img: c, k: K, x, y, vx: 0, vy: 0, a: 0, w: 0, delay: 0, floor: twBase(tw), water: false, kind: 'tower', player: tw.player, dock: tw.edge ? null : tw.dock, hh: c.height / 2 * K, land: !!(LAND && tw.edge) };   // (land: the mountain's tower - its pieces land on the mountain, user Oct 27 [10])
     if (r === rows.length - 2) {
       // the lowest course just slumps down onto the quay as the wall above leaves it
       k.delay = armTowerRnd(1.2, 2.4); k.vx = sea * armTowerRnd(2, 12); k.vy = armTowerRnd(-5, 5); k.w = sea * armTowerRnd(0.1, 0.6);
@@ -8578,7 +8581,7 @@ const SUB_DRAG_L = 0.42, SUB_VZ = 46;
 const SUB_PUSH = () => 84 * VTUNE.sub.speedK, SUB_DRAG_Q = () => 0.0016 / VTUNE.sub.speedK;   // (Oct 25: a bit more arcade - quicker up, down and to a stop)
 function makeSub(id, d) {
   return {
-    id, fac: id, dock: d, facing: -d.dir, x: d.subBerth, y: SUB_GATE_Y, vx: 0, vy: 0, a: 0, throttle: 0, input: 0, dive: 0, depthT: SUB_GATE_Y,
+    id, fac: id, dock: d, facing: -d.dir, x: d.subBerth, y: SUB_GATE_Y + dkY(d), vx: 0, vy: 0, a: 0, throttle: 0, input: 0, dive: 0, depthT: SUB_GATE_Y + dkY(d),
     state: 'docked', lvl: new Array(SUB_SECTIONS).fill(0), away: false, rising: false, autoDive: 0, scorch: [], art: null, parts: null, turn: null, torps: VTUNE.sub.torps, tk: 0, resupT: 0, mines: VTUNE.sub.mines, mk: 0, light: false, lamp: { elev: d.dir > 0 ? 155 : 25, power: 0, aimShow: 0 },
     bubbleAcc: 0, fixIdx: -1, sinkT: 0, weld: 0, leak: 0, rest: 0, ventAcc: 0,
   };
@@ -8838,7 +8841,7 @@ function stepSub(sb, dt) {
     if ((sb.x - d.subIn) * d.dir >= -0.5 && (sb.auto === 'home' || sb.vx * d.dir > 0)) {
       sb.x = d.subIn - d.dir * 0.5;
       if (sb.auto === 'home') bringIn(sb);
-      else { if (sb.vx * d.dir > 0) sb.vx = 0; if ((driving || !stopPref) && (sb.input || 0) * d.dir > 0.2 && sb.throttle * d.dir > 0.2) { sb.depthT = SUB_GATE_Y; bringIn(sb); } }
+      else { if (sb.vx * d.dir > 0) sb.vx = 0; if ((driving || !stopPref) && (sb.input || 0) * d.dir > 0.2 && sb.throttle * d.dir > 0.2) { sb.depthT = subGateY(sb); bringIn(sb); } }
     }
   }
   sb.tk = Math.max(0, sb.tk - dt);
@@ -8873,7 +8876,7 @@ function stepSub(sb, dt) {
   // depth: the console wheel sets the depth she makes for; she steers there and holds it
   sb.depthT = clamp(sb.depthT === undefined ? lvW : sb.depthT, lvW, subMaxY(sb.x, sb.y));
   // (user Oct 29) she can go down as soon as she's out of the hangar's door on her way out, not only past the pier
-  const goalY = harboured && !(sb.gate === 'out' && intoGate(sb) < 0) ? SUB_GATE_Y : sb.depthT;
+  const goalY = harboured && !(sb.gate === 'out' && intoGate(sb) < 0) ? subGateY(sb) : sb.depthT;
   const surf = (surfaceY(sb.x - SUB_L * 0.3) + surfaceY(sb.x) + surfaceY(sb.x + SUB_L * 0.3)) / 3;
   const y0 = sb.y;
   const dive = goalY > sb.y + 4 ? 1 : goalY < sb.y - 4 ? -1 : 0;
@@ -10885,7 +10888,7 @@ function planeCrash(pl) {
     for (const b of sailboats) if (!what && b.state === 'sail' && sailHullHit(b, x, y)) { emit('hit', { kind: 'sailboat', o: b, x, y, vx: pl.vx }); what = 'sea'; }   // (it flies through the sails; only her hull stops it)
     for (const b of buoys) if (!what && b.player !== p && buoyHit(b, x, y)) emit('hit', { kind: 'buoy', o: b, x, y });           // (the plane flies on)
     for (const d of docks) if (!what && !(pl.state === 'fly' && d === homeDock[p] && !hand) && harbourHit(d, x, y)) what = 'land';   // (your own harbour never brings your plane down - unless you're flying it: then dodge it yourself)
-    if (!what && hand && typeof cranes !== 'undefined') for (const cr of cranes) { const t = craneTopAt(cr, x); if (t != null && y >= t && y < DECK_Y) { what = 'land'; break; } }   // (the crane: solid to a plane flown by hand, user Oct 29 - it's yours to fly round)
+    if (!what && hand && typeof cranes !== 'undefined') for (const cr of cranes) { const t = craneTopAt(cr, x); if (t != null && y >= t && y < (cr.deck ?? DECK_Y)) { what = 'land'; break; } }   // (the crane: solid to a plane flown by hand, user Oct 29 - it's yours to fly round)
     if (!what && hangarSolid(x, y)) what = 'land';                       // (but a hangar's walls do - user Oct 29)
     if (what) { X = x; Y = y; break; }
   }
@@ -11048,7 +11051,7 @@ function stepPlanes(dt) {
       const q = pierEdge(hd), a = Math.min(q, hd.x0 + (hd.dir > 0 ? hd.w : 0)), b = Math.max(q, hd.x0 + (hd.dir > 0 ? hd.w : 0));
       const look = 60 + pl.spd * 0.9, nx = pl.x + dirNow * look;
       const over = Math.max(a, Math.min(pl.x, nx)) <= Math.min(b, Math.max(pl.x, nx));     // (its path ahead crosses the harbour)
-      const roof = Math.min(HANGAR_TOP, tw && tw.hp > 0 ? TW.BASE - TW.H : DECK_Y) - 36;
+      const roof = Math.min(HANGAR_TOP + dkY(hd), tw && tw.hp > 0 ? TW.BASE + dkY(hd) - TW.H : DECK_Y + dkY(hd)) - 36;   // (at its own water's)
       if (over && pl.y > roof) { want = Math.min(want, -0.8 * clamp((pl.y - roof) / 50, 0.45, 1)); forced = true; }
     }
     // (Nov 2: the one flight model - flyStep, 29-zz-flight.js: held, the stick pulls the wings (a tap a little, held the whole
@@ -12043,7 +12046,7 @@ function lostUnit(p, x, lost) {
 function lostWreckAt(w) {
   const v = w.v, k = w.kind;
   if (!v) return null;
-  if (k === 'tower') return [v.x, DECK_Y];
+  if (k === 'tower') return [v.x, twBase(v)];   // (its own foot: a harbour's quay at its water's)
   if (k === 'ship') {
     let x = 0, y = 0, n = 0;
     for (const q of pieces) if (q.owner === w.id && q.gen === undefined) { x += q.x; y += q.y; n++; }
@@ -12162,7 +12165,7 @@ function sendHomeVeh(p, k) {
   }
   const v = k === 'ship' ? ships[p] : subs[p];
   if (inHarbour(v)) bringIn(v);
-  else { v.auto = 'home'; if (k === 'sub') v.depthT = SUB_GATE_Y; }   // the sub comes home at her gate's depth
+  else { v.auto = 'home'; if (k === 'sub') v.depthT = subGateY(v); }   // the sub comes home at her gate's depth
   sound('click', gunCtl[p]);                                              // (you stay with her: the camera follows her home)
 }
 // home (the boat behind her gate, the plane off your edge): ashore, the harbour in view, to choose what's next
@@ -12319,7 +12322,7 @@ function stepSailboat(b, dt, SB) {
       // a yacht you sail (OPEN WORLD, one taken from the civilian boats): left, right or hove to
       b.drive = Math.sign(b.cin || 0);
       if (b.drive) b.face = b.drive;
-      const lo2 = wl ? lo - 100 : Math.max(...docks.filter(d => d.dir < 0).map(d => d.quay + 60), PLAY_L() + 40), hi2 = wl ? hi + 100 : Math.min(...docks.filter(d => d.dir > 0).map(d => d.quay - 60), PLAY_R() - 40);   // (the play's ends - STORY has none)
+      const lo2 = wl ? lo - 100 : Math.max(...docks.filter(d => !d.lake && d.dir < 0).map(d => d.quay + 60), PLAY_L() + 40), hi2 = wl ? hi + 100 : Math.min(...docks.filter(d => !d.lake && d.dir > 0).map(d => d.quay - 60), PLAY_R() - 40);   // (the play's ends - STORY has none)
       let want = b.drive && !ancHeld(b) ? b.face * (yachtEngine(false) + yachtSail(b, wind, b.face)) : 0;   // (her engine, and the wind in her sails if they're set; her anchor down, she lies to it)
       if ((b.x < lo2 + 20 && want < 0) || (b.x > hi2 - 20 && want > 0)) want = 0;
       b.vx += (want - b.vx) * Math.min(1, dt * 0.5);
@@ -13208,7 +13211,7 @@ let armPierR_ = null;
 const armPierR = () => (armPierR_ || (armPierR_ = sysRng('armPierGun')))(), armPierRnd = (a, b) => a + (b - a) * armPierR();
 // (user Oct 27) el: its own angle - it turns with the tower's gun only while you're manning it from the harbour tower
 // (or, the tower down, from its button); left alone it holds where it was. gone: fallen into the sea with the pier
-function makePierGun(d) { return { _x: d.ax(PG_COL), _y: DECK_Y, hp: PG_HP, chip: 0, flash: 0, alt: 0, boom: false, el: 30, gone: false }; }
+function makePierGun(d) { return { _x: d.ax(PG_COL), _y: DECK_Y + dkY(d), hp: PG_HP, chip: 0, flash: 0, alt: 0, boom: false, el: 30, gone: false }; }
 const pgOf = tw => (tw && tw.pg && tw.pg.hp > 0 && !tw.pg.gone) ? tw.pg : null;
 // manned: the harbour tower is the one its player is in (the gun follows the aim), else it keeps its own angle
 const pgManned = tw => !!tw && myTw(tw.player) === tw;   // (Nov 1: a land tower may carry one too - a MACHINE GUN CANNON on its top)
@@ -16802,7 +16805,7 @@ function buildPerches() {
       const t = T[c];
       if (t >= BASE.DECK - 5 || t < 20) continue;                 // above the deck, below the lamp posts
       if (Math.abs(T[c - 1] - t) > 1 || Math.abs(T[c + 1] - t) > 1 || Math.abs(T[c - 2] - t) > 1 || Math.abs(T[c + 2] - t) > 1) continue;
-      list.push([d.ax(c), DOCK_TOP_Y + t * BASE.K]);
+      list.push([d.ax(c), DOCK_TOP_Y + dkY(d) + t * BASE.K]);   // (at its own water's)
     }
     list.sort((a, b) => a[0] - b[0]);
     for (const [x, y] of list) if (x - lastX >= 5) { bdPerch(x, y, d.key); lastX = x; }
@@ -16811,7 +16814,7 @@ function buildPerches() {
     for (let x = ha + 6; x <= ha + HANGAR_W - 6; x += 9) {
       const col = Math.round((d.dir > 0 ? x - ha : ha + HANGAR_W - x) / HGR.K);
       if (hTop[col] >= HGR.H - 2) continue;
-      bdPerch(x, HANGAR_TOP + hTop[col] * HGR.K, d.key);
+      bdPerch(x, HANGAR_TOP + dkY(d) + hTop[col] * HGR.K, d.key);
     }
     // the tower's top rail
     const tw = d._tw;
@@ -27527,7 +27530,7 @@ function drawCoasts(pivY, zr) {
   if (vis < 0.03) return;
   const Sc = S * COAST.k * Math.pow(zr, 0.9), Xc = VWP / 2;     // zoom scales the land almost as much as the harbour
   for (const co of coasts) {
-    const d = DOCKS_OWNED ? docks.find(q => (q.dir > 0) === !!co.side) : docks[co.side];   // (the harbours' owners set: the one on that coast, if any)
+    const d = DOCKS_OWNED ? docks.find(q => !q.lake && (q.dir > 0) === !!co.side) : docks[co.side];   // (the harbours' owners set: the one on that coast, if any)
     if (!d) continue;
     // The painting's cut end is pinned to the edge of the screen on the harbour's side while you're at the
     // harbour (so it can never be seen), and as you sail away it slides off that edge with the dock, only a
@@ -27733,7 +27736,8 @@ function renderObjects() {
   guardDraw('drawPirateWrecks', () => drawPirateWrecks(x0, x1));                               // (OPEN WORLD: the sunken pirate ships)
   if (LAND) guardDraw('drawLooseContainers', () => drawLooseContainers(x0, x1, true));            // (boxes knocked into the sea, sinking or on the bottom)
   ot = ema('obWrecks', ot);
-  for (const d of docks) { drawHarbourBack(d, x0, x1); drawHarbourFront(d, x0, x1); if (HARB.on && !harbourInView(d, x0, x1) && d._tw && d._tw.hp > 0 && Math.abs(d._tw.x - (x0 + x1) / 2) < (x1 - x0) / 2 + 200) drawTower(d._tw); }   // (a harbour's lighthouse standing away from it: drawn where it is - 50-zz-structh)
+  for (const d of docks) { if (d.lake) continue; drawHarbourBack(d, x0, x1); drawHarbourFront(d, x0, x1);   // (a lake's: the land's pass - drawLakeHarbours, 50-land-lake)
+    if (HARB.on && !harbourInView(d, x0, x1) && d._tw && d._tw.hp > 0 && Math.abs(d._tw.x - (x0 + x1) / 2) < (x1 - x0) / 2 + 200) drawTower(d._tw); }   // (a harbour's lighthouse standing away from it: drawn where it is - 50-zz-structh)
   if (HARB.on) drawFreePiers(x0, x1);
   guardDraw('drawSeaStructs', () => drawSeaStructs(x0, x1));                  // (the docks standing in the sea: behind the boats, with the piers - 50-zz-struct.js)
   guardDraw('drawCranes', () => drawCranes(x0, x1));                                     // (the harbours' container cranes: on the pier, so behind every ship - user Nov 2 18:45: "the crane should render behind ships since it's in a dock")
@@ -27744,7 +27748,7 @@ function renderObjects() {
   guardDraw('drawStoryCars', () => drawStoryCars(x0, x1, 'sea'));                 // (a car in the sea: under the water's tint - 50-story-cars)
   guardDraw('drawAnchors', () => drawAnchors(x0, x1, false));                              // (every boat's anchor out, its rope - 50-land-anchors)
   if (LAND) guardDraw('drawLooseContainers', () => drawLooseContainers(x0, x1, false));           // (boxes falling, or lying burnt on the pier)
-  if (LAND) for (const d of docks) drawPierGun(d._tw || towers[d.player], d);   // (the pier's machine gun in front of the crane, user Oct 26: "now it's invisible")
+  if (LAND) for (const d of docks) if (!d.lake) drawPierGun(d._tw || towers[d.player], d);   // (the pier's machine gun in front of the crane, user Oct 26: "now it's invisible")
   ot = ema('obDock', ot);   // (crashes, anchors, cranes, loose boxes, the pier gun)
   drawMinisubs(x0, x1);                                   // (the research ships' subs, on their cranes or down in the water)
   drawReefItems(coastFront, x0, x1);                      // (boulders in front of the pier's pillars)
@@ -30291,7 +30295,7 @@ function harbourRect(d, a, w, y, k, c0, r0, c1, r1) {
   const xa = d.dir > 0 ? a + c0 * k : a + w - c1 * k;
   return [xa, y + r0 * k, xa + (c1 - c0) * k, y + r1 * k];
 }
-function shipGateRect(d) { const [a] = hangarSpan(d); return harbourRect(d, a, HANGAR_W, HANGAR_TOP, HGR.K, ...HGR.HOLE); }
+function shipGateRect(d) { const [a] = hangarSpan(d); return harbourRect(d, a, HANGAR_W, HANGAR_TOP + dkY(d), HGR.K, ...HGR.HOLE); }   // (at its own water's - dkY, 50-zz-structh)
 // a picture stretched over a world rectangle (pixel edges where the neighbouring pictures' are)
 function blitRect(src, r, k) {
   const L = PX(r[0]), T = PY(r[1]), R = PX(r[2]), B = PY(r[3]);
@@ -30321,14 +30325,15 @@ function drawHarbourFront(d, x0, x1) {
   // standing in the water on its foundation, its room and door behind its walls
   // (user Oct 29: "the ground below the hangar should be just pitch black") from the bottom of its slab down; in OPEN WORLD
   // and BATTLE the land's pass paints it again over the water's tint (drawCoastWedges, 50-land-coast)
-  { const L = Math.round(PX(ha)), R = Math.round(PX(hb)), T0 = Math.round(PY(HANGAR_TOP + HGR.SLAB * HGR.K)); C.fillStyle = UG_CSS; C.fillRect(L, T0, R - L, bh + SHY + 50 - T0); }
+  const u = dkY(d), DT = DOCK_TOP_Y + u;                       // (everything of it at its own water's: the sea's, a lake's - dkY, 50-zz-structh)
+  { const L = Math.round(PX(ha)), R = Math.round(PX(hb)), T0 = Math.round(PY(HANGAR_TOP + u + HGR.SLAB * HGR.K)); C.fillStyle = UG_CSS; C.fillRect(L, T0, R - L, bh + SHY + 50 - T0); }
   const qa = quayArt(), qx = [d.F, d.root];
-  blitRect(T(qa[f]), [Math.min(...qx), DOCK_TOP_Y, Math.max(...qx), DOCK_TOP_Y + BASE.H * BASE.K], BASE.K);   // (the quay, the lighthouse on it)
-  if (!d.noPier) { const pa = dockArtOf(d); blitRows(pa, [d.px0, DOCK_TOP_Y, d.px0 + d.pl, DOCK_TOP_Y + pa.height * BASE.K], BASE.K, 0, PIER_DECK_ROWS); if (!d.pierGone) drawDockLamps(d.lamps, BASE.K, dockLampFlip(d)); }   // (no pier: its quay alone - the harbours as parts; its lamps on its deck - 50-zz-docklamp.js)
+  blitRect(T(qa[f]), [Math.min(...qx), DT, Math.max(...qx), DT + BASE.H * BASE.K], BASE.K);   // (the quay, the lighthouse on it)
+  if (!d.noPier) { const pa = dockArtOf(d); blitRows(pa, [d.px0, DT, d.px0 + d.pl, DT + pa.height * BASE.K], BASE.K, 0, PIER_DECK_ROWS); if (!d.pierGone) drawDockLamps(d.lamps, BASE.K, dockLampFlip(d)); }   // (no pier: its quay alone - the harbours as parts; its lamps on its deck - 50-zz-docklamp.js)
   const sg = shipGateRect(d);
   blitRect(T(img.hangarRoom[f]), [sg[0] - 1, sg[1] - 1, sg[2] + 1, sg[3] + 1], HGR.K);
   drawGate(T(img.hgGate[f]), sg, Math.max(d.gates.ship, d.gates.sub), (sg[2] - sg[0]) / img.hgDoor.width);   // (the old door, stretched to the painted opening)
-  blitRect(T(img.hangarArt[f]), [ha, HANGAR_TOP, ha + HANGAR_W, HANGAR_BOT], HGR.K);
+  blitRect(T(img.hangarArt[f]), [ha, HANGAR_TOP + u, ha + HANGAR_W, HANGAR_BOT + u], HGR.K);
   const tw = d._tw || towers[d.player];
   if (tw) drawTower(tw);
   if (!LAND) drawPierGun(tw, d);                                 // (OPEN WORLD: drawn after the cranes - in front of them, user Oct 26)
@@ -31391,7 +31396,7 @@ function rainRoof(wx) {
     top = surfaceY(wx);
     for (const d of docks) {
       const q = pierEdge(d), a = Math.min(q, d.x0 + (d.dir > 0 ? d.w : 0)), b = Math.max(q, d.x0 + (d.dir > 0 ? d.w : 0));
-      if (wx >= a && wx <= b) top = Math.min(top, DECK_Y);
+      if (wx >= a && wx <= b) top = Math.min(top, DECK_Y + dkY(d));
       const r = hangarRoofAt(d, wx); if (r != null) top = Math.min(top, r);
     }
   }
@@ -31404,7 +31409,7 @@ function hangarRoofAt(d, wx) {
   const [ha, hb] = hangarSpan(d);
   if (wx <= ha || wx >= hb) return null;
   const T = img.hangarTops, col = Math.round((d.dir > 0 ? wx - ha : ha + HANGAR_W - wx) / HGR.K);
-  return col < 0 || col >= T.length || T[col] >= HGR.H - 1 ? null : HANGAR_TOP + T[col] * HGR.K;
+  return col < 0 || col >= T.length || T[col] >= HGR.H - 1 ? null : HANGAR_TOP + dkY(d) + T[col] * HGR.K;   // (at its own water's)
 }
 /* The one rain (user Oct 27, 15:05: "the rain seems to be 'static' as a texture, vs falling dynamically and there is like a
    secondary chunkier rain on top that actually moves"). There were two: the NEW sky's fine streaks (the Cloud Lab's
@@ -32370,7 +32375,7 @@ function cpuSub0(B, dt) {
   if (sb.state !== 'out' || sb.gate) return;
   const wl = waterLv(sb.x);   // (her own water's level - waterLv: every water as the ocean, user Nov 3)
   // hurt, or out of torpedoes: home (a raider never goes home)
-  if (!B.unit && (subLife(sb) < 0.4 || sb.torps <= 0)) { cpuDrive(B, d.dir); sb.depthT = SUB_GATE_Y; return; }
+  if (!B.unit && (subLife(sb) < 0.4 || sb.torps <= 0)) { cpuDrive(B, d.dir); sb.depthT = subGateY(sb); return; }
   if (E.ship) {
     // under the battleship, then a mine let go under her keel, floating up into her (aimed where she'll be; the vertical
     // torpedo is gone, user Oct 29)
@@ -32932,7 +32937,7 @@ function civNightHold(c, dt) {
   return !!(c.trip && c.trip.wait);
 }
 // in (or at the mouth of) a harbour: no anchoring there - she goes on in, or out clear of it
-const ancPortMouth = c => docks.some(d => Math.abs(c.x - d.quay) < 1900);
+const ancPortMouth = c => docks.some(d => dockSameWater(d, c.x) && Math.abs(c.x - d.quay) < 1900);   // (a harbour in her water)
 /* the passenger ships' trip: from a port by day to her spot in the middle of the ocean by nightfall (her speed eased so
    she gets there about then - a little faster than her usual if she must), anchored there the night, on to the other
    city's port the next day, a while there, and out again. Each picks her own spot, well apart from the others'. */
@@ -32974,7 +32979,7 @@ function rsBeaconAt(c) {
 /* ---- the small boats' night ---- */
 // a mooring by the nearest harbour: the jet boats close in by the pier, the yachts a little further off, in a row
 function ancMoor(v, list, off, gap) {
-  let best = null; for (const d of docks) if (!best || Math.abs(d.quay - v.x) < Math.abs(best.quay - v.x)) best = d;
+  let best = null; for (const d of docks) if (dockSameWater(d, v.x) && (!best || Math.abs(d.quay - v.x) < Math.abs(best.quay - v.x))) best = d;   // (in her own water)
   if (!best) return v.x;
   const i = list.filter(o => o !== v && o._moorD === best).length;
   v._moorD = best;
@@ -37093,7 +37098,7 @@ function civUnder(x, y) {
     else if (k === 'sub') { if (Math.abs(x - v.x) < 16 && Math.abs(y - v.y) < 12) return [v, v.x, v.y]; }
     else if (k === 'shuttle') { const st = v.state === 'pad' || v.state === 'count' || v.state === 'climb', [cx, cy] = st ? stackPoint(v, 0.5, 0.5) : [v.x, v.y], hw = st ? 22 : 38, hh = st ? 52 : 11; if (Math.abs(x - cx) < hw * 1.2 && Math.abs(y - cy) < hh * 1.2) return [v, cx, cy]; }
     else if (k === 'orb') { const hw = v.kind === 'iss' ? 114 : 28, hh = v.kind === 'iss' ? 36 : 10; if (Math.abs(x - v.x) < hw * 1.2 && Math.abs(y - v.y) < hh * 1.6) return [v, v.x, v.y]; }
-    else if (k === 'crane') { const a = Math.min(v.wx(0), v.wx(CRI.w)), b = Math.max(v.wx(0), v.wx(CRI.w)); if (x > a && x < b && y > v.top && y < DECK_Y) return [v, v.tx, v.hy]; }
+    else if (k === 'crane') { const a = Math.min(v.wx(0), v.wx(CRI.w)), b = Math.max(v.wx(0), v.wx(CRI.w)); if (x > a && x < b && y > v.top && y < (v.deck ?? DECK_Y)) return [v, v.tx, v.hy]; }
     else if (k === 'blimp') { const hw = blimpArt ? blimpArt.W * BLIMP_K * 0.45 : 64; if (Math.abs(x - v.x) < hw && Math.abs(y - v.y) < 20) return [v, v.x, v.y]; }
   }
   return null;
@@ -38650,7 +38655,7 @@ function drawCoastWedges(x0, x1) {
   for (const d of docks) {
     const [ha, hb] = hangarSpan(d);
     if (hb < x0 - 20 || ha > x1 + 20) continue;
-    const L = Math.round(PX(ha)), R = Math.round(PX(hb)), T0 = Math.round(PY(HANGAR_BOT));
+    const L = Math.round(PX(ha)), R = Math.round(PX(hb)), T0 = Math.round(PY(HANGAR_BOT + dkY(d)));   // (at its own water's)
     C.fillStyle = UG_CSS; C.fillRect(L, T0, R - L, bh + SHY + 50 - T0);
   }
 }
@@ -38838,7 +38843,7 @@ function buildCranes() {
     craneGeo(cr);
     cr.hy = cr.railY + 30;
     // the pier's stacks: at its root, by the lighthouse, where the crane reaches at its land end - three, a few boxes on them
-    for (let i = 0; i < 3; i++) { const sl = { x: R.mid1 + out * i * (CONT_W + 4), stack: [] }; const n = Math.floor(crR() * 3); for (let j = 0; j < n; j++) sl.stack.push(newCont()); cr.slots.push(sl); }
+    for (let i = 0; i < 3; i++) { const sl = { x: R.mid1 + out * i * (CONT_W + 4), stack: [], deck: cr.deck }; const n = Math.floor(crR() * 3); for (let j = 0; j < n; j++) sl.stack.push(newCont()); cr.slots.push(sl); }
     cranes.push(cr);
   }
 }
@@ -38848,8 +38853,10 @@ function craneGeo(cr) {
   cr.seaLeg = sea; cr.landLeg = sea - out * cr.legs;
   cr.ax = sea - out * CRI.legs[1] * CRK;                 // (the drawing's left edge as drawn - its sea side on the right - mirrored for the other)
   cr.wx = p => cr.ax + out * p * CRK;                     // (a column of the drawing, in the world)
-  cr.top = DECK_Y - CRI.foot * CRK;
-  cr.railY = DECK_Y - (CRI.foot - CRI.rail[2]) * CRK;
+  cr.deck = DECK_Y + dkY(cr.d);                          // (its pier's deck, at its own water's - dkY, 50-zz-structh)
+  for (const s of cr.slots || []) s.deck = cr.deck;
+  cr.top = cr.deck - CRI.foot * CRK;
+  cr.railY = cr.deck - (CRI.foot - CRI.rail[2]) * CRK;
   const r0 = cr.wx(CRI.rail[0] + 8), r1 = cr.wx(CRI.rail[1] - 8);
   cr.rmin = Math.min(r0, r1); cr.rmax = Math.max(r0, r1);
   cr.hyMin = cr.railY + CRI.troHang * CRK + 2;           // (the spreader right up under the trolley)
@@ -38912,7 +38919,7 @@ function craneFalls(cr) {
 // a stack on the pier goes in: its boxes fall, the upper ones riding the lower
 function stackFalls(s) {
   const vx = crRnd(-14, 14), va = crRnd(-0.8, 0.8);
-  s.stack.forEach((k, j) => Object.assign(k, { where: 'free', x: s.x, y: DECK_Y - CONT_H * (j + 0.5), vx, vy: crRnd(0, 20), a: 0, va, deck: null, on: j ? s.stack[j - 1] : null }));
+  s.stack.forEach((k, j) => Object.assign(k, { where: 'free', x: s.x, y: (s.deck ?? DECK_Y) - CONT_H * (j + 0.5), vx, vy: crRnd(0, 20), a: 0, va, deck: null, on: j ? s.stack[j - 1] : null }));
   s.stack.length = 0;
 }
 // (the dock chat, Oct 29 - user: "if it gets close to the crane, [it] falls into the water. And the container parts would
@@ -38961,7 +38968,7 @@ function shipCargo(c) {
 const shipSlotAt = (c, i, j) => civPoint(c, CSLOT.cols[i], CSLOT.deck - CONT_PH * (j + 0.5));
 // the stacks the crane can reach: on the pier, and the ship's slots under its girder
 function craneStacks(cr) {
-  const L = cr.slots.map((s, i) => ({ kind: 'dock', i, x: s.x, stack: s.stack, topY: DECK_Y - s.stack.length * CONT_H })).filter(s => !deckGone(cr.d, s.x));   // (not where the deck has fallen)
+  const L = cr.slots.map((s, i) => ({ kind: 'dock', i, x: s.x, stack: s.stack, topY: cr.deck - s.stack.length * CONT_H })).filter(s => !deckGone(cr.d, s.x));   // (not where the deck has fallen)
   const ship = craneShip(cr);
   const R = craneRun(cr.d), m0 = Math.min(R.mid0, R.mid1), m1 = Math.max(R.mid0, R.mid1);
   if (ship) { const cg = shipCargo(ship); cg.forEach((st, i) => { const [x, y] = shipSlotAt(ship, i, st.length - 0.5); if (x > m0 + 2 && x < m1 - 2) L.push({ kind: 'ship', ship, i, x, stack: st, topY: y }); }); }
@@ -39054,7 +39061,7 @@ function craneFloor(cr) {
   const s = stackUnder(cr, cr.tx), h = cr.load ? CONT_H : cr.obj ? magTop(cr.obj) + magFoot(cr.obj) : 0;
   // (user Oct 27: "the crane's spreader goes through the ship's hull between her slots") over the water it comes down on
   // whatever ship's top is under it - across the spreader's width, so a stack's edge or her rail stops it too
-  const sea = (cr.tx - cr.d.quay) * cr.out > 0, under = sea ? Math.min(surfaceY(cr.tx), ...[-5, 0, 5].map(dx => shipY(cr.tx + dx, cr.hyMin))) : DECK_Y;
+  const sea = (cr.tx - cr.d.quay) * cr.out > 0, under = sea ? Math.min(surfaceY(cr.tx), ...[-5, 0, 5].map(dx => shipY(cr.tx + dx, cr.hyMin))) : cr.deck;
   let f = s ? Math.min(s.topY, under) - 3 - h : under - 3 - h;
   // (anything a magnet takes under it - a box on a ship, a tank, a plane: down onto its top)
   if (!s) for (const q of magTargetsAll()) if (Math.abs(q.x - cr.tx) < 14) f = Math.min(f, q.y - magTop(q) - 3 - h);
@@ -39084,7 +39091,7 @@ function craneCpu(cr, dt, mv, dn) {
     // (where it goes: its stack still there and with room - or, the ship gone, a stack on the pier)
     let to = J.to; const S = craneStacks(cr);
     if (!to || !S.some(s => s.stack === to.stack) || to.stack.length >= CONT_ROWS) { to = S.filter(s => s.kind === 'dock' && s.stack.length < CONT_ROWS)[0]; J.to = to; }
-    if (!to) { if (dn(DECK_Y - 3 - CONT_H, 40)) { craneRelease(cr); cr.phase = 'home'; } return; }
+    if (!to) { if (dn(cr.deck - 3 - CONT_H, 40)) { craneRelease(cr); cr.phase = 'home'; } return; }
     to = S.find(s => s.stack === to.stack); J.to = to;
     if (dn(up, 45) & mv(to.x, 70)) cr.phase = 'set';
     return;
@@ -39101,7 +39108,7 @@ const CONT_REACH = c => civLen(c) + 300;
 function contPlaces(near) {
   const P = [];
   for (const cr of cranes) {
-    cr.slots.forEach(s => s.stack.forEach((k, j) => P.push([k, s.x, DECK_Y - CONT_H * (j + 0.5), 0, 'dock'])));
+    cr.slots.forEach(s => s.stack.forEach((k, j) => P.push([k, s.x, cr.deck - CONT_H * (j + 0.5), 0, 'dock'])));
     if (cr.load) P.push([cr.load, cr.tx, cr.hy + 3 + CONT_H / 2, 0, 'held', cr]);
   }
   for (const c of civShips) if (c.cargo && (c.state === 'sail' || c.state === 'sink') && (!near || near(c.x - CONT_REACH(c), c.x + CONT_REACH(c)))) c.cargo.forEach((st, i) => st.forEach((k, j) => { const [x, y, a] = cargoAt(c, i, j); P.push([k, x, y, a, 'ship', c, i]); }));
@@ -39169,7 +39176,7 @@ function contNear(c, x, y) {
 }
 function contFind(x, y) {
   for (const cr of cranes) {
-    for (const s of cr.slots) { const st = s.stack; for (let j = 0; j < st.length; j++) { const cy = DECK_Y - CONT_H * (j + 0.5); if (contIn(x, y, s.x, cy)) return [st[j], s.x, cy, 0, 'dock']; } }
+    for (const s of cr.slots) { const st = s.stack; for (let j = 0; j < st.length; j++) { const cy = cr.deck - CONT_H * (j + 0.5); if (contIn(x, y, s.x, cy)) return [st[j], s.x, cy, 0, 'dock']; } }
     if (cr.load) { const cy = cr.hy + 3 + CONT_H / 2; if (contIn(x, y, cr.tx, cy)) return [cr.load, cr.tx, cy, 0, 'held', cr]; }
   }
   for (const c of civShips) {
@@ -39315,7 +39322,7 @@ function boxOnBox(k, yb0) {
   let top = Infinity, hit = null, hs = null;
   for (const cr of cranes) for (const s of cr.slots) {
     if (!s.stack.length || Math.abs(k.x - s.x) >= CONT_W - 1) continue;
-    const t = DECK_Y - s.stack.length * CONT_H;
+    const t = (s.deck ?? DECK_Y) - s.stack.length * CONT_H;
     if (yb0 <= t + 3 && yb >= t && t < top) { top = t; hit = null; hs = s; }
   }
   for (const q of containers) {
@@ -39374,14 +39381,14 @@ const contSeen = (x, x0, x1) => x + CONT_R > x0 && x - CONT_R < x1;
 function drawLooseContainers(x0, x1, under) {
   for (const k of containers) if ((k.where === 'free' || k.where === 'rest' || (k.where === 'hook' && !under)) && (k.where === 'hook' || !!k.inWater === under) && contSeen(k.x, x0, x1)) drawContainerAt(k.x, k.y, k.a, k);
 }
-function drawCranes(x0, x1) {
+function drawCranes(x0, x1, lake = false) {
   if (!LAND || !cranes.length) return;
   if (!craneArt) buildCraneArt();
   const A = craneArt, s = CRK * SV;
   for (const cr of cranes) {
-    if (cr.gone) continue;                               // (in pieces in the sea: chunks)
+    if (cr.gone || !!(cr.d && cr.d.lake) !== lake) continue;   // (a lake's pier's: the land's pass, with its harbour - drawLakeHarbours)                              // (in pieces in the sea: chunks)
     // the pier's stacks: where they stand, each seen by its own box - the crane rolls along the pier away from them
-    for (const sl of cr.slots) if (contSeen(sl.x, x0, x1)) sl.stack.forEach((k, j) => drawContainerAt(sl.x, DECK_Y - CONT_H * (j + 0.5), 0, k));
+    for (const sl of cr.slots) if (contSeen(sl.x, x0, x1)) sl.stack.forEach((k, j) => drawContainerAt(sl.x, cr.deck - CONT_H * (j + 0.5), 0, k));
     const a = Math.min(cr.wx(0), cr.wx(CRI.w)), b = Math.max(cr.wx(0), cr.wx(CRI.w));
     if (b < x0 - 40 || a > x1 + 40) continue;
     const R = cr.out > 0;
@@ -42377,13 +42384,13 @@ function lakePath(a, b, step, yOff) {
 // 42-render-sky.js clipRegion); worked out again only when the ground changes (land.ver)
 function lakeWet(L) {
   const v = (land.ver || 0) + 1;
-  if (L._wv === v) return L._w;
+  if (L._wv === v) return HARB.on ? lakeWetTrim(L, L._w) : L._w;   // (to a harbour's quay standing in it - 50-zz-structh)
   let a = L[0], b = L[1];
   const lv = lakeLv(L);
   while (a < b && landTop(a) <= lv + 0.5) a += 2;
   while (b > a && landTop(b) <= lv + 0.5) b -= 2;
   L._w = [Math.max(L[0], a - 2), Math.min(L[1], b + 2)]; L._wv = v;
-  return L._w;
+  return HARB.on ? lakeWetTrim(L, L._w) : L._w;
 }
 // a lake whose bed is marked SEA (most of its columns): the sea's, not a lake's
 /* (user Nov 1 12:49-12:54: "Its like you are doing two separate systems" - "all terrains must have their 'underwater background
@@ -42426,6 +42433,52 @@ function drawLakeRoots(x0, x1) {
       if (solRoots.length) drawSolidRoots(a, b);             // (in front, never hazed - after the tint, as at sea)
     } finally { C.restore(); }
   }
+}
+// THE LOW SUN IN EVERY WATER (user Nov 3 15:11: "They should" - boats on a lake dark against a low sun as at sea): the sea's band
+// (renderObjects: what stands above the water a dark silhouette, its part under it darkening and fading with depth) laid over what's in
+// a lake. The land behind them is already in the world's layer, so they're drawn on a layer of their own, the band laid over that
+// layer from each lake's own surface, and the layer put over the world. No low sun or no lake in view: drawn straight, as ever
+let LK_DUSK = null;
+function lakeDusk(x0, x1, draw) {
+  const lakes = (land.lakes || []).filter(L => L[1] > x0 && L[0] < x1);
+  if (!(E.sunset > 0.03) || !lakes.length) { draw(); return; }
+  if (!LK_DUSK) LK_DUSK = makeLayer(bw, bh);
+  if (LK_DUSK.width !== bw || LK_DUSK.height !== bh) { LK_DUSK.width = bw; LK_DUSK.height = bh; }
+  const W = C, t = W.getTransform(), L = LK_DUSK.getContext('2d');
+  L.setTransform(1, 0, 0, 1, 0, 0); L.clearRect(0, 0, bw, bh);
+  L.setTransform(t.a, t.b, t.c, t.d, t.e, t.f); L.imageSmoothingEnabled = false;
+  C = L;
+  try {
+    draw();
+    C.save(); C.globalCompositeOperation = 'source-atop';
+    C.fillStyle = rgbs([29, 26, 61], 0.9 * E.sunset);
+    fillAboveSurface(1, -SHY - 40);                      // (above each column's own surface - the sea's, a lake's)
+    for (const K of lakes) {                             // (under it, from the lake's own level)
+      const lv = lakeLv(K), a = Math.floor(PX(K[0])), b = Math.ceil(PX(K[1])), dg = C.createLinearGradient(0, PY(lv), 0, PY(lv + 60));
+      dg.addColorStop(0, rgbs([29, 26, 61], 0.75 * E.sunset)); dg.addColorStop(1, rgbs([29, 26, 61], 0));
+      C.fillStyle = dg; C.fillRect(a, PY(lv - 30), b - a, PY(lv + 60) - PY(lv - 30));
+    }
+    C.restore();
+  } finally { C = W; }
+  C.save(); C.setTransform(1, 0, 0, 1, 0, 0); C.drawImage(LK_DUSK, 0, 0); C.restore();
+}
+// THE HARBOURS ON A LAKE (user Nov 3 15:11: piers and the marine hangar on lakes - "Yes, unified system, always"): the sea's own
+// drawing of them (drawPierPosts, drawHarbourFront, drawFreePiers) at their water's level (dkY, 50-zz-structh), in the land's pass
+// after the lake's floor and back water and before its boats - as the sea's pass has them. Their pillars in the lake's water down
+// to its bed (clipped to it, so the bed covers their feet as the sea floor does); the deck, quay and hangar over the ground
+const harbourOnLake = () => HARB.on && (docks.some(d => d.lake) || HARB.free.some(p => p.lake));
+function drawLakeHarbours(x0, x1) {
+  if (!harbourOnLake()) return;
+  const step = Math.max(1, 2 / SV);
+  for (const L of land.lakes || []) {
+    const a = Math.max(x0 - 8, L[0]), b = Math.min(x1 + 8, L[1]); if (b <= a) continue;
+    C.save(); lakePath(a, b, step, -4 * bh); C.clip();   // (from high over its surface down to its bed)
+    try { drawPierPosts(x0, x1, true); } finally { C.restore(); }
+  }
+  for (const d of docks) if (d.lake) { drawHarbourBack(d, x0, x1); drawHarbourFront(d, x0, x1); if (!harbourInView(d, x0, x1) && d._tw && d._tw.hp > 0 && Math.abs(d._tw.x - (x0 + x1) / 2) < (x1 - x0) / 2 + 200) drawTower(d._tw); }
+  drawFreePiers(x0, x1, undefined, true);
+  guardDraw('drawCranes', () => drawCranes(x0, x1, true));   // (its crane and boxes on its pier, in front of the land's backdrop - user Nov 3 15:29)
+  if (LAND) for (const d of docks) if (d.lake) drawPierGun(d._tw || towers[d.player], d);
 }
 // the boats' shadows in every lake's water - the ocean's own (drawShipShadows), each from its hull at this water's surface, down to
 // its bed (in the lakes' pass, after the ground: they fall on the bed as at sea)
@@ -43310,7 +43363,7 @@ function magTargets() {
 function magBoxTargets() {
   const L = [];
   if (!LAND || !containers.length) return L;
-  for (const cr of cranes) for (const s of cr.slots) if (s.stack.length) { const k = s.stack[s.stack.length - 1]; k.x = s.x; k.y = DECK_Y - CONT_H * (s.stack.length - 0.5); k.from = s.stack; L.push(k); }
+  for (const cr of cranes) for (const s of cr.slots) if (s.stack.length) { const k = s.stack[s.stack.length - 1]; k.x = s.x; k.y = (s.deck ?? DECK_Y) - CONT_H * (s.stack.length - 0.5); k.from = s.stack; L.push(k); }
   for (const c of civShips) if (c.cargo && c.state === 'sail') c.cargo.forEach((st, i) => { if (!st.length) return; const k = st[st.length - 1], [x, y] = shipSlotAt(c, i, st.length - 1); k.x = x; k.y = y; k.from = st; L.push(k); });
   for (const k of containers) if (k.where === 'rest' && !k.inWater && k.carried == null) { k.from = null; L.push(k); }
   return L;
@@ -45032,7 +45085,7 @@ function stepLandRest(dt) {
   // the launch pads: on the ground under their whole width (the stack on one tips with it - stepShuttle)
   for (const R of padKeys()) { const P = padRestOf(R); stepPadBoom(P, dt); if (woke(P, 115) && restSettle(P, P.x, P.y, 105, dt)) { P.y = RS.foot; P.a += (RS.a - P.a) * Math.min(1, dt * 6); restLanded(P.x, P.y, RS.hit, 1); } }
   // boxes lying on the ground: its ground gone, a box falls (as a loose one - stepContainers)
-  for (const k of containers) if (k.where === 'rest' && !k.deck && !k.on && !k.inWater && dryLand(k.x) && landWoke(k.x, CONT_W / 2) && !docks.some(d => harbourHit(d, k.x, DECK_Y))) {
+  for (const k of containers) if (k.where === 'rest' && !k.deck && !k.on && !k.inWater && dryLand(k.x) && landWoke(k.x, CONT_W / 2) && !docks.some(d => harbourHit(d, k.x, DECK_Y + dkY(d)))) {
     const [want] = restGround(k.x, k.y + CONT_H / 2, CONT_W * 0.4); if (want > k.y + CONT_H / 2 + 1) Object.assign(k, { where: 'free', vx: 0, vy: 0, va: lrRnd(-0.4, 0.4) });
   }
   // pieces lying on the ground (a wing, rubble): they fall again
@@ -45475,7 +45528,8 @@ function buildSeaplanes() {
   seaplanes.length = 0;
   if (!LAND) return;
   for (const d of docks) for (let k = 0; k < 2; k++) {
-    const out = -d.dir, home = d.quay + out * (260 + k * 140);
+    const out = -d.dir, S = dockSpan(d, 300), home = d.quay + out * (260 + k * 140);
+    if (home < S[0] || home > S[1]) continue;              // (its water too small for it: a lake's - none)
     seaplanes.push(newSeaplane(home, out, splnRnd(15, 60) + k * 25, (k * 3 + (d.dir > 0 ? 5 : 1)) % CESSNA_COLS.length));
   }
 }
@@ -49146,7 +49200,8 @@ function buildJetboats() {
   if (!LAND) return;
   let k = 0;
   for (const d of docks) for (let i = 0; i < 4; i++) {
-    const a = d.quay - d.dir * 140, b = d.quay - d.dir * jbRnd(800, 1150);
+    const S = dockSpan(d, 60), a = clamp(d.quay - d.dir * 140, S[0], S[1]), b = clamp(d.quay - d.dir * jbRnd(800, 1150), S[0], S[1]);   // (in its own water - a lake's too)
+    if (Math.abs(b - a) < 80) continue;
     jetboats.push(newJetboat(Math.min(a, b), Math.max(a, b), (k++) % JB_COLS.length, 'jet'));
   }
 }
@@ -49260,7 +49315,7 @@ const onLakeW = x => inCountry(x);                              // (OPEN WORLD a
 // where the ground is under the water's surface (not land, or land the water stands over), out to WSPAN_R each side - the boat
 // asks again every step, so the reach moves with it. A boat already nearer a shore than m stays where it is (never moved by it)
 const WSPAN_R = 600, WSPAN_ST = 10;
-const waterWet = q => !onLand(q) || landTop(q) > surfaceY(q) + 0.5;
+const waterWet = q => !onLand(q) || landTop(q) > surfaceY(q) + 0.5 && !lakeDockDry(q);   // (a lake's harbour on its own ground - 50-zz-structh)
 function waterSpanAt(x, m) {
   let lo = x, hi = x;
   while (lo > x - WSPAN_R - m && waterWet(lo - WSPAN_ST)) lo -= WSPAN_ST;
@@ -51833,6 +51888,7 @@ function drawLandHeliWreck(w) {
 function hangarLandCut(x0, x1) {
   const cut = [], ST = 2;
   for (const d of docks) {
+    if (d.lake) continue;                                 // (a lake's: drawn in this pass, over its ground - drawLakeHarbours, 50-land-lake)
     // (from its land wall: the painting's last HGR_LAND_EDGE columns are only the slab, and the ground goes on over them)
     const [ha0, hb0] = hangarSpan(d), ha = d.dir < 0 ? ha0 + HGR_LAND_EDGE * HGR.K : ha0, hb = d.dir > 0 ? hb0 - HGR_LAND_EDGE * HGR.K : hb0;
     const a = Math.max(ha, x0 - 10), b = Math.min(hb, x1 + 10), T = img.hangarTops;
@@ -51885,8 +51941,12 @@ function renderLandObjects0() {
   let lq = performance.now(); const lt = k => { const t = performance.now(); FT['l:' + k] = (FT['l:' + k] || 0) + t - lq; lq = t; };
   if (!spans.length) { drawStructs(x0, x1); drawTropFront(x0, x1); }   // (a dock or a house on an island out at sea, no land in view)
   if (spans.length) {
+    // (user Nov 3 15:29, a lake's water one flat grey-blue: "Why is the water still flat?" - the backdrop forest's fill under its trees runs
+    // down to the view's bottom for the ground in front to cover, and it was drawn after the lakes' water, over it. The forest is far
+    // behind: drawn first, the lakes' water in front of it)
+    if (!edTiny(15 * UPM)) drawLandTrees(x0, x1); lt('trees');
     guardDraw('lakeRoots', () => drawLakeRoots(x0, x1));   // (an island in a country's water: its rock under the water, behind the ground - 50-land-lake)
-    lt('roots'); if (!edTiny(15 * UPM)) drawLandTrees(x0, x1); lt('trees');
+    lt('roots');
     if (CAVE.ready) CAVE.holeSnap(VSX, VWP);                  // (a cave's entry out of the water: the world behind kept, laid back below - the sea's rule, user Nov 3 05:53)
     drawLandGround(x0, x1, () => { if (!edTiny(0.5 * UPM)) drawFieldFlowers(x0, x1); });   // (the green country's flowers - on its field)
     drawHoleDark(x0, x1, 'up');                                 // (the holes' dark, out of the water - 50-land-islands, user Nov 2 14:23)
@@ -51900,11 +51960,14 @@ function renderLandObjects0() {
     drawLake(x0, x1, false);                              // (the lakes' water, under what's in them)
     guardDraw('lakeShadows', () => drawLakeShadows(x0, x1));   // (the boats' shadows in its water - the ocean's own, 50-land-lake)
     guardDraw('lakeSea', () => drawLakeSea(x0, x1));     // (a lake bed marked SEA: the sea's corals, boulders and weed - 50-land-lake)
+    guardDraw('lakeHarbours', () => drawLakeHarbours(x0, x1));   // (piers and marine hangars on a lake: the sea's, at its level - 50-land-lake)
     // (a lake is the sea's water too, user Oct 25: what lies on its bed and sinks through it)
     lakeClip(x0, x1, () => { drawDuds(x0, x1); for (const p of pieces) if (p.x + p.hl > x0 - 20 && p.x - p.hl < x1 + 20) drawPiece(p); drawDcharges(x0, x1); drawTraffic(x0, x1, 'under'); drawBalloons(x0, x1, 'under'); drawBlimps(x0, x1, 'under'); drawCivHelis(x0, x1, 'under'); drawAnchors(x0, x1, true); drawCrashes(x0, x1, true); drawStoryCars(x0, x1, 'lake'); });
-    for (const b of bySize(sailboats)) if (onLakeW(b.x)) drawSailboat(b);   // (the lakes' yachts and motor boats)
-    guardDraw('drawJetboats', () => drawJetboats(x0, x1, true));
-    guardDraw('drawCivShips', () => drawCivShips(x0, x1, true)); guardDraw('drawMinisubs', () => drawMinisubs(x0, x1, true));   // (a ship or sub put on a lake: the lake's pass, as the boats - user Nov 2 12:33)
+    lakeDusk(x0, x1, () => {                              // (against a low sun, dark as the sea's - 50-land-lake)
+      for (const b of bySize(sailboats)) if (onLakeW(b.x)) drawSailboat(b);   // (the lakes' yachts and motor boats)
+      guardDraw('drawJetboats', () => drawJetboats(x0, x1, true));
+      guardDraw('drawCivShips', () => drawCivShips(x0, x1, true)); guardDraw('drawMinisubs', () => drawMinisubs(x0, x1, true));   // (a ship or sub put on a lake: the lake's pass, as the boats - user Nov 2 12:33)
+    });
     for (const tw of towers) if (tw && tw.edge && tw.x > x0 - 120 && tw.x < x1 + 120) drawTower(tw);   // (the towers on the mountains at the world's ends)
     lt('lakes'); restDrawDebris(1, x0, x1); lt('restDebris');                           // (the debris at rest on the land - 36-zzzz-settled.js)
     drawCrashes(x0, x1, false); if (!edTiny(0.5 * UPM)) drawLooseStones(x0, x1);   // (what's left of the planes; stones knocked loose, falling - 50-land-rest)
@@ -54974,7 +55037,7 @@ function dockLampAt(fx, fy, K, flip) { const dx = (DLAMP.lamp[0] - DLAMP.foot) *
 // a harbour's pier (layoutDock): over the pillar of each lamp's bay, on the deck
 // (the lantern hung out toward the sea: dockLampFlip)
 const dockLampFlip = d => d.look !== 'wood' && d.dir > 0;
-const pierLamps = d => dockLampSegs(d.nb).map(i => dockLampAt(d.ax(PIER_CAP + i * PIER_BAY + 8.5), DECK_Y, BASE.K, dockLampFlip(d)));
+const pierLamps = d => dockLampSegs(d.nb).map(i => dockLampAt(d.ax(PIER_CAP + i * PIER_BAY + 8.5), DECK_Y + dkY(d), BASE.K, dockLampFlip(d)));   // (on its deck, at its water's)
 // a wooden dock: x0 its left end, ppx its length in art pixels, tw its tile's width, K, its deck's top
 function woodDockLamps(x0, ppx, tw, K, deckY) {
   const n = Math.max(1, Math.ceil(ppx / tw - 1e-6)), L = [];
@@ -55069,7 +55132,7 @@ function colvDraw() {
   if (COLV.crane && typeof cranes !== 'undefined') for (const cr of cranes) {
     if (cr.gone || !cr.wx) continue;
     const a = Math.min(cr.wx(0), cr.wx(CRI.w));
-    colvFill((x, y) => { const t = craneTopAt(cr, x); return t != null && y >= t && y < DECK_Y; }, a, cr.top - 4, a + CRI.w * CRK, DECK_Y, c.crane);
+    colvFill((x, y) => { const t = craneTopAt(cr, x); return t != null && y >= t && y < cr.deck; }, a, cr.top - 4, a + CRI.w * CRK, cr.deck, c.crane);
   }
   if (COLV.tower) for (const tw of towers) { if (!tw) continue; const r = (lhOn(tw) ? LH_LAND + LH_SEA : TW.FW * TW.K) + 2, b = twBase(tw), h = lhOn(tw) ? lhGeo(tw).base[1] * LH_K : TW.FH * TW.K; colvFill((x, y) => towerHit(tw, x, y), tw.x - r, b - h - 8, tw.x + r, b + 4, c.tower); }
   if (COLV.ship) for (const sh of ships) {
@@ -57284,6 +57347,7 @@ function strCut(P, sw) { const m = P._cut || (P._cut = {}); let c = m[sw]; if (!
 // sea's pass with the harbours' piers, behind the boats (drawSeaStructs, renderObjects); in a lake, the land's pass draws it
 // before the lake's boats as before
 const strInSea = o => !!STR_KINDS[o.k].water && !lakeAt(clamp(o.x, 0, WORLD_W - 1));
+const strInLake = o => !!STR_KINDS[o.k].water && lakeAt(clamp(o.x, 0, WORLD_W - 1));   // (a water structure on a lake: the land's pass - a dock there a pier as at sea, 50-zz-structh)
 const STR_LAND = [], STR_SEA = [];
 function drawSeaStructs(x0, x1) {
   STR_SEA.length = 0; for (const o of strsUsed()) if (strInSea(o)) STR_SEA.push(o);
@@ -57418,7 +57482,7 @@ function stepStructs(dt) { strChimneys(dt); }
 // does drawStructs draw it: not the harbours' parts (drawn by the harbours themselves - 50-zz-structh.js) nor the gun towers (drawn
 // with the towers - each is one: towers[]); a picture kind only once its picture is there (a runway, road, pad, terminal, LARGE
 // hangar: drawn by hand)
-const strDrawn = (o, B) => !isHarbourPart(o) && o.k !== 'gunTower' && !isGunS(o) && (!!B.P || o.k === 'runway' || o.k === 'road' || o.k === 'launchPad' || o.k === 'terminal' || (o.k === 'hangarAir' && o.big));
+const strDrawn = (o, B) => !isHarbourPart(o) && !(o.k === 'dock' && woodPierOf(o)) && o.k !== 'gunTower' && !isGunS(o) && (!!B.P || o.k === 'runway' || o.k === 'road' || o.k === 'launchPad' || o.k === 'terminal' || (o.k === 'hangarAir' && o.big));
 // its still picture's kind: 1 a picture of the tropical set in the hour's light (put), 2 a picture as painted (the terminal's,
 // the LARGE hangar's), 0 none (a runway, a road - their colours rounded per channel in the hour's light, so drawn live -, a pad)
 const strStill = o => o.k === 'terminal' || (o.k === 'hangarAir' && o.big) ? 2 : o.k === 'runway' || o.k === 'road' || o.k === 'launchPad' ? 0 : 1;
@@ -57777,6 +57841,26 @@ const isHarbourPart = o => isPierS(o) || isMarineS(o) || isLightS(o) || o.k === 
 // (OPEN WORLD, BATTLE, STORY on this screen with both sides: the parts build the harbours)
 const harbourOn = () => true;
 const harbourParts = harbourOn;
+/* EVERY HARBOUR ON ITS OWN WATER (user Nov 3 15:11: piers and the marine hangar on lakes - "Yes, unified system, always"). A
+   harbour stands on the water at its sea side, the sea's or a lake's at any height: d.oy - its water's level less the sea's (0 at
+   sea, so the sea's harbours are as they were) - lifts everything of it laid out from the sea's level: its deck, quay, hangar,
+   door, lamps, tower, crane and boxes, and what hits or stands on them (dkY). d.lake: on a lake - drawn in the land's pass with the
+   lake's water (drawLakeHarbours, 50-land-lake), kept out of the sea's ships' way (dockSameWater) */
+const dkY = d => d && d.oy || 0;
+const wetX = x => { x = clamp(x, 0, WORLD_W - 1); return seaAtX(x) || lakeAt(x); };   // (any water: the sea's or a lake's)
+function dockWater(d, x) { x = clamp(x, 0, WORLD_W - 1); d.lake = !seaAtX(x) && lakeAt(x); d.oy = d.lake ? lakeLv(lakeOf(x)) - WATER_Y : 0; return d; }
+// (as a hangar out at sea makes its own ground - d.pad) a lake's harbour stands on its own foundation: behind its quay's face, out to
+// its hangar's land end, no lake's water - its surface line, its boats (lakeWet, waterWet) - the quay and the hangar standing there
+const lakeDockDry = x => { for (const d of docks) if (d.lake && (x - d.root) * d.dir > 0 && (x - d.L) * d.dir < HGR_INLAND) return true; return false; };
+function lakeWetTrim(L, w) {
+  let [a, b] = w;
+  for (const d of docks) if (d.lake && d.root > a && d.root < b && lakeOf(clamp(d.root, 0, WORLD_W - 1)) === L) { if (d.dir > 0) b = Math.min(b, d.root); else a = Math.max(a, d.root); }
+  return a === w[0] && b === w[1] ? w : [a, b];
+}
+// (its boats and seaplanes) where in its water a harbour's own may be: a lake's wet span, kept `m` in from its shores; the sea's: anywhere
+function dockSpan(d, m = 0) { if (!d.lake) return [-Infinity, Infinity]; const L = lakeOf(clamp(d.root, 0, WORLD_W - 1)), w = L ? lakeWet(L) : [d.root, d.root]; return [w[0] + m, w[1] - m]; }
+// (the sea's ships) a harbour in the same water as x: the sea's harbours for the sea, a lake's for its own lake
+const dockSameWater = (d, x) => !d.lake || lakeOf(clamp(x, 0, WORLD_W - 1)) === lakeOf(clamp(d.root, 0, WORLD_W - 1));
 // a pier's land end (where it meets a quay) and its way (dir: from the sea toward the land, as a harbour's)
 const pierDir = o => o.flip ? 1 : -1;
 // (user Nov 1 16:26: the pier's LENGTH as the wooden docks') its bays from its length in metres (len; none: the built-in pier's),
@@ -57785,12 +57869,12 @@ const pierNbOf = o => o.len > 0 ? Math.max(1, Math.round((o.len * UPM / BASE.K -
 const pierLenOf = o => (PIER_CAP + pierNbOf(o) * PIER_BAY) * BASE.K;
 const pierLandEnd = o => o.x + pierDir(o) * pierLenOf(o) / 2;
 // a harbour laid out so its pier's land end (its quay's sea face) is at E
-function dockForRoot(E, dir, nb) { const d = dockAt(E + dir * (QB_L + HANGAR_W - HGR_INLAND - HGR_EDGE * HGR.K), dir); d.nb = nb; layoutDock(d); return d; }
+function dockForRoot(E, dir, nb, wx) { const d = dockAt(E + dir * (QB_L + HANGAR_W - HGR_INLAND - HGR_EDGE * HGR.K), dir); if (wx != null) dockWater(d, wx); d.nb = nb; layoutDock(d); return d; }
 // (the editor's boxes) a marine hangar's layout, made for its place and kept
 function marineLayout(o) {
   const key = o.x + '|' + !!o.flip, c = o._lay;
   if (c && c.key === key) return c.d;
-  const d = dockAt(o.x, o.flip ? 1 : -1); layoutDock(d); o._lay = { key, d };
+  const d = dockAt(o.x, o.flip ? 1 : -1); layoutDock(d); dockWater(d, d.root - d.dir * 30); layoutDock(d); o._lay = { key, d };
   return d;
 }
 // (buildWorld, once the old harbours are laid out: left and right the two coasts', mkDock its stand-ins) the harbours from the parts
@@ -57799,7 +57883,7 @@ function harbourFromStrs(left, right, mkDock) {
   if (!harbourOn()) return;
   HARB.on = true; HARB.sig = harbourSig();
   const L = STRS.filter(o => !strFree(o)), pOf = t => t !== 0 && t !== 1 ? -1 : SIDE(0) === t ? 0 : 1, D = [];
-  for (const o of L) if (isMarineS(o)) { const d = dockAt(o.x, o.flip ? 1 : -1); d.player = pOf(strOwner(o)); d.so = o; layoutDock(d); D.push(d); }
+  for (const o of L) if (isMarineS(o)) { const d = dockAt(o.x, o.flip ? 1 : -1); d.player = pOf(strOwner(o)); d.so = o; layoutDock(d); dockWater(d, d.root - d.dir * 30); layoutDock(d); D.push(d); }   // (on the water at its door)
   // each its pier: one standing in front of its quay, the same way
   const used = new Set();
   for (const d of D) {
@@ -57807,7 +57891,7 @@ function harbourFromStrs(left, right, mkDock) {
     if (p) { used.add(p); d.pierS = p; d.nb = pierNbOf(p); } else d.noPier = true;
     layoutDock(d);
   }
-  for (const q of L) if (isPierS(q) && !used.has(q)) { const p = dockForRoot(pierLandEnd(q), pierDir(q), pierNbOf(q)); p.so = q; p.player = -1; p.key = 900 + HARB.free.length; p.noHangar = true; HARB.free.push(p); }
+  for (const q of L) if (isPierS(q) && !used.has(q)) { const p = dockForRoot(pierLandEnd(q), pierDir(q), pierNbOf(q), q.x); p.so = q; p.player = -1; p.key = 900 + HARB.free.length; p.noHangar = true; HARB.free.push(p); }
   for (const q of L) if (isWoodPierS(q)) { const p = woodPier(q); if (p) HARB.free.push(p); }   // (the wooden docks: piers of their own - below)
   // each its tower: the nearest lighthouse of its owner
   for (const d of D) {
@@ -57816,18 +57900,19 @@ function harbourFromStrs(left, right, mkDock) {
     if (best) { d.lh = best; HARB.tw.add(best.id); d.towerX = best.x; } else d.noTower = true;
   }
   // a hangar standing out at sea makes its own ground (as a dock placed at sea always did - DOCK_PADS)
-  for (const d of D) if (seaAtX(d.L + d.dir * 40)) d.pad = true;
+  for (const d of D) if (!d.lake && seaAtX(d.L + d.dir * 40)) d.pad = true;
   const home = d => d.player >= 0 && strVehs(d.so).some(e => e && (e.v === 'battleship' || e.v === 'warsub'));
   homeDock = [0, 1].map(p => D.find(d => d.player === p && home(d) && (d.dir > 0) === (SIDE(p) === 1)) || D.find(d => d.player === p && home(d)) || Object.assign(mkDock(SIDE(p) === 1, true), { player: p, stand: true }));
   for (const d of homeDock) if (d.stand) layoutDock(d);
   docks = D;
+  HARB.oyMin = Math.min(0, ...D.map(dkY));             // (the highest harbour's lift: inHangar's quick test)
   coastDocks = [left, right].map(c => D.find(d => d.dir === c.dir && Math.abs(d.L - c.L) < 2) || c);
   DOCKS_OWNED = true;
 }
 // (REFRESH) the harbour parts as they stand: changed since the world was built - it's built again
 const harbourSig = () => JSON.stringify(STRS.filter(o => isHarbourPart(o) || isWoodPierS(o)).map(o => [o.id, o.k, o.x, !!o.flip, strOwner(o), !!o.big, !!o.lh, o.spr || '', o.len || 0, o.fy ?? '', strVehs(o).map(e => e && e.v)]));
 // a harbour tower's ground: the quay (its deck) where it stands on its harbour's quay, else the ground under it
-function harbourTwBase(d, x) { const a = Math.min(d.F, d.root), b = Math.max(d.F, d.root); return x >= a - 2 && x <= b + 2 ? undefined : landTop(clamp(x, 0, WORLD_W - 1)); }
+function harbourTwBase(d, x) { const a = Math.min(d.F, d.root), b = Math.max(d.F, d.root); return x >= a - 2 && x <= b + 2 ? (d.oy ? DECK_Y + d.oy : undefined) : landTop(clamp(x, 0, WORLD_W - 1)); }   // (on its quay: its deck, at its own water's)
 // the crane standing on a harbour's pier (null: none)
 function harbourCraneS(d) {
   if (!HARB.on) return undefined;
@@ -57848,19 +57933,21 @@ const pierDeckOver = (p, x) => { if (p.pierGone) return false; if (x >= p.px0 &&
 const PIER_REACH = 14 * UPM, PIER_INTO = 1.5 * UPM;
 function pierExt(p) {
   if (p._ext) return p._ext;
-  const a = p.px0, b = p.px0 + p.pl, dy = p.deckY != null ? p.deckY : DECK_Y; p._ext = [a, b];
+  const a = p.px0, b = p.px0 + p.pl, dy = pierDeckY(p); p._ext = [a, b];
   if (typeof land === 'undefined' || !land.cell) { p._ext = null; return [a, b]; }
   const reach = dir => { const x0 = dir < 0 ? a : b; for (let u = 2; u <= PIER_REACH; u += 2) { const x = clamp(x0 + dir * u, 0, WORLD_W - 1); if (pillarFloor(x, dy - 60) <= dy + 3) return x0 + dir * Math.min(u + PIER_INTO, PIER_REACH); } return x0; };
   const E = [reach(-1), reach(1)]; p._ext = E; return E;
 }
 // a free pier's deck over x, on land too (where its end runs into the ground): its top, or Infinity
-function deckOn(x, y) { if (!HARB.on) return Infinity; for (const p of HARB.free) if (pierDeckOver(p, x)) { const dy = p.deckY != null ? p.deckY : DECK_Y; return y <= dy + 2 ? dy : Infinity; } return Infinity; }
-const pierDeckHit = (p, x, y) => pierDeckOver(p, x) && y >= (p.deckY != null ? p.deckY : DECK_Y) - 1 && y < waterLv(clamp(x, 0, WORLD_W - 1)) + 2;   // (down to its own water's level)
+const pierDeckY = p => p.deckY != null ? p.deckY : DECK_Y + dkY(p);   // (its deck: a wooden dock's its own, a steel one's at its water's)
+function deckOn(x, y) { if (!HARB.on) return Infinity; for (const p of HARB.free) if (pierDeckOver(p, x)) { const dy = pierDeckY(p); return y <= dy + 2 ? dy : Infinity; } return Infinity; }
+const pierDeckHit = (p, x, y) => pierDeckOver(p, x) && y >= pierDeckY(p) - 1 && y < waterLv(clamp(x, 0, WORLD_W - 1)) + 2;   // (down to its own water's level)
 // a pier on its own: its picture where its structure is (its pillars break and it falls as a harbour's does - pierHosts)
 // (part 'posts': its pillars, drawn before the ground - drawPierPosts; else its deck)
-function drawFreePiers(x0, x1, part) {
+function drawFreePiers(x0, x1, part, lake = false) {
   const fx = E.fx || [1, 1, 1], none = [0, 0, 0], posts = part === 'posts';
   for (const p of HARB.free) {
+    if (!!p.lake !== lake) continue;                    // (the sea's in the sea's pass, a lake's in the lake's)
     if (p.px0 + p.pl < x0 - 40 || p.px0 > x1 + 40) continue;
     const pa = dockArtOf(p), K = pierK(p), T = pierTop(p), DR = pierDeckRows(p), a = posts ? DR : 0, b = posts ? pa.height : DR;
     if (posts && !p.pierGone) pierExtDraw(p, pa, K, T, DR, fx, none);   // (its deck on into the ground at its ends - pierExt)
@@ -57900,10 +57987,10 @@ function pierExtDraw(p, pa, K, T, DR, fx, none) {
 }
 const pierDeckRows = p => p.look === 'wood' ? WOOD.rows : PIER_DECK_ROWS;
 // every dock's pillars (the harbours' piers, the piers of their own, the wooden docks), before the ground they go into
-function drawPierPosts(x0, x1) {
+function drawPierPosts(x0, x1, lake = false) {
   if (!HARB.on && !docks.length) return;
-  for (const d of docks) { if (d.noPier || !harbourInView(d, x0, x1)) continue; const pa = dockArtOf(d); blitRows(pa, [d.px0, DOCK_TOP_Y, d.px0 + d.pl, DOCK_TOP_Y + pa.height * BASE.K], BASE.K, PIER_DECK_ROWS, pa.height); }
-  drawFreePiers(x0, x1, 'posts');
+  for (const d of docks) { if (d.noPier || !!d.lake !== lake || !harbourInView(d, x0, x1)) continue; const pa = dockArtOf(d), T = pierTop(d); blitRows(pa, [d.px0, T, d.px0 + d.pl, T + pa.height * BASE.K], BASE.K, PIER_DECK_ROWS, pa.height); }
+  drawFreePiers(x0, x1, 'posts', lake);
 }
 // the floor under the docks changed (the ocean floor, its rocks, the islands): every dock's picture made again with its pillars
 function pierFloorsChanged() { try { for (const d of pierHosts()) { d.pierBase = null; d._ext = null; } } catch (e) { } }   // (before the harbours are made: none yet)
@@ -57915,14 +58002,14 @@ function pierFloorsChanged() { try { for (const d of pierHosts()) { d.pierBase =
    pierK, pierTop, pierRows). Its picture (woodPierArt): the tile along its length, each post carried down to the floor under it - the
    tile's plain post again and again, its wet foot on the bottom. A dock in a lake stays as drawn. ---- */
 const WOOD = { deck: 19, rows: 62, post: [68, 91], seg: [46, 62], foot: [62, 80] };   // (the tile's rows and columns: planks' top, the deck strip's height, the post, its plain stretch, its wet foot)
-const isWoodPierS = o => o.k === 'dock' && !isPierS(o) && strInSea(o);
+const isWoodPierS = o => o.k === 'dock' && !isPierS(o) && (strInSea(o) || strInLake(o));   // (in any water)
 const woodPierOf = o => HARB.on && HARB.free.find(p => p.so === o && p.look === 'wood') || null;
 function woodPier(o) {
   const B = strBox(o); if (!B.P) return null;
   const K = B.m, tw = B.P.width, ppx = Math.max(1, Math.round((B.x1 - B.x0) / K)), sea0 = B.x0, ax = c => sea0 + c * K;
   const posts = []; for (let c = 0; c + WOOD.post[1] <= ppx; c += tw) posts.push([c + WOOD.post[0], c + WOOD.post[1]]);
   if (!posts.length) return null;
-  const d = { look: 'wood', so: o, player: -1, key: 900 + HARB.free.length, noHangar: true, dir: 1, K, topY: B.top, deckRows: WOOD.rows, deckY: B.top + WOOD.deck * K,
+  const d = { look: 'wood', so: o, lake: strInLake(o), player: -1, key: 900 + HARB.free.length, noHangar: true, dir: 1, K, topY: B.top, deckRows: WOOD.rows, deckY: B.top + WOOD.deck * K,
     px0: sea0, pl: B.x1 - B.x0, ppx, sea0, ax, root: B.x1 + 1, quay: B.x1, L: B.x1, x0: B.x0, w: B.x1 - B.x0, lamps: woodDockLamps(sea0, ppx, tw, K, B.top + WOOD.deck * K), nb: posts.length, pierGone: false, art: null, pierBase: null };
   d.pillars = posts.map(([a, b]) => ({ x0: ax(a), x1: ax(b), broken: false, by: 0 }));
   const sp = [[0, posts[0][0], -1, 0]];                       // (each end held by its one post; between two posts, by both)
@@ -57950,17 +58037,17 @@ function woodPierArt(d) {
 // (the editor) where a harbour part can't stand: a marine hangar's door on dry land, a pier off the water, a crane off a pier
 function harbourPlaceBad(o) {
   if (isGunS(o)) return gunPlaceBad(o);
-  if (isMarineS(o)) { const d = marineLayout(o); return seaAtX(d.root - d.dir * 30) ? '' : 'NEEDS WATER AT ITS DOOR'; }
-  if (isPierS(o)) return seaAtX(o.x) && seaAtX(o.x - pierDir(o) * pierLenOf(o) * 0.4) ? '' : 'NEEDS WATER';
+  if (isMarineS(o)) { const d = marineLayout(o); return wetX(d.root - d.dir * 30) ? '' : 'NEEDS WATER AT ITS DOOR'; }   // (any water: the sea, a lake)
+  if (isPierS(o)) return wetX(o.x) && wetX(o.x - pierDir(o) * pierLenOf(o) * 0.4) ? '' : 'NEEDS WATER';
   if (o.k === 'crane') return STRS.some(q => isPierS(q) && Math.abs(o.x - q.x) < pierLenOf(q) / 2) ? '' : 'ONLY ON A PIER';
   return null;
 }
 // (the editor) a harbour part's box: the hangar and its quay; the pier; the crane on the deck
 function harbourBox(o) {
   if (isGunS(o)) { const s = gunSeat(o), y = s ? s.y : landTop(clamp(o.x, 0, WORLD_W - 1)); return { x0: o.x - 16, x1: o.x + 16, top: y - 22, foot: y, P: null, m: 1 }; }   // (on what carries it)
-  if (isMarineS(o)) { const d = marineLayout(o), a = Math.min(d.L + d.dir * HGR_INLAND, d.root), b = Math.max(d.L + d.dir * HGR_INLAND, d.root); return { x0: a, x1: b, top: HANGAR_TOP, foot: WATER_Y + 60, P: null, m: 1 }; }
-  if (isPierS(o)) return { x0: o.x - pierLenOf(o) / 2, x1: o.x + pierLenOf(o) / 2, top: DOCK_TOP_Y - 40, foot: WATER_Y + 60, P: null, m: 1 };
-  if (o.k === 'crane') { const w = (CRI.legs[1] - CRI.legs[0]) * CRK; return { x0: o.x - w / 2, x1: o.x + w / 2, top: DECK_Y - CRI.foot * CRK, foot: DECK_Y, P: null, m: 1 }; }
+  if (isMarineS(o)) { const d = marineLayout(o), a = Math.min(d.L + d.dir * HGR_INLAND, d.root), b = Math.max(d.L + d.dir * HGR_INLAND, d.root), u = dkY(d); return { x0: a, x1: b, top: HANGAR_TOP + u, foot: WATER_Y + 60 + u, P: null, m: 1 }; }
+  if (isPierS(o)) { const u = dockWater({}, o.x).oy; return { x0: o.x - pierLenOf(o) / 2, x1: o.x + pierLenOf(o) / 2, top: DOCK_TOP_Y - 40 + u, foot: WATER_Y + 60 + u, P: null, m: 1 }; }
+  if (o.k === 'crane') { const w = (CRI.legs[1] - CRI.legs[0]) * CRK, h = STRS.find(q => isPierS(q) && Math.abs(o.x - q.x) < pierLenOf(q) / 2), u = h ? dockWater({}, h.x).oy : 0; return { x0: o.x - w / 2, x1: o.x + w / 2, top: DECK_Y - CRI.foot * CRK + u, foot: DECK_Y + u, P: null, m: 1 }; }   // (on its pier, at its water's)
   return null;
 }
 /* ---- GUNS (user Nov 1 22:19-22:35: "the tower should be a separate element from the Cannon that is on top of it, so I can have lighthouses
@@ -57988,7 +58075,7 @@ function gunSeat(o, L = strsUsed()) {
       const tw = towers.find(t => t && (t.def === h || (t.dock && t.dock.lh === h)));   // (built: where its gun really turns - a harbour's on its quay)
       return { h, tower: true, y: tw && tw.hp > 0 ? towerPivot(tw)[1] + 8 : B.top + (h.lh ? (B.foot - B.top) * 0.28 : 6) };
     }
-    else if (!pier && isPierS(h) && Math.abs(o.x - h.x) < pierLenOf(h) / 2) pier = { h, tower: false, y: DECK_Y };
+    else if (!pier && isPierS(h) && Math.abs(o.x - h.x) < pierLenOf(h) / 2) pier = { h, tower: false, y: DECK_Y + dockWater({}, h.x).oy };   // (its deck at its water's)
   }
   return pier;
 }
