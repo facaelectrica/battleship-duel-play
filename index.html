@@ -502,27 +502,45 @@ function tabSaveBack() {                                          // (this tab's
   if (n) console.log('SNAPSHOT: ' + n + ' key(s) another tab had changed put back as this tab has them');
   return n;
 }
+/* (user Nov 3 09:47: online plays the host's world - "the host's game is the real one", 16-net-link.js) NET_WORLD: an online
+   guest's world, the host's as its screen keeps it (netWorldOut, sent with the round's start), held in memory for the round
+   (netWorldIn): every world key and every key the play depends on (NET_GAME_KEYS) read from it and written to it - never this
+   browser's own save, which is just as it was when the guest leaves (netWorldOut of the round: worldReload). */
+const NET_GAME_KEYS = ['bd_prefabs', 'bd_vtune'];
+const netKey = k => typeof k === 'string' && (WORLD_KEYS.includes(k) || NET_GAME_KEYS.includes(k));
+const NET_WORLD = { on: false, map: new Map() };
 (function worldShim() {
-  const PK = worldPackOf(STORY_WORLD), GK = WORLD_PACK.game || {}, packed = Object.keys(PK).length + Object.keys(GK).length > 0;
-  if (!STORY_WORLD && !packed) return;                          // (the open world, nothing built in: the storage as it is)
+  const PK = worldPackOf(STORY_WORLD), GK = WORLD_PACK.game || {};
   const isW = k => typeof k === 'string' && WORLD_KEYS.includes(k);
   const map = k => STORY_WORLD && isW(k) ? swKey(k) : k;
   const back = (k, v) => v != null ? v : isW(k) && k in PK ? PK[k] : isGameKey(k) && k in GK ? GK[k] : v;   // (not kept here: the built-in one)
+  const NW = k => NET_WORLD.on && netKey(k);                     // (an online guest's: the host's world)
+  const nwGet = k => NET_WORLD.map.has(k) ? NET_WORLD.map.get(k) : null, nwSet = (k, v) => { NET_WORLD.map.set(k, String(v)); }, nwDel = k => { NET_WORLD.map.delete(k); };
   try {
     const LS = localStorage;
     if (typeof Storage !== 'undefined' && LS instanceof Storage) {
       const P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
       lsRawGet = k => g.call(LS, k); lsRawSet = (k, v) => s.call(LS, k, v); lsRawDel = k => r.call(LS, k);
-      P.getItem = function (k) { return this === LS ? back(k, g.call(this, map(k))) : g.call(this, k); };
-      P.setItem = function (k, v) { return s.call(this, this === LS ? map(k) : k, v); };
-      P.removeItem = function (k) { return r.call(this, this === LS ? map(k) : k); };
+      P.getItem = function (k) { return this !== LS ? g.call(this, k) : NW(k) ? nwGet(k) : back(k, g.call(this, map(k))); };
+      P.setItem = function (k, v) { if (this === LS && NW(k)) return nwSet(k, v); return s.call(this, this === LS ? map(k) : k, v); };
+      P.removeItem = function (k) { if (this === LS && NW(k)) return nwDel(k); return r.call(this, this === LS ? map(k) : k); };
     } else {                                                     // (the worker's stand-in: a plain object)
       const g = LS.getItem, s = LS.setItem, r = LS.removeItem;
       lsRawGet = k => g(k); lsRawSet = (k, v) => s(k, v); lsRawDel = k => r(k);
-      LS.getItem = k => back(k, g(map(k))); LS.setItem = (k, v) => s(map(k), v); LS.removeItem = k => r(map(k));
+      LS.getItem = k => NW(k) ? nwGet(k) : back(k, g(map(k))); LS.setItem = (k, v) => NW(k) ? nwSet(k, v) : s(map(k), v); LS.removeItem = k => NW(k) ? nwDel(k) : r(map(k));
     }
   } catch (e) { }
 })();
+/* WORLD LOADERS: every file that reads its world's keys when the page starts does it through worldLoad (its table set back to its
+   own default first, then read), so worldReload reads the whole world again in the same order - an online guest's round in the
+   host's world, and back (netWorldIn / netWorldOut). */
+const WORLD_LOADERS = [];
+function worldLoad(f) { WORLD_LOADERS.push(f); try { f(); } catch (e) { console.warn('world load', e); } }
+function worldReload() { for (const f of WORLD_LOADERS) try { f(); } catch (e) { console.warn('world load', e); } if (typeof worldReloaded === 'function') worldReloaded(); }
+// (the host) its world as its screen reads it, for a guest; (a guest) the host's world for this round, or back to its own
+function netWorldPack() { const o = {}; for (const k of [...WORLD_KEYS, ...NET_GAME_KEYS]) { const v = localStorage.getItem(k); if (v != null) o[k] = v; } return o; }
+function netWorldIn(o) { NET_WORLD.map = new Map(Object.entries(o && typeof o === 'object' ? o : {}).filter(([k, v]) => netKey(k) && typeof v === 'string')); NET_WORLD.on = true; worldReload(); }
+function netWorldOut() { if (!NET_WORLD.on) return; NET_WORLD.on = false; NET_WORLD.map = new Map(); worldReload(); }
 // (the page, on load) this world's edits here against the built-in world: none of its own - its stamp taken; older than a
 // newer one built in - the title asks (WORLD_STALE)
 let WORLD_STALE = null;
@@ -849,12 +867,13 @@ const VTUNE_DEF = {
   mg: { rate: 0.085, shipRate: 0.0425, plane: 1 / 6, ship: 0.05, heli: 1 / 6 },   // (rate: seconds between rounds - shipRate the battleship's own, user Oct 30 17:13: 2x; plane, heli: a share of one hit)
 };
 const VTUNE = JSON.parse(JSON.stringify(VTUNE_DEF));
-(() => {
+worldLoad(() => {
+  for (const f in VTUNE) for (const k in VTUNE[f]) VTUNE[f][k] = VTUNE_DEF[f][k];   // (its own first: worldReload)
   try {
     const o = JSON.parse(localStorage.getItem('bd_vtune') || 'null');
     if (o && typeof o === 'object') for (const f in VTUNE) if (o[f]) for (const k in VTUNE[f]) if (typeof o[f][k] === 'number' && isFinite(o[f][k])) VTUNE[f][k] = o[f][k];
   } catch (e) { }
-})();
+});
 function vtuneSave() {
   try {
     const ch = {};
@@ -2126,7 +2145,7 @@ function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ fl
    (seaAt(y) and shoreDist(x) of the sea's colours and the floor's dressing - 44-shadows-seafloor - are other things.) ---- */
 const SEAS = new ColTable({ lo: 'f64', hi: 'f64', bedA: 'f64', bedB: 'f64', trA: 'f64', trB: 'f64', deepX: 'f64', deepY: 'f64', tab: 'obj', tabS: 'obj' });
 const LANDS = new ColTable({ lo: 'f64', hi: 'f64' });
-const gPosX = s => Math.round(warpX(EXT_L + Math.round(VIEW_W * s)));
+const gPosX = s => Math.round(gX(s));
 // (the checker only - tools/seasame.mjs: [[lo, hi], ...] in ground screens, seas in place of the strip, for a world of more
 // than one ocean; __game.seasTest. Never saved; null: the strip)
 let SEAS_TEST = null;
@@ -2694,21 +2713,19 @@ function buildWorld(restore) {
   mgHold[0] = mgHold[1] = false;   // (no trigger held over from the last round)
   sound('newRound');                   // (nor any of its sounds: a siren, a blast, a shell's whoosh)
   padPick[0] = padPick[1] = null;
-  // (an online guest: the host's world, whatever its screen) five screens: plenty of open ocean between the harbours
-  // (the test range: three). OPEN WORLD: forest 6, sea 10 (its middle five the deep ocean), desert 6 - user Oct 25
-  { const XT = OWM && NET.role === 'local' && !NET.worldW ? worldExt() : null; EXT_L = XT ? Math.round(VIEW_W * XT.L) : 0; EXT_R = XT ? Math.round(VIEW_W * XT.R) : 0; }   // (OPEN WORLD: made bigger at its ends - WORLD_EXT)
-  STRETCH = !OWM ? null : NET.role === 'local' && !NET.worldW ? stretchSet() : stretchDefSet();   // (online: the default world's - STRETCH_DEF)   // (OPEN WORLD: pieces of the line stretched - 50-land-tshape)
-  // (the dock chat, Oct 29: the sea duel's world grown by as much as its two harbours grew, so its open sea stays as wide)
-  WORLD_Wb = NET.worldW || Math.round(VIEW_W * (OWM ? 22 : TEST ? 3 : 5)) + EXT_L + EXT_R + (OWM || TEST ? 0 : Math.round(2 * (DOCK_SPAN - BASE.W * BASE.K)));
-  WORLD_W = STRETCH ? Math.round(warpX(WORLD_Wb)) : WORLD_Wb;
-  LAND_CW0 = Math.round(VIEW_W * 6);
-  LAYOUT_L0 = OWM ? EXT_L + Math.round(VIEW_W * 6) : 0; LAYOUT_R0 = OWM ? EXT_L + Math.round(VIEW_W * 16) : WORLD_W;   // (each country six screens, user Oct 25 late: room for its three-screen lake)
-  // (OPEN WORLD, user Oct 28: the docks dragged in the GAME EDITOR's TERRAIN tab - in screens from the left end, kept in this
-  // browser; online the default)
-  { const D = !OWM ? null : NET.role === 'local' && !NET.worldW ? dockSet() : DOCK_DEF;   // (online: the default docks, DOCK_DEF)
-    LAYOUT_Lb = D ? EXT_L + Math.round(VIEW_W * D.L) : LAYOUT_L0; LAYOUT_Rb = D ? EXT_L + Math.round(VIEW_W * D.R) : LAYOUT_R0; DOCKS_MOVED = !!D;
-    LAYOUT_L = D ? gPosX(D.L) : LAYOUT_Lb; LAYOUT_R = D ? gPosX(D.R) : LAYOUT_Rb; }   // (the one rounding rule for a place on the ground - gPosX, 05-zz-seas.js)
+  // (user Nov 3 09:03: "if I delete large parts of terrain or shapes, it should adjust what the size of the world is") OPEN WORLD,
+  // BATTLE, STORY - online too, the host's world: the world is its shapes, end to end in world units, the same on every screen (worldSize,
+  // 50-zzzz-world-size.js: moved to start at 0 first). The sea duel's own (no ground): five screens of ocean between the harbours -
+  // the test range three - an online guest's the host's width
+  EXT_L = EXT_R = 0; STRETCH = null;
+  if (OWM) worldNormalize();
+  WORLD_Wb = OWM ? worldSpanW() : NET.worldW || Math.round(VIEW_W * (TEST ? 3 : 5)) + (TEST ? 0 : Math.round(2 * (DOCK_SPAN - BASE.W * BASE.K)));
+  WORLD_W = WORLD_Wb;
+  LAND_CW0 = Math.round(G_REF_VW * 6);
   seasBuild();                                           // (the seas and the lands - 05-zz-seas.js)
+  // (the old two countries' coasts, what's left reading them: the widest sea's two shores - the sea duel's, its ends)
+  { let w = -1; LAYOUT_L = 0; LAYOUT_R = WORLD_W; if (OWM) for (let i = 0; i < SEAS.n; i++) if (SEAS.c.hi[i] - SEAS.c.lo[i] > w) { w = SEAS.c.hi[i] - SEAS.c.lo[i]; LAYOUT_L = SEAS.c.lo[i]; LAYOUT_R = SEAS.c.hi[i]; }
+    LAYOUT_L0 = LAYOUT_Lb = LAYOUT_L; LAYOUT_R0 = LAYOUT_Rb = LAYOUT_R; DOCKS_MOVED = OWM; }
   skinFillAll(true);                                     // (every shape's pieces typed - no AUTO; in memory - 50-land-zzz-skin-fill.js)
   builtViewW = VIEW_W;
   N = Math.ceil(WORLD_W / DX) + 1;
@@ -2719,30 +2736,12 @@ function buildWorld(restore) {
   // one player: the far side is open ocean (STORY: the right, where the enemy comes from). The other player's
   // harbour still exists for the bookkeeping, but far past the edge of the world, where nothing ever reaches it
   // (LAND TEST: no harbours either - both far past the edges, like the test range's)
-  const lone = PLAYERS === 1 && !LAND, farL = TEST || (lone && SWAP), farR = TEST || (lone && !SWAP);
+  const lone = PLAYERS === 1 && !OWM, farL = TEST || (lone && SWAP), farR = TEST || (lone && !SWAP);   // (OWM, one player alone too: the harbours from the structures - harbourFromStrs)
   const mkDock = (R, far) => R ? dockAt(LAYOUT_R + (far ? 50000 : 0), 1) : dockAt(far ? -50000 : LAYOUT_L, -1);
   const left = Object.assign(mkDock(false, farL), { player: SWAP ? 1 : 0 });
   const right = Object.assign(mkDock(true, farR), { player: SWAP ? 0 : 1 });
   homeDock = SWAP ? [right, left] : [left, right];
   docks = TEST ? [] : lone ? [homeDock[0]] : [left, right];
-  // (OPEN WORLD, user Oct 28-29: the docks are structures with owners - DOCK_OWN, 50-land-tshape) each coast's harbour the
-  // LEFT side's, the RIGHT side's, nobody's (-1), or not there (its coast stays where it is: the sea floor's shores, the
-  // views). A player's own harbour is the one on their own coast if they have it, else their other one; with none, a
-  // stand-in far past their end of the world, as one player's absent side has (no battleship, no sub, no harbour tower)
-  const local = LAND && !TEST && !lone && NET.role === 'local' && !NET.worldW, DX_ = local ? docksX() : [];
-  const DO = local ? dockOwn() || (DX_.length ? { L: 0, R: 1 } : null) : null;
-  DOCKS_OWNED = !!DO;
-  if (DO) {
-    const pOf = s => s < 0 ? -1 : SWAP ? 1 - s : s;
-    docks = [];
-    if (DO.L !== null) { left.player = pOf(DO.L); docks.push(left); }
-    if (DO.R !== null) { right.player = pOf(DO.R); docks.push(right); }
-    // (and the docks placed anywhere else - DOCKS_X: where its land ends, along the floor between the coasts' piers;
-    // setBedShores hasn't run yet, so the floor's ends from the two coasts' docks as they are laid out)
-    if (DX_.length) { layoutDock(left); layoutDock(right); const A = unwarpX(left.L - left.dir * OLD_RUN), B = unwarpX(right.L - right.dir * OLD_RUN);   // (along the floor in the layout's frame: from where the old piers ended)
-      for (const o of DX_) { const X = warpX(A + o.u * (B - A)), d = dockAt(X, o.R ? 1 : -1); d.player = pOf(o.own); d.extra = o; docks.push(d); } }
-    homeDock = [0, 1].map(p => docks.find(d => d.player === p && (d.dir > 0) === (SIDE(p) === 1)) || docks.find(d => d.player === p) || Object.assign(mkDock(SIDE(p) === 1, true), { player: p, stand: true }));
-  }
   for (const d of new Set([left, right, ...homeDock, ...docks])) layoutDock(d);
   coastDocks = [left, right];
   harbourFromStrs(left, right, mkDock);                  // (the harbours as parts - 50-zz-structh.js: docks, homeDock, coastDocks from the structures)
@@ -2823,7 +2822,7 @@ function buildWorld(restore) {
   buildCaptains();
   // LAND TEST: the ground, both sides' tank and helicopter on it, and you in your tank
   // (user Oct 25: nothing stands on the land at the start - a tank drives in from the world's end, a helicopter flies in)
-  btMark('crew'); structsConvert(); btMark('structs'); PADS_SIG = padsSig(); buildTraffic(); btMark('traffic');   // (the built-in airports as structures first - 50-zz-struct.js, Nov 1)                                     // (OPEN WORLD's planes, jet boats, cruise ship; none elsewhere)
+  btMark('crew'); PADS_SIG = padsSig(); buildTraffic(); btMark('traffic');   // (the built-in airports as structures first - 50-zz-struct.js, Nov 1)                                     // (OPEN WORLD's planes, jet boats, cruise ship; none elsewhere)
   manTw.length = 0;
   if (!LAND) placeKraken(true);                        // (none outside OPEN WORLD)
   if (OWM) { buildLand(); btMark('land'); if (!LAND) landListsReset(); } else ISLE = null;   // (BATTLE too: the Open World's ground, islands and coasts - OWM)
@@ -2847,7 +2846,7 @@ function buildWorld(restore) {
 function buildSea() {
   const types = Object.keys(FISH_DEFS);
   schools.length = 0; seaFish.length = 0;                   // (Nov 1: column tables - 05-game-state.js)
-  const nSchools = Math.round(19 * seaW() / (VIEW_W * 3));          // 20% more than before
+  const nSchools = Math.round(19 * seaW() / (G_REF_VW * 3));          // 20% more than before
   for (let i = 0; i < nSchools; i++) {
     const type = types[i % types.length];
     const n = type === 'sardine' ? 10 + Math.floor(hash(i * 3.7) * 10) : 3 + Math.floor(hash(i * 7.3) * 6);
@@ -2860,7 +2859,7 @@ function buildSea() {
   }
   natureSchools();                                         // (and the fish areas' own - 50-zz-nature)
   sharks = []; natureConvert(); bgConvert();               // (the far shores as placed BACKGROUNDS, once per world - 50-zz-backgrounds)                          // (their areas, once per world - 50-zz-nature)
-  if (!critAreas()) for (let i = 0; i < Math.round(5 * seaW() / (VIEW_W * 3)); i++) sharks.push({ x: seaXAt(seaRnd(0.1, 0.9)), y: 0, dir: seaR() < 0.5 ? 1 : -1, speed: seaRnd(16, 26), turnT: seaRnd(8, 18), turn: 0, ph: seaR() * 6 });
+  if (!critAreas()) for (let i = 0; i < Math.round(5 * seaW() / (G_REF_VW * 3)); i++) sharks.push({ x: seaXAt(seaRnd(0.1, 0.9)), y: 0, dir: seaR() < 0.5 ? 1 : -1, speed: seaRnd(16, 26), turnT: seaRnd(8, 18), turn: 0, ph: seaR() * 6 });
   buildReef();                                            // (the floor's rocks, corals and the ridges behind)
   for (const k of sharks) k.y = seaRnd(WATER_Y + 90, Math.min(seabedY(k.x), SEABED_DEEP + 600) - 50);
   // (user Oct 27: "have 3 whales") three whales, each in its own third of the sea (spread apart), each on its own
@@ -2888,7 +2887,7 @@ function buildSea() {
   // and in the same place, so every random number after them - and so the game's pictures - stay exactly as they were: per
   // layer [heaps at a three-screen world, nearest ones], five draws a heap, four for a nearest one)
   for (const [n, front] of [[20], [12], [10], [14], [16], [12], [7], [2], [9, 1], [7, 1]])
-    for (let i = Math.round(n * WORLD_W / (VIEW_W * 3)) * (front ? 4 : 5); i > 0; i--) Math.random();
+    for (let i = Math.round(n * WORLD_W / (G_REF_VW * 3)) * (front ? 4 : 5); i > 0; i--) Math.random();
 }
 
 function cloudNoise(x, y, sd) {
@@ -3256,15 +3255,15 @@ function seaFromOld(r, margin, dk, lift, deep) {   // (deep: kept in the deepest
 const seaEdOn = () => typeof NSKY !== 'undefined' && NSKY.editor && NSKY.editor.TUNE && NSKY.editor.TUNE.open;   // (the editor shows what play leaves out)
 const krSetOk = L => Array.isArray(L) && L.every(r => r && Number.isFinite(r.id) && (r.x == null || Number.isFinite(r.x)) && (r.y == null || Number.isFinite(r.y)) && (r.u == null || (r.u > 0 && r.u < 1)) && (r.dy == null || Number.isFinite(r.dy)));
 let KR_SET = JSON.parse(JSON.stringify(KR_DEF_SET));
-try {
+worldLoad(() => { KR_SET = JSON.parse(JSON.stringify(KR_DEF_SET)); try {
   const L = JSON.parse(localStorage.getItem('bd_krakens') || 'null');
   if (krSetOk(L)) KR_SET = L;
   else if (localStorage.getItem('bd_kraken_off') === '1') KR_SET = [];
   else { const v = JSON.parse(localStorage.getItem('bd_kraken_u') || 'null'), d = JSON.parse(localStorage.getItem('bd_kraken_dy') || 'null');
     if (v === 'none') KR_SET = [{ id: 1, u: null, dy: null }]; else if (isFinite(v) && v > 0 && v < 1 && v !== null) KR_SET = [{ id: 1, u: v, dy: isFinite(d) && d !== null ? d : null }]; }
-} catch (e) { }
+} catch (e) { } });
 function krSetSave() { try { localStorage.setItem('bd_krakens', JSON.stringify(KR_SET)); } catch (e) { } }
-const krSetUsed = () => NET.role === 'local' ? KR_SET : KR_DEF_SET;
+const krSetUsed = () => KR_SET;
 const krNewId = () => 1 + KR_SET.reduce((m, r) => Math.max(m, r.id), 0);
 const krPlaced = r => !!r && (r.x != null || (r.u != null && !!floorTab));
 // where a kraken sits: just where it was put (x, y - y null: on the floor there), or from before along the floor (u, dy); not put:
@@ -4237,8 +4236,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 727;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 03 11:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 728;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 03 11:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -4360,7 +4359,7 @@ function seatJoin(g) {
   }
   g.seat = makeSeat(g.id, team); g.seat.side = s; NET.seats.push(g.seat); g.ntb = null;
   NET.role = 'host';
-  linkTo(g, { t: 'start', worldW: WORLD_Wb, flags: flagPick.slice(), lv: STORY_LV, mode: MODE, side: s });
+  linkTo(g, { t: 'start', worldW: WORLD_Wb, world: OWM ? netWorldPack() : null, flags: flagPick.slice(), lv: STORY_LV, mode: MODE, side: s });   // (world: the host's, as its screen has it - the guest plays in it, 00-world.js)
   LINK.acc = 1;
 }
 // (the host) a guest's seat gone (it left the side, or the session): an emptied BATTLE side is the CPU's again
@@ -4482,6 +4481,7 @@ function linkReceive(m) {
 function linkStart(m) {
   if (NET_TABLES) ntbReset();
   NET.role = 'guest'; NET.me = 0; NET.worldW = m.worldW | 0; NET.send = linkSend; NET.side = m.side === 1 ? 1 : 0; NET.taken = null;
+  if (m.world) netWorldIn(m.world); else netWorldOut();   // (the host's world for the round, in memory - 00-world.js)
   if (Array.isArray(m.flags)) { flagPick[0] = m.flags[0]; flagPick[1] = m.flags[1]; }
   MODE = ['duel', 'chill', 'test'].includes(m.mode) ? m.mode : 'duel'; EXTRA = null; applyMode();
   held.clear(); ui.title = false; ui.resume = false; ui.menu = false; paused = false;
@@ -4493,6 +4493,7 @@ function linkStart(m) {
 function guestOut() {
   if (NET.role !== 'guest') return;
   NET.role = 'local'; NET.send = null; NET.worldW = 0; NET.side = 0; NET.taken = null;
+  netWorldOut();                                        // (this browser's own world again)
   applyMode();
   held.clear(); ui.title = true; ui.resume = false; ui.menu = false; ui.picker = -1; paused = true;
   worldDrop();                                          // (no round here now: the menu on black till the next one - user Oct 31)
@@ -4540,6 +4541,7 @@ function linkClose(msg) {
   if (NET.role === 'host') NET.role = 'local';
   if (was) {
     NET.role = 'local'; NET.send = null; NET.worldW = 0; NET.side = 0; NET.taken = null;
+    netWorldOut();                                      // (this browser's own world again - 00-world.js)
     applyMode();
     ui.title = true; ui.resume = false; ui.menu = false; paused = false;
     worldDrop();                                        // (no round here now: the menu on black till the next one - user Oct 31)
@@ -16661,7 +16663,7 @@ function buildBirds() {
   }
   flocks = [];
   // half the flocks low over the sea, half high up the sky (up where the planes fly)
-  const nF = Math.round(18 * WORLD_W / (VIEW_W * 3));
+  const nF = Math.round(18 * WORLD_W / (G_REF_VW * 3));
   for (let f = 0; f < nF; f++) {
     const y = f % 2 ? bdRnd(60, 300) : bdRnd(WATER_Y - 2200, WATER_Y - 500);
     flocks.push({ x: bdRnd(0.05, 0.95) * WORLD_W, y, top: Math.min(30, y - 150), dir: bdR() < 0.5 ? 1 : -1, speed: bdRnd(30, 46), ph: bdR() * 6 });
@@ -33419,7 +33421,7 @@ const SL = [
 const P_DEF = {};
 for (const s of SL) P[s[0]] = P_DEF[s[0]] = s[5];
 P.art = 1;
-try { const o = JSON.parse(localStorage.getItem('bd_cave_params') || 'null'); if (o) for (const k in o) if (k in P_DEF && Number.isFinite(o[k])) P[k] = o[k]; } catch (e) { /* (private window) */ }
+(typeof worldLoad === "function" ? worldLoad : f => f())(() => { for (const k in P_DEF) P[k] = P_DEF[k]; try { const o = JSON.parse(localStorage.getItem('bd_cave_params') || 'null'); if (o) for (const k in o) if (k in P_DEF && Number.isFinite(o[k])) P[k] = o[k]; } catch (e) { /* (private window) */ } });
 function paramsSave() {
   const o = {}; for (const k in P_DEF) if (P[k] !== P_DEF[k]) o[k] = P[k];
   try { if (Object.keys(o).length) localStorage.setItem('bd_cave_params', JSON.stringify(o)); else localStorage.removeItem('bd_cave_params'); } catch (e) { /* (private window) */ }
@@ -33454,7 +33456,7 @@ function cavesValid(o) {
 }
 // (the default: CAVE_DEF, src/50-land-caves.js - the user's design from the Lab; edits kept in this browser, as the floor's)
 let CAVES = clone(CAVE_DEF);
-try { const o = JSON.parse(localStorage.getItem('bd_caves') || 'null'); if (cavesValid(o)) CAVES = o; } catch (e) { /* (private window) */ }
+(typeof worldLoad === "function" ? worldLoad : f => f())(() => { CAVES = clone(CAVE_DEF); try { const o = JSON.parse(localStorage.getItem('bd_caves') || 'null'); if (cavesValid(o)) CAVES = o; } catch (e) { /* (private window) */ } });
 // (the user's own systems - not the ones the game makes from its HOLE shapes, holeSystems)
 const cavesOwn = () => Object.assign({}, CAVES, { systems: CAVES.systems.filter(s => !s.gen) });
 function cavesSave() { try { const o = cavesOwn(); if (JSON.stringify(o) === JSON.stringify(CAVE_DEF)) localStorage.removeItem('bd_caves'); else localStorage.setItem('bd_caves', JSON.stringify(o)); } catch (e) { /* (private window) */ } }
@@ -35684,7 +35686,7 @@ let sigT = 0;
    systems then gone from the CAVES tab (their caves come back as the holes' - holeSystems). Called as the land is built, once the floor
    is (islMarkCols) */
 function cavesToHoles() {
-  if (typeof ISLANDS === 'undefined' || NET.role !== 'local' || !OWM) return false;
+  if (typeof ISLANDS === 'undefined' || !OWM) return false;
   let done = false; try { done = localStorage.getItem('bd_caves_conv') === '1'; } catch (e) { /* (private window) */ }
   if (done) return false;
   const own = CAVES.systems.filter(s => !s.gen); let n = 0;
@@ -39972,9 +39974,12 @@ let ISLANDS = [];
 // (user Nov 2 13:00-13:20: every line a closed loop - SOLID, ISLAND or HOLE, 50-land-shapes) a loop's points go any way round;
 // a segment from before (its points left to right) is the same loop, its foot the piece from its last point back to its first
 function islandsValid(L) { return Array.isArray(L) && L.every(I => I && Array.isArray(I.p) && I.p.length >= (I.t ? 2 : 3) && I.p.every(q => ptOk(q)) && (I.k === undefined || I.k === 'S' || I.k === 'I' || I.k === 'H')); }
-try { const o = JSON.parse(localStorage.getItem('bd_islands') || 'null'); if (islandsValid(o)) ISLANDS = o; } catch (e) { }
-const islandsUsed = () => NET.role === 'local' ? ISLANDS : GND_DEF;   // (online: the default world's ground shapes - 50-land-zz-ground)
-let ISL_VER = 0;                                                // (the shapes' version: what's worked out from them is made again when it moves - gndBuild)
+worldLoad(() => { ISLANDS = []; try { const o = JSON.parse(localStorage.getItem('bd_islands') || 'null'); if (islandsValid(o)) ISLANDS = o; } catch (e) { } });
+const islandsUsed = () => ISLANDS;
+let ISL_VER = 0;
+// (worldReload, 00-world.js: the whole world read again - an online guest's round in the host's) what's worked out from the shapes and the structures made again
+function worldReloaded() { ISL_VER++; ISL_SIG = null; STR_GEN++; }
+                                                // (the shapes' version: what's worked out from them is made again when it moves - gndBuild)
 function islSave() { skinFillAll(); ISL_VER++; try { if (!ISLANDS.length) localStorage.removeItem('bd_islands'); else localStorage.setItem('bd_islands', JSON.stringify(ISLANDS)); } catch (e) { } }
 // its line (world y) at x, with the tangents m (floorTangents of its points), and the straight line along its foot
 // (user Nov 2: HILLS, SPIKY and ROUND on a segment's pieces too - the ground's one rule, lineShape in 50-land-zz-ground)
@@ -40504,21 +40509,7 @@ function islSplitChunk(k, id, w, h) {
    for the SKIN buttons (50-land-unified). Built on REFRESH, as the ground. ---- */
 const ISL_ED = { drag: null, ptr: null, hover: null, lastDown: null, hold: 0, dirty: false };
 let ISL_SIG = null;                                             // (the shapes other than the ground's, as last changed: a change only to the ground's leaves the islands' build alone)
-/* (user Nov 3 06:49: "The world size should change depending on the furthest terrain that has been made") the world's two ends reach
-   past its furthest shapes: whenever the shapes change, an end a shape reaches past grows to hold it, WORLD_FIT beyond it (the GROW
-   setting's own worldExtSet: the world built again, the left end moving everything kept in world x with it). The ground's own
-   shapes end at the world's ends, so nothing grows until a shape is drawn past one. Only ever outward: GROW still sets more */
-const WORLD_FIT = 0.25;   // (screens kept past a shape that reached past an end)
-function worldFitShapes() {
-  if (!OWM || NET.role !== 'local' || !ISLANDS.length) return;
-  let lo = Infinity, hi = -Infinity; for (const I of ISLANDS) for (const p of I.p) { if (p[0] < lo) lo = p[0]; if (p[0] > hi) hi = p[0]; }
-  const E = worldExt() || { L: 0, R: 0 }, up = n => Math.ceil(n * 100) / 100, m = WORLD_FIT * VIEW_W, W0 = WORLD_W;
-  const addL = lo < 0 ? up((m - lo) / VIEW_W) : 0;                 // (screens the left end grows - everything moves on with it)
-  const addR = hi > W0 ? up((hi + m - W0) / VIEW_W) : 0;            // (the right end: past the furthest shape by m)
-  if (addL) worldExtSet(false, E.L + addL);
-  if (addR) worldExtSet(true, E.R + addR);
-}
-function islChanged() { const sig = JSON.stringify(ISLANDS.filter(I => !I.gnd)); if (sig !== ISL_SIG || !gndOn()) ISL_ED.dirty = true; ISL_SIG = sig; const was = gndOn() ? gndSnap() : null; islSave(); if (was) gndChanged(was);   /* (the ground is SOLID shapes: only what its change reaches built again on REFRESH - gndChanged) */ if (typeof terrainSync === 'function') terrainSync(); worldFitShapes(); }
+function islChanged() { const sig = JSON.stringify(ISLANDS.filter(I => !I.gnd)); if (sig !== ISL_SIG || !gndOn()) ISL_ED.dirty = true; ISL_SIG = sig; const was = gndOn() ? gndSnap() : null; islSave(); if (was) gndChanged(was);   /* (the ground is SOLID shapes: only what its change reaches built again on REFRESH - gndChanged) */ if (typeof terrainSync === 'function') terrainSync(); }
 function islAdd() {
   const v = cam.view[0], vw = (ONEVIEW() ? bw : bw / 2) / (S * v.z), cx = v.l + vw / 2, w = Math.max(900, Math.min(4000, vw * 0.45));
   const I = { p: [[Math.round(cx - w / 2), 220], [Math.round(cx - w / 5), -60], [Math.round(cx), -160], [Math.round(cx + w / 5), -60], [Math.round(cx + w / 2), 220]] };
@@ -42056,8 +42047,8 @@ function lakeAt(x) { const L = lakeOf(x); return !!L && landTop(x) > lakeLv(L) +
    above its rim (where it would spill); below its bottom it is dry. SEA or LAKE is only the look (its pieces' skin). Kept in
    bd_lakes (a world key). The sea's surface code works a lake as the sea's water, from its own level (WBASE, surfaceY0) ---- */
 let LAKE_SET = [];
-try { const o = JSON.parse(localStorage.getItem('bd_lakes') || 'null'); if (Array.isArray(o) && o.every(q => q && isFinite(q.x) && isFinite(q.y))) LAKE_SET = o; } catch (e) { }
-const lakeSetUsed = () => NET.role === 'local' ? LAKE_SET : [];
+worldLoad(() => { LAKE_SET = []; try { const o = JSON.parse(localStorage.getItem('bd_lakes') || 'null'); if (Array.isArray(o) && o.every(q => q && isFinite(q.x) && isFinite(q.y))) LAKE_SET = o; } catch (e) { } });
+const lakeSetUsed = () => LAKE_SET;
 function lakeSave() { try { if (!LAKE_SET.length) localStorage.removeItem('bd_lakes'); else localStorage.setItem('bd_lakes', JSON.stringify(LAKE_SET)); } catch (e) { } }
 // a lake's level (world y), and the level of the water over x (the ocean's where no lake)
 const lakeLv = L => L && L.lv != null ? L.lv : WATER_Y;
@@ -44362,9 +44353,9 @@ const wreckOld = v => Array.isArray(v) && v.length === 4 && v.every(e => e === n
 function wreckSetOk(v) { return wreckOld(v) || (Array.isArray(v) && v.every(r => r && Number.isFinite(r.id) && r.v >= 0 && r.v < 4 && (r.x == null || Number.isFinite(r.x)) && (r.y == null || Number.isFinite(r.y)) && (r.u == null || (r.u > 0 && r.u < 1)) && (r.d == null || Number.isFinite(r.d)))); }
 const wreckList = v => wreckOld(v) ? wreckFromOld(v) : v;
 let WRECK_SET = JSON.parse(JSON.stringify(WRECK_DEF));
-try { const v = JSON.parse(localStorage.getItem('bd_wrecks') || 'null'); if (wreckSetOk(v)) WRECK_SET = wreckList(v); } catch (e) { }
+worldLoad(() => { WRECK_SET = JSON.parse(JSON.stringify(WRECK_DEF)); try { const v = JSON.parse(localStorage.getItem('bd_wrecks') || 'null'); if (wreckSetOk(v)) WRECK_SET = wreckList(v); } catch (e) { } });
 function wreckSave() { try { localStorage.setItem('bd_wrecks', JSON.stringify(WRECK_SET)); } catch (e) { } }
-const wrecksUsed = () => NET.role === 'local' ? WRECK_SET : WRECK_DEF;
+const wrecksUsed = () => WRECK_SET;
 const wreckRec = w => wrecksUsed().find(r => r.id === w.k) || null;
 const wreckNewId = () => 1 + WRECK_SET.reduce((m, r) => Math.max(m, r.id), 0);
 // a wreck put where it was placed (or not): its x, its keel's y (null: on the floor) and the floor levelled under her or not
@@ -48111,7 +48102,7 @@ function landPaintStep(views) {
     const list = landSpansIn(x0, x1).length ? landSlices(x0, x1) : [], isl = islSlices(x0, x1);
     ahead.push([x0, x1]);
     // (user Nov 1 20:12, editor speed: nothing thrown away while the GAME EDITOR is open - panned back to, it was all painted again)
-    if (EXT_L + EXT_R) { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; for (const k of isl) S_[k] = renderTick; if (renderTick % 300 === 0 && !EDMODE.on) landEvict(); }   // (the world made bigger: far slices' pictures let go)
+    if (WORLD_W > WORLD_W_EMPTY) { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; for (const k of isl) S_[k] = renderTick; if (renderTick % 300 === 0 && !EDMODE.on) landEvict(); }   // (a world bigger than the old 22 screens: far slices' pictures let go)
     for (const [k] of list) if (!land.back[k]) paintLandBack(k);
     for (const k of isl) paint(k);
     for (const [k] of list) paint(k);
@@ -49814,143 +49805,8 @@ function structsValid(L) { return Array.isArray(L) && L.length === STRUCT_DEF.le
    default world's are today's. R stays where it stands (its country: u is counted from that country's harbour). The
    side's own structure: structOf(kind, side); the one standing in a country: structIn(kind, R) ---- */
 const ownerOf = o => o.own !== undefined ? o.own : (o.R ? 1 : 0);
-/* ---- the towers on the land (user Oct 28, 20:46: "The towers at the end would be another type of structure" - "To destroy
-   a faction, you have to destroy all their towers"): LAND_TOWERS [{ R (its country), u (from that country's end of the
-   world, inland), own? }], each a tower with its gun on the ground at its foot (towers, edge: 07-world-build); as many as
-   wanted, any owner (none: its country's side; -1 nobody's). The default: each country's one on its mountain, as always.
-   Kept in this browser (bd_land_towers); online the default ---- */
-const TOWER_DEF = [{ R: 0, u: LAND_TOWER_X }, { R: 1, u: LAND_TOWER_X }];
-function towersValid(L) { return Array.isArray(L) && L.length <= 24 && L.every(t => t && (t.R === 0 || t.R === 1) && isFinite(t.u) && (t.own === undefined || t.own === -1 || t.own === 0 || t.own === 1)); }
-let LAND_TOWERS = TOWER_DEF.map(t => Object.assign({}, t));
-try { const o = JSON.parse(localStorage.getItem('bd_land_towers') || 'null'); if (towersValid(o)) LAND_TOWERS = o; } catch (e) { }
-function towerSave() { try { if (JSON.stringify(LAND_TOWERS) === JSON.stringify(TOWER_DEF)) localStorage.removeItem('bd_land_towers'); else localStorage.setItem('bd_land_towers', JSON.stringify(LAND_TOWERS)); } catch (e) { } }
-const towerDefX = t => warpX(t.R ? WORLD_Wb - EXT_R - t.u : EXT_L + t.u);   // (from its country's old end - the world made bigger or not)
-/* ---- the docks (user Oct 28, 20:19: "the same way you lift the terrain for an airport, we would need to have a dock
-   between the transition of land to ocean on each side" - "that dock is facing the ocean") each harbour is dragged along
-   the line in the TERRAIN tab: where it stands is that country's coast (LAYOUT_L / LAYOUT_R; since no-countries step 6 the ground's
-   SEA mark is moved with it - the sea is the SEA-marked ground), the ground's points staying where
-   they are (their frame: LAYOUT_L0, BED_A0 - 05-game-state). DOCK_SET { L, R }: the two coasts in screens (VIEW_W) from the
-   left end of the world; none: the default, 6 and 16. Moving one builds the world again (a fresh round). Kept in this
-   browser (bd_docks); online the default ---- */
-const DOCK_MIN_LAND = 2.6, DOCK_MIN_SEA = 4;                    // (screens: room for a country's airport, pads and tower; for a sea)
-function dockSetValid(o) { return !!o && isFinite(o.L) && isFinite(o.R) && o.L >= DOCK_MIN_LAND && o.R <= 22 - DOCK_MIN_LAND && o.R - o.L >= DOCK_MIN_SEA; }
-// the docks by default (user, Oct 29 17:12: the right one at 17.044 screens; it was 16) - in screens from the left end; online too
-const DOCK_DEF = { L: 6, R: 17.044 };
-let DOCK_SET = null;
-try { const o = JSON.parse(localStorage.getItem('bd_docks') || 'null'); if (dockSetValid(o)) DOCK_SET = o; } catch (e) { }
-const dockSet = () => DOCK_SET || DOCK_DEF;
-/* (user Oct 28, 20:47: "to build a world, I could just keep on adding more and more dots to the line at the edges where we
-   ended") WORLD_EXT { L, R }: whole screens added past the world's left and right ends (none: today's 22 screens). The
-   land past an old end goes on from it: the old end's mountain a ridge, then rolling country, its points in the land's
-   frame below 0 (groundFit). Kept in this browser (bd_world_ext); online today's world */
-const WORLD_EXT_MAX = 60;   // (screens a side: up to 142 in all, over six times today's - the ground's cells are kept for all of it)
-const worldExtValid = o => !!o && ['L', 'R'].every(k => isFinite(o[k]) && o[k] >= 0 && o[k] <= WORLD_EXT_MAX);   // (screens: fractions too - the GROWTH slider, user Oct 29)
-let WORLD_EXT = null;
-try { const o = JSON.parse(localStorage.getItem('bd_world_ext') || 'null'); if (worldExtValid(o)) WORLD_EXT = o; } catch (e) { }
-const worldExt = () => WORLD_EXT;
-function worldExtSet(R, n) {
-  const E = WORLD_EXT ? Object.assign({}, WORLD_EXT) : { L: 0, R: 0 };
-  const old = E[R ? 'R' : 'L'];
-  E[R ? 'R' : 'L'] = +clamp(n, 0, WORLD_EXT_MAX).toFixed(2);
-  // (the left end: everything kept in world x - the island lines, the caves on land - moved with the ground)
-  if (!R && E.L !== old) { const dx = Math.round(VIEW_W * E.L) - Math.round(VIEW_W * old); for (const I of ISLANDS) for (const p of I.p) p[0] += dx; if (ISLANDS.length) islSave(); if (CAVE && CAVE.shiftX) CAVE.shiftX(dx);
-    if (STRETCH_SET) { const d = E.L - old; STRETCH_SET = STRETCH_SET.map(k => [+(k[0] + d).toFixed(4), +(k[1] + d).toFixed(4)]); stretchSave(); } }   // (the stretches' knots with the ground)
-  WORLD_EXT = E.L || E.R ? E : null;
-  try { if (!WORLD_EXT) localStorage.removeItem('bd_world_ext'); else localStorage.setItem('bd_world_ext', JSON.stringify(WORLD_EXT)); } catch (e) { }
-  builtViewW = 0; resize();
-}
-/* (user Oct 29: "a button that is greyed out unless a segment is selected that would say '+1 at Segment' (or whatever the
-   slider value is)" - "I can add a full screen length anywhere" - "stretch, so the ends stay exactly the same") the picked
-   pieces of line stretched by that many screens: the ground between their two end handles widened (its heights at those
-   ends as they were), everything past them moved on by as much, everything before them where it was. STRETCH_SET: the
-   map's knots in screens [base, world] (05-game-state STRETCH); kept in this browser (bd_stretch); online none */
-const stretchValid = K => K === null || (Array.isArray(K) && K.length >= 2 && K.length <= 200 && K.every((k, i) => Array.isArray(k) && k.length === 2 && isFinite(k[0]) && isFinite(k[1]) && (!i || (k[0] > K[i - 1][0] && k[1] > K[i - 1][1]))));
-// (user Oct 29, 13:34, COPY POINTS: "Lets start with this change") STRETCH_DEF: the user's own stretches - the default
-// world, online too (both screens build it: the host sends the width before the stretch, WORLD_Wb). Kept "none" when
-// the editor's world has none
-const STRETCH_DEF = [[1.2108, 1.2108], [1.5, 2.5], [10.1077, 11.1077], [10.3305, 12.3305], [11.3891, 13.3891], [11.4072, 13.9053], [11.4416, 20.2868], [11.5345, 22.9345], [18.2391, 29.6391], [18.5825, 30.9825]];   // (the user's world, Oct 29 21:28)
-let STRETCH_SET = STRETCH_DEF.map(k => k.slice());
-try { const o = JSON.parse(localStorage.getItem('bd_stretch') || 'null'); if (o === 'none') STRETCH_SET = null; else if (o && stretchValid(o)) STRETCH_SET = o; } catch (e) { }
-const stretchSet = () => STRETCH_SET ? STRETCH_SET.map(([b, w]) => [b * VIEW_W, w * VIEW_W]) : null;
-const stretchDefSet = () => STRETCH_DEF.map(([b, w]) => [b * VIEW_W, w * VIEW_W]);
-const stretchReset = () => { STRETCH_SET = STRETCH_DEF.map(k => k.slice()); stretchSave(); };
-function stretchSave() { try { if (JSON.stringify(STRETCH_SET) === JSON.stringify(STRETCH_DEF)) localStorage.removeItem('bd_stretch'); else localStorage.setItem('bd_stretch', JSON.stringify(STRETCH_SET || 'none')); } catch (e) { } }
-// [a, b] in the layout's frame (base), widened by D world units
-function stretchAt(a, b, D) {
-  if (!(b > a) || !(D > 0)) return false;
-  const wa = warpX(a), wb = warpX(b), s = (wb - wa + D) / (wb - wa);
-  const f = x => x <= wa ? x : x >= wb ? x + D : wa + (x - wa) * s;     // (a world x, before: where it goes)
-  // what's kept in world x moves with the ground: the island lines, the land's caves, the structures (from their harbour)
-  for (const I of ISLANDS) for (const p of I.p) p[0] = Math.round(f(p[0]));
-  if (ISLANDS.length) islSave();
-  if (typeof CAVE !== 'undefined' && CAVE.mapX) CAVE.mapX(f);
-  for (const o of LAND_STRUCTS) { const xs = structX(o, o.u); o.u = Math.max(0, Math.round(o.R ? f(xs) - f(LAYOUT_R) : f(LAYOUT_L) - f(xs))); }
-  structSave();
-  const bases = [...new Set([a, b, ...(STRETCH || []).map(k => k[0])])].sort((p, q) => p - q);
-  const K = bases.map(bb => [bb, bb <= a ? warpX(bb) : bb >= b ? warpX(bb) + D : wa + (warpX(bb) - wa) * s]);
-  STRETCH_SET = K.map(([bb, w]) => [+(bb / VIEW_W).toFixed(4), +(w / VIEW_W).toFixed(4)]);
-  stretchSave();
-  builtViewW = 0; resize();                                       // (the world built again, stretched)
-  return true;
-}
-// the picked pieces' two ends in the layout's frame: a country's line, the floor's, an island's
-function selBaseSpan(s) {
-  if (!s) return null;
-  if (s.I != null) { const I = ISLANDS[s.I]; if (!I) return null; const n = I.p.length, xs = []; for (let k = selLo(s); k <= selHi(s) + 1; k++) xs.push(unwarpX(I.p[k % n][0])); return [Math.min(...xs), Math.max(...xs)]; }   // (a shape's loop: the picked pieces' whole width - 50-land-shapes)
-  return null;                                                     // (Nov 3: only shapes' pieces are picked - the old lines are gone)
-}
-/* (user Oct 28, 20:19-20:46: "we place structures in the world and we define whose faction those structures belong to";
-   "docks don't have to be mandatory") each coast's harbour has an owner - the LEFT side's, the RIGHT side's or NOBODY's -
-   or isn't there at all. DOCK_OWN { L, R }: each 0 / 1 (a side), -1 (nobody's) or null (no harbour on that coast); none:
-   the default, the left coast's LEFT and the right's RIGHT. A side with no harbour of its own has no battleship or sub;
-   one with both has the second's tower too (its ships come out of the one on its own coast). Kept in this browser
-   (bd_dock_own); online the default */
-const dockOwnValid = o => !!o && typeof o === 'object' && ['L', 'R'].every(k => o[k] === null || o[k] === 0 || o[k] === 1 || o[k] === -1);
-let DOCK_OWN = null;
-try { const o = JSON.parse(localStorage.getItem('bd_dock_own') || 'null'); if (dockOwnValid(o)) DOCK_OWN = o; } catch (e) { }
-const dockOwn = () => DOCK_OWN;
-const dockOwnOf = R => DOCK_OWN ? DOCK_OWN[R ? 'R' : 'L'] : R ? 1 : 0;
-const DOCK_MARK = [{ dockR: 0 }, { dockR: 1 }];
-/* (user Oct 28, 20:25: "I could make a giant world that has many oceans and many countries, and some have docks and others
-   don't") docks anywhere else, as many as wanted - DOCKS_X [{ u (where its land end stands: 0..1 along the ocean floor,
-   BED_A..BED_B, as the floor's points), R (0: its land on its left and the sea on its right, as the left coast's; 1: the
-   other way round), own (a side, or -1 nobody's) }]. Each sets its own ground: the quay's height behind it, the harbour's
-   depth under its pier and off its end (09-sea-surface, DOCK_PADS). Kept in this browser (bd_docks_x); online none */
-const docksXValid = o => Array.isArray(o) && o.every(d => d && isFinite(d.u) && d.u > 0 && d.u < 1 && (d.R === 0 || d.R === 1) && (d.own === 0 || d.own === 1 || d.own === -1));
-let DOCKS_X = [];
-try { const o = JSON.parse(localStorage.getItem('bd_docks_x') || 'null'); if (docksXValid(o)) DOCKS_X = o; } catch (e) { }
-const docksX = () => DOCKS_X;
-function docksXSave(rebuild = true) {
-  try { if (!DOCKS_X.length) localStorage.removeItem('bd_docks_x'); else localStorage.setItem('bd_docks_x', JSON.stringify(DOCKS_X)); } catch (e) { }
-  if (rebuild) { builtViewW = 0; resize(); }
-}
-const dockXAt = o => { const A = unwarpX(BED_A), B = unwarpX(BED_B); return warpX(A + o.u * (B - A)); };   // (the TERRAIN tab: a harbour's box pressed - the one the OWNER buttons and DELETE DOCK act on)
-// a coast's harbour given to v (a side, -1 nobody, null none): kept, and the world built again (a fresh round)
-function dockOwnSet(R, v) {
-  const D = DOCK_OWN ? Object.assign({}, DOCK_OWN) : { L: 0, R: 1 };
-  D[R ? 'R' : 'L'] = v;
-  DOCK_OWN = D.L === 0 && D.R === 1 ? null : D;
-  try { if (!DOCK_OWN) localStorage.removeItem('bd_dock_own'); else localStorage.setItem('bd_dock_own', JSON.stringify(DOCK_OWN)); } catch (e) { }
-  builtViewW = 0; resize();
-}
-function dockSave() { try { if (!DOCK_SET) localStorage.removeItem('bd_docks'); else localStorage.setItem('bd_docks', JSON.stringify(DOCK_SET)); } catch (e) { } }
-// a harbour moved by dx world units (R: the right one): its coast there, what stands in its country kept inside it, the
-// world built again
-function dockMoveBy(R, dx) {
-  const D = Object.assign({}, DOCK_SET || DOCK_DEF);
-  const k = R ? 'R' : 'L', v = (unwarpX((R ? LAYOUT_R : LAYOUT_L) + dx) - EXT_L) / VIEW_W;   // (in screens from the old left end, the layout's frame)
-  D[k] = +(R ? clamp(v, D.L + DOCK_MIN_SEA, 22 - DOCK_MIN_LAND) : clamp(v, DOCK_MIN_LAND, D.R - DOCK_MIN_SEA)).toFixed(3);
-  const was = dockSet();
-  DOCK_SET = Math.abs(D.L - DOCK_DEF.L) < 0.002 && Math.abs(D.R - DOCK_DEF.R) < 0.002 ? null : D;
-  dockSave();
-  void was;                                                    // (the sea is where the ground shapes' pieces are SEA: a dock moved doesn't mark it)
-  // (the country's width after: its structures and towers kept in it - a structure from its harbour, a tower from its end)
-  const cw = R ? WORLD_Wb - EXT_R - EXT_L - Math.round(VIEW_W * dockSet().R) : Math.round(VIEW_W * dockSet().L);
-  for (const o of LAND_STRUCTS) if (!!o.R === !!R && o.u + o.w > cw - LAND_TOWER_X - 300) o.u = Math.max(0, Math.round(cw - LAND_TOWER_X - 300 - o.w));
-  for (const t of LAND_TOWERS) if (!!t.R === !!R && t.u > cw - DOCK_W - 120) t.u = Math.max(40, Math.round(cw - DOCK_W - 120));
-  structSave(); towerSave();
-  builtViewW = 0; resize();                                       // (the world built again with its new coast)
-}
+/* (Nov 3: the old frame's records gone - the land towers' list, the two coasts' docks, their owners and the placed docks, the world's
+   extra ends and its stretches, all counted in screens: every tower, harbour and dock is a structure, the world's size its shapes') */
 // the world's land towers made again from the list: the side's own grouped by player, as the default always had them
 // (towers[2], towers[3]: player 0's and player 1's), nobody's after (player -1: no gun of anyone's)
 function landTowersBuild() {
@@ -49972,7 +49828,7 @@ try { const o = JSON.parse(localStorage.getItem('bd_land_structs') || 'null'); i
    host - an airport's RUNWAY, the pads' LAUNCH PAD - carries it (o.pad = { i: its record, a, b: its span from the host's x }),
    so the flat ground goes where the structure is moved. structsUsed() is the records as the hosts put them now (the same
    records where they weren't moved; a record with no host as it was) */
-let PADS_ON = (() => { try { return localStorage.getItem('bd_ground_conv') === '1'; } catch (e) { return false; } })();
+const PADS_ON = true;   // (Nov 3: every world's pads are their structures' - the old conversion's gone)
 const PADS_C = { gen: -1, src: null, ll: 0, lr: 0, L: null };
 function structsLocal() {
   if (!OWM) return LAND_STRUCTS;
@@ -50002,8 +49858,8 @@ function structsLocal() {
 const padsSig = () => OWM ? JSON.stringify(STRS.filter(s => s.k === 'runway' || s.k === 'launchPad').map(s => [s.id, s.x, s.len || 0, s.fy ?? null])) : '';   // (every carrier: spawned, moved, lengthened, lifted, deleted)
 let PADS_SIG = '';
 // a record carried by a structure (its TERRAIN box gone: the structure is moved instead)
-const structHosted = o => PADS_ON && OWM && NET.role === 'local';   // (Nov 3: every built-in record is its structure's - carried or gone with it: never a box of its own)
-const structsUsed = () => NET.role === 'local' ? structsLocal() : STRUCT_DEF;
+const structHosted = o => OWM;   // (Nov 3: every built-in record is its structure's - carried or gone with it: never a box of its own)
+const structsUsed = () => structsLocal();
 const structIn = (kind, R) => structsUsed().find(o => o.kind === kind && !!o.R === !!R);
 // (a side owning more than one: the one given to it in the editor first - own set - then its own country's)
 const structOf = (kind, side) => { const s = side ? 1 : 0, L = structsUsed().filter(o => o.kind === kind && ownerOf(o) === s); return L.find(o => o.own === s) || L[0] || null; };
@@ -50172,20 +50028,6 @@ function landEdDraw() {
   structEdDraw();
 }
 
-/* ---- the structures on the LAND tab: each a box over its footprint, its pad's line under it; drag it along its country
-   and up or down (shown as it moves: footprint and pad line); let go and the land is built again under it and
-   everything that belongs to it moves with it (structEdited). It can't overlap another structure, run into the dock area
-   (an airport may start right at the harbour, as today's does) or past the edge tower's foot; over a lake the ground
-   under it is filled up to its pad (the pad's flat ground does that by itself). ---- */
-const STRUCT_BOX_H = 70;                                          // (the box's height over its pad, world units)
-function structFree(o, u) {
-  if (u < 0 || (u > 0 && u < DOCK_W + 40)) return false;          // (at the harbour, as today's airport, or clear of the dock area)
-  if (u === 0 && o.kind !== 'airport') return false;
-  if (o.kind === 'airport' && u < airMinU(o)) return false;       // (its runway clear of the harbour's hangar - user Oct 29)
-  if (u + o.w > cwW(o.R) - (extOf(o.R) ? 0 : LAND_TOWER_X) - 300) return false;   // (to its end of the world: in the world, as its u)   // (the world made bigger: on past the old end)
-  for (const q of LAND_STRUCTS) if (q !== o && !!q.R === !!o.R && u < q.u + q.w + 40 && u + o.w > q.u - 40) return false;
-  return true;
-}
 // (user Oct 29: "I should also be able to move the kraken to position it") its box: its body's width, from over its head
 // down to its base; dragged anywhere, it stays where it's let go (its KR_SET record - 09-sea-surface), the floor left as it is
 function krakenBox(k) { const hw = KR_BW * krS() * 1.1; return [k.bx - hw, k.bx + hw, k.by - 520 * krS(), k.by + 20]; }
@@ -50240,15 +50082,7 @@ function wreckSet(id, f) {
   for (const w of pirateWrecks) if (w.k === id) { w.v = r.v; w.gold = r.gold !== false; if (r.face) w.face = r.face; w.half = (WRI[r.v] ? WRI[r.v].w : 240) * WRK / 2 + 20; }
   floorChanged();
 }
-function structPick(x, y, r) {
-  for (const o of LAND_STRUCTS) {
-    if (structHosted(o)) continue;
-    const [a, b] = structSpan(o);
-    if (x > a - r && x < b + r && y > o.y - STRUCT_BOX_H - r && y < o.y + 20 + r) return o;
-  }
-  return null;
-}
-const SED = { o: null, ptr: null, old: null, grab: 0, dock: null };
+const SED = { ptr: null };
 // (user Nov 3 07:19-07:20: "I just moved the kraken, then pressed 'Delete' but it didnt delete it"; the kraken under OBJECTS >
 // CREATURES, the sunken pirate ships listed too) a press on the kraken or a wreck picks it as every other thing is picked - WK
 // 'sea' (50-zzz-world-ed.js): white, DELETE takes it, shift / PICK MORE adds; SPAWN in OBJECTS puts it in the view
@@ -50259,30 +50093,10 @@ function seaPick(kraken, wk) {
   if (wk != null && !SEAPICK.wrecks.includes(wk)) SEAPICK.wrecks.push(wk);
   edClaim('sea');
 }
-// a harbour's box: from the land's end of its quay out to its pier's end, over the water (R: the right one; null: none)
-// (m: a coast's - DOCK_MARK - or a placed one's record in DOCKS_X)
-function dockSpan(m) {
-  if (m && m.u !== undefined) { const d = docks.find(q => q.extra === m); if (!d) return null; const X = d.dir < 0 ? d.x0 : d.x0 + d.w, a = X + d.dir * PAD_LAND, b = d.quay; return [Math.min(a, b), Math.max(a, b)]; }
-  const R = m && m.dockR !== undefined ? !!m.dockR : !!m;
-  const d = docks.find(q => !q.extra && (q.dir > 0) === R); if (!d) return null; const a = R ? LAYOUT_R + DOCK_W : LAYOUT_L - DOCK_W, b = d.quay; return [Math.min(a, b), Math.max(a, b)];
-}
-const dockMarks = () => harbourParts() ? [] : [...DOCK_MARK, ...DOCKS_X];   // (the harbours as parts: moved in STRUCTURES - 50-zz-structh)
-function dockPick(x, y, r) {
-  if (!LAND) return null;
-  for (const m of dockMarks()) { const s = dockSpan(m); if (s && x > s[0] - r && x < s[1] + r && y > WATER_Y - 260 - r && y < WATER_Y + 60 + r) return m; }
-  return null;
-}
 window.addEventListener('pointerdown', e => {
   if (e.pointerType === 'mouse' && e.button === 1) return;   // (the middle button only pans, never picks or drags - user Oct 29: "That is only LMB")
   if (!landEdOn() || onEdUI(e) || e.button === 2) return;
   const q = landPick(e); if (q.h) return;                       // (a point's handle first)
-  const dk = dockPick(q.x, q.y, q.r);
-  if (dk !== null) {                                             // (a harbour: dragged along the line; let go, the world's built again)
-    e.stopImmediatePropagation(); e.preventDefault();
-    edClaim('object'); TERRAIN_ED.struct = dk; terrainSyncOwner();
-    SED.dock = { m: dk, x0: q.x, dx: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
-    return;
-  }
   const wk = wreckPick(q.x, q.y, q.r);
   if (wk) {                                                      // (a pirate wreck: dragged anywhere; let go, she lies there)
     e.stopImmediatePropagation(); e.preventDefault();
@@ -50295,60 +50109,28 @@ window.addEventListener('pointerdown', e => {
     seaPick(kp.rid, null); SED.kraken = { k: kp, r: q.r, x0: q.x, y0: q.y, dx: 0, dy: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
     return;
   }
-  const o = structPick(q.x, q.y, q.r); if (!o) return;
-  e.stopImmediatePropagation(); e.preventDefault();
-  edClaim('object'); TERRAIN_ED.struct = o; terrainSyncOwner();                     // (the box pressed: the one the OWNER buttons set - 50-land-unified)
-  SED.o = o; SED.old = LAND_STRUCTS.map(s => Object.assign({}, s)); SED.grab = lcFromSea(q.x) - o.u; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false, y0: o.y, wy: q.y };
 }, { capture: true, passive: false });
 window.addEventListener('pointermove', e => {
-  const P = SED.ptr; if (!P || P.id !== e.pointerId || (!SED.o && !SED.dock && !SED.kraken && !SED.wreck)) return;
+  const P = SED.ptr; if (!P || P.id !== e.pointerId || (!SED.kraken && !SED.wreck)) return;
   e.stopImmediatePropagation();
   if (Math.hypot(e.clientX - P.cx, e.clientY - P.cy) > 6) P.moved = true;
   if (!P.moved) return;
   const [x, y] = screenToWorld(e.clientX, e.clientY);
-  if (SED.dock) { SED.dock.dx = x - SED.dock.x0; return; }
   if (SED.kraken) { SED.kraken.dx = x - SED.kraken.x0; SED.kraken.dy = y - SED.kraken.y0; return; }
-  if (SED.wreck) { SED.wreck.dx = x - SED.wreck.x0; SED.wreck.dy = y - SED.wreck.y0; return; }
-  structDragTo(SED.o, inCountry(x) && lcRight(x) === !!SED.o.R ? lcFromSea(x) - SED.grab : SED.o.u, P.y0 + (y - P.wy));
+  if (SED.wreck) { SED.wreck.dx = x - SED.wreck.x0; SED.wreck.dy = y - SED.wreck.y0; }
 }, { capture: true, passive: true });
-// a structure moved to u (along its country, from its harbour) and its pad to y: only where it's free; the line shown
-function structDragTo(o, u, y) {
-  const y0 = o.y; o.y = Math.round(clamp(y, STRUCT_Y[0], STRUCT_Y[1]));
-  u = Math.round(u); if (o.kind === 'airport') u = Math.max(u, airMinU(o));   // (no nearer the harbour than its runway's clearance - user Oct 29)
-  if (structFree(o, u)) o.u = u;
-  else if (o.kind === 'airport' && o.u < airMinU(o)) o.y = y0;   // (lowered, it would need more room than it has here: it keeps its height)
-  landPreview(structLand(o));
-}
 function structUp(e) {
   const P = SED.ptr; if (!P || P.id !== e.pointerId) return;
   e.stopImmediatePropagation();
-  const o = SED.o, old = SED.old; SED.o = null; SED.ptr = null;
+  SED.ptr = null;
   if (SED.wreck) { const k = SED.wreck; SED.wreck = null; if (P.moved && Math.hypot(k.dx, k.dy) > 20) wreckMoveTo(k.w.k, k.w.x + k.dx, wreckBy(k.w) + k.dy, k.r); return; }
   if (SED.kraken) { const k = SED.kraken; SED.kraken = null; if (P.moved && Math.hypot(k.dx, k.dy) > 20) krakenMoveTo(k.k.rid, k.k.bx + k.dx, k.k.by + k.dy, k.r); return; }
-  if (SED.dock) { const d = SED.dock; SED.dock = null; if (!P.moved || Math.abs(d.dx) <= 20) return;
-    if (d.m.u !== undefined) { const A = unwarpX(BED_A), B = unwarpX(BED_B); d.m.u = +clamp((unwarpX(dockXAt(d.m) + d.dx) - A) / (B - A), 0.01, 0.99).toFixed(4); docksXSave(); } else dockMoveBy(!!d.m.dockR, d.dx);   // (a placed dock: along the floor; a coast's: its coast)
-    return; }
-  if (o && P.moved) landEdChanged(old, true);
 }
 window.addEventListener('pointerup', structUp, { capture: true });
 window.addEventListener('pointercancel', structUp, { capture: true });
 // drawn with the tab's handles: each structure's box and pad line, its name
 function structEdDraw() {
   const t = Math.max(1, Math.round(1.5 * dpr / PIXW));
-  // (the harbours: a box each over its quay and pier - dragged, a ghost where it will go)
-  for (const m of dockMarks()) {
-    const s = dockSpan(m); if (!s) continue;
-    const dx = SED.dock && SED.dock.m === m ? SED.dock.dx : 0, own = m.u !== undefined ? m.own : dockOwnOf(m.dockR);
-    for (const [off, ghost] of dx ? [[0, true], [dx, false]] : [[0, false]]) {
-      const X0 = PX(s[0] + off), X1 = PX(s[1] + off), Y0 = PY(WATER_Y - 260), Y = PY(WATER_Y + 60);
-      if (X1 < 0 || X0 > VWP) continue;
-      const hot = !ghost && edPickedObj(m), w = hot ? t * 2 : t;   // (picked: white, as a picked piece of line - user Nov 1)
-      C.fillStyle = ghost ? 'rgba(160,255,200,0.06)' : hot ? 'rgba(255,255,255,0.22)' : 'rgba(160,255,200,0.14)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
-      C.fillStyle = ghost ? 'rgba(160,255,200,0.4)' : hot ? '#ffffff' : 'rgba(160,255,200,0.95)';
-      C.fillRect(X0, Y0, X1 - X0, w); C.fillRect(X0, Y0, w, Y - Y0); C.fillRect(X1 - w, Y0, w, Y - Y0); C.fillRect(X0, Y - w, X1 - X0, w);
-      if (!ghost) drawText(C, dx ? 'DOCK - LET GO TO BUILD IT HERE' : 'DOCK - ' + ['NOBODY', 'LEFT', 'RIGHT'][own + 1] + ' - DRAG ALONG', Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), hot ? '#ffffff' : '#d8ffe6', Math.max(1, Math.round(dpr / PIXW)), 'center');
-    }
-  }
   // (the kraken: a box over it on the ocean floor - dragged, a ghost where it will go)
   if (LAND) for (const K of KRAKENS) {
     const d = SED.kraken && SED.kraken.k === K ? SED.kraken : null, B = krakenBox(K), dx = d ? d.dx : 0, dy = d ? d.dy : 0;
@@ -50378,17 +50160,6 @@ function structEdDraw() {
     }
   }
 
-  for (const o of LAND_STRUCTS) {
-    if (structHosted(o)) continue;                                   // (carried by a structure: moved with it - structsLocal)
-    const [a, b] = structSpan(o), X0 = PX(a), X1 = PX(b), Y = PY(o.y), Y0 = PY(o.y - STRUCT_BOX_H);
-    if (X1 < 0 || X0 > VWP) continue;
-    const hot = SED.o === o || edPickedObj(o), w = hot ? t * 2 : t;
-    C.fillStyle = hot ? 'rgba(255,255,255,0.22)' : 'rgba(120,200,255,0.12)'; C.fillRect(X0, Y0, X1 - X0, Y - Y0);
-    C.fillStyle = hot ? '#ffffff' : 'rgba(120,210,255,0.95)';
-    C.fillRect(X0, Y0, X1 - X0, w); C.fillRect(X0, Y0, w, Y - Y0); C.fillRect(X1 - w, Y0, w, Y - Y0);
-    C.fillRect(X0, Y - (w >> 1), X1 - X0, w + 1);              // (the pad's line; past its ends the ground line's handles)
-    if (X1 - X0 > 60) drawText(C, STRUCT_KINDS[o.kind].name + ' - ' + ['NOBODY', 'LEFT', 'RIGHT'][ownerOf(o) + 1], Math.round((X0 + X1) / 2), Y0 + Math.max(3, Math.round(4 * dpr / PIXW)), hot ? '#ffffff' : '#bfe8ff', Math.max(1, Math.round(dpr / PIXW)), 'center');
-  }
 }
 
 /* ================================================================
@@ -50542,7 +50313,6 @@ function terrainSetShape(i, v) {
 }
 function terrainSyncSkin() {
   const s = TERRAIN_ED.sel, P = s && selPts(s);
-  if (TERRAIN_ED.growBtns) terrainSyncGrow();
   if (TERRAIN_ED.splitBtns) terrainSyncSplit();
   let sk; if (s && s.Is) { const set = new Set(); for (const n of s.Is) if (ISLANDS[n]) for (const p of ISLANDS[n].p) set.add(p[2] || null); if (set.size) sk = set.size === 1 ? [...set][0] : 'mixed'; }   // (whole shapes: every piece round them)
   else if (P) { const set = new Set(); for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(P[k][2] || null); sk = set.size === 1 ? [...set][0] : 'mixed'; }
@@ -50576,34 +50346,23 @@ function terrainSync() {
 // (the floor first: the caves notice the floor by themselves; the land's rebuild ends by building them again)
 // (the islands: the land built again with them - unless the land's own rebuild just did it)
 function terrainRefresh() {
-  worldFitShapes();                                              // (an end a shape reaches past grows to hold it - 50-land-islands; built again by itself)
   // (no-countries step 6) the SEA marks moved a coast or made a sea: the world built again with its seas (as moving a dock does)
-  if (OWM && (seasStale() || (HARB.on && harbourSig() !== HARB.sig) || (harbourOn() && !HARB.on && harbourConverted()) || padsSig() !== PADS_SIG)) { ISL_ED.dirty = false; LAND_ED.dirty = LAND_ED.structs = false; LAND_ED.old = null; FLOOR_ED.dirty = false; builtViewW = 0; resize(); terrainSync(); return; }
+  if (OWM && (worldSizeStale() || seasStale() || (HARB.on && harbourSig() !== HARB.sig) || padsSig() !== PADS_SIG)) { ISL_ED.dirty = false; LAND_ED.dirty = LAND_ED.structs = false; LAND_ED.old = null; FLOOR_ED.dirty = false; builtViewW = 0; resize(); terrainSync(); return; }
   terrainRefresh0();
 }
 function terrainRefresh0() { const isl = ISL_ED.dirty; ISL_ED.dirty = false; const ld = LAND_ED.dirty; floorRefresh(); landRefresh(); if (isl && !ld && LAND && land.cell) landEdited(); terrainSync(); }
-function terrainReset() { if (JSON.stringify(KR_SET) !== JSON.stringify(KR_DEF_SET)) { KR_SET = JSON.parse(JSON.stringify(KR_DEF_SET)); krSetSave(); } if (JSON.stringify(WRECK_SET) !== JSON.stringify(WRECK_DEF)) { WRECK_SET = JSON.parse(JSON.stringify(WRECK_DEF)); wreckSave(); } if (JSON.stringify(STRETCH_SET) !== JSON.stringify(STRETCH_DEF)) { stretchReset(); builtViewW = 0; resize(); } if (WORLD_EXT) { WORLD_EXT = { L: 0, R: 0 }; worldExtSet(true, 0); } if (DOCKS_X.length) { DOCKS_X = []; docksXSave(); } if (DOCK_OWN) { DOCK_OWN = { L: 0, R: 0 }; dockOwnSet(true, 1); } if (DOCK_SET) { DOCK_SET = null; dockSave(); builtViewW = 0; resize(); } landReset(); if (ISLANDS.length) { ISLANDS = []; islChanged(); } terrainShowTa(false); TERRAIN_ED.sel = null; terrainSyncSkin(); terrainSync(); }
-// COPY gives {"F": the floor's points, "L"/"R": each country's, "S": the structures}; LOAD takes that, or either old
-// tab's text (the floor's [[u, depth]...], or the land's {"L", "R", "S"})
-// (G: the one ground line, end to end - 50-land-zz-ground)
-function terrainCopyText() { const o = { S: LAND_STRUCTS };   /* (the ground: its SOLID shapes, in I) */ if (STRS.length) o.ST = STRS; if (NATURE.length) o.N = NATURE; if (WORLD_EXT) o.W = WORLD_EXT; if (ISLANDS.length) o.I = ISLANDS; if (LAKE_SET.length) o.LK = LAKE_SET; if (DOCK_SET) o.D = DOCK_SET; if (DOCK_OWN) o.DO = DOCK_OWN; if (STRETCH_SET) o.X = STRETCH_SET; o.K = KR_SET; o.P = WRECK_SET; o.BG = BGS;   /* (every kraken and every wreck placed - user Nov 3 08:36) */ if (DOCKS_X.length) o.DX = DOCKS_X; return JSON.stringify(o); /* (the towers: GUN TOWER structures, in ST - Nov 1) */ }
+function terrainReset() { if (JSON.stringify(KR_SET) !== JSON.stringify(KR_DEF_SET)) { KR_SET = JSON.parse(JSON.stringify(KR_DEF_SET)); krSetSave(); } if (JSON.stringify(WRECK_SET) !== JSON.stringify(WRECK_DEF)) { WRECK_SET = JSON.parse(JSON.stringify(WRECK_DEF)); wreckSave(); } landReset(); if (ISLANDS.length) { ISLANDS = []; islChanged(); } terrainShowTa(false); TERRAIN_ED.sel = null; terrainSyncSkin(); terrainSync(); }
+// COPY gives the world as text: I the shapes, ST the structures, N the creature areas, LK the lakes' levels, K the krakens, P the
+// wrecks, BG the backgrounds; LOAD takes it (Nov 3: the old frame's D / DO / DX / X / W / S / T gone - read and let go)
+function terrainCopyText() { const o = {}; if (STRS.length) o.ST = STRS; if (NATURE.length) o.N = NATURE; if (ISLANDS.length) o.I = ISLANDS; if (LAKE_SET.length) o.LK = LAKE_SET; o.K = KR_SET; o.P = WRECK_SET; o.BG = BGS;   /* (every kraken and every wreck placed - user Nov 3 08:36) */ return JSON.stringify(o); }
 function terrainLoad(text) {
   const o = JSON.parse(text);
   if (Array.isArray(o)) throw new Error('an old ground line: the ground is SOLID shapes now (I)');
   if (!o || typeof o !== 'object') throw new Error('paste the text COPY gives');
   if (o.I === undefined) throw new Error('nothing to load: needs "I" (the shapes - the ground is SOLID shapes)');
-  if (o.D !== undefined && o.D !== null && !dockSetValid(o.D)) throw new Error('D: the docks need {"L": screens, "R": screens}, a sea of 4 screens at least between them');
-  if (o.DO !== undefined && o.DO !== null && !dockOwnValid(o.DO)) throw new Error('DO: the docks\' owners need {"L": 0, 1, -1 or null, "R": the same}');
-  if (o.X !== undefined && o.X !== null && !stretchValid(o.X)) throw new Error('X: the stretches need [[base, world], ...] in screens, both growing');
-  if (o.W !== undefined && o.W !== null && !worldExtValid(o.W)) throw new Error('W: the world\'s size needs {"L": screens added at the left end, "R": at the right}');
-  if (o.DX !== undefined && !docksXValid(o.DX)) throw new Error('DX: the placed docks need [{"u": 0..1 along the floor, "R": 0 or 1, "own": 0, 1 or -1}, ...]');
-  if (o.T !== undefined && !towersValid(o.T)) throw new Error('T: the towers need [{"R": 0 or 1, "u": from its end}, ...]');
   if (o.N !== undefined && !natureValid(o.N)) throw new Error('N: each fish area needs {"k": "fish", "x0", "x1", "y0", "y1"}');
   if (o.ST !== undefined && !strsValid(o.ST)) throw new Error('ST: each structure needs {"k": kind, "x": x}');
   if (o.I !== undefined && !islandsValid(o.I)) throw new Error('I: each island needs {"p": [[x, depth], ...]}, three points or more, each x bigger than the last');
-  if (o.S !== undefined && !structsValid(o.S)) throw new Error('S: the structures, as COPY gives them');
-  if (o.S !== undefined) { const old = LAND_STRUCTS.map(q => Object.assign({}, q)); LAND_STRUCTS = structsFit(o.S.map(q => Object.assign({}, q))); landEdChanged(old, true); }
-  if ((o.D || null) !== DOCK_SET && JSON.stringify(o.D || null) !== JSON.stringify(DOCK_SET)) { DOCK_SET = o.D || null; dockSave(); builtViewW = 0; resize(); }
   // (K: the krakens - a list, or as before the one kraken's place: a number, [u, depth], none: the deepest point; KO: deleted)
   const krOld = k => k === undefined || k === null || (isFinite(k) && k > 0 && k < 1) || (Array.isArray(k) && k.length === 2 && k[0] > 0 && k[0] < 1 && isFinite(k[1]));
   if (!krOld(o.K) && !krSetOk(o.K)) throw new Error('K: the krakens need [{"id", "u": 0..1 along the floor or null, "dy": a depth or null}, ...]');
@@ -50612,11 +50371,6 @@ function terrainLoad(text) {
   { const k = o.K, list = Array.isArray(k) && (!k.length || typeof k[0] === 'object'), L = o.KO ? [] : list ? k : [{ id: 1, u: Array.isArray(k) ? k[0] : (k ?? null), dy: Array.isArray(k) ? k[1] : null }];
     if (JSON.stringify(L) !== JSON.stringify(KR_SET)) { KR_SET = JSON.parse(JSON.stringify(L)); krSetSave(); placeKraken(); floorEdited(); } }
   if (o.BG !== undefined && bgOk(o.BG) && JSON.stringify(o.BG) !== JSON.stringify(BGS)) { BGS = JSON.parse(JSON.stringify(o.BG)); bgSave(); }   // (the backgrounds - 50-zz-backgrounds)
-  if (JSON.stringify(o.X || null) !== JSON.stringify(STRETCH_SET)) { STRETCH_SET = o.X || null; stretchSave(); builtViewW = 0; resize(); }
-  if (JSON.stringify(o.W || null) !== JSON.stringify(WORLD_EXT)) { const W = o.W || { L: 0, R: 0 }; WORLD_EXT = { L: W.L, R: 0 }; worldExtSet(true, W.R); }
-  if (JSON.stringify(o.DX || []) !== JSON.stringify(DOCKS_X)) { DOCKS_X = (o.DX || []).map(d => Object.assign({}, d)); docksXSave(); }
-  if (JSON.stringify(o.DO || null) !== JSON.stringify(DOCK_OWN)) { const D = o.DO || { L: 0, R: 1 }; DOCK_OWN = { L: D.L, R: 0 }; dockOwnSet(true, D.R); }
-  // (T, the old towers: they are GUN TOWER structures since Nov 1 - in ST)
   if (o.LK !== undefined || LAKE_SET.length) { LAKE_SET = Array.isArray(o.LK) ? o.LK.filter(q => q && isFinite(q.x) && isFinite(q.y)).map(q => ({ x: +q.x, y: +q.y })) : []; lakeSave(); ISL_ED.dirty = true; }   // (the lakes' own levels - 50-land-lake, Nov 2)
   if (o.I !== undefined || ISLANDS.length) { ISLANDS = (o.I || []).map(I => Object.assign({ p: I.p.map(q => q.slice()) }, I.k ? { k: I.k } : I.solid ? { k: 'S' } : {}, I.g != null ? { g: I.g } : {}, I.see ? { see: true } : {}, I.t ? { t: 1, rs: (I.rs || [60, 60, 60]).slice() } : {}, I.wl != null ? { wl: I.wl } : {}, I.gnd ? { gnd: 1 } : {})); /* (a shape's kind and group with it - 50-land-shapes) */ islChanged(); }
   if (o.N !== undefined || NATURE.length) { NATURE = natureValid(o.N) ? JSON.parse(JSON.stringify(o.N)) : []; NE.sel = null; natureChanged(); }   // (the fish areas - 50-zz-nature)
@@ -50640,16 +50394,10 @@ function terrainTabInit(b) {
   }, 0);
 }
 terrainReset.init = terrainTabInit;
-// (the picked airport's RUNWAY, its own section before SEGMENT TYPE - it was in OBJECT TEAM, removed Nov 1)
-function terrainAirportBox(cat) {
-  if (!cat || TERRAIN_ED.rwAnchor) return;
-  const c = document.createElement('div'); c.className = 'cat'; c.hidden = true;
-  const h = document.createElement('h4'); h.textContent = 'AIRPORT'; c.appendChild(h); TERRAIN_ED.rwAnchor = h; cat.before(c); terrainRunwaySync();
-}
 NSKY.editor.TUNE.sliders('BG', 'UNDERGROUND', ['bgug']);   // (UNDERGROUND LIGHT, 50-land-terrain.js ltDist - a look: WORLD PROPERTIES > BACKGROUND > BG, user Nov 1)
 // (REFRESH: the editor's top bar, for every edit of the world - 50-zzz-world-ed.js, user Nov 1)
 const skinBtn = (lab, v, desc) => { const f = () => terrainMark(v); f.init = b => { (TERRAIN_ED.skinBtns || (TERRAIN_ED.skinBtns = [])).push([b, v]);
-  if (!TERRAIN_ED.skinNote) setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.skinNote) return; terrainHillsRow(cat); const n = document.createElement('div'); n.className = 'tabnote'; cat.appendChild(n); TERRAIN_ED.skinNote = n; terrainAirportBox(cat); terrainSyncSkin(); }, 0); }; return [lab, desc, f]; };
+  if (!TERRAIN_ED.skinNote) setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.skinNote) return; terrainHillsRow(cat); const n = document.createElement('div'); n.className = 'tabnote'; cat.appendChild(n); TERRAIN_ED.skinNote = n; terrainSyncSkin(); }, 0); }; return [lab, desc, f]; };
 NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
   skinBtn('FOREST', 'F', 'The forest\'s look'),
   skinBtn('DESERT', 'D', 'The desert\'s look'),
@@ -50734,98 +50482,9 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN SHAPES', [
   seeBtn(),
   ['SPLIT SHAPE', 'Cut the shape in two at the picked piece', islSplitShape],
 ]);
-// (user Oct 28, 20:25: "docs don't have to be mandatory") a coast's dock taken away, or put back (the nearer coast without one)
-function terrainDelDock() {
-  const o = TERRAIN_ED.struct;
-  if (DOCKS_X.includes(o)) { DOCKS_X.splice(DOCKS_X.indexOf(o), 1); TERRAIN_ED.struct = null; docksXSave(); terrainSyncOwner(); return; }
-  if (!DOCK_MARK.includes(o) || dockOwnOf(o.dockR) === null) { terrainSyncOwner('Press a dock\'s box first, then DELETE DOCK.'); return; }
-  dockOwnSet(o.dockR, null); terrainSyncOwner();
-}
-// (user Oct 31) RUNWAY: the picked airport's runway length, in metres - its flat footprint goes with it, a longer one moved
-// out to its clearance and what stood in its way pushed inland (structsFit), built on REFRESH as a drag is
-function terrainSetRunway(m) {
-  const o = TERRAIN_ED.struct; if (!o || o.kind !== 'airport' || !LAND_STRUCTS.includes(o)) return;
-  const old = LAND_STRUCTS.map(q => Object.assign({}, q)), len = Math.round(clamp(m * UPM, AIR_LEN_M[0], AIR_LEN_M[1]));
-  if (Math.abs(len - AIR_W) < UPM) delete o.len; else o.len = len;
-  o.w = airW(o) + 160; structsFit(LAND_STRUCTS);
-  landEdChanged(old, true); landPreview(structLand(o));
-}
-function terrainRunwaySync() {
-  const n = TERRAIN_ED.rwAnchor; if (!n || !n.parentElement) return;
-  let R = TERRAIN_ED.runway;
-  if (!R) {
-    const r = document.createElement('div'); r.className = 'row';
-    r.innerHTML = `<label>RUNWAY</label><input type="range" min="${Math.round(AIR_LEN_M[0] / UPM)}" max="${Math.round(AIR_LEN_M[1] / UPM)}" step="10"><output></output><span class="dv"></span>`;
-    const inp = r.querySelector('input'); r.querySelector('label').title = 'The picked airport\'s runway, metres';
-    inp.addEventListener('input', () => { terrainSetRunway(+inp.value); R.out.textContent = inp.value + ' M'; });
-    n.after(r); R = TERRAIN_ED.runway = { r, inp, out: r.querySelector('output') };
-  }
-  const o = TERRAIN_ED.struct, ok = !!o && o.kind === 'airport' && LAND_STRUCTS.includes(o);
-  R.inp.disabled = !ok; R.r.style.opacity = ok ? '' : '0.4'; n.parentElement.hidden = !ok;   // (the AIRPORT section shows while one is picked)
-  if (ok) { const m = Math.round(airW(o) / UPM); R.inp.value = m; R.out.textContent = m + ' M'; } else R.out.textContent = '';
-}
-function terrainSyncOwner(msg) {
-  setTimeout(terrainRunwaySync, 0);
-  if (DOCKS_X.includes(TERRAIN_ED.struct)) {                      // (a dock placed at sea)
-    const o = TERRAIN_ED.struct;
-    for (const [b, v] of TERRAIN_ED.ownBtns || []) b.classList.toggle('on', o.own === v);
-    if (TERRAIN_ED.ownNote) TERRAIN_ED.ownNote.textContent = msg || 'Dock: ' + ['NOBODY\'s', 'LEFT side\'s', 'RIGHT side\'s'][o.own + 1] + '.';
-    return;
-  }
-  if (DOCK_MARK.includes(TERRAIN_ED.struct)) {                     // (a harbour's box)
-    const R = TERRAIN_ED.struct.dockR, w = dockOwnOf(R);
-    for (const [b, v] of TERRAIN_ED.ownBtns || []) b.classList.toggle('on', w === v);
-    if (TERRAIN_ED.ownNote) TERRAIN_ED.ownNote.textContent = msg || (w === null ? 'No dock on this coast.' : 'Dock: ' + ['NOBODY\'s', 'LEFT side\'s', 'RIGHT side\'s'][w + 1] + '.');
-    return;
-  }
-  const o = TERRAIN_ED.struct && (LAND_STRUCTS.includes(TERRAIN_ED.struct) || LAND_TOWERS.includes(TERRAIN_ED.struct)) ? TERRAIN_ED.struct : null, w = o ? ownerOf(o) : null;
-  for (const [b, v] of TERRAIN_ED.ownBtns || []) b.classList.toggle('on', w === v);
-  if (TERRAIN_ED.ownNote) TERRAIN_ED.ownNote.textContent = msg || (o ? (o.kind ? STRUCT_KINDS[o.kind].name : 'TOWER') + ': ' + ['NOBODY\'s', 'LEFT side\'s', 'RIGHT side\'s'][w + 1] + '.' : 'Press a box to pick it.');
-}
 // (OBJECT TEAM gone, user Nov 1: a tower, a dock, an airport is picked in the world and deleted with the editor's DELETE; a tower
 // is added with the VEHICLE tab's SPAWN)
-// (user Oct 28, 20:47) the world bigger or smaller at its ends; (user Oct 29) by the GROWTH slider's screens (1 by default,
-// 0.1 to 10), and anywhere: +N AT SEGMENT stretches the picked pieces of line by that much (a new round each time)
-const ED_GROW = { v: 1 };
-try { const g = +localStorage.getItem('bd_growth'); if (g >= 0.1 && g <= 10) ED_GROW.v = g; } catch (e) { }
-const fmtScr = v => (Math.round(v * 100) / 100).toString();
-const worldScreens = () => 22 + (WORLD_EXT ? WORLD_EXT.L + WORLD_EXT.R : 0) + (STRETCH_SET ? STRETCH_SET[STRETCH_SET.length - 1][1] - STRETCH_SET[STRETCH_SET.length - 1][0] - (STRETCH_SET[0][1] - STRETCH_SET[0][0]) : 0);
-const extNote = () => 'World: ' + fmtScr(worldScreens()) + ' screens.';
-function terrainSyncGrow() {
-  const v = fmtScr(ED_GROW.v), sp = typeof selBaseSpan === 'function' ? selOneSpan() : null;
-  for (const [b, k] of TERRAIN_ED.growBtns || []) {
-    if (k === 'seg') { b.textContent = '+' + v + ' AT SEGMENT'; b.disabled = !sp; b.style.opacity = sp ? '' : '0.4'; }
-    else b.textContent = (k[0] > 0 ? '+' : '-') + v + (k[1] ? ' RIGHT' : ' LEFT');
-  }
-  if (TERRAIN_ED.growRow) { TERRAIN_ED.growRow.inp.value = ED_GROW.v; TERRAIN_ED.growRow.out.textContent = v; }
-  if (TERRAIN_ED.extNote) TERRAIN_ED.extNote.textContent = extNote();
-}
-function terrainGrowRow(cat) {
-  if (TERRAIN_ED.growRow || !cat) return;
-  const r = document.createElement('div'); r.className = 'row';
-  r.innerHTML = '<label>GROWTH</label><input type="range" min="0.1" max="10" step="0.1"><output></output><span class="dv"></span>';
-  const inp = r.querySelector('input'), lbl = r.querySelector('label');
-  lbl.title = 'How many screens the buttons below add: at an end of the world, or at the pieces of line you picked (+N AT SEGMENT)';
-  inp.addEventListener('input', () => { ED_GROW.v = +inp.value; try { localStorage.setItem('bd_growth', String(ED_GROW.v)); } catch (e) { } terrainSyncGrow(); });
-  cat.appendChild(r);
-  TERRAIN_ED.growRow = { inp, out: r.querySelector('output') };
-  const n = document.createElement('div'); n.className = 'tabnote'; cat.appendChild(n); TERRAIN_ED.extNote = n;
-  terrainSyncGrow();
-}
-// (user Oct 29: "+1 at segment should not work if I have 2 segments selected") one piece of line picked, no more
-const selOneSpan = () => { const s = TERRAIN_ED.sel; return s && selLo(s) === selHi(s) ? selBaseSpan(s) : null; };
-function terrainGrowSeg() {
-  const sp = selOneSpan();
-  if (!sp) { if (TERRAIN_ED.extNote) TERRAIN_ED.extNote.textContent = 'Pick one piece of line first.'; return; }
-  stretchAt(sp[0], sp[1], ED_GROW.v * VIEW_W); TERRAIN_ED.sel = null; terrainSyncSkin(); terrainSyncGrow();
-}
-const growBtn = (k, desc, f) => { f.init = b => { (TERRAIN_ED.growBtns || (TERRAIN_ED.growBtns = [])).push([b, k]); setTimeout(() => { terrainGrowRow(b.parentNode); terrainSyncGrow(); }, 0); }; return ['+1', desc, f]; };
-const extGrow = (R, sg) => growBtn([sg, R], (sg > 0 ? 'More land' : 'Less land') + ' at the world\'s ' + (R ? 'right' : 'left') + ' end, by the GROWTH slider\'s screens' + (sg > 0 ? ': the old end\'s mountain a ridge, rolling country past it' : ' (never less than it always was)'),
-  () => { worldExtSet(R, (WORLD_EXT ? WORLD_EXT[R ? 'R' : 'L'] : 0) + sg * ED_GROW.v); terrainSyncGrow(); });
-NSKY.editor.TUNE.buttons('TERRAIN', 'WORLD SIZE', [
-  growBtn('seg', 'Stretches the one piece of line you picked by the GROWTH slider\'s screens: the ground between its two handles widened, its heights at those ends as they were; everything past them moves on, everything before them stays. A lake, the middle of the ocean, an island - wider', terrainGrowSeg),
-  extGrow(false, 1), extGrow(false, -1), extGrow(true, 1), extGrow(true, -1),
-]);
+// (Nov 3: the WORLD SIZE buttons and the GROWTH slider gone - the world's size is its shapes', 50-zzzz-world-size.js)
 NSKY.editor.TUNE.buttons('TERRAIN', 'THE GROUND (OPEN WORLD)', [
   ['RESET TO DEFAULT', 'Back to the default ground', terrainReset],
   ['COPY POINTS', 'Copy the ground as text', b => {
@@ -52552,17 +52211,16 @@ function gedgeDraw(cv, xl) {
    shapes in ISLANDS marked gnd: 1 - edited, split, moved, scaled and taken away as any shape (50-land-islands / 50-land-shapes).
    The land and the sea floor are built from their tops (gndTopAt: each grid column's topmost ground solid), the ocean is where
    their pieces are marked SEA or where there is none (gndMarks -> seaRuns -> SEAS), and under the water a ground solid is the sea
-   floor (its sand, plants, rocks and pit), never a rock body of its own (SHP kind 'G'). Online every screen uses the default
-   world's ground shapes (GND_DEF - made once from the default line, Nov 2). Where there's no ground at all: the ocean, down to
+   floor (its sand, plants, rocks and pit), never a rock body of its own (SHP kind 'G'). Online the host's world's (00-world.js NET_WORLD). Where there's no ground at all: the ocean, down to
    the base seabed.
-   gS / gX: a world x's place in screens from the layout's old left end and back - the frame placed things are kept in.
+   gS / gX: a world x in reference screens (G_REF_VW, never the screen's own width) and back - what the marks' line is kept in.
    ================================================================ */
 const G_REF_VW = 1333;                                           // (the screen width the old ocean floor's frame was made into screens at)
 const G_FA = 6 + OLD_RUN / G_REF_VW, G_FB = 16 - OLD_RUN / G_REF_VW;   // (where the old ocean floor's points ran: from one old pier's end to the other's)
 const G_SEA = LAND_Y - WATER_Y;                                  // (the natural line at sea, under the calm sea's level: the floor's depth is dy + this)
 const G_DY = [Math.min(LAND_DY[0], FLOOR_MIN_D - G_SEA), Math.max(LAND_DY[1], FLOOR_MAX_D - G_SEA)];   // (how far a point moves)
-const gS = x => (unwarpX(x) - EXT_L) / VIEW_W;
-const gX = s => warpX(EXT_L + s * VIEW_W);
+const gS = x => x / G_REF_VW;                                    // (Nov 3: a fixed reference width - never the screen's: the world is the same on every screen)
+const gX = s => s * G_REF_VW;
 function seaRuns(P) {
   const out = [];
   for (let k = 0; k < P.length - 1; k++) {
@@ -52584,12 +52242,10 @@ const gGap = p => !!p && p[6] === 2;                              // (a piece wi
 const G_GAP_DY = () => clamp((SHP.base || SEA_FLOOR_MAX) - WATER_Y - G_SEA, 0, G_DY[1]);   // (down at the base seabed: the lowest point of any ground)
 const GND = { ver: -1, n: 0, top: null, skin: null, hills: null, marks: null, list: null };
 const GND_SK = [null, 'F', 'D', 'S', 'T'];
-// the default world's ground (online, and a world with none kept): made once from the default ground line (Nov 2)
-const GND_DEF = [{"k":"S","gnd":1,"p":[[0,-282,"F"],[444.8,-260.9,"F"],[888.5,-99.8,"F"],[1333.3,-54.8,"F"],[1746.2,139.7,"F"],[2152.5,267.8,"F"],[4345.8,283.5,"F"],[4836,158.6,"F"],[5777.8,236.6,"F"],[6429.1,-128.9,"F"],[7111.1,58,"F"],[7555.9,-96,"F"],[7999.6,-96,"F"],[8444.4,-96,"F"],[8889.2,-96,"F"],[9333,-96,"F"],[9777.8,-47.4,"F"],[10222.6,-49.1,"F"],[10666.3,-26.6,"F"],[11111.1,-14,"F"],[11555.9,-14,"F"],[12015.4,-24,"F"],[12444.4,-14,"S"],[12965.4,81,"S"],[13412.4,147,"S"],[13977.1,137,"S"],[14482.9,137,"S"],[15382.9,157,"S"],[15753.4,385,"S"],[16224,669,"S"],[16409.7,861,"S"],[17394.5,806,"S"],[17688.6,801,"S"],[18170.9,887,"S"],[18500.3,1049,"S"],[18647.4,1409,"S"],[18785.9,2351,"S"],[18799.2,2625,"S"],[18945.4,2859,"S"],[18998.6,3189,"S"],[19061.8,3244,"S"],[19269.5,3138,"S"],[19407.4,3148,"S"],[19522.1,3057,"S"],[19561.9,3097,"S"],[19703.2,3549,"S"],[19944.2,4544,"S"],[20719.4,4528,"S"],[21549.3,4506,"S"],[21933,5063,"S"],[22271.9,4868,"S"],[22418.2,4543,"S"],[22827,4618,"S"],[22850.2,4225,"S"],[23016.4,3429,"S"],[23347.1,3175,"S"],[23729.3,3376,"S"],[23742.6,3590,"S"],[24263.7,3863,"S"],[24376.5,4362,"S"],[24511.5,4382,"S"],[24586,4855,"S"],[24660.9,4427,"S"],[24809.9,4274,"S"],[25186.2,4792,"S"],[25395.6,6700,"S"],[25969.1,7132,"S"],[26311.1,6741,"S"],[27072.6,4870,"S"],[29248.9,4787,"S"],[32229.9,4370,"S"],[35620.9,4668,"S"],[37275.8,3657,"S"],[39028.2,3620,"S"],[39691.2,3741,"S"],[40844.2,3578,"S"],[40995.4,3153,"S"],[41008.7,2574,"S"],[41056.9,2361,"S"],[41274.6,2163,"S"],[41460.7,2163,"S"],[41641.8,2006,"S"],[41758.1,1995,"S"],[41997.4,2493,"S"],[42098.8,2559,"S"],[42183.5,2463,"S"],[42279.9,2493,"S"],[42622.2,2244,"S"],[42653.8,2036,"S"],[42866.5,1868,"S"],[43145.7,1447,"S"],[43628.2,1479,"S"],[43876.7,1407,"S"],[44125.2,1027,"S"],[45070.9,837,"S"],[45581.7,658,"S"],[46271.9,521,"S"],[46582.5,462,"S"],[46837.9,349,"S"],[47314.2,379,"S"],[47790.5,194,"S"],[48711.1,-14,"S"],[49155.9,-14,"S"],[49599.6,-14,"S"],[50044.4,-14,"S"],[50489.2,-14,"S"],[50567.1,-14,"D"],[50933,-14,"D"],[51377.8,-14,"D"],[51822.6,-14,"D"],[52189.5,38.8,"D"],[52691.7,161.7,"D"],[55079.9,-4.7,"D"],[55512.1,-99,"D"],[56267,-99,"D"],[56710.8,-99,"D"],[57155.6,236.6,"D"],[57600.4,-237,"D"],[58044.1,-237,"D"],[58300.2,-114.9,"D"],[58933.7,203.2,"D"],[59540.8,-129,"D"],[59843.3,-136.1,"D"],[60267,-75.4,"D"],[60710.8,-251,"D"],[61155,-282,"D"],[61155,7572,"F"],[0,7572,"F"]]}];
-// the ground solids: the world's own (in ISLANDS), online the default world's
-const gndList = () => NET.role === 'local' ? ISLANDS.filter(I => I.gnd && shpK(I) === 'S') : GND_DEF;
+// the ground solids: the world's own (in ISLANDS)
+const gndList = () => ISLANDS.filter(I => I.gnd && shpK(I) === 'S');
 function gndBuild() {
-  if (GND.ver === ISL_VER && GND.list === NET.role && GND.top && GND.n === Math.ceil(WORLD_W / LT_CELL) + 1) return;
+  if (GND.ver === ISL_VER && GND.top && GND.n === Math.ceil(WORLD_W / LT_CELL) + 1) return;
   const n = GND.n = Math.ceil(WORLD_W / LT_CELL) + 1, T = GND.top = new Float32Array(n).fill(Infinity), K = GND.skin = new Uint8Array(n), H = GND.hills = new Uint16Array(n).fill(100);
   for (const I of gndList()) {
     const P = shpPoly(I), c0 = Math.max(0, Math.ceil(P.x0 / LT_CELL)), c1 = Math.min(n - 1, Math.floor(P.x1 / LT_CELL)), QS = shpColSpans(P, c0, c1);
@@ -52604,7 +52260,7 @@ function gndBuild() {
   for (let c = 0; c < n; c++) { const code = T[c] === Infinity ? -1 : K[c] * 1000 + H[c]; if (code === last) continue; last = code; const q = [+gS(c * LT_CELL).toFixed(6), 0]; if (code === -1) q.push(null, 1, 0, 0, 2); else { const sk = GND_SK[K[c]], h = H[c] / 100; if (sk || h !== 1) q.push(sk); if (h !== 1) q.push(h); } M.push(q); }
   const e = +gS(WORLD_W).toFixed(6); if (!M.length || M[M.length - 1][0] < e) M.push([e, 0]);
   if (M.length < 2) M.unshift([+gS(0).toFixed(6), 0]);
-  GND.marks = M; GND.ver = ISL_VER; GND.list = NET.role;
+  GND.marks = M; GND.ver = ISL_VER;
 }
 const gndMarks = () => { gndBuild(); return GND.marks; };
 function gndTopAt(x) { gndBuild(); const f = clamp(x / LT_CELL, 0, GND.n - 1), c = Math.floor(f), u = f - c, a = GND.top[c], b = GND.top[Math.min(GND.n - 1, c + 1)]; if (a === Infinity || b === Infinity) return a === Infinity ? b : a; return a + (b - a) * u; }
@@ -54273,7 +53929,7 @@ const storyBerths = o => Math.max(1, strSpots(o));   // (a dock: as many as fit 
 // not on the structure that has the vehicle. The vehicle price would be universal") each vehicle type's price: the GAME
 // EDITOR's VEHICLES tab, STORY box - PRICE (kept with the world: bd_prices, 00-world.js); unset, the type's own (STR_VEHS)
 let STORY_PRICES = {};
-try { const o = JSON.parse(localStorage.getItem('bd_prices') || 'null'); if (o && typeof o === 'object') STORY_PRICES = o; } catch (e) { }
+worldLoad(() => { STORY_PRICES = {}; try { const o = JSON.parse(localStorage.getItem('bd_prices') || 'null'); if (o && typeof o === 'object') STORY_PRICES = o; } catch (e) { } });
 const storyTypePrice = sv => Number.isFinite(STORY_PRICES[sv]) ? STORY_PRICES[sv] : (STR_VEHS[sv] ? STR_VEHS[sv].price : 0);
 const storyPrice = (o, i, sv) => storyTypePrice(sv);
 function storySpotX(o, i) { const B = strBox(o); return B.x0 + (i + 0.5) * (B.x1 - B.x0) / storyBerths(o); }
@@ -54967,11 +54623,11 @@ function atmoMarksDraw() {
 const BG_PICS = [['CITY', 0], ['HILL TOWN', 1]];             // (each picture's name and its coasts[] row - 42-render-sky prepCoasts)
 const bgOk = L => Array.isArray(L) && L.every(r => r && Number.isFinite(r.id) && (r.v === 0 || r.v === 1) && Number.isFinite(r.x) && (r.e === 0 || r.e === 1));
 let BGS = [];
-try { const L = JSON.parse(localStorage.getItem('bd_backgrounds') || 'null'); if (bgOk(L)) BGS = L; } catch (e) { }
+worldLoad(() => { BGS = []; try { const L = JSON.parse(localStorage.getItem('bd_backgrounds') || 'null'); if (bgOk(L)) BGS = L; } catch (e) { } });
 function bgSave() { try { localStorage.setItem('bd_backgrounds', JSON.stringify(BGS)); } catch (e) { } if (typeof edDirty === 'function') edDirty(); }
 // what the game drew by itself before: each sea's two shores - the city at its left one, the hill town at its right (SEAS)
 function bgDefault() { const L = []; for (let i = 0; i < SEAS.n; i++) { L.push({ id: L.length + 1, v: 0, x: Math.round(SEAS.c.lo[i]), e: 0, flip: false }, { id: L.length + 2, v: 1, x: Math.round(SEAS.c.hi[i]), e: 1, flip: false }); } return L; }
-const bgLocal = () => OWM && NET.role === 'local';
+const bgLocal = () => OWM;
 const bgUsed = () => bgLocal() ? BGS : bgDefault();
 // once per world (after its seas are built - 07-world-build): the automatic ones as placed ones
 function bgConvert() {
@@ -55723,8 +55379,8 @@ const natN = a => [a.n0 != null ? a.n0 : a.n | 0, a.n1 != null ? a.n1 : a.n0 != 
 const natCount = a => { const [l, h] = natN(a); return l + Math.floor(seaR() * (Math.max(l, h) - l + 1)); };
 let NATURE = [];
 function natureValid(L) { return Array.isArray(L) && L.every(a => a && NAT_KINDS[a.k] && [a.x0, a.x1, a.y0, a.y1].every(Number.isFinite) && a.x1 > a.x0 && a.y1 > a.y0); }
-try { const o = JSON.parse(localStorage.getItem('bd_nature') || 'null'); if (natureValid(o)) NATURE = o; } catch (e) { }
-const natureUsed = () => OWM && NET.role === 'local' ? NATURE : [];
+worldLoad(() => { NATURE = []; try { const o = JSON.parse(localStorage.getItem('bd_nature') || 'null'); if (natureValid(o)) NATURE = o; } catch (e) { } });
+const natureUsed = () => OWM ? NATURE : [];
 function natureSave() { try { if (!NATURE.length) localStorage.removeItem('bd_nature'); else localStorage.setItem('bd_nature', JSON.stringify(NATURE)); } catch (e) { } }
 // a fish area's box by its id (null: gone - its schools keep the sea's range)
 const natureRange = id => natureUsed().find(a => a.id === id) || null;
@@ -55746,7 +55402,7 @@ function natureSchools() {
   }
 }
 // the areas' sharks and whales (buildSea, and after an edit): every area's own made again, born in its box, kept to it
-const critAreas = () => OWM && NET.role === 'local';              // (their areas are where they live: else the game's scatter)
+const critAreas = () => OWM;              // (their areas are where they live: else the game's scatter)
 function natureCreatures() {
   if (!critAreas()) return;
   sharks = sharks.filter(k => k.area == null); whales = whales.filter(k => k.area == null);
@@ -55766,7 +55422,7 @@ function natureConvert() {
   if (!critAreas()) return;
   try { if (localStorage.getItem('bd_crit_conv')) return; } catch (e) { return; }
   const W = seaW(); if (!(W > 0)) return;
-  const nS = Math.round(5 * W / (VIEW_W * 3)), id0 = NATURE.reduce((m, q) => Math.max(m, q.id), 0);
+  const nS = Math.round(5 * W / (G_REF_VW * 3)), id0 = NATURE.reduce((m, q) => Math.max(m, q.id), 0);
   let id = id0, gS = 0, gW = 0;
   for (let i = 0; i < SEAS.n; i++) {
     const x0 = Math.round(SEAS.c.lo[i]), x1 = Math.round(SEAS.c.hi[i]), f = (x1 - x0) / W;
@@ -55879,7 +55535,7 @@ function natureFill(box, el) {
    Not loose: a rocket stands on its LAUNCH PAD (spawn the structure), the armies' vehicles start at their teams' hangars.
    ================================================================ */
 let PLACED = [];                                          // ({ id, sv: its type - PLACE_TYPES, x, y, dir })
-try { const L = JSON.parse(localStorage.getItem('bd_placed') || 'null'); if (Array.isArray(L)) PLACED = L.filter(r => r && typeof r.sv === 'string' && Number.isFinite(r.x) && Number.isFinite(r.id)); } catch (e) { }
+worldLoad(() => { PLACED = []; try { const L = JSON.parse(localStorage.getItem('bd_placed') || 'null'); if (Array.isArray(L)) PLACED = L.filter(r => r && typeof r.sv === 'string' && Number.isFinite(r.x) && Number.isFinite(r.id)); } catch (e) { } });
 function placedSave() { try { if (PLACED.length) localStorage.setItem('bd_placed', JSON.stringify(PLACED)); else localStorage.removeItem('bd_placed'); } catch (e) { } }
 // ---- every type: its label and its maker (rows: [[table, row], ...] - the first is the vehicle)
 const placedBase = r => ({ placed: r.id, sid: 90000 + r.id, own: false, price: 0 });   // (sid: the editor keeps it - edPlacedOnly)
@@ -55938,7 +55594,7 @@ function placedNew(r) {
 }
 // the world built (07-world-build.js, after the structures' vehicles): every placed one in its table
 function placedBuild() {
-  if (!OWM || NET.role !== 'local') return;
+  if (!OWM) return;
   // (the structures' vehicles: an OWNER given to one in the editor - its spot's fac; PLAYER is the spot's own flag, as before)
   for (const t of PLACED_TABLES) { const T = TABLES[t]; if (T) for (const v of T.list()) if (v.hb != null && v.placed == null) { const o = strById(v.hb), e = o && Array.isArray(o.veh) ? o.veh[v.hs] : null; if (e && typeof e.fac === 'number') v.fac = e.fac; } }
   // (one held off its rest - r.off: the structures' rule - is left out of play; the editor shows it where it was let go, red)
@@ -56372,7 +56028,7 @@ function vehLookOf(sv) {
 const PF_KEYS = ['k', 'art', 'spr', 'big', 'lh', 'strip', 'small', 'hosp', 'takes', 'rep', 'ref', 'fish', 'maxL', 'restrict', 'allow', 'n'];
 const pfFields = k => k === 'dock' ? PF_KEYS.filter(q => q !== 'n') : PF_KEYS;   // (a dock's spots: as many as its length takes - strSpots)
 let PREFABS = { s: [], v: [], vn: {}, next: 0 };   // s: structure prefabs edited or made here; v: NEW vehicle prefabs { id, name, base }; vn: a vehicle type's own name, renamed
-try { const o = JSON.parse(localStorage.getItem('bd_prefabs') || 'null'); if (o && Array.isArray(o.s)) PREFABS = Object.assign({ s: [], v: [], vn: {}, next: 0 }, o); } catch (e) { }
+worldLoad(() => { PREFABS = { s: [], v: [], vn: {}, next: 0 }; try { const o = JSON.parse(localStorage.getItem('bd_prefabs') || 'null'); if (o && Array.isArray(o.s)) PREFABS = Object.assign({ s: [], v: [], vn: {}, next: 0 }, o); } catch (e) { } if (typeof PF_S !== 'undefined') PF_S = null; });
 let PF_S = null;                                              // (every structure prefab: the kinds' own, the saved ones, the ones found in the world)
 function pfSave() { try { localStorage.setItem('bd_prefabs', JSON.stringify({ s: PF_S || PREFABS.s, v: PREFABS.v, vn: PREFABS.vn, next: PREFABS.next })); } catch (e) { } }
 const pfHash = s => { let h = 5381; for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) | 0; return (h >>> 0).toString(36); };
@@ -57385,14 +57041,12 @@ function strVehs(o) {
 }
 // a dock's deck: its tile's top this far over the water (metres; the posts' feet in the water)
 const DOCK_ABOVE = 1.4;
-let STRS = [], STRS_NET = [], STR_GEN = 0;   // (STR_GEN: bumped at every save - what's derived from the structures made again, structsLocal)
-   // (STRS_NET: online, the built-in airports' structures - airportsConvert)
+let STRS = [], STR_GEN = 0;   // (STR_GEN: bumped at every save - what's derived from the structures made again, structsLocal)
 // (an older world: its FACTION is its OWNER - CIV 1 team 1, CIV 2 team 2)
 function strsFix(L) { for (const o of L) if ((o.home ?? o.k === 'home') && o.own === undefined) o.own = 'player'; for (const o of L) if (o.fac !== undefined) { if (o.own === undefined && (o.fac === 'civ1' || o.fac === 'civ2')) o.own = o.fac === 'civ1' ? 0 : 1; delete o.fac; } return L; }
 function strsValid(L) { return Array.isArray(L) && L.every(o => o && STR_KINDS[o.k] && Number.isFinite(o.x)); }
-try { const o = JSON.parse(localStorage.getItem('bd_structs') || 'null'); if (strsValid(o)) STRS = strsFix(o); } catch (e) { }
-STRS.forEach(pfAttach);                                       // (each copy with its prefab - 50-zz-prefabs.js)
-const strsUsed = () => !OWM ? [] : NET.role === 'local' ? (EDMODE.on ? STRS : strsPlay()) : STRS_NET;   // (online: the built-in airports' structures - airportsConvert)
+worldLoad(() => { STRS = []; try { const o = JSON.parse(localStorage.getItem('bd_structs') || 'null'); if (strsValid(o)) STRS = strsFix(o); } catch (e) { } STRS.forEach(pfAttach); STR_GEN++; });                                       // (each copy with its prefab - 50-zz-prefabs.js)
+const strsUsed = () => !OWM ? [] : EDMODE.on ? STRS : strsPlay();   // (online: the host's world's - 00-world.js NET_WORLD)
 // (play: those off their ground left out - strFree; the editor shows them all, red)
 const STR_PLAY = { gen: -1, src: null, L: [] };
 function strsPlay() { const c = STR_PLAY; if (c.gen !== STR_GEN || c.src !== STRS) { c.gen = STR_GEN; c.src = STRS; c.L = STRS.some(strFree) ? STRS.filter(o => !strFree(o)) : STRS; } return c.L; }
@@ -57752,49 +57406,7 @@ function armyCan(p, k) {
   const h = armyHangar(SIDE(p), ARMY_FAM[k]);
   return !!h && (k !== 'plane' || !!strRunwayNear(h));
 }
-/* ---- the built-in airports as structures (step 3b, Nov 1; the user chose the RUNWAY structure for them): each airport of
-   LAND_STRUCTS is a RUNWAY (its take-off run, sunk into the flat pad so its deck is the pad), a LARGE AIRCRAFT HANGAR where its
-   hangar stood (its owner's warplane, army helicopter and tank) and a TERMINAL, grouped. The airport record stays as the flat
-   ground they stand on (the pad - the ground's shape is the land's: structAt / groundPins). Made once per world into STRS
-   (bd_air_conv); online every screen makes them the same from the defaults (STRS_NET, never saved). ---- */
-function airportStructs(L, id0) {
-  const out = []; let id = id0;
-  for (const o of L) {
-    if (o.kind !== 'airport') continue;
-    const af = airfieldFor(o, !!o.R), dir = af.dir, own = ownerOf(o), hue = own === 1 ? 210 : own === 0 ? 0 : 60, hd = af.far + dir * 80;
-    const mine = r => { r.id = ++id; r.g = null; r.hue = hue; /* (not grouped: each part moves on its own - user Nov 1 13:52) */ if (own === 0 || own === 1) r.own = own; out.push(r); };
-    mine({ k: 'runway', x: Math.round((af.near + af.far) / 2), len: +(Math.abs(af.near - af.far) / 0.88 / UPM).toFixed(1), hgt: -RUNWAY_DECK, flip: dir < 0, dy: 0 });
-    mine({ k: 'hangarAir', big: true, x: Math.round(dir > 0 ? hd - HGI.door[0] + HGI.w / 2 : hd + HGI.door[0] - HGI.w / 2), flip: dir < 0, dy: 0, n: 3, veh: [{ v: 'warplane', own: false }, { v: 'warheli', own: false }, { v: 'tank', own: false }] });
-    mine({ k: 'terminal', x: Math.round(termX(af)), dy: 2 });
-  }
-  return out;
-}
-// (step 4) the gun towers (LAND_TOWERS: from a country's end) as GUN TOWER structures, each its owner's
-function towerStructs(L, id0) {
-  let id = id0;
-  return L.map(t => { const r = { id: ++id, k: 'gunTower', x: Math.round(towerDefX(t)), flip: t.R === 1, dy: 0, g: null, hue: 30 }, own = ownerOf(t); if (own === 0 || own === 1) r.own = own; return r; });
-}
 const maxStrId = () => STRS.reduce((a, q) => Math.max(a, q.id || 0), 0);
-function structsConvert() {
-  STRS_NET = [];
-  if (!LAND) return;
-  if (NET.role !== 'local') { STRS_NET = [...airportStructs(STRUCT_DEF, 900000), ...towerStructs(TOWER_DEF, 900100)]; return; }
-  const once = (key, f) => { let done = false; try { done = localStorage.getItem(key) === '1'; } catch (e) { } if (done) return; f(); strSave(); try { localStorage.setItem(key, '1'); } catch (e) { } };
-  once('bd_air_conv', () => STRS.push(...airportStructs(LAND_STRUCTS, maxStrId())));
-  // (the airports converted before 13:52 came grouped: each part its own again - a runway, LARGE hangar and terminal group of three)
-  once('bd_air_ungroup', () => { const G = {}; for (const o of STRS) if (o.g != null) (G[o.g] || (G[o.g] = [])).push(o); for (const L of Object.values(G)) if (L.length === 3 && ['runway', 'hangarAir', 'terminal'].every(k => L.some(o => o.k === k)) && L.some(o => o.big)) for (const o of L) o.g = null; });
-  once('bd_tower_conv', () => { STRS.push(...towerStructs(LAND_TOWERS, maxStrId())); LAND_TOWERS = []; towerSave(); });
-  // (Nov 1, user 16:26: everything a structure) the built-in launch pads: a LAUNCH PAD each where it stood, its rocket at its spot
-  // (Nov 1) the built-in pads' records carried by their structures: an airport's flat ground by its RUNWAY, the launch pads'
-  // by their LAUNCH PAD - moved with them (structsLocal, 50-land-tshape.js)
-  const groundConv = () => { for (let i = 0; i < LAND_STRUCTS.length; i++) { const o = LAND_STRUCTS[i], [a, b] = structSpan(o), m = (a + b) / 2;
-    let h = null, bd = Infinity;
-    for (const s of STRS) { if (s.pad) continue; const ok = o.kind === 'airport' ? s.k === 'runway' && (s.x > LOOK_MID()) === !!o.R : o.kind === 'pads' && s.k === 'launchPad' && Math.abs(s.x - padX(o.R)) < 2; if (ok && Math.abs(s.x - m) < bd) { bd = Math.abs(s.x - m); h = s; } }
-    if (h) h.pad = { i, a: a - h.x, b: b - h.x }; }
-    PADS_ON = true; };
-  once('bd_pads_conv', () => { let id = maxStrId(); for (const R of [false, true]) { const o = structIn('pads', R); if (!o) continue; const r = { id: ++id, k: 'launchPad', x: padX(R), flip: R, dy: 0, g: null, hue: 280, n: 1, veh: [{ v: 'shuttle', own: false }] }, own = ownerOf(o); if (own === 0 || own === 1) r.own = own; STRS.push(r); } });
-  once('bd_ground_conv', groundConv);
-}
 // ---- the pane
 /* (user Oct 31 22:48: "there should be kind of something that checks what's missing in the world. If you die, you have to go
    to a hospital, so we need to have a hospital. If you're at sea and you have no more fuel, an helicopter comes. So we need a
@@ -57988,7 +57600,7 @@ function drawRoad(o, B) {
 // (Nov 1, everything a structure: a LAUNCH PAD rests on the ground and tips into a crater as the built-in pads did - padSpot /
 // padRestOf; the built-in two made into LAUNCH PADS once - bd_pads_conv)
 const strPadSpot = o => padSpot(o);
-const padsConverted = () => { if (!OWM || NET.role !== 'local') return false; try { return localStorage.getItem('bd_pads_conv') === '1'; } catch (e) { return false; } };
+const padsConverted = () => OWM;   // (Nov 3: every world's launch pads are LAUNCH PAD structures - the old conversion's gone)
 // a stack's pad: its LAUNCH PAD structure, or its country's
 const stackPad = v => (v.ps != null && strsUsed().find(o => o.id === v.ps)) || v.R;
 function drawStrPad(o, B) {
@@ -58013,9 +57625,8 @@ function drawStrPad(o, B) {
                             owner (within HARB_LH_REACH) is a marine hangar's own (its flag, its pier gun); any other one a
                             gun tower of its owner in the lighthouse's look, wherever it stands
      CRANE                  { k: 'crane', x }                                 - rolls along the pier it stands on (only on one)
-   The harbours built the old way (DOCK_SET / DOCK_OWN / DOCKS_X - 07-world-build.js) are made into parts once in each world
-   (bd_harbour_conv), exactly where they stood; from then on buildWorld makes `docks`, `homeDock` and the harbour towers from
-   the parts (harbourFromStrs). Online, one player alone and the test range keep the old harbours. ---- */
+   buildWorld makes `docks`, `homeDock` and the harbour towers from the parts (harbourFromStrs) - in every mode with ground: OPEN
+   WORLD, BATTLE (one player alone too), STORY, online in the host's world (Nov 3: the old harbours and their conversion gone). ---- */
 const HARB = { on: false, tw: new Set(), free: [], dirty: false };
 const HARB_LH_REACH = 3000;
 const isPierS = o => o.k === 'dock' && o.spr === 'pier';
@@ -58023,9 +57634,8 @@ const isMarineS = o => o.k === 'hangarSea' && !!o.big;
 const isLightS = o => o.k === 'gunTower' && !!o.lh;
 const isHarbourPart = o => isPierS(o) || isMarineS(o) || isLightS(o) || o.k === 'crane';
 // (OPEN WORLD, BATTLE, STORY on this screen with both sides: the parts build the harbours)
-const harbourOn = () => OWM && !TEST && NET.role === 'local' && !NET.worldW && !(PLAYERS === 1 && !LAND);
-const harbourConverted = () => { try { return localStorage.getItem('bd_harbour_conv') === '1'; } catch (e) { return false; } };
-const harbourParts = () => harbourOn() && harbourConverted();
+const harbourOn = () => OWM;
+const harbourParts = harbourOn;
 // a pier's land end (where it meets a quay) and its way (dir: from the sea toward the land, as a harbour's)
 const pierDir = o => o.flip ? 1 : -1;
 // (user Nov 1 16:26: the pier's LENGTH as the wooden docks') its bays from its length in metres (len; none: the built-in pier's),
@@ -58042,30 +57652,10 @@ function marineLayout(o) {
   const d = dockAt(o.x, o.flip ? 1 : -1); layoutDock(d); o._lay = { key, d };
   return d;
 }
-// (once in each world) the harbours as the old way built them: their parts, where they stand
-function harbourConvert() {
-  if (harbourConverted()) return;
-  let id = maxStrId();
-  const team = d => d.player < 0 ? -1 : SIDE(d.player);
-  for (const d of docks) {
-    if (d.stand) continue;
-    const own = team(d), o = { id: ++id, k: 'hangarSea', big: true, x: d.L, flip: d.dir > 0, dy: 0, g: null, hue: 200, n: 2, veh: [{ v: 'battleship', own: false }, { v: 'warsub', own: false }] };
-    if (own === 0 || own === 1) o.own = own;
-    STRS.push(o);
-    STRS.push({ id: ++id, k: 'dock', spr: 'pier', x: d.px0 + PIER_L / 2, flip: d.dir > 0, dy: 0, g: null, hue: 200, n: 0, veh: [], len: PIER_M });
-    const t = { id: ++id, k: 'gunTower', lh: true, x: d.towerX, flip: d.dir > 0, dy: 0, g: null, hue: 30 };
-    if (own === 0 || own === 1) t.own = own;
-    STRS.push(t);
-    if (LAND) { const R = craneRun(d), legs = (CRI.legs[1] - CRI.legs[0]) * CRK, out = -d.dir; STRS.push({ id: ++id, k: 'crane', x: R.sea0 - out * (R.offMax * 0.5 + legs / 2), flip: d.dir > 0, dy: 0, g: null, hue: 50 }); }
-  }
-  strSave();
-  try { localStorage.setItem('bd_harbour_conv', '1'); } catch (e) { }
-}
 // (buildWorld, once the old harbours are laid out: left and right the two coasts', mkDock its stand-ins) the harbours from the parts
 function harbourFromStrs(left, right, mkDock) {
   HARB.on = false; HARB.tw.clear(); HARB.free = []; HARB.dirty = false;
   if (!harbourOn()) return;
-  if (!harbourConverted()) { if (!LAND) return; harbourConvert(); }   // (made into parts in OPEN WORLD / STORY - its owners and placed docks; BATTLE before that: the old harbours)
   HARB.on = true; HARB.sig = harbourSig();
   const L = STRS.filter(o => !strFree(o)), pOf = t => t !== 0 && t !== 1 ? -1 : SIDE(0) === t ? 0 : 1, D = [];
   for (const o of L) if (isMarineS(o)) { const d = dockAt(o.x, o.flip ? 1 : -1); d.player = pOf(strOwner(o)); d.so = o; layoutDock(d); D.push(d); }
@@ -58089,7 +57679,6 @@ function harbourFromStrs(left, right, mkDock) {
   const home = d => d.player >= 0 && strVehs(d.so).some(e => e && (e.v === 'battleship' || e.v === 'warsub'));
   homeDock = [0, 1].map(p => D.find(d => d.player === p && home(d) && (d.dir > 0) === (SIDE(p) === 1)) || D.find(d => d.player === p && home(d)) || Object.assign(mkDock(SIDE(p) === 1, true), { player: p, stand: true }));
   for (const d of homeDock) if (d.stand) layoutDock(d);
-  gunsConvert(D);                                        // (the towers' guns and the pier guns made GUN structures, once - below)
   docks = D;
   coastDocks = [left, right].map(c => D.find(d => d.dir === c.dir && Math.abs(d.L - c.L) < 2) || c);
   DOCKS_OWNED = true;
@@ -58244,12 +57833,10 @@ function harbourBox(o) {
        has no cannon or has fallen (as the pier gun always was).
    One rule: a gun goes with what carries it - a pier coming down takes its gun into the sea (pierGunFalls), a tower falling takes the
    gun on its top with it (stepPierGuns). The towers' arming and second guns are laid on when the world is built and when a structure
-   changes (gunsApply). Old worlds: every tower's gun and every harbour's pier gun made GUN structures once (bd_gun_conv, gunsConvert),
-   where they were. Online, one player alone and the test range keep the old harbours (towers armed, pier guns from the piers). ---- */
+   changes (gunsApply). (Nov 3: the old worlds' conversion gone - every world has its GUN structures.) ---- */
 const GUN_TYPES = [['cannon', 'MISSILE CANNON'], ['mg', 'MACHINE GUN CANNON']];
 const isGunS = o => o.k === 'gun';
-const gunsConverted = () => { try { return localStorage.getItem('bd_gun_conv') === '1'; } catch (e) { return false; } };
-const GUNS_ON = () => NET.role === 'local' && HARB.on && gunsConverted();
+const GUNS_ON = () => HARB.on;
 // what carries it, and where it sits on it: a tower whose body it's over (its top; a lighthouse's gallery), else a pier's deck
 function gunSeat(o, L = strsUsed()) {
   let pier = null;
@@ -58292,16 +57879,6 @@ function twOwnerS(o) {
   if (!GUNS_ON()) return strOwner(o);
   const c = strsUsed().find(g => isGunS(g) && g.wt !== 'mg' && (gunSeat(g) || {}).h === o);
   return c ? strOwner(c) : strOwner(o);
-}
-// (once per world, with the harbours as parts) every tower's gun and every harbour's pier gun as GUN structures, where they were
-function gunsConvert(D) {
-  if (gunsConverted() || NET.role !== 'local') return;
-  let id = STRS.reduce((m, o) => Math.max(m, o.id || 0), 0);
-  const own = s => s && s.own !== undefined ? { own: s.own } : {};
-  for (const o of STRS.filter(q => q.k === 'gunTower')) STRS.push(Object.assign({ id: ++id, k: 'gun', pf: 'k:gun', wt: 'cannon', x: o.x, dy: 0, g: null }, own(o)));
-  for (const d of D) if (d.lh && !d.noPier) STRS.push(Object.assign({ id: ++id, k: 'gun', pf: 'k:gun:mg', wt: 'mg', x: d.ax(PG_COL), dy: 0, g: null }, own(d.so)));
-  try { localStorage.setItem('bd_gun_conv', '1'); } catch (e) { }
-  strSave();
 }
 
 /* ---- UNDO for the GAME EDITOR (user Oct 31, the Story spec section 9: "Provide global Undo"). One history over the
@@ -58500,7 +58077,7 @@ setInterval(histDraw, 500);                               // (the editor just op
    STORM / CLOUDS / FOG chances. ---- */
 const WXA_DUR = 240, WXA_TW = 150;
 let WXA = { lines: [], areas: [{ storm: 0, cloud: 0, fog: 0 }] };
-try { const o = JSON.parse(localStorage.getItem('bd_weather_areas') || 'null'); if (o && Array.isArray(o.lines) && Array.isArray(o.areas) && o.areas.length === o.lines.length + 1) WXA = o; } catch (e) { }
+worldLoad(() => { WXA = { lines: [], areas: [{ storm: 0, cloud: 0, fog: 0 }] }; try { const o = JSON.parse(localStorage.getItem('bd_weather_areas') || 'null'); if (o && Array.isArray(o.lines) && Array.isArray(o.areas) && o.areas.length === o.lines.length + 1) WXA = o; } catch (e) { } });
 function wxaSave() { try { if (!WXA.lines.length) localStorage.removeItem('bd_weather_areas'); else localStorage.setItem('bd_weather_areas', JSON.stringify(WXA)); } catch (e) { } }
 const wxaR = sysRng('wxAreas');
 // the day's events, every area: [[{ k, t0 }...] per area] in W (the world's clock)
@@ -59018,7 +58595,7 @@ if (typeof window !== 'undefined') window.__objEd = { get SE() { return SE; }, g
    DELETE (the top bar, after DELETE ALL CHANGES): everything picked goes, whatever it is; it names it (DELETE TOWER, DELETE 3
    SEGMENTS, DELETE 4 ITEMS) - shown DELETE (Tower), DELETE (3 Segments), DELETE (4 Items). It's in the UNDO history like any edit.
    ================================================================ */
-const WED = { id: null, claim: null, shift: false, cx: 0, cy: 0, prevObj: null, lineSig: '', btn: null, rbtn: null, dirty: false };
+const WED = { id: null, claim: null, shift: false, cx: 0, cy: 0, lineSig: '', btn: null, rbtn: null, dirty: false };
 /* REFRESH (user Nov 1, 12:52: "at the top, next to the Undo, and properly change color when I edit ANYTHING"): one button for every
    edit of the world - lit (orange, CHANGES NOT BUILT) from any edit on WORLD EDITOR (an UNDO step: the ground, islands, airports,
    docks, towers, structures, fish areas; the caves; a weather line; a vehicle moved, spawned or deleted) until it's pressed: the
@@ -59032,16 +58609,10 @@ function wedRefresh() {
   if (typeof skyEdRefresh === 'function') skyEdRefresh();   // (the sky, held in the editor, taken again from the view - 41-sky-new.js SKYED)
   wedSync();
 }
-TERRAIN_ED.more = [];                                     // (terrain boxes picked with shift, besides TERRAIN_ED.struct)
 // (user Nov 2 14:13: "a selection drag should be outside existing items ... a UNIVERSAL CONSISTENT logic in the editor") a press any
 // editor of the world's things takes is never also the start of the TERRAIN tab's box-pick (MQ, 50-land-unified.js) - one place for all
 function edClaim(kind) { WED.claim = kind; if (typeof MQ !== 'undefined') MQ.on = false; }
-// (a terrain box picked: drawn white like everything picked - 50-land-tshape.js structEdDraw)
-const edPickedObj = o => TERRAIN_ED.struct === o || TERRAIN_ED.more.includes(o);
 // ---- each kind: its tab, what it has picked ({ noun, del: can it be deleted }), letting go, deleting
-const wedObjs = () => [TERRAIN_ED.struct, ...TERRAIN_ED.more].filter(Boolean);
-const wedObjNoun = o => DOCKS_X.includes(o) || DOCK_MARK.includes(o) ? 'DOCK' : o.kind && STRUCT_KINDS[o.kind] ? STRUCT_KINDS[o.kind].name.toUpperCase() : 'OBJECT';
-const wedObjDel = o => DOCKS_X.includes(o) || (DOCK_MARK.includes(o) && dockOwnOf(o.dockR) !== null);
 const vehNoun = e => e.army ? VEH_ARMY[e.k] : e.k === 'air' ? 'PLANE' : String(e.k).toUpperCase();
 // (a vehicle the editor may take out: not a side's own (the battleship, sub, plane...), not driven, not tied to another (a crane on
 // its rails, a research ship's mini sub or the ship carrying one))
@@ -59073,16 +58644,6 @@ const WK = {
       if (P && P.length !== n0) { TERRAIN_ED.sel = null; terrainSyncSkin(); }
     },
     el: () => TERRAIN_ED.skinBtns && TERRAIN_ED.skinBtns[0] && TERRAIN_ED.skinBtns[0][0],
-  },
-  object: {
-    tab: 'TERRAIN',
-    items: () => wedObjs().map(o => ({ noun: wedObjNoun(o), del: wedObjDel(o) })),
-    clear() { if (TERRAIN_ED.struct || TERRAIN_ED.more.length) { TERRAIN_ED.struct = null; TERRAIN_ED.more = []; terrainSyncOwner(); } },
-    del() {
-      for (const o of wedObjs()) { if (!wedObjDel(o)) continue; TERRAIN_ED.struct = o; terrainDelDock(); }
-      TERRAIN_ED.struct = null; TERRAIN_ED.more = []; terrainSyncOwner();
-    },
-    el: () => TERRAIN_ED.rwAnchor,
   },
   cave: {
     tab: 'CAVES',
@@ -59149,7 +58710,7 @@ const WK_TAB = { terrain: 'TERRAIN' };                    // (a press on what is
 NSKY.editor.TUNE.press = e => {
   const T = NSKY.editor.TUNE;
   if (!T.world() || onEdUI(e) || (e.pointerType === 'mouse' && e.button !== 0)) { WED.id = null; return; }
-  Object.assign(WED, { id: e.pointerId, claim: null, shift: e.shiftKey, cx: e.clientX, cy: e.clientY, prevObj: TERRAIN_ED.struct, lineSig: JSON.stringify(TERRAIN_ED.sel) });
+  Object.assign(WED, { id: e.pointerId, claim: null, shift: e.shiftKey, cx: e.clientX, cy: e.clientY, lineSig: JSON.stringify(TERRAIN_ED.sel) });
 };
 NSKY.editor.TUNE.release = e => {
   if (WED.id === null || e.pointerId !== WED.id) return;
@@ -59161,14 +58722,6 @@ function wedAfter(moved) {
   const T = NSKY.editor.TUNE; if (!T.world()) return;
   let k = WED.claim;
   if (!k && moved && TERRAIN_ED.sel && JSON.stringify(TERRAIN_ED.sel) !== WED.lineSig) k = 'line';   // (a box drawn round pieces of line)
-  if (k === 'object') {                                   // (shift: the box picked before stays picked too; pressed again, it's let go)
-    const cur = TERRAIN_ED.struct, prev = WED.prevObj;
-    if (!WED.shift) TERRAIN_ED.more = [];
-    else {
-      TERRAIN_ED.more = TERRAIN_ED.more.filter(o => o !== cur);
-      if (prev && prev !== cur && !TERRAIN_ED.more.includes(prev)) TERRAIN_ED.more.push(prev);
-    }
-  }
   if (!k) { if (!WED.shift && !moved) for (const id in WK) WK[id].clear(); }
   else if (k !== 'none') {
     if (!WED.shift) for (const id in WK) if (id !== k) WK[id].clear();
@@ -59332,6 +58885,52 @@ document.addEventListener('click', e => {
   e.stopImmediatePropagation(); e.preventDefault();
   sceneAsk(() => { SASK.pass = true; try { b.click(); } finally { SASK.pass = false; } }, null, t === 'SNAPSHOT');
 }, true);
+
+/* ================================================================
+   THE WORLD'S SIZE IS ITS SHAPES (user Nov 3 06:49: "The world size should change depending on the furthest terrain that has been
+   made"; 09:03: "if I delete large parts of terrain or shapes, it should adjust what the size of the world is"). OPEN WORLD, BATTLE
+   and STORY - online the host's world - run from the furthest shape's left end to the furthest shape's right end, in world units,
+   the same on every screen (it used to be counted in screen widths - WORLD_EXT, STRETCH - so a PC and an iPad built different
+   lengths). Built so (buildWorld, 07-world-build.js): a world whose shapes don't start at 0 is moved first so they do
+   (worldNormalize) - everything kept in world x with them, every kind (worldShift) - then its width is its furthest right end
+   (worldSpanW). REFRESH VIEW builds the world again when the shapes' ends have moved (worldSizeStale, 50-land-unified.js).
+   No shapes at all: the old 22 screens of ocean.
+   ================================================================ */
+const WORLD_W_EMPTY = 22 * G_REF_VW;
+function worldSpan() {
+  let lo = Infinity, hi = -Infinity;
+  for (const I of ISLANDS) for (const p of I.p) { if (p[0] < lo) lo = p[0]; if (p[0] > hi) hi = p[0]; }
+  return lo < hi ? [lo, hi] : null;
+}
+const worldSpanW = () => { const s = worldSpan(); return s ? Math.max(G_REF_VW, Math.round(s[1])) : WORLD_W_EMPTY; };
+function worldNormalize() { const s = worldSpan(); if (s && Math.round(s[0]) !== 0) worldShift(-Math.round(s[0])); }
+const worldSizeStale = () => { const s = worldSpan(); return !!s && (Math.round(s[0]) !== 0 || Math.max(G_REF_VW, Math.round(s[1])) !== WORLD_W); };
+// everything kept in world x moved by dx, each kind saved: the shapes, the structures, the placed vehicles, the krakens, the wrecks, the
+// creature areas, the lakes' levels, the weather lines, the backgrounds, the caves (and the editor's camera with them)
+function worldShift(dx) {
+  if (!dx) return;
+  const mv = x => Math.round(x + dx);
+  for (const I of ISLANDS) for (const p of I.p) p[0] = mv(p[0]);
+  ISL_VER++; try { localStorage.setItem('bd_islands', JSON.stringify(ISLANDS)); } catch (e) { }   // (as islSave, without typing the pieces: the seas aren't built yet)
+  for (const o of STRS) if (Number.isFinite(o.x)) o.x = mv(o.x);
+  strSave();
+  for (const r of PLACED) if (Number.isFinite(r.x)) r.x = r.x + dx;
+  placedSave();
+  for (const r of KR_SET) if (r.x != null) r.x = mv(r.x);
+  krSetSave();
+  for (const r of WRECK_SET) if (r.x != null) r.x = mv(r.x);
+  wreckSave();
+  for (const a of NATURE) { a.x0 = mv(a.x0); a.x1 = mv(a.x1); }
+  natureSave();
+  for (const q of LAKE_SET) q.x = mv(q.x);
+  lakeSave();
+  WXA.lines = WXA.lines.map(mv); wxaSave();
+  for (const r of BGS) r.x = mv(r.x);
+  if (BGS.length) bgSave();
+  if (typeof CAVE !== 'undefined' && CAVE.shiftX) CAVE.shiftX(dx);
+  if (typeof PHOTO !== 'undefined' && Number.isFinite(PHOTO.x)) PHOTO.x += dx;
+  console.log('WORLD: moved ' + dx + ' to start at its first shape');
+}
 
 /* ---- OPEN WORLD: the kraken's sounds (50-land-kraken.js) ----
    User Oct 27, 21:20: "For sfx it should give a deep 'roar' when it gets hurt. Then a final 'sad roar' like a dying lion but
@@ -60361,8 +59960,7 @@ async function start(data) {
   Object.assign(window.__game, { swT: { TABLES, RNGS, tablesSave, tablesLoad, tblPlain, uidOf, REG, planes, subs, ships, evStats, SW_DRAW, SW_COLS } });
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
-  Object.assign(window.__game, { structs: () => LAND_STRUCTS, structDragTo: (i, u, y) => structDragTo(LAND_STRUCTS[i], u, y), structUp: old => { structSave(); structEdited(old); }, airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landUp: () => landEdited(), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), setOwner: (i, v) => { const o = LAND_STRUCTS[i]; if (v === (o.R ? 1 : 0)) delete o.own; else o.own = v; }, islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x),
-    dockOwnSet: (R, v) => dockOwnSet(R, v), worldExtSet: (R, n) => worldExtSet(R, n), buildTimes: () => BUILD_T.slice(), landHillsAt: x => landHillsAt(x), stretchSel: (sel, n) => { const sp = selBaseSpan(sel); return sp ? stretchAt(sp[0], sp[1], n * VIEW_W) : false; }, stretchReset: () => { stretchReset(); builtViewW = 0; resize(); }, stretchNone: () => { STRETCH_SET = null; stretchSave(); builtViewW = 0; resize(); }, copyText: () => terrainCopyText(), terrainSel: s => { TERRAIN_ED.sel = s; terrainSyncSkin(); }, split: n => { ED_SPLIT.v = n; terrainSplit(); return TERRAIN_ED.sel; }, delSeg: () => { terrainDelSeg(); return TERRAIN_ED.sel; }, lakes: () => (land.lakes || []).map(L => [Math.round(L[0]), Math.round(L[1])]), krakenMoveTo: (x, y) => KR_SET[0] && krakenMoveTo(KR_SET[0].id, x, y), wreckMoveTo: (k, x, y) => wreckMoveTo(k, x, y), wrecks: () => pirateWrecks.map(w => ({ k: w.k, x: Math.round(w.x), y: w.y, by: Math.round(wreckBy(w)), flat: w.flat, chest: chestAt(w).map(Math.round) })),  krSeat: () => { const k = KRAKENS[0] || KR; return { x: Math.round(k.bx), y: Math.round(k.by), u: KR_SET[0] ? KR_SET[0].u : null }; }, landEvictNow: () => { if (!land.seen) return 0; land.seen.fill(-1e6); const n = land.chunks.filter(Boolean).length; landEvict(); return n - land.chunks.filter(Boolean).length; }, landCounts: () => ({ stones: (land.stones || []).length, props: (land.props || []).length, tufts: (land.tufts || []).length, boulders: (land.boulders || []).length, outcrops: (land.outcrops || []).length, cells: land.cell ? land.cell.length : 0 }), worldInfo: () => ({ W: WORLD_W, EXT_L, EXT_R, LAYOUT_L, LAYOUT_R, VIEW_W, BED_A, BED_B, cols: land.cols }), docksXSet: L => { DOCKS_X = L; docksXSave(); }, sandY: x => sandY(x), myTw: p => myTw(p), ownTowers: p => ownTowers(p), dockInfo: () => ({ owned: DOCKS_OWNED, docks: docks.map(d => ({ x: Math.round(d.quay), dir: d.dir, player: d.player, tw: towers.indexOf(d._tw) })), home: homeDock.map(d => ({ x: Math.round(d.quay), dir: d.dir, stand: !!d.stand, player: d.player })), towers: towers.map(t => ({ p: t.player, x: Math.round(t.x), hp: t.hp, edge: !!t.edge })), ships: ships.map(s => s.state), subs: subs.map(s => s.state), fleet: [0, 1].map(p => [fleet[p].ship, fleet[p].sub]) }) });
+  Object.assign(window.__game, { airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landEdited: () => landEdited(), landReset: () => { landReset(); landRefresh(); }, landUp: () => landEdited(), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), lakeFish: () => lakeFish, landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x), buildTimes: () => BUILD_T.slice(), landHillsAt: x => landHillsAt(x), copyText: () => terrainCopyText(), terrainSel: s => { TERRAIN_ED.sel = s; terrainSyncSkin(); }, split: n => { ED_SPLIT.v = n; terrainSplit(); return TERRAIN_ED.sel; }, delSeg: () => { terrainDelSeg(); return TERRAIN_ED.sel; }, lakes: () => (land.lakes || []).map(L => [Math.round(L[0]), Math.round(L[1])]), krakenMoveTo: (x, y) => KR_SET[0] && krakenMoveTo(KR_SET[0].id, x, y), wreckMoveTo: (k, x, y) => wreckMoveTo(k, x, y), wrecks: () => pirateWrecks.map(w => ({ k: w.k, x: Math.round(w.x), y: w.y, by: Math.round(wreckBy(w)), flat: w.flat, chest: chestAt(w).map(Math.round) })),  krSeat: () => { const k = KRAKENS[0] || KR; return { x: Math.round(k.bx), y: Math.round(k.by), u: KR_SET[0] ? KR_SET[0].u : null }; }, landEvictNow: () => { if (!land.seen) return 0; land.seen.fill(-1e6); const n = land.chunks.filter(Boolean).length; landEvict(); return n - land.chunks.filter(Boolean).length; }, landCounts: () => ({ stones: (land.stones || []).length, props: (land.props || []).length, tufts: (land.tufts || []).length, boulders: (land.boulders || []).length, outcrops: (land.outcrops || []).length, cells: land.cell ? land.cell.length : 0 }), worldInfo: () => ({ W: WORLD_W, EXT_L, EXT_R, LAYOUT_L, LAYOUT_R, VIEW_W, BED_A, BED_B, cols: land.cols }), sandY: x => sandY(x), myTw: p => myTw(p), ownTowers: p => ownTowers(p), dockInfo: () => ({ owned: DOCKS_OWNED, docks: docks.map(d => ({ x: Math.round(d.quay), dir: d.dir, player: d.player, tw: towers.indexOf(d._tw) })), home: homeDock.map(d => ({ x: Math.round(d.quay), dir: d.dir, stand: !!d.stand, player: d.player })), towers: towers.map(t => ({ p: t.player, x: Math.round(t.x), hp: t.hp, edge: !!t.edge })), ships: ships.map(s => s.state), subs: subs.map(s => s.state), fleet: [0, 1].map(p => [fleet[p].ship, fleet[p].sub]) }) });
   Object.assign(window.__game, { ground: () => ({ gX: s => gX(s), gS: x => gS(x), sea: [LAYOUT_L, LAYOUT_R], seas: () => Array.from({ length: SEAS.n }, (_, i) => SEAS.plain(i)), seasTest: L => { SEAS_TEST = L; }, lands: () => Array.from({ length: LANDS.n }, (_, i) => LANDS.plain(i)), bed: [BED_A, BED_B], depth: x => groundDepthAt(x), sand: x => sandY(x), skin: x => groundSkinAt(x), hills: x => groundHillsAt(x), lsk: x => landSkinAt(x), flags: () => ({ marked: FLOOR_MARKED, hilly: FLOOR_HILLY, isles: land.isles, gm: GSH.marked }), dirty: () => [LAND_ED.dirty, FLOOR_ED.dirty] }), terrainRefresh: () => terrainRefresh() });   // (the one ground line - 50-land-zz-ground)
   Object.assign(window.__game, { camAt: (x, y, z) => { camOverride[0] = x == null ? null : [x, y]; if (z) setZoom(0, z); updateCamera(0, true); }, seaRows: () => Array.from({ length: SEAS.n }, (_, i) => [SEAS.c.lo[i], SEAS.c.hi[i], SEAS.c.bedA[i], SEAS.c.bedB[i], SEAS.c.trA[i], SEAS.c.trB[i]]), landRows: () => Array.from({ length: LANDS.n }, (_, i) => [LANDS.c.lo[i], LANDS.c.hi[i], landFace(i).dir]) });
   Object.assign(window.__game, { floor: () => ({ A: BED_A, B: BED_B, TR: [TR_A, TR_B], max: SEA_FLOOR_MAX, deepest: floorDeepest(), tab: !!floorTab }), floorProfile: x => floorProfile(x), floorEdited: () => floorEdited(), bedSmooth: x => bedSmooth(x), floorEdOn: () => floorEdOn(), floorED: () => FLOOR_ED, S: () => S, viewW: () => VIEW_W, editorTab: t => { const b = [...document.querySelectorAll('#skyEd button.tab')].find(q => q.textContent === t); if (b) b.click(); return !!b; }, editorOpen: () => { if (!NSKY.editor.TUNE.built) skyNewFrame(); if (NSKY.editor.TUNE.root.hidden) NSKY.editor.TUNE.openBtn.click(); },
