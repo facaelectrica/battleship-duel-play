@@ -1939,6 +1939,14 @@ const isleCol = x => { if (ISLE === null) return false; const i = Math.floor(x /
 // (user Oct 28) the ground's own line out of the water at sea, `half` ahead of x going `dir`: a coast every boat stops or
 // turns at (an island line's island they go past)
 const coastAhead = (x, dir, half) => { if (ISLE === null) return false; const q = x + dir * half, i = Math.floor(q / 2.5); return ISLE[i] === 1 || !!(land.isolid && land.isolid[i]); };   // (or a SOLID segment - 50-land-islands, user Oct 31 20:03)
+/* ---- THE CULL RULE (user Nov 4: "This keeps happening with different stuff (smoke, then boats, then the crane, now the 747) ...
+   Shouldnt everything be culled by its own size?"): a thing is drawn in a view when any of it reaches the view's span - its own extent
+   [a, b] in world x (its picture's box, its radius, its rope's two ends), never a number round its middle. The one screen is two half
+   views (48-render.js): culled by less than its size, it's cut at the screen's middle. tools/cullcheck.mjs (run by build.py) stops the
+   build on a cull against x0 / x1 by a plain number ---- */
+const CULL_PAD = 4;                                  // (its strokes and the rounding to pixels: a few units past its outline)
+const offView = (a, b, x0, x1) => b < x0 - CULL_PAD || a > x1 + CULL_PAD;
+const offViewR = (x, r, x0, x1) => x + r < x0 - CULL_PAD || x - r > x1 + CULL_PAD;   // (r: its own half-width - the furthest any of it reaches from x, turned any way)
 const VIS_PAD = 40 * UPM;                  // (the cameras show this much past the outermost structure - 07-world-build.js)
 let VIS_L = 0, VIS_R = 4000;                // what the cameras may show: the world between the two harbours' far ends
 let wh, wv, wf, wtmp;
@@ -2842,7 +2850,10 @@ function buildWorld(restore) {
   // (user Nov 3 17:01: "the tower has to be in frame, obviously, as well as a bit of padding") the cameras' ends take in everything
   // placed in the world - every structure whole, VIS_PAD beyond the outermost - past the shapes' ends if it stands there (past
   // them is the open ocean in every mode)
-  else for (const o of strsUsed()) { try { const B = strBox(o); if (Number.isFinite(B.x0) && Number.isFinite(B.x1)) { VIS_L = Math.min(VIS_L, B.x0 - VIS_PAD); VIS_R = Math.max(VIS_R, B.x1 + VIS_PAD); } } catch (e) { } }
+  // (user Nov 4: "The only change in the battle is that we dont allow you to pan outside the hangar/lighthouse tower for both sides")
+  // BATTLE: its two harbours' hangars and lighthouse towers, whole, VIS_PAD beyond - not every structure in the world (in a built world
+  // that ran thousands of metres out: the planes flew in from there). OPEN WORLD: every structure, as above
+  else for (const o of LAND ? strsUsed() : [].concat(...docks.map(d => [d.so, d.lh])).filter(Boolean)) { try { const B = strBox(o); if (Number.isFinite(B.x0) && Number.isFinite(B.x1)) { VIS_L = Math.min(VIS_L, B.x0 - VIS_PAD); VIS_R = Math.max(VIS_R, B.x1 + VIS_PAD); } } catch (e) { } }
   // the sea floor's shores: the pier ends, and one player's open side
   // is open ocean (its shore mirrored, so the deep runs out to that edge of the world)
   // (the dock chat, Oct 29) a harbour's shore is its quay's face: the harbour's depth under the quay and hangar, the ocean
@@ -4357,8 +4368,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 766;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 04 15:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 767;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 04 15:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -9906,14 +9917,14 @@ function drawTorpAt(x, y, ang, dir) {
   }
 }
 function drawTorpWrecks(x0, x1) {
-  for (const w of torpWrecks) if (w.x > x0 - 20 && w.x < x1 + 20) drawTorpAt(PX(w.x), PY(w.y), w.ang, w.dir);
+  for (const w of torpWrecks) if (!offViewR(w.x, TORP_L, x0, x1)) drawTorpAt(PX(w.x), PY(w.y), w.ang, w.dir);
 }
 // (the rocket's flame flickers from a source of its own, drawing only: how often it's drawn never shifts the torpedoes' numbers)
 let armTorpFlick_ = null;
 const armTorpFlick = () => (armTorpFlick_ || (armTorpFlick_ = sysRng('armTorpFlame')))();
 function drawTorps(x0, x1) {
   for (const tp of torps) {
-    if (tp.x < x0 - 20 || tp.x > x1 + 20) continue;
+    if (offViewR(tp.x, TORP_L, x0, x1)) continue;
     if (tp.spent) { drawTorpAt(PX(tp.x), PY(tp.y), tp.ang, tp.dir); continue; }
     // a dark cylinder: a lit stripe along its top, a pale nose, and a little fin and screw at the tail
     const L = Math.max(PB * 4, Math.round(TORP_L * SV)), Wd = Math.max(PB * 2, Math.round(TORP_W * SV)), x = PX(tp.x), y = PY(tp.y);
@@ -10086,7 +10097,7 @@ function drawScreens(x0, x1) {
   const nt = clamp(E.night * 0.75, 0, 0.7), L = mix3(lit, [60, 70, 100], nt), D = mix3(dim, [40, 48, 78], nt);
   for (const q of screens) {
     const B = Math.max(PB, Math.round(SV * 2 * (q.k || 1) / PB) * PB);   // (its blocks as much bigger as it is: the same look magnified, at the same cost - FXK's rule)
-    if (q.x + q.r < x0 - 20 || q.x - q.r > x1 + 20) continue;
+    if (offViewR(q.x, q.r, x0, x1)) continue;
     const a = screenAlpha(q) * 0.96;
     if (a < 0.02) continue;
     const cx = PX(q.x), cy = PY(q.y), r = q.r * SV, wy = PY(screenFloor(q.x) + 1);
@@ -10243,7 +10254,7 @@ function drawBombBody(cx, cy, a, lamp) {
 }
 function drawDcharges(x0, x1) {
   for (const c of dcharges) {
-    if (c.x < x0 - 10 || c.x > x1 + 10) continue;
+    if (offViewR(c.x, 8, x0, x1)) continue;   // (a drum or a sunk bomb: a few units)
     if (c.bomb) { drawSunkBomb(c); continue; }
     // a little steel drum, banded
     const px = PX(c.x), py = PY(c.y), w = Math.max(3, Math.round(4.2 * SV)), h = Math.max(2, Math.round(3.2 * SV));
@@ -10427,7 +10438,7 @@ function drawMines(x0, x1) {
   if (!mineArt || mineArt.key !== mineCol(0).join() + mineCol(1).join()) buildMineArt();
   const k = MINE_K * SV;
   for (const m of mines) {
-    if (m.x < x0 - 20 || m.x > x1 + 20) continue;
+    if (offViewR(m.x, mineArt[0].width * MINE_K / 2, x0, x1)) continue;
     const s = scaled(mineArt[m.owner === 1 ? 1 : 0], k, true);
     const X = Math.round(PX(m.x) - s.width / 2), Y = Math.round(PY(m.y + (m.float ? Math.sin(m.ph * 1.7) * 0.6 : 0)) - s.height / 2);
     C.drawImage(s, X, Y);
@@ -10672,14 +10683,7 @@ function makePlane(p) {
     bk: 0, mgT: 0, mg: false, turn: null, auto: null, smokeT: 0, smokeDark: false, spin: 0, inCloud: 0, cloudT: -9, vaporT: 0, wait: 0, sink: 0,
     ice: 0, strand: null, cover: [[], []], lampPh: vehPlaneR(), wings: 0, splat: [], eng: 'on', offT: 0, recoverT: 0, holdT: 0, holdS: 0, kind: wpKindOf(p) };
 }
-function planeHome(p) {
-  // (user Nov 4: "In battle mode, because we are locked at the towers, the plane should spawn at that edge limit of the screen, not
-  // far away") flying in, it comes from its own harbour's edge of the battle (viewEdge, just behind its gate and tower) - the cameras'
-  // ends take in every structure since Version 745 (VIS_L / VIS_R), in a built world thousands of metres further out. BATTLE only:
-  // OPEN WORLD's planes take off from their airfields and the whole world is theirs; STORY has no edge
-  const d = homeDock && homeDock[p];
-  if (!LAND && !ENDLESS && d && Number.isFinite(d.viewEdge)) return d.viewEdge + (SIDE(p) ? 30 : -30);
-  return SIDE(p) ? Math.min(VIS_R, WORLD_W) + 30 : Math.max(VIS_L, 0) - 30; }   // (STORY has no edge: its world's end)            // your edge of the world: home
+function planeHome(p) { return SIDE(p) ? Math.min(VIS_R, WORLD_W) + 30 : Math.max(VIS_L, 0) - 30; }   // (STORY has no edge: its world's end)            // your edge of the world: home - in BATTLE its harbour's hangar and tower (07-world-build: VIS_L / VIS_R, user Nov 4 - the plane flies in at the edge of the screen)
 function planeEdge(p) { return SIDE(p) ? VIS_L + 12 : VIS_R - 12; }   // (right up to it: you can turn at the last minute, user Oct 24 night)            // the furthest it can go toward the enemy's edge
 // how far it travels toward where it was heading while it turns round (a half cosine of its speed)
 function planeTurnRoom(pl) { return pl.spd * PLANE_TURN_T / Math.PI + 4; }
@@ -11320,7 +11324,7 @@ const ICE_L = pxLayer({
   view: (T, own, n, x0, x1, L) => {
     const keep = { ga: C.s.ga }; let m = 0;
     for (const b of T.rows()) {
-      if (b.x < x0 - 10 || b.x > x1 + 10) continue;
+      if (offViewR(b.x, PB / SV, x0, x1)) continue;   // (a sparkle: a pixel)
       const a = 1 - b.life / b.max, css = Math.sin(time * 18 + b.tw) > 0.6 ? '#ffffff' : '#cfe8f6', col = pxRGBA(css, Math.max(0, a), keep);
       L.last = css;
       if (!(col >>> 24)) continue;
@@ -11490,7 +11494,7 @@ function planeSpot(pl, P, dx, dy) {
 function drawPlanes(x0, x1) {
   // under the water: a wreck going down (drawn with the sea over it)
   for (const pl of allPlanes()) {
-    if (!pl || pl.state !== 'wreck' || pl.x < x0 - 80 || pl.x > x1 + 80) continue;
+    if (!pl || pl.state !== 'wreck' || vehCulled(pl, x0, x1)) continue;
     const P = planePose(pl);
     blitPlane(P.fr[P.side], P.key, P.side, P.deg, PX(pl.x), PY(pl.y), false, P.k);
   }
@@ -11512,7 +11516,7 @@ function drawPlanesAir(x0, x1) {
       if (own) { col[0] = sc.cr[k]; col[1] = sc.cg[k]; col[2] = sc.cb[k]; }
       for (let j = 1, i0 = PTS[k], L = PTS[k + 1] - i0; j < L; j++) {
         const a = PTO[i0 + j - 1], b = PTO[i0 + j];
-        if ((X[a] < x0 - 30 && X[b] < x0 - 30) || (X[a] > x1 + 30 && X[b] > x1 + 30)) continue;
+        { const hw = PW[a] * (1 + AGE[a] / grow); if (offView(Math.min(X[a], X[b]) - hw, Math.max(X[a], X[b]) + hw, x0, x1)) continue; }   // (the segment and its width as spread)
         const u = clamp(AGE[a] / MAX[a], 0, 1), sprd = 1 + AGE[a] / grow;
         const al = PA[a] * Math.pow(1 - u, 1.2) / Math.sqrt(sprd) * (j < 5 ? j / 5 : 1);
         const ai = Math.round(al * 32);
@@ -11527,7 +11531,7 @@ function drawPlanesAir(x0, x1) {
   drawAirMotes(tc);
   { const c = planeWisps.c, WX = c.x, WY = c.y;
     for (let i = 0; i < planeWisps.n; i++) {
-      if (WX[i] < x0 - 40 || WX[i] > x1 + 40) continue;
+      if (offView(Math.min(WX[i], WX[i] - c.ux[i] * c.L[i]), Math.max(WX[i], WX[i] - c.ux[i] * c.L[i]), x0, x1)) continue;
       const ai = Math.round(0.4 * Math.sin(Math.PI * c.age[i] / c.max[i]) * 32);
       if (ai < 1) continue;
       C.fillStyle = trailStyle(tc, ai);
@@ -12762,7 +12766,7 @@ function stepBuoys(dt) {
   }
 }
 function drawBuoy(b, x0, x1) {
-  if (!b || b.x < x0 - 30 || b.x > x1 + 30) return;
+  if (!b || offViewR(b.x, 32 * BUOY_K, x0, x1)) return;   // (its picture, 32 tall, rocking)
   if (EDMODE.on && b.sid != null) { const o = strById(b.sid); if (o && o.x !== b.x) b = Object.assign({}, b, { x: o.x }); }   // (the editor: where its prop is while it's dragged)
   if (b.state !== 'float') {
     const src = img.buoyWreck[b.col], sp = drawSprite(src, BUOY_K * SV, true);
@@ -13687,7 +13691,7 @@ const STREAK_L = pxLayer({
     let m = 0, R = pxRoom(L, 64);
     L.lq = -1;
     for (let q = 0; q < nr; q++) {
-      if (Math.max(X1[q], X2[q]) < x0 - 10 || Math.min(X1[q], X2[q]) > x1 + 10) continue;
+      if (offView(Math.min(X1[q], X2[q]), Math.max(X1[q], X2[q]), x0, x1)) continue;
       const a = 1 - c.life[q] / c.max[q], ax = PX(X1[q]), ay = PY(Y1[q]), bx = PX(X2[q]), by = PY(Y2[q]);
       const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / PB));
       // (its two colours as the fill's text gave them: 3 decimals of alpha - glParseRgb's number of that text)
@@ -13759,7 +13763,7 @@ const SPRAY_L = pxLayer({
     const X = T.c.x, Y = T.c.y, S = T.c.s;
     L.last = -1;
     for (let i = 0; i < n; i++) {
-      if (X[i] < x0 - 5 || X[i] > x1 + 5) { own.on[i] = 0; continue; }
+      if (offViewR(X[i], 2 * PB / SV, x0, x1)) { own.on[i] = 0; continue; }   // (a pixel or two)
       own.on[i] = 1; own.n[i] = S[i] > 2.6 ? 2 : 1; own.x[i] = Math.floor(PX(X[i]) / PB) * PB; own.y[i] = Math.floor(PY(Y[i]) / PB) * PB;
       L.last = i;
     }
@@ -13797,7 +13801,7 @@ const JET_L = pxLayer({
     L.last = -1;
     for (let q = 0; q < n; q++) {
       const jx = J.x[q];
-      if (jx < x0 - 60 || jx > x1 + 60) continue;
+      if (offViewR(jx, J.w[q] + Math.abs(J.lean[q]) * J.v0[q] * J.v0[q] / (2 * JET_G), x0, x1)) continue;   // (its width, and how far its top leans)
       const v0 = J.v0[q], t = J.t[q], w = J.w[q], lean = J.lean[q], seed = J.seed[q];
       const tApex = v0 / JET_G, Hmax = v0 * v0 / (2 * JET_G);
       const top = Math.max(0, v0 * t - 0.5 * JET_G * t * t);
@@ -14137,7 +14141,7 @@ function stepMineSplashes(dt) {
 function drawMineSplashes(x0, x1, pal) {
   for (let mi = 0; mi < msplashes.n; mi++) {
     const S = msplashes.c, mx = S.x[mi], mt = S.t[mi], mH0 = S.H0[mi], mseed = S.seed[mi], id = S.sq[mi];
-    if (mx < x0 - 200 || mx > x1 + 200) continue;
+    if (offViewR(mx, mH0 * 2, x0, x1)) continue;   // (its rays and spires reach about its height either way, blown with the wind)
     const sy = surfaceY(mx), k = S.k[mi];
     // (user Oct 29: "it should be affected by wind if there is any") blown downwind, the more the higher and the longer it stands
     const wl = clamp(E.windU / 75, -1.5, 1.5) * 0.3 * Math.min(1, mt / 0.8);
@@ -16195,6 +16199,9 @@ function restTilePaint(t, ph, cleared) {
   t.k[ph] = t.recs.length; RST.stats.paint += t.recs.length - k;
 }
 // a pass's records at rest, with the debris table's rows at rest (on a deck) - as the loop over the list drew them, by number
+// (the margin the live debris loop culls at - drawDebris: a record further out than this is the kept layer's, or the live way when its
+// box reaches in - the layer's bookkeeping, not a thing's size)
+const REST_LIVE_M = 10;
 function restDrawDebris(p, x0, x1) {
   const live = [], D = debris.c; for (let i = 0; i < debris.n; i++) if (D.state[i] === 2 && restInPass(p, D.x[i])) live.push(i);
   if (!restDrawLayers(p, x0, x1, live)) {
@@ -16216,11 +16223,11 @@ function restDrawLayers(p, x0, x1, live) {
   const L = CAMPX - SHX, R = CAMPX + VWP - SHX, Tp = TOPPX - SHY, B = TOPPX + bh - SHY;
   // a record the live loop culls (x more than 10 outside) reaching into the view: the live way this frame
   const ex = 40 + 8 / SV;
-  for (const [a, b] of [[x0 - 10 - ex, x0 - 10], [x1 + 10, x1 + 10 + ex]])
-    for (const n of restDebrisIn(a, b)) { const x = restDeb.c.x[restDeb.row(n)]; if ((x < x0 - 10 || x > x1 + 10) && restInPass(p, x)) { const q = restBoxN(n, SV); if (q[2] > L && q[0] < R && q[3] > Tp && q[1] < B) return false; } }
+  for (const [a, b] of [[x0 - REST_LIVE_M - ex, x0 - REST_LIVE_M], [x1 + REST_LIVE_M, x1 + REST_LIVE_M + ex]])
+    for (const n of restDebrisIn(a, b)) { const x = restDeb.c.x[restDeb.row(n)]; if ((x < x0 - REST_LIVE_M || x > x1 + REST_LIVE_M) && restInPass(p, x)) { const q = restBoxN(n, SV); if (q[2] > L && q[0] < R && q[3] > Tp && q[1] < B) return false; } }
   // a live one at rest (on a deck) under a newer record: the live way
   for (const i of live) {
-    if (D.x[i] < x0 - 10 || D.x[i] > x1 + 10) continue;
+    if (D.x[i] < x0 - REST_LIVE_M || D.x[i] > x1 + REST_LIVE_M) continue;
     const q = restBox(debris, i, SV), dn = D.n[i];
     for (let tx = Math.floor((q[0] - 1) / REST_TW), tx1 = Math.floor((q[2] - 1) / REST_TW); tx <= tx1; tx++) { restCol(T, tx); for (let ty = Math.floor((q[1] - 1) / REST_TH), ty1 = Math.floor((q[3] - 1) / REST_TH); ty <= ty1; ty++) {
       const t = T.get(tx + ',' + ty); if (!t) continue;
@@ -16313,10 +16320,11 @@ function restDropOldestCoral() {
 }
 function restDrawChunks(x0, x1) {
   const all = restChunksIn(x0 - 60, x1 + 60);
-  if (!all.length) { for (const k of chunks) if (!k._rest && k.x > x0 - 60 && k.x < x1 + 60) drawChunk(k); return; }
-  for (const k of chunks) if (!k._rest && k.x > x0 - 60 && k.x < x1 + 60) all.push(k);
+  const chunkOut = k => offViewR(k.x, Math.hypot(k.img.width, k.img.height) * k.k / 2, x0, x1);   // (a piece turned any way)
+  if (!all.length) { for (const k of chunks) if (!k._rest && !chunkOut(k)) drawChunk(k); return; }
+  for (const k of chunks) if (!k._rest && !chunkOut(k)) all.push(k);
   all.sort((p, q) => (p.n ?? 1e15) - (q.n ?? 1e15));
-  for (const k of all) if (k.x > x0 - 60 && k.x < x1 + 60) drawChunk(k);
+  for (const k of all) if (!chunkOut(k)) drawChunk(k);
 }
 defTable('restChunks', () => restChunksAll(), { net: false,
   make: () => ({ x: 0, y: 0, vx: 0, vy: 0, a: 0, w: 0, delay: 0, floor: WATER_Y, water: true, kind: 'chunk', hh: 0 }),
@@ -17452,7 +17460,7 @@ function drawBirds(x0, x1) {
   const B = birds.c;
   for (let i = 0; i < birds.n; i++) {
     const st = B.st[i], bx = B.x[i], by = B.y[i];
-    if (st === BS.gone || bx < x0 - 20 || bx > x1 + 20) continue;
+    if (st === BS.gone || offViewR(bx, 2 * UPM, x0, x1)) continue;   // (a gull's wingspan)
     const gull = B.kind[i] === BK.gull, tree = B.tree[i], ph = B.ph[i], scared = B.scared[i], down = st === BS.dead || st === BS.sink || st === BS.bed;
     // gulls at half their old size: the full sprite once it's at least a pixel per pixel, a small one below that
     const gs = 0.375 * SV, mini = gull && gs < 0.75;
@@ -17492,7 +17500,7 @@ const BGORE_L = pxLayer({
   view: (T, own, n, x0, x1, L) => {
     const keep = { ga: C.s.ga }; let m = 0;
     for (const g of T.rows()) {
-      if (!(g.x > x0 - 5 && g.x < x1 + 5)) continue;
+      if (offViewR(g.x, 1, x0, x1)) continue;
       const col = pxRGBA('#b3141a', clamp(1.3 - g.life / g.max, 0, 1), keep);
       if (!(col >>> 24)) continue;
       own.x[m] = Math.floor(PX(g.x) / PB) * PB; own.y[m] = Math.floor(PY(g.y) / PB) * PB; own.rgba[m] = col; m++;
@@ -17507,7 +17515,7 @@ const FEATHER_L = pxLayer({
   view: (T, own, n, x0, x1, L) => {
     const F = T.c;
     for (let i = 0; i < n; i++) {
-      if (F.x[i] < x0 - 5 || F.x[i] > x1 + 5) { own.on[i] = 0; continue; }
+      if (offViewR(F.x[i], 1, x0, x1)) { own.on[i] = 0; continue; }
       own.on[i] = 1; own.x[i] = Math.floor(PX(F.x[i]) / PB) * PB; own.y[i] = Math.floor(PY(F.y[i]) / PB) * PB; own.c[i] = L.last = F.dark[i] ? 0 : 1;
     }
     return n;
@@ -23119,7 +23127,7 @@ function placeLobes(c, t) {
     o.k = Math.min(1, (L.rx + L.ry) / ((L.gx ?? L.rx) + (L.gy ?? L.ry))) * ge;                     // how big its puffs are now
     if (L.scrap) {   // (SCRAPS: off the downwind end, trailing further with the wind; in a calm, by either end in turn)
       const w = WINDQ * (P.scraps ?? 1), side = w > 0 ? 1 : w < 0 ? -1 : (L.scrap % 2 ? 1 : -1), x = (side > 0 ? hi : lo) + side * scrapGap(L, Math.min(1, Math.abs(w)));
-      o.x = x * s * g; o.grp = -1; o.k *= (P.scraps ?? 1) > 0 ? 1 : 0;   // (grp -1: a scrap - lit flat, 40-gl.js GL_LVS) if ((P.scraps ?? 1) <= 0) { o.rx = o.ry = o.rz = o.rb = 0.3; }
+      o.x = x * s * g; o.grp = -1; o.k *= (P.scraps ?? 1) > 0 ? 1 : 0; if ((P.scraps ?? 1) <= 0) { o.rx = o.ry = o.rz = o.rb = 0.3; }   // (grp -1: a scrap - lit flat, 40-gl.js GL_LVS)
       return;
     }
     if (f) {   // (WIND SHAPE: taller downwind, lower upwind - its height and its middle together, so its bottom stays where it was; tops leaning downwind)
@@ -28135,7 +28143,7 @@ function renderObjects() {
   drawReefItems(coastFront, x0, x1);                      // (boulders in front of the pier's pillars)
   for (const b of buoys) drawBuoy(b, x0, x1);
   restDrawDebris(0, x0, x1);                             // (the debris at rest: kept layers of the settled world - 36-zzzz-settled.js)
-  for (const p of pieces) if (p.x + p.hl > x0 - 20 && p.x - p.hl < x1 + 20) drawPiece(p);
+  for (const p of pieces) if (!offViewR(p.x, p.hl, x0, x1)) drawPiece(p);
   ot = ema('obBits', ot);   // (minisubs, front rocks, buoys, blood, debris, pieces)
   drawFire(x0, x1, true);                                 // (the blasts inside the ships: under their hulls)
   for (const sh of ships) {
@@ -28375,7 +28383,7 @@ function buildWakeField(x0, x1) {
   WF_I.fill(0, 0, WF_N); WF_K.fill(0, 0, WF_N);
   const c = wakes.c, X = c.x, LF = c.life;
   for (let q = 0; q < wakes.n; q++) {
-    if (X[q] < x0 - 40 || X[q] > x1 + 40) continue;
+    if (offViewR(X[q], c.w[q] * (1 + LF[q] * 0.6) / 2, x0, x1)) continue;
     const a = 1 - LF[q] / c.max[q], hw = c.w[q] * (1 + LF[q] * 0.6) * SV / 2, cx = PX(X[q]), wk = c.k[q];
     const i0 = Math.max(0, Math.floor((cx - hw - WF_X0) / PB)), i1 = Math.min(WF_N - 1, Math.ceil((cx + hw - WF_X0) / PB));
     for (let i = i0; i <= i1; i++) {
@@ -28626,7 +28634,7 @@ function drawDeepWater() {
 function drawDuds(x0, x1) {
   // spent shells half-sunk in the sand (or a lake's mud)
   for (const d of duds) {
-    if (d.x < x0 - 10 || d.x > x1 + 10) continue;
+    if (offViewR(d.x, 3, x0, x1)) continue;   // (a shell 6 long, half each way)
     const L = Math.max(PB * 2, Math.round((d.crushed ? 3.5 : 6) * SV)), ux = Math.cos(d.a), uy = Math.abs(Math.sin(d.a));
     const x = PX(d.x), y = PY(d.y);
     C.fillStyle = '#2a2e36'; blkLine(x - ux * L * 0.5, y - uy * L * 0.5, x + ux * L * 0.5, y + uy * L * 0.5);
@@ -28645,12 +28653,12 @@ const BUBBLE_L = pxLayer({
     let m = 0;
     const put = (x, y, w, h, c) => { R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.c[m] = c; m++; };
     for (let i = 0; i < n; i++) {
-      if (X[i] < x0 - 5 || X[i] > x1 + 5) continue;
+      if (offViewR(X[i], RR[i] + 1, x0, x1)) continue;   // (its radius and its shadow's pixel)
       const s = Math.max(RR[i] > 1.9 ? 2 : 1, Math.round(RR[i] * SV * 0.6));   // (at its own size zoomed in, never smaller than it was - user Nov 2 10:50: the fishing boat's bubbles unseen up close)
       put(PX(X[i]) + 1, PY(Y[i]) + 1, s, s, 0);
     }
     for (let i = 0; i < n; i++) {
-      if (X[i] < x0 - 5 || X[i] > x1 + 5) continue;
+      if (offViewR(X[i], RR[i], x0, x1)) continue;
       const px = PX(X[i]), py = PY(Y[i]), b = 1 + clamp(Math.floor((Y[i] - waterLv(X[i])) / (SEABED_DEEP - WATER_Y) * 6), 0, 5) * 3;   // (its depth under its own water - waterLv, user Nov 3)
       const s = Math.max(RR[i] > 1.9 ? 2 : 1, Math.round(RR[i] * SV * 0.6));
       if (s > 2) { put(px, py, s, s, b); put(px, py, Math.max(1, s >> 1), Math.max(1, s >> 1), b + 1); }
@@ -28683,7 +28691,7 @@ const FOAM_L = pxLayer({
     const put = (x, y, w, h, c) => { R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.c[m] = c; m++; };
     for (let q = 0; q < n; q++) {
       const fx = F.x[q];
-      if (fx < x0 - 5 || fx > x1 + 5) continue;
+      if (offViewR(fx, F.s[q] * 4.5, x0, x1)) continue;   // (its own size: a battleship's is 7-15 m across - it was cut 5 units past the view)
       const t = F.life[q] / F.max[q];
       if (t > 0.9) continue;
       const c = PX(fx), s = F.s[q];
@@ -29297,7 +29305,7 @@ const ALGAE_L = pxLayer({
     // wave left out when the sea is calm (tur 0: it adds nothing); the segment's size in pixels once a plant; PX, PY as putW does)
     const T35 = tur * 0.35, C8 = current * 8;
     for (const p of plants) {
-      if (p.x < x0 - 60 || p.x > x1 + 60 || !p.lk !== !lkOnly || (FLOOR_MARKED && !p.lk && plantLook(p))) continue;   // (none on a floor piece marked FOREST or DESERT)
+      if (offViewR(p.x, Math.max(p.rw || 0, p.h || 0), x0, x1) || !p.lk !== !lkOnly || (FLOOR_MARKED && !p.lk && plantLook(p))) continue;   // (none on a floor piece marked FOREST or DESERT)
       const base = seabedY(p.x) + 3;
       if (ISLE !== null && base - (p.h || 0) < WATER_Y + 4) continue;   // (by an island: nothing of the sea's out of the water)
       if (p.kind === 'rock') { held(); if (rockAgain(p, base)) drawRock(p, base, rockW); continue; }
@@ -29663,7 +29671,7 @@ function drawFloorSkins(x0, x1) {
   const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
   const Bt = bh - SHY + 2;
   for (const S of floorSkinStrips) {
-    if (S.x1 < x0 - 10 || S.x0 > x1 + 10) continue;
+    if (offView(S.x0, S.x1, x0, x1)) continue;
     const X0 = Math.round(PX(S.x0)), X1 = Math.round(PX(S.x1)), Y0 = Math.round(PY(S.y0)), Y1 = Math.round(PY(S.y0 + S.h * LT_CELL));
     C.drawImage(S.cv, X0, Y0, X1 - X0, Y1 - Y0);
     if (Y1 < Bt) { C.fillStyle = rgbs(S.deep); C.fillRect(X0, Y1 - 1, X1 - X0, Bt - Y1 + 1); }   // (and on down, in the dark)
@@ -29676,7 +29684,7 @@ function drawReefItems(list, x0, x1, lkOnly) {
   if (!lkOnly && reefLayerDraw(list, x0, x1)) return;   // (engine stage 6: from the kept layers - 44-zz-reef-layer.js)
   const ga = C.globalAlpha;
   for (const it of list) {
-    if (it.x < x0 - 120 || it.x > x1 + 120 || !it.lk !== !lkOnly) continue;
+    if (offViewR(it.x, Math.max(it.w || 0, it.sp ? it.sp.width * REEF_K * (it.s || 1) : 0), x0, x1) || !it.lk !== !lkOnly) continue;   // (its picture's whole width either way: a boulder with its corals, a coral at its size)
     drawReefItem(it);
   }
   C.globalAlpha = ga;
@@ -29826,7 +29834,7 @@ function drawRockForms(x0, x1, lkOnly) {
   rockFormsSync();
   const hz = bgP('bgrkh', 0);
   for (const f of rockForms) {
-    if (f.x1 < x0 - 40 || f.x0 > x1 + 40 || !f.lk !== !lkOnly) continue;      // (lk: a lake's, drawn over its water - drawLakeSea)
+    if (offView(f.x0, f.x1, x0, x1) || !f.lk !== !lkOnly) continue;      // (lk: a lake's, drawn over its water - drawLakeSea)
     const k = REEF_K * SV, X = Math.round(PX(f.x0)), Y = Math.round(PY(f.y0)), my = f.y0 + f.sp.height * REEF_K * 0.45;
     C.drawImage(sbTint(f.sp, seaTint(my, ROCK_K, true), my, hz, true), X, Y, Math.round(PX(f.x1)) - X, Math.round(f.sp.height * k));
   }
@@ -30441,7 +30449,7 @@ function drawDust(x0, x1) {
     if (DUSTQ.a.length < dust.length) { const m = dust.length * 2; DUSTQ.a = new Float64Array(m); DUSTQ.R = new Int32Array(m); DUSTQ.cx = new Int32Array(m); DUSTQ.cy = new Int32Array(m); }
     const QA = DUSTQ.a, QR = DUSTQ.R, QX = DUSTQ.cx, QY = DUSTQ.cy;
     for (const u of dust.rows()) {
-      if (u.x < x0 - 40 || u.x > x1 + 40) continue;
+      if (offViewR(u.x, u.r, x0, x1)) continue;
       const t = u.age / u.life;
       const a = 0.8 * Math.pow(1 - t, 1.2) * Math.min(1, u.age * 5);
       if (a < 0.02) continue;
@@ -30458,7 +30466,7 @@ function drawDust(x0, x1) {
   } else
   for (let pass = 0; pass < 3; pass++) {
     for (const u of dust.rows()) {
-      if (u.x < x0 - 40 || u.x > x1 + 40) continue;
+      if (offViewR(u.x, u.r, x0, x1)) continue;
       const t = u.age / u.life;
       const a = 0.8 * Math.pow(1 - t, 1.2) * Math.min(1, u.age * 5);
       if (a < 0.02) continue;
@@ -30480,7 +30488,7 @@ const GRAIN_L = pxLayer({
   view: (T, own, n, x0, x1, L) => {
     const X = T.c.x, Y = T.c.y, LF = T.c.life;
     for (let i = 0; i < n; i++) {
-      if (X[i] < x0 - 5 || X[i] > x1 + 5) { own.on[i] = 0; continue; }
+      if (offViewR(X[i], 1, x0, x1)) { own.on[i] = 0; continue; }
       own.on[i] = 1; own.x[i] = Math.floor(PX(X[i]) / PB) * PB; own.y[i] = Math.floor(PY(Y[i]) / PB) * PB; own.c[i] = LF[i] < 9 ? 0 : 1; L.last = own.c[i];
     }
     return n;
@@ -30688,7 +30696,7 @@ function blitRect(src, r, k) {
   if (R <= L || B <= T) return;
   C.drawImage(scaled(src, k * SV, true), L, T, R - L, B - T);
 }
-function harbourInView(d, x0, x1) { return !(d.x0 + d.w < x0 - 20 - HGR_INLAND || d.x0 > x1 + 20 + HGR_INLAND); }   // (the hangar runs HGR_INLAND in over the land past the harbour's land end)
+function harbourInView(d, x0, x1) { return !offView(d.x0 - HGR_INLAND, d.x0 + d.w + HGR_INLAND, x0, x1); }   // (the hangar runs HGR_INLAND in over the land past the harbour's land end)
 function drawHarbourBack(d, x0, x1) {
   if (!harbourInView(d, x0, x1)) return;
   // (nothing now: the sub's room in the stone block went with the block - the dock chat, Oct 29; both boats use the
@@ -30888,7 +30896,7 @@ function drawSubLapFoam(sb) {
 }
 // her shadow, cast down through the water from under the hull (drawn first, so the hull sits on top of it)
 function drawSubShadow(sb, x0, x1) {
-  if (sb.state === 'gone' || sb.parts || sb.x + SUB_L < x0 - 200 || sb.x - SUB_L > x1 + 200) return;
+  if (sb.state === 'gone' || sb.parts || offViewR(sb.x, SUB_L + 200, x0, x1)) return;   // (her length and her lamp's glow)
   if (inQuay(sb.x, sb.y + 10)) return;
   const dayS = E.day * (1 - 0.75 * E.overcast) * (1 - 0.5 * E.storm) * (1 - E.fog);
   const nightS = E.night * (1 - 0.6 * E.overcast) * (1 - E.fog);
@@ -30946,7 +30954,7 @@ function flamesNear(x, half, top) { const X = flames.c.x, Y = flames.c.y; for (l
 function drawSailsOver(x0, x1) {
   const near = [];
   for (const b of sailboats) {
-    if (b.state === 'gone' || b.state === 'down' || b.state === 'wrecked' || b.x < x0 - 40 || b.x > x1 + 40) continue;
+    if (b.state === 'gone' || b.state === 'down' || b.state === 'wrecked' || offViewR(b.x, sailHalf(b), x0, x1)) continue;
     const half = sailHalf(b) + 20, top = b.y - img.sails[b.kind].wl * SAIL_K - 10;
     if (smokeNear(b.x, half, top, b.y) || flamesNear(b.x, half, top)) near.push(b);
   }
@@ -30996,7 +31004,7 @@ function drawMoonlight(x0, x1) {
   const mx = moonXs[viewIdx], lean = lightLean(mx);
   const ships_ = ships.filter(sh => sh.state === 'afloat' && sh.x + SHIP_L > x0 && sh.x - SHIP_L < x1 &&
     !inHarbour(sh));                                                  // in her harbour, behind the stone: no moon
-  const boats = sailboats.filter(b => b.state === 'sail' && b.x > x0 - 60 && b.x < x1 + 60);
+  const boats = sailboats.filter(b => b.state === 'sail' && !offViewR(b.x, img.sails[b.kind].w * SAIL_K / 2, x0, x1));
   if (!ships_.length && !boats.length) return;
   const main = C, lc = lightLayer(), tr = main.getTransform();
   // the box around those boats, from mastheads to the waterline: only that much is cleared and copied back
@@ -31046,7 +31054,7 @@ function sailPoint(b, col, row) {
 }
 // riding lights: a white light at the masthead, and the cabin lit warm
 function drawSailLights(b, x0, x1) {
-  if (b.state !== 'sail' || b.x < x0 - 60 || b.x > x1 + 60) return;
+  if (b.state !== 'sail' || offViewR(b.x, img.sails[b.kind].w * SAIL_K / 2, x0, x1)) return;
   const art = img.sails[b.kind], a = E.lampsOn * (1 - 0.5 * E.light), far = clamp(SV / 1.8, 0.4, 1);
   if (a < 0.03) return;
   const [mx, my] = sailPoint(b, art.mast[0], art.mast[1] + 2);
@@ -31114,7 +31122,7 @@ const DEBRIS_L = pxLayer({
     let m = 0;
     for (let k = 0; k < n; k++) {
       const T = S.t[k], r = S.i[k], D = T.c, dx = D.x[r];
-      if (dx < x0 - 10 || dx > x1 + 10) continue;
+      if (offViewR(dx, Math.max(D.sw[r], D.sh[r]), x0, x1)) continue;
       const a = D.a[r], c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a)), sw = D.sw[r], sh = D.sh[r];
       const w = Math.max(PB, Math.round((sw * c + sh * s) * SV / PB) * PB), h = Math.max(PB, Math.round((sw * s + sh * c) * SV / PB) * PB);
       const fog = fogFor(D.y[r], dx), css = T.str(D.col[r]);
@@ -31280,7 +31288,7 @@ function fireImage(x0, x1, behind) {
   let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
   for (const f of flames.rows()) {
     if (!!behind !== !!f.behind) continue;
-    if (f.x + f.r < x0 - 10 || f.x - f.r > x1 + 10) continue;
+    if (offViewR(f.x, f.r, x0, x1)) continue;
     const R = Math.max(1.2, f.r * SV / FPX), cx = (PX(f.x) + 3 * FPX) / FPX, cy = (PY(f.y) + 3 * FPX) / FPX, a = clamp(f.heat * 0.5, 0, 1) * uwGlow(f.y, f.x);   // (a blast's hot core under the water: less of it in the deep's dark, user Oct 28)
     if (a <= 0) continue;
     L.push(cx, cy, R, a);
@@ -31404,7 +31412,7 @@ function shipCutters(x0, x1) {
   if (LAND && civShips.length) for (const c of civShips) {
     if (c.state === 'gone' || !c.fire.some(f => f > 0)) continue;
     const K = CIV[c.kind], L = civArt(c).width * K.k;
-    if (c.x + L < x0 - 40 || c.x - L > x1 + 40) continue;
+    if (offViewR(c.x, L, x0, x1)) continue;
     out.push(() => drawCivShip(c, x0, x1, true));
   }
   return out;
@@ -31506,7 +31514,7 @@ function renderOverlays() {
     const LA = E.lampsOn * (0.75 + 0.25 * E.fog) * (1 - 0.65 * E.light);   // faint by day, full at night
     const GS = Math.min(SV, 2.2);                                            // halos don't balloon when zoomed in
     for (const d of pierHosts()) for (const [lx, ly, , fy] of d.lamps) {   // (every dock's lamps - 50-zz-docklamp.js)
-      if (lx < x0 - 120 || lx > x1 + 120) continue;
+      if (offViewR(lx, Math.max(22, (22 + 60 * E.fog) * GS / SV), x0, x1)) continue;   // (its halo's reach, or its cone's)
       const px = PX(lx), py = PY(ly);
       // a wide, faint halo that grows in fog, and a small hot core
       softGlow(px, py, (22 + 60 * E.fog) * GS, lampCol, (0.2 + 0.18 * E.fog) * LA, 7);
@@ -31535,7 +31543,7 @@ function renderOverlays() {
     }
     // harbour buoys flash at night
     for (const b of buoys) {
-      if (b.state !== 'float' || b.x < x0 - 60 || b.x > x1 + 60) continue;
+      if (b.state !== 'float' || offViewR(b.x, 22 * Math.min(SV, 2.2) / SV, x0, x1)) continue;   // (its flash's halo)
       if ((time + b.ph) % 2.2 > 0.45) continue;
       const by = surfaceY(b.x) + 2.5 - 32 * BUOY_K;
       softGlow(PX(b.x), PY(by), 22 * Math.min(SV, 2.2), b.col === 'red' ? [255, 70, 50] : [255, 196, 90], 0.55 * E.lampsOn, 5);
@@ -31543,7 +31551,7 @@ function renderOverlays() {
     }
     // tower beacons
     for (const tw of towers) {
-      if (tw.hp <= 0 || tw.x < x0 - 40 || tw.x > x1 + 40) continue;
+      if (tw.hp <= 0 || offViewR(tw.x, 20, x0, x1)) continue;   // (its beacon's glow: 16 round a point 4 off its middle)
       if (Math.floor(time * 1.5 + tw.player) % 2) continue;
       const [bx, by] = towerPivot(tw);
       glowDisc(PX(bx - tw.facing * 4), PY(by - 9), 16 * SV, [255, 60, 40], 0.7 * E.lampsOn);
@@ -31587,7 +31595,7 @@ function renderOverlays() {
     const f = flames.cursor();
     for (let i = 0; i < flames.n; i += 6) {
       f.i = i;
-      if (f.heat < 0.7 || f.x < x0 - 80 || f.x > x1 + 80) continue;
+      if (f.heat < 0.7 || offViewR(f.x, 36 + f.r * 3, x0, x1)) continue;   // (its glow's radius)
       glowDisc(PX(f.x), PY(f.y), (36 + f.r * 3) * SV, [255, 130, 45], glowA * Math.min(1, f.heat) * uwGlow(f.y, f.x));   // (under the water, dimmed in the deep's dark)
     }
     C.restore();
@@ -31613,7 +31621,7 @@ function renderOverlays() {
   pxDraw(RING_L, x0, x1);
   if (rings.n) C.fillStyle = rings.c.life[rings.n - 1] < 0.2 ? '#fff4d2' : '#e8c890';   // (the fill style as the loop left it: the last ring's)
   for (const s of shells) {
-    if (s.click || s.x < x0 - 10 || s.x > x1 + 10) continue;
+    if (s.click || offViewR(s.x, s.from === 'rocket' ? 18 : s.from === 'bomb' ? 10 : 6, x0, x1)) continue;   // (its body: a missile's 9 and its flame, a bomb, a shell's 6-long streak)
     const sp = Math.hypot(s.vx, s.vy) || 1; let ux = s.vx / sp; let uy = s.vy / sp;
     if (s.from === 'bomb' && !s.under) {
       // a bomb (user Oct 25): slim, at the angle it left the plane at, its heavy nose tipping down as it falls
@@ -31734,9 +31742,9 @@ function drawBullets(x0, x1) {
   // (each round's yellow streak BULLET_LEN times the way it went this step - twice as long, user Oct 29)
   const K = BULLET_LEN, tail = b => blkLine(PX(b.x + (b.px - b.x) * K), PY(b.y + (b.py - b.y) * K), PX(b.x), PY(b.y));
   C.fillStyle = '#ffe680';
-  for (const b of bullets) if (b.px !== undefined && !b.spent && b.x > x0 - 10 && b.x < x1 + 10) tail(b);
+  for (const b of bullets) if (b.px !== undefined && !b.spent && !offView(Math.min(b.x, b.x + (b.px - b.x) * K), Math.max(b.x, b.x + (b.px - b.x) * K), x0, x1)) tail(b);
   // spent rounds: fading as they droop (a short streak, dimmer and dimmer)
-  for (const b of bullets) if (b.spent && b.px !== undefined && b.x > x0 - 10 && b.x < x1 + 10) { C.globalAlpha = clamp(b.spent / BULLET_FADE, 0, 1) * 0.9; tail(b); }
+  for (const b of bullets) if (b.spent && b.px !== undefined && !offView(Math.min(b.x, b.x + (b.px - b.x) * K), Math.max(b.x, b.x + (b.px - b.x) * K), x0, x1)) { C.globalAlpha = clamp(b.spent / BULLET_FADE, 0, 1) * 0.9; tail(b); }
   C.globalAlpha = 1;
 }
 
@@ -31929,7 +31937,7 @@ const ASH_L = pxLayer({
     const A = T.c, S2 = Math.max(PB, Math.round(SMK / PB) * PB);
     let m = 0, R = pxRoom(L, n * 2);
     for (let i = 0; i < n; i++) {
-      if (A.x[i] < x0 - 5 || A.x[i] > x1 + 5) continue;
+      if (offViewR(A.x[i], 2 * S2 / SV, x0, x1)) continue;   // (its pixel, two when big)
       const px = Math.floor(PX(A.x[i]) / PB) * PB, py = Math.floor(PY(A.y[i]) / PB) * PB;
       R.x[m] = px; R.y[m] = py; R.s[m] = S2; m++;
       if (A.big[i]) { R.x[m] = px + S2; R.y[m] = py + (Math.sin(A.life[i] * 3 + A.ph[i]) > 0 ? 0 : S2); R.s[m] = S2; m++; }
@@ -33458,7 +33466,7 @@ function ancRopeLine(pts, chain, x0, x1) {
   let k = 0;
   for (let i = 0; i < pts.length - 1; i++) {
     const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
-    if (Math.max(ax, bx) < x0 - 20 || Math.min(ax, bx) > x1 + 20) continue;
+    if (offView(Math.min(ax, bx), Math.max(ax, bx), x0, x1)) continue;
     const X0 = PX(ax), Y0 = PY(ay), X1 = PX(bx), Y1 = PY(by), n = Math.max(1, Math.ceil(Math.max(Math.abs(X1 - X0), Math.abs(Y1 - Y0)) / th));
     for (let s = 0; s < n; s++, k++) {
       const u = s / n, X = Math.round(X0 + (X1 - X0) * u - th / 2), Y = Math.round(Y0 + (Y1 - Y0) * u - th / 2);
@@ -33474,7 +33482,7 @@ function drawAnchors(x0, x1, lake) {
     const S = ANC_KIND[a.k], I = ancArt(S.size), [H] = ANC_PIX[S.size];
     if (a.st === 'stowed') {
       // (stowed: hanging at her bow against the hull - the big ships', the small boats' too small to show)
-      if (!CIV[a.k] || v.state === 'gone' || a.x < x0 - 30 || a.x > x1 + 30) return;
+      if (!CIV[a.k] || v.state === 'gone' || offViewR(a.x, Math.max(I.width, I.height), x0, x1)) return;
       const Is = scaled(I, SV, true);
       C.save(); C.translate(PX(a.x), PY(a.y - H / 2)); C.rotate((v.a || 0) + (v.tilt || 0)); C.drawImage(Is, -Math.round(Is.width / 2), 0); C.restore();
       return;
@@ -33484,7 +33492,7 @@ function drawAnchors(x0, x1, lake) {
     const ring = [a.x + Math.sin(ang) * H * 0.42, a.y - Math.cos(ang) * H * 0.42];
     const pts = P.slice(0, -1).map(p => [p.x, p.y]); pts.push(ring);
     ancRopeLine(pts, S.chain, x0, x1);
-    if (a.x < x0 - 30 || a.x > x1 + 30) return;
+    if (offViewR(a.x, Math.max(I.width, I.height), x0, x1)) return;
     const Is = scaled(I, SV, true);
     C.save(); C.translate(PX(a.x), PY(a.y)); C.rotate(ang); C.drawImage(Is, -Math.round(Is.width / 2), -Math.round(Is.height / 2)); C.restore();
     // (user Oct 27: "The anchor blips and does a bit of light so the sub can know where the ship is") the research
@@ -37790,7 +37798,7 @@ function stepCivHeli(h, dt) {
     if (h.state === 'landed') {
       h.spin = Math.min(1, h.spin + dt * 0.6);
       civLoadHome(h, mine, dt);
-      h.vx = 0; h.vy = 0; if (!groundFall(h, gy, dt, chStand(h), chHalf(h) * 0.6)) h.y = gy; h.tilt *= 1 - dt * 4;   // (the ground dug away under it: it falls into the hole - user Nov 2, groundFall) susStep(h, dt, CH_SUS_K, CH_SUS_C); heliDust(h.x, gy + chStand(h), 0, h.spin, dt, chHalf(h)); rotorDownwash(h.x, h.y - chSkid(h), chHalf(h) * 0.9, h.spin, 0, dt);
+      h.vx = 0; h.vy = 0; if (!groundFall(h, gy, dt, chStand(h), chHalf(h) * 0.6)) h.y = gy; h.tilt *= 1 - dt * 4; susStep(h, dt, CH_SUS_K, CH_SUS_C); heliDust(h.x, gy + chStand(h), 0, h.spin, dt, chHalf(h)); rotorDownwash(h.x, h.y - chSkid(h), chHalf(h) * 0.9, h.spin, 0, dt);   // (the ground dug away under it: it falls into the hole - user Nov 2, groundFall)
       if (h.spin > 0.85 && stick < -0.2) { h.state = 'fly'; h.vy = -20; h.deck = null; }
       else if (!mine && h.ai && h.ai.phase === 'home' && h.spin > 0.5 && Math.abs(h.x - h.home) < 80) { h.state = 'parked'; h.wait = chRnd(20, 70); h.ai = null; }
       else if (!mine && !h.ai) { h.state = 'parked'; h.wait = chRnd(20, 70); }   // (user Oct 27: only the player puts out fires - it flies its trips like the others)
@@ -37815,7 +37823,7 @@ function stepCivHeli(h, dt) {
     // and sets down)
     const apron = onApron(h.x) && dryLand(h.x);
     if (apron && gy - h.y < 140) { h.vy = Math.min(h.vy, 30 + (gy - h.y) * 0.4); if (gy - h.y < 70) h.tilt *= 1 - Math.min(1, dt * 4); }
-    h.x = clamp(h.x + h.vx * dt, (mine ? PLAY_L() : 0) + 40, (mine ? PLAY_R() : WORLD_W) - 40);   // (yours as far as the play goes - STORY has no edge) h.y = Math.max(HELI_CEIL, h.y + h.vy * dt);
+    h.x = clamp(h.x + h.vx * dt, (mine ? PLAY_L() : 0) + 40, (mine ? PLAY_R() : WORLD_W) - 40); h.y = Math.max(HELI_CEIL, h.y + h.vy * dt);   // (yours as far as the play goes - STORY has no edge)
     h.spin = Math.min(1, h.spin + dt);
     // touching down: gently on land it sets down; hard, or on the water, it's lost
     if (h.y >= gy) {
@@ -38109,8 +38117,8 @@ function drawAirStreaks(x0, x1) {
   let lc = null, la = 0;
   for (let i = 0; i < airStreaks.n; i++) {
     const sx = X[i], sy = Y[i];
-    if (sx < x0 - 60 || sx > x1 + 60) continue;
     const w = windAt(sy), L = 8 + Math.min(40, Math.abs(w) * 0.9), dir = Math.sign(w) || 1;
+    if (offViewR(sx, L, x0, x1)) continue;   // (its streak's length)
     if (sy < ATMO_TOP) {                                   // (space dust: a still mote, a pixel or two)
       const ai = Math.round(0.5 * Math.sin(Math.PI * AGE[i] / MAX[i]) * 32);
       if (ai < 1) continue;
@@ -38770,7 +38778,7 @@ function drawCivShips(x0, x1, lake) {   // (lake: the lakes' pass - a ship is dr
   for (const c of bySize(civShips)) {   // (smaller in front - 50-zz-size-order.js)
     if (c.state === 'gone' || onLakeW(c.x) !== !!lake) continue;
     const K = CIV[c.kind], L = civArt(c).width * K.k;
-    if (c.x + L < x0 - 40 || c.x - L > x1 + 40) continue;
+    if (offViewR(c.x, L, x0, x1)) continue;
     drawCivShip(c, x0, x1, false);
   }
   drawLinerLoose(x0, x1);                                          // (her pieces torn off: falling, in the water, on the bottom)
@@ -39062,7 +39070,7 @@ function drawOil(x0, x1) {
   if (LAND) { const I = inkArt || buildInkArt();
     for (let i = 0; i < oilSlicks.n; i++) { const ot = O.t[i]; if (ot < 6) continue; const fade = Math.min(1, (ot - 6) / 10);
       for (const q of LB[i]) {
-        if (!q.drip || q.c < x0 - 40 || q.c > x1 + 40 || Math.abs(q.c - O.x[i]) > O.r[i] * 0.85) continue;
+        if (!q.drip || offViewR(q.c, 4, x0, x1) || Math.abs(q.c - O.x[i]) > O.r[i] * 0.85) continue;
         const T = oilLensAt(i, q.c, LB[i]); if (T < 16) continue;
         const top = surfaceY(q.c) + T - 2;
         for (let k = 0; k < q.n; k++) {
@@ -39089,7 +39097,7 @@ function drawCoastWedges(x0, x1) {
   // doesn't reach it: from the hangar's foot down)
   for (const d of docks) {
     const [ha, hb] = hangarSpan(d);
-    if (hb < x0 - 20 || ha > x1 + 20) continue;
+    if (offView(ha, hb, x0, x1)) continue;
     const L = Math.round(PX(ha)), R = Math.round(PX(hb)), T0 = Math.round(PY(HANGAR_BOT + dkY(d)));   // (at its own water's)
     C.fillStyle = UG_CSS; C.fillRect(L, T0, R - L, bh + SHY + 50 - T0);
   }
@@ -39825,7 +39833,7 @@ function drawCranes(x0, x1, lake = false) {
     // the pier's stacks: where they stand, each seen by its own box - the crane rolls along the pier away from them
     for (const sl of cr.slots) if (contSeen(sl.x, x0, x1)) sl.stack.forEach((k, j) => drawContainerAt(sl.x, cr.deck - CONT_H * (j + 0.5), 0, k));
     const a = Math.min(cr.wx(0), cr.wx(CRI.w)), b = Math.max(cr.wx(0), cr.wx(CRI.w));
-    if (b < x0 - 40 || a > x1 + 40) continue;
+    if (offView(a, b, x0, x1)) continue;
     const R = cr.out > 0;
     // the frame
     const gs = scaled(R ? A.g : A.gl, s, true), GX = Math.round(PX(a)), GY = Math.round(PY(cr.top));
@@ -40177,10 +40185,11 @@ const HOSE_L = pxLayer({
       const w = Math.max(1, Math.round(q * clamp(0.3 + D.age[i] * 5.5, 0.3, 2.4))), o = (q - w) >> 1;
       for (let s = 0; s <= k; s++) put(snap(X1 + (Xs - X1) * s / k) + o, snap(Y1 + (Ys - Y1) * s / k) + dy + o, w, c);
     };
-    if (q >= 2) for (let i = 0; i < n; i++) if (!BR[i] && D.age[i] > 0.12 && X[i] > x0 - 20 && X[i] < x1 + 20) jet(i, q, 0);
-    for (let i = 0; i < n; i++) if (!BR[i] && X[i] > x0 - 20 && X[i] < x1 + 20) jet(i, 0, 1);
+    const jetOut = i => offView(Math.min(X[i], X[i] - D.vx[i] * 0.025) - 2.4 * HOSE_U, Math.max(X[i], X[i] - D.vx[i] * 0.025) + 2.4 * HOSE_U, x0, x1);   // (the jet's streak and its width)
+    if (q >= 2) for (let i = 0; i < n; i++) if (!BR[i] && D.age[i] > 0.12 && !jetOut(i)) jet(i, q, 0);
+    for (let i = 0; i < n; i++) if (!BR[i] && !jetOut(i)) jet(i, 0, 1);
     for (let i = 0; i < n; i++) {
-      if (!BR[i] || X[i] < x0 - 10 || X[i] > x1 + 10) continue;
+      if (!BR[i] || offViewR(X[i], 2 * HOSE_U, x0, x1)) continue;   // (a drop and the one behind it)
       const c = nearFlame(X[i], Y[i]) ? 3 : 2;
       put(snap(PX(X[i])), snap(PY(Y[i])), qd, c);
       if (!D.sp[i]) put(snap(PX(X[i] - D.vx[i] * 0.012)), snap(PY(Y[i] - D.vy[i] * 0.012)), qd, c);
@@ -40206,7 +40215,7 @@ function drawHoseCollision(x0, x1) {
   C.strokeStyle = '#ff9a2e';
   for (const q of S) { if (q.x1 < x0 || q.x0 > x1) continue; C.strokeRect(PX(q.x0) + 0.5, PY(q.y0) + 0.5, Math.max(1, Math.round((q.x1 - q.x0) * SV)), Math.max(1, Math.round((q.y1 - q.y0) * SV))); }
   C.strokeStyle = 'rgba(255,70,70,0.8)';
-  for (const f of flames.rows()) { if (f.heat <= 0.35 || f.x < x0 - 20 || f.x > x1 + 20) continue; C.beginPath(); C.arc(PX(f.x), PY(f.y), Math.max(1.5, Math.sqrt(49 + f.r * f.r) * SV), 0, 6.283); C.stroke(); }
+  for (const f of flames.rows()) { if (f.heat <= 0.35 || offViewR(f.x, Math.sqrt(49 + f.r * f.r), x0, x1)) continue; C.beginPath(); C.arc(PX(f.x), PY(f.y), Math.max(1.5, Math.sqrt(49 + f.r * f.r) * SV), 0, 6.283); C.stroke(); }
   const px = Math.max(1, Math.round(SV));
   C.fillStyle = '#4a7dff'; { const D = hoseDrops.c; for (let i = 0; i < hoseDrops.n; i++) if (!D.sp[i]) C.fillRect(PX(D.x[i]) - px, PY(D.y[i]) - px, px * 2, px * 2); }
   const COLS = { fire: '#ff9a2e', flame: '#ff3b3b', sea: '#9fd8ff' };
@@ -40395,8 +40404,8 @@ function fwAuto(c, dt) {
 function drawFireworks(x0, x1) {
   if (!LAND || (!fireworks.length && !fwBits.n)) return;
   const night = clamp(E.night * 1.2 + E.dusk * 0.5, 0, 1), dayK = 0.8 + 0.2 * night;
-  const list = fireworks.filter(f => f.x > x0 - 200 && f.x < x1 + 200);
-  let bits = 0; { const c = fwBits.c; for (let i = 0; i < fwBits.n; i++) if (c.t[i] >= 0 && c.x[i] > x0 - 20 && c.x[i] < x1 + 20) bits++; }
+  const list = fireworks.filter(f => !offViewR(f.x, Math.max(10, (f.R || 0) * 2.2), x0, x1));   // (a rocket, or a burst and its light)
+  let bits = 0; { const c = fwBits.c; for (let i = 0; i < fwBits.n; i++) if (c.t[i] >= 0 && !offViewR(c.x[i], 2, x0, x1)) bits++; }
   if (!list.length && !bits) return;
   // (for the colour grade: a young burst at night a bright light)
   for (const f of list) if (f.st === 'burst' && f.t < 1.2) brightLights[viewIdx].push(PX(f.x) + VSX + SHX, PY(f.y) + SHY, 0.45 * night * (1 - f.t / 1.2), Math.round(Math.max(60, f.R * 2.2 * SV)));
@@ -40508,7 +40517,7 @@ const FWBIT_L = pxLayer({
     const c = T.c, ga = C.s.ga, q = Math.max(1, Math.round(SV * 0.8)), sq = v => Math.floor(v / q) * q, cc = [0, 0, 0, 0], tk = Math.floor(time * 20), dayK = L.dayK;
     let m = 0, R = pxRoom(L, 64);
     for (let i = 0; i < n; i++) {
-      if (!(c.t[i] >= 0 && c.x[i] > x0 - 20 && c.x[i] < x1 + 20)) continue;
+      if (!(c.t[i] >= 0 && !offViewR(c.x[i], 2, x0, x1))) continue;   // (a spark and its glow)
       const u = c.t[i] / c.life[i]; if (fwHash(c.x[i] * 0.37 + tk) < 0.25) continue;
       cc[0] = c.cr[i] | 0; cc[1] = c.cg[i] | 0; cc[2] = c.cb[i] | 0; cc[3] = Math.max(0, Math.min(1, +clamp(dayK * (1 - u) * (c.ember[i] ? 0.8 : 1), 0, 1).toFixed(3)));
       L.lq = i;
@@ -43261,7 +43270,7 @@ function drawFieldFlowers(x0, x1) {
   const STALK = shade([62, 120, 52]), LUP = shade([150, 104, 206]), LUPT = shade([196, 160, 236]), DAISY = shade([244, 244, 236]), BUTTER = shade([246, 214, 70]);
   let last = null;
   for (const f of fieldFlowers) {
-    if (f.x < x0 - 10 || f.x > x1 + 10) continue;
+    if (offViewR(f.x, 3, x0, x1)) continue;   // (a flower: a few pixels)
     const fc = clamp(Math.floor(f.x / LT_CELL), 0, land.cols - 1); if (fieldK(f.x) < 0.5) continue;   // (none where the field gives out by the airfield)
     const foot = land.surfS[fc] - fieldH(fc) * LT_CELL * (0.12 + 0.7 * f.back), sw = (wnd * 0.4 + Math.sin(t * 1.2 + f.ph) * 0.3);
     lakeRect(PX(f.x), PY(foot - f.h * 0.6), p, f.h * 0.6 * SV, last = STALK);            // (its stalk)
@@ -43488,17 +43497,17 @@ function drawLinerRigging(c, x0, x1) {
   if (SW.live || !c.lp.ropes) {
     for (const rp of LPI.ropes) {
       const [ax, ay] = linerPoint(c, rp.pa, ...rp.a), [bx, by] = linerPoint(c, rp.pb, ...rp.b);
-      if (Math.max(ax, bx) < x0 - 20 || Math.min(ax, bx) > x1 + 20 || Math.hypot(bx - ax, by - ay) > rp.len * CIV[c.kind].k * 1.2) continue;
+      if (offView(Math.min(ax, bx), Math.max(ax, bx), x0, x1) || Math.hypot(bx - ax, by - ay) > rp.len * CIV[c.kind].k * 1.2) continue;
       let px = ax, py = ay;
       for (let i = 1; i <= 8; i++) { const u = i / 8, x = ax + (bx - ax) * u, y = ay + (by - ay) * u + Math.sin(u * Math.PI) * 2; thickLine(PX(px), PY(py), PX(x), PY(y), w); px = x; py = y; }
     }
     return;
   }
-  for (const R of c.lp.ropes) for (let i = 0; i < R.N.length - 1; i++) { const p = R.N[i], q = R.N[i + 1]; if (Math.max(p[0], q[0]) < x0 - 20 || Math.min(p[0], q[0]) > x1 + 20) continue; thickLine(PX(p[0]), PY(p[1]), PX(q[0]), PY(q[1]), w); }
+  for (const R of c.lp.ropes) for (let i = 0; i < R.N.length - 1; i++) { const p = R.N[i], q = R.N[i + 1]; if (offView(Math.min(p[0], q[0]), Math.max(p[0], q[0]), x0, x1)) continue; thickLine(PX(p[0]), PY(p[1]), PX(q[0]), PY(q[1]), w); }
 }
 function drawLinerLoose(x0, x1) {
   for (const o of linerLoose) {
-    if (o.x < x0 - 60 || o.x > x1 + 60) continue;
+    if (offViewR(o.x, Math.hypot(o.img.width, o.img.height) * o.k / 2, x0, x1)) continue;
     const sp = scaled(o.img, o.k * SV, true);
     C.save(); C.translate(PX(o.x), PY(o.y)); C.rotate(o.a); C.drawImage(sp, -Math.round(sp.width / 2), -Math.round(sp.height / 2)); C.restore();
   }
@@ -44327,6 +44336,9 @@ function plantsNear(x, r, fn) {
   for (let c = Math.floor((x - r) / PL_CELL); c <= Math.floor((x + r) / PL_CELL); c++) { const L = PLT.grid[c]; if (L) for (const it of L) if (Math.abs(it.x - x) <= r) fn(it); }
 }
 // a plant's height and middle (world), standing
+// (Nov 4: culled by its own size) how far any of it can reach from its foot: its picture's width or height, whichever is more - swaying,
+// falling, as it's felled (before its picture is ready: the old 220)
+function plantReach(it) { const G = plantGeo(it); return G ? Math.max(G.w, G.h) : 220; }
 function plantH(it) { if (it.pk === 'grass') return (10 + ((it.k * 5) % 4)) * TUFT_ART * TUFT_PX * it.s; const G = plantGeo(it); return G ? G.h : 20; }
 
 /* ---- what hits them ---- */
@@ -44663,7 +44675,7 @@ function drawLandProps(x0, x1, isl, part) {
   VEG_PX = clamp(VTUNE.tree.px || 0.8, 0.1, 4) * SV;   // (user Nov 4 10:46: every plant on the one pixel grid - the world's art pixel on the screen now)
   const VPL = part === 'plants' ? vegPassBegin() : null;   // (the plants of this pass laid in one layer at it - one blit, not one a plant)
   for (const it of land.props) {
-    if (it.x < x0 - 220 || it.x > x1 + 220 || lakeAt(it.x) || !it.isl !== !isl) continue;
+    if (offViewR(it.x, plantReach(it), x0, x1) || lakeAt(it.x) || !it.isl !== !isl) continue;
     if (isl && (isl === 'land') !== !seaAtX(it.x)) continue;   // (a segment's in a country: drawn in the land's pass - drawIslandsLand)   // (an island's: drawn with it, behind the water)
     if ((it.kind === 'rock') !== (part !== 'plants') && part) continue;   // (rocks with the ground, plants after the structures)
     if (part === 'plants' && (it.deck === 4 ? 'back' : it.deck === 1 ? 'front' : null) !== VEG_PASS) continue;   // (deck 3 behind the ground, deck 0 in front of the structures - their own passes, user Nov 3 22:41, 22:54)
@@ -44792,7 +44804,7 @@ const TLEAF_L = pxLayer({
   view: (T, own, n, x0, x1, L) => {
     const keep = { ga: C.s.ga }, fx = E.fx || [1, 1, 1]; let m = 0;
     for (const f of T.rows()) {
-      if (f.x < x0 - 10 || f.x > x1 + 10) continue;
+      if (offViewR(f.x, Math.abs(f.px || 0) * 2 + 1, x0, x1)) continue;   // (a leaf at its size, fluttering)
       const q = LEAF_PAL[f.c] || [90, 130, 60], col = pxRGBA(css3([q[0] * fx[0], q[1] * fx[1], q[2] * fx[2]]), Math.min(1, (f.life - f.age) / 1.5), keep); if (!(col >>> 24)) continue;
       const b = Math.max(1, Math.round(PX(f.x + f.px) - PX(f.x))), wide = Math.abs(Math.sin(f.spin)) > 0.5;   // (it turns as it flutters)
       own.x[m] = Math.floor(PX(f.x) / b) * b; own.y[m] = Math.floor(PY(f.y) / b) * b; own.w[m] = wide ? 2 * b : b; own.h[m] = b; own.rgba[m] = col; m++;
@@ -45182,7 +45194,7 @@ function drawPirateWrecks(x0, x1, only) {
   if (!pirateWrecks.length) return;
   if (!pirateArt) buildPirateArt();
   for (const w of pirateWrecks) {
-    if (w.x < x0 - 160 || w.x > x1 + 160 || (only && !only(w))) continue;
+    if (offViewR(w.x, w.half || 200, x0, x1) || (only && !only(w))) continue;
     const A = pirateArt[(w.v || 0) % pirateArt.length], by = wreckBy(w);
     if (!only) {
     // a pale shaft of light down onto her from far above (the target picture's), slowly breathing
@@ -45256,7 +45268,7 @@ function msAimStep(sub, dt) {
 function drawDeepLights(x0, x1, only) {
   if (!only) drawPings(x0, x1);                                   // (the PING's wave: seen in the dark too)
   for (const w of pirateWrecks) {
-    if (!cargoAny(w) || w.x < x0 - 200 || w.x > x1 + 200 || (only && !only(w))) continue;
+    if (!cargoAny(w) || offViewR(w.x, w.half || 200, x0, x1) || (only && !only(w))) continue;   // (its chest is on it)
     const [cx, cy] = chestAt(w), X = PX(cx), Y = PY(cy), s = SV, lit = chestLit(cx, cy), g = chestGlint(w, lit);
     // (user Oct 27, 12:21: no glow - the chest dark in the dark, seen as the sub's lamp falls on it, the gold in it
     // catching that light; now and then a glint off it, more often and brighter in the beam)
@@ -45306,7 +45318,7 @@ function msBeamSprite() {
 function drawMinisubs(x0, x1, lake) {   // (lake: the lakes' pass - a sub is drawn in the pass of the water it is in, onLakeW)
   if (!LAND || !msArt) return;
   for (const s of bySize(minisubs)) {   // (smaller in front - 50-zz-size-order.js)
-    if (s.state === 'lost' || s.x < x0 - 100 || s.x > x1 + 100 || onLakeW(s.x) !== !!lake) continue;
+    if (s.state === 'lost' || vehCulled(s, x0, x1) || onLakeW(s.x) !== !!lake) continue;
     drawMinisub(s);
   }
 }
@@ -45375,7 +45387,7 @@ const PING_L = pxLayer({
     let m = 0, Rm = pxRoom(L, 64);
     for (let q = 0; q < nr; q++) {
       const wxq = c.x[q], wr = c.r[q], life = c.life[q], seed = c.seed[q];
-      if (wxq + wr < x0 - 40 || wxq - wr > x1 + 40) continue;
+      if (offViewR(wxq, wr, x0, x1)) continue;
       const fade = 1 - life / c.max[q];
       for (let ring = 0; ring < 3; ring++) {
         const r0 = wr - ring * 16; if (r0 <= 4) continue;
@@ -45909,7 +45921,7 @@ function stepCrashPiece(W, p, dt) {
 function drawCrashes(x0, x1, wet) {
   for (const W of crashes) {
     for (const p of W.pieces) {
-      if (p.x < x0 - 80 || p.x > x1 + 80) continue;
+      if (offViewR(p.x, Math.hypot(p.c.width, p.c.height) * p.k / 2, x0, x1)) continue;   // (turned any way)
       if (wet === 'sea' ? onLand(p.x) : !onLand(p.x) || (p.mode === 'wet' || p.mode === 'bed') !== !!wet) continue;
       const s = p.k * SV, sp = scaled(p.c, s, true);
       C.save(); C.translate(Math.round(PX(p.x)), Math.round(PY(p.y - p.dy))); C.rotate(p.a); if (p.flip) C.scale(-1, 1);
@@ -45917,7 +45929,7 @@ function drawCrashes(x0, x1, wet) {
       C.drawImage(sp, X, Y); civLitLook(p.c, s, X, Y, PX(p.x));
       C.restore();
     }
-    if ((wet === 'sea') === !onLand(W.x) && wet !== true && !W.out && W.t < W.fire && W.x > x0 - 200 && W.x < x1 + 200) {
+    if ((wet === 'sea') === !onLand(W.x) && wet !== true && !W.out && W.t < W.fire && !offViewR(W.x, Math.max(14 / SV, 40 + 30 * W.size), x0, x1)) {   // (its fire's light)
       const u = W.t / W.fire, k = (1 - 0.6 * smoothstep(0.6, 1, u)) * (0.85 + 0.15 * Math.sin(time * 9 + W.x));
       airLamps[viewIdx].push(PX(W.x), PY(W.y - 6), 0.7 * k, Math.round(Math.max(14, (40 + 30 * W.size) * SV)));   // (its fire lighting the ground round it after dark)
     }
@@ -47229,7 +47241,7 @@ function drawPads(x0, x1) {
   for (const K of padKeys()) {
     const R = K && typeof K === 'object' ? !!K.flip : K;
     const s = padSpot(K), A = spaceArt, w = A.pad.width * PAD_K;
-    if (s.L > x1 + 40 || s.L + w < x0 - 40) continue;
+    if (offView(s.L, s.L + w, x0, x1)) continue;
     const I = scaled(R ? A.padR : A.pad, PAD_K * SV, true), c = Math.cos(s.a), sn = Math.sin(s.a);
     // (turned about its foot's middle with the ground under it)
     C.save(); C.translate(Math.round(PX(s.X)), Math.round(PY(s.gy))); if (s.a) C.rotate(s.a);
@@ -47256,7 +47268,8 @@ function drawSpace(x0, x1, pass) {
   if (!LAND || !spaceArt) return;
   const A = spaceArt;
   for (const j of spaceJunk) {
-    if (j.state === 'bottom' || j.x < x0 - 260 || j.x > x1 + 260) continue;
+    if (j.state === 'bottom') continue;
+    { const I = j.kind === 'et' ? spaceArt.tank : spaceArt.srb; if (offViewR(j.x, Math.hypot(I.width, I.height) * STACK_K / 2, x0, x1)) continue; }   // (turned any way: its picture's half-diagonal)
     const I = j.kind === 'et' ? A.tank : A.srb;       // (the user's picture taken apart: the tank, a booster)
     const sp = scaled(I, STACK_K * SV, true);
     C.save(); C.translate(PX(j.x), PY(j.y)); C.rotate(j.a);
@@ -47266,13 +47279,13 @@ function drawSpace(x0, x1, pass) {
   }
   for (const v of shuttles) {
     if (v.state === 'gone' || v.state === 'bottom') continue;
-    if (v.x < x0 - 400 || v.x > x1 + 400) continue;
+    if (offViewR(v.x, spaceArt.stack.height * STACK_K * 1.5, x0, x1)) continue;   // (its stack turned any way about its foot, and its flame)
     if (v.crash) continue;                                          // (its wreck on land: drawn with the ground - drawCrashes)
     if (v.state === 'pad' || v.state === 'count' || v.state === 'climb') drawStack(v);
     else drawOrbiter(v);
   }
   for (const q of satPieces) {
-    if (q.x < x0 - 100 || q.x > x1 + 100) continue;
+    if (offViewR(q.x, Math.hypot(q.img.width, q.img.height) * SAT_K / 2, x0, x1)) continue;
     const sp = scaled(dmgPic(q.img, 1, { m: SAT_K / UPM }), SAT_K * SV, true);   // (a lost satellite's: burnt all over, as its body)
     C.save(); C.translate(PX(q.x), PY(q.y)); C.rotate(q.a); if (q.flip) C.scale(-1, 1);
     drawBurning(sp, -Math.round(sp.width / 2), -Math.round(sp.height / 2), q.heat);
@@ -47280,7 +47293,7 @@ function drawSpace(x0, x1, pass) {
     airLamps[viewIdx].push(PX(q.x), PY(q.y), 0.5 * q.heat, Math.round(Math.max(10, 26 * SV)));   // (its fire lights the air round it)
   }
   for (const o of orbiters) {
-    if (o.state === 'gone' || o.state === 'deploy' || o.x < x0 - 300 || o.x > x1 + 300) continue;   // (coming out of the bay: drawn with the orbiter)
+    if (o.state === 'gone' || o.state === 'deploy' || vehCulled(o, x0, x1)) continue;   // (coming out of the bay: drawn with the orbiter)
     if (satUnfolding(o)) { drawSatUnfolding(o); continue; }
     // (charred as it's hurt; coming down, burnt all over - spaceDmg)
     const [I, k] = orbitPic(o), f = spaceDmg(o, o.state === 'fall' || o.state === 'reentry'), sp = scaled(dmgPic(I, f, { m: k / UPM }), k * SV, true);
@@ -48965,7 +48978,7 @@ function drawLandTrees(x0, x1) {
   for (let i = Math.floor((x0 - 40) / tileW); i <= Math.floor((x1 + 40) / tileW); i++) {
     for (let sx = 0; sx < im.width; sx += SL) {
       const wx = i * tileW + sx * k, ww = Math.min(SL, im.width - sx) * k;
-      if (wx + ww < x0 - 40 || wx > x1 + 40) continue;
+      if (offView(wx, wx + ww, x0, x1)) continue;
       const cx = wx + ww / 2; if (cx < 0 || cx > E2) continue;   // (past the world's ends is the open ocean - no trees there)
       if (lookD(cx) || landTrop(cx) || (land.sea && land.sea[clamp(ltCol(cx), 0, land.cols - 1)]) || !onLand(cx)) continue;   // (the forest's trees: where the ground is FOREST - by its terrain type, never a side)
       // (user Oct 27, 16:37, "for some reason you cut a chunk of these trees?" - the row used to be cropped lower and lower
@@ -49080,7 +49093,7 @@ function drawTufts(x0, x1) {
   if (!tuftArt) buildTuftArt();
   const sway = clamp((E.windU || 0) / 75, -1, 1);
   for (const t of land.tufts) {
-    if (t.x < x0 - 20 || t.x > x1 + 20) continue;
+    if (offViewR(t.x, 14 * TUFT_ART * TUFT_PX * (t.s || 1), x0, x1)) continue;   // (a tuft as tall as it's drawn, leaning with the wind)
     const top = landTop(t.x);
     if (!t.alive) {
       // (stubble: a few short dark stalks)
@@ -50189,7 +50202,7 @@ function drawTropForestAt(x0, x1, isl) {
     // the foliage's pieces: on a grid of PL, each [g - capM, g + PL + capM] within the sand, straight, at the lowest ground under it
     // (user Nov 3 21:23: "remove all the geometry on the background that is not dynamic" - none while the plants have bones: 50-land-zz-rig.js)
     if (RIG_T.off) for (let g = Math.floor(sa / PL) * PL; g < sb; g += PL) {   // (the decks' jungle in its place, on every TROPICAL ground - 13:33)
-      const pa = Math.max(sa, g - capM), pb = Math.min(sb, g + PL + capM); if (pb - pa < 2 * m || pb < x0 - 10 || pa > x1 + 10) continue;
+      const pa = Math.max(sa, g - capM), pb = Math.min(sb, g + PL + capM); if (pb - pa < 2 * m || offView(pa, pb, x0, x1)) continue;
       const w = Math.max(2, Math.round((pb - pa) / m)), P = tropForestPiece(F, uAt(pa), w, cw); if (!P) continue;
       const yb = low(pa, pb) + sink, X0 = Math.round(PX(pa)), X1 = Math.round(PX(pa + w * m)), Y0 = Math.round(PY(yb - H * m)), Y1 = Math.round(PY(yb));
       if (X1 > X0 && Y1 > Y0) C.drawImage(tropPut(P), X0, Y0, X1 - X0, Y1 - Y0);
@@ -51676,7 +51689,7 @@ const LEAF_L = pxLayer({
     let m = 0, R = pxRoom(L, n * 3);
     const put = (x, y, w, h, col) => { if (!(col >>> 24)) return; R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.rgba[m] = col; m++; };
     for (const f of T.rows()) {
-      if (f.x < x0 - 10 || f.x > x1 + 10) continue;
+      if (offViewR(f.x, 2.5, x0, x1)) continue;   // (a leaf: two blocks of 1.25)
       const css = f.c, col = pxRGBA(css, Math.min(1, (f.life - f.t) / 1.5), keep); L.last = css;
       const X = Math.floor(PX(f.x) / s) * s, Y = Math.floor(PY(f.y) / s) * s;
       if (f.blade) {
@@ -52091,7 +52104,7 @@ const EGRAIN_L = pxLayer({
     const PBw = Math.max(1, Math.round(1.25 * SV)), keep = { ga: C.s.ga };
     let m = 0;
     for (const q of T.rows()) {
-      if (q.x < x0 - 10 || q.x > x1 + 10) continue;
+      if (offViewR(q.x, 1.25, x0, x1)) continue;   // (a grain: a block of 1.25)
       const left = q.life - q.t, a = q.light ? Math.min(1, left / 1.2) * 0.85 : Math.min(1, left / 2);
       if (a <= 0.02) continue;
       const css = q.c, col = pxRGBA(css, a, keep); L.last = css;
@@ -52149,7 +52162,7 @@ function drawSpikeBursts(x0, x1) {
   spkRuns();
   const Bc = spikeBursts.c, Sc = spikeSpikes.c, G = spikeGrains.c;
   for (let bi = 0; bi < spikeBursts.n; bi++) {
-    if (Bc.x[bi] < x0 - 300 || Bc.x[bi] > x1 + 300) continue;
+    { let a = Bc.x[bi], b = a; for (let s = SPKR.b0[bi]; s < SPKR.b1[bi]; s++) for (let g = SPKR.s0[s]; g < SPKR.s1[s]; g++) { const gx = G.x[g]; if (gx < a) a = gx; else if (gx > b) b = gx; } if (offView(a, b, x0, x1)) continue; }   // (its spikes' own reach: their grains)
     const P = spkPal(bi);
     for (let s = SPKR.b0[bi]; s < SPKR.b1[bi]; s++) {
       if (Sc.shed[s]) continue;                              // (come apart into grains: see drawEarthGrains)
@@ -52504,13 +52517,13 @@ function renderLandObjects0() {
     guardDraw('lakeSea', () => drawLakeSea(x0, x1));     // (a lake bed marked SEA: the sea's corals, boulders and weed - 50-land-lake)
     guardDraw('lakeHarbours', () => drawLakeHarbours(x0, x1));   // (piers and marine hangars on a lake: the sea's, at its level - 50-land-lake)
     // (a lake is the sea's water too, user Oct 25: what lies on its bed and sinks through it)
-    lakeClip(x0, x1, () => { drawDuds(x0, x1); for (const p of pieces) if (p.x + p.hl > x0 - 20 && p.x - p.hl < x1 + 20) drawPiece(p); drawDcharges(x0, x1); drawTraffic(x0, x1, 'under'); drawBalloons(x0, x1, 'under'); drawBlimps(x0, x1, 'under'); drawCivHelis(x0, x1, 'under'); drawAnchors(x0, x1, true); drawCrashes(x0, x1, true); drawStoryCars(x0, x1, 'lake'); });
+    lakeClip(x0, x1, () => { drawDuds(x0, x1); for (const p of pieces) if (!offViewR(p.x, p.hl, x0, x1)) drawPiece(p); drawDcharges(x0, x1); drawTraffic(x0, x1, 'under'); drawBalloons(x0, x1, 'under'); drawBlimps(x0, x1, 'under'); drawCivHelis(x0, x1, 'under'); drawAnchors(x0, x1, true); drawCrashes(x0, x1, true); drawStoryCars(x0, x1, 'lake'); });
     lakeDusk(x0, x1, () => {                              // (against a low sun, dark as the sea's - 50-land-lake)
       for (const b of bySize(sailboats)) if (onLakeW(b.x)) drawSailboat(b);   // (the lakes' yachts and motor boats)
       guardDraw('drawJetboats', () => drawJetboats(x0, x1, true));
       guardDraw('drawCivShips', () => drawCivShips(x0, x1, true)); guardDraw('drawMinisubs', () => drawMinisubs(x0, x1, true));   // (a ship or sub put on a lake: the lake's pass, as the boats - user Nov 2 12:33)
     });
-    for (const tw of towers) if (tw && tw.edge && tw.x > x0 - 120 && tw.x < x1 + 120) drawTower(tw);   // (the towers on the mountains at the world's ends)
+    for (const tw of towers) if (tw && tw.edge) { const B = twOutline(tw.x, twBase(tw), tw.facing, lhOn(tw), tw); if (!offView(B.x0, B.x1, x0, x1)) drawTower(tw); }   // (the towers on the mountains at the world's ends)
     lt('lakes'); if (!VEG_NOPARTS) restDrawDebris(1, x0, x1); lt('restDebris');                           // (the debris at rest on the land - 36-zzzz-settled.js)
     drawCrashes(x0, x1, false); if (!edTiny(0.5 * UPM)) drawLooseStones(x0, x1);   // (what's left of the planes; stones knocked loose, falling - 50-land-rest)
     if (!edTiny(0.3 * UPM) && !VEG_NOPARTS) drawLeaves(x0, x1); lt('crashLeaves');
@@ -54544,7 +54557,7 @@ const EXH_L = pxLayer({
   view: (T, own, n, x0, x1, L) => {
     const keep = { ga: C.s.ga }, fx = E.fx || [1, 1, 1]; let m = 0;
     for (const p of T.rows()) {
-      if (p.x < x0 - 20 || p.x > x1 + 20) continue;
+      if (offViewR(p.x, Math.abs(p.px || 0) + 1, x0, x1)) continue;   // (a puff at its own size)
       const t = p.age / p.life, a = 0.6 * (1 - t) * (1 - t), bs = Math.max(1, Math.round(PX(p.x + p.px) - PX(p.x)));
       const col = pxRGBA(css3(EXH_GREY.map((v, j) => Math.min(255, v * p.g) * fx[j])), a, keep); if (!(col >>> 24)) continue;
       own.x[m] = Math.floor(PX(p.x) / bs) * bs; own.y[m] = Math.floor(PY(p.y) / bs) * bs; own.b[m] = bs; own.k[m] = Math.max(1, Math.round(p.r / p.px)); own.rgba[m] = col; m++;
@@ -54842,7 +54855,7 @@ function drawStoryCars(x0, x1, pass) {
   if (!storyCars.length || !img.tropical) { if (pass === 'dry') drawExhaust(x0, x1); return; }   // (everyone's exhaust - a boat's funnel too - drawn with or without cars: user Nov 2 10:40, no funnel smoke in the lab)
   const fx = E.fx || [1, 1, 1], none = [0, 0, 0];
   for (const c of bySize(storyCars)) {   // (smaller in front - 50-zz-size-order.js)
-    if (c.state === 'gone' || c.x < x0 - 80 || c.x > x1 + 80 || carPass(c) !== pass) continue;
+    if (c.state === 'gone' || vehCulled(c, x0, x1) || carPass(c) !== pass) continue;
     const [w, h, P0] = storyCarSize(c); if (!P0) continue;
     const P = dmgPic(P0, dmgOf(c), { marks: c.marks });   // (damaged: its damaged picture, charred - the one rule, 50-zz-damage.js)
     const W = PX(c.x + w / 2) - PX(c.x - w / 2), H = PY(c.y + h) - PY(c.y), bob = c.state === 'run' && !c.air && Math.abs(c.vx || 0) > 2 ? Math.round(Math.sin(c.ph * 18) * 0.5) : 0;
@@ -55471,7 +55484,7 @@ function netCatch(j, N, dt) {
   let took = 0;
   for (let si = 0; si < schools.n; si++) {
     let len = FI.at[si + 1] - FI.at[si];
-    if (len <= 1 || S.x[si] < x0 - 300 || S.x[si] > x1 + 300) continue;
+    if (len <= 1) continue;   // (each fish checked against the net by its own place, below - a school has no size of its own)
     for (let q = FI.at[si + 1] - 1; q >= FI.at[si] && len > 1; q--) {
       if (netCaught(j) >= Math.floor(NETP.HOLD)) break;   // (as many as she can carry: no more)
       const fj = FI.rows[q], fx = F.x[fj], fy = F.y[fj];
@@ -59297,8 +59310,8 @@ function strTilesDraw(L, x0, x1) {
     t.t = wtKeyed(STL.L[t.g], T, t.r, t, strTileBox);   // (t: its structures (its) and their keys (key) - a bucket)
     const k = t.t; if (k && !(k.y + k.h <= Tp || k.y >= Bt || k.x + k.w <= Lx || k.x >= Rr) && (k.h > 2048 || k.w > 4096)) { STL.stats.live++; return null; }
   }
-  // the live loop's cull (a box outside [x0 - 50, x1 + 50]) and the tiles' agree
-  for (const it of its) if ((it.B.x1 < x0 - 50 || it.B.x0 > x1 + 50) && it.box[1] > Lx && it.box[0] < Rr) { STL.stats.live++; return null; }
+  // the live loop's cull (its box outside the view - offView, the one cull rule) and the tiles' agree
+  for (const it of its) if (offView(it.B.x0, it.B.x1, x0, x1) && it.box[1] > Lx && it.box[0] < Rr) { STL.stats.live++; return null; }
   STL.stats.lay++;
   return P;
 }
@@ -59622,7 +59635,7 @@ function drawSeaStructs(x0, x1) {
   if (!img.tropical) return;
   const fx = E.fx || [1, 1, 1], none = [0, 0, 0];
   const put = (P, key, X, Y, W, H) => C.drawImage(GLR.on ? glTint(P, key, fx, none, false) : P, X, Y, W, H);
-  const D = []; for (const o of STR_SEA) { const B = strBox(o); if (!strDrawn(o, B) || B.x1 < x0 - 50 || B.x0 > x1 + 50 || woodPierOf(o)) continue; strStillDraw(o, B, put); strLiveDraw(o, B); D.push(o, B); }   // (a wooden dock that's a pier: drawFreePiers draws it)
+  const D = []; for (const o of STR_SEA) { const B = strBox(o); if (!strDrawn(o, B) || offView(B.x0, B.x1, x0, x1) || woodPierOf(o)) continue; strStillDraw(o, B, put); strLiveDraw(o, B); D.push(o, B); }   // (a wooden dock that's a pier: drawFreePiers draws it)
   // (user Nov 2 14:33: "A vehicle on a dock ALWAYS renders behind anything in front of it") what stands on a deck at sea - a dock's, a
   // pier's - is drawn in that deck's pass, after it and before the boats, as what stands on any ground is (carPass 'deck')
   drawStoryCars(x0, x1, 'deck');
@@ -59644,7 +59657,7 @@ function drawStructs(x0, x1, isl = false) {
   for (let i = 0; i < L.length; i++) {
     const o = L[i], B = strBox(o); if (!strDrawn(o, B)) continue;
     if (T && T.lay[i]) strTileLay(T.lay[i]);
-    if (B.x1 < x0 - 50 || B.x0 > x1 + 50) continue;
+    if (offView(B.x0, B.x1, x0, x1)) continue;
     if (!(T && T.in[i])) strStillDraw(o, B, put);
     strLiveDraw(o, B);
     strLit(o, B);                                          // (the hour's light over it - the night's shape, the moon's and a low sun's rims - and its windows lit at night: 50-zz-lights.js)
@@ -59652,7 +59665,7 @@ function drawStructs(x0, x1, isl = false) {
   if (T) strTilesSweep();
   drawStoryCars(x0, x1, isl ? 'isl' : 'dry');            // (STORY's cars on dry ground - 50-story-cars.js; wet ones go with the water they're in)
   for (const o of L) if (STR_KINDS[o.k].enclosed) drawStrGate(o, x0, x1);   // (the enclosed ones' gates, in front of what's parked in them)
-  for (const o of L) { const B = strBox(o); if (B.P && B.x1 >= x0 - 50 && B.x0 <= x1 + 50 && strDrawn(o, B)) strFrontDraw(o, B, put); }   // (and their front layers - user Nov 2)
+  for (const o of L) { const B = strBox(o); if (B.P && !offView(B.x0, B.x1, x0, x1) && strDrawn(o, B)) strFrontDraw(o, B, put); }   // (and their front layers - user Nov 2)
 }
 /* (user Nov 2: "The taxi 'hut' has 2 layers, the foreground that should render in FRONT of the vehicle and the background. So it
    feels the car is 'inside' the hut") a structure's front layer (STR_KINDS front - the taxi shelter's roof and pillars) is drawn
@@ -60043,7 +60056,7 @@ window.__strRunway = { place: (id, x) => { const o = STRS.find(q => q.id === id)
    it rolls up while one of the story's vehicles is moving close to it (coming in or going out), and down again. This
    screen's own look (o._gate, never saved). ---- */
 function drawStrGate(o, x0, x1) {
-  const B = strBox(o); if (!B.P || B.x1 < x0 - 50 || B.x0 > x1 + 50) return;
+  const B = strBox(o); if (!B.P || offView(B.x0, B.x1, x0, x1)) return;
   const near = typeof storyVehs === 'function' && STORY && storyVehs().some(v => !v.plane && Math.abs(v.x - o.x) < (B.x1 - B.x0) / 2 + 18 * UPM && Math.abs(v.vDrive || 0) > 1);
   o._gate = clamp((o._gate || 0) + (near ? 1 : -0.7) * frameDt, 0, 1);
   const open = o._gate, fx = E.fx || [1, 1, 1], G = strGateBox(o, B);
@@ -60226,7 +60239,7 @@ function drawFreePiers(x0, x1, part, lake = false) {
   const fx = E.fx || [1, 1, 1], none = [0, 0, 0], posts = part === 'posts';
   for (const p of HARB.free) {
     if (!!p.lake !== lake) continue;                    // (the sea's in the sea's pass, a lake's in the lake's)
-    if (p.px0 + p.pl < x0 - 40 || p.px0 > x1 + 40) continue;
+    if (offView(p.px0, p.px0 + p.pl, x0, x1)) continue;
     const pa = dockArtOf(p), K = pierK(p), T = pierTop(p), DR = pierDeckRows(p), a = posts ? DR : 0, b = posts ? pa.height : DR;
     if (posts && !p.pierGone) pierExtDraw(p, pa, K, T, DR, fx, none);   // (its deck on into the ground at its ends - pierExt)
     if (p.look === 'wood') { const I = GLR.on ? glTint(pa, 'strT', fx, none, false) : pa; blitRows(pa, [p.px0, T, p.px0 + p.ppx * K, T + pa.height * K], K, a, b, (src, ra, rb, X, Y, W, H) => C.drawImage(I, 0, ra, src.width, rb - ra, X, Y, W, H)); }   // (in the hour's light, as the structures)
