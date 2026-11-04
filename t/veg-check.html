@@ -4369,7 +4369,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 771;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 04 16:51';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 04 17:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -44076,6 +44076,32 @@ function plantsRegrid() {
   for (const t of land.tufts || []) if (t.pk === 'grass') add(t);
   for (const L of PLT.grid) if (L) for (const it of L) if (it.heat > 0 && !(it.fire > 0)) PLT.warm.add(it);
 }
+/* (veg-check chat, Nov 4 - "a frame costs only what is on the screen", the same frame rate anywhere in the world) THE PROPS BY PLACE: each prop's
+   place in land.props, kept by 512-unit cells, so the drawing (drawLandProps, a dozen passes a frame) and the bones' step (up to 8 a frame)
+   visit only what is near their span - in land.props' own order, the drawing's order - instead of every prop in the world. Made again when
+   land.props is another list or another length; PROP_IX.r the furthest any prop reaches from its x (plantReach), raised as they're met.
+   propsIn(x0, x1): the props whose cell lies within r of the span, in their order (the last few spans' lists kept: every pass of a view asks
+   the same one). (A spot on a plant: nearViews - 50-zz-struct.js.) */
+const PROP_IX = { L: null, n: -1, cell: 512, c0: 0, cells: [], r: 220, ver: 0, spans: [] };
+function propIx() {
+  const L = land.props || [], X = PROP_IX;
+  if (X.L === L && X.n === L.length) return X;
+  X.L = L; X.n = L.length; X.ver++; X.cells = []; X.spans.length = 0;
+  let c0 = Infinity; for (const it of L) c0 = Math.min(c0, Math.floor(it.x / X.cell)); X.c0 = Number.isFinite(c0) ? c0 : 0;
+  for (let i = 0; i < L.length; i++) { const it = L[i], c = Math.floor(it.x / X.cell) - X.c0; (X.cells[c] || (X.cells[c] = [])).push(i); if (it.kind !== 'rock') X.r = Math.max(X.r, plantReach(it)); }
+  return X;
+}
+function propsIn(x0, x1) {
+  const X = propIx(), a = x0 - X.r, b = x1 + X.r;
+  for (const e of X.spans) if (e.a === a && e.b === b && e.ver === X.ver) return e.out;
+  const e = X.spans.length < 6 ? { a, b, ver: 0, idx: [], out: [] } : X.spans.shift(); X.spans.push(e);
+  e.a = a; e.b = b; e.ver = X.ver; const I = e.idx, O = e.out; I.length = 0; O.length = 0;
+  const ca = Math.max(0, Math.floor(a / X.cell) - X.c0), cb = Math.min(X.cells.length - 1, Math.floor(b / X.cell) - X.c0);
+  for (let c = ca; c <= cb; c++) { const C = X.cells[c]; if (C) for (let k = 0; k < C.length; k++) I.push(C[k]); }
+  I.sort((p, q) => p - q);
+  for (let k = 0; k < I.length; k++) O.push(X.L[I[k]]);
+  return O;
+}
 defTable('plants', () => land.props || [], { net: 'changes', make: () => ({}) });
 defTable('plantFire', () => [PLT], { make: () => PLT, skip: ['grid', 'warm', 'spots'], after: plantsRegrid });
 const plantUp = it => it.state === 'stand';
@@ -44276,6 +44302,7 @@ function trackPlantPerches(dt) {
     if (plantPerchGone(j)) { if (P.bird[j]) takeOff(bdOn(j), P.plant[j].x); continue; }
     // (user Nov 3 22:17: "Birds if they land on a tree, they need to move with it. If it moves too much they fly away") a spot on a
     // frond: where the frond is now; moving faster than its kind's BIRDS FLY AT, the bird on it goes
+    if (!isNaN(P.rf[j]) && !nearViews(P.plant[j].x, plantReach(P.plant[j]))) continue;   // (its plant off every view holds still: the spot stays where it is - veg-check chat)
     if (!isNaN(P.rf[j])) { const w = rigPerchAt(j, dt); if (w) { P.x[j] = w[0]; P.y[j] = w[1]; if (w[2] && P.bird[j]) takeOff(bdOn(j), P.x[j]); continue; } }
     const y = plantPerchY(j); if (y != null) { P.y[j] = y; plantPerchX(j); }
   }
@@ -44682,8 +44709,9 @@ function drawLandProps(x0, x1, isl, part) {
   let lamps = 0;
   VEG_PX = clamp(VTUNE.tree.px || 0.8, 0.1, 4) * SV;   // (user Nov 4 10:46: every plant on the one pixel grid - the world's art pixel on the screen now)
   const VPL = part === 'plants' ? vegPassBegin() : null;   // (the plants of this pass laid in one layer at it - one blit, not one a plant)
-  for (const it of land.props) {
-    if (offViewR(it.x, plantReach(it), x0, x1) || lakeAt(it.x) || !it.isl !== !isl) continue;
+  for (const it of propsIn(x0, x1)) {
+    const rr = plantReach(it); if (rr > PROP_IX.r && it.kind !== 'rock') PROP_IX.r = rr;   // (a picture bigger than any met before: the next span takes it in)
+    if (offViewR(it.x, rr, x0, x1) || lakeAt(it.x) || !it.isl !== !isl) continue;
     if (isl && (isl === 'land') !== !seaAtX(it.x)) continue;   // (a segment's in a country: drawn in the land's pass - drawIslandsLand)   // (an island's: drawn with it, behind the water)
     if ((it.kind === 'rock') !== (part !== 'plants') && part) continue;   // (rocks with the ground, plants after the structures)
     if (part === 'plants' && (it.deck === 4 ? 'back' : it.deck === 1 ? 'front' : null) !== VEG_PASS) continue;   // (deck 3 behind the ground, deck 0 in front of the structures - their own passes, user Nov 3 22:41, 22:54)
@@ -52978,6 +53006,19 @@ let VEG_PX = 1;
 // (10:46, 52 fps zoomed in with a layer a plant - a target switch each) a pass's plants all laid in one layer the size of the view at the world pixel, its grid on
 // the world's (no swimming as the view moves), put on the screen once at the pass's end
 let VEG_PASS_L = null; const VEG_PASS_LY = new Map();
+/* (veg-check chat, Nov 4) the plants' kept pictures and layers - by size (which changes with the zoom) or by the light (which changes with the hour and the
+   plant's place on the screen) - kept no more than n at a time: one more past n frees the least recently used, once it hasn't been drawn for a second
+   (its GL texture deleted - glFreeSrc / a layer's free), so a long session doesn't pile them up. M: a Map, k: the key, make() the new one, free(v) */
+const VEG_KEEP_MS = 1000;
+function vegKeep(M, k, make, free, n) {
+  const now = performance.now(); let e = M.get(k);
+  if (e) { e.t = now; return e.v; }
+  if (M.size >= n) { let ok = null, ot = Infinity; for (const [kk, q] of M) if (q.t < ot) { ot = q.t; ok = kk; } if (ok !== null && now - ot > VEG_KEEP_MS) { free(M.get(ok).v); M.delete(ok); } }
+  e = { v: make(), t: now }; M.set(k, e); return e.v;
+}
+const vegLayerFree = L => { if (L && L.free) L.free(); };
+const vegPieceFree = P => { if (P && P.c) glFreeSrc(P.c); };
+const vegMidFree = M => { if (!M) return; for (const q of M.parts) { vegPieceFree(q.a); vegPieceFree(q.b); } vegPieceFree(M.trunk); };
 function vegPassBegin() {
   // (user Nov 4 12:50, far away: "Still looks pretty sharp") laid at the plant pixel at every zoom - smaller than the screen's, the layer is shrunk onto it smoothly,
   // as a picture of the pixel art is (to a third of a screen pixel; past that the plants are drawn straight)
@@ -52985,13 +53026,13 @@ function vegPassBegin() {
   const M = C.getTransform(), cv = C.canvas; if (!cv || !cv.width || Math.abs(M.b) > 1e-6 || Math.abs(M.c) > 1e-6 || M.a <= 0 || M.d <= 0) return null;
   const P = VEG_PX, ox = ((PX(0) % P) + P) % P, oy = ((PY(0) % P) + P) % P, ux = -M.e / M.a, uy = -M.f / M.d, gx = Math.floor((ux - ox) / P) * P + ox, gy = Math.floor((uy - oy) / P) * P + oy;
   const LW = Math.ceil((cv.width / M.a + (ux - gx)) / P / 32 + 0.05) * 32, LH = Math.ceil((cv.height / M.d + (uy - gy)) / P / 32 + 0.05) * 32, lk = LW * 4096 + LH;
-  let LY = VEG_PASS_LY.get(lk); if (!LY) { if (VEG_PASS_LY.size > 6) VEG_PASS_LY.clear(); LY = makeLayer(LW, LH); VEG_PASS_LY.set(lk, LY); }
-  const D = LY.getContext('2d'); D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.imageSmoothingEnabled = false; D.clearRect(0, 0, LW, LH);   // (11:41: "too sharp" - its pieces had been sampled smoothly into it: each layer pixel one picture pixel)
+  const LY = vegKeep(VEG_PASS_LY, lk, () => makeLayer(LW, LH), vegLayerFree, 6);
+  const D = LY.getContext('2d'); D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.imageSmoothingEnabled = false;   // (cleared when the first plant comes - vegPassCtx: a pass with none costs nothing, veg-check chat)   // (11:41: "too sharp" - its pieces had been sampled smoothly into it: each layer pixel one picture pixel)
   return (VEG_PASS_L = { LY, D, gx, gy, used: false });
 }
 function vegPassEnd(L) { VEG_PASS_L = null; if (!L.used) return; C.save(); C.globalAlpha = 1; C.imageSmoothingEnabled = VEG_PX < 1; C.drawImage(L.LY, L.gx, L.gy, L.LY.width * VEG_PX, L.LY.height * VEG_PX); C.restore(); }
 // (a plant into the pass's layer: its picture's top left X, Y on the screen, art pixels at q layer pixels each - saved; the caller restores)
-function vegPassCtx(it, X, Y, w, q) { const L = VEG_PASS_L; L.used = true; const D = L.D; D.setTransform(1, 0, 0, 1, 0, 0); D.save(); D.translate((X - L.gx) / VEG_PX, (Y - L.gy) / VEG_PX); if (it.flip) { D.translate(w / VEG_PX, 0); D.scale(-1, 1); } D.scale(q, q); return D; }
+function vegPassCtx(it, X, Y, w, q) { const L = VEG_PASS_L, D = L.D; if (!L.used) { L.used = true; D.setTransform(1, 0, 0, 1, 0, 0); D.clearRect(0, 0, L.LY.width, L.LY.height); } D.setTransform(1, 0, 0, 1, 0, 0); D.save(); D.translate((X - L.gx) / VEG_PX, (Y - L.gy) / VEG_PX); if (it.flip) { D.translate(w / VEG_PX, 0); D.scale(-1, 1); } D.scale(q, q); return D; }
 // (user Nov 4 12:17: "for each component ... a 'outline' that we can Toggle on or off, Choose how wide (1px, 2px etc), Pick the color for it") a part's OUTLINE
 // { on, w (plant pixels), c }: its shape in that colour laid round it, a plant pixel a step - 1 wide its four sides, wider each ring with its corners - under it
 const olOf = P => P && P.ol && P.ol.on && P.ol.w > 0 ? P.ol : null;
@@ -53253,34 +53294,39 @@ function rigState(it, rc) {
 }
 // the air vehicles move about them: gathered once a step - [x, y, vx, vy, kind] (kind 0 a car on the ground, 1 a plane, 2 a
 // helicopter - its rotor's downwash), velocities from where each was a step ago
-const RIG_PREV = new WeakMap(), RIG_MOV = [];
-function rigMovers(dt) {
-  RIG_MOV.length = 0;
-  const add = (v, kind) => {
-    if (!v || v.state === 'gone' || !isFinite(v.x) || !isFinite(v.y)) return;
-    const p = RIG_PREV.get(v); RIG_PREV.set(v, [v.x, v.y]);
-    const vx = p && dt > 0 ? (v.x - p[0]) / dt : 0, vy = p && dt > 0 ? (v.y - p[1]) / dt : 0;
-    if (Math.abs(vx) > 3000 || Math.abs(vy) > 3000) return;      // (a jump - put somewhere, not moving)
-    RIG_MOV.push([v.x, v.y, vx, vy, kind, kind === 2 ? (v.spin != null ? clamp(v.spin, 0, 1) : 1) : 0]);
-  };
-  const each = (L, k) => { if (L) for (const v of L) add(v, k); };
-  try { each(typeof storyCars !== 'undefined' && storyCars, 0); each(typeof tanks !== 'undefined' && tanks, 0); each(typeof planes !== 'undefined' && planes, 1);
-    each(typeof traffic !== 'undefined' && traffic, 1); each(typeof seaplanes !== 'undefined' && seaplanes, 1); each(typeof civHelis !== 'undefined' && civHelis, 2); each(typeof helis !== 'undefined' && helis, 2); } catch (e) { }
+// (veg-check chat, Nov 4) as flat numbers - x, y, vx, vy, kind, spin a mover (RIG_MW) - nothing made a tick; each vehicle's last place and time kept
+// in one small array of its own (RIG_PREV), so its speed is right however long since it was last asked; gathered once a step, and only when a
+// plant near a view asks for the air (rigAir) - not in a world with none
+const RIG_PREV = new WeakMap(), RIG_MOV = [], RIG_MW = 6; let RIG_MOV_N = -1;
+function rigMover(v, kind) {
+  if (!v || v.state === 'gone' || !isFinite(v.x) || !isFinite(v.y)) return;
+  let p = RIG_PREV.get(v); if (!p) { p = new Float64Array([v.x, v.y, NaN]); RIG_PREV.set(v, p); }
+  const dt = time - p[2], vx = dt > 0 ? (v.x - p[0]) / dt : 0, vy = dt > 0 ? (v.y - p[1]) / dt : 0;
+  p[0] = v.x; p[1] = v.y; p[2] = time;
+  if (Math.abs(vx) > 3000 || Math.abs(vy) > 3000) return;        // (a jump - put somewhere, not moving)
+  const M = RIG_MOV, o = RIG_MOV_N * RIG_MW; M[o] = v.x; M[o + 1] = v.y; M[o + 2] = vx; M[o + 3] = vy; M[o + 4] = kind; M[o + 5] = kind === 2 ? (v.spin != null ? clamp(v.spin, 0, 1) : 1) : 0; RIG_MOV_N++;
+}
+function rigMovers() {
+  RIG_MOV_N = 0;
+  const each = (L, k) => { if (L) for (const v of L) rigMover(v, k); };
+  each(storyCars, 0); each(tanks, 0); each(planes, 1); each(traffic, 1); each(seaplanes, 1); each(civHelis, 2); each(helis, 2);
 }
 // the air at (x, y) (world units a second): the wind's, and every vehicle's near it
 const RIG_AIR = [0, 0];
 function rigAir(x, y) {
   const A = airAt(x, y); let ux = A.wx, uy = A.wy;
-  for (const m of RIG_MOV) {
-    const dx = x - m[0], dy = y - m[1];
-    if (m[4] === 2) {                                            // (a helicopter: its downwash straight down under the rotor, spreading out along the ground)
+  if (RIG_MOV_N < 0) rigMovers();
+  const M = RIG_MOV;
+  for (let o = 0; o < RIG_MOV_N * RIG_MW; o += RIG_MW) {
+    const dx = x - M[o], dy = y - M[o + 1], kd = M[o + 4];
+    if (kd === 2) {                                            // (a helicopter: its downwash straight down under the rotor, spreading out along the ground)
       const R = 22 * UPM, below = dy > -2 * UPM ? 1 : 0, d = Math.hypot(dx * 0.8, dy * 0.35); if (!below || d > R * 1.6) continue;
-      const f = m[5] * Math.exp(-(d / R) * (d / R)), W = 26 * UPM;
+      const f = M[o + 5] * Math.exp(-(d / R) * (d / R)), W = 26 * UPM;
       uy += W * f; ux += Math.sign(dx || 1) * W * 0.7 * f * clamp(dy / (12 * UPM), 0.2, 1);
     } else {                                                     // (a plane or a car: the air it drags along behind and beside it)
-      const R = (m[4] === 1 ? 18 : 5) * UPM, d = Math.hypot(dx, dy * (m[4] === 1 ? 1 : 0.7)); if (d > R * 2) continue;
-      const f = Math.exp(-(d / R) * (d / R)) * (m[4] === 1 ? 0.45 : 0.6);
-      ux += m[2] * f; uy += m[3] * f + (m[4] === 1 ? Math.hypot(m[2], m[3]) * 0.12 * f : 0);
+      const R = (kd === 1 ? 18 : 5) * UPM, d = Math.hypot(dx, dy * (kd === 1 ? 1 : 0.7)); if (d > R * 2) continue;
+      const f = Math.exp(-(d / R) * (d / R)) * (kd === 1 ? 0.45 : 0.6);
+      ux += M[o + 2] * f; uy += M[o + 3] * f + (kd === 1 ? Math.hypot(M[o + 2], M[o + 3]) * 0.12 * f : 0);
     }
   }
   RIG_AIR[0] = ux; RIG_AIR[1] = uy; return RIG_AIR;
@@ -53289,9 +53335,10 @@ const RIG_V0 = 60;                                             // (air speed who
 const rigPush = u => clamp(u * Math.abs(u) / (RIG_V0 * RIG_V0), -6, 6);
 // a blast: every rigged tree near it is flung away from it, its fronds most
 on('blast', e => {
-  for (const it of rigAll()) {
-    const rc = rigOf(it); if (!rc) continue;
-    const d = Math.hypot(it.x - e.x, propTop(it) - plantH(it) * 0.6 - e.y), reach = e.r * 8 + 80; if (d > reach) continue;
+  const reach = e.r * 8 + 80;
+  plantsNear(e.x, reach, it => {                                 // (the plants within its reach, not every one in the world - veg-check chat)
+    const rc = rigOf(it); if (!rc) return;
+    const d = Math.hypot(it.x - e.x, propTop(it) - plantH(it) * 0.6 - e.y); if (d > reach) return;
     const s = rigState(it, rc), k = (1 - d / reach) * clamp(e.r / 30, 0.3, 3), dir = Math.sign(it.x - e.x) * (it.flip ? -1 : 1) || 1, T = rigK(it); s.hitT = time;
     if (rc.trunk) for (let j = 0; j < 3; j++) s.av[j] += dir * k * 0.08 * T.trunkSway / Math.sqrt(T.trunkStiff) * (1 - j * 0.15);
     for (let f = 0; f < s.b.length; f++) s.bv[f] += (dir * 0.6 + (rigHash(it.x + time, f) - 0.5)) * k * 4 / T.leafWeight;
@@ -53299,36 +53346,74 @@ on('blast', e => {
     if (rc.built && rc.trunk && s.snap < 0 && k > 1.5 * (T.trunkBreak || 1)) { const B = rc.built, S = rc._S || (rc._S = splinePts(B.trunk.pts, splinePer(B.trunk.pts)));
       s.snap = clamp(Math.floor((S.length - 1) * (0.25 + 0.35 * rigHash(it.x, 5))), 1, S.length - 2); s.sdir = dir; s.sa = 0; s.sav = dir * 0.4; s.sdone = 0; s.broke = true;
       if (!SIM_ONLY) { const G = plantGeo(it); if (G) { const by = propTop(it) + G.sink - (rc.foot - S[s.snap][1]) * G.k; for (let e = 0; e < 4; e++) leafFly(it.x + (rigHash(e, 3) - 0.5) * 10, by, dir * 30, -30); } } }
-  }
+  });
 }, 'rigs', 30);
 // the ground's shakes (shakeAt - a heavy landing, a crash, a blast's thump): the trunks near rock, the fronds with them
 function rigShake(amt, x) {
   if (!land.props) return;
-  for (const it of rigAll()) {
-    if (Math.abs(it.x - x) > 900) continue;
-    const rc = rigOf(it); if (!rc) continue;
+  plantsNear(x, 900, it => {                                     // (veg-check chat: the plants near it, not the world's)
+    const rc = rigOf(it); if (!rc) return;
     const s = rigState(it, rc), k = amt * 0.05 / (1 + Math.abs(it.x - x) / 300), sg = rigHash(it.x, time * 7) < 0.5 ? -1 : 1; s.hitT = time;
     if (rc.trunk) for (let j = 0; j < 3; j++) s.av[j] += sg * k * rigK(it).trunkSway;
     for (let f = 0; f < s.b.length; f++) s.bv[f] += sg * k * 3 / rigK(it).leafWeight;
-  }
+  });
 }
 // each step: the trees near a view (off the views they hold still - nothing to see)
+/* (veg-check chat, Nov 4 - rules.md section 6, Systems 5: the drawing reads, never writes) what the step needs from a built plant's shapes - how far
+   its parts reach into the ground (pen / pdx), where a torn piece's and a snapped top's lowest points are (tlow, tlowT), a torn piece's pivot
+   (tpx / tpy) - was worked out by the drawing (builtGeo from drawBuilt), so a plant nobody drew (the simulation worker's - the default -, SIM_ONLY)
+   never had them: a torn piece fell on through the ground, a snapped top swung past it. Now the step works them out (builtGeo's own), RIG_GEO_HZ
+   times a second (twice that while torn or snapped, four times while a part is in the ground); and its detail (lod 1: one leaf stepped for all,
+   on a plant tiny on the screen) from the views' zoom as drawRigged0 judges it, not from whichever view drew it last */
+const rigPolys = rc => rc._lp || (rc._lp = (c, kind) => kind === 'trunk' ? trunkPolys(c || rc.key) : kind === 'puff' ? puffPolys(c || rc.key) : builtLeaf(c || rc.key));
+const RIG_GEO_HZ = 15;
+function rigGeoStep(it, rc, s, G) {
+  const burnT = it.burnT || 0, Tt = VTUNE.tree, px = clamp(Tt.px || 0.8, 0.1, 4);
+  let hs = 0;
+  for (let i = 0; i < 2; i++) {
+    const v = cam.view && cam.view[i]; if (!v || !(v.z > 0)) continue;
+    if (offViewR(it.x, Math.max(G.w, G.h), v.l, v.l + halfWorldW(v.z))) continue;
+    const sv = S * v.z; hs = Math.max(hs, px * sv > 1 ? G.h / px : G.h * sv);   // (its height in the world's pixels, or the screen's - drawRigged0's hs)
+  }
+  s.lod = burnT > 0 || s.broke ? 0 : hs < Tt.lodFar ? 1 : hs < Tt.lodMid ? 2 : 0;
+  if (s.lod === 1) return;                                       // (tiny and whole: nothing of its shapes is asked)
+  const hz = RIG_GEO_HZ * (s.geoHot ? 4 : s.broke || s.snap >= 0 ? 2 : 1);
+  if (s.geoT != null && Math.abs(time - s.geoT) < 1 / hz) return;
+  s.geoT = time;
+  const K = rigK(it), B = rc.built;
+  builtGeo(rc, s, rigPolys(rc), burnT > 0 ? B.leaves.map((_, f) => rigFrondBurn(s, f, burnT, K)) : null, true);
+  let hot = false; for (let f = 0; f < s.pen.length; f++) if (s.pen[f] > 0.3) { hot = true; break; } s.geoHot = hot;
+}
+const RIG_SP = [];
+function rigSpans() {
+  const P = RIG_SP; P.length = 0;
+  const V = cam.view || [];
+  for (let i = 0; i < Math.min(2, V.length); i++) { const v = V[i]; if (v && v.z > 0) P.push(v.l, v.l + halfWorldW(v.z)); }
+  if (P.length === 4) {
+    if (P[2] < P[0]) { const a = P[0], b = P[1]; P[0] = P[2]; P[1] = P[3]; P[2] = a; P[3] = b; }
+    if (P[2] - P[1] <= 2 * PROP_IX.r) { P[1] = Math.max(P[1], P[3]); P.length = 2; }
+  }
+  return P;
+}
 function stepRigs(dt) { const t0 = performance.now(); stepRigs0(dt); RIG_T.step += performance.now() - t0; }
 function stepRigs0(dt) {
   if (!land.props || !(dt > 0)) return;
-  rigMovers(dt);
+  RIG_MOV_N = -1;                                                // (the movers gathered when a plant first asks for the air this step)
   const h = Math.min(dt, 1 / 30), n = Math.max(1, Math.ceil(dt / h)), st = dt / n;
-  const views = (cam.view || []).slice(0, 2).filter(Boolean).map(v => [v.l - 300, v.l + halfWorldW(v.z) + 300]);
-  for (const it of rigAll()) {
-    if (!views.some(([a, b]) => it.x > a && it.x < b)) continue;
+  // (veg-check chat, Nov 4) the plants near each view (by their own size), from the props by place (propsIn) - not every one in the world, up to 8
+  // times a frame; two views that come near each other one span, so no plant is stepped twice
+  const SP = rigSpans();
+  for (let q = 0; q < SP.length; q += 2) for (const it of propsIn(SP[q], SP[q + 1])) {
+    if (offViewR(it.x, plantReach(it), SP[q], SP[q + 1])) continue;
     const rc = rigOf(it); if (!rc || !rigShown(it)) continue;
     if (VEG_FREEZE && VEG_SOLO && VEG_SOLO.has(it)) { RIGS_ST.delete(it.x); continue; }
     const s = rigState(it, rc), G = plantGeo(it), T = rigK(it); if (!G) continue;
     if (rc.lat) { latStep(it, rc, s, G, T, n, st); continue; }
+    if (rc.built) rigGeoStep(it, rc, s, G);
     const fl = it.flip ? -1 : 1, foot = propTop(it) + G.sink, k = G.k, X0 = it.x - (it.flip ? G.w - G.fo : G.fo), Y0 = foot - G.h;
     const wx = ax => it.flip ? X0 + G.w - ax * k : X0 + ax * k, wy = ay => Y0 + ay * k;
     // the trunk: the air at its crown pushes it over (its three joints by how much trunk stands above each); it springs back
-    const air = rigAir(wx(rc.R.heart[0]), wy(rc.R.heart[1])), F = rigPush(air[0] * fl);
+    const air = rigAir(wx(rc.R.heart[0]), wy(rc.R.heart[1])), airX = air[0], F = rigPush(air[0] * fl);   // (airX: the crown's own - RIG_AIR is the next frond's after)
     const wt = 2 * Math.PI * 0.45 * Math.sqrt(T.trunkStiff), zt = 0.12;
     if (rc.trunk) for (let q = 0; q < n; q++) for (let j = 0; j < 3; j++) {
       const tgt = clamp(F * 0.03 * T.trunkSway / T.trunkStiff * (1 + j * 0.3), -0.25, 0.25);
@@ -53360,7 +53445,7 @@ function stepRigs0(dt) {
       // burning: when it's gone, its embers and a few bits of leaf off its tip
       if (burnT > 0 && !s.burnt[f] && rigFrondBurn(s, f, burnT, T) >= 1) {
         s.burnt[f] = 1;
-        if (!SIM_ONLY) { const tx = wx(Fd.tip[0]), ty = wy(Fd.tip[1]); for (let e = 0; e < 3; e++) spawnEmber(tx + (rigHash(f, e) - 0.5) * 20, ty, (air[0] || 0) * 0.3, 0.8); leafFly(tx, ty, (air[0] || 0) * 0.3, -20); }
+        if (!SIM_ONLY) { const tx = wx(Fd.tip[0]), ty = wy(Fd.tip[1]); for (let e = 0; e < 3; e++) spawnEmber(tx + (rigHash(f, e) - 0.5) * 20, ty, (airX || 0) * 0.3, 0.8); leafFly(tx, ty, (airX || 0) * 0.3, -20); }
       }
     }
     if (one) for (let f = 1; f < rc.fronds.length; f++) { s.b[f * 2] = s.b[0]; s.b[f * 2 + 1] = s.b[1]; s.bv[f * 2] = s.bv[0]; s.bv[f * 2 + 1] = s.bv[1]; }
@@ -53430,15 +53515,15 @@ function drawRigged0(it, rc, X, Y, w, k, mul, add, hs) {
     // (user Nov 4 08:52: "now its back to a solid shape just shaking ... I dont see any of the sweet physics" - the far picture had taken most plants and
     // all of deck 3) one picture only when truly tiny on the screen (under LOD FAR); every other plant its parts, each leaf on its own springs
     if (hs < T.lodFar && !(burnT > 0) && !s.broke) {   // (torn or snapped: every shape)
-      const P = builtSprite(rc, rigLight(it), vegUp(k)); if (P) { s.lod = 1; let b = 0; for (let f = 0; f < rc.fronds.length; f++) b += s.b[f * 2] + s.b[f * 2 + 1] * 0.5; const sk = clamp(-b / Math.max(1, rc.fronds.length) * 0.35 - (rc.trunk ? s.a[0] + s.a[1] : 0), -0.6, 0.6);
+      const P = builtSprite(rc, rigLight(it), vegUp(k)); if (P) { let b = 0; for (let f = 0; f < rc.fronds.length; f++) b += s.b[f * 2] + s.b[f * 2 + 1] * 0.5; const sk = clamp(-b / Math.max(1, rc.fronds.length) * 0.35 - (rc.trunk ? s.a[0] + s.a[1] : 0), -0.6, 0.6);
         const SD = VEG_PASS_L ? vegPassCtx(it, X, Y, w, vegQ(k)) : C; if (SD === C) { C.save(); C.translate(X, Y); if (it.flip) { C.translate(w, 0); C.scale(-1, 1); } C.scale(k, k); } SD.transform(1, 0, sk, 1, -sk * rc.foot, 0);
         { const B = rc.built, ol = GLR.on && (B.leaves.map(olOf).find(Boolean) || olOf(B.trunk)); if (ol) { const nn = vegUp(k), ok = 'o' + nn + B.leaves.map(L => olOf(L) ? 1 : 0).join('') + (olOf(B.trunk) ? 1 : 0), OC = rc._olK || (rc._olK = {}); if (OC[ok] === undefined) OC[ok] = builtPiece(rc, q => !!olOf(B.leaves[q.f]), !!olOf(B.trunk), false, null, nn) || null; const OP = OC[ok];
           if (OP) { const T0 = SD.getTransform(), U = SD === C ? VEG_PX : 1, tc = olTint(ol, mul), ga0 = SD.globalAlpha; SD.globalAlpha = ga0 * olA(ol); for (const [ox, oy] of vegOlOffs(Math.round(ol.w))) { SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e + ox * U, T0.f + oy * U); SD.drawImage(glTint(OP.c, 'rgO', RIG_ZERO, tc, false), OP.x, OP.y, OP.c.width / OP.n, OP.c.height / OP.n); } SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e, T0.f); SD.globalAlpha = ga0; } } }
         SD.drawImage(GLR.on ? glTint(P.c, 'rgB', mul, add, false) : P.c, P.x, P.y, P.c.width / P.n, P.c.height / P.n); SD.restore(); return; }
     }
     // (between LOD FAR and LOD MID on the screen: each part its own picture on its own springs)
-    if (hs < T.lodMid && !(burnT > 0) && !s.broke) { const M = builtMid(rc, rigLight(it), vegUp(k)); if (M) { s.lod = 2; drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add); return; } }
-    s.lod = 0; drawBuilt(it, rc, s, X, Y, w, k, mul, add); return;
+    if (hs < T.lodMid && !(burnT > 0) && !s.broke) { const M = builtMid(rc, rigLight(it), vegUp(k)); if (M) { drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add); return; } }
+    drawBuilt(it, rc, s, X, Y, w, k, mul, add); return;
   }
   { const sh = FOL_SHAPES[folKeyOf(it)]; if (sh && sh.polys && sh.polys.length) { drawPolys(it, rc, s, sh.polys, X, Y, w, k, mul, add); return; } }   // (shapes made in the FOLIAGE EDITOR)
   if (rc.lat) { drawLattice(it, rc, s, X, Y, w, k, mul, add); return; }
@@ -53992,12 +54077,15 @@ function drawTris(D, L, pts, M, tm) {
 const RIG_ZERO = [0, 0, 0];
 // (Nov 4 09:41: the prefab editor's MASK view and the far pictures didn't match the component's mask, one with a hole) a polygon's mask laid into a
 // picture as the near draw lays it: triangle by triangle from its first corner, each its own exact affine - in a colour
+// (veg-check chat, Nov 4) one scratch canvas for every triangle's colour, grown as needed - not a new canvas a triangle at every bake
+const MASK_SCR = { c: null };
+function maskScratch(w, h) { let c = MASK_SCR.c; if (!c || c.width < w || c.height < h) c = MASK_SCR.c = makeCanvas(Math.max(w, c ? c.width : 0), Math.max(h, c ? c.height : 0)); return c; }
 function maskTris(x, sh, which, ck, rc, pi, SP, pts, css, nu) {
   const L = polyTris(sh, which, ck, rc, pi, SP, nu), P0 = pts[0], n = pts.length;
   for (const T of L) { if (T.t + 1 >= n) continue; const P1 = pts[T.t], P2 = pts[T.t + 1], px = P1[0] - P0[0], py = P1[1] - P0[1], qx = P2[0] - P0[0], qy = P2[1] - P0[1];
     const a = (px * T.by - qx * T.ay) / T.det, c = (qx * T.ax - px * T.bx) / T.det, b = (py * T.by - qy * T.ay) / T.det, d = (qy * T.ax - py * T.bx) / T.det, e = P0[0] - (a * T.rx + c * T.ry), f = P0[1] - (b * T.rx + d * T.ry);
-    const t = makeCanvas(T.pc.c.width, T.pc.c.height), tx = t.getContext('2d'); tx.fillStyle = css; tx.fillRect(0, 0, t.width, t.height); tx.globalCompositeOperation = 'destination-in'; tx.drawImage(T.pc.c, 0, 0);
-    x.save(); x.transform(a, b, c, d, e, f); if (T.pc.n > 1) x.drawImage(t, T.pc.x, T.pc.y, T.pc.w, T.pc.h); else x.drawImage(t, T.pc.x, T.pc.y); x.restore(); }
+    const tw = T.pc.c.width, th = T.pc.c.height, t = maskScratch(tw, th), tx = t.getContext('2d'); tx.globalCompositeOperation = 'source-over'; tx.clearRect(0, 0, t.width, t.height); tx.fillStyle = css; tx.fillRect(0, 0, tw, th); tx.globalCompositeOperation = 'destination-in'; tx.drawImage(T.pc.c, 0, 0); tx.globalCompositeOperation = 'source-over';
+    x.save(); x.transform(a, b, c, d, e, f); if (T.pc.n > 1) x.drawImage(t, 0, 0, tw, th, T.pc.x, T.pc.y, T.pc.w, T.pc.h); else x.drawImage(t, 0, 0, tw, th, T.pc.x, T.pc.y, tw, th); x.restore(); }
 }
 
 /* ---- PREFABS BUILT FROM PARTS (user Nov 3 22:28: "In the Prefab mode we can place a tree trunk from the component editor, choose its thickness
@@ -54039,13 +54127,13 @@ function rigBuilt(B, key, fresh) {
   BUILT.set(B, rc); return rc;
 }
 // the build's shapes where its bones put them now (s null: at rest): the trunk's quads, the leaves' polygons, the trunk's top and turn
-function builtGeo(rc, s, leafPolys, burn) {
+function builtGeo(rc, s, leafPolys, burn, own) {   // (own: the step's call - the only one that writes the plant's state: tlowT, tpx / tpy, tlow, pen / pdx; the drawing's reads)
   const B = rc.built, T = B.trunk || { pts: rc.R.trunk, w0: 0, w1: 0 }, S = rc._S || (rc._S = splinePts(T.pts, splinePer(T.pts))), n = S.length;
   // the trunk: its spline's segments end to end, each turned by the bend where it stands (the trunk's joints)
   const P = [S[0].slice()], A = [0], out0 = {};
   for (let i = 0; i < n - 1; i++) { const th = (s ? Math.atan(rigSlope(rc, s, (S[i][1] + S[i + 1][1]) / 2)) : 0) + (s && s.snap >= 0 && i >= s.snap ? s.sa : 0), c = Math.cos(th), sn = Math.sin(th), vx = S[i + 1][0] - S[i][0], vy = S[i + 1][1] - S[i][1]; P.push([P[i][0] + vx * c - vy * sn, P[i][1] + vx * sn + vy * c]); A.push(th); }
   A[0] = A[1] || 0;
-  if (s && s.snap >= 0) { let lo = -1e9; for (let i = s.snap + 1; i < n; i++) lo = Math.max(lo, P[i][1]); s.tlowT = lo; }   // (the snapped top's lowest point - its fall stops on the ground)
+  let tlowT = -1e9; if (s && s.snap >= 0) { for (let i = s.snap + 1; i < n; i++) tlowT = Math.max(tlowT, P[i][1]); }   // (the snapped top's lowest point - its fall stops on the ground)
   const quads = [];
   // (user Nov 3 22:55: "we can just add points and those points have a thickness that we slide on screen") each point its own width (its third
   // number; none: from the old BASE / TOP widths), between points eased along the spline
@@ -54064,7 +54152,7 @@ function builtGeo(rc, s, leafPolys, burn) {
   // (user Nov 4 08:54: "When blasted, trees and vegetation must fall on the ground surface ... not overlap with the foreground") a snapped top lies on the ground
   out0.P = P; out0.n = n;
   const out = Object.assign(out0, { quads, top: P[n - 1], tilt: A[n - 1], leaves: [], lf: [] });
-  if (!leafPolys) return out;
+  if (!leafPolys) { if (own && s && s.snap >= 0) s.tlowT = tlowT; return out; }
   // the parts: each hangs where it was placed - on the trunk, or on a branch (user Nov 3 23:45: "the trunk should be able to have 'branches' for
   // more classical trees (branches being a prefab of little trunk shapes)") - at its nearest point there, riding it as it bends. The branches
   // first (each on the trunk or an earlier branch), the leaves and puffs after; the polygons in the parts' own order (the drawing order)
@@ -54086,7 +54174,7 @@ function builtGeo(rc, s, leafPolys, burn) {
     // (torn: the piece off - all of it, or a leaf's outer half - turned about where it tore and carried where it has fallen; gone: not drawn)
     const piece = tear === 1 || tear === 2, al = piece && s.tl[f] ? clamp(1 - (s.tt[f] - s.tl[f] - 6) / 2, 0, 1) : 1;
     const polys = []; per[f] = polys; let plow = -1e9;
-    const tpiv = pv => { if (isNaN(s.tpx[f])) { s.tpx[f] = pv[0]; s.tpy[f] = pv[1]; } const c = Math.cos(s.tr[f]), sn = Math.sin(s.tr[f]), dx0 = s.tx[f] + s.tpx[f] - pv[0], dy0 = s.ty[f] + s.tpy[f] - pv[1]; return p => { const dx = p[0] - pv[0], dy = p[1] - pv[1]; p[0] = pv[0] + dx * c - dy * sn + dx0; p[1] = pv[1] + dx * sn + dy * c + dy0; if (p[1] > plow) plow = p[1]; }; };
+    const tpiv = pv => { let qx = s.tpx[f], qy = s.tpy[f]; if (isNaN(qx)) { qx = pv[0]; qy = pv[1]; if (own) { s.tpx[f] = qx; s.tpy[f] = qy; } } const c = Math.cos(s.tr[f]), sn = Math.sin(s.tr[f]), dx0 = s.tx[f] + qx - pv[0], dy0 = s.ty[f] + qy - pv[1]; return p => { const dx = p[0] - pv[0], dy = p[1] - pv[1]; p[0] = pv[0] + dx * c - dy * sn + dx0; p[1] = pv[1] + dx * sn + dy * c + dy0; if (p[1] > plow) plow = p[1]; }; };
     if (kind === 'puff') {
       // (user Nov 3 23:45-23:47: "'puffy' style bushes, like a egg or sphere shape that we make a mask for ... attached to a trunk by their center
       // point (that can be moved) and the wind affects them based on that center point"; "geo like reference A that gets controlled with a cage")
@@ -54099,7 +54187,7 @@ function builtGeo(rc, s, leafPolys, burn) {
           const lx = ex * rx + dx, ly = ey * ry + dy, p = [root[0] + lx * cr - ly * sr, root[1] + lx * sr + ly * cr]; if (mv) mv(p); return p; });
         const n = pg.pts.length; ex0 /= n; ey0 /= n; const nl = Math.hypot(ex0, ey0);
         polys.push({ f, pi, u: 0.5 + 0.5 * Math.min(1, nl), front: !!L.front, side: 1, th: 0, pn: [ex0 * Math.cos(rot) - ey0 * Math.sin(rot), ex0 * Math.sin(rot) + ey0 * Math.cos(rot)], pts, al: mv ? al : 1, k: 'puff' }); }
-      if (mv) s.tlow[f] = plow;
+      if (mv && own) s.tlow[f] = plow;
       continue;
     }
     const LSC = rc._LS || (rc._LS = []), LS = LSC[f] || (LSC[f] = splinePts(L.pts, splinePer(L.pts))), m = LS.length;
@@ -54120,14 +54208,15 @@ function builtGeo(rc, s, leafPolys, burn) {
       let th = ang[k2] || 0;
       if (off) { for (const p of pts) mvL(p); th += s.tr[f]; }
       else if (kind === 'branch' && tear === 2) for (const p of pts) if (p[1] > plow) plow = p[1];
-      else if (s && s.snap >= 0 && ch && ch === chains[0] && ai > s.snap) for (const p of pts) if (p[1] > s.tlowT) s.tlowT = p[1];   // (a snapped top's leaves too: it comes to rest on them)
+      else if (s && s.snap >= 0 && ch && ch === chains[0] && ai > s.snap) for (const p of pts) if (p[1] > tlowT) tlowT = p[1];   // (a snapped top's leaves too: it comes to rest on them)
       polys.push({ f, pi, u: mu, front: !!L.front, side: sv >= 0 ? 1 : 0, th, pts, al: off || (kind === 'branch' && tear === 2) ? al : 1, k: kind }); }
-    if (piece) s.tlow[f] = plow;
+    if (piece) { if (own) s.tlow[f] = plow; }
     // (user Nov 4 08:57: "stopping and being affected by its collision, not masking") how far the part reaches into the ground, and how far out from where
     // it hangs that deepest point is - stepRigs turns it out of the ground by its own bend
-    else if (s && s.pen && !low && kind !== 'puff') { let my = -1e9, mx = 0; for (const q of polys) for (const p of q.pts) if (p[1] > my) { my = p[1]; mx = p[0]; } s.pen[f] = Math.max(0, my - gy); s.pdx[f] = mx - root[0]; }
+    else if (own && s && s.pen && !low && kind !== 'puff') { let my = -1e9, mx = 0; for (const q of polys) for (const p of q.pts) if (p[1] > my) { my = p[1]; mx = p[0]; } s.pen[f] = Math.max(0, my - gy); s.pdx[f] = mx - root[0]; }
   }
   for (let f = 0; f < per.length; f++) if (per[f]) for (const q of per[f]) out.leaves.push(q);
+  if (own && s && s.snap >= 0) s.tlowT = tlowT;
   return out;
 }
 // the TRUNK component: a prefab's own (its shapes' trunkC), else the palm's, else its starting one - a strip up its length, two sides, its mask
@@ -54231,7 +54320,7 @@ function litBake(col, nx, ny, Lt, LS) {
 // (10:10: "the darkening levels seem a bit too strong ... the amount of darkness the vegetation gets globally") LOOK > SHADE DEPTH: 1 as it was, 0 none
 const shadeK = () => clamp(VTUNE.tree.shade != null ? VTUNE.tree.shade : 1, 0, 1.5);
 const leafColOf = (lc, q) => { const h = rigHash(q.f + 1, 71) - 0.5, h2 = rigHash(q.f + 1, 72) - 0.5, u = q.u || 0.5, g = 1 + shadeK() * (0.4 * u - 0.28); return [lc[0] * g * (1 + h * 0.22), lc[1] * g * (1 + h2 * 0.12), lc[2] * g * (1 - h * 0.2)]; };
-function builtSprite(rc, Lt, n) { n = n || 1; const k = (Lt ? litKey(Lt) : '-') + 'x' + n, C2 = rc._sprK || (rc._sprK = {}); if (C2[k] === undefined) { const p = builtPiece(rc, null, true, true, Lt, n); C2[k] = p ? p : null; } return C2[k]; }
+function builtSprite(rc, Lt, n) { n = n || 1; const k = (Lt ? litKey(Lt) : '-') + 'x' + n, C2 = rc._sprK || (rc._sprK = new Map()); return vegKeep(C2, k, () => builtPiece(rc, null, true, true, Lt, n) || null, vegPieceFree, 12); }
 // (Nov 4 08:52) the plant at rest drawn as pictures: all of it (the far one), or some of its leaves' polygons (sel), with or without the trunk -
 // cropped to what's drawn: { c, x, y } (its top left in the plant's own pixels)
 function builtPiece(rc, sel, trunk, all, Lt, n, opx) {
@@ -54269,14 +54358,17 @@ function builtPiece(rc, sel, trunk, all, Lt, n, opx) {
 // and far: each leaf two pictures (its inner half, its outer half) turned by its own two bones about where it hangs and its joint, each puff one about
 // its centre, the trunk one picture bent in bands - every part still moving on its own springs, a few dozen pictures a plant, not hundreds of shapes
 function builtMid(rc, Lt, n) {
-  n = n || 1; const lk = (Lt ? litKey(Lt) : '-') + 'x' + n, MC = rc._midK || (rc._midK = {}); if (MC[lk] !== undefined) return MC[lk];
-  const B = rc.built; if (B.leaves.some(L => L.k === 'branch')) return (MC[lk] = null);   // (branches: what hangs on them rides them - drawn whole)
+  n = n || 1; const lk = (Lt ? litKey(Lt) : '-') + 'x' + n, MC = rc._midK || (rc._midK = new Map());
+  return vegKeep(MC, lk, () => builtMid0(rc, Lt, n), vegMidFree, 12);
+}
+function builtMid0(rc, Lt, n) {
+  const B = rc.built; if (B.leaves.some(L => L.k === 'branch')) return null;   // (branches: what hangs on them rides them - drawn whole)
   const g0 = rc._g0 || (rc._g0 = builtGeo(rc, null, (c, kind) => kind === 'trunk' ? trunkPolys(c || rc.key) : kind === 'puff' ? puffPolys(c || rc.key) : builtLeaf(c || rc.key), null)), S = rc._S;
   const parts = B.leaves.map((L, f) => { const r0 = L.pts[0], low = r0[1] >= rc.foot - 0.5; let ai = 0, bd = 1e9; if (B.trunk && !low && S) for (let i = 0; i < S.length; i++) { const d = Math.hypot(S[i][0] - r0[0], S[i][1] - r0[1]); if (d < bd) { bd = d; ai = i; } }
     if (L.k === 'puff') return { f, puff: true, front: !!L.front, r0, ai, low, a: builtPiece(rc, q => q.f === f, false, false, Lt, n) };
     const lf = g0.lf[f], J = lf ? lf.Q[Math.floor((lf.Q.length - 1) / 2)] : r0;
     return { f, front: !!L.front, r0, J, ai, low, a: builtPiece(rc, q => q.f === f && q.u < 0.5, false, false, Lt, n), b: builtPiece(rc, q => q.f === f && q.u >= 0.5, false, false, Lt, n) }; });
-  return (MC[lk] = { parts, trunk: B.trunk ? builtPiece(rc, null, true, false, Lt, n) : null });
+  return { parts, trunk: B.trunk ? builtPiece(rc, null, true, false, Lt, n) : null };
 }
 const MID_P = [], MID_A = [];
 function drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add) {
@@ -54310,7 +54402,7 @@ function drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add) {
 // (a plant's layer: its box and margin at q layer pixels an art pixel - one a size, shared; none with the world pixel no bigger than the screen's)
 function vegLayer(rc, MX, MY, q) {
   if (!GLR.on || VEG_PX < 0.34) return null; const LW = Math.ceil((Math.ceil(rc.W) + MX * 2) * q / 16) * 16, LH = Math.ceil((Math.ceil(rc.H) + MY + 4) * q / 16) * 16, lk = LW * 4096 + LH;
-  let LY = BUILT_LAYER.get(lk); if (!LY) { LY = makeLayer(LW, LH); BUILT_LAYER.set(lk, LY); } LY.getContext('2d').imageSmoothingEnabled = false; return LY;
+  const LY = vegKeep(BUILT_LAYER, lk, () => makeLayer(LW, LH), vegLayerFree, 16); LY.getContext('2d').imageSmoothingEnabled = false; return LY;
 }
 // (the layer on the screen: a layer pixel a world pixel)
 function vegBlit(LY, it, X, Y, w, ox, oy) { C.save(); C.imageSmoothingEnabled = VEG_PX < 1; C.translate(X, Y); if (it.flip) { C.translate(w, 0); C.scale(-1, 1); } C.scale(VEG_PX, VEG_PX); C.drawImage(LY, -ox, -oy); C.restore(); }
@@ -54321,7 +54413,7 @@ const BUILT_LAYER = new Map();
 function drawBuilt(it, rc, s, X, Y, w, k, mul, add) {
   const B = rc.built, K = rigK(it), burnT = it.burnT || 0, Lt = rigLight(it), LS = clamp(VTUNE.tree.light, 0, 2), black = clamp(burnT / K.trunkBurn, 0, 1);
   const burn = burnT > 0 ? B.leaves.map((_, f) => rigFrondBurn(s, f, burnT, K)) : null;
-  const g = builtGeo(rc, s, (c, kind) => kind === 'trunk' ? trunkPolys(c || rc.key) : kind === 'puff' ? puffPolys(c || rc.key) : builtLeaf(c || rc.key), burn), TC = B.trunk || {}, c0 = hexRgb(TC.c0), c1 = hexRgb(TC.c1), c2 = hexRgb(TC.c2), lc = hexRgb(B.col);
+  const g = builtGeo(rc, s, rigPolys(rc), burn), TC = B.trunk || {}, c0 = hexRgb(TC.c0), c1 = hexRgb(TC.c1), c2 = hexRgb(TC.c2), lc = hexRgb(B.col);
   const R = v => Math.round(clamp(v, 0, 255));
   const LC = [0, 0, 0], litCol = (col, nx, ny, dk, gl) => {
     const d = Math.max(0, nx * Lt.lx + ny * Lt.ly + 0.6 * Lt.lz) / Math.hypot(nx, ny, 0.6), kk = 1 + LS * (shadeK() * (Lt.amb - 1) + Lt.dif * d), m = Math.min(1, kk) * dk, up = Math.max(0, kk - 1) * 0.5 * dk, hh = d * d * dk;
@@ -54416,9 +54508,11 @@ function builtFrom(key) {
    RIGS_ST's own key), f (0 a trunk joint, 1 a leaf angle), i (which), v (its angle) - filled as each live snapshot is packed
    and carried like the effect tables (near: only rows near the page's views). The page puts each into its own RIGS_ST entry
    for that plant (made when the plant is first drawn; one frame at rest the first time it comes into view).
-   Not carried: tearing and a snapped trunk (their landing on the ground is worked out by the drawing - builtGeo - which the
-   worker never runs: open in veg-check-v769-nov4.md). */
+   A torn leaf goes too (its tear, place, turn and times, f 2-9 - only for the leaves torn) and a snapped trunk (f 10: snap, its fall's angle,
+   broke, done): the step works out where they land (rigGeoStep), the page draws them where the worker has them. */
 const RIG_BONES = new ColTable({ sq: 'id', x: 'f64', f: 'u8', i: 'f64', v: 'f64' });
+const RB_TEAR = ['tear', 'tx', 'ty', 'tr', 'tt', 'tl', 'tpx', 'tpy'];   // (f 2-9, a torn leaf's)
+const rbRow = (x, f, i, v) => { const T = RIG_BONES, r = T.add(); T.c.x[r] = x; T.c.f[r] = f; T.c.i[r] = i; T.c.v[r] = v; };
 // the worker, as a snapshot is packed: the bones of every plant near a view (the same spans and margin the snapshot sends by)
 function rigBonesFill() {
   const T = RIG_BONES, sp = REG.spans, m = SW_MARGIN; T.length = 0;
@@ -54428,8 +54522,10 @@ function rigBonesFill() {
     if (!near) continue;
     for (let f = 0; f < 2; f++) {
       const A = f ? s.b : s.a;
-      for (let i = 0; i < A.length; i++) { const r = T.add(); T.c.x[r] = x; T.c.f[r] = f; T.c.i[r] = i; T.c.v[r] = A[i]; }
+      for (let i = 0; i < A.length; i++) rbRow(x, f, i, A[i]);
     }
+    for (let i = 0; i < s.tear.length; i++) if (s.tear[i]) for (let f = 2; f < 10; f++) rbRow(x, f, i, s[RB_TEAR[f - 2]][i]);
+    if (s.snap >= 0 || s.broke) { rbRow(x, 10, 0, s.snap); rbRow(x, 10, 1, s.sa); rbRow(x, 10, 2, s.broke ? 1 : 0); rbRow(x, 10, 3, s.sdone); }
   }
 }
 // the page, after a snapshot's columns: each bone into that plant's own state (rows come plant by plant)
@@ -54437,10 +54533,15 @@ function rigBonesTake() {
   const T = RIG_BONES, X = T.c.x, F = T.c.f, I = T.c.i, V = T.c.v;
   let lx = NaN, s = null;
   for (let r = 0; r < T.n; r++) {
-    if (X[r] !== lx) { lx = X[r]; s = RIGS_ST.get(lx) || null; }
+    if (X[r] !== lx) {                                           // (a plant's first row: whole and standing unless its rows say otherwise)
+      lx = X[r]; s = RIGS_ST.get(lx) || null;
+      if (s) { s.tear.fill(0); s.snap = -1; s.broke = false; }
+    }
     if (!s) continue;
-    const A = F[r] ? s.b : s.a, i = I[r];
-    if (i < A.length) A[i] = V[r];
+    const f = F[r], i = I[r], v = V[r];
+    if (f < 2) { const A = f ? s.b : s.a; if (i < A.length) A[i] = v; }
+    else if (f < 10) { const A = s[RB_TEAR[f - 2]]; if (i < A.length) A[i] = v; }
+    else if (i === 0) s.snap = v; else if (i === 1) s.sa = v; else if (i === 2) s.broke = v > 0; else s.sdone = v;
   }
 }
 defTable('rigBones', null, { cols: RIG_BONES, drawn: ['x', 'f', 'i', 'v'], near: true, net: false, rows: rows => RIG_BONES.plainOfRows(rows), adopted: rigBonesTake });
@@ -62871,7 +62972,7 @@ const perf = { phys: 0, smoke: 0, render: 0 }, FT = {};
 function frame(now) {
   requestAnimationFrame(frame);                                     // first: an error below can't stop the game
   if (holdFrames) return;                                           // (a test steps the game by hand)
-  try { const f0 = performance.now(); frameBody(now); if (typeof RIG_T !== 'undefined') RIG_T.fr = (RIG_T.fr || 0) + performance.now() - f0; }   // (the whole frame's own time - the vegetation lab's counter)
+  try { const f0 = performance.now(); frameBody(now); if (typeof RIG_T !== 'undefined') { RIG_T.fr = (RIG_T.fr || 0) + performance.now() - f0; RIG_T.frames++; } }   // (the whole frame's own time - the vegetation lab's counter)
   catch (e) {
     frameErrN++; if (String(e) !== frameErr) { frameErr = String(e); console.error(e); }   // (each new error once; the count on the perf panel - Sky Bench port)
     SURF.on = false;
@@ -63060,7 +63161,7 @@ async function start(data) {
     shake: (amt, x) => shakeAt(amt, x),
     grow: () => { for (const it of land.props || []) if (it.pk === 'tree' || it.pk === 'palm' || it.bush || it.fol || it.deck) { if (PLT.burning.includes(it)) PLT.burning.splice(PLT.burning.indexOf(it), 1); Object.assign(it, { state: 'stand', alive: true, hp: PK[it.pk].hp, heat: 0, fire: 0, burnT: 0, char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0 }); } RIGS_ST.clear(); },
     top: x => propTop({ x }), centre: () => { const v = cam.view[0]; return v.l + halfWorldW(v.z) / 2; },
-    cost: () => { const r = Object.assign({}, RIG_T); RIG_T.step = RIG_T.draw = RIG_T.n = RIG_T.fr = 0; return r; }, set off(v) { RIG_T.off = !!v; }, get off() { return RIG_T.off; },
+    cost: () => { const r = Object.assign({}, RIG_T); RIG_T.step = RIG_T.draw = RIG_T.n = RIG_T.fr = RIG_T.frames = 0; return r; },   // (frames: the page's frames since the last call - veg-check chat) set off(v) { RIG_T.off = !!v; }, get off() { return RIG_T.off; },
     replant: () => rigReplant(),
     // (user Nov 3 22:08: "instead of vehicles, it should just have a 'spawn' and a drop down. I can then place that structure in the scene")
     // every structure prefab, and one spawned in the middle of the view as the GAME EDITOR's SPAWN does (it lives by the hour as in the game)
