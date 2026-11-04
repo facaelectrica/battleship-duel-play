@@ -4316,8 +4316,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 756;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 03 20:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 757;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 03 20:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6796,6 +6796,7 @@ function drawTitle() {
   modeButton(...T.opts, 'OPTIONS', false);
   drawText(ug, 'BUILD ' + BUILD, T.x + T.w - 8, T.y + T.h - 12, 'rgba(255,255,255,0.55)', 1, 'right');
   if (linkPanelUp()) drawLinkPanel(T);
+  if (typeof drawBugBtn === 'function') drawBugBtn(T);   // (REPORT BUG under the panel, with a game on - 50-zzzz-bug.js)
   drawStorySlots();                                     // (STORY's save slots, over the menu when open - 50-story-saves.js)
 }
 const linkPanelUp = () => LINK.state === 'joining' || LINK.state === 'msg' || LINK.state === 'enter';
@@ -6979,6 +6980,7 @@ function openMainMenu(fromNet) {
   mgHold[0] = mgHold[1] = false; diveHold[0] = diveHold[1] = 0; for (const pl of planes) if (pl) pl.mg = false;
   if (NET.role === 'guest' && LINK.conn) linkSend({ t: 'ctl', s: ctlState(0) });
   if (typeof storyAway === 'function') storyAway();   // (STORY: saved where you are as you leave it - 50-story-saves.js)
+  if (typeof BUG !== 'undefined' && !ui.title) BUG.want = true;   // (REPORT BUG's picture of the screen as it is - 50-zzzz-bug.js)
   held.clear(); setMenu(false); menuFromLive(); ui.title = true; ui.picker = -1; ui.resume = true; paused = true; for (let p = 0; p < 2; p++) holding[p] = null; if (!fromNet) netPause(true); }
 function restartGame(load) {
   if (NET.role === 'guest') { linkSend({ t: 'again' }); return; }            // (online: the host starts the next round for everyone)
@@ -32384,6 +32386,7 @@ function render() {
   glEndFrame();
   GPU_SCALE = false;
   SURF.on = false;
+  if (BUG.want) bugGrab();                               // (REPORT BUG's picture: the world just drawn, the game's controls still in their layer - 50-zzzz-bug.js)
   ug.clearRect(0, 0, ubw, ubh);
   ug.imageSmoothingEnabled = false;
   if (ui.title) { if (!LOADING) guardDraw('seaDecksWarm', seaDecksWarm); drawTitle(); if (ui.picker < 0) drawFullscreenBtn(); drawControls(); drawPadFocus(); drawToast(); drawFps(); return; }
@@ -59761,6 +59764,116 @@ function edPlay() {
 if (typeof window !== 'undefined') window.__edPlay = { key: edPlayKey, play: edPlay };   // (tools)
 setInterval(wedSync, 250);                                // (the name follows the pick however it changed: a list's button, UNDO, a tab's own DELETE)
 
+/* ================================================================
+   REPORT BUG (user Nov 3 19:02: "there has to be a button to submit a bug. When I press a bug button, it should give you
+   information so you can reproduce the state that I'm in").
+   With a game on, the main menu has REPORT BUG under its panel, bottom right. Pressed, it takes:
+   - the whole game as it stood when the menu opened (the GAME EDITOR's own save - edGameSave: the world and every table, the
+     simulation worker held while it's taken - the Story's saves use the same), so it can be put back exactly;
+   - this browser's game keys (every bd_ key: the worlds it plays, the prefabs, the tuning, the Story's slot list);
+   - a picture of the screen as it was when the menu opened (bugGrab, from render - 48-render.js);
+   - the version and build, the mode, the device and screen, what you were in, the day and hour, the last errors and warnings.
+   Sent: with the world page's GitHub token in this browser (wp_token - the user's own devices), the report is committed to
+   the game's repo on the branch `bugs` (bugs/<date>-<time>.json) and REPORT BUG says BUG SENT; without it (a tester's iPad)
+   the device's share sheet opens with the report as a file to send (AirDrop, Messages, mail), or it is downloaded.
+   Put back with __game.bugLoad(report) (52-main.js hook, below): the keys into this browser, then the game.
+   ================================================================ */
+const BUG = { shot: null, want: false, busy: false, log: [] };
+// the last 40 errors and warnings, with when they came
+(() => {
+  if (typeof window === 'undefined' || SW_IN_WORKER) return;
+  const keep = (k, a) => { try { BUG.log.push([Math.round(performance.now()), k, a.map(x => x && x.stack ? x.stack : String(x)).join(' ').slice(0, 600)]); if (BUG.log.length > 40) BUG.log.shift(); } catch (e) { } };
+  for (const k of ['error', 'warn']) { const f = console[k]; console[k] = (...a) => { keep(k, a); return f.apply(console, a); }; }
+  window.addEventListener('error', e => keep('uncaught', [e.error || e.message]));
+  window.addEventListener('unhandledrejection', e => keep('rejection', [e.reason]));
+})();
+// the screen as it is: the world's canvas with the controls' layer over it (called by render before the controls are cleared -
+// the frame the menu opened on still has the game's controls in that layer)
+function bugGrab() {
+  BUG.want = false;
+  try {
+    const gc = document.getElementById('game'), hc = document.getElementById('hud'); if (!gc) return;
+    const s = Math.min(1, 1280 / gc.width), c = document.createElement('canvas'); c.width = Math.round(gc.width * s); c.height = Math.round(gc.height * s);
+    const x = c.getContext('2d'); x.drawImage(gc, 0, 0, c.width, c.height); if (hc) x.drawImage(hc, 0, 0, c.width, c.height);
+    BUG.shot = c.toDataURL('image/jpeg', 0.8);
+  } catch (e) { BUG.shot = null; }
+}
+// REPORT BUG's place: under the menu's panel, at its right
+function bugBtn(T) { return T && menuCanResume() && !joinedRoom() && !SSL.open && !linkPanelUp() ? [T.x + T.w - 120, T.y + T.h + 6, 120, 28] : null; }
+function drawBugBtn(T) { try { const r = bugBtn(T); if (r) modeButton(...r, BUG.busy ? 'SENDING...' : 'REPORT BUG', false); } catch (e) { } }
+function bugState() {
+  const c = crew[0], v = c && c.mode === 'civ' ? c.civ : null, at = STORY && typeof storyAt === 'function' ? storyAt() : null;
+  const keys = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('bd_')) keys[k] = lsRawGet(k); }
+  return {
+    v: GAME_VERSION, build: BUILD, when: new Date().toISOString(), url: location.href, ua: navigator.userAgent,
+    screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, ubw, ubh, touch: 'ontouchstart' in window },
+    mode: MODE, menu: menuSel.mode, story: STORY ? { ...story, slot: storySlot, at: at ? at.id : null } : null, world: STORY_WORLD ? 'story' : 'open',
+    you: c ? { mode: c.mode, v: v ? { sid: v.sid, sv: v.sv, kind: v.kind, x: Math.round(v.x), y: Math.round(v.y || 0) } : null } : null,
+    day: W.day, hour: +env.time.toFixed(2), zoom: [scopes[0].level, +(cam.zt[0] || 0).toFixed(3)], ui: { settings: !!ui.settings, photo: !!PHOTO.on, swap: STORY ? { ...STSW } : null },
+    log: BUG.log.slice(), keys,
+  };
+}
+async function bugSend() {
+  if (BUG.busy) return; BUG.busy = true;
+  try {
+    const R = bugState(); R.shot = BUG.shot;
+    await swHold('bug'); try { R.game = edGameSave(); } finally { swRelease('bug'); }
+    const text = JSON.stringify(R), d = new Date(), z = n => String(n).padStart(2, '0');
+    const name = `bug-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}-v${GAME_VERSION}.json`;
+    let tok = null; try { tok = localStorage.getItem('wp_token'); } catch (e) { }
+    if (tok && await bugCommit(tok, 'bugs/' + name, text).catch(e => { console.warn('bug send', e); return false; })) { showToast('BUG SENT'); return; }
+    const file = new File([text], name, { type: 'application/json' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: 'Battleship Duel bug' }); showToast('BUG READY TO SEND'); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 20000);
+    showToast('BUG SAVED - SEND THE FILE');
+  } catch (e) { console.warn('bug report', e); showToast('COULD NOT MAKE THE REPORT'); }
+  finally { BUG.busy = false; }
+}
+// into the repo's `bugs` branch (made from main the first time)
+async function bugCommit(tok, path, text) {
+  const API = 'https://api.github.com/repos/facaelectrica/battleship-duel';
+  const gh = async (p, o = {}) => { const r = await fetch(API + p, { ...o, headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + tok, 'X-GitHub-Api-Version': '2022-11-28', ...(o.body ? { 'Content-Type': 'application/json' } : {}) } }); const j = await r.json().catch(() => ({})); if (!r.ok) { const e = new Error(j.message || 'HTTP ' + r.status); e.status = r.status; throw e; } return j; };
+  try { await gh('/git/ref/heads/bugs'); }
+  catch (e) { if (e.status !== 404) throw e; const m = await gh('/git/ref/heads/main'); await gh('/git/refs', { method: 'POST', body: JSON.stringify({ ref: 'refs/heads/bugs', sha: m.object.sha }) }); }
+  const b64 = await new Promise((res, rej) => { const f = new FileReader(); f.onload = () => res(String(f.result).split(',')[1]); f.onerror = () => rej(f.error); f.readAsDataURL(new Blob([text])); });
+  await gh('/contents/' + path, { method: 'PUT', body: JSON.stringify({ message: 'Bug report ' + path.slice(5), content: b64, branch: 'bugs' }) });
+  return true;
+}
+if (typeof window !== 'undefined' && !SW_IN_WORKER) window.addEventListener('pointerdown', ev => {
+  if (!ui.title || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
+  const r = bugBtn(titleLayout()); if (!r) return;
+  const [X, Y] = toUI(ev.clientX, ev.clientY); if (X < r[0] || X > r[0] + r[2] || Y < r[1] || Y > r[1] + r[3]) return;
+  ev.stopImmediatePropagation(); ev.preventDefault(); menuClick(); bugSend();
+}, { capture: true, passive: false });
+/* put a report back (a tool, from the console): its keys into this browser - after keeping this browser's own (bd_bug_back, put back
+   with __game.bugBack()) - then the page loaded again in its world; after the load, the report's game put into a fresh game of its
+   mode, as the Story's LOAD does */
+function bugLoad(R) {
+  if (typeof R === 'string') R = JSON.parse(R);
+  const mine = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('bd_')) mine[k] = lsRawGet(k); }
+  sessionStorage.setItem('bd_bug_back', JSON.stringify(mine));
+  for (const k of Object.keys(mine)) lsRawDel(k);
+  for (const [k, v] of Object.entries(R.keys || {})) if (v != null) lsRawSet(k, v);
+  if (R.world === 'story') lsRawSet('bd_world', 'story'); else lsRawDel('bd_world');
+  return new Promise(res => { const q = indexedDB.open('bd_bug', 1); q.onupgradeneeded = () => q.result.createObjectStore('r'); q.onsuccess = () => { const tx = q.result.transaction('r', 'readwrite'); tx.objectStore('r').put(R, 0); tx.oncomplete = () => { sessionStorage.setItem('bd_bug_go', '1'); location.reload(); res(); }; }; });
+}
+function bugBack() { const m = JSON.parse(sessionStorage.getItem('bd_bug_back') || 'null'); if (!m) return false; const L = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('bd_')) L.push(k); } for (const k of L) lsRawDel(k); for (const [k, v] of Object.entries(m)) lsRawSet(k, v); sessionStorage.removeItem('bd_bug_back'); return true; }
+// after bugLoad's reload: a fresh game of the report's mode, then its game put in (the worker held), as the Story's LOAD
+if (typeof window !== 'undefined' && !SW_IN_WORKER && sessionStorage.getItem('bd_bug_go')) {
+  sessionStorage.removeItem('bd_bug_go');
+  const go = () => {
+    if (!(PAGE_UP && !LOADING && ui.title)) { setTimeout(go, 200); return; }
+    const q = indexedDB.open('bd_bug', 1); q.onupgradeneeded = () => q.result.createObjectStore('r');
+    q.onsuccess = () => { const g = q.result.transaction('r').objectStore('r').get(0); g.onsuccess = () => {
+      const R = g.result; if (!R || !R.game) return;
+      menuSel.mode = R.menu || (R.story ? 'story' : menuSel.mode);
+      if (R.story) { storyPlayNow = true; storySlot = null; }
+      loadThen(() => { menuPlay(false); storyPlayNow = false; swSettled().then(() => swHold('bugLoad')).then(() => { try { edGameBack(R.game); cutTo(0); } catch (e) { console.warn('bug load', e); } swRelease('bugLoad'); }); });
+    }; };
+  };
+  setTimeout(go, 300);
+}
+
 /* ---- UNSAVED CHANGES (user Nov 3 07:07-07:09, the editor saves like a scene - the journal: 00-world-journal.js). Leaving the scene with
    changes not saved asks SAVE / DISCARD / CANCEL: the editor's CLOSE, SNAPSHOT (what it copies is the saved world) and the WORLD
    dropdown (the page loaded again in the other world). PLAY doesn't ask: it plays the scene as it is, still unsaved. SAVE CHANGES
@@ -61200,6 +61313,7 @@ async function start(data) {
       } } });
   }
   // (Nov 1) a column table's row as a plain object, for the console: __game.row('smoke', 0) - 04-zz-coltable.js
+  Object.assign(window.__game, { bugLoad: R => bugLoad(R), bugBack: () => bugBack(), bugState: () => bugState() });   // (REPORT BUG's report put back in this browser, and this browser's own keys back after - 50-zzzz-bug.js)
   Object.assign(window.__game, { row: (name, i) => { const t = TABLES[name]; return t && t.cols ? t.cols.plain(i) : t ? t.list()[i] : undefined; } });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
   Object.assign(window.__game, { wp: { WP_KINDS, art: pl => wpArt(pl), frame: (A, s, i, m, nb) => wpFrame(A, s, i, m, nb), pose: (pl, A) => wpPose(pl, A), K: () => ({ UPM, FLY_ROLL_T, PLANE_TURN_T, SC: PLANE_SC() }), mark: (o, x, y, w) => dmgMark(o, x, y, w), dmgPic: (P, f, o) => dmgPic(P, f, o), sea: c => seaplaneArt(c), jet: t => sheetArt({ kind: "jet", owner: t }), jetPose: f => rlPose(f), ces: c => sheetArt({ kind: 'cessna', col: c }) },   // (the warplanes' frames and poses for a look at them - 29-zzz-warplanes.js)
