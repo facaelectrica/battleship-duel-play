@@ -4368,8 +4368,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 780;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 05 11:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 781;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 05 21:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -40755,7 +40755,7 @@ const islGroundAt = (x, R) => !seaAtX(x) ? landProfileG(x, R) : sandY(x);   // (
 // wherever its line rises out of the water and the ground in front is under the water - the sea between the harbours, a
 // lake, or a sea in a country. Where the ground in front stands out of the water, it hides the island: nothing to mark
 function islMarkCols(I_, any, R) {
-  land.itop = null; land.islRuns = []; land.isolid = null; land.idry = null; land.stop = null; land.sunder = null; land.sspan = null; land.sfloor = null; land.gspan = null;
+  land.itop = null; land.ugDark = null; land.ugSee = null; land.ugBody = null; land.islRuns = []; land.isolid = null; land.idry = null; land.stop = null; land.sunder = null; land.sspan = null; land.sfloor = null; land.gspan = null;
   if (typeof CAVE !== 'undefined' && CAVE.toHoles) CAVE.toHoles();   // (the user's caves made into HOLE shapes, once in each world - caves/30-api.js)
   shpBuild();                                                    // (every loop's spans in each column - 50-land-shapes)
   ISL_SIG = JSON.stringify(ISLANDS.filter(I => !I.gnd));         // (the islands as built - islChanged)
@@ -40797,8 +40797,44 @@ function islMarkCols(I_, any, R) {
   gndSpansBuild();
   solSpansBuild(L);
   holeDarkBuild(R);
+  ugColsBuild(L);
+  // (user Nov 5 20:36: "The fade does NOT end at the water line, it follows the SHAPE") where an island or a solid stands out of the
+  // water, its body goes on under the water's line: the land's light (ltDist) counts that as ground, not open air (land.ugBody: the
+  // shapes' spans there, the holes cut out - ugInBody)
+  { const B = land.ugBody = new Array(land.cols).fill(null);
+    for (let c = 0; c < land.cols; c++) {
+      if (!I_[c]) continue;
+      const A = [], H = []; for (let n = 0; n < SHP.cols.length; n++) { const S = SHP.cols[n]; if (!S) continue; const v = shpIv(n, c); if (!v) continue; (S.k === 'H' ? H : A).push(...v); }
+      const v = H.length ? ivCut(ivMerge(A), ivMerge(H)) : ivMerge(A); if (v.length) B[c] = Float32Array.from(v);
+    } }
   return any;
 }
+// (user Nov 5 20:22, HIDE INTERIOR - shpUG) each column's spans whose shape has it on (land.ugDark) or off (land.ugSee), for the
+// land's painter (paintLandChunk). The shape a cell belongs to: the first SOLID over it (the ground's solids too - one body where
+// solids overlap, as solBefore), else the first ISLAND there (solids are in front). Unset shapes are in neither: drawn as before
+function ugColsBuild(L) {
+  land.ugDark = land.ugSee = null;
+  const set = []; L.forEach((I, n) => { const S = SHP.cols[n]; if (S && S.k !== 'H' && shpUG(I) !== null) set.push(n); });
+  if (!set.length) return;
+  const D = land.ugDark = new Array(land.cols).fill(null), E = land.ugSee = new Array(land.cols).fill(null), cols = new Set();
+  for (const n of set) { const S = SHP.cols[n]; for (let c = Math.max(0, S.c0); c <= Math.min(land.cols - 1, S.c1); c++) cols.add(c); }
+  for (const c of cols) {
+    const taken = [], dk = [], se = [];
+    for (const front of [true, false]) for (let n = 0; n < SHP.cols.length; n++) {
+      const S = SHP.cols[n]; if (!S || S.k === 'H' || (S.k !== 'I') !== front) continue;
+      const v = shpIv(n, c); if (!v || v.length < 2) continue;
+      const part = taken.length ? ivCut(Array.from(v), ivMerge(taken)) : Array.from(v), u = shpUG(L[n]);
+      if (u === true) dk.push(...part); else if (u === false) se.push(...part);
+      taken.push(...v);
+    }
+    if (dk.length) D[c] = Float32Array.from(ivMerge(dk));
+    if (se.length) E[c] = Float32Array.from(ivMerge(se));
+  }
+}
+// (ltDist) is (c, y) under the water's line inside the body of an island or a solid standing out of it
+const ugInBody = (c, y) => y > WATER_Y && !!land.ugBody && c >= 0 && c < land.cols && shpIn(land.ugBody[c], y);
+// (paintLandChunk) the cell (c, its middle y): 1 its shape has HIDE INTERIOR on, 0 off, -1 unset (as before)
+const ugCell = (c, y) => land.ugSee && shpIn(land.ugSee[c], y) ? 0 : land.ugDark && shpIn(land.ugDark[c], y) ? 1 : -1;
 // (step 2 of the cave plan, user Nov 2 21:57: "the cave should be part of the collision system of everything") the ground under
 // the sea, as spans, in each column where a HOLE lies under the floor's surface: from the sand down, the holes cut out
 // (land.gspan; elsewhere the ground is everything under seabedY). What the caves are made of is what every mover meets -
@@ -40868,6 +40904,7 @@ function islRootsBuild(R = land.R) {
     if (W * H > 4e6) return;                                     // (a giant one: not drawn under the water)
     const cv = makeCanvas(W, H), g = cv.getContext('2d'), id = g.createImageData(W, H), d = id.data;
     let mk = null;
+    const bTop = new Float32Array(W).fill(-Infinity), bBot = new Float32Array(W).fill(Infinity);   // (HIDE INTERIOR: where a column's body meets ground, not water - ugFadeRoot)
     for (let q = 0; q < W; q++) {
       const c = c0 + q, x = c * LT_CELL, t = top[q], f = bot[q]; if (!(f > t)) continue;
       const v = S.iv[q], last = v[v.length - 1];
@@ -40875,6 +40912,7 @@ function islRootsBuild(R = land.R) {
       const sk = islSkinAt(x), desert = sk === 'D' || (sk !== 'F' && sk !== 'T' && x > (LAYOUT_L + LAYOUT_R) / 2);
       const PD = desert ? LT_PAL_D[M_DIRT] : LT_PAL[M_DIRT], PR = desert ? LT_PAL_D[M_ROCK] : LT_PAL[M_ROCK], PS = desert ? LT_PAL_D[M_SAND] : LT_PAL[M_SAND];
       const ys = own ? Math.max(t, WATER_Y + 2) : t;
+      if (own) bTop[q] = ys; bBot[q] = f;
       for (let r = Math.max(0, Math.floor(ys / LT_CELL) - r0); r < H; r++) {
         const y = (r0 + r) * LT_CELL; if (y < ys || y > f) continue;
         if (y < last && !shpIn(v, y)) continue;                  // (between its spans: open - an overhang, a hole in the loop)
@@ -40889,11 +40927,43 @@ function islRootsBuild(R = land.R) {
         const o = (r * W + q) * 4; d[o] = col[0] * k; d[o + 1] = col[1] * k; d[o + 2] = col[2] * k; d[o + 3] = 255;
       }
     }
+    if (shpUG(I) === true) ugFadeRoot(d, mk, W, H, c0, r0, bTop, bBot);   // (HIDE INTERIOR on: dark inside, as the ground - user Nov 5)
     g.putImageData(id, 0, 0);
     const RT = { x0: c0 * LT_CELL, y0: r0 * LT_CELL, cv, my: Math.min(yB, WATER_Y + 400), c0, r0, W, H, mk, pc: {}, solid };
     if (mk) RT.edges = islRootEdges(mk, W, H, c0, r0, I);
     (solid ? solRoots : islRoots).push(RT);
   });
+}
+// (user Nov 5 20:22, HIDE INTERIOR on) a body under the water dark inside as the ground is: each cell faded to the black underground by
+// its distance to the nearest open water (ltFadeAt, the UNDERGROUND LIGHT reach) - a two-pass chamfer as ltDist. Open: a cell the body
+// doesn't fill, except where its column meets ground (above bTop: the shape's own ground out of the water; below bBot: the ground in front)
+// and past the picture's top over such ground; past its sides, open water
+function ugFadeRoot(d, mk, W, H, c0, r0, bTop, bBot) {
+  const cap = Math.ceil(ugReach() / LT_CELL) + 2, PW = W + 2, PH = H + 2, D = new Float32Array(PW * PH), D2 = 1.4142;
+  for (let j = 0; j < PH; j++) for (let i = 0; i < PW; i++) {
+    const q = i - 1, r = j - 1, o = j * PW + i;
+    if (q < 0 || q >= W) { D[o] = 0; continue; }
+    const y = (r0 + r) * LT_CELL, ground = y < bTop[q] || y > bBot[q];
+    D[o] = r < 0 ? (bTop[q] > -Infinity ? cap : 0) : r >= H ? (bBot[q] < Infinity ? cap : 0) : d[(r * W + q) * 4 + 3] || ground ? cap : 0;
+  }
+  for (let j = 0; j < PH; j++) for (let i = 0; i < PW; i++) {
+    const o = j * PW + i; let v = D[o]; if (v === 0) continue;
+    if (i > 0) v = Math.min(v, D[o - 1] + 1);
+    if (j > 0) { v = Math.min(v, D[o - PW] + 1); if (i > 0) v = Math.min(v, D[o - PW - 1] + D2); if (i < PW - 1) v = Math.min(v, D[o - PW + 1] + D2); }
+    D[o] = v;
+  }
+  for (let j = PH - 1; j >= 0; j--) for (let i = PW - 1; i >= 0; i--) {
+    const o = j * PW + i; let v = D[o]; if (v === 0) continue;
+    if (i < PW - 1) v = Math.min(v, D[o + 1] + 1);
+    if (j < PH - 1) { v = Math.min(v, D[o + PW] + 1); if (i < PW - 1) v = Math.min(v, D[o + PW + 1] + D2); if (i > 0) v = Math.min(v, D[o + PW - 1] + D2); }
+    D[o] = v;
+  }
+  for (let r = 0; r < H; r++) for (let q = 0; q < W; q++) {
+    const o = (r * W + q) * 4; if (!d[o + 3]) continue;
+    const fd = ltFadeAt(D[(r + 1) * PW + q + 1] * LT_CELL, c0 + q, r0 + r); if (!(fd > 0)) continue;
+    const k = 1 - fd; d[o] *= k; d[o + 1] *= k; d[o + 2] *= k;      // (UG_RGB is black: the fade is a darkening)
+    if (mk && mk[o + 3]) { mk[o] *= k; mk[o + 1] *= k; mk[o + 2] *= k; }
+  }
 }
 // is (c, y) in a solid listed before shape n (where two overlap, the first one paints: one body)
 function solBefore(n, c, y) { for (let m = 0; m < n; m++) { const S = SHP.cols[m]; if (S && S.k === 'S' && shpIn(shpIv(m, c), y)) return true; } return false; }
@@ -40957,6 +41027,14 @@ function islToggleSee() {
   if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Pick a hole first.'; return; }
   const on = !ISLANDS[L[0]].see; for (const n of L) { if (on) ISLANDS[n].see = true; else delete ISLANDS[n].see; }
   islChanged(); terrainSyncSkin();
+}
+// (user Nov 5 20:22) the picked shapes' HIDE INTERIOR on or off (holes have none: SEE-THROUGH is theirs). A change rebuilds on REFRESH,
+// the ground's shapes too (their own change check only sees their outline - gndChanged)
+function islToggleUG() {
+  const s = TERRAIN_ED.sel, L = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : []).filter(n => ISLANDS[n] && shpK(ISLANDS[n]) !== 'H');
+  if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Pick a terrain shape first.'; return; }
+  const on = !shpUGOn(ISLANDS[L[0]]); for (const n of L) ISLANDS[n].ug = on ? 1 : 0;
+  islChanged(); ISL_ED.dirty = true; terrainSyncSkin();
 }
 // (Nov 2) the solids' bodies under the water: in front - over the water's tint, as the sea's solid rocks are (drawRockForms,
 // 43-render-objects), never hazed: the boats and subs never get behind them, they stop at them
@@ -46591,6 +46669,12 @@ const shpIv = (n, c) => { const S = SHP.cols[n]; return S && c >= S.c0 && c <= S
 // its top in column c (Infinity: none)
 const shpTopC = (n, c) => { const v = shpIv(n, c); return v && v.length ? v[0] : Infinity; };
 const shpIn = (v, y) => { if (!v) return false; for (let i = 0; i + 1 < v.length; i += 2) if (y >= v[i] && y < v[i + 1]) return true; return false; };
+// (user Nov 5 20:22, HIDE INTERIOR) a shape's body: dark inside, fading to the black underground from its open faces as the ground
+// does (true), or its own rock seen all the way in (false - an island's rock, the tropical's and desert's own look). Unset: an island
+// or a solid laid on the ground off (user 20:32: "The default for island is that it doesnt have underground"); the ground's own
+// shapes (null) as drawn before the toggle - dark, the tropical lit - ugColsBuild
+const shpUG = I => !I ? null : I.ug != null ? !!I.ug : I.gnd ? null : false;
+const shpUGOn = I => shpUG(I) ?? !!(I && I.gnd);                 // (what the editor's toggle shows: an unset ground shape on)
 // is (column c, y) inside a hole / a solid (other than shape `not`)
 function shpHoleAt(c, y) { for (const n of SHP.holes) if (shpIn(shpIv(n, c), y)) return true; return false; }
 function shpSolidAt(c, y, not = -1) { for (let n = 0; n < SHP.cols.length; n++) if (n !== not && SHP.cols[n] && SHP.cols[n].k === 'S' && shpIn(shpIv(n, c), y) && !shpHoleAt(c, y)) return true; return false; }
@@ -48464,7 +48548,7 @@ function landEvict() {
 function ltDist(c0, w, rT, rB) {
   const cap = Math.ceil(ugReach() / LT_CELL) + 2, M = Math.min(cap, 64), W = w + 2 * M, H = rB - rT;
   const d = new Float32Array(W * H), D2 = 1.4142;
-  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { const c = c0 - M + i; d[j * W + i] = c < 0 || c >= land.cols ? cap : ltCell(c, rT + j) === M_AIR ? 0 : cap; }
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { const c = c0 - M + i; d[j * W + i] = c < 0 || c >= land.cols ? cap : ltCell(c, rT + j) === M_AIR && !ugInBody(c, LT_Y0 + (rT + j + 0.5) * LT_CELL) ? 0 : cap; }   // (an island's body under the water: not open - ugInBody, user Nov 5)
   for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
     const o = j * W + i; let v = d[o]; if (v === 0) continue;
     if (i > 0) v = Math.min(v, d[o - 1] + 1);
@@ -48538,6 +48622,7 @@ function paintLandChunk(k) {
       }
       const TR = TT && m !== M_CONC && !SEAB && (r < SE ? islSkinC(c) === 4 : land.trop[c] === 1);   // (TROPICAL: the rock tile's colours, a cell a pixel; its own pixels over it near the top - tropDrawOv)
       if (TR) col = tropTileLo(c, r);
+      const UG = ugCell(c, LT_Y0 + (r + 0.5) * LT_CELL);   // (its shape's HIDE INTERIOR: 1 dark inside, 0 its rock seen all the way in, -1 as before - user Nov 5, 50-land-islands)
       // light from above: a lit rim on a face open to the sky, a shade under an overhang and down a hole's sides,
       // deeper down a little darker
       let k2 = 1 - Math.min(0.18, depth * 0.006);   // (less darkening with depth: the stones stay bright down the top band, as the target picture)
@@ -48547,9 +48632,10 @@ function paintLandChunk(k) {
       const sc = land.scorch[i] / 255;
       col = [col[0] * k2 * (1 - 0.72 * sc) + 14 * sc, col[1] * k2 * (1 - 0.75 * sc) + 10 * sc, col[2] * k2 * (1 - 0.75 * sc) + 8 * sc];
       // (user Oct 25, their picture: the earth fades to black going down, in steps, as pixel art shades)
-      const fd = ltFadeAt((r >= SE ? Math.min(DIST.d[(r - rT) * DIST.W + q + DIST.M], r - SE) : DIST.d[(r - rT) * DIST.W + q + DIST.M]) * LT_CELL, c, r);   // (under a segment: from the ground in front's own top)
-      if (fd > 0 && !TR) col = mix3(col, DS ? LT_DEEP_D : LT_DEEP, fd);   // (TROPICAL: its rock face lit all the way down - the fade only under the water's line, darker as it goes)
-      if (TR) { const dw = Math.max(0, LT_Y0 + r * LT_CELL - WATER_Y), sh = (1 - 0.73 * sc) * (1 - 0.7 * smoothstep(0, 400, dw)); col = col.map(v => v * sh); tropMaskPut(q, r, sh); }
+      const fd = UG === 0 ? 0 : ltFadeAt((r >= SE ? Math.min(DIST.d[(r - rT) * DIST.W + q + DIST.M], r - SE) : DIST.d[(r - rT) * DIST.W + q + DIST.M]) * LT_CELL, c, r);   // (under a segment: from the ground in front's own top)
+      if (UG === 0 && !TR) { const ko = 1 - 0.8 * smoothstep(0, 700, depth * LT_CELL); col = col.map(v => v * ko); }   // (seen all the way in: darker only slowly with depth, as an island's rock under the water - islRootsBuild)
+      else if (fd > 0 && !TR) col = mix3(col, DS ? LT_DEEP_D : LT_DEEP, fd);   // (TROPICAL: its rock face lit all the way down - the fade only under the water's line, darker as it goes)
+      if (TR) { const dw = Math.max(0, LT_Y0 + r * LT_CELL - WATER_Y), sh = (1 - 0.73 * sc) * (1 - 0.7 * smoothstep(0, 400, dw)) * (UG === 1 ? 1 - fd : 1); col = col.map(v => v * sh); tropMaskPut(q, r, sh); }
       put(q, r + T4, col);
       depth++;
       // grass: a few blades standing up out of a grass top
@@ -50968,7 +51054,8 @@ function terrainSyncSkin() {
   for (const [b, v] of TERRAIN_ED.skinBtns || []) b.classList.toggle('on', sk !== undefined && sk === v);
   { const L = s && s.Is ? s.Is : s && s.I != null ? [s.I] : [], ks = new Set(L.filter(n => ISLANDS[n]).map(n => shpK(ISLANDS[n])));   // (the picked shapes' kind; was: the ground's own line: a SOLID)
     for (const [b, k] of TERRAIN_ED.kindBtns || []) b.classList.toggle('on', ks.size === 1 && ks.has(k));
-    if (TERRAIN_ED.seeBtn) TERRAIN_ED.seeBtn.classList.toggle('on', L.some(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H' && ISLANDS[n].see)); }
+    if (TERRAIN_ED.seeBtn) TERRAIN_ED.seeBtn.classList.toggle('on', L.some(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H' && ISLANDS[n].see));
+    if (TERRAIN_ED.ugBtn) TERRAIN_ED.ugBtn.classList.toggle('on', L.some(n => ISLANDS[n] && shpK(ISLANDS[n]) !== 'H' && shpUGOn(ISLANDS[n]))); }   // (HIDE INTERIOR - 50-land-islands islToggleUG)
   if (TERRAIN_ED.hills) {                                         // (the HILLS slider: the picked pieces' amount, or blank when they differ)
     const H = TERRAIN_ED.hills, ok = !!P, set = new Set();
     if (ok) for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(Math.round((P[k].length > 3 ? P[k][3] : 1) * 100));
@@ -51021,7 +51108,7 @@ function terrainLoad(text) {
     if (JSON.stringify(L) !== JSON.stringify(KR_SET)) { KR_SET = JSON.parse(JSON.stringify(L)); krSetSave(); placeKraken(); floorEdited(); } }
   if (o.BG !== undefined && bgOk(o.BG) && JSON.stringify(o.BG) !== JSON.stringify(BGS)) { BGS = JSON.parse(JSON.stringify(o.BG)); bgSave(); }   // (the backgrounds - 50-zz-backgrounds)
   if (o.LK !== undefined || LAKE_SET.length) { LAKE_SET = Array.isArray(o.LK) ? o.LK.filter(q => q && isFinite(q.x) && isFinite(q.y)).map(q => ({ x: +q.x, y: +q.y })) : []; lakeSave(); ISL_ED.dirty = true; }   // (the lakes' own levels - 50-land-lake, Nov 2)
-  if (o.I !== undefined || ISLANDS.length) { ISLANDS = (o.I || []).map(I => Object.assign({ p: I.p.map(q => q.slice()) }, I.k ? { k: I.k } : I.solid ? { k: 'S' } : {}, I.g != null ? { g: I.g } : {}, I.see ? { see: true } : {}, I.t ? { t: 1, rs: (I.rs || [60, 60, 60]).slice() } : {}, I.wl != null ? { wl: I.wl } : {}, I.gnd ? { gnd: 1 } : {})); /* (a shape's kind and group with it - 50-land-shapes) */ islChanged(); }
+  if (o.I !== undefined || ISLANDS.length) { ISLANDS = (o.I || []).map(I => Object.assign({ p: I.p.map(q => q.slice()) }, I.k ? { k: I.k } : I.solid ? { k: 'S' } : {}, I.g != null ? { g: I.g } : {}, I.see ? { see: true } : {}, I.ug != null ? { ug: I.ug ? 1 : 0 } : {}, I.t ? { t: 1, rs: (I.rs || [60, 60, 60]).slice() } : {}, I.wl != null ? { wl: I.wl } : {}, I.gnd ? { gnd: 1 } : {})); /* (a shape's kind and group with it - 50-land-shapes) */ islChanged(); }
   if (o.N !== undefined || NATURE.length) { NATURE = natureValid(o.N) ? JSON.parse(JSON.stringify(o.N)) : []; NE.sel = null; natureChanged(); }   // (the fish areas - 50-zz-nature)
   if (o.ST !== undefined || STRS.length) { STRS = strsValid(o.ST) ? strsFix(JSON.parse(JSON.stringify(o.ST))) : []; SE.sel = []; strChanged(); }   // (the placed structures - 50-zz-struct)
 }
@@ -51120,6 +51207,8 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT', [
 // shape's kind lit, as the skin buttons are (terrainSyncSkin)
 // (user 14:23) a hole dark (the default) or SEE-THROUGH: lit when the picked holes are
 const seeBtn = () => { const f = () => islToggleSee(); f.init = b => { TERRAIN_ED.seeBtn = b; }; return ['SEE-THROUGH', 'Picked hole shows what is behind (off: dark)', f]; };
+// (user Nov 5 20:22) a terrain shape dark inside as the ground (on) or its rock seen all the way in (off): lit when the picked shapes are
+const ugBtn = () => { const f = () => islToggleUG(); f.init = b => { TERRAIN_ED.ugBtn = b; }; return ['HIDE INTERIOR', 'Picked shape is dark inside (off: see its rock)', f]; };
 const kindBtn = (lab, k, desc) => { const f = () => islSetKind(k); f.init = b => (TERRAIN_ED.kindBtns || (TERRAIN_ED.kindBtns = [])).push([b, k]); return [lab, desc, f]; };
 NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN SHAPES', [
   ['CREATE TERRAIN', 'New terrain shape in the view', islAdd],
@@ -51129,6 +51218,7 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN SHAPES', [
   kindBtn('ISLAND', 'I', 'Picked shape: behind the water, boats pass'),
   kindBtn('HOLE', 'H', 'Picked shape: cuts the terrain'),
   seeBtn(),
+  ugBtn(),
   ['SPLIT SHAPE', 'Cut the shape in two at the picked segment', islSplitShape],
 ]);
 // (OBJECT TEAM gone, user Nov 1: a tower, a dock, an airport is picked in the world and deleted with the editor's DELETE; a tower
