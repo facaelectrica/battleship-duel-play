@@ -4243,7 +4243,11 @@ function netPlain(o, depth, sw) {
 }
 // (a projectile or a wreck keeps its number from host to guest, so the guest updates the same one)
 let netUid = 1;
-const uidOf = o => o._uid || (o._uid = netUid++);
+// (Nov 7: the id kept out of sight - not enumerable - so a copy of a thing made with Object.assign / spread (a wreck split in two -
+// 25-wrecks.js splitPiece) is a new thing with its own id: copied, two pieces shared one id, and the page dropped one of them -
+// user: "It was sinking, it got hit, and then it disappeared")
+function setUid(o, u) { Object.defineProperty(o, '_uid', { value: u, writable: true, configurable: true, enumerable: false }); return u; }
+const uidOf = o => o._uid || setUid(o, netUid++);
 function netSnapshot(sw, o = {}) {
   const P = (o, d = 4) => netPlain(o, d, sw), two = a => sw ? [a[1], a[0]] : [a[0], a[1]];
   const list = a => a.map(o => { const d = P(o, 3); d.u = uidOf(o); return d; });
@@ -4296,7 +4300,7 @@ function netVehicle(kind, p, d) {
     else { if (v.state === 'fly') downPlane(v); if (planes[p] === v) { if (v.state !== 'gone' && v.state !== 'hangar') oldPlanes.push(v); planes[p] = makePlane(p); } }
     v = arr[p];
   }
-  v._hu = d.u; v._uid = d.u;
+  v._hu = d.u; setUid(v, d.u);
 }
 // a list kept in step by each thing's number: new ones appear (with their sound and flash), the guest's own copy
 // carries on a moment after the host's is gone (so it can land here too), and one that's already burst here
@@ -4310,7 +4314,7 @@ function netList(arr, data, kind, onNew, create = true) {
     inSnap.add(d.u);
     if (st.gone.has(d.u)) continue;
     let o = by.get(d.u);
-    if (!o) { if (!create) continue; o = {}; netMerge(o, d); o._uid = d.u; if (onNew) onNew(o); }
+    if (!o) { if (!create) continue; o = {}; netMerge(o, d); setUid(o, d.u); if (onNew) onNew(o); }
     else { netMerge(o, d); o._orph = 0; }
     next.push(o);
   }
@@ -4396,7 +4400,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 781;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 10:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 07 10:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11233,7 +11237,7 @@ function stepPlanes(dt) {
     // pull - over the top into a loop at speed); let go or flown by itself, it flies the path it wants (want: + down - level,
     // home, dodging). Its speed is its own: a dive builds it, a climb spends it, the engine holds its cruise)
     const ai = !forced && pl.aiGamT > time - 0.25;                              // (the CPU's pilot: the path it wants - 49-cpu.js)
-    const ctl = ai ? { gam: pl.aiGam } : (stick || mine || sd) && !forced ? { pull: flyPull(pl, stick, dt) } : { gam: want };   // (yours let go: its trim - flyStep; it falls as it slows, user Nov 2 19:35)
+    const ctl = ai ? { gam: pl.aiGam } : (stick || mine || sd || pl.loiter) && !forced ? { pull: flyPull(pl, stick, dt) } : { gam: want };   // (stopped - pl.loiter: STOP's hold in flyStep, whoever's seat it is)   // (yours let go: its trim - flyStep; it falls as it slows, user Nov 2 19:35)
     if (gearWant && LAND) { const g = planeGroundY(pl.x); if (g != null) ctl.cush = g - pl.y; }   // (wheels down over ground it can land on: the flare)
     flyStep(pl, dt, ctl, wpKind(pl).flight, 'facing', PLANE_TURN_T);
     // heading for the enemy's edge it turns round in time, so it never leaves the world on their side; stopped (the stop
@@ -11953,7 +11957,7 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
   if (v.loiter && ctl.pull) v.loiter = null;
   if (v.loiter && ctl.pull != null && ctl.thr == null && ctl.cush == null) {
     const FL = FLIGHT[kind], Vn = (v.spd || 0) / UPM;
-    if (v.loiter.y == null && upright && Math.abs(v.gam || 0) < 0.05) v.loiter.y = v.y;
+    if (v.loiter.y == null && upright && Math.abs(v.gam || 0) < 0.08) v.loiter.y = v.y;
     let gw = v.loiter.y == null ? 0 : clamp((v.loiter.y - v.y) / 150, -0.3, 0.3);
     gw = Math.max(gw, 0.2 * clamp((1.3 * FL.vs - Vn) / (0.3 * FL.vs), 0, 1));   // (too slow: nose down - gam is + down)
     ctl = { gam: gw }; free = true;
@@ -15510,7 +15514,7 @@ function tablesLoad(S) {
       let o = have.get(d.u_); if (o && used.has(o)) o = null;
       if (!o && arr[i] && !used.has(arr[i]) && arr[i].kind === d.kind) o = arr[i];
       if (!o) o = t.make(d);
-      used.add(o); o._uid = d.u_; byU.set(d.u_, o); rows.push([o, d]);   // (its id now: a reference to it isn't walked into)
+      used.add(o); setUid(o, d.u_); byU.set(d.u_, o); rows.push([o, d]);   // (its id now: a reference to it isn't walked into)
     });
     plan.push([t, arr, rows]);
   }
@@ -15520,7 +15524,7 @@ function tablesLoad(S) {
       const sa = d.sa_, sk = d.sk_, u = d.u_; delete d.u_; delete d.sa_; delete d.sk_;
       tblRefs(d, byU, t.depth + 2);
       for (const f in o) { const v = o[f]; if (((v === null || typeof v !== 'object') && typeof v !== 'function' || v && typeof v === 'object' && v._uid != null) && !(f in d) && f[0] !== '_' && !t.skip.has(f)) delete o[f]; }   // (a link to another thing the save doesn't have: none - Oct 31, the editor's game put back)   // (a plain value the saved one didn't have)
-      tblMerge(o, d); o._uid = u; if (sa != null) o._sa = sa; else delete o._sa; if (sk != null) o._sk = sk; else delete o._sk;
+      tblMerge(o, d); setUid(o, u); if (sa != null) o._sa = sa; else delete o._sa; if (sk != null) o._sk = sk; else delete o._sk;
     }
     arr.length = 0; for (const [o] of rows) arr.push(o);
   }
@@ -16035,7 +16039,7 @@ function ntbApply(T) {
       let o = mine.get(u) || byU.get(u);
       if (!o) { const c = arr[i]; if (c && !c._nt && c.kind === F.kind) o = c; }
       if (!o) { o = t.make(F); o._ntNew = 1; }
-      o._uid = u; o._nt = 1; byU.set(u, o);
+      setUid(o, u); o._nt = 1; byU.set(u, o);
       if (!inArr.has(o)) { arr.push(o); inArr.add(o); changed = true; }
       fills.push([t, o, F, true]);
     }
@@ -16060,7 +16064,7 @@ function ntbApply(T) {
     const ev = NTB_EVENTS[t.name];
     if (ev && !o._ntNew) try { ev(o, F); } catch (e) { console.error(e); }   // (what it does when it goes down: its sound, pieces, smoke)
     delete o._ntNew;
-    const u = o._uid; tblMerge(o, F); o._uid = u; o._nt = 1;
+    const u = o._uid; tblMerge(o, F); setUid(o, u); o._nt = 1;
     if (whole && netShot[t.name] && !o._ntSnd) { o._ntSnd = 1; try { netShot[t.name](o); } catch (e) {} }   // (a new shot: its sound and flash)
   }
   for (const [t, arr] of touched) if (t.after) t.after(arr);
@@ -17045,7 +17049,7 @@ function swApply(snap) {
     { const K = [], L = []; swLeavesOfPlain(d, 0, K, L); SWM.paths.set(u, { P: swPaths(K, L), L }); }   // (its leaves' paths, for the changes to come)
     tblRefs(d, byU, t.depth + 2);
     for (const f in o) { const v = o[f]; if ((v === null || typeof v !== 'object') && typeof v !== 'function' && !(f in d) && f[0] !== '_' && !t.skip.has(f)) delete o[f]; }
-    tblMerge(o, d); o._uid = u;
+    tblMerge(o, d); setUid(o, u);
     if (sa != null) o._sa = sa; else delete o._sa;
     if (sk != null) o._sk = sk; else delete o._sk;
   }
@@ -26937,6 +26941,7 @@ const ED_CSS = `
 #skyEd .cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 8px 12px; align-items: start; }
 #skyEd .cat { border: 1px solid #2c3850; border-radius: 6px; padding: 5px 9px 7px; display: grid; gap: 2px; }
 #skyEd h4 { margin: 0 0 3px; color: #7a8294; font-weight: normal; font-size: 11px; letter-spacing: .1em; }
+#skyEd h3.grp { grid-column: 1 / -1; flex-basis: 100%; margin: 8px 0 0; padding-top: 6px; border-top: 1px solid #2c3850; color: #d8dce8; font-weight: 600; font-size: 12px; letter-spacing: .12em; }
 #skyEd .row { display: grid; grid-template-columns: 96px minmax(150px, 1fr) 44px 50px; align-items: center; gap: 6px; }
 #skyEd .row label { color: #7a8294; letter-spacing: .04em; cursor: help; }
 #skyEd .row output { text-align: right; color: #ffb347; font-variant-numeric: tabular-nums; }
@@ -27120,6 +27125,7 @@ function edBuild(host) {
     if (ED_PANES[t]) ED_PANES[t](pane, edEl);                                  // (a tab that builds its own pane: TUNE.pane)
     for (const [bt, name, list] of ED_BTNS) {
       if (bt !== t) continue;
+      if (name[0] === '=') { pane.appendChild(edEl('h3', 'grp', name.slice(1))); continue; }   // (a group's heading over the sections after it - TERRAIN's SELECTED PROPERTIES, Nov 7)
       const c = edEl('div', 'cat btns'); c.appendChild(edEl('h4', '', name));
       for (const [lab, desc, fn] of list) { const b = edEl('button', '', lab); if (desc) b.title = desc; b.onclick = () => { fn(b); if (desc) edHelp(b.textContent, desc); }; if (fn.init) fn.init(b); c.appendChild(b); }
       pane.appendChild(c);
@@ -39918,9 +39924,11 @@ function boxOnBox(k, yb0) {
 }
 // a box drawn at screen (X, Y) - its top left - W by H, rotated about its middle: ribbed sides, a lighter top edge,
 // its doors' end; a burnt one black and dented
+const CONT_NOCOL = [120, 124, 128];
 function drawContainerPx(X, Y, W, H, col, dead) {
   // (Nov 1, 80-fps work: the box's four colours given as numbers - fillRectA, the game's way to fill in a colour of numbers -
   // not built as text for every box and read back, ~670 boxes a frame; each channel cut to a whole number as css3 did)
+  if (!col) col = CONT_NOCOL;                                       // (Nov 7: a box with no colour yet on this page - its row half come from the worker - drawn grey, never an error that stops every ship being drawn)
   const c0 = dead ? col.map(v => v * 0.18 + 14) : col, K = CONTK;
   const tone = f => { K[0] = f(c0[0]); K[1] = f(c0[1]); K[2] = f(c0[2]); return K; };
   fillRectA(C, tone(v => v | 0), 1, X, Y, W, H);
@@ -41100,7 +41108,13 @@ function drawHoleDark(x0, x1, part) {
 function islToggleSee() {
   const s = TERRAIN_ED.sel, L = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : []).filter(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H');
   if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Pick a hole first.'; return; }
-  const on = !ISLANDS[L[0]].see; for (const n of L) { if (on) ISLANDS[n].see = true; else delete ISLANDS[n].see; }
+  const on = !ISLANDS[L[0]].see; islSetSee(on);
+}
+// (Nov 7: CAVE TYPE - CAVE dark, HOLE see-through) the picked caves and tunnels set to one or the other
+function islSetSee(on) {
+  const s = TERRAIN_ED.sel, L = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : []).filter(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H');
+  if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Pick a cave or tunnel first.'; return; }
+  for (const n of L) { if (on) ISLANDS[n].see = true; else delete ISLANDS[n].see; }
   islChanged(); terrainSyncSkin();
 }
 // (user Nov 5 20:22) the picked shapes' HIDE INTERIOR on or off (holes have none: SEE-THROUGH is theirs). A change rebuilds on REFRESH,
@@ -51125,12 +51139,13 @@ function terrainSetShape(i, v) {
 function terrainSyncSkin() {
   const s = TERRAIN_ED.sel, P = s && selPts(s);
   if (TERRAIN_ED.splitBtns) terrainSyncSplit();
+  terrainSyncSecs();
   let sk; if (s && s.Is) { const set = new Set(); for (const n of s.Is) if (ISLANDS[n]) for (const p of ISLANDS[n].p) set.add(p[2] || null); if (set.size) sk = set.size === 1 ? [...set][0] : 'mixed'; }   // (whole shapes: every piece round them)
   else if (P) { const set = new Set(); for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(P[k][2] || null); sk = set.size === 1 ? [...set][0] : 'mixed'; }
   for (const [b, v] of TERRAIN_ED.skinBtns || []) b.classList.toggle('on', sk !== undefined && sk === v);
   { const L = s && s.Is ? s.Is : s && s.I != null ? [s.I] : [], ks = new Set(L.filter(n => ISLANDS[n]).map(n => shpK(ISLANDS[n])));   // (the picked shapes' kind; was: the ground's own line: a SOLID)
     for (const [b, k] of TERRAIN_ED.kindBtns || []) b.classList.toggle('on', ks.size === 1 && ks.has(k));
-    if (TERRAIN_ED.seeBtn) TERRAIN_ED.seeBtn.classList.toggle('on', L.some(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H' && ISLANDS[n].see));
+    { const H = L.filter(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H'), sv = new Set(H.map(n => !!ISLANDS[n].see)); for (const [b, see] of TERRAIN_ED.seeBtns || []) b.classList.toggle('on', sv.size === 1 && sv.has(see)); }
     if (TERRAIN_ED.ugBtn) TERRAIN_ED.ugBtn.classList.toggle('on', L.some(n => ISLANDS[n] && shpK(ISLANDS[n]) !== 'H' && shpUGOn(ISLANDS[n]))); }   // (HIDE INTERIOR - 50-land-islands islToggleUG)
   if (TERRAIN_ED.hills) {                                         // (the HILLS slider: the picked pieces' amount, or blank when they differ)
     const H = TERRAIN_ED.hills, ok = !!P, set = new Set();
@@ -51163,7 +51178,6 @@ function terrainRefresh() {
   terrainRefresh0();
 }
 function terrainRefresh0() { const isl = ISL_ED.dirty; ISL_ED.dirty = false; const ld = LAND_ED.dirty; floorRefresh(); landRefresh(); if (isl && !ld && LAND && land.cell) landEdited(); terrainSync(); }
-function terrainReset() { if (JSON.stringify(KR_SET) !== JSON.stringify(KR_DEF_SET)) { KR_SET = JSON.parse(JSON.stringify(KR_DEF_SET)); krSetSave(); } if (JSON.stringify(WRECK_SET) !== JSON.stringify(WRECK_DEF)) { WRECK_SET = JSON.parse(JSON.stringify(WRECK_DEF)); wreckSave(); } landReset(); if (ISLANDS.length) { ISLANDS = []; islChanged(); } terrainShowTa(false); TERRAIN_ED.sel = null; terrainSyncSkin(); terrainSync(); }
 // COPY gives the world as text: I the shapes, ST the structures, N the creature areas, LK the lakes' levels, K the krakens, P the
 // wrecks, BG the backgrounds; LOAD takes it (Nov 3: the old frame's D / DO / DX / X / W / S / T gone - read and let go)
 function terrainCopyText() { const o = {}; if (STRS.length) o.ST = STRS; if (NATURE.length) o.N = NATURE; if (ISLANDS.length) o.I = ISLANDS; if (LAKE_SET.length) o.LK = LAKE_SET; o.K = KR_SET; o.P = WRECK_SET; o.BG = BGS;   /* (every kraken and every wreck placed - user Nov 3 08:36) */ return JSON.stringify(o); }
@@ -51188,14 +51202,6 @@ function terrainLoad(text) {
   if (o.N !== undefined || NATURE.length) { NATURE = natureValid(o.N) ? JSON.parse(JSON.stringify(o.N)) : []; NE.sel = null; natureChanged(); }   // (the fish areas - 50-zz-nature)
   if (o.ST !== undefined || STRS.length) { STRS = strsValid(o.ST) ? strsFix(JSON.parse(JSON.stringify(o.ST))) : []; SE.sel = []; strChanged(); }   // (the placed structures - 50-zz-struct)
 }
-function terrainShowTa(on) {
-  if (!TERRAIN_ED.ta) {
-    const cat = TERRAIN_ED.btn && TERRAIN_ED.btn.parentNode; if (!cat) return { value: '', select() { } };
-    const t = document.createElement('textarea'); t.spellcheck = false; t.style.flexBasis = '100%'; t.hidden = true; cat.appendChild(t); TERRAIN_ED.ta = t;
-  }
-  if (on !== undefined) TERRAIN_ED.ta.hidden = !on;
-  return TERRAIN_ED.ta;
-}
 function terrainTabInit(b) {
   TERRAIN_ED.btn = FLOOR_ED.btn = LAND_ED.btn = b;                 // (the floor's and the land's handles show while this does)
   setTimeout(() => {
@@ -51205,17 +51211,11 @@ function terrainTabInit(b) {
     cat.appendChild(n); TERRAIN_ED.note = n;
   }, 0);
 }
-terrainReset.init = terrainTabInit;
 NSKY.editor.TUNE.sliders('BG', 'UNDERGROUND', ['bgug']);   // (UNDERGROUND LIGHT, 50-land-terrain.js ltDist - a look: WORLD PROPERTIES > BACKGROUND > BG, user Nov 1)
 // (REFRESH: the editor's top bar, for every edit of the world - 50-zzz-world-ed.js, user Nov 1)
 const skinBtn = (lab, v, desc) => { const f = () => terrainMark(v); f.init = b => { (TERRAIN_ED.skinBtns || (TERRAIN_ED.skinBtns = [])).push([b, v]);
   if (!TERRAIN_ED.skinNote) setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.skinNote) return; terrainHillsRow(cat); const n = document.createElement('div'); n.className = 'tabnote'; cat.appendChild(n); TERRAIN_ED.skinNote = n; terrainSyncSkin(); }, 0); }; return [lab, desc, f]; };
-NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
-  skinBtn('FOREST', 'F', 'Picked segments: forest ground'),
-  skinBtn('DESERT', 'D', 'Picked segments: desert ground'),
-  skinBtn('TROPICAL', 'T', 'Picked segments: tropical ground and plants'),
-  skinBtn('SEA', 'S', 'Picked segments: sea floor'),
-]);
+
 // (user Oct 29: "We should have a 'split segment' and you have a slider for how many points you want to split it in")
 // each picked piece of line cut into N even pieces: N - 1 handles put on the line as it is (the shape unchanged), the
 // piece's skin and hills on each; a country's fixed stretches take none
@@ -51254,7 +51254,7 @@ function terrainDelSeg() {
 }
 function terrainSyncSplit() {
   const s = TERRAIN_ED.sel, on = !!(s && selPts(s));
-  for (const b of TERRAIN_ED.splitBtns || []) { b.textContent = 'SPLIT ' + ED_SPLIT.v; b.disabled = !on; b.style.opacity = on ? '' : '0.4'; }
+  for (const b of TERRAIN_ED.splitBtns || []) { b.textContent = 'SPLIT SEGMENT ' + (typeof btnVar === 'function' ? btnVar('in ' + ED_SPLIT.v) : ED_SPLIT.v); b.disabled = !on; b.style.opacity = on ? '' : '0.4'; }
   for (const b of TERRAIN_ED.delSegBtns || []) { b.disabled = !on; b.style.opacity = on ? '' : '0.4'; }
   if (TERRAIN_ED.splitRow) TERRAIN_ED.splitRow.inp.value = ED_SPLIT.v;
   if (TERRAIN_ED.splitNote) TERRAIN_ED.splitNote.textContent = on ? (selHi(s) > selLo(s) ? (selHi(s) - selLo(s) + 1) + ' segments picked.' : '1 segment picked.') : 'Pick a segment.';
@@ -51272,9 +51272,7 @@ function terrainSplitRow(b) {
 }
 terrainSplit.init = b => { (TERRAIN_ED.splitBtns || (TERRAIN_ED.splitBtns = [])).push(b); setTimeout(() => terrainSplitRow(b), 0); };
 terrainDelSeg.init = b => { (TERRAIN_ED.delSegBtns || (TERRAIN_ED.delSegBtns = [])).push(b); };
-NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT', [
-  ['SPLIT', 'Cut the picked segments into equal pieces', terrainSplit],
-]);   // (DELETE: the editor's one, on its top bar - user Nov 1)
+   // (DELETE: the editor's one, on its top bar - user Nov 1)
 // (user Oct 28, 21:04) the island lines: in the middle plane, behind the water - the boats and the subs go through them
 // (the Story spec section 8: 'Replace "Create Island" with "Create Segment"' - a new segment comes picked whole, so FOREST /
 // DESERT / TROPICAL type all of it; today every created segment is an island - water passes through it)
@@ -51282,35 +51280,48 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT', [
 // (user 14:02: "the Island should be highlighted by default so we know. And when we change to Solid, it should change") the picked
 // shape's kind lit, as the skin buttons are (terrainSyncSkin)
 // (user 14:23) a hole dark (the default) or SEE-THROUGH: lit when the picked holes are
-const seeBtn = () => { const f = () => islToggleSee(); f.init = b => { TERRAIN_ED.seeBtn = b; }; return ['SEE-THROUGH', 'Picked hole shows what is behind (off: dark)', f]; };
+// (user 14:23; Nov 7: CAVE TYPE) a cave or tunnel CAVE (dark - the default) or HOLE (see-through): lit as the picked ones are
+const caveTypeBtn = (lab, see, desc) => { const f = () => islSetSee(see); f.init = b => (TERRAIN_ED.seeBtns || (TERRAIN_ED.seeBtns = [])).push([b, see]); return [lab, desc, f]; };
 // (user Nov 5 20:22) a terrain shape dark inside as the ground (on) or its rock seen all the way in (off): lit when the picked shapes are
 const ugBtn = () => { const f = () => islToggleUG(); f.init = b => { TERRAIN_ED.ugBtn = b; }; return ['HIDE INTERIOR', 'Picked shape is dark inside (off: see its rock)', f]; };
 const kindBtn = (lab, k, desc) => { const f = () => islSetKind(k); f.init = b => (TERRAIN_ED.kindBtns || (TERRAIN_ED.kindBtns = [])).push([b, k]); return [lab, desc, f]; };
+
+// (Nov 7, user: "TERRAIN EDITOR Changes ... 2 CLEAR SECTIONS: TERRAIN SHAPES - only these options, to create terrain ... SELECTED
+// PROPERTIES (based on what you have selected)") the tab: TERRAIN SHAPES - what makes a new shape; SELECTED PROPERTIES - its parts shown
+// by what's picked: SEGMENT TYPE and SEGMENT ACTIONS for any shape, TERRAIN TYPE for a terrain shape, CAVE TYPE for a cave or tunnel
+islAdd.init = terrainTabInit;
 NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN SHAPES', [
   ['CREATE TERRAIN', 'New terrain shape in the view', islAdd],
-  ['CREATE HOLE', 'New hole that cuts the terrain', islAddHole],
-  ['CREATE TUNNEL', 'New tunnel: a path with 3 width points', islAddTunnel],
-  kindBtn('SOLID', 'S', 'Picked shape: solid foreground, blocks boats'),
-  kindBtn('ISLAND', 'I', 'Picked shape: behind the water, boats pass'),
-  kindBtn('HOLE', 'H', 'Picked shape: cuts the terrain'),
-  seeBtn(),
-  ugBtn(),
+  ['CREATE TUNNEL', 'New tunnel: a path carved with a width', islAddTunnel],
+  ['CREATE CAVE', 'New cave: a closed shape carved out', islAddHole],
+]);
+NSKY.editor.TUNE.buttons('TERRAIN', '=SELECTED PROPERTIES', []);
+NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
+  skinBtn('FOREST', 'F', 'Picked segments: forest ground'),
+  skinBtn('DESERT', 'D', 'Picked segments: desert ground'),
+  skinBtn('TROPICAL', 'T', 'Picked segments: tropical ground and plants'),
+  skinBtn('SEA', 'S', 'Picked segments: sea floor'),
+]);
+NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT ACTIONS', [
+  ['SPLIT SEGMENT', 'Cut the picked segments into equal pieces', terrainSplit],
   ['SPLIT SHAPE', 'Cut the shape in two at the picked segment', islSplitShape],
 ]);
+const secOf = (key, init) => { const f = init || (() => { }); return b => { f(b); setTimeout(() => { if (b.parentNode) (TERRAIN_ED.secs || (TERRAIN_ED.secs = {}))[key] = b.parentNode; terrainSyncSecs(); }, 0); }; };
+{ const k = kindBtn('SOLID', 'S', 'Picked shape: solid foreground, blocks boats'); k[2].init = secOf('terrain', k[2].init);
+  NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN TYPE', [k, kindBtn('ISLAND', 'I', 'Picked shape: behind the water, boats pass'), ugBtn()]); }
+{ const c = caveTypeBtn('CAVE', false, 'Picked cave or tunnel: dark inside'); c[2].init = secOf('cave', c[2].init);
+  NSKY.editor.TUNE.buttons('TERRAIN', 'CAVE TYPE', [c, caveTypeBtn('HOLE', true, 'Picked cave or tunnel: see what is behind')]); }
+// the SELECTED PROPERTIES parts for what's picked: TERRAIN TYPE with a terrain shape, CAVE TYPE with a cave or tunnel
+function terrainSyncSecs() {
+  const S = TERRAIN_ED.secs; if (!S) return;
+  const s = TERRAIN_ED.sel, L = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : []).filter(n => ISLANDS[n]), ks = L.map(n => shpK(ISLANDS[n]));
+  if (S.terrain) S.terrain.hidden = !ks.some(k => k !== 'H');
+  if (S.cave) S.cave.hidden = !ks.some(k => k === 'H');
+}
 // (OBJECT TEAM gone, user Nov 1: a tower, a dock, an airport is picked in the world and deleted with the editor's DELETE; a tower
 // is added with the VEHICLE tab's SPAWN)
 // (Nov 3: the WORLD SIZE buttons and the GROWTH slider gone - the world's size is its shapes', 50-zzzz-world-size.js)
-NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN DATA', [
-  ['RESET TO DEFAULT', 'Restore the built-in terrain', terrainReset],
-  ['COPY POINTS', 'Copy the terrain points as text', b => {
-    const t = terrainShowTa(true); t.value = terrainCopyText(); t.select();
-    try { navigator.clipboard.writeText(t.value).then(() => { b.textContent = 'COPIED'; setTimeout(() => { b.textContent = 'COPY POINTS'; }, 1500); }, () => { }); } catch (e) { try { document.execCommand('copy'); } catch (e2) { } }
-  }],
-  ['LOAD POINTS', 'Load terrain points pasted below', () => {
-    const t = terrainShowTa(true);
-    try { terrainLoad(t.value); } catch (e) { t.value = 'not valid: ' + e.message + '\n' + t.value; }
-  }],
-]);
+// (Nov 7, user: "Remove Terrain Data section" - RESET / COPY POINTS / LOAD POINTS gone: snapshots carry the world)
 
 /* ================================================================
    LAND TEST (user Oct 25): the tank and the helicopter
