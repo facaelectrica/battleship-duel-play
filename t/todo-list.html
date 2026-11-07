@@ -3241,11 +3241,12 @@ const ptOk = p => Array.isArray(p) && (p.length === 2 || (p.length === 3 && SKIN
 // [s, dy, skin, hills, spiky, round], the ones at their defaults (null, 1, 0, 0) left off the end
 const ptSpiky = p => p.length > 4 ? p[4] : 0, ptRound = p => p.length > 5 ? p[5] : 0;
 // (user Nov 7, the TODO list: "select a control point in the terrain shape AND have a slider from sharp to curved for that tangent") a
-// point's eighth item: CURVE, 0 a sharp corner there .. 1 fully curved (none: 1) - the shapes' one closed curve, 50-land-shapes.js shpPoly
-const ptCurve = p => p.length > 7 && p[7] != null ? p[7] : 1;
-function ptSetCurve(p, v) { while (p.length < 7) p.push(p.length === 2 ? null : p.length === 3 ? 1 : 0); p[7] = v; ptTrim(p); }
+// point's eighth item: CURVE, 0 a sharp corner there .. 1 fully curved (none: AUTO - the line as it always was: smooth along, a corner
+// where it turns back) - the shapes' one closed curve, 50-land-shapes.js shpPoly
+const ptCurve = p => p.length > 7 && p[7] != null ? p[7] : null;
+function ptSetCurve(p, v) { while (p.length < 7) p.push(p.length === 2 ? null : p.length === 3 ? 1 : 0); p[7] = v; if (v == null) p.length = 7; ptTrim(p); }
 function ptFill(p) { if (p.length < 3) p[2] = null; if (p.length < 4) p[3] = 1; if (p.length < 5) p[4] = 0; if (p.length < 6) p[5] = 0; return p; }
-function ptTrim(p) { if (p.length === 8 && (p[7] == null || p[7] === 1)) p.length = 7; if (p.length === 7 && !p[6]) p.length = 6; if (p.length === 6 && !p[5]) p.length = 5; if (p.length === 5 && !p[4]) p.length = 4; if (p.length === 4 && p[3] === 1) p.length = 3; if (p.length === 3 && p[2] === null) p.length = 2; return p; }
+function ptTrim(p) { if (p.length === 8 && p[7] == null) p.length = 7; if (p.length === 7 && !p[6]) p.length = 6; if (p.length === 6 && !p[5]) p.length = 5; if (p.length === 5 && !p[4]) p.length = 4; if (p.length === 4 && p[3] === 1) p.length = 3; if (p.length === 3 && p[2] === null) p.length = 2; return p; }
 // (user Oct 29: "For each segment we would control the smoothness") a point's fourth item: how much of the ground's own small
 // hills - the land's waves, the floor's zigzag - the piece of line from it to the next keeps (1, or none: as it always was;
 // 0: smooth). Where two pieces meet their amounts blend over a quarter of each, so the ground never steps.
@@ -4476,7 +4477,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 784;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 12:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 07 12:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -46811,21 +46812,36 @@ function shpPoly(I) {
     Object.defineProperty(I, '_polySig', { value: sig, writable: true, configurable: true, enumerable: false });
     return poly;
   }
-  // (user Nov 7, the TODO list: "one closed curve for every shape" - the S-curves and overhangs; it was cut into runs that only go
-  // one way across, each a curve of y over x, with a corner wherever the line turned back) ONE CLOSED CURVE through the points, in
-  // the loop's order: at each point a tangent along its two neighbours (as long as the shorter of its two edges, times its CURVE -
-  // 0 a sharp corner), each edge a cubic between its two points, sampled about a cell apart; an edge's marks (SPIKY, ROUND, HILLS
-  // over 100%) laid on it as before, as much as it runs across (lineShape)
+  // (user Nov 7, the TODO list: "one closed curve for every shape" - S-curves and overhangs; "a slider from sharp to curved for that
+  // tangent") ONE CLOSED CURVE through the points in the loop's order, each edge a cubic between its two points. A point's CURVE
+  // (ptCurve) sets its tangent: AUTO as the line always was - along the line, the slope of the monotone cubic (flat at peaks and
+  // hollows, steep walls kept steep: the same curve as before), and a sharp corner where the line turns back across; 0 a sharp
+  // corner; up to 1 rounded - at a turn, along its two neighbours. Sampled about a cell apart; an edge's marks (SPIKY, ROUND, HILLS
+  // over 100%) on it as before, as much as it runs across (lineShape)
   const X = [], Y = [], E = [], L = I.p, n = L.length;
   const PX = k => L[(k + n) % n][0], PY = k => WATER_Y + L[(k + n) % n][1];
-  const tan = k => {
-    const ax = PX(k + 1) - PX(k - 1), ay = PY(k + 1) - PY(k - 1), d = Math.hypot(ax, ay) || 1;
-    const l = Math.min(Math.hypot(PX(k + 1) - PX(k), PY(k + 1) - PY(k)), Math.hypot(PX(k) - PX(k - 1), PY(k) - PY(k - 1))) * ptCurve(L[(k + n) % n]);
-    return [ax / d * l, ay / d * l];
+  const sl = k => { const dx = PX(k + 1) - PX(k); return dx === 0 ? null : (PY(k + 1) - PY(k)) / dx; };   // (edge k's slope; null: straight up or down)
+  const sg = k => Math.sign(PX(k + 1) - PX(k));
+  // the tangent at point k for edge e (k's own edge or the one before it): [tx, ty]
+  const tan = (k, e) => {
+    const kk = (k + n) % n, c = ptCurve(L[kk]), turn = sg(k - 1) !== sg(k) || sg(k) === 0;
+    const hx = PX(e + 1) - PX(e);
+    if (turn) {                                                   // (where it turns back: a corner, or rounded by its CURVE)
+      if (!c) { const d = sl(e); return d === null ? [0, 0] : [hx, hx * d]; }   // (its own edge's slope, as each run's end was)
+      const ax = PX(k + 1) - PX(k - 1), ay = PY(k + 1) - PY(k - 1), dd = Math.hypot(ax, ay) || 1;
+      const l = c * Math.min(Math.hypot(PX(k + 1) - PX(k), PY(k + 1) - PY(k)), Math.hypot(PX(k) - PX(k - 1), PY(k) - PY(k - 1)));
+      return [ax / dd * l, ay / dd * l];
+    }
+    const d0 = sl(k - 1), d1 = sl(k), m = d0 * d1 <= 0 ? 0 : (d0 + d1) / 2, f = c == null ? 1 : c;   // (the monotone cubic's slope)
+    return [hx * f, hx * m * f];
   };
   for (let k = 0; k < n; k++) {
-    const x0 = PX(k), y0 = PY(k), x1 = PX(k + 1), y1 = PY(k + 1), [m0x, m0y] = tan(k), [m1x, m1y] = tan(k + 1);
-    const len = Math.hypot(x1 - x0, y1 - y0), steps = Math.max(1, Math.ceil(len / LT_CELL)), p = L[k];
+    const x0 = PX(k), y0 = PY(k), x1 = PX(k + 1), y1 = PY(k + 1), p = L[k];
+    let [m0x, m0y] = tan(k, k), [m1x, m1y] = tan(k + 1, k);
+    { const d = sl(k), hx = x1 - x0;                                // (the monotone cubic's limit: no overshoot past its points)
+      if (d && hx) { const a = (m0y / hx) / d, b = (m1y / hx) / d, s2 = a * a + b * b; if (s2 > 9) { const t = 3 / Math.sqrt(s2); m0y *= t; m1y *= t; } }
+      else if (d === 0) { if (Math.abs(m0x) > 0 && sg(k - 1) === sg(k)) m0y = 0; if (sg(k + 1) === sg(k)) m1y = 0; } }
+    const len = Math.hypot(x1 - x0, y1 - y0), steps = Math.max(1, Math.ceil(Math.max(Math.abs(x1 - x0), len * 0.5) / LT_CELL));
     const mk = p.length > 3 && x1 !== x0 ? [[Math.min(x0, x1), 0, ...p.slice(2)], [Math.max(x0, x1), 0]] : null;   // (its marks, across the edge's span)
     for (let i = 0; i < steps; i++) {
       const t = i / steps, t2 = t * t, t3 = t2 * t, h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
@@ -51302,7 +51318,7 @@ function curvePts() {
 function terrainCurveRow(cat) {
   const r = document.createElement('div'); r.className = 'row';
   r.innerHTML = '<label>CURVE</label><input type="range" min="0" max="100" step="5"><output></output><span class="dv"></span>';
-  const inp = r.querySelector('input'); r.querySelector('label').title = 'At the picked points: sharp corner (0%) to curved';
+  const inp = r.querySelector('input'); r.querySelector('label').title = 'At the picked points: sharp (0%) to curved (AUTO: as drawn)';
   inp.addEventListener('input', () => { const L = curvePts(); if (!L.length) return; for (const p of L) ptSetCurve(p, +inp.value / 100); islChanged(); terrainSyncSkin(); });
   cat.appendChild(r); TERRAIN_ED.curve = { inp, out: r.querySelector('output') };
 }
@@ -51336,7 +51352,7 @@ function terrainSyncSkin() {
     R.inp.disabled = !ok; if (set.size === 1) R.inp.value = [...set][0];
     R.out.textContent = !ok ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED';
   }
-  if (TERRAIN_ED.curve) { const C2 = TERRAIN_ED.curve, L = curvePts(), set = new Set(L.map(p => Math.round(ptCurve(p) * 100))); C2.inp.disabled = !L.length; if (set.size === 1) C2.inp.value = [...set][0]; C2.out.textContent = !L.length ? '' : set.size === 1 ? [...set][0] + '%' : 'MIXED'; }
+  if (TERRAIN_ED.curve) { const C2 = TERRAIN_ED.curve, L = curvePts(), set = new Set(L.map(p => ptCurve(p) == null ? 'AUTO' : Math.round(ptCurve(p) * 100))); C2.inp.disabled = !L.length; if (set.size === 1 && [...set][0] !== 'AUTO') C2.inp.value = [...set][0]; C2.out.textContent = !L.length ? '' : set.size === 1 ? ([...set][0] === 'AUTO' ? 'AUTO' : [...set][0] + '%') : 'MIXED'; }
   const n = s ? selHi(s) - selLo(s) + 1 : 0, what = (s && s.I != null && ISLANDS[s.I] ? SHP_NAME[shpK(ISLANDS[s.I])] + ' ' + (s.I + 1) + ', ' : '') + (n > 1 ? 'the ' + n + ' white pieces: ' : 'the white piece: ');
   if (TERRAIN_ED.skinNote && s && s.Is) { TERRAIN_ED.skinNote.textContent = s.Is.length + (s.Is.length > 1 ? ' shapes' : ' shape') + ' picked: drag, or set a type.'; return; }
   if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = !s ? 'Pick a piece of line.' : what + (sk === 'F' ? 'FOREST' : sk === 'D' ? 'DESERT' : sk === 'T' ? 'TROPICAL' : sk === 'S' ? 'SEA' : sk === 'mixed' ? 'MIXED' : 'NONE') + '.';
