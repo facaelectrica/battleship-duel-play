@@ -1930,24 +1930,29 @@ class ColTable {
    Not a game system: pictures are the page's drawing, never in the simulation's tables or the worker (rules.md section 7, rule 5).
    Readings: the perf panel's PICS line, __game.pics() (the stores, biggest first).
    ================================================================ */
-const PIC_BUDGET = { touch: 280e6, desktop: 900e6 };   // (bytes of canvas the page may hold: an iPad / phone - all canvases share one
-                                                        // limit there, and the GPU keeps a texture of most of them too - and a computer)
+const PIC_BUDGET = { touch: 450e6, desktop: 1600e6 };  // (bytes of pictures the page may hold - its canvases and the graphics card's textures and
+                                                        // layers together: an iPad / phone, where they share one graphics process, and a computer)
 const PIC_IDLE = 45;                                    // (seconds undrawn before a kept picture is let go, budget or not)
 const PIC_HOLD = 90;                                    // (frames: a picture drawn this recently is never let go)
 const PIC_PACK_IDLE = 300;                              // (seconds undrawn before a packable one is packed, budget or not: an old world's let go)
-const PICS = { bytes: 0, kept: 0, frame: 0, t: 0, live: new Map(), stores: {}, drops: 0, over: false, budget: 0, it: null, trimF: 0, fps: 60, packN: 0, packedB: 0 };
+const PIC_EASE = 0.6;                                   // (TIGHT ends once the pictures are under this much of the budget for ten seconds)
+const PICS = { bytes: 0, kept: 0, frame: 0, t: 0, live: new Map(), stores: {}, drops: 0, over: false, budget: 0, it: null, trimF: 0, fps: 60, packN: 0, packedB: 0, tight: false, easeT: 0 };
+// TIGHT (PICS.tight): the page has been over its budget and isn't yet well under it again. A store with a cheaper way of working - fewer
+// or smaller layers, the same picture - uses it while it's on (the sky's decks: sky/17-frame.js drawDeck). Read it, don't set it
 // (which: an iPad / iPhone - Safari says Macintosh on an iPad, with touch - or an Android; a computer with a touch screen is a computer)
 const picShared = () => { try { const u = navigator.userAgent || ''; return /iPhone|iPad|iPod|Android/.test(u) || (/Macintosh/.test(u) && navigator.maxTouchPoints > 1); } catch (e) { return false; } };
 PICS.budget = picShared() ? PIC_BUDGET.touch : PIC_BUDGET.desktop;
+// (?pics=1: each canvas and texture named by the function that made it - picReport's makers - so every byte has a name; off, it costs nothing)
+const PIC_TAG = typeof location !== 'undefined' && /[?&]pics=1/.test(location.search);
+const picMaker = () => {
+  const L = (new Error().stack || '').split('\n').map(s => s.trim()).filter(s => s.startsWith('at ') && !/\b(maker|picMaker|note|put|makeCanvas|set|createElement|flipCanvas|copyCanvas|reuseCanvas|texImage2D|texStorage2D|renderbufferStorage|renderbufferStorageMultisample|glNewTex|makeLayer|GLTarget)\b/.test(s) && !/G\.<computed>|WebGL2RenderingContext|Function\.apply/.test(s));
+  return (L[0] || '?').replace(/^at /, '').replace(/ \(.*$/, '').replace(/https?:\S+/, '').replace(/^Object\./, '') || '?';
+};
 // 1. counting: every canvas as it's sized (and its count back when it's collected)
 (() => {
   if (typeof HTMLCanvasElement === 'undefined' || (typeof SW_IN_WORKER !== 'undefined' && SW_IN_WORKER)) return;
   const sizes = new WeakMap(), gone = typeof FinalizationRegistry === 'function' ? new FinalizationRegistry(r => { PICS.bytes -= r.b; }) : null;
-  // (?pics=1: each canvas named by the function that made it - picReport's makers - so every byte has a name; off, it costs nothing)
-  const tagOn = typeof location !== 'undefined' && /[?&]pics=1/.test(location.search), maker = () => {
-    const L = (new Error().stack || '').split('\n').map(s => s.trim()).filter(s => s.startsWith('at ') && !/\b(maker|note|makeCanvas|set|createElement|flipCanvas|copyCanvas|reuseCanvas)\b/.test(s));
-    return (L[0] || '?').replace(/^at /, '').replace(/ \(.*$/, '').replace(/https?:\S+/, '').replace(/^Object\./, '') || '?';
-  };
+  const tagOn = PIC_TAG, maker = picMaker;
   if (tagOn) PICS.tags = [];
   const dW = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width'), dH = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
   const note = c => {
@@ -1974,6 +1979,34 @@ PICS.budget = picShared() ? PIC_BUDGET.touch : PIC_BUDGET.desktop;
     const f = P2[m]; if (typeof f !== 'function') continue;
     P2[m] = function (src) { if (src) { if (src._pk) picUnpack(src); if (src._pu !== undefined) src._pu = PICS.frame; } return f.apply(this, arguments); };
   }
+})();
+// 1b. the graphics card's own memory, counted the same way: every texture and render buffer as it's given its size, back when it's
+// deleted - the drawn pictures' textures, the atlas, the GPU layers (the sky's decks, the world's kept tiles) - PICS.gpu. On an iPad
+// it shares the graphics process's memory with the canvases, so the budget weighs both (picTrim)
+PICS.gpu = 0;
+(() => {
+  if (typeof WebGL2RenderingContext === 'undefined' || (typeof SW_IN_WORKER !== 'undefined' && SW_IN_WORKER)) return;
+  const G = WebGL2RenderingContext.prototype, size = new WeakMap();
+  const st = gl => gl.__ps || (gl.__ps = { unit: 0, tex: [], rb: null });
+  const bpp = (gl, f) => f === gl.RGBA16F ? 8 : f === gl.RGBA32F ? 16 : f === gl.R8 || f === gl.ALPHA || f === gl.LUMINANCE || f === gl.STENCIL_INDEX8 ? 1 : f === gl.RG8 || f === gl.DEPTH_COMPONENT16 ? 2 : 4;
+  if (PIC_TAG) PICS.gtags = [];
+  const put = (o, b) => { if (!o) return; const was = size.get(o) || 0; PICS.gpu += b - was; size.set(o, b); if (PIC_TAG) { let r = o.__pt; if (!r) { r = o.__pt = { b: 0 }; PICS.gtags.push(r); } r.b = b; if (b) r.by = PICS.tagNext || picMaker(); } };
+  const wrap = (m, fn) => { const f = G[m]; if (typeof f === 'function') G[m] = function () { fn.call(this, arguments); return f.apply(this, arguments); }; };
+  wrap('activeTexture', function (a) { st(this).unit = a[0] - this.TEXTURE0; });
+  wrap('bindTexture', function (a) { if (a[0] === this.TEXTURE_2D) st(this).tex[st(this).unit] = a[1]; });
+  wrap('bindRenderbuffer', function (a) { st(this).rb = a[1]; });
+  wrap('texImage2D', function (a) {
+    if (a[0] !== this.TEXTURE_2D || a[1] !== 0) return;
+    let w, h; if (a.length >= 8) { w = a[3]; h = a[4]; } else { const s = a[5]; w = s && (s.naturalWidth || s.videoWidth || s.width); h = s && (s.naturalHeight || s.videoHeight || s.height); }
+    put(st(this).tex[st(this).unit], (w * h * bpp(this, a[2])) || 0);
+  });
+  wrap('texStorage2D', function (a) { if (a[0] === this.TEXTURE_2D) put(st(this).tex[st(this).unit], a[3] * a[4] * bpp(this, a[2]) * (a[1] > 1 ? 1.34 : 1)); });
+  wrap('renderbufferStorage', function (a) { put(st(this).rb, a[2] * a[3] * bpp(this, a[1])); });
+  wrap('renderbufferStorageMultisample', function (a) { put(st(this).rb, a[3] * a[4] * bpp(this, a[2]) * Math.max(1, a[1])); });
+  wrap('deleteTexture', function (a) { put(a[0], 0); });
+  wrap('deleteRenderbuffer', function (a) { put(a[0], 0); });
+  // (the context lost: every texture with it - counted again as they're made anew)
+  if (typeof document !== 'undefined') document.addEventListener('webglcontextlost', () => { PICS.gpu = 0; }, true);
 })();
 // 3. a store's picture: c the canvas, store its name (the readings), drop(c) the store forgetting it, grp what it's used and let go with;
 // soft: something besides its store may still draw it (a plane's side view kept for its wreck) - let go, it's only forgotten (its
@@ -2071,7 +2104,9 @@ function picTrim() {
   const now = performance.now() / 1000, dt = PICS.t ? Math.min(0.25, now - PICS.t) : 1 / 60; PICS.t = now;
   PICS.fps += (1 / Math.max(dt, 1e-3) - PICS.fps) * 0.05;
   const idleF = Math.max(PIC_HOLD, Math.round(PIC_IDLE * PICS.fps)), packF = Math.max(PIC_HOLD, Math.round(PIC_PACK_IDLE * PICS.fps));
-  PICS.over = PICS.bytes > PICS.budget;
+  PICS.over = PICS.bytes + PICS.gpu > PICS.budget;            // (the canvases and the graphics card's own, together)
+  if (PICS.over) { PICS.tight = true; PICS.easeT = 0; }
+  else if (PICS.tight) { if (PICS.bytes + PICS.gpu < PICS.budget * PIC_EASE) { if (!PICS.easeT) PICS.easeT = now; else if (now - PICS.easeT > 10) PICS.tight = false; } else PICS.easeT = 0; }
   // (the idle sweep a slice of the list a frame - the whole list in about a second - so no frame pays for all of it)
   const L = PICS.live, step = Math.max(32, Math.ceil(L.size / 60));
   let i = 0;
@@ -2086,7 +2121,7 @@ function picTrim() {
   if (!PICS.over || PICS.frame - (PICS.trimF || 0) < 30) return;
   PICS.trimF = PICS.frame;
   // over the budget: the longest undrawn first, down to 85% of it (so it isn't back over at the next picture made)
-  const want = PICS.bytes - PICS.budget * 0.85, all = [];
+  const want = PICS.bytes + PICS.gpu - PICS.budget * 0.85, all = [];
   for (const [c, r] of L) { const a = picAge(c, r); if (a > PIC_HOLD) all.push([a, c]); }
   all.sort((p, q) => q[0] - p[0]);
   let freed = 0;
@@ -2095,11 +2130,15 @@ function picTrim() {
 // the readings: what the page holds, what's kept, the budget, and the stores biggest first
 function picReport() {
   const S = Object.entries(PICS.stores).filter(([, b]) => b > 0).sort((a, b) => b[1] - a[1]).map(([k, b]) => k + ' ' + (b / 1e6).toFixed(1));
-  const R = { MB: +(PICS.bytes / 1e6).toFixed(1), keptMB: +(PICS.kept / 1e6).toFixed(1), budgetMB: PICS.budget / 1e6, pictures: PICS.live.size, dropped: PICS.drops, packed: PICS.packN, packedMB: +(PICS.packedB / 1e6).toFixed(1), stores: S };
+  const R = { MB: +(PICS.bytes / 1e6).toFixed(1), gpuMB: +(PICS.gpu / 1e6).toFixed(1), keptMB: +(PICS.kept / 1e6).toFixed(1), budgetMB: PICS.budget / 1e6, tight: PICS.tight, pictures: PICS.live.size, dropped: PICS.drops, packed: PICS.packN, packedMB: +(PICS.packedB / 1e6).toFixed(1), stores: S };
   if (PICS.tags) {                                     // (?pics=1: every canvas held, by the function that made it)
     const by = {}; PICS.tags = PICS.tags.filter(([w]) => w.deref());
     for (const [w, r] of PICS.tags) { if (!r.b) continue; const k = r.by + (PICS.live.has(w.deref()) ? ' (kept)' : ''); const e = by[k] || (by[k] = [0, 0]); e[0] += r.b; e[1]++; }
     R.makers = Object.entries(by).sort((a, b) => b[1][0] - a[1][0]).slice(0, 30).map(([k, [b, n]]) => k + ' ' + (b / 1e6).toFixed(1) + ' x' + n);
+  }
+  if (PICS.gtags) {                                    // (?pics=1: the graphics card's memory, by the function that made each texture)
+    const by = {}; for (const r of PICS.gtags) { if (!r.b) continue; const e = by[r.by] || (by[r.by] = [0, 0]); e[0] += r.b; e[1]++; }
+    R.gpuMakers = Object.entries(by).sort((a, b) => b[1][0] - a[1][0]).slice(0, 20).map(([k, [b, n]]) => k + ' ' + (b / 1e6).toFixed(1) + ' x' + n);
   }
   return R;
 }
@@ -4794,8 +4833,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 801;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 15:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 802;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 16:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6332,8 +6371,9 @@ function drawPerfPanel(x, y) {
     'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + (GLR.on ? '  WEBGL' : '  MODE ' + MODE_NAMES[getMode()] + (BATCH_AUTO ? (abTrial.phase ? ' TRYING' : ' AUTO') : '') + '  [TAP HERE: NEXT MODE]'),
     GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + '  DECKS ' + Math.round(FT.dDraw || 0) + '/' + Math.round(FT.dSkip || 0) + (GLR.lost ? '  LOST' : '') : '',
     'SMOKE ' + smoke.n + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
-    // (Nov 7: the page's picture memory - 04-zzz-pics.js: all it holds, what's kept by the stores, the device's budget, the biggest store)
-    (R => 'PICTURES ' + Math.round(R.MB) + ' MB  KEPT ' + Math.round(R.keptMB) + '  BUDGET ' + Math.round(R.budgetMB) + '  LET GO ' + R.dropped + (R.stores[0] ? '  TOP ' + R.stores[0].toUpperCase() : ''))(picReport()),
+    // (Nov 7: the page's picture memory - 04-zzz-pics.js: its canvases, the graphics card's own, the device's budget for both, what the
+    // stores keep, what's packed, what was let go, the biggest store)
+    (R => 'PICTURES ' + Math.round(R.MB) + ' MB + GPU ' + Math.round(R.gpuMB) + '  BUDGET ' + Math.round(R.budgetMB) + (R.tight ? ' TIGHT' : '') + '  KEPT ' + Math.round(R.keptMB) + '  PACKED ' + R.packed + ' (' + Math.round(R.packedMB) + ' MB)  LET GO ' + R.dropped + (R.stores[0] ? '  TOP ' + R.stores[0].toUpperCase() : ''))(picReport()),
     probe.on || probe.done ? '' : 'TAP AGAIN: MEASURE DRAWING TOO',
   ].filter(l => l);
   // (user Oct 29: "that FPS window is getting extremely wide... why not put some lines below others": a line wider than about
@@ -20443,7 +20483,7 @@ function glSrc(src) {
 
 /* ---- render targets: a texture the GPU draws into, standing in for a canvas ---- */
 class GLTarget {
-  constructor(w, h) { this._w = Math.max(1, w | 0); this._h = Math.max(1, h | 0); this.tex = null; this.fbo = null; this.rb = null; this.epoch = -1; this.stencilClip = null; this.ctx = null; }
+  constructor(w, h) { this._w = Math.max(1, w | 0); this._h = Math.max(1, h | 0); this.tex = null; this.fbo = null; this.rb = null; this.epoch = -1; this.stencilClip = null; this.ctx = null; if (PIC_TAG) this.__by = picMaker(); }   // (__by: who made it - ?pics=1, 04-zzz-pics.js)
   get isGLTarget() { return true; }
   get width() { return this._w; }
   get height() { return this._h; }
@@ -20464,7 +20504,7 @@ class GLTarget {
   ensure() {
     if (this.tex && this.epoch === GLR.epoch) return;
     const gl = GLR.gl;
-    this.tex = glNewTex(this._w, this._h, gl.NEAREST);
+    PICS.tagNext = this.__by; this.tex = glNewTex(this._w, this._h, gl.NEAREST); PICS.tagNext = null;
     this.fbo = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.tex, 0);
@@ -22427,10 +22467,10 @@ const wtPh = L => L.par === 1 ? 0 : (((CAMPX % 2) + 2) % 2) | ((((TOPPX % 2) + 2
 // fully opaque or clear)
 function wtPut(L, t, ph, dirty, full, paint, tint) {
   let cv = t.cv[ph];
-  if (cv && (cv.width !== t.w || cv.height !== t.h)) { if (cv.free) cv.free(); cv = t.cv[ph] = null; }
+  if (cv && (cv.width !== t.w || cv.height !== t.h)) { picForget(cv); if (cv.free) cv.free(); cv = t.cv[ph] = null; }
   const fresh = !cv || t.ep[ph] !== GLR.epoch || !cv.tex;
   if (fresh || dirty) {
-    if (!cv) cv = t.cv[ph] = makeLayer(t.w, t.h);
+    if (!cv) { cv = t.cv[ph] = makeLayer(t.w, t.h); const c0 = cv; picKeep(cv, 'world tiles', () => { if (t.cv[ph] === c0) { c0.free(); t.cv[ph] = null; t.ep[ph] = -1; } }, null, true); }   // (in the page's picture memory - 04-zzz-pics.js: let go over the budget, painted again when next shown)
     const c = cv.getContext('2d'), s = { C, SV, CAMPX, TOPPX, fsLast }, clear = fresh || full;
     if (clear) { c.setTransform(1, 0, 0, 1, 0, 0); c.clearRect(0, 0, t.w, t.h); c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.imageSmoothingEnabled = false; }
     C = c; CAMPX = t.x + (ph & 1); TOPPX = t.y + (ph >> 1); fsLast = null;
@@ -22446,7 +22486,7 @@ function wtSweep(L) {
   if (REG.frame % 120) return;
   for (const T of L.sets.values()) for (const t of T.values()) if (t.cv.some(c => c) && REG.frame - t.seen > WT_FREE) { wtFreeTile(t); L.stats.free = (L.stats.free || 0) + 1; }
 }
-function wtFreeTile(t) { for (let i = 0; i < t.cv.length; i++) { if (t.cv[i] && t.cv[i].free) t.cv[i].free(); t.cv[i] = null; t.ep[i] = -1; } }
+function wtFreeTile(t) { for (let i = 0; i < t.cv.length; i++) { if (t.cv[i]) { picForget(t.cv[i]); if (t.cv[i].free) t.cv[i].free(); } t.cv[i] = null; t.ep[i] = -1; } }
 function wtFreeSet(T) { for (const t of T.values()) wtFreeTile(t); }
 function wtFreeAll(L) { for (const T of L.sets.values()) wtFreeSet(T); L.sets.clear(); }
 /* ---- content checks (stage 4): a tile of things standing still (the reef's, the rocks') holds the items anchored in it - their
@@ -25372,13 +25412,10 @@ function viewBufs(vi, w) {
   return b;
 }
 function deckTargetAt(LB, w, h) {
-  if (!LB.T || LB.T.width !== w || LB.T.height !== h) { LB.T = makeLayer(w, h); LB.ctx = LB.T.getContext(); LB.ctx.imageSmoothingEnabled = false; }
+  if (!LB.T || LB.T.width !== w || LB.T.height !== h) { if (LB.T && LB.T.free) LB.T.free(); LB.T = makeLayer(w, h); LB.ctx = LB.T.getContext(); LB.ctx.imageSmoothingEnabled = false; }   // (the old one's texture freed now, not whenever it's collected)
   return LB.T;
 }
-function deckTarget(LB) {
-  if (!LB.T || LB.T.width !== CW || LB.T.height !== H) { LB.T = makeLayer(CW, H); LB.ctx = LB.T.getContext(); LB.ctx.imageSmoothingEnabled = false; }
-  return LB.T;
-}
+function deckTarget(LB) { return deckTargetAt(LB, CW, H); }
 // ---- the picture and the screen. A view's sky picture is H0 rows of CPX pixels, drawn at the shared deck zoom ZL and laid on
 // the screen magnified by M = zr / ZL about the pivot and the horizon. Its first row is the first the screen shows (V.r0
 // rows below the top of the picture as it would be at M = 1 - so a high, zoomed-in view, its horizon far under the screen,
@@ -25470,7 +25507,7 @@ function deckOut(lay, B, frac) {
 // (perf pass, Oct 29) a deck's veil and rain in a layer of their own, the size of its clouds' layer, laid under it
 function veilTarget(LB) {
   const T = LB.T;
-  if (!LB.TV || LB.TV.width !== T.width || LB.TV.height !== T.height) { LB.TV = makeLayer(T.width, T.height); LB.TV.getContext().imageSmoothingEnabled = false; }
+  if (!LB.TV || LB.TV.width !== T.width || LB.TV.height !== T.height) { if (LB.TV && LB.TV.free) LB.TV.free(); LB.TV = makeLayer(T.width, T.height); LB.TV.getContext().imageSmoothingEnabled = false; }
   return LB.TV;
 }
 // ================================================================== once a frame
@@ -25942,8 +25979,12 @@ function skyVeil1(V) {
 // its clouds keep their place in it, and it is laid where the camera has moved it since. It is drawn again only when the
 // camera has gone a quarter of a view past its anchor - or when something in it changes, as before)
 let DLH = 0;
+// (Nov 7, picture memory: the anchored layer is 2.25 times the view - a quarter of a view more each side - and a deck's veil has one
+// too: on an iPad with two views, 12 of each, ~380 MB of the graphics memory. While the page is short of it (TIGHT, 04-zzz-pics.js)
+// each deck's layers are the view's size instead, as with STILL off: the same picture, laid again when the camera moves a cell)
+const deckSlim = () => typeof PICS !== 'undefined' && PICS.tight;
 function drawDeck(lay, B, horY, vis, withVeil, later) {
-  if ((P.still ?? 1) === 0) { B.lay[lay.name].lw = 0; return drawDeck0(lay, B, horY, vis, withVeil, later, 0, 0, 0); }
+  if ((P.still ?? 1) === 0 || deckSlim()) { B.lay[lay.name].lw = 0; return drawDeck0(lay, B, horY, vis, withVeil, later, 0, 0, 0); }
   const LB = B.lay[lay.name], MX = Math.max(16, W >> 2), MY = Math.max(16, H >> 2), lw = CW + 2 * MX, lh = H + 2 * MY;
   const ioff = Math.floor(lay.A), y0 = lay.baseY;
   let an = LB.anchor;
@@ -36566,7 +36607,7 @@ void main() {
 function cglSetup() {
   const gl = GLR.gl;
   CGL.epoch = GLR.epoch; CGL.prog = null; CGL.wc = CGL.pal = CGL.lampT = CGL.surf = CGL.tile = CGL.lum = null; CGL.lH = CGL.sW = CGL.sH = 0; CGL.tileKey = '';
-  for (const Wn of CGL.live) Wn._gl = null;
+  for (const Wn of CGL.live) { if (Wn._gl && Wn._gl.pk) picForget(Wn._gl.pk); Wn._gl = null; }   // (a new context: the old textures are gone with it)
   CGL.live.clear();
   try {
     const p = gl.createProgram();
@@ -36601,7 +36642,14 @@ function cglWindow(Wn, all) {
   const gl = GLR.gl, max = GLR.maxTex || (GLR.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE));   // (asked once: gl.getParameter waits on the GPU - Oct 31)
   if (Wn.w > max || Wn.h > max) return false;
   let T = Wn._gl;
-  if (!T) { T = Wn._gl = { tex: [], k: 0, row: 0, done: false }; CGL.live.add(Wn); }
+  if (!T) {
+    T = Wn._gl = { tex: [], k: 0, row: 0, done: false }; CGL.live.add(Wn);
+    // (Nov 7, picture memory - 04-zzz-pics.js: a window's cells are 8 bytes a cell on the graphics card - 92 MB for the open world's two
+    // caves. Signed up with the budget, the window itself the group: drawn or near a view it's in use (30-api.js draw); long unseen,
+    // or over the budget, let go - its textures freed, sent up again a slice a frame when a view nears it)
+    const T0 = T; T.pk = { width: Wn.w, height: Wn.h * CGL_NAMES.length / 4 };
+    picKeep(T.pk, 'cave windows', () => { if (Wn._gl === T0) cglFree(Wn); }, Wn, true);
+  }
   if (T.done) return true;
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); glPM(false);
   gl.activeTexture(gl.TEXTURE9);
@@ -36622,8 +36670,13 @@ function cglWindow(Wn, all) {
 }
 // the windows no longer in use (rebuilt): off the chip
 function cglTidy() {
-  const gl = GLR.gl;
-  for (const Wn of CGL.live) if (!CV.wins.includes(Wn)) { if (Wn._gl) for (const t of Wn._gl.tex) if (t) gl.deleteTexture(t); Wn._gl = null; CGL.live.delete(Wn); }
+  for (const Wn of CGL.live) if (!CV.wins.includes(Wn)) cglFree(Wn);
+}
+// a window's textures freed (and out of the picture memory's count)
+function cglFree(Wn) {
+  const gl = GLR.gl, T = Wn._gl;
+  if (T) { if (T.pk) picForget(T.pk); for (const t of T.tex) if (t) gl.deleteTexture(t); }
+  Wn._gl = null; CGL.live.delete(Wn);
 }
 // can this frame's windows be drawn on the chip (WebGL on, the program built)
 function cglOn() {
@@ -36671,7 +36724,7 @@ function cglDraw(ctx, Wn, bx, all, WS, dx, dy, dw, dh, hole) {
   }
   gl.bindTexture(gl.TEXTURE_2D, null);
   // the textures onto their units (0-7 the window's cells - the quad batch's units, so it's told; 10-15 the rest)
-  const T = Wn._gl.tex;
+  const T = Wn._gl.tex; picUse(Wn);   // (drawn: in use - 04-zzz-pics.js)
   for (let i = 0; i < 8; i++) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, T[i]); GLR.unit[i] = T[i]; if (GLR.unitS[i] !== GLR.near) { gl.bindSampler(i, GLR.near); GLR.unitS[i] = GLR.near; } }
   [CGL.pal, CGL.lampT, CGL.wc, CGL.tile, CGL.lum, CGL.surf].forEach((tx, i) => { gl.activeTexture(gl.TEXTURE10 + i); gl.bindTexture(gl.TEXTURE_2D, tx); gl.bindSampler(10 + i, null); });
   gl.useProgram(CGL.prog); GLR.cur.prog = 5;
@@ -37040,7 +37093,18 @@ function draw() {
   // (user Nov 1 21:01, panning in the GAME EDITOR: a cave's cells went up to the GPU a slice a frame only once it was in view,
   // and till they were all there (~60 frames) the CPU drew the whole window - 17 -> 118 ms a frame while panning onto it) every
   // window's cells go up from the moment it's built, a slice a frame (cglWindow's budget), seen or not
-  if (cglOn() && !CV.cpu) { const Wn = CV.wins.find(w => w && !(w._gl && w._gl.done) && !(GLR.maxTex && (w.w > GLR.maxTex || w.h > GLR.maxTex))); if (Wn) cglWindow(Wn); }
+  // (Nov 7, picture memory: in the editor still every window; in a game the windows within a view and a half of this view either
+  // side - the ones it can reach in the second it takes. Those count as in use; one far from both views is let go after a while)
+  if (cglOn() && !CV.cpu) {
+    const ed = typeof EDMODE !== 'undefined' && EDMODE, ax = CAMPX / SV, aw = VWP / SV, m = aw * 1.5;
+    let up = null;
+    for (const w of CV.wins) {
+      if (!w || !(ed || (w.X1 > ax - m && w.X0 < ax + aw + m))) continue;
+      if (w._gl) picUse(w);
+      if (!up && !(w._gl && w._gl.done) && !(GLR.maxTex && (w.w > GLR.maxTex || w.h > GLR.maxTex))) up = w;
+    }
+    if (up) cglWindow(up);
+  }
   const V = viewNow(); if (!V) return;
   const [vx0, vy0, vx1, vy1] = V, all = allLit();
   const t0 = performance.now();
@@ -54017,8 +54081,11 @@ const VEG_KEEP_MS = 1000;
 function vegKeep(M, k, make, free, n) {
   const now = performance.now(); let e = M.get(k);
   if (e) { e.t = now; return e.v; }
-  if (M.size >= n) { let ok = null, ot = Infinity; for (const [kk, q] of M) if (q.t < ot) { ot = q.t; ok = kk; } if (ok !== null && now - ot > VEG_KEEP_MS) { free(M.get(ok).v); M.delete(ok); } }
-  e = { v: make(), t: now }; M.set(k, e); return e.v;
+  if (M.size >= n) { let ok = null, ot = Infinity; for (const [kk, q] of M) if (q.t < ot) { ot = q.t; ok = kk; } if (ok !== null && now - ot > VEG_KEEP_MS) { const v0 = M.get(ok).v; if (v0 && v0.isGLTarget) picForget(v0); free(v0); M.delete(ok); } }
+  e = { v: make(), t: now }; M.set(k, e);
+  // (a plant layer on the GPU in the page's picture memory - 04-zzz-pics.js: over the budget let go, made again when next asked)
+  if (e.v && e.v.isGLTarget) { const E0 = e; picKeep(e.v, 'plant layers', () => { if (M.get(k) === E0) M.delete(k); free(E0.v); }, null, true); }
+  return e.v;
 }
 const vegLayerFree = L => { if (L && L.free) L.free(); };
 const vegPieceFree = P => { if (P && P.c) glFreeSrc(P.c); };
