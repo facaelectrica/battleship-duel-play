@@ -1928,15 +1928,17 @@ const PICS = { bytes: 0, kept: 0, frame: 0, t: 0, live: new Map(), stores: {}, d
 // (which: an iPad / iPhone - Safari says Macintosh on an iPad, with touch - or an Android; a computer with a touch screen is a computer)
 const picShared = () => { try { const u = navigator.userAgent || ''; return /iPhone|iPad|iPod|Android/.test(u) || (/Macintosh/.test(u) && navigator.maxTouchPoints > 1); } catch (e) { return false; } };
 PICS.budget = picShared() ? PIC_BUDGET.touch : PIC_BUDGET.desktop;
+// (?pics=1: each canvas and texture named by the function that made it - picReport's makers - so every byte has a name; off, it costs nothing)
+const PIC_TAG = typeof location !== 'undefined' && /[?&]pics=1/.test(location.search);
+const picMaker = () => {
+  const L = (new Error().stack || '').split('\n').map(s => s.trim()).filter(s => s.startsWith('at ') && !/\b(maker|picMaker|note|put|makeCanvas|set|createElement|flipCanvas|copyCanvas|reuseCanvas|texImage2D|texStorage2D|renderbufferStorage|renderbufferStorageMultisample|glNewTex)\b/.test(s) && !/G\.<computed>|WebGL2RenderingContext|Function\.apply/.test(s));
+  return (L[0] || '?').replace(/^at /, '').replace(/ \(.*$/, '').replace(/https?:\S+/, '').replace(/^Object\./, '') || '?';
+};
 // 1. counting: every canvas as it's sized (and its count back when it's collected)
 (() => {
   if (typeof HTMLCanvasElement === 'undefined' || (typeof SW_IN_WORKER !== 'undefined' && SW_IN_WORKER)) return;
   const sizes = new WeakMap(), gone = typeof FinalizationRegistry === 'function' ? new FinalizationRegistry(r => { PICS.bytes -= r.b; }) : null;
-  // (?pics=1: each canvas named by the function that made it - picReport's makers - so every byte has a name; off, it costs nothing)
-  const tagOn = typeof location !== 'undefined' && /[?&]pics=1/.test(location.search), maker = () => {
-    const L = (new Error().stack || '').split('\n').map(s => s.trim()).filter(s => s.startsWith('at ') && !/\b(maker|note|makeCanvas|set|createElement|flipCanvas|copyCanvas|reuseCanvas)\b/.test(s));
-    return (L[0] || '?').replace(/^at /, '').replace(/ \(.*$/, '').replace(/https?:\S+/, '').replace(/^Object\./, '') || '?';
-  };
+  const tagOn = PIC_TAG, maker = picMaker;
   if (tagOn) PICS.tags = [];
   const dW = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'width'), dH = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, 'height');
   const note = c => {
@@ -1973,7 +1975,8 @@ PICS.gpu = 0;
   const G = WebGL2RenderingContext.prototype, size = new WeakMap();
   const st = gl => gl.__ps || (gl.__ps = { unit: 0, tex: [], rb: null });
   const bpp = (gl, f) => f === gl.RGBA16F ? 8 : f === gl.RGBA32F ? 16 : f === gl.R8 || f === gl.ALPHA || f === gl.LUMINANCE || f === gl.STENCIL_INDEX8 ? 1 : f === gl.RG8 || f === gl.DEPTH_COMPONENT16 ? 2 : 4;
-  const put = (o, b) => { if (!o) return; const was = size.get(o) || 0; PICS.gpu += b - was; size.set(o, b); };
+  if (PIC_TAG) PICS.gtags = [];
+  const put = (o, b) => { if (!o) return; const was = size.get(o) || 0; PICS.gpu += b - was; size.set(o, b); if (PIC_TAG) { let r = o.__pt; if (!r) { r = o.__pt = { b: 0 }; PICS.gtags.push(r); } r.b = b; if (b) r.by = picMaker(); } };
   const wrap = (m, fn) => { const f = G[m]; if (typeof f === 'function') G[m] = function () { fn.call(this, arguments); return f.apply(this, arguments); }; };
   wrap('activeTexture', function (a) { st(this).unit = a[0] - this.TEXTURE0; });
   wrap('bindTexture', function (a) { if (a[0] === this.TEXTURE_2D) st(this).tex[st(this).unit] = a[1]; });
@@ -2116,6 +2119,10 @@ function picReport() {
     const by = {}; PICS.tags = PICS.tags.filter(([w]) => w.deref());
     for (const [w, r] of PICS.tags) { if (!r.b) continue; const k = r.by + (PICS.live.has(w.deref()) ? ' (kept)' : ''); const e = by[k] || (by[k] = [0, 0]); e[0] += r.b; e[1]++; }
     R.makers = Object.entries(by).sort((a, b) => b[1][0] - a[1][0]).slice(0, 30).map(([k, [b, n]]) => k + ' ' + (b / 1e6).toFixed(1) + ' x' + n);
+  }
+  if (PICS.gtags) {                                    // (?pics=1: the graphics card's memory, by the function that made each texture)
+    const by = {}; for (const r of PICS.gtags) { if (!r.b) continue; const e = by[r.by] || (by[r.by] = [0, 0]); e[0] += r.b; e[1]++; }
+    R.gpuMakers = Object.entries(by).sort((a, b) => b[1][0] - a[1][0]).slice(0, 20).map(([k, [b, n]]) => k + ' ' + (b / 1e6).toFixed(1) + ' x' + n);
   }
   return R;
 }
@@ -4780,7 +4787,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 800;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 15:51';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 07 15:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
