@@ -3949,7 +3949,18 @@ const surfOwn = (bn, i) => { const L = BIOME_SURF[bn] || [], m = L[i] && L[i].m,
   return first && ((m === 'grass' && (bn === 'forest' || bn === 'swamp')) || (m === 'sand' && (bn === 'tropical' || bn === 'sea')) || (m === 'snow' && bn === 'ice')); };
 const surfHex = s => [1, 3, 5].map(i => parseInt(String(s).slice(i, i + 2), 16) || 0);
 // a layer's colour for a cell (c, r): its three tones speckled, grit for gravel and ash; k (0-1) how far down the layer it is
+// (the TODO list: "Its look: a palette or a tile picture") a layer's TILE PICTURE (L.t, a small picture's data URL, imported in the Biome Editor):
+// its pixels, read once it's loaded - a cell a pixel, tiled along the ground and down the layer; till then its colours. SURF_TILE: url -> pixels
+const SURF_TILE = new Map();
+let surfTileReady = null;                                   // (the Biome Editor's: the ground painted again once a picture is in)
+function surfTile(url) {
+  let T = SURF_TILE.get(url); if (T) return T.d ? T : null;
+  T = {}; SURF_TILE.set(url, T);
+  try { const im = new Image(); im.onload = () => { const c = makeCanvas(im.width, im.height), g = c.getContext('2d'); g.drawImage(im, 0, 0); T.w = im.width; T.h = im.height; T.d = g.getImageData(0, 0, im.width, im.height).data; if (surfTileReady) surfTileReady(); }; im.src = url; } catch (e) { }
+  return null;
+}
 function surfLayerCol(L, c, r, k) {
+  if (L.t) { const T = surfTile(L.t); if (T) { const x = ((c % T.w) + T.w) % T.w, y = ((r % T.h) + T.h) % T.h, o = (y * T.w + x) * 4; if (T.d[o + 3] > 40) return [T.d[o], T.d[o + 1], T.d[o + 2]]; } }
   const M = SURF_MATS[L.m] || SURF_MATS.dirt, P = Array.isArray(L.c) && L.c.length === 3 ? L.c.map(surfHex) : M.pal, h = hash(c * 1.37 + r * 7.91);
   let col = h < 0.24 ? P[0] : h > 0.86 ? P[2] : P[1];
   if (M.grit && hash(c * 3.1 + r * 0.73) < 0.18) col = hash(c * 0.37 + r * 5.1) < 0.5 ? P[0] : P[2];
@@ -4906,8 +4917,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 806;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 17:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 807;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 17:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -30376,7 +30387,7 @@ function seaFloorCol(x, c, r, d, top) {
   let sd = 0; { let acc = 0; for (let i = 0; i < LS.length; i++) acc = Math.max(acc + surfThick(LS[i], x, 11 + i), LS[i].wl && top != null ? WATER_Y - 6 - top : -1e9); sd = acc; }
   const hs = hash(c * 1.37 + r * 7.91);
   let col;
-  if (LA && (!surfOwn('sea', LA.i) || Array.isArray(LA.L.c))) col = surfLayerCol(LA.L, c, r, LA.k);
+  if (LA && (!surfOwn('sea', LA.i) || Array.isArray(LA.L.c) || LA.L.t)) col = surfLayerCol(LA.L, c, r, LA.k);
   else if (LA) {                                                       // (the sand: three tones speckled, darker toward its foot)
     const k = LA.k, t = hs < 0.22 ? SEA_SAND[1] : hs > 0.9 ? SEA_SAND[2] : SEA_SAND[0];
     col = mix3(t, SEA_SAND[2], k * 0.55);
@@ -48948,7 +48959,7 @@ function buildLand() {
       if (GP && shpInGap(GP, y)) continue;
       if ((wetIsl || solIsl) && y >= land.itop[c] && r < rW && y < top) {   // (Nov 7: a segment's own biome's TERRAIN SURFACE layers too - surfLayerAt)
         let im = islCellM(c, y - land.itop[c], sandy); const IB = ISK_BIO[islSkinC(c)], LA = IB && BIOME_SURF[IB] && BIOME_SURF[IB].length ? surfLayerAt(IB, x, land.itop[c], y - land.itop[c]) : null;
-        if (LA) { const own = surfOwn(IB, LA.i); if (!own) im = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) land.lay[ltIdx(c, r)] = LA.i + 1; }
+        if (LA) { const own = surfOwn(IB, LA.i); if (!own) im = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c) || LA.L.t) land.lay[ltIdx(c, r)] = LA.i + 1; }
         land.cell[ltIdx(c, r)] = im; continue; }   // (y < top: over dry land the segment stops at the ground in front)
       if (y < top) continue;
       if (y < g0 && !shpSolidAt(c, y)) continue;
@@ -48959,7 +48970,7 @@ function buildLand() {
       else m = land.trop[c] ? (TSL && y < Math.max(top + surfThick(TSL, x, 3), TSL.wl ? WATER_Y - 6 : -1e9) ? M_SAND : M_DIRT) :   // (TROPICAL: sand down to the water, rocks from there - user Nov 1)
          y < top + ltGrassD(c) * LT_CELL && sandy < 0.35 ? M_GRASS : M_DIRT;   // (user Oct 31 20:19: the tropical ground is rocks and sand - a band of sand under its grass, the rocks under that)
       // (Nov 7, TERRAIN SURFACE: a layer the ground doesn't lay itself - its material's cell, painted as the layer; one it does, painted so if coloured)
-      if (BNL && m !== M_CONC) { const LA = surfLayerAt(BN, x, top, y - top); if (LA) { const own = surfOwn(BN, LA.i); if (!own) m = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) land.lay[ltIdx(c, r)] = LA.i + 1; } }
+      if (BNL && m !== M_CONC) { const LA = surfLayerAt(BN, x, top, y - top); if (LA) { const own = surfOwn(BN, LA.i); if (!own) m = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c) || LA.L.t) land.lay[ltIdx(c, r)] = LA.i + 1; } }
       land.cell[ltIdx(c, r)] = m;
     }
   }
@@ -65634,6 +65645,7 @@ if (VEG_MODE) (() => {
       });
     }
     // TERRAIN SURFACE: each of the biome's layers - its material, THICKNESS MIN / MAX, WOBBLE, DOWN TO WATER; the preview's ground built again
+    surfTileReady = () => surfRebuild();   // (a layer's tile picture loaded: the ground painted with it)
     let surfT = 0; const surfRebuild = () => { biomeSurfSave(); clearTimeout(surfT); surfT = setTimeout(() => { try { floorSkinStrips = null; landEdited(); terrainSync(); } catch (er) { console.error('surface', er); } /* (the ground built again in place - the view stays) */ }, 300); };
     const MAT_LAB = { grass: 'GRASS', sand: 'SAND', snow: 'SNOW' };
     // an ON / OFF button (as BIRDS: ON): its name, a one-line tooltip
@@ -65659,7 +65671,7 @@ if (VEG_MODE) (() => {
         hd.appendChild(sbtn('DOWN', 'Move this layer down', () => { L.splice(i + 1, 0, L.splice(i, 1)[0]); restruct(); }, i === L.length - 1));
         hd.appendChild(sbtn('REMOVE', 'Take this layer away', () => { L.splice(i, 1); restruct(); }));
         col.appendChild(hd);
-        if (surfOwn(bn, i)) { const n = document.createElement('div'); n.style.cssText = 'color:#9aa3b5;font-size:12px'; n.textContent = 'Drawn with the ground\'s own art until you give it colours'; col.appendChild(n); }
+        if (surfOwn(bn, i)) { const n = document.createElement('div'); n.style.cssText = 'color:#9aa3b5;font-size:12px'; n.textContent = 'Drawn with the ground\'s own art until you give it colours or a picture'; col.appendChild(n); }
         col.appendChild(slider('MIN THICKNESS', 'Thinnest the layer gets, in world units', 0, 120, 0.5, () => ly.a, v => { ly.a = Math.min(v, ly.b); surfRebuild(); }, d0.a != null ? d0.a : 10));
         col.appendChild(slider('MAX THICKNESS', 'Thickest the layer gets, in world units', 0, 120, 0.5, () => ly.b, v => { ly.b = Math.max(v, ly.a); surfRebuild(); }, d0.b != null ? d0.b : 20));
         col.appendChild(slider('VARIATION', 'How much the thickness changes along the ground', 0, 1, 0.05, () => ly.w != null ? ly.w : 1, v => { ly.w = v; surfRebuild(); }, d0.w != null ? d0.w : 1));
@@ -65672,6 +65684,15 @@ if (VEG_MODE) (() => {
             const q = { c: pal()[k] }; sw.onclick = () => feColPick(q, sw, () => { const p = pal().slice(); p[k] = q.c; ly.c = p; surfRebuild(); }); cr.appendChild(sw); });
           cr.appendChild(sbtn('RESET', 'Back to the material\'s own colours', () => { delete ly.c; restruct(); }, !Array.isArray(ly.c)));
           col.appendChild(cr); }
+        // TILE PICTURE: a small picture laid over the layer instead of its colours (made 64 pixels at most, a cell a pixel) - IMPORT / REMOVE
+        { const tr = document.createElement('div'); tr.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+          const lb = document.createElement('span'); lb.textContent = 'TILE PICTURE'; lb.title = lb.dataset.t = 'A small picture repeated over the layer instead of its colours'; lb.style.color = '#9aa3b5'; tr.appendChild(lb);
+          if (ly.t) { const im = document.createElement('img'); im.src = ly.t; im.style.cssText = 'width:34px;height:34px;image-rendering:pixelated;border:1px solid #2c3850;border-radius:4px'; tr.appendChild(im); }
+          const fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'image/*'; fi.hidden = true; tr.appendChild(fi);
+          fi.onchange = () => { const f = fi.files && fi.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { const im = new Image(); im.onload = () => { const k = Math.min(1, 64 / Math.max(im.width, im.height)), c2 = document.createElement('canvas'); c2.width = Math.max(1, Math.round(im.width * k)); c2.height = Math.max(1, Math.round(im.height * k)); const g = c2.getContext('2d'); g.imageSmoothingEnabled = false; g.drawImage(im, 0, 0, c2.width, c2.height); ly.t = c2.toDataURL('image/png'); restruct(); }; im.src = rd.result; }; rd.readAsDataURL(f); };
+          tr.appendChild(sbtn(ly.t ? 'CHANGE' : 'IMPORT', 'Pick a picture from this device', () => fi.click()));
+          if (ly.t) tr.appendChild(sbtn('REMOVE', 'Back to the layer\'s colours', () => { delete ly.t; restruct(); }));
+          col.appendChild(tr); }
         cols.appendChild(col);
       });
       { const col = document.createElement('div'); col.style.cssText = 'display:grid;gap:4px;align-content:start';
