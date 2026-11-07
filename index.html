@@ -62,7 +62,7 @@ body {
 // started in its vegetation mode (VEG_MODE) - the Vegetation Lab's three editors (53-veg-editor.js) over its own world, a flat stretch of TROPICAL
 // ground held in memory (00-world.js: this browser's world never read nor written), the page running the game itself. What it edits are the game's
 // own keys (bd_vegdecks, bd_foliage, bd_vegprefabs, bd_vtune): the game plays them. Opened from the title (VEGETATION EDITOR by GAME EDITOR) - a
-// flag for this tab's next load (sessionStorage 'veged'); BACK TO GAME clears it. The lab's artifact is always in it (window.__vegLab)
+// flag for this tab's next load (sessionStorage 'veged'); CLOSE clears it. The lab's artifact is always in it (window.__vegLab)
 const VEG_MODE = (() => { try { return !!window.__vegLab || sessionStorage.getItem('veged') === '1'; } catch (e) { return !!window.__vegLab; } })();
 if (VEG_MODE) {
   window.__noWorker = true; window.__openSea = true;
@@ -180,7 +180,7 @@ function swBootData(o = {}) {
     store, coarse: mm('(pointer: coarse)') || ('ontouchstart' in window), reduced: mm('(prefers-reduced-motion: reduce)') }, o);
 }
 // ---- the page's side
-const SW = { on: false, worker: null, fail: null, ready: false, seq: 0, wait: new Map(), bootMs: 0, t0: 0, touch: null, gen: 0, liveGen: 0, resyncing: false };
+const SW = { on: false, worker: null, fail: null, ready: false, seq: 0, wait: new Map(), bootMs: 0, t0: 0, touch: null, gen: 0, liveGen: 0, resyncing: false, handing: false };
 function swStart(o) {
   if (SW.worker || !SW_SRC) { if (!SW_SRC) SW.fail = 'no script text'; return; }
   try {
@@ -220,9 +220,20 @@ function swEvents(E) {
   }
 }
 // the worker failed (an error, no snapshot for 5 s): this page goes on with the game itself, from the last snapshot it has
+// (the page's own copy holds only what is drawn while the worker runs: it takes the worker's whole tables first if it still answers,
+// held meanwhile (SWB.taking) - it ran on with the drawn-only copy, erroring every frame, and drew no controls)
 function swFail(why) {
   SW.fail = String(why); console.error('sim worker:', SW.fail);
-  if (SW.live) { SW.live = false; console.warn('sim worker: the page runs the game itself from here'); }
+  if (!SW.live) return;
+  SW.live = false; console.warn('sim worker: the page runs the game itself from here');
+  if (!SW.worker || SWB.taking) return;
+  SWB.taking = (async () => {
+    try {
+      const s = await Promise.race([swAsk('tables'), new Promise((r, j) => setTimeout(() => j(new Error('no answer')), 3000))]);
+      SW.snaps.length = 0; tablesLoad(JSON.parse(s)); computeEnv();
+    } catch (e) { console.warn('sim worker: its game could not be taken back -', e && e.message || e); }
+    finally { SWB.taking = null; }
+  })();
 }
 /* (Oct 31) THE PAGE TAKES THE GAME BACK whenever it needs the whole of it: while the worker runs the game the page's copy holds
    only what is drawn, so whatever reads or writes the whole game here - the GAME EDITOR (it puts the game aside and builds the
@@ -265,13 +276,20 @@ function swHostSeats(m) {
 async function swResync() {
   SW.resyncing = true;
   try {
-    const store = swBootData().store;
-    await swAsk('resync', { mode: MODE, ctl: ctlPick.slice(), extra: EXTRA, store, ui: [!!ui.title, !!ui.menu, !!ui.settings], s: JSON.stringify(tablesSave()) });
+    const store = swBootData().store, gen = SW.gen;
+    // (Nov 7, user: "Everytime I start a game mode, it 'resets' the game after like 5 seconds" - the worker built its world (seconds)
+    // and then took the tables sent BEFORE that build, while this page went on playing: what was done meanwhile - a plane out of its
+    // hangar, a car driven - was put back. Now in two steps: the worker builds its world first, then takes this page's game as it is
+    // at that moment, the page held from then till the worker's first snapshot (SW.handing) so nothing happens here that it misses)
+    await swAsk('resync', { mode: MODE, ctl: ctlPick.slice(), extra: EXTRA, store, ui: [!!ui.title, !!ui.menu, !!ui.settings], s: null });
+    if (SW.gen !== gen) return;                                      // (a newer world was built here meanwhile: the next frame resyncs again)
+    SW.handing = true;
+    await swAsk('load', { s: JSON.stringify(tablesSave()) });
     SW.liveGen = SW.gen; swMirrorReset();
     const s0 = await swAsk('snap', { reset: true }); SW.snaps.length = 0;
     swApply(s0);
   } catch (e) { swFail(e && e.message || e); }
-  finally { SW.resyncing = false; }
+  finally { SW.resyncing = false; SW.handing = false; }
 }
 // (Oct 31: the page opens on the menu with no world) the worker takes the game whenever one is live here and it isn't running it
 // yet - the first game picked, and any after a failure was cleared - one rule, whatever order the worker and the world are ready in
@@ -293,7 +311,7 @@ function swGuestFrame(dt, held) {
     for (const m of SW.snaps.splice(0)) { swApply(m.s); SW.tickMs = m.tickMs; SW.behind = m.behind; SW.got++; if (m.ev && m.ev.length) swEvents(m.ev); }
     for (let p = 0; p < 2; p++) if (ctl[p]) try { setCtlState(p, ctl[p]); } catch (e) { }
     SW.framesNoSnap = 0;
-  } else SW.framesNoSnap++;
+  } else if (held) SW.framesNoSnap = 0; else SW.framesNoSnap++;   // (Nov 7, user: the WORLD panel open, Alt-Tab, closed - "hides all the game UI and controls": held, the worker sends nothing, and these frames were counted - closed after 5 s, the page called the worker dead at once)
   if (!held) { applyHeldKeys(dt); stepHud(dt); }
   regionsTick();                                                     // (the regions' tiers by this page's views: what the drawing culls by)
   const ctl = [];                                                    // (unrounded: online rounds them for the wire)
@@ -408,7 +426,8 @@ function swHostResync(m) {
   ctlPick[0] = m.ctl[0]; ctlPick[1] = m.ctl[1]; MODE = m.mode; EXTRA = m.extra || null;   // (a second person on a side: their seat here too)
   if (m.ui) swHostUi(m.ui);
   applyMode(); builtViewW = 0; resize();
-  tablesLoad(JSON.parse(m.s)); computeEnv(); swSnapReset();
+  if (m.s) { tablesLoad(JSON.parse(m.s)); computeEnv(); }           // (no tables: the page sends them next, 'load' - swResync)
+  swSnapReset();
   SWH.t0 = performance.now() - SWH.done * SUBSTEP * 1000;            // (no catching up on the time the rebuild took)
 }
 
@@ -481,7 +500,7 @@ const swKey = k => 'bd_sw_' + k.slice(3);
    the SNAPSHOT carries is built in: each world's (WORLD_KEYS) in its world, every other one (the vehicles' tuning, the zoom
    levels, the editor's settings...) in WORLD_PACK.game, read by both worlds - all but LOCAL_KEYS, this browser's own
    bookkeeping (which world is loaded, the stamp its edits were made over, the Story copy's start, its save slots). */
-const LOCAL_KEYS = ['bd_world', 'bd_wbase', 'bd_sw_init', 'bd_story_slots', 'bd_colv', 'bd_scene_j'];   // (bd_scene_j: the editor's unsaved changes - 00-world-journal.js)   // (bd_colv: the DISPLAY tab's switches, this browser's own - 50-zz-editor-tabs.js)
+const LOCAL_KEYS = ['bd_world', 'bd_wbase', 'bd_sw_init', 'bd_story_slots', 'bd_colv', 'bd_colv2', 'bd_scene_j'];   // (bd_scene_j: the editor's unsaved changes - 00-world-journal.js)   // (bd_colv: the DISPLAY tab's switches, this browser's own - 50-zz-editor-tabs.js)
 const isGameKey = k => typeof k === 'string' && k.startsWith('bd_') && !k.startsWith('bd_sw_') && !WORLD_KEYS.includes(k) && !LOCAL_KEYS.includes(k);
 /* (user Oct 31 21:38: "can we have a way that the snapshot has a timestamp? So if I get a build that has a snapshot that is more
    recent than my machine... if I change machines, then I'm always with the out-of-date version") THE BUILT-IN WORLDS: a
@@ -768,7 +787,15 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) {
     wsel.value = STORY_WORLD ? 'story' : 'land';
     wsel.addEventListener('change', () => { const v = wsel.value; if (worldNeedsSwitch(v)) sceneAsk(() => worldSwitch(v, 'edit'), () => { wsel.value = STORY_WORLD ? 'story' : 'land'; }); });   // (unsaved changes: asked first - 50-zzzz-scene-ask.js)
     bar.insertBefore(wsel, bar.firstChild);
+    // (Nov 7, user: "Ability to call the vegetation Editor from the Game Editor") VEGETATION EDITOR in the top bar, after the WORLD
+    // dropdown: the page again in the vegetation editor (53-veg-editor.js), unsaved changes asked first
+    const vb = document.createElement('button'); vb.textContent = 'VEGETATION EDITOR'; vb.title = 'Open the vegetation editor';
+    vb.onclick = () => sceneAsk(() => { try { sessionStorage.setItem('veged', '1'); } catch (e) { } location.reload(); }, () => { });
+    wsel.after(vb);
   }, 700);
+  // (the vegetation editor's GAME EDITOR button: this load opens the GAME EDITOR on the title's mode once the title is up)
+  let gameEd = false; try { gameEd = sessionStorage.getItem('gameed') === '1'; if (gameEd) sessionStorage.removeItem('gameed'); } catch (e) { }
+  if (gameEd) { const t = setInterval(() => { if (typeof worldEdOnTitle === 'function' && worldEdOnTitle() && typeof NSKY !== 'undefined' && NSKY.editor.TUNE.built) { clearInterval(t); worldEdit(menuSel.mode); } }, 300); }
 }
 if (typeof window !== 'undefined') window.__worldEdit = m => worldEdit(m);   // (tools)
 if (typeof window !== 'undefined') window.__worldStale = () => WORLD_STALE;   // (tools)
@@ -4216,7 +4243,11 @@ function netPlain(o, depth, sw) {
 }
 // (a projectile or a wreck keeps its number from host to guest, so the guest updates the same one)
 let netUid = 1;
-const uidOf = o => o._uid || (o._uid = netUid++);
+// (Nov 7: the id kept out of sight - not enumerable - so a copy of a thing made with Object.assign / spread (a wreck split in two -
+// 25-wrecks.js splitPiece) is a new thing with its own id: copied, two pieces shared one id, and the page dropped one of them -
+// user: "It was sinking, it got hit, and then it disappeared")
+function setUid(o, u) { Object.defineProperty(o, '_uid', { value: u, writable: true, configurable: true, enumerable: false }); return u; }
+const uidOf = o => o._uid || setUid(o, netUid++);
 function netSnapshot(sw, o = {}) {
   const P = (o, d = 4) => netPlain(o, d, sw), two = a => sw ? [a[1], a[0]] : [a[0], a[1]];
   const list = a => a.map(o => { const d = P(o, 3); d.u = uidOf(o); return d; });
@@ -4269,7 +4300,7 @@ function netVehicle(kind, p, d) {
     else { if (v.state === 'fly') downPlane(v); if (planes[p] === v) { if (v.state !== 'gone' && v.state !== 'hangar') oldPlanes.push(v); planes[p] = makePlane(p); } }
     v = arr[p];
   }
-  v._hu = d.u; v._uid = d.u;
+  v._hu = d.u; setUid(v, d.u);
 }
 // a list kept in step by each thing's number: new ones appear (with their sound and flash), the guest's own copy
 // carries on a moment after the host's is gone (so it can land here too), and one that's already burst here
@@ -4283,7 +4314,7 @@ function netList(arr, data, kind, onNew, create = true) {
     inSnap.add(d.u);
     if (st.gone.has(d.u)) continue;
     let o = by.get(d.u);
-    if (!o) { if (!create) continue; o = {}; netMerge(o, d); o._uid = d.u; if (onNew) onNew(o); }
+    if (!o) { if (!create) continue; o = {}; netMerge(o, d); setUid(o, d.u); if (onNew) onNew(o); }
     else { netMerge(o, d); o._orph = 0; }
     next.push(o);
   }
@@ -4368,8 +4399,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 781;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 05 21:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 782;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 10:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -5722,6 +5753,7 @@ function knobIcon(s) {
 const fpsMeter = { n: 0, t0: 0, v: 0 };
 // (user Oct 29: "Can we have the version number and fps display ALWAYS on screen?" - on every screen (the title, the game, the
 // menus, World / photo mode) whatever STATS says; STATS: OFF only hides the network numbers under it. y: where it sits)
+const CORNER = { bug: null, fps: null };   // (where REPORT and the FPS were drawn last frame: their presses - fpsPress, 50-zzzz-bug.js)
 function drawFps(y0) {
   const now = performance.now();
   if (!fpsMeter.t0) fpsMeter.t0 = now;
@@ -5729,12 +5761,16 @@ function drawFps(y0) {
   if (fpsMeter.last) { const gap = now - fpsMeter.last; fpsMeter.gap = (fpsMeter.gap || gap) + (gap - (fpsMeter.gap || gap)) * 0.05; fpsMeter.worst = Math.max((fpsMeter.worst || 0) * 0.995, gap); }
   fpsMeter.last = now;
   if (now - fpsMeter.t0 >= 500) { fpsMeter.v = Math.round(fpsMeter.n * 1000 / (now - fpsMeter.t0)); fpsMeter.n = 0; fpsMeter.t0 = now; }
-  const txt = fpsMeter.v + ' FPS', x = uvw - 16, y = y0 ?? (ui.title ? ui.top + 26 : hudTop() + 12);
-  const col = fpsMeter.v >= 55 ? '#9dff8a' : fpsMeter.v >= 40 ? '#ffd36b' : '#ff7a6a';
+  // (Nov 7, user: "These 3 should be constant on all screens, one below the other: REPORT, Version, FPS") the corner, on every screen
+  // where the version and FPS always were: REPORT (a bug report saved as a file - 50-zzzz-bug.js), the version under it, the FPS under that
+  const txt = fpsMeter.v + ' FPS', x = uvw - 16, yT = (y0 ?? (ui.title ? ui.top + 26 : hudTop() + 12)) - 8;
+  CORNER.bug = [x - 120, yT, 120, 26];
+  if (typeof modeButton === 'function') modeButton(...CORNER.bug, typeof BUG !== 'undefined' && BUG.busy ? 'SAVING...' : 'REPORT', false);
+  { const vt = 'V' + GAME_VERSION, vy = yT + 34; drawText(ug, vt, x + 1, vy + 1, '#04070f', 2, 'right'); drawText(ug, vt, x, vy, '#d8dde8', 2, 'right'); }   // (user Oct 29: "lets have the version number next to the FPS always")
+  const y = yT + 52, col = fpsMeter.v >= 55 ? '#9dff8a' : fpsMeter.v >= 40 ? '#ffd36b' : '#ff7a6a';
+  CORNER.fps = [ubw - 120, y - 6, 120, 24];
   drawText(ug, txt, x + 1, y + 1, '#04070f', 2, 'right');
   drawText(ug, txt, x, y, col, 2, 'right');
-  // (user Oct 29: "lets have the version number next to the FPS always so I dont have to open the fps tab to check it")
-  { const vt = 'V' + GAME_VERSION, vx = x - textWidth(txt) * 2 - 10; drawText(ug, vt, vx + 1, y + 1, '#04070f', 2, 'right'); drawText(ug, vt, vx, y, '#d8dde8', 2, 'right'); }
   if (ui.perfPanel) drawPerfPanel(x, y + 18);
   else if (SHOW_STATS) drawNetStats(x, y + 18);
 }
@@ -5788,7 +5824,7 @@ function drawNetStats(x, y) {
   rows.forEach(([t, c], i) => { drawText(ug, t, x + 1, y + i * 11 + 1, '#04070f', 1, 'right'); drawText(ug, t, x, y + i * 11, c, 1, 'right'); });
 }
 // Tap the frame counter: where each frame's time goes, to find what's slow on a given device
-function fpsRect() { return [ubw - 120, ui.title ? ui.top + 18 : PHOTO.on ? ui.top + 4 : hudTop() + 4, 120, 30]; }   // (photo mode and the GAME EDITOR draw it at ui.top + 12 - 48-render.js)
+function fpsRect() { return CORNER.fps || [0, 0, 0, 0]; }   // (where drawFps put it last frame)
 const perfPanelRect = [0, 0, 0, 0];
 /* The browser doesn't paint when a draw call is made: it records the calls and rasterises them later (on the
    GPU, or in software), so the timings above only see the script. In probe mode each stage ends by reading one
@@ -5986,12 +6022,23 @@ function setSlider(h, ux) {
   const u = clamp((ux - h.tx) / (h.tw - 1), 0, 1);
   let v = h.s.min + u * (h.s.max - h.s.min);
   if (h.s.key === 'wind' && Math.abs(v) < 0.05) v = 0;
-  env[h.s.key] = v;
-  if (h.s.key === 'grade') { try { localStorage.setItem('bd_grade', String(v)); } catch (e) {} return; }   // (the grade: not the weather - nothing to hold still)
+  if (h.s.key === 'grade') { env.grade = v; try { localStorage.setItem('bd_grade', String(v)); } catch (e) {} return; }   // (the grade: not the weather - nothing to hold still)
+  envSet(0, h.s.key, v);                                     // (here at once, for the panel)
+  if (SW.live) act(0, 'envSet', h.s.key, v);                 // (Nov 7, user: "changing the time of day ... always snaps back" - the worker runs the weather: it takes the change too, or its next snapshot puts the old sky back)
+}
+// a WORLD slider moved: the value, and everything holds still until play (W.frozen)
+function envSet(p, key, v) {
+  env[key] = v;
   W.frozen = true;                                           // you set it: everything holds still until you press play
-  if (h.s.key === 'time') W.lastHour = v;
+  if (key === 'time') W.lastHour = v;
   computeEnv();
 }
+ACTS.envSet = envSet;
+// the WORLD panel's play / pause: play hands the weather back to the system, pause holds the sky as it is
+function envPlay(p, play) {
+  if (play) { W.frozen = false; W.manual = {}; W.lastHour = env.time; } else W.frozen = true;
+}
+ACTS.envPlay = envPlay;
 
 /* ---- photo mode (user Oct 25 late): "When I press the button menu, the one with the sliders, it freezes the whole
    world. And then next to it, there's a button that represents an eye that I can close or open the eye. When I close
@@ -6848,7 +6895,6 @@ function drawTitle() {
   modeButton(...T.opts, 'OPTIONS', false);
   drawText(ug, 'BUILD ' + BUILD, T.x + T.w - 8, T.y + T.h - 12, 'rgba(255,255,255,0.55)', 1, 'right');
   if (linkPanelUp()) drawLinkPanel(T);
-  if (typeof drawBugBtn === 'function') drawBugBtn(T);   // (REPORT BUG under the panel, with a game on - 50-zzzz-bug.js)
   drawStorySlots();                                     // (STORY's save slots, over the menu when open - 50-story-saves.js)
 }
 const linkPanelUp = () => LINK.state === 'joining' || LINK.state === 'msg' || LINK.state === 'enter';
@@ -7208,7 +7254,7 @@ window.addEventListener('pointerdown', e => {
   if (ui.settings && inRect(ux, uy, L.play[0] - 3, L.play[1] - 3, 48, 48)) {
     menuClick();
     // pause holds the sky as it is; play hands the weather back to the system and closes the panel
-    if (W.frozen) { W.frozen = false; W.manual = {}; W.lastHour = env.time; ui.settings = false; } else W.frozen = true;
+    const play = !!W.frozen; envPlay(0, play); if (SW.live) act(0, 'envPlay', play); if (play) ui.settings = false;   // (the worker too - envSet)
     return;
   }
   if (inRect(ux, uy, L.menu[0] - 3, L.menu[1] - 3, 48, 48)) { menuClick(); openMainMenu(); return; }
@@ -11191,7 +11237,7 @@ function stepPlanes(dt) {
     // pull - over the top into a loop at speed); let go or flown by itself, it flies the path it wants (want: + down - level,
     // home, dodging). Its speed is its own: a dive builds it, a climb spends it, the engine holds its cruise)
     const ai = !forced && pl.aiGamT > time - 0.25;                              // (the CPU's pilot: the path it wants - 49-cpu.js)
-    const ctl = ai ? { gam: pl.aiGam } : (stick || mine || sd) && !forced ? { pull: flyPull(pl, stick, dt) } : { gam: want };   // (yours let go: its trim - flyStep; it falls as it slows, user Nov 2 19:35)
+    const ctl = ai ? { gam: pl.aiGam } : (stick || mine || sd || pl.loiter) && !forced ? { pull: flyPull(pl, stick, dt) } : { gam: want };   // (stopped - pl.loiter: STOP's hold in flyStep, whoever's seat it is)   // (yours let go: its trim - flyStep; it falls as it slows, user Nov 2 19:35)
     if (gearWant && LAND) { const g = planeGroundY(pl.x); if (g != null) ctl.cush = g - pl.y; }   // (wheels down over ground it can land on: the flare)
     flyStep(pl, dt, ctl, wpKind(pl).flight, 'facing', PLANE_TURN_T);
     // heading for the enemy's edge it turns round in time, so it never leaves the world on their side; stopped (the stop
@@ -11898,14 +11944,23 @@ const FLY_GUST_REF = Math.sqrt(1 + (21 * 0.12) ** 2);   // (how little the P-51'
 // turnT its turn round's time (v.turn: the nose swings through us - the way it was, its path held through it)
 function flyStep(v, dt, ctl, kind, fk, turnT) {
   if (v.bounceT > 0) v.bounceT -= dt;
-  const free = ctl.gam != null;                                        // (flown by an autopilot - its own pilot rolls it upright, below)
+  let free = ctl.gam != null;                                          // (flown by an autopilot - its own pilot rolls it upright, below)
   // STOP (v.loiter - every plane): let go, it holds its height - the height you leave it at (user Nov 5 10:40: "the plane should be
   // able to stay in the air, right now it ends up falling slowly"); the stick moves it, and let go it holds the new one. On its
   // back, the engine dead or coming in to land: as always
+  // (Nov 7, user: "If a plane is on 'stop' pressing UP or DOWN should disengage it, just like left/right" - the stick ends STOP;
+  // "if the plane is going up, and press STOP, it should stabilize and stay horizontal, same as if going down ... A player should
+  // reliably select STOP, change vehicle and know it won't crash" - climbing steeply it wasn't 'upright' and was left to its trim:
+  // it stalled and fell. Now STOP is an autopilot whatever its attitude (its pilot rolls it upright - free): it levels out first,
+  // holds the height it levelled at, and too slow it eases its nose down to get its speed back before holding)
   const upright = Math.cos(v.pitch || 0) > 0.3;
-  if (v.loiter && ctl.pull != null) {
-    if (ctl.pull !== 0 || v.loiter.y == null) v.loiter.y = v.y;
-    else if (upright && ctl.thr == null && ctl.cush == null) ctl = { gam: clamp((v.loiter.y - v.y) / 150, -0.3, 0.3) };
+  if (v.loiter && ctl.pull) v.loiter = null;
+  if (v.loiter && ctl.pull != null && ctl.thr == null && ctl.cush == null) {
+    const FL = FLIGHT[kind], Vn = (v.spd || 0) / UPM;
+    if (v.loiter.y == null && upright && Math.abs(v.gam || 0) < 0.08) v.loiter.y = v.y;
+    let gw = v.loiter.y == null ? 0 : clamp((v.loiter.y - v.y) / 150, -0.3, 0.3);
+    gw = Math.max(gw, 0.2 * clamp((1.3 * FL.vs - Vn) / (0.3 * FL.vs), 0, 1));   // (too slow: nose down - gam is + down)
+    ctl = { gam: gw }; free = true;
   }                                  // (just bounced off its wheels: the next touch lands it - planeLand, 29-plane.js)
   if (v.turn && !v.turn.t && !v.roll && Math.cos(v.pitch || 0) < -0.25) { v.turn = null; v.roll = { t: 0, done: false }; }   // (told to turn round on its back: the half roll upright - below)
   const F = FLIGHT[kind], g = CAR_G / UPM, KL = g / (F.vs * F.vs), cd0 = 1 / (4 * F.ld * F.ld * FLY_KI), vc = F.vc();
@@ -11980,7 +12035,10 @@ function flyStep(v, dt, ctl, kind, fk, turnT) {
     // (the turn's drag: the pull's induced drag, harder than straight flight's - FLY_KI_TURN - so it bleeds speed even with the
     // throttle open; stalled, the flat-plate drag too)
     const D = Math.min(q * (cd0 + FLY_KI_TURN * cl * cl + 1.3 * Math.min(1, Math.max(0, need - 1))), V / Math.max(dt, 1e-6));   // (the wings can't drag more than they lift at their most; never more than stops it)
-    const ta = T * Math.cos(a) - D + g * Math.sin(gam), na = Gv - sup, cg = Math.cos(gam), sg = Math.sin(gam);   // (along its path; square to it, down)
+    // (Nov 7: flown by an autopilot - STOP, which turns round on the spot again and again - the turn's lift also bends its path toward the
+    // path it's flown to, as it would straight: it levelled only between turns, so a plane stopped in a climb went on climbing)
+    const rW = ctl.gam != null && need <= 1 ? clamp(-kP * flyWrap(gam - ctl.gam), -0.6, 0.6) : 0;
+    const ta = T * Math.cos(a) - D + g * Math.sin(gam), na = Gv - sup + V * rW, cg = Math.cos(gam), sg = Math.sin(gam);   // (along its path; square to it, down)
     const ux = V * cg + (ta * cg - na * sg) * dt, uy = V * sg + (ta * sg + na * cg) * dt;
     V = Math.hypot(ux, uy); if (V > 0.05) gam = Math.atan2(uy, ux);
     v.bp = flyWrap(gam - a); v.q = 0;
@@ -13283,6 +13341,9 @@ function stepShells(dt) {
     // a ship going down can still be hit: she's blown further apart (user Oct 24)
     if (!done && s.age > 0.35 && s.y > waterLv(s.x) - 60) { const w = wreckAt(s.x, s.y); if (w) { emit('hit', { kind: 'wreck', o: w[0], sb: w[1], x: s.x, y: s.y, amt: 1, vx: s.vx }); done = true; } }
     if (!done && s.age > 0.04 && emit('hit', { kind: 'land', o: s }).took) { blastClose(s.x, s.y); shells.splice(i, 1); continue; }   // (LAND TEST: its own blast)
+    // (Nov 7, user: "If a plane drops a bomb on a boat (even a sail boat) we should get an explosion + explosion sfx. right now its like... just
+    // a hit?") a bomb always goes off where it hits, whatever it hit: if what it hit made no blast of its own, the bomb's own
+    if (done && s.from === 'bomb' && BLAST && flashes.top === BLAST.fl) sectionBlast(s.x, s.y, 1, (s.vx || 0) * 0.2);
     if (done) { guysNear(s.x, s.y, 30); blastClose(s.x, s.y); shells.splice(i, 1); continue; }
     const sy = surfaceY(s.x);
     if (s.y >= sy) {
@@ -15453,7 +15514,7 @@ function tablesLoad(S) {
       let o = have.get(d.u_); if (o && used.has(o)) o = null;
       if (!o && arr[i] && !used.has(arr[i]) && arr[i].kind === d.kind) o = arr[i];
       if (!o) o = t.make(d);
-      used.add(o); o._uid = d.u_; byU.set(d.u_, o); rows.push([o, d]);   // (its id now: a reference to it isn't walked into)
+      used.add(o); setUid(o, d.u_); byU.set(d.u_, o); rows.push([o, d]);   // (its id now: a reference to it isn't walked into)
     });
     plan.push([t, arr, rows]);
   }
@@ -15463,7 +15524,7 @@ function tablesLoad(S) {
       const sa = d.sa_, sk = d.sk_, u = d.u_; delete d.u_; delete d.sa_; delete d.sk_;
       tblRefs(d, byU, t.depth + 2);
       for (const f in o) { const v = o[f]; if (((v === null || typeof v !== 'object') && typeof v !== 'function' || v && typeof v === 'object' && v._uid != null) && !(f in d) && f[0] !== '_' && !t.skip.has(f)) delete o[f]; }   // (a link to another thing the save doesn't have: none - Oct 31, the editor's game put back)   // (a plain value the saved one didn't have)
-      tblMerge(o, d); o._uid = u; if (sa != null) o._sa = sa; else delete o._sa; if (sk != null) o._sk = sk; else delete o._sk;
+      tblMerge(o, d); setUid(o, u); if (sa != null) o._sa = sa; else delete o._sa; if (sk != null) o._sk = sk; else delete o._sk;
     }
     arr.length = 0; for (const [o] of rows) arr.push(o);
   }
@@ -15978,7 +16039,7 @@ function ntbApply(T) {
       let o = mine.get(u) || byU.get(u);
       if (!o) { const c = arr[i]; if (c && !c._nt && c.kind === F.kind) o = c; }
       if (!o) { o = t.make(F); o._ntNew = 1; }
-      o._uid = u; o._nt = 1; byU.set(u, o);
+      setUid(o, u); o._nt = 1; byU.set(u, o);
       if (!inArr.has(o)) { arr.push(o); inArr.add(o); changed = true; }
       fills.push([t, o, F, true]);
     }
@@ -16003,7 +16064,7 @@ function ntbApply(T) {
     const ev = NTB_EVENTS[t.name];
     if (ev && !o._ntNew) try { ev(o, F); } catch (e) { console.error(e); }   // (what it does when it goes down: its sound, pieces, smoke)
     delete o._ntNew;
-    const u = o._uid; tblMerge(o, F); o._uid = u; o._nt = 1;
+    const u = o._uid; tblMerge(o, F); setUid(o, u); o._nt = 1;
     if (whole && netShot[t.name] && !o._ntSnd) { o._ntSnd = 1; try { netShot[t.name](o); } catch (e) {} }   // (a new shot: its sound and flash)
   }
   for (const [t, arr] of touched) if (t.after) t.after(arr);
@@ -16988,7 +17049,7 @@ function swApply(snap) {
     { const K = [], L = []; swLeavesOfPlain(d, 0, K, L); SWM.paths.set(u, { P: swPaths(K, L), L }); }   // (its leaves' paths, for the changes to come)
     tblRefs(d, byU, t.depth + 2);
     for (const f in o) { const v = o[f]; if ((v === null || typeof v !== 'object') && typeof v !== 'function' && !(f in d) && f[0] !== '_' && !t.skip.has(f)) delete o[f]; }
-    tblMerge(o, d); o._uid = u;
+    tblMerge(o, d); setUid(o, u);
     if (sa != null) o._sa = sa; else delete o._sa;
     if (sk != null) o._sk = sk; else delete o._sk;
   }
@@ -18073,7 +18134,18 @@ on('sunk', e => {
 }, 'camera');
 // (user Nov 3 14:44: "when you crash in the water, the camera suddenly snaps") every focus goes through the plane's lead (planeLeadF),
 // so the lead eases out wherever the view goes next - onto the wreck as it falls - rather than vanishing in a frame
-function camFocus(i) { return planeLeadF(i, camFocus0(i)); }
+function camFocus(i) { return camUnderHud(i, planeLeadF(i, camFocus0(i))); }
+/* (Nov 7, user: "When flying a plane near the water, we want to pan to the water when you are low, but never 'cut' the actual plane.
+   In Battle mode, because 1/3 of the top is the UI, the camera must respect that") whatever you're in, when its framing gives its
+   height (F[4][2] - what flies: the view is put below or ahead of it), is kept under the top buttons and the minimap: the view never
+   goes so low that it sits behind them. One rule for every view, at the zoom drawn */
+function camUnderHud(i, F) {
+  if (!F || !F[4] || F[4][2] == null || ui.title) return F;
+  const z = cam.za[ONEVIEW() ? 0 : i] || cam.zt[i] || 1, hz = 0.5 * VIEW_H / z;
+  const band = (typeof hudTop === 'function' ? hudTop() + 70 : 0) / Math.max(1, ubh) * VIEW_H / z;   // (the buttons, captains and minimap, in world units)
+  const yMax = F[4][2] + hz - band - F[4][1];                        // (the view's middle no lower than this: its top edge clears the band by the thing's size)
+  return F[1] > yMax ? [F[0], yMax, F[2], F[3], F[4]] : F;
+}
 function camFocus0(i) {
   const c = crew[i];
   if (i === 0) { const S = storySelFocus(); if (S) return S; }   // (STORY: an object picked with the keys - the camera locked on it, 50-story.js)
@@ -18175,11 +18247,13 @@ function vehFocus(i, m) {
   // LAND TEST: the tank a little ahead of where it's looking, the helicopter in the middle
   // (the ground about two thirds of the way down the view, as in the user's picture)
   if (m === 'tank' && tanks[i]) { const t = tanks[i], hz = 0.5 * VIEW_H / (cam.zt[i] || 1); return [t.x, t.y - hz * 0.44, t.vx, t.facing * 0.25, [t.x, 40]]; }
-  if (m === 'heli' && helis[i]) { const h = helis[i]; return [h.x, h.y, h.vx, 0, [h.x, 50]]; }
+  if (m === 'heli' && helis[i]) { const h = helis[i]; return [h.x, h.y, h.vx, 0, [h.x, 50, h.y]]; }
   if (m === 'civ') { const F = civFocus(i); if (F) return F; }
   if (m === 'tower') {
     // look out to sea: the tower sits near the edge of your half, the rest of the view is the water ahead
-    const w = (bw / 2) / (S * cam.zt[i]);
+    // (Nov 7, user: "Zooming in and out from a tower is all twitchy" - the offset went by the zoom asked for (cam.zt), which jumps, while
+    // the view eases to it: now by the zoom as drawn this frame, so the tower glides with the zoom)
+    const w = (bw / 2) / (S * (cam.za[ONEVIEW() ? 0 : i] || cam.zt[i]));
     const tw = myTw(i), top = twBase(tw) - TW.BASE; return [tw.x + tw.facing * w * 0.26, DECK_Y - 50 + top, 0, undefined, [tw.x, 30]];
   }
   if (m === 'plane') {
@@ -18188,7 +18262,7 @@ function vehFocus(i, m) {
     // (the plane in the middle of the view at every zoom, user Oct 24 night: it used to sit a fixed distance above
     // the middle, which zoomed in put it up under the buttons; right up to the ceiling, the sky going on above it)
     const y = Math.max(Math.min(SKY_TOP, planeIceY() - 90) - hz * 0.2, focusSea(pl.y));   // (eased onto the waterline - focusSea)   // (up to its ceiling, the stratosphere - user Oct 30)
-    return [pl.x, y, pl.vx, 0, [pl.x, 40]];                 // (the plane in the middle of the view: no look-ahead, user)
+    return [pl.x, y, pl.vx, 0, [pl.x, 40, pl.y]];           // (the plane in the middle of the view: no look-ahead, user)   // (its height: under the top buttons - camUnderHud)
   }
   if (m === 'sub') {
     // the camera dips with her as she dives, so both the surface and the boat stay in view
@@ -18215,8 +18289,14 @@ function updateCamera(dt, snap) {
   const kv = (i, rate) => (snap || cam.cut[i] ? 1 : 1 - Math.exp(-dt * rate));
   if (ONEVIEW()) cam.zt[1] = cam.zt[0];            // one player: both halves are one screen with one zoom
   for (let i = 0; i < 2; i++) planeLeadStep(i, snap ? 0 : dt);   // (the plane's lead, once a frame)
+  for (let i = 0; i < 2; i++) cam.za[i] = ZOOM_SMOOTH ? zoomEase(i, dt) : cam.zt[i];   // (the zoom this frame, before the focus: what's framed by it - a tower - frames by the zoom drawn)   // (the stepped zoom: a cut to the level, no easing - 13-scope-minimap.js; ?zoomsmooth=1: eased between the same levels)
   const F = [camFocus(0), ONEVIEW() ? null : asSlot(1, q => camFocus(q))];
   if (!F[1]) F[1] = F[0];
+  // (Nov 7, user: "When plane crashes on water, camera is 'snapping' vs smoothly adjusting") what the view is on changed by itself -
+  // a vehicle lost and its wreck watched, put away, stepped ashore - with no cut (a cut is the player's pick: instant, as asked): the
+  // view glides to the new framing rather than taking the difference in one frame. One rule for every such change
+  cam.src = cam.src || ['', ''];
+  for (let i = 0; i < 2; i++) { const c = crew[i]; if (!c) continue; const key = c.mode + '|' + (c.watch ? 'w' : '') + (c.look ? 'l' : '') + (c.spec || ''); if (cam.src[i] && key !== cam.src[i] && !cam.cut[i] && !snap) cam.glide = Math.max(cam.glide || 0, 0.8); cam.src[i] = key; }
   // a view being dragged with the right mouse button looks where it's dragged (no look-ahead, no keeping the
   // unit in frame); let go and the drag eases back to nothing
   for (let i = 0; i < 2; i++) {
@@ -18230,7 +18310,6 @@ function updateCamera(dt, snap) {
     // nothing for a moment - never steps the zoom in and out again, user Oct 28)
     const sv = clamp(Math.abs(F[i][2]) / 110, 0, 1);
     cam.spd[i] += (sv - cam.spd[i]) * kv(i, sv > cam.spd[i] ? 1.5 : 0.12);
-    cam.za[i] = ZOOM_SMOOTH ? zoomEase(i, dt) : cam.zt[i];   // (the stepped zoom: a cut to the level, no easing - 13-scope-minimap.js; ?zoomsmooth=1: eased between the same levels)
   }
   // (the zoom-out with speed, in steps too: the level nearest the eased value, kept until the value is clearly nearer another)
   cam.zq = cam.zq || [null, null]; cam.zl = cam.zl || [null, null];
@@ -26862,6 +26941,7 @@ const ED_CSS = `
 #skyEd .cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 8px 12px; align-items: start; }
 #skyEd .cat { border: 1px solid #2c3850; border-radius: 6px; padding: 5px 9px 7px; display: grid; gap: 2px; }
 #skyEd h4 { margin: 0 0 3px; color: #7a8294; font-weight: normal; font-size: 11px; letter-spacing: .1em; }
+#skyEd h3.grp { grid-column: 1 / -1; flex-basis: 100%; margin: 8px 0 0; padding-top: 6px; border-top: 1px solid #2c3850; color: #d8dce8; font-weight: 600; font-size: 12px; letter-spacing: .12em; }
 #skyEd .row { display: grid; grid-template-columns: 96px minmax(150px, 1fr) 44px 50px; align-items: center; gap: 6px; }
 #skyEd .row label { color: #7a8294; letter-spacing: .04em; cursor: help; }
 #skyEd .row output { text-align: right; color: #ffb347; font-variant-numeric: tabular-nums; }
@@ -27045,6 +27125,7 @@ function edBuild(host) {
     if (ED_PANES[t]) ED_PANES[t](pane, edEl);                                  // (a tab that builds its own pane: TUNE.pane)
     for (const [bt, name, list] of ED_BTNS) {
       if (bt !== t) continue;
+      if (name[0] === '=') { pane.appendChild(edEl('h3', 'grp', name.slice(1))); continue; }   // (a group's heading over the sections after it - TERRAIN's SELECTED PROPERTIES, Nov 7)
       const c = edEl('div', 'cat btns'); c.appendChild(edEl('h4', '', name));
       for (const [lab, desc, fn] of list) { const b = edEl('button', '', lab); if (desc) b.title = desc; b.onclick = () => { fn(b); if (desc) edHelp(b.textContent, desc); }; if (fn.init) fn.init(b); c.appendChild(b); }
       pane.appendChild(c);
@@ -37330,9 +37411,9 @@ function civFocus(p) {
   if (k === 'sub') return [v.x, Math.max(FOCUS_Y, v.y), v.vx || 0, 0, [v.x, 30]];
   if (k === 'shuttle') { if (v.state === 'pad' || v.state === 'count' || v.state === 'climb') { const [cx, cy] = stackPoint(v, 0.5, 0.45); return [cx, cy, v.vx || 0, 0, [cx, 80]]; } return [v.x, v.y, v.vx || 0, 0, [v.x, 50]]; }
   if (k === 'orb') return [v.x, v.y, v.vx || 0, 0, [v.x, v.kind === 'iss' ? 130 : 40]];
-  if (k === 'seaplane') return [v.x, focusSea(v.y), v.vx || 0, 0, [v.x, 40]];   // (eased onto the waterline - 39-camera.js focusSea)
+  if (k === 'seaplane') return [v.x, focusSea(v.y), v.vx || 0, 0, [v.x, 40, v.y]];   // (its height: kept under the top buttons - camUnderHud)   // (eased onto the waterline - 39-camera.js focusSea)
   if (k === 'blimp') return [v.x, v.y, v.vx || 0, 0, [v.x, 80]];
-  return [v.x, v.y, v.vx || 0, 0, [v.x, 40]];
+  return [v.x, v.y, v.vx || 0, 0, [v.x, 40, v.y]];
 }
 // the person button's picture: a little figure, head and shoulders over a body, in the buttons' cream
 function personIcon(draw) {
@@ -39843,9 +39924,11 @@ function boxOnBox(k, yb0) {
 }
 // a box drawn at screen (X, Y) - its top left - W by H, rotated about its middle: ribbed sides, a lighter top edge,
 // its doors' end; a burnt one black and dented
+const CONT_NOCOL = [120, 124, 128];
 function drawContainerPx(X, Y, W, H, col, dead) {
   // (Nov 1, 80-fps work: the box's four colours given as numbers - fillRectA, the game's way to fill in a colour of numbers -
   // not built as text for every box and read back, ~670 boxes a frame; each channel cut to a whole number as css3 did)
+  if (!col) col = CONT_NOCOL;                                       // (Nov 7: a box with no colour yet on this page - its row half come from the worker - drawn grey, never an error that stops every ship being drawn)
   const c0 = dead ? col.map(v => v * 0.18 + 14) : col, K = CONTK;
   const tone = f => { K[0] = f(c0[0]); K[1] = f(c0[1]); K[2] = f(c0[2]); return K; };
   fillRectA(C, tone(v => v | 0), 1, X, Y, W, H);
@@ -41025,7 +41108,13 @@ function drawHoleDark(x0, x1, part) {
 function islToggleSee() {
   const s = TERRAIN_ED.sel, L = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : []).filter(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H');
   if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Pick a hole first.'; return; }
-  const on = !ISLANDS[L[0]].see; for (const n of L) { if (on) ISLANDS[n].see = true; else delete ISLANDS[n].see; }
+  const on = !ISLANDS[L[0]].see; islSetSee(on);
+}
+// (Nov 7: CAVE TYPE - CAVE dark, HOLE see-through) the picked caves and tunnels set to one or the other
+function islSetSee(on) {
+  const s = TERRAIN_ED.sel, L = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : []).filter(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H');
+  if (!L.length) { if (TERRAIN_ED.skinNote) TERRAIN_ED.skinNote.textContent = 'Pick a cave or tunnel first.'; return; }
+  for (const n of L) { if (on) ISLANDS[n].see = true; else delete ISLANDS[n].see; }
   islChanged(); terrainSyncSkin();
 }
 // (user Nov 5 20:22) the picked shapes' HIDE INTERIOR on or off (holes have none: SEE-THROUGH is theirs). A change rebuilds on REFRESH,
@@ -41311,7 +41400,7 @@ function islSplitChunk(k, id, w, h) {
     const yE = !seaAtX((c0 + q) * LT_CELL) || (land.idry && land.idry[c0 + q]) ? Math.min(h, yW, Math.ceil((land.surf[c0 + q] - LT_Y0) / LT_CELL) - land.rT[k] + 4) : h;   // (in a country the column keeps its own ground in front - a lake's bed, or the dry ground under a segment over land)
     for (let y = 0; y < yE; y++) { const o = (y * w + q) * 4; d[o] = s[o]; d[o + 1] = s[o + 1]; d[o + 2] = s[o + 2]; d[o + 3] = s[o + 3]; s[o + 3] = 0; }
   }
-  g.putImageData(iid, 0, 0);
+  g.putImageData(iid, 0, 0); cv.__v = (cv.__v || 0) + 1;   // (Nov 7: the canvas is reused - its version tells the GPU to take the new pixels; without it a repaint (HIDE INTERIOR, REFRESH VIEW) kept showing the old picture - 40-gl.js glSrc)
   gedgeMake(cv, d, w, h, c0, land.rT[k]);                // (its edge smooth over its cells' steps, the roots under the water too - 50-land-zz-edges.js)
 }
 
@@ -48076,7 +48165,8 @@ function buildLand() {
   }
   land.boulders = land.boulders.filter(b => lakeU(b.x) > 1.15 && !structNear(b.x, 380));   // (none in a lake's bowl, none on a pad's floor or its banks)
   land.boulders.sort((a, b) => b.back - a.back);
-  land.chunks = []; land.back = []; land.dirty = new Uint8Array(Math.ceil(land.cols / LT_CHUNK)).fill(1); land.seen = null;
+  for (const A of [land.chunks, land.back, land.ichunks]) if (A) for (const cv of A) if (cv) { glFreeSrc(cv); if (cv._gedgeCv) glFreeSrc(cv._gedgeCv); }   // (Nov 7: the island slices too - kept from the last build, they showed its picture)
+  land.chunks = []; land.back = []; land.ichunks = []; land.dirty = new Uint8Array(Math.ceil(land.cols / LT_CHUNK)).fill(1); land.seen = null;
   land.bg = null;
   // (user Oct 26, the lake: "The grass on the background should stay flat") the field behind the ground runs on at the
   // land's own level across a lake - its far bank - instead of dropping into the bowl: backS, the back's surface
@@ -48649,7 +48739,7 @@ function paintLandChunk(k) {
   islSplitChunk(k, id, w, h);                             // (an island's columns: into its own canvas, drawn behind the water - 50-land-islands)
   gedgeMake(cv, d, w, h, c0, rT);                        // (its edge smooth over its cells' steps - 50-land-zz-edges.js, user Nov 2)
   tropMaskEnd(k);
-  x.putImageData(id, 0, 0);
+  x.putImageData(id, 0, 0); cv.__v = (cv.__v || 0) + 1;   // (a reused canvas: the GPU takes its new pixels - islSplitChunk)
   cv._lt = true;
 }
 // the meadow's colours (the kit's meadow_strip sampled, toned down) and its soft patches: a smooth noise, cells ~11 x 4
@@ -51049,12 +51139,13 @@ function terrainSetShape(i, v) {
 function terrainSyncSkin() {
   const s = TERRAIN_ED.sel, P = s && selPts(s);
   if (TERRAIN_ED.splitBtns) terrainSyncSplit();
+  terrainSyncSecs();
   let sk; if (s && s.Is) { const set = new Set(); for (const n of s.Is) if (ISLANDS[n]) for (const p of ISLANDS[n].p) set.add(p[2] || null); if (set.size) sk = set.size === 1 ? [...set][0] : 'mixed'; }   // (whole shapes: every piece round them)
   else if (P) { const set = new Set(); for (let k = selLo(s); k <= selHi(s) && k < P.length - (s.I != null ? 0 : 1); k++) set.add(P[k][2] || null); sk = set.size === 1 ? [...set][0] : 'mixed'; }
   for (const [b, v] of TERRAIN_ED.skinBtns || []) b.classList.toggle('on', sk !== undefined && sk === v);
   { const L = s && s.Is ? s.Is : s && s.I != null ? [s.I] : [], ks = new Set(L.filter(n => ISLANDS[n]).map(n => shpK(ISLANDS[n])));   // (the picked shapes' kind; was: the ground's own line: a SOLID)
     for (const [b, k] of TERRAIN_ED.kindBtns || []) b.classList.toggle('on', ks.size === 1 && ks.has(k));
-    if (TERRAIN_ED.seeBtn) TERRAIN_ED.seeBtn.classList.toggle('on', L.some(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H' && ISLANDS[n].see));
+    { const H = L.filter(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H'), sv = new Set(H.map(n => !!ISLANDS[n].see)); for (const [b, see] of TERRAIN_ED.seeBtns || []) b.classList.toggle('on', sv.size === 1 && sv.has(see)); }
     if (TERRAIN_ED.ugBtn) TERRAIN_ED.ugBtn.classList.toggle('on', L.some(n => ISLANDS[n] && shpK(ISLANDS[n]) !== 'H' && shpUGOn(ISLANDS[n]))); }   // (HIDE INTERIOR - 50-land-islands islToggleUG)
   if (TERRAIN_ED.hills) {                                         // (the HILLS slider: the picked pieces' amount, or blank when they differ)
     const H = TERRAIN_ED.hills, ok = !!P, set = new Set();
@@ -51087,7 +51178,6 @@ function terrainRefresh() {
   terrainRefresh0();
 }
 function terrainRefresh0() { const isl = ISL_ED.dirty; ISL_ED.dirty = false; const ld = LAND_ED.dirty; floorRefresh(); landRefresh(); if (isl && !ld && LAND && land.cell) landEdited(); terrainSync(); }
-function terrainReset() { if (JSON.stringify(KR_SET) !== JSON.stringify(KR_DEF_SET)) { KR_SET = JSON.parse(JSON.stringify(KR_DEF_SET)); krSetSave(); } if (JSON.stringify(WRECK_SET) !== JSON.stringify(WRECK_DEF)) { WRECK_SET = JSON.parse(JSON.stringify(WRECK_DEF)); wreckSave(); } landReset(); if (ISLANDS.length) { ISLANDS = []; islChanged(); } terrainShowTa(false); TERRAIN_ED.sel = null; terrainSyncSkin(); terrainSync(); }
 // COPY gives the world as text: I the shapes, ST the structures, N the creature areas, LK the lakes' levels, K the krakens, P the
 // wrecks, BG the backgrounds; LOAD takes it (Nov 3: the old frame's D / DO / DX / X / W / S / T gone - read and let go)
 function terrainCopyText() { const o = {}; if (STRS.length) o.ST = STRS; if (NATURE.length) o.N = NATURE; if (ISLANDS.length) o.I = ISLANDS; if (LAKE_SET.length) o.LK = LAKE_SET; o.K = KR_SET; o.P = WRECK_SET; o.BG = BGS;   /* (every kraken and every wreck placed - user Nov 3 08:36) */ return JSON.stringify(o); }
@@ -51112,14 +51202,6 @@ function terrainLoad(text) {
   if (o.N !== undefined || NATURE.length) { NATURE = natureValid(o.N) ? JSON.parse(JSON.stringify(o.N)) : []; NE.sel = null; natureChanged(); }   // (the fish areas - 50-zz-nature)
   if (o.ST !== undefined || STRS.length) { STRS = strsValid(o.ST) ? strsFix(JSON.parse(JSON.stringify(o.ST))) : []; SE.sel = []; strChanged(); }   // (the placed structures - 50-zz-struct)
 }
-function terrainShowTa(on) {
-  if (!TERRAIN_ED.ta) {
-    const cat = TERRAIN_ED.btn && TERRAIN_ED.btn.parentNode; if (!cat) return { value: '', select() { } };
-    const t = document.createElement('textarea'); t.spellcheck = false; t.style.flexBasis = '100%'; t.hidden = true; cat.appendChild(t); TERRAIN_ED.ta = t;
-  }
-  if (on !== undefined) TERRAIN_ED.ta.hidden = !on;
-  return TERRAIN_ED.ta;
-}
 function terrainTabInit(b) {
   TERRAIN_ED.btn = FLOOR_ED.btn = LAND_ED.btn = b;                 // (the floor's and the land's handles show while this does)
   setTimeout(() => {
@@ -51129,17 +51211,11 @@ function terrainTabInit(b) {
     cat.appendChild(n); TERRAIN_ED.note = n;
   }, 0);
 }
-terrainReset.init = terrainTabInit;
 NSKY.editor.TUNE.sliders('BG', 'UNDERGROUND', ['bgug']);   // (UNDERGROUND LIGHT, 50-land-terrain.js ltDist - a look: WORLD PROPERTIES > BACKGROUND > BG, user Nov 1)
 // (REFRESH: the editor's top bar, for every edit of the world - 50-zzz-world-ed.js, user Nov 1)
 const skinBtn = (lab, v, desc) => { const f = () => terrainMark(v); f.init = b => { (TERRAIN_ED.skinBtns || (TERRAIN_ED.skinBtns = [])).push([b, v]);
   if (!TERRAIN_ED.skinNote) setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.skinNote) return; terrainHillsRow(cat); const n = document.createElement('div'); n.className = 'tabnote'; cat.appendChild(n); TERRAIN_ED.skinNote = n; terrainSyncSkin(); }, 0); }; return [lab, desc, f]; };
-NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
-  skinBtn('FOREST', 'F', 'Picked segments: forest ground'),
-  skinBtn('DESERT', 'D', 'Picked segments: desert ground'),
-  skinBtn('TROPICAL', 'T', 'Picked segments: tropical ground and plants'),
-  skinBtn('SEA', 'S', 'Picked segments: sea floor'),
-]);
+
 // (user Oct 29: "We should have a 'split segment' and you have a slider for how many points you want to split it in")
 // each picked piece of line cut into N even pieces: N - 1 handles put on the line as it is (the shape unchanged), the
 // piece's skin and hills on each; a country's fixed stretches take none
@@ -51178,7 +51254,7 @@ function terrainDelSeg() {
 }
 function terrainSyncSplit() {
   const s = TERRAIN_ED.sel, on = !!(s && selPts(s));
-  for (const b of TERRAIN_ED.splitBtns || []) { b.textContent = 'SPLIT ' + ED_SPLIT.v; b.disabled = !on; b.style.opacity = on ? '' : '0.4'; }
+  for (const b of TERRAIN_ED.splitBtns || []) { b.textContent = 'SPLIT SEGMENT ' + (typeof btnVar === 'function' ? btnVar('in ' + ED_SPLIT.v) : ED_SPLIT.v); b.disabled = !on; b.style.opacity = on ? '' : '0.4'; }
   for (const b of TERRAIN_ED.delSegBtns || []) { b.disabled = !on; b.style.opacity = on ? '' : '0.4'; }
   if (TERRAIN_ED.splitRow) TERRAIN_ED.splitRow.inp.value = ED_SPLIT.v;
   if (TERRAIN_ED.splitNote) TERRAIN_ED.splitNote.textContent = on ? (selHi(s) > selLo(s) ? (selHi(s) - selLo(s) + 1) + ' segments picked.' : '1 segment picked.') : 'Pick a segment.';
@@ -51196,9 +51272,7 @@ function terrainSplitRow(b) {
 }
 terrainSplit.init = b => { (TERRAIN_ED.splitBtns || (TERRAIN_ED.splitBtns = [])).push(b); setTimeout(() => terrainSplitRow(b), 0); };
 terrainDelSeg.init = b => { (TERRAIN_ED.delSegBtns || (TERRAIN_ED.delSegBtns = [])).push(b); };
-NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT', [
-  ['SPLIT', 'Cut the picked segments into equal pieces', terrainSplit],
-]);   // (DELETE: the editor's one, on its top bar - user Nov 1)
+   // (DELETE: the editor's one, on its top bar - user Nov 1)
 // (user Oct 28, 21:04) the island lines: in the middle plane, behind the water - the boats and the subs go through them
 // (the Story spec section 8: 'Replace "Create Island" with "Create Segment"' - a new segment comes picked whole, so FOREST /
 // DESERT / TROPICAL type all of it; today every created segment is an island - water passes through it)
@@ -51206,35 +51280,48 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT', [
 // (user 14:02: "the Island should be highlighted by default so we know. And when we change to Solid, it should change") the picked
 // shape's kind lit, as the skin buttons are (terrainSyncSkin)
 // (user 14:23) a hole dark (the default) or SEE-THROUGH: lit when the picked holes are
-const seeBtn = () => { const f = () => islToggleSee(); f.init = b => { TERRAIN_ED.seeBtn = b; }; return ['SEE-THROUGH', 'Picked hole shows what is behind (off: dark)', f]; };
+// (user 14:23; Nov 7: CAVE TYPE) a cave or tunnel CAVE (dark - the default) or HOLE (see-through): lit as the picked ones are
+const caveTypeBtn = (lab, see, desc) => { const f = () => islSetSee(see); f.init = b => (TERRAIN_ED.seeBtns || (TERRAIN_ED.seeBtns = [])).push([b, see]); return [lab, desc, f]; };
 // (user Nov 5 20:22) a terrain shape dark inside as the ground (on) or its rock seen all the way in (off): lit when the picked shapes are
 const ugBtn = () => { const f = () => islToggleUG(); f.init = b => { TERRAIN_ED.ugBtn = b; }; return ['HIDE INTERIOR', 'Picked shape is dark inside (off: see its rock)', f]; };
 const kindBtn = (lab, k, desc) => { const f = () => islSetKind(k); f.init = b => (TERRAIN_ED.kindBtns || (TERRAIN_ED.kindBtns = [])).push([b, k]); return [lab, desc, f]; };
+
+// (Nov 7, user: "TERRAIN EDITOR Changes ... 2 CLEAR SECTIONS: TERRAIN SHAPES - only these options, to create terrain ... SELECTED
+// PROPERTIES (based on what you have selected)") the tab: TERRAIN SHAPES - what makes a new shape; SELECTED PROPERTIES - its parts shown
+// by what's picked: SEGMENT TYPE and SEGMENT ACTIONS for any shape, TERRAIN TYPE for a terrain shape, CAVE TYPE for a cave or tunnel
+islAdd.init = terrainTabInit;
 NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN SHAPES', [
   ['CREATE TERRAIN', 'New terrain shape in the view', islAdd],
-  ['CREATE HOLE', 'New hole that cuts the terrain', islAddHole],
-  ['CREATE TUNNEL', 'New tunnel: a path with 3 width points', islAddTunnel],
-  kindBtn('SOLID', 'S', 'Picked shape: solid foreground, blocks boats'),
-  kindBtn('ISLAND', 'I', 'Picked shape: behind the water, boats pass'),
-  kindBtn('HOLE', 'H', 'Picked shape: cuts the terrain'),
-  seeBtn(),
-  ugBtn(),
+  ['CREATE TUNNEL', 'New tunnel: a path carved with a width', islAddTunnel],
+  ['CREATE CAVE', 'New cave: a closed shape carved out', islAddHole],
+]);
+NSKY.editor.TUNE.buttons('TERRAIN', '=SELECTED PROPERTIES', []);
+NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
+  skinBtn('FOREST', 'F', 'Picked segments: forest ground'),
+  skinBtn('DESERT', 'D', 'Picked segments: desert ground'),
+  skinBtn('TROPICAL', 'T', 'Picked segments: tropical ground and plants'),
+  skinBtn('SEA', 'S', 'Picked segments: sea floor'),
+]);
+NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT ACTIONS', [
+  ['SPLIT SEGMENT', 'Cut the picked segments into equal pieces', terrainSplit],
   ['SPLIT SHAPE', 'Cut the shape in two at the picked segment', islSplitShape],
 ]);
+const secOf = (key, init) => { const f = init || (() => { }); return b => { f(b); setTimeout(() => { if (b.parentNode) (TERRAIN_ED.secs || (TERRAIN_ED.secs = {}))[key] = b.parentNode; terrainSyncSecs(); }, 0); }; };
+{ const k = kindBtn('SOLID', 'S', 'Picked shape: solid foreground, blocks boats'); k[2].init = secOf('terrain', k[2].init);
+  NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN TYPE', [k, kindBtn('ISLAND', 'I', 'Picked shape: behind the water, boats pass'), ugBtn()]); }
+{ const c = caveTypeBtn('CAVE', false, 'Picked cave or tunnel: dark inside'); c[2].init = secOf('cave', c[2].init);
+  NSKY.editor.TUNE.buttons('TERRAIN', 'CAVE TYPE', [c, caveTypeBtn('HOLE', true, 'Picked cave or tunnel: see what is behind')]); }
+// the SELECTED PROPERTIES parts for what's picked: TERRAIN TYPE with a terrain shape, CAVE TYPE with a cave or tunnel
+function terrainSyncSecs() {
+  const S = TERRAIN_ED.secs; if (!S) return;
+  const s = TERRAIN_ED.sel, L = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : []).filter(n => ISLANDS[n]), ks = L.map(n => shpK(ISLANDS[n]));
+  if (S.terrain) S.terrain.hidden = !ks.some(k => k !== 'H');
+  if (S.cave) S.cave.hidden = !ks.some(k => k === 'H');
+}
 // (OBJECT TEAM gone, user Nov 1: a tower, a dock, an airport is picked in the world and deleted with the editor's DELETE; a tower
 // is added with the VEHICLE tab's SPAWN)
 // (Nov 3: the WORLD SIZE buttons and the GROWTH slider gone - the world's size is its shapes', 50-zzzz-world-size.js)
-NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN DATA', [
-  ['RESET TO DEFAULT', 'Restore the built-in terrain', terrainReset],
-  ['COPY POINTS', 'Copy the terrain points as text', b => {
-    const t = terrainShowTa(true); t.value = terrainCopyText(); t.select();
-    try { navigator.clipboard.writeText(t.value).then(() => { b.textContent = 'COPIED'; setTimeout(() => { b.textContent = 'COPY POINTS'; }, 1500); }, () => { }); } catch (e) { try { document.execCommand('copy'); } catch (e2) { } }
-  }],
-  ['LOAD POINTS', 'Load terrain points pasted below', () => {
-    const t = terrainShowTa(true);
-    try { terrainLoad(t.value); } catch (e) { t.value = 'not valid: ' + e.message + '\n' + t.value; }
-  }],
-]);
+// (Nov 7, user: "Remove Terrain Data section" - RESET / COPY POINTS / LOAD POINTS gone: snapshots carry the world)
 
 /* ================================================================
    LAND TEST (user Oct 25): the tank and the helicopter
@@ -57639,11 +57726,13 @@ function drawDockLamps(L, K, flip) {
 // default") every switch on from the start; VEHICLES: every vehicle of the world by the one hit rule (its picture where solid, at
 // its size, turned with it - vehHitAt / poseHitAt, 50-zz-damage.js) - the boats, cars, helicopters, planes, balloons, the space
 // vehicles; the army's own rows below as before
-const COLV = { veh: 1, ship: 1, sub: 1, civ: 1, plane: 1, tower: 1, crane: 1, harbour: 1, land: 1 };
+// (Nov 7, user: "Collision Display should be OFF by default" - every switch off until turned on; kept as bd_colv2, so the old all-on
+// choice saved as bd_colv is left behind once)
+const COLV = { veh: 0, ship: 0, sub: 0, civ: 0, plane: 0, tower: 0, crane: 0, harbour: 0, land: 0 };
 // (user Nov 3 06:57: "my local preferences should stay saved for Display tab ... They seem to reset every time") the switches kept
-// in this browser (bd_colv - LOCAL_KEYS: never in a snapshot); every switch on until set
-try { const o = JSON.parse(localStorage.getItem('bd_colv') || 'null'); if (o) for (const k in COLV) if (o[k] === 0 || o[k] === 1) COLV[k] = o[k]; } catch (e) { }
-const colvSave = () => { try { localStorage.setItem('bd_colv', JSON.stringify(COLV)); } catch (e) { } };
+// in this browser (bd_colv2 - LOCAL_KEYS: never in a snapshot); every switch off until set
+try { const o = JSON.parse(localStorage.getItem('bd_colv2') || 'null'); if (o) for (const k in COLV) if (o[k] === 0 || o[k] === 1) COLV[k] = o[k]; } catch (e) { }
+const colvSave = () => { try { localStorage.setItem('bd_colv2', JSON.stringify(COLV)); } catch (e) { } };
 const COLV_ROWS = [['veh', 'VEHICLES', 'rgba(255,214,64,0.55)', 'Boats, cars, aircraft, balloons'], ['ship', 'BATTLESHIPS', 'rgba(255,90,79,0.5)', 'The armies\' battleships'], ['sub', 'ATTACK SUBS', 'rgba(127,214,255,0.55)', 'The armies\' attack subs'], ['civ', 'BIG SHIPS', 'rgba(255,140,200,0.5)', 'Liners and cargo ships'], ['plane', 'WARPLANES', 'rgba(255,230,90,0.6)', 'The armies\' planes'], ['tower', 'GUN TOWERS', 'rgba(220,120,255,0.5)', 'Gun towers and lighthouses'],
   ['crane', 'CRANES', 'rgba(255,179,71,0.5)', 'Harbour cranes'], ['harbour', 'HARBOURS', 'rgba(255,255,255,0.4)', 'Piers and hangars'], ['land', 'GROUND LINE', 'rgba(125,255,155,0.9)', 'The ground surface']];
 const colvOn = () => NSKY.editor.TUNE.open && Object.values(COLV).some(Boolean);
@@ -61812,16 +61901,14 @@ setInterval(wedSync, 250);                                // (the name follows t
 /* ================================================================
    REPORT BUG (user Nov 3 19:02: "there has to be a button to submit a bug. When I press a bug button, it should give you
    information so you can reproduce the state that I'm in").
-   With a game on, the main menu has REPORT BUG under its panel, bottom right. Pressed, it takes:
-   - the whole game as it stood when the menu opened (the GAME EDITOR's own save - edGameSave: the world and every table, the
-     simulation worker held while it's taken - the Story's saves use the same), so it can be put back exactly;
+   REPORT is in the corner of every screen, above the version and the FPS (Nov 7). Pressed, it takes:
+   - the whole game when there is one (the GAME EDITOR's own save - edGameSave: the world and every table, the simulation worker
+     held while it's taken - the Story's saves use the same), so it can be put back exactly;
    - this browser's game keys (every bd_ key: the worlds it plays, the prefabs, the tuning, the Story's slot list);
-   - a picture of the screen as it was when the menu opened (bugGrab, from render - 48-render.js);
+   - a picture of the screen (bugGrab, from render - 48-render.js);
    - the version and build, the mode, the device and screen, what you were in, the day and hour, the last errors and warnings.
-   Sent: with the world page's GitHub token in this browser (wp_token - the user's own devices), the report is committed to
-   the game's repo on the branch `bugs` (bugs/<date>-<time>.json) and REPORT BUG says BUG SENT; without it (a tester's iPad)
-   the device's share sheet opens with the report as a file to send (AirDrop, Messages, mail), or it is downloaded.
-   Put back with __game.bugLoad(report) (52-main.js hook, below): the keys into this browser, then the game.
+   Saved on the device as one .zip (report.json + screenshot.jpg) - nothing is sent anywhere.
+   Put back with __game.bugLoad(report.json's text) (52-main.js hook, below): the keys into this browser, then the game.
    ================================================================ */
 const BUG = { shot: null, want: false, busy: false, log: [] };
 // the last 40 errors and warnings, with when they came
@@ -61840,12 +61927,11 @@ function bugGrab() {
     const gc = document.getElementById('game'), hc = document.getElementById('hud'); if (!gc) return;
     const s = Math.min(1, 1280 / gc.width), c = document.createElement('canvas'); c.width = Math.round(gc.width * s); c.height = Math.round(gc.height * s);
     const x = c.getContext('2d'); x.drawImage(gc, 0, 0, c.width, c.height); if (hc) x.drawImage(hc, 0, 0, c.width, c.height);
-    BUG.shot = c.toDataURL('image/jpeg', 0.8);
+    const u = c.toDataURL('image/jpeg', 0.85), b = atob(u.slice(u.indexOf(',') + 1)), A = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) A[i] = b.charCodeAt(i); BUG.shot = A;   // (the .jpg's bytes, for the .zip)
   } catch (e) { BUG.shot = null; }
 }
-// REPORT BUG's place: under the menu's panel, at its right
-function bugBtn(T) { return T && menuCanResume() && !joinedRoom() && !SSL.open && !linkPanelUp() ? [T.x + T.w - 120, T.y + T.h + 6, 120, 28] : null; }
-function drawBugBtn(T) { try { const r = bugBtn(T); if (r) modeButton(...r, BUG.busy ? 'SENDING...' : 'REPORT BUG', false); } catch (e) { } }
+// REPORT's place: the corner on every screen, above the version and the FPS (drawFps - 18-top-ui-perf.js)
+function bugBtn() { return LOADING ? null : CORNER.bug; }
 function bugState() {
   const c = crew[0], v = c && c.mode === 'civ' ? c.civ : null, at = STORY && typeof storyAt === 'function' ? storyAt() : null;
   const keys = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('bd_')) keys[k] = lsRawGet(k); }
@@ -61858,35 +61944,59 @@ function bugState() {
     log: BUG.log.slice(), keys,
   };
 }
+/* (Nov 7, user: "It saves a BUG REPORT file, does not use the server or anything: One .zip holding the report and the screenshot as a
+   normal .jpg ... it opens anywhere, iPad included") the report (report.json: bugState, and the whole game when there is one) and the
+   screen as it was (screenshot.jpg) in one .zip, saved on the device (downloaded - an iPad keeps it in Files). Nothing is sent */
 async function bugSend() {
   if (BUG.busy) return; BUG.busy = true;
   try {
-    const R = bugState(); R.shot = BUG.shot;
-    await swHold('bug'); try { R.game = edGameSave(); } finally { swRelease('bug'); }
-    const text = JSON.stringify(R), d = new Date(), z = n => String(n).padStart(2, '0');
-    const name = `bug-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}-v${GAME_VERSION}.json`;
-    let tok = null; try { tok = localStorage.getItem('wp_token'); } catch (e) { }
-    if (tok && await bugCommit(tok, 'bugs/' + name, text).catch(e => { console.warn('bug send', e); return false; })) { showToast('BUG SENT'); return; }
-    const file = new File([text], name, { type: 'application/json' });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) { try { await navigator.share({ files: [file], title: 'Battleship Duel bug' }); showToast('BUG READY TO SEND'); return; } catch (e) { if (e && e.name === 'AbortError') return; } }
-    const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 20000);
-    showToast('BUG SAVED - SEND THE FILE');
+    const live = typeof WORLD_READY !== 'undefined' && WORLD_READY && (!ui.title || menuCanResume());
+    if (live && !ui.title) { BUG.want = true; await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); }   // (the screen with its controls, grabbed by the next frame - render)
+    else if (!BUG.shot || !live) bugGrab();
+    const R = bugState();
+    if (live) { await swHold('bug'); try { R.game = edGameSave(); } finally { swRelease('bug'); } }
+    const d = new Date(), z = n => String(n).padStart(2, '0');
+    const name = `bug-${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}-v${GAME_VERSION}`;
+    const files = [['report.json', new TextEncoder().encode(JSON.stringify(R))]];
+    if (BUG.shot) files.push(['screenshot.jpg', BUG.shot]);
+    const zip = await zipMake(files), a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([zip], { type: 'application/zip' })); a.download = name + '.zip';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 20000);
+    showToast('BUG REPORT SAVED');
   } catch (e) { console.warn('bug report', e); showToast('COULD NOT MAKE THE REPORT'); }
-  finally { BUG.busy = false; }
+  finally { BUG.busy = false; BUG.shot = null; }
 }
-// into the repo's `bugs` branch (made from main the first time)
-async function bugCommit(tok, path, text) {
-  const API = 'https://api.github.com/repos/facaelectrica/battleship-duel';
-  const gh = async (p, o = {}) => { const r = await fetch(API + p, { ...o, headers: { Accept: 'application/vnd.github+json', Authorization: 'Bearer ' + tok, 'X-GitHub-Api-Version': '2022-11-28', ...(o.body ? { 'Content-Type': 'application/json' } : {}) } }); const j = await r.json().catch(() => ({})); if (!r.ok) { const e = new Error(j.message || 'HTTP ' + r.status); e.status = r.status; throw e; } return j; };
-  try { await gh('/git/ref/heads/bugs'); }
-  catch (e) { if (e.status !== 404) throw e; const m = await gh('/git/ref/heads/main'); await gh('/git/refs', { method: 'POST', body: JSON.stringify({ ref: 'refs/heads/bugs', sha: m.object.sha }) }); }
-  const b64 = await new Promise((res, rej) => { const f = new FileReader(); f.onload = () => res(String(f.result).split(',')[1]); f.onerror = () => rej(f.error); f.readAsDataURL(new Blob([text])); });
-  await gh('/contents/' + path, { method: 'PUT', body: JSON.stringify({ message: 'Bug report ' + path.slice(5), content: b64, branch: 'bugs' }) });
-  return true;
+// a .zip of [name, bytes] files: each deflated when the browser can (CompressionStream), else stored - read by every unzipper
+const ZIP_CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const zipCrc = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = ZIP_CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+async function zipDeflate(b) {
+  if (typeof CompressionStream !== 'function') return null;
+  try { return new Uint8Array(await new Response(new Blob([b]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer()); } catch (e) { return null; }
 }
+async function zipMake(files) {
+  const parts = [], cen = []; let off = 0;
+  const d = new Date(), dt = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF, dd = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
+  for (const [name, raw] of files) {
+    const nm = new TextEncoder().encode(name), crc = zipCrc(raw), df = /\.jpg$/.test(name) ? null : await zipDeflate(raw);
+    const body = df && df.length < raw.length ? df : raw, how = body === raw ? 0 : 8;
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, how, true); h.setUint16(10, dt, true); h.setUint16(12, dd, true);
+    h.setUint32(14, crc, true); h.setUint32(18, body.length, true); h.setUint32(22, raw.length, true); h.setUint16(26, nm.length, true);
+    parts.push(new Uint8Array(h.buffer), nm, body);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, how, true); c.setUint16(12, dt, true); c.setUint16(14, dd, true);
+    c.setUint32(16, crc, true); c.setUint32(20, body.length, true); c.setUint32(24, raw.length, true); c.setUint16(28, nm.length, true); c.setUint32(42, off, true);
+    cen.push(new Uint8Array(c.buffer), nm);
+    off += 30 + nm.length + body.length;
+  }
+  const cs = cen.reduce((n, q) => n + q.length, 0), e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, cs, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...cen, new Uint8Array(e.buffer)]);
+}
+// REPORT pressed, on any screen
 if (typeof window !== 'undefined' && !SW_IN_WORKER) window.addEventListener('pointerdown', ev => {
-  if (!ui.title || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
-  const r = bugBtn(titleLayout()); if (!r) return;
+  if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+  const r = bugBtn(); if (!r) return;
   const [X, Y] = toUI(ev.clientX, ev.clientY); if (X < r[0] || X > r[0] + r[2] || Y < r[1] || Y > r[1] + r[3]) return;
   ev.stopImmediatePropagation(); ev.preventDefault(); menuClick(); bugSend();
 }, { capture: true, passive: false });
@@ -63203,7 +63313,7 @@ function frameBody(now) {
   // is shut - photo mode, 18-zz-photo)
   edModeSync();                                                      // (the GAME EDITOR open: held, as photo mode - 18-zz-photo)
   atmoSync();                                                        // (the air's layers from the SKY EDITOR - 50-land-space.js)
-  const held_ = paused || !rotateEl.hidden || PHOTO.on || photoWorldFreeze() || !!SWB.taking;   // (SWB.taking: the game on its way back from the worker - 00-sw-boot.js swHold)
+  const held_ = paused || !rotateEl.hidden || PHOTO.on || photoWorldFreeze() || !!SWB.taking || SW.handing;   // (SW.handing: the game being handed to the worker - swResync)   // (SWB.taking: the game on its way back from the worker - 00-sw-boot.js swHold)
   schedFrame(!held_ && !SW.live);                                   // (the scheduler's frame count moves with the simulation only: a held page frame, or a guest's, isn't a frame of the game - Oct 30 gate)
   if (PHOTO.on) photoInput(dt); else pollPads(dt);
   swWantLive();
@@ -63856,9 +63966,10 @@ if (VEG_MODE) (() => {
 #vgLeft .r3{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid #2c3850}#vgLeft .r3 button{font-size:13px;min-height:40px}#vgLeft .r{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center}#vgLeft .l{color:#7a8294}#vgFps{color:#9fd36a;font:600 20px ui-monospace,Menlo,monospace}#vgCost{color:#c8cfdc;font-size:12px;line-height:1.35;white-space:pre-line}</style>
 <div class="r3"><button class="on" title="The scene: the prefabs on their decks">GROUP EDITOR</button><button data-ed="prefab" title="The prefab on its own (the last one worked on, or the plant selected)">PREFAB EDITOR</button><button data-ed="comp" title="Its trunk or its leaf">COMPONENT EDITOR</button></div><div id="vgFps">-- fps</div><div id="vgCost">-</div>
 <div class="r"><span class="l">ZOOM</span><button data-z="1">+</button><button data-z="-1">-</button></div>
-<button data-b="1" class="on" style="display:none">BONES ON</button><button data-reset="1" style="display:none" title="Every plant regrown, the structures and vehicles spawned gone, the hour, wind and view back - the saved numbers and shapes stay">RESET SCENE</button><div class="l">DECKS</div><div id="vgVis" style="display:grid;gap:6px"></div>` + (window.__vegLab ? `<button data-exp="1" title="Everything saved, as one file for the game">EXPORT FOR GAME</button>` : `<button data-snap="1" title="The game's SNAPSHOT - your world and these plants - to paste on the world page">SNAPSHOT</button><button data-back="1" title="Back to the game - what you changed here is the game's">BACK TO GAME</button>`);
+<button data-b="1" class="on" style="display:none">BONES ON</button><button data-reset="1" style="display:none" title="Every plant regrown, the structures and vehicles spawned gone, the hour, wind and view back - the saved numbers and shapes stay">RESET SCENE</button><div class="l">DECKS</div><div id="vgVis" style="display:grid;gap:6px"></div>` + (window.__vegLab ? `<button data-exp="1" title="Everything saved, as one file for the game">EXPORT FOR GAME</button>` : `<button data-snap="1" title="The game's SNAPSHOT - your world and these plants - to paste on the world page">SNAPSHOT</button><button data-ged="1" title="Open the game editor">GAME EDITOR</button><button data-back="1" title="Close the vegetation editor">CLOSE</button>`);
     const fpsEl = L.querySelector('#vgFps');
-    if (L.querySelector('[data-back]')) L.querySelector('[data-back]').onclick = () => { try { sessionStorage.removeItem('veged'); } catch (e) { } location.reload(); };   // (the game's VEGETATION EDITOR: back to the title)
+    if (L.querySelector('[data-back]')) L.querySelector('[data-back]').onclick = () => { try { sessionStorage.removeItem('veged'); } catch (e) { } location.reload(); };   // (the game's VEGETATION EDITOR: CLOSE - back to the title; user Nov 7: "Instead of 'Back to Game' it should say 'CLOSE'")
+    if (L.querySelector('[data-ged]')) L.querySelector('[data-ged]').onclick = () => { try { sessionStorage.removeItem('veged'); sessionStorage.setItem('gameed', '1'); } catch (e) { } location.reload(); };   // (GAME EDITOR: the page again, the GAME EDITOR opened on it - 00-world.js)
     // (user Nov 4 13:45: "the in-game vegetation editor must also have a 'snapshot' button so I dont have to open the game editor") the GAME EDITOR's SNAPSHOT:
     // this browser's saved world (as kept - not the editor's own world, which is only held in memory) and every vegetation number and shape
     if (L.querySelector('[data-snap]')) L.querySelector('[data-snap]').onclick = () => { L.querySelector('[data-snap]').blur(); let t = ''; try { const o = JSON.parse(gameSnapshot()); o.worldName = lsRawGet('bd_world') === 'story' ? 'story' : 'open'; t = JSON.stringify(o); } catch (e) { tip.textContent = 'Could not take it: ' + e.message; return; }
