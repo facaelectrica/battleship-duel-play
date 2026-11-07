@@ -18,6 +18,14 @@
   color-scheme: dark;
 }
 html, body { height: 100%; margin: 0; background: #000; overflow: hidden; overscroll-behavior: none; }
+/* (user Nov 7, iPad 27.2 from its Home Screen icon: iOS lays a Home Screen app out a status bar's height short of the screen - a black band
+   at the foot. There the page is the whole screen - 100lvh, as there's no toolbar to collapse - and the body is what fixed panels are placed
+   in, so one at bottom: 8px sits at the screen's real foot. html.fsapp: pageBox, 00-sw-boot.js) */
+html.fsapp, html.fsapp body { height: max(100%, 100lvh); }
+html.fsapp body { contain: layout; }
+/* (same day: the iPad dims the page under its status bar with a fade a little deeper than the bar itself. An editor's panels start below
+   both; 8px where there's no bar) */
+:root { --below-bar: calc(8px + 1.8 * env(safe-area-inset-top, 0px)); }
 body {
   touch-action: none; -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
@@ -168,13 +176,31 @@ function swPrelude(B) {
   self.onunhandledrejection = e => { postMessage({ t: 'fail', err: String(e && e.reason && (e.reason.stack || e.reason) || e) }); };
   self.onmessage = e => { if (self.__swReady) self.__swReady(e.data); else self.__swQ.push(e.data); };
 }
+// The page's size on screen, the one size the game and the editors' panels are laid out to (resize, the worker's boot, the editors).
+// The visual viewport if there is one (the part of the page that's actually on screen); the worker has none and gets that size as its window's.
+// (user Nov 7, iPad 27.2 opened from its Home Screen icon: iOS tells a Home Screen app its page is a status bar's height shorter than the screen,
+// and the game stopped there - a black band at the foot, the editor's bottom bar floating over it. In a Home Screen app the page is made the whole
+// screen (html.fsapp, style.css) and its own height taken when the shortfall is that small; a keyboard's is far bigger, and the game still fits above it)
+const PAGE_GAP_MAX = 80;
+const fsApp = () => { try { return !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)); } catch (e) { return false; } };
+if (!SW_IN_WORKER && fsApp()) try { document.documentElement.classList.add('fsapp'); } catch (e) { }
+function pageBox() {
+  const vv = window.visualViewport;
+  const w = vv ? Math.min(window.innerWidth, Math.round(vv.width)) : window.innerWidth;
+  let h = vv ? Math.min(window.innerHeight, Math.round(vv.height)) : window.innerHeight;
+  if (vv && document.body && document.documentElement.classList.contains('fsapp')) {
+    const full = Math.round(document.body.getBoundingClientRect().height);
+    if (full > h && full - h <= PAGE_GAP_MAX) h = full;
+  }
+  return { w, h };
+}
 // what the page tells the worker about itself at boot
 function swBootData(o = {}) {
   const store = {}; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); store[k] = localStorage.getItem(k); } } catch (e) { }
   const mm = q => { try { return !!(window.matchMedia && matchMedia(q).matches); } catch (e) { return false; } };
   // (the size the way resize() takes it - the visual viewport if there is one: the worker has none, so it gets that size as its window's; a
   // pixel off and the world is laid out a little differently - Oct 30, the first gate run)
-  const vv = window.visualViewport, w = vv ? Math.min(window.innerWidth, Math.round(vv.width)) : window.innerWidth, h = vv ? Math.min(window.innerHeight, Math.round(vv.height)) : window.innerHeight;
+  const { w, h } = pageBox();
   let sat = 0; try { sat = getComputedStyle(document.documentElement).getPropertyValue("--sat"); } catch (e) { }
   return Object.assign({ w, h, sat, dpr: window.devicePixelRatio || 1, search: (location.search || '').replace(/([?&])simworker=1/, '$1simworker=host') + '&gl=0', origin: location.origin,
     store, coarse: mm('(pointer: coarse)') || ('ontouchstart' in window), reduced: mm('(prefers-reduced-motion: reduce)') }, o);
@@ -4908,8 +4934,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 808;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 17:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 809;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 19:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -27675,7 +27701,7 @@ function edBuild(host) {
   // (user Oct 30; Nov 1 20:51: 30% of the screen from the bottom, was half) the editor's height: 30% of the screen to start, the same on every tab; the top bar (or the grip over it)
   // dragged up or down - mouse or finger - sets it. A drag that starts on a button doesn't press it.
   { let d = null, eat = false;
-    const H = () => Math.max(window.innerHeight, 1), fit = h => Math.round(clamp(h, 90, H() - 24));
+    const H = () => Math.max(pageBox().h, 1), fit = h => Math.round(clamp(h, 90, H() - 24));
     const down = e => { if (e.pointerType === 'mouse' && e.button !== 0) return; d = { id: e.pointerId, y: e.clientY, h: root.getBoundingClientRect().height, on: false }; };
     const move = e => {
       if (!d || e.pointerId !== d.id) return;
@@ -64984,7 +65010,7 @@ function resize(restore) {
   // of the page that's actually on screen, the visual viewport, and the page is put back at its top)
   const vv = window.visualViewport;
   try { if (window.scrollX || window.scrollY) window.scrollTo(0, 0); } catch (e) {}
-  const w = vv ? Math.min(window.innerWidth, Math.round(vv.width)) : window.innerWidth, h = vv ? Math.min(window.innerHeight, Math.round(vv.height)) : window.innerHeight;
+  const { w, h } = pageBox();   // (00-sw-boot.js: also the whole screen in a Home Screen app that iOS lays out short - user Nov 7)
   { const st = document.getElementById('stage');
     STAGE_X = vv ? Math.max(0, Math.round(vv.offsetLeft)) : 0; STAGE_Y = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
     if (st && vv) Object.assign(st.style, { top: STAGE_Y + 'px', left: STAGE_X + 'px', width: w + 'px', height: h + 'px', right: 'auto', bottom: 'auto' }); }
@@ -65407,14 +65433,14 @@ if (VEG_MODE) (() => {
   const L0 = () => document.getElementById('vgLeft') || document.createElement('div');
   function panel() {
     const css = document.createElement('style');
-    css.textContent = `#vgLab{position:fixed;right:8px;top:8px;max-height:calc(100vh - 16px);overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:auto;scrollbar-color:#6a9a3a #1a2234;z-index:70;background:#0f1420e8;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:10px;display:grid;gap:8px;width:min(330px,calc(100vw - 16px))}
+    css.textContent = `#vgLab{position:fixed;right:8px;top:var(--below-bar,8px);max-height:calc(100% - 8px - var(--below-bar,8px));overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;scrollbar-width:auto;scrollbar-color:#6a9a3a #1a2234;z-index:70;background:#0f1420e8;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:10px;display:grid;gap:8px;width:min(330px,calc(100vw - 16px))}
 #vgLab .tri button{font-size:12px;padding:8px 2px}#vgLab button.fold{text-align:left;padding-left:12px;color:#9fd36a;background:#141b2a}#vgLab button.fold::after{content:' \\25B8';float:right;margin-right:6px}#vgLab button.fold.open::after{content:' \\25BE'}#vgLeft .tri button{font-size:14px}#vgLab button{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:48px;padding:10px 8px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none;text-align:center}
 #vgLab button:disabled{opacity:0.35;cursor:default}#vgLab button:active,#vgLab button.on{background:#2a3a1e;border-color:#6a9a3a}#vgLab .w{display:grid;grid-template-columns:1fr 1fr;gap:8px}#vgLab .w3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}#vgTip{color:#ffd9a0;min-height:1.4em}
 #vgLab h4{margin:6px 0 0;font:inherit;color:#9fd36a}#vgCost{color:#c8cfdc}
 .vgS{display:grid;gap:4px;user-select:none;-webkit-user-select:none}.vgS .t{display:flex;justify-content:space-between;color:#9aa3b5}.vgS .t b{color:#9fd36a;font-weight:600}.vgS .t i{font-style:normal;color:#7a8294;cursor:pointer;margin-left:6px;padding:2px 4px;border-radius:4px}.vgS .t i:hover{color:#ffd25a;background:#1a2234}.vgS .t i.same{opacity:.45}
 .vgS .k{position:relative;height:44px;touch-action:pan-y;cursor:pointer}#vgLab::-webkit-scrollbar{width:14px}#vgLab::-webkit-scrollbar-thumb{background:#6a9a3a;border-radius:7px}#vgLab::-webkit-scrollbar-track{background:#1a2234}.vgS .k::before{content:"";position:absolute;left:0;right:0;top:19px;height:6px;border-radius:3px;background:#2c3850}
 .vgS .f{position:absolute;left:0;top:19px;height:6px;border-radius:3px;background:#6a9a3a}.vgS .h{position:absolute;top:6px;width:32px;height:32px;margin-left:-16px;border-radius:50%;background:#9fd36a;border:3px solid #0f1420;box-sizing:border-box}
-#vgPause{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:70;background:#0f1420c8;color:#d8dce8;font:600 16px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:6px;padding:6px 14px;pointer-events:none}#vgPause[hidden]{display:none}`;
+#vgPause{position:fixed;left:50%;top:var(--below-bar,10px);transform:translateX(-50%);z-index:70;background:#0f1420c8;color:#d8dce8;font:600 16px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:6px;padding:6px 14px;pointer-events:none}#vgPause[hidden]{display:none}`;
     document.head.appendChild(css);
     const ps = document.createElement('div'); ps.id = 'vgPause'; ps.hidden = true; ps.textContent = 'PAUSED - Esc to go on'; document.body.appendChild(ps);
     const T = VG().types(), pick = (fam, pref) => T.find(t => t.sv === pref) || T.find(t => t.fam === fam);
@@ -65936,7 +65962,7 @@ if (VEG_MODE) (() => {
     // (user Nov 3 22:13: "Cost should all be on the upper left side ... On the left we have a small menu that has ZOOM: + -, Bones On/Off, Decks
     // Vis Toggle Deck 1 Deck 2 etc") the view's own menu, top left: the frame rate and the cost, the zoom a level in or out, the bones, each deck shown
     const L = document.createElement('div'); L.id = 'vgLeft'; document.body.appendChild(L);
-    L.innerHTML = `<style>#vgLeft{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));top:calc(8px + env(safe-area-inset-top,0px));max-height:calc(100vh - 267px - 32px - env(safe-area-inset-top,0px));overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:auto;scrollbar-color:#6a9a3a #1a2234;box-sizing:border-box;align-content:start;z-index:70;width:220px !important;background:#0f1420e0;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:8px;display:grid;gap:6px;width:176px}
+    L.innerHTML = `<style>#vgLeft{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));top:var(--below-bar,8px);max-height:calc(100% - 267px - 24px - var(--below-bar,8px));overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:auto;scrollbar-color:#6a9a3a #1a2234;box-sizing:border-box;align-content:start;z-index:70;width:220px !important;background:#0f1420e0;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:8px;display:grid;gap:6px;width:176px}
 #vgBot button{font:inherit;font-size:14px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:42px;padding:6px 12px;cursor:pointer;touch-action:manipulation}#vgBot button.on{background:#2a3a1e;border-color:#6a9a3a}#vgBot button:disabled{opacity:0.35}
 #vgLeft button{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:44px;padding:6px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none}#vgLeft button.on{background:#2a3a1e;border-color:#6a9a3a}
 #vgLeft .r3{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid #2c3850}#vgLeft .r3 button{font-size:13px;min-height:40px}#vgLeft .r{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center}#vgLeft .l{color:#7a8294}#vgFps{color:#9fd36a;font:600 20px ui-monospace,Menlo,monospace}#vgCost{color:#c8cfdc;font-size:12px;line-height:1.35;white-space:pre-line}</style>
@@ -65945,8 +65971,8 @@ if (VEG_MODE) (() => {
 <button data-b="1" class="on" style="display:none">BONES ON</button><button data-reset="1" style="display:none" title="Every plant regrown, the structures and vehicles spawned gone, the hour, wind and view back - the saved numbers and shapes stay">RESET SCENE</button><div class="l">DECKS</div><div id="vgVis" style="display:grid;gap:6px"></div>` + (window.__vegLab ? `<button data-exp="1" title="Everything saved, as one file for the game">EXPORT FOR GAME</button>` : `<button data-snap="1" title="The game's SNAPSHOT - your world and these plants - to paste on the world page">SNAPSHOT</button><button data-ged="1" title="Open the game editor">GAME EDITOR</button><button data-back="1" title="Close the biome editor">CLOSE</button>`);
     const fpsEl = L.querySelector('#vgFps');
     // (user Nov 7 16:15, his photo: the left panel still ran over the bottom bar - 100vh isn't the screen's height on every device) the left
-    // panel stops 8 pixels over where the bottom bar really starts, and scrolls; the right one fits the screen it's on
-    const fitLeft = () => { const b = document.getElementById('vgBot'), rb = b && getComputedStyle(b).display !== 'none' && getComputedStyle(b).visibility !== 'hidden' ? b.getBoundingClientRect() : null, bt = rb && rb.height > 0 ? rb.top : window.innerHeight; L.style.maxHeight = Math.max(80, Math.floor(bt - L.getBoundingClientRect().top - 8)) + 'px'; d.style.maxHeight = (window.innerHeight - 16) + 'px'; };
+    // panel stops 8 pixels over where the bottom bar really starts, and scrolls; the right one fits the screen it's on. (Nov 7 18:05, iPad 27.2 Home Screen app: both panels start below the status bar and its fade - --below-bar - and fit the page's real height, pageBox)
+    const fitLeft = () => { const b = document.getElementById('vgBot'), rb = b && getComputedStyle(b).display !== 'none' && getComputedStyle(b).visibility !== 'hidden' ? b.getBoundingClientRect() : null, bt = rb && rb.height > 0 ? rb.top : pageBox().h; L.style.maxHeight = Math.max(80, Math.floor(bt - L.getBoundingClientRect().top - 8)) + 'px'; d.style.maxHeight = Math.max(80, Math.floor(pageBox().h - d.getBoundingClientRect().top - 8)) + 'px'; };
     fitLeft(); window.addEventListener('resize', fitLeft); setInterval(fitLeft, 700);
     if (L.querySelector('[data-back]')) L.querySelector('[data-back]').onclick = () => { try { sessionStorage.removeItem('veged'); } catch (e) { } location.reload(); };   // (the game's VEGETATION EDITOR: CLOSE - back to the title; user Nov 7: "Instead of 'Back to Game' it should say 'CLOSE'")
     if (L.querySelector('[data-ged]')) L.querySelector('[data-ged]').onclick = () => { try { sessionStorage.removeItem('veged'); sessionStorage.setItem('gameed', '1'); } catch (e) { } location.reload(); };   // (GAME EDITOR: the page again, the GAME EDITOR opened on it - 00-world.js)
@@ -66037,7 +66063,7 @@ if (VEG_MODE) (() => {
     if (!FE) {
       const root = document.createElement('div'); root.id = 'feRoot';
       root.innerHTML = `<style>#feRoot{position:fixed;inset:0;z-index:90;height:100%;background:#121822;display:grid;grid-template-rows:auto 1fr auto;font:14px ui-monospace,Menlo,monospace;color:#d8dce8;touch-action:none}
-#feRoot .bar{display:flex;flex-wrap:wrap;gap:6px;padding:calc(8px + env(safe-area-inset-top,0px)) max(8px,env(safe-area-inset-right,0px)) 8px max(8px,env(safe-area-inset-left,0px));background:#0f1420;border-bottom:1px solid #2c3850;align-items:center}
+#feRoot .bar{display:flex;flex-wrap:wrap;gap:6px;padding:var(--below-bar,8px) max(8px,env(safe-area-inset-right,0px)) 8px max(8px,env(safe-area-inset-left,0px));background:#0f1420;border-bottom:1px solid #2c3850;align-items:center}
 #feRoot .bot{border-top:1px solid #2c3850;border-bottom:0;padding-bottom:calc(8px + env(safe-area-inset-bottom,0px))}
 #feRoot button,#feRoot select{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:46px;padding:8px 12px;touch-action:manipulation}
 #feRoot button:disabled{opacity:0.35}#feRoot button.on{background:#2a3a1e;border-color:#6a9a3a}#feRoot button.save{background:#3a5a1e;border-color:#9fd36a;color:#fff}#feRoot .sep{width:1px;align-self:stretch;background:#2c3850;margin:0 4px}
@@ -66682,7 +66708,7 @@ if (VEG_MODE) (() => {
   function feColPick(q, anchor, done) {
     document.querySelectorAll('.feColPop').forEach(el => el.remove());
     const r = anchor.getBoundingClientRect(), m = document.createElement('div'); m.className = 'feColPop';
-    m.style.cssText = 'position:fixed;z-index:220;width:260px;background:#0f1420;border:1px solid #2c3850;border-radius:10px;padding:12px;display:grid;gap:8px;font:13px ui-monospace,Menlo,monospace;color:#d8dce8;left:' + Math.max(8, r.left - 270) + 'px;top:' + Math.min(window.innerHeight - 300, Math.max(8, r.top - 60)) + 'px';
+    m.style.cssText = 'position:fixed;z-index:220;width:260px;background:#0f1420;border:1px solid #2c3850;border-radius:10px;padding:12px;display:grid;gap:8px;font:13px ui-monospace,Menlo,monospace;color:#d8dce8;left:' + Math.max(8, r.left - 270) + 'px;top:' + Math.min(pageBox().h - 300, Math.max(8, r.top - 60)) + 'px';
     let mode = 'hsl'; const draw = () => {
       const hsl = rgb2hsl(hex2rgb(q.c)); m.innerHTML = '';
       const top = document.createElement('div'); top.style.cssText = 'display:flex;gap:6px;align-items:center';
