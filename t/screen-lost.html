@@ -1927,9 +1927,15 @@ PICS.budget = (() => { try { return matchMedia('(pointer: coarse)').matches || n
 (() => {
   if (typeof HTMLCanvasElement === 'undefined' || (typeof SW_IN_WORKER !== 'undefined' && SW_IN_WORKER)) return;
   const sizes = new WeakMap(), gone = typeof FinalizationRegistry === 'function' ? new FinalizationRegistry(r => { PICS.bytes -= r.b; }) : null;
+  // (?pics=1: each canvas named by the function that made it - picReport's makers - so every byte has a name; off, it costs nothing)
+  const tagOn = typeof location !== 'undefined' && /[?&]pics=1/.test(location.search), maker = () => {
+    const L = (new Error().stack || '').split('\n').map(s => s.trim()).filter(s => s.startsWith('at ') && !/\b(note|makeCanvas|set|createElement)\b/.test(s));
+    return (L[0] || '?').replace(/^at /, '').replace(/ \(.*$/, '').replace(/https?:\S+/, '').replace(/^Object\./, '') || '?';
+  };
+  if (tagOn) PICS.tags = [];
   const note = c => {
     let r = sizes.get(c);
-    if (!r) { r = { b: 0 }; sizes.set(c, r); if (gone) gone.register(c, r); }
+    if (!r) { r = { b: 0 }; sizes.set(c, r); if (gone) gone.register(c, r); if (tagOn) { r.by = maker(); PICS.tags.push([new WeakRef(c), r]); } }
     const b = (c.width * c.height * 4) || 0; PICS.bytes += b - r.b; r.b = b;
   };
   for (const k of ['width', 'height']) {
@@ -1998,7 +2004,13 @@ function picTrim() {
 // the readings: what the page holds, what's kept, the budget, and the stores biggest first
 function picReport() {
   const S = Object.entries(PICS.stores).filter(([, b]) => b > 0).sort((a, b) => b[1] - a[1]).map(([k, b]) => k + ' ' + (b / 1e6).toFixed(1));
-  return { MB: +(PICS.bytes / 1e6).toFixed(1), keptMB: +(PICS.kept / 1e6).toFixed(1), budgetMB: PICS.budget / 1e6, pictures: PICS.live.size, dropped: PICS.drops, stores: S };
+  const R = { MB: +(PICS.bytes / 1e6).toFixed(1), keptMB: +(PICS.kept / 1e6).toFixed(1), budgetMB: PICS.budget / 1e6, pictures: PICS.live.size, dropped: PICS.drops, stores: S };
+  if (PICS.tags) {                                     // (?pics=1: every canvas held, by the function that made it)
+    const by = {}; PICS.tags = PICS.tags.filter(([w]) => w.deref());
+    for (const [w, r] of PICS.tags) { if (!r.b) continue; const k = r.by + (PICS.live.has(w.deref()) ? ' (kept)' : ''); const e = by[k] || (by[k] = [0, 0]); e[0] += r.b; e[1]++; }
+    R.makers = Object.entries(by).sort((a, b) => b[1][0] - a[1][0]).slice(0, 30).map(([k, [b, n]]) => k + ' ' + (b / 1e6).toFixed(1) + ' x' + n);
+  }
+  return R;
 }
 
 /* ================================================================
@@ -3709,10 +3721,29 @@ const BIOME_SURF_DEF = {
 };
 let BIOME_SURF = JSON.parse(JSON.stringify(BIOME_SURF_DEF));
 try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && typeof o === 'object') for (const k in BIOME_SURF_DEF) if (Array.isArray(o[k])) BIOME_SURF[k] = o[k].filter(L => L && typeof L.m === 'string' && isFinite(L.a) && isFinite(L.b)); } catch (e) { }
-const biomeSurfSave = () => { try { localStorage.setItem('bd_biome_surf', JSON.stringify(BIOME_SURF)); } catch (e) { } };
+const biomeSurfSave = () => { try { localStorage.setItem('bd_biome_surf', JSON.stringify(Object.assign({}, BIOME_SURF, { sides: typeof BIOME_SIDES !== 'undefined' ? BIOME_SIDES : {}, bg: typeof BIOME_BG !== 'undefined' ? BIOME_BG : {} }))); } catch (e) { } };
 // a biome's layer of material m (its first): its thickness at x, world units (null: none) - between MIN and MAX on the ground's wobble
 function surfLayer(biome, m) { const L = BIOME_SURF[biome]; return L ? L.find(q => q.m === m) || null : null; }
 function surfThick(L, x, k) { const u = 0.5 + 0.5 * (L.w != null ? L.w : 1) * surfWob(x, k); return L.a + (L.b - L.a) * u; }
+// (the TODO list's BIOME EDITOR: "See how each 'side' has different properties. Selecting a side in the editor allows you to edit its properties";
+// "See how a transition from one side (e.g. top (red) to side (blue) there is a FADE of the vegetation") each biome's SIDES (edgeClass: TOP, SIDE,
+// BOTTOM): SIDE GRASS - grass runs down a cliff (1) or it's bare (0); BOTTOM ROOTS - how many roots hang under an overhang; BOTTOM SHADE - how dark
+// an underside is; EDGE FADE - over how many world units the plants thin out before the top turns into a side. Kept with the layers
+// (bd_biome_surf's 'sides'); the defaults are the look there is now
+const BIOME_SIDES_DEF = { sg: 0, roots: 0.22, shade: 1, fade: 0 };
+let BIOME_SIDES = {};
+try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.sides && typeof o.sides === 'object') BIOME_SIDES = o.sides; } catch (e) { }
+const biomeSides = n => Object.assign({}, BIOME_SIDES_DEF, BIOME_SIDES[n] || {});
+// a ground column's biome (as the Biome Editor names them)
+const colBiome = c => land.bio && land.bio[c] ? [null, 'ice', 'swamp', 'volcanic'][land.bio[c]] : land.mtn && land.mtn[c] ? 'mountain' : land.trop && land.trop[c] ? 'tropical' : land.look && land.look[c] === 1 ? 'desert' : 'forest';
+// (user Nov 7 13:49, his picture of the meadow behind the beach: "other background elements that are not under the Decks, but they're also Decks,
+// right? They should be available for editing") the far scenery as each biome's decks past deck 3 - DECK 4 the meadow (the desert's sand band) and
+// its flowers, DECK 5 the tree rows (the desert's dunes and city), DECK 6 the mountains (the desert's mesas): a biome's own values over the world's
+// FAR SCENERY ones (NSKY.P - GAME EDITOR > FAR SCENERY), none of its own: the world's. Kept with the layers (bd_biome_surf's 'bg')
+let BIOME_BG = {};
+try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.bg && typeof o.bg === 'object') BIOME_BG = o.bg; } catch (e) { }
+let BG_CUR_BIOME = null;                                   // (the biome whose far scenery is being drawn - drawLandBg0)
+const bgPB = (k, d, bn) => { const o = BIOME_BG[bn || BG_CUR_BIOME]; return o && typeof o[k] === 'number' ? o[k] : (typeof bgP === 'function' ? bgP(k, d) : d); };
 
 // The defense tower stands on the block at the end of the pier: six drawings, intact to a skeleton of rebar
 // (sea to the right in the art). Each hit shows the next drawing; the sixth brings it down in pieces.
@@ -4641,8 +4672,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 795;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 15:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 797;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 15:11';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -30952,7 +30983,7 @@ const GRAIN_L = pxLayer({
 function rusted(src, level) {
   if (!level) return src;
   const cache = src._rust || (src._rust = []);
-  if (cache[level]) return cache[level];
+  if (cache[level]) return picUse(cache[level]);
   const c = copyCanvas(src), x = c.getContext('2d');
   const id = x.getImageData(0, 0, c.width, c.height), d = id.data, t = level / 4;
   for (let i = 0; i < d.length; i += 4) {
@@ -30962,7 +30993,7 @@ function rusted(src, level) {
     d[i] = d[i] + (l * 0.8 * n + 52 - d[i]) * t; d[i + 1] = d[i + 1] + (l * 0.55 * n + 18 - d[i + 1]) * t; d[i + 2] = d[i + 2] + (l * 0.5 * n + 14 - d[i + 2]) * t;
   }
   x.putImageData(id, 0, 0);
-  cache[level] = c;
+  cache[level] = c; picKeep(c, 'rust', () => { if (cache[level] === c) cache[level] = null; }, null, true);   // (in the page's picture memory - 04-zzz-pics.js)
   return c;
 }
 const SEA_FOG = [18, 62, 146];
@@ -41710,6 +41741,7 @@ function islandProps() {
       if ((land.proud || []).some(([p, q]) => x > p - 10 && x < q + 10)) continue;   // (not on a boulder standing out of it)
       if (nearAirport(x, AS)) continue;                         // (not on or near a runway, a hangar, a terminal...)
       if (islTropAt(x) && !islDesert(x)) { if (RIG_T.off) land.props.push({ x, kind: 'tree', trop: true, pick, s, flip, z, alive: true, isl: true }); continue; }   // (the tropical's: palms - the decks' now, Nov 4 13:33: tropPalms, 50-land-plants.js)
+      { const bn = biomeAtX(x, true); if (bn && bn !== 'tropical' && biomePlanted(bn)) continue; }   // (a biome with plants of its own: theirs on its tops, not the old ones - Biome Editor)
       if (islDesert(x)) { const nearW = Math.min(x - a, b - x) < 260; land.props.push({ x, kind: nearW && roll < 0.5 ? 'palm' : roll < 0.25 ? 'cactus' : 'scrub', pick, s, flip, z, alive: true, isl: true }); }
       else if (ltCell(ltCol(x), ltRow(t + 1)) === M_GRASS || ltCell(ltCol(x), ltRow(t + 1)) === M_DIRT) land.props.push({ x, kind: 'tree', pick, s: s + 0.08, flip, z, alive: true, isl: true });
     }
@@ -43646,6 +43678,7 @@ function buildLandProps() {
   // whole world - no more the old desert country and the forest side's DESERT pieces apart)
   for (let x = 60 + R() * 100; x < WORLD_W - 60; x += 60 + R() * 140) {
     if (apronD(x) < 260 || !lookD(x) || DL.some(L => x > L[0] - 300 && x < L[1] + 300)) continue;
+    if (biomePlanted('desert') && biomeAtX(x) === 'desert') continue;   // (the DESERT biome has plants of its own: theirs, not these - Biome Editor)
     const kind = R() < 0.22 ? 'cactus' : 'scrub', pick = Math.floor(R() * 1000), z = R(), s = 0.8 + R() * 0.5, flip = R() < 0.5;
     if (ok(x)) land.props.push({ x, kind, pick, s, flip, z, alive: true });
   }
@@ -43834,6 +43867,7 @@ function drawFieldFlowers(x0, x1) {
   for (const f of fieldFlowers) {
     if (offViewR(f.x, 3, x0, x1)) continue;   // (a flower: a few pixels)
     const fc = clamp(Math.floor(f.x / LT_CELL), 0, land.cols - 1); if (fieldK(f.x) < 0.5) continue;   // (none where the field gives out by the airfield)
+    { const fa = bgPB('flw', 1, colBiome(fc)); if (fa < 1 && hash(f.x * 0.77 + 3.1) >= fa) continue; }   // (its biome's DECK 4 FLOWERS: that share of them)
     const foot = land.surfS[fc] - fieldH(fc) * LT_CELL * (0.12 + 0.7 * f.back), sw = (wnd * 0.4 + Math.sin(t * 1.2 + f.ph) * 0.3);
     lakeRect(PX(f.x), PY(foot - f.h * 0.6), p, f.h * 0.6 * SV, last = STALK);            // (its stalk)
     if (f.kind === 0) { for (let yy = f.h * 0.4; yy < f.h; yy += p / SV) lakeRect(PX(f.x + sw * yy / f.h) - p * 0.5, PY(foot - yy) - p, p * 2, p, last = yy > f.h * 0.85 ? LUPT : LUP); }   // (a lupine's purple spike)
@@ -44705,7 +44739,7 @@ function buildForestTrees(R) {
     && !(land.proud || []).some(([a, b]) => x > a - 10 && x < b + 10) && Math.abs(frontTop(x - 12) - frontTop(x + 12)) < 10
     && [M_GRASS, M_DIRT].includes(ltCell(ltCol(x), ltRow(frontTop(x) + 1)))   // (the ground in front's: under a segment over land too)
     && vegFadeKeep(x, 3)   // (its piece's VEGETATION - the FADE CONCEPT)
-    && !(biomePlanted('forest') && biomeAtX(x) === 'forest');   // (the FOREST biome has plants of its own: theirs there, not these)
+    && !((bnx => bnx && bnx !== 'tropical' && biomePlanted(bnx))(biomeAtX(x)));   // (a biome with plants of its own - FOREST, SWAMP, MOUNTAIN... - theirs there, not these)
   tropPalms();                                                  // (the TROPICAL pieces: palms - their own seed)
   for (let x = 120 + R() * 100; x < WORLD_W - 120; x += 150 + R() * 320) {
     const n = R() < 0.3 ? 2 : 1;
@@ -45440,7 +45474,7 @@ function tropPalms() {
   const AP = []; for (const o of strsUsed()) if (AIR_PARTS[o.k]) { try { const b = strBox0(o); AP.push([b.x0, b.x1]); } catch (e) { } }
   let tree = true; const nearAir = x => tree ? nearAirport(x, AS) : AP.some(([a, b]) => x > a - 4 && x < b + 4);
   let B = 'tropical';   // (the biome being planted: its ground's columns only - biomeAtX)
-  const ok = (x, w) => (VEG_MODE || biomeAtX(x) === B) && !isleCol(x) && frontTop(x) < WATER_Y - 4 && !lakeAt(x) && !nearAir(x) && Math.abs(frontTop(x - w) - frontTop(x + w)) <= w;   // (on the ground in front, under a segment over land too)
+  const ok = (x, w) => (VEG_MODE || biomeAtX(x) === B) && cliffKeep(x, VEG_MODE ? VEG_SET : B) && !isleCol(x) && frontTop(x) < WATER_Y - 4 && !lakeAt(x) && !nearAir(x) && Math.abs(frontTop(x - w) - frontTop(x + w)) <= w;   // (on the ground in front, under a segment over land too)
   // (user Nov 4 13:33, Story: "you only transfered the new palm trees" - its TROPICAL is segments and islands, where only the old palms grew) the decks
   // on a TROPICAL segment's or island's top too: every plant of the set, wherever the ground is TROPICAL (islandProps lays no palms of its own there)
   const runs = land.islRuns || [], inRun = x => runs.some(([a, b]) => x > a + 10 && x < b - 10);
@@ -45462,6 +45496,13 @@ function tropPalms() {
       if (at && vegFadeKeep(x, d * 13 + n, at.isl)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n }, DK === VEG_DECKS ? {} : { ve: e }, at, P.make));   // (another biome's plant: its own deck entry - vegEntry)   // (vd / vn: its deck entry - its own COLOUR VARIETY, Nov 4; isl: on a segment's or island's top)
     }
   })); }
+}
+// (Nov 7, the Biome Editor's SIDES: PLANT FADE AT CLIFFS) a plant at x kept as the top nears a cliff - none at the edge, all of them that far back
+function cliffKeep(x, bn) {
+  const f = biomeSides(bn).fade; if (!(f > 0)) return true;
+  const t0 = frontTop(x); let d = Infinity;
+  for (let s = -1; s <= 1; s += 2) for (let u = 4; u <= f; u += 4) if (frontTop(x + s * u) - t0 > 12) { d = Math.min(d, u); break; }
+  return d === Infinity || hash(x * 0.53 + 1.7) < d / f;
 }
 // (Nov 7) the biome of the ground at x: its terrain type's (F forest, D desert, T beach - 'tropical', M mountain, I ice, W swamp, V volcanic, S sea);
 // isl: a segment's or island's own
@@ -48346,8 +48387,8 @@ const fieldK = x => inCountry(x) ? smoothstep(0, 260, apronD(x)) : 0;   // (an i
 function fieldH(c) {
   const n = u => { const i = Math.floor(u), f = u - i, s = f * f * (3 - 2 * f); return hash(i * 7.13 + 1.7) * (1 - s) + hash((i + 1) * 7.13 + 1.7) * s; };
   // (the GAME EDITOR's BG tab: MEADOW HEIGHT scales it, MEADOW WAVES its ups and downs)
-  const D = lookD(c * LT_CELL), mw = bgP(D ? 'bgsw' : 'bgmw', 1);   // (the desert's sand band: its own SAND HEIGHT, SAND WAVES)
-  return ((FIELD_H / LT_CELL - 2) * bgP(D ? 'bgsh' : 'bgmh', 1) + mw * (4.5 * n(c / 46) + 1.6 * n(c / 13 + 50) + (hash(c * 3.71) < 0.12 ? 1 : 0))) * fieldK(c * LT_CELL);
+  const D = lookD(c * LT_CELL), bn = land.look ? colBiome(c) : null, mw = bgPB(D ? 'bgsw' : 'bgmw', 1, bn);   // (the desert's sand band: its own SAND HEIGHT, SAND WAVES; each biome's own - DECK 4)
+  return ((FIELD_H / LT_CELL - 2) * bgPB(D ? 'bgsh' : 'bgmh', 1, bn) + mw * (4.5 * n(c / 46) + 1.6 * n(c / 13 + 50) + (hash(c * 3.71) < 0.12 ? 1 : 0))) * fieldK(c * LT_CELL);
 }
 // grass on the ground's own top: five cells and a ragged fringe of one to three more hanging over the dirt
 const ltGrassD = c => { const L = surfLayer(land.bio && land.bio[c] === 2 ? 'swamp' : 'forest', 'grass'); return L ? Math.round(surfThick(L, c * LT_CELL, 2) / LT_CELL) + (hash(c * 0.71) < 0.3 ? 0 : 1) : 0; };   // (the grass's depth, cells: its TERRAIN SURFACE layer - 09-zz-biomes.js; none: no grass)   // (the grass's depth, cells: a smooth wobble along the ground and a cell here and there - user Nov 7 12:51)
@@ -49105,7 +49146,7 @@ function paintLandChunk(k) {
   for (let q = 0; q < w; q++) {
     const c = c0 + q, L0 = land.look ? land.look[c] : 0, SL = islPaintLook(c), SE = SL < 0 ? -1e9 : islSegEndRow(c);   // (a segment in a country: its rows over SE in its own look - 50-land-islands)
     let DS = lookD(c * LT_CELL), SEAB = land.sea && land.sea[c] === 1 && land.surf[c] > WATER_Y + 1;
-    let depth = 0;
+    let depth = 0; const BS = biomeSides(colBiome(c));   // (its biome's SIDES - 09-zz-biomes.js)
     for (let r = rT; r < rB; r++) {
       if (SE > -1e9) { const lk = r < SE ? SL : L0; if (land.look[c] !== lk) { land.look[c] = lk; DS = lk === 1; } SEAB = r >= SE && land.sea[c] === 1 && land.surf[c] > WATER_Y + 1; }
       const i = ltIdx(c, r), m = land.cell[i];
@@ -49147,7 +49188,7 @@ function paintLandChunk(k) {
         const sx = ((c % 16) + 16) % 16;
         col = depth === 0 ? (((c % 40) + 40) % 40 < 16 && hsh < 0.97 ? P[5] : P[2]) : sx === 0 ? P[3] : depth >= 7 ? P[4] : hsh < 0.08 ? P[1] : hash(Math.floor(c / 16) * 3.7) < 0.3 && hsh < 0.3 ? P[4] : P[0];
       }
-      else if (m === M_GRASS && edgeClass(c, r) === 2) { const PD = ltPal(M_DIRT, c); col = hsh < 0.35 ? PD[6] : hsh < 0.75 ? PD[1] : PD[0]; }   // (SIDE: a cliff's face bare earth, no grass - edgeClass)
+      else if (m === M_GRASS && !BS.sg && edgeClass(c, r) === 2) { const PD = ltPal(M_DIRT, c); col = hsh < 0.35 ? PD[6] : hsh < 0.75 ? PD[1] : PD[0]; }   // (SIDE: a cliff's face bare earth, no grass - edgeClass)
       else {
         // grass: the field's light top, darker blades deeper, and a fringe of blades hanging dark over the dirt
         const gd = depth;
@@ -49165,8 +49206,8 @@ function paintLandChunk(k) {
       let k2 = 1 - Math.min(0.18, depth * 0.006);   // (less darkening with depth: the stones stay bright down the top band, as the target picture)
       if (up === M_AIR) k2 *= m === M_GRASS || m === M_CONC || DES_SOFT ? 1.04 : 1.22;
       else if (dn === M_AIR) k2 *= 0.62;
-      else if (r + 3 < rB && (land.cell[i + 2 * w] === M_AIR || land.cell[i + 3 * w] === M_AIR) && edgeClass(c, r) === 3) k2 *= land.cell[i + 2 * w] === M_AIR ? 0.72 : 0.84;   // (BOTTOM: an overhang's underside shaded a few cells up)
-      if (dn === M_AIR && up !== M_AIR && m !== M_CONC && hash(c * 3.31 + r * 0.7) < 0.22 && edgeClass(c, r) === 3) {   // (BOTTOM: a root or two hanging from it)
+      else if (r + 3 < rB && (land.cell[i + 2 * w] === M_AIR || land.cell[i + 3 * w] === M_AIR) && edgeClass(c, r) === 3) { const sh = BS.shade; k2 *= 1 - (land.cell[i + 2 * w] === M_AIR ? 0.28 : 0.16) * sh; }   // (BOTTOM: an overhang's underside shaded a few cells up)
+      if (dn === M_AIR && up !== M_AIR && m !== M_CONC && hash(c * 3.31 + r * 0.7) < BS.roots && edgeClass(c, r) === 3) {   // (BOTTOM: a root or two hanging from it)
         const n = 1 + Math.floor(hash(c * 7.7 + r) * 4), rc = [58, 40, 26];
         for (let b = 1; b <= n && r + b < rB && land.cell[i + b * w] === M_AIR; b++) put(q, r + T4 + b, rc.map(v => v * (1 - b * 0.08)));
       }
@@ -49348,7 +49389,7 @@ function landSlices(x0, x1) {
 function landPaintStep(views) {
   if (!land.cell) return;
   const n = land.dirty.length;
-  { const ms = bgP('bgmh', 1) + ',' + bgP('bgmw', 1) + ',' + bgP('bgsh', 1) + ',' + bgP('bgsw', 1); if (land.msig !== ms) { if (land.msig !== undefined) land.back.length = 0; land.msig = ms; } }   // (the meadow's sliders moved: painted again)
+  { const ms = bgP('bgmh', 1) + ',' + bgP('bgmw', 1) + ',' + bgP('bgsh', 1) + ',' + bgP('bgsw', 1) + JSON.stringify(BIOME_BG); if (land.msig !== ms) { if (land.msig !== undefined) land.back.length = 0; land.msig = ms; } }   // (the meadow's sliders moved: painted again)
   if (!TROP_TILE && land.trop && land.marked && tropTile()) { land.dirty.fill(1); islRootsBuild(); }   // (the TROPICAL rock's picture come: painted again with it - 50-land-trop)
   { const sc = bgP('bgsc', 1) + ',' + ugReach(); if (land.ssig !== sc) { if (land.ssig !== undefined) land.dirty.fill(1); land.ssig = sc; } }   // (STONE COLOURS or UNDERGROUND LIGHT moved: the ground painted again)
   let painted = 0;
@@ -49585,10 +49626,10 @@ function buildLandBg() {
 // (user Oct 27, 16:39: "can you add a slider for the mountain size... A new BG tab. Then I can tweak it" - the GAME EDITOR's
 // BG tab, src/sky/00-base.js BG_SL: each layer's size (its art pixel's world size times the slider) and its height)
 const bgP = (k, d) => { const v = typeof NSKY !== 'undefined' && NSKY.P ? NSKY.P[k] : undefined; return typeof v === 'number' ? v : d; };
-const bgK = L => L.k * (L.bg ? bgP('bg' + L.bg, 1) : 1);
-const bgBase = L => L.base - (L.bg ? bgP('bg' + L.bg + 'y', 0) : 0);
-const bgHaze = L => L.bg ? bgP('bg' + L.bg + 'h', L.haze) : L.haze;
-const bgGap = L => L.bg ? bgP('bg' + L.bg + 'g', 0) : 0;   // (the room between two tiles, a share of a tile's width)
+const bgK = L => L.k * (L.bg ? bgPB('bg' + L.bg, 1) : 1);   // (the biome being drawn's own - BG_CUR_BIOME, DECK 5 / 6)
+const bgBase = L => L.base - (L.bg ? bgPB('bg' + L.bg + 'y', 0) : 0);
+const bgHaze = L => L.bg ? bgPB('bg' + L.bg + 'h', L.haze) : L.haze;
+const bgGap = L => L.bg ? bgPB('bg' + L.bg + 'g', 0) : 0;   // (the room between two tiles, a share of a tile's width)
 // THE FAR BACKDROPS GO BY THE TERRAIN TYPE (user Oct 28 20:24: "those trees and mountains should also change as we transition
 // between two sections"; Nov 3 13:28: "they belong to the terrain type. Not to the left or the right side"): each type's set -
 // FOREST's mountains and trees, DESERT's dry range, dunes and coast city; TROPICAL none yet - stands up where the ground under it
@@ -49639,6 +49680,7 @@ function drawLandBg0(near, desert, bio) {
   if (!land.bg) buildLandBg();
   const hz = mix3(E.skyHor || [180, 200, 220], E.skyTop || E.skyHor || [120, 170, 230], 0.3), fx0 = E.fx || [1, 1, 1], BB = bio && BG_BIO[bio], fx = BB ? fx0.map((v, j) => v * BB[0][j]) : fx0;
   if (bio) desert = bio;                                   // (its own columns - bgLookShare)
+  BG_CUR_BIOME = bio ? ({ M: 'mountain', I: 'ice', W: 'swamp', V: 'volcanic' })[bio] : desert === true ? 'desert' : 'forest';
   for (const L of desert === true ? land.bgD : land.bg) {
     const Lh = bgHaze(L);
     if (L.world || !!L.near !== !!near) continue;
@@ -49710,6 +49752,7 @@ function treeEnd(L, i, tileW, k, B) {
 const LTREE = { P: { src: null, T: null, G: null, W: 0, H: 0 }, m: [1, 0, 0, 1, 0, 0] };
 function drawLandTrees(x0, x1) {
   if (!land.bg) buildLandBg();
+  BG_CUR_BIOME = 'forest';                                 // (the row's size and its forest haze: the forest's; a biome's own slices its own haze, raise)
   const L = land.bg.find(b => b.world);
   if (!L || !land.surfS) return;
   // (slices 8 pixels wide, user Oct 27, 13:22 - "these artefacts between the background trees where I guess there is a
@@ -49727,7 +49770,7 @@ function drawLandTrees(x0, x1) {
   if (!(C instanceof GLCtx) || GLR.lost) return;
   const P = glImageOf(t, LTREE.P), mm = LTREE.m, m0 = C.s.m;   // (P null: no picture - the ground's colour under them only, as drawImage drew nothing)
   // (Nov 7) on a biome's own ground the row in that biome's colours (BG_BIO - as its far background)
-  const BLK = [null, 'I', 'W', 'V'], PB = {}, bioP = k => PB[k] !== undefined ? PB[k] : (PB[k] = glImageOf(glTint(im, 'landW' + k, fx.map((v, j) => v * BG_BIO[k][0][j] * (1 - bgHaze(L))), hz.map((v, j) => v * bgHaze(L) / 255 + BG_BIO[k][1][j] * (1 - bgHaze(L))), false), LTREE['P' + k] || (LTREE['P' + k] = { src: null, T: null, G: null, W: 0, H: 0 })));
+  const BLK = [null, 'I', 'W', 'V'], PB = {}, HB = k => bgPB('bg' + L.bg + 'h', L.haze, ({ M: 'mountain', I: 'ice', W: 'swamp', V: 'volcanic' })[k]), bioP = k => PB[k] !== undefined ? PB[k] : (PB[k] = glImageOf(glTint(im, 'landW' + k, fx.map((v, j) => v * BG_BIO[k][0][j] * (1 - HB(k))), hz.map((v, j) => v * HB(k) / 255 + BG_BIO[k][1][j] * (1 - HB(k))), false), LTREE['P' + k] || (LTREE['P' + k] = { src: null, T: null, G: null, W: 0, H: 0 })));
   let fs = false;
   for (let i = Math.floor((x0 - 40) / tileW); i <= Math.floor((x1 + 40) / tileW); i++) {
     for (let sx = 0; sx < im.width; sx += SL) {
@@ -49739,7 +49782,7 @@ function drawLandTrees(x0, x1) {
       // toward the coast, slicing the tops off the crowns. Now the trees stand whole and the row ends at a gap between
       // two crowns, the last whole tree before the coast: treeEnd)
       { const N = nearestShore(cx); if (N.dir > 0 && cx < N.x && wx + ww > treeEnd(L, i, tileW, k, N.x - 60)) continue; }   // (before a coast with the sea on its right)
-      const cc = clamp(Math.floor(cx / LT_CELL), 0, land.cols - 1), foot = land.surfS[cc] - fieldH(cc) * LT_CELL + 6 - bgP('bgfny', 0);   // (on the field's back edge (and the BG tab's NEAR TREES UP), its ups and downs; by the airfield, on the ground)
+      const cc = clamp(Math.floor(cx / LT_CELL), 0, land.cols - 1), foot = land.surfS[cc] - fieldH(cc) * LT_CELL + 6 - bgPB('bgfny', 0, colBiome(cc));   // (on the field's back edge (and the BG tab's NEAR TREES UP), its ups and downs; by the airfield, on the ground)
       const X = Math.round(PX(wx)), X2 = Math.round(PX(wx + ww)), Y = Math.round(PY(foot));
       if (!fs) { C.fillStyle = under; fs = true; }
       C.fillRect(X, Y - 1, X2 - X, Math.max(1, bh - Y + 1));   // (down to the bottom: the ground in front covers it, so a low valley shows no sky)
@@ -51656,7 +51699,7 @@ function vegPts() {   // (the picked pieces' first points - a piece's VEGETATION
 function terrainVegRow(cat) {
   const r = document.createElement('div'); r.className = 'row';
   r.innerHTML = '<label>VEGETATION</label><input type="range" min="0" max="100" step="5"><output></output><span class="dv"></span>';
-  const inp = r.querySelector('input'); r.querySelector('label').title = 'How much vegetation the picked segments keep: 100% all, 0% none (built on REFRESH VIEW)';
+  const inp = r.querySelector('input'); r.querySelector('label').title = 'Plants on the picked segments: 100% all, 0% none';
   inp.addEventListener('input', () => { const L = vegPts(); if (!L.length) return; for (const p of L) ptSetVeg(p, +inp.value / 100); islChanged(); terrainSyncSkin(); });
   cat.appendChild(r); TERRAIN_ED.veg = { inp, out: r.querySelector('output') };
 }
@@ -51832,11 +51875,11 @@ NSKY.editor.TUNE.buttons('TERRAIN', '=SELECTED PROPERTIES', []);
 NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
   skinBtn('FOREST', 'F', 'Picked segments: forest ground'),
   skinBtn('DESERT', 'D', 'Picked segments: desert ground'),
-  skinBtn('BEACH', 'T', 'Picked segments: beach sand and its plants (was TROPICAL)'),
+  skinBtn('BEACH', 'T', 'Picked segments: beach sand'),
   skinBtn('MOUNTAIN', 'M', 'Picked segments: bare grey rock'),
   skinBtn('ICE', 'I', 'Picked segments: snow over icy rock'),
   skinBtn('SWAMP', 'W', 'Picked segments: dark mud and wet grass'),
-  skinBtn('VOLCANIC', 'V', 'Picked segments: black rock with glowing seams'),
+  skinBtn('VOLCANIC', 'V', 'Picked segments: black rock with lava'),
   skinBtn('SEA', 'S', 'Picked segments: sea floor'),
 ]);
 NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT ACTIONS', [
@@ -58244,7 +58287,7 @@ function dmgPic(P, f, o) {
   const B = (o && o.B) || (P._name && TROP[P._name + '-dmg'] && tropPic(P._name + '-dmg')) || null;
   const q = prof.map(v => v >= 1 ? DMG_STEPS : v > 0 ? Math.max(1, Math.min(DMG_STEPS - 1, Math.round(v * DMG_STEPS))) : 0);
   const cuts = (o && o.cuts) || null, key = q.join('') + (B ? 'b' : '') + (cuts ? cuts.join() : '') + (marks ? '|' + marks.length + ':' + marks[0][3] + ':' + marks[marks.length - 1][3] + ':' + ax + ':' + ay : '');
-  const memo = P._dmg || (P._dmg = new Map()); { const hit = memo.get(key); if (hit) return hit; }
+  const memo = P._dmg || (P._dmg = new Map()); { const hit = memo.get(key); if (hit) return picUse(hit); }
   const W = P.width, H = P.height, cut = k => Math.round((cuts ? cuts[k] : k / n) * W);
   const out = makeCanvas(W, H), x = out.getContext('2d'); x.imageSmoothingEnabled = false;
   x.drawImage(P, 0, 0);
@@ -58273,8 +58316,10 @@ function dmgPic(P, f, o) {
   x.putImageData(im, 0, 0);
   out._m = P._m; out._door = P._door; out._chim = P._chim; out._flag = P._flag;
   if (P._hi && P._hi.c) { const n = P._hi.n || 1, Bh = B && B._hi && B._hi.c; out._hi = { c: dmgPic(P._hi.c, f, { B: Bh || undefined, cuts, m: ((o && o.m) || P._m || 0.02) / n, marks, ax, ay }), n }; }   // (its big-art drawing charred alike)
-  if (memo.size >= 16) memo.delete(memo.keys().next().value);
-  memo.set(key, out); return out;
+  // (in the page's picture memory - 04-zzz-pics.js, was the last 16 per picture: drawn longest ago, let go and painted again when
+  // next shown; soft - a scaled copy or a wreck may still hold it)
+  memo.set(key, out); picKeep(out, 'damage', () => { if (memo.get(key) === out) memo.delete(key); }, null, true);
+  return out;
 }
 // a picture's blotches (made once): two octaves of a smooth coarse noise, about half a metre across - ragged-edged patches
 function dmgBlots(P, m) {
@@ -58774,7 +58819,7 @@ const VEH_TUNE = {
       ['PLANT SIZE MIN', f, 'plantMin', 3, 0.05, 'x', 'Smallest plant, times its art'], ['PLANT SIZE MAX', f, 'plantMax', 3, 0.05, 'x', 'Largest plant, times its art']].concat(trunk ? [
       ['TRUNK STIFFNESS', f, 'trunkStiff', 4, 0.05, 'x', 'How much the trunk resists bending'], ['TRUNK SWAY', f, 'trunkSway', 4, 0.05, 'x', 'How far the trunk sways in wind'], ['TRUNK BURN TIME', f, 'trunkBurn', 120, 1, 's', 'Seconds the trunk burns'], ['TRUNK STRENGTH', f, 'trunkBreak', 5, 0.05, 'x', 'How hard a hit must be to break it'], ['BIRD SCARE SPEED', f, 'birdFlee', 200, 1, 'units/s', 'Frond speed that makes birds fly off']] : [])),   // (BIRD SCARE SPEED: how fast its frond may move under a bird - 50-land-zz-rig.js rigPerchAt)
     [['ALL PLANTS'], ['LIT FACES', 'tree', 'lit', 1, 1, '', 'Light and shade on the plants (1 on, 0 off)'], ['LIGHT', 'tree', 'light', 2, 0.05, 'x', 'Brightness of the lit side'], ['TINT VARIETY', 'tree', 'tint', 0.6, 0.01, '', 'Colour difference from plant to plant'], ['SHADE DEPTH', 'tree', 'shade', 1.5, 0.05, 'x', 'Darkness of the shaded side'], ['FLAT COLOURS', 'tree', 'flat', 1, 0.05, '', '1 flat colour fills, 0 the painted art'],
-      ['PIXEL SIZE', 'tree', 'px', 2, 0.05, '', 'Plant pixel size, world units'], ['DECK RAISE', 'tree', 'deckRaise', 20, 0.25, 'units', 'How much higher each deck stands than the one in front (depth)'], ['DECK 1 ATMOSPHERE', 'tree', 'haze1', 1, 0.01, '', 'How much deck 1 fades into the horizon colour (0 none)'], ['DECK 2 ATMOSPHERE', 'tree', 'haze2', 1, 0.01, '', 'How much deck 2 fades into the horizon colour (0 none)'], ['DECK 3 ATMOSPHERE', 'tree', 'haze3', 1, 0.01, '', 'How much deck 3 fades into the horizon colour (0 none)'], ['MEDIUM DETAIL BELOW', 'tree', 'lodMid', 600, 5, 'px', 'Plants shorter than this on screen: medium detail'], ['LOW DETAIL BELOW', 'tree', 'lodFar', 300, 5, 'px', 'Plants shorter than this on screen: low detail'],
+      ['PIXEL SIZE', 'tree', 'px', 2, 0.05, '', 'Plant pixel size, world units'], ['DECK HEIGHT STEP', 'tree', 'deckRaise', 20, 0.25, 'units', 'Each deck behind stands this much higher'], ['DECK 1 ATMOSPHERE', 'tree', 'haze1', 1, 0.01, '', 'How much deck 1 fades into the sky colour'], ['DECK 2 ATMOSPHERE', 'tree', 'haze2', 1, 0.01, '', 'How much deck 2 fades into the sky colour'], ['DECK 3 ATMOSPHERE', 'tree', 'haze3', 1, 0.01, '', 'How much deck 3 fades into the sky colour'], ['MEDIUM DETAIL BELOW', 'tree', 'lodMid', 600, 5, 'px', 'Plants shorter than this on screen: medium detail'], ['LOW DETAIL BELOW', 'tree', 'lodFar', 300, 5, 'px', 'Plants shorter than this on screen: low detail'],
       ['GROUND SINK'], ['STRUCTURES', 'ground', 'str', 8, 0.1, '', 'How far structures sit into the ground, world units'], ['VEHICLES', 'ground', 'veh', 8, 0.1, '', 'How far vehicles sit into the ground, world units']]),   // (the plants with bones - 50-land-zz-rig.js: each kind's section, and the look they share)
   WEAPONS: () => [['FIRE RATE'], ['MACHINE GUN', 'mg', 'rate', 0.5, 0.005, 's', 'Seconds between rounds']].concat(...[['shell', 'SHELL'], ['rocket', 'ROCKET'], ['bomb', 'BOMB'], ['tankGun', 'TANK SHELL']].map(([f, lab]) =>
       [[lab + ' DAMAGE'], ['VS SHIPS', f, 'ship', 5, 0.05, 'x', lab.charAt(0) + lab.slice(1).toLowerCase() + ' damage to ships'], ['VS TOWERS', f, 'tower', 5, 0.05, 'x', lab.charAt(0) + lab.slice(1).toLowerCase() + ' damage to towers'], ['VS GROUND', f, 'land', 5, 0.05, 'x', lab.charAt(0) + lab.slice(1).toLowerCase() + ' damage to land and vehicles']]),
@@ -65075,15 +65120,18 @@ if (VEG_MODE) (() => {
       const top = document.createElement('div'); top.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap'; box.appendChild(top);
       { const l = document.createElement('span'); l.textContent = 'BIOME'; l.style.color = '#9fd36a'; top.appendChild(l);
         const ss = document.createElement('select'); ss.style.cssText = 'font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:42px;padding:0 8px';
-        for (const n of VG().sets.names()) { const o = document.createElement('option'); o.value = n; o.textContent = (VG().sets.lab && VG().sets.lab(n)) || n.toUpperCase(); ss.appendChild(o); } ss.title = 'The biome whose decks you edit (BEACH plants the beach ground; the others are kept for their grounds)'; ss.value = VG().sets.cur; ss.onchange = () => { window.__vgSet(ss.value); setTimeout(() => location.reload(), 150); }; top.appendChild(ss); }   // (Nov 7: the page again, its ground the biome's own - 00-world.js; the decks are saved as they change)
+        for (const n of VG().sets.names()) { const o = document.createElement('option'); o.value = n; o.textContent = (VG().sets.lab && VG().sets.lab(n)) || n.toUpperCase(); ss.appendChild(o); } ss.title = 'The biome you are editing'; ss.value = VG().sets.cur; ss.onchange = () => { window.__vgSet(ss.value); setTimeout(() => location.reload(), 150); }; top.appendChild(ss); }   // (Nov 7: the page again, its ground the biome's own - 00-world.js; the decks are saved as they change)
       // (user Nov 3 23:20: "The editing for each deck should be at a horizontal tab like the game editor. With tabs for each Deck ... So we only see
       // one deck at a time") a tab a deck; the deck picked: its prefabs, each its AMOUNT and REMOVE, and ADD PREFAB
-      const tabs = document.createElement('div'); tabs.style.cssText = 'display:flex;gap:4px;margin-left:10px';
+      const tabs = document.createElement('div'); tabs.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-left:10px';
       D.forEach((_, di) => { const b = document.createElement('button'); b.textContent = 'DECK ' + di; b.dataset.t = DN[di]; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', di === deckTab); hint(b); b.onclick = () => { deckTab = di; renderDecks(); }; tabs.appendChild(b); });
       // (user Nov 7, the TODO list: "TERRAIN SURFACE (A Tab inside the Biome)") the biome's surface layers - 09-zz-biomes.js BIOME_SURF
-      { const b = document.createElement('button'); b.textContent = 'TERRAIN SURFACE'; b.dataset.t = 'This biome\'s ground layers: thickness and wobble along the ground'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'surf'); hint(b); b.onclick = () => { deckTab = 'surf'; renderDecks(); }; tabs.appendChild(b); }
+      // (user Nov 7 13:49: the far scenery is decks too) DECK 4-6: the biome's meadow, tree rows, mountains (the desert's sand band, dunes and city, mesas)
+      for (const [id, lab] of farTabs(VG().sets.cur)) { const b = document.createElement('button'); b.textContent = lab; b.dataset.t = 'This biome\'s far scenery: ' + lab.replace(/^DECK \d \(|\)$/g, '').toLowerCase(); b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === id); hint(b); b.onclick = () => { deckTab = id; renderDecks(); }; tabs.appendChild(b); }
+      { const b = document.createElement('button'); b.textContent = 'TERRAIN SURFACE'; b.dataset.t = 'This biome\'s ground layers'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'surf'); hint(b); b.onclick = () => { deckTab = 'surf'; renderDecks(); }; tabs.appendChild(b); }
       top.appendChild(tabs);
       if (deckTab === 'surf') { renderSurf(box, top); return; }
+      if (/^d[456]$/.test(deckTab)) { renderFar(box, top, deckTab); return; }
       D.forEach((list, di) => {
         if (di !== deckTab) return;
         const h = document.createElement('span'); h.textContent = DN[di] + (list.length ? '' : ' - empty'); h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
@@ -65116,6 +65164,8 @@ if (VEG_MODE) (() => {
     // TERRAIN SURFACE: each of the biome's layers - its material, THICKNESS MIN / MAX, WOBBLE, DOWN TO WATER; the preview's ground built again
     let surfT = 0; const surfRebuild = () => { biomeSurfSave(); clearTimeout(surfT); surfT = setTimeout(() => { try { landEdited(); terrainSync(); } catch (er) { console.error('surface', er); } /* (the ground built again in place - the view stays) */ }, 300); };
     const MAT_LAB = { grass: 'GRASS', sand: 'SAND', snow: 'SNOW' };
+    // an ON / OFF button (as BIRDS: ON): its name, a one-line tooltip
+    const toggle = (lab, t, get, set) => { const b = document.createElement('button'); const show = () => { b.textContent = lab + ': ' + (get() ? 'ON' : 'OFF'); b.classList.toggle('on', !!get()); }; b.dataset.t = t; b.title = t; hint(b); b.onclick = () => { set(!get()); show(); }; show(); return b; };
     function renderSurf(box, top) {
       const bn = VG().sets.cur, L = BIOME_SURF[bn] || [], D0 = BIOME_SURF_DEF[bn] || [];
       const h = document.createElement('span'); h.textContent = 'TERRAIN SURFACE - ' + ((VG().sets.lab && VG().sets.lab(bn)) || bn.toUpperCase()) + (L.length ? '' : ' - no layers: its ground all the way up'); h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
@@ -65123,22 +65173,52 @@ if (VEG_MODE) (() => {
       L.forEach((ly, i) => {
         const d0 = D0.find(q => q.m === ly.m) || {}, col = document.createElement('div'); col.style.cssText = 'display:grid;gap:4px;border-left:1px solid #2c3850;padding-left:10px;align-content:start';
         const t = document.createElement('div'); t.textContent = 'LAYER ' + (i + 1) + ': ' + (MAT_LAB[ly.m] || ly.m.toUpperCase()); t.style.color = '#d8dce8'; col.appendChild(t);
-        col.appendChild(slider('THICKNESS MIN', 'Thinnest the layer gets, world units', 0, 120, 0.5, () => ly.a, v => { ly.a = Math.min(v, ly.b); surfRebuild(); }, d0.a));
-        col.appendChild(slider('THICKNESS MAX', 'Thickest the layer gets, world units', 0, 120, 0.5, () => ly.b, v => { ly.b = Math.max(v, ly.a); surfRebuild(); }, d0.b));
-        col.appendChild(slider('WOBBLE', 'How much it changes along the ground (0: always the middle thickness)', 0, 1, 0.05, () => ly.w != null ? ly.w : 1, v => { ly.w = v; surfRebuild(); }, d0.w != null ? d0.w : 1));
-        if (ly.m === 'sand') col.appendChild(slider('DOWN TO WATER', 'Reaches the waterline whatever its thickness (1 on, 0 off)', 0, 1, 1, () => ly.wl ? 1 : 0, v => { ly.wl = v ? 1 : 0; surfRebuild(); }, d0.wl ? 1 : 0));
+        col.appendChild(slider('MIN THICKNESS', 'Thinnest the layer gets, in world units', 0, 120, 0.5, () => ly.a, v => { ly.a = Math.min(v, ly.b); surfRebuild(); }, d0.a));
+        col.appendChild(slider('MAX THICKNESS', 'Thickest the layer gets, in world units', 0, 120, 0.5, () => ly.b, v => { ly.b = Math.max(v, ly.a); surfRebuild(); }, d0.b));
+        col.appendChild(slider('VARIATION', 'How much the thickness changes along the ground', 0, 1, 0.05, () => ly.w != null ? ly.w : 1, v => { ly.w = v; surfRebuild(); }, d0.w != null ? d0.w : 1));
+        if (ly.m === 'sand') col.appendChild(toggle('FILL TO SEA LEVEL', 'The layer always reaches sea level, however thin it\'s set', () => !!ly.wl, v => { ly.wl = v ? 1 : 0; surfRebuild(); }));
         cols.appendChild(col);
       });
+      // its SIDES (TOP / SIDE / BOTTOM of the ground - edgeClass): grass on cliffs, roots and shadow under overhangs, plants thinning before a cliff
+      { const S = BIOME_SIDES[bn] || (BIOME_SIDES[bn] = {}), SD = BIOME_SIDES_DEF, g = k => S[k] != null ? S[k] : SD[k], col = document.createElement('div'); col.style.cssText = 'display:grid;gap:4px;border-left:1px solid #2c3850;padding-left:10px;align-content:start';
+        const t = document.createElement('div'); t.textContent = 'SIDES'; t.style.color = '#d8dce8'; col.appendChild(t);
+        col.appendChild(toggle('GRASS ON CLIFFS', 'Grass grows down steep sides too', () => !!g('sg'), v => { S.sg = v ? 1 : 0; surfRebuild(); }));
+        col.appendChild(slider('ROOTS UNDER OVERHANGS', 'How many roots hang under overhangs', 0, 1, 0.01, () => g('roots'), v => { S.roots = v; surfRebuild(); }, SD.roots));
+        col.appendChild(slider('OVERHANG SHADOW', 'How dark the underside of an overhang is', 0, 2, 0.05, () => g('shade'), v => { S.shade = v; surfRebuild(); }, SD.shade));
+        col.appendChild(slider('PLANT FADE AT CLIFFS', 'Plants thin out over this distance before a cliff', 0, 200, 1, () => g('fade'), v => { S.fade = v; surfRebuild(); }, SD.fade));
+        cols.appendChild(col); }
+    }
+    // DECK 4-6: the far scenery's rows for the biome - its own values over the world's (GAME EDITOR > FAR SCENERY) - 09-zz-biomes.js BIOME_BG
+    const farTabs = bn => bn === 'desert' ? [['d4', 'DECK 4 (SAND BAND)'], ['d5', 'DECK 5 (DUNES, CITY)'], ['d6', 'DECK 6 (MESAS)']] : [['d4', 'DECK 4 (MEADOW)'], ['d5', 'DECK 5 (TREES)'], ['d6', 'DECK 6 (MOUNTAINS)']];
+    const FAR_ROWS = {
+      d4: { forest: [['bgmh', 'HEIGHT', 'Height of the meadow band', 0, 2.5, 0.05], ['bgmw', 'WAVINESS', 'How wavy its top is', 0, 3, 0.05], ['flw', 'FLOWERS', 'Share of its flowers shown', 0, 1, 0.05]],
+        desert: [['bgsh', 'HEIGHT', 'Height of the sand band', 0, 2.5, 0.05], ['bgsw', 'WAVINESS', 'How wavy its top is', 0, 3, 0.05]] },
+      d5: { forest: [['bgfn', 'NEAR TREES SIZE', 'How big the near tree row is', 0.3, 1.5, 0.05], ['bgfny', 'NEAR TREES HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgfnh', 'NEAR TREES HAZE', 'How much sky colour is mixed in', 0, 1, 0.02],
+          ['bgff', 'FAR TREES SIZE', 'How big the far tree row is', 0.3, 1.5, 0.05], ['bgffy', 'FAR TREES HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgffh', 'FAR TREES HAZE', 'How much sky colour is mixed in', 0, 1, 0.02], ['bgffg', 'FAR TREES SPACING', 'Space between repeated tiles', 0, 1, 0.02]],
+        desert: [['bgdd', 'DUNES SIZE', 'How big the dunes are', 0.3, 1.5, 0.05], ['bgddy', 'DUNES HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgddh', 'DUNES HAZE', 'How much sky colour is mixed in', 0, 1, 0.02], ['bgddg', 'DUNES SPACING', 'Space between repeated tiles', 0, 1, 0.02],
+          ['bgdc', 'CITY SIZE', 'How big the coast city is', 0.3, 1.5, 0.05], ['bgdcy', 'CITY HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgdch', 'CITY HAZE', 'How much sky colour is mixed in', 0, 1, 0.02], ['bgdcg', 'CITY SPACING', 'Space between repeated tiles', 0, 1, 0.02]] },
+      d6: { forest: [['bgfm', 'MOUNTAINS SIZE', 'How big the mountains are', 0.3, 1.5, 0.05], ['bgfmy', 'MOUNTAINS HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgfmh', 'MOUNTAINS HAZE', 'How much sky colour is mixed in', 0, 1, 0.02], ['bgfmg', 'MOUNTAINS SPACING', 'Space between repeated tiles', 0, 1, 0.02]],
+        desert: [['bgdm', 'MESAS SIZE', 'How big the mesas are', 0.3, 1.5, 0.05], ['bgdmy', 'MESAS HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgdmh', 'MESAS HAZE', 'How much sky colour is mixed in', 0, 1, 0.02], ['bgdmg', 'MESAS SPACING', 'Space between repeated tiles', 0, 1, 0.02]] } };
+    const worldDef = k => { if (k === 'flw') return 1; const r = (NSKY.BG_SL || []).find(q => q[0] === k); return bgP(k, r ? r[5] : 1); };
+    function renderFar(box, top, tab) {
+      const bn = VG().sets.cur, kind = bn === 'desert' ? 'desert' : 'forest', lab = (farTabs(bn).find(q => q[0] === tab) || [, ''])[1];
+      let rows = FAR_ROWS[tab][kind];
+      const none = bn === 'tropical' && tab !== 'd4';      // (the beach: no far trees or mountains of its own yet)
+      if (kind === 'forest' && bn !== 'forest') rows = rows.filter(r => r[0] !== 'bgfn');   // (the near row's size is the forest's: one row along every biome)
+      const h = document.createElement('span'); h.textContent = lab + ' - ' + ((VG().sets.lab && VG().sets.lab(bn)) || bn.toUpperCase()) + (none ? ' - none behind this biome yet' : ''); h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
+      if (none) return;
+      const O = BIOME_BG[bn] || (BIOME_BG[bn] = {}), cols = document.createElement('div'); cols.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px 12px'; box.appendChild(cols);
+      for (const [k, name, tip2, mn, mx, st] of rows) cols.appendChild(slider(name, tip2, mn, mx, st, () => typeof O[k] === 'number' ? O[k] : worldDef(k), v => { O[k] = v; biomeSurfSave(); }, () => worldDef(k)));
     }
     // a far deck's PICTURE (deck 2, 3): IMPORT PICTURE / REMOVE, its SCALE and LIFT - laid along the biome's ground behind the deck's plants
     function renderDeckPic(box, di) {
       const bn = VG().sets.cur, L = DECK_PICS[bn] || (DECK_PICS[bn] = []), P = L.find(q => q.d === di);
       const row = document.createElement('div'); row.style.cssText = 'display:grid;grid-template-columns:auto auto 1fr 1fr;gap:8px;align-items:end'; box.appendChild(row);
       const fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'image/*'; fi.hidden = true; row.appendChild(fi);
-      const ib = document.createElement('button'); ib.textContent = P ? 'CHANGE PICTURE' : 'IMPORT PICTURE'; ib.dataset.t = 'A picture for this deck, repeated along the biome\'s ground behind its plants (far landscape)'; hint(ib); ib.onclick = () => fi.click(); row.appendChild(ib);
+      const ib = document.createElement('button'); ib.textContent = P ? 'CHANGE PICTURE' : 'IMPORT PICTURE'; ib.dataset.t = 'A far-scenery picture for this deck'; hint(ib); ib.onclick = () => fi.click(); row.appendChild(ib);
       fi.onchange = () => { const f = fi.files && fi.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { const q = L.find(z => z.d === di); if (q) q.src = rd.result; else L.push({ d: di, src: rd.result, s: 1, y: 0 }); if (!deckPicsSave()) tip.textContent = 'Picture too big to keep in this browser - try a smaller one'; renderDecks(); }; rd.readAsDataURL(f); };
-      const rb = document.createElement('button'); rb.textContent = 'REMOVE PICTURE'; rb.disabled = !P; rb.dataset.t = 'Take the picture off this deck'; hint(rb); rb.onclick = () => { const i = L.findIndex(z => z.d === di); if (i >= 0) L.splice(i, 1); deckPicsSave(); renderDecks(); }; row.appendChild(rb);
-      if (P) { row.appendChild(slider('PICTURE SCALE', 'How big the picture stands (times the plants\' pixel)', 0.1, 8, 0.05, () => P.s || 1, v => { P.s = v; deckPicsSave(); }, 1)); row.appendChild(slider('PICTURE LIFT', 'How far up from the ground it stands, world units', -100, 200, 1, () => P.y || 0, v => { P.y = v; deckPicsSave(); }, 0)); }
+      const rb = document.createElement('button'); rb.textContent = 'REMOVE PICTURE'; rb.disabled = !P; rb.dataset.t = 'Remove this deck\'s picture'; hint(rb); rb.onclick = () => { const i = L.findIndex(z => z.d === di); if (i >= 0) L.splice(i, 1); deckPicsSave(); renderDecks(); }; row.appendChild(rb);
+      if (P) { row.appendChild(slider('PICTURE SIZE', 'How big the picture is drawn', 0.1, 8, 0.05, () => P.s || 1, v => { P.s = v; deckPicsSave(); }, 1)); row.appendChild(slider('PICTURE HEIGHT', 'How far above the ground it stands, in world units', -100, 200, 1, () => P.y || 0, v => { P.y = v; deckPicsSave(); }, 0)); }
     }
     renderDecks(); window.__vgDecks = renderDecks;
     setInterval(() => { const dt = window.__vgSetDirty ? window.__vgSetDirty() : false; for (const b of bot.querySelectorAll('[data-set-save]')) { b.disabled = !dt; b.style.background = dt ? '#3a5a1e' : ''; b.style.borderColor = dt ? '#9fd36a' : ''; } for (const b of bot.querySelectorAll('[data-set-rev]')) b.disabled = !dt; }, 300);
@@ -65256,7 +65336,7 @@ if (VEG_MODE) (() => {
     // (user Nov 3 22:13: "Cost should all be on the upper left side ... On the left we have a small menu that has ZOOM: + -, Bones On/Off, Decks
     // Vis Toggle Deck 1 Deck 2 etc") the view's own menu, top left: the frame rate and the cost, the zoom a level in or out, the bones, each deck shown
     const L = document.createElement('div'); L.id = 'vgLeft'; document.body.appendChild(L);
-    L.innerHTML = `<style>#vgLeft{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));top:calc(8px + env(safe-area-inset-top,0px));z-index:70;width:220px !important;background:#0f1420e0;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:8px;display:grid;gap:6px;width:176px}
+    L.innerHTML = `<style>#vgLeft{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));top:calc(8px + env(safe-area-inset-top,0px));max-height:calc(100vh - 267px - 32px - env(safe-area-inset-top,0px));overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:auto;scrollbar-color:#6a9a3a #1a2234;box-sizing:border-box;align-content:start;z-index:70;width:220px !important;background:#0f1420e0;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:8px;display:grid;gap:6px;width:176px}
 #vgBot button{font:inherit;font-size:14px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:42px;padding:6px 12px;cursor:pointer;touch-action:manipulation}#vgBot button.on{background:#2a3a1e;border-color:#6a9a3a}#vgBot button:disabled{opacity:0.35}
 #vgLeft button{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:44px;padding:6px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none}#vgLeft button.on{background:#2a3a1e;border-color:#6a9a3a}
 #vgLeft .r3{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid #2c3850}#vgLeft .r3 button{font-size:13px;min-height:40px}#vgLeft .r{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center}#vgLeft .l{color:#7a8294}#vgFps{color:#9fd36a;font:600 20px ui-monospace,Menlo,monospace}#vgCost{color:#c8cfdc;font-size:12px;line-height:1.35;white-space:pre-line}</style>
