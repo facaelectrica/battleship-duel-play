@@ -4536,8 +4536,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 794;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 14:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 795;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 14:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -62662,10 +62662,25 @@ function bugLoad(R) {
   for (const k of Object.keys(mine)) lsRawDel(k);
   for (const [k, v] of Object.entries(R.keys || {})) if (v != null) lsRawSet(k, v);
   if (R.world === 'story') lsRawSet('bd_world', 'story'); else lsRawDel('bd_world');
+  return gameCarry(R);
+}
+/* a game carried over a reload of the page (the bug report's, and the screen lost - 50-zzzz-lost.js): R { game: edGameSave(),
+   menu: its mode, story: in STORY, slot: the Story's save slot } kept in this browser's IndexedDB, the page loaded again, and
+   put back below */
+function gameCarry(R) {
   return new Promise(res => { const q = indexedDB.open('bd_bug', 1); q.onupgradeneeded = () => q.result.createObjectStore('r'); q.onsuccess = () => { const tx = q.result.transaction('r', 'readwrite'); tx.objectStore('r').put(R, 0); tx.oncomplete = () => { sessionStorage.setItem('bd_bug_go', '1'); location.reload(); res(); }; }; });
 }
+// the game going on now, carried (the worker held while it's taken, as REPORT takes it); no game: the page simply loaded again
+async function gameCarryNow(why) {
+  const live = typeof WORLD_READY !== 'undefined' && WORLD_READY && !LOADING && (!ui.title || menuCanResume());
+  if (!live) { location.reload(); return; }
+  const R = { menu: MODE, story: STORY || null, slot: STORY ? storySlot : null };
+  await swHold(why); try { R.game = edGameSave(); } finally { swRelease(why); }
+  return gameCarry(R);
+}
 function bugBack() { const m = JSON.parse(sessionStorage.getItem('bd_bug_back') || 'null'); if (!m) return false; const L = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('bd_')) L.push(k); } for (const k of L) lsRawDel(k); for (const [k, v] of Object.entries(m)) lsRawSet(k, v); sessionStorage.removeItem('bd_bug_back'); return true; }
-// after bugLoad's reload: a fresh game of the report's mode, then its game put in (the worker held), as the Story's LOAD
+// after gameCarry's reload: a fresh game of its mode, then its game put in (the worker held), as the Story's LOAD - both views on it
+// at once; a Story carried with its slot goes on saving there (a report's has none: it never writes over a slot)
 if (typeof window !== 'undefined' && !SW_IN_WORKER && sessionStorage.getItem('bd_bug_go')) {
   sessionStorage.removeItem('bd_bug_go');
   const go = () => {
@@ -62674,8 +62689,13 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER && sessionStorage.getItem('bd
     q.onsuccess = () => { const g = q.result.transaction('r').objectStore('r').get(0); g.onsuccess = () => {
       const R = g.result; if (!R || !R.game) return;
       menuSel.mode = R.menu || (R.story ? 'story' : menuSel.mode);
-      if (R.story) { storyPlayNow = true; storySlot = null; }
-      loadThen(() => { menuPlay(false); storyPlayNow = false; swSettled().then(() => swHold('bugLoad')).then(() => { try { edGameBack(R.game); cutTo(0); } catch (e) { console.warn('bug load', e); } swRelease('bugLoad'); }); });
+      const slot = R.story && R.slot != null ? R.slot : null;
+      if (R.story) { storyPlayNow = true; storySlot = slot; storyLoading = slot != null; }
+      loadThen(() => { menuPlay(false); storyPlayNow = false; swSettled().then(() => swHold('bugLoad')).then(() => {
+        try { edGameBack(R.game); cam.cut[0] = cam.cut[1] = true; } catch (e) { console.warn('bug load', e); }
+        if (slot != null) { storySavedN = story.saveN; storyLoading = false; }
+        swRelease('bugLoad');
+      }); });
     }; };
   };
   setTimeout(go, 300);
@@ -62888,6 +62908,48 @@ WK.plant = {
   del() { hplDelete(); objSync(); },
   show: () => objSync(),
 };
+
+/* ================================================================
+   THE SCREEN LOST (bug report Nov 7 13:29, Version 791, an iPad, two players flying in OPEN WORLD: "suddenly everything
+   disappeared"). The browser took the graphics memory away and gave it back blank: on an iPad, Safari paints every canvas in its
+   graphics process, and when that process is reset every picture the game had already painted - each sprite cut, scaled or
+   turned, every button, every word written once and kept - comes back empty, with no error (the report's log was empty). What is
+   drawn fresh each frame still shows (the sky, pictures straight from their files, a new FPS number); the planes, the buttons,
+   the ground's slices and the words are gone.
+   One rule for all of it, nothing rebuilt piece by piece: the game is taken as REPORT takes it (the worker held), the page loaded
+   again, and the game put back where it was (gameCarryNow / gameCarry - 50-zzzz-bug.js).
+   Seen by: the WebGL context lost (the same reset takes it), a canvas's own contextlost (Chrome, Firefox), or a small canvas
+   painted at the start found empty (looked at every 2 s - Safari says nothing for a 2D canvas).
+   Left as it is: online (the reload would drop the others), with the GAME EDITOR open (its unsaved changes), and a second loss
+   within a minute of the last reload (never a loop of reloads).
+   ================================================================ */
+const LOST = { seen: false, probe: null };
+function screenLost(why) {
+  if (LOST.seen) return;
+  LOST.seen = true;
+  console.warn('screen lost:', why);
+  let last = 0; try { last = +sessionStorage.getItem('bd_lost_t') || 0; } catch (e) { }
+  if (Date.now() - last < 60000) return;
+  if (NET.role !== 'local' || (typeof EDMODE !== 'undefined' && EDMODE.on)) return;
+  try { sessionStorage.setItem('bd_lost_t', String(Date.now())); } catch (e) { }
+  gameCarryNow('lost');
+}
+if (typeof window !== 'undefined' && !SW_IN_WORKER) {
+  const watch = () => {
+    for (const id of ['game', 'hud']) { const c = document.getElementById(id); if (c) { c.addEventListener('webglcontextlost', () => screenLost('webgl ' + id)); c.addEventListener('contextlost', () => screenLost('canvas ' + id)); } }
+    const c = document.createElement('canvas'); c.width = c.height = 4;
+    const x = c.getContext('2d'); if (!x) return;
+    x.fillStyle = '#ff00ff'; x.fillRect(0, 0, 4, 4);
+    c.addEventListener('contextlost', () => screenLost('canvas probe'));
+    LOST.probe = x;
+    setInterval(() => {
+      if (LOST.seen || document.hidden) return;
+      let a = 255; try { a = x.getImageData(1, 1, 1, 1).data[3]; } catch (e) { }
+      if (a === 0) screenLost('canvas probe empty');
+    }, 2000);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watch); else watch();
+}
 
 /* ---- UNSAVED CHANGES (user Nov 3 07:07-07:09, the editor saves like a scene - the journal: 00-world-journal.js). Leaving the scene with
    changes not saved asks SAVE / DISCARD / CANCEL: the editor's CLOSE, SNAPSHOT (what it copies is the saved world) and the WORLD
@@ -64595,7 +64657,7 @@ async function start(data) {
   // (Nov 1) a column table's row as a plain object, for the console: __game.row('smoke', 0) - 04-zz-coltable.js
   // (tests: Story's save and LOAD without the slots - the game's text kept by the tool, the vehicles and where you are - 50-story-saves.js)
   Object.assign(window.__game, { storyT: { start: () => { storySlot = null; menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false; }, save: async () => { await swHold('storyT'); const G = JSON.stringify(edGameSave()); swRelease('storyT'); return G; }, load: G => new Promise(r => { storySlot = null; storyLoading = true; storyPutBack(G, r); }), hold: () => swHold('storyT'), release: () => swRelease('storyT'), vehs: () => storyVehs(), crew: () => ({ mode: crew[0].mode, civ: crew[0].civ ? crew[0].civ.sid : null, at: story.at, main: story.main }), board: sid => storyBoard(0, sid), go: id => storyGo(0, id, true), strs: () => strsUsed().map(o => ({ id: o.id, k: o.k, x: Math.round(o.x), use: strUse(o), own: o.own, home: o.home })) } });
-  Object.assign(window.__game, { bugLoad: R => bugLoad(R), bugBack: () => bugBack(), bugState: () => bugState() });   // (REPORT BUG's report put back in this browser, and this browser's own keys back after - 50-zzzz-bug.js)
+  Object.assign(window.__game, { bugLoad: R => bugLoad(R), bugBack: () => bugBack(), bugState: () => bugState(), screenLost: why => screenLost(why || 'test') });   // (REPORT BUG's report put back in this browser, and this browser's own keys back after - 50-zzzz-bug.js)
   Object.assign(window.__game, { row: (name, i) => { const t = TABLES[name]; return t && t.cols ? t.cols.plain(i) : t ? t.list()[i] : undefined; } });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
   Object.assign(window.__game, { wp: { WP_KINDS, art: pl => wpArt(pl), frame: (A, s, i, m, nb) => wpFrame(A, s, i, m, nb), pose: (pl, A) => wpPose(pl, A), K: () => ({ UPM, FLY_ROLL_T, PLANE_TURN_T, SC: PLANE_SC() }), mark: (o, x, y, w) => dmgMark(o, x, y, w), dmgPic: (P, f, o) => dmgPic(P, f, o), sea: c => seaplaneArt(c), jet: t => sheetArt({ kind: "jet", owner: t }), jetPose: f => rlPose(f), ces: c => sheetArt({ kind: 'cessna', col: c }) },   // (the warplanes' frames and poses for a look at them - 29-zzz-warplanes.js)
