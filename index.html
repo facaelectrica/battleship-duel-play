@@ -3577,7 +3577,7 @@ const bioMix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t,
 function bioTint(b, col, m, depth, seam, h, x = 0) {
   const L = Math.min(1, (0.3 * col[0] + 0.59 * col[1] + 0.11 * col[2]) / 255 * 1.45);
   if (b === 1) {                                           // ICE: snow on every open top (the boulders capped), icy blue rock under
-    const sd = 3.2 + 1.8 * surfWob(x, 5);                  // (the snow's depth, cells: thicker and thinner along it)
+    const SL = surfLayer('ice', 'snow'), sd = SL ? surfThick(SL, x, 5) / 2.5 : 0;   // (the snow's depth, cells: its TERRAIN SURFACE layer - thicker and thinner along it)
     if (depth < sd) return h < 0.3 ? [226, 236, 246] : [244, 248, 252];
     if (depth < sd + 2 && h < 0.5) return [214, 226, 240];
     const c = bioMix([62, 90, 124], [212, 230, 246], L); return seam ? c.map(v => v * 0.78) : c;
@@ -3591,6 +3591,25 @@ function bioTint(b, col, m, depth, seam, h, x = 0) {
   if (depth < 2) return bioMix([40, 36, 38], [100, 94, 96], L);
   return bioMix([15, 13, 15], [84, 78, 82], L);
 }
+/* ---- TERRAIN SURFACE (the TODO list: "TERRAIN SURFACE (A Tab inside the Biome) - The ground is editable too since its all procedural. A list of
+   layers. Each layer would have: the material ... a thickness range and how much it wobbles ... whether it's measured from the surface or the
+   waterline (tropical's 'sand down to the water' rule)"). Each biome's layers over its ground, from its open top down: a material, THICKNESS MIN /
+   MAX (world units) between which it wobbles along the ground (WOBBLE: how much of that range it uses), and DOWN TO WATER (it reaches the
+   waterline whatever its thickness). Under them the biome's own ground (earth with stones, or rock). Kept in bd_biome_surf (a game key: snapshots
+   carry it); the defaults are the ground as it was. Read by buildLand (grass, the beach's sand) and the paint (ICE's snow). ---- */
+const BIOME_SURF_DEF = {
+  forest: [{ m: 'grass', a: 13.5, b: 26.5, w: 1 }],
+  swamp: [{ m: 'grass', a: 13.5, b: 26.5, w: 1 }],
+  tropical: [{ m: 'sand', a: 12, b: 32, w: 1, wl: 1 }],
+  ice: [{ m: 'snow', a: 3.5, b: 12.5, w: 1 }],
+  desert: [], mountain: [], volcanic: [], sea: [],
+};
+let BIOME_SURF = JSON.parse(JSON.stringify(BIOME_SURF_DEF));
+try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && typeof o === 'object') for (const k in BIOME_SURF_DEF) if (Array.isArray(o[k])) BIOME_SURF[k] = o[k].filter(L => L && typeof L.m === 'string' && isFinite(L.a) && isFinite(L.b)); } catch (e) { }
+const biomeSurfSave = () => { try { localStorage.setItem('bd_biome_surf', JSON.stringify(BIOME_SURF)); } catch (e) { } };
+// a biome's layer of material m (its first): its thickness at x, world units (null: none) - between MIN and MAX on the ground's wobble
+function surfLayer(biome, m) { const L = BIOME_SURF[biome]; return L ? L.find(q => q.m === m) || null : null; }
+function surfThick(L, x, k) { const u = 0.5 + 0.5 * (L.w != null ? L.w : 1) * surfWob(x, k); return L.a + (L.b - L.a) * u; }
 
 // The defense tower stands on the block at the end of the pier: six drawings, intact to a skeleton of rebar
 // (sea to the right in the art). Each hit shows the next drawing; the sixth brings it down in pieces.
@@ -4517,8 +4536,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 790;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 14:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 791;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 14:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -48195,7 +48214,7 @@ function fieldH(c) {
   return ((FIELD_H / LT_CELL - 2) * bgP(D ? 'bgsh' : 'bgmh', 1) + mw * (4.5 * n(c / 46) + 1.6 * n(c / 13 + 50) + (hash(c * 3.71) < 0.12 ? 1 : 0))) * fieldK(c * LT_CELL);
 }
 // grass on the ground's own top: five cells and a ragged fringe of one to three more hanging over the dirt
-const ltGrassD = c => Math.round(8 + 2.6 * surfWob(c * LT_CELL, 2)) + (hash(c * 0.71) < 0.3 ? 0 : 1);   // (the grass's depth, cells: a smooth wobble along the ground and a cell here and there - user Nov 7 12:51)
+const ltGrassD = c => { const L = surfLayer(land.bio && land.bio[c] === 2 ? 'swamp' : 'forest', 'grass'); return L ? Math.round(surfThick(L, c * LT_CELL, 2) / LT_CELL) + (hash(c * 0.71) < 0.3 ? 0 : 1) : 0; };   // (the grass's depth, cells: its TERRAIN SURFACE layer - 09-zz-biomes.js; none: no grass)   // (the grass's depth, cells: a smooth wobble along the ground and a cell here and there - user Nov 7 12:51)
 
 /* (user Oct 25, evening) the land is now two countries, one each side of the sea in the middle of the world: the
    forest left of it, the desert right of it, five screens each. Going out from the harbour: an airfield on flat ground
@@ -48353,6 +48372,7 @@ function buildLand() {
     // (an island in a country's water - a lake, a sea carved into it: its ground down to the water's line, the water under
     // it, then the column's own ground - the lake's bed - in front, as everywhere: one column, two grounds)
     const GP = shpGaps(c);                                    // (the shapes' gaps in this column: open air under an overhang - shpGaps)
+    const TSL = land.trop[c] ? surfLayer('tropical', 'sand') : null;   // (BEACH: its sand layer - TERRAIN SURFACE)
     for (let r = ltR0(c), r1 = rEnd; r < r1; r++) {
       const y = LT_Y0 + r * LT_CELL;
       if (GP && shpInGap(GP, y)) continue;
@@ -48363,7 +48383,7 @@ function buildLand() {
       if (land.mtn[c] || y >= rockAt || (rocky > 0.5 && y < top + 60 + 40 * rocky)) m = M_ROCK;   // (MOUNTAIN: rock all through - its stones grey, packed, buildStones)
       else if (apron && y < top + 8 * LT_CELL) m = M_CONC;          // (the airfield: slabs of concrete over the earth)
       else if (y < top + sandDepth) m = M_SAND;
-      else m = land.trop[c] ? (y < Math.max(top + TROP_SAND * (1 + 0.45 * surfWob(x, 3)), WATER_Y - 6) ? M_SAND : M_DIRT) :   // (TROPICAL: sand down to the water, rocks from there - user Nov 1)
+      else m = land.trop[c] ? (TSL && y < Math.max(top + surfThick(TSL, x, 3), TSL.wl ? WATER_Y - 6 : -1e9) ? M_SAND : M_DIRT) :   // (TROPICAL: sand down to the water, rocks from there - user Nov 1)
          y < top + ltGrassD(c) * LT_CELL && sandy < 0.35 ? M_GRASS : M_DIRT;   // (user Oct 31 20:19: the tropical ground is rocks and sand - a band of sand under its grass, the rocks under that)
       land.cell[ltIdx(c, r)] = m;
     }
@@ -63074,6 +63094,19 @@ ACTS.stAct = (p, what, v) => {
 // controlling something you own, where you use the four buttons, and using something else. A is obviously used for the two scenarios,
 // but in different ways"). In a structure of yours its row is A B X Y, as a vehicle's; A buys or opens only while something not yours
 // is picked (storyDotKeys - a vehicle for sale or rent, a market, a showroom).
+// A lighthouse turns its beam with the universal ANGLE tape (user 10:51: "like we do with the lights in a submarine or the water in an
+// helicopter, we use our universal angle button"): its lamp is a light as the subs' (lampOf - the tape, the keys, the right stick;
+// carried to the simulation as theirs, ctlState le), elev 0 its beam right round to the right, 90 to you, 180 to the left.
+// (Nov 7 13:20: put back - the 784 rewrite of the comment above dropped it with the old one, and activeGun / lampOf / the HUD threw every frame)
+const LH_LAMPS = new Map();
+function lhLampOf(p) {
+  if (!STORY || p !== 0 || !crew[0] || crew[0].mode !== 'dock') return null;
+  const tw = stLighthouse(), id = tw && lhStrId(tw); if (id == null) return null;
+  let L = LH_LAMPS.get(id);
+  if (!L) LH_LAMPS.set(id, L = { power: 0, aimShow: 0, get elev() { const C = story.lh && story.lh[id]; return 90 - ((C && C.a) || 0); },
+    set elev(v) { const C = story.lh[id] || (story.lh[id] = { off: false, a: 0 }); C.a = clamp(90 - v, -90, 90); } });
+  return L;
+}
 const ST_CW = { cook: 'cook', lamp: 'light', beam: 'lhBeam', fog: 'fog' };   // (the green button -> the command)
 function stRow(p) {
   if (!STORY || p !== 0 || ui.title || story.wake) return [];
@@ -64778,7 +64811,10 @@ if (VEG_MODE) (() => {
       // one deck at a time") a tab a deck; the deck picked: its prefabs, each its AMOUNT and REMOVE, and ADD PREFAB
       const tabs = document.createElement('div'); tabs.style.cssText = 'display:flex;gap:4px;margin-left:10px';
       D.forEach((_, di) => { const b = document.createElement('button'); b.textContent = 'DECK ' + di; b.dataset.t = DN[di]; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', di === deckTab); hint(b); b.onclick = () => { deckTab = di; renderDecks(); }; tabs.appendChild(b); });
+      // (user Nov 7, the TODO list: "TERRAIN SURFACE (A Tab inside the Biome)") the biome's surface layers - 09-zz-biomes.js BIOME_SURF
+      { const b = document.createElement('button'); b.textContent = 'TERRAIN SURFACE'; b.dataset.t = 'This biome\'s ground layers: thickness and wobble along the ground'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'surf'); hint(b); b.onclick = () => { deckTab = 'surf'; renderDecks(); }; tabs.appendChild(b); }
       top.appendChild(tabs);
+      if (deckTab === 'surf') { renderSurf(box, top); return; }
       D.forEach((list, di) => {
         if (di !== deckTab) return;
         const h = document.createElement('span'); h.textContent = DN[di] + (list.length ? '' : ' - empty'); h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
@@ -64805,6 +64841,23 @@ if (VEG_MODE) (() => {
         add.appendChild(sel); add.appendChild(ab); top.appendChild(add);
         { const sv = document.createElement('button'), rv = document.createElement('button'); sv.textContent = 'SAVE'; rv.textContent = 'REVERT'; sv.dataset.t = 'Keep this set as it is now - its decks, amounts and sizes - in the shared store'; rv.dataset.t = 'Back to this set as last saved'; hint(sv); hint(rv);
           sv.onclick = () => { if (window.__vgSetSave) window.__vgSetSave(); }; rv.onclick = () => { if (window.__vgSetRevert) window.__vgSetRevert(); }; sv.dataset.setSave = '1'; rv.dataset.setRev = '1'; const ub = document.createElement('button'); ub.textContent = 'UNDO'; ub.dataset.t = 'Undo the last change here - an amount, a size, a prefab added, removed or moved, a number in the panel (Ctrl+Z)'; ub.dataset.gUndo = '1'; hint(ub); ub.onclick = () => { if (window.__vgGroupUndo) window.__vgGroupUndo(); }; add.appendChild(ub); add.appendChild(sv); add.appendChild(rv); }
+      });
+    }
+    // TERRAIN SURFACE: each of the biome's layers - its material, THICKNESS MIN / MAX, WOBBLE, DOWN TO WATER; the preview's ground built again
+    let surfT = 0; const surfRebuild = () => { biomeSurfSave(); clearTimeout(surfT); surfT = setTimeout(() => { try { landEdited(); terrainSync(); } catch (er) { console.error('surface', er); } /* (the ground built again in place - the view stays) */ }, 300); };
+    const MAT_LAB = { grass: 'GRASS', sand: 'SAND', snow: 'SNOW' };
+    function renderSurf(box, top) {
+      const bn = VG().sets.cur, L = BIOME_SURF[bn] || [], D0 = BIOME_SURF_DEF[bn] || [];
+      const h = document.createElement('span'); h.textContent = 'TERRAIN SURFACE - ' + ((VG().sets.lab && VG().sets.lab(bn)) || bn.toUpperCase()) + (L.length ? '' : ' - no layers: its ground all the way up'); h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
+      const cols = document.createElement('div'); cols.style.cssText = 'display:grid;grid-auto-flow:column;grid-auto-columns:minmax(380px,420px);gap:12px;overflow-x:auto;align-items:end'; box.appendChild(cols);
+      L.forEach((ly, i) => {
+        const d0 = D0.find(q => q.m === ly.m) || {}, col = document.createElement('div'); col.style.cssText = 'display:grid;gap:4px;border-left:1px solid #2c3850;padding-left:10px;align-content:start';
+        const t = document.createElement('div'); t.textContent = 'LAYER ' + (i + 1) + ': ' + (MAT_LAB[ly.m] || ly.m.toUpperCase()); t.style.color = '#d8dce8'; col.appendChild(t);
+        col.appendChild(slider('THICKNESS MIN', 'Thinnest the layer gets, world units', 0, 120, 0.5, () => ly.a, v => { ly.a = Math.min(v, ly.b); surfRebuild(); }, d0.a));
+        col.appendChild(slider('THICKNESS MAX', 'Thickest the layer gets, world units', 0, 120, 0.5, () => ly.b, v => { ly.b = Math.max(v, ly.a); surfRebuild(); }, d0.b));
+        col.appendChild(slider('WOBBLE', 'How much it changes along the ground (0: always the middle thickness)', 0, 1, 0.05, () => ly.w != null ? ly.w : 1, v => { ly.w = v; surfRebuild(); }, d0.w != null ? d0.w : 1));
+        if (ly.m === 'sand') col.appendChild(slider('DOWN TO WATER', 'Reaches the waterline whatever its thickness (1 on, 0 off)', 0, 1, 1, () => ly.wl ? 1 : 0, v => { ly.wl = v ? 1 : 0; surfRebuild(); }, d0.wl ? 1 : 0));
+        cols.appendChild(col);
       });
     }
     renderDecks(); window.__vgDecks = renderDecks;
