@@ -1899,6 +1899,123 @@ class ColTable {
 }
 
 /* ================================================================
+   PICTURE MEMORY (user Nov 7, after the iPad's "everything disappeared": "This should not be a one-off fix, but a system that will
+   be used to manage this kind of issues on all levels"). Every picture the game paints and keeps - a sprite cut, scaled, turned or
+   tinted, a word written, a slice of ground, a plane's angle - lives in one memory, with one limit for the device. On an iPad all of
+   a page's canvases share a few hundred MB; past it the browser resets its graphics and every kept picture comes back blank
+   (50-zzzz-lost.js is the last resort for that). Three layers:
+   1. COUNTED: every canvas the page sizes is counted as it is sized (its width x height x 4), whoever made it, until it is shrunk
+      to nothing or collected - PICS.bytes is what the page holds now.
+   2. A DECLARED BUDGET (PIC_BUDGET, below - the device's, as FRAME_BUDGET is the frame's) and an IDLE time.
+   3. STORES SIGN UP: a store that keeps pictures it can make again registers each one - picKeep(c, store, drop, grp) - and marks it
+      when it hands it out to be drawn - picUse(c or grp). Once a frame (picTrim, after drawing) whatever no frame has drawn for
+      PIC_IDLE seconds is let go, and while the page is over its budget the ones drawn longest ago go too (never one drawn in the
+      last PIC_HOLD frames): the store's drop(c) forgets it (it is made again when next asked for), its texture is deleted and the
+      canvas shrunk to nothing at once (Safari keeps a canvas's memory until a collection otherwise).
+   A group (grp - a plane's frame and its night / frost / torn-wing copies, a slice of ground and its edges) is used and let go as one.
+   Pictures a store can't make again (the loaded art, the screen's own buffers) are not registered: they're counted, never dropped.
+   Not a game system: pictures are the page's drawing, never in the simulation's tables or the worker (rules.md section 7, rule 5).
+   Readings: the perf panel's PICS line, __game.pics() (the stores, biggest first).
+   ================================================================ */
+const PIC_BUDGET = { touch: 280e6, desktop: 900e6 };   // (bytes of canvas the page may hold: an iPad / phone - all canvases share one
+                                                        // limit there, and the GPU keeps a texture of most of them too - and a computer)
+const PIC_IDLE = 45;                                    // (seconds undrawn before a kept picture is let go, budget or not)
+const PIC_HOLD = 90;                                    // (frames: a picture drawn this recently is never let go)
+const PICS = { bytes: 0, kept: 0, frame: 0, t: 0, live: new Map(), stores: {}, drops: 0, over: false, budget: 0, it: null, trimF: 0, fps: 60 };
+// (which: an iPad / iPhone - Safari says Macintosh on an iPad, with touch - or an Android; a computer with a touch screen is a computer)
+const picShared = () => { try { const u = navigator.userAgent || ''; return /iPhone|iPad|iPod|Android/.test(u) || (/Macintosh/.test(u) && navigator.maxTouchPoints > 1); } catch (e) { return false; } };
+PICS.budget = picShared() ? PIC_BUDGET.touch : PIC_BUDGET.desktop;
+// 1. counting: every canvas as it's sized (and its count back when it's collected)
+(() => {
+  if (typeof HTMLCanvasElement === 'undefined' || (typeof SW_IN_WORKER !== 'undefined' && SW_IN_WORKER)) return;
+  const sizes = new WeakMap(), gone = typeof FinalizationRegistry === 'function' ? new FinalizationRegistry(r => { PICS.bytes -= r.b; }) : null;
+  // (?pics=1: each canvas named by the function that made it - picReport's makers - so every byte has a name; off, it costs nothing)
+  const tagOn = typeof location !== 'undefined' && /[?&]pics=1/.test(location.search), maker = () => {
+    const L = (new Error().stack || '').split('\n').map(s => s.trim()).filter(s => s.startsWith('at ') && !/\b(maker|note|makeCanvas|set|createElement)\b/.test(s));
+    return (L[0] || '?').replace(/^at /, '').replace(/ \(.*$/, '').replace(/https?:\S+/, '').replace(/^Object\./, '') || '?';
+  };
+  if (tagOn) PICS.tags = [];
+  const note = c => {
+    let r = sizes.get(c);
+    if (!r) { r = { b: 0 }; sizes.set(c, r); if (gone) gone.register(c, r); if (tagOn) { r.by = maker(); PICS.tags.push([new WeakRef(c), r]); } }
+    const b = (c.width * c.height * 4) || 0; PICS.bytes += b - r.b; r.b = b;
+  };
+  for (const k of ['width', 'height']) {
+    const d = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, k);
+    if (!d || !d.set) continue;
+    Object.defineProperty(HTMLCanvasElement.prototype, k, { configurable: true, enumerable: d.enumerable, get: d.get, set(v) { d.set.call(this, v); note(this); } });
+  }
+  const mk = Document.prototype.createElement;
+  Document.prototype.createElement = function (t, o) { const e = mk.call(this, t, o); if (e instanceof HTMLCanvasElement) note(e); return e; };   // (a canvas made and never sized: its 300 x 150)
+})();
+// 3. a store's picture: c the canvas, store its name (the readings), drop(c) the store forgetting it, grp what it's used and let go with;
+// soft: something besides its store may still draw it (a plane's side view kept for its wreck) - let go, it's only forgotten (its
+// memory freed once nothing holds it), never shrunk under whoever still has it
+function picKeep(c, store, drop, grp, soft) {
+  if (!c || !c.width || PICS.live.has(c)) return c;
+  const b = c.width * c.height * 4;
+  PICS.live.set(c, { store, drop, grp: grp || null, b, soft: !!soft });
+  PICS.kept += b; PICS.stores[store] = (PICS.stores[store] || 0) + b;
+  if (grp) grp._pu = PICS.frame; else c._pu = PICS.frame;
+  return c;
+}
+// handed out to be drawn this frame: a canvas, or the group it was kept with
+function picUse(o) { if (o) o._pu = PICS.frame; return o; }
+// let go by its own store (resized, replaced): no longer counted as kept
+function picForget(c) {
+  const r = PICS.live.get(c); if (!r) return;
+  PICS.live.delete(c); PICS.kept -= r.b; PICS.stores[r.store] -= r.b;
+}
+// let go: its store forgets it, its texture and memory freed now
+function picDrop(c) {
+  const r = PICS.live.get(c); if (!r) return;
+  picForget(c);
+  try { if (r.drop) r.drop(c); } catch (e) { console.warn('picDrop', r.store, e); }
+  if (typeof glFreeSrc === 'function') glFreeSrc(c);
+  if (!r.soft) c.width = c.height = 0;
+  PICS.drops++;
+}
+const picAge = (c, r) => PICS.frame - ((r.grp ? r.grp._pu : c._pu) ?? -1e9);
+// once a frame, after the frame is drawn (48-render.js): the idle ones go; over the budget, the longest undrawn go until it's under
+function picTrim() {
+  PICS.frame++;
+  const now = performance.now() / 1000, dt = PICS.t ? Math.min(0.25, now - PICS.t) : 1 / 60; PICS.t = now;
+  PICS.fps += (1 / Math.max(dt, 1e-3) - PICS.fps) * 0.05;
+  const idleF = Math.max(PIC_HOLD, Math.round(PIC_IDLE * PICS.fps));
+  PICS.over = PICS.bytes > PICS.budget;
+  // (the idle sweep a slice of the list a frame - the whole list in about a second - so no frame pays for all of it)
+  const L = PICS.live, step = Math.max(32, Math.ceil(L.size / 60));
+  let i = 0;
+  if (!PICS.it) PICS.it = L.entries();                    // (a Map's iterator stays good as entries come and go)
+  while (i++ < step) {
+    let n = PICS.it.next();
+    if (n.done) { PICS.it = L.entries(); n = PICS.it.next(); if (n.done) break; }
+    const [c, r] = n.value;
+    if (picAge(c, r) > idleF) picDrop(c);
+  }
+  // (over the budget: looked at twice a second, not every frame - the sort is over every kept picture)
+  if (!PICS.over || PICS.frame - (PICS.trimF || 0) < 30) return;
+  PICS.trimF = PICS.frame;
+  // over the budget: the longest undrawn first, down to 85% of it (so it isn't back over at the next picture made)
+  const want = PICS.bytes - PICS.budget * 0.85, all = [];
+  for (const [c, r] of L) { const a = picAge(c, r); if (a > PIC_HOLD) all.push([a, c]); }
+  all.sort((p, q) => q[0] - p[0]);
+  let freed = 0;
+  for (const [, c] of all) { if (freed >= want) break; const r = L.get(c); if (!r) continue; freed += r.b; picDrop(c); }
+}
+// the readings: what the page holds, what's kept, the budget, and the stores biggest first
+function picReport() {
+  const S = Object.entries(PICS.stores).filter(([, b]) => b > 0).sort((a, b) => b[1] - a[1]).map(([k, b]) => k + ' ' + (b / 1e6).toFixed(1));
+  const R = { MB: +(PICS.bytes / 1e6).toFixed(1), keptMB: +(PICS.kept / 1e6).toFixed(1), budgetMB: PICS.budget / 1e6, pictures: PICS.live.size, dropped: PICS.drops, stores: S };
+  if (PICS.tags) {                                     // (?pics=1: every canvas held, by the function that made it)
+    const by = {}; PICS.tags = PICS.tags.filter(([w]) => w.deref());
+    for (const [w, r] of PICS.tags) { if (!r.b) continue; const k = r.by + (PICS.live.has(w.deref()) ? ' (kept)' : ''); const e = by[k] || (by[k] = [0, 0]); e[0] += r.b; e[1]++; }
+    R.makers = Object.entries(by).sort((a, b) => b[1][0] - a[1][0]).slice(0, 30).map(([k, [b, n]]) => k + ' ' + (b / 1e6).toFixed(1) + ' x' + n);
+  }
+  return R;
+}
+
+/* ================================================================
    World state
    ================================================================ */
 // the device: a touch screen, and a phone (a touch screen whose short side is under 500 CSS pixels)
@@ -3810,6 +3927,7 @@ function textCanvas(str, col) {
 }
 // Draw pixel text straight onto a context (cached per string/color/scale).
 const textCache = new Map();
+function textGone(t) { if (textCache.get(t._tk) === t) textCache.delete(t._tk); }
 // the coin (user Nov 2: "use the symbol we have for coins ... universally ... to represent exchange"): a '$' in a string
 // drawn by drawTextC is the coin picture (STORY_COIN, 50-story.js), k its pixel size (default: the text's), centred on
 // the line; the rest is drawText. ink: a colour for a shadow one pixel down-right of the letters (the coin has its rim).
@@ -3833,9 +3951,10 @@ function drawText(c, str, x, y, col, scale = 1, align = 'left') {
     const base = textCanvas(str, rgb(col));
     t = scale === 1 ? base : makeCanvas(base.width * scale, base.height * scale);
     if (scale !== 1) { const g2 = t.getContext('2d'); g2.imageSmoothingEnabled = false; g2.drawImage(base, 0, 0, t.width, t.height); }
-    textCache.set(key, t);
-    if (textCache.size > 300) textCache.delete(textCache.keys().next().value);
+    textCache.set(key, t); t._tk = key;
+    picKeep(t, 'words', textGone);                     // (in the page's picture memory - 04-zzz-pics.js; was the last 300 kept)
   }
+  picUse(t);
   const ox = align === 'center' ? Math.round(t.width / 2) : align === 'right' ? t.width : 0;
   c.drawImage(t, Math.round(x) - ox, Math.round(y) - (t.__top || 0) * scale);   // (an accented line: its marks above the letters' row)
   return t.width;
@@ -4555,8 +4674,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 797;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 15:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 798;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 15:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6093,6 +6212,8 @@ function drawPerfPanel(x, y) {
     'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + (GLR.on ? '  WEBGL' : '  MODE ' + MODE_NAMES[getMode()] + (BATCH_AUTO ? (abTrial.phase ? ' TRYING' : ' AUTO') : '') + '  [TAP HERE: NEXT MODE]'),
     GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + '  DECKS ' + Math.round(FT.dDraw || 0) + '/' + Math.round(FT.dSkip || 0) + (GLR.lost ? '  LOST' : '') : '',
     'SMOKE ' + smoke.n + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
+    // (Nov 7: the page's picture memory - 04-zzz-pics.js: all it holds, what's kept by the stores, the device's budget, the biggest store)
+    (R => 'PICTURES ' + Math.round(R.MB) + ' MB  KEPT ' + Math.round(R.keptMB) + '  BUDGET ' + Math.round(R.budgetMB) + '  LET GO ' + R.dropped + (R.stores[0] ? '  TOP ' + R.stores[0].toUpperCase() : ''))(picReport()),
     probe.on || probe.done ? '' : 'TAP AGAIN: MEASURE DRAWING TOO',
   ].filter(l => l);
   // (user Oct 29: "that FPS window is getting extremely wide... why not put some lines below others": a line wider than about
@@ -11699,6 +11820,16 @@ function planeFlare(pl, deg) {
 function blitPlane(src, key, side, deg, cx, cy, only, k) {
   const s = (k || PLANE_K * PLANE_SC()) * SV, w = Math.round(src.width * s), h = Math.round(src.height * s);
   let im, x, y;
+  /* (Nov 7, the page's picture memory - 04-zzz-pics.js: a plane turned a degree at a time kept a copy for every degree, zoom and
+     variant - night, scorch, frost - the biggest pile of pictures with two planes flying) on the GPU it is turned as it's drawn,
+     as it's sized (GPU_SCALE): its frame at its size, through the view's turn. Its own turned pixels are made only where they're
+     read - the moon's and the low sun's rims, a cloud covering it (cpu) */
+  if (!only && GPU_SCALE && Math.abs(deg) >= 0.5) {
+    im = scaled(src, s, true);
+    C.save(); C.translate(cx, cy); C.rotate(deg * Math.PI / 180); C.drawImage(im, -w / 2, -h / 2, w, h); C.restore();
+    const R = Math.ceil(Math.hypot(w / 2, h / 2)) + 2;
+    return { im, x: cx - R, y: cy - R, gpu: true, cpu: () => blitPlane(src, key, side, deg, cx, cy, true, k) };
+  }
   if (Math.abs(deg) < 0.5) { im = scaled(src, s, true); x = cx - (im.width >> 1); y = cy - (im.height >> 1); }
   else {
     im = rotated(src, key + '|' + side, w, h, deg, w / 2, h / 2, 1);   // (a degree at a time: no steps as it pitches)
@@ -11870,7 +12001,7 @@ function drawPlanesAir(x0, x1) {
     }
     // in a near cloud: a flat shape a little darker than the cloud, where the cloud covers it
     const cov = pl.cover[viewIdx];
-    if (cov && cov.length && !G.sz) planeInCloud(pl, G, cov);   // (not with a zoom stand-in: a frame or two)
+    if (cov && cov.length && !G.sz) planeInCloud(pl, G.gpu ? G.cpu() : G, cov);   // (turned on the GPU: its own turned pixels made for the cloud's cut)   // (not with a zoom stand-in: a frame or two)
     if (hc) C.restore();
   }
 }
@@ -12429,7 +12560,8 @@ function rlArt(K, key, paint) {
   if (WP_ART.tk !== teamKey) { WP_ART.clear(); WP_ART.tk = teamKey; }
   let A = WP_ART.get(key); if (A) return A;
   const base = img[K.src]; if (!base || !base.width) return null;
-  A = { K, seq: K.seq, sheet: paint ? paint(base) : base, fr: {}, id: key, k: K.len * UPM / K.seq.len };   // (k: world units a pixel)
+  // (paint: each frame repainted as it's cut - wpFrame - never a whole repainted sheet kept per livery: a Cessna's was 15 MB a colour)
+  A = { K, seq: K.seq, sheet: base, paint: paint || null, fr: {}, id: key, k: K.len * UPM / K.seq.len };   // (k: world units a pixel)
   // (what the rest of the game asks of a plane's art, as the old sheets had it: plane[row][0] its side view either way - the
   // crash's wreck (landCrash), the LOOK; wings: the two wings cut from its top view - its bladeless one when it has it, so no
   // blade goes with a wing - tumbling when torn off: wingPiece)
@@ -12440,13 +12572,20 @@ function rlArt(K, key, paint) {
 }
 const wpBand = (A, c) => Math.round(12 * c.width / 190);                    // (the fuselage's half height in a top view: planeCut)
 const wpAxis = c => c.height >> 1;                                        // (its fuselage runs through the pivot, the frame's middle - the propeller's tips are its leftmost pixels, not its nose)
+// a frame's pictures kept (04-zzz-pics.js), the frame f their group: let go, the plane's art forgets the frame
+function wpKeep(A, key, f, v) {
+  const keep = c => { if (c && c.getContext) picKeep(c, 'plane angles', () => { if (A.fr[key] === f) delete A.fr[key]; }, f, true); };
+  if (v && v.getContext) keep(v); else if (v) { keep(v[-1]); keep(v[1]); }
+  return v;
+}
 // frame i of a sequence; mirror: nose right drawn from the nose-left frame; nb: the row without its blades, when the sheet has one
 // (its propeller turning - wpSpins: the spinning disc in its picture). Its night shape (K), frost (F, 4 stages), scorched tail (R)
 // and wings torn off (nw[1..3]) each made the first time it's drawn
 function wpFrame(A, s, i, mirror, nb) {
   if (nb && A.seq.seqs[s + '_nb']) s += '_nb';
-  const key = s + i + (mirror ? 'm' : ''); let f = A.fr[key]; if (f) return f;
+  const key = s + i + (mirror ? 'm' : ''); let f = A.fr[key]; if (f) return picUse(f);
   const S = A.seq.seqs[s]; let c = makeCanvas(S.w, S.h); c.getContext('2d').drawImage(A.sheet, i * S.w, S.y, S.w, S.h, 0, 0, S.w, S.h);
+  if (A.paint) { const p = A.paint(c); if (p !== c) { c.width = c.height = 0; c = p; } }   // (its livery, on this frame only)
   // (its propeller turning: the disc made part of the frame's own picture - behind it tail-on, over it otherwise - so everything
   // that works from the picture takes it too: a cloud's cover, the hangar's door, the night's dark shape, its hit area)
   if (s.endsWith('_nb')) { const d = wpDisc(A, s, i, c); if (d) { const t = makeCanvas(S.w, S.h), x = t.getContext('2d'), back = s.startsWith('turn_tail') && i > 0 && i < A.seq.n - 1; x.drawImage(back ? d : c, 0, 0); x.drawImage(back ? c : d, 0, 0); c = t; } }
@@ -12457,11 +12596,15 @@ function wpFrame(A, s, i, mirror, nb) {
   const b = s.replace(/_nb$/, '').replace(/_r$/, ''), t = i / (A.seq.n - 1), g = { ax: nr ? -1 : 1, ay: 1 };
   if (b.startsWith('turn')) g.ax *= Math.max(0.25, Math.abs(Math.cos(t * Math.PI))); else g.ay = Math.max(0.25, Math.cos(t * Math.PI / 2));
   f = A.fr[key] = { [-1]: im, [1]: im, key: A.id + key, nr, g };
-  wpLazy(f, 'K', () => both2(planeBlack(im)));
-  wpLazy(f, 'R', () => both2(fl(planeRear)(im)));
-  wpLazy(f, 'F', () => { const F = []; for (let k = 0; k < 4; k++) wpLazy(F, k, () => both2(planeFrost(im, k))); return F; });
-  wpLazy(f, 'nw', () => { const o = {}; for (let m = 1; m <= 3; m++) wpLazy(o, m, () => { const c2 = fl(x => planeCut(x, !(m & 1), !(m & 2), wpBand(A, x), wpAxis(x)))(im); return wpLazy({ [-1]: c2, [1]: c2, key: f.key + 'w' + m }, 'K', () => both2(planeBlack(c2))); }); return o; });
-  return f;
+  // (the frame and every copy made from it - night shape, scorched tail, frost, torn wings - in the page's picture memory as one
+  // group: drawn longest ago, let go together and cut again when next shown; soft - a wreck or a torn wing may still draw one)
+  const kp = v => wpKeep(A, key, f, v);
+  kp(im);
+  wpLazy(f, 'K', () => kp(both2(GLR.on ? glTint(im, 'k', [0, 0, 0], [2 / 255, 3 / 255, 6 / 255]) : planeBlack(im))));   // (its night shape: on the GPU a tint as it's drawn - no copy)
+  wpLazy(f, 'R', () => kp(both2(fl(planeRear)(im))));
+  wpLazy(f, 'F', () => { const F = []; for (let k = 0; k < 4; k++) wpLazy(F, k, () => kp(both2(planeFrost(im, k)))); return F; });
+  wpLazy(f, 'nw', () => { const o = {}; for (let m = 1; m <= 3; m++) wpLazy(o, m, () => { const c2 = kp(fl(x => planeCut(x, !(m & 1), !(m & 2), wpBand(A, x), wpAxis(x)))(im)); return wpLazy({ [-1]: c2, [1]: c2, key: f.key + 'w' + m }, 'K', () => kp(both2(planeBlack(c2)))); }); return o; });
+  return picUse(f);
 }
 // the spinning propeller over frame i of a bladeless row (c: the frame as cut, before any mirror): an ellipse round its hub - R
 // high, rx across (edge on in a side view and every roll, opening with the yaw in a turn), a faint fill in the blades' own colour
@@ -22473,27 +22616,30 @@ let noStandIn = 0;                                 // (drawing the buttons: neve
 function noteZoom() {
   for (let i = 0; i < 2; i++) { const z = cam.view[i].z; zoomMoving[i] = zoomLast[i] > 0 && Math.abs(z - zoomLast[i]) / z > 0.0012; zoomLast[i] = z; }
 }
+function siGone(c) { if (c._siOf && c._siOf[c._siV] === c) c._siOf[c._siV] = null; }
 function standIn(src, w, h) {
   const all = src._si || (src._si = [null, null]);
   let c = all[viewIdx];
-  if (!c) c = all[viewIdx] = makeCanvas(w, h);
+  if (!c) { c = all[viewIdx] = makeCanvas(w, h); c._siOf = all; c._siV = viewIdx; }
   if (c.width !== w || c.height !== h || c._for !== src._stamp || !c._drawn) {     // (_drawn: a picture never repainted has no stamp)
     if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     const x = c.getContext('2d'); x.clearRect(0, 0, w, h); x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high';
     x.drawImage(src, 0, 0, w, h);
     c._for = src._stamp; c._stamp = (c._stamp || 0) + 1; c._drawn = true;
+    picForget(c); picKeep(c, 'zoom stand-ins', siGone);
   }
-  return c;
+  return picUse(c);
 }
 // rotated sprites, cached by size and angle
 const rotCache = new Map();
+function rotGone(r) { if (rotCache.get(r._rid) === r) rotCache.delete(r._rid); if (rotNear.get(r._rnear) === r) rotNear.delete(r._rnear); }
 const rotNear = new Map();             // key|angle -> the last size built (stands in while a zoom is moving)
 // (step: the angles built, in degrees - 3 for most; user Oct 28, 22:52, the plane: "when I aim it up and down, it isnt very
 // smooth, its like 'steps'" - the planes 1)
 function rotated(src, key, w, h, deg, px, py, step = 3) {
   const a = Math.round(deg / step) * step, id = key + '|' + w + '|' + a;
   let r = rotCache.get(id);
-  if (r) return r;
+  if (r) return picUse(r);
   // (a zoom in motion asks for a new size every frame: the nearest one built stands in until it settles)
   if (zoomMoving[viewIdx]) { const n = rotNear.get(key + '|' + a); if (n && n.width) return n; }
   perf.rm = (perf.rm || 0) + 1;
@@ -22506,43 +22652,33 @@ function rotated(src, key, w, h, deg, px, py, step = 3) {
   if (HARD_F) hardDraw(x, src, -px, -py, w, h);
   else { x.drawImage(src, -px, -py, w, h); x.setTransform(1, 0, 0, 1, 0, 0); hardenCPU(x); }
   r.R = R; r.w0 = w;                                   // (w0: the width it was built for, to scale a stand-in)
-  rotCache.set(id, r); rotNear.set(key + '|' + a, r);
-  if (rotCache.size > 520) { const k0 = rotCache.keys().next().value, r0 = rotCache.get(k0); rotCache.delete(k0); if (r0 !== r) { for (const [k, v] of rotNear) if (v === r0) rotNear.delete(k); glFreeSrc(r0); r0.width = r0.height = 0; } }
+  rotCache.set(id, r); rotNear.set(key + '|' + a, r); r._rid = id; r._rnear = key + '|' + a;
+  picKeep(r, 'turned', rotGone);                       // (in the page's picture memory - 04-zzz-pics.js; was at most 520 of them)
   return r;
 }
-/* Every size built is kept for reuse, but all of them together live within one memory budget (and at most a few
-   sizes per picture): past it, the copies used longest ago are let go - their texture deleted and their canvas
-   shrunk to nothing at once (Safari otherwise keeps a canvas's memory until a garbage collection, and on an iPad
-   all canvases share one limit of a few hundred MB; running close to it is what stalled the game for seconds). */
-const SCALED_BUDGET = 72e6, SCALED_PER_SRC = 4;
-const scaledLRU = new Map();              // canvas -> { map, w, bytes }, oldest first
-let scaledBytes = 0, scaledFrame = 0;
+/* Every size built is kept for reuse (at most a few sizes per picture) in the page's picture memory (04-zzz-pics.js: one budget
+   for every store - this one's own 72 MB budget is gone into it): drawn longest ago, a size is let go there with any other store's
+   pictures, its texture and tinted copies (warm, fog, burnt dark, moonlit) with it. */
+const SCALED_PER_SRC = 4;
+let scaledFrame = 0;
 function scaledKeep(c, map, w) {
-  const e = scaledLRU.get(c), bytes = c.width * c.height * 4;
-  if (e) { scaledBytes += bytes - e.bytes; scaledLRU.delete(c); }
-  else scaledBytes += bytes;
-  scaledLRU.set(c, { map, w, bytes });
-  c._used = scaledFrame;
+  const r = PICS.live.get(c);
+  if (r && r.b !== c.width * c.height * 4) picForget(c);              // (rebuilt in place at another size: counted again)
+  if (!r || r.b !== c.width * c.height * 4) { c._sw = w; c._smap = map; picKeep(c, 'sizes', scaledGone); }
+  picUse(c); c._used = scaledFrame;
 }
-function scaledDrop(c) {
-  const e = scaledLRU.get(c);
-  if (!e) return;
-  scaledLRU.delete(c); scaledBytes -= e.bytes; perf.sd = (perf.sd || 0) + 1;
-  if (e.map.get(e.w) === c) e.map.delete(e.w);
-  // (and the tinted copies made from it: warm, burnt dark, moonlit)
-  const gone = [c, c._warm, c._fog, c._dark && c._dark.c];
+// a size let go (picDrop): its picture forgets it, and its tinted copies go with it
+function scaledGone(c) {
+  const map = c._smap; if (map && map.get(c._sw) === c) map.delete(c._sw);
+  const gone = [c._warm, c._fog, c._dark && c._dark.c];
   if (c._moon) { for (const k in c._moon) if (k !== 'stamp' && k !== 'pool') gone.push(c._moon[k]); for (const k in c._moon.pool || {}) gone.push(c._moon.pool[k]); }
   for (const g of gone) if (g && g.width) { glFreeSrc(g); g.width = g.height = 0; }
-  c._warm = c._fog = c._dark = c._moon = null;
+  c._warm = c._fog = c._dark = c._moon = null; c._smap = null;
 }
+const scaledDrop = c => picDrop(c);
+// a picture's own sizes: no more than SCALED_PER_SRC (its oldest let go - never one drawn this frame)
 function scaledTrim(map) {
-  // a picture's own sizes first (its oldest), then the oldest anywhere - never one drawn this frame
-  if (map && map.size > SCALED_PER_SRC) for (const v of map.values()) { if (v._used !== scaledFrame) { scaledDrop(v); break; } }
-  for (const [c] of scaledLRU) {
-    if (scaledBytes <= SCALED_BUDGET) break;
-    if (c._used === scaledFrame) continue;
-    scaledDrop(c);
-  }
+  if (map && map.size > SCALED_PER_SRC) for (const v of map.values()) { if (v._used !== scaledFrame) { picDrop(v); break; } }
 }
 /* GPU scaling (step 2 of the land plan): under WebGL, while the world is drawn (GPU_SCALE), a sprite isn't copied
    at each size any more - scaled() hands back a stand-in with the size it would have had, and the renderer
@@ -23088,15 +23224,29 @@ const DECK_DROP = { hero: 0, mid: 0.18, mid2: 0.26, far: 0.345, far2: 0.42, hori
 const HERO_I = LAYERS.length - 1;
 function deckBases() { for (const L of LAYERS) { L.base = HOR - Math.max(0.02, (P.alt ?? 0.54) - DECK_DROP[L.name] * (P.gap ?? 1)); L.baseY0 = Math.round(H * L.base); if (L.baseY === undefined) L.baseY = L.baseY0; } }
 function makeBuf(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; const x = c.getContext('2d'); const img = x.createImageData(w, h); return { cv: c, cx: x, img, buf: new Uint32Array(img.data.buffer) }; }
-function target(b) { buf = b.buf; TW = CW; }
+/* (Nov 7, the page's picture memory - 04-zzz-pics.js: the measure on the user's PC found 27 sky buffers the size of the screen, 117 MB,
+   three times that on an iPad) a buffer whose pixels only the old CPU sky wanted - the decks' and their veil's, now drawn in GPU
+   layers (deckTarget, veilTarget), and the shared layers' - is made only if something asks for its pixels (lazyBuf); drawn into
+   meanwhile (target), the CPU's strokes go nowhere (NOBUF), as they were never shown */
+const NOBUF = new Uint32Array(0);
+function lazyBuf(w, h) {
+  const o = { _lazy: true };
+  for (const k of ['cv', 'cx', 'img', 'buf']) Object.defineProperty(o, k, { configurable: true, enumerable: false, get() {
+    const b = makeBuf(w, h); o._lazy = false;
+    for (const q of ['cv', 'cx', 'img', 'buf']) Object.defineProperty(o, q, { value: b[q], writable: true, enumerable: true, configurable: true });
+    return o[k];
+  } });
+  return o;
+}
+function target(b) { buf = b._lazy ? NOBUF : b.buf; TW = CW; }
 // the screen in cells changed: new buffers and a new sky (the game calls it from 17-frame.js)
 function resizeSky(cw, ch, keep) {
   const oS = S;
   W = Math.max(96, cw); H = Math.max(60, ch); CW = W + 2;
   S = Math.min(W / 400, HS / 230) * (P.cloudk ?? 1);   // (the clouds' size: the lab's, times CLOUD SIZE - by HS, the lab's screen height
   // in the game's sky, so a cloud is as big against the sky between the horizon and the top as it was in the lab)
-  bg = makeBuf(CW, H);
-  for (const L of LAYERS) { Object.assign(L, makeBuf(CW, H)); L.off = L.off || 0; L.by0 = 0; L.by1 = H - 1; }
+  bg = lazyBuf(CW, H);
+  for (const L of LAYERS) { L.off = L.off || 0; L.by0 = 0; L.by1 = H - 1; }   // (their own buffers gone: each view's decks are GPU layers - viewBufs)
   deckBases();
   // (Oct 29, user: "Why are clouds zooming in and out when I zoom in and out??" - the sky pixel follows the zoom (4 at x1, 3 at
   // x2/3), and a new sky pixel made a new screen in cells: the scene was built again, other clouds in other places, at every
@@ -25096,7 +25246,7 @@ function skyScreen(bw, bh) {
 // pristine copy of it (bg0) - its rows alone are uploaded each frame
 function viewBufs(vi, w) {
   const b = VB[vi], cw = w + 2;
-  if (b.cw !== cw || b.h !== H0) { b.cw = cw; b.h = H0; b.bg = makeBuf(cw, H0); b.bg0 = null; b.bgKey = ''; b.veil1 = makeBuf(cw, H0); b.veil1.by0 = 0; b.veil1.by1 = H0 - 1; b.lay = {}; for (const L of LAYERS) { b.lay[L.name] = makeBuf(cw, H0); b.lay[L.name].by0 = 0; b.lay[L.name].by1 = H0 - 1; } }
+  if (b.cw !== cw || b.h !== H0) { b.cw = cw; b.h = H0; b.bg = makeBuf(cw, H0); b.bg0 = null; b.bgKey = ''; b.veil1 = lazyBuf(cw, H0); b.veil1.by0 = 0; b.veil1.by1 = H0 - 1; b.lay = {}; for (const L of LAYERS) { b.lay[L.name] = lazyBuf(cw, H0); b.lay[L.name].by0 = 0; b.lay[L.name].by1 = H0 - 1; } }
   return b;
 }
 function deckTargetAt(LB, w, h) {
@@ -29449,6 +29599,7 @@ function softGlow(cx, cy, R, col, a, rings = 6) {
 // and drawn with one call at the wanted strength (it was up to ~250 rectangles per glow, every frame).
 // In additive mode the strength scales the light linearly, so the result is the same as stepped discs drawn over each other.
 const discCache = new Map();
+function discGone(c) { if (discCache.get(c._dk) === c) discCache.delete(c._dk); }
 function glowDisc(cx, cy, R, col, a) {
   if (a < 0.004) return;
   // (a big glow's size in steps of four blocks: a flash growing every frame no longer makes a new picture every
@@ -29467,9 +29618,10 @@ function glowDisc(cx, cy, R, col, a) {
       g.fillStyle = rgbs(col, k === 3 ? 0.35 : k === 2 ? 0.35 : 0.45);
       for (let j = -r; j < r; j += PB) { const w = Math.floor(Math.sqrt(r * r - (j + PB / 2) * (j + PB / 2)) / PB) * PB; g.fillRect(mid - w, mid + j, w * 2, PB); }
     }
-    if (discCache.size > 400) { const k0 = discCache.keys().next().value, c0 = discCache.get(k0); discCache.delete(k0); glFreeSrc(c0); c0.width = c0.height = 0; }
-    discCache.set(key, c);
+    discCache.set(key, c); c._dk = key;
+    picKeep(c, 'light discs', discGone);               // (in the page's picture memory - 04-zzz-pics.js; was the last 400 kept)
   }
+  picUse(c);
   const ga = C.globalAlpha;
   C.globalAlpha = ga * Math.min(1, a);
   C.drawImage(c, Math.floor(cx / PB) * PB - r3 - PB, Math.floor(cy / PB) * PB - r3 - PB);
@@ -30833,7 +30985,7 @@ const GRAIN_L = pxLayer({
 function rusted(src, level) {
   if (!level) return src;
   const cache = src._rust || (src._rust = []);
-  if (cache[level]) return cache[level];
+  if (cache[level]) return picUse(cache[level]);
   const c = copyCanvas(src), x = c.getContext('2d');
   const id = x.getImageData(0, 0, c.width, c.height), d = id.data, t = level / 4;
   for (let i = 0; i < d.length; i += 4) {
@@ -30843,7 +30995,7 @@ function rusted(src, level) {
     d[i] = d[i] + (l * 0.8 * n + 52 - d[i]) * t; d[i + 1] = d[i + 1] + (l * 0.55 * n + 18 - d[i + 1]) * t; d[i + 2] = d[i + 2] + (l * 0.5 * n + 14 - d[i + 2]) * t;
   }
   x.putImageData(id, 0, 0);
-  cache[level] = c;
+  cache[level] = c; picKeep(c, 'rust', () => { if (cache[level] === c) cache[level] = null; }, null, true);   // (in the page's picture memory - 04-zzz-pics.js)
   return c;
 }
 const SEA_FOG = [18, 62, 146];
@@ -31526,8 +31678,7 @@ const blobArt = { key: '', map: new Map() };
 // (the light changing through a sunset) is then just a fill. The coloured pictures are kept within a pixel budget,
 // oldest dropped first (their textures with them), rather than all thrown away whenever the light steps.
 const blobMask = new Map();
-let blobPx = 0;
-const BLOB_PX = 4e6;                       // (about 16 MB of coloured blobs at most)
+function blobGone(c) { if (blobArt.map.get(c._bk) === c) blobArt.map.delete(c._bk); }
 function blobShape(R, seed) {
   const k = R + '|' + seed;
   let m = blobMask.get(k);
@@ -31545,18 +31696,14 @@ function blobShape(R, seed) {
 function blobSprite(R, seed, col) {
   const k = R + '|' + seed + '|' + col;
   let c = blobArt.map.get(k);
-  if (c) { if (c._t !== renderTick) { c._t = renderTick; blobArt.map.delete(k); blobArt.map.set(k, c); } return c; }   // (used: to the back of the line)
+  if (c) return picUse(c);
   const N = 2 * R + 1, rgb = col.split(',').map(Number), m = blobShape(R, seed);
   c = makeCanvas(N, N);
   const x = c.getContext('2d'), id = x.createImageData(N, N), d = id.data;
   for (let i = 0; i < m.length; i++) if (m[i]) { const o = i * 4; d[o] = rgb[0]; d[o + 1] = rgb[1]; d[o + 2] = rgb[2]; d[o + 3] = 255; }
   x.putImageData(id, 0, 0);
-  blobArt.map.set(k, c); blobPx += N * N; c._t = renderTick;
-  if (blobPx > BLOB_PX || blobArt.map.size > 6000) {
-    // drop the oldest tenth (never one asked for this frame: they were all made or looked up before this one)
-    let n = Math.ceil(blobArt.map.size / 10);
-    for (const [k2, c2] of blobArt.map) { if (k2 === k || c2._t === renderTick) continue; blobArt.map.delete(k2); blobPx -= c2.width * c2.height; glFreeSrc(c2); c2.width = c2.height = 0; if (--n <= 0) break; }
-  }
+  blobArt.map.set(k, c); c._bk = k;
+  picKeep(c, 'smoke puffs', blobGone);                 // (in the page's picture memory - 04-zzz-pics.js; was its own 16 MB / 6000 cap)
   return c;
 }
 // Puffs are drawn into a small layer at the smoke's own pixel size (one layer pixel = one smoke pixel,
@@ -41376,8 +41523,10 @@ function islRootPiece(R, i, j) {
   tropLay(g, T.uw, R.c0 + q0, R.r0 + r0 - islRowY0(), cv.width, cv.height);
   g.globalCompositeOperation = 'multiply'; g.drawImage(mk, 0, 0, cv.width, cv.height);
   g.globalCompositeOperation = 'destination-in'; g.drawImage(mk, 0, 0, cv.width, cv.height);
-  cv.__v = 1;
-  return (R.pc[key] = { cv, q0, r0, w, h, seen: renderTick });
+  cv.__v = 1; mk.width = mk.height = 0;
+  const pc = R.pc[key] = { cv, q0, r0, w, h };
+  picKeep(cv, 'ground', () => { if (R.pc[key] === pc) delete R.pc[key]; });   // (in the page's picture memory - 04-zzz-pics.js: out of sight a while, let go and made again when seen)
+  return pc;
 }
 let islPieceBudget = 0;
 // each side of the root, down from just under the water: an outcrop every ISL_UW_GAP metres, its wall set into the rock and its
@@ -41406,12 +41555,11 @@ function drawIslRootDetail(R, x0, x1, tint) {
     const j0 = Math.max(0, Math.floor((yT - R.r0) / ISL_PC)), j1 = Math.min(Math.ceil(R.H / ISL_PC) - 1, Math.floor((yB - R.r0) / ISL_PC));
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
       const P = islRootPiece(R, i, j); if (!P) continue;
-      P.seen = renderTick;
+      picUse(P.cv);
       const X0 = Math.round(PX((R.c0 + P.q0) * LT_CELL)), X1 = Math.round(PX((R.c0 + P.q0 + P.w) * LT_CELL)), Y0 = Math.round(PY((R.r0 + P.r0) * LT_CELL)), Y1 = Math.round(PY((R.r0 + P.r0 + P.h) * LT_CELL));
       C.drawImage(tint(P.cv, 1), X0, Y0, X1 - X0, Y1 - Y0);
     }
   }
-  if (renderTick % 300 === 0) for (const k in R.pc) { const P = R.pc[k]; if (P && renderTick - P.seen > 900) { glFreeSrc(P.cv); delete R.pc[k]; } }   // (out of sight a while: let go - made again when seen)
   if (!R.edges || edTiny(2 * UPM)) return;
   for (const E_ of R.edges) {
     const P = islEdgePic(E_.n, E_.dir); if (!P) continue;
@@ -49239,7 +49387,7 @@ function landSlices(x0, x1) {
    consumed: once a frame, before any drawing (render), for the slices each view will show - the land's pass's (landSlices,
    when the view holds land: landSpansIn) and the islands' (islSlices, the sea's pass and the land's). Here too what paints them
    all again (the meadow's, STONE COLOURS' and UNDERGROUND LIGHT's sliders, the TROPICAL rock's picture come), the slices
-   seen, and the far ones let go (landEvict). The drawing only places the canvases. */
+   seen (landKeep: the page's picture memory lets the far ones go). The drawing only places the canvases. */
 function landPaintStep(views) {
   if (!land.cell) return;
   const n = land.dirty.length;
@@ -49255,10 +49403,10 @@ function landPaintStep(views) {
     const list = landSpansIn(x0, x1).length ? landSlices(x0, x1) : [], isl = islSlices(x0, x1);
     ahead.push([x0, x1]);
     // (user Nov 1 20:12, editor speed: nothing thrown away while the GAME EDITOR is open - panned back to, it was all painted again)
-    if (WORLD_W > WORLD_W_EMPTY) { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; for (const k of isl) S_[k] = renderTick; if (renderTick % 300 === 0 && !EDMODE.on) landEvict(); }   // (a world bigger than the old 22 screens: far slices' pictures let go)
+    { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; for (const k of isl) S_[k] = renderTick; }
     for (const [k] of list) if (!land.back[k]) paintLandBack(k);
-    for (const k of isl) paint(k);
-    for (const [k] of list) paint(k);
+    for (const k of isl) { paint(k); landKeep(k); }
+    for (const [k] of list) { paint(k); landKeep(k); }
   }
   // (user Nov 1 20:12, editor speed: panning to the sides zoomed out froze 56-154 ms each time new land came into view - every
   // slice painted on the frame it first showed) a frame that painted nothing paints the one slice nearest outside the view, up
@@ -49270,13 +49418,31 @@ function landPaintStep(views) {
   for (const [x0, x1] of ahead) {
     const W = x1 - x0, a = all ? -1e9 : x0 - W, b = all ? 1e9 : x1 + W;
     const S_ = land.seen;                                // (what's just outside the view counts as seen: not let go and painted again)
-    for (const k of islSlices(a, b)) if (S_) S_[k] = renderTick;
-    if (S_ && landSpansIn(a, b).length) for (const [k] of landSlices(a, b)) S_[k] = renderTick;
+    for (const k of islSlices(a, b)) { if (S_) S_[k] = renderTick; landKeep(k); }
+    if (S_ && landSpansIn(a, b).length) for (const [k] of landSlices(a, b)) { S_[k] = renderTick; landKeep(k); }
     for (const k of islSlices(a, b)) if (need(k)) { const xm = (k + 0.5) * LT_CHUNK * LT_CELL, d = xm < x0 ? x0 - xm : xm > x1 ? xm - x1 : 0; if (d < bd) { bd = d; best = k; } }
     if (!landSpansIn(a, b).length) continue;
     for (const [k, xl] of landSlices(a, b)) if (need(k)) { const xm = xl + LT_CHUNK * LT_CELL / 2, d = xm < x0 ? x0 - xm : xm > x1 ? xm - x1 : 0; if (d < bd) { bd = d; best = k; } }
   }
-  if (best >= 0 && !painted) { paintLandChunk(best); land.dirty[best] = 0; if (land.seen) land.seen[best] = renderTick; }
+  if (best >= 0 && !painted) { paintLandChunk(best); land.dirty[best] = 0; if (land.seen) land.seen[best] = renderTick; landKeep(best); }
+}
+/* a slice's pictures - its ground, the field behind, the islands' - with their smooth edges and sun rims, in the page's picture
+   memory (04-zzz-pics.js) as one group: used while it's in or just beside a view (the GAME EDITOR: the whole world), let go when
+   out of sight a while or the page is over its budget, painted again when next in view (was landEvict's own 1800 frames) */
+function landKeep(k) {
+  const G = land.sg || (land.sg = []), g = G[k] || (G[k] = { k });
+  for (const A of [land.chunks, land.back, land.ichunks]) {
+    const cv = A && A[k]; if (!cv) continue;
+    for (const c of [cv, cv._gedgeCv, ...(cv._rimCv || [])]) if (c && c.width && !PICS.live.has(c)) { c._lk = k; picKeep(c, 'ground', landGone, g); }
+  }
+  picUse(g);
+}
+function landGone(c) {
+  const k = c._lk; if (k == null) return;
+  const mine = cv => cv && (cv === c || cv._gedgeCv === c || (cv._rimCv || []).includes(c));
+  if (![land.chunks, land.back, land.ichunks].some(A => A && mine(A[k]))) return;   // (a slice painted since: not this one's any more)
+  for (const A of [land.chunks, land.back, land.ichunks]) if (A && A[k]) { glFreeSrc(A[k]); A[k] = null; }   // (the group's other pictures, as old, go in the same sweep)
+  land.dirty[k] = 1;
 }
 function drawLandGround(x0, x1, onField) {
   if (!land.cell) return;
@@ -58123,7 +58289,7 @@ function dmgPic(P, f, o) {
   const B = (o && o.B) || (P._name && TROP[P._name + '-dmg'] && tropPic(P._name + '-dmg')) || null;
   const q = prof.map(v => v >= 1 ? DMG_STEPS : v > 0 ? Math.max(1, Math.min(DMG_STEPS - 1, Math.round(v * DMG_STEPS))) : 0);
   const cuts = (o && o.cuts) || null, key = q.join('') + (B ? 'b' : '') + (cuts ? cuts.join() : '') + (marks ? '|' + marks.length + ':' + marks[0][3] + ':' + marks[marks.length - 1][3] + ':' + ax + ':' + ay : '');
-  const memo = P._dmg || (P._dmg = new Map()); { const hit = memo.get(key); if (hit) return hit; }
+  const memo = P._dmg || (P._dmg = new Map()); { const hit = memo.get(key); if (hit) return picUse(hit); }
   const W = P.width, H = P.height, cut = k => Math.round((cuts ? cuts[k] : k / n) * W);
   const out = makeCanvas(W, H), x = out.getContext('2d'); x.imageSmoothingEnabled = false;
   x.drawImage(P, 0, 0);
@@ -58152,8 +58318,10 @@ function dmgPic(P, f, o) {
   x.putImageData(im, 0, 0);
   out._m = P._m; out._door = P._door; out._chim = P._chim; out._flag = P._flag;
   if (P._hi && P._hi.c) { const n = P._hi.n || 1, Bh = B && B._hi && B._hi.c; out._hi = { c: dmgPic(P._hi.c, f, { B: Bh || undefined, cuts, m: ((o && o.m) || P._m || 0.02) / n, marks, ax, ay }), n }; }   // (its big-art drawing charred alike)
-  if (memo.size >= 16) memo.delete(memo.keys().next().value);
-  memo.set(key, out); return out;
+  // (in the page's picture memory - 04-zzz-pics.js, was the last 16 per picture: drawn longest ago, let go and painted again when
+  // next shown; soft - a scaled copy or a wreck may still hold it)
+  memo.set(key, out); picKeep(out, 'damage', () => { if (memo.get(key) === out) memo.delete(key); }, null, true);
+  return out;
 }
 // a picture's blotches (made once): two octaves of a smooth coarse noise, about half a metre across - ragged-edged patches
 function dmgBlots(P, m) {
@@ -64451,7 +64619,7 @@ function frameBody(now) {
   buildBudget = 4;
   // (user Oct 31) no world yet, or one on its way: only the menu runs - its controllers, its clock (the blinking PRESS TO
   // JOIN), its picture over black, the volume; nothing of a world is stepped, sent online or drawn
-  if (!worldLive()) { pollPads(dt); time += dt; render(); audioUpdate(dt); return; }
+  if (!worldLive()) { pollPads(dt); time += dt; render(); picTrim(); audioUpdate(dt); return; }
   netStep(); linkPump(dt);
   // (also holds still behind the 'turn the iPad' notice; and, user Oct 25 late, while the sliders are open or the eye
   // is shut - photo mode, 18-zz-photo)
@@ -64488,7 +64656,7 @@ function frameBody(now) {
   const q1 = performance.now();
   // (the simulation worker never draws or plays: 00-sw-boot.js. A frame not drawn still works out the light and the wind from
   // the weather, E - render() does it first thing, and the game's next steps read it: a ship's drift, the waves - Oct 30 gate)
-  if (!SIM_ONLY && !NO_DRAW && !SW_IN_WORKER) render(); else computeEnv();
+  if (!SIM_ONLY && !NO_DRAW && !SW_IN_WORKER) { render(); picTrim(); } else computeEnv();   // (picTrim: the kept pictures within the device's budget - 04-zzz-pics.js)
   const q2 = performance.now();
   if (!SIM_ONLY && !SW_IN_WORKER) audioUpdate(dt);
   const q3 = performance.now(), PQ = perf.parts || (perf.parts = {});
@@ -64688,7 +64856,7 @@ async function start(data) {
   // (Nov 1) a column table's row as a plain object, for the console: __game.row('smoke', 0) - 04-zz-coltable.js
   // (tests: Story's save and LOAD without the slots - the game's text kept by the tool, the vehicles and where you are - 50-story-saves.js)
   Object.assign(window.__game, { storyT: { start: () => { storySlot = null; menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false; }, save: async () => { await swHold('storyT'); const G = JSON.stringify(edGameSave()); swRelease('storyT'); return G; }, load: G => new Promise(r => { storySlot = null; storyLoading = true; storyPutBack(G, r); }), hold: () => swHold('storyT'), release: () => swRelease('storyT'), vehs: () => storyVehs(), crew: () => ({ mode: crew[0].mode, civ: crew[0].civ ? crew[0].civ.sid : null, at: story.at, main: story.main }), board: sid => storyBoard(0, sid), go: id => storyGo(0, id, true), strs: () => strsUsed().map(o => ({ id: o.id, k: o.k, x: Math.round(o.x), use: strUse(o), own: o.own, home: o.home })) } });
-  Object.assign(window.__game, { bugLoad: R => bugLoad(R), bugBack: () => bugBack(), bugState: () => bugState(), screenLost: why => screenLost(why || 'test') });   // (REPORT BUG's report put back in this browser, and this browser's own keys back after - 50-zzzz-bug.js)
+  Object.assign(window.__game, { bugLoad: R => bugLoad(R), bugBack: () => bugBack(), bugState: () => bugState(), screenLost: why => screenLost(why || 'test'), pics: () => picReport(), picBudget: b => { if (b > 0) PICS.budget = b; return PICS.budget; } });   // (REPORT BUG's report put back in this browser, and this browser's own keys back after - 50-zzzz-bug.js)
   Object.assign(window.__game, { row: (name, i) => { const t = TABLES[name]; return t && t.cols ? t.cols.plain(i) : t ? t.list()[i] : undefined; } });   // (a burning ship in front of her fire and smoke - 47-render-overlays.js shipCut)
   // (engine migration, the end checks: the perf panel's numbers for a measuring script - tools/bench-live.js)
   Object.assign(window.__game, { wp: { WP_KINDS, art: pl => wpArt(pl), frame: (A, s, i, m, nb) => wpFrame(A, s, i, m, nb), pose: (pl, A) => wpPose(pl, A), K: () => ({ UPM, FLY_ROLL_T, PLANE_TURN_T, SC: PLANE_SC() }), mark: (o, x, y, w) => dmgMark(o, x, y, w), dmgPic: (P, f, o) => dmgPic(P, f, o), sea: c => seaplaneArt(c), jet: t => sheetArt({ kind: "jet", owner: t }), jetPose: f => rlPose(f), ces: c => sheetArt({ kind: 'cessna', col: c }) },   // (the warplanes' frames and poses for a look at them - 29-zzz-warplanes.js)
