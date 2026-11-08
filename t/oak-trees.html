@@ -449,6 +449,7 @@ function swHostLoop() {
     if (SWH.done + SWH_PAIR <= want) { SWH.behind += want - SWH.done; SWH.t0 += (want - SWH.done) * ms; }   // (a step short of a frame waits for its pair)   // (fallen behind: slower, never different)
     if (n && SWH.credit) { SWH.credit = 0; SWH.sent++; const S = swSnapshot(); postMessage({ t: 'snap', s: S, ev: SWH.ev.splice(0), tickMs: SWH.tickMs, behind: SWH.behind, done: SWH.done }, S.bufs); }
   }
+  if (typeof landBgBuild === 'function') landBgBuild(2, [cam.view[0].l + halfWorldW(cam.view[0].z) / 2]);   // (Nov 8, the world in pieces: the rest of the ground made between steps, nearest the view first - 50-land-terrain.js)
   SWH.timer = setTimeout(swHostLoop, Math.max(0, SWH.t0 + (SWH.done + SWH_PAIR) * ms - performance.now()));
 }
 // (the page's menus: some of the game's steps look at them - a held trigger, the weather's clock under the settings)
@@ -980,7 +981,7 @@ const VTUNE_DEF = {
   air: { top: 200, gust: 1 },
   // (user Nov 3 20:04, the Vegetation Lab: "we could set the leaf property and the trunk property") the trees' bones (50-land-zz-rig.js):
   // the leaves' weight, stiffness, flutter and burn time (s), the trunk's stiffness, sway and burn time to all black (s), each tree's frond sizes
-  tree: { flat: 1, lodMid: 160, lodFar: 25, lit: 1, light: 1, tint: 0.14, shade: 1, px: 0.8, deckRaise: 2, haze1: 0, haze2: 0, haze3: 0 },   // (deckRaise: each deck's foot that much higher than the one in front, world units - user Nov 7)   // (px: the plants' pixel, world units - user Nov 4 11:41)
+  tree: { flat: 1, lodMid: 160, lodFar: 25, lit: 1, light: 1, tint: 0.14, shade: 1, px: 0.8, deckRaise: 2, haze1: 0, haze2: 0, haze3: 0, pBands: 5, pNoise: 0.55, pFeat: 7, pGrain: 1, pShadow: 0.55, pReach: 0.5 },   // (p*: the painted light - 50-land-zz-rig.js PAINTED, user Nov 8)   // (deckRaise: each deck's foot that much higher than the one in front, world units - user Nov 7)   // (px: the plants' pixel, world units - user Nov 4 11:41)
   ground: { str: 1.5, veh: 2.5 },   // (user Nov 3 23:02: structures a bit into the ground as it's drawn, the cars a little more - "so it feels its on the road surface"; world units)   // (the look shared by every plant with bones: FLAT COLOURS, LOD, LIT FACES, LIGHT, TINT VARIETY - 50-land-zz-rig.js)
   // (user Nov 3 21:28: "tabs per vegetation. Palm tree, bushes ... bush one, bush two, palm tree") each kind's own: its leaves' weight,
   // stiffness, flutter and burn time (s), each leaf's size and each plant's size (MIN / MAX), the trunk's stiffness, sway and burn time (s)
@@ -2095,11 +2096,23 @@ const picW = c => c.width, picH = c => c.height;
 function picUnpack(c) {
   const P = picPackForget(c); if (!P) return;
   c.width = P.w; c.height = P.h;
+  if (P.make) { P.make(c); picKeep(c, P.store, 'pack', P.grp); return; }   // (a picture made the first time it's used - picLater)
   const id = new ImageData(P.w, P.h);
   if (P.idx) { const d = new Uint32Array(id.data.buffer), pal = P.pal, ix = P.idx; for (let i = 0; i < ix.length; i++) d[i] = pal[ix[i]]; }
   else id.data.set(P.raw);
   c.getContext('2d').putImageData(id, 0, 0);
   picKeep(c, P.store, 'pack', P.grp);
+}
+/* (Nov 8, the world built in pieces - user: "fix the engine to fit what the game actually is") a picture made the first time anything draws
+   it, draws into it or reads it - not when it's asked for: w x h, its store, make(c) painting it into the canvas c (sized). Until then it
+   reads as its size and holds nothing (as a packed one); once made it's a 'pack' picture like any other. Where nothing is wrapped (the
+   simulation worker) it's made at once */
+function picLater(w, h, store, make) {
+  const c = makeCanvas(Math.max(1, w), Math.max(1, h));
+  if (typeof HTMLCanvasElement === 'undefined' || !(c instanceof HTMLCanvasElement) || (typeof SW_IN_WORKER !== 'undefined' && SW_IN_WORKER)) { make(c); return c; }
+  c.width = c.height = 0;
+  c._pk = { w: Math.max(1, w), h: Math.max(1, h), store, grp: null, make, b: 0 }; PICS.packN++;
+  return c;
 }
 // let go by its own store (resized, replaced): no longer counted as kept
 function picForget(c) {
@@ -3609,13 +3622,15 @@ function floorCurve(P, m, u) {
 let floorTab = null, floorTabS = null, floorDeep = [0, 0];
 const SEA_FLOOR_MAX0 = SEABED_Y + 3 * (SEABED_Y - WATER_Y) + 1650;
 let SEA_FLOOR_MAX = SEA_FLOOR_MAX0;                          // the deepest anywhere (OPEN WORLD: the drawing's pit)
+let floorSig = null;
 function floorRebuild() {
   pierFloorsChanged();                                        // (the piers' pillars reach down to it: drawn again - the dock chat; every dock's - 50-zz-structh)
   floorTab = floorTabS = null; SEA_FLOOR_MAX = SEA_FLOOR_MAX0; setTrench(0, 0);
   // (the dock chat, Oct 29 - user: "SEA, FOREST, DESERT would be a single unified spline": the floor is the one ground line's
   // stretch under the sea, GROUND - 50-land-zz-ground.js)
   groundPrep();
-  FLOOR_MARKED = GSH.marked; floorSkinStrips = null; FLOOR_HILLY = GSH.hilly;
+  FLOOR_MARKED = GSH.marked; FLOOR_HILLY = GSH.hilly;
+  { const sg = typeof landSig === 'function' ? landSig() : Math.random(); if (sg !== floorSig) floorSkinStrips = null; floorSig = sg; }   // (Nov 8: the same world built again keeps the floor's painted pieces - landSig)
   // (no-countries plan step 5, Nov 1: the floor per sea - each SEAS row its own ends, table, deep and deepest point;
   // BED_A / BED_B stay the docks' sea's ends, TR_A / TR_B, floorTab / floorTabS and floorDeep the deepest sea's)
   seaBeds();
@@ -4999,8 +5014,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 831;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 10:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 833;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 08 10:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -30369,6 +30384,12 @@ function paintRock(W, H, top, rnd1, tone = 0, water = null, bold = false, pal = 
   if (img) cx2.putImageData(img, 0, 0);
   return c;
 }
+// (Nov 8, the world built in pieces) a rock's picture made the first time it's drawn (picLater): its own random numbers from one draw of
+// the build's (so the build's draws after it are the same whether or not it's ever painted); after(c): what the build did to it once painted
+function rockLater(W, H, top, R, tone, water, bold, pal, after) {
+  const seed = Math.floor(R() * 2147483646) + 1;
+  return picLater(W, H, 'sea floor', c => { const g = c.getContext('2d'); g.drawImage(paintRock(W, H, top, seededRng(seed), tone, water, bold, pal), 0, 0); if (after) after(g); });
+}
 // a tuft of weed growing on a rock: a few wavy green-brown blades
 const WEED_COLS = [[64, 132, 72], [92, 140, 60], [120, 112, 52], [58, 112, 96]];
 function paintWeed(rnd1) {
@@ -30443,14 +30464,13 @@ function buildReef() {
     const W = Math.round(wU / REEF_K), H = Math.round(hU / REEF_K) + 50, top = rockProfile(W, H - 50, kind, R);
     const full = top;                                                       // (its bottom 50 px: down in the sand)
     // (brown-grey, a little darker and bluer the deeper; drawn over the water's tint, so it stands out)
-    const sp = paintRock(W, H, full, R, 0, null, true, RK_SOLID);
     let base = -Infinity; for (let c = 0; c < W; c += 4) base = Math.max(base, sandY(x - wU / 2 + c * REEF_K));
     const baseY = base + 4, y0 = baseY - (H - 50) * REEF_K, topW = new Float32Array(W);
     if (y0 < WATER_Y + 20) continue;                                        // (by an island: none standing out of the water)
     for (let c = 0; c < W; c++) topW[c] = y0 + full[c] * REEF_K;
     // its foot cut away below the sand line (it's drawn after the sand now, so the sand can't hide it)
-    { const g = sp.getContext('2d'); for (let c = 0; c < W; c++) { const r = Math.ceil((sandY(x - wU / 2 + c * REEF_K) + 3 - y0) / REEF_K); if (r < H) g.clearRect(c, Math.max(0, r), 1, H - r); } }
-    rockForms.push({ x0: x - wU / 2, x1: x - wU / 2 + W * REEF_K, y0, sp: picKeep(sp, 'sea floor', 'pack'), topW });   // (painted once from the build's draws: out of sight a while, packed into ordinary memory - 04-zzz-pics.js; picUse before it's read)
+    const x0r = x - wU / 2, sp = rockLater(W, H, full, R, 0, null, true, RK_SOLID, g => { for (let c = 0; c < W; c++) { const r = Math.ceil((sandY(x0r + c * REEF_K) + 3 - y0) / REEF_K); if (r < H) g.clearRect(c, Math.max(0, r), 1, H - r); } });
+    rockForms.push({ x0: x - wU / 2, x1: x - wU / 2 + W * REEF_K, y0, sp, topW });   // (painted once from the build's draws: out of sight a while, packed into ordinary memory - 04-zzz-pics.js; picUse before it's read)
   }
   rockForms.sort((a, b) => a.x0 - b.x0);
   // by the coast: boulders, big near the shore and smaller further out; those under the pier stand in front of
@@ -30462,7 +30482,7 @@ function buildReef() {
     if (docks.some(q => (x - q.root) * q.dir > -8 && (x - q.L) * q.dir < HGR_INLAND + 8)) continue;   // (none under the quay or a hangar, to its land end - the dock chat)
     const big = clamp(1 - d / 750, 0.15, 1), wU = (30 + R() * 90) * (0.35 + 1.4 * big), hU = wU * (0.45 + R() * 0.4);
     const W = Math.max(6, Math.round(wU / REEF_K)), H = Math.max(5, Math.round(hU / REEF_K)), top = rockProfile(W, H, 'mound', R);
-    const it = { kind: 'rock', x, w: W * REEF_K, h: H * REEF_K, sp: picKeep(paintRock(W, H + 2, top, R), 'sea floor', 'pack'), sink: 2 + R() * 4, top };   // (packed out of sight - 04-zzz-pics.js)
+    const it = { kind: 'rock', x, w: W * REEF_K, h: H * REEF_K, sp: rockLater(W, H + 2, top, R), sink: 2 + R() * 4, top };   // (packed out of sight - 04-zzz-pics.js)
     // (Oct 25, user: the rocks by the harbours have corals and weed growing on them too)
     if (W > 8 && R() < 0.9) {
       it.deco = [];
@@ -41875,9 +41895,10 @@ const solTopC = c => land.stop && c >= 0 && c < land.cols ? land.stop[c] : Infin
 // down to its foot, a cell a pixel as the land - its earth, then rock, darker the deeper (the water's tint over it as over
 // the floor). Painted once per build (islRootsBuild), drawn in the middle plane under the ground out of the water
 let islRoots = [], solRoots = [];
-function islRootsBuild(R = land.R) {
-  for (const O of islRoots.concat(solRoots)) for (const k in O.pc || {}) if (O.pc[k]) glFreeSrc(O.pc[k].cv);   // (the close-up pieces of the roots before - islRootPiece)
-  islRoots = []; solRoots = [];
+function islRootsBuild(R = land.R, keep) {
+  if (keep && islRoots.sig === land.wsig && solRoots.sig === land.wsig) { pierFloorsChanged(); return; }   // (Nov 8: the same world built again - its bodies' pictures still right, landSig)
+  for (const O of islRoots.concat(solRoots)) { for (const k in O.pc || {}) if (O.pc[k]) glFreeSrc(O.pc[k].cv); if (O.cv) glFreeSrc(O.cv); }   // (the close-up pieces of the roots before - islRootPiece)
+  islRoots = []; solRoots = []; islRoots.sig = solRoots.sig = land.wsig;
   pierFloorsChanged();                                         // (the docks' pillars stand on the islands too: drawn again - 50-zz-structh)
   islandsUsed().forEach((I, n) => {
     const S = SHP.cols[n]; if (!S || S.k === 'H') return;
@@ -41898,6 +41919,10 @@ function islRootsBuild(R = land.R) {
     if (!(yB > yA)) return;
     const r0 = Math.floor(yA / LT_CELL), H = Math.ceil(yB / LT_CELL) - r0 + 1;
     if (W * H > 4e6) return;                                     // (a giant one: not drawn under the water)
+    // (Nov 8, the world built in pieces: the picture made the first time the root is drawn (R.paint) - not in the build; its size and
+    // place are known now)
+    const RT = { x0: c0 * LT_CELL, y0: r0 * LT_CELL, cv: null, my: Math.min(yB, WATER_Y + 400), c0, r0, W, H, mk: null, pc: {}, solid };
+    RT.paint = () => {
     const cv = makeCanvas(W, H), g = cv.getContext('2d'), id = g.createImageData(W, H), d = id.data;
     let mk = null;
     const bTop = new Float32Array(W).fill(-Infinity), bBot = new Float32Array(W).fill(Infinity);   // (HIDE INTERIOR: where a column's body meets ground, not water - ugFadeRoot)
@@ -41927,8 +41952,9 @@ function islRootsBuild(R = land.R) {
     }
     if (shpUG(I) === true) ugFadeRoot(d, mk, W, H, c0, r0, bTop, bBot);   // (HIDE INTERIOR on: dark inside, as the ground - user Nov 5)
     g.putImageData(id, 0, 0);
-    const RT = { x0: c0 * LT_CELL, y0: r0 * LT_CELL, cv, my: Math.min(yB, WATER_Y + 400), c0, r0, W, H, mk, pc: {}, solid };
+    RT.cv = cv; RT.mk = mk; RT.paint = null;
     if (mk) RT.edges = islRootEdges(mk, W, H, c0, r0, I);
+    };
     (solid ? solRoots : islRoots).push(RT);
   });
 }
@@ -42047,8 +42073,9 @@ function drawSolidRoots(x0, x1) {
   if (!solRoots.length) return;
   const ga = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
   for (const R of solRoots) {
-    const w = R.cv.width * LT_CELL; if (R.x0 + w < x0 || R.x0 > x1) continue;
-    const X0 = Math.round(PX(R.x0)), X1 = Math.round(PX(R.x0 + w)), Y0 = Math.round(PY(R.y0)), Y1 = Math.round(PY(R.y0 + R.cv.height * LT_CELL));
+    const w = R.W * LT_CELL; if (R.x0 + w < x0 || R.x0 > x1) continue;
+    if (!R.cv) R.paint();                                    // (made the first time it's seen - islRootsBuild)
+    const X0 = Math.round(PX(R.x0)), X1 = Math.round(PX(R.x0 + w)), Y0 = Math.round(PY(R.y0)), Y1 = Math.round(PY(R.y0 + R.H * LT_CELL));
     C.drawImage(R.cv, X0, Y0, X1 - X0, Y1 - Y0);
     drawIslRootDetail(R, x0, x1, cv => cv);                 // (its own pixels close up and its outcrops, as an island's - untinted: in front of the water)
   }
@@ -42173,39 +42200,37 @@ const islSegEndRow = c => Math.min(Math.ceil((WATER_Y + 2 - LT_Y0) / LT_CELL), l
 // a segment's look at x: the desert's, the tropical's
 const islDesert = x => { const k = islSkinC(ltCol(x)); return k ? k === 2 : lookD(x); };
 const islTropAt = x => { const k = islSkinC(ltCol(x)); return k ? k === 4 : landTrop(x); };
-// (buildLand, after buildStones) the stones of the segments in a country - in their own earth, never crossing into the
-// ground in front ("You can never slice a rock"): boulders half sunk in their tops (some standing half out), the earth
-// packed with stones; none in the desert's dry earth. Their own seed: nothing else moves
-function islandStones() {
-  if (!land.iskin || !land.islRuns || !land.islRuns.length) return;
-  const Rs = seededRng(5311), SS = NET.role === 'local' ? bgP('bgss', 1) : 1, SV2 = NET.role === 'local' ? bgP('bgsv', 1) : 1;
-  const bot = c => islSegEndRow(c) * LT_CELL + LT_Y0;
-  const own = (x, y, rx, ry) => { for (const u of [-1, -0.5, 0, 0.5, 1]) { const xx = x + u * rx, c = ltCol(xx); if (c < 0 || c >= land.cols || ISLE[c] !== 2 || seaAtX(xx) || y + ry + 3 > bot(c)) return false; } return true; };
-  const rocky = c => islSkinC(c) !== 2 && islSkinC(c) !== 4 && !(islSkinC(c) === 0 && (lookD(c * LT_CELL) || land.trop[c]));   // (TROPICAL: its own rock - 50-land-trop)
-  for (const [a, b] of land.islRuns) {
-    if (seaAtX((a + b) / 2)) continue;                    // (out at sea: the ground's own packing has them)
-    for (let x = a + 40 + Rs() * 60; x < b - 40; x += 140 + Rs() * 180) {
-      const keep = Rs(), n = Rs() < 0.5 ? 1 : 2 + Math.floor(Rs() * 2);
-      if (keep < 0.2 || !rocky(ltCol(x))) continue;
-      for (let k = 0; k < n; k++) {
-        const rx = (8 + Rs() * 9) * (k ? 0.75 : 1) * boulderScale(Rs) * SS, ry = rx * (0.62 + Rs() * 0.18), bx = x + (k - (n - 1) / 2) * rx * 2.3 + Rs() * 4, c = ltCol(bx);
-        if (c < 0 || c >= land.cols || ISLE[c] !== 2) continue;
-        const top = land.itop[c], by = top + ry * (0.88 + Rs() * 0.14);
-        if (Rs() < 0.45 && rx > 9) { if (own(bx, top + ry * 0.35, rx * 1.15, ry * 1.1)) proudBoulder(bx, rx * 1.15, ry * 1.1, Rs); continue; }
-        const fy = sinkToFit(bx, by, rx, ry); if (fy != null && own(bx, fy, rx, ry) && stoneFree(bx, fy, rx, ry, 2)) addStone(bx, fy, rx, ry, true, false);
-      }
+// the stones of the segments in a country - in their own earth, never crossing into the ground in front ("You can never slice a rock"):
+// boulders half sunk in their tops (some standing half out), the earth packed with stones; none in the desert's dry earth. (Nov 8: slice by
+// slice with the ground's own - stonesS1 / stonesS2, 50-land-terrain.js: these are the segments' parts of a slice, from the slice's draws)
+const islStoneBot = c => islSegEndRow(c) * LT_CELL + LT_Y0;
+function islStoneOwn(x, y, rx, ry) { for (const u of [-1, -0.5, 0, 0.5, 1]) { const xx = x + u * rx, c = ltCol(xx); if (c < 0 || c >= land.cols || ISLE[c] !== 2 || seaAtX(xx) || y + ry + 3 > islStoneBot(c)) return false; } return true; }
+const islRocky = c => islSkinC(c) !== 2 && islSkinC(c) !== 4 && !(islSkinC(c) === 0 && (lookD(c * LT_CELL) || land.trop[c]));   // (TROPICAL: its own rock - 50-land-trop)
+function islRunsIn(X0, X1) { const out = []; if (!land.iskin || !land.islRuns || ISLE === null) return out; for (const [a, b] of land.islRuns) { if (b <= X0 || a >= X1 || seaAtX((a + b) / 2)) continue; out.push([a, b]); } return out; }   // (out at sea: the ground's own packing has them)
+function islStonesBoulders(k, X0, X1, R) {
+  const SS = land.stSS;
+  for (const [a, b] of islRunsIn(X0, X1)) {
+    const lo = Math.max(a + 40, X0), hi = Math.min(b - 40, X1); if (hi <= lo || R() > (hi - lo) / 230) continue;
+    const x = lo + R() * (hi - lo), keep = R(), n = R() < 0.5 ? 1 : 2 + Math.floor(R() * 2);
+    if (keep < 0.2 || !islRocky(ltCol(x))) continue;
+    for (let q = 0; q < n; q++) {
+      const rx = stClampR((8 + R() * 9) * (q ? 0.75 : 1) * boulderScale(R) * SS), ry = rx * (0.62 + R() * 0.18), bx = x + (q - (n - 1) / 2) * rx * 2.3 + R() * 4, c = ltCol(bx);
+      if (bx < X0 || bx >= X1 || c < 0 || c >= land.cols || ISLE[c] !== 2) continue;
+      const top = land.itop[c], by = top + ry * (0.88 + R() * 0.14);
+      if (R() < 0.45 && rx > 9) { if (islStoneOwn(bx, top + ry * 0.35, rx * 1.15, ry * 1.1)) proudBoulder(bx, stClampR(rx * 1.15), ry * 1.1, R); continue; }
+      const fy = sinkToFit(bx, by, rx, ry); if (fy != null && islStoneOwn(bx, fy, rx, ry) && stoneFree(bx, fy, rx, ry, 2)) addStone(bx, fy, rx, ry, true, false);
     }
-    const cand = [];
-    for (let c = Math.max(0, Math.ceil(a / LT_CELL)); c < land.cols && c * LT_CELL < b; c += 2) {
-      if (!rocky(c)) continue;
-      const top = land.itop[c], dep = bot(c) - top; if (dep < 12) continue;
-      for (let q = 0; q < 14; q++) { const d = Math.pow(Rs(), 0.85) * dep, rx = 3 * SS * Math.pow(1 + 11 * SV2, Math.pow(Rs(), 0.9)) * (0.7 + 0.75 * Math.min(1, d / 250)); cand.push([c * LT_CELL + Rs() * 2 * LT_CELL, top + d, rx, rx * (0.66 + Rs() * 0.26), Rs()]); }
-      for (let q = 0; q < 12; q++) { const rx = (1.8 + Rs() * 2.8) * SS; cand.push([c * LT_CELL + Rs() * 2 * LT_CELL, top + Rs() * dep, rx, rx * (0.7 + Rs() * 0.25), Rs()]); }
-    }
-    cand.sort((p, q) => q[2] - p[2]);
-    for (const [x, y, rx, ry, g] of cand) {
-      if (!stoneFits(x, y, rx, ry) || !own(x, y, rx, ry) || !stoneFreeP(x, y, rx, ry, rx < 5 ? 0.5 : 0.7)) continue;
-      addStone(x, y, rx, ry, ltCell(ltCol(x), ltRow(y)) === M_ROCK || g < 0.06, false);
+  }
+}
+// a slice's segment earth candidates: stage 1 the packed stones, stage 2 the little ones ([x, y, rx, ry, grey draw, 1])
+function islStonesCand(k, X0, X1, R, cand, stage) {
+  const SS = land.stSS, SV2 = land.stSV;
+  for (const [a, b] of islRunsIn(X0, X1)) {
+    for (let c = Math.max(k * LT_CHUNK, Math.ceil(a / LT_CELL)); c < Math.min(land.cols, (k + 1) * LT_CHUNK) && c * LT_CELL < b; c++) {
+      if (c & 1 || !islRocky(c)) continue;
+      const top = land.itop[c], dep = islStoneBot(c) - top; if (dep < 12) continue;
+      if (stage === 1) for (let q = 0; q < 14; q++) { const d = Math.pow(R(), 0.85) * dep, rx = stClampR(3 * SS * Math.pow(1 + 11 * SV2, Math.pow(R(), 0.9)) * (0.7 + 0.75 * Math.min(1, d / 250))); cand.push([c * LT_CELL + R() * 2 * LT_CELL, top + d, rx, rx * (0.66 + R() * 0.26), R(), 1]); }
+      else for (let q = 0; q < 12; q++) { const rx = (1.8 + R() * 2.8) * SS; cand.push([c * LT_CELL + R() * 2 * LT_CELL, top + R() * dep, rx, rx * (0.7 + R() * 0.25), R(), 1]); }
     }
   }
 }
@@ -42237,8 +42262,9 @@ function drawIslands(x0, x1) {
 function drawIslRoots(x0, x1, after) {
   const ga = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
   for (const R of islRoots) {
-    const w = R.cv.width * LT_CELL; if (R.x0 + w < x0 || R.x0 > x1) continue;
-    const X0 = Math.round(PX(R.x0)), X1 = Math.round(PX(R.x0 + w)), Y0 = Math.round(PY(R.y0)), Y1 = Math.round(PY(R.y0 + R.cv.height * LT_CELL));
+    const w = R.W * LT_CELL; if (R.x0 + w < x0 || R.x0 > x1) continue;
+    if (!R.cv) R.paint();                                    // (made the first time it's seen - islRootsBuild)
+    const X0 = Math.round(PX(R.x0)), X1 = Math.round(PX(R.x0 + w)), Y0 = Math.round(PY(R.y0)), Y1 = Math.round(PY(R.y0 + R.H * LT_CELL));
     // (hazed with the water's own colour, as the floor's far rows: it stands back, behind the water - the subs go through it)
     // (user Nov 1: "Why are we no longer seeing the island under the water???" - tinted as the water just under the surface, lightly
     // hazed: the island goes on down under the water and reads as rock and sand, darker as it goes down - its own painting)
@@ -44301,12 +44327,11 @@ function buildLakeSea() {
       if (wU < 80) continue;
       const hU = Math.min((95 + RR() * 90) * (0.65 + 1.3 * deep) * (kind === 'spire' ? 1.9 : 1) * RKs, dep - 40);   // (never up out of the water)
       const W = Math.round(wU / REEF_K), H = Math.round(hU / REEF_K) + 50, top = rockProfile(W, H - 50, kind, RR);
-      const sp = paintRock(W, H, top, RR, 0, null, true, RK_SOLID);
       let base = -Infinity; for (let c = 0; c < W; c += 4) base = Math.max(base, landTop(x - wU / 2 + c * REEF_K));
-      const y0 = base + 4 - (H - 50) * REEF_K, topW = new Float32Array(W);
+      const y0 = base + 4 - (H - 50) * REEF_K, topW = new Float32Array(W), x0r = x - wU / 2;
       for (let c = 0; c < W; c++) topW[c] = y0 + top[c] * REEF_K;
-      { const g = sp.getContext('2d'); for (let c = 0; c < W; c++) { const r = Math.ceil((landTop(x - wU / 2 + c * REEF_K) + 3 - y0) / REEF_K); if (r < H) g.clearRect(c, Math.max(0, r), 1, H - r); } }   // (its foot cut away below the bed)
-      rockForms.push({ x0: x - wU / 2, x1: x - wU / 2 + W * REEF_K, y0, sp: picKeep(sp, 'sea floor', 'pack'), topW, lk: true });   // (packed when out of sight - 04-zzz-pics.js)
+      const sp = rockLater(W, H, top, RR, 0, null, true, RK_SOLID, g => { for (let c = 0; c < W; c++) { const r = Math.ceil((landTop(x0r + c * REEF_K) + 3 - y0) / REEF_K); if (r < H) g.clearRect(c, Math.max(0, r), 1, H - r); } });   // (its foot cut away below the bed - when it's painted)
+      rockForms.push({ x0: x - wU / 2, x1: x - wU / 2 + W * REEF_K, y0, sp, topW, lk: true });   // (packed when out of sight - 04-zzz-pics.js)
       land.lkRocks = true;
     }
     rockForms.sort((a, b) => a.x0 - b.x0); }
@@ -44321,7 +44346,7 @@ function buildLakeSea() {
         const big = clamp(1 - shore / 320, 0.15, 1), hMax = Math.max(4, (dep - 12) * 0.5); let wU = (30 + R() * 90) * (0.35 + 1.4 * big), hU = wU * (0.45 + R() * 0.4);
         if (hU > hMax) { wU *= hMax / hU; hU = hMax; }
         const W = Math.max(6, Math.round(wU / REEF_K)), H = Math.max(5, Math.round(hU / REEF_K)), top = rockProfile(W, H, 'mound', R);
-        const it = { kind: 'rock', x, w: W * REEF_K, h: H * REEF_K, sp: picKeep(paintRock(W, H + 2, top, R), 'sea floor', 'pack'), sink: 2 + R() * 4, top, lk: true };
+        const it = { kind: 'rock', x, w: W * REEF_K, h: H * REEF_K, sp: rockLater(W, H + 2, top, R), sink: 2 + R() * 4, top, lk: true };
         if (W > 8 && R() < 0.9) {
           it.deco = [];
           for (let n = 1 + Math.floor(R() * (W > 30 ? 5 : 2)); n > 0; n--) {
@@ -46933,7 +46958,7 @@ function stonesCrater(x, y, rad) {
   if (!land.stones) return;
   const R = rad * 0.8;                                         // (what a crater takes of the earth: dirt goes less far - landCarve)
   for (const j of stonesNear(x, y, rad)) {
-    const o = land.stones[j]; if (!o || o.gone || o.loose || o.grey) continue;
+    const o = land.stones[j]; if (!o || o.gone || o.loose || o.grey || o.dh) continue;
     if (Math.abs(o.x - x) > R + o.rx || Math.abs(o.y - y) > R + o.ry || onApron(o.x - o.rx) || onApron(o.x + o.rx)) continue;
     const P = stonePts(stonePoly(o)); let n = 0;
     for (let k = 0; k < P.length; k += 2) if (Math.hypot(P[k] - x, P[k + 1] - y) < R) n++;
@@ -46946,7 +46971,7 @@ function stonesCrater(x, y, rad) {
 function stonesUndercut(x, y, rad) {
   if (!land.stones) return;
   for (const j of stonesNear(x, y, rad + 30)) {
-    const o = land.stones[j]; if (!o || o.gone || o.loose || !o.grey || onApron(o.x - o.rx) || onApron(o.x + o.rx)) continue;
+    const o = land.stones[j]; if (!o || o.gone || o.loose || !o.grey || o.dh || onApron(o.x - o.rx) || onApron(o.x + o.rx)) continue;
     if (Math.abs(o.x - x) > rad + o.rx + 8 || Math.abs(o.y - y) > rad + o.ry + 8) continue;
     const P = stonePts(stonePoly(o)); let n = 0, held = 0;
     for (let k = 0; k < P.length; k += 2) { if (P[k + 1] < o.y + o.ry * 0.25) continue; n++; if (landSolid(P[k], P[k + 1] + LT_CELL * 1.5)) held++; }
@@ -49119,6 +49144,8 @@ function ltCell(c, r) {
   const k = (c / LT_CHUNK) | 0;
   if (r >= land.rB[k]) return M_ROCK;
   if (r < land.rT[k]) return M_AIR;
+  if (land.colOK && !land.colOK[c]) ltFillCol(c);                  // (its column laid first - ltFillCol)
+  if (!LAND_RAW && land.sOK && !land.sOK[k]) landEnsure(k);         // (its slice made whole first - landEnsure)
   return land.cell[ltIdx(c, r)];
 }
 // the slices' rows, from the ground's shape (land.surf) before anything is laid in it: each at least today's rows, more
@@ -49161,6 +49188,8 @@ function landSolid(x, y) { return ltCell(ltCol(x), ltRow(y)) !== M_AIR; }
 function landBelow(x, y) {
   const c = ltCol(x);
   if (c < 0 || c >= land.cols) return LT_Y1;
+  if (land.colOK && !land.colOK[c]) ltFillCol(c);
+  landEnsureC(c);
   const r1 = ltR1(c);
   for (let r = Math.max(ltR0(c), ltRow(y)); r < r1; r++) if (land.cell[ltIdx(c, r)] !== M_AIR) return LT_Y0 + r * LT_CELL;
   return LT_Y0 + r1 * LT_CELL;
@@ -49171,6 +49200,7 @@ function landBelow(x, y) {
 function landTop(x) {
   const c = ltCol(x);
   if (c < 0 || !land.cell || c >= land.cols) return landBelow(x, -Infinity);
+  landEnsureC(c);
   if (!land.topV || land.topV.length !== land.cols) { land.topV = new Uint32Array(land.cols); land.topC = new Float32Array(land.cols); }
   const v = (land.ver || 0) + 1;                               // (+1: a fresh table's zeros never match)
   if (land.topV[c] === v) return land.topC[c];
@@ -49191,78 +49221,60 @@ function frontTop(x) { const c = ltCol(x); if (!land.idry || c < 0 || c >= land.
 // what the ground's made of where a blast meets it (for its colour): sand, grass on top, or dirt
 function groundAt(x, y) { const c = ltCol(x), r = ltRow(landBelow(x, y - 6)); for (let q = 0; q < 4; q++) { const m = ltCell(c, r + q); if (m === M_SAND) return 'sand'; } return 'dirt'; }
 
-function buildLand() {
-  const R0 = seededRng(9001 + (land.seed | 0));
-  const R = [R0() * 6, R0() * 6, R0() * 6, R0() * 6];
-  land.cols = Math.ceil(WORLD_W / LT_CELL) + 1;
-  land.surf = new Float32Array(land.cols);
-  waterReset(); land.waterW = null;                         // (a new ground: no water woken on it yet - 50-land-water)
-  land.sand.length = 0; land.outcrops = [];
-  const W = WORLD_W;
-  // the rock under it all: a ragged floor 50-90 units under the top, never dug through
-  landShapePrep();                                          // (the LAND tab's points: their curves - 50-land-tshape)
-  isleBuild(R);                                             // (where the ocean floor stands out of the water, and the island lines: onLand)
-  islRootsBuild(R);                                         // (the islands' roots under the water - 50-land-islands)
-  for (let c = 0; c < land.cols; c++) land.surf[c] = landProfile(c * LT_CELL, R);
-  land.lookP = null; land.fieldA = null; land.seam = null;
-  land.gsig = typeof ISLANDS !== 'undefined' ? JSON.stringify(ISLANDS.filter(I => I.gnd)) : null;   // (the ground's shapes as built - islChanged)          // (the meadow's amount made again - fieldAmt)
-  land.look = new Uint8Array(land.cols); land.sea = new Uint8Array(land.cols); land.trop = new Uint8Array(land.cols); land.mtn = new Uint8Array(land.cols); land.bio = new Uint8Array(land.cols); land.marked = false;   // (each column's look: 1 the desert's - lookD; sea: marked SEA)
-  for (let c = 0; c < land.cols; c++) { const x = c * LT_CELL, sk = landSkinAt(x), own = onLand(x) ? +landOwnD(x) : 0, d = sk === 'D' ? 1 : sk === 'F' || sk === 'T' || sk === 'M' || BIO_OF[sk] ? 0 : own; if (sk === 'M' || sk === 'I' || sk === 'V') { land.mtn[c] = 1; land.marked = true; } if (BIO_OF[sk]) { land.bio[c] = BIO_OF[sk]; land.marked = true; } land.look[c] = d; if (sk === 'T') { land.trop[c] = 1; land.marked = true; } if (sk === 'S' && !seaAtX(x)) { land.sea[c] = 1; land.marked = true; }   /* (step 6: SEA ground is the sea itself - only a land column marked SEA, none since the switch, is a lake as the sea) */ if (d !== own) land.marked = true; }   // (the ground unmarked: its nearest shore's look - landOwnD; an island the nearer coast's; the sea's columns 0, as they always were)
-  islSkinCols();                                            // (a segment in a country: its own skin, whatever the ground in front - 50-land-islands)
-  const n = ltBands();                                      // (each slice's rows, from the shape)
-  land.cell = new Uint8Array(n); land.scorch = new Uint8Array(n); land.lay = new Uint8Array(n);   // (lay: a TERRAIN SURFACE layer painted its own way - its number + 1, surfLayerAt)
-  land.prof0 = null;                                         // (the land as it was, for the LAND tab's line: made when asked)
-  land.R = R;
-  btMark('land:shape'); findLake();                                                // (the lakes: wherever the ground dips under the water - first, so the beaches and all know)
-  for (let c = 0; c < land.cols; c++) {
+// (Nov 8, the world in pieces - user: "fix the engine to fit what the game actually is") the ground's cells laid a COLUMN at a time, the
+// first time anything asks for one (ltCell, landBelow, landTop: the build's plants and grass reading a few; a slice made whole; a crater) -
+// from the shapes alone, so a column comes out the same whenever it's laid. ltFillCol(c) (land.colOK); ltFillSlice(k) every column of k
+function ltFillSlice(k) { if (!land.colOK) return; const c1 = Math.min(land.cols, (k + 1) * LT_CHUNK); for (let c = Math.max(0, k * LT_CHUNK); c < c1; c++) if (!land.colOK[c]) ltFillCol(c); }
+function ltFillCol(c) {
+  if (!land.colOK || c < 0 || c >= land.cols || land.colOK[c]) return;
+  land.colOK[c] = 1;
+  const R = land.R;
+  {
     const x = c * LT_CELL, top = land.surf[c];
-    if (!onLand(x)) continue;                                 // (the sea's stretch: no land)
-    const g0 = solTopC(c) < top + 0.01 ? landProfileG(x, R) : top;   // (over the ground's own line only a SOLID's spans are ground: an overhang, a floating solid - 50-land-shapes)
-    const rockAt = top + 270 + 30 * (0.5 + 0.5 * Math.sin(x / 140 + R[2])) + 9 * Math.sin(x / 37 + R[1]);   // (deep, under the view: the picture shows earth all the way down)
-    // sand in the low valley (and a skin of it on the slopes down into it)
-    const sandy = ltSandy(x), sandDepth = sandy * (24 + 11 * surfWob(x + R[3] * 97, 1));   // (the sand's depth along the ground: a natural wobble, not a sine - user Nov 7 12:51)
-    // (Nov 3: no old end-of-world mountain's rock any more - user 08:57, "get rid of all this old stuff")
-    // (a piece marked SEA standing out of the water: the coast's bare rock, no grass - user Oct 28, 17:12)
-    const rocky = land.sea[c] && top < WATER_Y ? 1 : 0, apron = onApronGround(x);
-    // (an island: its ground down to the water's line - under it, the sea's own floor, in the water's colour)
-    const rW = Math.ceil((WATER_Y + 2 - LT_Y0) / LT_CELL), wetIsl = ISLE !== null && ISLE[c] === 2 && inCountry(x);
-    const solIsl = !wetIsl && ISLE !== null && ISLE[c] === 2 && !!land.idry && !!land.idry[c] && !inCountry(x);   // (an island behind a SOLID at sea, over it: its ground down to the solid's top - 50-land-islands)
-    const rEnd = ISLE !== null && ISLE[c] && !wetIsl ? Math.min(ltR1(c), rW) : ltR1(c);
-    // (an island in a country's water - a lake, a sea carved into it: its ground down to the water's line, the water under
-    // it, then the column's own ground - the lake's bed - in front, as everywhere: one column, two grounds)
-    const GP = shpGaps(c);                                    // (the shapes' gaps in this column: open air under an overhang - shpGaps)
-    const TSL = land.trop[c] ? surfLayer('tropical', 'sand') : null;   // (BEACH: its sand layer - TERRAIN SURFACE)
-    const BN = typeof colBiome === 'function' ? colBiome(c) : null;   // (its biome's layers - surfLayerAt; a cell where two types meet: its own type's - ltTC)
-    for (let r = ltR0(c), r1 = rEnd; r < r1; r++) {
-      const y = LT_Y0 + r * LT_CELL;
-      if (GP && shpInGap(GP, y)) continue;
-      if ((wetIsl || solIsl) && y >= land.itop[c] && r < rW && y < top) {   // (Nov 7: a segment's own biome's TERRAIN SURFACE layers too - surfLayerAt)
-        let im = islCellM(c, y - land.itop[c], sandy); const IB = ISK_BIO[islSkinC(c)], LA = IB && BIOME_SURF[IB] && BIOME_SURF[IB].length ? surfLayerAt(IB, x, land.itop[c], y - land.itop[c]) : null;
-        if (LA) { const own = surfOwn(IB, LA.i); if (!own) im = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) land.lay[ltIdx(c, r)] = LA.i + 1; }
-        land.cell[ltIdx(c, r)] = im; continue; }   // (y < top: over dry land the segment stops at the ground in front)
-      if (y < top) continue;
-      if (y < g0 && !shpSolidAt(c, y)) continue;
-      // (user Nov 7 21:49, "the transition from a ledge to the floor sharp in the generated interior terrain": the ground under an overhang was all earth,
-      // its depth taken from the overhang's top - grass, sand and the TERRAIN SURFACE layers from its own top now, as any ground's)
-      const tp = GP ? gapSpanTop(GP, y, top) : top;
-      let m; const ct = ltTC(c, r), TSLc = ct === c ? TSL : land.trop[ct] ? surfLayer('tropical', 'sand') : null;   // (this cell's terrain type - ltTC: where two meet, the line wanders)
-      if (land.mtn[ct] || y >= rockAt + tp - top || (rocky > 0.5 && y < tp + 60 + 40 * rocky)) m = M_ROCK;   // (MOUNTAIN: rock all through - its stones grey, packed, buildStones)
-      else if (apron && y < tp + 8 * LT_CELL) m = M_CONC;          // (the airfield: slabs of concrete over the earth)
-      else if (y < tp + sandDepth) m = M_SAND;
-      else m = land.trop[ct] ? (TSLc && y < Math.max(tp + surfThick(TSLc, x, 3), TSLc.wl ? WATER_Y - 6 : -1e9) ? M_SAND : M_DIRT) :   // (TROPICAL: sand down to the water, rocks from there - user Nov 1)
-         y < tp + ltGrassD(ct) * LT_CELL * ltSeamT(c) && sandy < 0.35 ? M_GRASS : M_DIRT;   // (user Oct 31 20:19: the tropical ground is rocks and sand - a band of sand under its grass, the rocks under that)
-      // (Nov 7, TERRAIN SURFACE: a layer the ground doesn't lay itself - its material's cell, painted as the layer; one it does, painted so if coloured)
-      const BNc = ct === c ? BN : colBiome(ct);
-      if (BNc && BIOME_SURF[BNc] && BIOME_SURF[BNc].length && m !== M_CONC) { const LA = surfLayerAt(BNc, x, tp, y - tp); if (LA) { const own = surfOwn(BNc, LA.i); if (!own) m = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) land.lay[ltIdx(c, r)] = LA.i + 1; } }
-      land.cell[ltIdx(c, r)] = m;
+    if (onLand(x)) {                                          // (the sea's stretch: no land)
+      const g0 = solTopC(c) < top + 0.01 ? landProfileG(x, R) : top;   // (over the ground's own line only a SOLID's spans are ground: an overhang, a floating solid - 50-land-shapes)
+      const rockAt = top + 270 + 30 * (0.5 + 0.5 * Math.sin(x / 140 + R[2])) + 9 * Math.sin(x / 37 + R[1]);   // (deep, under the view: the picture shows earth all the way down)
+      // sand in the low valley (and a skin of it on the slopes down into it)
+      const sandy = ltSandy(x), sandDepth = sandy * (24 + 11 * surfWob(x + R[3] * 97, 1));   // (the sand's depth along the ground: a natural wobble, not a sine - user Nov 7 12:51)
+      // (Nov 3: no old end-of-world mountain's rock any more - user 08:57, "get rid of all this old stuff")
+      // (a piece marked SEA standing out of the water: the coast's bare rock, no grass - user Oct 28, 17:12)
+      const rocky = land.sea[c] && top < WATER_Y ? 1 : 0, apron = onApronGround(x);
+      // (an island: its ground down to the water's line - under it, the sea's own floor, in the water's colour)
+      const rW = Math.ceil((WATER_Y + 2 - LT_Y0) / LT_CELL), wetIsl = ISLE !== null && ISLE[c] === 2 && inCountry(x);
+      const solIsl = !wetIsl && ISLE !== null && ISLE[c] === 2 && !!land.idry && !!land.idry[c] && !inCountry(x);   // (an island behind a SOLID at sea, over it: its ground down to the solid's top - 50-land-islands)
+      const rEnd = ISLE !== null && ISLE[c] && !wetIsl ? Math.min(ltR1(c), rW) : ltR1(c);
+      // (an island in a country's water - a lake, a sea carved into it: its ground down to the water's line, the water under
+      // it, then the column's own ground - the lake's bed - in front, as everywhere: one column, two grounds)
+      const GP = shpGaps(c);                                    // (the shapes' gaps in this column: open air under an overhang - shpGaps)
+      const TSL = land.trop[c] ? surfLayer('tropical', 'sand') : null;   // (BEACH: its sand layer - TERRAIN SURFACE)
+      const BN = typeof colBiome === 'function' ? colBiome(c) : null;   // (its biome's layers - surfLayerAt; a cell where two types meet: its own type's - ltTC)
+      for (let r = ltR0(c), r1 = rEnd; r < r1; r++) {
+        const y = LT_Y0 + r * LT_CELL;
+        if (GP && shpInGap(GP, y)) continue;
+        if ((wetIsl || solIsl) && y >= land.itop[c] && r < rW && y < top) {   // (Nov 7: a segment's own biome's TERRAIN SURFACE layers too - surfLayerAt)
+          let im = islCellM(c, y - land.itop[c], sandy); const IB = ISK_BIO[islSkinC(c)], LA = IB && BIOME_SURF[IB] && BIOME_SURF[IB].length ? surfLayerAt(IB, x, land.itop[c], y - land.itop[c]) : null;
+          if (LA) { const own = surfOwn(IB, LA.i); if (!own) im = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) land.lay[ltIdx(c, r)] = LA.i + 1; }
+          land.cell[ltIdx(c, r)] = im; continue; }   // (y < top: over dry land the segment stops at the ground in front)
+        if (y < top) continue;
+        if (y < g0 && !shpSolidAt(c, y)) continue;
+        // (user Nov 7 21:49, "the transition from a ledge to the floor sharp in the generated interior terrain": the ground under an overhang was all earth,
+        // its depth taken from the overhang's top - grass, sand and the TERRAIN SURFACE layers from its own top now, as any ground's)
+        const tp = GP ? gapSpanTop(GP, y, top) : top;
+        let m; const ct = ltTC(c, r), TSLc = ct === c ? TSL : land.trop[ct] ? surfLayer('tropical', 'sand') : null;   // (this cell's terrain type - ltTC: where two meet, the line wanders)
+        if (land.mtn[ct] || y >= rockAt + tp - top || (rocky > 0.5 && y < tp + 60 + 40 * rocky)) m = M_ROCK;   // (MOUNTAIN: rock all through - its stones grey, packed, buildStones)
+        else if (apron && y < tp + 8 * LT_CELL) m = M_CONC;          // (the airfield: slabs of concrete over the earth)
+        else if (y < tp + sandDepth) m = M_SAND;
+        else m = land.trop[ct] ? (TSLc && y < Math.max(tp + surfThick(TSLc, x, 3), TSLc.wl ? WATER_Y - 6 : -1e9) ? M_SAND : M_DIRT) :   // (TROPICAL: sand down to the water, rocks from there - user Nov 1)
+           y < tp + ltGrassD(ct) * LT_CELL * ltSeamT(c) && sandy < 0.35 ? M_GRASS : M_DIRT;   // (user Oct 31 20:19: the tropical ground is rocks and sand - a band of sand under its grass, the rocks under that)
+        // (Nov 7, TERRAIN SURFACE: a layer the ground doesn't lay itself - its material's cell, painted as the layer; one it does, painted so if coloured)
+        const BNc = ct === c ? BN : colBiome(ct);
+        if (BNc && BIOME_SURF[BNc] && BIOME_SURF[BNc].length && m !== M_CONC) { const LA = surfLayerAt(BNc, x, tp, y - tp); if (LA) { const own = surfOwn(BNc, LA.i); if (!own) m = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) land.lay[ltIdx(c, r)] = LA.i + 1; } }
+        land.cell[ltIdx(c, r)] = m;
+      }
     }
   }
-  // (the stones in the earth, the rocks half sunk in the grass and the outcrops' boulders: placed whole once the ground's
-  // shape is made - buildStones, below - user Oct 26: "You can never slice a rock")
-  // (Nov 3, user 08:57: the generated humps and crags of the old countries' interiors gone - the ground is the user's shapes)
-  land.outcrops = [];
   // the grass's own top: a column whose top cell is dirt (an outcrop beside it) gets grass back where the sky sees it
-  for (let c = 0; c < land.cols; c++) {
+  {
     for (let r = ltR0(c), r1 = ltR1(c); r < r1; r++) {
       const m = land.cell[ltIdx(c, r)]; if (m === M_AIR) continue;
       if (m === M_DIRT && ltSandy(c * LT_CELL) < 0.35 && !onApronGround(c * LT_CELL) && !land.trop[ltTC(c, r)]) for (let q = 0, gq = Math.round(ltGrassD(ltTC(c, r)) * ltSeamT(c)); q < gq && r + q < r1 && land.cell[ltIdx(c, r + q)] === M_DIRT; q++) land.cell[ltIdx(c, r + q)] = M_GRASS;
@@ -49273,7 +49285,7 @@ function buildLand() {
   // a solid's, an island's - before anything is dug (50-land-shapes)
   for (const n of SHP.holes) {
     const S = SHP.cols[n];
-    for (let c = Math.max(0, S.c0); c <= Math.min(land.cols - 1, S.c1); c++) {
+    if (c >= Math.max(0, S.c0) && c <= Math.min(land.cols - 1, S.c1)) {
       const v = S.iv[c - S.c0]; if (!v) continue;
       for (let i = 0; i + 1 < v.length; i += 2) {
         const ra = Math.max(ltR0(c), Math.ceil((v[i] - LT_Y0) / LT_CELL)), rb = Math.min(ltR1(c), Math.ceil((v[i + 1] - LT_Y0) / LT_CELL));
@@ -49288,9 +49300,47 @@ function buildLand() {
     }
   }
   // (the ground's first top, humps and all, before anything is dug: the desert's crust and sand follow it - desertCell)
-  land.top0 = new Float32Array(land.cols);
-  for (let c = 0; c < land.cols; c++) { let r = ltR0(c); const r1 = ltR1(c); while (r < r1 && land.cell[ltIdx(c, r)] === M_AIR) r++; land.top0[c] = LT_Y0 + r * LT_CELL; }
-  btMark('land:fill'); buildStones(R); islandStones(); btMark('land:stones');
+  { let r = ltR0(c); const r1 = ltR1(c); while (r < r1 && land.cell[ltIdx(c, r)] === M_AIR) r++; land.top0[c] = LT_Y0 + r * LT_CELL; }
+}
+function buildLand() { LAND_RAW++; try { buildLand0(); } finally { LAND_RAW--; } }   // (the build reads the ground as it's laid - no slice made whole on the way: landEnsure)
+/* (Nov 8) what the world is built from, as one number: every saved world and game setting (the bd_ keys but this browser's own - LOCAL_KEYS),
+   the shapes and structures as they are now, the Biome Editor's world in memory (NET_WORLD), the scenery settings (NSKY.P's bg ones - never the
+   hour or the weather, which move on their own). The same number at the
+   next build: its pictures are still right (land.same - the ground's slices, the islands' bodies, the sea floor) */
+function landSig() {
+  let s = '', h = 2166136261;
+  try { const ks = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('bd_') && !LOCAL_KEYS.includes(k)) ks.push(k); } ks.sort(); for (const k of ks) s += k + '=' + localStorage.getItem(k) + ';'; } catch (e) { }
+  try { s += JSON.stringify(ISLANDS) + '|' + JSON.stringify(typeof STRS !== 'undefined' ? STRS : 0) + '|' + WORLD_W + '|' + (typeof NSKY !== 'undefined' && NSKY.P ? JSON.stringify(Object.keys(NSKY.P).filter(k => k.startsWith('bg')).sort().map(k => [k, NSKY.P[k]])) : '') + '|' + (typeof STORY_WORLD !== 'undefined' && STORY_WORLD) + '|' + (typeof VEG_MODE !== 'undefined' && VEG_MODE) + '|' + (NET_WORLD.on ? JSON.stringify([...NET_WORLD.map]) : ''); } catch (e) { s += Math.random(); }
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0) + ':' + s.length;
+}
+function buildLand0() {
+  { const sg = landSig(); land.same = land.wsig === sg; land.wsig = sg; }
+  const R0 = seededRng(9001 + (land.seed | 0));
+  const R = [R0() * 6, R0() * 6, R0() * 6, R0() * 6];
+  land.cols = Math.ceil(WORLD_W / LT_CELL) + 1;
+  land.surf = new Float32Array(land.cols);
+  waterReset(); land.waterW = null;                         // (a new ground: no water woken on it yet - 50-land-water)
+  land.sand.length = 0; land.outcrops = [];
+  const W = WORLD_W;
+  // the rock under it all: a ragged floor 50-90 units under the top, never dug through
+  landShapePrep();                                          // (the LAND tab's points: their curves - 50-land-tshape)
+  isleBuild(R);                                             // (where the ocean floor stands out of the water, and the island lines: onLand)
+  islRootsBuild(R, land.same);                              // (the islands' roots under the water - 50-land-islands; the same world: kept)
+  for (let c = 0; c < land.cols; c++) land.surf[c] = landProfile(c * LT_CELL, R);
+  land.lookP = null; land.fieldA = null; land.seam = null;
+  land.gsig = typeof ISLANDS !== 'undefined' ? JSON.stringify(ISLANDS.filter(I => I.gnd)) : null;   // (the ground's shapes as built - islChanged)          // (the meadow's amount made again - fieldAmt)
+  land.look = new Uint8Array(land.cols); land.sea = new Uint8Array(land.cols); land.trop = new Uint8Array(land.cols); land.mtn = new Uint8Array(land.cols); land.bio = new Uint8Array(land.cols); land.marked = false;   // (each column's look: 1 the desert's - lookD; sea: marked SEA)
+  for (let c = 0; c < land.cols; c++) { const x = c * LT_CELL, sk = landSkinAt(x), own = onLand(x) ? +landOwnD(x) : 0, d = sk === 'D' ? 1 : sk === 'F' || sk === 'T' || sk === 'M' || BIO_OF[sk] ? 0 : own; if (sk === 'M' || sk === 'I' || sk === 'V') { land.mtn[c] = 1; land.marked = true; } if (BIO_OF[sk]) { land.bio[c] = BIO_OF[sk]; land.marked = true; } land.look[c] = d; if (sk === 'T') { land.trop[c] = 1; land.marked = true; } if (sk === 'S' && !seaAtX(x)) { land.sea[c] = 1; land.marked = true; }   /* (step 6: SEA ground is the sea itself - only a land column marked SEA, none since the switch, is a lake as the sea) */ if (d !== own) land.marked = true; }   // (the ground unmarked: its nearest shore's look - landOwnD; an island the nearer coast's; the sea's columns 0, as they always were)
+  islSkinCols();                                            // (a segment in a country: its own skin, whatever the ground in front - 50-land-islands)
+  const n = ltBands();                                      // (each slice's rows, from the shape)
+  land.cell = new Uint8Array(n); land.scorch = new Uint8Array(n); land.lay = new Uint8Array(n);   // (lay: a TERRAIN SURFACE layer painted its own way - its number + 1, surfLayerAt)
+  land.prof0 = null;                                         // (the land as it was, for the LAND tab's line: made when asked)
+  land.R = R;
+  btMark('land:shape'); findLake();                                                // (the lakes: wherever the ground dips under the water - first, so the beaches and all know)
+  land.outcrops = [];
+  land.colOK = new Uint8Array(land.cols); land.top0 = new Float32Array(land.cols);   // (the cells: a column at a time when first asked - ltFillCol)
+  btMark('land:fill'); stonesInit(); btMark('land:stones');   // (the stones: slice by slice when first needed - landEnsure)
   // boulders lying out on the field behind (further back: higher up the field and smaller)
   land.boulders = [];
   for (let i = 0; i < W / 240; i++) {
@@ -49300,9 +49350,13 @@ function buildLand() {
   }
   land.boulders = land.boulders.filter(b => lakeU(b.x) > 1.15 && !structNear(b.x, 380));   // (none in a lake's bowl, none on a pad's floor or its banks)
   land.boulders.sort((a, b) => b.back - a.back);
-  for (const A of [land.chunks, land.back, land.ichunks]) if (A) for (const cv of A) if (cv) { glFreeSrc(cv); if (cv._gedgeCv) glFreeSrc(cv._gedgeCv); }   // (Nov 7: the island slices too - kept from the last build, they showed its picture)
-  land.gaps = null; land.gapC = null; land.chunks = []; land.back = []; land.ichunks = []; land.dirty = new Uint8Array(Math.ceil(land.cols / LT_CHUNK)).fill(1); land.seen = null;
-  land.bg = null;
+  // (Nov 8, the world in pieces: the same world built again - CLOSE, PLAY, back to the editor - keeps every slice's pictures that nothing
+  // dug since they were painted: land.same, land.dug)
+  { const nk = Math.ceil(land.cols / LT_CHUNK), keep = k => land.same && land.dug && land.dug.length === nk && !land.dug[k] && land.dirty && land.dirty.length === nk && !land.dirty[k];
+    const dirty = new Uint8Array(nk).fill(1), C2 = [], B2 = [], I2 = [];
+    for (const [A, A2] of [[land.chunks, C2], [land.back, B2], [land.ichunks, I2]]) if (A) A.forEach((cv, k) => { if (!cv) return; if (keep(k)) { A2[k] = cv; if (A === land.chunks) dirty[k] = 0; } else { glFreeSrc(cv); if (cv._gedgeCv) glFreeSrc(cv._gedgeCv); } });   // (Nov 7: the island slices too - kept from the last build, they showed its picture)
+    land.gaps = null; land.gapC = null; land.chunks = C2; land.back = B2; land.ichunks = I2; land.dirty = dirty; land.dug = new Uint8Array(nk); land.seen = null; }
+  if (land.bgPart) land.bg = null;                            // (Nov 8: the far scenery is the art's own, the same whatever the world - kept from build to build; made again only if it was made before its art came in)
   // (user Oct 26, the lake: "The grass on the background should stay flat") the field behind the ground runs on at the
   // land's own level across a lake - its far bank - instead of dropping into the bowl: backS, the back's surface
   land.ver = (land.ver || 0) + 1; land.topV = null;          // (a new world: no column's top known yet)
@@ -49325,7 +49379,7 @@ function buildLand() {
 function ltDirty(c0, c1) {
   land.ver = (land.ver || 0) + 1;                              // (the ground changed: each column's top is found again when asked)
   const ug = Math.ceil(ugReach() / LT_CELL) + 2;               // (the light's reach: a slice beside the change sees it too - ltDist)
-  for (let k = Math.max(0, Math.floor((c0 - ug) / LT_CHUNK)); k <= Math.min(land.dirty.length - 1, Math.floor((c1 + ug) / LT_CHUNK)); k++) land.dirty[k] = 1;
+  for (let k = Math.max(0, Math.floor((c0 - ug) / LT_CHUNK)); k <= Math.min(land.dirty.length - 1, Math.floor((c1 + ug) / LT_CHUNK)); k++) { land.dirty[k] = 1; if (land.dug) land.dug[k] = 1; }   // (dug: not as built - its pictures painted again at the next build, landSig)
   landChanged(c0 * LT_CELL, (c1 + 1) * LT_CELL);              // (what rests there looks again at what's under it - 50-land-rest)
 }
 /* A crater: everything but rock inside the radius is blown out; round it the ground is scorched; the dirt thrown
@@ -49335,6 +49389,7 @@ const caveLining = (c, y) => { for (let k = 1; k <= 3; k++) { const u = k * LT_C
 function landCarve(x, y, rad) {
   if (!land.cell) return 0;
   const c0 = ltCol(x - rad - 4), c1 = ltCol(x + rad + 4), r0 = ltRow(y - rad - 4), r1 = ltRow(y + rad + 4);
+  landEnsureX(x - rad - 4, x + rad + 4);                       // (the ground there made whole before it's dug)
   let n = 0;
   const kinds = [0, 0, 0, 0, 0];
   stonesCrater(x, y, rad);                                     // (the stones it reaches: taken whole or knocked loose, never sliced - 50-land-rest)
@@ -49384,6 +49439,7 @@ function stepLandSand(dt) {
     land.sandT -= 1 / 30;
     for (let k = land.sand.length - 1; k >= 0; k--) {
       const s = land.sand[k], c0 = Math.max(0, s.c0), c1 = Math.min(land.cols - 1, s.c1);
+      landEnsureX((c0 - 1) * LT_CELL, (c1 + 2) * LT_CELL);
       let moved = 0;
       const flip = (Math.floor(time * 30) & 1) ? 1 : -1;
       let rLo = Infinity, rHi = -Infinity;                       // (the rows any of these columns keeps)
@@ -49654,18 +49710,19 @@ function stoneFreeP(x, y, rx, ry, gap) {
     const L = land.stoneG.get(gx * 4096 + gy); if (!L) continue;
     for (const j of L) {
       const q = land.stones[j], dx = (x - q.x) / (rx + q.rx + gap), dy = (y - q.y) / (ry + q.ry + gap); if (dx * dx + dy * dy >= 1) continue;
-      if (!o) { o = stonePoly({ x, y, rx, ry, id: land.stones.length }); P = stonePts(o); }
+      if (!o) { o = stonePoly({ x, y, rx, ry, id: stNextId() }); P = stonePts(o); }
       if (stoneIn(q, P, gap) || stoneIn(o, stonePts(stonePoly(q)), gap)) return false;
     }
   }
   return true;
 }
-function addStone(x, y, rx, ry, grey, solid) {
-  const o = stonePoly({ x, y, rx, ry, grey, id: land.stones.length });
-  land.stones.push(o);
-  if (land.dHideOn && !grey && lookD(x)) land.dPack.push(o);   // (the desert's packed earth stones: taken out again after - deDesertStones)
+function addStone(x, y, rx, ry, grey, solid, dh) {
+  const o = stonePoly({ x, y, rx, ry, grey, id: stNextId() });
+  land.stones[o.id] = o; land.stN[ST_K]++;
+  // (the desert's packed earth stones: they shape the packing round them, then aren't there - not drawn, never dug up; dh)
+  if (dh) o.dh = true;
   for (let gx = Math.floor((x - rx) / ST_G); gx <= Math.floor((x + rx) / ST_G); gx++) for (let gy = Math.floor((y - ry - LT_Y0) / ST_G); gy <= Math.floor((y + ry - LT_Y0) / ST_G); gy++) { const k = gx * 4096 + gy; let L = land.stoneG.get(k); if (!L) land.stoneG.set(k, L = []); L.push(o.id); }
-  for (let k = Math.max(0, Math.floor(ltCol(x - rx) / LT_CHUNK)); k <= Math.min(land.stoneC.length - 1, Math.floor(ltCol(x + rx) / LT_CHUNK)); k++) land.stoneC[k].push(o.id);
+  if (!dh) for (let k = Math.max(0, Math.floor(ltCol(x - rx) / LT_CHUNK)); k <= Math.min(land.stoneC.length - 1, Math.floor(ltCol(x + rx) / LT_CHUNK)); k++) land.stoneC[k].push(o.id);
   // (a grey one is rock: its cells made rock - a boulder standing out of the ground fills the air it stands in)
   if (grey) for (let c = Math.max(0, ltCol(x - rx)); c <= Math.min(land.cols - 1, ltCol(x + rx)); c++) for (let r = Math.max(ltR0(c), ltRow(y - ry)), rE = Math.min(ltR1(c) - 1, ltRow(y + ry)); r <= rE; r++) {
     const dx = ((c + 0.5) * LT_CELL - x) / rx, dy = (LT_Y0 + (r + 0.5) * LT_CELL - y) / ry; if (dx * dx + dy * dy > 1 || !stoneHit(o, dx, dy)) continue;
@@ -49686,8 +49743,12 @@ function proudBoulder(x, rx, ry, Rs, lift = 0) {   // (lift: how much more of it
   if (!stoneFree(x, y, rx, ry, 3)) return false;
   // ground under it all round: it must sit in earth, not over a gap or on sand, concrete or water
   for (const u of [-0.7, -0.35, 0, 0.35, 0.7]) { const m = ltCell(ltCol(x + u * rx), ltRow(y + ry * Math.sqrt(1 - u * u) * 0.6)); if (m !== M_DIRT && m !== M_GRASS && m !== M_ROCK) return false; }
-  const collar = 3 + Rs() * 3;
-  (land.proud || (land.proud = [])).push([x - rx - collar - 4, x + rx + collar + 4]);   // (no grass tufts there)
+  const collar = 3 + Rs() * 3, a = x - rx - collar - 4, b = x + rx + collar + 4;
+  // (Nov 8, the world in pieces: the plants are laid before the stones now - a boulder never comes up under one, and the grass tufts it
+  // stands in go - hidden, t.hide)
+  if (propNear(a - 6, b + 6)) return false;
+  (land.proud || (land.proud = [])).push([a, b]);
+  for (const t of land.tufts || []) if (t.x > a && t.x < b) t.hide = true;
   for (let c = Math.max(0, ltCol(x - rx - collar - 3)); c <= Math.min(land.cols - 1, ltCol(x + rx + collar + 3)); c++) {
     const cx = (c + 0.5) * LT_CELL, ux = (cx - x) / (rx + collar);
     // (the grass gives way to bare earth round it)
@@ -49703,99 +49764,138 @@ function proudBoulder(x, rx, ry, Rs, lift = 0) {   // (lift: how much more of it
 // of big boulders should be smaller. Like 1 out of 15?") each boulder's size: one in fifteen big (30% up), the rest
 // as they were or 30% down
 const boulderScale = Rs => { const r = Rs(); return (r < 1 / 15 ? 1.3 : r < 0.5 ? 1 : 0.7) * (0.95 + Rs() * 0.1); };
-function buildStones() {
-  const Rs = seededRng(7717 + (land.seed | 0));
-  const Rx = seededRng(9133 + (land.seed | 0));          // (the extra stones of a biome with smaller ones - below)
-  // (the GAME EDITOR's BG tab: STONE SIZE and STONE SIZE SPREAD, from the next round - the stones are the ground, digging
-  // and cover; online always as made, so both screens build the same ground)
-  const SS = NET.role === 'local' ? bgP('bgss', 1) : 1, SV2 = NET.role === 'local' ? bgP('bgsv', 1) : 1;
-  land.stones = []; land.proud = []; land.dPack = []; land.dHideOn = false; land.stoneG = new Map(); land.stoneC = Array.from({ length: Math.ceil(land.cols / LT_CHUNK) }, () => []);
-  const topAt = x => land.surf[clamp(ltCol(x), 0, land.cols - 1)];
-  // the grey boulders half sunk in the forest's grass (the kit's surface_rock: "embedded at the surface as whole,
-  // irregular rocks") - a lone one or a little group, each sitting low in the ground
-  for (let li = 0; li < LANDS.n; li++) if (landFace(li).dir > 0) {   // (each land with the forest's look: the sea on its right - landFace)
-    for (let x = LANDS.c.lo[li]; x < LANDS.c.hi[li]; x += 140 + Rs() * 180) {
-      const big = 1, keep = Rs(), n = Rs() < 0.5 ? 1 : 2 + Math.floor(Rs() * 2);
-      if (keep < 0.2 || apronD(x) < 80 || structNear(x, 330) || lakeU(x) < 1.12 || ltSandy(x) > 0.3) continue;
-      for (let k = 0; k < n; k++) {
-        const rx = (8 + Rs() * 9) * big * (k ? 0.75 : 1) * boulderScale(Rs) * SS * stoneSzAt(x), ry = rx * (0.62 + Rs() * 0.18), bx = x + (k - (n - 1) / 2) * rx * 2.3 + Rs() * 4, by = topAt(bx) + ry * (0.88 + Rs() * 0.14);   // (user Oct 26, "Why are they floating above the grass with no dirt between them?" - sunk in the earth, only the crown at the ground's top)
-        if (Rs() < 0.45 && rx > 9) { proudBoulder(bx, rx * 1.15, ry * 1.1, Rs); continue; }   // (some standing half out of the ground - user Oct 26)
-        const fy = sinkToFit(bx, by, rx, ry); if (fy != null && stoneFree(bx, fy, rx, ry, 2)) addStone(bx, fy, rx, ry, true, false);
-      }
-    }
-  }
-  // (user Nov 7 11:43: "Mountain is big boulders on the surface, not a flat terrain surface" - his ref-mountain.png) MOUNTAIN: its top
-  // made of big grey boulders standing half out of the rock, side by side, then smaller ones in the gaps between them
-  const Rm = seededRng(8123 + (land.seed | 0));                   // (its own random: every other stone keeps its place)
-  if (land.mtn) for (let pass = 0; pass < 2; pass++) for (let c = 0; c < land.cols; c++) {
-    if (!land.mtn[c]) continue;
-    const x0 = c * LT_CELL; let x = x0 + Rm() * 6;
-    while (c < land.cols && land.mtn[c]) {
-      const rx = (pass === 0 ? 26 + Rm() * 22 : 11 + Rm() * 9) * SS * stoneSzAt(x), ry = rx * (0.62 + Rm() * 0.22);   // (its biome's STONE SIZE - biomeStone)
-      if (land.mtn[ltCol(x - rx)] && land.mtn[ltCol(x + rx)] && !structNear(x, rx + 40)) proudBoulder(x, rx, ry, Rm, pass === 0 ? 0.3 : 0.15);
-      x += rx * (pass === 0 ? 1.7 : 1.1) + Rm() * 4; c = ltCol(x);
-    }
-  }
-  // the outcrops: humps of earth with boulders set along their tops and into their flanks, whole
-  for (const O of land.outcrops) {
-    const prof = xx => { const ux = (xx - O.x) / O.w; return Math.abs(ux) >= 1 ? 0 : 0.5 + 0.5 * Math.cos(Math.PI * ux); };
-    for (let pass = 0; pass < 3; pass++) for (let xx = O.x - O.w * 0.85 + Rs() * 10; xx < O.x + O.w * 0.85; xx += 8 + Rs() * 12) {
-      const p = prof(xx); if (p < 0.12) continue;
-      const rx = (pass === 0 ? 13 + Rs() * 11 : 10 + Rs() * 9) * (0.7 + 0.5 * p) * boulderScale(Rs) * SS * stoneSzAt(xx), ry = rx * (0.68 + Rs() * 0.2);
-      const top = topAt(xx) - O.h * p, by = top + (pass === 0 ? ry * (0.9 + Rs() * 0.15) : ry * (1.3 + pass * 0.9 + Rs() * 0.6));
-      if (pass === 0 && p > 0.45 && Rs() < 0.5) { proudBoulder(xx, rx, ry, Rs); continue; }   // (along the hump's crest, some standing half out of it)
-      const fy = sinkToFit(xx, by, rx, ry); if (fy != null && stoneFree(xx, fy, rx, ry, 2.5)) addStone(xx, fy, rx, ry, true, false);   // (in the hump's earth, under its grass, earth between them)
-    }
-  }
-  // the earth packed with stones, biggest first, each wholly in the earth and clear of the rest
-  // (user Oct 26: "Rocks in general should be 50% bigger and more compressed. The tiny ones are between them. The lower
-  // we get closer to the blackness, the bigger they are.") half again as big as before, growing with depth - about
-  // twice as big down by the dark as just under the grass - packed close (a narrow seam of earth between), and then the
-  // gaps between them filled with little stones
-  const cand = [];
-  for (let c = 0; c < land.cols; c += 2) {
-    const x0 = c * LT_CELL, top = land.surf[c]; if (!onLand(x0)) continue;
-    // (its biome's STONE SIZE - biomeStone: smaller stones, more of them, so the ground stays as packed; the extra ones from their own random
-    // source, so every other biome's stones stay exactly where they were)
-    const sz = biomeStone(colBiome(c)), nq = sz < 1 ? Math.round(18 * Math.min(4, 1 / (sz * sz))) : 18;
-    for (let q = 0; q < nq; q++) {
-      const R = q < 18 ? Rs : Rx;
-      // (sizes spread far wider - log-even from pebbles to great stones - user Oct 26: "a lot more")
-      const dep = Math.pow(R(), 0.85) * 250, rx = 3 * SS * Math.pow(1 + 11 * SV2, Math.pow(R(), 0.9)) * (0.7 + 0.75 * dep / 250) * sz;
-      cand.push(x0 + R() * 2 * LT_CELL, top + dep, rx, rx * (0.66 + R() * 0.26), R());
-    }
-  }
-  land.dHideOn = true;                                           // (from here on: the packing - the desert's own noted, deDesertStones)
-  const order = Array.from({ length: cand.length / 5 }, (_, i) => i).sort((a, b) => cand[b * 5 + 2] - cand[a * 5 + 2]);
-  for (const i of order) {
-    const x = cand[i * 5], y = cand[i * 5 + 1], rx = cand[i * 5 + 2], ry = cand[i * 5 + 3];
-    if (!stoneFits(x, y, rx, ry) || !stoneFreeP(x, y, rx, ry, 0.7)) continue;   // (close: touching outlines, their rough corners leaving the seams - never one cut by another)
-    const inRock = ltCell(ltCol(x), ltRow(y)) === M_ROCK;
-    addStone(x, y, rx, ry, inRock || cand[i * 5 + 4] < 0.06, false);       // (grey where the ground is rock, and now and then in the earth)
-  }
-  // the little ones, in the gaps between
-  for (let c = 0; c < land.cols; c += 2) {
-    const x0 = c * LT_CELL, top = land.surf[c]; if (!onLand(x0)) continue;
-    for (let q = 0; q < 16; q++) {
-      const x = x0 + Rs() * 2 * LT_CELL, y = top + Rs() * 260, rx = (1.8 + Rs() * 2.8) * SS, ry = rx * (0.7 + Rs() * 0.25);
-      if (stoneFits(x, y, rx, ry) && stoneFreeP(x, y, rx, ry, 0.5)) addStone(x, y, rx, ry, Rs() < 0.08, false);
-    }
-  }
-  deDesertStones();
+/* ---- (Nov 8, user: "fix the engine to fit what the game actually is" - the world built in pieces, the way it's drawn) THE STONES, SLICE BY
+   SLICE. Each slice of the ground (LT_CHUNK columns) places its own stones from its own random numbers (stRng: its number, the stage), the
+   first time anything needs that slice (landEnsure) or in the background (landBgBuild) - never the whole world at once. Two stages: 1 the
+   boulders (the forest's half sunk in the grass, the mountains', the segments') and the earth packed with stones, biggest first; 2 the
+   little ones in the gaps. A stone stays inside its slice give or take its size (ST_RMAX, under half a slice), so the even slices' stones
+   never meet each other: an even slice places its stones first, an odd one after both its neighbours - every slice comes out the same
+   whatever order the world is built in (on this page, in the simulation worker, online). Stone ids: the slice's own (ST_IDS a slice) ---- */
+const ST_IDS = 4096, ST_RMAX = 52;
+let ST_K = 0;                                                     // (the slice placing stones now: its ids)
+const stNextId = () => ST_K * ST_IDS + land.stN[ST_K];
+const stRng = (k, st) => seededRng((((land.seed | 0) + 7717) * 2654435761 + k * 40503 + st * 2246822519) >>> 0);
+function stonesInit() {
+  const nk = Math.ceil(land.cols / LT_CHUNK);
+  land.stones = []; land.proud = []; land.stoneG = new Map(); land.stoneC = Array.from({ length: nk }, () => []);
+  land.stN = new Int32Array(nk); land.sS = new Uint8Array(nk); land.sOK = new Uint8Array(nk); land.propXs = null;
+  land.stSS = NET.role === 'local' ? bgP('bgss', 1) : 1; land.stSV = NET.role === 'local' ? bgP('bgsv', 1) : 1;   // (STONE SIZE and its SPREAD: as the world is built - online always as made)
 }
-/* (user Oct 27, the Desert Art Kit's guide: the desert's earth is "fine compacted red-brown dirt with broad horizontal
-   stratification... unlike forest soil, it must NOT read as a continuous mosaic of large packed round rocks") the
-   packing above runs over the whole world as it always has - so every forest stone keeps its place, its id and its
-   shape - and then the desert's packed brown stones (only a picture: their cells are earth) are taken out again, not
-   drawn. The hard ones - its outcrops' boulders and the odd rock in the earth, cells of rock a dig stops at - stay
-   whole, in sandstone: the ground digs exactly as it did. */
-function deDesertStones() {
-  const hide = new Set(land.dPack.map(o => o.id));
-  land.dHideOn = false;
-  if (!hide.size) { land.dPack = null; return; }
-  land.stoneC = land.stoneC.map(L => L.filter(j => !hide.has(j)));
-  for (const [k, L] of land.stoneG) land.stoneG.set(k, L.filter(j => !hide.has(j)));
-  land.dPack = null;
+// a plant (a tree, a palm, a scrub - land.props) standing between a and b
+function propNear(a, b) {
+  let X = land.propXs; if (!X) { X = land.propXs = Float64Array.from((land.props || []).map(p => p.x)).sort(); }
+  let lo = 0, hi = X.length; while (lo < hi) { const m = (lo + hi) >> 1; if (X[m] < a) lo = m + 1; else hi = m; }
+  return lo < X.length && X[lo] <= b;
+}
+const stClampR = rx => Math.min(ST_RMAX, rx);
+// stage 1 of slice k: its boulders, then its earth packed with stones, biggest first
+function stonesS1(k) {
+  const R = stRng(k, 1), SS = land.stSS, SV2 = land.stSV, X0 = k * LT_CHUNK * LT_CELL, X1 = Math.min(land.cols, (k + 1) * LT_CHUNK) * LT_CELL;
+  const inK = x => x >= X0 && x < X1;
+  const topAt = x => land.surf[clamp(ltCol(x), 0, land.cols - 1)];
+  // the grey boulders half sunk in the forest's grass (the kit's surface_rock) - now and then a lone one or a little group, some standing half out
+  for (let li = 0; li < LANDS.n; li++) if (landFace(li).dir > 0) {
+    const lo = Math.max(LANDS.c.lo[li], X0), hi = Math.min(LANDS.c.hi[li], X1); if (hi <= lo || R() > (hi - lo) / 230) continue;   // (one every 230 units on average, as before)
+    const x = lo + R() * (hi - lo), keep = R(), n = R() < 0.5 ? 1 : 2 + Math.floor(R() * 2);
+    if (keep < 0.2 || apronD(x) < 80 || structNear(x, 330) || lakeU(x) < 1.12 || ltSandy(x) > 0.3) continue;
+    for (let q = 0; q < n; q++) {
+      const rx = stClampR((8 + R() * 9) * (q ? 0.75 : 1) * boulderScale(R) * SS * stoneSzAt(x)), ry = rx * (0.62 + R() * 0.18), bx = x + (q - (n - 1) / 2) * rx * 2.3 + R() * 4, by = topAt(bx) + ry * (0.88 + R() * 0.14);
+      if (!inK(bx)) continue;
+      if (R() < 0.45 && rx > 9) { proudBoulder(bx, stClampR(rx * 1.15), ry * 1.1, R); continue; }
+      const fy = sinkToFit(bx, by, rx, ry); if (fy != null && stoneFree(bx, fy, rx, ry, 2)) addStone(bx, fy, rx, ry, true, false);
+    }
+  }
+  // MOUNTAIN (user Nov 7 11:43: "big boulders on the surface") its top made of big grey boulders half out of the rock, then smaller ones between
+  if (land.mtn) for (let pass = 0; pass < 2; pass++) {
+    let x = X0 + R() * 6;
+    while (x < X1) {
+      const c = ltCol(x); if (!land.mtn[c]) { x += LT_CELL; continue; }
+      const rx = stClampR((pass === 0 ? 26 + R() * 22 : 11 + R() * 9) * land.stSS * stoneSzAt(x)), ry = rx * (0.62 + R() * 0.22);
+      if (land.mtn[ltCol(x - rx)] && land.mtn[ltCol(x + rx)] && !structNear(x, rx + 40)) proudBoulder(x, rx, ry, R, pass === 0 ? 0.3 : 0.15);
+      x += rx * (pass === 0 ? 1.7 : 1.1) + R() * 4;
+    }
+  }
+  if (typeof islStonesBoulders === 'function') islStonesBoulders(k, X0, X1, R);   // (a segment's boulders - 50-land-islands.js)
+  // the earth packed with stones, biggest first, each wholly in the earth and clear of the rest (user Oct 26: "Rocks in general should be 50%
+  // bigger and more compressed ... The lower we get closer to the blackness, the bigger they are")
+  const cand = [];
+  for (let c = k * LT_CHUNK; c < Math.min(land.cols, (k + 1) * LT_CHUNK); c += 2) {
+    const x0 = c * LT_CELL, top = land.surf[c]; if (!onLand(x0)) continue;
+    const sz = biomeStone(colBiome(c)), nq = sz < 1 ? Math.round(18 * Math.min(4, 1 / (sz * sz))) : 18;   // (its biome's STONE SIZE: smaller, more of them)
+    for (let q = 0; q < nq; q++) {
+      const dep = Math.pow(R(), 0.85) * 250, rx = stClampR(3 * SS * Math.pow(1 + 11 * SV2, Math.pow(R(), 0.9)) * (0.7 + 0.75 * dep / 250) * sz);
+      cand.push([x0 + R() * 2 * LT_CELL, top + dep, rx, rx * (0.66 + R() * 0.26), R(), 0]);
+    }
+  }
+  if (typeof islStonesCand === 'function') islStonesCand(k, X0, X1, R, cand, 1);   // (a segment's earth - 50-land-islands.js)
+  cand.sort((p, q) => q[2] - p[2]);
+  for (const [x, y, rx, ry, g, isl] of cand) {
+    if (!stoneFits(x, y, rx, ry) || (isl && !islStoneOwn(x, y, rx, ry)) || !stoneFreeP(x, y, rx, ry, isl && rx < 5 ? 0.5 : 0.7)) continue;
+    const grey = ltCell(ltCol(x), ltRow(y)) === M_ROCK || g < 0.06;
+    addStone(x, y, rx, ry, grey, false, !isl && !grey && lookD(x));   // (the desert's: packed round, then not there - dh)
+  }
+}
+// stage 2 of slice k: the little ones, in the gaps between
+function stonesS2(k) {
+  const R = stRng(k, 2), SS = land.stSS, cand = [];
+  for (let c = k * LT_CHUNK; c < Math.min(land.cols, (k + 1) * LT_CHUNK); c += 2) {
+    const x0 = c * LT_CELL, top = land.surf[c]; if (!onLand(x0)) continue;
+    for (let q = 0; q < 16; q++) { const x = x0 + R() * 2 * LT_CELL, y = top + R() * 260, rx = (1.8 + R() * 2.8) * SS, ry = rx * (0.7 + R() * 0.25); cand.push([x, y, rx, ry, R(), 0]); }
+  }
+  if (typeof islStonesCand === 'function') islStonesCand(k, k * LT_CHUNK * LT_CELL, (k + 1) * LT_CHUNK * LT_CELL, R, cand, 2);
+  for (const [x, y, rx, ry, g, isl] of cand) {
+    if (!stoneFits(x, y, rx, ry) || (isl && !islStoneOwn(x, y, rx, ry)) || !stoneFreeP(x, y, rx, ry, 0.5)) continue;
+    const grey = isl ? ltCell(ltCol(x), ltRow(y)) === M_ROCK || g < 0.06 : g < 0.08;
+    addStone(x, y, rx, ry, grey, false, !isl && !grey && lookD(x));
+  }
+}
+/* ---- a slice made whole the first time anything needs it (landEnsure: its stones and its neighbours', which reach into it), or in the
+   background a little at a time (landBgBuild). LAND_RAW: the build's own steps reading the ground as it is, without making slices ---- */
+let LAND_RAW = 0;
+function stStage(k, st) {
+  const n = land.sS ? land.sS.length : 0; if (k < 0 || k >= n || land.sS[k] & st) return;
+  if (st === 1) { if (k & 1) { stStage(k - 1, 1); stStage(k + 1, 1); } }
+  else { stStage(k - 1, 1); stStage(k, 1); stStage(k + 1, 1); if (k & 1) { stStage(k - 1, 2); stStage(k + 1, 2); } }
+  if (land.sS[k] & st) return;
+  land.sS[k] |= st;
+  for (let q = k - 1; q <= k + 1; q++) if (q >= 0 && q < n) ltFillSlice(q);   // (the cells its stones reach, laid first)
+  const was = ST_K; ST_K = k; LAND_RAW++;
+  try { if (st === 1) stonesS1(k); else stonesS2(k); } finally { LAND_RAW--; ST_K = was; }
+}
+function landEnsure(k) {
+  if (!land.sOK || k < 0 || k >= land.sOK.length || land.sOK[k]) return;
+  land.sOK[k] = 1;
+  stStage(k - 1, 2); stStage(k, 2); stStage(k + 1, 2);
+  land.ver = (land.ver || 0) + 1;                                   // (the stones changed the ground's cells: each column's top asked again)
+}
+const landEnsureC = c => { if (!LAND_RAW && land.sOK) { const k = (c / LT_CHUNK) | 0; if (k >= 0 && k < land.sOK.length && !land.sOK[k]) landEnsure(k); } };
+const landEnsureX = (x0, x1) => { if (LAND_RAW || !land.sOK) return; for (let k = Math.max(0, Math.floor(ltCol(x0) / LT_CHUNK)); k <= Math.min(land.sOK.length - 1, Math.floor(ltCol(x1) / LT_CHUNK)); k++) if (!land.sOK[k]) landEnsure(k); };
+// (a stage the stage (k, st) needs whose own needs are met - the next small step toward it; null: (k, st) is done)
+function stNext(k, st) {
+  const n = land.sS.length; if (k < 0 || k >= n || (land.sS[k] & st)) return null;
+  const deps = st === 1 ? (k & 1 ? [k - 1, 1, k + 1, 1] : []) : (k & 1 ? [k - 1, 1, k, 1, k + 1, 1, k - 1, 2, k + 1, 2] : [k - 1, 1, k, 1, k + 1, 1]);
+  for (let i = 0; i < deps.length; i += 2) { const r = stNext(deps[i], deps[i + 1]); if (r) return r; }
+  return [k, st];
+}
+// the rest of the world made in the background: the slices nearest xs first, one small step at a time (a slice's cells, one stage of
+// its stones) until ms have gone - never a frame's worth at once
+function landBgBuild(ms, xs) {
+  if (!land.sOK || LAND_RAW) return 0;
+  const n = land.sOK.length; if (land.sAll === n) return 0;
+  const t0 = performance.now(); let done = 0;
+  const cs = (xs && xs.length ? xs : [WORLD_W / 2]).map(x => clamp(Math.floor(ltCol(x) / LT_CHUNK), 0, n - 1));
+  while (performance.now() - t0 < ms) {
+    let best = -1, bd = 1e9;
+    for (const c of cs) for (let d = 0; d < n; d++) { let hit = -1; if (c - d >= 0 && !land.sOK[c - d]) hit = c - d; else if (c + d < n && !land.sOK[c + d]) hit = c + d; if (hit >= 0) { if (d < bd) { bd = d; best = hit; } break; } }
+    if (best < 0) { land.sAll = n; break; }
+    let step = null; for (const q of [best - 1, best, best + 1]) { step = stNext(q, 2); if (step) break; }
+    if (!step) { landEnsure(best); done++; continue; }                    // (its stones all there: made whole - cheap now)
+    const [k, st] = step, c0 = Math.max(0, (k - 1) * LT_CHUNK), c1 = Math.min(land.cols, (k + 2) * LT_CHUNK);
+    let filled = false; for (let c = c0; c < c1; c++) if (!land.colOK[c]) { ltFillSlice(Math.floor(c / LT_CHUNK)); filled = true; break; }   // (the cells a stage reaches, a slice at a time)
+    if (!filled) stStage(k, st);
+    done++;
+  }
+  return done;
 }
 // a chunk's stones rasterised: for each cell the stone it's in (-1: the earth between), how far in from its rim (cells),
 // and where in it (-1..1)
@@ -49899,6 +49999,7 @@ function overhangShade(c, y) {
 }
 function paintLandChunk(k) { return ugHeld(() => paintLandChunk0(k)); }
 function paintLandChunk0(k) {
+  landEnsure(k);                                                // (its stones and its neighbours' first - landEnsure)
   const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0), rT = land.rT[k], rB = land.rB[k], h = rB - rT + 4, T4 = 4 - rT;   // (+4: grass blades over the top row; a cell's row in the canvas: r + T4)
   let cv = land.chunks[k];
   if (!cv || cv.width !== w || cv.height !== h) cv = land.chunks[k] = makeCanvas(w, h);
@@ -50039,6 +50140,7 @@ function landBackHue(bn) {
 }
 function paintLandBack(k) { return ugHeld(() => paintLandBack0(k)); }
 function paintLandBack0(k) {
+  landEnsure(k);
   const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0), rT = land.rT[k], rB = land.rB[k], h = rB - rT + 4, T4 = 4 - rT;
   const cv = land.back[k] = makeCanvas(w, h), x = cv.getContext('2d'), id = x.createImageData(w, h), d = id.data, SR = stoneRaster(k, w);
   // (Nov 7: the field behind in its biome's colours - ICE snow, SWAMP olive, VOLCANIC ash; MOUNTAIN grey rock, not a meadow)
@@ -50210,6 +50312,14 @@ function landSlices(x0, x1) {
    when the view holds land: landSpansIn) and the islands' (islSlices, the sea's pass and the land's). Here too what paints them
    all again (the meadow's, STONE COLOURS' and UNDERGROUND LIGHT's sliders, the TROPICAL rock's picture come), the slices
    seen (landKeep: the page's picture memory lets the far ones go). The drawing only places the canvases. */
+const LT_IDLE_MS = 400, LT_IDLE = { t: 0, sig: '' };
+if (typeof window !== 'undefined' && typeof SW_IN_WORKER !== 'undefined' && !SW_IN_WORKER) for (const ev of ['pointermove', 'pointerdown', 'wheel', 'keydown']) window.addEventListener(ev, () => { LT_IDLE.t = performance.now(); }, { capture: true, passive: true });
+// nothing moving: the views where they were and no mouse or key since LT_IDLE_MS ago
+function landIdle(views) {
+  const sg = views.map(([a, b]) => Math.round(a) + ',' + Math.round(b)).join(';'), now = performance.now();
+  if (sg !== LT_IDLE.sig) { LT_IDLE.sig = sg; LT_IDLE.t = now; }
+  return now - LT_IDLE.t > LT_IDLE_MS;
+}
 function landPaintStep(views) {
   if (!land.cell) return;
   landGaps();                                                  // (the shapes built again since the last paint: what was painted with the old ones marked to paint again - landGaps)
@@ -50248,15 +50358,20 @@ function landPaintStep(views) {
     if (!landSpansIn(a, b).length) continue;
     for (const [k, xl] of landSlices(a, b)) if (need(k)) { const xm = xl + LT_CHUNK * LT_CELL / 2, d = xm < x0 ? x0 - xm : xm > x1 ? xm - x1 : 0; if (d < bd) { bd = d; best = k; } }
   }
+  // (Nov 8, user: "smooth as butter" - a slice painted ahead is ~35 ms, a frame of its own: in the GAME EDITOR only while nothing moves - the
+  // view still and no mouse or key for LT_IDLE_MS - so it never lands on a frame you're zooming, panning or dragging in; landIdle)
+  if (all && !landIdle(ahead)) best = -1;
   if (best >= 0 && !painted) { paintLandChunk(best); land.dirty[best] = 0; if (land.seen) land.seen[best] = renderTick; landKeep(best); }
   // (Nov 8, editor speed - user: "slow when zooming out": the field behind each slice was painted only once in view, so zooming out painted
   // every one coming into view on the same frame, 100-200 ms) in the GAME EDITOR, a frame that painted nothing paints the nearest field behind
   // too, the whole world's ahead as its ground is. The same pictures: only when
-  else if (all && best < 0 && !painted && landSpansIn(-1e9, 1e9).length) {
+  else if (all && best < 0 && !painted && landIdle(ahead) && landSpansIn(-1e9, 1e9).length) {
     let bk = -1, bb = 1e18;
     for (const [x0, x1] of ahead) for (const [k, xl] of landSlices(-1e9, 1e9)) if (!land.back[k]) { const xm = xl + LT_CHUNK * LT_CELL / 2, d = xm < x0 ? x0 - xm : xm > x1 ? xm - x1 : 0; if (d < bb) { bb = d; bk = k; } }
     if (bk >= 0) { paintLandBack(bk); landKeep(bk); }
   }
+  // (Nov 8, the world in pieces) the rest of the ground made in the background, nearest the views first - a few ms a frame (landBgBuild)
+  landBgBuild(painted ? 1 : EDMODE.on ? 4 : 2, ahead.map(([a, b]) => (a + b) / 2));
 }
 /* a slice's pictures - its ground, the field behind, the islands' - with their smooth edges and sun rims, in the page's picture
    memory (04-zzz-pics.js) as one group: used while it's in or just beside a view (the GAME EDITOR: the whole world), let go when
@@ -50455,6 +50570,7 @@ function buildLandBg() {
     { s: city, p: 0.72, q: 0.95, k: kC ? 0.42 : 1.3, base: LAND_BG_Y - 26, haze: kC ? 0.12 : 0.4, reach: 2600, nf: !!kC, ns: !!kC, bg: 'dc' },   // (the city: only by the coast, behind the airport - in front of the dunes)
   ];
   for (const L of land.bgD) land.bgS[L.bg] = L;
+  land.bgPart = !(kM && kF && kN && img.desertMtn && img.desertMtn.width && img.desertDunes && img.desertDunes.width);   // (made before its art was in: made again at the next build)
 }
 // each strip drawn tiled across the view at its own depth, its foot standing on its base line (which hangs from
 // the ground's line on the screen, as the sea's far layers hang from the horizon), hazed toward the sky's colour
@@ -50804,6 +50920,7 @@ function drawTufts(x0, x1) {
   if (!tuftArt) buildTuftArt();
   const sway = clamp((E.windU || 0) / 75, -1, 1);
   for (const t of land.tufts) {
+    if (t.hide) continue;                                           // (under a boulder standing out of the ground - proudBoulder)
     if (offViewR(t.x, 14 * TUFT_ART * TUFT_PX * (t.s || 1), x0, x1)) continue;   // (a tuft as tall as it's drawn, leaning with the wind)
     const top = landTop(t.x);
     if (!t.alive) {
@@ -56154,14 +56271,17 @@ const builtRest = rc => rc._g0 || (rc._g0 = builtGeo(rc, null, (c, kind) => kind
    out from the puff's middle as a ball does, turned a little by a soft noise, the light then rounded to PUFF_BANDS steps with that noise in the
    rounding, so the steps' edges are ragged as a painted clump's. One picture a puff a light (the light's coarse key, as the far pictures) a size,
    in the plants' kept pictures (vegKeep); near and mid lay it where the puff is now, turned and scaled with it (one picture, not its polygons) ---- */
-const PUFF_BANDS = 5, PUFF_NOISE = 0.55, PUFF_FEAT = 7;   // (light steps; how far the noise moves a pixel's step; the noise's size, art pixels)
+// (user Nov 8 09:14: "is it exposed in the editor?") its numbers are the plants' LOOK > PAINTED LIGHT (VTUNE.tree p*): the light's steps, how far the noise
+// moves a pixel's step, the noise's size (plant pixels), the bark's grain, the front puffs' shadow and its reach - a picture's key carries them (PAINT_K)
+const PAINT = () => { const T = VTUNE.tree; return { bands: Math.max(1, Math.round(T.pBands ?? 5)), noise: Math.max(0, T.pNoise ?? 0.55), feat: Math.max(1, T.pFeat ?? 7), grain: Math.max(0, T.pGrain ?? 1), shadow: clamp(T.pShadow ?? 0.55, 0, 1), reach: Math.max(0, T.pReach ?? 0.5) }; };
+const paintK = () => { const P = PAINT(); return P.bands + '/' + P.noise + '/' + P.feat + '/' + P.grain; };
 const pnHash = (i, j, s) => { let h = Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(s, 1274126177) | 0; h = Math.imul(h ^ (h >>> 13), 1103515245); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
 function pnNoise(x, y, s) {   // (value noise, 0..1, smooth between whole numbers)
   const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
   const a = pnHash(i, j, s), b = pnHash(i + 1, j, s), c = pnHash(i, j + 1, s), d = pnHash(i + 1, j + 1, s);
   return (a + (b - a) * u) + ((c + (d - c) * u) - (a + (b - a) * u)) * v;
 }
-function puffPic(rc, f, Lt, n) { n = n || 1; const k = f + ':' + (Lt ? litKey(Lt) : '-') + 'x' + n, M = rc._pufK || (rc._pufK = new Map()); return vegKeep(M, k, () => puffPic0(rc, f, Lt, n), vegPieceFree, 96); }
+function puffPic(rc, f, Lt, n) { n = n || 1; const k = f + ':' + (Lt ? litKey(Lt) : '-') + 'x' + n + ':' + paintK(), M = rc._pufK || (rc._pufK = new Map()); return vegKeep(M, k, () => puffPic0(rc, f, Lt, n), vegPieceFree, 96); }
 function puffPic0(rc, f, Lt, n) {
   const B = rc.built, L = B.leaves[f]; if (!L || L.k !== 'puff') return null;
   const g0 = builtRest(rc), QS = g0.leaves.filter(q => q.f === f); if (!QS.length) return null;
@@ -56174,7 +56294,7 @@ function puffPic0(rc, f, Lt, n) {
     x.beginPath(); q.pts.forEach(([a, b], j) => j ? x.lineTo(a, b) : x.moveTo(a, b)); x.closePath(); x.fillStyle = '#fff'; x.fill(); }
   // each pixel lit: where it sits in the puff (its middle the part's root, its size rx / ry) is which way it faces; the noise in art pixels, the part's own
   const id = x.getImageData(0, 0, W, H), D = id.data, r0 = L.pts[0], rx = L.rx || 16, ry = L.ry || 12, LSx = clamp(VTUNE.tree.light, 0, 2), lc = hexRgb(B.col);
-  const TC = B.trunk || {}, c1 = hexRgb(TC.c1 || '#7a5636'), c2 = hexRgb(TC.c2 || '#8a6440'), seed = f * 7919 + 13, Q = { f, u: 0.5, k: 'puff' };
+  const TC = B.trunk || {}, c1 = hexRgb(TC.c1 || '#7a5636'), c2 = hexRgb(TC.c2 || '#8a6440'), seed = f * 7919 + 13, Q = { f, u: 0.5, k: 'puff' }, PT = PAINT(), PUFF_BANDS = PT.bands, PUFF_NOISE = PT.noise, PUFF_FEAT = PT.feat;
   for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) { const o = (py * W + px) * 4; if (!D[o + 3]) continue;
     const wx = x0 + (px + 0.5) / n, wy = y0 + (py + 0.5) / n, ex = (wx - r0[0]) / rx, ey = (wy - r0[1]) / ry, r = Math.min(1, Math.hypot(ex, ey));
     const N1 = pnNoise(wx / PUFF_FEAT, wy / PUFF_FEAT, seed) * 0.65 + pnNoise(wx / (PUFF_FEAT * 0.4), wy / (PUFF_FEAT * 0.4), seed + 1) * 0.35 - 0.5, N2 = pnNoise(wx / PUFF_FEAT + 31.7, wy / PUFF_FEAT - 12.3, seed + 2) - 0.5;
@@ -56194,9 +56314,45 @@ const PUF_FL = [];
 function puffAffine(P, g, f) { let q = null; for (const z of g.leaves) if (z.f === f && z.pi === P.pi) { q = z; break; } if (!q || q.pts.length !== P.R.length) return null; PUF_FL.length = 0; for (const p of q.pts) PUF_FL.push(p[0], p[1]); return polyAffine(P.R, PUF_FL); }
 // (user Nov 8 08:51: "can the puffs shade the trunk? Like a simple offset darkness in the trunk based on the light source direction (just the ones in front of
 // the trunk)") a front puff's shape laid dark over what's already drawn of its plant - the wood, and the puffs behind - moved away from the light
-const PUFF_SHADOW = 0.55;
-const puffShadowOff = (L, Lt) => { const k = clamp((L.ry || 12) * 0.5, 3, 14); if (!Lt) return [-0.35 * k, 0.94 * k]; const d = Math.hypot(Lt.lx, Lt.ly) || 1; return [-Lt.lx / d * k, -Lt.ly / d * k]; };   // (no light - the editor's picture: a high sun to the right)
-const puffShadowA = Lt => Lt ? PUFF_SHADOW * clamp(0.35 + Lt.dif / 0.6 * 0.65, 0, 1) : PUFF_SHADOW * 0.6;
+const puffShadowOff = (L, Lt) => { const k = clamp((L.ry || 12) * PAINT().reach, 0, 24); if (!Lt) return [-0.35 * k, 0.94 * k]; const d = Math.hypot(Lt.lx, Lt.ly) || 1; return [-Lt.lx / d * k, -Lt.ly / d * k]; };   // (no light - the editor's picture: a high sun to the right)
+const puffShadowA = Lt => { const S = PAINT().shadow; return Lt ? S * clamp(0.35 + Lt.dif / 0.6 * 0.65, 0, 1) : S * 0.6; };
+/* ---- THE WOOD PAINTED PIXEL BY PIXEL (user Nov 8 09:12: "the trunk is very horizontal, why not have a segment in the middle?"; 09:14 "lets paint the wood
+   too"). The trunk and each branch were their component's pieces, each one flat colour - steps up the trunk, and the two halves lit alike under a high
+   sun. Now each is one picture in its component's own frame (x along it 0 .. LEAF_W, y across), painted at rest: its colour smooth along its length,
+   each pixel facing out across it as a round stem does (its side by where the stem runs there), a grain of noise along it (BARK GRAIN), the light in
+   the puffs' steps and noise. Each piece of it (an upright rectangle in that frame) is laid from the picture where the piece is now - so it still bends,
+   and the trunk's light runs on into its branches (branchSide) ---- */
+function woodPic(rc, f, Lt, n) { n = n || 1; const k = f + ':' + (Lt ? litKey(Lt) : '-') + 'x' + n + ':' + paintK(), M = rc._wodK || (rc._wodK = new Map()); return vegKeep(M, k, () => woodPic0(rc, f, Lt, n), vegPieceFree, 48); }
+function woodPic0(rc, f, Lt, n) {
+  const B = rc.built, g0 = builtRest(rc), isT = f < 0, L = isT ? B.trunk : B.leaves[f]; if (!L) return null;
+  const R = isT ? g0.tf : g0.lf[f]; if (!R || !R.Q || R.Q.length < 2) return null;
+  const [sh, ck] = trunkSrc(L.c || rc.key), M = maskOf(sh, 'trunk', ck), W = LEAF_W * n, H = LEAF_H * n, cv = makeCanvas(W, H), x = cv.getContext('2d'), id = x.createImageData(W, H), D = id.data;
+  const PT = PAINT(), LSx = clamp(VTUNE.tree.light, 0, 2), TC = B.trunk || {}, c0 = hexRgb(TC.c0 || '#5a3e28'), c1 = hexRgb(TC.c1 || '#7a5636'), c2 = hexRgb(TC.c2 || '#8a6440'), lc = hexRgb(B.col);
+  const Q = { f, u: 0, k: 'branch' }, seed = (f + 2) * 4111 + 7, cum = R.cum, len = R.len || 1, nQ = R.Q.length, P0 = L.pts, sx = !isT && P0 && P0.length > 1 ? (P0[P0.length - 1][0] >= P0[0][0] ? 0.85 : -0.85) : 0;
+  let k = 0;
+  for (let px = 0; px < W; px++) {
+    const cx = (px + 0.5) / n, t = cx / LEAF_W, d = clamp(t, 0, 1) * len; while (k < nQ - 2 && cum[k + 1] < d) k++; while (k > 0 && cum[k] > d) k--;
+    const f2 = clamp((d - cum[k]) / ((cum[k + 1] - cum[k]) || 1), 0, 1), dx = R.Q[k + 1][0] - R.Q[k][0], dy = R.Q[k + 1][1] - R.Q[k][1], l = Math.hypot(dx, dy) || 1, ox = -dy / l, oy = dx / l, hw = Math.max(0.5, R.hwOf(k, f2));
+    const base = isT ? trunkCol(TC, t, c0, c1, c2) : (Q.u = t, partCol(B, Q, lc, c1, c2)), al = isT ? trunkA(TC, t) : partA(B, { f, u: t }), b = isT ? 0 : 1 - 0.6 * smoothstep(0.05, 0.6, t);
+    for (let py = 0; py < H; py++) {
+      const cy = (py + 0.5) / n, mi = M ? Math.floor(cy / LEAF_H * M.h) * M.w + Math.floor(cx / LEAF_W * M.w) : -1; if (M && !M.m[mi]) continue;
+      const v = (cy - LEAF_H / 2) / (LEAF_H / 2), along = d, across = v * hw;
+      const N1 = pnNoise(along / (PT.feat * 1.2), across / PT.feat, seed) - 0.5, G = (pnNoise(along / (PT.feat * 1.6), across / Math.max(0.6, PT.feat * 0.18), seed + 3) - 0.5) * PT.grain;
+      const nv = clamp(v + N1 * 0.35, -1, 1); let nx = ox * nv * 0.95, ny = oy * nv * 0.95 - 0.1 * (1 - Math.abs(nv)); if (b > 0) { nx += (sx - nx) * b * 0.8; ny += (-0.1 - ny) * b * 0.8; }
+      let col;
+      if (Lt) { const dq = clamp(Math.round(litD(nx, ny, Lt) * PT.bands + N1 * PT.noise * 2) / PT.bands, 0, 1); col = litBakeD(base, dq, Lt, LSx); }
+      else { const kk = 0.85 + 0.25 * clamp(Math.round((nx * 0.6 - ny * 0.4 + 0.5) * PT.bands + N1 * PT.noise * 2) / PT.bands, 0, 1); col = base.map(c => c * kk); }
+      const gk = 1 + G * 0.22, o = (py * W + px) * 4; D[o] = clamp(col[0] * gk, 0, 255); D[o + 1] = clamp(col[1] * gk, 0, 255); D[o + 2] = clamp(col[2] * gk, 0, 255); D[o + 3] = Math.round(255 * clamp(al, 0, 1)); } }
+  x.putImageData(id, 0, 0);
+  return { c: cv, n };
+}
+// a wood piece's rectangle in its component's frame (x0, y0, x1, y1) - null if it isn't an upright one (then its old flat colour)
+const woodRect = SP => { if (!SP || SP.length !== 4) return null; let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const [a, b] of SP) { if (a < x0) x0 = a; if (b < y0) y0 = b; if (a > x1) x1 = a; if (b > y1) y1 = b; } for (const [a, b] of SP) if ((a !== x0 && a !== x1) || (b !== y0 && b !== y1)) return null; return x1 - x0 > 0.01 && y1 - y0 > 0.01 ? [x0, y0, x1, y1] : null; };
+const WOOD_FL = [], WOOD_OV = 0.6;   // (a piece laid a little past its edges: no hairlines between neighbours as it bends)
+// (its source and place: the rectangle grown by WOOD_OV, inside the picture; A the affine from the frame to where the piece is now)
+function woodSrc(P, r) { const x0 = Math.max(0, r[0] - WOOD_OV), y0 = Math.max(0, r[1] - WOOD_OV), x1 = Math.min(LEAF_W, r[2] + WOOD_OV), y1 = Math.min(LEAF_H, r[3] + WOOD_OV); return [x0 * P.n, y0 * P.n, (x1 - x0) * P.n, (y1 - y0) * P.n, x0, y0, x1 - x0, y1 - y0]; }
+const setTA = (D, M, A) => { const [a, b, c, d, e, f] = A; D.setTransform(M.a * a + M.c * b, M.b * a + M.d * b, M.a * c + M.c * d, M.b * c + M.d * d, M.a * e + M.c * f + M.e, M.b * e + M.d * f + M.f); };
+function woodAff(SP, pts) { if (pts.length !== SP.length) return null; WOOD_FL.length = 0; for (const p of pts) WOOD_FL.push(p[0], p[1]); return polyAffine(SP, WOOD_FL); }
 // (user Nov 8 08:42 / 08:51: "trunks from a tree always feel like a single shape") a branch's facing: near its root the trunk's own side there (its left side
 // for a branch going left), turning partly into its own top and underside out to its middle - the trunk's light and dark run on into it, the wood lit as one
 function branchNorm(B, q, nx, ny) { const L = B.leaves[q.f], P = L && L.pts; if (!P || P.length < 2) return [nx, ny]; const b = 1 - 0.6 * smoothstep(0.05, 0.6, q.u || 0), sx = P[P.length - 1][0] >= P[0][0] ? 0.85 : -0.85; return [nx + (sx - nx) * b, ny + (-0.1 - ny) * b]; }
@@ -56218,7 +56374,9 @@ function builtPiece(rc, sel, trunk, all, Lt, n, opx) {
   // (a leaf polygon: its piece of its LEAF's mask, coloured, laid where it is - as near)
   const pufDone = new Set();
   const lpoly = (q, kk) => { if (q.k === 'puff') { if (pufDone.has(q.f)) return; pufDone.add(q.f); const P = puffPic(rc, q.f, Lt, n); if (P) { x.globalAlpha = partA(B, q); x.drawImage(P.c, P.x, P.y, P.c.width / P.n, P.c.height / P.n); x.globalAlpha = 1; } return; }   // (a puff: its picture, painted pixel by pixel - once)
-    const L = B.leaves[q.f], which = q.k === 'branch' ? 'trunk' : q.k === 'puff' ? 'puff' : 'leaf', [sh, ck] = which === 'trunk' ? trunkSrc(L.c || rc.key) : which === 'puff' ? puffSrc(L.c || rc.key) : leafSrc(L.c || rc.key), comp = which === 'trunk' ? sh.trunkC : which === 'puff' ? sh.puffC : sh.leaf, src = comp && comp.polys[q.pi], lc0 = lc; if (q.k === 'branch') lc = c1; if (q.k === 'puff' && !Lt) kk *= 0.8 + 0.4 * Math.max(0, -(q.pn[0] * 0.5 + q.pn[1] * 0.8));
+    const L = B.leaves[q.f], which = q.k === 'branch' ? 'trunk' : q.k === 'puff' ? 'puff' : 'leaf', [sh, ck] = which === 'trunk' ? trunkSrc(L.c || rc.key) : which === 'puff' ? puffSrc(L.c || rc.key) : leafSrc(L.c || rc.key), comp = which === 'trunk' ? sh.trunkC : which === 'puff' ? sh.puffC : sh.leaf, src = comp && comp.polys[q.pi], lc0 = lc;
+    if (q.k === 'branch') { const r = src && woodRect(src.pts), WP = r && woodPic(rc, q.f, Lt, n), A = WP && woodAff(src.pts, q.pts); if (A) { const S = woodSrc(WP, r); x.save(); x.transform(A[0], A[1], A[2], A[3], A[4], A[5]); x.drawImage(WP.c, S[0], S[1], S[2], S[3], S[4], S[5], S[6], S[7]); x.restore(); return; } }   // (a branch: its painted wood)
+    if (q.k === 'branch') lc = c1; if (q.k === 'puff' && !Lt) kk *= 0.8 + 0.4 * Math.max(0, -(q.pn[0] * 0.5 + q.pn[1] * 0.8));
     if (Lt) { const sg = q.side ? 1 : -1; let nx = q.k === 'puff' ? q.pn[0] * 0.9 : -Math.sin(q.th) * 0.8 * sg, ny = q.k === 'puff' ? q.pn[1] * 0.9 : Math.cos(q.th) * 0.8 * sg; if (q.k === 'branch') [nx, ny] = branchNorm(B, q, nx, ny); lc = litBake(partCol(B, q, lc0, c1, c2), nx, ny, Lt, LSx); kk = 1; } else if (B.leaves[q.f] && B.leaves[q.f].cols) lc = partCol(B, q, lc0, c1, c2);
     const pa = partA(B, q); x.globalAlpha = pa;
     try { if (src && maskOf(sh, which, ck)) { maskTris(x, sh, which, ck, rc, q.pi, src.pts, q.pts, 'rgb(' + lc.map(v => Math.round(clamp(v * kk, 0, 255))).join(',') + ')', n); return; }
@@ -56231,7 +56389,9 @@ function builtPiece(rc, sel, trunk, all, Lt, n, opx) {
   for (const q of QS) if (!q.front) lpolyO(q, q.side ? 1.02 : 0.8);
   const [tsh, tkey] = trunkSrc((B.trunk && B.trunk.c) || rc.key), tm = trunk && maskOf(tsh, 'trunk', tkey);
   { const ol = trunk && opx && olOf(B.trunk); if (ol) olLay(g0.quads, ol, q => { const src = tm && tsh.trunkC.polys[q.pi]; return src ? [tsh, tkey, 'trunk', src.pts] : null; }); }
-  if (trunk) for (const q of g0.quads) { const t = q.t, col0 = trunkCol(TC, t, c0, c1, c2), col = Lt ? litBake(col0, q.side ? 0.85 : -0.85, -0.1, Lt, LSx) : col0.map(v => v * (q.side ? 1.05 : 0.85)), src = tm && tsh.trunkC.polys[q.pi];
+  const TWP = trunk && tm ? woodPic(rc, -1, Lt, n) : null;   // (the trunk: its painted wood, piece by piece)
+  if (trunk) for (const q of g0.quads) { { const src = TWP && tsh.trunkC.polys[q.pi], r = src && woodRect(src.pts), A = r && woodAff(src.pts, q.pts); if (A) { const S = woodSrc(TWP, r); x.save(); x.transform(A[0], A[1], A[2], A[3], A[4], A[5]); x.drawImage(TWP.c, S[0], S[1], S[2], S[3], S[4], S[5], S[6], S[7]); x.restore(); continue; } }
+    const t = q.t, col0 = trunkCol(TC, t, c0, c1, c2), col = Lt ? litBake(col0, q.side ? 0.85 : -0.85, -0.1, Lt, LSx) : col0.map(v => v * (q.side ? 1.05 : 0.85)), src = tm && tsh.trunkC.polys[q.pi];
     x.globalAlpha = trunkA(TC, t); if (src) maskTris(x, tsh, 'trunk', tkey, rc, q.pi, src.pts, q.pts, 'rgb(' + col.map(v => Math.round(clamp(v, 0, 255))).join(',') + ')', n); else poly(q.pts, col, 1); x.globalAlpha = 1; }
   if (trunk && hr) poly(Array.from({ length: 8 }, (_, a) => [g0.top[0] + Math.cos(a * Math.PI / 4) * hr, g0.top[1] - hr * 0.35 + Math.sin(a * Math.PI / 4) * hr * 0.8]), Lt ? litBake(lc.map(v => v * 0.62), 0, -0.3, Lt, LSx) : lc, Lt ? 1 : 0.62);
   // (the front puffs' shadows over what's drawn - the wood and the puffs behind - only in a picture with the trunk)
@@ -56331,7 +56491,9 @@ function drawBuilt(it, rc, s, X, Y, w, k, mul, add) {
     // (its component: a branch the TRUNK's - its wood coloured up its length, charring with the trunk; a puff its PUFF - lit as a ball, from its
     // middle out; a leaf its LEAF)
     let nx = -Math.sin(q.th) * 0.8 * sg, ny = Math.cos(q.th) * 0.8 * sg, col, sh, ck, which;
-    if (q.k === 'branch') { col = partCol(B, q, lc, c1, c2).map(v => v * (1 - black)); [sh, ck] = trunkSrc(L.c || rc.key); which = 'trunk'; [nx, ny] = branchNorm(B, q, nx, ny); }
+    if (q.k === 'branch') { col = partCol(B, q, lc, c1, c2).map(v => v * (1 - black)); [sh, ck] = trunkSrc(L.c || rc.key); which = 'trunk'; [nx, ny] = branchNorm(B, q, nx, ny);
+      if (GLR.on && !VEG_NOMASK && DM) { const src = sh.trunkC && sh.trunkC.polys[q.pi], r = src && woodRect(src.pts), WP = r && woodPic(rc, q.f, Lt, NU), A = WP && woodAff(src.pts, q.pts);   // (its painted wood, laid where the piece is now)
+        if (A) { const S = woodSrc(WP, r), kk = (1 - black) * dk; setTA(D, DM, A); D.drawImage(glTint(WP.c, 'rgW', [mul[0] * kk, mul[1] * kk, mul[2] * kk], [add[0] + gl, add[1] + gl * 0.45, add[2]], false), S[0], S[1], S[2], S[3], S[4], S[5], S[6], S[7]); D.setTransform(DM.a, DM.b, DM.c, DM.d, DM.e, DM.f); return; } } }
     else if (q.k === 'puff') { col = L.cols ? partCol(B, q, lc, c1, c2) : leafCol(q); nx = q.pn[0] * 0.9; ny = q.pn[1] * 0.9; [sh, ck] = puffSrc(L.c || rc.key); which = 'puff'; }
     else { col = L.cols ? partCol(B, q, lc, c1, c2) : leafCol(q); [sh, ck] = leafSrc(L.c || rc.key); which = 'leaf'; }
     if (GLR.on) { const comp = which === 'trunk' ? sh.trunkC : which === 'puff' ? sh.puffC : sh.leaf, src = comp && comp.polys[q.pi];
@@ -56367,8 +56529,10 @@ function drawBuilt(it, rc, s, X, Y, w, k, mul, add) {
   for (const q of g.leaves) if (!q.front) leafO(q);
   const [tsh, tkey] = trunkSrc((B.trunk && B.trunk.c) || rc.key), tmask = GLR.on && !VEG_NOMASK && maskOf(tsh, 'trunk', tkey);
   { const ol = DM && olOf(B.trunk); if (ol && g.quads.length) olPolys(g.quads, ol, q => { const src = tmask && tsh.trunkC.polys[q.pi]; return src ? [tsh, tkey, 'trunk', src.pts] : null; }); }
+  const TWP = tmask && DM ? woodPic(rc, -1, Lt, NU) : null, tkW = 1 - black, TWT = TWP ? glTint(TWP.c, 'rgW', [mul[0] * tkW, mul[1] * tkW, mul[2] * tkW], add, false) : null;   // (the trunk's painted wood)
   for (const q of g.quads) { const t = q.t, col = trunkCol(TC, t, c0, c1, c2), tk = 1 - black, cl = col.map(v => v * tk), ta = trunkA(TC, t); D.globalAlpha = ta;
     const src = tmask && tsh.trunkC.polys[q.pi];
+    { const r = TWP && src && woodRect(src.pts), A = r && woodAff(src.pts, q.pts); if (A) { const S = woodSrc(TWP, r); D.globalAlpha = 1; setTA(D, DM, A); D.drawImage(TWT, S[0], S[1], S[2], S[3], S[4], S[5], S[6], S[7]); D.setTransform(DM.a, DM.b, DM.c, DM.d, DM.e, DM.f); continue; } }
     if (src) { const c = litCol(cl, q.side ? 0.85 : -0.85, -0.1, 1, 0), tm = [c[0] / 255, c[1] / 255, c[2] / 255], SP = src.pts, nn = Math.min(SP.length, q.pts.length);
       drawTris(D, polyTris(tsh, 'trunk', tkey, rc, q.pi, SP, NU), q.pts, DM, tm);
       continue; }
@@ -59868,6 +60032,8 @@ const VEH_TUNE = {
       ['TRUNK STIFFNESS', f, 'trunkStiff', 4, 0.05, 'x', 'How much the trunk resists bending'], ['TRUNK SWAY', f, 'trunkSway', 4, 0.05, 'x', 'How far the trunk sways in wind'], ['TRUNK BURN TIME', f, 'trunkBurn', 120, 1, 's', 'Seconds the trunk burns'], ['TRUNK STRENGTH', f, 'trunkBreak', 5, 0.05, 'x', 'How hard a hit must be to break it'], ['BIRD SCARE SPEED', f, 'birdFlee', 200, 1, 'units/s', 'Frond speed that makes birds fly off']] : [])),   // (BIRD SCARE SPEED: how fast its frond may move under a bird - 50-land-zz-rig.js rigPerchAt)
     [['ALL PLANTS'], ['LIT FACES', 'tree', 'lit', 1, 1, '', 'Light and shade on the plants (1 on, 0 off)'], ['LIGHT', 'tree', 'light', 2, 0.05, 'x', 'Brightness of the lit side'], ['TINT VARIETY', 'tree', 'tint', 0.6, 0.01, '', 'Colour difference from plant to plant'], ['SHADE DEPTH', 'tree', 'shade', 1.5, 0.05, 'x', 'Darkness of the shaded side'], ['FLAT COLOURS', 'tree', 'flat', 1, 0.05, '', '1 flat colour fills, 0 the painted art'],
       ['PIXEL SIZE', 'tree', 'px', 2, 0.05, '', 'Plant pixel size, world units'], ['DECK HEIGHT STEP', 'tree', 'deckRaise', 20, 0.25, 'units', 'Each deck behind stands this much higher'], ['DECK 1 ATMOSPHERE', 'tree', 'haze1', 1, 0.01, '', 'How much deck 1 fades into the sky colour'], ['DECK 2 ATMOSPHERE', 'tree', 'haze2', 1, 0.01, '', 'How much deck 2 fades into the sky colour'], ['DECK 3 ATMOSPHERE', 'tree', 'haze3', 1, 0.01, '', 'How much deck 3 fades into the sky colour'], ['MEDIUM DETAIL BELOW', 'tree', 'lodMid', 600, 5, 'px', 'Plants shorter than this on screen: medium detail'], ['LOW DETAIL BELOW', 'tree', 'lodFar', 300, 5, 'px', 'Plants shorter than this on screen: low detail'],
+      ['PAINTED LIGHT'], ['LIGHT STEPS', 'tree', 'pBands', 12, 1, '', 'Light steps on puffs and wood (fewer: more pixel art)'], ['LIGHT NOISE', 'tree', 'pNoise', 2, 0.05, '', 'How ragged the edges between light steps are'], ['NOISE SIZE', 'tree', 'pFeat', 30, 0.5, 'px', 'Size of the light noise, plant pixels'],
+      ['BARK GRAIN', 'tree', 'pGrain', 3, 0.05, 'x', 'Streaks along the trunk and branches'], ['PUFF SHADOW', 'tree', 'pShadow', 1, 0.01, '', 'Darkness of front puffs\' shadow on the wood'], ['SHADOW REACH', 'tree', 'pReach', 2, 0.05, 'x', 'How far that shadow falls, times the puff\'s height'],
       ['GROUND SINK'], ['STRUCTURES', 'ground', 'str', 8, 0.1, '', 'How far structures sit into the ground, world units'], ['VEHICLES', 'ground', 'veh', 8, 0.1, '', 'How far vehicles sit into the ground, world units']]),   // (the plants with bones - 50-land-zz-rig.js: each kind's section, and the look they share)
   WEAPONS: () => [['FIRE RATE'], ['MACHINE GUN', 'mg', 'rate', 0.5, 0.005, 's', 'Seconds between rounds']].concat(...[['shell', 'SHELL'], ['rocket', 'ROCKET'], ['bomb', 'BOMB'], ['tankGun', 'TANK SHELL']].map(([f, lab]) =>
       [[lab + ' DAMAGE'], ['VS SHIPS', f, 'ship', 5, 0.05, 'x', lab.charAt(0) + lab.slice(1).toLowerCase() + ' damage to ships'], ['VS TOWERS', f, 'tower', 5, 0.05, 'x', lab.charAt(0) + lab.slice(1).toLowerCase() + ' damage to towers'], ['VS GROUND', f, 'land', 5, 0.05, 'x', lab.charAt(0) + lab.slice(1).toLowerCase() + ' damage to land and vehicles']]),
