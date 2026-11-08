@@ -5014,8 +5014,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 832;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 09:59';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 833;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 08 10:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -56254,20 +56254,77 @@ const hexRgb = h => { const m = /^#?([0-9a-f]{6})$/i.exec(h || ''); if (!m) retu
 // shapes' own light - each face lit by the sun as it turns at rest, each leaf its own tint, darker at its base - the hour's tint laid on after as near;
 // one set a light (the sun's side and height, coarse), made again when it moves
 const litKey = Lt => Math.round(Lt.lx * 3) + ',' + Math.round(Lt.ly * 3) + ',' + Math.round(Lt.amb * 20) + ',' + Math.round(Lt.dif * 20) + ',' + Math.round(clamp(VTUNE.tree.light, 0, 2) * 10) + ',' + Math.round(shadeK() * 20);
-function litBake(col, nx, ny, Lt, LS) {
-  const d = Math.max(0, nx * Lt.lx + ny * Lt.ly + 0.6 * Lt.lz) / Math.hypot(nx, ny, 0.6), kk = 1 + LS * (shadeK() * (Lt.amb - 1) + Lt.dif * d), m = Math.min(1, kk), up = Math.max(0, kk - 1) * 0.5, hh = d * d;
+const litD = (nx, ny, Lt) => Math.max(0, nx * Lt.lx + ny * Lt.ly + 0.6 * Lt.lz) / Math.hypot(nx, ny, 0.6);   // (how far a facing turns to the light)
+function litBake(col, nx, ny, Lt, LS) { return litBakeD(col, litD(nx, ny, Lt), Lt, LS); }
+function litBakeD(col, d, Lt, LS) {
+  const kk = 1 + LS * (shadeK() * (Lt.amb - 1) + Lt.dif * d), m = Math.min(1, kk), up = Math.max(0, kk - 1) * 0.5, hh = d * d;
   return [Math.round(clamp(col[0] * m + (up + hh * Lt.hl[0]) * 255, 0, 255)), Math.round(clamp(col[1] * m + (up + hh * Lt.hl[1]) * 255, 0, 255)), Math.round(clamp(col[2] * m + (up + hh * Lt.hl[2]) * 255, 0, 255))];
 }
 // (10:10: "the darkening levels seem a bit too strong ... the amount of darkness the vegetation gets globally") LOOK > SHADE DEPTH: 1 as it was, 0 none
 const shadeK = () => clamp(VTUNE.tree.shade != null ? VTUNE.tree.shade : 1, 0, 1.5);
 const leafColOf = (lc, q) => { const h = rigHash(q.f + 1, 71) - 0.5, h2 = rigHash(q.f + 1, 72) - 0.5, u = q.u || 0.5, g = 1 + shadeK() * (0.4 * u - 0.28); return [lc[0] * g * (1 + h * 0.22), lc[1] * g * (1 + h2 * 0.12), lc[2] * g * (1 - h * 0.2)]; };
+// a built plant's shapes at rest (kept on it)
+const builtRest = rc => rc._g0 || (rc._g0 = builtGeo(rc, null, (c, kind) => kind === 'trunk' ? trunkPolys(c || rc.key) : kind === 'puff' ? puffPolys(c || rc.key) : builtLeaf(c || rc.key), null));
+/* ---- PUFFS PAINTED PIXEL BY PIXEL (user Nov 8 08:45: "the shading of the puffs ... less 'geometric' ... a sort of noise for the falloff"; 08:51
+   "What about how you shade between polys?"; 08:53: every puff, not one component). A puff was its component's polygons, each one flat colour from
+   where its middle sits - wedges. Now every puff is one picture at rest: its polygons' masks for its shape, and each pixel lit on its own - facing
+   out from the puff's middle as a ball does, turned a little by a soft noise, the light then rounded to PUFF_BANDS steps with that noise in the
+   rounding, so the steps' edges are ragged as a painted clump's. One picture a puff a light (the light's coarse key, as the far pictures) a size,
+   in the plants' kept pictures (vegKeep); near and mid lay it where the puff is now, turned and scaled with it (one picture, not its polygons) ---- */
+const PUFF_BANDS = 5, PUFF_NOISE = 0.55, PUFF_FEAT = 7;   // (light steps; how far the noise moves a pixel's step; the noise's size, art pixels)
+const pnHash = (i, j, s) => { let h = Math.imul(i, 374761393) + Math.imul(j, 668265263) + Math.imul(s, 1274126177) | 0; h = Math.imul(h ^ (h >>> 13), 1103515245); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+function pnNoise(x, y, s) {   // (value noise, 0..1, smooth between whole numbers)
+  const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const a = pnHash(i, j, s), b = pnHash(i + 1, j, s), c = pnHash(i, j + 1, s), d = pnHash(i + 1, j + 1, s);
+  return (a + (b - a) * u) + ((c + (d - c) * u) - (a + (b - a) * u)) * v;
+}
+function puffPic(rc, f, Lt, n) { n = n || 1; const k = f + ':' + (Lt ? litKey(Lt) : '-') + 'x' + n, M = rc._pufK || (rc._pufK = new Map()); return vegKeep(M, k, () => puffPic0(rc, f, Lt, n), vegPieceFree, 96); }
+function puffPic0(rc, f, Lt, n) {
+  const B = rc.built, L = B.leaves[f]; if (!L || L.k !== 'puff') return null;
+  const g0 = builtRest(rc), QS = g0.leaves.filter(q => q.f === f); if (!QS.length) return null;
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; for (const q of QS) for (const [a, b] of q.pts) { if (a < x0) x0 = a; if (b < y0) y0 = b; if (a > x1) x1 = a; if (b > y1) y1 = b; }
+  x0 = Math.floor(x0) - 2; y0 = Math.floor(y0) - 2; x1 = Math.ceil(x1) + 2; y1 = Math.ceil(y1) + 2;
+  const W = Math.max(1, (x1 - x0) * n), H = Math.max(1, (y1 - y0) * n), cv = makeCanvas(W, H), x = cv.getContext('2d'); x.scale(n, n); x.translate(-x0, -y0);
+  // its shape: every polygon's mask piece in white (its polygons filled where its component has no mask)
+  const [sh, ck] = puffSrc(L.c || rc.key), comp = sh.puffC, mk = maskOf(sh, 'puff', ck);
+  for (const q of QS) { const src = comp && comp.polys[q.pi]; if (src && mk) { maskTris(x, sh, 'puff', ck, rc, q.pi, src.pts, q.pts, '#fff', n); continue; }
+    x.beginPath(); q.pts.forEach(([a, b], j) => j ? x.lineTo(a, b) : x.moveTo(a, b)); x.closePath(); x.fillStyle = '#fff'; x.fill(); }
+  // each pixel lit: where it sits in the puff (its middle the part's root, its size rx / ry) is which way it faces; the noise in art pixels, the part's own
+  const id = x.getImageData(0, 0, W, H), D = id.data, r0 = L.pts[0], rx = L.rx || 16, ry = L.ry || 12, LSx = clamp(VTUNE.tree.light, 0, 2), lc = hexRgb(B.col);
+  const TC = B.trunk || {}, c1 = hexRgb(TC.c1 || '#7a5636'), c2 = hexRgb(TC.c2 || '#8a6440'), seed = f * 7919 + 13, Q = { f, u: 0.5, k: 'puff' };
+  for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) { const o = (py * W + px) * 4; if (!D[o + 3]) continue;
+    const wx = x0 + (px + 0.5) / n, wy = y0 + (py + 0.5) / n, ex = (wx - r0[0]) / rx, ey = (wy - r0[1]) / ry, r = Math.min(1, Math.hypot(ex, ey));
+    const N1 = pnNoise(wx / PUFF_FEAT, wy / PUFF_FEAT, seed) * 0.65 + pnNoise(wx / (PUFF_FEAT * 0.4), wy / (PUFF_FEAT * 0.4), seed + 1) * 0.35 - 0.5, N2 = pnNoise(wx / PUFF_FEAT + 31.7, wy / PUFF_FEAT - 12.3, seed + 2) - 0.5;
+    const nx = (ex + N1 * 0.5) * 0.9, ny = (ey + N2 * 0.5) * 0.9;
+    Q.u = clamp(0.5 + 0.5 * r + N1 * 0.12, 0.5, 1); const base = L.cols ? partCol(B, Q, lc, c1, c2) : lc;
+    let col;
+    if (Lt) { const dq = clamp(Math.round(litD(nx, ny, Lt) * PUFF_BANDS + N1 * PUFF_NOISE * 2) / PUFF_BANDS, 0, 1); col = litBakeD(base, dq, Lt, LSx); }
+    else { const kk = 0.8 + 0.4 * clamp(Math.round(Math.max(0, -(nx * 0.5 + ny * 0.8)) * PUFF_BANDS + N1 * PUFF_NOISE * 2) / PUFF_BANDS, 0, 1); col = base.map(v => clamp(v * kk, 0, 255)); }
+    D[o] = col[0]; D[o + 1] = col[1]; D[o + 2] = col[2]; }
+  x.setTransform(1, 0, 0, 1, 0, 0); x.putImageData(id, 0, 0);
+  // (its polygon spread widest at rest: near / mid lay the picture by where that one's corners are now)
+  let ref = QS[0], ra = -1; for (const q of QS) { let a = 0; for (let i = 0, j = q.pts.length - 1; i < q.pts.length; j = i++) a += (q.pts[j][0] - q.pts[i][0]) * (q.pts[j][1] + q.pts[i][1]); if (Math.abs(a) > ra) { ra = Math.abs(a); ref = q; } }
+  return { c: cv, x: x0, y: y0, n, pi: ref.pi, R: ref.pts.map(p => [p[0], p[1]]) };
+}
+// (the puff's picture where its widest polygon is now: the affine from that polygon at rest to its points now - null if it isn't drawn)
+const PUF_FL = [];
+function puffAffine(P, g, f) { let q = null; for (const z of g.leaves) if (z.f === f && z.pi === P.pi) { q = z; break; } if (!q || q.pts.length !== P.R.length) return null; PUF_FL.length = 0; for (const p of q.pts) PUF_FL.push(p[0], p[1]); return polyAffine(P.R, PUF_FL); }
+// (user Nov 8 08:51: "can the puffs shade the trunk? Like a simple offset darkness in the trunk based on the light source direction (just the ones in front of
+// the trunk)") a front puff's shape laid dark over what's already drawn of its plant - the wood, and the puffs behind - moved away from the light
+const PUFF_SHADOW = 0.55;
+const puffShadowOff = (L, Lt) => { const k = clamp((L.ry || 12) * 0.5, 3, 14); if (!Lt) return [-0.35 * k, 0.94 * k]; const d = Math.hypot(Lt.lx, Lt.ly) || 1; return [-Lt.lx / d * k, -Lt.ly / d * k]; };   // (no light - the editor's picture: a high sun to the right)
+const puffShadowA = Lt => Lt ? PUFF_SHADOW * clamp(0.35 + Lt.dif / 0.6 * 0.65, 0, 1) : PUFF_SHADOW * 0.6;
+// (user Nov 8 08:42 / 08:51: "trunks from a tree always feel like a single shape") a branch's facing: near its root the trunk's own side there (its left side
+// for a branch going left), turning partly into its own top and underside out to its middle - the trunk's light and dark run on into it, the wood lit as one
+function branchNorm(B, q, nx, ny) { const L = B.leaves[q.f], P = L && L.pts; if (!P || P.length < 2) return [nx, ny]; const b = 1 - 0.6 * smoothstep(0.05, 0.6, q.u || 0), sx = P[P.length - 1][0] >= P[0][0] ? 0.85 : -0.85; return [nx + (sx - nx) * b, ny + (-0.1 - ny) * b]; }
+const PUF_SCR = { c: null }, puffShadowScr = (w, h) => { let c = PUF_SCR.c; if (!c || c.width < w || c.height < h) c = PUF_SCR.c = makeCanvas(Math.max(w, c ? c.width : 0), Math.max(h, c ? c.height : 0)); else c.getContext('2d').clearRect(0, 0, c.width, c.height); return c; };
 function builtSprite(rc, Lt, n) { n = n || 1; const k = (Lt ? litKey(Lt) : '-') + 'x' + n, C2 = rc._sprK || (rc._sprK = new Map()); return vegKeep(C2, k, () => builtPiece(rc, null, true, true, Lt, n) || null, vegPieceFree, 12); }
 // (Nov 4 08:52) the plant at rest drawn as pictures: all of it (the far one), or some of its leaves' polygons (sel), with or without the trunk -
 // cropped to what's drawn: { c, x, y } (its top left in the plant's own pixels)
 function builtPiece(rc, sel, trunk, all, Lt, n, opx) {
   n = n || 1;   // (opx: the parts' outlines laid in too, art pixels a plant pixel - the prefab editor's MASK picture, user Nov 4 12:38)
   const LSx = clamp(VTUNE.tree.light, 0, 2);
-  const B = rc.built, g0 = rc._g0 || (rc._g0 = builtGeo(rc, null, (c, kind) => kind === 'trunk' ? trunkPolys(c || rc.key) : kind === 'puff' ? puffPolys(c || rc.key) : builtLeaf(c || rc.key), null));
+  const B = rc.built, g0 = builtRest(rc);
   const QS = g0.leaves.filter(q => all || (sel && sel(q))); let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; const ext = pts => { for (const [a, b] of pts) { if (a < x0) x0 = a; if (b < y0) y0 = b; if (a > x1) x1 = a; if (b > y1) y1 = b; } };
   for (const q of QS) ext(q.pts); if (trunk) for (const q of g0.quads) ext(q.pts);
   const hr = B.trunk && B.leaves.length ? Math.max(5, (B.trunk.pts[B.trunk.pts.length - 1][2] || B.trunk.w1 || 3) * 2.2) : 0; if (trunk && hr) ext([[g0.top[0] - hr, g0.top[1] - hr * 1.2], [g0.top[0] + hr, g0.top[1] + hr]]);
@@ -56276,8 +56333,10 @@ function builtPiece(rc, sel, trunk, all, Lt, n, opx) {
   const TC = B.trunk || {}, c0 = hexRgb(TC.c0 || '#5a3e28'), c1 = hexRgb(TC.c1 || '#7a5636'), c2 = hexRgb(TC.c2 || '#8a6440'); let lc = hexRgb(B.col);
   const poly = (pts, col, kk) => { x.beginPath(); pts.forEach(([a, b], j) => j ? x.lineTo(a, b) : x.moveTo(a, b)); x.closePath(); x.fillStyle = 'rgb(' + col.map(v => Math.round(clamp(v * kk, 0, 255))).join(',') + ')'; x.fill(); };
   // (a leaf polygon: its piece of its LEAF's mask, coloured, laid where it is - as near)
-  const lpoly = (q, kk) => { const L = B.leaves[q.f], which = q.k === 'branch' ? 'trunk' : q.k === 'puff' ? 'puff' : 'leaf', [sh, ck] = which === 'trunk' ? trunkSrc(L.c || rc.key) : which === 'puff' ? puffSrc(L.c || rc.key) : leafSrc(L.c || rc.key), comp = which === 'trunk' ? sh.trunkC : which === 'puff' ? sh.puffC : sh.leaf, src = comp && comp.polys[q.pi], lc0 = lc; if (q.k === 'branch') lc = c1; if (q.k === 'puff' && !Lt) kk *= 0.8 + 0.4 * Math.max(0, -(q.pn[0] * 0.5 + q.pn[1] * 0.8));
-    if (Lt) { const sg = q.side ? 1 : -1, nx = q.k === 'puff' ? q.pn[0] * 0.9 : -Math.sin(q.th) * 0.8 * sg, ny = q.k === 'puff' ? q.pn[1] * 0.9 : Math.cos(q.th) * 0.8 * sg; lc = litBake(partCol(B, q, lc0, c1, c2), nx, ny, Lt, LSx); kk = 1; } else if (B.leaves[q.f] && B.leaves[q.f].cols) lc = partCol(B, q, lc0, c1, c2);
+  const pufDone = new Set();
+  const lpoly = (q, kk) => { if (q.k === 'puff') { if (pufDone.has(q.f)) return; pufDone.add(q.f); const P = puffPic(rc, q.f, Lt, n); if (P) { x.globalAlpha = partA(B, q); x.drawImage(P.c, P.x, P.y, P.c.width / P.n, P.c.height / P.n); x.globalAlpha = 1; } return; }   // (a puff: its picture, painted pixel by pixel - once)
+    const L = B.leaves[q.f], which = q.k === 'branch' ? 'trunk' : q.k === 'puff' ? 'puff' : 'leaf', [sh, ck] = which === 'trunk' ? trunkSrc(L.c || rc.key) : which === 'puff' ? puffSrc(L.c || rc.key) : leafSrc(L.c || rc.key), comp = which === 'trunk' ? sh.trunkC : which === 'puff' ? sh.puffC : sh.leaf, src = comp && comp.polys[q.pi], lc0 = lc; if (q.k === 'branch') lc = c1; if (q.k === 'puff' && !Lt) kk *= 0.8 + 0.4 * Math.max(0, -(q.pn[0] * 0.5 + q.pn[1] * 0.8));
+    if (Lt) { const sg = q.side ? 1 : -1; let nx = q.k === 'puff' ? q.pn[0] * 0.9 : -Math.sin(q.th) * 0.8 * sg, ny = q.k === 'puff' ? q.pn[1] * 0.9 : Math.cos(q.th) * 0.8 * sg; if (q.k === 'branch') [nx, ny] = branchNorm(B, q, nx, ny); lc = litBake(partCol(B, q, lc0, c1, c2), nx, ny, Lt, LSx); kk = 1; } else if (B.leaves[q.f] && B.leaves[q.f].cols) lc = partCol(B, q, lc0, c1, c2);
     const pa = partA(B, q); x.globalAlpha = pa;
     try { if (src && maskOf(sh, which, ck)) { maskTris(x, sh, which, ck, rc, q.pi, src.pts, q.pts, 'rgb(' + lc.map(v => Math.round(clamp(v * kk, 0, 255))).join(',') + ')', n); return; }
     poly(q.pts, lc, kk); } finally { lc = lc0; x.globalAlpha = 1; } };
@@ -56292,6 +56351,11 @@ function builtPiece(rc, sel, trunk, all, Lt, n, opx) {
   if (trunk) for (const q of g0.quads) { const t = q.t, col0 = trunkCol(TC, t, c0, c1, c2), col = Lt ? litBake(col0, q.side ? 0.85 : -0.85, -0.1, Lt, LSx) : col0.map(v => v * (q.side ? 1.05 : 0.85)), src = tm && tsh.trunkC.polys[q.pi];
     x.globalAlpha = trunkA(TC, t); if (src) maskTris(x, tsh, 'trunk', tkey, rc, q.pi, src.pts, q.pts, 'rgb(' + col.map(v => Math.round(clamp(v, 0, 255))).join(',') + ')', n); else poly(q.pts, col, 1); x.globalAlpha = 1; }
   if (trunk && hr) poly(Array.from({ length: 8 }, (_, a) => [g0.top[0] + Math.cos(a * Math.PI / 4) * hr, g0.top[1] - hr * 0.35 + Math.sin(a * Math.PI / 4) * hr * 0.8]), Lt ? litBake(lc.map(v => v * 0.62), 0, -0.3, Lt, LSx) : lc, Lt ? 1 : 0.62);
+  // (the front puffs' shadows over what's drawn - the wood and the puffs behind - only in a picture with the trunk)
+  if (trunk && B.trunk) { const SA = puffShadowA(Lt), dn = new Set(); for (const q of QS) { if (!q.front || q.k !== 'puff' || dn.has(q.f)) continue; dn.add(q.f); const P = puffPic(rc, q.f, Lt, n); if (!P) continue;
+      const L = B.leaves[q.f], [ox, oy] = puffShadowOff(L, Lt), t = puffShadowScr(P.c.width, P.c.height), tx = t.getContext('2d');
+      tx.drawImage(P.c, 0, 0); tx.globalCompositeOperation = 'source-in'; tx.fillStyle = '#0b0a06'; tx.fillRect(0, 0, P.c.width, P.c.height); tx.globalCompositeOperation = 'source-over';
+      x.save(); x.globalCompositeOperation = 'source-atop'; x.globalAlpha = SA * partA(B, q); x.drawImage(t, 0, 0, P.c.width, P.c.height, P.x + ox, P.y + oy, P.c.width / P.n, P.c.height / P.n); x.restore(); } }
   for (const q of QS) if (q.front) lpolyO(q, q.side ? 1.1 : 0.88);
   return { c: cv, x: x0, y: y0, n };
 }
@@ -56304,7 +56368,7 @@ function builtMid(rc, Lt, n) {
 }
 function builtMid0(rc, Lt, n) {
   const B = rc.built; if (B.leaves.some(L => L.k === 'branch')) return null;   // (branches: what hangs on them rides them - drawn whole)
-  const g0 = rc._g0 || (rc._g0 = builtGeo(rc, null, (c, kind) => kind === 'trunk' ? trunkPolys(c || rc.key) : kind === 'puff' ? puffPolys(c || rc.key) : builtLeaf(c || rc.key), null)), S = rc._S;
+  const g0 = builtRest(rc), S = rc._S;
   const parts = B.leaves.map((L, f) => { const r0 = L.pts[0], low = r0[1] >= rc.foot - 0.5; let ai = 0, bd = 1e9; if (B.trunk && !low && S) for (let i = 0; i < S.length; i++) { const d = Math.hypot(S[i][0] - r0[0], S[i][1] - r0[1]); if (d < bd) { bd = d; ai = i; } }
     if (L.k === 'puff') return { f, puff: true, front: !!L.front, r0, ai, low, a: builtPiece(rc, q => q.f === f, false, false, Lt, n) };
     const lf = g0.lf[f], J = lf ? lf.Q[Math.floor((lf.Q.length - 1) / 2)] : r0;
@@ -56336,6 +56400,13 @@ function drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add) {
       D.save(); D.transform(1, 0, bb, 1, a, 0); D.drawImage(img, 0, (y0 - T.y) * tn, T.c.width, (y1 - y0) * tn, T.x, y0, T.c.width / tn, y1 - y0); D.restore(); } };
     { const ol = GLR.on ? olOf(B.trunk) : null; if (ol) { const T0 = D.getTransform(), tc = olTint(ol, mul), ga0 = D.globalAlpha; D.globalAlpha = ga0 * olA(ol); for (const [dx, dy] of vegOlOffs(Math.round(ol.w))) { D.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e + dx * OU, T0.f + dy * OU); bands(glTint(T.c, 'rgO', RIG_ZERO, tc, false)); } D.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e, T0.f); D.globalAlpha = ga0; } }
     bands(tint(T)); }
+  // (the front puffs' shadows over what's drawn, away from the light - as near)
+  if (M.trunk && GLR.on) { const Lt = rigLight(it), SA = puffShadowA(Lt), op0 = D.globalCompositeOperation; D.globalCompositeOperation = 'source-atop';
+    for (const p of M.parts) { if (!p.front || !p.puff || !p.a) continue; const [ox, oy] = puffShadowOff(B.leaves[p.f], Lt); D.save(); D.translate(ox, oy); D.globalAlpha = SA;
+      const z = s.sz[p.f] || 1, b0 = s.b[p.f * 2], b1 = s.b[p.f * 2 + 1], ta = !p.low && n ? MID_A[p.ai] : 0, ca = Math.cos(ta), sa = Math.sin(ta), qx = p.r0[0] - (n ? S[p.ai][0] : 0), qy = p.r0[1] - (n ? S[p.ai][1] : 0);
+      D.translate(!p.low && n ? MID_P[p.ai * 2] + qx * ca - qy * sa : p.r0[0], !p.low && n ? MID_P[p.ai * 2 + 1] + qx * sa + qy * ca : p.r0[1]); D.rotate(ta + b0 * 0.6 + b1 * 0.25); D.scale(z, z); D.translate(-p.r0[0], -p.r0[1]);
+      D.drawImage(glTint(p.a.c, 'rgK', RIG_ZERO, PUF_SHC, false), p.a.x, p.a.y, p.a.c.width / p.a.n, p.a.c.height / p.a.n); D.restore(); }
+    D.globalAlpha = 1; D.globalCompositeOperation = op0; }
   for (const p of M.parts) if (p.front) part(p);
   D.restore();
   if (LY) vegBlit(LY, it, X, Y, w, MX * q, MY * q);
@@ -56377,7 +56448,7 @@ function drawBuilt(it, rc, s, X, Y, w, k, mul, add) {
     // (its component: a branch the TRUNK's - its wood coloured up its length, charring with the trunk; a puff its PUFF - lit as a ball, from its
     // middle out; a leaf its LEAF)
     let nx = -Math.sin(q.th) * 0.8 * sg, ny = Math.cos(q.th) * 0.8 * sg, col, sh, ck, which;
-    if (q.k === 'branch') { col = partCol(B, q, lc, c1, c2).map(v => v * (1 - black)); [sh, ck] = trunkSrc(L.c || rc.key); which = 'trunk'; }
+    if (q.k === 'branch') { col = partCol(B, q, lc, c1, c2).map(v => v * (1 - black)); [sh, ck] = trunkSrc(L.c || rc.key); which = 'trunk'; [nx, ny] = branchNorm(B, q, nx, ny); }
     else if (q.k === 'puff') { col = L.cols ? partCol(B, q, lc, c1, c2) : leafCol(q); nx = q.pn[0] * 0.9; ny = q.pn[1] * 0.9; [sh, ck] = puffSrc(L.c || rc.key); which = 'puff'; }
     else { col = L.cols ? partCol(B, q, lc, c1, c2) : leafCol(q); [sh, ck] = leafSrc(L.c || rc.key); which = 'leaf'; }
     if (GLR.on) { const comp = which === 'trunk' ? sh.trunkC : which === 'puff' ? sh.puffC : sh.leaf, src = comp && comp.polys[q.pi];
@@ -56401,7 +56472,15 @@ function drawBuilt(it, rc, s, X, Y, w, k, mul, add) {
         D.setTransform(SM.a, SM.b, SM.c, SM.d, SM.e, SM.f); D.fillStyle = css; D.beginPath(); D.moveTo(q.pts[0][0], q.pts[0][1]); for (let i = 1; i < q.pts.length; i++) D.lineTo(q.pts[i][0], q.pts[i][1]); D.closePath(); D.fill(); } }
     D.setTransform(DM.a, DM.b, DM.c, DM.d, DM.e, DM.f); D.globalAlpha = ga0; };
   const leafShape = q => { if (!GLR.on || VEG_NOMASK) return null; const L = B.leaves[q.f], which = q.k === 'branch' ? 'trunk' : q.k === 'puff' ? 'puff' : 'leaf', [sh, ck] = which === 'trunk' ? trunkSrc(L.c || rc.key) : which === 'puff' ? puffSrc(L.c || rc.key) : leafSrc(L.c || rc.key), comp = which === 'trunk' ? sh.trunkC : which === 'puff' ? sh.puffC : sh.leaf, src = comp && comp.polys[q.pi]; return src && maskOf(sh, which, ck) ? [sh, ck, which, src.pts] : null; };
-  const leafO = q => { const ol = DM && olOf(B.leaves[q.f]); if (ol && !olDone.has(q.f)) { olDone.add(q.f); const qs = g.leaves.filter(x => x.f === q.f && x.al > 0); if (qs.length) { const a0 = D.globalAlpha; if (q.al < 1) D.globalAlpha = Math.max(0, q.al); olPolys(qs, ol, leafShape); D.globalAlpha = a0; } } leaf(q); };
+  // (a puff: its picture painted pixel by pixel, laid where it is now - once a part; burning darkens it and glows as its shapes did)
+  const pufDone = new Set(), pufOn = GLR.on && !VEG_NOMASK && !!DM;
+  const pufAt = (q, P) => { const A = puffAffine(P, g, q.f); if (!A) return false; const [a, b, c, d, e, f] = A; D.setTransform(DM.a * a + DM.c * b, DM.b * a + DM.d * b, DM.a * c + DM.c * d, DM.b * c + DM.d * d, DM.a * e + DM.c * f + DM.e, DM.b * e + DM.d * f + DM.f); return true; };
+  const puff = q => { if (pufDone.has(q.f)) return; pufDone.add(q.f); const P = puffPic(rc, q.f, Lt, NU), a = (q.al < 1 ? q.al : 1) * partA(B, q); if (!P || a <= 0 || !pufAt(q, P)) { D.setTransform(DM.a, DM.b, DM.c, DM.d, DM.e, DM.f); return; }
+    const bf = burn ? burn[q.f] : 0, dk = 1 - 0.85 * smoothstep(0, 0.6, bf), gl = bf > 0.05 && bf < 0.85 ? 0.35 * Math.sin(Math.PI * (bf - 0.05) / 0.8) : 0;
+    const ga0 = D.globalAlpha; D.globalAlpha = ga0 * a; D.drawImage(glTint(P.c, 'rgU', [mul[0] * dk, mul[1] * dk, mul[2] * dk], [add[0] + gl, add[1] + gl * 0.45, add[2]], false), P.x, P.y, P.c.width / P.n, P.c.height / P.n); D.globalAlpha = ga0;
+    D.setTransform(DM.a, DM.b, DM.c, DM.d, DM.e, DM.f); };
+  const leafO = q => { if (pufOn && q.k === 'puff') { const ol = olOf(B.leaves[q.f]); if (ol && !olDone.has(q.f)) { olDone.add(q.f); const qs = g.leaves.filter(x => x.f === q.f && x.al > 0); if (qs.length) olPolys(qs, ol, leafShape); } puff(q); return; }
+    const ol = DM && olOf(B.leaves[q.f]); if (ol && !olDone.has(q.f)) { olDone.add(q.f); const qs = g.leaves.filter(x => x.f === q.f && x.al > 0); if (qs.length) { const a0 = D.globalAlpha; if (q.al < 1) D.globalAlpha = Math.max(0, q.al); olPolys(qs, ol, leafShape); D.globalAlpha = a0; } } leaf(q); };
   for (const q of g.leaves) if (!q.front) leafO(q);
   const [tsh, tkey] = trunkSrc((B.trunk && B.trunk.c) || rc.key), tmask = GLR.on && !VEG_NOMASK && maskOf(tsh, 'trunk', tkey);
   { const ol = DM && olOf(B.trunk); if (ol && g.quads.length) olPolys(g.quads, ol, q => { const src = tmask && tsh.trunkC.polys[q.pi]; return src ? [tsh, tkey, 'trunk', src.pts] : null; }); }
@@ -56414,10 +56493,16 @@ function drawBuilt(it, rc, s, X, Y, w, k, mul, add) {
   D.globalAlpha = 1;
   // (23:08) the crown's heart over the trunk's top (under the leaves in front): their bases close over it as they bend
   if (B.trunk && B.leaves.length) { const r = Math.max(5, (B.trunk.pts[B.trunk.pts.length - 1][2] || B.trunk.w1 || 3) * 2.2); fill(Array.from({ length: 8 }, (_, a) => [g.top[0] + Math.cos(a * Math.PI / 4) * r, g.top[1] - r * 0.35 + Math.sin(a * Math.PI / 4) * r * 0.8]), lc.map(v => v * 0.62 * (1 - black * 0.8)), 0, -0.3, 1, 0); }
+  if (pufOn && B.trunk) { const SA = puffShadowA(Lt), dn = new Set(), op0 = D.globalCompositeOperation; D.globalCompositeOperation = 'source-atop';
+    for (const q of g.leaves) { if (!q.front || q.k !== 'puff' || dn.has(q.f)) continue; dn.add(q.f); const P = puffPic(rc, q.f, Lt, NU), a = (q.al < 1 ? q.al : 1) * partA(B, q); if (!P || a <= 0 || !pufAt(q, P)) continue;
+      const [ox, oy] = puffShadowOff(B.leaves[q.f], Lt), T0 = D.getTransform(); D.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e + DM.a * ox + DM.c * oy, T0.f + DM.b * ox + DM.d * oy);
+      D.globalAlpha = SA * a; D.drawImage(glTint(P.c, 'rgK', RIG_ZERO, PUF_SHC, false), P.x, P.y, P.c.width / P.n, P.c.height / P.n); }
+    D.globalAlpha = 1; D.globalCompositeOperation = op0; D.setTransform(DM.a, DM.b, DM.c, DM.d, DM.e, DM.f); }
   for (const q of g.leaves) if (q.front) leafO(q);
   D.restore();
   if (LY) vegBlit(LY, it, X, Y, w, MX * q, MY * q);
 }
+const PUF_SHC = [0x0b / 255, 0x0a / 255, 0x06 / 255];
 // a build to start from: the kind's own rig - its trunk's spine (a few points), its widths and colours, each frond a leaf along its root, joint, tip
 function builtFrom(key) {
   const bk = folBase(key);
