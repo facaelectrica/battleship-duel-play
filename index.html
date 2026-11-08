@@ -73,10 +73,14 @@ body {
 // flag for this tab's next load (sessionStorage 'veged'); CLOSE clears it. The lab's artifact is always in it (window.__vegLab)
 // (user Nov 7 20:16: "The game is loading the editor by default?") the flag is for the next load only: read and let go here, so a refresh or a
 // new release in the same tab opens the title. The editor's own reloads that stay in it (RESET) set it again - vegReload()
-const VEG_MODE = (() => { try { const on = sessionStorage.getItem('veged') === '1'; sessionStorage.removeItem('veged'); return !!window.__vegLab || on; } catch (e) { return !!window.__vegLab; } })();
+// (user Nov 8 09:12-09:15: the switch in place, no reload - "the Biome Editor can never write into your saved world. This is SUPER important") VEG_MODE
+// is no longer fixed for the page: the Biome Editor goes in and out in place (53-veg-editor.js vegEnter / vegLeave), its test world one more world the
+// page swaps in through the one world swap online play uses (00-world.js vegIn / vegOut - NET_WORLD and THE WORLD GUARD). The flag still opens it on
+// a load (its own RESET and biome reloads, a refresh in it)
+let VEG_MODE = (() => { try { const on = sessionStorage.getItem('veged') === '1'; sessionStorage.removeItem('veged'); return !!window.__vegLab || on; } catch (e) { return !!window.__vegLab; } })();
 function vegReload() { try { sessionStorage.setItem('veged', '1'); } catch (e) { } location.reload(); }
 if (VEG_MODE) {
-  window.__noWorker = true; window.__openSea = true;
+  window.__openSea = true;   // (the simulation worker held instead of off - 00-world.js: the game left in place goes back to it)
   try { const st = document.createElement('style'); st.textContent = 'html.flWait::after{content:"";position:fixed;inset:0;background:#2a3424;z-index:2147483647}'; document.head.appendChild(st); document.documentElement.classList.add('flWait'); setTimeout(() => document.documentElement.classList.remove('flWait'), 30000); } catch (e) { }
 }
 
@@ -478,7 +482,7 @@ const VEG_BAKED = {"at":"2026-11-04T17:54:22.841Z","vt":{"veg_palm":{"leafWeight
    every noted key back (sceneRestore). A page that opens with a journal left over - closed or reloaded without saving - puts it back
    before anything is read: unsaved changes are gone. Below the world shim (installed first), so it sees the stored names - the
    Story world's bd_sw_ ones too. Asked before leaving: 50-zzzz-scene-ask.js. ---- */
-const SCENE = { key: 'bd_scene_j', raw: null };
+const SCENE = { get key() { return VEG_MODE ? 'bd_veg_j' : 'bd_scene_j'; }, raw: null };   // (each editor its own journal - the Biome Editor goes in and out in place now)
 // the Biome Editor's own saved keys - what its SAVE CHANGES keeps and DISCARD puts back (not its bookkeeping: bd_biome_snapsig, bd_vgbot_h)
 const VEG_JKEYS = ['bd_vegdecks', 'bd_foliage', 'bd_vegprefabs', 'bd_vtune', 'bd_biome_surf', 'bd_biome_pics', 'bd_biome_grounds', 'bd_biome_ground', 'bd_plants'];
 function sceneJ() { try { return JSON.parse(SCENE.raw.g(SCENE.key) || 'null') || null; } catch (e) { return null; } }
@@ -507,24 +511,21 @@ function sceneRestore() {
   // into this browser's own world on the next visit. User Nov 7 23:04: "in the Biome Editor, why dont we also have a 'Save Changes'?" - the same
   // journal, of its own (bd_veg_j), noting only the Biome Editor's own keys (VEG_JKEYS). The page reloads inside the Biome Editor (its terrain
   // shape's editor closing), so a leftover journal is kept - still unsaved - never put back by itself; DISCARD puts it back (53-veg-editor.js))
+  // (Nov 8: the Biome Editor in and out in place - which journal, and which keys it notes, is whichever editor the page is in at the write)
   const VEG = typeof VEG_MODE !== 'undefined' && VEG_MODE;
-  if (VEG) SCENE.key = 'bd_veg_j';
   try {
     const LS = localStorage; if (typeof Storage === 'undefined' || !(LS instanceof Storage)) return;
     const P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
     SCENE.raw = { g: k => g.call(LS, k), s: (k, v) => s.call(LS, k, v), r: k => r.call(LS, k) };
-    if (VEG) {
-      const trackV = k => VEG_JKEYS.includes(k);
-      P.setItem = function (k, v) { if (this === LS && trackV(k)) sceneNote(k); return s.call(this, k, v); };
-      P.removeItem = function (k) { if (this === LS && trackV(k)) sceneNote(k); return r.call(this, k); };
-      return;
-    }
-    const n = sceneRestore(); if (n) console.log('EDITOR: ' + n + ' unsaved change(s) from the last visit discarded');
+    if (!VEG) { const n = sceneRestore(); if (n) console.log('EDITOR: ' + n + ' unsaved change(s) from the last visit discarded'); }
+    const trackV = k => VEG_JKEYS.includes(k);
     const track = k => typeof k === 'string' && k.startsWith('bd_') && !sceneSkip(k) && sceneEdOpen();
-    P.setItem = function (k, v) { if (this === LS && track(k)) sceneNote(k); return s.call(this, k, v); };
-    P.removeItem = function (k) { if (this === LS && track(k)) sceneNote(k); return r.call(this, k); };
-    // (closing the tab or reloading with changes not saved: the browser's own "leave the page?" - they'd be gone)
-    window.addEventListener('beforeunload', e => { if (sceneDirty()) { e.preventDefault(); e.returnValue = ''; } });
+    const tr = k => VEG_MODE ? trackV(k) : track(k);
+    P.setItem = function (k, v) { if (this === LS && tr(k)) sceneNote(k); return s.call(this, k, v); };
+    P.removeItem = function (k) { if (this === LS && tr(k)) sceneNote(k); return r.call(this, k); };
+    // (closing the tab or reloading with changes not saved: the browser's own "leave the page?" - they'd be gone. Not in the Biome Editor: it reloads
+    // within itself with its journal kept, still unsaved)
+    window.addEventListener('beforeunload', e => { if (!VEG_MODE && sceneDirty()) { e.preventDefault(); e.returnValue = ''; } });
   } catch (e) { }
 })();
 
@@ -561,7 +562,7 @@ const isGameKey = k => typeof k === 'string' && k.startsWith('bd_') && !k.starts
 const worldPackOf = story => story ? WORLD_PACK.story : WORLD_PACK.open;
 // a key as it is kept, whichever world is loaded (the SNAPSHOT: both worlds in one paste - 41-sky-new.js gameSnapshot)
 let lsRawGet = k => localStorage.getItem(k), lsRawSet = (k, v) => localStorage.setItem(k, v), lsRawDel = k => localStorage.removeItem(k);
-const STORY_WORLD = (() => { try { return !VEG_MODE && localStorage.getItem('bd_world') === 'story'; } catch (e) { return false; } })();   // (the VEGETATION EDITOR: its own world - 00-a-veg-mode.js)
+const STORY_WORLD = (() => { try { return localStorage.getItem('bd_world') === 'story'; } catch (e) { return false; } })();   // (the BIOME EDITOR's own world comes in over whichever this is - vegIn: every world key read from it)
 /* (user, Nov 2 12:35: "make it so that the snapshot actually copies the content of the tab that I'm in ... update what's in the
    memory at the same time that's capturing the snapshot") THIS TAB'S SAVE: two tabs share one browser save and each writes whole
    keys from its own memory, so the save can hold the other tab's world. Every bd_ key this tab reads or writes is kept here as
@@ -594,8 +595,8 @@ const netKey = k => typeof k === 'string' && (WORLD_KEYS.includes(k) || NET_GAME
 const NET_WORLD = { on: false, map: new Map(), pass: null };
 // (Nov 4, the VEGETATION EDITOR - 00-a-veg-mode.js) its world held in memory as an online guest's is: the open world's conversions marked done, one flat
 // stretch of TROPICAL ground (a SOLID shape, the last of it sea) and nothing else - this browser's own world untouched; the plants' numbers (bd_vtune) its own
-let LAB_CAVE = null, VEG_GUARD = false;
-if (VEG_MODE) {
+let LAB_CAVE = null;
+function vegWorld() {
   const o = (WORLD_PACK && WORLD_PACK.open) || {}, w = {}; for (const k in o) if (/_conv$/.test(k) || k === 'bd_air_ungroup' || k === 'bd_sky_p') w[k] = o[k];
   const L = 6800, TOP = -30, GAP = 3000, BED = 200, FOOT = 260;   // (Nov 7: the sea 3000 wide - the caves are built only by a sea floor 2000 wide - cavesWanted)
   // (Nov 7, the BIOME EDITOR) its ground the biome picked last - each biome seen on its own ground
@@ -609,9 +610,14 @@ if (VEG_MODE) {
   { const H = GROUND.find(I => I && I.k === 'H' && I.p && I.p.length); LAB_CAVE = H ? [H.p.reduce((a, p) => a + p[0], 0) / H.p.length, H.p.reduce((a, p) => a + p[1], 0) / H.p.length] : null; }
   Object.assign(w, { bd_islands: JSON.stringify(GROUND),
     bd_structs: '[]', bd_placed: '[]', bd_nature: '[]', bd_wrecks: '[]', bd_krakens: '[]', bd_lakes: '[]', bd_backgrounds: '[]', bd_weather_areas: '[]', bd_caves: JSON.stringify({ v: 1, systems: [] }) });
-  NET_WORLD.map = new Map(Object.entries(w)); NET_WORLD.on = true; NET_WORLD.pass = new Set(['bd_vtune']);
-  VEG_GUARD = true;                                               // (the guard's lock on as soon as the shim is in - below)
+  return new Map(Object.entries(w));
 }
+// (user Nov 8 09:15: the Biome Editor in and out in place) its test world in: held in memory as an online host's is (NET_WORLD - the plants' numbers,
+// bd_vtune, passed through to this browser's own) and this browser's saved world under THE WORLD GUARD (below) till vegOut. On a load in it: before
+// the world shim, so nothing is ever read from this browser's world first (the guard's lock taken just after the shim - guardOn needs it)
+function vegIn(lock = true) { NET_WORLD.pass = new Set(['bd_vtune']); if (lock) guardOn('the Biome Editor\'s test world'); NET_WORLD.map = vegWorld(); NET_WORLD.on = true; }
+function vegOut() { NET_WORLD.on = false; NET_WORLD.map = new Map(); NET_WORLD.pass = null; return guardOff(); }
+if (VEG_MODE) { vegIn(false); SWB.holds.add('biome'); }                // (the game stays on this page while in it: the simulation worker held - swHold, 00-sw-boot.js)
 /* ---- THE WORLD GUARD (user Nov 8 09:12, of the Biome Editor and this browser's saved world: "This is SUPER important"). While another world
    is in this page - an online host's for a round, the Biome Editor's test world - this browser's own saved world must come out exactly as
    it went in. Three locks, all here in the one gate every save goes through (the shim below, lsRawSet / lsRawDel):
@@ -653,7 +659,7 @@ const guardStop = (k, how) => { if (!GUARD.on || !guardKey(k)) return false; GUA
 const WORLD_LOADERS = [];
 function worldLoad(f) { WORLD_LOADERS.push(f); try { f(); } catch (e) { console.warn('world load', e); } }
 function worldReload() { for (const f of WORLD_LOADERS) try { f(); } catch (e) { console.warn('world load', e); } if (typeof worldReloaded === 'function') worldReloaded(); }
-if (VEG_GUARD) guardOn('the Biome Editor\'s test world');
+if (VEG_MODE) guardOn('the Biome Editor\'s test world');
 // (the host) its world as its screen reads it, for a guest; (a guest) the host's world for this round, or back to its own
 function netWorldPack() { const o = {}; for (const k of [...WORLD_KEYS, ...NET_GAME_KEYS]) { const v = localStorage.getItem(k); if (v != null) o[k] = v; } return o; }
 function netWorldIn(o) { guardOn('the host\'s world'); NET_WORLD.map = new Map(Object.entries(o && typeof o === 'object' ? o : {}).filter(([k, v]) => netKey(k) && typeof v === 'string')); NET_WORLD.on = true; worldReload(); }
@@ -883,7 +889,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) {
     // (Nov 7, user: "Ability to call the vegetation Editor from the Game Editor") VEGETATION EDITOR in the top bar, after the WORLD
     // dropdown: the page again in the vegetation editor (53-veg-editor.js), unsaved changes asked first
     const vb = document.createElement('button'); vb.textContent = 'BIOME EDITOR'; vb.title = 'Open the biome editor (the biomes\' plants and decks)';
-    vb.onclick = () => sceneAsk(() => { try { sessionStorage.setItem('veged', '1'); } catch (e) { } location.reload(); }, () => { });
+    vb.onclick = () => sceneAsk(() => vegEnter('editor'), () => { });   // (in place, no reload - 53-veg-editor.js)
     wsel.after(vb);
   }, 700);
   // (the vegetation editor's GAME EDITOR button: this load opens the GAME EDITOR on the title's mode once the title is up)
@@ -5049,8 +5055,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 839;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 11:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 840;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 08 11:35';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -27860,11 +27866,12 @@ function edBuild(host) {
   }
   const panes = {};
   for (const t of Object.keys(ED_TABS)) {
-    const pane = edEl('div', t === 'COLOURS' ? '' : 'cats'); pane.hidden = true; panes[t] = pane; body.appendChild(pane);
-    // (Nov 7: the TERRAIN tab's sections are the Biome Editor's own there - one Terrain Editor, never two sets of them - 53-veg-editor.js)
-    if (!(VEG_MODE && t === 'TERRAIN')) edFillPane(t, pane);
+    const pane = edEl('div', t === 'COLOURS' || t === 'TERRAIN' ? '' : 'cats'); pane.hidden = true; panes[t] = pane; body.appendChild(pane);
+    // (Nov 7: the TERRAIN tab's sections are the Biome Editor's too - one Terrain Editor, never two sets of them - 53-veg-editor.js. Nov 8, the two
+    // editors in one page in turn: ONE set, TUNE.terrPane, shown in whichever editor is up - put back here as this tab shows)
+    if (t !== 'TERRAIN') edFillPane(t, pane);
   }
-  const edShow = () => { for (const t in panes) panes[t].hidden = t !== edTab; if (edTab === 'COLOURS') edColours(panes.COLOURS); };
+  const edShow = () => { for (const t in panes) panes[t].hidden = t !== edTab; if (edTab === 'COLOURS') edColours(panes.COLOURS); if (edTab === 'TERRAIN') { const P = TUNE.terrPane(); if (P.parentNode !== panes.TERRAIN) panes.TERRAIN.appendChild(P); } };
   bClose.onclick = () => { root.hidden = true; TUNE.open = false; };
   const setV = (k, v) => { P[k] = v; if (TUNE.rows[k]) { TUNE.rows[k].inp.value = v; TUNE.rows[k].show(); } };
   bCmp.onclick = () => {
@@ -27921,6 +27928,8 @@ function edFillPane(t, pane) {
   }
 }
 TUNE.fillTab = (t, host) => { const pane = edEl('div', 'cats'); edFillPane(t, pane); host.appendChild(pane); return pane; };
+let ED_TERR = null;   // (the TERRAIN tab's one set of sections: the GAME EDITOR's TERRAIN tab and the BIOME EDITOR's EDIT TERRAIN show this same one)
+TUNE.terrPane = () => { if (!ED_TERR) { ED_TERR = edEl('div', 'cats'); edFillPane('TERRAIN', ED_TERR); } return ED_TERR; };
 // TUNE.add(tab, [[key, label, min, max, step, default, description]...]): a new category of settings in its own tab
 TUNE.toggle = edToggle; TUNE.isOnOff = isOnOff; TUNE.help = edHelp;   // (TUNE.help(name, text): the help line, from any panel)   // (the on/off switch, for the tabs that build their own rows)
 TUNE.pane = (tab, build) => { ED_PANES[tab] = build; if (!ED_TABS[tab]) ED_TABS[tab] = []; };
@@ -55038,6 +55047,8 @@ for (const n of VEG_SET_NAMES) if (!VEG_SETS[n]) VEG_SETS[n] = [[], [], [], []];
 const vegSetsLoad = o => { if (!o) return false; if (Array.isArray(o)) { const d = vegDecksOf(o); if (d) VEG_SETS.tropical = d; } else if (o.sets) { for (const n of VEG_SET_NAMES.concat(['jungle'])) { const d = vegDecksOf(o.sets[n]); if (d) VEG_SETS[n] = d; } if (VEG_SETS[o.cur]) VEG_SET = o.cur; } VEG_DECKS = VEG_SETS[VEG_SET]; return true; };
 vegSetsLoad(JSON.parse(JSON.stringify(VEG_BAKED.sets)));   // (Nov 4: the lab's sets - 00-veg-baked.js - then this browser's own)
 try { vegSetsLoad(JSON.parse(localStorage.getItem('bd_vegdecks') || 'null')); } catch (e) { }
+// (Nov 8: the Biome Editor in and out in place - vegSetsMode as it goes in, the biome it was left on; and as it comes out, BEACH again)
+function vegSetsMode() { if (VEG_MODE) { try { vegSetsLoad(JSON.parse(localStorage.getItem('bd_vegdecks') || 'null')); } catch (e) { } } else if (VEG_SETS.tropical) { VEG_SETS[VEG_SET] = VEG_DECKS; VEG_SET = 'tropical'; VEG_DECKS = VEG_SETS.tropical; } }
 if (!VEG_MODE && VEG_SETS.tropical) { VEG_SET = 'tropical'; VEG_DECKS = VEG_SETS.tropical; }   // (the game: the BEACH (tropical) ground always plants the BEACH biome - whichever biome the BIOME EDITOR was left on; the other biomes' grounds keep the old vegetation until theirs are planted)
 const vegDecksSave = () => { VEG_SETS[VEG_SET] = VEG_DECKS; try { localStorage.setItem('bd_vegdecks', JSON.stringify({ sets: VEG_SETS, cur: VEG_SET })); } catch (e) { } };
 const VEG_SHOW = [true, true, true, true];
@@ -66260,16 +66271,39 @@ window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude
 // (the GAME EDITOR's WORLD PROPERTIES > TREES, live). Everything goes through window.__game.veglab.
 // (Nov 4 13:26) the VEGETATION EDITOR's button on the title, by GAME EDITOR: the page again in its vegetation mode (00-a-veg-mode.js)
 (() => {
-  if (VEG_MODE) return;
   const b = document.createElement('button'); b.id = 'vegEdBtn'; b.textContent = 'BIOME EDITOR'; b.hidden = true;
   b.style.cssText = 'position:fixed;bottom:8px;z-index:49;opacity:0.92;font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:4px 8px;cursor:pointer';
-  b.onclick = () => { try { sessionStorage.setItem('veged', '1'); } catch (e) { } location.reload(); };
-  const sync = () => { const g = document.getElementById('skyEdBtn'); if (!g) return; const r = g.getBoundingClientRect(); b.hidden = g.hidden || !r.width; if (!b.hidden) { b.style.left = (r.right + 8) + 'px'; b.style.font = getComputedStyle(g).font; } };
+  b.onclick = () => vegEnter('title');   // (Nov 8: in place, no reload - vegEnter below)
+  const sync = () => { const g = document.getElementById('skyEdBtn'); if (!g) return; const r = g.getBoundingClientRect(); b.hidden = VEG_MODE || g.hidden || !r.width; if (!b.hidden) { b.style.left = (r.right + 8) + 'px'; b.style.font = getComputedStyle(g).font; } };
   const go = () => { if (!document.body) return setTimeout(go, 200); document.body.appendChild(b); setInterval(sync, 300); };
   go();
 })();
-if (VEG_MODE) (() => {
-  const wait = () => new Promise(r => { const t = setInterval(() => { if (window.__game && __game.veglab && __game.flightlab && __game.fishnet) { clearInterval(t); r(); } }, 100); });
+/* ---- THE BIOME EDITOR IN AND OUT IN PLACE (user Nov 8 07:18: the switches between the editors and the game "almost immediate"; 09:12-09:15:
+   no reload, and "the Biome Editor can never write into your saved world. This is SUPER important"). Its test world comes in through the one
+   world swap online play uses (00-world.js vegIn / vegOut: NET_WORLD, with THE WORLD GUARD's lock, fingerprint and copy on this browser's saved
+   world till it goes out - and put back if anything changed it). Its own page-wide parts - listeners on the window and the page, timers, frame
+   callbacks, its panels - are made in its own SCOPE (VZ: vegUI's setInterval, setTimeout, requestAnimationFrame and addEventListener are the
+   scope's), so going out takes every one of them away and nothing of it runs on. ---- */
+const VZ = { z: null, going: false, keep: null };
+function vzNew() {
+  const Z = { dead: false, iv: new Set(), to: new Set(), rf: new Set(), ls: [], nodes: [] };
+  Z.setInterval = (f, ms, ...a) => { const id = window.setInterval((...b) => { Z.fires = (Z.fires || 0) + 1; if (!Z.dead) f(...b); }, ms, ...a); Z.iv.add(id); Z.lastIv = id; return id; };
+  Z.setTimeout = (f, ms, ...a) => { const id = window.setTimeout((...b) => { Z.to.delete(id); if (!Z.dead) f(...b); }, ms, ...a); Z.to.add(id); return id; };
+  Z.raf = f => { const id = window.requestAnimationFrame(t => { Z.rf.delete(id); if (!Z.dead) f(t); }); Z.rf.add(id); return id; };
+  Z.on = (tg, t, f, o) => { tg.addEventListener(t, f, o); Z.ls.push([tg, t, f, o]); };
+  Z.put = (a, b) => { const host = b ? a : document.body, n = b || a; host.appendChild(n); Z.nodes.push(n); return n; };
+  Z.end = () => {
+    Z.dead = true;
+    for (const id of Z.iv) clearInterval(id); for (const id of Z.to) clearTimeout(id); for (const id of Z.rf) cancelAnimationFrame(id);
+    for (const [tg, t, f, o] of Z.ls) try { tg.removeEventListener(t, f, o); } catch (e) { }
+    for (const n of Z.nodes) try { n.remove(); } catch (e) { }
+    Z.iv.clear(); Z.to.clear(); Z.rf.clear(); Z.ls.length = 0; Z.nodes.length = 0;
+  };
+  return Z;
+}
+function vegUI(Z) {
+  const setInterval = Z.setInterval, setTimeout = Z.setTimeout, requestAnimationFrame = Z.raf, addEventListener = (t, f, o) => Z.on(window, t, f, o);   // (the scope's - above)
+  const wait = () => new Promise(r => { const ok = () => window.__game && __game.veglab && __game.flightlab && __game.fishnet; if (ok()) { r(); return; } const t = setInterval(() => { if (ok()) { clearInterval(t); r(); } }, 100); });   // (in place: the game's hooks are there already)
   const VG = () => __game.veglab, FL = () => __game.flightlab;
   let viewX = 0, feArm = false, FE = null, pickKey = null, strPick = null, selIt = null, vehPick = null;
   const PARKED = new Set();   // (the vehicles spawned in the lab: parked, never driven - 23:02)
@@ -66301,8 +66335,8 @@ if (VEG_MODE) (() => {
 .vgS .k{position:relative;height:44px;touch-action:pan-y;cursor:pointer}#vgLab::-webkit-scrollbar{width:14px}#vgLab::-webkit-scrollbar-thumb{background:#6a9a3a;border-radius:7px}#vgLab::-webkit-scrollbar-track{background:#1a2234}.vgS .k::before{content:"";position:absolute;left:0;right:0;top:19px;height:6px;border-radius:3px;background:#2c3850}
 .vgS .f{position:absolute;left:0;top:19px;height:6px;border-radius:3px;background:#6a9a3a}.vgS .h{position:absolute;top:6px;width:32px;height:32px;margin-left:-16px;border-radius:50%;background:#9fd36a;border:3px solid #0f1420;box-sizing:border-box}
 #vgPause{position:fixed;left:50%;top:var(--below-bar,10px);transform:translateX(-50%);z-index:70;background:#0f1420c8;color:#d8dce8;font:600 16px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:6px;padding:6px 14px;pointer-events:none}#vgPause[hidden]{display:none}`;
-    document.head.appendChild(css);
-    const ps = document.createElement('div'); ps.id = 'vgPause'; ps.hidden = true; ps.textContent = 'PAUSED - Esc to go on'; document.body.appendChild(ps);
+    Z.put(document.head, css);
+    const ps = document.createElement('div'); ps.id = 'vgPause'; ps.hidden = true; ps.textContent = 'PAUSED - Esc to go on'; Z.put(ps);
     const T = VG().types(), pick = (fam, pref) => T.find(t => t.sv === pref) || T.find(t => t.fam === fam);
     const vehs = [pick('heli', 'heliBell206'), pick('heli', 'heliChinook'), pick('warplane', 'spitfire'), pick('car', 'suv'), pick('car', 'dumpTruck'), pick('tank', 'tank')].filter(Boolean);
     const d = document.createElement('div'); d.id = 'vgLab';
@@ -66327,7 +66361,7 @@ if (VEG_MODE) (() => {
       '<div id="vgProps" style="display:grid;gap:6px"></div>' +
       '<div id="vgGroupOnly" style="display:none;gap:8px"><h4>IN THE GROUP</h4><div id="vgGrp" style="display:grid;gap:6px"></div></div>' +
       '<div id="vgSaved" style="color:#9fd36a">Every number saves itself</div><div id="vgSl"></div><div id="vgTip">Point at a button to see what it does</div>';
-    document.body.appendChild(d);
+    Z.put(d);
     // (a foldout: its header opens and closes what's under it)
     setTimeout(() => { for (const b of d.querySelectorAll('.fold')) { const sync = () => { const c = d.querySelector('[data-foldc="' + b.dataset.fold + '"]'); b.classList.toggle('open', !!c && c.style.display !== 'none'); }; sync(); b.addEventListener('click', () => { const c = d.querySelector('[data-foldc="' + b.dataset.fold + '"]'); if (!c) return; c.style.display = c.style.display === 'none' ? (c.classList.contains('w') ? '' : 'grid') : 'none'; sync(); b.blur(); }); } }, 0);
     { const sel = d.querySelector('#vgSpawn'), grp = lab => { const g = document.createElement('optgroup'); g.label = lab; sel.appendChild(g); return g; }, add = (g, v, t) => { const o = document.createElement('option'); o.value = v; o.textContent = t; g.appendChild(o); };
@@ -66348,7 +66382,7 @@ if (VEG_MODE) (() => {
       parts: () => { const b = document.querySelector('[data-a=parts]'), on = !b.classList.contains('on'); VG().parts(on); b.classList.toggle('on', on); b.textContent = 'PARTICLES: ' + (on ? 'ON' : 'OFF'); },
       tex: () => { const V = VG().V; V.tree.flat = V.tree.flat >= 0.5 ? 0 : 1; VG().save(); const b = document.querySelector('[data-a=tex]'); b.textContent = V.tree.flat >= 0.5 ? 'TEXTURES: OFF' : 'TEXTURES: ON'; b.classList.toggle('on', V.tree.flat >= 0.5); },   // (user 21:53: "where's the option to see it without textures?")
       // (user Nov 4 08:56: "View Trees should be called Reset and it brings back the terrain to the original display, not grow trees in the broken terrain")
-      reset: () => { tip.textContent = 'Resetting...'; setTimeout(vegReload, 50); },
+      reset: () => { tip.textContent = 'Resetting...'; setTimeout(vegAgain, 50); },
       grow: () => VG().grow(), view: () => lookAtTrees(), pause: () => FL().pause(),
     };
     // the plant selected: its kind's name over its buttons; EDIT PLANT opens that kind. (user Nov 3 22:43: "Buttons that dont do anything, or
@@ -66472,10 +66506,10 @@ if (VEG_MODE) (() => {
 #vgBot .vgS .t i { grid-column: 4; grid-row: 1; margin: 0; padding: 0; color: #7a8294; font-style: normal; font-variant-numeric: tabular-nums; white-space: nowrap; }
 #vgBot .vgS .t i:hover { color: #ffb347; background: transparent; }
 #vgBot .vgS > button { grid-column: 2 / 5; grid-row: 1; }
-#vgBot .cat > button.tglrow { justify-self: start; }`; document.head.appendChild(st); }
+#vgBot .cat > button.tglrow { justify-self: start; }`; Z.put(document.head, st); }
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchmove', 'touchend', 'wheel', 'click']) bot.addEventListener(ev, e => e.stopPropagation());
-    document.body.appendChild(bot);
-    const botFit = () => { const r = d.getBoundingClientRect(); bot.style.right = Math.max(8, window.innerWidth - r.left + 8) + 'px'; }; botFit(); window.addEventListener('resize', botFit); setInterval(botFit, 1000);
+    Z.put(bot);
+    const botFit = () => { const r = d.getBoundingClientRect(); bot.style.right = Math.max(8, window.innerWidth - r.left + 8) + 'px'; }; botFit(); addEventListener('resize', botFit); setInterval(botFit, 1000);
     const vgReplant = () => { try { VG().replant(); } catch (er) { console.error('replant', er); if (window.__vgLog) window.__vgLog.push(['replantERR', String(er && er.stack || er).slice(0, 300)]); window.__vgReplantErr = String(er && er.stack || er).slice(0, 400); } };
     // (user Nov 4 10:21: "When I select something in the Group Editor, the Set Properties should automatically update to the Deck of what I selected")
     let selName = null, selPf = null;
@@ -66517,7 +66551,7 @@ if (VEG_MODE) (() => {
       { const l = document.createElement('span'); l.textContent = 'BIOME'; l.className = 'mode'; top.appendChild(l);
         const ss = document.createElement('select');
         for (const n of VG().sets.names()) { const o = document.createElement('option'); o.value = n; o.textContent = (VG().sets.lab && VG().sets.lab(n)) || n.toUpperCase(); ss.appendChild(o); } ss.title = ss.dataset.t = 'The biome you are editing'; ss.value = VG().sets.cur; hint(ss);
-        ss.onchange = () => { const n = ss.value; if (!(VG().reskin && VG().reskin(n))) { window.__vgSet(n); setTimeout(() => location.reload(), 150); return; } window.__vgSet(n); tip.textContent = (VG().sets.lab(n) || n) + ': its ground and plants'; /* (Nov 7, user 16:15: changed in place - no restart) */ }; top.appendChild(ss); }
+        ss.onchange = () => { const n = ss.value; if (!(VG().reskin && VG().reskin(n))) { window.__vgSet(n); setTimeout(vegAgain, 150); return; } window.__vgSet(n); tip.textContent = (VG().sets.lab(n) || n) + ': its ground and plants'; /* (Nov 7, user 16:15: changed in place - no restart) */ }; top.appendChild(ss); }
       const cur = tabOf(deckTab);
       for (const [id, lab, tp] of BTABS) { if (id === 'lake' && VG().sets.cur === 'sea') continue;
         const b = document.createElement('button'); b.className = 'tab'; b.textContent = lab; b.title = b.dataset.t = tp; b.classList.toggle('on', cur === id); hint(b);
@@ -66771,10 +66805,10 @@ if (VEG_MODE) (() => {
       const eb = btn('EDIT TERRAIN: ' + (TERR.on ? 'ON' : 'OFF'), 'Edit the ground\'s shapes right here in the view, as in the game editor', () => terrSet(!TERR.on)); eb.classList.toggle('on', TERR.on); r1.appendChild(eb);
       const hp = document.createElement('span'); hp.className = 'cvnote'; hp.style.margin = '0'; hp.textContent = TERR.on ? 'Drag a point to move it. Press a line twice to add a point. Right-click a point to remove it. Right-drag to move the view.' : 'Turn on to shape the ground, as in the game editor\'s TERRAIN tab.'; r1.appendChild(hp);
       // (the game editor's own TERRAIN sections - built once, kept: one Terrain Editor; its tooltips on the help line)
-      if (TERR.on) { if (!TERR_PANE) { TERR_PANE = document.createElement('div'); NSKY.editor.TUNE.fillTab('TERRAIN', TERR_PANE);
+      if (TERR.on) { if (!TERR_PANE) { TERR_PANE = document.createElement('div'); TERR_PANE.appendChild(NSKY.editor.TUNE.terrPane());   // (the GAME EDITOR's own one set - sky/90-editor.js)
           const sh = e => { const t = e.target.closest && e.target.closest('[title]'); if (!t || !TERR_PANE.contains(t)) return; const row = t.closest('.row'), lb = row && row.querySelector('label'); tip.textContent = (t.tagName === 'BUTTON' ? t.textContent : lb ? lb.textContent : '') + ': ' + t.title; };
           TERR_PANE.addEventListener('pointerover', e => { if (e.pointerType === 'mouse') sh(e); }); TERR_PANE.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') sh(e); }); }
-        box.appendChild(TERR_PANE); if (typeof terrainSyncSkin === 'function') terrainSyncSkin(); }
+        { const P = NSKY.editor.TUNE.terrPane(); if (P.parentNode !== TERR_PANE) TERR_PANE.appendChild(P); } box.appendChild(TERR_PANE); if (typeof terrainSyncSkin === 'function') terrainSyncSkin(); }
       // (user Nov 7 20:42: "Prefabs should be a dropdown list with a 'LOAD' button next to it. Next to the LOAD we have a Prefab Name and Save as Prefab.
       // The current vertical list takes a ton of space") one row: the list (built in, then saved), LOAD, DELETE (a saved one), the name, SAVE AS PREFAB
       const r2 = row(), lab = document.createElement('span'); lab.textContent = 'PREFAB'; lab.style.color = '#7a8294'; r2.appendChild(lab);
@@ -66860,7 +66894,7 @@ if (VEG_MODE) (() => {
       if (!window.claude || !claude.use) { saved('Numbers kept in this browser only'); return; }
       SDB = await claude.use('db'); if (!SDB) { saved('Numbers kept in this browser only'); return; }
       try {
-        SDB.doc('settings/lab').onSnapshot(sn => {
+        SDB.doc('settings/lab').onSnapshot(sn => { if (Z.dead) return;
           const o = sn.exists ? sn.data() : null;
           if (!heard) { heard = true; if (!o) { push(); return; } }
           // (08:38: "When I press Add Prefab there is a lag and sometimes it does not add one" - every echo of this browser's own older save was applied over
@@ -66886,8 +66920,8 @@ if (VEG_MODE) (() => {
       const free = e => !FL().cur() && !d.contains(e.target) && !(FE && FE.root.contains(e.target)) && !L0().contains(e.target) && (e.target.tagName === 'CANVAS' || e.target === document.documentElement || e.target === document.body);
       // (user Nov 3 22:14: "Right mouse pans, middle mouse zooms in and out") a mouse: the right or middle button drags the view (22:20: held, it pans), the wheel zooms
       // the left picks - a plant, or a structure to drag. A finger: drag pans, pinch zooms, a tap picks
-      window.addEventListener('contextmenu', e => { if (free(e)) e.preventDefault(); }, true);
-      window.addEventListener('pointerdown', e => {
+      addEventListener('contextmenu', e => { if (free(e)) e.preventDefault(); }, true);
+      addEventListener('pointerdown', e => {
         if (free(e) && e.pointerType === 'mouse' && e.button === 0) { const v = VG().view(), z = VG().zl(); window.__vgDownView = { x: v.x, y: v.y, zt: z.zt, t: performance.now() }; }   // (the view as a press began - a double-click's editor comes back to it)
         if (feArm || !free(e)) return;
         // (editing the terrain: as in the game editor - the left button on empty space draws a box to pick pieces of line, the right or middle pans, a finger pans; nothing else is picked)
@@ -66899,7 +66933,7 @@ if (VEG_MODE) (() => {
         if (P.length === 1 && !TERR.on) { const o = VG().strAt(e.clientX, e.clientY); if (o) { pickStr(o.id, o.name); st = { str: o.id, x0: e.clientX, y0: e.clientY, tap: true }; tip.textContent = o.name + ' picked - drag it to place it, REMOVE to take it away'; return; } }
         st = P.length === 2 ? { pinch: Math.hypot(P[0][0] - P[1][0], P[0][1] - P[1][1]), z: v.z, x: v.x, y: v.y } : e.pointerType === 'mouse' ? { x0: e.clientX, y0: e.clientY, tap: true, pick: true } : { x0: e.clientX, y0: e.clientY, x: v.x, y: v.y, k: v.k, tap: true };
       }, true);
-      window.addEventListener('pointermove', e => {
+      addEventListener('pointermove', e => {
         if (!fp.has(e.pointerId) || !st) return; fp.set(e.pointerId, [e.clientX, e.clientY]); const P = [...fp.values()];
         if (st.tap && Math.hypot(e.clientX - st.x0, e.clientY - st.y0) > 8) st.tap = false;
         if (st.str != null) { if (!st.tap) VG().strMove(st.str, e.clientX); return; }
@@ -66910,13 +66944,13 @@ if (VEG_MODE) (() => {
       const end = e => {
         if (st && st.tap && st.str == null && !st.vh && fp.size === 1 && e.type === 'pointerup' && !TERR.on) { const it = VG().fol.it(e.clientX, e.clientY); vehPick = null; pickStr(null); if (it) select(it); else { const sd = VG().side ? VG().side(e.clientX, e.clientY) : 0; if (sd && window.__vgSide) window.__vgSide(sd); else tip.textContent = 'No plant there'; } }
         fp.delete(e.pointerId); if (!fp.size) st = null; };
-      window.addEventListener('pointerup', end, true); window.addEventListener('pointercancel', end, true);
+      addEventListener('pointerup', end, true); addEventListener('pointercancel', end, true);
       // (user Nov 3 22:52: "In the Group Editor, I can double click on any PLANT and it takes me to their Prefab Editor")
-      window.addEventListener('dblclick', e => { if (!free(e) || TERR.on) return; const it = VG().fol.it(e.clientX, e.clientY); if (!it) return; e.preventDefault(); e.stopImmediatePropagation(); const dv = window.__vgDownView; select(it); feShow('prefab', VG().fol.keyOf(it)); if (dv && performance.now() - dv.t < 1500) window.__vgSceneView(dv); }, true);   // (10:34: the game's own double-click zoomed the view out - the scene's view kept: it never sees this one)
-      let wt = 0; window.addEventListener('wheel', e => { if (!free(e)) return; e.preventDefault(); e.stopPropagation(); const t = performance.now(); if (t - wt < 90) return; wt = t; zoomStep(e.deltaY < 0 ? 1 : -1); }, { capture: true, passive: false });   // (a level a notch)
+      addEventListener('dblclick', e => { if (!free(e) || TERR.on) return; const it = VG().fol.it(e.clientX, e.clientY); if (!it) return; e.preventDefault(); e.stopImmediatePropagation(); const dv = window.__vgDownView; select(it); feShow('prefab', VG().fol.keyOf(it)); if (dv && performance.now() - dv.t < 1500) window.__vgSceneView(dv); }, true);   // (10:34: the game's own double-click zoomed the view out - the scene's view kept: it never sees this one)
+      let wt = 0; addEventListener('wheel', e => { if (!free(e)) return; e.preventDefault(); e.stopPropagation(); const t = performance.now(); if (t - wt < 90) return; wt = t; zoomStep(e.deltaY < 0 ? 1 : -1); }, { capture: true, passive: false });   // (a level a notch)
     }
     // (EDIT A PLANT: the next tap in the view opens the editor on the plant under it)
-    window.addEventListener('pointerdown', e => {
+    addEventListener('pointerdown', e => {
       if (!feArm || TERR.on || d.contains(e.target) || (FE && FE.root.contains(e.target))) return;
       feArm = false; const key = VG().fol.at(e.clientX, e.clientY);
       if (key) { e.stopPropagation(); e.preventDefault(); folEditor(key); } else tip.textContent = 'No plant there';
@@ -66926,7 +66960,7 @@ if (VEG_MODE) (() => {
     // (user Nov 3 21:28: "a frame rate counter at the top left")
     // (user Nov 3 22:13: "Cost should all be on the upper left side ... On the left we have a small menu that has ZOOM: + -, Bones On/Off, Decks
     // Vis Toggle Deck 1 Deck 2 etc") the view's own menu, top left: the frame rate and the cost, the zoom a level in or out, the bones, each deck shown
-    const L = document.createElement('div'); L.id = 'vgLeft'; document.body.appendChild(L);
+    const L = document.createElement('div'); L.id = 'vgLeft'; Z.put(L);
     L.innerHTML = `<style>#vgLeft{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));top:var(--below-bar,8px);max-height:calc(100% - 267px - 24px - var(--below-bar,8px));overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:auto;scrollbar-color:#6a9a3a #1a2234;box-sizing:border-box;align-content:start;z-index:70;width:220px !important;background:#0f1420e0;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:8px;display:grid;gap:6px;width:176px}
 #vgLeft button{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:44px;padding:6px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none}#vgLeft button.on{background:#2a3a1e;border-color:#6a9a3a}
 #vgLeft .r3{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid #2c3850}#vgLeft .r3 button{font-size:13px;min-height:40px}#vgLeft .r{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center}#vgLeft .l{color:#7a8294}#vgFps{color:#9fd36a;font:600 20px ui-monospace,Menlo,monospace}#vgCost{color:#c8cfdc;font-size:12px;line-height:1.35;white-space:pre-line}</style>
@@ -66936,7 +66970,7 @@ if (VEG_MODE) (() => {
     // (user Nov 7 16:15, his photo: the left panel still ran over the bottom bar - 100vh isn't the screen's height on every device) the left
     // panel stops 8 pixels over where the bottom bar really starts, and scrolls; the right one fits the screen it's on. (Nov 7 18:05, iPad 27.2 Home Screen app: both panels start below the status bar and its fade - --below-bar - and fit the page's real height, pageBox)
     const fitLeft = () => { const b = document.getElementById('vgBot'), rb = b && getComputedStyle(b).display !== 'none' && getComputedStyle(b).visibility !== 'hidden' ? b.getBoundingClientRect() : null, bt = rb && rb.height > 0 ? rb.top : pageBox().h; L.style.maxHeight = Math.max(80, Math.floor(bt - L.getBoundingClientRect().top - 8)) + 'px'; d.style.maxHeight = Math.max(80, Math.floor(pageBox().h - d.getBoundingClientRect().top - 8)) + 'px'; };
-    fitLeft(); window.addEventListener('resize', fitLeft); setInterval(fitLeft, 700);
+    fitLeft(); addEventListener('resize', fitLeft); setInterval(fitLeft, 700);
     // (user Nov 7 18:25: "We also need the SNAPSHOT button to be CRYSTAL CLEAR that we have made changes") SNAPSHOT shows whether anything of the
     // biomes has changed since a snapshot was last copied: the biome editor's own saved keys against bd_biome_snapsig (set by COPY)
     const SNAP_KEYS = ['bd_vegdecks', 'bd_foliage', 'bd_vegprefabs', 'bd_vtune', 'bd_biome_surf', 'bd_biome_pics', 'bd_biome_grounds', 'bd_biome_ground', 'bd_plants'];
@@ -66958,12 +66992,12 @@ if (VEG_MODE) (() => {
     // this browser keeps (VEG_JKEYS - the world and the rest of the game untouched) erased, the game's own back; a second tap within 3 s to be sure
     { const rb = L.querySelector('[data-vrev]'); let t0 = 0; if (rb) rb.onclick = () => { rb.blur();
       if (performance.now() - t0 > 3000) { t0 = performance.now(); rb.textContent = 'SURE? TAP AGAIN'; setTimeout(() => { if (performance.now() - t0 >= 2900) rb.textContent = 'REVERT ALL CHANGES'; }, 3000); return; }
-      try { for (const k of VEG_JKEYS) localStorage.removeItem(k); } catch (e) { } sceneSave(); rb.textContent = 'REVERTED'; setTimeout(() => location.reload(), 300); }; }
+      try { for (const k of VEG_JKEYS) localStorage.removeItem(k); } catch (e) { } sceneSave(); rb.textContent = 'REVERTED'; setTimeout(vegAgain, 300); }; }
     // go: what was asked for; reload: a DISCARD that stays here loads the page again (the editor shows what's saved)
     const vAsk = async (go, reload) => { if (!vDirty()) { go(); return; } const r = await vgDlg('UNSAVED CHANGES', '<div style="color:#9aa3b5">Save your changes to the biomes?</div>', [['SAVE', 's', 1], ['DISCARD', 'd', 2], ['CANCEL', 'c']]);
-      if (r.v === 'c') return; if (r.v === 's') { await vSave(); go(); return; } sceneRestore(); if (reload) { location.reload(); return; } go(); };
-    if (L.querySelector('[data-back]')) L.querySelector('[data-back]').onclick = () => vAsk(() => { try { sessionStorage.removeItem('veged'); } catch (e) { } location.reload(); });   // (the game's VEGETATION EDITOR: CLOSE - back to the title; user Nov 7: "Instead of 'Back to Game' it should say 'CLOSE'")
-    if (L.querySelector('[data-ged]')) L.querySelector('[data-ged]').onclick = () => vAsk(() => { try { sessionStorage.removeItem('veged'); sessionStorage.setItem('gameed', '1'); } catch (e) { } location.reload(); });   // (GAME EDITOR: the page again, the GAME EDITOR opened on it - 00-world.js)
+      if (r.v === 'c') return; if (r.v === 's') { await vSave(); go(); return; } sceneRestore(); if (reload) { vegAgain(); return; } go(); };
+    if (L.querySelector('[data-back]')) L.querySelector('[data-back]').onclick = () => vAsk(() => vegLeave('title'));   // (the game's VEGETATION EDITOR: CLOSE - back to the title; user Nov 7: "Instead of 'Back to Game' it should say 'CLOSE'")
+    if (L.querySelector('[data-ged]')) L.querySelector('[data-ged]').onclick = () => vAsk(() => vegLeave('editor'));   // (GAME EDITOR: the page again, the GAME EDITOR opened on it - 00-world.js)
     // (user Nov 4 13:45: "the in-game vegetation editor must also have a 'snapshot' button so I dont have to open the game editor") the GAME EDITOR's SNAPSHOT:
     // this browser's saved world (as kept - not the editor's own world, which is only held in memory) and every vegetation number and shape
     if (L.querySelector('[data-snap]')) L.querySelector('[data-snap]').onclick = () => vAsk(snapOpen, true);
@@ -66973,14 +67007,14 @@ if (VEG_MODE) (() => {
       const ta = m.querySelector('textarea'), bc = m.querySelector('[data-c]'); ta.value = t; for (const b of m.querySelectorAll('button')) b.style.cssText += ';font:inherit;background:#1a2234;color:#fff;border:1px solid #2c3850;border-radius:6px;cursor:pointer';
       bc.onclick = async () => { ta.select(); try { await navigator.clipboard.writeText(t); bc.textContent = 'COPIED'; if (window.__vgSnapCopied) window.__vgSnapCopied(); } catch (e) { try { document.execCommand('copy'); bc.textContent = 'COPIED'; if (window.__vgSnapCopied) window.__vgSnapCopied(); } catch (e2) { } } setTimeout(() => { bc.textContent = 'COPY'; }, 1500); };
       m.querySelector('[data-x]').onclick = () => m.remove(); for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'wheel', 'click', 'keydown']) m.addEventListener(ev, e => e.stopPropagation());
-      document.body.appendChild(m); ta.select(); }
+      Z.put(m); ta.select(); }
     if (L.querySelector('[data-exp]')) L.querySelector('[data-exp]').onclick = async () => { const b = L.querySelector('[data-exp]'); b.blur(); const dl = window.claude && claude.use ? await claude.use('downloads') : null; if (!dl) { tip.textContent = 'No file saving here'; return; }
       try { const o = window.__vgExport(), blob = new Blob([JSON.stringify(o)], { type: 'application/json' }); await dl.save({ filename: 'vegetation-export.json', data: blob }); tip.textContent = 'Saved vegetation-export.json - attach it in the chat'; } catch (e) { tip.textContent = 'Not saved: ' + (e && (e.code || e.message) || e); } };
     for (const b of L.querySelectorAll('[data-ed]')) b.onclick = () => { b.blur(); feShow(b.dataset.ed, pickKey || null); };   // (23:20: the plant selected - no EDIT PLANT button)
     for (const b of L.querySelectorAll('[data-z]')) b.onclick = () => { zoomStep(+b.dataset.z); b.blur(); };
     // (user Nov 3 22:15: "Have a 'Reset' Scene") the scene as it opened: aboard a vehicle the page opens again (the saved numbers and shapes stay)
     L.querySelector('[data-reset]').onclick = () => {
-      vegReload(); return;   // (08:56: a reset brings the ground back too - as RESET)
+      vegAgain(); return;   // (08:56: a reset brings the ground back too - as RESET)
       VG().grow(); VG().strClear(); for (const v of PARKED) VG().vehDel(v); PARKED.clear(); vehPick = null; pickStr(null); __game.fishnet.clear(null); Object.assign(__game.env, { time: 12, wind: 0.35 }); for (const f of shows) f();
       lookAtTrees(); select(nearPalm()); tip.textContent = 'The scene as it opened';
     };
@@ -67032,7 +67066,7 @@ if (VEG_MODE) (() => {
     m.innerHTML = '<div style="background:#0f1420;border:1px solid #2c3850;border-radius:10px;padding:18px;display:grid;gap:14px;color:#d8dce8;max-width:90vw"><div>Do you want to save the changes to <b style="color:#9fd36a">' + ((VG().pf.list().find(p => p.key === FE.key) || {}).name || FE.key) + '</b>?</div><div style="display:flex;gap:8px;flex-wrap:wrap"><button data-r="s" style="background:#3a5a1e;border-color:#9fd36a;color:#fff">SAVE</button><button data-r="n">DON\'T SAVE</button><button data-r="c">CANCEL</button></div></div>';
     for (const b of m.querySelectorAll('button')) { b.style.cssText += ';font:inherit;min-height:48px;padding:8px 16px;border-radius:6px;border:1px solid #2c3850;background:' + (b.dataset.r === 's' ? '#3a5a1e' : '#1a2234') + ';color:#fff;cursor:pointer'; b.onclick = async () => { m.remove(); if (b.dataset.r === 's') { await feSaveNow(); then(); } else if (b.dataset.r === 'n') { FE.clean = JSON.stringify(feShape()); then(); } }; }
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'wheel', 'click', 'keydown']) m.addEventListener(ev, e => e.stopPropagation());
-    document.body.appendChild(m);
+    Z.put(m);
   }
   // the editor shown on the editor it was on last (or ed), what it held kept; nothing open yet: on key
   // (user Nov 3 23:13: "After I edit and save an element, it seems the Group Editor zoom level is reset to far away? It should stay exactly where it
@@ -67063,7 +67097,7 @@ if (VEG_MODE) (() => {
 <span id="feCompBar" style="display:contents"><span class="sep"></span><select id="feComp" title="Pick the component"></select><span class="lbl">EDIT:</span><button id="feEdS" class="on" title="Edit its shapes: click a corner, an edge or a shape to pick it, or drag a box around several">SHAPE</button><button id="feEdM" title="Paint where it shows: left button paints, right button erases">MASK</button><span class="sep"></span><span class="lbl">SHOW:</span><button id="feVec" class="on" title="Shows its outline">SHAPE</button><button id="feLvM" title="Shows the part as it will look, with its mask">MASK</button><span id="feVecLv" hidden></span><span class="sep"></span><button id="feBg" class="on" title="The picture behind the component">VIEWPORT BG</button><button id="feTexB" title="Puts a picture behind this component to trace over. MASK > FROM TEXTURE can cut the component to its shape">IMPORT IMAGE</button><input type="file" id="feTexF" accept="image/*" hidden><button id="feWire" title="Saves a big picture of the outlines, to paint over in a paint program">EXPORT WIREFRAME</button><button id="feReset">RESET</button></span><button id="feLeaf" hidden></button><button id="feClose" hidden></button></div>
 <div style="position:relative;min-height:0;overflow:hidden"><canvas id="feCv" style="position:absolute;left:0;top:0;width:100%;height:100%"></canvas><div id="feCols" style="position:absolute;right:8px;top:8px;bottom:8px;width:170px;display:none;background:#0f1420e6;border:1px solid #2c3850;border-radius:8px;padding:10px;box-sizing:border-box"></div><div id="feUses" style="position:absolute;left:8px;top:8px;width:230px;max-height:calc(100% - 16px);overflow:auto;display:grid;gap:6px;align-content:start;background:#0f1420e6;border:1px solid #2c3850;border-radius:8px;padding:10px"></div></div>
 <div class="bar bot" id="feOps"></div>`;
-      document.body.appendChild(root);
+      Z.put(root);
       const q = id => root.querySelector('#' + id);
       FE = { root, cv: q('feCv'), lv: 'p', sel: -1, vpt: null, esel: null, newPts: null, pic: true, zoom: 1, panX: 0, panY: 0, key: null, polys: [], q };
       // (12:42: "a Background color at the top so we can change it to see different colors while editing a tree") the editors' background, kept in this browser
@@ -67346,7 +67380,7 @@ if (VEG_MODE) (() => {
       cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
       cv.addEventListener('wheel', e => { e.preventDefault(); if (FE.live) { const t = performance.now(); if (t - (FE.wt || 0) > 90) { FE.wt = t; zoomStep(e.deltaY < 0 ? 1 : -1); } return; } zoomAt(FE.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15), e.clientX, e.clientY); }, { passive: false });
       for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchmove', 'touchend', 'wheel', 'click', 'keydown']) root.addEventListener(ev, e => e.stopPropagation());
-      window.addEventListener('resize', () => { if (FE.root.style.display !== 'none') feDraw(); });
+      addEventListener('resize', () => { if (FE.root.style.display !== 'none') feDraw(); });
     }
     FE.root.style.display = 'grid'; feKinds(); FE.q('feKind').value = key; feLoad(key);   // (the scene's view: kept by feShow / folEditor's callers)
   }
@@ -67392,7 +67426,7 @@ if (VEG_MODE) (() => {
     m.innerHTML = '<div style="background:#0f1420;border:1px solid #2c3850;border-radius:10px;padding:18px;display:grid;gap:12px;color:#d8dce8;max-width:90vw;min-width:300px"><div style="color:#9fd36a">' + title + '</div>' + (body || '') + '<div data-b style="display:flex;gap:8px;flex-wrap:wrap"></div></div>';
     const row = m.querySelector('[data-b]'); for (const [lab, v, k] of btns) { const b = document.createElement('button'); b.textContent = lab; b.style.cssText = 'font:inherit;min-height:48px;padding:8px 16px;border-radius:6px;border:1px solid #2c3850;color:#fff;cursor:pointer;background:' + (k === 1 ? '#3a5a1e' : k === 2 ? '#6a2a22' : '#1a2234'); b.onclick = () => { const i = m.querySelector('input'); m.remove(); res({ v, name: i ? i.value : null }); }; row.appendChild(b); }
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'wheel', 'click', 'keydown']) m.addEventListener(ev, e => e.stopPropagation());
-    document.body.appendChild(m); const i = m.querySelector('input'); if (i) { i.focus(); i.select(); } }); }
+    Z.put(m); const i = m.querySelector('input'); if (i) { i.focus(); i.select(); } }); }
   function feKinds() { const s = FE.q('feKind'), v = s.value; s.innerHTML = ''; for (const [k, lab] of VG().fol.kinds()) { const o = document.createElement('option'); o.value = k; o.textContent = lab; s.appendChild(o); } s.value = v || FE.key; }
   // which editor and what it shows: the bars, the components a prefab has
   function feBars() {
@@ -67447,7 +67481,7 @@ if (VEG_MODE) (() => {
     FDB = await claude.use('db'); if (!FDB) return;
     try {
       let first = true;
-      FDB.collection('foliage').onSnapshot(q => {
+      FDB.collection('foliage').onSnapshot(q => { if (Z.dead) return;
         const F = VG().fol, have = new Set();
         // (Nov 4 09:00: what the store hands back is read-only - changes to it silently lost: every shape set copied whole, its own to change; every part kept -
         // the trunk, puff components and a component's own name and kind were being dropped)
@@ -67657,7 +67691,7 @@ if (VEG_MODE) (() => {
     if (shown.length) show(shown.some(([k]) => k === FE.partCat) ? FE.partCat : shown[0][0]); else pc.textContent = 'No components yet - make one first';
     m.querySelector('[data-x]').onclick = () => m.remove(); m.querySelector('[data-x]').style.cssText = 'font:inherit;min-height:46px;border-radius:6px;border:1px solid #2c3850;background:#1a2234;color:#d8dce8;margin-top:6px';
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'wheel', 'click', 'keydown']) m.addEventListener(ev, e => e.stopPropagation());
-    document.body.appendChild(m);
+    Z.put(m);
   }
   // (user Nov 4 10:01: colour points along the picked part's spline - "I can move those existing points up and down, along the spline. If I click on the point
   // it deletes it. If I click on a empty spot it creates a new point. Then I can click the color box and change the value there. HSL should be the default AND
@@ -67726,7 +67760,7 @@ if (VEG_MODE) (() => {
         pk.onclick = async () => { const hex2 = v => '#' + v.map(c => c.toString(16).padStart(2, '0')).join('');
           if (window.EyeDropper) { try { const r = await new EyeDropper().open(); if (r && r.sRGBHex) { set(r.sRGBHex.length === 7 ? r.sRGBHex : rgbHex(r.sRGBHex.match(/\d+/g).slice(0, 3).map(Number))); draw(); } return; } catch (e) { if (e && e.name === 'AbortError') return; } }
           pk.textContent = 'PRESS...'; const grab = e => { document.removeEventListener('pointerdown', grab, true); const c = FE.cv, rc = c.getBoundingClientRect(); if (e.clientX >= rc.left && e.clientX < rc.right && e.clientY >= rc.top && e.clientY < rc.bottom) { e.stopPropagation(); e.preventDefault(); const d = c.getContext('2d').getImageData(Math.floor((e.clientX - rc.left) * c.width / rc.width), Math.floor((e.clientY - rc.top) * c.height / rc.height), 1, 1).data; if (d[3]) { set(hex2([d[0], d[1], d[2]])); } } draw(); };
-          setTimeout(() => document.addEventListener('pointerdown', grab, true), 0); };
+          setTimeout(() => Z.on(document, 'pointerdown', grab, true), 0); };
         top.appendChild(pk); }
       const x = document.createElement('button'); x.textContent = 'DONE'; x.style.cssText = 'font:inherit;min-height:32px;padding:4px 10px;margin-left:auto;border-radius:5px;border:1px solid #2c3850;background:#1a2234;color:#d8dce8'; x.onclick = () => m.remove(); top.appendChild(x); m.appendChild(top);
       const set = c => { q.c = c; sw.style.background = c; anchor.style.background = c; done(); };
@@ -67736,7 +67770,7 @@ if (VEG_MODE) (() => {
       // (12:50: "an Opacity value ... it has Opacity slider too") a colour that can be see-through: its OPACITY, 100 solid
       if (q.a !== undefined) { const row = document.createElement('label'); row.style.cssText = 'display:grid;grid-template-columns:62px 1fr 36px;gap:6px;align-items:center;border-top:1px solid #2c3850;padding-top:8px'; const sp = document.createElement('span'); sp.textContent = 'OPACITY'; const rg = document.createElement('input'); rg.type = 'range'; rg.min = 0; rg.max = 100; rg.value = Math.round((q.a == null ? 1 : q.a) * 100); const vv = document.createElement('span'); vv.textContent = rg.value; rg.oninput = () => { q.a = +rg.value / 100; vv.textContent = rg.value; done(); }; row.appendChild(sp); row.appendChild(rg); row.appendChild(vv); m.appendChild(row); }
     };
-    draw(); for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'wheel', 'click', 'keydown']) m.addEventListener(ev, e => e.stopPropagation()); document.body.appendChild(m);
+    draw(); for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'wheel', 'click', 'keydown']) m.addEventListener(ev, e => e.stopPropagation()); Z.put(m);
   }
   // ---- UNDO (10:48): what the editor edits now - a built prefab's parts, or the polygons and mask of what's shown - kept after each change ----
   const feUKey = () => FE.key + '|' + FE.ed + '|' + FE.mode + (FE.ed === 'prefab' && FE.build ? '|b' : '');
@@ -67878,12 +67912,15 @@ if (VEG_MODE) (() => {
     g.restore();
   }
   (async () => {
-    await wait();
+    Z.ph = 'wait'; await wait(); Z.ph = 'waited';
+    if (Z.dead) return;
+    try {
     const g = __game;
+    VZ.keep = VZ.keep || { mode: g.menuSel.mode, roster: g.menuSel.roster.slice(), muted: MUTED, env: { time: g.env.time, weather: g.env.weather, rain: g.env.rain, wind: g.env.wind } };   // (what the lab changes of the game's, put back as it goes - vegLeave)
     g.setCtl(['kb', 'none']); g.setMode('land'); g.ui.title = false; g.ui.resume = false;
     g.menuSel.mode = 'land'; g.menuSel.roster = [{ dev: 'kb', side: 0 }];
     Object.assign(g.env, { time: 12, weather: 0.1, rain: 0, wind: 0.35 });   // (a light breeze)
-    setTimeout(() => {
+    Z.ph = 'sched'; setTimeout(() => { Z.ph = 'cb';
       g.fishnet.clear(null); g.fishnet.hudOnly([]);                 // (no game buttons till you're in a vehicle)
       setInterval(() => g.fishnet.clear(new Set([FL().cur(), ...PARKED])), 250);   // (the parked ones kept - 23:02)           // (the world's traffic kept away)
       lookAtTrees();
@@ -67894,11 +67931,13 @@ if (VEG_MODE) (() => {
       folSync();
       document.documentElement.classList.remove('flWait');   // (at once: a timer can wait long behind heavy frames - and its cover took the presses, the wheel went to the game's own zoom)
       g.fishnet.freeze(true);
+      Z.ph = 'up'; worldEditCover(false); VZ.going = false;                      // (in place: the cover off as the editor is up - vegEnter)
     }, 600);
+    } catch (e) { console.error('Biome Editor start', e); VZ.going = false; worldEditCover(false); }
   })();
   // (Nov 4: checked on the user's own GPU from outside the page - the claude.ai page this sits in asks; nothing else is listened to) the frame
   // rate and where the time goes over a few seconds; the lab's own calls (__game.veglab) and the game's settings by name; a panel shown or hidden
-  window.addEventListener('message', async e => {
+  addEventListener('message', async e => {
     const d = e.data; if (!d || !d.vgProbe || !/^https:\/\/([a-z0-9-]+\.)?claude\.ai$/.test(e.origin)) return;
     let r;
     try {
@@ -67909,7 +67948,7 @@ if (VEG_MODE) (() => {
       else if (d.cmd === 'call') r = VG()[d.fn](...(d.args || []));
       else if (d.cmd === 'fe') { const F = window.__vgFE && window.__vgFE(); r = F ? { ed: F.ed, key: F.key, mode: F.mode, live: !!F.live, ps: F.live ? VG().plantScreen(F.live) : null, liveX: F.live && F.live.x, zl: VG().zl(), view: VG().view(), cvH: F.cv.clientHeight } : null; }
       else if (d.cmd === 'hit') { const el = document.querySelector(d.sel); if (el) { const rc = el.getBoundingClientRect(), cx = rc.left + rc.width * (d.fx || 0.5), cy = rc.top + rc.height * (d.fy || 0.5), stack = document.elementsFromPoint(cx, cy).slice(0, 5).map(e => (e.id ? '#' + e.id : '') + '.' + (e.className || e.tagName) + ' z' + getComputedStyle(e).zIndex + ' pe' + getComputedStyle(e).pointerEvents); r = { rc: [rc.left, rc.top, rc.width, rc.height], stack, vh: innerHeight, vw: innerWidth }; } }
-      else if (d.cmd === 'trace') { window.__vgLog = []; const L = window.__vgLog; for (const t of ['pointerdown', 'pointermove', 'pointerup', 'lostpointercapture']) document.addEventListener(t, e => { if (L.length < 60 && (t !== 'pointermove' || L.filter(x => x[0] === 'pointermove').length < 6)) L.push([t, String(e.target.className || e.target.tagName).slice(0, 20), e.pointerType, e.button, e.defaultPrevented, Math.round(e.clientX), Math.round(e.clientY)]); }, true); window.__vgRDn = 0; r = true; }
+      else if (d.cmd === 'trace') { window.__vgLog = []; const L = window.__vgLog; for (const t of ['pointerdown', 'pointermove', 'pointerup', 'lostpointercapture']) Z.on(document, t, e => { if (L.length < 60 && (t !== 'pointermove' || L.filter(x => x[0] === 'pointermove').length < 6)) L.push([t, String(e.target.className || e.target.tagName).slice(0, 20), e.pointerType, e.button, e.defaultPrevented, Math.round(e.clientX), Math.round(e.clientY)]); }, true); window.__vgRDn = 0; r = true; }
       else if (d.cmd === 'path') { let o = VG(); const ps = d.fn.split('.'); for (let i = 0; i < ps.length - 1; i++) o = o[ps[i]]; r = o[ps[ps.length - 1]](...(d.args || [])); }
       else if (d.cmd === 'paneld') r = Object.assign(window.__vgPanelD ? window.__vgPanelD() : {}, { replantErr: window.__vgReplantErr || null });
       else if (d.cmd === 'count') r = d.sels.map(q => document.querySelectorAll(q).length);
@@ -67929,6 +67968,65 @@ if (VEG_MODE) (() => {
     } catch (x) { r = { err: String(x) }; }
     try { e.source.postMessage({ vgProbeR: d.vgProbe, r }, e.origin); } catch (x) { }
   });
-})();
+}
+// its scope made and its panels up (on a load in it, or in place - vegEnter); the title's and the GAME EDITOR's own buttons hidden while it's up
+function vegStart() {
+  if (!document.getElementById('vegOnCss')) { const st = document.createElement('style'); st.id = 'vegOnCss'; st.textContent = 'html.vegOn #skyEdBtn, html.vegOn #vegEdBtn, html.vegOn #skyEd { display: none !important; }'; document.head.appendChild(st); }
+  document.documentElement.classList.add('vegOn');
+  const Z = VZ.z = vzNew();
+  try { vegUI(Z); } catch (e) { console.error('Biome Editor', e); }
+}
+// IN: from the title or the GAME EDITOR (its own unsaved changes asked first - 00-world.js). The simulation worker held (the page runs the game while
+// in it), the test world swapped in (vegIn: the guard on), the editor's world built by its own start (vegUI's end: the land, its mode)
+function vegEnter(from) {
+  if (VEG_MODE || VZ.going || typeof __game === 'undefined') return;
+  VZ.going = true;
+  worldEditCover(true, 'LOADING BIOME EDITOR...');
+  SWB.holds.add('biome');                                          // (the worker kept from taking the game from here on - swWantLive)
+  if (from === 'editor' && typeof EDMODE !== 'undefined' && EDMODE.on) { EDMODE.game = null; EDMODE.restart = false; EDMODE.play = true; edModeClose(); }   // (the GAME EDITOR shut with nothing after it: no build, no title - this editor's build next)
+  const go = () => {
+    VEG_MODE = true; window.__openSea = true;
+    vegIn(); worldReload(); vegSetsMode();
+    vegStart();
+  };
+  // (the cover painted first; a hand-over to the worker under way finished first - as the GAME EDITOR opens, 18-zz-photo.js - then the game here
+  // whole, swHold, then in)
+  const handed = () => new Promise(r => { const f = () => (typeof SW === 'undefined' || !SW.going) ? r() : window.setTimeout(f, 100); f(); });
+  window.requestAnimationFrame(() => window.setTimeout(() => handed().then(() => swHold('biome')).then(go).catch(e => { console.error('Biome Editor', e); VZ.going = false; worldEditCover(false); }), 0));
+}
+// OUT: to the title ('title'), to the GAME EDITOR ('editor'), or straight in again (null - vegAgain). Its scope taken away, what the lab changed of
+// the game's put back, the test world out and this browser's own world back in - checked against the guard's copy (vegOut: guardOff)
+function vegLeave(to) {
+  if (!VEG_MODE) return;
+  const Z = VZ.z; VZ.z = null; if (Z) Z.end();
+  try { for (const k of Object.keys(window)) if (k.startsWith('__vg')) delete window[k]; } catch (e) { }
+  if (VEG_TERR.on) { VEG_TERR.on = false; TERRAIN_ED.sel = null; ISL_ED.pt = null; }
+  const g = __game;
+  try { g.fishnet.hudOnly(null); g.fishnet.freeze(false); if (g.veglab.freeze) g.veglab.freeze(false); g.veglab.look(null); g.hold = false; } catch (e) { }
+  paused = false; held.clear();
+  VEG_MODE = false; delete window.__openSea;
+  vegOut();
+  if (to == null) return;                                           // (in again at once - vegAgain: no world of its own read meanwhile)
+  document.documentElement.classList.remove('vegOn');
+  worldReload(); vegSetsMode();
+  const K = VZ.keep; VZ.keep = null;
+  if (K) { menuSel.mode = K.mode; menuSel.roster = K.roster; Object.assign(env, K.env); MUTED = K.muted; if (SFX.master) SFX.master.gain.value = MUTED ? 0 : env.volume * 0.9; }
+  if (to === 'editor') {
+    const T = NSKY.editor.TUNE; if (!T.built) NSKY.editor.build({ rescreen: () => { }, snapshot: gameSnapshot, load: gameLoad });   // (opened on a load in this editor: the GAME EDITOR not made yet)
+    worldEdit(menuSel.mode);                                        // (its own world built and it opened on it - 00-world.js; its own hold on the worker)
+  } else {
+    menuApply(); worldDrop(); openMainMenu(); ui.resume = false;   // (the title on black, as the page opens: no world till a game is picked)
+    worldEditCover(false);
+  }
+  swRelease('biome');
+}
+// its own RESET, REVERT and biome change: out and straight in again - the test world read again (its ground, its biome), the panels made again
+function vegAgain() {
+  if (!VEG_MODE || VZ.going) return;
+  VZ.going = true; worldEditCover(true, 'LOADING BIOME EDITOR...');
+  window.requestAnimationFrame(() => window.setTimeout(() => { vegLeave(null); VEG_MODE = true; window.__openSea = true; vegIn(); worldReload(); vegSetsMode(); vegStart(); }, 0));
+}
+if (VEG_MODE) vegStart();
+if (typeof window !== 'undefined') window.__veg = { enter: f => vegEnter(f || 'title'), leave: t => vegLeave(t || 'title'), again: () => vegAgain(), get on() { return VEG_MODE; }, get going() { return VZ.going; }, state: () => ({ veg: VEG_MODE, going: VZ.going, guard: GUARD.on, why: GUARD.why, tripped: GUARD.tripped, refused: GUARD.refused, nw: NET_WORLD.on, isl: ISLANDS.length, endless: ENDLESS, set: VEG_SET, title: !!ui.title, ready: WORLD_READY, loading: !!LOADING, holds: [...SWB.holds], swGoing: !!(typeof SW !== 'undefined' && SW.going), swLive: !!(typeof SW !== 'undefined' && SW.live), cover: !!worldEdCover, edOpen: !!NSKY.editor.TUNE.open, edOn: !!(typeof EDMODE !== 'undefined' && EDMODE.on), vgNodes: document.querySelectorAll('#vgBot,#vgLeft,#vgPause').length, mode: menuSel.mode, hud: !!HUD_ONLY, muted: MUTED }), get z() { return VZ.z ? { ph: VZ.z.ph, dead: VZ.z.dead, fires: VZ.z.fires, lastIv: VZ.z.lastIv, iv: VZ.z.iv.size, to: VZ.z.to.size, rf: VZ.z.rf.size, ls: VZ.z.ls.length, nodes: VZ.z.nodes.length } : null; } };   // (tools)
 })();
 </script>
