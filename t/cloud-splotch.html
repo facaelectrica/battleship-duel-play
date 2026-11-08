@@ -6367,84 +6367,61 @@ function smnLumpy(cx, cy, R, qx, qy, qR, d, st, z, a, fam, h, qa = a) {
     if (h3 < 0.35 && r > 2) { const o2 = -Math.sign(off || 1) * r * (0.35 + 0.25 * h1); smnPuff(x + nx * o2, y + ny * o2, Math.max(0.55, r * (0.45 + 0.25 * h2)), z * (1 - u), au, fam, h2); }
   }
 }
-// (Nov 1: the puffs are a column table - 05-game-state.js SMOKE_FIELDS - and these take a puff's row)
-function famOf(i) {
-  const c = smoke.c, fm = smoke.str(c.fam[i]);
-  if (fm && FAM_N[fm] !== undefined) return FAM_N[fm];
-  if (c.mist[i]) return 3;
-  const age = c.age[i], t = age / c.life[i], g = c.dark[i] * 0.8 + t * 0.9 + (c.h[i] - 0.5) * 0.12 - (c.quick[i] && age < 3.5 ? 0.3 : 0);
+function famOf(s) {
+  if (s.fam && FAM_N[s.fam] !== undefined) return FAM_N[s.fam];
+  if (s.mist) return 3;
+  const t = s.age / s.life, g = s.dark * 0.8 + t * 0.9 + (s.h - 0.5) * 0.12 - (s.quick && s.age < 3.5 ? 0.3 : 0);
   return g < 0.34 ? 0 : g < 0.62 ? 1 : 2;
 }
 // the smoke particles as the game sizes and fades them (src/46-smoke-fire-draw.js drawSmoke), then as balls
 // the smoke's source, for which pass it goes in (BEHIND DECK 1): the ship's fire, the tower's shells and missiles, the plane, the space rocket
-const srcOf = i => { const s = smoke.str(smoke.c.src[i]); return s === 'smear' ? 'plane' : s || 'ship'; };
-// which sources a pass draws (BEHIND DECK 1: P.behind's, in the back pass; the rest in the front) - the view's and the
-// smoke-drawing worker's one rule
-const smWant = (pass, behind) => pass === 'back' ? (src => !!behind[src]) : (src => !behind[src]);
-// what the smoke-drawing worker reads of the puffs: the drawn columns and the drawing's own number (Nov 1)
-const SMOKE_DRAWN_H = [...SMOKE_DRAWN, 'h'];
-// each puff of the pass its own number for its billows (h), the first time it's drawn - in the order drawn, the counter this
-// thread's (the drawing's own: never the simulation's)
-function smRollH(want) {
-  const H = smoke.c.h;
-  for (let i = 0; i < smoke.n; i++) if (H[i] !== H[i] && want(srcOf(i))) H[i] = fxHash(++smHc * 0.6180339 + 0.1);
-}
-// how far into its fading a puff is (0 not yet .. 1 gone): past fadeFrom of its life (0.62 unless its source says), its kill's
-// countdown, how long it has been alone
-function smLate(i) {
-  const c = smoke.c, f0 = c.fadeFrom[i] !== c.fadeFrom[i] ? 0.62 : c.fadeFrom[i], t = c.age[i] / c.life[i], kl = c.kill[i], lo = c.lonely[i];
-  return Math.max(c.keep[i] ? t : t > f0 ? (t - f0) / (1 - f0) : 0, kl ? 1 - kl / 2.5 : 0, lo ? Math.min(1, lo / 1.6) : 0);
-}
+const srcOf = s => s.src === 'smear' ? 'plane' : s.src || 'ship';
 function gatherSmokeNew(want) {
   const SV = FXV.SV, kx = SV / FXV.pxX, cxOf = wx => wpx(wx) / FXV.pxX + SMG.mx, cyOf = wy => wpy(wy) / FXV.pxY + SMG.my;
-  smRollH(want);   // (the game's puffs: a number of their own, for their billows)
-  const T = smoke, c = T.c, X = c.x, Y = c.y, RR = c.r, AG = c.age, LF = c.life, AL = c.alpha, H = c.h, LK = c.link, LU = c.lumpy, PV = c.prev, H0 = c.hd0, H1 = c.hd1, H2 = c.hd2;
-  for (let i = 0; i < T.n; i++) {
-    if (!want(srcOf(i))) continue;
-    const h = H[i], age = AG[i], alpha = AL[i], link = LK[i] || 60;
+  for (const s of smoke) {
+    if (!want(srcOf(s))) continue;
+    if (s.h === undefined) s.h = fxHash(++smHc * 0.6180339 + 0.1);   // (the game's puffs: a number of their own, for their billows)
     // (fading - user Oct 29, "proper smoke fading vs having the puffs disappear": past fadeFrom of its life (0.62 unless its
     // source says) a puff dissolves in clumps (its alpha: SM_COMP_FS) and only shrinks a little, rather than shrinking away)
-    const late = smLate(i);
-    let R = RR[i] * kx * Math.min(1, 0.55 + age * 3) * Math.min(1, 0.45 + alpha * 0.75);
-    const a0 = Math.min(1, 0.35 + alpha * 1.1) * (1 - late) * (1 - late * 0.5), a = clamp(a0 * 1.5, 0, 1);
+    const f0 = s.fadeFrom ?? 0.62, t = s.age / s.life, late = Math.max(s.keep ? t : t > f0 ? (t - f0) / (1 - f0) : 0, s.kill ? 1 - s.kill / 2.5 : 0, s.lonely ? Math.min(1, s.lonely / 1.6) : 0);
+    let R = s.r * kx * Math.min(1, 0.55 + s.age * 3) * Math.min(1, 0.45 + s.alpha * 0.75);
+    const a0 = Math.min(1, 0.35 + s.alpha * 1.1) * (1 - late) * (1 - late * 0.5), a = clamp(a0 * 1.5, 0, 1);
     R *= 0.75 + 0.25 * Math.sqrt(a);
     if (R < 0.35 || a < 0.03) continue;
-    const cx = cxOf(X[i]), cy = cyOf(Y[i]), fam = famOf(i), z = (h - 0.5) * R * 0.9;
+    const cx = cxOf(s.x), cy = cyOf(s.y), fam = famOf(s), z = (s.h - 0.5) * R * 0.9;
     // (engine stage 8, Oct 30: a puff whose ball and billows all lie off this picture is passed over here - smnAdd would turn
     // every one of them away; its billows and heaps reach at most 2.2 of its radius from its middle. The same balls, in the
     // same order. What joins it to the puff before it or to its funnel is still laid below)
     const RB = 2.2 * Math.max(0.55, R) + 1;
-    if (cx + RB >= 0 && cx - RB <= SMN.cw && cy + RB >= 0 && cy - RB <= SMN.h) smnPuff(cx, cy, Math.max(0.55, R), z, a, fam, h);
-    // joined to the puff before it: fill the gap so the body is unbroken (a puff gone is a row gone - T.row -1)
-    const q = PV[i] ? T.row(PV[i]) : -1;
-    if (q >= 0 && AG[q] < LF[q]) {
-      const qx = cxOf(X[q]), qy = cyOf(Y[q]), d = Math.hypot(qx - cx, qy - cy);
-      const ql = smLate(q), qal = AL[q];
-      const qa = clamp(Math.min(1, 0.35 + qal * 1.1) * (1 - ql) * (1 - ql * 0.5) * 1.5, 0, 1);
-      const qR = Math.max(0.55, RR[q] * kx * Math.min(1, 0.55 + AG[q] * 3) * Math.min(1, 0.45 + qal * 0.75) * (0.75 + 0.25 * Math.sqrt(qa))), rr = Math.min(R, qR);
+    if (cx + RB >= 0 && cx - RB <= SMN.cw && cy + RB >= 0 && cy - RB <= SMN.h) smnPuff(cx, cy, Math.max(0.55, R), z, a, fam, s.h);
+    // joined to the puff before it: fill the gap so the body is unbroken
+    const q = s.prev;
+    if (q && !q.dead && q.age < q.life) {
+      const qx = cxOf(q.x), qy = cyOf(q.y), d = Math.hypot(qx - cx, qy - cy);
+      const qt = q.age / q.life, qf = q.fadeFrom ?? 0.62, ql = Math.max(q.keep ? qt : qt > qf ? (qt - qf) / (1 - qf) : 0, q.kill ? 1 - q.kill / 2.5 : 0, q.lonely ? Math.min(1, q.lonely / 1.6) : 0);
+      const qa = clamp(Math.min(1, 0.35 + q.alpha * 1.1) * (1 - ql) * (1 - ql * 0.5) * 1.5, 0, 1);
+      const qR = Math.max(0.55, q.r * kx * Math.min(1, 0.55 + q.age * 3) * Math.min(1, 0.45 + q.alpha * 0.75) * (0.75 + 0.25 * Math.sqrt(qa))), rr = Math.min(R, qR);
       const st = Math.max(0.5, rr * 0.7);
-      if (d > st && d < link * kx) {
+      if (d > st && d < (s.link || 60) * kx) {
         // (at fixed steps from this puff: filling the gap, the fillers already there don't slide as it widens)
-        if (LU[i]) smnLumpy(cx, cy, R, qx, qy, qR, d, st, z, a, fam, h, qa);
-        else for (let k = 1; k * st < d - st * 0.5 && k <= 24; k++) { const u = k * st / d; smnPuff(cx + (qx - cx) * u, cy + (qy - cy) * u, Math.max(0.55, R + (qR - R) * u), z * (1 - u), a + (qa - a) * u, fam, fxHash(h * 13 + k)); }
+        if (s.lumpy) smnLumpy(cx, cy, R, qx, qy, qR, d, st, z, a, fam, s.h, qa);
+        else for (let k = 1; k * st < d - st * 0.5 && k <= 24; k++) { const u = k * st / d; smnPuff(cx + (qx - cx) * u, cy + (qy - cy) * u, Math.max(0.55, R + (qR - R) * u), z * (1 - u), a + (qa - a) * u, fam, fxHash(s.h * 13 + k)); }
       }
     }
     // the newest puff of a stream whose source marks its mouth (a big ship's funnel): joined down to it, so the column
-    // stands on its funnel between puffs (Oct 29, V254; Nov 1: the mouth in hd0..hd2 - 38-smoke-sim.js smHeads - NaN none)
-    if (H0[i] === H0[i]) {
-      const hx = cxOf(H0[i]), hy = cyOf(H1[i]), hR = Math.max(0.55, H2[i] * kx * 0.55), d = Math.hypot(hx - cx, hy - cy), st = Math.max(0.5, Math.min(R, hR) * 0.7);
-      if (d > st && d < link * kx) smnLumpy(cx, cy, R, hx, hy, hR, d, st, z, a, fam, h + 0.5);
+    // stands on its funnel between puffs (Oct 29, V254)
+    const hd = s.st && s.st.last === s && s.st.head;
+    if (hd) {
+      const hx = cxOf(hd[0]), hy = cyOf(hd[1]), hR = Math.max(0.55, hd[2] * kx * 0.55), d = Math.hypot(hx - cx, hy - cy), st = Math.max(0.5, Math.min(R, hR) * 0.7);
+      if (d > st && d < (s.link || 60) * kx) smnLumpy(cx, cy, R, hx, hy, hR, d, st, z, a, fam, s.h + 0.5);
     }
   }
   // the shell and missile trails (src/47-render-overlays.js drawTrails' blobs along each piece)
-  // (Nov 1: the trails are a column table - 47-render-overlays.js trFields: each piece's two ends' numbers in its own columns)
-  const TS = trails, TC = TS.c, TFL = TC.fl, TX1 = TC.x1, TY1 = TC.y1, TAG1 = TC.age1, TSD1 = TC.seed1, TLA1 = TC.la1, TX2 = TC.x2, TY2 = TC.y2, TAG2 = TC.age2;
-  if (want('tower')) for (let ti = 0; ti < TS.n; ti++) {
-    const thin = TFL[ti] & 2, root = TFL[ti] & 1, ak = thin ? THIN_AGE : 1, rk = thin ? THIN_R : 1;
-    const p1x = TX1[ti], p1y = TY1[ti], p1a = TAG1[ti], p1s = TSD1[ti], p2x = TX2[ti], p2y = TY2[ti], p2a = TAG2[ti];
-    const x1 = cxOf(p1x), y1 = cyOf(p1y), x2 = cxOf(p2x), y2 = cyOf(p2y), lenW = Math.hypot(p2x - p1x, p2y - p1y);
+  if (want('tower')) for (const tr of trails) {
+    const p1 = tr.p1, p2 = tr.p2, ak = tr.thin ? THIN_AGE : 1, rk = tr.thin ? THIN_R : 1;
+    const x1 = cxOf(p1.x), y1 = cyOf(p1.y), x2 = cxOf(p2.x), y2 = cyOf(p2.y), lenW = Math.hypot(p2.x - p1.x, p2.y - p1.y);
     if (Math.max(x1, x2) < -40 || Math.min(x1, x2) > SMN.cw + 40 || Math.max(y1, y2) < -40 || Math.min(y1, y2) > SMN.h + 40) continue;
-    const ageMid = (p1a + p2a) / 2 * ak, rMin = Math.max(0.5, trailR(Math.min(p1a, p2a) * ak) * 0.8 * rk * kx);
+    const ageMid = (p1.age + p2.age) / 2 * ak, rMin = Math.max(0.5, trailR(Math.min(p1.age, p2.age) * ak) * 0.8 * rk * kx);
     // (blobs at fixed steps along the piece from its start - 4.2 units as the game, closer for a thin line - so they don't
     // slide along it as it stretches)
     // (never closer than half a cell: zoomed out (real scale starts ~3x further out) 4.2 units is a fraction of a cell, and
@@ -6452,42 +6429,41 @@ function gatherSmokeNew(want) {
     // on the user's PC, Oct 29. A ball is at least 0.55 cells, so the trail stays unbroken)
     const stW = Math.max(0.5 / kx, Math.min(4.2, Math.max(0.8, rMin * 0.8 / kx))), n = Math.min(80, Math.max(1, Math.floor(lenW / stW)));
     for (let i = 0; i < n; i++) {
-      const f = Math.min(1, (i + 0.5) * stW / Math.max(lenW, 1e-6)), age = (p1a + (p2a - p1a) * f) * ak, u = age / TRAIL_SHAPE;
+      const f = Math.min(1, (i + 0.5) * stW / Math.max(lenW, 1e-6)), age = (p1.age + (p2.age - p1.age) * f) * ak, u = age / TRAIL_SHAPE;
       if (age >= TRAIL_LIFE) continue;
       const a = Math.pow(1 - u, 1.1) * (1 - 0.55 * TRAIL_GROW(age)) * trailLate(age);
-      const h1 = fxHash(i * 7.13 + p1s * 3.7), h2 = fxHash(i * 3.3 + p1s), h3 = fxHash(i * 5.1 + p1s * 1.3);
+      const h1 = fxHash(i * 7.13 + p1.seed * 3.7), h2 = fxHash(i * 3.3 + p1.seed), h3 = fxHash(i * 5.1 + p1.seed * 1.3);
       const keep = clamp((0.5 + 0.5 * a - h1) * 5 + 1, 0, 1);
       if (keep <= 0.01) continue;
       const r = trailR(age) * (0.8 + 0.5 * h2) * rk, spread = Math.min(1, age / 3) * r * 0.55;
-      const wx = p1x + (p2x - p1x) * f + (h3 - 0.5) * spread, wy = p1y + (p2y - p1y) * f + (h2 - 0.5) * spread;
+      const wx = p1.x + (p2.x - p1.x) * f + (h3 - 0.5) * spread, wy = p1.y + (p2.y - p1.y) * f + (h2 - 0.5) * spread;
       const aa = clamp(Math.min(1, a * 1.3) * keep * 1.6, 0, 1), R = r * kx * Math.sqrt(aa);
       if (R < 2.2) smnAdd(cxOf(wx), cyOf(wy), Math.max(0.55, R), (h3 - 0.5) * R, aa, 3, h1);
       else smnPuff(cxOf(wx), cyOf(wy), R, (h3 - 0.5) * R * 0.6, aa, 3, h1);
     }
-    if (TLA1[ti] && root) {
-      const age = p1a, u = Math.min(1, age / 16);
+    if (p1.launch && tr.root) {
+      const age = p1.age, u = Math.min(1, age / 16);
       if (u < 1) for (let k = 0; k < 7; k++) {
-        const h = fxHash(k * 2.17 + p1s), g = fxHash(k * 4.9 + p1s * 0.7), br = (4 + 15 * (1 - Math.exp(-age / 1.6))) * (0.6 + 0.6 * g), ang = h * Math.PI * 2, d = br * (0.4 + 0.8 * g);
+        const h = fxHash(k * 2.17 + p1.seed), g = fxHash(k * 4.9 + p1.seed * 0.7), br = (4 + 15 * (1 - Math.exp(-age / 1.6))) * (0.6 + 0.6 * g), ang = h * Math.PI * 2, d = br * (0.4 + 0.8 * g);
         const ab = clamp(Math.pow(1 - u, 1.2) * trailLate(age) * 1.6, 0, 1);
-        smnPuff(cxOf(p1x + Math.cos(ang) * d * 1.2), cyOf(Math.min(p1y + Math.sin(ang) * d * 0.7 - age * 0.6, trailGround(p1x) - br * 0.8)), br * kx * Math.sqrt(ab), (g - 0.5) * br * kx, ab, 3, h);
+        smnPuff(cxOf(p1.x + Math.cos(ang) * d * 1.2), cyOf(Math.min(p1.y + Math.sin(ang) * d * 0.7 - age * 0.6, trailGround(p1.x) - br * 0.8)), br * kx * Math.sqrt(ab), (g - 0.5) * br * kx, ab, 3, h);
       }
     }
   }
   // the space rocket's column and the heaps along the water (src/50-land-space.js drawRocketTrail's puffs)
-  // (Nov 1: a column table - 50-land-space.js ROCKET_FIELDS; here or, packed, in the worker)
-  if (want('space')) { const c = rocketTrail.c, H = c.h; for (let i = 0; i < rocketTrail.n; i++) {
-    if (H[i] !== H[i]) H[i] = fxHash(++smHc * 0.6180339 + 0.37);
-    const age = c.age[i], R = rocketPuffR(c, i) * kx, a = clamp(0.85 * Math.min(1, age * 3) * Math.pow(1 - age / c.life[i], 1.3) * 1.5, 0, 1);
+  if (want('space')) for (const p of rocketTrail) {
+    if (p.h === undefined) p.h = fxHash(++smHc * 0.6180339 + 0.37);
+    const R = rocketPuffR(p) * kx, a = clamp(0.85 * Math.min(1, p.age * 3) * Math.pow(1 - p.age / p.life, 1.3) * 1.5, 0, 1);
     if (a < 0.03) continue;
-    smnPuff(cxOf(c.x[i]), cyOf(c.y[i]), Math.max(0.55, R * Math.sqrt(a)), (H[i] - 0.5) * R, a, c.w[i] ? 3 : 4, H[i]);
-  } }
+    smnPuff(cxOf(p.x), cyOf(p.y), Math.max(0.55, R * Math.sqrt(a)), (p.h - 0.5) * R, a, p.w ? 3 : 4, p.h);
+  }
 }
 // the fires that light the smoke near them: [x, y, radius (cells), strength]
 function fireLights() {
   // (the game: its flames, gathered by where they burn - a fire is a few hundred flames - and its blasts)
   const L = [], kx = FXV.SV / FXV.pxX, cxOf = wx => wpx(wx) / FXV.pxX + SMG.mx, cyOf = wy => wpy(wy) / FXV.pxY + SMG.my;
   const G = FIRE_L; G.clear();
-  for (const f of flames.rows()) {
+  for (const f of flames) {
     if (!(f.heat > 0.15) || f.src === 'ship') continue;
     const k = Math.floor(f.x / 70) * 4096 + Math.floor(f.y / 70); let g = G.get(k);
     if (!g) G.set(k, g = [0, 0, 0]);
@@ -6510,7 +6486,7 @@ function fireLights() {
   for (const s of shells) if (s.burn > 0 && !(s.drop > 0) && !s.under) L.push(cxOf(s.x), cyOf(s.y), 24 * kx, 0.8);
   for (const pl of allPlanes()) if (pl && pl.state === 'down') L.push(cxOf(pl.x), cyOf(pl.y), 34 * kx, 1.0);
   for (const f of traffic) if (f.state === 'fall' && SHEET_PLANES[f.kind]) L.push(cxOf(f.x), cyOf(f.y), 34 * kx, 1.0);
-  for (const f of flashes.rows()) L.push(cxOf(f.x), cyOf(f.y), f.r * 3.5 * kx, 2 * (1 - f.life / f.max));
+  for (const f of flashes) L.push(cxOf(f.x), cyOf(f.y), f.r * 3.5 * kx, 2 * (1 - f.life / f.max));
   return L;
 }
 const FIRE_L = new Map();
@@ -6649,7 +6625,7 @@ function smdBody() {
 function smdStart(id) {
   try {
     const w = new Worker(URL.createObjectURL(new Blob([smgText() + '\n' + smDensity.toString() + '\n' + smdBody.toString() + '\nsmdBody();'], { type: 'text/javascript' })));
-    w.onmessage = e => { const m = e.data, S_ = SMD.by.get(m.id); if (!S_) return; if (m.g) { if (m.seq !== S_.gseq) return; if (m.part === 2) { if (S_.gres) { delete m.part; Object.assign(S_.gres, m); S_.gres.done = 1; } return; } SMD.ggot++; S_.gres = m; if (m.sb) { S_.sbuf = m.sb; m.sb = null; } if (!m.part) m.done = 1; return; } if (m.seq !== S_.dseq) return; SMD.got++; S_.dres = m.out; };
+    w.onmessage = e => { const m = e.data, S_ = SMD.by.get(m.id); if (!S_) return; if (m.g) { if (m.seq !== S_.gseq) return; if (m.part === 2) { if (S_.gres) { delete m.part; Object.assign(S_.gres, m); S_.gres.done = 1; } return; } SMD.ggot++; S_.gres = m; if (!m.part) m.done = 1; return; } if (m.seq !== S_.dseq) return; SMD.got++; S_.dres = m.out; };
     w.onerror = e => { SMD.fail = String(e.message || 'error'); };
     SMD.ws.set(id, w);
   } catch (e) { SMD.fail = String(e.message || e); }
@@ -6687,7 +6663,7 @@ function smdTake(S_, dn, gw, gx0, gy0, gx1, gy1) {
 // a puff is in (want), its kind of smoke (famOf), whether the puff before it is still there. Late or failed: the main
 // thread gathers on the second frame, as before. ?smdcheck=1: the main thread gathers too, on the first frame, from the
 // same puffs, and the balls that differ are counted (SMD.chk - stats().smd); ?smgw=0 (P.smgw) keeps the gather here.
-const ROCKET_SENT = ['x', 'y', 'r', 'k', 'ground', 'age', 'life', 'h', 'w'], SMG_KS = ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV'];
+const SMG_S = 29, SMG_T = 11, SMG_K = 7, SMG_KS = ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV'];
 const SMD_CHECK = (() => { try { return /[?&]smdcheck=1/.test(location.search); } catch (e) { return false; } })();
 if ((() => { try { return /[?&]smgw=0/.test(location.search); } catch (e) { return false; } })()) P.smgw = 0;
 // the worker's text before smdBody: the gather's functions as they are here, and what they read, filled by each job
@@ -6700,14 +6676,10 @@ function smgText() {
     `const trailLate = (() => { const clamp = ${O.clamp}, smoothstep = ${O.smoothstep}, TRAIL_HOLD = ${v(TRAIL_HOLD)}, TRAIL_LIFE = ${v(TRAIL_LIFE)}; return ${trailLate}; })();`,
     `const TRAIL_SHAPE = ${v(TRAIL_SHAPE)}, TRAIL_LIFE = ${v(TRAIL_LIFE)}, THIN_AGE = ${v(THIN_AGE)}, THIN_R = ${v(THIN_R)}, SMN_TILE_OFS = ${v(SMN_TILE_OFS)};`,
     `let SV = 1, CAMPX = 0, TOPPX = 0, SMN = null, smHc = 0; const PX = ${PX}, PY = ${PY}, wpx = ${wpx}, wpy = ${wpy};`,
-    `const FXV = {}, SMG = {}, P = {}, SMSUN = {}, E = {}, SMN_HC = new Map(), TGM = new Map();`,
-    // (Nov 1: the puffs as the same column table as the game's - its class and fields, from their text - filled from the columns
-    // the page packs (smoke.pack, adopted: smgRun); a puff's kind and pass worked out here by the same functions)
-    `${ColTable}`, `const SMOKE_FIELDS = ${v(SMOKE_FIELDS)}, smoke = new ColTable(SMOKE_FIELDS), FAM_N = ${v(FAM_N)}, rocketTrail = new ColTable(${v(ROCKET_FIELDS)}), trails = new ColTable(${v(trFields())});`,
-    famOf, smLate, smRollH, `const srcOf = ${srcOf}, smWant = ${smWant};`,
-    // (worked out on the main thread and sent: the rocket's puff's size, the ground under a launch's foot; the light is laid
-    // after the gather (smgAfter's smBodies) - the worker is used only when it is, SMN.lazyL)
-    `const rocketPuffR = ${rocketPuffR}, trailGround = x => TGM.get(x);`,
+    `const FXV = {}, SMG = {}, P = {}, SMSUN = {}, E = {}, SMN_HC = new Map(), TGM = new Map(), smoke = [], trails = [], rocketTrail = [];`,
+    // (worked out on the main thread and sent: a puff's kind, the rocket's puff's size, the ground under a launch's foot;
+    // the light is laid after the gather (smgAfter's smBodies) - the worker is used only when it is, SMN.lazyL)
+    `const famOf = s => s.fm, srcOf = s => '', rocketPuffR = p => p.rr, trailGround = x => TGM.get(x);`,
     // (the slots' table, SMG's last step: the pass's table and slots, kept here between jobs - SMS; the arrays the main thread
     // gave back to fill again - SMS_RB)
     `let SMS = null, SMS_RB = null; const smsH = ${smsH};`,
@@ -6721,15 +6693,22 @@ function smgRun(m) {
   if (m.sync) SMS = smsFrom(m.sync);   // (the main thread painted this pass itself last: its table, taken over)
   if (m.rb) SMS_RB = m.rb;
   SMN = { cap: 0, n: 0, X: null, Y: null, R: null, Z: null, A: null, F: null, LX: null, LY: null, LZ: null, TK: null, TU: null, TV: null, SID: null, cw: m.cw, h: m.h, tkz: m.tkz, lazyL: true };
-  TGM.clear();
-  // (the puffs: the page's columns, packed - this table's columns views into that buffer; the one it held goes back)
-  const sb = smoke.adopt(m.S);
-  // (the trails: the page's columns, packed - views into that buffer; the ground under each launch puff)
-  if (m.TR) { trails.adopt(m.TR); const c = trails.c; for (let i = 0; i < trails.n; i++) if (c.la1[i] && (c.fl[i] & 1)) TGM.set(c.x1[i], m.G[i]); } else trails.length = 0;
-  // (the rocket's puffs: the page's columns, packed - views into that buffer)
-  if (m.R) rocketTrail.adopt(m.R); else rocketTrail.length = 0;
-  gatherSmokeNew(smWant(m.pass, m.wantB));
-  const n = SMN.n, res = { g: 1, id: m.id, seq: m.seq, n, part: 1, sb }, tr = sb ? [sb] : [];
+  const S = m.S, T = m.T, K = m.K;
+  smoke.length = 0; trails.length = 0; rocketTrail.length = 0; TGM.clear();
+  for (let i = 0; i < m.ns; i++) {
+    const o = i * 29, s = { x: S[o], y: S[o + 1], r: S[o + 2], age: S[o + 3], life: S[o + 4], alpha: S[o + 5], fadeFrom: S[o + 6], keep: S[o + 7], kill: S[o + 8], lonely: S[o + 9], h: S[o + 10], fm: S[o + 11], link: S[o + 12], lumpy: S[o + 13], prev: null, st: null };
+    if (S[o + 14]) s.prev = { x: S[o + 15], y: S[o + 16], r: S[o + 17], age: S[o + 18], life: S[o + 19], alpha: S[o + 20], fadeFrom: S[o + 21], keep: S[o + 22], kill: S[o + 23], lonely: S[o + 24], dead: false };
+    if (S[o + 25]) s.st = { last: s, head: [S[o + 26], S[o + 27], S[o + 28]] };
+    smoke.push(s);
+  }
+  for (let i = 0; i < m.nt; i++) {
+    const o = i * 11, p1 = { x: T[o], y: T[o + 1], age: T[o + 2], seed: T[o + 3], launch: T[o + 4] }, tr = { p1, p2: { x: T[o + 5], y: T[o + 6], age: T[o + 7] }, thin: T[o + 8], root: T[o + 9] };
+    if (p1.launch && tr.root) TGM.set(p1.x, T[o + 10]);
+    trails.push(tr);
+  }
+  for (let i = 0; i < m.nk; i++) { const o = i * 7; rocketTrail.push({ x: K[o], y: K[o + 1], rr: K[o + 2], age: K[o + 3], life: K[o + 4], h: K[o + 5], w: K[o + 6] }); }
+  gatherSmokeNew(() => true);
+  const n = SMN.n, res = { g: 1, id: m.id, seq: m.seq, n, part: 1 }, tr = [];
   if (!n) { res.part = 0; return [res, tr]; }
   for (const k of ['X', 'Y', 'R', 'Z', 'A', 'F', 'SID', 'TK', 'TU', 'TV']) { const a = SMN[k].slice(0, n); res[k] = a; tr.push(a.buffer); }
   // the light as it was on the main thread when the puffs were packed (the sun in this view, the hour's)
@@ -6781,31 +6760,43 @@ function smgAfter(n, B, m, res, tr, mid) {
 function smgSend(want, cw, h, fast, tkA0) {
   if (!SMN.did) { SMN.did = ++SMD.ids; SMD.by.set(SMN.did, SMN); }
   if (!SMD.ws.has(SMN.did)) { smdStart(SMN.did); if (SMD.fail) return false; }
-  // the puffs: each of this pass given its number first, as gatherSmokeNew does (the same count, the same order), then the drawn
-  // columns and those numbers copied into one buffer (the one the worker gave back last, if big enough) - Nov 1
-  smRollH(want);
-  const S = smoke.pack(SMOKE_DRAWN_H, SMN.sbuf); SMN.sbuf = null;
-  // (the trails, Nov 1: their drawn columns packed (47-render-overlays.js TR_DRAWN) - and the ground under each first piece's
-  // launch puff (trailGround reads the land: here))
-  let TR = null, G = null;
-  if (want('tower')) {
-    const c = trails.c, n = trails.n; TR = trails.pack(TR_DRAWN, null); G = new Float64Array(n);
-    for (let i = 0; i < n; i++) if (c.la1[i] && (c.fl[i] & 1)) G[i] = trailGround(c.x1[i]);
+  // the puffs, in gatherSmokeNew's order, each given its number as it does (the same count, the same order)
+  const S = new Float64Array(smoke.length * SMG_S); let ns = 0;
+  for (const s of smoke) {
+    if (!want(srcOf(s))) continue;
+    if (s.h === undefined) s.h = fxHash(++smHc * 0.6180339 + 0.1);
+    const o = ns++ * SMG_S;
+    // (a flag kept as 1 or 0, a missing number as what the gather takes for it: the same branches, the same sums)
+    S[o] = s.x; S[o + 1] = s.y; S[o + 2] = s.r; S[o + 3] = s.age; S[o + 4] = s.life; S[o + 5] = s.alpha; S[o + 6] = s.fadeFrom ?? 0.62; S[o + 7] = s.keep ? 1 : 0; S[o + 8] = s.kill || 0; S[o + 9] = s.lonely || 0;
+    S[o + 10] = s.h; S[o + 11] = famOf(s); S[o + 12] = s.link || 60; S[o + 13] = s.lumpy ? 1 : 0;
+    const q = s.prev;
+    if (q && !q.dead && q.age < q.life) { S[o + 14] = 1; S[o + 15] = q.x; S[o + 16] = q.y; S[o + 17] = q.r; S[o + 18] = q.age; S[o + 19] = q.life; S[o + 20] = q.alpha; S[o + 21] = q.fadeFrom ?? 0.62; S[o + 22] = q.keep ? 1 : 0; S[o + 23] = q.kill || 0; S[o + 24] = q.lonely || 0; }
+    const hd = s.st && s.st.last === s && s.st.head;
+    if (hd) { S[o + 25] = 1; S[o + 26] = hd[0]; S[o + 27] = hd[1]; S[o + 28] = hd[2]; }
   }
-  // (the rocket's puffs, Nov 1: each given its hash first, as the gather does, then the drawn columns packed - the worker works
-  // out each one's size by the same rocketPuffR)
-  let R = null;
+  let nt = 0, T = new Float64Array(0);
+  if (want('tower')) {
+    T = new Float64Array(trails.length * SMG_T);
+    for (const tr of trails) {
+      const p1 = tr.p1, p2 = tr.p2, o = nt++ * SMG_T, la = p1.launch && tr.root;
+      T[o] = p1.x; T[o + 1] = p1.y; T[o + 2] = p1.age; T[o + 3] = p1.seed; T[o + 4] = p1.launch ? 1 : 0; T[o + 5] = p2.x; T[o + 6] = p2.y; T[o + 7] = p2.age; T[o + 8] = tr.thin ? 1 : 0; T[o + 9] = tr.root ? 1 : 0; T[o + 10] = la ? trailGround(p1.x) : 0;
+    }
+  }
+  let nk = 0, K = new Float64Array(0);
   if (want('space')) {
-    const H = rocketTrail.c.h; for (let i = 0; i < rocketTrail.n; i++) if (H[i] !== H[i]) H[i] = fxHash(++smHc * 0.6180339 + 0.37);
-    R = rocketTrail.pack(ROCKET_SENT, null);
+    K = new Float64Array(rocketTrail.length * SMG_K);
+    for (const p of rocketTrail) {
+      if (p.h === undefined) p.h = fxHash(++smHc * 0.6180339 + 0.37);
+      const o = nk++ * SMG_K; K[o] = p.x; K[o + 1] = p.y; K[o + 2] = rocketPuffR(p); K[o + 3] = p.age; K[o + 4] = p.life; K[o + 5] = p.h; K[o + 6] = p.w ? 1 : 0;
+    }
   }
   SMN.gseq = (SMN.gseq || 0) + 1; SMN.gres = null; SMN.gwait = true; SMN.gwt = 0; SMN.chk = null; SMD.gsent++;
   // (the light's numbers too - the sun in this view, the hour's: the bodies and their light are worked out there, as here now)
-  const m = { g: 1, id: SMN.did, seq: SMN.gseq, S, pass: SMN.pass, wantB: P.behind, TR, G, R, sv: SV, campx: CAMPX, toppx: TOPPX, fsv: FXV.SV, pxX: FXV.pxX, pxY: FXV.pxY, mx: SMG.mx, my: SMG.my, cw, h, tkz: SMN.tkz, smbump: P.smbump, smtex: P.smtex, fast, tkA0,
+  const m = { g: 1, id: SMN.did, seq: SMN.gseq, S, ns, T, nt, K, nk, sv: SV, campx: CAMPX, toppx: TOPPX, fsv: FXV.SV, pxX: FXV.pxX, pxY: FXV.pxY, mx: SMG.mx, my: SMG.my, cw, h, tkz: SMN.tkz, smbump: P.smbump, smtex: P.smtex, fast, tkA0,
     sun: [SMSUN.x, SMSUN.y, SMSUN.H, SMSUN.Z, SMSUN.s4], behind: E.behind, overcast: E.overcast, lightz: P.lightz, chk: SMD_CHECK, sl: 1, thin: (P.smthin ?? 1) > 0 };
   // (the slots: the worker's table. Painted here last (or never yet), this thread's table goes over with the job (smsSnap), a
   // copy kept here (G_.mir); the arrays of the last paint go back to be filled again)
-  const G_ = gsmState(SMN), tl = [S.buf]; if (R) tl.push(R.buf); if (TR) tl.push(TR.buf, G.buffer);
+  const G_ = gsmState(SMN), tl = [S.buffer, T.buffer, K.buffer];
   if (G_.own !== 'w') { m.sync = smsSnap(G_); G_.mir = smsCopy(m.sync); G_.own = 'w'; tl.push(m.sync.key.buffer, m.sync.ins.buffer, m.sync.p.buffer, m.sync.use.buffer, m.sync.free.buffer); }
   if (G_.rb) { m.rb = G_.rb; tl.push(G_.rb[0].buffer, G_.rb[1].buffer); G_.rb = null; }
   // (?smdcheck=1: the main thread's own gather of the same puffs now, into a scratch store, and its steps after (smgAfter, with
@@ -6873,8 +6864,8 @@ function smgCompare(C, W) {
   if (Cr.nb !== W.nb || !same(Cr.gOf, W.gOf) || !same(Cr.bb, W.bb)) c.body = (c.body || 0) + 1;
   if (!same(Cr.LX, W.LX) || !same(Cr.LY, W.LY) || !same(Cr.LZ, W.LZ)) c.light = (c.light || 0) + 1;
 }
-function drawSmokeNew(pass, want) {
-  SMN = SMNPV[VI][pass]; SMN.pass = pass;
+function drawSmokeNew(pass = 'front', want = () => true) {
+  SMN = SMNPV[VI][pass];
   const t0 = performance.now();
   { const zk = FXV.pxX + ',' + FXV.SV.toFixed(5) + ',' + SMG.cw + ',' + SMG.h; if (SMN.zk !== zk) { SMN.zk = zk; SMN.force = true; } }   // (zooming: a new picture every frame)
   // (the game: the last picture again, moved with the camera since it was made)
@@ -6896,7 +6887,7 @@ function drawSmokeNew(pass, want) {
   const cw = SMG.cw, h = SMG.h;
   if (SMN.cw !== cw || SMN.h !== h) { SMN.cw = cw; SMN.h = h; SMN.buf = makeBuf(cw, h); SMN.wrow = new Int32Array(cw); }
   if (!gsmOn()) return;   // (the smoke is the GPU's alone - Oct 28, no non-WebGL path: without float render targets, no smoke)
-  SMN.cam = [CAMPX, TOPPX, FXV.SV, FXV.pxX, FXV.pxY, SMG.mx, SMG.my]; SMN.lazyL = (P.smfast ?? 1) > 0 && (P.smgroup ?? 1) > 0;
+  SMN.cam = [CAMPX, TOPPX]; SMN.lazyL = (P.smfast ?? 1) > 0 && (P.smgroup ?? 1) > 0;
   SMN.n = 0; SMN.tkz = clamp(1.05 / Math.sqrt(Zg), 0.8, 2.2);              // (the tile's scale: billows of 4-10 cells at x1, smaller zoomed out)
   // FAST: the balls nearest first (a counting sort on their highest point), and a pixel already covered nearer than this
   // ball's top is passed at once - the launch heaps are thousands of big balls one behind another
@@ -6990,7 +6981,7 @@ function drawSmokeNew(pass, want) {
   // and paints - or, late, gathers here then and goes on as before
   if (wk && SMN.lazyL && (P.smgw ?? 1) > 0 && smgSend(want, cw, h, fast, tkA0)) {
     fillWrow(SMN.wrow); SMN.tgp = performance.now() - t0;
-    const take = () => { const W = smgTake(SMN); if (W === 'wait') { SMN.pend = take; blitLast(); return; } if (W) { rest(W, performance.now()); return; } SMN.n = 0; SMN.cam = [CAMPX, TOPPX, FXV.SV, FXV.pxX, FXV.pxY, SMG.mx, SMG.my]; rest(null, performance.now()); };
+    const take = () => { const W = smgTake(SMN); if (W === 'wait') { SMN.pend = take; blitLast(); return; } if (W) { rest(W, performance.now()); return; } SMN.n = 0; SMN.cam = [CAMPX, TOPPX]; rest(null, performance.now()); };
     SMN.pend = take;
     blitLast(); return;
   }
@@ -7001,52 +6992,8 @@ function drawSmokeNew(pass, want) {
 // shifted by how far the camera has moved since
 function smShow(S_) {
   if (!S_.ow || !S_.gpuOut || !S_.otT) return;   // (the GPU's picture, laid where it was made, shifted by how far the camera has moved since)
-  // (Oct 31, user: "when we take off with the rocket and we zoom in and out, there's a ton of flickering of the smoke and the smoke
-  // changes location" - a picture made at another zoom was laid at its old size, shifted by the camera's pixels at the new zoom:
-  // out of place every frame it was shown again while zooming. Now it is laid where its world is at this zoom, scaled to it - k,
-  // this zoom over the picture's; 1 when the zoom hasn't changed: as before)
-  const k = S_.osv ? FXV.SV / S_.osv : 1, opx = S_.opx || FXV.pxX, opy = S_.opy || FXV.pxY;
-  const dx = (S_.ox + S_.ocam[0]) * k - CAMPX, dy = (S_.oy + S_.ocam[1]) * k - TOPPX, dw = S_.ow * opx * k, dh = S_.oh * opy * k;
-  const sm = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false;
-  const hc = smHangarClip(ctx, dx, dy, dw, dh);
-  ctx.drawImage(S_.otT, S_.gx0, S_.gy0, S_.ow, S_.oh, dx, dy, dw, dh); ctx.imageSmoothingEnabled = sm;
-  if (hc) ctx.restore();
-}
-// (Oct 31, user: "any vehicle that's smoking, the moment they enter a hangar, the smoke should not render inside it. It should
-// even mask the smoke as it gets inside the hangar as it naturally would. Right now we see the smoke through the hangar") a
-// hangar is solid where it is drawn (23-harbour-gates.js: from its drawn roof, hangarRoofAt, down to the deck) - and smoke is
-// never seen inside a solid: the smoke's picture is laid outside every hangar's body (a clip: the picture's box, each hangar's
-// outline wound the other way round, so its inside is left out). The rain is kept out the same way (47-render-overlays.js)
-const SM_HG = new WeakMap();
-function smHangarPoly(d) {
-  const [ha, hb] = hangarSpan(d), T = img.hangarTops;
-  let P = SM_HG.get(d);
-  if (P && P.ha === ha && P.hb === hb && P.T === T && P.dir === d.dir) return P.pts ? P : null;
-  // its outline in the world: along the deck from one end to the other, then back along the roof (the tops as drawn)
-  const roof = [], step = HGR.K;
-  for (let x = ha + step / 2; x < hb; x += step) { const t = hangarRoofAt(d, x); if (t == null) continue; const n = roof.length; if (n >= 4 && roof[n - 1] === t && roof[n - 3] === t) { roof[n - 2] = x; continue; } roof.push(x, t); }   // (a flat run: its two ends)
-  let pts = null;
-  if (roof.length >= 4) {
-    pts = [roof[0], DECK_Y, roof[roof.length - 2], DECK_Y];
-    for (let i = roof.length - 2; i >= 0; i -= 2) pts.push(roof[i], roof[i + 1]);
-  }
-  let y0 = Infinity; for (let i = 1; i < roof.length; i += 2) y0 = Math.min(y0, roof[i]);
-  P = { ha, hb, T, dir: d.dir, pts, x0: ha, x1: hb, y0, y1: DECK_Y }; SM_HG.set(d, P);
-  return pts ? P : null;
-}
-function smHangarClip(c, dx, dy, dw, dh) {
-  if (typeof docks === 'undefined' || typeof hangarRoofAt !== 'function' || !docks.length) return false;
-  const k = FXV.SV; let on = false;
-  for (const d of docks) {
-    const P = smHangarPoly(d); if (!P) continue;
-    if (P.x1 * k - CAMPX < dx || P.x0 * k - CAMPX > dx + dw || P.y1 * k - TOPPX < dy || P.y0 * k - TOPPX > dy + dh) continue;
-    if (!on) { c.save(); c.beginPath(); c.moveTo(dx, dy); c.lineTo(dx + dw, dy); c.lineTo(dx + dw, dy + dh); c.lineTo(dx, dy + dh); c.closePath(); on = true; }
-    const p = P.pts; c.moveTo(p[0] * k - CAMPX, p[1] * k - TOPPX);
-    for (let i = 2; i < p.length; i += 2) c.lineTo(p[i] * k - CAMPX, p[i + 1] * k - TOPPX);
-    c.closePath();
-  }
-  if (on) c.clip();
-  return on;
+  const dx = S_.ox + S_.ocam[0] - CAMPX, dy = S_.oy + S_.ocam[1] - TOPPX, dw = S_.ow * FXV.pxX, dh = S_.oh * FXV.pxY;
+  const sm = ctx.imageSmoothingEnabled; ctx.imageSmoothingEnabled = false; ctx.drawImage(S_.otT, S_.gx0, S_.gy0, S_.ow, S_.oh, dx, dy, dw, dh); ctx.imageSmoothingEnabled = sm;
 }
 // ---- the smoke's picture on the GPU (GSM, 40-gl.js): its coarse fields made here as before, its balls, its puffs' tones
 // and its pixels there. SMOKE ON GPU 0 (or a SMOKE VIEW, or no float targets) draws it in JS as before
@@ -7233,7 +7180,7 @@ function gsmPaint(S_, a) {
   if (!GSM.bt || GSM.bt.ep !== GLR.epoch) GSM.bt = gsmTex(null, 64, 64, SM_BTD);
   const lut = S_.lut, NL = lut.length;
   if (!G_.lt || G_.lt.ep !== GLR.epoch || G_.lt.w !== NL) { if (G_.lt && G_.lt.ep === GLR.epoch) gl.deleteTexture(G_.lt.tex); G_.lt = { tex: glNewTex(0, 0, gl.NEAREST), w: NL, ep: GLR.epoch }; gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G_.lt.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, NL, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); }
-  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G_.lt.tex); glPM(false); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NL, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(lut.buffer, lut.byteOffset, NL * 4));
+  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G_.lt.tex); gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NL, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(lut.buffer, lut.byteOffset, NL * 4));
   // ---- 1. SPLAT, into the index-and-height target (the whole picture's size; the box cleared and drawn)
   if (!G_.sp || G_.sp.w !== cw || G_.sp.h !== h || G_.sp.ep !== GLR.epoch) {
     if (G_.sp && G_.sp.ep === GLR.epoch) { gl.deleteFramebuffer(G_.sp.fbo); gl.deleteRenderbuffer(G_.sp.rb); gl.deleteTexture(G_.sp.t.tex); }
@@ -7273,15 +7220,12 @@ function gsmPaint(S_, a) {
       for (const t of old) gl.deleteTexture(t.tex);
       G_.grew = (G_.grew || 0) + 1; GSM.grows = (GSM.grows || 0) + 1;   // (tests: how often the memory grew)
     }
-    G_.cur = 0; if (G_.tfbos) for (const T of G_.tfbos) if (T) gl.deleteFramebuffer(T.f); G_.tfbos = null;
+    G_.cur = 0; G_.tfbo = null;
   }
   const rowsM = G_.mem[0].h;   // (the memory's rows: room to spare - the passes run over all of them)
   const src = G_.mem[G_.cur], dst = G_.mem[1 - G_.cur];
-  // (one target a side of the ping-pong, kept: Oct 31 - the side flips every frame, and a new framebuffer made and the last thrown away
-  // each time was ~45 a second of the GPU's objects made and freed, a hitch on Direct3D)
-  const TF = G_.tfbos || (G_.tfbos = [null, null]), ti = 1 - G_.cur;
-  if (!TF[ti] || TF[ti].dst !== dst || TF[ti].tn !== G_.tn || TF[ti].ep !== GLR.epoch) { if (TF[ti] && TF[ti].ep === GLR.epoch) gl.deleteFramebuffer(TF[ti].f); TF[ti] = { f: gsmFbo([dst, G_.tn]), dst, tn: G_.tn, ep: GLR.epoch }; }
-  gl.bindFramebuffer(gl.FRAMEBUFFER, TF[ti].f); gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+  if (!G_.tfbo || G_.tfbo.dst !== dst || G_.tfbo.tn !== G_.tn) { if (G_.tfbo) gl.deleteFramebuffer(G_.tfbo.f); G_.tfbo = { f: gsmFbo([dst, G_.tn]), dst, tn: G_.tn }; }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, G_.tfbo.f); gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
   gl.viewport(0, 0, MW, rows); gl.disable(gl.SCISSOR_TEST);
   const setCommon = (pr, size) => {
     const U = pr.U; gl.uniform1i(U.u_b, 0); gl.uniform1i(U.u_g1, 3); gl.uniform1i(U.u_g2, 4); gl.uniform2i(U.u_gs, gw, gh);
@@ -7311,8 +7255,7 @@ function gsmPaint(S_, a) {
   GLR.cur = {}; GLR.unit = []; GLR.unitS = []; GLR.st.tgt = null;
   GLR.stats.draws += 3;
   // kept for the frames between paints (smShow lays it again)
-  const CM = S_.cam || [CAMPX, TOPPX, FXV.SV, FXV.pxX, FXV.pxY, SMG.mx, SMG.my];   // (the camera, zoom and grid its balls were gathered at)
-  S_.ow = bw; S_.oh = bh; S_.ox = (bx0 - CM[5]) * CM[3]; S_.oy = (by0 - CM[6]) * CM[4]; S_.ocam = CM; S_.osv = CM[2]; S_.opx = CM[3]; S_.opy = CM[4]; S_.gx0 = bx0; S_.gy0 = by0; S_.gpuOut = true;
+  S_.ow = bw; S_.oh = bh; S_.ox = (bx0 - SMG.mx) * FXV.pxX; S_.oy = (by0 - SMG.my) * FXV.pxY; S_.ocam = S_.cam; S_.osv = FXV.SV; S_.gx0 = bx0; S_.gy0 = by0; S_.gpuOut = true;
   if (WK) G_.rb = [WK.BD, WK.S2];   // (uploaded: the worker's arrays go back to it with the next job, to fill again)
 }
 // (?smdcheck=1) the slots and the packed data against a table of the main thread's own (G_.ref), run on every paint's balls
