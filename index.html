@@ -4948,8 +4948,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 819;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 22:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 820;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 23:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6718,6 +6718,11 @@ function edModeExit() {
    dust). The game itself draws them all */
 const ED_TINY_PX = 3;
 const edTiny = units => !!PHOTO.ed && units * SV < ED_TINY_PX;
+/* (user Nov 7 21:49: "the terrain handles dont scale and end up gigantic") every editor handle (a shape's points, its cross and
+   scale square, a tunnel's widths, a lake's level, an area's corners) is px screen points at the editor's opening zoom
+   (ED_HANDLE_Z) or closer, and shrinks with the zoom past it, down to min - one size rule for every handle, in canvas pixels */
+const ED_HANDLE_Z = 0.6;
+const edHandle = (px = 4.5, min = 2) => Math.max(2, Math.round(clamp(px * cam.view[viewIdx].z / ED_HANDLE_Z, min, px) * dpr / PIXW));
 // closing it from the game (Escape, a pad's B): as its own CLOSE does
 function edModeClose() { const T = NSKY.editor.TUNE; if (T.root) T.root.hidden = true; T.open = false; edModeSync(); }
 // (user Oct 29: "Editor or World mode - infinite zoom and panning up and down"; while playing the play's levels are the limit)
@@ -30488,15 +30493,19 @@ function drawFloorSkins(x0, x1) {
   // (in pieces of 256 cells, each painted the first time it's in view: the whole sea's floor at once was seconds)
   if (!floorSkinStrips) { floorSkinStrips = []; for (const [a, b, sk] of floorSkinRuns()) for (let u = a; u < b; u += 256 * LT_CELL) floorSkinStrips.push({ a: u, b: Math.min(b, u + 256 * LT_CELL), sk, S: null }); }
   const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
-  const Bt = bh - SHY + 2;
+  const Bt = bh - SHY + 2; let built = false;
   for (const Q of floorSkinStrips) {
     if (offView(Q.a, Q.b, x0, x1)) continue;
+    if (!Q.S) built = true;
     const S = Q.S || (Q.S = buildFloorSkinStrip(Q.a, Q.b, Q.sk));
     const X0 = Math.round(PX(S.x0)), X1 = Math.round(PX(S.x1)), Y0 = Math.round(PY(S.y0)), Y1 = Math.round(PY(S.y0 + S.h * LT_CELL));
     C.drawImage(S.cv, X0, Y0, X1 - X0, Y1 - Y0);
     if (Y1 < Bt) { C.fillStyle = rgbs(S.deep); C.fillRect(X0, Y1 - 1, X1 - X0, Bt - Y1 + 1); }   // (and on down, in the dark)
   }
   C.imageSmoothingEnabled = sm;
+  // (user Nov 7 21:37, "zooming in and out in the editor is very slow": zoomed out, each frame came on several pieces never painted - 20-50 ms a frame,
+  // the first time) the GAME EDITOR paints the floor ahead, as it does the land (landPaintStep): on a frame that painted none, the piece nearest the view
+  if (!built && PHOTO.ed) { const m = (x0 + x1) / 2; let q = null, qd = Infinity; for (const Q of floorSkinStrips) if (!Q.S) { const d = Math.abs((Q.a + Q.b) / 2 - m); if (d < qd) { qd = d; q = Q; } } if (q) q.S = buildFloorSkinStrip(q.a, q.b, q.sk); }
 }
 // the sprites, standing on the floor (rocks sunk into the sand a little), drawn as pixels at this zoom
 // (lk: the ones on a lake bed marked SEA - drawn in the land's pass, under the lake's water - lkOnly picks those)
@@ -33265,7 +33274,7 @@ function render() {
   guardDraw('grade', () => drawGrade(views));
   tl('tnGrade', ts);
   tt = lap('tint', tt);
-  for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); renderOverlays(); guardDraw('landEd', landEdDraw); guardDraw('islEd', islEdDraw); if (LAND) guardDraw('caveEd', CAVE.edDraw); guardDraw('colView', colvDraw); guardDraw('vehEd', vehEdDraw); g.restore(); }   // (the GAME EDITOR's FLOOR handles - 50-land-floor.js)
+  for (const [v, cp, sx, w, i, cf] of views) { let tq = performance.now(); beginView(g, v, cp, sx, w, i, cf); renderOverlays(); tq = subLap('ovAll', tq); guardDraw('landEd', landEdDraw); tq = subLap('edLand', tq); guardDraw('islEd', islEdDraw); tq = subLap('edShapes', tq); if (LAND) guardDraw('caveEd', CAVE.edDraw); tq = subLap('edCaves', tq); guardDraw('colView', colvDraw); tq = subLap('edCol', tq); guardDraw('vehEd', vehEdDraw); subLap('edVeh', tq); g.restore(); }   // (the GAME EDITOR's FLOOR handles - 50-land-floor.js)   // (each timed - the perf panel's parts: ovAll the game's overlays, ed* the editor's drawing)
   tt = lap('overlays', tt);
   C = g;
   g.setTransform(1, 0, 0, 1, 0, 0);
@@ -42476,24 +42485,43 @@ window.addEventListener('pointercancel', islUp, { capture: true });
 // drawn over the world with the ground's line (floorEdDraw): each shape's whole loop in its pieces' skin colours - an ISLAND's
 // AUTO violet, a SOLID's white-grey, a HOLE's cyan; picked: white and thicker - a handle on each point; the base seabed dashed
 // a line on the screen in fillStyle, w pixels thick (gap: left out - a hole's dashes)
-function edSeg(X0, Y0, X1, Y1, w, gap) { if (gap) return; const n = Math.max(1, Math.ceil(Math.max(Math.abs(X1 - X0), Math.abs(Y1 - Y0)) / Math.max(1, w * 0.75))), h = w >> 1; if (Math.max(X0, X1) < -w || Math.min(X0, X1) > VWP + w) return; for (let i = 0; i <= n; i++) C.fillRect(Math.round(X0 + (X1 - X0) * i / n) - h, Math.round(Y0 + (Y1 - Y0) * i / n) - h, w, w); }
+/* (user Nov 7 21:37, the editor slow: the outlines of every shape on screen were a square every pixel along each piece - thousands a frame,
+   11 ms with the OPEN WORLD's caves in view) a piece of an editor line: one band w wide, turned along it, its ends squared past the points
+   by half its width (as the squares covered the corners) */
+function edSeg(X0, Y0, X1, Y1, w, gap) {
+  if (gap) return; if (Math.max(X0, X1) < -w || Math.min(X0, X1) > VWP + w) return;
+  const dx = X1 - X0, dy = Y1 - Y0, h = w / 2;
+  if (Math.abs(dy) < 0.5 || Math.abs(dx) < 0.5) { const xa = Math.round(Math.min(X0, X1) - h), ya = Math.round(Math.min(Y0, Y1) - h); C.fillRect(xa, ya, Math.round(Math.max(X0, X1) + h) - xa, Math.round(Math.max(Y0, Y1) + h) - ya); return; }
+  const L = Math.hypot(dx, dy), cs = dx / L, sn = dy / L, M = ED_M || C.getTransform();   // (turned from the view's own transform, set back after - no save / restore a piece)
+  C.setTransform(M.a * cs + M.c * sn, M.b * cs + M.d * sn, M.c * cs - M.a * sn, M.d * cs - M.b * sn, M.a * X0 + M.c * Y0 + M.e, M.b * X0 + M.d * Y0 + M.f);
+  C.fillRect(-h, -h, L + w, w); C.setTransform(M.a, M.b, M.c, M.d, M.e, M.f);
+}
+let ED_M = null;   // (the view's transform while the editor's lines are drawn: islEdDraw sets it, edSeg turns from it)
+
 const SHP_ED_COL = { I: 'rgba(214,140,255,0.9)', S: 'rgba(235,235,235,0.9)', H: 'rgba(110,235,255,0.95)' }, SHP_HANDLE = { I: '#d68cff', S: '#e8e8e8', H: '#6eebff' };
 function islEdDraw() {
   if (!floorEdOn()) return;
+  ED_M = C.getTransform();
   lakeEdDraw();                                         // (the pockets' water lines - 50-land-lake, Nov 2)
   const x0 = CAMPX / SV, x1 = x0 + VWW, t = Math.max(1, Math.round(1.5 * dpr / PIXW)), s = TERRAIN_ED.sel;
   if (SHP.base) { const Y = Math.round(PY(SHP.base)); C.fillStyle = 'rgba(255,200,120,0.5)'; for (let X = 0; X < VWP; X += 14) C.fillRect(X, Y - (t >> 1), 7, t); }
   // (the ground's own shapes: their sides and crosses drawn with the ground line - groundShapesDraw, 50-land-zz-ground)   // (the base seabed: the lowest point of any shape - user Nov 2 13:16)
   ISLANDS.forEach((I, n) => {
     const Q = shpPoly(I), k = shpK(I); if (Q.x1 < x0 || Q.x0 > x1) return;
-    const P = I.p, N = Q.X.length;
+    // (zoomed out, a curve's pieces are under a pixel: pieces of one look are joined until a few pixels long - close up each is its own, as
+    // before; its colour set only when it changes - a colour string is read every time it's set)
+    const P = I.p, N = Q.X.length; let col0 = null, kc = null, kw = 0, kg = false, sx = PX(Q.X[0]), sy = PY(Q.Y[0]), ex = sx, ey = sy;
+    const flush = () => { if (kc === null || (ex === sx && ey === sy)) return; if (kc !== col0) { C.fillStyle = kc; col0 = kc; } edSeg(sx, sy, ex, ey, kw, kg); sx = ex; sy = ey; };
     for (let i = 0; i < N; i++) {
       const j = (i + 1) % N, e = Q.E[i];
       const sel = s && (s.Is ? s.Is.includes(n) : s.I === n && e >= Math.min(s.k, s.k1) && e <= Math.max(s.k, s.k1)), sk = P[e][2], tt = sel ? t * 3 : sk ? t * 2 : t;
-      C.fillStyle = sel ? '#ffffff' : TERRAIN_SKIN_COL[sk] || SHP_ED_COL[k];
-      edSeg(PX(Q.X[i]), PY(Q.Y[i]), PX(Q.X[j]), PY(Q.Y[j]), tt, k === 'H' && (i >> 2) % 2 === 1);
+      const col = sel ? '#ffffff' : TERRAIN_SKIN_COL[sk] || SHP_ED_COL[k], gap = k === 'H' && (i >> 2) % 2 === 1;
+      if (col !== kc || tt !== kw || gap !== kg) { flush(); sx = ex; sy = ey; kc = col; kw = tt; kg = gap; }
+      ex = PX(Q.X[j]); ey = PY(Q.Y[j]);
+      if (Math.abs(ex - sx) + Math.abs(ey - sy) >= 3 * tt) flush();
     }
-    const hs = Math.max(5, Math.round(4.5 * dpr / PIXW)), hd = ISL_ED.drag || ISL_ED.hover;
+    flush();
+    const hs = edHandle(4.5), hd = ISL_ED.drag || ISL_ED.hover;   // (shrinks zoomed out - edHandle, 18-zz-photo.js)
     if (I.t) {                                                    // (a tunnel: its middle line dashed, and its three round width handles)
       const T = Q.tube; C.fillStyle = 'rgba(110,235,255,0.6)'; for (let i = 0; i + 1 < T.X.length; i++) edSeg(PX(T.X[i]), PY(T.Y[i]), PX(T.X[i + 1]), PY(T.Y[i + 1]), Math.max(1, t >> 1), (i >> 1) % 2 === 1);
       for (let j = 0; j < 3; j++) { const [wx, wy] = tunWidthAt(I, j), X = Math.round(PX(wx)), Y = Math.round(PY(wy)), r2 = hs, hot = hd && hd.n === n && hd.kind === 'Wd' && hd.j === j;
@@ -42513,6 +42541,7 @@ function islEdDraw() {
       C.fillStyle = hot || onSel ? '#ffb347' : SHP_HANDLE[k]; C.fillRect(X - hs, Y - hs, 2 * hs, 2 * hs);   // (the one pressed or picked: orange, on every shape - as the ground's handles were)
     });
   });
+  ED_M = null;
 }
 
 /* ================================================================
@@ -44298,7 +44327,7 @@ window.addEventListener('pointercancel', lakeEdUp, { capture: true });
 // drawn with the shapes (islEdDraw): each pocket's level line, its rim dotted, the ocean's line locked (a padlock-grey dash)
 function lakeEdDraw() {
   if (!land.pockets) return;
-  const t = Math.max(1, Math.round(1.5 * dpr / PIXW)), hs = Math.max(5, Math.round(4.5 * dpr / PIXW));
+  const t = Math.max(1, Math.round(1.5 * dpr / PIXW)), hs = edHandle(4.5);   // (shrinks zoomed out - edHandle, 18-zz-photo.js)
   for (const K of lakeEdPockets()) {
     const X0 = Math.round(PX(K.x0)), X1 = Math.round(PX(K.x1)); if (X1 < 0 || X0 > VWP) continue;
     const lv = lakeEdLevel(K), Y = Math.round(PY(lv)), Ys = Math.round(PY(K.spill)), hot = LAKE_ED.drag === K || LAKE_ED.hover === K;
@@ -54520,6 +54549,27 @@ function vegKeep(M, k, make, free, n) {
   return e.v;
 }
 const vegLayerFree = L => { if (L && L.free) L.free(); };
+/* (user Nov 7 21:37, "zooming in and out in the editor is very slow") a layer whose size follows the zoom was kept by its exact size: every frame of a
+   zoom asked for a new one (the pass's up to three times the screen each way) and none could go for a second - one zoom in and out piled up ~900 MB on
+   the graphics card, the page went over its picture budget and packed away all the art (frames of 0.3-1.7 s). Now any kept layer big enough (no more
+   than VEG_FIT larger each way) is used, its top left part drawn; a new one is made VEG_GROW larger than asked, and over n the one drawn longest ago
+   (not this frame or the last) goes. Same pictures; a zoom reuses a few layers */
+const VEG_FIT = 1.4, VEG_GROW = 1.15;
+function vegLayerFit(M, w, h, n) {
+  const fr = scaledFrame, now = performance.now(); let best = null;
+  for (const e of M.values()) { const L = e.v; if (L.width >= w && L.height >= h && L.width <= w * VEG_FIT + 32 && L.height <= h * VEG_FIT + 32 && (!best || L.width * L.height < best.v.width * best.v.height)) best = e; }
+  if (best) { best.t = now; best.f = fr; return best.v; }
+  while (M.size >= n) {
+    let ok = null, of = Infinity; for (const [kk, e] of M) if ((e.f ?? -1) < of) { of = e.f ?? -1; ok = kk; }
+    if (ok === null || of >= fr - 1) break;
+    const v0 = M.get(ok).v; M.delete(ok); picForget(v0); vegLayerFree(v0);
+  }
+  const W = Math.ceil(w * VEG_GROW / 32) * 32, H = Math.ceil(h * VEG_GROW / 32) * 32, k = W * 4096 + H;
+  if (M.has(k)) { const e = M.get(k); e.t = now; e.f = fr; return e.v; }
+  const e = { v: makeLayer(W, H), t: now, f: fr }; M.set(k, e);
+  if (e.v.isGLTarget) picKeep(e.v, 'plant layers', () => { if (M.get(k) === e) M.delete(k); vegLayerFree(e.v); }, null, true);   // (in the page's picture memory - 04-zzz-pics.js)
+  return e.v;
+}
 const vegPieceFree = P => { if (P && P.c) glFreeSrc(P.c); };
 const vegMidFree = M => { if (!M) return; for (const q of M.parts) { vegPieceFree(q.a); vegPieceFree(q.b); } vegPieceFree(M.trunk); };
 function vegPassBegin() {
@@ -54528,14 +54578,14 @@ function vegPassBegin() {
   VEG_PASS_L = null; if (!GLR.on || VEG_PX < 0.34 || !C.getTransform) return null;
   const M = C.getTransform(), cv = C.canvas; if (!cv || !cv.width || Math.abs(M.b) > 1e-6 || Math.abs(M.c) > 1e-6 || M.a <= 0 || M.d <= 0) return null;
   const P = VEG_PX, ox = ((PX(0) % P) + P) % P, oy = ((PY(0) % P) + P) % P, ux = -M.e / M.a, uy = -M.f / M.d, gx = Math.floor((ux - ox) / P) * P + ox, gy = Math.floor((uy - oy) / P) * P + oy;
-  const LW = Math.ceil((cv.width / M.a + (ux - gx)) / P / 32 + 0.05) * 32, LH = Math.ceil((cv.height / M.d + (uy - gy)) / P / 32 + 0.05) * 32, lk = LW * 4096 + LH;
-  const LY = vegKeep(VEG_PASS_LY, lk, () => makeLayer(LW, LH), vegLayerFree, 6);
+  const LW = Math.ceil((cv.width / M.a + (ux - gx)) / P / 32 + 0.05) * 32, LH = Math.ceil((cv.height / M.d + (uy - gy)) / P / 32 + 0.05) * 32;
+  const LY = vegLayerFit(VEG_PASS_LY, LW, LH, 6);
   const D = LY.getContext('2d'); D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.imageSmoothingEnabled = false;   // (cleared when the first plant comes - vegPassCtx: a pass with none costs nothing, veg-check chat)   // (11:41: "too sharp" - its pieces had been sampled smoothly into it: each layer pixel one picture pixel)
-  return (VEG_PASS_L = { LY, D, gx, gy, used: false });
+  return (VEG_PASS_L = { LY, D, gx, gy, LW, LH, used: false });
 }
-function vegPassEnd(L) { VEG_PASS_L = null; if (!L.used) return; C.save(); C.globalAlpha = 1; C.imageSmoothingEnabled = VEG_PX < 1; C.drawImage(L.LY, L.gx, L.gy, L.LY.width * VEG_PX, L.LY.height * VEG_PX); C.restore(); }
+function vegPassEnd(L) { VEG_PASS_L = null; if (!L.used) return; C.save(); C.globalAlpha = 1; C.imageSmoothingEnabled = VEG_PX < 1; C.drawImage(L.LY, 0, 0, L.LW, L.LH, L.gx, L.gy, L.LW * VEG_PX, L.LH * VEG_PX); C.restore(); }
 // (a plant into the pass's layer: its picture's top left X, Y on the screen, art pixels at q layer pixels each - saved; the caller restores)
-function vegPassCtx(it, X, Y, w, q) { const L = VEG_PASS_L, D = L.D; if (!L.used) { L.used = true; D.setTransform(1, 0, 0, 1, 0, 0); D.clearRect(0, 0, L.LY.width, L.LY.height); } D.setTransform(1, 0, 0, 1, 0, 0); D.save(); D.translate((X - L.gx) / VEG_PX, (Y - L.gy) / VEG_PX); if (it.flip) { D.translate(w / VEG_PX, 0); D.scale(-1, 1); } D.scale(q, q); return D; }
+function vegPassCtx(it, X, Y, w, q) { const L = VEG_PASS_L, D = L.D; if (!L.used) { L.used = true; D.setTransform(1, 0, 0, 1, 0, 0); D.clearRect(0, 0, L.LW + 2, L.LH + 2); }   /* (and a pixel past it: smoothed, the edge samples clear as at a texture's edge) */ D.setTransform(1, 0, 0, 1, 0, 0); D.save(); D.translate((X - L.gx) / VEG_PX, (Y - L.gy) / VEG_PX); if (it.flip) { D.translate(w / VEG_PX, 0); D.scale(-1, 1); } D.scale(q, q); return D; }
 // (user Nov 4 12:17: "for each component ... a 'outline' that we can Toggle on or off, Choose how wide (1px, 2px etc), Pick the color for it") a part's OUTLINE
 // { on, w (plant pixels), c }: its shape in that colour laid round it, a plant pixel a step - 1 wide its four sides, wider each ring with its corners - under it
 const olOf = P => P && P.ol && P.ol.on && P.ol.w > 0 ? P.ol : null;
@@ -55914,7 +55964,7 @@ function drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add) {
   // (user Nov 4 10:34: "At this zoom level I expect the bushes AND palm tree to ... look pixel art, but they are sharp") laid in a layer one art pixel a pixel,
   // then that scaled up on the screen - its turned pieces on the art's own grid, as near
   const MX = Math.ceil(rc.W * 0.4), MY = Math.ceil(rc.H * 0.35), q = vegQ(k), PS = !!VEG_PASS_L, LY = PS ? null : vegLayer(rc, MX, MY, q);
-  const D = PS ? vegPassCtx(it, X, Y, w, q) : LY ? LY.getContext('2d') : C; if (PS) { } else if (LY) { D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.clearRect(0, 0, LY.width, LY.height); D.save(); D.translate(MX * q, MY * q); D.scale(q, q); }
+  const D = PS ? vegPassCtx(it, X, Y, w, q) : LY ? LY.getContext('2d') : C; if (PS) { } else if (LY) { D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.clearRect(0, 0, LY._uw + 2, LY._uh + 2); D.save(); D.translate(MX * q, MY * q); D.scale(q, q); }
   else { D.save(); D.translate(X, Y); if (it.flip) { D.translate(w, 0); D.scale(-1, 1); } D.scale(k, k); }
   const OU = PS || LY ? 1 : VEG_PX;   // (screen pixels a plant pixel, drawn straight; in a layer one)
   const part = p => { const z = s.sz[p.f] || 1, b0 = s.b[p.f * 2], b1 = s.b[p.f * 2 + 1], ta = !p.low && n ? MID_A[p.ai] : 0, ca = Math.cos(ta), sa = Math.sin(ta), ox = p.r0[0] - (n ? S[p.ai][0] : 0), oy = p.r0[1] - (n ? S[p.ai][1] : 0), rx = !p.low && n ? MID_P[p.ai * 2] + ox * ca - oy * sa : p.r0[0], ry = !p.low && n ? MID_P[p.ai * 2 + 1] + ox * sa + oy * ca : p.r0[1];
@@ -55937,11 +55987,11 @@ function drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add) {
 }
 // (a plant's layer: its box and margin at q layer pixels an art pixel - one a size, shared; none with the world pixel no bigger than the screen's)
 function vegLayer(rc, MX, MY, q) {
-  if (!GLR.on || VEG_PX < 0.34) return null; const LW = Math.ceil((Math.ceil(rc.W) + MX * 2) * q / 16) * 16, LH = Math.ceil((Math.ceil(rc.H) + MY + 4) * q / 16) * 16, lk = LW * 4096 + LH;
-  const LY = vegKeep(BUILT_LAYER, lk, () => makeLayer(LW, LH), vegLayerFree, 16); LY.getContext('2d').imageSmoothingEnabled = false; return LY;
+  if (!GLR.on || VEG_PX < 0.34) return null; const LW = Math.ceil((Math.ceil(rc.W) + MX * 2) * q / 16) * 16, LH = Math.ceil((Math.ceil(rc.H) + MY + 4) * q / 16) * 16;
+  const LY = vegLayerFit(BUILT_LAYER, LW, LH, 16); LY.getContext('2d').imageSmoothingEnabled = false; LY._uw = LW; LY._uh = LH; return LY;   // (_uw / _uh: the part of it this plant uses)
 }
 // (the layer on the screen: a layer pixel a world pixel)
-function vegBlit(LY, it, X, Y, w, ox, oy) { C.save(); C.imageSmoothingEnabled = VEG_PX < 1; C.translate(X, Y); if (it.flip) { C.translate(w, 0); C.scale(-1, 1); } C.scale(VEG_PX, VEG_PX); C.drawImage(LY, -ox, -oy); C.restore(); }
+function vegBlit(LY, it, X, Y, w, ox, oy) { const uw = LY._uw || LY.width, uh = LY._uh || LY.height; C.save(); C.imageSmoothingEnabled = VEG_PX < 1; C.translate(X, Y); if (it.flip) { C.translate(w, 0); C.scale(-1, 1); } C.scale(VEG_PX, VEG_PX); C.drawImage(LY, 0, 0, uw, uh, -ox, -oy, uw, uh); C.restore(); }
 // a built prefab drawn: the leaves behind, the trunk (its colour from the base, the middle, to the top; charring black as it burns), the leaves in front
 // (Nov 4, "can we afford to cover the world in it?": a layer per plant kept for ever grew with the world) the layers shared - one a size, each plant
 // drawing into it in its turn (the renderer finishes one use before the next starts: a target switch flushes)
@@ -55985,7 +56035,7 @@ function drawBuilt(it, rc, s, X, Y, w, k, mul, add) {
   // (10:10, 10:46: every one on the world's pixel - its own layer at it, none when that's no bigger than the screen's)
   const MX = Math.ceil(rc.W * 0.4), MY = Math.ceil(rc.H * 0.35), q = vegQ(k), NU = vegUp(k), PS = !!VEG_PASS_L, LY = PS ? null : vegLayer(rc, MX, MY, q);
   const D = PS ? vegPassCtx(it, X, Y, w, q) : LY ? LY.getContext('2d') : C;
-  if (PS) { } else if (LY) { D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.clearRect(0, 0, LY.width, LY.height); D.save(); D.translate(MX * q, MY * q); D.scale(q, q); }
+  if (PS) { } else if (LY) { D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.clearRect(0, 0, LY._uw + 2, LY._uh + 2); D.save(); D.translate(MX * q, MY * q); D.scale(q, q); }
   else { D.save(); D.translate(X, Y); if (it.flip) { D.translate(w, 0); D.scale(-1, 1); } D.scale(k, k); }
   const DM = D.getTransform ? D.getTransform() : null;
   // (12:17) a part's outline: all its polygons in its outline colour round it, a plant pixel a step, before the part itself
@@ -59775,7 +59825,7 @@ window.addEventListener('pointercancel', natUp, { capture: true });
 // drawn over the world while the section is in view (from vehEdDraw): each area's box (picked: white), its corners, its name
 function natureEdDraw() {
   if (!natureOpen() || !NATURE.length) return;
-  const q = Math.max(1, Math.round(2 * dpr / PIXW)), hs = Math.max(4, Math.round(4 * dpr / PIXW));
+  const q = Math.max(1, Math.round(2 * dpr / PIXW)), hs = edHandle(4);   // (shrinks zoomed out - edHandle, 18-zz-photo.js)
   for (const a of NATURE) {
     const X0 = Math.round(PX(a.x0)), X1 = Math.round(PX(a.x1)), Y0 = Math.round(PY(a.y0)), Y1 = Math.round(PY(a.y1)); if (X1 < 0 || X0 > VWP) continue;
     const on = a.id === NE.sel, c = on ? [255, 255, 255] : [90, 230, 200], w = on ? q + 1 : q;
@@ -62578,8 +62628,12 @@ function wxaEdDraw() {
   const xs = [-1e9, ...WXA.lines, 1e9], f = v => Math.round(v * 100);
   WXA.areas.forEach((a, i) => {
     const X0 = Math.max(0, PX(xs[i])), X1 = Math.min(VWP, PX(xs[i + 1])); if (X1 < 0 || X0 > VWP) return;
-    const t = 'SKY ' + f(a.sky) + '  FOG ' + f(a.fog) + '  RAIN ' + f(a.rain) + '  SEA ' + f(a.sea) + '  WIND ' + f(a.wind) + '  FADE ' + Math.round(a.fade) + 'S';
-    drawText(C, t, (X0 + X1) / 2, 40 * q, i === WXE.sel ? [255, 255, 255] : [154, 208, 255], q, 'center');
+    // (user Nov 7 21:58: "that text gets yellow tinted so I understand which area I picked ... a vertical layout instead of horizontal so
+    // it's easier to read") one setting a line, names in a column and numbers in another, over the middle of the area; the picked one yellow, the others white
+    const rows = [['SKY', f(a.sky)], ['FOG', f(a.fog)], ['RAIN', f(a.rain)], ['SEA', f(a.sea)], ['WIND', f(a.wind)], ['FADE', Math.round(a.fade) + 'S']];
+    const col = i === WXE.sel ? '#ffd36b' : '#ffffff',   /* (drawText takes '#rrggbb': the colours given as lists had come out black) */ nw = Math.max(...rows.map(r => textWidth(r[0]))), vw = Math.max(...rows.map(r => textWidth(String(r[1])))), gap = 4;
+    const x = Math.round((X0 + X1) / 2 - (nw + gap + vw) * q / 2), lh = 9 * q;
+    rows.forEach(([n, v], r) => { const y = 40 * q + r * lh; drawText(C, n, x, y, col, q); drawText(C, String(v), x + (nw + gap + vw) * q, y, col, q, 'right'); });
   });
 }
 function wxaSync() {
