@@ -5096,7 +5096,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 875;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 14:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 08 14:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -50290,28 +50290,63 @@ function landDarkMake(cv, k, c0, w, h, rT) {
   const R = SKY_RC, a0 = Math.max(0, c0 - R), a1 = Math.min(land.cols - 1, c0 + w - 1 + R), W = a1 - a0 + 1;
   let r0 = 1e9, r1 = -1e9; for (let c = a0; c <= a1; c++) { landEnsureC(c); if (land.colOK && !land.colOK[c]) ltFillCol(c); r0 = Math.min(r0, ltR0(c)); r1 = Math.max(r1, ltR1(c)); }
   const H = r1 - r0; if (H <= 0) return;
-  const D = new Uint8Array(W * H).fill(255), Q = new Int32Array(W * H); let qh = 0, qt = 0;
+  const D = new Uint16Array(W * H).fill(65535), Q = new Int32Array(W * H * 2); let qh = 0, qt = 0;   // (distance x 2: 2 a side, 3 a corner - round, not a diamond)
   const air = (c, r) => r >= ltR0(c) && r < ltR1(c) ? land.cell[ltIdx(c, r)] === M_AIR : r < ltR0(c);
   // (the open sky: each column's air from its top down to its first ground)
   for (let i = 0; i < W; i++) { const c = a0 + i; for (let r = r0; r < r1 && air(c, r); r++) { const j = (r - r0) * W + i; D[j] = 0; Q[qt++] = j; } }
-  while (qh < qt) { const j = Q[qh++], i = j % W, r = (j - i) / W, dn = D[j] + 1; if (dn > R) continue;
-    if (i > 0 && D[j - 1] > dn && air(a0 + i - 1, r0 + r)) { D[j - 1] = dn; Q[qt++] = j - 1; }
-    if (i < W - 1 && D[j + 1] > dn && air(a0 + i + 1, r0 + r)) { D[j + 1] = dn; Q[qt++] = j + 1; }
-    if (r > 0 && D[j - W] > dn && air(a0 + i, r0 + r - 1)) { D[j - W] = dn; Q[qt++] = j - W; }
-    if (r < H - 1 && D[j + W] > dn && air(a0 + i, r0 + r + 1)) { D[j + W] = dn; Q[qt++] = j + W; } }
-  const T4 = 4 - rT, oc = makeCanvas(w, h), g = oc.getContext('2d'), id = g.createImageData(w, h), od = id.data; let any = false;
+  // (two passes of a queue: a cell found again shorter goes in again - the chamfer's corners; QL caps the work)
+  const QL = Q.length, R2 = R * 2;
+  while (qh < qt && qt < QL - 8) { const j = Q[qh++], i = j % W, r = (j - i) / W, d0 = D[j]; if (d0 >= R2) continue;
+    for (let dy = -1; dy <= 1; dy++) { const rr = r + dy; if (rr < 0 || rr >= H) continue; for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const ii = i + dx; if (ii < 0 || ii >= W) continue;
+      const jj = rr * W + ii, dn = d0 + (dx && dy ? 3 : 2); if (D[jj] <= dn || !air(a0 + ii, r0 + rr)) continue; D[jj] = dn; Q[qt++] = jj; } } }
+  const T4 = 4 - rT, oc = makeCanvas(w, h), g = oc.getContext('2d'), id = g.createImageData(w, h), od = id.data, A = new Uint8Array(w * h); let any = false;
   for (let q = 0; q < w; q++) { const c = c0 + q, i = c - a0, top = land.surf ? Math.ceil((land.surf[c] - LT_Y0) / LT_CELL) : -1e9;
     for (let r = Math.max(rT, top, r0); r < Math.min(land.rB[k], r1); r++) { if (!air(c, r)) continue;
-      const dd = D[(r - r0) * W + i], L = dd > R ? 0 : Math.round((1 - dd / R) * SKY_STEPS) / SKY_STEPS, a = Math.round(255 * (1 - L)); if (!a) continue;
-      const o = ((r + T4) * w + q) * 4; od[o] = UG_RGB[0]; od[o + 1] = UG_RGB[1]; od[o + 2] = UG_RGB[2]; od[o + 3] = a; any = true; } }
+      const dd = D[(r - r0) * W + i] / 2, L = dd > R ? 0 : Math.round((1 - dd / R) * SKY_STEPS) / SKY_STEPS, a = Math.round(255 * (1 - L)); if (!a) continue;
+      const o = ((r + T4) * w + q) * 4; od[o] = UG_RGB[0]; od[o + 1] = UG_RGB[1]; od[o + 2] = UG_RGB[2]; od[o + 3] = a; A[(r + T4) * w + q] = a; any = true; } }
   if (!any) return;
-  g.putImageData(id, 0, 0); oc.__v = 1; cv._darkCv = oc;
+  g.putImageData(id, 0, 0); oc.__v = 1; oc._a = A; cv._darkCv = oc;
 }
 function landAllLit() { return (typeof VEG_MODE !== 'undefined' && VEG_MODE) || (typeof landEdOn === 'function' && landEdOn()) || (typeof CAVE !== 'undefined' && CAVE.view && CAVE.view.all) || (typeof EDMODE !== 'undefined' && EDMODE.on); }
+// (user Nov 8 13:44-13:49: "a submarine light, a vehicle torch, or the actual sunlight"; "It's not the submarine light. It's any vehicle that has a
+// light. So it's a global thing") every lamp in the game's one list (subLamps - subs, minisubs, helicopters, cars, lighthouses) opens the dark where
+// its beam falls (lampBeamAt, its strength l.k) and its rays get before the rock (CAVE.lampReach - the rule every lamp's beam keeps): in one box round
+// the lamps in view the dark is laid from a picture made this frame (the slices' dark there times what the lamps leave), the slices' own elsewhere
+const LDARK = { cv: null };
 function landDarkDraw(x0, x1) {
   if (!land.chunks || landAllLit()) return;
   const ga = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
-  for (const [k, xl] of landSlices(x0, x1)) { const ch = land.chunks[k], D = ch && ch._darkCv; if (!D) continue; const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + D.width * LT_CELL)); C.drawImage(D, X0, landYT(k), X1 - X0, landYB(k) - landYT(k)); }
+  const BL = typeof MS_BEAM_L === 'number' ? MS_BEAM_L : 120, lamps = typeof subLamps === 'function' ? subLamps().filter(l => l.k > 0.01 && l.x > x0 - BL && l.x < x1 + BL) : [];
+  let ca = 1e9, cb = -1e9, ra = 1e9, rb = -1e9;
+  for (const l of lamps) { ca = Math.min(ca, ltCol(l.x - BL)); cb = Math.max(cb, ltCol(l.x + BL)); ra = Math.min(ra, ltRow(l.y - BL)); rb = Math.max(rb, ltRow(l.y + BL)); }
+  ca = Math.max(ca, ltCol(x0) - 1, 0); cb = Math.min(cb, ltCol(x1) + 1, land.cols - 1);
+  const box = lamps.length && cb >= ca && rb >= ra;
+  for (const [k, xl] of landSlices(x0, x1)) { const ch = land.chunks[k], D = ch && ch._darkCv; if (!D) continue;
+    const YT = landYT(k), YB = landYB(k), w = D.width, h = D.height, c0 = k * LT_CHUNK, rT0 = land.rT[k] - 4, sy = (YB - YT) / h;
+    const part = (sx, sy0, sw, sh) => { if (sw <= 0 || sh <= 0) return; const X0 = Math.round(PX(xl + sx * LT_CELL)), X1 = Math.round(PX(xl + (sx + sw) * LT_CELL)), Y0 = Math.round(YT + sy0 * sy), Y1 = Math.round(YT + (sy0 + sh) * sy); C.drawImage(D, sx, sy0, sw, sh, X0, Y0, X1 - X0, Y1 - Y0); };
+    if (!box) { part(0, 0, w, h); continue; }
+    const qa = clamp(ca - c0, 0, w), qb = clamp(cb + 1 - c0, 0, w), ya = clamp(ra - rT0, 0, h), yb = clamp(rb + 1 - rT0, 0, h);
+    if (qa >= qb || ya >= yb) { part(0, 0, w, h); continue; }
+    part(0, 0, qa, h); part(qb, 0, w - qb, h); part(qa, 0, qb - qa, ya); part(qa, yb, qb - qa, h - yb); }
+  if (box) {   // (the lamps' box: the dark there, opened by every beam)
+    const W = cb - ca + 1, H = rb - ra + 1; if (W * H > 600000) { C.imageSmoothingEnabled = ga; return; }
+    let cv = LDARK.cv; if (!cv || cv.width < W || cv.height < H) { if (cv) glFreeSrc(cv); cv = LDARK.cv = makeCanvas(Math.max(W, cv ? cv.width : 0), Math.max(H, cv ? cv.height : 0)); }
+    const key = renderTick + ':' + (typeof viewIdx === 'number' ? viewIdx : 0) + ':' + ca + ':' + cb + ':' + ra + ':' + rb;   // (the sea's pass and the land's in one frame: made once)
+    if (LDARK.key !== key) { LDARK.key = key;
+    const g = cv.getContext('2d'), id = g.createImageData(W, H), od = id.data;
+    const LP = lamps.map(l => { const R = typeof CAVE !== 'undefined' && CAVE.lampReach && !l.air ? CAVE.lampReach(l) : null; return { l, ux: Math.cos(l.a), uy: Math.sin(l.a), R, oy: R ? R.oy + WATER_Y : 0 }; });
+    for (let c = ca; c <= cb; c++) { const k = Math.floor(c / LT_CHUNK), ch = land.chunks[k], D = ch && ch._darkCv; if (!D || !D._a) continue; const q = c - k * LT_CHUNK, rT0 = land.rT[k] - 4, X = (c + 0.5) * LT_CELL;
+      for (let r = ra; r <= rb; r++) { const y = r - rT0; if (y < 0 || y >= D.height) continue; const a0 = D._a[y * D.width + q]; if (!a0) continue; const Y = LT_Y0 + (r + 0.5) * LT_CELL;
+        let lit = 0;
+        for (const P of LP) { const dx = X - P.l.x, dy = Y - P.l.y; let v = lampBeamAt(dx, dy, P.ux, P.uy); const dd = Math.hypot(dx, dy); if (dd < 30) v = Math.max(v, 1 - dd / 36); if (v <= 0) continue;
+          if (P.R) { const n = P.R.occ.length, ex = X - P.R.ox, ey = Y - P.oy; let f = Math.atan2(ey, ex) / (Math.PI * 2) * n - 0.5; if (f < 0) f += n; const b0 = Math.floor(f) % n; if (Math.hypot(ex, ey) > P.R.occ[b0] + 7) continue; }
+          lit += v * P.l.k; }
+        const a = Math.round(a0 * (1 - Math.min(1, Math.round(lit * 1.6 * SKY_STEPS) / SKY_STEPS))); if (!a) continue;
+        const o = ((r - ra) * W + (c - ca)) * 4; od[o] = UG_RGB[0]; od[o + 1] = UG_RGB[1]; od[o + 2] = UG_RGB[2]; od[o + 3] = a; } }
+    g.clearRect(0, 0, cv.width, cv.height); g.putImageData(id, 0, 0); cv.__v = (cv.__v || 0) + 1; }
+    const X0 = Math.round(PX(ca * LT_CELL)), X1 = Math.round(PX((cb + 1) * LT_CELL)), Y0 = Math.round(PY(LT_Y0 + ra * LT_CELL)), Y1 = Math.round(PY(LT_Y0 + (rb + 1) * LT_CELL));
+    C.drawImage(cv, 0, 0, W, H, X0, Y0, X1 - X0, Y1 - Y0);
+  }
   C.imageSmoothingEnabled = ga;
 }
 // the meadow's colours (the kit's meadow_strip sampled, toned down) and its soft patches: a smooth noise, cells ~11 x 4
@@ -50662,8 +50697,9 @@ function drawLandGround(x0, x1, onField, onWater) {
     C.drawImage(groundLit(cv), X0, yT(k), X1 - X0, yB(k) - yT(k));   // (in the hour's light, as what stands on it - 50-land-trop.js, user Nov 2)
   };
   const putM = (cv, xl, k) => landBackPut(k, xl, false);   // (under the land's line: the wall in the ground's light - landBackCover)
-  landBackDraw(x0, x1, list); landDarkDraw(x0, x1);   // (user Nov 4 09:06: the field behind kept - it's the set's composition, as the game shows it)   // (the field behind - its grass, flowers, boulders: none while the plants have bones, user Nov 3 21:23)
+  landBackDraw(x0, x1, list);   // (user Nov 4 09:06: the field behind kept - it's the set's composition, as the game shows it)   // (the field behind - its grass, flowers, boulders: none while the plants have bones, user Nov 3 21:23)
   if (onField) { onField(); landBackCover(x0, x1, list, putM); }
+  landDarkDraw(x0, x1);                                   // (the back wall dark where the day's light doesn't reach - after the cover laid it again)
   if (onWater) onWater();                                 // (a lake's water over its back wall: its tint, what lives in it - drawLakeRoots 'over')   // (what stands on the field behind: in front of it, behind the ground - its foot under the land's line covered again)
   drawIslandsLand(x0, x1);                                // (the segments in a country: behind the ground in front, in front of what's behind - 50-land-islands)
   drawTropForestAt(x0, x1);                               // (the TROPICAL back forest of the ground in front: before its slices, which cover its foot - 50-land-trop)
