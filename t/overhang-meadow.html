@@ -80,10 +80,9 @@ if (VEG_MODE) {
   try { const st = document.createElement('style'); st.textContent = 'html.flWait::after{content:"";position:fixed;inset:0;background:#2a3424;z-index:2147483647}'; document.head.appendChild(st); document.documentElement.classList.add('flWait'); setTimeout(() => document.documentElement.classList.remove('flWait'), 30000); } catch (e) { }
 }
 
-// (Nov 7: the Biome Editor's EDIT POINTS - 53-veg-editor.js - takes its presses before anything of the game's: these are the first listeners on the
-// window, so a press on its layer goes to it alone - window.__terrPointer says whether it took it)
-if (VEG_MODE && typeof window !== 'undefined') for (const ty of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'contextmenu', 'wheel', 'dblclick', 'click'])
-  window.addEventListener(ty, e => { const h = window.__terrPointer; if (h && h(e)) e.stopImmediatePropagation(); }, { capture: true, passive: false });
+// (Nov 7, user: "One Terrain Editor ... It needs to use the game's own Terrain Editor") the Biome Editor's EDIT TERRAIN: the game's own terrain editing
+// (50-land-islands.js - its points, curves, lines and handles) on in the Biome Editor's view while on - floorEdOn
+const VEG_TERR = { on: false };
 
 /* THE SIMULATION WORKER (sim-worker branch, user Oct 30 18:22: "the whole game simulation moves to a worker"; design:
    docs/sim-worker-design.md). Behind ?simworker=1; ?simworker=0 (the default) is the game as it was. This first part runs
@@ -3905,7 +3904,7 @@ const BIOME_SURF_DEF = {
 };
 let BIOME_SURF = JSON.parse(JSON.stringify(BIOME_SURF_DEF));
 try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && typeof o === 'object') for (const k in BIOME_SURF_DEF) if (Array.isArray(o[k]) && !(['sea', 'desert', 'mountain', 'volcanic', 'swamp'].includes(k) && !(o.v >= 3))) BIOME_SURF[k] = o[k].filter(L => L && typeof L.m === 'string' && isFinite(L.a) && isFinite(L.b)); } catch (e) { }
-const biomeSurfSave = () => { try { localStorage.setItem('bd_biome_surf', JSON.stringify(Object.assign({}, BIOME_SURF, { v: 3, sides: typeof BIOME_SIDES !== 'undefined' ? BIOME_SIDES : {}, bg: typeof BIOME_BG !== 'undefined' ? BIOME_BG : {}, cave: typeof BIOME_CAVE !== 'undefined' ? BIOME_CAVE : {}, lake: typeof BIOME_LAKE !== 'undefined' ? BIOME_LAKE : {} }))); } catch (e) { } };
+const biomeSurfSave = () => { try { localStorage.setItem('bd_biome_surf', JSON.stringify(Object.assign({}, BIOME_SURF, { v: 3, sides: typeof BIOME_SIDES !== 'undefined' ? BIOME_SIDES : {}, bg: typeof BIOME_BG !== 'undefined' ? BIOME_BG : {}, far: typeof BIOME_FAR !== 'undefined' ? BIOME_FAR : {}, cave: typeof BIOME_CAVE !== 'undefined' ? BIOME_CAVE : {}, lake: typeof BIOME_LAKE !== 'undefined' ? BIOME_LAKE : {} }))); } catch (e) { } };
 // a biome's layer of material m (its first): its thickness at x, world units (null: none) - between MIN and MAX on the ground's wobble
 function surfLayer(biome, m) { const L = BIOME_SURF[biome]; return L ? L.find(q => q.m === m) || null : null; }
 function surfThick(L, x, k) { const u = 0.5 + 0.5 * (L.w != null ? L.w : 1) * surfWob(x, k); return L.a + (L.b - L.a) * u; }
@@ -3932,6 +3931,8 @@ const colBiome = c => land.bio && land.bio[c] ? [null, 'ice', 'swamp', 'volcanic
 // FAR SCENERY ones (NSKY.P - GAME EDITOR > FAR SCENERY), none of its own: the world's. Kept with the layers (bd_biome_surf's 'bg')
 let BIOME_BG = {};
 try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.bg && typeof o.bg === 'object') BIOME_BG = o.bg; } catch (e) { }
+// (the Biome Editor's DECKS bar: each far deck's SHOW toggle - the view only, never saved; index 4..6, false hides it - drawLandBg0, drawLandTrees, fieldH, the flowers)
+const DECK_SHOW = [];
 let BG_CUR_BIOME = null;                                   // (the biome whose far scenery is being drawn - drawLandBg0)
 const bgPB = (k, d, bn) => { const o = BIOME_BG[bn || BG_CUR_BIOME]; return o && typeof o[k] === 'number' ? o[k] : (typeof bgP === 'function' ? bgP(k, d) : d); };
 // (user Nov 7 14:07: "the cave interior depends on what type is the terrain that it's in. So a mountain cave would be different from a sea cave,
@@ -4020,6 +4021,36 @@ const BIOME_LAKE_DEF = {
 let BIOME_LAKE = {};
 try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.lake && typeof o.lake === 'object') BIOME_LAKE = o.lake; } catch (e) { }
 const biomeLake = (bn, k) => { const o = BIOME_LAKE[bn], d = BIOME_LAKE_DEF[bn] || BIOME_LAKE_DEF.forest; return o && o[k] != null ? o[k] : d[k]; };
+
+/* ---- (user Nov 7: "Decks 4-6 as plain decks, no names. Each can add prefabs, import a sprite from the game's art, or be a meadow surface with editable
+   properties (e.g. no rocks on snow). The old built-in trees go") DECKS 4, 5 and 6 of a biome: lists like decks 0-3, each entry one of
+     { k: 'pf', p: prefab, amount }   plants (the rig's decks - laid by tropPalms at deck 4-6, behind deck 3, each deck raised and hazed further),
+     { k: 'sprite', s: key }          one of the game's far-scenery pictures (FAR_SPRITES), drawn at its deck's depth (DECK 4 standing on the meadow's
+                                      back, as the near tree row did; 5 and 6 far layers) - its SIZE / HEIGHT / ATMOSPHERE / SPACING the biome's BIOME_BG,
+     { k: 'meadow' }                  the meadow band behind the ground (the desert's sand band) and its flowers - HEIGHT, WAVINESS, FLOWERS, PEBBLES.
+   No biome draws far scenery of its own any more: what each shows is its decks. The defaults are what each biome showed before (the forest's set -
+   and its stand-ins on mountain, ice, swamp, volcanic - the desert's, the beach's meadow alone). Kept in bd_biome_surf (.far) ---- */
+const FAR_SPRITES = { fn: ['NEAR TREES', 4], ff: ['FAR TREES', 5], fm: ['MOUNTAINS', 6], dd: ['DUNES', 5], dc: ['COAST CITY', 5], dm: ['MESAS', 6] };   // (its name, the deck it was drawn at)
+const farDef = bn => bn === 'sea' ? { 4: [], 5: [], 6: [] } : bn === 'desert' ? { 4: [{ k: 'meadow' }], 5: [{ k: 'sprite', s: 'dd' }, { k: 'sprite', s: 'dc' }], 6: [{ k: 'sprite', s: 'dm' }] }
+  : bn === 'tropical' ? { 4: [{ k: 'meadow' }], 5: [], 6: [] } : { 4: [{ k: 'meadow' }, { k: 'sprite', s: 'fn' }], 5: [{ k: 'sprite', s: 'ff' }], 6: [{ k: 'sprite', s: 'fm' }] };
+let BIOME_FAR = {}, FAR_VER = 1;
+try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.far && typeof o.far === 'object') BIOME_FAR = o.far; } catch (e) { }
+const farValid = q => q && (q.k === 'meadow' || (q.k === 'sprite' && FAR_SPRITES[q.s]) || (q.k === 'pf' && typeof q.p === 'string'));
+// biome bn's decks 4-6 { 4: [...], 5: [...], 6: [...] } - its own, else its defaults (own: made its own to be edited)
+function farOf(bn, own) {
+  const o = BIOME_FAR[bn];
+  if (o && typeof o === 'object') { for (const d of [4, 5, 6]) o[d] = Array.isArray(o[d]) ? o[d].filter(farValid) : []; return o; }
+  const d = farDef(bn); if (own) { BIOME_FAR[bn] = d; FAR_VER++; } return d;
+}
+const farSave = () => { FAR_VER++; FAR_C = {}; biomeSurfSave(); };
+let FAR_C = {};                                            // (per biome: has it a meadow, its sprites [deck, key], its plants [deck, entry] - made once a change)
+function farInfo(bn) {
+  const c = FAR_C[bn]; if (c && c.v === FAR_VER) return c;
+  const F = farOf(bn || 'forest'), o = { v: FAR_VER, meadow: false, md: 4, sprites: [], pfs: [] };
+  for (const d of [4, 5, 6]) for (const q of F[d]) { if (q.k === 'meadow') { o.meadow = true; o.md = d; } else if (q.k === 'sprite') o.sprites.push([d, q.s]); else if (q.k === 'pf') o.pfs.push([d, q]); }
+  return (FAR_C[bn] = o);
+}
+const farMeadow = bn => { const I = farInfo(bn); return I.meadow && DECK_SHOW[I.md] !== false; };   // (has biome bn a meadow - and is its deck shown in the Biome Editor)
 
 // The defense tower stands on the block at the end of the pier: six drawings, intact to a skeleton of rebar
 // (sea to the right in the art). Each hit shows the next drawing; the sixth brings it down in pieces.
@@ -4948,8 +4979,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 819;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 23:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 821;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 23:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -6718,6 +6749,11 @@ function edModeExit() {
    dust). The game itself draws them all */
 const ED_TINY_PX = 3;
 const edTiny = units => !!PHOTO.ed && units * SV < ED_TINY_PX;
+/* (user Nov 7 21:49: "the terrain handles dont scale and end up gigantic") every editor handle (a shape's points, its cross and
+   scale square, a tunnel's widths, a lake's level, an area's corners) is px screen points at the editor's opening zoom
+   (ED_HANDLE_Z) or closer, and shrinks with the zoom past it, down to min - one size rule for every handle, in canvas pixels */
+const ED_HANDLE_Z = 0.6;
+const edHandle = (px = 4.5, min = 2) => Math.max(2, Math.round(clamp(px * cam.view[viewIdx].z / ED_HANDLE_Z, min, px) * dpr / PIXW));
 // closing it from the game (Escape, a pad's B): as its own CLOSE does
 function edModeClose() { const T = NSKY.editor.TUNE; if (T.root) T.root.hidden = true; T.open = false; edModeSync(); }
 // (user Oct 29: "Editor or World mode - infinite zoom and panning up and down"; while playing the play's levels are the limit)
@@ -7749,7 +7785,7 @@ function fpsPress(e) {
   if (!ui.perfPanel) ui.perfPanel = true; else if (!probe.on) probeStart(); else { ui.perfPanel = false; probe.on = false; }
   return true;
 }
-const onEdUI = e => !!(e && e.target && e.target.closest && e.target.closest('#skyEd, #skyExp, #skyEdBtn, #skySnap'));
+const onEdUI = e => !!(e && e.target && e.target.closest && e.target.closest('#skyEd, #skyExp, #skyEdBtn, #skySnap, #vgBot, #vgLab, #vgLeft, #feRoot'));   // (and the Biome Editor's panels)
 window.addEventListener('pointerdown', e => {
   if (onEdUI(e)) return;
   e.preventDefault();
@@ -27741,23 +27777,10 @@ function edBuild(host) {
     root.addEventListener('touchmove', e => { if (!d || !d.on) e.stopPropagation(); }, { passive: true });
   }
   const panes = {};
-  const smHint = Object.fromEntries(SM_SL.concat(FW_SL, BG_SL).map(r => [r[0], r[6]])), rowOf = Object.fromEntries(SL.concat(SM_SL, FW_SL, BG_SL).map(r => [r[0], r]));
-  for (const [t, cats] of Object.entries(ED_TABS)) {
+  for (const t of Object.keys(ED_TABS)) {
     const pane = edEl('div', t === 'COLOURS' ? '' : 'cats'); pane.hidden = true; panes[t] = pane; body.appendChild(pane);
-    if (!cats) continue;
-    for (const [name, keys] of cats) {
-      const c = edEl('div', 'cat'); c.appendChild(edEl('h4', '', name));
-      for (const k of keys) { const r = rowOf[k]; if (!r) continue; c.appendChild(edRow(k, ED_SHORT[k] || r[1], r[2], r[3], r[4], DESC[k] || smHint[k])); TUNE.tab[k] = t; }
-      pane.appendChild(c);
-    }
-    if (ED_PANES[t]) ED_PANES[t](pane, edEl);                                  // (a tab that builds its own pane: TUNE.pane)
-    for (const [bt, name, list] of ED_BTNS) {
-      if (bt !== t) continue;
-      if (name[0] === '=') { pane.appendChild(edEl('h3', 'grp', name.slice(1))); continue; }   // (a group's heading over the sections after it - TERRAIN's SELECTED PROPERTIES, Nov 7)
-      const c = edEl('div', 'cat btns'); c.appendChild(edEl('h4', '', name));
-      for (const [lab, desc, fn] of list) { const b = edEl('button', '', lab); if (desc) b.title = desc; b.onclick = () => { fn(b); if (desc) edHelp(b.textContent, desc); }; if (fn.init) fn.init(b); c.appendChild(b); }
-      pane.appendChild(c);
-    }
+    // (Nov 7: the TERRAIN tab's sections are the Biome Editor's own there - one Terrain Editor, never two sets of them - 53-veg-editor.js)
+    if (!(VEG_MODE && t === 'TERRAIN')) edFillPane(t, pane);
   }
   const edShow = () => { for (const t in panes) panes[t].hidden = t !== edTab; if (edTab === 'COLOURS') edColours(panes.COLOURS); };
   bClose.onclick = () => { root.hidden = true; TUNE.open = false; };
@@ -27796,6 +27819,26 @@ function edBuild(host) {
   document.body.appendChild(ob); TUNE.openBtn = ob;
   pick(edTab); TUNE.built = true;
 }
+// a tab's sections into pane: its sliders' groups, its own pane builder (TUNE.pane), its buttons' groups - each button's init once (it may keep its
+// element: the TERRAIN tab's do - so a tab is filled in one place only). TUNE.fillTab(tab, host): the same into another panel (the Biome Editor's)
+function edFillPane(t, pane) {
+  const cats = ED_TABS[t]; if (!cats) return;
+  const smHint = Object.fromEntries(SM_SL.concat(FW_SL, BG_SL).map(r => [r[0], r[6]])), rowOf = Object.fromEntries(SL.concat(SM_SL, FW_SL, BG_SL).map(r => [r[0], r]));
+  for (const [name, keys] of cats) {
+    const c = edEl('div', 'cat'); c.appendChild(edEl('h4', '', name));
+    for (const k of keys) { const r = rowOf[k]; if (!r) continue; c.appendChild(edRow(k, ED_SHORT[k] || r[1], r[2], r[3], r[4], DESC[k] || smHint[k])); TUNE.tab[k] = t; }
+    pane.appendChild(c);
+  }
+  if (ED_PANES[t]) ED_PANES[t](pane, edEl);                                  // (a tab that builds its own pane: TUNE.pane)
+  for (const [bt, name, list] of ED_BTNS) {
+    if (bt !== t) continue;
+    if (name[0] === '=') { pane.appendChild(edEl('h3', 'grp', name.slice(1))); continue; }   // (a group's heading over the sections after it - TERRAIN's SELECTED PROPERTIES, Nov 7)
+    const c = edEl('div', 'cat btns'); c.appendChild(edEl('h4', '', name));
+    for (const [lab, desc, fn] of list) { const b = edEl('button', '', lab); if (desc) b.title = desc; b.onclick = () => { fn(b); if (desc) edHelp(b.textContent, desc); }; if (fn.init) fn.init(b); c.appendChild(b); }
+    pane.appendChild(c);
+  }
+}
+TUNE.fillTab = (t, host) => { const pane = edEl('div', 'cats'); edFillPane(t, pane); host.appendChild(pane); return pane; };
 // TUNE.add(tab, [[key, label, min, max, step, default, description]...]): a new category of settings in its own tab
 TUNE.toggle = edToggle; TUNE.isOnOff = isOnOff; TUNE.help = edHelp;   // (TUNE.help(name, text): the help line, from any panel)   // (the on/off switch, for the tabs that build their own rows)
 TUNE.pane = (tab, build) => { ED_PANES[tab] = build; if (!ED_TABS[tab]) ED_TABS[tab] = []; };
@@ -27808,7 +27851,8 @@ TUNE.add = (tab, rows) => { ED_TABS[tab] = [[tab, rows.map(r => r[0])]]; for (co
 const CLOUD_VIEWS = ['TONES', 'LOBES', 'BILLOWS', 'LIGHT', 'PUFFS'];
 { const vb = b => { view = (view + 1) % CLOUD_VIEWS.length; b.textContent = 'VIEW: ' + btnVar(CLOUD_VIEWS[view]); b.classList.toggle('on', view > 0); }; vb.init = b => { b.textContent = 'VIEW: ' + CLOUD_VIEWS[view]; b.classList.toggle('on', view > 0); };
   TUNE.buttons('LIGHT & SHADOW', 'DEBUG VIEW', [['VIEW: TONES', 'Show the clouds normally, or by lobe, billow, light or puff', vb]]); }
-NSKY_API.editor = { build: edBuild, TUNE, show(on) { if (TUNE.openBtn) TUNE.openBtn.hidden = !on; }, get open() { return TUNE.open; } };
+NSKY_API.editor = { build: edBuild, TUNE, css: ED_CSS,   // (css: the editor's look - the Biome Editor's bottom panel wears it too, 53-veg-editor.js)
+  show(on) { if (TUNE.openBtn) TUNE.openBtn.hidden = !on; }, get open() { return TUNE.open; } };
 
 // ================================================================== the GAME EDITOR's BG tab: the ocean's sea bed
 // (user Oct 27: "Add BG sliders for ocean seabed elements too.") the sea bed's background as the far land's: the sea's depth
@@ -28844,21 +28888,18 @@ function renderObjects() {
   const yW = PY(WATER_Y);
   // deep water
   // (its colours by depth: down to the harbour's floor as they always were, then on into the dark of the deep sea,
-  // user Oct 24: twice as deep out in the middle, and darker at the bottom)
-  const deep = C.createLinearGradient(0, yW, 0, PY(SEABED_DEEP + 150));
-  const ss = E.sunset, dz = (SEABED_Y + 150 - WATER_Y) / (SEABED_DEEP + 150 - WATER_Y);
-  for (const [t, c] of seaDeepStops(ss, dz)) deep.addColorStop(t, rgbs(c));   // (the table seaAt reads too)
+  // user Oct 24: twice as deep out in the middle, and darker at the bottom - waterDeep, every water's: 44-shadows-seafloor.js)
   // the deep water starts right at the moving surface, so nothing of the far sea shows beneath it
   const n = VWP + 6;
   if (ys.length < n) ys = ysPer[viewIdx] = new Int32Array(n * 2);
   if (ysW.length < n) ysW = new Float64Array(n * 2);
   for (let c = -3; c < VWP + 3; c++) { const sy = surfaceY((c + CAMPX + 0.5) / SV); ysW[c + 3] = sy; ys[c + 3] = PY(sy); }   // (ysW: the surface's own height a column, for the whitecaps below - the same call, once)
-  C.fillStyle = deep;
-  if (gpuwOn('cols')) wglColumns(E.overcast > 0.05 ? [{ k: 'grad', g: deep, yOff: 1 }, { k: 'col', css: `rgba(4,10,26,${(0.38 * E.overcast).toFixed(3)})`, yOff: 1 }] : [{ k: 'grad', g: deep, yOff: 1 }], Bt);   // (on the GPU: one pass - 40-zz-water-gl.js)
+  waterDeep((deep, sh) => { C.fillStyle = deep;
+  if (gpuwOn('cols')) wglColumns(sh ? [{ k: 'grad', g: deep, yOff: 1 }, { k: 'col', css: sh, yOff: 1 }] : [{ k: 'grad', g: deep, yOff: 1 }], Bt);   // (on the GPU: one pass - 40-zz-water-gl.js)
   else {
     fillBelowSurface(1, Bt);
-    if (E.overcast > 0.05) { C.fillStyle = `rgba(4,10,26,${(0.38 * E.overcast).toFixed(3)})`; fillBelowSurface(1, Bt); }   // in the clouds' shade
-  }
+    if (sh) { C.fillStyle = sh; fillBelowSurface(1, Bt); }   // in the clouds' shade
+  } });
   ot = ema('obDeep', ot);
   // distant ridges first: each layer further back is closer to the colour of the water
   // (the deep beyond: the sea's depth decks, user Oct 30 - 44-shadows-seafloor.js; before the light rays - "we definitely want
@@ -28969,13 +29010,9 @@ function renderObjects() {
   }
   drawPlanesAir(x0, x1);
   const lampV = lampSnapshot();                           // (the sub lamps: what's under the water as it is, before the water's tint - 27-sub-light)
-  const over = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(SEABED_DEEP + 150));
-  const ov = 0.08 * E.storm;
-  const sso = E.sunset, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12);
-  for (const [t, c] of seaOverStops(sso, ov, oz)) over.addColorStop(t, rgbs(c.slice(0, 3), c[3]));
-  C.fillStyle = over;
+  waterTint(over => { C.fillStyle = over;                 // (the water's tint - every water's: 44-shadows-seafloor.js)
   if (gpuwOn('cols')) wglColumns([{ k: 'grad', g: over, yOff: 0 }, { k: 'strips' }], Bt);   // (the tint and the middle of the ocean's dark, one pass on the GPU)
-  else { fillBelowSurface(0, Bt); drawDeepWater(); }
+  else { fillBelowSurface(0, Bt); drawDeepWater(); } });
   if (lampV) lampUncover(lampV);                          // (and laid back over the tint where their beams fall)
   ot = ema('obOver', ot);
   drawRockForms(x0, x1);                                  // (the solid rocks: over the water's tint, k times its colour, so their light and shade read - user Oct 25)
@@ -30183,6 +30220,23 @@ function seaDeepStops0(m, dz) {
   return [[0, m([45, 139, 240], [92, 80, 160])], [0.18 * dz, m([35, 120, 230], [70, 70, 150])], [0.5 * dz, m([24, 88, 198], [48, 52, 124])], [0.8 * dz, m([20, 72, 168], [40, 42, 108])],
     [dz, m([16, 60, 140], [30, 30, 84])], [dz + (1 - dz) * 0.55, m([16, 58, 140], [24, 24, 70])], [1, m([15, 54, 132], [20, 20, 62])]];
 }
+/* ---- EVERY WATER'S OWN LAYERS, ONE CODE (user Nov 7: "Lakes should use the SAME SYSTEM as the deep sea" - the lakes drawn by the sea's own code, so
+   the two can never drift apart): the deep (its colours by depth and the clouds' shade over them) and the tint over what's in the water, each made
+   here once and laid by whoever draws a water - the ocean in renderObjects (43-render-objects.js: down from its moving surface, on the GPU's
+   columns), a lake in drawLakeRoots (50-land-lake.js: its own shape, lifted to its own level). fill(style, shade): lays it; bn: a lake's biome,
+   its own water's colour over the tint (BIOME_LAKE) ---- */
+function waterDeep(fill) {
+  const deep = C.createLinearGradient(0, PY(WATER_Y), 0, PY(SEABED_DEEP + 150)), dz = (SEABED_Y + 150 - WATER_Y) / (SEABED_DEEP + 150 - WATER_Y);
+  for (const [t, c] of seaDeepStops(E.sunset, dz)) deep.addColorStop(t, rgbs(c));   // (the table seaAt reads too)
+  fill(deep, E.overcast > 0.05 ? `rgba(4,10,26,${(0.38 * E.overcast).toFixed(3)})` : null);   // (in the clouds' shade)
+}
+function waterTint(fill, bn) {
+  const over = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(SEABED_DEEP + 150)), ov = 0.08 * E.storm, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12);
+  for (const [t, c] of seaOverStops(E.sunset, ov, oz)) over.addColorStop(t, rgbs(c.slice(0, 3), c[3]));
+  fill(over);
+  const lk = bn ? biomeLake(bn, 'k') : 0, mk = bn ? biomeLake(bn, 'murk') : 0;   // (a lake's biome's own water over the ocean's - the Biome Editor's LAKES tab)
+  if (lk > 0 || mk > 0) { const lc = biomeLake(bn, 'col'), lg = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(WATER_Y + 260)); lg.addColorStop(0, rgbs(lc, Math.min(1, lk))); lg.addColorStop(1, rgbs(lc.map(v => v * 0.45), Math.min(1, lk + mk))); fill(lg); }
+}
 function seaOverStops(sso, ov, oz) {
   const mo = (a, b, al) => mix3(a, b, sso).concat([al]), d = seaZoomDark();
   const L = seaOverStops0(mo, ov, oz);
@@ -30488,15 +30542,19 @@ function drawFloorSkins(x0, x1) {
   // (in pieces of 256 cells, each painted the first time it's in view: the whole sea's floor at once was seconds)
   if (!floorSkinStrips) { floorSkinStrips = []; for (const [a, b, sk] of floorSkinRuns()) for (let u = a; u < b; u += 256 * LT_CELL) floorSkinStrips.push({ a: u, b: Math.min(b, u + 256 * LT_CELL), sk, S: null }); }
   const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
-  const Bt = bh - SHY + 2;
+  const Bt = bh - SHY + 2; let built = false;
   for (const Q of floorSkinStrips) {
     if (offView(Q.a, Q.b, x0, x1)) continue;
+    if (!Q.S) built = true;
     const S = Q.S || (Q.S = buildFloorSkinStrip(Q.a, Q.b, Q.sk));
     const X0 = Math.round(PX(S.x0)), X1 = Math.round(PX(S.x1)), Y0 = Math.round(PY(S.y0)), Y1 = Math.round(PY(S.y0 + S.h * LT_CELL));
     C.drawImage(S.cv, X0, Y0, X1 - X0, Y1 - Y0);
     if (Y1 < Bt) { C.fillStyle = rgbs(S.deep); C.fillRect(X0, Y1 - 1, X1 - X0, Bt - Y1 + 1); }   // (and on down, in the dark)
   }
   C.imageSmoothingEnabled = sm;
+  // (user Nov 7 21:37, "zooming in and out in the editor is very slow": zoomed out, each frame came on several pieces never painted - 20-50 ms a frame,
+  // the first time) the GAME EDITOR paints the floor ahead, as it does the land (landPaintStep): on a frame that painted none, the piece nearest the view
+  if (!built && PHOTO.ed) { const m = (x0 + x1) / 2; let q = null, qd = Infinity; for (const Q of floorSkinStrips) if (!Q.S) { const d = Math.abs((Q.a + Q.b) / 2 - m); if (d < qd) { qd = d; q = Q; } } if (q) q.S = buildFloorSkinStrip(q.a, q.b, q.sk); }
 }
 // the sprites, standing on the floor (rocks sunk into the sand a little), drawn as pixels at this zoom
 // (lk: the ones on a lake bed marked SEA - drawn in the land's pass, under the lake's water - lkOnly picks those)
@@ -33265,7 +33323,7 @@ function render() {
   guardDraw('grade', () => drawGrade(views));
   tl('tnGrade', ts);
   tt = lap('tint', tt);
-  for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); renderOverlays(); guardDraw('landEd', landEdDraw); guardDraw('islEd', islEdDraw); if (LAND) guardDraw('caveEd', CAVE.edDraw); guardDraw('colView', colvDraw); guardDraw('vehEd', vehEdDraw); g.restore(); }   // (the GAME EDITOR's FLOOR handles - 50-land-floor.js)
+  for (const [v, cp, sx, w, i, cf] of views) { let tq = performance.now(); beginView(g, v, cp, sx, w, i, cf); renderOverlays(); tq = subLap('ovAll', tq); guardDraw('landEd', landEdDraw); tq = subLap('edLand', tq); guardDraw('islEd', islEdDraw); tq = subLap('edShapes', tq); if (LAND) guardDraw('caveEd', CAVE.edDraw); tq = subLap('edCaves', tq); guardDraw('colView', colvDraw); tq = subLap('edCol', tq); guardDraw('vehEd', vehEdDraw); subLap('edVeh', tq); g.restore(); }   // (the GAME EDITOR's FLOOR handles - 50-land-floor.js)   // (each timed - the perf panel's parts: ovAll the game's overlays, ed* the editor's drawing)
   tt = lap('overlays', tt);
   C = g;
   g.setTransform(1, 0, 0, 1, 0, 0);
@@ -41574,7 +41632,7 @@ function floorEdited() {
   FLOOR_ED.print = h;
 }
 // the handles show while the tab does (in OPEN WORLD, off line)
-const floorEdOn = () => LAND && NET.role === 'local' && NSKY.editor.TUNE.world() && !ui.title   /* (user Nov 1: on WORLD EDITOR, whatever tab is shown) */;
+const floorEdOn = () => VEG_MODE ? VEG_TERR.on : LAND && NET.role === 'local' && NSKY.editor.TUNE.world() && !ui.title   /* (user Nov 1: on WORLD EDITOR, whatever tab is shown; the Biome Editor: its EDIT TERRAIN) */;
 
 /* ---- islands (user Oct 28, 21:04-21:07, with a drawing: a red line rising out of the sea, its two ends down past the
    ocean floor): "another type of line called islands that is separate from this contiguous line. So we draw this line
@@ -42239,7 +42297,8 @@ function islChanged() { const sig = JSON.stringify(ISLANDS.filter(I => !I.gnd));
   // (user Nov 7 21:32, found testing: a ground shape's SEGMENT TYPE, VEGETATION, HILLS, CURVE or HIDE INTERIOR changed with its outline as it was
   // wasn't built on REFRESH VIEW - gndChanged sees only its top line) the ground's shapes as the land was last built (land.gsig, buildLand):
   // anything about them different, the land and the floor built again on REFRESH
-  if (land.gsig != null && JSON.stringify(ISLANDS.filter(I => I.gnd)) !== land.gsig) { if (!LAND_ED.dirty) LAND_ED.old = LAND_STRUCTS.map(o => Object.assign({}, o)); LAND_ED.dirty = true; FLOOR_ED.dirty = true; }   /* (the ground is SOLID shapes: only what its change reaches built again on REFRESH - gndChanged) */ if (typeof terrainSync === 'function') terrainSync(); }
+  if (land.gsig != null && JSON.stringify(ISLANDS.filter(I => I.gnd)) !== land.gsig) { if (!LAND_ED.dirty) LAND_ED.old = LAND_STRUCTS.map(o => Object.assign({}, o)); LAND_ED.dirty = true; FLOOR_ED.dirty = true; }   /* (the ground is SOLID shapes: only what its change reaches built again on REFRESH - gndChanged) */ if (typeof terrainSync === 'function') terrainSync();
+  if (VEG_MODE && window.__vgTerrChanged) window.__vgTerrChanged(); }   // (the Biome Editor: built as it changes - 53-veg-editor.js)
 function islAdd() {
   const v = cam.view[0], vw = (ONEVIEW() ? bw : bw / 2) / (S * v.z), cx = v.l + vw / 2, w = Math.max(900, Math.min(4000, vw * 0.45));
   const I = { p: [[Math.round(cx - w / 2), 220], [Math.round(cx - w / 5), -60], [Math.round(cx), -160], [Math.round(cx + w / 5), -60], [Math.round(cx + w / 2), 220]] };
@@ -42476,24 +42535,43 @@ window.addEventListener('pointercancel', islUp, { capture: true });
 // drawn over the world with the ground's line (floorEdDraw): each shape's whole loop in its pieces' skin colours - an ISLAND's
 // AUTO violet, a SOLID's white-grey, a HOLE's cyan; picked: white and thicker - a handle on each point; the base seabed dashed
 // a line on the screen in fillStyle, w pixels thick (gap: left out - a hole's dashes)
-function edSeg(X0, Y0, X1, Y1, w, gap) { if (gap) return; const n = Math.max(1, Math.ceil(Math.max(Math.abs(X1 - X0), Math.abs(Y1 - Y0)) / Math.max(1, w * 0.75))), h = w >> 1; if (Math.max(X0, X1) < -w || Math.min(X0, X1) > VWP + w) return; for (let i = 0; i <= n; i++) C.fillRect(Math.round(X0 + (X1 - X0) * i / n) - h, Math.round(Y0 + (Y1 - Y0) * i / n) - h, w, w); }
+/* (user Nov 7 21:37, the editor slow: the outlines of every shape on screen were a square every pixel along each piece - thousands a frame,
+   11 ms with the OPEN WORLD's caves in view) a piece of an editor line: one band w wide, turned along it, its ends squared past the points
+   by half its width (as the squares covered the corners) */
+function edSeg(X0, Y0, X1, Y1, w, gap) {
+  if (gap) return; if (Math.max(X0, X1) < -w || Math.min(X0, X1) > VWP + w) return;
+  const dx = X1 - X0, dy = Y1 - Y0, h = w / 2;
+  if (Math.abs(dy) < 0.5 || Math.abs(dx) < 0.5) { const xa = Math.round(Math.min(X0, X1) - h), ya = Math.round(Math.min(Y0, Y1) - h); C.fillRect(xa, ya, Math.round(Math.max(X0, X1) + h) - xa, Math.round(Math.max(Y0, Y1) + h) - ya); return; }
+  const L = Math.hypot(dx, dy), cs = dx / L, sn = dy / L, M = ED_M || C.getTransform();   // (turned from the view's own transform, set back after - no save / restore a piece)
+  C.setTransform(M.a * cs + M.c * sn, M.b * cs + M.d * sn, M.c * cs - M.a * sn, M.d * cs - M.b * sn, M.a * X0 + M.c * Y0 + M.e, M.b * X0 + M.d * Y0 + M.f);
+  C.fillRect(-h, -h, L + w, w); C.setTransform(M.a, M.b, M.c, M.d, M.e, M.f);
+}
+let ED_M = null;   // (the view's transform while the editor's lines are drawn: islEdDraw sets it, edSeg turns from it)
+
 const SHP_ED_COL = { I: 'rgba(214,140,255,0.9)', S: 'rgba(235,235,235,0.9)', H: 'rgba(110,235,255,0.95)' }, SHP_HANDLE = { I: '#d68cff', S: '#e8e8e8', H: '#6eebff' };
 function islEdDraw() {
   if (!floorEdOn()) return;
+  ED_M = C.getTransform();
   lakeEdDraw();                                         // (the pockets' water lines - 50-land-lake, Nov 2)
   const x0 = CAMPX / SV, x1 = x0 + VWW, t = Math.max(1, Math.round(1.5 * dpr / PIXW)), s = TERRAIN_ED.sel;
   if (SHP.base) { const Y = Math.round(PY(SHP.base)); C.fillStyle = 'rgba(255,200,120,0.5)'; for (let X = 0; X < VWP; X += 14) C.fillRect(X, Y - (t >> 1), 7, t); }
   // (the ground's own shapes: their sides and crosses drawn with the ground line - groundShapesDraw, 50-land-zz-ground)   // (the base seabed: the lowest point of any shape - user Nov 2 13:16)
   ISLANDS.forEach((I, n) => {
     const Q = shpPoly(I), k = shpK(I); if (Q.x1 < x0 || Q.x0 > x1) return;
-    const P = I.p, N = Q.X.length;
+    // (zoomed out, a curve's pieces are under a pixel: pieces of one look are joined until a few pixels long - close up each is its own, as
+    // before; its colour set only when it changes - a colour string is read every time it's set)
+    const P = I.p, N = Q.X.length; let col0 = null, kc = null, kw = 0, kg = false, sx = PX(Q.X[0]), sy = PY(Q.Y[0]), ex = sx, ey = sy;
+    const flush = () => { if (kc === null || (ex === sx && ey === sy)) return; if (kc !== col0) { C.fillStyle = kc; col0 = kc; } edSeg(sx, sy, ex, ey, kw, kg); sx = ex; sy = ey; };
     for (let i = 0; i < N; i++) {
       const j = (i + 1) % N, e = Q.E[i];
       const sel = s && (s.Is ? s.Is.includes(n) : s.I === n && e >= Math.min(s.k, s.k1) && e <= Math.max(s.k, s.k1)), sk = P[e][2], tt = sel ? t * 3 : sk ? t * 2 : t;
-      C.fillStyle = sel ? '#ffffff' : TERRAIN_SKIN_COL[sk] || SHP_ED_COL[k];
-      edSeg(PX(Q.X[i]), PY(Q.Y[i]), PX(Q.X[j]), PY(Q.Y[j]), tt, k === 'H' && (i >> 2) % 2 === 1);
+      const col = sel ? '#ffffff' : TERRAIN_SKIN_COL[sk] || SHP_ED_COL[k], gap = k === 'H' && (i >> 2) % 2 === 1;
+      if (col !== kc || tt !== kw || gap !== kg) { flush(); sx = ex; sy = ey; kc = col; kw = tt; kg = gap; }
+      ex = PX(Q.X[j]); ey = PY(Q.Y[j]);
+      if (Math.abs(ex - sx) + Math.abs(ey - sy) >= 3 * tt) flush();
     }
-    const hs = Math.max(5, Math.round(4.5 * dpr / PIXW)), hd = ISL_ED.drag || ISL_ED.hover;
+    flush();
+    const hs = edHandle(4.5), hd = ISL_ED.drag || ISL_ED.hover;   // (shrinks zoomed out - edHandle, 18-zz-photo.js)
     if (I.t) {                                                    // (a tunnel: its middle line dashed, and its three round width handles)
       const T = Q.tube; C.fillStyle = 'rgba(110,235,255,0.6)'; for (let i = 0; i + 1 < T.X.length; i++) edSeg(PX(T.X[i]), PY(T.Y[i]), PX(T.X[i + 1]), PY(T.Y[i + 1]), Math.max(1, t >> 1), (i >> 1) % 2 === 1);
       for (let j = 0; j < 3; j++) { const [wx, wy] = tunWidthAt(I, j), X = Math.round(PX(wx)), Y = Math.round(PY(wy)), r2 = hs, hot = hd && hd.n === n && hd.kind === 'Wd' && hd.j === j;
@@ -42513,6 +42591,7 @@ function islEdDraw() {
       C.fillStyle = hot || onSel ? '#ffb347' : SHP_HANDLE[k]; C.fillRect(X - hs, Y - hs, 2 * hs, 2 * hs);   // (the one pressed or picked: orange, on every shape - as the ground's handles were)
     });
   });
+  ED_M = null;
 }
 
 /* ================================================================
@@ -43913,8 +43992,7 @@ function lakeWet(L) {
    behind the main land") - drawLakeRoots, before the ground (renderLandObjects0) */
 function drawLakeRoots(x0, x1) {
   if (!SIM_ONLY) waterPageSync();                                  // (the water as the simulation worker's snapshot has it - 50-land-water)
-  const step = Math.max(1, 2 / SV), dz = (SEABED_Y + 150 - WATER_Y) / (SEABED_DEEP + 150 - WATER_Y);
-  const ov = 0.08 * E.storm, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12);
+  const step = Math.max(1, 2 / SV);
   for (const L of land.lakes || []) {
     const a = Math.max(x0 - 8, L[0]), b = Math.min(x1 + 8, L[1]); if (b <= a) continue;
     // (user Nov 3 13:28: "All the bodies of water should have the exact same rendering like the main ocean has, independent of their
@@ -43926,11 +44004,8 @@ function drawLakeRoots(x0, x1) {
       // (in the sea's order - renderObjects: the deep, its decks and rays; an island's rock and the sea's life in it - fish from the
       // areas placed in it, user Nov 3: "all fish should be global"; the water's tint over them; a SOLID shape in front)
       C.save(); C.translate(0, dy);
-      const deep = C.createLinearGradient(0, PY(WATER_Y), 0, PY(SEABED_DEEP + 150));
-      for (const [t, c] of seaDeepStops(E.sunset, dz)) deep.addColorStop(t, rgbs(c));
-      const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12)), B = bh + SHY + 50 + Math.abs(dy);
-      C.fillStyle = deep; C.fillRect(X0, Y, X1 - X0, B - Y);
-      if (E.overcast > 0.05) { C.fillStyle = `rgba(4,10,26,${(0.38 * E.overcast).toFixed(3)})`; C.fillRect(X0, Y, X1 - X0, B - Y); }
+      const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12)), B = bh + SHY + 50 + Math.abs(dy), lay = st => { C.fillStyle = st; C.fillRect(X0, Y, X1 - X0, B - Y); };
+      waterDeep((deep, sh) => { lay(deep); if (sh) lay(sh); });   // (the sea's own deep - 44-shadows-seafloor.js)
       drawSeaDecks(bh - SHY + 2 - dy);                       // (down to the view's bottom, wherever this water's surface is)
       drawRays(false, true);                                 // (the sea's rays, their fade as the sea's pass left it this frame)
       C.restore();
@@ -43941,12 +44016,7 @@ function drawLakeRoots(x0, x1) {
       // (They were drawn after the ground, over the tint - drawLakeSea, gone)
       { const b0 = BATCH; BATCH = false; try { drawReefItems(reef, a, b, true); drawAlgae(a, b, true); } finally { BATCH = b0; } }
       C.save(); C.translate(0, dy);
-      const og = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(SEABED_DEEP + 150));
-      for (const [t, c] of seaOverStops(E.sunset, ov, oz)) og.addColorStop(t, rgbs(c.slice(0, 3), c[3]));
-      C.fillStyle = og; C.fillRect(X0, Y, X1 - X0, B - Y);
-      // (Nov 7: its biome's own water over the ocean's - BIOME_LAKE, the Biome Editor's LAKE tab)
-      { const bn = typeof colBiome === 'function' ? colBiome(clamp(ltCol((L[0] + L[1]) / 2), 0, land.cols - 1)) : null, lk = bn ? biomeLake(bn, 'k') : 0, mk = bn ? biomeLake(bn, 'murk') : 0;
-        if (lk > 0 || mk > 0) { const lc = biomeLake(bn, 'col'), lg = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(WATER_Y + 260)); lg.addColorStop(0, rgbs(lc, Math.min(1, lk))); lg.addColorStop(1, rgbs(lc.map(v => v * 0.45), Math.min(1, lk + mk))); C.fillStyle = lg; C.fillRect(X0, Y, X1 - X0, B - Y); } }
+      waterTint(lay, colBiome(clamp(ltCol((L[0] + L[1]) / 2), 0, land.cols - 1)));   // (the sea's own tint, and its biome's own water over it)
       C.restore();
       if (land.lkRocks) drawRockForms(a, b, true);           // (its rock formations: over the water's tint, behind the ground in front - as the sea's, renderObjects)
       if (solRoots.length) drawSolidRoots(a, b);             // (in front, never hazed - after the tint, as at sea)
@@ -44298,7 +44368,7 @@ window.addEventListener('pointercancel', lakeEdUp, { capture: true });
 // drawn with the shapes (islEdDraw): each pocket's level line, its rim dotted, the ocean's line locked (a padlock-grey dash)
 function lakeEdDraw() {
   if (!land.pockets) return;
-  const t = Math.max(1, Math.round(1.5 * dpr / PIXW)), hs = Math.max(5, Math.round(4.5 * dpr / PIXW));
+  const t = Math.max(1, Math.round(1.5 * dpr / PIXW)), hs = edHandle(4.5);   // (shrinks zoomed out - edHandle, 18-zz-photo.js)
   for (const K of lakeEdPockets()) {
     const X0 = Math.round(PX(K.x0)), X1 = Math.round(PX(K.x1)); if (X1 < 0 || X0 > VWP) continue;
     const lv = lakeEdLevel(K), Y = Math.round(PY(lv)), Ys = Math.round(PY(K.spill)), hot = LAKE_ED.drag === K || LAKE_ED.hover === K;
@@ -44342,6 +44412,7 @@ function drawFieldFlowers(x0, x1) {
   for (const f of fieldFlowers) {
     if (offViewR(f.x, 3, x0, x1)) continue;   // (a flower: a few pixels)
     const fc = clamp(Math.floor(f.x / LT_CELL), 0, land.cols - 1), fa0 = fieldK(f.x) * fieldAmt(fc); if (fa0 < 0.05 || (fa0 < 1 && hash(f.x * 1.913 + 0.7) >= fa0)) continue;   // (only on the meadow: none over the water or past its end, thinning out as it does - fieldAmt)
+    if (!farMeadow(colBiome(fc))) continue;   // (no meadow on the biome's decks, or its deck hidden in the Biome Editor)
     { const fa = bgPB('flw', 1, colBiome(fc)); if (fa < 1 && hash(f.x * 0.77 + 3.1) >= fa) continue; }   // (its biome's DECK 4 FLOWERS: that share of them)
     const foot = land.surfS[fc] - fieldH(fc) * LT_CELL * (0.12 + 0.7 * f.back), sw = (wnd * 0.4 + Math.sin(t * 1.2 + f.ph) * 0.3);
     if ((land.gapC && land.gapC[fc] && shpInGap(land.gapC[fc], foot + 1)) || (Math.abs(land.surfS[fc] - land.surf[fc]) > 6 && !lakeAt(f.x))) continue;   // (user Nov 7: none floating - its foot in the open air under an overhang, or by a drop where the field's smoothed line leaves the ground)
@@ -45792,7 +45863,7 @@ function drawLandProps(x0, x1, isl, part) {
     if (offViewR(it.x, rr, x0, x1) || lakeAt(it.x) || !it.isl !== !isl) continue;
     if (isl && (isl === 'land') !== !seaAtX(it.x)) continue;   // (a segment's in a country: drawn in the land's pass - drawIslandsLand)   // (an island's: drawn with it, behind the water)
     if ((it.kind === 'rock') !== (part !== 'plants') && part) continue;   // (rocks with the ground, plants after the structures)
-    if (part === 'plants' && (it.deck === 4 ? 'back' : it.deck === 1 ? 'front' : null) !== VEG_PASS) continue;   // (deck 3 behind the ground, deck 0 in front of the structures - their own passes, user Nov 3 22:41, 22:54)
+    if (part === 'plants' && (it.deck >= 4 ? 'back' : it.deck === 1 ? 'front' : null) !== VEG_PASS) continue;   // (deck 3 behind the ground, deck 0 in front of the structures - their own passes, user Nov 3 22:41, 22:54)
     if (it.kind === 'rock') {
       const arr = DA && DA.rockC; if (!arr || !arr.length || !it.alive) continue;
       const im = arr[it.pick % arr.length], k = desertArt.kit ? DESERT_PK : it.s / im.width;   // (a rock at its own pixel too)
@@ -45966,16 +46037,18 @@ function tropPalms() {
   // is drawn highest z first)
   // (Nov 7, the BIOME EDITOR) every biome with plants planted on its own ground - BEACH ('tropical') as before (its seeds unchanged), each other
   // biome on its columns with its own seeds; the editor: the biome being edited, on whatever ground its preview has
-  const sets = VEG_MODE ? [[VEG_SET, VEG_DECKS]] : Object.entries(VEG_SETS).filter(([k, D]) => k !== 'jungle' && D.some(L => L.length));
-  for (const [bn, DK] of sets) { B = bn; const salt = bn === 'tropical' || VEG_MODE ? 0 : 1000 * (1 + VEG_SET_NAMES.indexOf(bn));
+  // (Nov 7: and a biome's decks 4-6 - its plants there laid as deck 3's are, further back: each a deck past it - farOf, 09-zz-biomes.js)
+  const far = bn => { const F = farOf(bn); return [4, 5, 6].map(d => F[d].filter(q => q.k === 'pf')); };
+  const sets = (VEG_MODE ? [[VEG_SET, VEG_DECKS]] : Object.entries(VEG_SETS).filter(([k]) => k !== 'jungle')).map(([k, D]) => [k, D.concat(far(k)), D]).filter(([, D]) => D.some(L => L.length));
+  for (const [bn, DK, D0] of sets) { B = bn; const salt = bn === 'tropical' || VEG_MODE ? 0 : 1000 * (1 + VEG_SET_NAMES.indexOf(bn));
   DK.forEach((list, d) => list.forEach((e, n) => {
     const P = VEG_PREFABS[e.p]; if (!P || !(e.amount > 0)) return; tree = P.make.kind === 'tree';
     const R = seededRng(9431 + d * 97 + n * 13 + P.seed + salt);
     for (let x = P.x0 + R() * P.x0; x < WORLD_W - P.x0; x += P.gap(R) / e.amount) {
       const flip = R() < 0.5, z = d + 0.01 + (n + R()) / list.length * 0.98;   // (user Nov 4 10:37: the deck's order - its first prefab in front, its last behind)
       const pick = Math.floor(R() * 1000), at = ok(x, P.w) ? {} : okIsl(x, P.w) ? { isl: true } : null;
-      if (at && vegFadeKeep(x, d * 13 + n, at.isl)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n }, DK === VEG_DECKS ? {} : { ve: e }, at, P.make));
-      if (okLow(x, P.w) && vegFadeKeep(x, d * 13 + n, false)) { const it = Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, low: true }, DK === VEG_DECKS ? {} : { ve: e }, P.make); if (plantH(it) + deckRaise(it) < gapUnder(x) - 4) land.props.push(it); }   // (and on the ground under an overhang: one that fits under it)   // (another biome's plant: its own deck entry - vegEntry)   // (vd / vn: its deck entry - its own COLOUR VARIETY, Nov 4; isl: on a segment's or island's top)
+      if (at && vegFadeKeep(x, d * 13 + n, at.isl)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n }, D0 === VEG_DECKS && d < 4 ? {} : { ve: e }, at, P.make));   // (another biome's plant: its own deck entry - vegEntry)   // (vd / vn: its deck entry - its own COLOUR VARIETY, Nov 4; isl: on a segment's or island's top)
+      if (okLow(x, P.w) && vegFadeKeep(x, d * 13 + n, false)) { const it = Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, low: true }, D0 === VEG_DECKS && d < 4 ? {} : { ve: e }, P.make); if (plantH(it) + deckRaise(it) < gapUnder(x) - 4) land.props.push(it); }   // (and on the ground under an overhang: one that fits under it)
     }
   })); }
 }
@@ -48883,7 +48956,9 @@ const fieldK = x => inCountry(x) ? smoothstep(0, 260, apronD(x)) : 0;   // (an i
 function fieldH0(c) {
   const n = u => { const i = Math.floor(u), f = u - i, s = f * f * (3 - 2 * f); return hash(i * 7.13 + 1.7) * (1 - s) + hash((i + 1) * 7.13 + 1.7) * s; };
   // (the GAME EDITOR's BG tab: MEADOW HEIGHT scales it, MEADOW WAVES its ups and downs)
-  const D = lookD(c * LT_CELL), bn = land.look ? colBiome(c) : null, mw = bgPB(D ? 'bgsw' : 'bgmw', 1, bn);   // (the desert's sand band: its own SAND HEIGHT, SAND WAVES; each biome's own - DECK 4)
+  const D = lookD(c * LT_CELL), bn = land.look ? colBiome(c) : null;
+  if (bn && !farMeadow(bn)) return 0;                      // (no meadow on its biome's decks 4-6, or its deck hidden in the Biome Editor)
+  const mw = bgPB(D ? 'bgsw' : 'bgmw', 1, bn);   // (the desert's sand band: its own SAND HEIGHT, SAND WAVES; each biome's own - DECK 4)
   return ((FIELD_H / LT_CELL - 2) * bgPB(D ? 'bgsh' : 'bgmh', 1, bn) + mw * (4.5 * n(c / 46) + 1.6 * n(c / 13 + 50) + (hash(c * 3.71) < 0.12 ? 1 : 0))) * fieldK(c * LT_CELL) * fieldAmt(c);
 }
 // (on the column's top: faded toward any edge of that ground - fieldLines)
@@ -49065,6 +49140,8 @@ function landTop(x) {
 // (user Nov 7 20:31: a real overhang) the top of the ground water rests on at x: under an overhang the ground below it (the column's last open air's
 // floor - shpGaps, the cells as dug), anywhere else its top - the water's own ground (50-land-water: it runs in under an overhang, and the sea's fill
 // starts there, not at the overhang's top in the air under it)
+// the top of the ground y is in, in a column with gaps G (shpGaps): under an overhang, its own top; otherwise the column's (top)
+const gapSpanTop = (G, y, top) => { for (let i = 2; i + 1 < G.length; i += 2) if (y >= G[i] && y < G[i + 1]) return G[i]; return top; };
 function landFloor(x) {
   const c = ltCol(x), G = typeof shpGaps === 'function' && c >= 0 && c < land.cols ? (land.gapC && land.gapsV === SHP.ver ? land.gapC[c] : shpGaps(c)) : null;
   return G ? landBelow(x, G[G.length - 3] + Math.min(1.5 * LT_CELL, (G[G.length - 2] - G[G.length - 3]) / 2)) : landTop(x);   // (into the air under it: past the overhang's last row, part air part rock - a thin gap at its middle)
@@ -49124,15 +49201,18 @@ function buildLand() {
         land.cell[ltIdx(c, r)] = im; continue; }   // (y < top: over dry land the segment stops at the ground in front)
       if (y < top) continue;
       if (y < g0 && !shpSolidAt(c, y)) continue;
+      // (user Nov 7 21:49, "the transition from a ledge to the floor sharp in the generated interior terrain": the ground under an overhang was all earth,
+      // its depth taken from the overhang's top - grass, sand and the TERRAIN SURFACE layers from its own top now, as any ground's)
+      const tp = GP ? gapSpanTop(GP, y, top) : top;
       let m; const ct = ltTC(c, r), TSLc = ct === c ? TSL : land.trop[ct] ? surfLayer('tropical', 'sand') : null;   // (this cell's terrain type - ltTC: where two meet, the line wanders)
-      if (land.mtn[ct] || y >= rockAt || (rocky > 0.5 && y < top + 60 + 40 * rocky)) m = M_ROCK;   // (MOUNTAIN: rock all through - its stones grey, packed, buildStones)
-      else if (apron && y < top + 8 * LT_CELL) m = M_CONC;          // (the airfield: slabs of concrete over the earth)
-      else if (y < top + sandDepth) m = M_SAND;
-      else m = land.trop[ct] ? (TSLc && y < Math.max(top + surfThick(TSLc, x, 3), TSLc.wl ? WATER_Y - 6 : -1e9) ? M_SAND : M_DIRT) :   // (TROPICAL: sand down to the water, rocks from there - user Nov 1)
-         y < top + ltGrassD(ct) * LT_CELL * ltSeamT(c) && sandy < 0.35 ? M_GRASS : M_DIRT;   // (user Oct 31 20:19: the tropical ground is rocks and sand - a band of sand under its grass, the rocks under that)
+      if (land.mtn[ct] || y >= rockAt + tp - top || (rocky > 0.5 && y < tp + 60 + 40 * rocky)) m = M_ROCK;   // (MOUNTAIN: rock all through - its stones grey, packed, buildStones)
+      else if (apron && y < tp + 8 * LT_CELL) m = M_CONC;          // (the airfield: slabs of concrete over the earth)
+      else if (y < tp + sandDepth) m = M_SAND;
+      else m = land.trop[ct] ? (TSLc && y < Math.max(tp + surfThick(TSLc, x, 3), TSLc.wl ? WATER_Y - 6 : -1e9) ? M_SAND : M_DIRT) :   // (TROPICAL: sand down to the water, rocks from there - user Nov 1)
+         y < tp + ltGrassD(ct) * LT_CELL * ltSeamT(c) && sandy < 0.35 ? M_GRASS : M_DIRT;   // (user Oct 31 20:19: the tropical ground is rocks and sand - a band of sand under its grass, the rocks under that)
       // (Nov 7, TERRAIN SURFACE: a layer the ground doesn't lay itself - its material's cell, painted as the layer; one it does, painted so if coloured)
       const BNc = ct === c ? BN : colBiome(ct);
-      if (BNc && BIOME_SURF[BNc] && BIOME_SURF[BNc].length && m !== M_CONC) { const LA = surfLayerAt(BNc, x, top, y - top); if (LA) { const own = surfOwn(BNc, LA.i); if (!own) m = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) land.lay[ltIdx(c, r)] = LA.i + 1; } }
+      if (BNc && BIOME_SURF[BNc] && BIOME_SURF[BNc].length && m !== M_CONC) { const LA = surfLayerAt(BNc, x, tp, y - tp); if (LA) { const own = surfOwn(BNc, LA.i); if (!own) m = (SURF_MATS[LA.L.m] || SURF_MATS.dirt).cell; if (!own || Array.isArray(LA.L.c)) land.lay[ltIdx(c, r)] = LA.i + 1; } }
       land.cell[ltIdx(c, r)] = m;
     }
   }
@@ -49942,7 +50022,7 @@ function paintLandBack(k) {
         } else if (hsh < 0.07 + f * 0.08) col = G[3];
       }
       if (f < 0.12) col = mix3(col, [199, 208, 217], 0.25);
-      else if (hsh > 0.985) col = DSb ? [192, 122, 80] : [176, 172, 160];                 // (a pebble)
+      else if (hsh > 1 - 0.015 * bgPB('pb', 1, colBiome(c))) col = DSb ? [192, 122, 80] : [176, 172, 160];   // (a pebble - its biome's meadow PEBBLES: none on the snow, say)
       // (user Oct 25: the field behind darker and a little cooler, so the ground in front stands out)
       col = DSb ? [col[0] * 0.76, col[1] * 0.74, col[2] * 0.76 + 6] : [col[0] * 0.7, col[1] * 0.74, col[2] * 0.8 + 6];   // (the desert's sand a little warmer than the grass's: still darker and cooler than the ground)
       return col;
@@ -50084,7 +50164,7 @@ function landPaintStep(views) {
   if (!land.cell) return;
   landGaps();                                                  // (the shapes built again since the last paint: what was painted with the old ones marked to paint again - landGaps)
   const n = land.dirty.length;
-  { const ms = bgP('bgmh', 1) + ',' + bgP('bgmw', 1) + ',' + bgP('bgsh', 1) + ',' + bgP('bgsw', 1) + JSON.stringify(BIOME_BG); if (land.msig !== ms) { if (land.msig !== undefined) land.back.length = 0; land.msig = ms; } }   // (the meadow's sliders moved: painted again)
+  { const ms = bgP('bgmh', 1) + ',' + bgP('bgmw', 1) + ',' + bgP('bgsh', 1) + ',' + bgP('bgsw', 1) + JSON.stringify(BIOME_BG) + ',' + FAR_VER + ',' + DECK_SHOW.join(); if (land.msig !== ms) { if (land.msig !== undefined) { for (const cv of land.back) if (cv) glFreeSrc(cv); land.back.length = 0; } land.msig = ms; } }   // (the meadow's sliders moved, a biome's decks 4-6 changed or one shown / hidden: painted again)
   if (!TROP_TILE && land.trop && land.marked && tropTile()) { land.dirty.fill(1); islRootsBuild(); }   // (the TROPICAL rock's picture come: painted again with it - 50-land-trop)
   { const sc = bgP('bgsc', 1) + ',' + ugReach(); if (land.ssig !== sc) { if (land.ssig !== undefined) land.dirty.fill(1); land.ssig = sc; } }   // (STONE COLOURS or UNDERGROUND LIGHT moved: the ground painted again)
   let painted = 0;
@@ -50307,6 +50387,7 @@ function buildLandBg() {
   const kC = kit('desertCity'), city = kC || cityAt(false); if (!kC) city.lit = cityAt(true);
   // (the desert's, the same depths: its dry range far off, its dunes nearer)
   // (the kit's guide: seamless strips "repeat edge-to-edge, never mirrored" - nf: every tile the right way round)
+  land.bgS = {}; for (const L of land.bg) land.bgS[L.bg] = L;   // (the far-scenery pictures by key - a biome's decks 4-6 pick them, FAR_SPRITES)
   land.bgD = [
     // (user Oct 27, 14:39: "the mountains in the background are super pixelated. They should never be made that big" -
     // the kit's strips are made at DESERT_PK world units a pixel, no coarser than the vehicles' own pixels at the
@@ -50315,12 +50396,34 @@ function buildLandBg() {
     { s: kit('desertDunes') || dunes, p: 0.7, q: 0.95, k: 1.4, base: LAND_BG_Y - 34, haze: 0.18, nf: !!kU, bg: 'dd' },
     { s: city, p: 0.72, q: 0.95, k: kC ? 0.42 : 1.3, base: LAND_BG_Y - 26, haze: kC ? 0.12 : 0.4, reach: 2600, nf: !!kC, ns: !!kC, bg: 'dc' },   // (the city: only by the coast, behind the airport - in front of the dunes)
   ];
+  for (const L of land.bgD) land.bgS[L.bg] = L;
 }
 // each strip drawn tiled across the view at its own depth, its foot standing on its base line (which hangs from
 // the ground's line on the screen, as the sea's far layers hang from the horizon), hazed toward the sky's colour
 // at the horizon and lit with the hour. near: the strip in front of the clouds; otherwise the ones behind them
 // (user Oct 27, 16:39: "can you add a slider for the mountain size... A new BG tab. Then I can tweak it" - the GAME EDITOR's
 // BG tab, src/sky/00-base.js BG_SL: each layer's size (its art pixel's world size times the slider) and its height)
+const bgDeck = L => L.deck || (FAR_SPRITES[L.bg] ? FAR_SPRITES[L.bg][1] : 5);   // (the deck a far layer is drawn at - a biome's decks 4-6)
+// (a far deck's depth: a picture moved to a deck it wasn't drawn at takes that deck's parallax - its own where it was)
+const DECK_DEPTH = { 5: { p: 0.7, q: 0.95 }, 6: { p: 0.5, q: 0.9 } };
+// biome bn's far layers: its decks 5 and 6's pictures, furthest first (each the very layer it always was, at the deck it was drawn at)
+function farLayers(bn) {
+  const I = farInfo(bn); if (I.L && I.Lbg === land.bg) return I.L;
+  const out = [];
+  for (const [d, key] of I.sprites) { if (d < 5) continue; const B = land.bgS && land.bgS[key]; if (!B) continue;
+    out.push(FAR_SPRITES[key][1] === d ? B : Object.assign({}, B, DECK_DEPTH[d], { world: false, under: null, deck: d, endX: undefined })); }
+  out.sort((a, b) => a.p - b.p);
+  I.L = out; I.Lbg = land.bg; return out;
+}
+// the pictures some biome stands on its meadow's back (DECK 4): each a world layer as the near tree row is
+function farWorldLayers() {
+  if (land.bgW && land.bgWv === FAR_VER && land.bgWb === land.bg) return land.bgW;
+  const ks = new Set(); for (const bn of VEG_SET_NAMES) for (const [d, k] of farInfo(bn).sprites) if (d === 4) ks.add(k);
+  const out = [];
+  for (const k of ks) { const B = land.bgS[k]; if (!B) continue; out.push(B.world ? B : Object.assign({}, B, { world: true, tree: B.tree || 0, under: null, deck: 4, endX: undefined })); }
+  land.bgW = out; land.bgWv = FAR_VER; land.bgWb = land.bg; return out;
+}
+const farHas = (bn, d, k) => farInfo(bn).sprites.some(q => q[0] === d && q[1] === k);
 const bgP = (k, d) => { const v = typeof NSKY !== 'undefined' && NSKY.P ? NSKY.P[k] : undefined; return typeof v === 'number' ? v : d; };
 const bgK = L => L.k * (L.bg ? bgPB('bg' + L.bg, 1) : 1);   // (the biome being drawn's own - BG_CUR_BIOME, DECK 5 / 6)
 const bgBase = L => L.base - (L.bg ? bgPB('bg' + L.bg + 'y', 0) : 0);
@@ -50334,12 +50437,10 @@ const bgGap = L => L.bg ? bgPB('bg' + L.bg + 'g', 0) : 0;   // (the room between
 // it stands over taken through its own parallax (bgLookUp). One rule at a coast and between two types: no sides, no coasts
 function drawLandBg(near) {
   // (09:06: the forest's hills behind kept with the plants' bones - the set's background)                                    // (user Nov 3 21:23: no static plants behind while the plants have bones - 50-land-zz-rig.js)
-  drawLandBg0(near, false);                                // (the forest's mountains and trees, where the ground is FOREST)
-  drawLandBg0(near, true);                                 // (the desert's dry range, dunes and coast city, where it is DESERT)
-  // (Nov 7, the Biome Editor: each biome its own far background - stand-ins till each has its set: the forest's, in the biome's colours, where the
-  // ground is that biome - MOUNTAIN grey, ICE snowy, SWAMP murky, VOLCANIC ash - BG_BIO)
-  if (land.bio || land.mtn) for (const k of ['M', 'I', 'W', 'V']) if (bgAny(k)) drawLandBg0(near, false, k);
-  // (TROPICAL: no set of its own yet - its jungle stands at the ground, drawTropLayers; nothing far behind it)
+  // (Nov 7, the Biome Editor's decks 4-6) each biome's own far pictures - its decks 5 and 6 - over its own columns: FOREST and DESERT, the others where
+  // the world has them (MOUNTAIN, ICE, SWAMP, VOLCANIC repaint what they show in their own colours - bgBioVar; the BEACH as it is)
+  if (!land.bg) buildLandBg();
+  for (const [bn, cols] of BG_COLS) if ((cols === false || cols === true || bgAny(cols)) && farLayers(bn).length) drawLandBg0(near, cols, bn);
 }
 // the share of the ground over [x - B, x + B] that has the desert's look (desert) or the forest's - the sea's stretch and
 // the islands neither (prefix sums of land.look over the land's columns, made once a build)
@@ -50402,14 +50503,16 @@ function bgBioVar(S, bio, kind) {
   g.putImageData(id, 0, 0);
   return (S[key] = { c, flip: flipCanvas(c) });
 }
-function drawLandBg0(near, desert, bio) {
+const BG_COLS = [['forest', false], ['desert', true], ['mountain', 'M'], ['ice', 'I'], ['swamp', 'W'], ['volcanic', 'V'], ['tropical', 'T']];
+function drawLandBg0(near, desert, bn) {
   if (!land.bg) buildLandBg();
+  const bio = typeof desert === 'string' && desert !== 'T' ? desert : null;
   const hz = mix3(E.skyHor || [180, 200, 220], E.skyTop || E.skyHor || [120, 170, 230], 0.3), fx0 = E.fx || [1, 1, 1], BB = null, fx = fx0;   // (a biome's: its own repainted strips - bgBioVar - lit as the forest's)
-  if (bio) desert = bio;                                   // (its own columns - bgLookShare)
-  BG_CUR_BIOME = bio ? ({ M: 'mountain', I: 'ice', W: 'swamp', V: 'volcanic' })[bio] : desert === true ? 'desert' : 'forest';
-  for (const L of desert === true ? land.bgD : land.bg) {
+  BG_CUR_BIOME = bn;
+  for (const L of farLayers(bn)) {
     const Lh = bgHaze(L);
     if (L.world || !!L.near !== !!near) continue;
+    if (DECK_SHOW[bgDeck(L)] === false) continue;           // (its deck hidden in the Biome Editor)
     const LS = bio ? bgBioVar(L.s, bio, L.tree ? 'tree' : 'mtn') : L.s;   // (its biome's own strip)
     const im = LS.c, Sl = layerScale(L.q), Lk = bgK(L), tileW0 = im.width * Lk, tileW = tileW0 * (1 + bgGap(L));
     const i0 = Math.floor(layerX(0, L, Sl) / tileW) - 1, i1 = Math.ceil(layerX(VWP, L, Sl) / tileW) + 1;
@@ -50418,7 +50521,7 @@ function drawLandBg0(near, desert, bio) {
     if (!LS.bot) { const d = LS.c.getContext('2d').getImageData(0, Math.max(0, LS.c.height - 4), LS.c.width, Math.min(4, LS.c.height)).data, a = [0, 0, 0]; let n = 0; for (let q = 0; q < d.length; q += 4) if (d[q + 3] > 200) { a[0] += d[q]; a[1] += d[q + 1]; a[2] += d[q + 2]; n++; } LS.bot = n ? a.map(v => v / n) : [120, 130, 140]; }
     const skirt = css3(LS.bot.map((v, j) => v * fx[j] * (1 - Lh) + hz[j] * Lh + (BB ? BB[1][j] * 255 * (1 - Lh) : 0)));
     C.save();
-    const t = GLR.on ? glTint(im, (bio ? 'landV' + bio : desert ? 'landD' : 'land') + L.q, fx.map(v => v * (1 - Lh)), hz.map((v, j) => v * Lh / 255 + (BB ? BB[1][j] * (1 - Lh) : 0)), false) : im;
+    const t = GLR.on ? glTint(im, 'land' + bn + L.q, fx.map(v => v * (1 - Lh)), hz.map((v, j) => v * Lh / 255 + (BB ? BB[1][j] * (1 - Lh) : 0)), false) : im;
     // (the trees sway with the wind, user Oct 25: the row leans a little about its foot, a slow gusting rock; the far ones less,
     // the mountains not at all - one lean for the whole row, user Oct 27: "artefacts between the background trees")
     const wnd = clamp((E.windU || 0) / 60, -1, 1), sw = L.tree ? (wnd * 0.035 + Math.sin(time * 1.1) * 0.012 * (0.3 + Math.abs(wnd))) * L.tree * (1 + 0.3 * Math.sin(time * 0.7)) : 0;
@@ -50490,9 +50593,13 @@ const TREE_EDGE = 40;                                      // (world units the r
 const LTREE = { P: { src: null, T: null, G: null, W: 0, H: 0 }, m: [1, 0, 0, 1, 0, 0] };
 function drawLandTrees(x0, x1) {
   if (!land.bg) buildLandBg();
+  if (!land.surfS || DECK_SHOW[4] === false) return;
+  // (Nov 7, the Biome Editor's decks) every picture a biome stands on its meadow's back - its DECK 4 (the forest's near tree row as it always was) -
+  // over that biome's own columns
+  for (const L of farWorldLayers()) drawLandRow(L, x0, x1);
+}
+function drawLandRow(L, x0, x1) {
   BG_CUR_BIOME = 'forest';                                 // (the row's size and its forest haze: the forest's; a biome's own slices its own haze, raise)
-  const L = land.bg.find(b => b.world);
-  if (!L || !land.surfS) return;
   // (slices 8 pixels wide, user Oct 27, 13:22 - "these artefacts between the background trees where I guess there is a
   // seam": 40-pixel slices each leaning a little its own way and standing on its own step of the field opened thin
   // see-through lines and hard cuts through the crowns between them. Now one lean for all, and slices so narrow that
@@ -50500,40 +50607,41 @@ function drawLandTrees(x0, x1) {
   const im = L.s.c, k = bgK(L), tileW = im.width * k, SL = 8, hz = mix3(E.skyHor || [180, 200, 220], E.skyTop || E.skyHor || [120, 170, 230], 0.3), fx = E.fx || [1, 1, 1];
   const t = GLR.on ? glTint(im, 'landW', fx.map(v => v * (1 - bgHaze(L))), hz.map(v => v * bgHaze(L) / 255), false) : im;
   const sw = treeSway(0) * L.tree;                         // (the one sway every tree has - 50-land-plants.js)
-  const under = css3(L.under.map((v, j) => (v * (1 - bgHaze(L)) + hz[j] * bgHaze(L)) * fx[j]));
+  const under = L.under && css3(L.under.map((v, j) => (v * (1 - bgHaze(L)) + hz[j] * bgHaze(L)) * fx[j]));
   const E2 = land.cols * LT_CELL, h = Math.round(im.height * k * SV);
   // (Nov 1: each slice through GLCtx's own quad maths - glImageRect, its lean through glMatTranslate / glMatTransform on a matrix of
   // the loop's own - with the picture looked up once, not a save, translate, transform, drawImage and restore a slice; WebGL only,
   // as the pixel layers - 40-zzzz-layers.js)
   if (!(C instanceof GLCtx) || GLR.lost) return;
-  const P = glImageOf(t, LTREE.P), mm = LTREE.m, m0 = C.s.m;   // (P null: no picture - the ground's colour under them only, as drawImage drew nothing)
+  const LP = L._lt || (L._lt = {}), P = glImageOf(t, LP.P || (LP.P = { src: null, T: null, G: null, W: 0, H: 0 })), mm = LTREE.m, m0 = C.s.m;   // (P null: no picture - the ground's colour under them only, as drawImage drew nothing)
   // (Nov 7) on a biome's own ground the row in that biome's colours (BG_BIO - as its far background)
-  const BLK = [null, 'I', 'W', 'V'], PB = {}, HB = k => bgPB('bg' + L.bg + 'h', L.haze, ({ M: 'mountain', I: 'ice', W: 'swamp', V: 'volcanic' })[k]), bioP = k => PB[k] !== undefined ? PB[k] : (PB[k] = glImageOf(glTint(bgBioVar(L.s, k, 'tree').c, 'landWV' + k, fx.map(v => v * (1 - HB(k))), hz.map(v => v * HB(k) / 255), false), LTREE['P' + k] || (LTREE['P' + k] = { src: null, T: null, G: null, W: 0, H: 0 })));
+  const BLK = [null, 'I', 'W', 'V'], PB = {}, HB = k => bgPB('bg' + L.bg + 'h', L.haze, ({ M: 'mountain', I: 'ice', W: 'swamp', V: 'volcanic' })[k]), bioP = k => PB[k] !== undefined ? PB[k] : (PB[k] = glImageOf(glTint(bgBioVar(L.s, k, L.tree ? 'tree' : 'mtn').c, 'landWV' + k, fx.map(v => v * (1 - HB(k))), hz.map(v => v * HB(k) / 255), false), LP['P' + k] || (LP['P' + k] = { src: null, T: null, G: null, W: 0, H: 0 })));
   let fs = false;
   for (let i = Math.floor((x0 - 40) / tileW); i <= Math.floor((x1 + 40) / tileW); i++) {
     for (let sx = 0; sx < im.width; sx += SL) {
       const wx = i * tileW + sx * k, ww = Math.min(SL, im.width - sx) * k;
       if (offView(wx, wx + ww, x0, x1)) continue;
       const cx = wx + ww / 2; if (cx < 0 || cx > E2) continue;   // (past the world's ends is the open ocean - no trees there)
-      if (lookD(cx) || landTrop(cx) || (land.sea && land.sea[clamp(ltCol(cx), 0, land.cols - 1)]) || !onLand(cx)) continue;   // (the forest's trees: where the ground is FOREST - by its terrain type, never a side)
+      if ((land.sea && land.sea[clamp(ltCol(cx), 0, land.cols - 1)]) || !onLand(cx) || !farHas(colBiome(clamp(ltCol(cx), 0, land.cols - 1)), 4, L.bg)) continue;   // (where the ground's biome has it on its DECK 4 - by its terrain type, never a side)
       // (user Oct 27, 16:37, "for some reason you cut a chunk of these trees?" - the row used to be cropped lower and lower
       // toward the coast, slicing the tops off the crowns. Now the trees stand whole and the row ends at a gap between
       // two crowns, the last whole tree before the coast: treeEnd)
-      { const N = nearestShore(cx); if (N.dir > 0 && cx < N.x && wx + ww > treeEnd(L, i, tileW, k, N.x - 60)) continue; }   // (before a coast with the sea on its right)
+      if (L.tree) { const N = nearestShore(cx); if (N.dir > 0 && cx < N.x && wx + ww > treeEnd(L, i, tileW, k, N.x - 60)) continue; }   // (before a coast with the sea on its right)
       // (user Nov 7 21:53: the background decks fade out at an edge too) the row stands on each ground of the column - its top and the ground under an
       // overhang (fieldLines) - on its meadow's back edge, along that ground's own smoothed line, and ends at the last whole tree before that ground's end
       // (treeGap); never on a line smoothed across a drop, hanging in the air
       const cc = clamp(Math.floor(cx / LT_CELL), 0, land.cols - 1), FL = fieldLines(); if (!FL) continue;
       const X = Math.round(PX(wx)), X2 = Math.round(PX(wx + ww)), s2 = sw * (1 + 0.3 * Math.sin(time * 0.7));
-      const bk = land.bio && land.bio[cc] ? BLK[land.bio[cc]] : land.mtn && land.mtn[cc] ? 'M' : null, PP = bk ? bioP(bk) : P, up = bgPB('bgfny', 0, colBiome(cc));
+      const bk = land.bio && land.bio[cc] ? BLK[land.bio[cc]] : land.mtn && land.mtn[cc] ? 'M' : null, PP = bk ? bioP(bk) : P, up = bgPB('bg' + L.bg + 'y', 0, colBiome(cc));
       for (let j = FL.N[cc]; j < FL.N[cc + 1]; j++) {
         const f = FL.f[j]; if (f < 0.02) continue;
         // (it ends at the gap between two crowns before its ground's end, whole trees only - as at a coast, treeEnd)
         if (FL.DR[j] * LT_CELL < 208 * k + TREE_EDGE && wx + ww > treeGap(L, tileW, k, cx + FL.DR[j] * LT_CELL - TREE_EDGE, 1)) continue;
         if (FL.DL[j] * LT_CELL < 208 * k + TREE_EDGE && wx < treeGap(L, tileW, k, cx - FL.DL[j] * LT_CELL + TREE_EDGE, -1)) continue;
         const foot = FL.ys[j] - fieldH0(cc) * f * LT_CELL + 6 - up, Y = Math.round(PY(foot));   // (on the field's back edge (and the BG tab's NEAR TREES UP), its ups and downs; by the airfield, on the ground)
-        if (!fs) { C.fillStyle = under; fs = true; }
+        if (under) { if (!fs) { C.fillStyle = under; fs = true; }
         C.fillRect(X, Y - 1, X2 - X, Math.max(1, (j + 1 < FL.N[cc + 1] ? Math.round(PY(FL.y[j] + 4)) : bh) - Y + 1));   // (down to the bottom - the ground in front covers it, so a low valley shows no sky; over an overhang only down to its top: the open air under it stays open)
+        }
         // (toward the coast the trees get lower and give out - bushes by the airport's fence - rather than ending in a line)
         for (let q = 0; q < 6; q++) mm[q] = m0[q];
         glMatTranslate(mm, 0, Y); if (s2) glMatTransform(mm, 1, 0, -s2, 1, 0, 0);
@@ -52111,7 +52219,7 @@ function landRefresh() {
 function landSync() { terrainSync(); }
 // ---- the land's part of the TERRAIN tab (its buttons: 50-land-unified.js)
 function landReset() { for (let k = 0; k < LANDS.n; k++) landPreview(k); }   // (the ground is the SOLID shapes: RESET is theirs)
-const landEdOn = () => LAND && NET.role === 'local' && NSKY.editor.TUNE.world() && !ui.title && !!land.cell;
+const landEdOn = () => (VEG_MODE ? VEG_TERR.on : LAND && NET.role === 'local' && NSKY.editor.TUNE.world() && !ui.title) && !!land.cell;   // (the Biome Editor: its EDIT TERRAIN - the same terrain editor)
 // (the press's place in the world and its reach. User Nov 3 06:33, "Im unable to select or move the Kraken": this still asked the old
 // ground line's handles - groundPick, gone with that line in 690 - so every press here threw before the kraken, the wrecks or a
 // dock was looked at. The ground's points are the shapes' now: the shapes' editor takes those first - 50-land-islands)
@@ -54620,6 +54728,27 @@ function vegKeep(M, k, make, free, n) {
   return e.v;
 }
 const vegLayerFree = L => { if (L && L.free) L.free(); };
+/* (user Nov 7 21:37, "zooming in and out in the editor is very slow") a layer whose size follows the zoom was kept by its exact size: every frame of a
+   zoom asked for a new one (the pass's up to three times the screen each way) and none could go for a second - one zoom in and out piled up ~900 MB on
+   the graphics card, the page went over its picture budget and packed away all the art (frames of 0.3-1.7 s). Now any kept layer big enough (no more
+   than VEG_FIT larger each way) is used, its top left part drawn; a new one is made VEG_GROW larger than asked, and over n the one drawn longest ago
+   (not this frame or the last) goes. Same pictures; a zoom reuses a few layers */
+const VEG_FIT = 1.4, VEG_GROW = 1.15;
+function vegLayerFit(M, w, h, n) {
+  const fr = scaledFrame, now = performance.now(); let best = null;
+  for (const e of M.values()) { const L = e.v; if (L.width >= w && L.height >= h && L.width <= w * VEG_FIT + 32 && L.height <= h * VEG_FIT + 32 && (!best || L.width * L.height < best.v.width * best.v.height)) best = e; }
+  if (best) { best.t = now; best.f = fr; return best.v; }
+  while (M.size >= n) {
+    let ok = null, of = Infinity; for (const [kk, e] of M) if ((e.f ?? -1) < of) { of = e.f ?? -1; ok = kk; }
+    if (ok === null || of >= fr - 1) break;
+    const v0 = M.get(ok).v; M.delete(ok); picForget(v0); vegLayerFree(v0);
+  }
+  const W = Math.ceil(w * VEG_GROW / 32) * 32, H = Math.ceil(h * VEG_GROW / 32) * 32, k = W * 4096 + H;
+  if (M.has(k)) { const e = M.get(k); e.t = now; e.f = fr; return e.v; }
+  const e = { v: makeLayer(W, H), t: now, f: fr }; M.set(k, e);
+  if (e.v.isGLTarget) picKeep(e.v, 'plant layers', () => { if (M.get(k) === e) M.delete(k); vegLayerFree(e.v); }, null, true);   // (in the page's picture memory - 04-zzz-pics.js)
+  return e.v;
+}
 const vegPieceFree = P => { if (P && P.c) glFreeSrc(P.c); };
 const vegMidFree = M => { if (!M) return; for (const q of M.parts) { vegPieceFree(q.a); vegPieceFree(q.b); } vegPieceFree(M.trunk); };
 function vegPassBegin() {
@@ -54628,14 +54757,14 @@ function vegPassBegin() {
   VEG_PASS_L = null; if (!GLR.on || VEG_PX < 0.34 || !C.getTransform) return null;
   const M = C.getTransform(), cv = C.canvas; if (!cv || !cv.width || Math.abs(M.b) > 1e-6 || Math.abs(M.c) > 1e-6 || M.a <= 0 || M.d <= 0) return null;
   const P = VEG_PX, ox = ((PX(0) % P) + P) % P, oy = ((PY(0) % P) + P) % P, ux = -M.e / M.a, uy = -M.f / M.d, gx = Math.floor((ux - ox) / P) * P + ox, gy = Math.floor((uy - oy) / P) * P + oy;
-  const LW = Math.ceil((cv.width / M.a + (ux - gx)) / P / 32 + 0.05) * 32, LH = Math.ceil((cv.height / M.d + (uy - gy)) / P / 32 + 0.05) * 32, lk = LW * 4096 + LH;
-  const LY = vegKeep(VEG_PASS_LY, lk, () => makeLayer(LW, LH), vegLayerFree, 6);
+  const LW = Math.ceil((cv.width / M.a + (ux - gx)) / P / 32 + 0.05) * 32, LH = Math.ceil((cv.height / M.d + (uy - gy)) / P / 32 + 0.05) * 32;
+  const LY = vegLayerFit(VEG_PASS_LY, LW, LH, 6);
   const D = LY.getContext('2d'); D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.imageSmoothingEnabled = false;   // (cleared when the first plant comes - vegPassCtx: a pass with none costs nothing, veg-check chat)   // (11:41: "too sharp" - its pieces had been sampled smoothly into it: each layer pixel one picture pixel)
-  return (VEG_PASS_L = { LY, D, gx, gy, used: false });
+  return (VEG_PASS_L = { LY, D, gx, gy, LW, LH, used: false });
 }
-function vegPassEnd(L) { VEG_PASS_L = null; if (!L.used) return; C.save(); C.globalAlpha = 1; C.imageSmoothingEnabled = VEG_PX < 1; C.drawImage(L.LY, L.gx, L.gy, L.LY.width * VEG_PX, L.LY.height * VEG_PX); C.restore(); }
+function vegPassEnd(L) { VEG_PASS_L = null; if (!L.used) return; C.save(); C.globalAlpha = 1; C.imageSmoothingEnabled = VEG_PX < 1; C.drawImage(L.LY, 0, 0, L.LW, L.LH, L.gx, L.gy, L.LW * VEG_PX, L.LH * VEG_PX); C.restore(); }
 // (a plant into the pass's layer: its picture's top left X, Y on the screen, art pixels at q layer pixels each - saved; the caller restores)
-function vegPassCtx(it, X, Y, w, q) { const L = VEG_PASS_L, D = L.D; if (!L.used) { L.used = true; D.setTransform(1, 0, 0, 1, 0, 0); D.clearRect(0, 0, L.LY.width, L.LY.height); } D.setTransform(1, 0, 0, 1, 0, 0); D.save(); D.translate((X - L.gx) / VEG_PX, (Y - L.gy) / VEG_PX); if (it.flip) { D.translate(w / VEG_PX, 0); D.scale(-1, 1); } D.scale(q, q); return D; }
+function vegPassCtx(it, X, Y, w, q) { const L = VEG_PASS_L, D = L.D; if (!L.used) { L.used = true; D.setTransform(1, 0, 0, 1, 0, 0); D.clearRect(0, 0, L.LW + 2, L.LH + 2); }   /* (and a pixel past it: smoothed, the edge samples clear as at a texture's edge) */ D.setTransform(1, 0, 0, 1, 0, 0); D.save(); D.translate((X - L.gx) / VEG_PX, (Y - L.gy) / VEG_PX); if (it.flip) { D.translate(w / VEG_PX, 0); D.scale(-1, 1); } D.scale(q, q); return D; }
 // (user Nov 4 12:17: "for each component ... a 'outline' that we can Toggle on or off, Choose how wide (1px, 2px etc), Pick the color for it") a part's OUTLINE
 // { on, w (plant pixels), c }: its shape in that colour laid round it, a plant pixel a step - 1 wide its four sides, wider each ring with its corners - under it
 const olOf = P => P && P.ol && P.ol.on && P.ol.w > 0 ? P.ol : null;
@@ -54677,6 +54806,7 @@ try { vegSetsLoad(JSON.parse(localStorage.getItem('bd_vegdecks') || 'null')); } 
 if (!VEG_MODE && VEG_SETS.tropical) { VEG_SET = 'tropical'; VEG_DECKS = VEG_SETS.tropical; }   // (the game: the BEACH (tropical) ground always plants the BEACH biome - whichever biome the BIOME EDITOR was left on; the other biomes' grounds keep the old vegetation until theirs are planted)
 const vegDecksSave = () => { VEG_SETS[VEG_SET] = VEG_DECKS; try { localStorage.setItem('bd_vegdecks', JSON.stringify({ sets: VEG_SETS, cur: VEG_SET })); } catch (e) { } };
 const VEG_SHOW = [true, true, true, true];
+const FAR_HAZE = [0, 0, 0, 0, 0.3, 0.45, 0.6];               // (a plant on deck 4, 5, 6 toward the horizon's colour - as the far pictures there are)
 /* (user Nov 3 22:25: "3 MAIN EDITORS: GROUP EDITOR - for the arrangement, PREFAB EDITOR - to make bushes or trees, COMPONENT EDITOR - to make trunks
    and leaves ... We can also name these prefabs and then add them to the Decks") every prefab can be named; NEW PREFAB makes one of the user's
    own from another (its base: the kind it's built on - its rig, its numbers), with shapes of its own (FOL_SHAPES['pf-n']). Kept in
@@ -54704,7 +54834,7 @@ const folKeyOf = it => it.pf && FOL_SHAPES[it.pf] ? it.pf : (rigName(it) === 'fo
 const rigK = it => VTUNE[it.trop ? 'veg_palm' : it.fol ? 'veg_back' + it.fol : 'veg_mid' + (RIG_BUSHES.indexOf(it.bush) + 1)];
 let VEG_SOLO = null, VEG_FREEZE = false, VEG_NOMASK = false, VEG_NOBIRDS = false, VEG_NOPARTS = false, VEG_TREESHED = false;   // (VEG_TREESHED: the lab - leaves only from the plants, now and then)   // (Nov 4 08:46: the lab's BIRDS / PARTICLES toggles)
    // (23:36: the prefab editor's live view - WORLD off: the plant alone holds still at rest; MASK off: its shapes filled flat)   // (user Nov 3 23:23: "We should be able to test the prefab in isolation") one plant shown alone
-const rigShown = it => (!VEG_SOLO || VEG_SOLO.has(it)) && (!it.deck || VEG_SHOW[it.deck - 1]);   // (a deck hidden: its plants not drawn or stepped)
+const rigShown = it => (!VEG_SOLO || VEG_SOLO.has(it)) && (!it.deck || (it.deck > 4 ? DECK_SHOW[it.deck - 1] !== false : VEG_SHOW[it.deck - 1]));   // (decks 4-6: the Biome Editor's DECKS bar - DECK_SHOW)   // (a deck hidden: its plants not drawn or stepped)
 // (user Nov 4 10:37: "the leaf size and size under a Deck was for that object in that deck ... make the palm trees in Deck 3 smaller than the ones in Deck 1")
 // a plant's sizes its deck entry's own, else its kind's
 const vegEntry = it => it.ve || (it.vd != null && VEG_DECKS[it.vd] ? VEG_DECKS[it.vd][it.vn] : null);   // (it.ve: a hand-placed plant's own - 50-zzzz-hand-plants.js)
@@ -55123,7 +55253,7 @@ function drawRigged0(it, rc, X, Y, w, k, mul, add, hs) {
     mul = [mul[0] * v * (1 + t * (h1 - 0.5)), mul[1] * v * (1 + t * 0.5 * (h2 - 0.5)), mul[2] * v * (1 - t * (h1 - 0.5))]; }
   // (user Nov 7, the TODO list: "Each Deck can be edited in terms of distance to each other and atmosphere (like we do with the sky)") a deck's
   // ATMOSPHERE: its plants that much toward the horizon's colour of the hour (DECK 1-3 ATMOSPHERE, ALL PLANTS)
-  { const a = it.deck > 1 ? +(VTUNE.tree['haze' + (it.deck - 1)] || 0) : 0;
+  { const a = it.deck > 1 ? +(VTUNE.tree['haze' + (it.deck - 1)] ?? FAR_HAZE[it.deck - 1] ?? 0) : 0;
     if (a > 0.001 && E.skyHor) { const hc = E.skyHor; mul = mul.map(v => v * (1 - a)); add = [(add[0] || 0) + hc[0] / 255 * a, (add[1] || 0) + hc[1] / 255 * a, (add[2] || 0) + hc[2] / 255 * a]; } }
   const s = rigState(it, rc), T = VTUNE.tree, burnT = it.burnT || 0;
   // (10:46: zoomed past the world's pixel nothing more shows - every plant laid at it - so its detail goes by its height in world pixels, not the screen's: the
@@ -56014,7 +56144,7 @@ function drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add) {
   // (user Nov 4 10:34: "At this zoom level I expect the bushes AND palm tree to ... look pixel art, but they are sharp") laid in a layer one art pixel a pixel,
   // then that scaled up on the screen - its turned pieces on the art's own grid, as near
   const MX = Math.ceil(rc.W * 0.4), MY = Math.ceil(rc.H * 0.35), q = vegQ(k), PS = !!VEG_PASS_L, LY = PS ? null : vegLayer(rc, MX, MY, q);
-  const D = PS ? vegPassCtx(it, X, Y, w, q) : LY ? LY.getContext('2d') : C; if (PS) { } else if (LY) { D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.clearRect(0, 0, LY.width, LY.height); D.save(); D.translate(MX * q, MY * q); D.scale(q, q); }
+  const D = PS ? vegPassCtx(it, X, Y, w, q) : LY ? LY.getContext('2d') : C; if (PS) { } else if (LY) { D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.clearRect(0, 0, LY._uw + 2, LY._uh + 2); D.save(); D.translate(MX * q, MY * q); D.scale(q, q); }
   else { D.save(); D.translate(X, Y); if (it.flip) { D.translate(w, 0); D.scale(-1, 1); } D.scale(k, k); }
   const OU = PS || LY ? 1 : VEG_PX;   // (screen pixels a plant pixel, drawn straight; in a layer one)
   const part = p => { const z = s.sz[p.f] || 1, b0 = s.b[p.f * 2], b1 = s.b[p.f * 2 + 1], ta = !p.low && n ? MID_A[p.ai] : 0, ca = Math.cos(ta), sa = Math.sin(ta), ox = p.r0[0] - (n ? S[p.ai][0] : 0), oy = p.r0[1] - (n ? S[p.ai][1] : 0), rx = !p.low && n ? MID_P[p.ai * 2] + ox * ca - oy * sa : p.r0[0], ry = !p.low && n ? MID_P[p.ai * 2 + 1] + ox * sa + oy * ca : p.r0[1];
@@ -56037,11 +56167,11 @@ function drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add) {
 }
 // (a plant's layer: its box and margin at q layer pixels an art pixel - one a size, shared; none with the world pixel no bigger than the screen's)
 function vegLayer(rc, MX, MY, q) {
-  if (!GLR.on || VEG_PX < 0.34) return null; const LW = Math.ceil((Math.ceil(rc.W) + MX * 2) * q / 16) * 16, LH = Math.ceil((Math.ceil(rc.H) + MY + 4) * q / 16) * 16, lk = LW * 4096 + LH;
-  const LY = vegKeep(BUILT_LAYER, lk, () => makeLayer(LW, LH), vegLayerFree, 16); LY.getContext('2d').imageSmoothingEnabled = false; return LY;
+  if (!GLR.on || VEG_PX < 0.34) return null; const LW = Math.ceil((Math.ceil(rc.W) + MX * 2) * q / 16) * 16, LH = Math.ceil((Math.ceil(rc.H) + MY + 4) * q / 16) * 16;
+  const LY = vegLayerFit(BUILT_LAYER, LW, LH, 16); LY.getContext('2d').imageSmoothingEnabled = false; LY._uw = LW; LY._uh = LH; return LY;   // (_uw / _uh: the part of it this plant uses)
 }
 // (the layer on the screen: a layer pixel a world pixel)
-function vegBlit(LY, it, X, Y, w, ox, oy) { C.save(); C.imageSmoothingEnabled = VEG_PX < 1; C.translate(X, Y); if (it.flip) { C.translate(w, 0); C.scale(-1, 1); } C.scale(VEG_PX, VEG_PX); C.drawImage(LY, -ox, -oy); C.restore(); }
+function vegBlit(LY, it, X, Y, w, ox, oy) { const uw = LY._uw || LY.width, uh = LY._uh || LY.height; C.save(); C.imageSmoothingEnabled = VEG_PX < 1; C.translate(X, Y); if (it.flip) { C.translate(w, 0); C.scale(-1, 1); } C.scale(VEG_PX, VEG_PX); C.drawImage(LY, 0, 0, uw, uh, -ox, -oy, uw, uh); C.restore(); }
 // a built prefab drawn: the leaves behind, the trunk (its colour from the base, the middle, to the top; charring black as it burns), the leaves in front
 // (Nov 4, "can we afford to cover the world in it?": a layer per plant kept for ever grew with the world) the layers shared - one a size, each plant
 // drawing into it in its turn (the renderer finishes one use before the next starts: a target switch flushes)
@@ -56085,7 +56215,7 @@ function drawBuilt(it, rc, s, X, Y, w, k, mul, add) {
   // (10:10, 10:46: every one on the world's pixel - its own layer at it, none when that's no bigger than the screen's)
   const MX = Math.ceil(rc.W * 0.4), MY = Math.ceil(rc.H * 0.35), q = vegQ(k), NU = vegUp(k), PS = !!VEG_PASS_L, LY = PS ? null : vegLayer(rc, MX, MY, q);
   const D = PS ? vegPassCtx(it, X, Y, w, q) : LY ? LY.getContext('2d') : C;
-  if (PS) { } else if (LY) { D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.clearRect(0, 0, LY.width, LY.height); D.save(); D.translate(MX * q, MY * q); D.scale(q, q); }
+  if (PS) { } else if (LY) { D.setTransform(1, 0, 0, 1, 0, 0); D.globalAlpha = 1; D.clearRect(0, 0, LY._uw + 2, LY._uh + 2); D.save(); D.translate(MX * q, MY * q); D.scale(q, q); }
   else { D.save(); D.translate(X, Y); if (it.flip) { D.translate(w, 0); D.scale(-1, 1); } D.scale(k, k); }
   const DM = D.getTransform ? D.getTransform() : null;
   // (12:17) a part's outline: all its polygons in its outline colour round it, a plant pixel a step, before the part itself
@@ -59875,7 +60005,7 @@ window.addEventListener('pointercancel', natUp, { capture: true });
 // drawn over the world while the section is in view (from vehEdDraw): each area's box (picked: white), its corners, its name
 function natureEdDraw() {
   if (!natureOpen() || !NATURE.length) return;
-  const q = Math.max(1, Math.round(2 * dpr / PIXW)), hs = Math.max(4, Math.round(4 * dpr / PIXW));
+  const q = Math.max(1, Math.round(2 * dpr / PIXW)), hs = edHandle(4);   // (shrinks zoomed out - edHandle, 18-zz-photo.js)
   for (const a of NATURE) {
     const X0 = Math.round(PX(a.x0)), X1 = Math.round(PX(a.x1)), Y0 = Math.round(PY(a.y0)), Y1 = Math.round(PY(a.y1)); if (X1 < 0 || X0 > VWP) continue;
     const on = a.id === NE.sel, c = on ? [255, 255, 255] : [90, 230, 200], w = on ? q + 1 : q;
@@ -62678,8 +62808,12 @@ function wxaEdDraw() {
   const xs = [-1e9, ...WXA.lines, 1e9], f = v => Math.round(v * 100);
   WXA.areas.forEach((a, i) => {
     const X0 = Math.max(0, PX(xs[i])), X1 = Math.min(VWP, PX(xs[i + 1])); if (X1 < 0 || X0 > VWP) return;
-    const t = 'SKY ' + f(a.sky) + '  FOG ' + f(a.fog) + '  RAIN ' + f(a.rain) + '  SEA ' + f(a.sea) + '  WIND ' + f(a.wind) + '  FADE ' + Math.round(a.fade) + 'S';
-    drawText(C, t, (X0 + X1) / 2, 40 * q, i === WXE.sel ? [255, 255, 255] : [154, 208, 255], q, 'center');
+    // (user Nov 7 21:58: "that text gets yellow tinted so I understand which area I picked ... a vertical layout instead of horizontal so
+    // it's easier to read") one setting a line, names in a column and numbers in another, over the middle of the area; the picked one yellow, the others white
+    const rows = [['SKY', f(a.sky)], ['FOG', f(a.fog)], ['RAIN', f(a.rain)], ['SEA', f(a.sea)], ['WIND', f(a.wind)], ['FADE', Math.round(a.fade) + 'S']];
+    const col = i === WXE.sel ? '#ffd36b' : '#ffffff',   /* (drawText takes '#rrggbb': the colours given as lists had come out black) */ nw = Math.max(...rows.map(r => textWidth(r[0]))), vw = Math.max(...rows.map(r => textWidth(String(r[1])))), gap = 4;
+    const x = Math.round((X0 + X1) / 2 - (nw + gap + vw) * q / 2), lh = 9 * q;
+    rows.forEach(([n, v], r) => { const y = 40 * q + r * lh; drawText(C, n, x, y, col, q); drawText(C, String(v), x + (nw + gap + vw) * q, y, col, q, 'right'); });
   });
 }
 function wxaSync() {
@@ -65891,14 +66025,32 @@ if (VEG_MODE) (() => {
     showKind = f => { for (const k in pages) { if (k === 'tree' || k === 'ground') continue; pages[k][0].style.display = k === f && numsOn ? 'grid' : 'none'; pages[k][1].style.display = k === f && !numsOn ? 'grid' : 'none'; } };
     // (user Nov 3 22:05: "a visibility tab with toggles Deck 1 Deck 2 Deck 3. Then a section per deck - Add Prefab (to add plants to that deck),
     // Amount") VISIBILITY shows / hides each deck's plants; each deck its prefabs, each with its AMOUNT and REMOVE, and ADD PREFAB
-    const DN = ['DECK 0 (IN FRONT OF OBJECTS)', 'DECK 1 (FRONT)', 'DECK 2', 'DECK 3 (BACK)'];
     let rpD = 0; const relay = () => { VG().decks.set(D); clearTimeout(rpD); rpD = setTimeout(() => vgReplant(), 250); };
     let D = VG().decks.get();
     let deckTab = 1, sideSel = 0;   // (sideSel: the side of the ground picked in the view - 1 TOP, 2 SIDE, 3 BOTTOM)
     // (user Nov 4 08:24, his picture: "the Deck details should be at the bottom ... not on the right side window"; "above Decks ... a dropdown saying SET")
     // along the bottom of the scene: the SET, the deck tabs, and the deck's prefabs side by side - each its AMOUNT and REMOVE - and ADD PREFAB
     const bot = document.createElement('div'); bot.id = 'vgBot';
-    bot.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:70;height:267px;box-sizing:border-box;overflow-y:auto;overflow-x:hidden;align-content:start;background:#0f1420e8;border:1px solid #2c3850;border-radius:10px;padding:10px;display:grid;gap:8px;font:14px ui-monospace,Menlo,monospace;color:#d8dce8';
+    // (user Nov 7 20:48: "Exact same design") the game editor's own look (sky/90-editor.js ED_CSS, its #skyEd rules read as #vgBot) - its bar, tabs,
+    // sub bar, toggles, sections and help line - plus what's the Biome Editor's own: over the scene to the right panel's left edge, its sliders laid out
+    // as the game editor's rows (label, slider, value, default) and coloured as its sliders
+    { const st = document.createElement('style'); st.textContent = String(NSKY.editor.css || '').replace(/#skyEd\b/g, '#vgBot') + `
+#vgBot { z-index: 70; right: auto; height: 300px; }
+#vgBot .subbar .dk { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; }
+#vgBot .bar.top .sel { margin-left: auto; color: #7a8294; letter-spacing: .04em; }
+#vgBot select, #vgBot input:not([type]) , #vgBot input[type=text] { font: inherit; background: #1a2234; color: #d8dce8; border: 1px solid #2c3850; border-radius: 4px; padding: 3px 6px; }
+#vgBot .cat > .vgS, #vgBot .cats > .vgS { display: grid; grid-template-columns: 120px minmax(150px, 1fr) 44px 50px; align-items: center; gap: 6px; }
+#vgBot .vgS .t, #vgBot .vgS .t > span { display: contents; }
+#vgBot .vgS .t > span:first-child { grid-column: 1; grid-row: 1; color: #7a8294; letter-spacing: .04em; cursor: help; }
+#vgBot .vgS .k { grid-column: 2; grid-row: 1; height: 22px; }
+#vgBot .vgS .k::before, #vgBot .vgS .f { top: 9px; height: 4px; border-radius: 2px; }
+#vgBot .vgS .f { background: #ffb347; }
+#vgBot .vgS .h { top: 3px; width: 16px; height: 16px; margin-left: -8px; border: 2px solid #0f1420; background: #ffb347; }
+#vgBot .vgS .t b { grid-column: 3; grid-row: 1; text-align: right; color: #ffb347; font-weight: normal; font-variant-numeric: tabular-nums; }
+#vgBot .vgS .t i { grid-column: 4; grid-row: 1; margin: 0; padding: 0; color: #7a8294; font-style: normal; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#vgBot .vgS .t i:hover { color: #ffb347; background: transparent; }
+#vgBot .vgS > button { grid-column: 2 / 5; grid-row: 1; }
+#vgBot .cat > button.tglrow { justify-self: start; }`; document.head.appendChild(st); }
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchmove', 'touchend', 'wheel', 'click']) bot.addEventListener(ev, e => e.stopPropagation());
     document.body.appendChild(bot);
     const botFit = () => { const r = d.getBoundingClientRect(); bot.style.right = Math.max(8, window.innerWidth - r.left + 8) + 'px'; }; botFit(); window.addEventListener('resize', botFit); setInterval(botFit, 1000);
@@ -65906,65 +66058,133 @@ if (VEG_MODE) (() => {
     // (user Nov 4 10:21: "When I select something in the Group Editor, the Set Properties should automatically update to the Deck of what I selected")
     let selName = null, selPf = null;
     window.__vgSide = sd => { sideSel = sd; deckTab = 'surf'; renderDecks(); tip.textContent = ['', 'TOP', 'SIDE', 'BOTTOM'][sd] + ' of the ground picked - its properties are in TERRAIN SURFACE'; };
-    window.__vgSelDeck = (it, name) => { selName = it ? name : null; selPf = it ? VG().pf.idOf(VG().fol.keyOf(it)) : null; if (it && it.deck) deckTab = it.deck - 1; renderDecks(); };
+    window.__vgSelDeck = (it, name) => { selName = it ? name : null; selPf = it ? VG().pf.idOf(VG().fol.keyOf(it)) : null; if (it && it.deck) deckTab = it.deck - 1; renderDecks(); };   // (decks 0-6: the plant's own)
     window.__vgSet = n => { VG().sets.use(n); D = VG().decks.get(); renderDecks(); vgReplant(); };
+    // (user Nov 7 20:48: "the Bottom section should use the same colors and layout as the game editor and same principles. Exact same design. Where I
+    // can raise it or lower it in the middle. The scrollbar is for the sections and the main tabs stay on the top ... A Main Tab that is always visible
+    // (where we pick which Biome) and then sub groups DECKS, TERRAIN SURFACE, CAVES, LAKES, PREFABS"; "next to each Deck it has a Toggle (Show/Hide)")
+    // the game editor's own panel (sky/90-editor.js ED_CSS): a grip to drag its height, the top bar - BIOME and the tabs - fixed, a sub bar (the decks,
+    // each its SHOW toggle), the body scrolling under them, the help line at its foot
+    let botTip = null;
+    // the help line at the panel's foot says what the tip says (the game editor's .tip)
+    { const mo = new MutationObserver(() => { if (botTip) botTip.textContent = tip.textContent; }); mo.observe(tip, { childList: true, characterData: true, subtree: true }); }
+    // the grip: dragged up or down, the panel's height (kept in this browser), as the game editor's
+    const BOT_H = () => { let h = 0; try { h = +localStorage.getItem('bd_vgbot_h') || 0; } catch (e) { } return clamp(h || 300, 140, Math.round(window.innerHeight * 0.8)); };
+    bot.style.height = BOT_H() + 'px';
+    function botGrip(g) {
+      g.addEventListener('pointerdown', e => { e.preventDefault(); g.setPointerCapture(e.pointerId); const y0 = e.clientY, h0 = bot.getBoundingClientRect().height;
+        const mv = ev => { const h = clamp(h0 + (y0 - ev.clientY), 140, Math.round(window.innerHeight * 0.8)); bot.style.height = h + 'px'; };
+        const up = ev => { g.removeEventListener('pointermove', mv); g.removeEventListener('pointerup', up); g.removeEventListener('pointercancel', up); try { localStorage.setItem('bd_vgbot_h', String(Math.round(bot.getBoundingClientRect().height))); } catch (er) { } };
+        g.addEventListener('pointermove', mv); g.addEventListener('pointerup', up); g.addEventListener('pointercancel', up); });
+    }
+    const BTABS = [['decks', 'DECKS', 'This biome\'s plants and far scenery, deck by deck'], ['surf', 'TERRAIN SURFACE', 'This biome\'s ground layers and sides'],
+      ['cave', 'CAVES', 'How caves in this biome look'], ['lake', 'LAKES', 'How lakes in this biome look'], ['shape', 'PREFABS', 'The ground the biomes are shown on: edit it, load or save it as a prefab']];
+    const tabOf = t => typeof t === 'number' ? 'decks' : t;
+    let lastDeck = 1;
+    // (user Nov 7: "Decks 4-6 as plain decks. No names") the decks 0-6 alike: DECK 0 drawn over the objects, 1 at the front, 6 furthest back
+    const DECK_TIP = ['Drawn in front of buildings and vehicles', 'The front deck of plants', 'Behind deck 1', 'Behind deck 2, behind the ground in front', 'Behind deck 3: stands on the meadow\'s back', 'Further back: a far layer', 'Furthest back: the far horizon'];
+    const DN = [0, 1, 2, 3, 4, 5, 6].map(i => 'DECK ' + i);
+    const farChanged = (meadow, plants) => { farSave(); if (plants) vgReplant(); };   // (a biome's decks 4-6 saved: the far pictures and the meadow drawn again by themselves - FAR_VER; plants laid again)
     function renderDecks() {
       window.__vgRDn = (window.__vgRDn || 0) + 1;
-      const box = bot; box.innerHTML = '';
-      { const t = document.createElement('div'); t.textContent = 'BIOME PROPERTIES' + (selName ? ' - SELECTED: ' + selName : ''); t.style.cssText = 'color:#9fd36a;letter-spacing:1px'; box.appendChild(t); }   // (08:38: a title; always the same height)
-      const top = document.createElement('div'); top.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap'; box.appendChild(top);
-      { const l = document.createElement('span'); l.textContent = 'BIOME'; l.style.color = '#9fd36a'; top.appendChild(l);
-        const ss = document.createElement('select'); ss.style.cssText = 'font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:42px;padding:0 8px';
-        for (const n of VG().sets.names()) { const o = document.createElement('option'); o.value = n; o.textContent = (VG().sets.lab && VG().sets.lab(n)) || n.toUpperCase(); ss.appendChild(o); } ss.title = 'The biome you are editing'; ss.value = VG().sets.cur; ss.onchange = () => { const n = ss.value; if (!(VG().reskin && VG().reskin(n))) { window.__vgSet(n); setTimeout(() => location.reload(), 150); return; } window.__vgSet(n); tip.textContent = (VG().sets.lab(n) || n) + ': its ground and plants'; /* (Nov 7, user 16:15: changed in place - no restart) */ }; top.appendChild(ss); }   // (Nov 7: the page again, its ground the biome's own - 00-world.js; the decks are saved as they change)
-      // (user Nov 3 23:20: "The editing for each deck should be at a horizontal tab like the game editor. With tabs for each Deck ... So we only see
-      // one deck at a time") a tab a deck; the deck picked: its prefabs, each its AMOUNT and REMOVE, and ADD PREFAB
-      const tabs = document.createElement('div'); tabs.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-left:10px';
-      D.forEach((_, di) => { const b = document.createElement('button'); b.textContent = 'DECK ' + di; b.dataset.t = DN[di]; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', di === deckTab); hint(b); b.onclick = () => { deckTab = di; renderDecks(); }; tabs.appendChild(b); });
-      // (user Nov 7, the TODO list: "TERRAIN SURFACE (A Tab inside the Biome)") the biome's surface layers - 09-zz-biomes.js BIOME_SURF
-      // (user Nov 7 13:49: the far scenery is decks too) DECK 4-6: the biome's meadow, tree rows, mountains (the desert's sand band, dunes and city, mesas)
-      for (const [id, lab] of farTabs(VG().sets.cur)) { const b = document.createElement('button'); b.textContent = lab; b.dataset.t = 'This biome\'s far scenery: ' + lab.replace(/^DECK \d \(|\)$/g, '').toLowerCase(); b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === id); hint(b); b.onclick = () => { deckTab = id; renderDecks(); }; tabs.appendChild(b); }
-      { const b = document.createElement('button'); b.textContent = 'TERRAIN SURFACE'; b.dataset.t = 'This biome\'s ground layers and sides'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'surf'); hint(b); b.onclick = () => { deckTab = 'surf'; renderDecks(); }; tabs.appendChild(b); }
-      // (user Nov 7 14:07: mountain, sea and lava caves look different, "editable in the biome editor") CAVE: this biome's cave look - BIOME_CAVE
-      { const b = document.createElement('button'); b.textContent = 'CAVE'; b.dataset.t = 'How caves in this biome look'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'cave'); hint(b); b.onclick = () => { deckTab = 'cave'; renderDecks(); }; tabs.appendChild(b); }
-      // (user Nov 7 14:12: the default terrain shape, edited, saved as prefabs and loaded) TERRAIN SHAPE: the ground every biome is shown on
-      { const b = document.createElement('button'); b.textContent = 'TERRAIN SHAPE'; b.dataset.t = 'Edit the ground the biomes are shown on, and load or save it as a prefab'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'shape'); hint(b); b.onclick = () => { deckTab = 'shape'; renderDecks(); }; tabs.appendChild(b); }
-      // (user Nov 7 16:35: each biome its own lake) LAKE: its water's colour over the ocean's - BIOME_LAKE
-      if (VG().sets.cur !== 'sea') { const b = document.createElement('button'); b.textContent = 'LAKE'; b.dataset.t = 'How lakes in this biome look'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'lake'); hint(b); b.onclick = () => { deckTab = 'lake'; renderDecks(); }; tabs.insertBefore(b, tabs.lastChild); }
-      top.appendChild(tabs);
-      if (deckTab === 'lake') { renderLake(box, top); return; }
-      if (deckTab === 'shape') { renderShape(box, top); return; }
+      if (typeof deckTab === 'number') lastDeck = deckTab;
+      const sc = bot.querySelector('.body'), keep = sc ? sc.scrollTop : 0;
+      bot.innerHTML = '';
+      const grip = document.createElement('div'); grip.className = 'grip'; grip.title = 'Drag to make the panel taller or shorter'; bot.appendChild(grip); botGrip(grip);
+      const top = document.createElement('div'); top.className = 'bar top'; bot.appendChild(top);
+      { const l = document.createElement('span'); l.textContent = 'BIOME'; l.className = 'mode'; top.appendChild(l);
+        const ss = document.createElement('select');
+        for (const n of VG().sets.names()) { const o = document.createElement('option'); o.value = n; o.textContent = (VG().sets.lab && VG().sets.lab(n)) || n.toUpperCase(); ss.appendChild(o); } ss.title = ss.dataset.t = 'The biome you are editing'; ss.value = VG().sets.cur; hint(ss);
+        ss.onchange = () => { const n = ss.value; if (!(VG().reskin && VG().reskin(n))) { window.__vgSet(n); setTimeout(() => location.reload(), 150); return; } window.__vgSet(n); tip.textContent = (VG().sets.lab(n) || n) + ': its ground and plants'; /* (Nov 7, user 16:15: changed in place - no restart) */ }; top.appendChild(ss); }
+      const cur = tabOf(deckTab);
+      for (const [id, lab, tp] of BTABS) { if (id === 'lake' && VG().sets.cur === 'sea') continue;
+        const b = document.createElement('button'); b.className = 'tab'; b.textContent = lab; b.title = b.dataset.t = tp; b.classList.toggle('on', cur === id); hint(b);
+        b.onclick = () => { deckTab = id === 'decks' ? lastDeck : id; renderDecks(); }; top.appendChild(b); }
+      if (selName) { const s2 = document.createElement('span'); s2.className = 'sel'; s2.textContent = 'SELECTED: ' + selName; top.appendChild(s2); }
+      // DECKS: a tab a deck, each with its SHOW toggle - the view shows or hides everything on that deck (decks 0-3 VEG_SHOW, 4-6 DECK_SHOW)
+      if (cur === 'decks') {
+        const sb = document.createElement('div'); sb.className = 'subbar'; bot.appendChild(sb);
+        for (let i = 0; i < 7; i++) { if (i < 4 && !D[i]) continue;
+          const g = document.createElement('span'); g.className = 'dk';
+          const b = document.createElement('button'); b.className = 'subt'; b.textContent = DN[i]; b.title = b.dataset.t = DECK_TIP[i]; b.classList.toggle('on', deckTab === i); hint(b);
+          b.onclick = () => { deckTab = i; renderDecks(); }; g.appendChild(b);
+          const t = document.createElement('button'), on = () => i < 4 ? !!VG().decks.show[i] : DECK_SHOW[i] !== false; t.className = 'tgl'; t.classList.toggle('on', on()); t.title = t.dataset.t = 'Show or hide deck ' + i + ' in the view'; hint(t);
+          t.onclick = () => { if (i < 4) VG().decks.show[i] = !VG().decks.show[i]; else DECK_SHOW[i] = !on(); t.classList.toggle('on', on()); tip.textContent = DN[i] + (on() ? ' shown' : ' hidden'); };
+          g.appendChild(t); sb.appendChild(g); }
+      }
+      const body = document.createElement('div'); body.className = 'body'; bot.appendChild(body);
+      const box = body, note = document.createElement('div'); note.className = 'tabnote'; note.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center'; box.appendChild(note);
+      const tipL = document.createElement('div'); tipL.className = 'tip'; tipL.textContent = tip.textContent; bot.appendChild(tipL); botTip = tipL;
+      requestAnimationFrame(() => { body.scrollTop = keep; });
+      if (deckTab === 'lake') { renderLake(box, note); return; }
+      if (deckTab === 'shape') { renderShape(box, note); return; }
       if (TERR.on) setTimeout(() => terrSet(false), 0);   // (another tab: the terrain's points put away)
-      if (deckTab === 'cave') { renderCave(box, top); return; }
-      if (deckTab === 'surf') { renderSurf(box, top); return; }
-      if (/^d[456]$/.test(deckTab)) { renderFar(box, top, deckTab); return; }
-      D.forEach((list, di) => {
-        if (di !== deckTab) return;
-        const h = document.createElement('span'); h.textContent = DN[di] + (list.length ? '' : ' - empty'); h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
-        if (di >= 2) renderDeckPic(box, di);   // (a far deck's picture - 50-zzzz-deck-pics.js)
-        const cols = document.createElement('div'); cols.style.cssText = 'display:grid;grid-auto-flow:column;grid-auto-columns:minmax(380px,420px);gap:12px;overflow-x:auto;align-items:end'; box.appendChild(cols);
-        list.forEach((e, ei) => {
-          const P = VG().decks.prefabs().find(q => q.id === e.p), col = document.createElement('div'); col.style.cssText = 'display:grid;gap:4px;border-left:' + (e.p === selPf ? '3px solid #9fd36a' : '1px solid #2c3850') + ';padding-left:10px;align-content:start';
-          const row = document.createElement('div'); row.style.cssText = 'display:grid;grid-template-columns:1fr auto;gap:6px;align-items:end'; col.appendChild(row);
-          // (10:10: "the color variation ... per Set Properties Prefab") its own colour variety on this deck
-          { const ce = () => (D[di] && D[di][ei]) || e; col.appendChild(slider('COLOUR VARIETY', 'Colour difference between plants (0: all the same)', 0, 2, 0.01, () => ce().tint != null ? ce().tint : VG().V.tree.tint, v => { ce().tint = v; VG().decks.set(D); }, () => VG().V.tree.tint)); }
-          // (user Nov 4 08:49: "Those properties should be under the Prefab properties in the SET PROPERTIES section below Palm Amount") its sizes in the group
-          { const kf = VG().kOfKey(VG().pf.keyOf(e.p)), g2 = document.createElement('div'); g2.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:4px 10px'; col.appendChild(g2);
-            for (const [lab, f, k, mx, st, u] of VG().rows()) { if (f !== kf || !SIZES.has(k)) continue; const nm = lab.replace(/^(PALM|BUSH \d|JUNGLE \d) /, ''); { const ce2 = () => (D[di] && D[di][ei]) || e; g2.appendChild(slider(nm, vegTip(k, u) + ' - for this prefab on this deck only (smaller at the back for depth)', 0, Math.max(mx, VD[f][k]), st, () => ce2()[k] != null ? ce2()[k] : V[f][k], v => { ce2()[k] = v; VG().decks.set(D); }, () => VD[f][k])); } } }
-          const cur = () => (D[di] && D[di][ei]) || e;   // (the deck as it is now - never a copy the bar was drawn from)
-          row.appendChild(slider((P ? P.lab : e.p) + ' AMOUNT', 'How many on this deck: 1 usual, 2 twice as many, 0 none', 0, 4, 0.05, () => cur().amount, v => { cur().amount = v; relay(); }, 1));
-          const rm = document.createElement('button'); rm.textContent = 'REMOVE'; rm.dataset.t = 'Removes this plant from the deck'; hint(rm); rm.onclick = () => { D[di].splice(ei, 1); relay(); renderDecks(); }; row.appendChild(rm);
-          // (10:37: "a Move Up / Move Down so I can switch what gets rendered in front") the deck's order: its first in front, its last behind
-          { const mv = document.createElement('div'); mv.style.cssText = 'display:flex;gap:6px'; for (const [lab, dd, tp] of [['MOVE UP', -1, 'One place nearer the front'], ['MOVE DOWN', 1, 'One place further back: drawn behind the one after it']]) { const b = document.createElement('button'); b.textContent = lab; b.dataset.t = tp; hint(b); b.style.cssText = 'font-size:12px;min-height:34px;padding:4px 10px'; const j = ei + dd; b.disabled = j < 0 || j >= list.length; b.onclick = () => { const L = D[di]; [L[ei], L[j]] = [L[j], L[ei]]; relay(); renderDecks(); }; mv.appendChild(b); } col.appendChild(mv); }
-          cols.appendChild(col);
-        });
-        const add = document.createElement('div'); add.style.cssText = 'display:flex;gap:6px;margin-left:auto';
-        const sel = document.createElement('select'); sel.style.cssText = 'font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:48px;padding:0 8px';
-        for (const P of VG().decks.prefabs()) { const o = document.createElement('option'); o.value = P.id; o.textContent = P.lab; sel.appendChild(o); }
-        const ab = document.createElement('button'); ab.textContent = 'ADD PREFAB'; ab.dataset.t = 'Add the chosen prefab to ' + DN[di].toLowerCase(); hint(ab); ab.onclick = () => { D[di].push({ p: sel.value, amount: 1 }); relay(); renderDecks(); };
-        add.appendChild(sel); add.appendChild(ab); top.appendChild(add);
-        { const sv = document.createElement('button'), rv = document.createElement('button'); sv.textContent = 'SAVE'; rv.textContent = 'REVERT'; sv.dataset.t = 'Saves this biome\'s plants as they are now'; rv.dataset.t = 'Goes back to this biome\'s plants as last saved'; hint(sv); hint(rv);
-          sv.onclick = () => { if (window.__vgSetSave) window.__vgSetSave(); }; rv.onclick = () => { if (window.__vgSetRevert) window.__vgSetRevert(); }; sv.dataset.setSave = '1'; rv.dataset.setRev = '1'; const ub = document.createElement('button'); ub.textContent = 'UNDO'; ub.dataset.t = 'Undoes your last change (Ctrl+Z)'; ub.dataset.gUndo = '1'; hint(ub); ub.onclick = () => { if (window.__vgGroupUndo) window.__vgGroupUndo(); }; add.appendChild(ub); add.appendChild(sv); add.appendChild(rv); }
+      if (deckTab === 'cave') { renderCave(box, note); return; }
+      if (deckTab === 'surf') { renderSurf(box, note); return; }
+      renderDeck(box, note, deckTab);
+    }
+    // a section of the game editor's (.cat): its heading and what's in it
+    const catOf = (host, name, tp) => { const c = document.createElement('div'); c.className = 'cat'; const h = document.createElement('h4'); h.textContent = name; if (tp) h.title = tp; c.appendChild(h); host.appendChild(c); return c; };
+    const sBtn = (lab, tp, fn, dis) => { const b = document.createElement('button'); b.textContent = lab; b.title = b.dataset.t = tp; b.disabled = !!dis; hint(b); b.onclick = fn; return b; };
+    const btnRow = (c, ...bs) => { const r = document.createElement('div'); r.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px'; for (const b of bs) r.appendChild(b); c.appendChild(r); return r; };
+    // one deck: what's on it, each a section - a prefab (its AMOUNT, COLOUR VARIETY, sizes), a picture (its SIZE, HEIGHT, ATMOSPHERE, SPACING), the
+    // meadow (HEIGHT, WAVINESS, FLOWERS, PEBBLES) - each its MOVE UP / DOWN and REMOVE; ADD under them. Decks 0-3 are the biome's plant set (saved with
+    // SAVE, REVERT, UNDO); decks 4-6 its far decks (BIOME_FAR - saved as they change, as TERRAIN SURFACE is)
+    function renderDeck(box, note, di) {
+      const bn = VG().sets.cur, far = di >= 4, list = far ? farOf(bn, true)[di] : D[di] || [];
+      const h = document.createElement('span'); h.textContent = DN[di] + ' - ' + DECK_TIP[di].toLowerCase() + (list.length ? '' : ' - empty'); note.appendChild(h);
+      if (di === 2 || di === 3) renderDeckPic(box, di);   // (a far deck's picture - 50-zzzz-deck-pics.js)
+      const cats = document.createElement('div'); cats.className = 'cats'; box.appendChild(cats);
+      const changed = (plants, restruct) => { if (far) farChanged(false, plants); else relay(); if (restruct) renderDecks(); };
+      const move = (c, ei) => btnRow(c,
+        sBtn('MOVE UP', 'One place nearer the front', () => { [list[ei], list[ei - 1]] = [list[ei - 1], list[ei]]; changed(true, true); }, ei === 0),
+        sBtn('MOVE DOWN', 'One place further back: drawn behind the one after it', () => { [list[ei], list[ei + 1]] = [list[ei + 1], list[ei]]; changed(true, true); }, ei === list.length - 1),
+        sBtn('REMOVE', 'Takes it off this deck', () => { list.splice(ei, 1); changed(true, true); }));
+      list.forEach((e, ei) => {
+        const kind = far ? e.k : 'pf';
+        if (kind === 'sprite') {
+          const nm = FAR_SPRITES[e.s][0], O = BIOME_BG[bn] || (BIOME_BG[bn] = {}), c = catOf(cats, 'PICTURE: ' + nm, 'One of the game\'s far-scenery pictures'), k = 'bg' + e.s;
+          const row = (lab, tp, key, mn, mx, st, d0) => c.appendChild(slider(lab, tp, mn, mx, st, () => typeof O[key] === 'number' ? O[key] : worldDef(key, d0), v => { O[key] = v; biomeSurfSave(); }, () => worldDef(key, d0)));
+          row('SIZE', 'How big the picture is drawn', k, 0.3, 1.5, 0.05, 1);
+          row('HEIGHT', 'Raise or lower it, in world units', k + 'y', -100, 150, 2, 0);
+          row('ATMOSPHERE', 'How much it fades into the sky colour', k + 'h', 0, 1, 0.02, (land.bgS && land.bgS[e.s] || {}).haze || 0);
+          if (di > 4) row('SPACING', 'Space between repeated tiles', k + 'g', 0, 1, 0.02, 0);
+          move(c, ei); return;
+        }
+        if (kind === 'meadow') {
+          const O = BIOME_BG[bn] || (BIOME_BG[bn] = {}), ds = bn === 'desert', c = catOf(cats, ds ? 'SAND BAND' : 'MEADOW', 'The band of ground behind the ground in front');
+          const row = (lab, tp, key, mn, mx, st) => c.appendChild(slider(lab, tp, mn, mx, st, () => typeof O[key] === 'number' ? O[key] : worldDef(key, 1), v => { O[key] = v; biomeSurfSave(); }, () => worldDef(key, 1)));
+          row('HEIGHT', 'How tall the band is', ds ? 'bgsh' : 'bgmh', 0, 2.5, 0.05);
+          row('WAVINESS', 'How wavy its top is', ds ? 'bgsw' : 'bgmw', 0, 3, 0.05);
+          if (!ds) row('FLOWERS', 'Share of its flowers shown', 'flw', 0, 1, 0.05);
+          row('PEBBLES', 'How many pebbles show in it (0: none)', 'pb', 0, 3, 0.05);
+          move(c, ei); return;
+        }
+        // a prefab: its AMOUNT, its COLOUR VARIETY, its sizes on this deck
+        const P = VG().decks.prefabs().find(q => q.id === e.p), c = catOf(cats, 'PREFAB: ' + (P ? P.lab : e.p), 'A plant prefab on this deck');
+        if (e.p === selPf) c.style.borderColor = '#ffb347';
+        const ce = () => list[ei] || e;
+        c.appendChild(slider('AMOUNT', 'How many on this deck: 1 usual, 2 twice as many, 0 none', 0, 4, 0.05, () => ce().amount, v => { ce().amount = v; changed(true); }, 1));
+        c.appendChild(slider('COLOUR VARIETY', 'Colour difference between plants (0: all the same)', 0, 2, 0.01, () => ce().tint != null ? ce().tint : VG().V.tree.tint, v => { ce().tint = v; if (far) farSave(); else VG().decks.set(D); }, () => VG().V.tree.tint));
+        { const kf = VG().kOfKey(VG().pf.keyOf(e.p));
+          for (const [lab, f, k, mx, st, u] of VG().rows()) { if (f !== kf || !SIZES.has(k)) continue; const nm = lab.replace(/^(PALM|BUSH \d|JUNGLE \d) /, '');
+            c.appendChild(slider(nm, vegTip(k, u) + ' - this deck only', 0, Math.max(mx, VD[f][k]), st, () => ce()[k] != null ? ce()[k] : V[f][k], v => { ce()[k] = v; if (far) farSave(); else VG().decks.set(D); }, () => VD[f][k])); } }
+        move(c, ei);
       });
+      // ADD: a prefab (any deck), a picture or the meadow (decks 4-6)
+      const add = document.createElement('div'); add.style.cssText = 'display:flex;gap:6px;margin-left:auto;align-items:center';
+      const sel = document.createElement('select'); sel.title = sel.dataset.t = 'What to add to this deck'; hint(sel);
+      const grp = lab => { const g = document.createElement('optgroup'); g.label = lab; sel.appendChild(g); return g; }, opt = (g, v, t, dis) => { const o = document.createElement('option'); o.value = v; o.textContent = t; o.disabled = !!dis; g.appendChild(o); };
+      { const g = grp('PREFABS'); for (const P of VG().decks.prefabs()) opt(g, 'pf|' + P.id, P.lab); }
+      if (far) { const I = farInfo(bn), g = grp('PICTURES'); for (const k in FAR_SPRITES) opt(g, 'sprite|' + k, FAR_SPRITES[k][0] + (I.sprites.some(q => q[1] === k) ? ' (on a deck)' : ''), I.sprites.some(q => q[1] === k));
+        opt(grp('SURFACE'), 'meadow|', bn === 'desert' ? 'SAND BAND' : 'MEADOW', I.meadow); }
+      const ab = sBtn('ADD', 'Adds what is picked to ' + DN[di].toLowerCase(), () => { const [k, v] = sel.value.split('|');
+        if (k === 'pf') list.push(far ? { k: 'pf', p: v, amount: 1 } : { p: v, amount: 1 }); else if (k === 'sprite') list.push({ k: 'sprite', s: v }); else if (k === 'meadow') list.push({ k: 'meadow' });
+        changed(k === 'pf', true); });
+      add.appendChild(sel); add.appendChild(ab); note.appendChild(add);
+      if (!far) { const sv = sBtn('SAVE', 'Saves this biome\'s plants as they are now', () => { if (window.__vgSetSave) window.__vgSetSave(); }), rv = sBtn('REVERT', 'Goes back to this biome\'s plants as last saved', () => { if (window.__vgSetRevert) window.__vgSetRevert(); }), ub = sBtn('UNDO', 'Undoes your last change (Ctrl+Z)', () => { if (window.__vgGroupUndo) window.__vgGroupUndo(); });
+        sv.dataset.setSave = '1'; rv.dataset.setRev = '1'; ub.dataset.gUndo = '1'; add.appendChild(ub); add.appendChild(sv); add.appendChild(rv); }
+      else add.appendChild(sBtn('RESET DECK', 'Puts this deck back as the biome had it at first', () => { const F = farOf(bn, true); F[di] = farDef(bn)[di]; farChanged(true, true); renderDecks(); }));
     }
     // TERRAIN SURFACE: each of the biome's layers - its material, THICKNESS MIN / MAX, WOBBLE, DOWN TO WATER; the preview's ground built again
     let surfT = 0; const surfRebuild = () => { biomeSurfSave(); clearTimeout(surfT); surfT = setTimeout(() => { try { floorSkinStrips = null; landEdited(); terrainSync(); } catch (er) { console.error('surface', er); } /* (the ground built again in place - the view stays) */ }, 300); };
@@ -65973,49 +66193,49 @@ if (VEG_MODE) (() => {
     const toggle = (lab, t, get, set) => { const b = document.createElement('button'); const show = () => { b.textContent = lab + ': ' + (get() ? 'ON' : 'OFF'); b.classList.toggle('on', !!get()); }; b.dataset.t = t; b.title = t; hint(b); b.onclick = () => { set(!get()); show(); }; show(); return b; };
     function renderSurf(box, top) {
       const bn = VG().sets.cur, L = BIOME_SURF[bn] || (BIOME_SURF[bn] = []), D0 = BIOME_SURF_DEF[bn] || [];
-      const h = document.createElement('span'); h.textContent = 'TERRAIN SURFACE - ' + ((VG().sets.lab && VG().sets.lab(bn)) || bn.toUpperCase()) + ' - TOP: its layers' + (L.length ? '' : ' (none: its ground all the way up)') + '. Press the ground in the view to pick a side'; h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
+      const h = document.createElement('span'); h.textContent = 'TERRAIN SURFACE - ' + ((VG().sets.lab && VG().sets.lab(bn)) || bn.toUpperCase()) + ' - TOP: its layers' + (L.length ? '' : ' (none: its ground all the way up)') + '. Press the ground in the view to pick a side'; top.appendChild(h);
       // (the TODO list: "A list of layers. Each layer would have: the material ... a thickness range and how much it wobbles ... whether it's measured
       // from the surface or the waterline ... its look: a palette") each layer from the top down: MATERIAL, MIN / MAX THICKNESS, VARIATION, FILL TO SEA
       // LEVEL, COLOURS (light, mid, dark), MOVE UP / DOWN, REMOVE; ADD LAYER under them - 09-zz-biomes.js SURF_MATS, surfLayerAt
       const restruct = () => { surfRebuild(); renderDecks(); };
-      const sbtn = (lab, tp, fn, dis) => { const b = document.createElement('button'); b.textContent = lab; b.title = b.dataset.t = tp; b.style.cssText = 'padding:4px 8px;font-size:12px;min-height:34px'; b.disabled = !!dis; hint(b); b.onclick = fn; return b; };
-      const cols = document.createElement('div'); cols.style.cssText = 'display:grid;grid-auto-flow:column;grid-auto-columns:minmax(380px,420px);gap:12px;overflow-x:auto;align-items:start'; box.appendChild(cols);
+      const sbtn = (lab, tp, fn, dis) => { const b = document.createElement('button'); b.textContent = lab; b.title = b.dataset.t = tp; b.disabled = !!dis; hint(b); b.onclick = fn; return b; };
+      const cols = document.createElement('div'); cols.className = 'cats'; box.appendChild(cols);
       const hex = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
       L.forEach((ly, i) => {
-        const d0 = D0.find(q => q.m === ly.m) || {}, col = document.createElement('div'); col.style.cssText = 'display:grid;gap:4px;border-left:1px solid #2c3850;padding-left:10px;align-content:start'; col.dataset.layer = i;
+        const d0 = D0.find(q => q.m === ly.m) || {}, col = document.createElement('div'); col.className = 'cat'; col.dataset.layer = i;
         const hd = document.createElement('div'); hd.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap';
-        const t = document.createElement('span'); t.textContent = 'LAYER ' + (i + 1); t.style.color = '#d8dce8'; hd.appendChild(t);
-        const ms = document.createElement('select'); ms.title = ms.dataset.t = 'What the layer is made of - how it behaves and its colours'; ms.style.cssText = 'font:inherit;font-size:13px;min-height:34px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:5px';
+        const t = document.createElement('h4'); t.textContent = 'LAYER ' + (i + 1); t.style.margin = '0'; hd.appendChild(t);
+        const ms = document.createElement('select'); ms.title = ms.dataset.t = 'What the layer is made of - how it behaves and its colours'; 
         for (const [k, M] of Object.entries(SURF_MATS)) { const o = document.createElement('option'); o.value = k; o.textContent = M.lab; ms.appendChild(o); }
         ms.value = SURF_MATS[ly.m] ? ly.m : 'dirt'; ms.onchange = () => { ly.m = ms.value; delete ly.c; restruct(); }; hint(ms); hd.appendChild(ms);
         hd.appendChild(sbtn('UP', 'Move this layer up, nearer the top', () => { L.splice(i - 1, 0, L.splice(i, 1)[0]); restruct(); }, i === 0));
         hd.appendChild(sbtn('DOWN', 'Move this layer down', () => { L.splice(i + 1, 0, L.splice(i, 1)[0]); restruct(); }, i === L.length - 1));
         hd.appendChild(sbtn('REMOVE', 'Take this layer away', () => { L.splice(i, 1); restruct(); }));
         col.appendChild(hd);
-        if (surfOwn(bn, i)) { const n = document.createElement('div'); n.style.cssText = 'color:#9aa3b5;font-size:12px'; n.textContent = 'Drawn with the ground\'s own art until you give it colours'; col.appendChild(n); }
+        if (surfOwn(bn, i)) { const n = document.createElement('div'); n.className = 'cvnote'; n.textContent = 'Drawn with the ground\'s own art until you give it colours'; col.appendChild(n); }
         col.appendChild(slider('MIN THICKNESS', 'Thinnest the layer gets, in world units', 0, 120, 0.5, () => ly.a, v => { ly.a = Math.min(v, ly.b); surfRebuild(); }, d0.a != null ? d0.a : 10));
         col.appendChild(slider('MAX THICKNESS', 'Thickest the layer gets, in world units', 0, 120, 0.5, () => ly.b, v => { ly.b = Math.max(v, ly.a); surfRebuild(); }, d0.b != null ? d0.b : 20));
         col.appendChild(slider('VARIATION', 'How much the thickness changes along the ground', 0, 1, 0.05, () => ly.w != null ? ly.w : 1, v => { ly.w = v; surfRebuild(); }, d0.w != null ? d0.w : 1));
         col.appendChild(toggle('FILL TO SEA LEVEL', 'The layer always reaches sea level, however thin it\'s set', () => !!ly.wl, v => { ly.wl = v ? 1 : 0; surfRebuild(); }));
         // COLOURS: light, mid, dark - each a swatch opening the colour picker; RESET: the material's own
         { const cr = document.createElement('div'); cr.style.cssText = 'display:grid;grid-template-columns:auto 1fr 1fr 1fr auto;gap:4px;align-items:center';
-          const lb = document.createElement('span'); lb.textContent = 'COLOURS'; lb.title = lb.dataset.t = 'The layer\'s light, mid and dark colours'; lb.style.color = '#9aa3b5'; cr.appendChild(lb);
+          const lb = document.createElement('span'); lb.textContent = 'COLOURS'; lb.title = lb.dataset.t = 'The layer\'s light, mid and dark colours'; lb.style.color = '#7a8294'; cr.appendChild(lb);
           const pal = () => Array.isArray(ly.c) && ly.c.length === 3 ? ly.c : (SURF_MATS[ly.m] || SURF_MATS.dirt).pal.map(hex);
-          ['Light', 'Mid', 'Dark'].forEach((nm, k) => { const sw = document.createElement('button'); sw.title = sw.dataset.t = nm + ' colour'; sw.style.cssText = 'min-height:34px;border:1px solid #2c3850;border-radius:5px;background:' + pal()[k]; hint(sw);
+          ['Light', 'Mid', 'Dark'].forEach((nm, k) => { const sw = document.createElement('button'); sw.title = sw.dataset.t = nm + ' colour'; sw.style.cssText = 'height:22px;background:' + pal()[k]; hint(sw);
             const q = { c: pal()[k] }; sw.onclick = () => feColPick(q, sw, () => { const p = pal().slice(); p[k] = q.c; ly.c = p; surfRebuild(); }); cr.appendChild(sw); });
           cr.appendChild(sbtn('RESET', 'Back to the material\'s own colours', () => { delete ly.c; restruct(); }, !Array.isArray(ly.c)));
           col.appendChild(cr); }
         cols.appendChild(col);
       });
-      { const col = document.createElement('div'); col.style.cssText = 'display:grid;gap:4px;align-content:start';
+      { const col = document.createElement('div'); col.className = 'cat btns';
         col.appendChild(sbtn('ADD LAYER', 'A new layer under the others', () => { L.push({ m: 'dirt', a: 10, b: 20, w: 1 }); restruct(); }));
         cols.appendChild(col); }
       // its SIDES (TOP / SIDE / BOTTOM of the ground - edgeClass; the TODO list: "See how each 'side' has different properties. Selecting a side in
       // the editor allows you to edit its properties"): the TOP its layers (left), the SIDE grass on cliffs and plants thinning before one, the BOTTOM
       // roots and shadow under overhangs. A press on the ground in the view picks its side here (sideSel)
       { const S = BIOME_SIDES[bn] || (BIOME_SIDES[bn] = {}), SD = BIOME_SIDES_DEF, g = k => S[k] != null ? S[k] : SD[k];
-        const sideCol = (name, tp, n) => { const col = document.createElement('div'); col.dataset.side = n; col.style.cssText = 'display:grid;gap:4px;border-left:1px solid #2c3850;padding-left:10px;align-content:start';
-          const t = document.createElement('div'); t.textContent = name; t.title = t.dataset.t = tp; t.style.color = '#d8dce8'; col.appendChild(t); cols.appendChild(col); return col; };
+        const sideCol = (name, tp, n) => { const col = document.createElement('div'); col.dataset.side = n; col.className = 'cat';
+          const t = document.createElement('h4'); t.textContent = name; t.title = t.dataset.t = tp; col.appendChild(t); cols.appendChild(col); return col; };
         const st = sideCol('STONES', 'The stones and boulders in this biome\'s ground', 4);   // (user Nov 7 21:18 - biomeStone)
         st.appendChild(slider('STONE SIZE', 'Size of the stones and boulders in the ground', 0.1, 2, 0.05, () => biomeStone(bn), v => { S.stone = v; surfRebuild(); }, BIOME_STONE_DEF[bn] ?? 1));
         const sc = sideCol('SIDE (STEEP FACES)', 'The ground\'s steep faces - press one in the view to come here', 2);
@@ -66026,7 +66246,7 @@ if (VEG_MODE) (() => {
         bc.appendChild(slider('OVERHANG SHADOW', 'How dark the underside of an overhang is', 0, 2, 0.05, () => g('shade'), v => { S.shade = v; surfRebuild(); }, SD.shade));
         // (the side picked: its columns lit, the first in view - the TOP's are its layers)
         cols.querySelectorAll('[data-layer]').forEach(el => { el.dataset.side = 1; });
-        if (sideSel) { const hit = [...cols.querySelectorAll('[data-side="' + sideSel + '"]')]; hit.forEach(el => { el.style.borderLeft = '3px solid #9fd36a'; el.style.background = '#1a2a1466'; }); if (hit[0]) setTimeout(() => hit[0].scrollIntoView({ block: 'nearest', inline: 'start' }), 0); }
+        if (sideSel) { const hit = [...cols.querySelectorAll('[data-side="' + sideSel + '"]')]; hit.forEach(el => { el.style.borderColor = '#ffb347'; }); if (hit[0]) setTimeout(() => hit[0].scrollIntoView({ block: 'nearest', inline: 'start' }), 0); }
       }
     }
     // CAVE: the biome's cave look - its rock's colour and how much decoration (09-zz-biomes.js BIOME_CAVE, over the world's CAVE settings);
@@ -66037,13 +66257,13 @@ if (VEG_MODE) (() => {
     const caveDef = (bn, k) => { const d = BIOME_CAVE_DEF[bn] || BIOME_CAVE_DEF.forest; return d[k] != null ? d[k] : (CAVE_WORLD_P && CAVE_WORLD_P[k] != null ? CAVE_WORLD_P[k] : 1); };
     function renderCave(box, top) {
       const bn = VG().sets.cur, O = BIOME_CAVE[bn] || (BIOME_CAVE[bn] = {}), save = () => biomeSurfSave();
-      const h = document.createElement('span'); h.textContent = 'CAVE - ' + ((VG().sets.lab && VG().sets.lab(bn)) || bn.toUpperCase()); h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
-      const cols = document.createElement('div'); cols.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px 12px'; box.appendChild(cols);
+      const h = document.createElement('span'); h.textContent = 'CAVE - ' + ((VG().sets.lab && VG().sets.lab(bn)) || bn.toUpperCase()); top.appendChild(h);
+      const cols = document.createElement('div'); cols.className = 'cat'; { const cs = document.createElement('div'); cs.className = 'cats'; box.appendChild(cs); cs.appendChild(cols); }
       // ROCK COLOUR: a swatch opening the colour picker (as a plant part's), RESET back to the biome's own
       { const hex = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join(''), rgb = s => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16));
         const row = document.createElement('div'); row.className = 'vgS'; row.title = row.dataset.t = 'Colour of the cave walls in this biome';
         row.innerHTML = '<div class="t"><span>ROCK COLOUR</span><span><i>RESET</i></span></div>';
-        const sw = document.createElement('button'); sw.style.cssText = 'min-height:40px;border:1px solid #2c3850;border-radius:5px'; row.appendChild(sw);
+        const sw = document.createElement('button'); sw.style.cssText = 'height:22px'; row.appendChild(sw);
         const show = () => { sw.style.background = hex(biomeCave(bn, 'hue')); }; show();
         const q = { c: hex(biomeCave(bn, 'hue')) };
         sw.onclick = () => feColPick(q, sw, () => { O.hue = rgb(q.c); save(); show(); });
@@ -66051,26 +66271,26 @@ if (VEG_MODE) (() => {
         cols.appendChild(row); }
       cols.appendChild(slider('ROCK BRIGHTNESS', 'How light or dark the cave rock is (1: as painted)', 0.2, 1.5, 0.02, () => O.bright != null ? O.bright : ((BIOME_CAVE_DEF[bn] || {}).bright || 1), v => { O.bright = v; save(); }, () => (BIOME_CAVE_DEF[bn] || {}).bright || 1));
       for (const [k, name, tip2, mn, mx, st] of CAVE_ROWS) cols.appendChild(slider(name, tip2, mn, mx, st, () => biomeCave(bn, k), v => { O[k] = v; save(); }, () => caveDef(bn, k)));
-      const n = document.createElement('div'); n.style.cssText = 'color:#9aa3b5;grid-column:1/-1'; n.textContent = 'A cave\'s own VEGETATION (WORLD EDITOR > TERRAIN, the cave picked) scales its stalactites, stalagmites, sand, weed and coral.'; cols.appendChild(n);
-      if (LAB_CAVE) { const b = document.createElement('button'); b.textContent = 'LOOK AT THE CAVE'; b.dataset.t = 'Moves the view to the cave'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px;grid-column:1/-1;justify-self:start'; hint(b); b.onclick = () => VG().look(LAB_CAVE[0], WATER_Y + LAB_CAVE[1], 1.6); cols.appendChild(b); }
+      const n = document.createElement('div'); n.className = 'cvnote'; n.textContent = 'A cave\'s own VEGETATION (WORLD EDITOR > TERRAIN, the cave picked) scales its stalactites, stalagmites, sand, weed and coral.'; cols.appendChild(n);
+      if (LAB_CAVE) { const b = document.createElement('button'); b.textContent = 'LOOK AT THE CAVE'; b.dataset.t = 'Moves the view to the cave'; b.style.justifySelf = 'start'; hint(b); b.onclick = () => VG().look(LAB_CAVE[0], WATER_Y + LAB_CAVE[1], 1.6); cols.appendChild(b); }
     }
     // LAKE: the biome's lake water (09-zz-biomes.js BIOME_LAKE) - drawn as the ocean's with its colour over it (drawLakeRoots); LOOK AT A LAKE: the
     // TERRAIN SHAPE tab's HILLS ground has one, any dip under the sea's level is one
     function renderLake(box, top) {
       const bn = VG().sets.cur, O = BIOME_LAKE[bn] || (BIOME_LAKE[bn] = {}), D = BIOME_LAKE_DEF[bn] || BIOME_LAKE_DEF.forest, save = () => biomeSurfSave();
-      const h = document.createElement('span'); h.textContent = 'LAKE - ' + ((VG().sets.lab && VG().sets.lab(bn)) || bn.toUpperCase()) + ' - any dip under sea level fills with this biome\'s water'; h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
-      const cols = document.createElement('div'); cols.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px 12px'; box.appendChild(cols);
+      const h = document.createElement('span'); h.textContent = 'LAKE - ' + ((VG().sets.lab && VG().sets.lab(bn)) || bn.toUpperCase()) + ' - any dip under sea level fills with this biome\'s water'; top.appendChild(h);
+      const cols = document.createElement('div'); cols.className = 'cat'; { const cs = document.createElement('div'); cs.className = 'cats'; box.appendChild(cs); cs.appendChild(cols); }
       { const hex = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join(''), rgb = s => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16));
         const row = document.createElement('div'); row.className = 'vgS'; row.title = row.dataset.t = 'The colour of the lake water in this biome';
         row.innerHTML = '<div class="t"><span>WATER COLOUR</span><span><i>RESET</i></span></div>';
-        const sw = document.createElement('button'); sw.style.cssText = 'min-height:40px;border:1px solid #2c3850;border-radius:5px'; row.appendChild(sw);
+        const sw = document.createElement('button'); sw.style.cssText = 'height:22px'; row.appendChild(sw);
         const show = () => { sw.style.background = hex(biomeLake(bn, 'col')); }; show(); const q = { c: hex(biomeLake(bn, 'col')) };
         sw.onclick = () => feColPick(q, sw, () => { O.col = rgb(q.c); save(); show(); });
         row.querySelector('i').onclick = () => { delete O.col; save(); q.c = hex(biomeLake(bn, 'col')); show(); };
         cols.appendChild(row); }
       cols.appendChild(slider('COLOUR STRENGTH', 'How strongly the water takes its colour at the surface', 0, 1, 0.01, () => biomeLake(bn, 'k'), v => { O.k = v; save(); }, D.k));
       cols.appendChild(slider('MURK', 'How much darker and thicker it gets going down', 0, 1, 0.01, () => biomeLake(bn, 'murk'), v => { O.murk = v; save(); }, D.murk));
-      { const b = document.createElement('button'); b.textContent = 'SHOW A LAKE'; b.dataset.t = 'Loads ground with a dip that fills with lake water'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px;justify-self:start'; hint(b);
+      { const b = document.createElement('button'); b.textContent = 'SHOW A LAKE'; b.dataset.t = 'Loads ground with a dip that fills with lake water'; b.style.justifySelf = 'start'; hint(b);
         b.onclick = () => { const tp = []; for (let x = 0; x <= GROUND_X; x += 200) tp.push([x, x > 1100 && x < 1700 ? 60 : -60]); groundUse([landOf(tp), SEA_FLOOR, room(2600, 80, 240, 60)]); }; cols.appendChild(b); }
     }
     // TERRAIN SHAPE (user Nov 7 18:21-18:27: "Why not just give me the controls right there? It should be a smooth transition and the UI should stay
@@ -66096,81 +66316,41 @@ if (VEG_MODE) (() => {
       if (li >= 0) s[li].p = s[li].p.map(p => p.length > 2 && p[2] ? [p[0], p[1], SK, ...p.slice(3)] : p);
       VG().setGround(s); try { localStorage.setItem('bd_biome_ground', JSON.stringify(s)); } catch (e) { }
       const H = s.find(I => I && I.k === 'H' && I.p && I.p.length); LAB_CAVE = H ? [H.p.reduce((a, p) => a + p[0], 0) / H.p.length, H.p.reduce((a, p) => a + p[1], 0) / H.p.length] : null;
-      vgReplant(); if (TERR.on) TERR.g = groundNow(); if (name) tip.textContent = name + ' terrain prefab loaded';
+      vgReplant(); if (name) tip.textContent = name + ' terrain prefab loaded';
     }
-    // ---- EDIT POINTS: a layer over the view (under the panels) with the ground's points - its land and its caves, not the sea floor
-    const TERR = { on: false, cv: null, g: null, drag: null, pan: null, tap: null, raf: 0, hov: null };
-    const terrEditable = (I, i) => I && I.p && I.p.length && !(I.gnd && I.p.every(p => p[2] === 'S') && I.p[0][0] >= GROUND_X);
-    const terrScr = p => VG().toScreen(p[0], WATER_Y + p[1]);
-    function terrHit(cx, cy) {   // (the point under a press - 12 css pixels)
-      let best = null, bd = 144;
-      TERR.g.forEach((I, si) => { if (!terrEditable(I, si)) return; I.p.forEach((p, pi) => { const [x, y] = terrScr(p), d = (x - cx) * (x - cx) + (y - cy) * (y - cy); if (d < bd) { bd = d; best = { si, pi }; } }); });
-      return best;
-    }
-    function terrSeg(cx, cy) {   // (the piece of line under a press - 10 css pixels: the point before it)
-      let best = null, bd = 100;
-      TERR.g.forEach((I, si) => { if (!terrEditable(I, si)) return; const n = I.p.length, m = I.t ? n - 1 : n; for (let k = 0; k < m; k++) { const a = terrScr(I.p[k]), b = terrScr(I.p[(k + 1) % n]), dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy, u = L ? Math.max(0, Math.min(1, ((cx - a[0]) * dx + (cy - a[1]) * dy) / L)) : 0, ex = a[0] + dx * u - cx, ey = a[1] + dy * u - cy, d = ex * ex + ey * ey; if (d < bd) { bd = d; best = { si, k }; } } });
-      return best;
-    }
-    function terrCommit(what) { groundUse(TERR.g); tip.textContent = what; }
-    function terrDraw() {
-      if (!TERR.on || !TERR.cv) return;
-      const c = TERR.cv, d = window.devicePixelRatio || 1; if (c.width !== Math.round(innerWidth * d) || c.height !== Math.round(innerHeight * d)) { c.width = Math.round(innerWidth * d); c.height = Math.round(innerHeight * d); }
-      const g = c.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, innerWidth, innerHeight);
-      TERR.g.forEach((I, si) => {
-        if (!terrEditable(I, si)) return;
-        const P = I.p.map(terrScr); g.lineWidth = 2; g.strokeStyle = I.k === 'H' ? '#d8a04a' : '#9fd36a'; g.beginPath(); P.forEach(([x, y], k) => k ? g.lineTo(x, y) : g.moveTo(x, y)); if (!I.t) g.closePath(); g.stroke();
-        P.forEach(([x, y], pi) => { const on = TERR.hov && TERR.hov.si === si && TERR.hov.pi === pi; g.fillStyle = on ? '#ffffff' : I.k === 'H' ? '#d8a04a' : '#9fd36a'; g.strokeStyle = '#0f1420'; g.lineWidth = 2; g.fillRect(x - 6, y - 6, 12, 12); g.strokeRect(x - 6, y - 6, 12, 12); });
-      });
-      TERR.raf = requestAnimationFrame(terrDraw);
-    }
+    // ---- EDIT TERRAIN (user Nov 7: "One Terrain Editor ... use the game's own Terrain Editor"): the game's own terrain editing on in this view
+    // (VEG_TERR, floorEdOn - 50-land-islands.js: its points, curves, a press twice on a line for a point, right-click to take one away, the cross to
+    // drag a shape, the square to scale it) and the GAME EDITOR's own TERRAIN sections in this tab (TUNE.fillTab - CREATE, SEGMENT TYPE with HILLS,
+    // SPIKY, ROUND, CURVE, VEGETATION, SEGMENT ACTIONS, TERRAIN TYPE, CAVE WATER); a change built here at once (the game's waits for REFRESH VIEW)
+    const TERR = { get on() { return VEG_TERR.on; } };
+    let TERR_PANE = null, terrT = 0;
+    window.__vgTerrChanged = () => { clearTimeout(terrT); terrT = setTimeout(() => { const g = groundNow(); try { localStorage.setItem('bd_biome_ground', JSON.stringify(g)); } catch (e) { } VG().setGround(g);
+      const H = g.find(I => I && I.k === 'H' && I.p && I.p.length); LAB_CAVE = H ? [H.p.reduce((a, p) => a + p[0], 0) / H.p.length, H.p.reduce((a, p) => a + p[1], 0) / H.p.length] : null; vgReplant(); }, 250); };
     function terrSet(on) {
-      if (on === TERR.on) return;
-      TERR.on = on;
-      if (on) {
-        TERR.g = groundNow();
-        const c = TERR.cv = document.createElement('canvas'); c.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;z-index:65;cursor:crosshair;touch-action:none'; document.body.appendChild(c);
-        const H = {
-          contextmenu: e => { e.preventDefault(); const h = terrHit(e.clientX, e.clientY); if (!h) return; const I = TERR.g[h.si], min = I.gnd ? 4 : I.t ? 2 : 3; if (I.p.length <= min) { tip.textContent = 'A shape keeps ' + min + ' points at least'; return; } I.p.splice(h.pi, 1); terrCommit('Point removed'); },
-          pointerdown: e => {
-            e.preventDefault(); if (e.button === 2) return; try { c.setPointerCapture(e.pointerId); } catch (er) { }
-            const h = terrHit(e.clientX, e.clientY); if (h) { TERR.drag = Object.assign(h, { moved: false }); return; }
-            const s = terrSeg(e.clientX, e.clientY), now = e.timeStamp || performance.now();   // (when it was pressed, not when it was handled: a slow frame between the two presses)
-            if (e.pointerType === 'touch' && s && TERR.tap && now - TERR.tap.t < 450 && Math.abs(TERR.tap.x - e.clientX) < 14 && Math.abs(TERR.tap.y - e.clientY) < 14) {   // (pressed twice on the line: a new point there)
-              const [wx, wy] = VG().world(e.clientX, e.clientY); TERR.g[s.si].p.splice(s.k + 1, 0, [Math.round(wx), Math.round(wy - WATER_Y)]); TERR.tap = null; terrCommit('Point added'); return; }
-            TERR.tap = { t: now, x: e.clientX, y: e.clientY };
-            const v = VG().view(); TERR.pan = { x: e.clientX, y: e.clientY, vx: v.x, vy: v.y, k: v.k };   // (anywhere else: the view dragged)
-          },
-          pointermove: e => {
-            if (TERR.drag) { const [wx, wy] = VG().world(e.clientX, e.clientY), p = TERR.g[TERR.drag.si].p[TERR.drag.pi]; p[0] = Math.round(wx); p[1] = Math.round(wy - WATER_Y); TERR.drag.moved = true; return; }
-            if (TERR.pan) { const P = TERR.pan; if (Math.abs(e.clientX - P.x) + Math.abs(e.clientY - P.y) > 3) VG().look(P.vx - (e.clientX - P.x) / P.k, P.vy - (e.clientY - P.y) / P.k); return; }
-            TERR.hov = terrHit(e.clientX, e.clientY); c.style.cursor = TERR.hov ? 'grab' : terrSeg(e.clientX, e.clientY) ? 'copy' : 'crosshair';
-          },
-          pointerup: () => { if (TERR.drag && TERR.drag.moved) terrCommit('Point moved'); TERR.drag = null; TERR.pan = null; },
-          wheel: e => { e.preventDefault(); zoomStep(e.deltaY < 0 ? 1 : -1); },
-          dblclick: e => { e.preventDefault(); if (terrHit(e.clientX, e.clientY)) return; const s = terrSeg(e.clientX, e.clientY); if (!s) return; const [wx, wy] = VG().world(e.clientX, e.clientY); TERR.g[s.si].p.splice(s.k + 1, 0, [Math.round(wx), Math.round(wy - WATER_Y)]); terrCommit('Point added'); },
-        };
-        H.pointercancel = H.pointerup;
-        // (every press on the layer goes to it alone, before the game's own - 00-a-veg-mode.js)
-        window.__terrPointer = e => { if (!TERR.on || (e.target !== c && !(TERR.drag || TERR.pan))) return false; if (H[e.type]) H[e.type](e); return true; };
-        terrDraw(); tip.textContent = 'Editing the terrain: drag a point, press the line twice to add one, right-click a point to remove it';
-      } else { cancelAnimationFrame(TERR.raf); if (TERR.cv) TERR.cv.remove(); TERR.cv = null; TERR.drag = TERR.pan = null; window.__terrPointer = null; tip.textContent = 'Terrain editing off'; }
+      if (on === VEG_TERR.on) return;
+      VEG_TERR.on = on; if (!on) { TERRAIN_ED.sel = null; ISL_ED.pt = null; if (typeof terrainSyncSkin === 'function') terrainSyncSkin(); }
+      tip.textContent = on ? 'Editing the terrain: drag a point, press a line twice to add one, right-click a point to remove it' : 'Terrain editing off';
       renderDecks();
     }
     addEventListener('keydown', e => { if (e.key === 'Escape' && TERR.on) terrSet(false); }, true);
     let VG_GROUND_LAST = null;   // (the prefab last loaded: picked in the list when the tab is drawn again)
     function renderShape(box, top) {
-      const h = document.createElement('span'); h.textContent = 'TERRAIN SHAPE - the ground the biomes are shown on'; h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
-      const btn = (lab, tp, fn) => { const b = document.createElement('button'); b.textContent = lab; b.dataset.t = tp; b.title = tp; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; hint(b); b.onclick = fn; return b; };
-      const row = () => { const r = document.createElement('div'); r.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0'; box.appendChild(r); return r; };
+      const h = document.createElement('span'); h.textContent = 'TERRAIN SHAPE - the ground the biomes are shown on'; top.appendChild(h);
+      const btn = (lab, tp, fn) => { const b = document.createElement('button'); b.textContent = lab; b.dataset.t = tp; b.title = tp; hint(b); b.onclick = fn; return b; };
+      const row = () => { const r = document.createElement('div'); r.className = 'cvbar'; box.appendChild(r); return r; };
       const r1 = row();
-      const eb = btn('EDIT POINTS: ' + (TERR.on ? 'ON' : 'OFF'), 'Move, add and remove the ground\'s points right here in the view', () => terrSet(!TERR.on)); eb.classList.toggle('on', TERR.on); r1.appendChild(eb);
-      const hp = document.createElement('span'); hp.style.cssText = 'color:#9aa3b5'; hp.textContent = TERR.on ? 'Drag a point to move it. Press the line twice to add a point. Right-click a point to remove it. Drag empty space to move the view.' : 'Turn on to shape the ground: green is the land, orange the caves.'; r1.appendChild(hp);
+      const eb = btn('EDIT TERRAIN: ' + (TERR.on ? 'ON' : 'OFF'), 'Edit the ground\'s shapes right here in the view, as in the game editor', () => terrSet(!TERR.on)); eb.classList.toggle('on', TERR.on); r1.appendChild(eb);
+      const hp = document.createElement('span'); hp.className = 'cvnote'; hp.style.margin = '0'; hp.textContent = TERR.on ? 'Drag a point to move it. Press a line twice to add a point. Right-click a point to remove it. Right-drag to move the view.' : 'Turn on to shape the ground, as in the game editor\'s TERRAIN tab.'; r1.appendChild(hp);
+      // (the game editor's own TERRAIN sections - built once, kept: one Terrain Editor; its tooltips on the help line)
+      if (TERR.on) { if (!TERR_PANE) { TERR_PANE = document.createElement('div'); NSKY.editor.TUNE.fillTab('TERRAIN', TERR_PANE);
+          const sh = e => { const t = e.target.closest && e.target.closest('[title]'); if (!t || !TERR_PANE.contains(t)) return; const row = t.closest('.row'), lb = row && row.querySelector('label'); tip.textContent = (t.tagName === 'BUTTON' ? t.textContent : lb ? lb.textContent : '') + ': ' + t.title; };
+          TERR_PANE.addEventListener('pointerover', e => { if (e.pointerType === 'mouse') sh(e); }); TERR_PANE.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') sh(e); }); }
+        box.appendChild(TERR_PANE); if (typeof terrainSyncSkin === 'function') terrainSyncSkin(); }
       // (user Nov 7 20:42: "Prefabs should be a dropdown list with a 'LOAD' button next to it. Next to the LOAD we have a Prefab Name and Save as Prefab.
       // The current vertical list takes a ton of space") one row: the list (built in, then saved), LOAD, DELETE (a saved one), the name, SAVE AS PREFAB
-      const r2 = row(), lab = document.createElement('span'); lab.textContent = 'PREFAB'; lab.style.cssText = 'color:#d8dce8'; r2.appendChild(lab);
+      const r2 = row(), lab = document.createElement('span'); lab.textContent = 'PREFAB'; lab.style.color = '#7a8294'; r2.appendChild(lab);
       const sel = document.createElement('select'); sel.title = 'The terrain prefabs: built in, then the ones you saved'; sel.dataset.t = sel.title; hint(sel);
-      sel.style.cssText = 'font:inherit;min-height:42px;padding:4px 8px;border-radius:5px;border:1px solid #2c3850;background:#0f1420;color:#d8dce8;min-width:220px';
+      sel.style.minWidth = '220px';
       const ALL = GROUND_BUILT.map(([n, tp, f]) => ({ n, d: tp.replace(/^Loads the .* prefab: /, ''), g: f, own: false })).concat(groundsGet().map(q => ({ n: q.n, d: 'saved', g: () => q.g, own: true })));
       ALL.forEach((q, k) => { const o = document.createElement('option'); o.value = k; o.textContent = q.n + ' - ' + q.d; sel.appendChild(o); });
       { const k = ALL.findIndex(q => q.n === VG_GROUND_LAST); if (k >= 0) sel.value = k; }
@@ -66179,7 +66359,7 @@ if (VEG_MODE) (() => {
       const db = btn('DELETE', 'Deletes the picked prefab (only ones you saved)', () => { const q = ALL[+sel.value]; if (!q || !q.own) return; groundsSet(groundsGet().filter(o => o.n !== q.n)); renderDecks(); });
       const dOn = () => { const q = ALL[+sel.value]; db.disabled = !(q && q.own); }; sel.onchange = dOn; dOn(); r2.appendChild(db);
       const inp = document.createElement('input'); inp.placeholder = 'PREFAB NAME'; inp.maxLength = 30; inp.title = 'A name for the terrain as it is now';
-      inp.style.cssText = 'font:inherit;min-height:40px;padding:4px 10px;border-radius:5px;border:1px solid #2c3850;background:#0f1420;color:#d8dce8;width:200px;margin-left:12px';
+      inp.style.cssText = 'width:200px;margin-left:12px';
       r2.appendChild(inp);
       r2.appendChild(btn('SAVE AS PREFAB', 'Saves the terrain as it is now under this name, in the prefab list', () => {
         const n = inp.value.trim().toUpperCase(); if (!n) { inp.focus(); tip.textContent = 'Type a name first'; return; }
@@ -66187,32 +66367,12 @@ if (VEG_MODE) (() => {
         const a = groundsGet().filter(q => q.n !== n); a.push({ n, g: groundNow() }); groundsSet(a); VG_GROUND_LAST = n; tip.textContent = n + ' saved'; renderDecks();
       }));
     }
-    // DECK 4-6: the far scenery's rows for the biome - its own values over the world's (GAME EDITOR > FAR SCENERY) - 09-zz-biomes.js BIOME_BG
-    const farTabs = bn => bn === 'desert' ? [['d4', 'DECK 4 (SAND BAND)'], ['d5', 'DECK 5 (DUNES, CITY)'], ['d6', 'DECK 6 (MESAS)']] : [['d4', 'DECK 4 (MEADOW)'], ['d5', 'DECK 5 (TREES)'], ['d6', 'DECK 6 (MOUNTAINS)']];
-    const FAR_ROWS = {
-      d4: { forest: [['bgmh', 'HEIGHT', 'Height of the meadow band', 0, 2.5, 0.05], ['bgmw', 'WAVINESS', 'How wavy its top is', 0, 3, 0.05], ['flw', 'FLOWERS', 'Share of its flowers shown', 0, 1, 0.05]],
-        desert: [['bgsh', 'HEIGHT', 'Height of the sand band', 0, 2.5, 0.05], ['bgsw', 'WAVINESS', 'How wavy its top is', 0, 3, 0.05]] },
-      d5: { forest: [['bgfn', 'NEAR TREES SIZE', 'How big the near tree row is', 0.3, 1.5, 0.05], ['bgfny', 'NEAR TREES HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgfnh', 'NEAR TREES ATMOSPHERE', 'How much it fades into the sky colour', 0, 1, 0.02],
-          ['bgff', 'FAR TREES SIZE', 'How big the far tree row is', 0.3, 1.5, 0.05], ['bgffy', 'FAR TREES HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgffh', 'FAR TREES ATMOSPHERE', 'How much it fades into the sky colour', 0, 1, 0.02], ['bgffg', 'FAR TREES SPACING', 'Space between repeated tiles', 0, 1, 0.02]],
-        desert: [['bgdd', 'DUNES SIZE', 'How big the dunes are', 0.3, 1.5, 0.05], ['bgddy', 'DUNES HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgddh', 'DUNES ATMOSPHERE', 'How much it fades into the sky colour', 0, 1, 0.02], ['bgddg', 'DUNES SPACING', 'Space between repeated tiles', 0, 1, 0.02],
-          ['bgdc', 'CITY SIZE', 'How big the coast city is', 0.3, 1.5, 0.05], ['bgdcy', 'CITY HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgdch', 'CITY ATMOSPHERE', 'How much it fades into the sky colour', 0, 1, 0.02], ['bgdcg', 'CITY SPACING', 'Space between repeated tiles', 0, 1, 0.02]] },
-      d6: { forest: [['bgfm', 'MOUNTAINS SIZE', 'How big the mountains are', 0.3, 1.5, 0.05], ['bgfmy', 'MOUNTAINS HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgfmh', 'MOUNTAINS ATMOSPHERE', 'How much it fades into the sky colour', 0, 1, 0.02], ['bgfmg', 'MOUNTAINS SPACING', 'Space between repeated tiles', 0, 1, 0.02]],
-        desert: [['bgdm', 'MESAS SIZE', 'How big the mesas are', 0.3, 1.5, 0.05], ['bgdmy', 'MESAS HEIGHT', 'Raise or lower, in world units', -100, 150, 2], ['bgdmh', 'MESAS ATMOSPHERE', 'How much it fades into the sky colour', 0, 1, 0.02], ['bgdmg', 'MESAS SPACING', 'Space between repeated tiles', 0, 1, 0.02]] } };
-    const worldDef = k => { if (k === 'flw') return 1; const r = (NSKY.BG_SL || []).find(q => q[0] === k); return bgP(k, r ? r[5] : 1); };
-    function renderFar(box, top, tab) {
-      const bn = VG().sets.cur, kind = bn === 'desert' ? 'desert' : 'forest', lab = (farTabs(bn).find(q => q[0] === tab) || [, ''])[1];
-      let rows = FAR_ROWS[tab][kind];
-      const none = bn === 'tropical' && tab !== 'd4';      // (the beach: no far trees or mountains of its own yet)
-      if (kind === 'forest' && bn !== 'forest') rows = rows.filter(r => r[0] !== 'bgfn');   // (the near row's size is the forest's: one row along every biome)
-      const h = document.createElement('span'); h.textContent = lab + ' - ' + ((VG().sets.lab && VG().sets.lab(bn)) || bn.toUpperCase()) + (none ? ' - none behind this biome yet' : ''); h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
-      if (none) return;
-      const O = BIOME_BG[bn] || (BIOME_BG[bn] = {}), cols = document.createElement('div'); cols.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:4px 12px'; box.appendChild(cols);
-      for (const [k, name, tip2, mn, mx, st] of rows) cols.appendChild(slider(name, tip2, mn, mx, st, () => typeof O[k] === 'number' ? O[k] : worldDef(k), v => { O[k] = v; biomeSurfSave(); }, () => worldDef(k)));
-    }
+    // (a far picture's or the meadow's value as the world has it - GAME EDITOR > FAR SCENERY - under a biome's own)
+    const worldDef = (k, d0) => { if (k === 'flw' || k === 'pb') return 1; const r = (NSKY.BG_SL || []).find(q => q[0] === k); return bgP(k, r ? r[5] : d0 != null ? d0 : 1); };
     // a far deck's PICTURE (deck 2, 3): IMPORT PICTURE / REMOVE, its SCALE and LIFT - laid along the biome's ground behind the deck's plants
     function renderDeckPic(box, di) {
       const bn = VG().sets.cur, L = DECK_PICS[bn] || (DECK_PICS[bn] = []), P = L.find(q => q.d === di);
-      const row = document.createElement('div'); row.style.cssText = 'display:grid;grid-template-columns:auto auto 1fr 1fr;gap:8px;align-items:end'; box.appendChild(row);
+      const row = document.createElement('div'); row.className = 'cvbar'; box.appendChild(row);
       const fi = document.createElement('input'); fi.type = 'file'; fi.accept = 'image/*'; fi.hidden = true; row.appendChild(fi);
       const ib = document.createElement('button'); ib.textContent = P ? 'CHANGE PICTURE' : 'IMPORT PICTURE'; ib.dataset.t = 'A far-scenery picture for this deck'; hint(ib); ib.onclick = () => fi.click(); row.appendChild(ib);
       fi.onchange = () => { const f = fi.files && fi.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { const q = L.find(z => z.d === di); if (q) q.src = rd.result; else L.push({ d: di, src: rd.result, s: 1, y: 0 }); if (!deckPicsSave()) tip.textContent = 'Picture too big to keep in this browser - try a smaller one'; renderDecks(); }; rd.readAsDataURL(f); };
@@ -66293,18 +66453,20 @@ if (VEG_MODE) (() => {
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchmove', 'touchend', 'wheel', 'click']) d.addEventListener(ev, e => e.stopPropagation());
     // (user Nov 3 21:58: "I should be able to pan the camera freely") out of a vehicle: drag the view to pan it, pinch or the wheel to zoom
     { const fp = new Map(); let st = null;
-      const free = e => !TERR.on && !FL().cur() && !d.contains(e.target) && !(FE && FE.root.contains(e.target)) && !L0().contains(e.target) && (e.target.tagName === 'CANVAS' || e.target === document.documentElement || e.target === document.body);
+      const free = e => !FL().cur() && !d.contains(e.target) && !(FE && FE.root.contains(e.target)) && !L0().contains(e.target) && (e.target.tagName === 'CANVAS' || e.target === document.documentElement || e.target === document.body);
       // (user Nov 3 22:14: "Right mouse pans, middle mouse zooms in and out") a mouse: the right or middle button drags the view (22:20: held, it pans), the wheel zooms
       // the left picks - a plant, or a structure to drag. A finger: drag pans, pinch zooms, a tap picks
       window.addEventListener('contextmenu', e => { if (free(e)) e.preventDefault(); }, true);
       window.addEventListener('pointerdown', e => {
         if (free(e) && e.pointerType === 'mouse' && e.button === 0) { const v = VG().view(), z = VG().zl(); window.__vgDownView = { x: v.x, y: v.y, zt: z.zt, t: performance.now() }; }   // (the view as a press began - a double-click's editor comes back to it)
         if (feArm || !free(e)) return;
+        // (editing the terrain: as in the game editor - the left button on empty space draws a box to pick pieces of line, the right or middle pans, a finger pans; nothing else is picked)
+        if (TERR.on && e.pointerType === 'mouse' && e.button === 0) return;
         if (e.pointerType === 'mouse' && (e.button === 1 || e.button === 2)) { const v = VG().view(); fp.set(e.pointerId, [e.clientX, e.clientY]); st = { x0: e.clientX, y0: e.clientY, x: v.x, y: v.y, k: v.k }; e.preventDefault(); return; }
         fp.set(e.pointerId, [e.clientX, e.clientY]);
         const v = VG().view(), P = [...fp.values()];
-        if (P.length === 1) { const pv = VG().vehAt(e.clientX, e.clientY, [...PARKED]); if (pv) { strPick = null; vehPick = pv; pickName((d.querySelector('#vgSpawn [value^="v|' + pv.sv + '|"]') || { textContent: 'VEHICLE' }).textContent); st = { vh: pv, x0: e.clientX, y0: e.clientY, tap: true }; tip.textContent = 'Drag it to place it, REMOVE to take it away'; return; } }
-        if (P.length === 1) { const o = VG().strAt(e.clientX, e.clientY); if (o) { pickStr(o.id, o.name); st = { str: o.id, x0: e.clientX, y0: e.clientY, tap: true }; tip.textContent = o.name + ' picked - drag it to place it, REMOVE to take it away'; return; } }
+        if (P.length === 1 && !TERR.on) { const pv = VG().vehAt(e.clientX, e.clientY, [...PARKED]); if (pv) { strPick = null; vehPick = pv; pickName((d.querySelector('#vgSpawn [value^="v|' + pv.sv + '|"]') || { textContent: 'VEHICLE' }).textContent); st = { vh: pv, x0: e.clientX, y0: e.clientY, tap: true }; tip.textContent = 'Drag it to place it, REMOVE to take it away'; return; } }
+        if (P.length === 1 && !TERR.on) { const o = VG().strAt(e.clientX, e.clientY); if (o) { pickStr(o.id, o.name); st = { str: o.id, x0: e.clientX, y0: e.clientY, tap: true }; tip.textContent = o.name + ' picked - drag it to place it, REMOVE to take it away'; return; } }
         st = P.length === 2 ? { pinch: Math.hypot(P[0][0] - P[1][0], P[0][1] - P[1][1]), z: v.z, x: v.x, y: v.y } : e.pointerType === 'mouse' ? { x0: e.clientX, y0: e.clientY, tap: true, pick: true } : { x0: e.clientX, y0: e.clientY, x: v.x, y: v.y, k: v.k, tap: true };
       }, true);
       window.addEventListener('pointermove', e => {
@@ -66316,11 +66478,11 @@ if (VEG_MODE) (() => {
         if (st.k) VG().look(st.x - (e.clientX - st.x0) / st.k, st.y - (e.clientY - st.y0) / st.k);
       }, true);
       const end = e => {
-        if (st && st.tap && st.str == null && !st.vh && fp.size === 1 && e.type === 'pointerup') { const it = VG().fol.it(e.clientX, e.clientY); vehPick = null; pickStr(null); if (it) select(it); else { const sd = VG().side ? VG().side(e.clientX, e.clientY) : 0; if (sd && window.__vgSide) window.__vgSide(sd); else tip.textContent = 'No plant there'; } }
+        if (st && st.tap && st.str == null && !st.vh && fp.size === 1 && e.type === 'pointerup' && !TERR.on) { const it = VG().fol.it(e.clientX, e.clientY); vehPick = null; pickStr(null); if (it) select(it); else { const sd = VG().side ? VG().side(e.clientX, e.clientY) : 0; if (sd && window.__vgSide) window.__vgSide(sd); else tip.textContent = 'No plant there'; } }
         fp.delete(e.pointerId); if (!fp.size) st = null; };
       window.addEventListener('pointerup', end, true); window.addEventListener('pointercancel', end, true);
       // (user Nov 3 22:52: "In the Group Editor, I can double click on any PLANT and it takes me to their Prefab Editor")
-      window.addEventListener('dblclick', e => { if (!free(e)) return; const it = VG().fol.it(e.clientX, e.clientY); if (!it) return; e.preventDefault(); e.stopImmediatePropagation(); const dv = window.__vgDownView; select(it); feShow('prefab', VG().fol.keyOf(it)); if (dv && performance.now() - dv.t < 1500) window.__vgSceneView(dv); }, true);   // (10:34: the game's own double-click zoomed the view out - the scene's view kept: it never sees this one)
+      window.addEventListener('dblclick', e => { if (!free(e) || TERR.on) return; const it = VG().fol.it(e.clientX, e.clientY); if (!it) return; e.preventDefault(); e.stopImmediatePropagation(); const dv = window.__vgDownView; select(it); feShow('prefab', VG().fol.keyOf(it)); if (dv && performance.now() - dv.t < 1500) window.__vgSceneView(dv); }, true);   // (10:34: the game's own double-click zoomed the view out - the scene's view kept: it never sees this one)
       let wt = 0; window.addEventListener('wheel', e => { if (!free(e)) return; e.preventDefault(); e.stopPropagation(); const t = performance.now(); if (t - wt < 90) return; wt = t; zoomStep(e.deltaY < 0 ? 1 : -1); }, { capture: true, passive: false });   // (a level a notch)
     }
     // (EDIT A PLANT: the next tap in the view opens the editor on the plant under it)
@@ -66336,12 +66498,10 @@ if (VEG_MODE) (() => {
     // Vis Toggle Deck 1 Deck 2 etc") the view's own menu, top left: the frame rate and the cost, the zoom a level in or out, the bones, each deck shown
     const L = document.createElement('div'); L.id = 'vgLeft'; document.body.appendChild(L);
     L.innerHTML = `<style>#vgLeft{position:fixed;left:calc(8px + env(safe-area-inset-left,0px));top:var(--below-bar,8px);max-height:calc(100% - 267px - 24px - var(--below-bar,8px));overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:auto;scrollbar-color:#6a9a3a #1a2234;box-sizing:border-box;align-content:start;z-index:70;width:220px !important;background:#0f1420e0;color:#d8dce8;font:14px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:8px;padding:8px;display:grid;gap:6px;width:176px}
-#vgBot button{font:inherit;font-size:14px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:42px;padding:6px 12px;cursor:pointer;touch-action:manipulation}#vgBot button.on{background:#2a3a1e;border-color:#6a9a3a}#vgBot button:disabled{opacity:0.35}
 #vgLeft button{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:44px;padding:6px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none}#vgLeft button.on{background:#2a3a1e;border-color:#6a9a3a}
 #vgLeft .r3{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid #2c3850}#vgLeft .r3 button{font-size:13px;min-height:40px}#vgLeft .r{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center}#vgLeft .l{color:#7a8294}#vgFps{color:#9fd36a;font:600 20px ui-monospace,Menlo,monospace}#vgCost{color:#c8cfdc;font-size:12px;line-height:1.35;white-space:pre-line}</style>
 <div class="r3"><button class="on" title="All the plants of this biome, on their decks">GROUP EDITOR</button><button data-ed="prefab" title="Edit one plant prefab on its own">PREFAB EDITOR</button><button data-ed="comp" title="Pick its trunk or its leaf">COMPONENT EDITOR</button></div><div id="vgFps">-- fps</div><div id="vgCost">-</div>
-<div class="r"><span class="l">ZOOM</span><button data-z="1">+</button><button data-z="-1">-</button></div>
-<button data-b="1" class="on" style="display:none">BONES ON</button><button data-reset="1" style="display:none" title="Puts the scene back as it was when the editor opened. Your settings stay">RESET SCENE</button><div class="l">DECKS</div><div id="vgVis" style="display:grid;gap:6px"></div>` + (window.__vegLab ? `<button data-exp="1" title="Saves everything as one file for the game">EXPORT FOR GAME</button>` : `<button data-snap="1" title="Copies everything - the world and the biomes - as text you can paste or keep">SNAPSHOT</button><button data-ged="1" title="Opens the game editor">GAME EDITOR</button><button data-back="1" title="Closes the biome editor">CLOSE</button>`);
+<button data-b="1" class="on" style="display:none">BONES ON</button><button data-reset="1" style="display:none" title="Puts the scene back as it was when the editor opened. Your settings stay">RESET SCENE</button><div id="vgVis"></div>` + (window.__vegLab ? `<button data-exp="1" title="Saves everything as one file for the game">EXPORT FOR GAME</button>` : `<button data-snap="1" title="Copies everything - the world and the biomes - as text you can paste or keep">SNAPSHOT</button><button data-ged="1" title="Opens the game editor">GAME EDITOR</button><button data-back="1" title="Closes the biome editor">CLOSE</button>`);
     const fpsEl = L.querySelector('#vgFps');
     // (user Nov 7 16:15, his photo: the left panel still ran over the bottom bar - 100vh isn't the screen's height on every device) the left
     // panel stops 8 pixels over where the bottom bar really starts, and scrolls; the right one fits the screen it's on. (Nov 7 18:05, iPad 27.2 Home Screen app: both panels start below the status bar and its fade - --below-bar - and fit the page's real height, pageBox)
@@ -66378,7 +66538,7 @@ if (VEG_MODE) (() => {
       lookAtTrees(); select(nearPalm()); tip.textContent = 'The scene as it opened';
     };
     { const b = L.querySelector('[data-b]'); b.onclick = () => { VG().off = !VG().off; b.textContent = VG().off ? 'BONES OFF' : 'BONES ON'; b.classList.toggle('on', !VG().off); b.blur(); }; }
-    ['DECK 0 (OVER OBJECTS)', 'DECK 1 (FRONT)', 'DECK 2', 'DECK 3 (BACK)'].forEach((lab, i) => { const b = document.createElement('button'); b.textContent = lab; b.classList.toggle('on', VG().decks.show[i]); b.onclick = () => { VG().decks.show[i] = !VG().decks.show[i]; b.classList.toggle('on', VG().decks.show[i]); b.blur(); }; L.querySelector('#vgVis').appendChild(b); });
+    // (user Nov 7 20:48: the decks' SHOW toggles are in the bottom panel's DECKS bar now; ZOOM is the mouse wheel and a pinch)
     // (08:49: "TEXTURES, BIRDS, PARTICLES should be toggles on the LEFT side, below the DECKS toggles")
     { const tri = d.querySelector('.tri'); if (tri) { tri.style.gridTemplateColumns = '1fr'; const h = document.createElement('div'); h.textContent = 'SHOW'; h.style.cssText = 'color:#7a8294;font-size:13px;margin-top:6px'; L.querySelector('#vgVis').after(h, tri); } }
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchmove', 'touchend', 'wheel', 'click']) L.addEventListener(ev, e => e.stopPropagation());
