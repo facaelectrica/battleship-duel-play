@@ -5113,7 +5113,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 893;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 18:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 08 18:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -49415,7 +49415,7 @@ function ltBands() {
   for (let k = 0; k < n; k++) {
     const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0);
     let lo = Infinity, hi = -Infinity, hs = -Infinity;
-    for (let c = c0; c < c0 + w; c++) if (!land.onl[c]) hs = Math.max(hs, sandY(c * LT_CELL), holeBot(c));
+    for (let c = c0; c < c0 + w; c++) if (!land.onl[c]) { const hb = holeBot(c); if (hb > -Infinity) hs = Math.max(hs, sandY(c * LT_CELL), hb); }   // (only where a hole runs under the floor: the open ocean needs no rows of its own - nothing under its floor to light or flood)
     for (let c = c0; c < c0 + w; c++) if (onLand(c * LT_CELL)) { const t = land.surf[c], u = ISLE !== null && ISLE[c] === 2 ? Math.min(t, land.itop[c]) : t; if (u < lo) lo = u; if (t > hi) hi = t; }   // (an island in a country's water: room for its top over the ground's own)
     land.rT[k] = lo < Infinity ? Math.min(0, Math.floor((lo - LT_HEAD - LT_Y0) / LT_CELL)) : 0;
     land.rB[k] = hi + LT_SKIN <= LT_Y1 ? LT_ROWS : Math.ceil((hi + LT_DEEP_SKIN - LT_Y0) / LT_CELL);
@@ -54786,7 +54786,9 @@ function wcEnsure() {
   WC.ref = land.cell; WC.s = new Array(nk).fill(null); WC.n = new Array(nk).fill(null); WC.act = new Uint8Array(nk); WC.rest = new Float32Array(nk);
   WC.top = new Float32Array(land.cols).fill(NaN); WC.bed = new Float32Array(land.cols).fill(NaN); WC.open = new Uint8Array(land.cols); WC.colsT = new Uint8Array(land.cols);
   WC.sea = new Uint8Array(land.cols); for (let c = 0; c < land.cols; c++) WC.sea[c] = onLand((c + 0.5) * LT_CELL) ? 0 : 1;
-  WC.ssea = new Uint8Array(nk); for (let c = 0; c < land.cols; c++) if (WC.sea[c] || c === 0 || c === land.cols - 1 || WC.sea[c - 1] || WC.sea[c + 1]) WC.ssea[(c / LT_CHUNK) | 0] = 1;   // (a slice at sea or beside it)
+  // (a slice where the ocean meets open ground it may flow into: a shore, or a hole's columns - their water is made when they wake)
+  WC.ssea = new Uint8Array(nk); for (let c = 0; c < land.cols; c++) if (c === 0 || c === land.cols - 1 || WC.sea[c] !== WC.sea[c - 1] || WC.sea[c] !== WC.sea[c + 1]) WC.ssea[(c / LT_CHUNK) | 0] = 1;
+  if (typeof SHP !== 'undefined' && SHP.holes) for (const n of SHP.holes) { const S = SHP.cols[n]; if (S) for (let c = Math.max(0, S.c0); c <= Math.min(land.cols - 1, S.c1); c++) if (WC.sea[c]) WC.ssea[(c / LT_CHUNK) | 0] = 1; }
   WC.sfr = new Int32Array(land.cols).fill(-1);
   WC.seaRow = (WATER_Y - LT_Y0) / LT_CELL; WC.ver++; WC.fill = true;
   return true;
@@ -54859,11 +54861,10 @@ function wcFill() {
 }
 // the awake slices and the ones beside them, as one block of cells (WD): what's open (0 rock, 1 open, 2 the ocean's), the amounts; stepped there
 // W_SUB times with plain arrays, then put back in the slices. The block's open cells kept while the ground doesn't change (LIGHT.ver)
-const WD = { key: '', W: 0, H: 0, c0: 0, r0: 0, air: null, m: null, n: null, sea: null };
-function wcStepBlock() {
-  const nk = WC.act.length; let ka = 1e9, kb = -1;
-  for (let k = 0; k < nk; k++) if (WC.act[k]) { if (!WC.s[k] && WC.ssea[k]) wArr(k, true); if (WC.s[k]) { ka = Math.min(ka, k); kb = Math.max(kb, k); } }
-  if (kb < 0) return null;
+const WDS = new Map();   // (each run's block, kept by where it starts: its open cells while the ground doesn't change)
+function wcStepBlock(ka, kb, chg) {
+  const nk = WC.act.length;
+  let WD = WDS.get(ka); if (!WD) { WD = { key: '', W: 0, H: 0, c0: 0, r0: 0, air: null, m: null, n: null, sea: null }; WDS.set(ka, WD); if (WDS.size > 16) WDS.delete(WDS.keys().next().value); }
   ka = Math.max(0, ka - 1); kb = Math.min(nk - 1, kb + 1);
   const c0 = ka * LT_CHUNK, c1 = Math.min(land.cols, (kb + 1) * LT_CHUNK); let r0 = 1e9, r1 = -1e9;
   for (let k = ka; k <= kb; k++) { r1 = Math.max(r1, land.rB[k]); const A = WC.s[k]; if (!A) continue; const cw = land.cw[k]; for (let i = 0; i < A.length; i++) if (A[i] > 0) { r0 = Math.min(r0, A.rT + Math.floor(i / cw)); break; } }
@@ -54897,22 +54898,20 @@ function wcStepBlock() {
       } }
     M.set(Nn.subarray(0, n));
   }
-  wcLevel(W, H, n, r0);
+  wcLevel(WD, W, H, n, r0);
   // (back into the slices: each one's biggest change says whether it's still moving)
-  const chg = new Float32Array(nk);
   for (let k = ka; k <= kb; k++) { const cw = land.cw[k], xo = k * LT_CHUNK - c0; let A = WC.s[k];
     if (!A) { let any = false; for (let y = 0; y < H && !any; y++) for (let q = 0; q < cw; q++) if (M[y * W + xo + q] > 0.001) { any = true; break; } if (!any) continue; A = wArr(k, true); }
     const h = A.length / cw; let mx = 0;
     for (let j = 0; j < h; j++) { const y = A.rT + j - r0; if (y < 0 || y >= H) continue; for (let q = 0; q < cw; q++) { const v = M[y * W + xo + q], i = j * cw + q, d = Math.abs(v - A[i]); if (d > mx) mx = d; A[i] = v > 1e-5 ? v : 0; } }
-    chg[k] = mx; if (mx > W_EPS) { WC.act[k] = 1; WC.rest[k] = 0; } }
-  return chg;
+    chg[k] = Math.max(chg[k], mx); if (mx > W_EPS) { WC.act[k] = 1; WC.rest[k] = 0; } }
 }
 // (the cells alone level a wide pool slowly - a little to each side each step. Water under its surface presses through all of it at once: each body
 // of full cells joined together levels its surfaces - the open cells at its top - toward their mean, a share each step; one joined to the ocean
 // toward the ocean's line. A stream running down a slope isn't full: it doesn't join a basin to the pool it pours into, so a basin never drains
 // over its rim this way - only by the cells' own flow)
 const W_FULL = 0.95, W_LEVEL = 0.3;
-function wcLevel(W, H, n, r0) {
+function wcLevel(WD, W, H, n, r0) {
   const AIR = WD.air, M = WD.m;
   if (!WD.lab || WD.lab.length < n) WD.lab = new Int32Array(n);
   const L = WD.lab; L.fill(0, 0, n);
@@ -54939,7 +54938,9 @@ function stepFlood(dt) {
   if (WC.fill) wcFill();
   let any = false; for (let k = 0; k < WC.act.length; k++) if (WC.act[k]) { any = true; break; }
   if (any) {
-    const chg = wcStepBlock();
+    // (each run of awake slices with water a block of its own: two far apart are never one block over the world between)
+    const nk = WC.act.length, chg = WC.chg && WC.chg.length === nk ? WC.chg.fill(0) : (WC.chg = new Float32Array(nk));
+    for (let k = 0; k < nk; k++) { if (!WC.act[k]) continue; if (!WC.s[k] && WC.ssea[k]) wArr(k, true); if (!WC.s[k]) continue; let e = k; while (e + 1 < nk && WC.act[e + 1] && (WC.s[e + 1] || WC.ssea[e + 1])) { e++; if (!WC.s[e]) wArr(e, true); } wcStepBlock(k, e, chg); k = e + 1; }
     for (let k = 0; k < WC.act.length; k++) { if (!WC.act[k]) continue; if (!WC.s[k] || !chg || chg[k] < W_EPS) { WC.rest[k] += dt; if (WC.rest[k] > 1) WC.act[k] = 0; } else WC.rest[k] = 0; }
     WC.ver++;
   }
@@ -55006,7 +55007,7 @@ function waterApply() {
 // (the page, with the simulation worker stepping: the water came in a snapshot - into what reads it once each change)
 function waterPageSync() { if (!wcEnsure() || WC.pageVer === WC.ver) return; WC.pageVer = WC.ver; waterApply(); }
 // a new world: the water made again from its levels when its ground is (wcEnsure)
-function waterReset() { WC.ref = null; WC.act = null; WC.ver++; }
+function waterReset() { WC.ref = null; WC.act = null; WC.ver++; WDS.clear(); }
 // the water's floor at x: the bottom of its top water (a column with none: the ground's top)
 function waterBedAt(x) { const c = ltCol(x); if (!wcEnsure() || c < 0 || c >= land.cols) return landTop(x); const b = WC.bed[c]; return Number.isFinite(b) ? b : landTop(x); }
 // is there water at (x, y) - the ocean's, a lake's, a cave's - and its top surface over it there (null: dry). One question for everything that
