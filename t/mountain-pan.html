@@ -5109,7 +5109,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 882;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 15:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 08 15:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -50580,7 +50580,7 @@ function landSlices(x0, x1) {
    when the view holds land: landSpansIn) and the islands' (islSlices, the sea's pass and the land's). Here too what paints them
    all again (the meadow's, STONE COLOURS' and UNDERGROUND LIGHT's sliders, the TROPICAL rock's picture come), the slices
    seen (landKeep: the page's picture memory lets the far ones go). The drawing only places the canvases. */
-const LT_IDLE_MS = 400, LT_IDLE = { t: 0, sig: '' };
+const LT_IDLE_MS = 400, LT_IDLE = { t: 0, sig: '' }, LT_PAINT_MS = 6;
 if (typeof window !== 'undefined' && typeof SW_IN_WORKER !== 'undefined' && !SW_IN_WORKER) for (const ev of ['pointermove', 'pointerdown', 'wheel', 'keydown']) window.addEventListener(ev, () => { LT_IDLE.t = performance.now(); }, { capture: true, passive: true });
 // nothing moving: the views where they were and no mouse or key since LT_IDLE_MS ago
 function landIdle(views) {
@@ -50597,18 +50597,30 @@ function landPaintStep(views) {
   { const sc = bgP('bgsc', 1) + ',' + ugReach(); if (land.ssig !== sc) { if (land.ssig !== undefined) land.dirty.fill(1); land.ssig = sc; } }   // (STONE COLOURS or UNDERGROUND LIGHT moved: the ground painted again)
   let painted = 0;
   const need = k => land.dirty[k] || !land.chunks[k];
-  const paint = k => { if (need(k)) { paintLandChunk(k); land.dirty[k] = 0; painted++; } };
-  const ahead = [];
+  const ahead = [], todo = [];
   for (const [v, cp, , w] of views) {
-    const sv = S * v.z, x0 = cp / sv, x1 = x0 + w / sv;
+    const sv = S * v.z, x0 = cp / sv, x1 = x0 + w / sv, xm = (x0 + x1) / 2;
     const list = landSpansIn(x0, x1).length ? landSlices(x0, x1) : [], isl = islSlices(x0, x1);
     ahead.push([x0, x1]);
     // (user Nov 1 20:12, editor speed: nothing thrown away while the GAME EDITOR is open - panned back to, it was all painted again)
     { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; for (const k of isl) S_[k] = renderTick; }
     if (!LBACK) landBackArt();                              // (the caves' tile in: the backs painted again with it)
-    for (const [k] of list) if (!land.back[k]) { paintLandBack(k); painted++; }
-    for (const k of isl) { paint(k); landKeep(k); }
-    for (const [k] of list) { paint(k); landKeep(k); }
+    const dk = k => Math.abs((k + 0.5) * LT_CHUNK * LT_CELL - xm);
+    for (const [k] of list) if (!land.back[k]) todo.push([dk(k), 1, k]);
+    for (const k of isl) { if (need(k)) todo.push([dk(k), 0, k]); landKeep(k); }
+    for (const [k] of list) { if (need(k)) todo.push([dk(k), 0, k]); landKeep(k); }
+  }
+  // (user Nov 8 14:26, the Story world's mountain - slices up to 3,665 rows, 35-180 ms each: zoomed out, every slice coming into view was painted on the same
+  // frame, 1-5 s: "It's okay if things take longer to load ... but the splines, the editor and everything should stay smooth as butter") the slices in view
+  // painted nearest the view's middle first, within LT_PAINT_MS a frame (at least one): one not painted yet loads in - a slice painted before is drawn as it
+  // was until then. The same pictures: only when
+  if (todo.length) {
+    todo.sort((a, b) => a[0] - b[0]); const t0 = performance.now();
+    for (const [, bk, k] of todo) {
+      if (painted && performance.now() - t0 > LT_PAINT_MS) break;
+      if (bk) { if (!land.back[k]) { paintLandBack(k); landKeep(k); painted++; } }
+      else if (need(k)) { paintLandChunk(k); land.dirty[k] = 0; landKeep(k); painted++; }
+    }
   }
   // (user Nov 1 20:12, editor speed: panning to the sides zoomed out froze 56-154 ms each time new land came into view - every
   // slice painted on the frame it first showed) a frame that painted nothing paints the one slice nearest outside the view, up
@@ -50725,6 +50737,7 @@ function drawLandGround(x0, x1, onField, onWater) {
   drawIslandsLand(x0, x1);                                // (the segments in a country: behind the ground in front, in front of what's behind - 50-land-islands)
   drawTropForestAt(x0, x1);                               // (the TROPICAL back forest of the ground in front: before its slices, which cover its foot - 50-land-trop)
   for (const [k, xl] of list) {
+    if (!land.chunks[k]) continue;                        // (not painted yet: it loads in - landPaintStep)
     put(land.chunks[k], xl, k);
     gedgeDraw(land.chunks[k], xl); rimDraw(land.chunks[k], xl); tropDrawOv(k, 'main');   // (its smooth edge - 50-land-zz-edges.js; the TROPICAL rock's own pixels - 50-land-trop)                     // (the TROPICAL rock's own pixels - 50-land-trop)
   }
