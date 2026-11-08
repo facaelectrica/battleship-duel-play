@@ -507,7 +507,7 @@ function sceneBuiltIn(k) { try { const P = typeof WORLD_PACK === 'undefined' ? n
 function sceneCanon(k, v) { if (v == null) return null; try { const o = JSON.parse(v), drop = SCENE_VIEW[k];
   if (drop && o && typeof o === 'object') for (const q of drop) delete o[q];
   return JSON.stringify(o, (kk, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.keys(x).sort().reduce((m, q) => (m[q] = x[q], m), {}) : x); } catch (e) { return v; } }
-function sceneSame(k, a, b) { if (a === b) return true; const ea = a ?? sceneBuiltIn(k), eb = b ?? sceneBuiltIn(k); if (ea === eb) return true; return sceneCanon(k, ea) === sceneCanon(k, eb); }
+function sceneSame(k, a, b) { if (a === b) return true; const ea = a ?? sceneBuiltIn(k), eb = b ?? sceneBuiltIn(k); if (ea === eb) return true; if (ea === '\u0000none' || eb === '\u0000none') return false; return sceneCanon(k, ea) === sceneCanon(k, eb); }   // (LS_NONE, emptied on purpose - 00-world.js)
 function sceneDirty() { const J = sceneJ(); if (!J) return false; for (const k in J) if (!sceneSame(k, SCENE.raw.g(k), J[k])) return true; return false; }
 function sceneSave() { try { SCENE.raw.r(SCENE.key); } catch (e) { } }
 function sceneRestore() {
@@ -573,6 +573,12 @@ const isGameKey = k => typeof k === 'string' && k.startsWith('bd_') && !k.starts
 const worldPackOf = story => story ? WORLD_PACK.story : WORLD_PACK.open;
 // a key as it is kept, whichever world is loaded (the SNAPSHOT: both worlds in one paste - 41-sky-new.js gameSnapshot)
 let lsRawGet = k => localStorage.getItem(k), lsRawSet = (k, v) => localStorage.setItem(k, v), lsRawDel = k => localStorage.removeItem(k);
+/* (user Nov 8 13:52, "See if it's a bigger issue": the last lake, the only placed vehicle, every marker deleted - back after a reload) a key removed
+   (localStorage.removeItem - every saver's "nothing left": no lakes, no markers, every number at its default) while the built-in world has one is kept
+   as LS_NONE: it reads as nothing (null - the table's own default), never the built-in one. Going back to the built-in world on purpose (REVERT ALL
+   CHANGES, USE NEW) lets the key go: lsUnkeep (as the world names it) or lsRawDel (a stored name) */
+const LS_NONE = '\u0000none';
+let lsUnkeep = k => localStorage.removeItem(k);
 const STORY_WORLD = (() => { try { return localStorage.getItem('bd_world') === 'story'; } catch (e) { return false; } })();   // (the BIOME EDITOR's own world comes in over whichever this is - vegIn: every world key read from it)
 /* (user, Nov 2 12:35: "make it so that the snapshot actually copies the content of the tab that I'm in ... update what's in the
    memory at the same time that's capturing the snapshot") THIS TAB'S SAVE: two tabs share one browser save and each writes whole
@@ -646,7 +652,9 @@ const guardStop = (k, how) => { if (!GUARD.on || !guardKey(k)) return false; GUA
   const PK = worldPackOf(STORY_WORLD), GK = WORLD_PACK.game || {};
   const isW = k => typeof k === 'string' && WORLD_KEYS.includes(k);
   const map = k => STORY_WORLD && isW(k) ? swKey(k) : k;
-  const back = (k, v) => v != null ? v : isW(k) && k in PK ? PK[k] : isGameKey(k) && k in GK ? GK[k] : v;   // (not kept here: the built-in one)
+  const back0 = (k, v) => v != null ? v : isW(k) && k in PK ? PK[k] : isGameKey(k) && k in GK ? GK[k] : v;   // (not kept here: the built-in one)
+  const back = (k, v) => { const r = back0(k, v); return r === LS_NONE ? null : r; };   // (emptied on purpose: nothing - LS_NONE)
+  const built = k => (isW(k) && k in PK) || (isGameKey(k) && k in GK);
   const NW = k => NET_WORLD.on && netKey(k) && !(NET_WORLD.pass && NET_WORLD.pass.has(k));                     // (an online guest's: the host's world)
   const nwGet = k => NET_WORLD.map.has(k) ? NET_WORLD.map.get(k) : null, nwSet = (k, v) => { NET_WORLD.map.set(k, String(v)); }, nwDel = k => { NET_WORLD.map.delete(k); };
   try {
@@ -655,15 +663,17 @@ const guardStop = (k, how) => { if (!GUARD.on || !guardKey(k)) return false; GUA
       const P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
       GUARD.rawSet = (k, v) => s.call(LS, k, v); GUARD.rawDel = k => r.call(LS, k);   // (the guard's own way back in - guardOff)
       lsRawGet = k => g.call(LS, k); lsRawSet = (k, v) => { if (!guardStop(k, 'write')) s.call(LS, k, v); }; lsRawDel = k => { if (!guardStop(k, 'remove')) r.call(LS, k); };
+      lsUnkeep = k => { if (NW(k)) return nwDel(k); const K = map(k); if (!guardStop(K, 'remove')) r.call(LS, K); };
       P.getItem = function (k) { return this !== LS ? g.call(this, k) : NW(k) ? nwGet(k) : back(k, g.call(this, map(k))); };
       P.setItem = function (k, v) { if (this === LS && NW(k)) return nwSet(k, v); const K = this === LS ? map(k) : k; if (this === LS && guardStop(K, 'write')) return; return s.call(this, K, v); };
-      P.removeItem = function (k) { if (this === LS && NW(k)) return nwDel(k); const K = this === LS ? map(k) : k; if (this === LS && guardStop(K, 'remove')) return; return r.call(this, K); };
+      P.removeItem = function (k) { if (this === LS && NW(k)) return nwDel(k); const K = this === LS ? map(k) : k; if (this === LS && guardStop(K, 'remove')) return; if (this === LS && built(k)) return s.call(LS, K, LS_NONE); return r.call(this, K); };
       { const c = P.clear; P.clear = function () { if (this === LS && GUARD.on) { const ks = []; for (let i = 0; i < LS.length; i++) ks.push(LS.key(i)); for (const k of ks) if (!guardKey(k)) r.call(LS, k); GUARD.refused++; return; } return c.call(this); }; }   // (cleared while the guard is on: all but its keys)
     } else {                                                     // (the worker's stand-in: a plain object)
       const g = LS.getItem, s = LS.setItem, r = LS.removeItem;
       GUARD.rawSet = (k, v) => s(k, v); GUARD.rawDel = k => r(k);
       lsRawGet = k => g(k); lsRawSet = (k, v) => { if (!guardStop(k, 'write')) s(k, v); }; lsRawDel = k => { if (!guardStop(k, 'remove')) r(k); };
-      LS.getItem = k => NW(k) ? nwGet(k) : back(k, g(map(k))); LS.setItem = (k, v) => NW(k) ? nwSet(k, v) : guardStop(map(k), 'write') ? undefined : s(map(k), v); LS.removeItem = k => NW(k) ? nwDel(k) : guardStop(map(k), 'remove') ? undefined : r(map(k));
+      lsUnkeep = k => NW(k) ? nwDel(k) : guardStop(map(k), 'remove') ? undefined : r(map(k));
+      LS.getItem = k => NW(k) ? nwGet(k) : back(k, g(map(k))); LS.setItem = (k, v) => NW(k) ? nwSet(k, v) : guardStop(map(k), 'write') ? undefined : s(map(k), v); LS.removeItem = k => NW(k) ? nwDel(k) : guardStop(map(k), 'remove') ? undefined : built(k) ? s(map(k), LS_NONE) : r(map(k));
     }
   } catch (e) { }
 })();
@@ -715,7 +725,7 @@ let WORLD_STALE = null;
 function worldStaleAnswer(useNew) {
   const S = WORLD_STALE; WORLD_STALE = null; if (!S) return;
   try {
-    if (useNew) for (const k of [...WORLD_KEYS, ...Object.keys(WORLD_PACK.game || {})]) if (k !== 'bd_wbase') localStorage.removeItem(k);   // (this world's edits here let go: the built-in one read)
+    if (useNew) for (const k of [...WORLD_KEYS, ...Object.keys(WORLD_PACK.game || {})]) if (k !== 'bd_wbase') lsUnkeep(k);   // (this world's edits here let go: the built-in one read)
     localStorage.setItem('bd_wbase', S.built);
   } catch (e) { }
   if (useNew) location.reload();
@@ -1074,7 +1084,10 @@ function vtuneSave() {
   try {
     const ch = {};
     for (const f in VTUNE) for (const k in VTUNE[f]) if (VTUNE[f][k] !== VTUNE_DEF[f][k]) (ch[f] || (ch[f] = {}))[k] = VTUNE[f][k];
-    if (Object.keys(ch).length) localStorage.setItem('bd_vtune', JSON.stringify(ch)); else localStorage.removeItem('bd_vtune');
+    // (Nov 8: nothing written when it reads the same already - an UNDO or a REVERT that changed no number doesn't keep a copy of the built-in numbers here)
+    const v = Object.keys(ch).length ? JSON.stringify(ch) : null, now = localStorage.getItem('bd_vtune');
+    if (v === now || (v === null && now === '{}')) return;
+    if (v) localStorage.setItem('bd_vtune', v); else localStorage.removeItem('bd_vtune');   // (none: every number at its default - kept as emptied while the built-in has some, 00-world.js)
   } catch (e) { }
 }
 // a shell's, missile's or bomb's family in the table, by where it came from (s.from)
@@ -5095,8 +5108,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 878;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 14:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 879;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 08 15:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -27882,7 +27895,7 @@ function edBuild(host) {
   let delT = 0;
   bDel.onclick = () => {
     if (performance.now() - delT > 3000) { delT = performance.now(); bDel.textContent = 'SURE? TAP AGAIN'; bDel.classList.add('on'); setTimeout(() => { if (performance.now() - delT >= 2900) { bDel.textContent = 'REVERT ALL CHANGES'; bDel.classList.remove('on'); } }, 3000); return; }
-    try { for (const k of Object.keys(localStorage)) if (k.startsWith('bd_')) localStorage.removeItem(k); } catch (e) {}
+    try { for (const k of Object.keys(localStorage)) if (k.startsWith('bd_')) lsRawDel(k); } catch (e) {}   // (stored names, let go - the built-in world read again: 00-world.js)
     bDel.textContent = 'REVERTED'; setTimeout(() => location.reload(), 300);
   };
   // (SNAPSHOT, user Oct 29: "the snapshot feature ... that takes a screenshot of the world and then I can pass it to you for
@@ -67489,7 +67502,7 @@ function vegUI(Z) {
     // this browser keeps (VEG_JKEYS - the world and the rest of the game untouched) erased, the game's own back; a second tap within 3 s to be sure
     { const rb = L.querySelector('[data-vrev]'); let t0 = 0; if (rb) rb.onclick = () => { rb.blur();
       if (performance.now() - t0 > 3000) { t0 = performance.now(); rb.textContent = 'SURE? TAP AGAIN'; setTimeout(() => { if (performance.now() - t0 >= 2900) rb.textContent = 'REVERT ALL CHANGES'; }, 3000); return; }
-      try { for (const k of VEG_JKEYS) localStorage.removeItem(k); } catch (e) { } sceneSave(); rb.textContent = 'REVERTED'; setTimeout(vegAgain, 300); }; }
+      try { for (const k of VEG_JKEYS) lsUnkeep(k); } catch (e) { }   /* (back to the built-in: let go - 00-world.js) */ sceneSave(); rb.textContent = 'REVERTED'; setTimeout(vegAgain, 300); }; }
     // go: what was asked for; reload: a DISCARD that stays here loads the page again (the editor shows what's saved)
     const vAsk = async (go, reload) => { if (!vDirty()) { go(); return; } const r = await vgDlg('UNSAVED CHANGES', '<div style="color:#9aa3b5">Save your changes to the biomes?</div>', [['SAVE CHANGES', 's', 1], ['DISCARD', 'd', 2], ['CANCEL', 'c']]);
       if (r.v === 'c') return; if (r.v === 's') { await vSave(); go(); return; } sceneRestore(); if (reload) { vegAgain(); return; } go(); };
