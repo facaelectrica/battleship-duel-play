@@ -594,7 +594,7 @@ const netKey = k => typeof k === 'string' && (WORLD_KEYS.includes(k) || NET_GAME
 const NET_WORLD = { on: false, map: new Map(), pass: null };
 // (Nov 4, the VEGETATION EDITOR - 00-a-veg-mode.js) its world held in memory as an online guest's is: the open world's conversions marked done, one flat
 // stretch of TROPICAL ground (a SOLID shape, the last of it sea) and nothing else - this browser's own world untouched; the plants' numbers (bd_vtune) its own
-let LAB_CAVE = null;
+let LAB_CAVE = null, VEG_GUARD = false;
 if (VEG_MODE) {
   const o = (WORLD_PACK && WORLD_PACK.open) || {}, w = {}; for (const k in o) if (/_conv$/.test(k) || k === 'bd_air_ungroup' || k === 'bd_sky_p') w[k] = o[k];
   const L = 6800, TOP = -30, GAP = 3000, BED = 200, FOOT = 260;   // (Nov 7: the sea 3000 wide - the caves are built only by a sea floor 2000 wide - cavesWanted)
@@ -610,7 +610,18 @@ if (VEG_MODE) {
   Object.assign(w, { bd_islands: JSON.stringify(GROUND),
     bd_structs: '[]', bd_placed: '[]', bd_nature: '[]', bd_wrecks: '[]', bd_krakens: '[]', bd_lakes: '[]', bd_backgrounds: '[]', bd_weather_areas: '[]', bd_caves: JSON.stringify({ v: 1, systems: [] }) });
   NET_WORLD.map = new Map(Object.entries(w)); NET_WORLD.on = true; NET_WORLD.pass = new Set(['bd_vtune']);
+  VEG_GUARD = true;                                               // (the guard's lock on as soon as the shim is in - below)
 }
+/* ---- THE WORLD GUARD (user Nov 8 09:12, of the Biome Editor and this browser's saved world: "This is SUPER important"). While another world
+   is in this page - an online host's for a round, the Biome Editor's test world - this browser's own saved world must come out exactly as
+   it went in. Three locks, all here in the one gate every save goes through (the shim below, lsRawSet / lsRawDel):
+   1. LOCKED: while GUARD.on, a write or removal of any of its keys (GUARD_KEYS: each world's WORLD_KEYS - bd_ and bd_sw_ - and the keys a
+      round plays from, NET_GAME_KEYS) is refused, whoever asks; the borrowed world's own go to memory (NET_WORLD) as before.
+   2. CHECKED: guardOn takes a fingerprint of them; guardOff takes it again - any difference and they are put back from (3), loudly.
+   3. COPIED: guardOn keeps a whole copy of them - here, and in IndexedDB bd_guard (the last one, should the page go down meanwhile). ---- */
+const GUARD = { on: false, why: '', sum: null, copy: null, refused: 0, tripped: 0 };
+const guardKey = k => typeof k === 'string' && k.startsWith('bd_') && !(NET_WORLD.pass && NET_WORLD.pass.has(k)) && (WORLD_KEYS.includes(k) || NET_GAME_KEYS.includes(k) || (k.startsWith('bd_sw_') && WORLD_KEYS.includes('bd_' + k.slice(6))));   // (a key the borrowed world passes through to this browser on purpose - the Biome Editor's tree numbers, bd_vtune - isn't held)
+const guardStop = (k, how) => { if (!GUARD.on || !guardKey(k)) return false; GUARD.refused++; if (GUARD.refused < 20) console.warn('WORLD GUARD: refused to ' + how + ' ' + k + ' while ' + GUARD.why + ' is in'); return true; };
 (function worldShim() {
   const PK = worldPackOf(STORY_WORLD), GK = WORLD_PACK.game || {};
   const isW = k => typeof k === 'string' && WORLD_KEYS.includes(k);
@@ -622,14 +633,17 @@ if (VEG_MODE) {
     const LS = localStorage;
     if (typeof Storage !== 'undefined' && LS instanceof Storage) {
       const P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
-      lsRawGet = k => g.call(LS, k); lsRawSet = (k, v) => s.call(LS, k, v); lsRawDel = k => r.call(LS, k);
+      GUARD.rawSet = (k, v) => s.call(LS, k, v); GUARD.rawDel = k => r.call(LS, k);   // (the guard's own way back in - guardOff)
+      lsRawGet = k => g.call(LS, k); lsRawSet = (k, v) => { if (!guardStop(k, 'write')) s.call(LS, k, v); }; lsRawDel = k => { if (!guardStop(k, 'remove')) r.call(LS, k); };
       P.getItem = function (k) { return this !== LS ? g.call(this, k) : NW(k) ? nwGet(k) : back(k, g.call(this, map(k))); };
-      P.setItem = function (k, v) { if (this === LS && NW(k)) return nwSet(k, v); return s.call(this, this === LS ? map(k) : k, v); };
-      P.removeItem = function (k) { if (this === LS && NW(k)) return nwDel(k); return r.call(this, this === LS ? map(k) : k); };
+      P.setItem = function (k, v) { if (this === LS && NW(k)) return nwSet(k, v); const K = this === LS ? map(k) : k; if (this === LS && guardStop(K, 'write')) return; return s.call(this, K, v); };
+      P.removeItem = function (k) { if (this === LS && NW(k)) return nwDel(k); const K = this === LS ? map(k) : k; if (this === LS && guardStop(K, 'remove')) return; return r.call(this, K); };
+      { const c = P.clear; P.clear = function () { if (this === LS && GUARD.on) { const ks = []; for (let i = 0; i < LS.length; i++) ks.push(LS.key(i)); for (const k of ks) if (!guardKey(k)) r.call(LS, k); GUARD.refused++; return; } return c.call(this); }; }   // (cleared while the guard is on: all but its keys)
     } else {                                                     // (the worker's stand-in: a plain object)
       const g = LS.getItem, s = LS.setItem, r = LS.removeItem;
-      lsRawGet = k => g(k); lsRawSet = (k, v) => s(k, v); lsRawDel = k => r(k);
-      LS.getItem = k => NW(k) ? nwGet(k) : back(k, g(map(k))); LS.setItem = (k, v) => NW(k) ? nwSet(k, v) : s(map(k), v); LS.removeItem = k => NW(k) ? nwDel(k) : r(map(k));
+      GUARD.rawSet = (k, v) => s(k, v); GUARD.rawDel = k => r(k);
+      lsRawGet = k => g(k); lsRawSet = (k, v) => { if (!guardStop(k, 'write')) s(k, v); }; lsRawDel = k => { if (!guardStop(k, 'remove')) r(k); };
+      LS.getItem = k => NW(k) ? nwGet(k) : back(k, g(map(k))); LS.setItem = (k, v) => NW(k) ? nwSet(k, v) : guardStop(map(k), 'write') ? undefined : s(map(k), v); LS.removeItem = k => NW(k) ? nwDel(k) : guardStop(map(k), 'remove') ? undefined : r(map(k));
     }
   } catch (e) { }
 })();
@@ -639,10 +653,31 @@ if (VEG_MODE) {
 const WORLD_LOADERS = [];
 function worldLoad(f) { WORLD_LOADERS.push(f); try { f(); } catch (e) { console.warn('world load', e); } }
 function worldReload() { for (const f of WORLD_LOADERS) try { f(); } catch (e) { console.warn('world load', e); } if (typeof worldReloaded === 'function') worldReloaded(); }
+if (VEG_GUARD) guardOn('the Biome Editor\'s test world');
 // (the host) its world as its screen reads it, for a guest; (a guest) the host's world for this round, or back to its own
 function netWorldPack() { const o = {}; for (const k of [...WORLD_KEYS, ...NET_GAME_KEYS]) { const v = localStorage.getItem(k); if (v != null) o[k] = v; } return o; }
-function netWorldIn(o) { NET_WORLD.map = new Map(Object.entries(o && typeof o === 'object' ? o : {}).filter(([k, v]) => netKey(k) && typeof v === 'string')); NET_WORLD.on = true; worldReload(); }
-function netWorldOut() { if (!NET_WORLD.on) return; NET_WORLD.on = false; NET_WORLD.map = new Map(); worldReload(); }
+function netWorldIn(o) { guardOn('the host\'s world'); NET_WORLD.map = new Map(Object.entries(o && typeof o === 'object' ? o : {}).filter(([k, v]) => netKey(k) && typeof v === 'string')); NET_WORLD.on = true; worldReload(); }
+function netWorldOut() { if (!NET_WORLD.on) return; NET_WORLD.on = false; NET_WORLD.map = new Map(); guardOff(); worldReload(); }
+// (THE WORLD GUARD, above) its keys as kept, raw; their fingerprint
+function guardTake() { const o = {}; try { const LS = localStorage; for (let i = 0; i < LS.length; i++) { const k = LS.key(i); if (guardKey(k)) o[k] = lsRawGet(k); } } catch (e) { } return o; }
+function guardSum(o) { let h = 2166136261; for (const k of Object.keys(o).sort()) { const s = k + '=' + o[k] + ';'; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } } return (h >>> 0) + ':' + Object.keys(o).length; }
+function guardOn(why) {
+  if (GUARD.on) return;
+  GUARD.copy = guardTake(); GUARD.sum = guardSum(GUARD.copy); GUARD.why = why || 'another world'; GUARD.refused = 0; GUARD.on = true;
+  try { if (typeof indexedDB !== 'undefined' && !SW_IN_WORKER) { const q = indexedDB.open('bd_guard', 1); q.onupgradeneeded = () => q.result.createObjectStore('c'); q.onsuccess = () => { try { q.result.transaction('c', 'readwrite').objectStore('c').put({ when: new Date().toISOString(), why: GUARD.why, keys: GUARD.copy }, 'last'); } catch (e) { } }; } } catch (e) { }
+}
+// the borrowed world gone: this browser's own checked against the copy - put back exactly if anything at all differs (returns false then)
+function guardOff() {
+  if (!GUARD.on) return true;
+  GUARD.on = false;
+  const now = guardTake(); if (guardSum(now) === GUARD.sum) return true;
+  GUARD.tripped++;
+  for (const k in now) if (!(k in GUARD.copy)) GUARD.rawDel(k);
+  for (const k in GUARD.copy) if (now[k] !== GUARD.copy[k]) GUARD.rawSet(k, GUARD.copy[k]);
+  console.error('WORLD GUARD: this browser\'s saved world had changed while ' + GUARD.why + ' was in - put back as it was');
+  if (typeof showToast === 'function') try { showToast('YOUR SAVED WORLD WAS PUT BACK AS IT WAS'); } catch (e) { }
+  return false;
+}
 // (the page, on load) this world's edits here against the built-in world: none of its own - its stamp taken; older than a
 // newer one built in - the title asks (WORLD_STALE)
 let WORLD_STALE = null;
@@ -5014,8 +5049,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 834;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 10:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 835;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 08 10:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
