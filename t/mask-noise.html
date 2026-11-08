@@ -5112,7 +5112,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 886;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 17:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 08 17:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -55073,8 +55073,8 @@ const vegFadeKeep = (x, salt, isl) => { const f = vegFadeAt(x, isl); return f >=
    1. the cells round the view (rock, under the line) kept in a texture that scrolls with the view (LIGHT.occ - a ring, its columns put again when the
       ground changes: lightDirty from ltDirty);
    2. LIGHT_A: each open cell's light - the sun's rays (a few, spread a little) and the lamps', each marched through the cells till rock stops it;
-   3. the rock's faces: each rock cell lit by the open cell nearest it (a jump flood: LIGHT_J), so a cave's walls are as dark as the air in front of them
-      - the ground's own fade into the deep (ltFade, painted) does the rest;
+   3. the rock: each rock cell lit as the ground's fade from the open cell that lights it best (an unlit one as if further off - a jump flood:
+      LIGHT_J), over the fade it was painted with from the nearest (ltFade) - a cave's walls as dark as the air in front of them;
    4. LIGHT_F: the dark - what the light leaves, in LIGHT.steps steps dithered by the cell - laid over the world after the land's pass (48-render.js).
    The Biome Editor shows it all lit unless CAVE LIGHT is off (landAllLit). Replaces the dark painted with each slice (Nov 8 13:44, landDarkMake) and
    its per-frame lamp box ---- */
@@ -55181,31 +55181,41 @@ void main() {
   }
   o = vec4(clamp(L, 0.0, 1.0), 0.0, 1.0, 1.0);
 }`;
-// (the jump flood: each texel the way to the nearest open one - offsets + 128 in R, G; B 1 when it has one)
+// (the jump flood, two at once: RG the way to the open cell that lights this one best - nearest, an unlit one counted u_w further off for each
+// part of the light it lacks - and BA the way to the nearest open cell of any light (the ground's own fade was painted from it: ltFade); offsets
+// + 128, 0 none)
 const LIGHT_J0 = LIGHT_HEAD + `
 uniform highp sampler2D u_a;
-void main() { vec4 a = texelFetch(u_a, ivec2(gl_FragCoord.xy), 0); o = a.g > 0.5 ? vec4(0.0) : vec4(128.0 / 255.0, 128.0 / 255.0, 1.0, 1.0); }`;
+void main() { vec4 a = texelFetch(u_a, ivec2(gl_FragCoord.xy), 0); o = a.g > 0.5 ? vec4(0.0) : vec4(128.0 / 255.0); }`;
 const LIGHT_J = LIGHT_HEAD + `
-uniform highp sampler2D u_s; uniform int u_st; uniform ivec2 u_sz;
+uniform highp sampler2D u_s; uniform highp sampler2D u_a; uniform int u_st; uniform ivec2 u_sz; uniform float u_w;
 void main() {
-  ivec2 p = ivec2(gl_FragCoord.xy); float best = 1e9; vec2 bo = vec2(0.0); bool got = false;
+  ivec2 p = ivec2(gl_FragCoord.xy); float bw = 1e9, bu = 1e9; vec2 ow = vec2(0.0), ou = vec2(0.0); bool gw = false, gu = false;
   for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
     ivec2 q = p + ivec2(i, j) * u_st; if (q.x < 0 || q.y < 0 || q.x >= u_sz.x || q.y >= u_sz.y) continue;
-    vec4 s = texelFetch(u_s, q, 0); if (s.b < 0.5) continue;
-    vec2 off = vec2(q - p) + floor(s.rg * 255.0 + 0.5) - 128.0; if (abs(off.x) > 127.0 || abs(off.y) > 127.0) continue;
-    float d = dot(off, off); if (d < best) { best = d; bo = off; got = true; }
+    vec4 s = floor(texelFetch(u_s, q, 0) * 255.0 + 0.5);
+    if (s.r > 0.5) { vec2 off = vec2(q - p) + s.rg - 128.0; if (abs(off.x) <= 127.0 && abs(off.y) <= 127.0) { float L = texelFetch(u_a, p + ivec2(off), 0).r, d = length(off) + (1.0 - L) * u_w; if (d < bw) { bw = d; ow = off; gw = true; } } }
+    if (s.b > 0.5) { vec2 off = vec2(q - p) + s.ba - 128.0; if (abs(off.x) <= 127.0 && abs(off.y) <= 127.0) { float d = dot(off, off); if (d < bu) { bu = d; ou = off; gu = true; } } }
   }
-  o = got ? vec4((bo + 128.0) / 255.0, 1.0, 1.0) : vec4(0.0);
+  o = vec4(gw ? (ow + 128.0) / 255.0 : vec2(0.0), gu ? (ou + 128.0) / 255.0 : vec2(0.0));
 }`;
-// (the dark: 1 - the light, stepped and dithered by the cell)
+// (the dark: 1 - the light, stepped and dithered by the cell. An open cell its own light; a rock cell the ground's fade from the open cell that
+// lights it best, over the fade it was painted with - lit as it was where the air in front of it is lit, darker as that air is)
 const LIGHT_F = LIGHT_HEAD + `
-uniform highp sampler2D u_a; uniform highp sampler2D u_s; uniform vec4 u_box; uniform float u_steps;
+uniform highp sampler2D u_a; uniform highp sampler2D u_s; uniform vec4 u_box; uniform float u_steps; uniform float u_w; uniform float u_fade;
 const float BY[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+float lit(float d) { return 1.0 - smoothstep(0.13 * u_fade, u_fade, d * u_box.z); }
 void main() {
   ivec2 p = ivec2(gl_FragCoord.xy); vec4 a = texelFetch(u_a, p, 0);
   if (a.b < 0.5) { o = vec4(0.0); return; }
   float L = a.r;
-  if (a.g > 0.5) { vec4 s = texelFetch(u_s, p, 0); L = s.b < 0.5 ? 1.0 : texelFetch(u_a, p + ivec2(floor(s.rg * 255.0 + 0.5) - 128.0), 0).r; }
+  if (a.g > 0.5) {
+    vec4 s = floor(texelFetch(u_s, p, 0) * 255.0 + 0.5);
+    if (s.b < 0.5) L = 1.0;   // (no open cell near: deep in the ground - black as painted)
+    else { float n = lit(length(s.ba - 128.0)); if (n < 0.02) L = 1.0;
+      else if (s.r < 0.5) L = 0.0;
+      else { vec2 off = s.rg - 128.0; float e = length(off) + (1.0 - texelFetch(u_a, p + ivec2(off), 0).r) * u_w; L = clamp(lit(e) / n, 0.0, 1.0); } }
+  }
   float LS = u_box.z; ivec2 c = ivec2(floor(vec2(u_box.x + gl_FragCoord.x * LS, u_box.y + (u_box.w - gl_FragCoord.y) * LS))) & 3;
   float q = clamp(floor(L * u_steps + (BY[c.y * 4 + c.x] + 0.5) / 16.0) / u_steps, 0.0, 1.0);
   o = vec4(0.0, 0.0, 0.0, 1.0 - q);
@@ -55216,7 +55226,7 @@ function lightSetup() {
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const U = {}; for (const k of names) U[k] = gl.getUniformLocation(p, k); return { p, U }; };
   LIGHT.prog = {
     a: prog(LIGHT_A, ['u_occ', 'u_ring', 'u_box', 'u_win', 'u_sun', 'u_sk', 'u_sky', 'u_nl', 'u_lp', 'u_lq']),
-    j0: prog(LIGHT_J0, ['u_a']), j: prog(LIGHT_J, ['u_s', 'u_st', 'u_sz']), f: prog(LIGHT_F, ['u_a', 'u_s', 'u_box', 'u_steps']),
+    j0: prog(LIGHT_J0, ['u_a']), j: prog(LIGHT_J, ['u_s', 'u_a', 'u_st', 'u_sz', 'u_w']), f: prog(LIGHT_F, ['u_a', 'u_s', 'u_box', 'u_steps', 'u_w', 'u_fade']),
   };
   LIGHT.vao = gl.createVertexArray(); gl.bindVertexArray(LIGHT.vao);
   gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
@@ -55271,9 +55281,10 @@ function lightDraw() {
     // 3. the rock's faces: the nearest open cell (jump flood, LIGHT.K texels)
     tex(1, V.a.tex); pass(V.s0, P.j0, U => gl.uniform1i(U.u_a, 1));
     let src = V.s0, dst = V.s1;
-    for (let st = LIGHT.K >> 1; st >= 1; st >>= 1) { tex(2, src.tex); pass(dst, P.j, U => { gl.uniform1i(U.u_s, 2); gl.uniform1i(U.u_st, st); gl.uniform2i(U.u_sz, lw, lh); }); [src, dst] = [dst, src]; }
+    const FG = ugReach() / LT_CELL, Wt = FG / LS;   // (the ground's fade, cells; an unlit open cell counts that much further off, in texels)
+    for (let st = LIGHT.K >> 1; st >= 1; st >>= 1) { tex(2, src.tex); pass(dst, P.j, U => { gl.uniform1i(U.u_s, 2); gl.uniform1i(U.u_a, 1); gl.uniform1i(U.u_st, st); gl.uniform2i(U.u_sz, lw, lh); gl.uniform1f(U.u_w, Wt); }); [src, dst] = [dst, src]; }
     // 4. the dark
-    tex(2, src.tex); pass(V.f, P.f, U => { gl.uniform1i(U.u_a, 1); gl.uniform1i(U.u_s, 2); gl.uniform4f(U.u_box, c0, r0, LS, lh); gl.uniform1f(U.u_steps, LIGHT.steps); });
+    tex(2, src.tex); pass(V.f, P.f, U => { gl.uniform1i(U.u_a, 1); gl.uniform1i(U.u_s, 2); gl.uniform4f(U.u_box, c0, r0, LS, lh); gl.uniform1f(U.u_steps, LIGHT.steps); gl.uniform1f(U.u_w, Wt); gl.uniform1f(U.u_fade, FG); });
     // (the renderer's own state set again, all of it - as the smoke's passes leave it)
     gl.enable(gl.BLEND); gl.bindVertexArray(GLR.vao);
     GLR.cur = {}; GLR.unit = []; GLR.unitS = []; GLR.st.tgt = null;
