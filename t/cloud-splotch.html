@@ -4949,7 +4949,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 819;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 23:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 07 23:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24930,7 +24930,8 @@ function batchRecCovers(d, o, ax, ay, x, y) {
 // P.bake 0 = the live sky as before (the switch to compare).
 const BK = [{ cur: null, next: null, hard: '', n: 0, left: 0, swaps: 0, avg: 0.6, ms: 0, t0: 0, took: 0, frames: 0 },
             { cur: null, next: null, hard: '', n: 0, left: 0, swaps: 0, avg: 0.6, ms: 0, t0: 0, took: 0, frames: 0 }];
-let BK_UID = 0, BK_ON = false, BK_BUDGET = 0;
+let BK_UID = 0, BK_ON = false, BK_BUDGET = 0, BK_LIT = 0;
+const BK_SH_MS = 1.5;   // (ms a frame for lighting baked clouds again whose shadows moved - bakeVisit)
 const BK_SKIP = new Set(['time', 'sea', 'wind', 'rain', 'sky', 'cover', 'big', 'fog', 'bake', 'bakestep', 'bakemove', 'bakems']);
 const bakeOn = () => (P.bake ?? 1) > 0 && GPU;
 // (a sprite still usable: drawn in this GL context, or an 'empty' one - the cloud gone at the new weather)
@@ -25000,8 +25001,9 @@ function bakeBegin(V) {
   if (!b.next && soft !== b.cur) { b.next = soft; b.t0 = now; b.f0 = frameNo; }
   // (the frame's budget: clouds a frame from the bakes' own cost - everything at once after a hard change)
   BK_BUDGET = b.force > 0 ? 1e9 : Math.max(1, Math.floor((P.bakems ?? 3) / Math.max(0.05, b.avg)));
+  BK_LIT = Math.max(1, Math.floor(BK_SH_MS / Math.max(0.02, b.avgL ?? 0.2)));   // (its shadows' relights: their own budget, by their own cost)
   if (b.force > 0) b.force--;
-  b.n = 0; b.left = 0; b.baking = 0;
+  b.n = 0; b.left = 0; b.baking = 0; b.lit = 0;
   // (sky & far sea pass, Oct 30: what every cloud's forming read from the sliders - the cover, how clear the sky is, the wisps'
   // share, the big clouds' growth, its deck on or off - worked out once a pass, not once a cloud: the same sums of the same
   // values (nothing between here and the clouds' loop moves a slider). Zoomed out every cloud of the sky is visited)
@@ -25057,16 +25059,13 @@ function bakeVisit(c, vis, gk) {
   if ((P.farsun ?? 1) > 0 && c.minX !== undefined) { const Xm = X + (c.minX + c.maxX) / 2; pk = sunStep(c, Xm, c.y - c.h / 2); }
   c.pkNow = pk;
   // what this cloud needs: its sprite for the gen being baked (b.next), or - no gen going - its sprite for the look shown
-  let need = 0, light = false;   // 0 nothing, 1 bake into B (swapped with the rest), 2 bake into F (shown at once), 3 nothing to show yet: now; light: its light alone
+  let need = 0;   // 0 nothing, 1 bake into B (swapped with the rest), 2 bake into F (shown at once), 3 nothing to show yet: now
   // (Oct 29, user: "Seeing some holes in our pre rendered clouds" - a cloud with no picture at all (just come into view, or after a
   // zoom) was baked only into the next set while a set was being baked, so it showed nothing - the sky through it - until the
   // whole sky swapped. Now it is baked at once, whatever the frame's budget, and that picture serves the coming swap too)
   if (wants && !shownF) need = 3;
   else if (b.next) { if (!(v.B && v.B.sig === b.next && bkOk(v.B))) need = wants ? 1 : -1; }
   else if (wants && !(bkOk(v.F) && v.F.sig === b.cur && (v.F.pk ?? '') === pk)) need = 2;
-  // (Nov 7: only its shadows moved - the decks sliding past each other as the camera goes, 17-frame.js shadowKey: its light again, its
-  // puffs as they are; once in SH_EVERY frames at most, so the clouds of the fastest deck don't take every frame's budget)
-  else if (wants && (v.F.shk ?? 0) !== (c.shK ?? 0) && frameNo - (v.F.bf ?? -1e9) >= SH_EVERY) { need = 2; light = true; }
   else if (!wants && v.F) { bkFree(v.F); v.F = null; }
   if (need === -1) { if (v.B && v.B !== v.F) bkFree(v.B); v.B = { empty: true, sig: b.next }; need = 0; }   // (gone at the new look: gone at the swap)
   if (need > 0 && (inView || (need === 3 && inWide))) {
@@ -25075,12 +25074,20 @@ function bakeVisit(c, vis, gk) {
     const must = need === 3 && inView;
     if (must || b.baking < BK_BUDGET) {
       if (!must) b.baking++;
-      v.now = need; v.light = light;
-      if (!light) { c.grow = c.growT; c.dirty = true; c.lobG = -1; }        // (placed whole, at its finished size, lit afresh)
+      v.now = need; v.light = false;
+      c.grow = c.growT; c.dirty = true; c.lobG = -1;                          // (placed whole, at its finished size, lit afresh)
       if (skyGen <= 0) skyGen = 0.001;                                        // (its puffs made now, whatever the frame's budget)
       return false;
     }
     if (need === 1) b.left++;
+  }
+  // (Nov 7: its shadows moved - the decks sliding past each other as the camera goes, 17-frame.js shadowKey - and it isn't being baked:
+  // the picture shown is lit again, its puffs as they are (light only), within the frame's own budget for that, BK_SH_MS - also while
+  // the next set is being baked, which in a day that moves is nearly always. Once in SH_EVERY frames at most a cloud, so the clouds of
+  // the fastest deck don't take every frame's turn)
+  if (inView && shownF && !shownF.empty && (shownF.shk ?? 0) !== (c.shK ?? 0) && frameNo - (shownF.bf ?? -1e9) >= SH_EVERY && b.lit < BK_LIT) {
+    b.lit++; v.now = 2; v.light = true;
+    return false;
   }
   // frozen: its sprite laid where the cloud is - nothing worked out
   if (!shownF || !on) { c.visible = false; return true; }
@@ -25191,10 +25198,13 @@ function bakeCloud(c, ax, ay) {
     s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID, pk: c.pkNow ?? '', w, zl: c.lay.zl, shk: c.shK ?? 0, bf: frameNo };   // (shk, bf: the shadows it was lit with, and when - bakeVisit)   // (zl: the decks' zoom it was baked at)   // (w: the picture's own width - its texture may be wider, on the shelf's sizes)
   }
   BKREC.ops.length = 0;
-  if (v.now === 3) { s.sig = b.next || b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (b.next) { if (v.B && v.B !== s) bkFree(v.B); v.B = s; } }
+  if (v.light) {   // (lit again for its shadows: the picture shown, as it was in every other way - the set it belongs to, the next set's if it is that)
+    const o = v.F; s.sig = o ? o.sig : b.cur; if (v.B === o) v.B = s; if (o && o !== s) bkFree(o); v.F = s;
+  }
+  else if (v.now === 3) { s.sig = b.next || b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (b.next) { if (v.B && v.B !== s) bkFree(v.B); v.B = s; } }
   else if (v.now === 2) { s.sig = b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (v.B && v.B.sig !== b.next) { bkFree(v.B); v.B = null; } }
   else { s.sig = b.next; if (v.B && v.B !== v.F) bkFree(v.B); v.B = s; }
-  const ms = performance.now() - t0; b.avg = b.avg * 0.9 + ms * 0.1; b.ms += ms; b.n++; b.lastF = frameNo;   // (the bench's CLOUDS: READY / BAKING - Oct 30)
+  const ms = performance.now() - t0; if (v.light) b.avgL = (b.avgL ?? ms) * 0.9 + ms * 0.1; else b.avg = b.avg * 0.9 + ms * 0.1; b.ms += ms; b.n++; b.lastF = frameNo;   // (the bench's CLOUDS: READY / BAKING - Oct 30)
   FTV.bake = (FTV.bake || 0) + ms; FTV.baked = (FTV.baked || 0) + 1;
   v.now = 0; v.light = false;
 }
