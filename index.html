@@ -3862,8 +3862,17 @@ const ISK_BIO = [null, 'forest', 'desert', 'sea', 'tropical', 'mountain', 'ice',
 // (user Nov 7 12:51, his sunset picture of the sand down the slope: "the sand ... doesn't have a uniform depth, but it changes slightly. It feels
 // more natural ... all these elements along a surface should have a bit of variation") a smooth wobble along the ground, -1..1: two octaves of
 // smoothed noise (~90 and ~30 world units), its own for each k - every surface layer's thickness rides on it
+// (Nov 8, editor speed: buildLand asks it for every cell down a column - the same x and k each time; the last answer per k is kept,
+// the same numbers - it was a quarter of the world's build)
+const SWOB_X = new Float64Array(64).fill(NaN), SWOB_K = new Float64Array(64).fill(NaN), SWOB_V = new Float64Array(64);
 function surfWob(x, k) {
-  const n = (u, s) => { const i = Math.floor(u), f = u - i, a = Math.sin(i * 127.1 + s * 311.7) * 43758.5453, b = Math.sin((i + 1) * 127.1 + s * 311.7) * 43758.5453, t = f * f * (3 - 2 * f); return ((a - Math.floor(a)) * (1 - t) + (b - Math.floor(b)) * t) * 2 - 1; };
+  const j = k & 63;
+  if (SWOB_X[j] === x && SWOB_K[j] === k) return SWOB_V[j];
+  SWOB_X[j] = x; SWOB_K[j] = k;
+  return (SWOB_V[j] = surfWob0(x, k));
+}
+function surfWob0(x, k) {
+  const n =(u, s) => { const i = Math.floor(u), f = u - i, a = Math.sin(i * 127.1 + s * 311.7) * 43758.5453, b = Math.sin((i + 1) * 127.1 + s * 311.7) * 43758.5453, t = f * f * (3 - 2 * f); return ((a - Math.floor(a)) * (1 - t) + (b - Math.floor(b)) * t) * 2 - 1; };
   return 0.7 * n(x / 90, k * 7.3 + 1) + 0.3 * n(x / 30, k * 3.1 + 5);
 }
 const bioMix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
@@ -4990,8 +4999,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 830;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 00:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 831;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 08 08:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -30316,9 +30325,18 @@ function rockProfile(W, H, kind, rnd1) {
 }
 // paint a rock from its silhouette: lit on top and from the upper left, darker down and on the right, blocky
 // patches, a few cracks and strata, moss on the flatter tops; tone (0..1) dims it toward the water's blue
+// (Nov 8, editor speed: was a fillRect a pixel - ~0.7 s of every world build on the user's PC. Now its pixels are written into one
+// ImageData and put once; every rectangle it drew was whole pixels of an opaque colour, so the picture is the same pixel for pixel)
 function paintRock(W, H, top, rnd1, tone = 0, water = null, bold = false, pal = RK) {
-  const c = makeCanvas(W, H), x = c.getContext('2d'), mixW = col => water ? mix3(col, water, tone) : col;
-  const P = {}; for (const k in pal) P[k] = css3(mixW(pal[k]));
+  const c = makeCanvas(W, H), cx2 = c.getContext('2d'), mixW = col => water ? mix3(col, water, tone) : col;
+  const cw = c.width, chh = c.height, img = cw && chh ? cx2.createImageData(cw, chh) : null, B = img ? new Uint32Array(img.data.buffer) : null;
+  const P = {}; for (const k in pal) { const v = mixW(pal[k]).map(q => Math.min(255, Math.max(0, q | 0))); P[k] = (0xff000000 | (v[2] << 16) | (v[1] << 8) | v[0]) >>> 0; }   // (css3's colour: each part cut to a whole number)
+  let fs = 0;
+  const x = { set fillStyle(v) { fs = v; }, fillRect(rx, ry, rw, rh) {
+    if (!B) return;
+    const x0 = Math.max(0, rx), x1 = Math.min(cw, rx + rw), y0 = Math.max(0, ry), y1 = Math.min(chh, ry + rh);
+    for (let yy = y0; yy < y1; yy++) { const o = yy * cw; for (let xx = x0; xx < x1; xx++) B[o + xx] = fs; }
+  } };
   const cracks = []; for (let i = 0; i < Math.round(W / 22); i++) cracks.push([Math.floor(rnd1() * W), rnd1() * 0.6 + 0.2]);
   const strata = 7 + Math.floor(rnd1() * 6), seed = rnd1() * 100;
   for (let col = 0; col < W; col++) {
@@ -30348,6 +30366,7 @@ function paintRock(W, H, top, rnd1, tone = 0, water = null, bold = false, pal = 
   // cracks: dark lines wandering down from the top
   x.fillStyle = P.ol;
   for (const [cx0, len] of cracks) { let cx = cx0, y = Math.floor(top[cx0]) + 3; const y1 = y + (H - y) * len; while (y < y1 && cx > 0 && cx < W - 1) { if (y > top[cx] + 2) x.fillRect(cx, y, 1, 2); y += 2; cx += hash(cx * 1.3 + y) < 0.33 ? -1 : hash(cx * 2.1 + y) < 0.5 ? 1 : 0; } }
+  if (img) cx2.putImageData(img, 0, 0);
   return c;
 }
 // a tuft of weed growing on a rock: a few wavy green-brown blades
@@ -49530,7 +49549,10 @@ const LT_DEEP = UG_RGB;                                // (was the kit's undergr
 // fade's reach is UNDERGROUND LIGHT, bgug, 110 units: about half the old 205. The ground in front fades by ltDist - its distance
 // to the nearest open air in any direction, the surface or a crater's sides and floor, so a hole shows lit earth round it and
 // the dark as deep again under it; the back wall seen through a hole still by its depth under the land's first top)
-const ugReach = () => bgP('bgug', 65);
+// (Nov 8, editor speed: asked for every cell a slice paints - a settings lookup each time, a tenth of the paint. Held while one slice paints: UGR_HOLD)
+let UGR_HOLD = 0;
+const ugReach = () => UGR_HOLD > 0 ? UGR_HOLD : bgP('bgug', 65);
+function ugHeld(fn) { if (UGR_HOLD > 0) return fn(); UGR_HOLD = bgP('bgug', 65); if (!(UGR_HOLD > 0)) { UGR_HOLD = 0; return fn(); } try { return fn(); } finally { UGR_HOLD = 0; } }
 function ltFade(c, r) {
   const d = LT_Y0 + r * LT_CELL - land.surf[Math.min(land.cols - 1, Math.max(0, c))];
   return ltFadeAt(d, c, r);
@@ -49568,9 +49590,10 @@ function stoneFree(x, y, rx, ry, gap) {
   return true;
 }
 // wholly in the earth: its middle and points round its rim all in dirt or rock (not grass, sand, concrete or air)
+const SFIT_C = Array.from({ length: 14 }, (_, k) => Math.cos(k * Math.PI * 2 / 14)), SFIT_S = Array.from({ length: 14 }, (_, k) => Math.sin(k * Math.PI * 2 / 14));   // (the same angles, worked out once)
 function stoneFits(x, y, rx, ry) {
   for (let k = -1; k < 14; k++) {
-    const a = k * Math.PI * 2 / 14, px = k < 0 ? x : x + Math.cos(a) * (rx + 1), py = k < 0 ? y : y + Math.sin(a) * (ry + 1);
+    const px = k < 0 ? x : x + SFIT_C[k] * (rx + 1), py = k < 0 ? y : y + SFIT_S[k] * (ry + 1);
     const m = ltCell(ltCol(px), ltRow(py)); if (m !== M_DIRT && m !== M_ROCK && !(m === M_SAND && tropCol(ltCol(px)))) return false;   // (TROPICAL: its sand packed with stones too)
   }
   return true;
@@ -49625,11 +49648,13 @@ function stonePts(o) {
 }
 function stoneIn(q, P, gap) { for (let k = 0; k < P.length; k += 2) { const nx = (P[k] - q.x) / (q.rx + gap), ny = (P[k + 1] - q.y) / (q.ry + gap); if (nx * nx + ny * ny <= 1 && stoneHit(q, nx, ny)) return true; } return false; }
 function stoneFreeP(x, y, rx, ry, gap) {
-  const o = stonePoly({ x, y, rx, ry, id: land.stones.length }), R = Math.max(rx, ry), P = stonePts(o);
+  // (Nov 8, editor speed: its own outline made only once a stone is near enough to need it - most tries have none near; the same answers)
+  const R = Math.max(rx, ry); let o = null, P = null;
   for (let gx = Math.floor((x - R - 50) / ST_G); gx <= Math.floor((x + R + 50) / ST_G); gx++) for (let gy = Math.floor((y - R - 50 - LT_Y0) / ST_G); gy <= Math.floor((y + R + 50 - LT_Y0) / ST_G); gy++) {
     const L = land.stoneG.get(gx * 4096 + gy); if (!L) continue;
     for (const j of L) {
       const q = land.stones[j], dx = (x - q.x) / (rx + q.rx + gap), dy = (y - q.y) / (ry + q.ry + gap); if (dx * dx + dy * dy >= 1) continue;
+      if (!o) { o = stonePoly({ x, y, rx, ry, id: land.stones.length }); P = stonePts(o); }
       if (stoneIn(q, P, gap) || stoneIn(o, stonePts(stonePoly(q)), gap)) return false;
     }
   }
@@ -49872,7 +49897,8 @@ function overhangShade(c, y) {
   if (dm >= OH_SHADE) return 1;
   const t = 1 - dm / OH_SHADE; return 1 - 0.8 * t * t * (3 - 2 * t);
 }
-function paintLandChunk(k) {
+function paintLandChunk(k) { return ugHeld(() => paintLandChunk0(k)); }
+function paintLandChunk0(k) {
   const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0), rT = land.rT[k], rB = land.rB[k], h = rB - rT + 4, T4 = 4 - rT;   // (+4: grass blades over the top row; a cell's row in the canvas: r + T4)
   let cv = land.chunks[k];
   if (!cv || cv.width !== w || cv.height !== h) cv = land.chunks[k] = makeCanvas(w, h);
@@ -50011,7 +50037,8 @@ function landBackHue(bn) {
   const v = Array.isArray(h) ? (q => h.map(x => x / q * (Number.isFinite(b) ? b : 1)))(h[0] * 0.3 + h[1] * 0.45 + h[2] * 0.25) : null;
   LBACK_HUE[bn] = { key, v }; return v;
 }
-function paintLandBack(k) {
+function paintLandBack(k) { return ugHeld(() => paintLandBack0(k)); }
+function paintLandBack0(k) {
   const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0), rT = land.rT[k], rB = land.rB[k], h = rB - rT + 4, T4 = 4 - rT;
   const cv = land.back[k] = makeCanvas(w, h), x = cv.getContext('2d'), id = x.createImageData(w, h), d = id.data, SR = stoneRaster(k, w);
   // (Nov 7: the field behind in its biome's colours - ICE snow, SWAMP olive, VOLCANIC ash; MOUNTAIN grey rock, not a meadow)
@@ -50059,10 +50086,10 @@ function paintLandBack(k) {
     // (its top broken by blades and drifts standing up out of it, a cell or two)
     if (FH > 1.5) { const tip = hash(c * 5.17) < 0.4 ? 1 + (hash(c * 2.03) < 0.3 ? 1 : 0) : 0; for (let b = 1; b <= tip; b++) { const tc = DSb ? G[0] : MEADOW[b > 1 ? 3 : 2]; put(q, r0 - b + T4, [tc[0] * 0.7, tc[1] * 0.74, tc[2] * 0.8 + 6]); } }
     const rE = ISLE !== null && ISLE[c] ? Math.min(rB, Math.ceil((WATER_Y + 2 - LT_Y0) / LT_CELL)) : rB;   // (an island: down to the water's line)
+    let hu;                                                      // (the column's cave colour - landBackHue, asked when first needed)
     const GPb = typeof shpGaps === 'function' ? shpGaps(c) : null;   // (user Nov 7 20:19: "Why are the overhangs with a BG texture?" - the open air under an overhang is no dug ground: nothing behind it but what's behind the land)
     for (let r = r0; r < rE; r++) {
       if (GPb && r >= sr && shpInGap(GPb, LT_Y0 + r * LT_CELL)) continue;   // (user Nov 7 21:49, "why are there black dots on that surface?" - the cell tested where the ground in front tests it, its top: the back wall never shows in the open air beside a step of the ground's cells)
-      const hsh = hash(c * 1.37 + r * 7.91);
       let col; TC = -1; DSb = DS0; G = DS0 ? DESERT_FIELD : LT_PAL[M_GRASS];
       if (r < sr) {
         if (FH <= 0.5) continue;                                     // (no field here: the airfield - what's behind shows)
@@ -50070,17 +50097,18 @@ function paintLandBack(k) {
       } else {
         // the back wall: the same stony earth, in shadow
         // (its stones the ground's own, whole - those standing out of the ground left out: none cut by the field's line)
-        const qi = (r - rT) * w + q, sj = SR.id[qi], o = sj >= 0 ? land.stones[sj] : null;
-        const k0 = hash(sj * 0.37), t = !o || o.y - o.ry < LT_Y0 + sr * LT_CELL ? -9 : SR.sd[qi];
         const BA = landBackArt();
         if (BA) {                                                    // (the caves' back wall - landBackArt - in the biome's cave colours, in shadow)
           const X = (c + 0.5) * LT_CELL, Y = LT_Y0 + (r + 0.5) * LT_CELL, px = ((Math.floor(X / 2) % BA.w) + BA.w) % BA.w, py = ((Math.floor(Y / 2) % BA.h) + BA.h) % BA.h, o2 = (py * BA.w + px) * 4;
-          const tc = [BA.d[o2], BA.d[o2 + 1], BA.d[o2 + 2]], hu = landBackHue(colBiome(c));
-          col = hu ? (L => hu.map(v => v * L))(tc[0] * 0.3 + tc[1] * 0.45 + tc[2] * 0.25) : tc;
-          col = col.map(v => Math.min(255, v * 1.4));                // (the tile is dark: lit about as the caves' shader lights their back wall in the open - 12-gl.js)
+          const t0 = BA.d[o2], t1 = BA.d[o2 + 1], t2 = BA.d[o2 + 2];
+          if (hu === undefined) hu = landBackHue(colBiome(c));        // (Nov 8, editor speed: the column's biome colour asked once a column, not once a cell - the same numbers)
+          if (hu) { const L = t0 * 0.3 + t1 * 0.45 + t2 * 0.25; col = [Math.min(255, hu[0] * L * 1.4), Math.min(255, hu[1] * L * 1.4), Math.min(255, hu[2] * L * 1.4)]; }
+          else col = [Math.min(255, t0 * 1.4), Math.min(255, t1 * 1.4), Math.min(255, t2 * 1.4)];   // (the tile is dark: lit about as the caves' shader lights their back wall in the open - 12-gl.js)
         } else {
+          const qi = (r - rT) * w + q, sj = SR.id[qi], o = sj >= 0 ? land.stones[sj] : null;
+          const k0 = hash(sj * 0.37), t = !o || o.y - o.ry < LT_Y0 + sr * LT_CELL ? -9 : SR.sd[qi];
           land.backNA = true;
-          if (DSb) col = t < -5 ? desertEarth(c, r, hsh) : desertStone(o, sj, t, SR.e[qi], SR.ux[qi], SR.uy[qi], c);   // (the desert's: its layered earth, in shadow)
+          if (DSb) col = t < -5 ? desertEarth(c, r, hash(c * 1.37 + r * 7.91)) : desertStone(o, sj, t, SR.e[qi], SR.ux[qi], SR.uy[qi], c);   // (the desert's: its layered earth, in shadow)
           else col = t < -5 ? D[3] : t > 0.25 ? (o.grey ? [150, 144, 134] : D[4]) : t > -0.3 ? (o.grey ? [120, 114, 106] : k0 < 0.5 ? D[0] : D[1]) : D[6];
           col = col.map((v, j) => v * 0.48 + [10, 12, 18][j]);
         }
@@ -50200,7 +50228,7 @@ function landPaintStep(views) {
     // (user Nov 1 20:12, editor speed: nothing thrown away while the GAME EDITOR is open - panned back to, it was all painted again)
     { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; for (const k of isl) S_[k] = renderTick; }
     if (!LBACK) landBackArt();                              // (the caves' tile in: the backs painted again with it)
-    for (const [k] of list) if (!land.back[k]) paintLandBack(k);
+    for (const [k] of list) if (!land.back[k]) { paintLandBack(k); painted++; }
     for (const k of isl) { paint(k); landKeep(k); }
     for (const [k] of list) { paint(k); landKeep(k); }
   }
@@ -50221,6 +50249,14 @@ function landPaintStep(views) {
     for (const [k, xl] of landSlices(a, b)) if (need(k)) { const xm = xl + LT_CHUNK * LT_CELL / 2, d = xm < x0 ? x0 - xm : xm > x1 ? xm - x1 : 0; if (d < bd) { bd = d; best = k; } }
   }
   if (best >= 0 && !painted) { paintLandChunk(best); land.dirty[best] = 0; if (land.seen) land.seen[best] = renderTick; landKeep(best); }
+  // (Nov 8, editor speed - user: "slow when zooming out": the field behind each slice was painted only once in view, so zooming out painted
+  // every one coming into view on the same frame, 100-200 ms) in the GAME EDITOR, a frame that painted nothing paints the nearest field behind
+  // too, the whole world's ahead as its ground is. The same pictures: only when
+  else if (all && best < 0 && !painted && landSpansIn(-1e9, 1e9).length) {
+    let bk = -1, bb = 1e18;
+    for (const [x0, x1] of ahead) for (const [k, xl] of landSlices(-1e9, 1e9)) if (!land.back[k]) { const xm = xl + LT_CHUNK * LT_CELL / 2, d = xm < x0 ? x0 - xm : xm > x1 ? xm - x1 : 0; if (d < bb) { bb = d; bk = k; } }
+    if (bk >= 0) { paintLandBack(bk); landKeep(bk); }
+  }
 }
 /* a slice's pictures - its ground, the field behind, the islands' - with their smooth edges and sun rims, in the page's picture
    memory (04-zzz-pics.js) as one group: used while it's in or just beside a view (the GAME EDITOR: the whole world), let go when
