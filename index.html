@@ -5082,8 +5082,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 851;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 12:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 852;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 08 12:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -38619,7 +38619,7 @@ function shipHornSound() {
   for (const c of B) if (c.hornOn && !hornVoices.has(c)) { const vo = sfxShipHornStart(c.x, HORN_HZ[c.kind] || 70); if (vo) hornVoices.set(c, vo); }
   for (const [c, vo] of hornVoices) {
     if (!c.hornOn || !B.includes(c)) { sfxShipHornStop(vo); hornVoices.delete(c); continue; }
-    const h = hear(c.x); vo.pan.set(h.pan); vo.out.gain.setTargetAtTime(h.att * 0.75, SFX.ctx.currentTime, 0.08);
+    const h = hear(c.x); vo.pan.set(h.pan); aim(vo.out.gain, h.att * 0.75, SFX.ctx.currentTime, 0.08);
   }
 }
 function sfxShipHornStart(x, hz) {
@@ -65250,9 +65250,18 @@ function loopNoise(buf) {
   const src = SFX.ctx.createBufferSource(); src.buffer = buf; src.loop = true;
   src.loopStart = 0; src.start(0, Math.random() * 1.5); return src;
 }
+// (Nov 8, the user: "that is unacceptable" - the sound's update sent ~70 levels to the audio every frame, 96% of them the very
+// level it was already easing to: each send is a call into the browser's audio, and on his PC the sound's part of a frame reached
+// ~7 ms) one rule for every level the game eases: aimed again at the same level with the same speed, nothing is sent - the ease
+// already under way is the same curve. A level that moves is sent once it has moved past a step no ear can tell (0.1%)
+function aim(prm, v, t, k) {
+  const a = prm._aim;
+  if (a !== undefined && prm._aimK === k && Math.abs(v - a) <= Math.abs(a) * 1e-3 + 1e-6) return;
+  prm._aim = v; prm._aimK = k; prm.setTargetAtTime(v, t, k);
+}
 function makePan() {
   const ctx = SFX.ctx;
-  if (ctx.createStereoPanner) { const n = ctx.createStereoPanner(); return { node: n, set: v => { n.pan.value = v; } }; }
+  if (ctx.createStereoPanner) { const n = ctx.createStereoPanner(); let last = NaN; return { node: n, set: v => { if (Math.abs(v - last) > 1e-3 || last !== last) { last = v; n.pan.value = v; } } }; }
   const n = ctx.createGain(); return { node: n, set: () => {} };
 }
 // (Safari on the iPad only lets sound start inside a touch's own handler: a silent sound played there wakes the
@@ -65309,7 +65318,7 @@ function sfxRound() {
 function sfxNewRound() {
   if (!SFX.ctx) return;
   const old = SFX.round; SFX.round = null;
-  if (old) { try { old.gain.setTargetAtTime(0, SFX.ctx.currentTime, 0.01); } catch (e) {} setTimeout(() => { try { old.disconnect(); } catch (e) {} }, 120); }
+  if (old) { try { aim(old.gain, 0, SFX.ctx.currentTime, 0.01); } catch (e) {} setTimeout(() => { try { old.disconnect(); } catch (e) {} }, 120); }
   for (const w of SFX.whoosh) { try { w.src.stop(); } catch (e) {} try { w.pan.node.disconnect(); } catch (e) {} }
   SFX.whoosh.length = 0;
 }
@@ -65457,7 +65466,7 @@ function ambLife(dt, L, seaK, underK) {
   }
   const near = harb * (1 - high) * (1 - underK), open = (1 - harb) * (1 - high) * (1 - underK);
   const day = clamp(E.day + 0.5 * E.dusk, 0, 1), rainy = clamp((E.rain || 0) * 1.5 + (E.storm || 0), 0, 1);
-  A.townG.gain.setTargetAtTime(0.014 * near * (0.35 + 0.65 * day), t, 0.5);
+  aim(A.townG.gain, 0.014 * near * (0.35 + 0.65 * day), t, 0.5);
   const out = sfxRound();
   // water lapping at the pillars and the stone
   if ((A.lapT -= dt) <= 0) {
@@ -65572,8 +65581,8 @@ function sfxBell(k) {
 function audioUpdate(dt) {
   if (!SFX.ctx) return;
   const ctx = SFX.ctx, t = SFX.ctx.currentTime, k = 0.12;
-  SFX.master.gain.setTargetAtTime(MUTED ? 0 : env.volume * 0.9, t, 0.05);
-  SFX.world.gain.setTargetAtTime(ui.menu || ui.title || ui.settings || PHOTO.on || paused || !worldLive() ? 0 : 1, t, 0.04);       // menus: the world goes quiet (the world menu and photo mode too, user Oct 26: "we don't want any volume in that menu")
+  aim(SFX.master.gain, MUTED ? 0 : env.volume * 0.9, t, 0.05);
+  aim(SFX.world.gain, ui.menu || ui.title || ui.settings || PHOTO.on || paused || !worldLive() ? 0 : 1, t, 0.04);       // menus: the world goes quiet (the world menu and photo mode too, user Oct 26: "we don't want any volume in that menu")
   if (!worldLive()) return;                                           // (no world yet, or LOADING: only the menu's volume - user Oct 31)
   // the sea: always there, louder and more surf-filled when it's rough or windy
   const sea = env.sea, wind = Math.abs(env.wind);
@@ -65589,14 +65598,14 @@ function audioUpdate(dt) {
     if (m === 'sub' && subs[p] && subs[p].state === 'out') { const dep = clamp((subs[p].y - surfaceY(subs[p].x) - 6) / 30, 0, 1); s = 1 - 0.85 * dep; underK = Math.max(underK, dep); }
     seaK += s / L.length;
   }
-  SFX.amb.seaG.gain.setTargetAtTime((0.035 + 0.16 * sea + 0.03 * wind) * swell * seaK, t, k);
+  aim(SFX.amb.seaG.gain, (0.035 + 0.16 * sea + 0.03 * wind) * swell * seaK, t, k);
   ambLife(dt, L, seaK, underK);
   if (LAND) shipHornSound();                                       // (the big ships' horns, held: 50-land-civdrive)
-  SFX.amb.seaLP.frequency.setTargetAtTime((280 + 700 * sea) * (1 - 0.6 * underK), t, k);
-  SFX.amb.surfG.gain.setTargetAtTime((0.006 + 0.05 * sea * sea) * (0.6 + 0.4 * Math.sin(time * 0.8 + 2)) * seaK * (1 - underK), t, k);
-  SFX.amb.surfBP.frequency.setTargetAtTime(700 + 600 * sea, t, k);
+  aim(SFX.amb.seaLP.frequency, (280 + 700 * sea) * (1 - 0.6 * underK), t, k);
+  aim(SFX.amb.surfG.gain, (0.006 + 0.05 * sea * sea) * (0.6 + 0.4 * Math.sin(time * 0.8 + 2)) * seaK * (1 - underK), t, k);
+  aim(SFX.amb.surfBP.frequency, 700 + 600 * sea, t, k);
   const R = E.rain || 0;
-  SFX.amb.rainG.gain.setTargetAtTime(0.075 * R, t, k);
+  aim(SFX.amb.rainG.gain, 0.075 * R, t, k);
   // individual drops and little splashes on the water and decks, more of them the harder it rains
   SFX.amb.splashAcc += dt * R * 34;
   while (SFX.amb.splashAcc >= 1) {
@@ -65616,29 +65625,29 @@ function audioUpdate(dt) {
       const on = cv ? (cv.eng ? 0.25 + 0.55 * Math.min(1, Math.abs(cv.wsp || 0) * UPM / Math.max(20, cv.v || 60)) + 0.2 * (cv.thr || 0) : 0)
         : tk && tk.state === 'alive' ? 0.3 + 0.7 * Math.min(1, Math.abs(tk.wsp != null ? tk.wsp * UPM : tk.vx) / VTUNE.tank.speed) : 0, h = src ? hear(src.x) : { pan: 0, att: 0 };
       const aboard = (cv || crew[i].mode === 'tank') && L.includes(i) ? 2 / Math.sqrt(L.length) : 1;
-      e.osc.frequency.setTargetAtTime(34 + 40 * on, t, 0.2); e.lp.frequency.setTargetAtTime(130 + 300 * on, t, 0.2); e.lfo.frequency.setTargetAtTime(5 + 10 * on, t, 0.2);
-      e.g.gain.setTargetAtTime(on ? (0.01 + 0.05 * on) * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard : 0, t, 0.2);
+      aim(e.osc.frequency, 34 + 40 * on, t, 0.2); aim(e.lp.frequency, 130 + 300 * on, t, 0.2); aim(e.lfo.frequency, 5 + 10 * on, t, 0.2);
+      aim(e.g.gain, on ? (0.01 + 0.05 * on) * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard : 0, t, 0.2);
       e.pan.set(aboard > 1 ? h.pan * 0.4 : h.pan);
       // (the civilian helicopter you're flying has its rotor heard too, as the army one - user Oct 26)
       const ch = crew[i].mode === 'civ' && crew[i].civ && civHelis.includes(crew[i].civ) ? crew[i].civ : null;
       const r = SFX.rot[i], hl = ch || helis[i], sp = hl && (hl.state === 'fly' || hl.state === 'landed') ? clamp(hl.spin || 0, 0, 1) : 0, hh = hl ? hear(hl.x) : { pan: 0, att: 0 };
       const inH = (crew[i].mode === 'heli' || ch) && L.includes(i) ? 2 / Math.sqrt(L.length) : 1;
-      r.lfo.frequency.setTargetAtTime(4 + 12 * sp, t, 0.3); r.lp.frequency.setTargetAtTime(250 + 400 * sp, t, 0.3);
-      r.g.gain.setTargetAtTime(sp * 0.07 * Math.max(hh.att, inH > 1 ? 1 : 0) * inH, t, 0.25);
+      aim(r.lfo.frequency, 4 + 12 * sp, t, 0.3); aim(r.lp.frequency, 250 + 400 * sp, t, 0.3);
+      aim(r.g.gain, sp * 0.07 * Math.max(hh.att, inH > 1 ? 1 : 0) * inH, t, 0.25);
       r.pan.set(inH > 1 ? hh.pan * 0.4 : hh.pan);
       continue;
     }
-    SFX.rot[i].g.gain.setTargetAtTime(0, t, 0.1);
+    SFX.rot[i].aim(g.gain, 0, t, 0.1);
     const sh = ships[i];
     const on = sh && sh.state === 'afloat' ? Math.abs(sh.throttle) : 0;
     const h = sh ? hear(sh.x) : { pan: 0, att: 0 };
-    e.osc.frequency.setTargetAtTime(30 + 34 * on, t, 0.3);
-    e.lp.frequency.setTargetAtTime(110 + 260 * on, t, 0.3);
-    e.lfo.frequency.setTargetAtTime(3 + 9 * on, t, 0.3);
+    aim(e.osc.frequency, 30 + 34 * on, t, 0.3);
+    aim(e.lp.frequency, 110 + 260 * on, t, 0.3);
+    aim(e.lfo.frequency, 3 + 9 * on, t, 0.3);
     // aboard her you hear her engines close to, below you
     const aboard = crew[i].mode === 'ship' && L.includes(i) ? 2.2 / Math.sqrt(L.length) : 1;
     // (stopped, or berthed, she's quiet: no idling drone over the harbour)
-    e.g.gain.setTargetAtTime((sh && sh.state === 'afloat' && !sh.moored && on > 0.04 ? 0.006 + 0.05 * on : 0) * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard, t, 0.25);
+    aim(e.g.gain, (sh && sh.state === 'afloat' && !sh.moored && on > 0.04 ? 0.006 + 0.05 * on : 0) * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard, t, 0.25);
     e.pan.set(aboard > 1 ? h.pan * 0.4 : h.pan);
   }
   // planes: the engine note climbs with the speed, sputters as it goes down; flying one, you hear it close and
@@ -65659,30 +65668,30 @@ function audioUpdate(dt) {
     const lab = up && !down ? clamp((1.5 * FLIGHT[fk].vs - pl.spd / UPM) / (0.7 * FLIGHT[fk].vs), 0, 1) : 0, stalled = up && !down && pl.stall > 0.05;
     const surge = 1 - lab * 0.35 * (0.5 + 0.5 * Math.sin(time * 6.5 + 2 * Math.sin(time * 2.3))) - (stalled ? 0.3 * Math.random() : 0);
     const f = (down ? 40 + 12 * Math.sin(time * 9) : 52 + 26 * clamp(sp, 0.5, 1.8)) * (jet ? 3.2 : fk === 'cessna' || fk === 'seaplane' ? 1.3 : 1) * (1 - 0.22 * lab);   // (a light plane's engine revs higher; a jet's turbine whines)
-    e.o1.frequency.setTargetAtTime(f, t, 0.15); e.o2.frequency.setTargetAtTime(f * 0.503, t, 0.15);
-    e.prop.frequency.setTargetAtTime(f * 0.38, t, 0.15); e.propG.gain.setTargetAtTime(jet ? 0 : 0.4, t, 0.1);
-    e.lp.frequency.setTargetAtTime((500 + 500 * clamp(sp, 0, 1.8)) * (jet ? 2.2 : 1) * (1 - 0.35 * lab), t, 0.2);
+    aim(e.o1.frequency, f, t, 0.15); aim(e.o2.frequency, f * 0.503, t, 0.15);
+    aim(e.prop.frequency, f * 0.38, t, 0.15); aim(e.propG.gain, jet ? 0 : 0.4, t, 0.1);
+    aim(e.lp.frequency, (500 + 500 * clamp(sp, 0, 1.8)) * (jet ? 2.2 : 1) * (1 - 0.35 * lab), t, 0.2);
     const lvl = !up || (pl && pl.eng === 'off') ? 0 : flying ? 0.075 / Math.sqrt(L.length) : 0.035 * h.att;
-    e.g.gain.setTargetAtTime(jet ? 0 : lvl * (down ? 0.6 + 0.4 * Math.random() : 1) * surge, t, 0.12);   // (a jet: its turbine voice, below)
+    aim(e.g.gain, jet ? 0 : lvl * (down ? 0.6 + 0.4 * Math.random() : 1) * surge, t, 0.12);   // (a jet: its turbine voice, below)
     e.pan.set(flying ? h.pan * 0.3 : h.pan);
     { // the jet's turbine (SFX.jt): its spool (how hard it's running) from its speed against its cruise, sagging labouring near the stall;
       // the roar opens and deepens with it, the whine climbs with it
       const J = SFX.jt[i], spool = clamp(0.55 + 0.35 * sp, 0.4, 1.15) * (1 - 0.25 * lab) * (down ? 0.6 : 1);
-      J.g.gain.setTargetAtTime(jet ? lvl * 1.5 * surge * (down ? 0.6 + 0.4 * Math.random() : 1) : 0, t, 0.25);
+      aim(J.g.gain, jet ? lvl * 1.5 * surge * (down ? 0.6 + 0.4 * Math.random() : 1) : 0, t, 0.25);
       J.pan.set(flying ? h.pan * 0.3 : h.pan);
-      J.rLP.frequency.setTargetAtTime(220 + 380 * spool, t, 0.4); J.rG.gain.setTargetAtTime(1.1 + 0.7 * spool, t, 0.4);
-      J.fan.frequency.setTargetAtTime(52 + 34 * spool, t, 0.5); J.fLP.frequency.setTargetAtTime(180 + 160 * spool, t, 0.5);
-      J.hBP.frequency.setTargetAtTime(1100 + 900 * spool, t, 0.4); J.hG.gain.setTargetAtTime(0.06 + 0.1 * spool + 0.05 * sp * sp, t, 0.4);
-      J.w1.frequency.setTargetAtTime(2200 + 1300 * spool, t, 0.6); J.w2.frequency.setTargetAtTime((2200 + 1300 * spool) * 1.5, t, 0.6); J.wG.gain.setTargetAtTime(0.006 + 0.01 * spool, t, 0.5);
+      aim(J.rLP.frequency, 220 + 380 * spool, t, 0.4); aim(J.rG.gain, 1.1 + 0.7 * spool, t, 0.4);
+      aim(J.fan.frequency, 52 + 34 * spool, t, 0.5); aim(J.fLP.frequency, 180 + 160 * spool, t, 0.5);
+      aim(J.hBP.frequency, 1100 + 900 * spool, t, 0.4); aim(J.hG.gain, 0.06 + 0.1 * spool + 0.05 * sp * sp, t, 0.4);
+      aim(J.w1.frequency, 2200 + 1300 * spool, t, 0.6); aim(J.w2.frequency, (2200 + 1300 * spool) * 1.5, t, 0.6); aim(J.wG.gain, 0.006 + 0.01 * spool, t, 0.5);
     }
     // nose down and fast: the dive scream climbs with the speed; going down in flames it falls away
     const diveK = !up ? 0 : down ? 0.9 : clamp((pl.pitch - 0.3) / 0.35, 0, 1) * clamp((pl.spd - 360) / 160, 0, 1);
     const df = down ? 760 - 380 * clamp((pl.spin || 0) / 40, 0, 1) : 420 + Math.max(0, (pl ? pl.spd : 0) - 300) * 1.9;
-    e.dv.frequency.setTargetAtTime(df, t, 0.25); e.dvf.frequency.setTargetAtTime(df * 1.6, t, 0.25);
+    aim(e.dv.frequency, df, t, 0.25); aim(e.dvf.frequency, df * 1.6, t, 0.25);
     // a dive is heard as the wind: a rushing roar that rises and brightens with the speed (no whistle)
-    e.dg.gain.setTargetAtTime(0, t, 0.2);
-    e.wbp.frequency.setTargetAtTime(500 + 500 * sp + 900 * diveK, t, 0.25);
-    e.wg.gain.setTargetAtTime(flying ? (0.02 * sp * sp + 0.07 * diveK) / Math.sqrt(L.length) : 0.03 * diveK * h.att, t, 0.25);
+    aim(e.dg.gain, 0, t, 0.2);
+    aim(e.wbp.frequency, 500 + 500 * sp + 900 * diveK, t, 0.25);
+    aim(e.wg.gain, flying ? (0.02 * sp * sp + 0.07 * diveK) / Math.sqrt(L.length) : 0.03 * diveK * h.att, t, 0.25);
   }
   // the shuttle's roar: the loudest stack heard (panned and faded by where it is, or close by aboard it); quieter through
   // the countdown, loudest with the boosters, a little less after they drop, thinning with the air to near silence in
@@ -65694,12 +65703,12 @@ function audioUpdate(dt) {
       const h = hear(v.x), aboard = L.some(p => crew[p].mode === 'civ' && crew[p].civ === v), heard = k * (aboard ? 1 : h.att);
       if (heard > best) { best = heard; bh = aboard ? { pan: h.pan * 0.3 } : h; bk = k; }
     }
-    RO.g.gain.setTargetAtTime(0.16 * best / Math.sqrt(L.length), t, 0.15);
+    aim(RO.g.gain, 0.16 * best / Math.sqrt(L.length), t, 0.15);
     if (bh) {
       RO.pan.set(bh.pan);
-      RO.rLP.frequency.setTargetAtTime(150 + 160 * bk, t, 0.3);        // (deeper and fuller with the boosters)
-      RO.hBP.frequency.setTargetAtTime(900 + 700 * bk, t, 0.3); RO.hG.gain.setTargetAtTime(0.12 + 0.18 * bk, t, 0.3);
-      RO.lfo.frequency.setTargetAtTime(0.5 + 0.6 * bk, t, 0.5);
+      aim(RO.rLP.frequency, 150 + 160 * bk, t, 0.3);        // (deeper and fuller with the boosters)
+      aim(RO.hBP.frequency, 900 + 700 * bk, t, 0.3); aim(RO.hG.gain, 0.12 + 0.18 * bk, t, 0.3);
+      aim(RO.lfo.frequency, 0.5 + 0.6 * bk, t, 0.5);
     }
   }
   // under the sea in a dived sub: the hum and rumble, water washing and bubbling past the hull, all of it rolling
@@ -65707,16 +65716,16 @@ function audioUpdate(dt) {
   // night, it was irritating)
   const U = SFX.under;
   U.k += (underK - U.k) * Math.min(1, dt * 2);
-  U.g.gain.setTargetAtTime(0.085 * U.k, t, 0.2);
-  if (U.k <= 0.05) { U.echoG.gain.setTargetAtTime(0, t, 0.2); U.washG.gain.setTargetAtTime(0, t, 0.2); }
+  aim(U.g.gain, 0.085 * U.k, t, 0.2);
+  if (U.k <= 0.05) { aim(U.echoG.gain, 0, t, 0.2); aim(U.washG.gain, 0, t, 0.2); }
   if (U.k > 0.05) {
     const sb = L.map(p => subs[p]).find(v => v && v.state === 'out' && crew[v.id].mode === 'sub');
-    if (sb) U.hum.frequency.setTargetAtTime(46 + 20 * Math.abs(sb.throttle || 0), t, 0.3);
-    U.echoG.gain.setTargetAtTime(0.9 * U.k, t, 0.2);
+    if (sb) aim(U.hum.frequency, 46 + 20 * Math.abs(sb.throttle || 0), t, 0.3);
+    aim(U.echoG.gain, 0.9 * U.k, t, 0.2);
     // the wash: its pitch and swell drifting slowly, a little more with her speed
     const spd = sb ? Math.min(1, Math.abs(sb.vx) / 40) : 0;
-    U.washG.gain.setTargetAtTime((0.05 + 0.05 * spd) * U.k * (0.6 + 0.4 * Math.sin(time * 0.37) * Math.sin(time * 0.23 + 1)), t, 0.4);
-    U.washBP.frequency.setTargetAtTime(300 + 140 * Math.sin(time * 0.17) + 160 * spd, t, 0.5);
+    aim(U.washG.gain, (0.05 + 0.05 * spd) * U.k * (0.6 + 0.4 * Math.sin(time * 0.37) * Math.sin(time * 0.23 + 1)), t, 0.4);
+    aim(U.washBP.frequency, 300 + 140 * Math.sin(time * 0.17) + 160 * spd, t, 0.5);
     // bubbles: little trains of them rising past the hull, each a quick upward 'blip', in bursts
     if ((U.burstT -= dt) <= 0) {
       U.burstT = rnd(0.5, 1.8) / (0.7 + spd);
@@ -65759,7 +65768,7 @@ function audioUpdate(dt) {
     w.life += dt;
     const flying = shells.includes(s) && !s.under;
     if (!flying || w.life > 12) {
-      w.g.gain.setTargetAtTime(0, t, 0.03);
+      aim(w.g.gain, 0, t, 0.03);
       w.src.onended = () => { try { w.src.disconnect(); w.bp.disconnect(); w.g.disconnect(); w.pan.node.disconnect(); } catch (e) {} };
       try { w.src.stop(t + 0.2); } catch (e) {}
       SFX.whoosh.splice(i, 1);
@@ -65770,14 +65779,14 @@ function audioUpdate(dt) {
       // a falling bomb: a buzzing whistle that climbs and swells as it gathers speed (user Oct 24 night)
       const fall = Math.max(0, s.vy);
       w.bp.Q.value = 7;
-      w.bp.frequency.setTargetAtTime(260 + fall * 2.2, t, 0.05);
-      w.g.gain.setTargetAtTime(0.32 * clamp(fall / 450, 0, 1) * h.att, t, 0.05);
+      aim(w.bp.frequency, 260 + fall * 2.2, t, 0.05);
+      aim(w.g.gain, 0.32 * clamp(fall / 450, 0, 1) * h.att, t, 0.05);
       w.pan.set(h.pan);
       continue;
     }
     // falling shells whistle higher as they come down
-    w.bp.frequency.setTargetAtTime(380 + sp * 0.75 + Math.max(0, s.vy) * 1.4, t, 0.05);
-    w.g.gain.setTargetAtTime(Math.min(1, w.life * 3) * 0.16 * h.att, t, 0.05);
+    aim(w.bp.frequency, 380 + sp * 0.75 + Math.max(0, s.vy) * 1.4, t, 0.05);
+    aim(w.g.gain, Math.min(1, w.life * 3) * 0.16 * h.att, t, 0.05);
     w.pan.set(h.pan);
   }
 }
