@@ -77,6 +77,11 @@ if (VEG_MODE) {
   try { const st = document.createElement('style'); st.textContent = 'html.flWait::after{content:"";position:fixed;inset:0;background:#2a3424;z-index:2147483647}'; document.head.appendChild(st); document.documentElement.classList.add('flWait'); setTimeout(() => document.documentElement.classList.remove('flWait'), 30000); } catch (e) { }
 }
 
+// (Nov 7: the Biome Editor's EDIT POINTS - 53-veg-editor.js - takes its presses before anything of the game's: these are the first listeners on the
+// window, so a press on its layer goes to it alone - window.__terrPointer says whether it took it)
+if (VEG_MODE && typeof window !== 'undefined') for (const ty of ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'contextmenu', 'wheel', 'dblclick', 'click'])
+  window.addEventListener(ty, e => { const h = window.__terrPointer; if (h && h(e)) e.stopImmediatePropagation(); }, { capture: true, passive: false });
+
 /* THE SIMULATION WORKER (sim-worker branch, user Oct 30 18:22: "the whole game simulation moves to a worker"; design:
    docs/sim-worker-design.md). Behind ?simworker=1; ?simworker=0 (the default) is the game as it was. This first part runs
    before every other: on the page it keeps the game script's own text (SW_SRC: the whole game, pictures and all), from which
@@ -4934,8 +4939,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 809;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 19:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 810;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 07 20:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36853,6 +36858,15 @@ function cglWindow(Wn, all) {
   T.done = T.k >= CGL_NAMES.length;
   return false;
 }
+// (Nov 7: a crater in a cave's rock - carve, 30-api.js) a window's rows r0..r1 of the named cells sent up again; one still going up: from the start
+function cglPatch(Wn, r0, r1, names) {
+  const T = Wn._gl; if (!T || !GLR.gl) return;
+  if (!T.done) { T.k = 0; T.row = 0; return; }
+  const gl = GLR.gl; r0 = Math.max(0, r0); r1 = Math.min(Wn.h, r1); if (r1 <= r0) return;
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); glPM(false); gl.activeTexture(gl.TEXTURE9);
+  for (const n of names) { const k = CGL_NAMES.indexOf(n); if (k < 0 || !T.tex[k]) continue; gl.bindTexture(gl.TEXTURE_2D, T.tex[k]); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, r0, Wn.w, r1 - r0, gl.RED, gl.UNSIGNED_BYTE, Wn[n], r0 * Wn.w); }
+  gl.bindTexture(gl.TEXTURE_2D, null); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4); GLR.cur = {}; GLR.unit = []; GLR.unitS = [];
+}
 // the windows no longer in use (rebuilt): off the chip
 function cglTidy() {
   for (const Wn of CGL.live) if (!CV.wins.includes(Wn)) cglFree(Wn);
@@ -37336,9 +37350,32 @@ function draw() {
 }
 // is x near a system's mouth (the game keeps its rock formations off them, as off the kraken's pad - buildReef)
 function nearMouth(x, r) { if (!bedWide(2000)) return false; return CAVES.systems.some(s => Math.abs(sysX(s) - x) < r); }
+/* ---- (user Nov 7 18:14, his pictures: "When we destroy a cave, it should be destroyed the same way the land was, it should not 'keep the shape'")
+   a crater (landCarve - X world, Y under the calm sea, rad) blows the caves' rock out too: in each window it reaches, every cell of rock, sand or
+   stalactite inside its (ragged) radius becomes the world's - the ground's crater and, behind it, the terrain's back wall, the caves' own tile
+   (50-land-terrain landBackArt) - so the cave's outline opens where it hit; the weed and corals there gone. Sent up to the chip in place (cglPatch) ---- */
+function carve(X, Y, rad) {
+  if (!CV.ready) return;
+  const G = CV.G, R = rad * 0.9;
+  for (const Wn of CV.wins) {
+    if (!Wn || X + R < Wn.X0 || X - R > Wn.X1 || Y + R < Wn.Y0 || Y - R > Wn.Y1) continue;
+    const c0 = Math.max(0, Math.floor((X - R - Wn.X0) / G) - 1), c1 = Math.min(Wn.w - 1, Math.ceil((X + R - Wn.X0) / G) + 1);
+    const r0 = Math.max(0, Math.floor((Y - R - Wn.Y0) / G) - 1), r1 = Math.min(Wn.h - 1, Math.ceil((Y + R - Wn.Y0) / G) + 1);
+    let n = 0;
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      const i = r * Wn.w + c; if (!Wn.mat[i] || Wn.sea[i]) continue;
+      const dx = Wn.X0 + (c + 0.5) * G - X, dy = Wn.Y0 + (r + 0.5) * G - Y, e = R * (0.85 + 0.25 * hash(c * 7.1 + r * 3.3 + Wn.k));
+      if (dx * dx + dy * dy > e * e) continue;
+      Wn.mat[i] = 0; Wn.sea[i] = 1; n++;
+    }
+    if (!n) continue;
+    if (Wn.life) Wn.life = Wn.life.filter(L => (L.X - X) * (L.X - X) + (L.Y - Y) * (L.Y - Y) > R * R);
+    if (typeof cglPatch === 'function') cglPatch(Wn, r0, r1 + 1, ['mat', 'sea']);
+  }
+}
 const CAVE_API = {
   nearMouth, worker: CWW, buildWorker: CBW, crCurve, tunRadii, toHoles: () => cavesToHoles(),   // (the caves' own curves for the terrain's HOLE shapes - 50-land-shapes; their systems made into holes, once)   // (engine stage 4: the caves' workers - the swell's, the build's - for the perf panel)
-  step, pump, draw, holeSnap, holes, keepIn, buildNow, subNear, subMove, rebuild: () => refresh(null),
+  carve, step, pump, draw, holeSnap, holes, keepIn, buildNow, subNear, subMove, rebuild: () => refresh(null),
   inCave: (x, y) => CV.ready && inCave(x, y - WATER_Y),
   sandAt, sandTop,                                              // (the sand a cave settled: ground to everything - 50-land-shapes solidBlock / floorUnder)
   get ready() { return CV.ready; }, get building() { return !!CV.job; },
@@ -49081,6 +49118,7 @@ function landCarve(x, y, rad) {
       land.cell[i] = M_AIR; land.scorch[i] = 0; kinds[m]++; n++; continue; }
     if (d < edge + 6) land.scorch[i] = Math.min(255, land.scorch[i] + Math.round(170 * (1 - (d - edge) / 6)));
   }
+  if (typeof CAVE !== 'undefined' && CAVE.carve && !SIM_ONLY) CAVE.carve(x, y - WATER_Y, rad);   // (user Nov 7 18:14: a cave's rock is blown out too - its shape changes as the ground's does; one in a cave digs no ground but its rock)
   if (!n && !SIM_ONLY) return 0;
   stonesUndercut(x, y, rad);                                   // (a grey boulder left with nothing under it drops whole)
   ltDirty(c0, c1);
@@ -49676,6 +49714,27 @@ function meadowNoise(c, r) {
 }
 // what stands behind the ground (painted once): the field of grass running back from the ground's first top, its
 // boulders, and under it the back wall of earth that craters open onto
+/* ---- (user Nov 7 18:14, his pictures of a crater and a cave: "A is the background of the terrain. That should be the background for ALL of the
+   terrain") behind the ground, where it's dug or blown out, the caves' own back wall - their tile (img.caveBack), one art pixel a cave cell (2
+   world units), in the column's biome's cave colours and brightness (BIOME_CAVE - the Biome Editor's CAVE tab) - in shadow, darker the deeper.
+   LBACK: the tile's pixels, read once it's in; a back painted before it came is painted again (land.backNA) ---- */
+let LBACK = null;
+function landBackArt() {
+  if (LBACK) return LBACK;
+  const im = typeof img !== 'undefined' ? img.caveBack : null; if (!im || !(im.naturalWidth || im.width)) return null;
+  const w = im.naturalWidth || im.width, h = im.naturalHeight || im.height, c = makeCanvas(w, h), g = c.getContext('2d'); g.drawImage(im, 0, 0);
+  LBACK = { w, h, d: g.getImageData(0, 0, w, h).data };
+  if (land.backNA) { land.back = []; land.backNA = false; }
+  return LBACK;
+}
+const LBACK_HUE = {};                                       // (a biome's cave colour, a tone of brightness 1, times its ROCK BRIGHTNESS)
+function landBackHue(bn) {
+  const key = bn + ':' + (typeof BIOME_CAVE !== 'undefined' ? JSON.stringify(BIOME_CAVE[bn] || 0) : '');
+  if (LBACK_HUE[bn] && LBACK_HUE[bn].key === key) return LBACK_HUE[bn].v;
+  const h = typeof biomeCave === 'function' ? biomeCave(bn, 'hue') : null, b = typeof biomeCave === 'function' ? (biomeCave(bn, 'bright') ?? 1) : 1;
+  const v = Array.isArray(h) ? (q => h.map(x => x / q * (Number.isFinite(b) ? b : 1)))(h[0] * 0.3 + h[1] * 0.45 + h[2] * 0.25) : null;
+  LBACK_HUE[bn] = { key, v }; return v;
+}
 function paintLandBack(k) {
   const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0), rT = land.rT[k], rB = land.rB[k], h = rB - rT + 4, T4 = 4 - rT;
   const cv = land.back[k] = makeCanvas(w, h), x = cv.getContext('2d'), id = x.createImageData(w, h), d = id.data, SR = stoneRaster(k, w);
@@ -49727,10 +49786,21 @@ function paintLandBack(k) {
         // (its stones the ground's own, whole - those standing out of the ground left out: none cut by the field's line)
         const qi = (r - rT) * w + q, sj = SR.id[qi], o = sj >= 0 ? land.stones[sj] : null;
         const k0 = hash(sj * 0.37), t = !o || o.y - o.ry < LT_Y0 + sr * LT_CELL ? -9 : SR.sd[qi];
-        if (DSb) col = t < -5 ? desertEarth(c, r, hsh) : desertStone(o, sj, t, SR.e[qi], SR.ux[qi], SR.uy[qi], c);   // (the desert's: its layered earth, in shadow)
-        else col = t < -5 ? D[3] : t > 0.25 ? (o.grey ? [150, 144, 134] : D[4]) : t > -0.3 ? (o.grey ? [120, 114, 106] : k0 < 0.5 ? D[0] : D[1]) : D[6];
-        col = col.map((v, j) => v * 0.48 + [10, 12, 18][j]);
-        const fd = ltFade(c, r);
+        const BA = landBackArt();
+        if (BA) {                                                    // (the caves' back wall - landBackArt - in the biome's cave colours, in shadow)
+          const X = (c + 0.5) * LT_CELL, Y = LT_Y0 + (r + 0.5) * LT_CELL, px = ((Math.floor(X / 2) % BA.w) + BA.w) % BA.w, py = ((Math.floor(Y / 2) % BA.h) + BA.h) % BA.h, o2 = (py * BA.w + px) * 4;
+          const tc = [BA.d[o2], BA.d[o2 + 1], BA.d[o2 + 2]], hu = landBackHue(colBiome(c));
+          col = hu ? (L => hu.map(v => v * L))(tc[0] * 0.3 + tc[1] * 0.45 + tc[2] * 0.25) : tc;
+          col = col.map(v => Math.min(255, v * 1.4));                // (the tile is dark: lit about as the caves' shader lights their back wall in the open - 12-gl.js)
+        } else {
+          land.backNA = true;
+          if (DSb) col = t < -5 ? desertEarth(c, r, hsh) : desertStone(o, sj, t, SR.e[qi], SR.ux[qi], SR.uy[qi], c);   // (the desert's: its layered earth, in shadow)
+          else col = t < -5 ? D[3] : t > 0.25 ? (o.grey ? [150, 144, 134] : D[4]) : t > -0.3 ? (o.grey ? [120, 114, 106] : k0 < 0.5 ? D[0] : D[1]) : D[6];
+          col = col.map((v, j) => v * 0.48 + [10, 12, 18][j]);
+        }
+        // (the rock wall: seen through a crater's opening, lit a long way down - his picture of what he expected, the wall clear in the hole; the
+        // ground's own earth still fades as before)
+        const fd = BA ? ltFadeAt((LT_Y0 + r * LT_CELL - land.surf[Math.min(land.cols - 1, Math.max(0, c))]) * 0.35, c, r) : ltFade(c, r);
         if (fd > 0) col = mix3(col, DSb ? LT_DEEP_D : LT_DEEP, fd);
       }
       put(q, r + T4, col);
@@ -49833,6 +49903,7 @@ function landPaintStep(views) {
     ahead.push([x0, x1]);
     // (user Nov 1 20:12, editor speed: nothing thrown away while the GAME EDITOR is open - panned back to, it was all painted again)
     { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; for (const k of isl) S_[k] = renderTick; }
+    if (!LBACK) landBackArt();                              // (the caves' tile in: the backs painted again with it)
     for (const [k] of list) if (!land.back[k]) paintLandBack(k);
     for (const k of isl) { paint(k); landKeep(k); }
     for (const [k] of list) { paint(k); landKeep(k); }
@@ -52115,7 +52186,7 @@ function terrainHillsRow(cat) {
   const r = document.createElement('div'); r.className = 'row';
   r.innerHTML = '<label>HILLS</label><input type="range" min="0" max="200" step="5"><output></output><span class="dv"></span>';
   const inp = r.querySelector('input'), lbl = r.querySelector('label');
-  lbl.title = 'Below 100% smoother, above 100% hillier';
+  lbl.title = 'How bumpy the picked segments are: under 100% smoother, over 100% hillier';
   inp.addEventListener('input', () => terrainSetHills(+inp.value / 100));
   cat.appendChild(r); TERRAIN_ED.hills = { r, inp, out: r.querySelector('output') };
   terrainShapeRows(cat);
@@ -52146,7 +52217,7 @@ function curvePts() {
 function terrainCurveRow(cat) {
   const r = document.createElement('div'); r.className = 'row';
   r.innerHTML = '<label>CURVE</label><input type="range" min="0" max="100" step="5"><output></output><span class="dv"></span>';
-  const inp = r.querySelector('input'); r.querySelector('label').title = 'At the picked points: sharp (0%) to curved (AUTO: as drawn)';
+  const inp = r.querySelector('input'); r.querySelector('label').title = 'How the line bends at the picked points: 0% a sharp corner, AUTO a smooth curve';
   inp.addEventListener('input', () => { const L = curvePts(); if (!L.length) return; for (const p of L) ptSetCurve(p, +inp.value / 100); islChanged(); terrainSyncSkin(); });
   cat.appendChild(r); TERRAIN_ED.curve = { inp, out: r.querySelector('output') };
 }
@@ -52161,7 +52232,7 @@ function vegPts() {   // (the picked pieces' first points - a piece's VEGETATION
 function terrainVegRow(cat) {
   const r = document.createElement('div'); r.className = 'row';
   r.innerHTML = '<label>VEGETATION</label><input type="range" min="0" max="100" step="5"><output></output><span class="dv"></span>';
-  const inp = r.querySelector('input'); r.querySelector('label').title = 'How much grows on the picked segments (on a cave: its stalactites, sand, weed): 100% all, 0% none';
+  const inp = r.querySelector('input'); r.querySelector('label').title = 'How many plants grow on the picked segments (in a cave: how many stalactites, sand and weed). 100% all, 0% none';
   inp.addEventListener('input', () => { const L = vegPts(); if (!L.length) return; for (const p of L) ptSetVeg(p, +inp.value / 100); islChanged(); terrainSyncSkin(); });
   cat.appendChild(r); TERRAIN_ED.veg = { inp, out: r.querySelector('output') };
 }
@@ -52302,7 +52373,7 @@ function terrainSyncSplit() {
 function terrainSplitRow(b) {
   if (TERRAIN_ED.splitRow || !b.parentNode) return;
   const r = document.createElement('div'); r.className = 'row'; r.style.gridTemplateColumns = 'auto minmax(150px, 1fr)';
-  const inp = document.createElement('input'); inp.type = 'range'; inp.min = 2; inp.max = 12; inp.step = 1; inp.title = 'Pieces SPLIT cuts each segment into';
+  const inp = document.createElement('input'); inp.type = 'range'; inp.min = 2; inp.max = 12; inp.step = 1; inp.title = 'How many equal pieces SPLIT SEGMENT makes of each picked segment';
   inp.addEventListener('input', () => { ED_SPLIT.v = +inp.value; try { localStorage.setItem('bd_split', String(ED_SPLIT.v)); } catch (e) { } terrainSyncSplit(); });
   const cat = b.parentNode; cat.insertBefore(r, b); r.appendChild(b); r.appendChild(inp);   // (the group: its title, then this row, then DELETE)
   TERRAIN_ED.splitRow = { inp };
@@ -52322,7 +52393,7 @@ terrainDelSeg.init = b => { (TERRAIN_ED.delSegBtns || (TERRAIN_ED.delSegBtns = [
 // (user 14:23; Nov 7: CAVE TYPE) a cave or tunnel CAVE (dark - the default) or HOLE (see-through): lit as the picked ones are
 const caveTypeBtn = (lab, see, desc) => { const f = () => islSetSee(see); f.init = b => (TERRAIN_ED.seeBtns || (TERRAIN_ED.seeBtns = [])).push([b, see]); return [lab, desc, f]; };
 // (user Nov 5 20:22) a terrain shape dark inside as the ground (on) or its rock seen all the way in (off): lit when the picked shapes are
-const ugBtn = () => { const f = () => islToggleUG(); f.init = b => { TERRAIN_ED.ugBtn = b; }; return ['HIDE INTERIOR', 'Picked shape is dark inside (off: see its rock)', f]; };
+const ugBtn = () => { const f = () => islToggleUG(); f.init = b => { TERRAIN_ED.ugBtn = b; }; return ['HIDE INTERIOR', 'Makes the inside of the picked shape dark. Off: you see its rock', f]; };
 const kindBtn = (lab, k, desc) => { const f = () => islSetKind(k); f.init = b => (TERRAIN_ED.kindBtns || (TERRAIN_ED.kindBtns = [])).push([b, k]); return [lab, desc, f]; };
 
 // (Nov 7, user: "TERRAIN EDITOR Changes ... 2 CLEAR SECTIONS: TERRAIN SHAPES - only these options, to create terrain ... SELECTED
@@ -52330,9 +52401,9 @@ const kindBtn = (lab, k, desc) => { const f = () => islSetKind(k); f.init = b =>
 // by what's picked: SEGMENT TYPE and SEGMENT ACTIONS for any shape, TERRAIN TYPE for a terrain shape, CAVE TYPE for a cave or tunnel
 islAdd.init = terrainTabInit;
 NSKY.editor.TUNE.buttons('TERRAIN', 'TERRAIN SHAPES', [
-  ['CREATE TERRAIN', 'New terrain shape in the view', islAdd],
-  ['CREATE TUNNEL', 'New tunnel: a path carved with a width', islAddTunnel],
-  ['CREATE CAVE', 'New cave: a closed shape carved out', islAddHole],
+  ['CREATE TERRAIN', 'Adds a new piece of ground in the middle of the view', islAdd],
+  ['CREATE TUNNEL', 'Adds a tunnel: a passage dug through the ground', islAddTunnel],
+  ['CREATE CAVE', 'Adds a cave: a hollow space dug into the ground', islAddHole],
 ]);
 NSKY.editor.TUNE.buttons('TERRAIN', '=SELECTED PROPERTIES', []);
 NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
@@ -52346,8 +52417,8 @@ NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT TYPE', [
   skinBtn('DEEP SEA', 'S', 'Picked underwater segments: the deep sea floor'),   // (user Nov 7 16:35: "select terrain segments and assign them as deep sea")
 ]);
 NSKY.editor.TUNE.buttons('TERRAIN', 'SEGMENT ACTIONS', [
-  ['SPLIT SEGMENT', 'Cut the picked segments into equal pieces', terrainSplit],
-  ['SPLIT SHAPE', 'Cut the shape in two at the picked segment', islSplitShape],
+  ['SPLIT SEGMENT', 'Cuts each picked segment into equal pieces, so you can give them different types', terrainSplit],
+  ['SPLIT SHAPE', 'Cuts the shape into two shapes at the picked segment', islSplitShape],
 ]);
 const secOf = (key, init) => { const f = init || (() => { }); return b => { f(b); setTimeout(() => { if (b.parentNode) (TERRAIN_ED.secs || (TERRAIN_ED.secs = {}))[key] = b.parentNode; terrainSyncSecs(); }, 0); }; };
 { const k = kindBtn('SOLID', 'S', 'Picked shape: solid foreground, blocks boats'); k[2].init = secOf('terrain', k[2].init);
@@ -52358,9 +52429,9 @@ const secOf = (key, init) => { const f = init || (() => { }); return b => { f(b)
 const caveRooms = () => { const s = TERRAIN_ED.sel, L = (s && s.Is ? s.Is : s && s.I != null ? [s.I] : []).filter(n => ISLANDS[n] && shpK(ISLANDS[n]) === 'H' && !ISLANDS[n].t); return L.map(n => ISLANDS[n]); };
 const caveSpan = I => { const ys = I.p.map(p => WATER_Y + p[1]); return [Math.min(...ys), Math.max(...ys)]; };
 function caveWaterSet(on) { const L = caveRooms(); if (!L.length) return; for (const I of L) { if (on) { const [a, b] = caveSpan(I); I.wl = Math.round(b - (b - a) * 0.3); } else delete I.wl; } islChanged(); terrainSyncSkin(); }
-{ const a = ['ADD WATER LINE', 'A pool in the picked cave', () => caveWaterSet(true)], r = ['REMOVE WATER LINE', 'No pool in the picked cave', () => caveWaterSet(false)];
+{ const a = ['ADD WATER LINE', 'Puts a pool of water in the picked cave', () => caveWaterSet(true)], r = ['REMOVE WATER LINE', 'Takes the pool of water out of the picked cave', () => caveWaterSet(false)];
   a[2].init = secOf('cwater', b => { setTimeout(() => { const cat = b.parentNode; if (!cat || TERRAIN_ED.cwLvl) return; const row = document.createElement('div'); row.className = 'row';
-    row.innerHTML = '<label>WATER LEVEL</label><input type="range" min="0" max="100" step="1"><output></output><span class="dv"></span>'; row.querySelector('label').title = 'How high the pool fills the picked cave';
+    row.innerHTML = '<label>WATER LEVEL</label><input type="range" min="0" max="100" step="1"><output></output><span class="dv"></span>'; row.querySelector('label').title = 'How high the water in the picked cave comes up';
     const inp = row.querySelector('input'); inp.addEventListener('input', () => { for (const I of caveRooms()) { if (!Number.isFinite(I.wl)) continue; const [lo, hi] = caveSpan(I); I.wl = Math.round(hi - (hi - lo) * (+inp.value / 100)); } islChanged(); terrainSyncSkin(); });
     cat.appendChild(row); TERRAIN_ED.cwLvl = { inp, out: row.querySelector('output') }; terrainSyncSkin(); }, 0); });
   NSKY.editor.TUNE.buttons('TERRAIN', 'CAVE WATER', [a, r]); }
@@ -65273,6 +65344,12 @@ async function start(data) {
       return k; },
     // (user Nov 7 16:15: "Why does the whole editor restart when I change biome?") the lab's ground put in biome n's skin in place - its first ground
     // shape's land points (the sea floor's stay SEA) - and the land built again, the view kept
+    // (user Nov 7 18:21: the terrain edited in the Biome Editor itself - "the UI should stay identical") a world point on the screen (css pixels; the
+    // left view), the lab's ground shapes (a copy), and new ones put in place - the land built again, the view kept, no reload
+    toScreen: (x, y) => { const v = cam.view[0], sv = S * v.z, d = window.devicePixelRatio || 1, camPx = Math.round(v.l * sv); return [(x * sv - camPx) * PIXW / d, (y * sv - Math.round(v.top * sv)) * PIXW / d]; },
+    world: (cx, cy) => screenToWorld(cx, cy),
+    ground: () => JSON.parse(JSON.stringify(ISLANDS)),
+    setGround: g => { ISLANDS.length = 0; for (const I of g) ISLANDS.push(I); ISL_ED.dirty = true; islSave(); if (typeof floorSkinStrips !== 'undefined') floorSkinStrips = null; land.lookP = null; landEdited(); if (typeof terrainSync === 'function') terrainSync(); return true; },
     reskin: n => { const SK = ({ ice: 'I', mountain: 'M', forest: 'F', desert: 'D', tropical: 'T', swamp: 'W', volcanic: 'V', sea: 'S' })[n] || 'T', i = ISLANDS.findIndex(I => I && I.gnd); if (i < 0) return false;
       const I = ISLANDS[i]; ISLANDS[i] = Object.assign({}, I, { p: I.p.map(p => p.length > 2 && p[2] ? [p[0], p[1], SK, ...p.slice(3)] : p) });
       ISL_ED.dirty = true; islSave(); if (typeof floorSkinStrips !== 'undefined') floorSkinStrips = null; land.lookP = null; landEdited(); if (typeof terrainSync === 'function') terrainSync(); return true; },
@@ -65450,23 +65527,23 @@ if (VEG_MODE) (() => {
     // properties of the selected prefab. These two stay on the Group and Prefab editor. Only the 'group' values like Size Min and Max, Leaf size min
     // and max exist only in the GROUP EDITOR") WORLD; the SELECTED prefab with its own numbers; IN THE GROUP (its sizes) and the DECKS - the group's
     d.innerHTML = '<h4>WORLD</h4><div id="vgWind"></div>' +
-      '<div class="tri" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px"><button data-a="tex" hidden></button><button data-a="birds" class="on" data-t="The birds - on the fronds and in the air">BIRDS: ON</button><button data-a="parts" class="on" data-t="The flying bits: torn leaves, sparks, ash">PARTICLES: ON</button></div>' +
+      '<div class="tri" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px"><button data-a="tex" hidden></button><button data-a="birds" class="on" data-t="Shows or hides the birds">BIRDS: ON</button><button data-a="parts" class="on" data-t="Shows or hides flying bits: torn leaves, sparks and ash">PARTICLES: ON</button></div>' +
       '<div id="vgHour"></div><div id="vgLook"></div>' +
       // (user Nov 3 22:08: "instead of vehicles, it should just have a 'spawn' and a drop down. I can then place that structure in the scene. And
       // that structure will react like in game with the day and night mode") SPAWN: a vehicle (you aboard, short of the palms) or a structure
       // (in the middle of the view, lit by the hour as in the game) - drag a structure in the view to place it, REMOVE the one picked
       '<button class="fold" data-fold="sp">SPAWN</button><div class="w" data-foldc="sp" style="display:none"><select id="vgSpawn" style="grid-column:1/3;font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:48px;padding:0 8px"></select>' +
-      '<button data-a="spawn" data-t="Spawn the one chosen - a structure in the middle of the view (drag it to place it), a vehicle parked on its ground (drag it too)">SPAWN</button><button data-a="unspawn" data-t="Remove the structure picked (press one in the view to pick it)">REMOVE</button></div>' +
+      '<button data-a="spawn" data-t="Adds the chosen structure or vehicle in the middle of the view. Drag it to place it">SPAWN</button><button data-a="unspawn" data-t="Removes the structure or vehicle you picked in the view">REMOVE</button></div>' +
       // (user Nov 3 22:13: '"The Palm in View" should say Selected (prefab name)') the plant tapped in the view (at the start the palm in view)
-      '<h4 id="vgSelH">SELECTED</h4><div class="w"><button data-a="blast" data-t="A bomb blast 35 m from the palm in view">BLAST</button><button data-a="shake" data-t="A heavy shake of the ground there">SHAKE</button>' +
-      '<button data-a="fire" data-t="Set the palm in view alight">SET ON FIRE</button><button data-a="grow" data-t="Every palm whole and standing again">GROW AGAIN</button>' +
-      '<button data-a="reset" data-t="Everything back as it opened - the ground whole again, every plant standing, the view back (the saved numbers and shapes stay)">RESET</button><button data-a="pause" class="pz" data-t="Freeze everything - the same as Esc">PAUSE</button>' +
+      '<h4 id="vgSelH">SELECTED</h4><div class="w"><button data-a="blast" data-t="Sets off a bomb near the plant in the middle of the view">BLAST</button><button data-a="shake" data-t="Shakes the ground hard in the middle of the view">SHAKE</button>' +
+      '<button data-a="fire" data-t="Sets the plant in the middle of the view on fire">SET ON FIRE</button><button data-a="grow" data-t="Regrows every plant, whole and standing">GROW AGAIN</button>' +
+      '<button data-a="reset" data-t="Everything back as it opened - the ground whole again, every plant standing, the view back (the saved numbers and shapes stay)">RESET</button><button data-a="pause" class="pz" data-t="Pauses everything (the same as Esc)">PAUSE</button>' +
       // (user Nov 3 22:11: "select a plant directly in the editor, and pick 'Edit Plant' and the save and return to the view with the updates. We
       // dont need the Open Editor button") tap a plant in the view to pick it; EDIT PLANT opens it (none picked: the next tap does); SAVE comes back here
-      '<button data-a="feTap" hidden></button><div style="grid-column:1/3;color:#7a8294">Tap a plant in the view to select it - PREFAB EDITOR (top left) opens it; double-click opens it too</div></div>' +
+      '<button data-a="feTap" hidden></button><div style="grid-column:1/3;color:#7a8294">Click a plant to select it. Double-click a plant to edit it</div></div>' +
       '<div id="vgProps" style="display:grid;gap:6px"></div>' +
       '<div id="vgGroupOnly" style="display:none;gap:8px"><h4>IN THE GROUP</h4><div id="vgGrp" style="display:grid;gap:6px"></div></div>' +
-      '<div id="vgSaved" style="color:#9fd36a">Every number saves itself</div><div id="vgSl"></div><div id="vgTip">Touch a button to see what it does</div>';
+      '<div id="vgSaved" style="color:#9fd36a">Every number saves itself</div><div id="vgSl"></div><div id="vgTip">Point at a button to see what it does</div>';
     document.body.appendChild(d);
     // (a foldout: its header opens and closes what's under it)
     setTimeout(() => { for (const b of d.querySelectorAll('.fold')) { const sync = () => { const c = d.querySelector('[data-foldc="' + b.dataset.fold + '"]'); b.classList.toggle('open', !!c && c.style.display !== 'none'); }; sync(); b.addEventListener('click', () => { const c = d.querySelector('[data-foldc="' + b.dataset.fold + '"]'); if (!c) return; c.style.display = c.style.display === 'none' ? (c.classList.contains('w') ? '' : 'grid') : 'none'; sync(); b.blur(); }); } }, 0);
@@ -65623,12 +65700,13 @@ if (VEG_MODE) (() => {
       // (user Nov 7 14:07: mountain, sea and lava caves look different, "editable in the biome editor") CAVE: this biome's cave look - BIOME_CAVE
       { const b = document.createElement('button'); b.textContent = 'CAVE'; b.dataset.t = 'How caves in this biome look'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'cave'); hint(b); b.onclick = () => { deckTab = 'cave'; renderDecks(); }; tabs.appendChild(b); }
       // (user Nov 7 14:12: the default terrain shape, edited, saved as prefabs and loaded) TERRAIN SHAPE: the ground every biome is shown on
-      { const b = document.createElement('button'); b.textContent = 'TERRAIN SHAPE'; b.dataset.t = 'The ground the biomes are shown on: shape it, save it, load it'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'shape'); hint(b); b.onclick = () => { deckTab = 'shape'; renderDecks(); }; tabs.appendChild(b); }
+      { const b = document.createElement('button'); b.textContent = 'TERRAIN SHAPE'; b.dataset.t = 'Edit the ground the biomes are shown on, and load or save it as a prefab'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'shape'); hint(b); b.onclick = () => { deckTab = 'shape'; renderDecks(); }; tabs.appendChild(b); }
       // (user Nov 7 16:35: each biome its own lake) LAKE: its water's colour over the ocean's - BIOME_LAKE
       if (VG().sets.cur !== 'sea') { const b = document.createElement('button'); b.textContent = 'LAKE'; b.dataset.t = 'How lakes in this biome look'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; b.classList.toggle('on', deckTab === 'lake'); hint(b); b.onclick = () => { deckTab = 'lake'; renderDecks(); }; tabs.insertBefore(b, tabs.lastChild); }
       top.appendChild(tabs);
       if (deckTab === 'lake') { renderLake(box, top); return; }
       if (deckTab === 'shape') { renderShape(box, top); return; }
+      if (TERR.on) setTimeout(() => terrSet(false), 0);   // (another tab: the terrain's points put away)
       if (deckTab === 'cave') { renderCave(box, top); return; }
       if (deckTab === 'surf') { renderSurf(box, top); return; }
       if (/^d[456]$/.test(deckTab)) { renderFar(box, top, deckTab); return; }
@@ -65647,7 +65725,7 @@ if (VEG_MODE) (() => {
             for (const [lab, f, k, mx, st, u] of VG().rows()) { if (f !== kf || !SIZES.has(k)) continue; const nm = lab.replace(/^(PALM|BUSH \d|JUNGLE \d) /, ''); { const ce2 = () => (D[di] && D[di][ei]) || e; g2.appendChild(slider(nm, vegTip(k, u) + ' - for this prefab on this deck only (smaller at the back for depth)', 0, Math.max(mx, VD[f][k]), st, () => ce2()[k] != null ? ce2()[k] : V[f][k], v => { ce2()[k] = v; VG().decks.set(D); }, () => VD[f][k])); } } }
           const cur = () => (D[di] && D[di][ei]) || e;   // (the deck as it is now - never a copy the bar was drawn from)
           row.appendChild(slider((P ? P.lab : e.p) + ' AMOUNT', 'How many on this deck: 1 usual, 2 twice as many, 0 none', 0, 4, 0.05, () => cur().amount, v => { cur().amount = v; relay(); }, 1));
-          const rm = document.createElement('button'); rm.textContent = 'REMOVE'; rm.dataset.t = 'Take this prefab off the deck'; hint(rm); rm.onclick = () => { D[di].splice(ei, 1); relay(); renderDecks(); }; row.appendChild(rm);
+          const rm = document.createElement('button'); rm.textContent = 'REMOVE'; rm.dataset.t = 'Removes this plant from the deck'; hint(rm); rm.onclick = () => { D[di].splice(ei, 1); relay(); renderDecks(); }; row.appendChild(rm);
           // (10:37: "a Move Up / Move Down so I can switch what gets rendered in front") the deck's order: its first in front, its last behind
           { const mv = document.createElement('div'); mv.style.cssText = 'display:flex;gap:6px'; for (const [lab, dd, tp] of [['MOVE UP', -1, 'One place nearer the front'], ['MOVE DOWN', 1, 'One place further back: drawn behind the one after it']]) { const b = document.createElement('button'); b.textContent = lab; b.dataset.t = tp; hint(b); b.style.cssText = 'font-size:12px;min-height:34px;padding:4px 10px'; const j = ei + dd; b.disabled = j < 0 || j >= list.length; b.onclick = () => { const L = D[di]; [L[ei], L[j]] = [L[j], L[ei]]; relay(); renderDecks(); }; mv.appendChild(b); } col.appendChild(mv); }
           cols.appendChild(col);
@@ -65657,8 +65735,8 @@ if (VEG_MODE) (() => {
         for (const P of VG().decks.prefabs()) { const o = document.createElement('option'); o.value = P.id; o.textContent = P.lab; sel.appendChild(o); }
         const ab = document.createElement('button'); ab.textContent = 'ADD PREFAB'; ab.dataset.t = 'Add the chosen prefab to ' + DN[di].toLowerCase(); hint(ab); ab.onclick = () => { D[di].push({ p: sel.value, amount: 1 }); relay(); renderDecks(); };
         add.appendChild(sel); add.appendChild(ab); top.appendChild(add);
-        { const sv = document.createElement('button'), rv = document.createElement('button'); sv.textContent = 'SAVE'; rv.textContent = 'REVERT'; sv.dataset.t = 'Keep this set as it is now - its decks, amounts and sizes - in the shared store'; rv.dataset.t = 'Back to this set as last saved'; hint(sv); hint(rv);
-          sv.onclick = () => { if (window.__vgSetSave) window.__vgSetSave(); }; rv.onclick = () => { if (window.__vgSetRevert) window.__vgSetRevert(); }; sv.dataset.setSave = '1'; rv.dataset.setRev = '1'; const ub = document.createElement('button'); ub.textContent = 'UNDO'; ub.dataset.t = 'Undo the last change here - an amount, a size, a prefab added, removed or moved, a number in the panel (Ctrl+Z)'; ub.dataset.gUndo = '1'; hint(ub); ub.onclick = () => { if (window.__vgGroupUndo) window.__vgGroupUndo(); }; add.appendChild(ub); add.appendChild(sv); add.appendChild(rv); }
+        { const sv = document.createElement('button'), rv = document.createElement('button'); sv.textContent = 'SAVE'; rv.textContent = 'REVERT'; sv.dataset.t = 'Saves this biome\'s plants as they are now'; rv.dataset.t = 'Goes back to this biome\'s plants as last saved'; hint(sv); hint(rv);
+          sv.onclick = () => { if (window.__vgSetSave) window.__vgSetSave(); }; rv.onclick = () => { if (window.__vgSetRevert) window.__vgSetRevert(); }; sv.dataset.setSave = '1'; rv.dataset.setRev = '1'; const ub = document.createElement('button'); ub.textContent = 'UNDO'; ub.dataset.t = 'Undoes your last change (Ctrl+Z)'; ub.dataset.gUndo = '1'; hint(ub); ub.onclick = () => { if (window.__vgGroupUndo) window.__vgGroupUndo(); }; add.appendChild(ub); add.appendChild(sv); add.appendChild(rv); }
       });
     }
     // TERRAIN SURFACE: each of the biome's layers - its material, THICKNESS MIN / MAX, WOBBLE, DOWN TO WATER; the preview's ground built again
@@ -65745,7 +65823,7 @@ if (VEG_MODE) (() => {
       cols.appendChild(slider('ROCK BRIGHTNESS', 'How light or dark the cave rock is (1: as painted)', 0.2, 1.5, 0.02, () => O.bright != null ? O.bright : ((BIOME_CAVE_DEF[bn] || {}).bright || 1), v => { O.bright = v; save(); }, () => (BIOME_CAVE_DEF[bn] || {}).bright || 1));
       for (const [k, name, tip2, mn, mx, st] of CAVE_ROWS) cols.appendChild(slider(name, tip2, mn, mx, st, () => biomeCave(bn, k), v => { O[k] = v; save(); }, () => caveDef(bn, k)));
       const n = document.createElement('div'); n.style.cssText = 'color:#9aa3b5;grid-column:1/-1'; n.textContent = 'A cave\'s own VEGETATION (WORLD EDITOR > TERRAIN, the cave picked) scales its stalactites, stalagmites, sand, weed and coral.'; cols.appendChild(n);
-      if (LAB_CAVE) { const b = document.createElement('button'); b.textContent = 'LOOK AT THE CAVE'; b.dataset.t = 'Move the view to the cave in this ground'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px;grid-column:1/-1;justify-self:start'; hint(b); b.onclick = () => VG().look(LAB_CAVE[0], WATER_Y + LAB_CAVE[1], 1.6); cols.appendChild(b); }
+      if (LAB_CAVE) { const b = document.createElement('button'); b.textContent = 'LOOK AT THE CAVE'; b.dataset.t = 'Moves the view to the cave'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px;grid-column:1/-1;justify-self:start'; hint(b); b.onclick = () => VG().look(LAB_CAVE[0], WATER_Y + LAB_CAVE[1], 1.6); cols.appendChild(b); }
     }
     // LAKE: the biome's lake water (09-zz-biomes.js BIOME_LAKE) - drawn as the ocean's with its colour over it (drawLakeRoots); LOOK AT A LAKE: the
     // TERRAIN SHAPE tab's HILLS ground has one, any dip under the sea's level is one
@@ -65763,56 +65841,114 @@ if (VEG_MODE) (() => {
         cols.appendChild(row); }
       cols.appendChild(slider('COLOUR STRENGTH', 'How strongly the water takes its colour at the surface', 0, 1, 0.01, () => biomeLake(bn, 'k'), v => { O.k = v; save(); }, D.k));
       cols.appendChild(slider('MURK', 'How much darker and thicker it gets going down', 0, 1, 0.01, () => biomeLake(bn, 'murk'), v => { O.murk = v; save(); }, D.murk));
-      { const b = document.createElement('button'); b.textContent = 'SHOW A LAKE'; b.dataset.t = 'Put the HILLS ground in, with a lake in its dip'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px;justify-self:start'; hint(b);
+      { const b = document.createElement('button'); b.textContent = 'SHOW A LAKE'; b.dataset.t = 'Loads ground with a dip that fills with lake water'; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px;justify-self:start'; hint(b);
         b.onclick = () => { const tp = []; for (let x = 0; x <= GROUND_X; x += 200) tp.push([x, x > 1100 && x < 1700 ? 60 : -60]); groundUse([landOf(tp), SEA_FLOOR, room(2600, 80, 240, 60)]); }; cols.appendChild(b); }
     }
-    // TERRAIN SHAPE: the lab's ground (bd_biome_ground, read as the page starts - 00-world.js), shaped in the World Editor (its TERRAIN tab; its
-    // CLOSE keeps the shape and comes back here), saved as prefabs (bd_biome_grounds: [{ n: name, g: the shapes }]) and loaded; a few built in
+    // TERRAIN SHAPE (user Nov 7 18:21-18:27: "Why not just give me the controls right there? It should be a smooth transition and the UI should stay
+    // identical"; "A single unified prefab loading system"): the ground the biomes are shown on, edited here in the view - EDIT POINTS: drag a point,
+    // press the line twice for a new one, right-click a point to take it away (plants are not picked meanwhile) - and its PREFABS: the three built
+    // in and every one saved, each LOAD, put in place (no reload). bd_biome_ground: the ground as it is (00-world.js reads it as the page starts);
+    // bd_biome_grounds: the saved ones [{ n, g }]
     const GROUND_X = 3800, SEA_FLOOR = { k: 'S', gnd: true, p: [[6800, 260, 'S'], [3800, 260, 'S'], [3800, 200, 'S'], [6800, 200, 'S']] };
     const room = (cx, cy, rx, ry) => { const o = []; for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; o.push([Math.round(cx + Math.cos(a) * rx), Math.round(cy + Math.sin(a) * ry)]); } return { k: 'H', p: o }; };
     const landOf = top => ({ k: 'S', gnd: true, p: [[GROUND_X, 260, 'T'], [0, 260, 'T'], ...top.map(q => [q[0], q[1], 'T'])] });
     const GROUND_BUILT = [
-      ['FLAT', 'Flat ground just above the sea, a cave under it', null],
-      ['HILLS', 'Rolling hills', () => { const tp = []; for (let x = 0; x <= GROUND_X; x += 380) tp.push([x, Math.round(-40 - 130 * (0.5 + 0.5 * Math.sin(x / 520)))]); return [landOf(tp), SEA_FLOOR, room(1500, 60, 260, 70)]; }],
-      ['CLIFF AND OVERHANG', 'A high plateau ending in an overhanging cliff, a cave inside', () => [landOf([[0, -260], [1000, -275], [2000, -260], [2080, -235], [1920, -195], [1890, -120], [1960, -30], [GROUND_X, -30]]), SEA_FLOOR, room(900, -110, 260, 60)]],
+      ['FLAT', 'Loads the flat terrain prefab: level ground just above the sea, with a cave under it', () => [landOf([[0, -30], [GROUND_X, -30]]), SEA_FLOOR, room(1500, 125, 280, 75)]],
+      ['HILLS', 'Loads the hills terrain prefab: rolling hills, with a cave under them', () => { const tp = []; for (let x = 0; x <= GROUND_X; x += 380) tp.push([x, Math.round(-40 - 130 * (0.5 + 0.5 * Math.sin(x / 520)))]); return [landOf(tp), SEA_FLOOR, room(1500, 60, 260, 70)]; }],
+      ['CLIFF AND OVERHANG', 'Loads the cliff terrain prefab: a high plateau ending in an overhanging cliff, with a cave inside', () => [landOf([[0, -260], [1000, -275], [2000, -260], [2080, -235], [1920, -195], [1890, -120], [1960, -30], [GROUND_X, -30]]), SEA_FLOOR, room(900, -110, 260, 60)]],
     ];
+    const BIOME_SK = { ice: 'I', mountain: 'M', forest: 'F', desert: 'D', tropical: 'T', swamp: 'W', volcanic: 'V', sea: 'S' };
     const groundsGet = () => { try { const a = JSON.parse(localStorage.getItem('bd_biome_grounds') || '[]'); return Array.isArray(a) ? a.filter(q => q && typeof q.n === 'string' && Array.isArray(q.g)) : []; } catch (e) { return []; } };
     const groundsSet = a => { try { localStorage.setItem('bd_biome_grounds', JSON.stringify(a)); } catch (e) { } };
-    const groundNow = () => { try { return JSON.parse(localStorage.getItem('bd_islands') || '[]'); } catch (e) { return []; } };   // (the lab's world: in memory)
-    const groundUse = g => { try { if (g) localStorage.setItem('bd_biome_ground', JSON.stringify(g)); else localStorage.removeItem('bd_biome_ground'); } catch (e) { } location.reload(); };
-    function terrainEdit() {
-      // (the World Editor over the lab's world, the Biome Editor's panels hidden meanwhile; its CLOSE: the ground kept as this tab's, the page again)
-      for (const id of ['vgLab', 'vgLeft', 'vgBot', 'vgPause', 'feRoot']) { const el = document.getElementById(id); if (el) el.style.display = 'none'; }
-      if (typeof worldEdit === 'function') worldEdit('open');
-      let was = false, n = 0; const T = () => NSKY.editor.TUNE;
-      const iv = setInterval(() => {
-        const t2 = T(); if (!t2) return;
-        if (t2.open && !was) { was = true; const b = t2.root && [...t2.root.querySelectorAll('button')].find(q => q.textContent.trim() === 'TERRAIN'); if (b) b.click(); }
-        // (kept as it's edited: the editor's CLOSE can reload the page before this sees it closed)
-        if (t2.open) { const g = groundNow(); if (g.some(I => I && I.gnd)) { const s = JSON.stringify(g); try { if (localStorage.getItem('bd_biome_ground') !== s) localStorage.setItem('bd_biome_ground', s); } catch (e) { } } }
-        if (was && !t2.open) { clearInterval(iv); const g = groundNow(); groundUse(g.some(I => I && I.gnd) ? g : null); }
-        if (!was && ++n > 600) { clearInterval(iv); location.reload(); }
-      }, 300);
+    const groundNow = () => VG().ground();
+    // (a ground put in: its land in this biome's skin, kept as the ground, the cave's middle for LOOK AT THE CAVE, the plants grown on it again)
+    function groundUse(g, name) {
+      const SK = BIOME_SK[VG().sets.cur] || 'T', s = JSON.parse(JSON.stringify(g)), li = s.findIndex(I => I && I.gnd && !(I.p.every(p => p[2] === 'S') && I.p[0][0] >= GROUND_X));
+      if (li >= 0) s[li].p = s[li].p.map(p => p.length > 2 && p[2] ? [p[0], p[1], SK, ...p.slice(3)] : p);
+      VG().setGround(s); try { localStorage.setItem('bd_biome_ground', JSON.stringify(s)); } catch (e) { }
+      const H = s.find(I => I && I.k === 'H' && I.p && I.p.length); LAB_CAVE = H ? [H.p.reduce((a, p) => a + p[0], 0) / H.p.length, H.p.reduce((a, p) => a + p[1], 0) / H.p.length] : null;
+      vgReplant(); if (TERR.on) TERR.g = groundNow(); if (name) tip.textContent = name + ' terrain prefab loaded';
     }
+    // ---- EDIT POINTS: a layer over the view (under the panels) with the ground's points - its land and its caves, not the sea floor
+    const TERR = { on: false, cv: null, g: null, drag: null, pan: null, tap: null, raf: 0, hov: null };
+    const terrEditable = (I, i) => I && I.p && I.p.length && !(I.gnd && I.p.every(p => p[2] === 'S') && I.p[0][0] >= GROUND_X);
+    const terrScr = p => VG().toScreen(p[0], WATER_Y + p[1]);
+    function terrHit(cx, cy) {   // (the point under a press - 12 css pixels)
+      let best = null, bd = 144;
+      TERR.g.forEach((I, si) => { if (!terrEditable(I, si)) return; I.p.forEach((p, pi) => { const [x, y] = terrScr(p), d = (x - cx) * (x - cx) + (y - cy) * (y - cy); if (d < bd) { bd = d; best = { si, pi }; } }); });
+      return best;
+    }
+    function terrSeg(cx, cy) {   // (the piece of line under a press - 10 css pixels: the point before it)
+      let best = null, bd = 100;
+      TERR.g.forEach((I, si) => { if (!terrEditable(I, si)) return; const n = I.p.length, m = I.t ? n - 1 : n; for (let k = 0; k < m; k++) { const a = terrScr(I.p[k]), b = terrScr(I.p[(k + 1) % n]), dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy, u = L ? Math.max(0, Math.min(1, ((cx - a[0]) * dx + (cy - a[1]) * dy) / L)) : 0, ex = a[0] + dx * u - cx, ey = a[1] + dy * u - cy, d = ex * ex + ey * ey; if (d < bd) { bd = d; best = { si, k }; } } });
+      return best;
+    }
+    function terrCommit(what) { groundUse(TERR.g); tip.textContent = what; }
+    function terrDraw() {
+      if (!TERR.on || !TERR.cv) return;
+      const c = TERR.cv, d = window.devicePixelRatio || 1; if (c.width !== Math.round(innerWidth * d) || c.height !== Math.round(innerHeight * d)) { c.width = Math.round(innerWidth * d); c.height = Math.round(innerHeight * d); }
+      const g = c.getContext('2d'); g.setTransform(d, 0, 0, d, 0, 0); g.clearRect(0, 0, innerWidth, innerHeight);
+      TERR.g.forEach((I, si) => {
+        if (!terrEditable(I, si)) return;
+        const P = I.p.map(terrScr); g.lineWidth = 2; g.strokeStyle = I.k === 'H' ? '#d8a04a' : '#9fd36a'; g.beginPath(); P.forEach(([x, y], k) => k ? g.lineTo(x, y) : g.moveTo(x, y)); if (!I.t) g.closePath(); g.stroke();
+        P.forEach(([x, y], pi) => { const on = TERR.hov && TERR.hov.si === si && TERR.hov.pi === pi; g.fillStyle = on ? '#ffffff' : I.k === 'H' ? '#d8a04a' : '#9fd36a'; g.strokeStyle = '#0f1420'; g.lineWidth = 2; g.fillRect(x - 6, y - 6, 12, 12); g.strokeRect(x - 6, y - 6, 12, 12); });
+      });
+      TERR.raf = requestAnimationFrame(terrDraw);
+    }
+    function terrSet(on) {
+      if (on === TERR.on) return;
+      TERR.on = on;
+      if (on) {
+        TERR.g = groundNow();
+        const c = TERR.cv = document.createElement('canvas'); c.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;z-index:65;cursor:crosshair;touch-action:none'; document.body.appendChild(c);
+        const H = {
+          contextmenu: e => { e.preventDefault(); const h = terrHit(e.clientX, e.clientY); if (!h) return; const I = TERR.g[h.si], min = I.gnd ? 4 : I.t ? 2 : 3; if (I.p.length <= min) { tip.textContent = 'A shape keeps ' + min + ' points at least'; return; } I.p.splice(h.pi, 1); terrCommit('Point removed'); },
+          pointerdown: e => {
+            e.preventDefault(); if (e.button === 2) return; try { c.setPointerCapture(e.pointerId); } catch (er) { }
+            const h = terrHit(e.clientX, e.clientY); if (h) { TERR.drag = Object.assign(h, { moved: false }); return; }
+            const s = terrSeg(e.clientX, e.clientY), now = e.timeStamp || performance.now();   // (when it was pressed, not when it was handled: a slow frame between the two presses)
+            if (e.pointerType === 'touch' && s && TERR.tap && now - TERR.tap.t < 450 && Math.abs(TERR.tap.x - e.clientX) < 14 && Math.abs(TERR.tap.y - e.clientY) < 14) {   // (pressed twice on the line: a new point there)
+              const [wx, wy] = VG().world(e.clientX, e.clientY); TERR.g[s.si].p.splice(s.k + 1, 0, [Math.round(wx), Math.round(wy - WATER_Y)]); TERR.tap = null; terrCommit('Point added'); return; }
+            TERR.tap = { t: now, x: e.clientX, y: e.clientY };
+            const v = VG().view(); TERR.pan = { x: e.clientX, y: e.clientY, vx: v.x, vy: v.y, k: v.k };   // (anywhere else: the view dragged)
+          },
+          pointermove: e => {
+            if (TERR.drag) { const [wx, wy] = VG().world(e.clientX, e.clientY), p = TERR.g[TERR.drag.si].p[TERR.drag.pi]; p[0] = Math.round(wx); p[1] = Math.round(wy - WATER_Y); TERR.drag.moved = true; return; }
+            if (TERR.pan) { const P = TERR.pan; if (Math.abs(e.clientX - P.x) + Math.abs(e.clientY - P.y) > 3) VG().look(P.vx - (e.clientX - P.x) / P.k, P.vy - (e.clientY - P.y) / P.k); return; }
+            TERR.hov = terrHit(e.clientX, e.clientY); c.style.cursor = TERR.hov ? 'grab' : terrSeg(e.clientX, e.clientY) ? 'copy' : 'crosshair';
+          },
+          pointerup: () => { if (TERR.drag && TERR.drag.moved) terrCommit('Point moved'); TERR.drag = null; TERR.pan = null; },
+          wheel: e => { e.preventDefault(); zoomStep(e.deltaY < 0 ? 1 : -1); },
+          dblclick: e => { e.preventDefault(); if (terrHit(e.clientX, e.clientY)) return; const s = terrSeg(e.clientX, e.clientY); if (!s) return; const [wx, wy] = VG().world(e.clientX, e.clientY); TERR.g[s.si].p.splice(s.k + 1, 0, [Math.round(wx), Math.round(wy - WATER_Y)]); terrCommit('Point added'); },
+        };
+        H.pointercancel = H.pointerup;
+        // (every press on the layer goes to it alone, before the game's own - 00-a-veg-mode.js)
+        window.__terrPointer = e => { if (!TERR.on || (e.target !== c && !(TERR.drag || TERR.pan))) return false; if (H[e.type]) H[e.type](e); return true; };
+        terrDraw(); tip.textContent = 'Editing the terrain: drag a point, press the line twice to add one, right-click a point to remove it';
+      } else { cancelAnimationFrame(TERR.raf); if (TERR.cv) TERR.cv.remove(); TERR.cv = null; TERR.drag = TERR.pan = null; window.__terrPointer = null; tip.textContent = 'Terrain editing off'; }
+      renderDecks();
+    }
+    addEventListener('keydown', e => { if (e.key === 'Escape' && TERR.on) terrSet(false); }, true);
     function renderShape(box, top) {
-      const h = document.createElement('span'); h.textContent = 'TERRAIN SHAPE - the ground every biome is shown on'; h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
+      const h = document.createElement('span'); h.textContent = 'TERRAIN SHAPE - the ground the biomes are shown on'; h.style.cssText = 'color:#9fd36a;margin-left:10px'; top.appendChild(h);
       const btn = (lab, tp, fn) => { const b = document.createElement('button'); b.textContent = lab; b.dataset.t = tp; b.title = tp; b.style.cssText = 'padding:8px 14px;font-size:13px;min-height:42px'; hint(b); b.onclick = fn; return b; };
       const row = () => { const r = document.createElement('div'); r.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:4px 0'; box.appendChild(r); return r; };
       const r1 = row();
-      r1.appendChild(btn('EDIT TERRAIN', 'Shape the ground in the World Editor - its CLOSE keeps the shape and comes back here', terrainEdit));
-      for (const [n, tp, f] of GROUND_BUILT) r1.appendChild(btn(n, tp, () => groundUse(f ? f() : null)));
-      const r2 = row(), inp = document.createElement('input'); inp.placeholder = 'PREFAB NAME'; inp.maxLength = 30; inp.title = 'A name for the ground as it is now';
+      const eb = btn('EDIT POINTS: ' + (TERR.on ? 'ON' : 'OFF'), 'Move, add and remove the ground\'s points right here in the view', () => terrSet(!TERR.on)); eb.classList.toggle('on', TERR.on); r1.appendChild(eb);
+      const hp = document.createElement('span'); hp.style.cssText = 'color:#9aa3b5'; hp.textContent = TERR.on ? 'Drag a point to move it. Press the line twice to add a point. Right-click a point to remove it. Drag empty space to move the view.' : 'Turn on to shape the ground: green is the land, orange the caves.'; r1.appendChild(hp);
+      const ph = document.createElement('div'); ph.style.cssText = 'color:#d8dce8;margin-top:8px'; ph.textContent = 'PREFABS'; box.appendChild(ph);
+      for (const [n, tp, f] of GROUND_BUILT) { const r = row(), s = document.createElement('span'); s.textContent = n; s.style.cssText = 'color:#d8dce8;min-width:220px'; r.appendChild(s); const ds = document.createElement('span'); ds.textContent = tp.replace(/^Loads the .* prefab: /, ''); ds.style.cssText = 'color:#9aa3b5;min-width:320px'; r.appendChild(ds); r.appendChild(btn('LOAD', tp, () => groundUse(f(), n))); }
+      for (const q of groundsGet()) { const r = row(), s = document.createElement('span'); s.textContent = q.n; s.style.cssText = 'color:#d8dce8;min-width:220px'; r.appendChild(s); const ds = document.createElement('span'); ds.textContent = 'Saved'; ds.style.cssText = 'color:#9aa3b5;min-width:320px'; r.appendChild(ds);
+        r.appendChild(btn('LOAD', 'Loads the ' + q.n + ' terrain prefab', () => groundUse(q.g, q.n)));
+        r.appendChild(btn('DELETE', 'Deletes the ' + q.n + ' terrain prefab', () => { groundsSet(groundsGet().filter(o => o.n !== q.n)); renderDecks(); })); }
+      const r2 = row(), inp = document.createElement('input'); inp.placeholder = 'PREFAB NAME'; inp.maxLength = 30; inp.title = 'A name for the terrain as it is now';
       inp.style.cssText = 'font:inherit;min-height:40px;padding:4px 10px;border-radius:5px;border:1px solid #2c3850;background:#0f1420;color:#d8dce8;width:240px';
       r2.appendChild(inp);
-      r2.appendChild(btn('SAVE AS PREFAB', 'Keep the ground as it is now under this name', () => {
-        const n = inp.value.trim().toUpperCase(); if (!n) { inp.focus(); return; }
-        const a = groundsGet().filter(q => q.n !== n); a.push({ n, g: groundNow() }); groundsSet(a); renderDecks();
+      r2.appendChild(btn('SAVE AS PREFAB', 'Saves the terrain as it is now under this name, in the list above', () => {
+        const n = inp.value.trim().toUpperCase(); if (!n) { inp.focus(); tip.textContent = 'Type a name first'; return; }
+        if (GROUND_BUILT.some(b => b[0] === n)) { tip.textContent = 'That name is a built-in prefab - pick another'; return; }
+        const a = groundsGet().filter(q => q.n !== n); a.push({ n, g: groundNow() }); groundsSet(a); tip.textContent = n + ' saved'; renderDecks();
       }));
-      const L = groundsGet();
-      const lh = document.createElement('div'); lh.style.cssText = 'color:#9aa3b5;margin-top:6px'; lh.textContent = L.length ? 'SAVED PREFABS' : 'No saved prefabs yet'; box.appendChild(lh);
-      for (const q of L) { const r = row(), s = document.createElement('span'); s.textContent = q.n; s.style.cssText = 'color:#d8dce8;min-width:240px'; r.appendChild(s);
-        r.appendChild(btn('LOAD', 'Show the biome on this ground', () => groundUse(q.g)));
-        r.appendChild(btn('DELETE', 'Remove this prefab', () => { groundsSet(groundsGet().filter(o => o.n !== q.n)); renderDecks(); })); }
     }
     // DECK 4-6: the far scenery's rows for the biome - its own values over the world's (GAME EDITOR > FAR SCENERY) - 09-zz-biomes.js BIOME_BG
     const farTabs = bn => bn === 'desert' ? [['d4', 'DECK 4 (SAND BAND)'], ['d5', 'DECK 5 (DUNES, CITY)'], ['d6', 'DECK 6 (MESAS)']] : [['d4', 'DECK 4 (MEADOW)'], ['d5', 'DECK 5 (TREES)'], ['d6', 'DECK 6 (MOUNTAINS)']];
@@ -65920,7 +66056,7 @@ if (VEG_MODE) (() => {
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchmove', 'touchend', 'wheel', 'click']) d.addEventListener(ev, e => e.stopPropagation());
     // (user Nov 3 21:58: "I should be able to pan the camera freely") out of a vehicle: drag the view to pan it, pinch or the wheel to zoom
     { const fp = new Map(); let st = null;
-      const free = e => !FL().cur() && !d.contains(e.target) && !(FE && FE.root.contains(e.target)) && !L0().contains(e.target) && (e.target.tagName === 'CANVAS' || e.target === document.documentElement || e.target === document.body);
+      const free = e => !TERR.on && !FL().cur() && !d.contains(e.target) && !(FE && FE.root.contains(e.target)) && !L0().contains(e.target) && (e.target.tagName === 'CANVAS' || e.target === document.documentElement || e.target === document.body);
       // (user Nov 3 22:14: "Right mouse pans, middle mouse zooms in and out") a mouse: the right or middle button drags the view (22:20: held, it pans), the wheel zooms
       // the left picks - a plant, or a structure to drag. A finger: drag pans, pinch zooms, a tap picks
       window.addEventListener('contextmenu', e => { if (free(e)) e.preventDefault(); }, true);
@@ -65952,7 +66088,7 @@ if (VEG_MODE) (() => {
     }
     // (EDIT A PLANT: the next tap in the view opens the editor on the plant under it)
     window.addEventListener('pointerdown', e => {
-      if (!feArm || d.contains(e.target) || (FE && FE.root.contains(e.target))) return;
+      if (!feArm || TERR.on || d.contains(e.target) || (FE && FE.root.contains(e.target))) return;
       feArm = false; const key = VG().fol.at(e.clientX, e.clientY);
       if (key) { e.stopPropagation(); e.preventDefault(); folEditor(key); } else tip.textContent = 'No plant there';
     }, true);
@@ -65966,14 +66102,23 @@ if (VEG_MODE) (() => {
 #vgBot button{font:inherit;font-size:14px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:42px;padding:6px 12px;cursor:pointer;touch-action:manipulation}#vgBot button.on{background:#2a3a1e;border-color:#6a9a3a}#vgBot button:disabled{opacity:0.35}
 #vgLeft button{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:44px;padding:6px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none}#vgLeft button.on{background:#2a3a1e;border-color:#6a9a3a}
 #vgLeft .r3{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid #2c3850}#vgLeft .r3 button{font-size:13px;min-height:40px}#vgLeft .r{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center}#vgLeft .l{color:#7a8294}#vgFps{color:#9fd36a;font:600 20px ui-monospace,Menlo,monospace}#vgCost{color:#c8cfdc;font-size:12px;line-height:1.35;white-space:pre-line}</style>
-<div class="r3"><button class="on" title="The scene: the prefabs on their decks">GROUP EDITOR</button><button data-ed="prefab" title="The prefab on its own (the last one worked on, or the plant selected)">PREFAB EDITOR</button><button data-ed="comp" title="Its trunk or its leaf">COMPONENT EDITOR</button></div><div id="vgFps">-- fps</div><div id="vgCost">-</div>
+<div class="r3"><button class="on" title="All the plants of this biome, on their decks">GROUP EDITOR</button><button data-ed="prefab" title="Edit one plant prefab on its own">PREFAB EDITOR</button><button data-ed="comp" title="Its trunk or its leaf">COMPONENT EDITOR</button></div><div id="vgFps">-- fps</div><div id="vgCost">-</div>
 <div class="r"><span class="l">ZOOM</span><button data-z="1">+</button><button data-z="-1">-</button></div>
-<button data-b="1" class="on" style="display:none">BONES ON</button><button data-reset="1" style="display:none" title="Every plant regrown, the structures and vehicles spawned gone, the hour, wind and view back - the saved numbers and shapes stay">RESET SCENE</button><div class="l">DECKS</div><div id="vgVis" style="display:grid;gap:6px"></div>` + (window.__vegLab ? `<button data-exp="1" title="Everything saved, as one file for the game">EXPORT FOR GAME</button>` : `<button data-snap="1" title="The game's SNAPSHOT - your world and these plants - to paste on the world page">SNAPSHOT</button><button data-ged="1" title="Open the game editor">GAME EDITOR</button><button data-back="1" title="Close the biome editor">CLOSE</button>`);
+<button data-b="1" class="on" style="display:none">BONES ON</button><button data-reset="1" style="display:none" title="Puts the scene back as it was when the editor opened. Your settings stay">RESET SCENE</button><div class="l">DECKS</div><div id="vgVis" style="display:grid;gap:6px"></div>` + (window.__vegLab ? `<button data-exp="1" title="Everything saved, as one file for the game">EXPORT FOR GAME</button>` : `<button data-snap="1" title="Copies everything - the world and the biomes - as text you can paste or keep">SNAPSHOT</button><button data-ged="1" title="Opens the game editor">GAME EDITOR</button><button data-back="1" title="Closes the biome editor">CLOSE</button>`);
     const fpsEl = L.querySelector('#vgFps');
     // (user Nov 7 16:15, his photo: the left panel still ran over the bottom bar - 100vh isn't the screen's height on every device) the left
     // panel stops 8 pixels over where the bottom bar really starts, and scrolls; the right one fits the screen it's on. (Nov 7 18:05, iPad 27.2 Home Screen app: both panels start below the status bar and its fade - --below-bar - and fit the page's real height, pageBox)
     const fitLeft = () => { const b = document.getElementById('vgBot'), rb = b && getComputedStyle(b).display !== 'none' && getComputedStyle(b).visibility !== 'hidden' ? b.getBoundingClientRect() : null, bt = rb && rb.height > 0 ? rb.top : pageBox().h; L.style.maxHeight = Math.max(80, Math.floor(bt - L.getBoundingClientRect().top - 8)) + 'px'; d.style.maxHeight = Math.max(80, Math.floor(pageBox().h - d.getBoundingClientRect().top - 8)) + 'px'; };
     fitLeft(); window.addEventListener('resize', fitLeft); setInterval(fitLeft, 700);
+    // (user Nov 7 18:25: "We also need the SNAPSHOT button to be CRYSTAL CLEAR that we have made changes") SNAPSHOT shows whether anything of the
+    // biomes has changed since a snapshot was last copied: the biome editor's own saved keys against bd_biome_snapsig (set by COPY)
+    const SNAP_KEYS = ['bd_vegdecks', 'bd_foliage', 'bd_vegprefabs', 'bd_vtune', 'bd_biome_surf', 'bd_biome_pics', 'bd_biome_grounds', 'bd_biome_ground', 'bd_plants'];
+    const snapSig = () => { let s = ''; for (const k of SNAP_KEYS) { const v = localStorage.getItem(k) || ''; let h = 0; for (let i = 0; i < v.length; i++) h = (h * 31 + v.charCodeAt(i)) | 0; s += h + ':'; } return s; };
+    try { if (!localStorage.getItem('bd_biome_snapsig')) localStorage.setItem('bd_biome_snapsig', snapSig()); } catch (e) { }
+    const snapShow = () => { const b = L.querySelector('[data-snap]'); if (!b) return; let ch = false; try { ch = localStorage.getItem('bd_biome_snapsig') !== snapSig(); } catch (e) { }
+      b.textContent = ch ? 'SNAPSHOT - CHANGES NOT COPIED' : 'SNAPSHOT - UP TO DATE'; b.style.background = ch ? '#7a4a12' : ''; b.style.borderColor = ch ? '#e0a040' : '';
+      b.title = ch ? 'You changed the biomes since the last snapshot was copied - press to copy a new one' : 'Nothing changed since the last snapshot was copied'; };
+    snapShow(); setInterval(snapShow, 1000); window.__vgSnapCopied = () => { try { localStorage.setItem('bd_biome_snapsig', snapSig()); } catch (e) { } snapShow(); };
     if (L.querySelector('[data-back]')) L.querySelector('[data-back]').onclick = () => { try { sessionStorage.removeItem('veged'); } catch (e) { } location.reload(); };   // (the game's VEGETATION EDITOR: CLOSE - back to the title; user Nov 7: "Instead of 'Back to Game' it should say 'CLOSE'")
     if (L.querySelector('[data-ged]')) L.querySelector('[data-ged]').onclick = () => { try { sessionStorage.removeItem('veged'); sessionStorage.setItem('gameed', '1'); } catch (e) { } location.reload(); };   // (GAME EDITOR: the page again, the GAME EDITOR opened on it - 00-world.js)
     // (user Nov 4 13:45: "the in-game vegetation editor must also have a 'snapshot' button so I dont have to open the game editor") the GAME EDITOR's SNAPSHOT:
@@ -65982,7 +66127,7 @@ if (VEG_MODE) (() => {
       const m = document.createElement('div'); m.style.cssText = 'position:fixed;inset:0;z-index:230;background:#0008;display:grid;place-items:center;font:14px ui-monospace,Menlo,monospace';
       m.innerHTML = '<div style="background:#0f1420;border:1px solid #2c3850;border-radius:10px;padding:16px;display:grid;gap:10px;color:#d8dce8;width:min(640px,90vw)"><div style="color:#9fd36a">SNAPSHOT</div><div style="color:#9aa3b5">Copy it and paste it on the world page (or give it to Claude)</div><textarea readonly style="height:180px;font:11px ui-monospace,monospace;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px"></textarea><div style="display:flex;gap:8px"><button data-c style="min-height:44px;padding:6px 16px">COPY</button><button data-x style="min-height:44px;padding:6px 16px">CLOSE</button></div></div>';
       const ta = m.querySelector('textarea'), bc = m.querySelector('[data-c]'); ta.value = t; for (const b of m.querySelectorAll('button')) b.style.cssText += ';font:inherit;background:#1a2234;color:#fff;border:1px solid #2c3850;border-radius:6px;cursor:pointer';
-      bc.onclick = async () => { ta.select(); try { await navigator.clipboard.writeText(t); bc.textContent = 'COPIED'; } catch (e) { try { document.execCommand('copy'); bc.textContent = 'COPIED'; } catch (e2) { } } setTimeout(() => { bc.textContent = 'COPY'; }, 1500); };
+      bc.onclick = async () => { ta.select(); try { await navigator.clipboard.writeText(t); bc.textContent = 'COPIED'; if (window.__vgSnapCopied) window.__vgSnapCopied(); } catch (e) { try { document.execCommand('copy'); bc.textContent = 'COPIED'; if (window.__vgSnapCopied) window.__vgSnapCopied(); } catch (e2) { } } setTimeout(() => { bc.textContent = 'COPY'; }, 1500); };
       m.querySelector('[data-x]').onclick = () => m.remove(); for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'wheel', 'click', 'keydown']) m.addEventListener(ev, e => e.stopPropagation());
       document.body.appendChild(m); ta.select(); };
     if (L.querySelector('[data-exp]')) L.querySelector('[data-exp]').onclick = async () => { const b = L.querySelector('[data-exp]'); b.blur(); const dl = window.claude && claude.use ? await claude.use('downloads') : null; if (!dl) { tip.textContent = 'No file saving here'; return; }
@@ -66128,7 +66273,7 @@ if (VEG_MODE) (() => {
       // (user Nov 3 22:46: "The Group Editor / Prefab Editor / Component Editor should always be present on the top left, with whatever you worked
       // on there last remaining as you switch. Each time we switch it asks 'do you want to save changes' in case you didn't. Changes automatically
       // show in the next view change") the three tabs, here and on the scene; each switch with changes not saved asks first
-      q('feGroup').onclick = () => feAsk(() => { if (FE.live) { FE.pMask = FE.pWorld = false; feLiveSet(); } root.style.display = 'none'; feBack(); if (window.__vgPanel) window.__vgPanel('group'); const t = document.getElementById('vgTip'); if (t) t.textContent = 'The GROUP EDITOR: the scene'; });
+      q('feGroup').onclick = () => feAsk(() => { if (FE.live) { FE.pMask = FE.pWorld = false; feLiveSet(); } root.style.display = 'none'; feBack(); if (window.__vgPanel) window.__vgPanel('group'); const t = document.getElementById('vgTip'); if (t) t.textContent = 'Group editor: all the plants of this biome on their decks'; });
       for (const b of root.querySelectorAll('[data-ed]')) b.onclick = () => { b.blur(); if (FE.ed === b.dataset.ed) return; feAsk(() => feEd(b.dataset.ed)); };
       q('feComp').onchange = () => { feComp(q('feComp').value); };
       // (23:25) VECTOR SHAPE and MASK each on or off: vector on - the polygons edited (VERTEX / EDGE / POLYGON); vector off and mask on - the mask
