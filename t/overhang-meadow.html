@@ -4949,7 +4949,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 819;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 07 23:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 07 23:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -48925,7 +48925,7 @@ function fieldLines() {
       ys[j] = a / q;
     }
   }
-  return (land.fl = { v: V, s: land.surf, b: land.backS, N, y, f, ys });
+  return (land.fl = { v: V, s: land.surf, b: land.backS, N, y, f, ys, DL, DR });   // (DL / DR: columns to the line's end on each side)
 }
 /* ---- (user Nov 7 21:06, his pictures: flowers over the water; "Meadow should also disappear if a segment has no vegetation ... And it should be a
    smooth transition always, not a sharp edge") how much meadow column c has, 0..1 - the one amount the meadow (fieldH, paintLandBack) and its
@@ -50476,6 +50476,17 @@ function treeEnd(L, i, tileW, k, B) {
   for (let c = Math.floor(bc / 8) * 8; c >= Math.max(0, bc - 200); c -= 8) { const v = cov[c] + (c > 0 ? cov[c - 1] : 0); if (v < bv) { bv = v; best = c; } }
   return (L.endX = ti * tileW + best * k);
 }
+// (user Nov 7 21:53, the row at an edge of its ground - an overhang's tip, a cliff, the wall under an overhang) the gap between two crowns nearest an
+// edge at world x B, on its own side of it: dir 1 the ground runs on to the left (the row ends there), -1 to the right (it starts there)
+function treeGap(L, tileW, k, B, dir) {
+  if (!L.cov) { const im = L.s.c, d = im.getContext('2d').getImageData(0, 0, im.width, im.height).data, cov = new Float32Array(im.width);
+    for (let x = 0; x < im.width; x++) { let n = 0; for (let y = 0; y < im.height; y++) if (d[(y * im.width + x) * 4 + 3] > 40) n++; cov[x] = n; } L.cov = cov; }
+  const cov = L.cov, W = cov.length, ti = Math.floor(B / tileW), bc = Math.floor((B - ti * tileW) / k);
+  let best = bc, bv = 1e9;
+  for (let q = 0; q <= 200; q += 8) { const c = Math.floor(bc / 8) * 8 - dir * q; if (c < 0 || c >= W) break; const v = cov[c] + (c > 0 ? cov[c - 1] : 0); if (v < bv) { bv = v; best = c; } }
+  return ti * tileW + best * k;
+}
+const TREE_EDGE = 40;                                      // (world units the row keeps back from its ground's edge)
 const LTREE = { P: { src: null, T: null, G: null, W: 0, H: 0 }, m: [1, 0, 0, 1, 0, 0] };
 function drawLandTrees(x0, x1) {
   if (!land.bg) buildLandBg();
@@ -50510,20 +50521,23 @@ function drawLandTrees(x0, x1) {
       // two crowns, the last whole tree before the coast: treeEnd)
       { const N = nearestShore(cx); if (N.dir > 0 && cx < N.x && wx + ww > treeEnd(L, i, tileW, k, N.x - 60)) continue; }   // (before a coast with the sea on its right)
       // (user Nov 7 21:53: the background decks fade out at an edge too) the row stands on each ground of the column - its top and the ground under an
-      // overhang (fieldLines) - on its meadow's back edge, along that ground's own smoothed line, and sinks out of sight toward that ground's end as the
-      // meadow thins (f); never on a line smoothed across a drop, hanging in the air
+      // overhang (fieldLines) - on its meadow's back edge, along that ground's own smoothed line, and ends at the last whole tree before that ground's end
+      // (treeGap); never on a line smoothed across a drop, hanging in the air
       const cc = clamp(Math.floor(cx / LT_CELL), 0, land.cols - 1), FL = fieldLines(); if (!FL) continue;
       const X = Math.round(PX(wx)), X2 = Math.round(PX(wx + ww)), s2 = sw * (1 + 0.3 * Math.sin(time * 0.7));
       const bk = land.bio && land.bio[cc] ? BLK[land.bio[cc]] : land.mtn && land.mtn[cc] ? 'M' : null, PP = bk ? bioP(bk) : P, up = bgPB('bgfny', 0, colBiome(cc));
       for (let j = FL.N[cc]; j < FL.N[cc + 1]; j++) {
         const f = FL.f[j]; if (f < 0.02) continue;
+        // (it ends at the gap between two crowns before its ground's end, whole trees only - as at a coast, treeEnd)
+        if (FL.DR[j] * LT_CELL < 208 * k + TREE_EDGE && wx + ww > treeGap(L, tileW, k, cx + FL.DR[j] * LT_CELL - TREE_EDGE, 1)) continue;
+        if (FL.DL[j] * LT_CELL < 208 * k + TREE_EDGE && wx < treeGap(L, tileW, k, cx - FL.DL[j] * LT_CELL + TREE_EDGE, -1)) continue;
         const foot = FL.ys[j] - fieldH0(cc) * f * LT_CELL + 6 - up, Y = Math.round(PY(foot));   // (on the field's back edge (and the BG tab's NEAR TREES UP), its ups and downs; by the airfield, on the ground)
         if (!fs) { C.fillStyle = under; fs = true; }
         C.fillRect(X, Y - 1, X2 - X, Math.max(1, (j + 1 < FL.N[cc + 1] ? Math.round(PY(FL.y[j] + 4)) : bh) - Y + 1));   // (down to the bottom - the ground in front covers it, so a low valley shows no sky; over an overhang only down to its top: the open air under it stays open)
         // (toward the coast the trees get lower and give out - bushes by the airport's fence - rather than ending in a line)
         for (let q = 0; q < 6; q++) mm[q] = m0[q];
         glMatTranslate(mm, 0, Y); if (s2) glMatTransform(mm, 1, 0, -s2, 1, 0, 0);
-        if (PP) glImageRect(C, mm, PP, true, sx, 0, Math.min(SL, im.width - sx), im.height * f, X, -h * f, X2 - X, h * f);   // (its crowns only, sunk by 1 - f)
+        if (PP) glImageRect(C, mm, PP, true, sx, 0, Math.min(SL, im.width - sx), im.height, X, -h, X2 - X, h);   // (whole)
       }
     }
   }
