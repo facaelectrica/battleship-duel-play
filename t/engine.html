@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 19:17', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 09 19:31', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1273,7 +1273,7 @@ function gpuSampler(lin, wrapS, wrapT) {
    Nothing ever waits on the GPU: a read back (gpuRead) gives what was read a frame or more ago and asks again;
    the GPU's own time a frame comes from timestamps read the same way.
    ================================================================ */
-const FR = { enc: null, sub: 1, pass: null, pk: null, frame: 0, reads: new Map(), wait: [], qs: null, qn: 0, QMAX: 512, tsBuf: null, tsRead: [], gpuMs: 0, passMs: [], present: null };
+const FR = { marks: null, enc: null, sub: 1, pass: null, pk: null, frame: 0, reads: new Map(), wait: [], qs: null, qn: 0, QMAX: 512, tsBuf: null, tsRead: [], gpuMs: 0, passMs: [], present: null };
 function gpuEnc() { if (!FR.enc) FR.enc = GPU.dev.createCommandEncoder(); return FR.enc; }
 function gpuPassEnd() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; } }
 // a render pass on desc's targets (key: which targets, so draws to the same ones keep it open)
@@ -1302,7 +1302,7 @@ function gpuFrameEnd(screen) {
   if (!GPU.on || GPU.lost) return;
   if (screen && screen.gt) gpuPresent(screen);
   if (FR.qn && FR.qs) {
-    const n = FR.qn, enc = gpuEnc();
+    const n = FR.qn, enc = gpuEnc(), marks = FR.marks; FR.marks = null;
     gpuPassEnd();
     const rb = GPU.dev.createBuffer({ size: n * 8, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
     const mb = GPU.dev.createBuffer({ size: n * 8, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
@@ -1310,8 +1310,9 @@ function gpuFrameEnd(screen) {
     gpuTrash(rb);
     FR.wait.push(() => mb.mapAsync(GPUMapMode.READ).then(() => {
       const t = new BigUint64Array(mb.getMappedRange()); let s = 0; const P = [];
-      for (let i = 0; i + 1 < n; i += 2) { const d = Number(t[i + 1] - t[i]) / 1e6; if (d >= 0 && d < 1000) { s += d; P.push(d); } }
+      for (let i = 0; i + 1 < n; i += 2) { let d = Number(t[i + 1] - t[i]) / 1e6; if (!(d >= 0 && d < 1000)) d = 0; s += d; P.push(d); }
       FR.gpuMs = s; FR.passMs = P; mb.unmap(); mb.destroy();
+      if (marks && typeof gptTimes === 'function') gptTimes(P, marks);   // (the render parts' GPU time - 40-gl.js GPUT)
     }).catch(() => { }));
     FR.qn = 0;
   }
@@ -4179,31 +4180,10 @@ const picMaker = () => {
 // 1b. the graphics card's own memory, counted the same way: every texture and render buffer as it's given its size, back when it's
 // deleted - the drawn pictures' textures, the atlas, the GPU layers (the sky's decks, the world's kept tiles) - PICS.gpu. On an iPad
 // it shares the graphics process's memory with the canvases, so the budget weighs both (picTrim)
-PICS.gpu = 0;
-(() => {
-  if (typeof WebGL2RenderingContext === 'undefined' || (typeof SW_IN_WORKER !== 'undefined' && SW_IN_WORKER)) return;
-  const G = WebGL2RenderingContext.prototype, size = new WeakMap();
-  const st = gl => gl.__ps || (gl.__ps = { unit: 0, tex: [], rb: null });
-  const bpp = (gl, f) => f === gl.RGBA16F ? 8 : f === gl.RGBA32F ? 16 : f === gl.R8 || f === gl.ALPHA || f === gl.LUMINANCE || f === gl.STENCIL_INDEX8 ? 1 : f === gl.RG8 || f === gl.DEPTH_COMPONENT16 ? 2 : 4;
-  if (PIC_TAG) PICS.gtags = [];
-  const put = (o, b) => { if (!o) return; const was = size.get(o) || 0; PICS.gpu += b - was; size.set(o, b); if (PIC_TAG) { let r = o.__pt; if (!r) { r = o.__pt = { b: 0 }; PICS.gtags.push(r); } r.b = b; if (b) r.by = PICS.tagNext || picMaker(); } };
-  const wrap = (m, fn) => { const f = G[m]; if (typeof f === 'function') G[m] = function () { fn.call(this, arguments); return f.apply(this, arguments); }; };
-  wrap('activeTexture', function (a) { st(this).unit = a[0] - this.TEXTURE0; });
-  wrap('bindTexture', function (a) { if (a[0] === this.TEXTURE_2D) st(this).tex[st(this).unit] = a[1]; });
-  wrap('bindRenderbuffer', function (a) { st(this).rb = a[1]; });
-  wrap('texImage2D', function (a) {
-    if (a[0] !== this.TEXTURE_2D || a[1] !== 0) return;
-    let w, h; if (a.length >= 8) { w = a[3]; h = a[4]; } else { const s = a[5]; w = s && (s.naturalWidth || s.videoWidth || s.width); h = s && (s.naturalHeight || s.videoHeight || s.height); }
-    put(st(this).tex[st(this).unit], (w * h * bpp(this, a[2])) || 0);
-  });
-  wrap('texStorage2D', function (a) { if (a[0] === this.TEXTURE_2D) put(st(this).tex[st(this).unit], a[3] * a[4] * bpp(this, a[2]) * (a[1] > 1 ? 1.34 : 1)); });
-  wrap('renderbufferStorage', function (a) { put(st(this).rb, a[2] * a[3] * bpp(this, a[1])); });
-  wrap('renderbufferStorageMultisample', function (a) { put(st(this).rb, a[3] * a[4] * bpp(this, a[2]) * Math.max(1, a[1])); });
-  wrap('deleteTexture', function (a) { put(a[0], 0); });
-  wrap('deleteRenderbuffer', function (a) { put(a[0], 0); });
-  // (the context lost: every texture with it - counted again as they're made anew)
-  if (typeof document !== 'undefined') document.addEventListener('webglcontextlost', () => { PICS.gpu = 0; }, true);
-})();
+// (engine skeleton, Nov 9: the graphics card's memory is the graphics layer's own count - every texture and buffer made through
+// src/gpu/ counted by its pool, GPU_MEM; the WebGL prototype wrappers that counted it are gone with WebGL)
+Object.defineProperty(PICS, 'gpu', { get: () => typeof GPU_MEM === 'undefined' ? 0 : GPU_MEM.tex + GPU_MEM.buf + GPU_MEM.arena, set() { } });
+if (PIC_TAG) PICS.gtags = [];
 // 3. a store's picture: c the canvas, store its name (the readings), drop(c) the store forgetting it, grp what it's used and let go with;
 // soft: something besides its store may still draw it (a plane's side view kept for its wreck) - let go, it's only forgotten (its
 // memory freed once nothing holds it), never shrunk under whoever still has it
@@ -7272,7 +7252,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 19:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 19:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8814,7 +8794,9 @@ function drawPerfPanel(x, y) {
     'IN TINT: COPY ' + f(P.tnCopy) + '  LAMPS ' + f(P.tnLamps) + '  BACK SMOKE ' + f(P.tnSmokeB) + '  SPARKS ' + f(P.tnSparks) + '  DECK 1 ' + f(P.tnDeck1) + '  FW ' + f(P.tnFw) + '  CAVES ' + f(P.tnCaves) + '  GRADE ' + f(P.tnGrade),   // (Nov 1: the tint part's sub-parts - 48-render.js tl)
     'PUFFS ' + f(P.ovSmoke) + '  TRAILS ' + f(P.ovTrails) + '  FIRE ' + f(P.ovFire) + '  RAIN ' + f(P.ovRain),
     // (Nov 1: the graphics card's time on each part, from the GPU timers - 40-gl.js GPUT; their total the sum of the parts)
-    !GLR.on ? '' : GPUT.tried && !GPUT.ext ? 'GPU TIMERS: NONE ON THIS DRIVER' : (G => 'GPU ' + f(G.total) + '  SKY ' + f(G.sky) + '  WORLD ' + f(G.objects) + '  WATER ' + f(G.distort) + '  LAND ' + f(G.land) + '  TINT ' + f(G.tint) + '  FX ' + f(G.overlays))(GPUT.parts),
+    // (engine skeleton, Nov 9: the graphics card's own time a frame - the layer's timestamps, read a frame or more late - and its memory by pool)
+    !GPU.on ? 'NO WEBGPU' : !GPU.feat['timestamp-query'] ? 'GPU TIME: NO TIMESTAMPS ON THIS DEVICE' : (G => 'GPU ' + f(FR.gpuMs) + '  SKY ' + f(G.sky) + '  WORLD ' + f(G.objects) + '  WATER ' + f(G.distort) + '  LAND ' + f(G.land) + '  TINT ' + f(G.tint) + '  FX ' + f(G.overlays) + '  PASSES ' + FR.passMs.length)(GPUT.parts),
+    !GPU.on ? '' : 'GPU MEMORY ' + Math.round((GPU_MEM.tex + GPU_MEM.buf + GPU_MEM.arena) / 1048576) + ' MB: ' + Object.entries(GPU_MEM.by).filter(e => e[1] > 524288).sort((x, y) => y[1] - x[1]).map(e => e[0].toUpperCase() + ' ' + Math.round(e[1] / 1048576)).join('  '),
     'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + (GLR.on ? '  WEBGL' : '  MODE ' + MODE_NAMES[getMode()] + (BATCH_AUTO ? (abTrial.phase ? ' TRYING' : ' AUTO') : '') + '  [TAP HERE: NEXT MODE]'),
     GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + '  DECKS ' + Math.round(FT.dDraw || 0) + '/' + Math.round(FT.dSkip || 0) + (GLR.lost ? '  LOST' : '') : '',
     'SMOKE ' + smoke.n + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
@@ -23179,7 +23161,7 @@ function glBeginFrame() {
   if (GPUT.want || GPUT.cur || GPUT.frames.length || ui.perfPanel) gptBegin();   // (the GPU timers: off, nothing)
 }
 const PIX_RING = 24;
-function glEndFrame() { if (GLR.on && !GLR.lost) { glFlush(); gpuFrameEnd(GLX.screen && GLX.screen.c); } if (GPUT.cur) gptEnd(); }
+function glEndFrame() { if (GPUT.cur) gptEnd(); if (GLR.on && !GLR.lost) { glFlush(); gpuFrameEnd(GLX.screen && GLX.screen.c); } }
 /* (Nov 1) GPU TIMERS PER RENDER PART: what the graphics card spends on each part of the frame, not only the CPU. While the perf
    panel is open or __game.gpuTimers(true), each frame's drawing is timed by EXT_disjoint_timer_query_webgl2 TIME_ELAPSED
    queries one after another (they can't nest): one runs from the frame's start, and wherever a part's lap closes (48-render.js
@@ -23188,51 +23170,30 @@ function glEndFrame() { if (GLR.on && !GLR.lost) { glFlush(); gpuFrameEnd(GLX.sc
    later, when the results are there, each sub-part gets its own time and a part the times since the part before closed (its
    sub-parts in it, as its CPU time); total, their sum (no gl.finish). A frame the driver marks disjoint is dropped. Averaged
    as the CPU parts (perf.parts): GPUT.parts, perfNow().gpuParts. Off: no query, no flush, nothing else; no extension: nothing */
+// (engine skeleton, Nov 9: the same parts timed by the graphics layer's timestamps - each render pass's begin and end - not WebGL's
+// queries: a lap ends the open pass, so every pass belongs to one part; the frame's marks go to gpuFrameEnd, which reads its
+// timestamps a frame or more late and hands them back here - gptTimes)
 const GPUT = { want: false, ext: null, tried: false, ep: -1, cur: null, segs: null, frames: [], pool: [], parts: {}, n: 0 };
-function gptQuery() { return GPUT.pool.pop() || GLR.gl.createQuery(); }
-// the frame's first query (and the results of frames before, read when ready) - from glBeginFrame
 function gptBegin() {
-  const gl = GLR.gl;
-  if (GPUT.ep !== GLR.epoch) { GPUT.ep = GLR.epoch; GPUT.tried = false; GPUT.ext = null; GPUT.cur = null; GPUT.segs = null; GPUT.frames.length = 0; GPUT.pool.length = 0; }   // (a new context: its own queries)
-  if (GPUT.cur) { gl.endQuery(GPUT.ext.TIME_ELAPSED_EXT); for (const s of GPUT.segs) GPUT.pool.push(s.q); GPUT.pool.push(GPUT.cur); GPUT.cur = null; }   // (a frame that never ended: dropped)
-  gptRead();
-  if (!(GPUT.want || ui.perfPanel)) return;
-  if (!GPUT.tried) { GPUT.tried = true; GPUT.ext = gl.getExtension('EXT_disjoint_timer_query_webgl2'); }
-  if (!GPUT.ext) return;
-  GPUT.segs = []; GPUT.cur = gptQuery(); gl.beginQuery(GPUT.ext.TIME_ELAPSED_EXT, GPUT.cur);
+  GPUT.cur = null; GPUT.segs = null;
+  if (!(GPUT.want || ui.perfPanel) || !GPU.on || !GPU.feat['timestamp-query']) return;
+  GPUT.tried = true; GPUT.ext = {}; GPUT.cur = 1; gpuPassEnd(); GPUT.segs = [{ k: '', top: 1, q: FR.qn }];
 }
-// a part's lap: k its name, top 1 for a part (48-render.js), 0 for a sub-part
-function gptLap(k, top) {
-  const gl = GLR.gl, X = GPUT.ext;
-  glFlush(); gl.endQuery(X.TIME_ELAPSED_EXT); GPUT.segs.push({ k, top, q: GPUT.cur });
-  GPUT.cur = gptQuery(); gl.beginQuery(X.TIME_ELAPSED_EXT, GPUT.cur);
-}
-function gptEnd() {
-  GLR.gl.endQuery(GPUT.ext.TIME_ELAPSED_EXT); GPUT.segs.push({ k: 'rest', top: 1, q: GPUT.cur });
-  GPUT.frames.push(GPUT.segs); GPUT.cur = null; GPUT.segs = null;
-}
-// the frames whose results are in, oldest first: each part's ms into the averages (a part not in a frame averaged as 0)
-function gptRead() {
-  const gl = GLR.gl, X = GPUT.ext, F = GPUT.frames;
-  while (F.length) {
-    const segs = F[0], last = segs[segs.length - 1].q;
-    if (!gl.getQueryParameter(last, gl.QUERY_RESULT_AVAILABLE)) break;
-    F.shift();
-    const dis = gl.getParameter(X.GPU_DISJOINT_EXT), T = {};
-    if (!dis) {
-      let acc = 0, total = 0;
-      for (const s of segs) {
-        const ms = gl.getQueryParameter(s.q, gl.QUERY_RESULT) / 1e6;
-        acc += ms; total += ms;
-        if (s.top) { T[s.k] = (T[s.k] || 0) + acc; acc = 0; } else T[s.k] = (T[s.k] || 0) + ms;
-      }
-      T.total = total;
-      const P = GPUT.parts; for (const k in T) if (!(k in P)) P[k] = 0;
-      for (const k in P) P[k] += ((T[k] || 0) - P[k]) * 0.05;
-      GPUT.n++;
-    }
-    for (const s of segs) GPUT.pool.push(s.q);
+// a part's lap: k its name, top 1 for a part (48-render.js), 0 for a sub-part - the passes since the last lap are its
+function gptLap(k, top) { glFlush(); gpuPassEnd(); GPUT.segs.push({ k, top, q: FR.qn }); }
+function gptEnd() { glFlush(); gpuPassEnd(); GPUT.segs.push({ k: 'rest', top: 1, q: FR.qn }); FR.marks = GPUT.segs; GPUT.cur = null; GPUT.segs = null; }
+// a frame's pass times (D[j]: pass j's ms, by its timestamps' place 2j) and its marks: each part's ms into the averages, as before
+function gptTimes(D, marks) {
+  const T = {}; let acc = 0, total = 0;
+  for (let i = 1; i < marks.length; i++) {
+    let ms = 0; for (let q = marks[i - 1].q; q < marks[i].q; q += 2) ms += D[q >> 1] || 0;
+    acc += ms; total += ms;
+    const s = marks[i]; if (s.top) { T[s.k] = (T[s.k] || 0) + acc; acc = 0; } else T[s.k] = (T[s.k] || 0) + ms;
   }
+  T.total = total;
+  const P = GPUT.parts; for (const k in T) if (!(k in P)) P[k] = 0;
+  for (const k in P) P[k] += ((T[k] || 0) - P[k]) * 0.05;
+  GPUT.n++;
 }
 
 /* ---- the context: the Canvas 2D calls the world uses, drawn with the batch ---- */
