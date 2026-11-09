@@ -5189,8 +5189,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 953;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 14:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 954;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 14:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -42590,7 +42590,7 @@ function drawIslChunks(x0, x1, inLand) {
     if (!seaAtX((k + 0.5) * LT_CHUNK * LT_CELL) !== inLand) continue;   // (a slice in a country: the land's pass)
     const IT = land.ichunks && land.ichunks[k]; if (!IT) continue;
     const xl = k * LT_CHUNK * LT_CELL;
-    for (const cv of IT) { if (!cv) continue; const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL)), [Y, H] = ltTileRect(k, cv); if (ltTileOn(Y, H)) C.drawImage(groundLit(cv), X0, Y, X1 - X0, H); }   // (its tiles, in the hour's light - groundLit, 50-land-trop.js)
+    for (const cv of IT) { if (!cv) continue; const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + ltCW(cv) * LT_CELL)), [Y, H] = ltTileRect(k, cv); if (!ltTileOn(Y, H)) continue; const fc = ltFar(cv, ltFarF(X1 - X0, H, ltCW(cv), ltCH(cv))); if (fc) C.drawImage(groundLit(fc), X0, Y, X1 - X0, H); }   // (its tiles, in the hour's light - groundLit, 50-land-trop.js; zoomed far out from a smaller copy, as the ground in front's - ltFar)
     for (const cv of IT) if (cv) gedgeDraw(cv, xl);        // (its smooth edge - 50-land-zz-edges.js)
     for (const cv of IT) if (cv) rimDraw(cv, xl);          // (its edges in the sun and the moon - 50-land-zz-rims.js)
     tropDrawOv(k, 'isl');                                  // (the TROPICAL rock's own pixels - 50-land-trop)
@@ -42655,9 +42655,10 @@ function islSplitChunk(k, id, w, h, b = 0, Y0 = 0) {
   const c0 = k * LT_CHUNK; let has = false;
   for (let q = 0; q < w; q++) if (islSplitEnd(k, q) > 0) { has = true; break; }
   if (!land.ichunks) land.ichunks = [];
-  if (!has) { if (IT) IT[b] = null; return; }
+  if (!has) { if (IT && IT[b]) { ltTileFree(IT[b]); IT[b] = null; } return; }
   const T = land.ichunks[k] || (land.ichunks[k] = []);
   let cv = T[b];
+  if (cv && cv._slim) { ltTileFree(cv); cv = T[b] = null; }   // (kept only as its far copies: painted whole again - ltSlim, 50-land-terrain.js)
   if (!cv || cv.width !== w || cv.height !== h) cv = T[b] = makeCanvas(w, h);
   cv._y0 = Y0;
   const g = cv.getContext('2d'), iid = g.createImageData(w, h), s = id.data, d = iid.data;
@@ -49496,13 +49497,21 @@ function ltTileMarks(k) {
   if (land.dirty[k]) { T[k].fill(1); land.dirty[k] = 0; if (land.runs) land.runs[k] = null; }
   return T[k];
 }
-const ltTileNeed = (k, b) => { const T = ltTileMarks(k), A = land.chunks[k]; return !A || !A[b] || T[b] === 1; };
-const ltBackNeed = (k, b) => { const A = land.back[k]; return !A || !A[b]; };
+// (full: a view needs the tile's whole picture - a tile kept only as its far copies (ltSlim) is painted again for it)
+const ltTileNeed = (k, b, full) => { const T = ltTileMarks(k), A = land.chunks[k]; return !A || !A[b] || T[b] === 1 || (!!full && ltSlimAt(k, b)); };
+const ltBackNeed = (k, b, full) => { const A = land.back[k]; return !A || !A[b] || (!!full && !!A[b]._slim); };
+const ltSlimAt = (k, b) => [land.chunks, land.ichunks].some(A => A && A[k] && A[k][b] && A[k][b]._slim);
+// (a picture's own size: one kept only as its far copies - ltSlim - keeps it, its pixels let go)
+const ltCW = c => c._slim ? c._slim.w : c.width, ltCH = c => c._slim ? c._slim.h : c.height;
 // (the tiles of slice k a band of rows [r0, r1) touches)
 function ltTilesIn(k, r0, r1) { const T4 = 4 - land.rT[k], n = ltTiles(k), a = Math.max(0, Math.floor((r0 + T4) / LT_TILE)), b = Math.min(n - 1, Math.floor((r1 + T4) / LT_TILE)), out = []; for (let i = a; i <= b; i++) out.push(i); return out; }
-// (every canvas a tile keeps: its own and the pictures made with it)
-const ltTilePics = cv => cv ? [cv, cv._gedgeCv, ...(cv._rimCv || [])].filter(Boolean) : [];
-function ltFreeTiles(A) { if (A) for (const cv of A) for (const c of ltTilePics(cv)) glFreeSrc(c); }
+// (every canvas a tile keeps: its own and the pictures made with it - ltPicsOf; and with them their far copies' bases - ltTilePics, the tile's group: ltSlim)
+const ltPicsOf = cv => cv ? [cv, cv._gedgeCv, ...(cv._rimCv || [])].filter(Boolean) : [];
+const ltTilePics = cv => { const P = ltPicsOf(cv), n = P.length; for (let i = 0; i < n; i++) if (P[i]._fb) P.push(P[i]._fb); return P; };
+// (a tile let go: every picture of it, its far copies too - out of the picture memory, their textures and memory freed now)
+function ltPicFree(c) { if (!c) return; if (c._fb) { ltFarFree(c._fb); c._fb = null; } ltFarDrop(c); ltFarFree(c); }
+function ltTileFree(cv) { for (const c of ltPicsOf(cv)) ltPicFree(c); }
+function ltFreeTiles(A) { if (A) for (const cv of A) ltTileFree(cv); }
 /* (one ground for the whole world, stage 3 - user Oct 28: "why cant I go lower on land?", "we should go as high as we
    want to, not just as low") the grid is kept a slice (LT_CHUNK columns) at a time, each slice as tall as its own ground
    needs: from its top row land.rT[k] (0, today's top - or above it, up a mountain raised past it) to its bottom row
@@ -50672,6 +50681,7 @@ function paintLandChunk0(k, b, pass = 0) {
   const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0), rT = land.rT[k], rB = land.rB[k], h = rB - rT + 4, T4 = 4 - rT;   // (+4: grass blades over the top row; a cell's row in the canvas: r + T4)
   const Y0 = ltTileY0(b), Y1 = ltTileY1(k, b), th = Y1 - Y0, TA = land.chunks[k] || (land.chunks[k] = []);
   let cv = pass === 1 ? null : TA[b];
+  if (cv && cv._slim) { ltTileFree(cv); cv = TA[b] = null; }   // (kept only as its far copies: painted whole again - ltSlim)
   if (pass !== 1) { if (!cv || cv.width !== w || cv.height !== th) cv = TA[b] = makeCanvas(w, th); cv._y0 = Y0; }
   // (the cells it shows - rows Y0 - T4 to Y1 - T4 - and those whose pixels reach into it: a root hangs 4 cells under its cell, a grass blade stands 3 over)
   const rs = Math.max(rT, Y0 - T4 - 4), re = Math.min(rB, Y1 - T4 + 3), PD = Math.ceil(ugReach() / LT_CELL) + 4;
@@ -50846,7 +50856,7 @@ function paintLandBack0(k, b) {
   landEnsure(k);
   const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0), rT = land.rT[k], rB = land.rB[k], T4 = 4 - rT;
   const Y0 = ltTileY0(b), Y1 = ltTileY1(k, b), h = Y1 - Y0, ra = Y0 - T4, rb = Y1 - T4, BT = land.back[k] || (land.back[k] = []);   // (its cells' rows ra .. rb)
-  if (BT[b]) for (const c of ltTilePics(BT[b])) glFreeSrc(c);
+  if (BT[b]) ltTileFree(BT[b]);
   const cv = BT[b] = makeCanvas(w, h), x = cv.getContext('2d'), id = x.createImageData(w, h), d = id.data, SR = stoneRaster(k, w, ra, rb);
   cv._y0 = Y0;
   // (Nov 7: the field behind in its biome's colours - ICE snow, SWAMP olive, VOLCANIC ash; MOUNTAIN grey rock, not a meadow)
@@ -51066,7 +51076,20 @@ function landPaintStep(views) {
   // (a tile's middle in the world, and its distance from a view's middle)
   const tileYm = (k, b) => LT_Y0 + (land.rT[k] - 4 + (b + 0.5) * LT_TILE) * LT_CELL, tileXm = k => (k + 0.5) * LT_CHUNK * LT_CELL;
   const away = (k, b, x0, x1, y0, y1) => { const xm = tileXm(k), ym = tileYm(k, b), dx = xm < x0 ? x0 - xm : xm > x1 ? xm - x1 : 0, dy = ym < y0 ? y0 - ym : ym > y1 ? ym - y1 : 0; return dx + dy; };
-  const ahead = [], todo = [];
+  const ahead = [], todo = [], slimC = [], t0 = performance.now();
+  // (a tile's need from the views - ltSlim: 3 a view shows it whole now, 2 a view shows it, or one near it is at a size it's painted whole for, 1 either
+  // way as it is, 0 only far. The GAME EDITOR and a page without the GPU keep every tile whole, as before)
+  const VR = [], slimOn = GLR.on && !EDMODE.on;
+  for (const [v, cp, , w] of views) { const sv = S * v.z, x0 = cp / sv, x1 = x0 + w / sv, y0 = v.top, y1 = y0 + VIEW_H / v.z, W = x1 - x0, Hh = y1 - y0; VR.push([x0, x1, y0, y1, x0 - W, x1 + W, y0 - Hh, y1 + Hh, sv * LT_CELL]); }
+  const need = (k, b) => {
+    if (!slimOn) return 3;
+    const xa = k * LT_CHUNK * LT_CELL, xb = xa + LT_CHUNK * LT_CELL, ya = LT_Y0 + (land.rT[k] - 4 + ltTileY0(b)) * LT_CELL, yb = LT_Y0 + (land.rT[k] - 4 + ltTileY1(k, b)) * LT_CELL; let n = 0;
+    for (const [x0, x1, y0, y1, a, b2, c, d, px] of VR) {
+      if (xb > x0 && xa < x1 && yb > y0 && ya < y1) n = Math.max(n, px >= 0.5 ? 3 : 2);   // (in a view: always whole - zooming in never waits for a tile)
+      if (n < 2 && xb > a && xa < b2 && yb > c && ya < d) n = Math.max(n, px >= LT_SLIM.aheadFull ? 2 : px >= LT_SLIM.aheadSlim ? 1 : 0);
+    }
+    return n;
+  };
   for (const [v, cp, , w] of views) {
     const sv = S * v.z, x0 = cp / sv, x1 = x0 + w / sv, xm = (x0 + x1) / 2, y0 = v.top, y1 = v.top + VIEW_H / v.z, ym = (y0 + y1) / 2;
     const ra = ltRow(y0) - 8, rb = ltRow(y1) + 8;               // (the rows it shows - a few more for a blade or a shadow over the edge)
@@ -51075,7 +51098,7 @@ function landPaintStep(views) {
     // (user Nov 1 20:12, editor speed: nothing thrown away while the GAME EDITOR is open - panned back to, it was all painted again)
     { const S_ = land.seen || (land.seen = new Int32Array(n)); for (const [k] of list) S_[k] = renderTick; for (const k of isl) S_[k] = renderTick; }
     if (!LBACK) landBackArt();                              // (the caves' tile in: the backs painted again with it)
-    const add = (k, bk) => { for (const b of ltTilesIn(k, ra, rb)) { if (bk ? ltBackNeed(k, b) : ltTileNeed(k, b)) todo.push([Math.abs(tileXm(k) - xm) + Math.abs(tileYm(k, b) - ym), bk, k, b]); landKeep(k, b); } };
+    const add = (k, bk) => { for (const b of ltTilesIn(k, ra, rb)) { const n = need(k, b); if (bk ? ltBackNeed(k, b, n >= 2) : ltTileNeed(k, b, n >= 2)) todo.push([Math.abs(tileXm(k) - xm) + Math.abs(tileYm(k, b) - ym), bk, k, b, n]); else if (!n && ltWhole(k, b)) slimC.push([k, b]); landKeep(k, b); } };
     for (const [k] of list) add(k, 1);
     for (const k of isl) add(k, 0);
     for (const [k] of list) add(k, 0);
@@ -51086,10 +51109,16 @@ function landPaintStep(views) {
   // in - a tile painted before is drawn as it was until then. The same pictures: only when
   if (todo.length) {
     todo.sort((a, b) => a[0] - b[0]); bakeLeft();
-    for (const [, bk, k, b] of todo) {
+    for (const [, bk, k, b, n] of todo) {
       if (painted && !bakeLeft()) break;
-      if (bk) { if (ltBackNeed(k, b)) { paintLandBack(k, b); landKeep(k, b); painted++; } }
-      else if (ltTileNeed(k, b)) { paintLandChunk(k, b); ltTileMarks(k)[b] = 0; landKeep(k, b); painted++; }
+      // (a tile kept only far, painted whole again before a view draws it whole: until then its far copy is what's drawn, and right - so never all at once
+      // on a jump (bakeCut), only the frame's time for it)
+      const late = n < 3 && (bk ? !!(land.back[k] && land.back[k][b]) : !!(land.chunks[k] && land.chunks[k][b]) && ltTileMarks(k)[b] !== 1);
+      if (late && painted && performance.now() - t0 > BAKE.ms) continue;
+      if (late) LT_SLIM.full++;
+      if (bk) { if (ltBackNeed(k, b, n >= 2)) { paintLandBack(k, b); landKeep(k, b); painted++; } }
+      else if (ltTileNeed(k, b, n >= 2)) { paintLandChunk(k, b); ltTileMarks(k)[b] = 0; landKeep(k, b); painted++; }
+      if (!n) ltSlim(k, b);                                     // (painted for a crater, a slider: only far, its far copies made from it and it let go)
     }
   }
   // (user Nov 1 20:12, editor speed: panning to the sides zoomed out froze 56-154 ms each time new land came into view - every
@@ -51102,14 +51131,14 @@ function landPaintStep(views) {
   for (const [x0, x1, y0, y1] of ahead) {
     const W = x1 - x0, Hh = y1 - y0, a = all ? -1e9 : x0 - W, b2 = all ? 1e9 : x1 + W, ra = all ? -1e9 : ltRow(y0 - Hh), rb = all ? 1e9 : ltRow(y1 + Hh);
     const S_ = land.seen;                                // (what's just outside the view counts as seen: not let go and painted again)
-    const near = k => { if (S_) S_[k] = renderTick; for (const b of ltTilesIn(k, ra, rb)) { landKeep(k, b); if (ltTileNeed(k, b)) { const d = away(k, b, x0, x1, y0, y1); if (d < bd) { bd = d; best = [k, b]; } } } };
+    const near = k => { if (S_) S_[k] = renderTick; for (const b of ltTilesIn(k, ra, rb)) { landKeep(k, b); const n = need(k, b); if (ltTileNeed(k, b, n >= 2)) { const d = away(k, b, x0, x1, y0, y1); if (d < bd) { bd = d; best = [k, b, n]; } } else if (!n && ltWhole(k, b)) slimC.push([k, b]); } };
     for (const k of islSlices(a, b2)) near(k);
     for (const [k] of landSlices(a, b2)) near(k);   // (the sea's ground too - one cave world)
   }
   // (Nov 8, user: "smooth as butter" - a slice painted ahead is ~35 ms, a frame of its own: in the GAME EDITOR only while nothing moves - the
   // view still and no mouse or key for LT_IDLE_MS - so it never lands on a frame you're zooming, panning or dragging in; landIdle)
   if (all && !landIdle(ahead)) best = null;
-  if (best && !painted) { const [k, b] = best; paintLandChunk(k, b); ltTileMarks(k)[b] = 0; if (land.seen) land.seen[k] = renderTick; landKeep(k, b); }
+  if (best && !painted) { const [k, b, n] = best; paintLandChunk(k, b); ltTileMarks(k)[b] = 0; if (land.seen) land.seen[k] = renderTick; landKeep(k, b); if (!n) ltSlim(k, b); }   // (painted ahead for a view that shows it only far: kept only far at once - ltSlim)
   // (Nov 8, editor speed - user: "slow when zooming out": the field behind each slice was painted only once in view, so zooming out painted
   // every one coming into view on the same frame, 100-200 ms) in the GAME EDITOR, a frame that painted nothing paints the nearest field behind
   // too, the whole world's ahead as its ground is. The same pictures: only when
@@ -51118,6 +51147,8 @@ function landPaintStep(views) {
     for (const [x0, x1, y0, y1] of ahead) for (const [k] of landSlices(-1e9, 1e9)) for (const b of ltTilesIn(k, -1e9, 1e9)) if (ltBackNeed(k, b)) { const d = away(k, b, x0, x1, y0, y1); if (d < bb) { bb = d; bt = [k, b]; } }
     if (bt) { paintLandBack(bt[0], bt[1]); landKeep(bt[0], bt[1]); }
   }
+  // (the tiles now only far in every view near them: kept only as their far copies - a few at least a frame, more in the frame's time for things made)
+  for (let i = 0, m = 0; i < slimC.length; i++) { if (m >= 16 && performance.now() - t0 > BAKE.ms) break; m += ltSlim(slimC[i][0], slimC[i][1]); }
   // (Nov 8, the world in pieces) the rest of the ground made in the background, nearest the views first - a few ms a frame (landBgBuild)
   landBgBuild(painted ? 1 : EDMODE.on ? 4 : 2, ahead.map(([a, b]) => (a + b) / 2));
 }
@@ -51128,7 +51159,7 @@ function landKeep(k, b = 0) {
   const G = land.sg || (land.sg = []), GK = G[k] || (G[k] = []), g = GK[b] || (GK[b] = { k, b });
   for (const A of [land.chunks, land.back, land.ichunks]) {
     const cv = A && A[k] && A[k][b]; if (!cv) continue;
-    for (const c of ltTilePics(cv)) if (c.width && !PICS.live.has(c)) { c._lk = k; c._lb = b; picKeep(c, 'ground', landGone, g); }
+    for (const c of ltPicsOf(cv)) if (c.width && !PICS.live.has(c)) { c._lk = k; c._lb = b; picKeep(c, 'ground', landGone, g); }   // (a tile kept only far: its bases are in the group already - ltSlim)
   }
   picUse(g);
 }
@@ -51136,7 +51167,7 @@ function landGone(c) {
   const k = c._lk, b = c._lb; if (k == null || b == null) return;
   const mine = cv => cv && ltTilePics(cv).includes(c);
   if (![land.chunks, land.back, land.ichunks].some(A => A && A[k] && mine(A[k][b]))) return;   // (a tile painted since: not this one's any more)
-  for (const A of [land.chunks, land.back, land.ichunks]) if (A && A[k] && A[k][b]) { glFreeSrc(A[k][b]); A[k][b] = null; }   // (the group's other pictures, as old, go in the same sweep)
+  for (const A of [land.chunks, land.back, land.ichunks]) if (A && A[k] && A[k][b]) { ltTileFree(A[k][b]); A[k][b] = null; }   // (the group's other pictures and their far copies go with it, freed now)
   ltTileMarks(k)[b] = 1;
 }
 // (user Nov 8 12:43, his crater with rocks standing in the air: a plant on the field behind - DECK 2 and back - stands on the land's line as it was built,
@@ -51158,7 +51189,7 @@ function landBackCover(x0, x1, list, putM) {
 const landYT = k => Math.round(PY(LT_Y0 + (land.flat ? -4 : land.rT[k] - 4) * LT_CELL)), landYB = k => Math.round(PY(LT_Y0 + (land.flat ? LT_ROWS : land.rB[k]) * LT_CELL));
 // (a tile's place on the screen: its rows of the slice's whole picture where they fall in it - landYT .. landYB shared out a canvas row at a time, so a slice
 // in tiles lands pixel for pixel where its one picture did; without the GPU, whole pixels) and whether it's on the screen at all
-function ltTileRect(k, cv) { const YT = landYT(k), YB = landYB(k), sy = (YB - YT) / ltH(k), y = YT + (cv._y0 || 0) * sy, h = cv.height * sy; if (GLR.on) return [y, h]; const a = Math.round(y), b = Math.round(y + h); return [a, b - a]; }
+function ltTileRect(k, cv) { const YT = landYT(k), YB = landYB(k), sy = (YB - YT) / ltH(k), y = YT + (cv._y0 || 0) * sy, h = ltCH(cv) * sy; if (GLR.on) return [y, h]; const a = Math.round(y), b = Math.round(y + h); return [a, b - a]; }
 const ltTileOn = (y, h) => y + h > -256 && y < bh + 256;
 /* (Nov 9, graphics memory - Battle with two players zoomed fully out held ~1,600 ground tiles at full size, as canvases and again as textures on the
    graphics card, each shown a few pixels: a 64 x 320 tile at 12 x 62, a cell a fifth of a pixel) a picture shown at under half a screen pixel a cell is
@@ -51166,22 +51197,70 @@ const ltTileOn = (y, h) => y + h > -256 && y < bh + 256;
    shown - made from it with the nearest pixels, and its own texture is let go while it's far. At Battle's zoom (1.5 pixels a cell) and the default
    zoom nothing changes: f is 1 and the picture itself is drawn. The copy is in the picture memory, let go when no frame drew it for a while */
 function ltFarF(dw, dh, w, h) { const px = Math.max(Math.abs(dw) / w, Math.abs(dh) / h); if (!(px > 0) || px >= 0.5) return 1; let f = 2; while (f < 8 && f * 2 * px <= 1) f *= 2; return f; }
-function ltFar(cv, f) {
-  if (!cv || !GLR.on) return cv;
-  let F = cv._far;
-  if (f <= 1) { if (F) { cv._far = null; ltFarFree(F.c); } return cv; }   // (near again: the picture itself, its copy let go)
+// (a picture halved with the nearest pixels - each far copy is the one before it halved: f 2 from the picture, 4 from that, 8 from that - so a tile
+// kept only as its copy at f 2 (ltSlim) gives every further copy pixel for pixel as the picture itself would)
+function ltHalf(src) { const w = Math.max(1, Math.ceil(src.width / 2)), h = Math.max(1, Math.ceil(src.height / 2)), c = makeCanvas(w, h), x = c.getContext('2d'); x.imageSmoothingEnabled = false; x.drawImage(src, 0, 0, src.width, src.height, 0, 0, w, h); return c; }
+// (its copy at f 2 - the base the further ones are made from; a tile kept only far keeps this: ltSlim)
+function ltBase(cv) {
+  const B = cv._fb;
+  if (cv._slim) return B && B.width ? B : null;
   const v = cv.__v || 0;
-  if (!F || F.f !== f || F.v !== v || F.w !== cv.width || F.h !== cv.height || !F.c.width) {
-    const w = Math.max(1, Math.ceil(cv.width / f)), h = Math.max(1, Math.ceil(cv.height / f)), c = makeCanvas(w, h), x = c.getContext('2d');
-    x.imageSmoothingEnabled = false; x.drawImage(cv, 0, 0, cv.width, cv.height, 0, 0, w, h);
-    if (F) ltFarFree(F.c);
-    F = cv._far = { c, f, v, w: cv.width, h: cv.height };
+  if (B && B.width && B._v === v && B._w === cv.width && B._h === cv.height) return B;
+  if (!cv.width || !cv.height) return null;
+  if (B) ltFarFree(B);
+  const N = cv._fb = ltHalf(cv); N._v = v; N._w = cv.width; N._h = cv.height;
+  picKeep(N, 'ground far', cc => { if (cv._fb === cc) cv._fb = null; });
+  glFreeSrc(cv);                                                       // (its own texture: not drawn while it's far)
+  return N;
+}
+function ltFar(cv, f) {
+  if (!cv || !GLR.on) return cv && cv._slim ? null : cv;            // (without the GPU nothing is kept only far - landPaintStep paints it whole)
+  // (near: the picture itself; its copies left to the picture memory - two views at two zooms draw one tile both ways every frame. A tile kept only far drawn
+  // near before it was painted whole again - a jump - shows its base until it is: LT_SLIM.late, landPaintStep)
+  if (f <= 1) { if (!cv._slim) return cv; LT_SLIM.late++; return cv._fb && cv._fb.width ? cv._fb : null; }
+  const B = ltBase(cv); if (!B) return cv._slim ? null : cv;
+  picUse(B);                                                           // (in use while its further copy is drawn)
+  if (f === 2) return B;
+  let F = cv._far;
+  if (!F || F.f !== f || F.b !== B || !F.c.width) {
+    let c = B; for (let g = 2; g < f; g *= 2) { const n = ltHalf(c); if (c !== B) ltFarFree(c); c = n; }
+    ltFarDrop(cv);
+    F = cv._far = { c, f, b: B };
     picKeep(c, 'ground far', cc => { if (cv._far && cv._far.c === cc) cv._far = null; });
-    glFreeSrc(cv);                                                     // (its own texture: not drawn while it's far)
+    glFreeSrc(B);
   }
   return F.c;
 }
 function ltFarFree(c) { if (!c) return; picForget(c); glFreeSrc(c); c.width = c.height = 0; }
+function ltFarDrop(cv) { const F = cv && cv._far; if (F) { cv._far = null; ltFarFree(F.c); } }
+/* (Nov 9, graphics memory zoomed out: Battle, two players fully out - the ground painted ahead almost the whole world, every tile's full canvases kept,
+   182 MB in 40 s, ~600 MB and TIGHT in a long session; what's drawn there is the far copies) A TILE PAINTED AHEAD, IN NO VIEW, KEEPS ONLY ITS FAR COPIES
+   while the views near it are zoomed out under LT_SLIM.aheadSlim (a cell under 0.375 pixels - it can only come into a view drawn at f 2 or more): its
+   pictures - the ground, the field behind, the island's, their rims - are let go and only each one's copy at f 2 is kept (its base, in the tile's group
+   of the picture memory: let go with it); its smooth edge goes (drawn only from 2 pixels a cell). Every further copy is made from the base as from the
+   picture (ltHalf), so it looks the same. A tile in a view is always whole (landPaintStep: zooming in never waits for a tile - painting one is ~14 ms on
+   the user's PC); one coming into a view zoomed out is drawn from its far copies, its look there, and painted whole within the frame's time for it; a
+   view near it at aheadFull or closer paints it whole too. Let go again only under aheadSlim (no painting back and forth at one zoom). Default and
+   Battle's zoom (1.5 pixels a cell and more): never far */
+const LT_SLIM = { aheadFull: 0.5, aheadSlim: 0.375, late: 0, slimmed: 0, full: 0 };
+function ltSlimPic(c, k, b, g) {
+  if (c._slim || !c.width) return;
+  const B = ltBase(c); if (!B) return;
+  picForget(B); B._lk = k; B._lb = b; picKeep(B, 'ground far', landGone, g);   // (the tile's now: let go, the tile goes and is painted again when next needed)
+  const w = c.width, h = c.height; picForget(c); glFreeSrc(c); c._slim = { w, h }; c.width = c.height = 0;
+}
+function ltSlim(k, b) {
+  const g = land.sg && land.sg[k] && land.sg[k][b]; let n = 0;
+  for (const A of [land.chunks, land.back, land.ichunks]) {
+    const cv = A && A[k] && A[k][b]; if (!cv || cv._slim) continue;
+    for (const c of [cv, ...(cv._rimCv || [])]) if (c) ltSlimPic(c, k, b, g);
+    if (cv._gedgeCv) { ltFarFree(cv._gedgeCv); cv._gedgeCv = null; cv._gedge = null; }
+    n++;
+  }
+  if (n) LT_SLIM.slimmed++;
+  return n;
+}
+const ltWhole = (k, b) => [land.chunks, land.back, land.ichunks].some(A => A && A[k] && A[k][b] && !A[k][b]._slim);
 // (user Nov 8 11:48: "Did you fix meadow to use atmosphere? (we now have per deck atmosphere)") the field behind is its deck's (4, or wherever the
 // biome has its MEADOW - farInfo().md): it fades toward the sky's colour as that deck's ATMOSPHERE says, in its slice's biome (deckHaze), as the
 // deck's plants and pictures do
@@ -51189,7 +51268,7 @@ function meadowLit(cv, k) { if (!GLR.on || !cv) return cv; const bn = colBiome(M
 // (user Nov 8 13:36: "The darkness should match on the caves and on the background ... one has atmosphere and the other doesnt") the back picture is the field
 // (the meadow's deck: its ATMOSPHERE - meadowLit) over the land's line as built and the back wall under it (the ground's own light, no atmosphere -
 // the same as a cave's). haze: false - the whole picture in the ground's light (under the line only, landBackCover)
-function landBackPut(k, xl, haze) { const T = land.back && land.back[k]; if (!T) return; for (const cv of T) { if (!cv) continue; const [Y, H] = ltTileRect(k, cv); if (!ltTileOn(Y, H)) continue; const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL)), fc = ltFar(cv, ltFarF(X1 - X0, H, cv.width, cv.height)); C.drawImage(haze ? meadowLit(fc, k) : groundLit(fc), X0, Y, X1 - X0, H); } }
+function landBackPut(k, xl, haze) { const T = land.back && land.back[k]; if (!T) return; for (const cv of T) { if (!cv) continue; const [Y, H] = ltTileRect(k, cv); if (!ltTileOn(Y, H)) continue; const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + ltCW(cv) * LT_CELL)), fc = ltFar(cv, ltFarF(X1 - X0, H, ltCW(cv), ltCH(cv))); if (fc) C.drawImage(haze ? meadowLit(fc, k) : groundLit(fc), X0, Y, X1 - X0, H); } }
 // the slices' back pictures: the wall in the ground's light, then the field over the land's line in its deck's atmosphere (clipped above that line)
 function landBackDraw(x0, x1, list) {
   if (!land.back || !list.length) return;
@@ -51243,8 +51322,8 @@ function drawLandGround(x0, x1, onField, onWater) {
   // the slices to draw (painted before the frame's drawing: landPaintStep)
   const list = landSlices(x0, x1);
   const put = (cv, xl, k) => {
-    const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL)), [Y, H] = ltTileRect(k, cv); if (!ltTileOn(Y, H)) return;
-    C.drawImage(groundLit(ltFar(cv, ltFarF(X1 - X0, H, cv.width, cv.height))), X0, Y, X1 - X0, H);   // (in the hour's light, as what stands on it - 50-land-trop.js, user Nov 2; zoomed far out from its smaller copy - ltFar)
+    const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + ltCW(cv) * LT_CELL)), [Y, H] = ltTileRect(k, cv); if (!ltTileOn(Y, H)) return;
+    const fc = ltFar(cv, ltFarF(X1 - X0, H, ltCW(cv), ltCH(cv))); if (fc) C.drawImage(groundLit(fc), X0, Y, X1 - X0, H);   // (in the hour's light, as what stands on it - 50-land-trop.js, user Nov 2; zoomed far out from its smaller copy - ltFar)
   };
   const putM = (cv, xl, k) => landBackPut(k, xl, false);   // (under the land's line: the wall in the ground's light - landBackCover)
   landBackDraw(x0, x1, list);   // (user Nov 4 09:06: the field behind kept - it's the set's composition, as the game shows it)   // (the field behind - its grass, flowers, boulders: none while the plants have bones, user Nov 3 21:23)
@@ -58603,7 +58682,7 @@ function rimMake(cv, d, w, h, c0, rT, Y0 = 0, k = null, which = 'main') {
     if (!has) return null;
     const e = makeCanvas(w, H); e.getContext('2d').putImageData(id, 0, 0); return e;
   };
-  const old = cv._rimCv; if (old) for (const e of old) if (e) glFreeSrc(e);
+  const old = cv._rimCv; if (old) for (const e of old) if (e) ltPicFree(e);   // (with their far copies - ltFar)
   cv._rimCv = null;
   const P3 = [pic(L), pic(R), pic(U)];
   cv._rimCv = P3; cv._rim = { L: P3[0], R: P3[1], U: P3[2], rT, w, y0: y0 + Y0, H };
@@ -58631,7 +58710,7 @@ function rimDraw(cv, xl) {
   const ga = C.globalAlpha, sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
   // (a tile's rims laid where they fall in the slice's whole rim pictures (U), as those were placed; without the GPU, whole pixels)
   let DY = T, DH = B - T; if (U) { const su = (UB - UT) / U.H; DY = UT + (Rm.y0 - U.y0) * su; DH = Rm.H * su; if (!GLR.on) { const a = Math.round(DY), b = Math.round(DY + DH); DY = a; DH = b - a; } }
-  const put = (pic, w) => { if (!pic || w < 0.03) return; C.globalAlpha = ga * Math.min(1, w * Lt.k); C.drawImage(glTint(ltFar(pic, ltFarF(X1 - X0, DH, pic.width, pic.height)), 'rim', RIG_ZERO, Lt.col, false), X0, DY, X1 - X0, DH); };   // (zoomed far out from a smaller copy - ltFar, 50-land-terrain.js)
+  const put = (pic, w) => { if (!pic || w < 0.03) return; C.globalAlpha = ga * Math.min(1, w * Lt.k); const fc = ltFar(pic, ltFarF(X1 - X0, DH, ltCW(pic), ltCH(pic))); if (fc) C.drawImage(glTint(fc, 'rim', RIG_ZERO, Lt.col, false), X0, DY, X1 - X0, DH); };   // (zoomed far out from a smaller copy - ltFar, 50-land-terrain.js)
   put(Rm.L, -lx); put(Rm.R, lx); put(Rm.U, -ly * 0.7);
   C.globalAlpha = ga; C.imageSmoothingEnabled = sm;
 }
