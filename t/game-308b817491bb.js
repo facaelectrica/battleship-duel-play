@@ -137,7 +137,8 @@ if (!SW_IN_WORKER) try { const f = document.getElementById('fontCss'); if (f) f.
 // what it's doing now on it (its lines in lang/strings.csv, 'Loading screen'), with how far it has got (pct, 0-100) when that's known;
 // bootTick: the line, and a moment for it to be painted if the last paint was a while ago (never a pause per step: at most one every ~60 ms)
 function bootSay(t, pct) { if (!SW_IN_WORKER && typeof window.__bootSay === 'function') window.__bootSay(t, pct); }
-const bootPaint = () => SW_IN_WORKER || !document.getElementById('bootCover') ? null : new Promise(r => requestAnimationFrame(() => setTimeout(r, 0)));
+// (a frame, or 40 ms if the browser holds its frames back - on the user's PC a frame came only after ~1 s here; the line is painted either way when it can)
+const bootPaint = () => SW_IN_WORKER || !document.getElementById('bootCover') ? null : new Promise(r => { let done = false; const go = () => { if (!done) { done = true; setTimeout(r, 0); } }; requestAnimationFrame(go); setTimeout(go, 40); });
 let bootPainted = 0;
 function bootTick(t, pct) { bootSay(t, pct); if (SW_IN_WORKER || performance.now() - bootPainted < 60) return null; bootPainted = performance.now(); return bootPaint(); }
 function bootCoverOff() { if (SW_IN_WORKER) return; try { const d = document.getElementById('bootCover'); if (d) d.remove(); } catch (e) { } }
@@ -5189,7 +5190,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 949;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 14:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 14:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
