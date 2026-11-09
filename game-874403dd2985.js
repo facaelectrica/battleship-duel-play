@@ -5191,8 +5191,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 962;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 15:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 963;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 15:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7721,14 +7721,16 @@ function drawTitle() {
   const rowText = (e, cx, y, rs, mid) => {
     y += 4;                                                // (the rows' y is the pixel font's top: the serif's middle is lower)
     if (e.free) { ug.globalAlpha = blink; fancyText(ug, 'PRESS TO JOIN', cx, y, '#ffffff', npx, 'center', 'serif', { how: 'title' }); ug.globalAlpha = 1; return; }
-    if (mid && e.dev && !lobbyNoSides()) {
-      // the sketch's picker: the controller's name between two flourishes, left and right to pick a team
-      const [lx, rx] = fancyName(ug, e.name, cx, y, '#ffffff', npx);
+    if (e.dev && !one && !(mid && lobbyNoSides())) {
+      // the sketch's picker: the controller's name between two solid yellow arrows, left and right to pick a team (user Nov 9 14:43:
+      // "These should stay as arrows ... And yellow in color too, so it's clear"); on a side, the arrow with nowhere to go is dimmed
+      const sd = mid ? null : rs.side, canL = sd !== 0, canR = sd !== 1;
+      const [lx, rx] = fancyPick(ug, e.name, cx, y, '#ffffff', npx, canL, canR);
       // (user Oct 25: the arrows themselves are the buttons - their drawn place, with a generous margin for a finger)
-      lobbyArrows.push({ dev: e.dev, dir: -1, r: [lx - 22, y - 28, 44, 56] }, { dev: e.dev, dir: 1, r: [rx - 22, y - 28, 44, 56] });
+      if (canL) lobbyArrows.push({ dev: e.dev, dir: -1, r: [lx - 14, y - 28, 44, 56] });
+      if (canR) lobbyArrows.push({ dev: e.dev, dir: 1, r: [rx - 30, y - 28, 44, 56] });
       return;
     }
-    if (e.dev && !one) { fancyName(ug, e.name, cx, y, '#ffffff', npx); return; }
     const t = one && e.dev ? e.name + '  X' : e.name;
     fancyText(ug, t, cx, y, e.cpu != null ? (e.on ? '#ffffff' : '#9a9a9a') : '#ffffff', npx, 'center', 'serif', { how: 'title' });
   };
@@ -7739,7 +7741,7 @@ function drawTitle() {
     // the flag, in a white frame (user Oct 24); tap it to change it
     ug.fillStyle = '#ffffff'; ug.fillRect(fx - 3, fy - 3, FLAG_W + 6, FLAG_H + 6);
     ug.drawImage(img.flag[flagPick[s]], fx, fy, FLAG_W, FLAG_H);
-    LR.S[s].slice(0, 3).forEach((e, i) => rowText(e, S0.cx, S0.rows[i] + 2, S0.rs, false));
+    LR.S[s].slice(0, 3).forEach((e, i) => rowText(e, S0.cx, S0.rows[i] + 2, { side: s }, false));
   }
   // (the middle: PRESS TO JOIN first, a little bigger, then whoever has pressed and not picked a team)
   { const fr = LR.mid[0] && LR.mid[0].free ? 1 : 0;
@@ -7955,7 +7957,7 @@ function restartGame(load) {
      Condensed for everything else (face 'serif'). The game keeps its words in capitals (lang/strings.csv); drawn here they are
      translated first (trText) and then put in ordinary case (fancyCase: 'title' - every word's first letter; 'sentence').
    - Words are drawn once into a small canvas at the UI's own pixels (the picture memory's 'words', as drawText's) and copied.
-   - The frame's corners, the buttons' curls and the names' flourishes are pixel art drawn by the game (fancyArt: drawn 4x, brought
+   - The frame's corners, the buttons' curls and RULES' flourish are pixel art drawn by the game (fancyArt: drawn 4x, brought
      down to the UI's pixels with hard edges); the other corners are the same pieces mirrored as they're drawn.
    ================================================================ */
 const FANCY = { black: 'FFA Blackletter', serif: 'FFA Serif', ready: false, words: new Map(), art: new Map() };
@@ -8072,13 +8074,6 @@ const fancyCorner = col => fancyArt('corner', FCORN.w, FCORN.h, col, g => {
 const fancyBtnCurl = col => fancyArt('bcurl', 11, 11, col, g => {
   fancyCurl(g, 6, 5.2, 4.2, 0.8, Math.PI * 0.8, 1.5, 1, 1.6, [1.2, 10.5]);
 });
-// a name's flourish (the left one: its curl outward; the right one mirrored)
-const fancyFlourish = col => fancyArt('flour', 24, 10, col, g => {
-  g.lineWidth = 1.7; g.beginPath(); g.moveTo(23, 5);
-  for (let x = 23; x >= 9; x -= 0.5) g.lineTo(x, 5 + 2.2 * Math.sin((23 - x) / 14 * Math.PI * 2));
-  g.stroke();
-  fancyCurl(g, 5, 5, 4, 0.9, 0, 1.15, -1, 1.7, [9, 5]);
-});
 // the flourish after a heading (RULES)
 const fancyTail = col => fancyArt('tail', 44, 13, col, g => {
   fancyCurl(g, 6, 7, 4.4, 1, 0, 1.15, -1, 1.8, [14, 7]);
@@ -8114,12 +8109,15 @@ function fancyButton(x, y, w, h, label, on, px = 18) {
   fancyPut(c, B, x + 3, y + 3); fancyPut(c, B, x + w - 3 - bw, y + 3, -1, 1); fancyPut(c, B, x + 3, y + h - 3 - bw, 1, -1); fancyPut(c, B, x + w - 3 - bw, y + h - 3 - bw, -1, -1);
   fancyText(c, label, x + w / 2, y + h / 2, ink, px, 'center', 'black', { maxW: w - 2 * bw - 4 });
 }
-// a name between two flourishes (a player's): returns the flourishes' middles, for the team pick's taps
-function fancyName(c, str, cx, y, col, px, o = {}) {
-  const s = fancyCase(trText(str), 'title', o.keep), w = fancyLine(c, s, cx, y, col, px, 'center', 'serif'), F = fancyFlourish(col), fy = Math.round(y - F.height / 2);
-  const lx = Math.round(cx - w / 2 - 6 - F.width), rx = Math.round(cx + w / 2 + 6);
-  fancyPut(c, F, lx, fy); fancyPut(c, F, rx, fy, -1, 1);
-  return [lx + F.width / 2, rx + F.width / 2];
+// a player's name between the team pick's two solid yellow arrows (menuArrow, 19-menu.js; user Nov 9 14:43 - not flourishes); an arrow
+// that can't move the player is dimmed. Returns the arrows' points (left, right), for their taps
+function fancyPick(c, str, cx, y, col, px, canL = true, canR = true) {
+  const s = fancyCase(trText(str), 'title'), w = fancyLine(c, s, cx, y, col, px, 'center', 'serif');
+  const lx = Math.round(cx - w / 2 - 25), rx = Math.round(cx + w / 2 + 25);
+  c.globalAlpha = canL ? 1 : 0.3; menuArrow(lx, y, -1);
+  c.globalAlpha = canR ? 1 : 0.3; menuArrow(rx, y, 1);
+  c.globalAlpha = 1;
+  return [lx, rx];
 }
 
 /* ================================================================
