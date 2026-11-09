@@ -5113,7 +5113,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 906;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 21:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 08 22:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54867,6 +54867,7 @@ function landGoHome(p, k) {
    their top and floor) - saved, and sent to the page, which draws it. Replaces the column-by-column flow (one surface a column, WATER rows) and its
    floor rule (waterFloor, WF_LEDGE) ---- */
 const WC = { s: [], n: [], ssea: null, oc: null, ocV: -1, act: null, rest: null, ref: null, ver: 0, dver: -1, pageVer: -1, top: null, bed: null, sea: null, seaRow: 0, applyT: 0, fill: false, colsT: null };
+const W_STEP_K = 12;   // (slices of the water stepped at most a step - stepFlood)
 const W_MAX = 1, W_COMP = 0.02, W_MINF = 0.005, W_EPS = 0.002, W_SUB = 8, W_WET = 0.05;
 // the amount at rest of the lower of two cells holding total between them (the deeper a little fuller: the water's weight)
 const wStable = t => t <= 1 ? 1 : t < 2 * W_MAX + W_COMP ? (W_MAX * W_MAX + t * W_COMP) / (W_MAX + W_COMP) : (t + W_COMP) / 2;
@@ -54963,7 +54964,10 @@ function wcFill() {
   for (const c of cs) { if (c < 0 || c >= land.cols) continue;
     for (let r = r0; r < ltR1(c); r++) if (wAir(c, r) && !wOcean(c, r) && (wOcean(c - 1, r) && wAir(c - 1, r) || wOcean(c + 1, r) && wAir(c + 1, r))) sd.push([c, r]); }
   if (sd.length) wFillFrom(sd, WATER_Y, true);   // (in from the ocean: down and to the sides only - the air over a part that rises above its way in stays, a pocket)
-  for (let k = 0; k < WC.act.length; k++) if (WC.s[k]) { WC.act[k] = 1; WC.rest[k] = 0; }   // (settled from there)
+  // (Nov 8, battle-caves chat: the fill IS the water at rest - each cell as full as its depth makes it; a fresh world's first step changes no slice by more than
+  // 0.04 of a cell. All woken here, every slice with water was stepped at once till it slept - 0.65 s a step on the user's PC, never sleeping, and every game's
+  // start froze. They start asleep: the ground changing wakes the slices round it - waterWake)
+  for (let k = 0; k < WC.act.length; k++) { WC.act[k] = 0; WC.rest[k] = 0; }
   WC.ver++;
 }
 // the awake slices and the ones beside them, as one block of cells (WD): what's open (0 rock, 1 open, 2 the ocean's), the amounts; stepped there
@@ -55068,9 +55072,15 @@ function stepFlood(dt) {
   let any = false; for (let k = 0; k < WC.act.length; k++) if (WC.act[k]) { any = true; break; }
   if (any) {
     // (each run of awake slices with water a block of its own: two far apart are never one block over the world between)
-    const nk = WC.act.length, chg = WC.chg && WC.chg.length === nk ? WC.chg.fill(0) : (WC.chg = new Float32Array(nk));
-    for (let k = 0; k < nk; k++) { if (!WC.act[k]) continue; if (!WC.s[k] && WC.ssea[k]) wArr(k, true); if (!WC.s[k]) continue; let e = k; while (e + 1 < nk && WC.act[e + 1] && (WC.s[e + 1] || WC.ssea[e + 1])) { e++; if (!WC.s[e]) wArr(e, true); } wcStepBlock(k, e, chg); k = e + 1; }
-    for (let k = 0; k < WC.act.length; k++) { if (!WC.act[k]) continue; if (!WC.s[k] || !chg || chg[k] < W_EPS) { WC.rest[k] += dt; if (WC.rest[k] > 1) WC.act[k] = 0; } else WC.rest[k] = 0; }
+    // (Nov 8, battle-caves chat: at most W_STEP_K slices a step, taken in turn from where the last step stopped - a run of awake slices longer than that in
+    // pieces, each with the slice either side as its block's edge, so water still crosses between them. A big flood moves slower; a step never costs the world)
+    const nk = WC.act.length, chg = WC.chg && WC.chg.length === nk ? WC.chg.fill(0) : (WC.chg = new Float32Array(nk)), did = WC.did && WC.did.length === nk ? WC.did.fill(0) : (WC.did = new Uint8Array(nk));
+    let left = W_STEP_K, k = (WC.rr || 0) % nk;
+    for (let seen = 0; seen < nk && left > 0; ) { if (!WC.act[k] || (!WC.s[k] && !WC.ssea[k])) { k = (k + 1) % nk; seen++; continue; }
+      if (!WC.s[k]) wArr(k, true); let e = k; while (e + 1 < nk && e - k + 1 < left && WC.act[e + 1] && (WC.s[e + 1] || WC.ssea[e + 1])) { e++; if (!WC.s[e]) wArr(e, true); }
+      wcStepBlock(k, e, chg); for (let q = k; q <= e; q++) did[q] = 1; left -= e - k + 1; seen += e - k + 1; k = (e + 1) % nk; }
+    WC.rr = k;
+    for (let k = 0; k < WC.act.length; k++) { if (!WC.act[k] || !did[k] && WC.s[k]) continue; if (!WC.s[k] || !chg || chg[k] < W_EPS) { WC.rest[k] += dt; if (WC.rest[k] > 1) WC.act[k] = 0; } else WC.rest[k] = 0; }
     WC.ver++;
   }
   if (WC.dver !== WC.ver && !((WC.applyT -= dt) > 0)) { WC.applyT = 0.1; waterApply(); }
