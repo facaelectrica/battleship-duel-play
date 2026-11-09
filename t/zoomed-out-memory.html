@@ -1,4 +1,114 @@
-<title>Battleship Duel WebGL</title>
+<titl<script>// (tools/gpusame: put at the top of a test page - seeded randomness, a frozen clock, the game held - and __sameRun to run a
+// scene and compare its picture with another build's, in the user's Chrome on the user's GPU)
+(() => {
+  window.__noWorker = true;   // (engine stage 4: the game's workers off here - these scenes step synchronously, a worker could never answer)
+  let s = 12345; Math.random = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+  window.__reseed = v => { s = v; };
+  let fake = 1000; const realNow = performance.now.bind(performance); performance.now = () => fake; window.__tick = ms => { fake += ms; }; window.__realNow = realNow;
+  const D0 = Date.UTC(2026, 9, 29, 12); Date.now = () => D0 + fake;
+  let gg, res; window.__ready = new Promise(r => { res = r; });
+  Object.defineProperty(window, '__game', { configurable: true, get() { return gg; }, set(v) { gg = v; v.hold = true; res(); } });
+  const SCENES = {
+    battle: { mode: 'duel', env: { time: 12, weather: 0.15, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); g.setOrder && (g.setOrder(0, 3), g.setOrder(1, 3)); for (const p of [0, 1]) for (const k of [3, 4]) g.damage(p, k, 1); }, fire: true, frames: 150 },
+    storm: { mode: 'duel', env: { time: 18.6, weather: 0.92, rain: 0.8, wind: 0.8, sea: 0.9 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); for (const p of [0, 1]) for (const k of [2, 3, 4]) g.damage(p, k, 1); }, fire: true, frames: 150 },
+    // (Oct 31) sand clouds in the water by both ships: 300 puffs of every size (45 drawDust; Nov 1: a column table's row maker, or the old list's push)
+    dust: { mode: 'duel', env: { time: 12, weather: 0.15, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); for (let i = 0; i < 300; i++) { const sx = g.ships[i % 2].x; (g.dust.addRow ? o => g.dust.addRow(o) : o => g.dust.push(o))({ x: sx - 350 + Math.random() * 700, y: 430 + Math.random() * 300, vx: 0, vy: 0, r: 2 + Math.random() * 3, r1: 6 + Math.random() * 30, age: 0.5 + Math.random() * 8, life: 14, seed: Math.random() * 10, grainT: 0 }); } }, frames: 30 },
+    // (Nov 1) sparks and embers in the drawn frames (their pixel layers - 40-zzzz-layers.js): the guns every 12 frames (blasts
+    // grown by BLAST_K), and a section going up on each ship near the end (tick: a scene's own step each frame)
+    sparks: { mode: 'duel', env: { time: 12, weather: 0.15, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); }, tick: (g, i) => { if (i % 12 === 6) for (const p of [0, 1]) { try { const gu = g.gun(p); gu.elev = 24 + (i / 12 % 4) * 5; gu.power = 0.45; g.fire(p); } catch (e) { } } if (i === 80 || i === 92) for (const p of [0, 1]) g.blast(p, i === 80 ? 2 : 4); }, frames: 100 },
+    // (Nov 1) splash columns standing in the drawn frames (their pixel layer - 34-splashes-sinking.js JET_L): the battle, then
+    // a short low shot into the sea from both ships at frame 150 (it lands ~80 frames on)
+    splash: { mode: 'duel', env: { time: 12, weather: 0.15, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); g.setOrder && (g.setOrder(0, 3), g.setOrder(1, 3)); for (const p of [0, 1]) for (const k of [3, 4]) g.damage(p, k, 1); }, fire: true, tick: (g, i) => { if (i === 150) for (const p of [0, 1]) { try { const gu = g.gun(p); gu.elev = 45; gu.power = 0.2; g.fire(p); } catch (e) { } } }, frames: 240 },
+    sun: { mode: 'duel', env: { time: 17.2, weather: 0.15, rain: 0, wind: 0.2, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); g.zoomStep(0, -3); g.zoomStep(1, -3); }, frames: 60 },
+    // (Oct 31) both subs out at depth, diving and climbing: their leaning shadows through the water (44 shadeRowsGL)
+    subs: { mode: 'duel', env: { time: 12, weather: 0.1, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); g.placeOut(0, 'sub', 3050); g.placeOut(1, 'sub', 4050); g.depth(0, g.subs[0].y + 140); g.depth(1, g.subs[1].y + 90); }, frames: 100 },
+    // (Oct 31) the zoom scenes run long: a zoom's new cloud pictures come in behind the scenes, a few a frame (12-bake.js)
+    sunlong: { mode: 'duel', env: { time: 17.2, weather: 0.15, rain: 0, wind: 0.2, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); g.zoomStep(0, -3); g.zoomStep(1, -3); }, frames: 400 },
+    openfarlong: { mode: 'land', one: true, env: { time: 16, weather: 0.5, rain: 0.2, wind: 0.5, sea: 0.5 }, setup: g => { g.zoomStep(0, -99); g.cutTo(0); }, frames: 400 },
+    // (Oct 31, 80-fps work) a container ship by the player's battleship, her boxes hit (some burnt, some blown off); a rocket lifting off
+    cargo: { mode: 'land', one: true, env: { time: 12, weather: 0.2, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { const c = g.civShips().find(k => k.kind === 'container'); g.placeOut(0, 'ship', g.ships[0].x); c.x = g.ships[0].x + 260; c.vx = 0; g.contHitShip(c); g.contHitShip(c); }, frames: 90 },
+    oil: { mode: 'land', one: true, env: { time: 15, weather: 0.3, rain: 0, wind: 0.4, sea: 0.4 }, setup: g => { const c = g.civShips().find(k => k.kind === 'tanker'); g.placeOut(0, 'ship', g.ships[0].x); c.x = g.ships[0].x + 300; c.vx = 0; for (let i = 0; i < 4; i++) g.civHitHook(c.x - 60 + i * 40, 394); }, frames: 240 },
+    rocket: { mode: 'land', one: true, env: { time: 19.5, weather: 0.4, rain: 0.2, wind: 0.4, sea: 0.4 }, setup: g => { const v = g.rest().shuttles[0]; g.boardCiv(0, v); g.civLaunch(0); }, frames: 600 },
+    // (Nov 1, Batch 3) fireworks over a cruise ship / liner by the player's battleship at night: a salvo of four (fwBits' layer)
+    fireworks: { mode: 'land', one: true, env: { time: 22, weather: 0.1, rain: 0, wind: 0.2, sea: 0.3 }, setup: g => { const c = g.civShips().find(k => k.kind === 'cruise' || k.kind === 'liner'); g.placeOut(0, 'ship', g.ships[0].x); c.x = g.ships[0].x + 300; c.vx = 0; c.fwSalvo = 4; c.fwGap = 0; }, frames: 300 },
+    // (Nov 1, Batch 3) the shuttle blown up on its pad in its count: the earth thrown up (spikeBursts) and the ground's wake (landWake)
+    padblast: { mode: 'land', one: true, env: { time: 15, weather: 0.2, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { const v = g.rest().shuttles[0]; g.boardCiv(0, v); g.civLaunch(0); }, tick: (g, i) => { if (i === 30) { const v = g.rest().shuttles[0]; g.rest().shuttleBlow(v); } }, frames: 160 },
+    // (Nov 1, Batch 2) a plane high in the cold laying its white line (planeTrails, planeTrailPts - drawn in colours given as numbers)
+    plane: { mode: 'duel', env: { time: 11, weather: 0.2, rain: 0, wind: 0.4, sea: 0.3 }, setup: g => { g.select(0, 'plane'); g.stepFixed(1 / 30, 10); Object.assign(g.planes[0], { y: -2300 }); }, frames: 120 },
+    // (Nov 1, Batch 2) the far sea zoomed out at dusk and at night: its streaks, sparkles and the light's path (fillRectA); the
+    // air's streaks (airStreaks) in every open sky
+    dusk: { mode: 'land', one: true, env: { time: 19, weather: 0.5, rain: 0.2, wind: 0.5, sea: 0.5 }, setup: g => { g.zoomStep(0, -99); g.cutTo(0); }, frames: 90 },
+    night: { mode: 'land', one: true, env: { time: 23, weather: 0.5, rain: 0.2, wind: 0.5, sea: 0.5 }, setup: g => { g.zoomStep(0, -99); g.cutTo(0); }, frames: 90 },
+    // (Nov 1, Batch 2) both battleships firing for six seconds, then 30 frames: the shells' trails on screen (one column table)
+    shots: { mode: 'duel', env: { time: 12, weather: 0.15, rain: 0, wind: 0.5, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); g.stepFixed(1 / 30, 2); for (let k = 0; k < 24; k++) { for (const p of [0, 1]) { const gu = g.gun(p); gu.elev = 30 + (k % 9) * 5; gu.power = 0.35 + (k % 5) / 10; gu.rk = [0, 0]; g.fire(p); } g.stepFixed(1 / 30, 8); } }, frames: 30 },
+    open: { mode: 'land', one: true, env: { time: 12, weather: 0.2, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { }, frames: 120 },
+    // (Nov 9, zoomed-out-memory chat) two players in Battle: the default zoom, and both zoomed fully out in a storm
+    battle2: { mode: 'duel', two: true, env: { time: 12, weather: 0.15, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); }, fire: true, frames: 150 },
+    storm2: { mode: 'duel', two: true, env: { time: 16, weather: 1, rain: 1, wind: 0.8, sea: 1, fog: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); }, fire: true, frames: 150 },
+    stormfar2: { mode: 'duel', two: true, env: { time: 16, weather: 1, rain: 1, wind: 0.8, sea: 1, fog: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); g.zoomStep(0, -99); g.zoomStep(1, -99); }, frames: 300 },
+    dayfar2: { mode: 'duel', two: true, env: { time: 12, weather: 0.3, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); g.zoomStep(0, -99); g.zoomStep(1, -99); }, frames: 300 },
+    openfar: { mode: 'land', one: true, env: { time: 16, weather: 0.5, rain: 0.2, wind: 0.5, sea: 0.5 }, setup: g => { g.zoomStep(0, -99); g.cutTo(0); }, frames: 90 },
+  };
+  const db = () => new Promise((ok, no) => { const r = indexedDB.open('gpusame', 1); r.onupgradeneeded = () => r.result.createObjectStore('px'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+  const put = async (k, v) => { const d = await db(); await new Promise((ok, no) => { const t = d.transaction('px', 'readwrite'); t.objectStore('px').put(v, k); t.oncomplete = ok; t.onerror = () => no(t.error); }); };
+  const get = async k => { const d = await db(); return new Promise((ok, no) => { const r = d.transaction('px').objectStore('px').get(k); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); };
+  const errs = []; addEventListener('error', e => errs.push(String(e.message)));
+  // run a scene, read the picture (the world's WebGL canvas and the HUD's 2D canvas) and keep it as key; with cmp, compare to that key
+  window.__sameRun = async (name, key, cmp) => {
+    await window.__ready; const t0 = realNow(), g = __game, sc = SCENES[name];
+    window.__reseed(777);
+    if (sc.one) g.setCtl(['kb', 'none']); if (sc.two) g.setCtl(['kb', 'kb2']);
+    g.setMode(sc.mode); g.ui.title = false; g.ui.resume = false; g.paused = true; g.hold = true;
+    Object.assign(g.env, sc.env); g.W && (g.W.manual = { time: 1, weather: 1, rain: 1, wind: 1, sea: 1, fog: 1 }); g.computeEnv();
+    g.stepFixed(1 / 60, 2); sc.setup(g); window.__reseed(4242);
+    for (let i = 0; i < sc.frames; i++) {
+      if (sc.fire && i % 40 === 0) for (const p of [0, 1]) { try { const gu = g.gun(p); gu.elev = 30 + (i / 40 % 5) * 4; gu.power = 0.5; g.fire(p); } catch (e) { } }
+      if (sc.tick) sc.tick(g, i);
+      window.__tick(1000 / 60); if (i >= sc.frames - 4) g.stepFixed(1 / 60, 1); else g.stepQuiet(1 / 60, 1);
+    }
+    const gl = g.GLR.gl, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight, px = new Uint8Array(W * H * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const hud = document.getElementById('hud'), hp = hud.getContext('2d').getImageData(0, 0, hud.width, hud.height).data;
+    const pic = { W, H, px, hw: hud.width, hh: hud.height, hp: new Uint8Array(hp.buffer) };
+    await put(key, pic);
+    const out = { scene: name, key, ms: Math.round(realNow() - t0), size: W + 'x' + H, errs: errs.slice(0, 3) };
+    if (cmp) {
+      const a = await get(cmp); if (!a) return Object.assign(out, { cmp: 'missing ' + cmp });
+      if (a.W !== W || a.H !== H) return Object.assign(out, { cmp: 'sizes differ ' + a.W + 'x' + a.H });
+      let n = 0, mx = 0, x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+      for (let i = 0; i < W * H; i++) { let d = 0; for (let c = 0; c < 3; c++) { const v = Math.abs(a.px[i * 4 + c] - px[i * 4 + c]); if (v > d) d = v; } if (d) { n++; if (d > mx) mx = d; const x = i % W, y = H - 1 - ((i / W) | 0); if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; } }
+      let hn = 0; for (let i = 0; i < pic.hp.length; i++) if (a.hp[i] !== pic.hp[i]) hn++;
+      Object.assign(out, { differ: n, max: mx, box: n ? [x0, y0, x1, y1] : null, hudBytesDiffer: hn });
+    }
+    return out;
+  };
+
+  // the save-and-reload check (plan, "Stability"): __reloadSave(scene, key) runs the scene, keeps a GAME EDITOR snapshot at its end
+  // and the tables 300 ticks later; then in a fresh page of the same build __reloadLoad(scene, key) sets the scene up, loads the
+  // snapshot, steps 300 ticks and compares its tables with the kept ones, table by table
+  const stepN = (g, n) => { for (let i = 0; i < n; i++) { window.__tick(1000 / 60); g.stepQuiet(1 / 60, 1); } };
+  const setup = (g, sc) => { window.__reseed(777); if (sc.one) g.setCtl(['kb', 'none']); g.setMode(sc.mode); g.ui.title = false; g.ui.resume = false; g.paused = true; g.hold = true; Object.assign(g.env, sc.env); g.W && (g.W.manual = { time: 1, weather: 1, rain: 1, wind: 1, sea: 1, fog: 1 }); g.computeEnv(); g.stepFixed(1 / 60, 2); sc.setup(g); };
+  const flat = (o, pre, out) => { if (o && typeof o === 'object') { for (const k in o) if (k !== '_hu') flat(o[k], pre + '.' + k, out); } else out[pre] = typeof o === 'number' ? +o.toPrecision(9) : o; return out; };   // (_hu: the network's id, given again on load - not the game's state)
+  window.__reloadSave = async (name, key) => {
+    await window.__ready; const g = __game, sc = SCENES[name]; setup(g, sc); stepN(g, 60);
+    const snap = window.__gameSnap.snapshot(); window.__reseed(99); stepN(g, 300);
+    await put(key + '-snap', snap); await put(key + '-end', JSON.stringify(JSON.parse(window.__gameSnap.snapshot()).tables || {}));
+    return { saved: key, bytes: snap.length, errs: errs.slice(0, 3) };
+  };
+  window.__reloadLoad = async (name, key) => {
+    await window.__ready; const g = __game, sc = SCENES[name]; setup(g, sc);
+    const snap = await get(key + '-snap'), end = JSON.parse(await get(key + '-end'));
+    const note = window.__gameSnap.load(snap); window.__reseed(99); stepN(g, 300);
+    const now = JSON.parse(window.__gameSnap.snapshot()).tables || {}, res = {};
+    for (const t of new Set([...Object.keys(end.tables || {}), ...Object.keys(now.tables || {})])) {
+      const a = flat((end.tables || {})[t], '', {}), b = flat((now.tables || {})[t], '', {}); let n = 0, tot = 0; const ex = [];
+      for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) { tot++; if (a[k] !== b[k]) { n++; if (ex.length < 4) ex.push(k + ' ' + a[k] + ' vs ' + b[k]); } }
+      res[t] = { fields: tot, differ: n, ex };
+    }
+    return { note, tables: res, errs: errs.slice(0, 3) };
+  };
+})();
+</script>e>Battleship Duel WebGL</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -5210,8 +5320,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 941;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 12:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 943;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 12:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -7939,7 +8049,6 @@ function openMainMenu(fromNet) {
   // (let go of every trigger: online, the guest tells the host it has - user Oct 25, a machine gun kept firing)
   mgHold[0] = mgHold[1] = false; diveHold[0] = diveHold[1] = 0; for (const pl of planes) if (pl) pl.mg = false;
   if (NET.role === 'guest' && LINK.conn) linkSend({ t: 'ctl', s: ctlState(0) });
-  if (typeof storyAway === 'function') storyAway();   // (STORY: saved where you are as you leave it - 50-story-saves.js)
   if (typeof BUG !== 'undefined' && !ui.title) BUG.want = true;   // (REPORT BUG's picture of the screen as it is - 50-zzzz-bug.js)
   held.clear(); setMenu(false); menuFromLive(); ui.title = true; ui.picker = -1; ui.resume = true; paused = true; for (let p = 0; p < 2; p++) holding[p] = null; if (!fromNet) netPause(true); }
 function restartGame(load) {
@@ -25243,7 +25352,6 @@ function batchRecCovers(d, o, ax, ay, x, y) {
 const BK = [{ cur: null, next: null, hard: '', n: 0, left: 0, swaps: 0, avg: 0.6, ms: 0, t0: 0, took: 0, frames: 0 },
             { cur: null, next: null, hard: '', n: 0, left: 0, swaps: 0, avg: 0.6, ms: 0, t0: 0, took: 0, frames: 0 }];
 let BK_UID = 0, BK_ON = false, BK_BUDGET = 0;
-const BK_DBG = { now: 0, cut: 0, other: 0, none: 0 };   // (test hook - bakeStats: clouds baked at once, by why)
 const BK_SKIP = new Set(['time', 'sea', 'wind', 'rain', 'sky', 'cover', 'big', 'fog', 'bake', 'bakestep', 'bakemove', 'bakems']);
 const bakeOn = () => (P.bake ?? 1) > 0 && GPU;
 // (a sprite still usable: drawn in this GL context, or an 'empty' one - the cloud gone at the new weather)
@@ -25271,7 +25379,7 @@ function bkFree(s) {
 }
 function bkShelfClear() { for (const L of BK_POOL.values()) for (const T of L) T.free(); BK_POOL.clear(); BK_PN = 0; BK_PB = 0; }
 function bkSlot(c) { const v = c.bk || (c.bk = [{ F: null, B: null, now: 0, live: false }, { F: null, B: null, now: 0, live: false }]); return v[VI]; }
-function bakeDrop(c, why) { if (!c.bk) return; for (const v of c.bk) { if (v.B && v.B !== v.F) bkFree(v.B); if (v.F) v.fr = why || 'drop'; bkFree(v.F); v.F = v.B = null; } }
+function bakeDrop(c) { if (!c.bk) return; for (const v of c.bk) { if (v.B && v.B !== v.F) bkFree(v.B); bkFree(v.F); v.F = v.B = null; } }
 function bakeDropAll() { for (const c of clouds) bakeDrop(c); for (const b of BK) { b.cur = b.next = null; b.hard = null; } bkShelfClear(); }
 // the two signatures: HARD (the picture itself changes - zoom, screen, the debug view: every sprite thrown away, the sky baked
 // at once) and SOFT (the look changes - the hour's step, the weather's step, the drift past the sun, the sliders: baked again
@@ -25305,7 +25413,7 @@ function bakeBegin(V) {
   BK_ON = bakeOn();
   if (!BK_ON) return;
   const b = BK[VI], [hard, soft] = bakeSigs(V);
-  if (hard !== b.hard) { if (b.hard) bkShelfClear(); if (b.hard) for (const c of clouds) if (c.bk) { const v = c.bk[VI]; if (v.B && v.B !== v.F) bkFree(v.B); if (v.F) v.fr = 'hard'; bkFree(v.F); v.F = v.B = null; } b.hard = hard; b.cur = soft; b.next = null; b.force = 2; }
+  if (hard !== b.hard) { if (b.hard) bkShelfClear(); if (b.hard) for (const c of clouds) if (c.bk) { const v = c.bk[VI]; if (v.B && v.B !== v.F) bkFree(v.B); bkFree(v.F); v.F = v.B = null; } b.hard = hard; b.cur = soft; b.next = null; b.force = 2; }
   // (the last gen complete: every cloud's new sprite in at once)
   if (b.next && b.done) {
     for (const c of clouds) {
@@ -25370,12 +25478,8 @@ function bakeVisit(c, vis, gk) {
     if (Math.abs(flash.x - cx) < hw) { c.grow = c.growT; v.now = 0; v.live = true; return false; }
   }
   v.live = false; v.now = 0;
-  // (a cut sprite - bakeCloud - at another zoom: laid scaled while none of its cut sides comes into the view, and baked for this zoom within the frame's
-  // budget (stale); a cut side in view, it's a cloud with no picture: baked at once. Nov 9, user: "remember to zoom in and out during the tests" - in a
-  // storm every frame of a zoom baked its ~20-30 cut towers at once, 200-240 ms frames all the way)
-  const zk = bkOk(v.F) && v.F.cut && v.F.zl !== c.lay.zl ? c.lay.zl / v.F.zl : 1, cutShows = zk !== 1 && bkCutShows(v.F.cut, X, c.y, zk, 8);
-  if (zk !== 1 && !cutShows) v.F.stale = true;
-  const shownF = bkOk(v.F) && !cutShows ? v.F : null;
+  // (a cut sprite - bakeCloud - is never laid at another zoom: scaled, its cut would show. Such a cloud is one with no picture: baked at once)
+  const shownF = bkOk(v.F) && !(v.F.cut && v.F.zl !== c.lay.zl) ? v.F : null;
   // (FAR SUN: its light by where it is from the disc, in steps - a step moved since its picture was baked: baked again, alone)
   let pk = '';
   if ((P.farsun ?? 1) > 0 && c.minX !== undefined) { const Xm = X + (c.minX + c.maxX) / 2; pk = sunStep(c, Xm, c.y - c.h / 2); }
@@ -25392,11 +25496,11 @@ function bakeVisit(c, vis, gk) {
   if (wants && !shownF && !(v.nw != null && (v.nw === b.cur || v.nw === b.next))) need = 3;
   else if (b.next) { if (!(v.B && v.B.sig === b.next && bkOk(v.B))) need = wants ? 1 : -1; }
   else if (wants && !(bkOk(v.F) && v.F.sig === b.cur && (v.F.pk ?? '') === pk && !v.F.stale)) need = 2;   // (stale: a cut sprite the camera has moved toward a cut side of - bakeDraw)
-  else if (!wants && v.F) { bkFree(v.F); v.F = null; v.fr = 'unwanted' + (on ? 'G' : 'L'); }
+  else if (!wants && v.F) { bkFree(v.F); v.F = null; }
   if (need === -1) { if (v.B && v.B !== v.F) bkFree(v.B); v.B = { empty: true, sig: b.next }; need = 0; }   // (gone at the new look: gone at the swap)
   if (need > 0 && (inView || (need === 3 && inWide))) {
     if ((need === 3 && inView) || b.baking < BK_BUDGET) {
-      b.baking++; if (need === 3 && inView) { BK_DBG.now++; if (v.F && v.F.cut) BK_DBG.cut++; else if (bkOk(v.F)) BK_DBG.other++; else { BK_DBG.none++; const k = 'why_' + (v.fr || 'never'); BK_DBG[k] = (BK_DBG[k] || 0) + 1; } }
+      b.baking++;
       v.now = need; c.grow = c.growT; c.dirty = true; c.lobG = -1;           // (placed whole, at its finished size, lit afresh)
       if (skyGen <= 0) skyGen = 0.001;                                        // (its puffs made now, whatever the frame's budget)
       return false;
@@ -25523,8 +25627,6 @@ function bakeCloud(c, ax, ay) {
   FTV.bake = (FTV.bake || 0) + ms; FTV.baked = (FTV.baked || 0) + 1;
   v.now = 0;
 }
-// (whether a cut sprite laid at scale ks about (x, y) shows one of its cut sides within the view's w x h, m pixels inside it)
-function bkCutShows(K, x, y, ks, m, w = W, h = H) { return (K[0] !== null && x + K[0] * ks > -m) || (K[1] !== null && y + K[1] * ks > -m) || (K[2] !== null && x + K[2] * ks < w + m) || (K[3] !== null && y + K[3] * ks < h + m); }
 // a cloud in a deck (drawDeck0), baked sky: baked now if it is its turn, then its sprite laid (true), or the live way (false)
 function bakeDraw(c, ax, ay) {
   if (!BK_ON) return false;
@@ -25534,7 +25636,7 @@ function bakeDraw(c, ax, ay) {
   if (bkOk(s) && !s.empty) {
     // (baked at another zoom - a zoom's new pictures still on their way: laid scaled about the cloud's place, ks the scale)
     const ks = s.zl && s.zl !== c.lay.zl ? c.lay.zl / s.zl : 1;
-    if (s.cut && ks !== 1 && bkCutShows(s.cut, ax, ay, ks, 0, TW, DLH || H)) return true;   // (a cut side would show: not laid - bakeVisit has it baked at once)
+    if (s.cut && ks !== 1) return true;   // (a cut sprite at another zoom: never laid scaled - bakeVisit has it baked at once)
     // (a cut sprite - bakeCloud: the layer and BK_CROP_T of a view round it, in the sprite's own place; past a cut side, baked again next frame)
     if (s.cut && !s.stale) {
       const K = s.cut, Hn = DLH || H, mx = W * BK_CROP_T, my = Hn * BK_CROP_T;
@@ -25547,7 +25649,7 @@ function bakeDraw(c, ax, ay) {
   return true;
 }
 // (the panel)
-function bakeStats() { const b = BK[0]; let n = 0; for (const c of clouds) if (c.bk && c.bk[0].F && c.bk[0].F.T) n++; return { on: BK_ON, busy: !!b.next || frameNo - (b.lastF ?? -99) < 3, sprites: n, gen: !!b.next, left: b.left, swaps: b.swaps, took: b.took, frames: b.frames, avg: b.avg, dbg: BK_DBG }; }
+function bakeStats() { const b = BK[0]; let n = 0; for (const c of clouds) if (c.bk && c.bk[0].F && c.bk[0].F.T) n++; return { on: BK_ON, busy: !!b.next || frameNo - (b.lastF ?? -99) < 3, sprites: n, gen: !!b.next, left: b.left, swaps: b.swaps, took: b.took, frames: b.frames, avg: b.avg }; }
 
 // ================================================================== the sun and the moon
 // The sun (ref_sun_paintover_pixel, ref_sun_flare_photo): a white core, a soft glow in flat steps fading into the sky, and
@@ -26054,7 +26156,7 @@ function skyFrame(G) {
   // (Oct 28, 23:09: flying, a cloud gone off the screen was let go after 3 s and built again from nothing when it came back -
   // five a frame; kept 20 s now, its puffs 60 s)
   if (frameNo % 60 === 0) for (const c of clouds) { if (c.spr && now - (c.seen || 0) > 20) c.spr = null; if (c.pbv && !c.visible && now - (c.seen || 0) > 20) { for (const b of c.pbv) if (b) b.free(); c.pbv = null; if (c.pbx) { c.pbx.free(); c.pbx = null; } } if (c.lorder && !c.visible) c.lorder = null; }
-  if (frameNo % 60 === 0) for (const c of clouds) if (c.bk && !c.visible && now - (c.seen || 0) > 20) bakeDrop(c, 'unseen');   // (BAKED SKY: a sprite not seen for 20 s let go)
+  if (frameNo % 60 === 0) for (const c of clouds) if (c.bk && !c.visible && now - (c.seen || 0) > 20) bakeDrop(c);   // (BAKED SKY: a sprite not seen for 20 s let go)
   if (frameNo % 60 === 0) for (const c of clouds) if (c.items && c !== hero && !c.disturbed && !(c.tubes && c.tubes.length) && now - (c.seen || 0) > 60) { c.items = c.billows = null; c.nbrReady = false; }
   skyGen = frameNo < 4 || frameNo < FORCE ? 1e9 : (P.genms ?? 4);   // (the frame's budget, ms, for making clouds' puffs: a cloud past it is drawn as lobes till its turn)
 }
@@ -39400,7 +39502,6 @@ function stepCivHeli(h, dt) {
     h.ph += dt;
     h.rotor += h.spin * dt * 9;
     if (h.state === 'gone') return;
-    if (h.state === 'rescue') { h.spin = Math.min(1, h.spin + dt * 0.5); h.gear = 0; return; }   // (STORY: flown on a rescue call - 50-story.js storyRescue)
     // (its wreck stays: no other helicopter comes in its place - user Oct 27: "The rest, when destroyed, is never spawned again")
     if (h.state === 'wreck' && h.onDeck && harbourTop(h.x, h.y - 6) === Infinity) { h.onDeck = false; h.state = 'sink'; h.vy = 20; ditchFx(h.x, 0, 1, 36, 60); return; }   // (its wreck on the pier, the pier gone: into the sea - user Oct 27)
     if (h.state === 'wreck') {
@@ -47320,10 +47421,6 @@ function landChanged(x0, x1) {
   landWakeRow(x0, x1, 1.5);
 }
 function landWoke(x, half) { const A = landWake.c.x0, B = landWake.c.x1; for (let i = 0; i < landWake.n; i++) if (x + half >= A[i] && x - half <= B[i]) return true; return false; }
-// (Nov 9, storm stress test: after bombs ~17,000 grains, leaves and bits of debris lying on the ground were each asked landWoke every physics step - ~100,000
-// calls a frame, 20 ms) the woken ground's whole span, so what lies outside it all is passed over at once; the same ones woken
-function landWokeSpan() { const A = landWake.c.x0, B = landWake.c.x1; let lo = Infinity, hi = -Infinity; for (let i = 0; i < landWake.n; i++) { if (A[i] < lo) lo = A[i]; if (B[i] > hi) hi = B[i]; } LWS[0] = lo; LWS[1] = hi; return LWS; }
-const LWS = [0, 0];
 // the ground under something `half` wide whose foot is at y: where its foot settles, and its tilt (from the ground at its
 // two ends: over a small hole it bridges it, one end over a big one and it tips into it). Off the land: as it was
 function restGround(x, foot, half) {
@@ -47387,10 +47484,9 @@ function stepLandRest(dt) {
   if (landWake.n) for (const k of restChunksWhere(k => k.land && !k.uw && landWoke(k.x, 6), landWake)) { const f = k.y + k.hh * 0.45; if (landBelow(k.x, f - 6) > f + 1) { if (k._rest) restWakeChunk(k); k.rest = false; k.vx = k.vy = 0; k.w = lrRnd(-1, 1); } }
   // the debris, the grains of earth and the leaves lying on the ground: the ground gone, they fall again
   if (landWake.n) {
-    const [lo, hi] = landWokeSpan(), L0 = lo - 1, L1 = hi + 1;   // (landWoke(x, 1) only where L0 <= x <= L1)
-    { const D = debris.c; for (let i = 0; i < debris.n; i++) { const x = D.x[i]; if (x < L0 || x > L1) continue; if (D.state[i] === 2 && onLand(x) && landWoke(x, 1) && !landSolid(x, D.y[i] + 1.5)) { D.state[i] = 0; D.vy[i] = 0; } } }
+    { const D = debris.c; for (let i = 0; i < debris.n; i++) if (D.state[i] === 2 && onLand(D.x[i]) && landWoke(D.x[i], 1) && !landSolid(D.x[i], D.y[i] + 1.5)) { D.state[i] = 0; D.vy[i] = 0; } }
     restLandWake(landWake);                              // (and those filed away at rest - 36-zzzz-settled.js)
-    for (const T of [earthGrains, leaves]) { const c = T.c; for (let i = 0; i < T.n; i++) { const x = c.x[i]; if (x < L0 || x > L1) continue; if (c.rest[i] && landWoke(x, 1) && !landSolid(x, c.y[i] + 1.5)) { c.rest[i] = 0; c.vy[i] = 0; c.vx[i] = 0; } } }   // (Nov 1: column tables)
+    for (const T of [earthGrains, leaves]) { const c = T.c; for (let i = 0; i < T.n; i++) if (c.rest[i] && landWoke(c.x[i], 1) && !landSolid(c.x[i], c.y[i] + 1.5)) { c.rest[i] = 0; c.vy[i] = 0; c.vx[i] = 0; } }   // (Nov 1: column tables)
   }
 }
 // an army wreck (a tank's, a helicopter's): on a ship's deck it rides her, and goes down with her; over water it falls
@@ -48214,11 +48310,16 @@ function tunWidthAt(I, j) {
   const a = L[Math.max(0, m - 1)], b = L[Math.min(L.length - 1, m + 1)], dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1;
   return [L[m][0] - dy / d * R[m], L[m][1] + dx / d * R[m], L[m]];
 }
+// (Nov 9: Math.min(...A) passes every point as an argument - a wide shape's outline, tens of thousands of points, overflowed the
+// simulation worker's smaller stack: "Maximum call stack size exceeded" in its world build, and the page ran the game itself) the lowest
+// / highest of a long list, one at a time
+const lowOf = A => { let m = Infinity; for (let i = 0; i < A.length; i++) if (A[i] < m) m = A[i]; return m; };
+const highOf = A => { let m = -Infinity; for (let i = 0; i < A.length; i++) if (A[i] > m) m = A[i]; return m; };
 function shpPoly(I) {
   const sig = JSON.stringify(I.p) + (shpK(I) === 'H' ? '|H' + (I.t ? JSON.stringify(I.rs || TUN_RS0) : '') : '');
   if (I._poly && I._polySig === sig) return I._poly;
   if (shpK(I) === 'H' && typeof CAVE !== 'undefined' && CAVE.crCurve) {
-    const O = shpCavePoly(I), poly = { X: Float64Array.from(O.X), Y: Float64Array.from(O.Y), E: Int32Array.from(O.E), x0: Math.min(...O.X), x1: Math.max(...O.X), y0: Math.min(...O.Y), y1: Math.max(...O.Y), tube: O.tube || null };
+    const O = shpCavePoly(I), poly = { X: Float64Array.from(O.X), Y: Float64Array.from(O.Y), E: Int32Array.from(O.E), x0: lowOf(O.X), x1: highOf(O.X), y0: lowOf(O.Y), y1: highOf(O.Y), tube: O.tube || null };
     Object.defineProperty(I, '_poly', { value: poly, writable: true, configurable: true, enumerable: false });
     Object.defineProperty(I, '_polySig', { value: sig, writable: true, configurable: true, enumerable: false });
     return poly;
@@ -48266,7 +48367,7 @@ function shpPoly(I) {
   const O = { X: [], Y: [], E: [] };
   for (let i = 0; i < X.length; i++) { const j = O.X.length - 1; if (j >= 0 && Math.abs(O.X[j] - X[i]) < 1e-9 && Math.abs(O.Y[j] - Y[i]) < 1e-6) { O.E[j] = E[i]; continue; }   /* (the edge from it is the next run's) */ O.X.push(X[i]); O.Y.push(Y[i]); O.E.push(E[i]); }
   if (O.X.length > 1 && Math.abs(O.X[0] - O.X[O.X.length - 1]) < 1e-9 && Math.abs(O.Y[0] - O.Y[O.Y.length - 1]) < 1e-6) { O.X.pop(); O.Y.pop(); O.E.pop(); }
-  const poly = { X: Float64Array.from(O.X), Y: Float64Array.from(O.Y), E: Int32Array.from(O.E), x0: Math.min(...O.X), x1: Math.max(...O.X), y0: Math.min(...O.Y), y1: Math.max(...O.Y) };
+  const poly = { X: Float64Array.from(O.X), Y: Float64Array.from(O.Y), E: Int32Array.from(O.E), x0: lowOf(O.X), x1: highOf(O.X), y0: lowOf(O.Y), y1: highOf(O.Y) };
   Object.defineProperty(I, '_poly', { value: poly, writable: true, configurable: true, enumerable: false });
   Object.defineProperty(I, '_polySig', { value: sig, writable: true, configurable: true, enumerable: false });
   return poly;
@@ -52487,7 +52588,6 @@ function drawJetboats(x0, x1, lake) {
   if (!jetboats.length) return;
   if (!jbArt) buildJetboatArt();
   for (const j of bySize(jetboats)) {   // (smaller in front - 50-zz-size-order.js)
-    if (j.res && lake === false) drawStoryRescue(j);                    // (STORY: a rescue on its way - it flies off the screen with you - 50-story.js)
     // (culled by its whole size - a fishing boat's net hanging out to one side too: rules.md, one screen as two half views; user Nov 2
     // 10:28, the net cut off at the screen's middle when its boat was in the other half)
     const N = j.net, lo = Math.min(j.x - 60, N && N.lo != null ? N.lo - 30 : j.x), hi = Math.max(j.x + 60, N && N.hi != null ? N.hi + 30 : j.x);
@@ -56846,12 +56946,11 @@ function rigState(it, rc) {
       tear: new Uint8Array(n), tx: new Float32Array(n), ty: new Float32Array(n), tr: new Float32Array(n), tvx: new Float32Array(n), tvy: new Float32Array(n), tvr: new Float32Array(n), tt: new Float32Array(n), tl: new Float32Array(n), tlow: new Float32Array(n).fill(-1e9), tpx: new Float32Array(n).fill(NaN), tpy: new Float32Array(n).fill(NaN), pen: new Float32Array(n), pdx: new Float32Array(n),
       snap: -1, sa: 0, sav: 0, sdir: 1, sdone: 0, tlowT: -1e9, broke: false };
     const a0 = vegSz(it, 'sizeMin'), b0 = vegSz(it, 'sizeMax'); for (let f = 0; f < n; f++) { s.sz[f] = a0 + (b0 - a0) * rigHash(it.x, f); s.lag[f] = rigHash(it.x, f + 40); }
-    s.szA = a0; s.szB = b0;
+    s.szK = a0 + ',' + b0;
     RIGS_ST.set(it.x, s);
   }
-  // (the sizes follow the sliders - Nov 9, storm stress test: asked ~14,000 times a frame zoomed out, the two numbers compared as they are, not made a text each time)
-  const a1 = vegSz(it, 'sizeMin'), b1 = vegSz(it, 'sizeMax');
-  if (s.szA !== a1 || s.szB !== b1) { s.szA = a1; s.szB = b1; for (let f = 0; f < s.sz.length; f++) s.sz[f] = a1 + (b1 - a1) * rigHash(it.x, f); }
+  const a1 = vegSz(it, 'sizeMin'), b1 = vegSz(it, 'sizeMax'), k = a1 + ',' + b1;   // (the sizes follow the sliders)
+  if (s.szK !== k) { s.szK = k; for (let f = 0; f < s.sz.length; f++) s.sz[f] = a1 + (b1 - a1) * rigHash(it.x, f); }
   return s;
 }
 // the air vehicles move about them: gathered once a step - [x, y, vx, vy, kind] (kind 0 a car on the ground, 1 a plane, 2 a
@@ -57150,19 +57249,12 @@ function drawBuiltLod(it, rc, s, T, burnT, X, Y, w, k, mul, add, hs) {
     // flowers blown away - keeps its detail by its size: its parts drawn as pictures without the ones that are gone (drawBuiltMid), the pieces still in the
     // air or on the ground drawn shape by shape over it, as near (drawBuilt's only). The far one-picture plant has every part in it: torn, it's the parts
     const hurt = burnT > 0 || s.snap >= 0, torn = !!s.broke && !hurt;
-    // (Nov 9, user: "keep going through the list" - a storm fight zoomed out: ~20 snapped trees drawn shape by shape at ~20 px, ~0.35 ms each) a snapped
-    // tree tiny on the screen is its one picture in two pieces: under the break as it stands, over it turned by its fall about the break (as its shapes are)
-    const snapped = s.snap >= 0 && !(burnT > 0) && rc.trunk && rc._S && s.snap < rc._S.length;
-    if (hs < T.lodFar && (!hurt || snapped) && !torn) {   // (torn or burning: every shape)
-      BAKE.miss = false; const P = builtSprite(rc, rigLight(it), vegUp(k)); if (!P && BAKE.miss) return; if (P) { let b = 0; for (let f = 0; f < rc.fronds.length; f++) b += s.b[f * 2] + s.b[f * 2 + 1] * 0.5; const sk = snapped ? 0 : clamp(-b / Math.max(1, rc.fronds.length) * 0.35 - (rc.trunk ? s.a[0] + s.a[1] : 0), -0.6, 0.6);
-        const bx = snapped ? rc._S[s.snap][0] : 0, by = snapped ? rc._S[s.snap][1] : 0;
-        const put = (SD, img, Q) => { const W = Q.c.width, H = Q.c.height, n = Q.n; if (!snapped) { SD.drawImage(img, Q.x, Q.y, W / n, H / n); return; }
-          const r = clamp(Math.round((by - Q.y) * n), 0, H); if (r < H) SD.drawImage(img, 0, r, W, H - r, Q.x, Q.y + r / n, W / n, (H - r) / n);
-          if (r > 0) { SD.save(); SD.translate(bx, by); SD.rotate(s.sa); SD.drawImage(img, 0, 0, W, r, Q.x - bx, Q.y - by, W / n, r / n); SD.restore(); } };
+    if (hs < T.lodFar && !hurt && !torn) {   // (torn or snapped: every shape)
+      BAKE.miss = false; const P = builtSprite(rc, rigLight(it), vegUp(k)); if (!P && BAKE.miss) return; if (P) { let b = 0; for (let f = 0; f < rc.fronds.length; f++) b += s.b[f * 2] + s.b[f * 2 + 1] * 0.5; const sk = clamp(-b / Math.max(1, rc.fronds.length) * 0.35 - (rc.trunk ? s.a[0] + s.a[1] : 0), -0.6, 0.6);
         const SD = VEG_PASS_L ? vegPassCtx(it, X, Y, w, vegQ(k)) : C; if (SD === C) { C.save(); C.translate(X, Y); if (it.flip) { C.translate(w, 0); C.scale(-1, 1); } C.scale(k, k); } SD.transform(1, 0, sk, 1, -sk * rc.foot, 0);
         { const B = rc.built, nn = vegUp(k), OC = builtOlKey(rc, B, nn), ol = GLR.on && OC.ol; if (ol) { const ok = OC.ok, OM = rc._olM || (rc._olM = new Map()), OP = vegBake(OM, ok, () => builtOlJob(rc, nn), vegPieceFree, 12, 'o');
-          if (OP) { const T0 = SD.getTransform(), U = SD === C ? VEG_PX : 1, tc = olTint(ol, mul), ga0 = SD.globalAlpha; SD.globalAlpha = ga0 * olA(ol); for (const [ox, oy] of vegOlOffs(Math.round(ol.w))) { SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e + ox * U, T0.f + oy * U); put(SD, glTint(OP.c, 'rgO', RIG_ZERO, tc, false), OP); } SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e, T0.f); SD.globalAlpha = ga0; } } }
-        put(SD, GLR.on ? glTint(P.c, 'rgB', mul, add, false) : P.c, P); SD.restore(); return; }
+          if (OP) { const T0 = SD.getTransform(), U = SD === C ? VEG_PX : 1, tc = olTint(ol, mul), ga0 = SD.globalAlpha; SD.globalAlpha = ga0 * olA(ol); for (const [ox, oy] of vegOlOffs(Math.round(ol.w))) { SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e + ox * U, T0.f + oy * U); SD.drawImage(glTint(OP.c, 'rgO', RIG_ZERO, tc, false), OP.x, OP.y, OP.c.width / OP.n, OP.c.height / OP.n); } SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e, T0.f); SD.globalAlpha = ga0; } } }
+        SD.drawImage(GLR.on ? glTint(P.c, 'rgB', mul, add, false) : P.c, P.x, P.y, P.c.width / P.n, P.c.height / P.n); SD.restore(); return; }
     }
     // (between LOD FAR and LOD MID on the screen: each part its own picture on its own springs)
     if (hs < T.lodMid && !hurt) { BAKE.miss = false; const M = builtMid(rc, rigLight(it), vegUp(k)); if (!M && BAKE.miss) return; if (M) { drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add); if (torn && tornLive(s)) drawBuilt(it, rc, s, X, Y, w, k, mul, add, tornPiece(s)); return; } }
@@ -59441,10 +59533,10 @@ function storyHelisBuild() {
   }
 }
 function storyHeliNew(o, i, D, sv, sid, own) {
-  const x = storySpotX(o, i), R = landOwnD(x), h = newCivHeli(D.ch, x, R, 0), e = strVehs(o)[i], role = e && e.v === sv && e.role || null;
-  return Object.assign(h, { story: true, heli: true, sid, own: own && !role, role, price: storyPrice(o, i, sv), sv, berth: o.id, spot: i, hb: o.id, hs: i, fuel: 1, hp: 2, home: x, wait: 1e12, facing: o.flip ? -1 : 1, y: landTop(x) - chStand(h) });
+  const x = storySpotX(o, i), R = landOwnD(x), h = newCivHeli(D.ch, x, R, 0);
+  return Object.assign(h, { story: true, heli: true, sid, own, price: storyPrice(o, i, sv), sv, berth: o.id, spot: i, hb: o.id, hs: i, fuel: 1, hp: 2, home: x, wait: 1e12, facing: o.flip ? -1 : 1, y: landTop(x) - chStand(h) });
 }
-const storyHeliAlive = h => h.state === 'parked' || h.state === 'landed' || h.state === 'fly' || h.state === 'rescue';   // (rescue: on a call - 50-story.js storyRescue)
+const storyHeliAlive = h => h.state === 'parked' || h.state === 'landed' || h.state === 'fly';
 // each step (stepStory): left on the ground, it stays there; its fuel; refuelled, mended at its structure; lost - again
 // the next morning
 function storyHelis(dt) {
@@ -60292,13 +60384,16 @@ function storyPlaneLosses() {
 /* ================================================================
    STORY's SAVES (user Oct 31 09:31: "When you do story mode, you either can start a new save or load an existing save. There
    will be 5 slots for the saves. The save file will show you the day and the time it was saved, and the current day in the
-   game world, and how much money the character has"; 13:07: "If there's a save game, it should load at the last base that
-   the player was in that save game").
+   game world, and how much money the character has").
    NEW GAME with STORY picked opens the slots over the menu (storySlotsOpen): each slot EMPTY, or its day, coins, the base
-   it's at and when it was saved; NEW starts a story in it (asking first if one's there), LOAD puts the saved one back. A
-   story asks to be saved (story.saveN, 50-story.js) when it starts, on entering a home of yours, and on waking at home; this
-   page sees the ask in its copy of the game and saves the whole game (the GAME EDITOR's own save - edGameSave: the world and
-   every table, the worker held while it's taken - swHold) into the slot. The games are kept in this browser's IndexedDB
+   it's at and when it was saved; NEW starts a story in it (asking first if one's there), LOAD puts the saved one back.
+   CHECKPOINTS (user Nov 9: "Every time you enter a location that you own, the game gets saved there, and that's your checkpoint. If you
+   die or quit the game, it will resume from that checkpoint. And when that checkpoint is recorded, it stores where everything was in
+   the world"): a story asks to be saved (story.saveN, 50-story.js) only when it starts and on arriving at a structure of yours
+   (storyGo: story.cp, the checkpoint); this page sees the ask in its copy of the game and saves the whole game (the GAME EDITOR's own
+   save - edGameSave: the world and every table, every vehicle where it is, the worker held while it's taken - swHold) into the slot.
+   Nothing else saves - buying, selling, sleeping, getting in or out, quitting. A death (story.dead) loads the slot again; LOAD puts
+   you back at the checkpoint (storyResume). The games are kept in this browser's IndexedDB
    ('bd_story', a store of five), what each slot shows in localStorage (bd_story_slots).
    ================================================================ */
 const STORY_SLOTS = 5;
@@ -60339,29 +60434,22 @@ async function storySaveNow(quiet) {
   } catch (e) { swRelease('storySave'); storySavedN = ask; console.warn('story save', e); showToast('COULD NOT SAVE'); }
   storySaving = false;
 }
-// each frame (drawStoryBanner): a new ask, saved
-/* (user Nov 3 18:45: "the game should save wherever you are ... The world is waiting exactly where you left off"; 23:58: "It should
-   be on quit, death, exit, selling, etc") saved on the moments that matter, never on a timer: the story's own asks (story.saveN++ -
-   starting, entering a home of yours, waking, buying, selling at a market, tying up, every swap into something else - getting out of a vehicle
-   or into one, a vehicle lost and you back home) and leaving the game (storyAway: the menu opened, the page put away) */
-let storySavedAt = 0;
-// (user Nov 4 22:25: saving aboard a vehicle "should be impossible") never while you're in a vehicle: an ask made then (getting in) waits
-// till you're out of it, at a structure - the vehicle saved where you got out
+// each frame (drawStoryBanner): a checkpoint asked for, saved - while you're at it (an ask made elsewhere is let go); a death, the
+// checkpoint loaded again
+let storySavedAt = 0, storyDeadN = null;                  // (the deaths this page has seen: null - take the story's count as it is)
+// (user Nov 4 22:25: saving aboard a vehicle "should be impossible")
 const storyAboard = () => crew[0].mode === 'civ';
 function storySaveWatch() {
-  if (!(STORY && storySlot != null && !storyLoading && !ui.title && !story.wake) || storyAboard()) return;
-  if (story.saveN !== storySavedN) storySaveNow(true);
-}
-// leaving the game: the menu opened (openMainMenu, 19-menu.js), the page put away
-function storyAway() { if (STORY && storySlot != null && !storyLoading && !ui.title && !story.wake && !storyAboard()) storySaveNow(true); }
-if (typeof document !== 'undefined' && !SW_IN_WORKER) {
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') storyAway(); });
-  window.addEventListener('pagehide', storyAway);
+  if (!(STORY && storySlot != null && !storyLoading && !ui.title)) return;
+  if (storyDeadN == null) storyDeadN = story.dead;
+  else if (story.dead !== storyDeadN) { storyDeadN = story.dead; storyLoad(storySlot); return; }
+  if (story.wake || storyAboard() || story.saveN === storySavedN) return;
+  if (!story.cp || (story.at === story.cp && crew[0].mode === 'dock')) storySaveNow(true); else storySavedN = story.saveN;   // (no checkpoint: a world with no home of yours - its start)
 }
 // NEW in slot n: a fresh story there (its first save comes as it starts)
 function storyNew(n) {
   SSL.open = false; SSL.confirm = null;
-  storySlot = n; storySavedN = -1;
+  storySlot = n; storySavedN = -1; storyDeadN = null;
   menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false;
 }
 /* (user Nov 2 15:40: the taxi "snaps" back to its hut, as if after dying - found on his GPU: a LOAD put the saved game into the page
@@ -60394,9 +60482,9 @@ function storyPutBack(G, done) {
     storyPlayNow = true; menuPlay(false); storyPlayNow = false;
     swSettled().then(() => swHold('storyLoad')).then(() => {
       try { edGameBack(JSON.parse(G)); cutTo(0); } catch (e) { console.warn('story load', e); showToast('COULD NOT LOAD'); storySlot = null; }   // (not loaded: the fresh world never saved over the slot)
-      storySavedN = story.saveN; storyLoading = false;
+      storySavedN = story.saveN; storyDeadN = story.dead; storyLoading = false;
       swRelease('storyLoad');
-      act(0, 'storyResume');                             // (on at your MAIN - the last residence you entered, user Nov 4 17:30)
+      act(0, 'storyResume');                             // (on at the checkpoint - the structure of yours it was saved at, user Nov 9)
       if (done) done();
     });
   });
@@ -60536,11 +60624,11 @@ function storySubs(dt) {
    structures, prices, saves, the home's next-day sun, fuel - is built on this, one version at a time (work note
    story-mode-oct31.md). The old wave defence it replaces is in git (before Version 401).
    ================================================================ */
-const story = { coins: 0, at: 0, saveN: 0, wake: 0, main: 0, inv: {}, cook: true, light: true, lh: {} };   // (cook / light: the home you're in - its smoke and lights; lh: lighthouses' LIGHT / ANGLE by structure id - 50-zzzz-struct-act.js)   // (inv: what the player carries - PLAYER INVENTORY cargo, medicine - 50-zz-cargo.js)   // (main: your MAIN - the last residence of yours you entered: the story resumes there, you sleep there, a lost vehicle brings you back there; 0 none yet)   // (saveN: how many times it asked to be saved - 50-story-saves.js; wake: asleep till that day's morning, 0 awake)                       // (at: the structure you're at - its id in STRS; 0: none)
+const story = { coins: 0, at: 0, saveN: 0, wake: 0, main: 0, cp: 0, dead: 0, inv: {}, cook: true, light: true, lh: {} };   // (cook / light: the home you're in - its smoke and lights; lh: lighthouses' LIGHT / ANGLE by structure id - 50-zzzz-struct-act.js)   // (inv: what the player carries - PLAYER INVENTORY cargo, medicine - 50-zz-cargo.js)   // (main: your MAIN - the last residence of yours you entered: you sleep there; 0 none yet)   // (cp: the checkpoint - the structure of yours last entered, where the story was saved and resumes; dead: how many times you've died - 50-story-saves.js)   // (saveN: how many times it asked to be saved - 50-story-saves.js; wake: asleep till that day's morning, 0 awake)                       // (at: the structure you're at - its id in STRS; 0: none)
 const storyR = sysRng('story');
-const STORY_ROW = worldRow({ coins: [() => story.coins, v => { story.coins = v; }], at: [() => story.at, v => { story.at = v; }], saveN: [() => story.saveN, v => { story.saveN = v; }], wake: [() => story.wake, v => { story.wake = v; }], main: [() => story.main, v => { story.main = v; }], inv: [() => story.inv, v => { story.inv = v && typeof v === 'object' ? v : {}; }], cook: [() => story.cook, v => { story.cook = v !== false; }], light: [() => story.light, v => { story.light = v !== false; }], lh: [() => story.lh, v => { story.lh = v && typeof v === 'object' ? v : {}; }] });
+const STORY_ROW = worldRow({ coins: [() => story.coins, v => { story.coins = v; }], at: [() => story.at, v => { story.at = v; }], saveN: [() => story.saveN, v => { story.saveN = v; }], wake: [() => story.wake, v => { story.wake = v; }], main: [() => story.main, v => { story.main = v; }], cp: [() => story.cp, v => { story.cp = v || 0; }], dead: [() => story.dead, v => { story.dead = v || 0; }], inv: [() => story.inv, v => { story.inv = v && typeof v === 'object' ? v : {}; }], cook: [() => story.cook, v => { story.cook = v !== false; }], light: [() => story.light, v => { story.light = v !== false; }], lh: [() => story.lh, v => { story.lh = v && typeof v === 'object' ? v : {}; }] });
 defTable('story', () => [STORY_ROW], { make: () => STORY_ROW });
-function storyReset() { story.coins = STORY_CFG.coins; story.inv = Object.assign({}, STORY_CFG.inv); story.at = 0; story.saveN = 0; story.wake = 0; story.main = 0; storyHomeO = undefined; Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true }); }   // (the automatic zoom again till the player zooms - storyZoom)
+function storyReset() { story.coins = STORY_CFG.coins; story.inv = Object.assign({}, STORY_CFG.inv); story.at = 0; story.saveN = 0; story.wake = 0; story.main = 0; story.cp = 0; story.dead = 0; storyHomeO = undefined; Object.assign(STORY_ZOOM, { key: null, lv: null, manual: false, mv: 0, moving: false, snap: true }); }   // (the automatic zoom again till the player zooms - storyZoom)
 // where a story opens: the HOME structure, else a house, else nothing (the harbour's view, as ever)
 let storyHomeO;                                          // (the base this story opened at: picked once - storyReset)
 const storyMainO = () => story.main ? strsUsed().find(o => o.id === story.main) || null : null;
@@ -60558,9 +60646,9 @@ function storyStart() {
   const c = crew[0], o = storyHome();
   story.opened = { home: o ? o.k : null, n: (story.opened ? story.opened.n : 0) + 1 };   // (for the tools: what it opened on)
   civUI[0] = true;
-  story.main = o ? o.id : 0;
+  story.main = o ? o.id : 0; story.cp = o ? o.id : 0;
   if (o) storyGo(0, o.id); else cutTo(0);
-  story.saveN++;                                         // (a new story is saved at once, in its slot)
+  story.saveN++;                                         // (a new story is saved at once, in its slot: its first checkpoint)
 }
 /* ---- being at a structure, and the ones it connects to (user Oct 31, the spec section 1: "The player can switch between
    the home and dock, then from the dock to the boat"; "White pulsing dots identify objects available for switching. Nearby
@@ -60571,22 +60659,26 @@ const STORY_LINK_M = 4;
 function storyGap(a, b) { const A = strBox(a), B = strBox(b); return Math.max(0, Math.max(A.x0, B.x0) - Math.min(A.x1, B.x1)); }
 function storyLinks(o) { return o ? strsUsed().filter(q => q !== o && storyGap(o, q) < STORY_LINK_M * UPM) : []; }
 const storyAt = () => strsUsed().find(o => o.id === story.at) || null;
-function storyGo(p, id, any, glide) {
+function storyGo(p, id, any, glide, quiet) {   // (quiet: put back there - no checkpoint: a death, a LOAD)
   const o = strsUsed().find(q => q.id === id); if (!o || !STORY) return;
   const here = storyAt(); if (!any && here && here !== o && !storyLinks(here).includes(o)) return;   // (only to a connected one)
-  const arrived = story.at !== o.id; story.at = o.id;
-  if (storyEnterable(o) && (arrived || story.main !== o.id)) { story.main = o.id; story.saveN++; }
+  const arrived = story.at !== o.id || crew[p].mode !== 'dock'; story.at = o.id;   // (back from a vehicle to where you got into it: arrived too)
+  if (storyEnterable(o) && (arrived || story.main !== o.id)) story.main = o.id;   // (your MAIN: where you sleep)
+  // (user Nov 9: "Every time you enter a location that you own, the game gets saved there, and that's your checkpoint. If you die or quit
+  // the game, it will resume from that checkpoint") the one moment a story is saved: arriving at a structure of yours - 50-story-saves.js
+  if (arrived && !quiet && o.own === 'player') { story.cp = o.id; story.saveN++; }
   if (storyEnterable(o) && arrived) { story.cook = true; story.light = true; }   // (Nov 7: in a home of yours, its stove and lights on as you come in - COOK / LIGHT)   // (user Nov 4 17:28 / Nov 7: a home of yours entered is your CURRENT one - the save checkpoint, saved every time you enter it)
   const c = crew[p], B = strBox(o); c.mode = 'dock'; c.watch = null; c.look = { x: o.x, y: (B.top + B.foot) / 2 };
   if (glide) cam.glide = STORY_GLIDE; else cutTo(p);      // (a swap: the camera eases over - 50-zz-story-swap.js)
 }
 ACTS.storyGo = (p, id) => storyGo(p, id);
-// (user Nov 4 17:30: "Loading should be at the last residential structure you entered") a loaded story goes on at your MAIN (a story is
-// never saved aboard a vehicle - storySaveWatch: every vehicle is where you got out of it)
+// (user Nov 9) a loaded story goes on at its checkpoint - the structure of yours it was saved at (a story is saved only there, never
+// aboard a vehicle: every vehicle is where it was then). Already there: no new save
+const storyCpO = () => story.cp ? strsUsed().find(o => o.id === story.cp) || null : null;
 function storyResume(p) {
-  if (!STORY) return; const h = storyHome(); if (!h) return;
+  if (!STORY) return; const h = storyCpO() || storyHome(); if (!h) return;
   if (crew[p].mode === 'civ') civRelease(p);
-  story.at = 0; storyGo(p, h.id, true);
+  storyGo(p, h.id, true, false, true);
 }
 ACTS.storyResume = p => storyResume(p);
 /* ---- your vehicles, parked at the structures (user Oct 31, the spec section 1: "start at home -> dock -> boat"; "only
@@ -60661,7 +60753,7 @@ function storyPark(p, id) {
   if (v.sub) { v.vx = 0; v.vy = 0; v.ai = null; v.y = surfaceY(v.x) - 1; }   // (a sub: tied up, afloat)   // (a helicopter: on its spot, rotor winding down)
   setOrder(telegraphs[p], 3); civRelease(p); civUI[p] = true;
   netAboard(v);                                          // (tied up: the net aboard, its catch turned to coins - 50-story-net.js)
-  storyGo(p, o.id, true); sound('click', gunCtl[p]); story.saveN++;   // (tied up: saved)
+  storyGo(p, o.id, true); sound('click', gunCtl[p]);   // (tied up at a structure of yours: saved there - storyGo)
 }
 ACTS.storyBoard = (p, sid) => storyBoard(p, sid);
 ACTS.storyPark = (p, id) => storyPark(p, id);
@@ -60817,111 +60909,6 @@ window.addEventListener('pointerup', storyGiveUp, { capture: true });
 window.addEventListener('pointercancel', storyGiveUp, { capture: true });
 window.addEventListener('keydown', ev => { if (ev.code === 'KeyT' && STORY && !ui.title && !ev.repeat && storyGiveBtn()) { storyGiveHeld = true; act(0, 'storyGive', true); } });
 window.addEventListener('keyup', ev => { if (ev.code === 'KeyT') storyGiveUp(); });
-/* ---- the emergency rescue at sea (the spec section 5: "When the controlled boat runs out of fuel at sea, the Emergency button
-   becomes active instead of greyed out ... Press the Emergency button to launch a flare into the air. After about 10
-   seconds, an emergency helicopter appears. The helicopter hovers above the boat and lowers a rope with a blip at its end.
-   When the blip touches the boat, the player transfers into the helicopter. The player cannot drive the helicopter. It
-   takes the player to the nearest Fire Station"). The rescue is the boat's (j.res: st flare / come / hover / lift / fly, t,
-   x, y the helicopter, r the rope, to the station): act storySOS; the red-and-white Dauphin (the civilian helicopters' art,
-   FH_KIND) drawn with the boat (drawStoryRescue); you ride in it (the view on it) to the nearest FIRE STATION (else your home
-   base), and you're there. The boat stays where she is. ---- */
-const SOS_WAIT = 10, SOS_ALT = 16, SOS_V = 45;   // (the hover 16 m over her: the rope and blip read as hers)
-// (user Oct 31 22:48: "If you're at sea and you have no more fuel, an helicopter comes. So we need a helipad in the world for the
-// helicopter to come. And the helicopter is part of the helipad structure. And this one has the rule of I only exit the
-// helipad if there's an emergency that requires me") the rescue helicopters: story helicopters whose spot's ROLE is RESCUE,
-// waiting on their pad; the nearest takes off for the call, and flies back to its pad when it's done. None: NO RESCUE
-const storyRescuers = () => civHelis.filter(h => h.story && h.role === 'rescue' && h.state === 'parked' && h.driven == null);
-const storyStranded = v => !!v && v.story && jetboats.includes(v) && v.state === 'run' && (v.fuel || 0) <= 0 && !v.res && v.berth == null;
-const storySosOk = v => storyStranded(v) && storyRescuers().length > 0;
-// where a rescue takes you: the nearest HOSPITAL, else FIRE STATION, else your home base
-function storySafeAt(x) {
-  const S = strsUsed(), H = S.filter(o => o.hosp || o.k === 'hospital'), F = S.filter(o => o.k === 'fire');
-  return (H.length ? H : F.length ? F : [storyHome()].filter(Boolean)).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0] || null;
-}
-function storySOS(p) {
-  const v = crew[p].mode === 'civ' ? crew[p].civ : null; if (!STORY || !storySosOk(v)) return;
-  const h = storyRescuers().sort((a, b) => Math.abs(a.x - v.x) - Math.abs(b.x - v.x))[0], to = storySafeAt(v.x);
-  h.state = 'rescue'; h.berth = null; h.ai = null;
-  v.res = { st: 'flare', t: 0, heli: h.sid, x: h.x, y: h.y, r: 0, to: to ? to.id : null };
-  sound('fwLaunch', v.x);
-}
-ACTS.storySOS = p => storySOS(p);
-function storyRescue(dt) {
-  for (const j of jetboats) {
-    const R = j.res; if (!j.story || !R) continue;
-    R.t += dt;
-    const h = civHelis.find(q => q.sid === R.heli && q.state === 'rescue');
-    if (!h) { if (R.who != null && crew[R.who].mode === 'dock') crew[R.who].look = null; j.res = null; continue; }   // (it was lost: the call ends)
-    const gnd = x => dryLand(x) ? landTop(x) : waterLv(x);   // (the water there at its own level - waterLv, user Nov 3)
-    const toward = (tx, ty) => { const dx = tx - R.x, dy = ty - R.y, d = Math.hypot(dx, dy), m = SOS_V * UPM * dt; if (d <= m) { R.x = tx; R.y = ty; return true; } R.x += dx / d * m; R.y += dy / d * m; return false; };
-    // (up off the ground first, across at a height clear of both ends, then down - never through the ground)
-    const go = (tx, ty) => { const cr = Math.min(WATER_Y - 60 * UPM, gnd(R.x) - 40 * UPM, gnd(tx) - 40 * UPM); if (Math.abs(tx - R.x) > 1) { if (R.y > cr + 1) toward(R.x, cr); else toward(tx, cr); return false; } return toward(tx, ty); };
-    const hy = j.y - SOS_ALT * UPM;
-    if (R.st === 'flare') { if (R.t > SOS_WAIT) R.st = 'come'; }
-    else if (R.st === 'come') { if (go(j.x, hy)) R.st = 'hover'; }
-    else if (R.st === 'hover') { R.x = j.x; R.y = hy; R.r = Math.min(SOS_ALT * UPM - 3 * UPM, R.r + 6 * UPM * dt); if (R.r >= SOS_ALT * UPM - 3 * UPM) { R.st = 'lift'; if (j.driven != null) { const p = j.driven; civRelease(p); crew[p].mode = 'dock'; crew[p].watch = null; story.at = 0; R.who = p; } } }
-    else if (R.st === 'lift') { R.r = Math.max(0, R.r - 8 * UPM * dt); if (!R.r) R.st = 'fly'; }
-    else if (R.st === 'fly') {
-      const o = strsUsed().find(q => q.id === R.to);
-      if (!o || go(o.x, strBox(o).top - 20 * UPM)) { const p = R.who; R.who = null; if (p != null && o) { crew[p].look = null; storyGo(p, o.id, true); } R.st = 'back'; }
-    }
-    else if (R.st === 'back') {                          // (back to its pad: down on its spot, waiting again)
-      const o = strsUsed().find(q => q.id === h.hb), px = o ? storySpotX(o, h.hs) : h.home, py = gnd(px) - chStand(h);
-      if (go(px, py)) { j.res = null; Object.assign(h, { state: 'parked', berth: o ? o.id : null, spot: h.hs, x: px, y: py, vx: 0, vy: 0, tilt: 0 }); continue; }
-    }
-    if (R.st !== 'flare') { if (Math.abs(R.x - h.x) > 0.5) h.facing = R.x > h.x ? 1 : -1; h.x = R.x; h.y = R.y; }
-    if (R.who != null && crew[R.who].mode === 'dock') crew[R.who].look = { x: R.x, y: R.y };   // (aboard it: the view rides with it)
-  }
-}
-// the flare, the helicopter, its rope and the blip at its end (from drawPicBoat)
-function drawStoryRescue(j) {
-  const R = j.res; if (!R) return;
-  if (R.t < 6) { const fy = j.y - Math.min(R.t, 3) * 30 * UPM, X = PX(j.x), Y = PY(fy), q = Math.max(2, Math.round(PX(j.x + 0.4 * UPM) - PX(j.x)));
-    C.fillStyle = `rgba(255,${80 + Math.floor(Math.sin(time * 30) * 40 + 40)},60,${R.t < 3 ? 1 : (6 - R.t) / 3})`; C.fillRect(X - q, Y - q, 2 * q, 2 * q);
-    C.fillStyle = 'rgba(255,190,160,0.35)'; for (let k = 1; k < 8; k++) C.fillRect(X - (q >> 1), Y + k * q * 1.5, q, q); }
-  if (R.st === 'flare' || !(R.r > 0)) return;
-  const h = civHelis.find(q => q.sid === R.heli); if (!h) return;
-  const q = Math.max(1, Math.round(PX(h.x + 0.08 * UPM) - PX(h.x))), X = Math.round(PX(h.x)), y0 = Math.round(PY(h.y + chSkid(h))), y1 = Math.round(PY(h.y + R.r));
-  C.fillStyle = '#e8e4d6'; C.fillRect(X - (q >> 1), y0, q, Math.max(0, y1 - y0));
-  C.fillStyle = Math.floor(time * 4) % 2 ? '#ff4a3a' : '#ffd23a'; C.fillRect(X - 2 * q, y1 - q, 4 * q, 3 * q);   // (the blip)
-}
-// the EMERGENCY button: over the right drive arrow while you're aboard - lit when she's out of fuel at sea
-function storySosBtn() {
-  if (!STORY || ui.title || crew[0].mode !== 'civ' || !crew[0].civ || !crew[0].civ.story) return null;
-  let L; try { L = hudLayout(0); } catch (e) { return null; }
-  const a = L.items.find(it => it.id === 'right'); if (!a) return null;
-  // (user Nov 1 22:19: "similar to our red 'home' button, but its a exclamation mark inside it. (And its greyed out until you can use
-  // it)") the home button's size, over the right arrow (clear of GIVE FUEL over the left one)
-  const H = img.hud.home, w = Math.round(H.width * L.k), h = Math.round(H.height * L.k);
-  return [Math.round(a.x + a.w / 2 - w / 2), a.y - h - Math.round(a.h * 0.25), w, h];
-}
-// the button: the home button's red frame with a cream '!' in it (made from its picture, as the magnet's and the water's are)
-function makeSosArt(home) {
-  const c = copyCanvas(home), x = c.getContext('2d'), W = c.width, H = c.height, id = x.getImageData(0, 0, W, H), d = id.data;
-  const kx = W / 103, ky = H / 96;
-  for (let y = Math.round(12 * ky); y < Math.round(83 * ky); y++) for (let xx = Math.round(14 * kx); xx < Math.round(90 * kx); xx++) {
-    const i = (y * W + xx) * 4;
-    if (d[i] > 200 && d[i + 1] > 170) { const r = ((xx * 7 + y * 13) % 5) < 2 ? [213, 3, 19] : [239, 4, 25]; d[i] = r[0]; d[i + 1] = r[1]; d[i + 2] = r[2]; }   // (the house taken out)
-  }
-  const cx = 51.5 * kx, bw = 6.5 * kx, put = (x0, x1, y0, y1) => { for (let y = Math.round(y0); y < Math.round(y1); y++) for (let xx = Math.round(x0); xx < Math.round(x1); xx++) { const i = (y * W + xx) * 4; d[i] = 249; d[i + 1] = 234; d[i + 2] = 194; d[i + 3] = 255; } };
-  for (let y = Math.round(18 * ky); y < Math.round(60 * ky); y++) { const t = (y - 18 * ky) / (42 * ky), hw = bw * (1 - 0.35 * t); put(cx - hw, cx + hw, y, y + 1); }   // (the stroke, narrowing down)
-  put(cx - bw * 0.85, cx + bw * 0.85, 66 * ky, 78 * ky);                                                                    // (the dot)
-  x.putImageData(id, 0, 0);
-  return c;
-}
-function drawStorySos(r) {
-  const [x, y, w, h] = r, v = crew[0].civ, on = storySosOk(v);
-  if (!img.hud.sos) img.hud.sos = makeSosArt(img.hud.home);
-  ug.globalAlpha = v.res ? (Math.floor(time * 3) % 2 ? 1 : 0.55) : on ? 1 : 0.4;   // (as the home button: lit when it can be pressed, blinking while help comes, greyed otherwise)
-  ug.drawImage(img.hud.sos, x, y, w, h);
-  ug.globalAlpha = 1;
-}
-window.addEventListener('pointerdown', ev => {
-  const r = storySosBtn(); if (!r) return;
-  const [X, Y] = toUI(ev.clientX, ev.clientY); if (X < r[0] || X > r[0] + r[2] || Y < r[1] || Y > r[1] + r[3]) return;
-  if (storySosOk(crew[0].civ)) act(0, 'storySOS'); else sound('empty', 0);
-  ev.stopImmediatePropagation(); ev.preventDefault();
-}, { capture: true, passive: false });
 // (user Nov 2 14:58: the dots are arrows now - 50-zz-story-swap.js) what you can swap to, where each is on the page (CSS pixels):
 // kept by name for the tools
 function storyDots() { return storyArrowsAt().filter(T => !T.cur && !T.hidden).map(T => Object.assign(T, { act: T.price != null ? 'storyAsk' : 'storySwap', id: T.v ? T.v.sid : T.o.id })); }
@@ -60934,7 +60921,7 @@ function storyDots() { return storyArrowsAt().filter(T => !T.cur && !T.hidden).m
 let storyQ = null;                                       // ({ sid, lab, price } while the question's up)
 function storyBuy(p, sid) {
   const v = storyVehs().find(j => j.sid === sid); if (!v || !STORY || v.own || story.coins < storyVehPrice(v) || !storyTargets().some(T => T.v === v)) return;   // (one of the arrows' - from where you are)
-  story.coins -= storyVehPrice(v); v.own = true; story.saveN++;   // (bought: saved - 50-story-saves.js)
+  story.coins -= storyVehPrice(v); v.own = true;
   sound('click', gunCtl[p]);
 }
 ACTS.storyBuy = (p, sid) => storyBuy(p, sid);
@@ -61043,7 +61030,7 @@ window.addEventListener('keydown', ev => {
 /* ---- sleeping (user Oct 31 09:31: "Every time you're at your home ... you have a symbol of a sun where the home button is,
    where you can choose to go to the next day. So you see the time going fast, the sun going down and the sun going up while
    you're at the house"). At a HOME BASE the sun button (drawStoryBanner) is act storySleep: the clock runs STORY_SLEEP_X as
-   fast till the next morning (STORY_WAKE_H), then the story is saved. ---- */
+   fast till the next morning (STORY_WAKE_H). ---- */
 const STORY_SLEEP_X = 40, STORY_WAKE_H = 7;
 const storyIsHome = o => !!o && o.id === (storyHome() || {}).id;   // (your MAIN: you sleep there)
 function storySleep(p) {
@@ -61052,8 +61039,8 @@ function storySleep(p) {
 }
 ACTS.storySleep = p => storySleep(p);
 // (user Nov 3 18:44: "I should be allowed to interrupt it at any time, clicking anywhere") a press anywhere while asleep - the mouse, a
-// finger, a key, a pad's button - wakes you at the hour it is; saved as on waking (a command: the clock is the simulation's)
-function storyWake(p) { if (!STORY || !story.wake) return; story.wake = 0; story.saveN++; }
+// finger, a key, a pad's button - wakes you at the hour it is (a command: the clock is the simulation's)
+function storyWake(p) { if (!STORY || !story.wake) return; story.wake = 0; }
 ACTS.storyWake = p => storyWake(p);
 function storyWakePress(ev) {
   if (!STORY || ui.title || !story.wake || NSKY.editor.TUNE.open) return false;
@@ -61062,8 +61049,10 @@ function storyWakePress(ev) {
 window.addEventListener('pointerdown', ev => { storyWakePress(ev); }, { capture: true, passive: false });
 window.addEventListener('keydown', ev => { if (!ev.repeat && !/^(Shift|Control|Alt|Meta)/.test(ev.code)) storyWakePress(ev); }, { capture: true });
 /* ---- a vehicle lost (user Oct 31 09:31: "If you destroy a plane, then you have to buy a new one"): one of the story's that's
-   sunk is nobody's; aboard it, you watch it go STORY_LOST_S, then you're back at your home base; a new one of its kind is for
-   sale at the spot it started at from the next morning, once that spot is free. ---- */
+   sunk is nobody's; a new one of its kind is for sale at the spot it started at from the next morning, once that spot is free.
+   Aboard it, you watch it go STORY_LOST_S and you've died (user Nov 9: "If you die ... it will resume from that checkpoint"): story.dead
+   counts it and the page loads the story's checkpoint again (storySaveWatch - 50-story-saves.js); with no slot (the editor's PLAY) you're
+   at the checkpoint in the world as it is ---- */
 const STORY_LOST_S = 4;
 function storyLosses() {
   let top = 0; for (const j of jetboats) if (j.story) top = Math.max(top, j.sid || 0);
@@ -61094,7 +61083,7 @@ function storyLosses() {
     }
   }
   const c = crew[0], v = c.mode === 'civ' ? c.civ : null;
-  if (v && v.story && v.lostT != null && time - v.lostT > STORY_LOST_S) { civRelease(0); const h = storyHome(); story.at = 0; if (h) storyGo(0, h.id, true); story.saveN++; }   // (lost: home, saved)
+  if (v && v.story && v.lostT != null && time - v.lostT > STORY_LOST_S) { civRelease(0); const h = storyCpO() || storyHome(); if (h) storyGo(0, h.id, true, false, true); story.dead++; }   // (lost aboard it: died - the checkpoint again)
 }
 /* ---- NPC routines (the spec section 4: "Assign each vehicle an activity for each of four daily periods ... In this example, the
    boat leaves the dock, spends the day fishing, then returns to the dock at night"): a vehicle that isn't yours, with a
@@ -61106,7 +61095,7 @@ const storyPeriod = () => { const h = env.time; return h >= 5 && h < 11 ? 0 : h 
 function storyNPC(dt) {
   const k = storyPeriod();
   for (const j of storyVehs()) {
-    if (!j.rt || j.own || j.driven != null || j.plane || j.res) continue;
+    if (!j.rt || j.own || j.driven != null || j.plane) continue;
     const a = j.rt[k] || 'stay', boat = jetboats.includes(j);
     if (a === 'fish' && boat) {
       let A = null, bd = 1e12; for (const q of natureUsed()) { const d = Math.abs((q.x0 + q.x1) / 2 - j.x); if (d < bd) { bd = d; A = q; } }
@@ -61131,14 +61120,14 @@ function storyNPC(dt) {
 function stepStory(dt) {
   if (!STORY) { { stepStoryCars(dt); netsStep(dt); stepStructs(dt); } return; }   // (a fishing boat's net wherever there is one - 50-story-net.js)   // (the cars step wherever there are any - OPEN WORLD's at structures, placed ones - editor chat, Nov 1; BATTLE's placed ones too - user Nov 2, a taxi left floating over a crater: it was never stepped there; the structures' own life - chimney smoke - stepStructs)
   stepSwap(dt); storyNPC(dt); storyLosses(); netsStep(dt);   // (a swap playing out - 50-zz-story-swap.js)
-  storyFuel(dt); stepVehDeals(dt); storyGive(dt); storyRescue(dt); stepStoryCars(dt); stepStructs(dt); storyHelis(dt); storySubs(dt);
+  storyFuel(dt); stepVehDeals(dt); storyGive(dt); stepStoryCars(dt); stepStructs(dt); storyHelis(dt); storySubs(dt);
   if (!story.wake) return;
   stepWeather(dt * (STORY_SLEEP_X - 1));                 // (the clock, the sky and the weather run on: the frame's own step is the 1)
-  if (W.day >= story.wake && env.time >= STORY_WAKE_H && env.time < 12) { story.wake = 0; story.saveN++; }
+  if (W.day >= story.wake && env.time >= STORY_WAKE_H && env.time < 12) story.wake = 0;
 }
 function storyTidy() { }
 function spawnWave() { }
-window.__story = story; window.__storyDots = () => storyDots(); window.__storyQ = () => storyQ; window.__storyAsk = q => { storyQ = q; }; window.__storyGiveBtn = () => storyGiveBtn(); window.__storySosBtn = () => storySosBtn();                                   // (tools)                                 // (gone with the waves; kept by name for the tools' hook)
+window.__story = story; window.__storyDots = () => storyDots(); window.__storyQ = () => storyQ; window.__storyAsk = q => { storyQ = q; }; window.__storyGiveBtn = () => storyGiveBtn();                                   // (tools)                                 // (gone with the waves; kept by name for the tools' hook)
 // the day, top-left; the coins, top-right under the version and frame rate (each its own ink shadow)
 const STORY_COIN = ['..###..', '.#ooo#.', '#oo#oo#', '#o#o#o#', '#oo#oo#', '.#ooo#.', '..###..'];
 /* ---- the automatic zoom, STORY only (user Oct 31 08:36; the spec: "Close when stopped, Medium when driving, Far set by
@@ -61212,7 +61201,6 @@ function drawStoryBanner() {
   const hudIn = storyHudIn() >= 1;                      // (a swap: its buttons with its controls - 50-zz-story-swap.js)
   const sun = hudIn && storySunBtn(); if (sun) drawStorySun(sun);
   const give = hudIn && storyGiveBtn(); if (give) drawStoryGive(give); else if (storyGiveHeld) storyGiveUp();
-  const sos = hudIn && storySosBtn(); if (sos) drawStorySos(sos);
   if (story.wake) { const t = 'SLEEPING...'; drawText(ug, t, ubw / 2 + 1, Math.round(ubh * 0.3) + 1, '#04070f', 3, 'center'); drawText(ug, t, ubw / 2, Math.round(ubh * 0.3), '#ffd23a', 3, 'center'); }
   drawStoryArrows();                                     // (what you control and what you can swap to - 50-zz-story-swap.js)
   if (!storyQ) return storyBannerTop();
@@ -61478,7 +61466,7 @@ const STR_USES = [['hangar', 'HANGAR'], ['market', 'MARKET'], ['res', 'RESIDENTI
 const STR_USE_HELP = {
   hangar: 'Stores vehicles inside, out of sight. In Story you take them out here and put them away here.',
   market: 'Buys cargo, and sells what SELLS picks, between OPENS and CLOSES. In Story, stop a vehicle beside it to trade (prices: WORLD PROPERTIES > STORY > CARGO).',
-  res: 'A home. Owned by the player (OWNER: Player), it can be entered; the last one entered becomes CURRENT, where you sleep and the story resumes.',
+  res: 'A home. Owned by the player (OWNER: Player), it can be entered; the last one entered becomes CURRENT, where you sleep.',
   none: 'Just a building: no hangar, market or home.',
 };
 const strUse = o => { if (!o) return 'none'; if (o.use && STR_USES.some(u => u[0] === o.use)) return o.use; const K = STR_KINDS[o.k] || {}; return K.enclosed ? 'hangar' : strMarket0(o) ? 'market' : K.res ? 'res' : 'none'; };
@@ -61522,12 +61510,12 @@ function marketSell(p, arg) {
     const pr = cargoBuyPrice(k), to = marketBuyer(o, k);
     if (!marketSells(o).includes(k) || story.coins < pr || !to) { MKT.deny = time; sound('empty', o.x); return; }
     story.coins -= pr; if (to === 'inv') storyInvAdd(k, 1); else cargoAdd(to, k, 1);
-    sound('clink', o.x, 1); story.saveN++; return;
+    sound('clink', o.x, 1); return;
   }
   const S = marketSellers(o).filter(v => cargoN(v, k) > 0), n = S.reduce((s, v) => s + cargoN(v, k), 0) + storyInvN(k); if (!n) return;
   story.coins += cargoCoins(k, n); if (story.inv[k]) story.inv[k] = 0;
   for (const v of S) { const m = cargoN(v, k); cargoPut(v, k, 0); if (v.net) { v.net.cashN = m; v.net.cashT = time; } }
-  sound('clink', o.x, 1); if (STORY) story.saveN++;   // (sold: saved - 50-story-saves.js)
+  sound('clink', o.x, 1);
 }
 ACTS.marketSell = (p, arg) => marketSell(p, arg);
 
@@ -63452,7 +63440,7 @@ function storyTargets() {
   for (const o of S) if (strMarket(o)) { const L = marketLines(o); if (L.length) out.push(Object.assign(mk({ o }), { key: 'm:' + o.id, market: true, sell: L })); }
   const near = v => { const [a, b] = vehBox({ v }); return S.some(o => { const B = strBox(o); return b > B.x0 - r && a < B.x1 + r; }) || (cur.v && Math.abs(v.x - cur.v.x) < r + storyBoatSize(cur.v)[0] / 2); };
   for (const v of storyVehs()) {
-    if (v === cur.v || v.driven != null || v.role || v.res) continue;
+    if (v === cur.v || v.driven != null) continue;
     if (!v.own && v.rentBy == null && v.berth == null && !(v.placed != null && v.fac == null)) continue;   // (one you're renting: yours while you drive it)
     if (!v.own && v.rentBy == null && !dealBuy(v) && !dealRent(v)) continue;   // (neither for sale nor to rent: no arrow - 50-zzzz-veh-deal.js)   // (one that isn't yours is for sale at its spot, or wherever it was placed if it's nobody's - user Nov 2 15:40)
     if (near(v)) out.push(Object.assign(mk({ v }), v.berth != null && strEnclosed(strsUsed().find(o => o.id === v.berth)) ? { hidden: true } : {}));
@@ -63474,7 +63462,7 @@ function swapKind(T) {
 }
 const strEnclosed = o => !!o && strUse(o) === 'hangar';   // (a HANGAR by its USE: its vehicles out of sight, one arrow to its showroom)
 // what's stored in a structure now: the story vehicles at its spots, nobody in them (yours, or for sale)
-const storyInside = o => storyVehs().filter(v => v.berth === o.id && v.driven == null && !v.role && !v.res);
+const storyInside = o => storyVehs().filter(v => v.berth === o.id && v.driven == null);
 const storyCanEnter = v => !(v.plane && v.state === 'parked' && !storyRunwayFor(strsUsed().find(o => o.id === v.berth) || {}));
 // at a structure now (its id): story.at (Nov 7: SAVE POINT gone - the story saves on entering a home of yours)
 function storyArrive(id) {
@@ -63518,7 +63506,6 @@ function storySwap(p, key) {
   else storyGo(p, T.o.id, true, true);
   cam.glide = STORY_GLIDE; storySel = null;
   Object.assign(STSW, { on: true, t: 0, from: C0 ? [C0.wx, C0.wy] : null, key: T.key, kind: swapKind(T), vs: T.v ? T.v.sid : null, oi: T.o ? T.o.id : null, step: 0, chim: 0 });
-  story.saveN++;                                         // (into something else - getting out, tying up: saved - 50-story-saves.js)
   sound('storyEnter', T.wx, STSW.kind);                 // (the whole entering, in time with the arrow: sfxStoryEnter)
 }
 ACTS.storySwap = (p, key) => storySwap(p, key);
@@ -64613,8 +64600,6 @@ const maxStrId = () => STRS.reduce((a, q) => Math.max(a, q.id || 0), 0);
    helipad in the world") WORLD CHECK, over the STRUCTURES section in the Story world: each thing Story needs, OK or MISSING */
 const STORY_NEEDS = [
   ['CURRENT', 'The player\'s home a new story starts at', L => L.some(o => o.home ?? o.k === 'home')],
-  ['HOSPITAL', 'Where the player wakes after dying', L => L.some(o => o.hosp || o.k === 'hospital')],
-  ['RESCUE HELICOPTER', 'A helicopter spot with ROLE: RESCUE', L => L.some(o => (strTakes(o) || []).includes('heli') && strVehs(o).some(e => e && e.role === 'rescue'))],
 ];
 function strWorldCheck(U) {
   if (!U.chk) return;
@@ -66373,7 +66358,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER && sessionStorage.getItem('bd
       if (R.story) { storyPlayNow = true; storySlot = slot; storyLoading = slot != null; }
       loadThen(() => { menuPlay(false); storyPlayNow = false; swSettled().then(() => swHold('bugLoad')).then(() => {
         try { edGameBack(R.game); cam.cut[0] = cam.cut[1] = true; } catch (e) { console.warn('bug load', e); }
-        if (slot != null) { storySavedN = story.saveN; storyLoading = false; }
+        if (slot != null) { storySavedN = story.saveN; storyDeadN = story.dead; storyLoading = false; }
         swRelease('bugLoad');
       }); });
     }; };
@@ -66907,12 +66892,10 @@ function spotFill(U) {
   sel('TYPE', spotTypes().filter(k => strAllows(o, k) && strFits(o, k)).map(k => [k, spotLab(k)]), e.v, x => put(E => { E.v = x; }), 'What starts at this spot');
   if (!D.army && !D.loose) {
     const r = el('div', 'row'), own = NSKY.editor.TUNE.toggle(e.own ? 1 : 0), l = el('label', '', 'OWNED'); l.title = 'Owned by the player at start (off: for sale)';
-    own.addEventListener('input', () => put(E => { E.own = !!+own.value; if (E.own) delete E.role; })); r.append(l, own); c.appendChild(r);
+    own.addEventListener('input', () => put(E => { E.own = !!+own.value; })); r.append(l, own); c.appendChild(r);
   }
-  // (user Oct 31 22:48: ROLE: RESCUE - the helicopter that answers an emergency at sea and flies back to its pad - 50-story.js storySOS)
-  if (D.fam === 'heli') sel('ROLE', [['', 'NONE'], ['rescue', 'RESCUE (EMERGENCIES ONLY)']], e.role || '', x => put(E => { if (x) { E.role = x; E.own = false; } else delete E.role; }), 'Special job: rescue answers emergencies');
-  // (the spec section 4: "Assign each vehicle an activity for each of four daily periods" - not yours, not rescue, not a plane or the armies')
-  if (!e.own && !e.role && !D.army && !D.loose && D.fam !== 'plane') {
+  // (the spec section 4: "Assign each vehicle an activity for each of four daily periods" - not yours, not a plane or the armies')
+  if (!e.own && !D.army && !D.loose && D.fam !== 'plane') {
     const fam = D.fam, others = STRS.filter(q => q !== o && (strTakes(q) || []).includes(fam));
     ['MORNING', 'MIDDAY', 'EVENING', 'NIGHT'].forEach((pl, k) => {
       const opts = [['stay', 'STAY']]; if (fam === 'boat') opts.push(['fish', 'FISH']); for (const t of others) opts.push(['s:' + t.id, strName(t)]);
@@ -67048,7 +67031,7 @@ const dealPrice = (o, i, sv) => { const e = o ? strVehs(o)[i] : null; return e &
 ACTS.storyRent = (p, sid) => {
   const v = storyVehs().find(j => j.sid === sid); if (!v || !STORY || !dealRent(v) || !storyTargets().some(T => T.v === v)) return;
   if (story.coins < dealRentCost(v)) return;
-  v.rentBy = p; v.rentM = 0; v.rentX = v.x; story.saveN++;
+  v.rentBy = p; v.rentM = 0; v.rentX = v.x;
 };
 // back to its spot (out of coins, or left): at its structure, ready to be taken again
 function dealReturn(v) {
