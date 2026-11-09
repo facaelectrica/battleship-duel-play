@@ -5192,8 +5192,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 956;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 14:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 957;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 14:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -32460,7 +32460,7 @@ function drawSub(sb) {
   }
   C.globalAlpha = 1;
   // (her lamps at night, user Oct 25 late: every vehicle lit - a white light on top of her sail, out of the water)
-  if (LAND && E.lampsOn > 0.05 && !wreck && (sb.state === 'out' || sb.state === 'docked') && sb.y < waterLv(sb.x) + 30) airLamps[viewIdx].push(cx + sb.facing * W * 0.06, cy - wlY + 3 * s, E.lampsOn, 0);
+  if (LAND && E.lampsOn > 0.05 && !wreck && sb.state === 'out' && vehManned(sb) && sb.y < waterLv(sb.x) + 30) airLamps[viewIdx].push(cx + sb.facing * W * 0.06, cy - wlY + 3 * s, E.lampsOn, 0);
   // breaking the surface: the sea sheets off her in white, covering the hull just above the water and
   // draining down as she rises clear (pixels follow her exact outline)
   if (sb.emerge > 0 && (sb.state === 'out' || sb.state === 'docked')) {
@@ -32681,7 +32681,7 @@ function sailPoint(b, col, row) {
 }
 // riding lights: a white light at the masthead, and the cabin lit warm
 function drawSailLights(b, x0, x1) {
-  if (b.state !== 'sail' || offViewR(b.x, img.sails[b.kind].w * SAIL_K / 2, x0, x1)) return;
+  if (b.state !== 'sail' || !vehManned(b) || offViewR(b.x, img.sails[b.kind].w * SAIL_K / 2, x0, x1)) return;
   const art = img.sails[b.kind], a = E.lampsOn * (1 - 0.5 * E.light), far = clamp(SV / 1.8, 0.4, 1);
   if (a < 0.03) return;
   const [mx, my] = sailPoint(b, art.mast[0], art.mast[1] + 2);
@@ -39709,7 +39709,7 @@ function drawCivHelis(x0, x1, mode) {
     // over its hit and wrecked drawings - the more rounds in it the more; lost - falling, sinking, a wreck - burnt nearly all over
     const lost = h.state === 'fall' || h.state === 'sink' || h.state === 'wreck';
     const I = scaled(dmgPic(body, lost ? 1 : Math.min(1, (h.dmg || 0) / CH_HP), { m: chK(h) / UPM, marks: h.marks }), s, true);
-    if ((h.state === 'fly' || h.state === 'landed') && vi === 0) planeLights(h.x, h.y + (h.susY || 0), face, 0, A.W * chK(h) * 0.42, chSkid(h) * 0.9, false, h.kind * 0.37, h.tilt, 2 - chSkid(h) * 0.9);   // (its lamps, as a plane's: turned with it about its middle, user Oct 26)
+    if ((h.state === 'fly' || h.state === 'landed') && vi === 0 && vehManned(h)) planeLights(h.x, h.y + (h.susY || 0), face, 0, A.W * chK(h) * 0.42, chSkid(h) * 0.9, false, h.kind * 0.37, h.tilt, 2 - chSkid(h) * 0.9);   // (its lamps, as a plane's: turned with it about its middle, user Oct 26)
     C.save(); C.translate(PX(h.x), PY(h.y + (h.susY || 0))); C.rotate(h.tilt);
     const X = -Math.round(I.width / 2), Y = -Math.round(A.H * 0.5 * s);
     // its wheels (user Oct 26): legs out of its belly, the nose wheel forward and the main pair aft; standing, the
@@ -40020,7 +40020,7 @@ function tankLights(t) {
 }
 function shipNavLights(c, L) {
   const n = clamp(E.night * 1.2 + E.dusk * 0.7 + E.fog * 0.4, 0, 1);
-  if (n < 0.05 || c.state !== 'sail') return;
+  if (n < 0.05 || c.state !== 'sail' || !vehManned(c)) return;   // (only with someone at her helm - vehManned, 50-zz-lights.js)
   const K = CIV[c.kind], A = civArt(c), top = civPoint(c, A.width * 0.62, K.top), bow = civPoint(c, A.width - 4, K.wl - 14), stern = civPoint(c, 4, K.wl - 14);   // (civPoint's art is bow-right; it turns it for her)
   airLamps[viewIdx].push(PX(top[0]), PY(top[1]), n, 0);
   airLamps[viewIdx].push(PX(bow[0]), PY(bow[1]), n * 0.9, c.face > 0 ? 3 : 1);   // (her sidelight on our side: green going right, red going left)
@@ -52531,22 +52531,45 @@ const lighthouseGlow = [[], []];
 // (user Nov 2: every light lights what it touches - 27-sub-light.js subLamps) each lighthouse's beam as a lamp: out over the water,
 // tilted a little up as its drawn beam is, as strong as the beam is bright while it turns (the same sums as drawLighthouseGlow)
 const LH_FOCUS_K = 4;
+// (user Nov 9: one rule for every lighthouse - strIsLh, 50-zzzz-struct-act.js) every lamp that sweeps: each tower's (a TOWER in the
+// LIGHTHOUSE look - a harbour's too - at its lamp, any other tower's from its top, as before) and each LIGHTHOUSE structure's at the lamp
+// marked on its picture (STR_WINDOWS 'lighthouse'), facing its nearer water. { x, y, id: its structure (story.lh), f: its sea side, ph, tw / o }
+function lhBeams() {
+  const out = [];
+  for (const tw of towers) if (tw && !tw.edge && tw.hp > 0) { const [, py] = towerPivot(tw), [x, y] = lhOn(tw) ? lhLamp(tw) : [tw.x, py + 12]; out.push({ x, y, id: lhStrId(tw), f: tw.facing || 1, ph: tw.player ? 2 : 0, tw }); }
+  for (const o of strsUsed()) if (o.k === 'lighthouse') { const p = lhStrLamp(o); if (p) out.push({ x: p[0], y: p[1], id: o.id, f: lhSeaSide(o), ph: (o.id % 7) * 0.9, o }); }
+  return out;
+}
+function lhStrLamp(o) {
+  const B = strBox(o), P = B.P, W = STR_WINDOWS[o.art || STR_KINDS[o.k].art], M = W && W.lamp && W.lamp[0]; if (!P || !M) return null;
+  return [B.x0 + (o.flip ? P.width - M[0] : M[0]) * B.m, B.top + M[1] * B.m];
+}
+// the side its beam sweeps when nobody turns it: toward the nearer water (the first column off the land, either way)
+const LH_SIDE = new Map();
+function lhSeaSide(o) {
+  const k = o.id + ':' + Math.round(o.x); let f = LH_SIDE.get(k); if (f) return f;
+  f = o.flip ? -1 : 1;
+  for (let d = 20; d < 6000; d += 20) { const r = o.x + d, l = o.x - d; if (r < WORLD_W && !onLand(r)) { f = 1; break; } if (l > 0 && !onLand(l)) { f = -1; break; } }
+  LH_SIDE.set(k, f); return f;
+}
+const lhBeamTh = b => { const C = lhCtlId(b.id); return C ? lhCtlTh(C) : time * 0.9 + b.ph; };
+const lhBeamSea = b => { const C = lhCtlId(b.id); return C ? lhCtlSea(C, b.f) : b.f; };
 function lhLamps(out) {
   const on0 = clamp(E.lampsOn || 0, 0, 1); if (on0 <= 0.05) return out;
-  for (const tw of towers) if (tw && !tw.edge && tw.hp > 0) {
-    const LC = lhCtl(tw); if (LC && LC.off) continue;        // (Nov 7: a lighthouse you're at in Story - its LIGHT and ANGLE, 50-zzzz-struct-act.js)
+  for (const b of lhBeams()) {
+    const LC = lhCtlId(b.id); if (LC && LC.off) continue;   // (Nov 7: a lighthouse you're at in Story - its BEAM and ANGLE, 50-zzzz-struct-act.js)
     // (user Nov 5 10:40: the focus light - what it lights - reaches 4x as far (LH_FOCUS_K) and points along its gun as you turn it;
     // the lighthouse's drawn cone, drawLighthouseGlow, unchanged. A tower without a gun: its light sweeps over the water as before)
-    const [, py] = towerPivot(tw), [lx, ly] = lhOn(tw) ? lhLamp(tw) : [tw.x, py + 12], th = LC ? lhCtlTh(LC) : time * 0.9 + (tw.player ? 2 : 0), kk = 0.55 + 0.45 * Math.abs(Math.cos(th)), sea = LC ? lhCtlSea(LC, tw) : tw.facing || 1;
-    const up = LC ? 0.1 : tw.armed === false ? 0.1 + 0.06 * Math.sin(th * 0.5) : towerElev(tw) * Math.PI / 180;
-    out.push({ x: lx, y: ly, a: Math.atan2(-Math.sin(up), sea * Math.cos(up)), s: tw, ms: false, k: on0 * kk * 0.8, air: true, reach: LH_FOCUS_K * 1900 * (0.75 + 0.25 * kk) });
+    const th = lhBeamTh(b), kk = 0.55 + 0.45 * Math.abs(Math.cos(th)), sea = lhBeamSea(b);
+    const up = LC || !b.tw ? 0.1 + (LC ? 0 : 0.06 * Math.sin(th * 0.5)) : b.tw.armed === false ? 0.1 + 0.06 * Math.sin(th * 0.5) : towerElev(b.tw) * Math.PI / 180;
+    out.push({ x: b.x, y: b.y, a: Math.atan2(-Math.sin(up), sea * Math.cos(up)), s: b.tw || b, ms: false, k: on0 * kk * 0.8, air: true, reach: LH_FOCUS_K * 1900 * (0.75 + 0.25 * kk) });
   }
   return out;
 }
 function drawLighthouseGlow() {
   // (each view works out its own: the beam reaches far past the tower, into a view where the tower itself isn't)
   const G = [], on0 = clamp(E.lampsOn || 0, 0, 1);
-  if (on0 > 0.05) for (const tw of towers) if (tw && !tw.edge && tw.hp > 0) { const LC = lhCtl(tw); if (LC && LC.off) continue; const [, py] = towerPivot(tw), [lx, ly] = lhOn(tw) ? lhLamp(tw) : [tw.x, py + 12]; G.push(PX(lx), PY(ly), on0, LC ? lhCtlTh(LC) : time * 0.9 + (tw.player ? 2 : 0), SV, LC ? lhCtlSea(LC, tw) : tw.facing); }
+  if (on0 > 0.05) for (const b of lhBeams()) { const LC = lhCtlId(b.id); if (LC && LC.off) continue; G.push(PX(b.x), PY(b.y), on0, lhBeamTh(b), SV, lhBeamSea(b)); }
   for (let i = 0; i < G.length; i += 6) {
     const x = G[i], y = G[i + 1], on = G[i + 2], th = G[i + 3], s = G[i + 4], sea = G[i + 5] || 1;
     const side = Math.cos(th), toward = Math.sin(th), k = Math.abs(side);
@@ -52737,7 +52760,7 @@ function drawJetboats(x0, x1, lake) {
       C.scale(sq, 1); C.drawImage(I, -Math.round(I.width / 2), -I.height);
       civLitLook(j.dir > 0 ? A.r : A.l, s, -Math.round(I.width / 2), -I.height, PX(j.x));
       // (its lamp at night: a white light on the little mast, red at the bow)
-      if (E.lampsOn > 0.05 && j.hp >= 1) { airLamps[viewIdx].push(PX(j.x - j.dir * 4), PY(j.y - 8), E.lampsOn * 0.7, 0); airLamps[viewIdx].push(PX(j.x + j.dir * 9), PY(j.y - 3), E.lampsOn * 0.5, 1); }
+      if (E.lampsOn > 0.05 && j.hp >= 1 && vehManned(j)) { airLamps[viewIdx].push(PX(j.x - j.dir * 4), PY(j.y - 8), E.lampsOn * 0.7, 0); airLamps[viewIdx].push(PX(j.x + j.dir * 9), PY(j.y - 3), E.lampsOn * 0.5, 1); }
       if (j.hp < 2) { C.globalAlpha = 0.45; const D = scaled(j.dir > 0 ? A.dark : A.darkL, s, true); C.drawImage(D, -Math.round(D.width / 2), -D.height); C.globalAlpha = 1; }   // (hit: blackened)
     }
     C.restore();
@@ -59608,7 +59631,7 @@ function carPass(c) {
 // lamp is (airLamps, lateLit - 50-land-airport.js)
 const CAR_LAMP = [0.47, 0.36, -0.48, 0.42];               // (where they are on her: the headlamp along her from her middle, up from her wheels' foot, as shares of her length / height; the tail lamp's)
 function carLights(c, L, H) {
-  const k = E.lampsOn || 0; if (k < 0.05) return;
+  const k = E.lampsOn || 0; if (k < 0.05 || !vehManned(c)) return;   // (only with someone at the wheel - vehManned, 50-zz-lights.js)
   const [hx, hy] = carPt(c, L * CAR_LAMP[0], H * CAR_LAMP[1]), [tx, ty] = carPt(c, L * CAR_LAMP[2], H * CAR_LAMP[3]);
   airLamps[viewIdx].push(PX(hx), PY(hy), k, 0); airLamps[viewIdx].push(PX(tx), PY(ty), k * 0.9, 1);
 }
@@ -59619,7 +59642,7 @@ const CAR_BEAM = 2.6;                                     // (how far her headla
 function carLamps(out) {
   const k = E.lampsOn || 0; if (k < 0.05 || !storyCars.length) return out;
   for (const c of storyCars) {
-    if (c.state !== 'run') continue;
+    if (c.state !== 'run' || !vehManned(c)) continue;
     const [L, H] = storyCarSize(c), [hx, hy] = carPt(c, L * CAR_LAMP[0], H * CAR_LAMP[1]), r = c.a - c.dir * (c.pit || 0);
     out.push({ x: hx, y: hy, a: Math.atan2(Math.sin(r) * c.dir + 0.12, Math.cos(r) * c.dir), s: c, ms: false, k: 0.75 * k, air: true, reach: L * CAR_BEAM });   // (a little down, onto the road ahead)
   }
@@ -60969,8 +60992,9 @@ function drawPicBoat(j) {
   C.restore();
   // her windows and portholes lit as the lamps come on (STR_WINDOWS, marked by eye - gen/tropical/windows.py), seen side on; her
   // navigation lights - the masthead, the sidelight on our side (green going right, red going left), the stern light - as the ships'
-  if (F === P && j.state !== 'sink') { const Y1 = PY(j.y + dr), X0 = PX(j.x) - W / 2; objNight(P, B.art[0], X0, Y1 - H, X0 + W, Y1, j.dir > 0, false); }   // (a vehicle's windows: lit, no glow round them)
-  if (j.state === 'run') {
+  const lit = vehManned(j);   // (dark unless someone's at her helm - vehManned, 50-zz-lights.js)
+  if (lit && F === P && j.state !== 'sink') { const Y1 = PY(j.y + dr), X0 = PX(j.x) - W / 2; objNight(P, B.art[0], X0, Y1 - H, X0 + W, Y1, j.dir > 0, false); }   // (a vehicle's windows: lit, no glow round them)
+  if (lit && j.state === 'run') {
     const n = clamp(E.night * 1.2 + E.dusk * 0.7 + E.fog * 0.4, 0, 1);
     if (n > 0.05) for (const [ax, ay, s, side] of B.lamps)   // (its lamps on the view showing: their places along the side view, narrowed with it)
       airLamps[viewIdx].push(PX(j.x - j.dir * (ax - 0.5) * fw), PY(j.y + dr - fh + ay * fh), n * s, side ? (j.dir > 0 ? 3 : 1) : 0);   // (the sidelight on our side: green going right, red going left)
@@ -62489,6 +62513,17 @@ for (const [T, fam] of VEH_PROP_PAGES) NSKY.editor.TUNE.pane(T, (pane, el) => {
      picture seen dark openings and blue glass alike, so they're marked by eye, not guessed) - lit warm as the lamps come on
      (E.lampsOn), each with a soft glow round it (airLamps kind 2), and its porch lamps glowing, drawn after the world's tint. Vehicles: their lamps (carLights, 50-story-cars.js).
    ================================================================ */
+// (user Nov 9 13:44: "the vehicle that's not being driven should have the lights off. The lights are only on when someone is
+// controlling it, player or npc") one rule for every vehicle's lamps, windows and beams: someone at its controls - a player (driven),
+// an NPC out on its routine (rt, not yours, not tied up at a structure - storyNPC, 50-story.js). A placed or spot vehicle (story) left
+// where it is - parked, tied up, put down - is dark. The world's own traffic (no `story`) is always under way by its own AI.
+function vehManned(v) {
+  if (!v) return false;
+  if (v.driven != null) return true;
+  if (v.story) return !!v.rt && !v.own && v.berth == null;
+  if (v.placed != null) return false;                      // (placed in the editor, nobody aboard: it waits where it was put - 50-zz-placed.js)
+  return true;
+}
 // the hour's look over a picture P just drawn at X, Y (its size W, H; in the current transform), cx its middle on the screen
 function objLit(P, X, Y, W, H, cx, dk) {
   if (!P || !P.width || W < 2) return;
@@ -67068,6 +67103,7 @@ const stHere = () => STORY && crew[0] && crew[0].mode === 'dock' ? storyAt() : n
 const stInHome = o => !!o && o === stHere() && storyEnterable(o);
 // a residential's smoke: the home you're in by its COOK; any other of yours empty; everyone else's by day till bedtime
 function strSmokes(o) {
+  if (strIsLh(o)) return false;                            // (a lighthouse lived in has no stove)
   if (stInHome(o)) return !!story.cook;
   if (STORY && o.own === 'player') return false;
   return hourIn(env.time, HOME_UP_H, HOME_BED_H);
@@ -67075,6 +67111,7 @@ function strSmokes(o) {
 // its lights at night (strLit): the home you're in by its LIGHT; any other of yours dark; the town's till bedtime; a market while open
 function strLightsOn(o) {
   const u = strUse(o);
+  if (strIsLh(o)) { const C = lhCtlId(o.id); return !(C && C.off); }   // (a lighthouse: its windows with its light - BEAM)
   if (u === 'res') { if (stInHome(o)) return !!story.light; if (STORY && o.own === 'player') return false; return hourIn(env.time, 17, HOME_BED_H) || env.time < 5; }
   if (u === 'market') return strOpen(o);
   return true;
@@ -67083,19 +67120,30 @@ function strLightsOn(o) {
 const strOpen = o => { const a = o.openH ?? 0, b = o.closeH ?? 0; return a === b || hourIn(env.time, a, b); };
 const hourName = h => { const H = Math.floor(h) % 24, M = Math.round((h - Math.floor(h)) * 60); if (typeof LANG !== 'undefined' && LANG !== 'en' && !i18nOff()) return H + ':' + String(M).padStart(2, '0');   // (the other languages: the 24-hour clock)
   return (H % 12 || 12) + (M ? ':' + String(M).padStart(2, '0') : '') + (H < 12 ? 'AM' : 'PM'); };
-// ---- a lighthouse's controls: the structure its tower stands for (tw.def, a harbour's lh), its story state while you're at it - or ever set
+// ---- a lighthouse's controls (user Nov 9 13:44: the Story world's lighthouse - a LIGHTHOUSE structure of the player's, TYPE
+// RESIDENTIAL so it can be entered - showed a home's COOK and LIGHT and no ANGLE: only a TOWER in the LIGHTHOUSE look was one).
+// One rule: a lighthouse is the LIGHTHOUSE structure or a TOWER in the LIGHTHOUSE look (strIsLh) - both throw the beam
+// (lhBeams, 50-land-traffic.js) and, at one of yours, the same row: BEAM, FOG HORN and the ANGLE tape, never a home's.
+// Its story state by its structure's id (story.lh[id] { off, a }); a tower's structure is the one it stands for (tw.def, a harbour's lh)
+const strIsLh = o => !!o && (o.k === 'lighthouse' || (o.k === 'gunTower' && !!o.lh));
 const lhStrId = tw => { const o = tw.def || (tw.dock && tw.dock.lh); return o ? o.id : null; };
-function lhCtl(tw) { if (!STORY || !story.lh) return null; const id = lhStrId(tw); return id != null ? story.lh[id] || null : null; }
+const lhCtlId = id => !STORY || !story.lh || id == null ? null : story.lh[id] || null;
+const lhCtl = tw => lhCtlId(lhStrId(tw));
 const lhCtlTh = C => Math.PI / 2 - (C.a || 0) * Math.PI / 180;                       // (0 degrees: facing you, -90 left, 90 right)
-const lhCtlSea = (C, tw) => Math.sign(Math.sin((C.a || 0) * Math.PI / 180)) || tw.facing || 1;
-const stLighthouse = () => { const o = stHere(); return o ? towers.find(tw => tw && lhStrId(tw) === o.id && tw.hp > 0) || null : null; };
+const lhCtlSea = (C, f) => Math.sign(Math.sin((C.a || 0) * Math.PI / 180)) || f || 1;
+// the lighthouse you're at: its structure's id (a tower's while it stands), else null
+function stLhId() {
+  const o = stHere(); if (!strIsLh(o)) return null;
+  if (o.k === 'gunTower' && !towers.some(tw => tw && lhStrId(tw) === o.id && tw.hp > 0)) return null;
+  return o.id;
+}
 // ---- the commands
 ACTS.stAct = (p, what, v) => {
   if (!STORY || p !== 0) return;
   if (what === 'cook' && stInHome(stHere())) story.cook = !story.cook;
   else if (what === 'light' && stInHome(stHere())) story.light = !story.light;
-  else if (what === 'lhBeam') { const tw = stLighthouse(), id = tw && lhStrId(tw); if (id == null) return; const C = story.lh[id] || (story.lh[id] = { off: false, a: 0 }); C.off = !C.off; }   // (its light on / off; it turns by the angle tape - lhLampOf)
-  else if (what === 'fog') { const tw = stLighthouse(); if (tw) sound('fogHorn', tw.x); }
+  else if (what === 'lhBeam') { const id = stLhId(); if (id == null) return; const C = story.lh[id] || (story.lh[id] = { off: false, a: 0 }); C.off = !C.off; }   // (its light on / off; it turns by the angle tape - lhLampOf)
+  else if (what === 'fog') { if (stLhId() != null) sound('fogHorn', stHere().x); }
 };
 // ---- the buttons: the green ones on the right, as every vehicle's own (user Nov 7 10:49: "the cook, light, beam, foghorn should all
 // be green buttons on the right side. That's how the game works ... always mapped to the controller button"; 10:50: "every time I ask
@@ -67111,7 +67159,7 @@ ACTS.stAct = (p, what, v) => {
 const LH_LAMPS = new Map();
 function lhLampOf(p) {
   if (!STORY || p !== 0 || !crew[0] || crew[0].mode !== 'dock') return null;
-  const tw = stLighthouse(), id = tw && lhStrId(tw); if (id == null) return null;
+  const id = stLhId(); if (id == null) return null;
   let L = LH_LAMPS.get(id);
   if (!L) LH_LAMPS.set(id, L = { power: 0, aimShow: 0, get elev() { const C = story.lh && story.lh[id]; return 90 - ((C && C.a) || 0); },
     set elev(v) { const C = story.lh[id] || (story.lh[id] = { off: false, a: 0 }); C.a = clamp(90 - v, -90, 90); } });
@@ -67121,14 +67169,14 @@ const ST_CW = { cook: 'cook', lamp: 'light', beam: 'lhBeam', fog: 'fog' };   // 
 function stRow(p) {
   if (!STORY || p !== 0 || ui.title || story.wake) return [];
   const o = stHere(); if (!o) return [];
+  if (stLhId() != null) return ['beam', 'fog'];   // (and the ANGLE tape - stKit; first: a lighthouse you live in is still a lighthouse)
   if (stInHome(o)) return ['cook', 'lamp'];
-  if (stLighthouse()) return ['beam', 'fog'];   // (and the ANGLE tape - stKit)
   return [];
 }
 // its kit (17-hud.js hudKit): the green row; a lighthouse the ANGLE tape too (no POWER - the minisub's light's way)
 function stKit(p) { const W = stRow(p); if (!W.length) return null; const lh = !!lhLampOf(p); return { drive: false, home: false, dive: false, aim: lh, noPower: true, weapons: W }; }
 function stCwState(wk) {
-  const on = wk === 'cook' ? !!story.cook : wk === 'lamp' ? !!story.light : wk === 'beam' ? (() => { const tw = stLighthouse(), C = tw && lhCtl(tw); return !(C && C.off); })() : false;
+  const on = wk === 'cook' ? !!story.cook : wk === 'lamp' ? !!story.light : wk === 'beam' ? (() => { const C = lhCtlId(stLhId()); return !(C && C.off); })() : false;
   return { f: 0, off: false, n: -1, on };
 }
 
