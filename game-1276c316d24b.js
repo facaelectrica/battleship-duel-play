@@ -5193,8 +5193,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 967;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 16:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 968;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 16:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -28746,6 +28746,26 @@ const layerScale = q => S * ZOOM_REF * Math.pow(cam.view[viewIdx].z / ZOOM_REF, 
 // the layer-space x seen at screen column c
 const layerX = (c, L, Sl) => (c - layerPivX) / Sl + L.p * layerRefX;
 // how high the near sea's swells run (world units) right now, so the far layers can be a share of it
+// (user Nov 9 15:33: "the reflection should not be perfectly horizontal anymore either, but be affected by the waves, so we feel the whole ocean is
+// wavy") in a big sea (past MID_BIG) the middle sea's swell at a screen column - its rise from its rest line, this view this frame (drawMidSea sets
+// it, made a column at a time when first asked) - and how far a row of the far sea's detail at py moves with it there (midRowDy: rows from the
+// horizon to the swells' rest line a quarter to all of it), so its streaks, glitter and the light's glints ride the swells
+const MID_BIG = 12, MID_GROW = 0.25;
+const MSW = { on: false, Lp: 0, c: new Float32Array(0), L: null, Sl: 0, A: 1, st: 0, amp: 0, base: 0, hz: 0 };
+function midSwellSet(on, Lp, L, Sl, A, st, amp, base, hz) {
+  MSW.on = on; if (!on) return;
+  const n = Math.ceil((VWP + 8) / PB) + 4; if (MSW.c.length < n) MSW.c = new Float32Array(n);
+  MSW.c.fill(NaN); Object.assign(MSW, { Lp: Math.floor(Lp / PB) * PB, L, Sl, A, st, amp, base, hz });
+}
+function midSwellAt(px) {
+  if (!MSW.on) return 0;
+  const i = Math.floor((px - MSW.Lp) / PB); if (i < 0 || i >= MSW.c.length) return 0;
+  const v = MSW.c[i]; if (v === v) return v;
+  const u = layerX(MSW.Lp + i * PB, MSW.L, MSW.Sl), sh = crestAt(u * 2, time, MSW.A, MSW.st) * 0.8;
+  const w = swell(u * 0.021 + time * 0.7, sh) + 0.6 * swell(u * 0.047 - time * 1.1, sh) + 0.3 * Math.sin(u * 0.09 + time * 1.7);   // (drawMidSea's own swell)
+  return (MSW.c[i] = Math.round(w * MSW.amp / PB) * PB);
+}
+function midRowDy(px, py) { if (!MSW.on) return 0; const d = midSwellAt(px); return d ? Math.round(d * clamp((py - MSW.hz) / Math.max(1, MSW.base - MSW.hz), 0.25, 1) / PB) * PB : 0; }
 const nearSwell = () => (E.waveAmp || 1) * 5.5 + (E.storm || 0) * (E.storm || 0) * 9;
 function drawMidSea() {
   const Lp = -SHX - 2, Wp = VWP + 4, ss = E.sunset, nt = E.night * (1 - E.fog), fg = E.fog;
@@ -28757,10 +28777,13 @@ function drawMidSea() {
   g.addColorStop(0, rgbs(top)); g.addColorStop(1, rgbs(deep));
   const crest = ss > 0.3 ? rgbs(mix3([196, 228, 255], [255, 220, 170], ss), 0.9) : nt > 0.4 ? rgbs([120, 210, 240], 0.8) : 'rgba(214,238,255,0.92)';
   // drawn in its own layer space (DEPTH.midSea), so zooming only scales it a touch less than the near sea and
-  // the swells keep their shape; they run at a share of the near sea's height, and always below the horizon
-  const L = DEPTH.midSea, Sl = layerScale(L.q), A = E.waveAmp || 1, st = E.storm || 0;
-  const amp = (0.4 + L.wave * nearSwell()) * Sl * 0.55, base = hz + Math.round(4 * Sl + amp * 0.9);
+  // the swells keep their shape; they run at a share of the near sea's height, below the horizon - (user Nov 9 15:33: "It should go over the
+  // horizon line when we have these big waves") past MID_BIG of the near swell they grow more (MID_GROW of the rest) and rise over it: their rest
+  // line stays where it is at MID_BIG, the swells go up and down about it. Up to MID_BIG the same picture as before
+  const L = DEPTH.midSea, Sl = layerScale(L.q), A = E.waveAmp || 1, st = E.storm || 0, ns = nearSwell();
+  const amp = (0.4 + L.wave * ns + MID_GROW * Math.max(0, ns - MID_BIG)) * Sl * 0.55, amp0 = (0.4 + L.wave * MID_BIG) * Sl * 0.55, base = hz + Math.round(4 * Sl + Math.min(amp, amp0) * 0.9);
   const step = PB;
+  midSwellSet(ns > MID_BIG, Lp, L, Sl, A, st, amp, base, hz);   // (the far sea's streaks and the light's path ride its swells - midRowDy)
   // (engine stage 8: the columns on the GPU, 40-zzz-gpu8.js - on by default, ?midseagpu=0 for the loop below)
   if (MIDSEA_GPU && g8On()) { g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, 0.5 - 0.12 * Math.min(1, st + (A - 1) * 0.5), hz, bot, g, crest, foot); return; }
   // columns at the same height are drawn as one run (the same picture as column by column, far fewer calls)
@@ -28852,7 +28875,7 @@ function drawFarSeaDetail() {
       for (let k = 0; k < 10; k++) {
         const x = (FSH.night[R * 20 + k * 2] * (VWP + 200) + time * (3 + row) * (row % 2 ? 1 : -1)) % (VWP + 200) - 100;
         const len = 8 + Math.floor(FSH.night[R * 20 + k * 2 + 1] * 40);
-        fillRectA(C, c, a3, Math.round(x), py, len, 1); lc = c; la = a;
+        fillRectA(C, c, a3, Math.round(x), py + midRowDy(x + len / 2, py), len, 1); lc = c; la = a;   // (riding the swells - midRowDy)
       }
     }
     farSeaLast(lc, la, true);
@@ -28872,7 +28895,7 @@ function drawFarSeaDetail() {
         if (h > 0.55) continue;
         const x = (FSH.dusk[R * 36 + k * 2] * VWP + time * (6 + row) * (row % 2 ? 1 : -1)) % (VWP + 40) - 20;
         const len = 3 + Math.floor(FSH.dusk[R * 36 + k * 2 + 1] * 10);
-        fillRectA(C, c, a3, Math.round(x), py, len, 1); lc = c; la = a;
+        fillRectA(C, c, a3, Math.round(x), py + midRowDy(x + len / 2, py), len, 1); lc = c; la = a;   // (riding the swells - midRowDy)
       }
     }
     farSeaLast(lc, la, true);
@@ -28948,7 +28971,7 @@ function drawLightPath(lx, k, hot, glint, W) {
       if (h > 0.45 + 0.5 * c) continue;
       const len = Math.max(2, Math.round((3 + h * 12 + 12 * c) * Math.min(SV, 2) * (0.6 + 0.6 * u)));
       const gc = c > 0.45 && h < 0.35 ? hot : glint, ga = Math.min(1, k * (0.6 + 0.6 * c) * (1 - 0.25 * u));
-      fillRectA(C, gc, glA3(ga), Math.round(x - len / 2), py, len, 1); lc = gc; la = ga;
+      fillRectA(C, gc, glA3(ga), Math.round(x - len / 2), py + midRowDy(x, py), len, 1); lc = gc; la = ga;   // (riding the swells - midRowDy)
     }
   }
   farSeaLast(lc, la, true);
@@ -29090,6 +29113,7 @@ function renderSky() {
   st = sema('skBase', T0sky);
   clipRegion(DEPTH.farSea);                // (OPEN WORLD: the far water only over the sea - where the sea is at ITS depth)
   SEA_FOOT_Y = seaFootY();                 // (the deepest trough in view: how far the distant sea reaches down)
+  MSW.on = false;                          // (no middle sea drawn yet this view - midSwellSet)
   drawFarSea();
   C.restore();
   st = sema('skFar', st);
@@ -29960,7 +29984,7 @@ function drawSparkles(p, cell, yTop, yRange, alpha) {
     if (x >= VWP - SHX || x < -SHX - 2 || y < -SHY || y >= bh - SHY) continue;     // (off this view: nothing to paint)
     // (Nov 1: a colour given as numbers - fillRectA - not a text made and read back a sparkle; the last one's text set at the end)
     const a = a0 * (tw - 0.45) / 0.55;
-    fillRectA(C, SPK_W, glA3(a), x, y, h2 > 0.6 ? 2 : 1, 1); la = a; on = true;
+    fillRectA(C, SPK_W, glA3(a), x, y + midRowDy(x, y), h2 > 0.6 ? 2 : 1, 1); la = a; on = true;   // (riding the middle sea's swells in a big sea - midRowDy, 42-render-sky.js)
   }
   if (on) farSeaLast(SPK_W, la, false);
 }
