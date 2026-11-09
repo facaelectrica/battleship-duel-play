@@ -5170,8 +5170,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 928;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 08:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 929;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 08:59';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -20195,7 +20195,7 @@ function glLitRun(b, lit, U) {
   if (GLR.lost || !lit.n) { b.n = lit.n; return; }
   const gl = GLR.gl;
   glFlush();
-  if (lit.ep !== GLR.epoch) { lit.srcVbo = gl.createBuffer(); lit.tex = glNewTex(0, 0, gl.NEAREST); lit.ep = GLR.epoch; lit.srcUp = -1; lit.texH = 0; }
+  if (lit.ep !== GLR.epoch) { lit.srcVbo = gl.createBuffer(); lit.ep = GLR.epoch; lit.srcUp = -1; }
   if (!b.vbo || b.epoch !== GLR.epoch) { b.vbo = gl.createBuffer(); b.epoch = GLR.epoch; b.cap = 0; }
   // the shapes (only when they changed)
   gl.bindVertexArray(GLR.lvao); GLR.cur.vao = 7;
@@ -20204,11 +20204,14 @@ function glLitRun(b, lit, U) {
   for (let i = 0; i < 5; i++) { gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, 4, gl.FLOAT, false, 80, i * 16); gl.vertexAttribDivisor(i, 0); }
   // the cloud's data
   const W = 256, Hd = Math.max(1, Math.ceil(lit.dlen / 4 / W));
-  gl.activeTexture(gl.TEXTURE11); gl.bindTexture(gl.TEXTURE_2D, lit.tex); gl.bindSampler(11, null);
+  // (Nov 9, graphics memory: one texture for every cloud's data, not one each - it is written in full before every run and read only by it
+  // (texelFetch by index), so a cloud's own was ~1,100 textures, 43 MB, in a storm zoomed out. Grown when a cloud needs more rows)
+  const LD = GLR.litD && GLR.litD.ep === GLR.epoch ? GLR.litD : (GLR.litD = { tex: glNewTex(0, 0, gl.NEAREST), h: 0, ep: GLR.epoch });
+  gl.activeTexture(gl.TEXTURE11); gl.bindTexture(gl.TEXTURE_2D, LD.tex); gl.bindSampler(11, null);
   if (lit.dat.length < W * Hd * 4) { const a = new Float32Array(W * Hd * 4); a.set(lit.dat.subarray(0, lit.dlen)); lit.dat = a; }
   glPM(false);
-  if (lit.texH !== Hd) { gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, W, Hd, 0, gl.RGBA, gl.FLOAT, lit.dat.subarray(0, W * Hd * 4)); lit.texH = Hd; }
-  else gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, Hd, gl.RGBA, gl.FLOAT, lit.dat.subarray(0, W * Hd * 4));
+  if (LD.h < Hd) { LD.h = Math.max(Hd, Math.ceil(LD.h * 1.25)); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, W, LD.h, 0, gl.RGBA, gl.FLOAT, null); }
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, Hd, gl.RGBA, gl.FLOAT, lit.dat.subarray(0, W * Hd * 4));
   // the records' buffer, as big as the puffs
   gl.bindBuffer(gl.ARRAY_BUFFER, b.vbo);
   if ((b.cap || 0) < lit.n) { b.cap = Math.ceil(lit.n * 1.25); gl.bufferData(gl.ARRAY_BUFFER, b.cap * 32, gl.DYNAMIC_COPY); }
@@ -24529,6 +24532,7 @@ function buildScene() {
   const rnd = seed32(4242);
   WORLD = Math.round(W * 52);
   const x0 = W / 2 - WORLD / 2, heroX = W * 0.52;
+  if (typeof bakeDrop === 'function') for (const c of clouds) bakeDrop(c);   // (Nov 9: the old scene's cloud sprites given back to the graphics card, not left until the context goes)
   clouds = [];
   for (const lay of LAYERS) {
     if (lay.name === 'hero') { hero = makeCloud(heroLobes, lay, heroX); hero.storm = 0; clouds.push(hero); }
@@ -25206,22 +25210,28 @@ const bkOk = s => !!s && (s.empty || (!!s.T && s.T.epoch === GLR.epoch && !!s.T.
 // (Oct 31: a sprite's picture back on the shelf, not given back to the GPU - a texture made and freed for each cloud baked was ~90 a
 // second in a fight, hitches on Direct3D. Pictures are in sizes rounded up to 32 pixels, so one fits many clouds; the margin is
 // clear and draws nothing. The shelf keeps up to BK_SHELF; past that a picture is freed)
-const BK_POOL = new Map(), BK_SHELF = 96; let BK_PN = 0;
+// (Nov 9, graphics memory: the shelf counted in bytes too - BK_SHELF_B, and no picture over BK_SHELF_PX on it. Zoomed out, the shelf still held
+// the big pictures of the sky baked zoomed in, which no cloud fitted any more: ~300 MB on the graphics card in a storm. And it's emptied when every
+// picture is thrown away - a new screen or sky pixel, bakeBegin's HARD change)
+const BK_CROP = 0.6, BK_CROP_T = 0.25;   // (a cloud's sprite reaches at most BK_CROP of a view past its deck's layer; baked again when the camera is BK_CROP_T from a cut - bakeCloud)
+const BK_POOL = new Map(), BK_SHELF = 96, BK_SHELF_B = 24e6, BK_SHELF_PX = 512 * 512; let BK_PN = 0, BK_PB = 0;
 const bkSize = n => Math.ceil(n / 32) * 32;
 function bkTarget(w, h) {
   const W = bkSize(w), H = bkSize(h), L = BK_POOL.get(W * 65536 + H);
-  if (L && L.length) { const T = L.pop(); BK_PN--; if (T.epoch === GLR.epoch && T.tex) { T.width = W; return T; } T.free(); }   // (width set: cleared, as a canvas)
+  if (L && L.length) { const T = L.pop(); BK_PN--; BK_PB -= W * H * 4; if (T.epoch === GLR.epoch && T.tex) { T.width = W; return T; } T.free(); }   // (width set: cleared, as a canvas)
   return new GLTarget(W, H);
 }
 function bkFree(s) {
   if (!s || !s.T) return;
   const T = s.T; s.T = null;
-  if (BK_PN < BK_SHELF && T.epoch === GLR.epoch && T.tex) { const k = T.width * 65536 + T.height; let L = BK_POOL.get(k); if (!L) BK_POOL.set(k, L = []); L.push(T); BK_PN++; }
+  const b = T.width * T.height * 4;
+  if (BK_PN < BK_SHELF && BK_PB + b <= BK_SHELF_B && T.width * T.height <= BK_SHELF_PX && T.epoch === GLR.epoch && T.tex) { const k = T.width * 65536 + T.height; let L = BK_POOL.get(k); if (!L) BK_POOL.set(k, L = []); L.push(T); BK_PN++; BK_PB += b; }
   else T.free();
 }
+function bkShelfClear() { for (const L of BK_POOL.values()) for (const T of L) T.free(); BK_POOL.clear(); BK_PN = 0; BK_PB = 0; }
 function bkSlot(c) { const v = c.bk || (c.bk = [{ F: null, B: null, now: 0, live: false }, { F: null, B: null, now: 0, live: false }]); return v[VI]; }
 function bakeDrop(c) { if (!c.bk) return; for (const v of c.bk) { if (v.B && v.B !== v.F) bkFree(v.B); bkFree(v.F); v.F = v.B = null; } }
-function bakeDropAll() { for (const c of clouds) bakeDrop(c); for (const b of BK) { b.cur = b.next = null; b.hard = null; } }
+function bakeDropAll() { for (const c of clouds) bakeDrop(c); for (const b of BK) { b.cur = b.next = null; b.hard = null; } bkShelfClear(); }
 // the two signatures: HARD (the picture itself changes - zoom, screen, the debug view: every sprite thrown away, the sky baked
 // at once) and SOFT (the look changes - the hour's step, the weather's step, the drift past the sun, the sliders: baked again
 // behind the scenes and swapped together)
@@ -25254,7 +25264,7 @@ function bakeBegin(V) {
   BK_ON = bakeOn();
   if (!BK_ON) return;
   const b = BK[VI], [hard, soft] = bakeSigs(V);
-  if (hard !== b.hard) { if (b.hard) for (const c of clouds) if (c.bk) { const v = c.bk[VI]; if (v.B && v.B !== v.F) bkFree(v.B); bkFree(v.F); v.F = v.B = null; } b.hard = hard; b.cur = soft; b.next = null; b.force = 2; }
+  if (hard !== b.hard) { if (b.hard) bkShelfClear(); if (b.hard) for (const c of clouds) if (c.bk) { const v = c.bk[VI]; if (v.B && v.B !== v.F) bkFree(v.B); bkFree(v.F); v.F = v.B = null; } b.hard = hard; b.cur = soft; b.next = null; b.force = 2; }
   // (the last gen complete: every cloud's new sprite in at once)
   if (b.next && b.done) {
     for (const c of clouds) {
@@ -25319,7 +25329,8 @@ function bakeVisit(c, vis, gk) {
     if (Math.abs(flash.x - cx) < hw) { c.grow = c.growT; v.now = 0; v.live = true; return false; }
   }
   v.live = false; v.now = 0;
-  const shownF = bkOk(v.F) ? v.F : null;
+  // (a cut sprite - bakeCloud - is never laid at another zoom: scaled, its cut would show. Such a cloud is one with no picture: baked at once)
+  const shownF = bkOk(v.F) && !(v.F.cut && v.F.zl !== c.lay.zl) ? v.F : null;
   // (FAR SUN: its light by where it is from the disc, in steps - a step moved since its picture was baked: baked again, alone)
   let pk = '';
   if ((P.farsun ?? 1) > 0 && c.minX !== undefined) { const Xm = X + (c.minX + c.maxX) / 2; pk = sunStep(c, Xm, c.y - c.h / 2); }
@@ -25335,7 +25346,7 @@ function bakeVisit(c, vis, gk) {
   // the swap with the whole sky. Only a cloud just come into view (a pan, a zoom) is still baked at once)
   if (wants && !shownF && !(v.nw != null && (v.nw === b.cur || v.nw === b.next))) need = 3;
   else if (b.next) { if (!(v.B && v.B.sig === b.next && bkOk(v.B))) need = wants ? 1 : -1; }
-  else if (wants && !(bkOk(v.F) && v.F.sig === b.cur && (v.F.pk ?? '') === pk)) need = 2;
+  else if (wants && !(bkOk(v.F) && v.F.sig === b.cur && (v.F.pk ?? '') === pk && !v.F.stale)) need = 2;   // (stale: a cut sprite the camera has moved toward a cut side of - bakeDraw)
   else if (!wants && v.F) { bkFree(v.F); v.F = null; }
   if (need === -1) { if (v.B && v.B !== v.F) bkFree(v.B); v.B = { empty: true, sig: b.next }; need = 0; }   // (gone at the new look: gone at the swap)
   if (need > 0 && (inView || (need === 3 && inWide))) {
@@ -25435,10 +25446,20 @@ function bakeCloud(c, ax, ay) {
       else { const cx = ox + d[o], cy = oy + d[o + 1], rx = d[o + 2] + 2, ry = d[o + 3] + 2; if (cx - rx < x0) x0 = cx - rx; if (cx + rx > x1) x1 = cx + rx; if (cy - ry < y0) y0 = cy - ry; if (cy + ry > y1) y1 = cy + ry; }
     }
   }
-  let s;
+  let s, cut = null;
   if (!(x1 >= x0)) s = { empty: true, pk: c.pkNow ?? '', zl: c.lay.zl };
   else {
     x0 = Math.floor(x0); y0 = Math.floor(y0); x1 = Math.ceil(x1); y1 = Math.ceil(y1);
+    // (Nov 9, graphics memory - a storm at the launch zoom: deck 1's towers several screens tall, one sprite 5664 x 4768, 108 MB, of which a screen
+    // can show one view's worth) a cloud reaching past its deck's layer by more than BK_CROP of a view is baked only that far past it: the rest can't be
+    // seen from here. Which sides were cut is kept (s.cut, in the cloud's own place), and bakeDraw has it baked again once the camera has moved
+    // BK_CROP_T of a view toward a cut side - long before the cut could show. The same pixels wherever it is seen
+    const Hn = DLH || H, mx = Math.ceil(W * BK_CROP), my = Math.ceil(Hn * BK_CROP), L0 = -mx, L1 = TW + mx, T0 = -my, T1 = Hn + my;
+    // (never where the deck's world is narrow enough to be laid again along the view - zoomed out, bakeDraw's repeats: each copy needs all of it)
+    if ((x0 < L0 || x1 > L1 || y0 < T0 || y1 > T1) && WORLD * c.lay.zl >= 3 * (L1 - L0) + (x1 - x0)) {
+      const a0 = Math.max(x0, L0), a1 = Math.min(x1, L1), b0 = Math.max(y0, T0), b1 = Math.min(y1, T1);
+      if (a1 > a0 && b1 > b0) { cut = [x0 < L0 ? a0 - ax : null, y0 < T0 ? b0 - ay : null, x1 > L1 ? a1 - ax : null, y1 > T1 ? b1 - ay : null]; x0 = a0; x1 = a1; y0 = b0; y1 = b1; }
+    }
     const w = x1 - x0 + 1, h = y1 - y0 + 1;
     // (the old sprite's picture reused when it is the right size and not on the screen any more)
     let T = null; const spare = v.now === 2 ? v.F : v.B, Wb = bkSize(w), Hb = bkSize(h);
@@ -25447,7 +25468,7 @@ function bakeCloud(c, ax, ay) {
     if (!T) T = bkTarget(w, h);
     const cx = T.getContext();
     for (const [pb, ox, oy, pal] of BKREC.ops) cx.drawPuffs(pb, ox - x0, oy - y0, pal);
-    s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID, pk: c.pkNow ?? '', w, zl: c.lay.zl };   // (zl: the decks' zoom it was baked at)   // (w: the picture's own width - its texture may be wider, on the shelf's sizes)
+    s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID, pk: c.pkNow ?? '', w, zl: c.lay.zl, cut };   // (zl: the decks' zoom it was baked at)   // (w: the picture's own width - its texture may be wider, on the shelf's sizes)
   }
   BKREC.ops.length = 0;
   if (v.now === 3) { s.sig = b.next || b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (b.next) { if (v.B && v.B !== s) bkFree(v.B); v.B = s; } }
@@ -25466,6 +25487,12 @@ function bakeDraw(c, ax, ay) {
   if (bkOk(s) && !s.empty) {
     // (baked at another zoom - a zoom's new pictures still on their way: laid scaled about the cloud's place, ks the scale)
     const ks = s.zl && s.zl !== c.lay.zl ? c.lay.zl / s.zl : 1;
+    if (s.cut && ks !== 1) return true;   // (a cut sprite at another zoom: never laid scaled - bakeVisit has it baked at once)
+    // (a cut sprite - bakeCloud: the layer and BK_CROP_T of a view round it, in the sprite's own place; past a cut side, baked again next frame)
+    if (s.cut && !s.stale) {
+      const K = s.cut, Hn = DLH || H, mx = W * BK_CROP_T, my = Hn * BK_CROP_T;
+      if ((K[0] !== null && (-mx - ax) / ks < K[0]) || (K[1] !== null && (-my - ay) / ks < K[1]) || (K[2] !== null && (TW + mx - ax) / ks > K[2]) || (K[3] !== null && (Hn + my - ay) / ks > K[3])) s.stale = true;
+    }
     const per = WORLD * c.lay.zl, x = ax + s.rx * ks, w = (s.w ?? s.T.width) * ks, y = ay + s.ry * ks;
     if (per >= TW + w) DCTX.drawSprite(s, x, y, ks);
     else for (let k = Math.ceil((-w - x) / per); x + k * per < TW; k++) DCTX.drawSprite(s, Math.round(x + k * per), y, ks);   // (the world narrower than the view: once a repeat)
@@ -25790,14 +25817,17 @@ function skyScreen(bw, bh) {
     clouds.forEach((c, i) => { if (s.grow[i] != null) c.grow = s.grow[i]; });
     FORCE = frameNo + 3;
   }
-  VB[0] = {}; VB[1] = {};
+  vbFree(VB[0]); vbFree(VB[1]); VB[0] = {}; VB[1] = {};
 }
+// (Nov 9: a view's deck layers given back to the graphics card when its buffers are made anew - a new screen or sky pixel - not left until the
+// context goes: ~25 MB of old layers stayed after each change)
+function vbFree(b) { if (!b || !(b.veil1 || b.lay)) return; if (GLR.on) glFlush(); const fr = T => { if (T && T.free) T.free(); }; if (b.veil1) fr(b.veil1.T); if (b.lay) for (const k in b.lay) { const L = b.lay[k]; if (L) { fr(L.T); fr(L.TV); } } }
 // the deck buffers of view vi at width w cells (H0 tall). Under the GPU each deck (and deck 1's veil) is a GLTarget layer of
 // the same size instead (made when first drawn: deckTarget); the gradient keeps its buffer, with the sun drawn over a
 // pristine copy of it (bg0) - its rows alone are uploaded each frame
 function viewBufs(vi, w) {
   const b = VB[vi], cw = w + 2;
-  if (b.cw !== cw || b.h !== H0) { b.cw = cw; b.h = H0; b.bg = makeBuf(cw, H0); b.bg0 = null; b.bgKey = ''; b.veil1 = lazyBuf(cw, H0); b.veil1.by0 = 0; b.veil1.by1 = H0 - 1; b.lay = {}; for (const L of LAYERS) { b.lay[L.name] = lazyBuf(cw, H0); b.lay[L.name].by0 = 0; b.lay[L.name].by1 = H0 - 1; } }
+  if (b.cw !== cw || b.h !== H0) { vbFree(b); b.cw = cw; b.h = H0; b.bg = makeBuf(cw, H0); b.bg0 = null; b.bgKey = ''; b.veil1 = lazyBuf(cw, H0); b.veil1.by0 = 0; b.veil1.by1 = H0 - 1; b.lay = {}; for (const L of LAYERS) { b.lay[L.name] = lazyBuf(cw, H0); b.lay[L.name].by0 = 0; b.lay[L.name].by1 = H0 - 1; } }
   return b;
 }
 function deckTargetAt(LB, w, h) {
@@ -25887,18 +25917,45 @@ function deckOut(lay, B, frac) {
   // away": every deck is above the eye, so none of its clouds is ever under the horizon - its clouds' layer laid down to the horizon's
   // row and no further. Its veil and rain, a layer of their own, still reach the sea)
   const hr = Math.round(H * HOR);
+  // (Nov 9, graphics memory: a layer may hold only a band of its rows - T._vy the first, layerRows / veilBand - laid at its row; the
+  // rows it doesn't hold are rows nothing was drawn in or that are never laid)
   for (const T of B.TV ? [B.TV, B.T] : [B.T]) {   // (its veil and rain under its clouds, when they have a layer of their own - drawDeck0)
-    const clip = T === B.T;
-    if (B.lw) { const n = clip ? clamp(hr + B.doy, 0, B.lh) : B.lh; outImg(T, B.lw, 0, n, (frac - 1 - B.dox) * CPX, -B.doy * CPX, B.lw * CPX, n * CPX); }
-    else { const n = clip ? clamp(hr, 0, H) : H; outImg(T, CW, 0, n, (frac - 1) * CPX, 0, CW * CPX, n * CPX); }
+    const clip = T === B.T, vy = T._vy || 0;
+    if (B.lw) { const n = clamp((clip ? clamp(hr + B.doy, 0, B.lh) : B.lh) - vy, 0, T.height); outImg(T, B.lw, 0, n, (frac - 1 - B.dox) * CPX, (vy - B.doy) * CPX, B.lw * CPX, n * CPX); }
+    else { const n = clamp((clip ? clamp(hr, 0, H) : H) - vy, 0, T.height); outImg(T, CW, 0, n, (frac - 1) * CPX, vy * CPX, CW * CPX, n * CPX); }
   }
 }
-// (perf pass, Oct 29) a deck's veil and rain in a layer of their own, the size of its clouds' layer, laid under it
-function veilTarget(LB) {
-  const T = LB.T;
-  if (!LB.TV || LB.TV.width !== T.width || LB.TV.height !== T.height) { if (LB.TV && LB.TV.free) LB.TV.free(); LB.TV = makeLayer(T.width, T.height); LB.TV.getContext().imageSmoothingEnabled = false; }
-  return LB.TV;
+// (Nov 9, graphics memory - Battle with two views held ~185 MB of deck and veil layers at any zoom, each layer 2.25 times a view at the
+// screen's pixel) a deck's clouds' layer is laid only down to the horizon (deckOut): its rows under that are never shown, so it is
+// only as tall as the rows laid - want - rounded up, and made again only when the horizon moves past what it holds or far above it
+function layerRows(T, w, want, full) {
+  if (T && T.width === w && !T._vy && T.height >= want && T.height <= want + 96 && T.height <= full) return T.height;
+  return Math.max(1, Math.min(full, Math.max(32, Math.ceil((want + 16) / 32) * 32)));
 }
+// a deck's veil and rain cover only its rows from its clouds' base to its foot (drawVeil2: baseY - 2 .. foot): the layer holds that
+// band (a little more each side, so a deck moving a few rows keeps it), its first row T._vy. LB[key]: the layer ('TV' a deck's
+// veil under its clouds, 'T' deck 1's veil); a - b: the band's rows in the whole layer, full its height
+function veilBand(LB, key, w, a, b, full) {
+  let T = LB[key]; a = clamp(a, 0, full - 1); b = Math.max(a, Math.min(b, full - 1));
+  if (T && T.width === w && T._vy <= a && T._vy + T.height > b && T.height <= b - a + 97) return T;
+  const vy = Math.max(0, Math.floor((a - 16) / 16) * 16), h = Math.max(32, Math.ceil((b + 17 - vy) / 32) * 32);
+  if (T && T.free) T.free();
+  T = LB[key] = makeLayer(w, h); T._vy = vy; const cx = T.getContext(); cx.imageSmoothingEnabled = false; if (key === 'T') LB.ctx = cx;
+  return T;
+}
+// the veil drawn into its band: the deck's rows moved up by the band's first row while it is drawn (as drawDeck moves them into its
+// anchored layer), and back. horY in the whole layer's rows; full the layer's height
+function veilInBand(lay, LB, key, w, horY, X0, vis, full) {
+  const foot = Math.max(lay.footY || horY, lay.baseY + 2);   // (drawVeil2's own foot, worked out as it does)
+  const T = veilBand(LB, key, w, lay.baseY - 2, foot, full), vy = T._vy;
+  const b0 = lay.baseY, f0 = lay.footY, dl = DLH, by0 = BY0, by1 = BY1;
+  lay.baseY -= vy; lay.footY = foot - vy; DLH = Math.max(1, Math.min(T.height, full - vy)); BY0 = 1e9; BY1 = -1;
+  try { DCTX = DREC.reset(T); drawVeil(lay, horY - vy, X0, vis); deckCommit(T); }
+  finally { lay.baseY = b0; lay.footY = f0; DLH = dl; if (BY1 >= 0) { BY0 += vy; BY1 += vy; } BY0 = Math.min(BY0, by0); BY1 = Math.max(BY1, by1); }
+  return T;
+}
+// (perf pass, Oct 29) a deck's veil and rain in a layer of their own, as wide as its clouds' layer, laid under it - only its band of
+// rows since Nov 9 (veilInBand)
 // ================================================================== once a frame
 // G: { dt, time, weather, rain, fog, wind, sea, flash: { k, x (the bolt's world x) } }
 // (SMALLEST CLOUD, Oct 30 - the user, of a deck-1 tower at 11% of its size, a tiny tree of billows: "we should have a limit of how
@@ -26357,11 +26414,10 @@ function skyVeil1(V) {
   if (!viewLoad(V)) return;
   const B = VB[VI], lay = LAYERS[HERO_I], LB = B.veil1;               // (its own buffer: a shared view's other half lays it again)
   target(LB);
-  deckTarget(LB); DCTX = DREC.reset(LB.T);
   BY0 = 1e9; BY1 = -1;
   const frac = lay.A - Math.floor(lay.A);
-  if ((P['dk' + lay.dn] ?? 1) > 0) drawVeil(lay, Math.round(H * HOR), frac - 1, VIS[VI]); else lay.rain = null;   // (DECK 1 off: no veil)
-  deckCommit(LB.T);
+  if ((P['dk' + lay.dn] ?? 1) > 0) veilInBand(lay, LB, 'T', CW, Math.round(H * HOR), frac - 1, VIS[VI], H);   // (its band of rows only - Nov 9)
+  else { lay.rain = null; veilBand(LB, 'T', CW, 0, 0, H); DCTX = DREC.reset(LB.T); deckCommit(LB.T); }   // (DECK 1 off: no veil)
   deckOut(lay, LB, frac); LB.by0 = BY0; LB.by1 = BY1; DCTX = null;
   VSAVE[V.vi].lays[3][4] = lay.rain;
 }
@@ -26393,7 +26449,8 @@ function drawDeck0(lay, B, horY, vis, withVeil, later, dox, doy, big) {   // (la
   const LB = B.lay[lay.name];
   target(LB); if (big) TW = LB.lw;                                         // (target() sets the view's width: the anchored layer is wider)
   // (the GPU: the deck's layer, cleared; the veil, the clouds' batches, the live shapes drawn into it - 04-buffers.js)
-  if (big) deckTargetAt(LB, LB.lw, LB.lh); else deckTarget(LB); DCTX = DREC.reset(LB.T);
+  { const w = big ? LB.lw : CW, full = big ? LB.lh : H; deckTargetAt(LB, w, layerRows(LB.T, w, clamp(horY, 0, full), full)); }   // (only the rows laid: down to the horizon - Nov 9)
+  DCTX = DREC.reset(LB.T);
   BY0 = 1e9; BY1 = -1;
   const ioff = Math.floor(lay.A), frac = lay.A - ioff, X0 = frac - 1 - dox;
   if ((P['dk' + lay.dn] ?? 1) === 0) { deckCommit(LB.T); if (LB.TV) { DREC.reset(LB.TV); deckCommit(LB.TV); } LB.by0 = 1e9; LB.by1 = -1; LB.frac = frac; lay.rain = null; if (!later) deckLay(lay, LB); DCTX = null; return; }   // (DECK n off: nothing, not even its veil)
@@ -26401,7 +26458,7 @@ function drawDeck0(lay, B, horY, vis, withVeil, later, dox, doy, big) {   // (la
   // (perf pass, Oct 29: the far decks' rain shafts come and go a little every frame, and with them in the clouds' layer the
   // whole deck - every cloud, a draw each - was laid again every frame in a storm: zoomed out, 1,200 draws and 1,200 uploads
   // a frame. The veil and its shafts now have a layer of their own under the clouds', so a changing shaft lays only them)
-  if (withVeil) { const TV = veilTarget(LB); DCTX = DREC.reset(TV); drawVeil(lay, horY, X0, vis); deckCommit(TV); DCTX = DREC.reset(LB.T); }
+  if (withVeil) { veilInBand(lay, LB, 'TV', big ? LB.lw : CW, horY, X0, vis, big ? LB.lh : H); DCTX = DREC.reset(LB.T); }
   for (const c of vis) {
     if (c.lay !== lay) continue;
     const ax = zx(c) + dox, ay = c.y + doy;
@@ -27705,6 +27762,9 @@ const NSKY_API = {
   get gpu() { return (P.gpu ?? 1) > 0; }, set gpu(v) { P.gpu = v ? 1 : 0; },   // (the decks on the GPU: 04-buffers.js; ?skygpu=0 draws them in the buffers)
   // (tests: a deck's buffer of a view, as RGBA rows, and its band)
   dbgBuf(vi, name) { const b = VB[vi], B = name === 'bg' || name === 'veil1' ? b[name] : b.lay && b.lay[name]; if (!B) return null; const u = new Uint8Array(B.buf.buffer.slice(0)); return { w: b.cw, h: b.h, by0: B.by0, by1: B.by1, px: Array.from(u) }; },
+  // (tests, Nov 9: each view's deck layers - [width, height, first row] of the clouds' layer and its veil's, the anchored layer's size, the sky's rows - and the
+  // cloud sprites held)
+  dbgLayers() { const sz = T => T ? [T.width, T.height, T._vy || 0] : null; return { H: H0, CPX, ZL, views: [0, 1].map(v => { const b = VB[v]; if (!b || !b.lay) return null; const o = { veil1: sz(b.veil1 && b.veil1.T) }; for (const k in b.lay) { const L = b.lay[k]; o[k] = { T: sz(L.T), TV: sz(L.TV), lw: L.lw, lh: L.lh }; } return o; }), sprites: (() => { let n = 0, px = 0; for (const c of clouds) if (c.bk) for (const s of c.bk) for (const q of s.B === s.F ? [s.F] : [s.F, s.B]) if (q && q.T) { n++; px += q.T.width * q.T.height; } return { n, MB: +(px * 4 / 1e6).toFixed(1), pool: BK_PN }; })() }; },
   // (tests: the records drawn over a cell of view vi this frame - cloud, offset, record - to check a pixel against the buffers)
   dbgRecs(vi, x, y) { const out = []; for (const c of VIS[vi]) { if (!c.axd) continue; for (const pb of [c.pbv && c.pbv[vi], c.pbx]) { if (!pb || !pb.n) continue; const ax = c.axd[vi], ay = c.y, d = pb.data; for (let i = 0; i < pb.n; i++) { const o = i * 8, r = Array.from(d.subarray(o, o + 8)); const near = r[7] < 0.5 ? Math.abs(x - ax - r[0]) <= r[2] / 2 + 2 && Math.abs(y - ay - r[1]) <= r[2] / 2 + 2 : Math.abs(x - ax - r[0]) <= r[2] + 2 && Math.abs(y - ay - r[1]) <= r[3] + 2; if (near) out.push({ uid: c.uid, lay: c.lay.name, far: c.far, ax, ay, i, r }); } } } return out; },
   // (tests: each cloud in view - its screen box, deck, light direction, how far it is seen against the sun, its side step)
@@ -51143,6 +51203,28 @@ const landYT = k => Math.round(PY(LT_Y0 + (land.flat ? -4 : land.rT[k] - 4) * LT
 // in tiles lands pixel for pixel where its one picture did; without the GPU, whole pixels) and whether it's on the screen at all
 function ltTileRect(k, cv) { const YT = landYT(k), YB = landYB(k), sy = (YB - YT) / ltH(k), y = YT + (cv._y0 || 0) * sy, h = cv.height * sy; if (GLR.on) return [y, h]; const a = Math.round(y), b = Math.round(y + h); return [a, b - a]; }
 const ltTileOn = (y, h) => y + h > -256 && y < bh + 256;
+/* (Nov 9, graphics memory - Battle with two players zoomed fully out held ~1,600 ground tiles at full size, as canvases and again as textures on the
+   graphics card, each shown a few pixels: a 64 x 320 tile at 12 x 62, a cell a fifth of a pixel) a picture shown at under half a screen pixel a cell is
+   drawn from a copy f times smaller - f a power of two, a texel of the copy still no bigger than a screen pixel, so it looks the same at the size it's
+   shown - made from it with the nearest pixels, and its own texture is let go while it's far. At Battle's zoom (1.5 pixels a cell) and the default
+   zoom nothing changes: f is 1 and the picture itself is drawn. The copy is in the picture memory, let go when no frame drew it for a while */
+function ltFarF(dw, dh, w, h) { const px = Math.max(Math.abs(dw) / w, Math.abs(dh) / h); if (!(px > 0) || px >= 0.5) return 1; let f = 2; while (f < 8 && f * 2 * px <= 1) f *= 2; return f; }
+function ltFar(cv, f) {
+  if (!cv || !GLR.on) return cv;
+  let F = cv._far;
+  if (f <= 1) { if (F) { cv._far = null; ltFarFree(F.c); } return cv; }   // (near again: the picture itself, its copy let go)
+  const v = cv.__v || 0;
+  if (!F || F.f !== f || F.v !== v || F.w !== cv.width || F.h !== cv.height || !F.c.width) {
+    const w = Math.max(1, Math.ceil(cv.width / f)), h = Math.max(1, Math.ceil(cv.height / f)), c = makeCanvas(w, h), x = c.getContext('2d');
+    x.imageSmoothingEnabled = false; x.drawImage(cv, 0, 0, cv.width, cv.height, 0, 0, w, h);
+    if (F) ltFarFree(F.c);
+    F = cv._far = { c, f, v, w: cv.width, h: cv.height };
+    picKeep(c, 'ground far', cc => { if (cv._far && cv._far.c === cc) cv._far = null; });
+    glFreeSrc(cv);                                                     // (its own texture: not drawn while it's far)
+  }
+  return F.c;
+}
+function ltFarFree(c) { if (!c) return; picForget(c); glFreeSrc(c); c.width = c.height = 0; }
 // (user Nov 8 11:48: "Did you fix meadow to use atmosphere? (we now have per deck atmosphere)") the field behind is its deck's (4, or wherever the
 // biome has its MEADOW - farInfo().md): it fades toward the sky's colour as that deck's ATMOSPHERE says, in its slice's biome (deckHaze), as the
 // deck's plants and pictures do
@@ -51150,7 +51232,7 @@ function meadowLit(cv, k) { if (!GLR.on || !cv) return cv; const bn = colBiome(M
 // (user Nov 8 13:36: "The darkness should match on the caves and on the background ... one has atmosphere and the other doesnt") the back picture is the field
 // (the meadow's deck: its ATMOSPHERE - meadowLit) over the land's line as built and the back wall under it (the ground's own light, no atmosphere -
 // the same as a cave's). haze: false - the whole picture in the ground's light (under the line only, landBackCover)
-function landBackPut(k, xl, haze) { const T = land.back && land.back[k]; if (!T) return; for (const cv of T) { if (!cv) continue; const [Y, H] = ltTileRect(k, cv); if (!ltTileOn(Y, H)) continue; const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL)); C.drawImage(haze ? meadowLit(cv, k) : groundLit(cv), X0, Y, X1 - X0, H); } }
+function landBackPut(k, xl, haze) { const T = land.back && land.back[k]; if (!T) return; for (const cv of T) { if (!cv) continue; const [Y, H] = ltTileRect(k, cv); if (!ltTileOn(Y, H)) continue; const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL)), fc = ltFar(cv, ltFarF(X1 - X0, H, cv.width, cv.height)); C.drawImage(haze ? meadowLit(fc, k) : groundLit(fc), X0, Y, X1 - X0, H); } }
 // the slices' back pictures: the wall in the ground's light, then the field over the land's line in its deck's atmosphere (clipped above that line)
 function landBackDraw(x0, x1, list) {
   if (!land.back || !list.length) return;
@@ -51205,7 +51287,7 @@ function drawLandGround(x0, x1, onField, onWater) {
   const list = landSlices(x0, x1);
   const put = (cv, xl, k) => {
     const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL)), [Y, H] = ltTileRect(k, cv); if (!ltTileOn(Y, H)) return;
-    C.drawImage(groundLit(cv), X0, Y, X1 - X0, H);   // (in the hour's light, as what stands on it - 50-land-trop.js, user Nov 2)
+    C.drawImage(groundLit(ltFar(cv, ltFarF(X1 - X0, H, cv.width, cv.height))), X0, Y, X1 - X0, H);   // (in the hour's light, as what stands on it - 50-land-trop.js, user Nov 2; zoomed far out from its smaller copy - ltFar)
   };
   const putM = (cv, xl, k) => landBackPut(k, xl, false);   // (under the land's line: the wall in the ground's light - landBackCover)
   landBackDraw(x0, x1, list);   // (user Nov 4 09:06: the field behind kept - it's the set's composition, as the game shows it)   // (the field behind - its grass, flowers, boulders: none while the plants have bones, user Nov 3 21:23)
@@ -58510,7 +58592,7 @@ function rimDraw(cv, xl) {
   const ga = C.globalAlpha, sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
   // (a tile's rims laid where they fall in the slice's whole rim pictures (U), as those were placed; without the GPU, whole pixels)
   let DY = T, DH = B - T; if (U) { const su = (UB - UT) / U.H; DY = UT + (Rm.y0 - U.y0) * su; DH = Rm.H * su; if (!GLR.on) { const a = Math.round(DY), b = Math.round(DY + DH); DY = a; DH = b - a; } }
-  const put = (pic, w) => { if (!pic || w < 0.03) return; C.globalAlpha = ga * Math.min(1, w * Lt.k); C.drawImage(glTint(pic, 'rim', RIG_ZERO, Lt.col, false), X0, DY, X1 - X0, DH); };
+  const put = (pic, w) => { if (!pic || w < 0.03) return; C.globalAlpha = ga * Math.min(1, w * Lt.k); C.drawImage(glTint(ltFar(pic, ltFarF(X1 - X0, DH, pic.width, pic.height)), 'rim', RIG_ZERO, Lt.col, false), X0, DY, X1 - X0, DH); };   // (zoomed far out from a smaller copy - ltFar, 50-land-terrain.js)
   put(Rm.L, -lx); put(Rm.R, lx); put(Rm.U, -ly * 0.7);
   C.globalAlpha = ga; C.imageSmoothingEnabled = sm;
 }
