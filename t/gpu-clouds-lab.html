@@ -180,7 +180,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 967, build: 'NOV 09 18:21', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 967, build: 'NOV 09 18:26', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -5401,7 +5401,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 967;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 18:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 18:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -26117,50 +26117,97 @@ function gskArena(n) {
   gl.bindBuffer(gl.COPY_WRITE_BUFFER, null);
   A.buf = nb; A.cap = cap;
 }
-// a cloud's recipe from its billows and puffs as genCloud made them (the processor's lists then let go): its billows placed once at its
-// size now for their neighbours (findNeighbours - as litBuild finds them), every puff's billow, size, jitter and direction
-function gskRecipe(c) {
+// ---- a cloud's RECIPE, straight from its seeds into number arrays (user 17:16, iPad: zooming out restarted the page - genCloud's puffs, a JS
+// object each, ~28,000 a tower, 5 million zoomed out: 2-3.5 GB of the processor's memory). genLobe's own draws in its own order (the same
+// puffs: their directions, sizes, jitters, depths), written where they are kept; then sorted by depth as genCloud sorts them (stably).
+// FULL: every puff; else only the billows - a cloud whose puffs are under PUFF LOD on the screen draws its billows alone (placeCloud's lod),
+// so that is all it keeps; its puffs are made as it comes near that size (gskWantFull)
+const GG = { bd: new Float64Array(8 * 1024), pd: new Float64Array(8 * 8192) };   // (scratch: billows d0 d1 d2 bk sink ph jit z | puffs p0 p1 p2 pr jit z billow order)
+function gskGen(c, full) {
+  c.genG = genWant(c); cloudBox(c);
+  const s = c.s; let nb = 0, np = 0, ord = 0;
+  for (let j = 0; j < c.lobes.length; j++) {
+    const L = c.lobes[j], rnd = seed32((L.seed | 0) * 2654435761 + 17);
+    const RX = L.gx ?? L.rx, RY = L.gy ?? L.ry, rx = RX * s, ry = RY * s, rz = Math.min(RX, RY) * 0.95 * s, rb = (rx + ry) / 2;
+    const dk = P['bs' + c.lay.dn] ?? 1, dp = P['pk' + c.lay.dn] ?? 1;
+    const capU = P.bcap ?? 15, bc = capU > 0 ? 1 + (Math.min(1, capU / Math.max(1e-6, (RX + RY) / 2)) - 1) * (c.bodyK ?? 0) : 1;
+    const br0 = 0.34 * rb * bc * P.billow * dk, area = 4 * Math.PI * (rx * ry + ry * rz + rx * rz) / 3;
+    const n = clamp(Math.round(area / (br0 * br0 * 1.7)), 6, 400), a0 = rnd() * 6.28, pr0 = Math.max(1, P.puff * s * c.puffK * dp);
+    for (let i = 0; i < n; i++) {
+      const f = fib(n, i, a0), d0 = f[0] + (rnd() - 0.5) * 0.12, d1 = f[1] + (rnd() - 0.5) * 0.12, d2 = f[2] + (rnd() - 0.5) * 0.12, dl = Math.hypot(d0, d1, d2) || 1, d = [d0 / dl, d1 / dl, d2 / dl];
+      if (d[2] < -0.12) continue;
+      const bk = 0.34 * (0.55 + 0.9 * rnd()) * dk * bc, brr = bk * rb * P.billow, sink = 0.6 + 0.4 * rnd();
+      if (L.y * s + ry * d[1] * sink + brr < -rb * 0.5) continue;
+      const ph = rnd() * 7, jit = rnd() - 0.5, bz = (L.z || 0) * s + rz * d[2] * sink;
+      if (GG.bd.length < (nb + 1) * 10) { const a = new Float64Array(GG.bd.length * 2); a.set(GG.bd); GG.bd = a; }
+      const B = GG.bd, o = nb * 10; B[o] = d[0]; B[o + 1] = d[1]; B[o + 2] = d[2]; B[o + 3] = bk; B[o + 4] = sink; B[o + 5] = ph; B[o + 6] = jit; B[o + 7] = bz - 0.02; B[o + 8] = j; B[o + 9] = ord++;
+      const bi = nb++;
+      const nx0 = d[0] / rx, ny0 = d[1] / ry, nz0 = d[2] / rz, nl = Math.hypot(nx0, ny0, nz0) || 1, nL0 = nx0 / nl, nL1 = ny0 / nl, nL2 = nz0 / nl;
+      const npf = clamp(Math.round(4 * Math.PI * brr * brr / (pr0 * pr0 * 2.4)), 4, 120), b0 = rnd() * 6.28;
+      for (let k = 0; k < npf; k++) {
+        const pd = fib(npf, k, b0);
+        if (pd[0] * nL0 + pd[1] * nL1 + pd[2] * nL2 < 0.05 || pd[2] < -0.2) continue;
+        const pr = pr0 * (0.8 + 0.4 * rnd()), pj = rnd() - 0.5, q = ord++;
+        if (!full) continue;
+        if (GG.pd.length < (np + 1) * 8) { const a = new Float64Array(GG.pd.length * 2); a.set(GG.pd); GG.pd = a; }
+        const D = GG.pd, po = np * 8; D[po] = pd[0]; D[po + 1] = pd[1]; D[po + 2] = pd[2]; D[po + 3] = pr; D[po + 4] = pj; D[po + 5] = bz + pd[2] * brr * 0.82; D[po + 6] = bi; D[po + 7] = q; np++;
+      }
+    }
+  }
+  return { nb, np };
+}
+// the recipe sent up: the billows (their table, their neighbours - findNeighbours' rule on their places at the cloud's size now) and the puffs in
+// genCloud's drawing order (by depth, ties in the order dealt), then the billows alone in theirs
+function gskRecipe(c, full) {
   if (!gskSetup()) return;
   gskEpoch();
   const t0 = performance.now();
   gskFree(c);
-  placeCloud(c, now, true); findNeighbours(c);
-  const bi = new Map(), bl = [];
-  for (const list of c.billows) for (const b of list) { if (b.x === undefined) continue; bi.set(b, bl.length); bl.push(b); }
-  let nn = 0; for (const b of bl) nn += b.nbr ? b.nbr.length : 0;
-  const items = c.items, fills = [];
-  let n = 0; for (const it of items) { const own = it.fill ? it : it.bill; if (bi.has(own)) { n++; if (it.fill) fills.push(it); } }
-  const nf = fills.length, nt = bl.length * 4 + Math.ceil(nn / 4);
-  const tb = GS.tex.alloc(nt, 4), g0 = tb / 4, a0 = GS.items.alloc(n + nf);
-  // the billows into the texture's copy
+  const { nb, np } = gskGen(c, full), B = GG.bd, D = GG.pd;
+  c.lob = c.lobes.map(() => ({})); placeLobes(c, now);
+  // the billows placed (placeCloud's fill: its lobe this frame, BASE's flattening under the base) and their neighbours within each lobe
+  const bx = new Float64Array(nb * 4), billow = P.billow, ev = P.evolve * 0.05, sT = Math.sin(now * 0.13), cT = Math.cos(now * 0.13), flat = 1 - P.base;
+  for (let i = 0; i < nb; i++) { const o = i * 10, l = c.lob[B[o + 8]], sk = B[o + 4], ph = B[o + 5]; let y = l.y + l.ry * B[o + 1] * sk; if (y < 0) y *= flat; bx[i * 4] = l.x + l.rx * B[o] * sk; bx[i * 4 + 1] = y; bx[i * 4 + 2] = l.z + l.rz * B[o + 2] * sk; bx[i * 4 + 3] = B[o + 3] * l.rb * billow * (1 + ev * (sT * Math.cos(ph) + cT * Math.sin(ph))); }
+  const nbr = []; let nn = 0;
+  for (let i = 0, a = 0; i < nb; i = a) { a = i; const j = B[i * 10 + 8]; while (a < nb && B[a * 10 + 8] === j) a++;
+    for (let p = i; p < a; p++) { const L = []; for (let q = i; q < a; q++) { if (q === p) continue; const d = Math.hypot(bx[p * 4] - bx[q * 4], bx[p * 4 + 1] - bx[q * 4 + 1], bx[p * 4 + 2] - bx[q * 4 + 2]); if (d < (bx[p * 4 + 3] + bx[q * 4 + 3]) * 1.5) L.push(q); } nbr[p] = L; nn += L.length; } }
+  const nt = nb * 4 + Math.ceil(nn / 4), tb = GS.tex.alloc(nt, 4), g0 = tb / 4, n = full ? nb + np : 0, nf = nb, a0 = GS.items.alloc(n + nf);
   const need = (tb + nt) * 4;
   if (GS.RM.length < need) { const a = new Float32Array(Math.max(need, GS.RM.length * 2)); a.set(GS.RM); GS.RM = a; }
-  const R = GS.RM, nb0 = (tb + bl.length * 4) * 4;
-  let ni = 0;
-  for (let k = 0; k < bl.length; k++) {
-    const b = bl[k], o = (tb + k * 4) * 4;
-    R[o] = b.b[0]; R[o + 1] = b.b[1]; R[o + 2] = b.b[2]; R[o + 3] = b.bk;
-    R[o + 4] = b.sink; R[o + 5] = b.sph; R[o + 6] = b.cph; R[o + 7] = b.j;
-    let cnt = 0; const st = nb0 + ni;
-    for (const q of b.nbr || []) { const qi = bi.get(q); if (qi === undefined) continue; R[nb0 + ni++] = g0 + qi; cnt++; }
-    R[o + 8] = st; R[o + 9] = cnt; R[o + 10] = b.id || 0; R[o + 11] = 0; R[o + 12] = R[o + 13] = R[o + 14] = R[o + 15] = 0;
+  const R = GS.RM, nb0 = (tb + nb * 4) * 4; let ni = 0;
+  // (a billow's colour id in the BILLOWS view: its place in the list dealt, as genLobe's items.length % 9)
+  for (let k = 0; k < nb; k++) {
+    const o = (tb + k * 4) * 4, b = k * 10;
+    R[o] = B[b]; R[o + 1] = B[b + 1]; R[o + 2] = B[b + 2]; R[o + 3] = B[b + 3];
+    R[o + 4] = B[b + 4]; R[o + 5] = Math.sin(B[b + 5]); R[o + 6] = Math.cos(B[b + 5]); R[o + 7] = B[b + 8];
+    R[o + 8] = nb0 + ni; R[o + 9] = nbr[k].length; R[o + 10] = B[b + 9] % 9; R[o + 11] = 0; R[o + 12] = R[o + 13] = R[o + 14] = R[o + 15] = 0;
+    for (const q of nbr[k]) R[nb0 + ni++] = g0 + q;
   }
   GS.rLo = Math.min(GS.rLo, tb); GS.rHi = Math.max(GS.rHi, tb + nt);
-  // the puffs (in their drawing order), then the billows alone in theirs (zoomed out: PUFF LOD)
+  // the drawing order: by depth, ties as dealt (genCloud's stable sort)
   const F = new Float32Array((n + nf) * 6); let o = 0;
-  const put = it => { const own = it.fill ? it : it.bill, b = bi.get(own); if (b === undefined) return; F[o] = g0 + b; F[o + 1] = it.fill ? -1 : it.pr; F[o + 2] = it.jit || 0; const p = it.fill ? null : it.p; F[o + 3] = p ? p[0] : 0; F[o + 4] = p ? p[1] : 0; F[o + 5] = p ? p[2] : 0; o += 6; };
-  for (const it of items) put(it);
-  for (const it of fills) put(it);
+  const putB = k => { const b = k * 10; F[o] = g0 + k; F[o + 1] = -1; F[o + 2] = B[b + 6]; F[o + 3] = F[o + 4] = F[o + 5] = 0; o += 6; };
+  const putP = k => { const p = k * 8; F[o] = g0 + D[p + 6]; F[o + 1] = D[p + 3]; F[o + 2] = D[p + 4]; F[o + 3] = D[p]; F[o + 4] = D[p + 1]; F[o + 5] = D[p + 2]; o += 6; };
+  const bo = Array.from({ length: nb }, (_, k) => k).sort((x, y) => B[x * 10 + 7] - B[y * 10 + 7] || B[x * 10 + 9] - B[y * 10 + 9]);
+  if (full) {
+    const all = new Array(nb + np); for (let k = 0; k < nb; k++) all[k] = k; for (let k = 0; k < np; k++) all[nb + k] = -1 - k;
+    const z = k => k >= 0 ? B[k * 10 + 7] : D[(-1 - k) * 8 + 5], q = k => k >= 0 ? B[k * 10 + 9] : D[(-1 - k) * 8 + 7];
+    all.sort((x, y) => z(x) - z(y) || q(x) - q(y));
+    for (const k of all) if (k >= 0) putB(k); else putP(-1 - k);
+  }
+  for (const k of bo) putB(k);
   const gl = GLR.gl; gskArena(GS.items.end);
   gl.bindBuffer(gl.ARRAY_BUFFER, GSK.arena.buf); gl.bufferSubData(gl.ARRAY_BUFFER, a0 * 24, F); gl.bindBuffer(gl.ARRAY_BUFFER, null); GLR.stats.uploads++;
-  c.gsr = { ep: GS.ep, a0, n, nf, tb, nt, src: items, s: c.s, lobes: c.lobes, nl: c.lobes.length, sig: GS.sig };
-  GS.stat.recipes++; GS.stat.made++; GS.puffs += n;
-  // (the processor's lists let go - the graphics card has the recipe; genCloud makes them again if the cloud's shape changes)
+  c.gsr = { ep: GS.ep, a0, n, nf, tb, nt, full, s: c.s, lobes: c.lobes, nl: c.lobes.length, sig: GS.sig };
   c.items = null; c.billows = null; c.nbrReady = false; c.placedItems = null;
+  GS.stat.recipes++; GS.stat.made++; GS.puffs += n;
   GS.stat.ms += performance.now() - t0;
 }
+// (its puffs wanted: drawn now (not PUFF LOD) or near it - its puffs on the screen over 0.6 of PUFF LOD's size; let go again under 0.4)
+const gskLodSize = c => P.puff * c.s * c.puffK * c.lay.zl, gskLodAt = c => (P['pl' + c.lay.dn] ?? P.lodb * (c.lay.name === 'far' || c.lay.name === 'far2' || c.lay.name === 'horizon' ? 1.4 : 1));
+function gskWantFull(c, had) { if ((P['pf' + c.lay.dn] ?? 1) === 0) return false; const k = gskLodSize(c) / Math.max(1e-6, gskLodAt(c)); return k >= (had ? 0.4 : 0.6); }
 // (a cloud's recipe is still its own: made in this context, at its size, from its lobes, with the sliders genLobe reads)
-const gskHas = c => { const g = c.gsr; return !!g && g.ep === GS.ep && g.s === c.s && g.lobes === c.lobes && g.nl === c.lobes.length && g.sig === GS.sig && (!c.items || c.items === g.src); };
+const gskHas = c => { const g = c.gsr; return !!g && g.ep === GS.ep && g.s === c.s && g.lobes === c.lobes && g.nl === c.lobes.length && g.sig === GS.sig && g.full === gskWantFull(c, g.full); };
 function gskSig() { let s = P.puff + ',' + P.billow + ',' + (P.bcap ?? 15); for (let d = 1; d <= 6; d++) s += ',' + (P['bs' + d] ?? 1) + ',' + (P['pk' + d] ?? 1); GS.sig = s; }
 // ---- the clouds' loop (skyBack), GPU SKY: the live sky's forming and placing of its lobes, every frame; the puffs are the GPU's
 function gskVisit(c, vis, gk) {
@@ -26200,14 +26247,14 @@ function gskVisit(c, vis, gk) {
   c.far = cloudFar(c);
   // (its recipe: made ahead from half a view out within the frame's budget for making clouds, at once if it is on the screen unmade -
   // as its puffs are made today; again when its shape was made again - genCloud's lists are new)
-  if (!c.far && !gskHas(c) && (onV || skyGen > 0)) { const t0 = performance.now(); genCloud(c); gskRecipe(c); c.seen = now; skyGen -= performance.now() - t0; }
+  if (!c.far && !gskHas(c) && (onV || skyGen > 0)) { const t0 = performance.now(); gskRecipe(c, gskWantFull(c, !!(c.gsr && c.gsr.full))); c.seen = now; skyGen -= performance.now() - t0; }
   if (!onV) { c.visible = false; return; }
   if (c.storm > 0.02) { const pk = Math.round(c.storm * 1000) + EPALK; if (c.palK !== pk) { c.palK = pk; c.pal = E.pal.map((t, i) => mix3(t, E.palStorm[i], c.storm).map(Math.round)); } } else c.pal = null;
   c.seen = now;
   // (its lobes placed every frame: its growth and the wind's shape move smoothly - GROW_CELL's steps were the processor's saving)
   placeLobes(c, now); placeTubes(c, now); c.lobG = c.grow; c.lobZ = c.lay.zl; c.lobSrc = c.lobes;
   c.lastZ = c.lay.zl; c.lastG = c.grow;
-  if (!c.far) c.lod = (P['pf' + c.lay.dn] ?? 1) === 0 || P.puff * c.s * c.puffK * c.lay.zl < (P['pl' + c.lay.dn] ?? P.lodb * (c.lay.name === 'far' || c.lay.name === 'far2' || c.lay.name === 'horizon' ? 1.4 : 1));
+  if (!c.far) c.lod = (P['pf' + c.lay.dn] ?? 1) === 0 || gskLodSize(c) < gskLodAt(c);
   c.flit = false;
   if (flash.k > 0 && flash.lay === c.lay) {
     let rbM = 0; for (const o of c.lob) if (o.rb > rbM) rbM = o.rb;
@@ -71707,10 +71754,10 @@ function sseDraw() {
   // ---- the panel
   function panel() {
     const css = document.createElement('style');
-    css.textContent = `#gsLab{position:fixed;right:8px;top:8px;max-height:calc(100vh - 16px);overflow:auto;z-index:70;background:#0f1420e8;color:#d8dce8;font:12px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:6px;padding:8px;display:grid;gap:6px;width:min(300px,calc(100vw - 16px))}
+    css.textContent = `#gsLab *,#gsLab{box-sizing:border-box}#gsLab{position:fixed;right:8px;top:8px;max-height:calc(100vh - 16px);overflow:auto;z-index:70;background:#0f1420e8;color:#d8dce8;font:12px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:6px;padding:8px;display:grid;gap:6px;width:min(300px,calc(100vw - 16px))}
 #gsLab button{font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:7px 8px;cursor:pointer;touch-action:none;user-select:none}
 #gsLab button.on{background:#2a3a1e;border-color:#6a9a3a}#gsLab .r{display:flex;flex-wrap:wrap;gap:4px}#gsLab .r button{flex:1 1 80px;min-width:0}
-#gsLab h4{margin:4px 0 0;font:inherit;color:#ffb347}#gsLab label{display:grid;grid-template-columns:70px 1fr 44px;gap:6px;align-items:center;color:#7a8294}
+#gsLab h4{margin:4px 0 0;font:inherit;color:#ffb347}#gsLab label{display:grid;grid-template-columns:62px minmax(0,1fr) 44px;gap:6px;align-items:center;color:#7a8294}
 #gsLab input{width:100%;accent-color:#ffb347}#gsLab output{color:#ffb347;text-align:right}#gsTip{color:#ffd9a0;min-height:1.4em}
 #gsRead{white-space:pre;color:#aee0a0;font-size:11px;line-height:1.35}#gsOut{white-space:pre-wrap;color:#d8dce8;font-size:11px}
 #gsPause{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:70;background:#0f1420c8;color:#ffb347;font:600 16px ui-monospace,Menlo,monospace;border:1px solid #2c3850;border-radius:6px;padding:6px 14px;pointer-events:none}`;
