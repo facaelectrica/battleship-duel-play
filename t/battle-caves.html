@@ -5116,7 +5116,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 914;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 23:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 08 23:11';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -20560,6 +20560,7 @@ precision highp float; out vec4 o; void main() { o = vec4(0.0); }`));
   glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glSkySetup(); glShadeSetup(); glShaftSetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
+    'multiply': [gl.DST_COLOR, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE],   // (what's there times the colour laid - the ground under the water in its colour, waterGroundTint)
     'lighter': [gl.ONE, gl.ONE, gl.ONE, gl.ONE],
     'source-atop': [gl.DST_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE],
     'destination-out': [gl.ZERO, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE_MINUS_SRC_ALPHA],
@@ -50895,22 +50896,38 @@ function drawLandBackSea(x0, x1) {
   landBackDraw(x0, x1, landSlices(x0, x1)); drawStals(x0, x1);
   C.imageSmoothingEnabled = ga;
 }
-// (user Nov 8 21:10 / 21:55: "the sand underwater is not getting any of the blue tint"; "it should match the blue of the depth that its in") a slice all at sea
-// is drawn after the sea's tint, so it takes the water's colour itself, as the rock formations do (seaTint over): its sand the blue of its floor's depth, its
-// black still black (a multiply). A slice with dry land in it keeps the hour's light only
-function seaFloorY(k) {
-  const F = land.sfloorY && land.sfloorRef === land.cell ? land.sfloorY : (land.sfloorRef = land.cell, land.sfloorY = new Float32Array(land.cw.length).fill(NaN));
-  if (Number.isNaN(F[k])) { let s = 0, n = 0, dry = false; for (let q = 0; q < land.cw[k]; q++) { const c = k * LT_CHUNK + q; if (land.onl[c]) { dry = true; break; } s += sandY(c * LT_CELL); n++; } F[k] = dry || !n ? -1e9 : s / n; }
-  return F[k];
-}
-// the sea's tint at depth y as a multiply: what lies on the floor seen through the water - its own colour less the tint's share, plus the tint's colour at
-// that share (waterTint lays T at a over everything in the sea), with black kept black
+// (user Nov 8 21:10-22:07: "the sand underwater is not getting any of the blue tint"; "it should match the blue of the depth that its in"; "Any surface under water
+// gets tint from the water depth") the ground is drawn after the water's tint, so under any water - the sea, a lake, the ocean reaching in over a land column -
+// its top is laid over again with that water's tint at its depth as a multiply: what lies on the floor seen through the water (seaFloorMul), black kept black,
+// the water itself untouched (only a band from the ground's top down, under the water's surface). Per column, runs of one colour as one rectangle
 function seaFloorMul(y) { const { T, a } = seaAt(y); return T.map(v => clamp((1 - a) + v / 255 * a, 0, 1)); }
-function seaGroundLit(cv, k) {
-  if (!GLR.on || !cv || !land.onl) return groundLit(cv);
-  const fy = seaFloorY(k); if (!(fy > WATER_Y + 8)) return groundLit(cv);
-  const fx = E.fx || [1, 1, 1], w = seaFloorMul(fy);
-  return glTint(cv, 'gndW', fx.map((v, j) => v * w[j]), [0, 0, 0], false);
+const WGT = { ref: null, ver: -1, top: null, key: null, tick: -1, mul: new Map() };
+function waterGroundTint(x0, x1) {
+  if (!land.cell || !land.onl) return;
+  if (WGT.ref !== land.cell || WGT.ver !== (WC.cver || 0)) { WGT.ref = land.cell; WGT.ver = WC.cver || 0; WGT.top = new Int32Array(land.cols).fill(-1); WGT.key = new Int32Array(land.cols).fill(-99999); }
+  if (WGT.tick !== renderTick) { WGT.tick = renderTick; WGT.mul.clear(); }
+  const c0 = Math.max(0, ltCol(x0) - 1), c1 = Math.min(land.cols - 1, ltCol(x1) + 1), band = 40, BH = Math.max(1, Math.ceil(band * SV));
+  const op = C.globalCompositeOperation; C.globalCompositeOperation = 'multiply';
+  let run = -1, runCol = '', runY = 0, runX = 0;
+  const flush = xe => { if (run < 0) return; C.fillStyle = runCol; C.fillRect(runX, runY, Math.max(1, xe - runX), BH); run = -1; };
+  for (let c = c0; c <= c1; c++) {
+    const x = (c + 0.5) * LT_CELL;
+    let surf = null;
+    if (!land.onl[c] || (WC.oc && WC.oc[c])) surf = WATER_Y;                 // (the sea, and the ocean over a land column open to it)
+    else if (typeof lakeAt === 'function' && lakeAt(x)) surf = waterLv(x);   // (a lake: its own level)
+    if (surf == null) { flush(Math.round(PX(c * LT_CELL))); continue; }
+    const rs = Math.max(0, Math.floor((surf - LT_Y0) / LT_CELL)), k = (c / LT_CHUNK) | 0;
+    if (WGT.key[c] !== rs) { WGT.key[c] = rs; let r = Math.max(rs, land.rT[k]); while (r < land.rB[k] && land.cell[ltIdx(c, r)] === M_AIR) r++; WGT.top[c] = r < land.rB[k] ? r : -1; }
+    const r = WGT.top[c]; if (r < 0) { flush(Math.round(PX(c * LT_CELL))); continue; }
+    const fy = LT_Y0 + r * LT_CELL, d = fy - surf; if (d < 3) { flush(Math.round(PX(c * LT_CELL))); continue; }
+    const q = Math.round(d / 12), Y = Math.round(PY(fy - 3));
+    let col = WGT.mul.get(q); if (!col) { col = rgbs(seaFloorMul(WATER_Y + q * 12).map(v => v * 255)); WGT.mul.set(q, col); }
+    const X = Math.round(PX(c * LT_CELL));
+    if (run >= 0 && col === runCol && Y === runY) continue;
+    flush(X); run = c; runCol = col; runY = Y; runX = X;
+  }
+  flush(Math.round(PX((c1 + 1) * LT_CELL)));
+  C.globalCompositeOperation = op;
 }
 function drawLandGround(x0, x1, onField, onWater) {
   if (!land.cell) return;
@@ -50921,7 +50938,7 @@ function drawLandGround(x0, x1, onField, onWater) {
   const list = landSlices(x0, x1);
   const put = (cv, xl, k) => {
     const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + cv.width * LT_CELL)), [Y, H] = ltTileRect(k, cv); if (!ltTileOn(Y, H)) return;
-    C.drawImage(seaGroundLit(cv, k), X0, Y, X1 - X0, H);   // (in the hour's light, as what stands on it - 50-land-trop.js, user Nov 2; under the sea, the water's colour at its depth)
+    C.drawImage(groundLit(cv), X0, Y, X1 - X0, H);   // (in the hour's light, as what stands on it - 50-land-trop.js, user Nov 2)
   };
   const putM = (cv, xl, k) => landBackPut(k, xl, false);   // (under the land's line: the wall in the ground's light - landBackCover)
   landBackDraw(x0, x1, list);   // (user Nov 4 09:06: the field behind kept - it's the set's composition, as the game shows it)   // (the field behind - its grass, flowers, boulders: none while the plants have bones, user Nov 3 21:23)
@@ -50937,10 +50954,11 @@ function drawLandGround(x0, x1, onField, onWater) {
   for (const [k, xl] of list) {
     const T = land.chunks[k]; if (!T) continue;           // (a tile not painted yet: it loads in - landPaintStep)
     for (const cv of T) if (cv) put(cv, xl, k);
-    for (const cv of T) if (cv) gedgeDraw(cv, xl, k);       // (the tiles' edges over all of them: one may reach up over the tile above)
-    for (const cv of T) if (cv) rimDraw(cv, xl, k);
+    for (const cv of T) if (cv) gedgeDraw(cv, xl);       // (the tiles' edges over all of them: one may reach up over the tile above)
+    for (const cv of T) if (cv) rimDraw(cv, xl);
     tropDrawOv(k, 'main');   // (its smooth edge - 50-land-zz-edges.js; the TROPICAL rock's own pixels - 50-land-trop)                     // (the TROPICAL rock's own pixels - 50-land-trop)
   }
+  guardDraw('waterGround', () => waterGroundTint(x0, x1));   // (every ground under any water in that water's colour at its depth)
   // below the grid: the rock goes on down, in the dark - under every slice, the sea's too (one cave world, Nov 8: the ground under the sea is the land's;
   // before, only under the countries - LANDS - the sea's floor its own picture). Each slice from its own bottom
   C.fillStyle = UG_CSS;
@@ -55394,7 +55412,7 @@ on('blast', e => caveLifeBlast(e.x, e.y, e.r), 'caveLife', 26);
 const GEDGE_S = 4;                                            // (the edge's pixels a cell: a quarter of a cell, ~10 cm)
 // (made per tile - gedgeTile, below; the runs of each column it works from - ltRunsOf)
 // over a slice drawn at world x xl: its edge, in the hour's light (groundLit, 50-land-trop.js) as the slice
-function gedgeDraw(cv, xl, k) {   // (k: the land's slice - under the sea, in the water's colour as its tile: seaGroundLit)
+function gedgeDraw(cv, xl) {
   const E2 = cv && cv._gedge; if (!E2) return;
   const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + E2.w * LT_CELL)); if ((X1 - X0) / E2.w < 2) return;   // (a cell under 2 screen pixels: its steps don't show)
   // (a tile's piece laid where it falls in the slice's whole edge picture (U), as that one picture was placed - pixel for pixel the same; without the GPU, whole pixels)
@@ -55403,7 +55421,7 @@ function gedgeDraw(cv, xl, k) {   // (k: the land's slice - under the sea, in th
   let Y0 = UY0 + (E2.y0 - U.y0) * su, Y1 = Y0 + E2.cv.height / GEDGE_S * su; if (!GLR.on) { Y0 = Math.round(Y0); Y1 = Math.round(Y1); }
   if (Y1 <= Y0) return;
   const ga = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
-  C.drawImage(k != null ? seaGroundLit(E2.cv, k) : groundLit(E2.cv), X0, Y0, X1 - X0, Y1 - Y0);
+  C.drawImage(groundLit(E2.cv), X0, Y0, X1 - X0, Y1 - Y0);
   C.imageSmoothingEnabled = ga;
 }
 /* ---- (user Nov 8 14:43, tiles: "very tall and very deep are not an issue") what the ground's edge and rims of a slice need from its whole columns, kept from
@@ -58064,7 +58082,7 @@ function rimLight() {
   return { sx: sx > -1e8 ? sx : null, sy, col, k };
 }
 // over a slice drawn at world x xl: its rims, each as it faces the light
-function rimDraw(cv, xl, k) {   // (k: the land's slice - under the sea the light on its rims through the water's colour: seaGroundLit's)
+function rimDraw(cv, xl) {
   const Rm = cv && cv._rim; if (!Rm || !RIM.on || !GLR.on) return;
   const Lt = rimLight(); if (Lt.k < 0.02) return;
   const X0 = Math.round(PX(xl)), X1 = Math.round(PX(xl + Rm.w * LT_CELL)); if (X1 - X0 < 2) return;
@@ -58077,8 +58095,7 @@ function rimDraw(cv, xl, k) {   // (k: the land's slice - under the sea the ligh
   const ga = C.globalAlpha, sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
   // (a tile's rims laid where they fall in the slice's whole rim pictures (U), as those were placed; without the GPU, whole pixels)
   let DY = T, DH = B - T; if (U) { const su = (UB - UT) / U.H; DY = UT + (Rm.y0 - U.y0) * su; DH = Rm.H * su; if (!GLR.on) { const a = Math.round(DY), b = Math.round(DY + DH); DY = a; DH = b - a; } }
-  const fy = k != null ? seaFloorY(k) : -1e9, wt = fy > WATER_Y + 8 ? seaFloorMul(fy) : null, lc = wt ? Lt.col.map((v, j) => v * wt[j]) : Lt.col;
-  const put = (pic, w) => { if (!pic || w < 0.03) return; C.globalAlpha = ga * Math.min(1, w * Lt.k); C.drawImage(glTint(pic, wt ? 'rimW' : 'rim', RIG_ZERO, lc, false), X0, DY, X1 - X0, DH); };
+  const put = (pic, w) => { if (!pic || w < 0.03) return; C.globalAlpha = ga * Math.min(1, w * Lt.k); C.drawImage(glTint(pic, 'rim', RIG_ZERO, Lt.col, false), X0, DY, X1 - X0, DH); };
   put(Rm.L, -lx); put(Rm.R, lx); put(Rm.U, -ly * 0.7);
   C.globalAlpha = ga; C.imageSmoothingEnabled = sm;
 }
