@@ -5193,8 +5193,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 969;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 16:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 17:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10731,7 +10731,7 @@ function drawSubLights(x0, x1) {
     // (the screen is two half views: a lamp a whole beam past this one's edge still lights it - rules.md 6)
     if (l.x < x0 - MS_BEAM_L - 40 || l.x > x1 + MS_BEAM_L + 40) continue;
     if (l.k <= 0.01) continue;
-    const X = PX(l.x), Y = PY(l.y), a = l.a, L = MS_BEAM_L * SV, sp = msBeamSprite(), sc = L / sp.width, wy = Math.round(PY(waterLv(l.x) + 2)), dot = l.ms, lk = l.k, air = !!l.air;
+    const X = PX(l.x), Y = PY(l.y), a = l.a, L = MS_BEAM_L * SV, sp = msBeamSprite(), sc = L / sp.width, wy = Math.round(PY(surfaceY(l.x) + 2)), dot = l.ms, lk = l.k, air = !!l.air;
     // (user Nov 1, 12:12: the beam glowed down through the rock under a cave's mouth - "light stops at rock", one rule for every
     // lamp) under the water its glow is held to where its rays get before the rock: the caves' lamp's own 480 rays (CAVE.lampReach:
     // the caves' rock in a window, the game's ground outside them), each to the beam's length - and to the water, as before
@@ -10780,7 +10780,7 @@ function lampView(k) {
   for (const l of subLamps()) {
     const RL = l.reach || MS_BEAM_L, R = RL * SV;         // (its own reach: a sub's or a helicopter's MS_BEAM_L, a car's headlamp shorter, a lighthouse's far)
     if (l.x < x0 - RL - 40 || l.x > x1 + RL + 40 || l.k <= 0.01) continue;
-    const X = PX(l.x), Y = PY(l.y), wy = PY(waterLv(l.x) + 2); Rm = Math.max(Rm, R);   // (its own water's surface - waterLv, user Nov 3)
+    const X = PX(l.x), Y = PY(l.y), wy = PY(surfaceY(l.x) + 2); Rm = Math.max(Rm, R);   // (its own water's surface as it moves there - surfaceY: user Nov 9, every water line drawn from the moving surface, not the still level)
     // (its own side of the water's surface: the reach of a lamp above it ends at it, one under it starts there - its sign
     // on the near fade's length says which)
     bx0 = Math.min(bx0, X - R); bx1 = Math.max(bx1, X + R); by0 = Math.min(by0, l.air ? Y - R : Math.max(Y - R, wy)); by1 = Math.max(by1, l.air ? Math.min(Y + R, wy) : Y + R);
@@ -29469,6 +29469,7 @@ function renderObjects() {
   const ema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } if (GPUT.cur) gptLap(k, 0); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
   let ot = performance.now();
   const Bt = bh - SHY + 2;
+  UW_LIFT = 0;                                   // (the sea's own drawing: not lifted to another water - lakeWaterIn)
   const yW = PY(WATER_Y);
   // deep water
   // (its colours by depth: down to the harbour's floor as they always were, then on into the dark of the deep sea,
@@ -30378,7 +30379,7 @@ function drawShipShadows(x0, x1, lake) {
       const X = PX(d.blockFace);
       if (d.dir > 0) C.rect(-SHX - 20, -SHY - 20, X + SHX + 20, bh + 40); else C.rect(X, -SHY - 20, VWP - X + SHX + 20, bh + 40);
       C.clip();
-      wglShadows([[cx, half, 0.8, WATER_Y + 1, 1.35, 0]], strength, moonLit, lean, col, true);
+      wglShadows([[cx, half, 0.8, shadeTop(cx, half), 1.35, 0]], strength, moonLit, lean, col, true);
       C.restore();
     }
     return;
@@ -30421,7 +30422,7 @@ function drawShipShadows(x0, x1, lake) {
     const X = PX(d.blockFace);
     if (d.dir > 0) C.rect(-SHX - 20, -SHY - 20, X + SHX + 20, bh + 40); else C.rect(X, -SHY - 20, VWP - X + SHX + 20, bh + 40);
     C.clip();
-    cast(cx, half, 0.8, WATER_Y + 1, 1.35, 0);
+    cast(cx, half, 0.8, shadeTop(cx, half), 1.35, 0);
     fsLast = null;
     C.restore();
   }
@@ -30429,6 +30430,11 @@ function drawShipShadows(x0, x1, lake) {
   C.restore();
 }
 // (still: another water's copy of the same rays this frame - a lake's, drawLakeRoots - their fade read, not stepped again)
+// (user Nov 9 15:59, "Same for boat shadows? Any other system that is part of this") a pier deck's shade began at the still level - under a crest the
+// water over that was left unshaded: it begins at the highest of the water across it now, cut under the moving surface as every shadow (a boat's
+// begins at its own hull, which rides the waves)
+let UW_LIFT = 0;   // (how far the sea's drawing is lifted to another water's level while lakeWaterIn draws it there - world units)
+function shadeTop(cx, half) { let t = WATER_Y + 1; for (let q = -4; q <= 4; q++) t = Math.min(t, surfaceY(cx + half * q / 4) + 1); return t; }
 function drawRays(overlay, still) {
   // sunbeams by day, fainter cool moonbeams by night; both lean away from where the light is
   const dayS = E.day * (1 - 0.75 * E.overcast) * (1 - 0.5 * E.storm) * (1 - E.fog);
@@ -30468,7 +30474,7 @@ function drawRays(overlay, still) {
     C.beginPath();
     // (user Nov 9 15:45: "The light streaks don't respect the shapes ... rendering over the water or cut off" - its top was the still level, so in a
     // trough it stood out over the water and under a crest it began short of it: its top is the water's moving surface across its width now)
-    for (let q = 0; q <= 4; q++) { const xq = x + w * q / 4, yq = PY(surfaceY(xq) + 2); if (q) C.lineTo(PX(xq), yq); else C.moveTo(PX(xq), yq); }
+    for (let q = 0; q <= 4; q++) { const xq = x + w * q / 4, yq = PY(surfaceY(xq) - UW_LIFT + 2); if (q) C.lineTo(PX(xq), yq); else C.moveTo(PX(xq), yq); }   // (UW_LIFT: drawn lifted to another water's level - lakeWaterIn)
     C.lineTo(PX(x + w * 1.8 + slant), PY(SEABED_Y)); C.lineTo(PX(x - w * 0.2 + slant), PY(SEABED_Y));
     C.closePath(); C.fill();
   }
@@ -31585,7 +31591,7 @@ function drawSeaDecks(bot) {
   L.sort((a, b) => a.dk - b.dk || a.i - b.i);             // (nearest deck first: drawn last)
   // (a deck set up near the surface: its peaks kept under the water)
   const clip = true;   // (Nov 4 08:46, "When I zoom in, I sometimes see ocean rocks" over the land: a deck's pictures always kept under the water's surface)
-  if (clip) { C.save(); C.beginPath(); const Y = Math.round(PY(WATER_Y + 12)); C.rect(-SHX - 8, Y, VWP + SHX + 16, Bt + 8 - Y); C.clip(); }
+  if (clip) { C.save(); if (bot == null) surfacePath(Math.round(12 * SV), Bt + 8); else { C.beginPath(); const Y = Math.round(PY(WATER_Y + 12)); C.rect(-SHX - 8, Y, VWP + SHX + 16, Bt + 8 - Y); } C.clip(); }   // (the sea's: 12 under the water's moving surface - user Nov 9: in a trough its peaks stood in the air, under a crest they were cut short; another water's - lakeWaterIn, lifted to its level and cut by its own shape: 12 under its level, as before)
   // (each fill goes down only to where a nearer deck's own fill starts - that covers the rest: one screen of fill, not six)
   let end = Bt;
   for (const l of L) { l.end = end; end = Math.min(end, Math.ceil(PY(l.top) + l.S.sp.height * l.k * SV) + 4); }
@@ -40857,7 +40863,7 @@ function drawInk(x0, x1) {
     const L = Math.max(x0, ox - or), R = Math.min(x1, ox + or); if (R <= L) continue;
     C.save(); C.beginPath();
     const st = 24 / SV;
-    for (let wx = L - st; wx < R + st; wx += st) { const X = Math.round(PX(wx)), top = Math.round(PY(waterLv(wx + st / 2) + 2)), bot = Math.round(PY(seabedY(wx + st / 2))); if (bot > top) C.rect(X, top, Math.round(PX(wx + st)) - X, bot - top); }
+    for (let wx = L - st; wx < R + st; wx += st) { const X = Math.round(PX(wx)), top = Math.round(PY(surfaceY(wx + st / 2) + 2)), bot = Math.round(PY(seabedY(wx + st / 2))); if (bot > top) C.rect(X, top, Math.round(PX(wx + st)) - X, bot - top); }
     C.clip();
     // (a deep blue haze round the plume first - the ink thinning into the water - then the billows themselves)
     // (user Oct 27: "Light from the research sub doesn't work in oil spill (doesn't see through)") a sub's lamp (any: subLamps) cuts
@@ -44659,11 +44665,11 @@ function lakeWaterIn(a, b, lv, path, part, mx, noDecks, shallow = noDecks, bare 
     C.save(); path(); C.clip();
     try {
       const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12)), B = bh + SHY + 50 + Math.abs(dy), lay = st => { C.fillStyle = st; C.fillRect(X0, Y, X1 - X0, B - Y); };
-      if (part !== 'over') { C.save(); C.translate(0, dy);
+      if (part !== 'over') { C.save(); C.translate(0, dy); UW_LIFT = dl;
       if (!noDecks) waterDeep((deep, sh) => { lay(deep); if (sh) lay(sh); });   // (the sea's own deep - 44-shadows-seafloor.js; a lake: none - its own bowl is behind it, seen through its tint: user Nov 8 20:17, his picture)
       if (!noDecks) drawSeaDecks(bh - SHY + 2 - dy);         // (down to the view's bottom, wherever this water's surface is - the sea's deep only: a lake's bed is its own bowl behind it, bowlCol)
       if (!cave) drawRays(false, true);                      // (the sea's rays, their fade as the sea's pass left it this frame)
-      C.restore(); }
+      C.restore(); UW_LIFT = 0; }
       if (part === 'under') return;
       if (!cave) drawSeaLife();                           // (a pool or cave under the ground: none - zoomed out every one of them drew all the fish, 48 times a frame)
       if (!cave) { const b0 = BATCH; BATCH = false; try { drawReefItems(reef, a, b, true); drawAlgae(a, b, true); drawUwPlants(a, b, true); } finally { BATCH = b0; } }   // (and the UNDERWATER DECKS' plants on its bed - drawUwPlants)
