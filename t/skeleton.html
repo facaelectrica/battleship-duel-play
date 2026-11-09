@@ -310,7 +310,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 19:42', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 09 19:48', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -2233,6 +2233,60 @@ function gpuGLTransformFeedback(gl, p, first, count) {
   cp.end();
   out.b.own.use = FR.sub; for (const b of bufs) if (b && b.own) b.own.use = FR.sub;
   GPU.stats.computes++;
+}
+
+/* ================================================================
+   src/gpu/50-frame.js - THE FRAME (engine skeleton, Nov 9; engine-design 3)
+   What every engine part plugs into, never into another part:
+   1. THE LAYERS (3.1): one ordered list, back to front, owned by the frame. render() (48-render.js) runs FRAME.layers in order
+      for the frame; today each is one of the old renderer's steps, in the order they always ran:
+        ground   the ground's pictures painted where they're dirty (50-land-terrain landPaintStep)
+        sky      the sky decks, sun and clouds (41-sky-new.js, 42-render-sky.js)
+        world    the world's layer: objects, the water's distortion, the land (43-*, 40-zz-water-gl.js, 50-land-*)
+        tint     the hour's tint and the world to the screen, the lamps, the sky's front deck, the caves, the eye's grade
+        overlays smoke, fire, rain and the like over the world, the one light, the editors' drawing
+      A part replaces its layer with frameLayer(name, run) or adds its own next to one ({ before | after: name }). run(F) gets the
+      frame: F.views ([view, camPx, sx, w, index, camF] each - two players: two views, always), F.lap(name, t) / F.tt (timing).
+   2. THE CAMERA PER VIEW (3): frameCam(vi) - the view's camera as the GPU reads it (a uniform in this submit's arena), made from
+      what beginView set: where the view's left edge and top are in pixels (CAMPX, TOPPX), the scale (SV - pixels a world unit), the
+      view's place and size on the target (VSX, VWW, the target's height), the clock. A pass draws view 2 from the same data with
+      view 2's camera: a second set of draw calls, never a second loop over things.
+   3. THE LIGHT'S INPUTS (3.2-3.3): frameLight() - gathered once a frame after the layers that place lamps have run: the hour's and
+      weather's light (E), and every lamp that throws a beam (subLamps - each its place, angle, strength, reach) as numbers the GPU
+      reads. Today the light is still drawn by the old lightDraw (47-render-overlays.js, 50-land-zz-light.js); the light pass
+      (part 7) is written against these inputs.
+   ================================================================ */
+const FRAME = { layers: [], camF: new Float32Array(16), litF: new Float32Array(16), lampF: new Float32Array(8 * 64) };
+function frameLayer(name, run, at) {
+  const L = { name, run }, i = FRAME.layers.findIndex(q => q.name === name);
+  if (i >= 0 && !at) { FRAME.layers[i] = L; return L; }
+  if (i >= 0) FRAME.layers.splice(i, 1);
+  const ref = at && FRAME.layers.findIndex(q => q.name === (at.before || at.after));
+  if (at && ref >= 0) FRAME.layers.splice(at.before ? ref : ref + 1, 0, L); else FRAME.layers.push(L);
+  return L;
+}
+// the camera of the view beginView set last (vi its index): { buffer, offset, size } in this submit's arena - read by a pass as a
+// uniform: vec4(left px, top px, scale, zoom), vec4(view x on the target, view width, target width, target height), vec4(time, view, 0, 0)
+function frameCam(vi, v, tw, th) {
+  const f = FRAME.camF;
+  f[0] = CAMPX; f[1] = TOPPX; f[2] = SV; f[3] = v ? v.z : 1;
+  f[4] = VSX; f[5] = VWW; f[6] = tw || 0; f[7] = th || 0;
+  f[8] = typeof time === 'number' ? time : 0; f[9] = vi; f[10] = 0; f[11] = 0;
+  const [c, o] = arenaAlloc(64, 256); c.cpu.set(new Uint8Array(f.buffer), o);
+  return { buffer: c.gb, offset: o, size: 64 };
+}
+// the light's inputs this frame: { scalars (the hour's and weather's light), lamps (n of them, 8 numbers each: x, y in the world,
+// angle, strength, reach, 0, 0, 0) } in this submit's arena
+function frameLight() {
+  const f = FRAME.litF;
+  f[0] = E.light; f[1] = E.night; f[2] = E.dusk; f[3] = E.sunAlt;
+  f[4] = E.fog || 0; f[5] = E.rain || 0; f[6] = E.cloud || 0; f[7] = E.lampsOn || 0;
+  f[8] = E.sunset || 0; f[9] = E.tintA || 0; f[10] = E.warm || 0; f[11] = E.hour || 0;
+  const L = typeof subLamps === 'function' ? subLamps() : [], n = Math.min(L.length, 64), lf = FRAME.lampF;
+  for (let i = 0; i < n; i++) { const q = L[i], o = i * 8; lf[o] = q.x; lf[o + 1] = q.y; lf[o + 2] = q.a || 0; lf[o + 3] = q.k == null ? 1 : q.k; lf[o + 4] = q.reach || 0; lf[o + 5] = lf[o + 6] = lf[o + 7] = 0; }
+  const [c, o] = arenaAlloc(64, 256); c.cpu.set(new Uint8Array(f.buffer), o);
+  const [c2, o2] = arenaAlloc(Math.max(32, n * 32), 256); c2.cpu.set(new Uint8Array(lf.buffer, 0, n * 32), o2);
+  return { scalars: { buffer: c.gb, offset: o, size: 64 }, lamps: { buffer: c2.gb, offset: o2, size: Math.max(32, n * 32) }, n };
 }
 
 const GPU_OK = await gpuBoot();
@@ -7409,7 +7463,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 19:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 19:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36055,6 +36109,88 @@ function drawGrade(views) {
 // (Nov 1) a sub-part's lap, CPU and GPU, from t0 (performance.now() when it began): the tint part's tn* - here and 41-sky-new.js
 // skyNewFront - as the sky's, the world's and the overlays' own sema / ema
 function subLap(k, t0) { let rb = 0; if (probe.on) { probeFlush(g); rb = probe.cost; } if (GPUT.cur) gptLap(k, 0); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; }
+/* THE FRAME'S LAYERS (engine skeleton, Nov 9 - engine-design 3.1): render's steps, in the order they always ran, each a named layer of
+   FRAME.layers. An engine part replaces its layer (frameLayer(name, run) again) or adds one before / after another (frameLayer(name, run,
+   { before | after: name })); nothing draws outside the list. F: the frame's views ([v, camPx, sx, w, index, camF]), its timing lap and tt */
+// the ground's pictures painted (50-land-terrain landPaintStep)
+frameLayer('ground', F => {
+  { landPaintStep(F.views); F.tt = F.lap('landPaint', F.tt); }   // (the ground's pictures painted from their dirty marks, before any drawing - 50-land-terrain)
+});
+// the sky (41-sky-new.js, 42-render-sky.js)
+frameLayer('sky', F => {
+  for (let i = 0; i < 2; i++) { planeLamps[i].length = 0; lighthouseGlow[i].length = 0; airLamps[i].length = 0; lateLit[i].length = 0; brightLights[i].length = 0; fwLate[i].length = 0; }
+  noteZoom();
+  skyNewFrame();                                          // (THE NEW SKY: its frame - 41-sky-new.js)
+  for (const [v, cp, sx, w, i, cf] of F.views) { beginView(g, v, cp, sx, w, i, cf); renderSky(); g.restore(); }
+  F.tt = F.lap('sky', F.tt);
+});
+// the world into its layer: objects, the water's distortion, the land (43-, 40-zz-water-gl.js, 50-land-*)
+frameLayer('world', F => {
+  oc.setTransform(1, 0, 0, 1, 0, 0);
+  oc.clearRect(0, 0, bw, bh);
+  for (const [v, cp, sx, w, i, cf] of F.views) {
+    beginView(oc, v, cp, sx, w, i, cf); guardDraw('world', renderObjects); F.tt = F.lap('objects', F.tt);
+    distortWater(sx, w); oc.setTransform(1, 0, 0, 1, sx + SHX, SHY); drawFgRocks(); F.tt = F.lap('distort', F.tt); oc.restore();   // (one cave world, Nov 8: no cave mouths of the caves' own to lay back - every cave is the land's, drawn by it)
+    // (LAND TEST: the two countries, over the sea's picture where they are - user Oct 25)
+    { beginView(oc, v, cp, sx, w, i, cf); guardDraw('land', renderLandObjects); oc.restore(); F.tt = F.lap('land', F.tt); }
+    // (the one light under the ground: everything under the land's built line dark where no light reaches - the sun's at its angle, every lamp's -
+    // laid over all the view drew, land and sea - 50-land-zz-light.js)
+    // (the sea's caves' look was the caves' own here, drawLook - one cave world, Nov 8: the land's, 50-land-zz-cavelook.js)
+  }
+  // night and dusk tint the world (not the sky, which is already lit)
+  // (Nov 1: the tint part's own sub-parts, CPU and GPU, as the sky's, the world's and the overlays' - tn*: the tint and the world's
+  // copy to the screen (and the fog), the lamps' lights, the sky's front (deck 1, the smoke behind it, sparks, bullets, rays), the
+  // late fireworks, the caves, the eye's grade)
+});
+// the hour's tint and the world to the screen, lamps, the sky's front, the caves, the grade
+frameLayer('tint', F => {
+  const tl = subLap;
+  let ts = F.tt;
+  oc.setTransform(1, 0, 0, 1, 0, 0);
+  // (on the GPU, with no fog to draw between: the tint and the copy to the screen in one pass - 40-zz-water-gl.js)
+  const tintGL = gpuwOn('tint') && !(E.fog > 0.02);
+  if (tintGL) {
+    const two = E.tintA > 0.01 && E.tintA - E.tintClearA > 0.01;
+    wglTintCopy(F.views, i => {
+      if (!(E.tintA > 0.01)) return null;
+      if (!two) return { css: rgbs(E.tint, E.tintA) };
+      const dy = deckYs[i] + SHY, f = Math.round(40 * S * ZOOM_REF), tg = oc.createLinearGradient(0, dy - f, 0, dy + f);
+      tg.addColorStop(0, rgbs(E.tint, E.tintClearA)); tg.addColorStop(1, rgbs(E.tint, E.tintA));
+      return { grad: tg };
+    }, E.warm > 0.01 ? `rgba(255,120,140,${E.warm.toFixed(3)})` : null);
+  } else {
+  oc.globalCompositeOperation = 'source-atop';
+  if (E.tintA > 0.01) {
+    // the weather's gray light is under the clouds; above them only the hour's tint
+    if (E.tintA - E.tintClearA > 0.01) for (const [, , sx, w, i] of F.views) {
+      const dy = deckYs[i] + SHY, f = Math.round(40 * S * ZOOM_REF), tg = oc.createLinearGradient(0, dy - f, 0, dy + f);
+      tg.addColorStop(0, rgbs(E.tint, E.tintClearA)); tg.addColorStop(1, rgbs(E.tint, E.tintA));
+      oc.fillStyle = tg; oc.fillRect(sx, 0, w, bh);
+    } else { oc.fillStyle = rgbs(E.tint, E.tintA); oc.fillRect(0, 0, bw, bh); }
+  }
+  if (E.warm > 0.01) { oc.fillStyle = `rgba(255,120,140,${E.warm.toFixed(3)})`; oc.fillRect(0, 0, bw, bh); }
+  oc.globalCompositeOperation = 'source-over';
+  if (E.fog > 0.02) for (const [v, cp, sx, w, i, cf] of F.views) { beginView(oc, v, cp, sx, w, i, cf); fogObjects(); oc.restore(); }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.drawImage(ob, 0, 0);
+  }
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  ts = tl('tnCopy', ts);
+  for (const [v, cp, sx, w, i, cf] of F.views) { beginView(g, v, cp, sx, w, i, cf); drawLampLight(); drawLighthouseGlow(); drawLateLit(); drawAirLamps(); drawPlaneLamps(); ts = tl('tnLamps', ts); guardDraw('newsky', () => { ts = skyNewFront(ts); }); drawFwLate(); g.restore(); ts = tl('tnFw', ts); }
+  // (OPEN WORLD: the underwater caves where the exploration sub's lamp finds them - over the world and its night, as the
+  // lamp's own light is; unlit, a cave is the world's own ground - 50-land-caves)
+  // (Nov 8, one light: the caves' own lamp pass over the night is gone - drawLook before the light, above)
+  CAVE.pump();
+  ts = tl('tnCaves', ts);
+  guardDraw('grade', () => drawGrade(F.views));
+  tl('tnGrade', ts);
+  F.tt = F.lap('tint', F.tt);
+});
+// overlays, the one light, the editors' drawing
+frameLayer('overlays', F => {
+  for (const [v, cp, sx, w, i, cf] of F.views) { let tq = performance.now(); beginView(g, v, cp, sx, w, i, cf); renderOverlays(); tq = subLap('ovAll', tq); guardDraw('light', lightDraw); tq = subLap('light', tq);   /* (the one light's dark over all the world drew, in every mode - Battle plays the same built world, its caves too (user Nov 8 20:41: caves seen in Battle) - the smoke and dust of a blast too, user Nov 8 17:18: "Lit pieces in the dark"; the lamps' and fires' glows after it) */ guardDraw('landEd', landEdDraw); tq = subLap('edLand', tq); guardDraw('islEd', islEdDraw); tq = subLap('edShapes', tq); if (LAND) guardDraw('caveEd', CAVE.edDraw); tq = subLap('edCaves', tq); guardDraw('colView', colvDraw); tq = subLap('edCol', tq); guardDraw('vehEd', vehEdDraw); subLap('edVeh', tq); g.restore(); }   // (the GAME EDITOR's FLOOR handles - 50-land-floor.js)   // (each timed - the perf panel's parts: ovAll the game's overlays, ed* the editor's drawing)
+  F.tt = F.lap('overlays', F.tt);
+});
 function render() {
   if (!worldLive()) { drawNoWorld(); return; }            // (no world yet, or LOADING: the menu over black - user Oct 31, 19-menu.js)
   const T0 = performance.now();
@@ -36074,70 +36210,9 @@ function render() {
   const T = performance.now(), lap = (k, t0) => { let rb = 0; if (probe.on) { const n0 = probe.n; probeFlush(g); probeFlush(oc); rb = (probe.n - n0) * probe.cost; } if (GPUT.cur) gptLap(k, 1); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
   let tt = T;
   FT.env = (FT.env || 0) + (T - T0);
-  { landPaintStep(views); tt = lap('landPaint', tt); }   // (the ground's pictures painted from their dirty marks, before any drawing - 50-land-terrain)
-  for (let i = 0; i < 2; i++) { planeLamps[i].length = 0; lighthouseGlow[i].length = 0; airLamps[i].length = 0; lateLit[i].length = 0; brightLights[i].length = 0; fwLate[i].length = 0; }
-  noteZoom();
-  skyNewFrame();                                          // (THE NEW SKY: its frame - 41-sky-new.js)
-  for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); renderSky(); g.restore(); }
-  tt = lap('sky', tt);
-  oc.setTransform(1, 0, 0, 1, 0, 0);
-  oc.clearRect(0, 0, bw, bh);
-  for (const [v, cp, sx, w, i, cf] of views) {
-    beginView(oc, v, cp, sx, w, i, cf); guardDraw('world', renderObjects); tt = lap('objects', tt);
-    distortWater(sx, w); oc.setTransform(1, 0, 0, 1, sx + SHX, SHY); drawFgRocks(); tt = lap('distort', tt); oc.restore();   // (one cave world, Nov 8: no cave mouths of the caves' own to lay back - every cave is the land's, drawn by it)
-    // (LAND TEST: the two countries, over the sea's picture where they are - user Oct 25)
-    { beginView(oc, v, cp, sx, w, i, cf); guardDraw('land', renderLandObjects); oc.restore(); tt = lap('land', tt); }
-    // (the one light under the ground: everything under the land's built line dark where no light reaches - the sun's at its angle, every lamp's -
-    // laid over all the view drew, land and sea - 50-land-zz-light.js)
-    // (the sea's caves' look was the caves' own here, drawLook - one cave world, Nov 8: the land's, 50-land-zz-cavelook.js)
-  }
-  // night and dusk tint the world (not the sky, which is already lit)
-  // (Nov 1: the tint part's own sub-parts, CPU and GPU, as the sky's, the world's and the overlays' - tn*: the tint and the world's
-  // copy to the screen (and the fog), the lamps' lights, the sky's front (deck 1, the smoke behind it, sparks, bullets, rays), the
-  // late fireworks, the caves, the eye's grade)
-  const tl = subLap;
-  let ts = tt;
-  oc.setTransform(1, 0, 0, 1, 0, 0);
-  // (on the GPU, with no fog to draw between: the tint and the copy to the screen in one pass - 40-zz-water-gl.js)
-  const tintGL = gpuwOn('tint') && !(E.fog > 0.02);
-  if (tintGL) {
-    const two = E.tintA > 0.01 && E.tintA - E.tintClearA > 0.01;
-    wglTintCopy(views, i => {
-      if (!(E.tintA > 0.01)) return null;
-      if (!two) return { css: rgbs(E.tint, E.tintA) };
-      const dy = deckYs[i] + SHY, f = Math.round(40 * S * ZOOM_REF), tg = oc.createLinearGradient(0, dy - f, 0, dy + f);
-      tg.addColorStop(0, rgbs(E.tint, E.tintClearA)); tg.addColorStop(1, rgbs(E.tint, E.tintA));
-      return { grad: tg };
-    }, E.warm > 0.01 ? `rgba(255,120,140,${E.warm.toFixed(3)})` : null);
-  } else {
-  oc.globalCompositeOperation = 'source-atop';
-  if (E.tintA > 0.01) {
-    // the weather's gray light is under the clouds; above them only the hour's tint
-    if (E.tintA - E.tintClearA > 0.01) for (const [, , sx, w, i] of views) {
-      const dy = deckYs[i] + SHY, f = Math.round(40 * S * ZOOM_REF), tg = oc.createLinearGradient(0, dy - f, 0, dy + f);
-      tg.addColorStop(0, rgbs(E.tint, E.tintClearA)); tg.addColorStop(1, rgbs(E.tint, E.tintA));
-      oc.fillStyle = tg; oc.fillRect(sx, 0, w, bh);
-    } else { oc.fillStyle = rgbs(E.tint, E.tintA); oc.fillRect(0, 0, bw, bh); }
-  }
-  if (E.warm > 0.01) { oc.fillStyle = `rgba(255,120,140,${E.warm.toFixed(3)})`; oc.fillRect(0, 0, bw, bh); }
-  oc.globalCompositeOperation = 'source-over';
-  if (E.fog > 0.02) for (const [v, cp, sx, w, i, cf] of views) { beginView(oc, v, cp, sx, w, i, cf); fogObjects(); oc.restore(); }
-  g.setTransform(1, 0, 0, 1, 0, 0);
-  g.drawImage(ob, 0, 0);
-  }
-  g.setTransform(1, 0, 0, 1, 0, 0);
-  ts = tl('tnCopy', ts);
-  for (const [v, cp, sx, w, i, cf] of views) { beginView(g, v, cp, sx, w, i, cf); drawLampLight(); drawLighthouseGlow(); drawLateLit(); drawAirLamps(); drawPlaneLamps(); ts = tl('tnLamps', ts); guardDraw('newsky', () => { ts = skyNewFront(ts); }); drawFwLate(); g.restore(); ts = tl('tnFw', ts); }
-  // (OPEN WORLD: the underwater caves where the exploration sub's lamp finds them - over the world and its night, as the
-  // lamp's own light is; unlit, a cave is the world's own ground - 50-land-caves)
-  // (Nov 8, one light: the caves' own lamp pass over the night is gone - drawLook before the light, above)
-  CAVE.pump();
-  ts = tl('tnCaves', ts);
-  guardDraw('grade', () => drawGrade(views));
-  tl('tnGrade', ts);
-  tt = lap('tint', tt);
-  for (const [v, cp, sx, w, i, cf] of views) { let tq = performance.now(); beginView(g, v, cp, sx, w, i, cf); renderOverlays(); tq = subLap('ovAll', tq); guardDraw('light', lightDraw); tq = subLap('light', tq);   /* (the one light's dark over all the world drew, in every mode - Battle plays the same built world, its caves too (user Nov 8 20:41: caves seen in Battle) - the smoke and dust of a blast too, user Nov 8 17:18: "Lit pieces in the dark"; the lamps' and fires' glows after it) */ guardDraw('landEd', landEdDraw); tq = subLap('edLand', tq); guardDraw('islEd', islEdDraw); tq = subLap('edShapes', tq); if (LAND) guardDraw('caveEd', CAVE.edDraw); tq = subLap('edCaves', tq); guardDraw('colView', colvDraw); tq = subLap('edCol', tq); guardDraw('vehEd', vehEdDraw); subLap('edVeh', tq); g.restore(); }   // (the GAME EDITOR's FLOOR handles - 50-land-floor.js)   // (each timed - the perf panel's parts: ovAll the game's overlays, ed* the editor's drawing)
-  tt = lap('overlays', tt);
+  const F = { views, lap, tt };
+  for (const Ly of FRAME.layers) Ly.run(F);   // (THE FRAME'S LAYERS, back to front - src/gpu/50-frame.js; registered above render)
+  tt = F.tt;
   C = g;
   g.setTransform(1, 0, 0, 1, 0, 0);
   if (!cam.merge) { g.fillStyle = '#04070f'; g.fillRect(half - 2, 0, 4, bh); }   // (two players: the line between the halves)
