@@ -2044,10 +2044,12 @@ class ColTable {
    Not a game system: pictures are the page's drawing, never in the simulation's tables or the worker (rules.md section 7, rule 5).
    Readings: the perf panel's PICS line, __game.pics() (the stores, biggest first).
    ================================================================ */
-const PIC_BUDGET = { touch: 700e6, desktop: 1600e6 };  // (bytes of pictures the page may hold - its canvases and the graphics card's textures and
+const PIC_BUDGET = { touch: 450e6, desktop: 1600e6 };  // (bytes of pictures the page may hold - its canvases and the graphics card's textures and
                                                         // layers together: an iPad / phone, where they share one graphics process, and a computer.
                                                         // User Nov 9: his iPad ran two-player Battle at 612 MB without a reset, but 450 kept it TIGHT the
-                                                        // whole game - 9,812 pictures let go and made again, 62 ms of script a frame, 11 fps: touch 450 -> 700)
+                                                        // whole game - 9,812 pictures let go and made again, 62 ms of script a frame, 11 fps: touch 450 -> 700 (955).
+                                                        // At 700 the iPad's page restarted within minutes (user 14:45): back to 450 (964) - its limit is
+                                                        // somewhere above 612; the use has to come down instead)
 const PIC_IDLE = 45;                                    // (seconds undrawn before a kept picture is let go, budget or not)
 const PIC_HOLD = 90;                                    // (frames: a picture drawn this recently is never let go)
 const PIC_PACK_IDLE = 300;                              // (seconds undrawn before a packable one is packed, budget or not: an old world's let go)
@@ -5191,8 +5193,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 963;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 15:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 964;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 15:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
