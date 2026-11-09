@@ -5210,8 +5210,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 944;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 12:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 945;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 12:51';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -23841,8 +23841,9 @@ function resizeSky(cw, ch, keep) {
   // zoom step that changed it. Now only the sky pixel changed (keep): the same clouds, the scene scaled to the new cells -
   // their places and sizes in cells by the new scale, their puffs made again at it)
   if (keep && clouds.length && oS > 0) {
-    const r = S / oS; WORLD = Math.round(W * 52);
+    const oWorld = WORLD; WORLD = Math.round(W * 52); const r = oWorld > 0 ? WORLD / oWorld : S / oS;   // (each cloud where it was in its world: the world is W wide in cells)
     for (const c of clouds) c.bx *= r;
+    for (const L of LAYERS) L.off = (L.off || 0) * r;   // (the wind drift kept in place)
     regenAll();
     return;
   }
@@ -24678,7 +24679,7 @@ function deckDepths() { for (const lay of LAYERS) { const mine = clouds.filter(c
 // every wisp takes a new shape (the WISP BUMPS sliders), each with its own seed - the lifts are kept
 function reformWisps() { for (const c of clouds) if (c.wisp) { const r = seed32(c.uid * 7919 + 13); morphTo(c, wispLobes(r, 140 + r() * 300, r() * (c.lay.name === 'hero' ? 170 : 100), 1 / Math.sqrt(c.lay.k)), 0.3); } }
 function deckLook() { let ch = 0; for (const L of LAYERS) { const k = P['sz' + L.dn] ?? L.k, h = P['hz' + L.dn] ?? L.haze; if (k !== L.k) { L.k = k; ch = 1; } L.haze = h; } for (const c of clouds) { const h = c.lay.haze; if (c.haze !== h) c.haze = h; } return ch; }   // (stage 6, Oct 30: written only when it changes - a number stored in every cloud every frame was a new heap number each, ~50 KB of garbage a frame)   // (DECK n SIZE, DECK n HAZE)
-function regenAll() { SKIX.clouds = null; for (const c of clouds) { c.s = S * c.lay.k; if (c === hero || (c.items && c.visible)) genCloud(c); else c.items = null; } }   // (SKIX.clouds = null: sizes and places changed, the baked pass's index made again)
+function regenAll() { SKIX.clouds = null; const bk = bakeOn(); for (const c of clouds) { c.s = S * c.lay.k; if (c === hero || (c.items && c.visible && !bk)) genCloud(c); else c.items = null; } }   // (baked sky - Nov 9: their puffs made again within the frame's budget when baked again; their pictures laid scaled meanwhile)   // (SKIX.clouds = null: sizes and places changed, the baked pass's index made again)
 
 
 // ================================================================== lightning: the game's bolts light the clouds
@@ -25279,7 +25280,11 @@ function bakeSigs(V) {
   // (Oct 31: the decks' zoom, ZL, is part of the LOOK now, not of the picture - a zoom re-bakes the clouds behind the scenes, a few a
   // frame, while the pictures already baked are laid scaled to it (bakeDraw), and the new ones go in together; it threw every picture
   // away and baked the whole sky in one frame - up to ~200 ms on a zoom step, and every frame of a smooth zoom)
-  const hard = [view, W, H, CPX, S.toFixed(4), V.w, GLR.epoch].join(',');
+  // (Nov 9, zooming in and out in a storm: the sky pixel follows the zoom - 4 near, 3 out - and a new sky pixel was a hard change: every picture thrown
+  // away and the whole sky baked on one frame, ~180 storm towers, ~19 s. The sky pixel (CPX, and the sizes in cells that go with it: W, H, S) is part of
+  // the LOOK now, as the decks' zoom is: the pictures already baked are laid scaled to it (bakeDraw: s.S) while the new ones are baked behind the
+  // scenes, and go in together. Hard: the screen and the scene's settings themselves (lastScreenNC - the scene laid out again: other clouds)
+  const hard = [view, lastScreenNC, GLR.epoch].join(',');
   const step = Math.max(0.25, P.bakestep ?? 3) / 60, hk = Math.round(P.time / step);
   const hero = LAYERS[HERO_I], mvU = Math.max(8, W * Math.max(0.05, P.bakemove ?? 0.25) / Math.max(1e-3, ZL));
   const mv = (P.farsun ?? 1) > 0 ? 0 : Math.round(hero.uPiv / mvU);   // (FAR SUN: a pan no longer bakes the whole sky again - each cloud's own light step does, bakeVisit)
@@ -25294,7 +25299,7 @@ function bakeSigs(V) {
     BKP.len = ps.length; BKP.hash = hashStr(ps);
   }
   const sun = SUNO ? SUNO.x.toFixed(3) + '/' + SUNO.y.toFixed(3) : '';
-  const soft = [ZL.toFixed(4), hk, WINDQ, Math.round(P.cover * 50), Math.round((P.big || 0) * 20), Math.round(P.rain * 20), Math.round(P.fog * 20), mv, sun, BKP.len, BKP.hash].join('|');
+  const soft = [ZL.toFixed(4), CPX, S.toFixed(4), W, H, V.w, hk, WINDQ, Math.round(P.cover * 50), Math.round((P.big || 0) * 20), Math.round(P.rain * 20), Math.round(P.fog * 20), mv, sun, BKP.len, BKP.hash].join('|');
   return [hard, soft];
 }
 const BKP = { k: [], v: [], len: 0, hash: 0 };
@@ -25372,7 +25377,7 @@ function bakeVisit(c, vis, gk) {
   // (a cut sprite - bakeCloud - at another zoom: laid scaled while none of its cut sides comes into the view, and baked for this zoom within the frame's
   // budget (stale); a cut side in view, it's a cloud with no picture: baked at once. Nov 9, user: "remember to zoom in and out during the tests" - in a
   // storm every frame of a zoom baked its ~20-30 cut towers at once, 200-240 ms frames all the way)
-  const zk = bkOk(v.F) && v.F.cut && v.F.zl !== c.lay.zl ? c.lay.zl / v.F.zl : 1, cutShows = zk !== 1 && bkCutShows(v.F.cut, X, c.y, zk, 8);
+  const zk = bkOk(v.F) && v.F.cut ? bkScale(v.F, c) : 1, cutShows = zk !== 1 && bkCutShows(v.F.cut, X, c.y, zk, 8);
   if (zk !== 1 && !cutShows) v.F.stale = true;
   const shownF = bkOk(v.F) && !cutShows ? v.F : null;
   // (FAR SUN: its light by where it is from the disc, in steps - a step moved since its picture was baked: baked again, alone)
@@ -25491,7 +25496,7 @@ function bakeCloud(c, ax, ay) {
     }
   }
   let s, cut = null;
-  if (!(x1 >= x0)) s = { empty: true, pk: c.pkNow ?? '', zl: c.lay.zl };
+  if (!(x1 >= x0)) s = { empty: true, pk: c.pkNow ?? '', zl: c.lay.zl, S };
   else {
     x0 = Math.floor(x0); y0 = Math.floor(y0); x1 = Math.ceil(x1); y1 = Math.ceil(y1);
     // (Nov 9, graphics memory - a storm at the launch zoom: deck 1's towers several screens tall, one sprite 5664 x 4768, 108 MB, of which a screen
@@ -25512,7 +25517,7 @@ function bakeCloud(c, ax, ay) {
     if (!T) T = bkTarget(w, h);
     const cx = T.getContext();
     for (const [pb, ox, oy, pal] of BKREC.ops) cx.drawPuffs(pb, ox - x0, oy - y0, pal);
-    s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID, pk: c.pkNow ?? '', w, zl: c.lay.zl, cut };   // (zl: the decks' zoom it was baked at)   // (w: the picture's own width - its texture may be wider, on the shelf's sizes)
+    s = { T, rx: x0 - ax, ry: y0 - ay, uid: ++BK_UID, pk: c.pkNow ?? '', w, zl: c.lay.zl, S, cut };   // (zl: the decks' zoom it was baked at)   // (w: the picture's own width - its texture may be wider, on the shelf's sizes)
   }
   BKREC.ops.length = 0;
   if (v.now === 3) { s.sig = b.next || b.cur; if (v.F && v.F !== s) bkFree(v.F); v.F = s; if (b.next) { if (v.B && v.B !== s) bkFree(v.B); v.B = s; } }
@@ -25522,6 +25527,8 @@ function bakeCloud(c, ax, ay) {
   FTV.bake = (FTV.bake || 0) + ms; FTV.baked = (FTV.baked || 0) + 1;
   v.now = 0;
 }
+// (a sprite baked at another zoom or sky pixel: how much bigger it's laid now - the decks' zoom, and the sky's scale in cells, S)
+const bkScale = (s, c) => (s.zl && s.zl !== c.lay.zl ? c.lay.zl / s.zl : 1) * (s.S && s.S !== S ? S / s.S : 1);
 // (whether a cut sprite laid at scale ks about (x, y) shows one of its cut sides within the view's w x h, m pixels inside it)
 function bkCutShows(K, x, y, ks, m, w = W, h = H) { return (K[0] !== null && x + K[0] * ks > -m) || (K[1] !== null && y + K[1] * ks > -m) || (K[2] !== null && x + K[2] * ks < w + m) || (K[3] !== null && y + K[3] * ks < h + m); }
 // a cloud in a deck (drawDeck0), baked sky: baked now if it is its turn, then its sprite laid (true), or the live way (false)
@@ -25532,7 +25539,7 @@ function bakeDraw(c, ax, ay) {
   const s = v.F;
   if (bkOk(s) && !s.empty) {
     // (baked at another zoom - a zoom's new pictures still on their way: laid scaled about the cloud's place, ks the scale)
-    const ks = s.zl && s.zl !== c.lay.zl ? c.lay.zl / s.zl : 1;
+    const ks = bkScale(s, c);
     if (s.cut && ks !== 1 && bkCutShows(s.cut, ax, ay, ks, 0, TW, DLH || H)) return true;   // (a cut side would show: not laid - bakeVisit has it baked at once)
     // (a cut sprite - bakeCloud: the layer and BK_CROP_T of a view round it, in the sprite's own place; past a cut side, baked again next frame)
     if (s.cut && !s.stale) {
@@ -25830,11 +25837,17 @@ function skyScreen(bw, bh) {
   // (user Oct 28: "never lower than 3, otherwise it gets really slow": zoomed out it stops at 3 - or at SKY PIXEL itself, if set lower)
   const cs = Math.max(1, Math.round(P.cells || 4));   // (Oct 30, user: "higher pixel density overall" - the baked sky pays for it at bake time: down to 1)
   CPX = Math.max(Math.min(3, cs), Math.round(cs * ((P.cellz ?? 1) > 0 ? Math.min(1, ZL) : 1)));
-  if (lastScreen && old !== CPX) { for (const L of LAYERS) L.off = (L.off || 0) * old / CPX; FORCE = frameNo + 3; }   // (the wind drift kept in place; the sky built at once, not over many frames)
+  const pxNew = !!lastScreen && old !== CPX;
   const key = bw + 'x' + bh + '@' + CPX + '/' + (P.skyh ?? 0.5) + '/' + (P.cloudk ?? 1) + '/' + (P.tall ?? 0.3) + '/' + (P.tallwx ?? 0.5) + '/' + (P.mix ?? 0.7) + '/' + (P.region ?? 1.6) + '/' + (P.clump ?? 0.85) + '/' + (P.clumpw ?? 1.1) + '/' + (P.clumpd ?? 0.45);   // (Oct 28: TOWERS, KIND MIX, STRETCH rebuild the scene too)
   if (key === lastScreen) return;
-  const keyNC = key.replace('@' + CPX + '/', '/'), onlyPx = !!lastScreen && keyNC === lastScreenNC && !SNAPLOAD;   // (only the sky pixel changed: the same scene, scaled)
+  // (only the sky pixel, or the view's size, changed: the same scene, scaled. Nov 9, zooming in and out with two players: the views join into one screen
+  // zoomed out and part again zooming in, and a view of another width laid the scene out again - other clouds in other places, all of them baked on
+  // that one frame: ~165 storm towers, 18-21 s. lastScreenNC: the scene's own settings, without the screen's size or the sky pixel)
+  const keyNC = key.slice(key.indexOf('@')).replace('@' + CPX + '/', '/'), onlyPx = !!lastScreen && keyNC === lastScreenNC && !SNAPLOAD;
   lastScreen = key; lastScreenNC = keyNC;
+  // (a new sky pixel with a new scene: built at once, not over many frames. Only the sky pixel - the same scene, its baked pictures laid scaled while
+  // their new ones come (12-bake.js, Nov 9): nothing at once)
+  if (pxNew && !onlyPx) FORCE = frameNo + 3;
   const cells = cp => { W0 = Math.ceil(bw / cp) + 1; H0 = Math.ceil(bh / cp) + 1; HS = H0 * (P.skyh ?? 0.5) / 0.78; };
   if (SNAPLOAD) {
     // (Oct 29, user: "Are you able to recreate the exact conditions with the snapshot? that's what it's for". The scene is laid out
