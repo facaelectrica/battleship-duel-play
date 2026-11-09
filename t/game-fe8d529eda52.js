@@ -5189,7 +5189,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 949;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 14:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 14:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -66129,6 +66129,7 @@ function bugState() {
   return {
     v: GAME_VERSION, build: BUILD, when: new Date().toISOString(), url: location.href, ua: navigator.userAgent,
     screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, ubw, ubh, touch: 'ontouchstart' in window },
+    boot: (typeof window !== 'undefined' && window.__bootLog) || null,   // (user Nov 9: the loading's timings on this device - when each loading line came, src/index.html)
     mode: MODE, menu: menuSel.mode, story: STORY ? { ...story, slot: storySlot, at: at ? at.id : null } : null, world: STORY_WORLD ? 'story' : 'open',
     you: c ? { mode: c.mode, v: v ? { sid: v.sid, sv: v.sv, kind: v.kind, x: Math.round(v.x), y: Math.round(v.y || 0) } : null } : null,
     day: W.day, hour: +env.time.toFixed(2), zoom: [scopes[0].level, +(cam.zt[0] || 0).toFixed(3)], ui: { settings: !!ui.settings, photo: !!PHOTO.on, swap: STORY ? { ...STSW } : null },
