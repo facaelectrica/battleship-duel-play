@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 19:54', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 09 19:57', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -2163,6 +2163,34 @@ function frameTarget(ctx) {
   const t = ctx && ctx.target; if (!t) return null;
   if (t.isScreen) { const T = gpuGLTargets(GLR.gl, null); return { tex: T.col[0], stencil: T.ds, w: T.w, h: T.h }; }
   t.ensure(); const o = t.tex; return o && o.t ? { tex: o.t, w: o.t.w, h: o.t.h } : null;
+}
+/* 5. THE HUD ON THE SAME DEVICE (engine-design 3.5): the controls' canvas (#hud, stacked over the world's at its own pixel size) is a
+   second WebGPU canvas on the one device. The HUD draws through a GLCtx (the same subset of the canvas calls it always used:
+   rectangles, the user's sprites, the pixel text, alpha, clips, simple paths) into a layer the size of that canvas, shown on it once
+   the HUD is drawn (hudShow - render's end), with its transparency, over the world as the 2D canvas was. */
+function gpuHudInit(cv) {
+  const ctx = cv.getContext('webgpu'); if (!ctx) return null;
+  ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' });
+  FRAME.hud = { cv, ctx, T: new GLTarget(Math.max(1, cv.width), Math.max(1, cv.height)) };
+  GPU.onRebuild.push(() => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } });
+  return FRAME.hud.T;
+}
+const GPU_HUD_WGSL = `
+@group(0) @binding(0) var t: texture_2d<f32>;
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f { let x = f32((i << 1u) & 2u); let y = f32(i & 2u); return vec4f(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0); }
+@fragment fn fs(@builtin(position) p: vec4f) -> @location(0) vec4f { let d = vec2i(textureDimensions(t)); return textureLoad(t, vec2i(i32(p.x), d.y - 1 - i32(p.y)), 0); }`;
+function hudShow() {
+  const H = FRAME.hud; if (!H || !GPU.on || GPU.lost) return;
+  if (typeof glFlush === 'function') glFlush();
+  const t = H.T.tex && H.T.tex.t; if (!t) { gpuSubmit(); return; }
+  if (!H.pipe || H.ep !== GPU.ep) { const m = gpuModule(GPU_HUD_WGSL, 'hud'); H.pipe = GPU.dev.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } }); H.ep = GPU.ep; H.view = null; }
+  if (H.view !== t.view) { H.view = t.view; H.bg = GPU.dev.createBindGroup({ layout: H.pipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: t.view }] }); }
+  const cur = H.ctx.getCurrentTexture();
+  if (cur.width === t.w && cur.height === t.h) {
+    const pass = gpuPassBegin({ colorAttachments: [{ view: cur.createView(), loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'present');
+    pass.setPipeline(H.pipe); pass.setBindGroup(0, H.bg); pass.draw(3); gpuPassEnd(); t.use = FR.sub;
+  }
+  gpuSubmit(); FR.work = 0;
 }
 
 const GPU_OK = await gpuBoot();
@@ -7339,7 +7367,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 19:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 19:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -25050,7 +25078,8 @@ const g = GLR.on ? GLR.screen.getContext('2d') : buf.getContext('2d', { alpha: f
 const ob = GLR.on ? new GLTarget(1, 1) : document.createElement('canvas');
 const oc = ob.getContext('2d');
 const ubuf = document.getElementById('hud');  // and the controls into the one stacked above it
-let ug = ubuf.getContext('2d');
+const HUDT = GLR.on ? gpuHudInit(ubuf) : null;   // (engine skeleton: the controls drawn through the graphics layer on the same device - src/gpu/50-frame.js)
+let ug = HUDT ? HUDT.getContext('2d') : ubuf.getContext('2d');
 let bw = 1, bh = 1, PIXW = 2, ubw = 1, ubh = 1, PIXU = 3;
 let uvw = 1;   // (the controls' layer's width that's on screen: ubw is rounded up to whole CSS pixels, up to a dozen past the window's edge)
 let C = g;                                   // context the world helpers draw into
@@ -36067,7 +36096,9 @@ frameLayer('overlays', F => {
   for (const [v, cp, sx, w, i, cf] of F.views) { let tq = performance.now(); beginView(g, v, cp, sx, w, i, cf); renderOverlays(); tq = subLap('ovAll', tq); guardDraw('light', lightDraw); tq = subLap('light', tq);   /* (the one light's dark over all the world drew, in every mode - Battle plays the same built world, its caves too (user Nov 8 20:41: caves seen in Battle) - the smoke and dust of a blast too, user Nov 8 17:18: "Lit pieces in the dark"; the lamps' and fires' glows after it) */ guardDraw('landEd', landEdDraw); tq = subLap('edLand', tq); guardDraw('islEd', islEdDraw); tq = subLap('edShapes', tq); if (LAND) guardDraw('caveEd', CAVE.edDraw); tq = subLap('edCaves', tq); guardDraw('colView', colvDraw); tq = subLap('edCol', tq); guardDraw('vehEd', vehEdDraw); subLap('edVeh', tq); g.restore(); }   // (the GAME EDITOR's FLOOR handles - 50-land-floor.js)   // (each timed - the perf panel's parts: ovAll the game's overlays, ed* the editor's drawing)
   F.tt = F.lap('overlays', F.tt);
 });
-function render() {
+// (the frame, then the controls shown on their own canvas - hudShow, src/gpu/50-frame.js)
+function render() { renderFrame(); hudShow(); }
+function renderFrame() {
   if (!worldLive()) { drawNoWorld(); return; }            // (no world yet, or LOADING: the menu over black - user Oct 31, 19-menu.js)
   const T0 = performance.now();
   renderTick++; scaledFrame++;
@@ -70396,7 +70427,7 @@ function resize(restore) {
   // so the controls' pixel shrinks until there's room for them (at least UI_MIN_H tall)
   while (PIXU > 1 && ch / PIXU < UI_MIN_H) PIXU--;
   ubw = fit(Math.ceil(cw / PIXU), PIXU); ubh = fit(Math.ceil(ch / PIXU), PIXU);
-  ubuf.width = ubw; ubuf.height = ubh;
+  ubuf.width = ubw; ubuf.height = ubh; if (HUDT) { HUDT.width = ubw; HUDT.height = ubh; }
   uvw = Math.min(ubw, Math.floor(cw / PIXU));
   ubuf.style.width = (ubw * PIXU / dpr) + 'px'; ubuf.style.height = (ubh * PIXU / dpr) + 'px';
   S = bh / VIEW_H;
@@ -70566,7 +70597,7 @@ async function start(data) {
     setOrder: (p, i) => setOrder(telegraphs[p], i), fire: p => fireGun(ships[p]), shipMG: p => shipMG(ships[p]), tower: (p, mg) => fireTower(towers[p], mg),
     damage: (p, i, d) => damageSection(ships[p], i, d), kill: p => killGuy(p),
     get layout() { return { bw, bh, PIXW, ubw, ubh, PIXU, dpr }; },
-    scope: p => scopes[p], tg: p => telegraphs[p], perf, FT, probe, probeStart, fillTest, runFillTest, get batch() { return getMode(); }, get gl() { return GLR.on; }, glStats: () => GLR.shown, renderN: n => { for (let i = 0; i < n; i++) render(); glEndFrame(); }, GLR, gpuIdle: () => GPU.dev ? GPU.dev.queue.onSubmittedWorkDone() : Promise.resolve(), gpuShot: async () => { glFlush(); const S = GLX.screen; return S ? gpuReadNow(S.c, 0, 0, S.w, S.h) : null; }, gpu: () => ({ on: GPU.on, ep: GPU.ep, lost: GPU.lost, why: GPU.why, feat: Object.keys(GPU.feat), stats: GPU.stats, mem: GPU_MEM, gpuMs: FR.gpuMs, passes: FR.passMs.length, err: GPU.err.slice(0, 10), nerr: GPU.nerr, boot: GPU.bootMs }), set batch(v) { setMode(v === true ? 2 : v === false ? 0 : v); BATCH_AUTO = false; }, get paused() { return paused; }, set paused(v) { paused = v; }, set hold(v) { holdFrames = v; }, stepFixed: (dt, n) => { const was = paused; paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } paused = true; return was; },
+    scope: p => scopes[p], tg: p => telegraphs[p], perf, FT, probe, probeStart, fillTest, runFillTest, get batch() { return getMode(); }, get gl() { return GLR.on; }, glStats: () => GLR.shown, renderN: n => { for (let i = 0; i < n; i++) render(); glEndFrame(); }, GLR, gpuHudShot: async () => { const H = FRAME.hud; return H && H.T.tex && H.T.tex.t ? gpuReadNow(H.T.tex.t, 0, 0, H.T.tex.t.w, H.T.tex.t.h) : null; }, gpuIdle: () => GPU.dev ? GPU.dev.queue.onSubmittedWorkDone() : Promise.resolve(), gpuShot: async () => { glFlush(); const S = GLX.screen; return S ? gpuReadNow(S.c, 0, 0, S.w, S.h) : null; }, gpu: () => ({ on: GPU.on, ep: GPU.ep, lost: GPU.lost, why: GPU.why, feat: Object.keys(GPU.feat), stats: GPU.stats, mem: GPU_MEM, gpuMs: FR.gpuMs, passes: FR.passMs.length, err: GPU.err.slice(0, 10), nerr: GPU.nerr, boot: GPU.bootMs }), set batch(v) { setMode(v === true ? 2 : v === false ? 0 : v); BATCH_AUTO = false; }, get paused() { return paused; }, set paused(v) { paused = v; }, set hold(v) { holdFrames = v; }, stepFixed: (dt, n) => { const was = paused; paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } paused = true; return was; },
     stepQuiet: (dt, n) => { NO_DRAW = true; try { paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } } finally { paused = true; NO_DRAW = false; } },   // (stepFixed without drawing each step: tools/smokebench.mjs)
     smokeKit: { spawnSmoke: (x, y, o) => spawnSmoke(x, y, o), smStream: (o, k) => smStream(o, k), get SV() { return SV; }, get SMOKE_COLS() { return SMOKE_COLS; } },
     planeGround: x => planeGroundY(x),   // (Nov 1: where a plane can be on its wheels - 29-plane.js)
