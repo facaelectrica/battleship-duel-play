@@ -5193,8 +5193,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 968;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 16:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 969;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 16:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -30466,7 +30466,9 @@ function drawRays(overlay, still) {
     if (shade < 0.02) continue;
     C.globalAlpha = Math.min(1, strength * shade * (moonLit ? 0.34 : 0.11)) * (0.55 + 0.45 * Math.sin(time * (0.35 + h * 0.4) + c * 2.1));
     C.beginPath();
-    C.moveTo(PX(x), PY(WATER_Y + 4)); C.lineTo(PX(x + w), PY(WATER_Y + 4));
+    // (user Nov 9 15:45: "The light streaks don't respect the shapes ... rendering over the water or cut off" - its top was the still level, so in a
+    // trough it stood out over the water and under a crest it began short of it: its top is the water's moving surface across its width now)
+    for (let q = 0; q <= 4; q++) { const xq = x + w * q / 4, yq = PY(surfaceY(xq) + 2); if (q) C.lineTo(PX(xq), yq); else C.moveTo(PX(xq), yq); }
     C.lineTo(PX(x + w * 1.8 + slant), PY(SEABED_Y)); C.lineTo(PX(x - w * 0.2 + slant), PY(SEABED_Y));
     C.closePath(); C.fill();
   }
