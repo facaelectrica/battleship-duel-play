@@ -5193,8 +5193,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 965;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 15:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 966;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 16:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -22702,7 +22702,7 @@ uniform vec4 u_off;    // steps a column: the ripple's phase, the noise x, u/3; 
 uniform vec4 u_g;      // base, amp, hz, bot
 uniform vec4 u_col;    // the foam (premultiplied)
 uniform vec3 u_pass;   // pass (0 the water, 1 foam once, 2 foam twice), the gradient's row, its alpha
-uniform vec2 u_cb;      // crestAt's base (its clamp), PB
+uniform vec3 u_cb;      // crestAt's base (its clamp), PB, the foot (how far down it reaches - seaFootY, 42-render-sky.js)
 float swell(float ph, float s) {
   if (s < 0.02) return sin(ph);
   float f = ph - 1.5707963;
@@ -22736,7 +22736,7 @@ void main() {
   vec2 c = col(i, u_cb.x);
   if (u_pass.x < 0.5) {
     float bot = u_g.w;
-    if (y < min(c.x, bot) || y >= max(c.x, bot)) discard;
+    if (y < min(c.x, u_cb.z) || y >= max(c.x, u_cb.z)) discard;
     float t = clamp((y + 0.5 - u_g.z) / (bot - u_g.z), 0.0, 1.0);
     o = textureLod(u_grad, vec2((t * 255.0 + 0.5) / 256.0, (u_pass.y + 0.5) / 256.0), 0.0) * u_pass.z;
     return;
@@ -22748,7 +22748,7 @@ void main() {
   o = u_col;
 }`;
 // the middle sea's columns on the GPU (drawMidSea's loop): its numbers as drawMidSea has them
-function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, crest) {
+function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, crest, foot = bot) {
   const gl = GLR.gl, pr = G8.ms, U = pr.U, ctx = C;
   const c0 = Math.floor(Lp / step) * step, n = Math.ceil((Lp + Wp - c0) / step), nb = (n + 31) >> 5;
   const du = step / Sl, cbase = clamp(0.1 + 0.13 * A + 0.3 * st, 0, 0.82);
@@ -22779,12 +22779,12 @@ function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, cr
   const row = glGradRow(g), ga = ctx.s.ga, gA = Math.round(ga * 255) / 255;
   const pc = glParse(crest), cc = glPack(pc, ga), col = [(cc & 255) / 255, ((cc >>> 8) & 255) / 255, ((cc >>> 16) & 255) / 255, (cc >>> 24) / 255];
   // the quad: every column's top lies within 3 swells' height of base (|w| < 2.9)
-  const yLo = Math.min(bot, Math.floor(base - 3 * Math.abs(amp)) - 4), yHi = Math.max(bot, Math.ceil(base + 3 * Math.abs(amp)) + 4);
+  const yLo = Math.min(foot, Math.floor(base - 3 * Math.abs(amp)) - 4), yHi = Math.max(foot, Math.ceil(base + 3 * Math.abs(amp)) + 4);
   for (let pass = 0; pass < 3; pass++) {
     if (pass && !(cc >>> 24)) break;
     wglBegin(ctx, ctx.s.op, pr);
     wglTex(0, G8.msT, false); gl.uniform1i(U.u_d, 0); gl.uniform1i(U.u_grad, 8);
-    gl.uniform4f(U.u_c, c0, step, n, v); gl.uniform2f(U.u_cb, cbase, PB);
+    gl.uniform4f(U.u_c, c0, step, n, v); gl.uniform3f(U.u_cb, cbase, PB, foot);
     gl.uniform4f(U.u_k, 2 * du * 0.0019, 2 * du * 0.0047, du * 0.021, du * 0.047);
     gl.uniform4f(U.u_off, du * 0.09, du * 0.045, du / 3, foamCut);
     gl.uniform4f(U.u_g, base, amp, hz, bot); gl.uniform4f(U.u_col, col[0], col[1], col[2], col[3]); gl.uniform3f(U.u_pass, pass, row, gA);
@@ -28718,6 +28718,18 @@ function rgbsK(c, a) {
                              being only just behind the plane of the cut
    Anything new that lives in the distance (planes far off, ships on the horizon) picks a p and q between its
    neighbours here and goes through layerScale / layerX, so it can never disagree with them. */
+// (user Nov 9 14:53, a storm: "The ocean background has to fill that area ... We can't see that brighter blue" - in a wave's trough under the
+// still level the near water's line dips below where the distant sea and its overcast shade stopped, and the middle sea's bare bottom showed
+// there, bright. 14:59: "We should be able to have giant waves and keep that color". Every layer of the distant sea and its shade reaches
+// down to the deepest trough of the sea in this view (seaFootY, worked out once a view a frame in renderSky); the near water covers what's
+// under its line)
+let SEA_FOOT_Y = 0;
+function seaFootY() {
+  const x0 = CAMPX / SV, x1 = x0 + VWW, st = Math.max(2, (x1 - x0) / 400);
+  let m = WATER_Y + 40;                                   // (never above where the middle sea always reached)
+  for (let x = x0 - st; x <= x1 + st; x += st) if (seaWet(x)) { const y = surfaceY(x); if (y > m) m = y; }
+  return m + 4;
+}
 const DEPTH = {
   sky: { p: 0, q: 0 },
   farSea: { p: 0.25, q: 0.55, wave: 0.07 },
@@ -28737,7 +28749,7 @@ const layerX = (c, L, Sl) => (c - layerPivX) / Sl + L.p * layerRefX;
 const nearSwell = () => (E.waveAmp || 1) * 5.5 + (E.storm || 0) * (E.storm || 0) * 9;
 function drawMidSea() {
   const Lp = -SHX - 2, Wp = VWP + 4, ss = E.sunset, nt = E.night * (1 - E.fog), fg = E.fog;
-  const hz = PY(HZ_Y()), bot = PY(WATER_Y + 40);
+  const hz = PY(HZ_Y()), bot = PY(WATER_Y + 40), foot = PY(SEA_FOOT_Y);   // (bot: its colours' end; foot: how far it reaches - seaFootY)
   const fcol = (day, set, night, fog) => mix3(mix3(mix3(day, set, ss), night, nt), fog.map(v => v * (0.3 + 0.7 * E.day)), fg);
   const top = fcol([34, 104, 232], [150, 96, 156], [26, 88, 176], [84, 104, 128]);
   const deep = fcol([38, 120, 234], [80, 72, 142], [24, 40, 110], [48, 64, 86]);
@@ -28750,10 +28762,10 @@ function drawMidSea() {
   const amp = (0.4 + L.wave * nearSwell()) * Sl * 0.55, base = hz + Math.round(4 * Sl + amp * 0.9);
   const step = PB;
   // (engine stage 8: the columns on the GPU, 40-zzz-gpu8.js - on by default, ?midseagpu=0 for the loop below)
-  if (MIDSEA_GPU && g8On()) { g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, 0.5 - 0.12 * Math.min(1, st + (A - 1) * 0.5), hz, bot, g, crest); return; }
+  if (MIDSEA_GPU && g8On()) { g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, 0.5 - 0.12 * Math.min(1, st + (A - 1) * 0.5), hz, bot, g, crest, foot); return; }
   // columns at the same height are drawn as one run (the same picture as column by column, far fewer calls)
   let prev = null, runC = 0, runY = 0;
-  const flush = end => { if (prev !== null) { C.fillStyle = g; C.fillRect(runC, runY, end - runC, bot - runY); } };
+  const flush = end => { if (prev !== null) { C.fillStyle = g; C.fillRect(runC, runY, end - runC, foot - runY); } };
   // the crest line is distant foam: broken into patches that come and go (more of it in a rougher sea), never
   // one unbroken white line; brighter where a swell rises
   const crests = [], foamCut = 0.5 - 0.12 * Math.min(1, st + (A - 1) * 0.5);
@@ -28788,7 +28800,7 @@ function seaZoomDark() { const v = cam.view[viewIdx] || cam.view[0], z = v ? v.z
 const seaDarkC = (c, k) => k <= 0 ? c : c.map((v, j) => j < 3 ? v + (SEA_DARK_C[j] - v) * k : v);
 function drawFarSea() {
   const Lp = -SHX - 2, Wp = VWP + 4, ss = E.sunset, nt = E.night * (1 - E.fog), fg = E.fog;
-  const hz = PY(HZ_Y()), hb = PY(WATER_Y + 26);
+  const hz = PY(HZ_Y()), hb = PY(WATER_Y + 26), foot = PY(SEA_FOOT_Y);   // (hb: its colours' end; foot: how far it reaches - seaFootY)
   const band = C.createLinearGradient(0, hz, 0, hb);
   const fcol = (day, set, night, fog) => rgbs(mix3(mix3(mix3(day, set, ss), night, nt), fog.map(v => v * (0.3 + 0.7 * E.day)), fg));
   band.addColorStop(0, fcol([42, 116, 239], [200, 112, 150], [34, 112, 192], [112, 132, 154]));
@@ -28803,11 +28815,11 @@ function drawFarSea() {
     for (let c = Math.floor(Lp / step) * step; c < Lp + Wp; c += step) {
       const u = layerX(c, L, Sl);
       const top = hz + Math.round((swell(u * 0.011 + time * 0.55, sh) + 0.55 * Math.sin(u * 0.027 - time * 0.9)) * amp / PB) * PB;
-      C.fillStyle = band; C.fillRect(c, top, step, hb - top);
+      C.fillStyle = band; C.fillRect(c, top, step, foot - top);
       C.fillStyle = lineCol; C.fillRect(c, top, step, 1);
     }
   } else {
-    C.fillStyle = band; C.fillRect(Lp, hz, Wp, hb - hz);
+    C.fillStyle = band; C.fillRect(Lp, hz, Wp, foot - hz);
     C.fillStyle = lineCol; C.fillRect(Lp, hz, Wp, 1);
   }
 }
@@ -29071,6 +29083,7 @@ function renderSky() {
   let st = performance.now(); const sema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } if (GPUT.cur) gptLap(k, 0); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
   st = sema('skBase', T0sky);
   clipRegion(DEPTH.farSea);                // (OPEN WORLD: the far water only over the sea - where the sea is at ITS depth)
+  SEA_FOOT_Y = seaFootY();                 // (the deepest trough in view: how far the distant sea reaches down)
   drawFarSea();
   C.restore();
   st = sema('skFar', st);
@@ -29132,7 +29145,7 @@ const shootingStars = [{ s: null, next: 0 }, { s: null, next: 0 }];
 // The far sea in the clouds' shade: darker the heavier the cover, and under each big cloud a darker patch,
 // broken into rows that narrow toward the horizon (the sea seen in perspective)
 function drawSeaShade(hzY, yW, spans) {
-  const Lp = -SHX - 2, Wp = VWP + 4, top = hzY - 1, bot = yW + Math.round(6 * S);
+  const Lp = -SHX - 2, Wp = VWP + 4, top = hzY - 1, bot = Math.max(yW + Math.round(6 * S), PY(SEA_FOOT_Y));   // (down past the deepest trough - seaFootY)
   if (E.cover > 0.02) { C.fillStyle = rgbs(mix3(E.bandCol.map(v => v * 0.45), [6, 14, 30], 0.5), 0.55 * E.overcast); C.fillRect(Lp, top, Wp, bot - top); }
   const sa = 0.2 * E.day * (1 - 0.75 * E.overcast) * (1 - E.fog);
   if (sa < 0.01 || bot <= top) return;
