@@ -5210,8 +5210,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 940;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 11:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 941;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 11:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -45923,6 +45923,7 @@ function trackPlantPerches(dt) {
     // (user Nov 3 22:17: "Birds if they land on a tree, they need to move with it. If it moves too much they fly away") a spot on a
     // frond: where the frond is now; moving faster than its kind's BIRDS FLY AT, the bird on it goes
     if (!isNaN(P.rf[j]) && !nearViews(P.plant[j].x, plantReach(P.plant[j]))) continue;   // (its plant off every view holds still: the spot stays where it is - veg-check chat)
+    if (!isNaN(P.rf[j])) { const s = RIGS_ST.get(P.plant[j].x); if (s && s.still) continue; }   // (Nov 9: a plant under RIG_STILL_PX holds still - its spots, and a bird on one, where they were)
     if (!isNaN(P.rf[j])) { const w = rigPerchAt(j, dt); if (w) { P.x[j] = w[0]; P.y[j] = w[1]; if (w[2] && P.bird[j]) takeOff(bdOn(j), P.x[j]); continue; } }
     const y = plantPerchY(j); if (y != null) { P.y[j] = y; plantPerchX(j); }
   }
@@ -46025,7 +46026,9 @@ function plantsNear(x, r, fn) {
 // a plant's height and middle (world), standing
 // (Nov 4: culled by its own size) how far any of it can reach from its foot: its picture's width or height, whichever is more - swaying,
 // falling, as it's felled (before its picture is ready: the old 220)
-function plantReach(it) { const G = plantGeo(it); return G ? Math.max(G.w, G.h) : 220; }
+// (Nov 9, storm stress test: asked ~25,000 times a frame zoomed out - each pass, each physics step, the birds - for the same plants. Kept for the frame drawn;
+// the simulation worker, which draws no frames, asks every time)
+function plantReach(it) { if (!SIM_ONLY && it._rrT === renderTick) return it._rr; const G = plantGeo(it), r = G ? Math.max(G.w, G.h) : 220; if (!SIM_ONLY) { it._rrT = renderTick; it._rr = r; } return r; }
 function plantH(it) { const G = plantGeo(it); return G ? G.h : 20; }
 
 /* ---- what hits them ---- */
@@ -46366,15 +46369,19 @@ function drawLandProps(x0, x1, isl, part) {
   let lamps = 0;
   VEG_PX = clamp(VTUNE.tree.px || 0.8, 0.1, 4) * SV;   // (user Nov 4 10:46: every plant on the one pixel grid - the world's art pixel on the screen now)
   const VPL = part === 'plants' ? vegPassBegin() : null;   // (the plants of this pass laid in one layer at it - one blit, not one a plant)
+  // (Nov 9, storm stress test zoomed out: this runs ~12 times a frame - each deck's pass, each view - over nearly every plant in the world, and every plant's
+  // picture and size was looked up before asking whether it belongs to this pass at all. The pass's own questions first, the cheapest first; the same plants drawn)
   for (const it of propsIn(x0, x1)) {
-    const rr = plantReach(it); if (rr > PROP_IX.r && it.kind !== 'rock') PROP_IX.r = rr;   // (a picture bigger than any met before: the next span takes it in)
-    if (offViewR(it.x, rr, x0, x1) || !it.isl !== !isl) continue;
-    if (VEG_PASS === 'uw' ? !it.uw || !lakeAt(it.x) !== !UW_LK : VEG_PASS === 'cave' ? !it.cave : it.uw || it.cave || lakeAt(it.x)) continue;   // (in a cave: with the stalactites - drawCavePlants)   // (underwater: its water's own pass - drawUwPlants)
-    if (isl && (isl === 'land') !== !seaAtX(it.x)) continue;   // (a segment's in a country: drawn in the land's pass - drawIslandsLand)   // (an island's: drawn with it, behind the water)
+    if (!it.isl !== !isl) continue;
     if ((it.kind === 'rock') !== (part !== 'plants') && part) continue;   // (rocks with the ground, plants after the structures)
     // (user Nov 8 10:59: "anything that is NOT Deck 1 or 0 should be rendering behind the terrain") the editor's DECK 2 and every deck behind it (it.deck 3+) in
     // the pass behind the ground; DECK 1 (it.deck 2) with the structures; DECK 0 (it.deck 1) in front of them
     if (part === 'plants' && !it.uw && !it.cave && (it.deck >= 3 ? 'back' : it.deck === 1 ? 'front' : null) !== VEG_PASS) continue;
+    if (VEG_PASS === 'cave' ? !it.cave : VEG_PASS !== 'uw' && (it.uw || it.cave)) continue;
+    const rr = plantReach(it); if (rr > PROP_IX.r && it.kind !== 'rock') PROP_IX.r = rr;   // (a picture bigger than any met before: the next span takes it in)
+    if (offViewR(it.x, rr, x0, x1)) continue;
+    if (VEG_PASS === 'uw' ? !it.uw || !lakeAt(it.x) !== !UW_LK : VEG_PASS === 'cave' ? !it.cave : it.uw || it.cave || lakeAt(it.x)) continue;   // (in a cave: with the stalactites - drawCavePlants)   // (underwater: its water's own pass - drawUwPlants)
+    if (isl && (isl === 'land') !== !seaAtX(it.x)) continue;   // (a segment's in a country: drawn in the land's pass - drawIslandsLand)   // (an island's: drawn with it, behind the water)
     if (it.kind === 'rock') {
       const arr = DA && DA.rockC; if (!arr || !arr.length || !it.alive) continue;
       const im = arr[it.pick % arr.length], k = desertArt.kit ? DESERT_PK : it.s / im.width;   // (a rock at its own pixel too)
@@ -55318,6 +55325,12 @@ function waterWake(x0, x1) {
     for (let j = h - 1; j >= 0; j--) { const i = j * cw + q, m = A[i]; if (m > 0 && !wAir(c, A.rT + j)) { A[i] = 0; let jj = j - 1; while (jj >= 0 && !wAir(c, A.rT + jj)) jj--; if (jj >= 0) A[jj * cw + q] += m; } } }
   for (let k = Math.max(0, ((c0 / LT_CHUNK) | 0) - 1); k <= Math.min(WC.act.length - 1, ((c1 / LT_CHUNK) | 0) + 1); k++) { WC.act[k] = 1; WC.rest[k] = 0; }
   WC.ver++; WC.cver = (WC.cver || 0) + 1;
+  // (Nov 9, storm stress test: every bomb's crater made the tint of the ground under water (waterGroundTint) look for every column's floor again -
+  // 50 ms a view zoomed out. Only the woken slices' columns looked for again now; the same floors)
+  if (typeof WGT !== 'undefined' && WGT.ref === land.cell && WGT.key && WGT.ver === WC.cver - 1) {
+    const a = ((c0 / LT_CHUNK) | 0) * LT_CHUNK, b = Math.min(land.cols, (((c1 / LT_CHUNK) | 0) + 1) * LT_CHUNK);
+    WGT.key.fill(-99999, a, b); WGT.ver = WC.cver;
+  }
 }
 // filled from a seed: every open cell joined to (c, r) under the level lv (world y) full (its weight with its depth), the one the level cuts in part
 // (Nov 8, battle-caves chat: the cells it has reached kept as bits of the land's cells - a Set of numbers made the world's first fill 1.3 s on the user's PC,
@@ -56916,6 +56929,10 @@ function rigShake(amt, x) {
    on a plant tiny on the screen) from the views' zoom as drawRigged0 judges it, not from whichever view drew it last */
 const rigPolys = rc => rc._lp || (rc._lp = (c, kind) => kind === 'trunk' ? trunkPolys(c || rc.key) : kind === 'puff' ? puffPolys(c || rc.key) : builtLeaf(c || rc.key));
 const RIG_GEO_HZ = 15;
+const RIG_TINY_HZ = 20;                                         // (a tiny whole plant's springs: stepped this often - stepRigs0)
+// (Nov 9, user: "when you are that zoomed out, is it even worth rendering shrubs ... If something is less than a pixel size?") a whole plant under
+// RIG_STILL_PX pixels tall in every view holds still: its sway can't be seen. Looked at again RIG_STILL_HZ times a second, swaying again when a view comes near
+const RIG_STILL_PX = 2, RIG_STILL_HZ = 4;
 function rigGeoStep(it, rc, s, G) {
   const burnT = it.burnT || 0, Tt = VTUNE.tree, px = clamp(Tt.px || 0.8, 0.1, 4);
   let hs = 0;
@@ -56928,6 +56945,7 @@ function rigGeoStep(it, rc, s, G) {
   // only feeds its pieces then. In a storm fight zoomed out every torn plant was worked out every step, ~2,400 a frame - fewer frames, more steps, more of them)
   const tornStill = !!s.broke && !(burnT > 0) && s.snap < 0 && !tornFalling(s);
   s.lod = (burnT > 0 || s.broke) && !tornStill ? 0 : hs < Tt.lodFar ? 1 : hs < Tt.lodMid ? 2 : 0;
+  s.still = s.lod === 1 && !s.broke && hs < RIG_STILL_PX;
   if (s.lod === 1) return;                                       // (tiny and whole: nothing of its shapes is asked)
   // (user Nov 8 13:06, the frame rate after blasts: a plant once torn or snapped was worked out twice as often for good, even lying still) twice as
   // often only while something of it is still falling - a snapped top, a torn piece not yet down
@@ -56971,17 +56989,26 @@ function stepRigs0(dt) {
     const rc = rigOf(it); if (!rc || !rigShown(it)) continue;
     if (VEG_FREEZE && VEG_SOLO && VEG_SOLO.has(it)) { RIGS_ST.delete(it.x); continue; }
     RIG_SOFT = it.uw && it.ve && UW_SOFT.has(it.ve.p) ? 1 : 0;   // (kelp, seaweed, sea grass: the current sways it - rigAir)
-    const s = rigState(it, rc), G = plantGeo(it), T = rigK(it); if (!G) continue;
+    const s = rigState(it, rc);
+    if (s.tacc != null && s.lod === 1 && !(it.burnT > 0) && s.tacc + dt < 1 / (s.still ? RIG_STILL_HZ : RIG_TINY_HZ)) { s.tacc += dt; continue; }   // (a tiny plant between its steps: nothing else looked up - below)
+    const G = plantGeo(it), T = rigK(it); if (!G) continue;
     if (rc.lat) { latStep(it, rc, s, G, T, n, st); continue; }
     if (rc.built) rigGeoStep(it, rc, s, G);
+    // (Nov 9, user: slightly less smooth sway on the tiniest plants "Very acceptable") a plant tiny on the screen and whole (rigGeoStep's lod 1: drawn as its
+    // one picture, one leaf's springs) is stepped RIG_TINY_HZ times a second, its time gathered between (each plant its own phase, so not all on one
+    // step) - zoomed out ~1,400 of them every physics step, and the steps grow as the frame rate falls
+    let pdt = dt, pn = n, pst = st;
+    if (s.lod === 1 && !(it.burnT > 0)) { if (s.tacc == null) s.tacc = rigHash(it.x, 97) / RIG_TINY_HZ; s.tacc += dt; if (s.tacc < 1 / RIG_TINY_HZ) continue; pdt = Math.min(s.tacc, 0.25); s.tacc = 0; pn = Math.max(1, Math.ceil(pdt * 30)); pst = pdt / pn;
+      if (s.still) continue; }   // (under RIG_STILL_PX: its detail looked at again, its springs left)
+    else if (s.tacc) s.tacc = 0;
     const fl = it.flip ? -1 : 1, foot = propTop(it) + G.sink, k = G.k, X0 = it.x - (it.flip ? G.w - G.fo : G.fo), Y0 = foot - G.h;
     const wx = ax => it.flip ? X0 + G.w - ax * k : X0 + ax * k, wy = ay => Y0 + ay * k;
     // the trunk: the air at its crown pushes it over (its three joints by how much trunk stands above each); it springs back
     const air = rigAir(wx(rc.R.heart[0]), wy(rc.R.heart[1])), airX = air[0], F = rigPush(air[0] * fl);   // (airX: the crown's own - RIG_AIR is the next frond's after)
     const wt = 2 * Math.PI * 0.45 * Math.sqrt(T.trunkStiff), zt = 0.12;
-    if (rc.trunk) for (let q = 0; q < n; q++) for (let j = 0; j < 3; j++) {
+    if (rc.trunk) for (let q = 0; q < pn; q++) for (let j = 0; j < 3; j++) {
       const tgt = clamp(F * 0.03 * T.trunkSway / T.trunkStiff * (1 + j * 0.3), -0.25, 0.25);
-      s.av[j] += (wt * wt * (tgt - s.a[j]) - 2 * zt * wt * s.av[j]) * st; s.a[j] += s.av[j] * st;
+      s.av[j] += (wt * wt * (tgt - s.a[j]) - 2 * zt * wt * s.av[j]) * pst; s.a[j] += s.av[j] * pst;
     }
     // the fronds: the air across each (at its middle), the inner bone and the outer; flutter in moving air
     const wf = 2 * Math.PI * 1.5 * Math.sqrt(T.leafStiff / T.leafWeight), zf = 0.2;
@@ -56992,7 +57019,7 @@ function stepRigs0(dt) {
     // (user Nov 8 18:43: "They should be one or two leaves per tree, sometimes ... a bit more if there is a strong wind. But a lot more subtle") the one
     // source of falling leaves: a tree or palm sheds one now and then - about one in LEAF_SHED_T seconds in still air, up to twice as often in a strong
     // wind - off one of its own leaves (a leaf's tip, anywhere in a puff), in its own colours. Every leaf rolled for one each was a storm of them
-    const shed = !SIM_ONLY && (it.pk === 'tree' || it.pk === 'palm') && !it.fire && !it.uw && rc.fronds.length && rigHash(it.x + time * 1.7, 90) < dt / LEAF_SHED_T * (1 + 0.5 * Math.min(2, Math.hypot(air[0], air[1]) / RIG_V0));
+    const shed = !SIM_ONLY && (it.pk === 'tree' || it.pk === 'palm') && !it.fire && !it.uw && rc.fronds.length && rigHash(it.x + time * 1.7, 90) < pdt / LEAF_SHED_T * (1 + 0.5 * Math.min(2, Math.hypot(air[0], air[1]) / RIG_V0));
     const pick = shed ? (one ? 0 : Math.floor(rigHash(it.x + time * 2.3, 93) * rc.fronds.length) % rc.fronds.length) : -1;
     for (let f = 0; f < (one ? Math.min(1, rc.fronds.length) : rc.fronds.length); f++) {
       const Fd = rc.fronds[f], u = rigAir(wx(Fd.J[0]), wy(Fd.J[1])), ux = u[0] * fl, uy = u[1], nx = -Fd.d[1], ny = Fd.d[0];
@@ -57005,12 +57032,12 @@ function stepRigs0(dt) {
       const kf = Fd.rock ? 0 : Fd.br ? 0.22 / Math.sqrt(T.trunkStiff || 1) : Fd.puff ? 0.45 : 1, kfl = Fd.rock ? 0 : Fd.br ? 0.04 : Fd.puff ? 0.5 : 1;
       const wq = Fd.br ? wt * BRANCH_W : wf, zq = Fd.br ? BRANCH_Z : zf;
       const t0 = clamp((P * 0.25 / T.leafStiff) * kf + flut * kfl, -0.7, 0.7), t1 = clamp((P * 0.35 / T.leafStiff) * kf + flut * 1.4 * kfl, -0.9, 0.9);
-      for (let q = 0; q < n; q++) {
-        s.bv[f * 2] += (wq * wq * (t0 - s.b[f * 2]) - 2 * zq * wq * s.bv[f * 2]) * st; s.b[f * 2] += s.bv[f * 2] * st;
+      for (let q = 0; q < pn; q++) {
+        s.bv[f * 2] += (wq * wq * (t0 - s.b[f * 2]) - 2 * zq * wq * s.bv[f * 2]) * pst; s.b[f * 2] += s.bv[f * 2] * pst;
         const w1 = wq * 1.4;
-        s.bv[f * 2 + 1] += (w1 * w1 * (t1 - s.b[f * 2 + 1]) - 2 * zq * w1 * s.bv[f * 2 + 1] - 0.5 * s.bv[f * 2] * w1) * st; s.b[f * 2 + 1] += s.bv[f * 2 + 1] * st;
+        s.bv[f * 2 + 1] += (w1 * w1 * (t1 - s.b[f * 2 + 1]) - 2 * zq * w1 * s.bv[f * 2 + 1] - 0.5 * s.bv[f * 2] * w1) * pst; s.b[f * 2 + 1] += s.bv[f * 2 + 1] * pst;
       }
-      if (rc.built && !Fd.rock) builtTear(it, rc, s, T, f, P, ux, dt, k);   // (a BOULDER never comes off)
+      if (rc.built && !Fd.rock) builtTear(it, rc, s, T, f, P, ux, pdt, k);   // (a BOULDER never comes off)
       // (the ground's collision: a leaf reaching into the ground turned back out about where it hangs - the push its bend takes, its speed into it gone)
       // (user Nov 8 12:42, trees after a blast "shaking incontrollably": a snapped tree's leaves lie under its foot's line - pushed out of the ground every
       // step, the spring pulling them back - so not once its trunk has snapped)
@@ -57113,7 +57140,7 @@ function drawBuiltLod(it, rc, s, T, burnT, X, Y, w, k, mul, add, hs) {
     if (hs < T.lodFar && !hurt && !torn) {   // (torn or snapped: every shape)
       BAKE.miss = false; const P = builtSprite(rc, rigLight(it), vegUp(k)); if (!P && BAKE.miss) return; if (P) { let b = 0; for (let f = 0; f < rc.fronds.length; f++) b += s.b[f * 2] + s.b[f * 2 + 1] * 0.5; const sk = clamp(-b / Math.max(1, rc.fronds.length) * 0.35 - (rc.trunk ? s.a[0] + s.a[1] : 0), -0.6, 0.6);
         const SD = VEG_PASS_L ? vegPassCtx(it, X, Y, w, vegQ(k)) : C; if (SD === C) { C.save(); C.translate(X, Y); if (it.flip) { C.translate(w, 0); C.scale(-1, 1); } C.scale(k, k); } SD.transform(1, 0, sk, 1, -sk * rc.foot, 0);
-        { const B = rc.built, ol = GLR.on && (B.leaves.map(olOf).find(Boolean) || olOf(B.trunk)); if (ol) { const nn = vegUp(k), ok = 'o' + nn + B.leaves.map(L => olOf(L) ? 1 : 0).join('') + (olOf(B.trunk) ? 1 : 0), OM = rc._olM || (rc._olM = new Map()), OP = vegBake(OM, ok, () => builtOlJob(rc, nn), vegPieceFree, 12, 'o');
+        { const B = rc.built, nn = vegUp(k), OC = builtOlKey(rc, B, nn), ol = GLR.on && OC.ol; if (ol) { const ok = OC.ok, OM = rc._olM || (rc._olM = new Map()), OP = vegBake(OM, ok, () => builtOlJob(rc, nn), vegPieceFree, 12, 'o');
           if (OP) { const T0 = SD.getTransform(), U = SD === C ? VEG_PX : 1, tc = olTint(ol, mul), ga0 = SD.globalAlpha; SD.globalAlpha = ga0 * olA(ol); for (const [ox, oy] of vegOlOffs(Math.round(ol.w))) { SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e + ox * U, T0.f + oy * U); SD.drawImage(glTint(OP.c, 'rgO', RIG_ZERO, tc, false), OP.x, OP.y, OP.c.width / OP.n, OP.c.height / OP.n); } SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e, T0.f); SD.globalAlpha = ga0; } } }
         SD.drawImage(GLR.on ? glTint(P.c, 'rgB', mul, add, false) : P.c, P.x, P.y, P.c.width / P.n, P.c.height / P.n); SD.restore(); return; }
     }
@@ -57127,6 +57154,10 @@ const tornPiece = s => q => { const t = s.tear ? s.tear[q.f] : 0; return t === 2
 const tornFalling = s => { const T = s.tear; if (T) for (let f = 0; f < T.length; f++) if ((T[f] === 1 || T[f] === 2) && !s.tl[f]) return true; return false; };   // (a piece still in the air - rigGeoStep)
 const tornLive = s => { const T = s.tear; if (T) for (let f = 0; f < T.length; f++) if (T[f] === 1 || T[f] === 2) return true; return false; };   // (any piece still about - most torn plants have none: theirs faded)
 const tornGone = (s, f) => { const t = s.tear ? s.tear[f] : 0; return t === 2 || t === 4 ? 2 : t === 1 || t === 3 ? 1 : 0; };   // (2: the whole part off the plant, 1: its outer half)
+// (Nov 9) the far picture's outline - the first part's outline that's on, and its picture's key - kept per build and size: every plant worked it out
+// with two lists and a string each frame (~1,400 of them zoomed out)
+function builtOlKey(rc, B, nn) { let C = rc._olK; if (C && C.B === B && C.nn === nn) return C;
+  const ol = B.leaves.map(olOf).find(Boolean) || olOf(B.trunk) || null; C = rc._olK = { B, nn, ol, ok: ol ? 'o' + nn + B.leaves.map(L => olOf(L) ? 1 : 0).join('') + (olOf(B.trunk) ? 1 : 0) : '' }; return C; }
 // (the outline's picture: the parts with outlines, their painted pictures made first - BAKE)
 function* builtOlJob(rc, nn) { const B = rc.built; yield* vegParts(rc, B.leaves.map((_, f) => f).filter(f => olOf(B.leaves[f])), !!olOf(B.trunk), null, nn); return vegNow(() => builtPiece(rc, q => !!olOf(B.leaves[q.f]), !!olOf(B.trunk), false, null, nn) || null); }
 function drawRigged0(it, rc, X, Y, w, k, mul, add, hs) {
