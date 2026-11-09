@@ -5321,7 +5321,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 943;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 12:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 12:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -25352,6 +25352,7 @@ function batchRecCovers(d, o, ax, ay, x, y) {
 const BK = [{ cur: null, next: null, hard: '', n: 0, left: 0, swaps: 0, avg: 0.6, ms: 0, t0: 0, took: 0, frames: 0 },
             { cur: null, next: null, hard: '', n: 0, left: 0, swaps: 0, avg: 0.6, ms: 0, t0: 0, took: 0, frames: 0 }];
 let BK_UID = 0, BK_ON = false, BK_BUDGET = 0;
+const BK_DBG = { now: 0, cut: 0, other: 0, none: 0 };   // (test hook - bakeStats: clouds baked at once, by why)
 const BK_SKIP = new Set(['time', 'sea', 'wind', 'rain', 'sky', 'cover', 'big', 'fog', 'bake', 'bakestep', 'bakemove', 'bakems']);
 const bakeOn = () => (P.bake ?? 1) > 0 && GPU;
 // (a sprite still usable: drawn in this GL context, or an 'empty' one - the cloud gone at the new weather)
@@ -25478,8 +25479,12 @@ function bakeVisit(c, vis, gk) {
     if (Math.abs(flash.x - cx) < hw) { c.grow = c.growT; v.now = 0; v.live = true; return false; }
   }
   v.live = false; v.now = 0;
-  // (a cut sprite - bakeCloud - is never laid at another zoom: scaled, its cut would show. Such a cloud is one with no picture: baked at once)
-  const shownF = bkOk(v.F) && !(v.F.cut && v.F.zl !== c.lay.zl) ? v.F : null;
+  // (a cut sprite - bakeCloud - at another zoom: laid scaled while none of its cut sides comes into the view, and baked for this zoom within the frame's
+  // budget (stale); a cut side in view, it's a cloud with no picture: baked at once. Nov 9, user: "remember to zoom in and out during the tests" - in a
+  // storm every frame of a zoom baked its ~20-30 cut towers at once, 200-240 ms frames all the way)
+  const zk = bkOk(v.F) && v.F.cut && v.F.zl !== c.lay.zl ? c.lay.zl / v.F.zl : 1, cutShows = zk !== 1 && bkCutShows(v.F.cut, X, c.y, zk, 8);
+  if (zk !== 1 && !cutShows) v.F.stale = true;
+  const shownF = bkOk(v.F) && !cutShows ? v.F : null;
   // (FAR SUN: its light by where it is from the disc, in steps - a step moved since its picture was baked: baked again, alone)
   let pk = '';
   if ((P.farsun ?? 1) > 0 && c.minX !== undefined) { const Xm = X + (c.minX + c.maxX) / 2; pk = sunStep(c, Xm, c.y - c.h / 2); }
@@ -25500,7 +25505,7 @@ function bakeVisit(c, vis, gk) {
   if (need === -1) { if (v.B && v.B !== v.F) bkFree(v.B); v.B = { empty: true, sig: b.next }; need = 0; }   // (gone at the new look: gone at the swap)
   if (need > 0 && (inView || (need === 3 && inWide))) {
     if ((need === 3 && inView) || b.baking < BK_BUDGET) {
-      b.baking++;
+      b.baking++; if (need === 3 && inView) { BK_DBG.now++; if (v.F && v.F.cut) BK_DBG.cut++; else if (bkOk(v.F)) BK_DBG.other++; else BK_DBG.none++; }
       v.now = need; c.grow = c.growT; c.dirty = true; c.lobG = -1;           // (placed whole, at its finished size, lit afresh)
       if (skyGen <= 0) skyGen = 0.001;                                        // (its puffs made now, whatever the frame's budget)
       return false;
@@ -25627,6 +25632,8 @@ function bakeCloud(c, ax, ay) {
   FTV.bake = (FTV.bake || 0) + ms; FTV.baked = (FTV.baked || 0) + 1;
   v.now = 0;
 }
+// (whether a cut sprite laid at scale ks about (x, y) shows one of its cut sides within the view's w x h, m pixels inside it)
+function bkCutShows(K, x, y, ks, m, w = W, h = H) { return (K[0] !== null && x + K[0] * ks > -m) || (K[1] !== null && y + K[1] * ks > -m) || (K[2] !== null && x + K[2] * ks < w + m) || (K[3] !== null && y + K[3] * ks < h + m); }
 // a cloud in a deck (drawDeck0), baked sky: baked now if it is its turn, then its sprite laid (true), or the live way (false)
 function bakeDraw(c, ax, ay) {
   if (!BK_ON) return false;
@@ -25636,7 +25643,7 @@ function bakeDraw(c, ax, ay) {
   if (bkOk(s) && !s.empty) {
     // (baked at another zoom - a zoom's new pictures still on their way: laid scaled about the cloud's place, ks the scale)
     const ks = s.zl && s.zl !== c.lay.zl ? c.lay.zl / s.zl : 1;
-    if (s.cut && ks !== 1) return true;   // (a cut sprite at another zoom: never laid scaled - bakeVisit has it baked at once)
+    if (s.cut && ks !== 1 && bkCutShows(s.cut, ax, ay, ks, 0, TW, DLH || H)) return true;   // (a cut side would show: not laid - bakeVisit has it baked at once)
     // (a cut sprite - bakeCloud: the layer and BK_CROP_T of a view round it, in the sprite's own place; past a cut side, baked again next frame)
     if (s.cut && !s.stale) {
       const K = s.cut, Hn = DLH || H, mx = W * BK_CROP_T, my = Hn * BK_CROP_T;
@@ -25649,7 +25656,7 @@ function bakeDraw(c, ax, ay) {
   return true;
 }
 // (the panel)
-function bakeStats() { const b = BK[0]; let n = 0; for (const c of clouds) if (c.bk && c.bk[0].F && c.bk[0].F.T) n++; return { on: BK_ON, busy: !!b.next || frameNo - (b.lastF ?? -99) < 3, sprites: n, gen: !!b.next, left: b.left, swaps: b.swaps, took: b.took, frames: b.frames, avg: b.avg }; }
+function bakeStats() { const b = BK[0]; let n = 0; for (const c of clouds) if (c.bk && c.bk[0].F && c.bk[0].F.T) n++; return { on: BK_ON, busy: !!b.next || frameNo - (b.lastF ?? -99) < 3, sprites: n, gen: !!b.next, left: b.left, swaps: b.swaps, took: b.took, frames: b.frames, avg: b.avg, dbg: BK_DBG }; }
 
 // ================================================================== the sun and the moon
 // The sun (ref_sun_paintover_pixel, ref_sun_flare_photo): a white core, a soft glow in flat steps fading into the sky, and
@@ -47421,6 +47428,10 @@ function landChanged(x0, x1) {
   landWakeRow(x0, x1, 1.5);
 }
 function landWoke(x, half) { const A = landWake.c.x0, B = landWake.c.x1; for (let i = 0; i < landWake.n; i++) if (x + half >= A[i] && x - half <= B[i]) return true; return false; }
+// (Nov 9, storm stress test: after bombs ~17,000 grains, leaves and bits of debris lying on the ground were each asked landWoke every physics step - ~100,000
+// calls a frame, 20 ms) the woken ground's whole span, so what lies outside it all is passed over at once; the same ones woken
+function landWokeSpan() { const A = landWake.c.x0, B = landWake.c.x1; let lo = Infinity, hi = -Infinity; for (let i = 0; i < landWake.n; i++) { if (A[i] < lo) lo = A[i]; if (B[i] > hi) hi = B[i]; } LWS[0] = lo; LWS[1] = hi; return LWS; }
+const LWS = [0, 0];
 // the ground under something `half` wide whose foot is at y: where its foot settles, and its tilt (from the ground at its
 // two ends: over a small hole it bridges it, one end over a big one and it tips into it). Off the land: as it was
 function restGround(x, foot, half) {
@@ -47484,9 +47495,10 @@ function stepLandRest(dt) {
   if (landWake.n) for (const k of restChunksWhere(k => k.land && !k.uw && landWoke(k.x, 6), landWake)) { const f = k.y + k.hh * 0.45; if (landBelow(k.x, f - 6) > f + 1) { if (k._rest) restWakeChunk(k); k.rest = false; k.vx = k.vy = 0; k.w = lrRnd(-1, 1); } }
   // the debris, the grains of earth and the leaves lying on the ground: the ground gone, they fall again
   if (landWake.n) {
-    { const D = debris.c; for (let i = 0; i < debris.n; i++) if (D.state[i] === 2 && onLand(D.x[i]) && landWoke(D.x[i], 1) && !landSolid(D.x[i], D.y[i] + 1.5)) { D.state[i] = 0; D.vy[i] = 0; } }
+    const [lo, hi] = landWokeSpan(), L0 = lo - 1, L1 = hi + 1;   // (landWoke(x, 1) only where L0 <= x <= L1)
+    { const D = debris.c; for (let i = 0; i < debris.n; i++) { const x = D.x[i]; if (x < L0 || x > L1) continue; if (D.state[i] === 2 && onLand(x) && landWoke(x, 1) && !landSolid(x, D.y[i] + 1.5)) { D.state[i] = 0; D.vy[i] = 0; } } }
     restLandWake(landWake);                              // (and those filed away at rest - 36-zzzz-settled.js)
-    for (const T of [earthGrains, leaves]) { const c = T.c; for (let i = 0; i < T.n; i++) if (c.rest[i] && landWoke(c.x[i], 1) && !landSolid(c.x[i], c.y[i] + 1.5)) { c.rest[i] = 0; c.vy[i] = 0; c.vx[i] = 0; } }   // (Nov 1: column tables)
+    for (const T of [earthGrains, leaves]) { const c = T.c; for (let i = 0; i < T.n; i++) { const x = c.x[i]; if (x < L0 || x > L1) continue; if (c.rest[i] && landWoke(x, 1) && !landSolid(x, c.y[i] + 1.5)) { c.rest[i] = 0; c.vy[i] = 0; c.vx[i] = 0; } } }   // (Nov 1: column tables)
   }
 }
 // an army wreck (a tank's, a helicopter's): on a ship's deck it rides her, and goes down with her; over water it falls
@@ -56946,11 +56958,12 @@ function rigState(it, rc) {
       tear: new Uint8Array(n), tx: new Float32Array(n), ty: new Float32Array(n), tr: new Float32Array(n), tvx: new Float32Array(n), tvy: new Float32Array(n), tvr: new Float32Array(n), tt: new Float32Array(n), tl: new Float32Array(n), tlow: new Float32Array(n).fill(-1e9), tpx: new Float32Array(n).fill(NaN), tpy: new Float32Array(n).fill(NaN), pen: new Float32Array(n), pdx: new Float32Array(n),
       snap: -1, sa: 0, sav: 0, sdir: 1, sdone: 0, tlowT: -1e9, broke: false };
     const a0 = vegSz(it, 'sizeMin'), b0 = vegSz(it, 'sizeMax'); for (let f = 0; f < n; f++) { s.sz[f] = a0 + (b0 - a0) * rigHash(it.x, f); s.lag[f] = rigHash(it.x, f + 40); }
-    s.szK = a0 + ',' + b0;
+    s.szA = a0; s.szB = b0;
     RIGS_ST.set(it.x, s);
   }
-  const a1 = vegSz(it, 'sizeMin'), b1 = vegSz(it, 'sizeMax'), k = a1 + ',' + b1;   // (the sizes follow the sliders)
-  if (s.szK !== k) { s.szK = k; for (let f = 0; f < s.sz.length; f++) s.sz[f] = a1 + (b1 - a1) * rigHash(it.x, f); }
+  // (the sizes follow the sliders - Nov 9, storm stress test: asked ~14,000 times a frame zoomed out, the two numbers compared as they are, not made a text each time)
+  const a1 = vegSz(it, 'sizeMin'), b1 = vegSz(it, 'sizeMax');
+  if (s.szA !== a1 || s.szB !== b1) { s.szA = a1; s.szB = b1; for (let f = 0; f < s.sz.length; f++) s.sz[f] = a1 + (b1 - a1) * rigHash(it.x, f); }
   return s;
 }
 // the air vehicles move about them: gathered once a step - [x, y, vx, vy, kind] (kind 0 a car on the ground, 1 a plane, 2 a
@@ -57249,12 +57262,19 @@ function drawBuiltLod(it, rc, s, T, burnT, X, Y, w, k, mul, add, hs) {
     // flowers blown away - keeps its detail by its size: its parts drawn as pictures without the ones that are gone (drawBuiltMid), the pieces still in the
     // air or on the ground drawn shape by shape over it, as near (drawBuilt's only). The far one-picture plant has every part in it: torn, it's the parts
     const hurt = burnT > 0 || s.snap >= 0, torn = !!s.broke && !hurt;
-    if (hs < T.lodFar && !hurt && !torn) {   // (torn or snapped: every shape)
-      BAKE.miss = false; const P = builtSprite(rc, rigLight(it), vegUp(k)); if (!P && BAKE.miss) return; if (P) { let b = 0; for (let f = 0; f < rc.fronds.length; f++) b += s.b[f * 2] + s.b[f * 2 + 1] * 0.5; const sk = clamp(-b / Math.max(1, rc.fronds.length) * 0.35 - (rc.trunk ? s.a[0] + s.a[1] : 0), -0.6, 0.6);
+    // (Nov 9, user: "keep going through the list" - a storm fight zoomed out: ~20 snapped trees drawn shape by shape at ~20 px, ~0.35 ms each) a snapped
+    // tree tiny on the screen is its one picture in two pieces: under the break as it stands, over it turned by its fall about the break (as its shapes are)
+    const snapped = s.snap >= 0 && !(burnT > 0) && rc.trunk && rc._S && s.snap < rc._S.length;
+    if (hs < T.lodFar && (!hurt || snapped) && !torn) {   // (torn or burning: every shape)
+      BAKE.miss = false; const P = builtSprite(rc, rigLight(it), vegUp(k)); if (!P && BAKE.miss) return; if (P) { let b = 0; for (let f = 0; f < rc.fronds.length; f++) b += s.b[f * 2] + s.b[f * 2 + 1] * 0.5; const sk = snapped ? 0 : clamp(-b / Math.max(1, rc.fronds.length) * 0.35 - (rc.trunk ? s.a[0] + s.a[1] : 0), -0.6, 0.6);
+        const bx = snapped ? rc._S[s.snap][0] : 0, by = snapped ? rc._S[s.snap][1] : 0;
+        const put = (SD, img, Q) => { const W = Q.c.width, H = Q.c.height, n = Q.n; if (!snapped) { SD.drawImage(img, Q.x, Q.y, W / n, H / n); return; }
+          const r = clamp(Math.round((by - Q.y) * n), 0, H); if (r < H) SD.drawImage(img, 0, r, W, H - r, Q.x, Q.y + r / n, W / n, (H - r) / n);
+          if (r > 0) { SD.save(); SD.translate(bx, by); SD.rotate(s.sa); SD.drawImage(img, 0, 0, W, r, Q.x - bx, Q.y - by, W / n, r / n); SD.restore(); } };
         const SD = VEG_PASS_L ? vegPassCtx(it, X, Y, w, vegQ(k)) : C; if (SD === C) { C.save(); C.translate(X, Y); if (it.flip) { C.translate(w, 0); C.scale(-1, 1); } C.scale(k, k); } SD.transform(1, 0, sk, 1, -sk * rc.foot, 0);
         { const B = rc.built, nn = vegUp(k), OC = builtOlKey(rc, B, nn), ol = GLR.on && OC.ol; if (ol) { const ok = OC.ok, OM = rc._olM || (rc._olM = new Map()), OP = vegBake(OM, ok, () => builtOlJob(rc, nn), vegPieceFree, 12, 'o');
-          if (OP) { const T0 = SD.getTransform(), U = SD === C ? VEG_PX : 1, tc = olTint(ol, mul), ga0 = SD.globalAlpha; SD.globalAlpha = ga0 * olA(ol); for (const [ox, oy] of vegOlOffs(Math.round(ol.w))) { SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e + ox * U, T0.f + oy * U); SD.drawImage(glTint(OP.c, 'rgO', RIG_ZERO, tc, false), OP.x, OP.y, OP.c.width / OP.n, OP.c.height / OP.n); } SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e, T0.f); SD.globalAlpha = ga0; } } }
-        SD.drawImage(GLR.on ? glTint(P.c, 'rgB', mul, add, false) : P.c, P.x, P.y, P.c.width / P.n, P.c.height / P.n); SD.restore(); return; }
+          if (OP) { const T0 = SD.getTransform(), U = SD === C ? VEG_PX : 1, tc = olTint(ol, mul), ga0 = SD.globalAlpha; SD.globalAlpha = ga0 * olA(ol); for (const [ox, oy] of vegOlOffs(Math.round(ol.w))) { SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e + ox * U, T0.f + oy * U); put(SD, glTint(OP.c, 'rgO', RIG_ZERO, tc, false), OP); } SD.setTransform(T0.a, T0.b, T0.c, T0.d, T0.e, T0.f); SD.globalAlpha = ga0; } } }
+        put(SD, GLR.on ? glTint(P.c, 'rgB', mul, add, false) : P.c, P); SD.restore(); return; }
     }
     // (between LOD FAR and LOD MID on the screen: each part its own picture on its own springs)
     if (hs < T.lodMid && !hurt) { BAKE.miss = false; const M = builtMid(rc, rigLight(it), vegUp(k)); if (!M && BAKE.miss) return; if (M) { drawBuiltMid(it, rc, s, M, X, Y, w, k, mul, add); if (torn && tornLive(s)) drawBuilt(it, rc, s, X, Y, w, k, mul, add, tornPiece(s)); return; } }
