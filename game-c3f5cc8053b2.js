@@ -5193,8 +5193,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 971;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 19:11';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 972;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 19:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -51391,6 +51391,7 @@ function drawLandGround(x0, x1, onField, onWater) {
   landBackDraw(x0, x1, list);   // (user Nov 4 09:06: the field behind kept - it's the set's composition, as the game shows it)   // (the field behind - its grass, flowers, boulders: none while the plants have bones, user Nov 3 21:23)
   if (onField) { onField(); landBackCover(x0, x1, list, putM); }
   drawStals(x0, x1);
+  guardDraw('inCaves', () => drawInCaves(x0, x1));    // (what's in a cave: over its back wall, under its water's tint - 50-land-zz-cavelook.js)
   // (user Nov 8 21:43-21:48: the sea caves' water over the back wall here, in the land's pass - laid in the sea's pass it was under this wall, and the sea's
   // tint turned the caves' air pockets blue; here a pocket shows its rock, the water its water, the ground in front over both)
   guardDraw('seaCaveWater', () => drawSeaCaveWater(x0, x1));
@@ -55944,6 +55945,33 @@ function drawCavePlants(x0, x1) {
   for (let k = Math.max(0, Math.floor(ltCol(x0) / LT_CHUNK)), k1 = Math.min(land.dirty.length - 1, Math.floor(ltCol(x1) / LT_CHUNK)); k <= k1; k++) if (!land.cvK || !land.cvK[k]) cavePlantsMake(k);
   if (!land.props.some(it => it.cave)) return;
   const p0 = VEG_PASS; VEG_PASS = 'cave'; try { drawLandProps(x0, x1, false, 'plants'); } finally { VEG_PASS = p0; }
+}
+// (user Nov 9 18:13: "I went underwater with the exploration submarine into a cave, and the submarine is rendering behind the cave") what is in a cave
+// is drawn in the pass of the water it is in, as a lake's (onLakeW): in the land's pass, over the cave's back wall and stalactites and under its water's
+// tint (drawLandGround), clipped to the caves' holes so the part of it still out in the sea stays the sea pass's. Every cave is a HOLE shape since one
+// cave world (Version 902) - its back wall is the land's, drawn after the sea's things: anything that goes into a cave is in this list
+// (the caves module's own keepIn did this for its caves before - subs, the exploration subs, the pirate wrecks)
+function drawInCaves(x0, x1) {
+  if (typeof SHP === 'undefined' || !SHP.holes || !SHP.holes.length || !land.onl) return;
+  const inC = (x, y) => holeAt(ltCol(x), y) >= 0, L = [];
+  let a = Infinity, b = -Infinity; const add = (lo, hi, fn) => { L.push(fn); a = Math.min(a, lo); b = Math.max(b, hi); };
+  for (const s of minisubs) if (s.state !== 'lost' && !vehCulled(s, x0, x1) && [-8.5, 0, 8.5].some(dx => inC(s.x + dx, s.y))) add(s.x - 50, s.x + 50, () => drawMinisub(s));
+  for (const sb of subs) if (sb.state !== 'gone' && !sb.parts && !sb._krHeld && sb.x > x0 - SUB_L && sb.x < x1 + SUB_L && [-0.45, 0, 0.45].some(u => inC(sb.x + u * SUB_L, sb.y))) add(sb.x - SUB_L, sb.x + SUB_L, () => drawSub(sb));
+  const inW = w => w.y != null && (inC(w.x, w.y - 30) || inC(...chestAt(w)));
+  { const W = pirateWrecks.filter(w => !offViewR(w.x, w.half || 200, x0, x1) && inW(w)); if (W.length) add(Math.min(...W.map(w => w.x - (w.half || 200))), Math.max(...W.map(w => w.x + (w.half || 200))), () => drawPirateWrecks(x0, x1, inW)); }
+  for (const [list, fn, r] of [[torps, drawTorps, TORP_L], [mines, drawMines, 20], [dcharges, drawDcharges, 10]]) {
+    const In = list.filter(o => o.x > x0 - r && o.x < x1 + r && inC(o.x, o.y)); if (In.length) add(Math.min(...In.map(o => o.x)) - r, Math.max(...In.map(o => o.x)) + r, () => fn(x0, x1));
+  }
+  if (!L.length) return;
+  // the holes' spans in those columns (a cell or two over each side, as holeAt: the cells' rough walls), the ground in front covers the rest
+  const c0 = Math.max(0, ltCol(Math.max(a, x0))), c1 = Math.min(land.cols - 1, ltCol(Math.min(b, x1))), m = 2 * LT_CELL;
+  C.save(); C.beginPath();
+  for (const n of SHP.holes) { const S = SHP.cols[n]; if (!S || S.c1 < c0 || S.c0 > c1) continue;
+    for (let c = Math.max(c0, S.c0); c <= Math.min(c1, S.c1); c++) { const v = S.iv[c - S.c0]; if (!v) continue; const X = Math.floor(PX(c * LT_CELL)), W = Math.ceil(PX((c + 1) * LT_CELL)) - X;
+      const top = land.surf ? land.surf[c] : -Infinity;   // (only under the land's line as built: where its back wall is - landBackDraw)
+      for (let i = 0; i + 1 < v.length; i += 2) { const y0 = Math.max(v[i] - m, top), y1 = v[i + 1] + m; if (y1 <= y0) continue; const Y = Math.floor(PY(y0)); C.rect(X, Y, W, Math.ceil(PY(y1)) - Y); } } }
+  C.clip();
+  try { for (const fn of L) fn(); } finally { C.restore(); }
 }
 
 /* ---- THE GROUND'S EDGE, SMOOTH (user Nov 2 14:34: "The terrain should never be stepped like in this image, but smooth. This should
