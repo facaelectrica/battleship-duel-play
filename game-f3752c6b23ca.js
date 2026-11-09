@@ -5193,8 +5193,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 964;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 15:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 965;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 15:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18869,7 +18869,7 @@ function stepSmoke(dt) {
       else if (LO[n]) LO[n] = Math.max(0, LO[n] - dt * 2);
     }
     if (age > LF[n]) { smoke.drop(n); continue; }
-    if (LAND && land.cell && landSolid(X[n], Y[n])) { smoke.drop(n); continue; }   // (user Nov 8 19:49, "Smoke underground": a puff that drifts into solid ground is gone - smoke is in the air, a cave's or the sky's)
+    if (LAND && land.cell && landSolid(X[n], Y[n]) && !(isleCol(X[n]) && smFloor(n, X[n], Y[n]) === null)) { smoke.drop(n); continue; }   // (user Nov 9 14:49: but not a puff in front of an island - a boat's funnel under its top: smFloor)   // (user Nov 8 19:49, "Smoke underground": a puff that drifts into solid ground is gone - smoke is in the air, a cave's or the sky's)
     if (ASH[n] >= 0 && (ASH[n] -= dt) < 0 && age < LF[n] * 0.7 && ash.n < 50) {
       ASH[n] = smRnd(9, 18);
       ash.addRow({ x: X[n] + smRnd(-R[n], R[n]) * 0.8, y: Y[n] + smRnd(-R[n], R[n]) * 0.5, vx: VX[n] * 0.5, vy: smRnd(2, 8), ph: smR() * 6, life: 0, max: smRnd(6, 12), big: smR() < 0.25 });
@@ -38875,6 +38875,7 @@ function boardCiv(p, v) {
   if (v.placed != null) { d = 0; if ('drv' in v) v.drv = 0; }      // (a placed one was still: it stays still till you drive it)
   setOrder(telegraphs[p], d < 0 ? 0 : d > 0 ? 6 : 3);
   v.cin = d;
+  dockHere(v);                                                   // (by a dock and still: docked as it lies, its rope kept - 50-zzzz-dock-ropes.js)
   // (no zoom change on boarding: user Oct 27, "When you turn on any vehicle it should not be zooming in or out")
 }
 // a scripted flight taken over: from here on it flies (or rolls) by the warplane's rules
@@ -66609,6 +66610,14 @@ function dockLock(v, go, sp, dt, half) {
   v.dk = { x: D.x1 - D.x0 > 2 * half ? clamp(v.x, D.x0 + half, D.x1 - half) : (D.x0 + D.x1) / 2 };
   return true;
 }
+// (user Nov 9 14:49: "Switching from house to boat should not break the rope") boarded by a dock, still: docked where it lies - never
+// eased along (the ease pulled the bow past the rope's slack: it let go) - from boardCiv, every boarding
+function dockHere(v) {
+  v.dk = null; v.dkT = 0;
+  const sea = jetboats.includes(v); if (!sea && !(seaplanes.includes(v) && spOnWater(v))) return;
+  const half = sea ? storyBoatSize(v)[0] / 2 : (b => (b[1] - b[0]) / 2)(vehBox({ v }));
+  if (Math.abs((sea ? v.vDrive : v.spd) || 0) <= DK_V && drDockAt(v.x, half + DK_NEAR)) v.dk = { x: v.x };
+}
 // a new rope from the post (px, py) to the bow (bx, by), hanging with its slack - the liner's rope (ropeStep, 50-land-linerparts.js):
 // its end A the post (always held), B the bow (held while tied)
 function drMake(px, py, bx, by) {
@@ -66628,7 +66637,8 @@ function stepDockRopes() {
     const sp = Math.abs(v.x - S.lx) / dt, R = S.R; S.lx = v.x;
     if (R && R.holdB) {
       const pull = Math.hypot(bx - R.px, by - R.py) > R.len * 1.05;
-      if (!afloat || pull || sp > DR_GO || !drDockAt(R.px)) { R.holdB = false; R.t = 0; const e = R.N[R.N.length - 1]; e[2] = e[0] - (bx - e[0]) * 0.3; }   // (let go: its end flicks off the bow)
+      if (!afloat || (!v.dk && (pull || sp > DR_GO)) || !drDockAt(R.px)) {   // (docked - dockLock: held, whatever the frame's jump)
+        R.holdB = false; R.t = 0; const e = R.N[R.N.length - 1]; e[2] = e[0] - (bx - e[0]) * 0.3; }   // (let go: its end flicks off the bow)
       else drStep(R, bx, by, dt);
     } else if (R) { R.t += dt; drStep(R, bx, by, dt); if (R.t > DR_FALL_S + DR_FADE_S) S.R = null; }
     if (!S.R || !S.R.holdB) {
