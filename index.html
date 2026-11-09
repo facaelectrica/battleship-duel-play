@@ -2430,7 +2430,7 @@ const isCpu = p => PLAYERS === 2 && NET.role !== 'guest' && ctlFor(SIDE(p)) === 
 const HUMANS = () => SLOTS.length;                            // how many people play at this screen (each has a slot)
 const ONEVIEW = () => HUMANS() <= 1;                          // one screen (yours) rather than the split screen
 const ships = [];
-let time = 0, frameDt = 1 / 60, paused = false;
+let time = 0, frameDt = 1 / 60, paused = false, camFreeT = 0;   // (camFreeT: till when a paused lab's view still follows its own camera - 52-main.js)
 // (user Oct 31: "when the game opens, it doesnt load the world automatically. we need to pick 'battle, open world, etc' vs
 // loading everything at the start") a world is there only once a game is picked: until then nothing steps it or draws it
 // (frameBody, render), and the menu stands on black. worldLive: one is built and none is on its way (LOADING, 19-menu.js)
@@ -3327,7 +3327,7 @@ function buildWorld(restore) {
   shocks.length = 0;
   storm.bolts.length = 0; storm.flash = 0; storm.next = 3;
   mapTracks[0] = mapTracks[1] = null;
-  for (const arr of [screens, weedBits, torps, torpWrecks, gasBalls, jets, streaks, blastRings, deadFish, wclouds, dcharges, mines, spray, bubbles, foam, wakes, debris, sparks, flashes, shells, bullets, smoke, pieces, flames, embers, rings, trails, dust, grains, ash, duds]) arr.length = 0;
+  for (const arr of [screens, weedBits, torps, torpWrecks, gasBalls, jets, streaks, blastRings, deadFish, wclouds, dcharges, mines, spray, bubbles, foam, wakes, debris, sparks, flashes, shells, bullets, smoke, pieces, flames, embers, rings, trails, dust, grains, ash, duds, leaves, earthGrains, treeLeaves]) arr.length = 0;   // (and the land's bits - a leaf torn off, the earth a blast threw, a leaf falling: user Nov 8 19:42, the Biome Editor's RESET left them)
   for (let p = 0; p < 2; p++) {
     Object.assign(crew[p], freshCrew());               // the round opens with the captain in his hangar, choosing
     Object.assign(guns[p], { reload: 0, rk: [0, 0], pk: [0, 0], press: 0, ammo: VTUNE.ship.shells, dcAmmo: VTUNE.ship.dc, dk: 0, resupT: 0 });   // (the smoke: on each vehicle now, smokeSupply)
@@ -5112,8 +5112,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 902;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 08 20:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 903;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 08 20:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -44521,6 +44521,8 @@ function buildDesertArt() {
    made things a blast or a fire can take: alive) ---- */
 function buildLandProps() {
   land.props = [];
+  RIGS_ST.clear();   // (the plants laid again: none keeps the state the last ones had - a torn leaf, a bend, a snapped trunk. Kept by place, a plant at the same spot took its
+                     // old torn leaves back - user Nov 8 19:42, the Biome Editor's RESET)
   const R = seededRng(8123), DL = (land.lakes || []).filter(l => lookD((l[0] + l[1]) / 2)), L = DL[0];   // (the oases: every lake whose ground looks the desert's - lookD)
   const ok = x => onLand(x) && !isleCol(x) && !onApron(x) && !nearAirport(x, AS) &&   // (every plant asks nearAirport - user Nov 3 09:22)
     !structNear(x, 260) && !(land.proud || []).some(([a, b]) => x > a - 6 && x < b + 6);
@@ -58055,6 +58057,9 @@ function stepStals(dt) {
 }
 // drawn behind the ground, with the back wall and before its dark (drawLandGround, drawLandBackSea)
 function drawStals(x0, x1) {
+  // (a world built again keeps the ground's pictures it can - land.same: no slice painted again, so none laid its caves' things again. Laid here then, once
+  // a slice, for the slices in view - stalsMake)
+  if (land.cell && land.dirty) for (let k = Math.max(0, Math.floor(ltCol(x0) / LT_CHUNK)), k1 = Math.min(land.dirty.length - 1, Math.floor(ltCol(x1) / LT_CHUNK)); k <= k1; k++) if (!land.stalK || !land.stalK[k]) stalsMake(k);
   const A = land.stals; if (!A || !A.length) return;
   const ga = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false;
   for (const o of A) {
@@ -67453,7 +67458,9 @@ function frameBody(now) {
   const t2 = performance.now();
   for (const gun of [...guns, ...tguns, ...hguns]) { gun.aimShow = Math.max(0, gun.aimShow - dt); gun.press = Math.max(0, gun.press - dt); }
   const q0 = performance.now();
-  if (!(paused && HUD_ONLY)) updateCamera(dt, false);               // (a lab's in-place pause holds the view too: user Nov 3 15:17 "freeze everything")
+  // (a lab's in-place pause holds the view too: user Nov 3 15:17 "freeze everything" - but not your own looking about: user Nov 8 19:41, the wheel didn't zoom
+  // in a paused Biome Editor. The view goes where the lab's own camera is sent - a wheel notch, a drag, LOOK AT - while the world stays held)
+  if (!(paused && HUD_ONLY) || performance.now() < camFreeT) updateCamera(dt, false);
   const q1 = performance.now();
   // (the simulation worker never draws or plays: 00-sw-boot.js. A frame not drawn still works out the light and the wind from
   // the weather, E - render() does it first thing, and the game's next steps read it: a ship's drift, the waves - Oct 30 gate)
@@ -67667,7 +67674,7 @@ async function start(data) {
       lay: (key, f, m, x, y) => { const rc = folRig(key); if (!rc || !rc.fronds[f]) return null; return leafLay(rc.fronds[f].root, m, x, y, [0, 0, 0, 0]).slice(0, 2); } },
     perchesOn: () => { const P = perches.c, o = []; for (let j = 0; j < perches.n; j++) if (P.plant[j] && !isNaN(P.rf[j])) o.push({ j, x: P.x[j], y: P.y[j], bird: P.bird[j] ? 1 : 0, v: P.rv[j], tx: P.plant[j].x }); return o; },   // (the birds' spots on the fronds - a look for the lab)
     st: x => RIGS_ST.get(x), rows: () => VEH_TUNE.TREES(), V: VTUNE, VD: VTUNE_DEF, save: () => vtuneSave(),
-    look: (x, y, z) => { camOverride[0] = x == null ? null : [x, y]; if (z) setZoom(0, z); updateCamera(0, true); },
+    look: (x, y, z) => { camOverride[0] = x == null ? null : [x, y]; if (z) setZoom(0, z); updateCamera(0, true); camFreeT = performance.now() + 800; },
     view: () => { const v = cam.view[0], [x, y] = screenToWorld(innerWidth / 2, innerHeight / 2); return { x, y, z: v.z, k: S * v.z * PIXW / (window.devicePixelRatio || 1), over: !!camOverride[0] }; },   // (the view's middle in the world, its zoom, screen pixels a world unit - the lab's free camera)
   } });
   // (Nov 1) a column table's row as a plain object, for the console: __game.row('smoke', 0) - 04-zz-coltable.js
