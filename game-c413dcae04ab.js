@@ -5189,8 +5189,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 951;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 14:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 952;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 14:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8122,7 +8122,7 @@ window.addEventListener('pointerdown', e => {
     // into the civilian plane under it)
     if (LAND && NET.role === 'local' && e.pointerType === 'mouse' && e.button === 0) {
       if (e.shiftKey) { const [wx, wy] = screenToWorld(e.clientX, e.clientY), sl = ONEVIEW() || e.clientX < window.innerWidth / 2 ? 0 : 1; if (asSlot(sl, q => civTakeAt(q, wx, wy))) return; }
-      else if (testHitAt(e.clientX, e.clientY)) return;
+      else if (!(STORY && storyBoxAt(e.clientX, e.clientY)) && testHitAt(e.clientX, e.clientY)) return;   // (STORY: a click on what wears an arrow is its press, on the way up - endPointer0)
     }
     const half = ONEVIEW() || e.clientX < window.innerWidth / 2 ? 0 : 1;
     pointers.set(e.pointerId, { kind: 'pinch', half, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: performance.now() });
@@ -8199,6 +8199,7 @@ function endPointer0(e) {
   startPinch(p.half);
   const now = performance.now();
   const isTap = !p.look && !wasPinch && now - p.t0 < 280 && Math.hypot(p.x - p.x0, p.y - p.y0) < 14;
+  if (isTap && STORY && p.half === 0) { const T = storyBoxAt(p.x0, p.y0); if (T) { storyPress(T); lastTap[p.half] = 0; return; } }   // (STORY: a tap on what wears an arrow presses it - 50-zz-story-swap.js storyBoxAt)
   if (isTap) {
     if (now - lastTap[p.half] < 340) { asSlot(p.half, q => { if (!zoomLocked(q) && !menuNoZoom()) { if (crew[q]) crew[q].zoomOwn = true; setScope(q, zoomLevelOf(ZOOM_START)); } }); lastTap[p.half] = 0; }
     else lastTap[p.half] = now;
@@ -63298,7 +63299,7 @@ function storyTargets() {
     let x0, x1, y0, y1;
     if (q.o) { const B = strBox(q.o); x0 = B.x0; x1 = B.x1; y0 = B.top; y1 = B.foot; }
     else [x0, x1, y0, y1] = vehBox({ v: q.v });
-    const T = { key: q.o ? 's:' + q.o.id : 'v:' + q.v.sid, o: q.o || null, v: q.v || null, cur: !!cur, wx: (x0 + x1) / 2, wy: y0, mx: (x0 + x1) / 2, my: (y0 + y1) / 2, name: q.o ? storyStrName(q.o) : storyVehName(q.v) };
+    const T = { key: q.o ? 's:' + q.o.id : 'v:' + q.v.sid, o: q.o || null, v: q.v || null, cur: !!cur, wx: (x0 + x1) / 2, wy: y0, mx: (x0 + x1) / 2, my: (y0 + y1) / 2, box: [x0, x1, y0, y1], name: q.o ? storyStrName(q.o) : storyVehName(q.v) };
     if (q.v && !q.v.own && q.v.rentBy == null) { if (dealBuy(q.v)) T.price = storyVehPrice(q.v); if (dealRent(q.v)) T.rent = dealRentCost(q.v); }   // (Nov 7: BUY / RENT - 50-zzzz-veh-deal.js; one you're renting: yours to take)
     return T;
   };
@@ -63447,6 +63448,21 @@ const ARROW_B = 3, ARROW_GAP = 4, ARROW_BOB = 7;
 const storyBuyHint = () => { const d = (SLOTS[0] || {}).dev || 'kb'; return d === 'touch' ? 'TAP TO PURCHASE' : /pad/.test(d) ? 'PRESS A TO PURCHASE' : 'PRESS SPACE TO PURCHASE'; };
 // where each arrow is on the page this frame (for presses): its point (cx, cy) and how far up its arrow and label reach (up), in
 // the page's pixels
+// (user Nov 9, iPad: "when I'm able to access a structure, I should be able to click on it to enter") a tap or click on anything that
+// wears a white arrow presses it, as its arrow does (storyPress): the smallest box under it wins (a car in front of a lighthouse: the
+// car); on what you control, nothing. X, Y in the page's pixels; the tap itself is the world's tap (endPointer0, 20-input-pointer.js)
+function storyBoxAt(X, Y) {
+  if (!STORY || ui.title || ui.menu || storyQ || STSW.on || SHOWR.id != null || MKT.id != null) return null;
+  const w = storyToUI(), m = 8;
+  let best = null, ba = Infinity;
+  for (const T of storyTargets()) {
+    if (T.hidden || !T.box) continue;
+    const a = w(T.box[0], T.box[2]), b = w(T.box[1], T.box[3]);
+    if (X < a.cx - m || X > b.cx + m || Y < a.cy - m || Y > b.cy + m) continue;
+    const ar = (b.cx - a.cx) * (b.cy - a.cy); if (ar < ba) { ba = ar; best = T; }
+  }
+  return best && !best.cur ? best : null;
+}
 function storyArrowsAt() {
   const w = storyToUI(), k = PIXU / dpr;
   return storyTargets().map(T => { const p = w(T.wx, T.wy), n = T.price != null ? 3 : T.market ? 2 : 1; return Object.assign(T, { cx: p.cx, cy: p.cy, up: (ARROW_GAP + 7 * ARROW_B + ARROW_BOB + 6 + n * 16) * k }); });
