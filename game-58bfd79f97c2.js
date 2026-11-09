@@ -5192,8 +5192,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 959;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 15:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 960;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 15:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -39028,6 +39028,7 @@ function stepCivDriven(v, dt) {
     return true;
   }
   if (k === 'boat') {
+    if (dockLock(v, lever, v.vDrive || 0, dt, storyBoatSize(v)[0] / 2)) { v.drv = 0; v.vDrive = 0; return false; }   // (by a dock, let go: docked - 50-zzzz-dock-ropes.js)
     if (lever && Math.sign(lever) !== v.dir && !v.turn) { v.turn = 0.001; v.flipped = false; }
     v.drv = (v.drv || 0) + (Math.abs(lever) - (v.drv || 0)) * Math.min(1, dt * 1.5);
     v.vDrive = v.v * 1.2 * v.drv;
@@ -48121,6 +48122,7 @@ function spPlan(s, dt) {
 }
 // on the water: it taxis like a boat; run up to speed for three seconds and it lifts
 function spWater(s, dt, lever, stick, mine) {
+  if (mine && dockLock(s, lever || stick, s.spd, dt, (b => (b[1] - b[0]) / 2)(vehBox({ v: s })))) { lever = 0; stick = 0; s.spd = 0; }   // (by a dock, let go: docked - 50-zzzz-dock-ropes.js)
   if (lever && Math.sign(lever) !== s.dir) { if (s.spd < 12) s.dir = Math.sign(lever); else lever = 0; }
   if (!mine && lever && spWallAt(s.x + s.dir * (40 + s.spd * s.spd / (120 * AIR_SK.seaplane)))) lever = 0;   // (left to itself it eases off short of a wall - never runs onto one: spWall)
   const want = lever ? (mine ||(s.ai && (s.ai.phase === 'out' || s.ai.phase === 'tolake' || s.ai.phase === 'fromlake')) ? SP_V : 40) : 0;
@@ -66576,15 +66578,35 @@ function drBoats() {
   return L;
 }
 // the dock by x: [its deck's y, its span across, its pier] - a wooden dock's deck, a pier's, else its picture's planks
-function drDockAt(x) {
+function drDockAt(x, m = DR_NEAR) {
   for (const o of strsUsed()) {
     if (o.k !== 'dock' && !(typeof isPierS === 'function' && isPierS(o))) continue;
-    const B = strBox(o); if (x < B.x0 - DR_NEAR || x > B.x1 + DR_NEAR) continue;
+    const B = strBox(o); if (x < B.x0 - m || x > B.x1 + m) continue;
     const p = HARB.on ? HARB.free.find(q => q.so === o) : null;
     if (p && p.pierGone) continue;
     return { y: p ? pierDeckY(p) : B.top + WOOD.deck * (B.m || 1), x0: B.x0, x1: B.x1, o, p };
   }
   return null;
+}
+/* ---- DOCKING (user Nov 9 14:12: "if you're getting close to a dock, they kind of lock automatically and the rope comes in indicating that it's
+   docked. Of course you can press any key to undock, but you should feel that the boat is docking naturally"). One rule for every boat and
+   seaplane you drive: let go of the drive by a dock (its end within DK_NEAR of the dock) under DK_V, and it eases in alongside - all of it by the
+   deck if the deck's long enough, else its middle at the deck's - and lies there, held (v.dk: { x, its berth }); its rope comes in at once
+   (stepDockRopes). Any drive key (or a seaplane's stick) lets go, and it isn't caught again for DK_AGAIN, so it can pull away slowly ---- */
+const DK_V = 3 * UPM, DK_NEAR = 5 * UPM, DK_EASE = 1.6, DK_AGAIN = 2.5;   // (DK_NEAR: how close its end comes to the dock to be caught)
+// each step of a vehicle you drive on the water: go - the drive (or stick) pushed, sp - its speed now, half - half its length.
+// True while docked: the caller holds it still (no drive, no speed)
+function dockLock(v, go, sp, dt, half) {
+  if (v.dk) {
+    if (go || !drDockAt(v.dk.x, 0)) { v.dk = null; v.dkT = DK_AGAIN; return false; }   // (undocked - or its dock gone)
+    v.x += (v.dk.x - v.x) * (1 - Math.exp(-dt * DK_EASE));
+    return true;
+  }
+  if (v.dkT > 0) { v.dkT -= dt; return false; }
+  if (go || Math.abs(sp) > DK_V || v.turn) return false;
+  const D = drDockAt(v.x, half + DK_NEAR); if (!D) return false;
+  v.dk = { x: D.x1 - D.x0 > 2 * half ? clamp(v.x, D.x0 + half, D.x1 - half) : (D.x0 + D.x1) / 2 };
+  return true;
 }
 // a new rope from the post (px, py) to the bow (bx, by), hanging with its slack - the liner's rope (ropeStep, 50-land-linerparts.js):
 // its end A the post (always held), B the bow (held while tied)
@@ -66610,9 +66632,10 @@ function stepDockRopes() {
     } else if (R) { R.t += dt; drStep(R, bx, by, dt); if (R.t > DR_FALL_S + DR_FADE_S) S.R = null; }
     if (!S.R || !S.R.holdB) {
       // still by a dock a moment: tied to a post on its deck ahead of the bow
-      const D = afloat && sp < DR_REST ? drDockAt(v.x) : null;
+      const dk = v.dk && Math.abs(v.x - v.dk.x) < 0.5 * UPM;   // (docked and in alongside: tied at once - dockLock)
+      const D = afloat && (sp < DR_REST || dk) ? drDockAt(v.x) : null;
       S.still = D ? S.still + dt : 0;
-      if (D && S.still > DR_STILL_S) { S.R = drMake(clamp(bx + f * 1.2 * UPM, D.x0 + 0.4 * UPM, D.x1 - 0.4 * UPM), D.y, bx, by); S.still = 0; }
+      if (D && (S.still > DR_STILL_S || dk)) { S.R = drMake(clamp(bx + f * 1.2 * UPM, D.x0 + 0.4 * UPM, D.x1 - 0.4 * UPM), D.y, bx, by); S.still = 0; }
     }
   }
   for (const k of DR.st.keys()) if (!seen.has(k)) DR.st.delete(k);   // (the boat's gone: its rope with it)
