@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 19:01', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 09 19:04', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1481,8 +1481,8 @@ class GPUGL {
   bindVertexArray(v) { this.vao = v || this.defVao; }
   enableVertexAttribArray(i) { const a = this.vao.A[i]; if (!a.on) { a.on = true; this.vao.ver++; } }
   disableVertexAttribArray(i) { const a = this.vao.A[i]; if (a.on) { a.on = false; this.vao.ver++; } }
-  vertexAttribPointer(i, n, ty, norm, stride, off) { Object.assign(this.vao.A[i], { buf: this.arrayBuf, n, ty, norm: !!norm, int: false, stride, off }); this.vao.ver++; }
-  vertexAttribIPointer(i, n, ty, stride, off) { Object.assign(this.vao.A[i], { buf: this.arrayBuf, n, ty, norm: false, int: true, stride, off }); this.vao.ver++; }
+  vertexAttribPointer(i, n, ty, norm, stride, off) { Object.assign(this.vao.A[i], { buf: this.arrayBuf, n, ty, norm: !!norm, int: false, stride, off }); gpuGLWiden(this.vao.A[i]); this.vao.ver++; }
+  vertexAttribIPointer(i, n, ty, stride, off) { Object.assign(this.vao.A[i], { buf: this.arrayBuf, n, ty, norm: false, int: true, stride, off }); gpuGLWiden(this.vao.A[i]); this.vao.ver++; }
   vertexAttribDivisor(i, d) { this.vao.A[i].div = d; this.vao.ver++; }
   createFramebuffer() { return { k: 'f', id: ++GLO_ID, col: [], ds: null, db: [0], ver: 0 }; }
   deleteFramebuffer() { }
@@ -1568,8 +1568,10 @@ class GPUGL {
       b.back = b.own.gb; b.boff = 0; b.bsub = Infinity;
       return;
     }
-    const es = d.BYTES_PER_ELEMENT || 1, off = (so || 0) * es, n = len !== undefined ? len * es : d.byteLength - off;
-    const u8 = new Uint8Array(d.buffer, d.byteOffset + off, n);
+    const es = d.BYTES_PER_ELEMENT || 1, off = (so || 0) * es;
+    let n = len !== undefined ? len * es : d.byteLength - off;
+    let u8 = new Uint8Array(d.buffer, d.byteOffset + off, n);
+    if (b.wide) { const W = b.wide.norm ? new Float32Array(n) : b.wide.signed ? new Int32Array(n) : new Uint32Array(n), S = b.wide.signed ? new Int8Array(u8.buffer, u8.byteOffset, n) : u8; for (let i = 0; i < n; i++) W[i] = b.wide.norm ? S[i] / (b.wide.signed ? 127 : 255) : S[i]; u8 = new Uint8Array(W.buffer); n = u8.byteLength; }
     b.size = n;
     if (b.own && b.own.ep === GPU.ep && b.own.use === FR.sub) {
       // its own buffer is still to be read by this submit's commands: this version lives in the arena until then
@@ -1667,6 +1669,13 @@ class GPUGL {
     if (R && R.data.length <= out.byteLength) new Uint8Array(out.buffer, out.byteOffset, R.data.length).set(R.data);
     else new Uint8Array(out.buffer, out.byteOffset, out.byteLength).fill(0);
   }
+}
+// (a column of single bytes, read one a vertex or instance - WebGPU reads no vertex data narrower than 4 bytes a step: its buffer
+// keeps each byte as a 32-bit number, widened as it's sent - the same values)
+function gpuGLWiden(a) {
+  const K = GLK, one = (a.ty === K.UNSIGNED_BYTE || a.ty === K.BYTE) && (a.stride === a.n || !a.stride) && (a.n === 1 || a.n === 2 || a.n === 3) && !a.off;
+  a.wide = one && a.buf ? true : false;
+  if (a.wide) a.buf.wide = { signed: a.ty === K.BYTE, norm: a.norm };
 }
 const GLF_OF = {}; for (const k in GLF) if (!GLF_OF[GLF[k][0]]) GLF_OF[GLF[k][0]] = GLF[k];
 // the format a texImage2D asks for: its sized internal format, or an unsized one by its format and type
@@ -1834,6 +1843,7 @@ function gpuTopo(mode) { if (!GL_TOPO[GLK.TRIANGLES]) Object.assign(GL_TOPO, { [
 function gpuVFmt(a, want) {
   const K = GLK, n = a.n, x = n > 1 ? 'x' + n : '';
   if (a.ty === K.FLOAT) return ['float32' + x, 4 * n];
+  if (a.wide) return [(a.norm ? 'float32' : a.ty === K.BYTE ? 'sint32' : 'uint32') + x, 4 * n];
   if (a.ty === K.UNSIGNED_BYTE) return [(a.int ? 'uint8' : a.norm ? 'unorm8' : 'uint8') + 'x' + Math.max(2, n === 3 ? 4 : n), Math.max(2, n === 3 ? 4 : n)];
   if (a.ty === K.BYTE) return [(a.int ? 'sint8' : a.norm ? 'snorm8' : 'sint8') + 'x' + Math.max(2, n === 3 ? 4 : n), Math.max(2, n === 3 ? 4 : n)];
   if (a.ty === K.INT) return ['sint32' + x, 4 * n];
@@ -1855,7 +1865,7 @@ function gpuGLLayout(vao, p) {
       slots.push({ zero: isInt ? 16 : 0, buf: null, base: 0, st: 0, step: 'instance', attrs: [{ shaderLocation: at.loc, offset: 0, format: zf }] });
       key += 'z' + at.loc + zf; continue;
     }
-    const [fmt, fs] = gpuVFmt(a), stride = a.stride || fs, step = a.div ? 'instance' : 'vertex';
+    const [fmt, fs] = gpuVFmt(a), stride = a.wide ? fs : a.stride || fs, step = a.div ? 'instance' : 'vertex';
     let s = slots.find(q => q.buf === a.buf && q.st === stride && q.step === step && !q.zero && a.off >= q.base && a.off + fs - q.base <= stride);
     if (!s) { s = { buf: a.buf, base: a.off, st: stride, step, attrs: [] }; slots.push(s); }
     s.attrs.push({ shaderLocation: at.loc, offset: a.off - s.base, format: fmt });
@@ -7245,7 +7255,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 19:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 19:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
