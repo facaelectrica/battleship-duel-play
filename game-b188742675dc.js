@@ -5192,8 +5192,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 958;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 14:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 959;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 15:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8182,7 +8182,7 @@ function testHitAt(clientX, clientY) {
   // and under the water a blast there (so the bottom and what's on it reacts, the corals and weed too)
   if (owner < 0 && LAND && landSolid(x, y) && !(lakeAt(x) && y < surfaceY(x))) { landBlast({ from: 'bomb', owner: -1 }, x, y, null); sound('explosion', x, 0.9); shakeAt(5, x); return true; }
   if (owner < 0 && clickBig(x, y)) return true;                  // (a shark or a whale: killed, bleeding - user Oct 29)
-  if (owner < 0 && y > surfaceY(x) + 6 && y < seabedY(x) + 4 && !dryLand(x)) { underwaterBlast(x, y, 1); sound('explosion', x, 0.6); shock(x, y, 1); return true; }
+  if (owner < 0 && y > surfaceY(x) + 6 && y < seabedY(x) + 4 && (!dryLand(x) || seaWet(x))) { underwaterBlast(x, y, 1); sound('explosion', x, 0.6); shock(x, y, 1); return true; }
   if (owner < 0) return false;
   shells.push({ x, y: y - 3, vx: 0, vy: 150, owner, from: 'ship', age: 3, trail: 0, under: false, ut: 0 });
   return true;
@@ -39334,7 +39334,7 @@ function civClickHit(x, y) {
   const u = civUnder(x, y);
   if (!u) return false;
   const [, hx, hy] = u;
-  shells.push({ x: hx, y: hy, px: hx, py: hy, vx: 0, vy: 0, owner: 0, from: 'ship', age: 3, trail: 0, under: hy > surfaceY(hx) && !dryLand(hx), ut: 0, click: 2 });
+  shells.push({ x: hx, y: hy, px: hx, py: hy, vx: 0, vy: 0, owner: 0, from: 'ship', age: 3, trail: 0, under: hy > surfaceY(hx) && (!dryLand(hx) || seaWet(hx)), ut: 0, click: 2 });
   return true;
 }
 // shift + click (user Oct 26: "I should be able to select any vehicle with the shift left click"): into whatever's
@@ -48228,7 +48228,7 @@ function spDitch(s) {
 // harbour (the pier's front while it stands, then the stone block - harbourAt): run into one slowly it stops against it;
 // at take-off speed it's wrecked there - its floats torn off: it breaks up and sinks where it struck (spDitch)
 const SP_WALL_CRASH = 90;
-const spWallAt = x => dryLand(x) || !!harbourAt(x);
+const spWallAt = x => (dryLand(x) && !seaWet(x)) || !!harbourAt(x);   // (user Nov 9: the sea in front of an island is water - seaWet, 09-sea-surface; it stopped a seaplane at an island as at a shore)
 function spWall(s, mine) {
   if (s.spd >= SP_WALL_CRASH) { sound('impact', s.x); spawnDebris(s.x + s.dir * 14, s.y - 6, 8, -s.dir * 30); s.vx = -s.dir * s.spd * 0.15; s.vy = 30; spDitch(s); civFollowDown(s); return; }
   s.spd = 0; s.run = 0; if (mine) civBounce(s.driven);
@@ -49886,13 +49886,17 @@ function ltBands() {
   // one light, the one water and everything that hits rock see the same rock. A slice at sea: rows down past its floor and its deepest hole)
   land.onl = new Uint8Array(land.cols); for (let c = 0; c < land.cols; c++) land.onl[c] = onLand(c * LT_CELL) ? 1 : 0;
   land.cellSea = new Uint8Array(n); land.cspan = new Array(land.cols).fill(null);   // (a slice at sea whose cells hold its whole ground - gndSpans asks them)
+  const shpTopSea = c => { let t = Infinity; if (typeof SHP !== 'undefined') for (let n = 0; n < SHP.cols.length; n++) { const S = SHP.cols[n]; if (S && (S.k === 'S' || S.k === 'I')) t = Math.min(t, shpTopC(n, c)); } return t; };   // (the highest SOLID or ISLAND in column c - Infinity: none)
   const holeBot = c => { let b = -Infinity; if (typeof SHP !== 'undefined' && SHP.holes) for (const n of SHP.holes) { const S = SHP.cols[n]; if (!S || c < S.c0 || c > S.c1) continue; const v = S.iv[c - S.c0]; if (v && v.length) b = Math.max(b, v[v.length - 1]); } return b; };
   for (let k = 0; k < n; k++) {
     const c0 = k * LT_CHUNK, w = Math.min(LT_CHUNK, land.cols - c0);
     let lo = Infinity, hi = -Infinity, hs = -Infinity, so = Infinity;
     // (user Nov 8 18:10: "Land's ground everywhere" - the ground under the sea is the land's, drawn by it: every slice at sea has its floor's rows, from a
     // little over its highest floor or solid to a skin under its lowest - and down to its deepest hole)
-    for (let c = c0; c < c0 + w; c++) if (!land.onl[c] || isleSeaCol(c)) { const x = c * LT_CELL, f = land.onl[c] ? sandY(x) : land.surf[c], fd = Math.max(f, sandY(x)); so = Math.min(so, f); hs = Math.max(hs, fd + LT_DEEP_SKIN - LT_SKIN, holeBot(c)); }   // (down past the floor itself - sandY - not only past the highest ground in the column: a solid over a deeper floor left the floor under the slice's bottom, and the dark under every slice stood in the open water as a black box - user Nov 8 21:28)
+    // (user Nov 9 14:07, "this weird rectangle cut off on the terrain shape of the island": a slice wholly at sea began its rows over its floor, so an ISLAND's
+    // or SOLID's ground under the water higher than that - ltFillCol's sea branch - had no rows there and was cut flat at the slice's top, square at its side.
+    // Its rows start over the highest shape in it too)
+    for (let c = c0; c < c0 + w; c++) if (!land.onl[c] || isleSeaCol(c)) { const x = c * LT_CELL, f = land.onl[c] ? sandY(x) : land.surf[c], fd = Math.max(f, sandY(x)); so = Math.min(so, f, shpTopSea(c)); hs = Math.max(hs, fd + LT_DEEP_SKIN - LT_SKIN, holeBot(c)); }   // (down past the floor itself - sandY - not only past the highest ground in the column: a solid over a deeper floor left the floor under the slice's bottom, and the dark under every slice stood in the open water as a black box - user Nov 8 21:28)
     for (let c = c0; c < c0 + w; c++) if (onLand(c * LT_CELL)) { const t = land.surf[c], u = ISLE !== null && ISLE[c] === 2 ? Math.min(t, land.itop[c]) : t; if (u < lo) lo = u; if (t > hi) hi = t; }   // (an island in a country's water: room for its top over the ground's own)
     land.rT[k] = lo < Infinity ? Math.min(0, Math.floor((lo - LT_HEAD - LT_Y0) / LT_CELL)) : so < Infinity ? Math.floor((so - LT_HEAD - LT_Y0) / LT_CELL) : 0;   // (all sea: from over its floor - the open water over it is no cell's)
     land.rB[k] = hi + LT_SKIN <= LT_Y1 ? LT_ROWS : Math.ceil((hi + LT_DEEP_SKIN - LT_Y0) / LT_CELL);
@@ -52733,7 +52737,9 @@ const onLakeW = x => inCountry(x);                              // (OPEN WORLD a
 // where the ground is under the water's surface (not land, or land the water stands over), out to WSPAN_R each side - the boat
 // asks again every step, so the reach moves with it. A boat already nearer a shore than m stays where it is (never moved by it)
 const WSPAN_R = 600, WSPAN_ST = 10;
-const waterWet = q => !onLand(q) || landTop(q) > surfaceY(q) + 0.5 && !lakeDockDry(q);   // (a lake's harbour on its own ground - 50-zz-structh)
+// (user Nov 9 14:05, Story: "unable to go past the island with the fishing boat ... it just turns the other direction", nor tie up at its dock: an
+// ISLAND's columns are onLand, so the island read as a shore 150 m off - the one wet rule, seaWet (09-sea-surface): the sea in front of an island is water)
+const waterWet = q => seaWet(q) || landTop(q) > surfaceY(q) + 0.5 && !lakeDockDry(q);   // (a lake's harbour on its own ground - 50-zz-structh)
 function waterSpanAt(x, m) {
   let lo = x, hi = x;
   while (lo > x - WSPAN_R - m && waterWet(lo - WSPAN_ST)) lo -= WSPAN_ST;
