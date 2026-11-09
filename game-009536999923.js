@@ -5193,8 +5193,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 966;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 16:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 967;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 09 16:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -28843,13 +28843,15 @@ function drawFarSeaDetail() {
     // text made, set and read back a streak; the text of the last one set at the end, as the streaks left it: farSeaLast)
     abBegin();
     let lc = null, la = 0;
-    for (let row = 0; row < 16; row++) {
+    // (user Nov 9 15:04, "Same for the sun/moon reflection, it's getting cut off": on down past its 16 rows to the deepest trough - seaFootY -
+    // the rows past them as the last, their streaks from the same 16 rows' hashes)
+    for (let row = 0; row < 400; row++) {
       const wy = WATER_Y - 20 + row * 3, py = PY(wy);
-      if (py > hb) break;
-      const u = row / 16, c = mix3([46, 128, 206], [30, 70, 160], u), a = nt * 0.8, a3 = glA3(a);   // (one colour a row: made once, not per streak)
+      if (py > hb && (row < 16 || wy > SEA_FOOT_Y)) break;
+      const R = row % 16, u = Math.min(1, row / 16), c = mix3([46, 128, 206], [30, 70, 160], u), a = nt * 0.8, a3 = glA3(a);   // (one colour a row: made once, not per streak)
       for (let k = 0; k < 10; k++) {
-        const x = (FSH.night[row * 20 + k * 2] * (VWP + 200) + time * (3 + row) * (row % 2 ? 1 : -1)) % (VWP + 200) - 100;
-        const len = 8 + Math.floor(FSH.night[row * 20 + k * 2 + 1] * 40);
+        const x = (FSH.night[R * 20 + k * 2] * (VWP + 200) + time * (3 + row) * (row % 2 ? 1 : -1)) % (VWP + 200) - 100;
+        const len = 8 + Math.floor(FSH.night[R * 20 + k * 2 + 1] * 40);
         fillRectA(C, c, a3, Math.round(x), py, len, 1); lc = c; la = a;
       }
     }
@@ -28861,15 +28863,15 @@ function drawFarSeaDetail() {
     const tick = Math.floor(time * 2);
     abBegin();
     let lc = null, la = 0;
-    for (let row = 0; row < 14; row++) {
+    for (let row = 0; row < 400; row++) {   // (on down to the deepest trough as the night's - seaFootY)
       const wy = WATER_Y - 20 + row * 3.2, py = PY(wy);
-      if (py > hb) break;
-      const u = row / 14, c = mix3([238, 150, 168], [150, 120, 190], u), a = ss * 0.9, a3 = glA3(a);
+      if (py > hb && (row < 14 || wy > SEA_FOOT_Y)) break;
+      const R = row % 14, u = Math.min(1, row / 14), c = mix3([238, 150, 168], [150, 120, 190], u), a = ss * 0.9, a3 = glA3(a);
       for (let k = 0; k < 18; k++) {
         const h = hash(row * 31.7 + k * 7.3 + Math.floor((tick + row) / 3) * 0.13);
         if (h > 0.55) continue;
-        const x = (FSH.dusk[row * 36 + k * 2] * VWP + time * (6 + row) * (row % 2 ? 1 : -1)) % (VWP + 40) - 20;
-        const len = 3 + Math.floor(FSH.dusk[row * 36 + k * 2 + 1] * 10);
+        const x = (FSH.dusk[R * 36 + k * 2] * VWP + time * (6 + row) * (row % 2 ? 1 : -1)) % (VWP + 40) - 20;
+        const len = 3 + Math.floor(FSH.dusk[R * 36 + k * 2 + 1] * 10);
         fillRectA(C, c, a3, Math.round(x), py, len, 1); lc = c; la = a;
       }
     }
@@ -28880,6 +28882,7 @@ function drawFarSeaDetail() {
     C.globalAlpha = (1 - ss) * (1 - nt) * (1 - fg);
     drawSparkles(0.38, 7, WATER_Y - 19, 8, 0.85);
     drawSparkles(0.62, 5, WATER_Y - 11, 22, 1.0);
+    if (SEA_FOOT_Y > WATER_Y + 14) drawSparkles(0.62, 5, WATER_Y + 11, 60, 1.0);   // (a wave's trough: the glitter on down into it - seaFootY)
     C.globalAlpha = 1;
   }
 
@@ -28919,12 +28922,15 @@ function drawLightPath(lx, k, hot, glint, W) {
   C.globalAlpha = 1;
   C.restore();
   const rows = Math.max(6, Math.round((yN - hz) / Math.max(2, Math.round(1.6 * Math.min(SV, 2.4)))));
+  // (user Nov 9 15:04: "Same for the sun/moon reflection, it's getting cut off" - a wave's trough under the still level: the glints go on down to
+  // the deepest trough, seaFootY, row after row at the last row's spacing and look; the rows over it unchanged)
+  const dyR = (yN - hz - 2) / Math.max(1, rows - 1), yF = PY(SEA_FOOT_Y), rowsF = rows + (yF > yN ? Math.min(400, Math.ceil((yF - yN) / Math.max(1, dyR))) : 0);
   const tick = time * 4;
   fsLast = null;
   abBegin();
   let lc = null, la = 0;
-  for (let r = 0; r < rows; r++) {
-    const u = r / Math.max(1, rows - 1), py = Math.round(hz + 1 + u * (yN - hz - 2));
+  for (let r = 0; r < rowsF; r++) {
+    const u = Math.min(1, r / Math.max(1, rows - 1)), py = r < rows ? Math.round(hz + 1 + u * (yN - hz - 2)) : Math.round(hz + 1 + r * dyR);
     const half = W * (0.45 + 0.75 * u);
     const n = Math.round((12 + 16 * (1 - u * 0.4)) * clamp(W / Math.max(54, VWP * 0.16), 1, 4));   // (a wider path, more glints: as thick)
     const G = lpRow(r, n);
