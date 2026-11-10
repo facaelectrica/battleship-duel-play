@@ -377,7 +377,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 01:29', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 01:48', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -2385,7 +2385,7 @@ function gpuGLTransformFeedback(gl, p, first, count) {
       reads. Today the light is still drawn by the old lightDraw (47-render-overlays.js, 50-land-zz-light.js); the light pass
       (part 7) is written against these inputs.
    ================================================================ */
-const FRAME = { layers: [], camF: new Float32Array(16), litF: new Float32Array(16), lampF: new Float32Array(8 * 64) };
+const FRAME = { layers: [], camF: new Float32Array(16), litF: new Float32Array(32), dt: 1 / 60, tPrev: null, lampF: new Float32Array(8 * 64) };
 function frameLayer(name, run, at) {
   const L = { name, run }, i = FRAME.layers.findIndex(q => q.name === name);
   if (i >= 0 && !at) { FRAME.layers[i] = L; return L; }
@@ -2394,6 +2394,9 @@ function frameLayer(name, run, at) {
   if (at && ref >= 0) FRAME.layers.splice(at.before ? ref : ref + 1, 0, L); else FRAME.layers.push(L);
   return L;
 }
+// THE FRAME'S dt (part 3's ask): the game clock's step since the last frame drawn (s; the clock 'time', so a stepped test run and a
+// paused game give the same steps every run - 0 while paused, at most 0.25), set at the frame's start by frameTick()
+function frameTick() { const t = typeof time === 'number' ? time : 0; FRAME.dt = FRAME.tPrev == null ? 1 / 60 : Math.min(0.25, Math.max(0, t - FRAME.tPrev)); FRAME.tPrev = t; }
 // the camera of the view beginView set last (vi its index): { buffer, offset, size } in this submit's arena - read by a pass as a
 // uniform: vec4(left px, top px, scale, zoom), vec4(view x on the target, view width, target width, target height), vec4(time, view, shake x px, shake y px)
 function frameCam(vi, v, tw, th) {
@@ -2404,18 +2407,25 @@ function frameCam(vi, v, tw, th) {
   const [c, o] = arenaAlloc(64, 256); c.cpu.set(new Uint8Array(f.buffer), o);
   return { buffer: c.gb, offset: o, size: 64 };
 }
-// the light's inputs this frame: { scalars (the hour's and weather's light), lamps (n of them, 8 numbers each: x, y in the world,
-// angle, strength, reach, 0, 0, 0) } in this submit's arena
+// the light's inputs this frame: { scalars (the hour's and weather's light, 32 numbers - below), lamps (n of them, 8 numbers each:
+// x, y in the world, angle, strength, reach, 0, 0, 0) } in this submit's arena. The scalars:
+//   0 light, 1 night, 2 dusk, 3 sunAlt, 4 fog, 5 rain, 6 cloud, 7 lampsOn, 8 sunset, 9 tintA, 10 warm, 11 hour,
+//   12 day, 13 overcast, 14 the frame's dt (FRAME.dt), 15 0,
+//   16-23 view 1, 24-31 view 2: the sun's x, y on the screen (px; x -1e9 when the sky draws no sun in that view), its disc's
+//   radius, the moon's x, y (x -1e9 when none), 0, 0, 0 - 42-render-sky.js sunXs / sunYs / sunRs / moonXs / moonYs (part 3's ask)
 function frameLight() {
   const f = FRAME.litF;
   f[0] = E.light; f[1] = E.night; f[2] = E.dusk; f[3] = E.sunAlt;
   f[4] = E.fog || 0; f[5] = E.rain || 0; f[6] = E.cloud || 0; f[7] = E.lampsOn || 0;
   f[8] = E.sunset || 0; f[9] = E.tintA || 0; f[10] = E.warm || 0; f[11] = E.hour || 0;
+  f[12] = E.day != null ? E.day : 1; f[13] = E.overcast || 0; f[14] = FRAME.dt; f[15] = 0;
+  const sk = typeof sunXs !== 'undefined';
+  for (let v = 0; v < 2; v++) { const o = 16 + v * 8; f[o] = sk ? sunXs[v] : -1e9; f[o + 1] = sk ? sunYs[v] : 0; f[o + 2] = sk ? sunRs[v] : 0; f[o + 3] = sk ? moonXs[v] : -1e9; f[o + 4] = sk ? moonYs[v] : 0; f[o + 5] = f[o + 6] = f[o + 7] = 0; }
   const L = typeof subLamps === 'function' ? subLamps() : [], n = Math.min(L.length, 64), lf = FRAME.lampF;
   for (let i = 0; i < n; i++) { const q = L[i], o = i * 8; lf[o] = q.x; lf[o + 1] = q.y; lf[o + 2] = q.a || 0; lf[o + 3] = q.k == null ? 1 : q.k; lf[o + 4] = q.reach || 0; lf[o + 5] = lf[o + 6] = lf[o + 7] = 0; }
-  const [c, o] = arenaAlloc(64, 256); c.cpu.set(new Uint8Array(f.buffer), o);
+  const [c, o] = arenaAlloc(128, 256); c.cpu.set(new Uint8Array(f.buffer), o);
   const [c2, o2] = arenaAlloc(Math.max(32, n * 32), 256); c2.cpu.set(new Uint8Array(lf.buffer, 0, n * 32), o2);
-  return { scalars: { buffer: c.gb, offset: o, size: 64 }, lamps: { buffer: c2.gb, offset: o2, size: Math.max(32, n * 32) }, n };
+  return { scalars: { buffer: c.gb, offset: o, size: 128 }, lamps: { buffer: c2.gb, offset: o2, size: Math.max(32, n * 32) }, n };
 }
 // 4. DRAWING NATIVELY BETWEEN THE OLD CODE'S DRAWS (a part's own passes, until its old code is gone): frameFlush() first - the old
 // code's batch recorded and the open pass ended, so the part's pass comes after it in the same command encoder, in order; then
@@ -7653,7 +7663,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 01:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 01:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36389,7 +36399,7 @@ function render() { renderFrame(); hudShow(); }
 function renderFrame() {
   if (!worldLive()) { drawNoWorld(); return; }            // (no world yet, or LOADING: the menu over black - user Oct 31, 19-menu.js)
   const T0 = performance.now();
-  renderTick++; scaledFrame++;
+  renderTick++; scaledFrame++; frameTick();
   SURF.on = true;
   plSize();
   glBeginFrame();
