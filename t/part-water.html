@@ -352,7 +352,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 23:02', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 09 23:14', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -7597,7 +7597,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 23:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 23:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24612,7 +24612,7 @@ struct DP {
   ab2: vec4f,    // how many lights (0: the plain gradient), the fill's right, its bottom
   poly: vec4f,   // a lake's outline (the shadows' clip): its surface chain's first item and count, its floor chain's
   bd: vec4f,     // a body of the land's water: its lift (rows), its fill's columns (from, to), its fill's top row (before the lift)
-  bd2: vec4f,    // its fill's bottom row (before the lift), how many outlines (their headers first in the items)
+  bd2: vec4f,    // its fill's bottom row (before the lift), how many outlines (their headers first in the items); rays: the bodies' first header
 };
 @group(0) @binding(0) var<storage, read> P: SP;
 @group(0) @binding(1) var<storage, read> still: array<f32>;
@@ -24884,6 +24884,28 @@ fn abCell(q: i32, r: i32) -> array<vec4f, 2> {
   if (c.a <= 0.0) { discard; }
   return c;
 }
+// ---- THE LIGHT'S RAYS IN THE WATER (drawRays): a ray an instance (items: 3 each - its outline's header, its alpha, its box), its outline along the
+// moving surface down to the floor, the rays' gradient (ramp 5) times its alpha, laid as the context lays (lighter); in a body of the land's
+// water (lakeWaterIn) kept inside the body's outlines (bd.x: how far down they are from the rays' rows, bd2.y of them from item bd2.z)
+@vertex fn vsRay(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
+  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
+  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
+  let bb = items[n * 3u + 2u];
+  let d = mix(bb.xy, bb.zw, vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  var o: VO;
+  o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0);
+  o.i = n;
+  return o;
+}
+@fragment fn fsRay(v: VO) -> @location(0) vec4f {
+  let x = floor((v.p.x - D.m.z) / D.m.x);
+  let y = floor((D.tgt.y - v.p.y - D.m.w) / D.m.y);
+  if (windOf(items[v.i * 3u], x + 0.5, y + 0.5) == 0) { discard; }
+  var w = 0; let h0 = i32(D.bd2.z);
+  for (var o = 0; o < 64; o++) { if (f32(o) >= D.bd2.y) { break; } w += windOf(items[h0 + o], x + 0.5, y + 0.5 + D.bd.x); }
+  if (D.bd2.y > 0.5 && w == 0) { discard; }
+  return grad(y) * items[v.i * 3u + 1u].x;
+}
 @fragment fn fsAbyss(@builtin(position) p: vec4f) -> @location(0) vec4f {
   let x = floor((p.x - D.m.z) / D.m.x);
   let y = floor((D.tgt.y - p.y - D.m.w) / D.m.y);
@@ -24919,7 +24941,7 @@ function wgpuReady() {
   W.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: ro }, { binding: 1, visibility: VF, buffer: ro }, { binding: 2, visibility: F_, texture: {} }, { binding: 3, visibility: F_, sampler: {} }, { binding: 4, visibility: VF, buffer: ro }], 'water');
   W.pl = gpuPipeLayout([W.bl], 'water');
   W.rpipe.clear(); W.samp = gpuSampler(true, 0, 0);
-  W.ramp = gpuTex(256, 8, 'rgba8unorm', 'water'); W.rampKey = ['', '', '', '', ''];   // (rows: the deep, the tint, the deep's dark, a body's tint, a body's biome water; 8 - a power of two: each row's middle exact in binary, so no filter reads a neighbour's colours in, as the GL front's 256-row table)
+  W.ramp = gpuTex(256, 8, 'rgba8unorm', 'water'); W.rampKey = ['', '', '', '', '', ''];   // (rows: the deep, the tint, the deep's dark, a body's tint, a body's biome water, the rays; 8 - a power of two: each row's middle exact in binary, so no filter reads a neighbour's colours in, as the GL front's 256-row table)
   W.still = null; W.stillKey = ''; W.surf = [null, null]; W.surfKey = ['', ''];
   W.none = gpuBuf(256, 'water');
   W.ep = GPU.ep;
@@ -25176,6 +25198,28 @@ function waterBodyTintGPU(polys, dy, X0, X1, Y, B, bn, shallow) {
       f[152] = dy; f[153] = X0; f[154] = X1; f[155] = Y; f[156] = B; f[157] = part.length;
     }, items);
   }
+}
+/* THE LIGHT'S RAYS (drawRays, 44-shadows-seafloor.js): rays [outline [top chain, floor chain], alpha] in C's space, the gradient (stops, rows y0..y1),
+   one draw, a ray an instance in order (each laid on the last as the context lays: lighter); bodies (a lake's outlines - lakeWaterIn) and how far
+   down they are from the rays' rows (its lift): the rays kept inside them. Up to 256 rays and 64 outlines a draw */
+function waterRaysGPU(rays, G, bodies, bodyDy) {
+  if (!rays.length) return;
+  const polys = rays.map(r => r[0]).concat(bodies || []), nr = rays.length, nb = bodies ? bodies.length : 0;
+  let nv = 0; for (const [A, B] of polys) nv += (A.length + B.length) / 2;
+  const items = wgpuArena((nr * 3 + nb + nv) * 16, (u8, o) => {
+    const F = new Float32Array(u8.buffer, o, (nr * 3 + nb + nv) * 4); let at = nr * 3 + nb;
+    polys.forEach(([A, B], i) => {
+      const h = i < nr ? i * 12 : (nr * 3 + i - nr) * 4; F.set([at, A.length / 2, at + A.length / 2, B.length / 2], h);
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const P of [A, B]) for (let k = 0; k < P.length; k += 2) { F[at * 4] = P[k]; F[at * 4 + 1] = P[k + 1]; F[at * 4 + 2] = F[at * 4 + 3] = 0; at++; x0 = Math.min(x0, P[k]); x1 = Math.max(x1, P[k]); y0 = Math.min(y0, P[k + 1]); y1 = Math.max(y1, P[k + 1]); }
+      if (i < nr) { F.set([Math.round(rays[i][1] * 255) / 255, 0, 0, 0], h + 4); F.set([Math.floor(x0) - 1, Math.floor(y0) - 1, Math.ceil(x1) + 1, Math.ceil(y1) + 1], h + 8); }   // (its alpha as the context's byte - glAlpha)
+    });
+  });
+  waterDraw('vsRay', 'fsRay', f => {
+    wgpuRamp(5, G.stops);
+    f[8] = 5; f[9] = G.y0; f[10] = G.y1; f[11] = 1;
+    f[152] = bodyDy || 0; f[157] = nb; f[158] = nr * 3;
+  }, items, nr);
 }
 
 /* ================================================================
@@ -32885,7 +32929,7 @@ function drawShipShadows(x0, x1, lake, poly) {   // (poly: a lake's outline - la
 // begins at its own hull, which rides the waves)
 let UW_LIFT = 0;   // (how far the sea's drawing is lifted to another water's level while lakeWaterIn draws it there - world units)
 function shadeTop(cx, half) { let t = WATER_Y + 1; for (let q = -4; q <= 4; q++) t = Math.min(t, surfaceY(cx + half * q / 4) + 1); return t; }
-function drawRays(overlay, still) {
+function drawRays(overlay, still, bodies, bodyDy) {   // (bodies: a lake's outlines, bodyDy how far down they are from the rays' rows - lakeWaterIn: the rays kept in it)
   // sunbeams by day, fainter cool moonbeams by night; both lean away from where the light is
   const dayS = E.day * (1 - 0.75 * E.overcast) * (1 - 0.5 * E.storm) * (1 - E.fog);
   const nightS = E.night * 0.5 * (1 - 0.8 * E.overcast) * (1 - E.fog);
@@ -32904,11 +32948,8 @@ function drawRays(overlay, still) {
   const p = 0.7, off = parRef * (1 - p), spacing = 150, vl = CAMPX / SV;
   const c0 = Math.floor((vl - off - 260) / spacing), c1 = Math.ceil((vl + VWW - off + 260) / spacing);
   const spans = hullSpans();
-  const grad = C.createLinearGradient(0, PY(WATER_Y), 0, PY(SEABED_Y));
-  if (moonLit) { grad.addColorStop(0, 'rgba(160,225,250,0.75)'); grad.addColorStop(0.5, 'rgba(110,180,236,0.3)'); grad.addColorStop(1, 'rgba(80,140,220,0)'); }
-  else { grad.addColorStop(0, 'rgba(190,235,255,0.55)'); grad.addColorStop(0.5, 'rgba(150,210,255,0.22)'); grad.addColorStop(1, 'rgba(120,190,255,0)'); }
-  C.save(); C.globalCompositeOperation = 'lighter'; C.fillStyle = grad;
-  const k = Math.min(1, frameDt * 4);
+  const G = { y0: PY(WATER_Y), y1: PY(SEABED_Y), stops: moonLit ? [[0, 'rgba(160,225,250,0.75)'], [0.5, 'rgba(110,180,236,0.3)'], [1, 'rgba(80,140,220,0)']] : [[0, 'rgba(190,235,255,0.55)'], [0.5, 'rgba(150,210,255,0.22)'], [1, 'rgba(120,190,255,0)']] };
+  const rays = [], k = Math.min(1, frameDt * 4);
   for (let c = c0; c <= c1; c++) {
     const h = hash(c * 3.3 + 1.1);
     if (h < 0.25) continue;
@@ -32920,15 +32961,14 @@ function drawRays(overlay, still) {
     let shade = rayShade.has(key) ? rayShade.get(key) : 1 - cover;
     if (!still) { shade += (1 - cover - shade) * k; rayShade.set(key, shade); }
     if (shade < 0.02) continue;
-    C.globalAlpha = Math.min(1, strength * shade * (moonLit ? 0.34 : 0.11)) * (0.55 + 0.45 * Math.sin(time * (0.35 + h * 0.4) + c * 2.1));
-    C.beginPath();
+    const al = clamp(Math.min(1, strength * shade * (moonLit ? 0.34 : 0.11)) * (0.55 + 0.45 * Math.sin(time * (0.35 + h * 0.4) + c * 2.1)), 0, 1), A = [];
     // (user Nov 9 15:45: "The light streaks don't respect the shapes ... rendering over the water or cut off" - its top was the still level, so in a
     // trough it stood out over the water and under a crest it began short of it: its top is the water's moving surface across its width now)
-    for (let q = 0; q <= 4; q++) { const xq = x + w * q / 4, yq = PY(surfaceY(xq) - UW_LIFT + 2); if (q) C.lineTo(PX(xq), yq); else C.moveTo(PX(xq), yq); }   // (UW_LIFT: drawn lifted to another water's level - lakeWaterIn)
-    C.lineTo(PX(x + w * 1.8 + slant), PY(SEABED_Y)); C.lineTo(PX(x - w * 0.2 + slant), PY(SEABED_Y));
-    C.closePath(); C.fill();
+    for (let q = 0; q <= 4; q++) { const xq = x + w * q / 4; A.push(PX(xq), PY(surfaceY(xq) - UW_LIFT + 2)); }   // (UW_LIFT: drawn lifted to another water's level - lakeWaterIn)
+    rays.push([[A, [PX(x + w * 1.8 + slant), PY(SEABED_Y), PX(x - w * 0.2 + slant), PY(SEABED_Y)]], al]);
   }
-  C.restore();
+  // (every ray one instance of the water shader's rays, in order, each its outline along the moving surface down to the floor - 40-zz-water-gpu.js)
+  C.save(); C.globalCompositeOperation = 'lighter'; waterRaysGPU(rays, G, bodies, bodyDy); C.restore();
   if (rayShade.size > 400) rayShade.clear();
 }
 
@@ -47124,7 +47164,7 @@ function lakeWaterIn(a, b, lv, polys, part, mx, noDecks, shallow = noDecks, bare
       if (part !== 'over') { C.save(); C.translate(0, dy); UW_LIFT = dl;
       if (!noDecks) waterDeep((deep, sh) => { lay(deep); if (sh) lay(sh); });   // (the sea's own deep - 44-shadows-seafloor.js; a lake: none - its own bowl is behind it, seen through its tint: user Nov 8 20:17, his picture)
       if (!noDecks) drawSeaDecks(bh - SHY + 2 - dy);         // (down to the view's bottom, wherever this water's surface is - the sea's deep only: a lake's bed is its own bowl behind it, bowlCol)
-      if (!cave) drawRays(false, true);                      // (the sea's rays, their fade as the sea's pass left it this frame)
+      if (!cave) drawRays(false, true, polys, dy);           // (the sea's rays, their fade as the sea's pass left it this frame - kept in this water's outlines by the shader)
       C.restore(); UW_LIFT = 0; }
       if (part === 'under') return;
       if (!cave) drawSeaLife();                           // (a pool or cave under the ground: none - zoomed out every one of them drew all the fish, 48 times a frame)
