@@ -43,6 +43,24 @@ textarea{min-height:80px;resize:vertical}
 #modal .box{background:var(--ui);border:1px solid var(--line);border-radius:14px;padding:16px;width:min(560px,92vw);max-height:86vh;overflow:auto}
 #modal textarea{min-height:240px;font:12px/1.4 ui-monospace,Menlo,monospace;-webkit-user-select:text;user-select:text}
 #toast{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);background:#222;border:1px solid var(--line);padding:10px 16px;border-radius:10px;display:none;z-index:9}
+#lists{flex:1;min-width:0;display:none;overflow:auto;padding:12px;gap:10px;align-items:flex-start;-webkit-user-select:text;user-select:text}
+#lists.open{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));align-content:start}
+.lcol{background:var(--ui);border:1px solid var(--line);border-radius:12px;padding:10px;max-height:70vh;display:flex;flex-direction:column;min-width:0}
+.lcol h3{margin:2px 0 8px;font-size:14px;letter-spacing:.05em}
+.lrows{overflow-y:auto;flex:1;min-height:60px}
+.lrow{display:flex;align-items:center;gap:8px;min-height:44px;padding:6px 8px;border:1px solid transparent;border-radius:8px;cursor:pointer}
+.lrow.on{background:#555;border-color:#fff}
+.lrow .dot{width:14px;height:14px;border-radius:50%;flex:none}
+.lrow .nm{flex:1}
+.lrow .sub{font-size:12px;opacity:.65}
+.ladd{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.ladd input{flex:1;min-width:0}
+.ladd select{flex:1 0 100%}
+#lbar{display:none;gap:6px;align-items:center}
+.multi .mbtn{width:100%;text-align:left;background:#222;border-radius:8px}
+.multi .mlist{border:1px solid var(--line);border-radius:8px;margin-top:4px;background:#222;max-height:260px;overflow-y:auto}
+.multi .mrow{min-height:44px;padding:10px 12px;border-bottom:1px solid #333;cursor:pointer}
+.multi .mrow:last-child{border-bottom:0}
 @media (max-width:760px){#main{flex-direction:column}#panel{width:auto;max-height:45%;border-left:0;border-top:1px solid var(--line)}}
 </style>
 </head>
@@ -52,17 +70,20 @@ textarea{min-height:80px;resize:vertical}
 const SHELL=`<div id="app">
   <div id="bar">
     <span id="title">FAR AWAY</span>
-    <button id="bAdd" title="Add a place, structure, vehicle…">+ ADD</button>
-    <button id="bMore" title="Tap items to pick several; drag empty space to box-pick">PICK MORE</button>
+    <button id="tWorld" class="on" title="The world map">WORLD</button>
+    <button id="tLists" title="Every list: categories, types, owners, countries, goods, biomes">LISTS</button>
+    <button data-world id="bAdd" title="Add a place, structure, vehicle…">+ ADD</button>
+    <button data-world id="bMore" title="Tap items to pick several; drag empty space to box-pick">PICK MORE</button>
     <button id="bUndo" title="Undo">UNDO</button>
     <button id="bRedo" title="Redo">REDO</button>
-    <button id="bFit" title="Zoom to fit the whole world">FIT</button>
-    <button id="bLabels" class="on" title="Show or hide connection labels">LABELS</button>
-    <button id="bShow" title="Show or hide categories">SHOW</button>
+    <button data-world id="bFit" title="Zoom to fit the whole world">FIT</button>
+    <button data-world id="bLabels" class="on" title="Show or hide connection labels">LABELS</button>
+    <button data-world id="bShow" title="Show or hide categories">SHOW</button>
     <span class="sp"></span>
     <button id="bFile" title="Export, import or start over">FILE</button>
     <button id="bRevert" title="Go back to the last saved plan">REVERT ALL CHANGES</button>
-    <button id="bSave" class="save" title="Save the world into this page">SAVE CHANGES</button>
+    <span id="lbar"><button id="lRename">RENAME</button><button id="lDel">DELETE</button></span>
+    <button id="bSave" class="save" title="Save the plan to GitHub">SAVE CHANGES</button>
   </div>
   <div id="main">
     <div id="stage">
@@ -72,6 +93,7 @@ const SHELL=`<div id="app">
       <input id="edit" autocomplete="off" autocapitalize="words">
     </div>
     <div id="panel"></div>
+    <div id="lists"></div>
   </div>
   <div id="help">Double-tap: add / rename · Drag the ● dot onto another item: connect · Drag empty: move view · Pinch: zoom</div>
 </div>
@@ -203,6 +225,7 @@ function changed(){
   const dirty=lastSnap!==savedSnap;$('#bSave').classList.toggle('dirty',dirty);$('#bSave').textContent=dirty?'SAVE CHANGES':'SAVED';
   try{localStorage.setItem('farAwayPlanDraft',JSON.stringify({base:remoteSha,snap:lastSnap}))}catch(e){}
   $('#hint').style.display=doc.elements.length?'none':'';draw();
+  if(typeof viewMode!=='undefined'&&viewMode==='lists')renderLists();
 }
 function sanitize(d){
   if(!d||!Array.isArray(d.elements))throw new Error('Not a Far Away world plan');
@@ -570,8 +593,9 @@ function closePop(){pop.style.display='none'}
 function setPending(t){pending=t;$('#help').textContent=t?'Tap the canvas to place '+t.name:defaultHelp}
 
 /* ---------- panel ---------- */
-const pnl=$('#panel');
+const pnl=$('#panel');let goodsOpen=false,lastPanelSel='';const selKey=()=>[...sel.els,...sel.links].join(',');
 function panel(){
+  if(lastPanelSel!==selKey()){goodsOpen=false;lastPanelSel=selKey()}
   const els=[...sel.els].map(id=>byId.get(id)).filter(Boolean),lks=[...sel.links].map(linkOf).filter(Boolean);
   if(!els.length&&!lks.length){pnl.classList.remove('open');requestAnimationFrame(resize);return}
   pnl.classList.add('open');requestAnimationFrame(resize);
@@ -605,7 +629,9 @@ function elPanel(e){
   <label>Type</label><div data-new="type"><select data-f="type">${e.type?'':opt('','— none —',true)}${types.map(t=>opt(t,t,t===e.type)).join('')}${opt('__new','+ New type…')}</select></div>`}
   ${owned?`<label>Owner</label><div data-new="owner"><select data-f="owner">${opt('','— nobody —',!e.owner)}${chars.map(k=>opt(k.id,k.name,k.id===e.owner)).join('')}${opt('__new','+ New character…')}</select></div>
   ${ownerOf(e)?`<label>${esc(ownerOf(e).name)}'s colour — everything they own</label>${swatches('data-oc',OWNER_COLS,ownerOf(e).color)}`:''}`:''}
-  ${GOODS_FIELD[e.kind]?(()=>{const[f,lab]=GOODS_FIELD[e.kind],cur=e[f]||[];return`<label>${lab}</label><div class="chips" data-new="good">${byName(doc.goods).map(g=>`<button data-good="${g.id}" class="${cur.includes(g.id)?'on':''}">${esc(g.name)}</button>`).join('')}<button data-good="__new">+ New good…</button></div>`})():''}
+  ${GOODS_FIELD[e.kind]?(()=>{const[f,lab]=GOODS_FIELD[e.kind],cur=e[f]||[],names=byName(doc.goods).filter(g=>cur.includes(g.id)).map(g=>g.name);
+    return`<label>${lab}</label><div class="multi"><button class="mbtn" data-mopen>${names.length?esc(names.join(', ')):'— nothing —'} ▾</button>
+    <div class="mlist" data-new="good" ${goodsOpen?'':'hidden'}>${byName(doc.goods).map(g=>`<div class="mrow" data-good="${g.id}">${cur.includes(g.id)?'✓ ':'&nbsp;&nbsp;&nbsp; '}${esc(g.name)}</div>`).join('')}<div class="mrow" data-good="__new">+ New good…</div></div></div>`})():''}
   ${stands?`<label>${onWater(e)?'Held by':holderKind(stands)==='dock'?'Moored at':holderKind(stands)==='hangar'?'Kept in':'Stands on'}</label><div>${esc(stands.name||biomeOf(stands).name)}</div>`:''}
   ${(()=>{const hs=doc.elements.filter(v=>heldBy(v)===e);return hs.length?`<label>${holderKind(e)==='dock'?'Moored here':'Kept here'} (${hs.length})</label><div>${hs.map(v=>esc(v.name||v.type)).join(', ')}</div>`:''})()}
   ${land||e.kind==='vehicle'?'':`<label>Inside (belongs to)</label><select data-f="parent">${opt('','— nothing —',!e.parent)}${parents.map(p=>opt(p.id,p.name||p.type,p.id===e.parent)).join('')}</select>`}
@@ -618,6 +644,7 @@ function elPanel(e){
   wireCommon();
   pnl.querySelectorAll('[data-l]').forEach(d=>d.onclick=()=>{sel={els:new Set(),links:new Set([d.dataset.l])};panel();draw()});
   pnl.querySelectorAll('[data-oc]').forEach(b=>b.onclick=()=>{const o=ownerOf(e);if(o){o.color=b.dataset.oc;commit();panel()}});
+  pnl.querySelectorAll('[data-mopen]').forEach(b=>b.onclick=()=>{goodsOpen=!goodsOpen;panel()});
   pnl.querySelectorAll('[data-good]').forEach(b=>b.onclick=()=>{const[f]=GOODS_FIELD[e.kind],g=b.dataset.good;
     if(g==='__new')return askNew(b);const cur=new Set(e[f]||[]);cur.has(g)?cur.delete(g):cur.add(g);if(cur.size)e[f]=[...cur];else delete e[f];commit();panel()});
   pnl.querySelectorAll('[data-bc]').forEach(b=>b.onclick=()=>{bio.color=b.dataset.bc;commit();panel()});
@@ -665,6 +692,63 @@ function linkPanel(k){
   $('#pSwap').onclick=()=>{[k.from,k.to]=[k.to,k.from];k.bend=-k.bend;commit();panel()};
   $('#pFlat').onclick=()=>{k.bend=0;commit()};
 }
+
+/* ---------- LISTS: every list of the plan in columns - pick, rename, delete, add ---------- */
+let viewMode='world',newKind='structure';const lsel={};
+const usedBy=f=>doc.elements.filter(f).length;
+const LCOLS=[
+  {k:'catalog',name:'Categories',one:'category',rows:()=>byName(doc.catalog).map(c=>({id:c.id,name:c.name,sub:CATS[c.kind].name,dot:CATS[c.kind].color,n:usedBy(e=>e.category===c.id)})),
+    add:n=>{doc.catalog.push({id:uid('g'),kind:newKind,name:n,types:[]});return true},ren:(id,n)=>{doc.catalog.find(c=>c.id===id).name=n},
+    del:ids=>{doc.catalog=doc.catalog.filter(c=>!ids.has(c.id));for(const e of doc.elements)if(ids.has(e.category))e.category=null}},
+  {k:'types',name:'Types',one:'type',rows:()=>{const pick=[...(lsel.catalog||[])],cats=pick.length?doc.catalog.filter(c=>pick.includes(c.id)):doc.catalog;
+      return cats.flatMap(c=>c.types.map(t=>({id:c.id+'|'+t,name:t,sub:c.name,n:usedBy(e=>e.category===c.id&&e.type===t)}))).sort((a,b)=>az(a.name,b.name)||az(a.sub,b.sub))},
+    add:n=>{const pick=[...(lsel.catalog||[])];if(pick.length!==1){toast('Pick one category first, then add its types');return false}
+      const c=doc.catalog.find(c=>c.id===pick[0]);if(!c.types.includes(n))c.types.push(n);return true},
+    ren:(id,n)=>{const i=id.indexOf('|'),cid=id.slice(0,i),t=id.slice(i+1),c=doc.catalog.find(c=>c.id===cid);c.types=c.types.map(x=>x===t?n:x);for(const e of doc.elements)if(e.category===cid&&e.type===t)e.type=n},
+    del:ids=>{for(const id of ids){const i=id.indexOf('|'),c=doc.catalog.find(c=>c.id===id.slice(0,i));if(c)c.types=c.types.filter(x=>x!==id.slice(i+1))}}},
+  {k:'characters',name:'Owners',one:'owner',rows:()=>byName(doc.characters).map(h=>({id:h.id,name:h.name,dot:h.color,n:usedBy(e=>e.owner===h.id)})),
+    add:n=>{doc.characters.push({id:uid('h'),name:n,color:nextOwnerCol()});return true},ren:(id,n)=>{doc.characters.find(x=>x.id===id).name=n},
+    del:ids=>{doc.characters=doc.characters.filter(x=>!ids.has(x.id));for(const e of doc.elements)if(ids.has(e.owner))e.owner=null}},
+  {k:'countries',name:'Countries',one:'country',rows:()=>byName(doc.countries).map(c=>({id:c.id,name:c.name,n:usedBy(e=>e.country===c.id)})),
+    add:n=>{doc.countries.push({id:uid('k'),name:n});return true},ren:(id,n)=>{doc.countries.find(x=>x.id===id).name=n},
+    del:ids=>{doc.countries=doc.countries.filter(x=>!ids.has(x.id));for(const e of doc.elements)if(ids.has(e.country))e.country=null}},
+  {k:'goods',name:'Goods',one:'good',rows:()=>byName(doc.goods).map(g=>({id:g.id,name:g.name,n:usedBy(e=>['carries','stores','gives'].some(f=>(e[f]||[]).includes(g.id)))})),
+    add:n=>{doc.goods.push({id:uid('d'),name:n});return true},ren:(id,n)=>{doc.goods.find(x=>x.id===id).name=n},
+    del:ids=>{doc.goods=doc.goods.filter(x=>!ids.has(x.id));for(const e of doc.elements)for(const f of['carries','stores','gives'])if(e[f]){e[f]=e[f].filter(g=>!ids.has(g));if(!e[f].length)delete e[f]}}},
+  {k:'biomes',name:'Biomes',one:'biome',rows:()=>byName(doc.biomes).map(b=>({id:b.id,name:b.name,dot:b.color,n:usedBy(e=>isLand(e)&&e.biome===b.id)})),
+    add:n=>{doc.biomes.push({id:uid('b'),name:n,color:BIOME_COLS.find(c=>!doc.biomes.some(x=>x.color===c))||'#e9b52c',h:40});return true},ren:(id,n)=>{doc.biomes.find(x=>x.id===id).name=n},
+    del:ids=>{if(doc.biomes.every(b=>ids.has(b.id))){toast('Keep at least one biome');return false}doc.biomes=doc.biomes.filter(x=>!ids.has(x.id));
+      for(const e of doc.elements)if(isLand(e)&&ids.has(e.biome))e.biome=byName(doc.biomes)[0].id}},
+];
+const lPicked=()=>LCOLS.flatMap(c=>[...(lsel[c.k]||[])].map(id=>[c,id]));
+function renderLists(){
+  const box=$('#lists');let h='';
+  for(const c of LCOLS){const rows=c.rows(),ss=lsel[c.k]||(lsel[c.k]=new Set());for(const id of[...ss])if(!rows.some(r=>r.id===id))ss.delete(id);
+    const oneCat=c.k==='types'&&(lsel.catalog||new Set()).size===1?doc.catalog.find(x=>x.id===[...lsel.catalog][0]):null;
+    h+=`<div class="lcol"><h3>${c.name.toUpperCase()} <span class="sub">${rows.length}</span></h3><div class="lrows">${rows.map(r=>`<div class="lrow${ss.has(r.id)?' on':''}" data-lc="${c.k}" data-lid="${esc(r.id)}">${r.dot?`<span class="dot" style="background:${r.dot}"></span>`:''}<span class="nm">${esc(r.name)}${r.sub?`<div class="sub">${esc(r.sub)}</div>`:''}</span><span class="sub">${r.n?r.n+' used':''}</span></div>`).join('')||'<div class="sub" style="padding:8px">None yet</div>'}</div>
+    <div class="ladd">${c.k==='catalog'?`<select data-lkind>${['place','structure','vehicle','nature','other'].sort((a,b)=>az(CATS[a].name,CATS[b].name)).map(k=>`<option value="${k}"${k===newKind?' selected':''}>${CATS[k].name}</option>`).join('')}</select>`:''}<input data-ladd="${c.k}" placeholder="${c.k==='types'?(oneCat?'New type of '+esc(oneCat.name):'Pick a category to add'):'New '+c.one}" autocapitalize="words"><button data-laddb="${c.k}">ADD</button></div></div>`}
+  box.innerHTML=h;
+  box.querySelectorAll('[data-lid]').forEach(r=>r.onclick=()=>{const ss=lsel[r.dataset.lc],id=r.dataset.lid;ss.has(id)?ss.delete(id):ss.add(id);renderLists()});
+  const add=k=>{const inp=box.querySelector(`[data-ladd="${k}"]`),n=inp.value.trim();if(!n)return;if(LCOLS.find(c=>c.k===k).add(n)!==false){commit();renderLists()}};
+  box.querySelectorAll('[data-laddb]').forEach(b=>b.onclick=()=>add(b.dataset.laddb));
+  box.querySelectorAll('[data-ladd]').forEach(i=>i.onkeydown=ev=>{ev.stopPropagation();if(ev.key==='Enter')add(i.dataset.ladd)});
+  const k=box.querySelector('[data-lkind]');if(k)k.onchange=()=>{newKind=k.value};
+  const n=lPicked().length;$('#lDel').disabled=!n;$('#lDel').textContent=n?'DELETE ('+n+')':'DELETE';$('#lRename').disabled=n!==1;
+}
+$('#lDel').onclick=()=>{const P=lPicked();if(!P.length)return;let uses=0;for(const[c,id]of P)uses+=(c.rows().find(r=>r.id===id)||{}).n||0;
+  modal(`<h3>DELETE ${P.length}?</h3><p>${P.map(([c,id])=>esc((c.rows().find(r=>r.id===id)||{}).name||'')).join(', ')}</p>${uses?`<p>${uses} thing${uses>1?'s':''} on the map use${uses>1?'':'s'} them and will lose that setting.</p>`:''}<div class="row"><button id="lYes">YES</button><button data-close>NO</button></div>`,()=>{
+    $('#lYes').onclick=()=>{closeModal();for(const c of LCOLS){const ids=lsel[c.k];if(ids&&ids.size&&c.del(new Set(ids))!==false)ids.clear()}commit();renderLists();toast('Deleted · UNDO brings it back')}})};
+$('#lRename').onclick=()=>{const P=lPicked();if(P.length!==1)return;const[c,id]=P[0],r=c.rows().find(r=>r.id===id);
+  modal(`<h3>RENAME</h3><input id="lName" value="${esc(r.name)}" autocapitalize="words"><div class="row"><button id="lOk">RENAME</button><button data-close>CANCEL</button></div>`,()=>{
+    const ok=()=>{const n=$('#lName').value.trim();if(!n)return;closeModal();c.ren(id,n);lsel[c.k].clear();commit();renderLists()};
+    $('#lOk').onclick=ok;$('#lName').onkeydown=ev=>{ev.stopPropagation();if(ev.key==='Enter')ok()};$('#lName').focus()})};
+function setViewMode(m){viewMode=m;const L=m==='lists';
+  $('#tWorld').classList.toggle('on',!L);$('#tLists').classList.toggle('on',L);
+  $('#stage').style.display=L?'none':'';$('#panel').style.display=L?'none':'';$('#lists').classList.toggle('open',L);$('#lbar').style.display=L?'flex':'none';
+  document.querySelectorAll('[data-world]').forEach(b=>b.style.display=L?'none':'');
+  $('#help').textContent=L?'Tap rows to pick them (any column) · RENAME one · DELETE the picked · add at the foot of a column':defaultHelp;
+  if(L)renderLists();else{panel();requestAnimationFrame(resize)}}
+$('#tWorld').onclick=()=>setViewMode('world');$('#tLists').onclick=()=>setViewMode('lists');
 
 /* ---------- toolbar ---------- */
 const defaultHelp=$('#help').textContent;
