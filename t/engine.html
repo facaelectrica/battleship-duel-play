@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 00:54', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 01:02', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1205,11 +1205,13 @@ const gpuHasStencil = f => /stencil/.test(f);
 const gpuHasDepth = f => /depth/.test(f);
 let GPU_TID = 0;
 // a texture of the layer: { gt, view, w, h, fmt, pool, ep, use (the last submit that drew with it or into it) }
-function gpuTex(w, h, fmt, pool) {
-  const t = { id: ++GPU_TID, gt: null, view: null, w, h, fmt, pool: pool || 'textures', ep: GPU.ep, use: -1, bytes: 0 };
-  t.gt = GPU.dev.createTexture({ size: [w, h], format: fmt, usage: TEXU() });
-  t.view = t.gt.createView();
-  t.bytes = w * h * (GPU_BPP[fmt] || 4); GPU_MEM.tex += t.bytes; gpuMemAdd(t.pool, t.bytes);
+// (layers: a 2D array texture of that many pages - the art atlas; its view is a '2d-array' view; 1 or none: a plain 2D texture)
+function gpuTex(w, h, fmt, pool, layers) {
+  const L = Math.max(1, layers | 0);
+  const t = { id: ++GPU_TID, gt: null, view: null, w, h, layers: L, fmt, pool: pool || 'textures', ep: GPU.ep, use: -1, bytes: 0 };
+  t.gt = GPU.dev.createTexture({ size: [w, h, L], format: fmt, usage: TEXU() });
+  t.view = t.gt.createView(layers ? { dimension: '2d-array' } : undefined);
+  t.bytes = w * h * L * (GPU_BPP[fmt] || 4); GPU_MEM.tex += t.bytes; gpuMemAdd(t.pool, t.bytes);
   return t;
 }
 function gpuTexFree(t) {
@@ -2212,32 +2214,41 @@ function gpuPipeLayout(layouts, label) { return GPU.dev.createPipelineLayout({ b
 function gpuRenderPipe(desc) { GPU.stats.pipes = (GPU.stats.pipes || 0) + 1; return GPU.dev.createRenderPipeline(desc); }
 function gpuComputePipe(desc) { GPU.stats.pipes = (GPU.stats.pipes || 0) + 1; return GPU.dev.createComputePipeline(desc); }
 function gpuBindGroup(layout, entries, label) { return GPU.dev.createBindGroup({ layout, entries, label }); }
-/* 5. THE HUD ON THE SAME DEVICE (engine-design 3.5): the controls' canvas (#hud, stacked over the world's at its own pixel size) is a
-   second WebGPU canvas on the one device. The HUD draws through a GLCtx (the same subset of the canvas calls it always used:
-   rectangles, the user's sprites, the pixel text, alpha, clips, simple paths) into a layer the size of that canvas, shown on it once
-   the HUD is drawn (hudShow - render's end), with its transparency, over the world as the 2D canvas was. */
-function gpuHudInit(cv) {
-  const ctx = cv.getContext('webgpu'); if (!ctx) return null;
-  ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' });
-  FRAME.hud = { cv, ctx, T: new GLTarget(Math.max(1, cv.width), Math.max(1, cv.height)) };
-  GPU.onRebuild.push(() => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } });
-  return FRAME.hud.T;
-}
 const GPU_HUD_WGSL = `
 @group(0) @binding(0) var t: texture_2d<f32>;
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f { let x = f32((i << 1u) & 2u); let y = f32(i & 2u); return vec4f(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0); }
 @fragment fn fs(@builtin(position) p: vec4f) -> @location(0) vec4f { let d = vec2i(textureDimensions(t)); return textureLoad(t, vec2i(i32(p.x), d.y - 1 - i32(p.y)), 0); }`;
+// ANY PAGE CANVAS ON THE DEVICE (the HUD, the editor's LOOK panel, any panel that shows what the GPU draws): gpuCanvasView(cv) - the
+// canvas configured for WebGPU and a layer (V.T, a GLTarget the canvas's size: draw into it through a GLCtx or natively with
+// frameTarget) - and gpuCanvasShow(V): the layer laid on the canvas, rows turned the canvas's way, its transparency kept. Recorded
+// in the frame's encoder: inside a frame it goes with the frame's submit; outside one (an editor's own redraw) the caller sends it
+// with gpuSubmit() before its task ends. gpuCanvasSize(V, w, h) when the canvas is resized.
+function gpuCanvasView(cv) {
+  const ctx = cv.getContext('webgpu'); if (!ctx) return null;
+  ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' });
+  const V = { cv, ctx, T: new GLTarget(Math.max(1, cv.width), Math.max(1, cv.height)), pipe: null, ep: -1, view: null, bg: null };
+  GPU.onRebuild.push(() => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } });
+  return V;
+}
+function gpuCanvasSize(V, w, h) { V.cv.width = w; V.cv.height = h; V.T.width = w; V.T.height = h; }
+function gpuCanvasShow(V) {
+  if (!V || !GPU.on || GPU.lost) return false;
+  if (typeof glFlush === 'function') glFlush();
+  const t = V.T.tex && V.T.tex.t; if (!t) return false;
+  if (!V.pipe || V.ep !== GPU.ep) { const m = gpuModule(GPU_HUD_WGSL, 'canvas show'); V.pipe = gpuRenderPipe({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } }); V.ep = GPU.ep; V.view = null; }
+  if (V.view !== t.view) { V.view = t.view; V.bg = gpuBindGroup(V.pipe.getBindGroupLayout(0), [{ binding: 0, resource: t.view }]); }
+  const cur = V.ctx.getCurrentTexture();
+  if (cur.width !== t.w || cur.height !== t.h) return false;
+  const pass = gpuPassBegin({ colorAttachments: [{ view: cur.createView(), loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'present', [t]);
+  pass.setPipeline(V.pipe); pass.setBindGroup(0, V.bg); pass.draw(3); gpuPassEnd();
+  return true;
+}
+/* 5. THE HUD ON THE SAME DEVICE (engine-design 3.5): the controls' canvas (#hud) is one of these: a GLCtx draws the HUD into its layer
+   (the same subset of the canvas calls it always used) and it is shown at render's end (hudShow), over the world as the 2D canvas was. */
+function gpuHudInit(cv) { const V = gpuCanvasView(cv); if (!V) return null; FRAME.hud = V; return V.T; }
 function hudShow() {
   const H = FRAME.hud; if (!H || !GPU.on || GPU.lost) return;
-  if (typeof glFlush === 'function') glFlush();
-  const t = H.T.tex && H.T.tex.t; if (!t) { gpuSubmit(); return; }
-  if (!H.pipe || H.ep !== GPU.ep) { const m = gpuModule(GPU_HUD_WGSL, 'hud'); H.pipe = GPU.dev.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } }); H.ep = GPU.ep; H.view = null; }
-  if (H.view !== t.view) { H.view = t.view; H.bg = GPU.dev.createBindGroup({ layout: H.pipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: t.view }] }); }
-  const cur = H.ctx.getCurrentTexture();
-  if (cur.width === t.w && cur.height === t.h) {
-    const pass = gpuPassBegin({ colorAttachments: [{ view: cur.createView(), loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'present');
-    pass.setPipeline(H.pipe); pass.setBindGroup(0, H.bg); pass.draw(3); gpuPassEnd(); t.use = FR.sub;
-  }
+  gpuCanvasShow(H);
   gpuSubmit(); FR.work = 0;
 }
 
@@ -7422,7 +7433,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 00:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 01:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
