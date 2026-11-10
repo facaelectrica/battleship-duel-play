@@ -92,7 +92,7 @@ const UPM=63.75/9.83,KN=.5144*UPM,KMH=UPM/3.6; // world units a metre; a second 
 const MU=10*UPM; // how many world units the drawing's sizes are made for (icons and land read the same at the starting zoom)
 const SHELL=`<div id="app">
   <div id="bar">
-    <span id="title">FAR AWAY<small id="ver">v27</small></span>
+    <span id="title">FAR AWAY<small id="ver">v28</small></span>
     <button id="tWorld" class="on" title="The world map">WORLD</button>
     <button id="tLists" title="Every list: categories, types, owners, countries, goods, biomes">LISTS</button>
     <button id="tEditor" title="Draw the icons">EDITOR</button>
@@ -519,10 +519,21 @@ const BUILTIN=[ // [kind, name, key it is drawn by, on water, a dock]
   ...'Fishing Boat|fishing|1,Motor Boat|motor|1,Sailboat|sail|1,Yacht|yacht|1,Cargo Ship|cargo|1,Tanker|tanker|1,Cruise Ship|cruise|1,Submarine|sub|1,Helicopter|heli,Blimp|blimp,Balloon|balloon,Airliner|airliner,Plane|plane,Seaplane|seaplane,Bus|bus,Tractor|tractor,Fire Engine|fire,Truck|truck,Small Truck|small truck,Van|van,Ambulance|ambulance,Car|car,Taxi|taxi'.split(',').map(x=>['vehicle',...x.split('|')]),
   ...'Fish|fish,Shark|shark,Whale|whale,Kraken|kraken,Wreck|wreck,Forest|forest'.split(',').map(x=>['nature',...x.split('|')])]
   .map(([kind,name,key,w,d])=>({id:'b:'+slug(kind+' '+name),kind,name,key,water:w==='1',dock:d==='1',builtin:true}));
-const iconById=id=>id?(BUILTIN.find(b=>b.id===id)||(doc.icons||[]).find(i=>i.id===id)||null):null;
+const iconById=id=>id?((doc.icons||[]).find(i=>i.id===id)||BUILTIN.find(b=>b.id===id)||null):null; // an edited built-in is kept in doc.icons under the built-in's id
+const bIcon=(k,n)=>'b:'+slug(k+' '+n);
+function builtinFor(e){ // which built-in drawing a thing gets from its name (the same order icon() draws in)
+  const n=(tn(e)+' '+((subOf(e)||{}).name||'')).toLowerCase(),has=w=>n.includes(w);
+  if(e.kind==='structure'){if(onWater(e))return bIcon('structure','Dock');
+    for(const[ks,name]of[[['lighthouse'],'Lighthouse'],[['crane'],'Crane'],[['shipyard'],'Shipyard'],[['hangar'],'Hangar'],[['storage','terminal','container'],'Containers'],[['runway'],'Runway'],[['control','tower'],'Control Tower'],[['helipad'],'Helipad'],[['market'],'Market'],[['hospital','pharmacy'],'Hospital'],[['church'],'Church'],[['school'],'School'],[['station','garage'],'Garage'],[['building'],'Building'],[['airport'],'Airport'],[['taxi stand'],'Taxi Stand'],[['hut'],'Hut']])
+      if(ks.some(has))return bIcon('structure',name);return bIcon('structure','House')}
+  if(e.kind==='vehicle'){const v=n=>bIcon('vehicle',n);
+    if(isWaterVeh(e)&&!has('plane'))return v(has('sub')?'Submarine':has('cargo')||has('container')?'Cargo Ship':has('tanker')?'Tanker':has('cruise')?'Cruise Ship':has('sail')||has('yacht')?(has('yacht')?'Yacht':'Sailboat'):has('jet')||has('motor')?'Motor Boat':'Fishing Boat');
+    return v(has('heli')?'Helicopter':has('blimp')?'Blimp':has('balloon')?'Balloon':has('airliner')||has('jet')?'Airliner':has('plane')||has('cessna')?(has('seaplane')?'Seaplane':'Plane'):has('bus')?'Bus':has('tractor')?'Tractor':has('fire')?'Fire Engine':has('truck')?(has('small')?'Small Truck':'Truck'):has('van')||has('ambulance')?(has('ambulance')?'Ambulance':'Van'):has('taxi')?'Taxi':'Car')}
+  if(e.kind==='nature')return bIcon('nature',has('shark')?'Shark':has('whale')?'Whale':has('kraken')?'Kraken':has('wreck')?'Wreck':has('forest')?'Forest':'Fish');
+  return null}
 const iconRef=e=>(typeOf(e)||{}).icon||(subOf(e)||{}).icon||''; // the type's icon, else its subcategory's
-const iconForce=e=>{const I=iconById(iconRef(e));return I?(I.builtin?I:{kind:I.kind,strokes:I.strokes}):null};
-function drawStrokes(c,strokes,x,fy,r){for(const st of strokes||[]){const P=st.pts.map(([u,v])=>[x+u*r,fy+v*r]),n=P.length;if(!n)continue;
+const iconForce=e=>{let I=iconById(iconRef(e));if(!I&&!isLand(e)){const id=builtinFor(e);I=id&&(doc.icons||[]).find(i=>i.id===id)}return I?(I.builtin?I:{kind:I.kind,strokes:I.strokes,stretch:stretchy(e)}):null}; // its own icon, else an edited built-in
+function drawStrokes(c,strokes,x,fy,r,kx=1){for(const st of strokes||[]){const P=st.pts.map(([u,v])=>[x+u*r*kx,fy+v*r]),n=P.length;if(!n)continue;
   if(n===1){c.moveTo(P[0][0]+r*.06,P[0][1]);c.arc(P[0][0],P[0][1],r*.06,0,7);continue}
   if(st.smooth&&n>2){const m=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2],Q=st.closed?P:[P[0],...P,P[n-1]];
     const s0=st.closed?m(P[n-1],P[0]):P[0];c.moveTo(...s0);const k=st.closed?n:n+1;
@@ -541,7 +552,7 @@ function recordIcon(e,force){ // a drawing as editable lines: plays the drawing 
   icon(e,{sx:0,sy:-1,r:1},'#000',force,rec);return S.filter(s=>s.pts.length)}
 function icon(e,L,col,force,cc){const{sx:x,r}=L;let fy=L.sy+r;force=force||iconForce(e);const n=force&&force.key!=null?force.key:(tn(e)+' '+((subOf(e)||{}).name||'')).toLowerCase(),c=cc||ctx,M=(a,b)=>c.moveTo(a,b),T=(a,b)=>c.lineTo(a,b),R=(a,b,w,h)=>c.rect(a,b,w,h),O=(a,b,rr)=>{c.moveTo(a+rr,b);c.arc(a,b,rr,0,7)};
   c.strokeStyle=col;c.fillStyle=col;c.lineWidth=Math.max(1.3,r/9);c.beginPath();
-  if(force&&force.strokes){drawStrokes(c,force.strokes,x,fy,r);c.stroke();return}
+  if(force&&force.strokes){drawStrokes(c,force.strokes,x,fy,r,force.stretch&&L.hw?L.hw/(r*1.45):1);c.stroke();return}
   const kind=force&&force.kind||e.kind,water=force&&force.key!=null?!!force.water:isWaterVeh(e);
   const has=w=>n.includes(w),house=(w,h)=>{R(x-w,fy-h,w*2,h);M(x-w*1.15,fy-h);T(x,fy-h-r*.6);T(x+w*1.15,fy-h)},
     wheels=(a,b)=>{O(x+a,fy-r*.2,r*.2);O(x+b,fy-r*.2,r*.2)},hull=(w,h,lift)=>{const y=fy+lift;M(x-w,y-h);T(x+w*1.1,y-h);T(x+w*.8,y);T(x-w*.85,y);c.closePath();return y-h};
@@ -1117,7 +1128,7 @@ function setViewMode(m){viewMode=m;const L=m==='lists',E=m==='editor',Wd=!L&&!E;
   $('#stage').style.display=Wd?'':'none';$('#panel').style.display=Wd?'':'none';$('#lists').classList.toggle('open',L);$('#lpanel').style.display=L?'block':'none';
   $('#editor').classList.toggle('open',E);$('#epanel').style.display=E?'block':'none';
   document.querySelectorAll('[data-world]').forEach(b=>b.style.display=Wd?'':'none');
-  $('#help').textContent=L?'Tap: select · Add: bottom of a column · Scroll sideways for more':E?'Pick an icon · Tap: add point · Drag: move point':defaultHelp;
+  $('#help').textContent=L?'Tap: select · Add: bottom of a column · Scroll sideways for more':E?'Tap empty: add · Tap line: insert · Tap point: delete · Drag: move':defaultHelp;
   if(L){renderLists();const r=$('#lists .lrow.on');if(r)r.scrollIntoView({block:'center',inline:'nearest'})}else if(E){renderEditor();requestAnimationFrame(resizeEditor)}else{panel();requestAnimationFrame(resize)}}
 $('#tWorld').onclick=()=>setViewMode('world');$('#tLists').onclick=()=>setViewMode('lists');$('#tEditor').onclick=()=>setViewMode('editor');
 /* ---------- EDITOR: draw the icons. Built-in ones are made in code (edit a copy); custom ones are lines of points ---------- */
@@ -1130,58 +1141,64 @@ function thumb(cv,I,col){const d=window.devicePixelRatio||1,w=cv.width=44*d,h=cv
   c.lineCap='round';c.lineJoin='round';const r=11;icon(ieFake(I),{sx:22,sy:34-r,r},col||'#f1e7c8',I.builtin?I:{kind:I.kind,strokes:I.strokes},c)}
 function renderEditor(){
   const L=$('#elist'),cur=iconById(IE.id);
-  const row=I=>`<div class="lrow${IE.id===I.id?' on':''}" data-ic="${I.id}"><canvas class="ith"></canvas><span class="nm">${esc(I.name)}</span></div>`;
+  const row=I=>`<div class="lrow${IE.id===I.id?' on':''}" data-ic="${I.id}"><canvas class="ith"></canvas><span class="nm">${esc(I.name)}${I.id.startsWith('b:')&&!I.builtin?'<div class="sub">Edited</div>':''}</span></div>`;
+  const own=(doc.icons||[]).filter(i=>!i.id.startsWith('b:'));
   L.innerHTML=`<div class="ladd" style="margin:0 0 8px"><button id="ieNew" style="flex:1">+ NEW ICON</button></div>
-    <h3>CUSTOM</h3>${(doc.icons||[]).length?byName(doc.icons).map(row).join(''):'<div class="sub" style="padding:6px">None</div>'}
-    ${['structure','vehicle','nature'].map(k=>`<h3 style="color:${CATS[k].color}">${ieKindNames[k]}</h3>${BUILTIN.filter(b=>b.kind===k).map(row).join('')}`).join('')}`;
+    <h3>CUSTOM</h3>${own.length?byName(own).map(row).join(''):'<div class="sub" style="padding:6px">None</div>'}
+    ${['structure','vehicle','nature'].map(k=>`<h3 style="color:${CATS[k].color}">${ieKindNames[k]}</h3>${BUILTIN.filter(b=>b.kind===k).map(b=>row(iconById(b.id))).join('')}`).join('')}`;
   L.querySelectorAll('[data-ic]').forEach(r=>{const I=iconById(r.dataset.ic);thumb(r.querySelector('canvas'),I,CATS[I.kind].color);r.onclick=()=>{IE={id:I.id,s:-1,p:-1};renderEditor()}});
   $('#ieNew').onclick=()=>{const I={id:uid('i'),name:'New icon',kind:'structure',strokes:[]};doc.icons.push(I);IE={id:I.id,s:-1,p:-1};commit();renderEditor()};
   renderEPanel();resizeEditor()}
 function renderEPanel(){const P=$('#epanel'),I=iconById(IE.id);
   if(!I){P.innerHTML=`<h3>ICON</h3><div class="sub">Select an icon, or + NEW ICON.</div>`;return}
   const used=[...doc.subs,...doc.types].filter(t=>t.icon===I.id).map(t=>t.name);
-  if(I.builtin){P.innerHTML=`<h3 style="color:${CATS[I.kind].color}">ICON</h3><label>Name</label><div>${esc(I.name)}</div><label>Category</label><div>${CATS[I.kind].name}</div>
-    <label>Built-in</label><div class="sub">Made in code. Edit a copy to change it.</div><div class="row"><button id="ieCopy">EDIT A COPY</button></div><label>Used by (${used.length})</label><div class="sub">${used.length?esc(used.join(', ')):'Default for its names'}</div>`;
-    $('#ieCopy').onclick=()=>{const C={id:uid('i'),name:I.name+' 2',kind:I.kind,strokes:recordIcon(ieFake(I),I)};doc.icons.push(C);IE={id:C.id,s:-1,p:-1};commit();renderEditor()};return}
-  const st=I.strokes[IE.s];
-  P.innerHTML=`<h3 style="color:${CATS[I.kind].color}">ICON</h3><label>Name</label><input data-iname value="${esc(I.name)}" autocapitalize="words">
-    <label>Category</label><select data-ikind>${['structure','vehicle','nature'].map(k=>`<option value="${k}"${I.kind===k?' selected':''}>${CATS[k].name}</option>`).join('')}</select>
-    <label>Lines (${I.strokes.length})</label><div class="plist"><button id="ieLine">+ NEW LINE</button>
+  const B=I.id.startsWith('b:'),strokes=I.builtin?ieStrokes(I):I.strokes,st=strokes[IE.s];
+  P.innerHTML=`<h3 style="color:${CATS[I.kind].color}">ICON</h3>${B?`<label>Name</label><div>${esc(I.name)}</div><label>Category</label><div>${CATS[I.kind].name}</div>${I.builtin?'':'<div class="row"><button id="ieReset">RESET TO ORIGINAL</button></div>'}`:`<label>Name</label><input data-iname value="${esc(I.name)}" autocapitalize="words">
+    <label>Category</label><select data-ikind>${['structure','vehicle','nature'].map(k=>`<option value="${k}"${I.kind===k?' selected':''}>${CATS[k].name}</option>`).join('')}</select>`}
+    <label>Lines (${strokes.length})</label><div class="plist"><button id="ieLine">+ NEW LINE</button>
     ${st?`<button id="ieClose" class="${st.closed?'on':''}">Closed</button><button id="ieSmooth" class="${st.smooth?'on':''}">Smooth</button><button id="ieDelP"${IE.p<0?' disabled':''}>Delete point</button><button id="ieDelL">Delete line</button>`:''}</div>
-    <div class="sub" style="margin-top:8px">Tap: add a point to the line · Drag a point: move it · Tap a point: select its line</div>
+    <div class="sub" style="margin-top:8px">Tap empty: add after the last point · Tap a line: add a point there · Tap a point: delete it · Drag a point: move it</div>
     <label>Used by (${used.length})</label><div class="sub">${used.length?esc(used.join(', ')):'None'}</div>
-    <div class="row"><button id="ieDup">DUPLICATE</button><button id="ieDel">DELETE</button></div>`;
-  const done=()=>{commit();renderEditor()},on=(q,f)=>{const b=P.querySelector(q);if(b)b.onclick=f};
-  P.querySelector('[data-iname]').onkeydown=ev=>{ev.stopPropagation();if(ev.key==='Enter')ev.target.blur()};
-  P.querySelector('[data-iname]').onchange=ev=>{const n=ev.target.value.trim();if(n){I.name=n;done()}};
-  P.querySelector('[data-ikind]').onchange=ev=>{I.kind=ev.target.value;done()};
-  on('#ieLine',()=>{I.strokes.push({pts:[],closed:false,smooth:false});IE.s=I.strokes.length-1;IE.p=-1;done()});
-  on('#ieClose',()=>{st.closed=!st.closed;done()});on('#ieSmooth',()=>{st.smooth=!st.smooth;done()});
-  on('#ieDelP',()=>{st.pts.splice(IE.p,1);IE.p=-1;if(!st.pts.length){I.strokes.splice(IE.s,1);IE.s=-1}done()});
-  on('#ieDelL',()=>{I.strokes.splice(IE.s,1);IE.s=-1;IE.p=-1;done()});
-  on('#ieDup',()=>{const C={...JSON.parse(JSON.stringify(I)),id:uid('i'),name:I.name+' 2'};doc.icons.push(C);IE={id:C.id,s:-1,p:-1};done()});
-  on('#ieDel',()=>modal(`<h3>DELETE ${esc(I.name).toUpperCase()}?</h3>${used.length?`<p style="color:#ff8a8a">Used by ${esc(used.join(', '))}. They go back to their default icon.</p>`:''}<div class="row"><button id="iYes">YES, DELETE</button><button data-close>NO</button></div>`,()=>{
-    $('#iYes').onclick=()=>{closeModal();doc.icons=doc.icons.filter(x=>x.id!==I.id);for(const t of[...doc.subs,...doc.types])if(t.icon===I.id)delete t.icon;IE={id:null,s:-1,p:-1};done()}}));
+    <div class="row"><button id="ieDup">DUPLICATE</button>${B?'':'<button id="ieDel">DELETE</button>'}</div>`;
+  const done=()=>{commit();renderEditor()},on=(q,f)=>{const b=P.querySelector(q);if(b)b.onclick=(...a)=>{ieOwn();f(...a)}};const E=()=>ieOwn(),stE=()=>E().strokes[IE.s];
+  const nm=P.querySelector('[data-iname]');if(nm){nm.onkeydown=ev=>{ev.stopPropagation();if(ev.key==='Enter')ev.target.blur()};nm.onchange=ev=>{const n=ev.target.value.trim();if(n){I.name=n;done()}}}
+  const kd=P.querySelector('[data-ikind]');if(kd)kd.onchange=ev=>{I.kind=ev.target.value;done()};
+  on('#ieReset',()=>{doc.icons=doc.icons.filter(x=>x.id!==I.id);IE.s=IE.p=-1;done()});
+  on('#ieLine',()=>{E().strokes.push({pts:[],closed:false,smooth:false});IE.s=E().strokes.length-1;IE.p=-1;done()});
+  on('#ieClose',()=>{const t=stE();t.closed=!t.closed;done()});on('#ieSmooth',()=>{const t=stE();t.smooth=!t.smooth;done()});
+  on('#ieDelP',()=>{const t=stE();t.pts.splice(IE.p,1);IE.p=-1;if(!t.pts.length){E().strokes.splice(IE.s,1);IE.s=-1}done()});
+  on('#ieDelL',()=>{E().strokes.splice(IE.s,1);IE.s=-1;IE.p=-1;done()});
+  P.querySelector('#ieDup').onclick=()=>{const C={id:uid('i'),name:I.name+' 2',kind:I.kind,strokes:JSON.parse(JSON.stringify(strokes))};doc.icons.push(C);IE={id:C.id,s:-1,p:-1};done()};
+  if(P.querySelector('#ieDel'))P.querySelector('#ieDel').onclick=()=>modal(`<h3>DELETE ${esc(I.name).toUpperCase()}?</h3>${used.length?`<p style="color:#ff8a8a">Used by ${esc(used.join(', '))}. They go back to their default icon.</p>`:''}<div class="row"><button id="iYes">YES, DELETE</button><button data-close>NO</button></div>`,()=>{
+    $('#iYes').onclick=()=>{closeModal();doc.icons=doc.icons.filter(x=>x.id!==I.id);for(const t of[...doc.subs,...doc.types])if(t.icon===I.id)delete t.icon;IE={id:null,s:-1,p:-1};done()}});
 }
+const ieCache=new Map(),ieStrokes=I=>{if(!ieCache.has(I.id))ieCache.set(I.id,recordIcon(ieFake(I),I));return ieCache.get(I.id)}; // a built-in as points
+function ieOwn(){const I=iconById(IE.id);if(!I||!I.builtin)return I;const O={id:I.id,name:I.name,kind:I.kind,strokes:JSON.parse(JSON.stringify(ieStrokes(I)))};doc.icons.push(O);return O} // the first edit of a built-in keeps an editable copy under its id
 function resizeEditor(){const r=icv.getBoundingClientRect();if(!r.width)return;const d=window.devicePixelRatio||1;IW=r.width;IH=r.height;icv.width=Math.round(IW*d);icv.height=Math.round(IH*d);drawEditor()}
 function drawEditor(){const d=window.devicePixelRatio||1,c=ictx;c.setTransform(d,0,0,d,0,0);c.clearRect(0,0,IW,IH);const I=iconById(IE.id),M=ieMap();
   c.lineWidth=1;for(let u=-2;u<=2.001;u+=.25)for(const[a,b]of[[[u,-3.2],[u,1.2]],[[-2.2,u-1],[2.2,u-1]]]){const A=M.to(...a),B=M.to(...b);c.strokeStyle=Math.abs(u-Math.round(u))<.01?'rgba(255,255,255,.16)':'rgba(255,255,255,.06)';c.beginPath();c.moveTo(...A);c.lineTo(...B);c.stroke()}
   {const A=M.to(-2.2,0),B=M.to(2.2,0);c.strokeStyle='#4aa8ff';c.lineWidth=2;c.beginPath();c.moveTo(...A);c.lineTo(...B);c.stroke()} // the ground: where it stands
   if(!I)return;const col=CATS[I.kind].color;c.lineCap='round';c.lineJoin='round';
-  if(I.builtin){icon(ieFake(I),{sx:M.cx,sy:M.cy-M.s,r:M.s},col,I,c);return}
-  icon(ieFake(I),{sx:M.cx,sy:M.cy-M.s,r:M.s},col,{kind:I.kind,strokes:I.strokes},c);
-  I.strokes.forEach((st,si)=>st.pts.forEach(([u,v],pi)=>{const[x,y]=M.to(u,v),on=si===IE.s;c.fillStyle=on&&pi===IE.p?'#fff':on?'#ff7a45':'rgba(255,255,255,.35)';c.beginPath();c.arc(x,y,on&&pi===IE.p?8:on?6:4,0,7);c.fill()}))}
-const ieHit=(x,y)=>{const I=iconById(IE.id);if(!I||I.builtin)return null;const M=ieMap();let best=null;
-  I.strokes.forEach((st,si)=>st.pts.forEach(([u,v],pi)=>{const[px,py]=M.to(u,v),d=Math.hypot(px-x,py-y);if(d<22&&(!best||d<best.d))best={si,pi,d}}));return best};
+  const SS=I.builtin?ieStrokes(I):I.strokes;icon(ieFake(I),{sx:M.cx,sy:M.cy-M.s,r:M.s},col,{kind:I.kind,strokes:SS},c);
+  SS.forEach((st,si)=>st.pts.forEach(([u,v],pi)=>{const[x,y]=M.to(u,v),on=si===IE.s;c.fillStyle=on&&pi===IE.p?'#fff':on?'#ff7a45':'rgba(255,255,255,.35)';c.beginPath();c.arc(x,y,on&&pi===IE.p?8:on?6:4,0,7);c.fill()}))}
+const ieHit=(x,y)=>{const I=iconById(IE.id);if(!I)return null;const M=ieMap();let best=null;
+  (I.builtin?ieStrokes(I):I.strokes).forEach((st,si)=>st.pts.forEach(([u,v],pi)=>{const[px,py]=M.to(u,v),d=Math.hypot(px-x,py-y);if(d<22&&(!best||d<best.d))best={si,pi,d}}));return best};
 const iePt=ev=>{const r=icv.getBoundingClientRect();return[ev.clientX-r.left,ev.clientY-r.top]};
 const snapU=v=>Math.round(v*20)/20;
-icv.addEventListener('pointerdown',ev=>{const I=iconById(IE.id);if(!I||I.builtin)return;icv.setPointerCapture(ev.pointerId);const[x,y]=iePt(ev),h=ieHit(x,y);
-  if(h){IE.s=h.si;IE.p=h.pi;ieDrag={moved:false,x,y};drawEditor();renderEPanel();return}
-  const M=ieMap(),[u,v]=M.from(x,y);if(IE.s<0||!I.strokes[IE.s]){I.strokes.push({pts:[],closed:false,smooth:false});IE.s=I.strokes.length-1}
-  const st=I.strokes[IE.s],at=IE.p>=0&&IE.p<st.pts.length-1?IE.p+1:st.pts.length;st.pts.splice(at,0,[snapU(u),snapU(v)]);IE.p=at;ieDrag=null;commit();renderEditor()});
-icv.addEventListener('pointermove',ev=>{if(!ieDrag)return;const[x,y]=iePt(ev);if(!ieDrag.moved&&Math.hypot(x-ieDrag.x,y-ieDrag.y)<4)return;ieDrag.moved=true;
-  const I=iconById(IE.id),M=ieMap(),[u,v]=M.from(x,y);I.strokes[IE.s].pts[IE.p]=[snapU(u),snapU(v)];drawEditor()});
-const ieUp=()=>{if(ieDrag&&ieDrag.moved){commit();renderEditor()}ieDrag=null};
+const ieSeg=(x,y)=>{const I=iconById(IE.id);if(!I)return null;const M=ieMap();let best=null; // the nearest line segment
+  (I.builtin?ieStrokes(I):I.strokes).forEach((st,si)=>{const n=st.pts.length;for(let k=0;k<(st.closed?n:n-1);k++){const a=M.to(...st.pts[k]),b=M.to(...st.pts[(k+1)%n]),d=segD(x,y,a,b);if(d<14&&(!best||d<best.d))best={si,k,d}}});return best};
+icv.addEventListener('pointerdown',ev=>{if(!iconById(IE.id))return;icv.setPointerCapture(ev.pointerId);const[x,y]=iePt(ev),h=ieHit(x,y),M=ieMap(),[u,v]=M.from(x,y),q=[snapU(u),snapU(v)];
+  if(h){IE.s=h.si;IE.p=h.pi;ieDrag={moved:false,x,y,del:true};drawEditor();renderEPanel();return}  // tap a point: delete it · drag it: move it
+  const g=ieSeg(x,y),I=ieOwn();
+  if(g){I.strokes[g.si].pts.splice(g.k+1,0,q);IE.s=g.si;IE.p=g.k+1}                                  // tap a line: a point there
+  else{if(IE.s<0||!I.strokes[IE.s]){I.strokes.push({pts:[],closed:false,smooth:false});IE.s=I.strokes.length-1}
+    const st=I.strokes[IE.s];st.pts.push(q);IE.p=st.pts.length-1}                                    // anywhere else: on from the line's last point
+  ieDrag={moved:false,x,y,del:false};commit();renderEditor()});
+icv.addEventListener('pointermove',ev=>{if(!ieDrag)return;const[x,y]=iePt(ev);if(!ieDrag.moved&&Math.hypot(x-ieDrag.x,y-ieDrag.y)<6)return;ieDrag.moved=true;
+  const I=ieOwn(),M=ieMap(),[u,v]=M.from(x,y);I.strokes[IE.s].pts[IE.p]=[snapU(u),snapU(v)];drawEditor()});
+const ieUp=()=>{const d=ieDrag;ieDrag=null;if(!d)return;
+  if(d.moved){commit();renderEditor();return}
+  if(d.del){const I=ieOwn(),st=I.strokes[IE.s];st.pts.splice(IE.p,1);if(!st.pts.length){I.strokes.splice(IE.s,1);IE.s=-1}IE.p=st.pts.length?Math.min(IE.p,st.pts.length)-1:-1;commit();renderEditor()}};
 icv.addEventListener('pointerup',ieUp);icv.addEventListener('pointercancel',ieUp);
 window.addEventListener('resize',()=>{if(viewMode==='editor')resizeEditor()});
 
