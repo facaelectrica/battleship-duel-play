@@ -432,7 +432,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 11:34', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 11:51', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1225,6 +1225,7 @@ async function gpuDevice() {
   const dev = await ad.requestDevice({ requiredFeatures: want, requiredLimits: L });
   GPU.ad = ad; GPU.dev = dev; GPU.lim = dev.limits; GPU.feat = {}; for (const f of want) GPU.feat[f] = true;
   GPU.ep++; GPU.lost = false;
+  if (typeof gtDevice === 'function') gtDevice(dev);
   dev.addEventListener('uncapturederror', e => { GPU.nerr++; const m = String(e.error && e.error.message || e.error); if (GPU.err.length < 50) GPU.err.push(m); if (GPU.nerr <= 20) console.error('GPU:', m); });
   dev.lost.then(info => { if (GPU.dev !== dev) return; gpuLost(info && info.message || 'lost'); });
   return true;
@@ -1516,9 +1517,18 @@ function arenaAlloc(n, al) {
   ARENA.off = o + n; c.hi = Math.max(c.hi, o + n);
   return [c, o];
 }
+// the trace's split submits (30-frame.js GT): what was written since the last flush goes up WITHOUT starting the chunks again - the
+// passes still to come in this frame keep their offsets (c.sent: how far a chunk has gone up; each piece is written when it's taken)
+function arenaFlush() {
+  for (let i = 0; i <= ARENA.cur; i++) {
+    const c = ARENA.chunks[i]; if (!c) continue;
+    const lo = (c.sent || 0) & ~3, hi = Math.ceil(c.hi / 4) * 4;
+    if (hi > lo) { GPU.dev.queue.writeBuffer(c.gb, lo, c.cpu.buffer, lo, hi - lo); c.sent = c.hi; }
+  }
+}
 // before the submit: what was written goes up in one write a chunk
 function arenaSend() {
-  for (let i = 0; i <= ARENA.cur; i++) { const c = ARENA.chunks[i]; if (c && c.hi) { GPU.dev.queue.writeBuffer(c.gb, 0, c.cpu.buffer, 0, Math.ceil(c.hi / 4) * 4); GPU.stats.upB += c.hi; c.hi = 0; } }
+  for (let i = 0; i <= ARENA.cur; i++) { const c = ARENA.chunks[i]; if (c && c.hi) { const lo = (c.sent || 0) & ~3, hi = Math.ceil(c.hi / 4) * 4; if (hi > lo) GPU.dev.queue.writeBuffer(c.gb, lo, c.cpu.buffer, lo, hi - lo); GPU.stats.upB += c.hi; c.hi = 0; } if (c) c.sent = 0; }
   ARENA.cur = 0; ARENA.off = 0; ARENA.gen++;
 }
 
@@ -1546,12 +1556,62 @@ const GPU_OFF = (() => { try { const m = /[?&]gpuoff=([a-z:,]+)/.exec(location.s
 const GPU_OFF_KEYS = { sky: ['gsky'], ground: ['ground', 'ggshot'], plants: ['plants'], water: ['water'], smoke: ['smoke', 'rain', 'midsea', 'lay', 'px'], things: ['things'], light: ['light'] };
 function gpuOffKey(key) { if (!GPU_OFF.length || !key) return false; for (const n of GPU_OFF) for (const k of (GPU_OFF_KEYS[n] || [n])) if (String(key).startsWith(k)) return true; return false; }
 const GPU_NOPASS = new Proxy({}, { get: () => () => undefined });
+// THE HANG RECORDER (Nov 10, the laptop's intermittent hang): ?gputrace=1 - every pass and dispatch sent as its own submit, named by its
+// key; each submit's end on the GPU noted (onSubmittedWorkDone, in queue order). After a hang the first submit never noted done is the
+// one the GPU stopped in: window.__gpuTrace (and localStorage 'gputrace', for a page that dies with it) - its keys, the pipelines made
+// since the submit before (a driver compiles at first use), and each key's longest time on the GPU (near-hangs show on clean runs too).
+// ?gputrace=2: one submit a frame as normal, only its keys noted (the frame's timing unchanged).
+const GT = (() => { let m = 0; try { const r = /[?&]gputrace=([12])/.exec(location.search); m = r ? +r[1] : 0; } catch (e) { } return { on: m > 0, split: m === 1, id: 0, done: 0, doneT: 0, keys: [], pipes: [], pend: [], slow: {}, saved: 0, why: '' }; })();
+if (GT.on && typeof window !== 'undefined') { window.__gpuTrace = GT; window.__gtReport = () => gtReport(); }
+// a pass or dispatch about to be recorded: in split mode what's recorded so far goes as its own submit first
+function gtMark(key) {
+  if (GT.split && FR.enc) { arenaFlush(); gtSubmit(); }
+  GT.keys.push(String(key || '?'));
+}
+// FR.enc sent, its keys noted, its end on the GPU waited for (in queue order: done ids only go up)
+function gtSubmit() {
+  const e = { id: ++GT.id, f: FR.frame, keys: GT.keys, pipes: GT.pipes, t: performance.now() };
+  GT.keys = []; GT.pipes = [];
+  GPU.dev.queue.submit([FR.enc.finish()]); FR.enc = null; GPU.stats.submits++;
+  GT.pend.push(e); if (GT.pend.length > 400) GT.pend.splice(40, GT.pend.length - 400);   // (the oldest not done kept: where a hung GPU stopped)
+  const dev = GPU.dev;
+  dev.queue.onSubmittedWorkDone().then(() => {
+    if (GPU.dev !== dev) return;
+    const now = performance.now(), ms = now - Math.max(e.t, GT.doneT); GT.doneT = now; GT.done = Math.max(GT.done, e.id);
+    for (const k of new Set(e.keys)) { const S = GT.slow[k]; if (!S || ms > S.ms) GT.slow[k] = { ms: Math.round(ms * 10) / 10, f: e.f, with: e.keys.length }; }
+    const i = GT.pend.findIndex(p => p.id > GT.done); if (i > 0) GT.pend.splice(0, i); else if (i < 0) GT.pend.length = 0;
+  }).catch(() => { });
+  if (e.t - GT.saved > 500) gtSave();
+}
+// what the trace shows: the submits not yet done (the first is where the GPU is - or stopped), and the slowest keys
+function gtReport() {
+  const slow = Object.entries(GT.slow).sort((a, b) => b[1].ms - a[1].ms).slice(0, 15).map(([k, v]) => k + ' ' + v.ms + 'ms f' + v.f + (v.with > 1 ? ' (+' + (v.with - 1) + ')' : ''));
+  return { at: Date.now(), why: GPU.why || '', lost: !!GPU.lost, frame: FR.frame, sent: GT.id, done: GT.done, stuck: GT.pend.slice(0, 6).map(p => ({ id: p.id, f: p.f, keys: p.keys.slice(0, 40), pipes: p.pipes.slice(0, 20), ageMs: Math.round(performance.now() - p.t) })), slow };
+}
+function gtSave() { GT.saved = performance.now(); try { localStorage.setItem('gputrace', JSON.stringify(gtReport())); } catch (e) { } }
+// (41-gl-draw.js: a GL front draw - its program noted in the submit's keys as 'gl<id>', once in a row; GT.progs[id]: its sources' heads)
+function gtProg(p) {
+  const k = 'gl' + p.id;
+  if (GT.keys[GT.keys.length - 1] !== k) GT.keys.push(k);
+  if (!GT.progs) GT.progs = {};
+  if (!GT.progs[p.id]) GT.progs[p.id] = String(p.vsSrc || '').replace(/\s+/g, ' ').slice(0, 160) + ' || ' + String(p.fsSrc || '').replace(/\s+/g, ' ').slice(0, 240);
+}
+// (00-device.js: a new device's pipelines named as they're made, for the trace)
+function gtDevice(dev) {
+  if (!GT.on) return;
+  const name = d => d.label || (d.vertex && d.vertex.module && d.vertex.module.label) || (d.compute && d.compute.module && d.compute.module.label) || '?';
+  const R = dev.createRenderPipeline.bind(dev), C = dev.createComputePipeline.bind(dev);
+  dev.createRenderPipeline = d => { GT.pipes.push('r:' + name(d)); return R(d); };
+  dev.createComputePipeline = d => { GT.pipes.push('c:' + name(d)); return C(d); };
+  dev.lost.then(info => { GT.why = info && info.message || 'lost'; GT.atLoss = gtReport(); gtSave(); try { localStorage.setItem('gputrace-loss', JSON.stringify(GT.atLoss)); } catch (e) { } });
+}
 function gpuEnc() { if (!FR.enc) FR.enc = GPU.dev.createCommandEncoder(); return FR.enc; }
 function gpuPassEnd() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; } }
 // a render pass on desc's targets (key: which targets, so draws to the same ones keep it open)
 function gpuPassBegin(desc, key, uses) {
   gpuPassEnd();
   if (gpuOffKey(key)) return GPU_NOPASS;
+  if (GT.on) gtMark(key);
   if (uses) for (const t of uses) if (t) t.use = FR.sub;   // (what the pass writes or reads: in use by the pending submit - a later write to it is staged)
   if (GPU.feat['timestamp-query'] && FR.qn + 2 <= FR.QMAX) {
     if (!FR.qs || FR.qs.ep !== GPU.ep) { FR.qs = GPU.dev.createQuerySet({ type: 'timestamp', count: FR.QMAX }); FR.qs.ep = GPU.ep; }
@@ -1565,6 +1625,7 @@ function gpuPassBegin(desc, key, uses) {
 function gpuComputeBegin(uses, key) {
   gpuPassEnd();
   if (gpuOffKey(key)) return GPU_NOPASS;
+  if (GT.on) gtMark(key);
   if (uses) for (const t of uses) if (t) t.use = FR.sub;
   FR.work++; GPU.stats.passes++;
   return gpuEnc().beginComputePass();
@@ -1580,7 +1641,7 @@ function gpuSubmit() {
   gpuPassEnd();
   arenaSend();
   const R = FR.wait; FR.wait = [];
-  if (FR.enc) { GPU.dev.queue.submit([FR.enc.finish()]); FR.enc = null; GPU.stats.submits++; }
+  if (FR.enc) { if (GT.on) gtSubmit(); else { GPU.dev.queue.submit([FR.enc.finish()]); FR.enc = null; GPU.stats.submits++; } }
   FR.sub++;
   for (const o of GPU_TRASH) try { o.destroy(); } catch (e) { } GPU_TRASH.length = 0;
   for (const r of R) r();
@@ -2322,6 +2383,7 @@ function gpuSlotEnd(s) {
 }
 function gpuGLDraw(gl, p, mode, first, count, inst) {
   const PR = window.__gpuProf, t0 = PR ? gpuPT() : 0;
+  if (GT.on) gtProg(p);
   gpuGLDraw0(gl, p, mode, first, count, inst);
   if (PR) gpuProf('draw', t0);
 }
@@ -2425,6 +2487,7 @@ function gpuGLTransformFeedback(gl, p, first, count) {
   bufs.forEach((b, k) => E.push({ binding: B + 2 + k, resource: b ? { buffer: b.back, offset: b.boff } : { buffer: z.gb } }));
   const bg = gpuGLBindGroup(gl, p, null, { E });
   gpuPassEnd();
+  if (GT.on) gtMark('glxf');
   const cp = gpuEnc().beginComputePass(); FR.work++;
   cp.setPipeline(p.cpipe);
   if (p.hasU) cp.setBindGroup(0, bg, [p.uoff]); else cp.setBindGroup(0, bg);
@@ -7776,7 +7839,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 11:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 11:51';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
