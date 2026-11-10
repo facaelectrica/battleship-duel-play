@@ -9,9 +9,10 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;overflow:hidden;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 #app{position:fixed;inset:0;display:flex;flex-direction:column;height:100dvh}
-#bar{display:flex;gap:6px;align-items:center;padding:8px;padding-top:max(8px,env(safe-area-inset-top));background:var(--ui);overflow-x:auto;flex:none;scrollbar-width:none}
+#bar button{font-size:14px}
+#bar{display:flex;gap:5px;align-items:center;padding:8px;padding-top:max(8px,env(safe-area-inset-top));background:var(--ui);overflow-x:auto;flex:none;scrollbar-width:none}
 #bar::-webkit-scrollbar{display:none}
-button{font:inherit;color:var(--ink);background:var(--ui2);border:1px solid var(--line);border-radius:10px;min-height:44px;padding:0 14px;white-space:nowrap;cursor:pointer;touch-action:manipulation}
+button{font:inherit;color:var(--ink);background:var(--ui2);border:1px solid var(--line);border-radius:10px;min-height:44px;padding:0 11px;white-space:nowrap;cursor:pointer;touch-action:manipulation}
 button:active{background:#555}
 button.on{background:var(--ink);color:#222;border-color:var(--ink)}
 button.save.dirty{background:var(--ocean);color:#222;border-color:var(--ocean)}
@@ -61,6 +62,10 @@ textarea{min-height:80px;resize:vertical}
 .multi .mlist{border:1px solid var(--line);border-radius:8px;margin-top:4px;background:#222;max-height:260px;overflow-y:auto}
 .multi .mrow{min-height:44px;padding:10px 12px;border-bottom:1px solid #333;cursor:pointer}
 .multi .mrow:last-child{border-bottom:0}
+#time{position:absolute;left:8px;right:8px;bottom:8px;display:flex;gap:6px;align-items:center;background:rgba(47,47,47,.92);border:1px solid var(--line);border-radius:12px;padding:6px 10px}
+#time input[type=range]{flex:1;min-height:44px;padding:0;background:none;border:0}
+#time button{min-width:44px;padding:0 10px}
+#tLabel{min-width:150px;text-align:right;font-weight:600;color:var(--ocean)}
 @media (max-width:760px){#main{flex-direction:column}#panel{width:auto;max-height:45%;border-left:0;border-top:1px solid var(--line)}}
 </style>
 </head>
@@ -91,6 +96,7 @@ const SHELL=`<div id="app">
       <div id="hint">Double-tap to add something</div>
       <div id="pop"></div>
       <input id="edit" autocomplete="off" autocapitalize="words">
+      <div id="time"><button id="tPlay" title="Play the days">▶</button><button id="tBack" title="One part of a day back">‹</button><input id="tRange" type="range" min="0" max="239" step="1" value="0"><button id="tNext" title="One part of a day on">›</button><span id="tLabel">DAY 0 · MORNING</span></div>
     </div>
     <div id="panel"></div>
     <div id="lists"></div>
@@ -126,6 +132,8 @@ const DEFAULT_BIOMES=[ // the game's biomes, one colour each so the land reads a
   {id:'forest',name:'Forest',color:'#3f9a52',h:50},{id:'jungle',name:'Jungle',color:'#2fd06a',h:55},{id:'beach',name:'Beach',color:'#f2d36b',h:28},{id:'desert',name:'Desert',color:'#e4a55a',h:40},
   {id:'mountain',name:'Mountain',color:'#a3a8ad',h:220,peak:1},{id:'ice',name:'Ice',color:'#c4ecfa',h:60},{id:'swamp',name:'Swamp',color:'#8a9a42',h:25},{id:'volcanic',name:'Volcanic',color:'#c4553c',h:240,peak:2}];
 const DEFAULT_GOODS=[{id:'fish',name:'Fish'},{id:'goods',name:'Goods'},{id:'passengers',name:'Passengers'},{id:'medicine',name:'Medicine'},{id:'fuel',name:'Fuel'}];
+const DEFAULT_TASKS=[{id:'drop',name:'Drop cargo',act:'drop'},{id:'pick',name:'Pick up cargo',act:'pick'},{id:'passengers',name:'Carry passengers'},{id:'fishing',name:'Go fishing',act:'pick'}];
+const SLOTS=['Morning','Midday','Afternoon','Night']; // a day has four parts; the calendar starts at day 0
 const GOODS_FIELD={vehicle:['carries','Carries'],structure:['stores','Stores'],nature:['gives','Gives']}; // carrying, storing, giving: the same goods list
 const BIOME_COLS=['#3f9a52','#2fd06a','#f2d36b','#e4a55a','#a3a8ad','#c4ecfa','#8a9a42','#c4553c','#d9c7a3','#6fb3d2','#9c7bd1','#e8e8e8'];
 const KINDS={
@@ -181,9 +189,9 @@ const FONT='-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif';
 
 /* ---------- state ---------- */
 let doc=emptyDoc();
-const DOC_KEYS=['name','countries','characters','goods','biomes','catalog','elements','connections'];
+const DOC_KEYS=['name','countries','characters','goods','tasks','biomes','catalog','elements','connections'];
 const pick=o=>Object.fromEntries(DOC_KEYS.map(k=>[k,o[k]]));
-function emptyDoc(){return{format:'far-away-world-plan',version:2,name:'Far Away',savedAt:null,countries:[],characters:[],goods:JSON.parse(JSON.stringify(DEFAULT_GOODS)),biomes:JSON.parse(JSON.stringify(DEFAULT_BIOMES)),catalog:JSON.parse(JSON.stringify(DEFAULT_CATALOG)),elements:[],connections:[]}}
+function emptyDoc(){return{format:'far-away-world-plan',version:2,name:'Far Away',savedAt:null,countries:[],characters:[],goods:JSON.parse(JSON.stringify(DEFAULT_GOODS)),tasks:JSON.parse(JSON.stringify(DEFAULT_TASKS)),biomes:JSON.parse(JSON.stringify(DEFAULT_BIOMES)),catalog:JSON.parse(JSON.stringify(DEFAULT_CATALOG)),elements:[],connections:[]}}
 let byId=new Map();
 const view={cx:0,cy:-120,z:1};
 let sel={els:new Set(),links:new Set()};
@@ -234,6 +242,7 @@ function sanitize(d){
   const biomes=Array.isArray(d.biomes)&&d.biomes.length?list(d.biomes).map(b=>({...b,color:b.color||'#e9b52c',h:Math.max(5,+b.h||40)})):JSON.parse(JSON.stringify(DEFAULT_BIOMES));
   const catalog=Array.isArray(d.catalog)&&d.catalog.length?list(d.catalog).map(c=>({...c,kind:CATS[c.kind]?c.kind:'other',types:(Array.isArray(c.types)?c.types:[]).map(String)})):JSON.parse(JSON.stringify(DEFAULT_CATALOG));
   const goods=Array.isArray(d.goods)?list(d.goods):JSON.parse(JSON.stringify(DEFAULT_GOODS)),gids=new Set(goods.map(g=>g.id));
+  const tasks=Array.isArray(d.tasks)?list(d.tasks):JSON.parse(JSON.stringify(DEFAULT_TASKS)),tids=new Set(tasks.map(t=>t.id));
   const ids=new Set(),chids=new Set(characters.map(c=>c.id)),kids=new Set(countries.map(c=>c.id)),bids=new Set(biomes.map(b=>b.id)),cids=new Set(catalog.map(c=>c.id));
   d.elements=d.elements.filter(e=>e&&e.id&&!ids.has(e.id)&&ids.add(e.id)).map(e=>{
     let kind=CATS[e.kind]?e.kind:CATS[e.category]?e.category:'other'; // plans before categories kept the kind in "category"
@@ -246,8 +255,9 @@ function sanitize(d){
     return o});
   const m=new Map(d.elements.map(e=>[e.id,e]));
   for(const e of d.elements){let p=e.parent,n=0;while(p&&n++<100){if(p===e.id){e.parent=null;break}p=m.get(p)?.parent}}
-  d.connections=(d.connections||[]).filter(c=>c&&ids.has(c.from)&&ids.has(c.to)&&c.from!==c.to).map(c=>({id:String(c.id||uid('c')),from:c.from,to:c.to,label:String(c.label??''),kind:KINDS[c.kind]?c.kind:'other',direction:DIRS[c.direction]?c.direction:'forward',via:String(c.via??''),notes:String(c.notes??''),color:c.color||null,bend:+c.bend||0}));
-  return{format:'far-away-world-plan',version:2,name:String(d.name||'Far Away'),savedAt:d.savedAt||null,countries,characters,goods,biomes,catalog,elements:d.elements,connections:d.connections};
+  d.connections=(d.connections||[]).filter(c=>c&&ids.has(c.from)&&ids.has(c.to)&&c.from!==c.to).map(c=>({id:String(c.id||uid('c')),from:c.from,to:c.to,label:String(c.label??''),kind:KINDS[c.kind]?c.kind:'other',direction:DIRS[c.direction]?c.direction:'forward',via:String(c.via??''),notes:String(c.notes??''),color:c.color||null,bend:+c.bend||0,
+    ...(c.sched&&tids.has(c.sched.task)?{sched:{task:c.sched.task,every:Math.max(1,Math.round(+c.sched.every||1)),start:Math.max(0,Math.round(+c.sched.start||0)),slot:clamp(Math.round(+c.sched.slot||0),0,3),takes:Math.max(1,Math.round(+c.sched.takes||1))}}:{})}));
+  return{format:'far-away-world-plan',version:2,name:String(d.name||'Far Away'),savedAt:d.savedAt||null,countries,characters,goods,tasks,biomes,catalog,elements:d.elements,connections:d.connections};
 }
 
 /* ---------- canvas & view ---------- */
@@ -345,10 +355,17 @@ function render(){
     if(c.direction==='both')head(g.pts[0],g.pts[2]||g.pts[g.pts.length-1]);
   }
   // elements
-  for(const e of doc.elements){const L=LY.get(e.id);if(!L||L.group||L.land)continue;const pk=sel.els.has(e.id),bad=(onWater(e)||e.kind==='vehicle')&&!e.on,col=bad?'#ff5c5c':itemCol(e);
+  const SIM=simulate(T);
+  for(const e of doc.elements){const L=LY.get(e.id);if(!L||L.group||L.land)continue;ctx.globalAlpha=SIM.pos.has(e.id)?.3:1;const pk=sel.els.has(e.id),bad=(onWater(e)||e.kind==='vehicle')&&!e.on,col=bad?'#ff5c5c':itemCol(e);
     if(pk){ctx.fillStyle='rgba(255,255,255,.15)';ctx.beginPath();ctx.arc(L.sx,L.sy,L.r+6,0,7);ctx.fill()}
     icon(e,L,pk&&!bad?'#fff':col);if(L.lab)label(L,pk&&!bad?'#fff':col);
     if(bad){ctx.font=fontPx(11);ctx.fillStyle='#ff5c5c';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(onWater(e)?'NEEDS LAND':isWaterVeh(e)?'NEEDS A DOCK':'NEEDS A STRUCTURE',L.sx,L.sy+L.r+6)}}
+  ctx.globalAlpha=1;
+  for(const e of doc.elements){const L=LY.get(e.id);if(!L||L.land||L.group)continue;const st=goodsText(SIM.stock.get(e.id));if(st)pill(st,L.sx,L.sy+L.r+6,'#ffe9a8')}
+  for(const[id,p]of SIM.pos){const e=byId.get(id),g=lg.get(p.c.id),L=LY.get(id);if(!e||!g||!L)continue; // a vehicle on its way
+    const pts=p.rev?[...g.pts].reverse():g.pts,[x,y]=alongPts(pts,p.f),col=itemCol(e),M={sx:x,sy:y,r:L.r};
+    ctx.fillStyle='rgba(255,255,255,.18)';ctx.beginPath();ctx.arc(x,y,L.r+7,0,7);ctx.fill();icon(e,M,col);
+    const t=[p.there?((doc.tasks.find(k=>k.id===p.task)||{}).name||''):'',goodsText(SIM.load.get(id))].filter(Boolean).join(' · ');pill(t,x,y+L.r+8,col)}
   // connection labels on top
   for(const c of doc.connections){const g=lg.get(c.id);if(!g)continue;const pk=sel.links.has(c.id),col=pk?'#fff':(c.color||KINDS[c.kind].color);
     let t=(c.label||'').toUpperCase();if(c.via)t+=(t?' · ':'')+c.via.toUpperCase();
@@ -687,9 +704,10 @@ function linkPanel(k){
   <label>Direction</label><div class="chips">${Object.entries(DIRS).map(([id,v])=>`<button data-d="${id}" class="${id===k.direction?'on':''}">${v}</button>`).join('')}<button id="pSwap">SWAP ends</button></div>
   <label>Vehicle or character</label><input data-f="via" list="dlVia" value="${esc(k.via)}" placeholder="e.g. Truck"><datalist id="dlVia">${[...new Set(vias)].sort(az).map(v=>`<option value="${esc(v)}">`).join('')}</datalist>
   <label>Colour</label><div class="chips"><button data-col="" class="${k.color?'':'on'}">Kind's</button>${['#ff7a45','#6f8cff','#7fd99a','#c49bff','#5fd4e0','#f5c542','#ff5c5c','#ffffff'].map(c=>`<button data-col="${c}" class="${k.color===c?'on':''}" style="background:${c};width:44px"></button>`).join('')}</div>
+  ${schedHtml(k)}
   <label>Notes</label><textarea data-f="notes">${esc(k.notes)}</textarea>
   <div class="row"><button id="pFlat">STRAIGHTEN</button><button id="pDel">DELETE</button></div>`;
-  wireCommon();
+  wireCommon();wireSched(k);
   pnl.querySelectorAll('[data-f]').forEach(inp=>{const apply=()=>{k[inp.dataset.f]=inp.value;draw()};inp.addEventListener('input',apply);inp.addEventListener('change',()=>{apply();commit()})});
   pnl.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{k.kind=lastKind=b.dataset.k;commit();panel()});
   pnl.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{k.direction=b.dataset.d;commit();panel()});
@@ -697,6 +715,44 @@ function linkPanel(k){
   $('#pSwap').onclick=()=>{[k.from,k.to]=[k.to,k.from];k.bend=-k.bend;commit();panel()};
   $('#pFlat').onclick=()=>{k.bend=0;commit()};
 }
+
+/* ---------- schedules: a vehicle at one end of a connection leaves every N days at a part of the day to do a task at the other end ---------- */
+const tripEnds=c=>{const A=byId.get(c.from),B=byId.get(c.to);return A&&A.kind==='vehicle'?[A,B,false]:B&&B.kind==='vehicle'?[B,A,true]:null}; // [vehicle, where it goes, vehicle at the 'to' end]
+function schedHtml(k){const te=tripEnds(k);if(!te)return'';const S=k.sched,opt=(v,t,on)=>`<option value="${esc(v)}"${on?' selected':''}>${esc(t)}</option>`;
+  return`<label>Task — ${esc(te[0].name||te[0].type)} goes to ${esc(te[1]?.name||'?')}</label><div data-new="task"><select data-s="task">${opt('','— no schedule —',!S)}${byName(doc.tasks).map(t=>opt(t.id,t.name,S&&S.task===t.id)).join('')}${opt('__new','+ New task…')}</select></div>
+  ${S?`<div class="row" style="align-items:flex-end"><div style="flex:1"><label>Every (days)</label><input data-s="every" type="number" inputmode="numeric" min="1" value="${S.every}"></div>
+    <div style="flex:1"><label>Starting day</label><input data-s="start" type="number" inputmode="numeric" min="0" value="${S.start}"></div></div>
+  <label>Leaves</label><div class="chips">${SLOTS.map((n,i)=>`<button data-slot="${i}" class="${S.slot===i?'on':''}">${n}</button>`).join('')}</div>
+  <label>Trip takes (parts of a day, one way)</label><input data-s="takes" type="number" inputmode="numeric" min="1" value="${S.takes}">`:''}`}
+function wireSched(k){
+  pnl.querySelectorAll('[data-s]').forEach(inp=>inp.addEventListener('change',()=>{const f=inp.dataset.s,v=inp.value;
+    if(f==='task'){if(v==='__new')return askTask(inp);if(!v)delete k.sched;else k.sched={every:1,start:0,slot:0,takes:1,...(k.sched||{}),task:v};commit();panel();return}
+    const n=Math.round(+v);if(!isNaN(n)){k.sched[f]=f==='start'?Math.max(0,n):Math.max(1,n)}commit();draw()}));
+  pnl.querySelectorAll('[data-slot]').forEach(b=>b.onclick=()=>{k.sched.slot=+b.dataset.slot;commit();panel()});
+  function askTask(sel){const box=sel.parentElement;box.innerHTML=`<div class="row" style="margin:0"><input placeholder="New task, e.g. Deliver mail" autocapitalize="sentences" style="flex:2"><button>ADD</button></div>`;
+    const inp=box.querySelector('input'),ok=()=>{const n=inp.value.trim();if(!n){panel();return}const t={id:uid('t'),name:n};doc.tasks.push(t);k.sched={every:1,start:0,slot:0,takes:1,...(k.sched||{}),task:t.id};commit();panel()};
+    box.querySelector('button').onclick=ok;inp.onkeydown=ev=>{ev.stopPropagation();if(ev.key==='Enter')ok();if(ev.key==='Escape')panel()};inp.focus()}
+}
+/* the timeline: T counts parts of days from day 0 morning; everything is worked out again from the start, so dragging back works too */
+let T=0,playing=false;const DAYS=60;
+function simulate(t){
+  const trips=[];for(const c of doc.connections){const S=c.sched,te=tripEnds(c);if(!S||!te||!te[1])continue;
+    for(let n=0;;n++){const s0=(S.start+n*S.every)*4+S.slot;if(s0>t)break;trips.push({c,V:te[0],X:te[1],rev:te[2],s:s0,k:S.takes,act:(doc.tasks.find(x=>x.id===S.task)||{}).act,task:S.task})}}
+  const load=new Map(),stock=new Map(),pos=new Map(),add=(m,id,g,n)=>{if(!m.has(id))m.set(id,{});const o=m.get(id);o[g]=(o[g]||0)+n;if(!o[g])delete o[g]};
+  const arrivals=trips.filter(r=>r.s+r.k<=t).sort((a,b)=>a.s+a.k-(b.s+b.k));
+  for(const r of arrivals){const V=r.V,X=r.X;
+    if(r.act==='pick')for(const g of V.carries||[]){const free=X.kind==='nature'&&(X.gives||[]).includes(g),have=(stock.get(X.id)||{})[g]||0;if(free||have>0){add(load,V.id,g,1);if(!free)add(stock,X.id,g,-1)}}
+    if(r.act==='drop'){const l=load.get(V.id)||{};for(const g in l){add(stock,X.id,g,l[g]);delete l[g]}}}
+  for(const r of trips){const d=t-r.s;if(d<0||d>2*r.k)continue;const p=pos.get(r.V.id);if(p&&p.s>r.s)continue;
+    pos.set(r.V.id,{c:r.c,rev:r.rev,s:r.s,f:d<=r.k?d/r.k:1-(d-r.k)/r.k,there:Math.abs(d-r.k)<.5,task:r.task})}
+  for(const[id,p]of pos)if(p.f<=0)pos.delete(id); // back home
+  return{pos,load,stock}}
+const slotName=t=>'DAY '+Math.floor(t/4)+' · '+SLOTS[Math.floor(t)%4].toUpperCase();
+function setT(t){T=clamp(t,0,DAYS*4-1);$('#tRange').value=T;$('#tLabel').textContent=slotName(T);draw()}
+function alongPts(pts,f){let L=0;const seg=[];for(let i=1;i<pts.length;i++){const d=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);seg.push(d);L+=d}
+  let want=L*clamp(f,0,1);for(let i=1;i<pts.length;i++){if(want<=seg[i-1]){const k=want/(seg[i-1]||1);return[pts[i-1][0]+(pts[i][0]-pts[i-1][0])*k,pts[i-1][1]+(pts[i][1]-pts[i-1][1])*k]}want-=seg[i-1]}return pts[pts.length-1]}
+function goodsText(o){return Object.entries(o||{}).filter(([,n])=>n).map(([g,n])=>((doc.goods.find(x=>x.id===g)||{}).name||g)+' '+n).join(' · ')}
+function pill(t,x,y,col){if(!t)return;ctx.font=fontPx(11);const w=ctx.measureText(t).width;ctx.fillStyle='rgba(30,30,30,.85)';rr([x-w/2-6,y,x+w/2+6,y+17],8);ctx.fill();ctx.fillStyle=col;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(t,x,y+9)}
 
 /* ---------- LISTS: every list of the plan in columns - pick, rename, delete, add ---------- */
 let viewMode='world',newKind='structure';const lsel={};
@@ -720,6 +776,9 @@ const LCOLS=[
   {k:'goods',name:'Goods',one:'good',rows:()=>byName(doc.goods).map(g=>({id:g.id,name:g.name,n:usedBy(e=>['carries','stores','gives'].some(f=>(e[f]||[]).includes(g.id)))})),
     add:n=>{doc.goods.push({id:uid('d'),name:n});return true},ren:(id,n)=>{doc.goods.find(x=>x.id===id).name=n},
     del:ids=>{doc.goods=doc.goods.filter(x=>!ids.has(x.id));for(const e of doc.elements)for(const f of['carries','stores','gives'])if(e[f]){e[f]=e[f].filter(g=>!ids.has(g));if(!e[f].length)delete e[f]}}},
+  {k:'tasks',name:'Tasks',one:'task',rows:()=>byName(doc.tasks).map(t=>({id:t.id,name:t.name,sub:t.act==='drop'?'drops cargo':t.act==='pick'?'picks cargo up':'',n:doc.connections.filter(c=>c.sched&&c.sched.task===t.id).length})),
+    add:n=>{doc.tasks.push({id:uid('t'),name:n});return true},ren:(id,n)=>{doc.tasks.find(x=>x.id===id).name=n},
+    del:ids=>{doc.tasks=doc.tasks.filter(x=>!ids.has(x.id));for(const c of doc.connections)if(c.sched&&ids.has(c.sched.task))delete c.sched}},
   {k:'biomes',name:'Biomes',one:'biome',rows:()=>byName(doc.biomes).map(b=>({id:b.id,name:b.name,dot:b.color,n:usedBy(e=>isLand(e)&&e.biome===b.id)})),
     add:n=>{doc.biomes.push({id:uid('b'),name:n,color:BIOME_COLS.find(c=>!doc.biomes.some(x=>x.color===c))||'#e9b52c',h:40});return true},ren:(id,n)=>{doc.biomes.find(x=>x.id===id).name=n},
     del:ids=>{if(doc.biomes.every(b=>ids.has(b.id))){toast('Keep at least one biome');return false}doc.biomes=doc.biomes.filter(x=>!ids.has(x.id));
@@ -755,6 +814,11 @@ function setViewMode(m){viewMode=m;const L=m==='lists';
   if(L)renderLists();else{panel();requestAnimationFrame(resize)}}
 $('#tWorld').onclick=()=>setViewMode('world');$('#tLists').onclick=()=>setViewMode('lists');
 
+$('#tRange').max=DAYS*4-1;
+$('#tRange').addEventListener('input',e=>{playing=false;$('#tPlay').textContent='▶';setT(+e.target.value)});
+$('#tBack').onclick=()=>setT(Math.ceil(T)-1);$('#tNext').onclick=()=>setT(Math.floor(T)+1);
+$('#tPlay').onclick=()=>{playing=!playing;$('#tPlay').textContent=playing?'❚❚':'▶';if(playing){if(T>=DAYS*4-1)T=0;let last=performance.now();
+  const step=now=>{if(!playing)return;T=Math.min(DAYS*4-1,T+(now-last)/700);last=now;$('#tRange').value=T;$('#tLabel').textContent=slotName(T);draw();if(T>=DAYS*4-1){playing=false;$('#tPlay').textContent='▶';return}requestAnimationFrame(step)};requestAnimationFrame(step)}};
 /* ---------- toolbar ---------- */
 const defaultHelp=$('#help').textContent;
 $('#bAdd').onclick=()=>openAdd(null,null);
