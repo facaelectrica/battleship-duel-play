@@ -98,7 +98,7 @@ const SHELL=`<div id="app">
       <div id="pop"></div>
       <input id="edit" autocomplete="off" autocapitalize="words">
       <div id="time"><div class="trow"><button id="tPlay" title="Play">▶</button><button id="tBack" title="Day before">‹</button><input id="tDay" type="range" min="0" max="59" step="1" value="0"><button id="tNext" title="Next day">›</button><span id="tDayL">DAY 0</span></div>
-        <div class="trow"><span class="sub" style="width:96px">TIME OF DAY</span><input id="tPart" type="range" min="0" max="3.99" step="0.01" value="0"><span id="tPartL">MORNING</span></div></div>
+        <div class="trow"><span class="sub" style="width:96px">TIME OF DAY</span><input id="tPart" type="range" min="0" max="23.99" step="0.25" value="0"><span id="tPartL">MORNING</span></div></div>
     </div>
     <div id="panel"></div>
     <div id="lists"></div>
@@ -139,7 +139,15 @@ const DEFAULT_GOODS=[{id:'fish',name:'Fish'},{id:'goods',name:'Goods'},{id:'pass
 const DEFAULT_TASKS=[{id:'pick',name:'Pick up',act:'collect'},{id:'drop',name:'Drop cargo',act:'drop'},{id:'goto',name:'Go to',act:'goto'}];
 const ACTS=['goto','collect','drop'];
 const routeEnd=X=>doc.connections.filter(c=>c.to===X&&tripEnds(c)&&!doc.connections.some(n=>n.after===c.id)); // routes that end at X and can go on // what a task does: go there, collect a good there until it has enough, drop what it carries there
-const SLOTS=['Morning','Midday','Afternoon','Night']; // a day has four parts; the calendar starts at day 0
+const SLOTS=['Morning','Midday','Afternoon','Night'],SLOT_HOURS=[9,12,15,21]; // leaving times; the calendar starts at day 0, 00:00
+const SPEEDS={'fishing-boat':15,sailboat:12,'motor-boat':40,'jet-boat':60,yacht:25,'small-cargo-ship':20,'cargo-ship':30,tanker:28,'cruise-ship':35,submarine:25,seaplane:200,
+  car:70,taxi:60,van:60,bus:50,ambulance:80,'fire-engine':70,truck:60,'small-truck':60,tractor:25,cessna:220,airliner:850,helicopter:220,blimp:80,balloon:15}; // km/h
+const speedOf=V=>{const t=typeOf(V);return t&&t.speed||SPEEDS[V.type]||40};
+const spotOf=e=>{const h=e&&heldBy(e);return h||e}; // where it is: a vehicle is where it is kept
+const distKm=(a,b)=>{a=spotOf(a);b=spotOf(b);return a&&b?Math.hypot(a.x-b.x,a.y-b.y)*(doc.scale||10)/1000:0}; // the map's scale: metres per unit
+const hrs=h=>h<1/60?'under a minute':h<1?Math.round(h*60)+' min':Math.floor(h)+' h'+(Math.round(h%1*60)?' '+Math.round(h%1*60)+' min':'');
+const clock=h=>String(Math.floor(h%24)).padStart(2,'0')+':'+String(Math.floor(h%1*60)).padStart(2,'0');
+const partOf=h=>{h%=24;return h<6||h>=20?'Night':h<11?'Morning':h<14?'Midday':'Afternoon'};
 const GOODS_FIELD={vehicle:['carries','Carries'],structure:['stores','Stores'],nature:['gives','Gives']};
 const goodsField=e=>e.kind==='vehicle'||(e.kind==='nature'&&does(e,'gives'))?GOODS_FIELD[e.kind]:null; // a structure holds what its type says, any goods
 const takesCargo=X=>X&&X.kind==='structure'&&['stores','sells','ships'].some(p=>does(X,p)); // carrying, storing, giving: the same goods list
@@ -202,9 +210,9 @@ const FONT='-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif';
 
 /* ---------- state ---------- */
 let doc=emptyDoc();
-const DOC_KEYS=['name','countries','characters','goods','tasks','biomes','cats','types','elements','connections'];
+const DOC_KEYS=['name','scale','countries','characters','goods','tasks','biomes','cats','types','elements','connections'];
 const pick=o=>Object.fromEntries(DOC_KEYS.map(k=>[k,o[k]]));
-function emptyDoc(){return{format:'far-away-world-plan',version:2,name:'Far Away',savedAt:null,countries:[],characters:[],goods:JSON.parse(JSON.stringify(DEFAULT_GOODS)),tasks:JSON.parse(JSON.stringify(DEFAULT_TASKS)),biomes:JSON.parse(JSON.stringify(DEFAULT_BIOMES)),cats:JSON.parse(JSON.stringify(DEFAULT_CATS)),types:JSON.parse(JSON.stringify(DEFAULT_TYPES)),elements:[],connections:[]}}
+function emptyDoc(){return{format:'far-away-world-plan',version:2,name:'Far Away',scale:10,savedAt:null,countries:[],characters:[],goods:JSON.parse(JSON.stringify(DEFAULT_GOODS)),tasks:JSON.parse(JSON.stringify(DEFAULT_TASKS)),biomes:JSON.parse(JSON.stringify(DEFAULT_BIOMES)),cats:JSON.parse(JSON.stringify(DEFAULT_CATS)),types:JSON.parse(JSON.stringify(DEFAULT_TYPES)),elements:[],connections:[]}}
 let byId=new Map();
 const view={cx:0,cy:-120,z:1};
 let sel={els:new Set(),links:new Set()};
@@ -235,7 +243,7 @@ function resnap(){
 function landUnder(x,y){let best=null,bd=1e9;const z=view.z;
   for(const r of doc.elements){if(!isLand(r)||!visible(r)||x<r.x-r.w/2||x>r.x+r.w/2)continue;const t=topAt(r,x);
     if(y<t-90/z||y>Math.max(t,0)+40/z)continue;const d=Math.abs(y-t);if(d<bd){bd=d;best=r}}return best}
-function cleanRoutines(){for(const V of doc.elements){const R=V.routine;if(!R)continue;R.steps=R.steps.filter(st=>{const c=linkOf(st.link),te=c&&c.task&&tripEnds(c);return te&&te[0]===V})}}
+function cleanRoutines(){for(const V of doc.elements){const R=V.routine;if(!R)continue;R.steps=R.steps.filter(st=>{const c=linkOf(st.link),te=c&&c.activity&&tripEnds(c);return te&&te[0]===V})}}
 function commit(){resnap();settleGroups();cleanRoutines();const s=snap();if(s===lastSnap)return;undoS.push(lastSnap);if(undoS.length>200)undoS.shift();redoS.length=0;lastSnap=s;changed()}
 function restore(s){Object.assign(doc,JSON.parse(s));reindex();
   for(const id of[...sel.els])if(!byId.has(id))sel.els.delete(id);for(const id of[...sel.links])if(!linkOf(id))sel.links.delete(id);
@@ -257,7 +265,7 @@ function sanitize(d){
   const cats=Array.isArray(d.cats)&&d.cats.length?list(d.cats).filter(c=>CATS[c.kind]&&c.kind!=='region').map(c=>({id:c.id,kind:c.kind,name:c.name})):JSON.parse(JSON.stringify(DEFAULT_CATS));
   const catFor=(kind,name)=>{let c=cats.find(c=>c.kind===kind&&az(c.name,name)===0);if(!c){c={id:uid('g'),kind,name};cats.push(c)}return c.id};
   const kindOf=k=>k==='place'||k==='other'||k==='character'||!CATS[k]?'structure':k; // places and notes from older plans become structures
-  let types=Array.isArray(d.types)&&d.types.length?list(d.types).map(t=>{const kind=kindOf(t.kind);return{id:t.id,kind,cat:t.cat&&cats.some(c=>c.id===t.cat&&c.kind===kind)?t.cat:null,name:t.name,does:(Array.isArray(t.does)?t.does:[]).filter(p=>(PURPOSES[kind]||[]).some(q=>q[0]===p))}}):JSON.parse(JSON.stringify(DEFAULT_TYPES));
+  let types=Array.isArray(d.types)&&d.types.length?list(d.types).map(t=>{const kind=kindOf(t.kind);return{id:t.id,kind,...(+t.speed>0?{speed:+t.speed}:{}),cat:t.cat&&cats.some(c=>c.id===t.cat&&c.kind===kind)?t.cat:null,name:t.name,does:(Array.isArray(t.does)?t.does:[]).filter(p=>(PURPOSES[kind]||[]).some(q=>q[0]===p))}}):JSON.parse(JSON.stringify(DEFAULT_TYPES));
   if(Array.isArray(d.catalog))for(const c of d.catalog){const kind=kindOf(c.kind);if(kind==='region')continue;for(const n of c.types||[])if(!types.some(t=>t.kind===kind&&az(t.name,n)===0))types.push({id:uid('y'),kind,cat:catFor(kind,c.name||'Other'),name:String(n),does:[]})} // types from plans that still had categories
   for(const t of types)if(!t.cat){const def=DEFAULT_TYPES.find(x=>x.kind===t.kind&&az(x.name,t.name)===0);t.cat=def&&cats.some(c=>c.id===def.cat)?def.cat:catFor(t.kind,'Other')}
   types=types.filter(t=>!['big-city','small-town','village','landmark','note'].includes(t.id)||(d.elements||[]).some(e=>e&&e.type===t.id&&e.kind!=='place'));
@@ -279,12 +287,12 @@ function sanitize(d){
   const m=new Map(d.elements.map(e=>[e.id,e]));
   for(const e of d.elements){let p=e.parent,n=0;while(p&&n++<100){if(p===e.id){e.parent=null;break}p=m.get(p)?.parent}}
   d.connections=(d.connections||[]).filter(c=>c&&ids.has(c.from)&&ids.has(c.to)&&c.from!==c.to).map(c=>({id:String(c.id||uid('c')),from:c.from,to:c.to,direction:DIRS[c.direction]?c.direction:'forward',notes:String(c.notes??''),bend:+c.bend||0,...(c.veh&&ids.has(c.veh)?{veh:c.veh}:{}),...(c.after?{after:String(c.after)}:{}),
-    ...(oldTask[c.task]?{task:'pick',good:oldTask[c.task][1]}:tids.has(c.task)?{task:c.task,...(c.task==='pick'&&gids.has(c.good)?{good:c.good}:{})}:{})}));
+    ...(()=>{const a=c.activity??c.task;return oldTask[a]?{activity:'pick',good:oldTask[a][1]}:tids.has(a)?{activity:a,...(a==='pick'&&gids.has(c.good)?{good:c.good}:{})}:{}})()})); // 'task' in older plans
   const cids2=new Set(d.connections.map(c=>c.id));
   for(const e of d.elements){const R=e.routine;if(e.kind!=='vehicle'||!R||typeof R!=='object'){delete e.routine;continue}
     e.routine={start:['time','cargo','off'].includes(R.start)?R.start:'time',every:Math.max(1,Math.round(+R.every||1)),day:Math.max(0,Math.round(+R.day||0)),slot:clamp(Math.round(+R.slot||0),0,3),takes:Math.max(1,Math.round(+R.takes||1)),
       steps:(Array.isArray(R.steps)?R.steps:[]).filter(st=>st&&cids2.has(st.link)).map(st=>({link:st.link,until:Math.max(1,Math.round(+st.until||100))}))}}
-  return{format:'far-away-world-plan',version:2,name:String(d.name||'Far Away'),savedAt:d.savedAt||null,countries,characters,goods,tasks,biomes,cats,types,elements:d.elements,connections:d.connections};
+  return{format:'far-away-world-plan',version:2,name:String(d.name||'Far Away'),scale:+d.scale>0?+d.scale:10,savedAt:d.savedAt||null,countries,characters,goods,tasks,biomes,cats,types,elements:d.elements,connections:d.connections};
 }
 
 /* ---------- canvas & view ---------- */
@@ -352,7 +360,7 @@ function linkGeom(c){
   return{pts:pts.slice(i0,i1+1),mid:P(.5),nx,ny,mx,my};
 }
 function KIND_ON(c){return true}
-const linkCol=c=>c.task==='pick'?'#6fa8ff':c.task==='drop'?'#ff7a45':c.task==='goto'?'#7fd99a':'#d4d4d4'; // a connection's colour is its task's
+const linkCol=c=>c.activity==='pick'?'#6fa8ff':c.activity==='drop'?'#ff7a45':c.activity==='goto'?'#7fd99a':'#d4d4d4'; // a connection's colour is its task's
 
 /* ---------- drawing ---------- */
 function render(){
@@ -378,7 +386,7 @@ function render(){
   const lg=new Map();
   for(const c of doc.connections){const g=linkGeom(c);if(!g)continue;lg.set(c.id,g);
     const pk=sel.links.has(c.id),col=linkCol(c);
-    ctx.strokeStyle=pk?'#fff':col;ctx.lineWidth=pk?3:2;ctx.setLineDash(c.task?[]:[7,6]);
+    ctx.strokeStyle=pk?'#fff':col;ctx.lineWidth=pk?3:2;ctx.setLineDash(c.activity?[]:[7,6]);
     ctx.beginPath();g.pts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.stroke();ctx.setLineDash([]);
     if(c.direction!=='none')head(g.pts[g.pts.length-1],g.pts[g.pts.length-3]||g.pts[0]);
     if(c.direction==='both')head(g.pts[0],g.pts[2]||g.pts[g.pts.length-1]);
@@ -740,21 +748,23 @@ function elPanel(e){
   ${goodsField(e)?(()=>{const[f,lab]=goodsField(e),cur=e[f]||[],names=byName(doc.goods).filter(g=>cur.includes(g.id)).map(g=>g.name);
     return`<label>${lab}</label><div class="multi"><button class="mbtn" data-mopen>${names.length?esc(names.join(', ')):f==='carries'?'— anything —':'— nothing —'} ▾</button>
     <div class="mlist" data-new="good" ${goodsOpen?'':'hidden'}>${byName(doc.goods).map(g=>`<div class="mrow" data-good="${g.id}">${cur.includes(g.id)?'✓ ':'&nbsp;&nbsp;&nbsp; '}${esc(g.name)}</div>`).join('')}<div class="mrow" data-good="__new">+ New good…</div></div></div>`})():''}
+  ${e.kind==='vehicle'&&ty?`<label>Speed of every ${esc(ty.name)} (km/h)</label><input data-speed type="number" inputmode="numeric" min="1" value="${speedOf(e)}">`:''}
   ${e.kind==='vehicle'?routineHtml(e):''}
-  ${e.kind==='nature'&&(e.gives||[]).length?`<label>Gives per part of a day</label><input data-rate type="number" inputmode="numeric" min="1" value="${e.rate||25}">`:''}
+  ${e.kind==='nature'&&(e.gives||[]).length?`<label>Gives per hour</label><input data-rate type="number" inputmode="numeric" min="1" value="${e.rate||25}">`:''}
   ${stands?`<label>${onWater(e)?'Held by':holderKind(stands)==='dock'?'Moored at':holderKind(stands)==='hangar'?'Kept in':holderKind(stands)==='yard'?'Kept at':'Stands on'}</label><div>${esc(stands.name||biomeOf(stands).name)}</div>`:''}
   ${(()=>{const hs=doc.elements.filter(v=>heldBy(v)===e);return hs.length?`<label>${holderKind(e)==='dock'?'Moored here':'Kept here'} (${hs.length})</label><div>${hs.map(v=>esc(v.name||tn(v))).join(', ')}</div>`:''})()}
   ${true?'':`<label>Inside (belongs to)</label><select data-f="parent">${opt('','— nothing —',!e.parent)}${parents.map(p=>opt(p.id,p.name||tn(p),p.id===e.parent)).join('')}</select>`}
   <label>Notes</label><textarea data-f="notes">${esc(e.notes)}</textarea>
   <label>Other properties — one per line, like “Opens: 8am”</label><textarea data-f="props">${esc(props)}</textarea>
   ${land?'':`<label>Connections (${conns.length})</label><div class="links">${conns.map(k=>{const o=byId.get(k.from===e.id?k.to:k.from);const arrow=k.direction==='both'?'↔':k.direction==='none'?'—':(k.from===e.id?'→':'←');
-    return`<div data-l="${k.id}" style="border-color:${linkCol(k)}">${arrow} ${esc(o?.name||'?')}${k.task?' · '+esc(taskName(k)):''}</div>`}).join('')}</div>`}
+    return`<div data-l="${k.id}" style="border-color:${linkCol(k)}">${arrow} ${esc(o?.name||'?')}${k.activity?' · '+esc(taskName(k)):''}</div>`}).join('')}</div>`}
   <div class="row"><button id="pDup">DUPLICATE</button><button id="pCopy">COPY</button><button id="pPaste">PASTE</button></div>
   <div class="row"><button id="pDel">DELETE</button></div>`;
   wireCommon();
   pnl.querySelectorAll('[data-l]').forEach(d=>d.onclick=()=>{sel={els:new Set(),links:new Set([d.dataset.l])};panel();draw()});
   if(e.kind==='vehicle')wireRoutine(e);
   pnl.querySelectorAll('[data-does]').forEach(b=>b.onclick=()=>{const t=typeOf(e),k=b.dataset.does;if(!t)return;t.does=t.does.includes(k)?t.does.filter(x=>x!==k):[...t.does,k];commit();panel()}); // the type's purpose: every thing of it
+  pnl.querySelectorAll('[data-speed]').forEach(i=>i.addEventListener('change',()=>{const n=+i.value,t=typeOf(e);if(t&&n>0)t.speed=n;commit();panel()}));
   pnl.querySelectorAll('[data-rate]').forEach(i=>i.addEventListener('change',()=>{const n=Math.round(+i.value);if(n>0)e.rate=n;commit();draw()}));
   pnl.querySelectorAll('[data-oc]').forEach(b=>b.onclick=()=>{const o=ownerOf(e);if(o){o.color=b.dataset.oc;commit();panel()}});
   pnl.querySelectorAll('[data-mopen]').forEach(b=>b.onclick=()=>{goodsOpen=!goodsOpen;panel()});
@@ -791,8 +801,9 @@ function linkPanel(k){
   pnl.innerHTML=`<h3 style="color:${col}">CONNECTION</h3>
   <div style="font-size:15px">${esc(A?.name||'?')} <b>${k.direction==='both'?'↔':k.direction==='none'?'—':'→'}</b> ${esc(B?.name||'?')}</div>
   <label>Direction</label><div class="chips">${Object.entries(DIRS).map(([id,v])=>`<button data-d="${id}" class="${id===k.direction?'on':''}">${v}</button>`).join('')}<button id="pSwap">SWAP ends</button></div>
+  ${(()=>{const te=tripEnds(k);if(!te||!te[1])return'';const a=k.veh?byId.get(k.from):te[0],km=distKm(a,te[1]);return`<div class="sub" style="margin-top:10px">${km.toFixed(1)} km · about ${hrs(km/speedOf(te[0]))} for ${esc(te[0].name||tn(te[0]))} at ${speedOf(te[0])} km/h</div>`})()}
   ${schedHtml(k)}
-  <label>Notes</label><textarea data-f="notes">${esc(k.notes)}</textarea>
+  <label>What makes it fun</label><textarea data-f="notes" placeholder="Why is this enjoyable to do?">${esc(k.notes)}</textarea>
   <div class="row"><button id="pFlat">STRAIGHTEN</button><button id="pDel">DELETE</button></div>`;
   wireCommon();wireSched(k);
   pnl.querySelectorAll('[data-f]').forEach(inp=>{const apply=()=>{k[inp.dataset.f]=inp.value;draw()};inp.addEventListener('input',apply);inp.addEventListener('change',()=>{apply();commit()})});
@@ -806,32 +817,31 @@ const tripEnds=c=>{const A=byId.get(c.from),B=byId.get(c.to),W=c.veh&&byId.get(c
 const goodsAt=X=>X&&X.kind==='nature'&&does(X,'gives')?X.gives||[]:[];
 function taskOptions(X){const o=goodsAt(X).map(g=>({v:'pick:'+g,t:'Pick up '+((doc.goods.find(x=>x.id===g)||{}).name||g).toLowerCase()}));if(takesCargo(X))o.push({v:'pick:',t:'Pick up cargo'});
   if(X&&(X.kind==='structure'||X.kind==='vehicle'))o.push({v:'drop',t:'Drop cargo'});o.push({v:'goto',t:'Go to'});return o}
-const taskName=c=>c.task==='goto'?'Go to':c.task==='drop'?'Drop cargo':c.task==='pick'?'Pick up '+(c.good?((doc.goods.find(x=>x.id===c.good)||{}).name||'cargo'):'cargo').toLowerCase():'';
-function autoTask(c){const te=tripEnds(c);if(!te||!te[1]||c.task)return;const[V,X]=te,gs=goodsAt(X); // what dragging it there means
+const taskName=c=>c.activity==='goto'?'Go to':c.activity==='drop'?'Drop cargo':c.activity==='pick'?'Pick up '+(c.good?((doc.goods.find(x=>x.id===c.good)||{}).name||'cargo'):'cargo').toLowerCase():'';
+function autoTask(c){const te=tripEnds(c);if(!te||!te[1]||c.activity)return;const[V,X]=te,gs=goodsAt(X); // what dragging it there means
   const carried=new Set(V.carries||[]);
   if(gs.length)setTask(c,'pick:'+(gs.find(g=>carried.has(g))||gs[0]));  // it gives goods: pick them up
   else if(takesCargo(X))setTask(c,'drop');                              // it collects goods: drop the cargo there
   else setTask(c,'goto')}
-function setTask(c,tid){const te=tripEnds(c);delete c.good;if(tid&&tid.startsWith('pick:')){c.task='pick';if(tid.length>5)c.good=tid.slice(5)}else if(tid)c.task=tid;else delete c.task;if(!te)return;const V=te[0];
+function setTask(c,tid){const te=tripEnds(c);delete c.good;if(tid&&tid.startsWith('pick:')){c.activity='pick';if(tid.length>5)c.good=tid.slice(5)}else if(tid)c.activity=tid;else delete c.activity;if(!te)return;const V=te[0];
   if(c.good&&!(V.carries||[]).includes(c.good))V.carries=[...(V.carries||[]),c.good]; // it carries what it picks up
   if(tid){V.routine=V.routine||{start:'time',every:1,day:0,slot:0,takes:1,steps:[]};if(!V.routine.steps.some(st=>st.link===c.id))V.routine.steps.push({link:c.id,until:100})}
   else if(V.routine)V.routine.steps=V.routine.steps.filter(st=>st.link!==c.id)}
 function schedHtml(k){const te=tripEnds(k);if(!te||!te[1])return'';const opt=(v,t,on)=>`<option value="${esc(v)}"${on?' selected':''}>${esc(t)}</option>`;
-  const cur=k.task==='pick'?'pick:'+(k.good||''):k.task||'',os=taskOptions(te[1]);if(cur&&!os.some(o=>o.v===cur))os.push({v:cur,t:taskName(k)});
-  return`<label>Task</label><select data-s="task">${opt('','— none —',!cur)}${os.map(o=>opt(o.v,o.t,o.v===cur)).join('')}</select>
-  ${k.task?`<div class="sub" style="margin-top:6px">Step ${((te[0].routine||{steps:[]}).steps.findIndex(st=>st.link===k.id))+1} of ${esc(te[0].name||tn(te[0]))}'s routine — order and timing in its panel.</div>`:''}`}
+  const cur=k.activity==='pick'?'pick:'+(k.good||''):k.activity||'',os=taskOptions(te[1]);if(cur&&!os.some(o=>o.v===cur))os.push({v:cur,t:taskName(k)});
+  return`<label>Activity — make it fun</label><select data-s="task">${opt('','— none —',!cur)}${os.map(o=>opt(o.v,o.t,o.v===cur)).join('')}</select>
+  ${k.activity?`<div class="sub" style="margin-top:6px">Activity ${((te[0].routine||{steps:[]}).steps.findIndex(st=>st.link===k.id))+1} of ${esc(te[0].name||tn(te[0]))}'s routine — order and start in its panel.</div>`:''}`}
 function wireSched(k){pnl.querySelectorAll('[data-s="task"]').forEach(inp=>inp.addEventListener('change',()=>{setTask(k,inp.value);commit();panel()}))}
 /* a vehicle's ROUTINE: when it starts, then its connections' tasks in order, then home */
-function routineHtml(V){const R=V.routine,steps=R?R.steps.map(st=>{const c=linkOf(st.link),te=c&&tripEnds(c);return te?{st,c,X:te[1],task:{name:taskName(c),act:c.task==='pick'?'collect':c.task}}:null}).filter(Boolean):[];
-  if(!steps.length)return`<label>Routine</label><div class="sub">Connect it to places and give each connection a task — they line up here as its routine.</div>`;
+function routineHtml(V){const RT=routineTimes(V),R=V.routine,steps=R?R.steps.map(st=>{const c=linkOf(st.link),te=c&&tripEnds(c);return te?{st,c,X:te[1],task:{name:taskName(c),act:c.activity==='pick'?'collect':c.activity}}:null}).filter(Boolean):[];
+  if(!steps.length)return`<label>Routine</label><div class="sub">Connect it to places — each connection is an activity, and they line up here as its routine.</div>`;
   return`<label>Routine — starts</label><div class="chips">${[['time','On a calendar'],['cargo','When cargo arrives'],['off','Off']].map(([k,n])=>`<button data-rstart="${k}" class="${R.start===k?'on':''}">${n}</button>`).join('')}</div>
   ${R.start==='time'?`<div class="row" style="align-items:flex-end"><div style="flex:1"><label>Every (days)</label><input data-r="every" type="number" inputmode="numeric" min="1" value="${R.every}"></div><div style="flex:1"><label>From day</label><input data-r="day" type="number" inputmode="numeric" min="0" value="${R.day}"></div></div>
-  <label>Leaves</label><div class="chips">${SLOTS.map((n,i)=>`<button data-rslot="${i}" class="${R.slot===i?'on':''}">${n}</button>`).join('')}</div>`:R.start==='cargo'?`<div class="sub" style="margin-top:6px">Waits at ${esc((heldBy(V)||{}).name||'home')} until cargo it carries is there, loads it, then goes.</div>`:''}
-  <label>Each trip takes (parts of a day)</label><input data-r="takes" type="number" inputmode="numeric" min="1" value="${R.takes}">
-  <label>Steps</label>${steps.map((s,i)=>`<div class="links"><div style="cursor:default"><b>${i+1}.</b> ${esc(s.task?.name||'?')} · ${esc(s.X.name||tn(s.X)||'?')}
+  <label>Leaves</label><div class="chips">${SLOTS.map((n,i)=>`<button data-rslot="${i}" class="${R.slot===i?'on':''}">${n} ${SLOT_HOURS[i]}:00</button>`).join('')}</div>`:R.start==='cargo'?`<div class="sub" style="margin-top:6px">Waits at ${esc((heldBy(V)||{}).name||'home')} until cargo it carries is there, loads it, then goes.</div>`:''}
+  <label>Steps</label>${steps.map((s,i)=>`<div class="links"><div style="cursor:default"><b>${i+1}.</b> ${esc(s.task?.name||'?')} · ${esc(s.X.name||tn(s.X)||'?')}${RT&&RT.steps[i]?`<div class="sub">${RT.steps[i].km.toFixed(1)} km, ${hrs(RT.steps[i].go)} away${RT.steps[i].work?' · '+hrs(RT.steps[i].work)+' there':''}</div>`:''}
     ${s.task?.act==='collect'?`<div class="row" style="align-items:center;margin-top:6px"><span class="sub" style="flex:none">until it has</span><input data-until="${i}" type="number" inputmode="numeric" min="1" value="${s.st.until}" style="flex:1"></div>`:''}
     <div class="row" style="margin-top:6px"><button data-rup="${i}" ${i?'':'disabled'}>↑</button><button data-rdown="${i}" ${i<steps.length-1?'':'disabled'}>↓</button></div></div></div>`).join('')}
-  <div class="links"><div style="cursor:default;opacity:.7"><b>${steps.length+1}.</b> Goes home${heldBy(V)?' · '+esc(heldBy(V).name||''):''}</div></div>`}
+  <div class="links"><div style="cursor:default;opacity:.7"><b>${steps.length+1}.</b> Goes home${heldBy(V)?' · '+esc(heldBy(V).name||''):''}${RT?`<div class="sub">${hrs(RT.back)}</div>`:''}</div></div>${RT?`<div style="margin-top:8px"><b>A round takes about ${hrs(RT.total)}</b> <span class="sub">at ${speedOf(V)} km/h</span></div>`:''}`}
 function wireRoutine(V){const R=V.routine;if(!R)return;
   pnl.querySelectorAll('[data-rstart]').forEach(b=>b.onclick=()=>{R.start=b.dataset.rstart;commit();panel()});
   pnl.querySelectorAll('[data-rslot]').forEach(b=>b.onclick=()=>{R.slot=+b.dataset.rslot;commit();panel()});
@@ -841,33 +851,41 @@ function wireRoutine(V){const R=V.routine;if(!R)return;
   pnl.querySelectorAll('[data-rup]').forEach(b=>b.onclick=()=>mv(+b.dataset.rup,-1));pnl.querySelectorAll('[data-rdown]').forEach(b=>b.onclick=()=>mv(+b.dataset.rdown,1))}
 /* the timeline: T counts parts of days from day 0 morning; everything is worked out again from the start, so dragging back works too */
 let T=0,playing=false;const DAYS=60;
-function simulate(t){ // everything worked out again from day 0, a part of a day at a time
-  const tick=Math.floor(t),frac=t-tick,stock=new Map(),load=new Map(),pos=new Map();if(t<=0)return{pos,load,stock}; // the start: as placed
-  const add=(m,id,g,n)=>{if(!m.has(id))m.set(id,{});const o=m.get(id);o[g]=(o[g]||0)+n;if(!o[g])delete o[g]};
+const DT=.25,TPD=96; // a step is a quarter of an hour; 96 a day
+function simulate(t){ // everything worked out again from day 0, 00:00
+  const tick=Math.floor(t/DT),frac=t/DT-tick,stock=new Map(),load=new Map(),pos=new Map();if(t<=0)return{pos,load,stock}; // the start: as placed
+  const add=(m,id,g,n)=>{if(!m.has(id))m.set(id,{});const o=m.get(id);o[g]=(o[g]||0)+n;if(Math.abs(o[g])<1e-9)delete o[g]};
   const vs=[];
   for(const V of doc.elements){const R=V.routine;if(V.kind!=='vehicle'||!R||R.start==='off')continue;
-    const steps=R.steps.map(st=>{const c=linkOf(st.link),te=c&&tripEnds(c);return te&&te[1]&&c.task?{c,X:te[1],task:{name:taskName(c),act:c.task==='pick'?'collect':c.task,good:c.good},until:st.until}:null}).filter(Boolean);
+    const steps=R.steps.map(st=>{const c=linkOf(st.link),te=c&&tripEnds(c);return te&&te[1]&&c.activity?{c,X:te[1],task:{name:taskName(c),act:c.activity==='pick'?'collect':c.activity,good:c.good},until:st.until}:null}).filter(Boolean);
     if(steps.length)vs.push({V,R,steps,mode:'idle',i:-1})}
-  const leave=(v,from,to,link)=>{v.mode='travel';v.from=from;v.to=to;v.link=link;v.left=v.R.takes};
-  const fires=(v,k)=>{const R=v.R,day=Math.floor(k/4);if(R.start==='time')return k%4===R.slot&&day>=R.day&&(day-R.day)%R.every===0;
+  const leave=(v,from,to,link)=>{const a=from==='home'?v.V:byId.get(from),b=to==='home'?v.V:byId.get(to);v.mode='travel';v.from=from;v.to=to;v.link=link;v.dur=Math.max(DT,distKm(a,b)/speedOf(v.V));v.left=v.dur};
+  const fires=(v,k)=>{const R=v.R,day=Math.floor(k/TPD);if(R.start==='time')return k%TPD===SLOT_HOURS[R.slot]*4&&day>=R.day&&(day-R.day)%R.every===0;
     const H=heldBy(v.V),st=H&&stock.get(H.id)||{},ok=g=>!(v.V.carries||[]).length||v.V.carries.includes(g);return Object.keys(st).some(g=>st[g]>0&&ok(g))};
   for(let k=0;k<tick;k++)for(const v of vs){const V=v.V,R=v.R;
     if(v.mode==='idle'){if(fires(v,k)){if(R.start==='cargo'){const H=heldBy(V),st=stock.get(H.id);for(const g of Object.keys(st))if(st[g]>0&&(!(V.carries||[]).length||V.carries.includes(g))){const n=st[g];add(load,V.id,g,n);add(stock,H.id,g,-n)}}
-      v.i=0;leave(v,'home',v.steps[0].X.id,v.steps[0].c.id);if(--v.left<=0)v.mode='work'}} // it leaves at the start of that part of the day and travels during it
-    else if(v.mode==='travel'){if(--v.left<=0)v.mode=v.to==='home'?'idle':'work'}
+      v.i=0;leave(v,'home',v.steps[0].X.id,v.steps[0].c.id);v.left-=DT;if(v.left<=0)v.mode='work'}}
+    else if(v.mode==='travel'){v.left-=DT;if(v.left<=0)v.mode=v.to==='home'?'idle':'work'}
     else{const s=v.steps[v.i],X=s.X;let done=true;
       if(s.task.act==='collect'){const l=load.get(V.id)||{},have=Object.values(l).reduce((a,b)=>a+b,0);let need=s.until-have,got=0;
-        if(need>0){if(s.task.good&&X.kind==='nature'&&(X.gives||[]).includes(s.task.good)){got=Math.min(need,X.rate||25);add(load,V.id,s.task.good,got)}
+        if(need>0){if(s.task.good&&X.kind==='nature'&&(X.gives||[]).includes(s.task.good)){got=Math.min(need,(X.rate||25)*DT);add(load,V.id,s.task.good,got)} // nature gives so much an hour
           else{const st=stock.get(X.id)||{};for(const g in st){if(need<=0)break;if(s.task.good&&g!==s.task.good)continue;if(V.carries&&V.carries.length&&!V.carries.includes(g))continue;const n=Math.min(need,st[g]);if(n>0){add(stock,X.id,g,-n);add(load,V.id,g,n);need-=n;got+=n}}}
-          done=have+got>=s.until||(X.kind!=='nature'&&!got)}}
+          done=have+got>=s.until-1e-9||(X.kind!=='nature'&&!got)}}
       else if(s.task.act==='drop'){const l=load.get(V.id)||{};for(const g in l)add(stock,X.id,g,l[g]);load.set(V.id,{})}
       if(done){v.i++;if(v.i<v.steps.length){const n=v.steps[v.i].c;leave(v,X.id,v.steps[v.i].X.id,n.from===X.id?n.id:null)}else leave(v,X.id,'home',s.c.from===V.id||s.c.to===V.id?s.c.id:null)}}}
-  for(const v of vs){if(v.mode==='idle'){if(fires(v,tick))pos.set(v.V.id,{from:'home',to:v.steps[0].X.id,link:v.steps[0].c.id,f:clamp(frac/v.R.takes,0,1)});continue}
-    if(v.mode==='travel')pos.set(v.V.id,{from:v.from,to:v.to,link:v.link,f:clamp((v.R.takes-v.left+frac)/v.R.takes,0,1)});
+  for(const v of vs){if(v.mode==='idle'){if(fires(v,tick)){const a=v.V,b=v.steps[0].X,d=Math.max(DT,distKm(a,b)/speedOf(v.V));pos.set(v.V.id,{from:'home',to:b.id,link:v.steps[0].c.id,f:clamp(frac*DT/d,0,1)})}continue}
+    if(v.mode==='travel')pos.set(v.V.id,{from:v.from,to:v.to,link:v.link,f:clamp((v.dur-v.left+frac*DT)/v.dur,0,1)});
     else{const s=v.steps[v.i];pos.set(v.V.id,{from:s.X.id,to:s.X.id,f:1,task:s.task.name})}}
+  for(const m of[load,stock])for(const o of m.values())for(const g in o)o[g]=Math.round(o[g]); // whole fish
   return{pos,load,stock}}
-const slotName=t=>'DAY '+Math.floor(t/4)+' · '+SLOTS[Math.floor(t)%4].toUpperCase();
-function setT(t){T=clamp(t,0,DAYS*4-.01);const d=Math.floor(T/4);$('#tDay').value=d;$('#tPart').value=T-d*4;$('#tDayL').textContent='DAY '+d;$('#tPartL').textContent=SLOTS[Math.floor(T)%4].toUpperCase();draw()}
+/* how long a routine takes, from the map's distances and the vehicle's speed */
+function routineTimes(V){const R=V.routine;if(!R)return null;let at=V,total=0;const out=[];
+  for(const st of R.steps){const c=linkOf(st.link),te=c&&tripEnds(c);if(!te||!te[1])continue;const X=te[1],go=distKm(at,X)/speedOf(V);let work=0;
+    if(c.activity==='pick'&&c.good&&X.kind==='nature')work=st.until/(X.rate||25);
+    out.push({go,work,km:distKm(at,X)});total+=go+work;at=X}
+  const back=distKm(at,V)/speedOf(V);return{steps:out,back,total:total+back}}
+const slotName=t=>'DAY '+Math.floor(t/24)+' · '+clock(t)+' '+partOf(t).toUpperCase();
+function setT(t){T=clamp(t,0,DAYS*24-.01);const d=Math.floor(T/24);$('#tDay').value=d;$('#tPart').value=T-d*24;$('#tDayL').textContent='DAY '+d;$('#tPartL').textContent=clock(T)+' · '+partOf(T).toUpperCase();draw()}
 function alongPts(pts,f){let L=0;const seg=[];for(let i=1;i<pts.length;i++){const d=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);seg.push(d);L+=d}
   let want=L*clamp(f,0,1);for(let i=1;i<pts.length;i++){if(want<=seg[i-1]){const k=want/(seg[i-1]||1);return[pts[i-1][0]+(pts[i][0]-pts[i-1][0])*k,pts[i-1][1]+(pts[i][1]-pts[i-1][1])*k]}want-=seg[i-1]}return pts[pts.length-1]}
 function goodsText(o){return Object.entries(o||{}).filter(([,n])=>n).map(([g,n])=>((doc.goods.find(x=>x.id===g)||{}).name||g)+' '+n).join(' · ')}
@@ -940,11 +958,11 @@ $('#tWorld').onclick=()=>setViewMode('world');$('#tLists').onclick=()=>setViewMo
 
 $('#tDay').max=DAYS-1;
 const stopPlay=()=>{playing=false;$('#tPlay').textContent='▶'};
-$('#tDay').addEventListener('input',e=>{stopPlay();setT(+e.target.value*4)}); // a day at a time, from its morning
-$('#tPart').addEventListener('input',e=>{stopPlay();setT(Math.floor(T/4)*4+ +e.target.value)}); // through the picked day
-$('#tBack').onclick=()=>{stopPlay();setT((Math.ceil(T/4)-1)*4)};$('#tNext').onclick=()=>{stopPlay();setT((Math.floor(T/4)+1)*4)};
-$('#tPlay').onclick=()=>{playing=!playing;$('#tPlay').textContent=playing?'❚❚':'▶';if(playing){if(T>=DAYS*4-.02)T=0;let last=performance.now();
-  const step=now=>{if(!playing)return;setT(Math.min(DAYS*4-.01,T+(now-last)/700));last=now;if(T>=DAYS*4-.02){stopPlay();return}requestAnimationFrame(step)};requestAnimationFrame(step)}};
+$('#tDay').addEventListener('input',e=>{stopPlay();setT(+e.target.value*24+6)}); // a day at a time, from its morning (6:00, before anything leaves)
+$('#tPart').addEventListener('input',e=>{stopPlay();setT(Math.floor(T/24)*24+ +e.target.value)}); // through the picked day
+$('#tBack').onclick=()=>{stopPlay();setT(Math.max(0,Math.floor(T/24)-1)*24+6)};$('#tNext').onclick=()=>{stopPlay();setT((Math.floor(T/24)+1)*24+6)};
+$('#tPlay').onclick=()=>{playing=!playing;$('#tPlay').textContent=playing?'❚❚':'▶';if(playing){if(T>=DAYS*24-.02)T=0;let last=performance.now();
+  const step=now=>{if(!playing)return;setT(Math.min(DAYS*24-.01,T+(now-last)/250));last=now;if(T>=DAYS*24-.02){stopPlay();return}requestAnimationFrame(step)};requestAnimationFrame(step)}}; // an hour every quarter second
 /* ---------- toolbar ---------- */
 const defaultHelp=$('#help').textContent;
 $('#bAdd').onclick=()=>openAdd(null,null);
@@ -958,10 +976,12 @@ $('#bShow').onclick=()=>{
 };
 $('#bFile').onclick=()=>{
   modal(`<h3>FILE</h3><label>The whole world as JSON — copy it, or paste one in and LOAD</label><textarea id="fJson">${esc(exportJson())}</textarea>
+  <label>Map scale — metres per map unit (an island 400 units long is ${(400*(doc.scale||10)/1000).toFixed(1)} km)</label><input id="fScale" type="number" inputmode="decimal" min="0.1" step="any" value="${doc.scale||10}">
   <div class="row"><button id="fCopy">COPY</button><button id="fDown">DOWNLOAD .json</button></div>
   <div class="row"><button id="fLoad">LOAD pasted</button><button id="fPick">LOAD file…</button><input id="fFile" type="file" accept=".json,application/json" style="display:none"></div>
   <div class="row"><button id="fNew">NEW empty world</button><button data-close>CLOSE</button></div>`,box=>{
     $('#fCopy').onclick=async()=>{try{await navigator.clipboard.writeText(exportJson());toast('Copied')}catch(e){$('#fJson').select();toast('Select all and copy')}};
+    $('#fScale').onchange=()=>{const n=+$('#fScale').value;if(n>0){doc.scale=n;commit()}};
     $('#fDown').onclick=download;
     $('#fLoad').onclick=()=>loadText($('#fJson').value);
     $('#fPick').onclick=()=>$('#fFile').click();
@@ -1045,7 +1065,7 @@ async function boot(){
     else if(d&&d.snap){const o=sanitize(JSON.parse(d.snap)),n=JSON.stringify(pick(o));
       if(n!==savedSnap&&o.elements.length)modal(`<h3>UNSAVED CHANGES</h3><p>This browser has changes that were never saved, made on an older version of the plan.</p><div class="row"><button id="dKeep">KEEP my changes</button><button id="dDrop">USE the saved plan</button></div>`,()=>{
         $('#dKeep').onclick=()=>{closeModal();restore(n);undoS=[savedSnap];fit()};$('#dDrop').onclick=()=>{closeModal();changed()}})}}catch(e){}
-  changed();fit();
+  changed();fit();setT(0);
   if(!token)askToken();
 }
 boot();
