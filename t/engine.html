@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 11:51', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 15:57', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1379,6 +1379,13 @@ function gpuComputeBegin(uses, key) {
 // buffer / texture records ({ gb } / { gt } from gpuBuf / gpuTex) or the arena's chunks ({ gb })
 function gpuCopyBuf(src, so, dst, dof, n) { gpuPassEnd(); dst.use = FR.sub; if (src.use !== undefined) src.use = FR.sub; gpuEnc().copyBufferToBuffer(src.gb, so, dst.gb, dof, n); }
 function gpuCopyBufTex(src, so, bpr, dst, x, y, w, h, z) { gpuPassEnd(); dst.use = FR.sub; gpuEnc().copyBufferToTexture({ buffer: src.gb, offset: so, bytesPerRow: bpr }, { texture: dst.gt, origin: { x, y, z: z || 0 } }, { width: w, height: h }); }   // (z: the layer of an array texture)
+// a texture's rectangle copied into another of the same format (layer records { gt } from gpuTex), in order with the passes - a part's
+// snapshot of what's been drawn (the water's distortion, the light's lamps under the tint) without a draw; rows as they are in both
+function gpuCopyTex(src, sx, sy, dst, dx, dy, w, h) {
+  if (!(w > 0 && h > 0) || !src.gt || !dst.gt) return;
+  gpuPassEnd(); src.use = FR.sub; dst.use = FR.sub; GPU.stats.copies++;
+  gpuEnc().copyTextureToTexture({ texture: src.gt, origin: { x: sx, y: sy } }, { texture: dst.gt, origin: { x: dx, y: dy } }, { width: w, height: h });
+}
 // send what's recorded
 function gpuSubmit() {
   if (!GPU.dev) return;
@@ -2278,7 +2285,7 @@ function frameTick() { const t = typeof time === 'number' ? time : 0; FRAME.dt =
 // WHAT ONE PART HANDS ANOTHER (Nov 10, the water's floor tint from the ground and its reflection from the sky): a part never reads
 // another's variables - the giving part publishes a getter under a name, frameShare(name, () => value), and the taking part asks
 // frameShared(name) each frame (null when nothing is published - it falls back to its own look). The value is whatever the two agree
-// in the giver's notes: a texture record, a buffer record, numbers. Names so far: (none yet)
+// in the giver's notes: a texture record, a buffer record, numbers. Names so far: 'sky.reflection' (part 1 - [view0, view1], each { up, moon, x, y, r, fr }: the sun or the moon as that view's sky drew it this frame, its place and disc radius on the view's screen); 'ground.floor' (part 2 - { wgsl(g), bufs, slot }: the ground's floor lookup as WGSL at the taker's group g with its grid's buffers [pages, ptab, slots] (null while the grid isn't on this device) and slice k to slot - the water's floor tint)
 const FRAME_SHARE = new Map();
 function frameShare(name, get) { FRAME_SHARE.set(name, get); }
 function frameShared(name) { const g = FRAME_SHARE.get(name); if (!g) return null; try { return g(); } catch (e) { return null; } }
@@ -2323,6 +2330,38 @@ function frameLight() {
 // frameTarget(ctx) - the layer texture a context draws into (the screen, or a GLTarget layer): { tex, stencil, w, h } (rows in
 // WebGL's order); a part's pass names what it writes in gpuPassBegin(desc, key, [tex, stencil]) so later writes to them are staged
 function frameFlush() { if (typeof glFlush === 'function') glFlush(); gpuPassEnd(); }
+// A PART'S OWN CLIP (Nov 10, the ground's ask - drawInCaves, hangarLandCut): the union of rectangles r = [x, y, w, h, ...] in the context's
+// units (its transform applied, as rect() would) laid on the context's clip, the way a path's clip() lays one: every draw on the context
+// after it - the GL front's and every native pass's (they honour the clip stencil's bit 0x80 and the scissor) - is held inside it until
+// the context's state is restored. A part never builds a clip through the context's path calls. (Today the clip's stencil is written by
+// the GL front's builder, glBuildClip - the skeleton's to make native at the swap; a part's call stays the same.)
+function frameClip(ctx, r) {
+  const s = ctx.s, n = (r.length / 4) | 0;
+  if (!n) { s.sc = [0, 0, 0, 0]; return; }
+  const T = new Float32Array(n * 12); let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (let i = 0; i < n; i++) {
+    const x = r[i * 4], y = r[i * 4 + 1], w = r[i * 4 + 2], h = r[i * 4 + 3];
+    const a = ctx._pt(x, y), b = ctx._pt(x + w, y), c = ctx._pt(x + w, y + h), d = ctx._pt(x, y + h);
+    T.set([a[0], a[1], b[0], b[1], c[0], c[1], a[0], a[1], c[0], c[1], d[0], d[1]], i * 12);
+    for (const q of [a, b, c, d]) { if (q[0] < x0) x0 = q[0]; if (q[0] > x1) x1 = q[0]; if (q[1] < y0) y0 = q[1]; if (q[1] > y1) y1 = q[1]; }
+  }
+  T.box = [x0, y0, x1, y1];
+  s.clip = s.clip ? s.clip.concat([T]) : [T];
+}
+// A CLIP BY A PART'S OWN COVERAGE (Nov 10, the water's ask - each lake's body as the clip for what's drawn in it): draw(pass, colourFormat,
+// stencilFormat, w, h) records the part's own native draws whose pixels (those not discarded) are inside; laid on the context's clip like a
+// path's clip() (ANDed with any clip in force) and holding every draw after it until restore. The part's pipeline for it: colour target
+// { format: colourFormat, writeMask: 0 }, depthStencil frameClipDS(stencilFormat); its coordinates are the target's pixels, rows bottom up.
+// box: [x0, y0, x1, y1] the coverage's bounds in the target's pixels (top down, as paths)
+function frameClipBy(ctx, draw, box) {
+  const s = ctx.s, E = new Float32Array(0);
+  E.native = draw; E.box = box || [0, 0, 1e9, 1e9];
+  s.clip = s.clip ? s.clip.concat([E]) : [E];
+}
+function frameClipDS(sf) {
+  const op = { compare: 'always', failOp: 'keep', depthFailOp: 'keep', passOp: 'replace' };
+  return Object.assign({ format: sf, stencilFront: op, stencilBack: op, stencilReadMask: 0xff, stencilWriteMask: 0x7f }, gpuHasDepth(sf) ? { depthWriteEnabled: false, depthCompare: 'always' } : {});
+}
 function frameTarget(ctx) {
   const t = ctx && ctx.target; if (!t) return null;
   if (t.isScreen) { const T = gpuGLTargets(GLR.gl, null); return { tex: T.col[0], stencil: T.ds, w: T.w, h: T.h }; }
@@ -4144,6 +4183,100 @@ function rebuildShipArt(sh) {
     return n === 1 ? hiPass(c, src, make) : c;
   };
   sh.art = { intact: make(base.intact), damaged: make(base.damaged) };
+}
+
+/* ================================================================
+   THE ART ATLAS (engine part 5, vehicles / structures / creatures - engine-design "Vehicles, structures, creatures" and 4, Memory).
+   The user's art for the things of the world, packed once into one texture on the GPU (pool 'atlas'), sized once per device. A
+   family puts its pictures in when its art is made (artPut - the picture's own pixels, never a scaled, tinted or charred copy: those
+   are made by the things' shader as it draws, 45-zz-things-gpu.js); the pixels go up a few at a time, within a budget a frame
+   (artStep, the frame's 'art' layer), never all on the frame that first asks. A lost device makes the texture again and sends
+   every picture again from the pictures themselves (nothing on the GPU that can't be rebuilt).
+   A 2D array texture of ART.L pages of ART.S square (3 x 64 MB: the things' art - ~40 Mpx of sheets and big art, and their mirrored and
+   team-coloured variants - with room for the packing). Each picture's place:
+   pic._art = { x, y, l, w, h, ok } - texels and its layer, a clear margin of ART_PAD round it (the shader's taps never reach a
+   neighbour). Pixels are kept premultiplied (as the GL front kept every picture it drew).
+   ================================================================ */
+const ART = { S: 4096, L: 3, PAD: 2, FIT: 0.7, tex: null, ep: -1, shelves: [], ys: [], all: [], pend: [], free: new Map(), full: false, BUDGET: 2 << 20, stats: { pics: 0, px: 0, sent: 0 } };
+/* a picture into the atlas (once): its place, or null when the atlas has no room left (said once - the atlas is sized for all the art).
+   Packed in shelves (rows of pictures of about one height): a picture goes on the first shelf it fits that's no more than 1 / FIT its
+   height (a shelf's height wasted on a shorter picture kept under 30% - a tall sheet's shelf never filled a column at a time with small
+   ones), else a new shelf on the first page with the rows for it (each page's own rows used - ys - never only the last page's) */
+function artPut(pic) {
+  if (!pic || !pic.width) return null;
+  if (pic._art) return pic._art;
+  const w = pic.naturalWidth || pic.width, h = pic.naturalHeight || pic.height, P = ART.PAD, W = w + 2 * P, H = h + 2 * P;
+  let at = null;
+  { const F = ART.free.get(w + 'x' + h); if (F && F.length) { const q = F.pop(); at = [q.x, q.y, q.l]; } }   // (a place a picture of its size gave back - artDrop)
+  if (!at) for (const s of ART.shelves) if (H <= s.h && H >= s.h * ART.FIT && s.x + W <= ART.S) { at = [s.x + P, s.y + P, s.l]; s.x += W; break; }
+  if (!at) {
+    const hh = (H + 3) & ~3; let l = 0;
+    while (l < ART.L && (ART.ys[l] || 0) + hh > ART.S) l++;
+    if (l >= ART.L || W > ART.S) { if (!ART.full) console.error('art atlas: full (' + ART.all.length + ' pictures) - ART.S x ART.L is too small for the art'); ART.full = true; return null; }
+    const y = ART.ys[l] || 0; ART.shelves.push({ y, h: hh, x: W, l }); at = [P, y + P, l]; ART.ys[l] = y + hh;
+  }
+  const e = pic._art = { x: at[0], y: at[1], l: at[2], w, h, ok: false, src: pic, row: 0 };
+  ART.all.push(e); ART.pend.push(e); ART.stats.pics++; ART.stats.px += w * h;
+  return e;
+}
+// a picture no longer drawn (made again in other colours - a team's): its place given back, for the next picture of its size
+function artDrop(pic) {
+  const e = pic && pic._art; if (!e) return;
+  pic._art = null; e.src = null; e.ok = false; if (e.cv) { e.cv.width = e.cv.height = 0; e.cv = null; }
+  let i = ART.all.indexOf(e); if (i >= 0) ART.all.splice(i, 1);
+  i = ART.pend.indexOf(e); if (i >= 0) ART.pend.splice(i, 1);
+  const k = e.w + 'x' + e.h, F = ART.free.get(k) || (ART.free.set(k, []), ART.free.get(k)); F.push(e);
+}
+// the atlas texture on this device (made again after a device loss: every picture sent again)
+function artTex() {
+  if (!GPU.on || GPU.lost || !GPU.dev) return null;
+  if (ART.ep !== GPU.ep) {
+    if (ART.tex) gpuTexFree(ART.tex);
+    ART.tex = gpuTex(ART.S, ART.S, 'rgba8unorm', 'atlas', ART.L); ART.ep = GPU.ep;
+    ART.pend = ART.all.slice(); for (const e of ART.all) { e.ok = false; e.row = 0; }
+  }
+  return ART.tex;
+}
+// rows of a picture's pixels, premultiplied (as the GL front uploaded every picture: Chromium's sum) - read a band at a time (a sheet of 4 Mpx
+// is never read whole in one frame); an image is drawn once into a canvas kept while it goes up (e.cv)
+function artPixels(e, y0, rows) {
+  const pic = e.src;
+  if (pic._pk) picUnpack(pic);                                  // (a packed picture painted back first - 04-zzz-pics.js)
+  let c = pic.getContext ? pic : e.cv;
+  if (!c) { c = e.cv = makeCanvas(e.w, e.h); c.getContext('2d').drawImage(pic, 0, 0); }
+  const d = c.getContext('2d').getImageData(0, y0, e.w, rows).data;
+  for (let i = 0; i < d.length; i += 4) { const a = d[i + 3]; if (a === 255) continue; if (!a) { d[i] = d[i + 1] = d[i + 2] = 0; continue; } d[i] = Math.round(d[i] * a / 255); d[i + 1] = Math.round(d[i + 1] * a / 255); d[i + 2] = Math.round(d[i + 2] * a / 255); }
+  return d;
+}
+/* ---- THE ATLAS FOR EVERY PART (the coordinator, Nov 10: one art atlas - the things' art and the plants' kit-tree pictures alike):
+   artPut(pic)        a picture's place, made once: { x, y, l, w, h, ok } - texels, its page l, ok once its pixels are on the GPU; null when full
+   artDrop(pic)       a picture no longer used: its place given back (taken again by the next picture of its size)
+   artPutAll(o)       every picture in a family's art (its canvases, however deep in its lists and records)
+   artFamily(fn)      a family's pictures put in as soon as they exist: fn() each frame (artFrame) until it returns true (false: looked at
+                      again every frame - a family whose pictures are made again in new colours); fn may only call artPut / artPutAll / artDrop
+   artTex()           the atlas on this device: a gpuTex record (rgba8unorm, premultiplied, a 2D array of ART.L pages of ART.S square -
+                      .view is its '2d-array' view; read in WGSL as texture_2d_array<f32>, textureLoad(t, xy, page, 0) or a sampler's
+                      textureSampleLevel). A new device makes a new one (ART.ep changes): a part keeps its bind groups by it
+   artFrame()         run once a frame by the frame's 'art' layer (45-zz-things-gpu.js): the families, then artStep
+   A picture is drawn only once ok (its pixels sent within ART.BUDGET a frame - never all on the frame that first asks). ---- */
+const ART_FAMS = [];
+function artFamily(fn) { ART_FAMS.push(fn); }
+function artFrame() { for (let i = ART_FAMS.length - 1; i >= 0; i--) if (ART_FAMS[i]()) ART_FAMS.splice(i, 1); artStep(); }
+// the frame's share of the waiting pictures sent (ART.BUDGET bytes at most; a big picture goes up in bands of rows over frames)
+function artStep() {
+  const T = artTex(); if (!T || !ART.pend.length) return;
+  let left = ART.BUDGET;
+  while (ART.pend.length && left > 0) {
+    const e = ART.pend[0], src = e.src;
+    if (!src || !(src.naturalWidth || src.width) || src.complete === false) { ART.pend.shift(); ART.pend.push(e); if (ART.pend.length === 1) break; continue; }
+    const bpr = Math.ceil(e.w * 4 / 256) * 256;
+    const rows = Math.max(1, Math.min(e.h - e.row, Math.floor(Math.min(left, ARENA.CH) / bpr))), px = artPixels(e, e.row, rows);
+    const [c, o] = arenaAlloc(bpr * rows, 256);
+    for (let r = 0; r < rows; r++) c.cpu.set(px.subarray(r * e.w * 4, (r + 1) * e.w * 4), o + r * bpr);
+    gpuCopyBufTex(c, o, bpr, T, e.x, e.y + e.row, e.w, rows, e.l);
+    e.row += rows; left -= bpr * rows; ART.stats.sent += bpr * rows;
+    if (e.row >= e.h) { e.ok = true; if (e.cv) { e.cv.width = e.cv.height = 0; e.cv = null; } ART.pend.shift(); }
+  }
 }
 
 /* ================================================================
@@ -7584,7 +7717,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 11:51';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 15:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -22986,6 +23119,24 @@ function glWind(tris) {
   gl.colorMask(true, true, true, true);
   GLR.cur.sten = -1;
 }
+// a part's coverage as a clip's winding (frameClipBy, src/gpu/50-frame.js): its own native pass on the target's colour (unwritten) and
+// stencil, its pixels setting the stencil's low bits (reference 1, write mask 0x7f - frameClipDS) where it doesn't discard; then the
+// clip's 0x80 step below as for a path. In the scissor the clip is built under (rows as the target's: bottom up)
+function glWindNative(t, draw) {
+  glFlush();
+  let T;
+  if (t.isScreen) { const S = gpuGLTargets(GLR.gl, null); T = { tex: S.col[0], ds: S.ds, w: S.w, h: S.h }; }
+  else T = { tex: t.tex && t.tex.t, ds: t.rb && t.rb.t, w: t._w, h: t._h };
+  if (!T.tex || !T.ds || !T.tex.view || !T.ds.view) return;
+  const desc = { colorAttachments: [{ view: T.tex.view, loadOp: 'load', storeOp: 'store' }], depthStencilAttachment: Object.assign({ view: T.ds.view, stencilLoadOp: 'load', stencilStoreOp: 'store' }, gpuHasDepth(T.ds.fmt) ? { depthLoadOp: 'load', depthStoreOp: 'store' } : {}) };
+  const pass = gpuPassBegin(desc, 'clipby', [T.tex, T.ds]);
+  const sc = GLR.st.sc;
+  if (sc) { const x = Math.max(0, sc[0]), y = Math.max(0, T.h - sc[1] - sc[3]), x1 = Math.min(T.w, sc[0] + sc[2]), y1 = Math.min(T.h, T.h - sc[1]); if (x1 <= x || y1 <= y) { gpuPassEnd(); return; } pass.setScissorRect(x, y, x1 - x, y1 - y); }
+  pass.setStencilReference(1);
+  draw(pass, T.tex.fmt, T.ds.fmt, T.w, T.h);
+  gpuPassEnd();
+  GLR.cur.sten = -1;
+}
 // the clip: bit 0x80 of the stencil marks the inside of every clip path in force
 // (Nov 1, the GPU's time: built over the whole target each time - its stencil cleared and covered, two screens of a layer for a
 // ship's outline cut out of a few hundred pixels of fire. Built under a scissor box the draws to come are held to, it's built in
@@ -23000,7 +23151,7 @@ function glBuildClip(t, list) {
   gl.stencilMask(0xff); gl.clearStencil(0); gl.clear(gl.STENCIL_BUFFER_BIT);
   const W = t._w, H = t._h, full = new Float32Array([0, 0, W, 0, W, H, 0, 0, W, H, 0, H]);
   list.forEach((tris, i) => {
-    glWind(tris);
+    if (tris.native) glWindNative(t, tris.native); else glWind(tris);
     // where it wound (and, after the first, where the clip already was): 0x80; everywhere else 0
     gl.colorMask(false, false, false, false);
     gl.enable(gl.STENCIL_TEST); gl.stencilMask(0xff);
@@ -36672,6 +36823,9 @@ function subLap(k, t0) { let rb = 0; if (probe.on) { probeFlush(g); rb = probe.c
 /* THE FRAME'S LAYERS (engine skeleton, Nov 9 - engine-design 3.1): render's steps, in the order they always ran, each a named layer of
    FRAME.layers. An engine part replaces its layer (frameLayer(name, run) again) or adds one before / after another (frameLayer(name, run,
    { before | after: name })); nothing draws outside the list. F: the frame's views ([v, camPx, sx, w, index, camF]), its timing lap and tt */
+// the art atlas (04-zz-art-atlas.js - the one shared atlas: the things', the plants' kit trees, the ground's pictures): the families' pictures put in
+// and a budget's worth of pixels sent, before anything draws from it (nothing on the GPU until a family puts a picture in)
+frameLayer('art', F => { if (ART_FAMS.length || ART.all.length) artFrame(); });   // (artStep makes the texture: only once there's art for it)
 // the ground's pictures painted (50-land-terrain landPaintStep)
 frameLayer('ground', F => {
   { landPaintStep(F.views); F.tt = F.lap('landPaint', F.tt); }   // (the ground's pictures painted from their dirty marks, before any drawing - 50-land-terrain)
