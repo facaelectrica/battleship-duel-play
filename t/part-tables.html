@@ -428,7 +428,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 04:49', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 05:58', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -2448,6 +2448,12 @@ function frameLayer(name, run, at) {
 // THE FRAME'S dt (part 3's ask): the game clock's step since the last frame drawn (s; the clock 'time', so a stepped test run and a
 // paused game give the same steps every run - 0 while paused, at most 0.25), set at the frame's start by frameTick()
 function frameTick() { const t = typeof time === 'number' ? time : 0; FRAME.dt = FRAME.tPrev == null ? 1 / 60 : Math.min(0.25, Math.max(0, t - FRAME.tPrev)); FRAME.tPrev = t; }
+// THE FRAME'S READINESS (part 1's ask, Nov 10): a part whose first frames after a world is made can't yet draw what it should (the
+// sky's first cloud recipes wait a frame or two for their counts - gpuReadBuf) registers frameReadyAdd(() => true once it can).
+// frameReady() is true when every registered check is; the loading cover (00-world.js worldEditCover) stays up until it is (2 s at most).
+const FRAME_READY = [];
+function frameReadyAdd(fn) { if (typeof fn === 'function' && !FRAME_READY.includes(fn)) FRAME_READY.push(fn); }
+function frameReady() { for (const f of FRAME_READY) { try { if (!f()) return false; } catch (e) { } } return true; }
 // the camera of the view beginView set last (vi its index): { buffer, offset, size } in this submit's arena - read by a pass as a
 // uniform: vec4(left px, top px, scale, zoom), vec4(view x on the target, view width, target width, target height), vec4(time, view, shake x px, shake y px)
 function frameCam(vi, v, tw, th) {
@@ -2508,12 +2514,22 @@ function gpuCanvasView(cv) {
   const ctx = cv.getContext('webgpu'); if (!ctx) return null;
   ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' });
   const V = { cv, ctx, T: new GLTarget(Math.max(1, cv.width), Math.max(1, cv.height)), pipe: null, ep: -1, view: null, bg: null };
-  GPU.onRebuild.push(() => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } });
+  V.re = () => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } };
+  GPU.onRebuild.push(V.re);
   return V;
+}
+// a canvas view given up (an editor panel's canvas gone from the page - part 5's ask): its context let go, its rebuild hook removed,
+// its layer freed. V is no use after.
+function gpuCanvasDrop(V) {
+  if (!V || V.dropped) return; V.dropped = true;
+  const i = GPU.onRebuild.indexOf(V.re); if (i >= 0) GPU.onRebuild.splice(i, 1);
+  try { V.ctx.unconfigure(); } catch (e) { }
+  try { V.T.free(); } catch (e) { }
+  V.bg = V.view = V.pipe = null;
 }
 function gpuCanvasSize(V, w, h) { V.cv.width = w; V.cv.height = h; V.T.width = w; V.T.height = h; }
 function gpuCanvasShow(V) {
-  if (!V || !GPU.on || GPU.lost) return false;
+  if (!V || V.dropped || !GPU.on || GPU.lost) return false;
   if (typeof glFlush === 'function') glFlush();
   const t = V.T.tex && V.T.tex.t; if (!t) return false;
   if (!V.pipe || V.ep !== GPU.ep) { const m = gpuModule(GPU_HUD_WGSL, 'canvas show'); V.pipe = gpuRenderPipe({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } }); V.ep = GPU.ep; V.view = null; }
@@ -2681,7 +2697,15 @@ function bootSay(t, pct) { if (!SW_IN_WORKER && typeof window.__bootSay === 'fun
 const bootPaint = () => SW_IN_WORKER || !document.getElementById('bootCover') ? null : new Promise(r => { let done = false; const go = () => { if (!done) { done = true; setTimeout(r, 0); } }; requestAnimationFrame(go); setTimeout(go, 40); });
 let bootPainted = 0;
 function bootTick(t, pct) { bootSay(t, pct); if (SW_IN_WORKER || performance.now() - bootPainted < 60) return null; bootPainted = performance.now(); return bootPaint(); }
-function bootCoverOff() { if (SW_IN_WORKER) return; try { const d = document.getElementById('bootCover'); if (d) d.remove(); } catch (e) { } }
+// (Nov 10, the skeleton: like worldEditCover(false) - the cover stays until the frame under it is ready (frameReady, src/gpu/50-frame.js:
+// a round carried over a hot reload has its world and sky behind it), one animation frame at a time, 2 s at most)
+let bootCoverT0 = 0;
+function bootCoverOff() {
+  if (SW_IN_WORKER) return;
+  if (!bootCoverT0) bootCoverT0 = performance.now();
+  if (typeof frameReady === 'function' && !frameReady() && performance.now() - bootCoverT0 < 2000) { requestAnimationFrame(bootCoverOff); return; }
+  try { const d = document.getElementById('bootCover'); if (d) d.remove(); } catch (e) { }
+}
 const PAGE_GAP_MAX = 80;
 const fsApp = () => { try { return !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)); } catch (e) { return false; } };
 if (!SW_IN_WORKER && fsApp()) try { document.documentElement.classList.add('fsapp'); } catch (e) { }
@@ -3388,8 +3412,16 @@ let worldEdCover = null;
 // (user Nov 9 13:01: the loading screens say what they're doing in ordinary letters - "Downloading data (23%)" - the page's own one's look, src/index.html)
 function worldEditCover(on, text = 'Loading editor') {
   if (typeof document === 'undefined' || SW_IN_WORKER) return;
-  if (!on) { if (worldEdCover) { worldEdCover.remove(); worldEdCover = null; } return; }
-  if (worldEdCover) { worldCoverSay(text); return; }
+  if (!on) {
+    if (!worldEdCover) return;
+    // (Nov 10, the skeleton: the cover stays up until the frame under it is ready - every part's frameReady check, src/gpu/50-frame.js:
+    // the sky's first clouds come back a frame or two after the world is made - one animation frame at a time, 2 s at most; a new
+    // worldEditCover(true) while it waits keeps the cover up)
+    const d = worldEdCover, g = d.__gen = (d.__gen || 0) + 1, t0 = performance.now();
+    const off = () => { if (worldEdCover !== d || d.__gen !== g) return; if (typeof frameReady === 'function' && !frameReady() && performance.now() - t0 < 2000) { requestAnimationFrame(off); return; } d.remove(); worldEdCover = null; };
+    off(); return;
+  }
+  if (worldEdCover) { worldEdCover.__gen = (worldEdCover.__gen || 0) + 1; worldCoverSay(text); return; }
   const d = worldEdCover = window.__coverMake();          // (the loading screen's one look: the title, the line, the corner - src/index.html)
   worldCoverSay(text);
   setTimeout(() => { if (worldEdCover === d) worldEditCover(false); }, 60000);
@@ -7817,7 +7849,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 04:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 05:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18890,7 +18922,9 @@ on('hit', e => { if (e.o && e.kind !== 'land') harmed(e.o, e.x, e.y, HIT_BY, e.c
    did; the others build up their time and get it in steps of at most the system's own largest step when their turn comes
    (staggered by a number each thing keeps, so a fleet's far ships don't all step on the same tick). Nothing on screen changes:
    what is in or near a view is stepped every tick. The user, Oct 29: things far from every view may update less often and
-   catch up when a player gets near. Rules for every system: rules.md section 6, "Systems". */
+   catch up when a player gets near. Rules for every system: rules.md section 6, "Systems".
+   (part 8, Nov 10) A place's tier is read from the chunk grid below (chunksTick, once a tick): the same tier as the formula,
+   looked up per chunk. */
 const REG = {
   w: 1333,                // (a region's width: one screen, VIEW_W)
   spans: [],              // (each view's [left, right] in world units, this tick)
@@ -18909,16 +18943,62 @@ function regionsTick() {
   REG.tick++; REG.w = VIEW_W; REG.spans.length = 0;
   for (const v of cam.view) { if (!v || !(v.z > 0)) continue; REG.spans.push(v.l, v.l + halfWorldW(v.z)); }
   if (NET_TABLES && LINK.hosting) for (const g of LINK.conns.values()) if (g.seat && g.span) for (let i = 0; i + 1 < g.span.length; i += 2) REG.spans.push(g.span[i], g.span[i + 1]);   // (stage 5: online, every player's views)
+  chunksTick();
 }
-// a place's tier: its distance from the nearest view's span, in screens
-function tierAt(x) {
-  if (!REG.on || !REG.spans.length) return 0;
+// a place's tier by the formula: its distance from the nearest view's span, in screens (W: one screen)
+function tierOfX(x) {
   const W = REG.w; let d = Infinity;
   for (let i = 0; i < REG.spans.length; i += 2) {
     const l = REG.spans[i], r = REG.spans[i + 1], e = x < l ? l - x : x > r ? x - r : 0;
     if (e < d) d = e;
   }
   return d <= W ? 0 : d <= 3 * W ? 1 : 2;
+}
+/* (part 8, Nov 10) THE CHUNK GRID: one grid for the whole engine - chunks CHUNK_W world units wide (a fixed width, so a zoom never
+   changes which chunk a place is in), chunk c from c * CHUNK_W, over the world and past its ends. Each tick (regionsTick) every chunk
+   within reach of a view gets its tier from the views' spans: a chunk wholly ACTIVE, NEAR or FAR by the formula above holds that
+   tier (CHG.t), and a chunk a tier's edge runs through holds MIXED - a place there is told by the formula. So tierAt gives exactly what
+   the formula gives, and a place's tier is one look-up for nearly every place; a chunk past the grid's reach is FAR. CHG.top is each
+   chunk's most active tier (a MIXED chunk's too): what a system that works by whole chunks asks (chunkTier) - the GPU parts' residency,
+   a snapshot by chunk. The tiers aren't state: they come from the views each tick (saved: REG's tick, frame and sid) */
+const CHUNK_W = 1024, CH_MIXED = 3;
+const CHG = { c0: 0, n: 0, t: new Uint8Array(64), top: new Uint8Array(64), at: -1, iv: [] };
+const chunkOf = x => Math.floor(x / CHUNK_W);
+function chunksTick() {
+  CHG.at = REG.tick; CHG.n = 0;
+  const sp = REG.spans, W = REG.w; if (!REG.on || !sp.length) return;
+  // (the spans widened by one screen (ACTIVE) and by three (NEAR), each merged into runs: [lo, hi, lo, hi ...])
+  const runs = k => { const L = []; for (let i = 0; i < sp.length; i += 2) L.push([sp[i] - k * W, sp[i + 1] + k * W]); L.sort((a, b) => a[0] - b[0]);
+    const M = []; for (const [a, b] of L) { if (M.length && a <= M[M.length - 1]) { if (b > M[M.length - 1]) M[M.length - 1] = b; } else M.push(a, b); } return M; };
+  const A = runs(1), N = runs(3), E = 1;   // (E: a world unit to spare - a chunk only that close to an edge is MIXED, told by the formula)
+  const c0 = chunkOf(N[0]) - 1, c1 = chunkOf(N[N.length - 1]) + 1, n = c1 - c0 + 1;
+  if (CHG.t.length < n) { CHG.t = new Uint8Array(n * 2); CHG.top = new Uint8Array(n * 2); }
+  const inside = (R, a, b) => { for (let i = 0; i < R.length; i += 2) if (a >= R[i] + E && b <= R[i + 1] - E) return true; return false; };
+  const meets = (R, a, b) => { for (let i = 0; i < R.length; i += 2) if (b >= R[i] - E && a <= R[i + 1] + E) return true; return false; };
+  for (let c = c0; c <= c1; c++) {
+    const a = c * CHUNK_W, b = a + CHUNK_W, k = c - c0;
+    const inA = meets(A, a, b), inN = meets(N, a, b);
+    const t = inside(A, a, b) ? 0 : !inA && inside(N, a, b) ? 1 : !inN ? 2 : CH_MIXED;
+    CHG.t[k] = t; CHG.top[k] = t !== CH_MIXED ? t : inA ? 0 : 1;
+  }
+  CHG.c0 = c0; CHG.n = n;
+}
+// a place's tier: ACTIVE 0, NEAR 1, FAR 2 (by its chunk, or the formula where its chunk is MIXED)
+function tierAt(x) {
+  if (!REG.on || !REG.spans.length) return 0;
+  if (CHG.at !== REG.tick) chunksTick();
+  if (!CHG.n) return tierOfX(x);
+  const k = Math.floor(x / CHUNK_W) - CHG.c0;
+  if (k < 0 || k >= CHG.n) return 2;                                    // (past the grid's reach: more than three screens from every view)
+  const t = CHG.t[k];
+  return t < CH_MIXED ? t : tierOfX(x);                                // (a MIXED chunk, or x not a number: the formula)
+}
+// a whole chunk's tier: the most active tier of any place in it (a system that keeps or sends things by whole chunks)
+function chunkTier(c) {
+  if (!REG.on || !REG.spans.length) return 0;
+  if (CHG.at !== REG.tick) chunksTick();
+  const k = c - CHG.c0;
+  return !CHG.n ? 0 : k < 0 || k >= CHG.n ? 2 : CHG.top[k];
 }
 // step one thing of a scheduled system: fn(h) with the time it is owed (an ACTIVE or pinned thing that was far gets what it is
 // owed first, in steps of at most the system's largest). Returns true when it was stepped this tick.
