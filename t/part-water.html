@@ -110,6 +110,9 @@
       window.__tick(1000 / 60); if (i >= sc.frames - 4) g.stepFixed(1 / 60, 1); else g.stepQuiet(1 / 60, 1);
       if (g.gpuShot) await window.__turn();   // (the engine: the browser gets a turn between frames, as in the game)
     }
+    // (__settle: frames drawn again before the picture is taken, the game not stepped - for what loads in over frames, as the ground's
+    // pages do within the frame's budget; set the same on both pages compared)
+    for (let i = 0; i < (window.__settle || 0); i++) { g.renderN(1); if (g.gpuShot) await window.__turn(); }
     const gl = g.GLR.gl, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
     let px = new Uint8Array(W * H * 4);
     // (the engine (WebGPU): the screen's texture read and waited for - a tool's read, never the game's; rows in WebGL's order, as readPixels gave)
@@ -359,7 +362,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 23:37', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 00:49', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1177,6 +1180,10 @@ async function gpuLost(why) {
   gpuFrameReset();
   for (const f of GPU.onRebuild) try { f(); } catch (e) { console.error(e); }
 }
+// for code where the name GPU means something else (the sky's closure has its own flag called GPU): the device's epoch (goes up when a
+// lost device is rebuilt - anything made on an older epoch is made again) and whether the device is there to use
+function gpuEpoch() { return GPU.ep; }
+function gpuAlive() { return !!(GPU.on && GPU.dev && !GPU.lost); }
 
 /* ================================================================
    src/gpu/10-glsl.js - the game's own GLSL, made WGSL (engine skeleton, Nov 9)
@@ -7604,7 +7611,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 23:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 00:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24622,6 +24629,7 @@ struct DP {
   bd2: vec4f,    // its fill's bottom row (before the lift), how many outlines (their headers first in the items); rays: the bodies' first header
   wl: vec4f,     // what's measured from each water's level (fsLevel): its kind (0 under the surface, 2 over it, 3 a band of rows), the surface's offset (rows), how many lakes in the items, the top row (2)
   wl2: vec4f,    // the ocean's (the columns no lake in the items holds): its gradient's rows y0, y1, its bottom row; 1 when it's drawn
+  wk: array<vec4f, 7>,   // the wake (fsWake): 1 the foam on top / 0 the churned water under, the field's first column, PB, how many columns; then its three noises (wkN)
 };
 @group(0) @binding(0) var<storage, read> P: SP;
 @group(0) @binding(1) var<storage, read> still: array<f32>;
@@ -24976,6 +24984,72 @@ fn waterOf(px: f32) -> i32 {
   if (col.a <= 0.0) { discard; }
   return col;
 }
+// ---- THE NOISE OF THE WATER'S SEEN-ONLY LOOKS (user Nov 9 22:59, option A): value noise as cloudNoise's - its lattice's corners' values smoothed between -
+// each corner's value a whole-number hash (u32, no sines: the same on every GPU, and in tools/watersame's JS twin). The place is given as its lattice
+// cell's whole part reduced on the processor (i0, j0 - a far place in a big world as exact as near 0) and what's left (x, y)
+fn wHash(v: u32) -> u32 { var x = v; x ^= x >> 16u; x *= 0x7feb352du; x ^= x >> 15u; x *= 0x846ca68bu; x ^= x >> 16u; return x; }
+fn wLat(i: i32, j: i32, sd: u32) -> f32 { return f32(wHash(bitcast<u32>(i) ^ wHash(bitcast<u32>(j) ^ wHash(sd))) >> 8u) / 16777216.0; }
+fn wNoise(i0: i32, x: f32, j0: i32, y: f32, sd: u32) -> f32 {
+  let xf = floor(x); let yf = floor(y); let fx = x - xf; let fy = y - yf;
+  let i = i0 + i32(xf); let j = j0 + i32(yf);
+  let u = fx * fx * (3.0 - 2.0 * fx); let v = fy * fy * (3.0 - 2.0 * fy);
+  let a = wLat(i, j, sd); let b = wLat(i + 1, j, sd); let c = wLat(i, j + 1, sd); let d = wLat(i + 1, j + 1, sd);
+  return (a + (b - a) * u) * (1.0 - v) + (c + (d - c) * u) * v;
+}
+// ---- THE WAKE (drawWakeField): every wake patch adds to a per-column amount of churned water, so overlapping patches merge into one white band; its
+// texture is noise anchored in the sea, so it doesn't swim; it breaks up into gaps as the patches age.
+// THE FIELD (compute, a view): each column PB wide from the field's first (WK.x0) the sum over the patches in view - a row each: its middle column, half
+// width on the screen, strength (1 - life / max), its depth factor - of the amount (I) and the amount times the depth factor (K)
+struct WK { x0: f32, pb: f32, n: u32, rows: u32 };
+@group(0) @binding(0) var<storage, read> WKP: WK;
+@group(0) @binding(1) var<storage, read> wkRows: array<vec4f>;
+@group(0) @binding(2) var<storage, read_write> wkOut: array<vec4f>;
+@compute @workgroup_size(64) fn wakeField(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x; if (i >= WKP.n) { return; }
+  let xc = WKP.x0 + f32(i) * WKP.pb + WKP.pb * 0.5;
+  var I = 0.0; var K = 0.0;
+  for (var q = 0u; q < min(WKP.rows, 1024u); q++) { let r = wkRows[q]; let d = (xc - r.x) / r.y; let b = 1.0 - d * d; if (b <= 0.0) { continue; } I += r.z * b; K += r.z * b * r.w; }
+  wkOut[32u + i] = vec4f(I, K, 0.0, 0.0);
+}
+// (the foam's colours: the surface palette's index - SURF_PAL, 43-render-objects.js; its first 32 items of the field's buffer)
+fn foamShade(t: f32) -> i32 { let f = t * 4.0 - floor(t * 4.0); let d = abs(f - 0.5); return select(select(15, 14, d < 0.17), 13, d < 0.08); }
+fn foamA(a: f32) -> i32 { return i32(clamp(floor(a * 12.0 + 0.5), 0.0, 12.0)); }
+// (noise k at a column's middle xc and a block's row yb: its lattice x = x0 + xc ax + yb bx, y = y0 + yb by - wk[1 + 2k] (x0's part, whole, y0's, whole), wk[2 + 2k] (ax, bx, by, seed))
+fn wkN(k: u32, xc: f32, yb: f32) -> f32 { let A = D.wk[1u + k * 2u]; let B = D.wk[2u + k * 2u]; return wNoise(i32(A.y), A.x + xc * B.x + yb * B.y, i32(A.w), A.z + yb * B.z, u32(B.w)); }
+// THE WAKE'S TWO PASSES, a pixel each (items: the palette, then the field): on top, the foam lying on the surface behind each hull and the wet lip under it;
+// under, the churned water - dense and white just under the surface, thinning with depth and age. Its blocks PB on a side, as the field's columns
+@fragment fn fsWake(@builtin(position) p: vec4f) -> @location(0) vec4f {
+  let x = floor((p.x - D.m.z) / D.m.x); let y = floor((D.tgt.y - p.y - D.m.w) / D.m.y);
+  let H = D.wk[0]; let PB = H.z; let SV = D.ds.z;
+  let i = floor((x - H.y) / PB); if (i < 0.0 || i >= H.w) { discard; }
+  let F = items[32u + u32(i)]; let I = F.x; if (I < 0.03) { discard; }
+  let xc = H.y + i * PB + PB * 0.5;
+  let m = 1.0 - exp(-I * 0.8); let K = F.y / I;
+  let sy = floor(surfRow(clamp(xc, -3.0, D.tgt.w - 4.0)) / PB) * PB;
+  var col = -1;
+  if (H.x > 0.5) {
+    let cov = m * (0.55 + 0.9 * wkN(0u, xc, 0.0));
+    if (cov < 0.3) { discard; }
+    let th = max(PB, floor((0.6 + 2.6 * min(1.0, cov)) * SV / PB + 0.5) * PB);
+    if (y >= sy - th && y < sy + 1.0) {
+      if (cov < 0.45) { col = 18; } else { let yb = min(sy - th + floor((y - sy + th) / PB) * PB, sy - PB); col = foamShade(wkN(1u, xc, yb)); }
+    } else {
+      let lip = floor(2.0 * m * SV / PB + 0.5) * PB;
+      if (y >= sy + 1.0 && y < sy + 1.0 + lip) { col = foamA(0.7 * m); }
+    }
+  } else {
+    let Dp = floor((3.0 + 14.0 * m) * K * SV + 0.5);
+    if (y >= sy + PB && y < sy + Dp) {
+      let yb = sy + PB + floor((y - sy - PB) / PB) * PB;
+      let dens = m * pow(1.0 - (yb - sy) / Dp, 1.3) * (0.5 + wkN(2u, xc, yb));
+      if (dens >= 0.08) { col = foamA(min(0.7, dens * 0.75)); }
+    }
+  }
+  if (col < 0) { discard; }
+  let c = items[u32(col)] * D.g.w;
+  if (c.a <= 0.0) { discard; }
+  return c;
+}
 @fragment fn fsAbyss(@builtin(position) p: vec4f) -> @location(0) vec4f {
   let x = floor((p.x - D.m.z) / D.m.x);
   let y = floor((D.tgt.y - p.y - D.m.w) / D.m.y);
@@ -24996,7 +25070,7 @@ fn waterOf(px: f32) -> i32 {
   if (acc.a <= 0.0) { discard; }
   return acc;
 }`;
-const WGPU_W = { ep: -1, mod: null, cbl: null, cpipe: null, bl: null, pl: null, rpipe: new Map(), samp: null, ramp: null, rampKey: [], still: null, stillKey: '', surf: [null, null], surfKey: ['', ''], none: null };
+const WGPU_W = { wk: [null, null], wkKey: ['', ''], wbl: null, wpipe: null, ep: -1, mod: null, cbl: null, cpipe: null, bl: null, pl: null, rpipe: new Map(), samp: null, ramp: null, rampKey: [], still: null, stillKey: '', surf: [null, null], surfKey: ['', ''], none: null };
 // the water's GPU objects on this device (made again on a new one - GPU.ep); its layouts: the surface's compute, and the one the draws share
 // (0 the draw's numbers, 1 the view's surface, 2-3 the ramps, 4 the draw's items)
 function wgpuReady() {
@@ -25008,6 +25082,9 @@ function wgpuReady() {
   const C_ = GPUShaderStage.COMPUTE, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, F_ = GPUShaderStage.FRAGMENT, ro = { type: 'read-only-storage' };
   W.cbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: ro }, { binding: 1, visibility: C_, buffer: ro }, { binding: 2, visibility: C_, buffer: ro }, { binding: 3, visibility: C_, buffer: { type: 'storage' } }], 'water surface');
   W.cpipe = gpuComputePipe({ layout: gpuPipeLayout([W.cbl], 'water surface'), compute: { module: W.mod, entryPoint: 'surf' } });
+  W.wbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: ro }, { binding: 1, visibility: C_, buffer: ro }, { binding: 2, visibility: C_, buffer: { type: 'storage' } }], 'water wake field');
+  W.wpipe = gpuComputePipe({ layout: gpuPipeLayout([W.wbl], 'water wake field'), compute: { module: W.mod, entryPoint: 'wakeField' } });
+  for (const B of W.wk) if (B) gpuBufFree(B); W.wk = [null, null]; W.wkKey = ['', ''];
   W.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: ro }, { binding: 1, visibility: VF, buffer: ro }, { binding: 2, visibility: F_, texture: {} }, { binding: 3, visibility: F_, sampler: {} }, { binding: 4, visibility: VF, buffer: ro }], 'water');
   W.pl = gpuPipeLayout([W.bl], 'water');
   W.rpipe.clear(); W.samp = gpuSampler(true, 0, 0);
@@ -25023,12 +25100,15 @@ const WGPU_OPS = {
   'source-atop': ['dst-alpha', 'one-minus-src-alpha', 'zero', 'one'], 'destination-out': ['zero', 'one-minus-src-alpha', 'zero', 'one-minus-src-alpha'], 'destination-in': ['zero', 'src-alpha', 'zero', 'src-alpha'],
   'destination-over': ['one-minus-dst-alpha', 'one', 'one-minus-dst-alpha', 'one'], 'source-in': ['dst-alpha', 'zero', 'dst-alpha', 'zero'], 'copy': ['one', 'zero', 'one', 'zero'], 'clear': ['zero', 'zero', 'zero', 'zero'],
 };
-// a draw's pipeline: its entry points (vs + fs: the fills and lines; vsShadow + fsShadow; vs + fsAbyss), the target's format, the context's composite op
-function wgpuPipe(vs, fs, fmt, op) {
-  const W = WGPU_W, B = WGPU_OPS[op] || WGPU_OPS['source-over'], k = vs + ':' + fs + ':' + fmt + ':' + B.join(); let p = W.rpipe.get(k);
+// a draw's pipeline: its entry points (vs + fs: the fills and lines; vsShadow + fsShadow; vs + fsAbyss), the target's format, the context's composite op,
+// and with a clip in force the stencil's format (sfmt): drawn only where bit 0x80 is set - the GL front's clip, tested as its own draws test it
+const WGPU_FACE = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
+function wgpuPipe(vs, fs, fmt, op, sfmt) {
+  const W = WGPU_W, B = WGPU_OPS[op] || WGPU_OPS['source-over'], k = vs + ':' + fs + ':' + fmt + ':' + B.join() + ':' + (sfmt || ''); let p = W.rpipe.get(k);
   if (!p) {
     const blend = { color: { srcFactor: B[0], dstFactor: B[1], operation: 'add' }, alpha: { srcFactor: B[2], dstFactor: B[3], operation: 'add' } };
-    p = gpuRenderPipe({ layout: W.pl, label: 'water ' + fs, vertex: { module: W.mod, entryPoint: vs }, fragment: { module: W.mod, entryPoint: fs, targets: [{ format: fmt, blend }] }, primitive: { topology: 'triangle-list' } });
+    const ds = sfmt ? { depthStencil: { format: sfmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: WGPU_FACE, stencilBack: WGPU_FACE, stencilReadMask: 0x80, stencilWriteMask: 0 } } : {};
+    p = gpuRenderPipe(Object.assign({ layout: W.pl, label: 'water ' + fs, vertex: { module: W.mod, entryPoint: vs }, fragment: { module: W.mod, entryPoint: fs, targets: [{ format: fmt, blend }] }, primitive: { topology: 'triangle-list' } }, ds));
     W.rpipe.set(k, p);
   }
   return p;
@@ -25106,27 +25186,32 @@ function wgpuRamp(row, stops) {
   gpuCopyBufTex(src.c, src.o, 1024, W.ramp, 0, row, 256, 1);
   W.rampKey[row] = key;
 }
-/* one draw of the water shader into C's target over this view (its clip: the view's columns - beginView, and the context's scissor): the
+/* one draw of the water shader into C's target over this view (its clip: the view's columns - beginView, the context's scissor, and the context's clip in
+   force - the GL front's, in the target's stencil, built by glBegin as for its own draws: the old GL programs honoured it, wglBegin): the
    draw's numbers (set(f) fills them), its items (an arena piece, or none), and how many triangles (a full-screen one; a shadow's quad an
    instance) */
-const WDP = new Float32Array(168);
+const WDP = new Float32Array(196);
 function waterDraw(vs, fs, set, items, inst) {
   const S = waterSurfGPU(); if (!S) return;
-  const ctx = C, W = WGPU_W;
+  const ctx = C, W = WGPU_W, clip = !!ctx.s.clip;
+  if (clip) glBegin(ctx, ctx.s.op);                       // (the clip in the target's stencil, bit 0x80 - built if it isn't this one)
   frameFlush();
-  const T = frameTarget(ctx); if (!T || !T.tex) return;
+  const T = frameTarget(ctx); if (!T || !T.tex || (clip && !T.stencil)) return;
   const f = WDP; f.fill(0);
   const m = ctx.s.m; f[0] = m[0]; f[1] = m[3]; f[2] = m[4]; f[3] = m[5];
   f[4] = T.w; f[5] = T.h; f[7] = VWP + 6;
   set(f);
   const dB = wgpuArena(WDP.byteLength, (u8, o) => u8.set(new Uint8Array(WDP.buffer), o));
-  const pipe = wgpuPipe(vs, fs, T.tex.fmt, ctx.s.op);   // (laid as the context lays: its composite op - as the GL programs and the fills were)
+  const pipe = wgpuPipe(vs, fs, T.tex.fmt, ctx.s.op, clip ? T.stencil.fmt : null);   // (laid as the context lays: its composite op and clip - as the GL programs and the fills were)
   const bg = gpuBindGroup(W.bl, [{ binding: 0, resource: dB.res }, { binding: 1, resource: { buffer: S.gb } }, { binding: 2, resource: W.ramp.view }, { binding: 3, resource: W.samp }, { binding: 4, resource: items ? items.res : { buffer: W.none.gb } }], 'water');
   let x0 = Math.max(0, VSX), x1 = Math.min(T.w, VSX + VWP), y0 = 0, y1 = Math.min(T.h, bh);
   const sc = ctx.s.sc; if (sc) { x0 = Math.max(x0, sc[0]); y0 = Math.max(y0, sc[1]); x1 = Math.min(x1, sc[0] + sc[2]); y1 = Math.min(y1, sc[1] + sc[3]); }
   if (x1 <= x0 || y1 <= y0) return;
-  const pass = gpuPassBegin({ colorAttachments: [{ view: T.tex.view, loadOp: 'load', storeOp: 'store' }] }, 'water', [T.tex, S, W.ramp]);
+  const desc = { colorAttachments: [{ view: T.tex.view, loadOp: 'load', storeOp: 'store' }] };
+  if (clip) desc.depthStencilAttachment = Object.assign({ view: T.stencil.view, stencilReadOnly: true }, T.stencil.fmt.startsWith('depth') ? { depthReadOnly: true } : {});
+  const pass = gpuPassBegin(desc, 'water', clip ? [T.tex, T.stencil, S, W.ramp] : [T.tex, S, W.ramp]);
   pass.setPipeline(pipe); pass.setBindGroup(0, bg);
+  if (clip) pass.setStencilReference(0x80);
   pass.setScissorRect(x0, T.h - y1, x1 - x0, y1 - y0);   // (rows bottom first)
   if (inst) pass.draw(6, inst); else pass.draw(3);
   gpuPassEnd();
@@ -25338,6 +25423,50 @@ function waterUnderGPU(row, stops, yo, at) { waterLevelDraw(0, yo, row, stops, o
 function waterDuskGPU(css, yo, top, lakes, row, stops, at) {
   waterDraw('vs', 'fsLevel', f => { f.set(wgpuPmB(css, C.s.ga), 12); f[160] = 2; f[161] = yo; f[163] = top; });
   if (lakes.length) waterLevelDraw(3, 0, row, stops, lakes, at, false);
+}
+
+/* THE WAKE (drawWakeField, 43-render-objects.js - the sea's pass, and each lake's in the land's): the field built once a view a frame for the stretch drawn (a
+   compute pass: wakeField), then its two passes drawn from it (fsWake). What the patches are - spawned by the ships' own seeded streams, aged and moved by
+   stepParticles (35-particles.js) - stays the processor's: only their place, width and strength go up, the ones in view (offViewR, as before) */
+const WAKE_ROWS = new Float32Array(1024 * 4);
+function waterWakeField(x0, x1) {
+  if (!wgpuReady() || !waterSurfGPU()) return null;
+  const W = WGPU_W, vi = viewIdx, n = Math.ceil((VWP + 12) / PB) + 1, X0 = Math.floor(-6 / PB) * PB, key = renderTick + ':' + CAMPX + ':' + SV + ':' + VWP + ':' + PB + ':' + x0 + ':' + x1;
+  let B = W.wk[vi];
+  if (B && W.wkKey[vi] === key) return { B, n, X0 };
+  const bytes = (32 + n) * 16;
+  if (!B || B.size < bytes) { if (B) gpuBufFree(B); B = W.wk[vi] = gpuBuf(Math.ceil(bytes / 16384) * 16384, 'water'); }
+  const c = wakes.c, X = c.x, LF = c.life; let m = 0;
+  for (let q = 0; q < wakes.n && m < 1024; q++) {
+    const hw0 = c.w[q] * (1 + LF[q] * 0.6) / 2; if (offViewR(X[q], hw0, x0, x1)) continue;
+    WAKE_ROWS.set([PX(X[q]), hw0 * SV, 1 - LF[q] / c.max[q], c.k[q] || 1], m * 4); m++;
+  }
+  frameFlush();
+  const pal = wgpuArena(32 * 16, (u8, o) => { const F = new Float32Array(u8.buffer, o, 128); SURF_PAL.forEach((css, i) => F.set(wgpuPmB(css, 1), i * 4)); });
+  gpuCopyBuf(pal.c, pal.o, B, 0, 32 * 16);
+  const hd = wgpuArena(16, (u8, o) => { const F = new Float32Array(u8.buffer, o, 2), U = new Uint32Array(u8.buffer, o + 8, 2); F[0] = X0; F[1] = PB; U[0] = n; U[1] = m; });
+  const rows = wgpuArena(Math.max(1, m) * 16, (u8, o) => new Float32Array(u8.buffer, o, m * 4).set(WAKE_ROWS.subarray(0, m * 4)));
+  const bg = gpuBindGroup(W.wbl, [{ binding: 0, resource: hd.res }, { binding: 1, resource: rows.res }, { binding: 2, resource: { buffer: B.gb, offset: 0, size: bytes } }], 'water wake field');
+  const cp = gpuComputeBegin([B]);
+  cp.setPipeline(W.wpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(n / 64)); cp.end();   // (a column of the view an invocation; the patches' loop no longer than those sent)
+  W.wkKey[vi] = key;
+  return { B, n, X0 };
+}
+// (a noise's numbers: its lattice place x = kx * world x, y = ky0 * time + kyr * world row - the whole parts of the large terms reduced here, in double precision)
+function wakeNoise(f, at, kx, kyt, kyr, seed, kxr) {
+  const bx = kx * CAMPX / SV, by = kyt * time, ix = Math.floor(bx), iy = Math.floor(by);
+  f[at] = bx - ix; f[at + 1] = ix; f[at + 2] = by - iy; f[at + 3] = iy;
+  f[at + 4] = kx / SV; f[at + 5] = (kxr || 0) / SV; f[at + 6] = kyr / SV; f[at + 7] = seed;
+}
+function waterWakeGPU(x0, x1, top) {
+  const Fd = waterWakeField(x0, x1); if (!Fd) return;
+  waterDraw('vs', 'fsWake', f => {
+    f[11] = C.s.ga; f[26] = SV;
+    f.set([top ? 1 : 0, Fd.X0, PB, Fd.n], 168);
+    wakeNoise(f, 172, 0.07, 0.35, 0, 3);              // (the foam's cover - each column's)
+    wakeNoise(f, 180, 0.04, 0.2, 0.14, 4, -0.08);    // (the foam's rolls, streaking back and down)
+    wakeNoise(f, 188, 0.12, 0.15, 0.22, 7);           // (the churned water under it)
+  }, { res: { buffer: Fd.B.gb, offset: 0, size: (32 + Fd.n) * 16 } });
 }
 
 /* ================================================================
@@ -32439,74 +32568,13 @@ function drawShipWash(x0, x1) {
   if (WASH_L.last >= 0) C.fillStyle = SURF_PAL[WASH_L.last];
   fsLast = null;
 }
-// The wake as one field: every wake patch adds to a per-column amount of churned water, so overlapping
-// patches merge into a continuous white band instead of a scatter of separate dots. Its texture is smooth
-// noise anchored in the sea, so it doesn't swim or flicker; it breaks up into gaps as the patches age.
-let WF_I = new Float32Array(0), WF_K = new Float32Array(0), WF_X0 = 0, WF_N = 0;
-function buildWakeField(x0, x1) {
-  WF_X0 = Math.floor(-6 / PB) * PB; WF_N = Math.ceil((VWP + 12) / PB) + 1;
-  if (WF_I.length < WF_N) { WF_I = new Float32Array(WF_N * 2); WF_K = new Float32Array(WF_N * 2); }
-  WF_I.fill(0, 0, WF_N); WF_K.fill(0, 0, WF_N);
-  const c = wakes.c, X = c.x, LF = c.life;
-  for (let q = 0; q < wakes.n; q++) {
-    if (offViewR(X[q], c.w[q] * (1 + LF[q] * 0.6) / 2, x0, x1)) continue;
-    const a = 1 - LF[q] / c.max[q], hw = c.w[q] * (1 + LF[q] * 0.6) * SV / 2, cx = PX(X[q]), wk = c.k[q];
-    const i0 = Math.max(0, Math.floor((cx - hw - WF_X0) / PB)), i1 = Math.min(WF_N - 1, Math.ceil((cx + hw - WF_X0) / PB));
-    for (let i = i0; i <= i1; i++) {
-      const d = (WF_X0 + i * PB + PB / 2 - cx) / hw, b = 1 - d * d;
-      if (b <= 0) continue;
-      WF_I[i] += a * b; WF_K[i] += a * b * (wk || 1);
-    }
-  }
-}
+// The wake as one field: every wake patch adds to a per-column amount of churned water, so overlapping patches merge into a continuous white
+// band; its texture is noise anchored in the sea, so it doesn't swim or flicker; it breaks up into gaps as the patches age. Built and drawn by the
+// water shader (waterWakeGPU, 40-zz-water-gpu.js): the field once a view a frame (the under-water pass runs first; the surface pass reuses it)
 function drawWakeField(x0, x1, top) {
-  if (!top) buildWakeField(x0, x1);               // the under-water pass runs first each view; the surface pass reuses it
-  WAKE_L.top = top; WAKE_L.last = -1;
-  pxDraw(WAKE_L, x0, x1);
-  // (the fill style as the rectangles one by one left it: the last one's colour)
-  if (WAKE_L.last >= 0) C.fillStyle = SURF_PAL[WAKE_L.last];
+  waterWakeGPU(x0, x1, top);
   fsLast = null;
 }
-// (Nov 1) THE WAKE FIELD'S PIXEL LAYER (40-zzzz-layers.js): both its passes (top: the foam on the surface; else the churned water
-// under it, a run of blocks of one colour as one rectangle), each in one draw a view, worked out by the loop that painted them
-const WAKE_L = pxLayer({
-  table: null, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', c: 'view u8' }, pal: SURF_PAL,
-  view: (T, own, n, x0, x1, L) => {
-    const top = L.top;
-    let m = 0, R = pxRoom(L, 256);
-    const put = (x, y, w, h, c) => { if (m >= R.x.length) R = pxRoom(L, m + 1); R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.c[m] = c; m++; };
-    for (let i = 0; i < WF_N; i++) {
-      const I = WF_I[i];
-      if (I < 0.03) continue;
-      const X = WF_X0 + i * PB, m_ = 1 - Math.exp(-I * 0.8), K = WF_K[i] / I;
-      const wx = (X + PB / 2 + CAMPX) / SV, c = clamp(X + PB / 2, -3, VWP + 2), sy = Math.floor(ys[c + 3] / PB) * PB;
-      const nA = cloudNoise(wx * 0.07, time * 0.35, 3);
-      if (top) {
-        const cov = m_ * (0.55 + 0.9 * nA);
-        if (cov < 0.3) continue;
-        const th = Math.max(PB, Math.round((0.6 + 2.6 * Math.min(1, cov)) * SV / PB) * PB);
-        if (cov < 0.45) put(X, sy - th, PB, th + 1, SP_WAKE);
-        else for (let y = sy - th; y < sy; y += PB) put(X, y, PB, y + PB >= sy ? PB + 1 : PB, foamShade(cloudNoise(wx * 0.04 - (y / SV) * 0.08, time * 0.2 + (y / SV) * 0.14, 4)));
-        const lip = Math.round(2 * m_ * SV / PB) * PB;
-        if (lip > 0) put(X, sy + 1, PB, lip, foamA(0.7 * m_));
-      } else {
-        const Dp = Math.round((3 + 14 * m_) * K * SV);
-        let runY = 0, runCol = -1;
-        for (let y = sy + PB; y < sy + Dp; y += PB) {
-          const dd = (y - sy) / Dp, n3 = cloudNoise(wx * 0.12, (y / SV) * 0.22 + time * 0.15, 7);
-          const dens = m_ * Math.pow(1 - dd, 1.3) * (0.5 + n3);
-          const col = dens < 0.08 ? -1 : foamA(Math.min(0.7, dens * 0.75));
-          if (col !== runCol) { if (runCol >= 0) put(X, runY, PB, y - runY, runCol); runY = y; runCol = col; }
-        }
-        if (runCol >= 0) put(X, runY, PB, sy + Dp - runY, runCol);
-      }
-    }
-    L.last = m ? R.c[m - 1] : -1;
-    return m;
-  },
-  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = int(a_c); return true; }
-`,
-});
 /* (Nov 1) THE CRESTS' PIXEL LAYER (40-zzzz-layers.js): the foam on lively ripples and the whitecaps, one draw a view, their
    blocks worked out by the loops that painted them (the same sums on the surface sampled this view, ys / ysW) */
 const CREST_PAL = ['#ffffff', '#e4f4ff', '#cfe9fb'];
