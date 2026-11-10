@@ -103,6 +103,10 @@
     if (sc.one) g.setCtl(['kb', 'none']); if (sc.two) g.setCtl(['kb', 'kb2']);
     g.setMode(sc.mode); g.ui.title = false; g.ui.resume = false; g.paused = true; g.hold = true;
     Object.assign(g.env, sc.env); g.W && (g.W.manual = { time: 1, weather: 1, rain: 1, wind: 1, sea: 1, fog: 1 }); g.computeEnv();
+    // (Nov 9, sky part: a scene starts as a new round does - the sky's clouds as this weather is, at once (NSKY.snap, as 19-menu.js freshWeather), not
+    // easing over from the last scene's: the GPU sky grows each cloud toward the weather on drawn frames as the live clouds always did, where
+    // the old baked sky drew every cloud at its finished size)
+    if (g.nsky && g.nsky.snap) g.nsky.snap();
     g.stepFixed(1 / 60, 2); sc.setup(g); window.__reseed(4242);
     for (let i = 0; i < sc.frames; i++) {
       if (sc.fire && i % 40 === 0) for (const p of [0, 1]) { try { const gu = g.gun(p); gu.elev = 30 + (i / 40 % 5) * 4; gu.power = 0.5; g.fire(p); } catch (e) { } }
@@ -110,6 +114,9 @@
       window.__tick(1000 / 60); if (i >= sc.frames - 4) g.stepFixed(1 / 60, 1); else g.stepQuiet(1 / 60, 1);
       if (g.gpuShot) await window.__turn();   // (the engine: the browser gets a turn between frames, as in the game)
     }
+    // (__settle: frames drawn again before the picture is taken, the game not stepped - for what loads in over frames, as the ground's
+    // pages do within the frame's budget; set the same on both pages compared)
+    for (let i = 0; i < (window.__settle || 0); i++) { g.renderN(1); if (g.gpuShot) await window.__turn(); }
     const gl = g.GLR.gl, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
     let px = new Uint8Array(W * H * 4);
     // (the engine (WebGPU): the screen's texture read and waited for - a tool's read, never the game's; rows in WebGL's order, as readPixels gave)
@@ -359,7 +366,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 00:04', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 00:55', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1177,6 +1184,10 @@ async function gpuLost(why) {
   gpuFrameReset();
   for (const f of GPU.onRebuild) try { f(); } catch (e) { console.error(e); }
 }
+// for code where the name GPU means something else (the sky's closure has its own flag called GPU): the device's epoch (goes up when a
+// lost device is rebuilt - anything made on an older epoch is made again) and whether the device is there to use
+function gpuEpoch() { return GPU.ep; }
+function gpuAlive() { return !!(GPU.on && GPU.dev && !GPU.lost); }
 
 /* ================================================================
    src/gpu/10-glsl.js - the game's own GLSL, made WGSL (engine skeleton, Nov 9)
@@ -7600,7 +7611,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 00:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 00:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -26815,18 +26826,49 @@ const GS = { ep: -1, items: new GskSpace(), tex: new GskSpace(), ib: null, bb: n
 // (a new device: every recipe made again - the buffers went with the old one)
 function gskEpoch() {
   if (GS.ep === GPUX.ep) return;
-  GS.ep = GPUX.ep; GS.items = new GskSpace(); GS.tex = new GskSpace(); GS.ib = GS.bb = null; GS.view = [{}, {}]; GS.puffs = 0; GS.stat.recipes = 0;
+  GS.ep = GPUX.ep; GS.items = new GskSpace(); GS.tex = new GskSpace(); GS.ib = GS.bb = null; GS.view = [{}, {}]; GS.puffs = 0; GS.stat.recipes = 0; GSU.list.length = 0; GSU.n = 0;
   for (const c of clouds) c.gsr = null;
 }
 function gskFree(c) { const g = c.gsr; if (!g) return; c.gsr = null; if (g.ep === GS.ep) { GS.items.release(g.a0, g.n + g.nf); GS.tex.release(g.tb, g.nt); GS.stat.recipes--; GS.puffs -= g.n; } }
-// a buffer of the layer at least `bytes`, grown in steps (x1.5), its old contents copied on the GPU when keep; the copy is sent at once
-// so that what is written into the new buffer after it (queue writes) lands after the copy
+// a buffer of the layer at least `bytes`, grown in steps (x1.5), its old contents copied on the GPU when keep - in the frame's own
+// encoder, in order with everything recorded (never a submit of its own in the middle of a frame: a submit starts the arena over under
+// the parts that wrote their data for passes not yet recorded). The new buffer is then in use by the pending submit, so what is written
+// into it after the copy goes up in order too (gskPut)
 function gskGrow(b, bytes, pool, keep) {
   if (b && b.gb && b.ep === GPUX.ep && b.size >= bytes) return b;
   const nb = gpuBuf(Math.max(bytes, Math.ceil(((b && b.size) || 0) * 1.5), 1 << 16), pool);
-  if (b && b.gb && keep && b.ep === GPUX.ep) { frameFlush(); gpuEnc().copyBufferToBuffer(b.gb, 0, nb.gb, 0, b.size); gpuSubmit(); }
-  if (b) gpuBufFree(b);
+  if (b && b.gb && keep && b.ep === GPUX.ep) { frameFlush(); gpuCopyBuf(b, 0, nb, 0, b.size); }
+  if (b) gpuBufFree(b);   // (destroyed after the submit that copies from it)
   return nb;
+}
+// bytes into buffer B at off, in order with this frame's commands: straight in when nothing recorded for the pending submit uses B (a
+// write lands before that submit runs), else staged in the arena and copied in the frame's encoder after what was recorded - in pieces
+const GSK_PIECE = 1 << 20;
+function gskPut(B, off, u8) {
+  if (!u8.byteLength) return;
+  if (B.use !== FR.sub) { gpuWriteBuf(B.gb, off, u8); return; }
+  frameFlush();
+  for (let a = 0; a < u8.byteLength; a += GSK_PIECE) {
+    const m = Math.min(GSK_PIECE, u8.byteLength - a), m4 = Math.ceil(m / 4) * 4, [c, o] = arenaAlloc(m4, 16);
+    c.cpu.set(u8.subarray(a, a + m), o); gpuCopyBuf(c, o, B, off + a, m4);
+  }
+}
+// THE RECIPES' UPLOADS: a recipe made this frame is kept here (its bytes, where they go) until the view's passes (gskFlush, at the start of
+// gskViewPass): the recipes' buffers grown once to what the frame's recipes need, then every piece written in the order it was made
+const GSU = { u8: new Uint8Array(1 << 20), n: 0, list: [] };
+function gskQueue(k, off, arr, bytes) {
+  const b = new Uint8Array(arr.buffer, arr.byteOffset, bytes), n4 = Math.ceil(bytes / 4) * 4;
+  if (GSU.u8.length < GSU.n + n4) { const a = new Uint8Array(Math.max(GSU.n + n4, GSU.u8.length * 2)); a.set(GSU.u8.subarray(0, GSU.n)); GSU.u8 = a; }
+  GSU.u8.set(b, GSU.n); GSU.list.push(k, off, GSU.n, bytes); GSU.n += n4;
+}
+function gskFlush() {
+  GS.bb = gskGrow(GS.bb, Math.max(16, GS.tex.end * 16), 'sky recipes', true);
+  GS.ib = gskGrow(GS.ib, Math.max(24, GS.items.end * 24), 'sky recipes', true);
+  const L = GSU.list;
+  for (let i = 0; i < L.length; i += 4) gskPut(L[i] ? GS.ib : GS.bb, L[i + 1], GSU.u8.subarray(L[i + 2], L[i + 2] + L[i + 3]));
+  L.length = 0; GSU.n = 0;
+  // (the room kept for the uploads: let go of what one big frame - every recipe at once - needed)
+  if (GSU.u8.length > 8 << 20) GSU.u8 = new Uint8Array(1 << 20);
 }
 // ---- a cloud's RECIPE, straight from its seeds into number arrays (no puff is ever a JS object: genCloud's ~28,000 a storm tower, 5 million
 // zoomed out, were 2-3.5 GB of the processor's memory - the GPU Clouds Lab, Nov 9). genLobe's own draws in its own order (the same puffs:
@@ -26909,13 +26951,9 @@ function gskRecipe(c, full) {
     for (const k of all) if (k >= 0) putB(k); else putP(-1 - k);
   }
   for (const k of bo) putB(k);
-  // up: the buffers grown first (their old contents copied on the GPU), then this recipe written into its room
-  GS.bb = gskGrow(GS.bb, GS.tex.end * 16, 'sky recipes', true);
-  GS.ib = gskGrow(GS.ib, GS.items.end * 24, 'sky recipes', true);
-  const q = GPUX.dev.queue;
-  q.writeBuffer(GS.bb.gb, tb * 16, R.buffer, 0, nt * 16);
-  if (n + nf) q.writeBuffer(GS.ib.gb, a0 * 24, F.buffer, 0, (n + nf) * 24);
-  GPUX.stats.upB += nt * 16 + (n + nf) * 24;
+  // up with the view's passes (gskFlush): into its room, in order
+  gskQueue(0, tb * 16, R, nt * 16);
+  if (n + nf) gskQueue(1, a0 * 24, F, (n + nf) * 24);
   c.gsr = { ep: GS.ep, a0, n, nf, tb, nt, full, s: c.s, lobes: c.lobes, nl: c.lobes.length, sig: GS.sig };
   c.items = null; c.billows = null; c.nbrReady = false; c.placedItems = null;
   GS.stat.recipes++; GS.stat.made++; GS.puffs += n;
@@ -27091,13 +27129,13 @@ void cloudMain() {
   // lobes: its lobe and cloud from the frame's list
   s += lobes ? `
 void main() {
-  int i = int(gl_GlobalInvocationID.x); if (i >= u_n) return;
+  int i = u_first + int(gl_GlobalInvocationID.x); if (i >= u_n) return;
   ivec2 q = GL_[i]; a_lb = vec4(float(q.x), float(q.y), 0.0, 0.0); gsk_vid = i;
   cloudMain();
   GO_[(u_base + i) * 2] = o0; GO_[(u_base + i) * 2 + 1] = o1;
 }` : `
 void main() {
-  int i = int(gl_GlobalInvocationID.x); if (i >= u_n) return;
+  int i = u_first + int(gl_GlobalInvocationID.x); if (i >= u_n) return;
   int lo = 0, hi = u_nr - 1;
   while (lo < hi) { int m = (lo + hi + 1) >> 1; if (GRUN_[m].x <= i) lo = m; else hi = m - 1; }
   ivec4 run = GRUN_[lo]; int src = run.y + (i - run.x); gsk_vid = src; CL = run.w;
@@ -27107,7 +27145,7 @@ void main() {
 }`;
   // as the layer's compute GLSL: the uniforms one std430 block at binding 0 (in order, std430 offsets - as glslLink lays them), the frame's
   // table (8), the billows (9), the puffs (10), the runs (11) or the far lobes (12), the records written (13)
-  s = s.replace('void lightMain() {', 'uniform int u_n; uniform int u_nr; uniform int u_base;\nvoid lightMain() {');
+  s = s.replace('void lightMain() {', 'uniform int u_n; uniform int u_nr; uniform int u_base; uniform int u_first;\nvoid lightMain() {');
   const Rd = glslRead(s, 'v'), U = {}; let off = 0;
   for (const u of Rd.uni) { const [sz, al] = GLSL_T[u.type]; off = Math.ceil(off / al) * al; U[u.name] = { type: u.type, off, k: GLSL_T[u.type][2] }; off += sz; }
   let body = glslStrip(s);
@@ -27158,22 +27196,22 @@ function gskSetup() {
   GSK.ep = GPUX.ep; GSK.ok = false;
   gskEpoch();
   try {
-    const dev = GPUX.dev, CS = GPUShaderStage.COMPUTE, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
+    const CS = GPUShaderStage.COMPUTE, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
     const ro = (b, v) => ({ binding: b, visibility: v, buffer: { type: 'read-only-storage' } });
     // the place + light and lobes passes
-    GSK.cbgl = dev.createBindGroupLayout({ entries: [ro(0, CS), ro(8, CS), ro(9, CS), ro(10, CS), ro(11, CS), ro(12, CS), { binding: 13, visibility: CS, buffer: { type: 'storage' } }] });
-    const cpl = dev.createPipelineLayout({ bindGroupLayouts: [GSK.cbgl] });
+    GSK.cbgl = gpuBindLayout([ro(0, CS), ro(8, CS), ro(9, CS), ro(10, CS), ro(11, CS), ro(12, CS), { binding: 13, visibility: CS, buffer: { type: 'storage' } }], 'gsky light');
+    const cpl = gpuPipeLayout([GSK.cbgl], 'gsky light');
     for (const [k, lobes] of [['place', false], ['lobes', true]]) {
       const L = gskLightSrc(lobes);
-      GSK[k] = { U: L.U, ubytes: L.ubytes, pipe: dev.createComputePipeline({ layout: cpl, compute: { module: gpuModule(gpuNaga(L.src, 'compute'), 'gsky ' + k), entryPoint: 'main' } }) };
+      GSK[k] = { U: L.U, ubytes: L.ubytes, pipe: gpuComputePipe({ layout: cpl, compute: { module: gpuModule(gpuNaga(L.src, 'compute'), 'gsky ' + k), entryPoint: 'main' }, label: 'gsky ' + k }) };
     }
     // the draw
     const fs = gskDrawFS(), DL = glslLink(GSK_VS, fs);
     GSK.dU = DL.U; GSK.dub = DL.ubytes;
-    GSK.dbgl = dev.createBindGroupLayout({ entries: [ro(0, VF), ro(8, GPUShaderStage.VERTEX), ro(9, VF)] });
+    GSK.dbgl = gpuBindLayout([ro(0, VF), ro(8, GPUShaderStage.VERTEX), ro(9, VF)], 'gsky draw');
     const BL = { color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' } };
-    GSK.draw = dev.createRenderPipeline({
-      layout: dev.createPipelineLayout({ bindGroupLayouts: [GSK.dbgl] }),
+    GSK.draw = gpuRenderPipe({
+      label: 'gsky draw', layout: gpuPipeLayout([GSK.dbgl], 'gsky draw'),
       vertex: { module: gpuModule(gpuNaga(glslStage(DL, 'v', GSK_VS), 'vertex'), 'gsky vs'), entryPoint: 'main' },
       fragment: { module: gpuModule(gpuNaga(glslStage(DL, 'f', fs), 'fragment'), 'gsky fs'), entryPoint: 'main', targets: [{ format: 'rgba8unorm', blend: BL }] },
       primitive: { topology: 'triangle-strip' },
@@ -27198,7 +27236,8 @@ function gskRoomF(a, n) { if (a.length >= n) return a; const b = new Float32Arra
 function gskRoomI(a, n) { if (a.length >= n) return a; const b = new Int32Array(Math.max(n, a.length * 2)); b.set(a); return b; }
 // where a deck's clouds are in its layer: the layer is the view's own size (the sky is drawn fresh every frame, so nothing is anchored)
 const deckPlace = () => ({ dox: 0, doy: 0, w: CW, full: H });
-let GSKY_V = false;   // (this view's clouds placed and lit this frame: its decks drawn from their records)
+let GSKY_V = false;
+const GSK_CH = 1 << 18;   // (the most records a dispatch lights, or a draw lays: 4,096 workgroups)   // (this view's clouds placed and lit this frame: its decks drawn from their records)
 function gskViewPass() {
   if (!gskSetup()) return false;
   const t0 = performance.now();
@@ -27262,14 +27301,13 @@ function gskViewPass() {
   GSF.nP = nP; GSF.nL = nLb; GSF.rows = rows;
   FTV.gsBuild = (FTV.gsBuild || 0) + performance.now() - t0;
   const t1 = performance.now();
-  // ---- up: the table, the palettes, the runs and far lobes - each view its own buffers, written once a frame (queue writes: after the last
-  // frame's work, before this frame's passes)
-  const VB2 = GS.view[VI], q = GPUX.dev.queue, put = (k, arr, n, pool) => { const by = Math.max(16, n * 4); VB2[k] = gskGrow(VB2[k], by, pool, false); if (n) q.writeBuffer(VB2[k].gb, 0, arr.buffer, 0, Math.ceil(n / 4) * 16 > arr.byteLength ? arr.byteLength : Math.ceil(n / 4) * 16); GPUX.stats.upB += n * 4; };
+  // ---- up: the table, the palettes, the runs and far lobes - each view its own buffers, written once a frame before its passes (gskPut:
+  // in order with what this frame recorded)
+  gskFlush();   // (this frame's new recipes up first, in order)
+  const VB2 = GS.view[VI], put = (k, arr, n, pool) => { VB2[k] = gskGrow(VB2[k], Math.max(16, n * 4), pool, false); if (n) gskPut(VB2[k], 0, new Uint8Array(arr.buffer, 0, n * 4)); };
   put('D', D, d, 'sky frame'); put('Pl', Pl, rows * 64, 'sky frame'); put('runs', RU, nr * 4, 'sky frame'); put('lobes', LBs, nLb * 2, 'sky frame');
   const tot = nP + nLb;
   VB2.out = gskGrow(VB2.out, Math.max(1, tot) * 32, 'sky records', false);
-  if (!GS.bb) GS.bb = gskGrow(GS.bb, 16, 'sky recipes', false);
-  if (!GS.ib) GS.ib = gskGrow(GS.ib, 24, 'sky recipes', false);
   if (!tot) { GS.drawn = 0; return true; }
   // ---- the light's numbers (11-drawing.js litRun's, for every cloud alike)
   const vals = {
@@ -27278,19 +27316,16 @@ function gskViewPass() {
     u_shadeU: P.shade, u_nodir: 1 - SUN_DIRECT, u_fls: [46 * S * ZL, 9 * S * ZL], u_view: view | 0, u_body: P.bodyL ?? 0, u_bk: [P.bshade ?? 1.6, P.bshape ?? 0.85, P.breach ?? 2],
   };
   frameFlush();
-  const dev = GPUX.dev, enc = gpuEnc(), cp = enc.beginComputePass(); GPUX.stats.computes++;
+  const cp = gpuComputeBegin([VB2.D, GS.bb, GS.ib, VB2.runs, VB2.lobes, VB2.out]); GPUX.stats.computes++;
   const ent = (u) => [{ binding: 0, resource: u }, { binding: 8, resource: { buffer: VB2.D.gb } }, { binding: 9, resource: { buffer: GS.bb.gb } }, { binding: 10, resource: { buffer: GS.ib.gb } },
     { binding: 11, resource: { buffer: VB2.runs.gb } }, { binding: 12, resource: { buffer: VB2.lobes.gb } }, { binding: 13, resource: { buffer: VB2.out.gb } }];
-  if (nP) {   // the place + light pass: every puff of every cloud in view, one dispatch
-    vals.u_n = nP; vals.u_nr = nr; vals.u_base = 0;
-    const G = GSK.place, bg = dev.createBindGroup({ layout: GSK.cbgl, entries: ent(gskArena(gskPack(G.U, G.ubytes, vals))) });
-    cp.setPipeline(G.pipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(nP / 64)); GPUX.stats.draws++;
-  }
-  if (nLb) {   // the lobes' tones: every far cloud's lobes, one dispatch
-    vals.u_n = nLb; vals.u_nr = 0; vals.u_base = nP;
-    const G = GSK.lobes, bg = dev.createBindGroup({ layout: GSK.cbgl, entries: ent(gskArena(gskPack(G.U, G.ubytes, vals))) });
-    cp.setPipeline(G.pipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(nLb / 64)); GPUX.stats.draws++;
-  }
+  // (each pass in dispatches of at most GSK_CH records: every dispatch's work bounded, whatever is in view)
+  const run = (G, n) => { for (let f = 0; f < n; f += GSK_CH) {
+    vals.u_first = f;
+    cp.setPipeline(G.pipe); cp.setBindGroup(0, gpuBindGroup(GSK.cbgl, ent(gskArena(gskPack(G.U, G.ubytes, vals))), 'gsky light'));
+    cp.dispatchWorkgroups(Math.ceil(Math.min(GSK_CH, n - f) / 64)); GPUX.stats.draws++; } };
+  if (nP) { vals.u_n = nP; vals.u_nr = nr; vals.u_base = 0; run(GSK.place, nP); }      // the place + light pass: every puff of every cloud in view
+  if (nLb) { vals.u_n = nLb; vals.u_nr = 0; vals.u_base = nP; run(GSK.lobes, nLb); }   // the lobes' tones: every far cloud's lobes
   cp.end();
   FTV.gsGL = (FTV.gsGL || 0) + performance.now() - t1;
   GS.drawn = tot;
@@ -27301,20 +27336,22 @@ function gskDrawDeck(lay, T) {
   const list = GSF.decks.get(lay), VB2 = GS.view[VI];
   frameFlush();
   const tg = frameTarget(T.getContext()); if (!tg || !tg.tex || !tg.tex.gt) return;
-  const pass = gpuPassBegin({ colorAttachments: [{ view: tg.tex.view, loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'gsky');
-  if (list && list.length && VB2.out && VB2.Pl) {
+  const on = !!(list && list.length && VB2.out && VB2.Pl);
+  const pass = gpuPassBegin({ colorAttachments: [{ view: tg.tex.view, loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'gsky', on ? [tg.tex, VB2.out, VB2.Pl] : [tg.tex]);
+  if (on) {
     const b = GLR.burn || [1, 1, 1], u = gskArena(gskPack(GSK.dU, GSK.dub, { u_size: [T.width, T.height], u_edge: GLR.edge || 0, u_burn: [b[0], b[1], b[2]] }));
-    const bg = GPUX.dev.createBindGroup({ layout: GSK.dbgl, entries: [{ binding: 0, resource: u }, { binding: 8, resource: { buffer: VB2.out.gb } }, { binding: 9, resource: { buffer: VB2.Pl.gb } }] });
+    const bg = gpuBindGroup(GSK.dbgl, [{ binding: 0, resource: u }, { binding: 8, resource: { buffer: VB2.out.gb } }, { binding: 9, resource: { buffer: VB2.Pl.gb } }], 'gsky draw');
     pass.setPipeline(GSK.draw); pass.setBindGroup(0, bg);
     // (a run: consecutive clouds of one kind are consecutive records)
     for (let i = 0; i < list.length;) {
       const k = list[i][0], s = list[i][1]; let n = list[i][2], e = i + 1;
       while (e < list.length && list[e][0] === k && list[e][1] === s + n) { n += list[e][2]; e++; }
-      if (n) { pass.draw(4, n, 0, (k ? GSF.nP : 0) + s); GPUX.stats.draws++; GLR.stats.quads += n; }
+      for (let f = 0; f < n; f += GSK_CH) { pass.draw(4, Math.min(GSK_CH, n - f), 0, (k ? GSF.nP : 0) + s + f); GPUX.stats.draws++; }   // (in draws of at most GSK_CH, in order)
+      GLR.stats.quads += n;
       i = e;
     }
   }
-  gpuPassEnd(); tg.tex.use = FR.sub;
+  gpuPassEnd();
 }
 // ---- how much of the sun's disc is behind the clouds (the rays' WHEN HIDDEN - 17-frame.js skyRays): every deck's layer read back at the
 // disc - its cells with a cloud drawn in them - a frame late (nothing waits on the GPU), the share eased as before
