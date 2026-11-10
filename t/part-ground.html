@@ -110,6 +110,9 @@
       window.__tick(1000 / 60); if (i >= sc.frames - 4) g.stepFixed(1 / 60, 1); else g.stepQuiet(1 / 60, 1);
       if (g.gpuShot) await window.__turn();   // (the engine: the browser gets a turn between frames, as in the game)
     }
+    // (__settle: frames drawn again before the picture is taken, the game not stepped - for what loads in over frames, as the ground's
+    // pages do within the frame's budget; set the same on both pages compared)
+    for (let i = 0; i < (window.__settle || 0); i++) { g.renderN(1); if (g.gpuShot) await window.__turn(); }
     const gl = g.GLR.gl, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
     let px = new Uint8Array(W * H * 4);
     // (the engine (WebGPU): the screen's texture read and waited for - a tool's read, never the game's; rows in WebGL's order, as readPixels gave)
@@ -359,7 +362,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 23:47', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 00:09', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -7600,7 +7603,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 23:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 00:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -53542,8 +53545,7 @@ function landPaintStep(views) {
     }
     if (cut && !EDMODE.on) bakeCut();
   }
-  ggStep(views);                                               // (the ground in front: its grid on the GPU, loaded and worked out where it changed, in the frame's time for it - all
-                                                               // a view shows on a cut - 50-land-zz-grid.js)
+  ggStep(views);                                               // (the ground in front: its grid on the GPU, loaded and worked out where it changed, a frame's worth - 50-land-zz-grid.js)
   let painted = 0;
   // (a tile's middle in the world, and its distance from a view's middle)
   const tileYm = (k, b) => LT_Y0 + (land.rT[k] - 4 + (b + 0.5) * LT_TILE) * LT_CELL, tileXm = k => (k + 0.5) * LT_CHUNK * LT_CELL;
@@ -58978,7 +58980,7 @@ fn edgePx(si: u32, q: i32, i: i32, y4: i32, b: i32) -> vec3f {
    - A SLOT a slice near a view: its page table (BLACK: a page all in the dark under the ground - no page at all), its 64 columns'
      numbers (cols), its stones (their outlines, the processor's). Fixed pools grown in steps; the least lately used given back.
    - Where cells change (ltDirty with the rows) only those pages - and those within the light's reach - are written and worked out again.
-   - Loading: nearest a view's middle first, in the frame's time for things being made (bakeLeft); a page not there yet isn't drawn.
+   - Loading: nearest a view's middle first, GG_JOBS pages a frame at most within GG_MS - a cut too; a page not there yet isn't drawn.
    Every GPU call through src/gpu/ (gpuBuf, gpuWriteBuf, gpuModule, gpuBindLayout, gpuRenderPipe / gpuComputePipe, gpuBindGroup,
    gpuComputeBegin, gpuPassBegin, gpuCopyBuf, arenaAlloc); the camera is the frame's (frameCam).
    ================================================================ */
@@ -58986,9 +58988,15 @@ const GG_RB = -4096;                                          // (the global row
 const GG_MAXPR = 64;                                          // (page rows a slice at most: 4096 rows - the Story world's mountain is 3,665)
 const GG_CW = 6, GG_PB = 4096 * 6 * 4;                        // (words a cell; bytes a page)
 const GG_NONE = 0xffffffff, GG_BLACK = 0xfffffffe;
+/* (the pages' jobs: a fixed staging pool, sized once - GG_JOBS jobs a frame at most, each in its own place of it; a frame's work is that many pages and
+   the frame's time for the grid (GG_MS) - a cut too: what isn't loaded yet isn't drawn, as an unpainted tile wasn't) */
+const GG_JOBS = 32, GG_JOBB = 209152, GG_MS = 4;
+// (the pages' pool: 512 to start, grown 256 at a time - one step a frame - to GG_CAPMAX at most (96 MB): the views' pages over that, zoomed far out, wait for
+// the grid's smaller levels - engine-design "Smaller levels of the grid are used at far zoom", this part's next slices)
+const GG_CAPMAX = 1024;
 const GG = { on: true, ep: -1, cap: 0, slotsN: 0, stoneCap: 0, pagesBuf: null, ptabBuf: null, slotBuf: null, colBuf: null, stoneBuf: null, scrBuf: null,
   free: [], slot: null, sk: [], sUse: null, ptab: null, stoneTop: 0, cellRef: null, dirtyRef: null, ug: -1, gapV: -1, dk: null,
-  stats: { jobs: 0, black: 0, slots: 0, ms: 0, frameJobs: 0 } };
+  stats: { jobs: 0, black: 0, slots: 0, ms: 0, frameJobs: 0, frameDisp: 0, bufs: 0, grows: 0 }, fj: 0, grewAt: -1 };
 // the pools, sized at start and grown in steps - pages (cap), slots (slotsN), stones (stoneCap)
 function ggPools() {
   if (GG.ep === GPU.ep && GG.pagesBuf) return true;
@@ -59000,7 +59008,7 @@ function ggPools() {
   GG.pagesBuf = gpuBuf(GG.cap * GG_PB, 'ground grid');
   GG.ptabBuf = gpuBuf(GG.slotsN * GG_MAXPR * 4, 'ground grid'); GG.slotBuf = gpuBuf(GG.slotsN * 48, 'ground grid'); GG.tileBuf = gpuBuf(GG.slotsN * 17 * 16, 'ground grid');
   GG.colBuf = gpuBuf(GG.slotsN * 64 * 6 * 16, 'ground grid'); GG.stoneBuf = gpuBuf(GG.stoneCap * 9 * 16, 'ground grid');
-  GG.scrBuf = gpuBuf(192 * 64 * 4, 'ground grid');
+  GG.scrBuf = gpuBuf(192 * 64 * 4, 'ground grid'); GG.stage = gpuBuf(GG_JOBS * GG_JOBB, 'ground grid'); GG.stats.bufs += 9;
   { const T = new Float32Array(4096 * 4); for (let i = 0; i < 4096; i++) { const b = i - 2048; T[i * 4] = hash(b * 3.71 + 0.5); T[i * 4 + 1] = hash(b * 1.93); T[i * 4 + 2] = hash(b * 2.3); }   // (the desert's strata picks: the processor's hash, a stratum each)
     GG.strBuf = gpuBuf(T.byteLength, 'ground grid'); gpuWriteBuf(GG.strBuf.gb, 0, new Uint8Array(T.buffer)); }
   ggReset();
@@ -59204,7 +59212,9 @@ function ggSlotFree(si) {
 }
 // (every page in use by what the views show this frame) the pool grown a step - its pages copied over in this frame's commands, before any reads them
 function ggGrow() {
-  const lim = GPU.lim ? GPU.lim.maxStorageBufferBindingSize : 128 << 20, n = Math.min(GG.cap + 256, Math.floor(lim / GG_PB));
+  if (GG.grewAt === renderTick) return false;                 // (one step a frame)
+  GG.grewAt = renderTick; GG.stats.grows++; GG.stats.bufs++;
+  const lim = GPU.lim ? GPU.lim.maxStorageBufferBindingSize : 128 << 20, n = Math.min(GG.cap + 256, Math.floor(lim / GG_PB), GG_CAPMAX);
   if (n <= GG.cap) return false;
   const B = gpuBuf(n * GG_PB, 'ground grid'); gpuCopyBuf(GG.pagesBuf, 0, B, 0, GG.cap * GG_PB); GPU.stats.copies++;
   gpuBufFree(GG.pagesBuf); GG.pagesBuf = B;
@@ -59317,26 +59327,24 @@ function ggPipeR(fmt, sf) {
   const ds = sf ? { format: sf, stencilFront: sop, stencilBack: sop, stencilReadMask: 0x80, stencilWriteMask: 0, ...(gpuHasDepth(sf) ? { depthWriteEnabled: false, depthCompare: 'always' } : {}) } : undefined;
   return (GG.prs[key] = { rl, draw: gpuRenderPipe({ layout: gpuPipeLayout([rl], 'ground draw'), vertex: { module: mr, entryPoint: 'vs' }, fragment: { module: mr, entryPoint: 'fs', targets: [{ format: fmt, blend: { color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } } }] }, primitive: { topology: 'triangle-strip' }, depthStencil: ds }) });
 }
-// a page's job sent: its words into a buffer of its own (freed after the submit - a view's cut sends every page it shows at once, and the arena, kept
-// at its largest, would hold them all for good) and its two dispatches recorded at once; each dispatch sees the last one's writes
+// a page's job sent: its words into its place in the staging pool and its two dispatches recorded at once; each dispatch sees the last one's writes
 function ggDispatch(bytes, BW) {
-  const P = ggPipesC(), B = gpuBuf(bytes, 'ground jobs');
-  gpuWriteBuf(B.gb, 0, new Uint8Array(GG.pay.buffer, 0, bytes));
+  const P = ggPipesC(), off = GG.fj++ * GG_JOBB;                // (its place in the staging pool: this frame's job fj)
+  gpuWriteBuf(GG.stage.gb, off, new Uint8Array(GG.pay.buffer, 0, bytes));
   const bg = gpuBindGroup(P.dl, [
-    { binding: 0, resource: { buffer: B.gb, offset: 0, size: 64 } }, { binding: 1, resource: { buffer: GG.stoneBuf.gb } },
-    { binding: 2, resource: { buffer: B.gb, offset: 0, size: bytes } }, { binding: 3, resource: { buffer: GG.pagesBuf.gb } }, { binding: 4, resource: { buffer: GG.scrBuf.gb } }], 'ground derive');
+    { binding: 0, resource: { buffer: GG.stage.gb, offset: off, size: 64 } }, { binding: 1, resource: { buffer: GG.stoneBuf.gb } },
+    { binding: 2, resource: { buffer: GG.stage.gb, offset: off, size: bytes } }, { binding: 3, resource: { buffer: GG.pagesBuf.gb } }, { binding: 4, resource: { buffer: GG.scrBuf.gb } }], 'ground derive');
   const cp = gpuComputeBegin([GG.pagesBuf]); GPU.stats.computes++;
   cp.setBindGroup(0, bg);
   cp.setPipeline(P.hpass); cp.dispatchWorkgroups(8, Math.ceil(BW / 8));
   cp.setPipeline(P.dpass); cp.dispatchWorkgroups(8, 8);
-  cp.end();
-  gpuBufFree(B);                                              // (destroyed once the submit that reads it is sent - gpuTrash)
+  cp.end(); GG.stats.frameDisp += 2;
 }
 /* ---- each frame (the ground layer - landPaintStep): the slices the views show given slots, their pages worked out where they're missing or
    stale, nearest a view's middle first, in the frame's time for things being made ---- */
 function ggStep(views) {
   if (!GG.on || !land.cell || !ggPools()) return;
-  const t0 = performance.now();
+  const t0 = performance.now(); GG.fj = 0; GG.stats.frameDisp = 0;
   if (GG.cellRef !== land.cell || GG.dirtyRef !== land.dirty || !GG.slot || GG.slot.length !== Math.ceil(land.cols / LT_CHUNK)) { for (let i = 0; i < GG.sk.length; i++) ggSlotFree(i); ggReset(); }
   { const rs = ['forest', 'desert', 'mountain', 'tropical', 'ice', 'swamp', 'volcanic'].map(n => biomeSides(n).roots).join() + JSON.stringify((typeof BIOME_SURF !== 'undefined' && BIOME_SURF.sea) || []);   // (BOTTOM ROOTS, the sea's layers: the rare picks made with them)
     if (GG.ug !== ugReach() || GG.gapV !== land.gapsV || GG.rs !== rs) { GG.ug = ugReach(); GG.gapV = land.gapsV; GG.rs = rs; for (const S of GG.sk) if (S) { S.stale.fill(1); S.cols = false; } } }
@@ -59370,7 +59378,7 @@ function ggStep(views) {
     if (!ring) Sl.used = renderTick;
     const i = j - Sl.j0; if (i < 0 || i >= Sl.npr) continue;
     if (!Sl.stale[i] && Sl.cols) continue;
-    if (done && !bakeLeft()) break;                            // (the frame's time for things being made - all of what a view shows on a cut: bakeCut, landPaintStep)
+    if (GG.fj >= GG_JOBS || (done && performance.now() - t0 > GG_MS)) break;   // (the frame's work for the grid: GG_JOBS pages' jobs, GG_MS - a cut too)
     if (ring && done) break;                                    // (ahead of the views: one slice's worth a frame at most, only when the views' own are done)
     if (!Sl.cols) { ggSliceCols(k, Sl); Sl.cols = true; }
     if (Sl.stale[i]) { const r = ggPageJob(Sl, i); if (r === 'page' || r === 'black') { ggPtabWrite(Sl); done++; } }
@@ -59441,7 +59449,7 @@ function ggDrawTo(t, K, list, P) {
   gpuPassEnd();
 }
 // (tools: the grid's state and counts - tools/gpusame, the part's checks)
-if (typeof window !== 'undefined') window.__gg = () => ({ on: GG.on, cap: GG.cap, free: GG.free.length, slots: GG.stats.slots, jobs: GG.stats.jobs, black: GG.stats.black, frameJobs: GG.stats.frameJobs, ms: +GG.stats.ms.toFixed(2), stones: GG.stoneTop, setOn: v => { GG.on = !!v; }, bands: k => { const si = GG.slot[k]; return si >= 0 && GG.sk[si] && GG.sk[si].U ? Array.from(GG.sk[si].U) : null; } });
+if (typeof window !== 'undefined') window.__gg = () => ({ on: GG.on, cap: GG.cap, free: GG.free.length, slots: GG.stats.slots, jobs: GG.stats.jobs, black: GG.stats.black, frameJobs: GG.stats.frameJobs, frameDisp: GG.stats.frameDisp, bufs: GG.stats.bufs, grows: GG.stats.grows, poolMB: +(GG.cap * GG_PB / 1048576).toFixed(1), ms: +GG.stats.ms.toFixed(2), stones: GG.stoneTop, setOn: v => { GG.on = !!v; }, bands: k => { const si = GG.slot[k]; return si >= 0 && GG.sk[si] && GG.sk[si].U ? Array.from(GG.sk[si].U) : null; } });
 // (tools: the ground in front alone, drawn into a picture of its own - world x0 y0 its top left, sv pixels a world unit, w x h; no light, no rims unless
 // asked: opt.fx, opt.rim) -> { w, h, data (RGBA, rows top-down) }. Loads what it shows first (as many frames' worth as it takes)
 if (typeof window !== 'undefined') window.__ggShot = async (x0, y0, sv, w, h, opt = {}) => {
