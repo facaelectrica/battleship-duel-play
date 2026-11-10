@@ -78,6 +78,10 @@
       // (the exploration sub put in the middle of the world's first cave - a HOLE shape - and the view cut to it)
       g.swT.ev("(() => { const I = ISLANDS.find(I => (I.kind || I.k) === 'H'), xs = I.p.map(p => p[0]), ys = I.p.map(p => p[1]), s = crew[0].civ; Object.assign(s, { state: 'out', cable: 0, ai: null, x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2, vx: 0, vy: 0, facing: -1, turn: null, splashed: true, armed: true }); })()");
       g.cutTo && g.cutTo(0); g.stepFixed(1 / 60, 2); }, frames: 90 },
+    // (Nov 9, water part) open's world in fog (the fog over each water and the murk under it, from each lake's own level - fsLevel), and at the low sun with
+    // no fog (lakeDusk: the boats on the lakes dark against it, the band from each lake's level)
+    openfog: { mode: 'land', one: true, env: { time: 12, weather: 0.2, rain: 0, wind: 0.3, sea: 0.3, fog: 0.6 }, setup: g => { }, frames: 120 },
+    opendusk: { mode: 'land', one: true, env: { time: 18.2, weather: 0.1, rain: 0, wind: 0.2, sea: 0.3, fog: 0 }, setup: g => { }, frames: 120 },
     openfar: { mode: 'land', one: true, env: { time: 16, weather: 0.5, rain: 0.2, wind: 0.5, sea: 0.5 }, setup: g => { g.zoomStep(0, -99); g.cutTo(0); }, frames: 90 },
     // (Nov 9, skeleton chat) the sky's three approved looks (skySnap above): 10:00 with the sun dragged behind a small cloud, 18:06's colours,
     // and 19:21 at night
@@ -90,6 +94,9 @@
   const get = async k => { const d = await db(); return new Promise((ok, no) => { const r = d.transaction('px').objectStore('px').get(k); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }); };
   const errs = []; addEventListener('error', e => errs.push(String(e.message)));
   // run a scene, read the picture (the world's WebGL canvas and the HUD's 2D canvas) and keep it as key; with cmp, compare to that key
+  // a turn for the browser that isn't throttled in a tab or window that isn't in front (a timer there runs once a second at best;
+  // a message is handled at once) - so scenes run at full speed in the background, on the second PC or in a second tab
+  { const ch = new MessageChannel(), q = []; ch.port1.onmessage = () => { const r = q.shift(); if (r) r(); }; window.__turn = () => new Promise(r => { q.push(r); ch.port2.postMessage(0); }); }
   window.__sameRun = async (name, key, cmp) => {
     await window.__ready; const t0 = realNow(), g = __game, sc = SCENES[name];
     window.__reseed(777);
@@ -101,8 +108,11 @@
       if (sc.fire && i % 40 === 0) for (const p of [0, 1]) { try { const gu = g.gun(p); gu.elev = 30 + (i / 40 % 5) * 4; gu.power = 0.5; g.fire(p); } catch (e) { } }
       if (sc.tick) sc.tick(g, i);
       window.__tick(1000 / 60); if (i >= sc.frames - 4) g.stepFixed(1 / 60, 1); else g.stepQuiet(1 / 60, 1);
-      if (g.gpuShot) await new Promise(r => setTimeout(r, 0));   // (the engine: the browser gets a turn between frames, as in the game)
+      if (g.gpuShot) await window.__turn();   // (the engine: the browser gets a turn between frames, as in the game)
     }
+    // (__settle: frames drawn again before the picture is taken, the game not stepped - for what loads in over frames, as the ground's
+    // pages do within the frame's budget; set the same on both pages compared)
+    for (let i = 0; i < (window.__settle || 0); i++) { g.renderN(1); if (g.gpuShot) await window.__turn(); }
     const gl = g.GLR.gl, W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
     let px = new Uint8Array(W * H * 4);
     // (the engine (WebGPU): the screen's texture read and waited for - a tool's read, never the game's; rows in WebGL's order, as readPixels gave)
@@ -352,7 +362,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 23:01', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 00:30', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1170,6 +1180,10 @@ async function gpuLost(why) {
   gpuFrameReset();
   for (const f of GPU.onRebuild) try { f(); } catch (e) { console.error(e); }
 }
+// for code where the name GPU means something else (the sky's closure has its own flag called GPU): the device's epoch (goes up when a
+// lost device is rebuilt - anything made on an older epoch is made again) and whether the device is there to use
+function gpuEpoch() { return GPU.ep; }
+function gpuAlive() { return !!(GPU.on && GPU.dev && !GPU.lost); }
 
 /* ================================================================
    src/gpu/10-glsl.js - the game's own GLSL, made WGSL (engine skeleton, Nov 9)
@@ -7593,7 +7607,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 23:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 00:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -22625,310 +22639,6 @@ function glLitRun(b, lit, U) {
   GLR.stats.draws++; GLR.stats.lit = (GLR.stats.lit || 0) + lit.n;
 }
 
-/* ---- THE SMOKE ON THE GPU (Oct 28, user: "do it all to work in the GPU"). The smoke's picture was made in JS: thousands of
-   balls splatted front-most-wins into a z-buffer, then every pixel's puff found and lit, every frame. Its coarse fields (the
-   density grid, the body's smoothed normals, the shadow marched toward the sun, which puffs make one body) stay in JS - a
-   few thousand cells; the per-pixel work moves to three passes on the GPU, the same rules line for line:
-   1. SPLAT: each ball a quad, its surface's height (its sphere and the billow tile) the depth, nearest wins (ties: the first
-      drawn, as the z-buffer's strict test); its index and height kept per pixel.
-   2. TONES: every puff (a ball's dome of the billow tile, or the ball whole) lit once at its middle - shadePuff - with the
-      puff's memory (its shadow eased a quarter a paint, its tone held unless clearly past a step, moved a step at a time
-      after two paints) kept in a texture from one paint to the next, a slot a puff.
-   3. COMPOSE: each pixel its puff's tone (a trail's thin line lit per pixel), the crease, the colour, the fire's light.
-   A ball: b0 X Y R Z | b1 A F TK slot | b2 LX LY LZ thin | b3 TU TV 0 0 (4 texels, 1024 a row). ---- */
-const SM_COMMON = `
-uniform highp sampler2D u_b; uniform highp sampler2D u_g1; uniform highp sampler2D u_g2;
-uniform ivec2 u_gs;          // the grid's size (gw, gh)
-uniform vec4 u_q0;           // MASS, SHADOW, SELF, AMBIENT
-uniform vec4 u_q1;           // contrast (CONTRAST x hour x SMOKE CONTRAST), EXPOSURE, JITTER, HIGHLIGHT
-uniform vec4 u_q2;           // night, dusk, glow (GLOW x sunset x SMOKE GLOW), FIRE GLOW
-uniform float u_hp[47]; uniform float u_hq[47]; uniform vec2 u_dc[46];
-uniform vec4 u_fl[64]; uniform int u_nf;
-vec4 B(int i, int k) { int t = i * 4 + k; return texelFetch(u_b, ivec2(t & 1023, t >> 10), 0); }
-float samp(int ch, int which, float gxf, float gyf) {
-  int gi = clamp(int(gxf), 0, u_gs.x - 2), gj = clamp(int(gyf), 0, u_gs.y - 2);
-  float u = clamp(gxf - float(gi), 0.0, 1.0), v = clamp(gyf - float(gj), 0.0, 1.0);
-  vec4 a, b, c, d;
-  if (which == 1) { a = texelFetch(u_g1, ivec2(gi, gj), 0); b = texelFetch(u_g1, ivec2(gi + 1, gj), 0); c = texelFetch(u_g1, ivec2(gi, gj + 1), 0); d = texelFetch(u_g1, ivec2(gi + 1, gj + 1), 0); }
-  else { a = texelFetch(u_g2, ivec2(gi, gj), 0); b = texelFetch(u_g2, ivec2(gi + 1, gj), 0); c = texelFetch(u_g2, ivec2(gi, gj + 1), 0); d = texelFetch(u_g2, ivec2(gi + 1, gj + 1), 0); }
-  float fa = a[ch], fb = b[ch], fc = c[ch], fd = d[ch];
-  return (fa * (1.0 - u) + fb * u) * (1.0 - v) + (fc * (1.0 - u) + fd * u) * v;
-}
-vec3 nrm3(vec3 v) { float l = length(v); return l > 0.0 ? v / l : v; }
-// shadePuff: ball i, its puff's middle (px, py), dome d; pn: this pixel's own normal (THIN), mem: (tone, cast, shS, k+1) or 0
-// returns (tone, warm, cast, shS) and k in kOut
-vec4 shadePuff(int i, float px, float py, int d, bool pnOn, vec3 pn, vec4 mem, out float kOut) {
-  vec4 b0 = B(i, 0), b1 = B(i, 1), b2 = B(i, 2);
-  float X = b0.x, Y = b0.y, r = b0.z, F = b1.y; const float G = 3.0;
-  float ox = (px - X) / r, oy = (Y - py) / r, o2 = ox * ox + oy * oy, ok = o2 > 0.97 ? sqrt(0.97 / o2) : 1.0;
-  vec3 n = vec3(ox * ok, oy * ok, 0.0); n.z = sqrt(max(0.0, 1.0 - n.x * n.x - n.y * n.y));
-  if (pnOn) n = pn;
-  float hp = u_hp[d], hq = u_hq[d];
-  if (d < 46 && !pnOn) { n.x += (hp - 0.5) * 0.5; n.y += (hq - 0.5) * 0.5; n = nrm3(n); }
-  bool thinP = pnOn;                                            // (the GPU's per-pixel path is the THIN one only)
-  float gxf = px / G - 0.5, gyf = py / G - 0.5;
-  vec3 bn = n; float mass = u_q0.x;
-  if (mass > 0.0 && !thinP) {
-    bn = nrm3(vec3(samp(0, 1, gxf, gyf), samp(1, 1, gxf, gyf), samp(2, 1, gxf, gyf)));
-    n = nrm3(bn * mass + n * (1.0 - mass));
-  }
-  float cast_ = u_q0.y * samp(0, 2, gxf, gyf), shS = max(cast_, u_q0.z * samp(1, 2, gxf, gyf));
-  bool prev = !pnOn && mem.w > 0.0;
-  if (prev) { cast_ = mem.y + (cast_ - mem.y) * 0.25; shS = mem.z + (shS - mem.z) * 0.25; }
-  vec3 L = b2.xyz; float bk = smoothstep(0.35, 0.8, -L.z);
-  if (bk > 0.0 && !thinP) n = nrm3(n + (bn - n) * bk);
-  float AMB = u_q0.w;
-  float val = dot(n, L) * 0.5 + 0.5;
-  val -= shS * 0.5 * max(0.0, val - 0.15);
-  val += AMB * 0.3 * (n.y * 0.5 + 0.5) - AMB * 0.12;
-  float rimAdd = 0.0;
-  if (L.z < 0.0) {
-    float lxy = length(L.xy), dirT = lxy > 1e-4 ? max(0.0, n.x * L.x + n.y * L.y) / lxy : 0.0;
-    float toward = dirT * (1.0 - bk) + (0.45 + 0.55 * max(0.0, n.y)) * bk, side = 1.0 - abs(n.z), open = 1.0;
-    if (side > 0.05) { float nl = length(n.xy); if (nl == 0.0) nl = 1.0; float dd = (2.5 + min(r, 6.0) * 1.2) / G;
-      open = smoothstep(0.5, 0.15, samp(3, 1, clamp(gxf + n.x / nl * dd, 0.0, float(u_gs.x) - 1.01), clamp(gyf - n.y / nl * dd, 0.0, float(u_gs.y) - 1.01))); }
-    rimAdd = -L.z * side * side * toward * 1.1 * (1.0 - shS) * open; val += rimAdd;
-    val -= bk * (1.0 - open) * side * 0.45;
-  }
-  if (F >= 3.0 && r < 1.8) val += 0.25;
-  float qv = (val - 0.5) * u_q1.x + 0.5 + u_q1.y + (pnOn ? 0.0 : (hp - 0.5) * u_q1.z);
-  float gk = u_q2.z, gf = gk > 0.01 ? gk * (0.12 + 0.62 * max(0.0, -bn.y) + 0.2 * (1.0 - abs(bn.y))) : 0.0;
-  float hiK = u_q1.w;
-  int T[3];
-  for (int s = 0; s < 3; s++) {
-    float e = s == 0 ? 0.0 : s == 1 ? -0.08 : 0.08;
-    int t = int(clamp(floor((qv + e) * 5.0), 0.0, 4.0));
-    if (hiK > 0.0 && qv + e >= 1.25 - 0.25 * hiK && (rimAdd + e > 0.12 || u_q2.x > 0.5 || u_q2.y > 0.3)) t = 5;
-    float kk = clamp((cast_ - e - 0.3) / 0.3, 0.0, 1.0), floorT = bn.y > 0.3 ? 1.0 : 0.0;
-    if (kk > 0.0) t = min(t, int(floor(4.0 - kk * (4.0 - floorT) + 0.5)));
-    if (gf > 0.0) t = max(t, int(min(3.0, floor((gf + e) * 4.2))));
-    T[s] = t;
-  }
-  int tone = T[0]; float k = 0.0;
-  if (prev) {
-    int tp = int(mem.x + 0.5); k = mem.w - 1.0;
-    if (tp != tone && tp >= min(T[1], T[2]) && tp <= max(T[1], T[2])) tone = tp;
-    if (tone != tp) { k += 1.0; if (k >= 2.0) { tone = tp + (tone > tp ? 1 : -1); k = 0.0; } else tone = tp; } else k = 0.0;
-  }
-  kOut = k;
-  // the fire's light
-  int warm = 0;
-  if (u_nf > 0 && u_q2.w > 0.0) {
-    float fl = 0.0;
-    for (int m = 0; m < 64; m++) { if (m >= u_nf) break; vec4 f = u_fl[m]; float dx = f.x - px, dy = py - f.y, d2 = dx * dx + dy * dy; if (d2 >= f.z * f.z) continue;
-      float dl = sqrt(d2); if (dl == 0.0) dl = 1.0; float fall = 1.0 - d2 / (f.z * f.z); fl += f.w * fall * (0.35 + 0.65 * max(0.0, (n.x * dx + n.y * dy) / dl * 0.8 + n.z * 0.2)); }
-    fl *= u_q2.w; warm = fl > 0.62 ? 2 : fl > 0.3 ? 1 : 0;
-  }
-  return vec4(float(tone), float(warm), cast_, shS);
-}`;
-const SM_SPLAT_VS = `#version 300 es
-precision highp float; precision highp int;
-layout(location=0) in vec2 a_q; layout(location=1) in float a_i;
-uniform highp sampler2D u_b; uniform vec2 u_size;
-flat out int v_i;
-vec4 B(int i, int k) { int t = i * 4 + k; return texelFetch(u_b, ivec2(t & 1023, t >> 10), 0); }
-void main() {
-  int i = int(a_i + 0.5); v_i = i; vec4 b0 = B(i, 0); float cx = b0.x, cy = b0.y, r = b0.z;
-  vec2 lo, hi;
-  if (r < 0.75) { lo = vec2(floor(cx), floor(cy)); hi = lo + 1.0; }
-  else { lo = vec2(floor(cx - r), floor(cy - r)); hi = vec2(ceil(cx + r) + 1.0, ceil(cy + r) + 1.0); }
-  vec2 p = mix(lo, hi, a_q) / u_size;
-  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-}`;
-const SM_SPLAT_FS = `#version 300 es
-precision highp float; precision highp int;
-uniform highp sampler2D u_b; uniform highp sampler2D u_w; uniform highp sampler2D u_bt; uniform vec2 u_size; uniform float u_tka;
-flat in int v_i;
-out vec4 o;
-vec4 B(int i, int k) { int t = i * 4 + k; return texelFetch(u_b, ivec2(t & 1023, t >> 10), 0); }
-void main() {
-  float fx = floor(gl_FragCoord.x), fy = floor(u_size.y - gl_FragCoord.y);
-  if (fy > texelFetch(u_w, ivec2(int(fx), 0), 0).r) discard;              // (under the water: no ball)
-  vec4 b0 = B(v_i, 0), b1 = B(v_i, 1), b3 = B(v_i, 3);
-  float cx = b0.x, cy = b0.y, r = b0.z, z = b0.w, tk = b1.z, hz;
-  if (r < 0.75) hz = z + r;
-  else {
-    float dy = fy + 0.5 - cy, w2 = r * r - dy * dy;
-    if (w2 <= 0.0) discard;
-    float hw = sqrt(w2);
-    if (fx < ceil(cx - hw - 0.5) || fx > floor(cx + hw - 0.5)) discard;
-    float dx = fx + 0.5 - cx, t = (dx * dx + dy * dy) * (1024.0 / (r * r));
-    if (tk > 0.0) {
-      int q = ((int(floor(dy * tk + b3.y + 4096.0)) & 63) << 6) + (int(floor(dx * tk + b3.x + 4096.0)) & 63);
-      float th = texelFetch(u_bt, ivec2(q & 63, q >> 6), 0).r;
-      if (t > 1024.0 - 300.0 * u_tka * (1.0 - th)) discard;
-      hz = z + r * sqrt(1.0 - floor(t) / 1024.0) + r * 0.22 * u_tka * th;
-    } else hz = z + r * sqrt(1.0 - (t < 1024.0 ? floor(t) : 1024.0) / 1024.0);
-  }
-  o = vec4(float(v_i), hz, 0.0, 1.0);
-  gl_FragDepth = clamp(0.5 - hz * 1e-3, 0.0, 1.0);
-}`;
-const SM_QUAD_VS = `#version 300 es
-precision highp float;
-layout(location=0) in vec2 a_q; uniform vec4 u_rect; uniform vec2 u_size;
-void main() { vec2 p = (u_rect.xy + a_q * u_rect.zw) / u_size; gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0); }`;
-const SM_TONE_FS = `#version 300 es
-precision highp float; precision highp int;
-uniform highp sampler2D u_mem; uniform highp sampler2D u_s2b; uniform vec2 u_size;
-` + SM_COMMON + `
-layout(location=0) out vec4 oMem; layout(location=1) out vec4 oTone;
-void main() {
-  int col = int(gl_FragCoord.x), row = int(gl_FragCoord.y), slot = row * 64 + col / 47, d = col - (col / 47) * 47;   // (texel rows as stored)
-  vec4 mem = texelFetch(u_mem, ivec2(col, row), 0);
-  float sb = texelFetch(u_s2b, ivec2(slot & 1023, slot >> 10), 0).r;
-  oTone = vec4(0.0);
-  if (sb < -0.5) { oMem = mem; return; }                                  // (no ball of this puff in this paint: its memory kept)
-  bool fresh = sb >= 1048576.0; int i = int((fresh ? sb - 1048576.0 : sb) + 0.5);
-  if (fresh) mem = vec4(0.0);
-  vec4 b0 = B(i, 0), b1 = B(i, 1), b2 = B(i, 2), b3 = B(i, 3);
-  float tk = b1.z;
-  if (b2.w > 0.5 || (tk <= 0.0 && d != 46)) { oMem = mem; return; }        // (a thin line's ball: lit per pixel; no tile: only the ball whole)
-  float px = b0.x, py = b0.y;
-  if (d < 46) {                                                           // (the dome's middle: its repeat of the tile nearest the ball's middle)
-    float tuC = b3.x + 4096.0, tvC = b3.y + 4096.0, cu = u_dc[d].x + 64.0 * floor((tuC - u_dc[d].x) / 64.0 + 0.5), cv = u_dc[d].y + 64.0 * floor((tvC - u_dc[d].y) / 64.0 + 0.5);
-    px = b0.x + (cu - b3.x - 4096.0) / tk; py = b0.y + (cv - b3.y - 4096.0) / tk;
-  }
-  float k; vec4 s = shadePuff(i, px, py, d, false, vec3(0.0), mem, k);
-  oMem = vec4(s.x, s.z, s.w, k + 1.0);
-  oTone = vec4(s.x, s.y, 0.0, 1.0);
-}`;
-const SM_COMP_FS = `#version 300 es
-precision highp float; precision highp int;
-uniform highp sampler2D u_sp; uniform highp sampler2D u_tone; uniform highp sampler2D u_bt; uniform highp sampler2D u_lut; uniform vec2 u_size; uniform float u_crease; uniform float u_thin;
-` + SM_COMMON + `
-out vec4 o;
-void main() {
-  int x = int(gl_FragCoord.x), ty = int(gl_FragCoord.y), y = int(u_size.y) - 1 - ty, cw = int(u_size.x);   // (ty: the texel row - the splat's target is laid out as this one; y: the row from the top)
-  vec4 S = texelFetch(u_sp, ivec2(x, ty), 0);
-  int i = int(S.x + 0.5); if (S.x < -0.5) { o = vec4(0.0); return; }
-  vec4 b0 = B(i, 0), b1 = B(i, 1), b2 = B(i, 2), b3 = B(i, 3);
-  float X = b0.x, Y = b0.y, R = b0.z, F = b1.y, tk = b1.z; int slot = int(b1.w + 0.5);
-  // FADING (user Oct 29: "proper smoke fading vs having the puffs disappear"): a fading ball dissolves in clumps where it is
-  // the front of the smoke - holes through the whole body, its rim first, in a pattern riding with the ball (measured from
-  // its middle, seeded by its own number), so what's left is still lit as before
-  if (b1.x < 0.999) {
-    float ddx = float(x) + 0.5 - X, ddy = float(y) + 0.5 - Y, sd = b3.z * 97.0;
-    vec2 g = vec2(ddx, ddy) / 3.4 + sd, gi = floor(g), gf = g - gi; gf = gf * gf * (3.0 - 2.0 * gf);
-    float h00 = fract(sin(dot(gi, vec2(12.99, 78.23))) * 43758.5), h10 = fract(sin(dot(gi + vec2(1.0, 0.0), vec2(12.99, 78.23))) * 43758.5);
-    float h01 = fract(sin(dot(gi + vec2(0.0, 1.0), vec2(12.99, 78.23))) * 43758.5), h11 = fract(sin(dot(gi + vec2(1.0, 1.0), vec2(12.99, 78.23))) * 43758.5);
-    float vn = mix(mix(h00, h10, gf.x), mix(h01, h11, gf.x), gf.y), fn = fract(sin(dot(floor(vec2(ddx, ddy)) + sd, vec2(39.35, 11.13))) * 24634.6);
-    float rim = clamp(length(vec2(ddx, ddy)) / max(R, 0.5), 0.0, 1.0);
-    if ((0.5 * vn + 0.1 * fn + 0.4 * rim * rim) * 0.99 > b1.x) { o = vec4(0.0); return; }
-  }
-  int d = 46; bool tcr = false;
-  if (tk > 0.0) {
-    int q = ((int(floor((float(y) + 0.5 - Y) * tk + b3.y + 4096.0)) & 63) << 6) + (int(floor((float(x) + 0.5 - X) * tk + b3.x + 4096.0)) & 63);
-    vec4 bt = texelFetch(u_bt, ivec2(q & 63, q >> 6), 0);
-    tcr = F < 3.0 && bt.w > 0.5;
-    if (bt.z >= 0.0) d = int(bt.z + 0.5);
-  }
-  int tone, warm;
-  if (u_thin > 0.5 && tk <= 0.0 && F >= 3.0) {                           // THIN: lit per pixel, from its own round surface
-    vec3 n = vec3((float(x) + 0.5 - X) / R, (Y - float(y) - 0.5) / R, 0.0); n.z = sqrt(max(0.0, 1.0 - n.x * n.x - n.y * n.y));
-    float k; vec4 s = shadePuff(i, float(x) + 0.5, float(y) + 0.5, d, true, n, vec4(0.0), k);
-    tone = int(s.x + 0.5); warm = int(s.y + 0.5);
-  } else {
-    vec4 t = texelFetch(u_tone, ivec2((slot & 63) * 47 + d, slot >> 6), 0);
-    tone = int(t.x + 0.5); warm = int(t.y + 0.5);
-  }
-  if (u_crease > 0.5 && tcr && tone > 0) tone = tone == 5 ? 3 : tone - 1;
-  else if (u_crease > 0.5 && tone > 0) {
-    float zk = S.y + R * 0.22; bool cr = false;
-    if (x > 0) { vec4 n = texelFetch(u_sp, ivec2(x - 1, ty), 0); if (int(n.x + 0.5) != i && n.y > zk) cr = true; }
-    if (x < cw - 1) { vec4 n = texelFetch(u_sp, ivec2(x + 1, ty), 0); if (int(n.x + 0.5) != i && n.y > zk) cr = true; }
-    if (y > 0) { vec4 n = texelFetch(u_sp, ivec2(x, ty + 1), 0); if (int(n.x + 0.5) != i && n.y > zk) cr = true; }   // (the row above)
-    if (cr) tone = tone == 5 ? 3 : tone - 1;
-  }
-  int li = (int(F + 0.5) * 6 + tone) * 3 + warm;
-  o = texelFetch(u_lut, ivec2(li, 0), 0);
-}`;
-// 0. MARCH: the shadow from the smoke itself, each grid cell's march toward the sun through the density (sh: others' shadow,
-// ss: its own depth) - the JS march, line for line (it was lazy in JS: a cell marched the first time a puff asked for it)
-const SM_QUADU_VS = `#version 300 es
-precision highp float;
-layout(location=0) in vec2 a_q; uniform vec4 u_rect; uniform vec2 u_size;
-void main() { vec2 p = (u_rect.xy + a_q * u_rect.zw) / u_size; gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`;
-const SM_MARCH_FS = `#version 300 es
-precision highp float; precision highp int;
-uniform highp sampler2D u_dn; uniform ivec4 u_box; uniform vec4 u_m0; uniform vec4 u_m1;
-out vec4 o;
-float DN(int i, int j) { return texelFetch(u_dn, ivec2(i, j), 0).r; }
-void main() {
-  int i = int(gl_FragCoord.x), j = int(gl_FragCoord.y), nM = int(u_m0.w + 0.5);
-  float sdx = u_m0.x, sdy = u_m0.y, ownF = u_m0.z, f2 = u_m1.x, kS = u_m1.y, behind = u_m1.z;
-  float od = 0.0, odS = 0.0, x = float(i) + 0.5, y = float(j) + 0.5;
-  for (int s = 1; s <= 48; s++) {
-    if (s > nM) break;
-    x += sdx; y += sdy; float fx = x - 0.5, fy = y - 0.5; int xi = int(floor(fx)), yj = int(floor(fy));
-    if (xi < u_box.x || yj < u_box.y || xi >= u_box.z || yj >= u_box.w) break;
-    float u = fx - float(xi), v = fy - float(yj);
-    float d = min(1.3, (DN(xi, yj) * (1.0 - u) + DN(xi + 1, yj) * u) * (1.0 - v) + (DN(xi, yj + 1) * (1.0 - u) + DN(xi + 1, yj + 1) * u) * v), wo = clamp(ownF - float(s - 1), 0.0, 1.0);
-    odS += d * wo; od += d * (1.0 - wo);
-  }
-  float own = min(1.3, DN(i, j));
-  o = vec4(clamp((od * f2 * kS - 0.08) * 5.0, 0.0, 1.0), clamp(((odS * f2 + own * behind * 1.6) * kS * 0.8 - 0.08) * 5.0, 0.0, 1.0), 0.0, 1.0);
-}`;
-// MASS (engine stage 8, Oct 30): the smoke's body normals - its smoothed density's slope, each cell from its four neighbours
-// within the box (the box's edge: the cell's own), as 21-smoke.js phase2 worked them out in JS - into the grid the tones read
-// (u_g1: x y z the normal, w the smoothed density itself). Outside the box: (0, 0, 0, density) - no puff reads a normal there
-const SM_MASS_FS = `#version 300 es
-precision highp float; precision highp int;
-uniform highp sampler2D u_hb; uniform highp sampler2D u_hh; uniform ivec4 u_box; uniform float u_k;
-out vec4 o;
-float HH(int i, int j) { return texelFetch(u_hh, ivec2(i, j), 0).r; }
-void main() {
-  int i = int(gl_FragCoord.x), j = int(gl_FragCoord.y);
-  float c = texelFetch(u_hb, ivec2(i, j), 0).r;
-  if (i < u_box.x || j < u_box.y || i > u_box.z || j > u_box.w) { o = vec4(0.0, 0.0, 0.0, c); return; }
-  float e = HH(i, j), l = i > u_box.x ? HH(i - 1, j) : e, r = i < u_box.z ? HH(i + 1, j) : e, u = j > u_box.y ? HH(i, j - 1) : e, d = j < u_box.w ? HH(i, j + 1) : e;   // (u_hh: the mass's height, its own slope scale in it - 21-smoke.js smBlurSized; u_k 1)
-  float nx = -(r - l) * 0.5 * u_k, ny = (d - u) * 0.5 * u_k, m = sqrt(nx * nx + ny * ny + 1.0);
-  o = vec4(nx / m, ny / m, 1.0 / m, c);
-}`;
-const GSM = { ok: false };
-function glSmokeSetup() {
-  const gl = GLR.gl;
-  GSM.ok = false;
-  if (!gl.getExtension('EXT_color_buffer_float')) return;                // (no float targets: the smoke stays in JS)
-  const prog = (vs, fs, names) => { const p = gl.createProgram(); gl.attachShader(p, glShader(gl.VERTEX_SHADER, vs)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const U = {}; for (const k of names) U[k] = gl.getUniformLocation(p, k); return { p, U }; };
-  const common = ['u_b', 'u_g1', 'u_g2', 'u_gs', 'u_q0', 'u_q1', 'u_q2', 'u_hp', 'u_hq', 'u_dc', 'u_fl', 'u_nf', 'u_size'];
-  GSM.splat = prog(SM_SPLAT_VS, SM_SPLAT_FS, ['u_b', 'u_w', 'u_bt', 'u_size', 'u_tka']);
-  GSM.march = prog(SM_QUADU_VS, SM_MARCH_FS, ['u_rect', 'u_size', 'u_dn', 'u_box', 'u_m0', 'u_m1']);
-  GSM.mass = prog(SM_QUADU_VS, SM_MASS_FS, ['u_rect', 'u_size', 'u_hb', 'u_hh', 'u_box', 'u_k']);
-  GSM.tone = prog(SM_QUAD_VS, SM_TONE_FS, common.concat(['u_rect', 'u_mem', 'u_s2b']));
-  GSM.comp = prog(SM_QUAD_VS, SM_COMP_FS, common.concat(['u_rect', 'u_sp', 'u_tone', 'u_bt', 'u_lut', 'u_crease', 'u_thin']));
-  GSM.svao = gl.createVertexArray(); gl.bindVertexArray(GSM.svao);
-  gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
-  GSM.ordVbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, GSM.ordVbo); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 4, 0); gl.vertexAttribDivisor(1, 1);
-  GSM.qvao = gl.createVertexArray(); gl.bindVertexArray(GSM.qvao);
-  gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
-  gl.bindVertexArray(GLR.vao);
-  GSM.bt = null; GSM.ep = GLR.epoch; GSM.ok = true;
-}
-// a float texture of w x h (RGBA32F), its data from a Float32Array (or empty)
-function gsmTex(t, w, h, data, fmt) {
-  const gl = GLR.gl; fmt = fmt || 'RGBA32F';
-  if (!t || t.w !== w || t.h !== h || t.ep !== GLR.epoch) { if (t && t.ep === GLR.epoch) gl.deleteTexture(t.tex); t = { tex: glNewTex(0, 0, gl.NEAREST), w, h, ep: GLR.epoch, alloc: false }; }
-  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, t.tex); glPM(false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-  const ifmt = fmt === 'R32F' ? gl.R32F : gl.RGBA32F, f = fmt === 'R32F' ? gl.RED : gl.RGBA;
-  if (!t.alloc) { gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, w, h, 0, f, gl.FLOAT, data || null); t.alloc = true; }
-  else if (data) gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, w, h, f, gl.FLOAT, data);
-  return t;
-}
-// (engine stage 6, Oct 30: through the units' cache, GLR.unit / GLR.unitS, as glFlush and wglTex bind - only what isn't bound
-// already. It keeps the cache true too, where it used to leave it stale until gsmPaint reset it)
-function gsmBind(unit, t) {
-  const gl = GLR.gl;
-  if (GLR.unit[unit] !== t.tex) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t.tex); GLR.unit[unit] = t.tex; }
-  if (GLR.unitS[unit] !== null) { gl.bindSampler(unit, null); GLR.unitS[unit] = null; }
-}
-function gsmFbo(attach, depth) {
-  const gl = GLR.gl, f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
-  attach.forEach((t, k) => gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + k, gl.TEXTURE_2D, t.tex, 0));
-  if (depth) gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
-  return f;
-}
-
 /* ---- start-up, and again after the browser takes the GPU away and gives it back ---- */
 function glInit(cv) {
   // (engine skeleton, Nov 9: WebGPU only - the context is the graphics layer's WebGL2-shaped front, src/gpu/40-gl.js; the same calls)
@@ -23011,7 +22721,7 @@ precision highp float; out vec4 o; void main() { o = vec4(0.0); }`));
   GLR.gradGen++; GLR.gradNext = 0;
   ATL.tex = glNewTex(ATL.S, ATL.S, gl.NEAREST); ATL.gen++; ATL.shelves = []; ATL.y = 0;
   GLR.pix = null; GLR.pixPool = [];
-  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glSkySetup(); glShadeSetup(); glShaftSetup(); glBurnSetup(); glLitSetup(); glSmokeSetup(); wglSetup();
+  glPuffSetup(); glRaySetup(); glSunSetup(); glGlowSetup(); glSkySetup(); glShadeSetup(); glShaftSetup(); glBurnSetup(); glLitSetup(); wglSetup();
   Object.assign(GLB, {
     'source-over': [gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA],
     'multiply': [gl.DST_COLOR, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE],   // (what's there times the colour laid - the ground under the water in its colour, waterGroundTint)
@@ -29005,9 +28715,8 @@ function skyFront(V) {
 // - fading: solid to the end, dissolving in a pixel pattern rather than turning see-through.
 // A puff knows the puff before it from the same emitter (a falling plane's smoke: 19-fx-sim.js spawnSmoke o.chain), and
 // the gap between them is filled with balls, so a fast emitter leaves one unbroken body.
-let smnPaint = 0;
 const SMN_TILE_OFS = false;
-const makeSMN = () => ({ pend: null, pos: new Map(), mem: new Map(), cap: 0, n: 0, TK: null, TU: null, TV: null, X: null, Y: null, R: null, Z: null, A: null, F: null, LX: null, LY: null, LZ: null, buf: null, wrow: null, cw: 0, h: 0, sh: null, dn: null, lut: null, ms: 0, balls: 0 });
+const makeSMN = () => ({ pend: null, cap: 0, n: 0, TK: null, TU: null, TV: null, X: null, Y: null, R: null, Z: null, A: null, F: null, LX: null, LY: null, LZ: null, wrow: null, cw: 0, h: 0, dn: null, lut: null, ms: 0, balls: 0 });
 // two passes (BEHIND DECK 1, per source): each its own picture and memory
 const SMNPV = [{ front: makeSMN(), back: makeSMN() }, { front: makeSMN(), back: makeSMN() }];   // (the game: each view its own)
 const fxHash = n => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
@@ -29558,7 +29267,7 @@ function smgRun(m) {
   // the light as it was on the main thread when the puffs were packed (the sun in this view, the hour's)
   SMSUN.x = m.sun[0]; SMSUN.y = m.sun[1]; SMSUN.H = m.sun[2]; SMSUN.Z = m.sun[3]; SMSUN.s4 = m.sun[4]; E.behind = m.behind; E.overcast = m.overcast; P.lightz = m.lightz;
   const [res2, tr2] = smgAfter(n, SMN, m, res, tr, (r, t) => self.postMessage(r, t));
-  // the slots (smsRun on the pass's table) and the balls' data packed for the GPU (smsPack), as gsmPaint does; with what the
+  // the slots (smsRun on the pass's table) and the balls' data packed for the GPU (smsPack), as smPaint does; with what the
   // main thread needs to keep its copy of the table (smsMir): the numbers given slots, the slots given back, each slot's last paint
   if (m.sl && SMS) {
     const slotOf = new Int32Array(n), nw = new Uint8Array(n), lg = { nw: [], ev: [] };
@@ -29714,11 +29423,9 @@ function drawSmokeNew(pass, want) {
   const paintNow = (SMN.force && !wk) || !SMN.last || (frameNo & 1) === (pass === 'back' && !split ? 1 : 0);
   if (!paintNow) { blitLast(); SMN.ms = SMN.ms * 0.9 + (performance.now() - t0) * 0.1; return; }
   const forced = SMN.force; SMN.force = false;
-  // (the puffs' remembered tones: forget the ones not seen for a while)
-  if ((++smnPaint & 127) === 0) { for (const [k, v] of SMN.mem) if (smnPaint - v.p > 64) SMN.mem.delete(k); for (const [k, v] of SMN.pos) if (smnPaint - v[2] > 64) SMN.pos.delete(k); }
   const cw = SMG.cw, h = SMG.h;
-  if (SMN.cw !== cw || SMN.h !== h) { SMN.cw = cw; SMN.h = h; SMN.buf = makeBuf(cw, h); SMN.wrow = new Int32Array(cw); }
-  if (!gsmOn()) return;   // (the smoke is the GPU's alone - Oct 28, no non-WebGL path: without float render targets, no smoke)
+  if (SMN.cw !== cw || SMN.h !== h) { SMN.cw = cw; SMN.h = h; SMN.wrow = new Int32Array(cw); }
+  if (!smGpuOn()) return;   // (the smoke is the GPU's alone - Oct 28, no non-WebGL path)
   SMN.cam = [CAMPX, TOPPX, FXV.SV, FXV.pxX, FXV.pxY, SMG.mx, SMG.my]; SMN.lazyL = (P.smfast ?? 1) > 0 && (P.smgroup ?? 1) > 0;
   SMN.n = 0; SMN.tkz = clamp(1.05 / Math.sqrt(Zg), 0.8, 2.2);              // (the tile's scale: billows of 4-10 cells at x1, smaller zoomed out)
   // FAST: the balls nearest first (a counting sort on their highest point), and a pixel already covered nearer than this
@@ -29734,7 +29441,7 @@ function drawSmokeNew(pass, want) {
   const tgL = performance.now() - t0; SMN.tg = W ? SMN.tgp + tgL : tgL;
   const n = SMN.n; SMN.balls = n;
   if (!n) { SMN.last = null; SMN.ms = SMN.ms * 0.9 + (performance.now() - t0) * 0.1; return; }
-  const { X, Y, R, Z, A, F, LX, LY, LZ, wrow } = SMN, out = SMN.buf.buf;
+  const { X, Y, R, Z, A, F, LX, LY, LZ, wrow } = SMN;
   if (!W) fillWrow(wrow);   // (SMG: laid on the first frame, with the camera the balls were gathered at)
   // the balls' box
   const [bx0, by0, bx1, by1] = W ? W.box : smBox(n, X, Y, R, cw, h);
@@ -29745,7 +29452,7 @@ function drawSmokeNew(pass, want) {
     ord = SMN.ord;
     if (W) ord.set(W.ord); else smSort(n, Z, R, tkA0, ord, SMN.okey, SMN.ocnt || (SMN.ocnt = new Uint32Array(1024 + 1)));
   }
-  // (Oct 28: the splat is the GPU's - gsmPaint; the JS splat, tones and pixels are gone with the non-WebGL path)
+  // (Oct 28: the splat is the GPU's - smPaint; the JS splat, tones and pixels are gone with the non-WebGL path)
   if (W) { SMN.dbox = W.dbox; SMN.dres = W.dout; }   // (SMG: the worker's density came with its balls)
   else if (split && (!forced || wk) && smdOn()) smdSend(n, X, Y, R, A, cw, h, bx0, by0, bx1, by1, fast); else SMN.dbox = null;   // (SMD: the density by the next frame)
   const t1 = performance.now();
@@ -29756,8 +29463,8 @@ function drawSmokeNew(pass, want) {
   const t1p = performance.now();
   // ---- 2. shadow from the smoke: the balls' density on a coarse grid, marched toward the sun
   const G = 3, gw = Math.ceil(cw / G) + 1, gh = Math.ceil(h / G) + 1, GN = gw * gh;
-  if (!SMN.dn || SMN.dn.length < GN) { SMN.dn = new Float32Array(GN); SMN.sh = new Float32Array(GN); SMN.ss = new Float32Array(GN); }
-  const dn = SMN.dn, sh = SMN.sh, gx0 = Math.floor(bx0 / G), gy0 = Math.floor(by0 / G), gx1 = Math.min(gw - 1, Math.ceil(bx1 / G) + 1), gy1 = Math.min(gh - 1, Math.ceil(by1 / G) + 1);
+  if (!SMN.dn || SMN.dn.length < GN) SMN.dn = new Float32Array(GN);
+  const dn = SMN.dn, gx0 = Math.floor(bx0 / G), gy0 = Math.floor(by0 / G), gx1 = Math.min(gw - 1, Math.ceil(bx1 / G) + 1), gy1 = Math.min(gh - 1, Math.ceil(by1 / G) + 1);
   if (!SMN.dd || SMN.dd.length < GN + 1) SMN.dd = new Float64Array(GN + 1);
   const dd = SMN.dd;
   // (the worker's, sent when the balls were gathered last frame, or here: the same function, the same numbers)
@@ -29767,24 +29474,16 @@ function drawSmokeNew(pass, want) {
   // about a puff's size, is one surface wrapped round the whole column; that surface's normal (its slope: facing out at
   // the column's sides, to us in its middle) is blended into every ball's own, so the column is lit as a single shape
   // and the billows only shade it within that
-  if (!SMN.hb || SMN.hb.length < GN) { SMN.hb = new Float32Array(GN); SMN.tb = new Float32Array(GN); SMN.mx = new Float32Array(GN); SMN.my = new Float32Array(GN); SMN.mz = new Float32Array(GN); }
-  const mass = P.smmass ?? 0.62, hb = SMN.hb, tb = SMN.tb, MX = SMN.mx, MY = SMN.my, MZ = SMN.mz;
+  if (!SMN.hb || SMN.hb.length < GN) { SMN.hb = new Float32Array(GN); SMN.tb = new Float32Array(GN); }
+  const mass = P.smmass ?? 0.62, hb = SMN.hb, tb = SMN.tb;
   // (SMG: the worker smoothed it and found the bodies and their light, at the zoom and sun of the balls' frame - WB)
   const WB = W && W.hbo ? W : null;
-  let massK = 0;
   {
-    const [rb, K] = WB ? WB.mr : smMassR(FXV.SV, FXV.pxX);
-    massK = K;
     if (!SMN.hh || SMN.hh.length < GN) { SMN.hh = new Float32Array(GN); SMN.sz = new Float32Array(GN); }
     const hh = SMN.hh;
     if (WB) { const bw = gx1 - gx0 + 1; for (let j = gy0; j <= gy1; j++) { hb.set(WB.hbo.subarray((j - gy0) * bw, (j - gy0 + 1) * bw), j * gw + gx0); hh.set(WB.hho.subarray((j - gy0) * bw, (j - gy0 + 1) * bw), j * gw + gx0); } }
     else { const SN = (gx1 - gx0 + 2) * (gy1 - gy0 + 2); if (!SMN.sat || SMN.sat.length < SN) SMN.sat = new Float64Array(SN); smBlurSized(dn, hb, tb, hh, SMN.sz, SMN.sat, gw, gx0, gy0, gx1, gy1, WB ? WB.mr : smMassR(FXV.SV, FXV.pxX), n, X, Y, R); }
-    // (engine stage 8, Oct 30: the normals are the GPU's - 40-gl.js SM_MASS_FS, from hb; ?smgpu=0 works them out here as before)
-    if (mass > 0 && !SM_GPU_MASS) for (let j = gy0; j <= gy1; j++) for (let i = gx0; i <= gx1; i++) {
-      const k = j * gw + i, l = i > gx0 ? hh[k - 1] : hh[k], r = i < gx1 ? hh[k + 1] : hh[k], u = j > gy0 ? hh[k - gw] : hh[k], d = j < gy1 ? hh[k + gw] : hh[k];
-      const nx = -(r - l) * 0.5, ny = (d - u) * 0.5, m = Math.hypot(nx, ny, 1);   // (hh carries each place's own slope scale - smBlurSized)
-      MX[k] = nx / m; MY[k] = ny / m; MZ[k] = 1 / m;
-    }
+    // (the body's normals: the GPU's MASS, from hh - smPaint)
   }
   const tS2 = performance.now();
   // ---- what belongs to what: the parts of the smoothed density that touch are one body (puffs within about a puff's
@@ -29799,10 +29498,10 @@ function drawSmokeNew(pass, want) {
   const tS3 = performance.now();
   const tmp = { LX: [0], LY: [0], LZ: [0] }; smnLight((bx0 + bx1) / 2, (by0 + by1) / 2, Math.max(bx1 - bx0, by1 - by0) / 2, tmp, 0);
   const lx = tmp.LX[0], ly = tmp.LY[0], lzS = tmp.LZ[0], f2 = Math.hypot(lx, ly), sdx = f2 > 1e-4 ? lx / f2 : 0, sdy = f2 > 1e-4 ? -ly / f2 : -1;
-  const stepW = G * FXV.pxX / FXV.SV, D0 = 45, kS = stepW / D0, behind = Math.max(0, -lzS), ownF = 30 / stepW, nMarch = clamp(Math.round(420 / stepW), 2, 48), ss = SMN.ss;   // (in world units: a puff's own depth 30, the march 420, at any zoom)
+  const stepW = G * FXV.pxX / FXV.SV, D0 = 45, kS = stepW / D0, behind = Math.max(0, -lzS), ownF = 30 / stepW, nMarch = clamp(Math.round(420 / stepW), 2, 48);   // (in world units: a puff's own depth 30, the march 420, at any zoom)
   const tS4 = performance.now();
   buildSmokeLUT(); const FLg = fireLights(), t5 = performance.now();
-  gsmPaint(SMN, { wk: WF, B: W, n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, MX, MY, MZ, hb, hh: SMN.hh, dn, mass, massK, tkA: tkA0, FL: FLg, nF: FLg.length / 4, mg: [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] });
+  smPaint(SMN, { wk: WF, B: W, n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, hb, hh: SMN.hh, dn, mass, tkA: tkA0, FL: FLg, nF: FLg.length / 4, mg: [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] });
   smShow(SMN); SMN.last = [bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1];
   { const t6 = performance.now(), ad = (k, v) => { FTV[k] = (FTV[k] || 0) + v; }; ad('smDen', tS1 - t1p); ad('smBlur', tS2 - tS1); ad('smBody', tS3 - tS2); ad('smMarch', tS4 - tS3); ad('smFire', t5 - tS4); ad('smGpu', t6 - t5); }   // (the parts of smB / smT, for the perf work - Oct 29)
   FTV.smG = (FTV.smG || 0) + SMN.tg; FTV.smS = (FTV.smS || 0) + (t1 - t0 - tgL); FTV.smB = (FTV.smB || 0) + (t5 - t1p); FTV.smT = (FTV.smT || 0) + (performance.now() - t5);
@@ -29873,14 +29572,367 @@ function smHangarClip(c, dx, dy, dw, dh) {
   if (on) c.clip();
   return on;
 }
-// ---- the smoke's picture on the GPU (GSM, 40-gl.js): its coarse fields made here as before, its balls, its puffs' tones
-// and its pixels there. SMOKE ON GPU 0 (or a SMOKE VIEW, or no float targets) draws it in JS as before
-const gsmOn = () => !!(VIEW && VIEW.gl && GSM.ok && GSM.ep === GLR.epoch);
-// (engine stage 8, Oct 30: the body's normals made on the GPU from the smoothed density - SM_MASS_FS; ?smgpu=0: in JS, as before)
-const SM_GPU_MASS = !/[?&]smgpu=0/.test(location.search);
+/* ---- THE SMOKE'S PICTURE ON THE GPU (Oct 28, user: "do it all to work in the GPU"; engine part 6, Nov 9: native WebGPU - the five
+   passes the GL programs SM_* of 40-gl.js were, the same rules line for line, now WGSL here, fed the same processor data). The balls,
+   their box, order, density, smoothing, bodies and light are made on the processor as before (gatherSmokeNew ... smBodies); a paint:
+   1. MASS (compute): the body's normals - its smoothed density's slope (hh: each place's own slope scale in it), each grid cell from its
+      four neighbours within the box (the box's edge: the cell's own); g1 x y z the normal, w the smoothed density. Outside the box
+      (0, 0, 0, density) - no puff reads a normal there
+   2. MARCH (compute): the shadow from the smoke itself, each grid cell of the box marched toward the sun through the density (x: others'
+      shadow, y: its own depth) into g2 - kept between paints, only the box rewritten (made again, empty, when the grid's size changes)
+   3. TONES (compute): every puff (a ball's dome of the billow tile, or the ball whole) lit once at its middle - shadePuff - with the
+      puff's memory (its shadow eased a quarter a paint, its tone held unless clearly past a step, moved a step at a time after two
+      paints) kept from one paint to the next, a slot a puff: each slot's entry read and written by its own invocation only, so the
+      memory is one buffer, in place
+   4. SPLAT (render): each ball a quad, its surface's height (its sphere and the billow tile) the depth, nearest wins (ties: the first
+      drawn, as the strict test); its index and height kept per pixel
+   5. COMPOSE (render): each pixel its puff's tone (a trail's thin line lit per pixel), the crease, the colour, the fire's light, into
+      the smoke's picture (a GL layer the size of the grid; the box drawn)
+   A ball (smsPack): bd[i * 4 ...] = (X Y R Z) (A F TK slot) (LX LY LZ thin) (TU TV its number 0).
+   What goes up each paint: its numbers (H, in the frame's arena), the balls (bd) and the paint's grids and lists (F: hb hh dn | the
+   slots' balls | the draw order | the water's rows | g1) into buffers every paint shares, each paint's written in order before its own
+   passes (smpUp); a pass's own, kept: its shadow (g2) and its puffs' memory (mem). ---- */
+// (in the sky's closure the name GPU is the sky's own flag (04-buffers.js), not src/gpu's device: the smoke's GPU objects are tagged
+// with the GL front's generation, GLR.epoch - made again by glSetup each time the device is (src/gpu/00-device.js gpuLost) - as they were)
+const smGpuOn = () => !!(VIEW && VIEW.gl && GLR.gl && !GLR.lost);
 const SM_HP = new Float32Array(47).map((_, d) => fxHash(d * 1.73)), SM_HQ = new Float32Array(47).map((_, d) => fxHash(d * 2.9));   // (a puff's lean: its dome's own - the tile's offset is 0, SMN_TILE_OFS)
-let SM_DC = null, SM_BTD = null;
-// the balls' numbers -> their slots (gsmPaint): open addressing, linear probing, a deleted entry's run shifted back
+// (K, a buffer a device: the billow tile (BT: height, x normal, its dome, crease - 4 floats a texel), the puffs' leans, the domes' middles)
+const SMP_KHP = 16384, SMP_KHQ = SMP_KHP + 47, SMP_KDC = SMP_KHQ + 47, SMP_KN = SMP_KDC + 92, SMP_MW = 47 * 64;
+// the paint's numbers: the grid's size, the picture's; the light's (u_q0..2 of the GL programs); the grid's box; the march; the
+// picture's box (x, y, w, h); where F's parts start (floats); the tones' rows and the rows a dispatch row takes; the splat's tile
+// strength, crease, thin; the fire's lights and their count; the colours (buildSmokeLUT's, a pixel each)
+const smpHead = NL => `
+struct H {
+  gs: vec2i, sz: vec2f,
+  q0: vec4f, q1: vec4f, q2: vec4f,
+  box: vec4i, m0: vec4f, m1: vec4f,
+  pic: vec4f,
+  fo: vec4u,     // hh, dn, s2, od
+  fo2: vec4u,    // wr, g1, rows, rows a dispatch row
+  c: vec4f,      // tka, crease, thin
+  nf: vec4i,
+  fl: array<vec4f, 64>,
+  lut: array<u32, ${NL}>,
+};
+const G = 3.0;
+const KHP = ${SMP_KHP}u; const KHQ = ${SMP_KHQ}u; const KDC = ${SMP_KDC}u;`;
+// MASS, MARCH and g2's clearing - over the grid's cells
+const SMP_FIELDS_WGSL = NL => smpHead(NL) + `
+@group(0) @binding(0) var<storage, read> h: H;
+@group(0) @binding(1) var<storage, read_write> F: array<f32>;
+@group(0) @binding(2) var<storage, read_write> g2: array<vec2f>;
+fn HH(i: i32, j: i32) -> f32 { return F[h.fo.x + u32(j * h.gs.x + i)]; }
+fn DN(i: i32, j: i32) -> f32 { return F[h.fo.y + u32(j * h.gs.x + i)]; }
+@compute @workgroup_size(64) fn clear2(@builtin(global_invocation_id) g: vec3u) { if (g.x < u32(h.gs.x * h.gs.y)) { g2[g.x] = vec2f(0.0); } }
+@compute @workgroup_size(8, 8) fn mass(@builtin(global_invocation_id) g: vec3u) {
+  let i = i32(g.x); let j = i32(g.y);
+  if (i >= h.gs.x || j >= h.gs.y) { return; }
+  let k = u32(j * h.gs.x + i); let c = F[k]; let o = h.fo2.y + k * 4u;
+  let B = h.box;
+  if (i < B.x || j < B.y || i > B.z || j > B.w) { F[o] = 0.0; F[o + 1u] = 0.0; F[o + 2u] = 0.0; F[o + 3u] = c; return; }
+  let e = HH(i, j);
+  var l = e; if (i > B.x) { l = HH(i - 1, j); }
+  var r = e; if (i < B.z) { r = HH(i + 1, j); }
+  var u = e; if (j > B.y) { u = HH(i, j - 1); }
+  var d = e; if (j < B.w) { d = HH(i, j + 1); }
+  let nx = -(r - l) * 0.5; let ny = (d - u) * 0.5; let m = sqrt(nx * nx + ny * ny + 1.0);
+  F[o] = nx / m; F[o + 1u] = ny / m; F[o + 2u] = 1.0 / m; F[o + 3u] = c;
+}
+@compute @workgroup_size(8, 8) fn march(@builtin(global_invocation_id) g: vec3u) {
+  let i = h.box.x + i32(g.x); let j = h.box.y + i32(g.y);
+  if (i > h.box.z || j > h.box.w) { return; }
+  let nM = i32(h.m0.w + 0.5);
+  let sdx = h.m0.x; let sdy = h.m0.y; let ownF = h.m0.z; let f2 = h.m1.x; let kS = h.m1.y; let behind = h.m1.z;
+  var od = 0.0; var odS = 0.0; var x = f32(i) + 0.5; var y = f32(j) + 0.5;
+  for (var s = 1; s <= 48; s++) {
+    if (s > nM) { break; }
+    x += sdx; y += sdy; let fx = x - 0.5; let fy = y - 0.5; let xi = i32(floor(fx)); let yj = i32(floor(fy));
+    if (xi < h.box.x || yj < h.box.y || xi >= h.box.z || yj >= h.box.w) { break; }
+    let u = fx - f32(xi); let v = fy - f32(yj);
+    let d = min(1.3, (DN(xi, yj) * (1.0 - u) + DN(xi + 1, yj) * u) * (1.0 - v) + (DN(xi, yj + 1) * (1.0 - u) + DN(xi + 1, yj + 1) * u) * v); let wo = clamp(ownF - f32(s - 1), 0.0, 1.0);
+    odS += d * wo; od += d * (1.0 - wo);
+  }
+  let own = min(1.3, DN(i, j));
+  g2[u32(j * h.gs.x + i)] = vec2f(clamp((od * f2 * kS - 0.08) * 5.0, 0.0, 1.0), clamp(((odS * f2 + own * behind * 1.6) * kS * 0.8 - 0.08) * 5.0, 0.0, 1.0));
+}`;
+// a puff's light (TONES at its middle, COMPOSE per pixel for a thin line): ball i, the puff's middle (px, py), dome d; pn: the pixel's own
+// normal (THIN), mem: (tone, cast, shS, k + 1) or 0 -> s: (tone, warm, cast, shS), k
+const SMP_SHADE_WGSL = `
+fn B(i: i32, k: i32) -> vec4f { return bd[i * 4 + k]; }
+fn gcell(which: i32, ch: i32, i: i32, j: i32) -> f32 {
+  let k = j * h.gs.x + i;
+  if (which == 1) { return F[h.fo2.y + u32(k) * 4u + u32(ch)]; }
+  let v = g2[k]; return v[ch];
+}
+fn samp(ch: i32, which: i32, gxf: f32, gyf: f32) -> f32 {
+  let gi = clamp(i32(gxf), 0, h.gs.x - 2); let gj = clamp(i32(gyf), 0, h.gs.y - 2);
+  let u = clamp(gxf - f32(gi), 0.0, 1.0); let v = clamp(gyf - f32(gj), 0.0, 1.0);
+  let fa = gcell(which, ch, gi, gj); let fb = gcell(which, ch, gi + 1, gj); let fc = gcell(which, ch, gi, gj + 1); let fd = gcell(which, ch, gi + 1, gj + 1);
+  return (fa * (1.0 - u) + fb * u) * (1.0 - v) + (fc * (1.0 - u) + fd * u) * v;
+}
+fn nrm3(v: vec3f) -> vec3f { let l = length(v); if (l > 0.0) { return v / l; } return v; }
+struct Sh { s: vec4f, k: f32 };
+fn shadePuff(i: i32, px: f32, py: f32, d: i32, pnOn: bool, pn: vec3f, mem: vec4f) -> Sh {
+  let b0 = B(i, 0); let b1 = B(i, 1); let b2 = B(i, 2);
+  let X = b0.x; let Y = b0.y; let r = b0.z; let Fm = b1.y;
+  let ox = (px - X) / r; let oy = (Y - py) / r; let o2 = ox * ox + oy * oy;
+  var ok = 1.0; if (o2 > 0.97) { ok = sqrt(0.97 / o2); }
+  var n = vec3f(ox * ok, oy * ok, 0.0); n.z = sqrt(max(0.0, 1.0 - n.x * n.x - n.y * n.y));
+  if (pnOn) { n = pn; }
+  let hp = K[KHP + u32(d)]; let hq = K[KHQ + u32(d)];
+  if (d < 46 && !pnOn) { n.x += (hp - 0.5) * 0.5; n.y += (hq - 0.5) * 0.5; n = nrm3(n); }
+  let thinP = pnOn;                                             // (the per-pixel path is the THIN one only)
+  let gxf = px / G - 0.5; let gyf = py / G - 0.5;
+  var bn = n; let mass = h.q0.x;
+  if (mass > 0.0 && !thinP) {
+    bn = nrm3(vec3f(samp(0, 1, gxf, gyf), samp(1, 1, gxf, gyf), samp(2, 1, gxf, gyf)));
+    n = nrm3(bn * mass + n * (1.0 - mass));
+  }
+  var cast_ = h.q0.y * samp(0, 2, gxf, gyf); var shS = max(cast_, h.q0.z * samp(1, 2, gxf, gyf));
+  let prev = !pnOn && mem.w > 0.0;
+  if (prev) { cast_ = mem.y + (cast_ - mem.y) * 0.25; shS = mem.z + (shS - mem.z) * 0.25; }
+  let L = b2.xyz; let bk = smoothstep(0.35, 0.8, -L.z);
+  if (bk > 0.0 && !thinP) { n = nrm3(n + (bn - n) * bk); }
+  let AMB = h.q0.w;
+  var val = dot(n, L) * 0.5 + 0.5;
+  val -= shS * 0.5 * max(0.0, val - 0.15);
+  val += AMB * 0.3 * (n.y * 0.5 + 0.5) - AMB * 0.12;
+  var rimAdd = 0.0;
+  if (L.z < 0.0) {
+    let lxy = length(L.xy); var dirT = 0.0; if (lxy > 1e-4) { dirT = max(0.0, n.x * L.x + n.y * L.y) / lxy; }
+    let toward = dirT * (1.0 - bk) + (0.45 + 0.55 * max(0.0, n.y)) * bk; let side = 1.0 - abs(n.z); var open = 1.0;
+    if (side > 0.05) {
+      var nl = length(n.xy); if (nl == 0.0) { nl = 1.0; } let dd = (2.5 + min(r, 6.0) * 1.2) / G;
+      open = smoothstep(0.5, 0.15, samp(3, 1, clamp(gxf + n.x / nl * dd, 0.0, f32(h.gs.x) - 1.01), clamp(gyf - n.y / nl * dd, 0.0, f32(h.gs.y) - 1.01)));
+    }
+    rimAdd = -L.z * side * side * toward * 1.1 * (1.0 - shS) * open; val += rimAdd;
+    val -= bk * (1.0 - open) * side * 0.45;
+  }
+  if (Fm >= 3.0 && r < 1.8) { val += 0.25; }
+  var jit = 0.0; if (!pnOn) { jit = (hp - 0.5) * h.q1.z; }
+  let qv = (val - 0.5) * h.q1.x + 0.5 + h.q1.y + jit;
+  let gk = h.q2.z; var gf = 0.0; if (gk > 0.01) { gf = gk * (0.12 + 0.62 * max(0.0, -bn.y) + 0.2 * (1.0 - abs(bn.y))); }
+  let hiK = h.q1.w;
+  var T: array<i32, 3>;
+  for (var s = 0; s < 3; s++) {
+    var e = 0.0; if (s == 1) { e = -0.08; } else if (s == 2) { e = 0.08; }
+    var t = i32(clamp(floor((qv + e) * 5.0), 0.0, 4.0));
+    if (hiK > 0.0 && qv + e >= 1.25 - 0.25 * hiK && (rimAdd + e > 0.12 || h.q2.x > 0.5 || h.q2.y > 0.3)) { t = 5; }
+    let kk = clamp((cast_ - e - 0.3) / 0.3, 0.0, 1.0); var floorT = 0.0; if (bn.y > 0.3) { floorT = 1.0; }
+    if (kk > 0.0) { t = min(t, i32(floor(4.0 - kk * (4.0 - floorT) + 0.5))); }
+    if (gf > 0.0) { t = max(t, i32(min(3.0, floor((gf + e) * 4.2)))); }
+    T[s] = t;
+  }
+  var tone = T[0]; var k = 0.0;
+  if (prev) {
+    let tp = i32(mem.x + 0.5); k = mem.w - 1.0;
+    if (tp != tone && tp >= min(T[1], T[2]) && tp <= max(T[1], T[2])) { tone = tp; }
+    if (tone != tp) { k += 1.0; if (k >= 2.0) { var st = -1; if (tone > tp) { st = 1; } tone = tp + st; k = 0.0; } else { tone = tp; } } else { k = 0.0; }
+  }
+  // the fire's light
+  var warm = 0;
+  if (h.nf.x > 0 && h.q2.w > 0.0) {
+    var fl = 0.0;
+    for (var m = 0; m < 64; m++) {
+      if (m >= h.nf.x) { break; }
+      let f = h.fl[m]; let dx = f.x - px; let dy = py - f.y; let d2 = dx * dx + dy * dy;
+      if (d2 >= f.z * f.z) { continue; }
+      var dl = sqrt(d2); if (dl == 0.0) { dl = 1.0; }
+      let fall = 1.0 - d2 / (f.z * f.z);
+      fl += f.w * fall * (0.35 + 0.65 * max(0.0, (n.x * dx + n.y * dy) / dl * 0.8 + n.z * 0.2));
+    }
+    fl *= h.q2.w; if (fl > 0.62) { warm = 2; } else if (fl > 0.3) { warm = 1; }
+  }
+  return Sh(vec4f(f32(tone), f32(warm), cast_, shS), k);
+}`;
+// TONES: an invocation a slot's dome (47 a slot: 46 domes of the tile, 46 the ball whole) - x the column (slot % 64, dome), y + z the row
+const SMP_TONES_WGSL = NL => smpHead(NL) + `
+@group(0) @binding(0) var<storage, read> h: H;
+@group(0) @binding(1) var<storage, read> bd: array<vec4f>;
+@group(0) @binding(2) var<storage, read> F: array<f32>;
+@group(0) @binding(3) var<storage, read> g2: array<vec2f>;
+@group(0) @binding(4) var<storage, read> K: array<f32>;
+@group(0) @binding(5) var<storage, read_write> mem: array<vec4f>;
+@group(0) @binding(6) var<storage, read_write> tn: array<u32>;
+` + SMP_SHADE_WGSL + `
+@compute @workgroup_size(64) fn tones(@builtin(global_invocation_id) g: vec3u) {
+  let col = i32(g.x); let row = g.z * h.fo2.w + g.y;
+  if (row >= h.fo2.z) { return; }
+  let slot = i32(row) * 64 + col / 47; let d = col - (col / 47) * 47; let mi = row * ${SMP_MW}u + u32(col);
+  var mv = mem[mi];
+  let sb = F[h.fo.z + u32(slot)];
+  tn[mi] = 0u;
+  if (sb < -0.5) { return; }                                    // (no ball of this puff in this paint: its memory kept)
+  let fresh = sb >= 1048576.0; var si = sb; if (fresh) { si = sb - 1048576.0; } let i = i32(si + 0.5);
+  if (fresh) { mv = vec4f(0.0); }
+  let b0 = B(i, 0); let b1 = B(i, 1); let b2 = B(i, 2); let b3 = B(i, 3);
+  let tk = b1.z;
+  if (b2.w > 0.5 || (tk <= 0.0 && d != 46)) { mem[mi] = mv; return; }   // (a thin line's ball: lit per pixel; no tile: only the ball whole)
+  var px = b0.x; var py = b0.y;
+  if (d < 46) {                                                 // (the dome's middle: its repeat of the tile nearest the ball's middle)
+    let dcx = K[KDC + u32(d) * 2u]; let dcy = K[KDC + u32(d) * 2u + 1u];
+    let tuC = b3.x + 4096.0; let tvC = b3.y + 4096.0; let cu = dcx + 64.0 * floor((tuC - dcx) / 64.0 + 0.5); let cv = dcy + 64.0 * floor((tvC - dcy) / 64.0 + 0.5);
+    px = b0.x + (cu - b3.x - 4096.0) / tk; py = b0.y + (cv - b3.y - 4096.0) / tk;
+  }
+  let s = shadePuff(i, px, py, d, false, vec3f(0.0), mv);
+  mem[mi] = vec4f(s.s.x, s.s.z, s.s.w, s.k + 1.0);
+  tn[mi] = u32(s.s.x) | (u32(s.s.y) << 3u);
+}`;
+// SPLAT: a ball a quad (a triangle strip), in the picture's rows as the GL program had them; the rows turned to WebGL's order and z to
+// 0..w as every vertex stage of the game (src/gpu/10-glsl.js)
+const SMP_SPLAT_WGSL = NL => smpHead(NL) + `
+@group(0) @binding(0) var<storage, read> h: H;
+@group(0) @binding(1) var<storage, read> bd: array<vec4f>;
+@group(0) @binding(2) var<storage, read> F: array<f32>;
+@group(0) @binding(3) var<storage, read> K: array<f32>;
+fn B(i: i32, k: i32) -> vec4f { return bd[i * 4 + k]; }
+struct SV { @builtin(position) p: vec4f, @location(0) @interpolate(flat) i: i32 };
+@vertex fn vs(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> SV {
+  let i = i32(F[h.fo.w + n] + 0.5); let b0 = B(i, 0); let cx = b0.x; let cy = b0.y; let r = b0.z;
+  var lo: vec2f; var hi: vec2f;
+  if (r < 0.75) { lo = vec2f(floor(cx), floor(cy)); hi = lo + vec2f(1.0); }
+  else { lo = vec2f(floor(cx - r), floor(cy - r)); hi = vec2f(ceil(cx + r) + 1.0, ceil(cy + r) + 1.0); }
+  let p = mix(lo, hi, vec2f(f32(v & 1u), f32(v >> 1u))) / h.sz;
+  var g = vec4f(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0); g.y = -g.y; g.z = (g.z + g.w) * 0.5;
+  return SV(g, i);
+}
+struct SO { @location(0) o: vec4f, @builtin(frag_depth) z: f32 };
+@fragment fn fs(s: SV) -> SO {
+  let fx = floor(s.p.x); let fy = floor(h.sz.y - s.p.y);
+  if (fy > F[h.fo2.x + u32(fx)]) { discard; }                  // (under the water: no ball)
+  let b0 = B(s.i, 0); let b1 = B(s.i, 1); let b3 = B(s.i, 3);
+  let cx = b0.x; let cy = b0.y; let r = b0.z; let z = b0.w; let tk = b1.z; var hz = 0.0;
+  if (r < 0.75) { hz = z + r; }
+  else {
+    let dy = fy + 0.5 - cy; let w2 = r * r - dy * dy;
+    if (w2 <= 0.0) { discard; }
+    let hw = sqrt(w2);
+    if (fx < ceil(cx - hw - 0.5) || fx > floor(cx + hw - 0.5)) { discard; }
+    let dx = fx + 0.5 - cx; let t = (dx * dx + dy * dy) * (1024.0 / (r * r));
+    if (tk > 0.0) {
+      let q = ((i32(floor(dy * tk + b3.y + 4096.0)) & 63) << 6u) + (i32(floor(dx * tk + b3.x + 4096.0)) & 63);
+      let th = K[u32(q) * 4u];
+      if (t > 1024.0 - 300.0 * h.c.x * (1.0 - th)) { discard; }
+      hz = z + r * sqrt(1.0 - floor(t) / 1024.0) + r * 0.22 * h.c.x * th;
+    } else { var tt = 1024.0; if (t < 1024.0) { tt = floor(t); } hz = z + r * sqrt(1.0 - tt / 1024.0); }
+  }
+  return SO(vec4f(f32(s.i), hz, 0.0, 1.0), clamp(0.5 - hz * 1e-3, 0.0, 1.0));
+}`;
+// COMPOSE: one quad over the picture's box
+const SMP_COMP_WGSL = NL => smpHead(NL) + `
+@group(0) @binding(0) var<storage, read> h: H;
+@group(0) @binding(1) var<storage, read> bd: array<vec4f>;
+@group(0) @binding(2) var<storage, read> F: array<f32>;
+@group(0) @binding(3) var<storage, read> g2: array<vec2f>;
+@group(0) @binding(4) var<storage, read> K: array<f32>;
+@group(0) @binding(5) var<storage, read> tn: array<u32>;
+@group(0) @binding(6) var sp: texture_2d<f32>;
+` + SMP_SHADE_WGSL + `
+@vertex fn vs(@builtin(vertex_index) v: u32) -> @builtin(position) vec4f {
+  let p = (h.pic.xy + vec2f(f32(v & 1u), f32(v >> 1u)) * h.pic.zw) / h.sz;
+  var g = vec4f(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0); g.y = -g.y; g.z = (g.z + g.w) * 0.5;
+  return g;
+}
+@fragment fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
+  let x = i32(fc.x); let ty = i32(fc.y); let y = i32(h.sz.y) - 1 - ty; let cw = i32(h.sz.x);   // (ty: the texel row - the splat's target is laid out as this one; y: the row from the top)
+  let S = textureLoad(sp, vec2i(x, ty), 0);
+  let i = i32(S.x + 0.5); if (S.x < -0.5) { return vec4f(0.0); }
+  let b0 = B(i, 0); let b1 = B(i, 1); let b2 = B(i, 2); let b3 = B(i, 3);
+  let X = b0.x; let Y = b0.y; let R = b0.z; let Fm = b1.y; let tk = b1.z; let slot = i32(b1.w + 0.5);
+  // FADING (user Oct 29: "proper smoke fading vs having the puffs disappear"): a fading ball dissolves in clumps where it is the front of
+  // the smoke - holes through the whole body, its rim first, in a pattern riding with the ball (measured from its middle, seeded by its
+  // own number), so what's left is still lit as before
+  if (b1.x < 0.999) {
+    let ddx = f32(x) + 0.5 - X; let ddy = f32(y) + 0.5 - Y; let sd = b3.z * 97.0;
+    let g = vec2f(ddx, ddy) / 3.4 + sd; let gi = floor(g); var gf = g - gi; gf = gf * gf * (3.0 - 2.0 * gf);
+    let h00 = fract(sin(dot(gi, vec2f(12.99, 78.23))) * 43758.5); let h10 = fract(sin(dot(gi + vec2f(1.0, 0.0), vec2f(12.99, 78.23))) * 43758.5);
+    let h01 = fract(sin(dot(gi + vec2f(0.0, 1.0), vec2f(12.99, 78.23))) * 43758.5); let h11 = fract(sin(dot(gi + vec2f(1.0, 1.0), vec2f(12.99, 78.23))) * 43758.5);
+    let vn = mix(mix(h00, h10, gf.x), mix(h01, h11, gf.x), gf.y); let fh = fract(sin(dot(floor(vec2f(ddx, ddy)) + sd, vec2f(39.35, 11.13))) * 24634.6);
+    let rim = clamp(length(vec2f(ddx, ddy)) / max(R, 0.5), 0.0, 1.0);
+    if ((0.5 * vn + 0.1 * fh + 0.4 * rim * rim) * 0.99 > b1.x) { return vec4f(0.0); }
+  }
+  var d = 46; var tcr = false;
+  if (tk > 0.0) {
+    let q = ((i32(floor((f32(y) + 0.5 - Y) * tk + b3.y + 4096.0)) & 63) << 6u) + (i32(floor((f32(x) + 0.5 - X) * tk + b3.x + 4096.0)) & 63);
+    let btz = K[u32(q) * 4u + 2u]; let btw = K[u32(q) * 4u + 3u];
+    tcr = Fm < 3.0 && btw > 0.5;
+    if (btz >= 0.0) { d = i32(btz + 0.5); }
+  }
+  var tone: i32; var warm: i32;
+  if (h.c.z > 0.5 && tk <= 0.0 && Fm >= 3.0) {                 // THIN: lit per pixel, from its own round surface
+    var n = vec3f((f32(x) + 0.5 - X) / R, (Y - f32(y) - 0.5) / R, 0.0); n.z = sqrt(max(0.0, 1.0 - n.x * n.x - n.y * n.y));
+    let s = shadePuff(i, f32(x) + 0.5, f32(y) + 0.5, d, true, n, vec4f(0.0));
+    tone = i32(s.s.x + 0.5); warm = i32(s.s.y + 0.5);
+  } else {
+    let t = tn[u32(slot) * 47u + u32(d)]; tone = i32(t & 7u); warm = i32(t >> 3u);
+  }
+  if (h.c.y > 0.5 && tcr && tone > 0) { if (tone == 5) { tone = 3; } else { tone = tone - 1; } }
+  else if (h.c.y > 0.5 && tone > 0) {
+    let zk = S.y + R * 0.22; var cr = false;
+    if (x > 0) { let q = textureLoad(sp, vec2i(x - 1, ty), 0); if (i32(q.x + 0.5) != i && q.y > zk) { cr = true; } }
+    if (x < cw - 1) { let q = textureLoad(sp, vec2i(x + 1, ty), 0); if (i32(q.x + 0.5) != i && q.y > zk) { cr = true; } }
+    if (y > 0) { let q = textureLoad(sp, vec2i(x, ty + 1), 0); if (i32(q.x + 0.5) != i && q.y > zk) { cr = true; } }   // (the row above)
+    if (cr) { if (tone == 5) { tone = 3; } else { tone = tone - 1; } }
+  }
+  return unpack4x8unorm(h.lut[(i32(Fm + 0.5) * 6 + tone) * 3 + warm]);
+}`;
+// the GPU objects every paint shares (src/gpu's calls), made again on a new device: the layouts and pipelines, K, the buffers the paints
+// write in turn (bd, F, tn) and the splat's targets (grown in steps to the largest paint)
+const SMP = { ep: -1, NL: 0, HB: 0, comp: new Map(), bgs: new Map(), gen: 0 };
+function smpShared() {
+  if (SMP.ep === GLR.epoch) return;
+  const NL = SMP.NL = SMOKE_PAL.length * 18, CS = GPUShaderStage.COMPUTE, VS = GPUShaderStage.VERTEX, FS = GPUShaderStage.FRAGMENT;
+  SMP.HB = 192 + 1024 + Math.ceil(NL / 4) * 16;
+  const hd = vis => ({ binding: 0, visibility: vis, buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: SMP.HB } });
+  const ro = (b, vis) => ({ binding: b, visibility: vis, buffer: { type: 'read-only-storage' } }), rw = (b, vis) => ({ binding: b, visibility: vis, buffer: { type: 'storage' } });
+  SMP.lf = gpuBindLayout([hd(CS), rw(1, CS), rw(2, CS)], 'smoke fields');
+  SMP.lt = gpuBindLayout([hd(CS), ro(1, CS), ro(2, CS), ro(3, CS), ro(4, CS), rw(5, CS), rw(6, CS)], 'smoke tones');
+  SMP.ls = gpuBindLayout([hd(VS | FS), ro(1, VS | FS), ro(2, VS | FS), ro(3, FS)], 'smoke splat');
+  SMP.lc = gpuBindLayout([hd(VS | FS), ro(1, FS), ro(2, FS), ro(3, FS), ro(4, FS), ro(5, FS), { binding: 6, visibility: FS, texture: { sampleType: 'unfilterable-float' } }], 'smoke compose');
+  const mf = gpuModule(SMP_FIELDS_WGSL(NL), 'smoke fields'), pf = gpuPipeLayout([SMP.lf], 'smoke fields');
+  SMP.clear2 = gpuComputePipe({ layout: pf, compute: { module: mf, entryPoint: 'clear2' } });
+  SMP.mass = gpuComputePipe({ layout: pf, compute: { module: mf, entryPoint: 'mass' } });
+  SMP.march = gpuComputePipe({ layout: pf, compute: { module: mf, entryPoint: 'march' } });
+  SMP.tones = gpuComputePipe({ layout: gpuPipeLayout([SMP.lt], 'smoke tones'), compute: { module: gpuModule(SMP_TONES_WGSL(NL), 'smoke tones'), entryPoint: 'tones' } });
+  const ms = gpuModule(SMP_SPLAT_WGSL(NL), 'smoke splat');
+  SMP.splat = gpuRenderPipe({ layout: gpuPipeLayout([SMP.ls], 'smoke splat'), vertex: { module: ms, entryPoint: 'vs' }, fragment: { module: ms, entryPoint: 'fs', targets: [{ format: 'rg32float' }] },
+    primitive: { topology: 'triangle-strip', cullMode: 'none' }, depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' } });
+  SMP.mc = gpuModule(SMP_COMP_WGSL(NL), 'smoke compose'); SMP.pc = gpuPipeLayout([SMP.lc], 'smoke compose'); SMP.comp.clear();
+  // K: the billow tile, the leans, the domes' middles
+  const Kf = new Float32Array(SMP_KN);
+  for (let q = 0; q < 4096; q++) { Kf[q * 4] = BT.H[q]; Kf[q * 4 + 1] = BT.NX[q]; Kf[q * 4 + 2] = BT.ID[q]; Kf[q * 4 + 3] = BT.CR[q]; }
+  Kf.set(SM_HP, SMP_KHP); Kf.set(SM_HQ, SMP_KHQ); for (let d = 0; d < 46; d++) { Kf[SMP_KDC + d * 2] = BT.DCX[d]; Kf[SMP_KDC + d * 2 + 1] = BT.DCY[d]; }
+  SMP.K = gpuBuf(Kf.byteLength, 'smoke'); gpuWriteBuf(SMP.K.gb, 0, new Uint8Array(Kf.buffer));
+  for (const k of ['bd', 'F', 'tn', 'sp', 'spd']) SMP[k] = null;   // (the old device's: gone with it)
+  SMP.bgs.clear(); SMP.gen++; SMP.ep = GLR.epoch;
+}
+// a buffer of o's, at least `bytes` (grown in powers of two - never shrunk; keep: its contents copied into the new one, in order)
+function smpBuf(o, k, bytes, pool, keep) {
+  const b = o[k];
+  if (b && b.gle === GLR.epoch && b.size >= bytes) return b;
+  let n = 65536; while (n < bytes) n *= 2;
+  const nb = gpuBuf(n, pool); nb.gle = GLR.epoch;
+  if (b && b.gle === GLR.epoch) { if (keep) gpuCopyBuf(b, 0, nb, 0, b.size); gpuBufFree(b); }
+  SMP.gen++;
+  return (o[k] = nb);
+}
+// the splat's targets, at least w x h (rows used from 0 up: the paint's viewport)
+function smpTargets(w, h) {
+  const t = SMP.sp;
+  if (t && t.gle === GLR.epoch && t.w >= w && t.h >= h) return;
+  const W = Math.max(w, t ? t.w : 0), H = Math.max(h, t ? t.h : 0);
+  if (t) { gpuTexFree(t); gpuTexFree(SMP.spd); }
+  SMP.sp = gpuTex(W, H, 'rg32float', 'smoke'); SMP.spd = gpuTex(W, H, 'depth32float', 'smoke'); SMP.sp.gle = GLR.epoch; SMP.gen++;
+}
+// a typed array into buffer b at byte off, in order with the frame's passes: straight in if no command still to be sent uses b, else
+// through the arena (pieces of at most 1 MB) and a copy recorded where this paint is - never a submit mid-frame
+function smpUp(b, off, a) {
+  const u8 = new Uint8Array(a.buffer, a.byteOffset, a.byteLength), n = u8.length;
+  if (!n) return;
+  if (b.use !== FR.sub) { gpuWriteBuf(b.gb, off, u8); return; }
+  for (let s = 0; s < n; s += 1 << 20) { const k = Math.min(1 << 20, n - s), [c, o] = arenaAlloc(k, 256); c.cpu.set(u8.subarray(s, s + k), o); gpuCopyBuf(c, o, b, off + s, k); }
+}
+// the balls' numbers -> their slots (smPaint): open addressing, linear probing, a deleted entry's run shifted back
 function smsTab(cap) { return { cap, n: 0, seq: 0, key: new Float64Array(cap), use: new Uint8Array(cap), slot: new Int32Array(cap), p: new Int32Array(cap), f: new Uint8Array(cap), ins: new Float64Array(cap) }; }
 const smsH = (T, key) => (Math.imul((key >>> 0) ^ ((key / 4294967296) | 0), 0x9E3779B1) >>> 0) & (T.cap - 1);
 function smsFind(T, key) { let k = smsH(T, key); while (T.use[k]) { if (T.key[k] === key) return k; k = (k + 1) & (T.cap - 1); } return ~k; }
@@ -29903,7 +29955,7 @@ function smsDel(T, key) {
     j = (j + 1) & m;
   }
 }
-// a paint's slots (gsmPaint's, moved out - Oct 30, so the smoke-drawing worker runs it too): St the pass's table and slots
+// a paint's slots (smPaint's, moved out - Oct 30, so the smoke-drawing worker runs it too): St the pass's table and slots
 // ({ tab, free, next, paint }); each ball's slot into slotOf, whether its slot is new into nw. lg (the worker's): the numbers
 // given a slot ([slot, number, first-seen] each) and the slots given back, in order, for the main thread's copy (smsMir)
 function smsRun(St, n, SID, slotOf, nw, lg) {
@@ -29931,7 +29983,7 @@ function smsRun(St, n, SID, slotOf, nw, lg) {
     for (const key of keys) smsDel(T_, key);
   }
 }
-// the balls' data for the GPU (4 texels a ball) and each slot's ball (S2: -1 none, + 1048576 a new one) - gsmPaint's, moved out
+// the balls' data for the GPU (4 texels a ball) and each slot's ball (S2: -1 none, + 1048576 a new one) - smPaint's, moved out
 function smsPack(n, B, slotOf, nw, thinOn, BD, S2, sRows) {
   const { X, Y, R, Z, A, F, TK, TU, TV, SID, LX, LY, LZ } = B;
   for (let i = 0; i < n; i++) {
@@ -29991,9 +30043,15 @@ function smsTake(G_) {
   G_.free = M.free.slice(); G_.next = M.next; G_.paint = M.paint;
 }
 const gsmState = S_ => S_.gsm || (S_.gsm = { slot: new Map(), free: [], next: 0, paint: 0, s2b: null, cur: 0, own: 'm' });
-function gsmPaint(S_, a) {
-  const gl = GLR.gl, { n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, MX, MY, MZ, hb, hh, dn, mass, tkA, FL, nF, mg } = a;
-  glFlush();
+// a pass's bind groups for this arena chunk (made again when a buffer it names was made again: SMP.gen / G_.gen)
+function smpBind(map, key, c, mk) {
+  let e = map.get(c.id);
+  if (!e || e.gb !== c.gb || e.key !== key) { e = { gb: c.gb, key, g: mk() }; map.set(c.id, e); }
+  return e.g;
+}
+function smPaint(S_, a) {
+  const { n, X, Y, R, Z, A, F, LX, LY, LZ, ord, cw, h, bx0, by0, bx1, by1, wrow, gw, gh, hb, hh, dn, mass, tkA, FL, nF, mg } = a;
+  frameFlush();
   const G_ = gsmState(S_);
   const thinOn = (P.smthin ?? 1) > 0, WK = a.wk;
   // the puffs' slots in the memory: a ball's own number (SID) keeps its slot from paint to paint; one not seen for 64 paints
@@ -30015,7 +30073,6 @@ function gsmPaint(S_, a) {
     if (!G_.so || G_.so.length < n) { G_.so = new Int32Array(Math.ceil(n * 1.5)); G_.se = new Uint8Array(G_.so.length); }
     smsRun(G_, n, S_.SID, G_.so, G_.se, null);
     slots = Math.max(64, G_.next); sRows = Math.ceil(slots / 1024);
-    // ---- the inputs: the balls (4 texels each), the order, the water's rows, the fields, the slots' balls, the colours
     BD = G_.bd && G_.bd.length >= bRows * 4096 ? G_.bd : (G_.bd = new Float32Array(bRows * 4096 * 1.5 | 0));
     S2 = G_.s2 && G_.s2.length >= sRows * 1024 ? G_.s2 : (G_.s2 = new Float32Array(sRows * 1024 * 2));
     smsPack(n, { X, Y, R, Z, A, F, TK: S_.TK, TU: S_.TU, TV: S_.TV, SID: S_.SID, LX, LY, LZ }, G_.so, G_.se, thinOn, BD, S2, sRows);
@@ -30023,118 +30080,75 @@ function gsmPaint(S_, a) {
   // (?smdcheck=1: the same slots worked out here by a table of the main thread's own, from the same balls, and the packed data
   // compared to the bit - the worker's, or this thread's after taking the table back from its copy)
   if (SMD_CHECK) smsCheck(G_, n, a.B || { X, Y, R, Z, A, F, TK: S_.TK, TU: S_.TU, TV: S_.TV, SID: S_.SID, LX, LY, LZ }, thinOn, BD, S2, slots, sRows);
-  const rows = Math.ceil(slots / 64), MW = 47 * 64;
-  G_.btex = gsmTex(G_.btex, 1024, bRows, BD.subarray(0, bRows * 4096));
-  const W1 = G_.w1 && G_.w1.length >= cw ? G_.w1 : (G_.w1 = new Float32Array(cw * 2)); for (let x = 0; x < cw; x++) W1[x] = wrow[x];
-  G_.wtex = gsmTex(G_.wtex, cw, 1, W1.subarray(0, cw), 'R32F');
-  const GN = gw * gh;
-  if (SM_GPU_MASS) {
-    // (engine stage 8: the smoothed density alone goes up, a quarter of the four channels; the normals made from it on the GPU,
-    // over the whole grid - the box's cells their normals, the rest the density only)
-    G_.hbt = gsmTex(G_.hbt, gw, gh, hb.subarray(0, GN), 'R32F'); G_.hht = gsmTex(G_.hht, gw, gh, hh.subarray(0, GN), 'R32F');   // (hh: the mass's height, each place's own slope scale in it - smBlurSized)
-    if (!G_.g1g || G_.g1g.w !== gw || G_.g1g.h !== gh || G_.g1g.ep !== GLR.epoch) { if (G_.g1f && G_.g1g && G_.g1g.ep === GLR.epoch) gl.deleteFramebuffer(G_.g1f); G_.g1g = gsmTex(G_.g1g && G_.g1g.ep === GLR.epoch ? G_.g1g : null, gw, gh, null); G_.g1f = gsmFbo([G_.g1g]); }
-    const [gx0, gy0, gx1, gy1] = mg, mp = GSM.mass;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, G_.g1f); gl.viewport(0, 0, gw, gh); gl.disable(gl.SCISSOR_TEST); gl.disable(gl.BLEND); gl.disable(gl.STENCIL_TEST); gl.disable(gl.DEPTH_TEST);
-    gl.useProgram(mp.p); gl.uniform4f(mp.U.u_rect, 0, 0, gw, gh); gl.uniform2f(mp.U.u_size, gw, gh); gl.uniform1i(mp.U.u_hb, 0); gl.uniform1i(mp.U.u_hh, 1);
-    gl.uniform4i(mp.U.u_box, gx0, gy0, gx1, gy1); gl.uniform1f(mp.U.u_k, 1);
-    gsmBind(0, G_.hbt); gsmBind(1, G_.hht); gl.bindVertexArray(GSM.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    G_.g1u = G_.g1g;
-  } else {
-    const g1 = G_.g1 && G_.g1.length >= GN * 4 ? G_.g1 : (G_.g1 = new Float32Array(GN * 4));
-    for (let k = 0; k < GN; k++) { const o = k * 4; g1[o] = MX[k]; g1[o + 1] = MY[k]; g1[o + 2] = MZ[k]; g1[o + 3] = hb[k]; }
-    G_.g1u = G_.g1t = gsmTex(G_.g1t, gw, gh, g1.subarray(0, GN * 4));
+  // the picture this paint is laid into (smShow), a GL layer the size of the grid
+  const OT = S_.otT || (S_.otT = new GLTarget(cw, h)); if (OT.width !== cw || OT.height !== h) { OT.width = cw; OT.height = h; }
+  const FT = frameTarget({ target: OT }); if (!FT) return;
+  smpShared();
+  const rows = Math.ceil(slots / 64), GN = gw * gh, sN = sRows * 1024;
+  // ---- what goes up: F's parts (floats - hb hh dn | the slots' balls | the draw order | the water's rows | g1), the balls
+  const oS2 = 3 * GN, oOD = oS2 + sN, oWR = oOD + n, oG1 = Math.ceil((oWR + cw) / 4) * 4, FN = oG1 + 4 * GN;
+  const FB = smpBuf(SMP, 'F', FN * 4, 'smoke'), BB = smpBuf(SMP, 'bd', n * 64, 'smoke'), TN = smpBuf(SMP, 'tn', rows * SMP_MW * 4, 'smoke');
+  // (a pass's own: its shadow, cleared when the grid's size changes (as the GL texture was made again); its memory, grown with room to
+  // spare keeping what it held - Oct 28, user: "the smoke looks weirdly lit now. Lots of flickering and the part that should be dark has
+  // some tones": a source pouring smoke kept making new puffs, and each 64 more slots made the memory again, empty)
+  const g2fresh = !G_.g2 || G_.g2.gle !== GLR.epoch || G_.g2w !== gw || G_.g2h !== gh;
+  const G2 = smpBuf(G_, 'g2', GN * 8, 'smoke'); G_.g2w = gw; G_.g2h = gh;
+  if (!G_.mem || G_.mem.gle !== GLR.epoch || G_.memRows < rows) {
+    const old = G_.mem && G_.mem.gle === GLR.epoch ? G_.memRows : 0, R2 = Math.max(rows, Math.ceil(old * 1.5), rows + 4);
+    if (old) { G_.grew = (G_.grew || 0) + 1; SMP.grows = (SMP.grows || 0) + 1; }   // (tests: how often the memory grew)
+    smpBuf(G_, 'mem', R2 * SMP_MW * 16, 'smoke', true); G_.memRows = R2;
   }
-  G_.dnt = gsmTex(G_.dnt, gw, gh, dn.subarray(0, GN), 'R32F');
-  // ---- 0. MARCH: sh and ss for every cell of the box, into the shadow grid (kept between paints, as the JS arrays were)
-  if (!G_.g2t || G_.g2t.w !== gw || G_.g2t.h !== gh || G_.g2t.ep !== GLR.epoch) { if (G_.g2f) gl.deleteFramebuffer(G_.g2f); G_.g2t = gsmTex(G_.g2t && G_.g2t.ep === GLR.epoch ? G_.g2t : null, gw, gh, null); G_.g2f = gsmFbo([G_.g2t]); gl.disable(gl.SCISSOR_TEST); gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]); }
-  { const [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] = mg, mp = GSM.march;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, G_.g2f); gl.viewport(0, 0, gw, gh); gl.disable(gl.SCISSOR_TEST); gl.disable(gl.BLEND); gl.disable(gl.STENCIL_TEST); gl.disable(gl.DEPTH_TEST);
-    gl.useProgram(mp.p); gl.uniform4f(mp.U.u_rect, gx0, gy0, gx1 - gx0 + 1, gy1 - gy0 + 1); gl.uniform2f(mp.U.u_size, gw, gh); gl.uniform1i(mp.U.u_dn, 0);
-    gl.uniform4i(mp.U.u_box, gx0, gy0, gx1, gy1); gl.uniform4f(mp.U.u_m0, sdx, sdy, ownF, nMarch); gl.uniform4f(mp.U.u_m1, f2, kS, behind, 0);
-    gsmBind(0, G_.dnt); gl.bindVertexArray(GSM.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
-  G_.s2t = gsmTex(G_.s2t, 1024, sRows, S2.subarray(0, sRows * 1024), 'R32F');
-  if (!SM_DC) { SM_DC = new Float32Array(92); for (let d = 0; d < 46; d++) { SM_DC[d * 2] = BT.DCX[d]; SM_DC[d * 2 + 1] = BT.DCY[d]; }
-    SM_BTD = new Float32Array(64 * 64 * 4); for (let q = 0; q < 4096; q++) { SM_BTD[q * 4] = BT.H[q]; SM_BTD[q * 4 + 1] = BT.NX[q]; SM_BTD[q * 4 + 2] = BT.ID[q]; SM_BTD[q * 4 + 3] = BT.CR[q]; } }
-  if (!GSM.bt || GSM.bt.ep !== GLR.epoch) GSM.bt = gsmTex(null, 64, 64, SM_BTD);
-  const lut = S_.lut, NL = lut.length;
-  if (!G_.lt || G_.lt.ep !== GLR.epoch || G_.lt.w !== NL) { if (G_.lt && G_.lt.ep === GLR.epoch) gl.deleteTexture(G_.lt.tex); G_.lt = { tex: glNewTex(0, 0, gl.NEAREST), w: NL, ep: GLR.epoch }; gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G_.lt.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, NL, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); }
-  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G_.lt.tex); glPM(false); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NL, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(lut.buffer, lut.byteOffset, NL * 4));
-  // ---- 1. SPLAT, into the index-and-height target (the whole picture's size; the box cleared and drawn)
-  if (!G_.sp || G_.sp.w !== cw || G_.sp.h !== h || G_.sp.ep !== GLR.epoch) {
-    if (G_.sp && G_.sp.ep === GLR.epoch) { gl.deleteFramebuffer(G_.sp.fbo); gl.deleteRenderbuffer(G_.sp.rb); gl.deleteTexture(G_.sp.t.tex); }
-    const t = gsmTex(null, cw, h, null), rb = gl.createRenderbuffer(); gl.bindRenderbuffer(gl.RENDERBUFFER, rb); gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT32F, cw, h);
-    G_.sp = { t, rb, fbo: gsmFbo([t], rb), w: cw, h, ep: GLR.epoch };
-  }
-  const bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
-  gl.bindFramebuffer(gl.FRAMEBUFFER, G_.sp.fbo); gl.viewport(0, 0, cw, h);
-  gl.enable(gl.SCISSOR_TEST); gl.scissor(bx0, h - by0 - bh, bw, bh);
-  gl.disable(gl.STENCIL_TEST); gl.disable(gl.BLEND);
-  gl.clearBufferfv(gl.COLOR, 0, [-1, -1e9, 0, 0]); gl.clearDepth(1); gl.depthMask(true); gl.clear(gl.DEPTH_BUFFER_BIT);
-  gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS);
-  const sp = GSM.splat; gl.useProgram(sp.p);
-  gl.uniform1i(sp.U.u_b, 0); gl.uniform1i(sp.U.u_w, 1); gl.uniform1i(sp.U.u_bt, 2); gl.uniform2f(sp.U.u_size, cw, h); gl.uniform1f(sp.U.u_tka, tkA);
-  gsmBind(0, G_.btex); gsmBind(1, G_.wtex); gsmBind(2, GSM.bt);
+  smpTargets(cw, h);
+  smpUp(FB, 0, hb.subarray(0, GN)); smpUp(FB, GN * 4, hh.subarray(0, GN)); smpUp(FB, 2 * GN * 4, dn.subarray(0, GN)); smpUp(FB, oS2 * 4, S2.subarray(0, sN));
   let OD = WK && WK.od;
   if (!OD) { OD = G_.od && G_.od.length >= n ? G_.od : (G_.od = new Float32Array(Math.ceil(n * 1.5))); for (let q = 0; q < n; q++) OD[q] = ord ? ord[q] : q; }
-  gl.bindVertexArray(GSM.svao); gl.bindBuffer(gl.ARRAY_BUFFER, GSM.ordVbo); gl.bufferData(gl.ARRAY_BUFFER, OD, gl.STREAM_DRAW, 0, n);
-  gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);
-  gl.disable(gl.DEPTH_TEST);
-  // ---- 2. TONES: every puff's light and memory (the memory ping-ponged between two targets)
-  // (Oct 28, user: "the smoke looks weirdly lit now. Lots of flickering and the part that should be dark has some tones": a
-  // source pouring smoke - a burning ship - keeps making new puffs, and each 64 more slots made the memory again, empty: every
-  // puff forgot its eased shadow and its held tone at once - the column lit for a moment, then easing back into its shade.
-  // Now the memory grows with room to spare and keeps what it held: the old rows copied into the new)
-  const memOk = G_.mem && G_.mem[0].w === MW && G_.mem[0].h >= rows && G_.mem[0].ep === GLR.epoch;
-  gl.disable(gl.SCISSOR_TEST);
-  if (!memOk) {
-    const old = G_.mem && G_.mem[0].ep === GLR.epoch ? G_.mem : null, R2 = Math.max(rows, Math.ceil((old ? old[0].h : 0) * 1.5), rows + 4);
-    G_.mem = [gsmTex(null, MW, R2, null), gsmTex(null, MW, R2, null)]; G_.tn = gsmTex(G_.tn && G_.tn.ep === GLR.epoch ? G_.tn : null, MW, R2, null);
-    for (const t of G_.mem) { const f = gsmFbo([t]); gl.clearBufferfv(gl.COLOR, 0, [0, 0, 0, 0]); gl.deleteFramebuffer(f); }
-    if (old) {
-      // the memory as it was (the last paint's: old[G_.cur]) into both new targets, row for row
-      const rf = gsmFbo([old[G_.cur]]);
-      for (const t of G_.mem) { const df = gsmFbo([t]); gl.bindFramebuffer(gl.READ_FRAMEBUFFER, rf); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, df); gl.blitFramebuffer(0, 0, MW, old[0].h, 0, 0, MW, old[0].h, gl.COLOR_BUFFER_BIT, gl.NEAREST); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null); gl.deleteFramebuffer(df); }
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null); gl.deleteFramebuffer(rf);
-      for (const t of old) gl.deleteTexture(t.tex);
-      G_.grew = (G_.grew || 0) + 1; GSM.grows = (GSM.grows || 0) + 1;   // (tests: how often the memory grew)
-    }
-    G_.cur = 0; if (G_.tfbos) for (const T of G_.tfbos) if (T) gl.deleteFramebuffer(T.f); G_.tfbos = null;
-  }
-  const rowsM = G_.mem[0].h;   // (the memory's rows: room to spare - the passes run over all of them)
-  const src = G_.mem[G_.cur], dst = G_.mem[1 - G_.cur];
-  // (one target a side of the ping-pong, kept: Oct 31 - the side flips every frame, and a new framebuffer made and the last thrown away
-  // each time was ~45 a second of the GPU's objects made and freed, a hitch on Direct3D)
-  const TF = G_.tfbos || (G_.tfbos = [null, null]), ti = 1 - G_.cur;
-  if (!TF[ti] || TF[ti].dst !== dst || TF[ti].tn !== G_.tn || TF[ti].ep !== GLR.epoch) { if (TF[ti] && TF[ti].ep === GLR.epoch) gl.deleteFramebuffer(TF[ti].f); TF[ti] = { f: gsmFbo([dst, G_.tn]), dst, tn: G_.tn, ep: GLR.epoch }; }
-  gl.bindFramebuffer(gl.FRAMEBUFFER, TF[ti].f); gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-  gl.viewport(0, 0, MW, rows); gl.disable(gl.SCISSOR_TEST);
-  const setCommon = (pr, size) => {
-    const U = pr.U; gl.uniform1i(U.u_b, 0); gl.uniform1i(U.u_g1, 3); gl.uniform1i(U.u_g2, 4); gl.uniform2i(U.u_gs, gw, gh);
-    gl.uniform4f(U.u_q0, mass, P.smshadow ?? 0.7, P.smself ?? 0.45, P.smamb ?? 0.5);
-    gl.uniform4f(U.u_q1, (P.contrast ?? 2) * E.contrast * (P.smcon ?? 1), P.expo ?? 0, P.jitter ?? 0, P.hi ?? 1);
-    gl.uniform4f(U.u_q2, E.night, E.dusk, (P.glow ?? 1) * E.sunset * (P.smglow ?? 1), P.smfire ?? 1);
-    gl.uniform1fv(U.u_hp, SM_HP); gl.uniform1fv(U.u_hq, SM_HQ); gl.uniform2fv(U.u_dc, SM_DC);
-    const fl = G_.fl || (G_.fl = new Float32Array(256)); fl.fill(0); const m = Math.min(64, nF); for (let k = 0; k < m * 4; k++) fl[k] = FL[k];
-    gl.uniform4fv(U.u_fl, fl); gl.uniform1i(U.u_nf, m); gl.uniform2f(U.u_size, size[0], size[1]);
-  };
-  const tp = GSM.tone; gl.useProgram(tp.p); setCommon(tp, [MW, rows]);
-  gl.uniform4f(tp.U.u_rect, 0, 0, MW, rows); gl.uniform1i(tp.U.u_mem, 5); gl.uniform1i(tp.U.u_s2b, 6);
-  gsmBind(0, G_.btex); gsmBind(3, G_.g1u); gsmBind(4, G_.g2t); gsmBind(5, src); gsmBind(6, G_.s2t);
-  gl.bindVertexArray(GSM.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-  gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
-  G_.cur = 1 - G_.cur;
-  // ---- 3. COMPOSE, into the smoke's picture (a GL layer the size of the grid; the box drawn)
-  const OT = S_.otT || (S_.otT = new GLTarget(cw, h)); if (OT.width !== cw || OT.height !== h) { OT.width = cw; OT.height = h; }
-  OT.ensure(); gl.bindFramebuffer(gl.FRAMEBUFFER, OT.fbo); gl.viewport(0, 0, cw, h);
-  const cp = GSM.comp; gl.useProgram(cp.p); setCommon(cp, [cw, h]);
-  gl.uniform4f(cp.U.u_rect, bx0, by0, bw, bh); gl.uniform1i(cp.U.u_sp, 5); gl.uniform1i(cp.U.u_tone, 6); gl.uniform1i(cp.U.u_bt, 2); gl.uniform1i(cp.U.u_lut, 7);
-  gl.uniform1f(cp.U.u_crease, (P.smcrease ?? 1) > 0.5 ? 1 : 0); gl.uniform1f(cp.U.u_thin, thinOn ? 1 : 0);
-  gsmBind(0, G_.btex); gsmBind(2, GSM.bt); gsmBind(3, G_.g1u); gsmBind(4, G_.g2t); gsmBind(5, G_.sp.t); gsmBind(6, G_.tn); gsmBind(7, G_.lt);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-  // (the quad renderer's state, all of it, to be set again: units, samplers, program, buffers)
-  gl.enable(gl.BLEND); gl.bindVertexArray(GLR.vao);
-  GLR.cur = {}; GLR.unit = []; GLR.unitS = []; GLR.st.tgt = null;
-  GLR.stats.draws += 3;
+  smpUp(FB, oOD * 4, OD.subarray(0, n));
+  const W1 = G_.w1 && G_.w1.length >= cw ? G_.w1 : (G_.w1 = new Float32Array(cw * 2)); for (let x = 0; x < cw; x++) W1[x] = wrow[x];
+  smpUp(FB, oWR * 4, W1.subarray(0, cw));
+  smpUp(BB, 0, BD.subarray(0, n * 16));
+  // ---- the paint's numbers (H), in the arena
+  const [c, off] = arenaAlloc(SMP.HB, 256), w0 = off >> 2, Wd = pxWords(c), Hf = Wd.f, Hi = Wd.i, Hu = Wd.u;
+  const [gx0, gy0, gx1, gy1, sdx, sdy, ownF, nMarch, f2, kS, behind] = mg, bw = bx1 - bx0 + 1, bh = by1 - by0 + 1;
+  const ry = Math.min(rows, 65535), rz = Math.ceil(rows / ry);
+  Hi[w0] = gw; Hi[w0 + 1] = gh; Hf[w0 + 2] = cw; Hf[w0 + 3] = h;
+  Hf[w0 + 4] = mass; Hf[w0 + 5] = P.smshadow ?? 0.7; Hf[w0 + 6] = P.smself ?? 0.45; Hf[w0 + 7] = P.smamb ?? 0.5;
+  Hf[w0 + 8] = (P.contrast ?? 2) * E.contrast * (P.smcon ?? 1); Hf[w0 + 9] = P.expo ?? 0; Hf[w0 + 10] = P.jitter ?? 0; Hf[w0 + 11] = P.hi ?? 1;
+  Hf[w0 + 12] = E.night; Hf[w0 + 13] = E.dusk; Hf[w0 + 14] = (P.glow ?? 1) * E.sunset * (P.smglow ?? 1); Hf[w0 + 15] = P.smfire ?? 1;
+  Hi[w0 + 16] = gx0; Hi[w0 + 17] = gy0; Hi[w0 + 18] = gx1; Hi[w0 + 19] = gy1;
+  Hf[w0 + 20] = sdx; Hf[w0 + 21] = sdy; Hf[w0 + 22] = ownF; Hf[w0 + 23] = nMarch; Hf[w0 + 24] = f2; Hf[w0 + 25] = kS; Hf[w0 + 26] = behind; Hf[w0 + 27] = 0;
+  Hf[w0 + 28] = bx0; Hf[w0 + 29] = by0; Hf[w0 + 30] = bw; Hf[w0 + 31] = bh;
+  Hu[w0 + 32] = GN; Hu[w0 + 33] = 2 * GN; Hu[w0 + 34] = oS2; Hu[w0 + 35] = oOD;
+  Hu[w0 + 36] = oWR; Hu[w0 + 37] = oG1; Hu[w0 + 38] = rows; Hu[w0 + 39] = ry;
+  Hf[w0 + 40] = tkA; Hf[w0 + 41] = (P.smcrease ?? 1) > 0.5 ? 1 : 0; Hf[w0 + 42] = thinOn ? 1 : 0; Hf[w0 + 43] = 0;
+  const m = Math.min(64, nF); Hi[w0 + 44] = m; Hi[w0 + 45] = Hi[w0 + 46] = Hi[w0 + 47] = 0;
+  Hf.fill(0, w0 + 48, w0 + 48 + 256); for (let k = 0; k < m * 4; k++) Hf[w0 + 48 + k] = FL[k];
+  Hu.set(S_.lut.subarray(0, SMP.NL), w0 + 304);
+  // ---- the bind groups (this chunk; again when a buffer they name was made again)
+  const hd = { buffer: c.gb, offset: 0, size: SMP.HB }, B_ = b => ({ buffer: b.gb }), key = SMP.gen;
+  const bgF = smpBind(G_.bgs || (G_.bgs = new Map()), 'f' + key, c, () => gpuBindGroup(SMP.lf, [{ binding: 0, resource: hd }, { binding: 1, resource: B_(FB) }, { binding: 2, resource: B_(G2) }], 'smoke fields'));
+  const bgT = smpBind(G_.bgt || (G_.bgt = new Map()), 't' + key, c, () => gpuBindGroup(SMP.lt, [{ binding: 0, resource: hd }, { binding: 1, resource: B_(BB) }, { binding: 2, resource: B_(FB) }, { binding: 3, resource: B_(G2) }, { binding: 4, resource: B_(SMP.K) }, { binding: 5, resource: B_(G_.mem) }, { binding: 6, resource: B_(TN) }], 'smoke tones'));
+  const bgS = smpBind(SMP.bgs, 's' + key, c, () => gpuBindGroup(SMP.ls, [{ binding: 0, resource: hd }, { binding: 1, resource: B_(BB) }, { binding: 2, resource: B_(FB) }, { binding: 3, resource: B_(SMP.K) }], 'smoke splat'));
+  const bgC = smpBind(G_.bgc || (G_.bgc = new Map()), 'c' + key, c, () => gpuBindGroup(SMP.lc, [{ binding: 0, resource: hd }, { binding: 1, resource: B_(BB) }, { binding: 2, resource: B_(FB) }, { binding: 3, resource: B_(G2) }, { binding: 4, resource: B_(SMP.K) }, { binding: 5, resource: B_(TN) }, { binding: 6, resource: SMP.sp.view }], 'smoke compose'));
+  // ---- 1-3. MASS (the whole grid), MARCH (the box) and TONES (every slot's domes) - each dispatch bounded by the grid or the slots
+  const cp = gpuComputeBegin([FB, G2, BB, SMP.K, G_.mem, TN]);
+  cp.setBindGroup(0, bgF, [off]);
+  if (g2fresh) { cp.setPipeline(SMP.clear2); cp.dispatchWorkgroups(Math.ceil(GN / 64)); }
+  cp.setPipeline(SMP.mass); cp.dispatchWorkgroups(Math.ceil(gw / 8), Math.ceil(gh / 8));
+  cp.setPipeline(SMP.march); cp.dispatchWorkgroups(Math.ceil((gx1 - gx0 + 1) / 8), Math.ceil((gy1 - gy0 + 1) / 8));
+  cp.setPipeline(SMP.tones); cp.setBindGroup(0, bgT, [off]); cp.dispatchWorkgroups(SMP_MW / 64, ry, rz);
+  cp.end();
+  // ---- 4. SPLAT, into the index-and-height target (cleared; the box drawn: its viewport the picture's size)
+  let pass = gpuPassBegin({ colorAttachments: [{ view: SMP.sp.view, loadOp: 'clear', clearValue: [-1, -1e9, 0, 0], storeOp: 'store' }],
+    depthStencilAttachment: { view: SMP.spd.view, depthLoadOp: 'clear', depthClearValue: 1, depthStoreOp: 'discard' } }, 'smoke splat', [SMP.sp, SMP.spd, BB, FB, SMP.K]);
+  pass.setViewport(0, 0, cw, h, 0, 1); pass.setScissorRect(bx0, h - by0 - bh, bw, bh);
+  pass.setPipeline(SMP.splat); pass.setBindGroup(0, bgS, [off]); pass.draw(4, n);
+  // ---- 5. COMPOSE, into the smoke's picture (the box drawn)
+  let pipe = SMP.comp.get(FT.tex.fmt);
+  if (!pipe) { pipe = gpuRenderPipe({ layout: SMP.pc, vertex: { module: SMP.mc, entryPoint: 'vs' }, fragment: { module: SMP.mc, entryPoint: 'fs', targets: [{ format: FT.tex.fmt }] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } }); SMP.comp.set(FT.tex.fmt, pipe); }
+  pass = gpuPassBegin({ colorAttachments: [{ view: FT.tex.view, loadOp: 'load', storeOp: 'store' }] }, 'smoke compose', [FT.tex, SMP.sp, BB, FB, G2, SMP.K, TN]);
+  pass.setPipeline(pipe); pass.setBindGroup(0, bgC, [off]); pass.draw(4);
+  gpuPassEnd();
+  GLR.stats.draws += 2;
   // kept for the frames between paints (smShow lays it again)
   const CM = S_.cam || [CAMPX, TOPPX, FXV.SV, FXV.pxX, FXV.pxY, SMG.mx, SMG.my];   // (the camera, zoom and grid its balls were gathered at)
   S_.ow = bw; S_.oh = bh; S_.ox = (bx0 - CM[5]) * CM[3]; S_.oy = (by0 - CM[6]) * CM[4]; S_.ocam = CM; S_.osv = CM[2]; S_.opx = CM[3]; S_.opy = CM[4]; S_.gx0 = bx0; S_.gy0 = by0; S_.gpuOut = true;
