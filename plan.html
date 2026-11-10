@@ -132,7 +132,9 @@ const DEFAULT_BIOMES=[ // the game's biomes, one colour each so the land reads a
   {id:'forest',name:'Forest',color:'#3f9a52',h:50},{id:'jungle',name:'Jungle',color:'#2fd06a',h:55},{id:'beach',name:'Beach',color:'#f2d36b',h:28},{id:'desert',name:'Desert',color:'#e4a55a',h:40},
   {id:'mountain',name:'Mountain',color:'#a3a8ad',h:220,peak:1},{id:'ice',name:'Ice',color:'#c4ecfa',h:60},{id:'swamp',name:'Swamp',color:'#8a9a42',h:25},{id:'volcanic',name:'Volcanic',color:'#c4553c',h:240,peak:2}];
 const DEFAULT_GOODS=[{id:'fish',name:'Fish'},{id:'goods',name:'Goods'},{id:'passengers',name:'Passengers'},{id:'medicine',name:'Medicine'},{id:'fuel',name:'Fuel'}];
-const DEFAULT_TASKS=[{id:'drop',name:'Drop cargo',act:'drop'},{id:'pick',name:'Pick up cargo',act:'pick'},{id:'passengers',name:'Carry passengers'},{id:'fishing',name:'Go fishing',act:'pick'}];
+const DEFAULT_TASKS=[{id:'pick',name:'Pick up',act:'collect'},{id:'drop',name:'Drop cargo',act:'drop'},{id:'goto',name:'Go to',act:'goto'}];
+const ACTS=['goto','collect','drop'];
+const routeEnd=X=>doc.connections.filter(c=>c.to===X&&tripEnds(c)&&!doc.connections.some(n=>n.after===c.id)); // routes that end at X and can go on // what a task does: go there, collect a good there until it has enough, drop what it carries there
 const SLOTS=['Morning','Midday','Afternoon','Night']; // a day has four parts; the calendar starts at day 0
 const GOODS_FIELD={vehicle:['carries','Carries'],structure:['stores','Stores'],nature:['gives','Gives']}; // carrying, storing, giving: the same goods list
 const BIOME_COLS=['#3f9a52','#2fd06a','#f2d36b','#e4a55a','#a3a8ad','#c4ecfa','#8a9a42','#c4553c','#d9c7a3','#6fb3d2','#9c7bd1','#e8e8e8'];
@@ -222,7 +224,8 @@ function resnap(){
 function landUnder(x,y){let best=null,bd=1e9;const z=view.z;
   for(const r of doc.elements){if(!isLand(r)||!visible(r)||x<r.x-r.w/2||x>r.x+r.w/2)continue;const t=topAt(r,x);
     if(y<t-90/z||y>Math.max(t,0)+40/z)continue;const d=Math.abs(y-t);if(d<bd){bd=d;best=r}}return best}
-function commit(){resnap();settleGroups();const s=snap();if(s===lastSnap)return;undoS.push(lastSnap);if(undoS.length>200)undoS.shift();redoS.length=0;lastSnap=s;changed()}
+function cleanRoutines(){for(const V of doc.elements){const R=V.routine;if(!R)continue;R.steps=R.steps.filter(st=>{const c=linkOf(st.link),te=c&&c.task&&tripEnds(c);return te&&te[0]===V})}}
+function commit(){resnap();settleGroups();cleanRoutines();const s=snap();if(s===lastSnap)return;undoS.push(lastSnap);if(undoS.length>200)undoS.shift();redoS.length=0;lastSnap=s;changed()}
 function restore(s){Object.assign(doc,JSON.parse(s));reindex();
   for(const id of[...sel.els])if(!byId.has(id))sel.els.delete(id);for(const id of[...sel.links])if(!linkOf(id))sel.links.delete(id);
   lastSnap=s;changed();panel()}
@@ -242,7 +245,8 @@ function sanitize(d){
   const biomes=Array.isArray(d.biomes)&&d.biomes.length?list(d.biomes).map(b=>({...b,color:b.color||'#e9b52c',h:Math.max(5,+b.h||40)})):JSON.parse(JSON.stringify(DEFAULT_BIOMES));
   const catalog=Array.isArray(d.catalog)&&d.catalog.length?list(d.catalog).map(c=>({...c,kind:CATS[c.kind]?c.kind:'other',types:(Array.isArray(c.types)?c.types:[]).map(String)})):JSON.parse(JSON.stringify(DEFAULT_CATALOG));
   const goods=Array.isArray(d.goods)?list(d.goods):JSON.parse(JSON.stringify(DEFAULT_GOODS)),gids=new Set(goods.map(g=>g.id));
-  const tasks=Array.isArray(d.tasks)?list(d.tasks):JSON.parse(JSON.stringify(DEFAULT_TASKS)),tids=new Set(tasks.map(t=>t.id));
+  const tasks=JSON.parse(JSON.stringify(DEFAULT_TASKS)),tids=new Set(tasks.map(t=>t.id)); // a connection picks up a good or drops the cargo
+  const oldTask={'collect-fish':['pick','fish'],fishing:['pick','fish']};
   const ids=new Set(),chids=new Set(characters.map(c=>c.id)),kids=new Set(countries.map(c=>c.id)),bids=new Set(biomes.map(b=>b.id)),cids=new Set(catalog.map(c=>c.id));
   d.elements=d.elements.filter(e=>e&&e.id&&!ids.has(e.id)&&ids.add(e.id)).map(e=>{
     let kind=CATS[e.kind]?e.kind:CATS[e.category]?e.category:'other'; // plans before categories kept the kind in "category"
@@ -250,13 +254,18 @@ function sanitize(d){
     if(!category&&type){const c=catalog.find(c=>c.kind===kind&&c.types.some(t=>t.toLowerCase()===type.toLowerCase()));if(c)category=c.id}
     const o={id:String(e.id),name:String(e.name??''),kind,category,type,x:+e.x||0,y:+e.y||0,parent:e.parent&&ids.has(e.parent)&&e.parent!==e.id?e.parent:null,on:e.on&&ids.has(e.on)?e.on:null,
       owner:e.owner&&chids.has(e.owner)?String(e.owner):null,country:e.country&&kids.has(e.country)?String(e.country):null,notes:String(e.notes??''),props:e.props&&typeof e.props==='object'?e.props:{}};
+    if(kind==='vehicle'&&e.routine)o.routine=e.routine;if(kind==='nature'&&+e.rate>0)o.rate=Math.round(+e.rate);
     for(const f of['carries','stores','gives'])if(Array.isArray(e[f])){const v=e[f].map(String).filter(g=>gids.has(g));if(v.length)o[f]=v}
     if(kind==='region'){o.biome=bids.has(e.biome)?e.biome:biomes[0].id;o.w=Math.max(60,+e.w||400);o.h=Math.max(5,+e.h||40);o.category=null;o.type=''}
     return o});
   const m=new Map(d.elements.map(e=>[e.id,e]));
   for(const e of d.elements){let p=e.parent,n=0;while(p&&n++<100){if(p===e.id){e.parent=null;break}p=m.get(p)?.parent}}
-  d.connections=(d.connections||[]).filter(c=>c&&ids.has(c.from)&&ids.has(c.to)&&c.from!==c.to).map(c=>({id:String(c.id||uid('c')),from:c.from,to:c.to,label:String(c.label??''),kind:KINDS[c.kind]?c.kind:'other',direction:DIRS[c.direction]?c.direction:'forward',via:String(c.via??''),notes:String(c.notes??''),color:c.color||null,bend:+c.bend||0,
-    ...(c.sched&&tids.has(c.sched.task)?{sched:{task:c.sched.task,every:Math.max(1,Math.round(+c.sched.every||1)),start:Math.max(0,Math.round(+c.sched.start||0)),slot:clamp(Math.round(+c.sched.slot||0),0,3),takes:Math.max(1,Math.round(+c.sched.takes||1))}}:{})}));
+  d.connections=(d.connections||[]).filter(c=>c&&ids.has(c.from)&&ids.has(c.to)&&c.from!==c.to).map(c=>({id:String(c.id||uid('c')),from:c.from,to:c.to,direction:DIRS[c.direction]?c.direction:'forward',notes:String(c.notes??''),bend:+c.bend||0,...(c.veh&&ids.has(c.veh)?{veh:c.veh}:{}),...(c.after?{after:String(c.after)}:{}),
+    ...(oldTask[c.task]?{task:'pick',good:oldTask[c.task][1]}:tids.has(c.task)?{task:c.task,...(c.task==='pick'&&gids.has(c.good)?{good:c.good}:{})}:{})}));
+  const cids2=new Set(d.connections.map(c=>c.id));
+  for(const e of d.elements){const R=e.routine;if(e.kind!=='vehicle'||!R||typeof R!=='object'){delete e.routine;continue}
+    e.routine={start:['time','cargo','off'].includes(R.start)?R.start:'time',every:Math.max(1,Math.round(+R.every||1)),day:Math.max(0,Math.round(+R.day||0)),slot:clamp(Math.round(+R.slot||0),0,3),takes:Math.max(1,Math.round(+R.takes||1)),
+      steps:(Array.isArray(R.steps)?R.steps:[]).filter(st=>st&&cids2.has(st.link)).map(st=>({link:st.link,until:Math.max(1,Math.round(+st.until||100))}))}}
   return{format:'far-away-world-plan',version:2,name:String(d.name||'Far Away'),savedAt:d.savedAt||null,countries,characters,goods,tasks,biomes,catalog,elements:d.elements,connections:d.connections};
 }
 
@@ -323,7 +332,8 @@ function linkGeom(c){
   let i0=0,i1=40;while(i0<39&&Math.hypot(pts[i0][0]-ax,pts[i0][1]-ay)<A.r+4)i0++;while(i1>i0+1&&Math.hypot(pts[i1][0]-bx,pts[i1][1]-by)<B.r+4)i1--;
   return{pts:pts.slice(i0,i1+1),mid:P(.5),nx,ny,mx,my};
 }
-function KIND_ON(c){return!hidden.has('k:'+c.kind)}
+function KIND_ON(c){return true}
+const linkCol=c=>c.task==='pick'?'#6fa8ff':c.task==='drop'?'#ff7a45':c.task==='goto'?'#7fd99a':'#d4d4d4'; // a connection's colour is its task's
 
 /* ---------- drawing ---------- */
 function render(){
@@ -348,8 +358,8 @@ function render(){
   // connections
   const lg=new Map();
   for(const c of doc.connections){const g=linkGeom(c);if(!g)continue;lg.set(c.id,g);
-    const pk=sel.links.has(c.id),col=c.color||KINDS[c.kind].color;
-    ctx.strokeStyle=pk?'#fff':col;ctx.lineWidth=pk?3:2;ctx.setLineDash(KINDS[c.kind].dash?[7,6]:[]);
+    const pk=sel.links.has(c.id),col=linkCol(c);
+    ctx.strokeStyle=pk?'#fff':col;ctx.lineWidth=pk?3:2;ctx.setLineDash(c.task?[]:[7,6]);
     ctx.beginPath();g.pts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.stroke();ctx.setLineDash([]);
     if(c.direction!=='none')head(g.pts[g.pts.length-1],g.pts[g.pts.length-3]||g.pts[0]);
     if(c.direction==='both')head(g.pts[0],g.pts[2]||g.pts[g.pts.length-1]);
@@ -362,13 +372,15 @@ function render(){
     if(bad){ctx.font=fontPx(11);ctx.fillStyle='#ff5c5c';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(onWater(e)?'NEEDS LAND':isWaterVeh(e)?'NEEDS A DOCK':'NEEDS A STRUCTURE',L.sx,L.sy+L.r+6)}}
   ctx.globalAlpha=1;
   for(const e of doc.elements){const L=LY.get(e.id);if(!L||L.land||L.group)continue;const st=goodsText(SIM.stock.get(e.id));if(st)pill(st,L.sx,L.sy+L.r+6,'#ffe9a8')}
-  for(const[id,p]of SIM.pos){const e=byId.get(id),g=lg.get(p.c.id),L=LY.get(id);if(!e||!g||!L)continue; // a vehicle on its way
-    const pts=p.rev?[...g.pts].reverse():g.pts,[x,y]=alongPts(pts,p.f),col=itemCol(e),M={sx:x,sy:y,r:L.r};
-    ctx.fillStyle='rgba(255,255,255,.18)';ctx.beginPath();ctx.arc(x,y,L.r+7,0,7);ctx.fill();icon(e,M,col);
-    const t=[p.there?((doc.tasks.find(k=>k.id===p.task)||{}).name||''):'',goodsText(SIM.load.get(id))].filter(Boolean).join(' · ');pill(t,x,y+L.r+8,col)}
+  for(const[id,p]of SIM.pos){const e=byId.get(id),L=LY.get(id);if(!e||!L)continue; // a vehicle out on its routine
+    const at=k=>k==='home'?[L.ax,L.ay]:LY.get(k)?[LY.get(k).ax,LY.get(k).ay]:null,A=at(p.from),B=at(p.to);if(!A||!B)continue;
+    const g=p.link&&lg.get(p.link);let x,y;
+    if(g){const c=linkOf(p.link);let pts=g.pts;if(p.from==='home'?c.from!==id:c.from!==p.from)pts=[...pts].reverse();[x,y]=alongPts(pts,p.f)}else{x=A[0]+(B[0]-A[0])*p.f;y=A[1]+(B[1]-A[1])*p.f}
+    const col=itemCol(e),M={sx:x,sy:y,r:L.r};ctx.fillStyle='rgba(255,255,255,.18)';ctx.beginPath();ctx.arc(x,y,L.r+7,0,7);ctx.fill();icon(e,M,col);
+    pill([p.task||'',goodsText(SIM.load.get(id))].filter(Boolean).join(' · '),x,y+L.r+8,col)}
   // connection labels on top
-  for(const c of doc.connections){const g=lg.get(c.id);if(!g)continue;const pk=sel.links.has(c.id),col=pk?'#fff':(c.color||KINDS[c.kind].color);
-    let t=(c.label||'').toUpperCase();if(c.via)t+=(t?' · ':'')+c.via.toUpperCase();
+  for(const c of doc.connections){const g=lg.get(c.id);if(!g)continue;const pk=sel.links.has(c.id),col=pk?'#fff':linkCol(c);
+    let t=taskName(c).toUpperCase();
     const f=clamp(11*view.z,0,14);const[mx,my]=g.mid;let rect=[mx-12,my-12,mx+12,my+12];
     if((showLabels||pk)&&t&&(f>=7||pk)){const ff=Math.max(f,pk?11:0);ctx.font=fontPx(ff);const w=ctx.measureText(t).width;
       rect=[mx-w/2-6,my-ff/2-5,mx+w/2+6,my+ff/2+5];ctx.fillStyle='rgba(60,60,60,.85)';rr(rect,6);ctx.fill();
@@ -387,7 +399,11 @@ function render(){
     ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(hx,hy,11,0,7);ctx.fill();ctx.strokeStyle='#333';ctx.lineWidth=2;ctx.beginPath();
     ctx.moveTo(hx-5,hy);ctx.lineTo(hx+5,hy);ctx.moveTo(hx-2,hy-3);ctx.lineTo(hx-5,hy);ctx.lineTo(hx-2,hy+3);ctx.moveTo(hx+2,hy-3);ctx.lineTo(hx+5,hy);ctx.lineTo(hx+2,hy+3);ctx.stroke();
     HITS.push({t:'rz',id:one,side,x:hx,y:hy,pr:0})}}
-  else if(OL){const L=OL;{const hx=L.group?L.lab[2]+16:L.sx+L.r+18,hy=L.group?L.ay:L.sy;
+  const oneL=sel.links.size===1&&!sel.els.size?linkOf([...sel.links][0]):null;
+  if(oneL&&tripEnds(oneL)&&!doc.connections.some(n=>n.after===oneL.id)){const T=LY.get(oneL.to);if(T){const hx=T.ax+T.r+18,hy=T.ay-T.r-10;
+    ctx.fillStyle='#ff7a45';ctx.beginPath();ctx.arc(hx,hy,9,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+    HITS.push({t:'dot',id:oneL.to,after:oneL.id,x:hx,y:hy,pr:1,cx:hx,cy:hy})}}
+  if(OL&&!OL.land){const L=OL;{const hx=L.group?L.lab[2]+16:L.sx+L.r+18,hy=L.group?L.ay:L.sy;
     ctx.fillStyle='#ff7a45';ctx.beginPath();ctx.arc(hx,hy,9,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
     HITS.push({t:'dot',id:[...sel.els][0],x:hx,y:hy,pr:1,cx:hx,cy:hy});}}
   // gestures being drawn
@@ -443,7 +459,7 @@ cv.addEventListener('pointerdown',ev=>{
   const touch=ev.pointerType!=='mouse',h=hitAt(p.x,p.y,touch);
   if(ev.button===1||ev.button===2){op={t:'pan',x:p.x,y:p.y,cx:view.cx,cy:view.cy,moved:true};return}
   if(pending){op={t:'place',x0:p.x,y0:p.y};return}
-  if(h&&h.t==='dot'){op={t:'link',from:h.id,x:p.x,y:p.y};return}
+  if(h&&h.t==='dot'){op={t:'link',from:h.id,after:h.after,x:p.x,y:p.y};return}
   if(h&&h.t==='rz'){const e=byId.get(h.id);op={t:'resize',id:h.id,side:h.side,x0:p.x,w0:e.w,cx0:e.x,moved:false,docks:doc.elements.filter(d=>onWater(d)&&d.on===e.id).map(d=>[d.id,d.x,d.x>=e.x?1:-1])};return}
   if(h&&(h.t==='el'||h.t==='arc')){
     const add=pickMore||ev.shiftKey;
@@ -492,8 +508,8 @@ function endPtr(ev){
         if(SNAPS(e)){const l=landUnder(e.x,e.y);e.on=l&&!o.move.has(l.id)?l.id:null}else if(onWater(e))waterSnap(e,o.move)||(e.on=null)}if(o.into){for(const id of sel.els)if(id!==o.into&&!isLand(byId.get(id))&&byId.get(id).kind!=='vehicle'&&!descendants(id).has(o.into))byId.get(id).parent=o.into;toast('Put inside '+(byId.get(o.into).name||'group'))}commit();panel()}
     else if(dbl){startEdit('el',o.hit);lastTap.t=0;return}}
   else if(o.t==='resize'){if(o.moved)commit()}
-  else if(o.t==='bend'){if(o.moved)commit();else if(dbl){startEdit('link',o.hit);lastTap.t=0;return}}
-  else if(o.t==='link'){if(o.target)connect(o.from,o.target);
+  else if(o.t==='bend'){if(o.moved)commit()}
+  else if(o.t==='link'){if(o.target)connect(o.from,o.target,o.after);
     else{const A=LY.get(o.from);if(A&&Math.hypot(p.x-A.ax,p.y-A.ay)>50)openAdd(p.x,p.y,o.from)}}
   else if(o.t==='box'){const r=[Math.min(o.x0,o.x),Math.min(o.y0,o.y),Math.max(o.x0,o.x),Math.max(o.y0,o.y)];
     if(r[2]-r[0]>4||r[3]-r[1]>4){for(const[id,L]of LY)if(inR(r,L.ax,L.ay))sel.els.add(id);sel.links.clear();panel()}}
@@ -521,12 +537,15 @@ function placeAt(sx,sy,t,fromId){
   if(fromId){connect(fromId,e.id);return}
   commit();panel();
 }
-function connect(a,b){
-  const same=doc.connections.filter(c=>(c.from===a&&c.to===b)||(c.from===b&&c.to===a)).length;
+function connect(a,b,after){
+  if(!after&&byId.get(a).kind!=='vehicle'){const ends=routeEnd(a);if(ends.length===1)after=ends[0].id} // from the end of a route: it goes on
+  const at=id=>{const e=byId.get(id),h=e&&heldBy(e);return h?h.id:id},pa=at(a),pb=at(b); // a moored boat and its dock are one spot here
+  const same=doc.connections.filter(c=>(at(c.from)===pa&&at(c.to)===pb)||(at(c.from)===pb&&at(c.to)===pa)).length;
   const A=byId.get(a),B=byId.get(b),d=Math.hypot(A.x-B.x,A.y-B.y);
   const bend=Math.round(Math.min(d*.3,400)*(1+.6*Math.floor(same/2))*(same%2?-1:1));
-  const c={id:uid('c'),from:a,to:b,label:'',kind:lastKind,direction:'forward',via:'',notes:'',color:null,bend};
-  doc.connections.push(c);sel={els:new Set(),links:new Set([c.id])};commit();panel();render();startEdit('link',c.id);
+  const c={id:uid('c'),from:a,to:b,direction:'forward',notes:'',bend};
+  const prev=after&&linkOf(after),pv=prev&&tripEnds(prev);if(pv){c.after=prev.id;c.veh=pv[0].id}
+  doc.connections.push(c);autoTask(c);sel={els:new Set(),links:new Set([c.id])};commit();panel();
 }
 function removeSel(){
   const ids=sel.els;if(!ids.size&&!sel.links.size)return;
@@ -654,17 +673,21 @@ function elPanel(e){
   ${GOODS_FIELD[e.kind]?(()=>{const[f,lab]=GOODS_FIELD[e.kind],cur=e[f]||[],names=byName(doc.goods).filter(g=>cur.includes(g.id)).map(g=>g.name);
     return`<label>${lab}</label><div class="multi"><button class="mbtn" data-mopen>${names.length?esc(names.join(', ')):'— nothing —'} ▾</button>
     <div class="mlist" data-new="good" ${goodsOpen?'':'hidden'}>${byName(doc.goods).map(g=>`<div class="mrow" data-good="${g.id}">${cur.includes(g.id)?'✓ ':'&nbsp;&nbsp;&nbsp; '}${esc(g.name)}</div>`).join('')}<div class="mrow" data-good="__new">+ New good…</div></div></div>`})():''}
+  ${e.kind==='vehicle'?routineHtml(e):''}
+  ${e.kind==='nature'&&(e.gives||[]).length?`<label>Gives per part of a day</label><input data-rate type="number" inputmode="numeric" min="1" value="${e.rate||25}">`:''}
   ${stands?`<label>${onWater(e)?'Held by':holderKind(stands)==='dock'?'Moored at':holderKind(stands)==='hangar'?'Kept in':'Stands on'}</label><div>${esc(stands.name||biomeOf(stands).name)}</div>`:''}
   ${(()=>{const hs=doc.elements.filter(v=>heldBy(v)===e);return hs.length?`<label>${holderKind(e)==='dock'?'Moored here':'Kept here'} (${hs.length})</label><div>${hs.map(v=>esc(v.name||v.type)).join(', ')}</div>`:''})()}
   ${land||e.kind==='vehicle'?'':`<label>Inside (belongs to)</label><select data-f="parent">${opt('','— nothing —',!e.parent)}${parents.map(p=>opt(p.id,p.name||p.type,p.id===e.parent)).join('')}</select>`}
   <label>Notes</label><textarea data-f="notes">${esc(e.notes)}</textarea>
   <label>Other properties — one per line, like “Opens: 8am”</label><textarea data-f="props">${esc(props)}</textarea>
   ${land?'':`<label>Connections (${conns.length})</label><div class="links">${conns.map(k=>{const o=byId.get(k.from===e.id?k.to:k.from);const arrow=k.direction==='both'?'↔':k.direction==='none'?'—':(k.from===e.id?'→':'←');
-    return`<div data-l="${k.id}" style="border-color:${k.color||KINDS[k.kind].color}">${arrow} ${esc(o?.name||'?')}${k.label?' · '+esc(k.label):''}${k.via?' · '+esc(k.via):''}</div>`}).join('')}</div>`}
+    return`<div data-l="${k.id}" style="border-color:${linkCol(k)}">${arrow} ${esc(o?.name||'?')}${k.task?' · '+esc(taskName(k)):''}</div>`}).join('')}</div>`}
   <div class="row"><button id="pDup">DUPLICATE</button><button id="pCopy">COPY</button><button id="pPaste">PASTE</button></div>
   <div class="row">${kidsOf(e.id).length?'<button id="pUngroup">UNGROUP</button>':''}<button id="pDel">DELETE</button></div>`;
   wireCommon();
   pnl.querySelectorAll('[data-l]').forEach(d=>d.onclick=()=>{sel={els:new Set(),links:new Set([d.dataset.l])};panel();draw()});
+  if(e.kind==='vehicle')wireRoutine(e);
+  pnl.querySelectorAll('[data-rate]').forEach(i=>i.addEventListener('change',()=>{const n=Math.round(+i.value);if(n>0)e.rate=n;commit();draw()}));
   pnl.querySelectorAll('[data-oc]').forEach(b=>b.onclick=()=>{const o=ownerOf(e);if(o){o.color=b.dataset.oc;commit();panel()}});
   pnl.querySelectorAll('[data-mopen]').forEach(b=>b.onclick=()=>{goodsOpen=!goodsOpen;panel()});
   pnl.querySelectorAll('[data-good]').forEach(b=>b.onclick=()=>{const[f]=GOODS_FIELD[e.kind],g=b.dataset.good;
@@ -695,57 +718,83 @@ function elPanel(e){
     box.querySelector('button').onclick=ok;inp.onkeydown=ev=>{ev.stopPropagation();if(ev.key==='Enter')ok();if(ev.key==='Escape')panel()};inp.focus()}
 }
 function linkPanel(k){
-  const A=byId.get(k.from),B=byId.get(k.to),col=k.color||KINDS[k.kind].color;
-  const vias=doc.characters.map(c=>c.name).concat(doc.elements.filter(e=>e.kind==='vehicle').map(e=>e.name),catsOfKind('vehicle').flatMap(c=>c.types));
+  const A=byId.get(k.from),B=byId.get(k.to),col=linkCol(k);
   pnl.innerHTML=`<h3 style="color:${col}">CONNECTION</h3>
   <div style="font-size:15px">${esc(A?.name||'?')} <b>${k.direction==='both'?'↔':k.direction==='none'?'—':'→'}</b> ${esc(B?.name||'?')}</div>
-  <label>What happens</label><input data-f="label" value="${esc(k.label)}" placeholder="e.g. carries fish">
-  <label>Kind</label><div class="chips">${Object.entries(KINDS).map(([id,v])=>`<button data-k="${id}" class="${id===k.kind?'on':''}" style="${id===k.kind?'':'color:'+v.color}">${v.name}</button>`).join('')}</div>
   <label>Direction</label><div class="chips">${Object.entries(DIRS).map(([id,v])=>`<button data-d="${id}" class="${id===k.direction?'on':''}">${v}</button>`).join('')}<button id="pSwap">SWAP ends</button></div>
-  <label>Vehicle or character</label><input data-f="via" list="dlVia" value="${esc(k.via)}" placeholder="e.g. Truck"><datalist id="dlVia">${[...new Set(vias)].sort(az).map(v=>`<option value="${esc(v)}">`).join('')}</datalist>
-  <label>Colour</label><div class="chips"><button data-col="" class="${k.color?'':'on'}">Kind's</button>${['#ff7a45','#6f8cff','#7fd99a','#c49bff','#5fd4e0','#f5c542','#ff5c5c','#ffffff'].map(c=>`<button data-col="${c}" class="${k.color===c?'on':''}" style="background:${c};width:44px"></button>`).join('')}</div>
   ${schedHtml(k)}
   <label>Notes</label><textarea data-f="notes">${esc(k.notes)}</textarea>
   <div class="row"><button id="pFlat">STRAIGHTEN</button><button id="pDel">DELETE</button></div>`;
   wireCommon();wireSched(k);
   pnl.querySelectorAll('[data-f]').forEach(inp=>{const apply=()=>{k[inp.dataset.f]=inp.value;draw()};inp.addEventListener('input',apply);inp.addEventListener('change',()=>{apply();commit()})});
-  pnl.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{k.kind=lastKind=b.dataset.k;commit();panel()});
   pnl.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{k.direction=b.dataset.d;commit();panel()});
-  pnl.querySelectorAll('[data-col]').forEach(b=>b.onclick=()=>{k.color=b.dataset.col||null;commit();panel()});
   $('#pSwap').onclick=()=>{[k.from,k.to]=[k.to,k.from];k.bend=-k.bend;commit();panel()};
   $('#pFlat').onclick=()=>{k.bend=0;commit()};
 }
 
 /* ---------- schedules: a vehicle at one end of a connection leaves every N days at a part of the day to do a task at the other end ---------- */
-const tripEnds=c=>{const A=byId.get(c.from),B=byId.get(c.to);return A&&A.kind==='vehicle'?[A,B,false]:B&&B.kind==='vehicle'?[B,A,true]:null}; // [vehicle, where it goes, vehicle at the 'to' end]
-function schedHtml(k){const te=tripEnds(k);if(!te)return'';const S=k.sched,opt=(v,t,on)=>`<option value="${esc(v)}"${on?' selected':''}>${esc(t)}</option>`;
-  return`<label>Task — ${esc(te[0].name||te[0].type)} goes to ${esc(te[1]?.name||'?')}</label><div data-new="task"><select data-s="task">${opt('','— no schedule —',!S)}${byName(doc.tasks).map(t=>opt(t.id,t.name,S&&S.task===t.id)).join('')}${opt('__new','+ New task…')}</select></div>
-  ${S?`<div class="row" style="align-items:flex-end"><div style="flex:1"><label>Every (days)</label><input data-s="every" type="number" inputmode="numeric" min="1" value="${S.every}"></div>
-    <div style="flex:1"><label>Starting day</label><input data-s="start" type="number" inputmode="numeric" min="0" value="${S.start}"></div></div>
-  <label>Leaves</label><div class="chips">${SLOTS.map((n,i)=>`<button data-slot="${i}" class="${S.slot===i?'on':''}">${n}</button>`).join('')}</div>
-  <label>Trip takes (parts of a day, one way)</label><input data-s="takes" type="number" inputmode="numeric" min="1" value="${S.takes}">`:''}`}
-function wireSched(k){
-  pnl.querySelectorAll('[data-s]').forEach(inp=>inp.addEventListener('change',()=>{const f=inp.dataset.s,v=inp.value;
-    if(f==='task'){if(v==='__new')return askTask(inp);if(!v)delete k.sched;else k.sched={every:1,start:0,slot:0,takes:1,...(k.sched||{}),task:v};commit();panel();return}
-    const n=Math.round(+v);if(!isNaN(n)){k.sched[f]=f==='start'?Math.max(0,n):Math.max(1,n)}commit();draw()}));
-  pnl.querySelectorAll('[data-slot]').forEach(b=>b.onclick=()=>{k.sched.slot=+b.dataset.slot;commit();panel()});
-  function askTask(sel){const box=sel.parentElement;box.innerHTML=`<div class="row" style="margin:0"><input placeholder="New task, e.g. Deliver mail" autocapitalize="sentences" style="flex:2"><button>ADD</button></div>`;
-    const inp=box.querySelector('input'),ok=()=>{const n=inp.value.trim();if(!n){panel();return}const t={id:uid('t'),name:n};doc.tasks.push(t);k.sched={every:1,start:0,slot:0,takes:1,...(k.sched||{}),task:t.id};commit();panel()};
-    box.querySelector('button').onclick=ok;inp.onkeydown=ev=>{ev.stopPropagation();if(ev.key==='Enter')ok();if(ev.key==='Escape')panel()};inp.focus()}
-}
+const tripEnds=c=>{const A=byId.get(c.from),B=byId.get(c.to),W=c.veh&&byId.get(c.veh);if(W)return[W,B,false];return A&&A.kind==='vehicle'?[A,B,false]:B&&B.kind==='vehicle'?[B,A,true]:null}; // [vehicle, where it goes, vehicle at the 'to' end]
+const goodsAt=X=>X?[...new Set([...(X.kind==='nature'?X.gives||[]:[]),...(X.stores||[])])]:[];
+function taskOptions(X){const o=goodsAt(X).map(g=>({v:'pick:'+g,t:'Pick up '+((doc.goods.find(x=>x.id===g)||{}).name||g).toLowerCase()}));
+  if(X&&(X.kind==='structure'||X.kind==='vehicle'))o.push({v:'drop',t:'Drop cargo'});o.push({v:'goto',t:'Go to'});return o}
+const taskName=c=>c.task==='goto'?'Go to':c.task==='drop'?'Drop cargo':c.task==='pick'?'Pick up '+((doc.goods.find(x=>x.id===c.good)||{}).name||'cargo').toLowerCase():'';
+function autoTask(c){const te=tripEnds(c);if(!te||!te[1]||c.task)return;const[V,X]=te,gs=goodsAt(X); // what dragging it there means
+  const carried=new Set(V.carries||[]),stored=(X.stores||[]).filter(g=>carried.has(g));
+  if(stored.length&&(X.kind==='structure'||X.kind==='vehicle'))setTask(c,'drop');           // it keeps what this vehicle carries: drop it there
+  else if(gs.length)setTask(c,'pick:'+(gs.find(g=>carried.has(g))||gs[0]));                // it gives or keeps goods: pick them up
+  else setTask(c,'goto')}
+function setTask(c,tid){const te=tripEnds(c);delete c.good;if(tid&&tid.startsWith('pick:')){c.task='pick';c.good=tid.slice(5)}else if(tid)c.task=tid;else delete c.task;if(!te)return;const V=te[0];
+  if(c.good&&!(V.carries||[]).includes(c.good))V.carries=[...(V.carries||[]),c.good]; // it carries what it picks up
+  if(tid){V.routine=V.routine||{start:'time',every:1,day:0,slot:0,takes:1,steps:[]};if(!V.routine.steps.some(st=>st.link===c.id))V.routine.steps.push({link:c.id,until:100})}
+  else if(V.routine)V.routine.steps=V.routine.steps.filter(st=>st.link!==c.id)}
+function schedHtml(k){const te=tripEnds(k);if(!te||!te[1])return'';const opt=(v,t,on)=>`<option value="${esc(v)}"${on?' selected':''}>${esc(t)}</option>`;
+  const cur=k.task==='pick'?'pick:'+k.good:k.task||'',os=taskOptions(te[1]);if(cur&&!os.some(o=>o.v===cur))os.push({v:cur,t:taskName(k)});
+  return`<label>Task</label><select data-s="task">${opt('','— none —',!cur)}${os.map(o=>opt(o.v,o.t,o.v===cur)).join('')}</select>
+  ${k.task?`<div class="sub" style="margin-top:6px">Step ${((te[0].routine||{steps:[]}).steps.findIndex(st=>st.link===k.id))+1} of ${esc(te[0].name||te[0].type)}'s routine — order and timing in its panel.</div>`:''}`}
+function wireSched(k){pnl.querySelectorAll('[data-s="task"]').forEach(inp=>inp.addEventListener('change',()=>{setTask(k,inp.value);commit();panel()}))}
+/* a vehicle's ROUTINE: when it starts, then its connections' tasks in order, then home */
+function routineHtml(V){const R=V.routine,steps=R?R.steps.map(st=>{const c=linkOf(st.link),te=c&&tripEnds(c);return te?{st,c,X:te[1],task:{name:taskName(c),act:c.task==='pick'?'collect':c.task}}:null}).filter(Boolean):[];
+  if(!steps.length)return`<label>Routine</label><div class="sub">Connect it to places and give each connection a task — they line up here as its routine.</div>`;
+  return`<label>Routine — starts</label><div class="chips">${[['time','On a calendar'],['cargo','When cargo arrives'],['off','Off']].map(([k,n])=>`<button data-rstart="${k}" class="${R.start===k?'on':''}">${n}</button>`).join('')}</div>
+  ${R.start==='time'?`<div class="row" style="align-items:flex-end"><div style="flex:1"><label>Every (days)</label><input data-r="every" type="number" inputmode="numeric" min="1" value="${R.every}"></div><div style="flex:1"><label>From day</label><input data-r="day" type="number" inputmode="numeric" min="0" value="${R.day}"></div></div>
+  <label>Leaves</label><div class="chips">${SLOTS.map((n,i)=>`<button data-rslot="${i}" class="${R.slot===i?'on':''}">${n}</button>`).join('')}</div>`:R.start==='cargo'?`<div class="sub" style="margin-top:6px">Waits at ${esc((heldBy(V)||{}).name||'home')} until cargo it carries is there, loads it, then goes.</div>`:''}
+  <label>Each trip takes (parts of a day)</label><input data-r="takes" type="number" inputmode="numeric" min="1" value="${R.takes}">
+  <label>Steps</label>${steps.map((s,i)=>`<div class="links"><div style="cursor:default"><b>${i+1}.</b> ${esc(s.task?.name||'?')} · ${esc(s.X.name||s.X.type||'?')}
+    ${s.task?.act==='collect'?`<div class="row" style="align-items:center;margin-top:6px"><span class="sub" style="flex:none">until it has</span><input data-until="${i}" type="number" inputmode="numeric" min="1" value="${s.st.until}" style="flex:1"></div>`:''}
+    <div class="row" style="margin-top:6px"><button data-rup="${i}" ${i?'':'disabled'}>↑</button><button data-rdown="${i}" ${i<steps.length-1?'':'disabled'}>↓</button></div></div></div>`).join('')}
+  <div class="links"><div style="cursor:default;opacity:.7"><b>${steps.length+1}.</b> Goes home${heldBy(V)?' · '+esc(heldBy(V).name||''):''}</div></div>`}
+function wireRoutine(V){const R=V.routine;if(!R)return;
+  pnl.querySelectorAll('[data-rstart]').forEach(b=>b.onclick=()=>{R.start=b.dataset.rstart;commit();panel()});
+  pnl.querySelectorAll('[data-rslot]').forEach(b=>b.onclick=()=>{R.slot=+b.dataset.rslot;commit();panel()});
+  pnl.querySelectorAll('[data-r]').forEach(i=>i.addEventListener('change',()=>{const n=Math.round(+i.value);if(!isNaN(n))R[i.dataset.r]=i.dataset.r==='day'?Math.max(0,n):Math.max(1,n);commit();draw()}));
+  pnl.querySelectorAll('[data-until]').forEach(i=>i.addEventListener('change',()=>{const n=Math.round(+i.value);if(n>0)R.steps[+i.dataset.until].until=n;commit();draw()}));
+  const mv=(i,d)=>{const a=R.steps;[a[i],a[i+d]]=[a[i+d],a[i]];commit();panel()};
+  pnl.querySelectorAll('[data-rup]').forEach(b=>b.onclick=()=>mv(+b.dataset.rup,-1));pnl.querySelectorAll('[data-rdown]').forEach(b=>b.onclick=()=>mv(+b.dataset.rdown,1))}
 /* the timeline: T counts parts of days from day 0 morning; everything is worked out again from the start, so dragging back works too */
 let T=0,playing=false;const DAYS=60;
-function simulate(t){
-  const trips=[];for(const c of doc.connections){const S=c.sched,te=tripEnds(c);if(!S||!te||!te[1])continue;
-    for(let n=0;;n++){const s0=(S.start+n*S.every)*4+S.slot;if(s0>t)break;trips.push({c,V:te[0],X:te[1],rev:te[2],s:s0,k:S.takes,act:(doc.tasks.find(x=>x.id===S.task)||{}).act,task:S.task})}}
-  const load=new Map(),stock=new Map(),pos=new Map(),add=(m,id,g,n)=>{if(!m.has(id))m.set(id,{});const o=m.get(id);o[g]=(o[g]||0)+n;if(!o[g])delete o[g]};
-  const arrivals=trips.filter(r=>r.s+r.k<=t).sort((a,b)=>a.s+a.k-(b.s+b.k));
-  for(const r of arrivals){const V=r.V,X=r.X;
-    if(r.act==='pick')for(const g of V.carries||[]){const free=X.kind==='nature'&&(X.gives||[]).includes(g),have=(stock.get(X.id)||{})[g]||0;if(free||have>0){add(load,V.id,g,1);if(!free)add(stock,X.id,g,-1)}}
-    if(r.act==='drop'){const l=load.get(V.id)||{};for(const g in l){add(stock,X.id,g,l[g]);delete l[g]}}}
-  for(const r of trips){const d=t-r.s;if(d<0||d>2*r.k)continue;const p=pos.get(r.V.id);if(p&&p.s>r.s)continue;
-    pos.set(r.V.id,{c:r.c,rev:r.rev,s:r.s,f:d<=r.k?d/r.k:1-(d-r.k)/r.k,there:Math.abs(d-r.k)<.5,task:r.task})}
-  for(const[id,p]of pos)if(p.f<=0)pos.delete(id); // back home
+function simulate(t){ // everything worked out again from day 0, a part of a day at a time
+  const tick=Math.floor(t),frac=t-tick,stock=new Map(),load=new Map(),pos=new Map();
+  const add=(m,id,g,n)=>{if(!m.has(id))m.set(id,{});const o=m.get(id);o[g]=(o[g]||0)+n;if(!o[g])delete o[g]};
+  const vs=[];
+  for(const V of doc.elements){const R=V.routine;if(V.kind!=='vehicle'||!R||R.start==='off')continue;
+    const steps=R.steps.map(st=>{const c=linkOf(st.link),te=c&&tripEnds(c);return te&&te[1]&&c.task?{c,X:te[1],task:{name:taskName(c),act:c.task==='pick'?'collect':c.task,good:c.good},until:st.until}:null}).filter(Boolean);
+    if(steps.length)vs.push({V,R,steps,mode:'idle',i:-1})}
+  const leave=(v,from,to,link)=>{v.mode='travel';v.from=from;v.to=to;v.link=link;v.left=v.R.takes};
+  const fires=(v,k)=>{const R=v.R,day=Math.floor(k/4);if(R.start==='time')return k%4===R.slot&&day>=R.day&&(day-R.day)%R.every===0;
+    const H=heldBy(v.V),st=H&&stock.get(H.id)||{};return(v.V.carries||[]).some(g=>st[g]>0)};
+  for(let k=0;k<tick;k++)for(const v of vs){const V=v.V,R=v.R;
+    if(v.mode==='idle'){if(fires(v,k)){if(R.start==='cargo'){const H=heldBy(V),st=stock.get(H.id);for(const g of V.carries||[])if(st[g]>0){const n=st[g];add(load,V.id,g,n);add(stock,H.id,g,-n)}}
+      v.i=0;leave(v,'home',v.steps[0].X.id,v.steps[0].c.id);if(--v.left<=0)v.mode='work'}} // it leaves at the start of that part of the day and travels during it
+    else if(v.mode==='travel'){if(--v.left<=0)v.mode=v.to==='home'?'idle':'work'}
+    else{const s=v.steps[v.i],X=s.X;let done=true;
+      if(s.task.act==='collect'){const g=s.task.good,have=(load.get(V.id)||{})[g]||0,need=s.until-have;
+        if(need>0){let get=0;if(X.kind==='nature'&&(X.gives||[]).includes(g))get=Math.min(need,X.rate||25);else{get=Math.min(need,(stock.get(X.id)||{})[g]||0);if(get)add(stock,X.id,g,-get)}
+          if(get)add(load,V.id,g,get);done=have+get>=s.until}}
+      else if(s.task.act==='drop'){const l=load.get(V.id)||{};for(const g in l)add(stock,X.id,g,l[g]);load.set(V.id,{})}
+      if(done){v.i++;if(v.i<v.steps.length){const n=v.steps[v.i].c;leave(v,X.id,v.steps[v.i].X.id,n.from===X.id?n.id:null)}else leave(v,X.id,'home',s.c.from===V.id||s.c.to===V.id?s.c.id:null)}}}
+  for(const v of vs){if(v.mode==='idle'){if(fires(v,tick))pos.set(v.V.id,{from:'home',to:v.steps[0].X.id,link:v.steps[0].c.id,f:clamp(frac/v.R.takes,0,1)});continue}
+    if(v.mode==='travel')pos.set(v.V.id,{from:v.from,to:v.to,link:v.link,f:clamp((v.R.takes-v.left+frac)/v.R.takes,0,1)});
+    else{const s=v.steps[v.i];pos.set(v.V.id,{from:s.X.id,to:s.X.id,f:1,task:s.task.name})}}
   return{pos,load,stock}}
 const slotName=t=>'DAY '+Math.floor(t/4)+' · '+SLOTS[Math.floor(t)%4].toUpperCase();
 function setT(t){T=clamp(t,0,DAYS*4-1);$('#tRange').value=T;$('#tLabel').textContent=slotName(T);draw()}
@@ -776,9 +825,6 @@ const LCOLS=[
   {k:'goods',name:'Goods',one:'good',rows:()=>byName(doc.goods).map(g=>({id:g.id,name:g.name,n:usedBy(e=>['carries','stores','gives'].some(f=>(e[f]||[]).includes(g.id)))})),
     add:n=>{doc.goods.push({id:uid('d'),name:n});return true},ren:(id,n)=>{doc.goods.find(x=>x.id===id).name=n},
     del:ids=>{doc.goods=doc.goods.filter(x=>!ids.has(x.id));for(const e of doc.elements)for(const f of['carries','stores','gives'])if(e[f]){e[f]=e[f].filter(g=>!ids.has(g));if(!e[f].length)delete e[f]}}},
-  {k:'tasks',name:'Tasks',one:'task',rows:()=>byName(doc.tasks).map(t=>({id:t.id,name:t.name,sub:t.act==='drop'?'drops cargo':t.act==='pick'?'picks cargo up':'',n:doc.connections.filter(c=>c.sched&&c.sched.task===t.id).length})),
-    add:n=>{doc.tasks.push({id:uid('t'),name:n});return true},ren:(id,n)=>{doc.tasks.find(x=>x.id===id).name=n},
-    del:ids=>{doc.tasks=doc.tasks.filter(x=>!ids.has(x.id));for(const c of doc.connections)if(c.sched&&ids.has(c.sched.task))delete c.sched}},
   {k:'biomes',name:'Biomes',one:'biome',rows:()=>byName(doc.biomes).map(b=>({id:b.id,name:b.name,dot:b.color,n:usedBy(e=>isLand(e)&&e.biome===b.id)})),
     add:n=>{doc.biomes.push({id:uid('b'),name:n,color:BIOME_COLS.find(c=>!doc.biomes.some(x=>x.color===c))||'#e9b52c',h:40});return true},ren:(id,n)=>{doc.biomes.find(x=>x.id===id).name=n},
     del:ids=>{if(doc.biomes.every(b=>ids.has(b.id))){toast('Keep at least one biome');return false}doc.biomes=doc.biomes.filter(x=>!ids.has(x.id));
@@ -827,8 +873,7 @@ $('#bUndo').onclick=undo;$('#bRedo').onclick=redo;$('#bFit').onclick=fit;
 $('#bLabels').onclick=()=>{showLabels=!showLabels;$('#bLabels').classList.toggle('on',showLabels);prefsSave();draw()};
 $('#bShow').onclick=()=>{
   const chip=(id,name,col)=>`<button data-h="${id}" class="${hidden.has(id)?'':'on'}" style="${hidden.has(id)?'color:'+col:''}">${name}</button>`;
-  modal(`<h3>SHOW</h3><label>Things</label><div class="chips">${Object.entries(CATS).sort((a,b)=>az(a[1].name,b[1].name)).map(([k,c])=>chip(k,c.name,c.color)).join('')}</div>
-    <label>Connections</label><div class="chips">${Object.entries(KINDS).map(([k,c])=>chip('k:'+k,c.name,c.color)).join('')}</div><div class="row"><button data-close>DONE</button></div>`,
+  modal(`<h3>SHOW</h3><label>Things</label><div class="chips">${Object.entries(CATS).sort((a,b)=>az(a[1].name,b[1].name)).map(([k,c])=>chip(k,c.name,c.color)).join('')}</div><div class="row"><button data-close>DONE</button></div>`,
     box=>box.querySelectorAll('[data-h]').forEach(b=>b.onclick=()=>{const id=b.dataset.h;hidden.has(id)?hidden.delete(id):hidden.add(id);prefsSave();draw();$('#bShow').onclick()}));
 };
 $('#bFile').onclick=()=>{
@@ -900,7 +945,7 @@ document.addEventListener('keydown',ev=>{
   else if(m&&k==='c'){if(copySel())toast('Copied')}else if(m&&k==='v'){paste()}
   else if(m&&k==='d'){ev.preventDefault();duplicate()}else if(m&&k==='a'){ev.preventDefault();sel={els:new Set(doc.elements.filter(visible).map(e=>e.id)),links:new Set()};panel();draw()}
   else if(k==='delete'||k==='backspace'){removeSel()}else if(k==='f'){fit()}else if(k==='g'){ev.shiftKey?ungroup():group()}
-  else if(k==='enter'||k==='f2'){if(sel.els.size===1)startEdit('el',[...sel.els][0]);else if(sel.links.size===1)startEdit('link',[...sel.links][0])}
+  else if(k==='enter'||k==='f2'){if(sel.els.size===1)startEdit('el',[...sel.els][0]);}
   else if(k==='escape'){closePop();closeModal();setPending(null);sel={els:new Set(),links:new Set()};panel();draw()}
   else if(k==='n'){openAdd(null,null)}
 });
