@@ -352,7 +352,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 22:38', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 09 22:52', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -7588,7 +7588,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 22:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 22:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24679,7 +24679,7 @@ fn surfRow(c: f32) -> f32 { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1)
 fn surfW(c: f32) -> f32 { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1)].y; }
 fn grad(y: f32) -> vec4f {
   let t = clamp((y + 0.5 - D.g.y) / (D.g.z - D.g.y), 0.0, 1.0);
-  return textureSampleLevel(ramp, rampS, vec2f((t * 255.0 + 0.5) / 256.0, (D.g.x + 0.5) / 3.0), 0.0) * D.g.w;
+  return textureSampleLevel(ramp, rampS, vec2f((t * 255.0 + 0.5) / 256.0, (D.g.x + 0.5) / 4.0), 0.0) * D.g.w;
 }
 fn dseaAt(k: i32) -> vec2f { let v = D.sea[k / 2]; if ((k & 1) == 0) { return v.xy; } return v.zw; }
 // the middle of the ocean's dark, a strip of PB x 2 columns at a time, from the surface at the strip's first column down
@@ -24888,18 +24888,24 @@ function wgpuReady() {
   W.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: ro }, { binding: 1, visibility: VF, buffer: ro }, { binding: 2, visibility: F_, texture: {} }, { binding: 3, visibility: F_, sampler: {} }, { binding: 4, visibility: VF, buffer: ro }], 'water');
   W.pl = gpuPipeLayout([W.bl], 'water');
   W.rpipe.clear(); W.samp = gpuSampler(true, 0, 0);
-  W.ramp = gpuTex(256, 3, 'rgba8unorm', 'water'); W.rampKey = ['', '', ''];
+  W.ramp = gpuTex(256, 4, 'rgba8unorm', 'water'); W.rampKey = ['', '', ''];   // (4 rows, not 3: each row's middle exact in binary - (row + 0.5) / 4 - so no filter reads a neighbour's colours in; as the GL front's 256-row table)
   W.still = null; W.stillKey = ''; W.surf = [null, null]; W.surfKey = ['', ''];
   W.none = gpuBuf(256, 'water');
   W.ep = GPU.ep;
   return true;
 }
-// a draw's pipeline: its entry points (vs + fs: the fills and lines; vsShadow + fsShadow; vs + fsAbyss), the target's format; premultiplied over
-function wgpuPipe(vs, fs, fmt) {
-  const W = WGPU_W, k = vs + ':' + fs + ':' + fmt; let p = W.rpipe.get(k);
+// the context's composite operations as blend factors (premultiplied: the GL front's own table, 40-gl.js GLB) - [colour src, dst, alpha src, dst]
+const WGPU_OPS = {
+  'source-over': ['one', 'one-minus-src-alpha', 'one', 'one-minus-src-alpha'], 'multiply': ['dst', 'one-minus-src-alpha', 'zero', 'one'], 'lighter': ['one', 'one', 'one', 'one'],
+  'source-atop': ['dst-alpha', 'one-minus-src-alpha', 'zero', 'one'], 'destination-out': ['zero', 'one-minus-src-alpha', 'zero', 'one-minus-src-alpha'], 'destination-in': ['zero', 'src-alpha', 'zero', 'src-alpha'],
+  'destination-over': ['one-minus-dst-alpha', 'one', 'one-minus-dst-alpha', 'one'], 'source-in': ['dst-alpha', 'zero', 'dst-alpha', 'zero'], 'copy': ['one', 'zero', 'one', 'zero'], 'clear': ['zero', 'zero', 'zero', 'zero'],
+};
+// a draw's pipeline: its entry points (vs + fs: the fills and lines; vsShadow + fsShadow; vs + fsAbyss), the target's format, the context's composite op
+function wgpuPipe(vs, fs, fmt, op) {
+  const W = WGPU_W, B = WGPU_OPS[op] || WGPU_OPS['source-over'], k = vs + ':' + fs + ':' + fmt + ':' + B.join(); let p = W.rpipe.get(k);
   if (!p) {
-    const bl = { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' };
-    p = gpuRenderPipe({ layout: W.pl, label: 'water ' + fs, vertex: { module: W.mod, entryPoint: vs }, fragment: { module: W.mod, entryPoint: fs, targets: [{ format: fmt, blend: { color: bl, alpha: bl } }] }, primitive: { topology: 'triangle-list' } });
+    const blend = { color: { srcFactor: B[0], dstFactor: B[1], operation: 'add' }, alpha: { srcFactor: B[2], dstFactor: B[3], operation: 'add' } };
+    p = gpuRenderPipe({ layout: W.pl, label: 'water ' + fs, vertex: { module: W.mod, entryPoint: vs }, fragment: { module: W.mod, entryPoint: fs, targets: [{ format: fmt, blend }] }, primitive: { topology: 'triangle-list' } });
     W.rpipe.set(k, p);
   }
   return p;
@@ -24991,7 +24997,7 @@ function waterDraw(vs, fs, set, items, inst) {
   f[4] = T.w; f[5] = T.h; f[7] = VWP + 6;
   set(f);
   const dB = wgpuArena(WDP.byteLength, (u8, o) => u8.set(new Uint8Array(WDP.buffer), o));
-  const pipe = wgpuPipe(vs, fs, T.tex.fmt);
+  const pipe = wgpuPipe(vs, fs, T.tex.fmt, ctx.s.op);   // (laid as the context lays: its composite op - as the GL programs and the fills were)
   const bg = gpuBindGroup(W.bl, [{ binding: 0, resource: dB.res }, { binding: 1, resource: { buffer: S.gb } }, { binding: 2, resource: W.ramp.view }, { binding: 3, resource: W.samp }, { binding: 4, resource: items ? items.res : { buffer: W.none.gb } }], 'water');
   let x0 = Math.max(0, VSX), x1 = Math.min(T.w, VSX + VWP), y0 = 0, y1 = Math.min(T.h, bh);
   const sc = ctx.s.sc; if (sc) { x0 = Math.max(x0, sc[0]); y0 = Math.max(y0, sc[1]); x1 = Math.min(x1, sc[0] + sc[2]); y1 = Math.min(y1, sc[1] + sc[3]); }
