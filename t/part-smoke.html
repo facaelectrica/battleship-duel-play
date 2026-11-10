@@ -428,7 +428,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 04:34', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 06:49', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -2448,6 +2448,12 @@ function frameLayer(name, run, at) {
 // THE FRAME'S dt (part 3's ask): the game clock's step since the last frame drawn (s; the clock 'time', so a stepped test run and a
 // paused game give the same steps every run - 0 while paused, at most 0.25), set at the frame's start by frameTick()
 function frameTick() { const t = typeof time === 'number' ? time : 0; FRAME.dt = FRAME.tPrev == null ? 1 / 60 : Math.min(0.25, Math.max(0, t - FRAME.tPrev)); FRAME.tPrev = t; }
+// THE FRAME'S READINESS (part 1's ask, Nov 10): a part whose first frames after a world is made can't yet draw what it should (the
+// sky's first cloud recipes wait a frame or two for their counts - gpuReadBuf) registers frameReadyAdd(() => true once it can).
+// frameReady() is true when every registered check is; the loading cover (00-world.js worldEditCover) stays up until it is (2 s at most).
+const FRAME_READY = [];
+function frameReadyAdd(fn) { if (typeof fn === 'function' && !FRAME_READY.includes(fn)) FRAME_READY.push(fn); }
+function frameReady() { for (const f of FRAME_READY) { try { if (!f()) return false; } catch (e) { } } return true; }
 // the camera of the view beginView set last (vi its index): { buffer, offset, size } in this submit's arena - read by a pass as a
 // uniform: vec4(left px, top px, scale, zoom), vec4(view x on the target, view width, target width, target height), vec4(time, view, shake x px, shake y px)
 function frameCam(vi, v, tw, th) {
@@ -2508,12 +2514,22 @@ function gpuCanvasView(cv) {
   const ctx = cv.getContext('webgpu'); if (!ctx) return null;
   ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' });
   const V = { cv, ctx, T: new GLTarget(Math.max(1, cv.width), Math.max(1, cv.height)), pipe: null, ep: -1, view: null, bg: null };
-  GPU.onRebuild.push(() => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } });
+  V.re = () => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } };
+  GPU.onRebuild.push(V.re);
   return V;
+}
+// a canvas view given up (an editor panel's canvas gone from the page - part 5's ask): its context let go, its rebuild hook removed,
+// its layer freed. V is no use after.
+function gpuCanvasDrop(V) {
+  if (!V || V.dropped) return; V.dropped = true;
+  const i = GPU.onRebuild.indexOf(V.re); if (i >= 0) GPU.onRebuild.splice(i, 1);
+  try { V.ctx.unconfigure(); } catch (e) { }
+  try { V.T.free(); } catch (e) { }
+  V.bg = V.view = V.pipe = null;
 }
 function gpuCanvasSize(V, w, h) { V.cv.width = w; V.cv.height = h; V.T.width = w; V.T.height = h; }
 function gpuCanvasShow(V) {
-  if (!V || !GPU.on || GPU.lost) return false;
+  if (!V || V.dropped || !GPU.on || GPU.lost) return false;
   if (typeof glFlush === 'function') glFlush();
   const t = V.T.tex && V.T.tex.t; if (!t) return false;
   if (!V.pipe || V.ep !== GPU.ep) { const m = gpuModule(GPU_HUD_WGSL, 'canvas show'); V.pipe = gpuRenderPipe({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } }); V.ep = GPU.ep; V.view = null; }
@@ -2682,7 +2698,15 @@ function bootSay(t, pct) { if (!SW_IN_WORKER && typeof window.__bootSay === 'fun
 const bootPaint = () => SW_IN_WORKER || !document.getElementById('bootCover') ? null : new Promise(r => { let done = false; const go = () => { if (!done) { done = true; setTimeout(r, 0); } }; requestAnimationFrame(go); setTimeout(go, 40); });
 let bootPainted = 0;
 function bootTick(t, pct) { bootSay(t, pct); if (SW_IN_WORKER || performance.now() - bootPainted < 60) return null; bootPainted = performance.now(); return bootPaint(); }
-function bootCoverOff() { if (SW_IN_WORKER) return; try { const d = document.getElementById('bootCover'); if (d) d.remove(); } catch (e) { } }
+// (Nov 10, the skeleton: like worldEditCover(false) - the cover stays until the frame under it is ready (frameReady, src/gpu/50-frame.js:
+// a round carried over a hot reload has its world and sky behind it), one animation frame at a time, 2 s at most)
+let bootCoverT0 = 0;
+function bootCoverOff() {
+  if (SW_IN_WORKER) return;
+  if (!bootCoverT0) bootCoverT0 = performance.now();
+  if (typeof frameReady === 'function' && !frameReady() && performance.now() - bootCoverT0 < 2000) { requestAnimationFrame(bootCoverOff); return; }
+  try { const d = document.getElementById('bootCover'); if (d) d.remove(); } catch (e) { }
+}
 const PAGE_GAP_MAX = 80;
 const fsApp = () => { try { return !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)); } catch (e) { return false; } };
 if (!SW_IN_WORKER && fsApp()) try { document.documentElement.classList.add('fsapp'); } catch (e) { }
@@ -3389,8 +3413,16 @@ let worldEdCover = null;
 // (user Nov 9 13:01: the loading screens say what they're doing in ordinary letters - "Downloading data (23%)" - the page's own one's look, src/index.html)
 function worldEditCover(on, text = 'Loading editor') {
   if (typeof document === 'undefined' || SW_IN_WORKER) return;
-  if (!on) { if (worldEdCover) { worldEdCover.remove(); worldEdCover = null; } return; }
-  if (worldEdCover) { worldCoverSay(text); return; }
+  if (!on) {
+    if (!worldEdCover) return;
+    // (Nov 10, the skeleton: the cover stays up until the frame under it is ready - every part's frameReady check, src/gpu/50-frame.js:
+    // the sky's first clouds come back a frame or two after the world is made - one animation frame at a time, 2 s at most; a new
+    // worldEditCover(true) while it waits keeps the cover up)
+    const d = worldEdCover, g = d.__gen = (d.__gen || 0) + 1, t0 = performance.now();
+    const off = () => { if (worldEdCover !== d || d.__gen !== g) return; if (typeof frameReady === 'function' && !frameReady() && performance.now() - t0 < 2000) { requestAnimationFrame(off); return; } d.remove(); worldEdCover = null; };
+    off(); return;
+  }
+  if (worldEdCover) { worldEdCover.__gen = (worldEdCover.__gen || 0) + 1; worldCoverSay(text); return; }
   const d = worldEdCover = window.__coverMake();          // (the loading screen's one look: the title, the line, the corner - src/index.html)
   worldCoverSay(text);
   setTimeout(() => { if (worldEdCover === d) worldEditCover(false); }, 60000);
@@ -7714,7 +7746,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 04:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 06:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24658,111 +24690,131 @@ function wglLampSnap(x0, x1) {
 }
 
 /* ================================================================
-   ENGINE STAGE 8, the last two passes (Oct 30): the middle sea's columns and the rain's streaks on the GPU.
-   1. THE MIDDLE SEA (drawMidSea, 42-render-sky.js): every column's swell height and its patch of foam were worked out in JS
-      every frame (crestAt, two swells of three Gerstner steps, a sine, cloudNoise's four hashes and a hash: some twenty sines
-      a column) and drawn as runs of rectangles. Now JS works out only what needs doubles - each sine's phase at the start of
-      every block of 32 columns, reduced to one turn (the time and the camera's place make them large), the noise's lattice
-      and the foam's hashes (a few dozen) - and one program does the columns, in three draws: the water (the same gradient),
-      then the foam twice (a rising column's first foam row was painted twice, its 1-pixel patch and its 2-pixel rise: two
-      blends, so two draws). The same formulas in the same order, highp. ON by default (?midseagpu=0 turns it off).
-   2. THE RAIN'S STREAKS (drawRainStreaks, 47-render-overlays.js): each drop's cells were written into a pixel buffer in JS
-      (a dozen or two a drop, thousands of drops) and the buffer uploaded (a view's width x its height in cells, every frame).
-      Now JS keeps each drop's head, slant, length and where it stops (the same doubles as before) - 8 numbers a drop - and one
-      instanced draw writes the cells into a kept layer of the same cells (no blending: the last drop over a cell wins, as in
-      the buffer), which is laid on the view as the buffer was. ON by default (?raingpu=0 turns it off).
+   THE MIDDLE SEA'S COLUMNS AND THE RAIN'S STREAKS ON THE GPU (engine stage 8, Oct 30; native WebGPU since engine part 6, Nov 10 -
+   once GL programs through the GL front)
+   1. THE MIDDLE SEA (drawMidSea, 42-render-sky.js): JS works out only what needs doubles - each sine's phase at the start of every
+      block of 32 columns, reduced to one turn (the time and the camera's place make them large), the noise's lattice and the foam's
+      hashes (a few dozen) and the gradient's 256 colours - and one shader does the columns, in three draws of one pass: the water
+      (the gradient), then the foam twice (a rising column's first foam row was painted twice, its 1-pixel patch and its 2-pixel
+      rise: two blends, so two draws). The same formulas in the same order.
+   2. THE RAIN'S STREAKS (drawRainStreaks, 47-render-overlays.js): JS keeps each drop's head, slant, length and where it stops (the
+      same doubles as before) - 8 numbers a drop - and one instanced draw writes the cells into a kept layer of the same cells (no
+      blending: the last drop over a cell wins, as in the old buffer), which is laid on the view (fxLay, 40-zzzz-layers.js).
+   Both into the context's target with its blend, scissor and clip (fxBegin / fxColour / fxStencil / fxPass); their numbers in the
+   frame's arena; nothing submitted mid-frame.
    ================================================================ */
-// (ON by default since Version 353: on the user's GPU (Oct 30) storm, battle and openfar came out the same to the pixel as the JS
-// path; only a headless software renderer drew them differently. ?midseagpu=0 / ?raingpu=0 turn them off; a failed setup falls back
-// to the JS path by itself)
-const MIDSEA_GPU = !/[?&]midseagpu=0/.test(location.search);
-const RAIN_GPU = !/[?&]raingpu=0/.test(location.search);
-const G8 = { ep: -1, ms: null, rn: null };
-function g8Setup() {
-  if (G8.ep === GLR.epoch) return true;
-  const gl = GLR.gl;
-  try {
-    const prog = (vs, fs, names) => { const p = gl.createProgram(); gl.attachShader(p, glShader(gl.VERTEX_SHADER, vs)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p);
-      if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p)); const U = {}; for (const k of names) U[k] = gl.getUniformLocation(p, k); return { p, U }; };
-    G8.ms = prog(WGL_VS, G8_MS_FS, ['u_size', 'u_rect', 'u_m', 'u_d', 'u_grad', 'u_c', 'u_k', 'u_g', 'u_col', 'u_pass', 'u_off', 'u_cb']);
-    G8.msT = glNewTex(0, 0, gl.NEAREST); G8.msW = 0; G8.msF = new Float32Array(0);
-    G8.rn = prog(G8_RN_VS, G8_RN_FS, ['u_fb', 'u_lim', 'u_tier']);
-    G8.rvao = gl.createVertexArray(); gl.bindVertexArray(G8.rvao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, GLR.pqvbo); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
-    G8.rvbo = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, G8.rvbo);
-    for (let i = 1; i <= 2; i++) { gl.enableVertexAttribArray(i); gl.vertexAttribPointer(i, 4, gl.FLOAT, false, 32, (i - 1) * 16); gl.vertexAttribDivisor(i, 1); }
-    gl.bindVertexArray(GLR.vao); GLR.cur.vao = 1;
-    G8.rT = null; G8.rW = 0; G8.rH = 0; G8.rfbo = null;
-    G8.ep = GLR.epoch; return true;
-  } catch (e) { console.error(e); G8.ep = -2; return false; }
-}
-const g8On = () => GLR.on && !GLR.lost && (G8.ep === GLR.epoch || (G8.ep !== -2 && g8Setup())) && C instanceof GLCtx;
+const G8 = { ep: -1, ms: new Map(), rn: null, rT: null, bg: new Map() };
+const g8On = () => C instanceof GLCtx && gpuAlive();
+// (the old ?midseagpu=0 JS path: gone with the GL programs - kept true until 42-render-sky.js drops its loop)
+const MIDSEA_GPU = true;
 // one turn: the phases are reduced in doubles, so the shader's sines see small numbers (the same sine)
 const G8_TAU = Math.PI * 2;
 const g8Turn = v => v - G8_TAU * Math.floor(v / G8_TAU);
+// the GPU objects (src/gpu's calls), made again on a new device
+function g8Shared() {
+  if (G8.ep === GPU.ep) return;
+  const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, hd = n => ({ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: n } });
+  const all = { binding: 1, visibility: VF, buffer: { type: 'read-only-storage' } };
+  G8.msl = gpuBindLayout([hd(G8_MS_HB), all], 'mid sea'); G8.msm = gpuModule(G8_MS_WGSL, 'mid sea'); G8.msp = gpuPipeLayout([G8.msl], 'mid sea'); G8.ms.clear();
+  G8.rnl = gpuBindLayout([hd(G8_RN_HB), all], 'rain'); const rm = gpuModule(G8_RN_WGSL, 'rain');
+  G8.rn = gpuRenderPipe({ layout: gpuPipeLayout([G8.rnl], 'rain'), vertex: { module: rm, entryPoint: 'vs' }, fragment: { module: rm, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } });
+  G8.rT = null; G8.bg.clear(); G8.ep = GPU.ep;
+}
+// a draw's bind group for an arena chunk (its header at a dynamic offset, the chunk whole for its lists)
+function g8Bind(L, k, c, hb) {
+  const key = k + c.id; let e = G8.bg.get(key);
+  if (!e || e.gb !== c.gb) { e = { gb: c.gb, g: gpuBindGroup(L, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: hb } }, { binding: 1, resource: { buffer: c.gb } }], k) }; G8.bg.set(key, e); }
+  return e.g;
+}
 
-/* ---- 1. the middle sea. u_d (RGBA32F): rows 0-2 one texel a block of 32 columns - the five phases at its first column (crestAt's
-   two, the two swells', the ripple's), the noise's x there (its lattice cell from the table's first, and its fraction), u/3 there
-   (the same); row 3 the noise's lattice (hash at (xi, yi), (xi, yi + 1)); row 4 the foam's hashes. u_k: each phase's step a
-   column, the noise x's and u/3's ---- */
-const G8_MS_FS = `#version 300 es
-precision highp float; precision highp int;
-in vec2 v_u; out vec4 o;
-uniform highp sampler2D u_d; uniform sampler2D u_grad;
-uniform vec4 u_c;      // first column, step, columns, the noise's v (smoothstep of y's fraction)
-uniform vec4 u_k;      // steps a column: crestAt's two phases, the swells' two
-uniform vec4 u_off;    // steps a column: the ripple's phase, the noise x, u/3; foamCut
-uniform vec4 u_g;      // base, amp, hz, bot
-uniform vec4 u_col;    // the foam (premultiplied)
-uniform vec3 u_pass;   // pass (0 the water, 1 foam once, 2 foam twice), the gradient's row, its alpha
-uniform vec3 u_cb;      // crestAt's base (its clamp), PB, the foot (how far down it reaches - seaFootY, 42-render-sky.js)
-float swell(float ph, float s) {
-  if (s < 0.02) return sin(ph);
-  float f = ph - 1.5707963;
-  float th = f + s * sin(f);
+/* ---- 1. the middle sea. Its header (MS) and lists in one arena block: D (vec4s from h.o.x, TW a row) - rows 0-2 one a block of 32
+   columns: the five phases at its first column (crestAt's two, the two swells', the ripple's), the noise's x there (its lattice cell
+   from the table's first, and its fraction), u/3 there (the same); row 3 the noise's lattice (hash at (xi, yi), (xi, yi + 1)); row 4
+   the foam's hashes; then the gradient's 256 colours (premultiplied, vec4s from h.o.y). k: each phase's step a column, the noise x's
+   and u/3's ---- */
+const G8_MS_HB = 160;
+const G8_MS_WGSL = `
+struct MS {
+  m: vec4f,      // the context's transform (a, d, e, f - no turn)
+  sz: vec4f,     // the target's size
+  rect: vec4f,   // the quad, in the context's space
+  c: vec4f,      // first column, step, columns, the noise's v (smoothstep of y's fraction)
+  k: vec4f,      // steps a column: crestAt's two phases, the swells' two
+  off: vec4f,    // steps a column: the ripple's phase, the noise x, u/3; foamCut
+  g: vec4f,      // base, amp, hz, bot
+  col: vec4f,    // the foam (premultiplied)
+  cb: vec4f,     // crestAt's base (its clamp), PB, the foot (how far down it reaches - seaFootY, 42-render-sky.js), the context's alpha
+  o: vec4u,      // D's first vec4, the gradient's, TW
+};
+@group(0) @binding(0) var<storage, read> h: MS;
+@group(0) @binding(1) var<storage, read> A: array<vec4f>;
+struct VO { @builtin(position) p: vec4f, @location(0) u: vec2f, @location(1) @interpolate(flat) ps: u32 };
+@vertex fn vs(@builtin(vertex_index) v: u32, @builtin(instance_index) ps: u32) -> VO {
+  let pu = h.rect.xy + vec2f(f32(v & 1u), f32(v >> 1u)) * h.rect.zw; let p = pu * h.m.xy + h.m.zw; let n = p / h.sz.xy;
+  var g = vec4f(n.x * 2.0 - 1.0, 1.0 - n.y * 2.0, 0.0, 1.0);
+  g.y = -g.y; g.z = (g.z + g.w) * 0.5;   // (rows in WebGL's order, z 0..w - as every vertex stage of the game: src/gpu/10-glsl.js)
+  return VO(g, pu, ps);
+}
+fn D(row: u32, i: i32) -> vec4f { return A[h.o.x + row * h.o.z + u32(clamp(i, 0, i32(h.o.z) - 1))]; }
+fn swell(ph: f32, s: f32) -> f32 {
+  if (s < 0.02) { return sin(ph); }
+  let f = ph - 1.5707963;
+  var th = f + s * sin(f);
   th = f + s * sin(th); th = f + s * sin(th);
   return cos(th) + s * 0.5;
 }
 // column i: its top (y) and whether foam is on it
-vec2 col(int i, float cbase) {
-  int b = i >> 5, j = i & 31; float fj = float(j);
-  vec4 p = texelFetch(u_d, ivec2(b, 0), 0), q = texelFetch(u_d, ivec2(b, 1), 0);
-  float pa = p.x + fj * u_k.x, pb = p.y + fj * u_k.y;
-  float pat = 0.5 + 0.32 * sin(pa) + 0.18 * sin(pb);
-  float sh = cbase * clamp(pat * 1.25 - 0.1, 0.0, 1.0) * 0.8;
-  float w = swell(p.z + fj * u_k.z, sh) + 0.6 * swell(p.w + fj * u_k.w, sh) + 0.3 * sin(q.x + fj * u_off.x);
-  float y = u_g.x + floor(w * u_g.y / u_cb.y + 0.5) * u_cb.y;
-  float xr = q.z + fj * u_off.y, fl = floor(xr), fx = xr - fl; int xi = int(q.y + 0.5) + int(fl);
-  vec2 h0 = texelFetch(u_d, ivec2(xi, 3), 0).xy, h1 = texelFetch(u_d, ivec2(xi + 1, 3), 0).xy;
-  float uu = fx * fx * (3.0 - 2.0 * fx), v = u_c.w;
-  float a = h0.x, bb = h1.x, c = h0.y, d = h1.y;
-  float nz = (a + (bb - a) * uu) * (1.0 - v) + (c + (d - c) * uu) * v;
-  vec4 r = texelFetch(u_d, ivec2(b, 2), 0);
-  float kr = r.x + fj * u_off.z; int ki = int(r.y + 0.5) + int(floor(kr));
-  float hs = texelFetch(u_d, ivec2(ki, 4), 0).x;
-  return vec2(y, nz * 0.75 + hs * 0.25 > u_off.w ? 1.0 : 0.0);
+fn col(i: i32, cbase: f32) -> vec2f {
+  let b = i >> 5u; let fj = f32(i & 31);
+  let p = D(0u, b); let q = D(1u, b);
+  let pa = p.x + fj * h.k.x; let pb = p.y + fj * h.k.y;
+  let pat = 0.5 + 0.32 * sin(pa) + 0.18 * sin(pb);
+  let sh = cbase * clamp(pat * 1.25 - 0.1, 0.0, 1.0) * 0.8;
+  let w = swell(p.z + fj * h.k.z, sh) + 0.6 * swell(p.w + fj * h.k.w, sh) + 0.3 * sin(q.x + fj * h.off.x);
+  let y = h.g.x + floor(w * h.g.y / h.cb.y + 0.5) * h.cb.y;
+  let xr = q.z + fj * h.off.y; let fl = floor(xr); let fx = xr - fl; let xi = i32(q.y + 0.5) + i32(fl);
+  let h0 = D(3u, xi).xy; let h1 = D(3u, xi + 1).xy;
+  let uu = fx * fx * (3.0 - 2.0 * fx); let v = h.c.w;
+  let nz = (h0.x + (h1.x - h0.x) * uu) * (1.0 - v) + (h0.y + (h1.y - h0.y) * uu) * v;
+  let r = D(2u, b);
+  let kr = r.x + fj * h.off.z; let ki = i32(r.y + 0.5) + i32(floor(kr));
+  let hs = D(4u, ki).x;
+  return vec2f(y, select(0.0, 1.0, nz * 0.75 + hs * 0.25 > h.off.w));
 }
-void main() {
-  float x = floor(v_u.x), y = floor(v_u.y);
-  float fi = floor((x - u_c.x) / u_c.y); int i = int(fi), n = int(u_c.z + 0.5);
-  if (fi < 0.0 || i >= n) discard;
-  vec2 c = col(i, u_cb.x);
-  if (u_pass.x < 0.5) {
-    float bot = u_g.w;
-    if (y < min(c.x, u_cb.z) || y >= max(c.x, u_cb.z)) discard;
-    float t = clamp((y + 0.5 - u_g.z) / (bot - u_g.z), 0.0, 1.0);
-    o = textureLod(u_grad, vec2((t * 255.0 + 0.5) / 256.0, (u_pass.y + 0.5) / 256.0), 0.0) * u_pass.z;
-    return;
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let x = floor(i.u.x); let y = floor(i.u.y);
+  let fi = floor((x - h.c.x) / h.c.y); let n = i32(h.c.z + 0.5);
+  if (fi < 0.0 || i32(fi) >= n) { discard; }
+  let ii = i32(fi); let c = col(ii, h.cb.x);
+  if (i.ps == 0u) {
+    if (y < min(c.x, h.cb.z) || y >= max(c.x, h.cb.z)) { discard; }
+    let t = clamp((y + 0.5 - h.g.z) / (h.g.w - h.g.z), 0.0, 1.0) * 255.0; let t0 = floor(t); let t1 = min(255.0, t0 + 1.0);
+    return mix(A[h.o.y + u32(t0)], A[h.o.y + u32(t1)], t - t0) * h.cb.w;   // (the gradient, filtered between its two colours as the texture was)
   }
-  if (c.y < 0.5) discard;
-  bool rise = i > 0 && c.x < col(i - 1, u_cb.x).x;
-  int k = (y == c.x ? 1 : 0) + (rise && (y == c.x || y == c.x + 1.0) ? 1 : 0);
-  if (float(k) < u_pass.x) discard;
-  o = u_col;
+  if (c.y < 0.5) { discard; }
+  var rise = false; if (ii > 0) { rise = c.x < col(ii - 1, h.cb.x).x; }
+  let k = select(0, 1, y == c.x) + select(0, 1, rise && (y == c.x || y == c.x + 1.0));
+  if (k < i32(i.ps)) { discard; }
+  return h.col;
 }`;
-// the middle sea's columns on the GPU (drawMidSea's loop): its numbers as drawMidSea has them
+// the gradient's 256 colours (premultiplied, 0-1) as the GL front's gradient rows were (40-gl.js glGradRow) - into F from word o
+function g8Ramp(stops, F, o) {
+  const st = stops.length > 1 ? stops.map((s, i) => [s[0], s[1], i]).sort((a, b) => a[0] - b[0] || a[2] - b[2]) : stops;
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255; let r = 0, g = 0, b = 0, a = 0;
+    if (st.length) {
+      let k = 0; while (k < st.length && st[k][0] <= t) k++;
+      if (k === 0) [r, g, b, a] = st[0][1];
+      else if (k === st.length) [r, g, b, a] = st[st.length - 1][1];
+      else { const A = st[k - 1], B = st[k], u = (t - A[0]) / Math.max(1e-9, B[0] - A[0]), ca = A[1], cb = B[1]; r = ca[0] + (cb[0] - ca[0]) * u; g = ca[1] + (cb[1] - ca[1]) * u; b = ca[2] + (cb[2] - ca[2]) * u; a = ca[3] + (cb[3] - ca[3]) * u; }
+    }
+    const q = o + i * 4; F[q] = Math.round(r * a) / 255; F[q + 1] = Math.round(g * a) / 255; F[q + 2] = Math.round(b * a) / 255; F[q + 3] = Math.round(a * 255) / 255;
+  }
+}
+// the middle sea's columns (drawMidSea's loop): its numbers as drawMidSea has them
 function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, crest, foot = bot) {
-  const gl = GLR.gl, pr = G8.ms, U = pr.U, ctx = C;
+  const ctx = C, X = fxBegin(ctx); if (!X) return;
+  g8Shared();
   const c0 = Math.floor(Lp / step) * step, n = Math.ceil((Lp + Wp - c0) / step), nb = (n + 31) >> 5;
   const du = step / Sl, cbase = clamp(0.1 + 0.13 * A + 0.3 * st, 0, 0.82);
   // the noise's lattice and the foam's hashes over the columns' span (u rises with c)
@@ -24771,101 +24823,89 @@ function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, cr
   const k0 = Math.floor(uA / 3) - 1, k1 = Math.floor(uB / 3) + 1;
   const Y = time * 0.35, yi = Math.floor(Y), fy = Y - yi, v = fy * fy * (3 - 2 * fy);
   const nl = xi1 - xi0 + 1, nk = k1 - k0 + 1, TW = Math.max(nb, nl, nk);
-  if (G8.msF.length < TW * 5 * 4) G8.msF = new Float32Array((TW + 64) * 5 * 4);
-  const F = G8.msF, R = TW * 4;
+  // (the header, D's five rows, the gradient: one arena block, words)
+  const oD = G8_MS_HB / 4, oG = oD + TW * 5 * 4, [ch, off] = arenaAlloc((oG + 1024) * 4, 256), w0 = off >> 2, Wd = pxWords(ch), F = Wd.f, U = Wd.u;
+  F.fill(0, w0, w0 + oG);
+  const R = TW * 4, d0 = w0 + oD;
   for (let b = 0; b < nb; b++) {
-    const u = layerX(c0 + b * 32 * step, L, Sl), o = b * 4, x2 = u * 2;
+    const u = layerX(c0 + b * 32 * step, L, Sl), o = d0 + b * 4, x2 = u * 2;
     F[o] = g8Turn(x2 * 0.0019 + time * 0.11); F[o + 1] = g8Turn(x2 * 0.0047 - time * 0.17 + 1.9);
     F[o + 2] = g8Turn(u * 0.021 + time * 0.7); F[o + 3] = g8Turn(u * 0.047 - time * 1.1);
-    const X = u * 0.045 + time * 0.08, xi = Math.floor(X), U3 = u / 3, ki = Math.floor(U3);
-    F[R + o] = g8Turn(u * 0.09 + time * 1.7); F[R + o + 1] = xi - xi0; F[R + o + 2] = X - xi; F[R + o + 3] = 0;
-    F[2 * R + o] = U3 - ki; F[2 * R + o + 1] = ki - k0; F[2 * R + o + 2] = 0; F[2 * R + o + 3] = 0;
+    const Xn = u * 0.045 + time * 0.08, xi = Math.floor(Xn), U3 = u / 3, ki = Math.floor(U3);
+    F[R + o] = g8Turn(u * 0.09 + time * 1.7); F[R + o + 1] = xi - xi0; F[R + o + 2] = Xn - xi;
+    F[2 * R + o] = U3 - ki; F[2 * R + o + 1] = ki - k0;
   }
-  const h = (i, j) => hash(i * 12.9898 + j * 78.233 + 7.1 * 3.719);   // (cloudNoise's, sd 7.1)
-  for (let i = 0; i < nl; i++) { const o = 3 * R + i * 4; F[o] = h(xi0 + i, yi); F[o + 1] = h(xi0 + i, yi + 1); F[o + 2] = 0; F[o + 3] = 0; }
-  for (let i = 0; i < nk; i++) { const o = 4 * R + i * 4; F[o] = hash((k0 + i) * 0.731 + 0.17); F[o + 1] = 0; F[o + 2] = 0; F[o + 3] = 0; }
-  gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G8.msT); glPM(false); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-  if (G8.msW < TW) { G8.msW = TW + 64; gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, G8.msW, 5, 0, gl.RGBA, gl.FLOAT, null); }
-  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, TW, 5, gl.RGBA, gl.FLOAT, F.subarray(0, TW * 5 * 4));
-  for (let i = 0; i < 8; i++) if (GLR.unit[i] === G8.msT) GLR.unit[i] = null;   // (unit 9 used for the upload: the cache keeps 0-7)
-  GLR.stats.uploads++; GLR.stats.upPx += TW * 5;
-  const row = glGradRow(g), ga = ctx.s.ga, gA = Math.round(ga * 255) / 255;
-  const pc = glParse(crest), cc = glPack(pc, ga), col = [(cc & 255) / 255, ((cc >>> 8) & 255) / 255, ((cc >>> 16) & 255) / 255, (cc >>> 24) / 255];
+  const hh = (i, j) => hash(i * 12.9898 + j * 78.233 + 7.1 * 3.719);   // (cloudNoise's, sd 7.1)
+  for (let i = 0; i < nl; i++) { const o = d0 + 3 * R + i * 4; F[o] = hh(xi0 + i, yi); F[o + 1] = hh(xi0 + i, yi + 1); }
+  for (let i = 0; i < nk; i++) F[d0 + 4 * R + i * 4] = hash((k0 + i) * 0.731 + 0.17);
+  g8Ramp(g.stops, F, w0 + oG);
+  const s = ctx.s, t = ctx.target, m = s.m, ga = s.ga, gA = Math.round(ga * 255) / 255;
+  const cc = glPack(glParse(crest), ga);
   // the quad: every column's top lies within 3 swells' height of base (|w| < 2.9)
   const yLo = Math.min(foot, Math.floor(base - 3 * Math.abs(amp)) - 4), yHi = Math.max(foot, Math.ceil(base + 3 * Math.abs(amp)) + 4);
-  for (let pass = 0; pass < 3; pass++) {
-    if (pass && !(cc >>> 24)) break;
-    wglBegin(ctx, ctx.s.op, pr);
-    wglTex(0, G8.msT, false); gl.uniform1i(U.u_d, 0); gl.uniform1i(U.u_grad, 8);
-    gl.uniform4f(U.u_c, c0, step, n, v); gl.uniform3f(U.u_cb, cbase, PB, foot);
-    gl.uniform4f(U.u_k, 2 * du * 0.0019, 2 * du * 0.0047, du * 0.021, du * 0.047);
-    gl.uniform4f(U.u_off, du * 0.09, du * 0.045, du / 3, foamCut);
-    gl.uniform4f(U.u_g, base, amp, hz, bot); gl.uniform4f(U.u_col, col[0], col[1], col[2], col[3]); gl.uniform3f(U.u_pass, pass, row, gA);
-    gl.uniform4f(U.u_rect, c0, yLo, n * step, yHi - yLo); gl.bindVertexArray(WGL.qvao); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    wglEnd();
-  }
+  const hv = [m[0], m[3], m[4], m[5], t._w, t._h, 0, 0, c0, yLo, n * step, yHi - yLo, c0, step, n, v, 2 * du * 0.0019, 2 * du * 0.0047, du * 0.021, du * 0.047,
+    du * 0.09, du * 0.045, du / 3, foamCut, base, amp, hz, bot, (cc & 255) / 255, ((cc >>> 8) & 255) / 255, ((cc >>> 16) & 255) / 255, (cc >>> 24) / 255, cbase, PB, foot, gA];
+  for (let k = 0; k < hv.length; k++) F[w0 + k] = hv[k];
+  U[w0 + 36] = (off + G8_MS_HB) / 16; U[w0 + 37] = (off >> 4) + oG / 4; U[w0 + 38] = TW; U[w0 + 39] = 0;
+  const key = fxKey(X); let pipe = G8.ms.get(key);
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: G8.msp, vertex: { module: G8.msm, entryPoint: 'vs' }, fragment: { module: G8.msm, entryPoint: 'fs', targets: [fxColour(X.FT.tex, X.op, X.screen)] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } }, fxStencil(X.ds))); G8.ms.set(key, pipe); }
+  const pass = fxPass(X, 'mid sea');
+  pass.setPipeline(pipe); pass.setBindGroup(0, g8Bind(G8.msl, 'mid sea ', ch, G8_MS_HB), [off]);
+  for (let p = 0; p < 3; p++) { if (p && !(cc >>> 24)) break; pass.draw(4, 1, 0, p); GLR.stats.draws++; }   // (which of the three: the draw's instance)
+  gpuPassEnd();
 }
 
-/* ---- 2. the rain's streaks: an instance a drop - (x0's whole cells, its fraction, slant, jit), (head row, length, roof, depth) -
-   drawn into a layer of cells (row y of the layer = cell row y) with no blending, in the drops' order ---- */
-const G8_RN_VS = `#version 300 es
-layout(location=0) in vec2 a_q;
-layout(location=1) in vec4 a_a;
-layout(location=2) in vec4 a_b;
-uniform vec2 u_fb;
-flat out vec4 v_a; flat out vec4 v_b;
-void main() {
-  float e = a_a.y - a_a.z * (a_b.y - 1.0);
-  vec2 lo = vec2(a_a.x + floor(min(a_a.y, e)) - 1.0, a_b.x - a_b.y), hi = vec2(a_a.x + ceil(max(a_a.y, e)) + 2.0, a_b.x + 2.0);
-  vec2 p = mix(lo, hi, a_q) / u_fb;
-  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
-  v_a = a_a; v_b = a_b;
+/* ---- 2. the rain's streaks: an instance a drop - (x0's whole cells, its fraction, slant, jit), (head row, length, roof, depth) - drawn
+   into a layer of cells (its row y the cell row y from the top) with no blending, in the drops' order ---- */
+const G8_RN_HB = 336;
+const G8_RN_WGSL = `
+struct RN { fb: vec4f, lim: vec4f, o: vec4u, tier: array<vec4f, 18> };   // (the layer's size; top, bot, band, w; the drops' first vec4; the depths' six steps)
+@group(0) @binding(0) var<storage, read> h: RN;
+@group(0) @binding(1) var<storage, read> A: array<vec4f>;
+struct VO { @builtin(position) p: vec4f, @location(0) @interpolate(flat) a: vec4f, @location(1) @interpolate(flat) b: vec4f };
+@vertex fn vs(@builtin(vertex_index) v: u32, @builtin(instance_index) k: u32) -> VO {
+  let a = A[h.o.x + k * 2u]; let b = A[h.o.x + k * 2u + 1u];
+  let e = a.y - a.z * (b.y - 1.0);
+  let lo = vec2f(a.x + floor(min(a.y, e)) - 1.0, b.x - b.y); let hi = vec2f(a.x + ceil(max(a.y, e)) + 2.0, b.x + 2.0);
+  let p = mix(lo, hi, vec2f(f32(v & 1u), f32(v >> 1u))) / h.fb.xy;
+  return VO(vec4f(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0), a, b);
+}
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let x = floor(i.p.x); let y = floor(i.p.y); let t = i.b.x - y;
+  if (t < 0.0 || t >= i.b.y || y > i.b.z || y > h.lim.y || y < h.lim.x) { discard; }
+  let xx = i.a.x + floor(i.a.y - i.a.z * t + 0.5);
+  if (x != xx || x < 0.0 || x >= h.lim.w) { discard; }
+  let u = (y - h.lim.x) / h.lim.z + i.a.w;
+  let q = min(5, i32(floor((u - 0.04) / 0.62 * 6.0)));
+  if (q < 0) { discard; }
+  return h.tier[i32(i.b.w + 0.5) * 6 + q];
 }`;
-const G8_RN_FS = `#version 300 es
-precision highp float; precision highp int;
-flat in vec4 v_a; flat in vec4 v_b;
-uniform vec4 u_lim;      // top, bot, band, w
-uniform vec4 u_tier[18];
-out vec4 o;
-void main() {
-  float x = floor(gl_FragCoord.x), y = floor(gl_FragCoord.y), t = v_b.x - y;
-  if (t < 0.0 || t >= v_b.y || y > v_b.z || y > u_lim.y || y < u_lim.x) discard;
-  float xx = v_a.x + floor(v_a.y - v_a.z * t + 0.5);
-  if (x != xx || x < 0.0 || x >= u_lim.w) discard;
-  float u = (y - u_lim.x) / u_lim.z + v_a.w;
-  int q = min(5, int(floor((u - 0.04) / 0.62 * 6.0)));
-  if (q < 0) discard;
-  o = u_tier[int(v_b.w + 0.5) * 6 + q];
-}`;
+const G8_RN_PIECE = 65536;   // (drops a draw at most: 2 MB of the arena)
 // the drops (inst: 8 floats each, k of them) into the layer, which is then laid over the view as drawRainStreaks laid its buffer
 function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
-  const gl = GLR.gl, ctx = C, s = ctx.s;
-  glBegin(ctx, s.op); glFlush();
+  const ctx = C; if (!(ctx instanceof GLCtx)) return;
+  glBegin(ctx, ctx.s.op); frameFlush();   // (what the context drew so far, recorded before the layer's pass)
+  g8Shared();
   let tw = 64, th = 64; while (tw < w) tw *= 2; while (th < h) th *= 2;
-  if (!G8.rT || G8.rW < tw || G8.rH < th) {
-    if (G8.rT) { gl.deleteTexture(G8.rT); gl.deleteFramebuffer(G8.rfbo); }
-    G8.rW = Math.max(tw, G8.rW); G8.rH = Math.max(th, G8.rH);
-    G8.rT = glNewTex(0, 0, gl.NEAREST); gl.activeTexture(gl.TEXTURE9); gl.bindTexture(gl.TEXTURE_2D, G8.rT); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, G8.rW, G8.rH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    G8.rfbo = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, G8.rfbo); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, G8.rT, 0);
+  if (!G8.rT || G8.rT.ep !== GPU.ep || G8.rT.w < tw || G8.rT.h < th) {
+    const o = G8.rT && G8.rT.ep === GPU.ep ? G8.rT : null;
+    if (o) gpuTexFree(o);
+    G8.rT = gpuTex(Math.max(tw, o ? o.w : 0), Math.max(th, o ? o.h : 0), 'rgba8unorm', 'rain');
   }
-  for (let i = 0; i < 8; i++) if (GLR.unit[i] === G8.rT) { gl.activeTexture(gl.TEXTURE0 + i); gl.bindTexture(gl.TEXTURE_2D, null); GLR.unit[i] = null; }
-  gl.bindFramebuffer(gl.FRAMEBUFFER, G8.rfbo); gl.viewport(0, 0, G8.rW, G8.rH);
-  gl.disable(gl.SCISSOR_TEST); gl.disable(gl.STENCIL_TEST); gl.disable(gl.BLEND);
-  gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
-  if (k) {
-    const pr = G8.rn, U = pr.U;
-    gl.useProgram(pr.p);
-    gl.uniform2f(U.u_fb, G8.rW, G8.rH); gl.uniform4f(U.u_lim, top, bot, band, w); gl.uniform4fv(U.u_tier, tiers);
-    gl.bindVertexArray(G8.rvao); gl.bindBuffer(gl.ARRAY_BUFFER, G8.rvbo); gl.bufferData(gl.ARRAY_BUFFER, inst.subarray(0, k * 8), gl.STREAM_DRAW);
-    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, k);
-    GLR.stats.draws++; GLR.stats.uploads++; GLR.stats.upPx += k * 2;
+  const L = G8.rT, pass = gpuPassBegin({ colorAttachments: [{ view: L.view, loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'rain', [L]);
+  pass.setViewport(0, 0, L.w, L.h, 0, 1); pass.setPipeline(G8.rn);
+  for (let s = 0; s < k; s += G8_RN_PIECE) {
+    const m = Math.min(G8_RN_PIECE, k - s), [ch, off] = arenaAlloc(G8_RN_HB + m * 32, 256), w0 = off >> 2, Wd = pxWords(ch), F = Wd.f, U = Wd.u;
+    F[w0] = L.w; F[w0 + 1] = L.h; F[w0 + 2] = F[w0 + 3] = 0; F[w0 + 4] = top; F[w0 + 5] = bot; F[w0 + 6] = band; F[w0 + 7] = w;
+    U[w0 + 8] = (off + G8_RN_HB) / 16; U[w0 + 9] = U[w0 + 10] = U[w0 + 11] = 0;
+    F.set(tiers.subarray(0, 72), w0 + 12); F.set(inst.subarray(s * 8, (s + m) * 8), w0 + G8_RN_HB / 4);
+    pass.setBindGroup(0, g8Bind(G8.rnl, 'rain ', ch, G8_RN_HB), [off]); pass.draw(4, m);
+    GLR.stats.draws++;
   }
-  gl.bindVertexArray(GLR.vao); gl.enable(gl.BLEND); GLR.cur = {};
-  // (laid as drawPixels laid the buffer: rows top..bot, a cell rp pixels square, nearest)
-  glBegin(ctx, s.op);
-  const slot = glSlot(G8.rT, false), X = GLC4.x, Y = GLC4.y, n = bot - top + 1, u1 = w / G8.rW, v0 = top / G8.rH, v1 = (bot + 1) / G8.rH;
-  ctx._corners(0, top * rp, w * rp, n * rp);
-  glQuad(X[0], Y[0], X[1], Y[1], X[2], Y[2], X[3], Y[3], 0, v0, u1, v0, u1, v1, 0, v1, glAlpha(s.ga), 1 + 8 * slot, 0);
+  gpuPassEnd();
+  // (laid as the buffer was: rows top..bot, a cell rp pixels square, nearest, in the context's state)
+  const n = bot - top + 1;
+  fxLay(ctx, L, 0, top, w, n, 0, 0, top * rp, w * rp, n * rp);
 }
 
 /* ================================================================
@@ -24996,6 +25036,54 @@ function fxPass(X, key) {
   pass.setScissorRect(X.sc[0], X.sc[1], X.sc[2], X.sc[3]);
   if (ds) pass.setStencilReference(0x80);
   return pass;
+}
+/* ---- A PICTURE LAID INTO A CONTEXT (the smoke's, sky/21-smoke.js smShow; the rain's layer, 40-zzz-gpu8.js): one quad at the context's
+   place (its transform - glCorners' corners), each pixel the picture's texel under it (nearest), in the context's blend, scissor and
+   clip, times its alpha (as glAlpha gives it). The picture: tex (a gpuTex), its region from (sx, sy), sw x sh texels; ph > 0: its rows
+   in WebGL's order, ph high (a texel row ph - 1 - y); 0: rows from the top ---- */
+const FXL_WGSL = `
+struct LD { a: vec4f, q: array<vec4f, 2>, o: vec4i, g: vec4f };
+@group(0) @binding(0) var<storage, read> ld: LD;
+@group(0) @binding(1) var pic: texture_2d<f32>;
+struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f };
+@vertex fn vs(@builtin(vertex_index) v: u32) -> VO {
+  let k = select(select(select(3u, 2u, v == 4u), 0u, v == 3u), v, v < 3u);   // (the triangles 0 1 2 and 0 2 3)
+  let c = ld.q[k >> 1u]; let a_pos = select(c.xy, c.zw, (k & 1u) == 1u);
+  let p = a_pos / ld.a.xy;
+  var g = vec4f(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+  g.y = -g.y; g.z = (g.z + g.w) * 0.5;   // (rows in WebGL's order, z 0..w - as every vertex stage of the game: src/gpu/10-glsl.js)
+  var o: VO; o.p = g; o.uv = vec2f(select(0.0, ld.a.z, k == 1u || k == 2u), select(0.0, ld.a.w, k >= 2u)); return o;
+}
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let c = clamp(vec2i(floor(i.uv)), vec2i(0), vec2i(ld.a.zw) - 1);
+  let y = ld.o.y + c.y;
+  return textureLoad(pic, vec2i(ld.o.x + c.x, select(y, ld.o.z - 1 - y, ld.o.z > 0)), 0) * ld.g.x;
+}`;
+const FXL = { ep: -1, pipes: new Map() };
+function fxLay(c, tex, sx, sy, sw, sh, ph, dx, dy, dw, dh) {
+  const X = fxBegin(c); if (!X) return;
+  if (FXL.ep !== GPU.ep) {
+    const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
+    FXL.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: 96 } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }], 'lay');
+    FXL.m = gpuModule(FXL_WGSL, 'lay'); FXL.pl = gpuPipeLayout([FXL.bl], 'lay'); FXL.pipes.clear(); FXL.ep = GPU.ep;
+  }
+  const t = c.target, s = c.s, [ch, off] = arenaAlloc(96, 256), w0 = off >> 2, Wd = pxWords(ch), Fl = Wd.f, I = Wd.i;
+  glCorners(s.m, dx, dy, dw, dh);
+  const X4 = GLC4.x, Y4 = GLC4.y;
+  Fl[w0] = t._w; Fl[w0 + 1] = t._h; Fl[w0 + 2] = sw; Fl[w0 + 3] = sh;
+  for (let q = 0; q < 4; q++) { Fl[w0 + 4 + q * 2] = X4[q]; Fl[w0 + 5 + q * 2] = Y4[q]; }
+  I[w0 + 12] = sx; I[w0 + 13] = sy; I[w0 + 14] = ph; I[w0 + 15] = 0;
+  Fl[w0 + 16] = Math.fround(Math.round(s.ga * 255) / 255); Fl[w0 + 17] = Fl[w0 + 18] = Fl[w0 + 19] = 0;   // (the context's alpha, as glAlpha gives it)
+  const key = fxKey(X);
+  let pipe = FXL.pipes.get(key);
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FXL.pl, vertex: { module: FXL.m, entryPoint: 'vs' }, fragment: { module: FXL.m, entryPoint: 'fs', targets: [fxColour(X.FT.tex, X.op, X.screen)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, fxStencil(X.ds))); FXL.pipes.set(key, pipe); }
+  // (its bind group for this arena chunk, kept on the picture: made again when the chunk's buffer or the device is new)
+  const bm = tex.fxl || (tex.fxl = new Map()); let e = bm.get(ch.id);
+  if (!e || e.gb !== ch.gb || e.ep !== FXL.ep) { e = { gb: ch.gb, ep: FXL.ep, g: gpuBindGroup(FXL.bl, [{ binding: 0, resource: { buffer: ch.gb, offset: 0, size: 96 } }, { binding: 1, resource: tex.view }], 'lay') }; bm.set(ch.id, e); }
+  const pass = fxPass(X, 'lay');
+  pass.setPipeline(pipe); pass.setBindGroup(0, e.g, [off]); pass.draw(6);
+  gpuPassEnd(); tex.use = FR.sub;
+  GLR.stats.draws++;
 }
 // ---- the WebGPU objects of the layers (src/gpu's calls), made again on a new device (GPU.ep) ----
 function pxShared() {
@@ -29113,44 +29201,9 @@ function smShow(S_) {
   smLay(ctx, S_, dx, dy, dw, dh);
   if (hc) ctx.restore();
 }
-// THE PICTURE LAID (engine part 6, Nov 9 - natively: once drawImage through the GL front): one quad at the context's place (its transform -
-// glCorners' corners), each pixel the picture's cell under it (nearest), in the context's blend, scissor and clip, times its alpha
-const SMP_LAY_WGSL = `
-struct LD { a: vec4f, q: array<vec4f, 2>, o: vec4i, g: vec4f };
-@group(0) @binding(0) var<storage, read> ld: LD;
-@group(0) @binding(1) var pic: texture_2d<f32>;
-struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f };
-@vertex fn vs(@builtin(vertex_index) v: u32) -> VO {
-  let k = select(select(select(3u, 2u, v == 4u), 0u, v == 3u), v, v < 3u);   // (the triangles 0 1 2 and 0 2 3)
-  let c = ld.q[k >> 1u]; let a_pos = select(c.xy, c.zw, (k & 1u) == 1u);
-  let p = a_pos / ld.a.xy;
-  var g = vec4f(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-  g.y = -g.y; g.z = (g.z + g.w) * 0.5;   // (rows in WebGL's order, z 0..w - as every vertex stage of the game: src/gpu/10-glsl.js)
-  var o: VO; o.p = g; o.uv = vec2f(select(0.0, ld.a.z, k == 1u || k == 2u), select(0.0, ld.a.w, k >= 2u)); return o;
-}
-@fragment fn fs(i: VO) -> @location(0) vec4f {
-  let c = clamp(vec2i(floor(i.uv)), vec2i(0), vec2i(ld.a.zw) - 1);
-  return textureLoad(pic, vec2i(ld.o.x + c.x, ld.o.z - 1 - (ld.o.y + c.y)), 0) * ld.g.x;   // (the picture's rows: WebGL's order, its paint's h)
-}`;
-function smLay(c, S_, dx, dy, dw, dh) {
-  const X = fxBegin(c); if (!X) return;
-  smpShared();
-  const t = c.target, s = c.s, [ch, off] = arenaAlloc(96, 256), w0 = off >> 2, Wd = pxWords(ch), Fl = Wd.f, I = Wd.i;
-  glCorners(s.m, dx, dy, dw, dh);
-  const X4 = GLC4.x, Y4 = GLC4.y;
-  Fl[w0] = t._w; Fl[w0 + 1] = t._h; Fl[w0 + 2] = S_.ow; Fl[w0 + 3] = S_.oh;
-  for (let q = 0; q < 4; q++) { Fl[w0 + 4 + q * 2] = X4[q]; Fl[w0 + 5 + q * 2] = Y4[q]; }
-  I[w0 + 12] = S_.gx0; I[w0 + 13] = S_.gy0; I[w0 + 14] = S_.ph; I[w0 + 15] = 0;
-  Fl[w0 + 16] = Math.fround(Math.round(s.ga * 255) / 255); Fl[w0 + 17] = Fl[w0 + 18] = Fl[w0 + 19] = 0;   // (the context's alpha, as glAlpha gives it)
-  const key = fxKey(X);
-  let pipe = SMP.lay.get(key);
-  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: SMP.lp, vertex: { module: SMP.lm, entryPoint: 'vs' }, fragment: { module: SMP.lm, entryPoint: 'fs', targets: [fxColour(X.FT.tex, X.op, X.screen)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, fxStencil(X.ds))); SMP.lay.set(key, pipe); }
-  const bg = smpBind(S_.lbg || (S_.lbg = new Map()), 'l' + SMP.gen, ch, () => gpuBindGroup(SMP.ll, [{ binding: 0, resource: { buffer: ch.gb, offset: 0, size: 96 } }, { binding: 1, resource: S_.pic.view }], 'smoke lay'));
-  const pass = fxPass(X, 'smoke');
-  pass.setPipeline(pipe); pass.setBindGroup(0, bg, [off]); pass.draw(6);
-  gpuPassEnd(); S_.pic.use = FR.sub;
-  GLR.stats.draws++;
-}
+// THE PICTURE LAID (engine part 6, Nov 9 - natively: once drawImage through the GL front): fxLay (40-zzzz-layers.js) - one quad at the
+// context's place, nearest, in the context's blend, scissor and clip, times its alpha; the picture's rows in WebGL's order, its paint's h
+const smLay = (c, S_, dx, dy, dw, dh) => fxLay(c, S_.pic, S_.gx0, S_.gy0, S_.ow, S_.oh, S_.ph, dx, dy, dw, dh);
 // (Oct 31, user: "any vehicle that's smoking, the moment they enter a hangar, the smoke should not render inside it. It should
 // even mask the smoke as it gets inside the hangar as it naturally would. Right now we see the smoke through the hangar") a
 // hangar is solid where it is drawn (23-harbour-gates.js: from its drawn roof, hangarRoofAt, down to the deck) - and smoke is
@@ -29944,7 +29997,7 @@ const SMP_COMP_WGSL = NL => smpHead(NL) + `
 }`;
 // the GPU objects every paint shares (src/gpu's calls), made again on a new device: the layouts and pipelines, K, the buffers the paints
 // write in turn (bd, F, tn) and the splat's targets (grown in steps to the largest paint)
-const SMP = { ep: -1, NL: 0, HB: 0, lay: new Map(), bgs: new Map(), gen: 0 };
+const SMP = { ep: -1, NL: 0, HB: 0, bgs: new Map(), gen: 0 };
 function smpShared() {
   if (SMP.ep === gpuEpoch()) return;
   const NL = SMP.NL = SMOKE_PAL.length * 18, CS = GPUShaderStage.COMPUTE, VS = GPUShaderStage.VERTEX, FS = GPUShaderStage.FRAGMENT;
@@ -29972,8 +30025,6 @@ function smpShared() {
     primitive: { topology: 'triangle-strip', cullMode: 'none' }, depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' } });
   const mc = gpuModule(SMP_COMP_WGSL(NL), 'smoke compose');
   SMP.comp = gpuRenderPipe({ layout: gpuPipeLayout([SMP.lc], 'smoke compose'), vertex: { module: mc, entryPoint: 'vs' }, fragment: { module: mc, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } });
-  SMP.ll = gpuBindLayout([{ binding: 0, visibility: VS | FS, buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: 96 } }, { binding: 1, visibility: FS, texture: { sampleType: 'float' } }], 'smoke lay');
-  SMP.lm = gpuModule(SMP_LAY_WGSL, 'smoke lay'); SMP.lp = gpuPipeLayout([SMP.ll], 'smoke lay'); SMP.lay.clear();
   // K: the billow tile, the leans, the domes' middles
   const Kf = new Float32Array(SMP_KN);
   for (let q = 0; q < 4096; q++) { Kf[q * 4] = BT.H[q]; Kf[q * 4 + 1] = BT.NX[q]; Kf[q * 4 + 2] = BT.ID[q]; Kf[q * 4 + 3] = BT.CR[q]; }
@@ -30007,7 +30058,7 @@ function smpPic(S_, w, h) {
   if (t && t.ep === gpuEpoch() && t.w >= w && t.h >= h) return t;
   const keep = t && t.ep === gpuEpoch(), W = Math.max(w, keep ? t.w : 0, 64), H = Math.max(h, keep ? t.h : 0, 64);
   if (t) gpuTexFree(t);
-  SMP.gen++; S_.lbg = null; S_.ow = 0;   // (nothing to lay again until it is painted)
+  SMP.gen++; S_.ow = 0;   // (nothing to lay again until it is painted)
   return (S_.pic = gpuTex(smpPow2(W), smpPow2(H), 'rgba8unorm', 'smoke'));
 }
 // a typed array into buffer b at byte off, in order with the frame's passes: straight in if no command still to be sent uses b, else
@@ -35881,8 +35932,9 @@ function hangarRoofAt(d, wx) {
    about the wind's, dark and faint just under the clouds and lit in flat steps as they fall into the light - in three depths
    (far: short, dim, slow, barely sliding as the camera pans; near: long, bright, fast, sliding past), falling every frame at
    a steady speed in screen pixels (the same whatever the zoom, both views alike; further out than SMALL_SV, shorter and finer with the zoom - user Nov 8), each stopping where it meets the sea, a
-   deck, a roof, the ground or a vehicle, with the splashes below. Drawn into one pixel buffer and laid in one go. */
-const RAINP = { b: null, w: 0, h: 0, cv: null, cx: null, img: null };
+   deck, a roof, the ground or a vehicle, with the splashes below. Drawn into one layer of cells on the GPU and laid in one go (g8Rain,
+   40-zzz-gpu8.js: each drop's 8 numbers kept here, one instanced draw). */
+const RAINP = { inst: null, tiers: new Float32Array(72), roofs: null };
 const RAIN_DEPTH = [   // n (a 600-pixel width at full rain), fall (px/s), length (cells), alpha (lit), parallax
   { n: 560, v: 430, len: [4, 8], a: 0.3, par: 0.35 },
   { n: 640, v: 700, len: [7, 14], a: 0.44, par: 0.65 },
@@ -35890,12 +35942,8 @@ const RAIN_DEPTH = [   // n (a 600-pixel width at full rain), fall (px/s), lengt
 ];
 function drawRainStreaks(R) {
   const fx = E.fx, rp = PBV, w = Math.ceil(VWP / rp) + 1, h = Math.ceil(bh / rp) + 1, zc = Math.min(1, SV / SMALL_SV) * PB / rp;   // (zc: further out, shorter with the zoom - user Nov 8 16:51, "all should scale")
-  if (!RAINP.b || RAINP.w !== w || RAINP.h !== h) {
-    RAINP.w = w; RAINP.h = h; RAINP.b = new Uint32Array(w * h); RAINP.cv = null;
-    if (!GLR.on) { RAINP.cv = makeCanvas(w, h); RAINP.cx = RAINP.cv.getContext('2d'); RAINP.img = RAINP.cx.createImageData(w, h); RAINP.b = new Uint32Array(RAINP.img.data.buffer); }
-  }
-  const b = RAINP.b, top = Math.max(0, Math.floor((rainTopY[viewIdx] - 20) / rp)), foot = Math.min(h - 1, Math.ceil(PY(WATER_Y) / rp)), bot = h - 1;
-  if (!(RAIN_GPU && g8On())) b.fill(0, top * w, (bot + 1) * w);   // (the GPU's drops: their own layer, cleared there)
+  if (!g8On()) return;
+  const top = Math.max(0, Math.floor((rainTopY[viewIdx] - 20) / rp)), foot = Math.min(h - 1, Math.ceil(PY(WATER_Y) / rp)), bot = h - 1;
   const band = Math.max(20, foot - top), slant = clamp(E.windU / 75, -1, 1) * 0.6 + 0.12 * Math.sign(E.windU || 1);   // (cells across a cell down: the wind's)
   // the light: the clouds' dark base colour under them, the hour's daylight in the drops lower down (the lab's two ends)
   const dark = [120 * fx[0], 128 * fx[1], 146 * fx[2]], light = [236 * fx[0], 242 * fx[1], 252 * fx[2]], NL = 6;
@@ -35905,17 +35953,12 @@ function drawRainStreaks(R) {
   const roofs = RAINP.roofs && RAINP.roofs.length >= w ? RAINP.roofs : (RAINP.roofs = new Int32Array(w + 64));
   roofs.fill(-1, 0, w);
   const roofAt = x => { let v = roofs[x]; if (v === -1) v = roofs[x] = Math.floor(PY(rainRoof((x * rp + CAMPX) / SV)) / rp); return v; };
-  // (engine stage 8: the drops' cells on the GPU, 40-zzz-gpu8.js - each drop's 8 numbers kept here, one instanced draw; on by default; with ?raingpu=0
-  // the cells written below)
-  const gpu = RAIN_GPU && g8On();
-  let ni = 0, IN = RAINP.inst, TI = gpu ? (RAINP.tiers || (RAINP.tiers = new Float32Array(72))) : null;
+  let ni = 0, IN = RAINP.inst; const TI = RAINP.tiers;
   for (let L = 0; L < RAIN_DEPTH.length; L++) {
     const D = RAIN_DEPTH[L], n = Math.round(D.n * R * VWP / 600), spd = D.v * sv / rp, drift = camL * SV * D.par / rp;
     let HS = RAINP['hs' + L]; if (!HS || HS.length < n * 4) { HS = RAINP['hs' + L] = new Float32Array(Math.max(n, 512) * 8); for (let k = 0; k < HS.length / 4; k++) { HS[k * 4] = hash(k * 1.731 + L * 91); HS[k * 4 + 1] = hash(k * 4.913 + L * 37); HS[k * 4 + 2] = hash(k * 2.37 + L * 13); HS[k * 4 + 3] = hash(k * 7.31 + L * 5); } }
     // (its six steps, premultiplied: dark and faint under the base, lighter as it falls)
-    const tier = [];
-    for (let i = 0; i < NL; i++) { const f = (i + 1) / NL, a = D.a * (0.12 + 0.88 * f) * (0.6 + 0.4 * R), c = mix3(dark, light, 0.15 + 0.85 * f); tier.push(((Math.round(a * 255) << 24) | (Math.round(c[2] * a) << 16) | (Math.round(c[1] * a) << 8) | Math.round(c[0] * a)) >>> 0); }
-    if (gpu) for (let i = 0; i < NL; i++) { const v = tier[i], o = (L * NL + i) * 4; TI[o] = (v & 255) / 255; TI[o + 1] = ((v >>> 8) & 255) / 255; TI[o + 2] = ((v >>> 16) & 255) / 255; TI[o + 3] = (v >>> 24) / 255; }
+    for (let i = 0; i < NL; i++) { const f = (i + 1) / NL, a = D.a * (0.12 + 0.88 * f) * (0.6 + 0.4 * R), c = mix3(dark, light, 0.15 + 0.85 * f), o = (L * NL + i) * 4; TI[o] = Math.round(c[0] * a) / 255; TI[o + 1] = Math.round(c[1] * a) / 255; TI[o + 2] = Math.round(c[2] * a) / 255; TI[o + 3] = Math.round(a * 255) / 255; }
     for (let k = 0; k < n; k++) {
       const h1 = HS[k * 4], h2 = HS[k * 4 + 1], h3 = HS[k * 4 + 2], h4 = HS[k * 4 + 3];
       const lf = (D.len[0] + (D.len[1] - D.len[0]) * h3) * sv, len = Math.max(1, Math.round(lf * zc)), span = (bot - top) + Math.round(lf * PB / rp) + 8;   // (its span by its full length: no jump while zooming)
@@ -35925,24 +35968,13 @@ function drawRainStreaks(R) {
       const x0 = ((h1 * Wc + (y0 - top) * sl - drift) % Wc + Wc) % Wc - 30;
       const xc = Math.round(x0), roof = xc >= 0 && xc < w ? roofAt(xc) : Math.floor(PY(rainRoof((x0 * rp + CAMPX) / SV)) / rp);   // (where it stops: the sea, a deck, the ground...)
       const jit = (h1 * 7.3 % 1 - 0.5) * 0.22;                                       // (each lights at its own height: no line across)
-      if (gpu) {
-        if (!IN || IN.length < (ni + 1) * 8) { const nw = new Float32Array(Math.max(4096, (ni + 1) * 16)); if (IN) nw.set(IN.subarray(0, ni * 8)); IN = RAINP.inst = nw; }
-        const xf = Math.floor(x0), o = ni * 8; ni++;
-        IN[o] = xf; IN[o + 1] = x0 - xf; IN[o + 2] = sl; IN[o + 3] = jit; IN[o + 4] = Math.round(y0); IN[o + 5] = len; IN[o + 6] = roof; IN[o + 7] = L;
-        continue;
-      }
-      for (let t = 0; t < len; t++) {
-        const y = Math.round(y0) - t; if (y > roof || y > bot) continue; if (y < top) break;
-        const x = Math.round(x0 - sl * t); if (x < 0 || x >= w) continue;
-        const u = (y - top) / band + jit, q = Math.min(NL - 1, Math.floor((u - 0.04) / 0.62 * NL));
-        if (q >= 0) b[y * w + x] = tier[q];
-      }
+      if (!IN || IN.length < (ni + 1) * 8) { const nw = new Float32Array(Math.max(4096, (ni + 1) * 16)); if (IN) nw.set(IN.subarray(0, ni * 8)); IN = RAINP.inst = nw; }
+      const xf = Math.floor(x0), o = ni * 8; ni++;
+      IN[o] = xf; IN[o + 1] = x0 - xf; IN[o + 2] = sl; IN[o + 3] = jit; IN[o + 4] = Math.round(y0); IN[o + 5] = len; IN[o + 6] = roof; IN[o + 7] = L;
     }
   }
-  const n = bot - top + 1; if (n <= 0) return;
-  if (gpu) { g8Rain(IN || new Float32Array(8), ni, TI, w, h, top, bot, band, rp); return; }
-  if (GLR.on) C.drawPixels(new Uint32Array(b.buffer, top * w * 4, n * w), w, n, 0, top * rp, w * rp, n * rp);
-  else { RAINP.cx.putImageData(RAINP.img, 0, 0, 0, top, w, n); const sm = C.imageSmoothingEnabled; C.imageSmoothingEnabled = false; C.drawImage(RAINP.cv, 0, top, w, n, 0, top * rp, w * rp, n * rp); C.imageSmoothingEnabled = sm; }
+  if (bot < top) return;
+  g8Rain(IN || new Float32Array(8), ni, TI, w, h, top, bot, band, rp);   // (the drops' cells on the GPU, laid over the view)
 }
 function drawRainIn() {
   const R = Math.min(1, E.rain), fx = E.fx, tt = time;
