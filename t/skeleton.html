@@ -389,7 +389,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 02:07', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 02:31', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -2409,6 +2409,12 @@ function frameLayer(name, run, at) {
 // THE FRAME'S dt (part 3's ask): the game clock's step since the last frame drawn (s; the clock 'time', so a stepped test run and a
 // paused game give the same steps every run - 0 while paused, at most 0.25), set at the frame's start by frameTick()
 function frameTick() { const t = typeof time === 'number' ? time : 0; FRAME.dt = FRAME.tPrev == null ? 1 / 60 : Math.min(0.25, Math.max(0, t - FRAME.tPrev)); FRAME.tPrev = t; }
+// THE FRAME'S READINESS (part 1's ask, Nov 10): a part whose first frames after a world is made can't yet draw what it should (the
+// sky's first cloud recipes wait a frame or two for their counts - gpuReadBuf) registers frameReadyAdd(() => true once it can).
+// frameReady() is true when every registered check is; the loading cover (00-world.js worldEditCover) stays up until it is (2 s at most).
+const FRAME_READY = [];
+function frameReadyAdd(fn) { if (typeof fn === 'function' && !FRAME_READY.includes(fn)) FRAME_READY.push(fn); }
+function frameReady() { for (const f of FRAME_READY) { try { if (!f()) return false; } catch (e) { } } return true; }
 // the camera of the view beginView set last (vi its index): { buffer, offset, size } in this submit's arena - read by a pass as a
 // uniform: vec4(left px, top px, scale, zoom), vec4(view x on the target, view width, target width, target height), vec4(time, view, shake x px, shake y px)
 function frameCam(vi, v, tw, th) {
@@ -2469,12 +2475,22 @@ function gpuCanvasView(cv) {
   const ctx = cv.getContext('webgpu'); if (!ctx) return null;
   ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' });
   const V = { cv, ctx, T: new GLTarget(Math.max(1, cv.width), Math.max(1, cv.height)), pipe: null, ep: -1, view: null, bg: null };
-  GPU.onRebuild.push(() => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } });
+  V.re = () => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } };
+  GPU.onRebuild.push(V.re);
   return V;
+}
+// a canvas view given up (an editor panel's canvas gone from the page - part 5's ask): its context let go, its rebuild hook removed,
+// its layer freed. V is no use after.
+function gpuCanvasDrop(V) {
+  if (!V || V.dropped) return; V.dropped = true;
+  const i = GPU.onRebuild.indexOf(V.re); if (i >= 0) GPU.onRebuild.splice(i, 1);
+  try { V.ctx.unconfigure(); } catch (e) { }
+  try { V.T.free(); } catch (e) { }
+  V.bg = V.view = V.pipe = null;
 }
 function gpuCanvasSize(V, w, h) { V.cv.width = w; V.cv.height = h; V.T.width = w; V.T.height = h; }
 function gpuCanvasShow(V) {
-  if (!V || !GPU.on || GPU.lost) return false;
+  if (!V || V.dropped || !GPU.on || GPU.lost) return false;
   if (typeof glFlush === 'function') glFlush();
   const t = V.T.tex && V.T.tex.t; if (!t) return false;
   if (!V.pipe || V.ep !== GPU.ep) { const m = gpuModule(GPU_HUD_WGSL, 'canvas show'); V.pipe = gpuRenderPipe({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } }); V.ep = GPU.ep; V.view = null; }
@@ -3350,8 +3366,16 @@ let worldEdCover = null;
 // (user Nov 9 13:01: the loading screens say what they're doing in ordinary letters - "Downloading data (23%)" - the page's own one's look, src/index.html)
 function worldEditCover(on, text = 'Loading editor') {
   if (typeof document === 'undefined' || SW_IN_WORKER) return;
-  if (!on) { if (worldEdCover) { worldEdCover.remove(); worldEdCover = null; } return; }
-  if (worldEdCover) { worldCoverSay(text); return; }
+  if (!on) {
+    if (!worldEdCover) return;
+    // (Nov 10, the skeleton: the cover stays up until the frame under it is ready - every part's frameReady check, src/gpu/50-frame.js:
+    // the sky's first clouds come back a frame or two after the world is made - one animation frame at a time, 2 s at most; a new
+    // worldEditCover(true) while it waits keeps the cover up)
+    const d = worldEdCover, g = d.__gen = (d.__gen || 0) + 1, t0 = performance.now();
+    const off = () => { if (worldEdCover !== d || d.__gen !== g) return; if (typeof frameReady === 'function' && !frameReady() && performance.now() - t0 < 2000) { requestAnimationFrame(off); return; } d.remove(); worldEdCover = null; };
+    off(); return;
+  }
+  if (worldEdCover) { worldEdCover.__gen = (worldEdCover.__gen || 0) + 1; worldCoverSay(text); return; }
   const d = worldEdCover = window.__coverMake();          // (the loading screen's one look: the title, the line, the corner - src/index.html)
   worldCoverSay(text);
   setTimeout(() => { if (worldEdCover === d) worldEditCover(false); }, 60000);
@@ -7675,7 +7699,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 02:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 02:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
