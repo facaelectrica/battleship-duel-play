@@ -428,7 +428,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 06:12', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 07:49', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -4325,20 +4325,23 @@ function rebuildShipArt(sh) {
    pic._art = { x, y, l, w, h, ok } - texels and its layer, a clear margin of ART_PAD round it (the shader's taps never reach a
    neighbour). Pixels are kept premultiplied (as the GL front kept every picture it drew).
    ================================================================ */
-const ART = { S: 4096, L: 3, PAD: 2, tex: null, ep: -1, shelves: [], y: 0, l: 0, all: [], pend: [], free: new Map(), full: false, BUDGET: 2 << 20, stats: { pics: 0, px: 0, sent: 0 } };
-// a picture into the atlas (once): its place, or null when the atlas has no room left (said once - the atlas is sized for all the art)
+const ART = { S: 4096, L: 3, PAD: 2, FIT: 0.7, tex: null, ep: -1, shelves: [], ys: [], all: [], pend: [], free: new Map(), full: false, BUDGET: 2 << 20, stats: { pics: 0, px: 0, sent: 0 } };
+/* a picture into the atlas (once): its place, or null when the atlas has no room left (said once - the atlas is sized for all the art).
+   Packed in shelves (rows of pictures of about one height): a picture goes on the first shelf it fits that's no more than 1 / FIT its
+   height (a shelf's height wasted on a shorter picture kept under 30% - a tall sheet's shelf never filled a column at a time with small
+   ones), else a new shelf on the first page with the rows for it (each page's own rows used - ys - never only the last page's) */
 function artPut(pic) {
   if (!pic || !pic.width) return null;
   if (pic._art) return pic._art;
   const w = pic.naturalWidth || pic.width, h = pic.naturalHeight || pic.height, P = ART.PAD, W = w + 2 * P, H = h + 2 * P;
   let at = null;
   { const F = ART.free.get(w + 'x' + h); if (F && F.length) { const q = F.pop(); at = [q.x, q.y, q.l]; } }   // (a place a picture of its size gave back - artDrop)
-  if (!at) for (const s of ART.shelves) if (H <= s.h && s.x + W <= ART.S) { at = [s.x + P, s.y + P, s.l]; s.x += W; break; }
+  if (!at) for (const s of ART.shelves) if (H <= s.h && H >= s.h * ART.FIT && s.x + W <= ART.S) { at = [s.x + P, s.y + P, s.l]; s.x += W; break; }
   if (!at) {
-    const hh = (H + 3) & ~3;
-    if (ART.y + hh > ART.S) { ART.l++; ART.y = 0; }                                 // (this layer full: the next)
-    if (ART.l >= ART.L || hh > ART.S || W > ART.S) { if (!ART.full) console.error('art atlas: full (' + ART.all.length + ' pictures) - ART.S x ART.L is too small for the art'); ART.full = true; return null; }
-    ART.shelves.push({ y: ART.y, h: hh, x: W, l: ART.l }); at = [P, ART.y + P, ART.l]; ART.y += hh;
+    const hh = (H + 3) & ~3; let l = 0;
+    while (l < ART.L && (ART.ys[l] || 0) + hh > ART.S) l++;
+    if (l >= ART.L || W > ART.S) { if (!ART.full) console.error('art atlas: full (' + ART.all.length + ' pictures) - ART.S x ART.L is too small for the art'); ART.full = true; return null; }
+    const y = ART.ys[l] || 0; ART.shelves.push({ y, h: hh, x: W, l }); at = [P, y + P, l]; ART.ys[l] = y + hh;
   }
   const e = pic._art = { x: at[0], y: at[1], l: at[2], w, h, ok: false, src: pic, row: 0 };
   ART.all.push(e); ART.pend.push(e); ART.stats.pics++; ART.stats.px += w * h;
@@ -4347,7 +4350,7 @@ function artPut(pic) {
 // a picture no longer drawn (made again in other colours - a team's): its place given back, for the next picture of its size
 function artDrop(pic) {
   const e = pic && pic._art; if (!e) return;
-  pic._art = null; e.src = null; e.ok = false; e.px = null;
+  pic._art = null; e.src = null; e.ok = false; if (e.cv) { e.cv.width = e.cv.height = 0; e.cv = null; }
   let i = ART.all.indexOf(e); if (i >= 0) ART.all.splice(i, 1);
   i = ART.pend.indexOf(e); if (i >= 0) ART.pend.splice(i, 1);
   const k = e.w + 'x' + e.h, F = ART.free.get(k) || (ART.free.set(k, []), ART.free.get(k)); F.push(e);
@@ -4362,13 +4365,14 @@ function artTex() {
   }
   return ART.tex;
 }
-// a picture's pixels, premultiplied (as the GL front uploaded every picture: Chromium's sum)
-function artPixels(pic) {
-  const w = pic.naturalWidth || pic.width, h = pic.naturalHeight || pic.height;
+// rows of a picture's pixels, premultiplied (as the GL front uploaded every picture: Chromium's sum) - read a band at a time (a sheet of 4 Mpx
+// is never read whole in one frame); an image is drawn once into a canvas kept while it goes up (e.cv)
+function artPixels(e, y0, rows) {
+  const pic = e.src;
   if (pic._pk) picUnpack(pic);                                  // (a packed picture painted back first - 04-zzz-pics.js)
-  let c = pic;
-  if (!pic.getContext) { c = makeCanvas(w, h); c.getContext('2d').drawImage(pic, 0, 0); }
-  const d = c.getContext('2d').getImageData(0, 0, w, h).data;
+  let c = pic.getContext ? pic : e.cv;
+  if (!c) { c = e.cv = makeCanvas(e.w, e.h); c.getContext('2d').drawImage(pic, 0, 0); }
+  const d = c.getContext('2d').getImageData(0, y0, e.w, rows).data;
   for (let i = 0; i < d.length; i += 4) { const a = d[i + 3]; if (a === 255) continue; if (!a) { d[i] = d[i + 1] = d[i + 2] = 0; continue; } d[i] = Math.round(d[i] * a / 255); d[i + 1] = Math.round(d[i + 1] * a / 255); d[i + 2] = Math.round(d[i + 2] * a / 255); }
   return d;
 }
@@ -4393,13 +4397,13 @@ function artStep() {
   while (ART.pend.length && left > 0) {
     const e = ART.pend[0], src = e.src;
     if (!src || !(src.naturalWidth || src.width) || src.complete === false) { ART.pend.shift(); ART.pend.push(e); if (ART.pend.length === 1) break; continue; }
-    const px = e.px || (e.px = artPixels(src)), bpr = Math.ceil(e.w * 4 / 256) * 256;
-    const rows = Math.max(1, Math.min(e.h - e.row, Math.floor(Math.min(left, ARENA.CH) / bpr)));
+    const bpr = Math.ceil(e.w * 4 / 256) * 256;
+    const rows = Math.max(1, Math.min(e.h - e.row, Math.floor(Math.min(left, ARENA.CH) / bpr))), px = artPixels(e, e.row, rows);
     const [c, o] = arenaAlloc(bpr * rows, 256);
-    for (let r = 0; r < rows; r++) c.cpu.set(px.subarray((e.row + r) * e.w * 4, (e.row + r + 1) * e.w * 4), o + r * bpr);
+    for (let r = 0; r < rows; r++) c.cpu.set(px.subarray(r * e.w * 4, (r + 1) * e.w * 4), o + r * bpr);
     gpuCopyBufTex(c, o, bpr, T, e.x, e.y + e.row, e.w, rows, e.l);
     e.row += rows; left -= bpr * rows; ART.stats.sent += bpr * rows;
-    if (e.row >= e.h) { e.ok = true; e.px = null; ART.pend.shift(); }
+    if (e.row >= e.h) { e.ok = true; if (e.cv) { e.cv.width = e.cv.height = 0; e.cv = null; } ART.pend.shift(); }
   }
 }
 
@@ -7837,7 +7841,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 06:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 07:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14047,32 +14051,8 @@ function ptOrder() {
 // vapour too, 50-land-civlife.js): where its head is, its age and life, its length L back along ux, uy
 const planeWisps = new ColTable({ sq: 'id', x: 'f64', y: 'f64', age: 'f64', max: 'f64', L: 'f64', ux: 'f64', uy: 'f64' });
 function wispRow(x, y, max, L, ux, uy) { const j = planeWisps.add(), c = planeWisps.c; c.x[j] = x; c.y[j] = y; c.age[j] = 0; c.max[j] = max; c.L[j] = L; c.ux[j] = ux; c.uy[j] = uy; }
-// (Nov 3: the fighters' picture work as functions of their own - prepPlaneArt's, and the Spitfire's frames, 29-zzz-warplanes.js)
-// after dark a plane is a black shape; up high it frosts over (pale blue-white, brightest on its upper edges)
-function planeBlack(c) { const k = copyCanvas(c), x = k.getContext('2d'); x.globalCompositeOperation = 'source-in'; x.fillStyle = '#020306'; x.fillRect(0, 0, k.width, k.height); return k; }
-// ice: crusts of little bits, not a white coat. Four stages, each with more of them (the upper edges, where
-// the cold air strikes, first)
-function planeFrost(c, stage) {
-  const k = makeCanvas(c.width, c.height), x = k.getContext('2d'), s0 = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, id = x.createImageData(c.width, c.height), d = id.data, W = c.width;
-  const th = (stage + 1) / 4 * 0.62;                 // (even iced right up, some paint still shows)
-  for (let j = 0; j < c.height; j++) for (let i = 0; i < W; i++) {
-    const o = (j * W + i) * 4;
-    if (!s0[o + 3]) continue;
-    const edge = j < 2 || !s0[o + 3 - W * 4] || !s0[o + 3 - W * 12];
-    const cl = hash(Math.floor(i / 4) * 0.71 + Math.floor(j / 4) * 3.3), fine = hash(i * 1.37 + j * 7.1);
-    const v = (edge ? cl * 0.45 : cl) + (fine - 0.5) * 0.18;
-    if (v > th) continue;
-    const t = 0.4 + 0.6 * fine;
-    d[o] = 170 + 85 * t; d[o + 1] = 208 + 47 * t; d[o + 2] = 238 + 17 * t; d[o + 3] = 255;
-  }
-  x.putImageData(id, 0, 0); return k;
-}
-// damage chars the back half: darkest at the tail
-function planeRear(c) {
-  const k = copyCanvas(c), x = k.getContext('2d'), g = x.createLinearGradient(k.width * 0.35, 0, k.width * 0.95, 0);
-  g.addColorStop(0, 'rgba(16,12,10,0)'); g.addColorStop(1, 'rgba(16,12,10,0.9)');
-  x.globalCompositeOperation = 'source-atop'; x.fillStyle = g; x.fillRect(0, 0, k.width, k.height); return k;
-}
+// (Nov 3: the fighters' picture work as functions of their own - and the render-layout planes' frames, 29-zzz-warplanes.js; since
+// engine part 5 their night shape, frost and charred rear are rules of the things' shader - no copies)
 // a picture nose left with a wing taken off (keepUp / keepLo: the upper / lower one as drawn stays; band: the fuselage's half height kept;
 // axis: the fuselage's row, when known - else the nose's, its leftmost pixel)
 function planeCut(c, keepUp, keepLo, band, axis) {
@@ -14098,27 +14078,14 @@ function planeTrim(c) {
   t._ox = (x0 + x1 + 1) / 2 - W / 2; t._oy = (y0 + y1 + 1) / 2 - H / 2;
   return t;
 }
-// (I: another sheet laid out as the fighter's - the Cessna's, user Oct 26; lite: without the frost, char and night
-// copies, which only the fighter uses)
-function prepPlaneArt(sheet, I, lite) {
-  const { CW, CH, rows } = I || PLANEI, out = {};
-  const black = planeBlack, frost = planeFrost, rear = planeRear, cut = (c, u, l) => planeCut(c, u, l, Math.round(12 * CW / PLANEI.CW)), diff = planeDiff, trim = planeTrim;
-  const both = c => ({ [-1]: c, [1]: flipCanvas(c) });
-  out.plane = rows.map((row, r) => row.map((sz, i) => {
+// a sheet laid out as the old fighter's (I: its cells and rows - the orbiter's): each cell cut, nose left, and its mirror
+function prepPlaneArt(sheet, I) {
+  const { CW, CH, rows } = I || PLANEI;
+  return { plane: rows.map((row, r) => row.map((sz, i) => {
     const c = makeCanvas(CW, CH);
     c.getContext('2d').drawImage(sheet, i * CW, r * CH, CW, CH, 0, 0, CW, CH);
-    // drawn nose left; facing right is the mirror image
-    if (lite) return { [-1]: c, [1]: flipCanvas(c) };
-    return { [-1]: c, [1]: flipCanvas(c), K: both(black(c)), F: [0, 1, 2, 3].map(k => both(frost(c, k))), R: both(rear(c)) };
-  }));
-  // the spin frames with a wing torn off (1: the upper one as drawn, 2: the lower, 3: both); and the wings themselves
-  if (!out.plane[3]) return out;                         // (a sheet with no spin row: the orbiter's)
-  out.noWing = out.plane[3].map((f, fi) => fi === 2 ? null : [1, 2, 3].reduce((o, m) => { const c = cut(f[-1], !(m & 1), !(m & 2)); o[m] = lite ? both(c) : Object.assign(both(c), { K: both(black(c)) }); return o; }, {}));
-  const f0 = out.plane[3][0][-1], whole = f0, upOnly = cut(f0, true, false), loOnly = cut(f0, false, true);
-  // (user Oct 29: the 747's wings fell all wrong after real scale) each wing cut down to itself, so it tumbles about its
-  // own middle; _ox, _oy: where its middle was from the drawing's (nose left), in its pixels - wingPiece
-  out.wings = [trim(diff(whole, loOnly)), trim(diff(whole, upOnly))];    // [the upper wing, the lower wing]
-  return out;
+    return { [-1]: c, [1]: flipCanvas(c) };
+  })) };
 }
 const planeArt = pl => wpArt(pl);   // (every warplane is drawn from the user's renders, each kind its own - 29-zzz-warplanes.js)
 /* ---------------- Team colours ----------------
@@ -14961,9 +14928,9 @@ function planeHitTest(pl, x, y) {
   if (!planeUp(pl)) return false;
   const k = PLANE_SC();
   if (Math.abs(x - pl.x) > 60 * k || Math.abs(y - pl.y) > 60 * k) return false;
-  // (user Oct 30, the drawn shape - 23-harbour-gates: its picture as drawn now, its pose and tilt - planePose, blitPlane. It
+  // (user Oct 30, the drawn shape - 23-harbour-gates: its picture as drawn now, its pose and tilt - planePose. It
   // was a box 74 by 16 and 20 by 40 that never tilted)
-  const P = planePose(pl), src = P.fr && P.fr[P.side];
+  const P = planePose(pl), src = P.fr ? rlHit(P.fr, P.wings) : null;   // (its frame as drawn - its disc, its torn wings: 29-zzz-warplanes.js)
   if (!src || !src.width) return (Math.abs(x - pl.x) < 37 * k && Math.abs(y - pl.y) < 8 * k);
   return spriteHit(src, P.k, pl.x, pl.y, P.deg, x, y);
 }
@@ -14978,50 +14945,6 @@ function planeFlare(pl, deg) {
   const fk = pl.flare || 0;
   // (Nov 3 15:17: no drawn nose-up any more - its body's angle is the flight's own, the flare's pull and the flaps: flyStep)
   return deg;
-}
-function blitPlane(src, key, side, deg, cx, cy, only, k) {
-  const s = (k || PLANE_K * PLANE_SC()) * SV, w = Math.round(src.width * s), h = Math.round(src.height * s);
-  let im, x, y;
-  /* (Nov 7, the page's picture memory - 04-zzz-pics.js: a plane turned a degree at a time kept a copy for every degree, zoom and
-     variant - night, scorch, frost - the biggest pile of pictures with two planes flying) on the GPU it is turned as it's drawn,
-     as it's sized (GPU_SCALE): its frame at its size, through the view's turn. Its own turned pixels are made only where they're
-     read - the moon's and the low sun's rims, a cloud covering it (cpu) */
-  if (!only && GPU_SCALE && Math.abs(deg) >= 0.5) {
-    im = scaled(src, s, true);
-    C.save(); C.translate(cx, cy); C.rotate(deg * Math.PI / 180); C.drawImage(im, -w / 2, -h / 2, w, h); C.restore();
-    const R = Math.ceil(Math.hypot(w / 2, h / 2)) + 2;
-    return { im, x: cx - R, y: cy - R, gpu: true, cpu: () => blitPlane(src, key, side, deg, cx, cy, true, k) };
-  }
-  if (Math.abs(deg) < 0.5) { im = scaled(src, s, true); x = cx - (im.width >> 1); y = cy - (im.height >> 1); }
-  else {
-    im = rotated(src, key + '|' + side, w, h, deg, w / 2, h / 2, 1);   // (a degree at a time: no steps as it pitches)
-    // (a stand-in from another zoom, while the zoom moves: drawn at this zoom's size, never at its own - user Oct 24
-    // night, zoomed out a crashing plane showed as one giant picture)
-    if (im.w0 && im.w0 !== w) { const R = im.R * w / im.w0; x = cx - R; y = cy - R; if (!only) C.drawImage(im, x, y, R * 2, R * 2); return { im, x, y, sz: R * 2 }; }
-    x = cx - im.R; y = cy - im.R;
-  }
-  if (!only) C.drawImage(im, x, y);
-  return { im, x, y };
-}
-// a plane in a near cloud: where the cloud covers it, it shows as a flat shape a shade darker than the cloud
-const inCloudBuf = [];
-function planeInCloud(pl, g, cov) {
-  // two canvases exactly the plane's size: the clouds there, and the plane cut to them. (Each masking step's
-  // source covers its whole canvas, so it doesn't matter how a browser bounds the composite.)
-  const W = g.im.width, H = g.im.height, k = pl.id * 2 + viewIdx;
-  let B = inCloudBuf[k];
-  if (!B || B.a.width !== W || B.a.height !== H) B = inCloudBuf[k] = { a: makeCanvas(W, H), b: makeCanvas(W, H) };
-  const xa = B.a.getContext('2d'), xb = B.b.getContext('2d');
-  xa.globalCompositeOperation = 'source-over'; xa.globalAlpha = 1; xa.clearRect(0, 0, W, H); xa.imageSmoothingEnabled = false;
-  let col = null;
-  for (const q of cov) { xa.globalAlpha = q.a; if (q.sc.big) xa.drawImage(q.sc.src, q.px - g.x, q.py - g.y, q.sc.width, q.sc.height); else xa.drawImage(q.sc, q.px - g.x, q.py - g.y); if (q.col) col = q.col; }
-  xa.globalAlpha = 1;
-  xb.globalCompositeOperation = 'source-over'; xb.globalAlpha = 1; xb.clearRect(0, 0, W, H); xb.imageSmoothingEnabled = false;
-  xb.drawImage(g.im, 0, 0);
-  xb.globalCompositeOperation = 'destination-in'; xb.drawImage(B.a, 0, 0);
-  xb.globalCompositeOperation = 'source-in'; xb.fillStyle = rgbs((col || [190, 196, 210]).map(v => v * 0.84)); xb.fillRect(0, 0, W, H);
-  xb.globalCompositeOperation = 'source-over';
-  C.drawImage(B.b, g.x, g.y);
 }
 // (Nov 1) the alpha trailStyle(col, ai)'s text carries, as a number (40-gl.js glA3); PTSC: a strand's own colour, an array kept
 // a strand place (filled from its columns each draw)
@@ -15038,13 +14961,22 @@ function planeSpot(pl, P, dx, dy) {
   const ex = -dx * P.side, a = P.deg * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
   return [PX(pl.x) + (ex * ca - dy * sa) * SV, PY(pl.y) + (ex * sa + dy * ca) * SV];
 }
+/* (engine part 5) a warplane drawn by the things' pass from its sheet in the art atlas (rlQuad, 29-zzz-warplanes.js): its frame in its team's
+   paint, at its pitch, its marks where its blows landed (its mask), its rear charred by its hits, frosted up high; its light alone after
+   what's drawn over it (rockets, wheels, birds' blood) - the night's near-black shape, the moon's sheen and rims, a low sun's rim */
+const WP_DARK = [2, 3, 6];
+function wpQuad(pl, P, cx, cy, o) {
+  const M = thgRotate(thgTranslate(thgMat(), cx, cy), P.deg * Math.PI / 180), fr = P.fr;
+  rlQuad(M, P.A, fr, P.k * SV, Object.assign({ wings: P.wings, dark: WP_DARK, mk: o.kind === THG_LIGHT ? null : dmgMask(pl, fr, P.k / UPM, rlMarkAx(fr), fr.g.ay) }, o));
+}
 function drawPlanes(x0, x1) {
   // under the water: a wreck going down (drawn with the sea over it)
+  const own = thingsOwn();
   for (const pl of allPlanes()) {
     if (!pl || pl.state !== 'wreck' || vehCulled(pl, x0, x1)) continue;
-    const P = planePose(pl);
-    blitPlane(P.fr[P.side], P.key, P.side, P.deg, PX(pl.x), PY(pl.y), false, P.k);
+    wpQuad(pl, planePose(pl), PX(pl.x), PY(pl.y), { rear: 1 });
   }
+  if (own) thingsEnd();
 }
 let trailStyles = {};
 const ALL_PL = [];   // (every plane drawn up in the air, one kept list: bySize keeps its order per list)
@@ -15088,14 +15020,20 @@ function drawPlanesAir(x0, x1) {
   const nightK = clamp(E.night * 1.1 + E.sunset * 0.6, 0, 0.92);
   const sunHigh = smoothstep(0.45, 0.85, E.sunAlt || 0) * (1 - 0.8 * E.overcast);
   ALL_PL.length = 0; for (const q of planes) ALL_PL.push(q); for (const q of oldPlanes) ALL_PL.push(q);
+  const own = thingsOwn();
   for (const pl of bySize(ALL_PL)) {   // (smaller in front of bigger: the kinds' sizes - vehBox)
     if (!planeUp(pl) || vehCulled(pl, x0, x1, 80)) continue;
     const P = planePose(pl), cx = PX(pl.x), cy = PY(pl.y + (pl.susY || 0));
-    // (going into its hangar or coming out: straight through the door, hidden past it - user Oct 26)
+    // (going into its hangar or coming out: straight through the door, hidden past it - user Oct 26 - the planes before drawn first,
+    // outside the door's clip)
+    if (pl.ground) thingsGL();
     const hc = !pl.ground ? false : hangarClip(pl.x, pl.y, 36);
-    // (its marks - bullet holes, burns - painted into the frame drawn, as its view shows them: the one rule, 50-zz-damage.js)
-    const MK = pl.marks && pl.marks.length && P.fr.g ? pl.marks : null;
-    const G = MK ? blitPlane(dmgPic(P.fr[P.side], 0, { m: P.k / UPM, marks: MK, ax: P.fr.g.ax, ay: P.fr.g.ay }), P.key + 'm' + MK.length + ':' + MK[MK.length - 1][3], P.side, P.deg, cx, cy, false, P.k) : blitPlane(P.fr[P.side], P.key, P.side, P.deg, cx, cy, false, P.k);
+    // hit: the back of it darkens, more with every hit; iced up: the frost shows over the paint
+    const dmgK = pl.state === 'down' ? 1 : clamp((pl.hits + pl.dmg) / VTUNE.plane.hits * 1.2, 0, 1);
+    const frost = pl.ice > 0.04 ? Math.min(3, Math.floor(pl.ice * 4 - 0.01)) : -1;
+    // (its marks - bullet holes, burns - in its mask where they landed, as its view shows them: the one rule, 50-zz-damage.js)
+    wpQuad(pl, P, cx, cy, { rear: dmgK > 0.03 ? dmgK : 0, frost });
+    thingsGL();                                                  // (what the old code draws over it, over it)
     if (pl.state === 'fly' && P.side0 && !pl.turn) drawWingRockets(pl, P, nightK);
     // (OPEN WORLD) its wheels, let down for landing and on the ground: the main wheels under the wings, a tail wheel -
     // drawn over the plane and its rockets, so they show (user Oct 26: "it's missing the wheels too"); the wheels' feet
@@ -15114,33 +15052,14 @@ function drawPlanesAir(x0, x1) {
         if (!ok) { C.fillStyle = '#1c1c20'; C.fillRect(Math.round(bx - W / 2), Math.round(by - W / 2), W, W); }
       }
     }
-    // hit: the back of it darkens, more with every hit
-    const dmgK = pl.state === 'down' ? 1 : clamp((pl.hits + pl.dmg) / VTUNE.plane.hits * 1.2, 0, 1);
-    if (dmgK > 0.03 && P.fr.R) { C.globalAlpha = dmgK; blitPlane(P.fr.R[P.side], P.key + 'R', P.side, P.deg, cx, cy, false, P.k); C.globalAlpha = 1; }
     // birds it flew through: blood spattered on its nose and canopy
     if (pl.splat.length && pl.state === 'fly' && P.side0) {
       const r = Math.max(1, Math.round(SV * 0.8));
       for (const [dx, dy, dk] of pl.splat) { const [sx, sy] = planeSpot(pl, P, dx, dy); C.fillStyle = dk ? '#7a0e12' : '#b3141a'; C.fillRect(Math.round(sx), Math.round(sy), r, r); }
     }
-    // iced up: the frost shows over the paint
-    if (pl.ice > 0.04 && P.fr.F) { const st = Math.min(3, Math.floor(pl.ice * 4 - 0.01)); blitPlane(P.fr.F[st][P.side], P.key + 'F' + st, P.side, P.deg, cx, cy, false, P.k); }
-    // like the boats: after dark (and against a low sun) a black shape
-    if (nightK > 0.02 && P.fr.K) { C.globalAlpha = nightK; blitPlane(P.fr.K[P.side], P.key + 'K', P.side, P.deg, cx, cy, false, P.k); }
-    // like the boats: the moon lays a cool sheen and a pale rim on the side facing it; a low sun a warm rim
-    const moonK = E.night * (1 - 0.6 * E.overcast) * (1 - E.fog) * (1 - 0.7 * E.sunset), sunK = E.sunset * (1 - 0.7 * E.overcast) * (1 - E.fog);
-    if (moonK > 0.04 || sunK > 0.04) {
-      const G0 = blitPlane(P.fr[P.side], P.key, P.side, P.deg, cx, cy, true, P.k);
-      if (moonK > 0.04) {
-        const mxs = moonXs[viewIdx], side = (mxs > -1e8 ? mxs < cx : lightLean(mxs) > 0) ? 'mL' : 'mR';
-        C.globalAlpha = 0.25 * moonK; { const M = moonArt(G0.im, 'mB'); if (G0.sz) C.drawImage(M, G0.x, G0.y, G0.sz, G0.sz); else C.drawImage(M, G0.x, G0.y); }
-        C.globalAlpha = Math.min(1, 1.3 * moonK); { const M = moonArt(G0.im, side); if (G0.sz) C.drawImage(M, G0.x, G0.y, G0.sz, G0.sz); else C.drawImage(M, G0.x, G0.y); }
-      }
-      if (sunK > 0.04) {
-        const sxs = sunXs[viewIdx], side = sxs > -1e8 && sxs < cx ? 'sL' : 'sR';
-        C.globalAlpha = Math.min(1, 1.4 * sunK); { const M = moonArt(G0.im, side); if (G0.sz) C.drawImage(M, G0.x, G0.y, G0.sz, G0.sz); else C.drawImage(M, G0.x, G0.y); }
-      }
-    }
-    C.globalAlpha = 1;
+    // like the boats: after dark (and against a low sun) a near-black shape; the moon lays a cool sheen and a pale rim on the side
+    // facing it, a low sun a warm rim - the light alone, over the plane and what's drawn on it
+    { const L = thingsLit(cx, nightK); if (L[0] + L[1] + L[2] + L[3] > 0) { wpQuad(pl, P, cx, cy, { kind: THG_LIGHT, lit: L }); thingsGL(); } }
     if (pl.state === 'fly' && P.side0 && pl.inCloud < 0.5) {
       // the sun high: now and then the canopy catches it
       const g = sunHigh * Math.pow(Math.max(0, Math.sin(pl.x * 0.0045 + pl.pitch * 5 + pl.id * 2)), 14);
@@ -15161,11 +15080,9 @@ function drawPlanesAir(x0, x1) {
       }
       wpLights(pl, P);                                          // (its navigation light - 29-zzzz-aircraft-lights.js)
     }
-    // in a near cloud: a flat shape a little darker than the cloud, where the cloud covers it
-    const cov = pl.cover[viewIdx];
-    if (cov && cov.length && !G.sz) planeInCloud(pl, G.gpu ? G.cpu() : G, cov);   // (turned on the GPU: its own turned pixels made for the cloud's cut)   // (not with a zoom stand-in: a frame or two)
-    if (hc) C.restore();
+    if (hc) { thingsGL(); C.restore(); }
   }
+  if (own) thingsEnd();
 }
 // a line of pixel blocks from one point to another, th thick
 // (Nov 1) c, a: its rectangles in that colour and alpha (fillRectA - no colour text); without: in the fill colour set
@@ -15678,10 +15595,10 @@ function airClear(x, r) {
    - its propeller (user's brief, Nov 3: the sheet's rows again without the blades, "the game draws the spinning propeller"):
      a sheet with bladeless rows (`_nb`) shows them while its engine turns (wpSpins) with the spinning disc over them - an
      ellipse at the hub of each frame, edge on in a side view and a roll, opening with the yaw in a turn, behind the plane when
-     its tail is to us (wpDisc; hub, size and colours from the blades themselves - gen/warplanes.py), made part of the frame's
-     picture so clouds, the hangar door, the night and hits all take it as the plane's own; parked, taxiing, its
+     its tail is to us (the frame's disc; hub, size and colours from the blades themselves - gen/warplanes.py), part of the frame
+     as the shader draws it, so the hangar door, the night and hits all take it as the plane's own; parked, taxiing, its
      engine stopped, shot down: the blades;
-   - its night shape, frost, scorched tail, wing torn off: worked from each frame when first shown (wpFrame), every frame its own.
+   - its night shape, frost, scorched tail, wing torn off: rules the things' shader works out from the sheet as it draws (rlQuad).
    Every warplane is drawn this way (the P-51's old four-frame sheet and its squash in a roll are gone, Nov 3).
    ================================================================ */
 const SPITI = {"n": 8, "seqs": {"turn_front": {"y": 0, "w": 230, "h": 62}, "turn_tail": {"y": 62, "w": 230, "h": 62}, "roll_top": {"y": 124, "w": 190, "h": 224}, "roll_bottom": {"y": 348, "w": 190, "h": 224}}, "len": 186, "foot": 22}, P51I = {"n": 8, "seqs": {"turn_front": {"y": 0, "w": 234, "h": 70, "hub": [[-88.0, 0.0, 1.0], [-79.5, 0.0, 14.8], [-55.0, 1.0, 26.6], [-20.0, 0.0, 33.1], [20.0, 0.0, 33.1], [54.5, -1.0, 26.6], [79.0, 0.0, 14.8], [88.0, 0.0, 1.0]]}, "turn_tail": {"y": 70, "w": 234, "h": 70, "hub": [[-88.0, 0.0, 1.0], [-85.0, 0.0, 14.8], [-64.5, 0.0, 26.6], [-30.5, 0.0, 33.1], [30.5, 0.0, 33.1], [55.5, 0.0, 26.6], [85.0, 0.0, 14.8], [88.0, 0.0, 1.0]]}, "roll_top": {"y": 140, "w": 198, "h": 228, "hub": [[-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.5, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0]]}, "roll_bottom": {"y": 368, "w": 198, "h": 228, "hub": [[-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0]]}, "roll_top_r": {"y": 596, "w": 198, "h": 228, "hub": [[88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0]]}, "roll_bottom_r": {"y": 824, "w": 198, "h": 228, "hub": [[88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.5, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0]]}, "turn_front_nb": {"y": 1052, "w": 234, "h": 70, "hub": [[-88.0, 0.0, 1.0], [-79.5, 0.0, 14.8], [-55.0, 1.0, 26.6], [-20.0, 0.0, 33.1], [20.0, 0.0, 33.1], [54.5, -1.0, 26.6], [79.0, 0.0, 14.8], [88.0, 0.0, 1.0]]}, "turn_tail_nb": {"y": 1122, "w": 234, "h": 70, "hub": [[-88.0, 0.0, 1.0], [-85.0, 0.0, 14.8], [-64.5, 0.0, 26.6], [-30.5, 0.0, 33.1], [30.5, 0.0, 33.1], [55.5, 0.0, 26.6], [85.0, 0.0, 14.8], [88.0, 0.0, 1.0]]}, "roll_top_nb": {"y": 1192, "w": 198, "h": 228, "hub": [[-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.5, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0]]}, "roll_bottom_nb": {"y": 1420, "w": 198, "h": 228, "hub": [[-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0], [-88.0, 0.0, 1.0]]}, "roll_top_r_nb": {"y": 1648, "w": 198, "h": 228, "hub": [[88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0]]}, "roll_bottom_r_nb": {"y": 1876, "w": 198, "h": 228, "hub": [[88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0], [88.0, 0.5, 1.0], [88.0, 0.0, 1.0], [88.0, 0.0, 1.0]]}}, "prop": 34.0, "propCol": [92, 113, 124], "propRim": [113, 137, 149], "len": 196, "foot": 34};
@@ -15711,83 +15628,136 @@ function wpKindOf(p) {
 }
 // a value made the first time it's asked for, then kept
 function wpLazy(o, name, fn) { Object.defineProperty(o, name, { configurable: true, enumerable: true, get() { const v = fn(); Object.defineProperty(o, name, { value: v, enumerable: true }); return v; } }); return o; }
-const both2 = c => ({ [-1]: c, [1]: c });
-// its pictures in a team's colours (the red paint repainted - tintRed, as the P-51's), per team; frames cut when first shown
-const WP_ART = new Map();
+/* (engine part 5) A PLANE'S PICTURES ARE ITS SHEET (user's render layout), in the art atlas once (04-zz-art-atlas.js), and a frame is a
+   rectangle of it: { sx, sy, w, h } texels, drawn by the things' pass (45-zz-things-gpu.js) with its rules worked out by the shader as it
+   draws - texel by texel, before the picture is sized, as the copies had them (thingsRules): a team's or a livery's paint (one sheet for
+   every colour - no repainted copy), the rear charred by its hits, the frost, a wing torn off (boxes of texels taken out), the spinning
+   propeller (the disc: an ellipse at the frame's hub, behind it tail on), the night's near-black shape. Nose right drawn from a nose-left
+   frame and its pitch by the transform: no mirrored or turned copy. The frames of a sheet are shared by every livery of its kind. What
+   decides play reads the sheet's own pixels on the processor: where it can be hit (rlHit - the frame's alpha, with its disc and its
+   cuts), where its windows and wheels are (read once a frame). */
+// its paint as data, the shader's rule and the processor's (rlPaintPic) alike: { red: a team's colour } (its red paint - tintRed) or
+// { lower, tail, blue } (a livery's - recolourCessna); none: the sheet's own
+const WP_ART = new Map(), RL_FR = new Map();
 function wpArt(pl) {
   const K = wpKind(pl), t = pl.id === 0 || pl.id === 1 ? pl.id : -1, col = t >= 0 && img.teamCol && img.teamCol[t];
-  return rlArt(K, (WP_KINDS[pl.kind] ? pl.kind : 'warplane') + ':' + t, base => col ? tintRed(base, col) : base);
+  return rlArt(K, (WP_KINDS[pl.kind] ? pl.kind : 'warplane') + ':' + t, col ? { red: col } : null);
 }
-// any plane drawn from the user's render layout - a warplane in a team's colours, a seaplane in its livery (50-land-seaplanes.js):
-// K its kind's row ({ len, seq, src }), key what tells its paints apart, paint its sheet repainted. Its frames cut when first shown
-// (wpFrame), the turns, rolls and spinning disc the same for every plane
+// any plane drawn from the user's render layout - a warplane in a team's colours, a seaplane, a Cessna or a 747 in its livery: K its
+// kind's row ({ len, seq, src }), key what tells its paints apart, paint its paint (data, as above)
 function rlArt(K, key, paint) {
   if (WP_ART.tk !== teamKey) { WP_ART.clear(); WP_ART.tk = teamKey; }
   let A = WP_ART.get(key); if (A) return A;
   const base = img[K.src]; if (!base || !base.width) return null;
-  // (paint: each frame repainted as it's cut - wpFrame - never a whole repainted sheet kept per livery: a Cessna's was 15 MB a colour)
-  A = { K, seq: K.seq, sheet: base, paint: paint || null, fr: {}, id: key, k: K.len * UPM / K.seq.len };   // (k: world units a pixel)
-  // (what the rest of the game asks of a plane's art, as the old sheets had it: plane[row][0] its side view either way - the
-  // crash's wreck (landCrash), the LOOK; wings: the two wings cut from its top view - its bladeless one when it has it, so no
-  // blade goes with a wing - tumbling when torn off: wingPiece)
-  wpLazy(A, 'plane', () => { const L = wpFrame(A, 'turn_front', 0), R = wpFrame(A, 'turn_front', A.seq.n - 1), s = { [-1]: L[-1], [1]: R[1] }; return [[s], [s], [s]]; });
-  wpLazy(A, 'wings', () => { const f = wpFrame(A, 'roll_top', A.seq.n - 1, false, true)[-1], b = wpBand(A, f), up = planeCut(f, true, false, b, wpAxis(f)), lo = planeCut(f, false, true, b, wpAxis(f)); return [planeTrim(planeDiff(f, lo)), planeTrim(planeDiff(f, up))]; });
+  const F = RL_FR.get(K.src) || (RL_FR.set(K.src, {}), RL_FR.get(K.src));   // (its sheet's frames - every livery's)
+  A = { K, seq: K.seq, sheet: base, paint: paint || null, fr: F, id: key, k: K.len * UPM / K.seq.len };   // (k: world units a pixel)
+  // (what the rest of the game still asks as pictures - until the wrecks and the debris are drawn by the pass (part 5, breaking up):
+  // plane[row][0] its side view either way - the crash's wreck (landCrash), the LOOK, the sprites page; wings: the two wings cut from
+  // its top view, its bladeless one so no blade goes with a wing - tumbling when torn off: wingPiece. Cut from the sheet when first
+  // asked, painted, a few small pictures a kind)
+  wpLazy(A, 'plane', () => { const s = { [-1]: wpCanvas(A, wpFrame(A, 'turn_front', 0)), [1]: wpCanvas(A, wpFrame(A, 'turn_front', A.seq.n - 1)) }; return [[s], [s], [s]]; });
+  wpLazy(A, 'wings', () => { const f = wpCanvas(A, wpFrame(A, 'roll_top', A.seq.n - 1, false, true)), b = wpBand(f.width), up = planeCut(f, true, false, b, wpAxis(f.height)), lo = planeCut(f, false, true, b, wpAxis(f.height)); return [planeTrim(planeDiff(f, lo)), planeTrim(planeDiff(f, up))]; });
   WP_ART.set(key, A);
   return A;
 }
-const wpBand = (A, c) => Math.round(12 * c.width / 190);                    // (the fuselage's half height in a top view: planeCut)
-const wpAxis = c => c.height >> 1;                                        // (its fuselage runs through the pivot, the frame's middle - the propeller's tips are its leftmost pixels, not its nose)
-// a frame's pictures kept (04-zzz-pics.js), the frame f their group: let go, the plane's art forgets the frame
-function wpKeep(A, key, f, v) {
-  const keep = c => { if (c && c.getContext) picKeep(c, 'plane angles', () => { if (A.fr[key] === f) delete A.fr[key]; }, f, true); };
-  if (v && v.getContext) keep(v); else if (v) { keep(v[-1]); keep(v[1]); }
-  return v;
+const wpBand = w => Math.round(12 * w / 190);                               // (the fuselage's half height in a top view: planeCut)
+const wpAxis = h => h >> 1;                                                 // (its fuselage runs through the pivot, the frame's middle - the propeller's tips are its leftmost pixels, not its nose)
+// its paint on a picture on the processor (the shader's rule - texR - for the pictures still cut: wpCanvas)
+const rlPaintPic = (c, P) => !P ? c : P.red ? tintRed(c, P.red) : recolourCessna(c, [P.lower, P.tail], P.blue);
+// a frame cut out of the sheet as a picture, in its paint, mirrored when it's drawn so (the few still asked as pictures - rlArt)
+function wpCanvas(A, fr) {
+  const c = makeCanvas(fr.w, fr.h), x = c.getContext('2d');
+  if (fr.mx) { x.translate(fr.w, 0); x.scale(-1, 1); }
+  x.drawImage(A.sheet, fr.sx, fr.sy, fr.w, fr.h, 0, 0, fr.w, fr.h);
+  return rlPaintPic(c, A.paint);
 }
-// frame i of a sequence; mirror: nose right drawn from the nose-left frame; nb: the row without its blades, when the sheet has one
-// (its propeller turning - wpSpins: the spinning disc in its picture). Its night shape (K), frost (F, 4 stages), scorched tail (R)
-// and wings torn off (nw[1..3]) each made the first time it's drawn
+// frame i of a sequence (a rectangle of the sheet); mirror: nose right drawn from the nose-left frame (mx - by the transform); nb: the row
+// without its blades, when the sheet has one (its propeller turning - wpSpins: the spinning disc over it). nr: its nose to the right as
+// drawn; own: its nose's way round in the sheet's texels (1 left, -1 right); g: how this view squeezes its side view - along its length by
+// the yaw in a turn, across by the roll in a roll, turned round nose right: where a mark kept on its side view falls in it (dmgMark /
+// wpLocal); disc: the spinning propeller over a bladeless frame - an ellipse round its hub, R high, rx across (edge on in a side view and
+// every roll, opening with the yaw in a turn), a faint fill in the blades' own colour and a brighter rim where their tips sweep; with
+// the tail to us (turn_tail between its ends) behind the plane
 function wpFrame(A, s, i, mirror, nb) {
   if (nb && A.seq.seqs[s + '_nb']) s += '_nb';
-  const key = s + i + (mirror ? 'm' : ''); let f = A.fr[key]; if (f) return picUse(f);
-  const S = A.seq.seqs[s]; let c = makeCanvas(S.w, S.h); c.getContext('2d').drawImage(A.sheet, i * S.w, S.y, S.w, S.h, 0, 0, S.w, S.h);
-  if (A.paint) { const p = A.paint(c); if (p !== c) { c.width = c.height = 0; c = p; } }   // (its livery, on this frame only)
-  // (its propeller turning: the disc made part of the frame's own picture - behind it tail-on, over it otherwise - so everything
-  // that works from the picture takes it too: a cloud's cover, the hangar's door, the night's dark shape, its hit area)
-  if (s.endsWith('_nb')) { const d = wpDisc(A, s, i, c); if (d) { const t = makeCanvas(S.w, S.h), x = t.getContext('2d'), back = s.startsWith('turn_tail') && i > 0 && i < A.seq.n - 1; x.drawImage(back ? d : c, 0, 0); x.drawImage(back ? c : d, 0, 0); c = t; } }
-  const im = mirror ? flipCanvas(c) : c, nr = mirror || /_r(_nb)?$/.test(s) || (s.startsWith('turn') && i >= A.seq.n / 2);   // (nr: its nose to the right)
-  const fl = fn => x => { if (!nr) return fn(x); return flipCanvas(fn(flipCanvas(x))); };       // (worked nose left: the tail's char, the wings' cut)
-  // (g: how this view squeezes its side view - along its length by the yaw in a turn, across by the roll in a roll, turned round
-  // nose right: where a mark kept on its side view falls in it - dmgMark / wpLocal)
-  const b = s.replace(/_nb$/, '').replace(/_r$/, ''), t = i / (A.seq.n - 1), g = { ax: nr ? -1 : 1, ay: 1 };
+  const key = s + i + (mirror ? 'm' : ''); let f = A.fr[key]; if (f) return f;
+  const S = A.seq.seqs[s], n = A.seq.n, nr = !!mirror || /_r(_nb)?$/.test(s) || (s.startsWith('turn') && i >= n / 2);
+  const b = s.replace(/_nb$/, '').replace(/_r$/, ''), t = i / (n - 1), g = { ax: nr ? -1 : 1, ay: 1 };
   if (b.startsWith('turn')) g.ax *= Math.max(0.25, Math.abs(Math.cos(t * Math.PI))); else g.ay = Math.max(0.25, Math.cos(t * Math.PI / 2));
-  f = A.fr[key] = { [-1]: im, [1]: im, key: A.id + key, nr, g };
-  // (the frame and every copy made from it - night shape, scorched tail, frost, torn wings - in the page's picture memory as one
-  // group: drawn longest ago, let go together and cut again when next shown; soft - a wreck or a torn wing may still draw one)
-  const kp = v => wpKeep(A, key, f, v);
-  kp(im);
-  wpLazy(f, 'K', () => kp(both2(GLR.on ? glTint(im, 'k', [0, 0, 0], [2 / 255, 3 / 255, 6 / 255]) : planeBlack(im))));   // (its night shape: on the GPU a tint as it's drawn - no copy)
-  wpLazy(f, 'R', () => kp(both2(fl(planeRear)(im))));
-  wpLazy(f, 'F', () => { const F = []; for (let k = 0; k < 4; k++) wpLazy(F, k, () => kp(both2(planeFrost(im, k)))); return F; });
-  wpLazy(f, 'nw', () => { const o = {}; for (let m = 1; m <= 3; m++) wpLazy(o, m, () => { const c2 = kp(fl(x => planeCut(x, !(m & 1), !(m & 2), wpBand(A, x), wpAxis(x)))(im)); return wpLazy({ [-1]: c2, [1]: c2, key: f.key + 'w' + m }, 'K', () => kp(both2(planeBlack(c2)))); }); return o; });
-  return picUse(f);
+  const h = S.hub && S.hub[i], R = A.seq.prop;
+  const disc = s.endsWith('_nb') && h && R ? { x: S.w / 2 + h[0], y: S.h / 2 + h[1], rx: Math.max(1, h[2]), R, fc: A.seq.propCol, rc: A.seq.propRim, back: s.startsWith('turn_tail') && i > 0 && i < n - 1 } : null;
+  return (A.fr[key] = { sx: i * S.w, sy: S.y, w: S.w, h: S.h, width: S.w, height: S.h, mx: !!mirror, nr, own: nr && !mirror ? -1 : 1, g, disc, key: A.K.src + ':' + key, sheet: A.sheet });
 }
-// the spinning propeller over frame i of a bladeless row (c: the frame as cut, before any mirror): an ellipse round its hub - R
-// high, rx across (edge on in a side view and every roll, opening with the yaw in a turn), a faint fill in the blades' own colour
-// and a brighter rim where their tips sweep; with the tail to us (turn_tail between its ends) only where the plane isn't, the disc
-// behind it. Pixel for pixel, hard edged, as the art
-function wpDisc(A, s, i, c) {
-  const S = A.seq.seqs[s], h = S.hub && S.hub[i], R = A.seq.prop; if (!h || !R) return null;
-  const W = c.width, H = c.height, d = makeCanvas(W, H), x = d.getContext('2d'), id = x.createImageData(W, H), o = id.data;
-  const hx = W / 2 + h[0], hy = H / 2 + h[1], rx = Math.max(1, h[2]), fc = A.seq.propCol, rc = A.seq.propRim;
-  const back = s.startsWith('turn_tail') && i > 0 && i < A.seq.n - 1, src = back ? c.getContext('2d').getImageData(0, 0, W, H).data : null;
-  for (let y = Math.max(0, Math.floor(hy - R)); y < Math.min(H, Math.ceil(hy + R)); y++) for (let xx = Math.max(0, Math.floor(hx - rx)); xx < Math.min(W, Math.ceil(hx + rx)); xx++) {
-    const u = (xx + 0.5 - hx) / rx, v = (y + 0.5 - hy) / R, e = u * u + v * v, q = (y * W + xx) * 4;
-    if (e > 1 || (src && src[q + 3])) continue;
-    const rim = e > 0.78, col = rim ? rc : fc;
-    o[q] = col[0]; o[q + 1] = col[1]; o[q + 2] = col[2]; o[q + 3] = rim ? 110 : 52;
+// a frame's own pixels from its sheet (RGBA, w x h - read when first needed for what decides play or what's worked out once a frame; not kept)
+function rlPx(fr) {
+  const c = makeCanvas(fr.w, fr.h), x = c.getContext('2d'); x.drawImage(fr.sheet, fr.sx, fr.sy, fr.w, fr.h, 0, 0, fr.w, fr.h);
+  const d = x.getImageData(0, 0, fr.w, fr.h).data; c.width = c.height = 0; return d;
+}
+// its solid columns' ends in the sheet's texels [first, last] (kept on the frame)
+function rlExt(fr) {
+  if (fr._ext) return fr._ext;
+  const d = rlPx(fr), W = fr.w; let x0 = W, x1 = -1;
+  for (let j = 0; j < fr.h; j++) for (let i = 0; i < W; i++) if (d[(j * W + i) * 4 + 3]) { if (i < x0) x0 = i; if (i > x1) x1 = i; }
+  return (fr._ext = x1 < 0 ? [0, W - 1] : [x0, x1]);
+}
+// its wings torn off (wings: 1 the upper as drawn, 2 the lower, 3 both): the boxes of texels taken out - planeCut's rule (the wing's rows
+// past the fuselage's band, from its nose to 0.72 of its length), worked nose left: in a frame whose texels face right, mirrored
+function rlCuts(fr, wings) {
+  if (!wings) return null;
+  const W = fr.w, H = fr.h, band = wpBand(W), ny = wpAxis(H), [a, b] = rlExt(fr), out = [];
+  let c0, c1;
+  if (fr.own > 0) { c0 = 0; c1 = Math.ceil(a + (b - a) * 0.72); }
+  else { const n0 = W - 1 - b, n1 = W - 1 - a; c0 = Math.floor(W - 1 - (n0 + (n1 - n0) * 0.72)) + 1; c1 = W; }
+  if (wings & 1) out.push([c0, 0, c1, ny - band]);
+  if (wings & 2) out.push([c0, ny + band + 1, c1, H]);
+  return out;
+}
+// where it can be hit (what decides play - spriteHit, poseHitAt): the frame as drawn - its alpha, the disc over it, its torn wings cut,
+// mirrored as it's drawn - { width, height, _a8: each pixel's alpha, _alpha: 1 where over 40 (artAlpha's) }, kept on the frame
+function rlHit(fr, wings) {
+  const key = '_hit' + (wings || 0); if (fr[key]) return fr[key];
+  const W = fr.w, H = fr.h, d = rlPx(fr), a8 = new Uint8Array(W * H), D = fr.disc, cuts = rlCuts(fr, wings);
+  for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
+    let a = d[(j * W + i) * 4 + 3];
+    if (D) { const u = (i + 0.5 - D.x) / D.rx, v = (j + 0.5 - D.y) / D.R, e = u * u + v * v; if (e <= 1) { const da = e > 0.78 ? 110 : 52; a = D.back ? (a || da) : Math.round(da + a * (1 - da / 255)); } }
+    if (cuts) for (const c of cuts) if (i >= c[0] && i < c[2] && j >= c[1] && j < c[3]) a = 0;
+    a8[j * W + (fr.mx ? W - 1 - i : i)] = a;
   }
-  x.putImageData(id, 0, 0); return d;
+  const al = new Uint8Array(W * H); for (let q = 0; q < al.length; q++) al[q] = a8[q] > 40 ? 1 : 0;
+  return (fr[key] = { width: W, height: H, _a8: a8, _alpha: al });
 }
+/* a frame drawn by the things' pass, its middle at transform M's origin, s screen pixels a texel. o: { kind (THG_BODY), cov (its
+   charring), mk (its marks' mask - dmgMask in the frame's own texels: dmgMask(o, fr, m, rlMarkAx(fr), g.ay)), lit (thingsLit's), dark
+   (the night's colour), wings (torn off), rear, frost, cuts (more boxes taken out - painted wheels), alpha, part: [x0, y0, x1, y1] its
+   texels drawn only (a half, a band), dx / dy (screen pixels) where that part is moved to } */
+function rlQuad(M, A, fr, s, o) {
+  const e = artPut(A.sheet); if (!e || !e.ok) return;
+  const m = fr.mx ? thgScale(M.slice(), -1, 1) : M;
+  const w = thgW(fr, s), h = thgH(fr, s), X = -Math.round(w / 2), Y = -Math.round(h / 2), kx = w / fr.w, ky = h / fr.h;
+  const wc = rlCuts(fr, o.wings), cuts = wc && o.cuts ? wc.concat(o.cuts) : wc || o.cuts || null;
+  const R = thingsRules({ rect: [fr.sx, fr.sy, fr.w, fr.h], nose: fr.own, paint: A.paint, frost: o.frost == null ? -1 : o.frost, rear: o.rear || 0, disc: fr.disc, dark: o.dark || null, cuts });
+  const P = o.part, sr = P ? [fr.sx + P[0], fr.sy + P[1], P[2] - P[0], P[3] - P[1]] : [fr.sx, fr.sy, fr.w, fr.h];
+  const qx = P ? X + Math.round(P[0] * kx) : X, qy = P ? Y + Math.round(P[1] * ky) : Y, qw = P ? Math.round(P[2] * kx) - Math.round(P[0] * kx) : w, qh = P ? Math.round(P[3] * ky) - Math.round(P[1] * ky) : h;
+  thingsQuad(m, qx + (o.dx || 0), qy + (o.dy || 0), qw, qh, e, o.kind == null ? THG_BODY : o.kind, null, o.cov || 0, o.mk || null, dmgCell(fr, A.k / UPM), dmgSeed(fr), o.lit || null, null, o.alpha == null ? 1 : o.alpha, THG_SCALED, null, null, null, sr, R);
+}
+// a frame's marks' squeeze along its length in its own texels (g is as it's seen: a mirrored frame's texels face the other way)
+const rlMarkAx = fr => (fr.mx ? -1 : 1) * fr.g.ax;
+// a frame's lit windows as data (the night - cabinLit): runs of texels [x, y, n] in its own texels, worked out once a frame from its
+// pixels (fn: windowsHoles' or windowsAt's rule, 50-land-civlife.js, on the frame's RGBA), and drawn as blocks of the windows' colour over it
+function rlWin(fr, key, fn) {
+  if (fr[key] !== undefined) return fr[key];
+  const W = fr.w, H = fr.h, on = fn(rlPx(fr), W, H), runs = [];
+  if (on) for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) { if (!on[j * W + i]) continue; let n = 1; while (i + n < W && on[j * W + i + n]) n++; runs.push(i, j, n); i += n - 1; }
+  return (fr[key] = runs.length ? runs : null);
+}
+const RL_WIN = [255 / 255, 214 / 255, 120 / 255];
+function rlWinQuads(M, fr, s, runs, alpha) {
+  const m = fr.mx ? thgScale(M.slice(), -1, 1) : M, w = thgW(fr, s), h = thgH(fr, s), X = -Math.round(w / 2), Y = -Math.round(h / 2), kx = w / fr.w, ky = h / fr.h;
+  for (let q = 0; q < runs.length; q += 3) { const x0 = X + Math.round(runs[q] * kx), y0 = Y + Math.round(runs[q + 1] * ky); thingsQuad(m, x0, y0, Math.max(1, X + Math.round((runs[q] + runs[q + 2]) * kx) - x0), Math.max(1, Y + Math.round((runs[q + 1] + 1) * ky) - y0), null, THG_SOLID, RL_WIN, 0, null, 0, 0, null, null, alpha); }
+}
+// a kind's sheet into the art atlas (once - one sheet for all its colours): each family's artFamily, as soon as one of that kind is in the world
+const rlSheetPut = K => { const im = img[K.src]; if (im && im.width) artPut(im); };
+artFamily(() => { for (const pl of allPlanes()) if (pl) rlSheetPut(wpKind(pl)); return false; });
 // its propeller turning: flying with its engine running, or rolling fast on the ground (taking off, just landed) - parked,
 // taxiing, on a magnet, its engine stopped (iced), shot down or a wreck: the blades still
 const wpSpins = pl => pl.state === 'fly' && pl.eng !== 'off' && pl.carried == null && !(pl.ground && (pl.ground === 'taxi' || pl.ground === 'enter' || !(pl.spd > PLANE_TAXI)));
@@ -15812,7 +15782,7 @@ function wpRoll(A, side, phi, nb) {
 // the pose (planePose's, for a kind drawn from renders)
 function wpPose(pl, A) {
   const n = A.seq.n - 1, pd = pl.pitch * 180 / Math.PI, nb = wpSpins(pl);
-  let fr, deg, side = pl.facing, side0 = false;
+  let fr, deg, side = pl.facing, side0 = false, wings = 0;
   if (pl.state === 'down' || pl.state === 'wreck') {
     // shot down: it rolls round and round about its axis, nose down along the fall (a wreck lies on its side)
     side = pl.vx >= 0 ? 1 : -1;
@@ -15820,7 +15790,7 @@ function wpPose(pl, A) {
     // (a wreck lies on its side - with its wings gone, rolled enough that it shows: user Nov 3 12:43, "why is the spitfire not
     // breaking its wings when it falls on the water?")
     const phi = pl.state === 'wreck' ? (pl.wings ? 55 : 0) : pl.spin * 45, R = wpRoll(A, side, phi); fr = R.fr; deg += R.rot;
-    if (pl.wings && Math.abs(Math.sin(phi * Math.PI / 180)) > 0.35) fr = fr.nw[pl.wings];   // (a wing gone - shown once its wings are seen from above or below, not edge on)
+    if (pl.wings && Math.abs(Math.sin(phi * Math.PI / 180)) > 0.35) wings = pl.wings;   // (a wing gone - shown once its wings are seen from above or below, not edge on)
   } else if (pl.turn) {
     // turning round: the nose swings through us (left to right), back through its tail (right to left); tilted with its climb
     const u = clamp(pl.turn.t / PLANE_TURN_T, 0, 0.999), i = Math.round(u * n), from = pl.turn.from;
@@ -15836,7 +15806,7 @@ function wpPose(pl, A) {
     deg = planeFlare(pl, pd * pl.facing); side0 = true;
   }
   if (pl.carried != null && pl.hookA != null) deg = pl.hookA * 180 / Math.PI;   // (on a magnet: turned with it)
-  return { fr, deg: Math.round(deg), side, key: 'P' + pl.id + fr.key, side0, k: wpPx(pl) };
+  return { fr, A, wings, deg: Math.round(deg), side, key: 'P' + pl.id + fr.key, side0, k: wpPx(pl) };
 }
 
 /* ================================================================
@@ -35324,10 +35294,70 @@ fn blot(t: vec2f, cell: f32, sd: u32) -> f32 {
   }
   return s / 0.8775;
 }
-// is the picture solid at the screen-sized picture's pixel p (its size wh; k texels a pixel) - its hard edge, as scaled() cut it
+/* A PICTURE'S OWN RULES (thingsRules - a plane's frame, a part of its sheet: pf.w its block in pv + 1, 0 none). What used to be copies of
+   the frame - a team's or a livery's paint, the rear charred, the frost, a wing torn off, the spinning propeller - worked out texel by
+   texel from the sheet's own pixels, before the picture is sized (so its filtering and hard edge are the copies'):
+   [0] paint (1 a team's red - tintRed, 2 a livery - recolourCessna), its blue margin, frost's threshold (< 0 none), the rear's char;
+   [1] paint colour A (0..255; tintRed's already over 205 and its brightest), the picture's own way round (1 nose left, -1 nose right);
+   [2] paint colour B, how many cut boxes; [3] the disc's middle, across, high (0 none - frame texels); [4] its fill, behind the plane (1);
+   [5] its rim; [6] the night's colour, own (1); [7] the frame - its place in the sheet [x, y, w, h]; [8..] the cut boxes: [x0, y0, x1, y1]
+   a box of texels taken out, or [x, y, -1, r] a round one */
+fn rb(a: I) -> u32 { return u32(a.pf.w + 0.5); }
+fn rv(a: I, k: u32) -> vec4f { return pv[rb(a) - 1u + k]; }
+// the frame's own place in the picture (rules: its rect; else the whole picture)
+fn ownAt(a: I) -> vec4f { if (rb(a) > 0u) { return rv(a, 7u); } return vec4f(0.0, 0.0, a.at.zw); }
+// a texel of a frame with its rules (ti: the sheet's texel), premultiplied
+fn texR(a: I, ti: vec2f, l: i32) -> vec4f {
+  let FR = rv(a, 7u); let f = ti - FR.xy;
+  if (f.x < 0.0 || f.y < 0.0 || f.x >= FR.z || f.y >= FR.w) { return vec4f(0.0); }
+  var c = textureLoad(art, vec2i(a.at.xy + ti), l, 0);
+  let R0 = rv(a, 0u); let R1 = rv(a, 1u); let R2 = rv(a, 2u);
+  if (c.a > 0.0) {
+    var s = c.rgb / c.a * 255.0;
+    let m = i32(R0.x + 0.5);
+    if (m == 1) {
+      if (s.r >= 80.0 && s.r >= s.g * 1.55 && s.r >= s.b * 1.45) { s = clamp(R1.rgb * s.r, vec3f(0.0), vec3f(255.0)); }
+    } else if (m == 2) {
+      let L = (s.r + s.g + s.b) / 3.0;
+      if (s.b > s.r + R0.y && L < 115.0) { s = clamp(R1.rgb * clamp(L / 62.0, 0.45, 1.5), vec3f(0.0), vec3f(255.0)); }
+      else if (s.r > s.g + 80.0 && s.r > s.b + 60.0) { s = clamp(R2.rgb * clamp(L / 92.0, 0.45, 1.5), vec3f(0.0), vec3f(255.0)); }
+    }
+    if (R0.w > 0.0) { var u = (f.x + 0.5) / FR.z; if (R1.w < 0.0) { u = 1.0 - u; } s = mix(s, vec3f(16.0, 12.0, 10.0), clamp((u - 0.35) / 0.6, 0.0, 1.0) * 0.9 * R0.w); }
+    c = vec4f(s / 255.0 * c.a, c.a);
+  }
+  let D = rv(a, 3u);
+  if (D.w > 0.0) {
+    let q = (f + 0.5 - D.xy) / D.zw; let e = dot(q, q);
+    if (e <= 1.0) {
+      let F = rv(a, 4u);
+      var dc = vec4f(F.rgb * (52.0 / 255.0), 52.0 / 255.0);
+      if (e > 0.78) { dc = vec4f(rv(a, 5u).rgb * (110.0 / 255.0), 110.0 / 255.0); }
+      if (F.w > 0.5) { if (c.a <= 0.0) { c = dc; } } else { c = dc + c * (1.0 - dc.a); }
+    }
+  }
+  let nc = u32(R2.w + 0.5);
+  for (var j = 0u; j < nc; j++) {
+    let b = rv(a, 8u + j);
+    if (b.z >= 0.0) { if (f.x >= b.x && f.x < b.z && f.y >= b.y && f.y < b.w) { c = vec4f(0.0); } }
+    else if (length(f + 0.5 - b.xy) <= b.w) { c = vec4f(0.0); }
+  }
+  return c;
+}
+// a frame with its rules at texel place t: the nearest texel, or (drawn smaller) four mixed as the sampler mixes them - each its own rules first
+fn lookR(a: I, t: vec2f, lin: bool) -> vec4f {
+  let l = i32(a.cl2.w);
+  if (!lin) { return texR(a, floor(t), l); }
+  let p = t - 0.5; let i = floor(p); let w = p - i;
+  return mix(mix(texR(a, i, l), texR(a, i + vec2f(1.0, 0.0), l), w.x), mix(texR(a, i + vec2f(0.0, 1.0), l), texR(a, i + vec2f(1.0, 1.0), l), w.x), w.y);
+}
+// the night's dark shape's colour: its own (a plane's near black) or the things' (civLitLook's)
+fn dkc(a: I) -> vec3f { if (rb(a) > 0u) { let d = rv(a, 6u); if (d.w > 0.5) { return d.rgb; } } return vec3f(28.0, 18.0, 12.0) / 255.0; }
+// is the picture solid at the screen-sized picture's pixel p (its size wh; k texels a pixel; from its own corner - ownAt) - its hard edge, as scaled() cut it
 fn sil(a: I, p: vec2f, wh: vec2f, k: vec2f) -> bool {
   if (p.x < 0.0 || p.y < 0.0 || p.x >= wh.x || p.y >= wh.y) { return false; }
-  let tx = min(floor((p + 0.5) * k), a.at.zw - 1.0);
+  let O = ownAt(a);
+  let tx = min(floor((p + 0.5) * k), O.zw - 1.0);
+  if (rb(a) > 0u) { return texR(a, O.xy + tx, i32(a.cl2.w)).a >= 0.4314; }
   return textureLoad(art, vec2i(a.at.xy + tx), i32(a.cl2.w), 0).a >= 0.4314;
 }
 // a rim on the edges facing a light up to its left (L) or right: lit where the pixel up and toward the light (r pixels) is empty,
@@ -35379,7 +35409,9 @@ fn look(at: vec4f, l: i32, t: vec2f, lin: bool) -> vec4f {
 // one tap of the picture at texel place t: a thing's own picture with its damage on it (a section destroyed from its damaged picture,
 // the charring, the marks' mask) - premultiplied
 fn tap(a: I, t: vec2f, lin: bool, body: bool) -> vec4f {
-  var c = look(a.at, i32(a.cl2.w), t, lin);
+  let own = rb(a) > 0u;
+  var c: vec4f;
+  if (own) { c = lookR(a, t, lin); } else { c = look(a.at, i32(a.cl2.w), t, lin); }
   let ti = floor(t);
   if (body && a.pf.y > 0.5 && a.pf.z > 0.5) {
     let o = u32(a.pf.x + 0.5); let n = i32(a.pf.y + 0.5); let ob = o + u32((n + 3) / 4) + u32((n + 4) / 4);
@@ -35388,11 +35420,26 @@ fn tap(a: I, t: vec2f, lin: bool, body: bool) -> vec4f {
   }
   if (c.a <= 0.0 || !body) { return c; }
   var s = c.rgb / c.a;
-  let tc = clamp(ti, vec2f(0.0), a.at.zw - 1.0);
+  let O = ownAt(a);   // (its own texels: a frame's from the frame's corner - its mask, its blotches, its frost)
+  let tc = clamp(ti - O.xy, vec2f(0.0), O.zw - 1.0);
   var cov = a.mul.w;
   if (a.pf.y > 0.5) { cov = prof(a, tc.x); }
   if (cov > 0.0) { let kk = clamp((cov - blot(tc, a.mk.z, u32(a.mk.w))) / 0.1, 0.0, 1.0) * 0.92; s += (s * vec3f(0.16, 0.14, 0.13) + vec3f(10.0, 8.0, 7.0) / 255.0 - s) * kk; }
   if (a.mk.x >= 0.0) { let m = textureLoad(masks, vec2i(a.mk.xy + tc), 0); s = mix(s, vec3f(14.0, 10.0, 8.0) / 255.0, m.r); s = mix(s, vec3f(214.0, 208.0, 196.0) / 255.0, m.g); }
+  if (own) {
+    // (frosted up high: little crusts of ice over the paint - the upper edges first, where the cold air strikes; planeFrost's rule,
+    // from the frame's own texels and the two rows over them)
+    let th = rv(a, 0u).z;
+    if (th >= 0.0) {
+      let l = i32(a.cl2.w); let p0 = O.xy + tc;
+      if (textureLoad(art, vec2i(a.at.xy + p0), l, 0).a > 0.0) {
+        let edge = tc.y < 3.0 || textureLoad(art, vec2i(a.at.xy + p0 - vec2f(0.0, 1.0)), l, 0).a <= 0.0 || textureLoad(art, vec2i(a.at.xy + p0 - vec2f(0.0, 3.0)), l, 0).a <= 0.0;
+        let ix = i32(tc.x); let iy = i32(tc.y);
+        let cl = hsh(ix / 4, iy / 4, 7001u); let fine = hsh(ix, iy, 7002u);
+        if (select(cl, cl * 0.45, edge) + (fine - 0.5) * 0.18 <= th) { let u = 0.4 + 0.6 * fine; s = vec3f(170.0 + 85.0 * u, 208.0 + 47.0 * u, 238.0 + 17.0 * u) / 255.0; }
+      }
+    }
+  }
   return vec4f(s * c.a, c.a);
 }
 @fragment fn fs(v: VO) -> @location(0) vec4f {
@@ -35442,9 +35489,9 @@ fn tap(a: I, t: vec2f, lin: bool, body: bool) -> vec4f {
   if (kind == 3) {
     // (the light alone, laid over what's under it - civLitLook's own draws, each over the last: the night's dark shape, the moon's sheen,
     // its rim, a low sun's rim; on the picture's solid pixels)
-    let kp = k; let wh = a.at.zw / k; let ip = floor(so / k + lp); let f = u32(a.cl2.z);
+    let O = ownAt(a); let kp = k; let wh = O.zw / k; let ip = floor((so - O.xy) / k + lp); let f = u32(a.cl2.z);
     var o = vec4f(0.0);
-    o = vec4f(28.0, 18.0, 12.0, 255.0) / 255.0 * a.lit.x + o * (1.0 - a.lit.x);
+    o = vec4f(dkc(a), 1.0) * a.lit.x + o * (1.0 - a.lit.x);
     o = vec4f(raw * 0.5 + vec3f(70.0, 108.0, 170.0) / 255.0 * 0.5, 1.0) * a.lit.y + o * (1.0 - a.lit.y);
     if (a.lit.z > 0.0) { let k2 = a.lit.z * rim(a, ip, wh, kp, (f & 1u) != 0u); o = vec4f(191.0, 228.0, 246.0, 255.0) / 255.0 * k2 + o * (1.0 - k2); }
     if (a.lit.w > 0.0) { let k2 = a.lit.w * rim(a, ip, wh, kp, (f & 2u) != 0u); o = vec4f(255.0, 197.0, 138.0, 255.0) / 255.0 * k2 + o * (1.0 - k2); }
@@ -35453,9 +35500,9 @@ fn tap(a: I, t: vec2f, lin: bool, body: bool) -> vec4f {
   s *= a.mul.rgb;
   s = mix(s, a.tn.rgb, a.tn.a);                                                                  // (laid over its shape: a colour - burning hot, burnt dark)
   if (body && (a.lit.x + a.lit.y + a.lit.z + a.lit.w) > 0.0) {
-    let kp = k; let wh = a.at.zw / k; let ip = floor(so / k + lp);
+    let O = ownAt(a); let kp = k; let wh = O.zw / k; let ip = floor((so - O.xy) / k + lp);
     let f = u32(a.cl2.z);
-    s = mix(s, vec3f(28.0, 18.0, 12.0) / 255.0, a.lit.x);                                         // (the night's dark shape; a burnt one)
+    s = mix(s, dkc(a), a.lit.x);                                                                  // (the night's dark shape; a burnt one)
     s = mix(s, raw * 0.5 + vec3f(70.0, 108.0, 170.0) / 255.0 * 0.5, a.lit.y);                     // (the moon's sheen)
     if (a.lit.z > 0.0) { s = mix(s, vec3f(191.0, 228.0, 246.0) / 255.0, a.lit.z * rim(a, ip, wh, kp, (f & 1u) != 0u)); }   // (its rim)
     if (a.lit.w > 0.0) { s = mix(s, vec3f(255.0, 197.0, 138.0) / 255.0, a.lit.w * rim(a, ip, wh, kp, (f & 2u) != 0u)); }   // (a low sun's)
@@ -35524,7 +35571,7 @@ function thingsLit(cx, dk) {
    torn in two: only the side (+1 right, -1 left, in m's units) of a ragged line at x, its waves sin(r * 0.9 + seed) h1 and sin(r * 2.3 +
    3 seed) h2 at row r = (y + y0) / step (fishHalves' tear) */
 const THG_BODY = 0, THG_PART = 1, THG_SOLID = 2, THG_LIGHT = 3, THG_SCALED = 1, THG_NONE = { x: 0, y: 0, w: 1, h: 1, l: 0, ok: true };
-function thingsQuad(m, x, y, w, h, e, kind, mul, cov, mk, cell, seed, lit, clip, alpha = 1, filt = 0, tint = null, cut = null, prof = null, sr = null) {
+function thingsQuad(m, x, y, w, h, e, kind, mul, cov, mk, cell, seed, lit, clip, alpha = 1, filt = 0, tint = null, cut = null, prof = null, sr = null, rules = 0) {
   if (!THG.ctx || !(w > 0 && h > 0)) return;
   if (kind === THG_SOLID) e = THG_NONE;
   if (!e || !e.ok) return;
@@ -35546,7 +35593,7 @@ function thingsQuad(m, x, y, w, h, e, kind, mul, cov, mk, cell, seed, lit, clip,
   if (tint) { f[o + 40] = tint[0]; f[o + 41] = tint[1]; f[o + 42] = tint[2]; f[o + 43] = tint[3]; } else f[o + 40] = f[o + 41] = f[o + 42] = f[o + 43] = 0;
   if (cut) { f[o + 44] = cut[0]; f[o + 45] = cut[1]; f[o + 46] = cut[2]; f[o + 47] = cut[3]; f[o + 37] = cut[4]; f[o + 38] = cut[5]; f[o + 39] = cut[6]; } else f[o + 44] = f[o + 45] = f[o + 46] = f[o + 47] = 0;
   if (prof) { f[o + 48] = prof[0]; f[o + 49] = prof[1]; f[o + 50] = prof[2]; } else f[o + 48] = f[o + 49] = f[o + 50] = 0;
-  f[o + 51] = 0;
+  f[o + 51] = rules || 0;
   if (sr) { f[o + 52] = sr[0]; f[o + 53] = sr[1]; f[o + 54] = sr[2]; f[o + 55] = sr[3]; } else f[o + 52] = f[o + 53] = f[o + 54] = f[o + 55] = 0;
 }
 /* a big thing's damage section by section (dmgPic's list: one a section, left to right across its picture, 0 whole .. 1 destroyed; cuts where
@@ -35561,6 +35608,26 @@ function thingsProfile(list, B, cuts) {
   for (let k = 0; k <= n; k++) v[o + nq * 4 + k] = cuts ? cuts[k] : k / n;
   if (B) { const b = o + (nq + nc) * 4; v[b] = B.x; v[b + 1] = B.y; v[b + 2] = B.w; v[b + 3] = B.h; v[b + 4] = B.l || 0; v[b + 5] = B.ok ? 1 : 0; }
   return [at * 2, n, B ? 1 : 0];
+}
+/* a picture's own rules (a plane's frame drawn from its sheet - the shader's texR): put in with the call's shapes (pv), for its quads'
+   rules. R: { rect: the frame [x, y, w, h] in its sheet's texels, nose: its own way round (1 nose left, -1 right), paint: null or
+   { red: [r, g, b] } (a team's - tintRed) or { lower, tail, blue } (a livery - recolourCessna), frost: its stage 0..3 or -1, rear: the
+   rear's char 0..1, disc: null or { x, y, rx, R, fc, rc, back } (frame texels; colours 0..255), dark: the night's colour [r, g, b]
+   (0..255) or null, cuts: boxes of texels taken out - [x0, y0, x1, y1], or [x, y, -1, r] round } */
+function thingsRules(R) {
+  if (!THG.ctx) return 0;
+  const nc = R.cuts ? R.cuts.length : 0, v4 = 8 + nc, slots = Math.ceil(v4 / 2), need = (THG.pn + slots) * 8;
+  if (THG.pv.length < need) { const a = new Float32Array(Math.max(need, THG.pv.length * 2)); a.set(THG.pv); THG.pv = a; }
+  const at = THG.pn, v = THG.pv, o = at * 8; THG.pn += slots; v.fill(0, o, o + slots * 8);
+  const P = R.paint;
+  if (P && P.red) { const c = P.red, cm = Math.max(1, c[0], c[1], c[2]), q = 255 * 0.86 / (205 * cm); v[o] = 1; v[o + 4] = c[0] * q; v[o + 5] = c[1] * q; v[o + 6] = c[2] * q; }
+  else if (P && P.lower) { v[o] = 2; v[o + 1] = P.blue; v[o + 4] = P.lower[0]; v[o + 5] = P.lower[1]; v[o + 6] = P.lower[2]; v[o + 8] = P.tail[0]; v[o + 9] = P.tail[1]; v[o + 10] = P.tail[2]; }
+  v[o + 2] = R.frost >= 0 ? (R.frost + 1) / 4 * 0.62 : -1; v[o + 3] = R.rear || 0; v[o + 7] = R.nose || 1; v[o + 11] = nc;
+  const D = R.disc; if (D) { v[o + 12] = D.x; v[o + 13] = D.y; v[o + 14] = D.rx; v[o + 15] = D.R; for (let k = 0; k < 3; k++) { v[o + 16 + k] = D.fc[k] / 255; v[o + 20 + k] = D.rc[k] / 255; } v[o + 19] = D.back ? 1 : 0; }
+  if (R.dark) { v[o + 24] = R.dark[0] / 255; v[o + 25] = R.dark[1] / 255; v[o + 26] = R.dark[2] / 255; v[o + 27] = 1; }
+  v[o + 28] = R.rect[0]; v[o + 29] = R.rect[1]; v[o + 30] = R.rect[2]; v[o + 31] = R.rect[3];
+  for (let k = 0; k < nc; k++) { const b = R.cuts[k]; v[o + 32 + k * 4] = b[0]; v[o + 33 + k * 4] = b[1]; v[o + 34 + k * 4] = b[2]; v[o + 35 + k * 4] = b[3]; }
+  return at * 2 + 1;
 }
 // the context's transform as it is now (a family that sets its own with save / translate / rotate, as the old code did)
 const thgCur = () => (THG.ctx || C).s.m.slice();
@@ -42710,41 +42777,32 @@ function windowsArtDots(src) {
   return (src._winD = c);
 }
 // (Nov 3, the user's render-layout sheets - the Cessna's and the seaplane's: their windows are see-through, holes in the
-// picture, and the glass rule above lit their bellies and wheel spats instead) a picture's windows as its holes: the clear
+// picture, and the glass rule above lit their bellies and wheel spats instead) a frame's windows as its holes: the clear
 // pixels its outline closes round (not reached from its edge), small, above its middle (the struts' and floats' gaps are
-// below it) - lit warm
-function windowsArtHoles(src) {
-  if (src._winH !== undefined) return src._winH;
-  const W = src.width, H = src.height, rd = src.getContext ? src : (() => { const k = makeCanvas(W, H); k.getContext('2d').drawImage(src, 0, 0); return k; })(), d = rd.getContext('2d').getImageData(0, 0, W, H).data;
-  const clear = new Uint8Array(W * H), seen = new Uint8Array(W * H), st = [];
+// below it) - d its RGBA, W x H; each window pixel 1 (or null: none). Lit warm as blocks over the frame (rlWin, 29-zzz-warplanes.js)
+function windowsHoles(d, W, H) {
+  const clear = new Uint8Array(W * H), seen = new Uint8Array(W * H), st = [], on = new Uint8Array(W * H);
   for (let p = 0; p < W * H; p++) clear[p] = d[p * 4 + 3] < 128 ? 1 : 0;
   const flood = (p0, comp) => { st.push(p0); seen[p0] = 1; while (st.length) { const q = st.pop(); if (comp) comp.push(q); const qx = q % W, qy = (q - qx) / W;
     for (const [ax, ay] of [[qx - 1, qy], [qx + 1, qy], [qx, qy - 1], [qx, qy + 1]]) { if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue; const r = ay * W + ax; if (clear[r] && !seen[r]) { seen[r] = 1; st.push(r); } } } };
   for (let i = 0; i < W; i++) for (const j of [0, H - 1]) if (clear[j * W + i] && !seen[j * W + i]) flood(j * W + i, null);   // (the open air round it)
   for (let j = 0; j < H; j++) for (const i of [0, W - 1]) if (clear[j * W + i] && !seen[j * W + i]) flood(j * W + i, null);
-  const c = makeCanvas(W, H), x = c.getContext('2d'), id = x.createImageData(W, H), o = id.data;
   let n = 0;
   for (let p0 = 0; p0 < W * H; p0++) {
     if (!clear[p0] || seen[p0]) continue;
     const comp = []; flood(p0, comp);
     let sy = 0; for (const q of comp) sy += (q / W) | 0;
     if (comp.length < 2 || comp.length > W * H * 0.02 || sy / comp.length >= H / 2) continue;   // (a lone clear pixel: a gap in the paint, not a window)
-    for (const q of comp) { o[q * 4] = 255; o[q * 4 + 1] = 214; o[q * 4 + 2] = 120; o[q * 4 + 3] = 255; n++; }
+    for (const q of comp) { on[q] = 1; n++; }
   }
-  if (!n) return (src._winH = null);
-  x.putImageData(id, 0, 0);
-  return (src._winH = c);
+  return n ? on : null;
 }
 // (Nov 3: the pixel-art 747 has no windows drawn - too small at its 14 colours) its rows of windows put on its side views: pts,
-// pixels from its middle as it flies nose left (mirrored nose right), each lit where its body is
-function windowsArtAt(src, pts, dir) {
-  const key = dir > 0 ? '_winR' : '_winL';
-  if (src[key] !== undefined) return src[key];
-  const W = src.width, H = src.height, rd = src.getContext ? src : (() => { const k = makeCanvas(W, H); k.getContext('2d').drawImage(src, 0, 0); return k; })(), d = rd.getContext('2d').getImageData(0, 0, W, H).data;
-  const c = makeCanvas(W, H), x = c.getContext('2d'); x.fillStyle = 'rgb(255,214,120)';
-  let n = 0;
-  for (const [px, py] of pts) { const i = Math.round(W / 2 + (dir > 0 ? -px - 1 : px)), j = Math.round(H / 2 + py); if (i >= 0 && j >= 0 && i < W && j < H && d[(j * W + i) * 4 + 3] > 200) { x.fillRect(i, j, 1, 1); n++; } }
-  return (src[key] = n ? c : null);
+// pixels from its middle as it flies nose left (mirrored nose right), each lit where its body is - d its RGBA, W x H; as windowsHoles
+function windowsAt(d, W, H, pts, dir) {
+  const on = new Uint8Array(W * H); let n = 0;
+  for (const [px, py] of pts) { const i = Math.round(W / 2 + (dir > 0 ? -px - 1 : px)), j = Math.round(H / 2 + py); if (i >= 0 && j >= 0 && i < W && j < H && d[(j * W + i) * 4 + 3] > 200) { on[j * W + i] = 1; n++; } }
+  return n ? on : null;
 }
 function windowsArt(src) {
   if (src._win !== undefined) return src._win;
@@ -50950,7 +51008,7 @@ const SEAI = {"n": 8, "seqs": {"turn_front": {"y": 0, "w": 226, "h": 92, "hub": 
 const SEA_KIND = { len: 8.2, seq: SEAI, src: 'seaplane' };
 function seaplaneArt(col) {
   const k = (col || 0) % CESSNA_COLS.length;
-  return rlArt(SEA_KIND, 'sea' + k, k ? base => recolourCessna(base, CESSNA_COLS[k], 60) : null);
+  return rlArt(SEA_KIND, 'sea' + k, k ? { lower: CESSNA_COLS[k][0], tail: CESSNA_COLS[k][1], blue: 60 } : null);
 }
 // its lamps and glint, marked by eye on its side view (pixels from the pivot, nose left): the near wingtip's light, the beacon on
 // the fin's top (Nov 3 GPU check: it was half-way down its trailing edge), the windscreen
@@ -51212,7 +51270,7 @@ function splPic(s) {
   else if (s.turn) { const u = clamp(s.turn.t / SP_TURN, 0, 0.999), i = Math.round(u * n), f = s.turn.from; fr = f < 0 ? wpFrame(A, 'turn_front', i, false, nb) : wpFrame(A, 'turn_tail', n - i, false, nb); d = u < 0.5 ? f : -f; }
   else if (s.roll) { const u = clamp(s.roll.t / FLY_ROLL_T, 0, 1), R = wpRoll(A, s.dir, 180 * (s.roll.done ? 1 - u : u), nb); fr = R.fr; rot = R.rot; }
   else { fr = wpFrame(A, 'turn_front', d < 0 ? 0 : n, false, nb); lvl = true; }
-  return { d, A, im: fr[-1], fr, rot, fi: lvl ? 0 : -1, k: A.k, fbU: A.seq.foot * A.k };
+  return { d, A, fr, rot, fi: lvl ? 0 : -1, k: A.k, fbU: A.seq.foot * A.k };
 }
 // where that picture is, for the hits (vehHitBy): drawn turned about s.x, s.y (its floats' bottom) with its pivot fbU above that
 // point along its turned upright, upside down past 90 degrees of roll. Not drawn here (gone, or a wreck on land - drawCrashes):
@@ -51221,11 +51279,11 @@ function splPose(s) {
   if (s.state === 'gone' || s.state === 'wreck') return null;
   const Q = splPic(s); if (!Q) return null;
   const a = heldAng(s, s.ang || 0);
-  return { P: Q.im, k: Q.k, cx: s.x + Q.fbU * Math.sin(a), cy: s.y - Q.fbU * Math.cos(a), a: a + Q.rot * Math.PI / 180, flip: false };
+  return { P: rlHit(Q.fr), k: Q.k, cx: s.x + Q.fbU * Math.sin(a), cy: s.y - Q.fbU * Math.cos(a), a: a + Q.rot * Math.PI / 180, flip: false, g: Q.fr.g };   // (its frame as drawn - its disc: rlHit, 29-zzz-warplanes.js)
 }
 const spLost = s => s.state === 'fall' || s.state === 'sink' || s.state === 'sunk' || s.state === 'wreck';
-// (engine part 5) drawn by the things' pass from the art atlas (45-zz-things-gpu.js): its frame charred by its hits with its blows' marks
-// (dmgLook, dmgMask - squeezed with the frame's view), the hour's light on it, its see-through cabin lit at night
+// (engine part 5) drawn by the things' pass from its sheet in the art atlas (rlQuad, 29-zzz-warplanes.js): its frame in its livery, charred by
+// its hits with its blows' marks (its mask, in the frame's own texels), the hour's light, its see-through cabin lit at night
 function drawSeaplanes(x0, x1, mode) {
   if (!LAND || !seaplanes.length) return;
   if (!img.seaplane) return;
@@ -51236,25 +51294,23 @@ function drawSeaplanes(x0, x1, mode) {
     if ((mode === 'air' && wet) || (mode === 'under' && !wet)) continue;
     if (s.state === 'fall') s.spinF = (s.spinF || 0) + 1 / 60 * 9;   // (the spin, a frame on as it's drawn)
     const Q = splPic(s); if (!Q) continue;
-    const { d, im, fr, rot, fi, k, fbU } = Q, g = fr.g || { ax: 1, ay: 1 }, a = heldAng(s, s.ang || 0);
-    // charred by its hits and marked where they landed, the one rule (dmgPic, 50-zz-damage.js); lost - falling, sinking - nearly all over
-    const sp = { width: thgW(im, k * SV), height: thgH(im, k * SV) }, m = k / UPM;   // (its size as drawn)
+    const { d, A, fr, rot, fi, k, fbU } = Q, a = heldAng(s, s.ang || 0), sc = k * SV;
     // its lamps, turned with it about the same point (side views only: in the turn frames they'd sit off it) - its spots, SEA_SPOT
     if (s.state === 'fly' && fi === 0) { const N = SEA_SPOT.nav, T = SEA_SPOT.tail; planeLights(s.x, s.y, d, -N[0] * k, T[0] * k, -(T[1] * k - fbU), false, s.home * 0.01, a, N[1] * k - fbU); }
     C.save(); C.translate(PX(s.x), PY(s.y + (s.susY || 0))); C.rotate(a); C.translate(0, -Math.round(fbU * SV)); if (rot) C.rotate(Math.PI);   // (bobbing on its floats - susY)
-    const X = -Math.round(sp.width / 2), Y = -Math.round(sp.height / 2);
     const M = thgCur();
-    thingsQuad(M, X, Y, sp.width, sp.height, artPut(im), THG_BODY, null, dmgLook(im, spLost(s) ? 1 : clamp(1 - s.hp / (s.hpMax || 2), 0, 1))[0], dmgMask(s, im, m, g.ax, g.ay), dmgCell(im, m), dmgSeed(im), thingsLit(PX(s.x), civNightK()), null, 1, THG_SCALED);
-    { const L = cabinLit(), Wn = L > 0.05 ? windowsArtHoles(im) : null;   // (its see-through cabin - Nov 3 GPU check: the glass rule lit its nose and tail)
-    if (Wn) thingsQuad(M, X, Y, thgW(Wn, k * SV), thgH(Wn, k * SV), artPut(Wn), THG_PART, null, 0, null, 0, 0, null, null, L, THG_SCALED); }
+    // charred by its hits and marked where they landed, the one rule (50-zz-damage.js); lost - falling, sinking - nearly all over
+    rlQuad(M, A, fr, sc, { cov: dmgLook(fr, spLost(s) ? 1 : clamp(1 - s.hp / (s.hpMax || 2), 0, 1))[0], mk: dmgMask(s, fr, k / UPM, rlMarkAx(fr), fr.g.ay), lit: thingsLit(PX(s.x), civNightK()) });
+    { const L = cabinLit(), Wn = L > 0.05 ? rlWin(fr, '_winH', windowsHoles) : null;   // (its see-through cabin - Nov 3 GPU check: the glass rule lit its nose and tail)
+    if (Wn) rlWinQuads(M, fr, sc, Wn, L); }
     C.restore();
     if (s.state === 'fly' && fi === 0) {
       thingsGL(); const G = SEA_SPOT.glint; civGlint(PX(s.x - d * G[0] * k), PY(s.y + G[1] * k - fbU), s.x * 0.005 + s.ang * 5 + s.col, false); }
   }
   if (own) thingsEnd();
 }
-// each colour's frames in use into the art atlas as soon as one of its seaplanes is in the world (the frame's 'art' layer)
-artFamily(() => { if (LAND && img.seaplane) for (const s of seaplanes) { const A = seaplaneArt(s.col); if (A && !A._inArt) { artPutAll(A); A._inArt = true; } } return false; });
+// its sheet in the art atlas as soon as a seaplane is in the world (the frame's 'art' layer) - one sheet for every livery
+artFamily(() => { if (LAND && seaplanes.length) rlSheetPut(SEA_KIND); return false; });
 
 /* ---- TERRAIN SHAPES (user, Nov 2 13:00-13:20: "any spline we have can either be solid or island"; "every spline we do should
    be closed, like the caves are. So we have splines that create terrain and splines that create holes in the terrain").
@@ -51707,7 +51763,7 @@ function buildSpaceArt() {
   const part = (x, y, w, h) => { const c = makeCanvas(w, h); c.getContext('2d').drawImage(sat, x, y, w, h, 0, 0, w, h); return { c, dx: x + w / 2 - sat.width / 2, dy: y + h / 2 - sat.height / 2 }; };
   const satParts = { L: part(0, 0, 44, sat.height), R: part(76, 0, sat.width - 76, sat.height), B: part(44, 10, 32, sat.height - 10), D: part(48, 0, 24, 10) };
   // (user Oct 26) the orbiter: the user's sheet - the four turn frames, a row for each damage level
-  const orbSheet = img.shuttles ? prepPlaneArt(img.shuttles, SHUTTLEI, true) : null;
+  const orbSheet = img.shuttles ? prepPlaneArt(img.shuttles, SHUTTLEI) : null;
   spaceArt = { orbSheet, satParts, tank, srb, sat, satR: flipCanvas(sat), orb, orbR: flipCanvas(orb), et, stack, stackR: flipCanvas(stack), noOrb, noOrbR: flipCanvas(noOrb), pad, padR: flipCanvas(pad), iss, issR: flipCanvas(iss), lamps, nose, SW: W, SH: H, etW: et.width };
 }
 // the stack's foot on its pad (world): where it stands, and the pad's own top left
@@ -52583,7 +52639,7 @@ function spriteSheet() {
     ['BOATS - JET BOATS: SIDE, HEAD-ON, HIT', jbArt.flatMap(a => [a.r, a.f, sheetHit(a.r, 0.45)])],
     ['BOATS - MOTOR BOAT (YOUR PICTURES): ITS TURN, AND DAMAGED', PIC_BOATS.motor.art.flatMap(n => [tropPic(n), tropPic(n + '-dmg')]).filter(Boolean)],
     ['PLANES - CESSNAS (YOUR PICTURE, IN ITS TEN LIVERIES)', trafficArt.cessna.map(a => a.r)],
-    ['PLANES - 747s: FOREST, DESERT', trafficArt.jet.map(a => a.r)],
+    ['PLANES - 747s: FOREST, DESERT', [0, 1].map(t => sheetArt({ kind: 'jet', owner: t }).plane[0][0][1])],
     ['PLANES - SEAPLANES (YOUR CESSNA ON FLOATS, PER LIVERY)', CESSNA_COLS.map((_, k) => seaplaneArt(k).plane[0][0][1])],
     ['HELICOPTERS (YOUR SHEET) - CLEAN, HIT, WRECKED, THREE-QUARTER, HEAD-ON (MADE HERE)', chArt.flatMap(a => [a.lv[0], a.lv[1], a.lv[2], a.q[0], a.front])],
     ['UNDERWATER - THE RESEARCH SHIP\'S SUB (YOUR PICTURE): SIDE, THREE-QUARTER, HEAD-ON', msArt ? [msArt.side, msArt.q, msArt.front] : []],
@@ -55179,8 +55235,8 @@ function sheetFall(f, dt) {
 function sheetLoseWing(f, which, quiet) {
   if ((f.wings || 0) & (1 << which)) return;
   f.wings = (f.wings || 0) | (1 << which);
-  const A = sheetArt(f), S = SHEET_PLANES[f.kind];
-  chunks.push(Object.assign({ vx: f.vx * 0.6 + trRnd(-40, 40), vy: f.vy * 0.4 - trRnd(30, 80), a: trRnd(0, 6), w: trRnd(-9, 9), delay: 0, floor: dryLand(f.x) ? landTop(f.x) : waterLv(f.x), water: !dryLand(f.x), kind: 'wing', land: LAND }, wingPiece(A.wings[which], A.k || S.I.k, f.x, f.y, f.facing || (f.vx >= 0 ? 1 : -1))));
+  const A = sheetArt(f);
+  chunks.push(Object.assign({ vx: f.vx * 0.6 + trRnd(-40, 40), vy: f.vy * 0.4 - trRnd(30, 80), a: trRnd(0, 6), w: trRnd(-9, 9), delay: 0, floor: dryLand(f.x) ? landTop(f.x) : waterLv(f.x), water: !dryLand(f.x), kind: 'wing', land: LAND }, wingPiece(A.wings[which], A.k, f.x, f.y, f.facing || (f.vx >= 0 ? 1 : -1))));
   if (!quiet) { spawnSparks(f.x, f.y, 14, 200); planeBits(f, 5); sound('impact', f.x); }
 }
 // (user Oct 26, for every plane: into the water at least one wing splits off) - the lower one (or the other if it's gone)
@@ -55189,8 +55245,8 @@ function wingIntoWater(f) { if (!SHEET_PLANES[f.kind]) return; const w = f.wings
 // Cessna) or three (the 747) where it hit, its wings torn off, burning; the crater by its size (none in the stone) -
 // landCrash
 function trafficCrash(f, gy, deck, stone, quiet) {
-  const jet = f.kind === 'jet', face = (f.vx || f.dir || 1) >= 0 ? 1 : -1, S = SHEET_PLANES[f.kind], A = sheetArt(f);
-  f.crash = landCrash(f.x, gy, { size: jet ? 3.5 : 0.8, vx: f.vx, vy: f.vy, art: A.plane[2][0][face], k: A.k || S.I.k, face, n: jet ? 3 : 2, wings: [0, 1].map(w => (f.wings || 0) & (1 << w) ? null : A.wings[w]), deck, stone, quiet });
+  const jet = f.kind === 'jet', face = (f.vx || f.dir || 1) >= 0 ? 1 : -1, A = sheetArt(f);
+  f.crash = landCrash(f.x, gy, { size: jet ? 3.5 : 0.8, vx: f.vx, vy: f.vy, art: A.plane[2][0][face], k: A.k, face, n: jet ? 3 : 2, wings: [0, 1].map(w => (f.wings || 0) & (1 << w) ? null : A.wings[w]), deck, stone, quiet });
   f.state = 'wreck'; f.y = gy; f.vx = 0; f.vy = 0; f.split = false;
 }
 // (shot down or flown in, no other comes in its place - user Oct 27: "The rest, when destroyed, is never spawned
@@ -55230,7 +55286,7 @@ function buildTrafficArt() {
       d[i] = clamp(to[0] * k, 0, 255); d[i + 1] = clamp(to[1] * k, 0, 255); d[i + 2] = clamp(to[2] * k, 0, 255);
     }
     x.putImageData(id, 0, 0);
-    return { r: c, l: flipCanvas(c) };
+    return { r: c };
   };
   // the cruise ship: a dark hull with a red waterline, decks of white with rows of windows, two funnels
   const ship = mk(260, 80, R => {
@@ -55242,25 +55298,20 @@ function buildTrafficArt() {
     R(110, 0, 16, 18, [200, 60, 50]); R(110, 0, 16, 4, [30, 30, 34]); R(140, 4, 16, 14, [200, 60, 50]); R(140, 4, 16, 4, [30, 30, 34]);   // (funnels)
     R(196, 12, 30, 6, [244, 244, 240]); R(200, 14, 22, 2, [40, 60, 90]);    // (the bridge)
   });
-  // the 747 (the user's picture, Oct 25 late): its colour band in each country's colour, like the army's
+  // (the planes in the air are drawn from the user's render-layout sheets - rlArt; these old pictures are the HUD's civilian button's,
+  // and the old 747's only for a look at it - made if asked: debugJetArt)
   const tc = p => (img.teamCol && img.teamCol[p]) || (p ? [60, 110, 200] : [200, 46, 40]);
-  const j747 = p => { const c = tintRed(img.jet747, tc(p)); return { r: c, l: flipCanvas(c) }; };
-  trafficArt = { cessna: CESSNA_COLS.map(cessna), jet: [j747(0), j747(1)], ship, key: teamKey };
+  trafficArt = wpLazy({ cessna: CESSNA_COLS.map(cessna), ship, key: teamKey }, 'jet', () => [0, 1].map(p => ({ r: tintRed(img.jet747, tc(p)) })));
 }
 // the planes, drawn with the world's other fliers; the cruise ship on the sea with the boats
 // (mode 'air': only what's not in the water - the land's redraw; 'under': only what's sinking or sunk - in a lake)
-// (user Oct 26) the Cessna's and the 747's sheets, laid out as the fighter's ("same placement and rules as the army
-// plane"): made ready as the fighter's art is (turn frames per damage row, the spin, the spin without one wing or both,
-// the wings) - the Cessna per livery (its navy and red recoloured, as before), the 747 per team (its red in the
-// country's colour, as before). k: world units a pixel; hurt: what a round does (a sixth: as the fighter; the 747 a tenth)
+// (user Oct 26) the Cessnas and the 747s are drawn as the fighter is ("same placement and rules as the army plane"): from the user's
+// render-layout sheets (sheetArt / rlPose - the 172 and the 747-8, Nov 3), the Cessna in its livery (its navy and red recoloured), the
+// 747 in its team's colour (its red). hurt: what a round does (a sixth: as the fighter; the 747 a tenth)
 const SHEET_PLANES = {
-  cessna: { I: {"CW": 112, "CH": 105, "k": 0.5, "rows": [[[98, 39], [97, 45], [107, 56], [110, 50]], [[98, 39], [94, 46], [107, 59], [107, 49]], [[98, 40], [95, 46], [106, 59], [109, 50]], [[85, 103], [83, 84], [98, 37], [85, 79], [76, 98]]]}, src: () => img.c172,   /* (drawn from the 172 sheet now - sheetArt / rlPose; I: the old sheet's layout, for its sizes) */ hurt: 1 / 6, turnT: () => CIVAIR.cessna.turnT, wing: 5 },
-  jet: { I: {"CW": 286, "CH": 254, "k": 0.655, "rows": [[[230, 81], [205, 106], [229, 156], [273, 93]], [[230, 80], [208, 107], [226, 155], [274, 104]], [[230, 81], [206, 110], [227, 147], [284, 118]], [[235, 251], [222, 212], [230, 89], [216, 214], [204, 252]]]}, src: () => img.b747, hurt: 1 / 10,   /* (drawn from the 747-8 sheet now - sheetArt / jetPose; I: the old sheet's layout, for its sizes) */ turnT: () => CIVAIR.jet.turnT, wing: 12 },
+  cessna: { hurt: 1 / 6, turnT: () => CIVAIR.cessna.turnT, wing: 5 },
+  jet: { hurt: 1 / 10, turnT: () => CIVAIR.jet.turnT, wing: 12 },
 };
-SHEET_PLANES.cessna.I.k = +(SHEET_PLANES.cessna.I.k * 0.9).toFixed(4);
-SHEET_PLANES.cessna.I.k *= REAL.cessna; SHEET_PLANES.jet.I.k *= REAL.jet;   // (real scale, Oct 29)   // (user Oct 26: the Cessna - and the seaplane, a Cessna on floats - 10% smaller)
-const CESSNA_SC = 0.9 * REAL.cessna, CESSNA_K = SHEET_PLANES.cessna.I.k;
-const sheetArts = {};
 function recolourCessna(src, [lower, tail], blue = 15) {   // (blue: how much bluer than red its paint is - the seaplane's 60, so its floats' dark undersides stay)
   const W = src.width, H = src.height, c = makeCanvas(W, H), x = c.getContext('2d');
   x.drawImage(src, 0, 0); const id = x.getImageData(0, 0, W, H), d = id.data;
@@ -55282,7 +55333,7 @@ function recolourCessna(src, [lower, tail], blue = 15) {   // (blue: how much bl
    frames, rolling upright and spinning down through its roll frames; its red paint in its team's colour (tintRed). 76.3 m, 206
    pixels. JET_SPOT: its lamps marked by eye on its side view (pixels from the pivot, nose left) - the fin's beacon, the near
    wing, the cockpit's glass (its glint - Nov 3 GPU check: it had the old sheet's, mid-body); win its windows - the pixel art
-   lost them, so they're put on (windowsArtAt): the main deck's row, the upper deck's behind the cockpit. */
+   lost them, so they're put on (windowsAt): the main deck's row, the upper deck's behind the cockpit. */
 const B747I = {"n": 8, "seqs": {"turn_front": {"y": 0, "w": 210, "h": 68}, "turn_tail": {"y": 68, "w": 210, "h": 68}, "roll_top": {"y": 136, "w": 208, "h": 190}, "roll_bottom": {"y": 326, "w": 208, "h": 190}, "roll_top_r": {"y": 516, "w": 208, "h": 190}, "roll_bottom_r": {"y": 706, "w": 208, "h": 190}}, "len": 206, "foot": 23};
 // gear: its legs as drawn (drawTraffic) in the sheet's pixels - the belly under the middle, each leg [along, its top over the belly],
 // every wheel's middle len under the belly, r its radius: so its tyres' bottom, (belly + len + r) under the middle, is what it
@@ -55301,47 +55352,21 @@ const JET_SPOT = { nav: [0, 9], tail: [95, -26], glint: [-88, 0], smoke: [95, -2
 const C172I = {"n": 8, "seqs": {"turn_front": {"y": 0, "w": 228, "h": 78, "hub": [[-77.0, -8.5, 1.0], [-69.5, -8.5, 6.7], [-47.5, -8.0, 12.1], [-16.0, -7.5, 15.1], [18.0, -7.0, 15.1], [48.5, -8.0, 12.1], [69.5, -8.5, 6.7], [77.0, -8.5, 1.0]]}, "turn_tail": {"y": 78, "w": 228, "h": 78, "hub": [[-77.0, -8.5, 1.0], [-73.0, -8.0, 6.7], [-55.0, -7.5, 12.1], [-25.5, -6.5, 15.1], [23.0, -11.0, 15.1], [53.5, -10.5, 12.1], [70.0, -8.0, 6.7], [77.0, -8.5, 1.0]]}, "roll_top": {"y": 156, "w": 178, "h": 220, "hub": [[-77.0, -8.5, 1.0], [-77.0, -6.5, 1.0], [-77.0, -4.0, 1.0], [-77.0, -1.0, 1.0], [-76.0, 1.5, 1.0], [-76.5, 2.5, 1.0], [-77.0, 1.5, 1.0], [-77.0, 0.0, 1.0]]}, "roll_bottom": {"y": 376, "w": 178, "h": 220, "hub": [[-77.0, -8.5, 1.0], [-76.5, -7.0, 1.0], [-76.5, -4.0, 1.0], [-77.0, -1.5, 1.0], [-77.0, 1.5, 1.0], [-77.0, 3.0, 1.0], [-77.0, 1.5, 1.0], [-77.0, 0.0, 1.0]]}, "roll_top_r": {"y": 596, "w": 178, "h": 220, "hub": [[77.0, -8.5, 1.0], [77.0, -7.0, 1.0], [76.5, -4.0, 1.0], [76.5, -1.5, 1.0], [77.0, 1.5, 1.0], [77.0, 3.0, 1.0], [77.0, 1.5, 1.0], [76.5, 0.0, 1.0]]}, "roll_bottom_r": {"y": 816, "w": 178, "h": 220, "hub": [[77.0, -8.5, 1.0], [77.0, -6.5, 1.0], [76.5, -4.0, 1.0], [77.0, -1.0, 1.0], [77.0, 1.5, 1.0], [77.0, 2.5, 1.0], [77.0, 1.5, 1.0], [77.0, 0.0, 1.0]]}, "turn_front_nb": {"y": 1036, "w": 228, "h": 78, "hub": [[-77.0, -8.5, 1.0], [-69.5, -8.5, 6.7], [-47.5, -8.0, 12.1], [-16.0, -7.5, 15.1], [18.0, -7.0, 15.1], [48.5, -8.0, 12.1], [69.5, -8.5, 6.7], [77.0, -8.5, 1.0]]}, "turn_tail_nb": {"y": 1114, "w": 228, "h": 78, "hub": [[-77.0, -8.5, 1.0], [-73.0, -8.0, 6.7], [-55.0, -7.5, 12.1], [-25.5, -6.5, 15.1], [23.0, -11.0, 15.1], [53.5, -10.5, 12.1], [70.0, -8.0, 6.7], [77.0, -8.5, 1.0]]}, "roll_top_nb": {"y": 1192, "w": 178, "h": 220, "hub": [[-77.0, -8.5, 1.0], [-77.0, -6.5, 1.0], [-77.0, -4.0, 1.0], [-77.0, -1.0, 1.0], [-76.0, 1.5, 1.0], [-76.5, 2.5, 1.0], [-77.0, 1.5, 1.0], [-77.0, 0.0, 1.0]]}, "roll_bottom_nb": {"y": 1412, "w": 178, "h": 220, "hub": [[-77.0, -8.5, 1.0], [-76.5, -7.0, 1.0], [-76.5, -4.0, 1.0], [-77.0, -1.5, 1.0], [-77.0, 1.5, 1.0], [-77.0, 3.0, 1.0], [-77.0, 1.5, 1.0], [-77.0, 0.0, 1.0]]}, "roll_top_r_nb": {"y": 1632, "w": 178, "h": 220, "hub": [[77.0, -8.5, 1.0], [77.0, -7.0, 1.0], [76.5, -4.0, 1.0], [76.5, -1.5, 1.0], [77.0, 1.5, 1.0], [77.0, 3.0, 1.0], [77.0, 1.5, 1.0], [76.5, 0.0, 1.0]]}, "roll_bottom_r_nb": {"y": 1852, "w": 178, "h": 220, "hub": [[77.0, -8.5, 1.0], [77.0, -6.5, 1.0], [76.5, -4.0, 1.0], [77.0, -1.0, 1.0], [77.0, 1.5, 1.0], [77.0, 2.5, 1.0], [77.0, 1.5, 1.0], [77.0, 0.0, 1.0]]}}, "prop": 15.5, "propCol": [66, 71, 76], "propRim": [48, 52, 58], "len": 172, "foot": 26};
 const CES_KIND = { len: 8.6, seq: C172I, src: 'c172', wheels: true };
 const CES_SPOT = { nav: [-28, -14], tail: [82, -22], glint: [-38, -10], belly: 12, smoke: [80, -2] };
-// its windows lit at night (cabinLit): the 747's put on its side views, the Cessna's its see-through cabin (50-land-civlife.js)
-const trafficWin = (f, im, CP) => !CP || !CP.rl ? (f.kind === 'jet' ? windowsArtDots(im) : windowsArt(im)) : f.kind === 'jet' ? (CP.side0 ? windowsArtAt(im, JET_SPOT.win, CP.dir) : null) : windowsArtHoles(im);
 const rlK = K => K.len * UPM / K.seq.len;                                     // (world units a pixel of a render-layout kind)
-// the art for one plane: a Cessna by its livery, a 747 by its team (rebuilt when the flags change)
+// the art for one plane: a Cessna by its livery, a 747 by its team (its paint data - one sheet for all)
 function sheetArt(f) {
-  const S = SHEET_PLANES[f.kind];
-  if (f.kind === 'jet') { const t = f.owner === 1 ? 1 : 0, col = (img.teamCol && img.teamCol[t]) || (t ? [60, 110, 200] : [200, 46, 40]); return rlArt(JET_KIND, 'jet' + t, base => tintRed(base, col)); }
-  if (f.kind === 'cessna') { const k = (f.col || 0) % CESSNA_COLS.length; return rlArt(CES_KIND, 'c' + k, k ? base => recolourCessna(base, CESSNA_COLS[k], 20) : null); }
-  const t = f.owner === 1 ? 1 : 0, key = 'j' + t + '|' + teamKey, col = (img.teamCol && img.teamCol[t]) || (t ? [60, 110, 200] : [200, 46, 40]);
-  return sheetArts[key] || (sheetArts[key] = prepPlaneArt(tintRed(S.src(), col), S.I, true));
+  if (f.kind === 'jet') { const t = f.owner === 1 ? 1 : 0, col = (img.teamCol && img.teamCol[t]) || (t ? [60, 110, 200] : [200, 46, 40]); return rlArt(JET_KIND, 'jet' + t, { red: col }); }
+  const k = (f.col || 0) % CESSNA_COLS.length; return rlArt(CES_KIND, 'c' + k, k ? { lower: CESSNA_COLS[k][0], tail: CESSNA_COLS[k][1], blue: 20 } : null);
 }
-// which drawing a Cessna or a 747 shows now, which way, and its tilt (radians): the fighter's rules (planePose)
-function sheetPose(f) {
-  if (f.kind === 'jet' || f.kind === 'cessna') return rlPose(f);
-  const A = sheetArt(f), row = Math.min(2, f.hits || 0);
-  if (f.state === 'fall') {
-    const k = Math.floor(f.spinF || 0) % 8, seq = [0, 1, 2, 3, 4, 3, 2, 1], fi = seq[k], side = f.vx >= 0 ? 1 : -1;
-    let fr = A.plane[3][fi];
-    if (f.wings && A.noWing[fi]) fr = A.noWing[fi][f.wings];
-    return { im: fr[side], ang: Math.atan2(f.vy, Math.abs(f.vx) + 1) * side };
-  }
-  if (f.state === 'sink' || f.state === 'wreck') { const side = (f.vx || f.dir || 1) >= 0 ? 1 : -1; if (f.split) return { im: A.plane[2][0][side], ang: side * 0.08, split: true }; return { im: A.plane[3][2][side], ang: side * 0.44 }; }
-  // turning round: side, three-quarter, head on, three-quarter, side the other way (a driven one by its own turn; a
-  // scripted one through the turns of its route)
-  const T = f.state === 'free' && f.turn ? { u: clamp(f.turn.t / SHEET_PLANES[f.kind].turnT(), 0, 0.999), from: f.turn.from } : f.state === 'fly' && f.rt ? { u: clamp(f.rt.u, 0, 0.999), from: f.rt.from } : null;
-  if (T) {
-    const k = Math.floor(T.u * 5), side = k === 4 ? -T.from : T.from, fr = k === 0 || k === 4 ? A.plane[row][0] : A.plane[row][k];
-    return { im: fr[side], ang: k === 2 ? f.ang * 0.3 : f.ang, side0: k === 0 || k === 4, dir: side };
-  }
-  const side = (f.dir || 1) > 0 ? 1 : -1;
-  return { im: A.plane[row][0][side], ang: f.ang, side0: true, dir: side };
-}
-// a 747's or a Cessna's frame (the warplanes' rules - wpPose): { im, fr, k, ang, side0, dir, split, rl, foot } - rl: drawn from
-// the render layout (its rolls are frames, not a squash). Past 90 degrees of roll its frame is the other side's turned over (rot,
-// into ang). nb: its propeller turning (the bladeless frames and the disc) - flying, or rolling faster than taxiing; foot: how far
-// its painted wheels' bottom is under its middle (world units - a kind with its wheels in its pictures)
+// a 747's or a Cessna's frame (the warplanes' rules - wpPose): { im, fr, A, k, ang, side0, dir, split, wings, foot } - im its hit picture
+// (rlHit), fr its frame. Past 90 degrees of roll its frame is the other side's turned over (rot, into ang). nb: its propeller turning (the
+// bladeless frames and the disc) - flying, or rolling faster than taxiing; foot: how far its painted wheels' bottom is under its middle
+// (world units - a kind with its wheels in its pictures)
 const rlSpins = f => f.state === 'fly' || (f.state === 'free' && (!f.ground || Math.abs(f.spd || f.vx || 0) > PLANE_TAXI));
 function rlPose(f) {
   const A = sheetArt(f); if (!A) return null;
-  const n = A.seq.n - 1, k = A.k, nb = rlSpins(f), foot = rlFoot(A.K, k), Q = (fr, ang, o) => Object.assign({ im: fr[-1], fr, k, ang, rl: true, foot }, o);
-  if (f.state === 'fall') { const side = f.vx >= 0 ? 1 : -1, R = wpRoll(A, side, (f.spinF || 0) * 45), fr = f.wings && R.fr.nw ? R.fr.nw[f.wings] : R.fr; return Q(fr, Math.atan2(f.vy, Math.abs(f.vx) + 1) * side + R.rot * Math.PI / 180); }
+  const n = A.seq.n - 1, k = A.k, nb = rlSpins(f), foot = rlFoot(A.K, k), Q = (fr, ang, o) => Object.assign({ fr, A, k, ang, rl: true, foot, wings: 0, get im() { return rlHit(fr, this.wings); } }, o);
+  if (f.state === 'fall') { const side = f.vx >= 0 ? 1 : -1, R = wpRoll(A, side, (f.spinF || 0) * 45); return Q(R.fr, Math.atan2(f.vy, Math.abs(f.vx) + 1) * side + R.rot * Math.PI / 180, { wings: f.wings || 0 }); }
   if (f.state === 'sink' || f.state === 'wreck') { const side = (f.vx || f.dir || 1) >= 0 ? 1 : -1, fr = wpFrame(A, 'turn_front', side < 0 ? 0 : n); return f.split ? Q(fr, side * 0.08, { split: true }) : Q(fr, side * 0.44); }
   const T = f.state === 'free' && f.turn ? { u: clamp(f.turn.t / SHEET_PLANES[f.kind].turnT(), 0, 0.999), from: f.turn.from } : f.state === 'fly' && f.rt ? { u: clamp(f.rt.u, 0, 0.999), from: f.rt.from } : null;
   if (T) {
@@ -55352,31 +55377,18 @@ function rlPose(f) {
   if (f.roll) { const u = clamp(f.roll.t / FLY_ROLL_T, 0, 1), R = wpRoll(A, side, 180 * (f.roll.done ? 1 - u : u), nb); return Q(R.fr, f.ang + R.rot * Math.PI / 180, { side0: false, dir: side }); }
   return Q(wpFrame(A, 'turn_front', side < 0 ? 0 : n, false, nb), f.ang, { side0: true, dir: side });
 }
-// the picture a Cessna or a 747 is drawn with now and how: its sheet pose (sheetPose - null for the old blocky drawings), the
-// picture, world units a pixel, its tilt, and how far up from its middle it's drawn (driven: over its wheels). drawTraffic's
-// and trafficPose's both, so where it's hit is where it's seen
-// the body's top and bottom where a picture splits (its middle column, in its own pixels): a broken 747's torn end is darkened
-// over just that - never past the body (kept on the picture)
-function sheetMidSpan(im) {
-  if (im._mid) return im._mid;
-  const W = im.width, H = im.height, m = Math.round(W / 2), d = im.getContext('2d').getImageData(Math.max(0, m - 2), 0, 4, H).data;
-  let y0 = -1, y1 = -1;
-  for (let y = 0; y < H; y++) for (let i = 0; i < 4; i++) if (d[(y * 4 + i) * 4 + 3] > 40) { if (y0 < 0) y0 = y; y1 = y; }
-  return (im._mid = y0 < 0 ? [H / 2, H / 2] : [y0, y1 + 1]);
-}
+// the picture a Cessna or a 747 is drawn with now and how: its pose (rlPose), world units a pixel, its tilt, and how far up from its middle
+// it's drawn (driven: over its wheels). drawTraffic's and trafficPose's both, so where it's hit is where it's seen
 function trafficPic(f) {
-  const T = TRAFFIC[f.kind], CP = SHEET_PLANES[f.kind] ? sheetPose(f) : null;
-  if (!CP && !trafficArt) return null;
-  const A = CP ? null : f.kind === 'jet' ? trafficArt.jet[f.owner === 1 ? 1 : 0] : trafficArt.cessna[f.col || 0];
-  return { T, CP, im: CP ? CP.im : (f.dir || 1) > 0 ? A.r : A.l, k: CP ? CP.k || SHEET_PLANES[f.kind].I.k : T.k, ang: CP ? CP.ang : f.ang,
-    lift: f.state === 'free' ? (CP && CP.foot != null ? CP.foot : T.gy || PLANE_WHEELS) - PLANE_WHEELS : 0 };   // (a kind with its wheels in its pictures stands on them: foot)
+  const T = TRAFFIC[f.kind], CP = rlPose(f); if (!CP) return null;
+  return { T, CP, k: CP.k, ang: CP.ang, lift: f.state === 'free' ? (CP.foot != null ? CP.foot : T.gy || PLANE_WHEELS) - PLANE_WHEELS : 0 };   // (a kind with its wheels in its pictures stands on them: foot)
 }
 // where that picture is, for the hit test (vehHitBy): drawn about its middle, up by its lift, on its springs, turned (and on a
 // magnet with the magnet's turn). Only flying - on its timetable or yours - can it be hit
 function trafficPose(f) {
   if (f.state !== 'fly' && f.state !== 'free') return null;
   const Q = trafficPic(f); if (!Q) return null;
-  return { P: Q.im, k: Q.k, cx: f.x, cy: f.y - Q.lift + (f.susY || 0), a: heldAng(f, Q.ang), flip: false };
+  return { P: Q.CP.im, k: Q.k, cx: f.x, cy: f.y - Q.lift + (f.susY || 0), a: heldAng(f, Q.ang), flip: false, g: Q.CP.fr.g };
 }
 // how hurt it is, 0 whole to 1 down, for its charring: its hits counted as sheetHurt counts them (two it flies on, smoking; the
 // third brings it down) and the part of the next its rounds have done; going down, sinking or a wreck, 1
@@ -55384,39 +55396,50 @@ function trafficDmg(f) {
   if (f.state === 'fall' || f.state === 'sink' || f.state === 'wreck') return 1;
   return clamp(((f.hits || 0) + (f.dmg || 0)) / 3, 0, 1);
 }
+// its windows lit at night (cabinLit): the 747's put on its side views (windowsAt - its pixel art lost them), the Cessna's its see-through
+// cabin (windowsHoles) - each frame's worked out once from its pixels (rlWin, 29-zzz-warplanes.js)
+const trafficWin = (f, CP) => f.kind === 'jet' ? (CP.side0 ? rlWin(CP.fr, CP.dir > 0 ? '_winR' : '_winL', (d, W, H) => windowsAt(d, W, H, JET_SPOT.win, CP.dir)) : null) : rlWin(CP.fr, '_winH', windowsHoles);
+// the body's top and bottom where a 747 splits (its middle column, in its frame's texels): its torn end darkened over just that - never
+// past the body (kept on the frame)
+function sheetMidSpan(fr) {
+  if (fr._mid) return fr._mid;
+  const W = fr.w, H = fr.h, m = Math.round(W / 2), d = rlPx(fr);
+  let y0 = -1, y1 = -1;
+  for (let y = 0; y < H; y++) for (let i = Math.max(0, m - 2); i < Math.min(W, m + 2); i++) if (d[(y * W + i) * 4 + 3] > 40) { if (y0 < 0) y0 = y; y1 = y; }
+  return (fr._mid = y0 < 0 ? [H / 2, H / 2] : [y0, y1 + 1]);
+}
+const TR_TORN = [26 / 255, 22 / 255, 22 / 255];
+/* (engine part 5) drawn by the things' pass from its sheet in the art atlas (rlQuad, 29-zzz-warplanes.js): its frame in its livery or its team's
+   paint, charred by its hits with its blows' marks in its mask, the hour's light; a broken 747's halves (parts of its frame), a Cessna's body on
+   its springs over its wheels (its frame in two bands), its painted wheels taken out (boxes) where the wheel set stands in; its windows lit as
+   blocks of their colour; the gear, the wheels and the glints by the old code, between */
 function drawTraffic(x0, x1, mode) {
   if (!LAND || !traffic.length) return;
-  if (!trafficArt || trafficArt.key !== teamKey) buildTrafficArt();   // (the flags changed: the 747s' colours too)
+  const own = thingsOwn();
   for (const f of bySize(traffic)) {   // (smaller in front - 50-zz-size-order.js)
     if (f.state === 'parked' || f.crash) continue;   // (down on land: its broken wreck is drawn with the ground - drawCrashes)
     const wet = f.state === 'sink' || f.state === 'wreck';
     if ((mode === 'air' && wet) || (mode === 'under' && !wet)) continue;
     const Q = trafficPic(f); if (!Q) continue;
-    { const r = Math.max(Q.im.width, Q.im.height) * Q.k / 2 + 40; if (f.x < x0 - r || f.x > x1 + r) continue; }   // (culled by its own picture's size, never a fixed margin: the 747 is ~490 units long and was cut at the screen's middle - the two half views, rules.md; user Nov 4)
-    const T = Q.T, CP = Q.CP, im = Q.im, s = Q.k * SV, w = Math.round(im.width * s), h = Math.round(im.height * s);
-    // (its lamps: a red beacon, white strobes - the 747s brighter; and its gear, the big one's)
-    // (driven, it runs on the warplane's ground rules, its middle PLANE_WHEELS over the concrete: drawn up by the rest of
-    // its own height over its wheels, so the 747 stands on the runway, not in it - user Oct 26)
-    const lift = Q.lift;
-    // (its lamps: on the user's Oct 26 drawings the tail's top - the Cessna's 22 back and 9.5 up from its middle, the
-    // 747's 60 back and 23 up - and the near wing; turned with the drawing about its own middle, as it's drawn, and only
-    // in the side views: user Oct 26, "the red light is wrong when the plane tilts... same issue when diving")
-    if ((f.state === 'fly' || f.state === 'free') && (!CP || CP.side0) && !(hangarIn(f.x) > 0)) {
+    const CP = Q.CP, fr = CP.fr;
+    { const r = Math.max(fr.w, fr.h) * Q.k / 2 + 40; if (f.x < x0 - r || f.x > x1 + r) continue; }   // (culled by its own picture's size, never a fixed margin: the 747 is ~490 units long and was cut at the screen's middle - the two half views, rules.md; user Nov 4)
+    const s = Q.k * SV, w = thgW(fr, s), h = thgH(fr, s), lift = Q.lift, sus = f.susY || 0;
+    // (its lamps: on the user's drawings the tail's top and the near wing; turned with the drawing about its own middle, as it's drawn, and
+    // only in the side views: user Oct 26, "the red light is wrong when the plane tilts... same issue when diving")
+    if ((f.state === 'fly' || f.state === 'free') && CP.side0 && !(hangarIn(f.x) > 0)) {
       const jet = f.kind === 'jet', LS = jet ? JET_SPOT : CES_SPOT;   // (its lamps marked on its side view)
-      planeLights(f.x, f.y - lift + (f.susY || 0), CP ? CP.dir : f.dir || 1,   // (the way the drawing faces: at a turn's end it's already round - user Oct 26, the lamp went missing)
-        -LS.nav[0] * Q.k, LS.tail[0] * Q.k, -LS.tail[1] * Q.k, jet, f.col || 0, CP ? CP.ang : f.ang, LS.nav[1] * Q.k);   // (real scale: the lamps where the drawing's are - the 747's marked on its side view, JET_SPOT)
+      planeLights(f.x, f.y - lift + sus, CP.dir, -LS.nav[0] * Q.k, LS.tail[0] * Q.k, -LS.tail[1] * Q.k, jet, f.col || 0, CP.ang, LS.nav[1] * Q.k);   // (the way the drawing faces: at a turn's end it's already round - user Oct 26)
     }
-    const hc = hangarClip(f.x, f.y, im.width * Q.k / 2);   // (in through its hangar's door: hidden past it)
-    C.save(); C.translate(PX(f.x), PY(f.y - lift + (f.susY || 0))); C.rotate(heldAng(f, CP ? CP.ang : f.ang)); if (!(CP && CP.rl)) C.scale(1, flyRollK(f));   // (on a magnet: turned with it; rolling upright: closing to its edge and open again - 29-zz-flight.js)
+    thingsGL();                                                    // (the planes before it drawn - its hangar's door clips only it)
+    const hc = hangarClip(f.x, f.y, fr.w * Q.k / 2);               // (in through its hangar's door: hidden past it)
+    C.save(); C.translate(PX(f.x), PY(f.y - lift + sus)); C.rotate(heldAng(f, CP.ang));   // (on a magnet: turned with it)
     if (f.kind === 'jet' && (f.gear || 0) > 0.03 && !wet) {   // (sinking or a wreck: no gear - user Nov 3 17:11, its legs drawn as black lines off the broken halves)
-      const g = f.gear, d0 = f.dir || 1;
-      const JG = JET_KIND.gear, B0 = CP ? (CP.rl ? JG.belly : 31) : 14, GS = CP && CP.rl ? 206 / 229 : 1;   // (the belly under the middle: the 747-8 sheet's (Nov 3), the Oct 26 sheet's, or the old drawing's; GS: the new sheet's length against the old's)
-      // (user Oct 26, with a picture - gen/open/ref/jet747_gear_oct26.png: the nose gear just behind the nose, the main gear
-      // under the wing and just behind it; every wheel on the same line under the belly)
-      // (in the sheet's pixels: the drawing 229 long, its nose 114 ahead of the middle, the belly 31 under it)
-      // (on its springs the body bobs and the wheels stay down: the legs shortened by susY - world units, so over Q.k in the sheet's)
+      const g = f.gear, d0 = f.dir || 1, JG = JET_KIND.gear, B0 = JG.belly, GS = 206 / 229;   // (GS: the 747-8 sheet's length against the Oct 26 drawing's, its legs' places)
+      // (user Oct 26, with a picture - gen/open/ref/jet747_gear_oct26.png: the nose gear just behind the nose, the main gear under the wing
+      // and just behind it; every wheel on the same line under the belly; on its springs the body bobs and the wheels stay down: the legs
+      // shortened by susY - world units, so over Q.k in the sheet's)
       for (const [dx, top] of JG.legs) {
-        const L = JG.len - top, X = Math.round(d0 * dx * GS * s), y0 = Math.round((B0 + top) * s), y1 = Math.round((B0 + top + (L - (f.susY || 0) / Q.k) * g) * s), r = Math.max(1, Math.round(JG.r * s * g));
+        const L = JG.len - top, X = Math.round(d0 * dx * GS * s), y0 = Math.round((B0 + top) * s), y1 = Math.round((B0 + top + (L - sus / Q.k) * g) * s), r = Math.max(1, Math.round(JG.r * s * g));
         C.fillStyle = '#505258'; C.fillRect(X - Math.round(1.2 * s), y0, Math.max(1, Math.round(2.4 * s)), y1 - y0);
         // (user Nov 2: the one wheel set for every vehicle - 50-zz-wheels.js) turned as far as it has rolled
         const rw = JG.r * g * s / SV;                                 // (its radius, world units)
@@ -55424,50 +55447,50 @@ function drawTraffic(x0, x1, mode) {
         if (!ok) { C.fillStyle = '#1c1c20'; C.fillRect(X - r, y1 - r, r * 2, r * 2); }
       }
     }
-    // (user Nov 2: the one wheel set for every vehicle, planes too) a Cessna seen side on with its wheels down: its painted wheels
-    // cut out of the picture and the set's drawn in their place, turned as it rolls (planeWheelParts, 50-zz-wheels.js)
-    const WP = f.kind === 'cessna' && CP && CP.side0 && (f.gear == null || f.gear > 0.5) && f.state !== 'sink' && f.state !== 'wreck' ? planeWheelParts(im) : null;
-    // (its damage, the one rule - dmgPic, 50-zz-damage.js: charred over its damage row's drawing as its hits mount; going down,
-    // sunk or a wreck, all of it)
-    const SI = scaled(dmgPic(WP ? WP.body : im, trafficDmg(f), { m: Q.k / UPM, marks: f.marks, ax: CP && CP.fr && CP.fr.g ? CP.fr.g.ax : 1, ay: CP && CP.fr && CP.fr.g ? CP.fr.g.ay : 1 }), s, true), sus = f.susY || 0;
-    if (CP && CP.split) {
-      // (user Oct 26: "A Jumbo Jet, because it's so wide, when it crashes on water it should split into 2 parts like a ship
-      // as it sinks") two halves turned apart about the break at the wing root, a gap opening, the torn ends dark
-      const bd = f.bend || 0, gap = Math.round(bd * 14 * REAL.jet * SV);
-      // (user Nov 3 17:11: "errors on the plane damaged sprite (those black lines)" - the torn end was a dark bar across the whole
-      // picture's frame, sticking out over and under the body as thin black lines. Each half is its own picture now, the torn end
-      // darkened on the plane's own pixels only - sheetHalves)
-      const B = sheetMidSpan(im), ty0 = Math.round(B[0] * h / im.height - h / 2), ty1 = Math.round(B[1] * h / im.height - h / 2);
+    const M = thgCur();
+    // (user Nov 2: the one wheel set for every vehicle, planes too) a Cessna seen side on with its wheels down: its painted wheels taken out
+    // of its frame and the set's drawn in their place, turned as it rolls (planeWheelParts, 50-zz-wheels.js)
+    const WP = f.kind === 'cessna' && CP.side0 && (f.gear == null || f.gear > 0.5) && !wet ? planeWheelParts(fr) : null;
+    // (its damage, the one rule - 50-zz-damage.js: charred as its hits mount; going down, sunk or a wreck, all of it - its marks in its mask)
+    const L = thingsLit(PX(f.x), civNightK()), lit = L[0] + L[1] + L[2] + L[3] > 0;
+    const o = { cov: dmgLook(fr, trafficDmg(f))[0], mk: dmgMask(f, fr, Q.k / UPM, rlMarkAx(fr), fr.g.ay), wings: CP.wings, cuts: WP ? WP.cuts : null, lit: WP ? null : L };
+    if (CP.split) {
+      // (user Oct 26: "A Jumbo Jet, because it's so wide, when it crashes on water it should split into 2 parts like a ship as it sinks")
+      // two halves turned apart about the break at the wing root, a gap opening, the torn ends dark (on the body only - sheetMidSpan)
+      const bd = f.bend || 0, gap = Math.round(bd * 14 * REAL.jet * SV), hw = fr.w / 2, B = sheetMidSpan(fr), ty0 = Math.round(B[0] * h / fr.h - h / 2), ty1 = Math.round(B[1] * h / fr.h - h / 2);
       for (const side of [-1, 1]) {
-        C.save(); C.translate(side * gap, 0); C.rotate(-side * bd);
-        C.beginPath(); C.rect(side < 0 ? -Math.round(w / 2) - 2 : 0, -Math.round(h / 2) - 2, Math.round(w / 2) + 2, h + 4); C.clip();
-        C.drawImage(SI, -Math.round(w / 2), -Math.round(h / 2));
-        C.fillStyle = 'rgba(26,22,22,0.9)'; C.fillRect(side < 0 ? -Math.round(2 * SV) : 0, ty0, Math.round(2 * SV), Math.max(1, ty1 - ty0));
-        C.restore();
+        const Mh = thgRotate(thgTranslate(M.slice(), side * gap, 0), -side * bd);
+        rlQuad(Mh, CP.A, fr, s, Object.assign({}, o, { part: side < 0 ? [0, 0, hw, fr.h] : [hw, 0, fr.w, fr.h] }));
+        thingsQuad(Mh, side < 0 ? -Math.round(2 * SV) : 0, ty0, Math.round(2 * SV), Math.max(1, ty1 - ty0), null, THG_SOLID, TR_TORN, 0, null, 0, 0, null, null, 0.9);
       }
-    } else if (f.kind === 'cessna' && CP && CP.side0 && (f.gear || 0) > 0.5 && Math.abs(sus) > 0.05) {
-      // (on its wheels, its body riding its springs: the picture split at its belly - 6 under its middle - the wheels
-      // kept on the ground, the body above them sinking and bouncing)
-      const by = Math.round(SI.height / 2 + CES_SPOT.belly * s), dy = Math.round(sus * SV);
-      C.drawImage(SI, 0, 0, SI.width, by, -Math.round(w / 2), -Math.round(h / 2), SI.width, by);
-      C.drawImage(SI, 0, by, SI.width, SI.height - by, -Math.round(w / 2), -Math.round(h / 2) + by - dy, SI.width, SI.height - by);
-    } else C.drawImage(SI, -Math.round(w / 2), -Math.round(h / 2));
+    } else if (f.kind === 'cessna' && CP.side0 && (f.gear || 0) > 0.5 && Math.abs(sus) > 0.05) {
+      // (on its wheels, its body riding its springs: the frame split at its belly - the wheels kept on the ground, the body above them
+      // sinking and bouncing)
+      const by = Math.round(fr.h / 2 + CES_SPOT.belly), dy = Math.round(sus * SV);
+      rlQuad(M, CP.A, fr, s, Object.assign({}, o, { part: [0, 0, fr.w, by] }));
+      rlQuad(M, CP.A, fr, s, Object.assign({}, o, { part: [0, by, fr.w, fr.h], dy: -dy }));
+    } else rlQuad(M, CP.A, fr, s, o);
     if (WP) {
-      const dyW = f.kind === 'cessna' && (f.gear || 0) > 0.5 && Math.abs(sus) > 0.05 ? -Math.round(sus * SV) : 0, onG = Math.abs(f.vy || 0) < 1;
-      for (const [wx, wy, wr] of WP.wheels) { const rw = wr * s / SV; C.save(); C.translate(-Math.round(w / 2) + wx * s, -Math.round(h / 2) + wy * s + dyW); drawWheel(wr * s, rw / UPM, f.x / Math.max(rw, 0.1), onG ? Math.abs(f.vx || 0) / Math.max(rw, 0.1) : 0); C.restore(); }
+      thingsGL();
+      const X = -Math.round(w / 2), Y = -Math.round(h / 2), dyW = (f.gear || 0) > 0.5 && Math.abs(sus) > 0.05 ? -Math.round(sus * SV) : 0, onG = Math.abs(f.vy || 0) < 1;
+      for (const [wx, wy, wr] of WP.wheels) { const rw = wr * s / SV; C.save(); C.translate(X + wx * s, Y + wy * s + dyW); drawWheel(wr * s, rw / UPM, f.x / Math.max(rw, 0.1), onG ? Math.abs(f.vx || 0) / Math.max(rw, 0.1) : 0); C.restore(); }
+      if (lit) rlQuad(thgCur(), CP.A, fr, s, { kind: THG_LIGHT, lit: L, wings: CP.wings });   // (its night shape and rims over its wheels too - its frame's whole shape)
     }
-    civLitLook(im, s, -Math.round(w / 2), -Math.round(h / 2), PX(f.x));          // (its night shape, moon and sun rims)
     // (user Oct 26: "The big jumbo jet windows should glow at night") its rows of windows lit, over the night's tint
-    if (f.kind === 'jet' && !hc && f.state !== 'sink' && f.state !== 'wreck') { const L = cabinLit(), Wn = L > 0.05 ? trafficWin(f, im, CP) : null;
-      if (Wn) { const Ws = scaled(Wn, s, true), X = PX(f.x), Y = PY(f.y - lift + (f.susY || 0)), ang = CP ? CP.ang : f.ang; lateLit[viewIdx].push(() => { C.save(); C.translate(X, Y); C.rotate(ang); C.globalAlpha = L; C.drawImage(Ws, -Math.round(w / 2), -Math.round(h / 2)); C.restore(); }); } }
-    // (its glass catching the sun: the windscreen marked on its side view - Nov 3 GPU check, it was the old sheet's spot, on the
-    // Cessna's cowling and mid-way along the 747; only on its side views, where that spot is)
-    if ((f.state === 'fly' || f.state === 'free') && (!CP || CP.side0)) { const G = (f.kind === 'jet' ? JET_SPOT : CES_SPOT).glint, d = CP ? CP.dir : f.dir || 1; civGlint(-d * G[0] * s, G[1] * s, f.x * 0.004 + f.ang * 5 + (f.col || 0) * 2, f.kind === 'jet'); }
-    { const L = cabinLit(), Wn = L > 0.05 && f.kind !== 'jet' && f.state !== 'wreck' && f.state !== 'sink' ? trafficWin(f, im, CP) : null; if (Wn) { C.globalAlpha = L; C.drawImage(scaled(Wn, s, true), -Math.round(w / 2), -Math.round(h / 2)); C.globalAlpha = 1; } }   // (the cabins lit at night)
-    C.restore();
+    if (f.kind === 'jet' && !hc && !wet) { const Lc = cabinLit(), Wn = Lc > 0.05 ? trafficWin(f, CP) : null;
+      if (Wn) { const X = PX(f.x), Y = PY(f.y - lift + sus), ang = CP.ang; lateLit[viewIdx].push(() => { const ow = thingsOwn(); thingsQuadsAt(X, Y, ang, fr, s, Wn, Lc); if (ow) thingsEnd(); }); } }
+    { const Lc = cabinLit(), Wn = Lc > 0.05 && f.kind !== 'jet' && !wet ? trafficWin(f, CP) : null; if (Wn) rlWinQuads(thgCur(), fr, s, Wn, Lc); }   // (the cabins lit at night)
+    // (its glass catching the sun: the windscreen marked on its side view - only on its side views, where that spot is)
+    if ((f.state === 'fly' || f.state === 'free') && CP.side0) { thingsGL(); const G = (f.kind === 'jet' ? JET_SPOT : CES_SPOT).glint; civGlint(-CP.dir * G[0] * s, G[1] * s, f.x * 0.004 + f.ang * 5 + (f.col || 0) * 2, f.kind === 'jet'); }
+    thingsGL(); C.restore();
     if (hc) C.restore();
   }
+  if (own) thingsEnd();
 }
+// a frame's windows at a screen point, turned (a 747's, after the night's tint - lateLit)
+function thingsQuadsAt(X, Y, ang, fr, s, runs, alpha) { rlWinQuads(thgRotate(thgTranslate(thgCur(), X, Y), ang), fr, s, runs, alpha); }
+// each side's sheet in the art atlas as soon as one of its planes is in the world (the frame's 'art' layer)
+artFamily(() => { if (LAND) for (const f of traffic) rlSheetPut(f.kind === 'jet' ? JET_KIND : CES_KIND); return false; });
 
 /* ---- the harbour towers are lighthouses too (user Oct 25): a lamp under the gun, its beam sweeping round at night.
    The left one a Mediterranean lighthouse, the right one a fort like Alexandria's: a blocky wall round its foot ---- */
@@ -64795,12 +64818,14 @@ window.__market = { lines: id => { const o = strsUsed().find(q => q.id === id); 
    reading of its pose its hits use - poseHitAt / vehHitAt). Ships and submarines char their own way where shells burst (their
    scorch) and take the holes here. Kept with the thing (a table field: saved and sent), the newest DMG_MARKS. ---- */
 const DMG_STEPS = 4, DMG_MARKS = 64;
-// (a pose's picture point for a world point: metres from its middle, as poseHitAt reads it)
+// (a pose's picture point for a world point: metres from its middle, as poseHitAt reads it - a frame of a render-layout sheet (Q.g, its
+// view's squeeze): on its side view, nose left, as the warplanes' wpLocal - the mark stays where it landed as the plane turns)
 function dmgPoseAt(Q, x, y) {
   if (!Q || !Q.P) return null;
   const c = Math.cos(Q.a || 0), s = Math.sin(Q.a || 0), dx = x - Q.cx, dy = y - Q.cy;
   let u = dx * c + dy * s; const q = -dx * s + dy * c; if (Q.flip) u = -u;
-  return [u / UPM, q / UPM];
+  const g = Q.g || { ax: 1, ay: 1 };
+  return [u / g.ax / UPM, q / g.ay / UPM];
 }
 // (a boat's or a car's standing picture, as vehHitAt reads it: its art faces left, mirrored going right)
 function dmgVehAt(v, x, y) {
@@ -65060,11 +65085,12 @@ function poseHitAt(o, x, y, pad = VEH_HIT_PAD * UPM) {
   let u = dx * c + dy * s; const q = -dx * s + dy * c; if (o.flip) u = -u;
   const P = o.P, PW = P.width, PH = P.height, px = Math.round(u / o.k + PW / 2), py = Math.round(q / o.k + PH / 2), r = Math.max(1, Math.round(pad / o.k));
   if (px < -r || py < -r || px >= PW + r || py >= PH + r) return false;
-  if (!P.getContext && !(P instanceof HTMLImageElement)) return true;   // (no pixels to look at: its box)
-  const A = civAlphaOf(P);
+  const A8 = P._a8;                                                     // (a frame's own alpha, as drawn - rlHit, 29-zzz-warplanes.js)
+  if (!A8 && !P.getContext && !(P instanceof HTMLImageElement)) return true;   // (no pixels to look at: its box)
+  const A = A8 ? null : civAlphaOf(P);
   for (const [ox, oy] of [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]]) {
     const X = px + ox, Y = py + oy; if (X < 0 || Y < 0 || X >= PW || Y >= PH) continue;
-    if (A[(Y * PW + X) * 4 + 3] > 0) return true;
+    if (A8 ? A8[Y * PW + X] > 0 : A[(Y * PW + X) * 4 + 3] > 0) return true;
   }
   return false;
 }
@@ -68740,13 +68766,12 @@ function drawWheel(R, rm, ang, spin, fx, off) {
   C.restore();
   return true;
 }
-// a plane's picture whose wheels are painted in (the Cessna's frames): its wheels found once - the small round dark blobs in its
-// lowest third - each [x, y, r] in its pixels, and the picture with them cut out (a pixel beyond their edge), for drawWheel to
-// stand in. Works on any frame, mirrored or recoloured: it reads the frame itself
-function planeWheelParts(P) {
-  if (P._pw !== undefined) return P._pw;
-  if (!P.getContext) return (P._pw = null);
-  const w = P.width, h = P.height, g0 = P.getContext('2d'), id = g0.getImageData(0, 0, w, h), d = id.data, dk = new Uint8Array(w * h), seen = new Uint8Array(w * h), wheels = [];
+// a plane's frame whose wheels are painted in (the Cessna's - a rectangle of its sheet, 29-zzz-warplanes.js): its wheels found once - the
+// small round dark blobs in its lowest third - each [x, y, r] in its pixels as drawn, and the round boxes that take them out of it (a pixel
+// beyond their edge - the frame's own texels, the things' shader's cuts), for drawWheel to stand in. Works on any frame: it reads the frame
+function planeWheelParts(fr) {
+  if (fr._pw !== undefined) return fr._pw;
+  const w = fr.w, h = fr.h, d = rlPx(fr), dk = new Uint8Array(w * h), seen = new Uint8Array(w * h), wheels = [];
   for (let y = Math.floor(h * 0.5); y < h; y++) for (let x = 0; x < w; x++) { const o = (y * w + x) * 4; const mx = Math.max(d[o], d[o + 1], d[o + 2]), mn = Math.min(d[o], d[o + 1], d[o + 2]); dk[y * w + x] = d[o + 3] > 150 && (d[o] + d[o + 1] + d[o + 2]) / 3 < 45 && mx - mn < 30 ? 1 : 0; }   // (a tyre's near-black grey - not a dark paint's navy)
   for (let s = 0; s < w * h; s++) {
     if (!dk[s] || seen[s]) continue;
@@ -68755,12 +68780,8 @@ function planeWheelParts(P) {
     const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
     if (bw >= 3 && bh >= 3 && bw <= w * 0.12 && Math.abs(bw - bh) <= 2 && n >= 0.45 * bw * bh) wheels.push([(x0 + x1 + 1) / 2, (y0 + y1 + 1) / 2, Math.max(bw, bh) / 2]);
   }
-  if (!wheels.length) return (P._pw = null);
-  const body = makeCanvas(w, h), bx = body.getContext('2d'); bx.drawImage(P, 0, 0);
-  const bd = bx.getImageData(0, 0, w, h), B = bd.data;
-  for (const [cx, cy, r] of wheels) for (let y = Math.floor(cy - r - 1); y <= cy + r + 1; y++) for (let x = Math.floor(cx - r - 1); x <= cx + r + 1; x++) if (x >= 0 && y >= 0 && x < w && y < h && Math.hypot(x + 0.5 - cx, y + 0.5 - cy) <= r + 0.6) B[(y * w + x) * 4 + 3] = 0;
-  bx.putImageData(bd, 0, 0);
-  return (P._pw = { body, wheels });
+  if (!wheels.length) return (fr._pw = null);
+  return (fr._pw = { wheels: wheels.map(([x, y, r]) => [fr.mx ? w - x : x, y, r]), cuts: wheels.map(([x, y, r]) => [x, y, -1, r + 0.6]) });
 }
 
 /* ================================================================
