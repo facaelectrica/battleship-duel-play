@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Far Away — World Plan</title>
+<style id="css">
+:root{--bg:#4b4b4b;--ink:#f1e7c8;--ocean:#e9b52c;--ui:#2f2f2f;--ui2:#3a3a3a;--line:#5c5c5c;--hi:#fff}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);font:15px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;overflow:hidden;overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+#app{position:fixed;inset:0;display:flex;flex-direction:column;height:100dvh}
+#bar{display:flex;gap:6px;align-items:center;padding:8px;padding-top:max(8px,env(safe-area-inset-top));background:var(--ui);overflow-x:auto;flex:none;scrollbar-width:none}
+#bar::-webkit-scrollbar{display:none}
+button{font:inherit;color:var(--ink);background:var(--ui2);border:1px solid var(--line);border-radius:10px;min-height:44px;padding:0 14px;white-space:nowrap;cursor:pointer;touch-action:manipulation}
+button:active{background:#555}
+button.on{background:var(--ink);color:#222;border-color:var(--ink)}
+button.save.dirty{background:var(--ocean);color:#222;border-color:var(--ocean)}
+button:disabled{opacity:.35}
+#title{font-size:18px;color:var(--ocean);padding:0 6px;white-space:nowrap}
+.sp{flex:1}
+#main{position:relative;flex:1;min-height:0;display:flex}
+#stage{position:relative;flex:1;min-width:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
+#hint{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);opacity:.6;text-align:center;pointer-events:none;font-size:18px}
+#panel{width:320px;flex:none;background:var(--ui);border-left:1px solid var(--line);overflow-y:auto;padding:12px;-webkit-user-select:text;user-select:text;display:none}
+#panel.open{display:block}
+#panel h3{margin:4px 0 10px;font-size:15px;letter-spacing:.05em}
+label{display:block;font-size:12px;opacity:.75;margin:10px 0 4px}
+input,select,textarea{font:inherit;font-size:16px;width:100%;color:var(--ink);background:#222;border:1px solid var(--line);border-radius:8px;padding:9px 10px;min-height:44px}
+textarea{min-height:80px;resize:vertical}
+.row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.row button{flex:1}
+.links div{padding:10px;border:1px solid var(--line);border-radius:8px;margin-top:6px;cursor:pointer}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{min-height:40px;padding:0 10px}
+#help{flex:none;font-size:12px;opacity:.7;padding:6px 10px;padding-bottom:max(6px,env(safe-area-inset-bottom));background:var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#pop,#modal{position:absolute;display:none;z-index:5}
+#pop{background:var(--ui);border:1px solid var(--line);border-radius:12px;padding:10px;width:300px;max-height:70%;overflow-y:auto;box-shadow:0 8px 30px #0008}
+#pop .cat{font-size:12px;opacity:.75;margin:10px 0 4px}
+#pop .chips button{min-height:38px}
+#edit{position:absolute;display:none;z-index:6;width:220px;text-align:center}
+#modal{position:fixed;inset:0;background:#000a;align-items:center;justify-content:center}
+#modal .box{background:var(--ui);border:1px solid var(--line);border-radius:14px;padding:16px;width:min(560px,92vw);max-height:86vh;overflow:auto}
+#modal textarea{min-height:240px;font:12px/1.4 ui-monospace,Menlo,monospace;-webkit-user-select:text;user-select:text}
+#toast{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);background:#222;border:1px solid var(--line);padding:10px 16px;border-radius:10px;display:none;z-index:9}
+@media (max-width:760px){#main{flex-direction:column}#panel{width:auto;max-height:45%;border-left:0;border-top:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<script id="planSrc">
+'use strict';
+const SHELL=`<div id="app">
+  <div id="bar">
+    <span id="title">FAR AWAY</span>
+    <button id="bAdd" title="Add a place, structure, vehicle…">+ ADD</button>
+    <button id="bMore" title="Tap items to pick several; drag empty space to box-pick">PICK MORE</button>
+    <button id="bUndo" title="Undo">UNDO</button>
+    <button id="bRedo" title="Redo">REDO</button>
+    <button id="bFit" title="Zoom to fit the whole world">FIT</button>
+    <button id="bLabels" class="on" title="Show or hide connection labels">LABELS</button>
+    <button id="bShow" title="Show or hide categories">SHOW</button>
+    <span class="sp"></span>
+    <button id="bFile" title="Export, import or start over">FILE</button>
+    <button id="bSave" class="save" title="Save the world into this page">SAVE CHANGES</button>
+  </div>
+  <div id="main">
+    <div id="stage">
+      <canvas id="cv"></canvas>
+      <div id="hint">Double-tap to add something</div>
+      <div id="pop"></div>
+      <input id="edit" autocomplete="off" autocapitalize="words">
+    </div>
+    <div id="panel"></div>
+  </div>
+  <div id="help">Double-tap: add / rename · Drag the ● dot onto another item: connect · Drag empty: move view · Pinch: zoom</div>
+</div>
+<div id="modal"><div class="box"></div></div>
+<div id="toast"></div>`;
+document.body.insertAdjacentHTML('afterbegin',SHELL);
+/* ---------- definitions ---------- */
+/* KIND decides how a thing behaves (land, town, stands on land…); CATEGORY and TYPE are the world's own lists, grown from the dropdowns */
+const CATS={
+  region:{name:'Region (land)',color:'#e9b52c'},
+  place:{name:'Place (town)',color:'#ffd27a'},
+  structure:{name:'Structure',color:'#efe0b0'},
+  vehicle:{name:'Vehicle',color:'#7d9bff'},
+  nature:{name:'Nature',color:'#7fd99a'},
+  other:{name:'Other',color:'#d4d4d4'},
+};
+const DEFAULT_CATALOG=[ // the game's names and OBJECTS groups
+  {id:'settlements',kind:'place',name:'Settlements',types:['Big City','Small Town','Village']},
+  {id:'harbour',kind:'structure',name:'Harbour',types:['Dock','Lighthouse','Shipyard','Crane','Marine Hangar','Storage Yard']},
+  {id:'airport',kind:'structure',name:'Airport',types:['Airport','Runway','Aircraft Hangar','Terminal','Control Tower','Helipad']},
+  {id:'town',kind:'structure',name:'Town',types:['Market','Pharmacy','Hospital','School','Church','Fire Station','Police Station','Garage','House','Hut','Building','Taxi Stand']},
+  {id:'boats',kind:'vehicle',name:'Boats',types:['Fishing Boat','Sailboat','Motor Boat','Jet Boat','Yacht','Small Cargo Ship','Cargo Ship','Tanker','Cruise Ship']},
+  {id:'subs',kind:'vehicle',name:'Submarines',types:['Submarine']},
+  {id:'cars',kind:'vehicle',name:'Cars',types:['Car','Taxi','Van','Bus','Ambulance','Fire Engine','Truck','Small Truck','Tractor']},
+  {id:'planes',kind:'vehicle',name:'Planes',types:['Cessna','Seaplane','Airliner','Helicopter','Blimp','Balloon']},
+  {id:'sea',kind:'nature',name:'Sea life',types:['Fish Area','Shark Area','Whale Area','Kraken','Pirate Wreck']},
+  {id:'notes',kind:'other',name:'Notes',types:['Landmark','Note']},
+];
+const DEFAULT_BIOMES=[ // the game's biomes, one colour each so the land reads at a glance
+  {id:'forest',name:'Forest',color:'#3f9a52',h:50},{id:'jungle',name:'Jungle',color:'#2fd06a',h:55},{id:'beach',name:'Beach',color:'#f2d36b',h:28},{id:'desert',name:'Desert',color:'#e4a55a',h:40},
+  {id:'mountain',name:'Mountain',color:'#a3a8ad',h:220,peak:1},{id:'ice',name:'Ice',color:'#c4ecfa',h:60},{id:'swamp',name:'Swamp',color:'#8a9a42',h:25},{id:'volcanic',name:'Volcanic',color:'#c4553c',h:240,peak:2}];
+const DEFAULT_GOODS=[{id:'fish',name:'Fish'},{id:'goods',name:'Goods'},{id:'passengers',name:'Passengers'},{id:'medicine',name:'Medicine'},{id:'fuel',name:'Fuel'}];
+const GOODS_FIELD={vehicle:['carries','Carries'],structure:['stores','Stores'],nature:['gives','Gives']}; // carrying, storing, giving: the same goods list
+const BIOME_COLS=['#3f9a52','#2fd06a','#f2d36b','#e4a55a','#a3a8ad','#c4ecfa','#8a9a42','#c4553c','#d9c7a3','#6fb3d2','#9c7bd1','#e8e8e8'];
+const KINDS={
+  travel:{name:'Travel',color:'#ff7a45',dash:false},
+  goods:{name:'Goods',color:'#6f8cff',dash:false},
+  people:{name:'People',color:'#c49bff',dash:false},
+  needs:{name:'Needs / supplies',color:'#7fd99a',dash:true},
+  helps:{name:'Helps / serves',color:'#5fd4e0',dash:true},
+  other:{name:'Other',color:'#d4d4d4',dash:true},
+};
+const catOf=e=>e&&e.category&&doc.catalog.find(c=>c.id===e.category);
+const catsOfKind=k=>doc.catalog.filter(c=>c.kind===k);
+const vehShape=e=>{const t=(((catOf(e)||{}).name||'')+' '+(e.type||'')).toLowerCase();
+  return /plane|air|heli|fly|blimp|balloon|cessna/.test(t)?'plane':/sub/.test(t)?'sub':/car|truck|road|bus|taxi|van|tractor|ambulance|engine/.test(t)?'car':'boat'};
+const biomeOf=e=>doc.biomes.find(b=>b.id===e.biome)||doc.biomes[0]||{name:'Land',color:'#e9b52c',h:40};
+/* a region is a piece of land on the ocean line: its outline in world units (y up is negative) */
+function regionPts(e){const w=e.w||400,h=e.h||40,x0=e.x-w/2,x1=e.x+w/2,pk=biomeOf(e).peak;
+  if(pk===2)return[[x0,0],[x0+w*.18,-h*.3],[e.x-w*.07,-h],[e.x+w*.07,-h],[x1-w*.18,-h*.3],[x1,0]];
+  if(pk===1)return[[x0,0],[x0+w*.2,-h*.35],[e.x,-h],[x1-w*.2,-h*.35],[x1,0]];
+  const s=Math.min(h*1.6,w/4);return[[x0,0],[x0+s,-h],[x1-s,-h],[x1,0]]}
+function topAt(e,x){const p=regionPts(e);for(let i=1;i<p.length;i++)if(x<=p[i][0]){const a=p[i-1],b=p[i],t=(x-a[0])/((b[0]-a[0])||1);return a[1]+(b[1]-a[1])*Math.min(1,Math.max(0,t))}return 0}
+const isLand=e=>e&&e.kind==='region';
+const OWNER_COLS=['#ff6b6b','#4dabf7','#ffa94d','#b197fc','#63e6be','#f783ac','#ffd43b','#a9e34b','#e599f7','#74c0fc','#ff922b','#20c997'];
+const nextOwnerCol=()=>OWNER_COLS.find(c=>!doc.characters.some(h=>h.color===c))||OWNER_COLS[doc.characters.length%OWNER_COLS.length];
+const ownerOf=e=>e.owner&&doc.characters.find(h=>h.id===e.owner);
+const itemCol=e=>{const o=ownerOf(e);return o?o.color:CATS[e.kind].color}; // owned things wear their owner's colour
+const onWater=e=>e.kind==='structure'&&/dock|pier/i.test(e.type||'');
+const SNAPS=e=>!isLand(e)&&e.kind!=='place'&&!onWater(e); // what stands on land when dropped there
+const isWaterVeh=e=>e.kind==='vehicle'&&(vehShape(e)==='boat'||/seaplane/i.test(e.type||'')); // always at a dock (or in a marine hangar)
+const holderKind=h=>!h?null:onWater(h)?'dock':h.kind==='structure'&&/hangar|garage|station|shipyard/i.test(h.type||'')?'hangar':null;
+const canHold=(h,v)=>{const k=holderKind(h);return k==='dock'?isWaterVeh(v):k==='hangar'?v.kind==='vehicle':false};
+const heldBy=e=>{const h=e.on&&byId.get(e.on);return h&&canHold(h,e)?h:null};
+function boatSnap(e,skip){let best=null,bd=1e9; // a boat with no spot of its own goes to the nearest dock
+  for(const d of doc.elements){if(!onWater(d)||!d.on||(skip&&skip.has(d.id)))continue;const dd=Math.abs(d.x-e.x);if(dd<bd){bd=dd;best=d}}
+  if(!best)return false;e.on=best.id;e.x=best.x;e.y=best.y;return true}
+function holderAt(sx,sy,e,touch,skip){const s=touch?12:4; // the dock or hangar under the finger, never one being moved
+  for(const h of HITS){if(h.t!=='el'||!h.rect||h.id===e.id||(skip&&skip.has(h.id))||!inR(h.rect,sx,sy,s))continue;const H=byId.get(h.id);if(H&&canHold(H,e))return H}return null}
+/* a dock is always held by land: at the nearer end of its land, reaching out over the water */
+function dockTo(e,r){const side=e.x>=r.x?1:-1;e.x=Math.round(r.x+side*r.w/2);e.y=0;e.on=r.id} // x is the shore it joins
+const dockSide=e=>{const r=e.on&&byId.get(e.on);return r&&e.x<r.x?-1:1}; // which way it reaches out over the water
+function waterSnap(e,skip){if(!onWater(e))return true;let best=null,bd=1e9;
+  for(const r of doc.elements){if(!isLand(r)||(skip&&skip.has(r.id)))continue;const d=Math.max(0,Math.abs(e.x-r.x)-r.w/2);if(d<bd){bd=d;best=r}}
+  if(!best){e.on=null;return false}dockTo(e,best);return true}
+const DIRS={forward:'A → B',both:'A ↔ B',none:'A — B'};
+const $=s=>document.querySelector(s);
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=p=>p+Math.random().toString(36).slice(2,8);
+const FONT='-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif';
+
+/* ---------- state ---------- */
+let doc=emptyDoc();
+const DOC_KEYS=['name','countries','characters','goods','biomes','catalog','elements','connections'];
+const pick=o=>Object.fromEntries(DOC_KEYS.map(k=>[k,o[k]]));
+function emptyDoc(){return{format:'far-away-world-plan',version:2,name:'Far Away',savedAt:null,countries:[],characters:[],goods:JSON.parse(JSON.stringify(DEFAULT_GOODS)),biomes:JSON.parse(JSON.stringify(DEFAULT_BIOMES)),catalog:JSON.parse(JSON.stringify(DEFAULT_CATALOG)),elements:[],connections:[]}}
+let byId=new Map();
+const view={cx:0,cy:-120,z:1};
+let sel={els:new Set(),links:new Set()};
+let pickMore=false,showLabels=true,hidden=new Set(),lastKind='travel';
+let undoS=[],redoS=[],lastSnap='',savedSnap='',clip=null;
+function reindex(){byId=new Map(doc.elements.map(e=>[e.id,e]))}
+function linkOf(id){return doc.connections.find(c=>c.id===id)}
+function snap(){return JSON.stringify(pick(doc))}
+function kidsOf(id){return doc.elements.filter(e=>e.parent===id&&!isLand(e))}
+function descendants(id,out=new Set()){for(const k of kidsOf(id))if(!out.has(k.id)){out.add(k.id);descendants(k.id,out)}return out}
+function settleGroups(){ // a group's own spot follows its children (used when it is ungrouped)
+  const done=new Set();
+  const settle=e=>{if(done.has(e.id))return;done.add(e.id);const ks=kidsOf(e.id);if(!ks.length)return;ks.forEach(settle);
+    let x0=1e9,x1=-1e9,y0=1e9;for(const k of ks){x0=Math.min(x0,k.x);x1=Math.max(x1,k.x);y0=Math.min(y0,k.y)}
+    e.x=Math.round((x0+x1)/2);e.y=Math.round(y0-60)};
+  doc.elements.forEach(settle);
+}
+/* land: regions sit on the ocean line; what stands on one (e.on) keeps to its surface */
+function resnap(){
+  for(const e of doc.elements)if(isLand(e)){e.y=0;e.parent=null}
+  for(const e of doc.elements)if(onWater(e)){e.owner=null;const r=byId.get(e.on);if(isLand(r))dockTo(e,r);else waterSnap(e)}
+  for(const e of doc.elements){if(isLand(e)||onWater(e)||heldBy(e))continue;const r=e.on&&byId.get(e.on);
+    if(isWaterVeh(e)){boatSnap(e)||(e.on=null);continue}
+    if(!r)continue;if(!isLand(r)||e.x<r.x-r.w/2||e.x>r.x+r.w/2){e.on=null;continue}e.y=Math.round(topAt(r,e.x))}
+  for(const e of doc.elements){const h=heldBy(e);if(h){e.x=h.x;e.y=h.y}} // its spot is drawn on the holder
+}
+function landUnder(x,y){let best=null,bd=1e9;const z=view.z;
+  for(const r of doc.elements){if(!isLand(r)||!visible(r)||x<r.x-r.w/2||x>r.x+r.w/2)continue;const t=topAt(r,x);
+    if(y<t-90/z||y>Math.max(t,0)+40/z)continue;const d=Math.abs(y-t);if(d<bd){bd=d;best=r}}return best}
+function commit(){resnap();settleGroups();const s=snap();if(s===lastSnap)return;undoS.push(lastSnap);if(undoS.length>200)undoS.shift();redoS.length=0;lastSnap=s;changed()}
+function restore(s){Object.assign(doc,JSON.parse(s));reindex();
+  for(const id of[...sel.els])if(!byId.has(id))sel.els.delete(id);for(const id of[...sel.links])if(!linkOf(id))sel.links.delete(id);
+  lastSnap=s;changed();panel()}
+function undo(){if(!undoS.length)return;redoS.push(lastSnap);restore(undoS.pop())}
+function redo(){if(!redoS.length)return;undoS.push(lastSnap);restore(redoS.pop())}
+function changed(){
+  $('#bUndo').disabled=!undoS.length;$('#bRedo').disabled=!redoS.length;
+  const dirty=lastSnap!==savedSnap;$('#bSave').classList.toggle('dirty',dirty);$('#bSave').textContent=dirty?'SAVE CHANGES':'SAVED';
+  try{localStorage.setItem('farAwayPlanDraft',JSON.stringify({base:remoteSha,snap:lastSnap}))}catch(e){}
+  $('#hint').style.display=doc.elements.length?'none':'';draw();
+}
+function sanitize(d){
+  if(!d||!Array.isArray(d.elements))throw new Error('Not a Far Away world plan');
+  const list=a=>(Array.isArray(a)?a:[]).filter(c=>c&&c.id).map(c=>({...c,id:String(c.id),name:String(c.name??'')}));
+  const countries=list(d.countries),characters=list(d.characters);characters.forEach((h,i)=>{if(!h.color)h.color=OWNER_COLS[i%OWNER_COLS.length]});
+  const biomes=Array.isArray(d.biomes)&&d.biomes.length?list(d.biomes).map(b=>({...b,color:b.color||'#e9b52c',h:Math.max(5,+b.h||40)})):JSON.parse(JSON.stringify(DEFAULT_BIOMES));
+  const catalog=Array.isArray(d.catalog)&&d.catalog.length?list(d.catalog).map(c=>({...c,kind:CATS[c.kind]?c.kind:'other',types:(Array.isArray(c.types)?c.types:[]).map(String)})):JSON.parse(JSON.stringify(DEFAULT_CATALOG));
+  const goods=Array.isArray(d.goods)?list(d.goods):JSON.parse(JSON.stringify(DEFAULT_GOODS)),gids=new Set(goods.map(g=>g.id));
+  const ids=new Set(),chids=new Set(characters.map(c=>c.id)),kids=new Set(countries.map(c=>c.id)),bids=new Set(biomes.map(b=>b.id)),cids=new Set(catalog.map(c=>c.id));
+  d.elements=d.elements.filter(e=>e&&e.id&&!ids.has(e.id)&&ids.add(e.id)).map(e=>{
+    let kind=CATS[e.kind]?e.kind:CATS[e.category]?e.category:'other'; // plans before categories kept the kind in "category"
+    let category=e.kind&&cids.has(e.category)?e.category:null;const type=String(e.type??'');
+    if(!category&&type){const c=catalog.find(c=>c.kind===kind&&c.types.some(t=>t.toLowerCase()===type.toLowerCase()));if(c)category=c.id}
+    const o={id:String(e.id),name:String(e.name??''),kind,category,type,x:+e.x||0,y:+e.y||0,parent:e.parent&&ids.has(e.parent)&&e.parent!==e.id?e.parent:null,on:e.on&&ids.has(e.on)?e.on:null,
+      owner:e.owner&&chids.has(e.owner)?String(e.owner):null,country:e.country&&kids.has(e.country)?String(e.country):null,notes:String(e.notes??''),props:e.props&&typeof e.props==='object'?e.props:{}};
+    for(const f of['carries','stores','gives'])if(Array.isArray(e[f])){const v=e[f].map(String).filter(g=>gids.has(g));if(v.length)o[f]=v}
+    if(kind==='region'){o.biome=bids.has(e.biome)?e.biome:biomes[0].id;o.w=Math.max(60,+e.w||400);o.h=Math.max(5,+e.h||40);o.category=null;o.type=''}
+    return o});
+  const m=new Map(d.elements.map(e=>[e.id,e]));
+  for(const e of d.elements){let p=e.parent,n=0;while(p&&n++<100){if(p===e.id){e.parent=null;break}p=m.get(p)?.parent}}
+  d.connections=(d.connections||[]).filter(c=>c&&ids.has(c.from)&&ids.has(c.to)&&c.from!==c.to).map(c=>({id:String(c.id||uid('c')),from:c.from,to:c.to,label:String(c.label??''),kind:KINDS[c.kind]?c.kind:'other',direction:DIRS[c.direction]?c.direction:'forward',via:String(c.via??''),notes:String(c.notes??''),color:c.color||null,bend:+c.bend||0}));
+  return{format:'far-away-world-plan',version:2,name:String(d.name||'Far Away'),savedAt:d.savedAt||null,countries,characters,goods,biomes,catalog,elements:d.elements,connections:d.connections};
+}
+
+/* ---------- canvas & view ---------- */
+const cv=$('#cv'),ctx=cv.getContext('2d');let W=0,H=0,DPR=1,raf=0;
+function resize(){const r=cv.getBoundingClientRect();DPR=window.devicePixelRatio||1;
+  if(W&&r.width!==W)view.cx+=(r.width-W)/(2*view.z); // the panel opening never shifts the world on screen
+  W=r.width;H=r.height;cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);draw()}
+const toS=(x,y)=>[(x-view.cx)*view.z+W/2,(y-view.cy)*view.z+H/2];
+const toW=(sx,sy)=>[(sx-W/2)/view.z+view.cx,(sy-H/2)/view.z+view.cy];
+function draw(){if(!raf)raf=requestAnimationFrame(render)}
+function fontPx(px){return '600 '+px+'px '+FONT}
+
+/* layout: screen positions of every visible element, groups wrap their children */
+let LY=new Map(),HITS=[];
+function visible(e){return!hidden.has(e.kind)}
+function layout(){
+  LY=new Map();const z=view.z;const kids=new Map(),held=new Map();
+  for(const e of doc.elements){const h=heldBy(e);if(h&&visible(e)){if(!held.has(h.id))held.set(h.id,[]);held.get(h.id).push(e.id)}}
+  for(const e of doc.elements){if(!visible(e)||isLand(e))continue;const p=e.parent&&byId.get(e.parent);if(p&&visible(p)&&!isLand(p)){if(!kids.has(p.id))kids.set(p.id,[]);kids.get(p.id).push(e)}}
+  const lay=(e,d)=>{
+    if(LY.has(e.id))return LY.get(e.id);
+    const ks=kids.get(e.id),picked=sel.els.has(e.id),text=(e.name||e.type||'?').toUpperCase();
+    let L;
+    if(isLand(e)){ // a piece of land on the ocean line, its name under the water line
+      const pts=regionPts(e).map(([x,y])=>toS(x,y)),path=new Path2D();pts.forEach(([x,y],i)=>i?path.lineTo(x,y):path.moveTo(x,y));path.closePath();
+      const f=clamp(16*z,11,30);ctx.font=fontPx(f);const w=ctx.measureText(text).width,[cx,oy]=toS(e.x,0),[,ty]=toS(e.x,-e.h);
+      L={land:true,pts,path,ax:cx,ay:(ty+oy)/2,r:0,depth:0,text,f,x0:pts[0][0],x1:pts[pts.length-1][0],oy,lab:[cx-w/2-4,oy+8,cx+w/2+4,oy+12+f]};
+      L.rect=[L.x0,ty,L.x1,L.lab[3]];
+    }else if(!ks||d>30){
+      let[sx,fy]=toS(e.x,e.y);const r=clamp(13*z,4,20);if(onWater(e))sx+=dockSide(e)*r*1.5;
+      const H=heldBy(e),HL=H&&visible(H)&&lay(H,d+1);
+      if(HL&&!HL.group&&!HL.land){const list=(held.get(H.id)||[]),i=list.indexOf(e.id),n=list.length;
+        if(holderKind(H)==='dock'){const sd=dockSide(H);sx=HL.sx+sd*(HL.r*1.5+r*1.3+i*r*2.4);fy=HL.sy+HL.r}
+        else{sx=HL.sx+(i-(n-1)/2)*r*2.3;fy=HL.sy-HL.r-3}}
+      const below=HL&&holderKind(H)==='dock'; // a moored boat's name goes under the water line, clear of the dock's
+      let f=clamp(12*z,0,16);if(picked)f=Math.max(f,12);
+      const hi=HL?(held.get(H.id)||[]).indexOf(e.id):0,stack=hi>0?hi*(f+3):0;
+      const lift=(holderKind(e)==='hangar'&&(held.get(e.id)||[]).length?r*2+8+(held.get(e.id).length)*(f+3):0)+(below?0:stack),sy=fy-r; // a dock's land end touches the shore // x, y is where it stands: the icon sits on top
+      L={group:false,sx,sy,ax:sx,ay:sy,r,depth:0,text,f,rect:[sx-r,sy-r,sx+r,sy+r]};
+      if(f>=7){ctx.font=fontPx(f);const w=ctx.measureText(text).width;L.lab=below?[sx-w/2-3,sy+r*2+4+stack,sx+w/2+3,sy+r*2+8+f+stack]:[sx-w/2-3,sy-r-5-f-lift,sx+w/2+3,sy-r-1-lift];L.rect=uni(L.rect,L.lab)}
+    }else{
+      let r0=[1e9,1e9,-1e9,-1e9],depth=0;
+      for(const k of ks){const K=lay(k,d+1);r0=uni(r0,K.rect);depth=Math.max(depth,K.depth+1)}
+      const x0=r0[0]-8,x1=r0[2]+8,base=r0[1]-4,h=clamp((x1-x0)*.1,8,36),mid=(x0+x1)/2;
+      const f=clamp(15*z*(1+.2*(depth-1)),11,28);ctx.font=fontPx(f);const w=ctx.measureText(text).width;const ly=base-h-4;
+      L={group:true,arc:[x0,x1,base,h],ax:mid,ay:ly-f/2,r:f*.7,depth,text,f,lab:[mid-w/2-4,ly-f,mid+w/2+4,ly+3]};
+      L.rect=uni(r0,[Math.min(x0,L.lab[0]),L.lab[1],Math.max(x1,L.lab[2]),r0[3]]);
+    }
+    LY.set(e.id,L);return L;
+  };
+  for(const e of doc.elements)if(visible(e))lay(e,0);
+}
+const uni=(a,b)=>[Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[2],b[2]),Math.max(a[3],b[3])];
+const inR=(r,x,y,s=0)=>x>=r[0]-s&&x<=r[2]+s&&y>=r[1]-s&&y<=r[3]+s;
+
+function linkGeom(c){
+  const A=LY.get(c.from),B=LY.get(c.to);if(!A||!B||!KIND_ON(c))return null;
+  const ax=A.ax,ay=A.ay,bx=B.ax,by=B.ay,dx=bx-ax,dy=by-ay,len=Math.hypot(dx,dy)||1;
+  let nx=-dy/len,ny=dx/len;if(ny<0||(ny===0&&nx<0)){nx=-nx;ny=-ny}
+  const mx=(ax+bx)/2,my=(ay+by)/2,b=c.bend*view.z,qx=mx+nx*b,qy=my+ny*b;
+  const P=t=>{const u=1-t;return[u*u*ax+2*u*t*qx+t*t*bx,u*u*ay+2*u*t*qy+t*t*by]};
+  const pts=[];for(let i=0;i<=40;i++)pts.push(P(i/40));
+  let i0=0,i1=40;while(i0<39&&Math.hypot(pts[i0][0]-ax,pts[i0][1]-ay)<A.r+4)i0++;while(i1>i0+1&&Math.hypot(pts[i1][0]-bx,pts[i1][1]-by)<B.r+4)i1--;
+  return{pts:pts.slice(i0,i1+1),mid:P(.5),nx,ny,mx,my};
+}
+function KIND_ON(c){return!hidden.has('k:'+c.kind)}
+
+/* ---------- drawing ---------- */
+function render(){
+  raf=0;ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);HITS=[];
+  ctx.lineCap='round';ctx.lineJoin='round';
+  // ocean line
+  const[,oy]=toS(0,0);
+  if(oy<H){ctx.fillStyle='rgba(60,140,230,.10)';ctx.fillRect(0,Math.max(0,oy),W,H)}
+  ctx.strokeStyle='#4aa8ff';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(0,oy);ctx.lineTo(W,oy);ctx.stroke();
+  layout();
+  // land
+  for(const e of doc.elements){const L=LY.get(e.id);if(!L||!L.land)continue;const pk=sel.els.has(e.id);
+    const bc=biomeOf(e).color;ctx.fillStyle=bc;ctx.globalAlpha=pk?.45:.3;ctx.fill(L.path);ctx.globalAlpha=1;
+    ctx.strokeStyle=pk?'#fff':bc;ctx.lineWidth=pk?3:2;ctx.beginPath();L.pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.stroke();
+    ctx.font=fontPx(L.f);ctx.fillStyle=pk?'#fff':bc;ctx.globalAlpha=pk?1:.9;ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText(L.text,L.ax,L.lab[3]-2);const ct=doc.countries.find(c=>c.id===e.country);if(ct){ctx.font=fontPx(Math.max(10,L.f*.6));ctx.fillText(ct.name.toUpperCase(),L.ax,L.lab[3]+L.f*.7)}ctx.globalAlpha=1}
+  // group arcs and labels
+  const groups=doc.elements.filter(e=>LY.get(e.id)?.group).sort((a,b)=>LY.get(b.id).depth-LY.get(a.id).depth);
+  for(const e of groups){const L=LY.get(e.id),[x0,x1,base,h]=L.arc,pk=sel.els.has(e.id);
+    ctx.strokeStyle=pk?'#fff':CATS[e.kind].color;ctx.globalAlpha=pk?1:.75;ctx.lineWidth=pk?2.5:1.6;
+    ctx.beginPath();ctx.moveTo(x0,base);ctx.quadraticCurveTo((x0+x1)/2,base-h*2,x1,base);ctx.stroke();ctx.globalAlpha=1;
+    label(L,pk?'#fff':CATS[e.kind].color);}
+  // connections
+  const lg=new Map();
+  for(const c of doc.connections){const g=linkGeom(c);if(!g)continue;lg.set(c.id,g);
+    const pk=sel.links.has(c.id),col=c.color||KINDS[c.kind].color;
+    ctx.strokeStyle=pk?'#fff':col;ctx.lineWidth=pk?3:2;ctx.setLineDash(KINDS[c.kind].dash?[7,6]:[]);
+    ctx.beginPath();g.pts.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.stroke();ctx.setLineDash([]);
+    if(c.direction!=='none')head(g.pts[g.pts.length-1],g.pts[g.pts.length-3]||g.pts[0]);
+    if(c.direction==='both')head(g.pts[0],g.pts[2]||g.pts[g.pts.length-1]);
+  }
+  // elements
+  for(const e of doc.elements){const L=LY.get(e.id);if(!L||L.group||L.land)continue;const pk=sel.els.has(e.id),bad=(onWater(e)||isWaterVeh(e))&&!e.on,col=bad?'#ff5c5c':itemCol(e);
+    if(pk){ctx.fillStyle='rgba(255,255,255,.15)';ctx.beginPath();ctx.arc(L.sx,L.sy,L.r+6,0,7);ctx.fill()}
+    icon(e,L,pk&&!bad?'#fff':col);if(L.lab)label(L,pk&&!bad?'#fff':col);
+    if(bad){ctx.font=fontPx(11);ctx.fillStyle='#ff5c5c';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(onWater(e)?'NEEDS LAND':'NEEDS A DOCK',L.sx,L.sy+L.r+6)}}
+  // connection labels on top
+  for(const c of doc.connections){const g=lg.get(c.id);if(!g)continue;const pk=sel.links.has(c.id),col=pk?'#fff':(c.color||KINDS[c.kind].color);
+    let t=(c.label||'').toUpperCase();if(c.via)t+=(t?' · ':'')+c.via.toUpperCase();
+    const f=clamp(11*view.z,0,14);const[mx,my]=g.mid;let rect=[mx-12,my-12,mx+12,my+12];
+    if((showLabels||pk)&&t&&(f>=7||pk)){const ff=Math.max(f,pk?11:0);ctx.font=fontPx(ff);const w=ctx.measureText(t).width;
+      rect=[mx-w/2-6,my-ff/2-5,mx+w/2+6,my+ff/2+5];ctx.fillStyle='rgba(60,60,60,.85)';rr(rect,6);ctx.fill();
+      ctx.fillStyle=col;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(t,mx,my+1);
+    }else{ctx.fillStyle=col;ctx.beginPath();ctx.arc(mx,my,pk?6:3.5,0,7);ctx.fill()}
+    HITS.push({t:'llab',id:c.id,rect,pr:2});HITS.push({t:'link',id:c.id,pts:g.pts,pr:4});
+  }
+  // hit list: elements
+  for(const e of doc.elements){const L=LY.get(e.id);if(!L)continue;
+    if(L.land){HITS.push({t:'el',id:e.id,rect:L.lab,pr:3});HITS.push({t:'el',id:e.id,path:L.path,pr:6})}
+    else if(L.group){HITS.push({t:'el',id:e.id,rect:L.lab,pr:3});HITS.push({t:'arc',id:e.id,L,pr:5})}
+    else HITS.push({t:'el',id:e.id,rect:L.rect,pr:1});}
+  // stretch handles on a picked piece of land; everything else gets the connect dot
+  const one=sel.els.size===1&&!sel.links.size?[...sel.els][0]:null,OL=one&&LY.get(one);
+  if(OL&&OL.land){for(const side of[-1,1]){const hx=side<0?OL.x0:OL.x1,hy=OL.oy-4;
+    ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(hx,hy,11,0,7);ctx.fill();ctx.strokeStyle='#333';ctx.lineWidth=2;ctx.beginPath();
+    ctx.moveTo(hx-5,hy);ctx.lineTo(hx+5,hy);ctx.moveTo(hx-2,hy-3);ctx.lineTo(hx-5,hy);ctx.lineTo(hx-2,hy+3);ctx.moveTo(hx+2,hy-3);ctx.lineTo(hx+5,hy);ctx.lineTo(hx+2,hy+3);ctx.stroke();
+    HITS.push({t:'rz',id:one,side,x:hx,y:hy,pr:0})}}
+  else if(OL){const L=OL;{const hx=L.group?L.lab[2]+16:L.sx+L.r+18,hy=L.group?L.ay:L.sy;
+    ctx.fillStyle='#ff7a45';ctx.beginPath();ctx.arc(hx,hy,9,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+    HITS.push({t:'dot',id:[...sel.els][0],x:hx,y:hy,pr:0});}}
+  // gestures being drawn
+  if(op&&op.t==='link'){const A=LY.get(op.from);if(A){ctx.strokeStyle='#ff7a45';ctx.lineWidth=2;ctx.setLineDash([6,6]);ctx.beginPath();ctx.moveTo(A.ax,A.ay);ctx.lineTo(op.x,op.y);ctx.stroke();ctx.setLineDash([]);
+    if(op.target){const T=LY.get(op.target);if(T){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(T.rect[0]-4,T.rect[1]-4,T.rect[2]-T.rect[0]+8,T.rect[3]-T.rect[1]+8)}}}}
+  if(op&&op.t==='box'){ctx.strokeStyle='#fff';ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.strokeRect(Math.min(op.x0,op.x),Math.min(op.y0,op.y),Math.abs(op.x-op.x0),Math.abs(op.y-op.y0));ctx.setLineDash([])}
+  if(op&&op.t==='drag'&&op.into){const T=LY.get(op.into);if(T){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(T.lab[0]-3,T.lab[1]-3,T.lab[2]-T.lab[0]+6,T.lab[3]-T.lab[1]+6)}}
+}
+function rr(r,k){ctx.beginPath();ctx.roundRect?ctx.roundRect(r[0],r[1],r[2]-r[0],r[3]-r[1],k):ctx.rect(r[0],r[1],r[2]-r[0],r[3]-r[1])}
+function label(L,col){ctx.font=fontPx(L.f);ctx.fillStyle=col;ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText(L.text,(L.lab[0]+L.lab[2])/2,L.lab[3]-2)}
+function head(tip,from){const a=Math.atan2(tip[1]-from[1],tip[0]-from[0]),s=11;ctx.setLineDash([]);ctx.beginPath();
+  ctx.moveTo(tip[0]-s*Math.cos(a-.45),tip[1]-s*Math.sin(a-.45));ctx.lineTo(tip[0],tip[1]);ctx.lineTo(tip[0]-s*Math.cos(a+.45),tip[1]-s*Math.sin(a+.45));ctx.stroke()}
+/* one simple sketch shape per category */
+function icon(e,L,col){const{sx:x,sy:y,r}=L;ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=Math.max(1.4,r/8);ctx.beginPath();
+  switch(e.kind){
+    case'region':ctx.moveTo(x-r,y+r*.6);ctx.quadraticCurveTo(x,y-r*1.4,x+r,y+r*.6);ctx.moveTo(x-r*1.2,y+r*.6);ctx.lineTo(x+r*1.2,y+r*.6);break;
+    case'structure':if(onWater(e)){const fy=y+r,w=r*1.5;ctx.rect(x-w,fy-r*.3,w*2,r*.22);
+      for(const px of[-w*.8,0,w*.8]){ctx.moveTo(x+px,fy-r*.08);ctx.lineTo(x+px,fy+r*.9)}const sd=dockSide(e);ctx.moveTo(x+sd*w*.8,fy-r*.3);ctx.lineTo(x+sd*w*.8,fy-r*.6);break}
+      ctx.rect(x-r*.7,y-r*.1,r*1.4,r*.9);ctx.moveTo(x-r*.85,y-r*.05);ctx.lineTo(x,y-r*.8);ctx.lineTo(x+r*.85,y-r*.05);break;
+    case'vehicle':switch(vehShape(e)){
+      case'plane':ctx.moveTo(x-r,y);ctx.lineTo(x+r,y);ctx.moveTo(x-r*.1,y);ctx.lineTo(x-r*.4,y+r*.5);ctx.moveTo(x-r*.1,y);ctx.lineTo(x-r*.4,y-r*.5);ctx.moveTo(x-r,y);ctx.lineTo(x-r,y-r*.45);break;
+      case'sub':ctx.ellipse(x,y+r*.15,r,r*.35,0,0,7);ctx.rect(x-r*.15,y-r*.5,r*.35,r*.35);break;
+      case'car':ctx.rect(x-r,y-r*.25,r*2,r*.6);ctx.moveTo(x-r*.5,y-r*.25);ctx.lineTo(x-r*.3,y-r*.7);ctx.lineTo(x+r*.4,y-r*.7);ctx.lineTo(x+r*.6,y-r*.25);
+        ctx.moveTo(x-r*.35,y+r*.6);ctx.arc(x-r*.55,y+r*.6,r*.2,0,7);ctx.moveTo(x+r*.75,y+r*.6);ctx.arc(x+r*.55,y+r*.6,r*.2,0,7);break;
+      default:ctx.moveTo(x-r,y-r*.1);ctx.lineTo(x+r,y-r*.1);ctx.lineTo(x+r*.7,y+r*.5);ctx.lineTo(x-r*.7,y+r*.5);ctx.closePath();ctx.rect(x-r*.35,y-r*.6,r*.6,r*.5)}break;
+    case'nature':ctx.ellipse(x-r*.1,y,r*.6,r*.35,0,0,7);ctx.moveTo(x+r*.5,y);ctx.lineTo(x+r*.95,y-r*.35);ctx.lineTo(x+r*.95,y+r*.35);ctx.closePath();break;
+    default:for(let i=0;i<10;i++){const a=-Math.PI/2+i*Math.PI/5,k=i%2?r*.4:r*.9;ctx.lineTo(x+k*Math.cos(a),y+k*Math.sin(a))}ctx.closePath();
+  }ctx.stroke()}
+
+/* ---------- hit testing ---------- */
+function hitAt(x,y,touch){const s=touch?12:4;let best=null;
+  for(const h of HITS){let ok=false;
+    if(h.t==='dot'||h.t==='rz')ok=Math.hypot(x-h.x,y-h.y)<(touch?26:14);
+    else if(h.path)ok=ctx.isPointInPath(h.path,x*DPR,y*DPR)||ctx.isPointInPath(h.path,x*DPR,(y+s)*DPR);
+    else if(h.rect)ok=inR(h.rect,x,y,s);
+    else if(h.pts)ok=h.pts.some((p,i)=>i&&segD(x,y,h.pts[i-1],p)<s+4);
+    else if(h.L){const[x0,x1,base,hh]=h.L.arc;ok=x>=x0-s&&x<=x1+s&&y>=base-hh*1.2-s&&y<=base-hh*.3+s&&Math.abs(y-(base-hh*(1-((2*(x-x0)/(x1-x0||1))-1)**2)))<s+6}
+    if(ok&&(!best||h.pr<best.pr||(h.pr===best.pr&&h.t==='el')))best=h;}
+  return best}
+function segD(x,y,a,b){const dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy||1,t=clamp(((x-a[0])*dx+(y-a[1])*dy)/l,0,1);return Math.hypot(x-a[0]-t*dx,y-a[1]-t*dy)}
+
+/* ---------- gestures (finger first) ---------- */
+let op=null;const ptrs=new Map();let lastTap={t:0,x:0,y:0};
+cv.addEventListener('pointerdown',ev=>{
+  cv.setPointerCapture(ev.pointerId);const p=pt(ev);ptrs.set(ev.pointerId,p);closePop();commitEdit();
+  if(ptrs.size===2){const[a,b]=[...ptrs.values()];op={t:'pinch',d0:Math.hypot(a.x-b.x,a.y-b.y)||1,z0:view.z,w:toW((a.x+b.x)/2,(a.y+b.y)/2)};return}
+  if(ptrs.size>2)return;
+  const touch=ev.pointerType!=='mouse',h=hitAt(p.x,p.y,touch);
+  if(ev.button===1||ev.button===2){op={t:'pan',x:p.x,y:p.y,cx:view.cx,cy:view.cy,moved:true};return}
+  if(pending){op={t:'place',x0:p.x,y0:p.y};return}
+  if(h&&h.t==='dot'){op={t:'link',from:h.id,x:p.x,y:p.y};return}
+  if(h&&h.t==='rz'){const e=byId.get(h.id);op={t:'resize',id:h.id,side:h.side,x0:p.x,w0:e.w,cx0:e.x,moved:false,docks:doc.elements.filter(d=>onWater(d)&&d.on===e.id).map(d=>[d.id,d.x,d.x>=e.x?1:-1])};return}
+  if(h&&(h.t==='el'||h.t==='arc')){
+    const add=pickMore||ev.shiftKey;
+    if(add){sel.links.clear();sel.els.has(h.id)?sel.els.delete(h.id):sel.els.add(h.id)}
+    else if(!sel.els.has(h.id)){sel={els:new Set([h.id]),links:new Set()}}
+    panel();
+    const move=new Set();for(const id of sel.els){move.add(id);descendants(id,move)}
+    for(let grew=true;grew;){grew=false;for(const e of doc.elements)if(e.on&&move.has(e.on)&&!move.has(e.id)){move.add(e.id);grew=true}} // what it holds rides along
+    const start=id=>{const e=byId.get(id),L=LY.get(id);if(heldBy(e)&&!move.has(e.on)&&L&&!L.group){const w=toW(L.sx,L.sy+L.r);return[id,w[0],w[1]]}return[id,e.x,e.y]};
+    op={t:'drag',x0:p.x,y0:p.y,ids:[...move].map(start),moved:false,hit:h.id,move};draw();return}
+  if(h&&(h.t==='llab'||h.t==='link')){if(pickMore||ev.shiftKey){sel.els.clear();sel.links.has(h.id)?sel.links.delete(h.id):sel.links.add(h.id)}else sel={els:new Set(),links:new Set([h.id])};
+    panel();const c=linkOf(h.id);op={t:'bend',id:h.id,x0:p.x,y0:p.y,b0:c.bend,moved:false,hit:h.id,onLab:h.t==='llab'};draw();return}
+  if(pickMore||ev.shiftKey){op={t:'box',x0:p.x,y0:p.y,x:p.x,y:p.y};return}
+  op={t:'pan',x:p.x,y:p.y,cx:view.cx,cy:view.cy,moved:false};
+});
+cv.addEventListener('pointermove',ev=>{
+  if(!ptrs.has(ev.pointerId))return;const p=pt(ev);ptrs.set(ev.pointerId,p);if(!op)return;
+  if(op.t==='pinch'&&ptrs.size===2){const[a,b]=[...ptrs.values()];const d=Math.hypot(a.x-b.x,a.y-b.y);view.z=clamp(op.z0*d/op.d0,.03,6);
+    const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;view.cx=op.w[0]-(mx-W/2)/view.z;view.cy=op.w[1]-(my-H/2)/view.z;draw();return}
+  if(op.t==='pan'){if(Math.hypot(p.x-op.x,p.y-op.y)>6)op.moved=true;view.cx=op.cx-(p.x-op.x)/view.z;view.cy=op.cy-(p.y-op.y)/view.z;draw()}
+  else if(op.t==='drag'){const dx=(p.x-op.x0)/view.z,dy=(p.y-op.y0)/view.z;if(!op.moved&&Math.hypot(p.x-op.x0,p.y-op.y0)<6)return;op.moved=true;
+    for(const[id,x,y]of op.ids){const e=byId.get(id);e.x=Math.round(x+dx);e.y=Math.round(y+dy);
+      if(e.on&&op.move.has(e.on))continue; // riding on what moves
+      const H=holderAt(p.x,p.y,e,ev.pointerType!=='mouse',op.move);if(H){e.on=H.id;continue}
+      if(heldBy(e))e.on=null;
+      if(isWaterVeh(e)){boatSnap(e,op.move)||(e.on=null);continue}
+      if(SNAPS(e)){const l=landUnder(e.x,e.y);e.on=l&&!op.move.has(l.id)?l.id:null}else waterSnap(e,op.move)}
+    resnap();
+    const h=hitAt(p.x,p.y,ev.pointerType!=='mouse');op.into=null;
+    if(h&&(h.t==='el'||h.t==='arc')&&LY.get(h.id)?.group&&!op.move.has(h.id))op.into=h.id;draw()}
+  else if(op.t==='resize'){const e=byId.get(op.id),d=(p.x-op.x0)/view.z;if(Math.abs(p.x-op.x0)>3)op.moved=true;
+    e.w=Math.round(Math.max(60,op.w0+op.side*d));e.x=Math.round(op.cx0+op.side*(e.w-op.w0)/2);
+    for(const[id,x,side]of op.docks)if(side===op.side)byId.get(id).x=Math.round(x+side*(e.w-op.w0)); // docks stay at the end they hold on to
+    resnap();draw()}
+  else if(op.t==='bend'){if(!op.moved&&Math.hypot(p.x-op.x0,p.y-op.y0)<6)return;op.moved=true;
+    const c=linkOf(op.id),g=linkGeom(c);if(g){const qx=2*p.x-g.mx,qy=2*p.y-g.my;c.bend=Math.round(((qx-g.mx)*g.nx+(qy-g.my)*g.ny)/view.z)}draw()}
+  else if(op.t==='link'){op.x=p.x;op.y=p.y;const h=hitAt(p.x,p.y,ev.pointerType!=='mouse');op.target=h&&(h.t==='el'||h.t==='arc')&&h.id!==op.from&&!isLand(byId.get(h.id))?h.id:null;draw()}
+  else if(op.t==='box'){op.x=p.x;op.y=p.y;draw()}
+});
+function endPtr(ev){
+  if(!ptrs.has(ev.pointerId))return;const p=pt(ev);ptrs.delete(ev.pointerId);
+  if(!op)return;if(op.t==='pinch'){if(ptrs.size===0)op=null;else{const q=[...ptrs.values()][0];op={t:'pan',x:q.x,y:q.y,cx:view.cx,cy:view.cy,moved:true}}return}
+  const o=op;op=null;const now=performance.now(),dbl=now-lastTap.t<350&&Math.hypot(p.x-lastTap.x,p.y-lastTap.y)<24;
+  if(o.t==='place'){placeAt(p.x,p.y,pending);setPending(null)}
+  else if(o.t==='pan'){if(!o.moved){if(dbl){openAdd(p.x,p.y);lastTap.t=0;return}sel={els:new Set(),links:new Set()};panel();draw()}}
+  else if(o.t==='drag'){if(o.moved){if(o.into){for(const id of sel.els)if(id!==o.into&&!isLand(byId.get(id))&&!descendants(id).has(o.into))byId.get(id).parent=o.into;toast('Put inside '+(byId.get(o.into).name||'group'))}commit();panel()}
+    else if(dbl){startEdit('el',o.hit);lastTap.t=0;return}}
+  else if(o.t==='resize'){if(o.moved)commit()}
+  else if(o.t==='bend'){if(o.moved)commit();else if(dbl){startEdit('link',o.hit);lastTap.t=0;return}}
+  else if(o.t==='link'){if(o.target)connect(o.from,o.target);
+    else{const A=LY.get(o.from);if(A&&Math.hypot(p.x-A.ax,p.y-A.ay)>50)openAdd(p.x,p.y,o.from)}}
+  else if(o.t==='box'){const r=[Math.min(o.x0,o.x),Math.min(o.y0,o.y),Math.max(o.x0,o.x),Math.max(o.y0,o.y)];
+    if(r[2]-r[0]>4||r[3]-r[1]>4){for(const[id,L]of LY)if(inR(r,L.ax,L.ay))sel.els.add(id);sel.links.clear();panel()}}
+  lastTap={t:now,x:p.x,y:p.y};draw();
+}
+cv.addEventListener('pointerup',endPtr);cv.addEventListener('pointercancel',endPtr);
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('wheel',ev=>{ev.preventDefault();closePop();
+  if(ev.ctrlKey||ev.metaKey){const p=pt(ev),w=toW(p.x,p.y);view.z=clamp(view.z*Math.exp(-ev.deltaY*.01),.03,6);view.cx=w[0]-(p.x-W/2)/view.z;view.cy=w[1]-(p.y-H/2)/view.z}
+  else if(ev.shiftKey)view.cy+=(ev.deltaY||ev.deltaX)/view.z;else view.cx+=(ev.deltaX+ev.deltaY)/view.z;draw()},{passive:false});
+document.addEventListener('gesturestart',e=>e.preventDefault());
+function pt(ev){const r=cv.getBoundingClientRect();return{x:ev.clientX-r.left,y:ev.clientY-r.top}}
+
+/* ---------- actions ---------- */
+function placeAt(sx,sy,t,fromId){
+  const[x,y]=toW(sx,sy);const e={id:uid('e'),name:t.name,kind:t.kind,category:t.category||null,type:t.type||'',x:Math.round(x),y:Math.round(y),parent:null,on:null,owner:null,country:null,notes:'',props:{}};
+  if(isLand(e)){e.y=0;e.biome=t.biome;e.w=400;e.h=biomeOf(e).h}
+  else{const h=hitAt(sx,sy,true);if(h&&LY.get(h.id)?.group)e.parent=h.id;
+    const H=holderAt(sx,sy,e,true);
+    if(H){e.on=H.id;e.x=H.x;e.y=H.y}
+    else if(isWaterVeh(e)){if(!boatSnap(e)){toast('Boats and seaplanes need a dock — add one first');return}}
+    else if(SNAPS(e)){const l=landUnder(e.x,e.y);if(l){e.on=l.id;e.y=Math.round(topAt(l,e.x))}}
+    else if(!waterSnap(e)){toast('A dock needs land beside it — add a region first');return}}
+  doc.elements.push(e);byId.set(e.id,e);sel={els:new Set([e.id]),links:new Set()};
+  if(fromId){connect(fromId,e.id);return}
+  commit();panel();
+}
+function connect(a,b){
+  const same=doc.connections.filter(c=>(c.from===a&&c.to===b)||(c.from===b&&c.to===a)).length;
+  const A=byId.get(a),B=byId.get(b),d=Math.hypot(A.x-B.x,A.y-B.y);
+  const bend=Math.round(Math.min(d*.3,400)*(1+.6*Math.floor(same/2))*(same%2?-1:1));
+  const c={id:uid('c'),from:a,to:b,label:'',kind:lastKind,direction:'forward',via:'',notes:'',color:null,bend};
+  doc.connections.push(c);sel={els:new Set(),links:new Set([c.id])};commit();panel();render();startEdit('link',c.id);
+}
+function removeSel(){
+  const ids=sel.els;if(!ids.size&&!sel.links.size)return;
+  for(const e of doc.elements)if(ids.has(e.parent)){let p=byId.get(e.parent);while(p&&ids.has(p.id))p=byId.get(p.parent);e.parent=p?p.id:null}
+  doc.elements=doc.elements.filter(e=>!ids.has(e.id));
+  doc.connections=doc.connections.filter(c=>!sel.links.has(c.id)&&!ids.has(c.from)&&!ids.has(c.to));
+  reindex();sel={els:new Set(),links:new Set()};commit();panel();
+}
+function copySel(){
+  const ids=new Set();for(const id of sel.els){ids.add(id);descendants(id,ids)}if(!ids.size)return false;
+  clip={elements:doc.elements.filter(e=>ids.has(e.id)).map(e=>JSON.parse(JSON.stringify(e))),connections:doc.connections.filter(c=>ids.has(c.from)&&ids.has(c.to)).map(c=>({...c}))};return true;
+}
+function paste(dx,dy){
+  if(!clip)return;const map=new Map(clip.elements.map(e=>[e.id,uid('e')]));const newSel=new Set();
+  for(const e of clip.elements){const n=JSON.parse(JSON.stringify(e));n.id=map.get(e.id);n.x+=dx;n.y+=dy;n.parent=map.get(e.parent)||(byId.has(e.parent)?e.parent:null);doc.elements.push(n);byId.set(n.id,n);if(!map.has(e.parent))newSel.add(n.id)}
+  for(const c of clip.connections)doc.connections.push({...c,id:uid('c'),from:map.get(c.from),to:map.get(c.to)});
+  sel={els:newSel,links:new Set()};commit();panel();
+}
+function duplicate(){if(copySel())paste(Math.round(40/view.z),0)}
+function group(){
+  const ids=[...sel.els];if(ids.length<1)return;
+  const items=ids.filter(id=>!isLand(byId.get(id)));if(!items.length)return;
+  const places=items.filter(id=>byId.get(id).kind==='place');
+  if(places.length===1&&items.length>1){for(const id of items)if(id!==places[0]&&!descendants(id).has(places[0]))byId.get(id).parent=places[0]}
+  else{const g={id:uid('e'),name:'New Place',kind:'place',category:(catsOfKind('place')[0]||{}).id||null,type:'Small Town',x:0,y:0,parent:byId.get(items[0]).parent,on:null,notes:'',props:{}};
+    doc.elements.push(g);byId.set(g.id,g);for(const id of items)byId.get(id).parent=g.id;sel={els:new Set([g.id]),links:new Set()};commit();panel();render();startEdit('el',g.id);return}
+  commit();panel();
+}
+function ungroup(){for(const id of sel.els){const e=byId.get(id);for(const k of kidsOf(id))k.parent=e.parent;}commit();panel()}
+function fit(){
+  const vis=doc.elements.filter(visible);if(!vis.length){view.cx=0;view.cy=-120;view.z=1;draw();return}
+  let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;for(const e of vis){const hw=isLand(e)?e.w/2:0,top=isLand(e)?-e.h:e.y;x0=Math.min(x0,e.x-hw);x1=Math.max(x1,e.x+hw);y0=Math.min(y0,top);y1=Math.max(y1,e.y)}
+  y1=Math.max(y1,0);y0=Math.min(y0,0);
+  view.z=clamp(Math.min((W-140)/Math.max(x1-x0,1),(H-180)/Math.max(y1-y0,1)),.03,2);view.cx=(x0+x1)/2;view.cy=(y0+y1)/2-30/view.z;
+  layout();let u=[1e9,1e9,-1e9,-1e9];for(const L of LY.values())u=uni(u,L.rect);  // then again by what is drawn, names included
+  if(u[2]>u[0]){view.cx+=((u[0]+u[2])/2-W/2)/view.z;view.cy+=((u[1]+u[3])/2-H/2)/view.z;view.z=clamp(view.z*Math.min((W-40)/(u[2]-u[0]),(H-40)/(u[3]-u[1]),1),.03,2)}draw();
+}
+
+/* ---------- inline rename ---------- */
+const ed=$('#edit');let editing=null;
+function startEdit(kind,id){
+  layout();let x,y,val;
+  if(kind==='el'){const L=LY.get(id);if(!L)return;x=L.ax;y=L.group?L.ay:(L.lab?(L.lab[1]+L.lab[3])/2:L.sy-L.r-12);val=byId.get(id).name}
+  else{const c=linkOf(id),g=linkGeom(c);if(!g)return;[x,y]=g.mid;val=c.label}
+  editing={kind,id};ed.value=val;ed.placeholder=kind==='el'?'Name':'What happens? (e.g. carries fish)';
+  ed.style.display='block';ed.style.left=clamp(x-110,4,W-224)+'px';ed.style.top=clamp(y-22,4,H-50)+'px';ed.focus();ed.select();
+}
+function commitEdit(cancel){
+  if(!editing)return;const e=editing;editing=null;ed.style.display='none';ed.blur();if(cancel)return;
+  if(e.kind==='el'){const o=byId.get(e.id);if(o)o.name=ed.value.trim()}else{const c=linkOf(e.id);if(c)c.label=ed.value.trim()}
+  commit();panel();
+}
+ed.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();commitEdit()}else if(ev.key==='Escape')commitEdit(true);ev.stopPropagation()});
+ed.addEventListener('blur',()=>setTimeout(()=>commitEdit(),0));
+
+/* ---------- add picker ---------- */
+const pop=$('#pop');let pending=null;
+function openAdd(sx,sy,fromId){
+  let h=`<input id="qName" placeholder="Name it, or pick a type below" autocomplete="off" autocapitalize="words"><div class="row"><button id="qCustom">+ ADD as custom</button></div>`;
+  const chip=(d,t)=>`<button ${d}>${esc(t)}</button>`;
+  h+=`<div class="cat" style="color:${CATS.region.color}">LAND</div><div class="chips">`+doc.biomes.map(b=>`<button data-b="${b.id}" style="border-color:${b.color};color:${b.color}">${esc(b.name)}</button>`).join('')+'</div>';
+  for(const k of['place','structure','vehicle','nature','other'])for(const c of catsOfKind(k)){if(!c.types.length)continue;
+    h+=`<div class="cat" style="color:${CATS[k].color}">${esc(c.name.toUpperCase())}</div><div class="chips">`+c.types.map(t=>`<button data-k="${k}" data-c="${c.id}" data-t="${esc(t)}">${esc(t)}</button>`).join('')+'</div>'}
+  pop.innerHTML=h;pop.style.display='block';
+  const pw=Math.min(300,W-8);pop.style.width=pw+'px';
+  if(sx==null){sx=W/2;sy=H/2}
+  // keep the picker off the finger: below the point, else above, else beside it
+  const ph=pop.offsetHeight;let top=sy+24,left=clamp(sx-pw/2,4,W-pw-4);
+  if(top+ph>H-4){top=sy-24-ph;if(top<4){top=clamp(sy-ph/2,4,Math.max(4,H-ph-4));left=sx+30+pw<W?sx+30:Math.max(4,sx-30-pw)}}
+  pop.style.left=left+'px';pop.style.top=top+'px';
+  const opened=performance.now();const fresh=()=>performance.now()-opened<450; // ignore the tap that opened it
+  const add=t=>{closePop();placeAt(sx,sy,t,fromId)};
+  pop.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{if(fresh())return;const n=$('#qName').value.trim();add({kind:b.dataset.k,category:b.dataset.c,type:b.dataset.t,name:n||b.dataset.t})});
+  pop.querySelectorAll('[data-b]').forEach(b=>b.onclick=()=>{if(fresh())return;const n=$('#qName').value.trim(),bi=doc.biomes.find(x=>x.id===b.dataset.b);add({kind:'region',biome:bi.id,name:n||bi.name})});
+  const custom=n=>add({kind:'other',category:null,type:'',name:n});
+  $('#qCustom').onclick=()=>{if(fresh())return;custom($('#qName').value.trim()||'Idea')};
+  $('#qName').onkeydown=ev=>{ev.stopPropagation();if(ev.key==='Enter'){const n=ev.target.value.trim();if(!n)return;
+    for(const c of doc.catalog){const t=c.types.find(t=>t.toLowerCase()===n.toLowerCase());if(t)return add({kind:c.kind,category:c.id,type:t,name:t})}custom(n)}else if(ev.key==='Escape')closePop()};
+  if(matchMedia('(pointer:fine)').matches)$('#qName').focus();
+}
+function closePop(){pop.style.display='none'}
+function setPending(t){pending=t;$('#help').textContent=t?'Tap the canvas to place '+t.name:defaultHelp}
+
+/* ---------- panel ---------- */
+const pnl=$('#panel');
+function panel(){
+  const els=[...sel.els].map(id=>byId.get(id)).filter(Boolean),lks=[...sel.links].map(linkOf).filter(Boolean);
+  if(!els.length&&!lks.length){pnl.classList.remove('open');requestAnimationFrame(resize);return}
+  pnl.classList.add('open');requestAnimationFrame(resize);
+  if(els.length===1&&!lks.length)return elPanel(els[0]);
+  if(lks.length===1&&!els.length)return linkPanel(lks[0]);
+  pnl.innerHTML=`<h3>${els.length+lks.length} PICKED</h3><div class="row"><button id="pGroup">GROUP into a place</button></div><div class="row"><button id="pDup">DUPLICATE</button><button id="pCopy">COPY</button><button id="pPaste">PASTE</button></div><div class="row"><button id="pUngroup">UNGROUP</button><button id="pDel">DELETE</button></div>`;
+  wireCommon();
+}
+function wireCommon(){
+  const on=(id,f)=>{const b=pnl.querySelector(id);if(b)b.onclick=f};
+  on('#pGroup',group);on('#pUngroup',ungroup);on('#pDup',duplicate);on('#pDel',removeSel);
+  on('#pCopy',()=>{if(copySel())toast('Copied')});on('#pPaste',()=>paste(Math.round(60/view.z),Math.round(30/view.z)));
+}
+function elPanel(e){
+  const K=CATS[e.kind],land=isLand(e),owned=(e.kind==='structure'||e.kind==='vehicle')&&!onWater(e),cat=catOf(e);
+  const parents=doc.elements.filter(p=>p.id!==e.id&&!isLand(p)&&!descendants(e.id).has(p.id)).sort((a,b)=>(a.kind==='place'?0:1)-(b.kind==='place'?0:1)||(a.name||'').localeCompare(b.name||''));
+  const chars=[...doc.characters].sort((a,b)=>a.name.localeCompare(b.name));
+  const conns=doc.connections.filter(k=>k.from===e.id||k.to===e.id);
+  const props=Object.entries(e.props||{}).map(([k,v])=>k+': '+v).join('\n');
+  const opt=(v,t,on)=>`<option value="${esc(v)}"${on?' selected':''}>${esc(t)}</option>`;
+  const swatches=(attr,cols,cur)=>`<div class="chips">${cols.map(k=>`<button ${attr}="${k}" style="background:${k};width:44px;${cur===k?'outline:3px solid #fff;':''}"></button>`).join('')}</div>`;
+  const stands=e.on&&byId.get(e.on),bio=land&&biomeOf(e);
+  const types=cat?[...cat.types]:[];if(e.type&&!types.includes(e.type))types.unshift(e.type);
+  pnl.innerHTML=`<h3 style="color:${K.color}">${K.name.toUpperCase()}</h3>
+  <label>Name</label><input data-f="name" value="${esc(e.name)}">
+  ${land?`<label>Biome</label><div data-new="biome"><select data-f="biome" style="border-color:${bio.color};border-width:2px">${doc.biomes.map(b=>opt(b.id,b.name,b.id===e.biome)).join('')}${opt('__new','+ New biome…')}</select></div>
+  <label>${esc(bio.name)} colour — every ${esc(bio.name)} region</label>${swatches('data-bc',BIOME_COLS,bio.color)}
+  <label>Country</label><div data-new="country"><select data-f="country">${opt('','— none —',!e.country)}${doc.countries.map(k=>opt(k.id,k.name,k.id===e.country)).join('')}${opt('__new','+ New country…')}</select></div>
+  <label>Length</label><input data-f="w" type="number" inputmode="numeric" min="60" step="50" value="${e.w}">`
+  :`<label>Category</label><div data-new="category"><select data-f="category">${cat?'':opt('','— none —',true)}${['place','structure','vehicle','nature','other'].map(k=>`<optgroup label="${CATS[k].name}">${catsOfKind(k).map(c=>opt(c.id,c.name,c.id===e.category)).join('')}</optgroup>`).join('')}${opt('__new','+ New category…')}</select></div>
+  <label>Type</label><div data-new="type"><select data-f="type">${e.type?'':opt('','— none —',true)}${types.map(t=>opt(t,t,t===e.type)).join('')}${opt('__new','+ New type…')}</select></div>`}
+  ${owned?`<label>Owner</label><div data-new="owner"><select data-f="owner">${opt('','— nobody —',!e.owner)}${chars.map(k=>opt(k.id,k.name,k.id===e.owner)).join('')}${opt('__new','+ New character…')}</select></div>
+  ${ownerOf(e)?`<label>${esc(ownerOf(e).name)}'s colour — everything they own</label>${swatches('data-oc',OWNER_COLS,ownerOf(e).color)}`:''}`:''}
+  ${GOODS_FIELD[e.kind]?(()=>{const[f,lab]=GOODS_FIELD[e.kind],cur=e[f]||[];return`<label>${lab}</label><div class="chips" data-new="good">${doc.goods.map(g=>`<button data-good="${g.id}" class="${cur.includes(g.id)?'on':''}">${esc(g.name)}</button>`).join('')}<button data-good="__new">+ New good…</button></div>`})():''}
+  ${stands?`<label>${onWater(e)?'Held by':holderKind(stands)==='dock'?'Moored at':holderKind(stands)==='hangar'?'Kept in':'Stands on'}</label><div>${esc(stands.name||biomeOf(stands).name)}</div>`:''}
+  ${(()=>{const hs=doc.elements.filter(v=>heldBy(v)===e);return hs.length?`<label>${holderKind(e)==='dock'?'Moored here':'Kept here'} (${hs.length})</label><div>${hs.map(v=>esc(v.name||v.type)).join(', ')}</div>`:''})()}
+  ${land?'':`<label>Inside (belongs to)</label><select data-f="parent">${opt('','— nothing —',!e.parent)}${parents.map(p=>opt(p.id,p.name||p.type,p.id===e.parent)).join('')}</select>`}
+  <label>Notes</label><textarea data-f="notes">${esc(e.notes)}</textarea>
+  <label>Other properties — one per line, like “Opens: 8am”</label><textarea data-f="props">${esc(props)}</textarea>
+  ${land?'':`<label>Connections (${conns.length})</label><div class="links">${conns.map(k=>{const o=byId.get(k.from===e.id?k.to:k.from);const arrow=k.direction==='both'?'↔':k.direction==='none'?'—':(k.from===e.id?'→':'←');
+    return`<div data-l="${k.id}" style="border-color:${k.color||KINDS[k.kind].color}">${arrow} ${esc(o?.name||'?')}${k.label?' · '+esc(k.label):''}${k.via?' · '+esc(k.via):''}</div>`}).join('')}</div>`}
+  <div class="row"><button id="pDup">DUPLICATE</button><button id="pCopy">COPY</button><button id="pPaste">PASTE</button></div>
+  <div class="row">${kidsOf(e.id).length?'<button id="pUngroup">UNGROUP</button>':''}<button id="pDel">DELETE</button></div>`;
+  wireCommon();
+  pnl.querySelectorAll('[data-l]').forEach(d=>d.onclick=()=>{sel={els:new Set(),links:new Set([d.dataset.l])};panel();draw()});
+  pnl.querySelectorAll('[data-oc]').forEach(b=>b.onclick=()=>{const o=ownerOf(e);if(o){o.color=b.dataset.oc;commit();panel()}});
+  pnl.querySelectorAll('[data-good]').forEach(b=>b.onclick=()=>{const[f]=GOODS_FIELD[e.kind],g=b.dataset.good;
+    if(g==='__new')return askNew(b);const cur=new Set(e[f]||[]);cur.has(g)?cur.delete(g):cur.add(g);if(cur.size)e[f]=[...cur];else delete e[f];commit();panel()});
+  pnl.querySelectorAll('[data-bc]').forEach(b=>b.onclick=()=>{bio.color=b.dataset.bc;commit();panel()});
+  pnl.querySelectorAll('[data-f]').forEach(inp=>{
+    const apply=()=>{const f=inp.dataset.f,v=inp.value;if(v==='__new')return;
+      if(f==='props'){const o={};for(const line of v.split('\n')){const i=line.indexOf(':');if(i>0)o[line.slice(0,i).trim()]=line.slice(i+1).trim();else if(line.trim())o[line.trim()]=''}e.props=o}
+      else if(f==='w'){const n=+v;if(n>=60){e.w=Math.round(n);resnap()}}
+      else if(f==='biome'){e.biome=v;e.h=biomeOf(e).h;resnap()}
+      else if(f==='category'){const c=doc.catalog.find(c=>c.id===v);e.category=c?c.id:null;if(c){e.kind=c.kind;if(!c.types.includes(e.type))e.type=c.types[0]||'';for(const f of['carries','stores','gives'])if(!GOODS_FIELD[e.kind]||GOODS_FIELD[e.kind][0]!==f)delete e[f]}resnap()}
+      else if(f==='parent'||f==='owner'||f==='country')e[f]=v||null;else e[f]=v;draw()};
+    inp.addEventListener('input',apply);
+    inp.addEventListener('change',()=>{if(inp.value==='__new')return askNew(inp);apply();commit();if(inp.tagName==='SELECT')panel()});
+  });
+  // "+ New…" in any dropdown: type the name right there; it joins the world's lists (and + ADD)
+  function askNew(selEl){const box=selEl.parentElement,what=box.dataset.new;
+    const ph={good:'New good, e.g. Timber',country:'Country name',owner:'Character name',category:'New category for '+K.name.toLowerCase()+'s',type:'New type'+(cat?' of '+cat.name:''),biome:'Biome name'}[what];
+    box.innerHTML=`<div class="row" style="margin:0"><input placeholder="${esc(ph)}" autocapitalize="words" style="flex:2"><button>ADD</button></div>`;
+    const inp=box.querySelector('input'),ok=()=>{const n=inp.value.trim();if(!n){panel();return}
+      if(what==='good'){const g={id:uid('d'),name:n};doc.goods.push(g);const[f]=GOODS_FIELD[e.kind];e[f]=[...(e[f]||[]),g.id]}
+      else if(what==='country'){const k={id:uid('k'),name:n};doc.countries.push(k);e.country=k.id}
+      else if(what==='owner'){const ch={id:uid('h'),name:n,color:nextOwnerCol()};doc.characters.push(ch);e.owner=ch.id}
+      else if(what==='biome'){const b={id:uid('b'),name:n,color:BIOME_COLS.find(c=>!doc.biomes.some(x=>x.color===c))||'#e9b52c',h:40};doc.biomes.push(b);e.biome=b.id;e.h=b.h}
+      else if(what==='category'){const c={id:uid('g'),kind:e.kind,name:n,types:e.type?[e.type]:[]};doc.catalog.push(c);e.category=c.id}
+      else if(what==='type'){let c=cat;if(!c){c={id:uid('g'),kind:e.kind,name:CATS[e.kind].name+'s',types:[]};doc.catalog.push(c);e.category=c.id}if(!c.types.includes(n))c.types.push(n);e.type=n}
+      commit();panel()};
+    box.querySelector('button').onclick=ok;inp.onkeydown=ev=>{ev.stopPropagation();if(ev.key==='Enter')ok();if(ev.key==='Escape')panel()};inp.focus()}
+}
+function linkPanel(k){
+  const A=byId.get(k.from),B=byId.get(k.to),col=k.color||KINDS[k.kind].color;
+  const vias=doc.characters.map(c=>c.name).concat(doc.elements.filter(e=>e.kind==='vehicle').map(e=>e.name),catsOfKind('vehicle').flatMap(c=>c.types));
+  pnl.innerHTML=`<h3 style="color:${col}">CONNECTION</h3>
+  <div style="font-size:15px">${esc(A?.name||'?')} <b>${k.direction==='both'?'↔':k.direction==='none'?'—':'→'}</b> ${esc(B?.name||'?')}</div>
+  <label>What happens</label><input data-f="label" value="${esc(k.label)}" placeholder="e.g. carries fish">
+  <label>Kind</label><div class="chips">${Object.entries(KINDS).map(([id,v])=>`<button data-k="${id}" class="${id===k.kind?'on':''}" style="${id===k.kind?'':'color:'+v.color}">${v.name}</button>`).join('')}</div>
+  <label>Direction</label><div class="chips">${Object.entries(DIRS).map(([id,v])=>`<button data-d="${id}" class="${id===k.direction?'on':''}">${v}</button>`).join('')}<button id="pSwap">SWAP ends</button></div>
+  <label>Vehicle or character</label><input data-f="via" list="dlVia" value="${esc(k.via)}" placeholder="e.g. Truck"><datalist id="dlVia">${[...new Set(vias)].map(v=>`<option value="${esc(v)}">`).join('')}</datalist>
+  <label>Colour</label><div class="chips"><button data-col="" class="${k.color?'':'on'}">Kind's</button>${['#ff7a45','#6f8cff','#7fd99a','#c49bff','#5fd4e0','#f5c542','#ff5c5c','#ffffff'].map(c=>`<button data-col="${c}" class="${k.color===c?'on':''}" style="background:${c};width:44px"></button>`).join('')}</div>
+  <label>Notes</label><textarea data-f="notes">${esc(k.notes)}</textarea>
+  <div class="row"><button id="pFlat">STRAIGHTEN</button><button id="pDel">DELETE</button></div>`;
+  wireCommon();
+  pnl.querySelectorAll('[data-f]').forEach(inp=>{const apply=()=>{k[inp.dataset.f]=inp.value;draw()};inp.addEventListener('input',apply);inp.addEventListener('change',()=>{apply();commit()})});
+  pnl.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{k.kind=lastKind=b.dataset.k;commit();panel()});
+  pnl.querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{k.direction=b.dataset.d;commit();panel()});
+  pnl.querySelectorAll('[data-col]').forEach(b=>b.onclick=()=>{k.color=b.dataset.col||null;commit();panel()});
+  $('#pSwap').onclick=()=>{[k.from,k.to]=[k.to,k.from];k.bend=-k.bend;commit();panel()};
+  $('#pFlat').onclick=()=>{k.bend=0;commit()};
+}
+
+/* ---------- toolbar ---------- */
+const defaultHelp=$('#help').textContent;
+$('#bAdd').onclick=()=>openAdd(null,null);
+$('#bMore').onclick=()=>{pickMore=!pickMore;$('#bMore').classList.toggle('on',pickMore);$('#help').textContent=pickMore?'Tap items to add them · drag empty space to box-pick':defaultHelp};
+$('#bUndo').onclick=undo;$('#bRedo').onclick=redo;$('#bFit').onclick=fit;
+$('#bLabels').onclick=()=>{showLabels=!showLabels;$('#bLabels').classList.toggle('on',showLabels);prefsSave();draw()};
+$('#bShow').onclick=()=>{
+  const chip=(id,name,col)=>`<button data-h="${id}" class="${hidden.has(id)?'':'on'}" style="${hidden.has(id)?'color:'+col:''}">${name}</button>`;
+  modal(`<h3>SHOW</h3><label>Things</label><div class="chips">${Object.entries(CATS).map(([k,c])=>chip(k,c.name,c.color)).join('')}</div>
+    <label>Connections</label><div class="chips">${Object.entries(KINDS).map(([k,c])=>chip('k:'+k,c.name,c.color)).join('')}</div><div class="row"><button data-close>DONE</button></div>`,
+    box=>box.querySelectorAll('[data-h]').forEach(b=>b.onclick=()=>{const id=b.dataset.h;hidden.has(id)?hidden.delete(id):hidden.add(id);prefsSave();draw();$('#bShow').onclick()}));
+};
+$('#bFile').onclick=()=>{
+  modal(`<h3>FILE</h3><label>The whole world as JSON — copy it, or paste one in and LOAD</label><textarea id="fJson">${esc(exportJson())}</textarea>
+  <div class="row"><button id="fCopy">COPY</button><button id="fDown">DOWNLOAD .json</button></div>
+  <div class="row"><button id="fLoad">LOAD pasted</button><button id="fPick">LOAD file…</button><input id="fFile" type="file" accept=".json,application/json" style="display:none"></div>
+  <div class="row"><button id="fNew">NEW empty world</button><button data-close>CLOSE</button></div>`,box=>{
+    $('#fCopy').onclick=async()=>{try{await navigator.clipboard.writeText(exportJson());toast('Copied')}catch(e){$('#fJson').select();toast('Select all and copy')}};
+    $('#fDown').onclick=download;
+    $('#fLoad').onclick=()=>loadText($('#fJson').value);
+    $('#fPick').onclick=()=>$('#fFile').click();
+    $('#fFile').onchange=async ev=>{const f=ev.target.files[0];if(f)loadText(await f.text())};
+    $('#fNew').onclick=()=>{doc.elements=[];doc.connections=[];reindex();sel={els:new Set(),links:new Set()};commit();panel();closeModal();toast('Empty world · UNDO brings it back')};
+  });
+};
+function exportJson(){return JSON.stringify({format:'far-away-world-plan',version:2,savedAt:doc.savedAt,...pick(doc)},null,2)}
+function loadText(t){try{const d=sanitize(JSON.parse(t));for(const k of DOC_KEYS)doc[k]=d[k];reindex();sel={els:new Set(),links:new Set()};commit();panel();closeModal();fit();toast('Loaded · UNDO to go back')}catch(e){toast('Could not read that: '+e.message)}}
+function download(){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([exportJson()],{type:'application/json'}));a.download='far-away-world-plan.json';document.body.append(a);a.click();a.remove()}
+function modal(html,wire){const m=$('#modal');m.querySelector('.box').innerHTML=html;m.style.display='flex';m.querySelectorAll('[data-close]').forEach(b=>b.onclick=closeModal);if(wire)wire(m)}
+function closeModal(){$('#modal').style.display='none'}
+$('#modal').addEventListener('pointerdown',e=>{if(e.target.id==='modal')closeModal()});
+let toastT=0;function toast(t){const el=$('#toast');el.textContent=t;el.style.display='block';clearTimeout(toastT);toastT=setTimeout(()=>el.style.display='none',2600)}
+
+/* ---------- saving: the plan is worlds/plan.json in the game repo, through GitHub with the world page's token ---------- */
+const GH={owner:'facaelectrica',repo:'battleship-duel',path:'worlds/plan.json',branch:'main'};
+const GH_API='https://api.github.com/repos/'+GH.owner+'/'+GH.repo;
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}},lsSet=(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}};
+let token=lsGet('wp_token'),remoteSha=null,loaded=false;
+async function gh(path,opt={},tok=token){
+  const r=await fetch(path.startsWith('http')?path:GH_API+path,{...opt,cache:'no-store',headers:{Accept:'application/vnd.github+json',...(tok?{Authorization:'Bearer '+tok}:{}),'X-GitHub-Api-Version':'2022-11-28',...(opt.body?{'Content-Type':'application/json'}:{})}});
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){const e=new Error(j.message||('HTTP '+r.status));e.status=r.status;throw e}
+  return j}
+const b64=s=>{const u=new TextEncoder().encode(s);let o='';for(let i=0;i<u.length;i+=0x8000)o+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(o)};
+const unb64=s=>new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\s/g,'')),c=>c.charCodeAt(0)));
+async function fetchPlan(){ // {sha, data} - data null when there's no plan yet
+  try{const j=await gh('/contents/'+GH.path+'?ref='+GH.branch);return{sha:j.sha,data:JSON.parse(unb64(j.content))}}
+  catch(e){if(e.status===404)return{sha:null,data:null};throw e}}
+function askToken(why){
+  modal(`<h3>GITHUB TOKEN</h3><p>${esc(why||'The plan is kept in the game repo on GitHub.')} Paste the same token the world page uses — its steps are on the <a href="world.html" target="_blank" rel="noopener">world page</a>. It stays in this browser only.</p>
+  <input id="tTok" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" spellcheck="false"><div class="row"><button id="tSave">SAVE TOKEN</button><button data-close>LATER</button></div>`,()=>{
+    $('#tSave').onclick=async()=>{const t=$('#tTok').value.trim();if(!t)return;$('#tSave').textContent='CHECKING…';
+      try{await gh('',{},t);token=t;lsSet('wp_token',t);toast('Token saved');location.reload()}
+      catch(e){$('#tSave').textContent='SAVE TOKEN';toast(e.status===401?'That token doesn’t work':e.status===404||e.status===403?'That token can’t reach the game repo':'Token: '+e.message)}}})}
+async function putPlan(sha){const body={message:'World plan: saved from the planner',content:b64(exportJson()),branch:GH.branch};if(sha)body.sha=sha;
+  const j=await gh('/contents/'+GH.path,{method:'PUT',body:JSON.stringify(body)});remoteSha=j.content.sha}
+$('#bSave').onclick=async()=>{
+  if(!token)return askToken('To save, the planner needs your GitHub token.');
+  if(lastSnap===savedSnap&&loaded){toast('Already saved');return}
+  const prev=doc.savedAt;doc.savedAt=new Date().toISOString();$('#bSave').textContent='SAVING…';
+  try{await putPlan(remoteSha);loaded=true;savedSnap=lastSnap;changed();toast('Saved to GitHub')}
+  catch(e){doc.savedAt=prev;changed();
+    if(e.status===401)askToken('Your token has expired — make a new one.');
+    else if(e.status===409||e.status===422)modal(`<h3>SAVED ELSEWHERE</h3><p>The plan was saved from another device since you opened it.</p><div class="row"><button id="cMine">SAVE MINE over it</button><button id="cTheirs">OPEN that one</button></div><div class="row"><button data-close>CANCEL</button></div>`,()=>{
+      $('#cMine').onclick=async()=>{closeModal();try{const r=await fetchPlan();doc.savedAt=new Date().toISOString();await putPlan(r.sha);savedSnap=lastSnap;changed();toast('Saved to GitHub')}catch(err){toast('Save failed: '+err.message)}};
+      $('#cTheirs').onclick=()=>{lsSet('farAwayPlanDraft',null);savedSnap=lastSnap;location.reload()}});
+    else toast('Save failed: '+e.message)}
+};
+window.addEventListener('beforeunload',e=>{if(lastSnap!==savedSnap){e.preventDefault();e.returnValue=''}});
+
+/* ---------- keys (for a keyboard, optional) ---------- */
+document.addEventListener('keydown',ev=>{
+  const tag=document.activeElement?.tagName;if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
+  const m=ev.ctrlKey||ev.metaKey,k=ev.key.toLowerCase();
+  if(m&&k==='z'){ev.preventDefault();ev.shiftKey?redo():undo()}else if(m&&k==='y'){ev.preventDefault();redo()}
+  else if(m&&k==='c'){if(copySel())toast('Copied')}else if(m&&k==='v'){paste(Math.round(60/view.z),Math.round(30/view.z))}
+  else if(m&&k==='d'){ev.preventDefault();duplicate()}else if(m&&k==='a'){ev.preventDefault();sel={els:new Set(doc.elements.filter(visible).map(e=>e.id)),links:new Set()};panel();draw()}
+  else if(k==='delete'||k==='backspace'){removeSel()}else if(k==='f'){fit()}else if(k==='g'){ev.shiftKey?ungroup():group()}
+  else if(k==='enter'||k==='f2'){if(sel.els.size===1)startEdit('el',[...sel.els][0]);else if(sel.links.size===1)startEdit('link',[...sel.links][0])}
+  else if(k==='escape'){closePop();closeModal();setPending(null);sel={els:new Set(),links:new Set()};panel();draw()}
+  else if(k==='n'){openAdd(null,null)}
+});
+
+/* ---------- prefs & boot ---------- */
+function prefsSave(){try{localStorage.setItem('farAwayPlanPrefs',JSON.stringify({labels:showLabels,hidden:[...hidden]}))}catch(e){}}
+function prefsLoad(){try{const p=JSON.parse(localStorage.getItem('farAwayPlanPrefs')||'{}');if(p.labels===false){showLabels=false;$('#bLabels').classList.remove('on')}if(Array.isArray(p.hidden))hidden=new Set(p.hidden)}catch(e){}}
+window.addEventListener('resize',resize);
+async function boot(){
+  prefsLoad();resize();doc=emptyDoc();
+  if(token){try{const r=await fetchPlan();remoteSha=r.sha;if(r.data)doc=sanitize(r.data);loaded=true}
+    catch(e){if(e.status===401)askToken('Your token has expired — make a new one.');else toast('Couldn’t open the plan from GitHub: '+e.message)}}
+  reindex();lastSnap=savedSnap=snap();
+  try{const d=JSON.parse(lsGet('farAwayPlanDraft')||'null');
+    if(d&&d.snap&&(!loaded||(d.base||null)===(remoteSha||null))){const o=sanitize(JSON.parse(d.snap)),n=JSON.stringify(pick(o));
+      if(n!==savedSnap){restore(n);undoS=[savedSnap];toast('Picked up your unsaved changes')}}
+    else if(d&&d.snap){const o=sanitize(JSON.parse(d.snap)),n=JSON.stringify(pick(o));
+      if(n!==savedSnap&&o.elements.length)modal(`<h3>UNSAVED CHANGES</h3><p>This browser has changes that were never saved, made on an older version of the plan.</p><div class="row"><button id="dKeep">KEEP my changes</button><button id="dDrop">USE the saved plan</button></div>`,()=>{
+        $('#dKeep').onclick=()=>{closeModal();restore(n);undoS=[savedSnap];fit()};$('#dDrop').onclick=()=>{closeModal();changed()}})}}catch(e){}
+  changed();fit();
+  if(!token)askToken();
+}
+boot();
+</script>
+</body>
+</html>
