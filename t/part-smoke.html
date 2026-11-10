@@ -352,7 +352,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 22:14', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 09 22:34', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1452,8 +1452,9 @@ const FR = { work: 0, marks: null, enc: null, sub: 1, pass: null, pk: null, fram
 function gpuEnc() { if (!FR.enc) FR.enc = GPU.dev.createCommandEncoder(); return FR.enc; }
 function gpuPassEnd() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; } }
 // a render pass on desc's targets (key: which targets, so draws to the same ones keep it open)
-function gpuPassBegin(desc, key) {
+function gpuPassBegin(desc, key, uses) {
   gpuPassEnd();
+  if (uses) for (const t of uses) if (t) t.use = FR.sub;   // (what the pass writes or reads: in use by the pending submit - a later write to it is staged)
   if (GPU.feat['timestamp-query'] && FR.qn + 2 <= FR.QMAX) {
     if (!FR.qs || FR.qs.ep !== GPU.ep) { FR.qs = GPU.dev.createQuerySet({ type: 'timestamp', count: FR.QMAX }); FR.qs.ep = GPU.ep; }
     desc.timestampWrites = { querySet: FR.qs, beginningOfPassWriteIndex: FR.qn, endOfPassWriteIndex: FR.qn + 1 }; FR.qn += 2;
@@ -1461,6 +1462,18 @@ function gpuPassBegin(desc, key) {
   FR.pass = gpuEnc().beginRenderPass(desc); FR.pk = key; GPU.stats.passes++; if (key !== 'present') FR.work++;
   return FR.pass;
 }
+// a compute pass in the frame's encoder, after whatever was recorded (the open render pass ended first); the caller ends it
+// (cp.end()). uses: the buffers / textures it writes or reads, marked in use by the pending submit
+function gpuComputeBegin(uses) {
+  gpuPassEnd();
+  if (uses) for (const t of uses) if (t) t.use = FR.sub;
+  FR.work++; GPU.stats.passes++;
+  return gpuEnc().beginComputePass();
+}
+// copies recorded in the frame's encoder, in order with its passes (the open render pass ended first). Arguments are the layer's
+// buffer / texture records ({ gb } / { gt } from gpuBuf / gpuTex) or the arena's chunks ({ gb })
+function gpuCopyBuf(src, so, dst, dof, n) { gpuPassEnd(); dst.use = FR.sub; if (src.use !== undefined) src.use = FR.sub; gpuEnc().copyBufferToBuffer(src.gb, so, dst.gb, dof, n); }
+function gpuCopyBufTex(src, so, bpr, dst, x, y, w, h) { gpuPassEnd(); dst.use = FR.sub; gpuEnc().copyBufferToTexture({ buffer: src.gb, offset: so, bytesPerRow: bpr }, { texture: dst.gt, origin: { x, y } }, { width: w, height: h }); }
 // send what's recorded
 function gpuSubmit() {
   if (!GPU.dev) return;
@@ -1616,7 +1629,7 @@ class GPUGL {
     if (p === GLK.MAX_TEXTURE_IMAGE_UNITS || p === GLK.MAX_COMBINED_TEXTURE_IMAGE_UNITS) return 16;
     return 0;
   }
-  getError() { return 0; }
+  getError() { const e = this.err || 0; this.err = 0; return e; }
   finish() { } flush() { }
   pixelStorei(p, v) {
     const K = GLK, s = this.ps;
@@ -2171,6 +2184,12 @@ function gpuSampler2(minL, magL, wS, wT) {
   return s;
 }
 // a draw
+// the bytes a vertex slot's last element reaches from its start (WebGPU's 'lastStride': the furthest attribute's end)
+function gpuSlotEnd(s) {
+  if (s._end != null) return s._end;
+  let e = 0; for (const a of s.attrs) { const m = /^[a-z]+?(8|16|32)(?:x(\d))?$/.exec(a.format); e = Math.max(e, a.offset + (m ? (+m[1] / 8) * (+(m[2] || 1)) : 4)); }
+  return (s._end = e);
+}
 function gpuGLDraw(gl, p, mode, first, count, inst) {
   const PR = window.__gpuProf, t0 = PR ? gpuPT() : 0;
   gpuGLDraw0(gl, p, mode, first, count, inst);
@@ -2195,12 +2214,20 @@ function gpuGLDraw0(gl, p, mode, first, count, inst) {
   const v = gl.vp, vk = v[0] + ',' + v[1] + ',' + v[2] + ',' + v[3];
   if (S.vp !== vk) { pass.setViewport(v[0], v[1], Math.max(0, v[2]), Math.max(0, v[3]), 0, 1); S.vp = vk; }
   let x0 = 0, y0 = 0, x1 = T.w, y1 = T.h;
-  if (gl.en[K.SCISSOR_TEST]) { const c = gl.sc; x0 = Math.max(0, c[0]); y0 = Math.max(0, c[1]); x1 = Math.min(T.w, c[0] + c[2]); y1 = Math.min(T.h, c[1] + c[3]); if (x1 < x0) x1 = x0; if (y1 < y0) y1 = y0; }
+  if (gl.en[K.SCISSOR_TEST]) { const c = gl.sc; x0 = Math.min(T.w, Math.max(0, c[0])); y0 = Math.min(T.h, Math.max(0, c[1])); x1 = Math.max(x0, Math.min(T.w, c[0] + c[2])); y1 = Math.max(y0, Math.min(T.h, c[1] + c[3])); }   // (inside the target, as WebGL clips a scissor to it: one wholly outside has no area - nothing drawn)
   const sk = x0 + ',' + y0 + ',' + x1 + ',' + y1;
   if (S.sc !== sk) { pass.setScissorRect(x0, y0, x1 - x0, y1 - y0); S.sc = sk; }
   if (x1 === x0 || y1 === y0) return;
   if (T.ds && gl.en[K.STENCIL_TEST] && S.ref !== gl.sf.ref) { pass.setStencilReference(gl.sf.ref); S.ref = gl.sf.ref; }
   if (S.bg !== bg || (p.hasU && S.uo !== p.uoff)) { if (p.hasU) pass.setBindGroup(0, bg, [p.uoff]); else pass.setBindGroup(0, bg); S.bg = bg; S.uo = p.uoff; }
+  // WebGL's draw check: a draw that would read a vertex or instance past the end of its buffer is an error and draws nothing
+  // (WebGPU would reject the whole command buffer - every draw of the frame - for it)
+  for (const s of lay.slots) {
+    if (!s.buf) continue;
+    const b = s.buf, n = s.step === 'instance' ? inst : first + count; if (!n) continue;
+    const have = b.back ? b.back.size - (b.boff + s.base) : 0, need = (n - 1) * s.st + gpuSlotEnd(s);
+    if (need > have) { gl.err = gl.err || 0x0502; if (GPU.nerr++ < 30) console.warn('GPU: draw reads past its buffer (' + need + ' > ' + have + ' bytes) - not drawn, as WebGL'); return; }
+  }
   lay.slots.forEach((s, i) => {
     let gb, off;
     if (!s.buf) { gb = gpuZero().gb; off = s.zero; }
@@ -2332,13 +2359,21 @@ function frameLight() {
 }
 // 4. DRAWING NATIVELY BETWEEN THE OLD CODE'S DRAWS (a part's own passes, until its old code is gone): frameFlush() first - the old
 // code's batch recorded and the open pass ended, so the part's pass comes after it in the same command encoder, in order; then
-// frameTarget(ctx) - the layer texture a context draws into (the screen, or a GLTarget layer): { tex, w, h } (rows in WebGL's order)
+// frameTarget(ctx) - the layer texture a context draws into (the screen, or a GLTarget layer): { tex, stencil, w, h } (rows in
+// WebGL's order); a part's pass names what it writes in gpuPassBegin(desc, key, [tex, stencil]) so later writes to them are staged
 function frameFlush() { if (typeof glFlush === 'function') glFlush(); gpuPassEnd(); }
 function frameTarget(ctx) {
   const t = ctx && ctx.target; if (!t) return null;
   if (t.isScreen) { const T = gpuGLTargets(GLR.gl, null); return { tex: T.col[0], stencil: T.ds, w: T.w, h: T.h }; }
-  t.ensure(); const o = t.tex; return o && o.t ? { tex: o.t, w: o.t.w, h: o.t.h } : null;
+  t.ensure(); const o = t.tex; return o && o.t ? { tex: o.t, stencil: (t.rb && t.rb.t) || null, w: o.t.w, h: o.t.h } : null;   // (stencil: the layer's own, once its clip made one - ensureStencil)
 }
+// a part's own GPU objects (engine-design 1: only src/gpu talks to WebGPU). Each is made on the current device; a part keeps the
+// device's epoch (GPU.ep) with what it made and makes it again when the epoch changes (a lost device rebuilt - gpuLost)
+function gpuBindLayout(entries, label) { return GPU.dev.createBindGroupLayout({ entries, label }); }
+function gpuPipeLayout(layouts, label) { return GPU.dev.createPipelineLayout({ bindGroupLayouts: layouts, label }); }
+function gpuRenderPipe(desc) { GPU.stats.pipes = (GPU.stats.pipes || 0) + 1; return GPU.dev.createRenderPipeline(desc); }
+function gpuComputePipe(desc) { GPU.stats.pipes = (GPU.stats.pipes || 0) + 1; return GPU.dev.createComputePipeline(desc); }
+function gpuBindGroup(layout, entries, label) { return GPU.dev.createBindGroup({ layout, entries, label }); }
 /* 5. THE HUD ON THE SAME DEVICE (engine-design 3.5): the controls' canvas (#hud, stacked over the world's at its own pixel size) is a
    second WebGPU canvas on the one device. The HUD draws through a GLCtx (the same subset of the canvas calls it always used:
    rectangles, the user's sprites, the pixel text, alpha, clips, simple paths) into a layer the size of that canvas, shown on it once
@@ -7549,7 +7584,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 22:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 22:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -25034,11 +25069,13 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
             pixels, in colour c (-1: its own, the 'view rgba' column); false: none. Whole numbers only (u_pb: PB). Written in
             the game's GLSL and made WGSL by the graphics layer's translator as the layer is first drawn (gpuNaga, one source).
    pxDraw(L, lo, hi) draws it into the current context C at this point of the frame: the context's batch so far recorded first
-   (glBegin builds the context's clip, frameFlush ends the open pass), then this layer's pass on the same target, with the same
+   (fxBegin: glBegin builds the context's clip, frameFlush ends the open pass), then this layer's pass on the same target, with the same
    blend, scissor and clip - nothing drawn before or after changes order. The second view is the same small loop and a second
    draw; what is gone is the JavaScript per rectangle.
    What goes to the GPU each draw: this view's columns for the rows it wrote (cnt), and the frame's columns once a frame - all
-   in the frame's arena (src/gpu/20-res.js: one write a submit, a fixed pool); a layer keeps no GPU buffer of its own.
+   in the frame's arena (src/gpu/20-res.js: one write a submit, a fixed pool); a layer keeps no GPU buffer of its own. A draw of
+   more rows than one arena piece holds goes in pieces of rows, in order, in the same pass (pxBatch): no limit on rows.
+   The scissor: the context's, its start and end inside the target; none left, nothing drawn.
    ================================================================ */
 const PXL = { pal: new Float32Array(128), b255: new Float32Array(256).map((_, i) => Math.fround(i / 255)), ep: -1, fs: null, bgl: null, pl: null, bgs: new Map(), views: new WeakMap() };
 // (the header every draw sends first, in 32-bit words: 0-1 the target's size, 2 PBV, 3 the colours not drawn, 4-7 the context's
@@ -25046,7 +25083,7 @@ const PXL = { pal: new Float32Array(128), b255: new Float32Array(256).map((_, i)
 // (pxLayer is called by files before this one: it reads none of this file's constants)
 const PXL_HW = 152;
 function pxLayer(o) {
-  const L = { table: o.table, cols: o.cols, per: o.per || 1, pal: o.pal, frame: o.frame || null, view: o.view, rect: o.rect, own: {}, tick: -1, fgen: -1, fat: null, vs: null, pipes: new Map(), ep: -1 };
+  const L = { table: o.table, cols: o.cols, per: o.per || 1, pal: o.pal, frame: o.frame || null, view: o.view, rect: o.rect, own: {}, tick: -1, fgen: -1, fn: -1, fat: [], batch: 0, vs: null, pipes: new Map(), ep: -1 };
   if (Object.keys(L.cols).length > 16 || L.pal.length > 32) throw new Error('pxLayer: at most 16 columns and 32 colours');   // (the header's room: PXL_HW)
   for (const k in L.cols) L.own[k] = new (L.cols[k].endsWith('u8') ? Uint8Array : L.cols[k].endsWith('rgba') ? Uint32Array : Int32Array)(16);
   L.hasFrame = Object.keys(L.cols).some(k => L.cols[k].startsWith('frame'));
@@ -25098,35 +25135,65 @@ void main() {
 // (the colour: an interpolated varying, as GL_FS's v_col is - the same sums on the same numbers)
 const PXL_FS = `
 @fragment fn main(@location(0) c: vec4f) -> @location(0) vec4f { return c; }`;
-/* ---- the WebGPU objects of the layers: made again on a new device (GPU.ep).
-   SKELETON (PART-NOTES.md, "Asked of the skeleton"): src/gpu/ has no call yet for a part's own pipeline, bind group layout and bind
-   group - these four device calls belong there (gpuRenderPipe / gpuBindLayout / gpuBindGroup); everything else here goes through
-   src/gpu/'s own (gpuModule, gpuNaga, arenaAlloc, gpuPassBegin, frameFlush, frameTarget) ---- */
+/* ---- A PART'S OWN DRAW INTO A CONTEXT'S TARGET, between the old code's draws (the pixel layers, the fire - 46-smoke-fire-draw.js):
+   fxBegin(ctx) - the context's batch so far recorded and its clip built (glBegin, as a fillRect here would), the open pass ended
+   (frameFlush); back: { FT (frameTarget), ds (the stencil its clip is in, or none), sc (the scissor: the context's, its start and end
+   inside the target, in the target's rows - WebGL's order), op, screen } - or null when the scissor leaves nothing: nothing is drawn.
+   fxColour / fxStencil - the pipeline's colour target (the context's blend, GLB; the screen keeps its alpha: WebGL's had none) and its
+   stencil test (the clip: where the stencil's top bit is set, as glApplyState's test 1). fxPass(X, key) - the pass on the target, after
+   everything drawn into it so far, its scissor and stencil reference set ---- */
+function fxBegin(ctx) {
+  const s = ctx.s, t = ctx.target;
+  glBegin(ctx, s.op); frameFlush();
+  const FT = frameTarget(ctx); if (!FT) return null;
+  const ds = s.clip ? FT.stencil : null;   // (a clip that isn't an upright rectangle is in the target's stencil)
+  if (s.clip && !ds) throw new Error('a clip with no stencil to test');
+  let x0 = 0, y0 = 0, x1 = FT.w, y1 = FT.h;
+  if (s.sc) { const c = s.sc, gy = t._h - c[1] - c[3]; x0 = clamp(c[0], 0, FT.w); x1 = clamp(c[0] + c[2], 0, FT.w); y0 = clamp(gy, 0, FT.h); y1 = clamp(gy + c[3], 0, FT.h); }
+  if (x1 <= x0 || y1 <= y0) return null;
+  return { FT, ds, sc: [x0, y0, x1 - x0, y1 - y0], op: s.op, screen: !!t.isScreen };
+}
+function fxColour(tex, op, screen) {
+  const b = GLB[op] || GLB['source-over'];
+  return { format: tex.fmt, writeMask: screen ? 7 : 15, blend: { color: { srcFactor: GLBF[b[0]], dstFactor: GLBF[b[1]], operation: 'add' }, alpha: { srcFactor: GLBF[b[2]], dstFactor: GLBF[b[3]], operation: 'add' } } };
+}
+function fxStencil(ds) {
+  if (!ds) return {};
+  const face = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
+  return { depthStencil: { format: ds.fmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: face, stencilBack: face, stencilReadMask: 0x80, stencilWriteMask: 0 } };
+}
+const fxKey = X => X.op + '|' + X.FT.tex.fmt + '|' + (X.ds ? X.ds.fmt : '') + '|' + (X.screen ? 1 : 0);
+function fxPass(X, key) {
+  const tex = X.FT.tex, ds = X.ds, desc = { colorAttachments: [{ view: tex.view, loadOp: 'load', storeOp: 'store' }] };
+  if (ds) desc.depthStencilAttachment = Object.assign({ view: ds.view, stencilReadOnly: true }, gpuHasDepth(ds.fmt) ? { depthReadOnly: true } : {});
+  const pass = gpuPassBegin(desc, key, [tex, ds]);
+  pass.setScissorRect(X.sc[0], X.sc[1], X.sc[2], X.sc[3]);
+  if (ds) pass.setStencilReference(0x80);
+  return pass;
+}
+// ---- the WebGPU objects of the layers (src/gpu's calls), made again on a new device (GPU.ep) ----
 function pxShared() {
   if (PXL.ep === GPU.ep) return;
   const V = GPUShaderStage.VERTEX, ro = d => ({ type: 'read-only-storage', hasDynamicOffset: d });
-  PXL.bgl = GPU.dev.createBindGroupLayout({ entries: [{ binding: 0, visibility: V, buffer: ro(true) }, { binding: 1, visibility: V, buffer: ro(false) }, { binding: 2, visibility: V, buffer: ro(false) }] });
-  PXL.pl = GPU.dev.createPipelineLayout({ bindGroupLayouts: [PXL.bgl] });
+  PXL.bgl = gpuBindLayout([{ binding: 0, visibility: V, buffer: ro(true) }, { binding: 1, visibility: V, buffer: ro(false) }, { binding: 2, visibility: V, buffer: ro(false) }], 'px layers');
+  PXL.pl = gpuPipeLayout([PXL.bgl], 'px layers');
   PXL.fs = gpuModule(PXL_FS, 'px layer fs');
   PXL.bgs.clear(); PXL.ep = GPU.ep;
 }
 // the layer's pipeline for this target, blend and clip (ds: the stencil the clip is in, or none)
-function pxPipe(L, tex, ds, op, screen) {
+function pxPipe(L, X) {
+  const tex = X.FT.tex, ds = X.ds, op = X.op, screen = X.screen;
   if (L.ep !== GPU.ep) { L.pipes.clear(); L.vs = gpuModule(gpuNaga(pxVS(L), 'vertex'), 'px layer vs'); L.ep = GPU.ep; }
-  const key = op + '|' + tex.fmt + '|' + (ds ? ds.fmt : '') + '|' + (screen ? 1 : 0);
+  const key = fxKey(X);
   let p = L.pipes.get(key);
   if (p) return p;
-  const b = GLB[op] || GLB['source-over'];
-  const desc = {
+  const desc = Object.assign({
     layout: PXL.pl,
     vertex: { module: L.vs, entryPoint: 'main' },
-    // (the screen keeps its alpha: WebGL's context had none - src/gpu/41-gl-draw.js)
-    fragment: { module: PXL.fs, entryPoint: 'main', targets: [{ format: tex.fmt, writeMask: screen ? 7 : 15, blend: { color: { srcFactor: GLBF[b[0]], dstFactor: GLBF[b[1]], operation: 'add' }, alpha: { srcFactor: GLBF[b[2]], dstFactor: GLBF[b[3]], operation: 'add' } } }] },
+    fragment: { module: PXL.fs, entryPoint: 'main', targets: [fxColour(tex, op, screen)] },
     primitive: { topology: 'triangle-list', cullMode: 'none' },
-  };
-  // (the context's clip: drawn where the stencil's top bit is set, as glApplyState's stencil test 1)
-  if (ds) { const face = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' }; desc.depthStencil = { format: ds.fmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: face, stencilBack: face, stencilReadMask: 0x80, stencilWriteMask: 0 }; }
-  p = GPU.dev.createRenderPipeline(desc);
+  }, fxStencil(ds));
+  p = gpuRenderPipe(desc);
   L.pipes.set(key, p);
   return p;
 }
@@ -25135,7 +25202,7 @@ function pxBind(c0, c2) {
   const k = c0.id * 4096 + c2.id;
   let bg = PXL.bgs.get(k);
   if (bg && bg.c0 === c0.gb && bg.c2 === c2.gb) return bg.bg;
-  const g = GPU.dev.createBindGroup({ layout: PXL.bgl, entries: [{ binding: 0, resource: { buffer: c0.gb, offset: 0, size: PXL_HW * 4 } }, { binding: 1, resource: { buffer: c0.gb } }, { binding: 2, resource: { buffer: c2.gb } }] });
+  const g = gpuBindGroup(PXL.bgl, [{ binding: 0, resource: { buffer: c0.gb, offset: 0, size: PXL_HW * 4 } }, { binding: 1, resource: { buffer: c0.gb } }, { binding: 2, resource: { buffer: c2.gb } }], 'px layer');
   PXL.bgs.set(k, { bg: g, c0: c0.gb, c2: c2.gb });
   return g;
 }
@@ -25145,21 +25212,27 @@ function pxWords(c) {
   if (!w) { w = { i: new Int32Array(c.cpu.buffer), u: new Uint32Array(c.cpu.buffer), f: new Float32Array(c.cpu.buffer) }; PXL.views.set(c.cpu, w); }
   return w;
 }
-// the layer's 'frame' or 'view' columns, rows 0..n-1, into the arena after `skip` words (the header): [chunk, its first word,
-// each column's first word (by its index in cols)]
-function pxCols(L, n, when, skip) {
-  const names = Object.keys(L.cols), at = new Int32Array(names.length);
+// the layer's 'frame' or 'view' columns, rows a..b-1, into the arena after `skip` words (the header): [chunk, its first word, each
+// column's start (by its index in cols) - the word of row 0, so the shader's row (its instance over PER: the whole draw's) reads it]
+function pxCols(L, a, b, when, skip) {
+  const names = Object.keys(L.cols), at = new Int32Array(names.length), n = b - a;
   let words = skip;
   names.forEach((k, i) => { const t = L.cols[k]; if (t.startsWith(when)) { at[i] = words; words += t.endsWith('rgba') ? n * 4 : n; } });
   const [c, off] = arenaAlloc(Math.max(16, words * 4), 256), w0 = off >> 2, W = pxWords(c);
   names.forEach((k, i) => {
     const t = L.cols[k]; if (!t.startsWith(when)) return;
-    const a = L.own[k], o = w0 + at[i]; at[i] = o;
-    if (t.endsWith('rgba')) { const F = W.f, B = PXL.b255; for (let r = 0; r < n; r++) { const v = a[r], q = o + r * 4; F[q] = B[v & 255]; F[q + 1] = B[(v >>> 8) & 255]; F[q + 2] = B[(v >>> 16) & 255]; F[q + 3] = B[v >>> 24]; } }
-    else if (t.endsWith('u8')) W.u.set(a.subarray(0, n), o);
-    else W.i.set(a.subarray(0, n), o);
+    const A = L.own[k], o = w0 + at[i];
+    if (t.endsWith('rgba')) { const F = W.f, B = PXL.b255; for (let r = 0; r < n; r++) { const v = A[a + r], q = o + r * 4; F[q] = B[v & 255]; F[q + 1] = B[(v >>> 8) & 255]; F[q + 2] = B[(v >>> 16) & 255]; F[q + 3] = B[v >>> 24]; } at[i] = o - a * 4; }
+    else { (t.endsWith('u8') ? W.u : W.i).set(A.subarray(a, b), o); at[i] = o - a; }
   });
   return [c, w0, at];
+}
+// (the rows a draw sends in one piece: as many as fit an arena chunk with the header, at most 65536 - a layer of more is drawn in
+// pieces, in order, in the same pass: no limit on rows)
+function pxBatch(L) {
+  if (L.batch) return L.batch;
+  let rb = 0; for (const k in L.cols) rb += L.cols[k].endsWith('rgba') ? 16 : 4;
+  return (L.batch = Math.max(1, Math.min(65536, Math.floor((ARENA.CH - PXL_HW * 4 - 1024) / rb))));
 }
 // (a layer of rectangles: room in its own columns for at least m entries, what's written kept; back: the columns)
 function pxRoom(L, m) {
@@ -25173,28 +25246,12 @@ function pxDraw(L, lo, hi) {
   if (L.tick !== renderTick) { if (L.frame) L.frame(T, L.own, n); L.tick = renderTick; L.fgen = -1; }   // (once a frame)
   const cnt = L.view(T, L.own, n, lo, hi, L);
   if (!cnt) return;
+  const X = fxBegin(ctx); if (!X) return;
   const s = ctx.s, t = ctx.target, m = s.m, op = s.op;
-  // the context's batch so far recorded, its clip built (glBegin, as a fillRect here would), and the open pass ended
-  glBegin(ctx, op); frameFlush();
-  const FT = frameTarget(ctx); if (!FT) return;
-  // (a clip that isn't an upright rectangle is in the target's stencil - the screen's comes with frameTarget; a layer's is its
-  // GLTarget's own, made by ensureStencil - SKELETON: frameTarget to give it, PART-NOTES.md)
-  const ds = s.clip ? (FT.stencil || (t.rb && t.rb.t) || null) : null;
-  if (s.clip && !ds) throw new Error('pxDraw: a clip with no stencil to test');
-  // the scissor, in the target's rows (WebGL's order), inside the target
-  let x0 = 0, y0 = 0, x1 = FT.w, y1 = FT.h;
-  if (s.sc) { const c = s.sc, gy = t._h - c[1] - c[3]; x0 = Math.max(0, c[0]); y0 = Math.max(0, gy); x1 = Math.min(FT.w, c[0] + c[2]); y1 = Math.min(FT.h, gy + c[3]); }
-  if (x1 <= x0 || y1 <= y0) return;
   pxShared();
-  const pipe = pxPipe(L, FT.tex, ds, op, !!t.isScreen);
-  // the frame's columns: once a frame (and again after a submit has taken the arena's memory back)
-  if (L.hasFrame && (L.fgen !== ARENA.gen || !L.fat || L.fn !== n)) { L.fat = pxCols(L, n, 'frame', 0); L.fgen = ARENA.gen; L.fn = n; }
-  // this view's header and columns
-  const [c0, w0, at] = pxCols(L, cnt, 'view', PXL_HW), W = pxWords(c0), F = W.f, I = W.i;
-  if (L.fat) { const fa = L.fat[2]; Object.keys(L.cols).forEach((k, i) => { if (L.cols[k].startsWith('frame')) at[i] = fa[i]; }); }
-  F[w0] = t._w; F[w0 + 1] = t._h; I[w0 + 2] = PBV;
-  F[w0 + 4] = m[0]; F[w0 + 5] = m[3]; F[w0 + 6] = m[4]; F[w0 + 7] = m[5];   // (upright: the world's contexts are, as beginView sets them - 42-render-sky.js)
-  I.set(at, w0 + 8);
+  const pipe = pxPipe(L, X), B = pxBatch(L), names = Object.keys(L.cols);
+  // the frame's columns: once a frame, a block a piece of rows (and again after a submit has taken the arena's memory back)
+  if (L.hasFrame && (L.fgen !== ARENA.gen || L.fn !== n)) { L.fat = []; L.fgen = ARENA.gen; L.fn = n; }
   const pal = PXL.pal;
   let skip = 0;
   L.pal.forEach((css, i) => {
@@ -25202,18 +25259,21 @@ function pxDraw(L, lo, hi) {
     for (let q = 0; q < 4; q++) pal[i * 4 + q] = Math.fround(((col >>> (8 * q)) & 255) / 255);
     if (!(col >>> 24) && op !== 'copy' && op !== 'source-in' && op !== 'destination-in') skip |= 1 << i;   // (fully clear: not drawn, as glFillQuad skips it)
   });
-  I[w0 + 3] = skip;
-  F.set(pal.subarray(0, L.pal.length * 4), w0 + 24);
-  // the pass on the context's target, after everything drawn into it so far
-  const tex = FT.tex, desc = { colorAttachments: [{ view: tex.view, loadOp: 'load', storeOp: 'store' }] };
-  if (ds) desc.depthStencilAttachment = Object.assign({ view: ds.view, stencilReadOnly: true }, gpuHasDepth(ds.fmt) ? { depthReadOnly: true } : {});
-  const pass = gpuPassBegin(desc, 'px');
-  tex.use = FR.sub; if (ds) ds.use = FR.sub;
+  const pass = fxPass(X, 'px');
   pass.setPipeline(pipe);
-  pass.setBindGroup(0, pxBind(c0, L.fat ? L.fat[0] : c0), [w0 * 4]);
-  pass.setScissorRect(x0, y0, x1 - x0, y1 - y0);
-  if (ds) pass.setStencilReference(0x80);
-  pass.draw(6, cnt * L.per);
+  for (let a = 0; a < cnt; a += B) {
+    const b = Math.min(cnt, a + B), q = a / B;
+    const fb = L.hasFrame ? L.fat[q] || (L.fat[q] = pxCols(L, a, b, 'frame', 0)) : null;
+    // this piece's header and this view's columns
+    const [c0, w0, at] = pxCols(L, a, b, 'view', PXL_HW), W = pxWords(c0), F = W.f, I = W.i;
+    if (fb) names.forEach((k, i) => { if (L.cols[k].startsWith('frame')) at[i] = fb[2][i]; });
+    F[w0] = t._w; F[w0 + 1] = t._h; I[w0 + 2] = PBV; I[w0 + 3] = skip;
+    F[w0 + 4] = m[0]; F[w0 + 5] = m[3]; F[w0 + 6] = m[4]; F[w0 + 7] = m[5];   // (upright: the world's contexts are, as beginView sets them - 42-render-sky.js)
+    I.set(at, w0 + 8);
+    F.set(pal.subarray(0, L.pal.length * 4), w0 + 24);
+    pass.setBindGroup(0, pxBind(c0, fb ? fb[0] : c0), [w0 * 4]);
+    pass.draw(6, (b - a) * L.per, 0, a * L.per);
+  }
   gpuPassEnd();
   GLR.stats.draws++; GLR.stats.quads += cnt * L.per; GPU.stats.draws++;
 }
@@ -35177,16 +35237,20 @@ let renderTick = 0;
 // billowing part of smoke and trails changes slowly; the thin line behind a shell is drawn every frame)
 let PUFF_PERIOD = 2;
 
-/* Fire: every flame is a soft disc of heat; the heat adds up where flames overlap and is cut into the fire
-   palette's steps. It used to be painted with blended sprites into a canvas and read back pixel by pixel; the
-   read-back is a stall on a GPU canvas (26 ms a frame on a PC for a dozen flames), so the heat field is now
-   summed in a plain array, coloured, and put on the screen in one draw. The disc's profile is the old
-   sprite's: full heat at the centre, 0.6 half way out, nothing at the edge. */
-const FIRE = { heat: new Float32Array(0), px: new Uint32Array(0), cvs: new Map(), list: [] };
+/* Fire: every flame is a soft disc of heat; the heat adds up where flames overlap and is cut into the fire palette's steps. The
+   disc's profile is the old sprite's: full heat at the centre, 0.6 half way out, nothing at the edge. (It was painted with blended
+   sprites and read back - a stall; then, until Nov 9, summed in a Float32Array on the processor every frame and uploaded as a
+   picture.) Since Nov 9 (engine part 6 - PART-NOTES.md) on the GPU, natively: the processor only gathers the flames in view (each its
+   centre and radius in the fire's grid - a cell FPX pixels - and its strength); 1. the heat: each flame an instanced quad over its
+   disc, its profile added (blended, one + one) into an R32F grid of the picture's cells - in the flames' order, as the sum was;
+   2. the colours: one quad where the picture goes (fireImage's dx, dy, dw, dh, through the context's transform, blend, scissor and
+   clip, as drawPixels laid it), each cell's heat cut at FIRE_T into FIRE_PAL, the context's alpha on it. */
+const FIRE = { list: [], tex: null, ep: -1, heat: null, col: new Map(), bgl: null, cbgl: null, hb: new Map(), cb: new Map() };
 // behind: only the flames burning inside a ship (drawn before the ships, so the hull hides their foot); otherwise
 // all the rest
 function drawFire(x0, x1, behind) { const F = fireImage(x0, x1, behind); if (F) firePut(F); }
-// the fire's picture this view (its pixels, a pixel a FPX block, and where it goes in the view: dx, dy, dw, dh) - null: none
+// the fire's picture this view: its flames (L: x, y in its cells, radius in cells, strength), its cells (W x H) and where it goes in
+// the view (dx, dy, dw, dh - a cell a FPX block) - null: none
 function fireImage(x0, x1, behind) {
   if (!flames.n) return null;
   const L = FIRE.list; L.length = 0;
@@ -35205,42 +35269,120 @@ function fireImage(x0, x1, behind) {
   bx1 = clamp(Math.ceil(bx1), 1, fw); by1 = clamp(Math.ceil(by1), 1, fh);
   const W = bx1 - bx0, H = by1 - by0;
   if (W <= 0 || H <= 0) return null;
-  if (FIRE.heat.length < W * H) { FIRE.heat = new Float32Array(W * H * 2); FIRE.px = new Uint32Array(W * H * 2); }
-  const heat = FIRE.heat, px = FIRE.px;
-  heat.fill(0, 0, W * H);
-  for (let i = 0; i < L.length; i += 4) {
-    const cx = L[i] - bx0, cy = L[i + 1] - by0, R = L[i + 2], a = L[i + 3], inv = 1 / R;
-    const ya = Math.max(0, Math.floor(cy - R)), yb = Math.min(H - 1, Math.ceil(cy + R)), xa = Math.max(0, Math.floor(cx - R)), xb = Math.min(W - 1, Math.ceil(cx + R));
-    for (let y = ya; y <= yb; y++) {
-      const dy = y + 0.5 - cy, o = y * W;
-      for (let x = xa; x <= xb; x++) {
-        const dx = x + 0.5 - cx, u = Math.sqrt(dx * dx + dy * dy) * inv;
-        if (u >= 1) continue;
-        heat[o + x] += a * (u < 0.5 ? 1 - 0.8 * u : 1.2 * (1 - u));
-      }
-    }
-  }
-  const pal = FIRE.pal || (FIRE.pal = FIRE_PAL.map(c => plColor(`rgb(${c[0]},${c[1]},${c[2]})`)));
-  for (let i = 0, n = W * H; i < n; i++) {
-    const v = heat[i];
-    if (v < FIRE_T[0]) { px[i] = 0; continue; }
-    let k = 0; while (k < 6 && v >= FIRE_T[k + 1]) k++;
-    px[i] = pal[k];
-  }
   const F = FIRE.img || (FIRE.img = {});
-  F.px = px; F.W = W; F.H = H; F.dx = bx0 * FPX - 3 * FPX; F.dy = by0 * FPX - 3 * FPX; F.dw = W * FPX; F.dh = H * FPX;
+  F.L = L; F.bx0 = bx0; F.by0 = by0; F.W = W; F.H = H; F.dx = bx0 * FPX - 3 * FPX; F.dy = by0 * FPX - 3 * FPX; F.dw = W * FPX; F.dh = H * FPX;
   return F;
 }
+// (the heat: an instance a flame - its centre in the picture's cells, radius, strength: fl[base + i]; hd: the grid's size, base, count)
+const FIRE_HEAT_WGSL = `
+struct HD { w: f32, h: f32, base: u32, n: u32 };
+@group(0) @binding(0) var<storage, read> hd: HD;
+@group(0) @binding(1) var<storage, read> fl: array<vec4f>;
+struct VO { @builtin(position) p: vec4f, @location(0) @interpolate(flat) f: vec4f };
+@vertex fn vs(@builtin(vertex_index) v: u32, @builtin(instance_index) i: u32) -> VO {
+  let f = fl[hd.base + i];
+  let k = select(select(select(3u, 2u, v == 4u), 0u, v == 3u), v, v < 3u);   // (the triangles 0 1 2 and 0 2 3)
+  let x0 = floor(f.x - f.z) - 1.0; let x1 = ceil(f.x + f.z) + 1.0; let y0 = floor(f.y - f.z) - 1.0; let y1 = ceil(f.y + f.z) + 1.0;
+  let q = vec2f(select(x0, x1, k == 1u || k == 2u), select(y0, y1, k >= 2u));
+  var o: VO; o.p = vec4f(q.x / hd.w * 2.0 - 1.0, 1.0 - q.y / hd.h * 2.0, 0.0, 1.0); o.f = f; return o;
+}
+// (a cell's centre: its fragment's place - x + 0.5, y + 0.5, as the sum's dx, dy)
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let d = i.p.xy - i.f.xy;
+  let u = sqrt(d.x * d.x + d.y * d.y) * (1.0 / i.f.z);
+  if (u >= 1.0) { discard; }
+  return vec4f(i.f.w * select(1.2 * (1.0 - u), 1.0 - 0.8 * u, u < 0.5), 0.0, 0.0, 0.0);
+}`;
+// (the colours: c.a target size, cells; c.q the quad's corners as glCorners works them out; c.t FIRE_T as floats (each the smallest
+// float32 not under it, so a float32 heat compares with it as with the number itself); c.g the context's alpha; c.p FIRE_PAL)
+const FIRE_COL_WGSL = `
+struct CD { a: vec4f, q: array<vec4f, 2>, t: array<vec4f, 2>, g: vec4f, p: array<vec4f, 7> };
+@group(0) @binding(0) var<storage, read> cd: CD;
+@group(0) @binding(1) var heat: texture_2d<f32>;
+struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f };
+@vertex fn vs(@builtin(vertex_index) v: u32) -> VO {
+  let k = select(select(select(3u, 2u, v == 4u), 0u, v == 3u), v, v < 3u);
+  let c = cd.q[k >> 1u]; let a_pos = select(c.xy, c.zw, (k & 1u) == 1u);
+  let p = a_pos / cd.a.xy;
+  var g = vec4f(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+  g.y = -g.y; g.z = (g.z + g.w) * 0.5;   // (rows in WebGL's order, z 0..w - as every vertex stage of the game: src/gpu/10-glsl.js)
+  var o: VO; o.p = g; o.uv = vec2f(select(0.0, cd.a.z, k == 1u || k == 2u), select(0.0, cd.a.w, k >= 2u)); return o;
+}
+fn th(j: u32) -> f32 { return cd.t[j >> 2u][j & 3u]; }
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let cell = clamp(vec2i(floor(i.uv)), vec2i(0), vec2i(cd.a.zw) - 1);
+  let v = textureLoad(heat, cell, 0).r;
+  if (v < th(0u)) { return vec4f(0.0); }
+  var k = 0u; loop { if (k >= 6u || v < th(k + 1u)) { break; } k = k + 1u; }
+  return cd.p[k] * cd.g.x;
+}`;
+// (FIRE_T as float32s: the smallest not under each - see FIRE_COL_WGSL)
+const FIRE_TF = (() => { const f = new Float32Array(1), u = new Uint32Array(f.buffer); return FIRE_T.map(t => { f[0] = t; if (f[0] < t) u[0]++; return f[0]; }); })();
+// the fire's WebGPU objects (src/gpu's calls), made again on a new device
+function fireShared() {
+  if (FIRE.ep === GPU.ep) return;
+  if (!GPU.feat['float32-blendable']) throw new Error('the fire needs float32-blendable (its heat summed in an R32F grid)');
+  const V = GPUShaderStage.VERTEX, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
+  FIRE.bgl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true } }, { binding: 1, visibility: V, buffer: { type: 'read-only-storage' } }], 'fire heat');
+  FIRE.cbgl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } }], 'fire colours');
+  const hm = gpuModule(FIRE_HEAT_WGSL, 'fire heat'), one = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
+  FIRE.heat = gpuRenderPipe({ layout: gpuPipeLayout([FIRE.bgl], 'fire heat'), vertex: { module: hm, entryPoint: 'vs' }, fragment: { module: hm, entryPoint: 'fs', targets: [{ format: 'r32float', blend: { color: one, alpha: one } }] }, primitive: { topology: 'triangle-list', cullMode: 'none' } });
+  FIRE.cm = gpuModule(FIRE_COL_WGSL, 'fire colours'); FIRE.cpl = gpuPipeLayout([FIRE.cbgl], 'fire colours');
+  if (FIRE.tex) gpuTexFree(FIRE.tex);   // (the old device's: counted out, not destroyed)
+  FIRE.col.clear(); FIRE.hb.clear(); FIRE.cb.clear(); FIRE.tex = null; FIRE.ep = GPU.ep;
+}
+// the heat grid: one R32F texture, grown in steps (a power of two each way) to the largest picture asked for - the passes run in order,
+// so every fire of the frame uses it in turn
+function fireGrid(W, H) {
+  const T = FIRE.tex;
+  if (T && T.gt && T.w >= W && T.h >= H) return T;
+  let w = 64, h = 64; while (w < W) w *= 2; while (h < H) h *= 2;
+  if (T) { w = Math.max(w, T.w); h = Math.max(h, T.h); gpuTexFree(T); }
+  FIRE.cb.clear();
+  return (FIRE.tex = gpuTex(w, h, 'r32float', 'fire'));
+}
+// (an arena chunk's bind groups - the heat's, and the colours' with the grid)
+function fireBind(map, layout, c, second) {
+  const key = c.id; let e = map.get(key);
+  if (!e || e.gb !== c.gb) { e = { gb: c.gb, bg: gpuBindGroup(layout, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: map === FIRE.hb ? 16 : 256 } }, { binding: 1, resource: second }], 'fire') }; map.set(key, e); }
+  return e.bg;
+}
+// the picture into the current context at this point of the frame (as drawPixels laid it)
 function firePut(F) {
-  const { px, W, H } = F;
-  if (GLR.on) { C.drawPixels(px, W, H, F.dx, F.dy, F.dw, F.dh); return; }
-  let bwid = 32, bhgt = 32;
-  while (bwid < W) bwid *= 2; while (bhgt < H) bhgt *= 2;
-  const key = bwid * 65536 + bhgt;
-  let cv = FIRE.cvs.get(key);
-  if (!cv) { cv = document.createElement('canvas'); cv.width = bwid; cv.height = bhgt; FIRE.cvs.set(key, cv); }
-  cv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(px.buffer, 0, W * H * 4), W, H), 0, 0);
-  C.drawImage(cv, 0, 0, W, H, F.dx, F.dy, F.dw, F.dh);
+  const ctx = C;
+  if (!GPU.on || GPU.lost || GLR.lost || !(ctx instanceof GLCtx)) return;
+  const X = fxBegin(ctx); if (!X) return;
+  fireShared();
+  const W = F.W, H = F.H, L = F.L, n = L.length >> 2, grid = fireGrid(W, H);
+  // 1. the heat: the flames in pieces of at most 65536 (each piece's block in the arena: 16 bytes a flame)
+  const hp = gpuPassBegin({ colorAttachments: [{ view: grid.view, loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'fire heat', [grid]);
+  hp.setPipeline(FIRE.heat); hp.setViewport(0, 0, W, H, 0, 1); hp.setScissorRect(0, 0, W, H);
+  for (let a = 0; a < n; a += 65536) {
+    const k = Math.min(n, a + 65536) - a, [c, off] = arenaAlloc(16 + k * 16, 256), w0 = off >> 2, Wd = pxWords(c), Fl = Wd.f;
+    Fl[w0] = W; Fl[w0 + 1] = H; Wd.u[w0 + 2] = (off + 16) >> 4; Wd.u[w0 + 3] = k;
+    for (let i = 0; i < k; i++) { const s = (a + i) * 4, o = w0 + 4 + i * 4; Fl[o] = L[s] - F.bx0; Fl[o + 1] = L[s + 1] - F.by0; Fl[o + 2] = L[s + 2]; Fl[o + 3] = L[s + 3]; }
+    hp.setBindGroup(0, fireBind(FIRE.hb, FIRE.bgl, c, { buffer: c.gb }), [off]);
+    hp.draw(6, k);
+  }
+  gpuPassEnd();
+  // 2. the colours, where the picture goes
+  const t = ctx.target, s = ctx.s, [c, off] = arenaAlloc(256, 256), w0 = off >> 2, Fc = pxWords(c).f;
+  glCorners(s.m, F.dx, F.dy, F.dw, F.dh);
+  const X4 = GLC4.x, Y4 = GLC4.y;
+  Fc[w0] = t._w; Fc[w0 + 1] = t._h; Fc[w0 + 2] = W; Fc[w0 + 3] = H;
+  for (let q = 0; q < 4; q++) { Fc[w0 + 4 + q * 2] = X4[q]; Fc[w0 + 5 + q * 2] = Y4[q]; }
+  Fc.set(FIRE_TF, w0 + 12); Fc[w0 + 19] = 0;
+  Fc[w0 + 20] = Math.fround(Math.round(s.ga * 255) / 255); Fc[w0 + 21] = Fc[w0 + 22] = Fc[w0 + 23] = 0;   // (the context's alpha, as glAlpha gives it)
+  const B = PXL.b255; for (let k = 0; k < 7; k++) { const p = FIRE_PAL[k], o = w0 + 24 + k * 4; Fc[o] = B[p[0]]; Fc[o + 1] = B[p[1]]; Fc[o + 2] = B[p[2]]; Fc[o + 3] = 1; }
+  const key = fxKey(X);
+  let pipe = FIRE.col.get(key);
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FIRE.cpl, vertex: { module: FIRE.cm, entryPoint: 'vs' }, fragment: { module: FIRE.cm, entryPoint: 'fs', targets: [fxColour(X.FT.tex, X.op, X.screen)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, fxStencil(X.ds))); FIRE.col.set(key, pipe); }
+  const pass = fxPass(X, 'fire');
+  pass.setPipeline(pipe);
+  pass.setBindGroup(0, fireBind(FIRE.cb, FIRE.cbgl, c, grid.view), [off]);
+  pass.draw(6);
+  gpuPassEnd();
+  GLR.stats.draws += 2; GPU.stats.draws += 2;
 }
 
 // The light on the sea's skin: at night the surface line catches the moonlight (brightest under the moon,
