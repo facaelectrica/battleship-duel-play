@@ -114,7 +114,9 @@ const KINDS={
   other:{name:'Other',color:'#d4d4d4',dash:true},
 };
 const catOf=e=>e&&e.category&&doc.catalog.find(c=>c.id===e.category);
-const catsOfKind=k=>doc.catalog.filter(c=>c.kind===k);
+const az=(a,b)=>String(a).localeCompare(String(b),undefined,{sensitivity:'base',numeric:true}); // every list is shown A to Z
+const byName=l=>[...l].sort((a,b)=>az(a.name||a.type||'',b.name||b.type||''));
+const catsOfKind=k=>byName(doc.catalog.filter(c=>c.kind===k));
 const vehShape=e=>{const t=(((catOf(e)||{}).name||'')+' '+(e.type||'')).toLowerCase();
   return /plane|air|heli|fly|blimp|balloon|cessna/.test(t)?'plane':/sub/.test(t)?'sub':/car|truck|road|bus|taxi|van|tractor|ambulance|engine/.test(t)?'car':'boat'};
 const biomeOf=e=>doc.biomes.find(b=>b.id===e.biome)||doc.biomes[0]||{name:'Land',color:'#e9b52c',h:40};
@@ -130,13 +132,14 @@ const nextOwnerCol=()=>OWNER_COLS.find(c=>!doc.characters.some(h=>h.color===c))|
 const ownerOf=e=>e.owner&&doc.characters.find(h=>h.id===e.owner);
 const itemCol=e=>{const o=ownerOf(e);return o?o.color:CATS[e.kind].color}; // owned things wear their owner's colour
 const onWater=e=>e.kind==='structure'&&/dock|pier/i.test(e.type||'');
-const SNAPS=e=>!isLand(e)&&e.kind!=='place'&&!onWater(e); // what stands on land when dropped there
+const SNAPS=e=>!isLand(e)&&e.kind!=='place'&&e.kind!=='vehicle'&&!onWater(e); // what stands on land when dropped there (vehicles start at a structure)
 const isWaterVeh=e=>e.kind==='vehicle'&&(vehShape(e)==='boat'||/seaplane/i.test(e.type||'')); // always at a dock (or in a marine hangar)
-const holderKind=h=>!h?null:onWater(h)?'dock':h.kind==='structure'&&/hangar|garage|station|shipyard/i.test(h.type||'')?'hangar':null;
-const canHold=(h,v)=>{const k=holderKind(h);return k==='dock'?isWaterVeh(v):k==='hangar'?v.kind==='vehicle':false};
+const holderKind=h=>!h?null:onWater(h)?'dock':h.kind==='structure'?'hangar':null; // any structure keeps vehicles, as any structure's spots do in the game
+const forBoats=h=>onWater(h)||/marine|shipyard|boat/i.test(h.type||'');
+const canHold=(h,v)=>{const k=holderKind(h);if(!k||v.kind!=='vehicle')return false;return isWaterVeh(v)?forBoats(h):k==='hangar'};
 const heldBy=e=>{const h=e.on&&byId.get(e.on);return h&&canHold(h,e)?h:null};
-function boatSnap(e,skip){let best=null,bd=1e9; // a boat with no spot of its own goes to the nearest dock
-  for(const d of doc.elements){if(!onWater(d)||!d.on||(skip&&skip.has(d.id)))continue;const dd=Math.abs(d.x-e.x);if(dd<bd){bd=dd;best=d}}
+function vehSnap(e,skip){let best=null,bd=1e9; // a vehicle with no spot goes to the nearest structure that can keep it
+  for(const h of doc.elements){if(h===e||!canHold(h,e)||(onWater(h)&&!h.on)||(skip&&skip.has(h.id)))continue;const dd=Math.abs(h.x-e.x);if(dd<bd){bd=dd;best=h}}
   if(!best)return false;e.on=best.id;e.x=best.x;e.y=best.y;return true}
 function holderAt(sx,sy,e,touch,skip){const s=touch?12:4; // the dock or hangar under the finger, never one being moved
   for(const h of HITS){if(h.t!=='el'||!h.rect||h.id===e.id||(skip&&skip.has(h.id))||!inR(h.rect,sx,sy,s))continue;const H=byId.get(h.id);if(H&&canHold(H,e))return H}return null}
@@ -177,10 +180,11 @@ function settleGroups(){ // a group's own spot follows its children (used when i
 }
 /* land: regions sit on the ocean line; what stands on one (e.on) keeps to its surface */
 function resnap(){
-  for(const e of doc.elements)if(isLand(e)){e.y=0;e.parent=null}
+  for(const e of doc.elements)if(isLand(e)||e.kind==='vehicle')e.parent=null; // a vehicle belongs to the structure that keeps it
+  for(const e of doc.elements)if(isLand(e))e.y=0;
   for(const e of doc.elements)if(onWater(e)){e.owner=null;const r=byId.get(e.on);if(isLand(r))dockTo(e,r);else waterSnap(e)}
   for(const e of doc.elements){if(isLand(e)||onWater(e)||heldBy(e))continue;const r=e.on&&byId.get(e.on);
-    if(isWaterVeh(e)){boatSnap(e)||(e.on=null);continue}
+    if(e.kind==='vehicle'){vehSnap(e)||(e.on=null);continue}
     if(!r)continue;if(!isLand(r)||e.x<r.x-r.w/2||e.x>r.x+r.w/2){e.on=null;continue}e.y=Math.round(topAt(r,e.x))}
   for(const e of doc.elements){const h=heldBy(e);if(h){e.x=h.x;e.y=h.y}} // its spot is drawn on the holder
 }
@@ -253,7 +257,7 @@ function layout(){
       const H=heldBy(e),HL=H&&visible(H)&&lay(H,d+1);
       if(HL&&!HL.group&&!HL.land){const list=(held.get(H.id)||[]),i=list.indexOf(e.id),n=list.length;
         if(holderKind(H)==='dock'){const sd=dockSide(H);sx=HL.sx+sd*(HL.r*1.5+r*1.3+i*r*2.4);fy=HL.sy+HL.r}
-        else{sx=HL.sx+(i-(n-1)/2)*r*2.3;fy=HL.sy-HL.r-3}}
+        else{sx=HL.sx+(i-(n-1)/2)*r*2.3;fy=HL.sy-HL.r*.6}} // on its roof
       const below=HL&&holderKind(H)==='dock'; // a moored boat's name goes under the water line, clear of the dock's
       let f=clamp(12*z,0,16);if(picked)f=Math.max(f,12);
       const hi=HL?(held.get(H.id)||[]).indexOf(e.id):0,stack=hi>0?hi*(f+3):0;
@@ -317,10 +321,10 @@ function render(){
     if(c.direction==='both')head(g.pts[0],g.pts[2]||g.pts[g.pts.length-1]);
   }
   // elements
-  for(const e of doc.elements){const L=LY.get(e.id);if(!L||L.group||L.land)continue;const pk=sel.els.has(e.id),bad=(onWater(e)||isWaterVeh(e))&&!e.on,col=bad?'#ff5c5c':itemCol(e);
+  for(const e of doc.elements){const L=LY.get(e.id);if(!L||L.group||L.land)continue;const pk=sel.els.has(e.id),bad=(onWater(e)||e.kind==='vehicle')&&!e.on,col=bad?'#ff5c5c':itemCol(e);
     if(pk){ctx.fillStyle='rgba(255,255,255,.15)';ctx.beginPath();ctx.arc(L.sx,L.sy,L.r+6,0,7);ctx.fill()}
     icon(e,L,pk&&!bad?'#fff':col);if(L.lab)label(L,pk&&!bad?'#fff':col);
-    if(bad){ctx.font=fontPx(11);ctx.fillStyle='#ff5c5c';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(onWater(e)?'NEEDS LAND':'NEEDS A DOCK',L.sx,L.sy+L.r+6)}}
+    if(bad){ctx.font=fontPx(11);ctx.fillStyle='#ff5c5c';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText(onWater(e)?'NEEDS LAND':isWaterVeh(e)?'NEEDS A DOCK':'NEEDS A STRUCTURE',L.sx,L.sy+L.r+6)}}
   // connection labels on top
   for(const c of doc.connections){const g=lg.get(c.id);if(!g)continue;const pk=sel.links.has(c.id),col=pk?'#fff':(c.color||KINDS[c.kind].color);
     let t=(c.label||'').toUpperCase();if(c.via)t+=(t?' · ':'')+c.via.toUpperCase();
@@ -356,7 +360,10 @@ function label(L,col){ctx.font=fontPx(L.f);ctx.fillStyle=col;ctx.textAlign='cent
 function head(tip,from){const a=Math.atan2(tip[1]-from[1],tip[0]-from[0]),s=11;ctx.setLineDash([]);ctx.beginPath();
   ctx.moveTo(tip[0]-s*Math.cos(a-.45),tip[1]-s*Math.sin(a-.45));ctx.lineTo(tip[0],tip[1]);ctx.lineTo(tip[0]-s*Math.cos(a+.45),tip[1]-s*Math.sin(a+.45));ctx.stroke()}
 /* one simple sketch shape per category */
-function icon(e,L,col){const{sx:x,sy:y,r}=L;ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=Math.max(1.4,r/8);ctx.beginPath();
+const FOOT={structure:.2,car:.2,plane:.5,sub:.5,boat:.5}; // how far each shape's bottom sits above its feet
+function icon(e,L,col){const{sx:x,r}=L;let y=L.sy;ctx.strokeStyle=col;ctx.fillStyle=col;ctx.lineWidth=Math.max(1.4,r/8);ctx.beginPath();
+  if(e.kind==='structure'&&!onWater(e))y+=r*FOOT.structure;
+  if(e.kind==='vehicle'){const sh=vehShape(e);y+=r*FOOT[sh];if(sh==='boat'&&holderKind(heldBy(e)||null)==='dock')y+=r*.35}
   switch(e.kind){
     case'region':ctx.moveTo(x-r,y+r*.6);ctx.quadraticCurveTo(x,y-r*1.4,x+r,y+r*.6);ctx.moveTo(x-r*1.2,y+r*.6);ctx.lineTo(x+r*1.2,y+r*.6);break;
     case'structure':if(onWater(e)){const fy=y+r,w=r*1.5;ctx.rect(x-w,fy-r*.3,w*2,r*.22);
@@ -419,7 +426,7 @@ cv.addEventListener('pointermove',ev=>{
       if(e.on&&op.move.has(e.on))continue; // riding on what moves
       const H=holderAt(p.x,p.y,e,ev.pointerType!=='mouse',op.move);if(H){e.on=H.id;continue}
       if(heldBy(e))e.on=null;
-      if(isWaterVeh(e)){boatSnap(e,op.move)||(e.on=null);continue}
+      if(e.kind==='vehicle'){vehSnap(e,op.move)||(e.on=null);continue}
       if(SNAPS(e)){const l=landUnder(e.x,e.y);e.on=l&&!op.move.has(l.id)?l.id:null}else waterSnap(e,op.move)}
     resnap();
     const h=hitAt(p.x,p.y,ev.pointerType!=='mouse');op.into=null;
@@ -439,7 +446,7 @@ function endPtr(ev){
   const o=op;op=null;const now=performance.now(),dbl=now-lastTap.t<350&&Math.hypot(p.x-lastTap.x,p.y-lastTap.y)<24;
   if(o.t==='place'){placeAt(p.x,p.y,pending);setPending(null)}
   else if(o.t==='pan'){if(!o.moved){if(dbl){openAdd(p.x,p.y);lastTap.t=0;return}sel={els:new Set(),links:new Set()};panel();draw()}}
-  else if(o.t==='drag'){if(o.moved){if(o.into){for(const id of sel.els)if(id!==o.into&&!isLand(byId.get(id))&&!descendants(id).has(o.into))byId.get(id).parent=o.into;toast('Put inside '+(byId.get(o.into).name||'group'))}commit();panel()}
+  else if(o.t==='drag'){if(o.moved){if(o.into){for(const id of sel.els)if(id!==o.into&&!isLand(byId.get(id))&&byId.get(id).kind!=='vehicle'&&!descendants(id).has(o.into))byId.get(id).parent=o.into;toast('Put inside '+(byId.get(o.into).name||'group'))}commit();panel()}
     else if(dbl){startEdit('el',o.hit);lastTap.t=0;return}}
   else if(o.t==='resize'){if(o.moved)commit()}
   else if(o.t==='bend'){if(o.moved)commit();else if(dbl){startEdit('link',o.hit);lastTap.t=0;return}}
@@ -464,7 +471,7 @@ function placeAt(sx,sy,t,fromId){
   else{const h=hitAt(sx,sy,true);if(h&&LY.get(h.id)?.group)e.parent=h.id;
     const H=holderAt(sx,sy,e,true);
     if(H){e.on=H.id;e.x=H.x;e.y=H.y}
-    else if(isWaterVeh(e)){if(!boatSnap(e)){toast('Boats and seaplanes need a dock — add one first');return}}
+    else if(e.kind==='vehicle'){if(!vehSnap(e)){toast(isWaterVeh(e)?'Boats and seaplanes need a dock — add one first':'Vehicles start at a structure — add one first');return}}
     else if(SNAPS(e)){const l=landUnder(e.x,e.y);if(l){e.on=l.id;e.y=Math.round(topAt(l,e.x))}}
     else if(!waterSnap(e)){toast('A dock needs land beside it — add a region first');return}}
   doc.elements.push(e);byId.set(e.id,e);sel={els:new Set([e.id]),links:new Set()};
@@ -498,7 +505,7 @@ function paste(dx,dy){
 function duplicate(){if(copySel())paste(Math.round(40/view.z),0)}
 function group(){
   const ids=[...sel.els];if(ids.length<1)return;
-  const items=ids.filter(id=>!isLand(byId.get(id)));if(!items.length)return;
+  const items=ids.filter(id=>{const e=byId.get(id);return!isLand(e)&&e.kind!=='vehicle'});if(!items.length)return;
   const places=items.filter(id=>byId.get(id).kind==='place');
   if(places.length===1&&items.length>1){for(const id of items)if(id!==places[0]&&!descendants(id).has(places[0]))byId.get(id).parent=places[0]}
   else{const g={id:uid('e'),name:'New Place',kind:'place',category:(catsOfKind('place')[0]||{}).id||null,type:'Small Town',x:0,y:0,parent:byId.get(items[0]).parent,on:null,notes:'',props:{}};
@@ -537,9 +544,9 @@ const pop=$('#pop');let pending=null;
 function openAdd(sx,sy,fromId){
   let h=`<input id="qName" placeholder="Name it, or pick a type below" autocomplete="off" autocapitalize="words"><div class="row"><button id="qCustom">+ ADD as custom</button></div>`;
   const chip=(d,t)=>`<button ${d}>${esc(t)}</button>`;
-  h+=`<div class="cat" style="color:${CATS.region.color}">LAND</div><div class="chips">`+doc.biomes.map(b=>`<button data-b="${b.id}" style="border-color:${b.color};color:${b.color}">${esc(b.name)}</button>`).join('')+'</div>';
-  for(const k of['place','structure','vehicle','nature','other'])for(const c of catsOfKind(k)){if(!c.types.length)continue;
-    h+=`<div class="cat" style="color:${CATS[k].color}">${esc(c.name.toUpperCase())}</div><div class="chips">`+c.types.map(t=>`<button data-k="${k}" data-c="${c.id}" data-t="${esc(t)}">${esc(t)}</button>`).join('')+'</div>'}
+  h+=`<div class="cat" style="color:${CATS.region.color}">LAND</div><div class="chips">`+byName(doc.biomes).map(b=>`<button data-b="${b.id}" style="border-color:${b.color};color:${b.color}">${esc(b.name)}</button>`).join('')+'</div>';
+  for(const c of byName(doc.catalog)){if(!c.types.length)continue;const k=c.kind;
+    h+=`<div class="cat" style="color:${CATS[k].color}">${esc(c.name.toUpperCase())}</div><div class="chips">`+[...c.types].sort(az).map(t=>`<button data-k="${k}" data-c="${c.id}" data-t="${esc(t)}">${esc(t)}</button>`).join('')+'</div>'}
   pop.innerHTML=h;pop.style.display='block';
   const pw=Math.min(300,W-8);pop.style.width=pw+'px';
   if(sx==null){sx=W/2;sy=H/2}
@@ -578,28 +585,28 @@ function wireCommon(){
 }
 function elPanel(e){
   const K=CATS[e.kind],land=isLand(e),owned=(e.kind==='structure'||e.kind==='vehicle')&&!onWater(e),cat=catOf(e);
-  const parents=doc.elements.filter(p=>p.id!==e.id&&!isLand(p)&&!descendants(e.id).has(p.id)).sort((a,b)=>(a.kind==='place'?0:1)-(b.kind==='place'?0:1)||(a.name||'').localeCompare(b.name||''));
-  const chars=[...doc.characters].sort((a,b)=>a.name.localeCompare(b.name));
-  const conns=doc.connections.filter(k=>k.from===e.id||k.to===e.id);
+  const parents=doc.elements.filter(p=>p.id!==e.id&&!isLand(p)&&p.kind!=='vehicle'&&!descendants(e.id).has(p.id)).sort((a,b)=>az(a.name||a.type||'',b.name||b.type||''));
+  const chars=byName(doc.characters);
+  const conns=doc.connections.filter(k=>k.from===e.id||k.to===e.id).sort((a,b)=>az(byId.get(a.from===e.id?a.to:a.from)?.name||'',byId.get(b.from===e.id?b.to:b.from)?.name||''));
   const props=Object.entries(e.props||{}).map(([k,v])=>k+': '+v).join('\n');
   const opt=(v,t,on)=>`<option value="${esc(v)}"${on?' selected':''}>${esc(t)}</option>`;
   const swatches=(attr,cols,cur)=>`<div class="chips">${cols.map(k=>`<button ${attr}="${k}" style="background:${k};width:44px;${cur===k?'outline:3px solid #fff;':''}"></button>`).join('')}</div>`;
   const stands=e.on&&byId.get(e.on),bio=land&&biomeOf(e);
-  const types=cat?[...cat.types]:[];if(e.type&&!types.includes(e.type))types.unshift(e.type);
+  const types=cat?[...cat.types]:[];if(e.type&&!types.includes(e.type))types.push(e.type);types.sort(az);
   pnl.innerHTML=`<h3 style="color:${K.color}">${K.name.toUpperCase()}</h3>
   <label>Name</label><input data-f="name" value="${esc(e.name)}">
-  ${land?`<label>Biome</label><div data-new="biome"><select data-f="biome" style="border-color:${bio.color};border-width:2px">${doc.biomes.map(b=>opt(b.id,b.name,b.id===e.biome)).join('')}${opt('__new','+ New biome…')}</select></div>
+  ${land?`<label>Biome</label><div data-new="biome"><select data-f="biome" style="border-color:${bio.color};border-width:2px">${byName(doc.biomes).map(b=>opt(b.id,b.name,b.id===e.biome)).join('')}${opt('__new','+ New biome…')}</select></div>
   <label>${esc(bio.name)} colour — every ${esc(bio.name)} region</label>${swatches('data-bc',BIOME_COLS,bio.color)}
-  <label>Country</label><div data-new="country"><select data-f="country">${opt('','— none —',!e.country)}${doc.countries.map(k=>opt(k.id,k.name,k.id===e.country)).join('')}${opt('__new','+ New country…')}</select></div>
+  <label>Country</label><div data-new="country"><select data-f="country">${opt('','— none —',!e.country)}${byName(doc.countries).map(k=>opt(k.id,k.name,k.id===e.country)).join('')}${opt('__new','+ New country…')}</select></div>
   <label>Length</label><input data-f="w" type="number" inputmode="numeric" min="60" step="50" value="${e.w}">`
-  :`<label>Category</label><div data-new="category"><select data-f="category">${cat?'':opt('','— none —',true)}${['place','structure','vehicle','nature','other'].map(k=>`<optgroup label="${CATS[k].name}">${catsOfKind(k).map(c=>opt(c.id,c.name,c.id===e.category)).join('')}</optgroup>`).join('')}${opt('__new','+ New category…')}</select></div>
+  :`<label>Category</label><div data-new="category"><select data-f="category">${cat?'':opt('','— none —',true)}${['place','structure','vehicle','nature','other'].sort((a,b)=>az(CATS[a].name,CATS[b].name)).map(k=>`<optgroup label="${CATS[k].name}">${catsOfKind(k).map(c=>opt(c.id,c.name,c.id===e.category)).join('')}</optgroup>`).join('')}${opt('__new','+ New category…')}</select></div>
   <label>Type</label><div data-new="type"><select data-f="type">${e.type?'':opt('','— none —',true)}${types.map(t=>opt(t,t,t===e.type)).join('')}${opt('__new','+ New type…')}</select></div>`}
   ${owned?`<label>Owner</label><div data-new="owner"><select data-f="owner">${opt('','— nobody —',!e.owner)}${chars.map(k=>opt(k.id,k.name,k.id===e.owner)).join('')}${opt('__new','+ New character…')}</select></div>
   ${ownerOf(e)?`<label>${esc(ownerOf(e).name)}'s colour — everything they own</label>${swatches('data-oc',OWNER_COLS,ownerOf(e).color)}`:''}`:''}
-  ${GOODS_FIELD[e.kind]?(()=>{const[f,lab]=GOODS_FIELD[e.kind],cur=e[f]||[];return`<label>${lab}</label><div class="chips" data-new="good">${doc.goods.map(g=>`<button data-good="${g.id}" class="${cur.includes(g.id)?'on':''}">${esc(g.name)}</button>`).join('')}<button data-good="__new">+ New good…</button></div>`})():''}
+  ${GOODS_FIELD[e.kind]?(()=>{const[f,lab]=GOODS_FIELD[e.kind],cur=e[f]||[];return`<label>${lab}</label><div class="chips" data-new="good">${byName(doc.goods).map(g=>`<button data-good="${g.id}" class="${cur.includes(g.id)?'on':''}">${esc(g.name)}</button>`).join('')}<button data-good="__new">+ New good…</button></div>`})():''}
   ${stands?`<label>${onWater(e)?'Held by':holderKind(stands)==='dock'?'Moored at':holderKind(stands)==='hangar'?'Kept in':'Stands on'}</label><div>${esc(stands.name||biomeOf(stands).name)}</div>`:''}
   ${(()=>{const hs=doc.elements.filter(v=>heldBy(v)===e);return hs.length?`<label>${holderKind(e)==='dock'?'Moored here':'Kept here'} (${hs.length})</label><div>${hs.map(v=>esc(v.name||v.type)).join(', ')}</div>`:''})()}
-  ${land?'':`<label>Inside (belongs to)</label><select data-f="parent">${opt('','— nothing —',!e.parent)}${parents.map(p=>opt(p.id,p.name||p.type,p.id===e.parent)).join('')}</select>`}
+  ${land||e.kind==='vehicle'?'':`<label>Inside (belongs to)</label><select data-f="parent">${opt('','— nothing —',!e.parent)}${parents.map(p=>opt(p.id,p.name||p.type,p.id===e.parent)).join('')}</select>`}
   <label>Notes</label><textarea data-f="notes">${esc(e.notes)}</textarea>
   <label>Other properties — one per line, like “Opens: 8am”</label><textarea data-f="props">${esc(props)}</textarea>
   ${land?'':`<label>Connections (${conns.length})</label><div class="links">${conns.map(k=>{const o=byId.get(k.from===e.id?k.to:k.from);const arrow=k.direction==='both'?'↔':k.direction==='none'?'—':(k.from===e.id?'→':'←');
@@ -644,7 +651,7 @@ function linkPanel(k){
   <label>What happens</label><input data-f="label" value="${esc(k.label)}" placeholder="e.g. carries fish">
   <label>Kind</label><div class="chips">${Object.entries(KINDS).map(([id,v])=>`<button data-k="${id}" class="${id===k.kind?'on':''}" style="${id===k.kind?'':'color:'+v.color}">${v.name}</button>`).join('')}</div>
   <label>Direction</label><div class="chips">${Object.entries(DIRS).map(([id,v])=>`<button data-d="${id}" class="${id===k.direction?'on':''}">${v}</button>`).join('')}<button id="pSwap">SWAP ends</button></div>
-  <label>Vehicle or character</label><input data-f="via" list="dlVia" value="${esc(k.via)}" placeholder="e.g. Truck"><datalist id="dlVia">${[...new Set(vias)].map(v=>`<option value="${esc(v)}">`).join('')}</datalist>
+  <label>Vehicle or character</label><input data-f="via" list="dlVia" value="${esc(k.via)}" placeholder="e.g. Truck"><datalist id="dlVia">${[...new Set(vias)].sort(az).map(v=>`<option value="${esc(v)}">`).join('')}</datalist>
   <label>Colour</label><div class="chips"><button data-col="" class="${k.color?'':'on'}">Kind's</button>${['#ff7a45','#6f8cff','#7fd99a','#c49bff','#5fd4e0','#f5c542','#ff5c5c','#ffffff'].map(c=>`<button data-col="${c}" class="${k.color===c?'on':''}" style="background:${c};width:44px"></button>`).join('')}</div>
   <label>Notes</label><textarea data-f="notes">${esc(k.notes)}</textarea>
   <div class="row"><button id="pFlat">STRAIGHTEN</button><button id="pDel">DELETE</button></div>`;
@@ -665,7 +672,7 @@ $('#bUndo').onclick=undo;$('#bRedo').onclick=redo;$('#bFit').onclick=fit;
 $('#bLabels').onclick=()=>{showLabels=!showLabels;$('#bLabels').classList.toggle('on',showLabels);prefsSave();draw()};
 $('#bShow').onclick=()=>{
   const chip=(id,name,col)=>`<button data-h="${id}" class="${hidden.has(id)?'':'on'}" style="${hidden.has(id)?'color:'+col:''}">${name}</button>`;
-  modal(`<h3>SHOW</h3><label>Things</label><div class="chips">${Object.entries(CATS).map(([k,c])=>chip(k,c.name,c.color)).join('')}</div>
+  modal(`<h3>SHOW</h3><label>Things</label><div class="chips">${Object.entries(CATS).sort((a,b)=>az(a[1].name,b[1].name)).map(([k,c])=>chip(k,c.name,c.color)).join('')}</div>
     <label>Connections</label><div class="chips">${Object.entries(KINDS).map(([k,c])=>chip('k:'+k,c.name,c.color)).join('')}</div><div class="row"><button data-close>DONE</button></div>`,
     box=>box.querySelectorAll('[data-h]').forEach(b=>b.onclick=()=>{const id=b.dataset.h;hidden.has(id)?hidden.delete(id):hidden.add(id);prefsSave();draw();$('#bShow').onclick()}));
 };
