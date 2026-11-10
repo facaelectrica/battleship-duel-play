@@ -29,6 +29,14 @@
         grow: SKYSNAP_GROW.match(/\.\d{4}|[01c]/g).map(t => t === 'c' ? 0.35 : +t) });
     },
     done: g => { if (o.keep) Object.assign(g.nsky.P, o.keep); g.nsky.setSun(null); g.camAt(null); } });
+  const carScene = t => ({ mode: 'land', one: true, env: { time: t, weather: 0.15, rain: 0, wind: 0.2, sea: 0.3, fog: 0 }, frames: 40,
+    setup: g => {
+      const at = g.swT.ev(`(() => { const L = LANDS.c, x0 = L.lo[0] + (L.hi[0] - L.lo[0]) * 0.35; storyCars.length = 0; let x = x0;
+        for (const [k, art] of ['taxi', 'suv', 'van', 'city_bus', 'tractor', 'fire_engine'].entries()) { const c = newStoryCar({ art, x, y: landTop(x), dir: k % 2 ? 1 : -1, v: 0 }); storyCars.push(c); x += storyCarSize(c)[0] * 1.2; }
+        const M = storyCars[2], [w, h] = storyCarSize(M); for (let i = 0; i < 14; i++) dmgMark(M, M.x + (i / 13 - 0.5) * w * 0.8, M.y - h * (0.25 + 0.04 * (i % 9)), i % 4 ? 0 : 1);
+        storyCars[1].hp = 1; storyCars[3].hp = 0; storyCars[3].lost = true; return [(x0 + x) / 2, landTop((x0 + x) / 2)]; })()`);
+      g.camAt(at[0], at[1] - 60); g.cutTo && g.cutTo(0);
+    }, done: g => { g.camAt(null); g.swT.ev('storyCars.length = 0'); } });
   const SCENES = {
     battle: { mode: 'duel', env: { time: 12, weather: 0.15, rain: 0, wind: 0.3, sea: 0.3 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); g.setOrder && (g.setOrder(0, 3), g.setOrder(1, 3)); for (const p of [0, 1]) for (const k of [3, 4]) g.damage(p, k, 1); }, fire: true, frames: 150 },
     storm: { mode: 'duel', env: { time: 18.6, weather: 0.92, rain: 0.8, wind: 0.8, sea: 0.9 }, setup: g => { g.placeOut(0, 'ship', 3200); g.placeOut(1, 'ship', 3900); for (const p of [0, 1]) for (const k of [2, 3, 4]) g.damage(p, k, 1); }, fire: true, frames: 150 },
@@ -78,10 +86,18 @@
       SCENES.islestorm.at = at; if (at) { g.camAt(at[0], at[1] - 120); g.cutTo(0); } g.stepFixed(1 / 60, 2); },
       tick: (g, i) => { const at = SCENES.islestorm.at; if (at && i % 45 === 20) g.swT.ev('emit("blast", { x: ' + (at[0] + 140) + ', y: ' + (at[1] - 10) + ', r: 30, s: 1 })'); },
       frames: 150, done: g => g.camAt(null) },
-    // (Nov 9, part 3 plants) THE BIOME EDITOR'S BEACH (veged = '1' first, as forest): its ground and plants the BEACH biome's - its decks 2 and 3 the plants' GPU
-    // layer (bushes, jungle, palms behind the ground), a breeze; the biome the editor was on given back after
-    beach: { mode: 'land', one: true, env: { time: 15, weather: 0.2, rain: 0, wind: 0.6, sea: 0.3 }, setup: g => { SCENES.beach.keep = g.veglab.sets.cur; g.veglab.sets.use('tropical'); g.veglab.reskin('tropical'); g.veglab.replant && g.veglab.replant(); g.stepFixed(1 / 60, 2); }, frames: 120,
-      done: g => { const k = SCENES.beach.keep; if (k && k !== 'tropical') { g.veglab.sets.use(k); g.veglab.replant && g.veglab.replant(); } } },
+    // (Nov 9, part 3 plants) THE BIOME EDITOR'S BEACH (veged = '1' first, as forest): the editor's world switched to the BEACH biome as its own BIOME switch does
+    // it in place (__vgBiomeGo), its decks 2 and 3 the plants' GPU layer (bushes, jungle, palms behind the ground), a breeze, the camera on the middle of those
+    // plants. It needs the editor up (its panel comes ~0.6 s after the page is ready, and moves the camera as it does) and on a land biome: DEEP SEA's world is
+    // the sea - the editor's own switch out of it reloads the page; __vegBeach() does that once (it switches, saves and reloads). The biome is left on BEACH
+    // (put back in place it was saved too - the next page opened on it)
+    beach: { mode: 'land', one: true, env: { time: 15, weather: 0.2, rain: 0, wind: 0.6, sea: 0.3 }, setup: g => {
+      const V = g.veglab; if (!V || !window.__vgBiomeGo) throw new Error('beach: the Biome Editor is not up - load with sessionStorage veged = 1 and wait for its panel');
+      if (V.sets.cur === 'sea') throw new Error('beach: the Biome Editor is on DEEP SEA, whose world is the sea - run __vegBeach() once (it switches to BEACH and reloads), then the scene');
+      window.__vgBiomeGo('tropical'); g.stepFixed(1 / 60, 2);
+      const at = JSON.parse(g.swT.ev("JSON.stringify((() => { const L = (land.props || []).filter(it => it.deck >= 3 && !it.uw && !it.cave).sort((a, b) => a.x - b.x); const q = L[L.length >> 1]; return q ? [q.x, propTop(q)] : null; })())"));
+      if (!at) throw new Error('beach: no plants on DECK 2 or behind after the switch');
+      V.look(at[0], at[1] - 60, 2.2); g.stepFixed(1 / 60, 2); }, frames: 120 },
     // (Nov 9, skeleton chat) STORY'S START (tools/story.mjs's set-up) and A CAVE (the exploration sub put at the left system's mouth and
     // taken in - CAVE_API.dive, as tools/cavesplay.mjs)
     story: { mode: 'story', one: true, env: { time: 11, weather: 0.3, rain: 0, wind: 0.3, sea: 0.3, fog: 0 }, setup: g => { }, frames: 60 },
@@ -93,6 +109,9 @@
     // no fog (lakeDusk: the boats on the lakes dark against it, the band from each lake's level)
     openfog: { mode: 'land', one: true, env: { time: 12, weather: 0.2, rain: 0, wind: 0.3, sea: 0.3, fog: 0.6 }, setup: g => { }, frames: 120 },
     opendusk: { mode: 'land', one: true, env: { time: 18.2, weather: 0.1, rain: 0, wind: 0.2, sea: 0.3, fog: 0 }, setup: g => { }, frames: 120 },
+    // (Nov 9, things part) STORY'S CARS on the first land, in a row (each its own art and way round): whole, hurt (hp 1: charred), with 14
+    // blows' marks (rounds and blasts), destroyed (charred all over), parked - at noon, at the low sun (its warm rims) and at night (the moon's)
+    cars: carScene(12), carsdusk: carScene(18.2), carsnight: carScene(22.5),
     openfar: { mode: 'land', one: true, env: { time: 16, weather: 0.5, rain: 0.2, wind: 0.5, sea: 0.5 }, setup: g => { g.zoomStep(0, -99); g.cutTo(0); }, frames: 90 },
     // (Nov 9, skeleton chat) the sky's three approved looks (skySnap above): 10:00 with the sun dragged behind a small cloud, 18:06's colours,
     // and 19:21 at night
@@ -108,12 +127,18 @@
   // a turn for the browser that isn't throttled in a tab or window that isn't in front (a timer there runs once a second at best;
   // a message is handled at once) - so scenes run at full speed in the background, on the second PC or in a second tab
   { const ch = new MessageChannel(), q = []; ch.port1.onmessage = () => { const r = q.shift(); if (r) r(); }; window.__turn = () => new Promise(r => { q.push(r); ch.port2.postMessage(0); }); }
+  // (the Biome Editor switched to BEACH as its own switch does out of DEEP SEA: saved, the page loaded again in the editor - for the beach scene)
+  window.__vegBeach = () => { __game.veglab.sets.use('tropical'); try { sessionStorage.setItem('veged', '1'); } catch (e) { } location.reload(); };
   window.__sameRun = async (name, key, cmp) => {
     await window.__ready; const t0 = realNow(), g = __game, sc = SCENES[name];
     window.__reseed(777);
     if (sc.one) g.setCtl(['kb', 'none']); if (sc.two) g.setCtl(['kb', 'kb2']);
     g.setMode(sc.mode); g.ui.title = false; g.ui.resume = false; g.paused = true; g.hold = true;
     Object.assign(g.env, sc.env); g.W && (g.W.manual = { time: 1, weather: 1, rain: 1, wind: 1, sea: 1, fog: 1 }); g.computeEnv();
+    // (Nov 9, sky part: a scene starts as a new round does - the sky's clouds as this weather is, at once (NSKY.snap, as 19-menu.js freshWeather), not
+    // easing over from the last scene's: the GPU sky grows each cloud toward the weather on drawn frames as the live clouds always did, where
+    // the old baked sky drew every cloud at its finished size)
+    if (g.nsky && g.nsky.snap) g.nsky.snap();
     g.stepFixed(1 / 60, 2); sc.setup(g); window.__reseed(4242);
     for (let i = 0; i < sc.frames; i++) {
       if (sc.fire && i % 40 === 0) for (const p of [0, 1]) { try { const gu = g.gun(p); gu.elev = 30 + (i / 40 % 5) * 4; gu.power = 0.5; g.fire(p); } catch (e) { } }
@@ -373,7 +398,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 01:43', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 02:15', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -2381,7 +2406,7 @@ function gpuGLTransformFeedback(gl, p, first, count) {
       reads. Today the light is still drawn by the old lightDraw (47-render-overlays.js, 50-land-zz-light.js); the light pass
       (part 7) is written against these inputs.
    ================================================================ */
-const FRAME = { layers: [], camF: new Float32Array(16), litF: new Float32Array(16), lampF: new Float32Array(8 * 64) };
+const FRAME = { layers: [], camF: new Float32Array(16), litF: new Float32Array(32), dt: 1 / 60, tPrev: null, lampF: new Float32Array(8 * 64) };
 function frameLayer(name, run, at) {
   const L = { name, run }, i = FRAME.layers.findIndex(q => q.name === name);
   if (i >= 0 && !at) { FRAME.layers[i] = L; return L; }
@@ -2390,6 +2415,9 @@ function frameLayer(name, run, at) {
   if (at && ref >= 0) FRAME.layers.splice(at.before ? ref : ref + 1, 0, L); else FRAME.layers.push(L);
   return L;
 }
+// THE FRAME'S dt (part 3's ask): the game clock's step since the last frame drawn (s; the clock 'time', so a stepped test run and a
+// paused game give the same steps every run - 0 while paused, at most 0.25), set at the frame's start by frameTick()
+function frameTick() { const t = typeof time === 'number' ? time : 0; FRAME.dt = FRAME.tPrev == null ? 1 / 60 : Math.min(0.25, Math.max(0, t - FRAME.tPrev)); FRAME.tPrev = t; }
 // the camera of the view beginView set last (vi its index): { buffer, offset, size } in this submit's arena - read by a pass as a
 // uniform: vec4(left px, top px, scale, zoom), vec4(view x on the target, view width, target width, target height), vec4(time, view, shake x px, shake y px)
 function frameCam(vi, v, tw, th) {
@@ -2400,18 +2428,25 @@ function frameCam(vi, v, tw, th) {
   const [c, o] = arenaAlloc(64, 256); c.cpu.set(new Uint8Array(f.buffer), o);
   return { buffer: c.gb, offset: o, size: 64 };
 }
-// the light's inputs this frame: { scalars (the hour's and weather's light), lamps (n of them, 8 numbers each: x, y in the world,
-// angle, strength, reach, 0, 0, 0) } in this submit's arena
+// the light's inputs this frame: { scalars (the hour's and weather's light, 32 numbers - below), lamps (n of them, 8 numbers each:
+// x, y in the world, angle, strength, reach, 0, 0, 0) } in this submit's arena. The scalars:
+//   0 light, 1 night, 2 dusk, 3 sunAlt, 4 fog, 5 rain, 6 cloud, 7 lampsOn, 8 sunset, 9 tintA, 10 warm, 11 hour,
+//   12 day, 13 overcast, 14 the frame's dt (FRAME.dt), 15 0,
+//   16-23 view 1, 24-31 view 2: the sun's x, y on the screen (px; x -1e9 when the sky draws no sun in that view), its disc's
+//   radius, the moon's x, y (x -1e9 when none), 0, 0, 0 - 42-render-sky.js sunXs / sunYs / sunRs / moonXs / moonYs (part 3's ask)
 function frameLight() {
   const f = FRAME.litF;
   f[0] = E.light; f[1] = E.night; f[2] = E.dusk; f[3] = E.sunAlt;
   f[4] = E.fog || 0; f[5] = E.rain || 0; f[6] = E.cloud || 0; f[7] = E.lampsOn || 0;
   f[8] = E.sunset || 0; f[9] = E.tintA || 0; f[10] = E.warm || 0; f[11] = E.hour || 0;
+  f[12] = E.day != null ? E.day : 1; f[13] = E.overcast || 0; f[14] = FRAME.dt; f[15] = 0;
+  const sk = typeof sunXs !== 'undefined';
+  for (let v = 0; v < 2; v++) { const o = 16 + v * 8; f[o] = sk ? sunXs[v] : -1e9; f[o + 1] = sk ? sunYs[v] : 0; f[o + 2] = sk ? sunRs[v] : 0; f[o + 3] = sk ? moonXs[v] : -1e9; f[o + 4] = sk ? moonYs[v] : 0; f[o + 5] = f[o + 6] = f[o + 7] = 0; }
   const L = typeof subLamps === 'function' ? subLamps() : [], n = Math.min(L.length, 64), lf = FRAME.lampF;
   for (let i = 0; i < n; i++) { const q = L[i], o = i * 8; lf[o] = q.x; lf[o + 1] = q.y; lf[o + 2] = q.a || 0; lf[o + 3] = q.k == null ? 1 : q.k; lf[o + 4] = q.reach || 0; lf[o + 5] = lf[o + 6] = lf[o + 7] = 0; }
-  const [c, o] = arenaAlloc(64, 256); c.cpu.set(new Uint8Array(f.buffer), o);
+  const [c, o] = arenaAlloc(128, 256); c.cpu.set(new Uint8Array(f.buffer), o);
   const [c2, o2] = arenaAlloc(Math.max(32, n * 32), 256); c2.cpu.set(new Uint8Array(lf.buffer, 0, n * 32), o2);
-  return { scalars: { buffer: c.gb, offset: o, size: 64 }, lamps: { buffer: c2.gb, offset: o2, size: Math.max(32, n * 32) }, n };
+  return { scalars: { buffer: c.gb, offset: o, size: 128 }, lamps: { buffer: c2.gb, offset: o2, size: Math.max(32, n * 32) }, n };
 }
 // 4. DRAWING NATIVELY BETWEEN THE OLD CODE'S DRAWS (a part's own passes, until its old code is gone): frameFlush() first - the old
 // code's batch recorded and the open pass ended, so the part's pass comes after it in the same command encoder, in order; then
@@ -2443,12 +2478,22 @@ function gpuCanvasView(cv) {
   const ctx = cv.getContext('webgpu'); if (!ctx) return null;
   ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' });
   const V = { cv, ctx, T: new GLTarget(Math.max(1, cv.width), Math.max(1, cv.height)), pipe: null, ep: -1, view: null, bg: null };
-  GPU.onRebuild.push(() => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } });
+  V.re = () => { try { ctx.configure({ device: GPU.dev, format: GPU.cfmt, alphaMode: 'premultiplied' }); } catch (e) { } };
+  GPU.onRebuild.push(V.re);
   return V;
+}
+// a canvas view given up (an editor panel's canvas gone from the page - part 5's ask): its context let go, its rebuild hook removed,
+// its layer freed. V is no use after.
+function gpuCanvasDrop(V) {
+  if (!V || V.dropped) return; V.dropped = true;
+  const i = GPU.onRebuild.indexOf(V.re); if (i >= 0) GPU.onRebuild.splice(i, 1);
+  try { V.ctx.unconfigure(); } catch (e) { }
+  try { V.T.free(); } catch (e) { }
+  V.bg = V.view = V.pipe = null;
 }
 function gpuCanvasSize(V, w, h) { V.cv.width = w; V.cv.height = h; V.T.width = w; V.T.height = h; }
 function gpuCanvasShow(V) {
-  if (!V || !GPU.on || GPU.lost) return false;
+  if (!V || V.dropped || !GPU.on || GPU.lost) return false;
   if (typeof glFlush === 'function') glFlush();
   const t = V.T.tex && V.T.tex.t; if (!t) return false;
   if (!V.pipe || V.ep !== GPU.ep) { const m = gpuModule(GPU_HUD_WGSL, 'canvas show'); V.pipe = gpuRenderPipe({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } }); V.ep = GPU.ep; V.view = null; }
@@ -7649,7 +7694,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 01:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 02:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36385,7 +36430,7 @@ function render() { renderFrame(); hudShow(); }
 function renderFrame() {
   if (!worldLive()) { drawNoWorld(); return; }            // (no world yet, or LOADING: the menu over black - user Oct 31, 19-menu.js)
   const T0 = performance.now();
-  renderTick++; scaledFrame++;
+  renderTick++; scaledFrame++; frameTick();
   SURF.on = true;
   plSize();
   glBeginFrame();
