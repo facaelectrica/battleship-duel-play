@@ -92,7 +92,7 @@ const UPM=63.75/9.83,KN=.5144*UPM,KMH=UPM/3.6; // world units a metre; a second 
 const MU=10*UPM; // how many world units the drawing's sizes are made for (icons and land read the same at the starting zoom)
 const SHELL=`<div id="app">
   <div id="bar">
-    <span id="title">FAR AWAY<small id="ver">v32</small></span>
+    <span id="title">FAR AWAY<small id="ver">v33</small></span>
     <button id="tWorld" class="on" title="The world map">WORLD</button>
     <button id="tLists" title="Every list: categories, types, owners, countries, goods, biomes">LISTS</button>
     <button id="tEditor" title="Draw the icons">EDITOR</button>
@@ -290,6 +290,13 @@ function changed(){
   $('#hint').style.display=doc.elements.length?'none':'';draw();
   if(typeof viewMode!=='undefined'&&viewMode==='lists')renderLists();
 }
+function mergeIcons(raw,subs,types){
+  let icons=(Array.isArray(raw)?raw:[]).filter(i=>i&&i.id).map(i=>({id:String(i.id),name:String(i.name??'Icon'),kind:['structure','vehicle','nature'].includes(i.kind)?i.kind:'structure',strokes:(Array.isArray(i.strokes)?i.strokes:[]).map(st=>({pts:(Array.isArray(st&&st.pts)?st.pts:[]).filter(p=>Array.isArray(p)&&isFinite(p[0])&&isFinite(p[1])).map(p=>[+p[0],+p[1]]),closed:!!(st&&st.closed),smooth:!!(st&&st.smooth)}))}));
+  const remap={};
+  for(const I of[...icons]){if(I.id.startsWith('b:'))continue;const B=BUILTIN.find(b=>b.kind===I.kind&&az(b.name,I.name.trim())===0);if(!B)continue;
+    remap[I.id]=B.id;if(icons.some(x=>x.id===B.id))icons=icons.filter(x=>x!==I);else I.id=B.id} // a copy of a built-in becomes its edit
+  for(const t of[...subs,...types])if(remap[t.icon])t.icon=remap[t.icon];
+  return icons}
 function sanitize(d){
   if(!d||!Array.isArray(d.elements))throw new Error('Not a Far Away world plan');
   const list=a=>(Array.isArray(a)?a:[]).filter(c=>c&&c.id).map(c=>({...c,id:String(c.id),name:String(c.name??'')}));
@@ -349,7 +356,8 @@ function sanitize(d){
   for(const e of d.elements){const R=e.routine;if(e.kind!=='vehicle'||!R||typeof R!=='object'){delete e.routine;continue}
     e.routine={start:['time','cargo','off'].includes(R.start)?R.start:'time',every:Math.max(1,Math.round(+R.every||1)),day:Math.max(0,Math.round(+R.day||0)),slot:clamp(Math.round(+R.slot||0),0,3),takes:Math.max(1,Math.round(+R.takes||1)),
       steps:(Array.isArray(R.steps)?R.steps:[]).filter(st=>st&&cids2.has(st.link)).map(st=>({link:st.link,until:Math.max(1,Math.round(+st.until||100))}))}}
-  return{format:'far-away-world-plan',version:3,name:String(d.name||'Far Away'),units:'game',savedAt:d.savedAt||null,countries,characters,goods,tasks,biomes,icons:(Array.isArray(d.icons)?d.icons:[]).filter(i=>i&&i.id).map(i=>({id:String(i.id),name:String(i.name??'Icon'),kind:['structure','vehicle','nature'].includes(i.kind)?i.kind:'structure',strokes:(Array.isArray(i.strokes)?i.strokes:[]).map(st=>({pts:(Array.isArray(st&&st.pts)?st.pts:[]).filter(p=>Array.isArray(p)&&isFinite(p[0])&&isFinite(p[1])).map(p=>[+p[0],+p[1]]),closed:!!(st&&st.closed),smooth:!!(st&&st.smooth)}))})),subs,types,elements:d.elements,connections:d.connections};
+  const icons=mergeIcons(d.icons,subs,types);
+  return{format:'far-away-world-plan',version:3,name:String(d.name||'Far Away'),units:'game',savedAt:d.savedAt||null,countries,characters,goods,tasks,biomes,icons,subs,types,elements:d.elements,connections:d.connections};
 }
 
 /* ---------- canvas & view ---------- */
@@ -521,6 +529,7 @@ const BUILTIN=[ // [kind, name, key it is drawn by, on water, a dock]
   .map(([kind,name,key,w,d])=>({id:'b:'+slug(kind+' '+name),kind,name,key,water:w==='1',dock:d==='1',builtin:true}));
 const iconById=id=>id?((doc.icons||[]).find(i=>i.id===id)||BUILTIN.find(b=>b.id===id)||null):null; // an edited built-in is kept in doc.icons under the built-in's id
 const bIcon=(k,n)=>'b:'+slug(k+' '+n);
+const iconsOfKind=k=>byName([...BUILTIN.filter(b=>b.kind===k).map(b=>iconById(b.id)),...(doc.icons||[]).filter(i=>i.kind===k&&!i.id.startsWith('b:'))]); // every icon of a category, A to Z
 function builtinFor(e){ // which built-in drawing a thing gets from its name (the same order icon() draws in)
   const n=(tn(e)+' '+((subOf(e)||{}).name||'')).toLowerCase(),has=w=>n.includes(w);
   if(e.kind==='structure'){if(onWater(e))return bIcon('structure','Dock');
@@ -1096,8 +1105,9 @@ function renderLPanel(){const P=$('#lpanel');
     if(kind==='vehicle')h+=`<label>Speed</label><input data-lspeed type="number" inputmode="numeric" min="1" value="${Math.round(o.speed||SPEEDS[o.id]||14*UPM)}">
       <label>Cargo <span style="opacity:.7">· none = any</span></label>${gchips('data-lcarry',o.carries||[])}
       <label>Properties</label><div class="plist">${S.does.includes('water')?`<button class="on" disabled>Needs dock · ${esc(S.name)}</button>`:`<button data-lwater class="${(o.does||[]).includes('water')?'on':''}">Needs dock</button>`}</div>`}
-  if(k==='sub'||k==='type'){const ik=kind,cur=o.icon||'',ops=[['','Default'],...byName((doc.icons||[]).filter(i=>i.kind===ik)).map(i=>[i.id,i.name]),...BUILTIN.filter(b=>b.kind===ik).map(b=>[b.id,b.name+' (built-in)'])];
-    h+=`<label>Icon</label><select data-licon>${ops.map(([v,n])=>`<option value="${v}"${v===cur?' selected':''}>${esc(n)}</option>`).join('')}<option value="__new">+ New icon</option></select><div class="row"><button data-liedit>EDIT ICON</button></div>`}
+  const sample=()=>({id:'_s',kind,sub:k==='sub'?o.id:o.sub,type:k==='type'?o.id:''}),iconNow=()=>{const e=sample();return iconRef(e)||builtinFor(e)}; // the icon it shows
+  if(k==='sub'||k==='type'){const cur=iconNow();
+    h+=`<label>Icon</label><select data-licon>${iconsOfKind(kind).map(I=>`<option value="${I.id}"${I.id===cur?' selected':''}>${esc(I.name)}</option>`).join('')}<option value="__new">+ New icon</option></select><div class="row"><button data-liedit>EDIT ICON</button></div>`}
   if(L.pal)h+=`<label>Colour</label><div class="chips">${L.pal.map(c=>`<button data-lcol="${c}" style="background:${c};width:44px;${o.color===c?'outline:3px solid #fff;':''}"></button>`).join('')}<label class="sub" style="display:flex;align-items:center;gap:6px;margin:0">Any colour <input type="color" data-lcolany value="${o.color}" style="width:44px;height:38px;padding:0;border:0;background:none"></label></div>`;
   h+=`<label>Placed (${ws.length})</label><div class="sub">${ws.length?ws.slice(0,20).map(e=>esc(e.name||tn(e)||'?')).join(', ')+(ws.length>20?' …':''):'None'}</div>
     <div class="row"><button id="lDel">DELETE</button></div>`;
@@ -1113,11 +1123,9 @@ function renderLPanel(){const P=$('#lpanel');
   on('[data-lspeed]',i=>{i.onkeydown=ev=>ev.stopPropagation();i.onchange=()=>{const n=Math.round(+i.value);if(n>0){o.speed=n;done()}}});
   on('[data-lcol]',b=>b.onclick=()=>{o.color=b.dataset.lcol;done()});
   on('[data-lcolany]',i=>{i.oninput=()=>{o.color=i.value};i.onchange=()=>{o.color=i.value;done()}});
-  const sample=()=>{const e=doc.elements.find(x=>k==='sub'?x.sub===o.id:x.type===o.id)||{id:'_s',kind,sub:k==='sub'?o.id:o.sub,type:k==='type'?o.id:''};return e};
-  on('[data-licon]',i=>i.onchange=()=>{if(i.value==='__new'){const e=sample(),C={id:uid('i'),name:o.name,kind,strokes:recordIcon(e)};doc.icons.push(C);o.icon=C.id;commit();ieOpen(C.id);setViewMode('editor');return}
-    if(i.value)o.icon=i.value;else delete o.icon;done()});
-  on('[data-liedit]',b=>b.onclick=()=>{const e=sample();let id=iconRef(e);if(!id){const C={id:uid('i'),name:o.name,kind,strokes:recordIcon(e)};doc.icons.push(C);o.icon=C.id;commit();id=C.id}
-    else if(iconById(id)?.builtin){}ieOpen(id);setViewMode('editor')});
+  on('[data-licon]',i=>i.onchange=()=>{if(i.value==='__new'){const C={id:uid('i'),name:o.name,kind,strokes:recordIcon(sample())};doc.icons.push(C);o.icon=C.id;commit();ieOpen(C.id);setViewMode('editor');return}
+    delete o.icon;if(i.value!==iconNow())o.icon=i.value;done()}); // the one its name gives needs no setting
+  on('[data-liedit]',b=>b.onclick=()=>{ieOpen(iconNow());setViewMode('editor')}); // edits that icon itself, wherever it is used
   on('[data-lgo]',d=>d.onclick=()=>{lpick={k:'type',id:d.dataset.lgo};renderLists()});
   on('[data-lgosub]',d=>d.onclick=()=>{lpick={k:'sub',id:d.dataset.lgosub};renderLists()});
   const addType=()=>{const i=P.querySelector('[data-laddtype]'),n=i.value.trim();if(!n)return;const t={id:uid('y'),sub:o.id,name:n};doc.types.push(t);lpick={k:'type',id:t.id};done()};
@@ -1158,13 +1166,13 @@ function thumb(cv,I,col){const d=window.devicePixelRatio||1,w=cv.width=44*d,h=cv
   c.lineCap='round';c.lineJoin='round';const r=11;icon(ieFake(I),{sx:22,sy:34-r,r},col||'#f1e7c8',I.builtin?I:{kind:I.kind,strokes:I.strokes},c)}
 function renderEditor(){
   const L=$('#elist'),cur=iconById(IE.id);
-  const row=I=>`<div class="lrow${IE.id===I.id?' on':''}" data-ic="${I.id}"><canvas class="ith"></canvas><span class="nm">${esc(I.name)}${I.id.startsWith('b:')&&!I.builtin?'<div class="sub">Edited</div>':''}</span></div>`;
-  const own=(doc.icons||[]).filter(i=>!i.id.startsWith('b:'));
+  const row=I=>`<div class="lrow${IE.id===I.id?' on':''}" data-ic="${I.id}"><canvas class="ith"></canvas><span class="nm">${esc(I.name)}</span></div>`;
   L.innerHTML=`<div class="ladd" style="margin:0 0 8px"><button id="ieNew" style="flex:1">+ NEW ICON</button></div>
-    <h3>CUSTOM</h3>${own.length?byName(own).map(row).join(''):'<div class="sub" style="padding:6px">None</div>'}
-    ${['structure','vehicle','nature'].map(k=>`<h3 style="color:${CATS[k].color}">${ieKindNames[k]}</h3>${BUILTIN.filter(b=>b.kind===k).map(b=>row(iconById(b.id))).join('')}`).join('')}`;
+    ${['structure','vehicle','nature'].map(k=>`<h3 style="color:${CATS[k].color}">${ieKindNames[k]}</h3>${iconsOfKind(k).map(row).join('')}`).join('')}`;
   L.querySelectorAll('[data-ic]').forEach(r=>{const I=iconById(r.dataset.ic);thumb(r.querySelector('canvas'),I,CATS[I.kind].color);r.onclick=()=>{if(I.id!==IE.id)ieSwitch(()=>ieOpen(I.id))}});
-  $('#ieNew').onclick=()=>ieSwitch(()=>{const I={id:uid('i'),name:'New icon',kind:'structure',strokes:[{pts:[],closed:false,smooth:false}]};doc.icons.push(I);commit();ieOpen(I.id);ieSelect(0)});
+  $('#ieNew').onclick=()=>ieSwitch(()=>modal(`<h3>NEW ICON</h3><label>Name</label><input id="niName" autocapitalize="words"><label>Category</label><div class="chips">${['structure','vehicle','nature'].map(k=>`<button data-nik="${k}">${CATS[k].name}</button>`).join('')}</div><div class="row"><button data-close>CANCEL</button></div>`,box=>{
+    box.querySelectorAll('[data-nik]').forEach(b=>b.onclick=()=>{const n=$('#niName').value.trim()||'New icon';closeModal();const I={id:uid('i'),name:n,kind:b.dataset.nik,strokes:[{pts:[],closed:false,smooth:false}]};doc.icons.push(I);commit();ieOpen(I.id);ieSelect(0);renderEditor()});
+    $('#niName').onkeydown=ev=>ev.stopPropagation();$('#niName').focus()}));
   renderEPanel();resizeEditor()}
 function renderEPanel(){const P=$('#epanel'),I=iconById(IE.id);
   if(!I){P.innerHTML=`<h3>ICON</h3><div class="sub">Select an icon, or + NEW ICON.</div>`;return}
