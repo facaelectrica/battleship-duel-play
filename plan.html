@@ -61,6 +61,7 @@ const SHELL=`<div id="app">
     <button id="bShow" title="Show or hide categories">SHOW</button>
     <span class="sp"></span>
     <button id="bFile" title="Export, import or start over">FILE</button>
+    <button id="bRevert" title="Go back to the last saved plan">REVERT ALL CHANGES</button>
     <button id="bSave" class="save" title="Save the world into this page">SAVE CHANGES</button>
   </div>
   <div id="main">
@@ -182,11 +183,11 @@ function settleGroups(){ // a group's own spot follows its children (used when i
 function resnap(){
   for(const e of doc.elements)if(isLand(e)||e.kind==='vehicle')e.parent=null; // a vehicle belongs to the structure that keeps it
   for(const e of doc.elements)if(isLand(e))e.y=0;
-  for(const e of doc.elements)if(onWater(e)){e.owner=null;const r=byId.get(e.on);if(isLand(r))dockTo(e,r);else waterSnap(e)}
-  for(const e of doc.elements){if(isLand(e)||onWater(e)||heldBy(e))continue;const r=e.on&&byId.get(e.on);
+  for(const e of doc.elements)if(onWater(e)&&!dragFree.has(e.id)){e.owner=null;const r=byId.get(e.on);if(isLand(r))dockTo(e,r);else waterSnap(e)}
+  for(const e of doc.elements){if(isLand(e)||onWater(e)||heldBy(e)||dragFree.has(e.id))continue;const r=e.on&&byId.get(e.on);
     if(e.kind==='vehicle'){vehSnap(e)||(e.on=null);continue}
     if(!r)continue;if(!isLand(r)||e.x<r.x-r.w/2||e.x>r.x+r.w/2){e.on=null;continue}e.y=Math.round(topAt(r,e.x))}
-  for(const e of doc.elements){const h=heldBy(e);if(h){e.x=h.x;e.y=h.y}} // its spot is drawn on the holder
+  for(const e of doc.elements){const h=heldBy(e);if(h&&!dragFree.has(e.id)){e.x=h.x;e.y=h.y}} // its spot is drawn on the holder
 }
 function landUnder(x,y){let best=null,bd=1e9;const z=view.z;
   for(const r of doc.elements){if(!isLand(r)||!visible(r)||x<r.x-r.w/2||x>r.x+r.w/2)continue;const t=topAt(r,x);
@@ -198,7 +199,7 @@ function restore(s){Object.assign(doc,JSON.parse(s));reindex();
 function undo(){if(!undoS.length)return;redoS.push(lastSnap);restore(undoS.pop())}
 function redo(){if(!redoS.length)return;undoS.push(lastSnap);restore(redoS.pop())}
 function changed(){
-  $('#bUndo').disabled=!undoS.length;$('#bRedo').disabled=!redoS.length;
+  $('#bUndo').disabled=!undoS.length;$('#bRedo').disabled=!redoS.length;$('#bRevert').disabled=lastSnap===savedSnap;
   const dirty=lastSnap!==savedSnap;$('#bSave').classList.toggle('dirty',dirty);$('#bSave').textContent=dirty?'SAVE CHANGES':'SAVED';
   try{localStorage.setItem('farAwayPlanDraft',JSON.stringify({base:remoteSha,snap:lastSnap}))}catch(e){}
   $('#hint').style.display=doc.elements.length?'none':'';draw();
@@ -253,8 +254,8 @@ function layout(){
       L={land:true,pts,path,ax:cx,ay:(ty+oy)/2,r:0,depth:0,text,f,x0:pts[0][0],x1:pts[pts.length-1][0],oy,lab:[cx-w/2-4,oy+8,cx+w/2+4,oy+12+f]};
       L.rect=[L.x0,ty,L.x1,L.lab[3]];
     }else if(!ks||d>30){
-      let[sx,fy]=toS(e.x,e.y);const r=clamp(13*z,4,20);if(onWater(e))sx+=dockSide(e)*r*1.5;
-      const H=heldBy(e),HL=H&&visible(H)&&lay(H,d+1);
+      let[sx,fy]=toS(e.x,e.y);const r=clamp(13*z,4,20);if(onWater(e)&&!dragFree.has(e.id))sx+=dockSide(e)*r*1.5;
+      const H=dragFree.has(e.id)?null:heldBy(e),HL=H&&visible(H)&&lay(H,d+1);
       if(HL&&!HL.group&&!HL.land){const list=(held.get(H.id)||[]),i=list.indexOf(e.id),n=list.length;
         if(holderKind(H)==='dock'){const sd=dockSide(H);sx=HL.sx+sd*(HL.r*1.5+r*1.3+i*r*2.4);fy=HL.sy+HL.r}
         else{sx=HL.sx+(i-(n-1)/2)*r*2.3;fy=HL.sy-HL.r*.6}} // on its roof
@@ -392,7 +393,8 @@ function hitAt(x,y,touch){const s=touch?12:4;let best=null;
 function segD(x,y,a,b){const dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy||1,t=clamp(((x-a[0])*dx+(y-a[1])*dy)/l,0,1);return Math.hypot(x-a[0]-t*dx,y-a[1]-t*dy)}
 
 /* ---------- gestures (finger first) ---------- */
-let op=null;const ptrs=new Map();let lastTap={t:0,x:0,y:0};
+/* dragFree: what the finger is moving - free until let go, then it snaps */
+let op=null,dragFree=new Set();const ptrs=new Map();let lastTap={t:0,x:0,y:0};
 cv.addEventListener('pointerdown',ev=>{
   cv.setPointerCapture(ev.pointerId);const p=pt(ev);ptrs.set(ev.pointerId,p);closePop();commitEdit();
   if(ptrs.size===2){const[a,b]=[...ptrs.values()];op={t:'pinch',d0:Math.hypot(a.x-b.x,a.y-b.y)||1,z0:view.z,w:toW((a.x+b.x)/2,(a.y+b.y)/2)};return}
@@ -410,7 +412,8 @@ cv.addEventListener('pointerdown',ev=>{
     const move=new Set();for(const id of sel.els){move.add(id);descendants(id,move)}
     for(let grew=true;grew;){grew=false;for(const e of doc.elements)if(e.on&&move.has(e.on)&&!move.has(e.id)){move.add(e.id);grew=true}} // what it holds rides along
     const start=id=>{const e=byId.get(id),L=LY.get(id);if(heldBy(e)&&!move.has(e.on)&&L&&!L.group){const w=toW(L.sx,L.sy+L.r);return[id,w[0],w[1]]}return[id,e.x,e.y]};
-    op={t:'drag',x0:p.x,y0:p.y,ids:[...move].map(start),moved:false,hit:h.id,move};draw();return}
+    const direct=new Set([...move].filter(id=>{const e=byId.get(id);return!(e.on&&move.has(e.on))}));
+    op={t:'drag',x0:p.x,y0:p.y,ids:[...move].map(start),moved:false,hit:h.id,move,direct};draw();return}
   if(h&&(h.t==='llab'||h.t==='link')){if(pickMore||ev.shiftKey){sel.els.clear();sel.links.has(h.id)?sel.links.delete(h.id):sel.links.add(h.id)}else sel={els:new Set(),links:new Set([h.id])};
     panel();const c=linkOf(h.id);op={t:'bend',id:h.id,x0:p.x,y0:p.y,b0:c.bend,moved:false,hit:h.id,onLab:h.t==='llab'};draw();return}
   if(pickMore||ev.shiftKey){op={t:'box',x0:p.x,y0:p.y,x:p.x,y:p.y};return}
@@ -422,13 +425,8 @@ cv.addEventListener('pointermove',ev=>{
     const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;view.cx=op.w[0]-(mx-W/2)/view.z;view.cy=op.w[1]-(my-H/2)/view.z;draw();return}
   if(op.t==='pan'){if(Math.hypot(p.x-op.x,p.y-op.y)>6)op.moved=true;view.cx=op.cx-(p.x-op.x)/view.z;view.cy=op.cy-(p.y-op.y)/view.z;draw()}
   else if(op.t==='drag'){const dx=(p.x-op.x0)/view.z,dy=(p.y-op.y0)/view.z;if(!op.moved&&Math.hypot(p.x-op.x0,p.y-op.y0)<6)return;op.moved=true;
-    for(const[id,x,y]of op.ids){const e=byId.get(id);e.x=Math.round(x+dx);e.y=Math.round(y+dy);
-      if(e.on&&op.move.has(e.on))continue; // riding on what moves
-      const H=holderAt(p.x,p.y,e,ev.pointerType!=='mouse',op.move);if(H){e.on=H.id;continue}
-      if(heldBy(e))e.on=null;
-      if(e.kind==='vehicle'){vehSnap(e,op.move)||(e.on=null);continue}
-      if(SNAPS(e)){const l=landUnder(e.x,e.y);e.on=l&&!op.move.has(l.id)?l.id:null}else waterSnap(e,op.move)}
-    resnap();
+    dragFree=op.direct;for(const[id,x,y]of op.ids){const e=byId.get(id);e.x=Math.round(x+dx);e.y=Math.round(y+dy)} // what it holds rides along
+    resnap();op.p=p;op.touch=ev.pointerType!=='mouse';
     const h=hitAt(p.x,p.y,ev.pointerType!=='mouse');op.into=null;
     if(h&&(h.t==='el'||h.t==='arc')&&LY.get(h.id)?.group&&!op.move.has(h.id))op.into=h.id;draw()}
   else if(op.t==='resize'){const e=byId.get(op.id),d=(p.x-op.x0)/view.z;if(Math.abs(p.x-op.x0)>3)op.moved=true;
@@ -446,7 +444,11 @@ function endPtr(ev){
   const o=op;op=null;const now=performance.now(),dbl=now-lastTap.t<350&&Math.hypot(p.x-lastTap.x,p.y-lastTap.y)<24;
   if(o.t==='place'){placeAt(p.x,p.y,pending);setPending(null)}
   else if(o.t==='pan'){if(!o.moved){if(dbl){openAdd(p.x,p.y);lastTap.t=0;return}sel={els:new Set(),links:new Set()};panel();draw()}}
-  else if(o.t==='drag'){if(o.moved){if(o.into){for(const id of sel.els)if(id!==o.into&&!isLand(byId.get(id))&&byId.get(id).kind!=='vehicle'&&!descendants(id).has(o.into))byId.get(id).parent=o.into;toast('Put inside '+(byId.get(o.into).name||'group'))}commit();panel()}
+  else if(o.t==='drag'){if(o.moved){dragFree=new Set();
+      for(const id of o.direct){const e=byId.get(id);if(isLand(e))continue; // let go: it snaps to what is under it, or the nearest that can hold it
+        const H=holderAt(p.x,p.y,e,o.touch,o.move);if(H){e.on=H.id;continue}
+        if(e.kind==='vehicle'){vehSnap(e,o.move)||(e.on=null);continue}
+        if(SNAPS(e)){const l=landUnder(e.x,e.y);e.on=l&&!o.move.has(l.id)?l.id:null}else if(onWater(e))waterSnap(e,o.move)||(e.on=null)}if(o.into){for(const id of sel.els)if(id!==o.into&&!isLand(byId.get(id))&&byId.get(id).kind!=='vehicle'&&!descendants(id).has(o.into))byId.get(id).parent=o.into;toast('Put inside '+(byId.get(o.into).name||'group'))}commit();panel()}
     else if(dbl){startEdit('el',o.hit);lastTap.t=0;return}}
   else if(o.t==='resize'){if(o.moved)commit()}
   else if(o.t==='bend'){if(o.moved)commit();else if(dbl){startEdit('link',o.hit);lastTap.t=0;return}}
@@ -732,6 +734,9 @@ $('#bSave').onclick=async()=>{
       $('#cTheirs').onclick=()=>{lsSet('farAwayPlanDraft',null);savedSnap=lastSnap;location.reload()}});
     else toast('Save failed: '+e.message)}
 };
+$('#bRevert').onclick=()=>{if(lastSnap===savedSnap)return;
+  modal(`<h3>REVERT ALL CHANGES?</h3><p>Everything since your last save goes back to the saved plan. UNDO can still bring it back.</p><div class="row"><button id="rYes">YES</button><button data-close>NO</button></div>`,()=>{
+    $('#rYes').onclick=()=>{closeModal();undoS.push(lastSnap);redoS.length=0;restore(savedSnap);fit();toast('Back to the saved plan')}})};
 window.addEventListener('beforeunload',e=>{if(lastSnap!==savedSnap){e.preventDefault();e.returnValue=''}});
 
 /* ---------- keys (for a keyboard, optional) ---------- */
