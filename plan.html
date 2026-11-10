@@ -328,8 +328,15 @@ function sanitize(d){
   for(const t of subs)if(t.gives){t.gives=t.gives.filter(g=>gids.has(g));if(!t.gives.length)delete t.gives}
   const m=new Map(d.elements.map(e=>[e.id,e]));
   for(const e of d.elements){let p=e.parent,n=0;while(p&&n++<100){if(p===e.id){e.parent=null;break}p=m.get(p)?.parent}}
-  d.connections=(d.connections||[]).filter(c=>c&&ids.has(c.from)&&ids.has(c.to)&&c.from!==c.to).map(c=>({id:String(c.id||uid('c')),from:c.from,to:c.to,direction:'forward',notes:String(c.notes??''),bend:(+c.bend||0)*K,...(c.veh&&ids.has(c.veh)?{veh:c.veh}:{}),...(c.after?{after:String(c.after)}:{}),
+  d.connections=(d.connections||[]).filter(c=>c&&ids.has(c.from)&&ids.has(c.to)&&(c.from!==c.to||(c.veh&&ids.has(c.veh)))).map(c=>({id:String(c.id||uid('c')),from:c.from,to:c.to,direction:'forward',notes:String(c.notes??''),bend:(+c.bend||0)*K,...(c.veh&&ids.has(c.veh)?{veh:c.veh}:{}),...(c.after?{after:String(c.after)}:{}),
     ...(()=>{const a=c.activity??c.task;return oldTask[a]?{activity:'pick',good:oldTask[a][1]}:tids.has(a)?{activity:a,...(a==='pick'&&gids.has(c.good)?{good:c.good}:{})}:{}})()})); // 'task' in older plans
+  {const em=new Map(d.elements.map(e=>[e.id,e]));
+    for(const c of[...d.connections]){if(c.from===c.to||!(c.activity==='pick'||c.activity==='drop'))continue;
+      const A=em.get(c.from),B=em.get(c.to),V=c.veh?c.veh:A&&A.kind==='vehicle'?A.id:B&&B.kind==='vehicle'?B.id:null;if(!V)continue;
+      const X=!c.veh&&B&&B.id===V?c.from:c.to,a={id:uid('c'),from:X,to:X,direction:'forward',notes:'',bend:0,veh:V,after:c.id,activity:c.activity,...(c.good?{good:c.good}:{})};
+      for(const n of d.connections)if(n.after===c.id)n.after=a.id;
+      d.connections.push(a);c.activity='goto';delete c.good;
+      const R=em.get(V)?.routine;if(R&&Array.isArray(R.steps)){const i=R.steps.findIndex(st=>st&&st.link===c.id);if(i>=0)R.steps.splice(i+1,0,{link:a.id,until:R.steps[i].until||100})}}}
   const cids2=new Set(d.connections.map(c=>c.id));
   for(const e of d.elements){const R=e.routine;if(e.kind!=='vehicle'||!R||typeof R!=='object'){delete e.routine;continue}
     e.routine={start:['time','cargo','off'].includes(R.start)?R.start:'time',every:Math.max(1,Math.round(+R.every||1)),day:Math.max(0,Math.round(+R.day||0)),slot:clamp(Math.round(+R.slot||0),0,3),takes:Math.max(1,Math.round(+R.takes||1)),
@@ -391,7 +398,7 @@ function layout(){
 const uni=(a,b)=>[Math.min(a[0],b[0]),Math.min(a[1],b[1]),Math.max(a[2],b[2]),Math.max(a[3],b[3])];
 const inR=(r,x,y,s=0)=>x>=r[0]-s&&x<=r[2]+s&&y>=r[1]-s&&y<=r[3]+s;
 
-function linkGeom(c){
+function linkGeom(c){if(isAct(c))return null;
   const A=LY.get(c.from),B=LY.get(c.to);if(!A||!B||!KIND_ON(c))return null;
   const ax=A.ax,ay=A.ay,bx=B.ax,by=B.ay,dx=bx-ax,dy=by-ay,len=Math.hypot(dx,dy)||1;
   let nx=-dy/len,ny=dx/len;if(ny<0||(ny===0&&nx<0)){nx=-nx;ny=-ny}
@@ -402,6 +409,7 @@ function linkGeom(c){
   return{pts:pts.slice(i0,i1+1),mid:P(.5),nx,ny,mx,my};
 }
 function KIND_ON(c){return true}
+const isAct=c=>c&&c.from===c.to; // an activity step at one place (Collect / Deliver), drawn as a square
 const linkCol=c=>c.activity==='pick'?'#6fa8ff':c.activity==='drop'?'#ff7a45':c.activity==='goto'?'#7fd99a':'#d4d4d4'; // a connection's colour is its task's
 
 /* ---------- drawing ---------- */
@@ -447,6 +455,14 @@ function render(){
     if(g){const c=linkOf(p.link);let pts=g.pts;if(p.from==='home'?c.from!==id:c.from!==p.from)pts=[...pts].reverse();[x,y]=alongPts(pts,p.f)}else{x=A[0]+(B[0]-A[0])*p.f;y=A[1]+(B[1]-A[1])*p.f}
     const col=itemCol(e),M={sx:x,sy:y,r:L.r};ctx.fillStyle='rgba(255,255,255,.18)';ctx.beginPath();ctx.arc(x,y,L.r+7,0,7);ctx.fill();icon(e,M,col);
     pill([p.task||'',goodsText(SIM.load.get(id))].filter(Boolean).join(' · '),x,y+L.r+8,col)}
+  // activity steps: squares beside their place
+  const actN=new Map();
+  for(const c of doc.connections){if(!isAct(c))continue;const X=LY.get(c.to);if(!X||X.land)continue;const i=actN.get(c.to)||0;actN.set(c.to,i+1);
+    const pk=sel.links.has(c.id),col=linkCol(c),f=Math.max(10,clamp(11*view.z*MU,0,13)),t=taskName(c).toUpperCase();ctx.font=fontPx(f);const w=ctx.measureText(t).width;
+    const x0=X.ax+(X.hw||X.r)+12,y0=X.ay-f/2-6+i*(f+16),rect=[x0,y0,x0+w+14,y0+f+12];
+    ctx.fillStyle='rgba(40,40,40,.92)';ctx.fillRect(rect[0],rect[1],rect[2]-rect[0],rect[3]-rect[1]);ctx.strokeStyle=pk?'#fff':col;ctx.lineWidth=pk?3:2;ctx.strokeRect(rect[0],rect[1],rect[2]-rect[0],rect[3]-rect[1]);
+    ctx.fillStyle=pk?'#fff':col;ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(t,x0+7,(rect[1]+rect[3])/2+1);
+    c._rect=rect;HITS.push({t:'act',id:c.id,place:c.to,rect,pr:1})}
   // connection labels on top
   for(const c of doc.connections){const g=lg.get(c.id);if(!g)continue;const pk=sel.links.has(c.id),col=pk?'#fff':linkCol(c);
     let t=taskName(c).toUpperCase();
@@ -471,7 +487,7 @@ function render(){
     ctx.moveTo(hx-5,hy);ctx.lineTo(hx+5,hy);ctx.moveTo(hx-2,hy-3);ctx.lineTo(hx-5,hy);ctx.lineTo(hx-2,hy+3);ctx.moveTo(hx+2,hy-3);ctx.lineTo(hx+5,hy);ctx.lineTo(hx+2,hy+3);ctx.stroke();
     HITS.push({t:'rz',id:one,side,x:hx,y:hy,pr:0})}}
   const oneL=sel.links.size===1&&!sel.els.size?linkOf([...sel.links][0]):null;
-  if(oneL&&tripEnds(oneL)&&!doc.connections.some(n=>n.after===oneL.id)){const T=LY.get(oneL.to);if(T){const hx=T.ax+T.r+18,hy=T.ay-T.r-10;
+  if(oneL&&tripEnds(oneL)&&!doc.connections.some(n=>n.after===oneL.id)){const T=LY.get(oneL.to);if(T){const sq=isAct(oneL)&&oneL._rect,hx=sq?sq[2]+14:T.ax+T.r+18,hy=sq?(sq[1]+sq[3])/2:T.ay-T.r-10;
     ctx.fillStyle='#ff7a45';ctx.beginPath();ctx.arc(hx,hy,9,0,7);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
     HITS.push({t:'dot',id:oneL.to,after:oneL.id,x:hx,y:hy,pr:1,cx:hx,cy:hy})}}
   if(OL&&!OL.land){const L=OL;{const hx=L.group?L.lab[2]+16:L.sx+L.r+18,hy=L.group?L.ay:L.sy;
@@ -579,6 +595,7 @@ cv.addEventListener('pointerdown',ev=>{
   if(ev.button===1||ev.button===2){op={t:'pan',x:p.x,y:p.y,cx:view.cx,cy:view.cy,moved:true};return}
   if(pending){op={t:'place',x0:p.x,y0:p.y};return}
   if(h&&h.t==='dot'){op={t:'link',from:h.id,after:h.after,x:p.x,y:p.y};return}
+  if(h&&h.t==='act'){op={t:'link',from:h.place,after:h.id,x:p.x,y:p.y,x0:p.x,y0:p.y,tap:h.id};return}
   if(h&&h.t==='rz'){const e=byId.get(h.id);op={t:'resize',id:h.id,side:h.side,x0:p.x,w0:isLand(e)?e.w:lenOf(e),cx0:e.x,moved:false,docks:doc.elements.filter(d=>onWater(d)&&d.on===e.id).map(d=>[d.id,d.x,d.x>=e.x?1:-1])};return}
   if(h&&(h.t==='el'||h.t==='arc')){
     const add=pickMore||ev.shiftKey;
@@ -613,7 +630,8 @@ cv.addEventListener('pointermove',ev=>{
     resnap();draw()}
   else if(op.t==='bend'){if(!op.moved&&Math.hypot(p.x-op.x0,p.y-op.y0)<6)return;op.moved=true;
     const c=linkOf(op.id),g=linkGeom(c);if(g){const qx=2*p.x-g.mx,qy=2*p.y-g.my;c.bend=Math.round(((qx-g.mx)*g.nx+(qy-g.my)*g.ny)/view.z)}draw()}
-  else if(op.t==='link'){op.x=p.x;op.y=p.y;const h=hitAt(p.x,p.y,ev.pointerType!=='mouse');op.target=h&&(h.t==='el'||h.t==='arc')&&h.id!==op.from&&!isLand(byId.get(h.id))?h.id:null;draw()}
+  else if(op.t==='link'){op.x=p.x;op.y=p.y;const h=hitAt(p.x,p.y,ev.pointerType!=='mouse');const self=op.after&&!isAct(linkOf(op.after)); // back onto the place a travel link reached: an activity there
+    op.target=h&&(h.t==='el'||h.t==='arc')&&(h.id!==op.from||self)&&!isLand(byId.get(h.id))?h.id:null;draw()}
   else if(op.t==='box'){op.x=p.x;op.y=p.y;draw()}
 });
 function endPtr(ev){
@@ -630,7 +648,8 @@ function endPtr(ev){
     else if(dbl){startEdit('el',o.hit);lastTap.t=0;return}}
   else if(o.t==='resize'){if(o.moved)commit()}
   else if(o.t==='bend'){if(o.moved)commit()}
-  else if(o.t==='link'){if(o.target)connect(o.from,o.target,o.after);
+  else if(o.t==='link'){if(o.tap&&Math.hypot(p.x-o.x0,p.y-o.y0)<10){sel={els:new Set(),links:new Set([o.tap])};panel()}
+    else if(o.target)connect(o.from,o.target,o.after);
     else{const A=LY.get(o.from);if(A&&Math.hypot(p.x-A.ax,p.y-A.ay)>50)openAdd(p.x,p.y,o.from)}}
   else if(o.t==='box'){const r=[Math.min(o.x0,o.x),Math.min(o.y0,o.y),Math.max(o.x0,o.x),Math.max(o.y0,o.y)];
     if(r[2]-r[0]>4||r[3]-r[1]>4){for(const[id,L]of LY)if(inR(r,L.ax,L.ay))sel.els.add(id);sel.links.clear();panel()}}
@@ -659,6 +678,9 @@ function placeAt(sx,sy,t,fromId){
   commit();panel();
 }
 function connect(a,b,after){
+  if(a===b){const prev=after&&linkOf(after),pv=prev&&tripEnds(prev),X=byId.get(a);if(!pv)return;const gs=goodsAt(X);
+    const tid=gs.length?'pick:'+(gs.find(g=>carriesOf(pv[0]).includes(g))||gs[0]):takesCargo(X)?'drop':null;if(!tid){toast('No activity here');return}
+    const c={id:uid('c'),from:a,to:a,direction:'forward',notes:'',bend:0,after:prev.id,veh:pv[0].id};doc.connections.push(c);setTask(c,tid);sel={els:new Set(),links:new Set([c.id])};commit();panel();return}
   if(!after&&byId.get(a).kind!=='vehicle'){const ends=routeEnd(a);if(ends.length===1)after=ends[0].id} // from the end of a route: it goes on
   const at=id=>{const e=byId.get(id),h=e&&heldBy(e);return h?h.id:id},pa=at(a),pb=at(b); // a moored boat and its dock are one spot here
   const same=doc.connections.filter(c=>(at(c.from)===pa&&at(c.to)===pb)||(at(c.from)===pb&&at(c.to)===pa)).length;
@@ -853,7 +875,10 @@ function elPanel(e){
 }
 function linkPanel(k){
   const A=byId.get(k.from),B=byId.get(k.to),col=linkCol(k);
-  pnl.innerHTML=`<h3 style="color:${col}">CONNECTION</h3>
+  if(isAct(k)){const V=byId.get(k.veh);pnl.innerHTML=`<h3 style="color:${col}">ACTIVITY</h3><label>Place</label><div>${esc(A?.name||tn(A)||'?')}</div><label>Vehicle</label><div>${esc(V?.name||tn(V)||'?')}</div>
+    ${schedHtml(k)}<label>Notes</label><textarea data-f="notes">${esc(k.notes)}</textarea><div class="row"><button id="pDel">DELETE</button></div>`;
+    wireCommon();wireSched(k);pnl.querySelectorAll('[data-f]').forEach(inp=>{inp.addEventListener('input',()=>{k.notes=inp.value});inp.addEventListener('change',commit)});return}
+  pnl.innerHTML=`<h3 style="color:${col}">${tripEnds(k)?'TRAVEL':'CONNECTION'}</h3>
   <label>Direction</label><div class="chips"><button class="on">${esc(A?.name||tn(A)||'A')} → ${esc(B?.name||tn(B)||'B')}</button><button id="pSwap">${esc(B?.name||tn(B)||'B')} → ${esc(A?.name||tn(A)||'A')}</button></div>
   ${(()=>{const te=tripEnds(k);if(!te||!te[1])return'';const a=k.veh?byId.get(k.from):te[0],km=distKm(a,te[1]);const sec=distU(a,te[1])/speedOf(te[0]);return`<label>Trip</label><div>${km.toFixed(2)} km · ${realT(sec)}</div>`})()}
   ${schedHtml(k)}
@@ -868,10 +893,11 @@ function linkPanel(k){
 /* ---------- schedules: a vehicle at one end of a connection leaves every N days at a part of the day to do a task at the other end ---------- */
 const tripEnds=c=>{const A=byId.get(c.from),B=byId.get(c.to),W=c.veh&&byId.get(c.veh);if(W)return[W,B,false];return A&&A.kind==='vehicle'?[A,B,false]:B&&B.kind==='vehicle'?[B,A,true]:null}; // [vehicle, where it goes, vehicle at the 'to' end]
 const goodsAt=X=>X&&X.kind==='nature'&&does(X,'gives')?givesOf(X):[];
-function taskOptions(X){const o=goodsAt(X).map(g=>({v:'pick:'+g,t:'Collect '+((doc.goods.find(x=>x.id===g)||{}).name||g).toLowerCase()}));if(takesCargo(X))o.push({v:'pick:',t:'Collect cargo'});
-  if(X&&(X.kind==='structure'||X.kind==='vehicle'))o.push({v:'drop',t:'Deliver cargo'});o.push({v:'goto',t:'Travel'});return o}
+function taskOptions(X,act){if(!act)return[{v:'goto',t:'Travel'}];const o=goodsAt(X).map(g=>({v:'pick:'+g,t:'Collect '+((doc.goods.find(x=>x.id===g)||{}).name||g).toLowerCase()}));if(takesCargo(X))o.push({v:'pick:',t:'Collect cargo'});
+  if(X&&(X.kind==='structure'||X.kind==='vehicle'))o.push({v:'drop',t:'Deliver cargo'});return o}
 const taskName=c=>c.activity==='goto'?'Travel':c.activity==='drop'?'Deliver cargo':c.activity==='pick'?'Collect '+(c.good?((doc.goods.find(x=>x.id===c.good)||{}).name||'cargo'):'cargo').toLowerCase():'';
-function autoTask(c){const te=tripEnds(c);if(!te||!te[1]||c.activity)return;const[V,X]=te,gs=goodsAt(X); // what dragging it there means
+function autoTask(c){const te=tripEnds(c);if(!te||!te[1]||c.activity)return;setTask(c,'goto');return; // a link is travel; activities are steps at a place
+  const[V,X]=te,gs=goodsAt(X);
   const carried=new Set(carriesOf(V));
   if(gs.length)setTask(c,'pick:'+(gs.find(g=>carried.has(g))||gs[0]));  // it gives goods: pick them up
   else if(takesCargo(X))setTask(c,'drop');                              // it collects goods: drop the cargo there
@@ -881,17 +907,18 @@ function setTask(c,tid){const te=tripEnds(c);delete c.good;if(tid&&tid.startsWit
   if(tid){V.routine=V.routine||{start:'time',every:1,day:0,slot:0,takes:1,steps:[]};if(!V.routine.steps.some(st=>st.link===c.id))V.routine.steps.push({link:c.id,until:100})}
   else if(V.routine)V.routine.steps=V.routine.steps.filter(st=>st.link!==c.id)}
 function schedHtml(k){const te=tripEnds(k);if(!te||!te[1])return'';const opt=(v,t,on)=>`<option value="${esc(v)}"${on?' selected':''}>${esc(t)}</option>`;
-  const cur=k.activity==='pick'?'pick:'+(k.good||''):k.activity||'',os=taskOptions(te[1]);if(cur&&!os.some(o=>o.v===cur))os.push({v:cur,t:taskName(k)});
-  return`<label>Activity</label><select data-s="task">${opt('','None',!cur)}${os.map(o=>opt(o.v,o.t,o.v===cur)).join('')}</select>
+  if(!isAct(k))return`<div class="sub" style="margin-top:6px">Step ${((te[0].routine||{steps:[]}).steps.findIndex(st=>st.link===k.id))+1} of ${esc(te[0].name||tn(te[0]))}'s routine</div>`;
+  const cur=k.activity==='pick'?'pick:'+(k.good||''):k.activity||'',os=taskOptions(te[1],true);if(cur&&!os.some(o=>o.v===cur))os.push({v:cur,t:taskName(k)});
+  return`<label>Activity</label><select data-s="task">${os.map(o=>opt(o.v,o.t,o.v===cur)).join('')}</select>
   ${k.activity?`<div class="sub" style="margin-top:6px">Step ${((te[0].routine||{steps:[]}).steps.findIndex(st=>st.link===k.id))+1} of ${esc(te[0].name||tn(te[0]))}'s routine</div>`:''}`}
 function wireSched(k){pnl.querySelectorAll('[data-s="task"]').forEach(inp=>inp.addEventListener('change',()=>{setTask(k,inp.value);commit();panel()}))}
 /* a vehicle's ROUTINE: when it starts, then its connections' tasks in order, then home */
 function routineHtml(V){const RT=routineTimes(V),R=V.routine,steps=R?R.steps.map(st=>{const c=linkOf(st.link),te=c&&tripEnds(c);return te?{st,c,X:te[1],task:{name:taskName(c),act:c.activity==='pick'?'collect':c.activity}}:null}).filter(Boolean):[];
   if(!steps.length)return`<label>Routine</label><div class="sub">No activities. Connect this vehicle to a target.</div>`;
-  return`<label>Trigger</label><div class="chips">${[['time','Schedule'],['cargo','Cargo ready'],['off','Off']].map(([k,n])=>`<button data-rstart="${k}" class="${R.start===k?'on':''}">${n}</button>`).join('')}</div>
+  return`<label>Starts</label><div class="chips">${[['time','On schedule'],['cargo','When cargo is ready'],['off','Never']].map(([k,n])=>`<button data-rstart="${k}" class="${R.start===k?'on':''}">${n}</button>`).join('')}</div>
   ${R.start==='time'?`<div class="row" style="align-items:flex-end"><div style="flex:1"><label>Interval (days)</label><input data-r="every" type="number" inputmode="numeric" min="1" value="${R.every}"></div><div style="flex:1"><label>Start day</label><input data-r="day" type="number" inputmode="numeric" min="0" value="${R.day}"></div></div>
   <label>Departure</label><div class="chips">${SLOTS.map((n,i)=>`<button data-rslot="${i}" class="${R.slot===i?'on':''}">${n} ${SLOT_HOURS[i]}:00</button>`).join('')}</div>`:R.start==='cargo'?`<div class="sub" style="margin-top:6px">Departs when cargo is ready at ${esc((heldBy(V)||{}).name||'home')}.</div>`:''}
-  <label>Steps</label>${steps.map((s,i)=>`<div class="links"><div style="cursor:default"><b>${i+1}.</b> ${esc(s.task?.name||'?')} · ${esc(s.X.name||tn(s.X)||'?')}${RT&&RT.steps[i]?`<div class="sub">${RT.steps[i].km.toFixed(2)} km · ${hrs(RT.steps[i].go)} (${realT(RT.steps[i].secs)} real)${RT.steps[i].work?' · work '+hrs(RT.steps[i].work):''}</div>`:''}
+  <label>Steps</label>${steps.map((s,i)=>`<div class="links"><div style="cursor:default"><b>${i+1}.</b> ${esc(s.task?.name||'?')} · ${esc(s.X.name||tn(s.X)||'?')}${RT&&RT.steps[i]&&isAct(s.c)?`<div class="sub">${RT.steps[i].work?hrs(RT.steps[i].work):''}</div>`:RT&&RT.steps[i]?`<div class="sub">${RT.steps[i].km.toFixed(2)} km · ${hrs(RT.steps[i].go)} (${realT(RT.steps[i].secs)} real)${RT.steps[i].work?' · work '+hrs(RT.steps[i].work):''}</div>`:''}
     ${s.task?.act==='collect'?`<div class="row" style="align-items:center;margin-top:6px"><span class="sub" style="flex:none">Quantity</span><input data-until="${i}" type="number" inputmode="numeric" min="1" value="${s.st.until}" style="flex:1"></div>`:''}
     <div class="row" style="margin-top:6px"><button data-rup="${i}" ${i?'':'disabled'}>↑</button><button data-rdown="${i}" ${i<steps.length-1?'':'disabled'}>↓</button></div></div></div>`).join('')}
   <div class="links"><div style="cursor:default;opacity:.7"><b>${steps.length+1}.</b> Return${heldBy(V)?' · '+esc(heldBy(V).name||''):''}${RT?`<div class="sub">${hrs(RT.back)} (${realT(RT.backSecs)} real)</div>`:''}</div></div>${RT?`<label>Cycle</label><div>${hrs(RT.total)}</div>`:''}`}
