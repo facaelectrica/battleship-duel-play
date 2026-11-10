@@ -352,7 +352,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 22:34', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 09 22:43', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -7584,7 +7584,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 22:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 22:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -35240,12 +35240,14 @@ let PUFF_PERIOD = 2;
 /* Fire: every flame is a soft disc of heat; the heat adds up where flames overlap and is cut into the fire palette's steps. The
    disc's profile is the old sprite's: full heat at the centre, 0.6 half way out, nothing at the edge. (It was painted with blended
    sprites and read back - a stall; then, until Nov 9, summed in a Float32Array on the processor every frame and uploaded as a
-   picture.) Since Nov 9 (engine part 6 - PART-NOTES.md) on the GPU, natively: the processor only gathers the flames in view (each its
-   centre and radius in the fire's grid - a cell FPX pixels - and its strength); 1. the heat: each flame an instanced quad over its
-   disc, its profile added (blended, one + one) into an R32F grid of the picture's cells - in the flames' order, as the sum was;
-   2. the colours: one quad where the picture goes (fireImage's dx, dy, dw, dh, through the context's transform, blend, scissor and
-   clip, as drawPixels laid it), each cell's heat cut at FIRE_T into FIRE_PAL, the context's alpha on it. */
-const FIRE = { list: [], tex: null, ep: -1, heat: null, col: new Map(), bgl: null, cbgl: null, hb: new Map(), cb: new Map() };
+   picture.) Since Nov 9 (engine part 6 - PART-NOTES.md) on the GPU, natively, the same on every GPU: the processor only gathers the
+   flames in view (each its centre and radius in the fire's grid - a cell FPX pixels - and its strength); 1. the heat, in compute: a
+   workgroup a flame, each cell of its disc's box (inside the grid, as the sum's) adding its profile in whole numbers - FIRE_S to one -
+   with an atomic add into the grid (order-free: an integer sum is exact, so every GPU gets the same); a cell at FIRE_S (a heat of 1 -
+   past the palette's last step) takes no more, so no sum can wrap; 2. the colours: one quad where the picture goes (fireImage's dx, dy,
+   dw, dh, through the context's transform, blend, scissor and clip, as drawPixels laid it), each cell cut at FIRE_T into FIRE_PAL,
+   the context's alpha on it. */
+const FIRE = { list: [], buf: null, cells: 0, ep: -1, col: new Map(), hb: new Map(), cb: new Map() };
 // behind: only the flames burning inside a ship (drawn before the ships, so the hull hides their foot); otherwise
 // all the rest
 function drawFire(x0, x1, behind) { const F = fireImage(x0, x1, behind); if (F) firePut(F); }
@@ -35273,78 +35275,92 @@ function fireImage(x0, x1, behind) {
   F.L = L; F.bx0 = bx0; F.by0 = by0; F.W = W; F.H = H; F.dx = bx0 * FPX - 3 * FPX; F.dy = by0 * FPX - 3 * FPX; F.dw = W * FPX; F.dh = H * FPX;
   return F;
 }
-// (the heat: an instance a flame - its centre in the picture's cells, radius, strength: fl[base + i]; hd: the grid's size, base, count)
+// (the fixed point: 2^20 to a heat of 1. Fine enough that a cell lands on the processor's step wherever its sum isn't within ~1e-6 of a
+// step (tools/pxlayers.mjs counts them); coarse enough that no sum wraps 32 bits even if every workgroup a GPU holds adds to one cell
+// at once past FIRE_S - 4096 of them)
+const FIRE_S = 1048576;
+// (the heat: hd - the grid's size, the first flame (a vec4 in the arena chunk), how many; fl[base + i] - a flame's centre in the grid's
+// cells, radius, strength; heat - the grid, a cell a u32)
 const FIRE_HEAT_WGSL = `
-struct HD { w: f32, h: f32, base: u32, n: u32 };
+struct HD { w: u32, h: u32, base: u32, n: u32 };
 @group(0) @binding(0) var<storage, read> hd: HD;
 @group(0) @binding(1) var<storage, read> fl: array<vec4f>;
-struct VO { @builtin(position) p: vec4f, @location(0) @interpolate(flat) f: vec4f };
-@vertex fn vs(@builtin(vertex_index) v: u32, @builtin(instance_index) i: u32) -> VO {
-  let f = fl[hd.base + i];
-  let k = select(select(select(3u, 2u, v == 4u), 0u, v == 3u), v, v < 3u);   // (the triangles 0 1 2 and 0 2 3)
-  let x0 = floor(f.x - f.z) - 1.0; let x1 = ceil(f.x + f.z) + 1.0; let y0 = floor(f.y - f.z) - 1.0; let y1 = ceil(f.y + f.z) + 1.0;
-  let q = vec2f(select(x0, x1, k == 1u || k == 2u), select(y0, y1, k >= 2u));
-  var o: VO; o.p = vec4f(q.x / hd.w * 2.0 - 1.0, 1.0 - q.y / hd.h * 2.0, 0.0, 1.0); o.f = f; return o;
-}
-// (a cell's centre: its fragment's place - x + 0.5, y + 0.5, as the sum's dx, dy)
-@fragment fn fs(i: VO) -> @location(0) vec4f {
-  let d = i.p.xy - i.f.xy;
-  let u = sqrt(d.x * d.x + d.y * d.y) * (1.0 / i.f.z);
-  if (u >= 1.0) { discard; }
-  return vec4f(i.f.w * select(1.2 * (1.0 - u), 1.0 - 0.8 * u, u < 0.5), 0.0, 0.0, 0.0);
+@group(0) @binding(2) var<storage, read_write> heat: array<atomic<u32>>;
+const S = ${FIRE_S}.0;
+const CAP = ${FIRE_S}u;
+@compute @workgroup_size(64) fn clear(@builtin(global_invocation_id) g: vec3u) { if (g.x < hd.w * hd.h) { atomicStore(&heat[g.x], 0u); } }
+// (a flame's box: its disc's cells inside the grid - max(0, floor(cx - R)) .. min(W - 1, ceil(cx + R)), as the sum's; a cell's centre x + 0.5)
+@compute @workgroup_size(64) fn add(@builtin(workgroup_id) wg: vec3u, @builtin(local_invocation_index) li: u32) {
+  if (wg.x >= hd.n) { return; }
+  let f = fl[hd.base + wg.x];
+  let ax = max(0.0, floor(f.x - f.z)); let bx = min(f32(hd.w) - 1.0, ceil(f.x + f.z));
+  let ay = max(0.0, floor(f.y - f.z)); let by = min(f32(hd.h) - 1.0, ceil(f.y + f.z));
+  if (bx < ax || by < ay) { return; }
+  let x0 = u32(ax); let y0 = u32(ay); let bw = u32(bx) - x0 + 1u; let cells = bw * (u32(by) - y0 + 1u);
+  let inv = 1.0 / f.z;
+  for (var c = li; c < cells; c = c + 64u) {
+    let x = x0 + c % bw; let y = y0 + c / bw;
+    let dx = f32(x) + 0.5 - f.x; let dy = f32(y) + 0.5 - f.y;
+    let u = sqrt(dx * dx + dy * dy) * inv;
+    if (u < 1.0) {
+      let q = u32(round(f.w * select(1.2 * (1.0 - u), 1.0 - 0.8 * u, u < 0.5) * S));
+      let i = y * hd.w + x;
+      if (q > 0u && atomicLoad(&heat[i]) < CAP) { atomicAdd(&heat[i], q); }
+    }
+  }
 }`;
-// (the colours: c.a target size, cells; c.q the quad's corners as glCorners works them out; c.t FIRE_T as floats (each the smallest
-// float32 not under it, so a float32 heat compares with it as with the number itself); c.g the context's alpha; c.p FIRE_PAL)
+// (the colours: c.a target size, cells; c.q the quad's corners as glCorners works them out; c.t FIRE_T in the grid's whole numbers
+// (each the least sum at or over its step); c.g the context's alpha; c.p FIRE_PAL)
 const FIRE_COL_WGSL = `
-struct CD { a: vec4f, q: array<vec4f, 2>, t: array<vec4f, 2>, g: vec4f, p: array<vec4f, 7> };
+struct CD { a: vec4f, q: array<vec4f, 2>, t: array<vec4u, 2>, g: vec4f, p: array<vec4f, 7> };
 @group(0) @binding(0) var<storage, read> cd: CD;
-@group(0) @binding(1) var heat: texture_2d<f32>;
+@group(0) @binding(1) var<storage, read> heat: array<u32>;
 struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f };
 @vertex fn vs(@builtin(vertex_index) v: u32) -> VO {
-  let k = select(select(select(3u, 2u, v == 4u), 0u, v == 3u), v, v < 3u);
+  let k = select(select(select(3u, 2u, v == 4u), 0u, v == 3u), v, v < 3u);   // (the triangles 0 1 2 and 0 2 3)
   let c = cd.q[k >> 1u]; let a_pos = select(c.xy, c.zw, (k & 1u) == 1u);
   let p = a_pos / cd.a.xy;
   var g = vec4f(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
   g.y = -g.y; g.z = (g.z + g.w) * 0.5;   // (rows in WebGL's order, z 0..w - as every vertex stage of the game: src/gpu/10-glsl.js)
   var o: VO; o.p = g; o.uv = vec2f(select(0.0, cd.a.z, k == 1u || k == 2u), select(0.0, cd.a.w, k >= 2u)); return o;
 }
-fn th(j: u32) -> f32 { return cd.t[j >> 2u][j & 3u]; }
+fn th(j: u32) -> u32 { return cd.t[j >> 2u][j & 3u]; }
 @fragment fn fs(i: VO) -> @location(0) vec4f {
-  let cell = clamp(vec2i(floor(i.uv)), vec2i(0), vec2i(cd.a.zw) - 1);
-  let v = textureLoad(heat, cell, 0).r;
+  let n = vec2i(cd.a.zw);
+  let cell = clamp(vec2i(floor(i.uv)), vec2i(0), n - 1);
+  let v = heat[u32(cell.y) * u32(n.x) + u32(cell.x)];
   if (v < th(0u)) { return vec4f(0.0); }
   var k = 0u; loop { if (k >= 6u || v < th(k + 1u)) { break; } k = k + 1u; }
   return cd.p[k] * cd.g.x;
 }`;
-// (FIRE_T as float32s: the smallest not under each - see FIRE_COL_WGSL)
-const FIRE_TF = (() => { const f = new Float32Array(1), u = new Uint32Array(f.buffer); return FIRE_T.map(t => { f[0] = t; if (f[0] < t) u[0]++; return f[0]; }); })();
+// (FIRE_T in the grid's whole numbers: the least sum whose heat is at or over each step)
+const FIRE_TQ = FIRE_T.map(t => Math.ceil(t * FIRE_S));
 // the fire's WebGPU objects (src/gpu's calls), made again on a new device
 function fireShared() {
   if (FIRE.ep === GPU.ep) return;
-  if (!GPU.feat['float32-blendable']) throw new Error('the fire needs float32-blendable (its heat summed in an R32F grid)');
-  const V = GPUShaderStage.VERTEX, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
-  FIRE.bgl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true } }, { binding: 1, visibility: V, buffer: { type: 'read-only-storage' } }], 'fire heat');
-  FIRE.cbgl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } }], 'fire colours');
-  const hm = gpuModule(FIRE_HEAT_WGSL, 'fire heat'), one = { srcFactor: 'one', dstFactor: 'one', operation: 'add' };
-  FIRE.heat = gpuRenderPipe({ layout: gpuPipeLayout([FIRE.bgl], 'fire heat'), vertex: { module: hm, entryPoint: 'vs' }, fragment: { module: hm, entryPoint: 'fs', targets: [{ format: 'r32float', blend: { color: one, alpha: one } }] }, primitive: { topology: 'triangle-list', cullMode: 'none' } });
+  const C_ = GPUShaderStage.COMPUTE, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, ro = { type: 'read-only-storage' };
+  FIRE.hbgl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: { type: 'read-only-storage', hasDynamicOffset: true } }, { binding: 1, visibility: C_, buffer: ro }, { binding: 2, visibility: C_, buffer: { type: 'storage' } }], 'fire heat');
+  FIRE.cbgl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: ro }], 'fire colours');
+  const hm = gpuModule(FIRE_HEAT_WGSL, 'fire heat'), hl = gpuPipeLayout([FIRE.hbgl], 'fire heat');
+  FIRE.clear = gpuComputePipe({ layout: hl, compute: { module: hm, entryPoint: 'clear' } });
+  FIRE.add = gpuComputePipe({ layout: hl, compute: { module: hm, entryPoint: 'add' } });
   FIRE.cm = gpuModule(FIRE_COL_WGSL, 'fire colours'); FIRE.cpl = gpuPipeLayout([FIRE.cbgl], 'fire colours');
-  if (FIRE.tex) gpuTexFree(FIRE.tex);   // (the old device's: counted out, not destroyed)
-  FIRE.col.clear(); FIRE.hb.clear(); FIRE.cb.clear(); FIRE.tex = null; FIRE.ep = GPU.ep;
+  if (FIRE.buf) gpuBufFree(FIRE.buf);   // (the old device's: counted out, not destroyed)
+  FIRE.col.clear(); FIRE.hb.clear(); FIRE.cb.clear(); FIRE.buf = null; FIRE.cells = 0; FIRE.ep = GPU.ep;
 }
-// the heat grid: one R32F texture, grown in steps (a power of two each way) to the largest picture asked for - the passes run in order,
-// so every fire of the frame uses it in turn
-function fireGrid(W, H) {
-  const T = FIRE.tex;
-  if (T && T.gt && T.w >= W && T.h >= H) return T;
-  let w = 64, h = 64; while (w < W) w *= 2; while (h < H) h *= 2;
-  if (T) { w = Math.max(w, T.w); h = Math.max(h, T.h); gpuTexFree(T); }
-  FIRE.cb.clear();
-  return (FIRE.tex = gpuTex(w, h, 'r32float', 'fire'));
+// the heat grid: one buffer, grown in steps (a power of two of cells) to the largest picture asked for - the passes run in order, so
+// every fire of the frame uses it in turn
+function fireGrid(cells) {
+  if (FIRE.buf && FIRE.cells >= cells) return FIRE.buf;
+  let n = 4096; while (n < cells) n *= 2;
+  if (FIRE.buf) gpuBufFree(FIRE.buf);
+  FIRE.hb.clear(); FIRE.cb.clear(); FIRE.cells = n;
+  return (FIRE.buf = gpuBuf(n * 4, 'fire'));
 }
-// (an arena chunk's bind groups - the heat's, and the colours' with the grid)
-function fireBind(map, layout, c, second) {
-  const key = c.id; let e = map.get(key);
-  if (!e || e.gb !== c.gb) { e = { gb: c.gb, bg: gpuBindGroup(layout, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: map === FIRE.hb ? 16 : 256 } }, { binding: 1, resource: second }], 'fire') }; map.set(key, e); }
+// (an arena chunk's bind groups with the grid - the heat's and the colours')
+function fireBind(map, layout, c, entries) {
+  let e = map.get(c.id);
+  if (!e || e.gb !== c.gb) { e = { gb: c.gb, bg: gpuBindGroup(layout, entries, 'fire') }; map.set(c.id, e); }
   return e.bg;
 }
 // the picture into the current context at this point of the frame (as drawPixels laid it)
@@ -35353,25 +35369,26 @@ function firePut(F) {
   if (!GPU.on || GPU.lost || GLR.lost || !(ctx instanceof GLCtx)) return;
   const X = fxBegin(ctx); if (!X) return;
   fireShared();
-  const W = F.W, H = F.H, L = F.L, n = L.length >> 2, grid = fireGrid(W, H);
-  // 1. the heat: the flames in pieces of at most 65536 (each piece's block in the arena: 16 bytes a flame)
-  const hp = gpuPassBegin({ colorAttachments: [{ view: grid.view, loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'fire heat', [grid]);
-  hp.setPipeline(FIRE.heat); hp.setViewport(0, 0, W, H, 0, 1); hp.setScissorRect(0, 0, W, H);
-  for (let a = 0; a < n; a += 65536) {
-    const k = Math.min(n, a + 65536) - a, [c, off] = arenaAlloc(16 + k * 16, 256), w0 = off >> 2, Wd = pxWords(c), Fl = Wd.f;
-    Fl[w0] = W; Fl[w0 + 1] = H; Wd.u[w0 + 2] = (off + 16) >> 4; Wd.u[w0 + 3] = k;
+  const W = F.W, H = F.H, L = F.L, n = L.length >> 2, grid = fireGrid(W * H);
+  // 1. the heat: the grid cleared, then the flames in pieces of at most 65535 (a workgroup each - each piece's block in the arena,
+  // 16 bytes a flame after its 16-byte head)
+  const cp = gpuComputeBegin([grid]);
+  for (let a = 0; a < n; a += 65535) {
+    const k = Math.min(n, a + 65535) - a, [c, off] = arenaAlloc(16 + k * 16, 256), w0 = off >> 2, Wd = pxWords(c), Fl = Wd.f, U = Wd.u;
+    U[w0] = W; U[w0 + 1] = H; U[w0 + 2] = (off + 16) >> 4; U[w0 + 3] = k;
     for (let i = 0; i < k; i++) { const s = (a + i) * 4, o = w0 + 4 + i * 4; Fl[o] = L[s] - F.bx0; Fl[o + 1] = L[s + 1] - F.by0; Fl[o + 2] = L[s + 2]; Fl[o + 3] = L[s + 3]; }
-    hp.setBindGroup(0, fireBind(FIRE.hb, FIRE.bgl, c, { buffer: c.gb }), [off]);
-    hp.draw(6, k);
+    cp.setBindGroup(0, fireBind(FIRE.hb, FIRE.hbgl, c, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: 16 } }, { binding: 1, resource: { buffer: c.gb } }, { binding: 2, resource: { buffer: grid.gb } }]), [off]);
+    if (!a) { cp.setPipeline(FIRE.clear); cp.dispatchWorkgroups(Math.ceil(W * H / 64)); cp.setPipeline(FIRE.add); }
+    cp.dispatchWorkgroups(k);
   }
-  gpuPassEnd();
+  cp.end();
   // 2. the colours, where the picture goes
-  const t = ctx.target, s = ctx.s, [c, off] = arenaAlloc(256, 256), w0 = off >> 2, Fc = pxWords(c).f;
+  const t = ctx.target, s = ctx.s, [c, off] = arenaAlloc(256, 256), w0 = off >> 2, Wc = pxWords(c), Fc = Wc.f;
   glCorners(s.m, F.dx, F.dy, F.dw, F.dh);
   const X4 = GLC4.x, Y4 = GLC4.y;
   Fc[w0] = t._w; Fc[w0 + 1] = t._h; Fc[w0 + 2] = W; Fc[w0 + 3] = H;
   for (let q = 0; q < 4; q++) { Fc[w0 + 4 + q * 2] = X4[q]; Fc[w0 + 5 + q * 2] = Y4[q]; }
-  Fc.set(FIRE_TF, w0 + 12); Fc[w0 + 19] = 0;
+  Wc.u.set(FIRE_TQ, w0 + 12); Wc.u[w0 + 19] = 0;
   Fc[w0 + 20] = Math.fround(Math.round(s.ga * 255) / 255); Fc[w0 + 21] = Fc[w0 + 22] = Fc[w0 + 23] = 0;   // (the context's alpha, as glAlpha gives it)
   const B = PXL.b255; for (let k = 0; k < 7; k++) { const p = FIRE_PAL[k], o = w0 + 24 + k * 4; Fc[o] = B[p[0]]; Fc[o + 1] = B[p[1]]; Fc[o + 2] = B[p[2]]; Fc[o + 3] = 1; }
   const key = fxKey(X);
@@ -35379,10 +35396,10 @@ function firePut(F) {
   if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FIRE.cpl, vertex: { module: FIRE.cm, entryPoint: 'vs' }, fragment: { module: FIRE.cm, entryPoint: 'fs', targets: [fxColour(X.FT.tex, X.op, X.screen)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, fxStencil(X.ds))); FIRE.col.set(key, pipe); }
   const pass = fxPass(X, 'fire');
   pass.setPipeline(pipe);
-  pass.setBindGroup(0, fireBind(FIRE.cb, FIRE.cbgl, c, grid.view), [off]);
+  pass.setBindGroup(0, fireBind(FIRE.cb, FIRE.cbgl, c, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: 256 } }, { binding: 1, resource: { buffer: grid.gb } }]), [off]);
   pass.draw(6);
   gpuPassEnd();
-  GLR.stats.draws += 2; GPU.stats.draws += 2;
+  GLR.stats.draws++; GPU.stats.draws++; GPU.stats.computes = (GPU.stats.computes || 0) + 1;
 }
 
 // The light on the sea's skin: at night the surface line catches the moonlight (brightest under the moon,
