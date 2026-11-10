@@ -127,7 +127,7 @@ const DEFAULT_SUBS=[ // CATEGORY > SUBCATEGORY (says what it does) > TYPE (the g
   ['structure','Dock:water holds,Lighthouse,Shipyard:holds,Crane,Marine Hangar:holds,Storage Yard:stores,Terminal:stores ships,Airport:holds,Runway,Aircraft Hangar:holds,Control Tower,Helipad:holds,Market:stores sells,Pharmacy:stores sells,Hospital,School,Church,Fire Station:holds,Police Station:holds,Garage:holds,House,Hut,Building,Taxi Stand'],
   ['vehicle','Boats:water,Ships:water,Submarines:water,Cars,Trucks,Buses,Emergency,Farm,Planes,Helicopters,Airships'],
   ['nature','Fish Area:gives,Shark Area,Whale Area,Kraken,Pirate Wreck,Forest']]
-  .flatMap(([kind,l])=>l.split(',').map(x=>{const[n,d]=x.split(':');return{id:slug(n),kind,name:n,does:d?d.split(' '):[]}}));
+  .flatMap(([kind,l])=>l.split(',').map(x=>{const[n,d]=x.split(':');return{id:slug(n),kind,name:n,does:d?d.split(' '):[],...(n==='Fish Area'?{gives:['fish'],rate:25}:{})}}));
 const DEFAULT_TYPES=[['boats','Fishing Boat,Sailboat,Motor Boat,Jet Boat,Yacht'],['ships','Small Cargo Ship,Cargo Ship,Tanker,Cruise Ship'],['submarines','Submarine'],['cars','Car,Taxi,Van'],['trucks','Truck,Small Truck'],
   ['buses','Bus'],['emergency','Ambulance,Fire Engine'],['farm','Tractor'],['planes','Cessna,Airliner,Seaplane:water'],['helicopters','Helicopter'],['airships','Blimp,Balloon']]
   .flatMap(([sub,l])=>l.split(',').map(x=>{const[n,d]=x.split(':');return{id:slug(n),sub,name:n,...(d?{does:d.split(' ')}:{})}}));
@@ -176,6 +176,8 @@ const does=(e,p)=>((subOf(e)||{}).does||[]).includes(p)||((typeOf(e)||{}).does||
 const byName=l=>[...l].sort((a,b)=>az(a.name||tn(a)||'',b.name||tn(b)||''));
 
 
+const carriesOf=V=>(typeOf(V)||{}).carries||[]; // a vehicle type's goods (none = anything)
+const givesOf=X=>(subOf(X)||{}).gives||[],rateOf=X=>(subOf(X)||{}).rate||25; // a nature subcategory gives these, so many a game hour
 const subsOfKind=k=>byName(doc.subs.filter(t=>t.kind===k));
 const typesOfSub=id=>byName(doc.types.filter(t=>t.sub===id));
 const kindOfSub=id=>(doc.subs.find(t=>t.id===id)||{}).kind;
@@ -279,8 +281,8 @@ function sanitize(d){
   const kindOf=k=>k==='place'||k==='other'||k==='character'||!CATS[k]?'structure':k; // places and notes from older plans become structures
   let types=Array.isArray(d.types)&&d.types.length?list(d.types).map(t=>{const kind=kindOf(t.kind);return{id:t.id,kind,...(+t.speed>0?{speed:old?+t.speed*KMH:+t.speed}:{}),name:t.name,does:(Array.isArray(t.does)?t.does:[]).filter(p=>(PURPOSES[kind]||[]).some(q=>q[0]===p))}}):JSON.parse(JSON.stringify(LEGACY_TYPES));
   const NEW=Array.isArray(d.subs)&&d.subs.length; // version 3: subcategories hold the purposes, types belong to a subcategory
-  let subs=NEW?list(d.subs).map(t=>{const kind=kindOf(t.kind);return{id:t.id,kind:kind==='region'?'structure':kind,name:t.name,does:(Array.isArray(t.does)?t.does:[]).filter(p=>(PURPOSES[kind]||[]).some(q=>q[0]===p))}}):[];
-  if(NEW){const sids=new Set(subs.map(t=>t.id));types=list(d.types).filter(t=>sids.has(String(t.sub))).map(t=>({id:t.id,sub:String(t.sub),name:t.name,...(+t.speed>0?{speed:+t.speed}:{}),...(Array.isArray(t.does)&&t.does.includes('water')?{does:['water']}:{})}))}
+  let subs=NEW?list(d.subs).map(t=>{const kind=kindOf(t.kind);return{id:t.id,kind:kind==='region'?'structure':kind,name:t.name,...(Array.isArray(t.gives)?{gives:t.gives.map(String)}:{}),...(+t.rate>0?{rate:Math.round(+t.rate)}:{}),does:(Array.isArray(t.does)?t.does:[]).filter(p=>(PURPOSES[kind]||[]).some(q=>q[0]===p))}}):[];
+  if(NEW){const sids=new Set(subs.map(t=>t.id));types=list(d.types).filter(t=>sids.has(String(t.sub))).map(t=>({id:t.id,sub:String(t.sub),name:t.name,...(Array.isArray(t.carries)?{carries:t.carries.map(String)}:{}),...(+t.speed>0?{speed:+t.speed}:{}),...(Array.isArray(t.does)&&t.does.includes('water')?{does:['water']}:{})}))}
   if(!NEW&&Array.isArray(d.catalog))for(const c of d.catalog){const kind=kindOf(c.kind);if(kind==='region')continue;for(const n of c.types||[])if(!types.some(t=>t.kind===kind&&az(t.name,n)===0))types.push({id:uid('y'),kind,name:String(n),does:[]})} // types from plans that still had categories
 
   if(!NEW)types=types.filter(t=>!['big-city','small-town','village','landmark','note'].includes(t.id)||(d.elements||[]).some(e=>e&&e.type===t.id&&e.kind!=='place'));
@@ -302,10 +304,17 @@ function sanitize(d){
   if(!NEW){ // the old one-level types: structures' and nature's become subcategories, vehicles' become types in a subcategory
     const map={},legacy=types;types=[];
     const subFor=id=>{let t=subs.find(x=>x.id===id);if(!t){const D=DEFAULT_SUBS.find(x=>x.id===id);t=D?JSON.parse(JSON.stringify(D)):{id,kind:'vehicle',name:'Other',does:[]};subs.push(t)}return t};
-    for(const t of legacy){if(t.kind!=='vehicle'){subs.push({id:t.id,kind:t.kind,name:t.name,does:t.does||[]});map[t.id]={sub:t.id,type:''};continue}
+    for(const t of legacy){if(t.kind!=='vehicle'){const D=DEFAULT_SUBS.find(x=>x.id===t.id)||{};subs.push({id:t.id,kind:t.kind,name:t.name,does:t.does||[],...(D.gives?{gives:[...D.gives],rate:D.rate}:{})});map[t.id]={sub:t.id,type:''};continue}
       const D=DEFAULT_TYPES.find(x=>x.id===t.id),S=subFor(D?D.sub:(/sub/i.test(t.name)?'submarines':'other-vehicles'));
       const w=(t.does||[]).includes('water')&&!S.does.includes('water');types.push({id:t.id,sub:S.id,name:t.name,...(t.speed?{speed:t.speed}:{}),...(w?{does:['water']}:{})});map[t.id]={sub:S.id,type:t.id}}
     for(const e of d.elements){if(e.kind==='region')continue;const M=map[e.type];if(M){e.sub=M.sub;e.type=M.type}else{e.sub=(subs.find(t=>t.kind===e.kind)||{}).id||'';e.type=''}}}
+  for(const e of d.elements){ // carries / gives / rate used to sit on each thing: now every thing of its type (vehicles) or subcategory (nature) shares them
+    const T=types.find(t=>t.id===e.type),S=subs.find(t=>t.id===e.sub);
+    if(e.carries&&T)T.carries=[...new Set([...(T.carries||[]),...e.carries])];
+    if(e.gives&&S){S.gives=[...new Set([...(S.gives||[]),...e.gives])];if(e.rate&&!S.rate)S.rate=e.rate}
+    delete e.carries;delete e.gives;delete e.rate;delete e.stores}
+  for(const t of types)if(t.carries){t.carries=t.carries.filter(g=>gids.has(g));if(!t.carries.length)delete t.carries}
+  for(const t of subs)if(t.gives){t.gives=t.gives.filter(g=>gids.has(g));if(!t.gives.length)delete t.gives}
   const m=new Map(d.elements.map(e=>[e.id,e]));
   for(const e of d.elements){let p=e.parent,n=0;while(p&&n++<100){if(p===e.id){e.parent=null;break}p=m.get(p)?.parent}}
   d.connections=(d.connections||[]).filter(c=>c&&ids.has(c.from)&&ids.has(c.to)&&c.from!==c.to).map(c=>({id:String(c.id||uid('c')),from:c.from,to:c.to,direction:'forward',notes:String(c.notes??''),bend:(+c.bend||0)*K,...(c.veh&&ids.has(c.veh)?{veh:c.veh}:{}),...(c.after?{after:String(c.after)}:{}),
@@ -749,6 +758,11 @@ function wireCommon(){
   on('#pGroup',group);on('#pUngroup',ungroup);on('#pDup',duplicate);on('#pDel',removeSel);
   on('#pCopy',()=>{if(copySel())toast('Copied')});on('#pPaste',()=>paste());
 }
+function propsLine(e){const S=subOf(e),T=typeOf(e),gn=ids=>byName(doc.goods).filter(g=>ids.includes(g.id)).map(g=>g.name).join(', '),P=PURPOSES[e.kind]||[];
+  const d=P.filter(([k])=>does(e,k)&&!(e.kind==='nature'&&k==='gives')).map(([,n])=>n.toLowerCase());
+  const bits=e.kind==='vehicle'?['Speed '+speedOf(e),carriesOf(e).length?'carries '+gn(carriesOf(e)):'carries anything',...d]
+    :e.kind==='nature'?(givesOf(e).length&&does(e,'gives')?['gives '+gn(givesOf(e))+', '+rateOf(e)+' an hour']:['gives nothing']):d;
+  return(bits.length?bits.join(' · '):'Does nothing special')+' — set in LISTS'}
 function elPanel(e){
   const K=CATS[e.kind],land=isLand(e),owned=(e.kind==='structure'||e.kind==='vehicle')&&!onWater(e),ty=typeOf(e),su=subOf(e);
   const parents=doc.elements.filter(p=>p.id!==e.id&&!isLand(p)&&p.kind!=='vehicle'&&!descendants(e.id).has(p.id)).sort((a,b)=>az(a.name||tn(a)||'',b.name||tn(b)||''));
@@ -761,22 +775,15 @@ function elPanel(e){
   pnl.innerHTML=`<h3 style="color:${K.color}">${K.name.toUpperCase()}</h3>
   <label>Name</label><input data-f="name" value="${esc(e.name)}">
   ${land?`<label>Biome</label><div data-new="biome"><select data-f="biome" style="border-color:${bio.color};border-width:2px">${byName(doc.biomes).map(b=>opt(b.id,b.name,b.id===e.biome)).join('')}${opt('__new','+ New biome…')}</select></div>
-  <label>${esc(bio.name)} colour — every ${esc(bio.name)} region</label>${swatches('data-bc',BIOME_COLS,bio.color)}
   <label>Country</label><div data-new="country"><select data-f="country">${opt('','— none —',!e.country)}${byName(doc.countries).map(k=>opt(k.id,k.name,k.id===e.country)).join('')}${opt('__new','+ New country…')}</select></div>
   <label>Length (m)</label><input data-f="w" type="number" inputmode="numeric" min="10" step="10" value="${Math.round(e.w/UPM)}">`
   :`
   <label>Subcategory</label><div data-new="sub"><select data-f="sub">${su?'':opt('','— none —',true)}${subsOfKind(e.kind).map(t=>opt(t.id,t.name,t.id===e.sub)).join('')}${opt('__new','+ New '+K.name.toLowerCase()+' subcategory…')}</select></div>
   ${su?`<label>Type</label><div data-new="type"><select data-f="type">${opt('','— any '+esc(su.name)+' —',!ty)}${typesOfSub(su.id).map(t=>opt(t.id,t.name,t.id===e.type)).join('')}${opt('__new','+ New '+su.name+' type…')}</select></div>`:''}
-  ${su&&PURPOSES[su.kind]?`<label>${esc(su.name)}: what it does</label><div class="chips">${PURPOSES[su.kind].map(([k,n])=>`<button data-does="${k}" class="${su.does.includes(k)?'on':''}">${n}</button>`).join('')}</div>`:''}
-  ${ty&&e.kind==='vehicle'&&su&&!su.does.includes('water')?`<label>Every ${esc(ty.name)} also</label><div class="chips"><button data-tdoes="water" class="${(ty.does||[]).includes('water')?'on':''}">On the water, needs a dock</button></div>`:''}`}
+  ${su?`<div class="sub" style="margin-top:6px">${esc(propsLine(e))}</div>`:''}`}
   ${owned?`<label>Owner</label><div data-new="owner"><select data-f="owner">${opt('','— nobody —',!e.owner)}${chars.map(k=>opt(k.id,k.name,k.id===e.owner)).join('')}${opt('__new','+ New character…')}</select></div>
-  ${ownerOf(e)?`<label>${esc(ownerOf(e).name)}'s colour — everything they own</label>${swatches('data-oc',OWNER_COLS,ownerOf(e).color)}`:''}`:''}
-  ${goodsField(e)?(()=>{const[f,lab]=goodsField(e),cur=e[f]||[],names=byName(doc.goods).filter(g=>cur.includes(g.id)).map(g=>g.name);
-    return`<label>${lab}</label><div class="multi"><button class="mbtn" data-mopen>${names.length?esc(names.join(', ')):f==='carries'?'— anything —':'— nothing —'} ▾</button>
-    <div class="mlist" data-new="good" ${goodsOpen?'':'hidden'}>${byName(doc.goods).map(g=>`<div class="mrow" data-good="${g.id}">${cur.includes(g.id)?'✓ ':'&nbsp;&nbsp;&nbsp; '}${esc(g.name)}</div>`).join('')}<div class="mrow" data-good="__new">+ New good…</div></div></div>`})():''}
-  ${e.kind==='vehicle'&&ty?`<label>Speed of every ${esc(ty.name)} — game units a second (${kmhOf(speedOf(e))} km/h)</label><input data-speed type="number" inputmode="numeric" min="1" value="${speedOf(e)}">`:''}
+`:''}
   ${e.kind==='vehicle'?routineHtml(e):''}
-  ${e.kind==='nature'&&(e.gives||[]).length?`<label>Gives per hour</label><input data-rate type="number" inputmode="numeric" min="1" value="${e.rate||25}">`:''}
   ${stands?`<label>${onWater(e)?'Held by':holderKind(stands)==='dock'?'Moored at':holderKind(stands)==='hangar'?'Kept in':holderKind(stands)==='yard'?'Kept at':'Stands on'}</label><div>${esc(stands.name||biomeOf(stands).name)}</div>`:''}
   ${(()=>{const hs=doc.elements.filter(v=>heldBy(v)===e);return hs.length?`<label>${holderKind(e)==='dock'?'Moored here':'Kept here'} (${hs.length})</label><div>${hs.map(v=>esc(v.name||tn(v))).join(', ')}</div>`:''})()}
   ${true?'':`<label>Inside (belongs to)</label><select data-f="parent">${opt('','— nothing —',!e.parent)}${parents.map(p=>opt(p.id,p.name||tn(p),p.id===e.parent)).join('')}</select>`}
@@ -841,17 +848,17 @@ function linkPanel(k){
 
 /* ---------- schedules: a vehicle at one end of a connection leaves every N days at a part of the day to do a task at the other end ---------- */
 const tripEnds=c=>{const A=byId.get(c.from),B=byId.get(c.to),W=c.veh&&byId.get(c.veh);if(W)return[W,B,false];return A&&A.kind==='vehicle'?[A,B,false]:B&&B.kind==='vehicle'?[B,A,true]:null}; // [vehicle, where it goes, vehicle at the 'to' end]
-const goodsAt=X=>X&&X.kind==='nature'&&does(X,'gives')?X.gives||[]:[];
+const goodsAt=X=>X&&X.kind==='nature'&&does(X,'gives')?givesOf(X):[];
 function taskOptions(X){const o=goodsAt(X).map(g=>({v:'pick:'+g,t:'Pick up '+((doc.goods.find(x=>x.id===g)||{}).name||g).toLowerCase()}));if(takesCargo(X))o.push({v:'pick:',t:'Pick up cargo'});
   if(X&&(X.kind==='structure'||X.kind==='vehicle'))o.push({v:'drop',t:'Drop cargo'});o.push({v:'goto',t:'Go to'});return o}
 const taskName=c=>c.activity==='goto'?'Go to':c.activity==='drop'?'Drop cargo':c.activity==='pick'?'Pick up '+(c.good?((doc.goods.find(x=>x.id===c.good)||{}).name||'cargo'):'cargo').toLowerCase():'';
 function autoTask(c){const te=tripEnds(c);if(!te||!te[1]||c.activity)return;const[V,X]=te,gs=goodsAt(X); // what dragging it there means
-  const carried=new Set(V.carries||[]);
+  const carried=new Set(carriesOf(V));
   if(gs.length)setTask(c,'pick:'+(gs.find(g=>carried.has(g))||gs[0]));  // it gives goods: pick them up
   else if(takesCargo(X))setTask(c,'drop');                              // it collects goods: drop the cargo there
   else setTask(c,'goto')}
 function setTask(c,tid){const te=tripEnds(c);delete c.good;if(tid&&tid.startsWith('pick:')){c.activity='pick';if(tid.length>5)c.good=tid.slice(5)}else if(tid)c.activity=tid;else delete c.activity;if(!te)return;const V=te[0];
-  if(c.good&&!(V.carries||[]).includes(c.good))V.carries=[...(V.carries||[]),c.good]; // it carries what it picks up
+  {const t=typeOf(V);if(t&&c.good&&(t.carries||[]).length&&!t.carries.includes(c.good))t.carries=[...t.carries,c.good]} // its type carries what it picks up
   if(tid){V.routine=V.routine||{start:'time',every:1,day:0,slot:0,takes:1,steps:[]};if(!V.routine.steps.some(st=>st.link===c.id))V.routine.steps.push({link:c.id,until:100})}
   else if(V.routine)V.routine.steps=V.routine.steps.filter(st=>st.link!==c.id)}
 function schedHtml(k){const te=tripEnds(k);if(!te||!te[1])return'';const opt=(v,t,on)=>`<option value="${esc(v)}"${on?' selected':''}>${esc(t)}</option>`;
@@ -888,16 +895,16 @@ function simulate(t){ // everything worked out again from day 0, 00:00
     if(steps.length)vs.push({V,R,steps,mode:'idle',i:-1})}
   const leave=(v,from,to,link)=>{const a=from==='home'?v.V:byId.get(from),b=to==='home'?v.V:byId.get(to);v.mode='travel';v.from=from;v.to=to;v.link=link;v.dur=Math.max(.5,distU(a,b)/speedOf(v.V));v.left=v.dur}; // real seconds
   const fires=(v,k)=>{const R=v.R,day=Math.floor(k/TPD);if(R.start==='time')return k%TPD===SLOT_HOURS[R.slot]*4&&day>=R.day&&(day-R.day)%R.every===0;
-    const H=heldBy(v.V),st=H&&stock.get(H.id)||{},ok=g=>!(v.V.carries||[]).length||v.V.carries.includes(g);return Object.keys(st).some(g=>st[g]>0&&ok(g))};
+    const H=heldBy(v.V),st=H&&stock.get(H.id)||{},ok=g=>!carriesOf(v.V).length||carriesOf(v.V).includes(g);return Object.keys(st).some(g=>st[g]>0&&ok(g))};
   for(let k=0;k<tick;k++){const sec=DT/clockRate(k*DT); // real seconds this quarter hour lasts on the game's clock
    for(const v of vs){const V=v.V,R=v.R;
-    if(v.mode==='idle'){if(fires(v,k)){if(R.start==='cargo'){const H=heldBy(V),st=stock.get(H.id);for(const g of Object.keys(st))if(st[g]>0&&(!(V.carries||[]).length||V.carries.includes(g))){const n=st[g];add(load,V.id,g,n);add(stock,H.id,g,-n)}}
+    if(v.mode==='idle'){if(fires(v,k)){if(R.start==='cargo'){const H=heldBy(V),st=stock.get(H.id);for(const g of Object.keys(st))if(st[g]>0&&(!carriesOf(V).length||carriesOf(V).includes(g))){const n=st[g];add(load,V.id,g,n);add(stock,H.id,g,-n)}}
       v.i=0;leave(v,'home',v.steps[0].X.id,v.steps[0].c.id);v.left-=sec;if(v.left<=0)v.mode='work'}}
     else if(v.mode==='travel'){v.left-=sec;if(v.left<=0)v.mode=v.to==='home'?'idle':'work'}
     else{const s=v.steps[v.i],X=s.X;let done=true;
       if(s.task.act==='collect'){const l=load.get(V.id)||{},have=Object.values(l).reduce((a,b)=>a+b,0);let need=s.until-have,got=0;
-        if(need>0){if(s.task.good&&X.kind==='nature'&&(X.gives||[]).includes(s.task.good)){got=Math.min(need,(X.rate||25)*DT);add(load,V.id,s.task.good,got)} // nature gives so much an hour
-          else{const st=stock.get(X.id)||{};for(const g in st){if(need<=0)break;if(s.task.good&&g!==s.task.good)continue;if(V.carries&&V.carries.length&&!V.carries.includes(g))continue;const n=Math.min(need,st[g]);if(n>0){add(stock,X.id,g,-n);add(load,V.id,g,n);need-=n;got+=n}}}
+        if(need>0){if(s.task.good&&X.kind==='nature'&&givesOf(X).includes(s.task.good)){got=Math.min(need,rateOf(X)*DT);add(load,V.id,s.task.good,got)} // nature gives so much an hour
+          else{const st=stock.get(X.id)||{};for(const g in st){if(need<=0)break;if(s.task.good&&g!==s.task.good)continue;if(carriesOf(V).length&&!carriesOf(V).includes(g))continue;const n=Math.min(need,st[g]);if(n>0){add(stock,X.id,g,-n);add(load,V.id,g,n);need-=n;got+=n}}}
           done=have+got>=s.until-1e-9||(X.kind!=='nature'&&!got)}}
       else if(s.task.act==='drop'){const l=load.get(V.id)||{};for(const g in l)add(stock,X.id,g,l[g]);load.set(V.id,{})}
       if(done){v.i++;if(v.i<v.steps.length){const n=v.steps[v.i].c;leave(v,X.id,v.steps[v.i].X.id,n.from===X.id?n.id:null)}else leave(v,X.id,'home',s.c.from===V.id||s.c.to===V.id?s.c.id:null)}}}}
@@ -910,7 +917,7 @@ function simulate(t){ // everything worked out again from day 0, 00:00
 /* how long a routine takes, from the map's distances and the vehicle's speed */
 function routineTimes(V){const R=V.routine;if(!R)return null;let at=V,h=R.start==='time'?SLOT_HOURS[R.slot]:12,total=0;const out=[];
   for(const st of R.steps){const c=linkOf(st.link),te=c&&tripEnds(c);if(!te||!te[1])continue;const X=te[1],secs=distU(at,X)/speedOf(V),go=gameHours(h,secs);h+=go;let work=0;
-    if(c.activity==='pick'&&c.good&&X.kind==='nature')work=st.until/(X.rate||25);h+=work;
+    if(c.activity==='pick'&&c.good&&X.kind==='nature')work=st.until/rateOf(X);h+=work;
     out.push({go,secs,work,km:distKm(at,X)});total+=go+work;at=X}
   const bs=distU(at,V)/speedOf(V),back=gameHours(h,bs);return{steps:out,back,backSecs:bs,total:total+back}}
 const realT=s=>s<60?Math.round(s)+' s':Math.round(s/60)+' min';
@@ -947,10 +954,10 @@ const LCOLS=[
     add:n=>{doc.countries.push({id:uid('k'),name:n});return true},ren:(id,n)=>{doc.countries.find(x=>x.id===id).name=n},
     who:id=>doc.elements.filter(e=>e.country===id),
     del:ids=>{doc.countries=doc.countries.filter(x=>!ids.has(x.id));for(const e of doc.elements)if(ids.has(e.country))e.country=null}},
-  {k:'goods',name:'Goods',one:'good',rows:()=>byName(doc.goods).map(g=>({id:g.id,name:g.name,n:usedBy(e=>['carries','stores','gives'].some(f=>(e[f]||[]).includes(g.id)))})),
+  {k:'goods',name:'Goods',one:'good',rows:()=>byName(doc.goods).map(g=>({id:g.id,name:g.name,n:usedBy(e=>carriesOf(e).includes(g.id)||givesOf(e).includes(g.id))})),
     add:n=>{doc.goods.push({id:uid('d'),name:n});return true},ren:(id,n)=>{doc.goods.find(x=>x.id===id).name=n},
-    who:id=>doc.elements.filter(e=>['carries','stores','gives'].some(f=>(e[f]||[]).includes(id))),
-    del:ids=>{doc.goods=doc.goods.filter(x=>!ids.has(x.id));for(const e of doc.elements)for(const f of['carries','stores','gives'])if(e[f]){e[f]=e[f].filter(g=>!ids.has(g));if(!e[f].length)delete e[f]}}},
+    who:id=>doc.elements.filter(e=>carriesOf(e).includes(id)||givesOf(e).includes(id)),
+    del:ids=>{doc.goods=doc.goods.filter(x=>!ids.has(x.id));for(const[l,f]of[[doc.types,'carries'],[doc.subs,'gives']])for(const t of l)if(t[f]){t[f]=t[f].filter(g=>!ids.has(g));if(!t[f].length)delete t[f]}}},
   {k:'biomes',name:'Biomes',one:'biome',pal:BIOME_COLS,col:id=>doc.biomes.find(x=>x.id===id),rows:()=>byName(doc.biomes).map(b=>({id:b.id,name:b.name,dot:b.color,n:usedBy(e=>isLand(e)&&e.biome===b.id)})),
     add:n=>{doc.biomes.push({id:uid('b'),name:n,color:BIOME_COLS.find(c=>!doc.biomes.some(x=>x.color===c))||'#e9b52c',h:40*MU});return true},ren:(id,n)=>{doc.biomes.find(x=>x.id===id).name=n},
     who:id=>doc.elements.filter(e=>isLand(e)&&e.biome===id),
@@ -962,8 +969,16 @@ function renderLists(){
   const box=$('#lists');let h='';
   for(const c of LCOLS){const rows=c.rows(),ss=lsel[c.k]||(lsel[c.k]=new Set());for(const id of[...ss])if(!rows.some(r=>r.id===id))ss.delete(id);
     const oneT=c.k==='subs'&&(lsel.subs||new Set()).size===1?doc.subs.find(x=>x.id===[...lsel.subs][0]):null;
+    const oneY=c.k==='types'&&(lsel.types||new Set()).size===1?doc.types.find(x=>x.id===[...lsel.types][0]):null,oneYS=oneY&&doc.subs.find(x=>x.id===oneY.sub);
+    const gchips=(attr,cur)=>`<div class="chips" style="margin-top:4px">${byName(doc.goods).map(g=>`<button ${attr}="${g.id}" class="${cur.includes(g.id)?'on':''}">${esc(g.name)}</button>`).join('')}</div>`;
+    const lab=t=>`<div class="sub" style="margin-top:8px">${t}</div>`;
+    const props=oneT&&oneT.kind==='nature'&&oneT.does.includes('gives')?lab('Gives')+gchips('data-lgive',oneT.gives||[])+lab('Per hour')+`<input data-lrate type="number" inputmode="numeric" min="1" value="${oneT.rate||25}" style="margin-top:4px">`
+      :oneY&&oneYS&&oneYS.kind==='vehicle'?lab('Speed')+`<input data-lspeed type="number" inputmode="numeric" min="1" value="${Math.round(oneY.speed||SPEEDS[oneY.id]||14*UPM)}" style="margin-top:4px">`
+        +lab('Carries <span style="opacity:.7">(none picked = anything)</span>')+gchips('data-lcarry',oneY.carries||[])
+        +(oneYS.does.includes('water')?'':lab('Also')+`<div class="chips" style="margin-top:4px"><button data-lwater class="${(oneY.does||[]).includes('water')?'on':''}">On the water, needs a dock</button></div>`):'';
     h+=`<div class="lcol"><h3>${c.name.toUpperCase()} <span class="sub">${rows.length}</span></h3><div class="lrows">${rows.map(r=>`<div class="lrow${ss.has(r.id)?' on':''}" data-lc="${c.k}" data-lid="${esc(r.id)}">${r.dot?`<span class="dot" style="background:${r.dot}"></span>`:''}<span class="nm">${esc(r.name)}${r.sub?`<div class="sub">${esc(r.sub)}</div>`:''}</span><span class="sub">${r.n?r.n+' used':''}</span></div>`).join('')||'<div class="sub" style="padding:8px">None yet</div>'}</div>
     ${oneT&&PURPOSES[oneT.kind]?`<div class="sub" style="margin-top:8px">${esc(oneT.name)}: what it does</div><div class="chips" style="margin-top:4px">${PURPOSES[oneT.kind].map(([k,n])=>`<button data-ldoes="${k}" class="${oneT.does.includes(k)?'on':''}">${n}</button>`).join('')}</div>`:''}
+    ${props}
     ${c.col&&ss.size===1?(()=>{const o=c.col([...ss][0]);return o?`<div class="sub" style="margin-top:8px">${esc(o.name)} colour</div><div class="chips" style="margin-top:4px">${c.pal.map(k=>`<button data-lcolk="${c.k}" data-lcol="${k}" style="background:${k};width:40px;${o.color===k?'outline:3px solid #fff;':''}"></button>`).join('')}<label style="display:flex;align-items:center;gap:6px;margin:0" class="sub">Any colour <input type="color" data-lcolk="${c.k}" value="${o.color}" title="Any colour" style="width:44px;height:36px;padding:0;border:0;background:none"></label></div>`:''})():''}
     ${c.fixed?'':`<div class="ladd"><input data-ladd="${c.k}" placeholder="${c.k==='subs'&&(lsel.kinds||new Set()).size!==1?'Pick a category to add':c.k==='types'&&(lsel.subs||new Set()).size!==1?'Pick a subcategory to add':'New '+c.one}" autocapitalize="words"><button data-laddb="${c.k}">ADD</button></div>`}</div>`}
   box.innerHTML=h;
@@ -972,6 +987,13 @@ function renderLists(){
   box.querySelectorAll('[data-laddb]').forEach(b=>b.onclick=()=>add(b.dataset.laddb));
   box.querySelectorAll('[data-ladd]').forEach(i=>i.onkeydown=ev=>{ev.stopPropagation();if(ev.key==='Enter')add(i.dataset.ladd)});
   box.querySelectorAll('[data-ldoes]').forEach(b=>b.onclick=()=>{const t=doc.subs.find(x=>x.id===[...lsel.subs][0]),k=b.dataset.ldoes;t.does=t.does.includes(k)?t.does.filter(x=>x!==k):[...t.does,k];commit();renderLists()});
+  const T1=()=>doc.types.find(x=>x.id===[...lsel.types][0]),S1=()=>doc.subs.find(x=>x.id===[...lsel.subs][0]);
+  const tog=(o,f,g)=>{const v=o[f]||[];o[f]=v.includes(g)?v.filter(x=>x!==g):[...v,g];if(!o[f].length)delete o[f];commit();renderLists()};
+  box.querySelectorAll('[data-lgive]').forEach(b=>b.onclick=()=>tog(S1(),'gives',b.dataset.lgive));
+  box.querySelectorAll('[data-lcarry]').forEach(b=>b.onclick=()=>tog(T1(),'carries',b.dataset.lcarry));
+  box.querySelectorAll('[data-lwater]').forEach(b=>b.onclick=()=>{const t=T1();if((t.does||[]).includes('water'))delete t.does;else t.does=['water'];resnap();commit();renderLists()});
+  box.querySelectorAll('[data-lrate]').forEach(i=>{i.onkeydown=ev=>ev.stopPropagation();i.onchange=()=>{const n=Math.round(+i.value);if(n>0){S1().rate=n;commit()}}});
+  box.querySelectorAll('[data-lspeed]').forEach(i=>{i.onkeydown=ev=>ev.stopPropagation();i.onchange=()=>{const n=Math.round(+i.value);if(n>0){T1().speed=n;commit()}}});
   box.querySelectorAll('[data-lcolk]').forEach(b=>{const c=LCOLS.find(x=>x.k===b.dataset.lcolk),o=()=>c.col([...lsel[c.k]][0]);
     if(b.tagName==='INPUT'){b.oninput=()=>{o().color=b.value;draw()};b.onchange=()=>{o().color=b.value;commit();renderLists()}}
     else b.onclick=()=>{o().color=b.dataset.lcol;commit();renderLists()}});
