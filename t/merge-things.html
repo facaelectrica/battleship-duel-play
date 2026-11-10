@@ -432,7 +432,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 10:27', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 11:36', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1540,11 +1540,18 @@ function gpuSampler(lin, wrapS, wrapT) {
    the GPU's own time a frame comes from timestamps read the same way.
    ================================================================ */
 const FR = { work: 0, marks: null, enc: null, sub: 1, pass: null, pk: null, frame: 0, reads: new Map(), wait: [], qs: null, qn: 0, QMAX: 512, tsBuf: null, tsRead: [], gpuMs: 0, passMs: [], present: null, nowN: 0 };
+// THE PARTS' SWITCHES (Nov 10, the laptop's intermittent hang): ?gpuoff=sky,ground,plants,water,smoke - a part's passes and
+// dispatches recorded as nothing (its pictures go stale or missing), to find which part a GPU hang comes from by halves
+const GPU_OFF = (() => { try { const m = /[?&]gpuoff=([a-z:,]+)/.exec(location.search); return m ? m[1].split(',') : []; } catch (e) { return []; } })();
+const GPU_OFF_KEYS = { sky: ['gsky'], ground: ['ground', 'ggshot'], plants: ['plants'], water: ['water'], smoke: ['smoke', 'rain', 'midsea', 'lay', 'px'], things: ['things'], light: ['light'] };
+function gpuOffKey(key) { if (!GPU_OFF.length || !key) return false; for (const n of GPU_OFF) for (const k of (GPU_OFF_KEYS[n] || [n])) if (String(key).startsWith(k)) return true; return false; }
+const GPU_NOPASS = new Proxy({}, { get: () => () => undefined });
 function gpuEnc() { if (!FR.enc) FR.enc = GPU.dev.createCommandEncoder(); return FR.enc; }
 function gpuPassEnd() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; } }
 // a render pass on desc's targets (key: which targets, so draws to the same ones keep it open)
 function gpuPassBegin(desc, key, uses) {
   gpuPassEnd();
+  if (gpuOffKey(key)) return GPU_NOPASS;
   if (uses) for (const t of uses) if (t) t.use = FR.sub;   // (what the pass writes or reads: in use by the pending submit - a later write to it is staged)
   if (GPU.feat['timestamp-query'] && FR.qn + 2 <= FR.QMAX) {
     if (!FR.qs || FR.qs.ep !== GPU.ep) { FR.qs = GPU.dev.createQuerySet({ type: 'timestamp', count: FR.QMAX }); FR.qs.ep = GPU.ep; }
@@ -1555,8 +1562,9 @@ function gpuPassBegin(desc, key, uses) {
 }
 // a compute pass in the frame's encoder, after whatever was recorded (the open render pass ended first); the caller ends it
 // (cp.end()). uses: the buffers / textures it writes or reads, marked in use by the pending submit
-function gpuComputeBegin(uses) {
+function gpuComputeBegin(uses, key) {
   gpuPassEnd();
+  if (gpuOffKey(key)) return GPU_NOPASS;
   if (uses) for (const t of uses) if (t) t.use = FR.sub;
   FR.work++; GPU.stats.passes++;
   return gpuEnc().beginComputePass();
@@ -7855,7 +7863,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 10:27';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 11:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -25190,7 +25198,7 @@ function waterSurfGPU() {
   f[40] = WATER_Y; I[41] = PAD; f[42] = f[43] = 0;
   const pB = wgpuArena(176, (u8, o) => u8.set(new Uint8Array(WSP), o));
   const bg = gpuBindGroup(W.cbl, [{ binding: 0, resource: pB.res }, { binding: 1, resource: { buffer: still.gb } }, { binding: 2, resource: whB.res }, { binding: 3, resource: { buffer: B.gb } }], 'water surface');
-  const cp = gpuComputeBegin([still, B]);
+  const cp = gpuComputeBegin([still, B], 'water');
   cp.setPipeline(W.cpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(nOut / 64)); cp.end();   // (nOut = the view's columns + 6: bounded by the screen)
   W.surfKey[vi] = key;
   return B;
@@ -25478,7 +25486,7 @@ function waterWakeField(x0, x1) {
   const hd = wgpuArena(16, (u8, o) => { const F = new Float32Array(u8.buffer, o, 2), U = new Uint32Array(u8.buffer, o + 8, 2); F[0] = X0; F[1] = PB; U[0] = n; U[1] = m; });
   const rows = wgpuArena(Math.max(1, m) * 16, (u8, o) => new Float32Array(u8.buffer, o, m * 4).set(WAKE_ROWS.subarray(0, m * 4)));
   const bg = gpuBindGroup(W.wbl, [{ binding: 0, resource: hd.res }, { binding: 1, resource: rows.res }, { binding: 2, resource: { buffer: B.gb, offset: 0, size: bytes } }], 'water wake field');
-  const cp = gpuComputeBegin([B]);
+  const cp = gpuComputeBegin([B], 'water');
   cp.setPipeline(W.wpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(n / 64)); cp.end();   // (a column of the view an invocation; the patches' loop no longer than those sent)
   W.wkKey[vi] = key;
   return { B, n, X0 };
@@ -25634,7 +25642,7 @@ function waterDecksReady(decks) {
   decks.forEach((d, i) => {
     const pr = wgpuArena(16, (u8, o) => new Uint32Array(u8.buffer, o, 4).set([d.h, i, 0, 0]));
     const bg = gpuBindGroup(W.dbl, [{ binding: 0, resource: pr.res }, { binding: 4, resource: { buffer: W.dk.gb, offset: 0, size: bytes } }, { binding: 5, resource: { buffer: W.dkSum.gb, offset: 0, size: sb } }], 'water decks');
-    const cp = gpuComputeBegin([W.dk, W.dkSum]);
+    const cp = gpuComputeBegin([W.dk, W.dkSum], 'water');
     cp.setPipeline(W.dpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(d.W / 64)); cp.end();   // (a column of the deck an invocation; its rows bounded)
   });
   decks.forEach((d, i) => gpuCopyBuf(W.dkSum, i * 16, W.dk, (d.h + 2) * 16, 16));
@@ -28212,7 +28220,7 @@ function gskFlush() {
     GS.wl = gskGrow(GS.wl, GSU.nl * 64, 'sky frame', false);
     gskPut(GS.wl, 0, new Uint8Array(GSU.lh.buffer, 0, GSU.nl * 64));
     frameFlush();
-    const cp = gpuComputeBegin([GS.wl, GS.bb, sl.b]); GPUX.stats.computes++;
+    const cp = gpuComputeBegin([GS.wl, GS.bb, sl.b], 'gsky'); GPUX.stats.computes++;
     const ub = new ArrayBuffer(16), ui = new Int32Array(ub), uf = new Float32Array(ub);
     ui[0] = GSU.nl; uf[2] = P.billow; cp.setPipeline(GSK.walk);
     for (let f = 0; f < GSU.nl; f += GSK_CH) {
@@ -28712,7 +28720,7 @@ function gskNbrPass(J, nj, nt, S, ns) {
   GS.job = gskGrow(GS.job, Math.max(16, nj * 16), 'sky frame', false); GS.snap = gskGrow(GS.snap, Math.max(16, ns * 4), 'sky frame', false);
   gskPut(GS.job, 0, new Uint8Array(J.buffer, 0, nj * 16)); gskPut(GS.snap, 0, new Uint8Array(S.buffer, 0, ns * 4));
   frameFlush();
-  const cp = gpuComputeBegin([GS.job, GS.snap, GS.bb]); GPUX.stats.computes++;
+  const cp = gpuComputeBegin([GS.job, GS.snap, GS.bb], 'gsky'); GPUX.stats.computes++;
   const ub = new ArrayBuffer(32), ui = new Int32Array(ub), uf = new Float32Array(ub);
   ui[0] = nt; ui[1] = nj; uf[3] = P.billow; uf[4] = P.evolve * 0.05; uf[5] = Math.sin(now * 0.13); uf[6] = Math.cos(now * 0.13); uf[7] = 1 - P.base;
   cp.setPipeline(GSK.nbr);
@@ -28824,7 +28832,7 @@ function gskViewPass() {
     u_shadeU: P.shade, u_nodir: 1 - SUN_DIRECT, u_fls: [46 * S * ZL, 9 * S * ZL], u_view: view | 0, u_body: P.bodyL ?? 0, u_bk: [P.bshade ?? 1.6, P.bshape ?? 0.85, P.breach ?? 2],
   };
   frameFlush();
-  const cp = gpuComputeBegin([VB2.D, GS.bb, VB2.runs, VB2.lobes, VB2.out]); GPUX.stats.computes++;
+  const cp = gpuComputeBegin([VB2.D, GS.bb, VB2.runs, VB2.lobes, VB2.out], 'gsky'); GPUX.stats.computes++;
   const ent = (u) => [{ binding: 0, resource: u }, { binding: 8, resource: { buffer: VB2.D.gb } }, { binding: 9, resource: { buffer: GS.bb.gb } },
     { binding: 11, resource: { buffer: VB2.runs.gb } }, { binding: 12, resource: { buffer: VB2.lobes.gb } }, { binding: 13, resource: { buffer: VB2.out.gb } }];
   // (each pass in dispatches of at most GSK_CH invocations: every dispatch's work bounded, whatever is in view)
@@ -30527,7 +30535,7 @@ fn cellY(py: f32) -> f32 { return floor(py + 0.5) / h.gb.z + h.gd.y; }
   // a trail piece: its blobs at fixed steps along it, each sized, placed and kept by its own numbers (thinning out as it ages)
   let x1 = it.a.x; let y1 = it.a.y; let dx = it.a.z; let dy = it.a.w; let p1a = it.b.x; let p2a = it.b.y; let lenW = it.b.z; let ak = it.b.w;
   let rk = it.c.x; let stW = it.c.y; let SV = h.gb.x; let kx = SV / h.gb.y;
-  for (var i = li; i < it.k.z; i += 64u) {
+  for (var i = li; i < min(it.k.z, 65536u); i += 64u) {   // (Nov 10: capped by a constant as well as by the item's own count)
     let f = min(1.0, (f32(i) + 0.5) * stW / max(lenW, 1e-6)); let age = (p1a + (p2a - p1a) * f) * ak; let u = age / h.gc.x;
     if (age >= h.gc.z) { continue; }
     let a = pow(1.0 - u, 1.1) * (1.0 - 0.55 * tGrow(age)) * tLate(age);
@@ -31022,7 +31030,7 @@ function smPaint(S_, a) {
   // ---- the gather, the slots, the grid (the density, its smoothing, the bodies and each ball's light), MASS, MARCH and TONES - each
   // dispatch bounded by the items, the seeds, the balls, the grid, its box or the slots; those after the gather sized by the GPU's
   // counts (indirect, IA: the balls' workgroups 0 / 12, TONES' 24, the grid box's 36, the splat's draw 48, the seeds' 64)
-  const cp = gpuComputeBegin([FB, G2, BB, BK, AB, TB, SMP.K, G_.mem, TN, G_.tab, G_.sf, IB, SB, CB, IA]);
+  const cp = gpuComputeBegin([FB, G2, BB, BK, AB, TB, SMP.K, G_.mem, TN, G_.tab, G_.sf, IB, SB, CB, IA], 'smoke');
   const gall = [Math.ceil(gw / 8), Math.ceil(gh / 8)], ind = o => cp.dispatchWorkgroupsIndirect(IA.gb, o);
   cp.setBindGroup(0, bgA, [off]); cp.setPipeline(SMP.gclear); cp.dispatchWorkgroups(1);
   cp.setBindGroup(0, bgG, [off]); cp.setPipeline(SMP.gseed); cp.dispatchWorkgroups(gx_, gy_);
@@ -35701,7 +35709,7 @@ fn texR(a: I, ti: vec2f, l: i32) -> vec4f {
       if (F.w > 0.5) { if (c.a <= 0.0) { c = dc; } } else { c = dc + c * (1.0 - dc.a); }
     }
   }
-  let nc = u32(R2.w + 0.5);
+  let nc = min(u32(R2.w + 0.5), 16u);   // (Nov 10: every loop's bound capped by a constant - the laptop's hangs)
   for (var j = 0u; j < nc; j++) {
     let b = rv(a, 8u + j);
     if (b.z >= 0.0) { if (f.x >= b.x && f.x < b.z && f.y >= b.y && f.y < b.w) { c = vec4f(0.0); } }
@@ -35749,7 +35757,7 @@ struct PO { @builtin(position) p: vec4f, @location(0) c: vec4f };
 fn pval(o: u32, k: i32) -> f32 { return pv[o + u32(k / 4)][k % 4]; }
 fn cutAt(a: I, k: i32) -> f32 { let n = i32(a.pf.y + 0.5); return round(pval(u32(a.pf.x + 0.5) + u32((n + 3) / 4), k) * a.at.z); }
 fn midAt(a: I, k: i32) -> f32 { return (cutAt(a, k) + cutAt(a, k + 1)) * 0.5; }
-fn secAt(a: I, x: f32) -> i32 { let n = i32(a.pf.y + 0.5); var k = 0; for (var j = 1; j < n; j++) { if (x >= cutAt(a, j)) { k = j; } } return k; }
+fn secAt(a: I, x: f32) -> i32 { let n = min(i32(a.pf.y + 0.5), 64); var k = 0; for (var j = 1; j < n; j++) { if (x >= cutAt(a, j)) { k = j; } } return k; }
 // its charring at texel column x: each section's damage at its middle, eased into its neighbours' (dmgPic's sums)
 fn prof(a: I, x: f32) -> f32 {
   let n = i32(a.pf.y + 0.5); let o = u32(a.pf.x + 0.5);
@@ -35840,7 +35848,7 @@ fn tap(a: I, t: vec2f, lin: bool, body: bool) -> vec4f {
     if (c0.a < 0.784) { discard; }
     let s0 = c0.rgb / c0.a * 255.0; let l = 0.3 * s0.r + 0.59 * s0.g + 0.11 * s0.b;
     if (l > 150.0) { discard; }
-    var inW = false; let nb = u32(rv(a, 2u).w + 0.5);
+    var inW = false; let nb = min(u32(rv(a, 2u).w + 0.5), 32u);
     for (var j = 0u; j < nb; j++) { let b = rv(a, 8u + j); if (f.x >= b.x && f.x < b.z && f.y >= b.y && f.y < b.w) { inW = true; } }
     if (!inW) { discard; }
     return vec4f(a.mul.rgb * (0.8 + 0.2 * (1.0 - l / 150.0)), 1.0) * a.q.w;
@@ -36068,7 +36076,7 @@ function thingsGL() { const ctx = THG.ctx; if (ctx && (THG.n || THG.pn)) { thing
 // the call's quads drawn: one pass on the context's target, after what the old code drew before it (frameFlush)
 function thingsEnd() {
   const n = THG.n, pn = THG.pn, ctx = THG.ctx, seg = THG.seg.slice(); THG.n = 0; THG.pn = 0; THG.seg.length = 0; THG.ctx = null;
-  if ((!n && !pn) || !ctx || !thingsGPU() || THG_DBG.off) return;   // (THG_DBG: the laptop hang's bisect, Nov 10 - ?things=0)
+  if ((!n && !pn) || !ctx || !thingsGPU()) return;
   const A = artTex(), MK = dmgMaskTex(); if (!A || !MK) return;
   const clip = !!ctx.s.clip;
   if (clip) glBegin(ctx, ctx.s.op);                       // (the clip in the target's stencil, bit 0x80 - built if it isn't this one)
@@ -36098,8 +36106,7 @@ function thingsEnd() {
 }
 /* ---- the frame's 'art' layer, first of all: the art atlas's frame (its families' pictures put in, the waiting ones sent - artFrame, 04-zz-art-atlas.js)
    and the masks' budget for the frame ---- */
-const THG_DBG = (() => { try { const q = typeof location !== 'undefined' ? location.search : ''; return { off: /[?&]things=0/.test(q), art: !/[?&]art=0/.test(q), mask: !/[?&]mask=0/.test(q) }; } catch (e) { return { off: false, art: true, mask: true }; } })();
-function thingsFrame() { if (THG_DBG.art) artFrame(); if (THG_DBG.mask) dmgMaskFrame(); }
+function thingsFrame() { artFrame(); dmgMaskFrame(); }
 frameLayer('art', F => thingsFrame(), { before: 'ground' });
 
 /* ---------------- 3. Smoke, fog, lights and fire on top ---------------- */
@@ -36356,7 +36363,7 @@ function firePut(F) {
   const W = F.W, H = F.H, L = F.L, n = L.length >> 2, grid = fireGrid(W * H);
   // 1. the heat: the grid cleared, then the flames in pieces of at most 65535 (a workgroup each - each piece's block in the arena,
   // 16 bytes a flame after its 16-byte head)
-  const cp = gpuComputeBegin([grid]);
+  const cp = gpuComputeBegin([grid], 'smoke');
   for (let a = 0; a < n; a += 65535) {
     const k = Math.min(n, a + 65535) - a, [c, off] = arenaAlloc(16 + k * 16, 256), w0 = off >> 2, Wd = pxWords(c), Fl = Wd.f, U = Wd.u;
     U[w0] = W; U[w0 + 1] = H; U[w0 + 2] = (off + 16) >> 4; U[w0 + 3] = k;
@@ -57395,7 +57402,7 @@ fn svy(b: u32, i: u32) -> f32 { return stones[b + 7u + i / 4u][i % 4u]; }
 // (stoneHit) is (dx, dy) - in the stone's own measure - inside it: x how far in from its edge, y z its face's outward way, w how far out toward that face; ok
 struct Hit { ok: bool, d: f32, nx: f32, ny: f32, f: f32 }
 fn stoneHit(b: u32, dx: f32, dy: f32) -> Hit {
-  let n = u32(stones[b + 1u].x); let th = atan2(dy, dx);
+  let n = max(1u, min(u32(stones[b + 1u].x), 8u)); let th = atan2(dy, dx);   // (Nov 10: capped - a stone has 8 corners at most: sva / svx)
   var i: i32 = i32(n) - 1;
   for (var k = 0u; k < n; k++) { if (sva(b, k) > th) { i = i32(k) - 1; break; } }
   if (i < 0) { i = i32(n) - 1; }
@@ -57421,8 +57428,8 @@ fn hopen(i: i32, j: i32) -> bool { let w = hw(i, j); return (w & 7u) == 0u && (w
 fn gspan(i: i32, s: u32) -> vec2f { let o = J.gpos + (u32(i) * 8u + s) * 2u; return vec2f(bitcast<f32>(halo[o]), bitcast<f32>(halo[o + 1u])); }
 // pass A: each halo row's nearest open air and overhang air across (a column of the page, every row of the block)
 @compute @workgroup_size(8, 8) fn hpass(@builtin(global_invocation_id) g: vec3u) {
-  let q = i32(g.x); let j = i32(g.y); let Hh = i32(J.hal); if (q >= PAGE || j >= i32(J.bw)) { return; }
-  let cap = i32(ceil(J.cap / f32(J.f))); let i0 = q + Hh;          // (the light's reach in the level's cells)
+  let q = i32(g.x); let j = i32(g.y); let Hh = min(i32(J.hal), 256); if (q >= PAGE || j >= i32(min(J.bw, 1024u))) { return; }   // (Nov 10: every bound from the job's words capped - the laptop's hang)
+  let cap = min(i32(ceil(J.cap / f32(max(J.f, 1u)))), 256); let i0 = q + Hh;          // (the light's reach in the level's cells)
   var ha: u32 = 0xffffu;
   for (var dx = 0; dx <= Hh; dx++) {
     if (ha == 0xffffu && dx <= cap && ((i0 - dx >= 0 && hopen(i0 - dx, j)) || (i0 + dx < i32(J.bw) && hopen(i0 + dx, j)))) { ha = u32(dx); }
@@ -57434,10 +57441,10 @@ fn gspan(i: i32, s: u32) -> vec2f { let o = J.gpos + (u32(i) * 8u + s) * 2u; ret
 @compute @workgroup_size(8, 8) fn dpass(@builtin(global_invocation_id) g: vec3u) {
   let q = i32(g.x); let j = i32(g.y); if (q >= PAGE || j >= PAGE) { return; }
   // (a level's page - a cell every F = J.f: its cell the one at F / 2 in each F x F, its distances in cells)
-  let F = i32(J.f); let Ff = f32(F);
-  let Hh = i32(J.hal); let i = q + Hh; let jj = j + Hh; let r = J.r0 + j * F + F / 2; let w0 = hw(i, jj); let m = w0 & 7u;
+  let F = clamp(i32(J.f), 1, 64); let Ff = f32(F);
+  let Hh = min(i32(J.hal), 256); let i = q + Hh; let jj = j + Hh; let r = J.r0 + j * F + F / 2; let w0 = hw(i, jj); let m = w0 & 7u;
   // the distance to the open air, capped (ltDist)
-  var dist = J.cap; let cap = i32(ceil(J.cap / Ff));
+  var dist = J.cap; let cap = min(i32(ceil(J.cap / Ff)), 256);
   for (var dy = -min(cap, Hh); dy <= min(cap, Hh); dy++) {
     let ha = scr[J.spos + u32(jj + dy) * 64u + u32(q)] & 0xffffu; if (ha == 0xffffu) { continue; }
     let a = f32(ha); let b = f32(abs(dy)); dist = min(dist, (max(a, b) + 0.4142 * min(a, b)) * Ff);
@@ -57588,7 +57595,7 @@ fn fadeAt(d: f32, c: i32, r: i32) -> f32 {
 fn stint(cc: vec3f, b: u32) -> vec3f { let Vs = FD[3].z; let s = stones[b + 1u]; let tb = 1.0 + (s.z - 1.0) * Vs; let tw = s.w * Vs; return vec3f(cc.x * tb + tw, cc.y * tb, cc.z * tb - tw * 0.6); }
 // (seaFloorCol) the sea's floor: its sand layer, under it the silt with its pebbles
 fn seaFloor(si: u32, c: i32, r: i32, d: f32, hs: f32, rb: u32) -> vec3f {
-  let L4 = col(si, c, 4u); let L5 = col(si, c, 5u); let n = u32(L5.x); let sd = L5.y;
+  let L4 = col(si, c, 4u); let L5 = col(si, c, 5u); let n = min(u32(L5.x), 4u); let sd = L5.y;   // (Nov 10: capped - a vec4's 4 layers at most)
   var acc = 0.0; var li = 99u; var k = 0.0;
   for (var i = 0u; i < n; i++) { let bot = L4[i]; if (d < bot) { if (d >= acc) { li = i; k = (d - acc) / max(1.0, bot - acc); } break; } acc = bot; }
   var cc: vec3f;
@@ -57803,7 +57810,7 @@ fn edgeAt(si: u32, c: i32, i: i32, r4: i32) -> vec3f {
 }
 @fragment fn fs(fi: VO) -> @location(0) vec4f {
   let I = instOf(fi.ii); let si = I.si; let S = slots[si]; let K = cam();
-  LV = u32(I.lv);
+  LV = min(u32(I.lv), 3u);   // (Nov 10: capped - a level from the instance's words never walks more than 4 levels)
   if (fi.p.x < K.vx0 || fi.p.x >= K.vx1) { discard; }
   let X = fi.p.x - K.ox; let Y = (K.th - fi.p.y) - K.oy;          // (the view's own pixels - PX / PY's; the target's rows are WebGL's: bottom up)
   if (X < I.X0 || X >= I.X1) { discard; }
@@ -58528,7 +58535,7 @@ function ggDispatch(bytes, BW) {
   const bg = gpuBindGroup(P.dl, [
     { binding: 0, resource: { buffer: GG.stage.gb, offset: off, size: 80 } }, { binding: 1, resource: { buffer: GG.stoneBuf.gb } },
     { binding: 2, resource: { buffer: GG.stage.gb, offset: off, size: bytes } }, { binding: 3, resource: { buffer: GG.pagesBuf.gb } }, { binding: 4, resource: { buffer: GG.scrBuf.gb } }], 'ground derive');
-  const cp = gpuComputeBegin([GG.pagesBuf]); GPU.stats.computes++;
+  const cp = gpuComputeBegin([GG.pagesBuf], 'groundc'); GPU.stats.computes++;
   cp.setBindGroup(0, bg);
   cp.setPipeline(P.hpass); cp.dispatchWorkgroups(8, Math.ceil(BW / 8));
   cp.setPipeline(P.dpass); cp.dispatchWorkgroups(8, 8);
@@ -62248,7 +62255,7 @@ function pgLayer(list, o) {   // (o: a preview's own - its rows, its grid P, its
   const R = PGP.pipes;
   if (step) {
     const bg = gpuBindGroup(R.sl, [{ binding: 0, resource: pB }, { binding: 1, resource: { buffer: PGP.sd.gb } }, { binding: 2, resource: iB }, { binding: 3, resource: { buffer: PGP.hp.gb } }, { binding: 4, resource: nB }], 'plants step');
-    const cp = gpuComputeBegin([PGP.hp]); cp.setPipeline(R.step); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(n / 64)); cp.end();
+    const cp = gpuComputeBegin([PGP.hp], 'plants:step'); cp.setPipeline(R.step); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(n / 64)); cp.end();
   }
   // the plants into the layer, one draw
   const bg = gpuBindGroup(R.dl, [{ binding: 0, resource: pB }, { binding: 1, resource: { buffer: PGP.sd.gb } }, { binding: 2, resource: iB }, { binding: 3, resource: { buffer: PGP.hp.gb } },
@@ -62270,7 +62277,7 @@ function pgLayer(list, o) {   // (o: a preview's own - its rows, its grid P, its
   const pbg = gpuBindGroup(R.pl, [{ binding: 0, resource: pgArena(q) }, { binding: 1, resource: LT.view }, { binding: 2, resource: gpuSampler(true, 0, 0) }], 'plants put');
   const desc = { colorAttachments: [{ view: T2.tex.view, loadOp: 'load', storeOp: 'store' }] };
   if (sten) desc.depthStencilAttachment = Object.assign({ view: sten.view, stencilLoadOp: 'load', stencilStoreOp: 'store' }, gpuHasDepth(sten.fmt) ? { depthLoadOp: 'load', depthStoreOp: 'store' } : {});
-  pgTsMark(1); const pp = gpuPassBegin(desc, 'plants:' + T2.tex.id, sten ? [T2.tex, sten, LT] : [T2.tex, LT]);
+  pgTsMark(1); const pp = gpuPassBegin(desc, 'plants:put:' + T2.tex.id, sten ? [T2.tex, sten, LT] : [T2.tex, LT]);
   if (sten) pp.setStencilReference(0x80);
   if (sc) { const x = Math.max(0, sc[0]), y = Math.max(0, T2.h - sc[1] - sc[3]), x1 = Math.min(T2.w, sc[0] + sc[2]), y1 = Math.min(T2.h, T2.h - sc[1]); if (x1 <= x || y1 <= y) { gpuPassEnd(); return; } pp.setScissorRect(x, y, x1 - x, y1 - y); }   // (the GL front's rows: its scissor's y from the bottom - glApplyState)
   pp.setPipeline(pgPutPipe(T2.tex.fmt, sten ? sten.fmt : null)); pp.setBindGroup(0, pbg); pp.draw(4);
