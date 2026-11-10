@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 10:21', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 10:53', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1285,11 +1285,18 @@ function gpuSampler(lin, wrapS, wrapT) {
    the GPU's own time a frame comes from timestamps read the same way.
    ================================================================ */
 const FR = { work: 0, marks: null, enc: null, sub: 1, pass: null, pk: null, frame: 0, reads: new Map(), wait: [], qs: null, qn: 0, QMAX: 512, tsBuf: null, tsRead: [], gpuMs: 0, passMs: [], present: null, nowN: 0 };
+// THE PARTS' SWITCHES (Nov 10, the laptop's intermittent hang): ?gpuoff=sky,ground,plants,water,smoke - a part's passes and
+// dispatches recorded as nothing (its pictures go stale or missing), to find which part a GPU hang comes from by halves
+const GPU_OFF = (() => { try { const m = /[?&]gpuoff=([a-z,]+)/.exec(location.search); return m ? m[1].split(',') : []; } catch (e) { return []; } })();
+const GPU_OFF_KEYS = { sky: ['gsky'], ground: ['ground', 'ggshot'], plants: ['plants'], water: ['water'], smoke: ['smoke', 'rain', 'midsea', 'lay', 'px'], things: ['things'], light: ['light'] };
+function gpuOffKey(key) { if (!GPU_OFF.length || !key) return false; for (const n of GPU_OFF) for (const k of (GPU_OFF_KEYS[n] || [n])) if (String(key).startsWith(k)) return true; return false; }
+const GPU_NOPASS = new Proxy({}, { get: () => () => undefined });
 function gpuEnc() { if (!FR.enc) FR.enc = GPU.dev.createCommandEncoder(); return FR.enc; }
 function gpuPassEnd() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; } }
 // a render pass on desc's targets (key: which targets, so draws to the same ones keep it open)
 function gpuPassBegin(desc, key, uses) {
   gpuPassEnd();
+  if (gpuOffKey(key)) return GPU_NOPASS;
   if (uses) for (const t of uses) if (t) t.use = FR.sub;   // (what the pass writes or reads: in use by the pending submit - a later write to it is staged)
   if (GPU.feat['timestamp-query'] && FR.qn + 2 <= FR.QMAX) {
     if (!FR.qs || FR.qs.ep !== GPU.ep) { FR.qs = GPU.dev.createQuerySet({ type: 'timestamp', count: FR.QMAX }); FR.qs.ep = GPU.ep; }
@@ -1300,8 +1307,9 @@ function gpuPassBegin(desc, key, uses) {
 }
 // a compute pass in the frame's encoder, after whatever was recorded (the open render pass ended first); the caller ends it
 // (cp.end()). uses: the buffers / textures it writes or reads, marked in use by the pending submit
-function gpuComputeBegin(uses) {
+function gpuComputeBegin(uses, key) {
   gpuPassEnd();
+  if (gpuOffKey(key)) return GPU_NOPASS;
   if (uses) for (const t of uses) if (t) t.use = FR.sub;
   FR.work++; GPU.stats.passes++;
   return gpuEnc().beginComputePass();
@@ -7513,7 +7521,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 10:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 10:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24923,7 +24931,7 @@ function waterSurfGPU() {
   f[40] = WATER_Y; I[41] = PAD; f[42] = f[43] = 0;
   const pB = wgpuArena(176, (u8, o) => u8.set(new Uint8Array(WSP), o));
   const bg = gpuBindGroup(W.cbl, [{ binding: 0, resource: pB.res }, { binding: 1, resource: { buffer: still.gb } }, { binding: 2, resource: whB.res }, { binding: 3, resource: { buffer: B.gb } }], 'water surface');
-  const cp = gpuComputeBegin([still, B]);
+  const cp = gpuComputeBegin([still, B], 'water');
   cp.setPipeline(W.cpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(nOut / 64)); cp.end();   // (nOut = the view's columns + 6: bounded by the screen)
   W.surfKey[vi] = key;
   return B;
@@ -25211,7 +25219,7 @@ function waterWakeField(x0, x1) {
   const hd = wgpuArena(16, (u8, o) => { const F = new Float32Array(u8.buffer, o, 2), U = new Uint32Array(u8.buffer, o + 8, 2); F[0] = X0; F[1] = PB; U[0] = n; U[1] = m; });
   const rows = wgpuArena(Math.max(1, m) * 16, (u8, o) => new Float32Array(u8.buffer, o, m * 4).set(WAKE_ROWS.subarray(0, m * 4)));
   const bg = gpuBindGroup(W.wbl, [{ binding: 0, resource: hd.res }, { binding: 1, resource: rows.res }, { binding: 2, resource: { buffer: B.gb, offset: 0, size: bytes } }], 'water wake field');
-  const cp = gpuComputeBegin([B]);
+  const cp = gpuComputeBegin([B], 'water');
   cp.setPipeline(W.wpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(n / 64)); cp.end();   // (a column of the view an invocation; the patches' loop no longer than those sent)
   W.wkKey[vi] = key;
   return { B, n, X0 };
@@ -25367,7 +25375,7 @@ function waterDecksReady(decks) {
   decks.forEach((d, i) => {
     const pr = wgpuArena(16, (u8, o) => new Uint32Array(u8.buffer, o, 4).set([d.h, i, 0, 0]));
     const bg = gpuBindGroup(W.dbl, [{ binding: 0, resource: pr.res }, { binding: 4, resource: { buffer: W.dk.gb, offset: 0, size: bytes } }, { binding: 5, resource: { buffer: W.dkSum.gb, offset: 0, size: sb } }], 'water decks');
-    const cp = gpuComputeBegin([W.dk, W.dkSum]);
+    const cp = gpuComputeBegin([W.dk, W.dkSum], 'water');
     cp.setPipeline(W.dpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(d.W / 64)); cp.end();   // (a column of the deck an invocation; its rows bounded)
   });
   decks.forEach((d, i) => gpuCopyBuf(W.dkSum, i * 16, W.dk, (d.h + 2) * 16, 16));
@@ -27958,7 +27966,7 @@ function gskFlush() {
     GS.wl = gskGrow(GS.wl, GSU.nl * 64, 'sky frame', false);
     gskPut(GS.wl, 0, new Uint8Array(GSU.lh.buffer, 0, GSU.nl * 64));
     frameFlush();
-    const cp = gpuComputeBegin([GS.wl, GS.bb, sl.b]); GPUX.stats.computes++;
+    const cp = gpuComputeBegin([GS.wl, GS.bb, sl.b], 'gsky'); GPUX.stats.computes++;
     const ub = new ArrayBuffer(16), ui = new Int32Array(ub), uf = new Float32Array(ub);
     ui[0] = GSU.nl; uf[2] = P.billow; cp.setPipeline(GSK.walk);
     for (let f = 0; f < GSU.nl; f += GSK_CH) {
@@ -28458,7 +28466,7 @@ function gskNbrPass(J, nj, nt, S, ns) {
   GS.job = gskGrow(GS.job, Math.max(16, nj * 16), 'sky frame', false); GS.snap = gskGrow(GS.snap, Math.max(16, ns * 4), 'sky frame', false);
   gskPut(GS.job, 0, new Uint8Array(J.buffer, 0, nj * 16)); gskPut(GS.snap, 0, new Uint8Array(S.buffer, 0, ns * 4));
   frameFlush();
-  const cp = gpuComputeBegin([GS.job, GS.snap, GS.bb]); GPUX.stats.computes++;
+  const cp = gpuComputeBegin([GS.job, GS.snap, GS.bb], 'gsky'); GPUX.stats.computes++;
   const ub = new ArrayBuffer(32), ui = new Int32Array(ub), uf = new Float32Array(ub);
   ui[0] = nt; ui[1] = nj; uf[3] = P.billow; uf[4] = P.evolve * 0.05; uf[5] = Math.sin(now * 0.13); uf[6] = Math.cos(now * 0.13); uf[7] = 1 - P.base;
   cp.setPipeline(GSK.nbr);
@@ -28570,7 +28578,7 @@ function gskViewPass() {
     u_shadeU: P.shade, u_nodir: 1 - SUN_DIRECT, u_fls: [46 * S * ZL, 9 * S * ZL], u_view: view | 0, u_body: P.bodyL ?? 0, u_bk: [P.bshade ?? 1.6, P.bshape ?? 0.85, P.breach ?? 2],
   };
   frameFlush();
-  const cp = gpuComputeBegin([VB2.D, GS.bb, VB2.runs, VB2.lobes, VB2.out]); GPUX.stats.computes++;
+  const cp = gpuComputeBegin([VB2.D, GS.bb, VB2.runs, VB2.lobes, VB2.out], 'gsky'); GPUX.stats.computes++;
   const ent = (u) => [{ binding: 0, resource: u }, { binding: 8, resource: { buffer: VB2.D.gb } }, { binding: 9, resource: { buffer: GS.bb.gb } },
     { binding: 11, resource: { buffer: VB2.runs.gb } }, { binding: 12, resource: { buffer: VB2.lobes.gb } }, { binding: 13, resource: { buffer: VB2.out.gb } }];
   // (each pass in dispatches of at most GSK_CH invocations: every dispatch's work bounded, whatever is in view)
@@ -30768,7 +30776,7 @@ function smPaint(S_, a) {
   // ---- the gather, the slots, the grid (the density, its smoothing, the bodies and each ball's light), MASS, MARCH and TONES - each
   // dispatch bounded by the items, the seeds, the balls, the grid, its box or the slots; those after the gather sized by the GPU's
   // counts (indirect, IA: the balls' workgroups 0 / 12, TONES' 24, the grid box's 36, the splat's draw 48, the seeds' 64)
-  const cp = gpuComputeBegin([FB, G2, BB, BK, AB, TB, SMP.K, G_.mem, TN, G_.tab, G_.sf, IB, SB, CB, IA]);
+  const cp = gpuComputeBegin([FB, G2, BB, BK, AB, TB, SMP.K, G_.mem, TN, G_.tab, G_.sf, IB, SB, CB, IA], 'smoke');
   const gall = [Math.ceil(gw / 8), Math.ceil(gh / 8)], ind = o => cp.dispatchWorkgroupsIndirect(IA.gb, o);
   cp.setBindGroup(0, bgA, [off]); cp.setPipeline(SMP.gclear); cp.dispatchWorkgroups(1);
   cp.setBindGroup(0, bgG, [off]); cp.setPipeline(SMP.gseed); cp.dispatchWorkgroups(gx_, gy_);
@@ -35584,7 +35592,7 @@ function firePut(F) {
   const W = F.W, H = F.H, L = F.L, n = L.length >> 2, grid = fireGrid(W * H);
   // 1. the heat: the grid cleared, then the flames in pieces of at most 65535 (a workgroup each - each piece's block in the arena,
   // 16 bytes a flame after its 16-byte head)
-  const cp = gpuComputeBegin([grid]);
+  const cp = gpuComputeBegin([grid], 'smoke');
   for (let a = 0; a < n; a += 65535) {
     const k = Math.min(n, a + 65535) - a, [c, off] = arenaAlloc(16 + k * 16, 256), w0 = off >> 2, Wd = pxWords(c), Fl = Wd.f, U = Wd.u;
     U[w0] = W; U[w0 + 1] = H; U[w0 + 2] = (off + 16) >> 4; U[w0 + 3] = k;
@@ -57725,7 +57733,7 @@ function ggDispatch(bytes, BW) {
   const bg = gpuBindGroup(P.dl, [
     { binding: 0, resource: { buffer: GG.stage.gb, offset: off, size: 80 } }, { binding: 1, resource: { buffer: GG.stoneBuf.gb } },
     { binding: 2, resource: { buffer: GG.stage.gb, offset: off, size: bytes } }, { binding: 3, resource: { buffer: GG.pagesBuf.gb } }, { binding: 4, resource: { buffer: GG.scrBuf.gb } }], 'ground derive');
-  const cp = gpuComputeBegin([GG.pagesBuf]); GPU.stats.computes++;
+  const cp = gpuComputeBegin([GG.pagesBuf], 'ground'); GPU.stats.computes++;
   cp.setBindGroup(0, bg);
   cp.setPipeline(P.hpass); cp.dispatchWorkgroups(8, Math.ceil(BW / 8));
   cp.setPipeline(P.dpass); cp.dispatchWorkgroups(8, 8);
@@ -61445,7 +61453,7 @@ function pgLayer(list, o) {   // (o: a preview's own - its rows, its grid P, its
   const R = PGP.pipes;
   if (step) {
     const bg = gpuBindGroup(R.sl, [{ binding: 0, resource: pB }, { binding: 1, resource: { buffer: PGP.sd.gb } }, { binding: 2, resource: iB }, { binding: 3, resource: { buffer: PGP.hp.gb } }, { binding: 4, resource: nB }], 'plants step');
-    const cp = gpuComputeBegin([PGP.hp]); cp.setPipeline(R.step); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(n / 64)); cp.end();
+    const cp = gpuComputeBegin([PGP.hp], 'plants'); cp.setPipeline(R.step); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(n / 64)); cp.end();
   }
   // the plants into the layer, one draw
   const bg = gpuBindGroup(R.dl, [{ binding: 0, resource: pB }, { binding: 1, resource: { buffer: PGP.sd.gb } }, { binding: 2, resource: iB }, { binding: 3, resource: { buffer: PGP.hp.gb } },
