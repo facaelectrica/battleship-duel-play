@@ -352,7 +352,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 09 22:52', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 09 23:02', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -1133,7 +1133,8 @@ async function gpuBoot() {
 async function gpuDevice() {
   const ad = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!ad) { GPU.why = 'no adapter'; return false; }
-  const want = ['float32-filterable', 'float32-blendable', 'timestamp-query'].filter(f => ad.features.has(f));
+  // (?gputs=0: no timestamp queries - a test switch, Nov 9: finding Browser 2's GPU hangs)
+  const want = ['float32-filterable', 'float32-blendable', 'timestamp-query'].filter(f => ad.features.has(f) && !(f === 'timestamp-query' && /[?&]gputs=0/.test(location.search)));
   const L = {};
   for (const k of ['maxTextureDimension2D', 'maxBufferSize', 'maxStorageBufferBindingSize', 'maxSampledTexturesPerShaderStage', 'maxSamplersPerShaderStage', 'maxStorageBuffersPerShaderStage', 'maxColorAttachmentBytesPerSample', 'maxBindingsPerBindGroup', 'maxVertexBuffers', 'maxVertexAttributes'])
     if (ad.limits[k] !== undefined) L[k] = ad.limits[k];
@@ -1920,11 +1921,19 @@ function gpuTexWrite(t, x, y, w, h, u8, off, bpr) {
   GPU.stats.upT += w * h * bpp;
   if (t.use !== FR.sub) { GPU.dev.queue.writeTexture({ texture: t.gt, origin: [x, y] }, u8, { offset: off, bytesPerRow: bpr, rowsPerImage: h }, [w, h]); return; }
   const rb = Math.ceil(w * bpp / 256) * 256;
-  if (rb * h > ARENA.CH) { gpuSubmit(); GPU.dev.queue.writeTexture({ texture: t.gt, origin: [x, y] }, u8, { offset: off, bytesPerRow: bpr, rowsPerImage: h }, [w, h]); return; }
-  const [c, o] = arenaAlloc(rb * h, 256);
-  for (let r = 0; r < h; r++) c.cpu.set(u8.subarray(off + r * bpr, off + r * bpr + w * bpp), o + r * rb);
+  let gb, o;
+  if (rb * h > ARENA.CH) {
+    // (bigger than an arena piece: a buffer of its own for this one copy, freed after the submit - never a submit mid-frame, which
+    // would start the arena over under every part that has written its data for a pass it hasn't recorded yet)
+    const b = gpuBuf(rb * h, 'staging'), tmp = new Uint8Array(b.size);
+    for (let r = 0; r < h; r++) tmp.set(u8.subarray(off + r * bpr, off + r * bpr + w * bpp), r * rb);
+    GPU.dev.queue.writeBuffer(b.gb, 0, tmp); gb = b.gb; o = 0; gpuBufFree(b);
+  } else {
+    const [c, co] = arenaAlloc(rb * h, 256); gb = c.gb; o = co;
+    for (let r = 0; r < h; r++) c.cpu.set(u8.subarray(off + r * bpr, off + r * bpr + w * bpp), o + r * rb);
+  }
   gpuPassEnd();
-  gpuEnc().copyBufferToTexture({ buffer: c.gb, offset: o, bytesPerRow: rb, rowsPerImage: h }, { texture: t.gt, origin: [x, y] }, [w, h]);
+  gpuEnc().copyBufferToTexture({ buffer: gb, offset: o, bytesPerRow: rb, rowsPerImage: h }, { texture: t.gt, origin: [x, y] }, [w, h]);
   t.use = FR.sub; GPU.stats.copies++;
 }
 // a picture (canvas, image, bitmap, ImageData) into a texture, premultiplied or not as WebGL's unpack switch said
@@ -2335,12 +2344,12 @@ function frameLayer(name, run, at) {
   return L;
 }
 // the camera of the view beginView set last (vi its index): { buffer, offset, size } in this submit's arena - read by a pass as a
-// uniform: vec4(left px, top px, scale, zoom), vec4(view x on the target, view width, target width, target height), vec4(time, view, 0, 0)
+// uniform: vec4(left px, top px, scale, zoom), vec4(view x on the target, view width, target width, target height), vec4(time, view, shake x px, shake y px)
 function frameCam(vi, v, tw, th) {
   const f = FRAME.camF;
   f[0] = CAMPX; f[1] = TOPPX; f[2] = SV; f[3] = v ? v.z : 1;
   f[4] = VSX; f[5] = VWW; f[6] = tw || 0; f[7] = th || 0;
-  f[8] = typeof time === 'number' ? time : 0; f[9] = vi; f[10] = 0; f[11] = 0;
+  f[8] = typeof time === 'number' ? time : 0; f[9] = vi; f[10] = SHX; f[11] = SHY;   // (SHX / SHY: the view's shake this frame, px)
   const [c, o] = arenaAlloc(64, 256); c.cpu.set(new Uint8Array(f.buffer), o);
   return { buffer: c.gb, offset: o, size: 64 };
 }
@@ -7588,7 +7597,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 09 22:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 09 23:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24602,6 +24611,8 @@ struct DP {
   ab1: vec4f,    // the cells across, down; the dark's top and bottom rows (ya, yb)
   ab2: vec4f,    // how many lights (0: the plain gradient), the fill's right, its bottom
   poly: vec4f,   // a lake's outline (the shadows' clip): its surface chain's first item and count, its floor chain's
+  bd: vec4f,     // a body of the land's water: its lift (rows), its fill's columns (from, to), its fill's top row (before the lift)
+  bd2: vec4f,    // its fill's bottom row (before the lift), how many outlines (their headers first in the items)
 };
 @group(0) @binding(0) var<storage, read> P: SP;
 @group(0) @binding(1) var<storage, read> still: array<f32>;
@@ -24679,7 +24690,7 @@ fn surfRow(c: f32) -> f32 { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1)
 fn surfW(c: f32) -> f32 { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1)].y; }
 fn grad(y: f32) -> vec4f {
   let t = clamp((y + 0.5 - D.g.y) / (D.g.z - D.g.y), 0.0, 1.0);
-  return textureSampleLevel(ramp, rampS, vec2f((t * 255.0 + 0.5) / 256.0, (D.g.x + 0.5) / 4.0), 0.0) * D.g.w;
+  return textureSampleLevel(ramp, rampS, vec2f((t * 255.0 + 0.5) / 256.0, (D.g.x + 0.5) / 8.0), 0.0) * D.g.w;
 }
 fn dseaAt(k: i32) -> vec2f { let v = D.sea[k / 2]; if ((k & 1) == 0) { return v.xy; } return v.zw; }
 // the middle of the ocean's dark, a strip of PB x 2 columns at a time, from the surface at the strip's first column down
@@ -24766,14 +24777,18 @@ struct VO { @builtin(position) p: vec4f, @location(0) @interpolate(flat) i: u32 
   o.i = n;
   return o;
 }
-// (the edge a -> b crossing the upward line at px above py: its way, +1 rightward, -1 leftward; 0 none)
+// (the edge a -> b crossing the upward line from (px, py) - its way, +1 rightward, -1 leftward; 0 none. Exact, as a rasterizer is: the sides by the
+// cross product of small numbers (whole and half pixels), and a point on the edge decided as the GPU decides it - the top-left rule in the target's
+// rows, which run bottom first: the point taken a hair right and, much less, a hair up the screen)
 fn crossUp(a: vec2f, b: vec2f, px: f32, py: f32) -> i32 {
   if (px < min(a.x, b.x) || px >= max(a.x, b.x)) { return 0; }
-  let yy = a.y + (b.y - a.y) * (px - a.x) / (b.x - a.x);
-  if (yy >= py) { return 0; }
-  return select(-1, 1, b.x > a.x);
+  let dxe = b.x - a.x; let dye = b.y - a.y;
+  let sc = (py - a.y) * dxe - dye * (px - a.x);
+  let above = select(-sc, sc, dxe > 0.0) > 0.0 || (sc == 0.0 && dye * dxe < 0.0);
+  if (!above) { return 0; }
+  return select(-1, 1, dxe > 0.0);
 }
-// (a chain of the outline, monotone across: its edge over px found by halving)
+// (a chain of an outline, monotone across: its edge over px found by halving)
 fn chainUp(o: i32, n: i32, px: f32, py: f32) -> i32 {
   if (n < 2) { return 0; }
   let up = items[o + n - 1].x > items[o].x;
@@ -24781,13 +24796,15 @@ fn chainUp(o: i32, n: i32, px: f32, py: f32) -> i32 {
   for (var it = 0; it < 32; it++) { if (hi - lo <= 1) { break; } let m = (lo + hi) / 2; if ((items[o + m].x <= px) == up) { lo = m; } else { hi = m; } }
   return crossUp(items[o + lo].xy, items[o + lo + 1].xy, px, py);
 }
-// inside a lake's outline (its surface chain forward, its floor chain back, closed) - the canvas' nonzero rule, at the pixel's middle
-fn inPoly(px: f32, py: f32) -> bool {
-  let oa = i32(D.poly.x); let na = i32(D.poly.y); let ob = i32(D.poly.z); let nb = i32(D.poly.w);
+// the winding of an outline (h: its surface chain's first item and count, its floor chain's - forward along the surface, back along the floor,
+// closed) round a point; inside: not 0 (the canvas' nonzero rule)
+fn windOf(h: vec4f, px: f32, py: f32) -> i32 {
+  let oa = i32(h.x); let na = i32(h.y); let ob = i32(h.z); let nb = i32(h.w);
   var w = chainUp(oa, na, px, py) + chainUp(ob, nb, px, py);
   w += crossUp(items[oa + na - 1].xy, items[ob].xy, px, py) + crossUp(items[ob + nb - 1].xy, items[oa].xy, px, py);
-  return w != 0;
+  return w;
 }
+fn inPoly(px: f32, py: f32) -> bool { return windOf(D.poly, px, py) != 0; }
 fn pxf(wx: f32) -> f32 { return floor(wx * D.sh1.x + 0.5) - D.sh1.y; }
 @fragment fn fsShadow(v: VO) -> @location(0) vec4f {
   let x = floor((v.p.x - D.m.z) / D.m.x);
@@ -24853,6 +24870,20 @@ fn abCell(q: i32, r: i32) -> array<vec4f, 2> {
   aD /= 255.0; aG /= 255.0;
   return array<vec4f, 2>(vec4f(vec3f(1.0, 4.0, 12.0) / 255.0 * aD, aD), vec4f(vec3f(230.0, 240.0, 255.0) / 255.0 * aG, aG));
 }
+// ---- A BODY OF THE LAND'S WATER (a lake, a pool, the sea caves - lakeWaterIn): a gradient (the tint, or a biome's own water) laid over the
+// body's fill rectangle lifted to its level, inside its outlines (the items: a header each - surface chain, floor chain - then their points)
+@fragment fn fsBody(@builtin(position) p: vec4f) -> @location(0) vec4f {
+  let x = floor((p.x - D.m.z) / D.m.x);
+  let y = floor((D.tgt.y - p.y - D.m.w) / D.m.y);
+  let yl = y - D.bd.x;
+  if (x < D.bd.y || x >= D.bd.z || yl < D.bd.w || yl >= D.bd2.x) { discard; }
+  var w = 0;
+  for (var o = 0; o < 64; o++) { if (f32(o) >= D.bd2.y) { break; } w += windOf(items[o], x + 0.5, y + 0.5); }
+  if (w == 0) { discard; }
+  let c = grad(yl);
+  if (c.a <= 0.0) { discard; }
+  return c;
+}
 @fragment fn fsAbyss(@builtin(position) p: vec4f) -> @location(0) vec4f {
   let x = floor((p.x - D.m.z) / D.m.x);
   let y = floor((D.tgt.y - p.y - D.m.w) / D.m.y);
@@ -24873,7 +24904,7 @@ fn abCell(q: i32, r: i32) -> array<vec4f, 2> {
   if (acc.a <= 0.0) { discard; }
   return acc;
 }`;
-const WGPU_W = { ep: -1, mod: null, cbl: null, cpipe: null, bl: null, pl: null, rpipe: new Map(), samp: null, ramp: null, rampKey: ['', '', ''], still: null, stillKey: '', surf: [null, null], surfKey: ['', ''], none: null };
+const WGPU_W = { ep: -1, mod: null, cbl: null, cpipe: null, bl: null, pl: null, rpipe: new Map(), samp: null, ramp: null, rampKey: ['', '', '', '', ''], still: null, stillKey: '', surf: [null, null], surfKey: ['', ''], none: null };
 // the water's GPU objects on this device (made again on a new one - GPU.ep); its layouts: the surface's compute, and the one the draws share
 // (0 the draw's numbers, 1 the view's surface, 2-3 the ramps, 4 the draw's items)
 function wgpuReady() {
@@ -24888,7 +24919,7 @@ function wgpuReady() {
   W.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: ro }, { binding: 1, visibility: VF, buffer: ro }, { binding: 2, visibility: F_, texture: {} }, { binding: 3, visibility: F_, sampler: {} }, { binding: 4, visibility: VF, buffer: ro }], 'water');
   W.pl = gpuPipeLayout([W.bl], 'water');
   W.rpipe.clear(); W.samp = gpuSampler(true, 0, 0);
-  W.ramp = gpuTex(256, 4, 'rgba8unorm', 'water'); W.rampKey = ['', '', ''];   // (4 rows, not 3: each row's middle exact in binary - (row + 0.5) / 4 - so no filter reads a neighbour's colours in; as the GL front's 256-row table)
+  W.ramp = gpuTex(256, 8, 'rgba8unorm', 'water'); W.rampKey = ['', '', '', '', ''];   // (rows: the deep, the tint, the deep's dark, a body's tint, a body's biome water; 8 - a power of two: each row's middle exact in binary, so no filter reads a neighbour's colours in, as the GL front's 256-row table)
   W.still = null; W.stillKey = ''; W.surf = [null, null]; W.surfKey = ['', ''];
   W.none = gpuBuf(256, 'water');
   W.ep = GPU.ep;
@@ -24986,7 +25017,7 @@ function wgpuRamp(row, stops) {
 /* one draw of the water shader into C's target over this view (its clip: the view's columns - beginView, and the context's scissor): the
    draw's numbers (set(f) fills them), its items (an arena piece, or none), and how many triangles (a full-screen one; a shadow's quad an
    instance) */
-const WDP = new Float32Array(152);
+const WDP = new Float32Array(160);
 function waterDraw(vs, fs, set, items, inst) {
   const S = waterSurfGPU(); if (!S) return;
   const ctx = C, W = WGPU_W;
@@ -25124,6 +25155,27 @@ function waterAbyssLitGPU(lights, L0, T0, cs, gw, gh, ya, yb, deepK) {
     f[140] = gw; f[141] = gh; f[142] = ya; f[143] = yb;
     f[144] = nl; f[145] = L0 + gw * cs; f[146] = T0 + gh * cs;
   }, items);
+}
+/* THE TINT OF A BODY OF THE LAND'S WATER (lakeWaterIn, 50-land-lake.js - a lake, a pool under a crust, the sea caves at the ocean's level): the
+   ocean's tint (a lake's at its share - shallow) and the body's biome's own water over it (waterLakeGrad), each a gradient laid over the fill's
+   rectangle (columns X0..X1, rows Y..B before the lift) lifted dy rows to the body's level, inside its outlines (wcBodyPoly - from the water's
+   cells' runs: [surface chain, floor chain] each). Up to 64 outlines a draw */
+function waterBodyTintGPU(polys, dy, X0, X1, Y, B, bn, shallow) {
+  if (!polys.length) return;
+  const ga = Math.round(C.s.ga * 255) / 255, grads = [[3, waterTintGrad(shallow)]], L = waterLakeGrad(bn);
+  if (L) grads.push([4, L]);
+  for (const [row, Gd] of grads) for (let o0 = 0; o0 < polys.length; o0 += 64) {
+    const part = polys.slice(o0, o0 + 64); let nv = 0; for (const [A, Bc] of part) nv += (A.length + Bc.length) / 2;
+    const items = wgpuArena((part.length + nv) * 16, (u8, o) => {
+      const F = new Float32Array(u8.buffer, o, (part.length + nv) * 4); let at = part.length;
+      part.forEach(([A, Bc], i) => { F.set([at, A.length / 2, at + A.length / 2, Bc.length / 2], i * 4); for (const P of [A, Bc]) for (let k = 0; k < P.length; k += 2) { F[at * 4] = P[k]; F[at * 4 + 1] = P[k + 1]; F[at * 4 + 2] = F[at * 4 + 3] = 0; at++; } });
+    });
+    waterDraw('vs', 'fsBody', f => {
+      wgpuRamp(row, Gd.stops);
+      f[8] = row; f[9] = Gd.y0; f[10] = Gd.y1; f[11] = ga;
+      f[152] = dy; f[153] = X0; f[154] = X1; f[155] = Y; f[156] = B; f[157] = part.length;
+    }, items);
+  }
 }
 
 /* ================================================================
@@ -33308,10 +33360,12 @@ function waterTintGrad(shallow) {
 }
 const waterGrad = D => { const g = C.createLinearGradient(0, D.y0, 0, D.y1); for (const [t, s] of D.stops) g.addColorStop(t, s); return g; };
 function waterDeep(fill) { const D = waterDeepGrad(); fill(waterGrad(D), D.shade); }
-function waterTint(fill, bn, shallow) {   // (shallow: a lake's - the ocean's tint at a share, its bed seen through it: user Nov 8 20:17, "a lake is not as deep as the ocean")
-  fill(waterGrad(waterTintGrad(shallow)));
-  const lk = bn ? biomeLake(bn, 'k') : 0, mk = bn ? biomeLake(bn, 'murk') : 0;   // (a lake's biome's own water over the ocean's - the Biome Editor's LAKES tab)
-  if (lk > 0 || mk > 0) { const lc = biomeLake(bn, 'col'), lg = C.createLinearGradient(0, PY(WATER_Y - 12), 0, PY(WATER_Y + 260)); lg.addColorStop(0, rgbs(lc, Math.min(1, lk))); lg.addColorStop(1, rgbs(lc.map(v => v * 0.45), Math.min(1, lk + mk))); fill(lg); }
+// (a lake's biome's own water over the ocean's tint - the Biome Editor's LAKES tab: null when its biome has none)
+function waterLakeGrad(bn) {
+  const lk = bn ? biomeLake(bn, 'k') : 0, mk = bn ? biomeLake(bn, 'murk') : 0;
+  if (!(lk > 0 || mk > 0)) return null;
+  const lc = biomeLake(bn, 'col');
+  return { y0: PY(WATER_Y - 12), y1: PY(WATER_Y + 260), stops: [[0, rgbs(lc, Math.min(1, lk))], [1, rgbs(lc.map(v => v * 0.45), Math.min(1, lk + mk))]] };
 }
 function seaOverStops(sso, ov, oz) {
   const mo = (a, b, al) => mix3(a, b, sso).concat([al]), d = seaZoomDark();
@@ -47028,7 +47082,7 @@ function drawLakeRoots(x0, x1, part) {
   const step = Math.max(1, 2 / SV);
   // (user Nov 8 16:20-17:18, stacked water) every body of the land's water as the cells hold it (wcBodies - 50-land-water): a lake, a cave's pool under a
   // crust or under a crater's puddle - each one shape, drawn as the sea is from its own level; the ground in front covers its rock
-  if (typeof wcBodies === 'function') for (const P of wcBodies(x0 - 8, x1 + 8)) { if (!wcInView(P) || wcSeaBody(P)) continue; const top = P.cols.filter(q => q[3]), lv = top.length ? top.reduce((s, q) => s + q[1], 0) / top.length : P.lv; lakeWaterIn(P.a, P.b, lv, () => wcBodyPath(P), part, (P.a + P.b) / 2, true, true, !top.length); }   // (no open column: a pool under a crust - bare)
+  if (typeof wcBodies === 'function') for (const P of wcBodies(x0 - 8, x1 + 8)) { if (!wcInView(P) || wcSeaBody(P)) continue; const top = P.cols.filter(q => q[3]), lv = top.length ? top.reduce((s, q) => s + q[1], 0) / top.length : P.lv; lakeWaterIn(P.a, P.b, lv, [wcBodyPoly(P)], part, (P.a + P.b) / 2, true, true, !top.length); }   // (no open column: a pool under a crust - bare)
 }
 // (Nov 8, one cave world) a sea cave's water - the cells' under the sea's floor (wcBodies, the sea's own columns): in the sea's pass, over the land's back
 // wall there (drawLandBackSea), as a lake's - the sea's look from its own level, its tint over it
@@ -47045,16 +47099,26 @@ function drawSeaCaveWater(x0, x1) {
   let a = Infinity, b = -Infinity; for (const P of L) { a = Math.min(a, P.a); b = Math.max(b, P.b); }
   // (the sea's water, seen at its depth: from the sea's own level - its tint only, the cave's wall and stalactites seen through it, as a lake's bed: user Nov 8 21:51,
   // "no BG, no stalactites, no transparency")
-  lakeWaterIn(a, b, WATER_Y, () => { C.beginPath(); for (const P of L) wcBodyPath(P, true); }, undefined, (Math.max(a, x0) + Math.min(b, x1)) / 2, true, false);
+  lakeWaterIn(a, b, WATER_Y, L.map(wcBodyPoly), undefined, (Math.max(a, x0) + Math.min(b, x1)) / 2, true, false);
   for (const P of L) wcPoolLine(P, true);
 }
-// one water's look in its shape (path): the sea's own - its deep, decks, rays ('under'); its island roots, life, bed, tint ('over') - from its own level
-function lakeWaterIn(a, b, lv, path, part, mx, noDecks, shallow = noDecks, bare = noDecks && !shallow) {   // (bare: water under the ground - a sea cave, a pool under a crust: its tint and nothing of the open floor's)   // (shallow: the ocean's tint at a lake's share - a sea cave's is the ocean's own at its depth, user Nov 8 21:53: "deep blue water")
+// a body's outline on the screen, from the water's cells' runs (wcBodies - each column [x, top, floor, its top water open]): along its tops (an open
+// top's with its waves - surfaceY - as the sea's), back along its floors (2 rows under) - [surface chain, floor chain], X Y pairs
+function wcBodyPoly(P) {
+  const L = P.cols, A = [], B = [];
+  for (let i = 0; i < L.length; i++) { const [x, t, , w] = L[i], y0 = w ? surfaceY(x + 0.5) : t, y1 = w ? surfaceY(x + LT_CELL - 0.5) : t; A.push(i ? PX(x) : PX(x) - 0.5, PY(y0), PX(x + LT_CELL), PY(y1)); }
+  for (let i = L.length - 1; i >= 0; i--) { const [x, , b] = L[i]; B.push(PX(x + LT_CELL) + (i === L.length - 1 ? 0.5 : 0), PY(b) + 2, PX(x), PY(b) + 2); }
+  return [A, B];
+}
+// outlines as the canvas' clip path (what's drawn in the water that isn't the water's shader yet: its life, bed, plants, rays, rocks)
+function polysPath(polys) { C.beginPath(); for (const [A, B] of polys) { C.moveTo(A[0], A[1]); for (let i = 2; i < A.length; i += 2) C.lineTo(A[i], A[i + 1]); for (let i = 0; i < B.length; i += 2) C.lineTo(B[i], B[i + 1]); C.closePath(); } }
+// one water's look in its outlines (polys - wcBodyPoly): the sea's own - its deep, decks, rays ('under'); its island roots, life, bed, tint ('over') - from its own level
+function lakeWaterIn(a, b, lv, polys, part, mx, noDecks, shallow = noDecks, bare = noDecks && !shallow) {   // (bare: water under the ground - a sea cave, a pool under a crust: its tint and nothing of the open floor's)   // (shallow: the ocean's tint at a lake's share - a sea cave's is the ocean's own at its depth, user Nov 8 21:53: "deep blue water")
     // (user Nov 3 13:28: "All the bodies of water should have the exact same rendering like the main ocean has, independent of their
     // height") the ocean's own water - its deep colours, depth decks, light rays and tint (renderObjects, 43-render-objects) - drawn
     // in this water, lifted (or lowered) by how far its surface is from the ocean's: the same drawing, from its own surface
     const dl = lv - WATER_Y, dy = Math.round(dl * SV), cave = bare;   // (cave: a sea cave's - under the floor, none of the open floor's things can be in it: Nov 8, battle-caves chat)
-    C.save(); path(); C.clip();
+    C.save(); polysPath(polys); C.clip();
     try {
       const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12)), B = bh + SHY + 50 + Math.abs(dy), lay = st => { C.fillStyle = st; C.fillRect(X0, Y, X1 - X0, B - Y); };
       if (part !== 'over') { C.save(); C.translate(0, dy); UW_LIFT = dl;
@@ -47065,9 +47129,7 @@ function lakeWaterIn(a, b, lv, path, part, mx, noDecks, shallow = noDecks, bare 
       if (part === 'under') return;
       if (!cave) drawSeaLife();                           // (a pool or cave under the ground: none - zoomed out every one of them drew all the fish, 48 times a frame)
       if (!cave) { const b0 = BATCH; BATCH = false; try { drawReefItems(reef, a, b, true); drawAlgae(a, b, true); drawUwPlants(a, b, true); } finally { BATCH = b0; } }   // (and the UNDERWATER DECKS' plants on its bed - drawUwPlants)
-      C.save(); C.translate(0, dy);
-      waterTint(lay, colBiome(clamp(ltCol(mx), 0, land.cols - 1)), !!shallow);   // (the sea's own tint, and its biome's own water over it)
-      C.restore();
+      waterBodyTintGPU(polys, dy, X0, X1, Y, B, colBiome(clamp(ltCol(mx), 0, land.cols - 1)), !!shallow);   // (the sea's own tint, and its biome's own water over it - the water shader, inside the outlines, lifted to this water's level: 40-zz-water-gpu.js)
       if (!cave && land.lkRocks) drawRockForms(a, b, true);           // (its rock formations: over the water's tint, behind the ground in front - as the sea's, renderObjects)
     } finally { C.restore(); }
 }
@@ -58332,13 +58394,7 @@ function wcBodies(x0, x1) {
 }
 // a body on this view's screen: across it and between its top and bottom (the waves over its top a little)
 function wcInView(P) { const y0 = TOPPX / SV, y1 = (TOPPX + bh) / SV; return P.y1 + 4 >= y0 && P.y0 - 40 <= y1; }
-// a body's shape on the screen: along its tops (a top water's with its waves - surfaceY - as the sea's), back along its floors
-function wcBodyPath(P, add) {   // (add: onto the path begun - several bodies one shape)
-  if (!add) C.beginPath(); const L = P.cols;
-  for (let i = 0; i < L.length; i++) { const [x, t, , w] = L[i], y0 = w ? surfaceY(x + 0.5) : t, y1 = w ? surfaceY(x + LT_CELL - 0.5) : t; if (!i) C.moveTo(PX(x) - 0.5, PY(y0)); else C.lineTo(PX(x), PY(y0)); C.lineTo(PX(x + LT_CELL), PY(y1)); }
-  for (let i = L.length - 1; i >= 0; i--) { const [x, , b] = L[i]; C.lineTo(PX(x + LT_CELL) + (i === L.length - 1 ? 0.5 : 0), PY(b) + 2); C.lineTo(PX(x), PY(b) + 2); }
-  C.closePath();
-}
+// (a body's outline on the screen: the water's drawing's - wcBodyPoly, 50-land-lake.js)
 // a pool's shape on the screen: along its columns' tops, back along their floors
 function wcPoolPath(P) {
   C.beginPath(); const L = P.cols;
