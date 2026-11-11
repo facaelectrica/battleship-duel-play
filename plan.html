@@ -92,7 +92,7 @@ const UPM=63.75/9.83,KN=.5144*UPM,KMH=UPM/3.6; // world units a metre; a second 
 const MU=10*UPM; // how many world units the drawing's sizes are made for (icons and land read the same at the starting zoom)
 const SHELL=`<div id="app">
   <div id="bar">
-    <span id="title">FAR AWAY<small id="ver">v42</small></span>
+    <span id="title">FAR AWAY<small id="ver">v43</small></span>
     <button id="tWorld" class="on" title="The world map">WORLD</button>
     <button id="tLists" title="Structures, vehicles, nature, owners, countries, goods, biomes">LISTS</button>
     <button id="tEditor" title="Draw the icons">EDITOR</button>
@@ -221,9 +221,10 @@ const holderKind=h=>!h?null:onWater(h)?'dock':h.kind==='structure'?(does(h,'hold
 const forBoats=h=>onWater(h)||(does(h,'holds')&&/marine|shipyard|boat/i.test(tn(h)));
 const canHold=(h,v)=>{const k=holderKind(h);if(!k||v.kind!=='vehicle')return false;return isWaterVeh(v)?forBoats(h):k!=='dock'};
 const heldBy=e=>{const h=e.on&&byId.get(e.on);return h&&canHold(h,e)?h:null};
+const sideOf=(e,h)=>{if(holderKind(h)==='yard')e.side=e.x<h.x?-1:1;else delete e.side}; // beside a structure: left or right, where it was let go
 function vehSnap(e,skip){let best=null,bd=1e9; // a vehicle with no spot goes to the nearest structure that can keep it
   for(const h of doc.elements){if(h===e||!canHold(h,e)||(onWater(h)&&!h.on)||(skip&&skip.has(h.id)))continue;const dd=Math.abs(h.x-e.x);if(dd<bd){bd=dd;best=h}}
-  if(!best)return false;e.on=best.id;e.x=best.x;e.y=best.y;return true}
+  if(!best)return false;sideOf(e,best);e.on=best.id;e.x=best.x;e.y=best.y;return true}
 function holderAt(sx,sy,e,touch,skip){const s=touch?12:4; // the dock or hangar under the finger, never one being moved
   for(const h of HITS){if(h.t!=='el'||!h.rect||h.id===e.id||(skip&&skip.has(h.id))||!inR(h.rect,sx,sy,s))continue;const H=byId.get(h.id);if(H&&canHold(H,e))return H}return null}
 /* a dock is always held by land: at the nearer end of its land, reaching out over the water */
@@ -329,7 +330,7 @@ function sanitize(d){
     const o={id:String(e.id),name:String(e.name??''),kind,sub,type,x:(+e.x||0)*K,y:(+e.y||0)*K,parent:null,on:e.on&&ids.has(e.on)?e.on:null,
       owner:e.owner&&chids.has(e.owner)?String(e.owner):null,country:e.country&&kids.has(e.country)?String(e.country):null,notes:String(e.notes??''),props:e.props&&typeof e.props==='object'?e.props:{}};
 
-    if(kind==='structure'&&+e.len>0)o.len=Math.round(+e.len*K);if(kind==='vehicle'&&e.routine)o.routine=e.routine;if(kind==='nature'&&+e.rate>0)o.rate=Math.round(+e.rate);
+    if(kind==='structure'&&+e.len>0)o.len=Math.round(+e.len*K);if(kind==='vehicle'&&e.side===-1)o.side=-1;if(kind==='vehicle'&&e.routine)o.routine=e.routine;if(kind==='nature'&&+e.rate>0)o.rate=Math.round(+e.rate);
     for(const f of['carries','stores','gives'])if(Array.isArray(e[f])){const v=e[f].map(String).filter(g=>gids.has(g));if(v.length)o[f]=v}
     if(kind==='region'){o.biome=bids.has(e.biome)?e.biome:biomes[0].id;o.w=Math.max(60,(+e.w||400)*K);o.h=Math.max(5,(+e.h||40)*K);if(Math.abs(o.h-(oldH.get(o.biome)??-1))<1)o.h=DEF_H}
     return o});
@@ -403,7 +404,7 @@ function layout(){
       if(HL&&!HL.group&&!HL.land){const list=(held.get(H.id)||[]),i=list.indexOf(e.id),n=list.length;
         if(holderKind(H)==='dock'){const sd=dockSide(H);sx=HL.sx+sd*(HL.hw+r*1.4+i*r*2.8);fy=HL.sy+HL.r}
         else if(holderKind(H)==='hangar'){sx=HL.sx+(i-(n-1)/2)*r*2.6;fy=HL.sy-HL.r*.6} // on its roof
-        else{sx=HL.sx+HL.r*1.2+r*1.3+i*r*2.6;fy=HL.sy+HL.r}} // beside it on the ground
+        else{const sd=e.side===-1?-1:1,j=list.filter(id=>(byId.get(id).side===-1?-1:1)===sd).indexOf(e.id);sx=HL.sx+sd*(HL.r*1.2+r*1.3+j*r*2.6);fy=HL.sy+HL.r}} // beside it on the ground, on the side it was dropped
       const below=HL&&holderKind(H)!=='hangar'; // a moored boat's name goes under the water line, clear of the dock's
       let f=clamp(12*z*MU,0,16);if(picked)f=Math.max(f,12);
       const hi=HL?(held.get(H.id)||[]).indexOf(e.id):0,stack=hi>0?hi*(f+3):0;
@@ -714,7 +715,7 @@ function endPtr(ev){
   else if(o.t==='pan'){if(!o.moved){if(dbl){openAdd(p.x,p.y);lastTap.t=0;return}sel={els:new Set(),links:new Set()};panel();draw()}}
   else if(o.t==='drag'){if(o.moved){dragFree=new Set();
       for(const id of o.direct){const e=byId.get(id);if(isLand(e))continue; // let go: it snaps to what is under it, or the nearest that can hold it
-        const H=holderAt(p.x,p.y,e,o.touch,o.move);if(H){e.on=H.id;continue}
+        const H=holderAt(p.x,p.y,e,o.touch,o.move);if(H){sideOf(e,H);e.on=H.id;continue}
         if(e.kind==='vehicle'){vehSnap(e,o.move)||(e.on=null);continue}
         const D=does(e,'ondock')&&dockNear(e.x,e.y,o.move);if(D)onDock(e,D);else if(SNAPS(e)){const l=landUnder(e.x,e.y);e.on=l&&!o.move.has(l.id)?l.id:null}else if(onWater(e))waterSnap(e,o.move)||(e.on=null)}if(o.into){for(const id of sel.els)if(id!==o.into&&!isLand(byId.get(id))&&byId.get(id).kind!=='vehicle'&&!descendants(id).has(o.into))byId.get(id).parent=o.into;toast('Put inside '+(byId.get(o.into).name||'group'))}commit();panel()}
 }
@@ -744,7 +745,7 @@ function placeAt(sx,sy,t,fromId){
   if(isLand(e)){e.y=0;e.biome=t.biome;e.w=Math.round(400*MU);e.h=DEF_H}
   else{const h=hitAt(sx,sy,true);if(h&&LY.get(h.id)?.group)e.parent=h.id;
     const H=holderAt(sx,sy,e,true);
-    if(H){e.on=H.id;e.x=H.x;e.y=H.y}
+    if(H){sideOf(e,H);e.on=H.id;e.x=H.x;e.y=H.y}
     else if(e.kind==='vehicle'){if(!vehSnap(e)){toast(isWaterVeh(e)?'Needs a dock':'Needs a structure');return}}
     else if(does(e,'ondock')&&dockNear(e.x,e.y))onDock(e,dockNear(e.x,e.y));
     else if(SNAPS(e)){const l=landUnder(e.x,e.y);if(l){e.on=l.id;e.y=Math.round(topAt(l,e.x))}}
