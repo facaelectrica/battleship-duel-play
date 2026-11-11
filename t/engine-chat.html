@@ -44,6 +44,14 @@
     tick: g => g.swT.ev(`(() => { const L = globalThis.__lakeAt; if (!L) return; const B = sailboats.filter(b => b.state !== 'gone' && b.x > L[0] && b.x < L[1]).slice(0, 2);
         B.forEach((b, i) => { const x = L[2] + (i ? 45 : -50); Object.assign(b, { x, y: waterLv(x), vx: 0, state: 'sail', sink: 0, a: 0, face: i ? -1 : 1, driven: null }); }); })()`),
     done: g => { g.zoomStep(0, -1); g.camAt(null); delete globalThis.__lakeAt; } });
+  // (Nov 11, gl-front-last) the liner held still under the camera, two zoom steps in: her rigging's ropes (drawRopeLine - the things' pass, her order)
+  const linerScene = t => ({ mode: 'land', one: true, env: { time: t, weather: 0.1, rain: 0, wind: 0.3, sea: 0.3, fog: 0 }, frames: 60,
+    setup: g => {
+      const c = g.civShips().find(k => k.kind === 'liner' && k.state === 'sail'); if (!c) throw new Error('liner scene: no liner under way in this world');
+      globalThis.__linerAt = c.x; c.vx = 0; g.zoomStep(0, 2); g.camAt(c.x, g.rest().WATER_Y - 60); g.cutTo && g.cutTo(0);
+    },
+    tick: g => { const c = g.civShips().find(k => k.kind === 'liner' && k.state === 'sail'); if (c) { c.x = globalThis.__linerAt; c.vx = 0; } },
+    done: g => { g.zoomStep(0, -2); g.camAt(null); delete globalThis.__linerAt; } });
   const carScene = t => ({ mode: 'land', one: true, env: { time: t, weather: 0.15, rain: 0, wind: 0.2, sea: 0.3, fog: 0 }, frames: 40,
     setup: g => {
       const at = g.swT.ev(`(() => { const L = LANDS.c, x0 = ${FLATX}(L, 700); storyCars.length = 0; let x = x0;
@@ -208,6 +216,8 @@
     spacepads: spaceScene(12, 'pad'), spacepadsnight: spaceScene(21.5, 'fire'), spacelaunch: spaceScene(16, 'launch'), spaceland: spaceScene(12, 'land'), spacehot: spaceScene(12, 'hot'),
     // (Nov 10, light - lake-dusk) THE LOW SUN ON A LAKE'S BOATS: the camera on the lake holding the most boats, zoomed in a step - at sunset and at dusk
     // (lightLakeDusk: the silhouette over the surface, the fade under each lake's level, on what the boats drew); at noon and at night nothing of it
+    // (Nov 11, gl-front-last) THE LINER'S ROPES by the one rope line: at noon and at the low sun
+    liner: linerScene(12), linerdusk: linerScene(18.4),
     lakesunset: lakeScene(18.0), lakedusk: lakeScene(18.6), lakenoon: lakeScene(12), lakenight: lakeScene(22.5),
     openfar: { mode: 'land', one: true, env: { time: 16, weather: 0.5, rain: 0.2, wind: 0.5, sea: 0.5 }, setup: g => { g.zoomStep(0, -99); g.cutTo(0); }, frames: 90 },
     // (Nov 9, skeleton chat) the sky's three approved looks (skySnap above): 10:00 with the sun dragged behind a small cloud, 18:06's colours,
@@ -497,7 +507,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 11 02:20', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 11 02:22', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -2678,10 +2688,21 @@ function frameFlush() { if (typeof glFlush === 'function') glFlush(); gpuPassEnd
 // units (its transform applied, as rect() would) laid on the context's clip, the way a path's clip() lays one: every draw on the context
 // after it - the GL front's and every native pass's (they honour the clip stencil's bit 0x80 and the scissor) - is held inside it until
 // the context's state is restored. A part never builds a clip through the context's path calls. (Today the clip's stencil is written by
-// the GL front's builder, glBuildClip - the skeleton's to make native at the swap; a part's call stays the same.)
+// the GL front's builder, glBuildClip - the skeleton's to make native at the swap; a part's call stays the same.) One rectangle upright
+// on the target is a scissor box (the context's sc, narrowed - no stencil), as a path's clip() of one rectangle was
 function frameClip(ctx, r) {
   const s = ctx.s, n = (r.length / 4) | 0;
   if (!n) { s.sc = [0, 0, 0, 0]; return; }
+  if (n === 1) {
+    const x = r[0], y = r[1], w = r[2], h = r[3], a = ctx._pt(x, y), b = ctx._pt(x + w, y), c = ctx._pt(x + w, y + h), d = ctx._pt(x, y + h);
+    if ((a[0] === d[0] && b[0] === c[0] && a[1] === b[1] && c[1] === d[1]) || (a[0] === b[0] && c[0] === d[0] && a[1] === d[1] && b[1] === c[1])) {
+      const t = ctx.target, o = s.sc || [0, 0, t._w, t._h];
+      const x0 = Math.max(Math.round(Math.min(a[0], c[0])), o[0], 0), y0 = Math.max(Math.round(Math.min(a[1], c[1])), o[1], 0);
+      const x1 = Math.min(Math.round(Math.max(a[0], c[0])), o[0] + o[2], t._w), y1 = Math.min(Math.round(Math.max(a[1], c[1])), o[1] + o[3], t._h);
+      s.sc = [x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0)];
+      return;
+    }
+  }
   const T = new Float32Array(n * 12); let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
   for (let i = 0; i < n; i++) {
     const x = r[i * 4], y = r[i * 4 + 1], w = r[i * 4 + 2], h = r[i * 4 + 3];
@@ -8003,7 +8024,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 11 02:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 11 02:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -9454,70 +9475,6 @@ function probeTick(dt) {
   probe.left -= dt;
   if (probe.left <= 0) { probe.on = false; probe.done = true; }
 }
-// How long one pass over the whole world canvas takes to fill: well under a millisecond on a GPU, a few on a
-// CPU. Run once, when the panel is first opened, on a canvas of its own.
-const fillTest = { ms: -1, kind: '', rects: 0, path: 0 };
-function runFillTest() {
-  if (fillTest.ms >= 0) return;
-  if (!bw || bw < 8) return;
-  try {
-    const c = document.createElement('canvas'); c.width = bw; c.height = bh;
-    const x = c.getContext('2d');
-    const gr = x.createLinearGradient(0, 0, 0, bh); gr.addColorStop(0, '#123'); gr.addColorStop(1, '#456');
-    x.fillStyle = gr; x.fillRect(0, 0, bw, bh); x.getImageData(0, 0, bw, bh);
-    const r0 = performance.now(); x.getImageData(0, 0, bw, bh); const rb = performance.now() - r0;   // an idle read-back's own cost (the whole canvas: a single pixel may not make a software canvas draw it all)
-    let t0 = performance.now();
-    for (let i = 0; i < 40; i++) { x.fillStyle = i & 1 ? gr : 'rgba(20,40,80,0.5)'; x.fillRect(0, 0, bw, bh); }
-    x.getImageData(0, 0, bw, bh);
-    fillTest.ms = Math.max(0, performance.now() - t0 - rb) / 40;
-    fillTest.rb = rb;
-    fillTest.kind = fillTest.ms < 0.5 ? 'GPU' : 'CPU';
-    // The question batching answers, asked directly: 1500 little rectangles one by one, or as one path?
-    // (On a GPU canvas each command costs; on a software one a path's scan conversion costs.)
-    const N = 1500, xs = new Float64Array(N), ys = new Float64Array(N);
-    for (let i = 0; i < N; i++) { xs[i] = Math.floor(hash(i * 1.7) * (bw - 4)); ys[i] = Math.floor(hash(i * 3.1 + 7) * (bh - 4)); }
-    let rects = 1e9, path = 1e9;
-    for (let round = 0; round < 3; round++) {
-      t0 = performance.now();
-      for (let i = 0; i < N; i++) { x.fillStyle = i & 1 ? 'rgba(200,210,230,0.6)' : 'rgba(180,200,220,0.4)'; x.fillRect(xs[i], ys[i], 2, 2); }
-      x.getImageData(0, 0, bw, bh);
-      rects = Math.min(rects, performance.now() - t0 - rb);
-      t0 = performance.now();
-      for (const col of ['rgba(200,210,230,0.6)', 'rgba(180,200,220,0.4)']) { x.fillStyle = col; x.beginPath(); for (let i = col[11] === '0' ? 0 : 1; i < N; i += 2) x.rect(xs[i], ys[i], 2, 2); x.fill(); }
-      x.getImageData(0, 0, bw, bh);
-      path = Math.min(path, performance.now() - t0 - rb);
-    }
-    fillTest.rects = rects; fillTest.path = path;
-  } catch (e) { fillTest.ms = 0; fillTest.kind = '?'; }
-  if (BATCH_AUTO) setMode(fillTest.kind === 'GPU' ? (fillTest.path <= fillTest.rects ? 2 : 1) : 0);   // a first guess; the trial below decides
-}
-function getMode() { return BATCH ? (PATHS ? 2 : 1) : 0; }
-function setMode(m) { BATCH = m >= 1; PATHS = m >= 2; }
-const MODE_NAMES = ['PLAIN', 'LAYER', 'LAYER+PATHS'];
-/* Which mode is faster is settled by trying both: a little into the game the frame times are watched for a
-   stretch in the current mode, then for a stretch in the other, and the mode with the shorter median frame
-   stays (the current one keeps its place unless the other is clearly better). Frame time counts everything,
-   the script and the browser's own drawing, on this very device. Tried again now and then, since scenes change. */
-const abTrial = { t: 0, next: 4, phase: 0, gaps: [], meds: [0, 0, 0], mode0: 0, skip: 0, done: 0 };
-function abTrialTick(dt) {
-  if (!BATCH_AUTO || paused || ui.title) return;
-  abTrial.t += dt;
-  if (abTrial.phase === 0) { if (abTrial.t < abTrial.next) return; abTrial.phase = 1; abTrial.gaps = []; abTrial.mode0 = getMode(); setMode(0); abTrial.skip = 5; return; }
-  if (abTrial.skip > 0) { abTrial.skip--; return; }
-  const gap = dt * 1000;
-  if (gap > 0 && gap < 200) abTrial.gaps.push(gap);
-  if (abTrial.gaps.length < 50) return;
-  const g = abTrial.gaps.slice().sort((a, b) => a - b);
-  abTrial.meds[abTrial.phase - 1] = g[g.length >> 1];
-  if (abTrial.phase < 3) { setMode(abTrial.phase); abTrial.phase++; abTrial.gaps = []; abTrial.skip = 5; return; }
-  // the shortest median frame wins; the mode in use keeps its place unless another is clearly better
-  let best = abTrial.mode0;
-  for (let m = 0; m < 3; m++) if (abTrial.meds[m] < abTrial.meds[best] * 0.9) best = m;
-  setMode(best);
-  const lo = Math.min(...abTrial.meds), hi = Math.max(...abTrial.meds);
-  abTrial.phase = 0; abTrial.t = 0; abTrial.done++;
-  abTrial.next = hi > lo * 1.3 || abTrial.done >= 2 ? 1e9 : 45;    // a clear verdict stands; a close one is tried once more
-}
 // the perf panel's lines (drawPerfPanel; the REPORT keeps them too - 50-zzzz-bug.js bugPerf)
 function perfLines() {
   const P = (probe.on || probe.done) ? probe.parts : (perf.parts || {}), f = v => (v || 0).toFixed(1);
@@ -9525,7 +9482,7 @@ function perfLines() {
   const lines = [
     'V' + GAME_VERSION + '  FRAME ' + f(fpsMeter.gap) + ' MS  WORST ' + Math.round(fpsMeter.worst || 0),   // (user Oct 28: the version up top, to be sure it's the latest)
     frameErrN ? 'ERRORS ' + frameErrN + ': ' + frameErr.slice(0, 70).toUpperCase() : '',   // (frames that threw: the first of each message is in the console)
-    'SCRIPT ' + f(script) + '  DRAW+GPU ' + f(Math.max(0, (fpsMeter.gap || 0) - script)) + (fillTest.ms >= 0 ? '  FILL ' + fillTest.ms.toFixed(2) + ' ' + fillTest.kind + '  PATH ' + fillTest.path.toFixed(1) + ' VS RECTS ' + fillTest.rects.toFixed(1) : ''),
+    'SCRIPT ' + f(script) + '  DRAW+GPU ' + f(Math.max(0, (fpsMeter.gap || 0) - script)),
     (probe.on ? 'PROBING ' + Math.ceil(probe.left) + 'S: ' : probe.done ? 'PROBED: ' : '') + 'PHYS ' + f(perf.phys) + '  SMOKE ' + f(perf.smoke),
     // (Oct 31: whether the simulation worker runs the game on this screen, and if not why - the iPad's PHYS was the page's own)
     'SIM WORKER ' + (SW_IN_WORKER ? 'SELF' : SW.live ? 'ON' : !SW_WANT ? 'OFF (ASKED)' : SW.fail ? 'FAILED: ' + String(SW.fail).slice(0, 48).toUpperCase() : SWB.holds.size ? 'HELD: ' + [...SWB.holds].join(' ').toUpperCase() : !SW.worker ? 'NOT STARTED' : !SW.ready ? 'STARTING' : 'WAITING'),
@@ -9542,7 +9499,7 @@ function perfLines() {
     // (engine skeleton, Nov 9: the graphics card's own time a frame - the layer's timestamps, read a frame or more late - and its memory by pool)
     !GPU.on ? 'NO WEBGPU' : !GPU.feat['timestamp-query'] ? 'GPU TIME: NO TIMESTAMPS ON THIS DEVICE' : (G => 'GPU ' + f(FR.gpuMs) + '  SKY ' + f(G.sky) + '  WORLD ' + f(G.objects) + '  WATER ' + f(G.distort) + '  LAND ' + f(G.land) + '  TINT ' + f(G.tint) + '  FX ' + f(G.overlays) + '  PASSES ' + FR.passMs.length)(GPUT.parts),
     !GPU.on ? '' : 'GPU MEMORY ' + Math.round((GPU_MEM.tex + GPU_MEM.buf + GPU_MEM.arena) / 1048576) + ' MB: ' + Object.entries(GPU_MEM.by).filter(e => e[1] > 524288).sort((x, y) => y[1] - x[1]).map(e => e[0].toUpperCase() + ' ' + Math.round(e[1] / 1048576)).join('  '),
-    'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + (GLR.on ? '  WEBGL' : '  MODE ' + MODE_NAMES[getMode()] + (BATCH_AUTO ? (abTrial.phase ? ' TRYING' : ' AUTO') : '') + '  [TAP HERE: NEXT MODE]'),
+    'V' + GAME_VERSION + ' ' + BUILD + '  DETAIL ' + Math.round(FX * 100) + (PUFF_PERIOD > 2 ? ' PUFFS 1/' + PUFF_PERIOD : '') + '  ' + bw + 'x' + bh + '  DPR ' + dpr.toFixed(2) + '  WEBGL',
     GLR.on ? 'GL DRAWS ' + Math.round(GLR.shown.draws || 0) + '  QUADS ' + Math.round(GLR.shown.quads || 0) + '  UPLOADS ' + Math.round(GLR.shown.uploads || 0) + ' (' + Math.round((GLR.shown.upPx || 0) / 1000) + 'K PX)  FILLS ' + Math.round(GLR.shown.fills || 0) + '  CLIPS ' + Math.round(GLR.shown.clips || 0) + '  DECKS ' + Math.round(FT.dDraw || 0) + '/' + Math.round(FT.dSkip || 0) + (GLR.lost ? '  LOST' : '') : '',
     'SMOKE ' + smoke.n + '  TRAILS ' + trails.length + '  FIRES ' + flames.length + '  DEBRIS ' + debris.length,
     probe.on || probe.done ? '' : 'TAP AGAIN: MEASURE DRAWING TOO',
@@ -10821,7 +10778,7 @@ function inRect(ux, uy, x, y, w, h) { return ux >= x && ux <= x + w && uy >= y &
 // the FPS text (open the panel, then the probe, then close) and the open panel (the drawing mode): true when the press was theirs
 function fpsPress(e) {
   const [ux, uy] = toUI(e.clientX, e.clientY);
-  if (ui.perfPanel && inRect(ux, uy, ...perfPanelRect)) { if (!GLR.on) { setMode((getMode() + 1) % 3); BATCH_AUTO = false; } return true; }
+  if (ui.perfPanel && inRect(ux, uy, ...perfPanelRect)) return true;
   const [fx_, fy_, fw_, fh_] = fpsRect(); if (!inRect(ux, uy, fx_, fy_, fw_, fh_)) return false;
   if (!ui.perfPanel) ui.perfPanel = true; else if (!probe.on) probeStart(); else { ui.perfPanel = false; probe.on = false; }
   return true;
@@ -15085,15 +15042,8 @@ function drawPlanesAir(x0, x1) {
     // facing it, a low sun a warm rim - the light alone, over the plane and what's drawn on it
     { const L = thingsLit(cx, nightK); if (L[0] + L[1] + L[2] + L[3] > 0) { wpQuad(pl, P, cx, cy, { kind: THG_LIGHT, lit: L }); thingsGL(); } }
     if (pl.state === 'fly' && P.side0 && pl.inCloud < 0.5) {
-      // the sun high: now and then the canopy catches it
-      const g = sunHigh * Math.pow(Math.max(0, Math.sin(pl.x * 0.0045 + pl.pitch * 5 + pl.id * 2)), 14);
-      if (g > 0.03) {
-        const [gx, gy] = planeSpot(pl, P, wpKind(pl).glint[0], wpKind(pl).glint[1]), r = Math.max(1, Math.round(SV * 0.9)), L = Math.round((3 + 9 * g) * SV * 0.6);
-        thingsGL(); C.save(); C.globalCompositeOperation = 'lighter';   // (added to what's there: its own draw)
-        const m = thgCur(); thingsBlock(m, Math.round(gx - L), Math.round(gy - r / 2), L * 2, r, WP_GLINT[0], 0.9 * g); thingsBlock(m, Math.round(gx - r / 2), Math.round(gy - L * 0.7), r, Math.round(L * 1.4), WP_GLINT[0], 0.9 * g);
-        thingsBlock(m, Math.round(gx - r), Math.round(gy - r), r * 2, r * 2, WP_GLINT[1], g);
-        thingsGL(); C.restore();
-      }
+      // the sun high: now and then the canopy catches it (every glint - sunGlint, 50-land-civlife.js; its sun as the warplanes' have it)
+      { const [gx, gy] = planeSpot(pl, P, wpKind(pl).glint[0], wpKind(pl).glint[1]); sunGlint(gx, gy, pl.x * 0.0045 + pl.pitch * 5 + pl.id * 2, false, sunHigh); }
       // a red lamp on the tail, blinking, from sunset through the night
       // (drawn after the night has darkened the world, so it shines: the light pass's tail lamp rows, 47-zz-light-pass.js)
       const lampA = clamp(E.night * 1.2 + E.sunset * 1.2 + E.dusk * 0.6, 0, 1);
@@ -15201,7 +15151,7 @@ function sfxRocketRelease(x) {
   thump(out, t, 160, 80, 0.06, 0.3);
 }
 // (the warplanes' struts, a tyre with no wheel picture, birds' blood, the canopy's glint - blocks of the things' pass)
-const WP_STRUT = [0x5a, 0x5c, 0x62], WP_TYRE = [0x1c, 0x1c, 0x20], WP_BLOOD = [[0xb3, 0x14, 0x1a], [0x7a, 0x0e, 0x12]], WP_GLINT = [[255, 250, 225], [255, 255, 255]];
+const WP_STRUT = [0x5a, 0x5c, 0x62], WP_TYRE = [0x1c, 0x1c, 0x20], WP_BLOOD = [[0xb3, 0x14, 0x1a], [0x7a, 0x0e, 0x12]];
 // the missiles still hanging under the wings, drawn over the plane while it's seen from the side (blocks of the things' pass, in its batch)
 function drawWingRockets(pl, P, nightK) {
   const n = pl.rockets || 0;
@@ -17369,7 +17319,6 @@ function drawSplashes(x0, x1, pal) {
   pxDraw(SPRAY_L, x0, x1);
   // (the fill style as the loop left it: the last drop's colour)
   if (SPRAY_L.last >= 0) { const col = SPRAY_L.pal[(SPRAY_L.last & 3) ? 0 : 1]; C.fillStyle = col; fsLast = col; }
-  plFlush();
 }
 /* (Nov 1) THE JETS' PIXEL LAYER (40-zzzz-layers.js): every splash column in one draw a view, its blocks worked out by the loop
    that painted them. A column's top rises like a thrown stone and falls back; down it, row by row of blocks, a tapered spike
@@ -26158,127 +26107,8 @@ const PX = wx => Math.round(wx * SV) - CAMPX;
 let fsLast = null;
 function fs1(col) { if (col !== fsLast) { C.fillStyle = col; fsLast = col; } }
 const PY = wy => Math.round(wy * SV) - TOPPX;
-function rect(wx, wy, ww, wh) { C.fillRect(PX(wx), PY(wy), Math.max(1, Math.round(ww * SV)), Math.max(1, Math.round(wh * SV))); }
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map(v => v / 16 - 0.47);
 
-/* ---------------- The pixel layer ----------------
-   Much of the world is pixel art painted as thousands of tiny opaque rectangles a frame (seaweed, foam, flags,
-   gun barrels, whitecaps). On a GPU-backed canvas every one of those is a drawing command the browser has
-   to record, ship to its GPU process and batch, and that bookkeeping, not the pixels, was the frame's cost.
-   These are now written straight into a pixel buffer (an ImageData over the whole canvas) and put on the
-   screen in one drawImage per batch. Only opaque colours go through it, so the picture is exactly the same:
-   an opaque pixel over another is simply the later one, and untouched pixels stay clear. The buffer is in
-   canvas coordinates and clipped to the view, like the canvas itself. Batches are flushed wherever the
-   original drawing order needs it (before anything else is painted over the same spot). */
-/* BATCH: gather the world's thousands of little rectangles into a few draws (the pixel layer, the batches
-   and paths below). Right for a GPU-backed canvas, where each drawing command costs more than the pixels it
-   paints; wrong for a software-rasterised one, where fillRect is the fast path and a path is slower. Chosen
-   from the fill-rate test at start-up, switchable from the frame-time panel, or with ?mode=0 (plain), ?mode=1 (layer), ?mode=2 (layer and paths). */
-let BATCH = true, BATCH_AUTO = true;        // BATCH: the pixel layer (opaque pixels, one draw per batch)
-let PATHS = true;                            // PATHS: see-through rectangles gathered into paths (Chrome's GPU canvas likes it, Safari's does not)
-const PL = { w: 0, h: 0, px: null, cvs: new Map(), x0: 1e9, y0: 1e9, x1: -1, y1: -1, cols: new Map(), n: 0 };
-const PL_LE = new Uint8Array(new Uint32Array([0x11223344]).buffer)[0] === 0x44;
-function plColor(col) {
-  let v = PL.cols.get(col);
-  if (v !== undefined) return v;
-  let r = 0, g = 0, b = 0, a = 1;
-  if (col[0] === '#') { r = parseInt(col.slice(1, 3), 16); g = parseInt(col.slice(3, 5), 16); b = parseInt(col.slice(5, 7), 16); }
-  else { const m = col.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/); r = +m[1]; g = +m[2]; b = +m[3]; if (m[4] !== undefined) a = +m[4]; }
-  if (a >= 1) v = PL_LE ? ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0 : ((r << 24) | (g << 16) | (b << 8) | 255) >>> 0;
-  else v = { r, g, b, a };                                   // see-through: blended pixel by pixel
-  PL.cols.set(col, v);
-  return v;
-}
-// A see-through rectangle, blended into the layer the way the canvas blends it (premultiplied source-over,
-// worked out on the pixels it touches; the layer itself keeps straight colours, as ImageData wants them, so
-// handing it over costs no pass of its own). A see-through pixel can land a step off what the canvas
-// itself would have made; nothing the eye sees.
-function plRectA(c, x, y, w, h) {
-  let ax = x + VSX + SHX, ay = y + SHY, bx = ax + w, by = ay + h;
-  const L = VSX, R = VSX + VWP;
-  if (ax < L) ax = L; if (ay < 0) ay = 0; if (bx > R) bx = R; if (by > PL.h) by = PL.h;
-  if (ax >= bx || ay >= by) return;
-  const px = PL.px, W = PL.w, a = c.a, k = 1 - a, sr = c.r * a, sg = c.g * a, sb = c.b * a;
-  // over a clear pixel the result is the colour itself at its own alpha (the common case, no blending)
-  const solo = PL_LE ? ((Math.round(a * 255) << 24) | (c.b << 16) | (c.g << 8) | c.r) >>> 0 : ((c.r << 24) | (c.g << 16) | (c.b << 8) | Math.round(a * 255)) >>> 0;
-  for (let yy = ay; yy < by; yy++) {
-    const o = yy * W;
-    for (let xx = ax + o; xx < bx + o; xx++) {
-      const d = px[xx];
-      if (d === 0) { px[xx] = solo; continue; }
-      let dr, dg, db, da;
-      if (PL_LE) { dr = d & 255; dg = (d >>> 8) & 255; db = (d >>> 16) & 255; da = d >>> 24; } else { dr = d >>> 24; dg = (d >>> 16) & 255; db = (d >>> 8) & 255; da = d & 255; }
-      const dk = da / 255 * k;                                  // what is under, premultiplied and kept
-      const oa = a + da / 255 * k, f = 1 / oa;                  // out: premultiplied sums, back to straight
-      dr = Math.min(255, Math.round((sr + dr * dk) * f)); dg = Math.min(255, Math.round((sg + dg * dk) * f)); db = Math.min(255, Math.round((sb + db * dk) * f)); da = Math.round(oa * 255);
-      px[xx] = PL_LE ? ((da << 24) | (db << 16) | (dg << 8) | dr) >>> 0 : ((dr << 24) | (dg << 16) | (db << 8) | da) >>> 0;
-    }
-  }
-  if (ax < PL.x0) PL.x0 = ax; if (ay < PL.y0) PL.y0 = ay; if (bx > PL.x1) PL.x1 = bx; if (by > PL.y1) PL.y1 = by;
-  PL.n++;
-}
-function plSize() {
-  if (PL.w === bw && PL.h === bh) return;
-  PL.w = bw; PL.h = bh;
-  PL.px = new Uint32Array(bw * bh);
-  PL.x0 = PL.y0 = 1e9; PL.x1 = PL.y1 = -1;
-}
-function plRect(col, x, y, w, h) {
-  if (!BATCH || C.globalAlpha !== 1 || (C !== oc && C !== g)) { fs1(col); C.fillRect(x, y, w, h); return; }     // (faded, or not a world canvas: the plain way)
-  const v = plColor(col);
-  if (typeof v !== 'number') { plRectA(v, x, y, w, h); return; }
-  let ax = x + VSX + SHX, ay = y + SHY, bx = ax + w, by = ay + h;
-  const L = VSX, R = VSX + VWP;
-  if (ax < L) ax = L; if (ay < 0) ay = 0; if (bx > R) bx = R; if (by > PL.h) by = PL.h;
-  if (ax >= bx || ay >= by) return;
-  const px = PL.px, W = PL.w;
-  for (let yy = ay; yy < by; yy++) px.fill(v, yy * W + ax, yy * W + bx);
-  if (ax < PL.x0) PL.x0 = ax; if (ay < PL.y0) PL.y0 = ay; if (bx > PL.x1) PL.x1 = bx; if (by > PL.y1) PL.y1 = by;
-  PL.n++;
-}
-// an opaque colour goes to the layer, a see-through one straight to the canvas (it must blend with what's under it)
-const plOpaque = new Map();
-function fillPx(col, x, y, w, h) {
-  let o = plOpaque.get(col);
-  if (o === undefined) { o = col[0] === '#' ? col.length === 7 : col.startsWith('rgb('); plOpaque.set(col, o); }
-  if (o || !PATHS) plRect(col, x, y, w, h); else if (C.globalAlpha !== 1 || C !== oc) { fs1(col); C.fillRect(x, y, w, h); } else rbRect(col, x, y, w, h);
-}
-/* See-through rectangles that never overlap one another (a cast shadow's rows, say) can be gathered by
-   colour and painted as one path per colour: the same pixels, a handful of commands instead of hundreds. */
-const RB = new Map();
-function rbRect(col, x, y, w, h) { if (!PATHS) { if (BATCH) { plRect(col, x, y, w, h); return; } fs1(col); C.fillRect(x, y, w, h); return; } if (x + w <= -SHX || x >= VWP - SHX || y + h <= -SHY || y >= bh - SHY) return; let a = RB.get(col); if (!a) RB.set(col, a = []); a.push(x, y, w, h); }
-function rbFlush() {
-  if (!RB.size) return;
-  for (const [col, a] of RB) {
-    C.fillStyle = col; C.beginPath();
-    for (let i = 0; i < a.length; i += 4) C.rect(a[i], a[i + 1], a[i + 2], a[i + 3]);
-    C.fill();
-  }
-  RB.clear(); fsLast = null;
-}
-// in world units, like rect()
-function plRectW(col, wx, wy, ww, wh) { plRect(col, PX(wx), PY(wy), Math.max(1, Math.round(ww * SV)), Math.max(1, Math.round(wh * SV))); }
-// put what has been written on the canvas (one drawImage), and clear it for the next batch
-function plFlush() {
-  rbFlush();
-  if (PL.x1 < 0) return;
-  const x0 = PL.x0, y0 = PL.y0, w = PL.x1 - x0, h = PL.y1 - y0;
-  // only the box that was written is handed to the canvas (putImageData converts every pixel it is given,
-  // so the whole buffer would cost the same every time, however little changed)
-  if (!PL.tmp || PL.tmp.length < w * h) PL.tmp = new Uint32Array(Math.max(w * h, 1 << 16));
-  const px = PL.px, W = PL.w, tmp = PL.tmp;
-  for (let yy = 0; yy < h; yy++) { const o = (y0 + yy) * W + x0; tmp.set(px.subarray(o, o + w), yy * w); px.fill(0, o, o + w); }
-  // through a staging canvas no bigger than needed (drawing from a canvas copies it whole, so a full-screen
-  // one would cost a full-screen copy every time): one per power-of-two size, made as needed
-  let bwid = 32, bhgt = 32;
-  while (bwid < w) bwid *= 2; while (bhgt < h) bhgt *= 2;
-  const key = bwid * 65536 + bhgt;
-  let cv = PL.cvs.get(key);
-  if (!cv) { cv = document.createElement('canvas'); cv.width = bwid; cv.height = bhgt; PL.cvs.set(key, cv); }
-  cv.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(tmp.buffer, 0, w * h * 4), w, h), 0, 0);
-  C.drawImage(cv, 0, 0, w, h, x0 - VSX - SHX, y0 - SHY, w, h);
-  PL.x0 = PL.y0 = 1e9; PL.x1 = PL.y1 = -1;
-}
 /* SIZES, TURNS AND TINTS ARE THE GRAPHICS CARD'S, AS IT DRAWS (engine-design: nothing that's only drawn is kept as a copy - the old
    picture memory, 04-zzz-pics.js, and its stores of sizes, turned copies and zoom stand-ins are retired). scaled() hands back a stand-in
    with the size the picture would have had - { _gs, src, width, height, hard, down }: data, no pixels - and the GL front samples the
@@ -31673,7 +31503,7 @@ function beginView(c, v, camPx, sx, wpx, vi, camF = camPx) {
   SHX = Math.round(shakeXY[vi][0] * S); SHY = Math.round(shakeXY[vi][1] * S);
   c.save();
   c.setTransform(1, 0, 0, 1, 0, 0);
-  c.beginPath(); c.rect(sx, 0, wpx, bh); c.clip();
+  frameClip(c, [sx, 0, wpx, bh]);   // (the view's columns: a scissor - src/gpu)
   c.setTransform(1, 0, 0, 1, sx + SHX, SHY);
   c.imageSmoothingEnabled = false;
 }
@@ -32197,33 +32027,6 @@ function drawCoastsLand(pivY) {
 const ysPer = [new Int32Array(64), new Int32Array(64)];
 let ys = ysPer[0];
 const rayShade = new Map();
-/* The water's regions are polygons bounded by the surface line. They used to get two corners per screen
-   column (thousands of edges for the browser to scan-convert or tessellate, several times a frame); now a
-   corner only where the surface changes height, which is the same outline with a fraction of the edges. */
-function surfacePath(yOff, far) {
-  C.beginPath(); C.moveTo(-3, far);
-  let runY = ys[0] + yOff;
-  C.lineTo(-3, runY);
-  for (let c = -2; c < VWP + 3; c++) {
-    const y = ys[c + 3] + yOff;
-    if (y !== runY) { C.lineTo(c, runY); C.lineTo(c, y); runY = y; }
-  }
-  C.lineTo(VWP + 3, runY); C.lineTo(VWP + 3, far); C.closePath();
-}
-// The surface line sampled every other column (the way the fog and shadow outlines are drawn), as lineTo
-// calls from column -3 to VWP+3: the same polyline, leaving out the points inside a level stretch
-function surfaceLine(yOff) {
-  let pc = -3, py = ys[0] + yOff, held = false;          // the last point not yet emitted (inside a level run)
-  C.lineTo(pc, py);
-  for (let c = -1; c < VWP + 3; c += 2) {
-    const y = ys[c + 3] + yOff;
-    if (y === py) { held = true; pc = c; continue; }
-    if (held) { C.lineTo(pc, py); held = false; }
-    C.lineTo(c, y); pc = c; py = y;
-  }
-  if (held) C.lineTo(pc, py);
-}
-function fillAboveSurface(yOff, top) { surfacePath(yOff, top); C.fill(); }
 
 // the horizon's height over the sea (21 above the waterline); in OPEN WORLD (user Oct 25) the band of far water under
 // it gets thinner the closer you zoom in, so close up it stays a thin line along the coast
@@ -32300,7 +32103,7 @@ function renderObjects() {
   const yW = PY(WATER_Y);
   // deep water
   // (its colours by depth: down to the harbour's floor as they always were, then on into the dark of the deep sea,
-  // user Oct 24: twice as deep out in the middle, and darker at the bottom - waterDeep, every water's: 44-shadows-seafloor.js)
+  // user Oct 24: twice as deep out in the middle, and darker at the bottom - waterDeepGrad: 44-shadows-seafloor.js)
   // the deep water starts right at the moving surface, so nothing of the far sea shows beneath it
   const n = VWP + 6;
   if (ys.length < n) ys = ysPer[viewIdx] = new Int32Array(n * 2);
@@ -32439,7 +32242,6 @@ function renderObjects() {
   waterLineGPU(lw); C.fillStyle = lineCol; fsLast = lineCol;   // (the surface's line and the band under it - the one water shader; the fill style as the rectangles left it)
   // foam on lively ripples, and the whitecaps (the water shader - waterCrestsGPU)
   drawCrests(lw);
-  plFlush();
   // wake: a white band of churned foam lying on the surface behind each hull, breaking up as it ages
   drawWakeField(x0, x1, true);
   drawShipWash(x0, x1);
@@ -32895,10 +32697,6 @@ function drawSeaLife() {
 }
 // the sea's creatures' pictures into the atlas once they're made
 artFamily(() => { if (!img.fish || !img.shark || !img.whale) return false; for (const k in img.fish) artPut(img.fish[k].r); artPutAll(img.shark); artPutAll(img.whale); return true; });
-// Particles snap to a coarse grid and come in 2x2 (or 4x4) pixel blocks.
-// (b: the block's size - the view's, PBV, unless given)
-function blkPx(px, py, n = 1, b = PBV) { const s = b * n; C.fillRect(Math.floor(px / b) * b, Math.floor(py / b) * b, s, s); }
-function blk(wx, wy, n = 1) { blkPx(PX(wx), PY(wy), n); }
 /* (user Nov 8 16:33: "bombs don't seem to scale with the game? So when I zoom out and drop one from the plane its gigantic, almost the
    same size as the plane?? Everything should scale properly") A small thing drawn in blocks - a bomb, a missile, a shell's or a round's
    streak, a torpedo, a depth charge - is drawn as it always was from SMALL_SV in (its world size there); further out it shrinks with
@@ -32911,16 +32709,6 @@ const SMALL_SV = 1;
 const smallF = F => SV >= SMALL_SV ? F : Math.max(1, F * SV / SMALL_SV);
 const smallB = () => SV >= SMALL_SV ? PB : Math.max(1, Math.round(PB * SV / SMALL_SV));
 let PBV = PB;
-// a soft halo in many faint hard-edged rings: brightest in the middle, melting into the air
-function softGlow(cx, cy, R, col, a, rings = 6) {
-  rings = Math.max(rings, Math.min(18, Math.round(R / (PB * 4))));   // big halos get finer steps
-  const bx = Math.floor(cx / PB) * PB, by = Math.floor(cy / PB) * PB;   // the centre block, once (not once per row)
-  for (let k = rings; k >= 1; k--) {
-    const r = Math.max(PB, Math.round(R * k / rings / PB) * PB);
-    C.fillStyle = rgbs(col, a / rings * (1.3 - 0.5 * k / rings));
-    for (let j = -r; j < r; j += PB) { const w = Math.floor(Math.sqrt(r * r - (j + PB / 2) * (j + PB / 2)) / PB) * PB; C.fillRect(bx - w, by + j, w * 2, PB); }
-  }
-}
 // (fill: the colour to fill under the tiles with, down to the bottom of the view. The tiles follow the floor down
 // out to sea: each tile is drawn in upright strips, each strip as deep as the near floor at its column of the
 // screen, in whole particle blocks, so the sand steps down like the rest of the pixel art)
@@ -32963,7 +32751,6 @@ function drawAlgae0(x0, x1, lkOnly) {
   pxDraw(ALGAE_L, x0, x1);
   // (the fill style as the rectangles one by one left it: the last one's colour)
   if (ALGAE_L.last >= 0) fs1(ALG_PAL[ALGAE_L.last]);
-  if (!lkOnly) plFlush();
 }
 /* (Nov 1) THE WEED'S PIXEL LAYER (40-zzzz-layers.js): algae and kelp swaying in the current, the rocks among them
    (drawRock, in their turn - Nov 10: no kept picture of them, 44-zz-rock-layer.js gone) and the cut-off pieces, one draw a view - every rectangle worked out by the loops that
@@ -33119,10 +32906,10 @@ function seaDeepStops0(m, dz) {
 /* ---- EVERY WATER'S OWN LAYERS, ONE CODE (user Nov 7: "Lakes should use the SAME SYSTEM as the deep sea" - the lakes drawn by the sea's own code, so
    the two can never drift apart): the deep (its colours by depth and the clouds' shade over them) and the tint over what's in the water, each made
    here once and laid by whoever draws a water - the ocean in renderObjects (43-render-objects.js: down from its moving surface, on the GPU's
-   columns), a lake in drawLakeRoots (50-land-lake.js: its own shape, lifted to its own level). fill(style, shade): lays it; bn: a lake's biome,
+   columns), a lake's tint in drawLakeRoots (50-land-lake.js: its own shape, lifted to its own level - waterBodyTintGPU); bn: a lake's biome,
    its own water's colour over the tint (BIOME_LAKE) ---- */
 // (engine part 4: each gradient as data - its rows (user space, this view) and its stops [t, css] - for the water shader's ramps
-// (40-zz-water-gpu.js) and for a lake's lay here, the same numbers)
+// (40-zz-water-gpu.js))
 function waterDeepGrad() {
   const dz = (SEABED_Y + 150 - WATER_Y) / (SEABED_DEEP + 150 - WATER_Y);
   return { y0: PY(WATER_Y), y1: PY(SEABED_DEEP + 150), stops: seaDeepStops(E.sunset, dz).map(([t, c]) => [t, rgbs(c)]),   // (the table seaAt reads too)
@@ -33132,8 +32919,6 @@ function waterTintGrad(shallow) {
   const ov = 0.08 * E.storm, oz = (SEABED_Y + 150 - WATER_Y + 12) / (SEABED_DEEP + 150 - WATER_Y + 12);
   return { y0: PY(WATER_Y - 12), y1: PY(SEABED_DEEP + 150), stops: seaOverStops(E.sunset, ov, oz).map(([t, c]) => [t, rgbs(c.slice(0, 3), shallow ? c[3] * 0.3 : c[3])]) };
 }
-const waterGrad = D => { const g = C.createLinearGradient(0, D.y0, 0, D.y1); for (const [t, s] of D.stops) g.addColorStop(t, s); return g; };
-function waterDeep(fill) { const D = waterDeepGrad(); fill(waterGrad(D), D.shade); }
 // (a lake's biome's own water over the ocean's tint - the Biome Editor's LAKES tab: null when its biome has none)
 function waterLakeGrad(bn) {
   const lk = bn ? biomeLake(bn, 'k') : 0, mk = bn ? biomeLake(bn, 'murk') : 0;
@@ -33428,9 +33213,8 @@ function breakCoral(sp, cut, B, cutY, vx, cx, cy, kick) {
       const cw = Math.min(sp.width - x0, 5 + Math.floor(simR('seabed') * 5));
       let n = 0; for (let y = y0; y < y0 + ch; y++) for (let x = x0; x < x0 + cw; x++) if (src[(y * sp.width + x) * 4 + 3] > 0) n++;
       if (n >= 4 && !SIM_ONLY) {
-        const c = makeCanvas(cw, ch); c.getContext('2d').drawImage(sp, x0, y0 + cut, cw, ch, 0, 0, cw, ch);
         const px = B.left + (x0 + cw / 2) * B.k, py = B.top + (y0 + ch / 2) * B.k, dx = px - (cx ?? px), dy = py - (cy ?? py), d = Math.hypot(dx, dy) || 1;
-        chunks.addRow({ img: c, k: B.k, x: px, y: py, vx: vx * simRnd('seabed', 0.2, 0.5) + simRnd('seabed', -12, 12) + (kick ? dx / d * kick * simRnd('seabed', 0.5, 1) : 0),
+        chunks.addRow({ img: { pic: sp, r: [x0, y0 + cut, cw, ch], width: cw, height: ch }, k: B.k, x: px, y: py, vx: vx * simRnd('seabed', 0.2, 0.5) + simRnd('seabed', -12, 12) + (kick ? dx / d * kick * simRnd('seabed', 0.5, 1) : 0),
           vy: simRnd('seabed', -8, 4) + (kick ? Math.min(0, dy / d) * kick * simRnd('seabed', 0.5, 1) - kick * 0.3 : 0), a: 0, w: simRnd('seabed', -2.5, 2.5), delay: 0, uw: true, kind: 'coral',
           hh: ch / 2 * B.k, hw: cw / 2 * B.k });
         coralBits++;
@@ -33901,8 +33685,12 @@ function drawFlag(sh) {
   const dir = Math.abs(wa) < 2 ? -sh.facing : Math.sign(wa);
   drawWaveFlag(ax, ay, sh.id, dir, clamp(Math.abs(wa) / 45, 0, 1), 10);   // (the one waving flag - 50-land-airport.js)
 }
-// The forward guns elevate with the aim and kick back when they fire.
+// The forward guns elevate with the aim and kick back when they fire - by the things' pass (in the batch open, or one of its own), as the
+// tower's gun: the barrel in three greys along its elevation, the muzzle's ring
+const rgb01 = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
+const SHG = [['#1e2124', 1, 0], ['#8e8f86', 0.45, 0], ['#c9c8bc', 0.18, -0.18]].map(([c, w, o]) => [rgb01(c), w, o]), SHG_RING = rgb01('#1e2124');
 function drawGuns(sh) {
+  const own = thingsOwn(), M = thgCur(), blk = (wx, wy, ww, wh, c) => thingsQuad(M, PX(wx), PY(wy), Math.max(1, Math.round(ww * SV)), Math.max(1, Math.round(wh * SV)), null, THG_SOLID, c);
   const [ux, uy] = barrelDir(sh);
   const nx = -uy, ny = ux;
   for (let k = 0; k < 2; k++) {
@@ -33910,17 +33698,16 @@ function drawGuns(sh) {
     const [px, py] = turretPivot(sh, k);
     const back = sh.recoil[k] * 4;
     const steps = Math.ceil(BARREL_LEN * SV * 1.2);
-    for (const [col, wdt] of [['#1e2124', BARREL_W], ['#8e8f86', BARREL_W * 0.45], ['#c9c8bc', BARREL_W * 0.18]]) {
+    for (const [col, w, o] of SHG) {
+      const wdt = BARREL_W * w, off = BARREL_W * o;
       for (let i = 0; i <= steps; i++) {
         const t = -back + (BARREL_LEN + back * 0.2) * i / steps;
-        const off = col === '#c9c8bc' ? -BARREL_W * 0.18 : 0;
-        plRectW(col, px + ux * t + nx * off - wdt / 2, py + uy * t + ny * off - wdt / 2, wdt, wdt);
+        blk(px + ux * t + nx * off - wdt / 2, py + uy * t + ny * off - wdt / 2, wdt, wdt, col);
       }
     }
-    // muzzle ring
-    plRectW('#1e2124', px + ux * (BARREL_LEN - back) - BARREL_W * 0.65, py + uy * (BARREL_LEN - back) - BARREL_W * 0.65, BARREL_W * 1.3, BARREL_W * 1.3);
+    blk(px + ux * (BARREL_LEN - back) - BARREL_W * 0.65, py + uy * (BARREL_LEN - back) - BARREL_W * 0.65, BARREL_W * 1.3, BARREL_W * 1.3, SHG_RING);   // (muzzle ring)
   }
-  plFlush();
+  if (own) thingsEnd();
 }
 // ~15.6 world units long (20% smaller than the old rowboat), riding the waves
 const LB_K = 0.325 * REAL.life;
@@ -34087,7 +33874,6 @@ function drawTowerPiece(c) {
   thgTranslate(M, -(x1 - x0) * k / 2, -(y1 - y0) * k / 2);
   towerCellDraw(I.tw, M, k, I.win, [F.v[I.q], F.v[I.q + 1], F.h[I.r], F.h[I.r + 1]], I.q, I.r);
 }
-const rgb01 = h => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
 const TWG_LH = [['#1e2026', 1, 0], ['#4c505a', 0.62, 0], ['#8a8e98', 0.22, -0.16]].map(([c, w, o]) => [rgb01(c), w, o]), TWG = [['#26262c', 1, 0], ['#8c8986', 0.62, 0], ['#cbc5bb', 0.22, -0.16]].map(([c, w, o]) => [rgb01(c), w, o]);
 const TWG_BAND = rgb01('#4a484c'), TWG_STEEL = rgb01('#8c8986'), TWG_FLASH = rgb01('#fff3b0');
 // its gun by the things' pass (in the batch open, or one of its own): the barrel in three greys along its elevation, the muzzle's band, its flash
@@ -34120,9 +33906,7 @@ function drawTowerGun(tw) {
 function harbourClip(v) {
   if (!v || v.id === undefined || !inHarbour(v)) return false;
   const d = v.dock, X = PX(gateOf(v)[1]);
-  C.save(); C.beginPath();
-  if (d.dir > 0) C.rect(-SHX - 20, -SHY - 20, X + SHX + 20, bh + 40); else C.rect(X, -SHY - 20, VWP - X + SHX + 20, bh + 40);
-  C.clip();
+  C.save(); frameClip(C, d.dir > 0 ? [-SHX - 20, -SHY - 20, X + SHX + 20, bh + 40] : [X, -SHY - 20, VWP - X + SHX + 20, bh + 40]);   // (a part's own clip - src/gpu)
   return true;
 }
 // a harbour picture's world rectangle: columns c0..c1 and rows r0..r1 of a drawing (sea on its left) that
@@ -34219,11 +34003,7 @@ function drawChunk(k) {
   if (k.img.pier != null) { drawPierPiece(k); return; }   // (a piece of a pier: its picture as data - 50-zz-structh.js)
   if (k.img.pg) { drawPierGunPiece(k); return; }          // (the pier gun - 33-pier-gun.js)
   if (k.img.tw) { drawTowerPiece(k); return; }            // (a toppled tower's course - crumbleTower)
-  if (k.img.sh || k.img.pic) { partQuad(thgRotate(thgTranslate(thgCur(), PX(k.x), PY(k.y)), k.a || 0), k.img, k.k * SV, null, null, null); return; }   // (a part of a picture as data - a plane's torn-off wing (wingPiece), a yacht's rig)
-  const sp = scaled(k.img, k.k * SV, true);
-  C.save(); C.translate(PX(k.x), PY(k.y)); if (k.a) C.rotate(k.a);
-  C.drawImage(sp, -Math.round(sp.width / 2), -Math.round(sp.height / 2));
-  C.restore();
+  if (k.img.sh || k.img.pic) partQuad(thgRotate(thgTranslate(thgCur(), PX(k.x), PY(k.y)), k.a || 0), k.img, k.k * SV, null, null, null);   // (a part of a picture as data - a plane's torn-off wing (wingPiece), a yacht's rig, a coral's broken bit (breakCoral))
 }
 /* The submarine is drawn like the battleship: section by section, damaged ones from the holed drawing, and pitched by shearing whole
    pixel columns so the art stays crisp. (engine part 5) Drawn by the things' pass from the art atlas: her drawing - its big one, 04-zz-big-art.js
@@ -35563,7 +35343,7 @@ function shipCut(x0, x1, draw, box) {
   if (!cut || !cut.length) { draw(); return; }
   const main = C, lc = cutLayer();
   lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(X, Y, w, h);
-  lc.save(); lc.beginPath(); lc.rect(X, Y, w, h); lc.clip();          // (an upright box: a scissor - the cutters' quads paint only in it)
+  lc.save(); frameClip(lc, [X, Y, w, h]);                            // (an upright box: a part's own clip - the cutters' quads paint only in it)
   lc.setTransform(main.getTransform());
   C = lc; fsLast = null;
   try {
@@ -37237,7 +37017,6 @@ function renderFrame() {
   const T0 = performance.now();
   renderTick++; frameTick();
   SURF.on = true;
-  plSize();
   glBeginFrame();
   probeCalibrate();
   computeEnv();
@@ -37717,7 +37496,7 @@ function hangarClip(x, y, half) {
   const af = airfieldAt(x), dx = hangarDoorX(af), inn = (dx - x) * af.dir;
   if (inn < -half - 4 || inn > 520) return false;
   const sx = Math.round(PX(dx)), S = 1e5;
-  C.save(); C.beginPath(); C.rect(af.dir > 0 ? sx : sx - S, -S / 2, S, S); C.clip();
+  C.save(); frameClip(C, [af.dir > 0 ? sx : sx - S, -S / 2, S, S]);   // (a part's own clip - src/gpu)
   return true;
 }
 const termX = af => af.far + af.dir * 300;
@@ -39899,7 +39678,7 @@ function drawCivHelis(x0, x1, mode) {
       }
     }
     thingsQuad(Mb, X, Y, I.width, I.height, artPut(body), THG_BODY, null, dmgLook(body, lost ? 1 : Math.min(1, (h.dmg || 0) / CH_HP))[0], dmgMask(h, body, m, mx ? -1 : 1), dmgCell(body, m), dmgSeed(body), thingsLit(PX(h.x), civNightK()), null, 1, THG_SCALED, null, null, null, null, rk(body));
-    if (h.state === 'fly' && vi === 0) { thingsGL(); civGlint(-face * I.width * 0.28, Y + I.height * 0.4, h.x * 0.005 + h.tilt * 6 + h.kind, false); }
+    if (h.state === 'fly' && vi === 0) { sunGlint(-face * I.width * 0.28, Y + I.height * 0.4, h.x * 0.005 + h.tilt * 6 + h.kind, false); }
     { const L = cabinLit(), W0 = L > 0.05 && vi !== 2 && lv < 2 && !wet ? windowsGlass(body) : null, Wn = W0 && mx ? windowsKept(body, W0, keep) : W0; if (Wn) lightWin(Mb, X, Y, thgW(body, s), thgH(body, s), body, null, Wn, LW_COVER, CABIN_COL, L * C.s.ga, true); }   // (its cabin lit at night - its glass, data: the light pass)
     // the rotors
     if (h.state !== 'wreck' && h.state !== 'sink') {
@@ -40156,18 +39935,21 @@ function drawAirStreaks(x0, x1) {
    dark shape over the paint, the moon's cool sheen and a pale rim on the side facing it, a warm rim toward a low sun.
    Drawn by the things' pass (thingsLit, 45-zz-things-gpu.js); civNightK: how dark it goes (the boats' amount) */
 const civNightK = () => clamp(E.night * 1.1 + E.sunset * 0.3, 0, 0.92);
-// the sun high: now and then glass or bright metal catches it - a white flash with a little cross (as the fighter's
-// canopy). gx, gy on the screen; ph keeps each one on its own beat as it moves
-function civGlint(gx, gy, ph, big) {
-  const sunHigh = smoothstep(0.45, 0.85, E.sunAlt || 0) * (1 - 0.8 * E.overcast) * (1 - E.fog);
+// the sun high: now and then glass or bright metal catches it - a white flash with a little cross (every glint: the civilians', the
+// warplanes' canopies, the satellites' panels). gx, gy in the context's frame; ph keeps each one on its own beat as it moves; sunHigh: how
+// high and clear the sun is (the warplanes give theirs). By the things' pass, added to what's there ('lighter'): its own draw - what's
+// batched before it drawn first, the batch open after it goes on as it was
+const GLINT_C = [[255, 250, 225], [255, 255, 255]];
+function sunGlint(gx, gy, ph, big, sunHigh = smoothstep(0.45, 0.85, E.sunAlt || 0) * (1 - 0.8 * E.overcast) * (1 - E.fog)) {
   if (sunHigh < 0.03) return;
   const g = sunHigh * Math.pow(Math.max(0, Math.sin(ph)), 14);
   if (g < 0.03) return;
   const r = Math.max(1, Math.round(SV * 0.9)), L = Math.round((3 + (big ? 14 : 9) * g) * SV * 0.6);
-  C.save(); C.globalCompositeOperation = 'lighter';
-  C.fillStyle = `rgba(255,250,225,${(0.9 * g).toFixed(3)})`;
-  C.fillRect(Math.round(gx - L), Math.round(gy - r / 2), L * 2, r); C.fillRect(Math.round(gx - r / 2), Math.round(gy - L * 0.7), r, Math.round(L * 1.4));
-  C.fillStyle = `rgba(255,255,255,${g.toFixed(3)})`; C.fillRect(Math.round(gx - r), Math.round(gy - r), r * 2, r * 2);
+  thingsGL(); C.save(); C.globalCompositeOperation = 'lighter';
+  const own = thingsOwn(), m = thgCur();
+  thingsBlock(m, Math.round(gx - L), Math.round(gy - r / 2), L * 2, r, GLINT_C[0], 0.9 * g); thingsBlock(m, Math.round(gx - r / 2), Math.round(gy - L * 0.7), r, Math.round(L * 1.4), GLINT_C[0], 0.9 * g);
+  thingsBlock(m, Math.round(gx - r), Math.round(gy - r), r * 2, r * 2, GLINT_C[1], g);
+  if (own) thingsEnd(); else thingsGL();
   C.restore();
 }
 
@@ -40846,8 +40628,7 @@ function drawCivShip(c, x0, x1, cut) {
   C.restore();
   if (own) thingsEnd();
   if (cut) return;
-  if (linerOn(c) && c.lp) thingsGL();                               // (her ropes over her: what's batched so far drawn first)
-  drawLinerRigging(c, x0, x1); if (c.state === 'sail') shipNavLights(c, L);   // (her ropes; her navigation lights)
+  drawLinerRigging(c, x0, x1); if (c.state === 'sail') shipNavLights(c, L);   // (her ropes - the things' pass, after her; her navigation lights)
 }
 // the big ships' pictures into the art atlas (the frame's 'art' layer): each one's own (her windows worked out with it - data), the liner's pieces
 artFamily(() => {
@@ -41136,11 +40917,6 @@ function drawCoastWedges(x0, x1) {
     gbRect(L, T0, R - L, bh + SHY + 50 - T0, UG_RGB);           // (the ground's blocks - 50-land-zz-blocks.js)
   }
   gbFlush();
-}
-// a line lw wide as a filled quad (the renderer has no stroke)
-function thickLine(ax, ay, bx, by, lw) {
-  const L = Math.hypot(bx - ax, by - ay) || 1, nx = -(by - ay) / L * lw / 2, ny = (bx - ax) / L * lw / 2;
-  C.beginPath(); C.moveTo(ax + nx, ay + ny); C.lineTo(bx + nx, by + ny); C.lineTo(bx - nx, by - ny); C.lineTo(ax - nx, ay - ny); C.closePath(); C.fill();
 }
 
 /* ================================================================
@@ -44916,7 +44692,7 @@ function drawLakeRoots(x0, x1, part) {
   const step = Math.max(1, 2 / SV);
   // (user Nov 8 16:20-17:18, stacked water) every body of the land's water as the cells hold it (wcBodies - 50-land-water): a lake, a cave's pool under a
   // crust or under a crater's puddle - each one shape, drawn as the sea is from its own level; the ground in front covers its rock
-  if (typeof wcBodies === 'function') for (const P of wcBodies(x0 - 8, x1 + 8)) { if (!wcInView(P) || wcSeaBody(P)) continue; const top = P.cols.filter(q => q[3]), lv = top.length ? top.reduce((s, q) => s + q[1], 0) / top.length : P.lv; lakeWaterIn(P.a, P.b, lv, [wcBodyPoly(P)], part, (P.a + P.b) / 2, true, true, !top.length); }   // (no open column: a pool under a crust - bare)
+  if (typeof wcBodies === 'function') for (const P of wcBodies(x0 - 8, x1 + 8)) { if (!wcInView(P) || wcSeaBody(P)) continue; const top = P.cols.filter(q => q[3]), lv = top.length ? top.reduce((s, q) => s + q[1], 0) / top.length : P.lv; lakeWaterIn(P.a, P.b, lv, [wcBodyPoly(P)], part, (P.a + P.b) / 2, true, !top.length); }   // (no open column: a pool under a crust - bare)
 }
 // (Nov 8, one cave world) a sea cave's water - the cells' under the sea's floor (wcBodies, the sea's own columns): in the sea's pass, over the land's back
 // wall there (drawLandBackSea), as a lake's - the sea's look from its own level, its tint over it
@@ -44933,7 +44709,7 @@ function drawSeaCaveWater(x0, x1) {
   let a = Infinity, b = -Infinity; for (const P of L) { a = Math.min(a, P.a); b = Math.max(b, P.b); }
   // (the sea's water, seen at its depth: from the sea's own level - its tint only, the cave's wall and stalactites seen through it, as a lake's bed: user Nov 8 21:51,
   // "no BG, no stalactites, no transparency")
-  lakeWaterIn(a, b, WATER_Y, L.map(wcBodyPoly), undefined, (Math.max(a, x0) + Math.min(b, x1)) / 2, true, false);
+  lakeWaterIn(a, b, WATER_Y, L.map(wcBodyPoly), undefined, (Math.max(a, x0) + Math.min(b, x1)) / 2, false);
   waterPoolLinesGPU(L.map(P => wcPoolCells(P, true)));          // (each pocket's surface line: the water shader, one draw - 40-zz-water-gpu.js)
 }
 // a body's outline on the screen, from the water's cells' runs (wcBodies - each column [x, top, floor, its top water open]): along its tops (an open
@@ -44963,23 +44739,22 @@ function wcBodyOutline(P, sv) {
   return { sv, a: a.slice(0, na), aw: aw.slice(0, na >> 1), b: b.slice(0, nb) };
 }
 // outlines as the canvas' clip path (what's drawn in the water that isn't the water's shader yet: its life, bed, plants, rays, rocks)
-// one water's look in its outlines (polys - wcBodyPoly): the sea's own - its deep, decks, rays ('under'); its island roots, life, bed, tint ('over') - from its own level
-function lakeWaterIn(a, b, lv, polys, part, mx, noDecks, shallow = noDecks, bare = noDecks && !shallow) {   // (bare: water under the ground - a sea cave, a pool under a crust: its tint and nothing of the open floor's)   // (shallow: the ocean's tint at a lake's share - a sea cave's is the ocean's own at its depth, user Nov 8 21:53: "deep blue water")
+// one water's look in its outlines (polys - wcBodyPoly): the sea's rays ('under'); its life, bed, tint ('over') - from its own level. Not the sea's deep or
+// its decks: a lake's own bowl is behind it, seen through its tint (user Nov 8 20:17, his picture); a sea cave's is its tint alone
+function lakeWaterIn(a, b, lv, polys, part, mx, shallow, bare = !shallow) {   // (bare: water under the ground - a sea cave, a pool under a crust: its tint and nothing of the open floor's)   // (shallow: the ocean's tint at a lake's share - a sea cave's is the ocean's own at its depth, user Nov 8 21:53: "deep blue water")
     // (user Nov 3 13:28: "All the bodies of water should have the exact same rendering like the main ocean has, independent of their
     // height") the ocean's own water - its deep colours, depth decks, light rays and tint (renderObjects, 43-render-objects) - drawn
     // in this water, lifted (or lowered) by how far its surface is from the ocean's: the same drawing, from its own surface
     const dl = lv - WATER_Y, dy = Math.round(dl * SV), cave = bare;   // (cave: a sea cave's - under the floor, none of the open floor's things can be in it: Nov 8, battle-caves chat)
     C.save(); waterClipPolys(polys);                     // (its outlines as the clip: the water shader's coverage - frameClipBy)
     try {
-      const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12)), B = bh + SHY + 50 + Math.abs(dy), lay = st => { C.fillStyle = st; C.fillRect(X0, Y, X1 - X0, B - Y); };
+      const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12)), B = bh + SHY + 50 + Math.abs(dy);
       if (part !== 'over') { C.save(); C.translate(0, dy); UW_LIFT = dl;
-      if (!noDecks) waterDeep((deep, sh) => { lay(deep); if (sh) lay(sh); });   // (the sea's own deep - 44-shadows-seafloor.js; a lake: none - its own bowl is behind it, seen through its tint: user Nov 8 20:17, his picture)
-      if (!noDecks) drawSeaDecks(bh - SHY + 2 - dy);         // (down to the view's bottom, wherever this water's surface is - the sea's deep only: a lake's bed is its own bowl behind it, bowlCol)
       if (!cave) drawRays(false, true, polys, dy);           // (the sea's rays, their fade as the sea's pass left it this frame - kept in this water's outlines by the shader)
       C.restore(); UW_LIFT = 0; }
       if (part === 'under') return;
       if (!cave) drawSeaLife();                           // (a pool or cave under the ground: none - zoomed out every one of them drew all the fish, 48 times a frame)
-      if (!cave) { const b0 = BATCH; BATCH = false; try { drawReefItems(reef, a, b, true); drawAlgae(a, b, true); drawUwPlants(a, b, true); } finally { BATCH = b0; } }   // (and the UNDERWATER DECKS' plants on its bed - drawUwPlants)
+      if (!cave) { drawReefItems(reef, a, b, true); drawAlgae(a, b, true); drawUwPlants(a, b, true); }   // (and the UNDERWATER DECKS' plants on its bed - drawUwPlants)
       waterBodyTintGPU(polys, dy, X0, X1, Y, B, colBiome(clamp(ltCol(mx), 0, land.cols - 1)), !!shallow);   // (the sea's own tint, and its biome's own water over it - the water shader, inside the outlines, lifted to this water's level: 40-zz-water-gpu.js)
       if (!cave && land.lkRocks) drawRockForms(a, b, true);           // (its rock formations: over the water's tint, behind the ground in front - as the sea's, renderObjects)
     } finally { C.restore(); }
@@ -45546,11 +45321,11 @@ function drawLinerPieces(c, ox, oy, s, W, M, cut, lit) {
     thingsQuad(Mf, c.face > 0 ? X : -(X + w), Y, w, h, artPut(im), THG_BODY, null, 0, null, 0, 0, lit, null, 1, THG_SCALED, null, q);   // (moon and sun rims, as everything)
   }
 }
-// her ropes and the pieces off her (after her, in the world's own frame)
+// her ropes (after her, in the world's own frame): every rope's line (drawRopeLine, 50-land-magnet.js - the things' pass's blocks), near black
+const LINER_ROPE = [24, 24, 28];
 function drawLinerRigging(c, x0, x1) {
   if (!linerOn(c) || !c.lp) return;
-  C.fillStyle = 'rgba(24,24,28,0.95)';
-  const w = Math.max(1, SV * 0.55);
+  const ga = C.globalAlpha; C.globalAlpha = ga * 0.95;
   // (Oct 31, tools/space2p.mjs: with the simulation worker her ropes swing there - civShips' snapshot skips them, as her save
   // does - and this page's copy of her has none: drawn from where each is made fast, hanging a little, as they are made; one
   // stretched past its length by a piece torn off is parted. A draw error every frame she was on screen before)
@@ -45558,12 +45333,13 @@ function drawLinerRigging(c, x0, x1) {
     for (const rp of LPI.ropes) {
       const [ax, ay] = linerPoint(c, rp.pa, ...rp.a), [bx, by] = linerPoint(c, rp.pb, ...rp.b);
       if (offView(Math.min(ax, bx), Math.max(ax, bx), x0, x1) || Math.hypot(bx - ax, by - ay) > rp.len * CIV[c.kind].k * 1.2) continue;
-      let px = ax, py = ay;
-      for (let i = 1; i <= 8; i++) { const u = i / 8, x = ax + (bx - ax) * u, y = ay + (by - ay) * u + Math.sin(u * Math.PI) * 2; thickLine(PX(px), PY(py), PX(x), PY(y), w); px = x; py = y; }
+      drawRopeLine(Array.from({ length: 9 }, (_, i) => { const u = i / 8; return [ax + (bx - ax) * u, ay + (by - ay) * u + Math.sin(u * Math.PI) * 2]; }), LINER_ROPE, 0.55);
     }
-    return;
+  } else for (const R of c.lp.ropes) {
+    const N = R.N; let a = N[0][0], b = a; for (const q of N) { if (q[0] < a) a = q[0]; if (q[0] > b) b = q[0]; }
+    if (!offView(a, b, x0, x1)) drawRopeLine(N, LINER_ROPE, 0.55);
   }
-  for (const R of c.lp.ropes) for (let i = 0; i < R.N.length - 1; i++) { const p = R.N[i], q = R.N[i + 1]; if (offView(Math.min(p[0], q[0]), Math.max(p[0], q[0]), x0, x1)) continue; thickLine(PX(p[0]), PY(p[1]), PX(q[0]), PY(q[1]), w); }
+  C.globalAlpha = ga;
 }
 // (each its own picture, mirrored as she faced - the things' pass, no flipped copy)
 function drawLinerLoose(x0, x1) {
@@ -48475,7 +48251,7 @@ function drawSeaplanes(x0, x1, mode) {
     if (Wn) rlWinLit(M, fr, sc, Wn, L, true); }
     C.restore();
     if (s.state === 'fly' && fi === 0) {
-      thingsGL(); const G = SEA_SPOT.glint; civGlint(PX(s.x - d * G[0] * k), PY(s.y + G[1] * k - fbU), s.x * 0.005 + s.ang * 5 + s.col, false); }
+      const G = SEA_SPOT.glint; sunGlint(PX(s.x - d * G[0] * k), PY(s.y + G[1] * k - fbU), s.x * 0.005 + s.ang * 5 + s.col, false); }
   }
   if (own) thingsEnd();
 }
@@ -49509,7 +49285,7 @@ function drawSpace(x0, x1, pass) {
     { const M = thgCur(), X = -Math.round(sw / 2); if (mx) thgScale(thgTranslate(M, 2 * X + sw, 0), -1, 1);
       thingsQuad(M, X, -Math.round(sh / 2), sw, sh, artPut(I), THG_BODY, null, dmgLook(I, f)[0], null, dmgCell(I, k / UPM), dmgSeed(I), thingsLit(PX(o.x), clamp(E.night * 0.9, 0, 0.85)), null, 1, THG_SCALED); }
     C.restore();
-    thingsGL(); civGlint(PX(o.x + (o.kind === 'iss' ? 28 * REAL.iss : 14 * REAL.sat) * Math.sin(time * 0.2 + o.ph)), PY(o.y - 2 * (o.kind === 'iss' ? REAL.iss : REAL.sat)), time * 0.9 + o.ph * 3, true);   // (the sun flashing off its panels)
+    sunGlint(PX(o.x + (o.kind === 'iss' ? 28 * REAL.iss : 14 * REAL.sat) * Math.sin(time * 0.2 + o.ph)), PY(o.y - 2 * (o.kind === 'iss' ? REAL.iss : REAL.sat)), time * 0.9 + o.ph * 3, true);   // (the sun flashing off its panels)
     if (o.state === 'orbit') planeLights(o.x, o.y, o.face, o.kind === 'iss' ? 46 * REAL.iss : 18 * REAL.sat, 0, 3 * (o.kind === 'iss' ? REAL.iss : REAL.sat), o.kind === 'iss', o.ph, (o.a || 0) + (o.tilt || 0));
   }
   if (own) thingsEnd();
@@ -51061,7 +50837,7 @@ function drawLandBg(near) {
   if (!land.bg) buildLandBg();
   // (user Nov 8 20:05: "the mountain should end where the terrain ends. And the ocean touches the end of the terrain") the far land only over the land you
   // see - its coasts the ground's own on the screen, as the far water's are (clipRegion): the two meet there
-  C.save(); C.beginPath(); for (let i = 0; i < LANDS.n; i++) { const a = Math.floor(PX(Math.max(LANDS.c.lo[i], ENDLESS ? 0 : -1e6))), b = Math.ceil(PX(Math.min(LANDS.c.hi[i], ENDLESS ? WORLD_W : 1e6))); if (b > a) C.rect(a, -1e5, b - a, 2e5); } C.clip();
+  C.save(); { const R = []; for (let i = 0; i < LANDS.n; i++) { const a = Math.floor(PX(Math.max(LANDS.c.lo[i], ENDLESS ? 0 : -1e6))), b = Math.ceil(PX(Math.min(LANDS.c.hi[i], ENDLESS ? WORLD_W : 1e6))); if (b > a) R.push(a, -1e5, b - a, 2e5); } frameClip(C, R); }   // (a part's own clip - src/gpu)
   try { for (const [bn, cols] of BG_COLS) if ((cols === false || cols === true || bgAny(cols)) && farLayers(bn).length) drawLandBg0(near, cols, bn); gsFlush(); } finally { GS.n = 0; C.restore(); }   // (the ground's sprites pass - 50-land-zz-sprites.js - inside this clip)
 }
 // the share of the ground over [x - B, x + B] that has the desert's look (desert) or the forest's - the sea's stretch and
@@ -51742,7 +51518,7 @@ function drawTraffic(x0, x1, mode) {
     if (f.kind === 'jet' && !hc && !wet) { const Lc = cabinLit(), Wn = Lc > 0.05 ? trafficWin(f, CP) : null; if (Wn) rlWinLit(thgCur(), fr, s, Wn, Lc, false); }
     { const Lc = cabinLit(), Wn = Lc > 0.05 && f.kind !== 'jet' && !wet ? trafficWin(f, CP) : null; if (Wn) rlWinLit(thgCur(), fr, s, Wn, Lc, true); }   // (the cabins lit at night)
     // (its glass catching the sun: the windscreen marked on its side view - only on its side views, where that spot is)
-    if ((f.state === 'fly' || f.state === 'free') && CP.side0) { thingsGL(); const G = (f.kind === 'jet' ? JET_SPOT : CES_SPOT).glint; civGlint(-CP.dir * G[0] * s, G[1] * s, f.x * 0.004 + f.ang * 5 + (f.col || 0) * 2, f.kind === 'jet'); }
+    if ((f.state === 'fly' || f.state === 'free') && CP.side0) { const G = (f.kind === 'jet' ? JET_SPOT : CES_SPOT).glint; sunGlint(-CP.dir * G[0] * s, G[1] * s, f.x * 0.004 + f.ang * 5 + (f.col || 0) * 2, f.kind === 'jet'); }
     thingsGL(); C.restore();
     if (hc) C.restore();
   }
@@ -54368,9 +54144,7 @@ function renderLandObjects0() {
   drawSpikeBursts(x0, x1);
   if (!edTiny(0.3 * UPM)) drawEarthGrains(x0, x1); lt('fx');
   // what's in the air over the land, drawn again over it (the sea's pass drew it first, under the ground)
-  C.save(); C.beginPath();
-  for (const [a, b] of spans) C.rect(Math.floor(PX(a)), -SHY - 50, Math.ceil(PX(b) - PX(a)) + 1, bh + 100);
-  C.clip();
+  C.save(); spansClip(spans);
   drawFire(x0, x1, true);
   drawPlanes(x0, x1);
   guardDraw('drawBalloons', () => drawBalloons(x0, x1, 'air'));
@@ -54388,13 +54162,18 @@ function renderLandObjects0() {
   C.restore();
 }
 
+// the context's clip to the view's columns over stretches S ([a, b] world x each), top to bottom - a part's own clip (frameClip, src/gpu: the
+// union of its rectangles), whole pixels edge to edge
+function spansClip(S) {
+  const R = [];
+  for (const [a, b] of S) R.push(Math.floor(PX(a)), -SHY - 50, Math.ceil(PX(b) - PX(a)) + 1, bh + 100);
+  frameClip(C, R);
+}
 // draw fn() over the lakes only (the stretches of this view where there's a lake)
 function lakeClip(x0, x1, fn) {
   const L = (land.lakes || []).filter(l => l[1] > x0 && l[0] < x1);
   if (!L.length) return;
-  C.save(); C.beginPath();
-  for (const l of L) C.rect(Math.floor(PX(l[0])), -SHY - 50, Math.ceil(PX(l[1]) - PX(l[0])) + 1, bh + 100);
-  C.clip(); fn(); C.restore();
+  C.save(); spansClip(L); fn(); C.restore();
 }
 
 // a tank or helicopter gone off its own end of the world: home, mended and rearmed (its captain ashore again); the
@@ -61352,7 +61131,7 @@ function fishGulls(j) {
 function drawStoryNet(j, h) {
   const N = j.net;
   thingsGL();   // (her own picture, waiting in the boats' batch, drawn first: the net, its fish and its gulls go over her)
-  if (N && N.P && N.ck && N.ck.length) { const cy = netClipY(j); if (cy < 1e12) { C.save(); C.beginPath(); C.rect(-1e5, -1e5, 2e5, cy + 1e5); C.clip(); } drawNetFish(N); if (cy < 1e12) C.restore(); }   // (under the mesh: inside the bag)
+  if (N && N.P && N.ck && N.ck.length) { const cy = netClipY(j); if (cy < 1e12) { C.save(); frameClip(C, [-1e5, -1e5, 2e5, cy + 1e5]); } drawNetFish(N); if (cy < 1e12) C.restore(); }   // (under the mesh: inside the bag)
   if (N && N.P) { NET_DRAW = j; pxDraw(NET_L, -1e12, 1e12); NET_DRAW = null; }   // (in front of her)
   // gulls round her while she has fish in the net, at the size of every gull in the game (37-birds.js: user 10:29, "The seagulls
   // look gigantic ... They should be smaller like other birds"); stopped, they come down and sit on her - the bow, the wheelhouse
@@ -69491,7 +69270,6 @@ function frameBody(now) {
   const t3 = performance.now();
   perf.phys += (t1 - t0 - perf.phys) * 0.05; perf.smoke += (t2 - t1 - perf.smoke) * 0.05; perf.render += (t3 - t2 - perf.render) * 0.05;
   govern(t3 - t0, dt * 1000); perf.fx = FX;
-  abTrialTick(dt);
   // (the next frame was already asked for at the top of frame())
 }
 
@@ -69523,8 +69301,6 @@ async function start(data) {
   requestAnimationFrame(() => requestAnimationFrame(bootCoverOff));   // (the page's LOADING screen off once the title has drawn - 00-sw-boot.js)
   PAGE_UP = true;                                   // (a NEW GAME pressed in the other world goes on from here - worldResume, 00-world.js)
   if (data && data.ships && data.ships.length) worldNow(data);
-  try { const q = new URLSearchParams(location.search).get('mode'); if (q === '0' || q === '1' || q === '2') { setMode(+q); BATCH_AUTO = false; } } catch (e) {}
-  if (GLR.on) { setMode(0); BATCH_AUTO = false; } else if (!SW_IN_WORKER) runFillTest();
   window.addEventListener('resize', () => resize());
   if (window.visualViewport) { window.visualViewport.addEventListener('resize', () => resize()); window.visualViewport.addEventListener('scroll', () => resize()); }
   window.addEventListener('scroll', () => { if (window.scrollY || window.scrollX) resize(); }, { passive: true });
@@ -69539,7 +69315,7 @@ async function start(data) {
     setOrder: (p, i) => setOrder(telegraphs[p], i), fire: p => fireGun(ships[p]), shipMG: p => shipMG(ships[p]), tower: (p, mg) => fireTower(towers[p], mg),
     damage: (p, i, d) => damageSection(ships[p], i, d), kill: p => killGuy(p),
     get layout() { return { bw, bh, PIXW, ubw, ubh, PIXU, dpr }; },
-    scope: p => scopes[p], tg: p => telegraphs[p], perf, FT, probe, probeStart, fillTest, runFillTest, get batch() { return getMode(); }, get gl() { return GLR.on; }, glStats: () => GLR.shown, renderN: n => { for (let i = 0; i < n; i++) render(); glEndFrame(); }, GLR, gpuHudShot: async () => { const H = FRAME.hud; return H && H.T.tex && H.T.tex.t ? gpuReadNow(H.T.tex.t, 0, 0, H.T.tex.t.w, H.T.tex.t.h) : null; }, gpuIdle: () => GPU.dev ? GPU.dev.queue.onSubmittedWorkDone() : Promise.resolve(), gpuShot: async () => { glFlush(); const S = GLX.screen; return S ? gpuReadNow(S.c, 0, 0, S.w, S.h) : null; }, gpu: () => ({ on: GPU.on, ep: GPU.ep, lost: GPU.lost, why: GPU.why, feat: Object.keys(GPU.feat), stats: GPU.stats, mem: GPU_MEM, gpuMs: FR.gpuMs, passes: FR.passMs.length, err: GPU.err.slice(0, 10), nerr: GPU.nerr, boot: GPU.bootMs }), set batch(v) { setMode(v === true ? 2 : v === false ? 0 : v); BATCH_AUTO = false; }, get paused() { return paused; }, set paused(v) { paused = v; }, set hold(v) { holdFrames = v; }, stepFixed: (dt, n) => { const was = paused; paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } paused = true; return was; },
+    scope: p => scopes[p], tg: p => telegraphs[p], perf, FT, probe, probeStart, get gl() { return GLR.on; }, glStats: () => GLR.shown, renderN: n => { for (let i = 0; i < n; i++) render(); glEndFrame(); }, GLR, gpuHudShot: async () => { const H = FRAME.hud; return H && H.T.tex && H.T.tex.t ? gpuReadNow(H.T.tex.t, 0, 0, H.T.tex.t.w, H.T.tex.t.h) : null; }, gpuIdle: () => GPU.dev ? GPU.dev.queue.onSubmittedWorkDone() : Promise.resolve(), gpuShot: async () => { glFlush(); const S = GLX.screen; return S ? gpuReadNow(S.c, 0, 0, S.w, S.h) : null; }, gpu: () => ({ on: GPU.on, ep: GPU.ep, lost: GPU.lost, why: GPU.why, feat: Object.keys(GPU.feat), stats: GPU.stats, mem: GPU_MEM, gpuMs: FR.gpuMs, passes: FR.passMs.length, err: GPU.err.slice(0, 10), nerr: GPU.nerr, boot: GPU.bootMs }), set batch(v) { setMode(v === true ? 2 : v === false ? 0 : v); BATCH_AUTO = false; }, get paused() { return paused; }, set paused(v) { paused = v; }, set hold(v) { holdFrames = v; }, stepFixed: (dt, n) => { const was = paused; paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } paused = true; return was; },
     stepQuiet: (dt, n) => { NO_DRAW = true; try { paused = false; for (let i = 0; i < n; i++) { last = 1000; frameBody(1000 + dt * 1000); } } finally { paused = true; NO_DRAW = false; } },   // (stepFixed without drawing each step: tools/smokebench.mjs)
     smokeKit: { spawnSmoke: (x, y, o) => spawnSmoke(x, y, o), smStream: (o, k) => smStream(o, k), get SV() { return SV; }, get SMOKE_COLS() { return SMOKE_COLS; } },
     planeGround: x => planeGroundY(x),   // (Nov 1: where a plane can be on its wheels - 29-plane.js)
