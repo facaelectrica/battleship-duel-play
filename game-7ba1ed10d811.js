@@ -7908,8 +7908,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 977;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 11 12:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 978;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 11 12:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13150,7 +13150,7 @@ function drawSubLights(x0, x1) {
   for (const sb of subs) {
     if (!subLightOn(sb) || sb.x < x0 - SUB_L || sb.x > x1 + SUB_L) continue;
     const [tx, ty] = subArtPt(sb, ...SUB_TAIL_AT), k = subLampK(sb);
-    if ((time + sb.id * 0.37) % 1.0 < 0.32 && k > 0.02) planeLamps[viewIdx].push(PX(tx), PY(ty), clamp(0.7 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1) * k);
+    if ((time + sb.id * 0.37) % 1.0 < 0.32 && k > 0.02) tailLamp(PX(tx), PY(ty), clamp(0.7 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1) * k);
   }
   // (every lamp's beam glowing in the water or the air, and the exploration sub's spot: the light pass's glow rows - 47-zz-light-pass.js)
 }
@@ -14963,7 +14963,7 @@ function drawPlanesAir(x0, x1) {
       const lampA = clamp(E.night * 1.2 + E.sunset * 1.2 + E.dusk * 0.6, 0, 1);
       if (lampA > 0.05 && ((time + pl.lampPh) % 1.0) < 0.32) {
         const [lx, ly] = planeSpot(pl, P, wpKind(pl).lamp[0], wpKind(pl).lamp[1]);
-        planeLamps[viewIdx].push(lx, ly, lampA);
+        tailLamp(lx, ly, lampA);
       }
       wpLights(pl, P);                                          // (its navigation light - 29-zzzz-aircraft-lights.js)
     }
@@ -15710,7 +15710,7 @@ const acLampA = () => clamp(E.lampsOn || 0, 0, 1);
 // its navigation light at a screen point, facing dir
 function acNav(sx, sy, dir, k = 1) {
   const on = acLampA() * k; if (on < 0.05) return;
-  airLamps[viewIdx].push(sx, sy, 0.9 * on, dir > 0 ? 3 : 1);
+  airLamp(sx, sy, 0.9 * on, dir > 0 ? 3 : 1);
 }
 // a warplane flying level: its navigation light (drawPlanesAir)
 function wpLights(pl, P) {
@@ -32086,7 +32086,9 @@ function clipRegion(L) {
   frameClip(C, r);
 }
 const cloudSpans = [[], []], planeLamps = [[], []];
-// (the planes' blinking red tail lamps: the light pass's tail lamp rows - 47-zz-light-pass.js)
+// (the planes' blinking red tail lamps: the light pass's tail lamp rows - 47-zz-light-pass.js; four numbers a lamp - x, y, strength, its thing's
+// order as airLamp's, 50-land-airport.js)
+const tailLamp = (x, y, a, ord = 0) => { planeLamps[viewIdx].push(x, y, a, ord); };
 const shootingStars = [{ s: null, next: 0 }, { s: null, next: 0 }];
 // The far sea in the clouds' shade: darker the heavier the cover, and under each big cloud a darker patch,
 // broken into rows that narrow toward the horizon (the sea seen in perspective)
@@ -33984,10 +33986,11 @@ function towerMask(tw, P, G) {
 const desertRules = (x, P, R) => desertSide(x) ? thingsRules({ rect: R || [0, 0, P.width, P.height], paint: { desert: true } }) : 0;
 const TW_MARK = [[0x1a / 255, 0x17 / 255, 0x14 / 255], [0x3a / 255, 0x33 / 255, 0x2c / 255]];
 // a tower drawn by the things' pass (in the batch open, or one of its own): its stump once it's down; the lighthouse; else its gun behind,
-// its damage frame with its burns and the desert's tone, its lamp, its machine gun on top and its pock marks
+// its damage frame with its burns and the desert's tone, its lamp, its machine gun on top and its pock marks; its number in what's in front
+// marked as all of it is drawn (thgOrderMark - its lamp's halo and its beacon hidden by what's drawn after it, 47-zz-light-pass.js)
 function drawTower(tw) {
   const own = thingsOwn();
-  try { drawTower0(tw); } finally { if (own) thingsEnd(); }
+  try { drawTower0(tw); thgOrderMark(tw); } finally { if (own) thingsEnd(); }
 }
 function drawTower0(tw) {
   const s = TW.K * SV, M = thgCur();
@@ -34228,7 +34231,7 @@ function drawSub(sb) {
   subHull(sb, thgCur(), s, face, Math.tan(sb.a), cx - pivX, cy - wlY);
   const M = thgCur();                                          // (the sea's white on her, over her: blocks after her in her batch)
   // (her lamps at night, user Oct 25 late: every vehicle lit - a white light on top of her sail, out of the water)
-  if (LAND && E.lampsOn > 0.05 && !wreck && sb.state === 'out' && vehManned(sb) && sb.y < waterLv(sb.x) + 30) airLamps[viewIdx].push(cx + sb.facing * W * 0.06, cy - wlY + 3 * s, E.lampsOn, 0);
+  if (LAND && E.lampsOn > 0.05 && !wreck && sb.state === 'out' && vehManned(sb) && sb.y < waterLv(sb.x) + 30) airLamp(cx + sb.facing * W * 0.06, cy - wlY + 3 * s, E.lampsOn, 0);
   // breaking the surface: the sea sheets off her in white, covering the hull just above the water and
   // draining down as she rises clear (pixels follow her exact outline)
   if (sb.emerge > 0 && (sb.state === 'out' || sb.state === 'docked')) {
@@ -34834,7 +34837,8 @@ fn shade(v: VO) -> vec4f {
   let a = inst[v.i];
   let q = vec2f(v.p.x, D.y - v.p.y);
   // (a thing drawn again over what came after it in the world - thingsCut: od.yz its numbers in the order layer, (from, to] - only where one of them
-  // is in front, its own pixels; od.w 1: only above the water's surface - a pixel whose middle is over its column's row)
+  // is in front, its own pixels; from -1: anywhere nothing after to is in front - a thing's light, thingsBehind; od.w 1: only above the water's
+  // surface - a pixel whose middle is over its column's row)
   if (a.od.z > 0.0 && D.ord > 0.5) { let n = ordAt(q); if (n <= a.od.y || n > a.od.z) { discard; } }
   if (a.od.w > 0.5 && D.ns > 0.5) { let c = clamp(i32(floor(q.x - D.ox)) + 3, 0, i32(D.ns) - 1); if (floor(q.y - D.oy) >= surfL[c].x) { discard; } }
   // (a structure's mask: hidden inside its building's walls unless seen through its door)
@@ -34928,7 +34932,7 @@ fn shade(v: VO) -> vec4f {
 @fragment fn fsW(v: VO) -> WO { let c = shade(v); var w: WO; w.c = c; w.o = ordPx(inst[v.i].od.x, c); return w; }`;
 const THG = { stale: false, ep: -1, mod: null, bl: null, pl: null, pipes: new Map(), f: new Float32Array(60 * 64), n: 0, pv: new Float32Array(8 * 256), pn: 0, seg: [], ctx: null, m0: [1, 0, 0, 1, 0, 0], stats: { draws: 0, quads: 0 },
   ord: null, ordCtx: null, ordFrame: -1, seq: 0, lord: [new Map(), new Map()], lfrom: [new Map(), new Map()],   // (the order layer - what's in front: its texture, the world's context while it's drawn, its frame, the last number given, the things' own numbers a view - their last, the one before their first)
-  cut: [0, 0, 0], cutS: false, ord1: null, none: null };   // (thingsCut's: the quads put now drawn only on these numbers / above the surface; the batch has a surface cut; the stand-ins)
+  cut: [0, 0, 0], cutS: false, behind: 0, ord1: null, none: null };   // (thingsCut's: the quads put now drawn only on these numbers / above the surface; the batch has a surface cut; thingsBehind's; the stand-ins)
 const THG_REC = 60;   // (floats an instance: fifteen vec4s - I in the shader)
 // the context's composite operations as blend factors, premultiplied (the GL front's own table, 40-gl.js GLB): [colour src, dst, alpha src, dst]
 const THG_OPS = {
@@ -35019,7 +35023,8 @@ function thingsQuad(m, x, y, w, h, e, kind, mul, cov, mk, cell, seed, lit, clip,
   if (prof) { f[o + 48] = prof[0]; f[o + 49] = prof[1]; f[o + 50] = prof[2]; } else f[o + 48] = f[o + 49] = f[o + 50] = 0;
   f[o + 51] = rules || 0;
   if (sr) { f[o + 52] = sr[0]; f[o + 53] = sr[1]; f[o + 54] = sr[2]; f[o + 55] = sr[3]; } else f[o + 52] = f[o + 53] = f[o + 54] = f[o + 55] = 0;
-  f[o + 56] = THG.ctx === THG.ordCtx ? ++THG.seq : 0; f[o + 57] = THG.cut[0]; f[o + 58] = THG.cut[1]; f[o + 59] = THG.cut[2];   // (its number in the order layer - drawing the world; thingsCut's)
+  const bh = THG.behind > 0 && !(THG.cut[1] > 0);   // (a thing's light after the dark - thingsBehind: any number up to its thing's)
+  f[o + 56] = THG.ctx === THG.ordCtx ? ++THG.seq : 0; f[o + 57] = bh ? -1 : THG.cut[0]; f[o + 58] = bh ? THG.behind : THG.cut[1]; f[o + 59] = THG.cut[2];   // (its number in the order layer - drawing the world; thingsCut's)
 }
 /* A THING DRAWN AGAIN OVER WHAT CAME AFTER IT (the moon's light on the boats, the yachts over the smoke - drawMoonlight, drawSailsOver): the quads put
    in the open batch from now on drawn only where the world's drawing left one of span's numbers in front ([from, to] - thgOrderSpan: the thing's own
@@ -35029,6 +35034,10 @@ function thingsCut(span, above) {
   const c = THG.cut; c[0] = span ? span[0] : 0; c[1] = span ? span[1] : 0; c[2] = above ? 1 : 0;
   if (above) THG.cutS = true;
 }
+/* A THING'S LIGHT DRAWN AFTER THE DARK (lateLit's - a lighthouse's windows, a dock lamp's glass: drawLateLit, 50-land-airport.js): every quad put from
+   now on, in any batch, until thingsBehind(0), hidden where the order layer holds a number after ord - something drawn after its thing in front of it
+   (the light pass's rule for its rows, 47-zz-light-pass.js; thingsCut's span from -1: the sky and what's behind kept). 0: nothing hidden */
+function thingsBehind(ord) { THG.behind = ord > 0 ? ord : 0; }
 /* a big thing's damage section by section (the damage's list: one a section, left to right across its picture, 0 whole .. 1 destroyed; cuts where
    they meet - fractions of its width, n + 1 of them, default even; B its damaged picture, drawn where a section is destroyed - its atlas place)
    for its quads' prof: put in with the call's shapes (pv), stepped as the damage steps them (DMG_STEPS) */
@@ -36175,9 +36184,11 @@ function distortWater(sx, wpx) {
       pass (fsDusk, laid 'source-atop' into the world's layer) lays on those pixels the silhouette over each column's surface and each lake's fade under
       it (duskAt); their cabins (21, in the world's light) take it in winPx before the dark. The water hands over each column's surface (the view's
       surface rows, a GPU buffer - binding 11) and the lakes' levels: frameShare('water.levels').
-      WHAT'S IN FRONT: a row that belongs to a thing (a window, a boat's lamp) carries its order (c.w = kind + 64 x order - the number the
-      world's drawing had reached when it was given, 45-zz-things-gpu.js): it's cut where the order layer (binding 10) holds a higher one -
-      something drawn after its thing, in front of it. Order 0: never cut.
+      WHAT'S IN FRONT: a row that belongs to a thing (a window, a boat's lamp; every lit structure's lamps - a lighthouse's halo, a house's
+      window glows, a hangar's, a crane's, a dock's lamps, a tower's beacon) carries its order (c.w = kind + 64 x order - the number the world's
+      drawing had reached when it was given, 45-zz-things-gpu.js): it's cut where the order layer (binding 10) holds a higher one - something drawn
+      after its thing, in front of it. Order 0: never cut. (What such a thing draws after the dark - lateLit: a lighthouse's windows - the same
+      rule in the things' pass: thingsBehind.)
       In the 'world' layer, under the water's tint (renderObjects - lampSnapshot / lampUncover, 27-sub-light.js): the world's layer copied
       as it was before the tint (lpassSnap, fsCopy - LPASS.snap), and laid back where the beams fall:
         15 UNCOVER - every lamp of the view in one row (their beams added, then capped at 1): the copy times that light, laid over.
@@ -36773,12 +36784,13 @@ function lpassRows(ctx, world) {
       if (l.ms) { const r = 7 * SV, x0 = Math.round(X - r), y0 = Math.round(Y - r), w = Math.round(2 * r), q = row(6, x0, y0, x0 + w, y0 + w); if (q < 0) break; R[q] = X + ox; R[q + 1] = Y + oy; R[q + 2] = r; R[q + 3] = l.k; }
     }
   }
-  // 4-5. the lighthouses' halos and beams (each view its own: a beam reaches far past its tower)
+  // 4-5. the lighthouses' halos and beams (each view its own: a beam reaches far past its tower); the halo its lighthouse's lamp - hidden where something
+  // drawn after its tower or structure stands in front (its order: thgOrderMark, drawTower / drawStructs)
   const on0 = clamp(E.lampsOn || 0, 0, 1);
   if (world && on0 > 0.05) for (const b of lhBeams()) {
     const LC = lhCtlId(b.id); if (LC && LC.off) continue;
     const x = PX(b.x), y = PY(b.y), th = lhBeamTh(b), sea = lhBeamSea(b) || 1, s = SV, r = 6 * s, k = Math.abs(Math.cos(th)), kk = 0.55 + 0.45 * k;
-    let o = row(4, x - 5 * r - 1, y - 4 * r - 1, x + 5 * r + 1, y + 4 * r + 1); if (o < 0) break;
+    let o = row(lpassKind(4, thgOrderOf(b.tw || b.o)), x - 5 * r - 1, y - 4 * r - 1, x + 5 * r + 1, y + 4 * r + 1); if (o < 0) break;
     R[o] = x + ox; R[o + 1] = y + oy; R[o + 2] = r; R[o + 3] = on0; R[o + 4] = Math.pow(Math.max(0, Math.sin(th)), 6);
     // (the beam: always out over the water - the land side never lit - tilted a little up, sweeping gently up and down, breathing as the lamp turns)
     const up = 0.1 + 0.06 * Math.sin(th * 0.5), L = 1900 * s * (0.75 + 0.25 * kk), hw = 0.07 * (1.2 - 0.4 * kk);
@@ -36786,27 +36798,27 @@ function lpassRows(ctx, world) {
     o = row(5, Math.min(x, ...ex) - 1, Math.min(y, ...ey) - 1, Math.max(x, ...ex) + 1, Math.max(y, ...ey) + 1); if (o < 0) break;
     R[o] = x + ox; R[o + 1] = y + oy; R[o + 2] = L; R[o + 3] = on0; R[o + 4] = sea; R[o + 5] = up; R[o + 6] = kk;
   }
-  // 3. the air lamps (airLamps: x, y, strength, kind in view px - kind 0 white, 1 red, 2 a warm lit window, 3 green, 4 a lit point; 10 and up
-  // a big warm glow that many px round, below 0 the same -kind px round - lampR)
+  // 3. the air lamps (airLamps: x, y, strength, kind in view px, order - kind 0 white, 1 red, 2 a warm lit window, 3 green, 4 a lit point; 10 and up
+  // a big warm glow that many px round, below 0 the same -kind px round - lampR; the order its thing's: hidden where something drawn after it is in front)
   const G = airLamps[vi], s = SV, px = Math.max(1, Math.round(1.2 * SV));
-  for (let i = 0; i < G.length; i += 4) {
-    const x = G[i], y = G[i + 1], a = G[i + 2], kind = G[i + 3];
+  for (let i = 0; i < G.length; i += 5) {
+    const x = G[i], y = G[i + 1], a = G[i + 2], kind = G[i + 3], k3 = lpassKind(3, G[i + 4]);
     if (kind >= 10 || kind < 0) {
       const Rb = Math.abs(kind); if (!(a > 0.01)) continue;
-      const o = row(3, x - Rb - 1, y - Rb - 1, x + Rb + 1, y + Rb + 1); if (o < 0) break;
+      const o = row(k3, x - Rb - 1, y - Rb - 1, x + Rb + 1, y + Rb + 1); if (o < 0) break;
       R[o] = x + ox; R[o + 1] = y + oy; R[o + 2] = Rb; R[o + 3] = a; R[o + 7] = clamp(Math.round(2 * Rb / 3) | 1, 15, 81); R[o + 9] = 1; continue;
     }
     const col = LPASS_COL[kind] || LPASS_WHITE, r = kind === 2 ? 14 * s : 6 * s, ha = kind === 2 ? 0.5 * a : kind === 4 ? 0 : 0.4 * a;
     const Rh = ha >= 0.01 && r >= 1 ? (r >= 7.5 ? Math.round(r / 7.5) * 7.5 : r) : 0, M = Math.max(Rh, px) + 1;
     if (!Rh && kind === 2) continue;
-    const o = row(3, x - M, y - M, x + M, y + M); if (o < 0) break;
+    const o = row(k3, x - M, y - M, x + M, y + M); if (o < 0) break;
     R[o] = x + ox; R[o + 1] = y + oy; R[o + 2] = Rh; R[o + 3] = a; R[o + 4] = col[0]; R[o + 5] = col[1]; R[o + 6] = col[2];
     R[o + 8] = kind === 2 ? 0 : px; R[o + 9] = kind === 4 ? -1 : 0; R[o + 10] = ha;
   }
-  // 2. the tail lamps (planeLamps: x, y, strength in view px), over the rest
+  // 2. the tail lamps (planeLamps: x, y, strength in view px, order - as the air lamps'), over the rest
   const PL = planeLamps[vi], pr = Math.max(1, Math.round(1.2 * SV));
-  for (let i = 0; i < PL.length; i += 3) {
-    const x = Math.round(PL[i]), y = Math.round(PL[i + 1]), o = row(2, x - 3 * pr, y - 3 * pr, x + 3 * pr, y + 3 * pr); if (o < 0) break;
+  for (let i = 0; i < PL.length; i += 4) {
+    const x = Math.round(PL[i]), y = Math.round(PL[i + 1]), o = row(lpassKind(2, PL[i + 3]), x - 3 * pr, y - 3 * pr, x + 3 * pr, y + 3 * pr); if (o < 0) break;
     R[o] = x + ox; R[o + 1] = y + oy; R[o + 2] = pr; R[o + 3] = PL[i + 2];
   }
   // the windows lit after the dark (a building's, a jet's): over the rest, where the lit insides were drawn (after the light pass); the LOOK panel's
@@ -36944,10 +36956,10 @@ function lpassSoft(cx, cy, R, col, a, rings = 6, ord = 0) {
   const r = LPASS.rows; r[o] = bx; r[o + 1] = by; r[o + 2] = R; r[o + 3] = rings; r[o + 4] = col[0]; r[o + 5] = col[1]; r[o + 6] = col[2]; r[o + 7] = a; r[o + 8] = PB;
 }
 // a three-step light pool (glowDisc): its size in steps (four blocks when big), added at a
-function lpassDisc(cx, cy, R, col, a) {
+function lpassDisc(cx, cy, R, col, a, ord = 0) {
   if (a < 0.004) return;
   const q = R > 16 * PB ? 4 * PB : PB; R = Math.max(PB, Math.round(R / q) * q);
-  const bx = Math.floor(cx / PB) * PB, by = Math.floor(cy / PB) * PB, M = R + 2 * PB, o = lpassRow(8, bx - M, by - M, bx + M, by + M); if (o < 0) return;
+  const bx = Math.floor(cx / PB) * PB, by = Math.floor(cy / PB) * PB, M = R + 2 * PB, o = lpassRow(lpassKind(8, ord), bx - M, by - M, bx + M, by + M); if (o < 0) return;
   const r = LPASS.rows; r[o] = bx; r[o + 1] = by; r[o + 2] = R; r[o + 3] = Math.min(1, a); r[o + 4] = col[0]; r[o + 5] = col[1]; r[o + 6] = col[2]; r[o + 8] = PB;
 }
 function lpassOverSmoke() {
@@ -36956,13 +36968,14 @@ function lpassOverSmoke() {
     // dock lamps: warm sodium, nudged toward the colour of the air (rose at sunset, teal in night fog); faint by day, full at night
     const lampCol = mix3(mix3([255, 206, 140], [255, 170, 120], E.dusk * 0.5), E.fogCol.map(v => Math.min(255, v * 1.25)), 0.3 * E.fog);
     const LA = E.lampsOn * (0.75 + 0.25 * E.fog) * (1 - 0.65 * E.light), GS = Math.min(SV, 2.2);   // (halos don't balloon when zoomed in)
-    for (const d of pierHosts()) for (const [lx, ly, , fy] of d.lamps) {   // (every dock's lamps - 50-zz-docklamp.js)
+    for (const d of pierHosts()) for (const q of d.lamps) {   // (every dock's lamps - 50-zz-docklamp.js; each hidden where something drawn after its post is in front)
+      const [lx, ly, , fy] = q, od = thgOrderOf(q);
       if (offViewR(lx, Math.max(22, (22 + 60 * E.fog) * GS / SV), x0, x1)) continue;
       const px = PX(lx), py = PY(ly), dy = PY(fy ?? DECK_Y);
       // a wide, faint halo that grows in fog, and a small hot core; a faint cone down to its deck, a soft pool where it lands, a long broken reflection
-      lpassSoft(px, py, (22 + 60 * E.fog) * GS, lampCol, (0.2 + 0.18 * E.fog) * LA, 7);
-      lpassSoft(px, py, 7 * GS, lampCol, 0.3 * LA, 3);
-      const sy = PY(surfaceY(lx) + 3), w = 32 * SV + 4 * PB, o = lpassRow(9, px - w, Math.min(py, sy) - PB, px + w, Math.max(dy, sy + 50 * SV) + PB); if (o < 0) break;
+      lpassSoft(px, py, (22 + 60 * E.fog) * GS, lampCol, (0.2 + 0.18 * E.fog) * LA, 7, od);
+      lpassSoft(px, py, 7 * GS, lampCol, 0.3 * LA, 3, od);
+      const sy = PY(surfaceY(lx) + 3), w = 32 * SV + 4 * PB, o = lpassRow(lpassKind(9, od), px - w, Math.min(py, sy) - PB, px + w, Math.max(dy, sy + 50 * SV) + PB); if (o < 0) break;
       R[o] = px; R[o + 1] = py; R[o + 2] = dy; R[o + 3] = SV; R[o + 4] = lampCol[0]; R[o + 5] = lampCol[1]; R[o + 6] = lampCol[2]; R[o + 7] = LA; R[o + 8] = PB; R[o + 9] = E.fog; R[o + 10] = sy;
     }
     // harbour buoys flash at night: a glow and its hot pixel
@@ -36973,10 +36986,10 @@ function lpassOverSmoke() {
       const X = Math.floor((bx - PB / 2) / PBV) * PBV, Y = Math.floor(by / PBV) * PBV, o = lpassRow(10, X, Y, X + PBV, Y + PBV); if (o < 0) break;
       R[o] = X; R[o + 1] = Y; R[o + 2] = PBV; R[o + 3] = PBV; R[o + 4] = 255; R[o + 5] = 242; R[o + 6] = 192; R[o + 7] = 1;
     }
-    // tower beacons
+    // tower beacons (hidden where something drawn after the tower is in front)
     for (const tw of towers) {
       if (tw.hp <= 0 || offViewR(tw.x, 20, x0, x1) || Math.floor(time * 1.5 + tw.player) % 2) continue;
-      const [bx, by] = towerPivot(tw); lpassDisc(PX(bx - tw.facing * 4), PY(by - 9), 16 * SV, [255, 60, 40], 0.7 * E.lampsOn);
+      const [bx, by] = towerPivot(tw); lpassDisc(PX(bx - tw.facing * 4), PY(by - 9), 16 * SV, [255, 60, 40], 0.7 * E.lampsOn, thgOrderOf(tw));
     }
   }
   // fire lights up the night around it (under the water, dimmed in the deep's dark)
@@ -37786,8 +37799,8 @@ function drawTerminal(tx, gy, p) {
   const wx = tx - T.width / 2, wy = gy - T.height;                  // (the picture's top left, in the world)
   drawWindsock(wx + 138, wy + 74);
   if (p >= 0) drawPoleFlag(wx + 30, wy + 88, p);
-  if (night > 0.05 && (time % 1.4) < 0.5) airLamps[viewIdx].push(PX(wx + 190), PY(wy + 2), night, 1);   // (the mast's red lamp)
-  if (night > 0.05) airLamps[viewIdx].push(PX(wx + 190), PY(wy + 54), night * 0.6, 2);                    // (the cab lit inside)
+  if (night > 0.05 && (time % 1.4) < 0.5) airLamp(PX(wx + 190), PY(wy + 2), night, 1, thgOrder());   // (the mast's red lamp)
+  if (night > 0.05) airLamp(PX(wx + 190), PY(wy + 54), night * 0.6, 2, thgOrder());                    // (the cab lit inside)
 }
 // the five approach lights, chasing in from the take-off end toward the hangar, over and over, standing on ry - the
 // built-in airports' and every RUNWAY structure's (user Nov 1 13:29: "should still have the lights too")
@@ -37798,7 +37811,7 @@ function drawRunwayLights(af, ry) {
   runwayLights(af).forEach((lx, i) => {
     const X = PX(lx); if (X < -20 || X > VWP + 20) return;
     thingsQuad(M, Math.round(X - w / 2), Math.round(PY(ry) - h), w, h, e, THG_PART, null, 0, null, 0, 0, null, null, 1, THG_SCALED);   // (as painted, by the things' pass)
-    if (night > 0.05) airLamps[viewIdx].push(X, PY(ry - 4), night * (i === k ? 1 : 0.25), 0);
+    if (night > 0.05) airLamp(X, PY(ry - 4), night * (i === k ? 1 : 0.25), 0, thgOrder());
   });
 }
 // a LARGE AIRCRAFT HANGAR structure (the built-in airports' hangar): its left end at wl, standing on gy, facing left when flipped,
@@ -37820,16 +37833,26 @@ function drawBigHangar(wl, gy, flip, open, p) {
     thingsQuad(M, DX, DY + rest - Math.max(1, Math.round(SV)), W, Math.max(1, Math.round(2 * SV)), null, THG_SOLID, HG_EDGE);
   }
   const night = clamp(E.night * 1.2 + E.dusk * 0.8 + E.sunset * 0.5, 0, 1);
-  if (night > 0.05) airLamps[viewIdx].push(PX(wl + (flip ? HGI.w - HGI.lamp[0] : HGI.lamp[0])), PY(gy - HGI.h + HGI.lamp[1]), night * 0.8, 2);
+  if (night > 0.05) airLamp(PX(wl + (flip ? HGI.w - HGI.lamp[0] : HGI.lamp[0])), PY(gy - HGI.h + HGI.lamp[1]), night * 0.8, 2, thgOrder());
 }
 // (the built-in airports' drawing went with them, Nov 1: their RUNWAY, LARGE AIRCRAFT HANGAR and TERMINAL structures draw it -
 // drawStructs, 50-zz-struct.js)
-// the lights, after the night's tint so they shine: a runway light white-gold, the tower's lamp red, its cab warm
+// the lights, after the night's tint so they shine: a runway light white-gold, the tower's lamp red, its cab warm - five numbers a lamp (x, y,
+// strength, kind, order - the light pass's air lamp rows, 47-zz-light-pass.js)
 const airLamps = [[], []];
+// a lamp at x, y (the view's px); ord: its thing's number in what's in front (thgOrder() given after its thing is drawn - 45-zz-things-gpu.js): hidden
+// where something drawn after its thing stands in front (a ship before a lit house or a hangar); 0: never hidden
+const airLamp = (x, y, a, kind, ord = 0) => { airLamps[viewIdx].push(x, y, a, kind, ord); };
 // (things lit from within, drawn after the night's tint so they keep their own colour - a balloon's envelope lit by its
-// burner: each a function drawing in the view's own coordinates)
+// burner, a lighthouse's windows: each a function drawing in the view's own coordinates, and its thing's order - two entries a light)
 const lateLit = [[], []];
-function drawLateLit() { for (const f of lateLit[viewIdx]) f(); C.globalAlpha = 1; C.globalCompositeOperation = 'source-over'; }
+// f drawn after the dark; ord as airLamp's: what the things' pass draws in it is hidden where something drawn after its thing stands in front (thingsBehind)
+const lightLate = (f, ord = 0) => { lateLit[viewIdx].push(f, ord); };
+function drawLateLit() {
+  const L = lateLit[viewIdx];
+  for (let i = 0; i < L.length; i += 2) { thingsBehind(L[i + 1]); try { L[i](); } finally { thingsBehind(0); } }
+  C.globalAlpha = 1; C.globalCompositeOperation = 'source-over';
+}
 // (user Oct 26, with a picture - gen/open/ref/reentry_glow_bug_oct26.png: "We can't have such a low resolution weird glow
 // in front of an object") a big glow in fine pixels - about three screen pixels each - fading in eight soft steps
 // (Nov 10) its pixels as runs along each row (bigHaloRuns: row, first, past the last, eighths - one formula), laid as painted blocks
@@ -38540,7 +38563,7 @@ function drawBalloons(x0, x1, mode) {
       const gw = thgW(G.c, s), gh = thgH(G.c, s), X = PX(b.x), Y = PY(b.y), ang = b.a, a1 = Math.min(1, gl), a2 = dark > 0.1 ? 0.6 * gl * dark : 0;
       // (after the night's tint: lit from within, it keeps its colour; the fabric lit through is brighter than the dark round it - the second
       // draw added on: a pass of its own, as its blend is)
-      lateLit[viewIdx].push(() => { C.save(); C.translate(X, Y); C.rotate(ang); const GM = thgCur(), ge = artPut(G.c);
+      lightLate(() => { C.save(); C.translate(X, Y); C.rotate(ang); const GM = thgCur(), ge = artPut(G.c);
         thingsBegin(C); thingsQuad(GM, -Math.round(gw / 2), -gh, gw, gh, ge, THG_PART, null, 0, null, 0, 0, null, null, a1, THG_SCALED); thingsEnd();
         if (a2) { C.globalCompositeOperation = 'lighter'; thingsBegin(C); thingsQuad(GM, -Math.round(gw / 2), -gh, gw, gh, ge, THG_PART, null, 0, null, 0, 0, null, null, a2, THG_SCALED); thingsEnd(); }
         C.restore(); });
@@ -38548,7 +38571,7 @@ function drawBalloons(x0, x1, mode) {
     // the burner's flame: a tongue of yellow and orange up into the mouth
     if (b.state === 'fly' && b.burn > 0) {
       const fl = (0.7 + 0.3 * Math.sin(b.ph * 40)) * s, fy = -A.H * 0.2 * s, X = PX(b.x), Y = PY(b.y), ang = b.a;
-      lateLit[viewIdx].push(() => { C.save(); C.translate(X, Y); C.rotate(ang); const own = thingsOwn(), M = thgCur();   // (blocks of the things' pass)
+      lightLate(() => { C.save(); C.translate(X, Y); C.rotate(ang); const own = thingsOwn(), M = thgCur();   // (blocks of the things' pass)
         thingsBlock(M, Math.round(-2 * fl), Math.round(fy - 9 * fl), Math.max(1, Math.round(4 * fl)), Math.round(8 * fl), BAL_FLAME[0], 0.9);
         thingsBlock(M, Math.round(-fl), Math.round(fy - 6 * fl), Math.max(1, Math.round(2 * fl)), Math.round(5 * fl), BAL_FLAME[1], 0.95); if (own) thingsEnd(); C.restore(); });
     }
@@ -38724,7 +38747,7 @@ function drawBlimps(x0, x1, mode) {   // (mode 'under': the lakes' pass - 50-lan
     const L = cabinLit(); if (L > 0.05 && b.state === 'fly') for (const q of A.lit) lightWin(M, X, Y, w, h, im, null, q.b, LW_COVER, q.col, L * C.s.ga, true);   // (its little lights at night - the light pass, in the world's light)
     C.restore();
     // the red lamp on its tail, blinking (drawn over the night)
-    if (b.state === 'fly' && (time + b.ph) % 1.2 < 0.22) { const [tx, ty] = blimpPoint(b, BLIMP_TAIL[0], BLIMP_TAIL[1]); planeLamps[viewIdx].push(PX(tx), PY(ty), clamp(0.6 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1)); }
+    if (b.state === 'fly' && (time + b.ph) % 1.2 < 0.22) { const [tx, ty] = blimpPoint(b, BLIMP_TAIL[0], BLIMP_TAIL[1]); tailLamp(PX(tx), PY(ty), clamp(0.6 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1)); }
     // its navigation light at the gondola's front (every aircraft's - 29-zzzz-aircraft-lights.js)
     if (b.state === 'fly') { const [nx, ny] = blimpPoint(b, 103, 48); acNav(PX(nx), PY(ny), b.face); }
   }
@@ -40062,8 +40085,8 @@ function planeLights(x, y, dir, wingDx, tailDx, tailDy, big, ph, ang, wingDy = 2
   const t = (time + (ph || 0)) % 1.2, A = big ? 1 : 0.75, c = Math.cos(ang || 0), s = Math.sin(ang || 0);
   const at = (dx, dy) => [PX(x + dx * c - dy * s), PY(y + dx * s + dy * c)];
   { const [nx, ny] = at(dir * wingDx, wingDy); acNav(nx, ny, dir); }
-  if (t < 0.18) { const [px, py] = at(-dir * tailDx, -tailDy); planeLamps[viewIdx].push(px, py, A); }
-  if (t > 0.6 && t < 0.68) { const [px, py] = at(dir * wingDx, wingDy); airLamps[viewIdx].push(px, py, A, 0); if (big) { const [qx, qy] = at(-dir * wingDx * 0.2, wingDy + 2); airLamps[viewIdx].push(qx, qy, A, 0); } }
+  if (t < 0.18) { const [px, py] = at(-dir * tailDx, -tailDy); tailLamp(px, py, A); }
+  if (t > 0.6 && t < 0.68) { const [px, py] = at(dir * wingDx, wingDy); airLamp(px, py, A, 0); if (big) { const [qx, qy] = at(-dir * wingDx * 0.2, wingDy + 2); airLamp(qx, qy, A, 0); } }
 }
 // a helicopter low over the ground: its downwash raises dust (on water, spray)
 // (user Oct 26: "Why the smoke? It's a cement airport, it should be debris or more white smoke" - "and the rotor wash
@@ -40200,20 +40223,20 @@ function tankLights(t) {
   if (n < 0.05) return;
   const f = t.facing, ca = Math.cos(t.a || 0), sa = Math.sin(t.a || 0), pt = (dx, dy) => [t.x + (dx * ca - dy * sa), t.y + (dx * sa + dy * ca)];
   const [hx, hy] = pt(f * TANK_W * 0.46, -12), [rx, ry] = pt(-f * TANK_W * 0.47, -14);
-  airLamps[viewIdx].push(PX(hx), PY(hy), n, 0); airLamps[viewIdx].push(PX(rx), PY(ry), n * 0.8, 1);
+  airLamp(PX(hx), PY(hy), n, 0); airLamp(PX(rx), PY(ry), n * 0.8, 1);
   // (the headlamps' beam along the ground ahead)
-  airLamps[viewIdx].push(PX(hx + f * 26), PY(hy + 6), n * 0.5, lampR(24 * SV));
+  airLamp(PX(hx + f * 26), PY(hy + 6), n * 0.5, lampR(24 * SV));
 }
 function shipNavLights(c, L) {
   const n = clamp(E.night * 1.2 + E.dusk * 0.7 + E.fog * 0.4, 0, 1);
   if (n < 0.05 || c.state !== 'sail' || !vehManned(c)) return;   // (only with someone at her helm - vehManned, 50-zz-lights.js)
   const K = CIV[c.kind], A = civArt(c), top = civPoint(c, A.width * 0.62, K.top), bow = civPoint(c, A.width - 4, K.wl - 14), stern = civPoint(c, 4, K.wl - 14);   // (civPoint's art is bow-right; it turns it for her)
-  airLamps[viewIdx].push(PX(top[0]), PY(top[1]), n, 0);
-  airLamps[viewIdx].push(PX(bow[0]), PY(bow[1]), n * 0.9, c.face > 0 ? 3 : 1);   // (her sidelight on our side: green going right, red going left)
-  airLamps[viewIdx].push(PX(stern[0]), PY(stern[1]), n * 0.8, 0);
+  airLamp(PX(top[0]), PY(top[1]), n, 0);
+  airLamp(PX(bow[0]), PY(bow[1]), n * 0.9, c.face > 0 ? 3 : 1);   // (her sidelight on our side: green going right, red going left)
+  airLamp(PX(stern[0]), PY(stern[1]), n * 0.8, 0);
   // (user Oct 26: "All vehicles should have little lights that shine at night (e.g. container ship is missing them)")
   // the working ships' deck lights: a row of warm lamps along her deck
-  if (c.kind === 'container' || c.kind === 'tanker') for (let px = 30; px < A.width - 30; px += 46) { const [x, y] = civPoint(c, px, K.wl - (c.kind === 'container' ? 16 : 12)); airLamps[viewIdx].push(PX(x), PY(y), n * 0.75, 2); }
+  if (c.kind === 'container' || c.kind === 'tanker') for (let px = 30; px < A.width - 30; px += 46) { const [x, y] = civPoint(c, px, K.wl - (c.kind === 'container' ? 16 : 12)); airLamp(PX(x), PY(y), n * 0.75, 2); }
 }
 // (Nov 1, batch 2) the streaks' table (a column table: airStreaks above); before, a list the snapshots carried beside the tables
 // (SW_EXTRA), never saved. All of it is drawn
@@ -41918,9 +41941,9 @@ function drawCranes(x0, x1, lake = false) {
     // by night: floodlights under the girder, the trolley's lamp, a red lamp blinking on its top
     const night = clamp(E.night * 1.2 + E.dusk * 0.8, 0, 1);
     if (night > 0.05) {
-      for (const f of [0.15, 0.45, 0.8]) airLamps[viewIdx].push(PX(cr.wx(CRI.rail[0] + (CRI.rail[1] - CRI.rail[0]) * f)), PY(cr.railY + 2), night * 0.8, 2);
-      airLamps[viewIdx].push(PX(cr.tx), PY(hb), night * 0.6, lampR(18 * SV));   // (with the zoom - user Nov 8)
-      if ((time % 1.6) < 0.6) planeLamps[viewIdx].push(PX(cr.wx(181)), PY(cr.top + 2 * CRK), night);
+      for (const f of [0.15, 0.45, 0.8]) airLamp(PX(cr.wx(CRI.rail[0] + (CRI.rail[1] - CRI.rail[0]) * f)), PY(cr.railY + 2), night * 0.8, 2, thgOrder());
+      airLamp(PX(cr.tx), PY(hb), night * 0.6, lampR(18 * SV), thgOrder());   // (with the zoom - user Nov 8)
+      if ((time % 1.6) < 0.6) tailLamp(PX(cr.wx(181)), PY(cr.top + 2 * CRK), night, thgOrder());
     }
   }
   if (own) thingsEnd();
@@ -44735,14 +44758,14 @@ function drawKraken1(x0, x1) {
   const B = krgMake('b' + vi); krgLay(B, w, h, dx, dy, cs, false);
   // its rim in the subs' lamps, as light after the night and the deep's dark (lateLit, as its eyes) - a picture of its own, made from the body's
   krgBegin();
-  if (B && krRim()) { const R = krgMake('r' + vi, B); lateLit[vi].push(() => krgLay(R, w, h, dx, dy, cs, true)); }
+  if (B && krRim()) { const R = krgMake('r' + vi, B); lightLate(() => krgLay(R, w, h, dx, dy, cs, true)); }
   // its eyes: a picture of their own round them, laid on as light after the night and the deep's dark
   const HT = body.H, e0 = krHeadPt(HT, -body.BW * 0.29, 0.25), e1 = krHeadPt(HT, body.BW * 0.29, 0.25), gr = 30 * sK * SV;
   if (KR.eye + KR.hurt > 0.02 || KR.dead) {
     if (krTarget(Math.min(PX(e0.x), PX(e1.x)) - gr, Math.min(PY(e0.y), PY(e1.y)) - gr, Math.max(PX(e0.x), PX(e1.x)) + gr, Math.max(PY(e0.y), PY(e1.y)) + gr)) {
       krEyes(body);
       const w = KTW, h = KTH, dx = K0X - KCS, dy = K0Y, cs = KCS, E2 = KRG.n ? krgMake('e' + vi) : null;   // (each kraken's own)
-      if (E2) lateLit[vi].push(() => krgLay(E2, w, h, dx, dy, cs, true));
+      if (E2) lightLate(() => krgLay(E2, w, h, dx, dy, cs, true));
     }
   }
 }
@@ -45380,7 +45403,7 @@ function lhTopAt(tw, dx) {
 }
 // the tower drawn by the things' pass (drawTower's batch): its barrel behind, the lighthouse - the left one's damage frame from its sheet in the
 // art atlas, mirrored by the transform, in the desert's tone on the desert side (the shader's paint), in the hour's light (civLitLook's night
-// shape, sheen and rims), by night its lights (the frame's glow, after the night's tint); the old single drawing (no sheet yet) as cut, its
+// shape, sheen and rims), by night its lights (the frame's glow, after the night's tint, hidden by what's drawn in front of it); the old single drawing (no sheet yet) as cut, its
 // burns in its mask
 artFamily(() => { if (!img.lighthouseL || !img.lighthouseL.width) return false; artPut(img.lighthouseL); return true; });
 function drawLighthouseTower(tw) {
@@ -45395,11 +45418,11 @@ function drawLighthouseTower(tw) {
   thingsQuad(M, X, Y, w, h, e, THG_BODY, null, 0, mk, 0, 0, thingsLit(PX(tw.x), civNightK()), null, 1, THG_SCALED, null, null, null, L ? R : null, rules);
   if (on > 0.03) {
     const glow = L ? null : lhArt(tw).glow, ge = L ? e : artPut(glow);
-    if (ge) lateLit[viewIdx].push(() => {
+    if (ge) lightLate(() => {
       const own = thingsOwn(); let M2 = thgCur(); if (tw.facing < 0) M2 = thgScale(thgTranslate(M2, 2 * X + w, 0), -1, 1);
       thingsQuad(M2, X, Y, w, h, ge, THG_PART, null, 0, null, 0, 0, null, null, on, THG_SCALED, null, null, null, L ? [f * LHL.w, LHL.h, LHL.w, LHL.h] : null);
       if (own) thingsEnd();
-    });
+    }, thgOrder());   // (its number in what's in front: its windows hidden where something drawn after it stands before it - a ship in its harbour)
   }
 }
 
@@ -46851,7 +46874,7 @@ function drawLandProps(x0, x1, isl, part) {
     if (it.state === 'gone' || !it.pk) continue;
     if (it.deck && !rigShown(it)) continue;                 // (its deck hidden in the Biome Editor: nothing of it drawn)
     const G = plantGeo(it); if (!G) continue;
-    if (it.fire > 0.1 && lamps < 12) { lamps++; airLamps[viewIdx].push(PX(it.x), PY(propTop(it) + G.sink) - Math.min(G.h * SV, 60 * SV) * 0.5, 0.6 * it.fire, lampR((it.pk === 'tree' || it.pk === 'palm' ? 46 : 26) * SV)); }   // (a burning plant's lamp: the processor's)
+    if (it.fire > 0.1 && lamps < 12) { lamps++; airLamp(PX(it.x), PY(propTop(it) + G.sink) - Math.min(G.h * SV, 60 * SV) * 0.5, 0.6 * it.fire, lampR((it.pk === 'tree' || it.pk === 'palm' ? 46 : 26) * SV)); }   // (a burning plant's lamp: the processor's)
     GL.push(it);
   }
   if (GL.length) { const t0 = performance.now(); pgLayer(GL); RIG_T.draw += performance.now() - t0; RIG_T.n += GL.length; GL.length = 0; }   // (the Biome Editor's cost line: the processor's time for the plants' rows, and the plants a frame)
@@ -48077,7 +48100,7 @@ function drawCrashes(x0, x1, wet) {
     }
     if ((wet === 'sea') === !onLand(W.x) && wet !== true && !W.out && W.t < W.fire && !offViewR(W.x, Math.max(14 / SV, 40 + 30 * W.size), x0, x1)) {   // (its fire's light)
       const u = W.t / W.fire, k = (1 - 0.6 * smoothstep(0.6, 1, u)) * (0.85 + 0.15 * Math.sin(time * 9 + W.x));
-      airLamps[viewIdx].push(PX(W.x), PY(W.y - 6), 0.7 * k, lampR((40 + 30 * W.size) * SV));   // (its fire lighting the ground round it after dark)
+      airLamp(PX(W.x), PY(W.y - 6), 0.7 * k, lampR((40 + 30 * W.size) * SV));   // (its fire lighting the ground round it after dark)
     }
   }
 }
@@ -49463,11 +49486,11 @@ function drawPads(x0, x1) {
     if (PR.wrecked) thingsQuad(m, LX, TY, pw, ph, e, THG_PART, null, 0, null, 0, 0, null, null, 0.72, THG_SCALED, THG_DARK);   // (blown up with its stack: charred, for the round)
     C.restore();
     // (the fuel's fireball lighting everything round it, night or day - user Oct 27, 14:16)
-    if (PR.boom && PR.boom.t < 7) { const k = Math.pow(1 - PR.boom.t / 7, 1.5), bx = PX(PR.boom.x), by = PY(PR.boom.y - 60 - 40 * Math.min(PR.boom.t, 5)); brightLights[viewIdx].push(bx + VSX + SHX, by + SHY, k * 1.4, Math.max(1, Math.round(700 * SV))); airLamps[viewIdx].push(bx, by, 0.9 * k, lampR(420 * SV)); }
+    if (PR.boom && PR.boom.t < 7) { const k = Math.pow(1 - PR.boom.t / 7, 1.5), bx = PX(PR.boom.x), by = PY(PR.boom.y - 60 - 40 * Math.min(PR.boom.t, 5)); brightLights[viewIdx].push(bx + VSX + SHX, by + SHY, k * 1.4, Math.max(1, Math.round(700 * SV))); airLamp(bx, by, 0.9 * k, lampR(420 * SV)); }
     if (PR.wrecked) continue;
     // (user Oct 26: "The night lights on the rocket station should not have this bloom and it's way too many. They should
     // also turn off during the day") one lamp in three, little lit points, only after dark
-    if (night > 0.35) A.lamps.forEach(([lx, ly], k) => { if (k % 3 === 0) { const ox = s.L + (R ? A.pad.width - lx : lx) * PAD_K - s.X, oy = s.T + ly * PAD_K - s.gy; airLamps[viewIdx].push(PX(s.X + ox * c - oy * sn), PY(s.gy + ox * sn + oy * c), (night - 0.35) / 0.65 * (0.75 + 0.25 * Math.sin(time * 1.3 + lx)), 4); } });
+    if (night > 0.35) A.lamps.forEach(([lx, ly], k) => { if (k % 3 === 0) { const ox = s.L + (R ? A.pad.width - lx : lx) * PAD_K - s.X, oy = s.T + ly * PAD_K - s.gy; airLamp(PX(s.X + ox * c - oy * sn), PY(s.gy + ox * sn + oy * c), (night - 0.35) / 0.65 * (0.75 + 0.25 * Math.sin(time * 1.3 + lx)), 4); } });
   }
   if (own) thingsEnd();
 }
@@ -49503,7 +49526,7 @@ function drawSpace(x0, x1, pass) {
     C.save(); C.translate(PX(q.x), PY(q.y)); C.rotate(q.a); if (q.flip) C.scale(-1, 1);
     thingsBurning(P, -Math.round(sw / 2), -Math.round(sh / 2), sw, sh, q.heat, dmgLook(P, 1)[0], dmgCell(P, SAT_K / UPM), dmgSeed(P), null);
     C.restore();
-    airLamps[viewIdx].push(PX(q.x), PY(q.y), 0.5 * q.heat, lampR(26 * SV));   // (its fire lights the air round it)
+    airLamp(PX(q.x), PY(q.y), 0.5 * q.heat, lampR(26 * SV));   // (its fire lights the air round it)
   }
   for (const o of orbiters) {
     if (o.state === 'gone' || o.state === 'deploy' || vehCulled(o, x0, x1)) continue;   // (coming out of the bay: drawn with the orbiter)
@@ -49518,7 +49541,7 @@ function drawSpace(x0, x1, pass) {
       if (!o.broken && mx) thgScale(thgTranslate(M, 2 * X + bw, 0), -1, 1);   // (whole, the other way round: mirrored in its place)
       thingsBurning(P, X, oy - Math.round(bh2 / 2), bw, bh2, o.heat || 0, dmgLook(P, f)[0], dmgCell(P, k / UPM), dmgSeed(P), null, M);
       C.restore();
-      airLamps[viewIdx].push(PX(o.x), PY(o.y), 0.5 * (o.heat || 0), lampR(26 * SV));
+      airLamp(PX(o.x), PY(o.y), 0.5 * (o.heat || 0), lampR(26 * SV));
       continue;
     }
     C.save(); C.translate(PX(o.x), PY(o.y)); if (o.a || o.tilt) C.rotate((o.a || 0) + (o.tilt || 0));
@@ -49593,7 +49616,7 @@ function drawStack(v) {
   // (the flame and its light on the rocket drawn after the night's tint - user Oct 26, at night the flame was lost in the
   // dark: it shines by its own light, and lights the rocket's lower half)
   const X0 = PX(v.x) + shake, Y0 = PY(v.y), ang = v.a, gyS = PY(trailGround(v.x)) - PY(v.y), lit = (0.35 + 0.55 * clamp(E.night * 1.3 + E.dusk * 0.6, 0, 1)) * fireK;
-  lateLit[viewIdx].push(() => {
+  lightLate(() => {
     C.save(); C.translate(X0, Y0); C.rotate(ang);
     const fl = 0.9 + 0.1 * Math.sin(time * 47) + 0.05 * Math.sin(time * 83), len = (v.state === 'count' ? 70 : 330) * S2 * fireK * fl, w0 = 26 * S2 * (0.7 + 0.3 * fireK);
     const nx = L + nz[0] * S2, ny = T + nz[1] * S2, gy = gyS;   // (the ground, in the stack's own frame: the flame goes behind it)
@@ -52010,7 +52033,7 @@ function drawJetboats(x0, x1, lake) {
       C.scale(sq, 1); const m = thgCur(); if (j.dir <= 0) thgScale(thgTranslate(m, 2 * X + w, 0), -1, 1);   // (facing left: mirrored by the transform)
       thingsQuad(m, X, -h, w, h, artPut(P), THG_BODY, null, 0, null, 4, 0, thingsLit(PX(j.x), civNightK()), null, 1, THG_SCALED);
       // (its lamp at night: a white light on the little mast, red at the bow)
-      if (E.lampsOn > 0.05 && j.hp >= 1 && vehManned(j)) { airLamps[viewIdx].push(PX(j.x - j.dir * 4), PY(j.y - 8), E.lampsOn * 0.7, 0); airLamps[viewIdx].push(PX(j.x + j.dir * 9), PY(j.y - 3), E.lampsOn * 0.5, 1); }
+      if (E.lampsOn > 0.05 && j.hp >= 1 && vehManned(j)) { airLamp(PX(j.x - j.dir * 4), PY(j.y - 8), E.lampsOn * 0.7, 0); airLamp(PX(j.x + j.dir * 9), PY(j.y - 3), E.lampsOn * 0.5, 1); }
       if (j.hp < 2) thingsQuad(m, X, -h, w, h, artPut(P), THG_PART, null, 0, null, 0, 0, null, null, 0.45, THG_SCALED, THG_DARK);   // (hit: blackened - its shape in darkArt's colour laid over it)
     }
     C.restore();
@@ -54257,7 +54280,7 @@ function drawLandHeli(h) {
   if (vi === 0 && h.state !== 'down' && ((time + (h.lampPh || 0)) % 1.0) < 0.32) {
     const ax = (face > 0 ? heliArt.lamp[0] : V.w - heliArt.lamp[0]) * s + X, ay = heliArt.lamp[1] * s + Y, a = h.tilt + (h.roll || 0) * 0.15;
     const sx = PX(h.x) + ax * Math.cos(a) - ay * Math.sin(a), sy = PY(h.y + (h.susY || 0)) + ax * Math.sin(a) + ay * Math.cos(a);
-    planeLamps[viewIdx].push(sx, sy, clamp(0.7 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1));
+    tailLamp(sx, sy, clamp(0.7 + E.night * 0.6 + E.sunset * 0.5 + E.dusk * 0.3, 0, 1));
   }
   // its navigation light, low on the near side of its cabin (every aircraft's - 29-zzzz-aircraft-lights.js; its beam is its LIGHT)
   if (vi === 0 && h.state !== 'down' && h.state !== 'sink') { const [nx, ny] = heliPoint(h, heliHalf() * 0.15, 7); acNav(PX(nx), PY(ny + (h.susY || 0)), face); }
@@ -60585,7 +60608,7 @@ const CAR_LAMP = [0.47, 0.36, -0.48, 0.42];               // (where they are on 
 function carLights(c, L, H) {
   const k = E.lampsOn || 0; if (k < 0.05 || !vehManned(c)) return;   // (only with someone at the wheel - vehManned, 50-zz-lights.js)
   const [hx, hy] = carPt(c, L * CAR_LAMP[0], H * CAR_LAMP[1]), [tx, ty] = carPt(c, L * CAR_LAMP[2], H * CAR_LAMP[3]);
-  airLamps[viewIdx].push(PX(hx), PY(hy), k, 0); airLamps[viewIdx].push(PX(tx), PY(ty), k * 0.9, 1);
+  airLamp(PX(hx), PY(hy), k, 0); airLamp(PX(tx), PY(ty), k * 0.9, 1);
 }
 // (user Nov 2, the beam: "should have a smoother falloff and a slightly bigger radius. It should also illuminate the things it
 // touches, just like the torch for the research submarine does. This is a universal rule for all lights") her headlamp's beam is a
@@ -61983,7 +62006,7 @@ function drawPicBoat(j) {
   if (lit && j.state === 'run') {
     const n = clamp(E.night * 1.2 + E.dusk * 0.7 + E.fog * 0.4, 0, 1);
     if (n > 0.05) for (const [ax, ay, s, side] of B.lamps)   // (its lamps on the view showing: their places along the side view, narrowed with it)
-      airLamps[viewIdx].push(PX(j.x - j.dir * (ax - 0.5) * fw), PY(j.y + dr - fh + ay * fh), n * s, side ? (j.dir > 0 ? 3 : 1) : 0);   // (the sidelight on our side: green going right, red going left)
+      airLamp(PX(j.x - j.dir * (ax - 0.5) * fw), PY(j.y + dr - fh + ay * fh), n * s, side ? (j.dir > 0 ? 3 : 1) : 0);   // (the sidelight on our side: green going right, red going left)
   }
   drawStoryNet(j, h);   // (a boat with a net out - 50-story-net.js)
 }
@@ -63030,7 +63053,7 @@ function vehHitBy(v, dt, pose) {
    sixth segment, the run centred on the dock (a short dock has one), standing on the deck at the dock's own scale (its art pixel:
    the post's pixels match the dock's). The user's post (assets19/docklamp.png, gen/docklamp/prep.py) drawn with the dock, in the
    hour's light (glTint strT, objLit); at night (E.lampsOn) its lantern lit - a warm glow at its middle (airLamps kind 2) and its
-   glass bright over the tint (lateLit). A dock's lamps go into the sea with the deck under them (pierAfterFall). ---- */
+   glass bright over the tint (lateLit) - each hidden where something drawn after its post stands in front (its order). A dock's lamps go into the sea with the deck under them (pierAfterFall). ---- */
 const DLAMP = { post: [0, 0, 28, 57], glass: [30, 0, 28, 57], foot: 7.5, lamp: [21.3, 26.1] };   // (gen/docklamp/prep.py: its cells, the post's foot and the lantern's middle - art pixels)
 // (user Nov 2 14:55: "The size of these lamps is ridiculous. They are smaller than a car. They should be at least 5x taller. (but not
 // just scaled uniformly of course)") the post stands DLAMP_TALL times its painted height: its head (the finial, the arm, the lantern -
@@ -63083,14 +63106,15 @@ function drawDockLamps(L, K, flip) {
     part(0, pa, Y0, Yh, THG_BODY, null, 1); part(pa, pb - pa, Yh, Yf, THG_BODY, null, 1); part(pb, H - pb, Yf, Y1, THG_BODY, null, 1);
     const lit = thingsLit((X0 + X1) / 2, civNightK());
     if (lit[0] + lit[1] + lit[2] + lit[3] > 0) thingsQuad(M, X0, Y0, X1 - X0, Math.round(H * (X1 - X0) / W), e, THG_LIGHT, null, 0, null, 0, 0, lit, null, 1);
+    thgOrderMark(q);                                        // (its number in what's in front: its lights - the glow, the glass, the halo over the smoke - hidden by what's drawn after it)
     if (on < 0.05) continue;
-    airLamps[viewIdx].push(PX(q[0]), PY(q[1]), on, 2);
+    airLamp(PX(q[0]), PY(q[1]), on, 2, thgOrder());
     const G = dockLampPic(true), g = G && artPut(G);
-    if (g) lateLit[viewIdx].push(() => {                    // (the glass is in the head: in the view's own coordinates, after the tint)
+    if (g) lightLate(() => {                    // (the glass is in the head: in the view's own coordinates, after the tint)
       const o2 = thingsOwn(), M1 = thgCur(), Mg = flip ? thgScale(thgTranslate(M1, X0 + X1, 0), -1, 1) : M1;
       thingsQuad(Mg, X0, Y0, X1 - X0, Yh - Y0, g, THG_PART, null, 0, null, 0, 0, null, null, on, 0, null, null, null, [0, 0, W, pa]);
       if (o2) thingsEnd();
-    });
+    }, thgOrder());
   }
   if (own) thingsEnd();
 }
@@ -63592,7 +63616,7 @@ function objNight(P, art, X0, Y0, X1, Y1, flip, glow = true) {
   const k = E.lampsOn || 0; if (k < 0.05) return;
   const N = nightOf(art); if (!N || !P || !P.width) return;
   const sx = (X1 - X0) / P.width, sy = (Y1 - Y0) / P.height;
-  if (glow) for (const [x, y, n] of N.spots) airLamps[viewIdx].push(flip ? X1 - x * sx : X0 + x * sx, Y0 + y * sy, k * Math.min(1, n / 10), 2);
+  if (glow) for (const [x, y, n] of N.spots) airLamp(flip ? X1 - x * sx : X0 + x * sx, Y0 + y * sy, k * Math.min(1, n / 10), 2, thgOrder());
   if (!N.boxes.length) return;
   let M = [1, 0, 0, 1, VSX + SHX, SHY]; if (flip) M = thgScale(thgTranslate(M, X0 + X1, 0), -1, 1);   // (the view's own place - X0.. are its px)
   lightWin(M, X0, Y0, X1 - X0, Y1 - Y0, P, null, N.flat, LW_PANES, NIGHT_MUL, 0.9 * k, false);
@@ -65495,6 +65519,7 @@ function drawStructs(x0, x1, isl = false) {
     strStillDraw(o, B);
     if (strHasLive(o)) strLiveDraw(o, B);
     strLit(o, B);                                          // (the hour's light over it - the night's shape, the moon's and a low sun's rims - and its windows lit at night: 50-zz-lights.js)
+    thgOrderMark(o);                                       // (its number in what's in front: its lights given later - a LIGHTHOUSE's lamp, 47-zz-light-pass.js - hidden by what's drawn after it)
   }
   drawStoryCars(x0, x1, isl ? 'isl' : 'dry');            // (STORY's cars on dry ground - 50-story-cars.js; wet ones go with the water they're in)
   for (const o of L) if (STR_KINDS[o.k].enclosed) drawStrGate(o, x0, x1);   // (the enclosed ones' gates, in front of what's parked in them)
@@ -65920,7 +65945,7 @@ function drawRunway(o, B) {
   if (o.strip) strBlock(M, X0, T, X1 - X0, Math.max(1, q >> 1), 96, 138, 60); else strBlock(M, X0, T, X1 - X0, Math.max(1, q >> 1), 214, 214, 206);
   const dash = Math.max(2, Math.round(PX(o.x + 6 * UPM) - PX(o.x))), my = Math.round((T + D) / 2);
   if (!o.strip) for (let x = X0 + dash; x < X1 - dash; x += dash * 2) strBlock(M, x, my, dash, Math.max(1, q >> 1), 236, 236, 228);
-  if (E.lampsOn > 0.05) for (const lx of [B.x0 + 2 * UPM, B.x1 - 2 * UPM]) airLamps[viewIdx].push(PX(lx), T - q, E.lampsOn * 0.8, 1);
+  if (E.lampsOn > 0.05) for (const lx of [B.x0 + 2 * UPM, B.x1 - 2 * UPM]) airLamp(PX(lx), T - q, E.lampsOn * 0.8, 1, thgOrder());
   drawRunwayLights(strAirfield(o), B.top);                  // (the approach lights, as the built-in airports' - user Nov 1)
 }
 window.__strRunway = { place: (id, x) => { const o = STRS.find(q => q.id === id); if (o) o.x = x; }, at: x => strRunwayAt(x), af: id => { const o = STRS.find(q => q.id === id); return o ? strAirfield(o) : null; } };   // (tools)
