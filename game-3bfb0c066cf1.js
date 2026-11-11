@@ -1194,12 +1194,68 @@ function gpuEnc() { if (!FR.enc) FR.enc = GPU.dev.createCommandEncoder(); return
 // on in it, its state put back to a new pass's (the whole target, stencil reference 0). It is closed for real (gpuPassClose) only by what
 // can't go on in it: another target, a clear, a copy, a compute pass, a submit; and for the GPU timers and the hang recorder, which time
 // or name each pass. FR.pg: a new number for every part's pass, kept or not - a part that keeps its own pass between calls asks by it
-function gpuPassClose() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; FR.pd = null; } }
+function gpuPassClose() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; FR.pd = null; } if (GPU_CLR.size) gpuClearFlush(); }
+// A WHOLE TARGET'S CLEAR WAITS FOR THE NEXT PASS ON IT (calm-cost, Nov 11: the world's layer was cleared by a pass of its own every frame, a
+// whole target stored and then loaded again by the next pass on it): gpuClearLater(list) - [[texture record, { c: colour } or { d, s }], ...],
+// one clear - ends the open pass and keeps the clear pending; the next pass that has the texture as a target (its record's view, loaded,
+// written - not read-only) clears it as its load op instead (gpuClearTake). Anything else recorded first - a pass on other targets, a compute
+// pass, a copy, a read, the submit: whatever might read it - ends the open pass through gpuPassClose, which records the clears still
+// pending as passes of their own first (gpuClearFlush), as they were. The same commands in the same order, a pass fewer when the next
+// pass draws on it
+const GPU_CLR = new Map();
+let GPU_CLRG = 0;
+function gpuClearLater(list) {
+  if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; FR.pd = null; }   // (what was drawn before it: in the pass before the clear)
+  const g = ++GPU_CLRG;
+  for (const [t, v] of list) {
+    if (!t || !t.view) continue;
+    const o = GPU_CLR.get(t) || {}; o.g = g;
+    for (const k of ['c', 'd', 's']) if (v[k] != null) o[k] = v[k];
+    GPU_CLR.set(t, o); t.use = FR.sub;
+  }
+  FR.work++;
+}
+// (desc's targets that have a clear waiting: a copy of desc whose load ops clear them - the caller's desc never changed)
+function gpuClearTake(desc) {
+  let A = desc.colorAttachments, D = desc.depthStencilAttachment, out = desc;
+  const own = () => { if (out === desc) { out = Object.assign({}, desc); A = out.colorAttachments = A.slice(); if (D) D = out.depthStencilAttachment = Object.assign({}, D); } };
+  for (let i = 0; i < A.length; i++) {
+    const a = A[i], t = a && GPU_VDIM.get(a.view), o = t && GPU_CLR.get(t);
+    if (!o || o.c == null) continue;
+    if (a.loadOp === 'load') { own(); A[i] = Object.assign({}, a, { loadOp: 'clear', clearValue: o.c }); }
+    GPU_CLR.delete(t);   // (cleared as it begins - or it clears itself)
+  }
+  const t = D && GPU_VDIM.get(D.view), o = t && GPU_CLR.get(t);
+  if (o) {
+    if (o.d != null && gpuHasDepth(t.fmt) && !D.depthReadOnly) { if (D.depthLoadOp === 'load') { own(); D.depthLoadOp = 'clear'; D.depthClearValue = o.d; } o.d = null; }
+    if (o.s != null && gpuHasStencil(t.fmt) && !D.stencilReadOnly) { if (D.stencilLoadOp === 'load') { own(); D.stencilLoadOp = 'clear'; D.stencilClearValue = o.s; } o.s = null; }
+    if (o.d == null && o.s == null) GPU_CLR.delete(t);
+  }
+  return out;
+}
+// the clears still waiting, each one a pass of its own (the targets cleared together, together)
+function gpuClearFlush() {
+  while (GPU_CLR.size) {
+    const g = GPU_CLR.values().next().value.g, ca = []; let ds = null;
+    for (const [t, o] of GPU_CLR) {
+      if (o.g !== g) continue;
+      GPU_CLR.delete(t);
+      if (!t.view) continue;   // (freed since)
+      if (o.c != null) { ca.push({ view: t.view, loadOp: 'clear', clearValue: o.c, storeOp: 'store' }); continue; }
+      ds = { view: t.view };
+      if (gpuHasDepth(t.fmt)) Object.assign(ds, o.d != null ? { depthLoadOp: 'clear', depthClearValue: o.d } : { depthLoadOp: 'load' }, { depthStoreOp: 'store' });
+      if (gpuHasStencil(t.fmt)) Object.assign(ds, o.s != null ? { stencilLoadOp: 'clear', stencilClearValue: o.s } : { stencilLoadOp: 'load' }, { stencilStoreOp: 'store' });
+    }
+    if (!ca.length && !ds) continue;
+    if (GT.on) gtMark('clear');
+    gpuEnc().beginRenderPass(ds ? { colorAttachments: ca, depthStencilAttachment: ds } : { colorAttachments: ca }).end(); GPU.stats.passes++;
+  }
+}
 function gpuPassEnd() { if (FR.pass && (GT.on || (typeof GPUT !== 'undefined' && GPUT.cur) || !FR.pd)) gpuPassClose(); }
 // (the targets a pass on desc writes, when it can go on in the open one - its views, loaded and stored - else null; open: the open pass's
-// own, which may have cleared them as it began)
+// own, which may have cleared them as it began. d: where its depth / stencil view is in V - its read-only flags after it - or -1)
 function gpuPassSig(desc, open) {
-  const A = desc.colorAttachments, V = []; let dim = null;
+  const A = desc.colorAttachments, V = []; let dim = null, di = -1;
   for (const a of A) {
     if (!a) { V.push(null); continue; }
     if ((!open && a.loadOp !== 'load') || a.storeOp !== 'store' || a.resolveTarget) return null;
@@ -1208,16 +1264,28 @@ function gpuPassSig(desc, open) {
   const d = desc.depthStencilAttachment;
   if (d) {
     if ((!open && ((d.depthLoadOp && d.depthLoadOp !== 'load') || (d.stencilLoadOp && d.stencilLoadOp !== 'load'))) || (d.depthStoreOp && d.depthStoreOp !== 'store') || (d.stencilStoreOp && d.stencilStoreOp !== 'store')) return null;
-    V.push(d.view, !!d.depthReadOnly, !!d.stencilReadOnly); dim = dim || GPU_VDIM.get(d.view);
+    di = V.length; V.push(d.view, !!d.depthReadOnly, !!d.stencilReadOnly); dim = dim || GPU_VDIM.get(d.view);
   } else V.push(0);
-  return dim ? { V, w: dim.w, h: dim.h } : null;
+  return dim ? { V, d: di, w: dim.w, h: dim.h } : null;
+}
+// (a pass s can go on in the open one o: the same views; its depth / stencil asked read-only goes on in an open pass that holds them read-write as
+// well - its pipelines write neither, which a read-write attachment allows (the clipped draws of the water, the things, the frame's draws, read-only,
+// between the GL front's and the ground's, read-write, on the same layer); asked read-write, never in a read-only one)
+// (the open pass holds view - a depth / stencil view - as its attachment: a part whose draw needs no clip may attach it too, read-only, its pipelines
+// testing nothing, and so go on in it - the water's draws, waterDraw)
+function gpuPassHolds(view) { const o = FR.pass && FR.pd; return !!(o && o.d >= 0 && o.V[o.d] === view); }
+function gpuPassFits(s, o) {
+  const a = s.V, b = o.V; if (a.length !== b.length || s.d !== o.d) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && !(s.d >= 0 && i > s.d && a[i] === true && b[i] === false)) return false;
+  return true;
 }
 // a render pass on desc's targets (key: which part's - ?gpuoff, the hang recorder); the open one gone on in when it's on the same targets
 function gpuPassBegin(desc, key, uses) {
   if (gpuOffKey(key)) { gpuPassClose(); return GPU_NOPASS; }
   FR.pg++;
+  if (GPU_CLR.size) desc = gpuClearTake(desc);   // (its targets' clears waiting: its load ops; any left are another target's - recorded before it, gpuPassClose)
   const sig = GT.on || (typeof GPUT !== 'undefined' && GPUT.cur) ? null : gpuPassSig(desc), o = FR.pd;
-  if (FR.pass && sig && o && sig.V.length === o.V.length && sig.V.every((v, i) => v === o.V[i])) {
+  if (FR.pass && !GPU_CLR.size && sig && o && gpuPassFits(sig, o)) {
     if (uses) for (const t of uses) if (t) t.use = FR.sub;
     const p = FR.pass; FR.pk = key;
     p.setViewport(0, 0, sig.w, sig.h, 0, 1); p.setScissorRect(0, 0, sig.w, sig.h); p.setStencilReference(0); p.setBlendConstant([0, 0, 0, 0]);
@@ -1297,7 +1365,7 @@ function gpuFrameEnd(screen) {
   FR.frame++;
 }
 // after a device loss: nothing recorded survives
-function gpuFrameReset() { FR.enc = null; FR.pass = null; FR.pk = null; FR.pd = null; FR.qs = null; FR.qn = 0; FR.wait = []; FR.reads.clear(); FR.present = null; ARENA.chunks = []; ARENA.cur = ARENA.off = 0; GPU_SAMP.clear(); GPU_TRASH.length = 0; }
+function gpuFrameReset() { FR.enc = null; FR.pass = null; FR.pk = null; FR.pd = null; FR.qs = null; FR.qn = 0; FR.wait = []; FR.reads.clear(); FR.present = null; GPU_CLR.clear(); ARENA.chunks = []; ARENA.cur = ARENA.off = 0; GPU_SAMP.clear(); GPU_TRASH.length = 0; }
 
 /* ---- the screen shown: its texture (rows bottom-up, as WebGL's) turned over onto the canvas, every pixel as it is ---- */
 const GPU_PRESENT_WGSL = `
@@ -1307,7 +1375,7 @@ const GPU_PRESENT_WGSL = `
 function gpuPresent(screen) {
   const P = FR.present && FR.present.ep === GPU.ep ? FR.present : (FR.present = (() => {
     const m = GPU.dev.createShaderModule({ code: GPU_PRESENT_WGSL });
-    const pipe = GPU.dev.createRenderPipeline({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } });
+    const pipe = GPU.dev.createRenderPipeline({ layout: 'auto', label: 'present', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } });
     return { ep: GPU.ep, pipe, bg: null, view: null };
   })());
   if (P.view !== screen.view) { P.view = screen.view; P.bg = GPU.dev.createBindGroup({ layout: P.pipe.getBindGroupLayout(0), entries: [{ binding: 0, resource: screen.view }] }); }
@@ -1836,22 +1904,29 @@ function gpuGLTargets(gl, fb) {
   if (fb._T && fb._T.key === key) return fb._T;
   return (fb._T = { key, col, ds, w, h, screen: false, db: fb.db, fk });
 }
-// the open pass on T (a new one when T isn't the open one's, or to clear: cl { c (colour), ci (that attachment only), s, d })
+// the open pass on T (a new one when T isn't the open one's); or T's targets cleared: cl { c (colour), ci (that attachment only), s, d } - the
+// clear waits for the next pass on them (gpuClearLater, 30-frame.js)
 function gpuGLPass(gl, T, cl) {
-  if (!cl && FR.pass && FR.pk === T.key) return FR.pass;
+  if (cl) {
+    const L = [];
+    for (let i = 0; i < T.col.length; i++) if (T.col[i] && cl.c && (cl.ci === undefined || cl.ci === i)) L.push([T.col[i], { c: cl.c }]);
+    if (T.ds) { const f = T.ds.fmt, v = {}; if (gpuHasDepth(f) && cl.d != null) v.d = cl.d; if (gpuHasStencil(f) && cl.s != null) v.s = cl.s; if (v.d != null || v.s != null) L.push([T.ds, v]); }
+    gpuClearLater(L);
+    return null;
+  }
+  if (FR.pass && FR.pk === T.key) return FR.pass;
   const ca = [];
   for (let i = 0; i < T.col.length; i++) {
     const t = T.col[i]; if (!t) { ca.push(null); continue; }
-    const c = cl && cl.c && (cl.ci === undefined || cl.ci === i);
-    ca.push({ view: t.view, loadOp: c ? 'clear' : 'load', clearValue: c ? cl.c : undefined, storeOp: 'store' });
+    ca.push({ view: t.view, loadOp: 'load', storeOp: 'store' });
     t.use = FR.sub;
   }
   const desc = { colorAttachments: ca };
   if (T.ds) {
     const f = T.ds.fmt, D = {};
     D.view = T.ds.view;
-    if (gpuHasDepth(f)) { const c = cl && cl.d != null; D.depthLoadOp = c ? 'clear' : 'load'; D.depthStoreOp = 'store'; if (c) D.depthClearValue = cl.d; }
-    if (gpuHasStencil(f)) { const c = cl && cl.s != null; D.stencilLoadOp = c ? 'clear' : 'load'; D.stencilStoreOp = 'store'; if (c) D.stencilClearValue = cl.s; }
+    if (gpuHasDepth(f)) { D.depthLoadOp = 'load'; D.depthStoreOp = 'store'; }
+    if (gpuHasStencil(f)) { D.stencilLoadOp = 'load'; D.stencilStoreOp = 'store'; }
     desc.depthStencilAttachment = D; T.ds.use = FR.sub;
   }
   const pass = gpuPassBegin(desc, T.key);
@@ -1925,7 +2000,7 @@ function gpuGLPipeline(gl, p, lay, T, mode) {
     return tg;
   });
   const desc = {
-    layout: p.pl,
+    layout: p.pl, label: p.label || 'gl ' + p.id,   // (the program's name - the GL front's quads, its paths: glSetup)
     vertex: { module: p.vs, entryPoint: 'main', buffers: lay.buffers },
     fragment: { module: p.fs, entryPoint: 'main', targets },
     primitive: { topology: gpuTopo(mode), frontFace: GPU.ff, cullMode: 'none' },
@@ -2071,7 +2146,7 @@ function gpuGLClearQuad(gl, T, C, S, D, scis, only, col) {
     for (const i of outs) { const t = ints[i] ? (/uint/.test(T.col[i].fmt) ? 'vec4u' : 'vec4i') : 'vec4f'; code += 'o.o' + i + ' = ' + t + '(' + col.map(v => ints[i] ? String(Math.round(v)) : gpuWf(v)).join(', ') + '); '; }
     code += 'return o; }\n';
     const m = gpuModule(code, 'clear');
-    const desc = { layout: 'auto', vertex: { module: m, entryPoint: 'vs' },
+    const desc = { layout: 'auto', label: 'gl clear', vertex: { module: m, entryPoint: 'vs' },
       fragment: { module: m, entryPoint: 'fs', targets: T.col.map((t, i) => t ? { format: t.fmt, writeMask: only === undefined || only === i ? wm : 0 } : null) },
       primitive: { topology: 'triangle-list' } };
     if (T.ds) { const f = T.ds.fmt, hs = gpuHasStencil(f), hd = gpuHasDepth(f); desc.depthStencil = { format: f, depthWriteEnabled: !!(hd && D), depthCompare: 'always', stencilFront: { compare: 'always', passOp: hs && sw ? 'replace' : 'keep' }, stencilBack: { compare: 'always', passOp: hs && sw ? 'replace' : 'keep' }, stencilWriteMask: sw }; }
@@ -2092,7 +2167,7 @@ function gpuGLClearQuad(gl, T, C, S, D, scis, only, col) {
 function gpuGLTransformFeedback(gl, p, first, count) {
   gpuProgReady(p);
   const L = p.L, B = 1 + L.tex.length * 2, out = gl.tfBuf[0]; if (!out) return;
-  if (!p.cpipe) p.cpipe = GPU.dev.createComputePipeline({ layout: p.pl, compute: { module: p.cs, entryPoint: 'main' } });
+  if (!p.cpipe) p.cpipe = GPU.dev.createComputePipeline({ layout: p.pl, label: (p.label || 'gl ' + p.id) + ' tf', compute: { module: p.cs, entryPoint: 'main' } });
   gpuGLUniforms(p);
   // where each attribute's numbers are (floats): offset, stride, count
   const P = new Int32Array(2 + 48), bufs = [];
@@ -2296,7 +2371,7 @@ function gpuCanvasShow(V) {
   if (!V || V.dropped || !GPU.on || GPU.lost) return false;
   if (typeof glFlush === 'function') glFlush();
   const t = V.T.tex && V.T.tex.t; if (!t) return false;
-  if (!V.pipe || V.ep !== GPU.ep) { const m = gpuModule(GPU_HUD_WGSL, 'canvas show'); V.pipe = gpuRenderPipe({ layout: 'auto', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } }); V.ep = GPU.ep; V.view = null; }
+  if (!V.pipe || V.ep !== GPU.ep) { const m = gpuModule(GPU_HUD_WGSL, 'canvas show'); V.pipe = gpuRenderPipe({ layout: 'auto', label: 'canvas show', vertex: { module: m, entryPoint: 'vs' }, fragment: { module: m, entryPoint: 'fs', targets: [{ format: GPU.cfmt }] }, primitive: { topology: 'triangle-list' } }); V.ep = GPU.ep; V.view = null; }
   if (V.view !== t.view) { V.view = t.view; V.bg = gpuBindGroup(V.pipe.getBindGroupLayout(0), [{ binding: 0, resource: t.view }]); }
   const cur = V.ctx.getCurrentTexture();
   if (cur.width !== t.w || cur.height !== t.h) return false;
@@ -2456,7 +2531,7 @@ function frameLay(c, tex, sx, sy, sw, sh, ph, dx, dy, dw, dh, box) {
   Fl[w0 + 16] = Math.fround(Math.round(s.ga * 255) / 255); Fl[w0 + 17] = Fl[w0 + 18] = Fl[w0 + 19] = 0;   // (the context's alpha, as glAlpha gives it)
   const key = frameDrawKey(X);
   let pipe = FLAY.pipes.get(key);
-  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FLAY.pl, vertex: { module: FLAY.m, entryPoint: 'vs' }, fragment: { module: FLAY.m, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, frameDrawStencil(X))); FLAY.pipes.set(key, pipe); }
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FLAY.pl, label: 'lay', vertex: { module: FLAY.m, entryPoint: 'vs' }, fragment: { module: FLAY.m, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, frameDrawStencil(X))); FLAY.pipes.set(key, pipe); }
   // (its bind group for this arena chunk, kept on the picture: made again when the chunk's buffer or the device is new)
   const bm = tex.fxl || (tex.fxl = new Map()); let e = bm.get(ch.id);
   if (!e || e.gb !== ch.gb || e.ep !== FLAY.ep) { e = { gb: ch.gb, ep: FLAY.ep, g: gpuBindGroup(FLAY.bl, [{ binding: 0, resource: { buffer: ch.gb, offset: 0, size: 96 } }, { binding: 1, resource: tex.view }], 'lay') }; bm.set(ch.id, e); }
@@ -2487,7 +2562,8 @@ function frameLayTarget(c, L, sx, sy, sw, sh, dx, dy, dw, dh) {
                                  transform (upright - scale and offset: the world's and the sky's contexts never turn), its clip (the
                                  target's stencil, built as the GL front builds it) and its scissor. opts:
        op    the blend (GLB's names: 'source-over', 'source-atop', 'lighter', ...); none: the context's
-       key   the pass's name (?gpuoff=, ?gputrace=: the part's - 'ground:blocks', 'gsky:draw', 'px'); none: 'rects'
+       key   the pass's name (?gpuoff=, ?gputrace=: the part's - 'ground:blocks', 'gsky:draw', 'px'); none: 'rects'. Its pipelines are
+             named by it too ('rects:gsky:draw' - the GPU's time a caller)
        grad  { y0, y1, stops: [[at 0..1, [r, g, b] 0-255, alpha], ...] (8 at most) } - every rectangle of the draw coloured by the
              gradient from row y0 to row y1 of the context's space, as createLinearGradient(0, y0, 0, y1) fills it (mixed straight, then
              premultiplied), not by its own colours
@@ -2507,12 +2583,15 @@ struct H { tgt: vec4f, m: vec4f, g: vec4f, st: array<vec4f, 16> };
 @group(0) @binding(0) var<storage, read> h: H;
 // a rectangle: x, y, w, h in the context's space | its colour at its top, premultiplied | at its foot
 @group(0) @binding(1) var<storage, read> R: array<vec4f>;
-struct VO { @builtin(position) p: vec4f, @location(0) c: vec4f, @location(1) @interpolate(flat) n: u32 };
+// (Nov 11, cave-cost: a pixel reads nothing of its rectangle - its colour at the top as it is (flat: the vertex's, bit for bit) and whether its
+// foot's is the same come from the vertex stage; only a gradient's draw reads its stops)
+struct VO { @builtin(position) p: vec4f, @location(0) c: vec4f, @location(1) @interpolate(flat) a: vec4f, @location(2) @interpolate(flat) same: u32 };
 @vertex fn vs(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
   let r = R[n * 3u]; let k = vec2f(f32(v & 1u), f32(v >> 1u));
   let q = h.m.xy * (r.xy + k * r.zw) + h.m.zw;
   var o: VO; o.p = vec4f(q.x / h.tgt.x * 2.0 - 1.0, q.y / h.tgt.y * 2.0 - 1.0, 0.0, 1.0);   // (the target's rows: WebGL's, bottom up - src/gpu/10-glsl.js)
-  o.c = mix(R[n * 3u + 1u], R[n * 3u + 2u], k.y); o.n = n;
+  let a = R[n * 3u + 1u]; let b = R[n * 3u + 2u];
+  o.c = mix(a, b, k.y); o.a = a; o.same = select(0u, 1u, all(a == b));
   return o;
 }
 @fragment fn fs(i: VO) -> @location(0) vec4f {
@@ -2528,8 +2607,7 @@ struct VO { @builtin(position) p: vec4f, @location(0) c: vec4f, @location(1) @in
     }
     return vec4f(c.rgb * c.a, c.a);
   }
-  let a = R[i.n * 3u + 1u];
-  if (all(a == R[i.n * 3u + 2u])) { return a; }
+  if (i.same != 0u) { return i.a; }
   return i.c;
 }`;
 function frameRectList() {
@@ -2570,11 +2648,11 @@ function frameRects(ctx, L, opts) {
     H[8] = m[3] * G.y0 + m[5]; H[9] = m[3] * G.y1 + m[5]; H[10] = k;
     for (let i = 0; i < k; i++) { const [t, c, a] = G.stops[i], q = 12 + i * 8; H[q] = t; H[q + 4] = c[0] / 255; H[q + 5] = c[1] / 255; H[q + 6] = c[2] / 255; H[q + 7] = a; }
   }
-  const key = frameDrawKey(X, op);
+  const pk = o.key || 'rects', key = frameDrawKey(X, op) + '|' + pk;   // (a pipeline a caller - named by its pass's key, 'rects:gsky:draw': the GPU's time a caller)
   let pipe = FRECT.pipes.get(key);
-  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FRECT.pl, label: 'rects', vertex: { module: FRECT.mod, entryPoint: 'vs' }, fragment: { module: FRECT.mod, entryPoint: 'fs', targets: [frameDrawColour(X, op)] }, primitive: { topology: 'triangle-strip' } }, frameDrawStencil(X))); FRECT.pipes.set(key, pipe); }
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FRECT.pl, label: 'rects:' + pk, vertex: { module: FRECT.mod, entryPoint: 'vs' }, fragment: { module: FRECT.mod, entryPoint: 'fs', targets: [frameDrawColour(X, op)] }, primitive: { topology: 'triangle-strip' } }, frameDrawStencil(X))); FRECT.pipes.set(key, pipe); }
   const [hc, ho] = arenaAlloc(FRECT.HB, 256); hc.cpu.set(new Uint8Array(H.buffer), ho);
-  const pass = frameDrawPass(X, o.key || 'rects');
+  const pass = frameDrawPass(X, pk);
   pass.setPipeline(pipe);
   for (let i0 = 0; i0 < n; i0 += FRECT.MAX) {
     const k = Math.min(FRECT.MAX, n - i0), nb = k * 48, [rc, ro] = arenaAlloc(nb, 256);
@@ -7988,8 +8066,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 981;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 11 14:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 982;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 11 15:11';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -22546,7 +22624,7 @@ function glSetup() {
   gl.attachShader(p, glShader(gl.VERTEX_SHADER, GL_VS)); gl.attachShader(p, glShader(gl.FRAGMENT_SHADER, GL_FS));
   gl.linkProgram(p);
   if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-  GLR.prog = p; gl.useProgram(p);
+  GLR.prog = p; p.label = 'gl quads'; gl.useProgram(p);   // (its pipelines' name - 41-gl-draw.js)
   for (let i = 0; i < 8; i++) gl.uniform1i(gl.getUniformLocation(p, 'u_t' + i), i);
   gl.uniform1i(gl.getUniformLocation(p, 'u_grad'), 8);
   GLR.uSize = gl.getUniformLocation(p, 'u_size');
@@ -22560,7 +22638,7 @@ void main() { vec2 p = a_pos / u_size; gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 -
 precision highp float; out vec4 o; void main() { o = vec4(0.0); }`));
     gl.linkProgram(q);
     if (!gl.getProgramParameter(q, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(q));
-    GLR.tprog = q; GLR.tuSize = gl.getUniformLocation(q, 'u_size'); gl.useProgram(p); }
+    GLR.tprog = q; q.label = 'gl paths'; GLR.tuSize = gl.getUniformLocation(q, 'u_size'); gl.useProgram(p); }
   // the quad batch: 4 vertices a quad, 9 numbers a vertex (x, y, u, v, colour as 4 bytes, mode, k, and a tint's
   // multiply and add as 4 bytes each)
   // (engine stage 6, Oct 30: and an upright sprite's corner on the target, its texture coordinate there, and texels a pixel
@@ -23495,7 +23573,8 @@ try { if (/[?&]gpuw=0/.test(location.search)) for (const k in GPUW) GPUW[k] = 0;
        the swell's phases reduced on the processor in double precision so a far place in a big world is as exact as near 0;
      - THE ONE WATER SHADER (WATER_WGSL fs): every water drawn from that surface - the deep (its colours by depth, the clouds' shade),
        the tint over what's in the water with the middle of the ocean's dark, and the surface's bright line and the pale band under it,
-       for the ocean (renderObjects) and for every lake (its line in the land's pass - drawLake, 50-land-lake.js). One line rule for
+       for the ocean (renderObjects - fsSurf, with the wake and the crests in the same pass) and for every lake (its line in the land's
+       pass - drawLake, 50-land-lake.js). One line rule for
        every water: joined to its neighbours at their midpoints, never up a step (two waters side by side: no line up the wall).
    The colours by depth are the two ramps (deep, tint) as the canvas gradients had them: 256 premultiplied colours, read with the
    same linear filter - the same picture as the GL front's gradient rows.
@@ -23512,7 +23591,7 @@ struct SP {
 };
 struct DP {
   m: vec4f,      // the context's transform: scale x, scale y, offset x, offset y (device = user * scale + offset)
-  tgt: vec4f,    // the target's width, height; the mode (0 deep, 1 tint, 2 the ocean's line, 3 the lakes' line, 4 the pools' lines); the surface's length
+  tgt: vec4f,    // the target's width, height; the mode (0 deep, 1 tint, 3 the lakes' line, 4 the pools' lines); the surface's length
   g: vec4f,      // the ramp: its row, the gradient's y0, y1 (user rows), the global alpha
   c1: vec4f,     // the clouds' shade (premultiplied), deep's second layer
   yo: vec4f,     // the layers' offsets under the surface (0, 1), the bottom (Bt), 1 when the shade is laid
@@ -23529,18 +23608,21 @@ struct DP {
   sh2: vec4f,    // the shadows' colour (0..1); the shade rows' global alpha
   ab0: vec4f,    // the deep's dark: the cells' left, top, size, deepK (lit); unlit: -, the fill's top
   ab1: vec4f,    // the cells across, down; the dark's top and bottom rows (ya, yb)
-  ab2: vec4f,    // how many lights (0: the plain gradient), the fill's right, its bottom
+  ab2: vec4f,    // how many lights (0: the plain gradient), the fill's right, its bottom; the light map's tiles across (abCell)
   poly: vec4f,   // a lake's outline (the shadows' clip): its surface chain's first item and count, its floor chain's
   bd: vec4f,     // a body of the land's water: its lift (rows), its fill's columns (from, to), its fill's top row (before the lift)
-  bd2: vec4f,    // its fill's bottom row (before the lift); rays: how many of the bodies' outlines, their first header
+  bd2: vec4f,    // its fill's bottom row (before the lift); fsBody: the second gradient's ramp row (-1: none), its rows y0, y1; rays: how many of the
+                 // bodies' outlines, their first header
   wl: vec4f,     // what's measured from each water's level (fsLevel): -, the surface's offset (rows), how many lakes in the items, -
   wl2: vec4f,    // the ocean's (the columns no lake in the items holds): its gradient's rows y0, y1, its bottom row; 1 when it's drawn
-  wk: array<vec4f, 7>,   // the wake (fsWake): 1 the foam on top / 0 the churned water under, the field's first column, PB, how many columns; then its three noises (wkN)
+  wk: array<vec4f, 7>,   // the wake (fsSurf): -, the field's first column, PB, how many columns; then its three noises (wkN)
   fl: array<vec4f, 3>,   // the floor under the water (vsFloor): the draw's first column, how many runs, LT_CELL, LT_Y0 | SV, CAMPX, TOPPX, the band's rows |
                          // the ramp's t a world unit, the slices' slots' first item, the first slice, how many
   di: array<vec4f, 4>,   // the distortion (fsDistort): its first row y0, the view's width, the slow waves' amplitude, the band | SHY, TOPPX, SV, the clock |
                          // the snapshot's rows, how many stirred pieces, how many rings in this draw, the farthest a piece shifts | -, -, the first ring's
                          // item, 1: the rings only (a further draw)
+  cr: array<vec4f, 8>,   // the crests (fsSurf): their numbers (crestAt) | the looks drawn - the crests' window's first item, which looks (1 the wake's churned water
+                         // under the surface, 2 the line and its band, 4 the crests, 8 the wake's foam on top), -, -
 };
 @group(0) @binding(0) var<storage, read> P: SP;
 @group(0) @binding(1) var<storage, read> still: array<f32>;
@@ -23626,6 +23708,10 @@ fn gradAt(y: f32, y0: f32, y1: f32) -> vec4f {
   return textureSampleLevel(ramp, rampS, vec2f((t * 255.0 + 0.5) / 256.0, (D.g.x + 0.5) / 16.0), 0.0) * D.g.w;
 }
 fn grad(y: f32) -> vec4f { return gradAt(y, D.g.y, D.g.z); }
+fn gradRow(row: f32, y: f32, y0: f32, y1: f32) -> vec4f {   // (another ramp row's gradient, the same alpha)
+  let t = clamp((y + 0.5 - y0) / (y1 - y0), 0.0, 1.0);
+  return textureSampleLevel(ramp, rampS, vec2f((t * 255.0 + 0.5) / 256.0, (row + 0.5) / 16.0), 0.0) * D.g.w;
+}
 fn dseaAt(k: i32) -> vec2f { let v = D.sea[k / 2]; if ((k & 1) == 0) { return v.xy; } return v.zw; }
 // the middle of the ocean's dark, a strip of PB x 2 columns at a time, from the surface at the strip's first column down
 fn strips(x: f32, y: f32) -> vec4f {
@@ -23663,7 +23749,7 @@ fn lakeOk(c: f32) -> bool {
   let L = items[k];
   return L.y > 0.5 && L.x > surfW(c) + 0.5;
 }
-fn colOk(c: f32, s: i32) -> bool { if (D.tgt.z < 2.5) { return true; } return lakeSpan(c) == s && lakeOk(c); }
+fn colOk(c: f32, s: i32) -> bool { return lakeSpan(c) == s && lakeOk(c); }
 // THE SURFACE'S BRIGHT LINE AND THE PALE BAND UNDER IT, every water's one rule: at a column whose surface is row yc, joined to a neighbour (its row yl /
 // yr; jl / jr: it has a line of the same water) at their midpoint, never up a step bigger than lp.w. Its colour at row y; alpha -1: none
 fn lineCol(y: f32, yc: f32, yl: f32, yr: f32, jl: bool, jr: bool) -> vec4f {
@@ -23690,10 +23776,9 @@ fn lineCol(y: f32, yc: f32, yl: f32, yr: f32, jl: bool, jr: bool) -> vec4f {
     if (acc.a <= 0.0) { discard; }
     return acc;
   }
-  // the surface's bright line and the pale band under it: every water's, one rule
+  // a lake's line and the pale band under it (mode 3): every water's one rule - the ocean's is fsSurf's
   if (x < D.lp.y || x >= D.lp.z) { discard; }
-  var s = -1;
-  if (mode == 3) { s = lakeSpan(x); if (s < 0 || !lakeOk(x)) { discard; } }
+  let s = lakeSpan(x); if (s < 0 || !lakeOk(x)) { discard; }
   let c = lineCol(y, surfRow(x), surfRow(x - 1.0), surfRow(x + 1.0), colOk(x - 1.0, s), colOk(x + 1.0, s));
   if (c.a < 0.0) { discard; }
   return c;
@@ -23809,15 +23894,21 @@ fn pxf(wx: f32) -> f32 { return floor(wx * D.sh1.x + 0.5) - D.sh1.y; }
 }
 // ---- THE DEEP'S DARK (drawAbyss): with no light in it, its gradient (ramp 2) over its rows; with lights, the light map's cells (items: 2
 // each - x, y, reach, strength; aim x, y, 1 a cone / 0 a glow round, 1 a beam) worked out at their middles and laid smoothed, the dark then
-// the beams' glow
+// the beams' glow. A cell asks only the lights that can reach it: the map in tiles of 8 x 8 cells (ABT), each tile's lights a bit each (items
+// after the lights, 4 tiles an item - a whole number under 2^24, exact in f32: waterAbyssLitGPU), found from their boxes on the processor - a
+// light whose box misses every cell middle of a tile is skipped there, as the box test below skipped it
+const ABT = 8;
 fn dkAt(y: f32) -> f32 { let u = clamp((y - D.ab1.z) / max(1.0, D.ab1.w - D.ab1.z), 0.0, 1.0); return select(0.62 + 0.36 * (u - 0.5) * 2.0, 0.62 * u * 2.0, u < 0.5); }
 // (a cell's two colours as a struct's fields - no array returned: Intel D3D12 scratch memory, Nov 11)
 struct AB { d: vec4f, g: vec4f };   // (the dark, the glow)
 fn abCell(q: i32, r: i32) -> AB {
   let xc = D.ab0.x + (f32(q) + 0.5) * D.ab0.z; let yc = D.ab0.y + (f32(r) + 0.5) * D.ab0.z; let d = dkAt(yc);
   var lit = 0.0; var glow = 0.0;
-  for (var k = 0; k < 24; k++) {
-    if (f32(k) >= D.ab2.x) { break; }
+  let t = (r / ABT) * i32(D.ab2.w) + q / ABT; let e = i32(D.ab2.x) * 2 + t / 4;
+  var mk = u32(items[e][t % 4]);
+  for (var it = 0; it < 24; it++) {
+    if (mk == 0u) { break; }
+    let k = i32(firstTrailingBit(mk)); mk = mk & (mk - 1u);   // (this tile's lights, in order)
     let a = items[k * 2]; let b = items[k * 2 + 1]; let R = a.z;
     if (yc < a.y - R || yc > a.y + R || xc < a.x - R || xc > a.x + R) { continue; }
     let dx = xc - a.x; let dy = yc - a.y; let d2 = dx * dx + dy * dy;
@@ -23844,15 +23935,16 @@ fn windTile(i: u32, px: f32, py: f32) -> i32 {
   for (var o = 0; o < 64; o++) { if (f32(o) >= t.y) { break; } let e = e0 + o; w += windOf(items[i32(items[e / 4][e % 4])], px, py); }
   return w;
 }
-// ---- A BODY OF THE LAND'S WATER (a lake, a pool, the sea caves - lakeWaterIn): a gradient (the tint, or a biome's own water) laid over the
-// body's fill rectangle lifted to its level, inside its outlines (in tiles, above)
+// ---- A BODY OF THE LAND'S WATER (a lake, a pool, the sea caves - lakeWaterIn): its gradients - the tint, then a biome's own water over it (bd2.y: its
+// ramp row, -1 none) - laid over the body's fill rectangle lifted to its level, inside its outlines (in tiles, above: tested once for both)
 @fragment fn fsBody(v: VO) -> @location(0) vec4f {
   let x = floor((v.p.x - D.m.z) / D.m.x);
   let y = floor((D.tgt.y - v.p.y - D.m.w) / D.m.y);
   let yl = y - D.bd.x;
   if (x < D.bd.y || x >= D.bd.z || yl < D.bd.w || yl >= D.bd2.x) { discard; }
   if (windTile(v.i, x + 0.5, y + 0.5) == 0) { discard; }
-  let c = grad(yl);
+  var c = grad(yl);
+  if (D.bd2.y >= 0.0) { let b = gradRow(D.bd2.y, yl, D.bd2.z, D.bd2.w); c = b + c * (1.0 - b.a); }
   if (c.a <= 0.0) { discard; }
   return c;
 }
@@ -23948,7 +24040,7 @@ fn wNoise(i0: i32, x: f32, j0: i32, y: f32, sd: u32) -> f32 {
   let a = wLat(i, j, sd); let b = wLat(i + 1, j, sd); let c = wLat(i, j + 1, sd); let d = wLat(i + 1, j + 1, sd);
   return (a + (b - a) * u) * (1.0 - v) + (c + (d - c) * u) * v;
 }
-// ---- THE WAKE (drawWakeField): every wake patch adds to a per-column amount of churned water, so overlapping patches merge into one white band; its
+// ---- THE WAKE (waterSurfaceGPU): every wake patch adds to a per-column amount of churned water, so overlapping patches merge into one white band; its
 // texture is noise anchored in the sea, so it doesn't swim; it breaks up into gaps as the patches age.
 // THE FIELD (compute, a view): each column PB wide from the field's first (WK.x0) the sum over the patches in view - a row each: its middle column, half
 // width on the screen, strength (1 - life / max), its depth factor - of the amount (I) and the amount times the depth factor (K)
@@ -23969,52 +24061,54 @@ fn foamShade(t: f32) -> i32 { let f = t * 4.0 - floor(t * 4.0); let d = abs(f - 
 fn foamA(a: f32) -> i32 { return i32(clamp(floor(a * 12.0 + 0.5), 0.0, 12.0)); }
 // (noise k at a column's middle xc and a block's row yb: its lattice x = x0 + xc ax + yb bx, y = y0 + yb by - wk[1 + 2k] (x0's part, whole, y0's, whole), wk[2 + 2k] (ax, bx, by, seed))
 fn wkN(k: u32, xc: f32, yb: f32) -> f32 { let A = D.wk[1u + k * 2u]; let B = D.wk[2u + k * 2u]; return wNoise(i32(A.y), A.x + xc * B.x + yb * B.y, i32(A.w), A.z + yb * B.z, u32(B.w)); }
-// THE WAKE'S TWO PASSES, a pixel each (items: the palette, then the field): on top, the foam lying on the surface behind each hull and the wet lip under it;
-// under, the churned water - dense and white just under the surface, thinning with depth and age. Its blocks PB on a side, as the field's columns
-@fragment fn fsWake(@builtin(position) p: vec4f) -> @location(0) vec4f {
-  let x = floor((p.x - D.m.z) / D.m.x); let y = floor((D.tgt.y - p.y - D.m.w) / D.m.y);
+// THE WAKE'S TWO LOOKS at a pixel (items: the palette, then the field; M: which - 1 under, 8 on top): on top, the foam lying on the surface behind each hull and
+// the wet lip under it; under, the churned water - dense and white just under the surface, thinning with depth and age. Its blocks PB on a side, as the
+// field's columns; the column's numbers (its amount, depth, surface) worked out once for both. Each premultiplied; clear: none
+struct WKC { under: vec4f, top: vec4f };
+fn wkPal(col: i32) -> vec4f { return items[u32(col)] * D.g.w; }
+fn wakeAt(x: f32, y: f32, M: u32) -> WKC {
+  var o = WKC(vec4f(0.0), vec4f(0.0));
   let H = D.wk[0]; let PB = H.z; let SV = D.ds.z;
-  let i = floor((x - H.y) / PB); if (i < 0.0 || i >= H.w) { discard; }
-  let F = items[32u + u32(i)]; let I = F.x; if (I < 0.03) { discard; }
+  let i = floor((x - H.y) / PB); if (i < 0.0 || i >= H.w) { return o; }
+  let F = items[32u + u32(i)]; let I = F.x; if (I < 0.03) { return o; }
   let xc = H.y + i * PB + PB * 0.5;
   let m = 1.0 - exp(-I * 0.8); let K = F.y / I;
   let sy = floor(surfRow(clamp(xc, -3.0, D.tgt.w - 4.0)) / PB) * PB;
-  var col = -1;
-  if (H.x > 0.5) {
-    let cov = m * (0.55 + 0.9 * wkN(0u, xc, 0.0));
-    if (cov < 0.3) { discard; }
-    let th = max(PB, floor((0.6 + 2.6 * min(1.0, cov)) * SV / PB + 0.5) * PB);
-    if (y >= sy - th && y < sy + 1.0) {
-      if (cov < 0.45) { col = 18; } else { let yb = min(sy - th + floor((y - sy + th) / PB) * PB, sy - PB); col = foamShade(wkN(1u, xc, yb)); }
-    } else {
-      let lip = floor(2.0 * m * SV / PB + 0.5) * PB;
-      if (y >= sy + 1.0 && y < sy + 1.0 + lip) { col = foamA(0.7 * m); }
-    }
-  } else {
+  if ((M & 1u) != 0u) {
     let Dp = floor((3.0 + 14.0 * m) * K * SV + 0.5);
     if (y >= sy + PB && y < sy + Dp) {
       let yb = sy + PB + floor((y - sy - PB) / PB) * PB;
       let dens = m * pow(1.0 - (yb - sy) / Dp, 1.3) * (0.5 + wkN(2u, xc, yb));
-      if (dens >= 0.08) { col = foamA(min(0.7, dens * 0.75)); }
+      if (dens >= 0.08) { o.under = wkPal(foamA(min(0.7, dens * 0.75))); }
     }
   }
-  if (col < 0) { discard; }
-  let c = items[u32(col)] * D.g.w;
-  if (c.a <= 0.0) { discard; }
-  return c;
+  if ((M & 8u) != 0u) {
+    let cov = m * (0.55 + 0.9 * wkN(0u, xc, 0.0));
+    if (cov >= 0.3) {
+      var col = -1;
+      let th = max(PB, floor((0.6 + 2.6 * min(1.0, cov)) * SV / PB + 0.5) * PB);
+      if (y >= sy - th && y < sy + 1.0) {
+        if (cov < 0.45) { col = 18; } else { let yb = min(sy - th + floor((y - sy + th) / PB) * PB, sy - PB); col = foamShade(wkN(1u, xc, yb)); }
+      } else {
+        let lip = floor(2.0 * m * SV / PB + 0.5) * PB;
+        if (y >= sy + 1.0 && y < sy + 1.0 + lip) { col = foamA(0.7 * m); }
+      }
+      if (col >= 0) { o.top = wkPal(col); }
+    }
+  }
+  return o;
 }
-// ---- THE CRESTS (drawCrests): the foam on lively ripples - where the stepped water runs fast - and, in a rough sea, the whitecaps riding every big crest and
-// trailing down its back; a pixel each, by CREST_L's rules, their picks from the whole-number hash (wLat). items: the view's water columns [speed (wv), level
-// (WBASE)] from the window's first. wk: [0] the line's width, PB, 1 whitecaps, their height (capH); [1] waveAmp, time x 5, time x 10, the columns' count (N);
-// [2] the view's column 0's water column (whole, part), 1 / (SV DX), the window's first; [3] column 0's world x over 3 (whole, part), 1 / SV, the window's
-// length; [4..6] the crests' colours (CREST_PAL, premultiplied)
+// ---- THE CRESTS (waterSurfaceGPU): the foam on lively ripples - where the stepped water runs fast - and, in a rough sea, the whitecaps riding every big crest and
+// trailing down its back; a pixel each, by CREST_L's rules, their picks from the whole-number hash (wLat). items from cr[7].x: the view's water columns [speed
+// (wv), level (WBASE)] from the window's first. cr: [0] the line's width, PB, 1 whitecaps, their height (capH); [1] waveAmp, time x 5, time x 10, the columns'
+// count (N); [2] the view's column 0's water column (whole, part), 1 / (SV DX), the window's first; [3] column 0's world x over 3 (whole, part), 1 / SV, the
+// window's length; [4..6] the crests' colours (CREST_PAL, premultiplied). Clear: none
 fn crestCol(c: f32) -> vec4f {
-  let W = D.wk[2]; let k = clamp(i32(W.x) + i32(floor(W.y + c * W.z + 0.5)), 0, i32(D.wk[1].w) - 1) - i32(W.w);
-  return items[clamp(k, 0, i32(D.wk[3].w) - 1)];
+  let W = D.cr[2]; let k = clamp(i32(W.x) + i32(floor(W.y + c * W.z + 0.5)), 0, i32(D.cr[1].w) - 1) - i32(W.w);
+  return items[i32(D.cr[7].x) + clamp(k, 0, i32(D.cr[3].w) - 1)];
 }
-@fragment fn fsCrest(@builtin(position) p: vec4f) -> @location(0) vec4f {
-  let x = floor((p.x - D.m.z) / D.m.x); let y = floor((D.tgt.y - p.y - D.m.w) / D.m.y);
-  let H = D.wk[0]; let A = D.wk[1]; let Q = D.wk[3]; let lw = H.x; let PB = H.y; let vw = D.tgt.w - 6.0;
+fn crestAt(x: f32, y: f32) -> vec4f {
+  let H = D.cr[0]; let A = D.cr[1]; let Q = D.cr[3]; let lw = H.x; let PB = H.y; let vw = D.tgt.w - 6.0;
   var col = -1;
   // (ripples: a column every other one from -2, one or two wide, lw tall over the surface)
   let c = x - (x - 2.0 * floor(x / 2.0));
@@ -24044,8 +24138,26 @@ fn crestCol(c: f32) -> vec4f {
       }
     }
   }
-  if (col < 0) { discard; }
-  return D.wk[4 + col];
+  if (col < 0) { return vec4f(0.0); }
+  return D.cr[4 + col];
+}
+// ---- THE SURFACE'S OWN LOOKS IN ONE PASS (waterSurfaceGPU - the sea's pass; the lakes' in the land's): the wake's churned water under the surface, the
+// ocean's bright line and the pale band under it (lineCol, the one rule - joined to both neighbours), the crests, the wake's foam on top - each laid over the
+// last here, source-over, in the order their own passes were laid (cr[7].y: which of them). One read of the target a pixel instead of one a look
+@fragment fn fsSurf(@builtin(position) p: vec4f) -> @location(0) vec4f {
+  let x = floor((p.x - D.m.z) / D.m.x); let y = floor((D.tgt.y - p.y - D.m.w) / D.m.y);
+  let M = u32(D.cr[7].y);
+  var w = WKC(vec4f(0.0), vec4f(0.0));
+  if ((M & 9u) != 0u) { w = wakeAt(x, y, M); }
+  var acc = w.under;
+  if ((M & 2u) != 0u && x >= D.lp.y && x < D.lp.z) {
+    let c = lineCol(y, surfRow(x), surfRow(x - 1.0), surfRow(x + 1.0), true, true);
+    if (c.a >= 0.0) { acc = c + acc * (1.0 - c.a); }
+  }
+  if ((M & 4u) != 0u) { let c = crestAt(x, y); acc = c + acc * (1.0 - c.a); }
+  acc = w.top + acc * (1.0 - w.top.a);
+  if (acc.a <= 0.0) { discard; }
+  return acc;
 }
 // ---- THE SHIPS' WASH (drawShipWash): a ship under way - the bow piles the sea into a white wave rolling off to the sides, a band of foam runs back along the
 // waterline, the screws boil up white water astern; one solid mass of white water shaded by noise flowing back along the hull (bow) or churning in the sea
@@ -24684,7 +24796,7 @@ struct VQ { @builtin(position) p: vec4f, @location(0) @interpolate(flat) q: f32 
   return vec4f(m * D.g.w, D.g.w);
 }
 `;
-const WGPU_W = { wk: [null, null], wkKey: ['', ''], wbl: null, wpipe: null, ep: -1, mod: null, cbl: null, cpipe: null, bl: null, pl: null, rpipe: new Map(), samp: null, ramp: null, rampKey: [], still: null, stillKey: '', surf: [null, null], surfKey: ['', ''], none: null };
+const WGPU_W = { wk: [null, null], wkKey: ['', ''], wkK: [1, 1], wbl: null, wpipe: null, ep: -1, mod: null, cbl: null, cpipe: null, bl: null, pl: null, rpipe: new Map(), samp: null, ramp: null, rampKey: [], still: null, stillKey: '', surf: [null, null], surfKey: ['', ''], none: null };
 // the water's GPU objects on this device (made again on a new one - GPU.ep); its layouts: the surface's compute, and the one the draws share
 // (0 the draw's numbers, 1 the view's surface, 2-3 the ramps, 4 the draw's items)
 function wgpuReady() {
@@ -24697,12 +24809,12 @@ function wgpuReady() {
   W.mod = gpuModule(WATER_WGSL + (W.floor ? GF.wgsl(1) + WATER_FLOOR_WGSL : ''), 'water');
   const C_ = GPUShaderStage.COMPUTE, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, F_ = GPUShaderStage.FRAGMENT, ro = { type: 'read-only-storage' };
   W.cbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: ro }, { binding: 1, visibility: C_, buffer: ro }, { binding: 2, visibility: C_, buffer: ro }, { binding: 3, visibility: C_, buffer: { type: 'storage' } }], 'water surface');
-  W.cpipe = gpuComputePipe({ layout: gpuPipeLayout([W.cbl], 'water surface'), compute: { module: W.mod, entryPoint: 'surf' } });
+  W.cpipe = gpuComputePipe({ layout: gpuPipeLayout([W.cbl], 'water surface'), label: 'water surface', compute: { module: W.mod, entryPoint: 'surf' } });
   W.wbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: ro }, { binding: 1, visibility: C_, buffer: ro }, { binding: 2, visibility: C_, buffer: { type: 'storage' } }], 'water wake field');
-  W.wpipe = gpuComputePipe({ layout: gpuPipeLayout([W.wbl], 'water wake field'), compute: { module: W.mod, entryPoint: 'wakeField' } });
-  for (const B of W.wk) if (B) gpuBufFree(B); W.wk = [null, null]; W.wkKey = ['', ''];
+  W.wpipe = gpuComputePipe({ layout: gpuPipeLayout([W.wbl], 'water wake field'), label: 'water wake field', compute: { module: W.mod, entryPoint: 'wakeField' } });
+  for (const B of W.wk) if (B) gpuBufFree(B); W.wk = [null, null]; W.wkKey = ['', '']; W.wkK = [1, 1];
   W.dbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: ro }, { binding: 4, visibility: C_, buffer: ro }, { binding: 5, visibility: C_, buffer: { type: 'storage' } }], 'water decks');
-  W.dpipe = gpuComputePipe({ layout: gpuPipeLayout([W.dbl], 'water decks'), compute: { module: W.mod, entryPoint: 'deckMean' } });
+  W.dpipe = gpuComputePipe({ layout: gpuPipeLayout([W.dbl], 'water decks'), label: 'water decks', compute: { module: W.mod, entryPoint: 'deckMean' } });
   if (W.dk) gpuBufFree(W.dk); if (W.dkSum) gpuBufFree(W.dkSum); W.dk = W.dkSum = null; W.dkKey = '';
   if (W.pv) gpuBufFree(W.pv); if (W.pvSum) gpuBufFree(W.pvSum); W.pv = W.pvSum = null; W.pvVer = -1;   // (an editor panel's deck - waterDeckPanel)
   if (W.fg) gpuBufFree(W.fg); W.fg = W.fgP = null;
@@ -24727,23 +24839,24 @@ const WGPU_OPS = {
   'destination-over': ['one-minus-dst-alpha', 'one', 'one-minus-dst-alpha', 'one'], 'source-in': ['dst-alpha', 'zero', 'dst-alpha', 'zero'], 'copy': ['one', 'zero', 'one', 'zero'], 'clear': ['zero', 'zero', 'zero', 'zero'],
 };
 // a draw's pipeline: its entry points (vs + fs: the fills and lines; vsShadow + fsShadow; vs + fsAbyss), the target's format, the context's composite op,
-// and with a clip in force the stencil's format (sfmt): drawn only where bit 0x80 is set - the GL front's clip, tested as its own draws test it
-const WGPU_FACE = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
-const wgpuPipeKey = (vs, fs, fmt, B, sfmt, g1) => vs + ':' + fs + ':' + fmt + ':' + B.join() + ':' + (sfmt || '') + (g1 ? ':g1' : '');
-function wgpuPipeDesc(vs, fs, fmt, B, sfmt, g1) {
-  const W = WGPU_W, blend = { color: { srcFactor: B[0], dstFactor: B[1], operation: 'add' }, alpha: { srcFactor: B[2], dstFactor: B[3], operation: 'add' } };
-  const ds = sfmt ? { depthStencil: { format: sfmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: WGPU_FACE, stencilBack: WGPU_FACE, stencilReadMask: 0x80, stencilWriteMask: 0 } } : {};
+// and with the target's stencil attached its format (sfmt): with a clip in force (clip) drawn only where bit 0x80 is set - the GL front's clip, tested as
+// its own draws test it; without, attached only to go on in the open pass that holds it (gpuPassHolds), nothing tested
+const WGPU_FACE = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' }, WGPU_ANY = { compare: 'always', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
+const wgpuPipeKey = (vs, fs, fmt, B, sfmt, g1, clip) => vs + ':' + fs + ':' + fmt + ':' + B.join() + ':' + (sfmt ? sfmt + (clip ? ':clip' : ':any') : '') + (g1 ? ':g1' : '');
+function wgpuPipeDesc(vs, fs, fmt, B, sfmt, g1, clip) {
+  const W = WGPU_W, blend = { color: { srcFactor: B[0], dstFactor: B[1], operation: 'add' }, alpha: { srcFactor: B[2], dstFactor: B[3], operation: 'add' } }, F = clip ? WGPU_FACE : WGPU_ANY;
+  const ds = sfmt ? { depthStencil: { format: sfmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: F, stencilBack: F, stencilReadMask: clip ? 0x80 : 0, stencilWriteMask: 0 } } : {};
   return Object.assign({ layout: g1 ? W.plG : W.pl, label: 'water ' + fs, vertex: { module: W.mod, entryPoint: vs }, fragment: { module: W.mod, entryPoint: fs, targets: [{ format: fmt, blend }] }, primitive: { topology: 'triangle-list' } }, ds);
 }
 // (the first shot - 60-draw.js frameWarm: the effects' draws - a shell's wash and foam, the splash's puffs and balls, a wreck's shade - made ahead,
 // off the frame, for every target, op and clip the water is first drawn with, while the world is built under its loading screen)
 const WGPU_AHEAD = [['vsWash', 'fsWash'], ['vsFoam', 'fsFoam'], ['vsPuff', 'fsPuff'], ['vsBall', 'fsBall'], ['vsShadeRows', 'fsShadeRows']];
-function wgpuPipe(vs, fs, fmt, op, sfmt, g1) {
-  const W = WGPU_W, B = WGPU_OPS[op] || WGPU_OPS['source-over'], k = wgpuPipeKey(vs, fs, fmt, B, sfmt, g1); let p = W.rpipe.get(k);
+function wgpuPipe(vs, fs, fmt, op, sfmt, g1, clip) {
+  const W = WGPU_W, B = WGPU_OPS[op] || WGPU_OPS['source-over'], k = wgpuPipeKey(vs, fs, fmt, B, sfmt, g1, clip); let p = W.rpipe.get(k);
   if (!p) {
-    const wk = fmt + ':' + B.join() + ':' + (sfmt || ''), seen = W.ahead || (W.ahead = new Set());
-    if (!seen.has(wk)) { seen.add(wk); for (const [v, f] of WGPU_AHEAD) { const k2 = wgpuPipeKey(v, f, fmt, B, sfmt, false); if (k2 !== k && !W.rpipe.has(k2)) gpuPipeAhead(W.rpipe, k2, wgpuPipeDesc(v, f, fmt, B, sfmt, false)); } }
-    p = gpuRenderPipe(wgpuPipeDesc(vs, fs, fmt, B, sfmt, g1));
+    const wk = fmt + ':' + B.join() + ':' + (sfmt || '') + (clip ? ':clip' : ''), seen = W.ahead || (W.ahead = new Set());
+    if (!seen.has(wk)) { seen.add(wk); for (const [v, f] of WGPU_AHEAD) { const k2 = wgpuPipeKey(v, f, fmt, B, sfmt, false, clip); if (k2 !== k && !W.rpipe.has(k2)) gpuPipeAhead(W.rpipe, k2, wgpuPipeDesc(v, f, fmt, B, sfmt, false, clip)); } }
+    p = gpuRenderPipe(wgpuPipeDesc(vs, fs, fmt, B, sfmt, g1, clip));
     W.rpipe.set(k, p);
   }
   return p;
@@ -24827,9 +24940,10 @@ function wgpuRamp(row, stops) {
    draw's numbers (set(f) fills them), its items (an arena piece, or none), and how many triangles (a full-screen one; a shadow's quad an
    instance); g1: another part's buffers handed over by frameShared, bound as group 1 in order (fsFloor: the ground's grid); tex: a texture read
    in the ramp's place (fsDistort: the snapshot); art: the draw reads the art atlas (artTex - fsCoast); box: [x0, y0, x1, y1] the target's pixels drawn
-   (an editor's panel - waterDeckPanel: not the world's view, no surface read) */
-const WDP = new Float32Array(224);
-function waterDraw(vs, fs, set, items, inst, g1, tex, art, box) {
+   (an editor's panel - waterDeckPanel: not the world's view, no surface read); rows: [from, to) the only rows (user space) the draw can colour - the
+   rest of the view not run at all (fsSurf: the band round the surface) */
+const WDP = new Float32Array(256);
+function waterDraw(vs, fs, set, items, inst, g1, tex, art, box, rows) {
   const S = box ? (wgpuReady() ? WGPU_W.none : null) : waterSurfGPU(); if (!S) return;
   const ctx = C, W = WGPU_W, clip = !!ctx.s.clip;
   if (clip) glBegin(ctx, ctx.s.op);                       // (the clip in the target's stencil, bit 0x80 - built if it isn't this one)
@@ -24840,18 +24954,20 @@ function waterDraw(vs, fs, set, items, inst, g1, tex, art, box) {
   f[4] = T.w; f[5] = T.h; f[7] = VWP + 6;
   set(f);
   const dB = wgpuArena(WDP.byteLength, (u8, o) => u8.set(new Uint8Array(WDP.buffer), o));
-  const pipe = wgpuPipe(vs, fs, T.tex.fmt, ctx.s.op, clip ? T.stencil.fmt : null, !!g1);   // (laid as the context lays: its composite op and clip - as the GL programs and the fills were)
   const AT = art ? artTex() : null; if (art && !AT) return;
+  const st = clip || (!!T.stencil && gpuPassHolds(T.stencil.view));   // (the stencil attached: for the clip; or, none in force, as the open pass holds it - to go on in it; asked after set and artTex, which may close it)
+  const pipe = wgpuPipe(vs, fs, T.tex.fmt, ctx.s.op, st ? T.stencil.fmt : null, !!g1, clip);   // (laid as the context lays: its composite op and clip - as the GL programs and the fills were)
   const bg = gpuBindGroup(W.bl, [{ binding: 0, resource: dB.res }, { binding: 1, resource: { buffer: S.gb } }, { binding: 2, resource: (tex || W.ramp).view }, { binding: 3, resource: W.samp }, { binding: 4, resource: items ? items.res : { buffer: W.none.gb } }, { binding: 6, resource: (AT || W.noArt).view }], 'water');
   let x0 = Math.max(0, box ? box[0] : VSX), x1 = Math.min(T.w, box ? box[2] : VSX + VWP), y0 = box ? Math.max(0, box[1]) : 0, y1 = Math.min(T.h, box ? box[3] : bh);
   const sc = ctx.s.sc; if (sc) { x0 = Math.max(x0, sc[0]); y0 = Math.max(y0, sc[1]); x1 = Math.min(x1, sc[0] + sc[2]); y1 = Math.min(y1, sc[1] + sc[3]); }
+  if (rows) { y0 = Math.max(y0, Math.floor(rows[0] * m[3] + m[5])); y1 = Math.min(y1, Math.ceil(rows[1] * m[3] + m[5])); }   // (user rows to the target's: the transform's y scale is positive)
   if (x1 <= x0 || y1 <= y0) return;
   const desc = { colorAttachments: [{ view: T.tex.view, loadOp: 'load', storeOp: 'store' }] };
-  if (clip) desc.depthStencilAttachment = Object.assign({ view: T.stencil.view, stencilReadOnly: true }, T.stencil.fmt.startsWith('depth') ? { depthReadOnly: true } : {});
-  const pass = gpuPassBegin(desc, 'water', (clip ? [T.tex, T.stencil, S, tex || W.ramp] : [T.tex, S, tex || W.ramp]).concat(g1 || [], AT ? [AT] : []));
+  if (st) desc.depthStencilAttachment = Object.assign({ view: T.stencil.view, stencilReadOnly: true }, T.stencil.fmt.startsWith('depth') ? { depthReadOnly: true } : {});
+  const pass = gpuPassBegin(desc, 'water', (st ? [T.tex, T.stencil, S, tex || W.ramp] : [T.tex, S, tex || W.ramp]).concat(g1 || [], AT ? [AT] : []));
   pass.setPipeline(pipe); pass.setBindGroup(0, bg);
   if (g1) pass.setBindGroup(1, gpuBindGroup(W.gbl, g1.map((B, i) => ({ binding: i, resource: { buffer: B.gb } })), 'water ground'));
-  if (clip) pass.setStencilReference(0x80);
+  if (st) pass.setStencilReference(0x80);
   pass.setScissorRect(x0, T.h - y1, x1 - x0, y1 - y0);   // (rows bottom first)
   if (inst) pass.draw(6, inst); else pass.draw(3);
   gpuPassEnd();
@@ -24892,8 +25008,6 @@ function waterLineSet(f, lw, lineCss = waterLineCss()) {
   f[36] = lw; f[37] = -2; f[38] = VWP + 2; f[39] = Math.max(4, 2 * LT_CELL * SV);
   f[26] = SV;
 }
-// THE OCEAN'S LINE and the band under it, over the whole view (renderObjects; the land in front covers it where it's dry)
-function waterLineGPU(lw) { waterDraw('vs', 'fs', f => { f[6] = 2; waterLineSet(f, lw); }); }
 /* EVERY LAKE'S LINE (drawLake, the land's pass): the same rule, in each lake's wet span (lakeWet), on columns with water under the surface
    (its bed - lakeBedAt - deeper than half a unit under it) whose top water is the lake's own and open (not a cave's under rock, not
    another water's puddle over it) - for each LT column of the spans in view: [its bed, 1 when it's the lake's open top water] */
@@ -24958,7 +25072,8 @@ function waterShadeRowsGPU(F, len, col) {
   waterDraw('vsShadeRows', 'fsShadeRows', f => { f[132] = col[0] / 255; f[133] = col[1] / 255; f[134] = col[2] / 255; f[135] = C.globalAlpha; }, items, 1);
 }
 /* THE DEEP'S DARK (drawAbyss): with no lights, its gradient over [L0, L1) x [top, Bt); with lights, the light map's cells (cs a cell, gw x gh
-   of them from L0, T0) worked out per pixel's four and smoothed, the dark then the beams' glow */
+   of them from L0, T0) worked out per pixel's four and smoothed, the dark then the beams' glow. Each tile of ABT x ABT cells lists the lights whose
+   box (x, y +- reach - the shader's own test) holds one of its cells' middles, a cell spare each way: a cell asks those alone (fsAbyss) */
 const WATER_ABYSS_STOPS = [[0, 'rgba(1,5,14,0)'], [0.5, 'rgba(1,5,14,0.62)'], [1, 'rgba(0,2,8,0.98)']];
 function waterAbyssGPU(ya, yb, L0, L1, top, Bt) {
   const ga = Math.round(C.s.ga * 255) / 255;
@@ -24968,34 +25083,42 @@ function waterAbyssGPU(ya, yb, L0, L1, top, Bt) {
     f[136] = L0; f[137] = top; f[144] = 0; f[145] = L1; f[146] = Bt;
   });
 }
+const ABT = 8;                                             // (the light map's tiles: ABT x ABT cells - fsAbyss's)
 function waterAbyssLitGPU(lights, L0, T0, cs, gw, gh, ya, yb, deepK) {
-  const nl = Math.min(24, lights.length);
-  const items = wgpuArena(nl * 32, (u8, o) => {
-    const F = new Float32Array(u8.buffer, o, nl * 8);
-    for (let k = 0; k < nl; k++) { const l = lights[k]; F.set([l.x, l.y, l.L || l.r, l.k, l.ux || 0, l.uy || 0, l.r ? 0 : 1, l.beam ? 1 : 0], k * 8); }
+  const nl = Math.min(24, lights.length), tw = Math.ceil(gw / ABT), th = Math.ceil(gh / ABT), nt = tw * th;
+  const items = wgpuArena((nl * 2 + Math.ceil(nt / 4)) * 16, (u8, o) => {
+    const F = new Float32Array(u8.buffer, o, nl * 8 + Math.ceil(nt / 4) * 4), mk = new Uint32Array(nt);
+    for (let k = 0; k < nl; k++) {
+      const l = lights[k], R = l.L || l.r; F.set([l.x, l.y, R, l.k, l.ux || 0, l.uy || 0, l.r ? 0 : 1, l.beam ? 1 : 0], k * 8);
+      // (the cells whose middle L0 + (q + 0.5) cs may be in its box, one spare each way for f32's rounding; none on the map: in no tile)
+      const qa = Math.ceil((l.x - R - L0) / cs - 0.5) - 1, qb = Math.floor((l.x + R - L0) / cs - 0.5) + 1, ra = Math.ceil((l.y - R - T0) / cs - 0.5) - 1, rb = Math.floor((l.y + R - T0) / cs - 0.5) + 1;
+      if (!(qb >= 0 && qa <= gw - 1 && rb >= 0 && ra <= gh - 1)) continue;
+      const ta = Math.floor(Math.max(0, qa) / ABT), tb = Math.floor(Math.min(gw - 1, qb) / ABT), ua = Math.floor(Math.max(0, ra) / ABT), ub = Math.floor(Math.min(gh - 1, rb) / ABT);
+      for (let u = ua; u <= ub; u++) for (let t = ta; t <= tb; t++) mk[u * tw + t] |= 1 << k;
+    }
+    F.fill(0, nl * 8); for (let t = 0; t < nt; t++) F[nl * 8 + t] = mk[t];   // (whole numbers under 2^24: exact as floats)
   });
   waterDraw('vs', 'fsAbyss', f => {
     f[136] = L0; f[137] = T0; f[138] = cs; f[139] = deepK;
     f[140] = gw; f[141] = gh; f[142] = ya; f[143] = yb;
-    f[144] = nl; f[145] = L0 + gw * cs; f[146] = T0 + gh * cs;
+    f[144] = nl; f[145] = L0 + gw * cs; f[146] = T0 + gh * cs; f[147] = tw;
   }, items);
 }
 /* THE TINT OF A BODY OF THE LAND'S WATER (lakeWaterIn, 50-land-lake.js - a lake, a pool under a crust, the sea caves at the ocean's level): the
    ocean's tint (a lake's at its share - shallow) and the body's biome's own water over it (waterLakeGrad), each a gradient laid over the fill's
    rectangle (columns X0..X1, rows Y..B before the lift) lifted dy rows to the body's level, inside its outlines (wcBodyPoly - from the water's
-   cells' runs: [surface chain, floor chain] each). Up to 64 outlines a draw, in tiles (waterTileItems) */
+   cells' runs: [surface chain, floor chain] each). Up to 64 outlines a draw, in tiles (waterTileItems); both gradients in the one draw (fsBody - one
+   outline test a pixel for both; the second laid over the first there, as its own draw laid it) */
 function waterBodyTintGPU(polys, dy, X0, X1, Y, B, bn, shallow) {
   if (!polys.length) return;
-  const ga = Math.round(C.s.ga * 255) / 255, grads = [[3, waterTintGrad(shallow)]], L = waterLakeGrad(bn);
-  if (L) grads.push([4, L]);
+  const ga = Math.round(C.s.ga * 255) / 255, G = waterTintGrad(shallow), L = waterLakeGrad(bn);
   const m = C.s.m, box = [Math.max(X0, (VSX - m[4]) / m[0]), Math.max(Y + dy, -m[5] / m[3]), Math.min(X1, (VSX + VWP - m[4]) / m[0]), Math.min(B + dy, (bh - m[5]) / m[3])];   // (the fill lifted, in the view)
-  const parts = [];                                         // (the outlines into the items once, 64 a draw - each gradient's draw reads the same)
-  for (let o0 = 0; o0 < polys.length; o0 += 64) { const T = waterTileItems(polys.slice(o0, o0 + 64), box); if (T) parts.push(T); }
-  for (const [row, Gd] of grads) for (const T of parts) {
+  for (let o0 = 0; o0 < polys.length; o0 += 64) {           // (the outlines into the items, 64 a draw)
+    const T = waterTileItems(polys.slice(o0, o0 + 64), box); if (!T) continue;
     waterDraw('vsBox', 'fsBody', f => {
-      wgpuRamp(row, Gd.stops);
-      f[8] = row; f[9] = Gd.y0; f[10] = Gd.y1; f[11] = ga;
-      f[152] = dy; f[153] = X0; f[154] = X1; f[155] = Y; f[156] = B;
+      wgpuRamp(3, G.stops); f[8] = 3; f[9] = G.y0; f[10] = G.y1; f[11] = ga;
+      f[152] = dy; f[153] = X0; f[154] = X1; f[155] = Y; f[156] = B; f[157] = -1;
+      if (L) { wgpuRamp(4, L.stops); f[157] = 4; f[158] = L.y0; f[159] = L.y1; }   // (its biome's own water, over the tint)
     }, T.items, T.n);
   }
 }
@@ -25180,21 +25303,22 @@ function waterUnderGPU(row, stops, yo, at) { waterLevelDraw(yo, row, stops, ownL
 // (vec2f a column - waterSurfGPU's, as surfRow reads it), null without one; lakes() every lake as [its columns from, to, its level] in the world's units
 if (!SW_IN_WORKER) frameShare('water.levels', () => ({ surf: () => { const B = waterSurfGPU(); return B ? { B, n: VWP + 6 } : null; }, lakes: () => (land.lakes || []).map(l => [l[0], l[1], lakeLv(l)]) }));
 
-/* THE WAKE (drawWakeField, 43-render-objects.js - the sea's pass, and each lake's in the land's): the field built once a view a frame for the stretch drawn (a
-   compute pass: wakeField), then its two passes drawn from it (fsWake). What the patches are - spawned by the ships' own seeded streams, aged and moved by
-   stepParticles (35-particles.js) - stays the processor's: only their place, width and strength go up, the ones in view (offViewR, as before) */
+/* THE WAKE (waterSurfaceGPU - the sea's pass, and each lake's in the land's): the field built once a view a frame for the stretch drawn (a compute pass:
+   wakeField), its looks drawn from it (fsSurf). What the patches are - spawned by the ships' own seeded streams, aged and moved by stepParticles
+   (35-particles.js) - stays the processor's: only their place, width and strength go up, the ones in view (offViewR, as before). room: items kept free after
+   the field (the crests' window - waterSurfaceGPU). { B, n, X0, k: the deepest patch's depth factor (how far down its churned water can reach) } */
 const WAKE_ROWS = new Float32Array(1024 * 4);
-function waterWakeField(x0, x1) {
+function waterWakeField(x0, x1, room) {
   if (!wgpuReady() || !waterSurfGPU()) return null;
   const W = WGPU_W, vi = viewIdx, n = Math.ceil((VWP + 12) / PB) + 1, X0 = Math.floor(-6 / PB) * PB, key = renderTick + ':' + CAMPX + ':' + SV + ':' + VWP + ':' + PB + ':' + x0 + ':' + x1;
   let B = W.wk[vi];
-  if (B && W.wkKey[vi] === key) return { B, n, X0 };
-  const bytes = (32 + n) * 16;
-  if (!B || B.size < bytes) { if (B) gpuBufFree(B); B = W.wk[vi] = gpuBuf(Math.ceil(bytes / 16384) * 16384, 'water'); }
-  const c = wakes.c, X = c.x, LF = c.life; let m = 0;
+  const bytes = (32 + n) * 16, need = bytes + (room || 0) * 16;
+  if (B && W.wkKey[vi] === key && B.size >= need) return { B, n, X0, k: W.wkK[vi] };
+  if (!B || B.size < need) { if (B) gpuBufFree(B); B = W.wk[vi] = gpuBuf(Math.ceil(need / 16384) * 16384, 'water'); }
+  const c = wakes.c, X = c.x, LF = c.life; let m = 0, kx = 0;
   for (let q = 0; q < wakes.n && m < 1024; q++) {
     const hw0 = c.w[q] * (1 + LF[q] * 0.6) / 2; if (offViewR(X[q], hw0, x0, x1)) continue;
-    WAKE_ROWS.set([PX(X[q]), hw0 * SV, 1 - LF[q] / c.max[q], c.k[q] || 1], m * 4); m++;
+    const k = c.k[q] || 1; WAKE_ROWS.set([PX(X[q]), hw0 * SV, 1 - LF[q] / c.max[q], k], m * 4); m++; kx = Math.max(kx, k);
   }
   frameFlush();
   const pal = wgpuArena(32 * 16, (u8, o) => { const F = new Float32Array(u8.buffer, o, 128); SURF_PAL.forEach((css, i) => F.set(wgpuPmB(css, 1), i * 4)); });
@@ -25204,8 +25328,8 @@ function waterWakeField(x0, x1) {
   const bg = gpuBindGroup(W.wbl, [{ binding: 0, resource: hd.res }, { binding: 1, resource: rows.res }, { binding: 2, resource: { buffer: B.gb, offset: 0, size: bytes } }], 'water wake field');
   const cp = gpuComputeBegin([B], 'water');
   cp.setPipeline(W.wpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(n / 64)); cp.end();   // (a column of the view an invocation; the patches' loop no longer than those sent)
-  W.wkKey[vi] = key;
-  return { B, n, X0 };
+  W.wkKey[vi] = key; W.wkK[vi] = kx;
+  return { B, n, X0, k: kx };
 }
 // (a noise's numbers: its lattice place x = kx * world x, y = ky0 * time + kyr * world row - the whole parts of the large terms reduced here, in double precision)
 function wakeNoise(f, at, kx, kyt, kyr, seed, kxr) {
@@ -25213,32 +25337,42 @@ function wakeNoise(f, at, kx, kyt, kyr, seed, kxr) {
   f[at] = bx - ix; f[at + 1] = ix; f[at + 2] = by - iy; f[at + 3] = iy;
   f[at + 4] = kx / SV; f[at + 5] = (kxr || 0) / SV; f[at + 6] = kyr / SV; f[at + 7] = seed;
 }
-function waterWakeGPU(x0, x1, top) {
-  const Fd = waterWakeField(x0, x1); if (!Fd) return;
-  waterDraw('vs', 'fsWake', f => {
-    f[11] = C.s.ga; f[26] = SV;
-    f.set([top ? 1 : 0, Fd.X0, PB, Fd.n], 168);
+/* THE SURFACE'S OWN LOOKS, ONE DRAW A VIEW (renderObjects, 43-render-objects.js - the sea's pass; line false: a lake's in the land's, lakeClip -
+   50-land-units.js): the wake's churned water under the surface, the ocean's line and the band under it, the crests (the ripples' foam and the whitecaps),
+   the wake's foam on top (fsSurf) - four full-screen passes before, each loading and storing the whole view and finding its own surface rows again; the lakes'
+   pass the wake's two. Drawn only over the rows they can reach: from the surface's highest row in the view (the processor's ys - the GPU's own but for f32's
+   rare 1-row step: 2 rows spare) less the most any of them reaches over it, to its lowest plus the most any reaches under it. The crests' water columns the
+   view reads - their stepped speed (wv: the processor's, as it steps it) and their level (WBASE) - go up for it, after the wake's field in its buffer */
+function waterSurfaceGPU(x0, x1, lw, line) {
+  if (!wgpuReady()) return;
+  const cr = line && !!wv && N > 0, x0w = (CAMPX + 0.5) / SV;
+  const lo = cr ? clamp(Math.floor(wCol((-2 * PB - 2 + CAMPX + 0.5) / SV)), 0, N - 1) : 0, winN = cr ? clamp(Math.ceil(wCol((VWP + 2 * PB + 2 + CAMPX + 0.5) / SV)) + 1, 0, N - 1) - lo + 1 : 0;
+  const Fd = waterWakeField(x0, x1, winN); if (!Fd) return;
+  const at = 32 + Fd.n;                                    // (the crests' window: after the palette and the field)
+  if (cr) { const it = wgpuArena(winN * 16, (u8, o) => { const F = new Float32Array(u8.buffer, o, winN * 4); for (let k = 0; k < winN; k++) { F[k * 4] = wv[lo + k]; F[k * 4 + 1] = WBASE ? WBASE[lo + k] : WATER_Y; F[k * 4 + 2] = F[k * 4 + 3] = 0; } });   // (a column of the view's window each: bounded by the view)
+    gpuCopyBuf(it.c, it.o, Fd.B, at * 16, winN * 16); }
+  // (the rows: over the surface - the wake's foam (its blocks' rounding, its height 3.2 SV), the crests' ripples (lw) and whitecaps (2 PB); under it - the
+  // band (2 lw + 2), the whitecaps' trails (7 PB), the wake's lip (2 SV) and churned water (17 SV times the deepest patch's factor))
+  let ya = Infinity, yb = -Infinity; for (let i = 0; i < VWP + 6; i++) { const v = ys[i]; if (v < ya) ya = v; if (v > yb) yb = v; }
+  if (!(yb >= ya)) return;
+  const up = 2 * PB + 3.2 * SV + lw, dn = Math.max(2 * lw + 2, 7 * PB, 2 * SV + PB + 1, 17 * Fd.k * SV + 1);
+  const ga = C.s.ga, amp = E.waveAmp, st = E.storm, cf = wCol(x0w), i0 = Math.floor(cf), q0 = Math.floor(x0w / 3);
+  waterDraw('vs', 'fsSurf', f => {
+    f[11] = ga; f[25] = CAMPX; f[26] = SV;
+    f.set([0, Fd.X0, PB, Fd.n], 168);
     wakeNoise(f, 172, 0.07, 0.35, 0, 3);              // (the foam's cover - each column's)
     wakeNoise(f, 180, 0.04, 0.2, 0.14, 4, -0.08);    // (the foam's rolls, streaking back and down)
     wakeNoise(f, 188, 0.12, 0.15, 0.22, 7);           // (the churned water under it)
-  }, { res: { buffer: Fd.B.gb, offset: 0, size: (32 + Fd.n) * 16 } });
-}
-/* THE CRESTS (drawCrests, 43-render-objects.js - the sea's pass): the ripples' foam and the whitecaps, one draw a view (fsCrest). The water columns the view
-   reads - their stepped speed (wv: the processor's, as it steps it) and their level (WBASE) - go up for it, as the surface's own (waterSurfGPU) */
-function waterCrestsGPU(lw) {
-  if (!wgpuReady() || !wv || !N) return;
-  const x0w = (CAMPX + 0.5) / SV, cf = wCol(x0w), i0 = Math.floor(cf), q0 = Math.floor(x0w / 3);
-  const lo = clamp(Math.floor(wCol((-2 * PB - 2 + CAMPX + 0.5) / SV)), 0, N - 1), hi = clamp(Math.ceil(wCol((VWP + 2 * PB + 2 + CAMPX + 0.5) / SV)) + 1, 0, N - 1), winN = hi - lo + 1;
-  const items = wgpuArena(winN * 16, (u8, o) => { const F = new Float32Array(u8.buffer, o, winN * 4); for (let k = 0; k < winN; k++) { F[k * 4] = wv[lo + k]; F[k * 4 + 1] = WBASE ? WBASE[lo + k] : WATER_Y; F[k * 4 + 2] = F[k * 4 + 3] = 0; } });   // (a column of the view's window each: bounded by the view)
-  const ga = C.s.ga, amp = E.waveAmp, st = E.storm;
-  waterDraw('vs', 'fsCrest', f => {
-    f[25] = CAMPX; f[26] = SV;
-    f.set([lw, PB, st > 0.25 ? 1 : 0, amp * (4.6 - 2.2 * st)], 168);
-    f.set([amp, Math.floor(time * 5), Math.floor(time * 10), N], 172);
-    f.set([i0, cf - i0, 1 / (SV * DX), lo], 176);
-    f.set([q0, x0w - 3 * q0, 1 / SV, winN], 180);
-    CREST_PAL.forEach((css, i) => f.set(wgpuPmB(css, ga), 184 + i * 4));
-  }, items);
+    if (line) waterLineSet(f, lw);
+    if (cr) {
+      f.set([lw, PB, st > 0.25 ? 1 : 0, amp * (4.6 - 2.2 * st)], 224);
+      f.set([amp, Math.floor(time * 5), Math.floor(time * 10), N], 228);
+      f.set([i0, cf - i0, 1 / (SV * DX), lo], 232);
+      f.set([q0, x0w - 3 * q0, 1 / SV, winN], 236);
+      CREST_PAL.forEach((css, i) => f.set(wgpuPmB(css, ga), 240 + i * 4));
+    }
+    f[252] = at; f[253] = 1 | 8 | (line ? 2 : 0) | (cr ? 4 : 0);
+  }, { res: { buffer: Fd.B.gb, offset: 0, size: (at + winN) * 16 } }, 0, null, null, false, null, [Math.floor(ya - up) - 2, Math.ceil(yb + dn) + 2]);
 }
 /* THE SHIPS' WASH (drawShipWash, 43-render-objects.js - the sea's pass): every ship under way an instance of one draw (fsWash). What she is - her place, speed,
    throttle - is the processor's; here her wash's numbers and its noises' large terms (her flow's phases, her stern's place in the sea), reduced in double
@@ -25588,7 +25722,7 @@ function g8Shared() {
   const all = { binding: 1, visibility: VF, buffer: { type: 'read-only-storage' } };
   G8.msl = gpuBindLayout([hd(G8_MS_HB), all], 'mid sea'); G8.msm = gpuModule(G8_MS_WGSL, 'mid sea'); G8.msp = gpuPipeLayout([G8.msl], 'mid sea'); G8.ms.clear();
   G8.rnl = gpuBindLayout([hd(G8_RN_HB), all], 'rain'); const rm = gpuModule(G8_RN_WGSL, 'rain');
-  G8.rn = gpuRenderPipe({ layout: gpuPipeLayout([G8.rnl], 'rain'), vertex: { module: rm, entryPoint: 'vs' }, fragment: { module: rm, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } });
+  G8.rn = gpuRenderPipe({ layout: gpuPipeLayout([G8.rnl], 'rain'), label: 'rain', vertex: { module: rm, entryPoint: 'vs' }, fragment: { module: rm, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } });
   G8.rT = null; G8.bg.clear(); G8.ep = GPU.ep;
 }
 // a draw's bind group for an arena chunk (its header at a dynamic offset, the chunk whole for its lists)
@@ -25719,7 +25853,7 @@ function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, cr
   for (let k = 0; k < hv.length; k++) F[w0 + k] = hv[k];
   U[w0 + 36] = (off + G8_MS_HB) / 16; U[w0 + 37] = (off >> 4) + oG / 4; U[w0 + 38] = TW; U[w0 + 39] = 0;
   const key = frameDrawKey(X); let pipe = G8.ms.get(key);
-  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: G8.msp, vertex: { module: G8.msm, entryPoint: 'vs' }, fragment: { module: G8.msm, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } }, frameDrawStencil(X))); G8.ms.set(key, pipe); }
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: G8.msp, label: 'mid sea', vertex: { module: G8.msm, entryPoint: 'vs' }, fragment: { module: G8.msm, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } }, frameDrawStencil(X))); G8.ms.set(key, pipe); }
   const pass = frameDrawPass(X, 'mid sea');
   pass.setPipeline(pipe); pass.setBindGroup(0, g8Bind(G8.msl, 'mid sea ', ch, G8_MS_HB), [off]);
   for (let p = 0; p < 3; p++) { if (p && !(cc >>> 24)) break; pass.draw(4, 1, 0, p); GLR.stats.draws++; }   // (which of the three: the draw's instance)
@@ -30726,19 +30860,19 @@ function smpShared() {
   SMP.ls = gpuBindLayout([hd(VS | FS), ro(1, VS | FS), ro(2, VS | FS), ro(3, FS)], 'smoke splat');
   SMP.lc = gpuBindLayout([hd(VS | FS), ro(1, FS), ro(2, VS | FS), ro(3, FS), ro(4, FS), ro(5, FS), { binding: 6, visibility: FS, texture: { sampleType: 'unfilterable-float' } }, ro(7, FS)], 'smoke compose');
   const mf = gpuModule(SMP_FIELDS_WGSL(NL), 'smoke fields'), pf = gpuPipeLayout([SMP.lf], 'smoke fields');
-  for (const e of ['clear2', 'clearw', 'dens', 'cells1', 'cells2', 'blur1', 'blur2', 'unite', 'flat', 'bbox', 'light', 'mass', 'march']) SMP[e] = gpuComputePipe({ layout: pf, compute: { module: mf, entryPoint: e } });
+  for (const e of ['clear2', 'clearw', 'dens', 'cells1', 'cells2', 'blur1', 'blur2', 'unite', 'flat', 'bbox', 'light', 'mass', 'march']) SMP[e] = gpuComputePipe({ layout: pf, label: 'smoke ' + e, compute: { module: mf, entryPoint: e } });
   const mg = gpuModule(SMP_GATHER_WGSL(NL), 'smoke gather'), pg = gpuPipeLayout([SMP.lg], 'smoke gather');
-  for (const e of ['gseed', 'gball']) SMP[e] = gpuComputePipe({ layout: pg, compute: { module: mg, entryPoint: e } });
+  for (const e of ['gseed', 'gball']) SMP[e] = gpuComputePipe({ layout: pg, label: 'smoke ' + e, compute: { module: mg, entryPoint: e } });
   const ma = gpuModule(SMP_ARGS_WGSL(NL), 'smoke args'), pa = gpuPipeLayout([SMP.la], 'smoke args');
-  for (const e of ['gclear', 'gargs0', 'gargs']) SMP[e] = gpuComputePipe({ layout: pa, compute: { module: ma, entryPoint: e } });
+  for (const e of ['gclear', 'gargs0', 'gargs']) SMP[e] = gpuComputePipe({ layout: pa, label: 'smoke ' + e, compute: { module: ma, entryPoint: e } });
   const msl = gpuModule(SMP_SLOTS_WGSL(NL), 'smoke slots'), psl = gpuPipeLayout([SMP.lsl], 'smoke slots');
-  for (const e of ['sclr', 'sreset', 'sevict', 'sprep', 'sins', 'snew', 'sfin', 'swin']) SMP[e] = gpuComputePipe({ layout: psl, compute: { module: msl, entryPoint: e } });
-  SMP.tones = gpuComputePipe({ layout: gpuPipeLayout([SMP.lt], 'smoke tones'), compute: { module: gpuModule(SMP_TONES_WGSL(NL), 'smoke tones'), entryPoint: 'tones' } });
+  for (const e of ['sclr', 'sreset', 'sevict', 'sprep', 'sins', 'snew', 'sfin', 'swin']) SMP[e] = gpuComputePipe({ layout: psl, label: 'smoke ' + e, compute: { module: msl, entryPoint: e } });
+  SMP.tones = gpuComputePipe({ layout: gpuPipeLayout([SMP.lt], 'smoke tones'), label: 'smoke tones', compute: { module: gpuModule(SMP_TONES_WGSL(NL), 'smoke tones'), entryPoint: 'tones' } });
   const ms = gpuModule(SMP_SPLAT_WGSL(NL), 'smoke splat');
-  SMP.splat = gpuRenderPipe({ layout: gpuPipeLayout([SMP.ls], 'smoke splat'), vertex: { module: ms, entryPoint: 'vs' }, fragment: { module: ms, entryPoint: 'fs', targets: [{ format: 'rg32float' }] },
+  SMP.splat = gpuRenderPipe({ layout: gpuPipeLayout([SMP.ls], 'smoke splat'), label: 'smoke splat', vertex: { module: ms, entryPoint: 'vs' }, fragment: { module: ms, entryPoint: 'fs', targets: [{ format: 'rg32float' }] },
     primitive: { topology: 'triangle-strip', cullMode: 'none' }, depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'less' } });
   const mc = gpuModule(SMP_COMP_WGSL(NL), 'smoke compose');
-  SMP.comp = gpuRenderPipe({ layout: gpuPipeLayout([SMP.lc], 'smoke compose'), vertex: { module: mc, entryPoint: 'vs' }, fragment: { module: mc, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } });
+  SMP.comp = gpuRenderPipe({ layout: gpuPipeLayout([SMP.lc], 'smoke compose'), label: 'smoke compose', vertex: { module: mc, entryPoint: 'vs' }, fragment: { module: mc, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } });
   // K: the billow tile, the leans, the domes' middles
   const Kf = new Float32Array(SMP_KN);
   for (let q = 0; q < 4096; q++) { Kf[q * 4] = BT.H[q]; Kf[q * 4 + 1] = BT.NX[q]; Kf[q * 4 + 2] = BT.ID[q]; Kf[q * 4 + 3] = BT.CR[q]; }
@@ -32493,14 +32627,11 @@ function renderObjects() {
   if (LAND) guardDraw('drawKraken', () => drawKraken(x0, x1));
   drawDeepLights(x0, x1);                                 // (the chests' glow, the subs' headlights)
   drawSubLights(x0, x1);                                  // (the army sub's light, user Oct 29)
-  // under the wake: churned, aerated water, dense and white just under the surface, thinning with depth and age
-  drawWakeField(x0, x1, false);
-  const lw = waterLineW(), lineCol = waterLineCss();
-  waterLineGPU(lw); C.fillStyle = lineCol; fsLast = lineCol;   // (the surface's line and the band under it - the one water shader; the fill style as the rectangles left it)
-  // foam on lively ripples, and the whitecaps (the water shader - waterCrestsGPU)
-  drawCrests(lw);
-  // wake: a white band of churned foam lying on the surface behind each hull, breaking up as it ages
-  drawWakeField(x0, x1, true);
+  // the surface's own looks, one draw (the water shader - waterSurfaceGPU): under the wake, churned, aerated water, dense and white just under the surface,
+  // thinning with depth and age; the surface's line and the band under it; foam on lively ripples, and the whitecaps; the wake - a white band of churned
+  // foam lying on the surface behind each hull, breaking up as it ages
+  const lw = waterLineW();
+  waterSurfaceGPU(x0, x1, lw, true); C.fillStyle = waterLineCss(); fsLast = null;   // (the fill style as the line's rectangles left it)
   drawShipWash(x0, x1);
   drawFoamBits(x0, x1);
   drawOil(x0, x1);                                        // (OPEN WORLD: a tanker's spill)
@@ -32523,17 +32654,9 @@ function drawShipWash(x0, x1) {
 }
 // The wake as one field: every wake patch adds to a per-column amount of churned water, so overlapping patches merge into a continuous white
 // band; its texture is noise anchored in the sea, so it doesn't swim or flicker; it breaks up into gaps as the patches age. Built and drawn by the
-// water shader (waterWakeGPU, 40-zz-water-gpu.js): the field once a view a frame (the under-water pass runs first; the surface pass reuses it)
-function drawWakeField(x0, x1, top) {
-  waterWakeGPU(x0, x1, top);
-  fsLast = null;
-}
-// the crests' colours: the foam on the ripples and the whitecaps' tops, their sides, their trails (the water shader's crests - waterCrestsGPU, 40-zz-water-gpu.js)
+// water shader with the surface's other looks (waterSurfaceGPU, 40-zz-water-gpu.js): the field once a view a frame
+// the crests' colours: the foam on the ripples and the whitecaps' tops, their sides, their trails (the water shader's crests - waterSurfaceGPU, 40-zz-water-gpu.js)
 const CREST_PAL = ['#ffffff', '#e4f4ff', '#cfe9fb'];
-function drawCrests(lw) {
-  waterCrestsGPU(lw);
-  fsLast = null;
-}
 function drawShocks(x0, x1) { pxDraw(SHOCK_L, x0, x1); }
 /* (Nov 1) THE SHOCKS' PIXEL LAYER (40-zzzz-layers.js): pressure waves in the water - chunky, wobbly, broken rings that ripple
    outward slowly; the loop that painted their blocks writes them, each block's colour at its own alpha packed by glColA */
@@ -35031,7 +35154,7 @@ fn shade(v: VO) -> vec4f {
 @fragment fn fs(v: VO) -> @location(0) vec4f { return shade(v); }
 @fragment fn fsW(v: VO) -> WO { let c = shade(v); var w: WO; w.c = c; w.o = ordPx(inst[v.i].od.x, c); return w; }`;
 const THG = { stale: false, ep: -1, mod: null, bl: null, pl: null, pipes: new Map(), f: new Float32Array(60 * 64), n: 0, pv: new Float32Array(8 * 256), pn: 0, seg: [], ctx: null, m0: [1, 0, 0, 1, 0, 0], stats: { draws: 0, quads: 0 },
-  ord: null, ordCtx: null, ordFrame: -1, seq: 0, lord: [new Map(), new Map()], lfrom: [new Map(), new Map()],   // (the order layer - what's in front: its texture, the world's context while it's drawn, its frame, the last number given, the things' own numbers a view - their last, the one before their first)
+  ord: null, ordCtx: null, ordFrame: -1, ordNew: false, seq: 0, lord: [new Map(), new Map()], lfrom: [new Map(), new Map()],   // (the order layer - what's in front: its texture, the world's context while it's drawn, its frame, the last number
   cut: [0, 0, 0], cutS: false, behind: 0, ord1: null, none: null };   // (thingsCut's: the quads put now drawn only on these numbers / above the surface; the batch has a surface cut; thingsBehind's; the stand-ins)
 const THG_REC = 60;   // (floats an instance: fifteen vec4s - I in the shader)
 // the context's composite operations as blend factors, premultiplied (the GL front's own table, 40-gl.js GLB): [colour src, dst, alpha src, dst]
@@ -35322,14 +35445,15 @@ function thingsEnd() {
   if (x1 <= x0 || y1 <= y0) return;
   const bytes = Math.max(16, n * THG_REC * 4), [c, o] = arenaAlloc(bytes, 256); c.cpu.set(new Uint8Array(THG.f.buffer, 0, n * THG_REC * 4), o);
   const pbytes = Math.max(32, pn * 32), [c3, o3] = arenaAlloc(pbytes, 256); c3.cpu.set(new Uint8Array(THG.pv.buffer, 0, pn * 32), o3);
-  const O = thingsOrderTex(), OK = O && O.w === T.w && O.h === T.h ? O : null, ord = ctx === THG.ordCtx && (ctx.s.op || 'source-over') === 'source-over' ? OK : null;   // (the world's layer: the order layer written too)
-  const rd = ctx !== THG.ordCtx ? OK : null, Sf = cutS ? frameShared('water.levels') : null, S = Sf && Sf.surf();   // (drawn elsewhere: the order layer read - thingsCut's; the view's surface)
+  const fit = O => O && O.gt && O.ep === GPU.ep && O.w === T.w && O.h === T.h ? O : null;
+  const ord = ctx === THG.ordCtx && (ctx.s.op || 'source-over') === 'source-over' ? fit(THG.ord) : null;   // (the world's layer: the order layer written too - cleared by the first pass that writes it)
+  const rd = ctx !== THG.ordCtx ? fit(thingsOrderTex()) : null, Sf = cutS ? frameShared('water.levels') : null, S = Sf && Sf.surf();   // (drawn elsewhere: the order layer read - thingsCut's; the view's surface)
   const [c2, o2] = arenaAlloc(32, 256), dv = new Float32Array(c2.cpu.buffer, o2, 8); dv[0] = T.w; dv[1] = T.h; dv[2] = THG.m0[4]; dv[3] = THG.m0[5]; dv[4] = rd ? 1 : 0; dv[5] = S && S.B ? S.n : 0; dv[6] = dv[7] = 0;
   const OT = rd || THG.ord1, SB = S && S.B ? S.B : THG.none;
   const pipe = thingsPipe(T.tex.fmt, ctx.s.op, clip ? T.stencil.fmt : null, false, !!ord), ppipe = pn ? thingsPipe(T.tex.fmt, ctx.s.op, clip ? T.stencil.fmt : null, true, !!ord) : null;
   const bg = gpuBindGroup(THG.bl, [{ binding: 0, resource: { buffer: c.gb, offset: o, size: bytes } }, { binding: 1, resource: A.view }, { binding: 2, resource: MK.view }, { binding: 3, resource: { buffer: c2.gb, offset: o2, size: 32 } }, { binding: 4, resource: gpuSampler(true, 0, 0) }, { binding: 5, resource: { buffer: c3.gb, offset: o3, size: pbytes } }, { binding: 6, resource: OT.view }, { binding: 7, resource: { buffer: SB.gb } }], 'things');
   const desc = { colorAttachments: [{ view: T.tex.view, loadOp: 'load', storeOp: 'store' }] };
-  if (ord) desc.colorAttachments.push({ view: ord.view, loadOp: 'load', storeOp: 'store' });
+  if (ord) { desc.colorAttachments.push(THG.ordNew ? { view: ord.view, loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' } : { view: ord.view, loadOp: 'load', storeOp: 'store' }); THG.ordNew = false; THG.ordFrame = renderTick; }
   if (clip) desc.depthStencilAttachment = Object.assign({ view: T.stencil.view, stencilReadOnly: true }, T.stencil.fmt.startsWith('depth') ? { depthReadOnly: true } : {});
   const pass = gpuPassBegin(desc, 'things', clip ? [T.tex, T.stencil, A, MK, ord, OT, SB] : [T.tex, A, MK, ord, OT, SB]);
   pass.setBindGroup(0, bg);
@@ -35344,21 +35468,20 @@ function thingsEnd() {
   THG.stats.draws++; THG.stats.quads += n;
 }
 /* ---- WHAT'S IN FRONT - the order layer (the light's slice 5 - fsW above): begun as the world's layer starts (48-render.js, its context ctx): a
-   texture the layer's size (rgba8unorm, pool 'things'), cleared; the numbers from 1, each quad and shape drawn into the world's layer the next one.
+   texture the layer's size (rgba8unorm, pool 'things'), cleared by the first pass that writes it (its load op - no pass of its own: calm-cost,
+   Nov 11); until then nothing reads it (thingsOrderTex null - its readers' stand-in is as clear); the numbers from 1, each quad and shape drawn into the world's layer the next one.
    A thing's lights (47-zz-light-pass.js: its windows, its lamps) carry the number its drawing had reached - thgOrder() as they're given, or
    thgOrderOf(thing) marked after it was drawn (thgOrderMark) - and are cut where the layer's number is higher: something drawn after it, in front.
    What the world draws other than the things' pass (the ground, the water, the GL front's last draws) writes no number: it hides no light ---- */
 function thingsOrderBegin(ctx) {
   THG.seq = 0; THG.lord[0].clear(); THG.lord[1].clear(); THG.lfrom[0].clear(); THG.lfrom[1].clear(); THG.ordCtx = null;
   if (!thingsGPU()) return;
-  frameFlush();
   const T = frameTarget(ctx); if (!T || !T.tex) return;
   if (!THG.ord || THG.ord.ep !== GPU.ep || THG.ord.w !== T.w || THG.ord.h !== T.h) { gpuTexFree(THG.ord); THG.ord = gpuTex(T.w, T.h, 'rgba8unorm', 'things'); }
-  gpuPassBegin({ colorAttachments: [{ view: THG.ord.view, loadOp: 'clear', clearValue: { r: 0, g: 0, b: 0, a: 0 }, storeOp: 'store' }] }, 'things order', [THG.ord]); gpuPassEnd();
-  THG.ordCtx = ctx; THG.ordFrame = renderTick;
+  THG.ordCtx = ctx; THG.ordNew = true;
 }
 function thingsOrderEnd() { THG.ordCtx = null; }
-// the order layer drawn this frame, or null
+// the order layer written this frame, or null
 function thingsOrderTex() { const t = THG.ord; return t && t.gt && t.ep === GPU.ep && THG.ordFrame === renderTick ? t : null; }
 // the number the world's drawing has reached (0 when it isn't the world's layer being drawn): a light given now is in front of all drawn so far
 const thgOrder = () => THG.ordCtx && (C === THG.ordCtx || THG.ctx === THG.ordCtx) ? THG.seq : 0;
@@ -35495,8 +35618,8 @@ function fireShared() {
   FIRE.hbgl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: { type: 'read-only-storage', hasDynamicOffset: true } }, { binding: 1, visibility: C_, buffer: ro }, { binding: 2, visibility: C_, buffer: { type: 'storage' } }], 'fire heat');
   FIRE.cbgl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: ro }], 'fire colours');
   const hm = gpuModule(FIRE_HEAT_WGSL, 'fire heat'), hl = gpuPipeLayout([FIRE.hbgl], 'fire heat');
-  FIRE.clear = gpuComputePipe({ layout: hl, compute: { module: hm, entryPoint: 'clear' } });
-  FIRE.add = gpuComputePipe({ layout: hl, compute: { module: hm, entryPoint: 'add' } });
+  FIRE.clear = gpuComputePipe({ layout: hl, label: 'fire heat clear', compute: { module: hm, entryPoint: 'clear' } });
+  FIRE.add = gpuComputePipe({ layout: hl, label: 'fire heat add', compute: { module: hm, entryPoint: 'add' } });
   FIRE.cm = gpuModule(FIRE_COL_WGSL, 'fire colours'); FIRE.cpl = gpuPipeLayout([FIRE.cbgl], 'fire colours');
   if (FIRE.buf) gpuBufFree(FIRE.buf);   // (the old device's: counted out, not destroyed)
   FIRE.col.clear(); FIRE.hb.clear(); FIRE.cb.clear(); FIRE.buf = null; FIRE.cells = 0; FIRE.ep = GPU.ep;
@@ -35546,7 +35669,7 @@ function firePut(F) {
   const B = PXL.b255; for (let k = 0; k < 7; k++) { const p = FIRE_PAL[k], o = w0 + 24 + k * 4; Fc[o] = B[p[0]]; Fc[o + 1] = B[p[1]]; Fc[o + 2] = B[p[2]]; Fc[o + 3] = 1; }
   const key = frameDrawKey(X);
   let pipe = FIRE.col.get(key);
-  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FIRE.cpl, vertex: { module: FIRE.cm, entryPoint: 'vs' }, fragment: { module: FIRE.cm, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, frameDrawStencil(X))); FIRE.col.set(key, pipe); }
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FIRE.cpl, label: 'fire colours', vertex: { module: FIRE.cm, entryPoint: 'vs' }, fragment: { module: FIRE.cm, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, frameDrawStencil(X))); FIRE.col.set(key, pipe); }
   const pass = frameDrawPass(X, 'fire');
   pass.setPipeline(pipe);
   pass.setBindGroup(0, fireBind(FIRE.cb, FIRE.cbgl, c, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: 256 } }, { binding: 1, resource: { buffer: grid.gb } }]), [off]);
@@ -54513,7 +54636,7 @@ function renderLandObjects0() {
   drawLake(x0, x1, true);                                // (the lakes' water over what's in them)
   lt('lake2');
   // and, as on the sea: blasts' shock rings, the trails through it, bubbles, the wake's churn, foam on top
-  lakeClip(x0, x1, () => { drawShocks(x0, x1); drawStreaks(x0, x1); drawGasBalls(x0, x1); drawBubbles(x0, x1); drawWakeField(x0, x1, false); drawWakeField(x0, x1, true); drawFoamBits(x0, x1); });
+  lakeClip(x0, x1, () => { drawShocks(x0, x1); drawStreaks(x0, x1); drawGasBalls(x0, x1); drawBubbles(x0, x1); waterSurfaceGPU(x0, x1, 0, false); fsLast = null; drawFoamBits(x0, x1); });   // (the wake's two looks, one draw - 40-zz-water-gpu.js)
   drawSpikeBursts(x0, x1);
   if (!edTiny(0.3 * UPM)) drawEarthGrains(x0, x1); lt('fx');
   // what's in the air over the land, drawn again over it (the sea's pass drew it first, under the ground)
@@ -55337,11 +55460,20 @@ fn stoneHit(b: u32, dx: f32, dy: f32) -> Hit {
 `;
   const derive = H + `
 // ---- DERIVE: a page's cells worked out (from a block of cells H round it - the halo, written by the processor) ----
+// (Nov 11, cave-cost: a frame's jobs in one batch - each its own place of the staging pool (JOBW words, its Job first) and its own rows of the
+// scratch (SCRR rows of 64); the batch's job z its dispatches' z - ggFlush)
 struct Job { page: u32, hal: u32, bw: u32, c0: i32, r0: i32, cap: f32, sb: u32, sn: u32, yw: i32, rT: i32, rB: i32, hpos: u32, ipos: u32, npos: u32, spos: u32, wpos: u32, gpos: u32, ng: u32, f: u32, p3: u32 }
-@group(0) @binding(0) var<storage, read> J: Job;
+const JOBW: u32 = ${GG_JOBB / 4}u; const SCRR: u32 = ${GG_SCRR}u;
 @group(0) @binding(2) var<storage, read> halo: array<u32>;
 @group(0) @binding(3) var<storage, read_write> pages: array<u32>;
 @group(0) @binding(4) var<storage, read_write> scr: array<u32>;
+var<private> J: Job;
+// job z's words (its positions in the halo made the batch's, its scratch rows its own)
+fn job(z: u32) {
+  let b = z * JOBW;
+  J = Job(halo[b], halo[b + 1u], halo[b + 2u], bitcast<i32>(halo[b + 3u]), bitcast<i32>(halo[b + 4u]), bitcast<f32>(halo[b + 5u]), halo[b + 6u], halo[b + 7u], bitcast<i32>(halo[b + 8u]),
+    bitcast<i32>(halo[b + 9u]), bitcast<i32>(halo[b + 10u]), b + halo[b + 11u], b + halo[b + 12u], b + halo[b + 13u], z * SCRR * 64u, b + halo[b + 15u], b + halo[b + 16u], halo[b + 17u], halo[b + 18u], 0u);
+}
 fn hw(i: i32, j: i32) -> u32 { return halo[J.hpos + u32(j) * J.bw + u32(i)]; }
 fn hmat(i: i32, j: i32) -> u32 { return hw(i, j) & 7u; }
 // (ltDist) open air: air, and not an island's body under the water (ugInBody - flag bit 18)
@@ -55350,7 +55482,8 @@ fn hopen(i: i32, j: i32) -> bool { let w = hw(i, j); return (w & 7u) == 0u && (w
 fn gspan(i: i32, s: u32) -> vec2f { let o = J.gpos + (u32(i) * 8u + s) * 2u; return vec2f(bitcast<f32>(halo[o]), bitcast<f32>(halo[o + 1u])); }
 // pass A: each halo row's nearest open air and overhang air across (a column of the page, every row of the block)
 @compute @workgroup_size(8, 8) fn hpass(@builtin(global_invocation_id) g: vec3u) {
-  let q = i32(g.x); let j = i32(g.y); let Hh = min(i32(J.hal), 256); if (q >= PAGE || j >= i32(min(J.bw, 1024u))) { return; }   // (Nov 10: every bound from the job's words capped - the laptop's hang)
+  job(g.z);
+  let q = i32(g.x); let j = i32(g.y); let Hh = min(i32(J.hal), 256); if (q >= PAGE || j >= i32(min(J.bw, SCRR))) { return; }   // (Nov 10: every bound from the job's words capped - the laptop's hang)
   let cap = min(i32(ceil(J.cap / f32(max(J.f, 1u)))), 256); let i0 = q + Hh;          // (the light's reach in the level's cells)
   var ha: u32 = 0xffffu;
   for (var dx = 0; dx <= 256; dx++) {
@@ -55362,6 +55495,7 @@ fn gspan(i: i32, s: u32) -> vec2f { let o = J.gpos + (u32(i) * 8u + s) * 2u; ret
 }
 // pass B: each cell of the page
 @compute @workgroup_size(8, 8) fn dpass(@builtin(global_invocation_id) g: vec3u) {
+  job(g.z);
   let q = i32(g.x); let j = i32(g.y); if (q >= PAGE || j >= PAGE) { return; }
   // (a level's page - a cell every F = J.f: its cell the one at F / 2 in each F x F, its distances in cells)
   let F = clamp(i32(J.f), 1, 64); let Ff = f32(F);
@@ -55934,6 +56068,11 @@ const GG_NONE = 0xffffffff, GG_BLACK = 0xfffffffe;
 /* (the pages' jobs: a fixed staging pool, sized once - GG_JOBS jobs a frame at most, each in its own place of it; a frame's work is that many pages and
    the frame's time for the grid (GG_MS) - a cut too: what isn't loaded yet isn't drawn, as an unpainted tile wasn't) */
 const GG_JOBS = 32, GG_JOBB = 209152, GG_MS = 4;
+// (Nov 11, cave-cost - the user's laptop: the derive's two dispatches a page, each page its own compute pass, 64 small dispatches a frame one after the
+// other while the ground loads (hpass and dpass 4-5 ms each): the frame's jobs are one batch - each in its own place of the staging pool and its own
+// GG_SCRR rows of the scratch, two dispatches for all of them (ggFlush); a page asked for again in the same batch sends the batch first, so a page's
+// writes stay in the order they were asked for)
+const GG_SCRR = 192;                                          // (the scratch's rows a job: a halo's width at most, 64 + 2 x 64)
 // (the pages' pool: 512 to start, grown 256 at a time - one step a frame - to GG_CAPMAX at most (96 MB): the views' pages over that, zoomed far out, wait for
 // the grid's smaller levels - engine-design "Smaller levels of the grid are used at far zoom", this part's next slices)
 const GG_CAPMAX = 1024;
@@ -55995,7 +56134,7 @@ function ggPools() {
   GG.pagesBuf = gpuBuf(GG.cap * GG_PB, 'ground grid');
   GG.slotsN = 0; ggSlotBufs();
   GG.artBuf = null; GG.artRef = null; GG.art0 = gpuBuf(16, 'ground grid'); gpuWriteBuf(GG.art0.gb, 0, new Uint8Array(16)); GG.stoneBuf = gpuBuf(GG.stoneCap * 9 * 16, 'ground grid');
-  GG.scrBuf = gpuBuf(192 * 64 * 4, 'ground grid'); GG.stage = gpuBuf(GG_JOBS * GG_JOBB, 'ground grid'); GG.stats.bufs += 5;
+  GG.scrBuf = gpuBuf(GG_JOBS * GG_SCRR * 64 * 4, 'ground grid'); GG.bat = { z0: 0, n: 0, bw: 0, pages: new Set() }; GG.stage = gpuBuf(GG_JOBS * GG_JOBB, 'ground grid'); GG.stats.bufs += 5;
   ggReset();
   return true;
 }
@@ -56584,9 +56723,9 @@ function ggPageJob(S, i) {
 function ggPipesC() {
   if (GG.pc && GG.pc.ep === GPU.ep) return GG.pc;
   const md = gpuModule(ggWgsl().derive, 'ground derive'), C = GPUShaderStage.COMPUTE, ro = { type: 'read-only-storage' }, rw = { type: 'storage' };
-  const dl = gpuBindLayout([{ binding: 0, visibility: C, buffer: ro }, { binding: 1, visibility: C, buffer: ro }, { binding: 2, visibility: C, buffer: ro }, { binding: 3, visibility: C, buffer: rw }, { binding: 4, visibility: C, buffer: rw }], 'ground derive');
+  const dl = gpuBindLayout([{ binding: 1, visibility: C, buffer: ro }, { binding: 2, visibility: C, buffer: ro }, { binding: 3, visibility: C, buffer: rw }, { binding: 4, visibility: C, buffer: rw }], 'ground derive');
   const dpl = gpuPipeLayout([dl], 'ground derive');
-  return (GG.pc = { ep: GPU.ep, dl, hpass: gpuComputePipe({ layout: dpl, compute: { module: md, entryPoint: 'hpass' } }), dpass: gpuComputePipe({ layout: dpl, compute: { module: md, entryPoint: 'dpass' } }) });
+  return (GG.pc = { ep: GPU.ep, dl, hpass: gpuComputePipe({ layout: dpl, label: 'ground derive hpass', compute: { module: md, entryPoint: 'hpass' } }), dpass: gpuComputePipe({ layout: dpl, label: 'ground derive dpass', compute: { module: md, entryPoint: 'dpass' } }) });
 }
 // (sf: the context's clip as a stencil's format, or none - the clip's cells are the stencil's 0x80 bit, as the GL front's own draws test it: glBegin,
 // glApplyState)
@@ -56597,27 +56736,36 @@ function ggPipeR(fmt, sf, entry = 'fs') {
   const rl = gpuBindLayout([0, 1, 2, 3, 4, 5, 6, 8].map(b => ({ binding: b, visibility: VF, buffer: { type: 'read-only-storage' } })), 'ground draw');
   const sop = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
   const ds = sf ? { format: sf, stencilFront: sop, stencilBack: sop, stencilReadMask: 0x80, stencilWriteMask: 0, ...(gpuHasDepth(sf) ? { depthWriteEnabled: false, depthCompare: 'always' } : {}) } : undefined;
-  return (GG.prs[key] = { rl, draw: gpuRenderPipe({ layout: gpuPipeLayout([rl], 'ground draw'), vertex: { module: mr, entryPoint: entry === 'fsLoose' ? 'vsLoose' : 'vs' }, fragment: { module: mr, entryPoint: entry, targets: [{ format: fmt, blend: { color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } } }] }, primitive: { topology: 'triangle-strip' }, depthStencil: ds }) });
+  return (GG.prs[key] = { rl, draw: gpuRenderPipe({ layout: gpuPipeLayout([rl], 'ground draw'), label: 'ground draw ' + entry, vertex: { module: mr, entryPoint: entry === 'fsLoose' ? 'vsLoose' : 'vs' }, fragment: { module: mr, entryPoint: entry, targets: [{ format: fmt, blend: { color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } } }] }, primitive: { topology: 'triangle-strip' }, depthStencil: ds }) });
 }
-// a page's job sent: its words into its place in the staging pool and its two dispatches recorded at once; each dispatch sees the last one's writes
+// a page's job given: its words into its place in the staging pool (this frame's job fj), in the frame's batch - sent first if the page is in it already
 function ggDispatch(bytes, BW) {
-  const P = ggPipesC(), off = GG.fj++ * GG_JOBB;                // (its place in the staging pool: this frame's job fj)
-  gpuWriteBuf(GG.stage.gb, off, new Uint8Array(GG.pay.buffer, 0, bytes));
-  const bg = gpuBindGroup(P.dl, [
-    { binding: 0, resource: { buffer: GG.stage.gb, offset: off, size: 80 } }, { binding: 1, resource: { buffer: GG.stoneBuf.gb } },
-    { binding: 2, resource: { buffer: GG.stage.gb, offset: off, size: bytes } }, { binding: 3, resource: { buffer: GG.pagesBuf.gb } }, { binding: 4, resource: { buffer: GG.scrBuf.gb } }], 'ground derive');
+  const B = GG.bat, p = GG.pay[0];
+  if (B.pages.has(p)) ggFlush();
+  gpuWriteBuf(GG.stage.gb, GG.fj++ * GG_JOBB, new Uint8Array(GG.pay.buffer, 0, bytes));
+  B.n++; B.bw = Math.max(B.bw, BW); B.pages.add(p);
+}
+// the batch's jobs worked out: one compute pass, each pass's dispatch over all of them (z: the job); the dpass sees the hpass's writes
+function ggFlush() {
+  const B = GG.bat; if (!B || !B.n) return;
+  const P = ggPipesC(), n = B.n;
+  const bg = gpuBindGroup(P.dl, [{ binding: 1, resource: { buffer: GG.stoneBuf.gb } }, { binding: 2, resource: { buffer: GG.stage.gb, offset: B.z0 * GG_JOBB, size: n * GG_JOBB } },
+    { binding: 3, resource: { buffer: GG.pagesBuf.gb } }, { binding: 4, resource: { buffer: GG.scrBuf.gb, offset: B.z0 * GG_SCRR * 256, size: n * GG_SCRR * 256 } }], 'ground derive');
   const cp = gpuComputeBegin([GG.pagesBuf], 'groundc'); GPU.stats.computes++;
   cp.setBindGroup(0, bg);
-  cp.setPipeline(P.hpass); cp.dispatchWorkgroups(8, Math.ceil(BW / 8));
-  cp.setPipeline(P.dpass); cp.dispatchWorkgroups(8, 8);
+  cp.setPipeline(P.hpass); cp.dispatchWorkgroups(8, Math.ceil(B.bw / 8), n);
+  cp.setPipeline(P.dpass); cp.dispatchWorkgroups(8, 8, n);
   cp.end(); GG.stats.frameDisp += 2;
+  B.z0 = GG.fj; B.n = 0; B.bw = 0; B.pages.clear();
 }
 /* ---- each frame (the ground layer - landPaintStep): the slices the views show given slots, their pages worked out where they're missing or
    stale, nearest a view's middle first, in the frame's time for things being made ---- */
 function ggStep(views) {
+  GG.ready = true;
   if (!GG.on || !land.cell) return;
   if (!ggPools()) { if (GPU.on) frameWait('ground'); return; }   // (a ground to draw and the device lost - not drawn: the loading cover waits)
-  const t0 = performance.now(); GG.fj = 0; GG.stats.frameDisp = 0;
+  ggFlush();                                                   // (a batch left from a frame cut short: sent before its places are given again)
+  const t0 = performance.now(); GG.fj = 0; GG.stats.frameDisp = 0; GG.bat.z0 = 0;
   if (GG.cellRef !== land.cell || GG.dirtyRef !== land.dirty || !GG.slot || GG.nk !== Math.ceil(land.cols / LT_CHUNK)) { for (let i = 0; i < GG.sk.length; i++) ggSlotFree(i); ggSlotBufs(); ggReset(); }   // (a bigger world: its slots' buffers made for it)
   { const rs = ['forest', 'desert', 'mountain', 'tropical', 'ice', 'swamp', 'volcanic'].map(n => biomeSides(n).roots).join() + JSON.stringify((typeof BIOME_SURF !== 'undefined' && BIOME_SURF.sea) || []);   // (BOTTOM ROOTS, the sea's layers: the rare picks made with them)
     if (GG.ug !== ugReach() || GG.gapV !== land.gapsV || GG.rs !== rs) { GG.ug = ugReach(); GG.gapV = land.gapsV; GG.rs = rs; GG.air = new Map(); for (const S of GG.sk) if (S) { S.stale.fill(1); S.cols = false; } for (const e of GG.lv.values()) e.stale = 1; ggBaseAll(); } }
@@ -56688,6 +56836,7 @@ function ggStep(views) {
     const r = ggPageJob(Sl, i); if (r === 'page' || r === 'black') { GG.wr.add(Sl); done++; }
   }
   { let bf = done || nd; ggBaseStep(() => { if (!bf) { bf = 1; return false; } return performance.now() - t0 > GG_MS; }); }   // (the world's base in the time left - after the views' own; a frame that made nothing else makes a piece)
+  ggFlush();                                                   // (the frame's jobs worked out - before anything draws from their pages)
   for (const Sl of GG.wr) if (GG.sk[Sl.si] === Sl) ggPtabWrite(Sl);   // (each slot's page table sent once)
   for (const Sl of GG.sk) if (Sl && Sl.cols && Sl.scb && Sl.used === renderTick) ggScarStep(Sl);   // (the grass burnt on the views' slices)
   GG.wr.clear();
@@ -58895,7 +59044,7 @@ function gsPipe(fmt, sf) {
   const sop = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
   const ds = sf ? { format: sf, stencilFront: sop, stencilBack: sop, stencilReadMask: 0x80, stencilWriteMask: 0, ...(gpuHasDepth(sf) ? { depthWriteEnabled: false, depthCompare: 'always' } : {}) } : undefined;
   const PM = { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' };
-  return (GS.prs[key] = { rl, draw: gpuRenderPipe({ layout: gpuPipeLayout([rl], 'ground sprites'), vertex: { module: md, entryPoint: 'vs' }, fragment: { module: md, entryPoint: 'fs', targets: [{ format: fmt, blend: { color: PM, alpha: PM } }] }, primitive: { topology: 'triangle-strip' }, depthStencil: ds }) });
+  return (GS.prs[key] = { rl, draw: gpuRenderPipe({ layout: gpuPipeLayout([rl], 'ground sprites'), label: 'ground sprites', vertex: { module: md, entryPoint: 'vs' }, fragment: { module: md, entryPoint: 'fs', targets: [{ format: fmt, blend: { color: PM, alpha: PM } }] }, primitive: { topology: 'triangle-strip' }, depthStencil: ds }) });
 }
 // the pictures' column tops on the GPU: sent again only when a picture was added (or the device is new)
 function gsTops() {
@@ -59416,20 +59565,20 @@ function pgPipes() {
   const S = pgWgsl(), C = GPUShaderStage.COMPUTE, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, F = GPUShaderStage.FRAGMENT;
   const ro = (b, v) => ({ binding: b, visibility: v, buffer: { type: 'read-only-storage' } });
   const sl = gpuBindLayout([ro(0, C), ro(1, C), ro(2, C), { binding: 3, visibility: C, buffer: { type: 'storage' } }, ro(4, C)], 'plants step');
-  const step = gpuComputePipe({ layout: gpuPipeLayout([sl], 'plants step'), compute: { module: gpuModule(S.step, 'plants step'), entryPoint: 'main' } });
+  const step = gpuComputePipe({ layout: gpuPipeLayout([sl], 'plants step'), label: 'plants step', compute: { module: gpuModule(S.step, 'plants step'), entryPoint: 'main' } });
   const dl = gpuBindLayout([ro(0, VF), ro(1, VF), ro(2, VF), ro(3, VF), { binding: 4, visibility: F, texture: { sampleType: 'float' } }, { binding: 5, visibility: F, sampler: { type: 'filtering' } }, { binding: 6, visibility: F, texture: { sampleType: 'float' } }, ro(7, F)], 'plants draw');
   const dm = gpuModule(S.draw, 'plants draw'), pm = gpuModule(S.put, 'plants put');
   const pl = gpuBindLayout([ro(0, VF), { binding: 1, visibility: F, texture: { sampleType: 'float' } }, { binding: 2, visibility: F, sampler: { type: 'filtering' } }], 'plants put');
   const PM = { color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' } };
   const cm = gpuModule(S.clr, 'plants clear'), cl = gpuBindLayout([ro(0, GPUShaderStage.VERTEX)], 'plants clear');
-  const clr = gpuRenderPipe({ layout: gpuPipeLayout([cl], 'plants clear'), vertex: { module: cm, entryPoint: 'vs' }, fragment: { module: cm, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] }, primitive: { topology: 'triangle-strip' } });
+  const clr = gpuRenderPipe({ layout: gpuPipeLayout([cl], 'plants clear'), label: 'plants clear', vertex: { module: cm, entryPoint: 'vs' }, fragment: { module: cm, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] }, primitive: { topology: 'triangle-strip' } });
   // (the plants drawn from pictures: the rows, the art atlas - pgPicRow)
   const xm = gpuModule(S.pic, 'plants pictures'), xl = gpuBindLayout([ro(0, VF), ro(1, VF), { binding: 2, visibility: F, texture: { sampleType: 'float', viewDimension: '2d-array' } }], 'plants pictures');
   return { sl, step, dl, dm, pm, pl, PM, cl, clr, xm, xl, draw: null, puts: {} };
 }
 function pgDrawPipe() {
   const P = PGP.pipes; if (P.draw) return P.draw;
-  return (P.draw = gpuRenderPipe({ layout: gpuPipeLayout([P.dl], 'plants draw'), vertex: { module: P.dm, entryPoint: 'vs' }, fragment: { module: P.dm, entryPoint: 'fs', targets: [{ format: 'rgba8unorm', blend: P.PM }] }, primitive: { topology: 'triangle-list' } }));
+  return (P.draw = gpuRenderPipe({ layout: gpuPipeLayout([P.dl], 'plants draw'), label: 'plants draw', vertex: { module: P.dm, entryPoint: 'vs' }, fragment: { module: P.dm, entryPoint: 'fs', targets: [{ format: 'rgba8unorm', blend: P.PM }] }, primitive: { topology: 'triangle-list' } }));
 }
 // (what the plants draw on a target - the layer laid on it (put), or the plants' pictures (pic): one pipeline a target format and stencil - the context's clip
 // is the stencil's 0x80 bit, as the GL front's own draws test it)
@@ -59438,7 +59587,7 @@ function pgPutPipe(fmt, sf, pic) {
   const sop = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
   const ds = sf ? { format: sf, stencilFront: sop, stencilBack: sop, stencilReadMask: 0x80, stencilWriteMask: 0, ...(gpuHasDepth(sf) ? { depthWriteEnabled: false, depthCompare: 'always' } : {}) } : undefined;
   const L = pic ? P.xl : P.pl, M = pic ? P.xm : P.pm;
-  return (P.puts[key] = gpuRenderPipe({ layout: gpuPipeLayout([L], pic ? 'plants pictures' : 'plants put'), vertex: { module: M, entryPoint: 'vs' }, fragment: { module: M, entryPoint: 'fs', targets: [{ format: fmt, blend: P.PM }] }, primitive: { topology: pic ? 'triangle-list' : 'triangle-strip' }, depthStencil: ds }));
+  return (P.puts[key] = gpuRenderPipe({ layout: gpuPipeLayout([L], pic ? 'plants pictures' : 'plants put'), label: pic ? 'plants pictures' : 'plants put', vertex: { module: M, entryPoint: 'vs' }, fragment: { module: M, entryPoint: 'fs', targets: [{ format: fmt, blend: P.PM }] }, primitive: { topology: pic ? 'triangle-list' : 'triangle-strip' }, depthStencil: ds }));
 }
 // the plants' layer: one, the size of the largest target it's asked for at the finest pixel (half a target pixel), grown in steps
 function pgLayerTex(w, h) {
