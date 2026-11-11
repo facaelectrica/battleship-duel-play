@@ -7988,8 +7988,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 979;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 11 12:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 980;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 11 12:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10953,10 +10953,11 @@ function endPointer0(e) {
 window.addEventListener('pointerup', e => { if (PHOTO.on && !pointers.has(e.pointerId)) { photoPointerUp(e); return; } endPointer(e); });
 window.addEventListener('pointercancel', e => { if (PHOTO.on && !pointers.has(e.pointerId)) { photoPointerUp(e); return; } endPointer(e); });
 function dropAll() { mgHold[0] = mgHold[1] = false; for (const pl of planes) if (pl) pl.mg = false; cam.panHeld[0] = cam.panHeld[1] = false; diveHold[0] = diveHold[1] = 0; pointers.clear(); pinch[0] = pinch[1] = null; held.clear(); holding[0] = holding[1] = null; ui.dragSlider = null; }
-window.addEventListener('blur', dropAll);
+window.addEventListener('blur', () => { dropAll(); if (SFX.ctx && AUDIO_WEBKIT) audioAway(); });   // (Safari on a Mac: another app in front - the page not hidden - can still leave its sound dead: 51-audio.js)
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) dropAll();
   // (hidden: the sound stopped, a refusal - a closed context - let be; shown: resumed, or by the next touch if Safari won't here - 51-audio.js audioResume)
+  if (document.hidden) audioAway();   // (the next touch back builds the sound again - 51-audio.js audioInit)
   if (SFX.ctx) { if (document.hidden) { if (SFX.ctx.state !== 'closed') { const q = SFX.ctx.suspend(); if (q && q.catch) q.catch(() => {}); } } else audioResume(); }
 });
 window.addEventListener('wheel', e => {
@@ -27133,7 +27134,7 @@ const CLD_SPEC = {
   lay: 'obj', casters: 'obj', castF: 'obj', gsr: 'obj', gsn: 'obj', pal: 'obj', palK: 'obj', kind: 'obj',
   bx: 'f64', y: 'f64', s: 'f64', puffK: 'f64', haze: 'f64', wz: 'f64', thr: 'f64', storm: 'f64', wf: 'f64 0.5', w0: 'f64', uid: 'f64',
   wisp: 'u8', reformed: 'u8', visible: 'u8', far: 'u8', lod: 'u8', flit: 'u8',
-  grow: 'f64 1', growT: 'f64', gk0: 'f64 -1', gfr: 'f64 -1', pfr: 'f64 -1', cfr: 'f64 -1', cwf: 'f64 -1', lpf: 'f64 -1', lp: 'f64', ln: 'f64',
+  grow: 'f64 1', growT: 'f64', gk0: 'f64 -1', gfr: 'f64 -1', pfr: 'f64 -1', lfr: 'f64 -1', cfr: 'f64 -1', cwf: 'f64 -1', lpf: 'f64 -1', lp: 'f64', ln: 'f64',
   minX: 'f64 NaN', maxX: 'f64 NaN', h: 'f64', extU: 'f64 NaN', bodyK: 'f64', seen: 'f64', nextForm: 'f64',
   under: 'f64', Lx: 'f64', Ly: 'f64', Lz: 'f64 -1', agOn: 'u8', ag0: 'f64', ag1: 'f64', ag2: 'f64', ag3: 'f64 1', ag4: 'f64 1', ag5: 'f64 1', ag6: 'f64 1', ag7: 'f64 0.1',
   axd0: 'f64', axd1: 'f64', hasAxd: 'u8', cwx: 'f64', cwy: 'f64', bc0: 'f64', bc1: 'f64', bc2: 'f64', hasBc: 'u8', bR: 'f64',
@@ -28068,11 +28069,11 @@ function gskVisit(c, vis, gk) {
   if (isNaN(CK.extU[c])) cloudBox(c);
   { const X = screenX(c), r = CK.extU[c] * CK.s[c] * lay.zl * Math.max(1, CK.grow[c]), Mg = W * 0.5 + 24; if (X + r < -Mg || X - r > W + Mg) { if (CK.pfr[c] !== frameNo) CK.visible[c] = 0; return; } }
   if (CK.grow[c] > 0.04) NEAR.push(c);                                 // (within half a screen of the view: a shadow caster, on the screen or just off it)
-  // (seen by the other view this frame: drawn with the light it was given there)
-  if (CK.pfr[c] === frameNo) { if (CK.visible[c]) { const X = screenX(c), VM = 24 + (W >> 2); if (X + CK.maxX[c] >= -VM && X + CK.minX[c] <= W + VM) vis.push(c); } return; }
-  const wasFar = CK.far[c] && CK.pfr[c] >= frameNo - 2;   // (drawn as its lobes alone a frame or two ago)
-  CK.pfr[c] = frameNo;
-  stepLobes(c);
+  // (lit by the other view this frame: drawn with the light it was given there. User Nov 11 11:23, two views, flying the plane: "a lot of clouds
+  // popping in and out of existence" - one the other view had placed but found off its own screen was taken as not visible here either, so a
+  // cloud on this view's screen went whenever it was near the other view's: now it is lit here, its lobes already stepped this frame)
+  if (CK.pfr[c] === frameNo) { if (CK.lfr[c] === frameNo) { if (CK.visible[c]) { const X = screenX(c), VM = 24 + (W >> 2); if (X + CK.maxX[c] >= -VM && X + CK.minX[c] <= W + VM) vis.push(c); } return; } }
+  else { CK.pfr[c] = frameNo; stepLobes(c); }
   CK.visible[c] = CK.grow[c] > 0.04 && (P[lay.dkK || (lay.dkK = 'dk' + lay.dn)] ?? 1) > 0 ? 1 : 0;   // (DECK n off: its clouds aren't placed or drawn)
   if (!CK.visible[c]) return;
   // (a re-forming cloud takes its new lobes: within the frame's budget for making clouds, skyGen, or a frame or two later)
@@ -28102,8 +28103,12 @@ function gskVisit(c, vis, gk) {
   CK.seen[c] = now;
   // (drawn as its lobes alone (far): by its kind or deck, or none of its records could be drawn - by its recipe's own biggest billows and puffs
   // when it has one; or, coming nearer, while its recipe's counts are on their way (2: drawn as it was, a frame or two - never a placeholder))
+  // (user Nov 11 11:23, the iPad flying a plane: "a lot of clouds popping in and out of existence". A cloud coming on to the screen, or
+  // grown past its lobes, had nothing drawn until its recipe's counts were back from the GPU - a frame or two on the laptop, many more on the
+  // iPad, and none while every read was in flight (gskSlotFree): it popped in. Now it is drawn as its lobes meanwhile - its whole shape, its
+  // light - and takes its billows and puffs when they're there. The loading screen still waits for every recipe (gskReady: GS.wait))
   const g = CK.gsr[c], ready = !!g && g.ep === GS.ep && !!g.bm;
-  CK.far[c] = lob || !want ? 1 : !ready ? (wasFar ? 2 : 0) : !GSK_FULL && gskBig(c, g) < GSK_PIX * (1 - GSK_PIXM) ? 1 : 0;
+  CK.far[c] = lob || !want ? 1 : !ready ? 2 : !GSK_FULL && gskBig(c, g) < GSK_PIX * (1 - GSK_PIXM) ? 1 : 0;
   CK.flit[c] = 0;
   if (flash.k > 0 && flash.lay === lay) {
     let rbM = 0; for (let j = CK.lp[c]; j < CK.lp[c] + CK.ln[c]; j++) if (LP[j * LPN + 6] > rbM) rbM = LP[j * LPN + 6];
@@ -28114,6 +28119,7 @@ function gskVisit(c, vis, gk) {
   CK.under[c] = ((P.farsun ?? 1) > 0 ? smoothstep(0.3, 0.02, sunScreen.y) : clamp((H * sunZ().row - CK.y[c] + 4 * Zg) / (HS * 0.12 * Zg), 0, 1)) * (1 - E.overcast) * (1 - 0.6 * E.night);   // (FAR SUN: light from under only with the sun low - every cloud alike)
   lightDir(c);
   castWorld(c); CK.cwf[c] = frameNo;
+  CK.lfr[c] = frameNo;
   vis.push(c);
 }
 
@@ -68800,7 +68806,17 @@ const SFX = { ctx: null, master: null, noise: null, brown: null, whoosh: [], amb
    running - it's resumed there, a silent sound played in the same handler (Safari's unlock); a refused resume is noted and tried
    again at the next touch, never left as an uncaught rejection. Only a closed context (it can never run again) is replaced, with
    a new one built as the first was. Each change of its state is noted in the log the REPORT button saves (50-zzzz-bug.js) */
+/* (user Nov 11 09:38: "if I'm playing the game on Safari and I alt tab to another application, it will then lose the sound when I return")
+   WebKit's context, back from behind another app, can say 'running' and play nothing, or stay stopped through every resume. So a page
+   that was sent behind (or a window left while its context stopped) has its sound built again from nothing at the first touch, key or
+   click after it's back - a new context, inside that touch, as the first one was; elsewhere (Chrome, Firefox) only when it isn't running */
+const AUDIO_WEBKIT = typeof navigator !== 'undefined' && /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|CriOS|Edg|Firefox|FxiOS/.test(navigator.userAgent);
+function audioAway() { if (SFX.ctx) SFX.away = true; }
 function audioInit() {
+  if (SFX.ctx && SFX.away) {
+    SFX.away = false;
+    if (AUDIO_WEBKIT || SFX.ctx.state !== 'running') { const old = SFX.ctx; console.warn('audio: back from behind another app (' + old.state + ') - the sound built again'); audioDrop(); try { const q = old.close(); if (q && q.catch) q.catch(() => {}); } catch (e) {} }
+  }
   if (SFX.ctx && SFX.ctx.state === 'closed') audioDrop();
   if (SFX.ctx) { audioWake(); return; }
   const AC = window.AudioContext || window.webkitAudioContext;
@@ -68994,7 +69010,7 @@ function audioState(ctx) {
 // a closed context let go, everything built on it with it - the next touch builds the sound again (audioInit)
 function audioDrop() {
   const ctx = SFX.ctx; if (ctx) ctx.onstatechange = null;
-  console.warn('audio: the context was closed - a new one is made');
+  if (ctx && ctx.state === 'closed') console.warn('audio: the context was closed - a new one is made');
   Object.assign(SFX, { ctx: null, master: null, world: null, round: null, noise: null, brown: null, whoosh: [], amb: null, eng: [], rot: null, pl: null, jt: null, roar: null, under: null, life: null, refused: false, wasStopped: false });
   if (typeof hornVoices !== 'undefined') hornVoices.clear();
 }
