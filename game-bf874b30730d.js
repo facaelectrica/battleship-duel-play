@@ -2162,12 +2162,19 @@ function frameTick() { const t = typeof time === 'number' ? time : 0; FRAME.dt =
 const FRAME_SHARE = new Map();
 function frameShare(name, get) { FRAME_SHARE.set(name, get); }
 function frameShared(name) { const g = FRAME_SHARE.get(name); if (!g) return null; try { return g(); } catch (e) { return null; } }
-// THE FRAME'S READINESS (part 1's ask, Nov 10): a part whose first frames after a world is made can't yet draw what it should (the
-// sky's first cloud recipes wait a frame or two for their counts - gpuReadBuf) registers frameReadyAdd(() => true once it can).
-// frameReady() is true when every registered check is; the loading cover (00-world.js worldEditCover) stays up until it is (2 s at most).
-const FRAME_READY = [];
-function frameReadyAdd(fn) { if (typeof fn === 'function' && !FRAME_READY.includes(fn)) FRAME_READY.push(fn); }
-function frameReady() { for (const f of FRAME_READY) { try { if (!f()) return false; } catch (e) { } } return true; }
+// THE FRAME'S READINESS (part 1's ask, Nov 10; user Nov 11 09:34 - the loading screen lifted on a world still building, its sound already
+// playing under it). A part that draws this frame short of its final picture says so while it draws it: frameWait(name) - the ground's pages
+// not at the view's level ('ground'), a plant's species still being made ('plants'), the clouds' first recipes waiting for their counts
+// ('sky'), the lakes' first fill ('lakes'), a picture still going up to the atlas ('atlas'), the worker's first snapshot ('worker').
+// frameReadyTake() at the frame's end: what waited in it ({ name: times }, or null - the frame whole) and starts the next frame's list.
+// Said in the frame itself, never read from a part's flag between frames: a flag read outside the frame described the frame before - the
+// world's first ask found the last world's (or none) and lifted the cover at once
+const FRAME_WAIT = new Map();
+function frameWait(name) { FRAME_WAIT.set(name, (FRAME_WAIT.get(name) || 0) + 1); }
+function frameReadyTake() {
+  if (!FRAME_WAIT.size) return null;
+  const w = {}; for (const [k, n] of FRAME_WAIT) w[k] = n; FRAME_WAIT.clear(); return w;
+}
 // the camera of the view beginView set last (vi its index): { buffer, offset, size } in this submit's arena - read by a pass as a
 // uniform: vec4(left px, top px, scale, zoom), vec4(view x on the target, view width, target width, target height), vec4(time, view, shake x px, shake y px)
 function frameCam(vi, v, tw, th) {
@@ -2350,8 +2357,46 @@ function frameDrawStencil(X) {
   return { depthStencil: { format: ds.fmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: face, stencilBack: face, stencilReadMask: 0x80, stencilWriteMask: 0 } };
 }
 const frameDrawKey = (X, op) => (op || X.op) + '|' + X.T.tex.fmt + '|' + (X.ds ? X.ds.fmt : '') + '|' + (X.screen ? 1 : 0);
+/* THE FIRST SHOT (user Nov 11 09:35 / 11:20, the iPad: "the first time I fire a missile ... the game hangs for like a frame"). A pipeline made at
+   a draw compiles its shaders there and then - on the iPad's Metal a frame's hitch: the fire's at the first missile, the smoke's at the first
+   smoke, a picture's lay for a target it had not been laid on. So every draw target a frame draws into (frameDrawKey: its op, format, clip and
+   screen) has the effects' pipelines for it made ahead, off the frame (createRenderPipelineAsync), the first time it's seen - while the world is
+   built, under its loading screen; the part takes it from its own map when it's there (made at the draw as before only if it isn't yet). The
+   effects' shared objects (their modules, layouts and computes - fireShared, smpShared, g8Shared, the lay's) are made with them, there */
+function flaySetup() {
+  if (FLAY.ep === GPU.ep) return;
+  const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
+  FLAY.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: 96 } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }], 'lay');
+  FLAY.m = gpuModule(FLAY_WGSL, 'lay'); FLAY.pl = gpuPipeLayout([FLAY.bl], 'lay'); FLAY.pipes.clear(); FLAY.ep = GPU.ep;
+}
+const FWARM = { ep: -1, seen: new Set(), parts: null };
+function frameWarmParts() {
+  const P = [], st = (X, topo) => Object.assign({ primitive: { topology: topo, cullMode: 'none' } }, frameDrawStencil(X));
+  P.push({ setup: flaySetup, map: () => FLAY.pipes, desc: X => Object.assign({ layout: FLAY.pl, label: 'lay', vertex: { module: FLAY.m, entryPoint: 'vs' }, fragment: { module: FLAY.m, entryPoint: 'fs', targets: [frameDrawColour(X)] } }, st(X, 'triangle-list')) });
+  if (typeof fireShared === 'function') P.push({ setup: fireShared, map: () => FIRE.col, desc: X => Object.assign({ layout: FIRE.cpl, label: 'fire colours', vertex: { module: FIRE.cm, entryPoint: 'vs' }, fragment: { module: FIRE.cm, entryPoint: 'fs', targets: [frameDrawColour(X)] } }, st(X, 'triangle-list')) });
+  if (typeof g8Shared === 'function') P.push({ setup: g8Shared, map: () => G8.ms, desc: X => Object.assign({ layout: G8.msp, label: 'mid sea', vertex: { module: G8.msm, entryPoint: 'vs' }, fragment: { module: G8.msm, entryPoint: 'fs', targets: [frameDrawColour(X)] } }, st(X, 'triangle-strip')) });
+  if (typeof NSKY === 'object' && NSKY.smokeShared) P.push({ setup: NSKY.smokeShared, map: null });
+  if (typeof pxWarm === 'function') P.push({ warm: pxWarm });
+  return P;
+}
+// a pipeline made ahead (desc), put in map at key when made - unless the part made its own there first, or the device is new
+function gpuPipeAhead(map, key, desc) {
+  const ep = GPU.ep; map.set(key, null);   // (null: on its way - a part asking meanwhile makes its own, as before)
+  GPU.stats.pipesAhead = (GPU.stats.pipesAhead || 0) + 1;
+  GPU.dev.createRenderPipelineAsync(desc).then(p => { if (GPU.ep === ep && map.get(key) === null) map.set(key, p); }, e => { if (map.get(key) === null) map.delete(key); console.warn('gpu: a pipeline made ahead failed -', desc.label, e && e.message || e); });
+}
+function frameWarm(X) {
+  if (FWARM.ep !== GPU.ep) { FWARM.ep = GPU.ep; FWARM.seen.clear(); }
+  const k = frameDrawKey(X); if (FWARM.seen.has(k)) return; FWARM.seen.add(k);
+  if (!FWARM.parts) FWARM.parts = frameWarmParts();
+  for (const W of FWARM.parts) {
+    try { if (W.warm) { W.warm(X, k); continue; } W.setup(); if (W.map) { const M = W.map(); if (!M.has(k)) gpuPipeAhead(M, k, W.desc(X)); } }
+    catch (e) { console.warn('gpu: warming', k, '-', e && e.message || e); }
+  }
+}
 function frameDrawPass(X, key) {
   const D = FDRAW, tex = X.T.tex, ds = X.ds;
+  frameWarm(X);
   if (X.clear || !FR.pass || FR.pg !== D.pg || D.tex !== tex || D.ds !== ds || D.key !== key) {   // (FR.pg: another part's pass gone on in the open one since - its state not ours)
     const desc = { colorAttachments: [{ view: tex.view, loadOp: X.clear ? 'clear' : 'load', clearValue: [0, 0, 0, 0], storeOp: 'store' }] };
     if (ds) desc.depthStencilAttachment = Object.assign({ view: ds.view, stencilReadOnly: true }, gpuHasDepth(ds.fmt) ? { depthReadOnly: true } : {});
@@ -2393,11 +2438,7 @@ const frameClearKeeps = op => { const b = GLB[op] || GLB['source-over'], one = f
 // in it (a pixel's margin each side for the sums' rounding): the same pixels drawn, none of the ones that would add nothing
 function frameLay(c, tex, sx, sy, sw, sh, ph, dx, dy, dw, dh, box) {
   const X = frameDrawBegin(c); if (!X) return;
-  if (FLAY.ep !== GPU.ep) {
-    const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
-    FLAY.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: 96 } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }], 'lay');
-    FLAY.m = gpuModule(FLAY_WGSL, 'lay'); FLAY.pl = gpuPipeLayout([FLAY.bl], 'lay'); FLAY.pipes.clear(); FLAY.ep = GPU.ep;
-  }
+  flaySetup();
   const t = c.target, s = c.s, [ch, off] = arenaAlloc(96, 256), w0 = off >> 2, Wd = arenaWords(ch), Fl = Wd.f, I = Wd.i;
   glCorners(s.m, dx, dy, dw, dh);
   const X4 = GLC4.x, Y4 = GLC4.y;
@@ -2709,15 +2750,9 @@ function bootSay(t, pct) { if (!SW_IN_WORKER && typeof window.__bootSay === 'fun
 const bootPaint = () => SW_IN_WORKER || !document.getElementById('bootCover') ? null : new Promise(r => { let done = false; const go = () => { if (!done) { done = true; setTimeout(r, 0); } }; requestAnimationFrame(go); setTimeout(go, 40); });
 let bootPainted = 0;
 function bootTick(t, pct) { bootSay(t, pct); if (SW_IN_WORKER || performance.now() - bootPainted < 60) return null; bootPainted = performance.now(); return bootPaint(); }
-// (Nov 10, the skeleton: like worldEditCover(false) - the cover stays until the frame under it is ready (frameReady, src/gpu/50-frame.js:
-// a round carried over a hot reload has its world and sky behind it), one animation frame at a time, 2 s at most)
-let bootCoverT0 = 0;
-function bootCoverOff() {
-  if (SW_IN_WORKER) return;
-  if (!bootCoverT0) bootCoverT0 = performance.now();
-  if (typeof frameReady === 'function' && !frameReady() && performance.now() - bootCoverT0 < 2000) { requestAnimationFrame(bootCoverOff); return; }
-  try { const d = document.getElementById('bootCover'); if (d) d.remove(); } catch (e) { }
-}
+// (like worldEditCover(false): the page's loading screen goes at the end of the first whole frame drawn after the ask - coverOff, 00-world.js;
+// the title's, or a round carried over a hot reload with its world behind it)
+function bootCoverOff() { if (!SW_IN_WORKER) coverOff(document.getElementById('bootCover')); }
 const PAGE_GAP_MAX = 80;
 const fsApp = () => { try { return !!(navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)); } catch (e) { return false; } };
 if (!SW_IN_WORKER && fsApp()) try { document.documentElement.classList.add('fsapp'); } catch (e) { }
@@ -2863,6 +2898,10 @@ async function swResync() {
 }
 // (Oct 31: the page opens on the menu with no world) the worker takes the game whenever one is live here and it isn't running it
 // yet - the first game picked, and any after a failure was cleared - one rule, whatever order the worker and the world are ready in
+// (user Nov 11 09:34, the loading cover: the worker's first snapshot is part of the first whole frame - frameWait, src/gpu/50-frame.js) a game
+// the worker is to run that it doesn't run yet - booting, going live, taking a new world from the page: the page's copy is held for the hand-over
+// (SW.handing), so a cover lifted before it would show the game standing still. Nothing waits once it failed, or while the page keeps the game (a hold)
+function swWaitFrame() { if (SW_WANT && !SW.fail && !SWB.holds.size && !SWB.taking && (!SW.live || SW.resyncing || SW.gen !== SW.liveGen)) frameWait('worker'); }
 function swWantLive() {
   if (NET.role !== 'local') swHold('online'); else if (SWB.holds.has('online')) swRelease('online');
   if (!SW_WANT || !SW.ready || SW.live || SW.going || SW.fail || SWB.holds.size || SWB.taking) return;
@@ -3433,7 +3472,7 @@ function worldResume() {
     if (!(PAGE_UP && !LOADING && ui.title)) { if (++tries < 600) setTimeout(go, 100); return; }   // (the page started - no world is built at the title: it's built when a game is picked)
     menuSel.mode = m;
     if (m === 'story') { SSL.open = true; SSL.confirm = null; SSL.sel = 0; worldEditCover(false); }   // (STORY: its slots to pick)
-    else { menuPlay(true); let n = 0; const off = () => { if (!ui.title || ++n > 600) worldEditCover(false); else setTimeout(off, 100); }; off(); }   // (LOADING... till the game's on)
+    else { menuPlay(true); worldEditCover(false); }   // (LOADING... till the game's first whole frame - coverOff)
   };
   go();
 }
@@ -3508,18 +3547,50 @@ let worldEdCover = null;
 function worldEditCover(on, text = 'Loading editor') {
   if (typeof document === 'undefined' || SW_IN_WORKER) return;
   if (!on) {
-    if (!worldEdCover) return;
-    // (Nov 10, the skeleton: the cover stays up until the frame under it is ready - every part's frameReady check, src/gpu/50-frame.js:
-    // the sky's first clouds come back a frame or two after the world is made - one animation frame at a time, 2 s at most; a new
-    // worldEditCover(true) while it waits keeps the cover up)
-    const d = worldEdCover, g = d.__gen = (d.__gen || 0) + 1, t0 = performance.now();
-    const off = () => { if (worldEdCover !== d || d.__gen !== g) return; if (typeof frameReady === 'function' && !frameReady() && performance.now() - t0 < 2000) { requestAnimationFrame(off); return; } d.remove(); worldEdCover = null; };
-    off(); return;
+    // (the cover goes when the frame under it is whole - coverOff, below; a new worldEditCover(true) while it waits keeps it up)
+    const d = worldEdCover; if (d) coverOff(d, () => { if (worldEdCover === d) worldEdCover = null; });
+    return;
   }
-  if (worldEdCover) { worldEdCover.__gen = (worldEdCover.__gen || 0) + 1; worldCoverSay(text); return; }
+  if (worldEdCover) { coverKeep(worldEdCover); worldCoverSay(text); return; }
   const d = worldEdCover = window.__coverMake();          // (the loading screen's one look: the title, the line, the corner - src/index.html)
   worldCoverSay(text);
   setTimeout(() => { if (worldEdCover === d) worldEditCover(false); }, 60000);
+}
+/* THE LOADING SCREENS' LIFT (user Nov 11 09:34: "when I press play, I hear the sound while the game is still loading, and then when it loads a
+   scene, I see it's finalizing like the buildup of the terrain. The way it should work is that you only get audio and the scene at the same time
+   when it's ready to display to the player"). One rule for every loading screen, whatever put it up - the page's own (bootCover), worldEditCover's
+   (a game from the menu - loadThen, the GAME EDITOR and its PLAY, a world switch, a Story load): asked off (coverOff), it is taken away at the end
+   of the first frame drawn after the ask that is whole - nothing LOADING, and with a world live, no part said in that frame that it drew short of
+   its final picture (frameWait, src/gpu/50-frame.js: the ground at the view's level, the plants' species, the clouds' recipes, the lakes' first
+   fill, the atlas's pictures, the pipelines, the worker's first snapshot) - however many frames that takes, no time limit; in that frame, before
+   its sound (coverStep at the frame's end, before audioSafe - 52-main.js frameBody): the world is silent while a loading screen is up (coverUp -
+   51-audio.js), so its sound starts on the frame the screen goes. COVER.last: the last lift - the frame it went on (renderTick), when it was asked
+   and lifted (ms), the frames between, and the last frame each part waited in; COVER.lifts the last 8 (the REPORT's 'cover', __game.cover()) */
+const COVER = { off: new Map(), waited: {}, asked: 0, askFr: 0, last: null, lifts: [] };
+// (a check on any device - window.__cover(): the lifts so far; read without building a world, as reading window.__game at the title does - 52-main.js)
+if (typeof window !== 'undefined' && !SW_IN_WORKER) window.__cover = () => ({ up: coverUp(), asked: COVER.off.size > 0, last: COVER.last, lifts: COVER.lifts.slice() });
+function coverUp() { return !!worldEdCover || (typeof document !== 'undefined' && !!document.getElementById('bootCover')); }
+function coverOff(d, done) {
+  if (!d) return;
+  if (!COVER.off.size) { COVER.asked = performance.now(); COVER.askFr = renderTick; COVER.waited = {}; }
+  COVER.off.set(d, done || null);
+}
+function coverKeep(d) { COVER.off.delete(d); }
+function coverStep() {
+  const w = frameReadyTake();
+  if (!COVER.off.size) return;
+  if (w) for (const k in w) COVER.waited[k] = renderTick;
+  if (LOADING || (w && worldLive())) return;
+  const L = COVER.last = { fr: renderTick, asked: Math.round(COVER.asked), lifted: Math.round(performance.now()), frames: renderTick - COVER.askFr, world: worldLive(), waited: COVER.waited };
+  COVER.lifts.push(L); if (COVER.lifts.length > 8) COVER.lifts.shift();
+  for (const [d, done] of COVER.off) { try { d.remove(); } catch (e) { } if (done) done(); }
+  COVER.off.clear();
+}
+// a world about to be built on the page: a loading screen over it if none is up yet (true - this build's own: asked off once it's built, it goes
+// with the world's first whole frame); one already up (loadThen's, the editor's) stays its owner's
+function worldBuildCover() {
+  if (typeof document === 'undefined' || SW_IN_WORKER || worldEdCover) return false;
+  worldEditCover(true, 'Building world'); return true;
 }
 function worldCoverSay(text, pct) { if (!worldEdCover) return; if (typeof window.__bootSay === 'function') window.__bootSay(text, pct, worldEdCover); else worldEdCover.textContent = text; }
 const worldEditReady = () => worldEditCover(false);
@@ -4407,6 +4478,14 @@ function artDrop(pic) {
   i = ART.pend.indexOf(e); if (i >= 0) ART.pend.splice(i, 1);
   const k = e.w + 'x' + e.h, F = ART.free.get(k) || (ART.free.set(k, []), ART.free.get(k)); F.push(e);
 }
+// a picture about to be drawn this frame: true once its pixels are on the GPU (e.ok); one still going up - its source there, or still
+// loading - holds the loading cover (frameWait, src/gpu/50-frame.js: the frame isn't its final picture), a source that can't load never does
+function artOk(e) {
+  if (!e) return false;
+  if (e.ok) return true;
+  const s = e.src; if (s && ((s.naturalWidth || s.width) || s.complete === false)) frameWait('atlas');
+  return false;
+}
 // the atlas texture on this device (made again after a device loss: every picture sent again)
 function artTex() {
   if (!GPU.on || GPU.lost || !GPU.dev) return null;
@@ -4437,6 +4516,7 @@ function artPixels(e, y0, rows) {
                       .view is its '2d-array' view; read in WGSL as texture_2d_array<f32>, textureLoad(t, xy, page, 0) or a sampler's
                       textureSampleLevel). A new device makes a new one (ART.ep changes): a part keeps its bind groups by it
    artFrame()         run once a frame by the frame's 'art' layer (45-zz-things-gpu.js): the families, then artStep
+   artOk(e)           at a draw: e's pixels there (e.ok) - false while they go up, said to the frame (the loading cover waits for them)
    A picture is drawn only once ok (its pixels sent within ART.BUDGET a frame - never all on the frame that first asks). ---- */
 const ART_FAMS = [];
 function artFamily(fn) { ART_FAMS.push(fn); }
@@ -7908,8 +7988,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 978;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 11 12:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 979;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 11 12:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24631,7 +24711,7 @@ function wgpuReady() {
   W.pl = gpuPipeLayout([W.bl], 'water');
   // (group 1 of the draws that read another part's GPU data, handed over by frameShared: the ground's grid - fsFloor)
   W.gbl = gpuBindLayout([0, 1, 2].map(b => ({ binding: b, visibility: VF, buffer: ro })), 'water ground'); W.plG = gpuPipeLayout([W.bl, W.gbl], 'water ground');
-  W.rpipe.clear(); W.samp = gpuSampler(true, 0, 0);
+  W.rpipe.clear(); W.ahead = null; W.samp = gpuSampler(true, 0, 0);
   W.ramp = gpuTex(256, 16, 'rgba8unorm', 'water'); W.rampKey = new Array(16).fill('');   // (rows: the deep, the tint, the deep's dark, a body's tint, a body's biome water, the rays, the fog over the water, the murk under it, the low sun's band, the far sea's band, the light paths' glows - the moon's, the low sun's, the day's; 16 - a power of two: each row's middle exact in binary, so no filter reads a neighbour's colours in, as the GL front's 256-row table)
   W.still = null; W.stillKey = ''; W.surf = [null, null]; W.surfKey = ['', ''];
   W.none = gpuBuf(256, 'water');
@@ -24648,12 +24728,21 @@ const WGPU_OPS = {
 // a draw's pipeline: its entry points (vs + fs: the fills and lines; vsShadow + fsShadow; vs + fsAbyss), the target's format, the context's composite op,
 // and with a clip in force the stencil's format (sfmt): drawn only where bit 0x80 is set - the GL front's clip, tested as its own draws test it
 const WGPU_FACE = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
+const wgpuPipeKey = (vs, fs, fmt, B, sfmt, g1) => vs + ':' + fs + ':' + fmt + ':' + B.join() + ':' + (sfmt || '') + (g1 ? ':g1' : '');
+function wgpuPipeDesc(vs, fs, fmt, B, sfmt, g1) {
+  const W = WGPU_W, blend = { color: { srcFactor: B[0], dstFactor: B[1], operation: 'add' }, alpha: { srcFactor: B[2], dstFactor: B[3], operation: 'add' } };
+  const ds = sfmt ? { depthStencil: { format: sfmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: WGPU_FACE, stencilBack: WGPU_FACE, stencilReadMask: 0x80, stencilWriteMask: 0 } } : {};
+  return Object.assign({ layout: g1 ? W.plG : W.pl, label: 'water ' + fs, vertex: { module: W.mod, entryPoint: vs }, fragment: { module: W.mod, entryPoint: fs, targets: [{ format: fmt, blend }] }, primitive: { topology: 'triangle-list' } }, ds);
+}
+// (the first shot - 60-draw.js frameWarm: the effects' draws - a shell's wash and foam, the splash's puffs and balls, a wreck's shade - made ahead,
+// off the frame, for every target, op and clip the water is first drawn with, while the world is built under its loading screen)
+const WGPU_AHEAD = [['vsWash', 'fsWash'], ['vsFoam', 'fsFoam'], ['vsPuff', 'fsPuff'], ['vsBall', 'fsBall'], ['vsShadeRows', 'fsShadeRows']];
 function wgpuPipe(vs, fs, fmt, op, sfmt, g1) {
-  const W = WGPU_W, B = WGPU_OPS[op] || WGPU_OPS['source-over'], k = vs + ':' + fs + ':' + fmt + ':' + B.join() + ':' + (sfmt || '') + (g1 ? ':g1' : ''); let p = W.rpipe.get(k);
+  const W = WGPU_W, B = WGPU_OPS[op] || WGPU_OPS['source-over'], k = wgpuPipeKey(vs, fs, fmt, B, sfmt, g1); let p = W.rpipe.get(k);
   if (!p) {
-    const blend = { color: { srcFactor: B[0], dstFactor: B[1], operation: 'add' }, alpha: { srcFactor: B[2], dstFactor: B[3], operation: 'add' } };
-    const ds = sfmt ? { depthStencil: { format: sfmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: WGPU_FACE, stencilBack: WGPU_FACE, stencilReadMask: 0x80, stencilWriteMask: 0 } } : {};
-    p = gpuRenderPipe(Object.assign({ layout: g1 ? W.plG : W.pl, label: 'water ' + fs, vertex: { module: W.mod, entryPoint: vs }, fragment: { module: W.mod, entryPoint: fs, targets: [{ format: fmt, blend }] }, primitive: { topology: 'triangle-list' } }, ds));
+    const wk = fmt + ':' + B.join() + ':' + (sfmt || ''), seen = W.ahead || (W.ahead = new Set());
+    if (!seen.has(wk)) { seen.add(wk); for (const [v, f] of WGPU_AHEAD) { const k2 = wgpuPipeKey(v, f, fmt, B, sfmt, false); if (k2 !== k && !W.rpipe.has(k2)) gpuPipeAhead(W.rpipe, k2, wgpuPipeDesc(v, f, fmt, B, sfmt, false)); } }
+    p = gpuRenderPipe(wgpuPipeDesc(vs, fs, fmt, B, sfmt, g1));
     W.rpipe.set(k, p);
   }
   return p;
@@ -25735,6 +25824,7 @@ function pxLayer(o) {
   if (Object.keys(L.cols).length > 16 || L.pal.length > 32) throw new Error('pxLayer: at most 16 columns and 32 colours');   // (the header's room: PXL_HW)
   for (const k in L.cols) L.own[k] = new (L.cols[k].endsWith('u8') ? Uint8Array : L.cols[k].endsWith('rgba') ? Uint32Array : Int32Array)(16);
   L.hasFrame = Object.keys(L.cols).some(k => L.cols[k].startsWith('frame'));
+  (pxLayer.all || (pxLayer.all = [])).push(L);   // (every layer: their pipelines made ahead for each target - the first shot, 60-draw.js frameWarm)
   return L;
 }
 // the layer's vertex stage: its columns read from the arena (a_name), its rect, and the corners as GLCtx's quads work them out
@@ -25793,18 +25883,24 @@ function pxShared() {
   PXL.bgs.clear(); PXL.ep = GPU.ep;
 }
 // the layer's pipeline for this target, blend and clip (ds: the stencil the clip is in, or none)
+function pxVsSetup(L) { if (L.ep !== GPU.ep) { L.pipes.clear(); L.vs = gpuModule(gpuNaga(pxVS(L), 'vertex'), 'px layer vs'); L.ep = GPU.ep; } }
+const pxPipeDesc = (L, X) => Object.assign({
+  layout: PXL.pl, label: 'px layer',
+  vertex: { module: L.vs, entryPoint: 'main' },
+  fragment: { module: PXL.fs, entryPoint: 'main', targets: [frameDrawColour(X)] },
+  primitive: { topology: 'triangle-list', cullMode: 'none' },
+}, frameDrawStencil(X));
+// (the first shot: every layer's pipeline for a target made ahead, off the frame - 60-draw.js frameWarm)
+function pxWarm(X, key) {
+  pxShared();
+  for (const L of pxLayer.all || []) { pxVsSetup(L); if (!L.pipes.has(key)) gpuPipeAhead(L.pipes, key, pxPipeDesc(L, X)); }
+}
 function pxPipe(L, X) {
-  if (L.ep !== GPU.ep) { L.pipes.clear(); L.vs = gpuModule(gpuNaga(pxVS(L), 'vertex'), 'px layer vs'); L.ep = GPU.ep; }
+  pxVsSetup(L);
   const key = frameDrawKey(X);
   let p = L.pipes.get(key);
   if (p) return p;
-  const desc = Object.assign({
-    layout: PXL.pl,
-    vertex: { module: L.vs, entryPoint: 'main' },
-    fragment: { module: PXL.fs, entryPoint: 'main', targets: [frameDrawColour(X)] },
-    primitive: { topology: 'triangle-list', cullMode: 'none' },
-  }, frameDrawStencil(X));
-  p = gpuRenderPipe(desc);
+  p = gpuRenderPipe(pxPipeDesc(L, X));
   L.pipes.set(key, p);
   return p;
 }
@@ -28508,7 +28604,7 @@ function gskViewPass() {
     for (const c of VIS[VI]) {
       if (CK.lay[c] !== lay) continue;
       const axv = Math.round(CK.bx[c] * lay.zl) + ioff + 1; if (VI) CK.axd1[c] = axv; else CK.axd0[c] = axv; CK.hasAxd[c] = 1;   // (where it is in the view this frame: for the sun and the planes)
-      if (!CK.far[c] && !(CK.gsr[c] && CK.gsr[c].ep === GS.ep)) { wait++; continue; }   // (its first recipe's counts not back yet: not drawn - never as a placeholder; gskReady)
+      if (!CK.far[c] && !(CK.gsr[c] && CK.gsr[c].ep === GS.ep)) { wait++; continue; }   // (its first recipe's counts not back yet: not drawn - never as a placeholder; frameWait, below)
       if (CK.far[c] === 2) wait++;   // (drawn as its lobes as it was a frame ago, its recipe's counts on their way)
       list.push(c);
     }
@@ -28578,6 +28674,7 @@ function gskViewPass() {
     decks.set(lay, [r0, rec - r0, f0, [nF, nfr, nP, npr, nLb], bx]);   // (its records; its FILL, PUFF and LOBES invocations and runs, from and to; its clouds' boxes)
   }
   GSF.nP = nP; GSF.nF = nF; GSF.nfr = nfr; GSF.npr = npr; GSF.lanes = nP; GSF.nL = nLb; GSF.fv[VI] = [frameNo, nP, nF, nLb, rows]; GSF.rows = rows; GSF.recs = rec; GS.wait[VI] = wait; GS.waitFr[VI] = frameNo;
+  if (wait && typeof frameWait === 'function') frameWait('sky');   // (clouds on the screen not drawn yet: the loading cover over a fresh world waits - src/gpu/50-frame.js)
   FTV.gsBuild = (FTV.gsBuild || 0) + performance.now() - t0;
   const t1 = performance.now();
   // ---- up: this frame's new recipes first (and their neighbours), then the table, the palettes, the runs (the fills', then the puffs') and
@@ -30879,7 +30976,7 @@ function skyRef(V) { const R = SKYREF[V.vi], [x, y] = sunAtV(V); R.x = x; R.y = 
 const NSKY_API = {
   P, P_DEF, SL, SM_SL, FW_SL, BG_SL, E, PAL, SKY_KEYS, FT, saveP,
   gsky: () => gskStats(),
-  ready: () => gskReady(),   // (every cloud on the screen drawn - a loading screen over a fresh world can wait for it: 13-gpu-sky.js gskReady)   // (the GPU sky: its recipes, records, puffs drawn - 13-gpu-sky.js)
+  smokeShared: () => smpShared(),   // (the smoke's GPU objects made ahead - the first shot: src/gpu/60-draw.js frameWarm)
   screen: skyScreen,
   // the hour's cloud tones (E.pal) when the new sky isn't drawn this frame (the OLD sky: the water's light still comes
   // from them - 50-land-firewater.js)
@@ -31413,9 +31510,6 @@ NSKY_API.editor = { build: edBuild, TUNE, css: ED_CSS,   // (css: the editor's l
 //@src 41-sky-new.js:21
 return NSKY_API;
 })();
-// (the loading cover over a fresh world stays until every cloud on the screen is drawn - their first recipes come a frame or two late:
-// 13-gpu-sky.js gskReady; the worker has no cover)
-if (!SW_IN_WORKER) frameReadyAdd(NSKY.ready);
 // (the sky's reflection handed to the water: each view's sun or moon as its sky drew it this frame - src/sky/30-api.js SKYREF, its fields there.
 // [view 0, view 1]; a record's fr is the frame it was set on)
 if (!SW_IN_WORKER) frameShare('sky.reflection', () => NSKY.reflection);
@@ -33343,7 +33437,7 @@ function reefPut(it) {
     reefPic(g.sp, g.cut || 0, gx - (gw >> 1), gy - gh, gw, gh);
   }
 }
-function reefPic(sp, cut, X, Y, w, h) { const A = artPut(sp); if (A && A.ok) REEF_L.push([null, X, Y, w, h, A, cut]); }
+function reefPic(sp, cut, X, Y, w, h) { const A = artPut(sp); if (artOk(A)) REEF_L.push([null, X, Y, w, h, A, cut]); }
 /* ---- what grows on the bottom reacts to whatever touches it (user Oct 27: "lets have the sub being also able to destroy
    the corals. The seaweed when destroyed should be 'floaty' as it falls to the ground, not stiff. While the coral breaks
    into smaller pieces that stay solid when they fall" - "and this would apply per our GTA logic to everything that
@@ -33758,7 +33852,7 @@ function drawFgRocks() {
 // draws the row (waterTileRowGPU); drawn once its pixels are on the GPU
 function drawSeabedBack() {
   if (!(bgP('bgsbon', 0) >= 0.5)) return;
-  const A = artPut(img.seabed); if (!A || !A.ok) return;
+  const A = artPut(img.seabed); if (!artOk(A)) return;
   const s = bgP('bgsb', 1), k = SEABED_BACK_K * s, top = SEABED_BACK_TOP + A.h * SEABED_BACK_K * (1 - s) - bgP('bgsby', 0), hz = Math.max(0, bgP('bgsbh', 0));
   waterTileRowGPU(A, SEABED_BACK_P, k, top, [14 / 255, 48 / 255, 130 / 255, 0.62], hz, seaAt(top + A.h * k / 2).deep, bgP('bgsbg', 0), bh - SHY + 2);
 }
@@ -35002,7 +35096,7 @@ const THG_BODY = 0, THG_PART = 1, THG_SOLID = 2, THG_LIGHT = 3, THG_GRAD = 5   /
 function thingsQuad(m, x, y, w, h, e, kind, mul, cov, mk, cell, seed, lit, clip, alpha = 1, filt = 0, tint = null, cut = null, prof = null, sr = null, rules = 0) {
   if (!THG.ctx || !(w > 0 && h > 0)) return;
   if (kind === THG_SOLID || kind === THG_GRAD) e = THG_NONE;
-  if (!e || !e.ok) return;
+  if (!artOk(e)) return;
   if (THG.f.length < (THG.n + 1) * THG_REC) { const a = new Float32Array(THG.f.length * 2); a.set(THG.f); THG.f = a; }
   const f = THG.f, o = THG.n * THG_REC, m0 = THG.m0, sg = THG.seg[THG.seg.length - 1];
   if (sg && sg.q) sg.n++; else THG.seg.push({ q: true, at: THG.n, n: 1 });   // (the draw's runs, in order: quads, a shape, quads...)
@@ -36636,14 +36730,16 @@ function lpassOrd(T) { const O = LPASS.look ? null : thingsOrderTex(); return O 
 function lpassMask(name) { const t = frameShared(name); return t && t.view && t.ep === GPU.ep ? t : LPASS.white; }
 // a pipeline: its entry points, the target's format - laid premultiplied (a light that adds leaves alpha 0); the copy written; sf: the format of
 // the target's stencil when its context is clipped (the clip where its top bit is set - as the GL front's own drawing tests it)
-function lpassPipe(vs, fs, fmt, sf) {
+function lpassPipe(vs, fs, fmt, sf, ahead) {
   const Q = LPASS, k = vs + fs + fmt + (sf || ''); let p = Q.pipes.get(k);
+  if (!p && !ahead && !(fs === 'fsRow' && vs === 'vsRow')) { const k2 = 'vsRow' + 'fsRow' + fmt + (sf || ''); if (!Q.pipes.has(k2)) lpassPipe('vsRow', 'fsRow', fmt, sf, true); }   // (the first shot: a light's rows made ahead for a target the pass first draws in - 60-draw.js frameWarm)
   if (!p) {
     const c = { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }, t = { format: fmt };
     if (fs === 'fsDusk') t.blend = { color: { srcFactor: 'dst-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' }, alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' } };   // ('source-atop': only on what's drawn there)
     else if (fs !== 'fsCopy' && fs !== 'fsClear') t.blend = { color: c, alpha: c };   // (the copy written as it is, the clear as clear)
     const D = { layout: Q.pl, label: 'light ' + fs, vertex: { module: Q.mod, entryPoint: vs }, fragment: { module: Q.mod, entryPoint: fs, targets: [t] }, primitive: { topology: 'triangle-list' } };
     if (sf) { const face = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' }; D.depthStencil = { format: sf, depthWriteEnabled: false, depthCompare: 'always', stencilFront: face, stencilBack: face, stencilReadMask: 0x80, stencilWriteMask: 0 }; }
+    if (ahead) { gpuPipeAhead(Q.pipes, k, D); return null; }
     p = gpuRenderPipe(D);
     Q.pipes.set(k, p);
   }
@@ -39925,7 +40021,7 @@ function drawCivHelis(x0, x1, mode) {
         // what the clip round it let through; facing right its columns as seen c0..c1 are the picture's RW - c1..RW - c0, mirrored in place)
         const hl = face > 0 ? A.W - hub : hub, hs = (hl - A.W / 2) * s * kx, pad = 2 / s;
         const c0 = Math.max(0, Math.floor(hl - rw - pad)), c1 = Math.min(RW, Math.ceil(hl + rw + pad)), r0 = Math.max(0, Math.floor(ry - pad)), r1 = Math.min(RP.height, Math.ceil(ry + rh + pad));
-        if (c1 <= c0 || r1 <= r0 || !re.ok) continue;
+        if (c1 <= c0 || r1 <= r0 || !artOk(re)) continue;
         const Mr = thgScale(thgTranslate(M.slice(), hs, 0), vi === 2 ? 0.9 : h.spin > 0.2 ? sq : 1, 1), qx = -Math.round(hl * s) + c0 * rk, qw = (c1 - c0) * rk;
         if (face > 0) thgScale(thgTranslate(Mr, 2 * qx + qw, 0), -1, 1);
         thingsQuad(Mr, qx, Y + r0 * rk, qw, (r1 - r0) * rk, { x: re.x + (face > 0 ? RW - c1 : c0), y: re.y + r0, l: re.l, w: c1 - c0, h: r1 - r0, ok: true }, THG_PART, null, 0, null, 0, 0, null, null, h.spin > 0.6 ? 0.55 + 0.25 * sq : 1, THG_SCALED);
@@ -50940,7 +51036,7 @@ function landBackHue(bn) {
 // picture (FRI) from the art atlas, the shade and the light its tint (the ground's sprites, 50-land-zz-sprites.js)
 const FR_SHADE = [20, 32, 48], FR_SHADE_A = 0.22;            // (the field's cooler shade: a 'source-atop' fill of this colour at this alpha)
 function drawFieldBoulders(x0, x1) {
-  const F = img.forestRocks ? gsPic(img.forestRocks) : null; if (!F || !F.pic._art || !F.pic._art.ok || !land.boulders) return;
+  const F = img.forestRocks ? gsPic(img.forestRocks) : null; if (!F || !artOk(F.pic._art) || !land.boulders) return;
   const fx = E.fx || [1, 1, 1], mHz = mix3(E.skyHor || [180, 200, 220], E.skyTop || E.skyHor || [120, 170, 230], 0.3), TK = {};
   // (user Nov 8 11:48: "Did you fix meadow to use atmosphere? (we now have per deck atmosphere)") the field behind is its deck's (4, or wherever the
   // biome has its MEADOW - farInfo().md): its boulders fade toward the sky's colour as that deck's ATMOSPHERE says, in their slice's biome (deckHaze);
@@ -51149,7 +51245,7 @@ function drawLandBg0(near, desert, bn) {
     const Lh = bgHaze(L);
     if (L.world || !!L.near !== !!near) continue;
     if (DECK_SHOW[bgDeck(L)] === false) continue;           // (its deck hidden in the Biome Editor)
-    const F = L.s; if (!F || !F.pic._art || !F.pic._art.ok) continue;   // (its picture not in the atlas yet: loading in)
+    const F = L.s; if (!F || !artOk(F.pic._art)) continue;   // (its picture not in the atlas yet: loading in)
     const bf = bio ? gsBio(bio, !!L.tree) : 0;              // (its biome's own colours)
     const Sl = layerScale(L.q), Lk = bgK(L), tileW0 = F.w * Lk, tileW = tileW0 * (1 + bgGap(L));
     const i0 = Math.floor(layerX(0, L, Sl) / tileW) - 1, i1 = Math.ceil(layerX(VWP, L, Sl) / tileW) + 1;
@@ -51231,7 +51327,7 @@ function drawLandRow(L, x0, x1) {
   // seam": 40-pixel slices each leaning a little its own way and standing on its own step of the field opened thin
   // see-through lines and hard cuts through the crowns between them. Now one lean for all, and slices so narrow that
   // the field's line under them steps by a pixel at most)
-  const F = L.s; if (!F || !F.pic._art || !F.pic._art.ok) return;   // (its picture not in the atlas yet: loading in)
+  const F = L.s; if (!F || !artOk(F.pic._art)) return;   // (its picture not in the atlas yet: loading in)
   const k = bgK(L), tileW = F.w * k, SL = 8, hz = mix3(E.skyHor || [180, 200, 220], E.skyTop || E.skyHor || [120, 170, 230], 0.3), fx = E.fx || [1, 1, 1];
   const sw = treeSway(0) * L.tree;                         // (the one sway every tree has - 50-land-plants.js)
   const Lh = bgHaze(L), under = L.under && L.under.map((v, j) => (v * (1 - Lh) + hz[j] * Lh) * fx[j]);
@@ -54846,6 +54942,7 @@ const WBOD = new Map();
 function wcBodies(x0, x1) {
   if (!wcEnsure() || !WC.s) return [];
   if (WC.fill) wcFill();   // (the world's first fill wherever its water is first drawn - the GAME EDITOR steps no physics, and its caves showed no water: user Nov 8 21:43)
+  if (WC.fill) frameWait('lakes');   // (its first fill not done: the water drawn isn't whole yet - the loading cover waits, src/gpu/50-frame.js)
   return wcStretch(WBOD, x0, x1, (c0, c1) => {
     const out = []; let open = [];
     for (let c = c0; c <= c1; c++) {
@@ -55860,7 +55957,6 @@ const GG_COLV = 7;                                            // (vec4s a column
 const GG = { on: true, ep: -1, cap: 0, slotsN: 0, stoneCap: 0, pagesBuf: null, ptabBuf: null, slotBuf: null, colBuf: null, stoneBuf: null, scrBuf: null,
   free: [], slot: null, sk: [], sUse: null, ptab: null, stoneTop: 0, cellRef: null, dirtyRef: null, ug: -1, gapV: -1, dk: null,
   stats: { jobs: 0, black: 0, dark: 0, slots: 0, ms: 0, frameJobs: 0, frameDisp: 0, bufs: 0, grows: 0 }, fj: 0, grewAt: -1 };
-if (typeof frameReadyAdd === 'function') frameReadyAdd(() => GG.ready !== false);   // (the loading cover up until the views' own ground is loaded - ggStep)
 /* (Nov 10) THE OPEN FLOOR - past the world's ends (slices k < 0 and k >= nk, and the last slice's columns past land.cols) the open ocean's floor by the sea's
    cell rule (ltOpenFl / ltOpenCell, 50-land-terrain.js): slices of the grid like any other, made for drawing only - never in land.cell, never dirty, nothing
    saved. Every slice has 64 columns; each column is the world's or the open floor's (ggColCells); a slice's rows hold both - its world columns' (land.rT /
@@ -56513,8 +56609,8 @@ function ggDispatch(bytes, BW) {
 /* ---- each frame (the ground layer - landPaintStep): the slices the views show given slots, their pages worked out where they're missing or
    stale, nearest a view's middle first, in the frame's time for things being made ---- */
 function ggStep(views) {
-  GG.ready = true;
-  if (!GG.on || !land.cell || !ggPools()) return;
+  if (!GG.on || !land.cell) return;
+  if (!ggPools()) { if (GPU.on) frameWait('ground'); return; }   // (a ground to draw and the device lost - not drawn: the loading cover waits)
   const t0 = performance.now(); GG.fj = 0; GG.stats.frameDisp = 0;
   if (GG.cellRef !== land.cell || GG.dirtyRef !== land.dirty || !GG.slot || GG.nk !== Math.ceil(land.cols / LT_CHUNK)) { for (let i = 0; i < GG.sk.length; i++) ggSlotFree(i); ggSlotBufs(); ggReset(); }   // (a bigger world: its slots' buffers made for it)
   { const rs = ['forest', 'desert', 'mountain', 'tropical', 'ice', 'swamp', 'volcanic'].map(n => biomeSides(n).roots).join() + JSON.stringify((typeof BIOME_SURF !== 'undefined' && BIOME_SURF.sea) || []);   // (BOTTOM ROOTS, the sea's layers: the rare picks made with them)
@@ -56589,14 +56685,15 @@ function ggStep(views) {
   for (const Sl of GG.wr) if (GG.sk[Sl.si] === Sl) ggPtabWrite(Sl);   // (each slot's page table sent once)
   for (const Sl of GG.sk) if (Sl && Sl.cols && Sl.scb && Sl.used === renderTick) ggScarStep(Sl);   // (the grass burnt on the views' slices)
   GG.wr.clear();
-  // (the frame's readiness - frameReady, the loading cover: every view's own pages there, not what's round them)
-  GG.ready = want.every(it => {
+  // (the frame's readiness - frameWait, the loading cover (src/gpu/50-frame.js): every view's own pages there at the view's level, not what's round them)
+  const ready = want.every(it => {
     if (it[0] === 3) return true;
     if (it[2] === 1) return !it[3].stale;
     const si = ggSi(it[3]), Sl = si >= 0 ? GG.sk[si] : null; if (!Sl || !Sl.cols) return false;
     if (it[2] === 2) return true;
     const i = it[4] - Sl.j0; return i < 0 || i >= Sl.npr || !Sl.stale[i + it[5] * Sl.npr];
   });
+  if (!ready) frameWait('ground');
   GG.stats.frameJobs = done; GG.stats.slots = GG.sk.filter(Boolean).length; GG.stats.ms = performance.now() - t0;
 }
 /* ---- the ground in front drawn (drawLandGround): one quad a slice the view shows, into the layer C draws into - after what C drew so far ---- */
@@ -58766,7 +58863,7 @@ function gsRec(M) {
   return o;
 }
 function gsSprite(F, sx, sy, sw, sh, X0, Y0, X1, Y1, fl = 0, M = null) {
-  const e = F && F.pic._art; if (!e || !e.ok || !(X1 > X0) || !(Y1 > Y0) || !(sw > 0) || !(sh > 0)) return false;
+  const e = F && F.pic._art; if (!artOk(e) || !(X1 > X0) || !(Y1 > Y0) || !(sw > 0) || !(sh > 0)) return false;
   const o = gsRec(M), f = GS.f;
   f[o] = X0; f[o + 1] = Y0; f[o + 2] = X1; f[o + 3] = Y1;
   f[o + 4] = e.x + sx; f[o + 5] = e.y + sy; f[o + 6] = e.x + sx + sw; f[o + 7] = e.y + sy + sh;
@@ -59076,9 +59173,10 @@ const pgArena = (data, al) => { const n = Math.max(16, data.byteLength), [c, o] 
 // the colours, the vertices (offsets in it are relative; made absolute when it's put in the species buffer)
 function pgSpecies(rc) {
   let sp = PGP.sp.get(rc);
-  if (sp) { sp.t = time; return sp.ok ? sp : null; }
+  // (one still being made: not drawn this frame - the loading cover waits for it, frameWait; one that couldn't be made never holds it)
+  if (sp) { sp.t = time; if (sp.ok) return sp; if (sp.job) frameWait('plants'); return null; }
   sp = { rc, ok: false, t: time, off: -1, data: null, rel: null, n: 0, vcount: 0, stateSize: 0, poseSize: 0, lookSize: 0, job: null };
-  sp.job = pgSpJob(rc, sp); PGP.sp.set(rc, sp); PGP.jobs.push(sp);
+  sp.job = pgSpJob(rc, sp); PGP.sp.set(rc, sp); PGP.jobs.push(sp); frameWait('plants');
   return null;
 }
 // (the jobs stepped in the frame's time: a part a step)
@@ -59404,7 +59502,7 @@ function pgPicRow(it, ID, o, vtx) {
     st = it.state === 'stump' ? 2 : it.state === 'down' || it.state === 'fall' ? 1 : 0; tall = it.pk === 'tree' || it.pk === 'palm';
   }
   // (its pictures' cells: a bare picture not in the atlas is its whole one with the green taken out - bareOf)
-  const cell = p => { const e = p && p._art; if (e) return e.ok ? [e, false] : null; const w = im._art; return p && p === im._bare && w && w.ok ? [w, true] : null; };
+  const cell = p => { const e = p && p._art; if (e) return artOk(e) ? [e, false] : null; const w = im._art; return p && p === im._bare && artOk(w) ? [w, true] : null; };
   const leaf = bare ? (it.leaf != null ? it.leaf : 1) : 1;
   let A = im, B = null, la = 1, sil = false, crop = 0;
   if (st === 2) { A = bare || im; crop = im.height - Math.max(2, Math.round(im.height * (it.pk === 'palm' ? 0.1 : 0.15))); }   // (the bottom of its trunk, broken off)
@@ -61644,12 +61742,12 @@ async function storyLoad(n) {
 // a saved game (its text) put into a fresh Story world (LOAD; the tools' storyT hook - 52-main.js)
 /* (user Nov 9 13:46: "the moment the game opens, it's showing me the start location for like 3 seconds before it snaps to the right
    location and time of day") the loading screen stays up over the fresh world until the saved game is in it - the checkpoint, its hour
-   and weather (the clouds at once, as a new round's - NSKY.snap) - and that frame painted; loadThen's own would lift as the fresh world
-   was built, showing its start while the worker settled */
+   and weather (the clouds at once, as a new round's - NSKY.snap) - then lifted with the first whole frame of it (coverOff, 00-world.js);
+   loadThen's own would lift as the fresh world was built, showing its start while the worker settled */
 function storyPutBack(G, done) {
   menuSel.mode = 'story';
   const mine = !worldEdCover && !LOADING; if (mine) worldEditCover(true, 'Loading');   // (ours: loadThen leaves one already up)
-  const lift = () => { if (mine) requestAnimationFrame(() => requestAnimationFrame(() => worldEditCover(false))); };
+  const lift = () => { if (mine) worldEditCover(false); };
   loadThen(() => {
     storyPlayNow = true; menuPlay(false); storyPlayNow = false;
     swSettled().then(() => swHold('storyLoad')).then(() => {
@@ -67517,6 +67615,8 @@ function bugState() {
     log: BUG.log.slice(), keys,
     // (Nov 11, the iPad's "TypeError: Type error": the simulation worker as it is, and if it failed, where - the error, the place in the source
     // (file:line:col and function), what it was doing, its tick and its stack, put back as the source files' - 00-sw-boot.js swPlace)
+    // (user Nov 11 09:34: the loading screens' lifts - each one's frame, when it was asked and lifted, and the last frame each part waited in - 00-world.js COVER)
+    cover: { up: coverUp(), last: COVER.last, lifts: COVER.lifts.slice() },
     sw: typeof SW === 'undefined' ? null : { want: SW_WANT, ready: SW.ready, live: SW.live, fail: SW.fail, where: SW.where || null, bootMs: Math.round(SW.bootMs), snaps: SW.got },
   };
 }
@@ -68714,8 +68814,9 @@ function audioInit() {
   comp.threshold.value = -16; comp.knee.value = 12; comp.ratio.value = 5; comp.attack.value = 0.004; comp.release.value = 0.25;
   SFX.master = ctx.createGain(); SFX.master.gain.value = MUTED ? 0 : env.volume * 0.9;
   SFX.master.connect(comp); comp.connect(ctx.destination);
-  // every sound from the game world goes through one bus, so the menus can silence it all at once
-  SFX.world = ctx.createGain(); SFX.world.gain.value = 1; SFX.world.connect(SFX.master);
+  // every sound from the game world goes through one bus, so the menus can silence it all at once (silent as it's made: the frame opens it
+  // when the world is to be heard - audioUpdate)
+  SFX.world = ctx.createGain(); SFX.world.gain.value = 0; SFX.world.connect(SFX.master);
   const len = ctx.sampleRate * 2;
   SFX.noise = ctx.createBuffer(1, len, ctx.sampleRate);
   SFX.brown = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -69208,7 +69309,9 @@ function audioUpdate(dt) {
   if (!SFX.ctx) return;
   const ctx = SFX.ctx, t = SFX.ctx.currentTime, k = 0.12;
   aim(SFX.master.gain, MUTED ? 0 : env.volume * 0.9, t, 0.05);
-  aim(SFX.world.gain, ui.menu || ui.title || ui.settings || PHOTO.on || paused || !worldLive() ? 0 : 1, t, 0.04);       // menus: the world goes quiet (the world menu and photo mode too, user Oct 26: "we don't want any volume in that menu")
+  // (user Nov 11 09:34, "you only get audio and the scene at the same time when it's ready": silent while a loading screen is up - its lift is
+  // decided at this frame's end before this, so the world is heard from the frame the screen goes - 00-world.js coverStep)
+  aim(SFX.world.gain, ui.menu || ui.title || ui.settings || PHOTO.on || paused || !worldLive() || coverUp() ? 0 : 1, t, 0.04);       // menus: the world goes quiet (the world menu and photo mode too, user Oct 26: "we don't want any volume in that menu")
   if (!worldLive()) return;                                           // (no world yet, or LOADING: only the menu's volume - user Oct 31)
   // the sea: always there, louder and more surf-filled when it's rough or windy
   const sea = env.sea, wind = Math.abs(env.wind);
@@ -69494,7 +69597,9 @@ function resize(restore) {
   // round; Oct 24, user: so did one while the round was paused at the menu - leaving full screen, say)
   // (user Oct 31: no world until a game is picked - builtViewW -1: none wanted yet, so nothing's built)
   if (builtViewW < 0) return;
-  if (!builtViewW || (ui.title && !ui.resume && Math.abs(VIEW_W - builtViewW) / builtViewW > 0.15)) { buildWorld(restore); WORLD_READY = true; }
+  // (user Nov 11 11:20, "still has the issue with the sound and the level being built when I press start": every world built on the page goes
+  // up under a loading screen - whatever built it, from the menu or not - lifted with its first whole frame, its sound with it: 00-world.js)
+  if (!builtViewW || (ui.title && !ui.resume && Math.abs(VIEW_W - builtViewW) / builtViewW > 0.15)) { const cv = worldBuildCover(); buildWorld(restore); WORLD_READY = true; if (cv) worldEditCover(false); }
 }
 // a world now, if there's none: built as the page used to build it as it opened, and settled (a round carried over a hot
 // reload, and the tools - their window.__game hooks expect the world the page used to open with)
@@ -69550,7 +69655,7 @@ function frameBody(now) {
   // (Nov 11, the user's iPad: "TypeError: Type error" - the simulation worker draws nothing and plays nothing, with a world or without: its
   // clock starts ('go') before the page's world reaches it ('resync'), and a tick between drew the menu - the pixel text's glyphs are the GL
   // front's stand-ins, which a worker's canvas can't draw: Chrome said so at length, Safari only "Type error", and the page failed the worker)
-  if (!worldLive()) { pollPads(dt); time += dt; if (!SW_IN_WORKER) { render(); audioSafe(dt); } return; }
+  if (!worldLive()) { pollPads(dt); time += dt; if (!SW_IN_WORKER) { render(); coverStep(); audioSafe(dt); } return; }
   netStep(); linkPump(dt);
   // (also holds still behind the 'turn the iPad' notice; and, user Oct 25 late, while the sliders are open or the eye
   // is shut - photo mode, 18-zz-photo)
@@ -69559,7 +69664,7 @@ function frameBody(now) {
   const held_ = paused || !rotateEl.hidden || PHOTO.on || photoWorldFreeze() || !!SWB.taking || SW.handing;   // (SW.handing: the game being handed to the worker - swResync)   // (SWB.taking: the game on its way back from the worker - 00-sw-boot.js swHold)
   schedFrame(!held_ && !SW.live);                                   // (the scheduler's frame count moves with the simulation only: a held page frame, or a guest's, isn't a frame of the game - Oct 30 gate)
   if (PHOTO.on) photoInput(dt); else pollPads(dt);
-  swWantLive();
+  swWantLive(); swWaitFrame();
   if (SW.live) swGuestFrame(dt, held_);                              // (the simulation worker steps the game; this page draws it - 00-sw-boot.js)
   else if (!held_) {
     applyHeldKeys(dt);
@@ -69590,6 +69695,7 @@ function frameBody(now) {
   // (the simulation worker never draws or plays: 00-sw-boot.js. A frame not drawn still works out the light and the wind from
   // the weather, E - render() does it first thing, and the game's next steps read it: a ship's drift, the waves - Oct 30 gate)
   if (!SIM_ONLY && !NO_DRAW && !SW_IN_WORKER) render(); else computeEnv();
+  if (!SW_IN_WORKER) coverStep();                                     // (a loading screen asked off goes with this frame if it's whole - before its sound: 00-world.js)
   const q2 = performance.now();
   if (!SIM_ONLY && !SW_IN_WORKER) audioSafe(dt);
   const q3 = performance.now(), PQ = perf.parts || (perf.parts = {});
@@ -69630,7 +69736,7 @@ async function start(data) {
   // (user Oct 31: the page opens on the menu with no world - it's built when a game is picked; only a round carried over
   // a hot reload is built at once)
   resize(data);
-  requestAnimationFrame(() => requestAnimationFrame(bootCoverOff));   // (the page's LOADING screen off once the title has drawn - 00-sw-boot.js)
+  bootCoverOff();                                    // (the page's LOADING screen off once the title has drawn - 00-sw-boot.js)
   PAGE_UP = true;                                   // (a NEW GAME pressed in the other world goes on from here - worldResume, 00-world.js)
   if (data && data.ships && data.ships.length) worldNow(data);
   window.addEventListener('resize', () => resize());
@@ -69656,7 +69762,7 @@ async function start(data) {
       const F2 = T.flags[1] || T.flags[0]; return { flag2: c(F2[0] + FLAG_W / 2, F2[1] + FLAG_H / 2), play: c(T.play[0] + T.play[2] / 2, T.play[1] + T.play[3] / 2), opts: c(T.opts[0] + T.opts[2] / 2, T.opts[1] + T.opts[3] / 2), modes: T.modes.map(m => c(m[0] + m[2] / 2, m[1] + m[3] / 2)), fs: c(fx + 20, fy + 20) }; },
     worldToScreen: (x, y) => { const half = Math.floor(bw / 2); for (const i of [0, 1]) { const v = cam.view[i], sv = S * v.z; const camPx = i === 0 ? Math.round(v.l * sv) : cam.merge >= 1 ? Math.round(cam.view[0].l * S * cam.view[0].z) + half : Math.round(v.l * sv); const px = x * sv - camPx + (i ? half : 0); if ((i === 0 && px < half) || i === 1) return [px * PIXW / dpr, (y * sv - Math.round(v.top * sv)) * PIXW / dpr]; } },
     bedLife: () => ({ reef, coastFront, weedBits, chunks, plants }), seabedHit: (x, hl, pw, vx, cut, bl) => seabedHit(x, hl, pw, vx, cut, bl), uwBlast: (x, y, pw) => underwaterBlast(x, y, pw),   // (Oct 27: the bottom's growth)
-    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, get screens() { return screenRows(); }, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeTrailPts, planeWisps, gore, get homeDock() { return homeDock; }, calmAt: x => calmAt(x), harbourTop: (x, y) => harbourTop(x, y), crumbleTower: tw => crumbleTower(tw), vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers[p]), seaHeli: (x, y) => { const h = helis[0] = makeHeli(0, x); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.merge ? 'single' : 'split', cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
+    set simOnly(v) { SIM_ONLY = !!v; }, cpu: (p, level) => { brains[p] = level == null ? null : makeBrain(p, level); }, cpuStats, brains, setVsCpu: (on, lv) => { cpuLvSide[1] = lv; ctlPick[0] = 'kb'; ctlPick[1] = on ? 'cpu' : 'kb'; MODE = 'duel'; applyMode(); builtViewW = 0; resize(); }, setStop: v => { stopPref = !!v; }, get muted() { return MUTED; }, sfxTest: () => { audioInit(); sfxGull(0, 0.03); sfxBell(1); sfxCar(1); sfxHorn(1); return !!SFX.ctx && !!SFX.life; }, cover: () => ({ up: coverUp(), asked: COVER.off.size > 0, last: COVER.last, lifts: COVER.lifts.slice() }), shipBlastAt: (p, x, y, pw) => shipBlast(ships[p], x, y, pw), captains, get screens() { return screenRows(); }, hiddenShip: p => hiddenShip(ships[p]), get padsSeen() { return PADS_SEEN; }, ctlChoices: s => ctlChoices(s), planeStop: p => { planes[p].loiter = { x: planes[p].x }; }, tgun: p => tguns[p], duds, dropShell: (x, y, owner) => { launch(x, y, -Math.PI / 2, 0, 1, 0, owner, 'bomb'); }, setCtl: c => { ctlPick[0] = c[0]; ctlPick[1] = c[1]; }, killPlane: pl => downPlane(pl), sinkShipV: sh => sinkShip(sh), sinkSubV: sb => sinkSub(sb), story, spawnWave: n => spawnWave(n), titleLayout: () => titleLayout(), uiK: () => PIXU / dpr, setMode: m => { MODE = m; applyMode(); builtViewW = 0; resize(); }, modeInfo: () => ({ MODE, PLAYERS, STORY, SWAP, ctl: ctlPick.slice(), humans: HUMANS(), one: ONEVIEW(), brains: brains.map(b => b ? b.level : null) }), fireTorp: (p, up) => { subs[p].tk = 0; fireTorpedo(subs[p], up); }, downPlane: p => downPlane(planes[p]), oldPlanes, sgun: p => guns[p], teamCol: () => img.teamCol, pastBuoy: p => enemyPastBuoy(p), get winner() { return ui.winner; }, bullets, smash: (i, a) => { const b = sailboats[i]; smashSailboat(b, b.x, b.y, a); }, planeTrails, planeTrailPts, planeWisps, gore, get homeDock() { return homeDock; }, calmAt: x => calmAt(x), harbourTop: (x, y) => harbourTop(x, y), crumbleTower: tw => crumbleTower(tw), vis: () => [VIS_L, VIS_R], drive: (p, i) => driveCmd(p, i), crumble: p => crumbleTower(towers[p]), seaHeli: (x, y) => { const h = helis[0] = makeHeli(0, x); Object.assign(h, { sea: true, state: 'fly', y, spin: 1, cpuIn: 0, cpuStick: 0, cpu: true }); return h; }, get docksN() { return docks.length; }, lobbyArrows, camInfo: () => ({ z: [+(cam.view[0].z).toFixed(3), +(cam.zt[0]).toFixed(3)], l: Math.round(cam.view[0].l), c1: Math.round(cam.c1), mode: cam.merge ? 'single' : 'split', cut: !!(cam.cut && cam.cut[0]) }), zoomStep: (p, d) => { setScope(p, scopes[p].level + d); }, pillar: (p, i, y) => { const d = homeDock[p], P = d.pillars[i]; breakPillar(d, i, (P.x0 + P.x1) / 2, y || WATER_Y + 120); }, planes, bomb: p => dropBomb(planes[p]), rocket: p => fireRocket(planes[p]), bedDrop: x => bedDrop(x), mines, layMine: p => layMine(subs[p]), capsLeft: p => capsLeft(p),
     landState: () => land, landPlants: () => ({ PLT, PK, plantGeo, treeAt, plantsBlast, plantIgnite, plantFell, plantHeat, fireSpots: () => fireSpots([]) }), land: () => ({ tanks, helis, bgStrips: () => { if (!land.bg) buildLandBg(); return land.bg.map(L => { if (!L.s) return ''; const c = makeCanvas(L.s.w, L.s.h); c.getContext('2d').drawImage(L.s.pic, 0, 0); return c.toDataURL(); }); }, wrecks: () => landWrecks.length, top: x => landTop(x), below: (x, y) => landBelow(x, y), sandActive: () => land.sand.length,
       sandX: () => { let best = -1, bx = WORLD_W / 2; for (let c = 0; c < land.cols; c++) { let r = ltR0(c); while (r < ltR1(c) && land.cell[ltIdx(c, r)] === M_AIR) r++; let n = 0; while (r + n < ltR1(c) && land.cell[ltIdx(c, r + n)] === M_SAND) n++; if (n > best) { best = n; bx = (c + 0.5) * LT_CELL; } } return bx; }, sandCount: () => { let n = 0; for (const v of land.cell) if (v === M_SAND) n++; return n; }, rockX: () => land.outcrops[0] ? land.outcrops[0].x : WORLD_W / 2, rockAt: x => ltCell(ltCol(x), ltRow(landTop(x)) ) }),
     rest: () => ({ crashes, looseStones, landWrecks, padRest, padSpot, padRestOf, padX, land, landTop, landCrash, trafficDown, traffic, containers, towers, chunks, crumbleTower, perches, birds, shuttles, civHelis, seaplanes, debris, lakeAt, LT_CELL, WATER_Y, LAND_Y, AIR_W, LAYOUT_L, LAYOUT_R, onApron, lcFromSea, stepLandRest, earthGrains, spikeBursts, landWake, collapsePier, harbourTop, pierEdge, docks, shuttleBlow }), traffic: () => traffic, containers: () => containers, contHit: (x, y) => contHit(x, y, 1, 0), contHitShip: c => { const cg = c.cargo || []; for (let i = cg.length - 1; i >= 0; i--) if (cg[i].length) { const [x, y] = shipSlotAt(c, i, cg[i].length - 1); return contHit(x, y, 1, 0); } return false; }, contHitDock: cr => { const sl = cr.slots.find(q => q.stack.length); return sl ? contHit(sl.x, DECK_Y - CONT_H * (sl.stack.length - 0.5)) : false; }, routeAt: (f, s) => routeAt(f, s), balloonBox: b => balloonBox(b), minisubs: () => minisubs, pirateWrecks: () => pirateWrecks, yachtFor: p => yachtFor(p), hangarDoor: R => hangarDoorX(airfieldAt(R ? LAYOUT_R + 10 : LAYOUT_L - 10)), get LAND_Y() { return LAND_Y; }, chestAt: w => chestAt(w), hookAt: c => hookAt(c), civHelis: () => civHelis, hose: () => HOSE, fireSpots: () => fireSpots([]), hoseToggle: (h, on) => hoseToggle(h, on), hoseRange: () => hoseRange(), nskyP: () => NSKY.P, landWrecks: () => landWrecks, landTopAt: x => landTop(x), shipTop: x => shipY(x, -1e9), killTraffic: f => trafficDown(f), civLose: v => { const k = civClass(v); if (k === 'air') trafficDown(v); else if (k === 'ship') civSink(v, 0); else if (k === 'boat') jetboatSink(v); else if (k === 'balloon') balloonPop(v); else if (k === 'heli') civHeliDown(v); else if (k === 'sub') minisubLost(v); else if (k === 'seaplane') spDown(v); else if (k === 'blimp') blimpBurst(v); else if (k === 'yacht') sinkSailboat(v, v.x, v.y, 0); else if (k === 'shuttle') groundCrash(v, 1); return k; },   /* (tools: a civilian vehicle lost by its own rule - tools/civloss.mjs) */ lampScene: (gap = 150, hour = 23) => { const x = (LAYOUT_L + LAYOUT_R) / 2, y = WATER_Y + (seabedY(x) - WATER_Y) * 0.5, a = subs[0], b = subs[1], dx = SUB_L + gap; for (const [s, sx, f] of [[a, x - dx / 2, 1], [b, x + dx / 2, -1]]) Object.assign(s, { state: 'out', gate: null, auto: null, x: sx, y, depthT: y, vx: 0, vy: 0, facing: f, turn: null, input: 0, throttle: 0, a: 0 }); a.light = true; b.light = false; a.lamp = { elev: 0, power: 0, aimShow: 0 }; const [lx, ly] = subArtPt(a, ...SUB_LAMP_AT), el = clamp(Math.atan2(b.y - ly, b.x - lx) * 180 / Math.PI, 0, 180); a.lamp.elev = el; a.aimA = el * Math.PI / 180; env.time = hour; computeEnv(); camOverride[0] = [x, y]; paused = true; return { x: Math.round(x), y: Math.round(y), elev: +el.toFixed(1) }; },   /* (the sub lamp's check, user Oct 30: two subs a gap apart at mid-depth, the left one's light on the other, at night; paused there) */ boardCiv: (p, v) => boardCiv(p, v), civClass: v => civClass(v), civPoint: (c, x, y) => civPoint(c, x, y), oilSlicks: () => oilSlicks, spriteSheet: () => spriteSheet(), balloons: () => balloons, jetboats: () => jetboats, jetsN: () => jets.length, civShips: () => civShips, civSpawn: (kind, x, lo, hi, dir) => { const c = newCivShip(kind, x, lo, hi, dir); civShips.push(c); return c; }, ancHeld: v => ancHeld(v), rsBeaconAt: c => rsBeaconAt(c), ancNight: () => ancNight(), shuttles: () => shuttles, seaplanes: () => seaplanes, cutTo: p => cutTo(p), civHitHook: (x, y) => civHit(x, y, 1, 0), civLen: c => civLen(c), surfaceY: x => surfaceY(x), blimps: () => blimps, cranes: () => cranes, PHOTO, photoEnter: () => photoEnter(), photoExit: () => photoExit(), civMagnet: h => civMagnet(h), civHeliList: () => civHelis, orbiters: () => orbiters, spaceJunk: () => spaceJunk, rocketTrail: () => rocketTrail, fireworks: () => fireworks, fwBits: () => fwBits, smokeList: () => smoke, civLaunch: p => civLaunch(p), landSpawn: () => { for (const p of [0, 1]) { if (!tanks[p]) tanks[p] = makeTank(p, landHomeX(p, 'tank')); if (!helis[p]) helis[p] = makeHeli(p, landHomeX(p, 'heli')); } act(0, 'switch', 'tank'); },   // (the old LAND TEST start, for its tests: both sides' tank and helicopter at home, you in your tank)
