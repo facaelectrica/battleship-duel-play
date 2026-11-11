@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 978, build: 'NOV 11 12:29', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 978, build: 'NOV 11 12:44', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -2561,8 +2561,46 @@ function frameDrawStencil(X) {
   return { depthStencil: { format: ds.fmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: face, stencilBack: face, stencilReadMask: 0x80, stencilWriteMask: 0 } };
 }
 const frameDrawKey = (X, op) => (op || X.op) + '|' + X.T.tex.fmt + '|' + (X.ds ? X.ds.fmt : '') + '|' + (X.screen ? 1 : 0);
+/* THE FIRST SHOT (user Nov 11 09:35 / 11:20, the iPad: "the first time I fire a missile ... the game hangs for like a frame"). A pipeline made at
+   a draw compiles its shaders there and then - on the iPad's Metal a frame's hitch: the fire's at the first missile, the smoke's at the first
+   smoke, a picture's lay for a target it had not been laid on. So every draw target a frame draws into (frameDrawKey: its op, format, clip and
+   screen) has the effects' pipelines for it made ahead, off the frame (createRenderPipelineAsync), the first time it's seen - while the world is
+   built, under its loading screen; the part takes it from its own map when it's there (made at the draw as before only if it isn't yet). The
+   effects' shared objects (their modules, layouts and computes - fireShared, smpShared, g8Shared, the lay's) are made with them, there */
+function flaySetup() {
+  if (FLAY.ep === GPU.ep) return;
+  const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
+  FLAY.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: 96 } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }], 'lay');
+  FLAY.m = gpuModule(FLAY_WGSL, 'lay'); FLAY.pl = gpuPipeLayout([FLAY.bl], 'lay'); FLAY.pipes.clear(); FLAY.ep = GPU.ep;
+}
+const FWARM = { ep: -1, seen: new Set(), parts: null };
+function frameWarmParts() {
+  const P = [], st = (X, topo) => Object.assign({ primitive: { topology: topo, cullMode: 'none' } }, frameDrawStencil(X));
+  P.push({ setup: flaySetup, map: () => FLAY.pipes, desc: X => Object.assign({ layout: FLAY.pl, label: 'lay', vertex: { module: FLAY.m, entryPoint: 'vs' }, fragment: { module: FLAY.m, entryPoint: 'fs', targets: [frameDrawColour(X)] } }, st(X, 'triangle-list')) });
+  if (typeof fireShared === 'function') P.push({ setup: fireShared, map: () => FIRE.col, desc: X => Object.assign({ layout: FIRE.cpl, label: 'fire colours', vertex: { module: FIRE.cm, entryPoint: 'vs' }, fragment: { module: FIRE.cm, entryPoint: 'fs', targets: [frameDrawColour(X)] } }, st(X, 'triangle-list')) });
+  if (typeof g8Shared === 'function') P.push({ setup: g8Shared, map: () => G8.ms, desc: X => Object.assign({ layout: G8.msp, label: 'mid sea', vertex: { module: G8.msm, entryPoint: 'vs' }, fragment: { module: G8.msm, entryPoint: 'fs', targets: [frameDrawColour(X)] } }, st(X, 'triangle-strip')) });
+  if (typeof NSKY === 'object' && NSKY.smokeShared) P.push({ setup: NSKY.smokeShared, map: null });
+  if (typeof pxWarm === 'function') P.push({ warm: pxWarm });
+  return P;
+}
+// a pipeline made ahead (desc), put in map at key when made - unless the part made its own there first, or the device is new
+function gpuPipeAhead(map, key, desc) {
+  const ep = GPU.ep; map.set(key, null);   // (null: on its way - a part asking meanwhile makes its own, as before)
+  GPU.stats.pipesAhead = (GPU.stats.pipesAhead || 0) + 1;
+  GPU.dev.createRenderPipelineAsync(desc).then(p => { if (GPU.ep === ep && map.get(key) === null) map.set(key, p); }, e => { if (map.get(key) === null) map.delete(key); console.warn('gpu: a pipeline made ahead failed -', desc.label, e && e.message || e); });
+}
+function frameWarm(X) {
+  if (FWARM.ep !== GPU.ep) { FWARM.ep = GPU.ep; FWARM.seen.clear(); }
+  const k = frameDrawKey(X); if (FWARM.seen.has(k)) return; FWARM.seen.add(k);
+  if (!FWARM.parts) FWARM.parts = frameWarmParts();
+  for (const W of FWARM.parts) {
+    try { if (W.warm) { W.warm(X, k); continue; } W.setup(); if (W.map) { const M = W.map(); if (!M.has(k)) gpuPipeAhead(M, k, W.desc(X)); } }
+    catch (e) { console.warn('gpu: warming', k, '-', e && e.message || e); }
+  }
+}
 function frameDrawPass(X, key) {
   const D = FDRAW, tex = X.T.tex, ds = X.ds;
+  frameWarm(X);
   if (X.clear || !FR.pass || FR.pg !== D.pg || D.tex !== tex || D.ds !== ds || D.key !== key) {   // (FR.pg: another part's pass gone on in the open one since - its state not ours)
     const desc = { colorAttachments: [{ view: tex.view, loadOp: X.clear ? 'clear' : 'load', clearValue: [0, 0, 0, 0], storeOp: 'store' }] };
     if (ds) desc.depthStencilAttachment = Object.assign({ view: ds.view, stencilReadOnly: true }, gpuHasDepth(ds.fmt) ? { depthReadOnly: true } : {});
@@ -2604,11 +2642,7 @@ const frameClearKeeps = op => { const b = GLB[op] || GLB['source-over'], one = f
 // in it (a pixel's margin each side for the sums' rounding): the same pixels drawn, none of the ones that would add nothing
 function frameLay(c, tex, sx, sy, sw, sh, ph, dx, dy, dw, dh, box) {
   const X = frameDrawBegin(c); if (!X) return;
-  if (FLAY.ep !== GPU.ep) {
-    const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
-    FLAY.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: 96 } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }], 'lay');
-    FLAY.m = gpuModule(FLAY_WGSL, 'lay'); FLAY.pl = gpuPipeLayout([FLAY.bl], 'lay'); FLAY.pipes.clear(); FLAY.ep = GPU.ep;
-  }
+  flaySetup();
   const t = c.target, s = c.s, [ch, off] = arenaAlloc(96, 256), w0 = off >> 2, Wd = arenaWords(ch), Fl = Wd.f, I = Wd.i;
   glCorners(s.m, dx, dy, dw, dh);
   const X4 = GLC4.x, Y4 = GLC4.y;
@@ -8159,7 +8193,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 978;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 11 12:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 11 12:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24881,7 +24915,7 @@ function wgpuReady() {
   W.pl = gpuPipeLayout([W.bl], 'water');
   // (group 1 of the draws that read another part's GPU data, handed over by frameShared: the ground's grid - fsFloor)
   W.gbl = gpuBindLayout([0, 1, 2].map(b => ({ binding: b, visibility: VF, buffer: ro })), 'water ground'); W.plG = gpuPipeLayout([W.bl, W.gbl], 'water ground');
-  W.rpipe.clear(); W.samp = gpuSampler(true, 0, 0);
+  W.rpipe.clear(); W.ahead = null; W.samp = gpuSampler(true, 0, 0);
   W.ramp = gpuTex(256, 16, 'rgba8unorm', 'water'); W.rampKey = new Array(16).fill('');   // (rows: the deep, the tint, the deep's dark, a body's tint, a body's biome water, the rays, the fog over the water, the murk under it, the low sun's band, the far sea's band, the light paths' glows - the moon's, the low sun's, the day's; 16 - a power of two: each row's middle exact in binary, so no filter reads a neighbour's colours in, as the GL front's 256-row table)
   W.still = null; W.stillKey = ''; W.surf = [null, null]; W.surfKey = ['', ''];
   W.none = gpuBuf(256, 'water');
@@ -24898,12 +24932,21 @@ const WGPU_OPS = {
 // a draw's pipeline: its entry points (vs + fs: the fills and lines; vsShadow + fsShadow; vs + fsAbyss), the target's format, the context's composite op,
 // and with a clip in force the stencil's format (sfmt): drawn only where bit 0x80 is set - the GL front's clip, tested as its own draws test it
 const WGPU_FACE = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
+const wgpuPipeKey = (vs, fs, fmt, B, sfmt, g1) => vs + ':' + fs + ':' + fmt + ':' + B.join() + ':' + (sfmt || '') + (g1 ? ':g1' : '');
+function wgpuPipeDesc(vs, fs, fmt, B, sfmt, g1) {
+  const W = WGPU_W, blend = { color: { srcFactor: B[0], dstFactor: B[1], operation: 'add' }, alpha: { srcFactor: B[2], dstFactor: B[3], operation: 'add' } };
+  const ds = sfmt ? { depthStencil: { format: sfmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: WGPU_FACE, stencilBack: WGPU_FACE, stencilReadMask: 0x80, stencilWriteMask: 0 } } : {};
+  return Object.assign({ layout: g1 ? W.plG : W.pl, label: 'water ' + fs, vertex: { module: W.mod, entryPoint: vs }, fragment: { module: W.mod, entryPoint: fs, targets: [{ format: fmt, blend }] }, primitive: { topology: 'triangle-list' } }, ds);
+}
+// (the first shot - 60-draw.js frameWarm: the effects' draws - a shell's wash and foam, the splash's puffs and balls, a wreck's shade - made ahead,
+// off the frame, for every target, op and clip the water is first drawn with, while the world is built under its loading screen)
+const WGPU_AHEAD = [['vsWash', 'fsWash'], ['vsFoam', 'fsFoam'], ['vsPuff', 'fsPuff'], ['vsBall', 'fsBall'], ['vsShadeRows', 'fsShadeRows']];
 function wgpuPipe(vs, fs, fmt, op, sfmt, g1) {
-  const W = WGPU_W, B = WGPU_OPS[op] || WGPU_OPS['source-over'], k = vs + ':' + fs + ':' + fmt + ':' + B.join() + ':' + (sfmt || '') + (g1 ? ':g1' : ''); let p = W.rpipe.get(k);
+  const W = WGPU_W, B = WGPU_OPS[op] || WGPU_OPS['source-over'], k = wgpuPipeKey(vs, fs, fmt, B, sfmt, g1); let p = W.rpipe.get(k);
   if (!p) {
-    const blend = { color: { srcFactor: B[0], dstFactor: B[1], operation: 'add' }, alpha: { srcFactor: B[2], dstFactor: B[3], operation: 'add' } };
-    const ds = sfmt ? { depthStencil: { format: sfmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: WGPU_FACE, stencilBack: WGPU_FACE, stencilReadMask: 0x80, stencilWriteMask: 0 } } : {};
-    p = gpuRenderPipe(Object.assign({ layout: g1 ? W.plG : W.pl, label: 'water ' + fs, vertex: { module: W.mod, entryPoint: vs }, fragment: { module: W.mod, entryPoint: fs, targets: [{ format: fmt, blend }] }, primitive: { topology: 'triangle-list' } }, ds));
+    const wk = fmt + ':' + B.join() + ':' + (sfmt || ''), seen = W.ahead || (W.ahead = new Set());
+    if (!seen.has(wk)) { seen.add(wk); for (const [v, f] of WGPU_AHEAD) { const k2 = wgpuPipeKey(v, f, fmt, B, sfmt, false); if (k2 !== k && !W.rpipe.has(k2)) gpuPipeAhead(W.rpipe, k2, wgpuPipeDesc(v, f, fmt, B, sfmt, false)); } }
+    p = gpuRenderPipe(wgpuPipeDesc(vs, fs, fmt, B, sfmt, g1));
     W.rpipe.set(k, p);
   }
   return p;
@@ -25985,6 +26028,7 @@ function pxLayer(o) {
   if (Object.keys(L.cols).length > 16 || L.pal.length > 32) throw new Error('pxLayer: at most 16 columns and 32 colours');   // (the header's room: PXL_HW)
   for (const k in L.cols) L.own[k] = new (L.cols[k].endsWith('u8') ? Uint8Array : L.cols[k].endsWith('rgba') ? Uint32Array : Int32Array)(16);
   L.hasFrame = Object.keys(L.cols).some(k => L.cols[k].startsWith('frame'));
+  (pxLayer.all || (pxLayer.all = [])).push(L);   // (every layer: their pipelines made ahead for each target - the first shot, 60-draw.js frameWarm)
   return L;
 }
 // the layer's vertex stage: its columns read from the arena (a_name), its rect, and the corners as GLCtx's quads work them out
@@ -26043,18 +26087,24 @@ function pxShared() {
   PXL.bgs.clear(); PXL.ep = GPU.ep;
 }
 // the layer's pipeline for this target, blend and clip (ds: the stencil the clip is in, or none)
+function pxVsSetup(L) { if (L.ep !== GPU.ep) { L.pipes.clear(); L.vs = gpuModule(gpuNaga(pxVS(L), 'vertex'), 'px layer vs'); L.ep = GPU.ep; } }
+const pxPipeDesc = (L, X) => Object.assign({
+  layout: PXL.pl, label: 'px layer',
+  vertex: { module: L.vs, entryPoint: 'main' },
+  fragment: { module: PXL.fs, entryPoint: 'main', targets: [frameDrawColour(X)] },
+  primitive: { topology: 'triangle-list', cullMode: 'none' },
+}, frameDrawStencil(X));
+// (the first shot: every layer's pipeline for a target made ahead, off the frame - 60-draw.js frameWarm)
+function pxWarm(X, key) {
+  pxShared();
+  for (const L of pxLayer.all || []) { pxVsSetup(L); if (!L.pipes.has(key)) gpuPipeAhead(L.pipes, key, pxPipeDesc(L, X)); }
+}
 function pxPipe(L, X) {
-  if (L.ep !== GPU.ep) { L.pipes.clear(); L.vs = gpuModule(gpuNaga(pxVS(L), 'vertex'), 'px layer vs'); L.ep = GPU.ep; }
+  pxVsSetup(L);
   const key = frameDrawKey(X);
   let p = L.pipes.get(key);
   if (p) return p;
-  const desc = Object.assign({
-    layout: PXL.pl,
-    vertex: { module: L.vs, entryPoint: 'main' },
-    fragment: { module: PXL.fs, entryPoint: 'main', targets: [frameDrawColour(X)] },
-    primitive: { topology: 'triangle-list', cullMode: 'none' },
-  }, frameDrawStencil(X));
-  p = gpuRenderPipe(desc);
+  p = gpuRenderPipe(pxPipeDesc(L, X));
   L.pipes.set(key, p);
   return p;
 }
@@ -31130,6 +31180,7 @@ function skyRef(V) { const R = SKYREF[V.vi], [x, y] = sunAtV(V); R.x = x; R.y = 
 const NSKY_API = {
   P, P_DEF, SL, SM_SL, FW_SL, BG_SL, E, PAL, SKY_KEYS, FT, saveP,
   gsky: () => gskStats(),
+  smokeShared: () => smpShared(),   // (the smoke's GPU objects made ahead - the first shot: src/gpu/60-draw.js frameWarm)
   screen: skyScreen,
   // the hour's cloud tones (E.pal) when the new sky isn't drawn this frame (the OLD sky: the water's light still comes
   // from them - 50-land-firewater.js)
@@ -36883,14 +36934,16 @@ function lpassOrd(T) { const O = LPASS.look ? null : thingsOrderTex(); return O 
 function lpassMask(name) { const t = frameShared(name); return t && t.view && t.ep === GPU.ep ? t : LPASS.white; }
 // a pipeline: its entry points, the target's format - laid premultiplied (a light that adds leaves alpha 0); the copy written; sf: the format of
 // the target's stencil when its context is clipped (the clip where its top bit is set - as the GL front's own drawing tests it)
-function lpassPipe(vs, fs, fmt, sf) {
+function lpassPipe(vs, fs, fmt, sf, ahead) {
   const Q = LPASS, k = vs + fs + fmt + (sf || ''); let p = Q.pipes.get(k);
+  if (!p && !ahead && !(fs === 'fsRow' && vs === 'vsRow')) { const k2 = 'vsRow' + 'fsRow' + fmt + (sf || ''); if (!Q.pipes.has(k2)) lpassPipe('vsRow', 'fsRow', fmt, sf, true); }   // (the first shot: a light's rows made ahead for a target the pass first draws in - 60-draw.js frameWarm)
   if (!p) {
     const c = { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }, t = { format: fmt };
     if (fs === 'fsDusk') t.blend = { color: { srcFactor: 'dst-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' }, alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' } };   // ('source-atop': only on what's drawn there)
     else if (fs !== 'fsCopy' && fs !== 'fsClear') t.blend = { color: c, alpha: c };   // (the copy written as it is, the clear as clear)
     const D = { layout: Q.pl, label: 'light ' + fs, vertex: { module: Q.mod, entryPoint: vs }, fragment: { module: Q.mod, entryPoint: fs, targets: [t] }, primitive: { topology: 'triangle-list' } };
     if (sf) { const face = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' }; D.depthStencil = { format: sf, depthWriteEnabled: false, depthCompare: 'always', stencilFront: face, stencilBack: face, stencilReadMask: 0x80, stencilWriteMask: 0 }; }
+    if (ahead) { gpuPipeAhead(Q.pipes, k, D); return null; }
     p = gpuRenderPipe(D);
     Q.pipes.set(k, p);
   }
