@@ -92,7 +92,7 @@ const UPM=63.75/9.83,KN=.5144*UPM,KMH=UPM/3.6; // world units a metre; a second 
 const MU=10*UPM; // how many world units the drawing's sizes are made for (icons and land read the same at the starting zoom)
 const SHELL=`<div id="app">
   <div id="bar">
-    <span id="title">FAR AWAY<small id="ver">v49</small></span>
+    <span id="title">FAR AWAY<small id="ver">v50</small></span>
     <button id="tWorld" class="on" title="The world map">WORLD</button>
     <button id="tLists" title="Structures, vehicles, nature, owners, countries, goods, biomes">LISTS</button>
     <button id="tEditor" title="Draw the icons">EDITOR</button>
@@ -323,6 +323,7 @@ function sanitize(d){
   if(!NEW)types=types.filter(t=>!['big-city','small-town','village','landmark','note'].includes(t.id)||(d.elements||[]).some(e=>e&&e.type===t.id&&e.kind!=='place'));
   const typeIds=new Set(types.map(t=>t.id)),findType=(kind,n)=>{if(!n)return'';if(typeIds.has(n))return n;let t=types.find(t=>t.kind===kind&&az(t.name,n)===0);if(!t){t={id:uid('y'),kind,name:String(n),does:[]};types.push(t);typeIds.add(t.id)}return t.id};
   const goods=Array.isArray(d.goods)?list(d.goods):JSON.parse(JSON.stringify(DEFAULT_GOODS)),gids=new Set(goods.map(g=>g.id));
+  for(const g of goods){const n=(Array.isArray(g.needs)?g.needs:[]).filter(x=>x&&gids.has(x.good)&&x.good!==g.id&&+x.n>0).map(x=>({good:x.good,n:+x.n}));if(n.length)g.needs=n;else delete g.needs} // what one of it is made from
   const tasks=JSON.parse(JSON.stringify(DEFAULT_TASKS)),tids=new Set(tasks.map(t=>t.id)); // a connection picks up a good or drops the cargo
   const oldTask={'collect-fish':['pick','fish'],fishing:['pick','fish']};
   const ids=new Set(),chids=new Set(characters.map(c=>c.id)),kids=new Set(countries.map(c=>c.id)),bids=new Set(biomes.map(b=>b.id));
@@ -1065,7 +1066,8 @@ function simulate(t){ // everything worked out again from day 0, 00:00
   const box=id=>{const e=byId.get(id);return e.kind==='vehicle'?(home(id)?load:null):stock};
   const makers=doc.elements.filter(e=>givesOf(e).length);
   for(let k=0;k<tick;k++){const sec=DT/clockRate(k*DT); // real seconds this quarter hour lasts on the game's clock
-   for(const M of makers)for(const g of givesOf(M))add(stock,M.id,g,rateOf(M)*DT); // producing: so many an hour into its own stock
+   for(const M of makers)for(const g of givesOf(M)){const nd=goodOf(g).needs||[],st=stock.get(M.id)||{};let make=rateOf(M)*DT; // producing: so many an hour into its own stock,
+     for(const x of nd)make=Math.min(make,(st[x.good]||0)/x.n);if(make<=1e-9)continue;for(const x of nd)add(stock,M.id,x.good,-make*x.n);add(stock,M.id,g,make)} // using up what each one is made from
    for(const c of moves){const F=box(c.from),T=box(c.to);if(!F||!T)continue;const src=F.get(c.from)||{},n=c.until||100; // a Move passes a batch on once the source has a batch
      const have=c.good?(src[c.good]||0):Object.values(src).reduce((a,b)=>a+b,0);if(have+1e-9<n)continue;let left=n;
      {const D=byId.get(c.to);if(D.kind==='vehicle'&&capOf(D)-Object.values(load.get(D.id)||{}).reduce((a,b)=>a+b,0)+1e-9<n)continue} // a vehicle takes a batch only while it has room
@@ -1103,6 +1105,7 @@ function pill(t,x,y,col){if(!t)return;ctx.font=fontPx(11);const w=ctx.measureTex
 /* ---------- LISTS: every list of the plan in columns - pick, rename, delete, add ---------- */
 let viewMode='world',lpick=null; // LISTS: the one entry picked, {k, id}
 const usedBy=f=>doc.elements.filter(f).length;
+const goodOf=id=>doc.goods.find(g=>g.id===id)||{},needsText=g=>(g.needs||[]).map(x=>x.n+' '+(goodOf(x.good).name||'?').toLowerCase()).join(' + ');
 const gnames=ids=>byName(doc.goods).filter(g=>ids.includes(g.id)).map(g=>g.name).join(', ');
 const doesText=(kind,d)=>(d||[]).map(p=>((PURPOSES[kind]||[]).find(q=>q[0]===p)||[,''])[1]).filter(Boolean);
 /* every list: how to find an entry, who uses it, how it goes */
@@ -1115,8 +1118,8 @@ const LIST={
     del:id=>{doc.characters=doc.characters.filter(x=>x.id!==id);for(const e of doc.elements)if(e.owner===id)e.owner=null}},
   country:{one:'country',arr:()=>doc.countries,who:id=>doc.elements.filter(e=>e.country===id),
     del:id=>{doc.countries=doc.countries.filter(x=>x.id!==id);for(const e of doc.elements)if(e.country===id)e.country=null}},
-  good:{one:'good',arr:()=>doc.goods,who:id=>doc.elements.filter(e=>carriesOf(e).includes(id)||givesOf(e).includes(id)),
-    del:id=>{doc.goods=doc.goods.filter(x=>x.id!==id);for(const[l,f]of[[doc.types,'carries'],[doc.types,'gives'],[doc.subs,'gives']])for(const t of l)if(t[f]){t[f]=t[f].filter(g=>g!==id);if(!t[f].length)delete t[f]}}},
+  good:{one:'good',arr:()=>doc.goods,who:id=>doc.elements.filter(e=>carriesOf(e).includes(id)||givesOf(e).includes(id)||givesOf(e).some(p=>(goodOf(p).needs||[]).some(x=>x.good===id))),
+    del:id=>{doc.goods=doc.goods.filter(x=>x.id!==id);for(const g of doc.goods)if(g.needs){g.needs=g.needs.filter(x=>x.good!==id);if(!g.needs.length)delete g.needs}for(const[l,f]of[[doc.types,'carries'],[doc.types,'gives'],[doc.subs,'gives']])for(const t of l)if(t[f]){t[f]=t[f].filter(g=>g!==id);if(!t[f].length)delete t[f]}}},
   biome:{one:'biome',arr:()=>doc.biomes,who:id=>doc.elements.filter(e=>isLand(e)&&e.biome===id),pal:BIOME_COLS,
     del:id=>{if(doc.biomes.length<2){toast('Keep at least one biome');return false}doc.biomes=doc.biomes.filter(x=>x.id!==id);for(const e of doc.elements)if(isLand(e)&&e.biome===id)e.biome=byName(doc.biomes)[0].id}},
 };
@@ -1130,7 +1133,7 @@ function renderLists(){
   for(const k of KIND_ORDER){const ss=subsOfKind(k);
     h+=`<div class="lcol"><h3 style="color:${CATS[k].color}">${({structure:'STRUCTURES',vehicle:'VEHICLES',nature:'NATURE'})[k]} <span class="sub">${ss.length}</span></h3><div class="lrows">${ss.map(S=>`<div class="lbox">${lrow('sub',S,[...doesText(k,S.does.filter(p=>p!=='gives')),...(S.does.includes('gives')?[(S.gives||[]).length?'Produces '+gnames(S.gives):'Produces goods']:[])].join(' · '),null,' sh','color:'+CATS[k].color)}${typesOfSub(S.id).map(T=>lrow('type',T,'',null,' ty')).join('')}${k==='vehicle'?`<div class="lrow ty sub" data-newtype="${S.id}">+ New type</div>`:''}</div>`).join('')||'<div class="sub" style="padding:8px">Empty</div>'}</div>${ladd('sub:'+k,({structure:'New structure',vehicle:'New vehicle',nature:'New nature'})[k])}</div>`}
   const simple=(k,title,l,dot)=>`<div class="lcol"><h3>${title} <span class="sub">${l.length}</span></h3><div class="lrows">${byName(l).map(o=>lrow(k,o,'',dot?o.color:null)).join('')||'<div class="sub" style="padding:8px">Empty</div>'}</div>${ladd(k,'New '+LIST[k].one)}</div>`;
-  h+=simple('owner','OWNERS',doc.characters,1)+simple('country','COUNTRIES',doc.countries)+simple('good','GOODS',doc.goods)+simple('biome','BIOMES',doc.biomes,1);
+  h+=simple('owner','OWNERS',doc.characters,1)+simple('country','COUNTRIES',doc.countries)+`<div class="lcol"><h3>GOODS <span class="sub">${doc.goods.length}</span></h3><div class="lrows">${byName(doc.goods).map(g=>lrow('good',g,g.needs?'From '+needsText(g):'')).join('')||'<div class="sub" style="padding:8px">Empty</div>'}</div>${ladd('good','New good')}</div>`+simple('biome','BIOMES',doc.biomes,1);
   box.innerHTML=h;box.scrollLeft=keep.x;box.querySelectorAll('.lrows').forEach((r,i)=>r.scrollTop=keep.y[i]||0);
   box.querySelectorAll('[data-newtype]').forEach(r=>r.onclick=()=>{const S=doc.subs.find(x=>x.id===r.dataset.newtype); // a new type in this subcategory
     modal(`<h3>NEW ${esc(S.name).toUpperCase()} TYPE</h3><label>Name</label><input id="ntName" autocapitalize="words"><div class="row"><button id="ntOk">ADD</button><button data-close>CANCEL</button></div>`,()=>{
@@ -1168,6 +1171,9 @@ function renderLPanel(){const P=$('#lpanel');
   const sample=()=>({id:'_s',kind,sub:k==='sub'?o.id:o.sub,type:k==='type'?o.id:''}),iconNow=()=>{const e=sample();return iconRef(e)||builtinFor(e)}; // the icon it shows
   if(k==='sub'||k==='type'){const cur=iconNow();
     h+=`<label>Icon</label><select data-licon>${iconsOfKind(kind).map(I=>`<option value="${I.id}"${I.id===cur?' selected':''}>${esc(I.name)}</option>`).join('')}<option value="__new">+ New icon</option></select><div class="row"><button data-liedit>EDIT ICON</button></div>`}
+  if(k==='good'){const others=byName(doc.goods.filter(g=>g.id!==o.id&&!(o.needs||[]).some(x=>x.good===g.id)));
+    h+=`<label>Made from (for 1)</label>${(o.needs||[]).map((x,i)=>`<div class="row" style="margin:4px 0;align-items:center"><input data-nn="${i}" type="number" inputmode="numeric" min="1" value="${x.n}" style="width:80px;flex:none"><div style="flex:1">${esc(goodOf(x.good).name||'?')}</div><button data-nx="${i}" style="flex:none">✕</button></div>`).join('')||'<div class="sub">Nothing: it is a raw good</div>'}
+      ${others.length?`<select data-nadd style="margin-top:6px"><option value="">+ Add an ingredient</option>${others.map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select>`:''}`}
   if(L.pal)h+=`<label>Colour</label><div class="chips">${L.pal.map(c=>`<button data-lcol="${c}" style="background:${c};width:44px;${o.color===c?'outline:3px solid #fff;':''}"></button>`).join('')}<label class="sub" style="display:flex;align-items:center;gap:6px;margin:0">Any colour <input type="color" data-lcolany value="${o.color}" style="width:44px;height:38px;padding:0;border:0;background:none"></label></div>`;
   h+=`<label>Placed (${ws.length})</label><div class="sub">${ws.length?ws.slice(0,20).map(e=>esc(e.name||tn(e)||'?')).join(', ')+(ws.length>20?' …':''):'None'}</div>
     <div class="row"><button id="lDel">DELETE</button></div>`;
@@ -1179,6 +1185,9 @@ function renderLPanel(){const P=$('#lpanel');
   on('[data-lgive]',b=>b.onclick=()=>tog('gives',b.dataset.lgive));
   on('[data-lcarry]',b=>b.onclick=()=>tog('carries',b.dataset.lcarry));
   on('[data-lwater]',b=>b.onclick=()=>{if((o.does||[]).includes('water'))delete o.does;else o.does=['water'];done()});
+  on('[data-nadd]',i=>i.onchange=()=>{if(!i.value)return;o.needs=[...(o.needs||[]),{good:i.value,n:1}];done()});
+  on('[data-nx]',b=>b.onclick=()=>{o.needs.splice(+b.dataset.nx,1);if(!o.needs.length)delete o.needs;done()});
+  on('[data-nn]',i=>{i.onkeydown=ev=>ev.stopPropagation();i.onchange=()=>{const n=+i.value;if(n>0){o.needs[+i.dataset.nn].n=n;done()}}});
   on('[data-lper]',b=>b.onclick=()=>{if(b.dataset.lper==='day')o.per='day';else delete o.per;done()});
   on('[data-lrate]',i=>{i.onkeydown=ev=>ev.stopPropagation();i.onchange=()=>{const n=Math.round(+i.value);if(n>0){o.rate=n;done()}}});
   on('[data-lcap]',i=>{i.onkeydown=ev=>ev.stopPropagation();i.onchange=()=>{const n=Math.round(+i.value);if(n>0){o.capacity=n;done()}}});
