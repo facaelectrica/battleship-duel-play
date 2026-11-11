@@ -1037,11 +1037,13 @@ const gpuHasDepth = f => /depth/.test(f);
 let GPU_TID = 0;
 // a texture of the layer: { gt, view, w, h, fmt, pool, ep, use (the last submit that drew with it or into it) }
 // (layers: a 2D array texture of that many pages - the art atlas; its view is a '2d-array' view; 1 or none: a plain 2D texture)
+// (a texture's view to its record: the size of a pass's target - gpuPassSig)
+const GPU_VDIM = new WeakMap();
 function gpuTex(w, h, fmt, pool, layers) {
   const L = Math.max(1, layers | 0);
   const t = { id: ++GPU_TID, gt: null, view: null, w, h, layers: L, fmt, pool: pool || 'textures', ep: GPU.ep, use: -1, bytes: 0 };
   t.gt = GPU.dev.createTexture({ size: [w, h, L], format: fmt, usage: TEXU() });
-  t.view = t.gt.createView(layers ? { dimension: '2d-array' } : undefined);
+  t.view = t.gt.createView(layers ? { dimension: '2d-array' } : undefined); GPU_VDIM.set(t.view, t);
   t.bytes = w * h * L * (GPU_BPP[fmt] || 4); GPU_MEM.tex += t.bytes; gpuMemAdd(t.pool, t.bytes);
   return t;
 }
@@ -1124,7 +1126,7 @@ function gpuSampler(lin, wrapS, wrapT) {
    Nothing ever waits on the GPU: a read back (gpuRead) gives what was read a frame or more ago and asks again;
    the GPU's own time a frame comes from timestamps read the same way.
    ================================================================ */
-const FR = { work: 0, marks: null, enc: null, sub: 1, pass: null, pk: null, frame: 0, reads: new Map(), wait: [], qs: null, qn: 0, QMAX: 512, tsBuf: null, tsRead: [], gpuMs: 0, passMs: [], present: null, nowN: 0 };
+const FR = { work: 0, marks: null, enc: null, sub: 1, pass: null, pk: null, pd: null, pg: 0, frame: 0, reads: new Map(), wait: [], qs: null, qn: 0, QMAX: 512, tsBuf: null, tsRead: [], gpuMs: 0, passMs: [], present: null, nowN: 0 };
 // THE PARTS' SWITCHES (Nov 10, the laptop's intermittent hang): ?gpuoff=sky,ground,plants,water,smoke - a part's passes and
 // dispatches recorded as nothing (its pictures go stale or missing), to find which part a GPU hang comes from by halves
 const GPU_OFF = (() => { try { const m = /[?&]gpuoff=([a-z:,]+)/.exec(location.search); return m ? m[1].split(',') : []; } catch (e) { return []; } })();
@@ -1186,24 +1188,56 @@ function gtDevice(dev) {
   dev.lost.then(info => { GT.why = info && info.message || 'lost'; GT.atLoss = gtReport(); gtSave(); try { localStorage.setItem('gputrace-loss', JSON.stringify(GT.atLoss)); } catch (e) { } });
 }
 function gpuEnc() { if (!FR.enc) FR.enc = GPU.dev.createCommandEncoder(); return FR.enc; }
-function gpuPassEnd() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; } }
-// a render pass on desc's targets (key: which targets, so draws to the same ones keep it open)
+// THE OPEN PASS IS SHARED (Nov 11, the laptop: 101 passes a frame, half of them on the target the pass before had just stored - each one
+// loading and storing the whole target again, most of the engine's GPU time on an integrated GPU): a part done with its pass says so
+// (gpuPassEnd) and the pass stays open; the next part's pass on the same targets (the same views, everything loaded, nothing cleared) goes
+// on in it, its state put back to a new pass's (the whole target, stencil reference 0). It is closed for real (gpuPassClose) only by what
+// can't go on in it: another target, a clear, a copy, a compute pass, a submit; and for the GPU timers and the hang recorder, which time
+// or name each pass. FR.pg: a new number for every part's pass, kept or not - a part that keeps its own pass between calls asks by it
+function gpuPassClose() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; FR.pd = null; } }
+function gpuPassEnd() { if (FR.pass && (GT.on || (typeof GPUT !== 'undefined' && GPUT.cur) || !FR.pd)) gpuPassClose(); }
+// (the targets a pass on desc writes, when it can go on in the open one - its views, loaded and stored - else null; open: the open pass's
+// own, which may have cleared them as it began)
+function gpuPassSig(desc, open) {
+  const A = desc.colorAttachments, V = []; let dim = null;
+  for (const a of A) {
+    if (!a) { V.push(null); continue; }
+    if ((!open && a.loadOp !== 'load') || a.storeOp !== 'store' || a.resolveTarget) return null;
+    V.push(a.view); dim = dim || GPU_VDIM.get(a.view);
+  }
+  const d = desc.depthStencilAttachment;
+  if (d) {
+    if ((!open && ((d.depthLoadOp && d.depthLoadOp !== 'load') || (d.stencilLoadOp && d.stencilLoadOp !== 'load'))) || (d.depthStoreOp && d.depthStoreOp !== 'store') || (d.stencilStoreOp && d.stencilStoreOp !== 'store')) return null;
+    V.push(d.view, !!d.depthReadOnly, !!d.stencilReadOnly); dim = dim || GPU_VDIM.get(d.view);
+  } else V.push(0);
+  return dim ? { V, w: dim.w, h: dim.h } : null;
+}
+// a render pass on desc's targets (key: which part's - ?gpuoff, the hang recorder); the open one gone on in when it's on the same targets
 function gpuPassBegin(desc, key, uses) {
-  gpuPassEnd();
-  if (gpuOffKey(key)) return GPU_NOPASS;
+  if (gpuOffKey(key)) { gpuPassClose(); return GPU_NOPASS; }
+  FR.pg++;
+  const sig = GT.on || (typeof GPUT !== 'undefined' && GPUT.cur) ? null : gpuPassSig(desc), o = FR.pd;
+  if (FR.pass && sig && o && sig.V.length === o.V.length && sig.V.every((v, i) => v === o.V[i])) {
+    if (uses) for (const t of uses) if (t) t.use = FR.sub;
+    const p = FR.pass; FR.pk = key;
+    p.setViewport(0, 0, sig.w, sig.h, 0, 1); p.setScissorRect(0, 0, sig.w, sig.h); p.setStencilReference(0); p.setBlendConstant([0, 0, 0, 0]);
+    GPU.stats.shared = (GPU.stats.shared || 0) + 1;
+    return p;
+  }
+  gpuPassClose();
   if (GT.on) gtMark(key);
   if (uses) for (const t of uses) if (t) t.use = FR.sub;   // (what the pass writes or reads: in use by the pending submit - a later write to it is staged)
   if (GPU.feat['timestamp-query'] && FR.qn + 2 <= FR.QMAX) {
     if (!FR.qs || FR.qs.ep !== GPU.ep) { FR.qs = GPU.dev.createQuerySet({ type: 'timestamp', count: FR.QMAX }); FR.qs.ep = GPU.ep; }
     desc.timestampWrites = { querySet: FR.qs, beginningOfPassWriteIndex: FR.qn, endOfPassWriteIndex: FR.qn + 1 }; FR.qn += 2;
   }
-  FR.pass = gpuEnc().beginRenderPass(desc); FR.pk = key; GPU.stats.passes++; if (key !== 'present') FR.work++;
+  FR.pass = gpuEnc().beginRenderPass(desc); FR.pk = key; FR.pd = sig || (GT.on ? null : gpuPassSig(desc, true)); GPU.stats.passes++; if (key !== 'present') FR.work++;
   return FR.pass;
 }
 // a compute pass in the frame's encoder, after whatever was recorded (the open render pass ended first); the caller ends it
 // (cp.end()). uses: the buffers / textures it writes or reads, marked in use by the pending submit
 function gpuComputeBegin(uses, key) {
-  gpuPassEnd();
+  gpuPassClose();
   if (gpuOffKey(key)) return GPU_NOPASS;
   if (GT.on) gtMark(key);
   if (uses) for (const t of uses) if (t) t.use = FR.sub;
@@ -1212,20 +1246,20 @@ function gpuComputeBegin(uses, key) {
 }
 // copies recorded in the frame's encoder, in order with its passes (the open render pass ended first). Arguments are the layer's
 // buffer / texture records ({ gb } / { gt } from gpuBuf / gpuTex) or the arena's chunks ({ gb })
-function gpuCopyBuf(src, so, dst, dof, n) { gpuPassEnd(); dst.use = FR.sub; if (src.use !== undefined) src.use = FR.sub; gpuEnc().copyBufferToBuffer(src.gb, so, dst.gb, dof, n); }
-function gpuCopyBufTex(src, so, bpr, dst, x, y, w, h, z) { gpuPassEnd(); dst.use = FR.sub; gpuEnc().copyBufferToTexture({ buffer: src.gb, offset: so, bytesPerRow: bpr }, { texture: dst.gt, origin: { x, y, z: z || 0 } }, { width: w, height: h }); }   // (z: the layer of an array texture)
+function gpuCopyBuf(src, so, dst, dof, n) { gpuPassClose(); dst.use = FR.sub; if (src.use !== undefined) src.use = FR.sub; gpuEnc().copyBufferToBuffer(src.gb, so, dst.gb, dof, n); }
+function gpuCopyBufTex(src, so, bpr, dst, x, y, w, h, z) { gpuPassClose(); dst.use = FR.sub; gpuEnc().copyBufferToTexture({ buffer: src.gb, offset: so, bytesPerRow: bpr }, { texture: dst.gt, origin: { x, y, z: z || 0 } }, { width: w, height: h }); }   // (z: the layer of an array texture)
 // a texture's rectangle copied into another of the same format (layer records { gt } from gpuTex), in order with the passes - a part's
 // snapshot of what's been drawn (the water's distortion, the light's lamps under the tint) without a draw; rows as they are in both
 function gpuCopyTex(src, sx, sy, dst, dx, dy, w, h) {
   if (!(w > 0 && h > 0) || !src.gt || !dst.gt) return;
-  gpuPassEnd(); src.use = FR.sub; dst.use = FR.sub; GPU.stats.copies++;
+  gpuPassClose(); src.use = FR.sub; dst.use = FR.sub; GPU.stats.copies++;
   gpuEnc().copyTextureToTexture({ texture: src.gt, origin: { x: sx, y: sy } }, { texture: dst.gt, origin: { x: dx, y: dy } }, { width: w, height: h });
 }
 // send what's recorded
 function gpuSubmit() {
   if (!GPU.dev) return;
   const PR = typeof window !== 'undefined' && window.__gpuProf, t0 = PR ? gpuPT() : 0;
-  gpuPassEnd();
+  gpuPassClose();
   arenaSend();
   const R = FR.wait; FR.wait = [];
   if (FR.enc) { if (GT.on) gtSubmit(); else { GPU.dev.queue.submit([FR.enc.finish()]); FR.enc = null; GPU.stats.submits++; } }
@@ -1243,7 +1277,7 @@ function gpuFrameEnd(screen) {
   if (screen && screen.gt) gpuPresent(screen);
   if (FR.qn && FR.qs) {
     const n = FR.qn, enc = gpuEnc(), marks = FR.marks; FR.marks = null;
-    gpuPassEnd();
+    gpuPassClose();
     const rb = GPU.dev.createBuffer({ size: n * 8, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
     const mb = GPU.dev.createBuffer({ size: n * 8, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     enc.resolveQuerySet(FR.qs, 0, n, rb, 0); enc.copyBufferToBuffer(rb, 0, mb, 0, n * 8);
@@ -1263,7 +1297,7 @@ function gpuFrameEnd(screen) {
   FR.frame++;
 }
 // after a device loss: nothing recorded survives
-function gpuFrameReset() { FR.enc = null; FR.pass = null; FR.pk = null; FR.qs = null; FR.qn = 0; FR.wait = []; FR.reads.clear(); FR.present = null; ARENA.chunks = []; ARENA.cur = ARENA.off = 0; GPU_SAMP.clear(); GPU_TRASH.length = 0; }
+function gpuFrameReset() { FR.enc = null; FR.pass = null; FR.pk = null; FR.pd = null; FR.qs = null; FR.qn = 0; FR.wait = []; FR.reads.clear(); FR.present = null; ARENA.chunks = []; ARENA.cur = ARENA.off = 0; GPU_SAMP.clear(); GPU_TRASH.length = 0; }
 
 /* ---- the screen shown: its texture (rows bottom-up, as WebGL's) turned over onto the canvas, every pixel as it is ---- */
 const GPU_PRESENT_WGSL = `
@@ -1281,7 +1315,7 @@ function gpuPresent(screen) {
   if (cur.width !== screen.w || cur.height !== screen.h) return;   // (the canvas sized again since: the next frame shows it)
   const pass = gpuPassBegin({ colorAttachments: [{ view: cur.createView(), loadOp: 'clear', clearValue: [0, 0, 0, 1], storeOp: 'store' }] }, 'present');
   pass.setPipeline(P.pipe); pass.setBindGroup(0, P.bg); pass.draw(3);
-  gpuPassEnd();
+  gpuPassClose();
   screen.use = FR.sub;
 }
 
@@ -1295,7 +1329,7 @@ function gpuRead(t, x, y, w, h, key) {
     R.busy = true;
     const bpp = GPU_BPP[t.fmt] || 4, bpr = Math.ceil(w * bpp / 256) * 256;
     const mb = GPU.dev.createBuffer({ size: bpr * h, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-    gpuPassEnd();
+    gpuPassClose();
     gpuEnc().copyTextureToBuffer({ texture: t.gt, origin: [x, y] }, { buffer: mb, bytesPerRow: bpr, rowsPerImage: h }, [w, h]);
     t.use = FR.sub; GPU.stats.copies++;
     const fr = FR.frame;
@@ -1318,7 +1352,7 @@ function gpuReadBuf(b, off, n, key) {
   if (!R.busy && b.gb && n > 0) {
     R.busy = true;
     const mb = GPU.dev.createBuffer({ size: n, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-    gpuPassEnd();
+    gpuPassClose();
     gpuEnc().copyBufferToBuffer(b.gb, off, mb, 0, n);
     if (b.use !== undefined) b.use = FR.sub; GPU.stats.copies++;
     const fr = FR.frame;
@@ -1557,7 +1591,7 @@ class GPUGL {
   bufferSubData(tg, dst, d, so, len) {
     const b = tg === GLK.ARRAY_BUFFER ? this.arrayBuf : this.binds[tg]; if (!b) return;
     const es = d.BYTES_PER_ELEMENT || 1, off = (so || 0) * es, n = len !== undefined ? len * es : d.byteLength - off;
-    gpuBufReady(b); gpuPassEnd();
+    gpuBufReady(b); gpuPassClose();
     const [c, o] = arenaAlloc(Math.max(4, n), 256); c.cpu.set(new Uint8Array(d.buffer, d.byteOffset + off, n), o);
     gpuEnc().copyBufferToBuffer(c.gb, o, b.own.gb, dst, Math.ceil(n / 4) * 4);
     b.own.use = FR.sub; b.back = b.own.gb; b.boff = 0; b.bsub = Infinity; b.cpu = null;
@@ -1565,7 +1599,7 @@ class GPUGL {
   copyBufferSubData(rt, wt, ro, wo, n) {
     const r = this.binds[rt], w = this.binds[wt]; if (!r || !w) return;
     gpuBufReady(r); gpuBufReady(w);
-    gpuPassEnd();
+    gpuPassClose();
     gpuEnc().copyBufferToBuffer(r.back, r.boff + ro, w.own.gb, wo, n);
     r.own && (r.own.use = FR.sub); w.own.use = FR.sub; GPU.stats.copies++;
   }
@@ -1643,7 +1677,7 @@ class GPUGL {
     const R = gpuGLTargets(this, this.readFb), W = gpuGLTargets(this, this.drawFb); if (!R || !W || !R.col[0] || !W.col[0]) return;
     const w = sx1 - sx0, h = sy1 - sy0;
     if (w !== dx1 - dx0 || h !== dy1 - dy0 || w <= 0 || h <= 0) { console.warn('GPU: a scaled blit'); return; }
-    gpuPassEnd();
+    gpuPassClose();
     gpuEnc().copyTextureToTexture({ texture: R.col[0].gt, origin: [sx0, sy0] }, { texture: W.col[0].gt, origin: [dx0, dy0] }, [w, h]);
     R.col[0].use = W.col[0].use = FR.sub; GPU.stats.copies++;
   }
@@ -1702,7 +1736,7 @@ function gpuTexWrite(t, x, y, w, h, u8, off, bpr) {
     const [c, co] = arenaAlloc(rb * h, 256); gb = c.gb; o = co;
     for (let r = 0; r < h; r++) c.cpu.set(u8.subarray(off + r * bpr, off + r * bpr + w * bpp), o + r * rb);
   }
-  gpuPassEnd();
+  gpuPassClose();
   gpuEnc().copyBufferToTexture({ buffer: gb, offset: o, bytesPerRow: rb, rowsPerImage: h }, { texture: t.gt, origin: [x, y] }, [w, h]);
   t.use = FR.sub; GPU.stats.copies++;
 }
@@ -1716,7 +1750,7 @@ function gpuTexFromSource(t, src, x, y, w, h, pm, fy) {
     if (t.use !== FR.sub) { cp(t.gt, x, y); return; }
     // (the texture is in this submit's commands: the picture goes into a staging texture first, then copied in order)
     const S = gpuTex(w, h, t.fmt, 'staging'); cp(S.gt, 0, 0);
-    gpuPassEnd();
+    gpuPassClose();
     gpuEnc().copyTextureToTexture({ texture: S.gt }, { texture: t.gt, origin: [x, y] }, [w, h]);
     t.use = FR.sub; GPU.stats.copies++;
     gpuTexFree(S);
@@ -2075,7 +2109,7 @@ function gpuGLTransformFeedback(gl, p, first, count) {
   const E = [{ binding: B, resource: { buffer: pc.gb, offset: po, size: P.byteLength } }, { binding: B + 1, resource: { buffer: out.b.own.gb, offset: out.off, size: out.size > 0 ? out.size : out.b.own.size - out.off } }];
   bufs.forEach((b, k) => E.push({ binding: B + 2 + k, resource: b ? { buffer: b.back, offset: b.boff } : { buffer: z.gb } }));
   const bg = gpuGLBindGroup(gl, p, null, { E });
-  gpuPassEnd();
+  gpuPassClose();
   if (GT.on) gtMark('glxf');
   const cp = gpuEnc().beginComputePass(); FR.work++;
   cp.setPipeline(p.cpipe);
@@ -2293,7 +2327,7 @@ function hudShow() {
                                  pass of the same key still open on the same target and stencil (nothing recorded since) is kept - one
                                  pass for a run of draws (the sky's); the caller ends it (gpuPassEnd) when it wants it ended
    ================================================================ */
-const FDRAW = { pass: null, tex: null, ds: null, key: null };
+const FDRAW = { pass: null, pg: -1, tex: null, ds: null, key: null };
 function frameDrawBegin(ctx, clear) {
   const s = ctx.s, t = ctx.target;
   if (!clear) glBegin(ctx, s.op);
@@ -2318,10 +2352,10 @@ function frameDrawStencil(X) {
 const frameDrawKey = (X, op) => (op || X.op) + '|' + X.T.tex.fmt + '|' + (X.ds ? X.ds.fmt : '') + '|' + (X.screen ? 1 : 0);
 function frameDrawPass(X, key) {
   const D = FDRAW, tex = X.T.tex, ds = X.ds;
-  if (X.clear || !FR.pass || FR.pass !== D.pass || D.tex !== tex || D.ds !== ds || D.key !== key) {
+  if (X.clear || !FR.pass || FR.pg !== D.pg || D.tex !== tex || D.ds !== ds || D.key !== key) {   // (FR.pg: another part's pass gone on in the open one since - its state not ours)
     const desc = { colorAttachments: [{ view: tex.view, loadOp: X.clear ? 'clear' : 'load', clearValue: [0, 0, 0, 0], storeOp: 'store' }] };
     if (ds) desc.depthStencilAttachment = Object.assign({ view: ds.view, stencilReadOnly: true }, gpuHasDepth(ds.fmt) ? { depthReadOnly: true } : {});
-    D.pass = gpuPassBegin(desc, key, [tex, ds]); D.tex = tex; D.ds = ds; D.key = key;
+    D.pass = gpuPassBegin(desc, key, [tex, ds]); D.tex = tex; D.ds = ds; D.key = key; D.pg = FR.pg;
   }
   const pass = D.pass;
   pass.setScissorRect(X.sc[0], X.sc[1], X.sc[2], X.sc[3]);
@@ -7874,8 +7908,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 975;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 11 11:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 976;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 11 11:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -23006,11 +23040,11 @@ const GPUT = { want: false, ext: null, tried: false, ep: -1, cur: null, segs: nu
 function gptBegin() {
   GPUT.cur = null; GPUT.segs = null;
   if (!(GPUT.want || ui.perfPanel) || !GPU.on || !GPU.feat['timestamp-query']) return;
-  GPUT.tried = true; GPUT.ext = {}; GPUT.cur = 1; gpuPassEnd(); GPUT.segs = [{ k: '', top: 1, q: FR.qn }];
+  GPUT.tried = true; GPUT.ext = {}; GPUT.cur = 1; gpuPassClose(); GPUT.segs = [{ k: '', top: 1, q: FR.qn }];
 }
 // a part's lap: k its name, top 1 for a part (48-render.js), 0 for a sub-part - the passes since the last lap are its
-function gptLap(k, top) { glFlush(); gpuPassEnd(); GPUT.segs.push({ k, top, q: FR.qn }); }
-function gptEnd() { glFlush(); gpuPassEnd(); GPUT.segs.push({ k: 'rest', top: 1, q: FR.qn }); FR.marks = GPUT.segs; GPUT.cur = null; GPUT.segs = null; }
+function gptLap(k, top) { glFlush(); gpuPassClose(); GPUT.segs.push({ k, top, q: FR.qn }); }
+function gptEnd() { glFlush(); gpuPassClose(); GPUT.segs.push({ k: 'rest', top: 1, q: FR.qn }); FR.marks = GPUT.segs; GPUT.cur = null; GPUT.segs = null; }
 // a frame's pass times (D[j]: pass j's ms, by its timestamps' place 2j) and its marks: each part's ms into the averages, as before
 function gptTimes(S, marks) {
   const T = {}, N = S.length, at = q => S[Math.min(q, N - 1)];
