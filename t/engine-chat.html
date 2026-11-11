@@ -167,7 +167,7 @@
     // pixels above the water in the hour's light (drawSailsOver - the things' pass, thingsCut) - at the low sun, and at night with the moon's light on her and
     // them (drawMoonlight); THE RESEARCH SHIP'S ANCHOR AT NIGHT: anchored, its lamp blinking down there (the light pass's soft glow - lightGlow); TWO PLAYERS
     // AIMING: both guns' aim dots (the things' pass's blocks) and the line between the halves; THE DEBRIS AT REST: both battleships blown apart and the
-    // pieces settled, zoomed out (the kept tiles laid natively - fxLayer)
+    // pieces settled, zoomed out (the kept tiles laid natively - frameLayTarget)
     sailsmoke: litScene(17.6, 'boats', true), sailsmokenight: litScene(22.5, 'boats', true),
     anchornight: { mode: 'land', one: true, env: { time: 22.5, weather: 0.1, rain: 0, wind: 0.2, sea: 0.3, fog: 0 }, frames: 360,
       setup: g => { const c = g.civShips().find(k => k.kind === 'research' && k.state !== 'gone'); if (!c) throw new Error('anchornight: no research ship in this world'); globalThis.__rsShip = c; g.camAt(c.x, g.rest().WATER_Y + 120); g.cutTo && g.cutTo(0); },
@@ -520,7 +520,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 11 03:50', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 11 04:10', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -565,6 +565,9 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
      40-gl.js       the WebGL2-shaped front the game's existing drawing code (GLCtx and the GL programs) calls
                     - the same calls, the same pixels; each engine part replaces its use of it with the layer's
                     own calls and deletes its old code (task-engine-conversion.md), and the front goes at the swap
+     50-frame.js    the frame: its layers, the camera per view, the light's inputs, the parts' shares, a part's clip
+     60-draw.js     a part's own draw into a context's target (one begin / pass for every part), a picture laid
+     61-rects.js    the rectangles: every part's rectangles of a colour or a gradient
    ================================================================ */
 const GPU = {
   on: false, dev: null, ad: null, ctx: null, cv: null, cfmt: 'bgra8unorm', ep: 0, lost: false, why: '',
@@ -1575,13 +1578,11 @@ const gpuHasDepth = f => /depth/.test(f);
 let GPU_TID = 0;
 // a texture of the layer: { gt, view, w, h, fmt, pool, ep, use (the last submit that drew with it or into it) }
 // (layers: a 2D array texture of that many pages - the art atlas; its view is a '2d-array' view; 1 or none: a plain 2D texture)
-// (a texture's view to its record: the size of a pass's target - gpuPassSig)
-const GPU_VDIM = new WeakMap();
 function gpuTex(w, h, fmt, pool, layers) {
   const L = Math.max(1, layers | 0);
   const t = { id: ++GPU_TID, gt: null, view: null, w, h, layers: L, fmt, pool: pool || 'textures', ep: GPU.ep, use: -1, bytes: 0 };
   t.gt = GPU.dev.createTexture({ size: [w, h, L], format: fmt, usage: TEXU() });
-  t.view = t.gt.createView(layers ? { dimension: '2d-array' } : undefined); GPU_VDIM.set(t.view, t);
+  t.view = t.gt.createView(layers ? { dimension: '2d-array' } : undefined);
   t.bytes = w * h * L * (GPU_BPP[fmt] || 4); GPU_MEM.tex += t.bytes; gpuMemAdd(t.pool, t.bytes);
   return t;
 }
@@ -1628,6 +1629,9 @@ function arenaAlloc(n, al) {
   ARENA.off = o + n; c.hi = Math.max(c.hi, o + n);
   return [c, o];
 }
+// an arena chunk's bytes as words (i, u, f: Int32Array, Uint32Array, Float32Array over its staging bytes - made once a chunk): a part writing
+// numbers into the room arenaAlloc gave it at word (offset >> 2)
+function arenaWords(c) { return c.words || (c.words = { i: new Int32Array(c.cpu.buffer), u: new Uint32Array(c.cpu.buffer), f: new Float32Array(c.cpu.buffer) }); }
 // the trace's split submits (30-frame.js GT): what was written since the last flush goes up WITHOUT starting the chunks again - the
 // passes still to come in this frame keep their offsets (c.sent: how far a chunk has gone up; each piece is written when it's taken)
 function arenaFlush() {
@@ -1660,7 +1664,7 @@ function gpuSampler(lin, wrapS, wrapT) {
    Nothing ever waits on the GPU: a read back (gpuRead) gives what was read a frame or more ago and asks again;
    the GPU's own time a frame comes from timestamps read the same way.
    ================================================================ */
-const FR = { work: 0, marks: null, enc: null, sub: 1, pass: null, pk: null, pd: null, pg: 0, frame: 0, reads: new Map(), wait: [], qs: null, qn: 0, QMAX: 512, tsBuf: null, tsRead: [], gpuMs: 0, passMs: [], present: null, nowN: 0 };
+const FR = { work: 0, marks: null, enc: null, sub: 1, pass: null, pk: null, frame: 0, reads: new Map(), wait: [], qs: null, qn: 0, QMAX: 512, tsBuf: null, tsRead: [], gpuMs: 0, passMs: [], present: null, nowN: 0 };
 // THE PARTS' SWITCHES (Nov 10, the laptop's intermittent hang): ?gpuoff=sky,ground,plants,water,smoke - a part's passes and
 // dispatches recorded as nothing (its pictures go stale or missing), to find which part a GPU hang comes from by halves
 const GPU_OFF = (() => { try { const m = /[?&]gpuoff=([a-z:,]+)/.exec(location.search); return m ? m[1].split(',') : []; } catch (e) { return []; } })();
@@ -1720,56 +1724,24 @@ function gtDevice(dev) {
   dev.lost.then(info => { GT.why = info && info.message || 'lost'; GT.atLoss = gtReport(); gtSave(); try { localStorage.setItem('gputrace-loss', JSON.stringify(GT.atLoss)); } catch (e) { } });
 }
 function gpuEnc() { if (!FR.enc) FR.enc = GPU.dev.createCommandEncoder(); return FR.enc; }
-// THE OPEN PASS IS SHARED (Nov 11, the laptop: 101 passes a frame, half of them on the target the pass before had just stored - each one
-// loading and storing the whole target again, most of the engine's GPU time on an integrated GPU): a part done with its pass says so
-// (gpuPassEnd) and the pass stays open; the next part's pass on the same targets (the same views, everything loaded, nothing cleared) goes
-// on in it, its state put back to a new pass's (the whole target, stencil reference 0). It is closed for real (gpuPassClose) only by what
-// can't go on in it: another target, a clear, a copy, a compute pass, a submit; and for the GPU timers and the hang recorder, which time
-// or name each pass. FR.pg: a new number for every part's pass, kept or not - a part that keeps its own pass between calls asks by it
-function gpuPassClose() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; FR.pd = null; } }
-function gpuPassEnd() { if (FR.pass && (GT.on || (typeof GPUT !== 'undefined' && GPUT.cur) || !FR.pd)) gpuPassClose(); }
-// (the targets a pass on desc writes, when it can go on in the open one - its views, loaded and stored - else null; open: the open pass's
-// own, which may have cleared them as it began)
-function gpuPassSig(desc, open) {
-  const A = desc.colorAttachments, V = []; let dim = null;
-  for (const a of A) {
-    if (!a) { V.push(null); continue; }
-    if ((!open && a.loadOp !== 'load') || a.storeOp !== 'store' || a.resolveTarget) return null;
-    V.push(a.view); dim = dim || GPU_VDIM.get(a.view);
-  }
-  const d = desc.depthStencilAttachment;
-  if (d) {
-    if ((!open && ((d.depthLoadOp && d.depthLoadOp !== 'load') || (d.stencilLoadOp && d.stencilLoadOp !== 'load'))) || (d.depthStoreOp && d.depthStoreOp !== 'store') || (d.stencilStoreOp && d.stencilStoreOp !== 'store')) return null;
-    V.push(d.view, !!d.depthReadOnly, !!d.stencilReadOnly); dim = dim || GPU_VDIM.get(d.view);
-  } else V.push(0);
-  return dim ? { V, w: dim.w, h: dim.h } : null;
-}
-// a render pass on desc's targets (key: which part's - ?gpuoff, the hang recorder); the open one gone on in when it's on the same targets
+function gpuPassEnd() { if (FR.pass) { FR.pass.end(); FR.pass = null; FR.pk = null; } }
+// a render pass on desc's targets (key: which targets, so draws to the same ones keep it open)
 function gpuPassBegin(desc, key, uses) {
-  if (gpuOffKey(key)) { gpuPassClose(); return GPU_NOPASS; }
-  FR.pg++;
-  const sig = GT.on || (typeof GPUT !== 'undefined' && GPUT.cur) ? null : gpuPassSig(desc), o = FR.pd;
-  if (FR.pass && sig && o && sig.V.length === o.V.length && sig.V.every((v, i) => v === o.V[i])) {
-    if (uses) for (const t of uses) if (t) t.use = FR.sub;
-    const p = FR.pass; FR.pk = key;
-    p.setViewport(0, 0, sig.w, sig.h, 0, 1); p.setScissorRect(0, 0, sig.w, sig.h); p.setStencilReference(0); p.setBlendConstant([0, 0, 0, 0]);
-    GPU.stats.shared = (GPU.stats.shared || 0) + 1;
-    return p;
-  }
-  gpuPassClose();
+  gpuPassEnd();
+  if (gpuOffKey(key)) return GPU_NOPASS;
   if (GT.on) gtMark(key);
   if (uses) for (const t of uses) if (t) t.use = FR.sub;   // (what the pass writes or reads: in use by the pending submit - a later write to it is staged)
   if (GPU.feat['timestamp-query'] && FR.qn + 2 <= FR.QMAX) {
     if (!FR.qs || FR.qs.ep !== GPU.ep) { FR.qs = GPU.dev.createQuerySet({ type: 'timestamp', count: FR.QMAX }); FR.qs.ep = GPU.ep; }
     desc.timestampWrites = { querySet: FR.qs, beginningOfPassWriteIndex: FR.qn, endOfPassWriteIndex: FR.qn + 1 }; FR.qn += 2;
   }
-  FR.pass = gpuEnc().beginRenderPass(desc); FR.pk = key; FR.pd = sig || (GT.on ? null : gpuPassSig(desc, true)); GPU.stats.passes++; if (key !== 'present') FR.work++;
+  FR.pass = gpuEnc().beginRenderPass(desc); FR.pk = key; GPU.stats.passes++; if (key !== 'present') FR.work++;
   return FR.pass;
 }
 // a compute pass in the frame's encoder, after whatever was recorded (the open render pass ended first); the caller ends it
 // (cp.end()). uses: the buffers / textures it writes or reads, marked in use by the pending submit
 function gpuComputeBegin(uses, key) {
-  gpuPassClose();
+  gpuPassEnd();
   if (gpuOffKey(key)) return GPU_NOPASS;
   if (GT.on) gtMark(key);
   if (uses) for (const t of uses) if (t) t.use = FR.sub;
@@ -1778,20 +1750,20 @@ function gpuComputeBegin(uses, key) {
 }
 // copies recorded in the frame's encoder, in order with its passes (the open render pass ended first). Arguments are the layer's
 // buffer / texture records ({ gb } / { gt } from gpuBuf / gpuTex) or the arena's chunks ({ gb })
-function gpuCopyBuf(src, so, dst, dof, n) { gpuPassClose(); dst.use = FR.sub; if (src.use !== undefined) src.use = FR.sub; gpuEnc().copyBufferToBuffer(src.gb, so, dst.gb, dof, n); }
-function gpuCopyBufTex(src, so, bpr, dst, x, y, w, h, z) { gpuPassClose(); dst.use = FR.sub; gpuEnc().copyBufferToTexture({ buffer: src.gb, offset: so, bytesPerRow: bpr }, { texture: dst.gt, origin: { x, y, z: z || 0 } }, { width: w, height: h }); }   // (z: the layer of an array texture)
+function gpuCopyBuf(src, so, dst, dof, n) { gpuPassEnd(); dst.use = FR.sub; if (src.use !== undefined) src.use = FR.sub; gpuEnc().copyBufferToBuffer(src.gb, so, dst.gb, dof, n); }
+function gpuCopyBufTex(src, so, bpr, dst, x, y, w, h, z) { gpuPassEnd(); dst.use = FR.sub; gpuEnc().copyBufferToTexture({ buffer: src.gb, offset: so, bytesPerRow: bpr }, { texture: dst.gt, origin: { x, y, z: z || 0 } }, { width: w, height: h }); }   // (z: the layer of an array texture)
 // a texture's rectangle copied into another of the same format (layer records { gt } from gpuTex), in order with the passes - a part's
 // snapshot of what's been drawn (the water's distortion, the light's lamps under the tint) without a draw; rows as they are in both
 function gpuCopyTex(src, sx, sy, dst, dx, dy, w, h) {
   if (!(w > 0 && h > 0) || !src.gt || !dst.gt) return;
-  gpuPassClose(); src.use = FR.sub; dst.use = FR.sub; GPU.stats.copies++;
+  gpuPassEnd(); src.use = FR.sub; dst.use = FR.sub; GPU.stats.copies++;
   gpuEnc().copyTextureToTexture({ texture: src.gt, origin: { x: sx, y: sy } }, { texture: dst.gt, origin: { x: dx, y: dy } }, { width: w, height: h });
 }
 // send what's recorded
 function gpuSubmit() {
   if (!GPU.dev) return;
   const PR = typeof window !== 'undefined' && window.__gpuProf, t0 = PR ? gpuPT() : 0;
-  gpuPassClose();
+  gpuPassEnd();
   arenaSend();
   const R = FR.wait; FR.wait = [];
   if (FR.enc) { if (GT.on) gtSubmit(); else { GPU.dev.queue.submit([FR.enc.finish()]); FR.enc = null; GPU.stats.submits++; } }
@@ -1809,7 +1781,7 @@ function gpuFrameEnd(screen) {
   if (screen && screen.gt) gpuPresent(screen);
   if (FR.qn && FR.qs) {
     const n = FR.qn, enc = gpuEnc(), marks = FR.marks; FR.marks = null;
-    gpuPassClose();
+    gpuPassEnd();
     const rb = GPU.dev.createBuffer({ size: n * 8, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
     const mb = GPU.dev.createBuffer({ size: n * 8, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     enc.resolveQuerySet(FR.qs, 0, n, rb, 0); enc.copyBufferToBuffer(rb, 0, mb, 0, n * 8);
@@ -1829,7 +1801,7 @@ function gpuFrameEnd(screen) {
   FR.frame++;
 }
 // after a device loss: nothing recorded survives
-function gpuFrameReset() { FR.enc = null; FR.pass = null; FR.pk = null; FR.pd = null; FR.qs = null; FR.qn = 0; FR.wait = []; FR.reads.clear(); FR.present = null; ARENA.chunks = []; ARENA.cur = ARENA.off = 0; GPU_SAMP.clear(); GPU_TRASH.length = 0; }
+function gpuFrameReset() { FR.enc = null; FR.pass = null; FR.pk = null; FR.qs = null; FR.qn = 0; FR.wait = []; FR.reads.clear(); FR.present = null; ARENA.chunks = []; ARENA.cur = ARENA.off = 0; GPU_SAMP.clear(); GPU_TRASH.length = 0; }
 
 /* ---- the screen shown: its texture (rows bottom-up, as WebGL's) turned over onto the canvas, every pixel as it is ---- */
 const GPU_PRESENT_WGSL = `
@@ -1847,7 +1819,7 @@ function gpuPresent(screen) {
   if (cur.width !== screen.w || cur.height !== screen.h) return;   // (the canvas sized again since: the next frame shows it)
   const pass = gpuPassBegin({ colorAttachments: [{ view: cur.createView(), loadOp: 'clear', clearValue: [0, 0, 0, 1], storeOp: 'store' }] }, 'present');
   pass.setPipeline(P.pipe); pass.setBindGroup(0, P.bg); pass.draw(3);
-  gpuPassClose();
+  gpuPassEnd();
   screen.use = FR.sub;
 }
 
@@ -1861,7 +1833,7 @@ function gpuRead(t, x, y, w, h, key) {
     R.busy = true;
     const bpp = GPU_BPP[t.fmt] || 4, bpr = Math.ceil(w * bpp / 256) * 256;
     const mb = GPU.dev.createBuffer({ size: bpr * h, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-    gpuPassClose();
+    gpuPassEnd();
     gpuEnc().copyTextureToBuffer({ texture: t.gt, origin: [x, y] }, { buffer: mb, bytesPerRow: bpr, rowsPerImage: h }, [w, h]);
     t.use = FR.sub; GPU.stats.copies++;
     const fr = FR.frame;
@@ -1884,7 +1856,7 @@ function gpuReadBuf(b, off, n, key) {
   if (!R.busy && b.gb && n > 0) {
     R.busy = true;
     const mb = GPU.dev.createBuffer({ size: n, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-    gpuPassClose();
+    gpuPassEnd();
     gpuEnc().copyBufferToBuffer(b.gb, off, mb, 0, n);
     if (b.use !== undefined) b.use = FR.sub; GPU.stats.copies++;
     const fr = FR.frame;
@@ -2122,7 +2094,7 @@ class GPUGL {
   bufferSubData(tg, dst, d, so, len) {
     const b = tg === GLK.ARRAY_BUFFER ? this.arrayBuf : this.binds[tg]; if (!b) return;
     const es = d.BYTES_PER_ELEMENT || 1, off = (so || 0) * es, n = len !== undefined ? len * es : d.byteLength - off;
-    gpuBufReady(b); gpuPassClose();
+    gpuBufReady(b); gpuPassEnd();
     const [c, o] = arenaAlloc(Math.max(4, n), 256); c.cpu.set(new Uint8Array(d.buffer, d.byteOffset + off, n), o);
     gpuEnc().copyBufferToBuffer(c.gb, o, b.own.gb, dst, Math.ceil(n / 4) * 4);
     b.own.use = FR.sub; b.back = b.own.gb; b.boff = 0; b.bsub = Infinity; b.cpu = null;
@@ -2130,7 +2102,7 @@ class GPUGL {
   copyBufferSubData(rt, wt, ro, wo, n) {
     const r = this.binds[rt], w = this.binds[wt]; if (!r || !w) return;
     gpuBufReady(r); gpuBufReady(w);
-    gpuPassClose();
+    gpuPassEnd();
     gpuEnc().copyBufferToBuffer(r.back, r.boff + ro, w.own.gb, wo, n);
     r.own && (r.own.use = FR.sub); w.own.use = FR.sub; GPU.stats.copies++;
   }
@@ -2208,7 +2180,7 @@ class GPUGL {
     const R = gpuGLTargets(this, this.readFb), W = gpuGLTargets(this, this.drawFb); if (!R || !W || !R.col[0] || !W.col[0]) return;
     const w = sx1 - sx0, h = sy1 - sy0;
     if (w !== dx1 - dx0 || h !== dy1 - dy0 || w <= 0 || h <= 0) { console.warn('GPU: a scaled blit'); return; }
-    gpuPassClose();
+    gpuPassEnd();
     gpuEnc().copyTextureToTexture({ texture: R.col[0].gt, origin: [sx0, sy0] }, { texture: W.col[0].gt, origin: [dx0, dy0] }, [w, h]);
     R.col[0].use = W.col[0].use = FR.sub; GPU.stats.copies++;
   }
@@ -2267,7 +2239,7 @@ function gpuTexWrite(t, x, y, w, h, u8, off, bpr) {
     const [c, co] = arenaAlloc(rb * h, 256); gb = c.gb; o = co;
     for (let r = 0; r < h; r++) c.cpu.set(u8.subarray(off + r * bpr, off + r * bpr + w * bpp), o + r * rb);
   }
-  gpuPassClose();
+  gpuPassEnd();
   gpuEnc().copyBufferToTexture({ buffer: gb, offset: o, bytesPerRow: rb, rowsPerImage: h }, { texture: t.gt, origin: [x, y] }, [w, h]);
   t.use = FR.sub; GPU.stats.copies++;
 }
@@ -2281,7 +2253,7 @@ function gpuTexFromSource(t, src, x, y, w, h, pm, fy) {
     if (t.use !== FR.sub) { cp(t.gt, x, y); return; }
     // (the texture is in this submit's commands: the picture goes into a staging texture first, then copied in order)
     const S = gpuTex(w, h, t.fmt, 'staging'); cp(S.gt, 0, 0);
-    gpuPassClose();
+    gpuPassEnd();
     gpuEnc().copyTextureToTexture({ texture: S.gt }, { texture: t.gt, origin: [x, y] }, [w, h]);
     t.use = FR.sub; GPU.stats.copies++;
     gpuTexFree(S);
@@ -2639,7 +2611,7 @@ function gpuGLTransformFeedback(gl, p, first, count) {
   const E = [{ binding: B, resource: { buffer: pc.gb, offset: po, size: P.byteLength } }, { binding: B + 1, resource: { buffer: out.b.own.gb, offset: out.off, size: out.size > 0 ? out.size : out.b.own.size - out.off } }];
   bufs.forEach((b, k) => E.push({ binding: B + 2 + k, resource: b ? { buffer: b.back, offset: b.boff } : { buffer: z.gb } }));
   const bg = gpuGLBindGroup(gl, p, null, { E });
-  gpuPassClose();
+  gpuPassEnd();
   if (GT.on) gtMark('glxf');
   const cp = gpuEnc().beginComputePass(); FR.work++;
   cp.setPipeline(p.cpipe);
@@ -2833,6 +2805,247 @@ function hudShow() {
   const H = FRAME.hud; if (!H || !GPU.on || GPU.lost) return;
   gpuCanvasShow(H);
   gpuSubmit(); FR.work = 0;
+}
+
+/* ================================================================
+   src/gpu/60-draw.js - A PART'S OWN DRAW INTO A CONTEXT'S TARGET (the skeleton tidy, Nov 11): the one begin / pass / end every
+   part's native draw between the old code's draws goes through - the sky's (sky/12-draw.js), the smoke's (the middle sea and the rain's
+   layer, 40-zzz-gpu8.js; the fire, 46-smoke-fire-draw.js; the pixel layers, 40-zzzz-layers.js), a picture laid (frameLay, below) and
+   the rectangles (frameRects, 61-rects.js). Was the sky's skdBegin / skdRun and the smoke's fxBegin / fxColour / fxStencil / fxKey /
+   fxPass, two copies of the same steps.
+     frameDrawBegin(ctx, clear)  the context's batch so far recorded and its clip built into the target's stencil (glBegin, as a fillRect
+                                 here would), its GL batch sent (glFlush); back X = { T (frameTarget), ds (the stencil its clip is in, or
+                                 none), sc (the scissor: the context's, its start and end inside the target, in the target's rows -
+                                 WebGL's order), op (the context's blend), screen, clear } - or null: nothing to draw (the scissor leaves
+                                 nothing, no target, a clip with no stencil). clear: the target is cleared by the pass (a sky deck's layer)
+                                 - no clip, no scissor
+     frameDrawColour(X, op)      a pipeline's colour target in blend op (the context's when none: GLB's factors; the screen keeps its
+                                 alpha - WebGL's had none)
+     frameDrawStencil(X)         a pipeline's stencil test for the clip (where the stencil's top bit is set, as glApplyState's test) - {} with none
+     frameDrawKey(X, op)         what a pipeline depends on: the blend, the target's format, the stencil's, the screen
+     frameDrawPass(X, key)       the pass on the target, after everything drawn into it so far, its scissor and stencil reference set. A
+                                 pass of the same key still open on the same target and stencil (nothing recorded since) is kept - one
+                                 pass for a run of draws (the sky's); the caller ends it (gpuPassEnd) when it wants it ended
+   ================================================================ */
+const FDRAW = { pass: null, tex: null, ds: null, key: null };
+function frameDrawBegin(ctx, clear) {
+  const s = ctx.s, t = ctx.target;
+  if (!clear) glBegin(ctx, s.op);
+  glFlush();
+  const T = frameTarget(ctx); if (!T || !T.tex || !T.tex.gt) return null;
+  const clip = !!s.clip && !clear, ds = clip ? T.stencil : null;   // (a clip that isn't an upright rectangle is in the target's stencil)
+  if (clip && !ds) { GPU.nerr++; if (GPU.err.length < 50) GPU.err.push('frameDrawBegin: a clip with no stencil to test'); return null; }
+  let x0 = 0, y0 = 0, x1 = T.w, y1 = T.h;
+  if (s.sc && !clear) { const c = s.sc, gy = t._h - c[1] - c[3]; x0 = clamp(c[0], 0, T.w); x1 = clamp(c[0] + c[2], 0, T.w); y0 = clamp(gy, 0, T.h); y1 = clamp(gy + c[3], 0, T.h); }
+  if (x1 <= x0 || y1 <= y0) return null;
+  return { T, ds, sc: [x0, y0, x1 - x0, y1 - y0], op: s.op, screen: !!t.isScreen, clear: !!clear };
+}
+function frameDrawColour(X, op) {
+  const b = GLB[op || X.op] || GLB['source-over'];
+  return { format: X.T.tex.fmt, writeMask: X.screen ? 7 : 15, blend: { color: { srcFactor: GLBF[b[0]], dstFactor: GLBF[b[1]], operation: 'add' }, alpha: { srcFactor: GLBF[b[2]], dstFactor: GLBF[b[3]], operation: 'add' } } };
+}
+function frameDrawStencil(X) {
+  const ds = X.ds; if (!ds) return {};
+  const face = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
+  return { depthStencil: { format: ds.fmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: face, stencilBack: face, stencilReadMask: 0x80, stencilWriteMask: 0 } };
+}
+const frameDrawKey = (X, op) => (op || X.op) + '|' + X.T.tex.fmt + '|' + (X.ds ? X.ds.fmt : '') + '|' + (X.screen ? 1 : 0);
+function frameDrawPass(X, key) {
+  const D = FDRAW, tex = X.T.tex, ds = X.ds;
+  if (X.clear || !FR.pass || FR.pass !== D.pass || D.tex !== tex || D.ds !== ds || D.key !== key) {
+    const desc = { colorAttachments: [{ view: tex.view, loadOp: X.clear ? 'clear' : 'load', clearValue: [0, 0, 0, 0], storeOp: 'store' }] };
+    if (ds) desc.depthStencilAttachment = Object.assign({ view: ds.view, stencilReadOnly: true }, gpuHasDepth(ds.fmt) ? { depthReadOnly: true } : {});
+    D.pass = gpuPassBegin(desc, key, [tex, ds]); D.tex = tex; D.ds = ds; D.key = key;
+  }
+  const pass = D.pass;
+  pass.setScissorRect(X.sc[0], X.sc[1], X.sc[2], X.sc[3]);
+  if (ds) pass.setStencilReference(0x80);
+  return pass;
+}
+/* ---- A PICTURE LAID INTO A CONTEXT (the smoke's, sky/21-smoke.js smLay; the rain's layer, 40-zzz-gpu8.js; the kraken, 50-land-kraken-gpu.js;
+   the debris' kept tiles, 40-zzzz-world-tiles.js; the burning ships' cut, 47-render-overlays.js): one quad at the context's place (its
+   transform - glCorners' corners), each pixel the picture's texel under it (nearest), in the context's blend, scissor and clip, times its
+   alpha (as glAlpha gives it). The picture: tex (a gpuTex), its region from (sx, sy), sw x sh texels; ph > 0: its rows in WebGL's order,
+   ph high (a texel row ph - 1 - y); 0: rows from the top. (Was the smoke part's fxLay / fxLayer, 40-zzzz-layers.js) ---- */
+const FLAY_WGSL = `
+struct LD { a: vec4f, q: array<vec4f, 2>, o: vec4i, g: vec4f };
+@group(0) @binding(0) var<storage, read> ld: LD;
+@group(0) @binding(1) var pic: texture_2d<f32>;
+struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f };
+@vertex fn vs(@builtin(vertex_index) v: u32) -> VO {
+  let k = select(select(select(3u, 2u, v == 4u), 0u, v == 3u), v, v < 3u);   // (the triangles 0 1 2 and 0 2 3)
+  let c = ld.q[k >> 1u]; let a_pos = select(c.xy, c.zw, (k & 1u) == 1u);
+  let p = a_pos / ld.a.xy;
+  var g = vec4f(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+  g.y = -g.y; g.z = (g.z + g.w) * 0.5;   // (rows in WebGL's order, z 0..w - as every vertex stage of the game: src/gpu/10-glsl.js)
+  var o: VO; o.p = g; o.uv = vec2f(select(0.0, ld.a.z, k == 1u || k == 2u), select(0.0, ld.a.w, k >= 2u)); return o;
+}
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let c = clamp(vec2i(floor(i.uv)), vec2i(0), vec2i(ld.a.zw) - 1);
+  let y = ld.o.y + c.y;
+  return textureLoad(pic, vec2i(ld.o.x + c.x, select(y, ld.o.z - 1 - y, ld.o.z > 0)), 0) * ld.g.x;
+}`;
+const FLAY = { ep: -1, pipes: new Map() };
+// (does a clear texel - 0 0 0 0 - leave the target as it was in this blend? Its colour and alpha factors on the target are 1 for a clear source)
+const frameClearKeeps = op => { const b = GLB[op] || GLB['source-over'], one = f => f === 'one' || f === 'one-minus-src' || f === 'one-minus-src-alpha'; return one(GLBF[b[1]]) && one(GLBF[b[3]]); };
+// box (optional): the picture's texels [x0, y0, x1, y1] (inclusive, rows from the top of its region) outside which every texel is clear. When a
+// clear texel leaves the target as it was (frameClearKeeps) and the context is upright, the pass's scissor is cut to the pixels whose texel can lie
+// in it (a pixel's margin each side for the sums' rounding): the same pixels drawn, none of the ones that would add nothing
+function frameLay(c, tex, sx, sy, sw, sh, ph, dx, dy, dw, dh, box) {
+  const X = frameDrawBegin(c); if (!X) return;
+  if (FLAY.ep !== GPU.ep) {
+    const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
+    FLAY.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: 96 } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }], 'lay');
+    FLAY.m = gpuModule(FLAY_WGSL, 'lay'); FLAY.pl = gpuPipeLayout([FLAY.bl], 'lay'); FLAY.pipes.clear(); FLAY.ep = GPU.ep;
+  }
+  const t = c.target, s = c.s, [ch, off] = arenaAlloc(96, 256), w0 = off >> 2, Wd = arenaWords(ch), Fl = Wd.f, I = Wd.i;
+  glCorners(s.m, dx, dy, dw, dh);
+  const X4 = GLC4.x, Y4 = GLC4.y;
+  if (box && s.m[1] === 0 && s.m[2] === 0 && frameClearKeeps(X.op)) {
+    const kx = (X4[1] - X4[0]) / sw, ky = (Y4[2] - Y4[1]) / sh;
+    const xa = X4[0] + box[0] * kx, xb = X4[0] + (box[2] + 1) * kx, ya = Y4[0] + box[1] * ky, yb = Y4[0] + (box[3] + 1) * ky;
+    const px0 = Math.floor(Math.min(xa, xb)) - 1, px1 = Math.ceil(Math.max(xa, xb)) + 1, py0 = t._h - (Math.ceil(Math.max(ya, yb)) + 1), py1 = t._h - (Math.floor(Math.min(ya, yb)) - 1);   // (rows: WebGL's, as the scissor's - frameDrawBegin)
+    const S = X.sc, x0 = Math.max(S[0], px0), x1 = Math.min(S[0] + S[2], px1), y0 = Math.max(S[1], py0), y1 = Math.min(S[1] + S[3], py1);
+    if (!(x1 > x0 && y1 > y0)) return;
+    X.sc = [x0, y0, x1 - x0, y1 - y0];
+  }
+  Fl[w0] = t._w; Fl[w0 + 1] = t._h; Fl[w0 + 2] = sw; Fl[w0 + 3] = sh;
+  for (let q = 0; q < 4; q++) { Fl[w0 + 4 + q * 2] = X4[q]; Fl[w0 + 5 + q * 2] = Y4[q]; }
+  I[w0 + 12] = sx; I[w0 + 13] = sy; I[w0 + 14] = ph; I[w0 + 15] = 0;
+  Fl[w0 + 16] = Math.fround(Math.round(s.ga * 255) / 255); Fl[w0 + 17] = Fl[w0 + 18] = Fl[w0 + 19] = 0;   // (the context's alpha, as glAlpha gives it)
+  const key = frameDrawKey(X);
+  let pipe = FLAY.pipes.get(key);
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FLAY.pl, vertex: { module: FLAY.m, entryPoint: 'vs' }, fragment: { module: FLAY.m, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, frameDrawStencil(X))); FLAY.pipes.set(key, pipe); }
+  // (its bind group for this arena chunk, kept on the picture: made again when the chunk's buffer or the device is new)
+  const bm = tex.fxl || (tex.fxl = new Map()); let e = bm.get(ch.id);
+  if (!e || e.gb !== ch.gb || e.ep !== FLAY.ep) { e = { gb: ch.gb, ep: FLAY.ep, g: gpuBindGroup(FLAY.bl, [{ binding: 0, resource: { buffer: ch.gb, offset: 0, size: 96 } }, { binding: 1, resource: tex.view }], 'lay') }; bm.set(ch.id, e); }
+  const pass = frameDrawPass(X, 'lay');
+  pass.setPipeline(pipe); pass.setBindGroup(0, e.g, [off]); pass.draw(6);
+  gpuPassEnd(); tex.use = FR.sub;
+  GLR.stats.draws++;
+}
+// a layer (a GLTarget - makeLayer) laid into context c the same way: its pixels sx, sy, sw x sh (rows from its top) over dx, dy, dw, dh of the
+// context's units - its texture's rows in WebGL's order (as the GL front kept a layer's)
+function frameLayTarget(c, L, sx, sy, sw, sh, dx, dy, dw, dh) {
+  const T = frameTarget(L.getContext('2d')); if (!T || !T.tex) return;
+  frameLay(c, T.tex, sx, sy, sw, sh, T.h, dx, dy, dw, dh);
+}
+
+/* ================================================================
+   src/gpu/61-rects.js - THE RECTANGLES (the skeleton tidy, Nov 11): the one way a part lays rectangles of a colour - or of a colour going
+   to another down each one, or of a gradient down the draw - into a context's target, natively, between the old code's draws. Was four
+   systems: the ground's blocks (gbRect, 50-land-zz-blocks.js), the sky's plain fills (skdRects / skdVGrad, sky/12-draw.js), the smoke
+   part's painted blocks (PAINT_L, a pixel layer of rectangles - 40-zzzz-layers.js pxPaint) and the far sea's (the water's - see below).
+     frameRectList()            a list a part fills (its own: a part's rectangles never wait in another's), grown in steps, never shrunk:
+       .rect(x, y, w, h, col, a = 1, col2, a2)   one more, in the context's units; col 0-255, a 0-1 (col2 / a2: at its foot - the colour
+                                                 goes from one to the other down it; none: the same); premultiplied as col / 255 x a
+       .pm(x, y, w, h, r, g, b, a)               one more of a colour already premultiplied (0-1)
+       .n                                        how many (0: an empty list)
+     frameRects(ctx, list, opts)  the list laid into the context and emptied, in its order, each as fillRect lays one: the context's
+                                 transform (upright - scale and offset: the world's and the sky's contexts never turn), its clip (the
+                                 target's stencil, built as the GL front builds it) and its scissor. opts:
+       op    the blend (GLB's names: 'source-over', 'source-atop', 'lighter', ...); none: the context's
+       key   the pass's name (?gpuoff=, ?gputrace=: the part's - 'ground:blocks', 'gsky:draw', 'px'); none: 'rects'
+       grad  { y0, y1, stops: [[at 0..1, [r, g, b] 0-255, alpha], ...] (8 at most) } - every rectangle of the draw coloured by the
+             gradient from row y0 to row y1 of the context's space, as createLinearGradient(0, y0, 0, y1) fills it (mixed straight, then
+             premultiplied), not by its own colours
+     frameGrad(ctx, x, y, w, h, y0, y1, stops, opts)   one rectangle of a gradient (frameRects with grad)
+   The global alpha is the caller's (in the colours it gives). A colour that is the same at the rectangle's top and foot is read as it is
+   (no interpolation); one that changes is interpolated down it. The numbers go in the frame's arena; the pass is frameDrawPass's (60-draw.js).
+   NOT HERE (each says why where it is): the water's far sea (40-zz-water-gpu.js waterRects - its gradients are the GL front's ramp rows,
+   across or down, some laid 'lighter' among the others in one ordered list); the light table's kind 10 (47-zz-light-pass.js - a row among
+   the light's other rows of one ordered draw); thingsBlock (45-zz-things-gpu.js - a quad of the things' pass: any transform, its order
+   written, in the pass's one batch)
+   ================================================================ */
+const FRECT = { ep: -1, mod: null, bl: null, pl: null, pipes: new Map(), MAX: 65536, HB: 304, h: new Float32Array(76) };
+const FRECT_WGSL = `
+// the draw: the target's width and height | the context's transform (sx, sy, ox, oy) | the gradient's rows y0, y1 on the target (from the
+// top), its stops (0: none) | stop k: its place (st[2k].x), its colour straight (st[2k + 1])
+struct H { tgt: vec4f, m: vec4f, g: vec4f, st: array<vec4f, 16> };
+@group(0) @binding(0) var<storage, read> h: H;
+// a rectangle: x, y, w, h in the context's space | its colour at its top, premultiplied | at its foot
+@group(0) @binding(1) var<storage, read> R: array<vec4f>;
+struct VO { @builtin(position) p: vec4f, @location(0) c: vec4f, @location(1) @interpolate(flat) n: u32 };
+@vertex fn vs(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
+  let r = R[n * 3u]; let k = vec2f(f32(v & 1u), f32(v >> 1u));
+  let q = h.m.xy * (r.xy + k * r.zw) + h.m.zw;
+  var o: VO; o.p = vec4f(q.x / h.tgt.x * 2.0 - 1.0, q.y / h.tgt.y * 2.0 - 1.0, 0.0, 1.0);   // (the target's rows: WebGL's, bottom up - src/gpu/10-glsl.js)
+  o.c = mix(R[n * 3u + 1u], R[n * 3u + 2u], k.y); o.n = n;
+  return o;
+}
+@fragment fn fs(i: VO) -> @location(0) vec4f {
+  let g = h.g; let ns = i32(g.z);
+  if (ns > 0) {
+    let y = h.tgt.y - i.p.y;
+    let t = clamp((y - g.x) / select(1e-6, g.y - g.x, abs(g.y - g.x) > 1e-6), 0.0, 1.0);
+    var c = h.st[1];
+    for (var k = 1; k < 8; k++) {
+      if (k >= ns) { break; }
+      let a = h.st[2 * (k - 1)].x; let b = h.st[2 * k].x;
+      if (t >= b) { c = h.st[2 * k + 1]; } else { if (t > a) { c = mix(h.st[2 * (k - 1) + 1], h.st[2 * k + 1], (t - a) / max(1e-6, b - a)); } break; }
+    }
+    return vec4f(c.rgb * c.a, c.a);
+  }
+  let a = R[i.n * 3u + 1u];
+  if (all(a == R[i.n * 3u + 2u])) { return a; }
+  return i.c;
+}`;
+function frameRectList() {
+  return {
+    f: new Float32Array(12 * 256), n: 0,
+    room() { if ((this.n + 1) * 12 > this.f.length) { const g = new Float32Array(this.f.length * 2); g.set(this.f); this.f = g; } return this.n++ * 12; },
+    rect(x, y, w, h, col, a = 1, col2, a2) {
+      if (!(w > 0 && h > 0)) return;
+      const o = this.room(), f = this.f, c2 = col2 || col, b = a2 == null ? a : a2;
+      f[o] = x; f[o + 1] = y; f[o + 2] = w; f[o + 3] = h;
+      f[o + 4] = col[0] / 255 * a; f[o + 5] = col[1] / 255 * a; f[o + 6] = col[2] / 255 * a; f[o + 7] = a;
+      f[o + 8] = c2[0] / 255 * b; f[o + 9] = c2[1] / 255 * b; f[o + 10] = c2[2] / 255 * b; f[o + 11] = b;
+    },
+    pm(x, y, w, h, r, g, b, a) {
+      if (!(w > 0 && h > 0)) return;
+      const o = this.room(), f = this.f;
+      f[o] = x; f[o + 1] = y; f[o + 2] = w; f[o + 3] = h;
+      f[o + 4] = f[o + 8] = r; f[o + 5] = f[o + 9] = g; f[o + 6] = f[o + 10] = b; f[o + 7] = f[o + 11] = a;
+    },
+  };
+}
+function frameRectsReady() {
+  if (FRECT.ep === GPU.ep && FRECT.mod) return true;
+  const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, ro = { type: 'read-only-storage' };
+  FRECT.mod = gpuModule(FRECT_WGSL, 'rects');
+  FRECT.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: ro }, { binding: 1, visibility: VF, buffer: ro }], 'rects');
+  FRECT.pl = gpuPipeLayout([FRECT.bl], 'rects'); FRECT.pipes.clear(); FRECT.ep = GPU.ep;
+  return true;
+}
+function frameRects(ctx, L, opts) {
+  const n = L.n; L.n = 0;
+  if (!n || !gpuAlive() || GLR.lost || !ctx || !ctx.s) return;
+  const X = frameDrawBegin(ctx); if (!X || !frameRectsReady()) return;
+  const o = opts || {}, op = o.op || X.op, m = ctx.s.m, G = o.grad, H = FRECT.h;
+  H.fill(0); H[0] = X.T.w; H[1] = X.T.h; H[4] = m[0]; H[5] = m[3]; H[6] = m[4]; H[7] = m[5];
+  if (G && G.stops.length) {
+    const k = Math.min(8, G.stops.length);
+    H[8] = m[3] * G.y0 + m[5]; H[9] = m[3] * G.y1 + m[5]; H[10] = k;
+    for (let i = 0; i < k; i++) { const [t, c, a] = G.stops[i], q = 12 + i * 8; H[q] = t; H[q + 4] = c[0] / 255; H[q + 5] = c[1] / 255; H[q + 6] = c[2] / 255; H[q + 7] = a; }
+  }
+  const key = frameDrawKey(X, op);
+  let pipe = FRECT.pipes.get(key);
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FRECT.pl, label: 'rects', vertex: { module: FRECT.mod, entryPoint: 'vs' }, fragment: { module: FRECT.mod, entryPoint: 'fs', targets: [frameDrawColour(X, op)] }, primitive: { topology: 'triangle-strip' } }, frameDrawStencil(X))); FRECT.pipes.set(key, pipe); }
+  const [hc, ho] = arenaAlloc(FRECT.HB, 256); hc.cpu.set(new Uint8Array(H.buffer), ho);
+  const pass = frameDrawPass(X, o.key || 'rects');
+  pass.setPipeline(pipe);
+  for (let i0 = 0; i0 < n; i0 += FRECT.MAX) {
+    const k = Math.min(FRECT.MAX, n - i0), nb = k * 48, [rc, ro] = arenaAlloc(nb, 256);
+    rc.cpu.set(new Uint8Array(L.f.buffer, i0 * 48, nb), ro);
+    pass.setBindGroup(0, gpuBindGroup(FRECT.bl, [{ binding: 0, resource: { buffer: hc.gb, offset: ho, size: FRECT.HB } }, { binding: 1, resource: { buffer: rc.gb, offset: ro, size: nb } }], 'rects'));
+    pass.draw(4, k); GPU.stats.draws++;
+  }
+}
+const FRECT_G = frameRectList();
+function frameGrad(ctx, x, y, w, h, y0, y1, stops, opts) {
+  if (!(w > 0 && h > 0) || !stops.length) return;
+  FRECT_G.n = 0; FRECT_G.pm(x, y, w, h, 0, 0, 0, 0);
+  frameRects(ctx, FRECT_G, Object.assign({}, opts, { grad: { y0, y1, stops } }));
 }
 
 const GPU_OK = await gpuBoot();
@@ -8072,7 +8285,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 11 03:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 11 04:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -23120,11 +23333,11 @@ const GPUT = { want: false, ext: null, tried: false, ep: -1, cur: null, segs: nu
 function gptBegin() {
   GPUT.cur = null; GPUT.segs = null;
   if (!(GPUT.want || ui.perfPanel) || !GPU.on || !GPU.feat['timestamp-query']) return;
-  GPUT.tried = true; GPUT.ext = {}; GPUT.cur = 1; gpuPassClose(); GPUT.segs = [{ k: '', top: 1, q: FR.qn }];
+  GPUT.tried = true; GPUT.ext = {}; GPUT.cur = 1; gpuPassEnd(); GPUT.segs = [{ k: '', top: 1, q: FR.qn }];
 }
 // a part's lap: k its name, top 1 for a part (48-render.js), 0 for a sub-part - the passes since the last lap are its
-function gptLap(k, top) { glFlush(); gpuPassClose(); GPUT.segs.push({ k, top, q: FR.qn }); }
-function gptEnd() { glFlush(); gpuPassClose(); GPUT.segs.push({ k: 'rest', top: 1, q: FR.qn }); FR.marks = GPUT.segs; GPUT.cur = null; GPUT.segs = null; }
+function gptLap(k, top) { glFlush(); gpuPassEnd(); GPUT.segs.push({ k, top, q: FR.qn }); }
+function gptEnd() { glFlush(); gpuPassEnd(); GPUT.segs.push({ k: 'rest', top: 1, q: FR.qn }); FR.marks = GPUT.segs; GPUT.cur = null; GPUT.segs = null; }
 // a frame's pass times (D[j]: pass j's ms, by its timestamps' place 2j) and its marks: each part's ms into the averages, as before
 function gptTimes(S, marks) {
   const T = {}, N = S.length, at = q => S[Math.min(q, N - 1)];
@@ -25460,8 +25673,8 @@ function waterRects() {
       rise: two blends, so two draws). The same formulas in the same order.
    2. THE RAIN'S STREAKS (drawRainStreaks, 47-render-overlays.js): JS keeps each drop's head, slant, length and where it stops (the
       same doubles as before) - 8 numbers a drop - and one instanced draw writes the cells into a kept layer of the same cells (no
-      blending: the last drop over a cell wins, as in the old buffer), which is laid on the view (fxLay, 40-zzzz-layers.js).
-   Both into the context's target with its blend, scissor and clip (fxBegin / fxColour / fxStencil / fxPass); their numbers in the
+      blending: the last drop over a cell wins, as in the old buffer), which is laid on the view (frameLay, src/gpu/60-draw.js).
+   Both into the context's target with its blend, scissor and clip (frameDrawBegin / frameDrawColour / frameDrawStencil / frameDrawPass - src/gpu/60-draw.js); their numbers in the
    frame's arena; nothing submitted mid-frame.
    ================================================================ */
 const G8 = { ep: -1, ms: new Map(), rn: null, rT: null, bg: new Map() };
@@ -25574,7 +25787,7 @@ function g8Ramp(stops, F, o) {
 }
 // the middle sea's columns (drawMidSea's loop): its numbers as drawMidSea has them
 function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, crest, foot = bot) {
-  const ctx = C, X = fxBegin(ctx); if (!X) return;
+  const ctx = C, X = frameDrawBegin(ctx); if (!X) return;
   g8Shared();
   const c0 = Math.floor(Lp / step) * step, n = Math.ceil((Lp + Wp - c0) / step), nb = (n + 31) >> 5;
   const du = step / Sl, cbase = clamp(0.1 + 0.13 * A + 0.3 * st, 0, 0.82);
@@ -25585,7 +25798,7 @@ function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, cr
   const Y = time * 0.35, yi = Math.floor(Y), fy = Y - yi, v = fy * fy * (3 - 2 * fy);
   const nl = xi1 - xi0 + 1, nk = k1 - k0 + 1, TW = Math.max(nb, nl, nk);
   // (the header, D's five rows, the gradient: one arena block, words)
-  const oD = G8_MS_HB / 4, oG = oD + TW * 5 * 4, [ch, off] = arenaAlloc((oG + 1024) * 4, 256), w0 = off >> 2, Wd = pxWords(ch), F = Wd.f, U = Wd.u;
+  const oD = G8_MS_HB / 4, oG = oD + TW * 5 * 4, [ch, off] = arenaAlloc((oG + 1024) * 4, 256), w0 = off >> 2, Wd = arenaWords(ch), F = Wd.f, U = Wd.u;
   F.fill(0, w0, w0 + oG);
   const R = TW * 4, d0 = w0 + oD;
   for (let b = 0; b < nb; b++) {
@@ -25608,9 +25821,9 @@ function g8MidSea(Lp, Wp, L, Sl, A, st, amp, base, step, foamCut, hz, bot, g, cr
     du * 0.09, du * 0.045, du / 3, foamCut, base, amp, hz, bot, (cc & 255) / 255, ((cc >>> 8) & 255) / 255, ((cc >>> 16) & 255) / 255, (cc >>> 24) / 255, cbase, PB, foot, gA];
   for (let k = 0; k < hv.length; k++) F[w0 + k] = hv[k];
   U[w0 + 36] = (off + G8_MS_HB) / 16; U[w0 + 37] = (off >> 4) + oG / 4; U[w0 + 38] = TW; U[w0 + 39] = 0;
-  const key = fxKey(X); let pipe = G8.ms.get(key);
-  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: G8.msp, vertex: { module: G8.msm, entryPoint: 'vs' }, fragment: { module: G8.msm, entryPoint: 'fs', targets: [fxColour(X.FT.tex, X.op, X.screen)] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } }, fxStencil(X.ds))); G8.ms.set(key, pipe); }
-  const pass = fxPass(X, 'mid sea');
+  const key = frameDrawKey(X); let pipe = G8.ms.get(key);
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: G8.msp, vertex: { module: G8.msm, entryPoint: 'vs' }, fragment: { module: G8.msm, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-strip', cullMode: 'none' } }, frameDrawStencil(X))); G8.ms.set(key, pipe); }
+  const pass = frameDrawPass(X, 'mid sea');
   pass.setPipeline(pipe); pass.setBindGroup(0, g8Bind(G8.msl, 'mid sea ', ch, G8_MS_HB), [off]);
   for (let p = 0; p < 3; p++) { if (p && !(cc >>> 24)) break; pass.draw(4, 1, 0, p); GLR.stats.draws++; }   // (which of the three: the draw's instance)
   gpuPassEnd();
@@ -25656,7 +25869,7 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
   const L = G8.rT, pass = gpuPassBegin({ colorAttachments: [{ view: L.view, loadOp: 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'rain', [L]);
   pass.setViewport(0, 0, L.w, L.h, 0, 1); pass.setPipeline(G8.rn);
   for (let s = 0; s < k; s += G8_RN_PIECE) {
-    const m = Math.min(G8_RN_PIECE, k - s), [ch, off] = arenaAlloc(G8_RN_HB + m * 32, 256), w0 = off >> 2, Wd = pxWords(ch), F = Wd.f, U = Wd.u;
+    const m = Math.min(G8_RN_PIECE, k - s), [ch, off] = arenaAlloc(G8_RN_HB + m * 32, 256), w0 = off >> 2, Wd = arenaWords(ch), F = Wd.f, U = Wd.u;
     F[w0] = L.w; F[w0 + 1] = L.h; F[w0 + 2] = F[w0 + 3] = 0; F[w0 + 4] = top; F[w0 + 5] = bot; F[w0 + 6] = band; F[w0 + 7] = w;
     U[w0 + 8] = (off + G8_RN_HB) / 16; U[w0 + 9] = U[w0 + 10] = U[w0 + 11] = 0;
     F.set(tiers.subarray(0, 72), w0 + 12); F.set(inst.subarray(s * 8, (s + m) * 8), w0 + G8_RN_HB / 4);
@@ -25666,7 +25879,7 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
   gpuPassEnd();
   // (laid as the buffer was: rows top..bot, a cell rp pixels square, nearest, in the context's state)
   const n = bot - top + 1;
-  fxLay(ctx, L, 0, top, w, n, 0, 0, top * rp, w * rp, n * rp);
+  frameLay(ctx, L, 0, top, w, n, 0, 0, top * rp, w * rp, n * rp);
 }
 
 /* ================================================================
@@ -25696,7 +25909,7 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
             pixels, in colour c (-1: its own, the 'view rgba' column); false: none. Whole numbers only (u_pb: PB). Written in
             the game's GLSL and made WGSL by the graphics layer's translator as the layer is first drawn (gpuNaga, one source).
    pxDraw(L, lo, hi) draws it into the current context C at this point of the frame: the context's batch so far recorded first
-   (fxBegin: glBegin builds the context's clip, frameFlush ends the open pass), then this layer's pass on the same target, with the same
+   (frameDrawBegin, src/gpu/60-draw.js: glBegin builds the context's clip), then this layer's pass on the same target, with the same
    blend, scissor and clip - nothing drawn before or after changes order. The second view is the same small loop and a second
    draw; what is gone is the JavaScript per rectangle.
    What goes to the GPU each draw: this view's columns for the rows it wrote (cnt), and the frame's columns once a frame - all
@@ -25704,7 +25917,7 @@ function g8Rain(inst, k, tiers, w, h, top, bot, band, rp) {
    more rows than one arena piece holds goes in pieces of rows, in order, in the same pass (pxBatch): no limit on rows.
    The scissor: the context's, its start and end inside the target; none left, nothing drawn.
    ================================================================ */
-const PXL = { pal: new Float32Array(128), b255: new Float32Array(256).map((_, i) => Math.fround(i / 255)), ep: -1, fs: null, bgl: null, pl: null, bgs: new Map(), views: new WeakMap() };
+const PXL = { pal: new Float32Array(128), b255: new Float32Array(256).map((_, i) => Math.fround(i / 255)), ep: -1, fs: null, bgl: null, pl: null, bgs: new Map() };
 // (the header every draw sends first, in 32-bit words: 0-1 the target's size, 2 PBV, 3 the colours not drawn, 4-7 the context's
 // transform, 8-23 where each column starts (a word in its arena chunk), 24-151 the colours)
 // (pxLayer is called by files before this one: it reads none of this file's constants)
@@ -25762,109 +25975,6 @@ void main() {
 // (the colour: an interpolated varying, as GL_FS's v_col is - the same sums on the same numbers)
 const PXL_FS = `
 @fragment fn main(@location(0) c: vec4f) -> @location(0) vec4f { return c; }`;
-/* ---- A PART'S OWN DRAW INTO A CONTEXT'S TARGET, between the old code's draws (the pixel layers, the fire - 46-smoke-fire-draw.js):
-   fxBegin(ctx) - the context's batch so far recorded and its clip built (glBegin, as a fillRect here would), the open pass ended
-   (frameFlush); back: { FT (frameTarget), ds (the stencil its clip is in, or none), sc (the scissor: the context's, its start and end
-   inside the target, in the target's rows - WebGL's order), op, screen } - or null when the scissor leaves nothing: nothing is drawn.
-   fxColour / fxStencil - the pipeline's colour target (the context's blend, GLB; the screen keeps its alpha: WebGL's had none) and its
-   stencil test (the clip: where the stencil's top bit is set, as glApplyState's test 1). fxPass(X, key) - the pass on the target, after
-   everything drawn into it so far, its scissor and stencil reference set ---- */
-function fxBegin(ctx) {
-  const s = ctx.s, t = ctx.target;
-  glBegin(ctx, s.op); frameFlush();
-  const FT = frameTarget(ctx); if (!FT) return null;
-  const ds = s.clip ? FT.stencil : null;   // (a clip that isn't an upright rectangle is in the target's stencil)
-  if (s.clip && !ds) throw new Error('a clip with no stencil to test');
-  let x0 = 0, y0 = 0, x1 = FT.w, y1 = FT.h;
-  if (s.sc) { const c = s.sc, gy = t._h - c[1] - c[3]; x0 = clamp(c[0], 0, FT.w); x1 = clamp(c[0] + c[2], 0, FT.w); y0 = clamp(gy, 0, FT.h); y1 = clamp(gy + c[3], 0, FT.h); }
-  if (x1 <= x0 || y1 <= y0) return null;
-  return { FT, ds, sc: [x0, y0, x1 - x0, y1 - y0], op: s.op, screen: !!t.isScreen };
-}
-function fxColour(tex, op, screen) {
-  const b = GLB[op] || GLB['source-over'];
-  return { format: tex.fmt, writeMask: screen ? 7 : 15, blend: { color: { srcFactor: GLBF[b[0]], dstFactor: GLBF[b[1]], operation: 'add' }, alpha: { srcFactor: GLBF[b[2]], dstFactor: GLBF[b[3]], operation: 'add' } } };
-}
-function fxStencil(ds) {
-  if (!ds) return {};
-  const face = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
-  return { depthStencil: { format: ds.fmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: face, stencilBack: face, stencilReadMask: 0x80, stencilWriteMask: 0 } };
-}
-const fxKey = X => X.op + '|' + X.FT.tex.fmt + '|' + (X.ds ? X.ds.fmt : '') + '|' + (X.screen ? 1 : 0);
-function fxPass(X, key) {
-  const tex = X.FT.tex, ds = X.ds, desc = { colorAttachments: [{ view: tex.view, loadOp: 'load', storeOp: 'store' }] };
-  if (ds) desc.depthStencilAttachment = Object.assign({ view: ds.view, stencilReadOnly: true }, gpuHasDepth(ds.fmt) ? { depthReadOnly: true } : {});
-  const pass = gpuPassBegin(desc, key, [tex, ds]);
-  pass.setScissorRect(X.sc[0], X.sc[1], X.sc[2], X.sc[3]);
-  if (ds) pass.setStencilReference(0x80);
-  return pass;
-}
-/* ---- A PICTURE LAID INTO A CONTEXT (the smoke's, sky/21-smoke.js smShow; the rain's layer, 40-zzz-gpu8.js): one quad at the context's
-   place (its transform - glCorners' corners), each pixel the picture's texel under it (nearest), in the context's blend, scissor and
-   clip, times its alpha (as glAlpha gives it). The picture: tex (a gpuTex), its region from (sx, sy), sw x sh texels; ph > 0: its rows
-   in WebGL's order, ph high (a texel row ph - 1 - y); 0: rows from the top ---- */
-const FXL_WGSL = `
-struct LD { a: vec4f, q: array<vec4f, 2>, o: vec4i, g: vec4f };
-@group(0) @binding(0) var<storage, read> ld: LD;
-@group(0) @binding(1) var pic: texture_2d<f32>;
-struct VO { @builtin(position) p: vec4f, @location(0) uv: vec2f };
-@vertex fn vs(@builtin(vertex_index) v: u32) -> VO {
-  let k = select(select(select(3u, 2u, v == 4u), 0u, v == 3u), v, v < 3u);   // (the triangles 0 1 2 and 0 2 3)
-  let c = ld.q[k >> 1u]; let a_pos = select(c.xy, c.zw, (k & 1u) == 1u);
-  let p = a_pos / ld.a.xy;
-  var g = vec4f(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
-  g.y = -g.y; g.z = (g.z + g.w) * 0.5;   // (rows in WebGL's order, z 0..w - as every vertex stage of the game: src/gpu/10-glsl.js)
-  var o: VO; o.p = g; o.uv = vec2f(select(0.0, ld.a.z, k == 1u || k == 2u), select(0.0, ld.a.w, k >= 2u)); return o;
-}
-@fragment fn fs(i: VO) -> @location(0) vec4f {
-  let c = clamp(vec2i(floor(i.uv)), vec2i(0), vec2i(ld.a.zw) - 1);
-  let y = ld.o.y + c.y;
-  return textureLoad(pic, vec2i(ld.o.x + c.x, select(y, ld.o.z - 1 - y, ld.o.z > 0)), 0) * ld.g.x;
-}`;
-const FXL = { ep: -1, pipes: new Map() };
-// (does a clear texel - 0 0 0 0 - leave the target as it was in this blend? Its colour and alpha factors on the target are 1 for a clear source)
-const fxClearKeeps = op => { const b = GLB[op] || GLB['source-over'], one = f => f === 'one' || f === 'one-minus-src' || f === 'one-minus-src-alpha'; return one(GLBF[b[1]]) && one(GLBF[b[3]]); };
-// box (optional): the picture's texels [x0, y0, x1, y1] (inclusive, rows from the top of its region) outside which every texel is clear. When a
-// clear texel leaves the target as it was (fxClearKeeps) and the context is upright, the pass's scissor is cut to the pixels whose texel can lie in
-// it (a pixel's margin each side for the sums' rounding): the same pixels drawn, none of the ones that would add nothing
-function fxLay(c, tex, sx, sy, sw, sh, ph, dx, dy, dw, dh, box) {
-  const X = fxBegin(c); if (!X) return;
-  if (FXL.ep !== GPU.ep) {
-    const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT;
-    FXL.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: { type: 'read-only-storage', hasDynamicOffset: true, minBindingSize: 96 } }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } }], 'lay');
-    FXL.m = gpuModule(FXL_WGSL, 'lay'); FXL.pl = gpuPipeLayout([FXL.bl], 'lay'); FXL.pipes.clear(); FXL.ep = GPU.ep;
-  }
-  const t = c.target, s = c.s, [ch, off] = arenaAlloc(96, 256), w0 = off >> 2, Wd = pxWords(ch), Fl = Wd.f, I = Wd.i;
-  glCorners(s.m, dx, dy, dw, dh);
-  const X4 = GLC4.x, Y4 = GLC4.y;
-  if (box && s.m[1] === 0 && s.m[2] === 0 && fxClearKeeps(X.op)) {
-    const kx = (X4[1] - X4[0]) / sw, ky = (Y4[2] - Y4[1]) / sh;
-    const xa = X4[0] + box[0] * kx, xb = X4[0] + (box[2] + 1) * kx, ya = Y4[0] + box[1] * ky, yb = Y4[0] + (box[3] + 1) * ky;
-    const px0 = Math.floor(Math.min(xa, xb)) - 1, px1 = Math.ceil(Math.max(xa, xb)) + 1, py0 = t._h - (Math.ceil(Math.max(ya, yb)) + 1), py1 = t._h - (Math.floor(Math.min(ya, yb)) - 1);   // (rows: WebGL's, as the scissor's - fxBegin)
-    const S = X.sc, x0 = Math.max(S[0], px0), x1 = Math.min(S[0] + S[2], px1), y0 = Math.max(S[1], py0), y1 = Math.min(S[1] + S[3], py1);
-    if (!(x1 > x0 && y1 > y0)) return;
-    X.sc = [x0, y0, x1 - x0, y1 - y0];
-  }
-  Fl[w0] = t._w; Fl[w0 + 1] = t._h; Fl[w0 + 2] = sw; Fl[w0 + 3] = sh;
-  for (let q = 0; q < 4; q++) { Fl[w0 + 4 + q * 2] = X4[q]; Fl[w0 + 5 + q * 2] = Y4[q]; }
-  I[w0 + 12] = sx; I[w0 + 13] = sy; I[w0 + 14] = ph; I[w0 + 15] = 0;
-  Fl[w0 + 16] = Math.fround(Math.round(s.ga * 255) / 255); Fl[w0 + 17] = Fl[w0 + 18] = Fl[w0 + 19] = 0;   // (the context's alpha, as glAlpha gives it)
-  const key = fxKey(X);
-  let pipe = FXL.pipes.get(key);
-  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FXL.pl, vertex: { module: FXL.m, entryPoint: 'vs' }, fragment: { module: FXL.m, entryPoint: 'fs', targets: [fxColour(X.FT.tex, X.op, X.screen)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, fxStencil(X.ds))); FXL.pipes.set(key, pipe); }
-  // (its bind group for this arena chunk, kept on the picture: made again when the chunk's buffer or the device is new)
-  const bm = tex.fxl || (tex.fxl = new Map()); let e = bm.get(ch.id);
-  if (!e || e.gb !== ch.gb || e.ep !== FXL.ep) { e = { gb: ch.gb, ep: FXL.ep, g: gpuBindGroup(FXL.bl, [{ binding: 0, resource: { buffer: ch.gb, offset: 0, size: 96 } }, { binding: 1, resource: tex.view }], 'lay') }; bm.set(ch.id, e); }
-  const pass = fxPass(X, 'lay');
-  pass.setPipeline(pipe); pass.setBindGroup(0, e.g, [off]); pass.draw(6);
-  gpuPassEnd(); tex.use = FR.sub;
-  GLR.stats.draws++;
-}
-// a layer (a GLTarget - makeLayer) laid into context c the same way: its pixels sx, sy, sw x sh (rows from its top) over dx, dy, dw, dh of the
-// context's units - its texture's rows in WebGL's order (as the GL front kept a layer's)
-function fxLayer(c, L, sx, sy, sw, sh, dx, dy, dw, dh) {
-  const T = frameTarget(L.getContext('2d')); if (!T || !T.tex) return;
-  fxLay(c, T.tex, sx, sy, sw, sh, T.h, dx, dy, dw, dh);
-}
 // ---- the WebGPU objects of the layers (src/gpu's calls), made again on a new device (GPU.ep) ----
 function pxShared() {
   if (PXL.ep === GPU.ep) return;
@@ -25876,17 +25986,16 @@ function pxShared() {
 }
 // the layer's pipeline for this target, blend and clip (ds: the stencil the clip is in, or none)
 function pxPipe(L, X) {
-  const tex = X.FT.tex, ds = X.ds, op = X.op, screen = X.screen;
   if (L.ep !== GPU.ep) { L.pipes.clear(); L.vs = gpuModule(gpuNaga(pxVS(L), 'vertex'), 'px layer vs'); L.ep = GPU.ep; }
-  const key = fxKey(X);
+  const key = frameDrawKey(X);
   let p = L.pipes.get(key);
   if (p) return p;
   const desc = Object.assign({
     layout: PXL.pl,
     vertex: { module: L.vs, entryPoint: 'main' },
-    fragment: { module: PXL.fs, entryPoint: 'main', targets: [fxColour(tex, op, screen)] },
+    fragment: { module: PXL.fs, entryPoint: 'main', targets: [frameDrawColour(X)] },
     primitive: { topology: 'triangle-list', cullMode: 'none' },
-  }, fxStencil(ds));
+  }, frameDrawStencil(X));
   p = gpuRenderPipe(desc);
   L.pipes.set(key, p);
   return p;
@@ -25900,19 +26009,13 @@ function pxBind(c0, c2) {
   PXL.bgs.set(k, { bg: g, c0: c0.gb, c2: c2.gb });
   return g;
 }
-// an arena chunk's bytes as words
-function pxWords(c) {
-  let w = PXL.views.get(c.cpu);
-  if (!w) { w = { i: new Int32Array(c.cpu.buffer), u: new Uint32Array(c.cpu.buffer), f: new Float32Array(c.cpu.buffer) }; PXL.views.set(c.cpu, w); }
-  return w;
-}
 // the layer's 'frame' or 'view' columns, rows a..b-1, into the arena after `skip` words (the header): [chunk, its first word, each
 // column's start (by its index in cols) - the word of row 0, so the shader's row (its instance over PER: the whole draw's) reads it]
 function pxCols(L, a, b, when, skip) {
   const names = Object.keys(L.cols), at = new Int32Array(names.length), n = b - a;
   let words = skip;
   names.forEach((k, i) => { const t = L.cols[k]; if (t.startsWith(when)) { at[i] = words; words += t.endsWith('rgba') ? n * 4 : n; } });
-  const [c, off] = arenaAlloc(Math.max(16, words * 4), 256), w0 = off >> 2, W = pxWords(c);
+  const [c, off] = arenaAlloc(Math.max(16, words * 4), 256), w0 = off >> 2, W = arenaWords(c);
   names.forEach((k, i) => {
     const t = L.cols[k]; if (!t.startsWith(when)) return;
     const A = L.own[k], o = w0 + at[i];
@@ -25940,7 +26043,7 @@ function pxDraw(L, lo, hi) {
   if (L.tick !== renderTick) { if (L.frame) L.frame(T, L.own, n); L.tick = renderTick; L.fgen = -1; }   // (once a frame)
   const cnt = L.view(T, L.own, n, lo, hi, L);
   if (!cnt) return;
-  const X = fxBegin(ctx); if (!X) return;
+  const X = frameDrawBegin(ctx); if (!X) return;
   const s = ctx.s, t = ctx.target, m = s.m, op = s.op;
   pxShared();
   const pipe = pxPipe(L, X), B = pxBatch(L), names = Object.keys(L.cols);
@@ -25953,13 +26056,13 @@ function pxDraw(L, lo, hi) {
     for (let q = 0; q < 4; q++) pal[i * 4 + q] = Math.fround(((col >>> (8 * q)) & 255) / 255);
     if (!(col >>> 24) && op !== 'copy' && op !== 'source-in' && op !== 'destination-in') skip |= 1 << i;   // (fully clear: not drawn, as glFillQuad skips it)
   });
-  const pass = fxPass(X, 'px');
+  const pass = frameDrawPass(X, 'px');
   pass.setPipeline(pipe);
   for (let a = 0; a < cnt; a += B) {
     const b = Math.min(cnt, a + B), q = a / B;
     const fb = L.hasFrame ? L.fat[q] || (L.fat[q] = pxCols(L, a, b, 'frame', 0)) : null;
     // this piece's header and this view's columns
-    const [c0, w0, at] = pxCols(L, a, b, 'view', PXL_HW), W = pxWords(c0), F = W.f, I = W.i;
+    const [c0, w0, at] = pxCols(L, a, b, 'view', PXL_HW), W = arenaWords(c0), F = W.f, I = W.i;
     if (fb) names.forEach((k, i) => { if (L.cols[k].startsWith('frame')) at[i] = fb[2][i]; });
     F[w0] = t._w; F[w0 + 1] = t._h; I[w0 + 2] = PBV; I[w0 + 3] = skip;
     F[w0 + 4] = m[0]; F[w0 + 5] = m[3]; F[w0 + 6] = m[4]; F[w0 + 7] = m[5];   // (upright: the world's contexts are, as beginView sets them - 42-render-sky.js)
@@ -25978,10 +26081,10 @@ function pxDraw(L, lo, hi) {
    B.rgba(c, a) a colour given as numbers (c's whole numbers, a to three decimals - as 40-gl.js glColA packs it; the fill
    style left as it was), B.rect as fillRect, B.px / B.line the one block and block line (inkPx / inkLine, below: blkPx's blocks, the old blkLine's runs),
    B.pixLine the one pixel line (inkPixLine, below: a line of PB blocks th thick, its blocks in a row one rectangle); then all of them, in order,
-   in one draw of PAINT_L into the context (its transform, blend, scissor and clip - pxDraw). The context's fill style and alpha are
-   left as the loop left them. One blend a draw: a loop that changes the blend is two paints. ---- */
+   laid in one draw into the context (the frame's rectangles - frameRects, src/gpu/61-rects.js: its transform, blend, scissor and clip). The
+   context's fill style and alpha are left as the loop left them. One blend a draw: a loop that changes the blend is two paints. ---- */
 const PXB = {
-  R: null, L: null, m: 0, css: null, ga: 1, col: 0, keep0: false, paint: null,
+  R: frameRectList(), css: null, ga: 1, col: 0, keep0: false,
   src: 0, q: [0, 0, 0, 1],   // (src: what the colour is made from - 0 packed, 1 the fill style css, 2 the numbers q; the global alpha re-packs 1 and 2)
   fill(css) { if (typeof css !== 'string') return; if (css !== this.css || this.src !== 1) { this.css = css; this.src = 1; this.col = glPack(glParse(css), this.ga); } },
   pack(col) { this.css = null; this.src = 0; this.col = col >>> 0; },   // (a colour already packed - glPack, glColA)
@@ -25998,8 +26101,7 @@ const PXB = {
     // (a rectangle off the whole pixels: the pixels whose middles it covers, as the GPU fills a quad - the rows are whole numbers)
     if ((x | 0) !== x || (w | 0) !== w) { const a = Math.ceil(x - 0.5); w = Math.ceil(x + w - 0.5) - a; x = a; if (w <= 0) return; }
     if ((y | 0) !== y || (h | 0) !== h) { const a = Math.ceil(y - 0.5); h = Math.ceil(y + h - 0.5) - a; y = a; if (h <= 0) return; }
-    let R = this.R, m = this.m; if (m >= R.x.length) R = this.R = pxRoom(this.L, m + 1);
-    R.x[m] = x; R.y[m] = y; R.w[m] = w; R.h[m] = h; R.rgba[m] = this.col; this.m = m + 1;
+    const c = this.col, B = PXL.b255; this.R.pm(x, y, w, h, B[c & 255], B[(c >>> 8) & 255], B[(c >>> 16) & 255], B[c >>> 24]);   // (its colour's bytes / 255, as the pixel layers read them)
   },
   px: inkPx, line: inkLine,   // (the one block and block line - below)
   pixLine: inkPixLine,   // (the one pixel line - below)
@@ -26048,22 +26150,14 @@ function inkPixLine(xa, ya, xb, yb, th) {
     if (rn) this.rect(rx, d > 0 ? ry : ry + rd + PB, th, rn * PB);
   }
 }
-const PAINT_L = pxLayer({
-  table: null, cols: { x: 'view i32', y: 'view i32', w: 'view i32', h: 'view i32', rgba: 'view rgba' }, pal: [],
-  view: (T, own, n, lo, hi, L) => {
-    const B = PXB, s = C.s;
-    B.R = own; B.L = L; B.m = 0; B.css = null; B.src = 0; B.col = 0; B.ga = s.ga;
-    B.keep0 = s.op === 'copy' || s.op === 'source-in' || s.op === 'destination-in';
-    B.paint(B);
-    return B.m;
-  },
-  rect: `bool rect(int j, out ivec4 r, out int c) { r = ivec4(a_x, a_y, a_w, a_h); c = -1; return true; }
-`,
-});
 function pxPaint(paint) {
   const B = PXB, ctx = C;
-  B.paint = paint; B.css = null; B.src = 0; B.ga = ctx.globalAlpha;
-  try { pxDraw(PAINT_L, 0, 0); } finally { B.paint = null; }
+  B.css = null; B.src = 0; B.ga = ctx.globalAlpha;
+  if (GPU.on && !GPU.lost && !GLR.lost && ctx instanceof GLCtx) {
+    const s = ctx.s; B.R.n = 0; B.col = 0; B.ga = s.ga;
+    B.keep0 = s.op === 'copy' || s.op === 'source-in' || s.op === 'destination-in';
+    try { paint(B); frameRects(ctx, B.R, { key: 'px' }); } finally { B.R.n = 0; }
+  }
   if (B.css !== null) ctx.fillStyle = B.css;
   ctx.globalAlpha = B.ga;
 }
@@ -26073,7 +26167,7 @@ function pxPaint(paint) {
    drawn by the water shader each frame now - engine part 4; the structures by the things' pass - engine part 5.) What it keeps for each:
    - tiles of the world in world pixels at one zoom (a set per SV), each a kept texture painted by the layer's own drawing with
      C, SV, CAMPX and TOPPX the tile's (so the same sums the live loop does give the same pixels, against the tile's corner),
-     laid on the screen as one quad at its whole-pixel place (natively - fxLayer);
+     laid on the screen as one quad at its whole-pixel place (natively - frameLayTarget);
    - a zoom held for a frame before its tiles are made (while zooming the live way draws), the two views' zooms kept and any
      other dropped;
    - painted again when the GL context is new (GLR.epoch), the texture is gone, or the layer says its content changed;
@@ -26104,7 +26198,7 @@ function wtTile(L, o) { o.cv = new Array(L.par).fill(null); o.ep = new Array(L.p
 const wtPh = L => L.par === 1 ? 0 : (((CAMPX % 2) + 2) % 2) | ((((TOPPX % 2) + 2) % 2) << 1);
 // lay tile t (parity ph); painted first when its canvas is missing, the wrong size, from an older GL context or without its
 // texture (cleared), or when dirty (cleared when full). paint(t, ph, cleared) draws with C, CAMPX, TOPPX the tile's (SV is
-// the tile's zoom: tiles are laid at the zoom they're made for). Laid natively, a picture laid into the context (fxLayer -
+// the tile's zoom: tiles are laid at the zoom they're made for). Laid natively, a picture laid into the context (frameLayTarget -
 // 40-zzzz-layers.js: one quad, each pixel its texel, in the context's blend, scissor and clip)
 function wtPut(L, t, ph, dirty, full, paint) {
   let cv = t.cv[ph];
@@ -26120,7 +26214,7 @@ function wtPut(L, t, ph, dirty, full, paint) {
     t.ep[ph] = GLR.epoch;
   }
   t.seen = REG.frame;
-  fxLayer(C, cv, 0, 0, t.w, t.h, t.x + (ph & 1) - CAMPX, t.y + (ph >> 1) - TOPPX, t.w, t.h);
+  frameLayTarget(C, cv, 0, 0, t.w, t.h, t.x + (ph & 1) - CAMPX, t.y + (ph >> 1) - TOPPX, t.w, t.h);
 }
 // after a frame's laying: every 120 frames, tiles not shown for WT_FREE frames give their GPU memory back
 function wtSweep(L) {
@@ -27472,16 +27566,17 @@ const nearCloud = (c, x, y, m) => { if (!CK.hasAxd[c]) return false; const ax = 
 // ================================================================== THE SKY'S OWN DRAWING ON THE GPU (Nov 10, part 1 - the last of the sky's GL front)
 // Every picture of the sky that isn't a cloud's record is drawn here, natively through src/gpu, by one WGSL module (SKD_WGSL): the
 // gradient and its texture, the sun's glow and disc, the moon, the light rays (their march in compute), the deck layers laid on the
-// screen (deck 1 clipped by the ground and the towers - a column table, no stencil), the veils, the far rain shafts, and the plain
-// fills behind the sky (42-render-sky.js: the base colour, space, the atmosphere's layers, the stars, the fog's hills). Each is a
+// screen (deck 1 clipped by the ground and the towers - a column table, no stencil), the veils, the far rain shafts. Each is a
 // quad (or a run of instanced quads) in a context's target - its transform (scale and offset: the sky's contexts never turn), its
-// scissor, its clip if it has one (the target's stencil, as the GL front leaves it) - after everything drawn there so far.
+// scissor, its clip if it has one (the target's stencil, as the GL front leaves it) - after everything drawn there so far: the
+// skeleton's draw into a context (frameDrawBegin / frameDrawPass, src/gpu/60-draw.js). The plain fills (the base colour, space, the
+// atmosphere's layers, the stars, the fog's hills, the sun's fine rays) are the frame's rectangles (frameRects, src/gpu/61-rects.js).
 // The data each draw reads goes in the frame's arena: u (the target's size, the quad, its cells, the program's numbers), and per
 // program a row of floats (fa), a run of vec4s (va), a layer (tx) or the rays' steps (rs). Every loop has a constant bound.
 // (Nov 10, the laptop's GPU hang: every shader loop bounded by a constant. A ray crosses each lobe on the screen once - twice the lobe round the
 // sun, where its rays wrap - and the whole sky holds ~31,000 lobes; so no ray has 65,536 crossings)
 const RAY_XMAX = 65536;
-const SKD = { ep: -1, mod: null, pipes: new Map(), pass: null, pg: -1, tex: null, ds: null, err: null, rays: null, rseq: -1, march: null };
+const SKD = { ep: -1, mod: null, pipes: new Map(), err: null, rays: null, rseq: -1, march: null };
 const SKD_WGSL = `
 @group(0) @binding(0) var<storage, read> u: array<vec4f>;
 @group(0) @binding(1) var<storage, read> fa: array<f32>;
@@ -27502,22 +27597,6 @@ fn tpos(p: vec4f) -> vec2f { return vec2f(p.x, u[0].y - p.y); }
 // cell's edge picks the same cell whatever the GPU snaps the corners to - not the coordinate interpolated across the triangle
 fn cellAt(p: vec4f) -> vec2f { return u[2].xy + (tpos(p) - u[1].xy) * (u[2].zw - u[2].xy) / u[1].zw; }
 @vertex fn vq(@builtin(vertex_index) v: u32) -> VO { let k = cnr(v); var o: VO; o.p = at(u[1].xy + k * u[1].zw); o.c = mix(u[2].xy, u[2].zw, k); o.n = 0u; return o; }
-// RECTANGLES, one an instance (va: its rectangle in the context's space, its colour premultiplied); u[1] the context's transform (sx, sy, ox, oy)
-@vertex fn vr(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO { let r = va[n * 2u]; let m = u[1]; var o: VO; o.p = at(m.xy * (r.xy + cnr(v) * r.zw) + m.zw); o.c = vec2f(0.0); o.n = n; return o; }
-@fragment fn fr(i: VO) -> @location(0) vec4f { return va[i.n * 2u + 1u]; }
-// A GRADIENT DOWN THE QUAD, as the canvas's linear gradient from (0, y0) to (0, y1) (u[3]: y0, y1 on the target, its stops): stop k at
-// u[4 + 2k].x, its colour (straight) u[5 + 2k]; between two stops mixed straight, then premultiplied
-@fragment fn fg(i: VO) -> @location(0) vec4f {
-  let g = u[3]; let n = i32(g.z); let y = tpos(i.p).y;
-  let t = clamp((y - g.x) / select(1e-6, g.y - g.x, abs(g.y - g.x) > 1e-6), 0.0, 1.0);
-  var c = u[5];
-  for (var k = 1; k < 8; k++) {
-    if (k >= n) { break; }
-    let a = u[4 + 2 * (k - 1)].x; let b = u[4 + 2 * k].x;
-    if (t >= b) { c = u[5 + 2 * k]; } else { if (t > a) { c = mix(u[5 + 2 * (k - 1)], u[5 + 2 * k], (t - a) / max(1e-6, b - a)); } break; }
-  }
-  return vec4f(c.rgb * c.a, c.a);
-}
 // THE SKY'S TEXTURED GRADIENT (17-frame.js skyBack, SKY TEXTURE): each cell's band from its row's place (fa: whole part, fraction a row),
 // nudged by two value noises - the integer hash the processor painted it with (u32 wraps as Math.imul and | 0 did), each noise's
 // whole and fractional parts in integers as the double sums land them. u[3]: the texture's shift, the horizon's row, the bands, the rows;
@@ -27709,51 +27788,34 @@ fn sn(x: f32, y: f32) -> f32 { let xi = floor(x); let yi = floor(y); return kn(i
 `;
 function skdSetup() {
   if (SKD.ep === GPUX.ep && SKD.mod) return true;
-  SKD.ep = GPUX.ep; SKD.pipes.clear(); SKD.pass = SKD.tex = SKD.ds = SKD.march = null; SKD.rseq = -1;
+  SKD.ep = GPUX.ep; SKD.pipes.clear(); SKD.march = null; SKD.rseq = -1;
   try { SKD.mod = gpuModule(SKD_WGSL, 'sky draw'); } catch (e) { SKD.mod = null; SKD.err = String(e && e.message || e); console.error('SKY DRAW', e); }
   return !!SKD.mod;
 }
-// a program's pipeline for a target format, a blend ('over': premultiplied source-over; 'copy': replacing), a stencil (its clip) and the
-// screen (whose alpha is kept, as WebGL's had none)
-const SKD_OVER = { color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' } };
-function skdPipe(vs, fs, fmt, blend, dsf, screen) {
-  const key = vs + fs + '|' + fmt + '|' + blend + '|' + (dsf || '') + (screen ? '|s' : '');
+// a program's pipeline for the draw's target (X - frameDrawBegin's: its format, its clip's stencil, the screen) and a blend ('over': premultiplied
+// source-over; 'copy': replacing)
+function skdPipe(vs, fs, X, blend) {
+  const op = blend === 'copy' ? 'copy' : 'source-over', key = vs + fs + '|' + frameDrawKey(X, op);
   let p = SKD.pipes.get(key); if (p) return p;
-  const face = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
-  p = gpuRenderPipe({ label: 'sky ' + fs, layout: 'auto', vertex: { module: SKD.mod, entryPoint: vs }, primitive: { topology: 'triangle-strip' },
-    fragment: { module: SKD.mod, entryPoint: fs, targets: [{ format: fmt, writeMask: screen ? 7 : 15, blend: blend === 'copy' ? undefined : SKD_OVER }] },
-    depthStencil: dsf ? { format: dsf, depthWriteEnabled: false, depthCompare: 'always', stencilFront: face, stencilBack: face, stencilReadMask: 0x80, stencilWriteMask: 0 } : undefined });
+  p = gpuRenderPipe(Object.assign({ label: 'sky ' + fs, layout: 'auto', vertex: { module: SKD.mod, entryPoint: vs }, primitive: { topology: 'triangle-strip' },
+    fragment: { module: SKD.mod, entryPoint: fs, targets: [frameDrawColour(X, op)] } }, frameDrawStencil(X)));
   SKD.pipes.set(key, p);
   return p;
 }
 // numbers for this submit (the arena): a binding's resource
 function skdData(a) { const n = Math.max(16, a.byteLength), [c, o] = arenaAlloc(n, (GPUX.lim && GPUX.lim.minStorageBufferOffsetAlignment) || 256); c.cpu.set(new Uint8Array(a.buffer, a.byteOffset, a.byteLength), o); return { buffer: c.gb, offset: o, size: n }; }
-// the pass on a context's target, after everything drawn into it so far (its GL batch recorded; a sky pass still open on it kept): its scissor
-// and its clip; clear: the target cleared first (a deck's layer). Back: { pass, T (frameTarget), ds, screen } or null - nothing to draw
+// the draw into a context's target, after everything drawn into it so far (its GL batch recorded; a sky pass still open on it kept - one pass
+// for the sky's run of draws): its scissor and its clip; clear: the target cleared first (a deck's layer). Back: frameDrawBegin's X, its pass
+// (X.pass) - or null, nothing to draw
 function skdBegin(cx, clear) {
   if (!skdSetup()) return null;
-  const s = cx.s;
-  if (s.clip && !clear) glBegin(cx, s.op);   // (its clip built into the target's stencil, as the GL front draws under it)
-  glFlush();
-  const T = frameTarget(cx); if (!T || !T.tex || !T.tex.gt) return null;
-  const ds = s.clip && !clear ? T.stencil : null; if (s.clip && !clear && !ds) return null;
-  let x0 = 0, y0 = 0, x1 = T.w, y1 = T.h;
-  if (s.sc && !clear) { const c = s.sc, gy = T.h - c[1] - c[3]; x0 = clamp(c[0], 0, T.w); x1 = clamp(c[0] + c[2], 0, T.w); y0 = clamp(gy, 0, T.h); y1 = clamp(gy + c[3], 0, T.h); }
-  if (x1 <= x0 || y1 <= y0) return null;
-  if (clear || !FR.pass || FR.pg !== SKD.pg || SKD.tex !== T.tex || SKD.ds !== ds) {
-    gpuPassEnd();
-    const desc = { colorAttachments: [{ view: T.tex.view, loadOp: clear ? 'clear' : 'load', clearValue: [0, 0, 0, 0], storeOp: 'store' }] };
-    if (ds) desc.depthStencilAttachment = Object.assign({ view: ds.view, stencilReadOnly: true }, gpuHasDepth(ds.fmt) ? { depthReadOnly: true } : {});
-    SKD.pass = gpuPassBegin(desc, 'gsky:draw', [T.tex, ds]); SKD.tex = T.tex; SKD.ds = ds; SKD.pg = FR.pg;   // (FR.pg: another part's pass gone on in it since - its state not ours)
-  }
-  const pass = SKD.pass;
-  pass.setScissorRect(x0, y0, x1 - x0, y1 - y0);
-  if (ds) pass.setStencilReference(0x80);
-  return { pass, T, ds, screen: !!cx.target.isScreen };
+  const X = frameDrawBegin(cx, clear); if (!X) return null;
+  X.pass = frameDrawPass(X, 'gsky:draw');
+  return X;
 }
 // one program's draw: U its numbers from u[3] on (u[0..2] filled here), ex its other bindings ({ binding: resource }), n instances from first
 function skdRun(X, vs, fs, U, ex, blend, n, first) {
-  const p = skdPipe(vs, fs, X.T.tex.fmt, blend || 'over', X.ds && X.ds.fmt, X.screen);
+  const p = skdPipe(vs, fs, X, blend || 'over');
   U[0] = X.T.w; U[1] = X.T.h;
   const E = [{ binding: 0, resource: skdData(U) }];
   if (ex) for (const b in ex) E.push({ binding: +b, resource: ex[b] });
@@ -27774,23 +27836,6 @@ function skdInst(X, cx, vs, fs, n, va, U, blend, first) {
   skdRun(X, vs, fs, U, { 2: va }, blend, n, first);
 }
 const SKD_U = n => new Float32Array(12 + 4 * n);
-// RECTANGLES into a context (the stars, the sun's fine rays, the fog's hills...): R a Float32Array of n rectangles, 8 numbers each - x, y, w,
-// h in the context's space, the colour (r, g, b 0..255, alpha 0..1) - each laid as fillRect lays one, in the context's blend (source-over)
-function skdRects(cx, R, n) {
-  if (!(n > 0)) return;
-  const X = skdBegin(cx); if (!X) return;
-  const V = new Float32Array(n * 8);
-  for (let i = 0; i < n; i++) { const o = i * 8, a = R[o + 7]; V[o] = R[o]; V[o + 1] = R[o + 1]; V[o + 2] = R[o + 2]; V[o + 3] = R[o + 3]; V[o + 4] = R[o + 4] / 255 * a; V[o + 5] = R[o + 5] / 255 * a; V[o + 6] = R[o + 6] / 255 * a; V[o + 7] = a; }
-  skdInst(X, cx, 'vr', 'fr', n, skdData(V), SKD_U(0));
-}
-// A GRADIENT DOWN a context's rectangle (x, y, w, h), as createLinearGradient(0, y0, 0, y1) fills it: stops [[at, [r, g, b], alpha], ...] (8 at most)
-function skdVGrad(cx, x, y, w, h, y0, y1, stops) {
-  if (!(w > 0 && h > 0) || !stops.length) return;
-  const U = SKD_U(1 + 16), m = cx.s.m, n = Math.min(8, stops.length);
-  U[12] = m[3] * y0 + m[5]; U[13] = m[3] * y1 + m[5]; U[14] = n;
-  for (let k = 0; k < n; k++) { const [t, c, a] = stops[k], o = 16 + k * 8; U[o] = t; U[o + 4] = c[0] / 255; U[o + 5] = c[1] / 255; U[o + 6] = c[2] / 255; U[o + 7] = a; }
-  skdQuad(cx, 'fg', x, y, w, h, [0, 0, 1, 1], U);
-}
 // THE RAYS' STEPS (16-light-rays.js drawRays: rayIvPack's lists, gb) marched on the GPU into SKD.rays, a u32 a step, NS a ray - once for each
 // list (a shared view's second half lays the same). Back: the bindings fray reads (its wedges' tier and length; the steps) or null
 function skdMarch(gb, NS) {
@@ -28993,7 +29038,9 @@ function outImg(T, w, y0, n, x, y, wd, ht) {
   skdQuad(ctx, 'flay', dx, dy, dw, dh, [0, y0, w, y0 + n], U, ex);
 }
 // the sun on the GPU (SUNG from drawSun - 12-draw.js): its glow over its rows (fglow), its fine rays a cell at a time in their order (white
-// cells, as drawSun blended them), then its disc through the heat (fsun) - each laid as a picture of the sky's cells is (picX, picY)
+// cells, as drawSun blended them - the frame's rectangles, frameRects), then its disc through the heat (fsun) - each laid as a picture of the
+// sky's cells is (picX, picY)
+const SUN_RAYS = frameRectList(), SUN_RAY_C = [255, 255, 255];
 function outSun(G) {
   const V = VIEW, Q = G.glow;
   if (G.moon) {   // (the moon: its glow and disc - 14-sun-moon.js moonAt)
@@ -29013,9 +29060,9 @@ function outSun(G) {
     }
   }
   if (Q && Q.rays.length) {
-    const R = Q.rays, n = R.length / 3, cs = CPX * M, F = new Float32Array(n * 8);
-    for (let i = 0; i < n; i++) { const o = i * 8; F[o] = picX(V, (R[i * 3] - 1) * CPX); F[o + 1] = picY(V, R[i * 3 + 1] * CPX); F[o + 2] = F[o + 3] = cs; F[o + 4] = F[o + 5] = F[o + 6] = 255; F[o + 7] = R[i * 3 + 2]; }
-    skdRects(ctx, F, n);
+    const R = Q.rays, n = R.length / 3, cs = CPX * M, L = SUN_RAYS;
+    for (let i = 0; i < n; i++) L.rect(picX(V, (R[i * 3] - 1) * CPX), picY(V, R[i * 3 + 1] * CPX), cs, cs, SUN_RAY_C, Math.fround(R[i * 3 + 2]));   // (its alpha as a float32, as it was kept)
+    frameRects(ctx, L, { op: 'source-over', key: 'gsky:draw' });
   }
   const dx = picX(V, (G.x0 - 1) * CPX), dy = picY(V, G.y0 * CPX), dw = (G.x1 - G.x0) * CPX * M, dh = (G.y1 - G.y0) * CPX * M;
   if (G.y1 <= G.y0 || dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4) return;
@@ -29711,13 +29758,13 @@ function smShow(S_) {
   // this zoom over the picture's; 1 when the zoom hasn't changed: as before)
   const k = S_.osv ? FXV.SV / S_.osv : 1, opx = S_.opx || FXV.pxX, opy = S_.opy || FXV.pxY;
   const dx = (S_.ox + S_.ocam[0]) * k - CAMPX, dy = (S_.oy + S_.ocam[1]) * k - TOPPX, dw = S_.ow * opx * k, dh = S_.oh * opy * k;
-  const hc = smHangarClip(ctx, dx, dy, dw, dh);   // (the hangars: the context's clip - fxBegin builds it into the target's stencil)
+  const hc = smHangarClip(ctx, dx, dy, dw, dh);   // (the hangars: the context's clip - frameDrawBegin builds it into the target's stencil)
   smLay(ctx, S_, dx, dy, dw, dh);
   if (hc) ctx.restore();
 }
-// THE PICTURE LAID (engine part 6, Nov 9 - natively: once drawImage through the GL front): fxLay (40-zzzz-layers.js) - one quad at the
+// THE PICTURE LAID (engine part 6, Nov 9 - natively: once drawImage through the GL front): frameLay (src/gpu/60-draw.js) - one quad at the
 // context's place, nearest, in the context's blend, scissor and clip, times its alpha; the picture's rows in WebGL's order, its paint's h
-const smLay = (c, S_, dx, dy, dw, dh) => fxLay(c, S_.pic, S_.gx0, S_.gy0, S_.ow, S_.oh, S_.ph, dx, dy, dw, dh, S_.box);   // (only where its balls can be: smItems' SMI.box)
+const smLay = (c, S_, dx, dy, dw, dh) => frameLay(c, S_.pic, S_.gx0, S_.gy0, S_.ow, S_.oh, S_.ph, dx, dy, dw, dh, S_.box);   // (only where its balls can be: smItems' SMI.box)
 // (Oct 31, user: "any vehicle that's smoking, the moment they enter a hangar, the smoke should not render inside it. It should
 // even mask the smoke as it gets inside the hangar as it naturally would. Right now we see the smoke through the hangar") a
 // hangar is solid where it is drawn (23-harbour-gates.js: from its drawn roof, hangarRoofAt, down to the deck) - and smoke is
@@ -30669,7 +30716,7 @@ function smPaint(S_, a) {
   smpUp(FB, oWR * 4, W1.subarray(0, cw));
   smpUp(IB, 0, IT);
   // ---- the paint's numbers (H), in the arena
-  const [c, off] = arenaAlloc(SMP.HB, 256), w0 = off >> 2, Wd = pxWords(c), Hf = Wd.f, Hi = Wd.i, Hu = Wd.u;
+  const [c, off] = arenaAlloc(SMP.HB, 256), w0 = off >> 2, Wd = arenaWords(c), Hf = Wd.f, Hi = Wd.i, Hu = Wd.u;
   const gx_ = Math.min(ni, 65535), gy_ = Math.ceil(ni / gx_);   // (gseed: a workgroup an item)
   Hi[w0] = gw; Hi[w0 + 1] = gh; Hf[w0 + 2] = cw; Hf[w0 + 3] = h;
   Hf[w0 + 4] = mass; Hf[w0 + 5] = P.smshadow ?? 0.7; Hf[w0 + 6] = P.smself ?? 0.45; Hf[w0 + 7] = P.smamb ?? 0.5;
@@ -30861,8 +30908,6 @@ const NSKY_API = {
   sunUp: sunUpNow, isNight: nightNow,
   deck1Px(V) { return toScreen(V, 0, LAYERS[HERO_I].baseY * CPX)[1]; },
   spans: skySpans,
-  // (the sky's plain fills drawn natively - 12-draw.js: 42-render-sky.js's base colour, space, the atmosphere, the stars, the fog's hills)
-  rects: skdRects, vgrad: skdVGrad,
   get drift() { return LAYERS.map(l => l.off); },   // (tests: each deck's wind drift - it holds while the world is held)
   get clouds() { return CLD; },   // (tests: the clouds' table - a cloud is its row; CK its columns)
   // (the perf panel: each deck's puff size in cells, front deck first, and how many of the visible clouds are at their billows alone)
@@ -31840,7 +31885,7 @@ function lpRow(r, n) {
   return (LP[r] = G2);
 }
 const moonXs = [-1e9, -1e9], sunXs = [-1e9, -1e9], moonYs = [0, 0], sunYs = [0, 0], sunRs = [0, 0];   // (sunRs: the disc's radius on screen, the new sky's)
-// Fog: ranges of hills fading into the mist, each nearer layer a little darker (their columns laid natively - NSKY.rects)
+// Fog: ranges of hills fading into the mist, each nearer layer a little darker (their columns laid natively - skyRect, the frame's rectangles)
 function drawFogHills() {
   const hz = PY(HZ_Y()), step = PB * 2;
   const far = E.skyHor, near = E.fogCol.map(v => v * 0.42);
@@ -31861,15 +31906,18 @@ function drawFogHills() {
   skyRectsEnd();
 }
 // THE SKY'S PLAIN FILLS (Nov 10, part 1): rectangles gathered (x, y, w, h in C's space, the colour 0..255, its alpha) and laid natively in one draw,
-// in their order, each as fillRect laid one - the base colour, the stars, the shooting star, the fog's hills, the atmosphere's lines
-const SKYR = { R: new Float32Array(8 * 1024), n: 0 };
+// in their order, each as fillRect laid one - the base colour, the stars, the shooting star, the fog's hills, the atmosphere's lines: the frame's
+// rectangles (frameRects, src/gpu/61-rects.js), in the sky's pass ('gsky:draw'); the colour and alpha as float32s, as the sky kept them
+const SKYR = frameRectList(), SKYR_C = [0, 0, 0];
 function skyRectsBegin() { SKYR.n = 0; }
 function skyRect(x, y, w, h, c, a) {
-  if (!(w > 0 && h > 0) || !(a > 0)) return;
-  if ((SKYR.n + 1) * 8 > SKYR.R.length) { const R = new Float32Array(SKYR.R.length * 2); R.set(SKYR.R); SKYR.R = R; }
-  const R = SKYR.R, o = SKYR.n++ * 8; R[o] = x; R[o + 1] = y; R[o + 2] = w; R[o + 3] = h; R[o + 4] = c[0]; R[o + 5] = c[1]; R[o + 6] = c[2]; R[o + 7] = Math.min(1, a);
+  if (!(a > 0)) return;
+  const q = SKYR_C; q[0] = Math.fround(c[0]); q[1] = Math.fround(c[1]); q[2] = Math.fround(c[2]);
+  SKYR.rect(x, y, w, h, q, Math.fround(Math.min(1, a)));
 }
-function skyRectsEnd() { if (SKYR.n) NSKY.rects(C, SKYR.R, SKYR.n); SKYR.n = 0; }
+function skyRectsEnd() { frameRects(C, SKYR, { op: 'source-over', key: 'gsky:draw' }); }
+// a gradient down a rectangle of C (x, y, w, h), as createLinearGradient(0, y0, 0, y1) fills it: stops [[at, [r, g, b], alpha], ...] (8 at most)
+const skyGrad = (x, y, w, h, y0, y1, stops) => frameGrad(C, x, y, w, h, y0, y1, stops, { op: 'source-over', key: 'gsky:draw' });
 // (Nov 1) each of the 340 stars' hashes - its place across and up, its twinkle, its colour, its size - worked out once (hash is a
 // plain function of k: the same numbers as worked out each frame); the star colour's array, filled a star at a time; a meteor's
 let STARH = null;
@@ -31913,7 +31961,7 @@ function renderSky() {
   // (OPEN WORLD: the sky goes on up into space, user Oct 25 late - the darkening starts higher and reaches black at the
   // edge of space, with the atmosphere's layers between: see drawAtmosphere)
   if (spB > T - 4000 && spA > T) {
-    NSKY.vgrad(C, Lp, T, Wp, Math.max(0, spA - T), spB, spA, [[0, [3, 5, 18], 0.96], [0.45, [8, 14, 44], 0.7], [1, [14, 26, 70], 0]]);
+    skyGrad(Lp, T, Wp, Math.max(0, spA - T), spB, spA, [[0, [3, 5, 18], 0.96], [0.45, [8, 14, 44], 0.7], [1, [14, 26, 70], 0]]);
   }
   drawAtmosphere(Lp, T, Wp, yW);
   // stars (above the clouds the night is always clear; the clouds are drawn over them)
@@ -32142,8 +32190,8 @@ function drawAtmosphere(Lp, T, Wp, yW) {
     g.push([u, c, a + (1 - a) * nk * 0.6 * (a > 0 ? 1 : 0)]);
   }
   g.push([1, [4, 3, 12], 1]);
-  // (laid natively, Nov 10 - NSKY.vgrad, NSKY.rects: the gradient's stops, as createLinearGradient's from the bottom band up; 8 at most)
-  NSKY.vgrad(C, Lp, Math.max(T, yTop - 4), Wp, Math.max(0, Math.min(y0, yW) - Math.max(T, yTop - 4)), y0, yTop, g);
+  // (laid natively, Nov 10 - skyGrad, skyRect: the gradient's stops, as createLinearGradient's from the bottom band up; 8 at most)
+  skyGrad(Lp, Math.max(T, yTop - 4), Wp, Math.max(0, Math.min(y0, yW) - Math.max(T, yTop - 4)), y0, yTop, g);
   skyRectsBegin();
   if (yTop > T) skyRect(Lp, T, Wp, yTop - T + 1, [4, 3, 12], 1);
   // (the layers' edges: a faint pale line along each, the "-pause")
@@ -32160,8 +32208,8 @@ function drawAtmosphere(Lp, T, Wp, yW) {
   const yE = Math.round(PY(ATMO_TOP));
   if (yE > T - 2 && yE < yW) {
     const gh = Math.max(6 * lw, Math.round((PY(ATMO_UPPER) - yE) * 0.6)), hu = Math.max(3 * lw, Math.round(gh * 0.18)), k = 1 - 0.5 * nk;
-    NSKY.vgrad(C, Lp, yE - hu, Wp, hu, yE - hu, yE, [[0, [70, 130, 255], 0], [1, [95, 160, 255], 0.65 * k]]);   // (the glow thinning out into space above the line)
-    NSKY.vgrad(C, Lp, yE, Wp, gh, yE, yE + gh, [[0, [105, 170, 255], 0.95 * k], [0.3, [75, 140, 250], 0.65 * k], [1, [55, 105, 230], 0]]);   // (the bright band, fading down into the upper atmosphere)
+    skyGrad(Lp, yE - hu, Wp, hu, yE - hu, yE, [[0, [70, 130, 255], 0], [1, [95, 160, 255], 0.65 * k]]);   // (the glow thinning out into space above the line)
+    skyGrad(Lp, yE, Wp, gh, yE, yE + gh, [[0, [105, 170, 255], 0.95 * k], [0.3, [75, 140, 250], 0.65 * k], [1, [55, 105, 230], 0]]);   // (the bright band, fading down into the upper atmosphere)
     skyRectsBegin(); skyRect(Lp, yE, Wp, Math.max(1, lw), [190, 225, 255], 0.8 * k); skyRectsEnd();
   }
 }
@@ -32172,6 +32220,7 @@ function drawAtmosphere(Lp, T, Wp, yW) {
 const BUBBLE_COLS = [0, 1, 2, 3, 4, 5].map(i => { const k = i / 5 * 0.72, m = c => rgbs(mix3(c, [22, 52, 104], k));
   return ['rgba(' + mix3([190, 232, 255], [22, 52, 104], k).map(Math.round).join(',') + ',0.85)', m([244, 252, 255]), 'rgba(' + mix3([214, 242, 255], [22, 52, 104], k).map(Math.round).join(',') + ',0.9)']; });
 let ysW = new Float64Array(64);   // (this view's surface heights a column, this frame: renderObjects' own)
+const DUSK_R = frameRectList();   // (the low sun's silhouettes - renderObjects)
 function renderObjects() {
   const x0 = CAMPX / SV, x1 = x0 + VWW;
   const ema = (k, t0) => { let rb = 0; if (probe.on) { probeFlush(C); rb = probe.cost; } if (GPUT.cur) gptLap(k, 0); const t1 = performance.now(); FT[k] = (FT[k] || 0) + Math.max(0, t1 - t0 - rb); return t1; };
@@ -32284,14 +32333,14 @@ function renderObjects() {
   ot = ema('obMid', ot);
   // front water uses the surface sampled above, one pixel column at a time
   if (E.sunset > 0.03) {
-    // against a low sun, ships, docks, towers and birds above the water read as dark silhouettes - over what's drawn only (atop), by the ground's
-    // blocks (50-land-zz-blocks.js): over the surface line (a pixel under it) a run of columns at a time, from the view's top
-    const DK = [29, 26, 61], top = -SHY - 40;
-    for (let c = -3; c < VWP + 3;) { const y = ys[c + 3] + 1; let e = c + 1; while (e < VWP + 3 && ys[e + 3] + 1 === y) e++; if (y > top) gbRect(c, top, e - c, y - top, DK, 0.9 * E.sunset); c = e; }
+    // against a low sun, ships, docks, towers and birds above the water read as dark silhouettes - over what's drawn only (atop), by the frame's
+    // rectangles (src/gpu/61-rects.js): over the surface line (a pixel under it) a run of columns at a time, from the view's top
+    const DK = [29, 26, 61], top = -SHY - 40, R = DUSK_R;
+    for (let c = -3; c < VWP + 3;) { const y = ys[c + 3] + 1; let e = c + 1; while (e < VWP + 3 && ys[e + 3] + 1 === y) e++; if (y > top) R.rect(c, top, e - c, y - top, DK, 0.9 * E.sunset); c = e; }
     // and their underwater parts darken too, fading with depth (to nothing 60 under the water's line)
     const wA = PY(WATER_Y - 30), wY = PY(WATER_Y), wB = PY(WATER_Y + 60);
-    gbRect(-3, wA, VWP + 6, wY - wA, DK, 0.75 * E.sunset); gbRect(-3, wY, VWP + 6, wB - wY, DK, 0.75 * E.sunset, DK, 0);
-    gbFlush('atop');
+    R.rect(-3, wA, VWP + 6, wY - wA, DK, 0.75 * E.sunset); R.rect(-3, wY, VWP + 6, wB - wY, DK, 0.75 * E.sunset, DK, 0);
+    frameRects(C, R, { op: 'source-atop', key: 'ground:blocks' });
   }
   drawPlanesAir(x0, x1);
   const lampV = lampSnapshot();                           // (the sub lamps: what's under the water as it is, before the water's tint - 27-sub-light)
@@ -35322,14 +35371,14 @@ function fireBind(map, layout, c, entries) {
 function firePut(F) {
   const ctx = C;
   if (!GPU.on || GPU.lost || GLR.lost || !(ctx instanceof GLCtx)) return;
-  const X = fxBegin(ctx); if (!X) return;
+  const X = frameDrawBegin(ctx); if (!X) return;
   fireShared();
   const W = F.W, H = F.H, L = F.L, n = L.length >> 2, grid = fireGrid(W * H);
   // 1. the heat: the grid cleared, then the flames in pieces of at most 65535 (a workgroup each - each piece's block in the arena,
   // 16 bytes a flame after its 16-byte head)
   const cp = gpuComputeBegin([grid], 'smoke');
   for (let a = 0; a < n; a += 65535) {
-    const k = Math.min(n, a + 65535) - a, [c, off] = arenaAlloc(16 + k * 16, 256), w0 = off >> 2, Wd = pxWords(c), Fl = Wd.f, U = Wd.u;
+    const k = Math.min(n, a + 65535) - a, [c, off] = arenaAlloc(16 + k * 16, 256), w0 = off >> 2, Wd = arenaWords(c), Fl = Wd.f, U = Wd.u;
     U[w0] = W; U[w0 + 1] = H; U[w0 + 2] = (off + 16) >> 4; U[w0 + 3] = k;
     for (let i = 0; i < k; i++) { const s = (a + i) * 4, o = w0 + 4 + i * 4; Fl[o] = L[s] - F.bx0; Fl[o + 1] = L[s + 1] - F.by0; Fl[o + 2] = L[s + 2]; Fl[o + 3] = L[s + 3]; }
     cp.setBindGroup(0, fireBind(FIRE.hb, FIRE.hbgl, c, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: 16 } }, { binding: 1, resource: { buffer: c.gb } }, { binding: 2, resource: { buffer: grid.gb } }]), [off]);
@@ -35338,7 +35387,7 @@ function firePut(F) {
   }
   cp.end();
   // 2. the colours, where the picture goes
-  const t = ctx.target, s = ctx.s, [c, off] = arenaAlloc(256, 256), w0 = off >> 2, Wc = pxWords(c), Fc = Wc.f;
+  const t = ctx.target, s = ctx.s, [c, off] = arenaAlloc(256, 256), w0 = off >> 2, Wc = arenaWords(c), Fc = Wc.f;
   glCorners(s.m, F.dx, F.dy, F.dw, F.dh);
   const X4 = GLC4.x, Y4 = GLC4.y;
   Fc[w0] = t._w; Fc[w0 + 1] = t._h; Fc[w0 + 2] = W; Fc[w0 + 3] = H;
@@ -35346,10 +35395,10 @@ function firePut(F) {
   Wc.u.set(FIRE_TQ, w0 + 12); Wc.u[w0 + 19] = 0;
   Fc[w0 + 20] = Math.fround(Math.round(s.ga * 255) / 255); Fc[w0 + 21] = Fc[w0 + 22] = Fc[w0 + 23] = 0;   // (the context's alpha, as glAlpha gives it)
   const B = PXL.b255; for (let k = 0; k < 7; k++) { const p = FIRE_PAL[k], o = w0 + 24 + k * 4; Fc[o] = B[p[0]]; Fc[o + 1] = B[p[1]]; Fc[o + 2] = B[p[2]]; Fc[o + 3] = 1; }
-  const key = fxKey(X);
+  const key = frameDrawKey(X);
   let pipe = FIRE.col.get(key);
-  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FIRE.cpl, vertex: { module: FIRE.cm, entryPoint: 'vs' }, fragment: { module: FIRE.cm, entryPoint: 'fs', targets: [fxColour(X.FT.tex, X.op, X.screen)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, fxStencil(X.ds))); FIRE.col.set(key, pipe); }
-  const pass = fxPass(X, 'fire');
+  if (!pipe) { pipe = gpuRenderPipe(Object.assign({ layout: FIRE.cpl, vertex: { module: FIRE.cm, entryPoint: 'vs' }, fragment: { module: FIRE.cm, entryPoint: 'fs', targets: [frameDrawColour(X)] }, primitive: { topology: 'triangle-list', cullMode: 'none' } }, frameDrawStencil(X))); FIRE.col.set(key, pipe); }
+  const pass = frameDrawPass(X, 'fire');
   pass.setPipeline(pipe);
   pass.setBindGroup(0, fireBind(FIRE.cb, FIRE.cbgl, c, [{ binding: 0, resource: { buffer: c.gb, offset: 0, size: 256 } }, { binding: 1, resource: { buffer: grid.gb } }]), [off]);
   pass.draw(6);
@@ -35419,7 +35468,7 @@ function shipCut(x0, x1, draw, box) {
     lc.restore();
     C = main; fsLast = null;
   }
-  main.save(); main.setTransform(1, 0, 0, 1, 0, 0); main.globalCompositeOperation = 'source-over'; fxLayer(main, cutCv, X, Y, w, h, X, Y, w, h); main.restore();   // (laid back natively - 40-zzzz-layers.js)
+  main.save(); main.setTransform(1, 0, 0, 1, 0, 0); main.globalCompositeOperation = 'source-over'; frameLayTarget(main, cutCv, X, Y, w, h, X, Y, w, h); main.restore();   // (laid back natively - src/gpu/60-draw.js frameLayTarget)
 }
 function renderOverlays() {
   const x0 = CAMPX / SV, x1 = x0 + VWW;
@@ -41006,6 +41055,7 @@ artFamily(() => { artPut(inkArt || buildInkArt()); artPut(inkHaloArt || buildInk
    face slopes from the quay down and out to the sea floor, the earth packed in behind it - not a straight cut
    between the land and the sea. Drawn with the land (its own earth, mirrored out from the shore), under the water's
    colour, a pale concrete edge along the slope. */
+const COAST_R = frameRectList();   // (the dark under the hangars: the frame's rectangles - src/gpu/61-rects.js)
 function drawCoastWedges(x0, x1) {
   // (the dock chat, Oct 29: no embankment of earth at a harbour now; a coast with no harbour is a beach, as before. User:
   // "the ground below the hangar should be just pitch black" - painted here, in the land's pass, so the water's tint
@@ -41014,9 +41064,9 @@ function drawCoastWedges(x0, x1) {
     const [ha, hb] = hangarSpan(d);
     if (offView(ha, hb, x0, x1)) continue;
     const L = Math.round(PX(ha)), R = Math.round(PX(hb)), T0 = Math.round(PY(HANGAR_BOT + dkY(d)));   // (at its own water's)
-    gbRect(L, T0, R - L, bh + SHY + 50 - T0, UG_RGB);           // (the ground's blocks - 50-land-zz-blocks.js)
+    COAST_R.rect(L, T0, R - L, bh + SHY + 50 - T0, UG_RGB);
   }
-  gbFlush();
+  frameRects(C, COAST_R, { op: 'source-over', key: 'ground:blocks' });
 }
 
 /* ================================================================
@@ -43286,7 +43336,7 @@ function islEdDraw() {
    the blood behind (lumpy clouds in blocks of two cells and three tones, the chunks with their ragged corners - krAdd's blend), then
    all black: the pieces cut off and the arms (each a tapered tube between two points of its curve, its discs' union), the head (each
    cell tested against its outline in the head's own frame - krHeadW, krHeadRag) and its base. That picture is laid into the context
-   (fxLay - nearest, the context's blend, clip and alpha). Its rim in the lamps (a cell of it whose neighbour toward a lamp is open water,
+   (frameLay, src/gpu/60-draw.js - nearest, the context's blend, clip and alpha). Its rim in the lamps (a cell of it whose neighbour toward a lamp is open water,
    as bright as the beam there - lampBeamAt) and its eyes are pictures of cells of their own, made the same way and laid on as light
    after the night and the deep's dark (lateLit). Each kraken keeps its pictures, one set a view (made again on a new device).
    ================================================================ */
@@ -43443,7 +43493,7 @@ function krgMake(key, src) {
 function krgLay(t, w, h, dx, dy, cs, light) {
   if (!t || !(C instanceof GLCtx) || GLR.lost) return;
   if (light) { C.save(); C.globalCompositeOperation = 'lighter'; }
-  fxLay(C, t, 0, 0, w, h, 0, dx, dy, w * cs, h * cs);
+  frameLay(C, t, 0, 0, w, h, 0, dx, dy, w * cs, h * cs);
   if (light) C.restore();
 }
 /* ---- its shapes (the cells' numbers as krCol / krRow give them: a point's column + 1 - the buffer's margin, as the Lab's code) ---- */
@@ -45141,8 +45191,9 @@ function lakeEdDraw() {
    drawn by the ocean's own drawing from its own surface (drawLakeRoots, 50-land-lake.js; the shadows: drawShipShadows with
    lake set, 44-shadows-seafloor.js). Left here: the flowers on the far grass ---- */
 const LK = { p: () => Math.max(1, Math.round(SV * 1.1)) };   // (the flowers' pixel at this zoom)
-// a rectangle in a colour given as numbers, on whole pixels (the ground's blocks - gbRect, 50-land-zz-blocks.js)
-function lakeRect(X, Y, W, H, col) { gbRect(Math.round(X), Math.round(Y), Math.max(1, Math.round(W)), Math.max(1, Math.round(H)), col); }
+// a rectangle in a colour given as numbers, on whole pixels (the frame's rectangles - frameRects, src/gpu/61-rects.js)
+const LAKE_R = frameRectList();
+function lakeRect(X, Y, W, H, col) { LAKE_R.rect(Math.round(X), Math.round(Y), Math.max(1, Math.round(W)), Math.max(1, Math.round(H)), col); }
 // flowers on the far grass (user Oct 26: "the flowers I added on the background grass plane to break it up a bit"):
 // purple spikes and white and yellow heads, in little groups, across the green country's field
 let fieldFlowers = null;
@@ -45159,7 +45210,7 @@ function drawFieldFlowers(x0, x1) {
   if (!fieldFlowers) buildFieldFlowers();
   const p = LK.p(), t = time, wnd = clamp((E.windU || 0) / 60, -1, 1), dim = clamp(0.35 + 0.65 * E.light, 0.25, 1);
   const shade = c => c.map(v => Math.round(v * dim));
-  // (the five colours shaded once a draw, not a fresh array a rectangle; the rectangles drawn together at the end - gbFlush)
+  // (the five colours shaded once a draw, not a fresh array a rectangle; the rectangles drawn together at the end - frameRects)
   const STALK = shade([62, 120, 52]), LUP = shade([150, 104, 206]), LUPT = shade([196, 160, 236]), DAISY = shade([244, 244, 236]), BUTTER = shade([246, 214, 70]);
   // (user Nov 8 11:48) the meadow's flowers fade with it - their deck's ATMOSPHERE in their biome (deckHaze; the field: the grid's field behind, ggBackDraw)
   const fHz = mix3(E.skyHor || [180, 200, 220], E.skyTop || E.skyHor || [120, 170, 230], 0.3), fHC = {};
@@ -45177,7 +45228,7 @@ function drawFieldFlowers(x0, x1) {
     if (f.kind === 0) { for (let yy = f.h * 0.4; yy < f.h; yy += p / SV) lakeRect(PX(f.x + sw * yy / f.h) - p * 0.5, PY(foot - yy) - p, p * 2, p, yy > f.h * 0.85 ? cLT : cL); }   // (a lupine's purple spike)
     else lakeRect(PX(f.x + sw) - p, PY(foot - f.h) - p, p * 2, p * 2, f.kind === 1 ? cD : cB);   // (a daisy or a buttercup)
   }
-  gbFlush();
+  frameRects(C, LAKE_R, { op: 'source-over', key: 'ground:blocks' });
 }
 
 /* ---- the harbour lighthouse (OPEN WORLD, user Oct 26, with pictures: gen/open/ref/dock_crane_lighthouse_design_oct26.png
@@ -50229,7 +50280,7 @@ function ltDirty(c0, c1, r0, r1) {
   const ug = Math.ceil(ugReach() / LT_CELL) + 2;   // (the light's reach: a slice beside the change sees it too - ltDist; the day's light into the back, landDarkMake)
   ggDirty(c0 - ug, c1 + ug, r0 == null ? null : r0 - ug, r1 == null ? null : r1 + ug);
   for (let k = Math.max(0, Math.floor((c0 - ug) / LT_CHUNK)); k <= Math.min(land.dirty.length - 1, Math.floor((c1 + ug) / LT_CHUNK)); k++) { land.dirty[k] = 1; if (land.dug) land.dug[k] = 1; }   // (dug: not as built - its pictures painted again at the next build, landSig)
-  lightDirty(c0, c1);                                          // (the one light's cells put again - 50-land-zz-light.js)
+  cellsDirty(c0, c1);                                          // (the world's cells on the GPU put again - 50-land-zz-cells.js, 'ground.cells')
   if (land.cspan) for (let c = Math.max(0, c0 - 1); c <= Math.min(land.cols - 1, c1 + 1); c++) land.cspan[c] = null;   // (the rock everything meets there found again - gndSpans)
   landChanged(c0 * LT_CELL, (c1 + 1) * LT_CELL);              // (what rests there looks again at what's under it - 50-land-rest)
 }
@@ -54427,7 +54478,7 @@ function* wcFillGen() {
   WC.ver++;
 }
 // the awake slices and the ones beside them, as one block of cells (WD): what's open (0 rock, 1 open, 2 the ocean's), the amounts; stepped there
-// W_SUB times with plain arrays, then put back in the slices. The block's open cells kept while the ground doesn't change (LIGHT.ver)
+// W_SUB times with plain arrays, then put back in the slices. The block's open cells kept while the ground doesn't change (WC.cver)
 const WDS = new Map();   // (each run's block, kept by where it starts: its open cells while the ground doesn't change)
 function wcStepBlock(ka, kb, chg) {
   const nk = WC.act.length;
@@ -54726,69 +54777,6 @@ defTable('landWater', () => WC.s.map((A, k) => A ? { id: k + 1, k } : null).filt
   after: () => { WC.ver++; waterApply(); },
 });
 
-/* ================================================================
-   THE GROUND'S BLOCKS (engine part 2, Nov 10): rectangles of a colour - or of a colour going to another down them - drawn by a pass of
-   their own into the layer C draws into, after what C drew so far (no GL front): the field's flowers (drawFieldFlowers), the dark under a
-   harbour's hangar (drawCoastWedges), the low sun's dark over what stands above the water (renderObjects' dusk silhouettes).
-     gbRect(X, Y, W, H, col, a[, col2, a2])  one queued, in the context's pixels (PX / PY), colours 0-255, alphas 0-1 (col2 / a2: at its foot -
-                                              the colour goes from one to the other down it)
-     gbFlush(op)                              the queue drawn, in the order queued: op 'over' (source-over) or 'atop' (source-atop: only over
-                                              what's there, its alpha kept) - inside the context's clip (its stencil's bit 0x80) and scissor
-   Every GPU call through src/gpu/ (gpuModule, gpuBindLayout, gpuRenderPipe, gpuBindGroup, arenaAlloc - ggArena, the ground's pass - ggPassDraw);
-   the camera is the frame's (frameCam). The queue is one typed array, grown in steps, never shrunk.
-   ================================================================ */
-const GB = { f: new Float32Array(12 * 1024), n: 0, prs: null };
-const GB_MAX = 65536;                                          // (rectangles in one draw at most - more go in the next)
-const GB_WGSL = `
-struct VO { @builtin(position) p: vec4f, @location(0) c: vec4f }
-// the view's camera (frameCam): left px, top px, scale, zoom | view x on the target, view width (world), target w, h | time, view, shake x, y
-@group(0) @binding(0) var<storage, read> K: array<vec4f, 4>;
-// a rectangle: x0 y0 x1 y1 (the view's pixels) | its colour at its top, premultiplied | at its foot
-@group(0) @binding(1) var<storage, read> R: array<vec4f>;
-@vertex fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VO {
-  let a = R[ii * 3u]; let u = f32(vi & 1u); let v = f32((vi >> 1u) & 1u);
-  let ox = K[1].x + K[2].z;
-  let X = clamp(mix(a.x, a.z, u) + ox, K[1].x, K[1].x + K[1].y * K[0].z); let Y = mix(a.y, a.w, v) + K[2].w;   // (inside the view's own columns)
-  var o: VO; o.p = vec4f(X / K[1].z * 2.0 - 1.0, Y / K[1].w * 2.0 - 1.0, 0.0, 1.0); o.c = mix(R[ii * 3u + 1u], R[ii * 3u + 2u], v);   // (the target's rows: WebGL's, bottom up - as the ground's draw)
-  return o;
-}
-@fragment fn fs(i: VO) -> @location(0) vec4f { return i.c; }
-`;
-function gbRect(X, Y, W, H, col, a = 1, col2, a2) {
-  if (!(W > 0 && H > 0)) return;
-  if ((GB.n + 1) * 12 > GB.f.length) { const g = new Float32Array(GB.f.length * 2); g.set(GB.f); GB.f = g; }
-  const f = GB.f, o = GB.n++ * 12, c2 = col2 || col, b = a2 == null ? a : a2;
-  f[o] = X; f[o + 1] = Y; f[o + 2] = X + W; f[o + 3] = Y + H;
-  f[o + 4] = col[0] / 255 * a; f[o + 5] = col[1] / 255 * a; f[o + 6] = col[2] / 255 * a; f[o + 7] = a;
-  f[o + 8] = c2[0] / 255 * b; f[o + 9] = c2[1] / 255 * b; f[o + 10] = c2[2] / 255 * b; f[o + 11] = b;
-}
-// (a pipeline for the target's format, the clip's stencil format (or none) and the op)
-function gbPipe(fmt, sf, op) {
-  const key = fmt + '|' + (sf || '') + '|' + op; GB.prs = GB.prs && GB.prs.ep === GPU.ep ? GB.prs : { ep: GPU.ep };
-  if (GB.prs[key]) return GB.prs[key];
-  const md = gpuModule(GB_WGSL, 'ground blocks'), V = GPUShaderStage.VERTEX;
-  const rl = gpuBindLayout([{ binding: 0, visibility: V, buffer: { type: 'read-only-storage' } }, { binding: 1, visibility: V, buffer: { type: 'read-only-storage' } }], 'ground blocks');
-  const sop = { compare: 'equal', failOp: 'keep', depthFailOp: 'keep', passOp: 'keep' };
-  const ds = sf ? { format: sf, stencilFront: sop, stencilBack: sop, stencilReadMask: 0x80, stencilWriteMask: 0, ...(gpuHasDepth(sf) ? { depthWriteEnabled: false, depthCompare: 'always' } : {}) } : undefined;
-  const PM = { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' };
-  const blend = op === 'atop' ? { color: { srcFactor: 'dst-alpha', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'zero', dstFactor: 'one' } } : { color: PM, alpha: PM };
-  return (GB.prs[key] = { rl, draw: gpuRenderPipe({ layout: gpuPipeLayout([rl], 'ground blocks'), vertex: { module: md, entryPoint: 'vs' }, fragment: { module: md, entryPoint: 'fs', targets: [{ format: fmt, blend }] }, primitive: { topology: 'triangle-strip' }, depthStencil: ds }) });
-}
-function gbFlush(op = 'over') {
-  const n = GB.n; GB.n = 0;
-  if (!n || !GPU.on || GPU.lost || !GPU.dev) return;
-  const clip = !!(C.s && C.s.clip), sc = C.s && C.s.sc;
-  if (clip) glBegin(C, 'source-over');                         // (the clip in the target's stencil - built if it isn't this one)
-  frameFlush();
-  const T = frameTarget(C); if (!T || !T.tex || !T.tex.view) return;
-  const sten = clip && T.stencil && T.stencil.view ? T.stencil : null, R = gbPipe(T.tex.fmt, sten ? sten.fmt : null, op), K = frameCam(viewIdx, cam.view[viewIdx], T.w, T.h);
-  for (let i0 = 0; i0 < n; i0 += GB_MAX) {
-    const m = Math.min(GB_MAX, n - i0);
-    const bg = gpuBindGroup(R.rl, [{ binding: 0, resource: K }, { binding: 1, resource: ggArena(GB.f.subarray(i0 * 12, (i0 + m) * 12)) }], 'ground blocks');
-    ggPassDraw(T.tex, sten, { sc, th: T.h }, R, bg, m);
-  }
-}
-
 /* ---- ONE CAVE WORLD, ITS LOOK (user Nov 8 19:06, the caves module's own drawing taken out; 19:07: "Make sure the way we edit caves is still the
    same even with the new ones, so we don't lose any of that functionality"). Every cave - a HOLE shape, in the land or under the sea - looks as
    its biome's CAVE tab says (Biome Editor > CAVES, BIOME_CAVE - 09-zz-biomes.js: ROUGHNESS, STALACTITES, STALACTITE LENGTH, STALAGMITES, SAND, WEED,
@@ -54949,6 +54937,85 @@ function drawInCaves(x0, x1) {
   C.save(); frameClip(C, R);                                   // (a part's own clip: the spans' union - src/gpu)
   try { for (const fn of L) fn(); } finally { C.restore(); }
 }
+
+/* ---- THE WORLD'S CELLS ON THE GPU - the ground's share 'ground.cells' (the skeleton tidy, Nov 11: was the light's own copy, LIGHT.cb in
+   50-land-zz-light.js - light-cpu, Nov 10). The whole world's cells, one buffer, made when the ground is made or changes and read by any part's
+   shader wherever it looks - nothing put per frame, at any zoom, for any number of views. Its words:
+   - each slice k (4): its top and bottom rows (land.rT, rB), where its cells start (land.base: in land.cell's own order - ltIdx), its columns (cw);
+   - each column (from ruO): the first row under the land's line as built (land.surf; at sea, or an island's column, the first rock from the top);
+   - the rock (from bitO): a bit a cell of land.cell - not air.
+   A slice is written when a part first needs it (its cells laid and made whole first - ltFillSlice, landEnsure) and again when the ground changes
+   in it (cellsDirty from ltDirty). Out of the world's columns (and under every slice's rows) the cells are worked out by the accessor as they were put.
+   WHAT A PART GETS (frameShared('ground.cells')):
+     wgsl          the accessor: fn celAt(c: i32, r: i32, n: vec4f) -> vec2f - x rock, y under the built line - reading the taker's own binding
+                   `cel: array<u32>` (read-only storage: the buffer below); n: n() as a vec4f
+     buf()         the buffer (a gpuBuf record) with the ground's changes in what's there written - or null (no ground, or too big for a binding)
+     need(cA, cB)  the slices of columns cA..cB - 1 written (after buf())
+     n()           [the world's columns, its rows (LT_ROWS: past the world's ends rock from there down), ruO, bitO]
+     ver           goes up whenever what the buffer holds changes (a cache's key) ---- */
+const GCELLS = { cb: null, cw: null, ci: null, ok: null, cellRef: null, ruO: 0, bitO: 0, dirty: [], ver: 0 };
+// (ltDirty) the ground changed in columns c0..c1: those of their slices already written, written again before the next read (each once)
+function cellsDirty(c0, c1) {
+  const Q = GCELLS; Q.ver++; if (!Q.ok || Q.cellRef !== land.cell) return;
+  for (let k = Math.max(0, Math.floor(c0 / LT_CHUNK)), k1 = Math.min(Q.ok.length - 1, Math.floor(c1 / LT_CHUNK)); k <= k1; k++) if (Q.ok[k] === 1) { Q.ok[k] = 2; Q.dirty.push(k); }
+}
+// the buffer for this ground on this device (a new ground, or a device: every slice written again as it's needed)
+function cellsMake() {
+  const Q = GCELLS, nk = land.rT.length, cols = land.cols;
+  if (Q.cb && Q.cb.ep === GPU.ep && Q.cellRef === land.cell) return true;
+  gpuBufFree(Q.cb); Q.cb = null;
+  Q.ruO = 4 * nk; Q.bitO = Q.ruO + cols; const n = Q.bitO + Math.ceil(land.base[nk] / 32) + 1;
+  if (n * 4 > GPU.lim.maxStorageBufferBindingSize) return false;
+  Q.cw = new Uint32Array(n); Q.ci = new Int32Array(Q.cw.buffer); Q.ok = new Uint8Array(nk);
+  for (let k = 0; k < nk; k++) Q.ci.set([land.rT[k], land.rB[k], land.base[k], land.cw[k]], 4 * k);
+  Q.cb = gpuBuf(n * 4, 'ground'); gpuWriteBuf(Q.cb.gb, 0, new Uint8Array(Q.cw.buffer, 0, 4 * nk * 4));
+  Q.cellRef = land.cell; Q.dirty.length = 0; Q.ver++;
+  return true;
+}
+// the buffer, with the ground's changes in what's there written: null when it can't be
+function cellsBuf() {
+  if (!land.cell || !gpuAlive() || !cellsMake()) return null;
+  const Q = GCELLS; for (const k of Q.dirty) cellsSlice(k); Q.dirty.length = 0;
+  return Q.cb;
+}
+// the slices of columns cA..cB - 1 there
+function cellsNeed(cA, cB) {
+  const Q = GCELLS; if (!Q.ok) return; const nk = Q.ok.length;
+  for (let k = clamp(Math.floor(cA / LT_CHUNK), 0, nk - 1), kB = clamp(Math.floor((cB - 1) / LT_CHUNK), 0, nk - 1); k <= kB; k++) if (!Q.ok[k]) cellsSlice(k);
+}
+// slice k into the buffer: its cells final first, then its columns' rows under the line and its rock
+function cellsSlice(k) {
+  const Q = GCELLS, c0 = k * LT_CHUNK, c1 = Math.min(land.cols, c0 + LT_CHUNK);
+  ltFillSlice(k); if (!LAND_RAW && land.sOK && !land.sOK[k]) landEnsure(k);
+  const rT = land.rT[k], rB = land.rB[k], cell = land.cell;
+  // (under the line: the land's built line; at sea, under the floor - the first rock from the top, so a cave under it is in the ground and the open
+  // water over it isn't)
+  for (let c = c0; c < c1; c++) {
+    let ru = land.surf ? Math.ceil((land.surf[c] - LT_Y0) / LT_CELL) : 1 << 30;
+    if (land.onl && !land.onl[c]) { ru = rT; while (ru < rB && cell[ltIdx(c, ru)] === M_AIR) ru++; }
+    else if (isleSeaCol(c)) { ru = Math.max(rT, isleSeaRow()); while (ru < rB && cell[ltIdx(c, ru)] === M_AIR) ru++; }   // (an island: the open sea under it too - its floor's the line)
+    Q.ci[Q.ruO + c] = Math.min(ru, 1 << 30);
+  }
+  const i0 = land.base[k], i1 = land.base[k + 1], W = Q.cw, B = Q.bitO, w0 = i0 >> 5, w1 = (i1 + 31) >> 5;
+  for (let i = i0; i < i1; i++) { const w = B + (i >> 5), m = 1 << (i & 31); if (cell[i] !== M_AIR) W[w] |= m; else W[w] &= ~m; }
+  const u8 = new Uint8Array(W.buffer); gpuWriteBuf(Q.cb.gb, (Q.ruO + c0) * 4, u8.subarray((Q.ruO + c0) * 4, (Q.ruO + c1) * 4));
+  if (w1 > w0) gpuWriteBuf(Q.cb.gb, (B + w0) * 4, u8.subarray((B + w0) * 4, (B + w1) * 4));
+  Q.ok[k] = 1; Q.ver++;
+}
+// (WGSL) the world's cell (c, r) from the buffer (bound by the taker as cel - cellsSlice's layout): x rock, y under the built line; n: the world's
+// columns, its rows (LT_ROWS: past the world's ends rock from there down), where the columns' rows and the rock's bits start
+const GROUND_CELL_WGSL = `
+fn celAt(c: i32, r: i32, n: vec4f) -> vec2f {
+  if (c < 0 || c >= i32(n.x)) { return vec2f(select(0.0, 1.0, r >= i32(n.y)), 0.0); }   // (past the world's ends: the open floor's rock under the grid)
+  let k = u32(c) / ${LT_CHUNK}u; let rT = bitcast<i32>(cel[4u * k]); let rB = bitcast<i32>(cel[4u * k + 1u]);
+  let un = select(0.0, 1.0, r >= bitcast<i32>(cel[u32(n.z) + u32(c)]));
+  if (r >= rB) { return vec2f(1.0, un); }
+  if (r < rT) { return vec2f(0.0, un); }
+  let i = u32(bitcast<i32>(cel[4u * k + 2u]) + (r - rT) * bitcast<i32>(cel[4u * k + 3u]) + (c - i32(k) * ${LT_CHUNK})); let w = cel[u32(n.w) + (i >> 5u)];
+  return vec2f(f32((w >> (i & 31u)) & 1u), un);
+}`;
+const GCELLS_SHARE = { wgsl: GROUND_CELL_WGSL, buf: cellsBuf, need: cellsNeed, n: () => [land.cols, LT_ROWS, GCELLS.ruO, GCELLS.bitO], get ver() { return GCELLS.ver; } };
+frameShare('ground.cells', () => GCELLS_SHARE);
 
 /* ================================================================
    THE GROUND'S ONE SHADER (engine part 2, Nov 9 - engine-design "Ground and caves"): WGSL, read with the grid on the GPU
@@ -56701,8 +56768,8 @@ const vegFadeKeep = (x, salt, isl) => { const f = vegFadeAt(x, isl); return f >=
    it goes in under the line; every lamp of the game's one list (subLamps: subs, minisubs, helicopters, cars, lighthouses) is another, its beam's own
    shape (the game's lampBeamAt) and reach.
    Worked on the GPU each frame for the view, at the land's cells (LT_CELL; a few cells a texel when zoomed far out - LS):
-   1. the world's cells (rock, under the line) kept on the GPU, each slice written when first needed and when the ground changes in it (LIGHT.cb -
-      lightCells, lightSlice; lightDirty from ltDirty);
+   1. the world's cells (rock, under the line) on the GPU: the ground's - frameShared('ground.cells') (50-land-zz-cells.js), each slice written
+      when first needed and when the ground changes in it;
    2. fsA: each open cell's light - the sun's rays (a few, spread a little) and the lamps', each marched through the cells till rock stops it;
    3. the rock: each rock cell lit as the ground's fade from the open cell that lights it best (an unlit one as if further off - a jump flood:
       fsJ), over the fade it was painted with from the nearest (ltFade) - a cave's walls as dark as the air in front of them;
@@ -56711,88 +56778,15 @@ const vegFadeKeep = (x, salt, isl) => { const f = vegFadeAt(x, isl); return f >=
    the jump flood, fsF the dark, fsLay laying it on the screen.
    The Biome Editor shows it all lit unless CAVE LIGHT is off (landAllLit). Replaces the dark painted with each slice (Nov 8 13:44, landDarkMake) and
    its per-frame lamp box ---- */
-const LIGHT = { reach: 280, steps: 5, rays: 5, spread: 0.09, sky: 0.55, skyRays: 7, skyFan: 1.3, lampK: 1.6, K: 32, ep: -1, mod: null, bl: null, pl: null, pipes: new Map(), white: null, V: [], ver: 0,
-  cb: null, cw: null, ci: null, ok: null, cellRef: null, ruO: 0, bitO: 0, dirty: [], wins: [], gen: 0 };
+const LIGHT = { reach: 280, steps: 5, rays: 5, spread: 0.09, sky: 0.55, skyRays: 7, skyFan: 1.3, lampK: 1.6, K: 32, ep: -1, mod: null, bl: null, pl: null, pipes: new Map(), white: null, V: [] };
 function landAllLit() { return (typeof VEG_MODE !== 'undefined' && VEG_MODE && VEG_CAVELIT) || (typeof landEdOn === 'function' && landEdOn()) || (typeof EDMODE !== 'undefined' && EDMODE.on); }
-/* THE LIGHT'S CELLS ON THE GPU (Nov 10, light-cpu: a two-player Battle spent 17 ms a frame here - both views at one zoom shared one ring of cells
-   that held only one view's box, so each view put its whole box again every frame, a cell at a time on the processor; zoomed out with one view
-   10 ms, the box following the camera). The whole world's cells the light needs, one buffer (LIGHT.cb), made when the ground is made or changes and
-   read by the shader wherever it looks - nothing put per frame, at any zoom, for any number of views. Its words:
-   - each slice k (4): its top and bottom rows (land.rT, rB), where its cells start (land.base: in land.cell's own order - ltIdx), its columns (cw);
-   - each column (from ruO): the first row under the land's line as built (land.surf; at sea, or an island's column, the first rock from the top);
-   - the rock (from bitO): a bit a cell of land.cell - not air.
-   A slice is written when the light first needs it (its cells laid and made whole first - ltFillSlice, landEnsure: as the ring's columns were) and
-   again when the ground changes in it (lightDirty from ltDirty). Out of the world's columns (and under every slice's rows) the cells are worked out
-   by the shader as they were put */
-// (ltDirty) the ground changed in columns c0..c1: those of their slices already written, written again before the next light (each once)
-function lightDirty(c0, c1) {
-  const Q = LIGHT; Q.ver++; if (!Q.ok || Q.cellRef !== land.cell) return;
-  for (let k = Math.max(0, Math.floor(c0 / LT_CHUNK)), k1 = Math.min(Q.ok.length - 1, Math.floor(c1 / LT_CHUNK)); k <= k1; k++) if (Q.ok[k] === 1) { Q.ok[k] = 2; Q.dirty.push(k); }
-}
-// the buffer for this ground on this device (a new ground, or a device: every slice written again as it's needed)
-function lightCells() {
-  const Q = LIGHT, nk = land.rT.length, cols = land.cols;
-  if (Q.cb && Q.cb.ep === GPU.ep && Q.cellRef === land.cell) return true;
-  gpuBufFree(Q.cb); Q.cb = null;
-  Q.ruO = 4 * nk; Q.bitO = Q.ruO + cols; const n = Q.bitO + Math.ceil(land.base[nk] / 32) + 1;
-  if (n * 4 > GPU.lim.maxStorageBufferBindingSize) return false;
-  Q.cw = new Uint32Array(n); Q.ci = new Int32Array(Q.cw.buffer); Q.ok = new Uint8Array(nk);
-  for (let k = 0; k < nk; k++) Q.ci.set([land.rT[k], land.rB[k], land.base[k], land.cw[k]], 4 * k);
-  Q.cb = gpuBuf(n * 4, 'light'); gpuWriteBuf(Q.cb.gb, 0, new Uint8Array(Q.cw.buffer, 0, 4 * nk * 4));
-  Q.cellRef = land.cell; Q.dirty.length = 0; Q.gen++; Q.ver++;
-  return true;
-}
-// the buffer, with the ground's changes in what's there written (lightCells): false when it can't be
-function lightCellsNow() {
-  const Q = LIGHT; if (!lightCells()) return false;
-  for (const k of Q.dirty) lightSlice(k); Q.dirty.length = 0;
-  return true;
-}
-// the slices of columns cA..cB - 1 there
-function lightNeed(cA, cB) {
-  const Q = LIGHT, nk = Q.ok.length;
-  for (let k = clamp(Math.floor(cA / LT_CHUNK), 0, nk - 1), kB = clamp(Math.floor((cB - 1) / LT_CHUNK), 0, nk - 1); k <= kB; k++) if (!Q.ok[k]) lightSlice(k);
-}
-// slice k into the buffer: its cells final first, then its columns' rows under the line and its rock
-function lightSlice(k) {
-  const Q = LIGHT, c0 = k * LT_CHUNK, c1 = Math.min(land.cols, c0 + LT_CHUNK);
-  ltFillSlice(k); if (!LAND_RAW && land.sOK && !land.sOK[k]) landEnsure(k);
-  const rT = land.rT[k], rB = land.rB[k], cell = land.cell;
-  // (under the line: the land's built line; at sea, under the floor - the first rock from the top, so a cave under it is in the ground and the open
-  // water over it isn't)
-  for (let c = c0; c < c1; c++) {
-    let ru = land.surf ? Math.ceil((land.surf[c] - LT_Y0) / LT_CELL) : 1 << 30;
-    if (land.onl && !land.onl[c]) { ru = rT; while (ru < rB && cell[ltIdx(c, ru)] === M_AIR) ru++; }
-    else if (isleSeaCol(c)) { ru = Math.max(rT, isleSeaRow()); while (ru < rB && cell[ltIdx(c, ru)] === M_AIR) ru++; }   // (an island: the open sea under it too - its floor's the line)
-    Q.ci[Q.ruO + c] = Math.min(ru, 1 << 30);
-  }
-  const i0 = land.base[k], i1 = land.base[k + 1], W = Q.cw, B = Q.bitO, w0 = i0 >> 5, w1 = (i1 + 31) >> 5;
-  for (let i = i0; i < i1; i++) { const w = B + (i >> 5), m = 1 << (i & 31); if (cell[i] !== M_AIR) W[w] |= m; else W[w] &= ~m; }
-  const u8 = new Uint8Array(W.buffer); gpuWriteBuf(Q.cb.gb, (Q.ruO + c0) * 4, u8.subarray((Q.ruO + c0) * 4, (Q.ruO + c1) * 4));
-  if (w1 > w0) gpuWriteBuf(Q.cb.gb, (B + w0) * 4, u8.subarray((B + w0) * 4, (B + w1) * 4));
-  Q.ok[k] = 1; Q.ver++;
-}
-// the cells in columns cA..cB - 1 there for view vi's light (the ground's changes in them too): false when they can't be
-function lightReadyCells(vi, cA, cB) {
-  const Q = LIGHT; if (!lightCellsNow()) return false;
-  const W = Q.wins[vi]; if (W && W[0] === cA && W[1] === cB && W[2] === Q.gen) return true;   // (the same columns as this view's last frame, all there)
-  lightNeed(cA, cB); Q.wins[vi] = [cA, cB, Q.gen]; return true;
-}
-// (WGSL) the world's cell (c, r) from LIGHT.cb (bound as cel - lightSlice's layout): x rock, y under the built line; n: the world's columns, its rows
-// (LT_ROWS: past the world's ends rock from there down), where the columns' rows and the rock's bits start. Every module that reads the cells has it
-const LIGHT_CELL_WGSL = `
-fn celAt(c: i32, r: i32, n: vec4f) -> vec2f {
-  if (c < 0 || c >= i32(n.x)) { return vec2f(select(0.0, 1.0, r >= i32(n.y)), 0.0); }   // (past the world's ends: the open floor's rock under the grid)
-  let k = u32(c) / ${LT_CHUNK}u; let rT = bitcast<i32>(cel[4u * k]); let rB = bitcast<i32>(cel[4u * k + 1u]);
-  let un = select(0.0, 1.0, r >= bitcast<i32>(cel[u32(n.z) + u32(c)]));
-  if (r >= rB) { return vec2f(1.0, un); }
-  if (r < rT) { return vec2f(0.0, un); }
-  let i = u32(bitcast<i32>(cel[4u * k + 2u]) + (r - rT) * bitcast<i32>(cel[4u * k + 3u]) + (c - i32(k) * ${LT_CHUNK})); let w = cel[u32(n.w) + (i >> 5u)];
-  return vec2f(f32((w >> (i & 31u)) & 1u), un);
-}`;
+// the world's cells the light reads (the ground's share - 50-land-zz-cells.js: its buffer, the accessor celAt), or null: none (then the glows'
+// reach is made with an accessor of no rock anywhere - LIGHT_NO_CELLS_WGSL)
+const lightCells = () => frameShared('ground.cells');
+const LIGHT_NO_CELLS_WGSL = 'fn celAt(c: i32, r: i32, n: vec4f) -> vec2f { return vec2f(0.0); }';
 /* THE SHADERS (WGSL). The view's light pictures (a, the flood's two, f) a texel a block of LS cells: texel (i, j), rows from the top, is the cell
    (c0 + (i + 0.5) LS, r0 + (j + 0.5) LS). Every loop bounded by a constant (the laptop's hang, Nov 10) */
-const LIGHT_WGSL = `
+const LIGHT_WGSL = cel => `
 struct LU {
   box: vec4f,    // the box's first column and row (cells), LS (cells a texel), its height (texels)
   win: vec4f,    // the cells the rays go through (cells): columns x..y, rows z..w
@@ -56808,14 +56802,14 @@ struct LU {
   cel: vec4f,    // the world's cells (celAt's n): its columns and rows (LT_ROWS), where the columns' rows under the line and the rock's bits start
 };
 @group(0) @binding(0) var<storage, read> U: LU;
-@group(0) @binding(1) var<storage, read> cel: array<u32>;   // (the world's cells: LIGHT.cb - each slice's rows, each column's line, the rock's bits)
+@group(0) @binding(1) var<storage, read> cel: array<u32>;   // (the world's cells: the ground's - each slice's rows, each column's line, the rock's bits)
 @group(0) @binding(2) var tA: texture_2d<f32>;          // (the open cells' light: r light, g rock, b under the line)
 @group(0) @binding(3) var tS: texture_2d<f32>;          // (the flood's last step - or, laying it, the dark)
 @group(0) @binding(4) var<storage, read> lamps: array<vec4f, 32>;   // (each lamp two: its cell, its aim; its strength, reach (world), pool (world))
 const CELL = ${LT_CELL.toFixed(4)};
 
 fn inWin(p: vec2f) -> bool { return p.x >= U.win.x && p.x < U.win.y && p.y >= U.win.z && p.y < U.win.w; }
-${LIGHT_CELL_WGSL}
+${cel}
 fn occ(p: vec2f) -> vec2f {   // (x rock, y under the built line: a texel of ring.z cells is the cell at its block's middle)
   let RS = i32(U.ring.z); let q = vec2i(floor(p / U.ring.z)) * RS + vec2i(RS >> 1); return celAt(q.x, q.y, U.cel);
 }
@@ -56913,13 +56907,13 @@ fn litD(d: f32) -> f32 { return 1.0 - smoothstep(0.13 * U.jf.z, U.jf.z, d * U.bo
 function lightReady() {
   if (!gpuAlive()) return false;
   const Q = LIGHT; if (Q.ep === GPU.ep) return true;
-  Q.mod = gpuModule(LIGHT_WGSL, 'cave light');
+  const G = lightCells(); if (!G) return false;
+  Q.mod = gpuModule(LIGHT_WGSL(G.wgsl), 'cave light');
   const VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, F_ = GPUShaderStage.FRAGMENT, ro = { type: 'read-only-storage' }, tx = { sampleType: 'unfilterable-float' };
   Q.bl = gpuBindLayout([{ binding: 0, visibility: VF, buffer: ro }, { binding: 1, visibility: F_, buffer: ro }, { binding: 2, visibility: F_, texture: tx }, { binding: 3, visibility: F_, texture: tx }, { binding: 4, visibility: F_, buffer: ro }], 'cave light');
   Q.pl = gpuPipeLayout([Q.bl], 'cave light'); Q.pipes.clear();
   gpuTexFree(Q.white); Q.white = gpuTex(1, 1, 'rgba8unorm', 'light');
-  // (a new device: the old one's textures and cells went with it - let go, counted out)
-  if (Q.cb && Q.cb.ep !== GPU.ep) { gpuBufFree(Q.cb); Q.cb = null; }
+  // (a new device: the old one's textures went with it - let go, counted out)
   for (const V of Q.V) if (V) for (const k of ['a', 's0', 's1', 'f']) gpuTexFree(V[k]);
   Q.V.length = 0;
   Q.ep = GPU.ep;
@@ -56937,10 +56931,11 @@ function lightPipe(vs, fs, fmt, blend) {
   return p;
 }
 const LIGHT_U = new Float32Array(64);
-// one pass: its numbers (LIGHT_U as it is now) and textures, drawn into target T (a gpuTex) - the whole of it, or (lay) over the box
-function lightRun(T, fs, a, s, lampB, lay) {
+// one pass: its numbers (LIGHT_U as it is now) and textures, drawn into target T (a gpuTex) - the whole of it, or (lay) over the box; cb: the world's
+// cells (the ground's buffer - 'ground.cells')
+function lightRun(T, fs, a, s, lampB, lay, cb) {
   const Q = LIGHT, [uc, uo] = arenaAlloc(256, 256); uc.cpu.set(new Uint8Array(LIGHT_U.buffer), uo);
-  const w = Q.white, bg = gpuBindGroup(Q.bl, [{ binding: 0, resource: { buffer: uc.gb, offset: uo, size: 256 } }, { binding: 1, resource: { buffer: Q.cb.gb } }, { binding: 2, resource: (a || w).view }, { binding: 3, resource: (s || w).view }, { binding: 4, resource: lampB }], 'cave light');
+  const w = Q.white, bg = gpuBindGroup(Q.bl, [{ binding: 0, resource: { buffer: uc.gb, offset: uo, size: 256 } }, { binding: 1, resource: { buffer: cb.gb } }, { binding: 2, resource: (a || w).view }, { binding: 3, resource: (s || w).view }, { binding: 4, resource: lampB }], 'cave light');
   const pass = gpuPassBegin({ colorAttachments: [{ view: T.view, loadOp: lay ? 'load' : 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'light cave ' + (lay ? 'fsLay' : fs), [T, a, s]);   // (keyed 'light...': ?gpuoff=light, each pass by name in ?gputrace)
   pass.setBindGroup(0, bg);
   if (lay) { pass.setScissorRect(lay[0], lay[1], lay[2], lay[3]); pass.setPipeline(lightPipe('vsLay', 'fsLay', T.fmt, true)); pass.draw(6); }
@@ -56984,7 +56979,8 @@ function lightDraw() {
   const T = frameTarget(C); if (!T || !T.tex) return;
   // (the cells the rays may cross: the box and the rays' reach round it, in whole texels)
   const vi = typeof viewIdx === 'number' ? viewIdx : 0, WN = [Math.floor((c0 - M) / LS) * LS, Math.ceil((c1 + M) / LS) * LS, Math.floor((r0 - M) / LS) * LS, Math.ceil((r1 + M) / LS) * LS];
-  if (!lightReadyCells(vi, WN[0], WN[1])) return;
+  const G = lightCells(), cb = G && G.buf(); if (!cb) return;
+  G.need(WN[0], WN[1]);
   // (user Nov 8 18:40, "at sunset you forgot to tint those shadows": the dark is laid after the hour's tint over the world - black there is what the
   // tint makes of black: its colour at its strength, the dusk's purple, the night's blue)
   // (user Nov 8 22:12, "at sunset the cave shadows doesn't match the tint": black under the hour's tint is then laid over with the evening's warm pink (E.warm,
@@ -57005,7 +57001,7 @@ function lightDraw() {
   const dkAll = dk.concat(dkA, dkW, dkW1, dkW2);
   const sun = lightSun(), lamps = lightLamps(c0, c1, r0, r1);
   const V = LIGHT.V[vi] || (LIGHT.V[vi] = { a: null, s0: null, s1: null, f: null, key: '' });
-  const key = [c0, r0, LS, lw, lh, LIGHT.ver, LIGHT.sky, LIGHT.reach, dkAll.map(v => v.toFixed(3)).join(','), (dkAll.some((v, j) => Math.abs(v - dk[j % 3]) > 0.004) ? band.map(v => Math.round(v / 2)).join(',') : ''), sun.map(v => v.toFixed(3)).join(','), lamps.map(l => [l.cx, l.cy, l.ux, l.uy, l.k].map(v => v.toFixed(2)).join(',')).join(';')].join('|');
+  const key = [c0, r0, LS, lw, lh, G.ver, LIGHT.sky, LIGHT.reach, dkAll.map(v => v.toFixed(3)).join(','), (dkAll.some((v, j) => Math.abs(v - dk[j % 3]) > 0.004) ? band.map(v => Math.round(v / 2)).join(',') : ''), sun.map(v => v.toFixed(3)).join(','), lamps.map(l => [l.cx, l.cy, l.ux, l.uy, l.k].map(v => v.toFixed(2)).join(',')).join(';')].join('|');
   const U = LIGHT_U; U.fill(0);
   U.set([c0, r0, LS, lh], 0); U.set([lw, lh], 58);
   const [lc, lo] = arenaAlloc(512, 256), LB = { buffer: lc.gb, offset: lo, size: 512 };
@@ -57015,36 +57011,37 @@ function lightDraw() {
     // 2. the open cells' light
     const LP = new Float32Array(lc.cpu.buffer, lc.cpu.byteOffset + lo, 128);
     LP.fill(0); lamps.forEach((l, i) => { LP.set([l.cx, l.cy, l.ux, l.uy], i * 8); LP.set([l.k, l.R, l.pool, 0], i * 8 + 4); });
-    U.set(WN, 4); U.set([0, 0, LS, lamps.length], 8); U.set([land.cols, LT_ROWS, LIGHT.ruO, LIGHT.bitO], 60);
+    U.set(WN, 4); U.set([0, 0, LS, lamps.length], 8); U.set(G.n(), 60);
     U.set([sun[0], sun[1], sun[2], LIGHT.spread * (LIGHT.rays - 1)], 12); U.set([LIGHT.reach, LIGHT.reach * 1.3, LIGHT.rays, 0], 16); U.set([LIGHT.sky * sun[3], LIGHT.skyRays, LIGHT.skyFan * 2, 0], 20);
     const FG = ugReach() / LT_CELL, Wt = FG / LS;   // (the ground's fade, cells; an unlit open cell counts that much further off, in texels)
     U.set([0, Wt, FG, LIGHT.steps], 24);
     U.set(dk, 28); U.set(dkA, 32); U.set(dkW, 36); U.set(dkW1, 40); U.set(dkW2, 44); U.set(band, 48);
-    lightRun(V.a, 'fsA', null, null, LB);
+    lightRun(V.a, 'fsA', null, null, LB, null, cb);
     // 3. the rock's faces: the nearest open cell (jump flood, LIGHT.K texels - log2 of it passes)
-    lightRun(V.s0, 'fsJ0', V.a, null, LB);
+    lightRun(V.s0, 'fsJ0', V.a, null, LB, null, cb);
     let src = V.s0, dst = V.s1;
-    for (let st = LIGHT.K >> 1; st >= 1; st >>= 1) { U[24] = st; lightRun(dst, 'fsJ', V.a, src, LB); [src, dst] = [dst, src]; }
+    for (let st = LIGHT.K >> 1; st >= 1; st >>= 1) { U[24] = st; lightRun(dst, 'fsJ', V.a, src, LB, null, cb); [src, dst] = [dst, src]; }
     // 4. the dark
-    lightRun(V.f, 'fsF', V.a, src, LB);
+    lightRun(V.f, 'fsF', V.a, src, LB, null, cb);
   } else new Uint8Array(lc.cpu.buffer, lc.cpu.byteOffset + lo, 512).fill(0);
   // 5. laid over the view's box on the screen (C's place on its target: its transform's offset), within the view's columns
   const m = C.s.m, X0 = PX(c0 * LT_CELL) + m[4], X1 = PX(c1 * LT_CELL) + m[4], Y0 = PY(LT_Y0 + r0 * LT_CELL) + m[5], Y1 = PY(LT_Y0 + r1 * LT_CELL) + m[5];
   const sx0 = Math.max(0, Math.floor(VSX), Math.floor(X0)), sx1 = Math.min(T.w, Math.ceil(VSX + VWP), Math.ceil(X1)), sy0 = Math.max(0, Math.floor(Y0)), sy1 = Math.min(T.h, bh, Math.ceil(Y1));
   if (sx1 <= sx0 || sy1 <= sy0) return;
   U.set([X0, Y0, X1, Y1], 52); U.set([T.w, T.h, lw, lh], 56);
-  lightRun(T.tex, 'fsLay', null, V.f, LB, [sx0, T.h - sy1, sx1 - sx0, sy1 - sy0]);   // (the scissor's rows bottom first)
+  lightRun(T.tex, 'fsLay', null, V.f, LB, [sx0, T.h - sy1, sx1 - sx0, sy1 - sy0], cb);   // (the scissor's rows bottom first)
 }
 
 /* THE GLOWS' REACH (the light pass's kind 1 - a lamp's beam glowing in the air or the water, held to where its rays get before rock): from each lamp
    LPASS.RAYS rays round it, each out to the beam's length or the first rock of the world's cells - worked out on the GPU (csReach) from the same
-   cells as the dark, every frame the pass draws glows (was lampReachCells: 96 rays a lamp marched on the processor, a cell at a time, every frame).
+   cells as the dark (the ground's - frameShared('ground.cells')), every frame the pass draws glows (was lampReachCells: 96 rays a lamp marched on the
+   processor, a cell at a time, every frame).
    LIGHT.glowRays: the reaches (px) - glow i's RAYS from i x RAYS; then each glow's numbers (8: its cell's column and row, where it is in them (0..1),
    its length (world), px a world unit); then the cells' (celAt's n) */
-const LIGHT_REACH_WGSL = () => `
+const LIGHT_REACH_WGSL = cel => `
 @group(0) @binding(0) var<storage, read_write> rc: array<f32>;
 @group(0) @binding(1) var<storage, read> cel: array<u32>;
-${LIGHT_CELL_WGSL}
+${cel}
 const RAYS = ${LPASS.RAYS}u; const GO = ${LPASS.GLOWS * LPASS.RAYS}u; const NO = ${LPASS.GLOWS * (LPASS.RAYS + 8)}u; const CELL = ${LT_CELL.toFixed(4)};
 @compute @workgroup_size(${LPASS.RAYS}) fn csReach(@builtin(workgroup_id) w: vec3u, @builtin(local_invocation_index) b: u32) {
   let g = GO + w.x * 8u; let c0 = vec2i(i32(rc[g]), i32(rc[g + 1u])); let f0 = vec2f(rc[g + 2u], rc[g + 3u]); let L = rc[g + 4u];
@@ -57055,10 +57052,12 @@ const RAYS = ${LPASS.RAYS}u; const GO = ${LPASS.GLOWS * LPASS.RAYS}u; const NO =
   rc[w.x * RAYS + b] = min(d, L) * rc[g + 5u];
 }`;
 // LIGHT.glowRays on this device (not LIGHT.reach - that's the sun's reach in cells, a number) (and what csReach reads where there are no cells: an empty world - every ray its whole length)
+// (the accessor: the ground's - its share's wgsl; with no share, one of no rock anywhere over the empty stand-in cel0)
 function lightReachBuf() {
   const Q = LIGHT; if (Q.glowRays && Q.glowRays.ep === GPU.ep) return Q.glowRays;
+  const G = lightCells();
   Q.glowRays = gpuBuf((LPASS.GLOWS * (LPASS.RAYS + 8) + 4) * 4, 'light'); Q.cel0 = gpuBuf(16, 'light');
-  Q.rmod = gpuModule(LIGHT_REACH_WGSL(), 'light reach');
+  Q.rmod = gpuModule(LIGHT_REACH_WGSL(G ? G.wgsl : LIGHT_NO_CELLS_WGSL), 'light reach');
   const C_ = GPUShaderStage.COMPUTE;
   Q.rbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: { type: 'storage' } }, { binding: 1, visibility: C_, buffer: { type: 'read-only-storage' } }], 'light reach');
   Q.rpipe = gpuComputePipe({ layout: gpuPipeLayout([Q.rbl], 'light reach'), compute: { module: Q.rmod, entryPoint: 'csReach' }, label: 'light reach' });
@@ -57068,17 +57067,17 @@ const LIGHT_RG = new Float32Array(LPASS.GLOWS * 8 + 4);
 // the n glows' reaches into LIGHT.glowRays before the pass that reads them (G: each [x, y, length (world), px a world unit]); the cells they reach there first
 function lightReach(G, n) {
   if (!n || !gpuAlive()) return;
-  const Q = LIGHT, B = lightReachBuf(), F = LIGHT_RG, has = !!land.cell && lightCellsNow();
+  const Q = LIGHT, B = lightReachBuf(), F = LIGHT_RG, GC = lightCells(), cb = GC && GC.buf(), has = !!cb;
   F.fill(0);
   for (let i = 0; i < n; i++) {
     const x = G[i * 4], y = G[i * 4 + 1], L = G[i * 4 + 2], cx = x / LT_CELL, cy = (y - LT_Y0) / LT_CELL, ix = Math.floor(cx), iy = Math.floor(cy);
-    if (has) lightNeed(Math.floor((x - L) / LT_CELL) - 1, Math.ceil((x + L) / LT_CELL) + 2);
+    if (has) GC.need(Math.floor((x - L) / LT_CELL) - 1, Math.ceil((x + L) / LT_CELL) + 2);
     F.set([ix, iy, cx - ix, cy - iy, L, G[i * 4 + 3]], i * 8);
   }
-  F.set(has ? [land.cols, LT_ROWS, Q.ruO, Q.bitO] : [0, 1 << 30, 0, 0], LPASS.GLOWS * 8);   // (no world: no rock anywhere)
+  F.set(has ? GC.n() : [0, 1 << 30, 0, 0], LPASS.GLOWS * 8);   // (no world: no rock anywhere)
   const nb = F.byteLength, [ac, ao] = arenaAlloc(nb, 256); ac.cpu.set(new Uint8Array(F.buffer), ao);
   gpuCopyBuf(ac, ao, B, LPASS.GLOWS * LPASS.RAYS * 4, nb);
-  const bg = gpuBindGroup(Q.rbl, [{ binding: 0, resource: { buffer: B.gb } }, { binding: 1, resource: { buffer: (has ? Q.cb : Q.cel0).gb } }], 'light reach');
+  const bg = gpuBindGroup(Q.rbl, [{ binding: 0, resource: { buffer: B.gb } }, { binding: 1, resource: { buffer: (has ? cb : Q.cel0).gb } }], 'light reach');
   const cp = gpuComputeBegin([B], 'light reach');
   cp.setPipeline(Q.rpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(n); cp.end();
 }
