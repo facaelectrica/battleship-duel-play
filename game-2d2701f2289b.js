@@ -7908,8 +7908,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 976;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 11 11:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 977;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 11 12:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -23535,6 +23535,9 @@ fn exact(i: i32) -> f32 {
 @group(0) @binding(4) var<storage, read> items: array<vec4f>;
 @group(0) @binding(6) var art: texture_2d_array<f32>;   // (the art atlas - artTex, 04-zz-art-atlas.js: premultiplied; a 1 x 1 stand-in for draws that don't read it)   // (each draw's own: a lake's columns, the casters and an outline, the lights)
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f { let x = f32((i << 1u) & 2u); let y = f32(i & 2u); return vec4f(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0); }
+// a quad's corner (x, y: 0 or 1) at vertex v of its two triangles 0 1 2, 2 1 3 - (0,0) (1,0) (0,1) (0,1) (1,0) (1,1) - from two six-bit masks, a vertex
+// past the sixth as the sixth (no corner table indexed by the vertex: Intel D3D12 scratch memory, Nov 11)
+fn qd(v: u32) -> vec2f { let k = min(v, 5u); return vec2f(f32((0x32u >> k) & 1u), f32((0x2cu >> k) & 1u)); }
 fn surfRow(c: f32) -> f32 { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1)].x; }
 fn surfW(c: f32) -> f32 { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1)].y; }
 fn gradAt(y: f32, y0: f32, y1: f32) -> vec4f {
@@ -23618,10 +23621,8 @@ fn lineCol(y: f32, yc: f32, yl: f32, yr: f32, jl: bool, jr: bool) -> vec4f {
 // space; the columns it may fall in), its rows and four nested bands worked out per pixel, snapped to PB blocks, sheared about one pivot
 struct VO { @builtin(position) p: vec4f, @location(0) @interpolate(flat) i: u32 };
 @vertex fn vsShadow(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let bb = items[n * 4u + 2u];
-  let u = mix(bb.xy, bb.zw, vec2f(qx[v], qy[v]));
+  let u = mix(bb.xy, bb.zw, qd(v));
   let d = u * D.m.xy + D.m.zw;
   var o: VO;
   o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0);   // (rows bottom first: the screen's row d.y is the target's row h - d.y)
@@ -23700,10 +23701,8 @@ fn pxf(wx: f32) -> f32 { return floor(wx * D.sh1.x + 0.5) - D.sh1.y; }
 // shear, 4 an item). A pixel's column of PB its shear; the row it then falls in found by halving; the bands over it counted; its colour sh2.rgb, its global
 // alpha sh2.w
 @vertex fn vsShadeRows(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let bb = items[1];
-  let d = mix(bb.xy, bb.zw, vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = mix(bb.xy, bb.zw, qd(v)) * D.m.xy + D.m.zw;
   var o: VO;
   o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0);
   o.i = n;
@@ -23731,7 +23730,9 @@ fn pxf(wx: f32) -> f32 { return floor(wx * D.sh1.x + 0.5) - D.sh1.y; }
 // each - x, y, reach, strength; aim x, y, 1 a cone / 0 a glow round, 1 a beam) worked out at their middles and laid smoothed, the dark then
 // the beams' glow
 fn dkAt(y: f32) -> f32 { let u = clamp((y - D.ab1.z) / max(1.0, D.ab1.w - D.ab1.z), 0.0, 1.0); return select(0.62 + 0.36 * (u - 0.5) * 2.0, 0.62 * u * 2.0, u < 0.5); }
-fn abCell(q: i32, r: i32) -> array<vec4f, 2> {
+// (a cell's two colours as a struct's fields - no array returned: Intel D3D12 scratch memory, Nov 11)
+struct AB { d: vec4f, g: vec4f };   // (the dark, the glow)
+fn abCell(q: i32, r: i32) -> AB {
   let xc = D.ab0.x + (f32(q) + 0.5) * D.ab0.z; let yc = D.ab0.y + (f32(r) + 0.5) * D.ab0.z; let d = dkAt(yc);
   var lit = 0.0; var glow = 0.0;
   for (var k = 0; k < 24; k++) {
@@ -23751,7 +23752,7 @@ fn abCell(q: i32, r: i32) -> array<vec4f, 2> {
   var aD = select(floor(255.0 * d + 0.5), floor(255.0 * d * (1.0 - min(1.0, lit)) + 0.5), lit > 0.0);
   var aG = select(0.0, floor(255.0 * clamp(glow * (0.16 + 0.22 * d) * D.ab0.w, 0.0, 0.5) + 0.5), glow > 0.0);
   aD /= 255.0; aG /= 255.0;
-  return array<vec4f, 2>(vec4f(vec3f(1.0, 4.0, 12.0) / 255.0 * aD, aD), vec4f(vec3f(230.0, 240.0, 255.0) / 255.0 * aG, aG));
+  return AB(vec4f(vec3f(1.0, 4.0, 12.0) / 255.0 * aD, aD), vec4f(vec3f(230.0, 240.0, 255.0) / 255.0 * aG, aG));
 }
 // ---- A BODY'S OUTLINES IN TILES (waterTileItems - fsBody, fsCover): a tile an instance (vsBox; items: 3 each - its list's first float and length, -, its box),
 // its list the outlines whose box meets it (each its header's item). An outline winds 0 round a point outside its box, so a pixel's sum over its tile's
@@ -23787,10 +23788,8 @@ fn windTile(i: u32, px: f32, py: f32) -> i32 {
 // water (lakeWaterIn) kept inside the body's outlines (bd.x: how far down they are from the rays' rows, bd2.y of them from item bd2.z)
 // (an instance's box: the third of its three items - a ray's, a stretch of a body's line's, a tile's)
 @vertex fn vsBox(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let bb = items[n * 3u + 2u];
-  let d = mix(bb.xy, bb.zw, vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = mix(bb.xy, bb.zw, qd(v)) * D.m.xy + D.m.zw;
   var o: VO;
   o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0);
   o.i = n;
@@ -23973,10 +23972,8 @@ fn crestCol(c: f32) -> vec4f {
 // the bow wave's height, depth, reach ahead, behind; the screws' boil, reach, SHIP_L; then its noises' large terms, whole and part, reduced on the
 // processor), each pixel by its PB block's place along her - by WASH_L's rules, the bow wave, then the band over it, then the screws
 @vertex fn vsWash(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let bb = items[32u + n * 12u];
-  let d = mix(bb.xy, bb.zw, vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = mix(bb.xy, bb.zw, qd(v)) * D.m.xy + D.m.zw;
   var o: VO; o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0); o.i = n;
   return o;
 }
@@ -24040,15 +24037,13 @@ fn rnd(v: f32) -> f32 { return floor(v + 0.5); }
 fn foamW(s: f32) -> f32 { return max(D.wk[0].x, floor(s * 4.5 * D.ds.z / D.wk[0].x + 0.5) * D.wk[0].x); }
 fn foamHMax(nb: f32, t: f32) -> f32 { return max(1.0, floor(nb * 0.4 * (1.0 - 0.6 * t) + 0.5)); }
 @vertex fn vsFoam(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let a = items[n * 2u]; let PB = D.wk[0].x; let c = a.x;
   var bb = vec4f(c, surfRow(c) - 1.0, c + 3.0, surfRow(c));
   if (a.z > 1.0) {
     let w = foamW(a.y); let nb = max(1.0, floor(w / PB + 0.5)); let bx = floor((c - w / 2.0) / PB) * PB; let sy = floor(surfRow(c) / PB) * PB;
     bb = vec4f(bx, sy - (foamHMax(nb, a.w) * 1.2 + 1.0) * PB, bx + nb * PB, sy + 2.0 * PB);
   }
-  let d = mix(bb.xy, bb.zw, vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = mix(bb.xy, bb.zw, qd(v)) * D.m.xy + D.m.zw;
   var o: VO; o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0); o.i = n;
   return o;
 }
@@ -24079,10 +24074,8 @@ fn foamHMax(nb: f32, t: f32) -> f32 { return max(1.0, floor(nb * 0.4 * (1.0 - 0.
 // (premultiplied by nothing: 0..1), its seed); its lumpy outline worked out per cell on the smoke's grid (wk[0].x = SMK). Laid one over the next as the
 // puffs' layer laid them (source-over is associative: the same as their layer laid on the view)
 @vertex fn vsPuff(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let a = items[n * 2u]; let K = D.wk[0].x; let N = (2.0 * a.z + 1.0) * K;
-  let d = mix(a.xy, a.xy + vec2f(N), vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = mix(a.xy, a.xy + vec2f(N), qd(v)) * D.m.xy + D.m.zw;
   var o: VO; o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0); o.i = n;
   return o;
 }
@@ -24101,12 +24094,12 @@ fn foamHMax(nb: f32, t: f32) -> f32 { return max(1.0, floor(nb * 0.4 * (1.0 - 0.
 // between them, pressure rings running outward, streaks fanning out; tearing apart from the rim inward. A ball an instance (items: 9 each - its middle on the
 // screen, radius, age; its seed, block, how far torn, the rings' strength; its box; its five tones and its core's (premultiplied)), a block of PBV a pixel's;
 // its rim's bumps from the whole-number noise (wNoise, around the circle)
-const BAYER = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+// (the 4 x 4 ordered dither's level at x, y (each 0..3) - 0 8 2 10 / 12 4 14 6 / 3 11 1 9 / 15 7 13 5 - from their bits: no table indexed at run time,
+// Intel D3D12 scratch memory, Nov 11)
+fn bayer(x: i32, y: i32) -> f32 { let a = x ^ y; return f32(((a & 1) << 3u) | ((y & 1) << 2u) | (a & 2) | ((y & 2) >> 1u)); }
 @vertex fn vsBall(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let bb = items[n * 9u + 2u];
-  let d = mix(bb.xy, bb.zw, vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = mix(bb.xy, bb.zw, qd(v)) * D.m.xy + D.m.zw;
   var o: VO; o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0); o.i = n;
   return o;
 }
@@ -24135,7 +24128,7 @@ const BAYER = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.
   var vv = 0.55 - lit * 0.6 - ring * 0.17 * rip - streak * 0.7 + d * d * 0.25;
   if (d > 0.84) { vv -= 0.45; }
   vv += brk * 0.5;
-  vv += (BAYER[(i32(x / s) & 3) + (i32(y / s) & 3) * 4] / 16.0 - 0.47) * 0.32;   // (ordered dither between the tones)
+  vv += (bayer(i32(x / s) & 3, i32(y / s) & 3) / 16.0 - 0.47) * 0.32;   // (ordered dither between the tones)
   let col = items[b + 3u + u32(clamp(floor(vv * 5.0), 0.0, 4.0))];
   if (col.a <= 0.0) { discard; }
   return col;
@@ -24145,15 +24138,26 @@ const BAYER = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.
 // first painted row), slope, moss (rows + 4 x which), cut (a blast's new top - the rock formations', rockBlast; 0 none)], [its solid spans' first item and
 // count, its cracks' first item and count]; the spans [from, to) and the cracks' runs of rows [from, to) after. A texel's colour by paintRock's rules - its
 // palette and boldness: the decks' RK_LAYER, the formations' RK_SOLID bold, the coast's boulders RK - its blocks and strata picked from the whole-number hash (option A)
-const RKP = array<vec3f, 24>(vec3f(255.0, 255.0, 255.0), vec3f(246.0, 246.0, 250.0), vec3f(226.0, 226.0, 232.0), vec3f(204.0, 204.0, 214.0), vec3f(184.0, 184.0, 196.0), vec3f(255.0, 255.0, 255.0), vec3f(226.0, 238.0, 222.0), vec3f(238.0, 244.0, 234.0),
-  vec3f(255.0, 255.0, 255.0), vec3f(222.0, 222.0, 226.0), vec3f(186.0, 186.0, 192.0), vec3f(150.0, 150.0, 158.0), vec3f(116.0, 116.0, 124.0), vec3f(26.0, 26.0, 30.0), vec3f(170.0, 196.0, 150.0), vec3f(196.0, 214.0, 170.0),
-  vec3f(184.0, 192.0, 200.0), vec3f(142.0, 152.0, 164.0), vec3f(108.0, 118.0, 132.0), vec3f(76.0, 84.0, 98.0), vec3f(52.0, 58.0, 70.0), vec3f(30.0, 34.0, 44.0), vec3f(84.0, 132.0, 78.0), vec3f(118.0, 164.0, 92.0));   // (hi, lit, base, sh, dk, ol, moss, moss2: RK_LAYER (0), RK_SOLID (1), RK (2))
+// (its 24 colours - a palette's 8 each: hi, lit, base, sh, dk, ol, moss, moss2: RK_LAYER (0), RK_SOLID (1), RK (2)) packed 0xbbggrr, four to a vector; rkp(i)
+// picks one by selects on i's bits - no table indexed at run time: Intel D3D12 scratch memory, Nov 11
+const RK0 = vec4u(0xffffff, 0xfaf6f6, 0xe8e2e2, 0xd6cccc);
+const RK1 = vec4u(0xc4b8b8, 0xffffff, 0xdeeee2, 0xeaf4ee);
+const RK2 = vec4u(0xffffff, 0xe2dede, 0xc0baba, 0x9e9696);
+const RK3 = vec4u(0x7c7474, 0x1e1a1a, 0x96c4aa, 0xaad6c4);
+const RK4 = vec4u(0xc8c0b8, 0xa4988e, 0x84766c, 0x62544c);
+const RK5 = vec4u(0x463a34, 0x2c221e, 0x4e8454, 0x5ca476);
+fn rkp(i: u32) -> vec3f {
+  let k = min(i, 23u);
+  let q = select(select(select(select(select(RK0, RK1, k >= 4u), RK2, k >= 8u), RK3, k >= 12u), RK4, k >= 16u), RK5, k >= 20u); let l = k & 3u;
+  let w = select(select(select(q.x, q.y, l >= 1u), q.z, l >= 2u), q.w, l >= 3u);
+  return vec3f(f32(w & 255u), f32((w >> 8u) & 255u), f32(w >> 16u));
+}
 fn dkSolid(cb: u32, rc: f32) -> bool {
   let e = items[cb + 1u]; let o = u32(e.x);
   for (var s = 0u; s < 16u; s++) { if (f32(s) >= e.y) { break; } let q = items[o + s]; if (rc >= q.x && rc < q.y) { return true; } }
   return false;
 }
-// (a texel as paintRock painted it: rgb 0..255, a 1 where painted; pal its palette (RKP's 0, 1, 2); bold - the solid rocks: a heavier outline, a brighter rim, a dark
+// (a texel as paintRock painted it: rgb 0..255, a 1 where painted; pal its palette (rkp's 0, 1, 2); bold - the solid rocks: a heavier outline, a brighter rim, a dark
 // edge down the sides)
 fn rkRaw(h: u32, c: i32, r: i32, pal: u32, bold: bool) -> vec4f {
   let A = items[h]; let H = A.y;
@@ -24162,16 +24166,16 @@ fn rkRaw(h: u32, c: i32, r: i32, pal: u32, bold: bool) -> vec4f {
   let cut = max(t, cc.w);                                                // (a blast's new top: the rows over it gone)
   if (rf < cut || !dkSolid(cb, rf + 0.5)) { return vec4f(0.0); }
   let pb = min(pal, 2u) * 8u;
-  if (cut > t && rf < cut + 2.0) { return vec4f(RKP[pb + 5u], 1.0); }   // (the broken top's dark edge - rockBlast's)
+  if (cut > t && rf < cut + 2.0) { return vec4f(rkp(pb + 5u), 1.0); }   // (the broken top's dark edge - rockBlast's)
   let e = items[cb + 1u];
-  for (var s = 0u; s < 32u; s++) { if (f32(s) >= e.w) { break; } let q = items[u32(e.z) + s]; if (rf >= q.x && rf < q.y) { return vec4f(RKP[pb + 5u], 1.0); } }   // (the cracks: lines wandering down)
+  for (var s = 0u; s < 32u; s++) { if (f32(s) >= e.w) { break; } let q = items[u32(e.z) + s]; if (rf >= q.x && rf < q.y) { return vec4f(rkp(pb + 5u), 1.0); } }   // (the cracks: lines wandering down)
   if (bold) {                                                            // (a dark edge down its sides, where a neighbour's top is lower: so it stands out against the ridges behind)
     let tl = select(H, items[cb - 2u].x, c > 0); let tr = select(H, items[cb + 2u].x, f32(c) < A.x - 1.0);
     var ed = 0.0; if (tl > t + 1.0) { ed = ceil(tl - t); } if (tr > t + 1.0) { ed = max(ed, ceil(tr - t)); }
-    if (rf < floor(t) + ed) { return vec4f(RKP[pb + 5u], 1.0); }
+    if (rf < floor(t) + ed) { return vec4f(rkp(pb + 5u), 1.0); }
   }
   let ms = cc.z;
-  if (ms > 0.5) { let rows = ms - 4.0 * floor(ms / 4.0); if (rf < t + rows) { return vec4f(RKP[pb + 6u + u32(floor(ms / 4.0))], 1.0); } }   // (moss on the flatter tops)
+  if (ms > 0.5) { let rows = ms - 4.0 * floor(ms / 4.0); if (rf < t + rows) { return vec4f(rkp(pb + 6u + u32(floor(ms / 4.0))), 1.0); } }   // (moss on the flatter tops)
   let dy = rf - t; let u = dy / max(1.0, H - t); let sl = cc.y;
   var k = 2;
   if (dy < select(1.0, 2.0, bold)) { k = 5; }
@@ -24186,13 +24190,13 @@ fn rkRaw(h: u32, c: i32, r: i32, pal: u32, bold: bool) -> vec4f {
     if (u > 0.8) { k = 4; }
     if ((r + i32(floor(f32(c) * 0.15))) % i32(B.x) == 0 && wLat(c, r, sd ^ 0x5bd1e995u) < 0.6) { k = 4; }   // (strata)
   }
-  return vec4f(RKP[pb + u32(k)], 1.0);
+  return vec4f(rkp(pb + u32(k)), 1.0);
 }
 // ---- THE SEA DECKS (drawSeaDecks, 44-shadows-seafloor.js): each seabed layer drawn from its shape, no picture - its data (seaDeckMake, rkRaw's format, not
 // bold), the body fading to its own colour (C0), the foot flat C0 (seaDeckBody's)
 fn dkC0(h: u32) -> vec3f {
   let q = items[h + 2u]; let n = bitcast<u32>(q.w);
-  if (n == 0u) { return RKP[2]; }
+  if (n == 0u) { return rkp(2); }
   return floor(vec3f(f32(bitcast<u32>(q.x)), f32(bitcast<u32>(q.y)), f32(bitcast<u32>(q.z))) / f32(n) + 0.5);
 }
 // THE DECK'S TEXELS (Nov 11, pixel-cost - a column at a time: a pixel's n x n taps fall in at most 4 columns and 4 rows, and each tap read its column's
@@ -24208,11 +24212,11 @@ fn dkRow(A: vec4f, C0: vec3f, B1: vec4f, c: i32, cc: vec4f, cut: f32, r: i32, so
   if (r < 0 || rf >= H) { return vec4f(0.0); }
   if (rf >= H - 6.0) { return vec4f(C0 / 255.0, 1.0); }               // (the foot: flat, its own colour)
   if (rf < cut || !sol) { return vec4f(0.0); }
-  var rgb = RKP[2];
+  var rgb = rkp(2);
   let ms = cc.z; let sl = cc.y;
-  if (cut > t && rf < cut + 2.0) { rgb = RKP[5]; }                     // (the broken top's dark edge - rockBlast's)
-  else if (crk) { rgb = RKP[5]; }                                      // (the cracks: lines wandering down)
-  else if (ms > 0.5 && rf < t + (ms - 4.0 * floor(ms / 4.0))) { rgb = RKP[6u + u32(floor(ms / 4.0))]; }   // (moss on the flatter tops)
+  if (cut > t && rf < cut + 2.0) { rgb = rkp(5); }                     // (the broken top's dark edge - rockBlast's)
+  else if (crk) { rgb = rkp(5); }                                      // (the cracks: lines wandering down)
+  else if (ms > 0.5 && rf < t + (ms - 4.0 * floor(ms / 4.0))) { rgb = rkp(6u + u32(floor(ms / 4.0))); }   // (moss on the flatter tops)
   else {
     let dy = rf - t; let u = dy / max(1.0, H - t); let sd = u32(B1.y);
     var k = 2;
@@ -24227,7 +24231,7 @@ fn dkRow(A: vec4f, C0: vec3f, B1: vec4f, c: i32, cc: vec4f, cut: f32, r: i32, so
       if (u > 0.8) { k = 4; }
       if ((r + i32(floor(f32(c) * 0.15))) % i32(B1.x) == 0 && wLat(c, r, sd ^ 0x5bd1e995u) < 0.6) { k = 4; }   // (strata)
     }
-    rgb = RKP[u32(k)];
+    rgb = rkp(u32(k));
   }
   if (rf >= A.w) { let g = clamp((rf + 0.5 - A.w) / (H - 6.0 - A.w), 0.0, 1.0); rgb = rgb * (1.0 - g) + C0 * g; }   // (fading into its own colour down the body)
   return vec4f(rgb / 255.0, 1.0);
@@ -24270,11 +24274,9 @@ struct DKM { h: u32, slot: u32, a: u32, b: u32 };
 // [6] the fill's mul; [7] the fill's add (0..255); [8] 1 the clip a rectangle (a lake), its top row, 1: an atlas picture's row (the far sand - drawSeabedBack: its
 // texels from the atlas at [6] (x, y, page), [7] a colour laid over them source-atop (rgb 0..1, its alpha); no fill)
 @vertex fn vsDeck(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let k = u32(D.span[0].x) + n * 9u; let K0 = items[k]; let K1 = items[k + 1u]; let K3 = items[k + 3u];
   let y0 = K1.x; let y1 = min(max(K1.x + K0.w, K1.y), K3.z);
-  let d = mix(vec2f(-8.0, y0), vec2f(D.tgt.w + 8.0, max(y0, y1)), vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = mix(vec2f(-8.0, y0), vec2f(D.tgt.w + 8.0, max(y0, y1)), qd(v)) * D.m.xy + D.m.zw;
   var o: VO; o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0); o.i = n;
   return o;
 }
@@ -24339,10 +24341,8 @@ struct DKM { h: u32, slot: u32, a: u32, b: u32 };
 // [1] its box (user space): x, y, width, height; a rock's [2] the tint's mul, its palette, [3] its add (the water's colour by HAZE - sbTint's), 1 bold; a
 // picture's [2] its place in the atlas (x, its first row shown, page). Its texels n x n over the pixel as the decks'
 @vertex fn vsRock(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let B = items[u32(D.span[0].x) + n * 4u + 1u];
-  let d = (B.xy + B.zw * vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = (B.xy + B.zw * qd(v)) * D.m.xy + D.m.zw;
   var o: VO; o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0); o.i = n;
   return o;
 }
@@ -24377,10 +24377,8 @@ fn desertTone(c: vec3f) -> vec3f { let L = dot(c, vec3f(0.3, 0.59, 0.11)); retur
 // the instance: [0] its place in the atlas (x, y, page), 1 mirrored; [1] its box (user space) x, y, width, height; [2] its texels across, down, the foot's
 // rows, the foot's height drawn; [3] mul, 1 the desert's tone; [4] add; [5] the foot's colour. Its texels n x n over the pixel (as many as fall in it, up to 4)
 @vertex fn vsCoast(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let k = u32(D.span[0].x) + n * 6u; let B = items[k + 1u]; let K2 = items[k + 2u];
-  let d = (B.xy + vec2f(B.z, B.w + K2.w) * vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = (B.xy + vec2f(B.z, B.w + K2.w) * qd(v)) * D.m.xy + D.m.zw;
   var o: VO; o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0); o.i = n;
   return o;
 }
@@ -24427,10 +24425,8 @@ fn fgCls(c: i32, r: i32) -> u32 {
   return 0u;
 }
 @vertex fn vsFg(@builtin(vertex_index) v: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let P0 = u32(D.span[0].x); let K0 = items[P0]; let K1 = items[P0 + 1u];
-  let d = mix(vec2f(K1.x, K1.z), vec2f(K1.x + K1.y, max(K1.z, K0.z)), vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = mix(vec2f(K1.x, K1.z), vec2f(K1.x + K1.y, max(K1.z, K0.z)), qd(v)) * D.m.xy + D.m.zw;
   var o: VO; o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0); o.i = 0u;
   return o;
 }
@@ -24530,10 +24526,8 @@ fn diWave(y: f32) -> f32 { let wy = diWy(y); let t = D.di[1].w; return floor(D.d
 // the gradient's ramp row (-1: none), its axis (0 across, 1 down), its start and end in user space). Added: alpha 0 laid source-over, the same as
 // 'lighter' on the opaque sky
 @vertex fn vsRect(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
   let bb = items[n * 3u];
-  let d = mix(bb.xy, bb.zw, vec2f(qx[v], qy[v])) * D.m.xy + D.m.zw;
+  let d = mix(bb.xy, bb.zw, qd(v)) * D.m.xy + D.m.zw;
   var o: VO;
   o.p = vec4f(d.x / D.tgt.x * 2.0 - 1.0, d.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0);
   o.i = n;
@@ -24563,7 +24557,7 @@ fn diWave(y: f32) -> f32 { let wy = diWy(y); let t = D.di[1].w; return floor(D.d
   let gw = i32(D.ab1.x); let gh = i32(D.ab1.y);
   let q0 = clamp(i32(fx), 0, gw - 1); let q1 = clamp(i32(fx) + 1, 0, gw - 1); let r0 = clamp(i32(fy), 0, gh - 1); let r1 = clamp(i32(fy) + 1, 0, gh - 1);
   let a00 = abCell(q0, r0); let a10 = abCell(q1, r0); let a01 = abCell(q0, r1); let a11 = abCell(q1, r1);
-  let Dk = mix(mix(a00[0], a10[0], tx), mix(a01[0], a11[0], tx), ty); let G = mix(mix(a00[1], a10[1], tx), mix(a01[1], a11[1], tx), ty);
+  let Dk = mix(mix(a00.d, a10.d, tx), mix(a01.d, a11.d, tx), ty); let G = mix(mix(a00.g, a10.g, tx), mix(a01.g, a11.g, tx), ty);
   let acc = G + Dk * (1.0 - G.a);
   if (acc.a <= 0.0) { discard; }
   return acc;
@@ -24597,9 +24591,7 @@ struct VQ { @builtin(position) p: vec4f, @location(0) @interpolate(flat) q: f32 
   let fy = F0.w + f32(fr) * F0.z; let d = fy - lv; if (d < 3.0) { return o; }
   let Y = floor((fy - 3.0) * F1.x - F1.z + 0.5);
   let X0 = floor(f32(c) * F0.z * F1.x - F1.y + 0.5); let X1 = floor(f32(c + 1) * F0.z * F1.x - F1.y + 0.5);
-  var qx = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
-  let u = vec2f(mix(X0, X1, qx[v]), Y + F1.w * qy[v]) * D.m.xy + D.m.zw;
+  let q = qd(v); let u = vec2f(mix(X0, X1, q.x), Y + F1.w * q.y) * D.m.xy + D.m.zw;
   o.p = vec4f(u.x / D.tgt.x * 2.0 - 1.0, u.y / D.tgt.y * 2.0 - 1.0, 0.0, 1.0);
   o.q = floor(d / 12.0 + 0.5);
   return o;
@@ -25336,7 +25328,7 @@ function waterDecksGPU(list, Bt, rect) {
    list's order): each rock's data (rockFormData, reefRockData - made the first time it's drawn, a formation's cuts again after a blast: its v moves) kept in
    one buffer while it's seen - placed where there's room, sent again when its v moves; when the room's used up, the ones in view placed again from the start
    (the buffer grown if they don't fit). Their numbers in the buffer's first part, RK_INST a draw (more: further draws, each copied in before its draw).
-   list: a rock [data, x, y, width, height (its box, user space), the tint's mul, the water's colour there (0..255), haze, its palette (RKP's), 1 bold]; a
+   list: a rock [data, x, y, width, height (its box, user space), the tint's mul, the water's colour there (0..255), haze, its palette (rkp's), 1 bold]; a
    picture [null, x, y, width, height, its place in the atlas (pic._art - drawn once ok), its first row shown] */
 const RK_INST = 256;
 function waterRocksGPU(list) {
@@ -28055,7 +28047,7 @@ function gskLightSrc(kind, mode) {
   { const a = s.indexOf('vec4 bb = T(u_o.z + bill * 2 + 1);'), e0 = 'odSelf += ch / B.w; }', b = s.indexOf(e0, a);
     if (a < 0 || b < 0) throw new Error('GPU SKY: GL_LVS changed, not found: SELF');
     s = s.slice(0, a) + `int f0 = int(RB(bill, 3).w + 0.5);
-    for (int w = 0; w < 4; w++) { uvec4 mw = RU(bill, 6 + w); for (int e = 0; e < 4; e++) { uint mk = mw[e]; for (int bt = 0; bt < 32 && mk != 0u; bt++) { int q = int(findLSB(mk)); mk &= mk - 1u;
+    for (int w = 0; w < 4; w++) { uvec4 mw = RU(bill, 6 + w); for (int e = 0; e < 4; e++) { uint mk = gskLane(mw, e); for (int bt = 0; bt < 32 && mk != 0u; bt++) { int q = int(findLSB(mk)); mk &= mk - 1u;
       vec4 B = BPOS(f0 + w * 128 + e * 32 + q); float ch = sphereChord(P, L, B.xyz, B.w); if (ch > 0.0) odSelf += ch / B.w; } } }` + s.slice(b + e0.length); }
   rep('int(T(u_o.z + bill * 2 + 1).z + 0.5)', 'int(RB(bill, 3).z + 0.5)');
   rep('gl_VertexID', 'gsk_vid');
@@ -28082,6 +28074,8 @@ uint gskJump(uint s, uint n) { uint am = 1u, ap = 0u, cm = 1664525u, cp = 101390
 // (a billow's pass mask: its four words - no array a shader indexes as it runs: Intel's D3D12 put those in scratch memory and hung, pixel-cost Nov 11)
 uvec4 gskMask(int g) { return uvec4(RU(g, 4).yzw, RU(g, 5).x); }
 uint gskWord(uvec4 m, int w) { return w == 0 ? m.x : w == 1 ? m.y : w == 2 ? m.z : m.w; }
+// (a vector's lane w by selects, past the last the last: a vector indexed as the shader runs is kept in scratch memory too - the Intel hang, Nov 11)
+uint gskLane(uvec4 m, int w) { uint u = uint(w); return u >= 3u ? m.w : (u >= 2u ? m.z : (u >= 1u ? m.y : m.x)); }
 // how many of a billow's puff places before k hold a puff (its pass mask)
 int gskRank(int g, int k) { uvec4 m = gskMask(g); int kw = k >> 5;
   int r = (kw > 0 ? int(bitCount(m.x)) : 0) + (kw > 1 ? int(bitCount(m.y)) : 0) + (kw > 2 ? int(bitCount(m.z)) : 0) + (kw > 3 ? int(bitCount(m.w)) : 0);
@@ -30390,7 +30384,7 @@ fn B(i: i32, k: i32) -> vec4f { return bd[i * 4 + k]; }
 fn gcell(which: i32, ch: i32, i: i32, j: i32) -> f32 {
   let k = j * h.gs.x + i;
   if (which == 1) { return F[h.fo2.y + u32(k) * 4u + u32(ch)]; }
-  let v = g2[k]; return v[ch];
+  return g2[k][ch];   // (the shadow's channel read where it's kept - not a vector in the function indexed at run time: Intel D3D12 scratch memory, Nov 11)
 }
 fn samp(ch: i32, which: i32, gxf: f32, gyf: f32) -> f32 {
   let gi = clamp(i32(gxf), 0, h.gs.x - 2); let gj = clamp(i32(gyf), 0, h.gs.y - 2);
@@ -30400,6 +30394,15 @@ fn samp(ch: i32, which: i32, gxf: f32, gyf: f32) -> f32 {
 }
 fn nrm3(v: vec3f) -> vec3f { let l = length(v); if (l > 0.0) { return v / l; } return v; }
 struct Sh { s: vec4f, k: f32 };
+// (a puff's tone at its value qv moved by e)
+fn toneAt(e: f32, qv: f32, hiK: f32, rimAdd: f32, cast_: f32, bny: f32, gf: f32) -> i32 {
+  var t = i32(clamp(floor((qv + e) * 5.0), 0.0, 4.0));
+  if (hiK > 0.0 && qv + e >= 1.25 - 0.25 * hiK && (rimAdd + e > 0.12 || h.q2.x > 0.5 || h.q2.y > 0.3)) { t = 5; }
+  let kk = clamp((cast_ - e - 0.3) / 0.3, 0.0, 1.0); var floorT = 0.0; if (bny > 0.3) { floorT = 1.0; }
+  if (kk > 0.0) { t = min(t, i32(floor(4.0 - kk * (4.0 - floorT) + 0.5))); }
+  if (gf > 0.0) { t = max(t, i32(min(3.0, floor((gf + e) * 4.2)))); }
+  return t;
+}
 fn shadePuff(i: i32, px: f32, py: f32, d: i32, pnOn: bool, pn: vec3f, mem: vec4f) -> Sh {
   let b0 = B(i, 0); let b1 = B(i, 1); let b2 = B(i, 2);
   let X = b0.x; let Y = b0.y; let r = b0.z; let Fm = b1.y;
@@ -30441,20 +30444,12 @@ fn shadePuff(i: i32, px: f32, py: f32, d: i32, pnOn: bool, pn: vec3f, mem: vec4f
   let qv = (val - 0.5) * h.q1.x + 0.5 + h.q1.y + jit;
   let gk = h.q2.z; var gf = 0.0; if (gk > 0.01) { gf = gk * (0.12 + 0.62 * max(0.0, -bn.y) + 0.2 * (1.0 - abs(bn.y))); }
   let hiK = h.q1.w;
-  var T: array<i32, 3>;
-  for (var s = 0; s < 3; s++) {
-    var e = 0.0; if (s == 1) { e = -0.08; } else if (s == 2) { e = 0.08; }
-    var t = i32(clamp(floor((qv + e) * 5.0), 0.0, 4.0));
-    if (hiK > 0.0 && qv + e >= 1.25 - 0.25 * hiK && (rimAdd + e > 0.12 || h.q2.x > 0.5 || h.q2.y > 0.3)) { t = 5; }
-    let kk = clamp((cast_ - e - 0.3) / 0.3, 0.0, 1.0); var floorT = 0.0; if (bn.y > 0.3) { floorT = 1.0; }
-    if (kk > 0.0) { t = min(t, i32(floor(4.0 - kk * (4.0 - floorT) + 0.5))); }
-    if (gf > 0.0) { t = max(t, i32(min(3.0, floor((gf + e) * 4.2)))); }
-    T[s] = t;
-  }
-  var tone = T[0]; var k = 0.0;
+  // (the tone at the value and a step either side - three calls, not an array filled by a loop: Intel D3D12 scratch memory, Nov 11)
+  let T0 = toneAt(0.0, qv, hiK, rimAdd, cast_, bn.y, gf); let T1 = toneAt(-0.08, qv, hiK, rimAdd, cast_, bn.y, gf); let T2 = toneAt(0.08, qv, hiK, rimAdd, cast_, bn.y, gf);
+  var tone = T0; var k = 0.0;
   if (prev) {
     let tp = i32(mem.x + 0.5); k = mem.w - 1.0;
-    if (tp != tone && tp >= min(T[1], T[2]) && tp <= max(T[1], T[2])) { tone = tp; }
+    if (tp != tone && tp >= min(T1, T2) && tp <= max(T1, T2)) { tone = tp; }
     if (tone != tp) { k += 1.0; if (k >= 2.0) { var st = -1; if (tone > tp) { st = 1; } tone = tp + st; k = 0.0; } else { tone = tp; } } else { k = 0.0; }
   }
   // the fire's light
@@ -33040,7 +33035,7 @@ function rockTopY(x) {
   }
   return top;
 }
-// (the rocks' palettes - RK_LAYER the decks', RK_SOLID the formations', RK the coast's boulders - live in the water shader's RKP (40-zz-water-gpu.js), which
+// (the rocks' palettes - RK_LAYER the decks', RK_SOLID the formations', RK the coast's boulders - live in the water shader's RK0..RK5 (rkp, 40-zz-water-gpu.js), which
 // paints them all from their data. User Oct 25, with a picture - gen/sea_src/ref_rocks_layers.png: the solid rocks dark blue-grey in the water's tint with a
 // black edge, the layers behind lighter, nearly the water's own colour; painted in neutral greys and coloured as they're drawn from the water's colour at
 // their depth - seaTint)
@@ -34538,10 +34533,11 @@ struct DD { x: f32, y: f32, ox: f32, oy: f32, ord: f32, ns: f32, p0: f32, p1: f3
 @group(0) @binding(7) var<storage, read> surfL: array<vec2f>;  // (the view's surface: each column's row (x), from -3 - the water's, frameShared('water.levels'); a stand-in)
 struct VO { @builtin(position) p: vec4f, @location(0) @interpolate(flat) i: u32 };
 @vertex fn vs(@builtin(vertex_index) v: u32, @builtin(instance_index) n: u32) -> VO {
-  var qx = array<f32, 6>(0.0, 1.0, 1.0, 0.0, 1.0, 0.0);
-  var qy = array<f32, 6>(0.0, 0.0, 1.0, 0.0, 1.0, 1.0);
+  // (the quad's corner at vertex v of its triangles 0 1 2, 0 2 3 - (0,0) (1,0) (1,1) (0,0) (1,1) (0,1) - from two six-bit masks, a vertex past the sixth
+  // as the sixth: no corner table indexed by the vertex, Intel D3D12 scratch memory, Nov 11)
+  let k = min(v, 5u); let qv = vec2f(f32((0x16u >> k) & 1u), f32((0x34u >> k) & 1u));
   let a = inst[n];
-  let l = a.t.zw + vec2f(qx[v], qy[v]) * a.q.xy;
+  let l = a.t.zw + qv * a.q.xy;
   let d = vec2f(a.m.x * l.x + a.m.z * l.y + a.t.x, a.m.y * l.x + a.m.w * l.y + a.t.y);
   var o: VO;
   o.p = vec4f(d.x / D.x * 2.0 - 1.0, d.y / D.y * 2.0 - 1.0, 0.0, 1.0);   // (rows bottom first, as every target's: the canvas's row d.y is the target's row h - d.y)
@@ -34829,6 +34825,11 @@ fn ordAt(q: vec2f) -> f32 {
   let o = textureLoad(ordL, vec2i(x, d.y - 1 - y), 0);
   return round(o.r * 255.0) * 65536.0 + round(o.g * 255.0) * 256.0 + round(o.b * 255.0);
 }
+// (a gradient's stop j - offsets o0 the one before, o1 its own - over colour c at t: c, or the mix of the colours either side of it once t is past o0)
+fn gradStop(a: I, c: vec4f, t: f32, j: u32, o0: f32, o1: f32) -> vec4f {
+  if (t > o0) { return mix(rv(a, 2u + j), rv(a, 3u + j), clamp((t - o0) / max(o1 - o0, 1e-5), 0.0, 1.0)); }
+  return c;
+}
 fn shade(v: VO) -> vec4f {
   let a = inst[v.i];
   let q = vec2f(v.p.x, D.y - v.p.y);
@@ -34872,7 +34873,8 @@ fn shade(v: VO) -> vec4f {
     var t = clamp(dot(p - G0.xy, ab) / max(dot(ab, ab), 1e-8), 0.0, 1.0);
     if (G1.y > 0.5) { t = clamp(length(p - G0.xy) / max(length(ab), 1e-4), 0.0, 1.0); }
     let n = u32(G1.x + 0.5); var c = rv(a, 3u);
-    for (var j = 1u; j < 4u; j++) { if (j >= n) { break; } if (t > O[j - 1u]) { c = mix(rv(a, 2u + j), rv(a, 3u + j), clamp((t - O[j - 1u]) / max(O[j] - O[j - 1u], 1e-5), 0.0, 1.0)); } }
+    // (stops 1, 2, 3 in turn while there are that many - the offsets O's lanes named, not indexed at run time: Intel D3D12 scratch memory, Nov 11)
+    if (n > 1u) { c = gradStop(a, c, t, 1u, O.x, O.y); } if (n > 2u) { c = gradStop(a, c, t, 2u, O.y, O.z); } if (n > 3u) { c = gradStop(a, c, t, 3u, O.z, O.w); }
     return vec4f(c.rgb * c.a, c.a) * a.q.w;
   }
   // (a part of the picture only - sr: its texels [x, y, w, h], the rest of the picture still its own for the rims; a sail's band, a column run)
@@ -36502,24 +36504,27 @@ fn winPx(R: Row, p: vec2f, od: f32) -> vec4f {
     let down = k.x > 1.0001 || k.y > 1.0001;
     let tpp = max(k.x / length(m.xy), k.y / length(m.zw));
     let n = select(1, clamp(i32(ceil(tpp - 0.05)), 1, 4), down);
-    // (the boxes near this pixel's texels first - at most 8: its taps read only those)
+    // (the boxes near this pixel's texels first - at most 8: its taps read only those. Kept as a mask of their numbers (WINS <= 32), each read again
+    // in turn - no array of them: Intel D3D12 scratch memory, Nov 11)
     let tc = lp * k; let ext = (abs(ddx) + abs(ddy)) * 0.5 + 1.5;
-    var near: array<vec4f, 8>; var nn = 0u;
+    var near = 0u; var nn = 0u;
     for (var j = 0u; j < ${LPASS.WINS}u; j++) { if (j >= nb) { break; } let b = boxAt(bo, j);
-      if (nn < 8u && b.z > tc.x - ext.x && b.x < tc.x + ext.x && b.w > tc.y - ext.y && b.y < tc.y + ext.y) { near[nn] = b; nn = nn + 1u; } }
+      if (nn < 8u && b.z > tc.x - ext.x && b.x < tc.x + ext.x && b.w > tc.y - ext.y && b.y < tc.y + ext.y) { near = near | (1u << j); nn = nn + 1u; } }
     if (nn == 0u) { return vec4f(0.0); }
     var acc = 0.0;
     for (var j = 0; j < 4; j++) { if (j >= n) { break; } for (var i = 0; i < 4; i++) { if (i >= n) { break; }
       let u = so + tc + ddx * ((f32(i) + 0.5) / f32(n) - 0.5) + ddy * ((f32(j) + 0.5) / f32(n) - 0.5);   // (the picture's texels)
       if (down) {
         let U = clamp(u, vec2f(-1.0), aw + 1.0) - 0.5; let i0 = floor(U); let fr = U - i0; var c4 = vec4f(0.0);
-        for (var q = 0u; q < 8u; q++) { if (q >= nn) { break; } let b = near[q] + vec4f(so, so);
+        var nm = near;
+        for (var q = 0u; q < 8u; q++) { if (q >= nn) { break; } let b = boxAt(bo, firstTrailingBit(nm)) + vec4f(so, so); nm = nm & (nm - 1u);
           let xa = i0.x >= b.x && i0.x < b.z; let xb = i0.x + 1.0 >= b.x && i0.x + 1.0 < b.z; let ya = i0.y >= b.y && i0.y < b.w; let yb = i0.y + 1.0 >= b.y && i0.y + 1.0 < b.w;
           c4 = max(c4, vec4f(select(0.0, 1.0, xa && ya), select(0.0, 1.0, xb && ya), select(0.0, 1.0, xa && yb), select(0.0, 1.0, xb && yb))); }
         acc += mix(mix(c4.x, c4.y, fr.x), mix(c4.z, c4.w, fr.x), fr.y);
       } else {
         let ti = floor(u) - so; var on = 0.0;
-        for (var q = 0u; q < 8u; q++) { if (q >= nn) { break; } let b = near[q]; if (ti.x >= b.x && ti.x < b.z && ti.y >= b.y && ti.y < b.w) { on = 1.0; } }
+        var nm = near;
+        for (var q = 0u; q < 8u; q++) { if (q >= nn) { break; } let b = boxAt(bo, firstTrailingBit(nm)); nm = nm & (nm - 1u); if (ti.x >= b.x && ti.x < b.z && ti.y >= b.y && ti.y < b.w) { on = 1.0; } }
         acc += on;
       } } }
     if (acc / f32(n * n) < 0.4314) { return vec4f(0.0); }
@@ -36529,6 +36534,11 @@ fn winPx(R: Row, p: vec2f, od: f32) -> vec4f {
     return darkOf(p, c) * R.a.w;
   }
   return vec4f(col, 1.0) * R.a.w;
+}
+// (a lighthouse's halo q (its size x r, its strength) laid over o)
+fn lhHalo(o: vec4f, p: vec2f, x: f32, y: f32, r: f32, q: vec2f, fl: f32, on: f32) -> vec4f {
+  if (inRect(p, vec4f(jround(x - r * q.x), jround(y - r * q.x * 0.8), jround(r * q.x * 2.0), jround(r * q.x * 1.6)))) { return over(pm(vec3f(255.0, 214.0, 140.0), (q.y + 0.2 * fl) * on), o); }
+  return o;
 }
 @fragment fn fsRow(v: VO) -> @location(0) vec4f {
   let R = rows[v.i]; let p = canvasP(v.pos); let kc = R.c.w; let od = floor(kc / 64.0); let kind = i32(kc - od * 64.0);
@@ -36573,9 +36583,8 @@ fn winPx(R: Row, p: vec2f, od: f32) -> vec4f {
     }
   } else if (kind == 4) { // a lighthouse's halo and glass
     let x = R.a.x; let y = R.a.y; let r = R.a.z; let on = R.a.w; let fl = R.b.x;
-    var rr = array<vec2f, 3>(vec2f(5.0, 0.06), vec2f(3.2, 0.1), vec2f(2.0, 0.16));
-    for (var k = 0; k < 3; k++) { let q = rr[k];
-      if (inRect(p, vec4f(jround(x - r * q.x), jround(y - r * q.x * 0.8), jround(r * q.x * 2.0), jround(r * q.x * 1.6)))) { o = over(pm(vec3f(255.0, 214.0, 140.0), (q.y + 0.2 * fl) * on), o); } }
+    // (its three halos in turn, each its size and strength - not a table indexed by the loop: Intel D3D12 scratch memory, Nov 11)
+    o = lhHalo(o, p, x, y, r, vec2f(5.0, 0.06), fl, on); o = lhHalo(o, p, x, y, r, vec2f(3.2, 0.1), fl, on); o = lhHalo(o, p, x, y, r, vec2f(2.0, 0.16), fl, on);
     if (inRect(p, vec4f(jround(x - r), jround(y - r * 0.6), jround(r * 2.0), jround(r * 1.2)))) { o = over(pm(vec3f(255.0, 248.0, 214.0), 0.9 * on), o); }
   } else if (kind >= 7) { o = rowPx(R, p - P.misc.yz, kind);
   } else {                // a lighthouse's beam: three wedges, each fading along it (its stops 0, 0.45, 1)
@@ -43420,14 +43429,17 @@ struct VO { @builtin(position) p: vec4f, @location(0) @interpolate(flat) i: u32 
 }
 fn rnd(x: f32) -> f32 { return floor(x + 0.5); }   // (Math.round's: halves up)
 fn sstep(a: f32, b: f32, x: f32) -> f32 { let t = clamp((x - a) / (b - a), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }
-// the head's outline (KR_HEAD: its half-width, a share of its base's, at each height 0..1)
-const HU = array<f32, 11>(0.0, 0.12, 0.25, 0.38, 0.5, 0.58, 0.7, 0.82, 0.92, 0.98, 1.0);
-const HW = array<f32, 11>(0.8, 0.7, 0.66, 0.86, 0.98, 1.0, 0.86, 0.6, 0.3, 0.1, 0.03);
+// the head's outline (KR_HEAD: its half-width, a share of its base's, at each height 0..1 - heights 0, 0.12, 0.25, 0.38, 0.5, 0.58, 0.7, 0.82, 0.92, 0.98, 1;
+// widths 0.8, 0.7, 0.66, 0.86, 0.98, 1, 0.86, 0.6, 0.3, 0.1, 0.03). The stretch u is in: s its ends' heights and widths, taken over at each height u
+// passes (they rise, so the last passed is the one) - no table indexed at run time: Intel D3D12 scratch memory, Nov 11
+fn hdUp(s: vec4f, u: f32, k: vec4f) -> vec4f { return select(s, k, u > k.x); }
 fn headW(u0: f32) -> f32 {
-  let u = clamp(u0, 0.0, 1.0); var i = 0u;
-  for (var j = 0u; j < 9u; j = j + 1u) { if (u > HU[i + 1u]) { i = i + 1u; } else { break; } }
-  let f = (u - HU[i]) / (HU[i + 1u] - HU[i]);
-  return HW[i] + (HW[i + 1u] - HW[i]) * (1.0 - cos(f * 3.14159265)) / 2.0;
+  let u = clamp(u0, 0.0, 1.0); var s = vec4f(0.0, 0.12, 0.8, 0.7);
+  s = hdUp(s, u, vec4f(0.12, 0.25, 0.7, 0.66)); s = hdUp(s, u, vec4f(0.25, 0.38, 0.66, 0.86)); s = hdUp(s, u, vec4f(0.38, 0.5, 0.86, 0.98));
+  s = hdUp(s, u, vec4f(0.5, 0.58, 0.98, 1.0)); s = hdUp(s, u, vec4f(0.58, 0.7, 1.0, 0.86)); s = hdUp(s, u, vec4f(0.7, 0.82, 0.86, 0.6));
+  s = hdUp(s, u, vec4f(0.82, 0.92, 0.6, 0.3)); s = hdUp(s, u, vec4f(0.92, 0.98, 0.3, 0.1)); s = hdUp(s, u, vec4f(0.98, 1.0, 0.1, 0.03));
+  let f = (u - s.x) / (s.y - s.x);
+  return s.z + (s.w - s.z) * (1.0 - cos(f * 3.14159265)) / 2.0;
 }
 fn headRag(bw: f32, u: f32, sd: f32) -> f32 { let sh = sstep(0.32, 0.45, u) * (1.0 - sstep(0.72, 0.86, u)); return bw * 0.035 * sh * (sin(u * 55.0 + sd * 1.3) + 0.6 * sin(u * 131.0 + sd * 2.1)); }
 // a sub's beam on a point dx, dy from the lamp (lampBeamAt, 27-sub-light.js; beamFall, 50-land-research.js); L its length
@@ -55160,6 +55172,10 @@ fn groundFloorRow(si: u32, c: i32, r: i32) -> i32 {
 `; }
 // a JS colour list as a WGSL array of vec3f
 const ggArr = (name, A) => 'const ' + name + ' = array<vec3f, ' + A.length + '>(' + A.map(c => 'vec3f(' + c.map(v => (+v).toFixed(1)).join(', ') + ')').join(', ') + ');\n';
+// and its colour i picked by selects (name_at - i past the last: the last), for a pick at run time: the array itself only ever indexed by a literal (an array
+// indexed at run time is scratch memory on D3D12 - Intel's driver hangs on it, Nov 11)
+const ggPick = (name, n) => 'fn ' + name + '_at(i: u32) -> vec3f { return ' + Array.from({ length: n - 1 }, (_, k) => 'select(').join('') + name + '[0]'
+  + Array.from({ length: n - 1 }, (_, k) => ', ' + name + '[' + (k + 1) + '], i >= ' + (k + 1) + 'u)').join('') + '; }\n';
 function ggWgsl() {
   const H = `
 const CELL: f32 = ${LT_CELL.toFixed(4)};
@@ -55263,7 +55279,7 @@ fn gspan(i: i32, s: u32) -> vec2f { let o = J.gpos + (u32(i) * 8u + s) * 2u; ret
   pages[o] = w0; pages[o + 1u] = halo[J.ipos + u32(j) * 64u + u32(q)]; pages[o + 2u] = d0; pages[o + 3u] = select(0xffffu, u32(gd * 256.0), gd < 72.0) | (lfrt << 16u); pages[o + 4u] = halo[J.npos + u32(j) * 64u + u32(q)]; pages[o + 5u] = halo[J.wpos + u32(j) * 64u + u32(q)];
 }
 `;
-  const P = (n, M) => ggArr(n, M);
+  const P = (n, M) => ggArr(n, M) + (/^(PAL|DES_EARTH|SEA_PEB)/.test(n) ? ggPick(n, M.length) : '');   // (the ones picked at run time)
   const draw = H + P('PAL_G', LT_PAL[M_GRASS]) + P('PAL_DI', LT_PAL[M_DIRT]) + P('PAL_S', LT_PAL[M_SAND]) + P('PAL_R', LT_PAL[M_ROCK]) + P('PAL_C', LT_PAL[M_CONC])
     + P('PALD_DI', LT_PAL_D[M_DIRT]) + P('PALD_S', LT_PAL_D[M_SAND]) + P('PALD_R', LT_PAL_D[M_ROCK]) + P('PALD_C', LT_PAL_D[M_CONC])
     + P('DES_EARTH', DES_EARTH) + P('DES_SAND', DES_SAND) + P('DES_CRUST', DES_CRUST) + P('DES_STONE', DES_STONE) + P('DES_PEB', DES_PEB)
@@ -55323,11 +55339,11 @@ fn bv(b: u32, v: u32) -> vec4f { return FD[FD_BIO + b * BIOV + v]; }
 // a type (ltTypeKey: look | trop << 1 | mtn << 2 | bio << 3) -> its biome (colBiome): 0 forest, 1 desert, 2 mountain, 3 tropical, 4 ice, 5 swamp, 6 volcanic, 7 sea
 fn tBiome(t: u32) -> u32 { let b = t >> 3u; if (b != 0u) { return 3u + b; } if ((t & 4u) != 0u) { return 2u; } if ((t & 2u) != 0u) { return 3u; } if ((t & 1u) != 0u) { return 1u; } return 0u; }
 fn pal(m: u32, des: bool, i: u32) -> vec3f {
-  if (m == M_GRASS) { return PAL_G[i]; }
-  if (m == M_DIRT) { if (des) { return PALD_DI[i]; } return PAL_DI[i]; }
-  if (m == M_SAND) { if (des) { return PALD_S[i]; } return PAL_S[i]; }
-  if (m == M_ROCK) { if (des) { return PALD_R[i]; } return PAL_R[i]; }
-  if (des) { return PALD_C[i]; } return PAL_C[i];
+  if (m == M_GRASS) { return PAL_G_at(i); }
+  if (m == M_DIRT) { if (des) { return PALD_DI_at(i); } return PAL_DI_at(i); }
+  if (m == M_SAND) { if (des) { return PALD_S_at(i); } return PAL_S_at(i); }
+  if (m == M_ROCK) { if (des) { return PALD_R_at(i); } return PAL_R_at(i); }
+  if (des) { return PALD_C_at(i); } return PAL_C_at(i);
 }
 fn lum(c: vec3f) -> f32 { return min(1.0, (0.3 * c.x + 0.59 * c.y + 0.11 * c.z) / 255.0 * 1.45); }
 // a cell's colour col (material m, depth cells under its open top, seam: between stones, h its own noise 0..1) in biome b; nb (VOLCANIC, a seam
@@ -55378,7 +55394,8 @@ fn stint(cc: vec3f, b: u32) -> vec3f { let Vs = FD[3].z; let s = stones[b + 1u];
 fn seaFloor(si: u32, c: i32, r: i32, d: f32, hs: f32, rb: u32) -> vec3f {
   let L4 = col(si, c, 4u); let L5 = col(si, c, 5u); let n = min(u32(L5.x), 4u); let sd = L5.y;   // (Nov 10: capped - a vec4's 4 layers at most)
   var acc = 0.0; var li = 99u; var k = 0.0;
-  for (var i = 0u; i < 4u; i++) { if (i >= n) { break; } let bot = L4[i]; if (d < bot) { if (d >= acc) { li = i; k = (d - acc) / max(1.0, bot - acc); } break; } acc = bot; }
+  // (layer i's bottom L4's lane i by selects - not a vector indexed at run time: Intel D3D12 scratch memory, Nov 11)
+  for (var i = 0u; i < 4u; i++) { if (i >= n) { break; } let bot = select(select(select(L4.x, L4.y, i >= 1u), L4.z, i >= 2u), L4.w, i >= 3u); if (d < bot) { if (d >= acc) { li = i; k = (d - acc) / max(1.0, bot - acc); } break; } acc = bot; }
   var cc: vec3f;
   if (li != 99u) {
     let f = u32(bv(7u, 1u + li * 4u).w);
@@ -55386,7 +55403,7 @@ fn seaFloor(si: u32, c: i32, r: i32, d: f32, hs: f32, rb: u32) -> vec3f {
     else { let t = select(select(SEA_SAND[0], SEA_SAND[2], hs > 0.9), SEA_SAND[1], hs < 0.22); cc = mix(t, SEA_SAND[2], k * 0.55); }
   } else {
     cc = select(select(SEA_SILT[0], SEA_SILT[2], hs > 0.93), SEA_SILT[1], hs < 0.3);
-    let pk = (rb >> 27u) & 3u; if (pk != 0u) { cc = SEA_PEB[pk - 1u]; }   // (its pebble: the processor's - one to a jittered 10-cell square)
+    let pk = (rb >> 27u) & 3u; if (pk != 0u) { cc = SEA_PEB_at(pk - 1u); }   // (its pebble: the processor's - one to a jittered 10-cell square)
     if (d - sd < 4.0) { cc = mix(cc, SEA_SAND[2], 0.5); }
   }
   let f = fadeAt(d, c, r); if (f > 0.0) { cc = mix(cc, LT_DEEP, f); }
@@ -55407,10 +55424,10 @@ fn stoneLook(b: u32, dx: f32, dy: f32, hs: f32) -> SR {
 struct DC { c: vec3f, soft: bool }
 fn desertCell(si: u32, c: i32, r: i32, m: u32, depth: f32, hs: f32, jit0: f32, sb0: u32, hasS: bool, rb: u32) -> DC {
   if (hasS && (m == M_DIRT || m == M_ROCK)) {
-    let S = stoneAt(sb0, c, r, hs); let k0 = stones[sb0 + 2u].x; let P = DES_STONE;
-    var cc = select(select(select(P[4], select(P[3], P[2], k0 < 0.5), S.t > -0.25), P[1], S.t > 0.22), P[0], S.t > 0.6);
-    if (S.e < 0.9 && S.t < 0.2) { cc = P[5]; }
-    if ((rb & (1u << 17u)) != 0u) { cc = mix(cc, P[4], 0.55); }   // (a bedding line across it - the processor's)
+    let S = stoneAt(sb0, c, r, hs); let k0 = stones[sb0 + 2u].x;   // (DES_STONE read where it's used - not copied into a local array: Intel D3D12 scratch memory, Nov 11)
+    var cc = select(select(select(DES_STONE[4], select(DES_STONE[3], DES_STONE[2], k0 < 0.5), S.t > -0.25), DES_STONE[1], S.t > 0.22), DES_STONE[0], S.t > 0.6);
+    if (S.e < 0.9 && S.t < 0.2) { cc = DES_STONE[5]; }
+    if ((rb & (1u << 17u)) != 0u) { cc = mix(cc, DES_STONE[4], 0.55); }   // (a bedding line across it - the processor's)
     return DC(stint(cc, sb0), false);
   }
   let C0 = col(si, c, 0u); let C3 = col(si, c, 3u); let y = LT_Y0 + f32(r) * CELL; let t0 = C0.y;
@@ -55429,7 +55446,7 @@ fn desertCell(si: u32, c: i32, r: i32, m: u32, depth: f32, hs: f32, jit0: f32, s
     if (f < 0.18) { deep = DES_STONE[4]; } else if (hs > 0.9) { deep = DES_STONE[1]; }
   } else {
     let v = y - C0.x + C3.z; let T = 22.0; let b = floor(v / T); let f = v / T - b;
-    deep = DES_EARTH[min(3u, u32(sth(b).x * 4.0))];
+    deep = DES_EARTH_at(min(3u, u32(sth(b).x * 4.0)));
     if (f < 0.07 && (rb & (1u << 18u)) != 0u) { deep = mix(deep, DES_SEAM, 0.55); }
     else if (sth(b).y < 0.45 && abs(f - 0.55) < 0.05) { deep = mix(deep, DES_SEAM, 0.25); }
     else if (hs < 0.12) { deep = deep * 0.9; } else if (hs > 0.92) { deep = deep * 1.07; }
@@ -55593,6 +55610,12 @@ fn edgeAt(si: u32, c: i32, i: i32, r4: i32) -> vec3f {
   if (r4 < yy || r4 >= t * 4) { return vec3f(-1.0); }
   return cellCol(si, c, t, ot);
 }
+// (a cell's side lit as it faces the light: f its rim's strength (0 none, 1, 2 the full), w how much it faces the light) over cc
+fn rimOver(cc: vec4f, f: u32, w: f32) -> vec4f {
+  if (f == 0u || w < 0.03) { return cc; }
+  let a = select(120.0, 255.0, f == 2u) / 255.0 * min(1.0, w * FD[1].w);
+  return vec4f(cc.xyz * (1.0 - a) + FD[1].xyz * a, cc.w * (1.0 - a) + a);   // (premultiplied: over what's under, the ground or what's behind it)
+}
 @fragment fn fs(fi: VO) -> @location(0) vec4f {
   let I = instOf(fi.ii); let si = I.si; let S = slots[si]; let K = cam();
   LV = min(u32(I.lv), 3u);   // (Nov 10: capped - a level from the instance's words never walks more than 4 levels)
@@ -55614,12 +55637,8 @@ fn edgeAt(si: u32, c: i32, i: i32, r4: i32) -> vec3f {
     let o = cellAt(si, c, r);
     if (ok(o) && (pages[o] & 7u) != M_AIR) {
       let d0 = pages[o + 2u];
-      var fl = array<u32, 3>((d0 >> 18u) & 3u, (d0 >> 20u) & 3u, (d0 >> 22u) & 3u); var wv = array<f32, 3>(-I.lx, I.lx, -I.ly * 0.7);
-      for (var k = 0; k < 3; k++) {
-        if (fl[k] == 0u || wv[k] < 0.03) { continue; }
-        let a = select(120.0, 255.0, fl[k] == 2u) / 255.0 * min(1.0, wv[k] * FD[1].w);
-        cc = vec4f(cc.xyz * (1.0 - a) + FD[1].xyz * a, cc.w * (1.0 - a) + a);   // (premultiplied: over what's under, the ground or what's behind it)
-      }
+      // (its left, right and top sides in turn - not tables indexed by the loop: Intel D3D12 scratch memory, Nov 11)
+      cc = rimOver(cc, (d0 >> 18u) & 3u, -I.lx); cc = rimOver(cc, (d0 >> 20u) & 3u, I.lx); cc = rimOver(cc, (d0 >> 22u) & 3u, -I.ly * 0.7);
     }
   }
   // the grass burnt black along the ground's top (drawScar's rule - the plants' fire): from a ragged height over the top (2 to 5 units) to 2.5 under it
@@ -56962,7 +56981,9 @@ fn beam(d: vec2f, u: vec2f, L: f32) -> f32 {   // (lampBeamAt, its reach L)
 }
 // 4. the dark: 1 - the light, stepped and dithered by the cell. An open cell its own light; a rock cell the ground's fade from the open cell that
 // lights it best, over the fade it was painted with - lit as it was where the air in front of it is lit, darker as that air is
-var<private> BY: array<f32, 16> = array<f32, 16>(0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+// (the 4 x 4 ordered dither's level at x, y (each 0..3) - 0 8 2 10 / 12 4 14 6 / 3 11 1 9 / 15 7 13 5 - from their bits: no table indexed at run time,
+// Intel D3D12 scratch memory, Nov 11)
+fn bayer(x: i32, y: i32) -> f32 { let a = x ^ y; return f32(((a & 1) << 3u) | ((y & 1) << 2u) | (a & 2) | ((y & 2) >> 1u)); }
 fn litD(d: f32) -> f32 { return 1.0 - smoothstep(0.13 * U.jf.z, U.jf.z, d * U.box.z); }
 @fragment fn fsF(@builtin(position) pos: vec4f) -> @location(0) vec4f {
   let p = vec2i(pos.xy); let a = textureLoad(tA, p, 0);
@@ -56976,7 +56997,7 @@ fn litD(d: f32) -> f32 { return 1.0 - smoothstep(0.13 * U.jf.z, U.jf.z, d * U.bo
       else { let off = s.rg - 128.0; let e = length(off) + (1.0 - textureLoad(tA, p + vec2i(off), 0).r) * U.jf.y; L = clamp(litD(e) / n, 0.0, 1.0); } }
   }
   let cell = U.box.xy + pos.xy * U.box.z; let c = vec2i(floor(cell)) & vec2i(3);
-  let q = clamp(floor(L * U.jf.w + (BY[c.y * 4 + c.x] + 0.5) / 16.0) / U.jf.w, 0.0, 1.0);
+  let q = clamp(floor(L * U.jf.w + (bayer(c.x, c.y) + 0.5) / 16.0) / U.jf.w, 0.0, 1.0);
   let row = cell.y;
   let tw = clamp((row - U.band.z) / max(1.0, U.band.w - U.band.z), 0.0, 1.0);
   var dk = mix(U.dkA.rgb, U.dk.rgb, clamp((row - U.band.x) / max(1.0, U.band.y - U.band.x), 0.0, 1.0));
@@ -57416,7 +57437,7 @@ const folKeyOf = it => it.pf && FOL_SHAPES[it.pf] ? it.pf : (rigName(it) === 'fo
 // (user Nov 3 21:28) each kind its own numbers: PALM, BUSH 1 (the single bushes), BUSH 2 (the two-plant ones) - VTUNE.veg_*
 // (user Nov 3 21:51: "only 2 for the back. 3 for the middle, and then the palm tree") each kind its own numbers: PALM, MIDDLE 1-3, BACK 1-2
 const rigK = it => VTUNE[it.trop ? 'veg_palm' : it.fol ? 'veg_back' + it.fol : 'veg_mid' + (RIG_BUSHES.indexOf(it.bush) + 1)];
-let VEG_SOLO = null, VEG_FREEZE = false, VEG_NOMASK = false, VEG_NOBIRDS = false, VEG_NOPARTS = false, VEG_TREESHED = false;   // (VEG_TREESHED: the lab - leaves only from the plants, now and then)   // (Nov 4 08:46: the lab's BIRDS / PARTICLES toggles)
+let VEG_SOLO = null, VEG_FREEZE = false, VEG_NOBIRDS = false, VEG_NOPARTS = false;   // (Nov 4 08:46: the lab's BIRDS / PARTICLES toggles)
    // (23:36: the prefab editor's live view - WORLD off: the plant alone holds still at rest; MASK off: its shapes filled flat)   // (user Nov 3 23:23: "We should be able to test the prefab in isolation") one plant shown alone
 const rigShown = it => (!VEG_SOLO || VEG_SOLO.has(it)) && (!it.deck || (it.cave ? CAVE_SHOW : it.uw ? UW_SHOW : DECK_SHOW)[it.deck - 1] !== false);   // (an underwater deck's: its own SHOW - UW_SHOW)   // (decks 4-6: the Biome Editor's DECKS bar - DECK_SHOW)   // (a deck hidden: its plants not drawn or stepped)
 // (user Nov 4 10:37: "the leaf size and size under a Deck was for that object in that deck ... make the palm trees in Deck 3 smaller than the ones in Deck 1")
@@ -57515,7 +57536,7 @@ function rigState(it, rc) {
   let s = RIGS_ST.get(it.x);
   if (s && s.b.length !== rc.fronds.length * 2) s = null;   // (a built prefab's leaves added or taken away)
   if (!s) {
-    const n = rc.fronds.length, T = rigK(it);
+    const n = rc.fronds.length;
     s = { a: new Float32Array(3), av: new Float32Array(3), b: new Float32Array(n * 2), bv: new Float32Array(n * 2), sz: new Float32Array(n), lag: new Float32Array(n), burnt: new Uint8Array(n), seen: 0,
       // (user Nov 3 22:19 / 23:42: torn - explosions, crashes, strong wind) each leaf's tear (0 whole on the plant, 1 its outer half falling, 2 all of it
       // falling, 3 / 4 that piece gone), the falling piece's offset / turn and their speeds, its time, when it lay down, its lowest point now (builtGeo's);
@@ -69719,9 +69740,9 @@ async function start(data) {
     vegPx: () => VEG_PX,
     kOf: it => it.trop ? 'veg_palm' : it.fol ? 'veg_back' + it.fol : 'veg_mid' + (RIG_BUSHES.indexOf(it.bush) + 1),
     kOfKey: key => { const b = folBase(key) || key; return b === 'palm-tropical' ? 'veg_palm' : b.startsWith('fol-') ? 'veg_back' + b.slice(4) : 'veg_mid' + (RIG_BUSHES.indexOf(+b.slice(9)) + 1); },
-    birds: v => { VEG_NOBIRDS = !v; }, treeShed: v => { VEG_TREESHED = !!v; }, parts: v => { VEG_NOPARTS = !v; },
+    birds: v => { VEG_NOBIRDS = !v; }, parts: v => { VEG_NOPARTS = !v; },
     solo: it => { VEG_SOLO = it ? new Set(Array.isArray(it) ? it : [it]) : null; },   // (08:38: the WORLD view's plant and its copies)
-    freeze: v => { VEG_FREEZE = !!v; }, noMask: v => { VEG_NOMASK = !!v; },
+    freeze: v => { VEG_FREEZE = !!v; },
     // a plant's picture box on the screen: its top left (css pixels) and css pixels an art pixel - the prefab editor's live view lines up with it
     plantScreen: it => { const G = plantGeo(it); if (!G) return null; const v = cam.view[0], sv = S * v.z, d = window.devicePixelRatio || 1, foot = propTop(it) + G.sink, X0 = it.x - (it.flip ? G.w - G.fo : G.fo), Y0 = foot - G.h;
       return { x: (X0 * sv - Math.round(v.l * sv)) * PIXW / d, y: (Y0 * sv - Math.round(v.top * sv)) * PIXW / d, k: sv * PIXW / d * G.k, cpw: sv * PIXW / d, w: G.w, h: G.h }; },
@@ -69916,7 +69937,7 @@ function vegUI(Z) {
       '<button data-a="feTap" hidden></button><div style="grid-column:1/3;color:#7a8294">Click a plant to select it. Double-click a plant to edit it</div></div>' +
       '<div id="vgProps" style="display:grid;gap:6px"></div>' +
       '<div id="vgGroupOnly" style="display:none;gap:8px"><h4>IN THE GROUP</h4><div id="vgGrp" style="display:grid;gap:6px"></div></div>' +
-      '<div id="vgSaved" style="color:#9fd36a">Every number saves itself</div><div id="vgSl"></div><div id="vgTip">Point at a button to see what it does</div>';
+      '<div id="vgSaved" style="color:#9fd36a">Every number saves itself</div><div id="vgTip">Point at a button to see what it does</div>';
     Z.put(d);
     // (a foldout: its header opens and closes what's under it)
     setTimeout(() => { for (const b of d.querySelectorAll('.fold')) { const sync = () => { const c = d.querySelector('[data-foldc="' + b.dataset.fold + '"]'); b.classList.toggle('open', !!c && c.style.display !== 'none'); }; sync(); b.addEventListener('click', () => { const c = d.querySelector('[data-foldc="' + b.dataset.fold + '"]'); if (!c) return; c.style.display = c.style.display === 'none' ? (c.classList.contains('w') ? '' : 'grid') : 'none'; sync(); b.blur(); }); } }, 0);
@@ -69930,7 +69951,7 @@ function vegUI(Z) {
       shake: () => { const it = nearTree(); if (it) VG().shake(6, it.x); },
       fire: () => { const it = nearTree(); if (it) VG().ignite(it); },
       feTap: () => { if (pickKey) feShow('prefab', pickKey); },
-      spawn: () => { const v = d.querySelector('#vgSpawn').value, [t, id, fam] = v.split('|'), name = d.querySelector('#vgSpawn').selectedOptions[0].textContent; if (t === 'v') { const o = VG().park(id); if (o) { PARKED.add(o); pickStr(null); vehPick = o; pickName(name); tip.textContent = 'Parked - drag it to place it'; } } else { const sid = VG().spawnStruct(id); pickStr(sid, d.querySelector('#vgSpawn').selectedOptions[0].textContent); tip.textContent = 'Spawned - drag it in the view to place it'; } },
+      spawn: () => { const v = d.querySelector('#vgSpawn').value, [t, id] = v.split('|'), name = d.querySelector('#vgSpawn').selectedOptions[0].textContent; if (t === 'v') { const o = VG().park(id); if (o) { PARKED.add(o); pickStr(null); vehPick = o; pickName(name); tip.textContent = 'Parked - drag it to place it'; } } else { const sid = VG().spawnStruct(id); pickStr(sid, d.querySelector('#vgSpawn').selectedOptions[0].textContent); tip.textContent = 'Spawned - drag it in the view to place it'; } },
       unspawn: () => { if (vehPick) { VG().vehDel(vehPick); PARKED.delete(vehPick); vehPick = null; pickStr(null); tip.textContent = 'Removed'; return; } if (strPick == null) return; VG().strDel(strPick); pickStr(null); tip.textContent = 'Removed'; },
       // (08:46: "a toggle for the flying particles and birds ... 3 buttons next to each other")
       birds: () => { const b = document.querySelector('[data-a=birds]'), on = !b.classList.contains('on'); VG().birds(on); b.classList.toggle('on', on); b.textContent = 'BIRDS: ' + (on ? 'ON' : 'OFF'); },
@@ -70006,7 +70027,7 @@ function vegUI(Z) {
     { const w0 = +(+__game.env.wind).toFixed(2); d.querySelector('#vgWind').replaceWith(slider('WIND', 'Wind on the plants: below 0 left, above 0 right', -1.5, 1.5, 0.05, () => __game.env.wind, v => { __game.env.wind = v; }, w0)); }
     // the TREES numbers: the same as the GAME EDITOR's (WORLD PROPERTIES > TREES), live. (user Nov 3 21:28: "tabs per vegetation. Palm tree,
     // bushes ... bush one, bush two, palm tree") a tab per kind - its own numbers - and LOOK, what they share
-    const box = d.querySelector('#vgSl'), V = VG().V, VD = VG().VD, TABS = [['veg_palm', 'PALM'], ['veg_mid1', 'BUSH 1'], ['veg_mid2', 'BUSH 2'], ['veg_mid3', 'BUSH 3'], ['veg_back1', 'JUNGLE 1'], ['veg_back2', 'JUNGLE 2'], ['tree', 'LOOK'], ['ground', 'GROUND']];
+    const V = VG().V, VD = VG().VD, TABS = [['veg_palm', 'PALM'], ['veg_mid1', 'BUSH 1'], ['veg_mid2', 'BUSH 2'], ['veg_mid3', 'BUSH 3'], ['veg_back1', 'JUNGLE 1'], ['veg_back2', 'JUNGLE 2'], ['tree', 'LOOK'], ['ground', 'GROUND']];
     // each kind's numbers: its own (the SELECTED prefab's) and its sizes (IN THE GROUP); LOOK and GROUND (what every plant and object shares) under WORLD
     const SIZES = new Set(['plantMin', 'plantMax', 'sizeMin', 'sizeMax']), pages = {}; let rp = 0;
     for (const [f] of TABS) { const p = document.createElement('div'), gq = document.createElement('div'); p.style.cssText = gq.style.cssText = 'display:none;gap:6px'; d.querySelector('#vgProps').appendChild(p); d.querySelector('#vgGrp').appendChild(gq); pages[f] = [p, gq]; }
@@ -70180,7 +70201,6 @@ function vegUI(Z) {
     // (user Nov 9 08:52: "each item we add to a deck should have a 'allowed depth' ... if its 50, its only generated once its 50 depth in the shape") an underwater
     // item's MIN DEPTH: 0 anywhere under the water, 100 only at its water's deepest (the way down from its floor's highest point - 44-shadows-seafloor.js depthOk)
     const mdRow = (c, e, re) => c.appendChild(slider('MIN DEPTH', 'Only where the water is this deep or more: 0 anywhere, 50 the deeper half, 100 only the very bottom', 0, 100, 1, () => e.minDepth || 0, v => { e.minDepth = v; if (re) relay(); else VG().decks.set(D, UWM); }, 0));
-    const seaOn = k => D.some(L => L.some(q => q.k === 'sea' && q.s === k)), caveOn = k => D.some(L => L.some(q => q.k === 'cave' && q.s === k));   // (each of the sea's pieces on one deck only)
     function renderDeck(box, note, di) {
       const bn = VG().sets.cur, list = D[di] || [];
       const h = document.createElement('span'); h.textContent = DN(di) + ' - ' + DECK_TIP(di).toLowerCase() + (list.length ? '' : ' - empty'); note.appendChild(h);
@@ -70285,7 +70305,7 @@ function vegUI(Z) {
       if (UWM === 'uw' && bn !== 'sea' && LAKE_ITEMS.length) { const g = grp('LAKE'); for (const k of LAKE_ITEMS) opt(g, 'sea|' + k, SEA_ITEMS[k] + onLab('sea', k), onDk('sea', k) === di); }   // (a lake's own rocks, weed and corals - user Nov 9 08:49)
       if (UWM === 'uw' && bn === 'sea') { const g = grp('SEA'); for (const k in SEA_ITEMS) if (k === 'front') opt(g, 'sea|' + k, SEA_ITEMS[k] + onLab('sea', k), onDk('sea', k) === di);
         const gb = grp('SEABED SHAPES'); for (const S of seaShapes().slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))) opt(gb, 'bed|' + S.n, S.name); }   // (as many as wanted, on any deck - user Nov 9 08:36)
-      if (di >= 2 && !UWM) { const I = farInfo(bn), g = grp('PICTURES'); for (const k in FAR_SPRITES) opt(g, 'sprite|' + k, FAR_SPRITES[k][0] + onLab('sprite', k), onDk('sprite', k) === di);
+      if (di >= 2 && !UWM) { const g = grp('PICTURES'); for (const k in FAR_SPRITES) opt(g, 'sprite|' + k, FAR_SPRITES[k][0] + onLab('sprite', k), onDk('sprite', k) === di);
         opt(grp('SURFACE'), 'meadow|', (bn === 'desert' ? 'SAND BAND' : 'MEADOW') + onLab('meadow'), onDk('meadow') === di); }
       const ab = sBtn('ADD', 'Adds what is picked to ' + DN(di).toLowerCase(), () => { const [k, v] = sel.value.split('|');
         if (k === 'sea' || k === 'cave' || k === 'sprite' || k === 'meadow') for (const L of D) for (let j = L.length - 1; j >= 0; j--) if (L[j].k === k && (k === 'meadow' || L[j].s === v)) L.splice(j, 1);   // (one of: moved here)
@@ -70299,7 +70319,6 @@ function vegUI(Z) {
     }
     // TERRAIN SURFACE: each of the biome's layers - its material, THICKNESS MIN / MAX, WOBBLE, DOWN TO WATER; the preview's ground built again
     let surfT = 0; const surfRebuild = () => { biomeSurfSave(); clearTimeout(surfT); surfT = setTimeout(() => { try { landEdited(); terrainSync(); } catch (er) { console.error('surface', er); } /* (the ground built again in place - the view stays) */ }, 300); };
-    const MAT_LAB = { grass: 'GRASS', sand: 'SAND', snow: 'SNOW' };
     // an ON / OFF button (as BIRDS: ON): its name, a one-line tooltip
     const toggle = (lab, t, get, set) => { const b = document.createElement('button'); const show = () => { b.textContent = lab + ': ' + (get() ? 'ON' : 'OFF'); b.classList.toggle('on', !!get()); }; b.dataset.t = t; b.title = t; hint(b); b.onclick = () => { set(!get()); show(); }; show(); return b; };
     function renderSurf(box, top) {
@@ -70719,7 +70738,7 @@ function vegUI(Z) {
       const loop = () => { if (!FE.live) return; feDraw(); requestAnimationFrame(loop); }; requestAnimationFrame(loop);
     }
     if (!want && FE.live) { VG().dropPlant(FE.live); for (const c of FE.liveMore || []) VG().dropPlant(c); FE.liveMore = []; FE.live = null; VG().solo(null); VG().fol.preview(FE.liveKey, FE.liveSaved || null); FE.root.style.background = ''; FE.cv.parentNode.style.background = ''; L0().style.visibility = ''; { const b = document.getElementById('vgBot'); if (b) b.style.visibility = ''; } }
-    VG().freeze(!FE.pWorld); VG().noMask(!FE.pMask); if (!FE.live) { VG().freeze(false); VG().noMask(false); }
+    VG().freeze(!FE.pWorld); if (!FE.live) VG().freeze(false);
     feDraw();
   }
   const feLivePush = () => { if (FE && FE.live) VG().fol.preview(FE.key, feShape()); };   // (the live plant: the shapes as the editor holds them now)
@@ -70919,7 +70938,7 @@ function vegUI(Z) {
         // (user Nov 4 09:41: "if I select 2 vertices, I should have a CONNECT option to create a edge between them") the polygon with both cut in two along it
         v: [['CONNECT', 'Cuts the shape in two between the two picked corners', () => { const V = feVSel(); if (V.length !== 2) return; const [a, b] = V;
               const o = FE.polys.find(o => { const i = o.pts.indexOf(a), j = o.pts.indexOf(b), n = o.pts.length; return i >= 0 && j >= 0 && Math.abs(i - j) !== 1 && Math.abs(i - j) !== n - 1; }); if (!o) { feTip('No polygon has both of them apart - nothing to connect'); return; }
-              const n = o.pts.length; let i = o.pts.indexOf(a), j = o.pts.indexOf(b); if (i > j) [i, j] = [j, i]; const A = o.pts.slice(i, j + 1), B = o.pts.slice(j).concat(o.pts.slice(0, i + 1));
+              let i = o.pts.indexOf(a), j = o.pts.indexOf(b); if (i > j) [i, j] = [j, i]; const A = o.pts.slice(i, j + 1), B = o.pts.slice(j).concat(o.pts.slice(0, i + 1));
               o.pts = A; FE.polys.push(Object.assign({}, o, { pts: B })); FE.sel = FE.polys.indexOf(o); feTip('Connected - the polygon cut in two'); },
               () => { const V = feVSel(); return V.length === 2 && FE.polys.some(o => { const i = o.pts.indexOf(V[0]), j = o.pts.indexOf(V[1]), n = o.pts.length; return i >= 0 && j >= 0 && Math.abs(i - j) !== 1 && Math.abs(i - j) !== n - 1; }); }],
             ['DELETE', 'Removes the picked corners from every shape that has them', () => { const L = feVSel(); if (!L.length) return; for (const pt of L) for (const o of FE.polys) { const j = o.pts.indexOf(pt); if (j >= 0 && o.pts.length > 3) o.pts.splice(j, 1); } FE.vpt = null; FE.vsel = null; }, () => feVSel().length > 0, () => feVSel().length > 1 ? 'REMOVE ' + feVSel().length : 'REMOVE']],
@@ -71216,8 +71235,6 @@ function vegUI(Z) {
   function feSync() {
     feLivePush();
     const bar = FE.q('feOps'); bar.innerHTML = ''; try { feColsUI(); } catch (er) { console.error('cols', er); }
-    const canBuild = !!FE.leaf || /^(facebush-|fol-)/.test(VG().pf.baseKey(FE.key) || '');
-    const build = ['BUILD FROM PARTS', 'Builds this prefab from its parts', () => { FE.build = VG().built.from(FE.key); FE.bsel = null; if (!FE.leaf) { FE.trunk = FE.polys; FE.leaf = feWeld(JSON.parse(JSON.stringify(VG().built.leaf(FE.key)))); } feTip('Built from parts: drag a point; tap a spline to pick it'); }, () => true];
     const ops = FE.ed === 'prefab' ? (FE.build ? feBuiltOps() : (FE.frond >= 0 && FE.mode === 'plant' ? [['FROND ' + (FE.frond + 1), '', () => { }, () => false]].concat(FE.frondOps) : [])) : FE.ops[FE.lv].filter(o => !(((FE.mode === 'leaf' || FE.mode === 'trunk' || FE.mode === 'puff')) && o[0].startsWith('SKIN')));
     // (user Nov 8 09:31: a palm's rings) a TRUNK component's RINGS - its starting ones shown until one is moved (then kept on it, SAVE)
     if (FE.ed === 'comp' && FE.mode === 'puff' && (VG().fol.get(FE.key) || {}).rock) { const m0 = FE.moss != null ? FE.moss : ((VG().fol.get(FE.key).puffC || {}).moss ?? 0.5);   // (a ROCK's MOSS)
@@ -71554,7 +71571,6 @@ function vegUI(Z) {
     const addPt = ['ADD POINT', 'Adds a point on the line after the picked point', () => { const P = pts(), p = sel.p >= 0 && sel.p < P.length - 1 ? sel.p : P.length - 1; const a = P[p], b = P[p + 1] || [a[0] + (a[0] - P[p - 1][0]) * 0.3, a[1] + (a[1] - P[p - 1][1]) * 0.3]; const part = sel.k === 't' ? B.trunk : B.leaves[sel.i], wa = feW(P, p, part, sel.k === 't'), wb = P[p + 1] ? feW(P, p + 1, part, sel.k === 't') : wa; for (let j = 0; j < P.length; j++) if (P[j][2] == null) P[j][2] = r1(feW(P, j, part, sel.k === 't')); P.splice(p + 1, 0, [r1((a[0] + b[0]) / 2), r1((a[1] + b[1]) / 2), r1((wa + wb) / 2)]); if (!P[p + 2]) { P[p + 1] = [r1(b[0]), r1(b[1]), r1(wb)]; } sel.p = p + 1; }, () => true];
     const rmPt = ['REMOVE POINT', 'Removes the picked point from the line', () => { const P = pts(); P.splice(sel.p, 1); sel.p = -1; }, () => sel.p >= 0 && pts().length > 2 && !(sel.k === 't' && sel.p === 0)];
     const addLeaf = ['ADD COMPONENT', 'Adds a branch, leaf, puff, boulder or small prefab', () => { fePartPick(); }, () => true];
-    const addLeafOld = ['ADD LEAF', '', () => { const T = B.trunk ? B.trunk.pts : [[FE.bones ? FE.bones.W / 2 : 30, B.ground || 60]], t = T[T.length - 1], sg = B.leaves.length % 2 ? 1 : -1; B.leaves.push({ pts: [[r1(t[0]), r1(t[1])], [r1(t[0] + 22 * sg), r1(t[1] - 6)], [r1(t[0] + 40 * sg), r1(t[1] + 8)]], w: 8, front: true }); FE.bsel = { k: 'l', i: B.leaves.length - 1, p: -1 }; }, () => true];
     const col = (lab, get, set) => [lab, 'Its colour', () => { }, () => true, null, [get, set]];
     // (user Nov 3 22:57: "When you select a element in the Prefab Editor it should have a Bring FRONT, Bring BACK") the drawing order: the leaves
     // behind the trunk, the trunk, the leaves in front - the picked part one step nearer or further (a leaf crossing the trunk goes to its other side)
@@ -71571,7 +71587,7 @@ function vegUI(Z) {
     const flRows = fls.length ? [['FLOWER', 'The FLOWER component its puffs bloom with', () => { }, () => true, null, null, { kind: 'flower', get: () => (B.flw && B.flw.c) || fls[0].key, set: v => { flw().c = v; } }],
       col('MIDDLE', () => (B.flw && B.flw.mid) || '#fcc93d', v => { flw().mid = v; }), col('PETALS', () => (B.flw && B.flw.pet) || '#fdf5ea', v => { flw().pet = v; })] : [];
     if (!sel) return [['BUILT: ' + B.leaves.length + ' PARTS', '', () => { }, () => false], addLeaf].concat(flRows);
-    if (sel.k === 't') { const T = B.trunk, w = (lab, k, d) => [lab, '', () => { T[k] = Math.max(0.5, r1(T[k] + d)); }, () => true];
+    if (sel.k === 't') { const T = B.trunk;
       return [['TRUNK', '', () => { }, () => false], ['COMPONENT', 'The trunk component it is made of', () => { }, () => true, null, null, { kind: 'trunk', get: () => T.c, set: v => { if (v) T.c = v; else delete T.c; delete T.edit; } }], addPt, rmPt, bf, bb, ['RESET SHAPE', 'Puts its corners back where its component and widths place them', () => { delete T.edit; }, () => !!(T.edit && Object.keys(T.edit).length)], ['DELETE TRUNK', 'Removes the trunk (ADD COMPONENT puts one back)', () => { if (B.ground == null) B.ground = T.pts[0][1]; FE.lastTrunk = JSON.parse(JSON.stringify(T)); B.trunk = null; FE.bsel = null; FE.bmulti = null; feTip('Trunk deleted - ADD COMPONENT (TRUNK) puts one back'); }, () => B.leaves.length > 0]].concat(FE.bmulti && FE.bmulti.size ? [dup] : []); }   // (10:01: its colours along it - the colour points at the right)
     const L = B.leaves[sel.i], KN = L.k === 'branch' ? 'BRANCH' : L.k === 'puff' ? (L.rock ? 'BOULDER' : L.flower ? 'FLOWER' : 'PUFF') : 'LEAF';
     if (L.k === 'puff') { const sz = d => () => { L.rx = r1(Math.max(3, (L.rx || 16) * d)); L.ry = r1(Math.max(3, (L.ry || 12) * d)); };
@@ -71590,7 +71606,7 @@ function vegUI(Z) {
   function feDraw(tgt) {
     const kx = fePuffK(); FE.kx = kx; if (kx === 1) { feDraw0(tgt); return; }
     const g = (tgt ? tgt.cv : FE.cv).getContext('2d'), S = new DOMMatrix().scaleSelf(1 / kx, 1), un = M => { const N = S.multiply(M); return N; };
-    const st = g.stroke, sr = g.strokeRect, ft = g.fillText, ar = g.arc;
+    const st = g.stroke, ft = g.fillText;
     g.stroke = function (...a) { this.save(); this.setTransform(un(this.getTransform())); st.apply(this, a); this.restore(); };
     g.strokeRect = function (x, y, w, h) { this.save(); this.beginPath(); this.rect(x, y, w, h); this.setTransform(un(this.getTransform())); st.call(this); this.restore(); };
     g.fillText = function (t, x, y, ...r) { const M = this.getTransform(), p = M.transformPoint({ x, y }), N = un(M), q = N.transformPoint({ x, y }); this.save(); this.setTransform(new DOMMatrix().translateSelf(p.x - q.x, p.y - q.y).multiply(N)); ft.call(this, t, x, y, ...r); this.restore(); };
@@ -71679,9 +71695,8 @@ function vegUI(Z) {
       g.fishnet.clear(null); g.fishnet.hudOnly([]);                 // (no game buttons till you're in a vehicle)
       setInterval(() => g.fishnet.clear(new Set([FL().cur(), ...PARKED])), 250);   // (the parked ones kept - 23:02)           // (the world's traffic kept away)
       lookAtTrees();
-      VG().mute(); setInterval(() => VG().mute(), 2000);
+      VG().mute(); setInterval(() => VG().mute(), 2000);   // (no sound in the lab - 23:29)
       VG().off = false;   // (09:06: "Bones On/Off is not needed, it should always be ON")
-      VG().treeShed(true);   // (08:56: the only flying leaves the plants' own, now and then)   // (no sound in the lab - 23:29)
       try { panel(); } catch (e) { console.error('lab panel', e); }
       folSync();
       document.documentElement.classList.remove('flWait');   // (at once: a timer can wait long behind heavy frames - and its cover took the presses, the wheel went to the game's own zoom)
