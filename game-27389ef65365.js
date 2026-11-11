@@ -1318,10 +1318,11 @@ function gpuCopyBuf(src, so, dst, dof, n) { gpuPassClose(); dst.use = FR.sub; if
 function gpuCopyBufTex(src, so, bpr, dst, x, y, w, h, z) { gpuPassClose(); dst.use = FR.sub; gpuEnc().copyBufferToTexture({ buffer: src.gb, offset: so, bytesPerRow: bpr }, { texture: dst.gt, origin: { x, y, z: z || 0 } }, { width: w, height: h }); }   // (z: the layer of an array texture)
 // a texture's rectangle copied into another of the same format (layer records { gt } from gpuTex), in order with the passes - a part's
 // snapshot of what's been drawn (the water's distortion, the light's lamps under the tint) without a draw; rows as they are in both
-function gpuCopyTex(src, sx, sy, dst, dx, dy, w, h) {
+// (n: that rectangle of the first n layers of an array texture - an array grown by pages, the art atlas's)
+function gpuCopyTex(src, sx, sy, dst, dx, dy, w, h, n) {
   if (!(w > 0 && h > 0) || !src.gt || !dst.gt) return;
   gpuPassClose(); src.use = FR.sub; dst.use = FR.sub; GPU.stats.copies++;
-  gpuEnc().copyTextureToTexture({ texture: src.gt, origin: { x: sx, y: sy } }, { texture: dst.gt, origin: { x: dx, y: dy } }, { width: w, height: h });
+  gpuEnc().copyTextureToTexture({ texture: src.gt, origin: { x: sx, y: sy } }, { texture: dst.gt, origin: { x: dx, y: dy } }, { width: w, height: h, depthOrArrayLayers: n || 1 });
 }
 // send what's recorded
 function gpuSubmit() {
@@ -2451,7 +2452,9 @@ function frameWarmParts() {
   if (typeof fireShared === 'function') P.push({ setup: fireShared, map: () => FIRE.col, desc: X => Object.assign({ layout: FIRE.cpl, label: 'fire colours', vertex: { module: FIRE.cm, entryPoint: 'vs' }, fragment: { module: FIRE.cm, entryPoint: 'fs', targets: [frameDrawColour(X)] } }, st(X, 'triangle-list')) });
   if (typeof g8Shared === 'function') P.push({ setup: g8Shared, map: () => G8.ms, desc: X => Object.assign({ layout: G8.msp, label: 'mid sea', vertex: { module: G8.msm, entryPoint: 'vs' }, fragment: { module: G8.msm, entryPoint: 'fs', targets: [frameDrawColour(X)] } }, st(X, 'triangle-strip')) });
   if (typeof NSKY === 'object' && NSKY.smokeShared) P.push({ setup: NSKY.smokeShared, map: null });
-  if (typeof pxWarm === 'function') P.push({ warm: pxWarm });
+  if (typeof pxWarm === 'function') P.push({ warm: pxWarm, real: true });   // (every pixel layer's: for the targets really drawn into only)
+  if (typeof thingsWarm === 'function') P.push({ warm: X => thingsWarm(X) });
+  if (typeof lpassPipe === 'function') P.push({ warm: X => { if (lpassReady()) { const sf = X.ds ? X.ds.fmt : null; if (!LPASS.pipes.has('vsRow' + 'fsRow' + X.T.tex.fmt + (sf || ''))) lpassPipe('vsRow', 'fsRow', X.T.tex.fmt, sf, true); } } });
   return P;
 }
 // a pipeline made ahead (desc), put in map at key when made - unless the part made its own there first, or the device is new
@@ -2460,14 +2463,23 @@ function gpuPipeAhead(map, key, desc) {
   GPU.stats.pipesAhead = (GPU.stats.pipesAhead || 0) + 1;
   GPU.dev.createRenderPipelineAsync(desc).then(p => { if (GPU.ep === ep && map.get(key) === null) map.set(key, p); }, e => { if (map.get(key) === null) map.delete(key); console.warn('gpu: a pipeline made ahead failed -', desc.label, e && e.message || e); });
 }
-function frameWarm(X) {
-  if (FWARM.ep !== GPU.ep) { FWARM.ep = GPU.ep; FWARM.seen.clear(); }
+function frameWarm(X, made) {
+  if (FWARM.ep !== GPU.ep) { FWARM.ep = GPU.ep; FWARM.seen.clear(); FWARM.all = false; }
+  if (!made && !FWARM.all) { FWARM.all = true; frameWarmAll(X); }
   const k = frameDrawKey(X); if (FWARM.seen.has(k)) return; FWARM.seen.add(k);
   if (!FWARM.parts) FWARM.parts = frameWarmParts();
   for (const W of FWARM.parts) {
+    if (made && W.real && (X.ds || X.screen)) continue;   // (the pixel layers: on a plain layer only, the ways the effects lay them)
     try { if (W.warm) { W.warm(X, k); continue; } W.setup(); if (W.map) { const M = W.map(); if (!M.has(k)) gpuPipeAhead(M, k, W.desc(X)); } }
     catch (e) { console.warn('gpu: warming', k, '-', e && e.message || e); }
   }
+}
+// (the targets a frame can draw into, each in the ways it's drawn - its format, its clip's stencil or none, source-over or lighter, the screen or a
+// layer: the effects' pipelines for all of them made ahead the first time anything is drawn - a target the smoke or a bomb's blast is the first to
+// draw into has its pipelines there too)
+function frameWarmAll(X0) {
+  const fmt = X0.T.tex.fmt, dss = [null, { fmt: 'stencil8' }, { fmt: 'depth24plus-stencil8' }];
+  for (const ds of dss) for (const op of ['source-over', 'lighter']) for (const screen of [false, true]) frameWarm({ T: { tex: { fmt } }, ds, op, screen }, true);
 }
 function frameDrawPass(X, key) {
   const D = FDRAW, tex = X.T.tex, ds = X.ds;
@@ -4521,8 +4533,10 @@ function prepareArt() {
    are made by the things' shader as it draws, 45-zz-things-gpu.js); the pixels go up a few at a time, within a budget a frame
    (artStep, the frame's 'art' layer), never all on the frame that first asks. A lost device makes the texture again and sends
    every picture again from the pictures themselves (nothing on the GPU that can't be rebuilt).
-   A 2D array texture of ART.L pages of ART.S square (3 x 64 MB: the things' art - ~40 Mpx of sheets and big art, and their mirrored and
-   team-coloured variants - with room for the packing). Each picture's place:
+   A 2D array texture of pages of ART.S square (64 MB each), ART.L at most (the things' art - ~40 Mpx of sheets and big art, and their
+   mirrored and team-coloured variants - with room for the packing): only the pages the pictures put in so far take - a page is made the
+   frame a picture first goes on it (artStep: the texture made again a page longer, the pages there copied over on the GPU), so a world
+   whose art fits in two pages never holds a third. Each picture's place:
    pic._art = { x, y, l, w, h, ok } - texels and its layer, a clear margin of ART_PAD round it (the shader's taps never reach a
    neighbour). Pixels are kept premultiplied (as the GL front kept every picture it drew).
    ================================================================ */
@@ -4564,15 +4578,27 @@ function artOk(e) {
   const s = e.src; if (s && ((s.naturalWidth || s.width) || s.complete === false)) frameWait('atlas');
   return false;
 }
-// the atlas texture on this device (made again after a device loss: every picture sent again)
+// (the pages the pictures put in so far are on: the shelves' pages - at least one)
+const artPages = () => Math.max(1, ART.ys.length);
+// the atlas texture on this device (made again after a device loss: every picture sent again) - the pages it holds now; a page more is made only
+// by artStep, the frame's first work, so every draw of a frame reads the one texture
 function artTex() {
   if (!GPU.on || GPU.lost || !GPU.dev) return null;
   if (ART.ep !== GPU.ep) {
     if (ART.tex) gpuTexFree(ART.tex);
-    ART.tex = gpuTex(ART.S, ART.S, 'rgba8unorm', 'atlas', ART.L); ART.ep = GPU.ep;
+    ART.tex = gpuTex(ART.S, ART.S, 'rgba8unorm', 'atlas', artPages()); ART.ep = GPU.ep;
     ART.pend = ART.all.slice(); for (const e of ART.all) { e.ok = false; e.row = 0; }
   }
   return ART.tex;
+}
+// a picture gone on a page the texture hasn't yet: the texture made again with it, the pages there copied over on the GPU (in order with the frame's
+// commands - what was sent before is in the copy); the old one let go after the submit
+function artGrow() {
+  const T = ART.tex, n = artPages(); if (!T || T.layers >= n) return T;
+  const N = gpuTex(ART.S, ART.S, 'rgba8unorm', 'atlas', n);
+  gpuCopyTex(T, 0, 0, N, 0, 0, ART.S, ART.S, T.layers);
+  gpuTexFree(T); ART.tex = N;
+  return N;
 }
 // rows of a picture's pixels, premultiplied (as the GL front uploaded every picture: Chromium's sum) - read a band at a time (a sheet of 4 Mpx
 // is never read whole in one frame); an image is drawn once into a canvas kept while it goes up (e.cv)
@@ -4590,7 +4616,7 @@ function artPixels(e, y0, rows) {
    artPutAll(o)       every picture in a family's art (its canvases, however deep in its lists and records)
    artFamily(fn)      a family's pictures put in as soon as they exist: fn() each frame (artFrame) until it returns true (false: looked at
                       again every frame - a family whose pictures are made again in new colours); fn may only call artPut / artPutAll / artDrop
-   artTex()           the atlas on this device: a gpuTex record (rgba8unorm, premultiplied, a 2D array of ART.L pages of ART.S square -
+   artTex()           the atlas on this device: a gpuTex record (rgba8unorm, premultiplied, a 2D array of the pages in use (ART.L at most) of ART.S square -
                       .view is its '2d-array' view; read in WGSL as texture_2d_array<f32>, textureLoad(t, xy, page, 0) or a sampler's
                       textureSampleLevel). A new device makes a new one (ART.ep changes): a part keeps its bind groups by it
    artFrame()         run once a frame by the frame's 'art' layer (45-zz-things-gpu.js): the families, then artStep
@@ -4609,7 +4635,8 @@ function artFrame() {
 }
 // the frame's share of the waiting pictures sent (ART.BUDGET bytes at most; a big picture goes up in bands of rows over frames)
 function artStep() {
-  const T = artTex(); if (!T || !ART.pend.length) return;
+  if (!artTex() || !ART.pend.length) return;
+  const T = artGrow();
   let left = ART.BUDGET;
   while (ART.pend.length && left > 0) {
     const e = ART.pend[0], src = e.src;
@@ -8066,8 +8093,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 982;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 11 15:11';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 983;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 11 17:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -22843,12 +22870,15 @@ function glGradRow(gr) {
 }
 
 /* ---- textures for sprites: small ones share an atlas, big ones get their own ---- */
-const ATL = { tex: null, S: 2048, MAX: 128, gen: 0, shelves: [], y: 0 };
+// (the atlas only as big as the small pictures drawn through here take - since the world's draws went native, the HUD's and the menus' icons, a
+// few hundred KB: made at S, and made again twice as wide and tall (every place given up, each picture sent again when next drawn - as a reset)
+// when they've filled it, up to SMAX; full at SMAX it starts over at that size, as it always did)
+const ATL = { tex: null, S: 256, SMAX: 2048, MAX: 128, gen: 0, shelves: [], y: 0 };
 function atlasAlloc(w, h) {
   const W = w + 2, H = h + 2;                     // a clear pixel of margin all round
   for (const s of ATL.shelves) if (H <= s.h && H >= s.h * 0.7 && s.x + W <= ATL.S) { const x = s.x; s.x += W; return [x + 1, s.y + 1]; }
   const hh = (H + 3) & ~3;
-  if (ATL.y + hh > ATL.S) atlasReset();
+  if (ATL.y + hh > ATL.S) { if (ATL.S < ATL.SMAX) ATL.S *= 2; atlasReset(); }
   ATL.shelves.push({ y: ATL.y, h: hh, x: W });
   const y = ATL.y; ATL.y += hh;
   return [1, y + 1];
@@ -24850,12 +24880,15 @@ function wgpuPipeDesc(vs, fs, fmt, B, sfmt, g1, clip) {
 }
 // (the first shot - 60-draw.js frameWarm: the effects' draws - a shell's wash and foam, the splash's puffs and balls, a wreck's shade - made ahead,
 // off the frame, for every target, op and clip the water is first drawn with, while the world is built under its loading screen)
-const WGPU_AHEAD = [['vsWash', 'fsWash'], ['vsFoam', 'fsFoam'], ['vsPuff', 'fsPuff'], ['vsBall', 'fsBall'], ['vsShadeRows', 'fsShadeRows']];
+const WGPU_AHEAD = [['vsWash', 'fsWash'], ['vsFoam', 'fsFoam'], ['vsPuff', 'fsPuff'], ['vsBall', 'fsBall'], ['vsShadeRows', 'fsShadeRows'], ['vsBox', 'fsRay']];   // (fsRay: a missile's light down into the water)
 function wgpuPipe(vs, fs, fmt, op, sfmt, g1, clip) {
   const W = WGPU_W, B = WGPU_OPS[op] || WGPU_OPS['source-over'], k = wgpuPipeKey(vs, fs, fmt, B, sfmt, g1, clip); let p = W.rpipe.get(k);
   if (!p) {
     const wk = fmt + ':' + B.join() + ':' + (sfmt || '') + (clip ? ':clip' : ''), seen = W.ahead || (W.ahead = new Set());
-    if (!seen.has(wk)) { seen.add(wk); for (const [v, f] of WGPU_AHEAD) { const k2 = wgpuPipeKey(v, f, fmt, B, sfmt, false, clip); if (k2 !== k && !W.rpipe.has(k2)) gpuPipeAhead(W.rpipe, k2, wgpuPipeDesc(v, f, fmt, B, sfmt, false, clip)); } }
+    if (!seen.has(wk)) {   // (this target, clip and op - and the target and clip the same source-over and added: the effects' own ops)
+      seen.add(wk);
+      for (const B2 of new Set([B, WGPU_OPS['source-over'], WGPU_OPS.lighter])) for (const [v, f] of WGPU_AHEAD) { const k2 = wgpuPipeKey(v, f, fmt, B2, sfmt, false, clip); if (k2 !== k && !W.rpipe.has(k2)) gpuPipeAhead(W.rpipe, k2, wgpuPipeDesc(v, f, fmt, B2, sfmt, false, clip)); }
+    }
     p = gpuRenderPipe(wgpuPipeDesc(vs, fs, fmt, B, sfmt, g1, clip));
     W.rpipe.set(k, p);
   }
@@ -35177,18 +35210,28 @@ function thingsGPU() {
 }
 // a pipeline for the target's format, the context's composite op, and with a clip in force the stencil's format: drawn only where bit 0x80
 // is set (the GL front's clip, as its own draws test it); ord: the world's layer drawn - the order layer written too (a second target)
+const thingsPipeKey = (fmt, B, sfmt, poly, ord) => fmt + ':' + B.join() + ':' + (sfmt || '') + (poly ? ':poly' : '') + (ord ? ':ord' : '');
+function thingsPipeDesc(fmt, B, sfmt, poly, ord) {
+  const blend = { color: { srcFactor: B[0], dstFactor: B[1], operation: 'add' }, alpha: { srcFactor: B[2], dstFactor: B[3], operation: 'add' } };
+  const ds = sfmt ? { depthStencil: { format: sfmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: THG_FACE, stencilBack: THG_FACE, stencilReadMask: 0x80, stencilWriteMask: 0 } } : {};
+  const ob = { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }, targets = [{ format: fmt, blend }];   // (the order: its number where it covers - 0 or 1 - the old one kept elsewhere)
+  if (ord) targets.push({ format: 'rgba8unorm', blend: { color: ob, alpha: ob } });
+  return Object.assign({ layout: THG.pl, label: 'things', vertex: { module: THG.mod, entryPoint: poly ? 'vsPoly' : 'vs' }, fragment: { module: THG.mod, entryPoint: (poly ? 'fsPoly' : 'fs') + (ord ? 'W' : ''), targets }, primitive: { topology: 'triangle-list' } }, ds);
+}
 function thingsPipe(fmt, op, sfmt, poly, ord) {
-  const B = THG_OPS[op] || THG_OPS['source-over'], key = fmt + ':' + B.join() + ':' + (sfmt || '') + (poly ? ':poly' : '') + (ord ? ':ord' : '');
+  const B = THG_OPS[op] || THG_OPS['source-over'], key = thingsPipeKey(fmt, B, sfmt, poly, ord);
   let p = THG.pipes.get(key);
-  if (!p) {
-    const blend = { color: { srcFactor: B[0], dstFactor: B[1], operation: 'add' }, alpha: { srcFactor: B[2], dstFactor: B[3], operation: 'add' } };
-    const ds = sfmt ? { depthStencil: { format: sfmt, depthWriteEnabled: false, depthCompare: 'always', stencilFront: THG_FACE, stencilBack: THG_FACE, stencilReadMask: 0x80, stencilWriteMask: 0 } } : {};
-    const ob = { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }, targets = [{ format: fmt, blend }];   // (the order: its number where it covers - 0 or 1 - the old one kept elsewhere)
-    if (ord) targets.push({ format: 'rgba8unorm', blend: { color: ob, alpha: ob } });
-    p = gpuRenderPipe(Object.assign({ layout: THG.pl, label: 'things', vertex: { module: THG.mod, entryPoint: poly ? 'vsPoly' : 'vs' }, fragment: { module: THG.mod, entryPoint: (poly ? 'fsPoly' : 'fs') + (ord ? 'W' : ''), targets }, primitive: { topology: 'triangle-list' } }, ds));
-    THG.pipes.set(key, p);
-  }
+  if (!p) { p = gpuRenderPipe(thingsPipeDesc(fmt, B, sfmt, poly, ord)); THG.pipes.set(key, p); }
   return p;
+}
+// (the first shot - src/gpu/60-draw.js frameWarm: the things' pipelines for a draw target - its op, clip, quads and shapes, the order layer's
+// when drawn source-over - made ahead, off the frame)
+function thingsWarm(X) {
+  if (!thingsGPU()) return;
+  const op = X.op || 'source-over', B = THG_OPS[op] || THG_OPS['source-over'], fmt = X.T.tex.fmt, sfmt = X.ds ? X.ds.fmt : null;
+  for (const poly of [false, true]) for (const ord of op === 'source-over' ? [false, true] : [false]) {
+    const k = thingsPipeKey(fmt, B, sfmt, poly, ord); if (!THG.pipes.has(k)) gpuPipeAhead(THG.pipes, k, thingsPipeDesc(fmt, B, sfmt, poly, ord));
+  }
 }
 /* ---- a call's quads ---- */
 // a transform of its own (the canvas's [a, b, c, d, e, f]: x' = a x + c y + e, y' = b x + d y + f), started from the context's
@@ -35196,7 +35239,17 @@ const thgMat = () => THG.m0.slice();
 function thgTranslate(m, x, y) { m[4] += m[0] * x + m[2] * y; m[5] += m[1] * x + m[3] * y; return m; }
 function thgRotate(m, r) { if (!r) return m; const c = Math.cos(r), s = Math.sin(r), A = m[0], B = m[1], C2 = m[2], D2 = m[3]; m[0] = A * c + C2 * s; m[1] = B * c + D2 * s; m[2] = C2 * c - A * s; m[3] = D2 * c - B * s; return m; }
 function thgScale(m, x, y) { m[0] *= x; m[1] *= x; m[2] *= y; m[3] *= y; return m; }
+/* (user Nov 11 12:38, Story's buildings invisible: a family that began a batch while another's was open threw the open one's quads away - every
+   building drawStructs had put in. A batch begun over one with quads in it now draws them first, and says so once with where it came from: the
+   family should take the open batch (thingsOwn) instead. A quad put with no batch open (dropped) is said once too) */
+const THG_SAID = new Set();
+function thgSay(what) {
+  if (THG_SAID.has(what)) return; THG_SAID.add(what);
+  const at = ((new Error().stack || '').split('\n')[3] || '').trim().replace(/^at /, '').replace(/ \(.*$/, '');
+  console.error('things: ' + what + ' - ' + at);
+}
 function thingsBegin(ctx) {
+  if (THG.ctx && (THG.n || THG.pn)) { thgSay('a batch begun over an open one (its quads drawn first)'); thingsEnd(); }
   THG.n = 0; THG.pn = 0; THG.seg.length = 0; THG.ctx = ctx && ctx.target ? ctx : null; THG.cut[0] = THG.cut[1] = THG.cut[2] = 0; THG.cutS = false;
   const m = ctx && ctx.s && ctx.s.m; if (m) for (let i = 0; i < 6; i++) THG.m0[i] = m[i];
   return !!THG.ctx;
@@ -35223,7 +35276,8 @@ function thingsLit(cx, dk) {
    above) of a row of n teeth at y, step apart from x0, every other one up and down by j times 0.4..1 (tearArt's - a pier's pillar) */
 const THG_BODY = 0, THG_PART = 1, THG_SOLID = 2, THG_LIGHT = 3, THG_GRAD = 5   /* (4 was a building's windows lit - the light pass's now, 47-zz-light-pass.js) */, THG_SCALED = 1, THG_NONE = { x: 0, y: 0, w: 1, h: 1, l: 0, ok: true };
 function thingsQuad(m, x, y, w, h, e, kind, mul, cov, mk, cell, seed, lit, clip, alpha = 1, filt = 0, tint = null, cut = null, prof = null, sr = null, rules = 0) {
-  if (!THG.ctx || !(w > 0 && h > 0)) return;
+  if (!THG.ctx) { thgSay('a quad with no batch open (dropped)'); return; }
+  if (!(w > 0 && h > 0)) return;
   if (kind === THG_SOLID || kind === THG_GRAD) e = THG_NONE;
   if (!artOk(e)) return;
   if (THG.f.length < (THG.n + 1) * THG_REC) { const a = new Float32Array(THG.f.length * 2); a.set(THG.f); THG.f = a; }
@@ -56073,9 +56127,10 @@ const GG_JOBS = 32, GG_JOBB = 209152, GG_MS = 4;
 // GG_SCRR rows of the scratch, two dispatches for all of them (ggFlush); a page asked for again in the same batch sends the batch first, so a page's
 // writes stay in the order they were asked for)
 const GG_SCRR = 192;                                          // (the scratch's rows a job: a halo's width at most, 64 + 2 x 64)
-// (the pages' pool: 512 to start, grown 256 at a time - one step a frame - to GG_CAPMAX at most (96 MB): the views' pages over that, zoomed far out, wait for
-// the grid's smaller levels - engine-design "Smaller levels of the grid are used at far zoom", this part's next slices)
-const GG_CAPMAX = 1024;
+// (the pages' pool: GG_CAP0 to start (48 MB), grown 256 at a time - one step a frame - to GG_CAPMAX at most (96 MB): the views' pages over that, zoomed far
+// out, wait for the grid's smaller levels - engine-design "Smaller levels of the grid are used at far zoom", this part's next slices. Grown only for the
+// pages the views draw - never for what's round them (ggPageGet) - and made again at GG_CAP0 for a new world: everything is let go then)
+const GG_CAP0 = 512, GG_CAPMAX = 1024;
 /* (the far levels, Nov 10) LEVEL L (1-3) of the grid: a cell every F = 2^L, its page 64 x 64 of them - 64F columns (F slices) by 64F rows; drawn where a
    cell is under half a pixel (farF: a texel never bigger than a pixel), and standing in for a finer level not loaded yet. A slot's page table, each set:
    GG_PTS words - level 0's page rows, then level 1's, 2's, 3's (GG_LOFF), each the level's rows of the slice; a level's page is shared by its F slices,
@@ -56129,7 +56184,7 @@ function ggPools() {
   if (!GPU.on || GPU.lost) return false;
   GG.ep = GPU.ep; GG.pc = GG.pr = null;
   const lim = GPU.lim ? GPU.lim.maxStorageBufferBindingSize : 128 << 20;
-  GG.cap = Math.max(64, Math.min(GG.cap || 512, Math.floor(lim / GG_PB)));
+  GG.cap = Math.max(64, Math.min(GG.cap || GG_CAP0, Math.floor(lim / GG_PB)));
   GG.stoneCap = GG.stoneCap || 32768;
   GG.pagesBuf = gpuBuf(GG.cap * GG_PB, 'ground grid');
   GG.slotsN = 0; ggSlotBufs();
@@ -56150,6 +56205,11 @@ function ggSlotBufs() {
   { const T = new Float32Array(GG_STRATA * 4); for (let i = 0; i < GG_STRATA; i++) { const b = i - 2048; T[i * 4] = hash(b * 3.71 + 0.5); T[i * 4 + 1] = hash(b * 1.93); T[i * 4 + 2] = hash(b * 2.3); }
     gpuWriteBuf(GG.bcolBuf.gb, 0, new Uint8Array(T.buffer)); }
   return true;
+}
+// (a new world: every page let go - the pool grown for the last world's views made again at its starting size, grown again only for this one's)
+function ggPagesAgain() {
+  if (GG.cap <= GG_CAP0 || !GG.pagesBuf) return;
+  gpuBufFree(GG.pagesBuf); GG.cap = GG_CAP0; GG.pagesBuf = gpuBuf(GG.cap * GG_PB, 'ground grid'); GG.stats.bufs++;
 }
 // everything let go: the next frames load it again (a build, a device)
 function ggReset() {
@@ -56393,7 +56453,7 @@ function ggSlotOf(k) {
   si = GG.sk.indexOf(null);
   if (si < 0) { let best = -1, bu = Infinity; for (let i = 0; i < GG.sk.length; i++) { const S = GG.sk[i]; if (S.used < bu && S.used < renderTick && !ggKeep(S.k)) { bu = S.used; best = i; } } if (best < 0) return null; ggSlotFree(best); si = best; }   // (the world's own never: the base)
   const [rT, rB] = ggRows(k), j0 = (rT - GG_RB) >> 6, j1 = (rB - 1 - GG_RB) >> 6, npr = Math.min(GG_MAXPR, j1 - j0 + 1);
-  const S = GG.sk[si] = { si, k, j0, npr, pages: new Int32Array(2 * npr).fill(-1), pu: new Int32Array(2 * npr), stale: new Uint8Array(2 * npr).fill(1), used: renderTick, cols: false, sb: 0, sn: 0, top: null };
+  const S = GG.sk[si] = { si, k, j0, npr, pages: new Int32Array(2 * npr).fill(-1), pu: new Int32Array(2 * npr), ru: new Int32Array(2 * npr), stale: new Uint8Array(2 * npr).fill(1), used: renderTick, cols: false, sb: 0, sn: 0, top: null };
   GG.slot.set(k, si); GG.ptab.fill(GG_NONE, si * 2 * GG_PTS, (si + 1) * 2 * GG_PTS); ggLvFill(S); ggPtabWrite(S);
   return S;
 }
@@ -56413,24 +56473,37 @@ function ggGrow() {
   for (let p = n - 1; p >= GG.cap; p--) GG.free.push(p);
   GG.cap = n; return true;
 }
-// a page for slot S's page row i (one given back from the slot least lately used if the pool is out - never one drawn this frame)
-function ggPageGet() {
+/* a page for slot S's page row i (one given back if the pool is out - never one a view draws this frame). pre: a page for what's round the views (ggStep's
+   ring - loaded ahead, in a frame with time over): it takes only a free page or one nobody asked for this frame, and never grows the pool - so the pool
+   holds what the views draw, and what's round them only in the room that leaves (a view's own page takes one of those first, the longest unasked) */
+function ggPageGet(pre) {
   if (GG.free.length) return GG.free.pop();
-  // (the pages no view asked for this frame, the longest unasked first - a slot's (pu) and the levels' (used): listed once a frame)
+  for (let c; (c = ggCandTop(pre));) {
+    GG.cand.pop(); const o = c[1], i = c[2];
+    if (i < 0) { const p = o.p; o.p = -1; o.stale = 1; ggLvPub(o); return p; }
+    const p = o.pages[i]; o.pages[i] = -1; o.stale[i] = 1; GG.ptab[ggPti(o, i)] = GG_NONE; GG.wr.add(o); return p;
+  }
+  return !pre && ggGrow() ? GG.free.pop() : -1;
+}
+// (the pages no view asked for this frame - a slot's (pu) and the levels' (used) -, listed once a frame by when each was last wanted: by a view or as
+// round one (ru), the longest unwanted first; those round a view this frame last) the next one still held -> [when, slot or level, i] or null; pre: only
+// one nobody wanted this frame
+function ggCandTop(pre) {
   if (GG.candAt !== renderTick) {
     const L = [];
-    for (const S of GG.sk) if (S) for (let i = 0; i < 2 * S.npr; i++) if (S.pages[i] >= 0 && S.pu[i] < renderTick) L.push([S.pu[i], S, i]);
-    for (const e of GG.lv.values()) if (e.p >= 0 && e.used < renderTick && !ggBaseE(e)) L.push([e.used, e, -1]);   // (the base's never)
+    for (const S of GG.sk) if (S) for (let i = 0; i < 2 * S.npr; i++) if (S.pages[i] >= 0 && S.pu[i] < renderTick) L.push([Math.max(S.pu[i], S.ru[i]), S, i]);
+    for (const e of GG.lv.values()) if (e.p >= 0 && e.used < renderTick && !ggBaseE(e)) L.push([Math.max(e.used, e.ru), e, -1]);   // (the base's never)
     L.sort((a, b) => b[0] - a[0]); GG.cand = L; GG.candAt = renderTick;
   }
   while (GG.cand.length) {
-    const [, o, i] = GG.cand.pop();
-    if (i < 0) { if (o.p < 0) continue; const p = o.p; o.p = -1; o.stale = 1; ggLvPub(o); return p; }
-    if (GG.sk[o.si] !== o || o.pages[i] < 0) continue;
-    const p = o.pages[i]; o.pages[i] = -1; o.stale[i] = 1; GG.ptab[ggPti(o, i)] = GG_NONE; GG.wr.add(o); return p;
+    const c = GG.cand[GG.cand.length - 1], o = c[1], i = c[2];
+    if (i < 0 ? o.p < 0 : GG.sk[o.si] !== o || o.pages[i] < 0) { GG.cand.pop(); continue; }   // (given back since it was listed)
+    return pre && c[0] >= renderTick ? null : c;
   }
-  return ggGrow() ? GG.free.pop() : -1;
+  return null;
 }
+// (ggStep: a page round the views can be had this frame - free, or one nobody wants)
+const ggPreRoom = () => GG.free.length > 0 || !!ggCandTop(true);
 /* ---- the dark pages known at once (a cut's deep ground the frame it's asked for): a slice's open air, a 64-row block at a time - the first and last
    row of open air its columns have in the block (air, not an island's body under the water - the page job's test), each set's; every row over
    the slice's top is open. A page whose block of cells round it (its halo) reaches no open air in its own slice or either neighbour's is dark:
@@ -56487,7 +56560,7 @@ function ggLevel(px) { if (!(px > 0) || px >= 0.5) return 0; let f = 2, L = 1; w
 // the record of level L's page row JL of slices K F .. K F + F - 1, set wh (made when first asked for: no page, stale)
 function ggLv(L, K, wh, JL) {
   const g = ggLvKey(L, K), key = (g * 2 + wh) * 1024 + JL; let e = GG.lv.get(key);
-  if (!e) { e = { L, K, wh, JL, p: -1, black: false, stale: 1, used: 0 }; GG.lv.set(key, e); let A = GG.lvK.get(g); if (!A) GG.lvK.set(g, A = []); A.push(e); }
+  if (!e) { e = { L, K, wh, JL, p: -1, black: false, stale: 1, used: 0, ru: 0 }; GG.lv.set(key, e); let A = GG.lvK.get(g); if (!A) GG.lvK.set(g, A = []); A.push(e); }
   return e;
 }
 // (its F slices' page rows of level L: j the row's place in slice k's - none if outside its rows)
@@ -56534,13 +56607,13 @@ function ggStoneLv(c0, r0, F) {
   return { id, e, ux, uy, sd, up, r0 };
 }
 // a level page worked out: its slices' slots first (their columns' numbers, stones), the halo of the level's cells, its derive (ggPageJob's, F cells apart)
-function ggLvJob(e) {
+function ggLvJob(e, pre) {
   const L = e.L, F = 1 << L, h = F >> 1, wh = e.wh, k0 = e.K * F, c0 = k0 * LT_CHUNK, r0 = GG_RB + e.JL * 64 * F;
   const SS = [];
   for (let i = 0; i < F; i++) { const k = k0 + i, Sl = ggSlotOf(k); if (!Sl) return false; Sl.used = renderTick; if (!Sl.cols) { ggSliceCols(k, Sl); Sl.cols = true; } SS.push(Sl); }
   if (wh && SS.every(Sl => !Sl || r0 >= Sl.islMax)) { e.black = true; e.stale = 0; if (e.p >= 0) GG.free.push(e.p); e.p = -1; ggLvPub(e); return false; }   // (no island's rows in it)
   const cap = Math.ceil(ugReach() / LT_CELL) + 2, H = ggLvH(F, cap), BW = 64 + 2 * H, N = BW * BW;
-  const p = e.p >= 0 ? e.p : ggPageGet(); if (p < 0) return false;
+  const p = e.p >= 0 ? e.p : ggPageGet(pre); if (p < 0) return false;
   e.p = p; e.black = false; e.stale = 0; ggLvPub(e);
   if (!GG_FILL.mat || GG_FILL.mat.length < N) { GG_FILL.mat = new Uint8Array(N); GG_FILL.lay = new Uint8Array(N); }
   const mat = GG_FILL.mat, lay = GG_FILL.lay, n = BW * F, colM = new Uint8Array(n), colL = new Uint8Array(n), rA = r0 - H * F;
@@ -56631,7 +56704,7 @@ function ggBaseStep(late) {
 const GG_FILL = { mat: null, lay: null };
 // page i of slot S all dark: no page, the table's BLACK (drawn the ground's dark)
 function ggPageBlack(S, i) { if (S.pages[i] >= 0) GG.free.push(S.pages[i]); S.pages[i] = -1; GG.ptab[ggPti(S, i)] = GG_BLACK; S.stale[i] = 0; }
-function ggPageJob(S, i) {
+function ggPageJob(S, i, pre) {
   const which = i >= S.npr ? 1 : 0, k = S.k, c0 = k * LT_CHUNK, r0 = GG_RB + (S.j0 + i % S.npr) * 64, cap = Math.ceil(ugReach() / LT_CELL) + 2, H = Math.min(64, Math.max(cap, 30)), BW = 64 + 2 * H;
   const N = BW * BW; if (!GG_FILL.mat || GG_FILL.mat.length < N) { GG_FILL.mat = new Uint8Array(N); GG_FILL.lay = new Uint8Array(N); }
   const mat = GG_FILL.mat, lay = GG_FILL.lay, colM = new Uint8Array(BW), colL = new Uint8Array(BW);
@@ -56643,7 +56716,7 @@ function ggPageJob(S, i) {
   for (let x = 0; x < BW && !open; x++) { const c = c0 - H + x, U = land.ugBody && c >= 0 && c < land.cols ? land.ugBody[c] : null; for (let y = 0; y < BW; y++) if (mat[y * BW + x] === M_AIR && !(U && ugInBody(c, LT_Y0 + (yIn(y) + 0.5) * LT_CELL))) { open = true; break; } }
   if (!open && land.ugSee) for (let q = 0; q < 64 && !open; q++) { const c = c0 + q; if (c < land.cols && land.ugSee[c]) for (let j = 0; j < 64; j++) if (ugCell(c, LT_Y0 + (r0 + j + 0.5) * LT_CELL) === 0) { open = true; break; } }
   if (!open) { ggPageBlack(S, i); GG.stats.black++; return 'black'; }
-  const p = S.pages[i] >= 0 ? S.pages[i] : ggPageGet(); if (p < 0) return null;
+  const p = S.pages[i] >= 0 ? S.pages[i] : ggPageGet(pre); if (p < 0) return null;
   S.pages[i] = p; GG.ptab[ggPti(S, i)] = p; S.stale[i] = 0;
   // the arena: Job (64 B), the halo's w0 (BW x BW), the page's w1 and w4 (64 x 64 each)
   // (the job's words - Job (16), the halo's w0 (BW x BW), the page's w1 and w4 (64 x 64 each) - made in the processor's own scratch first, and put in this
@@ -56766,7 +56839,7 @@ function ggStep(views) {
   if (!ggPools()) { if (GPU.on) frameWait('ground'); return; }   // (a ground to draw and the device lost - not drawn: the loading cover waits)
   ggFlush();                                                   // (a batch left from a frame cut short: sent before its places are given again)
   const t0 = performance.now(); GG.fj = 0; GG.stats.frameDisp = 0; GG.bat.z0 = 0;
-  if (GG.cellRef !== land.cell || GG.dirtyRef !== land.dirty || !GG.slot || GG.nk !== Math.ceil(land.cols / LT_CHUNK)) { for (let i = 0; i < GG.sk.length; i++) ggSlotFree(i); ggSlotBufs(); ggReset(); }   // (a bigger world: its slots' buffers made for it)
+  if (GG.cellRef !== land.cell || GG.dirtyRef !== land.dirty || !GG.slot || GG.nk !== Math.ceil(land.cols / LT_CHUNK)) { for (let i = 0; i < GG.sk.length; i++) ggSlotFree(i); ggSlotBufs(); ggPagesAgain(); ggReset(); }   // (a bigger world: its slots' buffers made again; a new world: the pages' pool at its start)
   { const rs = ['forest', 'desert', 'mountain', 'tropical', 'ice', 'swamp', 'volcanic'].map(n => biomeSides(n).roots).join() + JSON.stringify((typeof BIOME_SURF !== 'undefined' && BIOME_SURF.sea) || []);   // (BOTTOM ROOTS, the sea's layers: the rare picks made with them)
     if (GG.ug !== ugReach() || GG.gapV !== land.gapsV || GG.rs !== rs) { GG.ug = ugReach(); GG.gapV = land.gapsV; GG.rs = rs; GG.air = new Map(); for (const S of GG.sk) if (S) { S.stale.fill(1); S.cols = false; } for (const e of GG.lv.values()) e.stale = 1; ggBaseAll(); } }
   if (GG.ms !== land.msig) { GG.ms = land.msig; for (const S of GG.sk) if (S) S.cols = false; ggBaseAll(); }   // (the meadow's sliders, a biome's decks: the field behind's numbers again)
@@ -56796,8 +56869,8 @@ function ggStep(views) {
           for (let J = (ra - GG_RB) >> sh, J1 = (rb - 1 - GG_RB) >> sh; J <= J1; J++) {
             const ymj = LT_Y0 + (GG_RB + (J + 0.5) * (64 << L)) * LT_CELL, dist = Math.abs(xk - xm) + Math.abs(ymj - ym);
             const pr = ring ? 3 : L !== Lv ? 0 : Math.abs(xk - xm) < W / 4 && Math.abs(ymj - ym) < Hh / 4 ? 1 : 2;
-            if (!L) { if (Sk && J - Sk.j0 >= 0 && J - Sk.j0 < Sk.npr) Sk.pu[J - Sk.j0 + wh * Sk.npr] = renderTick; want.push([pr, dist, 0, k, J, wh]); continue; }
-            const e = ggLv(L, k >> L, wh, J); e.used = renderTick; if (seen.has(e)) continue; seen.add(e); want.push([pr, dist, 1, e]);
+            if (!L) { if (Sk && J - Sk.j0 >= 0 && J - Sk.j0 < Sk.npr) (ring ? Sk.ru : Sk.pu)[J - Sk.j0 + wh * Sk.npr] = renderTick; want.push([pr, dist, 0, k, J, wh]); continue; }   // (wanted by a view, or round one - ggPageGet)
+            const e = ggLv(L, k >> L, wh, J); if (seen.has(e)) continue; if (ring) e.ru = renderTick; else e.used = renderTick; seen.add(e); want.push([pr, dist, 1, e]);
           }
         }
       }
@@ -56817,14 +56890,15 @@ function ggStep(views) {
       // (its slices' slots first, one at a time in the frame's time - ggLvJob needs their columns' numbers and stones)
       let wait = false; for (let k = e.K << e.L; k < (e.K + 1) << e.L; k++) { const Sl = ggSlotOf(k); if (!Sl) { wait = true; break; } Sl.used = renderTick; if (Sl.cols) continue; if (late(pr)) { wait = true; break; } ggSliceCols(k, Sl); Sl.cols = true; nd++; }
       if (wait || late(pr) && nd) continue;
-      if (ggLvJob(e)) done++;
+      if (pr === 3 && e.p < 0 && !ggPreRoom()) break;            // (round the views: no room left this frame - the pool is the views')
+      if (ggLvJob(e, pr === 3)) done++;
       continue;
     }
     const [, , , k, j, wh] = it;
     const Sl = ggSlotOf(k); if (!Sl) continue;
     if (pr < 3) Sl.used = renderTick;
     if (j - Sl.j0 < 0 || j - Sl.j0 >= Sl.npr) continue;
-    const i = j - Sl.j0 + wh * Sl.npr; Sl.pu[i] = renderTick;
+    const i = j - Sl.j0 + wh * Sl.npr; if (pr < 3) Sl.pu[i] = renderTick; else Sl.ru[i] = renderTick;
     if (!Sl.stale[i] && Sl.cols) continue;
     if (wh && Sl.cols && GG_RB + j * 64 >= Sl.islMax) { Sl.stale[i] = 0; continue; }   // (no island's rows in it: no island page)
     if (late(pr)) break;
@@ -56833,7 +56907,8 @@ function ggStep(views) {
     if (!Sl.stale[i]) continue;
     if (ggDark(Sl, i)) { ggPageBlack(Sl, i); GG.wr.add(Sl); GG.stats.dark++; nd++; continue; }   // (dark: known from the slices' open air, no job - ggDark)
     if (GG.fj >= GG_JOBS) continue;                             // (the frame's jobs all given out - GG_JOBS: the dark ones still marked)
-    const r = ggPageJob(Sl, i); if (r === 'page' || r === 'black') { GG.wr.add(Sl); done++; }
+    if (pr === 3 && Sl.pages[i] < 0 && !ggPreRoom()) break;     // (round the views: no room left this frame)
+    const r = ggPageJob(Sl, i, pr === 3); if (r === 'page' || r === 'black') { GG.wr.add(Sl); done++; }
   }
   { let bf = done || nd; ggBaseStep(() => { if (!bf) { bf = 1; return false; } return performance.now() - t0 > GG_MS; }); }   // (the world's base in the time left - after the views' own; a frame that made nothing else makes a piece)
   ggFlush();                                                   // (the frame's jobs worked out - before anything draws from their pages)
@@ -59589,10 +59664,12 @@ function pgPutPipe(fmt, sf, pic) {
   const L = pic ? P.xl : P.pl, M = pic ? P.xm : P.pm;
   return (P.puts[key] = gpuRenderPipe({ layout: gpuPipeLayout([L], pic ? 'plants pictures' : 'plants put'), label: pic ? 'plants pictures' : 'plants put', vertex: { module: M, entryPoint: 'vs' }, fragment: { module: M, entryPoint: 'fs', targets: [{ format: fmt, blend: P.PM }] }, primitive: { topology: pic ? 'triangle-list' : 'triangle-strip' }, depthStencil: ds }));
 }
-// the plants' layer: one, the size of the largest target it's asked for at the finest pixel (half a target pixel), grown in steps
-function pgLayerTex(w, h) {
+// the plants' layer: one, the size of the largest plants' box it's asked for (w x h of its pixels - what a layer's plants are drawn into and laid from: one
+// view's, within its scissor), grown in steps - never past the grid over the whole target (cw x ch) that a box lies in
+function pgLayerTex(w, h, cw, ch) {
   const L = PGP.lt; if (L && L.w >= w && L.h >= h) return L;
-  const W = Math.max(w, L ? L.w : 0, 64), H = Math.max(h, L ? L.h : 0, 64), nw = Math.ceil(W * 1.15 / 64) * 64, nh = Math.ceil(H * 1.15 / 64) * 64;
+  const W = Math.max(w, L ? L.w : 0, 64), H = Math.max(h, L ? L.h : 0, 64);
+  const nw = Math.max(W, Math.min(Math.ceil(W * 1.15 / 64) * 64, Math.ceil(cw / 64) * 64)), nh = Math.max(H, Math.min(Math.ceil(H * 1.15 / 64) * 64, Math.ceil(ch / 64) * 64));
   if (L) gpuTexFree(L);
   return (PGP.lt = gpuTex(nw, nh, 'rgba8unorm', 'plants'));
 }
@@ -59769,13 +59846,13 @@ function pgLook(it, s, n, out) {
   }
 }
 // the params of a layer's step and draw: the clock, the wind and a storm's gusts, the painted light's numbers, the layer's size, the movers
-function pgParams(n, lw, lh) {
+function pgParams(n, lw, lh, lx, ly) {
   const Pp = PG_P, PT = PAINT();
   Pp[0] = PGP.dt || 0; Pp[1] = time; Pp[2] = n; Pp[3] = PGP.nMov || 0;
   Pp[4] = (E.windU || 0) * (1 + 0.25 * Math.sin(time * 0.31) + 0.15 * Math.sin(time * 1.13 + 2)); Pp[5] = WATER_Y; Pp[6] = WATER_Y - (VTUNE.air.top || 200) * UPM;   // (windAt's gust; airAt's layer top)
   Pp[7] = Math.max(E.stormK || 0, 0.7 * (E.storm || 0), 0.6 * Math.abs(env.wind || 0)) * (VTUNE.air.gust ?? 1); Pp[8] = UPM;
   Pp[9] = clamp(VTUNE.tree.light, 0, 2); Pp[10] = shadeK(); Pp[11] = PT.bands; Pp[12] = PT.noise; Pp[13] = PT.feat; Pp[14] = PT.grain;
-  Pp[15] = lw; Pp[16] = lh; Pp[22] = PT.shadow; Pp[23] = PT.reach; Pp[25] = typeof viewIdx === 'number' ? viewIdx : 0; Pp[24] = RIG_V0;
+  Pp[15] = lw; Pp[16] = lh; Pp[20] = lx || 0; Pp[21] = ly || 0; Pp[22] = PT.shadow; Pp[23] = PT.reach; Pp[25] = typeof viewIdx === 'number' ? viewIdx : 0; Pp[24] = RIG_V0;
   Pp.set(PG_MOV.subarray(0, (PGP.nMov || 0) * 6), PGW.PP_MOV);
   Pp[17] = E.windU || 0; Pp[18] = E.storm || 0; Pp[19] = PGP.nSub || 0; Pp.set(PG_SUBS.subarray(0, (PGP.nSub || 0) * 5), PGW.PP_SUB);   // (under the water: the current's - rigAir)
   return Pp;
@@ -59792,7 +59869,7 @@ function pgLayer(list, o) {   // (o: a preview's own - its rows, its grid P, its
   const Pc = P * M.a, lin = Pc < 1 ? 1 : 0;
   const T = frameTarget(C); if (!T || !T.tex || !T.tex.view) return;
   const ox = o ? 0 : ((PX(0) % P) + P) % P, oy = o ? 0 : ((PY(0) % P) + P) % P, ux = -M.e / M.a, uy = -M.f / M.d, gx = Math.floor((ux - ox) / P) * P + ox, gy = Math.floor((uy - oy) / P) * P + oy;
-  const LW = Math.ceil(T.w / Pc) + 2, LH = Math.ceil(T.h / Pc) + 2, LT = pgLayerTex(LW, LH);
+  const LW = Math.ceil(T.w / Pc) + 2, LH = Math.ceil(T.h / Pc) + 2;   // (the layer's grid over the whole target - the layer itself holds only the plants' box: below)
   // (what the context can draw on, in its units: its scissor within the target - onTarget's)
   const sc0 = C.s && C.s.sc, vis = [((sc0 ? Math.max(0, sc0[0]) : 0) - M.e) / M.a, ((sc0 ? Math.max(0, sc0[1]) : 0) - M.f) / M.d, ((sc0 ? Math.min(T.w, sc0[0] + sc0[2]) : T.w) - M.e) / M.a, ((sc0 ? Math.min(T.h, sc0[1] + sc0[3]) : T.h) - M.f) / M.d];
   const R0 = o ? o.rows(list, P, gx, gy, true) : pgRows(list, P, gx, gy, true, vis);
@@ -59800,7 +59877,19 @@ function pgLayer(list, o) {   // (o: a preview's own - its rows, its grid P, its
   const { ID, INI, n, vtx, step } = R0, segs = R0.segs || [{ pic: false, v0: 0, v1: vtx, box: R0.box }];
   PGP.stats.inst = n; PGP.stats.verts = vtx; PGP.stats.slots = PGP.slots.size;
   if (!n) return;
-  const Pp = pgParams(n, LT.w, LT.h);
+  // (each stretch's box on the grid, in its pixels - with a pixel round it, cleared, for the laying's taps - within the target and the context's scissor (what
+  // can be laid); the layer holds their union, its top left at lx, ly of the grid: the draw puts a plant there, the laying reads it from there)
+  const vb = [Math.floor((vis[0] - gx) / P) - 1, Math.floor((vis[1] - gy) / P) - 1, Math.ceil((vis[2] - gx) / P) + 1, Math.ceil((vis[3] - gy) / P) + 1];
+  const LB = new Map(), U = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const g of segs) {
+    if (g.pic) continue;
+    const [bx0, by0, bx1, by1] = g.box;
+    const b = [Math.max(0, vb[0], Math.floor((bx0 - gx) / P) - 1), Math.max(0, vb[1], Math.floor((by0 - gy) / P) - 1), Math.min(LW, vb[2], Math.ceil((bx1 - gx) / P) + 1), Math.min(LH, vb[3], Math.ceil((by1 - gy) / P) + 1)];
+    if (b[2] <= b[0] || b[3] <= b[1]) continue;
+    LB.set(g, b); U[0] = Math.min(U[0], b[0]); U[1] = Math.min(U[1], b[1]); U[2] = Math.max(U[2], b[2]); U[3] = Math.max(U[3], b[3]);
+  }
+  const LT = LB.size ? pgLayerTex(U[2] - U[0], U[3] - U[1], LW, LH) : null, lx = LT ? U[0] : 0, ly = LT ? U[1] : 0;
+  const Pp = pgParams(n, LT ? LT.w : 1, LT ? LT.h : 1, lx, ly);
   // the context's clip (built into its stencil as the GL front's own draws have it) and scissor: one rule for every native draw on a clipped context
   const clip = !!(C.s && C.s.clip), sc = C.s && C.s.sc;
   if (clip) glBegin(C, 'source-over');
@@ -59837,10 +59926,10 @@ function pgLayer(list, o) {   // (o: a preview's own - its rows, its grid P, its
       GPU.stats.draws++; PGP.stats.draws++;
       gpuPassEnd(); continue;
     }
+    const b = LB.get(g); if (!b) continue;
     const [bx0, by0, bx1, by1] = g.box;
     // (the plants' box on the layer, in its pixels: cleared first - the rest of the layer isn't read)
-    const lb = new Float32Array([Math.max(0, Math.floor((bx0 - gx) / P) - 1), Math.max(0, Math.floor((by0 - gy) / P) - 1), Math.min(LT.w, Math.ceil((bx1 - gx) / P) + 1), Math.min(LT.h, Math.ceil((by1 - gy) / P) + 1), LT.w, LT.h]);
-    if (lb[2] <= lb[0] || lb[3] <= lb[1]) continue;
+    const lb = new Float32Array([b[0] - lx, b[1] - ly, b[2] - lx, b[3] - ly, LT.w, LT.h]);
     const cbg = gpuBindGroup(R.cl, [{ binding: 0, resource: pgArena(lb) }], 'plants clear');
     pgTsMark(0); const pass = gpuPassBegin({ colorAttachments: [{ view: LT.view, loadOp: 'load', storeOp: 'store' }] }, 'plants:layer', [LT]);
     pass.setPipeline(R.clr); pass.setBindGroup(0, cbg); pass.draw(4);
@@ -59848,7 +59937,7 @@ function pgLayer(list, o) {   // (o: a preview's own - its rows, its grid P, its
     GPU.stats.draws++; PGP.stats.draws++;
     gpuPassEnd();
     // the layer on the target: its box, in the target's pixels (the context's transform)
-    const q = new Float32Array([Math.max(0, Math.floor(tx(bx0))), Math.max(0, Math.floor(ty(by0))), Math.min(T2.w, Math.ceil(tx(bx1))), Math.min(T2.h, Math.ceil(ty(by1))), T2.w, T2.h, tx(gx), ty(gy), Pc, lin, 0, 0, 0, 0, 0, 0]);
+    const q = new Float32Array([Math.max(0, Math.floor(tx(bx0))), Math.max(0, Math.floor(ty(by0))), Math.min(T2.w, Math.ceil(tx(bx1))), Math.min(T2.h, Math.ceil(ty(by1))), T2.w, T2.h, tx(gx) + lx * Pc, ty(gy) + ly * Pc, Pc, lin, 0, 0, 0, 0, 0, 0]);
     if (q[2] <= q[0] || q[3] <= q[1]) continue;
     const pbg = gpuBindGroup(R.pl, [{ binding: 0, resource: pgArena(q) }, { binding: 1, resource: LT.view }, { binding: 2, resource: gpuSampler(true, 0, 0) }], 'plants put');
     const pp = onTarget('plants:put:', LT); if (!pp) return;
@@ -60187,7 +60276,7 @@ struct VO {
   let rt = ID[I + 8u];
   if ((fl & 128u) != 0u) { q.y = 2.0 * ID[I + 10u] - q.y; }          // (a cave's ON CEILING plant: turned over about its foot, hanging from the rock)
   else if (rt != 0.0) { let c = vec2f(ID[I + 9u], ID[I + 10u]); q = c + rot2(q - c, rt); }
-  q += vec2f(ID[I + 4u], ID[I + 5u]);
+  q += vec2f(ID[I + 4u], ID[I + 5u]) - vec2f(PP[20], PP[21]);     // (the layer holds the plants' box: its top left at PP[20], PP[21] of the grid)
   o.p = vec4f(q.x / PP[15] * 2.0 - 1.0, 1.0 - q.y / PP[16] * 2.0, 0.0, 1.0);
   o.uv = vec2f(SD[V + 7u], SD[V + 8u]); o.rp = vec2f(SD[V + 9u], SD[V + 10u]); o.al = vec2f(SD[V + 11u], SD[V + 12u]); o.nr = vec2f(SD[V + 13u], SD[V + 14u]); o.tt = SD[V + 15u];
   o.ids = vec4u(lo, u32(fpart + 1.0), kind, u32(SD[V + 16u] + 1.0)); o.rs = vec2f(SD[V + 17u], SD[V + 18u]); o.lk = lk;
