@@ -457,7 +457,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 970, build: 'NOV 10 20:55', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 970, build: 'NOV 10 21:55', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -7966,7 +7966,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 970;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 10 20:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 10 21:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11002,7 +11002,8 @@ function dropAll() { mgHold[0] = mgHold[1] = false; for (const pl of planes) if 
 window.addEventListener('blur', dropAll);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) dropAll();
-  if (SFX.ctx) { if (document.hidden) SFX.ctx.suspend(); else SFX.ctx.resume(); }
+  // (hidden: the sound stopped, a refusal - a closed context - let be; shown: resumed, or by the next touch if Safari won't here - 51-audio.js audioResume)
+  if (SFX.ctx) { if (document.hidden) { if (SFX.ctx.state !== 'closed') { const q = SFX.ctx.suspend(); if (q && q.catch) q.catch(() => {}); } } else audioResume(); }
 });
 window.addEventListener('wheel', e => {
   if (onEdUI(e)) return;                                  // (the panel scrolls; the game doesn't zoom)
@@ -67815,13 +67816,24 @@ function krSfxThud(x) { if (SFX.ctx && !SIM_ONLY) sfxKrakenThud(x); }
    Sounds are panned by where they happen on screen and fade when far off-screen.
    ================================================================ */
 const SFX = { ctx: null, master: null, noise: null, brown: null, whoosh: [], amb: null, eng: [] };
+/* (Nov 10, the iPad: "Failed to start the audio device", and no sound after it) the sound is started and kept going by one rule.
+   Safari lets sound start only inside a user's own touch, key or click, and stops a context on its own: an interruption (a call,
+   Siri, another app's sound, the audio session taken) leaves it 'interrupted', the page sent behind leaves it 'suspended' (we
+   suspend it ourselves - 20-input-pointer.js), and a resume() it can't honour - outside a touch, or while the device won't start -
+   is refused by rejecting its promise (InvalidStateError "Failed to start the audio device"). So every touch, key and click
+   (audioInit, below: listened for before the game's own handlers) wakes the sound: no context yet - it's made; one that isn't
+   running - it's resumed there, a silent sound played in the same handler (Safari's unlock); a refused resume is noted and tried
+   again at the next touch, never left as an uncaught rejection. Only a closed context (it can never run again) is replaced, with
+   a new one built as the first was. Each change of its state is noted in the log the REPORT button saves (50-zzzz-bug.js) */
 function audioInit() {
-  if (SFX.ctx) { if (SFX.ctx.state !== 'running') { try { SFX.ctx.resume(); } catch (e) {} audioUnlock(); } return; }
+  if (SFX.ctx && SFX.ctx.state === 'closed') audioDrop();
+  if (SFX.ctx) { audioWake(); return; }
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return;
   // (the iPad: play as a game, not as a ring tone, so the side switch and silent mode don't swallow it)
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch (e) {}
   const ctx = new AC(); SFX.ctx = ctx;
+  ctx.onstatechange = () => audioState(ctx);
   audioUnlock();
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -16; comp.knee.value = 12; comp.ratio.value = 5; comp.attack.value = 0.004; comp.release.value = 0.25;
@@ -67978,11 +67990,37 @@ function makePan() {
   const n = ctx.createGain(); return { node: n, set: () => {} };
 }
 // (Safari on the iPad only lets sound start inside a touch's own handler: a silent sound played there wakes the
-// audio up; listening in the capture phase, before the game's own handlers, so the first press already clicks)
+// audio up - at the context's first touch, and at every touch that finds it stopped; listening in the capture phase,
+// before the game's own handlers, so the first press already clicks)
 function audioUnlock() {
-  const ctx = SFX.ctx; if (!ctx || SFX.unlocked) return;
+  const ctx = SFX.ctx; if (!ctx) return;
   try { const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource(); s.buffer = b; s.connect(ctx.destination); s.start(0); } catch (e) {}
-  if (ctx.state === 'running') SFX.unlocked = true;
+}
+// a touch, a key or a click with the context there: not running ('suspended', or Safari's 'interrupted') - the silent sound and a resume
+function audioWake() {
+  const ctx = SFX.ctx; if (!ctx || ctx.state === 'running' || ctx.state === 'closed') return;
+  audioUnlock(); audioResume();
+}
+// a resume, its refusal kept to the log (once each time the sound stops - audioState) and left for the next touch to try again; also
+// the page shown again (20-input-pointer.js), where no touch is in hand - Safari may refuse it there, and the next touch wakes it
+function audioResume() {
+  const ctx = SFX.ctx; if (!ctx || ctx.state === 'running' || ctx.state === 'closed') return;
+  let p = null; try { p = ctx.resume(); } catch (e) { p = Promise.reject(e); }
+  if (p && p.catch) p.catch(e => { if (SFX.ctx === ctx && !SFX.refused) { SFX.refused = true; console.warn('audio: resume refused (' + ((e && (e.name + ': ' + e.message)) || e) + ', state ' + ctx.state + ') - tried again at the next touch'); } });
+}
+// the context's state as it changes (Safari's own stops included) - into the REPORT's log; running again clears the refusal's note
+function audioState(ctx) {
+  if (SFX.ctx !== ctx) return;
+  if (ctx.state === 'running') SFX.refused = false;
+  if (ctx.state !== 'running' || SFX.wasStopped) console.warn('audio: ' + ctx.state + (document.hidden ? ' (page hidden)' : ''));
+  SFX.wasStopped = ctx.state !== 'running';
+}
+// a closed context let go, everything built on it with it - the next touch builds the sound again (audioInit)
+function audioDrop() {
+  const ctx = SFX.ctx; if (ctx) ctx.onstatechange = null;
+  console.warn('audio: the context was closed - a new one is made');
+  Object.assign(SFX, { ctx: null, master: null, world: null, round: null, noise: null, brown: null, whoosh: [], amb: null, eng: [], rot: null, pl: null, jt: null, roar: null, under: null, life: null, refused: false, wasStopped: false });
+  if (typeof hornVoices !== 'undefined') hornVoices.clear();
 }
 ['pointerdown', 'keydown', 'touchstart', 'touchend', 'mousedown', 'click'].forEach(t => window.addEventListener(t, audioInit, { passive: true, capture: true }));
 
