@@ -8599,8 +8599,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 984;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 12 00:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 985;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 12 00:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -29382,8 +29382,11 @@ fn axOf(K: Cl) -> f32 { let D0 = deckU(K.di, 0); return rnd(placeX(K) * D0.w) + 
   let LOW = ss(0.25, 0.0, sunY); let kb = 1.0 - 0.45 * u7.w;
   var ex = 0.0; if (u8.z > 0.0) { ex = (sx - W / 2.0) * 0.5; } else if (sx < X + minX) { ex = sx - (X + minX); } else if (sx > X + maxX) { ex = sx - (X + maxX); }
   var ax = ex / HS / select(Zg, 1.0, u8.z > 0.0) * 0.6 * kb; var ay = (Ym - srow) / HS / Zg * (2.2 - 1.6 * u8.x) * kb;
-  // (FAR SUN: one light for the whole sky - up and down by how high the sun is, across by which side of it the cloud is, in eighths)
-  if (u8.y > 0.0) { ax = rnd(clamp((sx - Xm) / HS * 0.6, -1.4, 1.4) * (1.0 - 0.75 * LOW) * 8.0) / 8.0 * kb; ay = (clamp(sunY, -0.3, 1.0) * 2.0 * (1.0 - 0.8 * u8.x) - 0.9 * LOW) * kb; }
+  // (FAR SUN: one light for the whole sky - the same on every cloud, as parallel sunlight is: up and down by how high the sun is, across by
+  // the hour's sun across the sky (sunScreen.x, U(3).y - not the drawn disc, which drifts slowly with the camera: SUN PARALLAX), in eighths -
+  // never by where the cloud is, so flying past a cloud never turns its light; user
+  // Nov 11 23:47: "the sun is really far away. It would not be updating")
+  if (u8.y > 0.0) { ax = rnd(clamp((U(3).y - 0.5) * W / HS * 0.6, -1.4, 1.4) * (1.0 - 0.75 * LOW) * 8.0) / 8.0 * kb; ay = (clamp(sunY, -0.3, 1.0) * 2.0 * (1.0 - 0.8 * u8.x) - 0.9 * LOW) * kb; }
   var d = length(vec2f(ax, ay)); if (d == 0.0) { d = 1e-6; }
   let rxs = max(6.0 * u6.x * Zg, (maxX - minX) / 2.0); let rys = max(6.0 * u6.x * Zg, h / 2.0);
   var outK = ss(0.15, 1.5, length(vec2f((sx - Xm) / rxs, (srow - Ym) / rys)));
@@ -29841,7 +29844,7 @@ function gctNumbers(V2) {
   const cov = P.cover, clear = smoothstep(0, 0.06, cov), wcov = (P.wisps ?? 0.5) * clamp(cov / 0.3, 0, 1), heroT = smoothstep(0.12, 0.3, cov);
   put(0, CLD.n, 0, WORLD, WORLD / 2);
   put(1, now, Math.min(1, skyDt * skyGrowK), frameNo < 3 || frameNo < SNAP ? 1 : 0, cov); put(2, clear, wcov, heroT, 1 + (P.bigk ?? 0.5) * (P.big || 0));
-  put(3, P.gmin ?? 0.35, 0, WINDQ, P.windpile ?? 0.6); put(4, P.evolve, ZL, P.bcap ?? 15, P.scraps ?? 1);
+  put(3, P.gmin ?? 0.35, sunScreen.x, WINDQ, P.windpile ?? 0.6); put(4, P.evolve, ZL, P.bcap ?? 15, P.scraps ?? 1);   // (.y: the hour's sun across the sky, a share of the view - the far sun's light, never the drawn disc's drift with the camera)
   // (the view's: its size in cells, its sun, the light's rules - 07-light-shadow.js - the bolt, detail by size, the shadows' switches)
   const sz = sunZ();
   put(5, W, H, CW, HS); put(6, S, ZL, W * 0.5 + 24, 24 + (W >> 2));
