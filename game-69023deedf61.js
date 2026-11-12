@@ -6092,9 +6092,12 @@ function reachSet(nl, nr) {
   if (nl === WX0 && n === N) return;
   const keep = (A, T) => { const B = new T(n); if (A) { const s = Math.max(0, -off), e = Math.min(A.length, n - off); if (e > s) B.set(A.subarray(s, e), off + s); } return B; };
   wh = keep(wh, Float32Array); wv = keep(wv, Float32Array); wf = keep(wf, Float32Array); wtmp = new Float32Array(n);
-  const sOff = Math.round((WX0 - nl) / STIR_CELL), sA = stirA;
+  const sOff = Math.round((WX0 - nl) / STIR_CELL), sA = stirA, n0 = N, had = !!calmA && calmA.length === N && !!wetA && wetA.length === N;
+  // (each column's shelter, water and swell: kept where they are, the new columns' worked out - calmCol, buildWet; none yet: all of them, as at the build)
+  if (had) { calmA = keep(calmA, Float32Array); if (calmGoal) calmGoal = keep(calmGoal, Float32Array); wetA = keep(wetA, Uint8Array); ambK = keep(ambK, Float32Array); if (WBASE) { const W0 = WBASE; WBASE = new Float32Array(n).fill(WATER_Y); const s = Math.max(0, -off), e = Math.min(W0.length, n - off); if (e > s) WBASE.set(W0.subarray(s, e), off + s); } }
   WX0 = nl; N = n; REACH_W = nr - nl;
-  buildCalm(); buildWet();                              // (each column's shelter, water and swell - for all of them, as at the build)
+  if (!had) { buildCalm(); buildWet(); }
+  else for (const [a, b] of [[0, Math.min(n, off)], [Math.max(0, off + n0), n]]) if (b > a) { for (let i = a; i < b; i++) { calmA[i] = calmCol(WX0 + i * DX, calmD); if (calmGoal) calmGoal[i] = calmA[i]; } buildWet(a, b); }
   smokeReach(nl, nr);
   stirA = new Float32Array(0); stirReady();            // (the stirred water's cells, kept where they are)
   for (let c = 0; c < sA.length; c++) { const C = c + sOff; if (C >= 0 && C < stirA.length) stirA[C] = sA[c]; }
@@ -6107,7 +6110,8 @@ function smokeReach(x0, x1) {
   const ox = SG.nx;
   for (const k of ['u', 'v', 'u0', 'v0', 'p', 'div', 'dens', 'curl']) {
     const A = SG[k], B = new Float32Array(nx * ny);
-    for (let j = 0; j < ny; j++) for (let i = 0; i < ox; i++) { const I = i + off; if (I >= 0 && I < nx) B[j * nx + I] = A[j * ox + i]; }
+    const s = Math.max(0, -off), e = Math.min(ox, nx - off);   // (each row's cells kept where they are: a row at once)
+    if (e > s) for (let j = 0; j < ny; j++) B.set(A.subarray(j * ox + s, j * ox + e), j * nx + s + off);
     SG[k] = B;
   }
   const act = new Uint8Array(nx), A0 = SG.active; for (let i = 0; i < ox; i++) { const I = i + off; if (I >= 0 && I < nx) act[I] = A0[i]; }
@@ -6703,8 +6707,9 @@ function worldSeas() {
 /* the harbours from their parts (harbourFromStrs, 50-zz-structh.js) and what's laid out from them: the docks, the cameras' ends, the sea floor's
    shores and its floor, the sheltered water, the buoys, the harbour towers and their guns - buildWorld's, and an edit's in place on its drop
    (liveWorld, 50-zzzz-live-edit.js: a part a step - worldHarboursGen, its pieces in order) */
+// (edit: an edit's - the sheltered water made again only where a harbour's row changed, calmAgainGen)
 function worldHarbours() { for (const _ of worldHarboursGen()) ; }
-function* worldHarboursGen() {
+function* worldHarboursGen(edit) {
   const [left, right] = harbourLayout();
   yield;
   VIS_L = LAND ? 0 : left.viewEdge; VIS_R = LAND ? WORLD_W : right.viewEdge;   // (OPEN WORLD: the whole world; BATTLE: between the harbours)
@@ -6716,6 +6721,18 @@ function* worldHarboursGen() {
   // BATTLE: its two harbours' hangars and lighthouse towers, whole, VIS_PAD beyond - not every structure in the world (in a built world
   // that ran thousands of metres out: the planes flew in from there). OPEN WORLD: every structure, as above
   else for (const o of LAND ? strsUsed() : [].concat(...docks.map(d => [d.so, d.lh])).filter(Boolean)) { try { const B = strBox(o); if (Number.isFinite(B.x0) && Number.isFinite(B.x1)) { VIS_L = Math.min(VIS_L, B.x0 - VIS_PAD); VIS_R = Math.max(VIS_R, B.x1 + VIS_PAD); } } catch (e) { } }
+  harbourShores(left, right);
+  yield;
+  btMark('start'); floorRebuild(); btMark('floor');                                     // (OPEN WORLD: the ocean floor's shape, from the user's drawing - FLOOR_PTS; and the deep ocean's range, TR_A..TR_B)
+  yield;
+  yield* (edit ? calmAgainGen() : buildCalmGen()); btMark('calm');
+  yield;
+  buoysBuild();                                          // (the harbours' own in BATTLE / OPEN WORLD, and those placed by hand - PROPS > BUOY, 31-sailboats-buoys.js)
+}
+// the sea floor's shores from the harbours (left, right: the two coasts' docks as laid out - harbourLayout) and what the floor reads of them - the
+// world's build's, an edit's (worldHarboursGen - liveWorld, 50-zzzz-live-edit.js: a drag's on every move) -> whether any of it moved
+function harbourShores(left, right) {
+  const now = () => [BED_A, BED_B, BED_A0, BED_B0, JSON.stringify(COAST_RAMP), JSON.stringify(DOCK_PADS)].join(), was = now();
   // the sea floor's shores: the pier ends, and one player's open side
   // is open ocean (its shore mirrored, so the deep runs out to that edge of the world)
   // (the dock chat, Oct 29) a harbour's shore is its quay's face: the harbour's depth under the quay and hangar, the ocean
@@ -6728,15 +6745,10 @@ function* worldHarboursGen() {
   COAST_RAMP = DOCKS_OWNED ? coastDocks.filter(d => !docks.includes(d)).map(d => [d.dir < 0 ? LAYOUT_L : LAYOUT_R, oldEnd(d)]) : null;   // (a coast with no harbour: a beach - 09-sea-surface)
   if (COAST_RAMP && !COAST_RAMP.length) COAST_RAMP = null;
   DOCK_PADS = docks.some(d => d.extra || d.pad) ? docks.filter(d => d.extra || d.pad).map(d => [d.L, d.dir, d.root]) : null;   // (its harbour's depth under its hangar)   // (a dock placed at sea: its own ground - 09-sea-surface)
-  yield;
-  btMark('start'); floorRebuild(); btMark('floor');                                     // (OPEN WORLD: the ocean floor's shape, from the user's drawing - FLOOR_PTS; and the deep ocean's range, TR_A..TR_B)
-  yield;
-  yield* buildCalmGen(); btMark('calm');
-  yield;
-  buoysBuild();                                          // (the harbours' own in BATTLE / OPEN WORLD, and those placed by hand - PROPS > BUOY, 31-sailboats-buoys.js)
+  return now() !== was;
 }
 // the harbours laid out from their parts (harbourFromStrs): the docks, each side's home and the coasts', the harbour towers and their guns - the
-// world's build's, and a held edit's on every move (liveHarbour, 50-zzzz-live-edit.js) -> the two coasts' docks
+// world's build's, and an edit's (liveWorld, 50-zzzz-live-edit.js: a drag's on every move) -> the two coasts' docks
 function harbourLayout() {
   // each harbour runs from its land end (the coast) out to the end of its pier (dockAt, 06-fleet-captains)
   // one player: the far side is open ocean (STORY: the right, where the enemy comes from). The other player's
@@ -6877,37 +6889,63 @@ let WSTILL_VER = 0;
 function buildCalm() { for (const _ of buildCalmGen()) ; }
 // (its pieces: an edit's drop a few at a time - worldHarboursGen; the old shelter kept till the new is whole)
 function* buildCalmGen() {
-  const A = new Float32Array(N);
-  // (each harbour's numbers read once - its row's, not a column at a time)
-  const D = Array.from(docks, d => [d.blockFace, d.dir, d.pierGone ? 40 : Math.abs(d.blockFace - d.quay) + 80, d.extra || d.pad ? -(Math.abs(d.blockFace - (d.dir < 0 ? d.x0 : d.x0 + d.w)) + PAD_LAND) : -Infinity]);
+  const A = new Float32Array(N), D = calmRows();
   for (let i = 0; i < N; i++) {
     if (i && (i & 8191) === 0) yield;
-    const x = WX0 + i * DX;
-    let c = 1;
-    for (const [bf, dir, R, own] of D) {
-      // from the block to just past the pier's end (user Oct 27: the pier gone, the open sea's waves come right up to the block)
-      const u = (x - bf) * -dir;
-      if (u < own) continue;   // (a dock placed at sea: the water past its own ground isn't its)
-      if (u < R) c = Math.min(c, u <= 0 ? 0.06 : 0.06 + 0.94 * smooth01(u / R));
-    }
-    A[i] = c;
+    A[i] = calmCol(WX0 + i * DX, D);
   }
   if (A.length !== N) { yield* buildCalmGen(); return; }        // (the water's reach grown meanwhile - reachSet: made again for it)
-  calmA = A; calmGoal = null; WSTILL_VER++;
+  calmPut(A, D);
+}
+// each harbour's numbers, read once (its row's, not a column at a time): its block's face, its way, how far its shelter reaches, where its own
+// water ends (a dock placed at sea)
+const calmRows = () => Array.from(docks, d => [d.blockFace, d.dir, d.pierGone ? 40 : Math.abs(d.blockFace - d.quay) + 80, d.extra || d.pad ? -(Math.abs(d.blockFace - (d.dir < 0 ? d.x0 : d.x0 + d.w)) + PAD_LAND) : -Infinity]);
+const CALM_LAKE = 0.8, CALM_LAKE32 = Math.fround(CALM_LAKE);                                         // (inland of a harbour counts as its sheltered water: not a lake - buildWet too)
+function calmCol(x, D) {
+  if (onLand(x) && lakeAt(x)) return CALM_LAKE;
+  let c = 1;
+  for (const [bf, dir, R, own] of D) {
+    // from the block to just past the pier's end (user Oct 27: the pier gone, the open sea's waves come right up to the block)
+    const u = (x - bf) * -dir;
+    if (u < own) continue;   // (a dock placed at sea: the water past its own ground isn't its)
+    if (u < R) c = Math.min(c, u <= 0 ? 0.06 : 0.06 + 0.94 * smooth01(u / R));
+  }
+  return c;
+}
+// (its rows kept with it: an edit's shelter made again only where a harbour's row changed - calmAgainGen)
+let calmD = [];
+function calmPut(A, D) {
+  calmA = A; calmD = D; calmGoal = null; WSTILL_VER++;
   calmRuns = [];
   for (let i = 0; i < N;) { if (calmA[i] < 0.999) { let j = i; while (j < N && calmA[j] < 0.999) j++; calmRuns.push([i, j]); i = j; } else i++; }
 }
-function calmAt(x) { return calmA ? calmA[clamp(Math.round(wCol(x)), 0, N - 1)] : 1; }
-// (the pier came down) the shelter worked out again, the swell easing back in over a few seconds rather than at once
-function rebuildCalm() {
-  const old = calmA && calmA.slice();
-  buildCalm(); buildWet();
-  if (!old || old.length !== calmA.length) return;
-  calmGoal = calmA; calmA = old;                     // (calmRuns while it eases: wherever either is sheltered)
+/* the shelter made again only where a harbour's row changed - what its old row and its new one reach - from every harbour's rows, as buildCalmGen:
+   beside the old (a copy, a piece at a time), put in its place once it's whole - an edit's (user Nov 11 23:41, every edit real time: a harbour's
+   part dragged, every move - worldHarboursGen); or (ease) the game's, a pier come down: eased to (calmGoal - stepCalm) */
+function* calmAgainGen(ease) {
+  if (!calmA || calmA.length !== N) { yield* buildCalmGen(); return; }
+  const D = calmRows(), key = r => r.join(), was = new Set(calmD.map(key)), now = new Set(D.map(key)), rs = [];
+  // (a row's reach: u = (x - bf) * -dir from its own water's end up to R)
+  for (const r of calmD.filter(q => !now.has(key(q))).concat(D.filter(q => !was.has(key(q))))) {
+    const [bf, dir, R, own] = r, a = bf - dir * R, b = bf - dir * own, lo = Math.min(a, b), hi = Math.max(a, b);
+    rs.push([clamp(Math.floor((lo - WX0) / DX) - 1, 0, N), clamp(Math.ceil((hi - WX0) / DX) + 1, 0, N)]);
+  }
+  if (!rs.length) { calmD = D; return; }
+  const A = (calmGoal && calmGoal.length === N ? calmGoal : calmA).slice();   // (one easing: what it eases to)
+  for (const [i0, i1] of rs) for (let i = i0; i < i1; i++) { if (i > i0 && ((i - i0) & 2047) === 0) yield; A[i] = calmCol(WX0 + i * DX, D); }   // (a piece ~1 ms)
+  if (A.length !== N || calmA.length !== N) { yield* buildCalmGen(); return; }   // (the water's reach changed meanwhile: made whole again)
+  if (!ease) { calmPut(A, D); return; }
+  calmGoal = A; calmD = D; WSTILL_VER++;                        // (calmRuns while it eases: wherever either is sheltered)
   calmRuns = [];
   for (let i = 0; i < N;) { if (calmA[i] < 0.999 || calmGoal[i] < 0.999) { let j = i; while (j < N && (calmA[j] < 0.999 || calmGoal[j] < 0.999)) j++; calmRuns.push([i, j]); i = j; } else i++; }
 }
+function calmAt(x) { return calmA ? calmA[clamp(Math.round(wCol(x)), 0, N - 1)] : 1; }
+// (the pier came down) the shelter worked out again where its harbour's row changed (calmAgainGen - the one rule an edit's uses too), a piece a step
+// (stepCalm: the same in every thread), the swell easing back in over a few seconds rather than at once
+let calmJob = null;
+function rebuildCalm() { calmJob = calmAgainGen(true); }
 function stepCalm(dt) {
+  if (calmJob && calmJob.next().done) calmJob = null;
   if (!calmGoal) return;
   WSTILL_VER++;
   let left = false;
@@ -6926,15 +6964,17 @@ let wetA = null, ambK = null, WBASE = null;
 // wind and everything else just like the rest of the water") the sea's own water at x: wherever the ground isn't out of it - the open sea,
 // and in front of an island behind the water (isleCol: the boats and subs go through it, the water is in front). Every wet mask asks this
 const seaWet = x => !onLand(x) || (seaAtX(x) && isleCol(x));   // (WBASE: each column's water level - a lake's own, Nov 2 LAKE LEVELS (50-land-lake); null: the ocean's everywhere)
-function buildWet() {
-  wetA = ambK = WBASE = null; WSTILL_VER++;
-  if (!calmA) return;
-  wetA = new Uint8Array(N); ambK = new Float32Array(N);
-  for (let i = 0; i < N; i++) {
+// (i0..i1: those columns only - an edit's, the water's reach grown; none: all of them)
+function buildWet(i0, i1) {
+  WSTILL_VER++;
+  if (!calmA) { wetA = ambK = WBASE = null; return; }
+  if (i0 == null || !wetA || wetA.length !== N || ambK.length !== N || (WBASE && WBASE.length !== N)) { wetA = new Uint8Array(N); ambK = new Float32Array(N); WBASE = null; i0 = 0; i1 = N; }
+  for (let i = Math.max(0, i0); i < Math.min(N, i1); i++) {
     const x = WX0 + i * DX, lake = onLand(x) && lakeAt(x);
     wetA[i] = seaWet(x) || lake ? 1 : 0; ambK[i] = lake ? 0.3 : wetA[i];
-    if (lake) calmA[i] = 0.8;                       // (inland of a harbour counts as its sheltered water: not a lake)
-    if (lake) { const lv = lakeLevelAt(x); if (lv !== WATER_Y) { if (!WBASE) WBASE = new Float32Array(N).fill(WATER_Y); WBASE[i] = lv; } }
+    if (lake) calmA[i] = CALM_LAKE; else if (calmA[i] === CALM_LAKE32) calmA[i] = calmCol(x, calmD);   // (as calmCol: a lake made since the shelter was, or one gone)
+    const lv = lake ? lakeLevelAt(x) : WATER_Y;
+    if (lv !== WATER_Y) { if (!WBASE) WBASE = new Float32Array(N).fill(WATER_Y); WBASE[i] = lv; } else if (WBASE) WBASE[i] = WATER_Y;
   }
   calmRuns = [];
   for (let i = 0; i < N;) { if (calmA[i] < 0.999) { let j = i; while (j < N && calmA[j] < 0.999) j++; calmRuns.push([i, j]); i = j; } else i++; }
@@ -8604,8 +8644,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 986;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 12 01:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 987;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 12 09:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -20036,6 +20076,7 @@ defTable('dockCalm', () => [CALM_ROW], { net: false,
     const G = calmGoal && calmGoal.length === calmA.length ? calmGoal : null; if (!G) calmGoal = null;
     calmRuns = [];
     for (let i = 0; i < N;) { if (calmA[i] < 0.999 || (G && G[i] < 0.999)) { let j = i; while (j < N && (calmA[j] < 0.999 || (G && G[j] < 0.999))) j++; calmRuns.push([i, j]); i = j; } else i++; }
+    calmD = []; calmJob = calmAgainGen(true);                     // (a pier's that fell as it was saved, still being worked out: every harbour's again, a piece a step - stepCalm)
   },
 });
 
@@ -21373,16 +21414,24 @@ function artTops(c) {
   return (c._tops = T);
 }
 function buildPerches() {
-  perches.length = 0;
-  for (const d of docks) dockPerches(d);
+  perches.length = 0; PERCH_SIG.length = 0;
+  for (const d of docks) { PERCH_SIG[d.key] = perchSig(d); dockPerches(d); }
 }
-// (Nov 11, an edit's drop - the harbours made again in place, liveWorld) the harbours' perches laid again as a build lays them: those of the harbours
-// before let go (a bird on one flies off - their towers are gone with them), the trees' kept
-function harbourPerches() {
+// (Nov 11, an edit - the harbours made again in place, liveWorld: a drag's on every move) the harbours' perches laid
+// again as a build lays them, a harbour's only where what they're laid from changed (PERCH_SIG, by its mark - d.key): its old ones let go (a bird on
+// one flies off - its tower is gone with them), the trees' and the other harbours' kept
+const PERCH_SIG = [];
+const perchSig = d => d ? JSON.stringify([d.ax(0), d.ax(64), dkY(d), hangarSpan(d)[0], d._tw ? [d._tw.x, lhOn(d._tw), towerFrame(d._tw), d._tw.hp] : 0, d.lamps]) : '';
+const perchMarks = () => { let m = docks.length; const P = perches.c; for (let j = 0; j < perches.n; j++) m = Math.max(m, P.dock[j] + 1); return Math.max(m, PERCH_SIG.length); };
+function harbourPerches() { for (let k = 0, n = perchMarks(); k < n; k++) harbourPerchesAgain(k); }
+// harbour mark k's (docks[k], or one gone) -> whether they were laid again
+function harbourPerchesAgain(k) {
+  const d = k < docks.length ? docks.hAt(k) : null, sig = perchSig(d); if (PERCH_SIG[k] === sig) return false;   // (d.key: its row - harbourLayout)
   const P = perches.c;
-  for (let j = 0; j < perches.n; j++) if (P.dock[j] >= 0) { const i = bdOn(j); if (i >= 0) takeOff(i, P.x[j]); perches.drop(j); }
+  for (let j = 0; j < perches.n; j++) if (P.dock[j] === k) { const i = bdOn(j); if (i >= 0) takeOff(i, P.x[j]); perches.drop(j); }
   perches.sweep();
-  for (const d of docks) dockPerches(d);
+  PERCH_SIG[k] = sig; if (d) dockPerches(d);
+  return true;
 }
 // harbour d's perches: on its pier's deck, its hangar's roof, its tower's top rail, its lamps
 function dockPerches(d) {
@@ -32529,7 +32578,8 @@ const SKYV = [null, null];                                // (each view's record
    (its camera) from when the editor opened or a weather area last changed: a zoom only magnifies its picture (M), a pan doesn't
    scroll it - no cloud is drawn again for either. Its own settings (SUN, CLOUDS...) still change it at once. SKYED.h: that held
    zoom and camera; null outside the editor; a weather area's edit (skyEdRefresh, wxaChanged - 50-zz-weather-areas.js; Nov 11: built as it's
-   made, no REFRESH) takes them again from the view */
+   made, no REFRESH; Nov 12: on each move of a line, a fade mark or a slider - the sky drawn again only if the view's zoom or place moved since,
+   as a camera's cut in play) takes them again from the view */
 const SKYED = { h: null };
 function skyEdHeld() { if (typeof EDMODE === 'undefined' || !EDMODE.on) { SKYED.h = null; return null; } return SKYED.h || (SKYED.h = { ZL: null, refX: [null, null] }); }
 function skyEdRefresh() { SKYED.h = null; }
@@ -40179,9 +40229,9 @@ const CATS = { CAVE: ['ROCK', 'STALACTITES', 'FLOOR'] };
 let edElF = null;
 const mk = (tag, cls, txt) => { const e = edElF(tag, cls); if (txt != null) e.textContent = txt; return e; };
 // (Nov 8, one cave world: the CAVE sliders - ROUGHNESS, STALACTITES, SAND, WEED, CORAL - are the world's cave look, read as the land lays its caves
-// - 50-land-zz-cavelook.js: the ground built again in place a moment after the last move)
-let lookT = 0;
-function caveLookAgain() { clearTimeout(lookT); lookT = setTimeout(() => { try { if (VEG_MODE) landEdited(); else liveEdit(); } catch (e) { console.error('cave look', e); } }, 350); }   // (the game's: every cave's columns built again in place - 50-zzzz-live-edit.js)
+// - 50-land-zz-cavelook.js. User Nov 11 23:41, every edit real time: on every move - every cave's slices laid again by a job, nearest the view
+// first, the old shown till each is laid: liveCaves, 50-zzzz-live-edit.js; the Biome Editor's preview the same)
+function caveLookAgain() { liveEdit(); }
 function sliderRow(s) {
   const [key, label, mn, mx, st, def, hint, , , rb] = s;
   const T = NSKY.editor.TUNE, tg = T.isOnOff(mn, mx, st);   // (an on/off one is a switch, user Oct 30)
@@ -43957,7 +44007,7 @@ function sfxFwBang(x, kind) {
 const FLOOR_ED = { on: false, drag: -1, hover: -1, ptr: null, lastDown: null, hold: 0, btn: null };   // (btn: a TERRAIN tab button - the handles show while it does)
 // (Nov 11, editing is live) what lies on the floor moved (a kraken, a pirate wreck): it's there at once; the floor and its dressing built again
 // when it's let go (liveDrop, 50-zzzz-live-edit.js)
-function floorChanged() { LIVE.floor = true; if (!PRESS.n) liveDrop(); }
+function floorChanged() { LIVE.floor = true; if (!PRESS.n) liveDrop(); else liveHeld('floor', liveFloorGen(true)); }   // (held - the kraken or a wreck carried: laid as it moves, a job of its own - 50-zzzz-live-edit.js)
 // the nearest fairly level ground to x for something `half` wide (a pirate wreck), over the deep and clear of the kraken's
 // pit bottom: on the drawn floor's cliffs a wreck can't lie level
 function floorFlatSpot(x0, half) {
@@ -43992,6 +44042,8 @@ function* floorEditedGen() {
   buildReef();                                                    // (rocks, corals, boulders; the ridges behind and the black rocks in front made again)
   yield;
   // eslint-disable-next-line no-undef
+  // (the ground round each kraken laid first, a piece at a time - what placing it reads there: krPlaceAt)
+  if (typeof placeKraken === 'function' && typeof lvReady === 'function' && land.cell) for (const r of krSetUsed()) { const x = krSeatX(r), m = krLen() * 1.4 + 200; if (!Number.isFinite(x)) continue; const k0 = Math.floor(ltCol(x - m) / LT_CHUNK), k1 = Math.floor(ltCol(x + m) / LT_CHUNK); while (!lvReady(k0, k1, lvLate(), true)) yield; yield; }
   if (typeof placeKraken === 'function') placeKraken();            // (the kraken at the deepest point - floorDeepest; group E's, once merged)
   // (user Oct 30: REFRESH saw no change) the floor as now built - the sand, wherever across the ocean, with every levelled
   // spot on it - for the caves cut into it (their sig, src/caves/30-api.js): built from a different floor, they're built again
@@ -45697,20 +45749,22 @@ function krDrawBlood() {
 // editor calls this: it keeps its wounds and its death). Its base never moves.
 // the half-width of the floor levelled under it (KR_PAD, 09-sea-surface): its head's base and the roots of its arms
 function krPadHalf() { return KR_BW * krS() * 1.25; }
+// (an edit: one whose place and floor are as they were - krPlaceAt - kept as it is, nothing of it laid again: the floor's edits elsewhere)
 function placeKraken(fresh) {
-  const L = LAND && seaW() > 0 ? krSetUsed() : [], old = new Map(KRAKENS.map(k => [k.rid, k]));
-  for (const k of KRAKENS) { KR = k; for (const o of KR.objs) krUnpin(o); krLetGo(); }
+  const L = LAND && seaW() > 0 ? krSetUsed() : [], old = new Map(KRAKENS.map(k => [k.rid, k])), was = KRAKENS.slice();
+  const P = L.map(r => { const k = old.get(r.id); KR = k || KR_NONE; return krPlaceAt(r); }), same = (k, p) => !!k && !fresh && k.pl && k.pl.key === p.key;
+  for (const k of was) if (!L.some((r, i) => r.id === k.rid && same(k, P[i]))) { KR = k; for (const o of KR.objs) krUnpin(o); krLetGo(); }
   KRAKENS.length = 0;
-  for (const r of L) {
-    const k = old.get(r.id) || krNew(); k.rid = r.id; KR = k; placeKraken1(fresh || !old.has(r.id), r);
-    k.bad = krBad(k, r);                                            // (somewhere it can't be: shown red in the editor, left out of play)
+  L.forEach((r, i) => {
+    let k = old.get(r.id);
+    if (!same(k, P[i])) { k = k || krNew(); k.rid = r.id; KR = k; placeKraken1(fresh || !old.has(r.id), r, P[i]); }
+    KR = k; k.bad = krBad(k, r);                                    // (somewhere it can't be: shown red in the editor, left out of play)
     if (!k.bad || seaEdOn()) KRAKENS.push(k);
-  }
+  });
   KR = KR_NONE;
 }
-function placeKraken1(fresh, r) {
-  KR.objs.length = 0; KR.map.clear(); KR.torps.length = 0;
-  KR.on = true;
+// where kraken r sits and the floor round it, as placeKraken1 reads them (KR: the one there now, or none) - key: all of it, as one
+function krPlaceAt(r) {
   seaFromOld(r, 700, 'dy', krLift(), true);                                         // (an old placement: a real one, where it was shown)
   let x = -1;
   if (krPlaced(r)) x = krSeatX(r);                                  // (where it was put - anywhere: seaPlaceBad says if it can be)
@@ -45726,12 +45780,19 @@ function placeKraken1(fresh, r) {
   // its foot, so it grows out of the bottom
   const hw = KR_BW * krS() * 0.95; let low = -Infinity;
   for (let q = x - hw; q <= x + hw; q += 8) low = Math.max(low, sandY(q));
-  KR.bx = x; KR.by = low + 6 * krS();
-  if (typeof krSeatY === 'function' && floorTab && krSeatY(r) !== null) KR.by = krSeatY(r);   // (where it was let go, as it is)
+  let by = low + 6 * krS();
+  if (typeof krSeatY === 'function' && floorTab && krSeatY(r) !== null) by = krSeatY(r);   // (where it was let go, as it is)
   // the floor round it, and how far it is to the pit's walls each side: the arms' fan narrowed to fit between them
-  const sK = krS(), R = krLen() * 1.4, n = Math.ceil(2 * R / 8) + 1;
-  KR.ft0 = x - R; KR.ft = new Float32Array(n);
-  for (let i = 0; i < n; i++) KR.ft[i] = seabedY(KR.ft0 + i * 8);
+  const sK = krS(), R = krLen() * 1.4, n = Math.ceil(2 * R / 8) + 1, ft0 = x - R, ft = new Float32Array(n);
+  for (let i = 0; i < n; i++) ft[i] = seabedY(ft0 + i * 8);
+  return { x, by, ft0, ft, key: [JSON.stringify(r), x, by, sK, Array.from(ft).join()].join('|') };
+}
+function placeKraken1(fresh, r, p) {
+  KR.objs.length = 0; KR.map.clear(); KR.torps.length = 0;
+  KR.on = true;
+  p = p || krPlaceAt(r); KR.pl = p;
+  const x = p.x, sK = krS(), R = krLen() * 1.4;
+  KR.bx = x; KR.by = p.by; KR.ft0 = p.ft0; KR.ft = p.ft;
   const fy = seabedY(x) + 4, wall = s => { for (let d = 0; d < R; d += 8) if (krFloorY(x + s * d) < fy - 150 * sK) return d; return R; };   // (from the floor's level there, not its sunk base)
   KR.fanL = clamp((wall(-1) - 40 * sK) / (530 * sK), 0.25, 1); KR.fanR = clamp((wall(1) - 40 * sK) / (530 * sK), 0.25, 1);
   const keep = { dead: KR.dead, deadT: KR.deadT, headHits: KR.headHits, fallDir: KR.fallDir, thudDone: KR.thudDone };
@@ -48207,6 +48268,20 @@ function openPlant(k, a, b) {
     } }); });
   if (n0) openPlantsCount();
 }
+/* (a deck entry's walk along the world - its seed's numbers: each place, its FLIP's and order's draws, its pick - kept by what it's drawn from: its
+   seed, its prefab's spacing, its AMOUNT; walked on as far as the world now reaches (a wider world: from where it stopped). A stretch laid again
+   (PL_X - rigReplantX, livePlants) reads only its own places, each with the numbers the whole walk gave it) */
+const PL_WALKS = new Map();
+function plWalk(seed, P, amt) {
+  const key = seed + '|' + P.x0 + '|' + amt + '|' + P.gap, end = WORLD_W - P.x0;
+  let W = PL_WALKS.get(key);
+  if (!W) { if (PL_WALKS.size > 400) PL_WALKS.clear(); const R = seededRng(seed); W = { R, xn: P.x0 + R() * P.x0, x: [], a: [], b: [], p: [], n: 0 }; PL_WALKS.set(key, W); }
+  for (const R = W.R; W.xn < end; W.xn += P.gap(R) / amt) { W.x.push(W.xn); W.a.push(R()); W.b.push(R()); W.p.push(Math.floor(R() * 1000)); }
+  let n = W.x.length; while (n > 0 && W.x[n - 1] >= end) n--; W.n = n;   // (a narrower world: its places this side of the end)
+  return W;
+}
+// its first place in PL_X (none: its first)
+function plFrom(W) { if (!PL_X) return 0; let lo = 0, hi = W.n; while (lo < hi) { const m = (lo + hi) >> 1; if (W.x[m] < PL_X[0]) lo = m + 1; else hi = m; } return lo; }
 function tropPalms() {
   if (typeof hplLay === 'function') hplLay();                 // (the plants placed by hand - 50-zzzz-hand-plants.js: on any ground)
   const AS = airTreeSpans();
@@ -48237,10 +48312,11 @@ function tropPalms() {
   for (const [bn, DK, D0] of sets) { B = bn; const salt = bn === 'tropical' || VEG_MODE ? 0 : 1000 * (1 + VEG_SET_NAMES.indexOf(bn));
   DK.forEach((list, d) => list.forEach((e, n) => {
     const P = VEG_PREFABS[e.p]; if (!P || !(e.amount > 0)) return; tree = P.make.kind === 'tree';
-    const R = seededRng(9431 + d * 97 + n * 13 + P.seed + salt);
-    for (let x = P.x0 + R() * P.x0; x < WORLD_W - P.x0; x += P.gap(R) / e.amount) {
-      const flip = R() < 0.5, z = d + 0.01 + (n + R()) / list.length * 0.98;   // (user Nov 4 10:37: the deck's order - its first prefab in front, its last behind)
-      const pick = Math.floor(R() * 1000); if (plOut(x)) continue;
+    const W = plWalk(9431 + d * 97 + n * 13 + P.seed + salt, P, e.amount);
+    for (let i = plFrom(W); i < W.n; i++) {
+      const x = W.x[i]; if (PL_X && x >= PL_X[1]) break;
+      const flip = W.a[i] < 0.5, z = d + 0.01 + (n + W.b[i]) / list.length * 0.98;   // (user Nov 4 10:37: the deck's order - its first prefab in front, its last behind)
+      const pick = W.p[i];
       const at = ok(x, P.w) ? {} : okIsl(x, P.w) ? { isl: true } : null;
       if (at && vegFadeKeep(x, d * 13 + n, at.isl)) land.props.push(Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn }, D0 === VEG_DECKS ? {} : { ve: e }, at, P.make));   // (another biome's plant: its own deck entry - vegEntry)   // (vd / vn: its deck entry - its own COLOUR VARIETY, Nov 4; isl: on a segment's or island's top)
       if (okLow(x, P.w) && vegFadeKeep(x, d * 13 + n, false)) { const it = Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn, low: true }, D0 === VEG_DECKS ? {} : { ve: e }, P.make); if (plantH(it) + deckRaise(it) < gapUnder(x) - 4) land.props.push(it); }   // (and on the ground under an overhang: one that fits under it)
@@ -48261,14 +48337,15 @@ function tropPalms() {
   for (const [bn, DK] of uws) { B = bn; const salt = 50000 + 1000 * (1 + VEG_SET_NAMES.indexOf(bn));
     DK.forEach((list, d) => list.forEach((e, n) => {
       const P = VEG_PREFABS[e.p]; if (!P || !(e.amount > 0)) return; tree = false;
-      const R = seededRng(9431 + d * 97 + n * 13 + P.seed + salt);
-      for (let x = P.x0 + R() * P.x0; x < WORLD_W - P.x0; x += P.gap(R) / e.amount) {
-        const flip = R() < 0.5, z = d + 0.01 + (n + R()) / list.length * 0.98, pick = Math.floor(R() * 1000);
-        if (!plOut(x) && okUw(x, P.w) && depthOk(x, e.minDepth)) { const it = Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn, uw: true, ve: e }, P.make), r = uwTilt(e.p, x); if (r) it.rot = r; land.props.push(it); }
+      const W = plWalk(9431 + d * 97 + n * 13 + P.seed + salt, P, e.amount);
+      for (let i = plFrom(W); i < W.n; i++) {
+        const x = W.x[i]; if (PL_X && x >= PL_X[1]) break;
+        const flip = W.a[i] < 0.5, z = d + 0.01 + (n + W.b[i]) / list.length * 0.98, pick = W.p[i];
+        if (okUw(x, P.w) && depthOk(x, e.minDepth)) { const it = Object.assign({ x, pick, s: 1, flip, z, alive: true, deck: d + 1, vd: d, vn: n, bn, uw: true, ve: e }, P.make), r = uwTilt(e.p, x); if (r) it.rot = r; land.props.push(it); }
       }
     })); }
-  UW_HARD = land.props.reduce((n, it) => n + (it.uw && plantHard(it) ? 1 : 0), 0); UWH.n = 0; UW_N = land.props.reduce((n, it) => n + (it.uw ? 1 : 0), 0);
-  OPEN_PL_VER++;   // (the endless sea's stretches planted again as they're next seen - openPlant)   // (DECK 1's under the water: part of the floor - uwHardTop; asked afresh)
+  if (!PL_X) { UW_HARD = land.props.reduce((n, it) => n + (it.uw && plantHard(it) ? 1 : 0), 0); UWH.n = 0; UW_N = land.props.reduce((n, it) => n + (it.uw ? 1 : 0), 0); }   // (a stretch's: counted as it's put in - openPlantsCount)
+  if (!PL_X || PL_X[0] <= 0 || PL_X[1] >= WORLD_W) OPEN_PL_VER++;   // (a stretch's at the world's ends only) (the endless sea's stretches planted again as they're next seen - openPlant)   // (DECK 1's under the water: part of the floor - uwHardTop; asked afresh)
 }
 // (Nov 7, the Biome Editor's SIDES: PLANT FADE AT CLIFFS) a plant at x kept as the top nears a cliff - none at the edge, all of them that far back
 // (user Nov 7 20:23: "the vegetation has to end BEFORE the overhang, smoothly, so we dont have plants falling down ... the FADE we designed to go to 0.
@@ -49962,6 +50039,16 @@ function shpSpansAt(poly, x) {
 // (Nov 2 20:37, the user: "I select a point and move, everything freezes for like 30 seconds" - a world-wide shape asked column by
 // column was every column times every vertex) a shape's spans in every grid column c0..c1 in one pass over its edges: each edge
 // gives its crossing to the columns it spans - the same answers as shpSpansAt, column by column
+// the stretch [x0, x1] across which polygons A and B differ - the edges between what they begin and end with alike (a point's own and its neighbours')
+function shpPolyDiff(A, B) {
+  const na = A.X.length, nb = B.X.length, same = (i, j) => A.X[i] === B.X[j] && A.Y[i] === B.Y[j] && A.E[i] === B.E[j];
+  let i = 0; while (i < na && i < nb && same(i, i)) i++;
+  let j = 0; while (j < na - i && j < nb - i && same(na - 1 - j, nb - 1 - j)) j++;
+  let lo = Infinity, hi = -Infinity; const take = (X, a, b) => { for (let q = Math.max(0, a); q <= Math.min(X.length - 1, b); q++) { if (X[q] < lo) lo = X[q]; if (X[q] > hi) hi = X[q]; } };
+  take(A.X, i - 1, na - j); take(B.X, i - 1, nb - j);
+  if (i === 0 || j === 0) { take(A.X, 0, 0); take(A.X, na - 1, na - 1); take(B.X, 0, 0); take(B.X, nb - 1, nb - 1); }   // (the edge from the last point round to the first)
+  return lo <= hi ? [lo, hi] : [A.x0, A.x0];
+}
 function shpColSpans(poly, c0, c1) {
   const n = c1 - c0 + 1; if (n <= 0) return [];                 // (wholly outside the world's columns)
   const out = new Array(n);
@@ -49991,9 +50078,12 @@ function shpBuild(live) {
     const k = I.gnd && shpK(I) === 'S' ? 'G' : shpK(I);           // ('G': a ground solid - the ground itself, read through gndTopAt, never a solid laid on it)
     let S = I._cols;
     if (!S || S.poly !== poly || S.c0 !== c0 || S.c1 !== c1 || S.k !== k) {
-      const iv = [], pe = [];
-      const QS = shpColSpans(poly, c0, c1);
-      for (let c = c0; c <= c1; c++) { const q = QS[c - c0]; iv.push(Float32Array.from(q.s)); pe.push(q.e.filter((v, i) => !(i & 1))); }
+      // (Nov 12, an edit's every move: as many columns as it ends the same - only those its changed edges cross made again - shpPolyDiff; the rest kept)
+      const R = S && S.c0 === c0 && S.c1 === c1 && S.k === k && S.poly && !S.poly.tube && !poly.tube ? shpPolyDiff(S.poly, poly) : null;
+      const a = R ? clamp(Math.floor(R[0] / LT_CELL) - 1, c0, c1) : c0, b = R ? clamp(Math.ceil(R[1] / LT_CELL) + 1, c0, c1) : c1;
+      const iv = R ? S.iv.slice() : [], pe = R ? S.pe.slice() : [];
+      const QS = shpColSpans(poly, a, b);
+      for (let c = a; c <= b; c++) { const q = QS[c - a]; iv[c - c0] = Float32Array.from(q.s); pe[c - c0] = q.e.filter((v, i) => !(i & 1)); }
       S = { c0, c1, iv, pe, k, poly };
       Object.defineProperty(I, '_cols', { value: S, writable: true, configurable: true, enumerable: false });
     }
@@ -51326,12 +51416,17 @@ function fieldLinesCols(a, b) {
   const n = land.cols, Y = [], cN = [];
   for (let c = a; c <= b; c++) { cN.push(Y.length); flNodes(c, Y); }
   const o0 = O.N[a], o1 = O.N[b + 1], d = Y.length - (o1 - o0), m = O.y.length + d;
+  if (!d) { O.s = land.surf; O.b = land.backS; O.y.set(Y, o0); flColsAgain(O, a, b); return; }   // (as many nodes as before: in place - not every line copied)
   const N = new Int32Array(n + 1); N.set(O.N.subarray(0, a + 1)); for (let c = a; c <= b; c++) N[c] = o0 + cN[c - a]; for (let c = b + 1; c <= n; c++) N[c] = O.N[c] + d;
   const sp = (A, T, put) => { const B = new T(m); B.set(A.subarray(0, o0)); B.set(A.subarray(o1), o1 + d); if (put) B.set(put, o0); return B; };
   const L = { v: O.v, s: land.surf, b: land.backS, N, y: sp(O.y, Float32Array, Y), f: sp(O.f, Float32Array), ys: sp(O.ys, Float32Array), DL: sp(O.DL, Float32Array), DR: sp(O.DR, Float32Array), LL: sp(O.LL, Int32Array), LR: sp(O.LR, Int32Array) };
   for (const A of [L.LL, L.LR]) for (let j = 0; j < m; j++) if (A[j] >= o1) A[j] += d;   // (a link past the range: its node moved with the rest; into it: linked again below)
   land.fl = L;
-  const c0 = Math.max(0, a - 1), c1 = Math.min(n - 1, b + 1);
+  flColsAgain(L, a, b);
+}
+// (fieldLinesCols) columns a..b's nodes put: their links, the counts carried on as far as they change, the fades, the smoothed lines round them
+function flColsAgain(L, a, b) {
+  const n = land.cols, c0 = Math.max(0, a - 1), c1 = Math.min(n - 1, b + 1);
   for (let c = c0; c <= c1; c++) flLink(L, c);
   let cR = c1; for (let c = c0; c < n; c++) { const ch = flDL(L, c); if (c > c1 && !ch) break; cR = c; }
   let cL = c0; for (let c = c1; c >= 0; c--) { const ch = flDR(L, c); if (c < c0 && !ch) break; cL = c; }
@@ -53938,10 +54033,11 @@ window.addEventListener('pointermove', e => {
   if (Math.hypot(e.clientX - P.cx, e.clientY - P.cy) > 6) P.moved = true;
   if (!P.moved) return;
   const [x, y] = screenToWorld(e.clientX, e.clientY);
-  // (user Nov 11 23:41: every edit live) where it's carried, at once - on the floor there within STR_SNAP of it (its own move: the floor's dressing
-  // round it on the drop - floorChanged); not before it's been carried past the press's own wobble
+  // (user Nov 11 23:41: every edit live) where it's carried, at once - on the floor there within STR_SNAP of it, the floor's dressing round it with
+  // it (floorChanged: a job of its own on every move); not before it's been carried past the press's own wobble
   const k = SED.kraken || SED.wreck, dx = x - k.x0, dy = y - k.y0; if (!k.on && Math.hypot(dx, dy) <= 20) return; k.on = true;
   if (SED.kraken) krakenMoveTo(k.k.rid, k.X + dx, k.Y + dy, k.r); else wreckMoveTo(k.w.k, k.X + dx, k.Y + dy, k.r);
+  floorChanged();                                               // (the floor's dressing round it as it's carried - a job of its own, liveHeld)
 }, { capture: true, passive: true });
 function structUp(e) {
   const P = SED.ptr; if (!P || P.id !== e.pointerId) return;
@@ -59427,18 +59523,40 @@ function rigLat(n) {
 }
 // (user Nov 3 21:33: the AMOUNT of each) every TROPICAL plant with bones laid again from its kind's AMOUNT - the palms, the bushes, the
 // jungle behind: taken out of the plants in front, laid by tropPalms, set up as buildPlants does, in drawing order again
+/* (user Nov 11 23:41: every edit real time) the decks' plants laid again - a deck's prefab, its AMOUNT, a plant placed by hand: a job (liveHeld
+   'plants', 50-zzzz-live-edit.js), LIVE_PLK slices a piece from those nearest the views, the old ones there till theirs are laid (rigReplantX - each
+   walk draws every number it did: a plant the same whatever's laid round it); a change while it's going: in its place. The worker, the tools: whole */
 function rigReplant() {
-  if (!land.props) return 0;
-  land.props = land.props.filter(it => !(it.trop || it.bush || it.fol || it.deck));
-  land.cvK = null;                                                          // (the caves' prefabs laid again as their slices are drawn - cavePlantsMake)
-  const n0 = land.props.length; tropPalms();
-  for (let i = n0; i < land.props.length; i++) { const it = land.props[i]; Object.assign(it, { pk: it.kind, state: 'stand', hp: PK[it.kind].hp, heat: 0, fire: 0, burnT: 0, burnMax: PK[it.kind].burn * (0.8 + 0.4 * hash(it.x * 0.13)), char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0, ph: hash(it.x * 0.37) * 6, gy: propTop(it) }); }
+  if (!land.props) return;
+  if (SW_IN_WORKER) { for (const _ of rigReplantGen()) ; return; }
+  liveHeld('plants', rigReplantGen());
+}
+function* rigReplantGen() {
+  const nk = Math.ceil(land.cols / LT_CHUNK), L = []; for (let k = 0; k < nk; k += LIVE_PLK) L.push(k);
+  if (land.props) land.props = land.props.filter(it => !((it.trop || it.bush || it.fol || it.deck) && it.open == null && (it.x < 0 || it.x >= WORLD_W)));   // (past the world's ends: none laid there)
+  while (L.length) {
+    yield;
+    const k = L.splice(lvNear(L.map(q => q + (LIVE_PLK >> 1)), lvViewKs()), 1)[0];
+    while (!lvReady(k - 1, k + LIVE_PLK, lvLate(), true)) yield;   // (the ground they stand on - its cells, its stones - laid first, a piece at a time)
+    yield;
+    rigReplantX([k ? k * LT_CHUNK * LT_CELL : -Infinity, k + LIVE_PLK >= nk ? Infinity : (k + LIVE_PLK) * LT_CHUNK * LT_CELL]);
+  }
+}
+// the decks' plants (and the caves' prefabs, as their slices are drawn - cavePlantsMake) standing in [X[0], X[1]) laid again
+function rigReplantX(X) {
+  if (!land.props) return;
+  const inX = it => it.x >= X[0] && it.x < X[1], dk = it => inX(it) && (it.trop || it.bush || it.fol || it.deck) && it.open == null;   // (a stretch of the open sea's: its own, as it's drawn - openPlant)
+  // (the birds' spots in them let go - a bird on one flies - and the new plants' made)
+  { const P = perches.c; for (let j = 0; j < perches.n; j++) { const it = P.plant[j]; if (it && (dk(it) || (it.cave && inX(it)))) { if (P.bird[j]) takeOff(bdOn(j), P.x[j]); P.plant[j] = null; P.gone[j] = 1; } } }
+  land.props = land.props.filter(it => !dk(it) && !(it.cave && inX(it)));
+  if (land.cvK) for (let k = Math.max(0, Math.floor(X[0] / LT_CELL / LT_CHUNK)); k < Math.min(land.cvK.length, Math.ceil(Math.min(X[1], WORLD_W + LT_CELL) / LT_CELL / LT_CHUNK)); k++) land.cvK[k] = 0;
+  const n0 = land.props.length; PL_X = X; try { tropPalms(); } finally { PL_X = null; }
+  const L = land.props.slice(n0);
+  for (const it of L) Object.assign(it, { pk: it.kind, state: 'stand', hp: PK[it.kind].hp, heat: 0, fire: 0, burnT: 0, burnMax: PK[it.kind].burn * (0.8 + 0.4 * hash(it.x * 0.13)), char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0, ph: hash(it.x * 0.37) * 6, gy: propTop(it) });
   land.props.sort((a, b) => b.z - a.z);
   PLT.burning = PLT.burning.filter(it => land.props.includes(it));
-  plantsRegrid(); RIGS_ST.clear();
-  // (the birds' spots in the plants laid again: the old ones gone - a bird on one flies - and the new plants' made)
-  { const P = perches.c; for (let j = 0; j < perches.n; j++) if (P.plant[j]) { if (P.bird[j]) takeOff(bdOn(j), P.x[j]); P.plant[j] = null; P.gone[j] = 1; } plantPerches(); }
-  return land.props.length - n0;
+  openPlantsCount(); for (const x of [...RIGS_ST.keys()]) if (x >= X[0] && x < X[1]) RIGS_ST.delete(x);   // (the underwater ones counted - its grid with them)
+  plantPerches(L);
 }
 
 /* ---- THE BIRDS ON THE FRONDS (user Nov 3 22:17: "Birds if they land on a tree, they need to move with it. If it moves too much they fly
@@ -65211,9 +65329,12 @@ function strLit(o, B) {
 // (user Nov 3 09:07: "the limits in the editor should be much higher, like 200"; "For the fish area, there should be an option to be ALL
 // also") MIN / MAX up to 200 of every kind; a fish area's fish 'all': each school one of every kind of fish (FISH_DEFS), picked at random
 const NAT_KINDS = { fish: { lab: 'FISH AREA', max: 200, what: 'SCHOOLS' }, shark: { lab: 'SHARK AREA', max: 200, what: 'SHARKS' }, whale: { lab: 'WHALE AREA', max: 200, what: 'WHALES' } };
-const natFish = a => { if (a.type !== 'all') return a.type || 'sardine'; const K = Object.keys(FISH_DEFS); return K[Math.floor(seaR() * K.length)] || 'sardine'; };
+// (user Nov 11 23:41, every edit real time - rules 7.9) each area's creatures from random numbers of its own, by its id (natRng: from its seed each time
+// it's laid), never the sea's one stream: an area moved or stretched lays only its own again - the same numbers, so they keep their places in it
+const natRng = a => { const r = { s: rngSeed('nature:' + a.id) }; return () => rngNext(r); };
+const natFish = (a, R) => { if (a.type !== 'all') return a.type || 'sardine'; const K = Object.keys(FISH_DEFS); return K[Math.floor(R() * K.length)] || 'sardine'; };
 const natN = a => [a.n0 != null ? a.n0 : a.n | 0, a.n1 != null ? a.n1 : a.n0 != null ? a.n0 : a.n | 0];   // (MIN, MAX)
-const natCount = a => { const [l, h] = natN(a); return l + Math.floor(seaR() * (Math.max(l, h) - l + 1)); };
+const natCount = (a, R) => { const [l, h] = natN(a); return l + Math.floor(R() * (Math.max(l, h) - l + 1)); };
 let NATURE = [];
 function natureValid(L) { return Array.isArray(L) && L.every(a => a && NAT_KINDS[a.k] && [a.x0, a.x1, a.y0, a.y1].every(Number.isFinite) && a.x1 > a.x0 && a.y1 > a.y0); }
 worldLoad(() => { NATURE = []; try { const o = JSON.parse(localStorage.getItem('bd_nature') || 'null'); if (natureValid(o)) NATURE = o; } catch (e) { } });
@@ -65223,44 +65344,68 @@ function natureSave() { try { if (!NATURE.length) localStorage.removeItem('bd_na
 const natureRange = id => natureUsed().find(a => a.id === id) || null;
 // where in an area's box a creature is born: over its water (the sea's or a lake's - a box reaching over a shore is kept to the water
 // in it: user Nov 3, every water as the ocean); the first pick as ever where it's water, a few more tries else
-const natR = sysRng('natX');                 // (the tries after the first: their own sequence, so the sea's stays as it was)
-function natX(a) {
-  let x = seaRnd(a.x0 + 40, Math.max(a.x0 + 41, a.x1 - 40));
-  for (let t = 0; t < 12 && dryLand(x); t++) x = a.x0 + 40 + natR() * Math.max(1, a.x1 - a.x0 - 80);
+function natX(a, R) {
+  const rn = (p, q) => p + (q - p) * R();
+  let x = rn(a.x0 + 40, Math.max(a.x0 + 41, a.x1 - 40));
+  for (let t = 0; t < 12 && dryLand(x); t++) x = a.x0 + 40 + R() * Math.max(1, a.x1 - a.x0 - 80);
   return x;
 }
-// the areas' schools (buildSea, and after an edit): each area's n schools of its fish, born in its box, kept to it
-function natureSchools() {
+// the areas' schools (buildSea, and after an edit): each area's n schools of its fish, born in its box, kept to it - every area's, or (id) that one's
+// alone (gone: its schools let go)
+function natureSchools(id) {
   // (Nov 1: column tables - a school of an area, and its fish, gone)
-  { const A = schools.c.area, gone = new Set(); for (let i = 0; i < schools.n; i++) if (A[i] === A[i]) { gone.add(schools.c.sid[i]); schools.drop(i); } schools.sweep();
+  { const A = schools.c.area, gone = new Set(); for (let i = 0; i < schools.n; i++) if (A[i] === A[i] && (id == null || A[i] === id)) { gone.add(schools.c.sid[i]); schools.drop(i); } schools.sweep();
     const S = seaFish.c.school; for (let j = 0; j < seaFish.n; j++) if (gone.has(S[j])) seaFish.drop(j); seaFish.sweep(); }
   for (const a of natureUsed()) {
-    if (a.k !== 'fish') continue;
-    for (let i = 0, N = natCount(a); i < N; i++) {
-      const type = natFish(a), n = type === 'sardine' ? 10 + Math.floor(seaR() * 10) : 3 + Math.floor(seaR() * 6), fish = [];
-      for (let k = 0; k < n; k++) fish.push({ dx: seaRnd(-1, 1) * (16 + n * 3), dy: seaRnd(-1, 1) * (8 + n), ph: seaR() * 6.28 });
-      const s = { type, x: natX(a), y: 0, dir: seaR() < 0.5 ? 1 : -1, speed: seaRnd(8, 18), turnT: seaRnd(6, 20), flee: 0, fish, vy: 0, area: a.id };
+    if (a.k !== 'fish' || (id != null && a.id !== id)) continue;
+    const R = natRng(a), rn = (p, q) => p + (q - p) * R();
+    for (let i = 0, N = natCount(a, R); i < N; i++) {
+      const type = natFish(a, R), n = type === 'sardine' ? 10 + Math.floor(R() * 10) : 3 + Math.floor(R() * 6), fish = [];
+      for (let k = 0; k < n; k++) fish.push({ dx: rn(-1, 1) * (16 + n * 3), dy: rn(-1, 1) * (8 + n), ph: R() * 6.28 });
+      const s = { type, x: natX(a, R), y: 0, dir: R() < 0.5 ? 1 : -1, speed: rn(8, 18), turnT: rn(6, 20), flee: 0, fish, vy: 0, area: a.id };
       const wl = waterLv(s.x);   // (its own water's level - waterLv, user Nov 3)
-      s.y = seaRnd(Math.max(wl + 50, a.y0 + 20), Math.max(wl + 51, Math.min(a.y1 - 20, seabedY(s.x) - 30)));
+      s.y = rn(Math.max(wl + 50, a.y0 + 20), Math.max(wl + 51, Math.min(a.y1 - 20, seabedY(s.x) - 30)));
       for (const f of fish) { f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; f.vx = s.dir * s.speed; f.vy = 0; f.face = s.dir; }
       delete s.fish; schoolAdd(s, fish);
     }
   }
 }
-// the areas' sharks and whales (buildSea, and after an edit): every area's own made again, born in its box, kept to it
+// the areas' sharks and whales (buildSea, and after an edit): every area's own made again, born in its box, kept to it - or (id) that one's alone
 const critAreas = () => true;              // (their areas are where they live: else the game's scatter)
-function natureCreatures() {
+function natureCreatures(id) {
   if (!critAreas()) return;
-  sharks = sharks.filter(k => k.area == null); whales = whales.filter(k => k.area == null);
+  const mine = k => k.area != null && (id == null || k.area === id);
+  sharks = sharks.filter(k => !mine(k)); whales = whales.filter(k => !mine(k));
   for (const a of natureUsed()) {
-    if (a.k === 'fish') continue;
-    for (let i = 0, N = natCount(a); i < N; i++) {
-      const x = natX(a), lo = Math.max(waterLv(x) + (a.k === 'whale' ? 140 : 90), a.y0 + 20), hi = Math.max(lo + 1, Math.min(a.y1 - 20, seabedY(x) - (a.k === 'whale' ? 90 : 50)));
-      const y = seaRnd(lo, hi), dir = seaR() < 0.5 ? 1 : -1;
-      if (a.k === 'shark') sharks.push({ x, y, dir, speed: seaRnd(16, 26), turnT: seaRnd(8, 18), turn: 0, ph: seaR() * 6, area: a.id });
-      else whales.push({ x, y, dir, speed: seaRnd(9, 14), turnT: seaRnd(25, 60), turn: 0, ph: seaR() * 6, dy: 0, flee: 0, area: a.id });
+    if (a.k === 'fish' || (id != null && a.id !== id)) continue;
+    const R = natRng(a), rn = (p, q) => p + (q - p) * R();
+    for (let i = 0, N = natCount(a, R); i < N; i++) {
+      const x = natX(a, R), lo = Math.max(waterLv(x) + (a.k === 'whale' ? 140 : 90), a.y0 + 20), hi = Math.max(lo + 1, Math.min(a.y1 - 20, seabedY(x) - (a.k === 'whale' ? 90 : 50)));
+      const y = rn(lo, hi), dir = R() < 0.5 ? 1 : -1;
+      if (a.k === 'shark') sharks.push({ x, y, dir, speed: rn(16, 26), turnT: rn(8, 18), turn: 0, ph: R() * 6, area: a.id });
+      else whales.push({ x, y, dir, speed: rn(9, 14), turnT: rn(25, 60), turn: 0, ph: R() * 6, dy: 0, flee: 0, area: a.id });
     }
   }
+}
+// (an edit) area id's creatures laid again - every area's: none given - to whichever thread runs the game (rules 7.9: the worker lays the same)
+function natureEdit(id) {
+  const s = JSON.stringify(NATURE);
+  act(0, 'natureEd', s, id == null ? null : id);
+  if (SW.live) ACTS.natureEd(0, s, id == null ? null : id);   // (the worker's game: this page's copy too - liveEdit's)
+}
+ACTS.natureEd = (p, s, id) => {
+  if (!SW_IN_WORKER && NET.role !== 'local') return;           // (this screen's own editor's: never a guest's)
+  if (SW_IN_WORKER) { const L = JSON.parse(s); if (natureValid(L)) NATURE = L; }
+  const g = natureLayGen(id == null ? undefined : id);
+  if (SW_IN_WORKER || typeof liveHeld !== 'function' || !land.cell) { for (const _ of g) ; } else liveHeld('nature' + (id == null ? '' : id), g);   // (the page: a job - 50-zzzz-live-edit.js)
+};
+// (the page's: a job, a piece a step) the ground where they're born read first - the slices under the area's box made whole (landEnsure: what seabedY reads
+// there - the floor's stones, the hard plants on it), nearest the view first, a slice a piece - then its creatures laid, at once (the old ones till then)
+function* natureLayGen(id) {
+  const A = natureUsed().filter(a => id == null || a.id === id), K = new Set(), nk = land.sOK ? land.sOK.length : 0;
+  for (const a of A) for (let k = Math.max(0, Math.floor(ltCol(a.x0 - 400) / LT_CHUNK)); k <= Math.min(nk - 1, Math.floor(ltCol(a.x1 + 400) / LT_CHUNK)); k++) if (!land.sOK[k]) K.add(k);
+  for (const L = [...K]; L.length;) { const k = L.splice(lvNear(L, lvViewKs()), 1)[0]; if (land.sOK[k]) continue; while (!lvReady(k, k, lvLate(), true)) yield; yield; }
+  natureSchools(id); natureCreatures(id);
 }
 // once per world: the sharks and whales it had - scattered over its seas - as an area over each sea holding as many (the same
 // numbers: 5 sharks a 3-screen stretch of sea, 3 whales in all, by each sea's share), so nothing changes until it's edited
@@ -65278,7 +65423,7 @@ function natureConvert() {
   }
   natureSave(); try { localStorage.setItem('bd_crit_conv', '1'); } catch (e) { }
 }
-function natureChanged() { natureSave(); { natureSchools(); natureCreatures(); } natureSync(); }
+function natureChanged(id) { natureSave(); natureEdit(id); natureSync(); }   // (id: that area's alone - moved, stretched, its numbers; none: every area's)
 // ---- the editor: the TERRAIN tab's NATURE section
 const NE = { sel: null, drag: null, ui: {} };
 const natureOpen = () => NSKY.editor.TUNE.world();   // (on WORLD EDITOR, user Nov 1)
@@ -65287,9 +65432,9 @@ function natureAdd(k = 'fish') {
   const v = cam.view[0], vw = (ONEVIEW() ? bw : bw / 2) / (S * v.z), [mx, my] = edViewMid(), cx = clamp(mx, 400, WORLD_W - 400), w = Math.max(600, Math.min(3000, vw * 0.3)), h = k === 'fish' ? 300 : 620;
   const a = Object.assign({ id: NATURE.reduce((m, q) => Math.max(m, q.id), 0) + 1, k, x0: Math.round(cx - w / 2), x1: Math.round(cx + w / 2), y0: Math.round(my - h / 2), y1: Math.round(my + h / 2) },
     k === 'fish' ? { n0: 3, n1: 3, type: 'sardine' } : { n0: k === 'shark' ? 5 : 1, n1: k === 'shark' ? 6 : 2 });
-  NATURE.push(a); NE.sel = a.id; natureChanged();
+  NATURE.push(a); NE.sel = a.id; natureChanged(a.id);
 }
-function natureDelete() { if (NE.sel == null) return; NATURE = NATURE.filter(a => a.id !== NE.sel); NE.sel = null; natureChanged(); }
+function natureDelete() { if (NE.sel == null) return; const id = NE.sel; NATURE = NATURE.filter(a => a.id !== id); NE.sel = null; natureChanged(id); }
 // a press on an area: a corner (stretch), else its inside (move)
 // (user Nov 3 09:15: "if I click and drag, it should make a selection drag. Right now, if I do it on top of a shark area, for example, it
 // automatically moves it ... They have a plus in the middle to move the whole thing, or I move the edges because they're too big") an
@@ -65322,9 +65467,10 @@ window.addEventListener('pointermove', ev => {
     if (d.h.ex && a.x1 - a.x0 < 120) { if (d.h.ex === 'x0') a.x0 = a.x1 - 120; else a.x1 = a.x0 + 120; }   // (never thinner than a school)
     if (d.h.ey && a.y1 - a.y0 < 80) { if (d.h.ey === 'y0') a.y0 = a.y1 - 80; else a.y1 = a.y0 + 80; }
   }
+  natureEdit(a.id);                                            // (its own creatures laid again as it moves - from its own numbers: they keep their places in it)
   ev.stopImmediatePropagation();
 }, { capture: true, passive: true });
-const natUp = ev => { const d = NE.drag; if (d && d.id === ev.pointerId) { NE.drag = null; if (d.moved) natureChanged(); ev.stopImmediatePropagation(); } };
+const natUp = ev => { const d = NE.drag; if (d && d.id === ev.pointerId) { NE.drag = null; if (d.moved) { natureSave(); natureSync(); } ev.stopImmediatePropagation(); } };   // (laid as it moved: kept, the panel shown again)
 window.addEventListener('pointerup', natUp, { capture: true });
 window.addEventListener('pointercancel', natUp, { capture: true });
 // drawn over the world while the section is in view (from vehEdDraw): each area's box (picked: white), its corners, its name
@@ -65352,7 +65498,7 @@ function natureFill(box, el) {
   cat.appendChild(el('h4', '', K.lab));
   const row = (lab, v, set, tip) => {
     const r = el('div', 'row'), i = el('input'); i.type = 'range'; i.min = 0; i.max = K.max; i.step = 1; i.value = v;
-    const out = el('output', '', String(v)); i.oninput = () => { out.textContent = i.value; set(+i.value); natureSchools(); natureCreatures(); }; i.onchange = () => { set(+i.value); natureChanged(); };   // (what lives there made again as it moves; let go: kept, the panel shown again)
+    const out = el('output', '', String(v)); i.oninput = () => { out.textContent = i.value; set(+i.value); natureEdit(a.id); }; i.onchange = () => { set(+i.value); natureSave(); natureSync(); };   // (what lives there made again as it moves; let go: kept, the panel shown again)
     const l = el('label', '', lab); l.title = tip; r.append(l, i, out); cat.appendChild(r);
   };
   row('MIN ' + K.what, n0, v => { a.n0 = v; a.n1 = Math.max(v, natN(a)[1]); delete a.n; }, 'Fewest ' + K.what.toLowerCase() + ' living in this area');
@@ -65360,7 +65506,7 @@ function natureFill(box, el) {
   if (a.k === 'fish') {
     const r2 = el('div', 'row'), s = el('select'); s.style.cssText = 'font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:3px 4px';
     for (const k of ['all', ...Object.keys(FISH_DEFS)]) { const op = document.createElement('option'); op.value = k; op.textContent = k.toUpperCase(); s.appendChild(op); }
-    s.value = a.type || 'sardine'; s.onchange = () => { a.type = s.value; natureChanged(); };
+    s.value = a.type || 'sardine'; s.onchange = () => { a.type = s.value; natureChanged(a.id); };
     const l2 = el('label', '', 'SPECIES'); l2.title = 'Which fish (ALL: a mix)'; r2.append(l2, s); cat.appendChild(r2);
   }
   box.appendChild(cat); return true;
@@ -66034,10 +66180,11 @@ function pfAttach(o) {
 const pfAttachAll = () => { for (const o of STRS) { delete o.fish; if (!pfGet(o.pf)) pfAttach(o); } };   // (fish: the old ACCEPTS FISH)
 // a prefab changed: every copy of it in this world takes it again (the other world's when it's loaded), what no longer fits
 // leaves its spots (dockRefit), built as it changes (strSave)
-function pfEdited(p) {
+// (held: a slider moving - every copy built as it moves, what no longer fits its spots kept, red, till it's let go - dockRefit)
+function pfEdited(p, held) {
   p.base = false;                                             // (edited: kept as it is now, not the kind's default)
-  for (const o of STRS) if (o.pf === p.id) { pfApply(o, p); if (strTakes(o)) dockRefit(o); }
-  pfSave(); strSave(); strSync();
+  for (const o of STRS) if (o.pf === p.id) { pfApply(o, p); if (strTakes(o) && !held) dockRefit(o); }
+  pfSave(); strSave(); if (!held) strSync();
 }
 // a NEW structure prefab: a copy of the one picked, its own id and name
 function pfNewS(from) { const p = Object.assign({}, from, { id: 'p' + (++PREFABS.next), name: pfFreeName(from.name), base: false }); for (const q of PF_KEYS) if (Array.isArray(p[q])) p[q] = p[q].slice(); pfAllS().push(p); pfSave(); return p; }
@@ -66111,7 +66258,7 @@ function pfStructBox(p, box, el, css) {
   const row = (lab, ...xs) => { const r = el('div', 'row'); r.append(el('label', '', lab), ...xs); return r; };
   const sel = (L, v, f) => { const q = el('select'); q.style.cssText = css; for (const [val, lab] of L) { const z = document.createElement('option'); z.value = val; z.textContent = lab; q.appendChild(z); } q.value = v; q.onchange = () => f(q.value); return q; };
   const sw = (box2, lab, key, tip) => { const t = T.toggle(p[key] ? 1 : 0); t.addEventListener('input', () => { if (+t.value) p[key] = true; else delete p[key]; ed(); }); const r = row(lab, t); if (tip) r.title = tip; box2.appendChild(r); };
-  const sl = (box2, lab, key, lo, hi, unit, v0, tip) => { const i = el('input'), v = p[key] ?? v0, out = el('output', '', v + unit); i.type = 'range'; i.min = lo; i.max = hi; i.step = 1; i.value = v; i.oninput = () => { out.textContent = i.value + unit; }; i.onchange = () => { p[key] = +i.value; ed(); }; const rr = row(lab, i, out); if (tip) rr.title = tip; box2.appendChild(rr); };
+  const sl = (box2, lab, key, lo, hi, unit, v0, tip) => { const i = el('input'), v = p[key] ?? v0, out = el('output', '', v + unit); i.type = 'range'; i.min = lo; i.max = hi; i.step = 1; i.value = v; i.oninput = () => { out.textContent = i.value + unit; p[key] = +i.value; pfEdited(p, true); }; i.onchange = () => { p[key] = +i.value; ed(); }; const rr = row(lab, i, out); if (tip) rr.title = tip; box2.appendChild(rr); };
   c.appendChild(row('KIND', el('output', '', K.lab)));
   // its picture: any of the structures' pictures, where the kind is drawn from one (not the harbour's parts, the big hangar, a dock's tiles)
   if (K.art && p.k !== 'dock' && p.k !== 'hangarSea' && !(p.k === 'hangarAir' && p.big)) {
@@ -66958,9 +67105,11 @@ function strTypeLenM(sv) {
   const P = tropPic(B.art[0]); return P ? P.width * P._m : B.fb[0];   // (a picture boat: its side picture's length)
 }
 const strFits = (o, sv) => { if (isHangarS(o) && STR_VEHS[sv] && STR_VEHS[sv].big && !o.big) return false; const m = strTypeLenM(sv); return m == null || m <= strMaxL(o) + 1e-6; };
-// (a dock's length or MAX SIZE changed, a hangar's SIZE) its spots as many as fit, what no longer fits taken out of them
+// (a dock's length or MAX SIZE changed, a hangar's SIZE, its SPOTS) its spots as many as fit, what no longer fits taken out of them - on a slider's
+// let go: while it moves what doesn't fit is kept, shown red (spotBad - 50-zzzz-spots.js), and only what's still red when it's let go goes
+const spotFitsAt = (o, i, e) => i < strSpots(o) && strFits(o, e.v);
 function dockRefit(o) {
-  const n = strSpots(o), L = strVehs(o).slice(0, n).map(e => e && strFits(o, e.v) ? e : null);
+  const n = strSpots(o), L = strVehs(o).slice(0, n).map((e, i) => e && spotFitsAt(o, i, e) ? e : null);
   while (L.length < n) L.push(null);
   o.veh = L; o.n = n;
 }
@@ -66997,7 +67146,7 @@ const strsUsed = () => EDMODE.on ? STRS : strsPlay();   // (online: the host's w
 // (play: those off their ground left out - strFree; the editor shows them all, red)
 const STR_PLAY = { gen: -1, src: null, L: [] };
 function strsPlay() { const c = STR_PLAY; if (c.gen !== STR_GEN || c.src !== STRS) { c.gen = STR_GEN; c.src = STRS; c.L = STRS.some(strFree) ? STRS.filter(o => !strFree(o)) : STRS; } return c.L; }
-function strSave() { STR_GEN++; if (typeof buoysBuild === 'function' && typeof EDMODE !== 'undefined' && EDMODE.on) buoysBuild();   /* (the placed buoys at once - 31-sailboats-buoys.js) */ try { pfAttachAll(); } catch (e) { } try { if (!STRS.length) localStorage.removeItem('bd_structs'); else localStorage.setItem('bd_structs', JSON.stringify(STRS)); } catch (e) { } if (typeof SE !== 'undefined' && SE.ui && SE.ui.chk) strWorldCheck(SE.ui); if (typeof liveEdit === 'function') liveEdit(); try { wedSync(); } catch (e) { } }   // (the WORLD CHECK kept up to date; every structure edit - a property, a LOOK, an owner - built as it's made, as a move: 50-zzzz-live-edit.js)
+function strSave() { STR_GEN++; if (typeof buoysBuild === 'function' && typeof EDMODE !== 'undefined' && EDMODE.on) buoysBuild();   /* (the placed buoys at once - 31-sailboats-buoys.js) */ try { pfAttachAll(); } catch (e) { } try { if (!STRS.length) localStorage.removeItem('bd_structs'); else localStorage.setItem('bd_structs', JSON.stringify(STRS)); } catch (e) { } if (typeof SE !== 'undefined' && SE.ui && SE.ui.chk) strWorldCheck(SE.ui); if (typeof liveEdit === 'function') liveEdit(); try { wedSync(); } catch (e) { } if (typeof spotsHead === 'function') spotsHead(); }   // (the WORLD CHECK kept up to date; every structure edit - a property, a LOOK, an owner - built as it's made, as a move: 50-zzzz-live-edit.js)
 // the editor's own random source for new colours (not the game's: nothing in the world moves for it)
 const strRng = seededRng(7311 + (Date.now() % 9973));
 // where it stands: its box in the world (left, right, top, foot). (user Nov 2: "click and drag any structure ... move it freely and
@@ -67454,7 +67603,7 @@ function strFill() {
     // (Nov 7: OPENS / CLOSES - the hours it trades; the same hour both: always open; closed it's dark at night)
     for (const [lab, key, tip] of [['OPENS', 'openH', 'Hour the market opens'], ['CLOSES', 'closeH', 'Hour the market closes (same as OPENS: always open)']]) {
       const r = el('div', 'row'), l = el('label', '', lab), i = el('input'), out = el('output', '', hourName(o[key] ?? 0)); l.title = tip; i.type = 'range'; i.min = 0; i.max = 23.5; i.step = 0.5; i.value = o[key] ?? 0;
-      i.oninput = () => { out.textContent = hourName(+i.value); }; i.onchange = () => { o[key] = +i.value; if (!o.openH && !o.closeH) { delete o.openH; delete o.closeH; } strSave(); };
+      i.oninput = () => { out.textContent = hourName(+i.value); o[key] = +i.value; if (!o.openH && !o.closeH) { delete o.openH; delete o.closeH; } strSave(); };   // (as it moves - user Nov 11 23:41)
       r.append(l, i, out); c2.appendChild(r); }
     for (const [k, lab] of CARGO_KINDS) { const r = el('div', 'row'), on = marketSells(o).includes(k), t = NSKY.editor.TUNE.toggle(on ? 1 : 0), l = el('label', '', lab); l.title = 'The player can buy ' + lab.toLowerCase() + ' here';
       t.addEventListener('input', () => { const S = new Set(marketSells(o)); if (+t.value) S.add(k); else S.delete(k); if (S.size) o.sells = [...S]; else delete o.sells; strSave(); });
@@ -67631,14 +67780,14 @@ function dockForRoot(E, dir, nb, wx) { const d = dockAt(E + dir * (QB_L + HANGAR
 function marineLayout(o) {
   const key = o.x + '|' + !!o.flip, c = o._lay;
   if (c && c.key === key) return c.d;
-  const d = dockAt(o.x, o.flip ? 1 : -1); layoutDock(d); dockWater(d, d.root - d.dir * 30); layoutDock(d); o._lay = { key, d };
+  const d = dockAt(o.x, o.flip ? 1 : -1); layoutDock(d); dockWater(d, d.root - d.dir * 30); layoutDock(d); Object.defineProperty(o, '_lay', { value: { key, d }, writable: true, configurable: true, enumerable: false });   // (its layout kept with it - never saved, sent or compared: not one of its own properties)
   return d;
 }
 // (buildWorld, once the old harbours are laid out: left and right the two coasts', mkDock its stand-ins) the harbours from the parts
 function harbourFromStrs(left, right, mkDock) {
   HARB.on = false; HARB.tw.clear(); HARB.free = []; HARB.dirty = false;
   if (!harbourOn()) return;
-  HARB.on = true; HARB.sig = HARB.lay = harbourSig();   // (lay: what's laid out now - a held edit's, liveHarbour; sig: the last build's)
+  HARB.on = true; HARB.sig = HARB.lay = harbourSig();   // (what they're laid out from - an edit's that changed it lays them again: liveWorld)
   const L = STRS.filter(o => !strFree(o)), pOf = t => t !== 0 && t !== 1 ? -1 : SIDE(0) === t ? 0 : 1, D = [];
   for (const o of L) if (isMarineS(o)) { const d = dockAt(o.x, o.flip ? 1 : -1); d.player = pOf(strOwner(o)); d.so = o; layoutDock(d); dockWater(d, d.root - d.dir * 30); layoutDock(d); D.push(d); }   // (on the water at its door)
   // each its pier: one standing in front of its quay, the same way
@@ -68161,6 +68310,7 @@ window.addEventListener('pointermove', ev => {
   const [X] = vehWorld(ev);
   if (d.fade) WXA.fw[d.i] = Math.round(clamp(Math.abs(X - WXA.lines[d.i]) / UPM, 5, 5000));
   else { const lo = d.i > 0 ? WXA.lines[d.i - 1] + 50 : -Infinity, hi = d.i < WXA.lines.length - 1 ? WXA.lines[d.i + 1] - 50 : Infinity; WXA.lines[d.i] = Math.round(clamp(X, lo, hi)); }
+  skyEdRefresh();                                              // (user Nov 11 23:41, every edit real time: the editor's held sky taken again as it moves, not on the let go)
   ev.stopImmediatePropagation();
 }, { capture: true, passive: true });
 const wxaUp = ev => { if (WXE.drag && WXE.drag.id === ev.pointerId) { WXE.drag = null; wxaChanged(); setTimeout(undoCommit, 0); ev.stopImmediatePropagation(); } };
@@ -68197,7 +68347,7 @@ function wxaSync() {
   for (const [k, lab, lo, hi, st, tip] of WXA_KEYS) {
     const r = el('div'), i = el('input'), show = v => k === 'fade' ? Math.round(v) + ' S' : Math.round(v * 100) + '', out = el('output', show(a[k])); r.className = 'row';
     i.type = 'range'; i.min = lo; i.max = hi; i.step = st; i.value = a[k];
-    i.oninput = () => { a[k] = +i.value; out.textContent = show(a[k]); if (k !== 'fade') wxaPreview(); }; i.onchange = () => wxaChanged();
+    i.oninput = () => { a[k] = +i.value; out.textContent = show(a[k]); if (k !== 'fade') wxaPreview(); skyEdRefresh(); }; i.onchange = () => wxaChanged();   // (the held sky as it moves - skyEdRefresh)
     const l = el('label', lab); l.title = tip; r.append(l, i, out); U.box.appendChild(r);
   }
   if (!STORY_WORLD) { const n = el('div', 'Weather areas work in Story only.'); n.className = 'tabnote'; U.box.appendChild(n); }
@@ -69547,18 +69697,19 @@ WK.plant = {
        (wcFillGen(C)), what stands on the ground there set on it again (landReseat), a launch pad's stack on its pad;
      - the same for the simulation worker: an action (ACTS.worldEd) with the shapes, structures, lakes' levels and caves' settings - it builds
        the same from them.
-   On the drop (no press held - liveDrop): the world's parts the land is laid from, each in place (liveWorld): its width (a shape's end past the
-   world's: every table kept by its columns or slices made that long - liveWidth), its seas (a SEA piece, a coast across the water line -
-   worldSeas), its harbours (their parts - worldHarbours); the columns that reads changed laid again as above; then the sea floor's dressing
-   where it changed (floorEdited: its tables, rocks, the kraken, the wrecks) and the seas' life (buildSea). Still a whole build (liveWhole, never
-   during a drag): the world's start moved (a shape past x 0 - see liveWidth).
-   (Nov 11, slice-cells) On the page an edit made on a drop is a JOB (LIVE.q): the edit's build as pieces (liveApplyGen - each part of it, the world's
-   parts each, the reading of what they changed a stretch of columns at a time), the floor's dressing's and the seas' life's after it - run by liveStep
-   a piece at a time within its time a frame, in order, the old world shown till each piece is made (the slices' GPU pages kept till worked out again,
-   the water filled beside the old - liveWaterGen). A drag's moves (built whole as they come), the simulation worker and the tools run them whole.
+   The world's parts the land is laid from, each in place (liveWorld) - on every move of a drag too: its width (a shape's end past the world's: every
+   table kept by its columns or slices made that long - liveWidth), its seas (a SEA piece, a coast across the water line - worldSeas), its harbours
+   (their parts - worldHarbours); the columns that reads changed laid again as above; then the sea floor's dressing where it changed (floorEdited)
+   and the seas' life (buildSea). Still a whole build, on the drop: the world's start moved (a shape past x 0 - see liveWidth).
+   (Nov 11, slice-cells; Nov 12, every move) On the page every edit is a JOB: the edit's build as pieces (liveApplyGen - each part of it, the world's
+   parts each, the reading of what they changed a stretch of columns at a time), run by liveStep a piece at a time within its time a frame, in
+   order, the old world shown till each piece is made (the slices' GPU pages kept till worked out again, the water filled beside the old -
+   liveWaterGen): a drag's move one of its own ('move', liveHeld - a move while it's going laid by the next, from what the world is then), the
+   drop's after it; the floor's dressing's, the seas' life's, the CAVES sliders' (liveCaves), a biome's surface (liveSurface) jobs of their own.
+   The simulation worker and the tools run them whole.
    SAVE CHANGES saves as before.
    ================================================================ */
-const LIVE = { b: null, whole: '', floor: false, held: false, ms: 0, n: 0, q: [], fq: false, wj: null, fill: [], water: [], plants: [], hold: [] };   // (q: the jobs; fill .. hold: what's still to lay - liveStep)
+const LIVE = { b: null, whole: '', floor: false, held: false, ms: 0, n: 0, q: [], fq: false, wj: null, fill: [], water: [], plants: [], hold: [], seat: [], pads: false, hq: {}, xs: null };   // (q: the jobs; fill .. hold: what's still to lay - liveStep; hq: a held edit's jobs - liveHeld; xs: the views, as liveStep was last given them)
 // (world units: LIVE_EDGE past what a plant reads round it - the stones beside reach in less; a structure's own reach - its pad's bank, STRUCT_BANK;
 // an airport's part's, its trees' keep-off, AIR_RUNWAY_GAP - less the plants' range round it)
 const LIVE_MIX = 450, LIVE_PL = 400, LIVE_EDGE = 300, LIVE_STR = 400, LIVE_AIR = 1200;
@@ -69567,15 +69718,19 @@ const lvCol = x => clamp(Math.floor(x / LT_CELL), 0, land.cols - 1);
 function liveStrSpan(o) { const F = strFootX(o); if (F) return F; LAND_RAW++; try { const B = strBox0(o); return [B.x0, B.x1]; } catch (e) { return [o.x - 800, o.x + 800]; } finally { LAND_RAW--; } }
 const liveCaveP = () => typeof CAVE !== 'undefined' && CAVE.P ? JSON.stringify(CAVE.P) : '';
 // (buildLand0's end) what this world is built from
-function liveBuilt() {
+// (an edit's job's end: N - what it laid, as it read it - the shapes, the structures, the lakes, the caves; what changed while it ran is the next one's;
+// sig: what the land read of the seas and the harbours as it's left - liveWorld's; none: read again when next asked - liveSig)
+function liveBuilt(sig, N) {
   if (!land.cell || typeof ISLANDS === 'undefined') return;
-  if (land.sHold === null) { LIVE.q.length = 0; LIVE.fq = false; LIVE.wj = null; LIVE.fill.length = 0; LIVE.water.length = 0; LIVE.plants.length = 0; LIVE.hold.length = 0; }   // (a new land: nothing of the last one's left to lay)
-  const ST = new Map(); for (const o of STRS) ST.set(o.id, { j: JSON.stringify(o), s: liveStrSpan(o), air: !!AIR_PARTS[o.k] });
-  LIVE.b = { cols: SHP.cols.slice(), I: ISLANDS.map(I => JSON.stringify(I)), ST, LK: JSON.stringify(LAKE_SET), CV: liveCaveP(), pk: (land.pockets || []).map(K => [K.x0, K.x1, K.lv]), W: WORLD_W };
+  if (land.sHold === null) { LIVE.q.length = 0; LIVE.fq = false; LIVE.wj = null; LIVE.hq = {}; LIVE.fill.length = 0; LIVE.water.length = 0; LIVE.plants.length = 0; LIVE.hold.length = 0; LIVE.seat.length = 0; }   // (a new land: nothing of the last one's left to lay)
+  if (!N) N = Object.assign(liveNowShapes(), { ST: liveNowStrs(), LK: JSON.stringify(LAKE_SET), CV: liveCaveP() });
+  LIVE.b = { cols: N.cols, I: N.I, ST: N.ST, LK: N.LK, CV: N.CV, pk: (land.pockets || []).map(K => [K.x0, K.x1, K.lv]), W: WORLD_W, sig: sig || null };
 }
+const liveNowShapes = () => ({ cols: SHP.cols.slice(), I: ISLANDS.map(I => JSON.stringify(I)) });
+function liveNowStrs() { const ST = new Map(); for (const o of STRS) ST.set(o.id, { j: JSON.stringify(o), g: lvStrGround(o), s: liveStrSpan(o), air: !!AIR_PARTS[o.k] }); return ST; }
 // ---- an edit: to whichever thread runs the game (rules 7.9 - the worker builds the same)
 function liveEdit() {
-  if (!LIVE.b || !land.cell || typeof EDMODE === 'undefined' || !EDMODE.on) return;   // (the GAME EDITOR's: a structure saved in a game is no edit of the world)
+  if (!LIVE.b || !land.cell || !((typeof EDMODE !== 'undefined' && EDMODE.on) || VEG_MODE)) return;   // (the GAME EDITOR's, the Biome Editor's preview: a structure saved in a game is no edit of the world)
   const s = JSON.stringify({ I: ISLANDS, ST: STRS, LK: LAKE_SET, CV: typeof CAVE !== 'undefined' && CAVE.P ? CAVE.P : null, H: PRESS.n > 0 ? 1 : 0 });   // (H: a drag's move - the world's parts wait for its drop there too)
   act(0, 'worldEd', s);
   if (SW.live) ACTS.worldEd(0, s);                              // (the worker's game: this page draws its own copy of the world - built here too, whole as the worker builds it - liveApply)
@@ -69594,18 +69749,19 @@ function liveTake(s) {
   ISL_VER++; STR_GEN++;
 }
 // ---- what the edit touched: column ranges [a, b]
-const lvSame = (u, v) => { if (!u || !v) return (!u || !u.length) && (!v || !v.length); if (u.length !== v.length) return false; for (let i = 0; i < u.length; i++) if (u[i] !== v[i]) return false; return true; };
+const lvSame = (u, v) => { if (u === v) return true; if (!u || !v) return (!u || !u.length) && (!v || !v.length); if (u.length !== v.length) return false; for (let i = 0; i < u.length; i++) if (u[i] !== v[i]) return false; return true; };
 const lvProps = J => { const o = JSON.parse(J); delete o.p; return JSON.stringify(o); };
 function livePieceSpan(S, k, out) {
   const P = S && S.poly; if (!P) return;
   let a = Infinity, b = -Infinity; for (let i = 0; i < P.X.length; i++) if (P.E[i] === k) { a = Math.min(a, P.X[i]); b = Math.max(b, P.X[i]); }
   if (a <= b) out.push([lvCol(a) - 3, lvCol(b) + 3]);   // (its last edge runs on to the next piece's first point; the ground's skins are read rounded - groundSkinAt)
 }
-function liveShapes(B, rs) {
-  const J = ISLANDS.map(I => JSON.stringify(I)), n1 = Math.max(J.length, B.I.length);
+// (N: the shapes as this edit's job built them - liveNowShapes)
+function liveShapes(B, rs, N) {
+  const J = N.I, n1 = Math.max(J.length, B.I.length);
   for (let n = 0; n < n1; n++) {
     if (J[n] === B.I[n]) continue;
-    const o = B.cols[n], s = SHP.cols[n], all = S => { if (S) rs.push([S.c0, S.c1]); };
+    const o = B.cols[n], s = N.cols[n], all = S => { if (S) rs.push([S.c0, S.c1]); };
     if (!o || !s || o.k !== s.k || lvProps(B.I[n]) !== lvProps(J[n])) { all(o); all(s); continue; }   // (a shape new, gone, or its kind or settings changed: all of it)
     let a = -1, b = -1;
     for (let c = Math.min(o.c0, s.c0); c <= Math.max(o.c1, s.c1); c++) {
@@ -69614,18 +69770,26 @@ function liveShapes(B, rs) {
       if (!lvSame(u, v) || !lvSame(pu, pv)) { if (a < 0) a = c; b = c; }
     }
     if (a >= 0) rs.push([a, b]);
-    const P0 = JSON.parse(B.I[n]).p, P1 = ISLANDS[n].p;                // (a piece's marks - its skin, vegetation: where it runs)
+    const P0 = JSON.parse(B.I[n]).p, P1 = J[n] ? JSON.parse(J[n]).p : [];                // (a piece's marks - its skin, vegetation: where it runs)
     for (let k = 0; k < Math.max(P0.length, P1.length); k++) if (JSON.stringify((P0[k] || []).slice(2)) !== JSON.stringify((P1[k] || []).slice(2))) { livePieceSpan(o, k, rs); livePieceSpan(s, k, rs); }
   }
 }
+// (a structure's fields the land reads nothing of - what starts at its spots, how many and how long, what it's for and sells, its hours, its cargo,
+// its colour in the editor, its RESTRICT, REPAIR, REFUEL, HOSPITAL, MARKET, its gun's weapon: one of them changed lays none of the ground again -
+// what they feed reads them as it's asked: STR_GEN)
+const LIVE_STR_OWN = new Set(['veh', 'n', 'maxL', 'use', 'sells', 'openH', 'closeH', 'cargo', 'home', 'hue', 'restrict', 'allow', 'rep', 'ref', 'hosp', 'market', 'takes', 'name', 'wt']);
+const lvStrGround = o => JSON.stringify(o, function (k, v) { return this === o && LIVE_STR_OWN.has(k) ? undefined : v; });   // (its own fields only)
+// -> the structures as read (liveNowStrs)
 function liveStructs(B, rs) {
-  const seen = new Set(), put = (sp, air) => { const m = air ? LIVE_AIR : LIVE_STR; rs.push([lvCol(sp[0] - m), lvCol(sp[1] + m)]); STR_GEN++; };
+  const seen = new Set(), put = (sp, air) => { const m = air ? LIVE_AIR : LIVE_STR; rs.push([lvCol(sp[0] - m), lvCol(sp[1] + m)]); STR_GEN++; }, ST = liveNowStrs();
   for (const o of STRS) {
-    seen.add(o.id); const q = B.ST.get(o.id);
-    if (q && q.j === JSON.stringify(o)) continue;
-    put(liveStrSpan(o), !!AIR_PARTS[o.k] || (q && q.air)); if (q) put(q.s, q.air);
+    seen.add(o.id); const q = B.ST.get(o.id), r = ST.get(o.id);
+    if (q && q.j === r.j) continue;
+    if (q && q.g === r.g) { STR_GEN++; continue; }   // (only what the ground reads nothing of)
+    put(r.s, r.air || (q && q.air)); if (q) put(q.s, q.air);
   }
   for (const [id, q] of B.ST) if (!seen.has(id)) put(q.s, q.air);
+  return ST;
 }
 // (merged, in order, each grown by m columns)
 function liveMerge(rs, m) {
@@ -69639,42 +69803,54 @@ const lvSlices = r => [Math.floor(r[0] / LT_CHUNK), Math.floor(r[1] / LT_CHUNK)]
 // neighbours' boulders, placed after it)
 const lvAlign = r => { const nk = land.rT.length; let k0 = Math.floor(r[0] / LT_CHUNK), k1 = Math.floor(r[1] / LT_CHUNK); if (!(k0 & 1) && k0 > 0) k0--; if (!(k1 & 1) && k1 < nk - 1) k1++; return [k0 * LT_CHUNK, Math.min(land.cols - 1, (k1 + 1) * LT_CHUNK - 1)]; };
 const lvC = u => Math.ceil(u / LT_CELL);
-/* ---- the edit built in place: whole (a drag's move, the worker), or on the page's drop a job (liveStep) - a job still going finished first */
+/* ---- the edit built in place - on the page a job (liveStep, a piece at a time): a drag's move one of its own ('move' - liveHeld; a move while it's going
+   laid by the next one, from what the world is then: each laid whole, in turn), the drop's after it in the jobs - a job still going (the drop's
+   before) laid first, in its steps, never all at once; the worker and the worker's game here whole */
 function liveApply() {
-  liveJobs(Infinity);
-  const held = SW_IN_WORKER ? LIVE.held : PRESS.n > 0, t0 = performance.now(), g = liveApplyGen(held);
-  if (held || SW_IN_WORKER || SW.live) { for (const _ of g) ; if (SW.live) liveJobs(Infinity); }   // (the worker's game here: whole, its jobs too - its harbours' tables come from the worker's snapshots between frames)
-  else { LIVE.whole = ''; LIVE.q.push(g); if (GND.top) GND.ver = ISL_VER; }   // (a frame at a time from the next - the world's parts with them; the ground solids' line as built till its pieces - never whole on a read meanwhile)
+  const held = SW_IN_WORKER ? LIVE.held : PRESS.n > 0, t0 = performance.now();
+  if (SW_IN_WORKER || SW.live) { liveJobs(Infinity); for (const _ of liveApplyGen(held)) ; if (SW.live) liveJobs(Infinity); }   // (a job still going finished first)   // (the worker's game here: whole, its jobs too - its harbours' tables come from the worker's snapshots between frames)
+  else {
+    if (held) liveHeld('move', null, { next: () => liveApplyGen(true) });
+    else { LIVE.whole = ''; LIVE.q.push(liveApplyGen(false)); }
+    if (GND.top) GND.ver = ISL_VER;                             // (the ground solids' line as built till its pieces - never whole on a read meanwhile)
+  }
   LIVE.ms = performance.now() - t0;
 }
+// what the land read of the seas and the harbours as the world was last left (liveSeaSigGen - the edit's world parts are read against it)
+function* liveSig(B) { return B.sig || (B.sig = yield* liveSeaSigGen()); }
 function* liveApplyGen(held) {
   const B = LIVE.b; if (!B || !land.cell || !land.R) return;
-  const sp = worldSpan(), rs = [], wide = !held && worldSizeStale() && sp && Math.round(sp[0]) === 0 ? yield* liveSeaSigGen() : null;   // (the world's width on the drop: first - the shapes' columns reach to it)
+  if (!held) { const J = LIVE.hq.move; if (J) { J.next = null; yield* liveHeldRest('move'); } }   // (a move's still going: finished first - the drop's own lays what came after it)
+  const sp = worldSpan(), rs = [], wide = worldSizeStale() && sp && Math.round(sp[0]) === 0 ? yield* liveSig(B) : null;   // (the world's width: first - the shapes' columns reach to it)
   if (wide) liveWidth(rs);
   skinFillAll(); ISL_VER++;                                     // (what's worked out from the shapes - the pads' heights - asked again)
   shpBuild(true);                                               // (the shapes it touched: their columns - the rest kept, 50-land-shapes)
+  const N = liveNowShapes();                                    // (as it's built them: a shape moved meanwhile is the next job's)
   yield;
-  liveShapes(B, rs);
+  liveShapes(B, rs, N);
   if (rs.length) { const [a, b] = liveMerge(rs, 0).reduce((A, r) => [Math.min(A[0], r[0]), Math.max(A[1], r[1])], [Infinity, -Infinity]); yield* liveGnd(a, b); }   // (the ground solids' tops there - 50-land-zz-ground)
   else if (GND.top) GND.ver = ISL_VER;                          // (no shape changed: as built)
-  liveStructs(B, rs);
-  if (held && HARB.on && harbourSig() !== HARB.lay) liveHarbour();   // (a harbour's part changed while held: the harbours laid out on this move)
-  if (JSON.stringify(LAKE_SET) !== B.LK) { const xs = new Set([...JSON.parse(B.LK), ...LAKE_SET].map(q => q.x)); for (const K of land.pockets || []) for (const x of xs) if (x > K.x0 && x < K.x1) rs.push([lvCol(K.x0), lvCol(K.x1)]); }
-  if (liveCaveP() !== B.CV) for (const n of SHP.holes) { const S = SHP.cols[n]; if (S) rs.push([S.c0, S.c1]); }   // (the CAVES sliders: every cave)
-  // (the world's parts the land is laid from - its width, its seas, its harbours: on the drop, in place - liveWorld)
+  N.ST = liveStructs(B, rs);
+  N.LK = JSON.stringify(LAKE_SET); N.CV = liveCaveP();
+  if (N.LK !== B.LK) { const xs = new Set([...JSON.parse(B.LK), ...LAKE_SET].map(q => q.x)); for (const K of land.pockets || []) for (const x of xs) if (x > K.x0 && x < K.x1) rs.push([lvCol(K.x0), lvCol(K.x1)]); }
+  if (N.CV !== B.CV) liveCaves(B.CV ? JSON.parse(B.CV) : {});   // (the CAVES sliders: every cave's slices, a job of their own)
+  // (the world's parts the land is laid from - its width, its seas, its harbours: on every move too, in place - liveWorld; the world's start moved: a
+  // whole build, on the drop - liveWidth)
   const why = wide || worldSizeStale() ? 'size' : seasStale() ? 'seas' : HARB.on && harbourSig() !== HARB.sig ? 'harbour' : '';
-  LIVE.whole = held ? why : ''; if (why === 'size' && !wide && !held) { liveWhole(); return; }   // (a drag's: on its drop - liveDrop; its start moved: built whole - liveWidth)
+  if (why === 'size' && !wide) { if (held) LIVE.whole = why; else liveWhole(); return; }
+  LIVE.whole = '';
   yield;
-  if (why && !held) { yield* liveWorld(why, rs, wide || undefined); LIVE.whole = ''; }
+  const sig = why ? yield* liveWorld(why, rs, wide || (yield* liveSig(B))) : null;
   if (rs.length) yield* liveRedo(liveMerge(rs, 1), B);
-  liveBuilt();
+  if (held && LIVE.floor) liveHeld('floor', liveFloorGen(true));   // (the sea floor's dressing where it changed: as it moves too, a job of its own)
+  liveBuilt(sig, N);
   LIVE.n++;
 }
 // the ground solids' line (gndBuild) made again over columns a..b, LIVE_SIGC columns a piece - as built meanwhile: never made whole on a read
 function* liveGnd(a, b) {
   if (!GND.top) return;
   GND.ver = ISL_VER;
-  for (let c = a; c <= b; c += LIVE_SIGC) { yield; gndBuild([c, Math.min(b, c + LIVE_SIGC - 1)]); }
+  for (let c = a; c <= b; c += LIVE_GNDC) { yield; gndBuild([c, Math.min(b, c + LIVE_GNDC - 1)]); }
 }
 // D: the columns whose own numbers changed (the shapes', the structures', the lakes'); round them the cells laid again (C: whole slices - LIVE_MIX,
 // the plants' reach, a stone's) and the plants (Rp)
@@ -69686,10 +69862,10 @@ function* liveRedo(D, B) {
   // the columns' own numbers, the slices' rows, the lakes - a lake that changed is a change too: its columns with the rest
   for (let pass = 0, done = []; pass < 3; pass++) {
     const todo = liveMerge(D, 0).filter(r => !done.some(q => q[0] <= r[0] && q[1] >= r[1]));
-    for (const r of todo) isleBuild(R, r);
+    for (const r of todo) for (const q of lvCols(r)) { isleBuild(R, q); yield; }
     pierFloorsChanged();
     yield;
-    for (const r of todo) { landColsBuild(R, r[0], r[1]); for (const k of ltBands(lvSlices(r))) moved.add(k); yield; }   // (a slice given its rows again: not laid till asked - ltBlock)
+    for (const r of todo) for (const q of lvCols(r)) { landColsBuild(R, q[0], q[1]); for (const k of ltBands(lvSlices(q))) moved.add(k); yield; }   // (a slice given its rows again: not laid till asked - ltBlock)
     done = liveMerge(done.concat(todo), 0);
     findLake();
     const pk = (land.pockets || []).map(K => [K.x0, K.x1, K.lv]), key = q => q.join(), was = new Set(B.pk.map(key)), now = new Set(pk.map(key)), more = [];
@@ -69701,21 +69877,29 @@ function* liveRedo(D, B) {
   yield;
   const Rp = grow(D, LIVE_MIX + LIVE_PL), C = liveMerge(grow(Rp, LIVE_EDGE).map(lvAlign), 0);
   // the slices there laid again: their cells, stones, caves' things, pictures - in the next frames, nearest the views (liveStep)
-  for (const r of C) { liveSlices(r); yield; }
+  for (const L = lvChunks(C); L.length;) { liveSlices(lvNearest(L)); yield; }   // (LIVE_SLK slices a piece, nearest the views first)
   for (const r of D) landGapsCols(r[0], r[1]);
   yield;
   landBouldersBuild();
+  const bk0 = land.backS ? land.backS.slice() : null;
   landBackBuild();
+  const Db = lvDiff(bk0, land.backS);                           // (the field's back where it changed - smoothed wider than the columns: the field's lines read it, flSmooth)
   yield;
-  buildWet();
-  yield;
+  for (const r of C) { buildWet(Math.floor((r[0] * LT_CELL - LIVE_MIX - WX0) / DX), Math.ceil(((r[1] + 1) * LT_CELL + LIVE_MIX - WX0) / DX)); yield; }   // (the water's columns there - which are water, their swell, a lake's level)
   if (LIVE.wj) { LIVE.water.push(LIVE.wj.r); LIVE.wj = null; }  // (a fill of the water there still going: begun again - the old water kept meanwhile)
   LIVE.water = liveMerge(LIVE.water.concat(C), 0); LIVE.plants = liveMerge(LIVE.plants.concat(Rp), 0);
-  for (const r of D) { fieldLinesCols(r[0], r[1]); yield; fieldAmtCols(r[0], r[1]); yield; }
+  for (const [a, b] of liveMerge(D.concat(Db), 0)) for (let c = a; c <= b; c += LIVE_FLC) { const e = Math.min(b, c + LIVE_FLC - 1); fieldLinesCols(c, e); yield; fieldAmtCols(c, e); yield; }   // (LIVE_FLC columns a piece)
   land.seam = null; land.lookP = null; land.prof0 = null; land.propXs = null; fieldFlowers = null;
   for (const k of moved) ggRowsAgain(k);
-  for (const r of C) { ltDirty(r[0], r[1]); landReseat(r[0] * LT_CELL, (r[1] + 1) * LT_CELL); }
-  for (const v of shuttles) if (v.state === 'pad') { const S = padSpot(v.R); v.x = S.x; v.y = S.y; v.a = S.a; }   // (a launch pad's stack on its pad, wherever it is now)
+  for (const r of C) ltDirty(r[0], r[1]);
+  LIVE.seat = liveMerge(LIVE.seat.concat(C), 0);
+  LIVE.pads = true;                                             // (a launch pad's stack on its pad, wherever it is now - once its ground is laid: liveStep)
+}
+// the columns where A and B differ (none: all) - ranges
+function lvDiff(A, B) {
+  if (!A || !B || A.length !== B.length) return B ? [[0, B.length - 1]] : [];
+  const out = []; for (let c = 0, a = -1; c <= A.length; c++) { const d = c < A.length && A[c] !== B[c]; if (d && a < 0) a = c; else if (!d && a >= 0) { out.push([a, c - 1]); a = -1; } }
+  return out;
 }
 // columns r[0]..r[1] (whole slices) laid again as they're asked for, as a build leaves them
 function liveSlices(r) {
@@ -69765,16 +69949,110 @@ function livePlants(r) {
   plantsRegrid(); openPlantsCount();
   plantPerches(L);
 }
+/* ---- (user Nov 11 23:41: "all actions in the UI editor should all be real time") the CAVES sliders (WORLD PROPERTIES > CAVE, caves/40-editor.js) on
+   every move: what they set is read only where a cave's cells are laid (ROUGHNESS, SAND - ltFillCol) and where its things are made (STALACTITES,
+   LENGTH, STALAGMITES, WEED, CORAL - stalsMake), never by the columns' own numbers (isleBuild, landColsBuild) - so every cave's slices are laid again
+   by a job of their own (LIVE.hq.cave), nearest the views first: its cells a range of slices a piece (liveSlices, as an edit's - the old shown till each
+   is laid again: their GPU pages kept till then), or only its things, a slice a piece (the old ones there till the new are made). A move while
+   one is going: in its place - it lays them all again, each from its slice's own numbers (what the last had laid is laid the same again) */
+const LIVE_CAVE_CELLS = ['rough', 'sand'];
+function liveCaves(P0) {
+  const J = LIVE.hq.cave, cells = !P0 || LIVE_CAVE_CELLS.some(k => P0[k] !== CAVE.P[k]) || !!(J && J.cells);   // (one going that lays the cells: still laid; none given - a biome's cave ROCK: its cells)
+  if (!land.cell || !LIVE.b) return;
+  liveHeld('cave', liveCaveGen(cells), { cells });
+}
+// (the Biome Editor's TERRAIN SURFACE - its layers: read only as the cells are laid, ltFillCol / islCellM) every slice of its preview's ground laid
+// again, its plants with them (they stand on its grass), a job - nearest the view first, the old shown till each is laid
+function liveSurface() { if (land.cell && LIVE.b) liveHeld('surf', liveSlicesGen([[0, land.cols - 1]], true)); }
+/* columns D's cells laid again where nothing of the columns' own numbers changed - what's read only as the cells are laid (a cave's look, a biome's
+   surface layers): whole slices round them (the stones beside reach in, LIVE_EDGE), LIVE_SLK at a time from the odd one to the odd one (lvAlign),
+   nearest the views first - each laid as an edit's (liveSlices: the old shown till it is), its water filled again, (plants) its plants laid again */
+const LIVE_SLK = 8;
+// ranges of whole slices (from an odd one to an odd one - lvAlign) cut in LIVE_SLK slices each - each from an odd slice to an odd one: a slice where
+// two meet laid with both
+function lvChunks(C) {
+  const out = [];
+  for (const [a, b] of C) { const ka = Math.floor(a / LT_CHUNK), kb = Math.floor(b / LT_CHUNK); for (let k = ka; k <= kb; k += LIVE_SLK) out.push(lvAlign([k * LT_CHUNK, Math.min(b, (Math.min(kb, k + LIVE_SLK - 1) + 1) * LT_CHUNK - 1)])); }
+  return out;
+}
+// (taken out of L) the range nearest the views
+const lvNearest = L => L.splice(lvNear(L.map(q => Math.floor((q[0] + q[1]) / 2 / LT_CHUNK)), lvViewKs()), 1)[0];
+function* liveSlicesGen(D, plants) {
+  const C = lvChunks(liveMerge(liveMerge(D, lvC(LIVE_EDGE)).map(lvAlign), 0));
+  if (LIVE.wj) { LIVE.water.push(LIVE.wj.r); LIVE.wj = null; }
+  while (C.length) {
+    yield;
+    const r = lvNearest(C);
+    liveSlices(r); LIVE.water = liveMerge(LIVE.water.concat([r]), 0); if (plants) LIVE.plants = liveMerge(LIVE.plants.concat([r]), 0);
+    ltDirty(r[0], r[1]); LIVE.seat = liveMerge(LIVE.seat.concat([r]), 0);
+  }
+}
+// (a held edit's job k - the CAVES sliders', a harbour's: run by liveStep a piece at a time, a move's in place of the last one's still going - it lays
+// all of it again)
+// (o.next: made when it's started - one still going isn't let go: it's laid whole, then the next made from what the world is then, the last move's)
+function liveHeld(k, g, o) {
+  const J = LIVE.hq[k];
+  if (o && o.next && J) J.next = o.next; else LIVE.hq[k] = Object.assign({ g: g || o.next() }, o, { next: null });
+  land.sHold = land.sHold || new Uint8Array(land.rT.length);   // (this land's own jobs now - liveBuilt keeps them)
+}
+// held job k a piece -> false when it (and any made after it) is done
+function liveHeldStep(k) {
+  const J = LIVE.hq[k]; if (!J) return false;
+  if (J.g.next().done) { if (J.next) { J.g = J.next(); J.next = null; } else delete LIVE.hq[k]; }
+  return !!LIVE.hq[k];
+}
+// (the drop's job) what's left of held job k first, a piece a step
+function* liveHeldRest(k) { while (liveHeldStep(k)) yield; }
+function* liveCaveGen(cells) {
+  const D = []; for (const n of SHP.holes) { const S = SHP.cols[n]; if (S) D.push([Math.max(0, S.c0), Math.min(land.cols - 1, S.c1)]); }
+  if (!D.length) return;
+  const near = L => { const ks = lvViewKs(), i = lvNear(L.map(r => Math.floor((r[0] + r[1]) / 2 / LT_CHUNK)), ks); return L.splice(i, 1)[0]; };
+  if (cells) { yield* liveSlicesGen(D); return; }
+  const K = []; for (const r of liveMerge(D, 0)) for (let k = lvSlices(r)[0]; k <= lvSlices(r)[1]; k++) if (land.stalK && land.stalK[k] && !LIVE.fill.includes(k)) K.push([k * LT_CHUNK, k * LT_CHUNK]);   // (each slice its things made: those not made yet are made as they're drawn)
+  while (K.length) {
+    yield;
+    const k = near(K)[0] / LT_CHUNK, x0 = k * LT_CHUNK * LT_CELL, x1 = (k + 1) * LT_CHUNK * LT_CELL, inX = q => q.x >= x0 && q.x < x1;
+    land.stals = land.stals.filter(q => !inX(q)); if (land.cvlife) land.cvlife = land.cvlife.filter(q => !inX(q));
+    land.stalK[k] = 0; stalsMake(k);
+  }
+}
 /* ---- what an edit lays again, a little each frame, nearest the views (landPaintStep) - never all on the frame it's made: first the drop's jobs
    (LIVE.q, in order, a piece at a time - liveJobs); then the slices' cells a column at a time (and then their caves' stalactites and plants as they're drawn), their
    water to its levels (liveWaterGen, a piece at a time), the plants (LIVE_PLK slices at a time, on the ground as laid, before any stone - as a
    build), their stones a stage at a time; then they're let go. A new edit meanwhile adds its own */
-const LIVE_MS = 3, LIVE_PLK = 4;
+const LIVE_MS = 3, LIVE_PLK = 4, LIVE_FLC = 96, LIVE_COLK = 8;
+// (range r cut at slices' edges, LIVE_COLK slices' columns a piece)
+function lvCols(r) { const out = []; for (let c = r[0]; c <= r[1];) { const e = Math.min(r[1], (Math.floor(c / LT_CHUNK) + LIVE_COLK) * LT_CHUNK - 1); out.push([c, e]); c = e + 1; } return out; }
 const lvNear = (L, ks) => { let bi = 0, bd = Infinity; L.forEach((k, i) => { let d = Infinity; for (const q of ks) d = Math.min(d, Math.abs(q - k)); if (d < bd) { bd = d; bi = i; } }); return bi; };
 // slice k's columns laid (ltFillCol) till late() -> true when all of them are: its caves' things then laid as it's drawn
 function liveFillSlice(k, late) {
-  for (let c = k * LT_CHUNK, c1 = Math.min(land.cols, (k + 1) * LT_CHUNK); c < c1; c++) { if (land.colOK[c]) continue; ltFillCol(c); if (c + 1 < c1 && late()) return false; }
+  if (!lvFillCols(k, late)) return false;
   if (land.stalK) land.stalK[k] = 0; if (land.cvK) land.cvK[k] = 0; return true;
+}
+// slices k0..k1 ready to be read - their cells laid, and (stones) their stones placed (landEnsure) - a column, a stone's stage at a time till late()
+// -> true when they are (a slice an edit holds: its stones come as it's let go - LIVE.hold)
+function lvReady(k0, k1, late, stones) {
+  const nk = land.rT.length;
+  for (let k = Math.max(0, k0); k <= Math.min(nk - 1, k1); k++) {
+    if (!lvFillCols(k, late)) return false;
+    if (!stones || !land.sOK || land.sOK[k]) continue;
+    for (let q = k - 1; q <= k + 1; q++) for (let st; (st = stNext(q, 2));) {
+      if (land.sHold && land.sHold[st[0]]) break;
+      for (let r = st[0] - 1; r <= st[0] + 1; r++) if (!lvFillCols(r, late)) return false;
+      stStage(st[0], st[1]); if (!(land.sS[st[0]] & st[1])) break;
+      if (late()) return false;
+    }
+    landEnsure(k); if (late()) return false;
+  }
+  return true;
+}
+// a piece's time: late() -> true when ms have gone since it was made
+const lvLate = (ms = LIVE_MS) => { const t0 = performance.now(); return () => performance.now() - t0 > ms; };
+// slice k's columns laid till late() -> true when all of them are
+function lvFillCols(k, late) {
+  if (k < 0 || k >= land.rT.length) return true;
+  for (let c = k * LT_CHUNK, c1 = Math.min(land.cols, (k + 1) * LT_CHUNK); c < c1; c++) { if (land.colOK[c]) continue; ltFillCol(c); if (c + 1 < c1 && late()) return false; }
+  return true;
 }
 // the drop's jobs, a piece after another until ms have gone -> true when none is left
 function liveJobs(ms) {
@@ -69787,30 +70065,53 @@ function liveJobs(ms) {
   return !LIVE.q.length;
 }
 function liveStep(xs) {
+  LIVE.xs = xs;
   if (LIVE.q.length) { liveJobs(LIVE_MS); return; }           // (the drop's jobs first: what's laid next comes from them)
-  if (!LIVE.fill.length && !LIVE.water.length && !LIVE.wj && !LIVE.plants.length && !LIVE.hold.length) return;
-  const t0 = performance.now(), ks = (xs && xs.length ? xs : [WORLD_W / 2]).map(x => Math.floor(ltCol(x) / LT_CHUNK)), late = () => performance.now() - t0 > LIVE_MS;
+  const t0 = performance.now(), late = () => performance.now() - t0 > LIVE_MS;
+  for (const k in LIVE.hq) while (liveHeldStep(k)) if (late()) return;   // (a held edit's jobs: a piece after another - the CAVES sliders' slices handed to those below)
+  if (!LIVE.fill.length && !LIVE.water.length && !LIVE.wj && !LIVE.plants.length && !LIVE.hold.length && !LIVE.seat.length && !LIVE.pads) return;
+  const ks = lvViewKs();
   while (LIVE.fill.length) { const i = lvNear(LIVE.fill, ks); if (liveFillSlice(LIVE.fill[i], late)) LIVE.fill.splice(i, 1); if (late()) return; }
   while (LIVE.wj || LIVE.water.length) {
     if (!LIVE.wj) { const r = LIVE.water.shift(); LIVE.wj = { r, g: liveWaterGen(r) }; }
     if (LIVE.wj.g.next().done) LIVE.wj = null;
     if (late()) return;
   }
-  while (LIVE.plants.length) {
-    const r = LIVE.plants[0], e = Math.min(r[1], (Math.floor(r[0] / LT_CHUNK) + LIVE_PLK) * LT_CHUNK - 1);   // (LIVE_PLK slices of it at a time)
-    livePlants([r[0], e]); if (e >= r[1]) LIVE.plants.shift(); else r[0] = e + 1;
+  while (LIVE.plants.length) {   // (LIVE_PLK slices at a time, from the slice of them nearest the views - a plant the same whatever's laid round it)
+    let bi = 0, bk = 0, bd = Infinity;
+    LIVE.plants.forEach((r, i) => { const a = Math.floor(r[0] / LT_CHUNK), b = Math.floor(r[1] / LT_CHUNK); for (const q of ks) { const k = clamp(q, a, b), d = Math.abs(q - k); if (d < bd) { bd = d; bi = i; bk = k; } } });
+    const r = LIVE.plants[bi], a = Math.max(r[0], bk * LT_CHUNK), e = Math.min(r[1], (bk + LIVE_PLK) * LT_CHUNK - 1);
+    if (!lvReady(Math.floor(a / LT_CHUNK) - 1, Math.floor(e / LT_CHUNK) + 1, late)) return;   // (the cells they're laid on, a column at a time first)
+    livePlants([a, e]);
+    LIVE.plants.splice(bi, 1, ...[[r[0], a - 1], [e + 1, r[1]]].filter(q => q[0] <= q[1]));
     if (late()) return;
   }
   const H = LIVE.hold.slice().sort((a, b) => Math.min(...ks.map(q => Math.abs(q - a))) - Math.min(...ks.map(q => Math.abs(q - b))));
   for (const k of H) for (let st; (st = stNext(k, 2));) {
+    for (let q = st[0] - 1; q <= st[0] + 1; q++) if (!lvFillCols(q, late)) return;   // (the cells its stones reach - its neighbours' too, never laid yet: a column at a time first)
     ST_FREE = true; try { stStage(st[0], st[1]); } finally { ST_FREE = false; }
     if (late()) return;
   }
   for (const k of LIVE.hold.splice(0)) land.sHold[k] = 0;      // (every stage there: let go - made whole as asked, landEnsure)
   land.sAll = 0;
+  // what stands there set on it again, once it's laid (landReseat - its ground made whole first, a piece at a time)
+  while (LIVE.seat.length) {
+    const r = LIVE.seat[0], e = Math.min(r[1], r[0] + LIVE_SLK * LT_CHUNK - 1);
+    if (!lvReady(Math.floor(r[0] / LT_CHUNK) - 1, Math.floor(e / LT_CHUNK) + 1, late, true)) return;
+    landReseat(r[0] * LT_CELL, (e + 1) * LT_CELL); if (e >= r[1]) LIVE.seat.shift(); else r[0] = e + 1;
+    if (late()) return;
+  }
+  if (LIVE.pads) {
+    for (const v of shuttles) if (v.state === 'pad') { const k = Math.floor(ltCol(v.R && typeof v.R === 'object' ? v.R.x : padX(v.R)) / LT_CHUNK); if (!lvReady(k - 1, k + 1, late, true)) return; }
+    for (const v of shuttles) if (v.state === 'pad') { const S = padSpot(v.R); v.x = S.x; v.y = S.y; v.a = S.a; }
+    LIVE.pads = false;
+  }
 }
 // all of it now (the simulation worker's: it runs nothing a frame at a time; the tools)
-function liveFinish() { liveJobs(Infinity); for (let i = 0; i < 1e6 && (LIVE.q.length || LIVE.fill.length || LIVE.water.length || LIVE.wj || LIVE.plants.length || LIVE.hold.length); i++) liveStep(); }
+function liveFinish() { liveJobs(Infinity); for (let i = 0; i < 1e6 && liveLeft(); i++) liveStep(); }
+const liveLeft = () => LIVE.q.length + LIVE.fill.length + LIVE.water.length + (LIVE.wj ? 1 : 0) + LIVE.plants.length + LIVE.hold.length + LIVE.seat.length + (LIVE.pads ? 1 : 0) + Object.keys(LIVE.hq).length;
+// the views' slices (liveStep's xs - none: the world's middle)
+const lvViewKs = () => (LIVE.xs && LIVE.xs.length ? LIVE.xs : [WORLD_W / 2]).map(x => Math.floor(ltCol(x) / LT_CHUNK));
 // the water in columns r[0]..r[1] filled from its levels again - the pockets, the caves' water lines, the ocean (wcFillGen) - beside the old: its slices'
 // amounts made in arrays of their own a piece at a time while the old ones are drawn and stepped, put in their place once it's all filled (asleep,
 // as a build's)
@@ -69831,7 +70132,7 @@ function* liveWaterGen(r) {
   }
   put();
 }
-/* ---- the world's parts the land is laid from, on the drop (never during a drag), each made again in place - what a build makes them from:
+/* ---- the world's parts the land is laid from, by an edit that changed them (a drag's on every move), each made again in place - what a build makes them from:
      - the seas and the lands (worldSeas: a SEA piece, a coast moved across the water line);
      - the harbours from their parts (worldHarbours: the docks, the floor's shores and the floor, the sheltered water, the buoys, the harbour
        towers and their guns), the land's towers after them (landTowersBuild, as a build has them), the birds' perches on them (harbourPerches);
@@ -69839,12 +70140,11 @@ function* liveWaterGen(r) {
        re-seated at its harbour as a build makes them (liveFleet), one out at sea kept;
      - what the land's build reads from them, a column at a time (liveSeaSigGen: its sea, its floor's sand, an island's shelf, its unmarked look) and a
        slice at a time (the lands' rows and faces its boulders are laid by): the columns where any of it changed laid again with the edit's own
-       (rs - liveRedo), the sea's dressing and its life where the seas changed (floorEdited on the drop, buildSea) */
+       (rs - liveRedo), the sea's dressing and its life where the seas changed (floorEdited, buildSea: jobs of their own) -> what it read now */
 function* liveWorld(why, rs, s0) {
-  if (!s0) s0 = yield* liveSeaSigGen();
   const home0 = homeDock.slice(), seas0 = why === 'harbour' ? '' : liveSeaRows();
   if (why !== 'harbour') { worldSeas(); yield; const v = ISL_VER; skinFillAll(); if (ISL_VER !== v) yield* liveGnd(0, land.cols - 1); yield; }   // (the marks the seas fill in: the ground solids' line with them)
-  yield* worldHarboursGen();
+  yield* worldHarboursGen(true);
   if (LAND) landTowersBuild();
   harbourPerches();                                             // (the birds' perches on them - on their towers: the old towers' let go)
   liveFleet(home0);
@@ -69855,8 +70155,9 @@ function* liveWorld(why, rs, s0) {
     if (d && a < 0) a = c; else if (!d && a >= 0) { rs.push([a, c - 1]); a = -1; }
   }
   for (let k = 0; k < Math.min(s0.K.length, s1.K.length); k++) if (s0.K[k] !== s1.K[k]) rs.push([k * LT_CHUNK, Math.min(land.cols - 1, (k + 1) * LT_CHUNK - 1)]);
-  if (why !== 'harbour') { if (liveSeaRows() !== seas0) LIVE.q.push(buildSeaGen()); yield; reachWant(0, WORLD_W); }   // (the seas' life: a job of its own after this one and the floor's)
+  if (why !== 'harbour') { if (liveSeaRows() !== seas0) liveHeld('sea', buildSeaGen()); yield; reachWant(0, WORLD_W); }   // (the seas' life: a job of its own)
   LIVE.floor = true;
+  return s1;
 }
 const liveSeaRows = () => Array.from({ length: SEAS.n }, (_, i) => SEAS.c.lo[i] + ',' + SEAS.c.hi[i]).join(';');
 /* ---- the world's width changed (a shape's end moved past it - its start where it was): the world is its shapes end to end (worldSpanW), and
@@ -69914,7 +70215,7 @@ function liveWidth(rs) {
 // what the land's build reads from the seas and the harbours: each column's sea (seaAtX at its edge and its middle - onLand, the water's), its
 // unmarked look (landOwnD), an island's shelf there (isleBuild: the floor's shelf, a coast's ramp, a dock's pad) - A; its floor's sand (sandY) -
 // F; each slice's lands' rows and their faces (its boulders' - stonesS1) - K. A piece every LIVE_SIGC columns
-const LIVE_SIGC = 1024;
+const LIVE_SIGC = 1024, LIVE_GNDC = 256;
 function* liveSeaSigGen() {
   const n = land.cols, A = new Uint8Array(n), F = new Float32Array(n), nk = land.rT.length, K = new Array(nk), mid = LOOK_MID(), face = Array.from({ length: LANDS.n }, (_, i) => landFace(i).dir);
   for (let c = 0; c < n; c++) { if (c && c % LIVE_SIGC === 0) yield; const x = c * LT_CELL; A[c] = (seaAtX(x) ? 1 : 0) | (seaAtX(x + LT_CELL / 2) ? 2 : 0) | (x > mid ? 4 : 0) | (floorTab && (bedInside(x, BED_SHELF) || rampAt(x) > 0 || dockPadAt(x)) ? 8 : 0); if (A[c] & 11 || (ISLE !== null && ISLE[c])) F[c] = sandY(x); }   // (the sand: read at sea and under an island only)
@@ -69933,19 +70234,6 @@ function liveFleet(home0) {
     if (was && !!was.stand !== !!d.stand) { fleet[p].ship = none ? 0 : FLEET.ship; fleet[p].sub = none ? 0 : FLEET.sub; }
   }
 }
-/* (user Nov 11 23:41: "when I extend a dock or move a dock, it dynamically creates the dock in real time too. Like all actions in the UI editor should
-   all be real time") a held edit that changed a harbour's parts - a marine hangar, a pier, a dock, a tower, a crane dragged; a LENGTH, a FLIP, an OWNER,
-   a spot changed as a slider moves: the harbours laid out again from their parts on that move (harbourLayout - their docks' rows, the piers' pillars,
-   the towers and their guns; the buoys, the land's towers, each side's fleet at home), the old ones drawn till then. All of them, in one pass over
-   the parts (~1 ms the world): they're paired across the parts - a pier joins the hangar whose quay it meets, a tower the nearest hangar of its owner,
-   each side's home is chosen among them. What's laid from where a harbour stands waits for the drop (liveWorld 'harbour' - the sea floor's shores
-   and shape, the sheltered water, the land's columns under a pad at sea, the birds' perches: ~25 ms, past a move's budget) */
-function liveHarbour() {
-  const sig = HARB.sig, home0 = homeDock.slice();
-  harbourLayout(); HARB.sig = sig;                              // (the drop still sees the change - liveApplyGen's why)
-  buoysBuild(); if (LAND) landTowersBuild();
-  liveFleet(home0);
-}
 /* ---- the drop: the world's parts if they changed (liveWorld); the sea floor's dressing where the floor changed - a job after the edit's (now: the
    jobs all done here - the editor closed) */
 function liveDrop(now) {
@@ -69953,13 +70241,16 @@ function liveDrop(now) {
   if (land.cell && !LIVE.fq) { LIVE.fq = true; LIVE.q.push(liveFloorGen()); }
   if (now || SW.live) liveJobs(Infinity);
 }
-function* liveFloorGen() {
-  LIVE.fq = false; if (!LIVE.floor || !land.cell) return;
-  LIVE.floor = false; yield* floorEditedGen();                  // (the floor's tables, the pirate wrecks on level ground, its rocks and corals, the kraken - 50-land-floor.js)
+// (held: a held edit's, on its every move - liveHeld; the drop's: all of it again, one still going let go)
+function* liveFloorGen(held) {
+  if (!held) LIVE.fq = false;
+  if (!LIVE.floor || !land.cell) return;
+  LIVE.floor = false; if (!held) delete LIVE.hq.floor;
+  yield* floorEditedGen();                                      // (the floor's tables, the pirate wrecks on level ground, its rocks and corals, the kraken - 50-land-floor.js)
 }
 // the whole world built again (its start moved - see the top)
 function liveWhole() { LIVE.whole = ''; LIVE.floor = false; if (SW_IN_WORKER) return; builtViewW = 0; resize(); }   // (the worker: the page's whole build reaches it - SW.gen)
-if (typeof window !== 'undefined') window.__live = { edit: () => liveEdit(), drop: () => liveDrop(), finish: () => liveFinish(), state: () => ({ ms: LIVE.ms, n: LIVE.n, whole: LIVE.whole, floor: LIVE.floor, left: LIVE.q.length + LIVE.fill.length + LIVE.water.length + (LIVE.wj ? 1 : 0) + LIVE.plants.length + LIVE.hold.length }) };   // (tools)
+if (typeof window !== 'undefined') window.__live = { edit: () => liveEdit(), drop: () => liveDrop(), finish: () => liveFinish(), state: () => ({ ms: LIVE.ms, n: LIVE.n, whole: LIVE.whole, floor: LIVE.floor, left: liveLeft() }) };   // (tools)
 
 //@src 50-zzzz-lost.js:1
 /* ================================================================
@@ -70264,15 +70555,16 @@ function spotsEdDraw(o, X0, X1, Y0, q) {
   const gap = 4 * q, cx = Math.round((X0 + X1) / 2), B = SP.boxes[viewIdx] || (SP.boxes[viewIdx] = []);
   const cells = L.map(({ i, e }) => {
     const P = spotPic(e.v), w = Math.max(4, Math.round(spotWorldW(e.v) * SV)), h = P ? Math.max(2, Math.round(P.height * w / P.width)) : Math.round(w * 0.3);
-    return { i, P, w, h: Math.max(h, 7 * q), ph: h, lab: 'SPOT ' + (i + 1) };
+    return { i, P, w, h: Math.max(h, 7 * q), ph: h, lab: 'SPOT ' + (i + 1), bad: !spotFitsAt(o, i, e) };   // (bad: past its spots or too long for them now - a slider moving; kept till it's let go, dockRefit)
   });
   let y = Y0 - gap - cells.reduce((a, c) => a + c.h + gap, 0) + gap;   // (the top of the stack)
   for (const c of cells) {
     const on = SP.sel && SP.sel.s === o.id && SP.sel.i === c.i, ix = cx - (c.w >> 1), iy = y + c.h - c.ph;
+    if (c.bad) { C.fillStyle = 'rgba(255,60,50,0.28)'; C.fillRect(ix - q, y - q, c.w + 2 * q, c.h + 2 * q); }   // (the editor's red - where a structure can't stand, strEdDraw)
     if (c.P) C.drawImage(c.P, ix, iy, c.w, c.ph);
     else { C.fillStyle = 'rgba(200,210,230,0.5)'; C.fillRect(ix, iy, c.w, c.ph); }
     const tw = textWidth(c.lab) * q, lx = ix - gap - tw;
-    drawText(C, c.lab, lx, y + (c.h >> 1) - 3 * q, on ? [255, 255, 255] : [220, 230, 250], q, 'left');
+    drawText(C, c.lab, lx, y + (c.h >> 1) - 3 * q, on ? [255, 255, 255] : c.bad ? [255, 120, 110] : [220, 230, 250], q, 'left');
     const bx0 = lx - q, bx1 = ix + c.w + q, by0 = y - q, by1 = y + c.h + q;
     if (on) { C.fillStyle = '#fff'; C.fillRect(bx0, by0, bx1 - bx0, q); C.fillRect(bx0, by1 - q, bx1 - bx0, q); C.fillRect(bx0, by0, q, by1 - by0); C.fillRect(bx1 - q, by0, q, by1 - by0); }
     B.push({ s: o.id, i: c.i, x0: (bx0 + CAMPX) / SV, x1: (bx1 + CAMPX) / SV, y0: (by0 + TOPPX) / SV, y1: (by1 + TOPPX) / SV });   // (in world units, for the press)
@@ -70288,7 +70580,7 @@ function spotPick(b) { for (const id in WK) if (id !== 'spot') WK[id].clear(); S
 // ---- the structure's panel: its SPOTS
 function spotsBox(o, U) {
   const el = U.el, n = strSpots(o), L = spotList(o);
-  const v = el('div', 'cat'); v.appendChild(el('h4', '', 'SPOTS ' + L.length + ' / ' + n));
+  const v = el('div', 'cat'), h = el('h4', '', 'SPOTS ' + L.length + ' / ' + n); v.appendChild(h); SP.head = { o, h };
   for (const { i, e } of L) {
     const r = el('div', 'row'), b = el('button', '', 'REMOVE'); b.title = 'Empty this spot';
     b.onclick = () => { spotRemove(o, i); spotsChanged(); };
@@ -70303,6 +70595,8 @@ function spotsBox(o, U) {
   r.append(s, add); v.appendChild(r);
   U.box.appendChild(v);
 }
+// (a slider moving - a dock's LENGTH, a prefab's MAX SIZE / SPOTS: strSave) the panel's SPOTS line as it is now - that line's words, not the panel
+function spotsHead() { const H = SP.head; if (H && H.h.isConnected) H.h.textContent = 'SPOTS ' + spotList(H.o).filter(q => spotFitsAt(H.o, q.i, q.e)).length + ' / ' + strSpots(H.o); }
 // a spot emptied: the ones after it move up (its spots are kept in order)
 function spotRemove(o, i) { const M = strVehs(o).slice(); M.splice(i, 1); o.veh = M.filter(Boolean); if (SP.sel && SP.sel.s === o.id) SP.sel = null; }
 // ---- a picked spot's own panel (in the OBJECTS tab's box, where a structure's would be)
@@ -70622,7 +70916,7 @@ WK.nature.span = () => { const a = NE.sel != null && NATURE.find(q => q.id === N
 WK.nature.dup = dx => {
   const a = NE.sel != null && NATURE.find(q => q.id === NE.sel); if (!a) return;
   const c = dupClone(a); c.id = dupId(NATURE); c.x0 = a.x0 + dx; c.x1 = a.x1 + dx; c.g = null;
-  NATURE.push(c); NE.sel = c.id; natureChanged();
+  NATURE.push(c); NE.sel = c.id; natureChanged(c.id);
 };
 // krakens and pirate wrecks (as they lie: the floor under them, or where they were let go)
 WK.sea.span = () => {
@@ -72201,7 +72495,7 @@ function vegUI(Z) {
     // bushes ... bush one, bush two, palm tree") a tab per kind - its own numbers - and LOOK, what they share
     const V = VG().V, VD = VG().VD, TABS = [['veg_palm', 'PALM'], ['veg_mid1', 'BUSH 1'], ['veg_mid2', 'BUSH 2'], ['veg_mid3', 'BUSH 3'], ['veg_back1', 'JUNGLE 1'], ['veg_back2', 'JUNGLE 2'], ['tree', 'LOOK'], ['ground', 'GROUND']];
     // each kind's numbers: its own (the SELECTED prefab's) and its sizes (IN THE GROUP); LOOK and GROUND (what every plant and object shares) under WORLD
-    const SIZES = new Set(['plantMin', 'plantMax', 'sizeMin', 'sizeMax']), pages = {}; let rp = 0;
+    const SIZES = new Set(['plantMin', 'plantMax', 'sizeMin', 'sizeMax']), pages = {};
     for (const [f] of TABS) { const p = document.createElement('div'), gq = document.createElement('div'); p.style.cssText = gq.style.cssText = 'display:none;gap:6px'; d.querySelector('#vgProps').appendChild(p); d.querySelector('#vgGrp').appendChild(gq); pages[f] = [p, gq]; }
     // (user Nov 4 08:49: "LOOK, GROUND, SPAWN should all be FOLDOUT menus") each a header over its own numbers, folded at first
     { const lk = d.querySelector('#vgLook'); lk.style.cssText = 'display:grid;gap:6px';
@@ -72211,7 +72505,7 @@ function vegUI(Z) {
     for (const [lab, f, k, mx, st, u, t] of VG().rows()) {
       if (!pages[f]) continue;
       const def = VD[f][k], name = lab.replace(/^(PALM|BUSH \d|JUNGLE \d) /, '');
-      pages[f][SIZES.has(k) ? 1 : 0].appendChild(slider(name, vegTip(k, u, t), 0, Math.max(mx, def), st, () => V[f][k], v => { V[f][k] = v; VG().save(); if (k === 'amount') { clearTimeout(rp); rp = setTimeout(() => VG().replant(), 250); } }, def));
+      pages[f][SIZES.has(k) ? 1 : 0].appendChild(slider(name, vegTip(k, u, t), 0, Math.max(mx, def), st, () => V[f][k], v => { V[f][k] = v; VG().save(); if (k === 'amount') VG().replant(); }, def));
     }
     setTimeout(() => showKind(selIt ? VG().kOf(selIt) : 'veg_palm'), 0);
     // the numbers shown: the selected prefab's kind's
@@ -72239,7 +72533,7 @@ function vegUI(Z) {
     const want = VZ.deck && VZ.deck.n === VG().sets.cur ? VZ.deck : null;
     if (want && !want.armed) { want.armed = true; const off = e => { if (!e.isTrusted || VZ.going) return; removeEventListener('pointerdown', off, true); if (VZ.deck === want) VZ.deck = null; }; addEventListener('pointerdown', off, true); }
     let UWM = want ? want.m : VG().sets.cur === 'sea' ? 'uw' : false;
-    let rpD = 0; const relay = () => { VG().decks.set(D, UWM); clearTimeout(rpD); rpD = setTimeout(() => vgReplant(), 250); };
+    const relay = () => { VG().decks.set(D, UWM); vgReplant(); };   // (laid again as it changes - a job, nearest the view first: rigReplant)
     let D = VG().decks.get(UWM);
     let deckTab = want ? want.i : 1, sideSel = 0;   // (sideSel: the side of the ground picked in the view - 1 TOP, 2 SIDE, 3 BOTTOM)
     // (user Nov 4 08:24, his picture: "the Deck details should be at the bottom ... not on the right side window"; "above Decks ... a dropdown saying SET")
@@ -72490,7 +72784,7 @@ function vegUI(Z) {
         rv.dataset.setRev = '1'; ub.dataset.gUndo = '1'; add.appendChild(ub); add.appendChild(rv); }
     }
     // TERRAIN SURFACE: each of the biome's layers - its material, THICKNESS MIN / MAX, WOBBLE, DOWN TO WATER; the preview's ground built again
-    let surfT = 0; const surfRebuild = () => { biomeSurfSave(); clearTimeout(surfT); surfT = setTimeout(() => { try { landEdited(); } catch (er) { console.error('surface', er); } /* (the ground built again in place - the view stays) */ }, 300); };
+    const surfRebuild = () => { biomeSurfSave(); liveSurface(); };   // (the ground's cells laid again as it changes - a job, nearest the view first: 50-zzzz-live-edit.js)
     // an ON / OFF button (as BIRDS: ON): its name, a one-line tooltip
     const toggle = (lab, t, get, set) => { const b = document.createElement('button'); const show = () => { b.textContent = lab + ': ' + (get() ? 'ON' : 'OFF'); b.classList.toggle('on', !!get()); }; b.dataset.t = t; b.title = t; hint(b); b.onclick = () => { set(!get()); show(); }; show(); return b; };
     function renderSurf(box, top) {
@@ -72560,7 +72854,7 @@ function vegUI(Z) {
     // the CAVE DECKS' ROCK section: the biome's cave rock - its colour, brightness, roughness and floor sand (09-zz-biomes.js BIOME_CAVE, over the world's CAVE
     // settings); the caves built again as it changes (their values are part of what they're built from)
     function caveRock(cats) {
-      const bn = VG().sets.cur, O = BIOME_CAVE[bn] || (BIOME_CAVE[bn] = {}), save = () => surfRebuild();   // (one cave world: every cave's look the land's - its ground built again, caveVal)
+      const bn = VG().sets.cur, O = BIOME_CAVE[bn] || (BIOME_CAVE[bn] = {}), save = () => { biomeSurfSave(); liveCaves(); };   // (one cave world: every cave's look the land's - every cave's slices laid again as it changes, caveVal: liveCaves)
       const cols = catOf(cats, 'ROCK', 'The caves\' rock in this biome');
       // ROCK COLOUR: a swatch opening the colour picker (as a plant part's), RESET back to the biome's own
       { const hex = c => '#' + c.map(v => Math.round(v).toString(16).padStart(2, '0')).join(''), rgb = s => [1, 3, 5].map(i => parseInt(s.slice(i, i + 2), 16));
@@ -72642,9 +72936,10 @@ function vegUI(Z) {
     // drag a shape, the square to scale it) and the GAME EDITOR's own TERRAIN sections in this tab (TUNE.fillTab - CREATE, SEGMENT TYPE with HILLS,
     // SPIKY, ROUND, CURVE, VEGETATION, SEGMENT ACTIONS, TERRAIN TYPE, CAVE WATER); a change built here at once (as the game's - 50-zzzz-live-edit.js)
     const TERR = { get on() { return VEG_TERR.on; } };
-    let TERR_PANE = null, terrT = 0;
-    window.__vgTerrChanged = () => { clearTimeout(terrT); terrT = setTimeout(() => { const g = groundNow(); try { localStorage.setItem(vegGroundKey(BIOME_SK[VG().sets.cur] || 'T'), JSON.stringify(g)); } catch (e) { } VG().setGround(g);
-      const H = g.find(I => I && I.k === 'H' && I.p && I.p.length); LAB_CAVE = H ? [H.p.reduce((a, p) => a + p[0], 0) / H.p.length, H.p.reduce((a, p) => a + p[1], 0) / H.p.length] : null; vgReplant(); }, 250); };
+    let TERR_PANE = null;
+    // (a change: kept as this biome's ground, built in place as it's made - liveEdit, the game's own; its plants with it)
+    window.__vgTerrChanged = () => { const g = groundNow(); try { localStorage.setItem(vegGroundKey(BIOME_SK[VG().sets.cur] || 'T'), JSON.stringify(g)); } catch (e) { } land.lookP = null; liveEdit();
+      const H = g.find(I => I && I.k === 'H' && I.p && I.p.length); LAB_CAVE = H ? [H.p.reduce((a, p) => a + p[0], 0) / H.p.length, H.p.reduce((a, p) => a + p[1], 0) / H.p.length] : null; };
     function terrSet(on) {
       if (on === VEG_TERR.on) return;
       VEG_TERR.on = on; if (!on) { TERRAIN_ED.sel = null; ISL_ED.pt = null; if (typeof terrainSyncSkin === 'function') terrainSyncSkin(); }
