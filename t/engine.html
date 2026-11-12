@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 985, build: 'NOV 12 01:07', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 985, build: 'NOV 12 01:23', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -8809,7 +8809,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 985;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 12 01:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 12 01:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -68675,6 +68675,30 @@ function strRides(o, N) {
   const G = Math.min(g(xs[0]), Math.max(g(xs[1]), g(xs[2])));   // (the ground it stands on - strGround's: the points of it holding it)
   return xs.some(x => Math.abs(g(x) - G) <= RIDE_T && rideOn(N, x, g(x)));
 }
+/* (Nov 12, the user's laptop: an island raised as it was dragged - its shore further out - and its dock rode along, now on the ground, NEEDS
+   WATER) what's joined to a shore keeps to the shore: a dock's or pier's land end, a marine hangar's (its x) as far from where the shape comes up
+   to its deck as it was - joined again at the moved shoreline, its deck at its own water's level (strBox0), never lifted with the shape */
+// where, going from the sea toward the land (dir) across x - R .. x + R, one of the shapes N first comes up to a deck at y (null: nowhere) - read
+// from their outlines as they are now (shpColSpans: the points just moved, before any build)
+function shoreAt(N, x, dir, y, R) {
+  const c0 = Math.floor((x - R) / LT_CELL), c1 = Math.ceil((x + R) / LT_CELL), Q = [];
+  for (const n of N) if (ISLANDS[n] && shpK(ISLANDS[n]) !== 'H') Q.push(shpColSpans(shpPoly(ISLANDS[n]), c0, c1));
+  for (let i = 0; i <= c1 - c0; i++) { const k = dir > 0 ? i : c1 - c0 - i; if (Q.some(A => A[k].s.length && A[k].s[0] <= y + 3)) return (c0 + k) * LT_CELL; }
+  return null;
+}
+// a structure joined to a shore of the shapes N: { dir: toward the land, end: its land end, y: its deck } - a dock or pier (the side the shape
+// comes up to its deck on), a marine hangar (its land end) - or null
+function strShore(o, N) {
+  if (strFree(o)) return null;
+  if (isMarineS(o)) { const d = marineLayout(o); return { dir: d.dir, end: d.L, y: DECK_Y + dkY(d) }; }
+  if (o.k !== 'dock') return null;
+  if (isPierS(o)) return { dir: pierDir(o), end: pierLandEnd(o), y: DECK_Y + dockWater({}, o.x).oy };
+  // (a dock: its land end the one the shape is highest past - within PIER_REACH of it)
+  const B = strBox(o), y = B.top + WOOD.deck * B.m, top = (a, b) => { let t = Infinity; for (const n of N) if (ISLANDS[n] && shpK(ISLANDS[n]) !== 'H') for (const q of shpColSpans(shpPoly(ISLANDS[n]), Math.floor(a / LT_CELL), Math.ceil(b / LT_CELL))) if (q.s.length) t = Math.min(t, q.s[0]); return t; };
+  const tR = top(B.x1, B.x1 + PIER_REACH), tL = top(B.x0 - PIER_REACH, B.x0);
+  return tR === Infinity && tL === Infinity ? null : tR <= tL ? { dir: 1, end: B.x1, y } : { dir: -1, end: B.x0, y };
+}
+const SHORE_R = 2000;                                       // (world units: how far a dragged shape's shore is looked for round where it went)
 // the structure whose deck a vehicle at x with its bottom at y stands on (a pier's, a dock's, a harbour's quay or hangar roof, a runway), or null
 function vehDeck(x, y) {
   const roof = hangarRoofUnder(x, y - RIDE_T);
@@ -68690,14 +68714,18 @@ function ridersOf(N, S0 = [], V0 = []) {
   const C = new Map(S0.map(o => [o, 'picked']));
   if (N.length) for (const o of STRS) if (!C.has(o) && !strHold(o) && strRides(o, N)) C.set(o, 'on');
   for (let more = true; more;) { more = false; for (const o of STRS) { if (C.has(o)) continue; const h = strHold(o); if (h && C.has(h)) { C.set(o, h); more = true; } } }   // (held by what rides: a gun on a pier at a hangar's quay...)
-  const R = { s: [...C], v: [], p: [], k: [], w: [] }, vIn = new Set(V0);
+  const R = { s: [...C], v: [], p: [], k: [], w: [], m: [] }, vIn = new Set(V0);
+  // (Nov 12: Story's HOME marker stayed behind) a marker marks the place it's in: one inside a riding structure's box goes with it, one in a
+  // dragged shape's body with the shape
+  for (const r of MARKS) { const o = [...C.keys()].find(o => { const B = strBox(o); return r.x >= B.x0 && r.x <= B.x1 && r.y >= B.top - RIDE_T && r.y <= B.foot + RIDE_T; }); if (o) R.m.push([r, o]); else if (N.some(n => shpIn(shpIv(n, Math.round(clamp(r.x, 0, WORLD_W - 1) / LT_CELL)), r.y))) R.m.push([r, null]); }
   for (const e of vehAll()) {
     const v = e.v;
     if (vIn.has(v)) { R.v.push([e, 'picked', null]); continue; }
     if (v.placed == null) { const o = v.hb != null ? strById(v.hb) : null; if (o && C.has(o)) R.v.push([e, o, o]); continue; }   // (at its structure's spot)
     const r = placedRec(v); if (!r || r.off || v._off) continue;
-    const k = vehRestKind(e); if (k === 'water') continue;      // (afloat: on its water)
-    const [x, y] = vehPos(e), yb = vehBox(e)[3], h = vehDeck(x, k === 'ground' ? y : yb);
+    const k = vehRestKind(e), [x, y] = vehPos(e);
+    if (k !== 'ground' && Math.abs(y - waterLv(clamp(x, 0, WORLD_W - 1))) <= 3 * RIDE_T) { const d = harbourAt(x); if (d && d.so && C.has(d.so)) R.v.push([e, d.so, d.so]); continue; }   // (afloat: moored at a riding dock or pier - with it; on its own it stays)
+    const yb = vehBox(e)[3], h = vehDeck(x, k === 'ground' ? y : yb);
     if (h) { if (C.has(h)) R.v.push([e, h, h]); continue; }
     const f = k === 'sub' ? floorUnder(x, y) : landTop(clamp(x, 0, WORLD_W - 1));
     if (N.length && (k === 'ground' || Math.abs(yb - f) <= 2 * RIDE_T) && rideOn(N, x, f)) R.v.push([e, 'on', null]);   // (on its ground; what flies or dives: down on it)
@@ -68713,15 +68741,18 @@ function grpDragStart(seeds) {
   const M = grpExpand(seeds), S = { s: [], i: [], v: [] };
   const isl = M.filter(m => m.k === 'i').map(m => m.I), N = isl.map(I => ISLANDS.indexOf(I)).filter(n => n >= 0);
   const R = ridersOf(N, M.filter(m => m.k === 's').map(m => m.o), M.filter(m => m.k === 'v' && m.v).map(m => m.v));
-  for (const [o, how] of R.s) S.s.push([o, o.x, strBox(o).foot, how !== 'picked']);   // (riding: along with it, on its ground - never lifted)
+  // (riding: along with it, on its ground - never lifted; held: as far as what holds it went; joined to a shore: kept to it - strShore)
+  for (const [o, how] of R.s) { const sh = how === 'on' ? strShore(o, N) : null, s0 = sh && shoreAt(N, sh.end, sh.dir, sh.y, PIER_REACH);
+    S.s.push([o, o.x, strBox(o).foot, how !== 'picked', typeof how === 'object' ? how : null, s0 != null ? Object.assign(sh, { off: o.x - s0, s0 }) : null]); }
+  S.x0 = new Map(S.s.map(a => [a[0], a[1]])); S.n = N;
   for (const I of isl) S.i.push([I, I.p.map(p => [p[0], p[1]])]);
   // (a riding vehicle keeps its height over what holds it - its structure's foot, or the ground under it; a picked one goes with the cursor)
   for (const [e, how, h] of R.v) {
     const [x, y] = vehPos(e), q = { e, x, y, t: vehTable(e), off: vehRestOff(e) };
-    if (how !== 'picked') { const sub = vehRestKind(e) === 'sub'; q.hold = h ? () => strBox(h).foot : X => sub ? floorUnder(X, y) : landTop(clamp(X, 0, WORLD_W - 1)); q.ho = y - q.hold(x); }
+    if (how !== 'picked') { const sub = vehRestKind(e) === 'sub'; q.hold = h ? () => strBox(h).foot : X => sub ? floorUnder(X, y) : landTop(clamp(X, 0, WORLD_W - 1)); q.ho = y - q.hold(x); q.h = h; }
     S.v.push(q);
   }
-  S.p = R.p.map(r => [r, r.x]); S.k = R.k; S.w = R.w;
+  S.p = R.p.map(r => [r, r.x]); S.k = R.k; S.w = R.w; S.m = R.m.map(([r, o]) => [r, r.x, r.y, o, o && strBox(o).foot]);
   // (a vehicle that is part of a moved structure - vehHost: a tower - goes with it, standing where its structure stands; built
   // again from its structure when it's let go: strChanged)
   const ids = new Set(S.s.map(a => a[0].id));
@@ -68732,12 +68763,19 @@ function grpDragMove(S, dx, dy, r) {
   if (S.s.length) { const lo = Math.min(...S.s.map(a => a[1])), hi = Math.max(...S.s.map(a => a[1])); dx = clamp(dx, 20 - lo, WORLD_W - 20 - hi); }   // (its structures kept in the world)
   // (user Nov 2) a structure with the cursor up and down too: it drops onto where it rests at its new place when its foot comes
   // within STR_SNAP press-radii of it (a few dozen screen pixels at any zoom), else it stays at the cursor's height
-  for (const [o, x, f, ride] of S.s) { o.x = Math.round(x + dx); if (ride) continue; delete o.fy; const want = f + dy; if (Math.abs(want - strBox0(o).foot) > STR_SNAP * r) o.fy = Math.round(want); }
-  for (const [I, P0] of S.i) P0.forEach(([x, d], k) => { if (!I.p[k]) return; I.p[k][0] = Math.round(x + dx); I.p[k][1] = Math.round(clamp(d + dy, ISL_MIN_D, ISL_MAX_D)); });
+  for (const [I, P0] of S.i) P0.forEach(([x, d], k) => { if (!I.p[k]) return; I.p[k][0] = Math.round(x + dx); I.p[k][1] = Math.round(clamp(d + dy, ISL_MIN_D, ISL_MAX_D)); });   // (the shapes first: a shore is looked for on them where they are now)
+  const by = o => S.x0 && S.x0.has(o) ? o.x - S.x0.get(o) : dx;   // (how far a structure of the drag went)
+  for (const [o, x, f, ride, h, sh] of S.s) {
+    if (h) { o.x = Math.round(x + by(h)); continue; }           // (held: with what holds it - S.s has it first)
+    if (sh) { const s1 = shoreAt(S.n, sh.s0 + dx, sh.dir, sh.y, SHORE_R); o.x = Math.round(s1 != null ? s1 + sh.off : x + dx); continue; }
+    o.x = Math.round(x + dx); if (ride) continue; delete o.fy; const want = f + dy; if (Math.abs(want - strBox0(o).foot) > STR_SNAP * r) o.fy = Math.round(want);
+  }
+  for (const [q, x, y, o] of S.m || []) if (!o) { q.x = Math.round(x + dx); q.y = Math.round(y + dy); }
   for (const [q, x] of S.p || []) q.x = Math.round(x + dx);     // (a hand-placed plant: laid again on its ground with the plants there - livePlants)
-  for (const q of S.v) if (q.hold) vehMoveTo(q.e, q.x + dx, q.y + dy, q.t, true);   // (a riding vehicle at its new place first: what's on the ground built there is set on it - landReseat)
+  for (const q of S.v) if (q.hold) vehMoveTo(q.e, q.x + (q.h ? by(q.h) : dx), q.y + dy, q.t, true);   // (a riding vehicle at its new place first: what's on the ground built there is set on it - landReseat)
   if (S.s.length || S.i.length) liveEdit();                     // (the ground under them built as they move - 50-zzzz-live-edit.js)
   for (const [q] of S.p || []) hplRelay(q);                    // (and on it at once - the plants there laid again as the frames go)
+  for (const [q, x, y, o, f] of S.m || []) if (o) { q.x = Math.round(x + by(o)); q.y = Math.round(y + strBox(o).foot - f); }   // (a marker in a structure: as it went, up and down with its foot)
   for (const [v, ox, o] of S.h || []) { v.x = o.x + ox; v.base = strFree(o) ? o.fy : strGround(o.x, TW.FW * TW.K * 0.6); }   // (a tower: on its structure's foot - the GUN TOWER's own, strBox0)
   // (the kraken and the wrecks on the floor: on the floor at their new place - their own moves, 50-land-tshape.js)
   for (const [q, x] of S.k || []) { const X = Math.round(x + dx); krakenMoveTo(q.id, X, seaRest(X), 1); }
@@ -68747,7 +68785,7 @@ function grpDragMove(S, dx, dy, r) {
   // its ground) when it comes within STR_SNAP press-radii of it, else held at the cursor's height - off its rest, red (vehPlaceBad).
   // One riding: as high over what holds it as it was (the ground there built already)
   for (const q of S.v) {
-    q.lx = q.x + dx;
+    q.lx = q.x + (q.h ? by(q.h) : dx);
     if (q.hold) { q.ly = q.hold(q.lx) + q.ho; q.lifted = false; } else [q.ly, q.lifted] = vehSnapY(q.e, q.lx, q.y + dy, q.off, r);
     q.e.v._lifted = q.lifted;
     vehMoveTo(q.e, q.lx, q.ly, q.t, true);
@@ -68765,6 +68803,7 @@ function grpDragEnd(S) {
   if (S.s.length) strChanged();
   if (S.i.length) islChanged();
   if (S.p && S.p.length) hplSave();                            // (the hand-placed plants that rode: laid already where they are - livePlants)
+  if (S.m && S.m.length) mkSave();                             // (and the markers)
   for (const q of S.v) if (q.lx != null) {
     const v = q.e.v; placedMoved(v, q.lx, q.ly, q.lifted); v._lifted = undefined; v._off = q.lifted ? true : undefined;   // (a placed one: kept where it's let go)
     if (placedRec(v)) { const o = placedRemake(v), e = o && vehAll().find(w => w.v === o); if (e) { if (VE.sel && VE.sel.v === v) vehSelect(e); VE.more = VE.more.map(m => m.v === v ? e : m); } }   // (and made again there by its maker: an aircraft in the air flies - placedRemake)
