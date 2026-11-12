@@ -6705,17 +6705,7 @@ function worldSeas() {
    (liveWorld, 50-zzzz-live-edit.js: a part a step - worldHarboursGen, its pieces in order) */
 function worldHarbours() { for (const _ of worldHarboursGen()) ; }
 function* worldHarboursGen() {
-  // each harbour runs from its land end (the coast) out to the end of its pier (dockAt, 06-fleet-captains)
-  // one player: the far side is open ocean (STORY: the right, where the enemy comes from). The other player's
-  // harbour still exists for the bookkeeping, but far past the edge of the world, where nothing ever reaches it
-  const mkDock = (R, far) => R ? dockAt(LAYOUT_R + (far ? 50000 : 0), 1) : dockAt(far ? -50000 : LAYOUT_L, -1);
-  const left = Object.assign(mkDock(false, false), { player: SWAP ? 1 : 0 });
-  const right = Object.assign(mkDock(true, false), { player: SWAP ? 0 : 1 });
-  homeDock = SWAP ? [right, left] : [left, right];
-  for (const d of new Set([left, right, ...homeDock])) layoutDock(d);
-  coastDocks = [left, right];
-  docksPut(harbourFromStrs(left, right, mkDock) || [left, right]);   // (the harbours as parts - 50-zz-structh.js: the harbours, homeDock, coastDocks from the structures)
-  docks.forEach((d, i) => { d.key = i; });   // (each harbour's own mark: its gulls, its perches)
+  const [left, right] = harbourLayout();
   yield;
   VIS_L = LAND ? 0 : left.viewEdge; VIS_R = LAND ? WORLD_W : right.viewEdge;   // (OPEN WORLD: the whole world; BATTLE: between the harbours)
   if (ENDLESS) { VIS_L = -Infinity; VIS_R = Infinity; }   // (STORY: no edge - the open ocean past the world's ends, 05-zzz-endless.js)
@@ -6744,7 +6734,21 @@ function* worldHarboursGen() {
   yield* buildCalmGen(); btMark('calm');
   yield;
   buoysBuild();                                          // (the harbours' own in BATTLE / OPEN WORLD, and those placed by hand - PROPS > BUOY, 31-sailboats-buoys.js)
-  yield;
+}
+// the harbours laid out from their parts (harbourFromStrs): the docks, each side's home and the coasts', the harbour towers and their guns - the
+// world's build's, and a held edit's on every move (liveHarbour, 50-zzzz-live-edit.js) -> the two coasts' docks
+function harbourLayout() {
+  // each harbour runs from its land end (the coast) out to the end of its pier (dockAt, 06-fleet-captains)
+  // one player: the far side is open ocean (STORY: the right, where the enemy comes from). The other player's
+  // harbour still exists for the bookkeeping, but far past the edge of the world, where nothing ever reaches it
+  const mkDock = (R, far) => R ? dockAt(LAYOUT_R + (far ? 50000 : 0), 1) : dockAt(far ? -50000 : LAYOUT_L, -1);
+  const left = Object.assign(mkDock(false, false), { player: SWAP ? 1 : 0 });
+  const right = Object.assign(mkDock(true, false), { player: SWAP ? 0 : 1 });
+  homeDock = SWAP ? [right, left] : [left, right];
+  for (const d of new Set([left, right, ...homeDock])) layoutDock(d);
+  coastDocks = [left, right];
+  docksPut(harbourFromStrs(left, right, mkDock) || [left, right]);   // (the harbours as parts - 50-zz-structh.js: the harbours, homeDock, coastDocks from the structures)
+  docks.forEach((d, i) => { d.key = i; });   // (each harbour's own mark: its gulls, its perches)
   towers.length = 0;
   // (the harbours as parts: a harbour's tower is its lighthouse, where it stands; one with none has a stand-in, far off and down)
   const twDocks = [], far = d => d.dir > 0 ? WORLD_W + 60000 : -60000;
@@ -6755,6 +6759,7 @@ function* worldHarboursGen() {
   for (const d of docks) if (!homeDock.includes(d) && (!HARB.on || d.lh)) towers.addRow(mkTw(d));
   for (let i = 0; i < towers.length; i++) { const d = twDocks[i], tw = towers.hAt(i); tw.dock = d; d._tw = tw; }   // (each tower its harbour, each harbour its tower)
   gunsApply();                                           // (the GUN structures: the harbour towers' cannons and pier guns - 50-zz-structh.js)
+  return [left, right];
 }
 
 // Sea life, plants and clouds
@@ -8599,8 +8604,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 985;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 12 00:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 986;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 12 01:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -46568,6 +46573,7 @@ window.addEventListener('pointermove', e => {
   e.stopImmediatePropagation();
   const [, y] = screenToWorld(e.clientX, e.clientY), K = LAKE_ED.drag;
   q.y = clamp(q.y0 + y - q.py, K.spill, lakeEdLow(K));
+  if (Math.abs(q.y - (K.lv != null ? K.lv : pocketLevel(K))) > 0.5) lakeSetLevel(K, q.y);   // (its water filled to it as it's dragged - every edit live, user Nov 11 23:41)
 }, { capture: true, passive: true });
 function lakeEdUp(e) { const q = LAKE_ED.ptr; if (!q || q.id !== e.pointerId) return; e.stopImmediatePropagation(); const K = LAKE_ED.drag; LAKE_ED.drag = LAKE_ED.ptr = null; if (Math.abs(q.y - q.y0) > 0.5) lakeSetLevel(K, q.y); }
 window.addEventListener('pointerup', lakeEdUp, { capture: true });
@@ -53809,6 +53815,10 @@ function landReseat(x0 = 0, x1 = WORLD_W) {
   for (const tw of towers) if (tw && tw.edge && tw.x >= x0 && tw.x <= x1) tw.base = top(tw.x);
   for (const t of tanks) if (t && t.state === 'alive' && on(t.x)) { t.y = top(t.x); t.vy = 0; tankSettle(t, 0, true); }
   for (const h of helis) if (h && h.state === 'landed' && on(h.x)) h.y = heliGround(h.x, -Infinity) - heliSkid();
+  // (Nov 11, a shape's point dragged under them: a car still kept her old height, in the raised ground) a car standing there - placed or at a
+  // structure's spot - put down on the new top as she was made (carSettle); a placed helicopter on its ground (placedStrVeh's)
+  for (const c of storyCars) if (c.state === 'run' && c.driven == null && !c.air && on(c.x)) { c.set = 0; c.rest = 0; carSettle(c); }
+  for (const h of civHelis) if (h.placed != null && h.state === 'parked' && on(h.x)) h.y = top(h.x) - chStand(h);
   for (const w of landWrecks) if (on(w.x) && !w.deck && !w.onDeck) { w.y = top(w.x); w._rv = 0; w.bed = lakeAt(w.x); }
   for (const W of crashes) if (!W.deck && on(W.x)) { W.y = top(W.x); for (const p of W.pieces) if (p.mode === 'land' || p.mode === 'air') { p.y = top(p.x) + 1; p.mode = lakeAt(p.x) ? 'air' : 'land'; } }
   for (const L of [civHelis, blimps, balloons, spaceJunk, shuttles]) for (const v of L) if (v.state === 'wreck' && !v.deck && on(v.x)) { v.y = top(v.x); v._rv = 0; }
@@ -53912,13 +53922,13 @@ window.addEventListener('pointerdown', e => {
   const wk = wreckPick(q.x, q.y, q.r);
   if (wk) {                                                      // (a pirate wreck: dragged anywhere; let go, she lies there)
     e.stopImmediatePropagation(); e.preventDefault();
-    seaPick(null, wk.k); SED.wreck = { w: wk, r: q.r, x0: q.x, y0: q.y, dx: 0, dy: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
+    seaPick(null, wk.k); SED.wreck = { w: wk, r: q.r, x0: q.x, y0: q.y, dx: 0, dy: 0, X: wk.x, Y: wreckBy(wk) }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
     return;
   }
   const kp = krakenPick(q.x, q.y, q.r);
   if (kp) {                                                      // (the kraken: dragged along the ocean floor; let go, it sits there)
     e.stopImmediatePropagation(); e.preventDefault();
-    seaPick(kp.rid, null); SED.kraken = { k: kp, r: q.r, x0: q.x, y0: q.y, dx: 0, dy: 0 }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
+    seaPick(kp.rid, null); SED.kraken = { k: kp, r: q.r, x0: q.x, y0: q.y, dx: 0, dy: 0, X: kp.bx, Y: kp.by }; SED.ptr = { id: e.pointerId, cx: e.clientX, cy: e.clientY, moved: false };
     return;
   }
 }, { capture: true, passive: false });
@@ -53928,15 +53938,17 @@ window.addEventListener('pointermove', e => {
   if (Math.hypot(e.clientX - P.cx, e.clientY - P.cy) > 6) P.moved = true;
   if (!P.moved) return;
   const [x, y] = screenToWorld(e.clientX, e.clientY);
-  if (SED.kraken) { SED.kraken.dx = x - SED.kraken.x0; SED.kraken.dy = y - SED.kraken.y0; return; }
-  if (SED.wreck) { SED.wreck.dx = x - SED.wreck.x0; SED.wreck.dy = y - SED.wreck.y0; }
+  // (user Nov 11 23:41: every edit live) where it's carried, at once - on the floor there within STR_SNAP of it (its own move: the floor's dressing
+  // round it on the drop - floorChanged); not before it's been carried past the press's own wobble
+  const k = SED.kraken || SED.wreck, dx = x - k.x0, dy = y - k.y0; if (!k.on && Math.hypot(dx, dy) <= 20) return; k.on = true;
+  if (SED.kraken) krakenMoveTo(k.k.rid, k.X + dx, k.Y + dy, k.r); else wreckMoveTo(k.w.k, k.X + dx, k.Y + dy, k.r);
 }, { capture: true, passive: true });
 function structUp(e) {
   const P = SED.ptr; if (!P || P.id !== e.pointerId) return;
   e.stopImmediatePropagation();
   SED.ptr = null;
-  if (SED.wreck) { const k = SED.wreck; SED.wreck = null; if (P.moved && Math.hypot(k.dx, k.dy) > 20) wreckMoveTo(k.w.k, k.w.x + k.dx, wreckBy(k.w) + k.dy, k.r); return; }
-  if (SED.kraken) { const k = SED.kraken; SED.kraken = null; if (P.moved && Math.hypot(k.dx, k.dy) > 20) krakenMoveTo(k.k.rid, k.k.bx + k.dx, k.k.by + k.dy, k.r); return; }
+  if (SED.wreck) { const k = SED.wreck; SED.wreck = null; if (k.on) floorChanged(); return; }
+  if (SED.kraken) { const k = SED.kraken; SED.kraken = null; if (k.on) floorChanged(); return; }
 }
 window.addEventListener('pointerup', structUp, { capture: true });
 window.addEventListener('pointercancel', structUp, { capture: true });
@@ -65340,7 +65352,7 @@ function natureFill(box, el) {
   cat.appendChild(el('h4', '', K.lab));
   const row = (lab, v, set, tip) => {
     const r = el('div', 'row'), i = el('input'); i.type = 'range'; i.min = 0; i.max = K.max; i.step = 1; i.value = v;
-    const out = el('output', '', String(v)); i.oninput = () => { out.textContent = i.value; }; i.onchange = () => { set(+i.value); natureChanged(); };
+    const out = el('output', '', String(v)); i.oninput = () => { out.textContent = i.value; set(+i.value); natureSchools(); natureCreatures(); }; i.onchange = () => { set(+i.value); natureChanged(); };   // (what lives there made again as it moves; let go: kept, the panel shown again)
     const l = el('label', '', lab); l.title = tip; r.append(l, i, out); cat.appendChild(r);
   };
   row('MIN ' + K.what, n0, v => { a.n0 = v; a.n1 = Math.max(v, natN(a)[1]); delete a.n; }, 'Fewest ' + K.what.toLowerCase() + ' living in this area');
@@ -67626,7 +67638,7 @@ function marineLayout(o) {
 function harbourFromStrs(left, right, mkDock) {
   HARB.on = false; HARB.tw.clear(); HARB.free = []; HARB.dirty = false;
   if (!harbourOn()) return;
-  HARB.on = true; HARB.sig = harbourSig();
+  HARB.on = true; HARB.sig = HARB.lay = harbourSig();   // (lay: what's laid out now - a held edit's, liveHarbour; sig: the last build's)
   const L = STRS.filter(o => !strFree(o)), pOf = t => t !== 0 && t !== 1 ? -1 : SIDE(0) === t ? 0 : 1, D = [];
   for (const o of L) if (isMarineS(o)) { const d = dockAt(o.x, o.flip ? 1 : -1); d.player = pOf(strOwner(o)); d.so = o; layoutDock(d); dockWater(d, d.root - d.dir * 30); layoutDock(d); D.push(d); }   // (on the water at its door)
   // each its pier: one standing in front of its quay, the same way
@@ -68337,8 +68349,8 @@ STR_LOOKS.windsock = p => {
    an island (ISLANDS[n].g), a placed vehicle's record (PLACED, r.g); a vehicle at a structure's spot belongs to its structure
    (its group is the structure's). Dragging any of them drags the whole group by the same step (grpDragStart / Move / End -
    the structures', islands' and vehicles' own drags), each the way it moves by itself: a structure follows the cursor and
-   drops onto its ground near it (STR_SNAP), an island's points move, a vehicle is moved by its table's owner; what stands on a
-   moved island rides it (along only - it sits on its ground); a moved structure's spot vehicles come along.
+   drops onto its ground near it (STR_SNAP), an island's points move, a vehicle is moved by its table's owner; what rests on a
+   moved shape rides it, and what's held by what moves comes along (ridersOf).
    ================================================================ */
 // ---- groups
 const grpM = {                                              // (a thing as a group member: k its kind, R what keeps its g)
@@ -68416,18 +68428,130 @@ function grpBoxPick(a, b) {
   WED.lineSig = JSON.stringify(TERRAIN_ED.sel);           // (wedAfter: the box's pick stands as it is - not a line pick clearing the rest)
   terrainSyncSkin(); grpPickWhole();
 }
+/* ---- WHAT RIDES (user Nov 11 23:36: "If I drag a terrain piece, everything that's on it follows - a dock, a structure, a vehicle - just like we
+   have in the editor for the plan"; the World Plan's `on`). ONE RULE: a thing rides the shapes dragged when it rests on one of them - where its own
+   rule puts it down (a structure: its ground, strGround / strBox0; a vehicle: its rest, vehRestKind; a wreck, the kraken: the floor; a hand-placed
+   plant: its ground) is that shape's top at its x (a cave's: its floor) - or when what holds it rides (strHold): a dock or a pier joined to the
+   shape's shore (the shape comes up to its deck within PIER_REACH of its end, as its deck runs into the ground - pierExt), a harbour's pier at its
+   hangar's quay, a tower or a lamp on that quay, a crane on its pier, a gun on its tower or pier (gunSeat), a LARGE hangar on its runway's deck; a
+   vehicle at a structure's spot (hb) or part of one (vehHost), a placed one on a riding deck (a pier's, a dock's, a hangar's roof, a runway).
+   What rests on nothing rides nothing: a structure held off its ground (fy), a vehicle afloat or in the air, a marker, a sea-life area (the water's),
+   a background (the far layer). A picked structure or vehicle carries what it holds the same way (its guns, its crane, its spots' vehicles). ---- */
+const RIDE_T = 12;                                          // (world units: the ground as laid against the shape's outline - a cell's rounding, a sink)
+// is (x, y) on one of the shapes N (their indices): one of its tops there - a cave's floor
+function rideOn(N, x, y) {
+  const c = Math.round(clamp(x, 0, WORLD_W - 1) / LT_CELL);
+  for (const n of N) { const v = shpIv(n, c), h = SHP.cols[n] && SHP.cols[n].k === 'H'; if (v) for (let i = h ? 1 : 0; i < v.length; i += 2) if (Math.abs(v[i] - y) <= RIDE_T) return true; }
+  return false;
+}
+// does one of the shapes N come up to a deck at y within PIER_REACH past x0..x1 (a dock's or a pier's ends - joined to its shore)
+function rideShore(N, x0, x1, y) {
+  for (let u = 0; u <= PIER_REACH; u += LT_CELL) for (const x of [x0 - u, x1 + u]) {
+    const c = Math.round(clamp(x, 0, WORLD_W - 1) / LT_CELL);
+    for (const n of N) { const v = shpIv(n, c); if (v && v.length && SHP.cols[n].k !== 'H' && v[0] <= y + 3) return true; }
+  }
+  return false;
+}
+// the structure holding o (null: none - it stands on its own ground or water)
+function strHold(o) {
+  if (isGunS(o)) { const s = gunSeat(o, STRS); return s ? s.h : null; }
+  if (o.k === 'crane') return STRS.find(q => isPierS(q) && Math.abs(o.x - q.x) < pierLenOf(q) / 2) || null;
+  if (isPierS(o)) return STRS.find(h => isMarineS(h) && !strFree(h) && (h.flip ? 1 : -1) === pierDir(o) && Math.abs(pierLandEnd(o) - marineLayout(h).root) < 60) || null;   // (harbourFromStrs' pairing)
+  if (o.k === 'gunTower' || (STR_KINDS[o.k] && STR_KINDS[o.k].lamp)) return STRS.find(h => { if (!isMarineS(h) || strFree(h)) return false; const d = marineLayout(h); return o.x >= Math.min(d.F, d.root) - 2 && o.x <= Math.max(d.F, d.root) + 2; }) || null;   // (on a harbour's quay - harbourTwBase)
+  if (o.k === 'hangarAir' && o.big) return strRunwayAt(o.x);
+  return null;
+}
+// does structure o rest on one of the shapes N
+function strRides(o, N) {
+  if (strFree(o)) return false;
+  if (o.k === 'dock') { const B = strBox(o), dy = isPierS(o) ? DECK_Y + dockWater({}, o.x).oy : B.top + WOOD.deck * B.m; return rideShore(N, B.x0, B.x1, dy); }
+  if ((STR_KINDS[o.k] || {}).buoy) return false;              // (afloat)
+  if (isMarineS(o)) { const d = marineLayout(o); return [0.2, 0.5, 0.8].some(f => { const x = d.L + d.dir * HGR_INLAND * f; return rideOn(N, x, frontTop(clamp(x, 0, WORLD_W - 1))); }); }   // (its land side)
+  const B = strBox0(o), w = B.x1 - B.x0, g = X => frontTop(clamp(X, 0, WORLD_W - 1)), xs = [o.x, o.x - w * 0.4, o.x + w * 0.4];
+  const G = Math.min(g(xs[0]), Math.max(g(xs[1]), g(xs[2])));   // (the ground it stands on - strGround's: the points of it holding it)
+  return xs.some(x => Math.abs(g(x) - G) <= RIDE_T && rideOn(N, x, g(x)));
+}
+/* (Nov 12, the user's laptop: an island raised as it was dragged - its shore further out - and its dock rode along, now on the ground, NEEDS
+   WATER) what's joined to a shore keeps to the shore: a dock's or pier's land end, a marine hangar's (its x) as far from where the shape comes up
+   to its deck as it was - joined again at the moved shoreline, its deck at its own water's level (strBox0), never lifted with the shape */
+// where, going from the sea toward the land (dir) across x - R .. x + R, one of the shapes N first comes up to a deck at y (null: nowhere) - read
+// from their outlines as they are now (shpColSpans: the points just moved, before any build)
+function shoreAt(N, x, dir, y, R) {
+  const c0 = Math.floor((x - R) / LT_CELL), c1 = Math.ceil((x + R) / LT_CELL), Q = [];
+  for (const n of N) if (ISLANDS[n] && shpK(ISLANDS[n]) !== 'H') Q.push(shpColSpans(shpPoly(ISLANDS[n]), c0, c1));
+  for (let i = 0; i <= c1 - c0; i++) { const k = dir > 0 ? i : c1 - c0 - i; if (Q.some(A => A[k].s.length && A[k].s[0] <= y + 3)) return (c0 + k) * LT_CELL; }
+  return null;
+}
+// a structure joined to a shore of the shapes N: { dir: toward the land, end: its land end, y: its deck } - a dock or pier (the side the shape
+// comes up to its deck on), a marine hangar (its land end) - or null
+function strShore(o, N) {
+  if (strFree(o)) return null;
+  if (isMarineS(o)) { const d = marineLayout(o); return { dir: d.dir, end: d.L, y: DECK_Y + dkY(d) }; }
+  if (o.k !== 'dock') return null;
+  if (isPierS(o)) return { dir: pierDir(o), end: pierLandEnd(o), y: DECK_Y + dockWater({}, o.x).oy };
+  // (a dock: its land end the one the shape is highest past - within PIER_REACH of it)
+  const B = strBox(o), y = B.top + WOOD.deck * B.m, top = (a, b) => { let t = Infinity; for (const n of N) if (ISLANDS[n] && shpK(ISLANDS[n]) !== 'H') for (const q of shpColSpans(shpPoly(ISLANDS[n]), Math.floor(a / LT_CELL), Math.ceil(b / LT_CELL))) if (q.s.length) t = Math.min(t, q.s[0]); return t; };
+  const tR = top(B.x1, B.x1 + PIER_REACH), tL = top(B.x0 - PIER_REACH, B.x0);
+  return tR === Infinity && tL === Infinity ? null : tR <= tL ? { dir: 1, end: B.x1, y } : { dir: -1, end: B.x0, y };
+}
+const SHORE_R = 2000;                                       // (world units: how far a dragged shape's shore is looked for round where it went)
+// the structure whose deck a vehicle at x with its bottom at y stands on (a pier's, a dock's, a harbour's quay or hangar roof, a runway), or null
+function vehDeck(x, y) {
+  const roof = hangarRoofUnder(x, y - RIDE_T);
+  if (roof < Infinity && Math.abs(roof - y) <= RIDE_T) { const h = docks.find(q => !q.noHangar && hangarRoofAt(q, x) === roof); if (h && h.so) return h.so; }
+  const d = harbourAt(x); if (d && d.so && Math.abs(pierDeckY(d) - y) <= RIDE_T) return d.so;
+  const rw = strRunwayAt(x); if (rw && Math.abs(strRunwayBox(rw).top - y) <= RIDE_T) return rw;
+  return null;
+}
+/* everything that comes along when the shapes N (indices) and the structures and vehicles picked (S0, V0) are dragged: s [structure, how],
+   v [vehicle entry, how, the structure holding it or null: the ground], p hand-placed plants, k / w the krakens' and wrecks' records on the floor
+   [record, x] - how: 'picked', 'on' (its shape) or the structure holding it */
+function ridersOf(N, S0 = [], V0 = []) {
+  const C = new Map(S0.map(o => [o, 'picked']));
+  if (N.length) for (const o of STRS) if (!C.has(o) && !strHold(o) && strRides(o, N)) C.set(o, 'on');
+  for (let more = true; more;) { more = false; for (const o of STRS) { if (C.has(o)) continue; const h = strHold(o); if (h && C.has(h)) { C.set(o, h); more = true; } } }   // (held by what rides: a gun on a pier at a hangar's quay...)
+  const R = { s: [...C], v: [], p: [], k: [], w: [], m: [] }, vIn = new Set(V0);
+  // (Nov 12: Story's HOME marker stayed behind) a marker marks the place it's in: one inside a riding structure's box goes with it, one in a
+  // dragged shape's body with the shape
+  for (const r of MARKS) { const o = [...C.keys()].find(o => { const B = strBox(o); return r.x >= B.x0 && r.x <= B.x1 && r.y >= B.top - RIDE_T && r.y <= B.foot + RIDE_T; }); if (o) R.m.push([r, o]); else if (N.some(n => shpIn(shpIv(n, Math.round(clamp(r.x, 0, WORLD_W - 1) / LT_CELL)), r.y))) R.m.push([r, null]); }
+  for (const e of vehAll()) {
+    const v = e.v;
+    if (vIn.has(v)) { R.v.push([e, 'picked', null]); continue; }
+    if (v.placed == null) { const o = v.hb != null ? strById(v.hb) : null; if (o && C.has(o)) R.v.push([e, o, o]); continue; }   // (at its structure's spot)
+    const r = placedRec(v); if (!r || r.off || v._off) continue;
+    const k = vehRestKind(e), [x, y] = vehPos(e);
+    if (k !== 'ground' && Math.abs(y - waterLv(clamp(x, 0, WORLD_W - 1))) <= 3 * RIDE_T) { const d = harbourAt(x); if (d && d.so && C.has(d.so)) R.v.push([e, d.so, d.so]); continue; }   // (afloat: moored at a riding dock or pier - with it; on its own it stays)
+    const yb = vehBox(e)[3], h = vehDeck(x, k === 'ground' ? y : yb);
+    if (h) { if (C.has(h)) R.v.push([e, h, h]); continue; }
+    const f = k === 'sub' ? floorUnder(x, y) : landTop(clamp(x, 0, WORLD_W - 1));
+    if (N.length && (k === 'ground' || Math.abs(yb - f) <= 2 * RIDE_T) && rideOn(N, x, f)) R.v.push([e, 'on', null]);   // (on its ground; what flies or dives: down on it)
+  }
+  if (!N.length) return R;
+  for (const r of HPL) if (rideOn(N, r.x, hplGround(r.x))) R.p.push(r);
+  for (const k of KRAKENS) { const r = KR_SET.find(q => q.id === k.rid); if (r && r.y == null && rideOn(N, k.bx, seabedY(clamp(k.bx, 0, WORLD_W - 1)))) R.k.push([r, k.bx]); }
+  for (const w of pirateWrecks) { const r = WRECK_SET.find(q => q.id === w.k); if (r && w.y == null && rideOn(N, w.x, seabedY(clamp(w.x, 0, WORLD_W - 1)))) R.w.push([r, w.x]); }
+  return R;
+}
 // ---- the group drag (the structures', islands' and vehicles' own drags call these)
 function grpDragStart(seeds) {
   const M = grpExpand(seeds), S = { s: [], i: [], v: [] };
-  const isl = M.filter(m => m.k === 'i').map(m => m.I), onI = o => isl.some(I => { const xs = I.p.map(p => p[0]); return o.x > Math.min(...xs) && o.x < Math.max(...xs); });   // (a shape's loop: its whole width - 50-land-shapes)
-  const sIn = new Set(M.filter(m => m.k === 's').map(m => m.o));
-  for (const g of STRS) if (isGunS(g) && !sIn.has(g)) { const s = gunSeat(g, STRS); if (s && sIn.has(s.h)) sIn.add(g); }   // (a gun goes with what carries it - a tower, a pier: the guns' rule, 50-zz-structh.js)
-  for (const o of STRS) if (sIn.has(o) || onI(o)) S.s.push([o, o.x, strBox(o).foot, onI(o)]);   // (on a moved island: it rides it)
+  const isl = M.filter(m => m.k === 'i').map(m => m.I), N = isl.map(I => ISLANDS.indexOf(I)).filter(n => n >= 0);
+  const R = ridersOf(N, M.filter(m => m.k === 's').map(m => m.o), M.filter(m => m.k === 'v' && m.v).map(m => m.v));
+  // (riding: along with it, on its ground - never lifted; held: as far as what holds it went; joined to a shore: kept to it - strShore)
+  for (const [o, how] of R.s) { const sh = how === 'on' ? strShore(o, N) : null, s0 = sh && shoreAt(N, sh.end, sh.dir, sh.y, PIER_REACH);
+    S.s.push([o, o.x, strBox(o).foot, how !== 'picked', typeof how === 'object' ? how : null, s0 != null ? Object.assign(sh, { off: o.x - s0, s0 }) : null]); }
+  S.x0 = new Map(S.s.map(a => [a[0], a[1]])); S.n = N;
   for (const I of isl) S.i.push([I, I.p.map(p => [p[0], p[1]])]);
-  const vIn = new Set(M.filter(m => m.k === 'v' && m.v).map(m => m.v)), ids = new Set(S.s.map(a => a[0].id));
-  for (const e of vehAll()) if (vIn.has(e.v) || (e.v.placed == null && e.v.hb != null && ids.has(e.v.hb))) { const [x, y] = vehPos(e); S.v.push({ e, x, y, t: vehTable(e), off: vehRestOff(e) }); }
+  // (a riding vehicle keeps its height over what holds it - its structure's foot, or the ground under it; a picked one goes with the cursor)
+  for (const [e, how, h] of R.v) {
+    const [x, y] = vehPos(e), q = { e, x, y, t: vehTable(e), off: vehRestOff(e) };
+    if (how !== 'picked') { const sub = vehRestKind(e) === 'sub'; q.hold = h ? () => strBox(h).foot : X => sub ? floorUnder(X, y) : landTop(clamp(X, 0, WORLD_W - 1)); q.ho = y - q.hold(x); q.h = h; }
+    S.v.push(q);
+  }
+  S.p = R.p.map(r => [r, r.x]); S.k = R.k; S.w = R.w; S.m = R.m.map(([r, o]) => [r, r.x, r.y, o, o && strBox(o).foot]);
   // (a vehicle that is part of a moved structure - vehHost: a tower - goes with it, standing where its structure stands; built
   // again from its structure when it's let go: strChanged)
+  const ids = new Set(S.s.map(a => a[0].id));
   S.h = []; for (const e of vehAll()) { const o = vehHost(e); if (o && ids.has(o.id) && e.k === 'tower') S.h.push([e.v, e.v.x - o.x, o]); }
   return S;
 }
@@ -68435,18 +68559,33 @@ function grpDragMove(S, dx, dy, r) {
   if (S.s.length) { const lo = Math.min(...S.s.map(a => a[1])), hi = Math.max(...S.s.map(a => a[1])); dx = clamp(dx, 20 - lo, WORLD_W - 20 - hi); }   // (its structures kept in the world)
   // (user Nov 2) a structure with the cursor up and down too: it drops onto where it rests at its new place when its foot comes
   // within STR_SNAP press-radii of it (a few dozen screen pixels at any zoom), else it stays at the cursor's height
-  for (const [o, x, f, ride] of S.s) { o.x = Math.round(x + dx); if (ride) continue; delete o.fy; const want = f + dy; if (Math.abs(want - strBox0(o).foot) > STR_SNAP * r) o.fy = Math.round(want); }
+  for (const [I, P0] of S.i) P0.forEach(([x, d], k) => { if (!I.p[k]) return; I.p[k][0] = Math.round(x + dx); I.p[k][1] = Math.round(clamp(d + dy, ISL_MIN_D, ISL_MAX_D)); });   // (the shapes first: a shore is looked for on them where they are now)
+  const by = o => S.x0 && S.x0.has(o) ? o.x - S.x0.get(o) : dx;   // (how far a structure of the drag went)
+  for (const [o, x, f, ride, h, sh] of S.s) {
+    if (h) { o.x = Math.round(x + by(h)); continue; }           // (held: with what holds it - S.s has it first)
+    if (sh) { const s1 = shoreAt(S.n, sh.s0 + dx, sh.dir, sh.y, SHORE_R); o.x = Math.round(s1 != null ? s1 + sh.off : x + dx); continue; }
+    o.x = Math.round(x + dx); if (ride) continue; delete o.fy; const want = f + dy; if (Math.abs(want - strBox0(o).foot) > STR_SNAP * r) o.fy = Math.round(want);
+  }
+  for (const [q, x, y, o] of S.m || []) if (!o) { q.x = Math.round(x + dx); q.y = Math.round(y + dy); }
+  for (const [q, x] of S.p || []) q.x = Math.round(x + dx);     // (a hand-placed plant: laid again on its ground with the plants there - livePlants)
+  for (const q of S.v) if (q.hold) vehMoveTo(q.e, q.x + (q.h ? by(q.h) : dx), q.y + dy, q.t, true);   // (a riding vehicle at its new place first: what's on the ground built there is set on it - landReseat)
+  if (S.s.length || S.i.length) liveEdit();                     // (the ground under them built as they move - 50-zzzz-live-edit.js)
+  for (const [q] of S.p || []) hplRelay(q);                    // (and on it at once - the plants there laid again as the frames go)
+  for (const [q, x, y, o, f] of S.m || []) if (o) { q.x = Math.round(x + by(o)); q.y = Math.round(y + strBox(o).foot - f); }   // (a marker in a structure: as it went, up and down with its foot)
   for (const [v, ox, o] of S.h || []) { v.x = o.x + ox; v.base = strFree(o) ? o.fy : strGround(o.x, TW.FW * TW.K * 0.6); }   // (a tower: on its structure's foot - the GUN TOWER's own, strBox0)
-  for (const [I, P0] of S.i) P0.forEach(([x, d], k) => { if (!I.p[k]) return; I.p[k][0] = Math.round(x + dx); I.p[k][1] = Math.round(clamp(d + dy, ISL_MIN_D, ISL_MAX_D)); });
-  // (user Nov 2 14:13: "It does not allow me to lift it ... we made a change for that with structures. That should be global (the red
-  // if invalid etc)") a vehicle the same: with the cursor up and down too, dropping onto where it rests at its new place (its water,
-  // its ground) when it comes within STR_SNAP press-radii of it, else held at the cursor's height - off its rest, red (vehPlaceBad)
+  // (the kraken and the wrecks on the floor: on the floor at their new place - their own moves, 50-land-tshape.js)
+  for (const [q, x] of S.k || []) { const X = Math.round(x + dx); krakenMoveTo(q.id, X, seaRest(X), 1); }
+  for (const [q, x] of S.w || []) { const X = Math.round(x + dx); wreckMoveTo(q.id, X, seaRest(X), 1); }
+  // (user Nov 2 14:13: "It does not allow me to lift it ... we made a change for that with structures. That should be global (the red if
+  // invalid etc)") a vehicle the same: with the cursor up and down too, dropping onto where it rests at its new place (its water,
+  // its ground) when it comes within STR_SNAP press-radii of it, else held at the cursor's height - off its rest, red (vehPlaceBad).
+  // One riding: as high over what holds it as it was (the ground there built already)
   for (const q of S.v) {
-    q.lx = q.x + dx; [q.ly, q.lifted] = vehSnapY(q.e, q.lx, q.y + dy, q.off, r);
+    q.lx = q.x + (q.h ? by(q.h) : dx);
+    if (q.hold) { q.ly = q.hold(q.lx) + q.ho; q.lifted = false; } else [q.ly, q.lifted] = vehSnapY(q.e, q.lx, q.y + dy, q.off, r);
     q.e.v._lifted = q.lifted;
     vehMoveTo(q.e, q.lx, q.ly, q.t, true);
   }
-  if (S.s.length || S.i.length) liveEdit();                     // (the ground under them built as they move - 50-zzzz-live-edit.js)
 }
 // a vehicle at height y over x (dragged or spawned): onto its rest when within STR_SNAP press-radii of it, else held there off it -
 // [y, lifted]; a sub anywhere down in the water, up out of it off
@@ -68459,6 +68598,8 @@ function vehSnapY(e, x, y, off, r) {
 function grpDragEnd(S) {
   if (S.s.length) strChanged();
   if (S.i.length) islChanged();
+  if (S.p && S.p.length) hplSave();                            // (the hand-placed plants that rode: laid already where they are - livePlants)
+  if (S.m && S.m.length) mkSave();                             // (and the markers)
   for (const q of S.v) if (q.lx != null) {
     const v = q.e.v; placedMoved(v, q.lx, q.ly, q.lifted); v._lifted = undefined; v._off = q.lifted ? true : undefined;   // (a placed one: kept where it's let go)
     if (placedRec(v)) { const o = placedRemake(v), e = o && vehAll().find(w => w.v === o); if (e) { if (VE.sel && VE.sel.v === v) vehSelect(e); VE.more = VE.more.map(m => m.v === v ? e : m); } }   // (and made again there by its maker: an aircraft in the air flies - placedRemake)
@@ -69305,17 +69446,26 @@ function hplSave() { try { if (HPL.length) localStorage.setItem('bd_plants', JSO
 const hplNewId = () => 1 + HPL.reduce((m, r) => Math.max(m, r.id), 0);
 const hplPrefabs = () => Object.keys(VEG_PREFABS).map(k => [k, VEG_PREFABS[k].lab || k.toUpperCase()]);
 // (tropPalms) each one laid as a plant of land.props: its deck's band in the drawing order, its own sizes and tint as its deck entry
-function hplLay() {
+function hplLay(L = HPL) {
   const runs = land.islRuns || [];
-  for (const r of HPL) {
+  for (const r of L) {
     const P = VEG_PREFABS[r.p]; if (!P || plOut(r.x)) continue;
     const d = clamp(r.d | 0, 0, 3), isl = runs.some(([a, b]) => r.x > a && r.x < b) && landTop(r.x) < frontTop(r.x) - 2;
     const ve = { plantMin: r.s ?? 1, plantMax: r.s ?? 1, sizeMin: r.leaf ?? 1, sizeMax: r.leaf ?? 1, tint: r.tint ?? VTUNE.tree.tint };
-    land.props.push(Object.assign({ x: r.x, pick: (r.id * 97) % 1000, s: 1, flip: !!r.flip, z: d + 0.5, alive: true, deck: d + 1, ve, hp: r.id, rot: (r.rot || 0) * Math.PI / 180 }, isl ? { isl: true } : {}, P.make));
+    land.props.push(Object.assign({ x: r.x, pick: (r.id * 97) % 1000, s: 1, flip: !!r.flip, z: d + 0.5, alive: true, deck: d + 1, ve, hp: r.id, hpl: r.id, rot: (r.rot || 0) * Math.PI / 180 }, isl ? { isl: true } : {}, P.make));
   }
 }
 // the plants laid again after an edit (the deck plants with them - rigReplant)
 const hplChanged = () => { hplSave(); if (typeof rigReplant === 'function' && land.props) rigReplant(); };
+// (user Nov 11 23:41: "all actions in the UI editor should all be real time") one laid again where it is and as it's set now, the rest kept - as it's
+// dragged, as a slider moves (its own entry: hpl); let go, all of them as always (hplChanged)
+function hplRelay(r) {
+  if (!land.props) return;
+  land.props = land.props.filter(it => it.hpl !== r.id);
+  const n0 = land.props.length; hplLay([r]);
+  for (let i = n0; i < land.props.length; i++) { const it = land.props[i]; Object.assign(it, { pk: it.kind, state: 'stand', hp: PK[it.kind].hp, heat: 0, fire: 0, burnT: 0, burnMax: PK[it.kind].burn * (0.8 + 0.4 * hash(it.x * 0.13)), char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0, ph: hash(it.x * 0.37) * 6, gy: propTop(it) }); }   // (as rigReplant stands it)
+  land.props.sort((a, b) => b.z - a.z); plantsRegrid();
+}
 // ---- the editor
 const HPE = { sel: [], drag: null };
 const hplOpen = () => NSKY.editor.TUNE.world();
@@ -69333,7 +69483,7 @@ window.addEventListener('pointerdown', ev => {
 window.addEventListener('pointermove', ev => {
   const d = HPE.drag; if (!d || d.id !== ev.pointerId) return;
   if (!d.moved && Math.abs(ev.clientX - d.cx) < 6) return;
-  d.moved = true; const [X] = vehWorld(ev); d.r.x = Math.round(d.x0 + X - d.X);
+  d.moved = true; const [X] = vehWorld(ev); d.r.x = Math.round(d.x0 + X - d.X); hplRelay(d.r);
   ev.stopImmediatePropagation();
 }, { capture: true, passive: true });
 const hplUp = ev => { const d = HPE.drag; if (d && d.id === ev.pointerId) { HPE.drag = null; if (d.moved) { hplChanged(); if (typeof undoCommit === 'function') setTimeout(undoCommit, 0); } ev.stopImmediatePropagation(); } };
@@ -69357,7 +69507,7 @@ function hplFill(box, el) {
   const r = L[0], css = OBJ.ui.css, c = el('div', 'cat'); c.appendChild(el('h4', '', L.length > 1 ? L.length + ' PLANTS' : (VEG_PREFABS[r.p] || {}).lab || 'PLANT'));
   const all = f => { for (const q of L) f(q); hplChanged(); };
   const sel = (lab, opts, val, set, tip) => { const row = el('div', 'row'), s = el('select'), l = el('label', '', lab); s.style.cssText = css; l.title = tip; for (const [v, t] of opts) { const o = document.createElement('option'); o.value = v; o.textContent = t; s.appendChild(o); } s.value = val; s.onchange = () => set(s.value); row.append(l, s); c.appendChild(row); };
-  const sl = (lab, k, lo, hi, st, d, tip) => { const row = el('div', 'row'), l = el('label', '', lab), i = el('input'), out = el('output', '', String(+(r[k] ?? d).toFixed(2))); l.title = tip; i.type = 'range'; i.min = lo; i.max = hi; i.step = st; i.value = r[k] ?? d; i.oninput = () => { out.textContent = String(+(+i.value).toFixed(2)); }; i.onchange = () => all(q => { q[k] = +i.value; }); row.append(l, i, out); c.appendChild(row); };
+  const sl = (lab, k, lo, hi, st, d, tip) => { const row = el('div', 'row'), l = el('label', '', lab), i = el('input'), out = el('output', '', String(+(r[k] ?? d).toFixed(2))); l.title = tip; i.type = 'range'; i.min = lo; i.max = hi; i.step = st; i.value = r[k] ?? d; i.oninput = () => { out.textContent = String(+(+i.value).toFixed(2)); for (const q of L) { q[k] = +i.value; hplRelay(q); } }; i.onchange = () => all(q => { q[k] = +i.value; }); row.append(l, i, out); c.appendChild(row); };
   sel('PREFAB', hplPrefabs(), r.p, v => all(q => { q.p = v; }), 'Which plant it is');
   sel('DECK', VEG_DECKS.map((L, i) => [i, 'DECK ' + i + (i === 0 ? ' (IN FRONT)' : i === 1 ? ' (COLLISION)' : '')]), r.d | 0, v => all(q => { q.d = +v; }), 'Which deck it is drawn in');
   { const row = el('div', 'row'), l = el('label', '', 'FLIP'), t = NSKY.editor.TUNE.toggle(r.flip ? 1 : 0); l.title = 'Face the other way'; t.addEventListener('input', () => all(q => { q.flip = !!+t.value; })); row.append(l, t); c.appendChild(row); }
@@ -69508,6 +69658,7 @@ function* liveApplyGen(held) {
   if (rs.length) { const [a, b] = liveMerge(rs, 0).reduce((A, r) => [Math.min(A[0], r[0]), Math.max(A[1], r[1])], [Infinity, -Infinity]); yield* liveGnd(a, b); }   // (the ground solids' tops there - 50-land-zz-ground)
   else if (GND.top) GND.ver = ISL_VER;                          // (no shape changed: as built)
   liveStructs(B, rs);
+  if (held && HARB.on && harbourSig() !== HARB.lay) liveHarbour();   // (a harbour's part changed while held: the harbours laid out on this move)
   if (JSON.stringify(LAKE_SET) !== B.LK) { const xs = new Set([...JSON.parse(B.LK), ...LAKE_SET].map(q => q.x)); for (const K of land.pockets || []) for (const x of xs) if (x > K.x0 && x < K.x1) rs.push([lvCol(K.x0), lvCol(K.x1)]); }
   if (liveCaveP() !== B.CV) for (const n of SHP.holes) { const S = SHP.cols[n]; if (S) rs.push([S.c0, S.c1]); }   // (the CAVES sliders: every cave)
   // (the world's parts the land is laid from - its width, its seas, its harbours: on the drop, in place - liveWorld)
@@ -69781,6 +69932,19 @@ function liveFleet(home0) {
     if (sb) { if (sb.state === 'docked' || (was && was.stand)) { Object.assign(sb, makeSub(p, d)); if (none) sb.state = 'gone'; } else sb.dock = d; }
     if (was && !!was.stand !== !!d.stand) { fleet[p].ship = none ? 0 : FLEET.ship; fleet[p].sub = none ? 0 : FLEET.sub; }
   }
+}
+/* (user Nov 11 23:41: "when I extend a dock or move a dock, it dynamically creates the dock in real time too. Like all actions in the UI editor should
+   all be real time") a held edit that changed a harbour's parts - a marine hangar, a pier, a dock, a tower, a crane dragged; a LENGTH, a FLIP, an OWNER,
+   a spot changed as a slider moves: the harbours laid out again from their parts on that move (harbourLayout - their docks' rows, the piers' pillars,
+   the towers and their guns; the buoys, the land's towers, each side's fleet at home), the old ones drawn till then. All of them, in one pass over
+   the parts (~1 ms the world): they're paired across the parts - a pier joins the hangar whose quay it meets, a tower the nearest hangar of its owner,
+   each side's home is chosen among them. What's laid from where a harbour stands waits for the drop (liveWorld 'harbour' - the sea floor's shores
+   and shape, the sheltered water, the land's columns under a pad at sea, the birds' perches: ~25 ms, past a move's budget) */
+function liveHarbour() {
+  const sig = HARB.sig, home0 = homeDock.slice();
+  harbourLayout(); HARB.sig = sig;                              // (the drop still sees the change - liveApplyGen's why)
+  buoysBuild(); if (LAND) landTowersBuild();
+  liveFleet(home0);
 }
 /* ---- the drop: the world's parts if they changed (liveWorld); the sea floor's dressing where the floor changed - a job after the edit's (now: the
    jobs all done here - the editor closed) */
