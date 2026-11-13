@@ -7416,7 +7416,7 @@ function hitTest(sh, x, y, inside) {
 
 //@src 09-zz-biomes.js:1
 /* ---- THE NEW BIOMES' GROUNDS (user Nov 7, the TODO list's BIOME EDITOR: "Ice - snow base (new)", "Swamp - mud (new)", "Volcanic - rock lava (new)").
-   Stand-ins until the art comes, made from the ground there is: ICE and VOLCANIC are built as MOUNTAIN (bare rock all through, its boulders proud
+   Stand-ins until the art comes, made from the ground there is: ICE and VOLCANIC are built as MOUNTAIN (bare rock all through, its boulders sunk
    on top, no forest - land.mtn), SWAMP as FOREST (grass over earth); each then takes its own colours, cell by cell, as it's painted
    (paintLandChunk, an island's body under the water too - ltBody). land.bio: a column's biome (0 none, 1 ICE, 2 SWAMP, 3 VOLCANIC);
    a segment's own by its skin (BIO_ISK). ---- */
@@ -8665,8 +8665,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 998;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 17:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 999;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 17:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -44369,7 +44369,7 @@ const islSegEndRow = c => Math.min(Math.ceil((WATER_Y + 2 - LT_Y0) / LT_CELL), l
 const islDesert = x => { const k = islSkinC(ltCol(x)); return k ? k === 2 : lookD(x); };
 const islTropAt = x => { const k = islSkinC(ltCol(x)); return k ? k === 4 : landTrop(x); };
 // the stones of the segments in a country - in their own earth, never crossing into the ground in front ("You can never slice a rock"):
-// boulders half sunk in their tops (some standing half out), the earth packed with stones; none in the desert's dry earth. (Nov 8: slice by
+// boulders sunk under their tops (never out of them - the ground smooth), the earth packed with stones; none in the desert's dry earth. (Nov 8: slice by
 // slice with the ground's own - stonesS1 / stonesS2, 50-land-terrain.js: these are the segments' parts of a slice, from the slice's draws)
 const islStoneBot = c => islSegEndRow(c) * LT_CELL + LT_Y0;
 function islStoneOwn(x, y, rx, ry) { for (const u of [-1, -0.5, 0, 0.5, 1]) { const xx = x + u * rx, c = ltCol(xx); if (c < 0 || c >= land.cols || ISLE[c] !== 2 || seaAtX(xx) || y + ry + 3 > islStoneBot(c)) return false; } return true; }
@@ -44385,8 +44385,7 @@ function islStonesBoulders(k, X0, X1, R) {
       const rx = stClampR((8 + R() * 9) * (q ? 0.75 : 1) * boulderScale(R) * SS), ry = rx * (0.62 + R() * 0.18), bx = x + (q - (n - 1) / 2) * rx * 2.3 + R() * 4, c = ltCol(bx);
       if (bx < X0 || bx >= X1 || c < 0 || c >= land.cols || ISLE[c] !== 2) continue;
       const top = land.itop[c], by = top + ry * (0.88 + R() * 0.14);
-      if (R() < 0.45 && rx > 9) { if (islStoneOwn(bx, top + ry * 0.35, rx * 1.15, ry * 1.1)) proudBoulder(bx, stClampR(rx * 1.15), ry * 1.1, R); continue; }
-      const fy = sinkToFit(bx, by, rx, ry); if (fy != null && islStoneOwn(bx, fy, rx, ry) && stoneFree(bx, fy, rx, ry, 2)) addStone(bx, fy, rx, ry, true, false);
+      const fy = sinkToFit(bx, by, rx, ry); if (fy != null && islStoneOwn(bx, fy, rx, ry) && stoneFree(bx, fy, rx, ry, 2)) addStone(bx, fy, rx, ry, true);
     }
   }
 }
@@ -44400,22 +44399,6 @@ function islStonesCand(k, X0, X1, R, cand, stage) {
       if (stage === 1) for (let q = 0; q < 14; q++) { const d = Math.pow(R(), 0.85) * dep, rx = stClampR(3 * SS * Math.pow(1 + 11 * SV2, Math.pow(R(), 0.9)) * (0.7 + 0.75 * Math.min(1, d / 250))); cand.push([c * LT_CELL + R() * 2 * LT_CELL, top + d, rx, rx * (0.66 + R() * 0.26), R(), 1]); }
       else for (let q = 0; q < 12; q++) { const rx = (1.8 + R() * 2.8) * SS; cand.push([c * LT_CELL + R() * 2 * LT_CELL, top + R() * dep, rx, rx * (0.7 + R() * 0.25), R(), 1]); }
     }
-  }
-}
-/* (user Nov 1, with the tropical set's pictures: "I like the little rocks near the water and sand above. So that the bottom of
-   the sea feels more rocky and sandy") the TROPICAL ground's shore: a row of dark boulders where its top meets the water - the
-   main ground's and a segment's alike - half out of it, never on each other. Their own seed: nothing else moves */
-function tropShoreRocks() {
-  const Rs = seededRng(6173), SS = NET.role === 'local' ? bgP('bgss', 1) : 1;
-  const tropAt = c => { const seg = ISLE !== null && ISLE[c] === 2; return seg ? (land.iskin && land.iskin[c] ? land.iskin[c] === 4 : land.trop[c]) && land.itop : land.trop && land.trop[c]; };
-  const topAt = c => ISLE !== null && ISLE[c] === 2 && land.itop ? land.itop[c] : land.surf[c];
-  for (let c = 0; c < land.cols; c++) {
-    if (!tropAt(c) || !onLand(c * LT_CELL)) continue;
-    const t = topAt(c); if (t < WATER_Y - 26 || t > WATER_Y + 8) continue;   // (its top by the water's line: the shore)
-    const x = c * LT_CELL + Rs() * LT_CELL, rx = (5 + Rs() * 6) * SS, ry = rx * (0.7 + Rs() * 0.15), y = WATER_Y - ry * (0.15 + Rs() * 0.35);
-    if (!stoneFree(x, y, rx, ry, 1)) continue;
-    addStone(x, y, rx, ry, true, true);
-    c += Math.floor(rx * (1.2 + Rs() * 0.6) / LT_CELL);
   }
 }
 // (the sea's pass, 43-render-objects: after the far rows of the floor, before the floor in front) the islands, behind the
@@ -46470,7 +46453,7 @@ function buildLandProps0() {
   if (!PL_X) RIGS_ST.clear();   // (the plants laid again: none keeps the state the last ones had - a torn leaf, a bend, a snapped trunk. Kept by place, a plant at the same spot took its
                      // old torn leaves back - user Nov 8 19:42, the Biome Editor's RESET)
   const AS = airTreeSpans(), ok = x => onLand(x) && !isleCol(x) && !onApron(x) && !nearAirport(x, AS) &&   // (every plant asks nearAirport - user Nov 3 09:22)
-    !structNear(x, 260) && !(land.proud || []).some(([a, b]) => x > a - 6 && x < b + 6);
+    !structNear(x, 260);
   // (user Nov 13 15:35: "mountains ... no longer have trees" - an old tree stood on his MOUNTAIN island: a biome with no plants on its decks got the old
   // vegetation - the forest kit's trees on grass, the desert kit's oasis palms, scrub and cacti, island tops' trees. Gone: every plant is a deck's -
   // tropPalms, 50-land-plants.js - and a biome whose decks hold none has none)
@@ -48105,13 +48088,10 @@ function plantSpots(add) {
 // (the grass burnt black along the ground's top - PLT.scar - is drawn with the ground: the grid's draw, 50-land-zz-grid.js ggScar)
 // (user Oct 31) the ground a thing that grows stands on: a segment's own (isl), else the ground in front's - under a
 // segment over land, not on the segment's top behind it
-// (user Nov 8 11:05) where a boulder stands out of the ground, the ground's own line under it (land.gTop - proudBoulder), not the rock's top; dug
-// lower since (a crater): the ground as it is
-const gLine = (x, y) => { const G = land.gTop, v = G && G.size ? G.get(ltCol(x)) : undefined; return v === undefined ? y : Math.max(v, y); };
 // (user Nov 8 12:42: "when I explode the terrain near a tree, they are falling down") a plant on DECK 2 or further back stands behind the ground in front:
 // a crater in that ground isn't under it - it keeps the ground's line as built (land.surf), never dropping into the hole in front of it
 const backTop = x => { const c = ltCol(x), S = land.surf; if (!S || c < 0 || c >= S.length) return frontTop(x); return Math.min(frontTop(x), LT_Y0 + Math.ceil((S[c] - LT_Y0) / LT_CELL) * LT_CELL); };
-const propTop = it => it.open != null ? sandY(it.x) - deckRaise(it) : it.cave ? it.cy : (it.low ? landFloor(it.x) : gLine(it.x, it.isl ? landTop(it.x) : it.deck >= 3 && !it.uw ? backTop(it.x) : frontTop(it.x))) - deckRaise(it);   // (underwater: the floor itself - tropPalms' uw)   // (low: under an overhang, on the ground below it - tropPalms)
+const propTop = it => it.open != null ? sandY(it.x) - deckRaise(it) : it.cave ? it.cy : (it.low ? landFloor(it.x) : it.isl ? landTop(it.x) : it.deck >= 3 && !it.uw ? backTop(it.x) : frontTop(it.x)) - deckRaise(it);   // (underwater: the floor itself - tropPalms' uw)   // (low: under an overhang, on the ground below it - tropPalms)
 // (user Nov 7 12:47, the Biome Editor sketch: "each deck was a bit raised compared to the previous one ... to give some depth to it, but only slightly")
 // a deck plant's foot that much higher for each deck behind deck 0 (DECK RAISE, ALL PLANTS)
 const deckRaise = it => it.deck > 1 ? (it.deck - 1) * ((VTUNE.tree && VTUNE.tree.deckRaise) || 0) : 0;
@@ -48232,7 +48212,7 @@ function tropPalms() {
   // (user Nov 4 13:33, Story: "you only transfered the new palm trees" - its TROPICAL is segments and islands, where only the old palms grew) the decks
   // on a TROPICAL segment's or island's top too: every plant of the set, wherever the ground is TROPICAL
   const runs = land.islRuns || [], inRun = x => runs.some(([a, b]) => x > a + 10 && x < b - 10);
-  const okIsl = (x, w) => inRun(x) && (VEG_MODE ? true : biomeAtX(x, true) === B) && (B === 'desert' || !islDesert(x)) && landTop(x) < WATER_Y - 4 && !nearAir(x) && Math.abs(landTop(x - w) - landTop(x + w)) <= w && !(land.proud || []).some(([p, q]) => x > p - 10 && x < q + 10);
+  const okIsl = (x, w) => inRun(x) && (VEG_MODE ? true : biomeAtX(x, true) === B) && (B === 'desert' || !islDesert(x)) && landTop(x) < WATER_Y - 4 && !nearAir(x) && Math.abs(landTop(x - w) - landTop(x + w)) <= w;
   // (user Nov 3 22:05: "a section per deck - Add Prefab (to add plants to that deck), Amount") the TROPICAL ground's DECKS (VEG_DECKS,
   // 50-land-zz-rig.js): deck 1 in front, deck 3 at the back; each a list of prefabs, each with its AMOUNT - laid at its prefab's spacing /
   // its amount, its own seed (the deck and its place in it), drawn in its deck's band (z: deck 1 0..1, deck 2 1..2, deck 3 2..3 - land.props
@@ -52061,8 +52041,9 @@ const ugReach = () => bgP('bgug', 65);
    this transition between two rock types with a sharp line. You actually have to place the rocks in a natural way where
    there's dirt between them. You can never slice a rock.") ----
    Every stone is a whole thing, placed once the ground is shaped: an oval at its own place and size, brown (in the
-   earth) or grey (a boulder - hard, it stops a dig). The grey boulders go first: half sunk in the grass here and there,
-   and set into the outcrops' humps, each whole, standing out of the ground as far as it does. Then the earth is packed
+   earth) or grey (a boulder - hard, it stops a dig). The grey boulders go first, sunk whole just under the ground's top -
+   never standing out of it (user Nov 13: "The terrain should always be smooth unless it's been destroyed. If I want rocks
+   for collision, I would place them manually or on the deck one of the biome"). Then the earth is packed
    with brown stones and the odd grey one, biggest first, each only where it fits wholly in the earth - under the grass,
    clear of the sand, the concrete and the air - and clear of every other stone, so there's always earth between them.
    Painting a cell: the stone it's in (lit from the upper left, a shaded rim) or, between stones, the dark earth - the
@@ -52145,69 +52126,31 @@ function stoneFreeP(x, y, rx, ry, gap) {
   }
   return true;
 }
-function addStone(x, y, rx, ry, grey, solid, dh) {
+function addStone(x, y, rx, ry, grey, dh) {
   const o = stonePoly({ x, y, rx, ry, grey, id: stNextId() });
   land.stones[o.id] = o; land.stN[ST_K]++; o.st = ST_S;
   // (the desert's packed earth stones: they shape the packing round them, then aren't there - not drawn, never dug up; dh)
   if (dh) o.dh = true;
   for (let gx = Math.floor((x - rx) / ST_G); gx <= Math.floor((x + rx) / ST_G); gx++) for (let gy = Math.floor((y - ry - LT_Y0) / ST_G); gy <= Math.floor((y + ry - LT_Y0) / ST_G); gy++) { const k = gx * 4096 + gy; let L = land.stoneG.get(k); if (!L) land.stoneG.set(k, L = []); L.push(o.id); }
   if (!dh) for (let k = Math.max(0, Math.floor(ltCol(x - rx) / LT_CHUNK)); k <= Math.min(land.stoneC.length - 1, Math.floor(ltCol(x + rx) / LT_CHUNK)); k++) land.stoneC[k].push(o.id);
-  // (a grey one is rock: its cells made rock - a boulder standing out of the ground fills the air it stands in)
+  // (a grey one is rock: its earth's cells made rock - never the air: the ground's line is the shapes' alone)
   if (grey) for (let c = Math.max(0, ltCol(x - rx)); c <= Math.min(land.cols - 1, ltCol(x + rx)); c++) for (let r = Math.max(ltR0(c), ltRow(y - ry)), rE = Math.min(ltR1(c) - 1, ltRow(y + ry)); r <= rE; r++) {
     const dx = ((c + 0.5) * LT_CELL - x) / rx, dy = (LT_Y0 + (r + 0.5) * LT_CELL - y) / ry; if (dx * dx + dy * dy > 1 || !stoneHit(o, dx, dy)) continue;
-    const i = ltIdx(c, r), m = land.cell[i]; if (solid || m === M_DIRT || m === M_ROCK) land.cell[i] = M_ROCK;
+    const i = ltIdx(c, r), m = land.cell[i]; if (m === M_DIRT || m === M_ROCK) land.cell[i] = M_ROCK;
   }
   return o;
 }
-// (user Oct 26: "Can you try having some boulders above ground just to see how it feels? So it's more natural. But they
-// cannot be floating, they have to respect the logic. So the grass would stop and the dirt and the boulder is there,
-// half inside, half outside.") a boulder bedded half in the ground: its middle at the ground's top (a little below, so
-// its widest part is in the earth - never an overhang to float on); round it the grass gives way to bare earth at the
-// ground's own level (user Oct 26, after: "An outside boulder cannot have grass below it, nor should it have dirt above
-// ground" - no heap)
-function colTop(x) { const c = clamp(ltCol(x), 0, land.cols - 1), r1 = ltR1(c); for (let r = ltR0(c); r < r1; r++) if (land.cell[ltIdx(c, r)] !== M_AIR) return LT_Y0 + r * LT_CELL; return LT_Y0 + r1 * LT_CELL; }
-function proudBoulder(x, rx, ry, Rs, lift = 0) {   // (lift: how much more of it stands out, in its heights - MOUNTAIN's)
-  const lo = Math.max(colTop(x - rx * 0.8), colTop(x), colTop(x + rx * 0.8));       // (its lowest ground under it: bedded at least that deep)
-  const y = lo + ry * (0.08 + Rs() * 0.22 - lift);
-  if (!stoneFree(x, y, rx, ry, 3)) return false;
-  // ground under it all round: it must sit in earth, not over a gap or on sand, concrete or water
-  for (const u of [-0.7, -0.35, 0, 0.35, 0.7]) { const m = ltCell(ltCol(x + u * rx), ltRow(y + ry * Math.sqrt(1 - u * u) * 0.6)); if (m !== M_DIRT && m !== M_GRASS && m !== M_ROCK) return false; }
-  const collar = 3 + Rs() * 3, a = x - rx - collar - 4, b = x + rx + collar + 4;
-  // (Nov 8, the world in pieces: the plants are laid before the stones now - a boulder never comes up under one)
-  if (propNear(a - 6, b + 6)) return false;
-  (land.proud || (land.proud = [])).push([a, b, stNextId()]);   // (its stone's id: let go with its slice - 50-zzzz-live-edit.js)
-  for (let c = Math.max(0, ltCol(x - rx - collar - 3)); c <= Math.min(land.cols - 1, ltCol(x + rx + collar + 3)); c++) {
-    const cx = (c + 0.5) * LT_CELL, ux = (cx - x) / (rx + collar);
-    // (the grass gives way to bare earth round it)
-    for (let r = ltR0(c), r1 = ltR1(c); r < r1; r++) {
-      const i = ltIdx(c, r); if (land.cell[i] !== M_GRASS) continue;
-      const dx = (cx - x) / (rx + collar), dy = (LT_Y0 + (r + 0.5) * LT_CELL - y) / (ry + collar); if (dx * dx + dy * dy < 1) land.cell[i] = M_DIRT;
-    }
-  }
-  // (user Nov 8 11:05: "if a terrain has a rock like that, the trees and vegetation should follow the line of the terrain, not get raised") the
-  // ground's line under it kept, column by column, before its rock fills the air - a plant there stands on that line (propTop), never on the rock
-  const G = land.gTop || (land.gTop = new Map());
-  for (let c = Math.max(0, ltCol(x - rx)); c <= Math.min(land.cols - 1, ltCol(x + rx)); c++) if (!G.has(c)) G.set(c, colTop((c + 0.5) * LT_CELL));
-  addStone(x, y, rx, ry, true, true).pc = collar;               // (its collar: done again in a column laid again - ltStampCol)
-  return true;
-}
 /* (Nov 11, editing is live) a column laid again (an edit's slices, 50-zzzz-live-edit.js) under stones of a slice beside it already placed: what they
-   did to its cells done again - a grey one's rock, a boulder's bare collar, its rock and the ground's line kept under it (land.gTop) - so its cells
-   are as a build has them. A build never meets one: the cells a slice's stones reach are laid before them (stStage) */
+   did to its cells done again - a grey one's rock - so its cells are as a build has them. A build never meets one: the cells a slice's stones reach are laid before them (stStage) */
 function ltStampCol(c) {
   const k = (c / LT_CHUNK) | 0, seen = new Set();
   for (let q = Math.max(0, k - 1); q <= Math.min(land.stoneC.length - 1, k + 1); q++) for (const id of land.stoneC[q]) {
     const o = land.stones[id]; if (!o || !o.grey || seen.has(id)) continue; seen.add(id);
-    const m = o.pc != null ? o.pc + 3 : 0; if (c < ltCol(o.x - o.rx - m) || c > ltCol(o.x + o.rx + m)) continue;
-    const cx = (c + 0.5) * LT_CELL;
-    if (o.pc != null) {
-      for (let r = ltR0(c), r1 = ltR1(c); r < r1; r++) { const i = ltIdx(c, r); if (land.cell[i] !== M_GRASS) continue; const dx = (cx - o.x) / (o.rx + o.pc), dy = (LT_Y0 + (r + 0.5) * LT_CELL - o.y) / (o.ry + o.pc); if (dx * dx + dy * dy < 1) land.cell[i] = M_DIRT; }
-      if (c >= ltCol(o.x - o.rx) && c <= ltCol(o.x + o.rx) && !land.gTop.has(c)) land.gTop.set(c, colTop(cx));
-    }
     if (c < ltCol(o.x - o.rx) || c > ltCol(o.x + o.rx)) continue;
+    const cx = (c + 0.5) * LT_CELL;
     for (let r = Math.max(ltR0(c), ltRow(o.y - o.ry)), rE = Math.min(ltR1(c) - 1, ltRow(o.y + o.ry)); r <= rE; r++) {
       const dx = (cx - o.x) / o.rx, dy = (LT_Y0 + (r + 0.5) * LT_CELL - o.y) / o.ry; if (dx * dx + dy * dy > 1 || !stoneHit(o, dx, dy)) continue;
-      const i = ltIdx(c, r), mm = land.cell[i]; if (o.pc != null || mm === M_DIRT || mm === M_ROCK) land.cell[i] = M_ROCK;
+      const i = ltIdx(c, r), mm = land.cell[i]; if (mm === M_DIRT || mm === M_ROCK) land.cell[i] = M_ROCK;
     }
   }
 }
@@ -52218,7 +52161,7 @@ const boulderScale = Rs => { const r = Rs(); return (r < 1 / 15 ? 1.3 : r < 0.5 
 /* ---- (Nov 8, user: "fix the engine to fit what the game actually is" - the world built in pieces, the way it's drawn) THE STONES, SLICE BY
    SLICE. Each slice of the ground (LT_CHUNK columns) places its own stones from its own random numbers (stRng: its number, the stage), the
    first time anything needs that slice (landEnsure) or in the background (landBgBuild) - never the whole world at once. Two stages: 1 the
-   boulders (the forest's half sunk in the grass, the mountains', the segments') and the earth packed with stones, biggest first; 2 the
+   boulders (the forest's sunk under the grass, the mountains', the segments') and the earth packed with stones, biggest first; 2 the
    little ones in the gaps. A stone stays inside its slice give or take its size (ST_RMAX, under half a slice), so the even slices' stones
    never meet each other: an even slice places its stones first, an odd one after both its neighbours - every slice comes out the same
    whatever order the world is built in (on this page, in the simulation worker, online). Stone ids: the slice's own (ST_IDS a slice) ---- */
@@ -52233,7 +52176,7 @@ const stSeen = o => { if (!ST_S) return true; const q = (o.id / ST_IDS) | 0; ret
 const stRng = (k, st) => seededRng((((land.seed | 0) + 7717) * 2654435761 + k * 40503 + st * 2246822519) >>> 0);
 function stonesInit() {
   const nk = Math.ceil(land.cols / LT_CHUNK);
-  land.stones = []; land.proud = []; land.gTop = new Map(); land.stoneG = new Map(); land.stoneC = Array.from({ length: nk }, () => []);
+  land.stones = []; land.stoneG = new Map(); land.stoneC = Array.from({ length: nk }, () => []);
   land.stN = new Int32Array(nk); land.sS = new Uint8Array(nk); land.sOK = new Uint8Array(nk); land.propXs = null;
   land.stSS = NET.role === 'local' ? bgP('bgss', 1) : 1; land.stSV = NET.role === 'local' ? bgP('bgsv', 1) : 1;   // (STONE SIZE and its SPREAD: as the world is built - online always as made)
 }
@@ -52249,7 +52192,7 @@ function stonesS1(k) {
   const R = stRng(k, 1), SS = land.stSS, SV2 = land.stSV, X0 = k * LT_CHUNK * LT_CELL, X1 = Math.min(land.cols, (k + 1) * LT_CHUNK) * LT_CELL;
   const inK = x => x >= X0 && x < X1;
   const topAt = x => land.surf[clamp(ltCol(x), 0, land.cols - 1)];
-  // the grey boulders half sunk in the forest's grass (the kit's surface_rock) - now and then a lone one or a little group, some standing half out
+  // the grey boulders sunk under the forest's grass (the kit's surface_rock) - now and then a lone one or a little group
   for (let li = 0; li < LANDS.n; li++) if (landFace(li).dir > 0) {
     const lo = Math.max(LANDS.c.lo[li], X0), hi = Math.min(LANDS.c.hi[li], X1); if (hi <= lo || R() > (hi - lo) / 230) continue;   // (one every 230 units on average, as before)
     const x = lo + R() * (hi - lo), keep = R(), n = R() < 0.5 ? 1 : 2 + Math.floor(R() * 2);
@@ -52257,17 +52200,17 @@ function stonesS1(k) {
     for (let q = 0; q < n; q++) {
       const rx = stClampR((8 + R() * 9) * (q ? 0.75 : 1) * boulderScale(R) * SS * stoneSzAt(x)), ry = rx * (0.62 + R() * 0.18), bx = x + (q - (n - 1) / 2) * rx * 2.3 + R() * 4, by = topAt(bx) + ry * (0.88 + R() * 0.14);
       if (!inK(bx)) continue;
-      if (R() < 0.45 && rx > 9) { proudBoulder(bx, stClampR(rx * 1.15), ry * 1.1, R); continue; }
-      const fy = sinkToFit(bx, by, rx, ry); if (fy != null && stoneFree(bx, fy, rx, ry, 2)) addStone(bx, fy, rx, ry, true, false);
+      const fy = sinkToFit(bx, by, rx, ry); if (fy != null && stoneFree(bx, fy, rx, ry, 2)) addStone(bx, fy, rx, ry, true);
     }
   }
-  // MOUNTAIN (user Nov 7 11:43: "big boulders on the surface") its top made of big grey boulders half out of the rock, then smaller ones between
+  // MOUNTAIN (user Nov 7 11:43: "big boulders on the surface") its top made of big grey boulders sunk whole just under the rock's top, then
+  // smaller ones between - never out of it (user Nov 13: the ground smooth; rocks to drive over are placed - by hand or DECK 1)
   if (land.mtn) for (let pass = 0; pass < 2; pass++) {
     let x = X0 + R() * 6;
     while (x < X1) {
       const c = ltCol(x); if (!land.mtn[c]) { x += LT_CELL; continue; }
       const rx = stClampR((pass === 0 ? 26 + R() * 22 : 11 + R() * 9) * land.stSS * stoneSzAt(x)), ry = rx * (0.62 + R() * 0.22);
-      if (land.mtn[ltCol(x - rx)] && land.mtn[ltCol(x + rx)] && !structNear(x, rx + 40)) proudBoulder(x, rx, ry, R, pass === 0 ? 0.3 : 0.15);
+      if (land.mtn[ltCol(x - rx)] && land.mtn[ltCol(x + rx)] && !structNear(x, rx + 40)) { const fy = sinkToFit(x, topAt(x) + ry * (0.88 + R() * 0.14), rx, ry); if (fy != null && stoneFree(x, fy, rx, ry, 2)) addStone(x, fy, rx, ry, true); }
       x += rx * (pass === 0 ? 1.7 : 1.1) + R() * 4;
     }
   }
@@ -52288,7 +52231,7 @@ function stonesS1(k) {
   for (const [x, y, rx, ry, g, isl] of cand) {
     if (!stoneFits(x, y, rx, ry) || (isl && !islStoneOwn(x, y, rx, ry)) || !stoneFreeP(x, y, rx, ry, isl && rx < 5 ? 0.5 : 0.7)) continue;
     const grey = ltCell(ltCol(x), ltRow(y)) === M_ROCK || g < 0.06;
-    addStone(x, y, rx, ry, grey, false, !isl && !grey && lookD(x));   // (the desert's: packed round, then not there - dh)
+    addStone(x, y, rx, ry, grey, !isl && !grey && lookD(x));   // (the desert's: packed round, then not there - dh)
   }
 }
 // stage 2 of slice k: the little ones, in the gaps between
@@ -52302,7 +52245,7 @@ function stonesS2(k) {
   for (const [x, y, rx, ry, g, isl] of cand) {
     if (!stoneFits(x, y, rx, ry) || (isl && !islStoneOwn(x, y, rx, ry)) || !stoneFreeP(x, y, rx, ry, 0.5)) continue;
     const grey = isl ? ltCell(ltCol(x), ltRow(y)) === M_ROCK || g < 0.06 : g < 0.08;
-    addStone(x, y, rx, ry, grey, false, !isl && !grey && lookD(x));
+    addStone(x, y, rx, ry, grey, !isl && !grey && lookD(x));
   }
 }
 /* ---- a slice made whole the first time anything needs it (landEnsure: its stones and its neighbours', which reach into it), or in the
@@ -69845,7 +69788,7 @@ function liveSlices(r) {
   const [c0, c1] = r, [k0, k1] = lvSlices(r), x0 = c0 * LT_CELL, x1 = c1 >= land.cols - 1 ? Infinity : (c1 + 1) * LT_CELL;   // (the last slice: what's past the world's end with it - a shrunk world's)
   land.reK = land.reK || new Uint8Array(land.rT.length); land.sHold = land.sHold || new Uint8Array(land.rT.length);
   for (let k = k0; k <= k1; k++) for (const A of [land.cell, land.scorch, land.lay]) A.fill(0, land.base[k], land.base[k] + ltN(k));   // (whole slices: their blocks)
-  for (let c = c0; c <= c1; c++) { land.colOK[c] = 0; land.top0[c] = 0; land.bd[c] = null; land.iend[c] = -1; if (land.gTop) land.gTop.delete(c); }
+  for (let c = c0; c <= c1; c++) { land.colOK[c] = 0; land.top0[c] = 0; land.bd[c] = null; land.iend[c] = -1; }
   // their stones let go (each slice's own: its ids) - the stones of the slices beside them stay, done again in the cells they reach (ltStampCol)
   const gone = new Set();
   for (let k = k0; k <= k1; k++) {
@@ -69857,7 +69800,6 @@ function liveSlices(r) {
     if (land.stalK) land.stalK[k] = 1; if (land.cvK) land.cvK[k] = 1;   // (its caves' things: none till its cells are laid - liveFillSlice)
   }
   for (let k = Math.max(0, k0 - 1); k <= Math.min(land.stoneC.length - 1, k1 + 1); k++) land.stoneC[k] = land.stoneC[k].filter(id => !gone.has(id));
-  if (land.proud) land.proud = land.proud.filter(q => !gone.has(q[2]));
   land.sAll = 0;
   for (let k = Math.max(0, k0 - 1); k <= Math.min(land.sOK.length - 1, k1 + 1); k++) land.sOK[k] = 0;   // (a slice beside them made whole again: its neighbours' stages are part of it - landEnsure)
   // their caves' stalactites and plants (laid again with the slices - stalsMake, cavePlantsMake)
@@ -69875,12 +69817,11 @@ function livePlants(r) {
   const x0 = r[0] * LT_CELL, x1 = r[1] >= land.cols - 1 ? Infinity : (r[1] + 1) * LT_CELL, inX = x => x >= x0 && x < x1;
   // (the birds in the trees going: their spots let go)
   { const P = perches.c; for (let j = 0; j < perches.n; j++) { const it = P.plant[j]; if (it && inX(it.x) && !it.cave && it.open == null) { if (P.bird[j]) takeOff(bdOn(j), P.x[j]); P.plant[j] = null; P.gone[j] = 1; } } }
-  const proud = land.proud; land.proud = [];                    // (a build lays the plants before any boulder - stonesS1 keeps off them)
   LAND_RAW++; let L;
   try {
     L = buildLandProps([x0, x1]);
     for (const it of L) if (it.kind !== 'rock') Object.assign(it, { pk: it.kind, state: 'stand', hp: PK[it.kind].hp, heat: 0, fire: 0, burnT: 0, burnMax: PK[it.kind].burn * (0.8 + 0.4 * hash(it.x * 0.13)), char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0, ph: hash(it.x * 0.37) * 6, gy: propTop(it) });   // (as buildPlants: on the ground as laid)
-  } finally { LAND_RAW--; land.proud = proud; }
+  } finally { LAND_RAW--; }
   const keep = (land.props || []).filter(it => !(inX(it.x) && !it.cave && it.open == null));
   land.props = keep.concat(L).sort((a, b) => b.z - a.z);
   for (const x of [...RIGS_ST.keys()]) if (inX(x)) RIGS_ST.delete(x);
