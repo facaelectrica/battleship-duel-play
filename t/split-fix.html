@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 987, build: 'NOV 13 00:22', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 987, build: 'NOV 13 00:29', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -3398,6 +3398,7 @@ async function swGoLive() {
   SW.acts.length = 0; SW.framesNoSnap = 0;
   await swResync();                                                  // (the worker takes this page's world, then a whole snapshot back)
   if (SW.fail) return false;
+  if (SWB.holds.size) { SW.worker.postMessage({ t: 'in', hold: true }); return false; }   // (held while it went live: the page keeps the game, the worker waits - swWantLive again once nothing holds it)
   SW.live = true;
   return true;
 }
@@ -3425,6 +3426,7 @@ function swFail(why, where) {
   if (!SW.worker || SWB.taking) return;
   SWB.taking = (async () => {
     try {
+      if (swPageNewer()) return;                                       // (the page's own game is the newer: kept)
       const s = await Promise.race([swAsk('tables'), new Promise((r, j) => setTimeout(() => j(new Error('no answer')), 3000))]);
       SW.snaps.length = 0; tablesLoad(JSON.parse(s)); computeEnv();
     } catch (e) { console.warn('sim worker: its game could not be taken back -', e && e.message || e); }
@@ -3438,6 +3440,11 @@ function swFail(why, where) {
    is here); swRelease(why): when nothing holds it any more, the worker takes this page's game again (swWantLive, swResync).
    Anything new that saves, loads or sends the whole game: swHold first. */
 const SWB = { holds: new Set(), taking: null };
+/* (Nov 12, the online check: the host's round began with the CPU on the guest's side - online holds the worker the frame the round
+   starts, and swHold took back the worker's copy: the game before the round, its CPU and all, over the round just built here) the page
+   built a world (or loaded a game) the worker hasn't taken yet - its game is the newer one, whole here: whatever takes the game back from
+   the worker (swHold, swFail) keeps the page's then, and a resync under way stops where it is */
+const swPageNewer = () => SW.gen !== SW.liveGen;
 function swHold(why) {
   SWB.holds.add(why);
   if (SWB.taking) return SWB.taking;
@@ -3445,10 +3452,11 @@ function swHold(why) {
   SW.live = false; SW.snaps.length = 0;
   SWB.taking = (async () => {
     try {
+      const mine = swPageNewer();                                       // (taken before the answer: a resync finishing meanwhile doesn't make the worker's copy the newer)
       const s = await swAsk('tables');
       SW.worker.postMessage({ t: 'in', hold: true });
       SW.snaps.length = 0;
-      tablesLoad(JSON.parse(s)); computeEnv();
+      if (!mine) { tablesLoad(JSON.parse(s)); computeEnv(); }
       SW.liveGen = SW.gen;
     } catch (e) { swFail(e); }
     finally { SWB.taking = null; }
@@ -3478,9 +3486,10 @@ async function swResync() {
     // hangar, a car driven - was put back. Now in two steps: the worker builds its world first, then takes this page's game as it is
     // at that moment, the page held from then till the worker's first snapshot (SW.handing) so nothing happens here that it misses)
     await swAsk('resync', { mode: MODE, ctl: ctlPick.slice(), extra: EXTRA, store, ui: [!!ui.title, !!ui.menu, !!ui.settings], s: null });
-    if (SW.gen !== gen) return;                                      // (a newer world was built here meanwhile: the next frame resyncs again)
+    if (SW.gen !== gen || SWB.holds.size) return;                  // (a newer world was built here meanwhile: the next frame resyncs again) (held meanwhile: the page keeps its game)
     SW.handing = true;
     await swAsk('load', { s: JSON.stringify(tablesSave()) });
+    if (SWB.holds.size) return;                                      // (held meanwhile: the page keeps its game - the worker's is the same now)
     SW.liveGen = SW.gen; swMirrorReset();
     const s0 = await swAsk('snap', { reset: true }); SW.snaps.length = 0;
     swApply(s0);
@@ -8849,7 +8858,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 987;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 00:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 13 00:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
