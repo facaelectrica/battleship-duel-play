@@ -3194,6 +3194,7 @@ async function swGoLive() {
   SW.acts.length = 0; SW.framesNoSnap = 0;
   await swResync();                                                  // (the worker takes this page's world, then a whole snapshot back)
   if (SW.fail) return false;
+  if (SWB.holds.size) { SW.worker.postMessage({ t: 'in', hold: true }); return false; }   // (held while it went live: the page keeps the game, the worker waits - swWantLive again once nothing holds it)
   SW.live = true;
   return true;
 }
@@ -3221,6 +3222,7 @@ function swFail(why, where) {
   if (!SW.worker || SWB.taking) return;
   SWB.taking = (async () => {
     try {
+      if (swPageNewer()) return;                                       // (the page's own game is the newer: kept)
       const s = await Promise.race([swAsk('tables'), new Promise((r, j) => setTimeout(() => j(new Error('no answer')), 3000))]);
       SW.snaps.length = 0; tablesLoad(JSON.parse(s)); computeEnv();
     } catch (e) { console.warn('sim worker: its game could not be taken back -', e && e.message || e); }
@@ -3234,6 +3236,11 @@ function swFail(why, where) {
    is here); swRelease(why): when nothing holds it any more, the worker takes this page's game again (swWantLive, swResync).
    Anything new that saves, loads or sends the whole game: swHold first. */
 const SWB = { holds: new Set(), taking: null };
+/* (Nov 12, the online check: the host's round began with the CPU on the guest's side - online holds the worker the frame the round
+   starts, and swHold took back the worker's copy: the game before the round, its CPU and all, over the round just built here) the page
+   built a world (or loaded a game) the worker hasn't taken yet - its game is the newer one, whole here: whatever takes the game back from
+   the worker (swHold, swFail) keeps the page's then, and a resync under way stops where it is */
+const swPageNewer = () => SW.gen !== SW.liveGen;
 function swHold(why) {
   SWB.holds.add(why);
   if (SWB.taking) return SWB.taking;
@@ -3241,10 +3248,11 @@ function swHold(why) {
   SW.live = false; SW.snaps.length = 0;
   SWB.taking = (async () => {
     try {
+      const mine = swPageNewer();                                       // (taken before the answer: a resync finishing meanwhile doesn't make the worker's copy the newer)
       const s = await swAsk('tables');
       SW.worker.postMessage({ t: 'in', hold: true });
       SW.snaps.length = 0;
-      tablesLoad(JSON.parse(s)); computeEnv();
+      if (!mine) { tablesLoad(JSON.parse(s)); computeEnv(); }
       SW.liveGen = SW.gen;
     } catch (e) { swFail(e); }
     finally { SWB.taking = null; }
@@ -3274,9 +3282,10 @@ async function swResync() {
     // hangar, a car driven - was put back. Now in two steps: the worker builds its world first, then takes this page's game as it is
     // at that moment, the page held from then till the worker's first snapshot (SW.handing) so nothing happens here that it misses)
     await swAsk('resync', { mode: MODE, ctl: ctlPick.slice(), extra: EXTRA, store, ui: [!!ui.title, !!ui.menu, !!ui.settings], s: null });
-    if (SW.gen !== gen) return;                                      // (a newer world was built here meanwhile: the next frame resyncs again)
+    if (SW.gen !== gen || SWB.holds.size) return;                  // (a newer world was built here meanwhile: the next frame resyncs again) (held meanwhile: the page keeps its game)
     SW.handing = true;
     await swAsk('load', { s: JSON.stringify(tablesSave()) });
+    if (SWB.holds.size) return;                                      // (held meanwhile: the page keeps its game - the worker's is the same now)
     SW.liveGen = SW.gen; swMirrorReset();
     const s0 = await swAsk('snap', { reset: true }); SW.snaps.length = 0;
     swApply(s0);
@@ -8644,8 +8653,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 987;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 12 09:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 988;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 00:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10789,7 +10798,10 @@ let joinDev = null;
 function menuFromLive() { if (VERSUS(MODE)) for (const s of [0, 1]) menuSel.cpu[s] = ctlPick[s] === 'cpu'; menuSel.mode = MODE; menuSel.ctl = [ctlPick[0] === 'net' ? 'kb' : ctlPick[0], ctlPick[1] === 'net' ? 'kb' : ctlPick[1]]; menuSel.cpuLv = cpuLvSide.slice(); menuSel.storyLv = STORY_LV; }
 const mCtlFor = s => { const c = menuSel.ctl[s]; if (c === 'cpu') return VERSUS(menuSel.mode) ? c : 'kb'; if (c === 'pad1' && padsSeen() < 1) return 'kb'; if (c === 'pad2' && padsSeen() < 2) return 'kb'; return c; };
 const mCtlChoices = s => ['kb', ...['pad1', 'pad2'].slice(0, padsSeen()), ...(VERSUS(menuSel.mode) ? ['cpu'] : [])];
-function menuApply() {
+function menuApply() { rosterApply(); savePrefs(); }
+// the menu's mode and roster made the round's players (MODE, who plays each side, EXTRA, the slots) - the one way a roster becomes the
+// people at this screen: the menu's PLAY, and an editor setting its own one person (the Biome Editor - 53-veg-editor.js)
+function rosterApply() {
   MODE = menuSel.mode;
   // who plays each side, from the roster: its first person, or the CPU (BATTLE) or nobody; a second person on a side
   // is EXTRA (their own seat on that team)
@@ -10803,7 +10815,7 @@ function menuApply() {
     if (!on.length && LINK.hosting && linkGuests().some(g => g.side === s) && roomSideOk(s)) ctlPick[s] = 'net';
   }
   cpuLvSide[0] = menuSel.cpuLv[0]; cpuLvSide[1] = menuSel.cpuLv[1]; STORY_LV = menuSel.storyLv;
-  applyMode(); savePrefs();
+  applyMode();
 }
 // PLAY: a new round as the menu has it (load: pressed on the menu - LOADING... first, loadThen)
 function menuPlay(load) {
@@ -74154,9 +74166,11 @@ function vegUI(Z) {
     if (Z.dead) return;
     try {
     const g = __game;
-    VZ.keep = VZ.keep || { mode: g.menuSel.mode, roster: g.menuSel.roster.slice(), muted: MUTED, env: { time: g.env.time, weather: g.env.weather, rain: g.env.rain, wind: g.env.wind } };   // (what the lab changes of the game's, put back as it goes - vegLeave)
-    g.setCtl(['kb', 'none']); g.setMode('land'); g.ui.title = false; g.ui.resume = false;
-    g.menuSel.mode = 'land'; g.menuSel.roster = [{ dev: 'kb', side: 0 }];
+    VZ.keep = VZ.keep || { mode: g.menuSel.mode, roster: g.menuSel.roster.slice(), cpu: g.menuSel.cpu.slice(), muted: MUTED, env: { time: g.env.time, weather: g.env.weather, rain: g.env.rain, wind: g.env.wind } };   // (what the lab changes of the game's, put back as it goes - vegLeave)
+    // (user Nov 12: opened after a game of two at one screen, its view was split in two - the second person, a seat on player 0's side (EXTRA), was
+    // kept: one person, made the round's players the menu's way - rosterApply, 19-menu.js - not saved as the menu's choice)
+    g.menuSel.mode = 'land'; g.menuSel.roster = [{ dev: 'kb', side: 0 }]; g.menuSel.cpu = [false, false];   // (nobody on the other side, the CPU neither)
+    rosterApply(); builtViewW = 0; resize(); g.ui.title = false; g.ui.resume = false;
     Object.assign(g.env, { time: 12, weather: 0.1, rain: 0, wind: 0.35 });   // (a light breeze)
     Z.ph = 'sched'; setTimeout(() => { Z.ph = 'cb';
       g.fishnet.clear(null); g.fishnet.hudOnly([]);                 // (no game buttons till you're in a vehicle)
@@ -74247,7 +74261,7 @@ function vegLeave(to) {
   document.documentElement.classList.remove('vegOn');
   worldReload(); vegSetsMode();
   const K = VZ.keep; VZ.keep = null;
-  if (K) { menuSel.mode = K.mode; menuSel.roster = K.roster; Object.assign(env, K.env); MUTED = K.muted; if (SFX.master) SFX.master.gain.value = MUTED ? 0 : env.volume * 0.9; }
+  if (K) { menuSel.mode = K.mode; menuSel.roster = K.roster; if (K.cpu) menuSel.cpu = K.cpu; Object.assign(env, K.env); MUTED = K.muted; if (SFX.master) SFX.master.gain.value = MUTED ? 0 : env.volume * 0.9; }
   if (to === 'editor') {
     const T = NSKY.editor.TUNE; if (!T.built) NSKY.editor.build({ rescreen: () => { }, snapshot: gameSnapshot, load: gameLoad });   // (opened on a load in this editor: the GAME EDITOR not made yet)
     worldEdit(menuSel.mode);                                        // (its own world built and it opened on it - 00-world.js; its own hold on the worker)
