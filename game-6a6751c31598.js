@@ -8666,8 +8666,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 990;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 16:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 991;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 16:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10342,11 +10342,16 @@ function edUnplacedLeft() {
   for (const n of ED_UNPLACED) { const T = TABLES[n], L = T && T.list(); if (Array.isArray(L)) for (const o of L) if (!(o && (o.story || o.sid != null))) return true; }
   return false;
 }
-function edPlacedOnly() {
+// everything sent out on its own taken out - by its table's own way (T.take: a record table's row cut from its columns - part 8); keep: one thing, or a
+// Set, kept too (the Biome Editor's own vehicles - 53-veg-editor.js, every 250 ms). (User Nov 13 15:24, the Biome Editor after 5 minutes: container
+// ships, planes, their crashes' fires, spilt containers and anchors in its test world - the lab's clear took them out of the list's copy (splice on
+// the record table's arr()), never out of the table, since the traffic tables became record tables: one way out for both now)
+function edPlacedOnly(keep) {
+  const K = keep instanceof Set ? keep : new Set(keep ? [keep] : []);
   for (const n of ED_UNPLACED) {
     const T = TABLES[n]; if (!T) continue;
     const L = T.list(); if (!Array.isArray(L)) continue;
-    for (const o of L.slice().reverse()) if (!(o && (o.story || o.sid != null))) T.take(o);   // (out by its table's own way - a record table's row: part 8)
+    for (const o of L.slice().reverse()) if (!(o && (o.story || o.sid != null)) && !K.has(o)) T.take(o);
   }
 }
 function edModeExit() {
@@ -41614,7 +41619,9 @@ const civShips = new ColTable(ColTable.rec('num: x lo hi face dir ph a sink tilt
 // (engine stage 3: the big ships' own table and random source - 36-zz-tables.js; her funnels' smoke stream links (_smS) not saved,
 // picked up again as she smokes; a liner's ropes (lp.ropes) not saved, rebuilt by linerState once loaded - 50-land-linerparts)
 const csR = sysRng('civShips'), csRnd = (a, b) => a + (b - a) * csR();
-defTable('civShips', null, { cols: civShips, skip: ['_smS', 'ropes'] });
+// (a ship taken out of the world - the editors' T.take: the GAME EDITOR's placed-only world, the Biome Editor's test world kept clear) her boxes go with
+// her: user Nov 13 15:24, a container ship cleared from the Biome Editor's world left her 73 boxes standing where she'd been (cargoOut - 50-land-crane.js)
+defTable('civShips', null, { cols: civShips, skip: ['_smS', 'ropes'], remove: c => { cargoOut(c); const i = civShips.indexOf(c); if (i >= 0) civShips.cut(i); } });
 function buildCivShips() {
   civShips.length = 0; oilSlicks.length = 0; oilInk.length = 0; oilDrops.length = 0; fireworks.length = 0; fwBits.length = 0;
   if (!LAND) { buildCranes(); buildDeep(); return; }   // (BATTLE: no big ships, but the map's sunken wrecks)   // (and no cranes: buildCranes empties OPEN WORLD's - left standing, unseen, where it had them, they stopped planes and rain in BATTLE, user Oct 30)
@@ -42805,6 +42812,12 @@ function craneShip(cr) {
   if (cr.gone) return null;
   for (const c of civShips) if (c.kind === 'container' && c.state === 'sail' && c.dockT > 0 && Math.abs(c.x - craneBerth(cr.d)) < 200) return c;
   return null;
+}
+// her boxes still on her taken out of the world with her (she's taken out - the civShips table's remove, 50-land-civships.js); the ones she lost stay
+function cargoOut(c) {
+  if (!c.cargo) return;
+  for (const st of c.cargo) for (const k of st) { const i = containers.indexOf(k); if (i >= 0) containers.cut(i); }
+  c.cargo = null;
 }
 // her cargo: a stack of boxes on each of her slots (made the first time she's needed: a random load)
 function shipCargo(c) {
@@ -72151,7 +72164,7 @@ async function start(data) {
     // (user 09:46-09:47: "We want the water AND a boat, thats it") every other vehicle the world sends out taken away, and the spot of
     // open sea farthest from anything that stands (the seas' ends, structures, harbours, towers, the players' own vehicles)
     hudOnly: ids => { HUD_ONLY = ids ? new Set(ids) : null; }, freeze: on => { W.frozen = !!on; },
-    clear: keep => { const K = keep instanceof Set ? keep : null; for (const n of ED_UNPLACED) { const T = TABLES[n], L = T && T.list(); if (Array.isArray(L)) for (let i = L.length - 1; i >= 0; i--) if (K ? !K.has(L[i]) : L[i] !== keep) L.splice(i, 1); } },   // (keep: one, or a Set)
+    clear: keep => edPlacedOnly(keep),   // (keep: one, or a Set - 18-zz-photo.js)
     spot: () => {
       const stand = strsUsed().map(o => o.x).concat(docks.map(d => d.x), towers.map(t => t.x), ships.map(v => v.x), subs.map(v => v.x), planes.map(v => v.x)).filter(Number.isFinite);
       let best = -1, bx = 0;
