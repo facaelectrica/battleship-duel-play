@@ -4081,7 +4081,7 @@ const SRC = {
   docklamp: __ART[0],    // (the user's dock lamp post, Nov 2: gen/docklamp/prep.py - 50-zz-docklamp)
   wheels: __ART[1],        // (the user's wheel set, Nov 2: gen/wheels/prep.py - 50-zz-wheels)
   bpsheet: __ART[2],      // (the user's blueprint sheet for the Story showrooms, Nov 2: gen/showroom/prep.py - 50-zz-story-swap)
-  titleLogo: __ART[3],  // (the user's Far Far Away picture, Nov 9: gen/title/prep.py - 19-menu drawTitle)
+  titleOpen: __ART[3],  // (Story's opening shot, Nov 13: the user's Far Far Away picture as his mockup - gen/title/opening.py, 50-zzzz-story-open.js)
   chimney: __ART[4],      // (the user's chimney for the hut, Nov 2: gen/chimney/prep.py - 50-zz-struct)
   tropical: __ART[5],    // (the user's tropical set and land vehicles, Oct 31: gen/tropical/prep.py - 50-zz-struct)
   shipIntact: __ART[6],
@@ -8665,8 +8665,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 995;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 16:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 996;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 16:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12002,9 +12002,10 @@ function pollPads(dt) {
     const want = {};
     const btn = i => !!(gp && gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.4));
     const edge = (name, on) => { const was = !!st[name]; st[name] = on; return on && !was ? 1 : !on && was ? -1 : 0; };
-    if (gp && padMenuOn()) {
+    if (gp && (padMenuOn() || storyOpenHides())) {
       // the menus are driven by any controller (padMenuPoll, below): here only what's held is noted, so nothing
-      // fires or opens the moment you're back in the round
+      // fires or opens the moment you're back in the round. (Story's opening shot: a button pressed takes the name away - 50-zzzz-story-open.js)
+      const any = gp.buttons.some((b, i) => btn(i)); if (any && !st.anyOpen && storyOpenHides()) storyOpenSkip(); st.anyOpen = any;
       st.start = btn(9); st.w1 = btn(0) || btn(7); st.pa = btn(0); st.w2 = btn(1) || btn(6); st.w3 = btn(2); st.w4 = btn(3);
       st.lb = btn(4); st.rb = btn(5); st.l3 = btn(10); st.dl = (gp.axes[0] || 0) < -0.5; st.dr = (gp.axes[0] || 0) > 0.5;
     } else if (gp && v < HUMANS()) asSlot(v, p => {                // (each slot's pad plays as that slot: see asSlot)
@@ -22446,7 +22447,7 @@ function camUnderHud(i, F) {
 }
 function camFocus0(i) {
   const c = crew[i];
-  if (i === 0) { const S = storySelFocus(); if (S) return S; }   // (STORY: an object picked with the keys - the camera locked on it, 50-story.js)
+  if (i === 0) { const S = storySelFocus() || storyOpenFocus(); if (S) return S; }   // (and Story's opening shot - 50-zzzz-story-open.js)   // (STORY: an object picked with the keys - the camera locked on it, 50-story.js)
   if (camOverride[i] != null) return Array.isArray(camOverride[i]) ? [camOverride[i][0], camOverride[i][1], 0, 0, null] : [camOverride[i], FOCUS_Y, 0, 0, null];          // testing hook (an x, or [x, y])
   if (c.mode === 'boat') return [c.x, WATER_Y - 4, 0, clamp((c.bv || 0) / BOAT_SPEED, -1, 1) * 0.32, [c.x, 14]];   // leaning ahead when she's moving
   if (c.mode === 'gone') return [c.x, WATER_Y - 4, 0, undefined, [c.x, 14]];
@@ -38620,6 +38621,7 @@ function renderFrame() {
   ug.imageSmoothingEnabled = false;
   if (ui.title) { if (!LOADING) guardDraw('seaDecksWarm', seaDecksWarm); drawTitle(); if (ui.picker < 0) drawFullscreenBtn(); drawControls(); drawPadFocus(); drawToast(); drawFps(); return; }
   if (PHOTO.on) { drawPhotoHint(frameDt); if (PHOTO.ed) drawEdWorld(); drawFps(ui.top + 12); return; }   // (the GAME EDITOR's WORLD panel: the sliders over its view - 50-zzz-world-ed.js)   // (the version and FPS on every screen)       // (photo mode: the world and nothing else)
+  if (storyOpenHides()) { storyFrameStep(); drawStoryOpen(); drawFps(); drawToast(); return; }   // (Story's opening shot: the name over the world, no controls - 50-zzzz-story-open.js)
   if (!ui.settings) {
   layoutBoatCtl();
   tt = lap('hudpre', tt);
@@ -63227,7 +63229,7 @@ const storyAboard = () => crew[0].mode === 'civ';
 function storySaveWatch() {
   if (!(STORY && storySlot != null && !storyLoading && !ui.title)) return;
   if (storyDeadN == null) storyDeadN = story.dead;
-  else if (story.dead !== storyDeadN) { storyDeadN = story.dead; storyLoad(storySlot); return; }
+  else if (story.dead !== storyDeadN) { storyDeadN = story.dead; storyLoad(storySlot, true); return; }   // (again: no opening shot)
   if (story.wake || storyAboard() || story.saveN === storySavedN) return;
   if (!story.cp || (story.at === story.cp && crew[0].mode === 'dock')) storySaveNow(true); else storySavedN = story.saveN;   // (no checkpoint: a world with no home of yours - its start)
 }
@@ -63235,6 +63237,7 @@ function storySaveWatch() {
 function storyNew(n) {
   SSL.open = false; SSL.confirm = null;
   storySlot = n; storySavedN = -1; storyDeadN = null;
+  storyOpenAsk();                                        // (the opening shot - 50-zzzz-story-open.js)
   menuSel.mode = 'story'; storyPlayNow = true; menuPlay(true); storyPlayNow = false;
 }
 /* (user Nov 2 15:40: the taxi "snaps" back to its hut, as if after dying - found on his GPU: a LOAD put the saved game into the page
@@ -63249,7 +63252,7 @@ function swSettled() {
   });
 }
 // LOAD slot n: a fresh Story world, then the saved game put into it (the worker held while it's put in)
-async function storyLoad(n) {
+async function storyLoad(n, again) {   // (again: a death's reload - no opening shot)
   if (SSL.busy) return;
   SSL.busy = true;
   let G = null;
@@ -63258,6 +63261,7 @@ async function storyLoad(n) {
   if (!G) { showToast('NOTHING SAVED IN SLOT ' + (n + 1)); return; }
   SSL.open = false; SSL.confirm = null;
   storySlot = n; storyLoading = true;
+  if (!again) storyOpenAsk();                            // (the opening shot - 50-zzzz-story-open.js)
   storyPutBack(G);
 }
 // a saved game (its text) put into a fresh Story world (LOAD; the tools' storyT hook - 52-main.js)
@@ -63942,7 +63946,7 @@ try { const o = JSON.parse(localStorage.getItem('bd_story_zoom') || 'null'); if 
 function storyZoomDef(sv) { if (sv === 'cessna') return [70, 420]; const D = STR_VEHS[sv], L = D && D.fam === 'car' ? 5 : sv === 'jet' ? 3.5 : sv === 'motor' ? strTypeLenM('motor') : 11.3; return [Math.round(Math.max(45, 4 * L)), Math.round(Math.max(130, 12 * L))]; }
 const storyZoomOf = sv => STORY_ZW[sv] || storyZoomDef(sv);
 function storyZoomWidth() {
-  const c = crew[0];
+  const c = crew[0], ow = storyOpenWidth(); if (ow) return ow;   // (Story's opening shot: wider, on the structure - 50-zzzz-story-open.js)
   if (c.mode === 'civ' && c.civ && c.civ.story) { const z = storyZoomOf(c.civ.sv); return (STORY_ZOOM.moving ? z[1] : z[0]) * UPM; }
   if (c.mode === 'dock') { const o = storyAt(); if (o) { const B = strBox(o); return Math.max(60 * UPM, 3 * (B.x1 - B.x0)); } }
   return null;
@@ -63992,11 +63996,17 @@ function pxDiscSmooth(c, cx, cy, R, col) {
   if (f > 0.01) { c.globalAlpha = a * f; pxDisc(c, cx, cy, r0 + 1); c.globalAlpha = a; }
   pxDisc(c, cx, cy, r0);
 }
-function drawStoryBanner() {
+// this screen's Story steps each frame, run as it's drawn - with the controls (drawStoryBanner) or without them (the opening shot - 48-render.js)
+function storyFrameStep() {
   if (!STORY || ui.title) return;
   storySaveWatch();                                      // (a save asked for: into the slot - 50-story-saves.js)
+  storyOpenStep(frameDt);                                // (the opening shot's clock - 50-zzzz-story-open.js)
   storyZoom(frameDt);                                    // (STORY's automatic zoom)
-  const hudIn = !!storyHudIn();                         // (a swap: its buttons with its controls - 50-zz-story-swap.js)
+}
+function drawStoryBanner() {
+  if (!STORY || ui.title) return;
+  storyFrameStep();
+  const hudIn = !!storyHudIn();                      // (a swap: its buttons with its controls - 50-zz-story-swap.js)
   const sun = hudIn && storySunBtn(); if (sun) drawStorySun(sun);
   const give = hudIn && storyGiveBtn(); if (give) drawStoryGive(give); else if (storyGiveHeld) storyGiveUp();
   if (story.wake) { const t = 'SLEEPING...'; drawText(ug, t, ubw / 2 + 1, Math.round(ubh * 0.3) + 1, '#04070f', 3, 'center'); drawText(ug, t, ubw / 2, Math.round(ubh * 0.3), '#ffd23a', 3, 'center'); }
@@ -66464,8 +66474,8 @@ ACTS.storySwap = (p, key) => storySwap(p, key);
 // the vehicle being entered: its lever does nothing till its engine has caught; then revved a moment
 const swapHold = v => STSW.on && STSW.vs != null && STSW.vs === v.sid && STSW.t < STSW_T.ENGINE;
 const swapRev = v => STSW.on && STSW.vs != null && STSW.vs === v.sid && STSW.t >= STSW_T.ENGINE && STSW.t < STSW_T.ENGINE + 0.55 ? 0.9 : 0;
-// the controls: hidden while the arrow flies, there the moment it lands (0 or 1)
-function storyHudIn() { return !STORY || !STSW.on || STSW.t >= STSW_T.LAND ? 1 : 0; }
+// the controls: hidden while the arrow flies, there the moment it lands (0 or 1); hidden too while Story's opening shot has its name up (50-zzzz-story-open.js)
+function storyHudIn() { return storyOpenHides() ? 0 : !STORY || !STSW.on || STSW.t >= STSW_T.LAND ? 1 : 0; }
 // the swap's steps (stepStory)
 function stepSwap(dt) {
   for (const v of jetboats.concat(minisubs)) if (v.story && (v.susV || v.susY)) susStep(v, dt, 60, 5.5);   // (a boat or sub's dip in the water: its own spring - drawPicBoat, drawMinisub)
@@ -70573,6 +70583,80 @@ WK.spot = {
 };
 // a spot changed: saved, and what the spots start made again in the editor's world at once (edVehRebuild, 50-zz-undo.js)
 function spotsChanged() { strSave(); if (typeof edVehRebuild === 'function') edVehRebuild(); strSync(); }
+
+//@src 50-zzzz-story-open.js:1
+/* ================================================================
+   STORY'S OPENING SHOT (user Nov 13 15:43, his mockup gen/title/ref-story-opening.png: "In story mode, when the game opens, it should always
+   frame your current lighthouse like this, about a third to the left of the screen. And the title of the game appears framed like this. Then
+   it fades out in about 3 seconds").
+   A story opened from its slots - NEW or LOAD, never a death's reload (storyOpenAsk, 50-story-saves.js) - opens on the structure you're at
+   (your current home: a new story's start, a loaded one's checkpoint): the view as tall as five of it (STOPEN.H), the structure a third of the
+   way in from the left, its middle a little above the screen's (STOPEN.Y); over it the name, Far / Far / Away... down a stair on the right
+   (assets19/title_opening.png - gen/title/opening.py: the user's picture laid out as his mockup, its box where the mockup's is - STOPEN.BOX).
+   Nothing of the controls shows meanwhile, as in the mockup (the version and frame rate do). Its clock starts when the loading screen lifts
+   (coverUp, 00-world.js): the name held HOLD s, faded over FADE s; then the controls are there at once (storyHudIn - 50-zz-story-swap.js) and the view
+   eases to Story's own framing of the structure over MOVE s - the automatic zoom's slow ease (zoomSlow, 39-camera.js), the shot's offset going
+   with it. A press, a key or a pad's button while the name is up takes it away quickly and is only that (as waking from sleep - storyWakePress);
+   zooming by hand, picking something or leaving the structure ends the shot there.
+   This screen's own presentation, run as it's drawn (as storyZoom): nothing of it is the simulation's.
+   ================================================================ */
+const STOPEN = { HOLD: 1, FADE: 2, MOVE: ZOOM_EASE_AUTO, SKIP: 8, H: 0.2, Y: 0.435,
+  BOX: { cx: 0.6254, cy: 0.439, w: 0.5438, h: 0.7049 }, PAD: 8 };   // (BOX: the name's box in the mockup, in the screen's fractions; PAD: the picture's margin round it)
+const STORY_OPEN = { on: false, t: 0, skip: false };
+// a story opened from its slots: the shot, from the loading screen's lift
+function storyOpenAsk() { STORY_OPEN.on = true; STORY_OPEN.t = 0; STORY_OPEN.skip = false; }
+const storyOpenEnd = () => { STORY_OPEN.on = false; };
+const stopenTitleT = () => STOPEN.HOLD + STOPEN.FADE;
+// the name on the screen: the controls hidden, presses only take it away
+const storyOpenHides = () => STORY && STORY_OPEN.on && !ui.title && STORY_OPEN.t < stopenTitleT();
+const storyOpenAlpha = () => storyOpenHides() ? 1 - clamp((STORY_OPEN.t - STOPEN.HOLD) / STOPEN.FADE, 0, 1) : 0;
+// the structure framed: the one you're at, while you're in it and nothing's picked
+function stopenO() {
+  if (!STORY || !STORY_OPEN.on || storySel || crew[0].mode !== 'dock') return null;
+  return storyAt();
+}
+// how much of the shot's framing is left: 1 till the name's gone, then down to 0 over MOVE
+const stopenK = () => 1 - smooth01(clamp((STORY_OPEN.t - stopenTitleT()) / STOPEN.MOVE, 0, 1));
+// each frame (storyFrameStep): the clock - only once the loading screen is gone; the ends
+function storyOpenStep(dt) {
+  const O = STORY_OPEN; if (!O.on) return;
+  if (!STORY) { O.on = false; return; }
+  if (coverUp()) return;
+  if (STORY_ZOOM.manual || storySel || crew[0].mode !== 'dock') { storyOpenEnd(); return; }
+  O.t += dt * (O.skip && O.t < stopenTitleT() ? STOPEN.SKIP : 1);
+  if (O.t >= stopenTitleT() + STOPEN.MOVE) storyOpenEnd();
+}
+// the automatic zoom's width while the shot frames the structure (storyZoomWidth): as tall as 1 / H of it; once the name's gone, Story's own
+function storyOpenWidth() {
+  const o = stopenO(); if (!o || STORY_OPEN.t >= stopenTitleT()) return null;
+  const B = strBox(o); return Math.max(1, B.foot - B.top) / STOPEN.H * VIEW_W / VIEW_H;
+}
+// the camera's aim (camFocus0, 39-camera.js): Story's own on the structure (storyGo's look) moved by the shot's offset at the zoom drawn
+function storyOpenFocus() {
+  const o = stopenO(); if (!o) return null;
+  const B = strBox(o), my = (B.top + B.foot) / 2, z = cam.za[0] || cam.zt[0] || 1, k = stopenK();
+  return [o.x + k * (0.5 - 1 / 3) * VIEW_W / z, my + k * (0.5 - STOPEN.Y) * VIEW_H / z, 0, 0, null];
+}
+// the name, in the controls' layer (render, 48-render.js)
+function drawStoryOpen() {
+  const im = img.titleOpen, a = storyOpenAlpha(); if (!im || !im.width || a <= 0) return;
+  const P = STOPEN.PAD, Bx = STOPEN.BOX, k = Math.min(Bx.w * ubw / (im.width - 2 * P), Bx.h * ubh / (im.height - 2 * P));
+  const w = Math.round(im.width * k), h = Math.round(im.height * k);
+  ug.save(); ug.globalAlpha = a; ug.imageSmoothingEnabled = true;
+  ug.drawImage(im, Math.round(Bx.cx * ubw - w / 2), Math.round(Bx.cy * ubh - h / 2), w, h);
+  ug.restore();
+}
+// a press while the name is up: it goes quickly, and the press is only that
+function storyOpenSkip() { if (!storyOpenHides() || coverUp()) return false; STORY_OPEN.skip = true; return true; }
+function storyOpenPress(ev) {
+  if (NSKY.editor.TUNE.open || !storyOpenSkip()) return;
+  ev.stopImmediatePropagation(); ev.preventDefault();
+}
+if (typeof window !== 'undefined' && !SW_IN_WORKER) {
+  window.addEventListener('pointerdown', ev => { storyOpenPress(ev); }, { capture: true, passive: false });
+  window.addEventListener('keydown', ev => { if (!ev.repeat && !/^(Shift|Control|Alt|Meta)/.test(ev.code)) storyOpenPress(ev); }, { capture: true });
+  window.__storyOpen = STORY_OPEN;
+}
 
 //@src 50-zzzz-struct-act.js:1
 /* ================================================================
