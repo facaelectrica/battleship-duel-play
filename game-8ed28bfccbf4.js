@@ -8674,8 +8674,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1003;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 18:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1004;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 18:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -70799,18 +70799,18 @@ function stCwState(wk) {
    The editors' SNAPSHOT is SUBMIT CHANGES: the game's snapshot (gameSnapshot - 41-sky-new.js) goes straight to worlds/snapshot.json on main
    through GitHub, as the world page's SUBMIT does (tools/world-page/world.html), and the "World release" workflow bakes it in, builds the
    next version and puts it on Pages. The panel follows that build here: each step, then "Version N is out" and RELOAD.
-   - The token is the world page's (localStorage wp_token): one website, so the one this browser saved there is read here. None, or expired:
-     the panel says so and links to the world page to set it (its SAVE also keeps it as the repo's PLAY_TOKEN secret the workflow needs).
+   - The token (localStorage wp_token, shared with the world page and WORLD PLAN - one website) is set IN THE PANEL (user 17:53: "I should
+     do it in game. Just able to paste it in the window"): none, expired or without access, the panel asks for it - paste, SAVE TOKEN; it is
+     checked, kept as the repo's PLAY_TOKEN secret (the workflow pushes Pages with it - as the world page's SAVE) and the submit goes on.
      wp_token is not a bd_ key, so no snapshot ever carries it.
    - The build followed is kept (wp_run, the world page's own): either page shows it, also after a reload.
-   - AS TEXT: the snapshot as text to COPY (to give to Claude) and LOAD one (gameLoad), what the SNAPSHOT panel did.
+   - COPY SNAPSHOT (the snapshot as text, to give to Claude) and LOAD SNAPSHOT (paste one, LOAD - gameLoad).
    Used by the GAME EDITOR (sky/90-editor.js) and the Biome Editor (53-veg-editor.js): worldSubmit(text, done). ---- */
-const SUB = { el: null, text: '', follow: 0, done: null };
+const SUB = { el: null, text: '', follow: 0, done: null };   // (done: the submit waiting for a token - SAVE TOKEN sends it)
 const SUB_OWNER = 'facaelectrica', SUB_REPO = 'battleship-duel', SUB_PATH = 'worlds/snapshot.json', SUB_WF = 'world.yml';
 const SUB_API = 'https://api.github.com/repos/' + SUB_OWNER + '/' + SUB_REPO;
 function subLs(k, v) { try { if (v === undefined) return localStorage.getItem(k); v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { return null; } }
-async function subGh(path, opt = {}) {
-  const tok = subLs('wp_token');
+async function subGh(path, opt = {}, tok = subLs('wp_token')) {
   const r = await fetch(path.startsWith('http') ? path : SUB_API + path, { ...opt, headers: { Accept: 'application/vnd.github+json',
     ...(tok ? { Authorization: 'Bearer ' + tok } : {}), 'X-GitHub-Api-Version': '2022-11-28', ...(opt.body ? { 'Content-Type': 'application/json' } : {}) } });
   if (r.status === 204) return {};
@@ -70829,27 +70829,51 @@ function subB64(s) { const u = new TextEncoder().encode(s); let o = ''; for (let
 function subPanel() {
   if (SUB.el) return SUB.el;
   const m = document.createElement('div'); m.id = 'wSub';
+  const box = 'background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px';
   m.style.cssText = 'position:fixed;inset:0;z-index:240;background:#0008;display:grid;place-items:center;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace';
   m.innerHTML = '<div style="background:#0f1420;border:1px solid #2c3850;border-radius:10px;padding:16px;display:grid;gap:10px;color:#d8dce8;width:min(560px,90vw);max-height:86vh;overflow:auto">'
     + '<div style="color:#9fd36a">SUBMIT CHANGES</div><div data-s></div><ul data-l style="list-style:none;margin:0;padding:0;color:#7a8294;font-size:12px"></ul>'
-    + '<div data-tx hidden style="display:grid;gap:8px"><textarea spellcheck="false" style="height:160px;font:11px ui-monospace,monospace;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;-webkit-user-select:text;user-select:text"></textarea>'
-    + '<div style="display:flex;gap:8px;flex-wrap:wrap"><button data-c>COPY</button><button data-ld>LOAD</button></div><div data-n style="color:#7a8294"></div></div>'
-    + '<div style="display:flex;gap:8px;flex-wrap:wrap"><button data-r hidden>RELOAD</button><button data-t>AS TEXT</button><button data-x>CLOSE</button></div></div>';
+    + '<div data-tk hidden style="display:grid;gap:8px"><div style="display:flex;gap:8px"><input type="password" autocomplete="off" spellcheck="false" placeholder="Paste your GitHub token here (github_pat_...)" style="flex:1;min-width:0;padding:8px;font:inherit;' + box + '"><button data-ts>SAVE TOKEN</button></div>'
+    + '<ol style="margin:0;padding-left:20px;color:#7a8294;font-size:12px"><li><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" style="color:#ffd23a">Make a token</a> (fine-grained)</li>'
+    + '<li>Repository access: only <span style="color:#d8dce8">battleship-duel</span> and <span style="color:#d8dce8">battleship-duel-play</span></li>'
+    + '<li>Permissions: <span style="color:#d8dce8">Contents</span> read and write, <span style="color:#d8dce8">Actions</span> read, <span style="color:#d8dce8">Secrets</span> read and write</li>'
+    + '<li>Generate, paste it above, SAVE TOKEN. It stays in this browser.</li></ol></div>'
+    + '<div data-ldb hidden style="display:grid;gap:8px"><textarea spellcheck="false" placeholder="Paste a snapshot here" style="height:140px;font:11px ui-monospace,monospace;' + box + ';-webkit-user-select:text;user-select:text"></textarea>'
+    + '<div style="display:flex;gap:8px"><button data-ld>LOAD</button></div></div><div data-n style="color:#7a8294"></div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap"><button data-r hidden>RELOAD</button><button data-c title="Copies the game as text, to give to Claude">COPY SNAPSHOT</button><button data-lo title="Paste a snapshot to see it here">LOAD SNAPSHOT</button><button data-x>CLOSE</button></div></div>';
   for (const b of m.querySelectorAll('button')) b.style.cssText += ';min-height:40px;padding:6px 14px;font:inherit;background:#1a2234;color:#fff;border:1px solid #2c3850;border-radius:6px;cursor:pointer';
   for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'wheel', 'click', 'keydown', 'touchstart', 'touchmove', 'touchend']) m.addEventListener(ev, e => e.stopPropagation());
-  const q = s => m.querySelector(s), ta = q('textarea');
+  const q = s => m.querySelector(s), ta = q('textarea'), note = t => { q('[data-n]').textContent = t; };
   q('[data-x]').onclick = () => { m.remove(); };
   q('[data-r]').onclick = () => location.reload();
-  q('[data-t]').onclick = () => { const t = q('[data-tx]'); t.hidden = !t.hidden; if (!t.hidden) { ta.value = SUB.text; q('[data-n]').textContent = 'Copy it to give to Claude, or paste one and LOAD it'; ta.select(); } };
-  q('[data-c]').onclick = async () => { ta.select(); const b = q('[data-c]'); try { await navigator.clipboard.writeText(ta.value); b.textContent = 'COPIED'; } catch (e) { try { document.execCommand('copy'); b.textContent = 'COPIED'; } catch (e2) { } } setTimeout(() => { b.textContent = 'COPY'; }, 1500); };
-  q('[data-ld]').onclick = () => { try { q('[data-n]').textContent = gameLoad(ta.value); } catch (e) { q('[data-n]').textContent = 'Not a snapshot: ' + e.message; } };
+  q('[data-c]').onclick = async () => { const b = q('[data-c]'); let ok = false; try { await navigator.clipboard.writeText(SUB.text); ok = true; } catch (e) { }
+    if (!ok) { const t = document.createElement('textarea'); t.value = SUB.text; m.appendChild(t); t.select(); try { ok = document.execCommand('copy'); } catch (e) { } t.remove(); }
+    b.textContent = ok ? 'COPIED' : 'COULD NOT COPY'; setTimeout(() => { b.textContent = 'COPY SNAPSHOT'; }, 1500); };
+  q('[data-lo]').onclick = () => { const d = q('[data-ldb]'); d.hidden = !d.hidden; note(''); if (!d.hidden) { ta.value = ''; ta.focus(); } };
+  q('[data-ld]').onclick = () => { try { note(gameLoad(ta.value)); } catch (e) { note('Not a snapshot: ' + e.message); } };
+  q('[data-ts]').onclick = () => subTokenSave(q('[data-tk] input').value.trim());
   return SUB.el = m;
+}
+// the token asked for in the panel (why: the line above it); the submit that needed it waits in SUB.done
+function subTokenAsk(why) { subSay(why, 'bad'); const t = subPanel().querySelector('[data-tk]'); t.hidden = false; t.querySelector('input').value = ''; t.querySelector('input').focus(); }
+// SAVE TOKEN: checked against the repo, kept as its PLAY_TOKEN secret (sealed with the repo's key, libsodium - as the world page), then in this browser
+async function subTokenSave(t) {
+  if (!t) return; const P = subPanel(), b = P.querySelector('[data-ts]'); b.disabled = true; subSay('Checking the token...');
+  try {
+    await subGh('', {}, t);
+    const key = await subGh('/actions/secrets/public-key', {}, t);
+    const sodium = (await import('https://esm.sh/libsodium-wrappers@0.7.15')).default; await sodium.ready;
+    const sealed = sodium.crypto_box_seal(sodium.from_string(t), sodium.from_base64(key.key, sodium.base64_variants.ORIGINAL));
+    await subGh('/actions/secrets/PLAY_TOKEN', { method: 'PUT', body: JSON.stringify({ key_id: key.key_id, encrypted_value: sodium.to_base64(sealed, sodium.base64_variants.ORIGINAL) }) }, t);
+    subLs('wp_token', t); P.querySelector('[data-tk]').hidden = true; subSay('Token saved.', 'ok');
+    const go = SUB.done; SUB.done = null; if (go) go();
+  } catch (e) { subSay(e.status === 401 ? 'That token doesn\'t work: check it was copied whole.' : e.status === 403 || e.status === 404 ? 'That token can\'t reach the game\'s code or its secrets: check steps 2 and 3.' : 'Token: ' + e.message, 'bad'); }
+  b.disabled = false;
 }
 function subSay(text, col, link) {
   const s = subPanel().querySelector('[data-s]'); s.textContent = text; s.style.color = col === 'ok' ? '#9fd36a' : col === 'bad' ? '#ff8a80' : '#d8dce8';
   if (link) { const a = document.createElement('a'); a.href = link[1]; a.target = '_blank'; a.rel = 'noopener'; a.textContent = link[0]; a.style.color = '#ffd23a'; s.append(' ', a); }
 }
-const SUB_TOKEN_LINK = ['Set it on the world page', 'world.html'];
 // the build's steps as GitHub reports them (GitHub's own Post / Complete steps left out), each with its seconds
 function subSteps(steps) {
   const ul = subPanel().querySelector('[data-l]'); ul.textContent = '';
@@ -70863,29 +70887,30 @@ function subSteps(steps) {
     ul.append(li);
   }
 }
-// the panel shown (over everything), the snapshot it would submit kept for AS TEXT
-function subOpen(text) { SUB.text = text || ''; const m = subPanel(); if (!m.isConnected) document.body.appendChild(m); m.querySelector('[data-r]').hidden = true; m.querySelector('[data-tx]').hidden = true; return m; }
+// the panel shown (over everything), the snapshot it would submit kept for COPY SNAPSHOT
+function subOpen(text) { SUB.text = text || ''; SUB.done = null; const m = subPanel(); if (!m.isConnected) document.body.appendChild(m); for (const k of ['[data-r]', '[data-tk]', '[data-ldb]']) m.querySelector(k).hidden = true; m.querySelector('[data-n]').textContent = ''; return m; }
 // SUBMIT CHANGES: text - the snapshot (gameSnapshot); done() - called once GitHub has it
-async function worldSubmit(text, done) {
-  subOpen(text); subSteps(null);
+async function worldSubmit(text, done, again) {
+  if (!again) { subOpen(text); subSteps(null); }
   if (SUB.follow && subLs('wp_run')) { subFollow(); return; }                     // (a build already on its way: shown, not a second one)
-  if (!subLs('wp_token')) { subSay('No GitHub token in this browser.', 'bad', SUB_TOKEN_LINK); return; }
+  SUB.done = () => worldSubmit(text, done, true);                                 // (a token asked for: SAVE TOKEN sends this again)
+  if (!subLs('wp_token')) { subTokenAsk('This browser has no GitHub token yet: paste it below once.'); return; }
   let snap; try { snap = JSON.parse(text); } catch (e) { subSay('Could not take the snapshot: ' + e.message, 'bad'); return; }
   subSay('Sending...');
   try {
     let sha; try { sha = (await subGh('/contents/' + SUB_PATH + '?ref=main')).sha; } catch (e) { if (e.status !== 404) throw e; }
     const body = JSON.stringify(snap, null, 1) + '\n';
-    if (sha && sha === await subBlobSha(body)) { subSay('Already submitted: nothing new to build.', 'ok'); if (done) done(); return; }
+    if (sha && sha === await subBlobSha(body)) { SUB.done = null; subSay('Already submitted: nothing new to build.', 'ok'); if (done) done(); return; }
     const r = await subGh('/contents/' + SUB_PATH, { method: 'PUT', body: JSON.stringify({ branch: 'main', sha,
       message: 'World page: SNAPSHOT of ' + (snap.at || '?') + ' UTC (SUBMIT CHANGES in the game)', content: subB64(body) }) });
-    subLs('wp_run', JSON.stringify({ sha: r.commit.sha, t: Date.now() }));
+    SUB.done = null; subLs('wp_run', JSON.stringify({ sha: r.commit.sha, t: Date.now() }));
     if (done) done();
     subFollow();
   } catch (e) { subTell(e, 'Couldn\'t send: '); }
 }
 function subTell(e, pre) {
-  if (e.status === 401) subSay('Token expired: make a new one.', 'bad', SUB_TOKEN_LINK);
-  else if (e.status === 403 || e.status === 404) subSay('The token can\'t reach the game\'s code.', 'bad', SUB_TOKEN_LINK);
+  if (e.status === 401) subTokenAsk('The token has expired: make a new one and paste it below.');
+  else if (e.status === 403 || e.status === 404) subTokenAsk('The token can\'t reach the game\'s code: make a new one and paste it below.');
   else subSay(pre + e.message, 'bad');
 }
 // follow the workflow run of the last submitted commit, every 4 s, until it's out or failed
@@ -70896,7 +70921,7 @@ async function subFollow() {
   for (;;) {
     let run;
     try { run = (await subGh('/actions/workflows/' + SUB_WF + '/runs?head_sha=' + run0.sha + '&per_page=1')).workflow_runs[0]; }
-    catch (e) { if (mine()) subTell(e, 'Lost track of the build: '); break; }
+    catch (e) { if (mine()) { SUB.done = () => subFollow(); subTell(e, 'Lost track of the build: '); } break; }
     if (!mine()) return;
     if (!run) { subSay('Sent. Waiting for the build to start... ' + since());
       if (Date.now() - run0.t > 5 * 60e3) { subSay('The build never started.', 'bad', ['Actions', 'https://github.com/' + SUB_OWNER + '/' + SUB_REPO + '/actions']); break; } }
