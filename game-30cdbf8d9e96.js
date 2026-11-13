@@ -8666,8 +8666,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 991;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 16:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 992;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 16:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10167,6 +10167,11 @@ function drawPerfPanel(x, y) {
   ug.fillStyle = 'rgba(4,7,15,0.82)'; ug.fillRect(x - w, y, w + 4, h);
   lines.forEach((l, i) => drawText(ug, l, x - 2, y + 6 + i * 14, / OVER\b/.test(l) ? '#ff6a5a' : '#dfe8f0', 2, 'right'));   // (a system over its budget: red)
 }
+// what of the top bar a screen shows - and so takes presses: one rule for the drawing and the presses (20-input-pointer.js). A lab's screen (HUD_ONLY,
+// 17-hud.js) has the WORLD gear and its sliders only if it asks for 'world', never the MENU button (user Nov 13 15:33: tapping the Biome Editor's top
+// left corner brought up the main menu over it - the hidden MENU button still took the press)
+const topUiShown = () => !HUD_ONLY || HUD_ONLY.has('world');
+const menuBtnShown = () => !HUD_ONLY;
 function drawTopUI() {
   const L = topLayout();
   if (!HUD_ONLY) drawFps();
@@ -10174,7 +10179,7 @@ function drawTopUI() {
   ug.drawImage(uiArt.gearBtn, L.gear[0], L.gear[1]);
   if (ui.settings) ug.drawImage(W.frozen ? uiArt.playBtn : uiArt.pauseBtn, L.play[0], L.play[1]);
   if (ui.settings) { const [ex, ey] = eyeSpot(L); ug.drawImage(eyeBtn().open, ex, ey); }   // (the eye: shut it for photo mode)
-  if (!HUD_ONLY) ug.drawImage(uiArt.menuBtn, L.menu[0], L.menu[1]);   // (a lab: its world button, no menu - HUD_ONLY)
+  if (menuBtnShown()) ug.drawImage(uiArt.menuBtn, L.menu[0], L.menu[1]);   // (a lab: its world button, no menu - HUD_ONLY)
   if (ui.settings) { ug.fillStyle = '#ffd36b'; ug.fillRect(L.gear[0] + 6, L.gear[1] + 45, 30, 2); }
   drawSliders(L);
 }
@@ -11520,18 +11525,18 @@ window.addEventListener('pointerdown', e => {
     else if (h.act === 'flag') { ui.picker = h.p; scrollPickerTo(flagPick[h.p]); }
     return;
   }
-  const L = topLayout();
-  if (inRect(ux, uy, L.gear[0] - 3, L.gear[1] - 3, 48, 48)) { menuClick(); ui.settings = !ui.settings; return; }
-  if (ui.settings) { const [ex, ey] = eyeSpot(L); if (inRect(ux, uy, ex - 3, ey - 3, 48, 48)) { menuClick(); photoEnter(); return; } }
-  if (ui.settings && inRect(ux, uy, L.play[0] - 3, L.play[1] - 3, 48, 48)) {
+  const L = topLayout(), top = topUiShown();   // (only what the screen shows takes a press - 18-top-ui-perf.js)
+  if (top && inRect(ux, uy, L.gear[0] - 3, L.gear[1] - 3, 48, 48)) { menuClick(); ui.settings = !ui.settings; return; }
+  if (top && ui.settings) { const [ex, ey] = eyeSpot(L); if (inRect(ux, uy, ex - 3, ey - 3, 48, 48)) { menuClick(); photoEnter(); return; } }
+  if (top && ui.settings && inRect(ux, uy, L.play[0] - 3, L.play[1] - 3, 48, 48)) {
     menuClick();
     // pause holds the sky as it is; play hands the weather back to the system and closes the panel
     const play = !!W.frozen; envPlay(0, play); if (SW.live) act(0, 'envPlay', play); if (play) ui.settings = false;   // (the worker too - envSet)
     return;
   }
-  if (inRect(ux, uy, L.menu[0] - 3, L.menu[1] - 3, 48, 48)) { menuClick(); openMainMenu(); return; }
+  if (menuBtnShown() && inRect(ux, uy, L.menu[0] - 3, L.menu[1] - 3, 48, 48)) { menuClick(); openMainMenu(); return; }
   if (fpsPress(e)) return;
-  const sl = sliderAt(ux, uy);
+  const sl = top && sliderAt(ux, uy);
   if (sl) { menuClick(); setSlider(sl, ux); ui.dragSlider = sl.s.key; pointers.set(e.pointerId, { kind: 'slider', h: sl }); return; }
   // (user Oct 26: with the sliders open, a drag over the world looks round it and two fingers pinch it, each half on
   // its own; only the world button closes them)
@@ -38634,7 +38639,7 @@ function renderFrame() {
   if (!ui.settings && !HUD_ONLY && !STORY) drawMiniMap();   // (STORY: no minimap - user Nov 2 15:29)
   if (probe.on) probeFlush(ug);
   tt = lap('dots', tt);
-  if (HUD_ONLY && HUD_ONLY.has('world')) drawTopUI();   // (a lab with the world button: time, weather, the sea - user Nov 2 11:11)
+  if (HUD_ONLY && topUiShown()) drawTopUI();   // (a lab with the world button: time, weather, the sea - user Nov 2 11:11)
   if (HUD_ONLY) drawFps();   // (user Nov 8 14:25: the labs - the Biome Editor's too - never drew REPORT, the version and the FPS, yet their presses stayed where the last screen drew them, behind the panel: drawn on every screen now, the panels start under them - --below-corner)
   if (!HUD_ONLY) {   // (a lab's screen: only its vehicle's own controls - HUD_ONLY, 17-hud.js)
   drawTopUI();
