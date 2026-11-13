@@ -8665,8 +8665,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 996;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 16:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 997;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 17:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -70601,7 +70601,7 @@ function spotsChanged() { strSave(); if (typeof edVehRebuild === 'function') edV
    This screen's own presentation, run as it's drawn (as storyZoom): nothing of it is the simulation's.
    ================================================================ */
 const STOPEN = { HOLD: 1, FADE: 2, MOVE: ZOOM_EASE_AUTO, SKIP: 8, H: 0.2, Y: 0.435,
-  BOX: { cx: 0.6254, cy: 0.439, w: 0.5438, h: 0.7049 }, PAD: 8 };   // (BOX: the name's box in the mockup, in the screen's fractions; PAD: the picture's margin round it)
+  BOX: { cx: 0.613, cy: 0.467, w: 0.5438 * 0.78, h: 0.7049 * 0.78 }, PAD: 8, GAP: 0.04 };   // (BOX: the name's box, in the screen's fractions - the mockup's made 0.78 the size and its middle a little left and down: user Nov 13 16:05, his picture of it in the game, "a bit too big" and touching the lighthouse; PAD: the picture's margin round it; GAP: the least room between the structure's right side and the name, of the screen's width)
 const STORY_OPEN = { on: false, t: 0, skip: false };
 // a story opened from its slots: the shot, from the loading screen's lift
 function storyOpenAsk() { STORY_OPEN.on = true; STORY_OPEN.t = 0; STORY_OPEN.skip = false; }
@@ -70637,13 +70637,21 @@ function storyOpenFocus() {
   const B = strBox(o), my = (B.top + B.foot) / 2, z = cam.za[0] || cam.zt[0] || 1, k = stopenK();
   return [o.x + k * (0.5 - 1 / 3) * VIEW_W / z, my + k * (0.5 - STOPEN.Y) * VIEW_H / z, 0, 0, null];
 }
-// the name, in the controls' layer (render, 48-render.js)
+// the name, in the controls' layer (render, 48-render.js): in its box, and never nearer the structure than GAP (user Nov 13 16:05: "a bit of
+// padding between the home structure and the title") - moved right if it would be, made smaller only if that would take it off the screen
 function drawStoryOpen() {
   const im = img.titleOpen, a = storyOpenAlpha(); if (!im || !im.width || a <= 0) return;
-  const P = STOPEN.PAD, Bx = STOPEN.BOX, k = Math.min(Bx.w * ubw / (im.width - 2 * P), Bx.h * ubh / (im.height - 2 * P));
-  const w = Math.round(im.width * k), h = Math.round(im.height * k);
+  const P = STOPEN.PAD, Bx = STOPEN.BOX, pw = im.width - 2 * P, ph = im.height - 2 * P;
+  let k = Math.min(Bx.w * ubw / pw, Bx.h * ubh / ph), x0 = Bx.cx * ubw - pw * k / 2;
+  const o = stopenO();
+  if (o) {
+    const B = strBox(o), minL = storyToUI()(B.x1, B.top).X + STOPEN.GAP * ubw, maxR = ubw * (1 - STOPEN.GAP / 2);
+    if (x0 < minL) x0 = minL;
+    if (x0 + pw * k > maxR) k = Math.max(0.05, (maxR - x0) / pw);
+  }
+  const y0 = Bx.cy * ubh - ph * k / 2;
   ug.save(); ug.globalAlpha = a; ug.imageSmoothingEnabled = true;
-  ug.drawImage(im, Math.round(Bx.cx * ubw - w / 2), Math.round(Bx.cy * ubh - h / 2), w, h);
+  ug.drawImage(im, Math.round(x0 - P * k), Math.round(y0 - P * k), Math.round(im.width * k), Math.round(im.height * k));
   ug.restore();
 }
 // a press while the name is up: it goes quickly, and the press is only that
