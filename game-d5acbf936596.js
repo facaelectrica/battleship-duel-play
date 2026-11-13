@@ -5059,6 +5059,13 @@ async function loadBigArt() {
    This class also runs in the smoke-drawing worker, sent there as its text (sky/21-smoke.js smgText): it reads no game globals. */
 class ColTable {
   static T(kind) { return kind === 'u8' ? Uint8Array : kind === 'str' || kind === 'txt' ? Int32Array : kind === 'obj' || kind === 'val' ? Array : Float64Array; }
+  /* (Nov 13) A WORLD'S BUILD NUMBERS ITS ROWS FROM 1 (07-world-build.js buildWorld sets fresh while it runs): a table it empties gives
+     its rows ids from 1 again, so the same world built on the page, in the simulation worker and online has the same ids. The worker
+     takes the page's rows in its hand-off (swResync); what its own build linked by a handle outside the tables or in a field that isn't
+     sent - homeDock, coastDocks, a hull's harbour, a tower's, a perch's tower - is the same row again. Numbered on from the last build's
+     (the page builds the title's world first) every such link pointed at a row gone: a Battle's worker stopped in its first seconds
+     (fxMask - gateOf; lhGeo from a perch) and the page ran the game itself */
+  static fresh = false;
   static side(kind) { return kind === 'obj' || kind === 'val'; }   // (a column of values beside the rows, not numbers)
   constructor(spec) {
     this.f = []; this.byK = {}; this.c = {}; this.id = null; this.rec = false;
@@ -5142,6 +5149,7 @@ class ColTable {
   get length() { return this.n; }
   set length(v) {
     v = Math.max(0, Math.min(this.n, v | 0));
+    if (v === 0 && ColTable.fresh) this.top = 0;   // (emptied by a world's build: its rows numbered from 1 again - ColTable.fresh)
     if (this.hs) for (let i = v; i < this.n; i++) this.hs.delete(this.c[this.id][i]);
     for (const F of this.f) if (ColTable.side(F.kind)) this.c[F.k].fill(undefined, v, this.n);
     this.gone.fill(0, v, this.n); this.n = v; this.ver++;
@@ -5707,7 +5715,7 @@ const ONEVIEW = () => HUMANS() <= 1;                          // one screen (you
 // (the STORY's own vehicles - 50-story*.js, 50-zz-story-swap.js, 50-zzzz-veh-deal.js: its spot now (berth / spot), its fuel, lost and
 // mended by the day, renewed; rented (rentBy, rentM, rentX) and its engine's heat (heatT, hot, stillT))
 const STORY_REC = ['num: story heli plane sub boat car berth spot fuel renewed lostDay lostT fixDay fixT rentBy rentM rentX heatT hot stillT'];
-const CIV_REC = ['num: driven cin placed sid own price py _off _lifted downK _rv _sa _sk hookA hookT spd dropFrom dkT _smX _smY _smAcc _msPy hb hs fac', 'txt: sv', 'val: loiter carried marks deck dk goods', 'obj: _smS _smCh'];
+const CIV_REC = ['num: driven cin placed sid own price py _off _lifted downK _rv _sa _sk hookA hookT spd dropFrom dkT _smX _smY _smAcc _msPy hb hs fac susV susY noseT enterK washT', 'txt: sv', 'val: loiter carried marks deck dk goods', 'obj: _smS _smCh'];
 // (Nov 11, tables) a vehicle family's record table from its own lists and the shared ones: a name met again is the first list's
 const vehRec = (...L) => { const seen = new Set(); return ColTable.rec(...L.map(s => { const [k, f] = s.split(':'); return k + ': ' + f.trim().split(/\s+/).filter(n => n && !seen.has(n) && seen.add(n)).join(' '); })); };
 /* (Nov 11, tables) THE ARMY'S HULLS, A TABLE PER FAMILY (ships here; subs 24-submarine.js, planes 29-plane.js, tanks and helis
@@ -6637,6 +6645,10 @@ function stepFleet(dt) {
 
 //@src 07-world-build.js:1
 function buildWorld(restore) {
+  ColTable.fresh = true;                                    // (the tables it empties numbered from 1 again: the same ids on every side - 04-zz-coltable.js)
+  try { buildWorld0(restore); } finally { ColTable.fresh = false; }
+}
+function buildWorld0(restore) {
   SW.gen++;                                                 // (the simulation worker, 00-sw-boot.js: the page built a new world - the worker follows it)
   LIVE.b = null;                                            // (an edit while it's built is this world's: none till its land is - liveBuilt, 50-zzzz-live-edit.js)
   BUILD_T.length = 0; buildT0 = performance.now();
@@ -8674,8 +8686,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1009;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 19:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1010;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 19:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12648,7 +12660,6 @@ function gateDone(v, how) {
   if (how === 'out') { v.throttle = -v.dock.dir; } else { v.vx = 0; v.throttle = 0; }
   if (how === 'out') {
     // out: she goes on ahead, out to sea, by default
-    v.wasClear = true;
     v.input = NOTCH_VAL[outNotch(v.dock)];
     if (c.mode === k) setOrder(telegraphs[p], outNotch(v.dock));
     return;
@@ -19605,10 +19616,14 @@ function simRnd(name, a, b) { return a + (b - a) * simR(name); }
 function rngRestart(name) { (RNGS[name] || (RNGS[name] = {})).s = rngSeed(name); }
 function seenR(name) { const S = seenR.s || (seenR.s = {}); return rngNext(S[name] || (S[name] = { s: rngSeed('seen:' + name) })); }
 function seenRnd(name, a, b) { return a + (b - a) * seenR(name); }
-const TBL_SKIP = new Set([...NET_SKIP, '_wq', '_wk']);   // (and the wreck index's marks - 36-zzzz-settled.js)
+/* (Nov 13) what a table never saves or sends to the page: a thing's own pictures (art), its harbour (dock - each side's own build lays it
+   out, the same ids: ColTable.fresh), the drawing's caches (_e, _si, _px) and the wreck index's marks (36-zzzz-settled.js). It was all of
+   NET_SKIP - what each screen keeps for itself online, where the guest runs its own hits - so the marks the game makes (scorch: a tower's,
+   a tank's, a helicopter's burns), a STORY raider's own gun, a sub's halves and a plane's trail, ice and splats never reached the page from
+   the simulation worker, nor a save; ships, subs and planes had each kept theirs back with a table's own keep */
+const TBL_SKIP = new Set(['dock', 'art', '_e', '_si', '_px', '_wq', '_wk']);
 // ---- tables
 const TABLES = {};
-// (keep: fields the network leaves out (NET_SKIP) that are this system's own state - a sunk sub's halves, a plane's trail)
 // (Oct 31, 60-fps chat: a table kept as flat arrays rather than a list of things - the shells' trails, 47-render-overlays.js -
 // gives its own save: () => plain data, load: (data, byU) => put back (byU: an old save's ids, for references to its rows), and
 // for the simulation worker's snapshots snapCols: (full, drawn, bufs) => its columns, colsInto: columns => put back on the page
@@ -19620,7 +19635,7 @@ const TABLES = {};
 // the page takes as its own (adopt) and hands back to be packed into again (swColTable, swColAdopt)
 const TBL_NO_ROWS = Object.freeze([]);
 function defTable(name, list, o = {}) {
-  const keep = new Set(o.keep || []), skip = new Set([...TBL_SKIP, ...(o.skip || [])].filter(k => !keep.has(k)));
+  const skip = new Set([...TBL_SKIP, ...(o.skip || [])]);
   const ct = o.cols || null; if (ct) { ct.name = name; ColTable.named[name] = ct; if (o.handles || ct.rec) ct.handles = true; if (o.vals) ct.keepVals = true; if (ct.rec) ct.uidBase = -(++TBL_REC.n) * 4294967296; }   // (a column table knows its name: a handle of its row is saved by it - tblPlain; a record table's rows their own uids)
   const depth = o.depth ?? 4;
   const ctLoad = ct && (ct.rec ? (d, byU) => recLoad(TABLES[name], d, byU)
@@ -19861,18 +19876,18 @@ function tablesLoad(S) {
 defTable('sideOwn', null, { cols: sideOwn });
 const vehOwnBack = (k, T) => { for (let p = 0; p < 2; p++) { const v = ownOf(k, p); if (!v || !v.alive()) ownPut(k, p, T.find(q => !q.lost && q.placed == null && q.id === p) || null); } };
 // the battleships (06-fleet-captains makeShip, 22-ship-physics) - shipOf(p) each side's own, the lost ones going down
-// (her art, scorch marks and dock are local: NET_SKIP leaves them out; one without a harbour gets her side's back)
+// (her art and dock are each side's own: TBL_SKIP leaves them out; one without a harbour gets her side's back)
 const vehDockBack = arr => { for (const v of arr) if (!v.dock && homeDock[v.id]) v.dock = homeDock[v.id]; };
 // (moved by the GAME EDITOR, 'tableMove': off her harbour's gate, her autopilot and her moorings)
 const vehBoatMoveTo = (v, e) => { tblMoveTo(v, e); v.gate = null; v.auto = null; v.moored = false; };
-defTable('ships', null, { cols: ships, keep: ['scorch'], after: arr => { vehDockBack(arr); vehOwnBack('ship', ships); }, moveTo: vehBoatMoveTo });
+defTable('ships', null, { cols: ships, after: arr => { vehDockBack(arr); vehOwnBack('ship', ships); }, moveTo: vehBoatMoveTo });
 // (a sunk ship's broken pieces are the weapons' table, 'pieces' - 36-zzz-arms-tables.js)
 // the submarines (24-submarine makeSub) - subOf(p) each side's own, the lost ones going down and their halves on the sand (art and
-// dock local; one without a harbour gets her side's back)
-defTable('subs', null, { cols: subs, keep: ['scorch','parts'], after: arr => { vehDockBack(arr); vehOwnBack('sub', subs); }, moveTo: vehBoatMoveTo });
+// dock each side's own; one without a harbour gets her side's back)
+defTable('subs', null, { cols: subs, after: arr => { vehDockBack(arr); vehOwnBack('sub', subs); }, moveTo: vehBoatMoveTo });
 // the planes (29-plane makePlane) - planeOf(p) each side's own, the lost ones still falling or sinking (strand - the trail it's
-// laying - cover and splat kept); the trails, the wisps of rushing air and the ice shed off its wings
-defTable('planes', null, { cols: planes, keep: ['strand','cover','splat'], after: () => vehOwnBack('plane', planes) });
+// laying, cover and splat - saved and sent as any field); the trails, the wisps of rushing air and the ice shed off its wings
+defTable('planes', null, { cols: planes, after: () => vehOwnBack('plane', planes) });
 // (Nov 1) the trails: two column tables (29-plane.js) - the strands and their points; a save from before (a strand a row, its
 // points in it) read into both
 defTable('planeTrails', null, { cols: planeTrails, drawn: ['col', 'cr', 'cg', 'cb'], rows: ptFromRows, net: false });
@@ -40954,8 +40969,8 @@ const chK = h => CH_LEN[h.kind] * CIV_UPM / ((chArt && chArt[h.kind].W) || 100);
 // rotor's lift and the gusts it's in - col, turb - heliStep's, 29-zz-flight.js): its
 // magnet (mag, 50-land-magnet.js), its water cannon (hose ... - 50-land-firewater.js), the STORY's (STORY_REC); the ship it stands on (deck)
 // saved as her handle or id)
-const civHelis = new ColTable(ColTable.rec('num: kind x y vx vy facing tilt spin rotor R pad home dmg wait smokeT ph gear susY susV hose flow spinV t onDeck cpuElev hp id light hoseAcc hoseAng hg magBroken sinkT wrecked role col turb',
-  'txt: state', 'val: ai turn mag', ...STORY_REC, ...CIV_REC));
+const civHelis = new ColTable(ColTable.rec('num: kind x y vx vy facing tilt spin rotor R pad home dmg wait smokeT ph gear hose flow spinV t onDeck cpuElev hp id light hoseAcc hoseAng hg magBroken sinkT wrecked role col turb',
+'txt: state','val: ai turn mag', ...STORY_REC, ...CIV_REC));
 // (engine stage 3: the civilian helicopters' own table and random source - 36-zz-tables.js)
 const chR = sysRng('civHelis'), chRnd = (a, b) => a + (b - a) * chR();
 defTable('civHelis', null, { cols: civHelis, skip: ['_smS'] });
@@ -49513,8 +49528,8 @@ defTable('padRest', () => [padRestOf(false), padRestOf(true)], { make: () => ({}
    by itself. Hit, it goes down; into the water it sinks, onto land it crashes. ---- */
 // (Nov 10, part 8: a record table - 04-zz-coltable.js; a row a seaplane, held and walked as its handle, its fields as they were - the
 // warplanes' flight's too, 29-zz-flight.js)
-const seaplanes = new ColTable(ColTable.rec('num: home out x y dir run pitch ang vx vy wait col hp hpMax bounceT climbT dig flare foamT spin spinF susY susV tilt touchT gam invT coG aoa bp q flyAt flap stall stallT turb climbX pullS pullT',
-  'txt: state', 'val: ai turn roll crash', ...CIV_REC));
+const seaplanes = new ColTable(ColTable.rec('num: home out x y dir run pitch ang vx vy wait col hp hpMax bounceT climbT dig flare foamT spin spinF tilt touchT gam invT coG aoa bp q flyAt flap stall stallT turb climbX pullS pullT',
+'txt: state','val: ai turn roll crash', ...CIV_REC));
 // (engine stage 3: the seaplanes' own table and random source - 36-zz-tables.js)
 const splnR = sysRng('seaplanes'), splnRnd = (a, b) => a + (b - a) * splnR();
 defTable('seaplanes', null, { cols: seaplanes, skip: ['_smS'] });
@@ -52839,8 +52854,8 @@ for (const [kd, f] of [['cessna', REAL.cessna], ['jet', REAL.jet]]) { const T = 
 // gear, rot, offField ...), its own pilot (auto, ri, ap), the flight's (29-zz-flight.js: gam, aoa, stall, pullS ...), a Cessna's coloured
 // smoke (smk - 28-smoke-screen-depth-charges.js smokeSupply; its chain _smkCh beside the row, never saved), the STORY's and every
 // civilian vehicle's)
-const traffic = new ColTable(ColTable.rec('num: from to s wait x y ang owner spin vx vy hits dmg wings spinF smokeT smokeDark final holds split bend route0 D sGate col alt ph dir facing pitch gam climbT climbX offField gear rot ri coG aoa bp q flyAt flap stall stallT turb invT flare bounceT pullS pullT onDeck gWant exitK id washT smAcc smkAcc syncWait',
-  'txt: kind state ground auto', 'val: rt turn route roll crash ap smk', 'obj: _smkCh', ...STORY_REC, ...CIV_REC));
+const traffic = new ColTable(ColTable.rec('num: from to s wait x y ang owner spin vx vy hits dmg wings spinF smokeT smokeDark final holds split bend route0 D sGate col alt ph dir facing pitch gam climbT climbX offField gear rot ri coG aoa bp q flyAt flap stall stallT turb invT flare bounceT pullS pullT onDeck gWant exitK id smAcc smkAcc syncWait',
+'txt: kind state ground auto','val: rt turn route roll crash ap smk','obj: _smkCh', ...STORY_REC, ...CIV_REC));
 // (engine stage 3: the flights' own table and random source - 36-zz-tables.js; its smoke streams' links and its coloured smoke's chain
 // left out, picked up again as it smokes)
 const trR = sysRng('traffic'), trRnd = (a, b) => a + (b - a) * trR();
@@ -53414,8 +53429,8 @@ const JET_STRUT = [0x50, 0x52, 0x58];
    (user Oct 27: "The rest, when destroyed, is never spawned again") ---- */
 // (Nov 10, part 8: a record table - 04-zz-coltable.js; a row a boat, held and walked as its handle, its fields as they were: its wake and
 // foam's (fpx ...), driven (drv, vDrive), a fishing boat's horn (hornOn - 50-land-civdrive.js), moored (anc, _moorX - 50-land-anchors.js), a fishing boat's net (50-story-net.js), the STORY's)
-const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv susY susV smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn',
-  'txt: kind state', 'val: lake net anc rt ai home', ...STORY_REC, ...CIV_REC));
+const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn',
+'txt: kind state','val: lake net anc rt ai home', ...STORY_REC, ...CIV_REC));
 // (engine stage 3: the jet and motor boats' own table and random source - 36-zz-tables.js)
 const jbR = sysRng('jetboats'), jbRnd = (a, b) => a + (b - a) * jbR();
 defTable('jetboats', null, { cols: jetboats, skip: ['_smS'] });
@@ -54457,9 +54472,9 @@ const LAND_RESPAWN = 4;                                // seconds before a lost 
 // (Nov 11, tables) the tanks and the army helicopters: record tables, every hull a row - each side's own (tankOf(p), heliOf(p): none
 // till one comes in), the placed ones, the lost ones still going down (05-game-state.js THE ARMY'S HULLS)
 const tanks = new ColTable(vehRec(...VEH_REC, 'num: id fac x y a vx vy facing input hp ammo rk recoil mgT fall cap smokeT hitT fixT enter wsp way thr brk slipV stuckT track',
-  'txt: kind state', 'val: deck wd dropT hook carry cpuIn sandT smk cpuElev cpuPower bumpT kw grip speed reload aKick', ...CIV_REC));
+  'txt: kind state', 'val: deck wd dropT hook carry cpuIn sandT smk cpuElev cpuPower bumpT kw grip speed reload aKick scorch', ...CIV_REC));
 const helis = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy facing tilt hp rockets rk mgT rotor spin cap smokeT input fixT roll lampPh enter col turb washT bitT',
-  'txt: kind state', 'val: turn big flip rope cpu cpuIn cpuStick deck magBroken doorT sea edgeT _civT cpuElev spinV lostDone wrecked downT susY width reload mag', ...CIV_REC));
+  'txt: kind state', 'val: turn big flip rope cpu cpuIn cpuStick deck magBroken doorT sea edgeT _civT cpuElev spinV lostDone wrecked downT susY width reload mag scorch', ...CIV_REC));
 const landWrecks = [];
 const landWait = [{ tank: 0, heli: 0 }, { tank: 0, heli: 0 }];
 // (engine stage 3, tables - 36-zz-tables.js) landWait each side's time till the next can come. Their own random source: landUnitR
@@ -55697,7 +55712,6 @@ function unitScorch(v, x, y, r) {
   v.scorch = v.scorch || [];
   v.scorch.push({ lx, ly, r, seed: simR('landUnits') * 100 });
   if (v.scorch.length > 36) v.scorch.splice(v.scorch.findIndex(q => q.r < 3) >= 0 ? v.scorch.findIndex(q => q.r < 3) : 0, 1);
-  v.scorchN = (v.scorchN || 0) + 1;
 }
 // (engine part 5) drawn by the things' pass (45-zz-things-gpu.js) from the art atlas: its body (its burn marks in its mask - dmgMask; lost,
 // burnt dark), its rotor squeezed about the hub as the blades sweep, a blur at speed - with the rest of its call's things (thingsOwn)
@@ -61940,8 +61954,8 @@ function storyInvAdd(k, n) { if (!story.inv) story.inv = {}; story.inv[k] = Math
 // quiet - settling unseen), her engine and her wreck's smoulder (eng burnT smT), turned at her spot (turn - the story's swap), lost
 // (dmgOf draws her wrecked); her picture (art), her day's routine (rt); the STORY's (STORY_REC) and every civilian vehicle's (CIV_REC). Put in
 // by addRow (her structure's spot, renewed the next morning) or the table's own put (placed); each made settled first - carSettle)
-const storyCars = new ColTable(ColTable.rec('num: x y dir v vDrive drv npcV hp ph vx vy a av pit pitV susY susV air wet sinkT eng set rest quiet roll rollD wsp way thr brk wslip slipV burnT smT turn lost',
-  'txt: kind state art', 'val: rt fl', ...STORY_REC, ...CIV_REC));
+const storyCars = new ColTable(ColTable.rec('num: x y dir v vDrive drv npcV hp ph vx vy a av pit pitV air wet sinkT eng set rest quiet roll rollD wsp way thr brk wslip slipV burnT smT turn lost',
+'txt: kind state art','val: rt fl', ...STORY_REC, ...CIV_REC));
 const CAR_V = 14;                                         // (top speed, metres a second: about 50 km/h)
 function newStoryCar(d) { return Object.assign({ story: true, car: true, kind: 'car', state: 'run', x: 0, y: LAND_Y, dir: -1, v: CAR_V * UPM, vDrive: 0, drv: 0, cin: 0, hp: 2, fuel: 1, ph: 0, vx: 0, vy: 0, a: 0, pit: 0, pitV: 0, air: 0, wet: 0, eng: 0, set: 0, roll: 0 }, d); }
 defTable('storyCars', null, { cols: storyCars });
