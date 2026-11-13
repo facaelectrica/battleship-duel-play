@@ -8665,8 +8665,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 997;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 17:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 998;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 17:10';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11441,7 +11441,7 @@ function fpsPress(e) {
   if (!ui.perfPanel) ui.perfPanel = true; else if (!probe.on) probeStart(); else { ui.perfPanel = false; probe.on = false; }
   return true;
 }
-const onEdUI = e => !!(e && e.target && e.target.closest && e.target.closest('#skyEd, #skyExp, #skyEdBtn, #skySnap, #vgBot, #vgLab, #vgLeft, #feRoot'));   // (and the Biome Editor's panels)
+const onEdUI = e => !!(e && e.target && e.target.closest && e.target.closest('#skyEd, #skyExp, #skyEdBtn, #wSub, #vgBot, #vgLab, #vgLeft, #feRoot'));   // (and the Biome Editor's panels)
 window.addEventListener('pointerdown', e => {
   if (onEdUI(e)) return;
   e.preventDefault();
@@ -32228,7 +32228,7 @@ if (typeof window !== 'undefined') {
 }
 const ED_CSS = `
 #skyEd { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; background: #0f1420f2; color: #d8dce8; font: 12px/1.3 ui-monospace, Menlo, Consolas, monospace; border-top: 1px solid #2c3850; padding: 0 max(12px, env(safe-area-inset-left)) calc(8px + env(safe-area-inset-bottom, 0px)); height: 30vh; box-sizing: border-box; display: flex; flex-direction: column; touch-action: pan-y; -webkit-user-select: none; user-select: none; }
-#skyEd[hidden], #skyEdBtn[hidden], #skyExp[hidden], #skySnap[hidden] { display: none !important; }
+#skyEd[hidden], #skyEdBtn[hidden], #skyExp[hidden] { display: none !important; }
 #skyEd .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 6px; }
 #skyEd .grip { flex: 0 0 auto; height: 12px; margin: 0 -12px; cursor: ns-resize; touch-action: none; display: flex; justify-content: center; align-items: center; }
 #skyEd .grip::after { content: ''; width: 44px; height: 3px; border-radius: 2px; background: #2c3850; }
@@ -32270,7 +32270,7 @@ const ED_CSS = `
 #skyEd input[type=range] { width: 100%; min-width: 150px; margin: 0; accent-color: #ffb347; height: 22px; }   /* (lab V47, user: "sliders should never be this tiny") */
 #skyEd .cat.btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; align-content: flex-start; } #skyEd .cat.btns h4 { flex-basis: 100%; }
 #skyEd .tabnote { grid-column: 1 / -1; color: #7a8294; font-size: 11px; margin: 0 0 2px; }
-#skyEd button, #skyEdBtn, #skyExp button, #skySnap button { font: inherit; background: #1a2234; color: #d8dce8; border: 1px solid #2c3850; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
+#skyEd button, #skyEdBtn, #skyExp button { font: inherit; background: #1a2234; color: #d8dce8; border: 1px solid #2c3850; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
 #skyEd button.on { background: #ffb347; color: #000; border-color: #ffb347; }
 /* (the top row on one line down to an iPad's 1180, user Oct 30: tighter there; a phone still wraps it) */
 @media (max-width: 1400px) { #skyEd .bar.top { gap: 3px; } #skyEd .bar.top button { padding: 4px 5px; } #skyEd .bar.top .tab { letter-spacing: 0; } }
@@ -32281,10 +32281,10 @@ const ED_CSS = `
 #skyEd .crow label { color: #7a8294; }
 #skyEd .cbtn { width: 30px; height: 22px; padding: 0; border: 1px solid #2c3850; border-radius: 3px; cursor: pointer; }
 #skyEd .cw { color: #7a8294; font-size: 11px; }
-#skyEd textarea, #skyExp textarea, #skySnap textarea { font: 11px/1.3 ui-monospace, Menlo, monospace; background: #0a0e18; color: #d8dce8; border: 1px solid #2c3850; border-radius: 4px; width: min(520px, 100%); height: 44px; -webkit-user-select: text; user-select: text; }
+#skyEd textarea, #skyExp textarea { font: 11px/1.3 ui-monospace, Menlo, monospace; background: #0a0e18; color: #d8dce8; border: 1px solid #2c3850; border-radius: 4px; width: min(520px, 100%); height: 44px; -webkit-user-select: text; user-select: text; }
 #skyEdBtn { position: fixed; left: 8px; bottom: 8px; z-index: 49; opacity: 0.92; }
-#skyExp, #skySnap { position: fixed; z-index: 60; left: 50%; top: 10%; transform: translateX(-50%); width: min(640px, calc(100vw - 32px)); background: #0f1420; border: 1px solid #2c3850; border-radius: 6px; padding: 10px; color: #d8dce8; font: 12px ui-monospace, Menlo, monospace; }
-#skyExp textarea, #skySnap textarea { width: 100%; height: 220px; box-sizing: border-box; }
+#skyExp { position: fixed; z-index: 60; left: 50%; top: 10%; transform: translateX(-50%); width: min(640px, calc(100vw - 32px)); background: #0f1420; border: 1px solid #2c3850; border-radius: 6px; padding: 10px; color: #d8dce8; font: 12px ui-monospace, Menlo, monospace; }
+#skyExp textarea { width: 100%; height: 220px; box-sizing: border-box; }
 `;
 const fmtV = (k, v) => k === 'time' ? hhmm(v) : (Number.isInteger(v) ? String(v) : (+v).toFixed(2));
 const hex = c => '#' + c.map(v => clamp(Math.round(v), 0, 255).toString(16).padStart(2, '0')).join('');
@@ -32373,10 +32373,10 @@ function edBuild(host) {
     try { for (const k of Object.keys(localStorage)) if (k.startsWith('bd_')) lsRawDel(k); } catch (e) {}   // (stored names, let go - the built-in world read again: 00-world.js)
     bDel.textContent = 'REVERTED'; setTimeout(() => location.reload(), 300);
   };
-  // (SNAPSHOT, user Oct 29: "the snapshot feature ... that takes a screenshot of the world and then I can pass it to you for
-  // debug - add the same feature to the main game editor": the host's host.snapshot / host.load - the game's world as text)
-  const bSnap = host.snapshot ? edEl('button', '', 'SNAPSHOT') : null;
-  if (bSnap) bSnap.title = 'Copy the whole game as text, or load one';
+  // (SUBMIT CHANGES, user Nov 13 15:56 - was SNAPSHOT, Oct 29): the game as text (host.snapshot) sent straight into the game on GitHub;
+  // its panel also shows it AS TEXT to copy for Claude, or loads one (50-zzzz-submit.js)
+  const bSnap = host.snapshot ? edEl('button', '', 'SUBMIT CHANGES') : null;
+  if (bSnap) bSnap.title = 'Puts your saved changes in the game for everyone';
   // (user Nov 1) the top row: the two modes, then the buttons for everything (UNDO / REDO go in at its start - 50-zz-undo.js; DELETE
   // what's picked after DELETE ALL CHANGES (was DELETE SAVED, renamed Nov 1) - 50-zzz-world-ed.js), CLOSE
   const modeBtn = {}, gap = edEl('span', 'gap');
@@ -32448,18 +32448,8 @@ function edBuild(host) {
     else { for (const k of keys) setV(k, TUNE.cur[k]); TUNE.cur = null; saveP(); }
     bCmp.textContent = TUNE.cur ? 'COMPARE: DEFAULTS' : 'COMPARE: MINE'; bCmp.classList.toggle('on', !!TUNE.cur);
   };
-  // (EXPORT gone, user Nov 1: "its the same as snapshot" - the SNAPSHOT carries every setting)
-  if (bSnap) {
-    const sn = edEl('div'); sn.id = 'skySnap'; sn.hidden = true;
-    sn.innerHTML = '<div class="bar"><b style="margin-right:auto;font-weight:normal;color:#7a8294">SNAPSHOT: THE GAME AS TEXT</b><button>COPY</button><button>CLEAR</button><button>LOAD</button><button>CLOSE</button></div><textarea spellcheck="false"></textarea><div style="color:#7a8294;margin-top:4px"></div>';
-    document.body.appendChild(sn);
-    const [sCopy, sClear, sLoad, sClose] = sn.querySelectorAll('button'), sTa = sn.querySelector('textarea'), sNote = sn.querySelector('div:last-child');
-    bSnap.onclick = () => { try { sTa.value = host.snapshot(); sNote.textContent = 'Copy this and paste it to Claude. (Paste a snapshot here and press LOAD to see it.)'; } catch (e) { sTa.value = ''; sNote.textContent = 'Could not take it: ' + e.message; } sn.hidden = false; sTa.select(); };
-    sCopy.onclick = async () => { sTa.select(); try { await navigator.clipboard.writeText(sTa.value); sCopy.textContent = 'COPIED'; } catch (e) { try { document.execCommand('copy'); sCopy.textContent = 'COPIED'; } catch (e2) { } } setTimeout(() => { sCopy.textContent = 'COPY'; }, 1500); };
-    sClear.onclick = () => { sTa.value = ''; sNote.textContent = 'Paste a snapshot, then LOAD.'; sTa.focus(); };   // (user Nov 1 22:05: empty it before pasting a new one)
-    sLoad.onclick = () => { try { sNote.textContent = host.load(sTa.value); } catch (e) { sNote.textContent = 'Not a snapshot: ' + e.message; } };
-    sClose.onclick = () => { sn.hidden = true; };
-  }
+  // (EXPORT gone, user Nov 1: "its the same as snapshot" - the snapshot SUBMIT CHANGES sends carries every setting)
+  if (bSnap) bSnap.onclick = () => { let t; try { t = host.snapshot(); } catch (e) { subOpen(''); subSay('Could not take it: ' + e.message, 'bad'); return; } worldSubmit(t); };
   // (user Nov 5 09:04: "at the bottom of the Editor ... we could hold the longer descriptions of things, so its like the manual in the
   // editor") THE HELP LINE: pointing at (mouse) or tapping (finger) anything in the editor with a description shows its name and the
   // whole description here - every panel's, one rule: an element's data-help (the longer one) or else its title
@@ -32618,7 +32608,7 @@ const SKYED = { h: null };
 function skyEdHeld() { if (typeof EDMODE === 'undefined' || !EDMODE.on) { SKYED.h = null; return null; } return SKYED.h || (SKYED.h = { ZL: null, refX: [null, null] }); }
 function skyEdRefresh() { SKYED.h = null; }
 function skyNewFrame() {
-  if (!NSKY.editor.TUNE.built && document.body) NSKY.editor.build({ rescreen: () => { }, snapshot: gameSnapshot, load: gameLoad });
+  if (!NSKY.editor.TUNE.built && document.body) NSKY.editor.build({ rescreen: () => { }, snapshot: gameSnapshot });
   NSKY.editor.show(ui.settings || NSKY.editor.open || worldEdOnTitle() || (WED.played && !ui.title));   // (a game started with the editor's PLAY: its button stays to go back - 50-zzz-world-ed.js)   // (and on the title: the highlighted mode's world - 00-world.js, Story chat Oct 31)
   const z0 = cam.view[0].z / ZOOM_DEFAULT, z1 = cam.merge >= 1 ? z0 : cam.view[1].z / ZOOM_DEFAULT;
   // the decks' drawing zoom: in steps (an eighth of a zoom step apart, 2^(1/6)), held while the camera's zoom stays within its
@@ -70376,11 +70366,11 @@ function mkListSync() {
 
 //@src 50-zzzz-scene-ask.js:1
 /* ---- UNSAVED CHANGES (user Nov 3 07:07-07:09, the editor saves like a scene - the journal: 00-world-journal.js). Leaving the scene with
-   changes not saved asks SAVE / DISCARD / CANCEL: the editor's CLOSE, SNAPSHOT (what it copies is the saved world) and the WORLD
+   changes not saved asks SAVE / DISCARD / CANCEL: the editor's CLOSE, SUBMIT CHANGES (what it sends is the saved world) and the WORLD
    dropdown (the page loaded again in the other world). PLAY doesn't ask: it plays the scene as it is, still unsaved. SAVE CHANGES
    commits (its own button, user 07:14 - every edit is built as it's made: 50-zzzz-live-edit.js). ---- */
 const SASK = { el: null, pass: false };
-// go: what was asked for, after SAVE or DISCARD. reload: a DISCARD that leaves the page where it is (SNAPSHOT) loads it again, the
+// go: what was asked for, after SAVE or DISCARD. reload: a DISCARD that leaves the page where it is (SUBMIT CHANGES) loads it again, the
 // editor open on the saved world (what's in memory is still the unsaved one)
 function sceneAsk(go, cancel, reload) {
   if (!sceneDirty()) { go(); return; }
@@ -70404,14 +70394,14 @@ function sceneAsk(go, cancel, reload) {
     go();
   };
 }
-// the top bar's CLOSE and SNAPSHOT: asked first (the button pressed again once answered)
+// the top bar's CLOSE and SUBMIT CHANGES: asked first (the button pressed again once answered)
 document.addEventListener('click', e => {
   const b = e.target && e.target.closest ? e.target.closest('#skyEd .bar.top button') : null;
   if (!b || SASK.pass) return;
-  const t = b.textContent.trim(); if (t !== 'CLOSE' && t !== 'SNAPSHOT') return;
+  const t = b.textContent.trim(); if (t !== 'CLOSE' && t !== 'SUBMIT CHANGES') return;
   if (!sceneDirty()) return;
   e.stopImmediatePropagation(); e.preventDefault();
-  sceneAsk(() => { SASK.pass = true; try { b.click(); } finally { SASK.pass = false; } }, null, t === 'SNAPSHOT');
+  sceneAsk(() => { SASK.pass = true; try { b.click(); } finally { SASK.pass = false; } }, null, t === 'SUBMIT CHANGES');
 }, true);
 
 //@src 50-zzzz-spots.js:1
@@ -70759,6 +70749,129 @@ function stKit(p) { const W = stRow(p); if (!W.length) return null; const lh = !
 function stCwState(wk) {
   const on = wk === 'cook' ? !!story.cook : wk === 'lamp' ? !!story.light : wk === 'beam' ? (() => { const C = lhCtlId(stLhId()); return !(C && C.off); })() : false;
   return { f: 0, off: false, n: -1, on };
+}
+
+//@src 50-zzzz-submit.js:1
+/* ---- SUBMIT CHANGES (submit chat, Nov 13; user 15:56: "Why can't I just save changes, and then instead of snapshot, it's a submit changes,
+   and it does the process of copying the snapshot into the game? ... so I would not need to open the page where I paste the changes.")
+   The editors' SNAPSHOT is SUBMIT CHANGES: the game's snapshot (gameSnapshot - 41-sky-new.js) goes straight to worlds/snapshot.json on main
+   through GitHub, as the world page's SUBMIT does (tools/world-page/world.html), and the "World release" workflow bakes it in, builds the
+   next version and puts it on Pages. The panel follows that build here: each step, then "Version N is out" and RELOAD.
+   - The token is the world page's (localStorage wp_token): one website, so the one this browser saved there is read here. None, or expired:
+     the panel says so and links to the world page to set it (its SAVE also keeps it as the repo's PLAY_TOKEN secret the workflow needs).
+     wp_token is not a bd_ key, so no snapshot ever carries it.
+   - The build followed is kept (wp_run, the world page's own): either page shows it, also after a reload.
+   - AS TEXT: the snapshot as text to COPY (to give to Claude) and LOAD one (gameLoad), what the SNAPSHOT panel did.
+   Used by the GAME EDITOR (sky/90-editor.js) and the Biome Editor (53-veg-editor.js): worldSubmit(text, done). ---- */
+const SUB = { el: null, text: '', follow: 0, done: null };
+const SUB_OWNER = 'facaelectrica', SUB_REPO = 'battleship-duel', SUB_PATH = 'worlds/snapshot.json', SUB_WF = 'world.yml';
+const SUB_API = 'https://api.github.com/repos/' + SUB_OWNER + '/' + SUB_REPO;
+function subLs(k, v) { try { if (v === undefined) return localStorage.getItem(k); v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { return null; } }
+async function subGh(path, opt = {}) {
+  const tok = subLs('wp_token');
+  const r = await fetch(path.startsWith('http') ? path : SUB_API + path, { ...opt, headers: { Accept: 'application/vnd.github+json',
+    ...(tok ? { Authorization: 'Bearer ' + tok } : {}), 'X-GitHub-Api-Version': '2022-11-28', ...(opt.body ? { 'Content-Type': 'application/json' } : {}) } });
+  if (r.status === 204) return {};
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(j.message || ('HTTP ' + r.status)); e.status = r.status; throw e; }
+  return j;
+}
+// git's id of a file (GitHub's sha): sha1 of "blob <bytes>\0" + the bytes - the same snapshot twice starts no build
+async function subBlobSha(text) {
+  const u = new TextEncoder().encode(text), h = new TextEncoder().encode('blob ' + u.length + '\0'), all = new Uint8Array(h.length + u.length);
+  all.set(h); all.set(u, h.length);
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-1', all))].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function subB64(s) { const u = new TextEncoder().encode(s); let o = ''; for (let i = 0; i < u.length; i += 0x8000) o += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); return btoa(o); }
+
+function subPanel() {
+  if (SUB.el) return SUB.el;
+  const m = document.createElement('div'); m.id = 'wSub';
+  m.style.cssText = 'position:fixed;inset:0;z-index:240;background:#0008;display:grid;place-items:center;font:13px/1.4 ui-monospace,Menlo,Consolas,monospace';
+  m.innerHTML = '<div style="background:#0f1420;border:1px solid #2c3850;border-radius:10px;padding:16px;display:grid;gap:10px;color:#d8dce8;width:min(560px,90vw);max-height:86vh;overflow:auto">'
+    + '<div style="color:#9fd36a">SUBMIT CHANGES</div><div data-s></div><ul data-l style="list-style:none;margin:0;padding:0;color:#7a8294;font-size:12px"></ul>'
+    + '<div data-tx hidden style="display:grid;gap:8px"><textarea spellcheck="false" style="height:160px;font:11px ui-monospace,monospace;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;-webkit-user-select:text;user-select:text"></textarea>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap"><button data-c>COPY</button><button data-ld>LOAD</button></div><div data-n style="color:#7a8294"></div></div>'
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap"><button data-r hidden>RELOAD</button><button data-t>AS TEXT</button><button data-x>CLOSE</button></div></div>';
+  for (const b of m.querySelectorAll('button')) b.style.cssText += ';min-height:40px;padding:6px 14px;font:inherit;background:#1a2234;color:#fff;border:1px solid #2c3850;border-radius:6px;cursor:pointer';
+  for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'wheel', 'click', 'keydown', 'touchstart', 'touchmove', 'touchend']) m.addEventListener(ev, e => e.stopPropagation());
+  const q = s => m.querySelector(s), ta = q('textarea');
+  q('[data-x]').onclick = () => { m.remove(); };
+  q('[data-r]').onclick = () => location.reload();
+  q('[data-t]').onclick = () => { const t = q('[data-tx]'); t.hidden = !t.hidden; if (!t.hidden) { ta.value = SUB.text; q('[data-n]').textContent = 'Copy it to give to Claude, or paste one and LOAD it'; ta.select(); } };
+  q('[data-c]').onclick = async () => { ta.select(); const b = q('[data-c]'); try { await navigator.clipboard.writeText(ta.value); b.textContent = 'COPIED'; } catch (e) { try { document.execCommand('copy'); b.textContent = 'COPIED'; } catch (e2) { } } setTimeout(() => { b.textContent = 'COPY'; }, 1500); };
+  q('[data-ld]').onclick = () => { try { q('[data-n]').textContent = gameLoad(ta.value); } catch (e) { q('[data-n]').textContent = 'Not a snapshot: ' + e.message; } };
+  return SUB.el = m;
+}
+function subSay(text, col, link) {
+  const s = subPanel().querySelector('[data-s]'); s.textContent = text; s.style.color = col === 'ok' ? '#9fd36a' : col === 'bad' ? '#ff8a80' : '#d8dce8';
+  if (link) { const a = document.createElement('a'); a.href = link[1]; a.target = '_blank'; a.rel = 'noopener'; a.textContent = link[0]; a.style.color = '#ffd23a'; s.append(' ', a); }
+}
+const SUB_TOKEN_LINK = ['Set it on the world page', 'world.html'];
+// the build's steps as GitHub reports them (GitHub's own Post / Complete steps left out), each with its seconds
+function subSteps(steps) {
+  const ul = subPanel().querySelector('[data-l]'); ul.textContent = '';
+  for (const st of steps || []) {
+    if (/^(Post |Complete job)/.test(st.name)) continue;
+    const fail = st.conclusion === 'failure', done = st.status === 'completed', now = st.status === 'in_progress';
+    const li = document.createElement('li'); li.style.color = fail ? '#ff8a80' : now ? '#ffd23a' : done ? '#d8dce8' : '';
+    const t0 = st.started_at && Date.parse(st.started_at), t1 = st.completed_at ? Date.parse(st.completed_at) : Date.now();
+    li.textContent = (fail ? '✗' : st.conclusion === 'skipped' ? '-' : done ? '✓' : now ? '▸' : '·') + ' ' + (st.name === 'Set up job' ? 'Start the machine' : st.name.replace(/^Run /, ''))
+      + (t0 && (done || now) ? '  ' + Math.max(0, Math.round((t1 - t0) / 1000)) + ' s' : '');
+    ul.append(li);
+  }
+}
+// the panel shown (over everything), the snapshot it would submit kept for AS TEXT
+function subOpen(text) { SUB.text = text || ''; const m = subPanel(); if (!m.isConnected) document.body.appendChild(m); m.querySelector('[data-r]').hidden = true; m.querySelector('[data-tx]').hidden = true; return m; }
+// SUBMIT CHANGES: text - the snapshot (gameSnapshot); done() - called once GitHub has it
+async function worldSubmit(text, done) {
+  subOpen(text); subSteps(null);
+  if (SUB.follow && subLs('wp_run')) { subFollow(); return; }                     // (a build already on its way: shown, not a second one)
+  if (!subLs('wp_token')) { subSay('No GitHub token in this browser.', 'bad', SUB_TOKEN_LINK); return; }
+  let snap; try { snap = JSON.parse(text); } catch (e) { subSay('Could not take the snapshot: ' + e.message, 'bad'); return; }
+  subSay('Sending...');
+  try {
+    let sha; try { sha = (await subGh('/contents/' + SUB_PATH + '?ref=main')).sha; } catch (e) { if (e.status !== 404) throw e; }
+    const body = JSON.stringify(snap, null, 1) + '\n';
+    if (sha && sha === await subBlobSha(body)) { subSay('Already submitted: nothing new to build.', 'ok'); if (done) done(); return; }
+    const r = await subGh('/contents/' + SUB_PATH, { method: 'PUT', body: JSON.stringify({ branch: 'main', sha,
+      message: 'World page: SNAPSHOT of ' + (snap.at || '?') + ' UTC (SUBMIT CHANGES in the game)', content: subB64(body) }) });
+    subLs('wp_run', JSON.stringify({ sha: r.commit.sha, t: Date.now() }));
+    if (done) done();
+    subFollow();
+  } catch (e) { subTell(e, 'Couldn\'t send: '); }
+}
+function subTell(e, pre) {
+  if (e.status === 401) subSay('Token expired: make a new one.', 'bad', SUB_TOKEN_LINK);
+  else if (e.status === 403 || e.status === 404) subSay('The token can\'t reach the game\'s code.', 'bad', SUB_TOKEN_LINK);
+  else subSay(pre + e.message, 'bad');
+}
+// follow the workflow run of the last submitted commit, every 4 s, until it's out or failed
+async function subFollow() {
+  const run0 = JSON.parse(subLs('wp_run') || 'null'); if (!run0) return;
+  const me = ++SUB.follow, mine = () => me === SUB.follow;
+  const since = () => Math.round((Date.now() - run0.t) / 1000) + ' s';
+  for (;;) {
+    let run;
+    try { run = (await subGh('/actions/workflows/' + SUB_WF + '/runs?head_sha=' + run0.sha + '&per_page=1')).workflow_runs[0]; }
+    catch (e) { if (mine()) subTell(e, 'Lost track of the build: '); break; }
+    if (!mine()) return;
+    if (!run) { subSay('Sent. Waiting for the build to start... ' + since());
+      if (Date.now() - run0.t > 5 * 60e3) { subSay('The build never started.', 'bad', ['Actions', 'https://github.com/' + SUB_OWNER + '/' + SUB_REPO + '/actions']); break; } }
+    else if (run.status !== 'completed') {
+      let steps = null; try { const j = (await subGh(run.jobs_url)).jobs[0]; steps = j ? j.steps : null; } catch (e) { }
+      if (!mine()) return;
+      subSay(run.status === 'queued' || !steps || !steps.length ? 'Waiting for a GitHub machine... ' + since() : 'Building... ' + since()); subSteps(steps);
+    } else if (run.conclusion === 'success') {
+      try { const j = (await subGh(run.jobs_url)).jobs[0]; subSteps(j ? j.steps : null); } catch (e) { }
+      let v = ''; try { for (const c of await subGh('/commits?sha=main&per_page=20')) { const m = /^Built: Version (\d+) \(world page\)/.exec(c.commit.message); if (m) { v = m[1]; break; } } } catch (e) { }
+      if (!mine()) return;
+      subSay('Version ' + v + ' is out. The site has it in about a minute: RELOAD to play it.', 'ok'); subPanel().querySelector('[data-r]').hidden = false; break;
+    } else { let steps = null; try { steps = (await subGh(run.jobs_url)).jobs[0].steps; } catch (e) { } subSteps(steps); subSay('Build failed.', 'bad', ['See why', run.html_url]); break; }
+    await new Promise(r => setTimeout(r, 4000));
+    if (!mine()) return;
+  }
+  if (mine()) { subLs('wp_run', null); SUB.follow = 0; }
 }
 
 //@src 50-zzzz-veh-deal.js:1
@@ -73142,7 +73255,7 @@ function vegUI(Z) {
 #vgLeft button{font:inherit;font-size:15px;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px;min-height:44px;padding:6px;cursor:pointer;touch-action:manipulation;user-select:none;-webkit-user-select:none}#vgLeft button.on{background:#2a3a1e;border-color:#6a9a3a}
 #vgLeft .r3{display:grid;gap:4px;padding-bottom:6px;border-bottom:1px solid #2c3850}#vgLeft .r3 button{font-size:13px;min-height:40px}#vgLeft .r{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;align-items:center}#vgLeft .l{color:#7a8294}#vgFps{color:#9fd36a;font:600 20px ui-monospace,Menlo,monospace}#vgCost{color:#c8cfdc;font-size:12px;line-height:1.35;white-space:pre-line}</style>
 <div class="r3"><button class="on" title="All the plants of this biome, on their decks">GROUP EDITOR</button><button data-ed="prefab" title="Edit one plant prefab on its own">PREFAB EDITOR</button><button data-ed="comp" title="Pick its trunk or its leaf">COMPONENT EDITOR</button></div><div id="vgFps">-- fps</div><div id="vgCost">-</div>
-<button data-b="1" class="on" style="display:none">BONES ON</button><button data-reset="1" style="display:none" title="Puts the scene back as it was when the editor opened. Your settings stay">RESET SCENE</button><div id="vgVis"></div>` + (window.__vegLab ? `` : `<button data-vsave="1" title="Keeps your changes in this browser" disabled>SAVE CHANGES</button><button data-vrev="1" title="Erase all biome changes in this browser (tap twice)" style="border-color:#ff5046;color:#ff8a80">REVERT ALL CHANGES</button><button data-snap="1" title="Copies everything - the world and the biomes - as text you can paste or keep">SNAPSHOT</button><button data-ged="1" title="Opens the game editor">GAME EDITOR</button><button data-back="1" title="Closes the biome editor">CLOSE</button>`);
+<button data-b="1" class="on" style="display:none">BONES ON</button><button data-reset="1" style="display:none" title="Puts the scene back as it was when the editor opened. Your settings stay">RESET SCENE</button><div id="vgVis"></div>` + (window.__vegLab ? `` : `<button data-vsave="1" title="Keeps your changes in this browser" disabled>SAVE CHANGES</button><button data-vrev="1" title="Erase all biome changes in this browser (tap twice)" style="border-color:#ff5046;color:#ff8a80">REVERT ALL CHANGES</button><button data-snap="1" title="Puts your saved changes - the world and the biomes - in the game for everyone">SUBMIT CHANGES</button><button data-ged="1" title="Opens the game editor">GAME EDITOR</button><button data-back="1" title="Closes the biome editor">CLOSE</button>`);
     const fpsEl = L.querySelector('#vgFps');
     // (user Nov 7 16:15, his photo: the left panel still ran over the bottom bar - 100vh isn't the screen's height on every device) the left
     // panel stops 8 pixels over where the bottom bar really starts, and scrolls; the right one fits the screen it's on. (Nov 7 18:05, iPad 27.2 Home Screen app: both panels start below the status bar and its fade - --below-bar - and fit the page's real height, pageBox)
@@ -73153,20 +73266,20 @@ function vegUI(Z) {
     const feCorner = () => { const f = document.getElementById('feRoot'); if (!f) return; const on = getComputedStyle(f).display !== 'none', r = f.getBoundingClientRect(), cut = on && CORNER.cssL ? Math.round(r.right - CORNER.cssL) : 0, B = Math.round((CORNER.css || 0) - r.top), bar = f.querySelector('.bar');
       const cp = cut > 0 && B > 0 ? `polygon(0 0,${r.width - cut}px 0,${r.width - cut}px ${B}px,100% ${B}px,100% 100%,0 100%)` : ''; if (f.style.clipPath !== cp) f.style.clipPath = cp; if (bar) { const pr = cut > 0 ? cut + 8 + 'px' : ''; if (bar.style.paddingRight !== pr) bar.style.paddingRight = pr; } };
     fitLeft(); addEventListener('resize', fitLeft); setInterval(() => { fitLeft(); feCorner(); }, 700);
-    // (user Nov 7 18:25: "We also need the SNAPSHOT button to be CRYSTAL CLEAR that we have made changes") SNAPSHOT shows whether anything of the
-    // biomes has changed since a snapshot was last copied: the biome editor's own saved keys against bd_biome_snapsig (set by COPY)
+    // (user Nov 7 18:25: "We also need the SNAPSHOT button to be CRYSTAL CLEAR that we have made changes"; Nov 13: SNAPSHOT is SUBMIT CHANGES) it shows
+    // whether anything of the biomes has changed since the last submit: the biome editor's own saved keys against bd_biome_snapsig (set once GitHub has it)
     const SNAP_KEYS = ['bd_vegdecks', 'bd_foliage', 'bd_vegprefabs', 'bd_vtune', 'bd_biome_surf', 'bd_biome_grounds', 'bd_biome_ground', 'bd_biome_ground_sea', 'bd_plants', 'bd_seashapes'];
     const snapSig = () => { let s = ''; for (const k of SNAP_KEYS) { const v = localStorage.getItem(k) || ''; let h = 0; for (let i = 0; i < v.length; i++) h = (h * 31 + v.charCodeAt(i)) | 0; s += h + ':'; } return s; };
     try { if (!localStorage.getItem('bd_biome_snapsig')) localStorage.setItem('bd_biome_snapsig', snapSig()); } catch (e) { }
     const snapShow = () => { const b = L.querySelector('[data-snap]'); if (!b) return; let ch = false; try { ch = localStorage.getItem('bd_biome_snapsig') !== snapSig(); } catch (e) { }
-      b.textContent = ch ? 'SNAPSHOT - CHANGES NOT COPIED' : 'SNAPSHOT - UP TO DATE'; b.style.background = ch ? '#7a4a12' : ''; b.style.borderColor = ch ? '#e0a040' : '';
-      b.title = ch ? 'You changed the biomes since the last snapshot was copied - press to copy a new one' : 'Nothing changed since the last snapshot was copied'; };
-    snapShow(); setInterval(snapShow, 1000); window.__vgSnapCopied = () => { try { localStorage.setItem('bd_biome_snapsig', snapSig()); } catch (e) { } snapShow(); };
+      b.textContent = ch ? 'SUBMIT CHANGES - NOT IN THE GAME YET' : 'SUBMIT CHANGES - UP TO DATE'; b.style.background = ch ? '#7a4a12' : ''; b.style.borderColor = ch ? '#e0a040' : '';
+      b.title = ch ? 'You changed the biomes since the last submit - press to put them in the game' : 'Nothing changed since the last submit'; };
+    snapShow(); setInterval(snapShow, 1000); const snapSent = () => { try { localStorage.setItem('bd_biome_snapsig', snapSig()); } catch (e) { } snapShow(); };
     // (user Nov 7 23:04: "in the Biome Editor, why dont we also have a 'Save Changes'? (separate from the snapshot)") the editor saves like a scene, as the
     // GAME EDITOR does (00-world-journal.js, bd_veg_j): every change is used at once, SAVE CHANGES keeps it - a plant set or a prefab still open unsaved
-    // saved with it; CLOSE, GAME EDITOR and SNAPSHOT with changes not saved ask SAVE / DISCARD / CANCEL (DISCARD: everything as last saved)
+    // saved with it; CLOSE, GAME EDITOR and SUBMIT CHANGES with changes not saved ask SAVE / DISCARD / CANCEL (DISCARD: everything as last saved)
     const vDirty = () => { try { return sceneDirty() || !!(window.__vgSetDirty && window.__vgSetDirty()) || feDirty(); } catch (e) { return false; } };
-    const vSave = async () => { if (feDirty()) await feSaveNow(); if (window.__vgSetDirty && window.__vgSetDirty() && window.__vgSetSave) window.__vgSetSave(); sceneSave(); vSaveShow(); tip.textContent = 'Changes saved in this browser - SNAPSHOT copies them for the game'; };
+    const vSave = async () => { if (feDirty()) await feSaveNow(); if (window.__vgSetDirty && window.__vgSetDirty() && window.__vgSetSave) window.__vgSetSave(); sceneSave(); vSaveShow(); tip.textContent = 'Changes saved in this browser - SUBMIT CHANGES puts them in the game'; };
     const vSaveShow = () => { const b = L.querySelector('[data-vsave]'); if (!b) return; const dt = vDirty(); b.disabled = !dt; b.style.background = dt ? '#3a5a1e' : ''; b.style.borderColor = dt ? '#9fd36a' : ''; b.title = dt ? 'Keeps your changes in this browser' : 'Nothing to save'; };
     vSaveShow(); setInterval(vSaveShow, 500);
     // (user Nov 8 13:27: "a single SAVE CHANGES button ... a different button in the prefab and component editor ... but it should be the 'same button'
@@ -73183,16 +73296,12 @@ function vegUI(Z) {
       if (r.v === 'c') return; if (r.v === 's') { await vSave(); go(); return; } sceneRestore(); if (reload) { vegAgain(); return; } go(); };
     if (L.querySelector('[data-back]')) L.querySelector('[data-back]').onclick = () => vAsk(() => vegLeave('title'));   // (the game's VEGETATION EDITOR: CLOSE - back to the title; user Nov 7: "Instead of 'Back to Game' it should say 'CLOSE'")
     if (L.querySelector('[data-ged]')) L.querySelector('[data-ged]').onclick = () => vAsk(() => vegLeave('editor'));   // (GAME EDITOR: the page again, the GAME EDITOR opened on it - 00-world.js)
-    // (user Nov 4 13:45: "the in-game vegetation editor must also have a 'snapshot' button so I dont have to open the game editor") the GAME EDITOR's SNAPSHOT:
-    // this browser's saved world (as kept - not the editor's own world, which is only held in memory) and every vegetation number and shape
-    if (L.querySelector('[data-snap]')) L.querySelector('[data-snap]').onclick = () => vAsk(snapOpen, true);
-    function snapOpen() { L.querySelector('[data-snap]').blur(); let t = ''; try { const o = JSON.parse(gameSnapshot()); o.worldName = lsRawGet('bd_world') === 'story' ? 'story' : 'open'; t = JSON.stringify(o); } catch (e) { tip.textContent = 'Could not take it: ' + e.message; return; }
-      const m = document.createElement('div'); m.style.cssText = 'position:fixed;inset:0;z-index:230;background:#0008;display:grid;place-items:center;font:14px ui-monospace,Menlo,monospace';
-      m.innerHTML = '<div style="background:#0f1420;border:1px solid #2c3850;border-radius:10px;padding:16px;display:grid;gap:10px;color:#d8dce8;width:min(640px,90vw)"><div style="color:#9fd36a">SNAPSHOT</div><div style="color:#9aa3b5">Copy it and paste it on the world page (or give it to Claude)</div><textarea readonly style="height:180px;font:11px ui-monospace,monospace;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:6px"></textarea><div style="display:flex;gap:8px"><button data-c style="min-height:44px;padding:6px 16px">COPY</button><button data-x style="min-height:44px;padding:6px 16px">CLOSE</button></div></div>';
-      const ta = m.querySelector('textarea'), bc = m.querySelector('[data-c]'); ta.value = t; for (const b of m.querySelectorAll('button')) b.style.cssText += ';font:inherit;background:#1a2234;color:#fff;border:1px solid #2c3850;border-radius:6px;cursor:pointer';
-      bc.onclick = async () => { ta.select(); try { await navigator.clipboard.writeText(t); bc.textContent = 'COPIED'; if (window.__vgSnapCopied) window.__vgSnapCopied(); } catch (e) { try { document.execCommand('copy'); bc.textContent = 'COPIED'; if (window.__vgSnapCopied) window.__vgSnapCopied(); } catch (e2) { } } setTimeout(() => { bc.textContent = 'COPY'; }, 1500); };
-      m.querySelector('[data-x]').onclick = () => m.remove(); for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'wheel', 'click', 'keydown']) m.addEventListener(ev, e => e.stopPropagation());
-      Z.put(m); ta.select(); }
+    // (user Nov 4 13:45: "the in-game vegetation editor must also have a 'snapshot' button so I dont have to open the game editor") the GAME EDITOR's
+    // SUBMIT CHANGES (50-zzzz-submit.js): this browser's saved world (as kept - not the editor's own world, held only in memory) and every vegetation
+    // number and shape
+    if (L.querySelector('[data-snap]')) L.querySelector('[data-snap]').onclick = () => vAsk(snapSubmit, true);
+    function snapSubmit() { L.querySelector('[data-snap]').blur(); let t = ''; try { const o = JSON.parse(gameSnapshot()); o.worldName = lsRawGet('bd_world') === 'story' ? 'story' : 'open'; t = JSON.stringify(o); } catch (e) { tip.textContent = 'Could not take it: ' + e.message; return; }
+      worldSubmit(t, snapSent); }
     for (const b of L.querySelectorAll('[data-ed]')) b.onclick = () => { b.blur(); feShow(b.dataset.ed, pickKey || null); };   // (23:20: the plant selected - no EDIT PLANT button)
     for (const b of L.querySelectorAll('[data-z]')) b.onclick = () => { zoomStep(+b.dataset.z); b.blur(); };
     // (user Nov 3 22:15: "Have a 'Reset' Scene") the scene as it opened: aboard a vehicle the page opens again (the saved numbers and shapes stay)
