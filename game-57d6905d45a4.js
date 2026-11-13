@@ -8674,8 +8674,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1002;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 17:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1003;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 18:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -63785,7 +63785,7 @@ window.addEventListener('pointerdown', ev => {
 // a dot pressed (a finger, the mouse, or the keys' pick and fire - storyStep): what it does
 function storyPress(d) {
   storySel = null;
-  if (d.cur || STSW.on) return;
+  if (d.cur) return;                                     // (a swap playing out doesn't hold the next - storySwap replaces it)
   if (d.show) { storyShowOpen(d); return; }             // (a hangar: its showroom - 50-zz-story-swap.js)
   if (d.market) { marketOpen(d); return; }               // (a market: its sheet, the cargo to sell - 50-zz-cargo.js)
   if (d.price != null || d.rent != null) {               // (for sale or to rent: BUY / RENT - or, short of coins for both, it shakes its head)
@@ -63828,7 +63828,6 @@ function storyDotKeys(p, kind, d) {
   if (SHOWR.id != null) { if (kind === 'take') storyShowTake(); else if (kind === 'back') storyShowClose(); else storyShowFlip(d); return true; }   // (a showroom up: the keys are its)
   if (MKT.id != null) { if (kind === 'take') marketTake(); else if (kind === 'back') marketClose(); else marketFlip(d); return true; }   // (a market's sheet up: the same - 50-zz-cargo.js)
   if (kind === 'back') return false;
-  if (STSW.on && (m === 'dock' || kind === 'pick')) return true;
   if (m === 'dock') { if (kind === 'take') return storyTake(); storyStep(d); return true; }
   if (m !== 'civ') return false;
   if (kind === 'pick') { if (storyTargets().length < 2) return false; storyStep(d); return true; }
@@ -64354,7 +64353,7 @@ ACTS.marketSell = (p, arg) => marketSell(p, arg);
    / a tap off it closes. This screen's own (MKT). ---- */
 const MKT = { id: null, i: 0, t: 0, deny: 0 };
 const marketT = () => MKT.id == null ? null : storyTargets().find(q => q.key === 'm:' + MKT.id) || null;
-function marketOpen(T) { MKT.id = T.o.id; MKT.i = 0; MKT.t = time; storySel = T.key; cam.glide = STORY_GLIDE; sound('click', 0); }
+function marketOpen(T) { MKT.n = STSW.n; MKT.id = T.o.id; MKT.i = 0; MKT.t = time; storySel = T.key; cam.glide = STORY_GLIDE; sound('click', 0); }
 function marketClose() { if (MKT.id == null) return; MKT.id = null; storySel = null; cam.glide = STORY_GLIDE; sound('click', 0); }
 function marketFlip(d) { const T = marketT(), L = T ? T.sell : []; if (L.length < 2) return; MKT.i = (MKT.i + d + L.length) % L.length; MKT.t = time; sound('click', 0); }
 function marketTake() {
@@ -64369,7 +64368,7 @@ function marketRows(Q, n) {
 function drawMarket(w, Ls) {
   if (MKT.id == null) return;
   const T = Ls.find(q => q.key === 'm:' + MKT.id), L = T ? T.sell : [];
-  if (!T || !L.length || STSW.on) { MKT.id = null; if (storySel && storySel[0] === 'm') storySel = null; return; }
+  if (!T || !L.length || MKT.n !== STSW.n) { MKT.id = null; if (storySel && storySel[0] === 'm') storySel = null; return; }
   MKT.i = clamp(MKT.i, 0, L.length - 1);
   const Q = showLayout(w, T), ink = '#245cb2', mid = '#5082cc', green = '#2f7d32';
   if (img.bpsheet) { ug.save(); ug.imageSmoothingEnabled = true; ug.drawImage(img.bpsheet, Q.x, Q.y, Q.W, Q.H); ug.restore(); }
@@ -66356,11 +66355,14 @@ function bySize(list) {
      ENGINE a vehicle's engine catches (the sound's starter, then the engine) - its own exhaust, funnel smoke and screw bubbles,
             the engine's own rule revved for a moment (swapRev: picBoatFx's throttle, storyCarBody's engine start);
             Till ENGINE its lever does nothing (swapHold - stepCivDriven).
+   (user Nov 13 17:47: "If I choose to switch immediately back, it should do it. There's no wait.") A swap can be made at any moment: one
+   made while another plays out replaces it - its timeline starts again from 0 on the new object, and the old one's sound is cut
+   (sfxStoryEnter's bus). Nothing waits for END.
    ================================================================ */
 const STSW_T = { LAND: 0.42, ENGINE: 0.9, END: 1.5 };
-const STSW = { on: false, t: 0, from: null, key: null, kind: null, vs: null, oi: null, step: 0, chim: 0, deny: null };
+const STSW = { on: false, t: 0, from: null, key: null, kind: null, vs: null, oi: null, step: 0, chim: 0, deny: null, n: 0 };   // (n: swaps made - a showroom or market sheet opened before the latest closes)
 // (the swap is the simulation's - the worker's when it runs the game: a table, so the page that draws it has it too - rules.md, Systems 6)
-const STSW_ROW = worldRow(Object.fromEntries(['on', 't', 'from', 'key', 'kind', 'vs', 'oi', 'step', 'chim'].map(k => [k, [() => STSW[k], v => { STSW[k] = v; }]])));
+const STSW_ROW = worldRow(Object.fromEntries(['on', 't', 'from', 'key', 'kind', 'vs', 'oi', 'step', 'chim', 'n'].map(k => [k, [() => STSW[k], v => { STSW[k] = v; }]])));
 defTable('storySwap', () => [STSW_ROW], { make: () => STSW_ROW });
 const swV = () => STSW.vs == null ? null : storyVehs().find(v => v.sid === STSW.vs) || null;   // (what's being entered)
 const swO = () => STSW.oi == null ? null : strsUsed().find(o => o.id === STSW.oi) || null;
@@ -66477,7 +66479,7 @@ function storyEnterVeh(p, v) {
 }
 // the swap (a command: the same on every screen)
 function storySwap(p, key) {
-  if (!STORY || p !== 0 || STSW.on) return;
+  if (!STORY || p !== 0) return;                         // (one playing out is replaced - no wait)
   const L = storyTargets(), T = L.find(q => q.key === key), C0 = L.find(q => q.cur); if (!T || T.cur) return;
   if (T.v && (!(T.v.own || T.v.rentBy === p) || !storyCanEnter(T.v))) { sound('empty', T.wx); return; }   // (yours, or one you've just rented - 50-zzzz-veh-deal.js)
   const c = crew[p], leaving = c.mode === 'civ' ? c.civ : null;
@@ -66485,7 +66487,7 @@ function storySwap(p, key) {
   if (T.v) { storyEnterVeh(p, T.v); if (T.at != null) storyArrive(T.at); }
   else storyGo(p, T.o.id, true, true);
   cam.glide = STORY_GLIDE; storySel = null;
-  Object.assign(STSW, { on: true, t: 0, from: C0 ? [C0.wx, C0.wy] : null, key: T.key, kind: swapKind(T), vs: T.v ? T.v.sid : null, oi: T.o ? T.o.id : null, step: 0, chim: 0 });
+  Object.assign(STSW, { n: (STSW.n | 0) + 1, on: true, t: 0, from: C0 ? [C0.wx, C0.wy] : null, key: T.key, kind: swapKind(T), vs: T.v ? T.v.sid : null, oi: T.o ? T.o.id : null, step: 0, chim: 0 });
   sound('storyEnter', T.wx, STSW.kind);                 // (the whole entering, in time with the arrow: sfxStoryEnter)
 }
 ACTS.storySwap = (p, key) => storySwap(p, key);
@@ -66553,7 +66555,7 @@ const storyBuyHint = () => { const d = (SLOTS[0] || {}).dev || 'kb'; return d ==
 // wears a white arrow presses it, as its arrow does (storyPress): the smallest box under it wins (a car in front of a lighthouse: the
 // car); on what you control, nothing. X, Y in the page's pixels; the tap itself is the world's tap (endPointer0, 20-input-pointer.js)
 function storyBoxAt(X, Y) {
-  if (!STORY || ui.title || ui.menu || storyQ || STSW.on || SHOWR.id != null || MKT.id != null) return null;
+  if (!STORY || ui.title || ui.menu || storyQ || SHOWR.id != null || MKT.id != null) return null;
   const w = storyToUI(), m = 8;
   let best = null, ba = Infinity;
   for (const T of storyTargets()) {
@@ -66631,10 +66633,13 @@ function swapWindows(w, o, t) {
    leaves; on its landing the way in - a home's wooden door (a creak, its latch, the thud), a car's door shut, steps on a boat's
    deck, a plane's or helicopter's door, a sub's hatch clanging shut; then the engine - a starter cranking and catching, a diesel
    chugging up, an outboard buzzing up, a propeller coughing into life, a turbine winding up, a sub's motor humming. ---- */
+let SWAP_BUS = null;                                    // (the swap playing's sound: cut when another swap starts)
 function sfxStoryEnter(x, kind) {
   if (!SFX.ctx || SIM_ONLY) return;
-  const out = sfxOut(x, 0.9); if (!out) return;
   const ctx = SFX.ctx, t0 = ctx.currentTime, tl = t0 + STSW_T.LAND, te = t0 + STSW_T.ENGINE;
+  if (SWAP_BUS) { const b = SWAP_BUS; SWAP_BUS = null; b.gain.setTargetAtTime(0, t0, 0.02); setTimeout(() => { try { b.disconnect(); } catch (e) {} }, 200); }
+  const o0 = sfxOut(x, 0.9); if (!o0) return;
+  const out = SWAP_BUS = ctx.createGain(); out.connect(o0);
   noiseShot(out, t0, 0.32, 'bandpass', 700, 2200, 2.5, 0.12, 0.08);             // the arrow's lift: a soft swish up
   // an engine's note: a waveform at f0 rising to f1, through a low-pass, swelling then dying away (its idle heard settling)
   const motor = (type, f0, f1, t, dur, peak, lp, rise = 0.35) => {
@@ -66764,7 +66769,7 @@ function storyBlueprint(v, w, h) {
   BLUEPRINTS.set(key, B); return B;
 }
 const showList = T => T && T.show ? T.show.map(sid => storyVehs().find(v => v.sid === sid)).filter(Boolean) : [];
-function storyShowOpen(T) { SHOWR.id = T.o.id; SHOWR.i = 0; SHOWR.t = time; SHOWR.dir = 0; storySel = T.key; cam.glide = STORY_GLIDE; sound('click', 0); }
+function storyShowOpen(T) { SHOWR.n = STSW.n; SHOWR.id = T.o.id; SHOWR.i = 0; SHOWR.t = time; SHOWR.dir = 0; storySel = T.key; cam.glide = STORY_GLIDE; sound('click', 0); }
 function storyShowClose() { if (SHOWR.id == null) return; SHOWR.id = null; storySel = null; cam.glide = STORY_GLIDE; sound('click', 0); }
 const storyShowT = () => SHOWR.id == null ? null : storyTargets().find(q => q.key === 'h:' + SHOWR.id) || null;
 function storyShowFlip(d) { const L = showList(storyShowT()); if (L.length < 2) return; SHOWR.i = (SHOWR.i + d + L.length) % L.length; SHOWR.t = time; SHOWR.dir = d; sound('click', 0); }
@@ -66810,7 +66815,7 @@ const storyKeyName = () => { const d = (SLOTS[0] || {}).dev || 'kb'; return d ==
 function drawShowroom(w, Ls) {
   if (SHOWR.id == null) return;
   const T = Ls.find(q => q.key === 'h:' + SHOWR.id), L = showList(T);
-  if (!T || !L.length || STSW.on) { SHOWR.id = null; if (storySel && storySel[0] === 'h') storySel = null; return; }
+  if (!T || !L.length || SHOWR.n !== STSW.n) { SHOWR.id = null; if (storySel && storySel[0] === 'h') storySel = null; return; }
   SHOWR.i = clamp(SHOWR.i, 0, L.length - 1);
   const v = L[SHOWR.i], Q = showLayout(w, T), ink = '#245cb2', green = '#2f7d32', red = '#c0392b';
   // the user's sheet of paper
