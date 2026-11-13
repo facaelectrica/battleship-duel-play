@@ -8674,8 +8674,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1004;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 18:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1005;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 19:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -32224,14 +32224,18 @@ const TUNE = { def: P_DEF, label: {}, tab: {}, cur: null, rows: {}, open: false,
 TUNE.world = () => TUNE.open && TUNE.mode === 'WORLD EDITOR';
 // (one selection over all of them - 50-zzz-world-ed.js: a press is looked at as it starts, before any editor's own handler takes it)
 TUNE.press = null; TUNE.release = null;
+// (a finger's press held until it's known to be one finger, not a pinch - TUNE.gate, 50-zzz-world-ed.js: true, the event goes no further)
+TUNE.gate = null;
 if (typeof window !== 'undefined') {
   // (PICK MORE - OBJECTS, GROUPING: a press over the world is a shift-press for every editor of the world's things, the iPad's shift;
   // this listener is the first of theirs, so each reads it as its own shift)
   window.addEventListener('pointerdown', e => {
+    if (TUNE.gate && TUNE.gate(e)) { e.stopImmediatePropagation(); e.preventDefault(); return; }
     if (TUNE.multi && TUNE.world() && (TUNE.page === 'OBJECTS' || TUNE.page === 'GROUPING') && !e.shiftKey) try { Object.defineProperty(e, 'shiftKey', { value: true }); } catch (x) { }
     if (TUNE.press) TUNE.press(e);
-  }, { capture: true });
-  for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, e => { if (TUNE.release) TUNE.release(e); }, { capture: true });
+  }, { capture: true, passive: false });
+  window.addEventListener('pointermove', e => { if (TUNE.gate && TUNE.gate(e)) e.stopImmediatePropagation(); }, { capture: true, passive: true });
+  for (const t of ['pointerup', 'pointercancel']) window.addEventListener(t, e => { if (TUNE.gate) TUNE.gate(e); if (TUNE.release) TUNE.release(e); }, { capture: true });
 }
 const ED_CSS = `
 #skyEd { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; background: #0f1420f2; color: #d8dce8; font: 12px/1.3 ui-monospace, Menlo, Consolas, monospace; border-top: 1px solid #2c3850; padding: 0 max(12px, env(safe-area-inset-left)) calc(8px + env(safe-area-inset-bottom, 0px)); height: 30vh; box-sizing: border-box; display: flex; flex-direction: column; touch-action: pan-y; -webkit-user-select: none; user-select: none; }
@@ -38613,7 +38617,10 @@ frameLayer('split', F => {
 // (the frame, then the controls shown on their own canvas - hudShow, src/gpu/50-frame.js)
 function render() { renderFrame(); hudShow(); }
 function renderFrame() {
-  if (!worldLive()) { drawNoWorld(); return; }            // (no world yet, or LOADING: the menu over black - user Oct 31, 19-menu.js)
+  // (no world yet, or LOADING: the menu over black - user Oct 31, 19-menu.js; user Nov 13 17:56: "Main menu is always a flat color" - with a
+  // world live behind it too (after the GAME EDITOR's CLOSE, MENU from a game): the world isn't drawn under the title; a REPORT's picture of
+  // the game just left still takes its one frame - bugGrab, below - under the title's flat colour)
+  if (!worldLive() || (ui.title && !(typeof BUG !== 'undefined' && BUG.want))) { drawNoWorld(); return; }
   const T0 = performance.now();
   renderTick++; frameTick();
   SURF.on = true;
@@ -38639,7 +38646,7 @@ function renderFrame() {
   if (BUG.want) bugGrab();                               // (REPORT BUG's picture: the world just drawn, the game's controls still in their layer - 50-zzzz-bug.js)
   ug.clearRect(0, 0, ubw, ubh);
   ug.imageSmoothingEnabled = false;
-  if (ui.title) { if (!LOADING) guardDraw('seaDecksWarm', seaDecksWarm); drawTitle(); if (ui.picker < 0) drawFullscreenBtn(); drawControls(); drawPadFocus(); drawToast(); drawFps(); return; }
+  if (ui.title) { ug.fillStyle = UG_CSS; ug.fillRect(0, 0, ubw, ubh); if (!LOADING) guardDraw('seaDecksWarm', seaDecksWarm); drawTitle(); if (ui.picker < 0) drawFullscreenBtn(); drawControls(); drawPadFocus(); drawToast(); drawFps(); return; }
   if (PHOTO.on) { drawPhotoHint(frameDt); if (PHOTO.ed) drawEdWorld(); drawFps(ui.top + 12); return; }   // (the GAME EDITOR's WORLD panel: the sliders over its view - 50-zzz-world-ed.js)   // (the version and FPS on every screen)       // (photo mode: the world and nothing else)
   if (storyOpenHides()) { storyFrameStep(); drawStoryOpen(); drawFps(); drawToast(); return; }   // (Story's opening shot: the name over the world, no controls - 50-zzzz-story-open.js)
   if (!ui.settings) {
@@ -51593,6 +51600,40 @@ function landTop(x) {
   if (land.topV[c] === v) return land.topC[c];
   const t = landBelow(x, -Infinity); land.topC[c] = t; land.topV[c] = v; return t;
 }
+/* THE GROUND'S SMOOTH LINE (user Nov 13 17:49, a car on a gentle sandy slope: "Why is the terrain it steps and not smooth?"): over a run's top cell
+   t of column c, how high the line stands at the column's left and right sides, in cells over t's top (0 none) - the one line the ground is drawn
+   to (the ground's shader, edgeAt) and stood on (landStand). Gentle ground is cut into the grid as flat treads with a one-cell riser at each end:
+   from the top of a one-cell riser the line runs down across the tread to its foot (over at most GEDGE_SPAN columns; a tread with a riser up at
+   both ends - a dip - meets in its middle), so a slope is one straight line through the stairs' corners. A taller riser (steep ground, a crater's
+   wall, a cliff) keeps its one-column chamfer, as before. Fill only: the line never cuts a cell. solid(cc, r): the cell is ground; up(cc, r): the
+   solid cells from r up (r solid) */
+const GEDGE_SPAN = 16, GEDGE_SCAN = 2 * GEDGE_SPAN;
+function gedgeLine(c, t, solid, up) {
+  // a column's top against t: 1 + n higher by n, 0 the same, -1 lower
+  const rel = cc => !solid(cc, t) ? -1 : !solid(cc, t - 1) ? 0 : 2 + Math.min(253, up(cc, t - 1));
+  let L = 0, R = 0, dl = -1, dr = -1;
+  for (; L < GEDGE_SCAN; L++) { const v = rel(c - L - 1); if (v !== 0) { dl = v - 1; break; } }
+  for (; R < GEDGE_SCAN; R++) { const v = rel(c + R + 1); if (v !== 0) { dr = v - 1; break; } }
+  const n = L + R + 1, open = L >= GEDGE_SCAN || R >= GEDGE_SCAN, both = dl === 1 && dr === 1;
+  const span = open ? GEDGE_SPAN : Math.min(both ? n / 2 : n, GEDGE_SPAN);
+  const at = u => Math.max(dl === 1 ? Math.max(0, 1 - u / span) : 0, dr === 1 ? Math.max(0, 1 - (n - u) / span) : 0);
+  return [Math.max(at(L), L === 0 && dl > 1 ? dl : 0), Math.max(at(L + 1), R === 0 && dr > 1 ? dr : 0)];
+}
+// where anything standing meets the ground under y at x (wheels, tracks, feet - groundBelow): the cells' top (landBelow) raised to the smooth line
+// over it (gedgeLine; each column's kept until the ground there changes)
+function landStand(x, y) {
+  const Y = landBelow(x, y), c = ltCol(x), t = ltRow(Y);
+  if (c < 0 || c >= land.cols || Y >= LT_Y1 || ltCell(c, t - 1) !== M_AIR) return Y;
+  if (!land.edV || land.edV.length !== land.cols) { land.edV = new Uint32Array(land.cols); land.edT = new Int32Array(land.cols); land.edL = new Float32Array(land.cols); land.edR = new Float32Array(land.cols); }
+  const v = (land.ver || 0) + 1;
+  if (land.edV[c] !== v || land.edT[c] !== t) {
+    const solid = (cc, r) => cc >= 0 && cc < land.cols && ltCell(cc, r) !== M_AIR;
+    const up = (cc, r) => { let n = 0; while (n < 255 && solid(cc, r - n - 1)) n++; return n; };
+    const E = gedgeLine(c, t, solid, up); land.edV[c] = v; land.edT[c] = t; land.edL[c] = E[0]; land.edR[c] = E[1];
+  }
+  const f = x / LT_CELL - c, h = land.edL[c] + (land.edR[c] - land.edL[c]) * f;
+  return h > 0 ? Math.max(y, Y - h * LT_CELL) : Y;
+}
 // (user Oct 31) the ground in front's own top at x - under a segment over land (whose top is the ground there: landTop),
 // the main ground's, where what grows on it stands
 // (user Nov 7 20:31: a real overhang) the top of the ground water rests on at x: under an overhang the ground below it (the column's last open air's
@@ -51868,7 +51909,8 @@ function landBackBuild() {
 function ltDirty(c0, c1, r0, r1) {
   land.ver = (land.ver || 0) + 1;                              // (the ground changed: each column's top is found again when asked)
   const ug = Math.ceil(ugReach() / LT_CELL) + 2;   // (the light's reach: a slice beside the change sees it too - ltDist; the day's light into the back, landDarkMake)
-  ggDirty(c0 - ug, c1 + ug, r0 == null ? null : r0 - ug, r1 == null ? null : r1 + ug);
+  const ue = Math.max(ug, GEDGE_SCAN + 2);   // (and the smooth line's reach: a tread's line runs from its risers - gedgeLine)
+  ggDirty(c0 - ue, c1 + ue, r0 == null ? null : r0 - ug, r1 == null ? null : r1 + ug);
   for (let k = Math.max(0, Math.floor((c0 - ug) / LT_CHUNK)); k <= Math.min(land.dirty.length - 1, Math.floor((c1 + ug) / LT_CHUNK)); k++) { land.dirty[k] = 1; if (land.dug) land.dug[k] = 1; }   // (dug: not as built - its pictures painted again at the next build, landSig)
   cellsDirty(c0, c1);                                          // (the world's cells on the GPU put again - 50-land-zz-cells.js, 'ground.cells')
   if (land.cspan) for (let c = Math.max(0, c0 - 1); c <= Math.min(land.cols - 1, c1 + 1); c++) land.cspan[c] = null;   // (the rock everything meets there found again - gndSpans)
@@ -51942,7 +51984,7 @@ function landLoose(x, y, rad) {
       for (const sj of stonesNear(cx, cy, rad)) { const o = land.stones[sj]; if (!o || o.gone || o.loose || o.dh) continue; const oc = ltCol(o.x) - c0, or = ltRow(o.y) - ra; if (oc >= 0 && or >= 0 && oc < W && or < H && seen[or * W + oc] === id) stoneLoosen(o); } }
     for (const k of comp) { const ii = k % W, jj = (k - ii) / W, i2 = ltIdx(c0 + ii, ra + jj); if (land.cell[i2] !== M_AIR) { land.cell[i2] = M_AIR; land.scorch[i2] = 0; gone++; } }
   }
-  if (gone) ggDirty(c0 - 1, c1 + 1, ra - 1, rb + 1);         // (its cells gone: the GPU's grid there - the crater's ltDirty doesn't reach this far)
+  if (gone) ggDirty(c0 - GEDGE_SCAN - 2, c1 + GEDGE_SCAN + 2, ra - 2, rb + 2);   // (its cells gone: the GPU's grid there and the smooth line over the treads beside it - gedgeLine; the crater's ltDirty doesn't reach this far)
   if (gone && !SIM_ONLY) for (let k = 0; k < Math.min(30, gone / 4); k++) { const a = -Math.PI / 2 + simRnd('land', -1.4, 1.4), v = simRnd('land', 30, 120); debrisRow({ x: x + simRnd('land', -rad, rad), y: y + simRnd('land', -rad, rad) * 0.6, vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: simRnd('land', 0, 6), w: simRnd('land', -8, 8), sw: simRnd('land', 1.2, 2.2), sh: simRnd('land', 1, 1.8), col: '#6b4a2e', state: 0, bub: 0, seed: simR('land') * 6, age: 0, clod: true }); }
   return gone;
 }
@@ -54513,7 +54555,7 @@ const tankGround = (t, x) => wheelGround(x, t.y, TANK_L * 0.42, TANK_STEP);
 // the first solid ground at or below y at x - the one rule for what stands on the ground: the land's (an island out of the water
 // too - onLand), at sea a harbour's deck or the sea's own floor with its rock formations (seabedY - what everything sinks to; the
 // land's grid has no ground there, its bottom is no floor - user Nov 1 22:27, a car stopped mid-water)
-function groundBelow(x, y) { return onLand(x) ? Math.min(landBelow(x, y), deckOn(x, y), hangarRoofUnder(x, y)) : Math.min(harbourTop(x, y), floorUnder(x, y)); }   // (on land too: a pier's deck where it runs into the ground - deckOn, 50-zz-structh)
+function groundBelow(x, y) { return onLand(x) ? Math.min(landStand(x, y), deckOn(x, y), hangarRoofUnder(x, y)) : Math.min(harbourTop(x, y), floorUnder(x, y)); }   // (on land too: a pier's deck where it runs into the ground - deckOn, 50-zz-structh)
 // (user Nov 2 14:32, the taxi on a slope: "the front part is clearly floating") each end stands on the highest ground under its own
 // footprint (foot: that footprint inward from the end, a share of half) - a track runs its end's whole half (the tank's 0.5); a wheel
 // touches where it is (a car's 0: half = half the length between her wheels - carGround). Measured from halfway along, a car's
@@ -57124,8 +57166,8 @@ fn tilePx(si: u32, c: i32, r: i32, sp: vec2f) -> vec3f {
   }
   return outc;
 }
-// (gedgeTile) the smooth edge at quarter cell (i, r4) of column c (r4: a quarter row, global): the top cell's colour where it's under the line from the
-// left neighbour's top to the right's and over the run's top t (in the air over it), or none
+// the smooth edge at quarter cell (i, r4) of column c (r4: a quarter row, global): the top cell's colour where it's under the ground's smooth line
+// (gedgeLine, 50-land-terrain.js) and over the run's top t (in the air over it), or none
 fn edgeAt(si: u32, c: i32, i: i32, r4: i32, sub: bool) -> vec3f {
   let S = slots[si]; let r = r4 >> 2u; if (r < S.rT || r >= S.rB) { return vec3f(-1.0); }
   let o = cellAt(si, c, r); if (!ok(o) || (pages[o] & 7u) != M_AIR) { return vec3f(-1.0); }
@@ -57134,7 +57176,7 @@ fn edgeAt(si: u32, c: i32, i: i32, r4: i32, sub: bool) -> vec3f {
   let ot = cellAt(si, c, t); if (!ok(ot)) { return vec3f(-1.0); }
   let wt = pages[ot + 1u]; let aD = i32((wt >> 16u) & 255u); let bD = i32(wt >> 24u); if (aD == 0 && bD == 0) { return vec3f(-1.0); }
   let oa = cellAt(si, c, t - 1); let first = (w0 & (1u << 19u)) != 0u; let op = ok(oa) && (pages[oa] & (1u << 20u)) != 0u; if (!(first || op)) { return vec3f(-1.0); }
-  let a = f32(t - aD); let bb = f32(t - bD);
+  let a = f32(t) - f32(aD) / 8.0; let bb = f32(t) - f32(bD) / 8.0;   // (gedgeLine: the line's heights at the column's sides, eighths of a cell)
   let yy = i32(floor((a + (bb - a) * (f32(i) + 0.5) / 4.0) * 4.0 + 0.5));
   if (r4 < yy || r4 >= t * 4) { return vec3f(-1.0); }
   return cellCol(si, c, t, ot, select(vec2f(-1.0), vec2f((floor((f32(i) + 0.5) * AN / 4.0) + 0.5) / AN, 0.5 / AN), sub));   // (the art pixel over it: the top cell's top row's)
@@ -58010,7 +58052,6 @@ function ggPageJob(S, i, pre) {
     let down = ggDown(c, r0 + 64, which);
     const W1 = new Uint32Array(64);
     for (let j = 63; j >= 0; j--) { const m = mat[(H + j) * BW + x]; if (m === M_AIR) { down++; W1[j] = Math.min(0xffff, down); } else down = 0; }
-    const eL = splitRow(c - 1), eR = splitRow(c + 1);
     for (let j = 0; j < 64; j++) {
       const r = r0 + j, m = mat[(H + j) * BW + x];
       if (m === M_AIR) { depth = 0; u[ipos + j * 64 + q] = W1[j]; u[npos + j * 64 + q] = 0; u[wpos + j * 64 + q] = 0xffff; continue; }
@@ -58018,8 +58059,9 @@ function ggPageJob(S, i, pre) {
       let w1 = Math.min(0xffff, depth);
       if (mat[(H + j - 1) * BW + x] === M_AIR) {   // (a run's top: how far up the neighbours' tops are, where they're solid just over it - gedgeTile's line: the
         // ground in front's runs from each column's split row down, the islands' over it - ltRunsOf)
-        const t = r, nb = (cc, e) => { if (ggMat(cc, t - 1, which) === M_AIR) return 0; const a0 = runStart(cc, t - 1); if (which && t > e) return 0; const a = which ? a0 : Math.max(a0, e); return a < t ? Math.min(255, t - a) : 0; };
-        w1 |= nb(c - 1, eL) << 16 | nb(c + 1, eR) << 24;
+        // (user Nov 13: the one smooth line, gedgeLine - its heights at the column's sides in eighths of a cell)
+        const E = gedgeLine(c, r, (cc, rr) => ggMat(cc, rr, which) !== M_AIR, (cc, rr) => Math.max(0, rr - (which ? runStart(cc, rr) : Math.max(runStart(cc, rr), splitRow(cc)))));
+        w1 |= Math.min(255, Math.round(E[0] * 8)) << 16 | Math.min(255, Math.round(E[1] * 8)) << 24;
       }
       u[ipos + j * 64 + q] = w1 >>> 0;
       const hsh = hash(c * 1.37 + r * 7.91);
@@ -69154,6 +69196,67 @@ NSKY.editor.TUNE.release = e => {
   WED.id = null;
   const moved = Math.hypot(e.clientX - WED.cx, e.clientY - WED.cy) > 6;
   setTimeout(() => wedAfter(moved), 0);                   // (after the editors' own let-go: the TERRAIN tab's box-pick picks then)
+};
+/* ---- TWO FINGERS ARE THE VIEW'S (user Nov 13 17:55: "when I'm pinching with two fingers to zoom out, it should not select objects. So if two
+   fingers are on the screen, panning or zooming in and out, it should not be selecting stuff"). One gate for every editor of the world's things,
+   before any of them sees a finger (TUNE.gate, called first by sky/90-editor.js's listeners): a finger on the world is held a moment - EDT_HOLD ms,
+   EDT_MOVE px - before anything picks, drags or lets go with it.
+     - a second finger in that time: both are the view's pan and pinch (photoPointerDown, 18-zz-photo.js) - nothing is picked or let go;
+     - otherwise the press goes on as it was made (the same pointer, where it went down) when the finger moves, is lifted or the time is up -
+       a tap, a drag or a hold is what it always was;
+     - a second finger after that: the first finger's press is called off (a pointercancel to the editors, WED's let-go skipped: no picking or
+       letting go from it) and both are the view's.
+   Fingers stay the view's until all are lifted. A mouse and a pen are never held */
+const EDT = { held: null, live: new Map(), view: new Set(), pass: null, timer: 0 };
+const EDT_HOLD = 200, EDT_MOVE = 8;
+const edtFinger = e => e.pointerType === 'touch';
+function edtSend(type, id, x, y, target, shift) {
+  let ev;
+  try { ev = new PointerEvent(type, { bubbles: true, cancelable: true, composed: true, pointerId: id, pointerType: 'touch', isPrimary: !EDT.view.size, clientX: x, clientY: y, button: type === 'pointerdown' ? 0 : -1, buttons: type === 'pointerdown' ? 1 : 0, shiftKey: !!shift, pressure: type === 'pointerdown' ? 0.5 : 0 }); } catch (x) { return; }
+  EDT.pass = ev;
+  try { ((target && target.isConnected) ? target : document.body).dispatchEvent(ev); } finally { EDT.pass = null; }
+}
+// (the view takes a finger where it is now - the pan and pinch of photo mode, as a finger on empty space already pans)
+const edtToView = (id, x, y) => { EDT.view.add(id); photoPointerDown({ pointerId: id, pointerType: 'touch', button: 0, clientX: x, clientY: y }); };
+// the held finger's press, let through as it was made
+function edtLet() {
+  const h = EDT.held; if (!h) return;
+  EDT.held = null; clearTimeout(EDT.timer);
+  EDT.live.set(h.id, h);
+  edtSend('pointerdown', h.id, h.x0, h.y0, h.target, h.shift);
+}
+NSKY.editor.TUNE.gate = e => {
+  if (e === EDT.pass || !edtFinger(e)) return false;
+  const id = e.pointerId;
+  if (e.type === 'pointermove') {
+    const h = EDT.held;
+    if (h && h.id === id) { h.x = e.clientX; h.y = e.clientY; if (Math.hypot(h.x - h.x0, h.y - h.y0) <= EDT_MOVE) return true; edtLet(); return false; }
+    const q = EDT.live.get(id); if (q) { q.x = e.clientX; q.y = e.clientY; }
+    return false;
+  }
+  if (e.type === 'pointerup' || e.type === 'pointercancel') {
+    if (EDT.held && EDT.held.id === id) { EDT.held.x = e.clientX; EDT.held.y = e.clientY; edtLet(); }   // (a tap: its press, then this let-go)
+    EDT.live.delete(id); EDT.view.delete(id);
+    return false;
+  }
+  // a finger down
+  const T = NSKY.editor.TUNE;
+  if (!T.world() || !PHOTO.on || onEdUI(e)) return false;
+  const x = e.clientX, y = e.clientY;
+  if (EDT.view.size && !PHOTO.ptr.size) EDT.view.clear();   // (fingers dropped without a let-go - the page hidden: dropAll)
+  if (EDT.view.size) { edtToView(id, x, y); return true; }   // (a pinch on: one more finger of it)
+  if (EDT.held) {                                            // (two fingers at once: the view's, nothing picked)
+    const h = EDT.held; EDT.held = null; clearTimeout(EDT.timer);
+    edtToView(h.id, h.x, h.y); edtToView(id, x, y); return true;
+  }
+  if (EDT.live.size) {                                       // (a second finger later: the first's press called off)
+    for (const [k, q] of EDT.live) { WED.id = null; edtSend('pointercancel', k, q.x, q.y, q.target, q.shift); edtToView(k, q.x, q.y); }
+    EDT.live.clear();
+    edtToView(id, x, y); return true;
+  }
+  EDT.held = { id, x0: x, y0: y, x, y, target: e.target, shift: e.shiftKey };
+  EDT.timer = setTimeout(edtLet, EDT_HOLD);
+  return true;
 };
 function wedAfter(moved) {
   const T = NSKY.editor.TUNE; if (!T.world()) return;
