@@ -4283,8 +4283,6 @@ const REAL = {
 // 50-land-zz-grid-wgsl.js); every picture finer than it is drawn on a grid of them (45-zz-things-gpu.js); coarser art keeps its own
 // (the lighthouse, twice it: its picture redrawn at this size is open)
 const ART_PX = 0.625;                                        // (0.096 m)
-// the zoom's pixel grid stays the old battleship art's (zoom levels unchanged: 13-scope-minimap.js)
-const GRID_K = 225 / 1066;
 // a 40-foot container, 12.2 by 2.6 m (all boxes: the container ship's, the pier stacks, the crane's and loose ones)
 const BOX_M = [12.19, 2.59];
 // Effects with their vehicle (user Oct 29: "speeds and fights ... we will need to change this accordingly"): a vehicle's
@@ -4337,7 +4335,8 @@ const CLOUD_DECK = 270;
 const WATER_Y = 400;                 // calm sea level
 const SEABED_Y = 735;                // sand surface
 const SEABED_K = 1.24, SEABED_TOP = SEABED_Y - 61, SEABED_BACK_K = 1.0, SEABED_BACK_TOP = SEABED_Y - 78, SEABED_BACK_P = 0.8;
-const PB = 2;                         // particles are drawn in 2x2 pixel blocks
+let PB = 2;                           // the view's block (screen pixels) for what's drawn in blocks - particles, the water's and the sky's grids: the world's
+                                      // art pixel (ART_PX) in whole screen pixels, never under 2 (zoomed out: as it always was there) - set with SV, beginView
 const FOCUS_Y = WATER_Y - 14;        // what the camera keeps in the middle of the screen
 const SHIP_L = 225 * REAL.ship;                    // (real scale: 01-zz-real-scale.js)
 const SHIP_SRC_W = 1066, SHIP_SRC_H = 204, SHIP_WL_ROW = 193, SHIP_UNDER_PX = 40;
@@ -8094,20 +8093,23 @@ function turnWheel(p, degs) {
 // THE STEPPED ZOOM (user Oct 27 evening: "when we zoom in/out it slows down a lot... maybe the zoom could happen in a cut
 // vs the camera zooming out smoothly? It also looks not that great since its pixel art"). The zoom goes in cuts between
 // fixed levels, no easing through the zooms between: every sprite was rebuilt at each in-between scale, every cloud
-// re-placed, and pixel art at a fractional scale shimmers. The levels respect the pixel ratio: each is a zoom at which
-// one screen pixel is a whole number N of the ship art's pixels (SHIP_K * S * z = 1 / N), so the art lands on the
-// pixel grid at every level. They depend on the screen (S): setZoomLevels, at every resize.
+// re-placed, and pixel art at a fractional scale shimmers. The levels respect the pixel ratio (Nov 13 16:50, "0.1m everywhere" - the
+// world's art pixel, ART_PX, was the old battleship art's): closer in, the world's pixel is a whole number of screen pixels (1, 2, 3 ...)
+// at every level, so every pixel lands on the screen's grid; further out (the world's pixel under a screen pixel) a screen pixel is N of
+// them (ZOOM_NS). They depend on the screen (S): setZoomLevels, at every resize.
 let ZOOM_LEVELS = [0.35, 0.42, 0.5, 0.6, 0.72, 0.85, 1.08, 1.32, 1.72, 2.25];   // (until the screen is known)
 // (user Nov 1 23:01: "I dont seem to be able to zoom more than this ... when driving a car? i would expect at least one more zoom
-// level") ZOOM_TOP no longer stops short of the closest level: the closest is one screen pixel to one art pixel (ZOOM_NS's 1), on any
+// level") ZOOM_TOP no longer stops short of the closest level (ZOOM_MS's last that fits), on any
 // screen (it was 2.25 - on a big screen that level fell just past it)
 const ZOOM_REF = 1.32, ZOOM_TOP = 24;   // (user Nov 3 22:07, the Vegetation Lab: "I should be able to zoom in 4x more at least" - was 6)   // (ZOOM_REF: what the sky and the distance are drawn for; ZOOM_TOP, ZOOM_MIN: the bounds)
 let ZN = ZOOM_LEVELS.length;
 const zoomLevelOf = z => { let best = 1; for (let k = 1; k <= ZN; k++) if (Math.abs(ZOOM_LEVELS[k - 1] - z) < Math.abs(ZOOM_LEVELS[best - 1] - z)) best = k; return best; };
-const ZOOM_NS = [0.25, 1 / 3, 0.5, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 64, 80, 96, 128];   // (the art pixels a screen pixel: every step near, wider apart far out; past 32 the Oct 27 night levels, 4x further out)
+const ZOOM_MS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 20];   // (zoomed in: the screen pixels a world's pixel - every step near, wider apart close in)
+const ZOOM_NS = [1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4, 5, 6, 7, 8, 10, 12, 14, 16, 20, 24, 28, 32, 40, 48, 64];   // (zoomed out: the world's pixels a screen pixel - every step near, wider apart far out)
 function setZoomLevels() {
-  const k = GRID_K * S, lv = [];   // (the old battleship art's pixel: real scale left the levels as they were)
-  for (const N of ZOOM_NS) { const z = 1 / (N * k); if (z <= ZOOM_TOP * 1.001 && z >= ZOOM_MIN * 0.999) lv.push(+z.toFixed(4)); }
+  const k = ART_PX * S, lv = [];   // (the world's art pixel on the screen at zoom 1)
+  for (const m of ZOOM_MS) { const z = m / k; if (z <= ZOOM_TOP * 1.001) lv.push(+z.toFixed(4)); }   // (in: the world's pixel m screen pixels)
+  for (const N of ZOOM_NS) { const z = 1 / (N * k); if (z >= ZOOM_MIN * 0.999) lv.push(+z.toFixed(4)); }
   lv.sort((a, b) => a - b);
   if (lv.length < 2) return;
   ZOOM_LEVELS = lv; ZN = lv.length;
@@ -8672,8 +8674,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1001;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 17:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1002;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 17:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -26991,10 +26993,8 @@ const SL = [
   ['par5', 'DECK 5 PARALLAX', 0, 1, 0.01, 0.16],
   ['par6', 'DECK 6 PARALLAX', 0, 1, 0.01, 0.12],
   ['sunpar', 'SUN PARALLAX', 0, 1, 0.01, 0.08],   // (17-frame.js skyBack, Oct 30: the sun is a 'deck 7', just behind deck 6 (0.12) - user 11:50; 1 with the land, 0 following the camera)
-  ['cells', 'SKY PIXEL', 1, 8, 1, 1],   // (user Oct 29 15:25: 3)   // (user Oct 27: "Default should be 2"; 1 broke up, 0 was 'about 230 to the screen's height')
   ['skyh', 'SKY HEIGHT', 0.25, 1, 0.01, 0.5],
   ['cloudk', 'CLOUD SIZE', 0.3, 10, 0.05, 4],   // (user Oct 29 defaults)   // (max 10, was 2 - user Oct 29: the clouds' size with the real-scale world)
-  ['cellz', 'SKY PIXEL BY ZOOM', 0, 1, 1, 1],
 ];
 const SM_SL = [   // the smoke's (the lab's SMOKE tab)
   ['smshadow', 'CAST SHADOW', 0, 1, 0.05, 0.7, 'Shadow from other smoke'],
@@ -27008,7 +27008,6 @@ const SM_SL = [   // the smoke's (the lab's SMOKE tab)
   ['smcrease', 'CREASES', 0, 1, 1, 1, 'Dark line between billows'],
   ['smglow', 'SUNSET TINT', 0, 2, 0.05, 1, 'Low sun colouring the undersides'],
   ['smfire', 'FIRE GLOW', 0, 2, 0.05, 1, 'Flames lighting their smoke'],
-  ['smpx', 'PIXEL SIZE', 0.5, 2, 0.05, 1, 'Smoke pixel size'],
   // (defaults: the user's, Oct 29 22:31)
   // LIFETIMES (user Oct 29): each kind of smoke's life in seconds - its longest-lived source's; the kind's others in step
   // (38-smoke-sim.js SM_LIFE)
@@ -30192,7 +30191,7 @@ function drawRays2(sunX, sunY, horY) {
 //   skyFront(V)      deck 1's clouds and the rays over them - drawn after the world, as the game's front clouds
 // A view V: { vi, ctx, w (pixels), pivX, hzPx, waterPx, zr (the zoom over the default), refX (the world's x under the
 // pivot), sunPx (the sun's x across the whole screen) }. Its picture is drawn at the shared deck zoom ZL (the smaller of the
-// views' zooms, never over 1) in cells of CPX pixels, then laid on the screen magnified by M = zr / ZL about its pivot and
+// views' zooms, never over SKY_ZL_MAX - 41-sky-new.js) in cells of CPX pixels, then laid on the screen magnified by M = zr / ZL about its pivot and
 // its horizon (the lab's painting zoom), so both views share one placing of every cloud.
 // HS: the lab's screen height, for heights above the horizon (the lab's horizon was 0.78 down its screen; the game's sky,
 // at the default camera, is the top half of its screen: the decks and the sun keep the lab's places between the horizon and the top)
@@ -30207,9 +30206,10 @@ function skyScreen(bw, bh) {
   // get the splotches": at 2 a puff was 5 to 7 sky pixels across on a big screen and each one showed as a dot. Zoomed out it
   // follows the zoom (SKY PIXEL BY ZOOM): x2/3 gives 3, the user's choice there; never under 2)
   const old = CPX;
-  // (user Oct 28: "never lower than 3, otherwise it gets really slow": zoomed out it stops at 3 - or at SKY PIXEL itself, if set lower)
-  const cs = Math.max(1, Math.round(P.cells || 4));   // (Oct 30, user: "higher pixel density overall" - the baked sky pays for it at bake time: down to 1)
-  CPX = Math.max(Math.min(3, cs), Math.round(cs * ((P.cellz ?? 1) > 0 ? Math.min(1, ZL) : 1)));
+  // (Oct 30, user: "higher pixel density overall" - 1. Nov 13 16:50, "0.1m everywhere": a screen pixel at the deck zoom, always - the deck zoom
+  // follows the camera in (41-sky-new.js skyNewFrame) until a sky pixel is the world's art pixel, so the clouds' pixel is the world's on the screen
+  // there and in; zoomed further out, a screen pixel. The SKY PIXEL settings are gone)
+  CPX = 1;
   const pxNew = !!lastScreen && old !== CPX;
   const key = bw + 'x' + bh + '@' + CPX + '/' + (P.skyh ?? 0.5) + '/' + (P.cloudk ?? 1) + '/' + (P.tall ?? 0.3) + '/' + (P.tallwx ?? 0.5) + '/' + (P.mix ?? 0.7) + '/' + (P.region ?? 1.6) + '/' + (P.clump ?? 0.85) + '/' + (P.clumpw ?? 1.1) + '/' + (P.clumpd ?? 0.45);   // (Oct 28: TOWERS, KIND MIX, STRETCH rebuild the scene too)
   if (key === lastScreen) return;
@@ -32001,7 +32001,7 @@ const toScreen = (V, x, y) => [picX(V, x), picY(V, y)];   // (17-frame.js: the o
 // ---- the smoke in a view: its grid (the game's smoke pixel, SMK) and the sun in it
 function smokeView(V, pass) {
   VIEW = V; VI = V.vi; ctx = V.ctx;
-  const cell = Math.max(1, Math.round(V.smk * (P.smpx ?? 1)));
+  const cell = Math.max(1, Math.round(V.smk));   // (the world's art pixel - smokePx, 46-smoke-fire-draw.js)
   FXV.SV = V.sv; FXV.pxX = FXV.pxY = cell;
   // (a margin past the view's edges as wide as the smoke's smoothing reaches: cut at the edge, the smoothed body thinned
   // there and was lit as the smoke's own edge - a pale rim down the split in two players, user Oct 29)
@@ -32171,7 +32171,7 @@ const ED_TABS = {
   'ON THE CLOUDS': [['WIND ON CLOUDS', ['windpile']]],
   MOTION: [['RESHAPING', ['form', 'morph']], ['PUFFS', ['evolve']]],
   GRADIENT: [['BANDS', ['bands', 'skytex']], ['DISTANCE', ['atmo']]],
-  CAMERA: [['PARALLAX (1 = MOVES WITH WORLD)', ['par1', 'par2', 'par3', 'par4', 'par5', 'par6']], ['SCALE', ['cells', 'cellz', 'skyh', 'cloudk']]],
+  CAMERA: [['PARALLAX (1 = MOVES WITH WORLD)', ['par1', 'par2', 'par3', 'par4', 'par5', 'par6']], ['SCALE', ['skyh', 'cloudk']]],
   ATMOSPHERE: [['LAYER ALTITUDES (OPEN WORLD)', ['strat', 'upper', 'space']]],
   SMOKE: [['LIFETIME (SECONDS)', SM_SL.filter(r => /^sl/.test(r[0])).map(r => r[0])], ['SHADING', SM_SL.filter(r => !/^s[fl]/.test(r[0])).map(r => r[0])], ['BURNING SHIP', SM_SL.filter(r => /^sf/.test(r[0])).map(r => r[0])]],
   // (user Oct 27: the lab's fire and water in the game's editor - the fire helicopter's water cannon and the game's fires)
@@ -32327,7 +32327,7 @@ function edRow(k, lab, mn, mx, st, desc) {
   const fv = v => tg ? (+v ? 'ON' : 'OFF') : fmtV(k, v);
   inp.value = P[k];
   const show = () => { const v = P[k], d = TUNE.def[k], on = Math.abs(v - d) > (+st) * 0.5; out.textContent = fv(v); dv.textContent = on ? '(' + fv(d) + ')' : ''; dv.classList.toggle('on', on); };
-  inp.addEventListener('input', () => { P[k] = +inp.value; show(); saveP(); clearTimeout(TUNE.rt); TUNE.rt = setTimeout(() => skyRefresh(false), 200); if (k === 'cells' && edHost) edHost.rescreen(); if (k === 'wispbump' || k === 'wispbumpk') reformWisps(); if (/^(pk|bs)[1-6]$/.test(k) || k === 'puff' || k === 'billow' || k === 'bcap') regenAll(); });
+  inp.addEventListener('input', () => { P[k] = +inp.value; show(); saveP(); clearTimeout(TUNE.rt); TUNE.rt = setTimeout(() => skyRefresh(false), 200); if (k === 'wispbump' || k === 'wispbumpk') reformWisps(); if (/^(pk|bs)[1-6]$/.test(k) || k === 'puff' || k === 'billow' || k === 'bcap') regenAll(); });
   dv.addEventListener('click', () => { if (!dv.classList.contains('on')) return; P[k] = TUNE.def[k]; inp.value = P[k]; show(); saveP(); });
   if (desc) { lbl.title = desc; lbl.addEventListener('click', () => edHelp(lab, desc)); }
   TUNE.rows[k] = { inp, show }; TUNE.label[k] = lab; show();
@@ -32624,7 +32624,10 @@ function skyNewFrame() {
   // shook (user Oct 27, "a LOT of clouds shaking especially when I go up and down zoomed out")
   // (the stepped zoom, Oct 27 evening: the camera's zoom is a level, cut to, so the decks are drawn at it exactly - every
   // cloud redrawn once at the cut, never between; magnified (M) only past 1)
-  const zmin0 = Math.min(1, z0, z1), Hd = skyEdHeld();
+  // (Nov 13 16:50, "0.1m everywhere": past the default zoom the decks are drawn at the camera's zoom until a sky pixel - CPX, one screen pixel - is the
+  // world's art pixel on the screen (SKY_ZL_MAX); further in they're magnified, their pixel the world's. Never under 1: the default zoom and out as before)
+  const SKY_ZL_MAX = Math.max(1, 1 / (ART_PX * S * ZOOM_DEFAULT));
+  const zmin0 = Math.min(SKY_ZL_MAX, z0, z1), Hd = skyEdHeld();
   if (Hd && Hd.ZL == null) Hd.ZL = zmin0;
   const zmin = Hd ? Hd.ZL : zmin0;                          // (the GAME EDITOR: the zoom it opened at - SKYED)
   if (Math.abs(zmin - NSKY.ZL) > 1e-9) NSKY.ZL = zmin;
@@ -32800,7 +32803,7 @@ function smearAir(a, vx, vy, sp, dt) {
 //@src 42-render-sky.js:1
 function beginView(c, v, camPx, sx, wpx, vi, camF = camPx) {
   C = c;
-  SV = S * v.z; PBV = smallB(); CAMPX = camPx; CAMF = camF; TOPPX = Math.round(v.top * SV);   // (PBV: the view's block for small things - 44-shadows-seafloor.js)
+  SV = S * v.z; PB = Math.max(2, Math.round(ART_PX * SV)); PBV = smallB(); CAMPX = camPx; CAMF = camF; TOPPX = Math.round(v.top * SV);   // (PBV: the view's block for small things - 44-shadows-seafloor.js)
   VWW = wpx / SV; parRef = v.ref; viewIdx = vi; VSX = sx; VWP = wpx; ys = ysPer[vi];
   SHX = Math.round(shakeXY[vi][0] * S); SHY = Math.round(shakeXY[vi][1] * S);
   c.save();
@@ -34002,8 +34005,8 @@ function drawSeaLife() {
    the zoom as everything else does, down to one pixel - never kept at a screen size of its own. smallF(F): a size on the screen that
    was a floor (PB * 4, ...), shrunk with the zoom; smallB(): the block it's drawn in (PB, 1 further out).
    (user Nov 8 16:51: "Nothing should at fixed size, all should scale") PBV: the view's block (smallB, set with SV in beginView) -
-   every particle, spark, ember, bubble, drop of spray or rain, puff of dust drawn as blocks is drawn in it; the ground's, the
-   water's and the sky's pixel grids keep PB (their look's resolution, not a size) */
+   every particle, spark, ember, bubble, drop of spray or rain, puff of dust drawn as blocks is drawn in it; the water's and the
+   sky's pixel grids are PB. (Nov 13 16:50, "0.1m everywhere": PB is the world's art pixel in whole screen pixels, never under 2) */
 const SMALL_SV = 1;
 const smallF = F => SV >= SMALL_SV ? F : Math.max(1, F * SV / SMALL_SV);
 const smallB = () => SV >= SMALL_SV ? PB : Math.max(1, Math.round(PB * SV / SMALL_SV));
@@ -36675,11 +36678,11 @@ frameLayer('masks', F => { thingsFrameStart(); dmgMaskFrame(); });   // (the atl
 //@src 46-smoke-fire-draw.js:1
 /* ---------------- 3. Smoke, fog, lights and fire on top ---------------- */
 let SMK = 3, FPX = 3;
-// the smoke's (and fire's) pixel in the view: 2.4 world units, but never bigger on the screen than SMOKE_PX_MAX (user Nov 2 10:47,
-// close on the fishing boat's funnel: "Why is it so low res?" - one rule for all smoke: zoomed in, its grid gets finer; at the
-// default zoom and out it is as it was)
-const SMOKE_PX_MAX = 3,   // (10:50: "Can the grid be even smaller at close up?" - 3, the default zoom's)
-  smokePx = () => clamp(Math.round(2.4 * SV), 2, SMOKE_PX_MAX);
+// the smoke's (and fire's, and the white water's) pixel in the view: the world's art pixel (ART_PX - user Nov 13 16:50: "let's do 0.1m
+// everywhere"), whole screen pixels; never under SMOKE_PX_MIN on the screen (zoomed far out, where the world's pixel is under a screen pixel
+// or two, the smoke's grid stays as it always was there - its cost a frame never above what it was)
+const SMOKE_PX_MIN = 2,
+  smokePx = () => Math.max(SMOKE_PX_MIN, Math.round(ART_PX * SV));
 const FIRE_PAL = [[236, 118, 36], [246, 152, 42], [252, 190, 58], [255, 214, 82], [255, 230, 118], [255, 242, 164], [255, 251, 222]];
 const FIRE_T = [0.12, 0.22, 0.36, 0.5, 0.64, 0.78, 0.92];
 // a puff's layers, as a pixel artist lays smoke (each a size, a shift toward the light, a tone): the white water's clouds are drawn
@@ -65943,11 +65946,11 @@ function lookByGame(key, W, H, k, ax, ay, fn) {
 // the game's drawing pointed at a look's layer for one call (fn): its context, scale, camera and the view's place and size, as beginView sets
 // them for a view - every one of them put back after, whatever happens
 function lookView(g, W, H, sv, campx, toppx, fn) {
-  const keep = { C, SV, CAMPX, TOPPX, VWW, VWP, VSX, SHX, SHY, bh, PBV, viewIdx };
+  const keep = { C, SV, CAMPX, TOPPX, VWW, VWP, VSX, SHX, SHY, bh, PB, PBV, viewIdx };
   try {
-    C = g; C.imageSmoothingEnabled = false; SV = sv; CAMPX = campx; TOPPX = toppx; VWW = W / sv; VWP = W; VSX = 0; SHX = 0; SHY = 0; bh = H; PBV = smallB(); viewIdx = 0;
+    C = g; C.imageSmoothingEnabled = false; SV = sv; CAMPX = campx; TOPPX = toppx; VWW = W / sv; VWP = W; VSX = 0; SHX = 0; SHY = 0; bh = H; PB = Math.max(2, Math.round(ART_PX * sv)); PBV = smallB(); viewIdx = 0;
     fn();
-  } finally { ({ C, SV, CAMPX, TOPPX, VWW, VWP, VSX, SHX, SHY, bh, PBV, viewIdx } = keep); }
+  } finally { ({ C, SV, CAMPX, TOPPX, VWW, VWP, VSX, SHX, SHY, bh, PB, PBV, viewIdx } = keep); }
 }
 // the tank as it drives: its gun (at a resting 15 degrees), its track and wheels, its hull and turret (drawLandTank)
 VEH_LOOKS.tank = () => {
