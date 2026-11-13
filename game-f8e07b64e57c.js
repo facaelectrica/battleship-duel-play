@@ -4134,26 +4134,25 @@ const SRC = {
   desertDunes: __ART[52],
   desertCity: __ART[53],     // (the user's own city, Oct 27, 16:55)
   desertArt: __ART[54],
-  forestTrees: __ART[55], // (gen/open/foretrees.py: the forest's foreground trees, whole and bare, Oct 27)
-  hangar2: __ART[56],         // (gen/open/hangar2.py: the user's red hangar, Oct 26)
-  wrecks: __ART[57],           // (gen/open/wrecks.py: the user's four pirate wrecks, Oct 26)
-  linerBare: __ART[58],     // (gen/open/linerparts.py: the liner without her masts, funnels and rigging, Oct 26)
-  linerParts: __ART[59],   // (gen/open/lighthouse_dmg.py: the left harbour's lighthouse in five states of damage, Oct 26)   // (gen/open/containership.py: her deck emptied - the boxes are their own, Oct 26)       // (gen/open/dockart.py: the user's lighthouse and dockside crane, Oct 26)      // (gen/open/civicons.py: the user's civilian category symbols, Oct 26 - ships, planes, helicopters, subs, space)
-  shuttles: __ART[60],      // (gen/open/planesheet.py: the user's orbiter sheet, Oct 26 - three damage rows of the turn)        // (gen/open/cessna2.py: the user's Cessna sheet, Oct 26 - laid out as the fighter's)
-  cessna: __ART[61],          // (gen/open/cessna.py: the user's Civil Air Patrol 182, its navy and red recoloured per livery)
-  jet747: __ART[62],          // (its colour band red: each country's colour goes on it, as on the army's)
-  cruise2: __ART[63],
-  container: __ART[64],
-  tanker: __ART[65],
+  hangar2: __ART[55],         // (gen/open/hangar2.py: the user's red hangar, Oct 26)
+  wrecks: __ART[56],           // (gen/open/wrecks.py: the user's four pirate wrecks, Oct 26)
+  linerBare: __ART[57],     // (gen/open/linerparts.py: the liner without her masts, funnels and rigging, Oct 26)
+  linerParts: __ART[58],   // (gen/open/lighthouse_dmg.py: the left harbour's lighthouse in five states of damage, Oct 26)   // (gen/open/containership.py: her deck emptied - the boxes are their own, Oct 26)       // (gen/open/dockart.py: the user's lighthouse and dockside crane, Oct 26)      // (gen/open/civicons.py: the user's civilian category symbols, Oct 26 - ships, planes, helicopters, subs, space)
+  shuttles: __ART[59],      // (gen/open/planesheet.py: the user's orbiter sheet, Oct 26 - three damage rows of the turn)        // (gen/open/cessna2.py: the user's Cessna sheet, Oct 26 - laid out as the fighter's)
+  cessna: __ART[60],          // (gen/open/cessna.py: the user's Civil Air Patrol 182, its navy and red recoloured per livery)
+  jet747: __ART[61],          // (its colour band red: each country's colour goes on it, as on the army's)
+  cruise2: __ART[62],
+  container: __ART[63],
+  tanker: __ART[64],
   // (the user's sheets, Oct 25 late, cut by gen/open/sheets.py: rows of sprites - see the JSONs)
-  balloons: __ART[66],   // (14 balloons: whole, popped, falling)
-  civhelis: __ART[67],   // (12 helicopters: clean, hit, wrecked; nose left)
-  airport: __ART[68],     // (the user's airport: the hangar, the terminal and its tower; trim red, for the team tint)
-  research: __ART[69],   // (the user's research ship, bow right, its sub cut off: gen/open/research.py)
-  minisub: __ART[70],
-  caveBack: __ART[71],      // (OPEN WORLD's caves: the user's back-wall tiles and stalactites, Oct 28)
-  seaKit: __ART[72],        // (the user's sea kit: rocks, corals, sea fans, sponges - gen/sea_kit.py, SEA_KIT)
-  caveStal: __ART[73],     // (the exploration sub: side, three-quarter, front; nose left)
+  balloons: __ART[65],   // (14 balloons: whole, popped, falling)
+  civhelis: __ART[66],   // (12 helicopters: clean, hit, wrecked; nose left)
+  airport: __ART[67],     // (the user's airport: the hangar, the terminal and its tower; trim red, for the team tint)
+  research: __ART[68],   // (the user's research ship, bow right, its sub cut off: gen/open/research.py)
+  minisub: __ART[69],
+  caveBack: __ART[70],      // (OPEN WORLD's caves: the user's back-wall tiles and stalactites, Oct 28)
+  seaKit: __ART[71],        // (the user's sea kit: rocks, corals, sea fans, sponges - gen/sea_kit.py, SEA_KIT)
+  caveStal: __ART[72],     // (the exploration sub: side, three-quarter, front; nose left)
 };
 
 //@src 01-z-vehicle-tune.js:1
@@ -5007,7 +5006,7 @@ function artStep() {
    pixels); scaled() draws the big one in its place, and whatever is made from a picture (mirrored, team colours,
    charred, cut, darkened) makes the same from its big one (hiPass, 04-art-prep.js).
    ================================================================ */
-const BIGART = {"cruise2":{"n":7,"w":2520,"h":812,"pieces":[[__ART[74],0,0],[__ART[75],630,0],[__ART[76],1960,0]]},"tanker":{"n":6,"w":2040,"h":564,"pieces":[[__ART[77],0,0],[__ART[78],480,0],[__ART[79],1680,0]]},"containerEmpty":{"n":6,"w":2400,"h":750,"pieces":[[__ART[80],0,0],[__ART[81],840,0],[__ART[82],1920,0]]},"sub":{"n":2,"w":1560,"h":620,"pieces":[[__ART[83],0,0],[__ART[84],600,0],[__ART[85],1200,0]]},"subTurn":{"n":2,"w":3144,"h":612,"pieces":[[__ART[86],0,0],[__ART[87],1048,0],[__ART[88],2096,0]]}};
+const BIGART = {"cruise2":{"n":7,"w":2520,"h":812,"pieces":[[__ART[73],0,0],[__ART[74],630,0],[__ART[75],1960,0]]},"tanker":{"n":6,"w":2040,"h":564,"pieces":[[__ART[76],0,0],[__ART[77],480,0],[__ART[78],1680,0]]},"containerEmpty":{"n":6,"w":2400,"h":750,"pieces":[[__ART[79],0,0],[__ART[80],840,0],[__ART[81],1920,0]]},"sub":{"n":2,"w":1560,"h":620,"pieces":[[__ART[82],0,0],[__ART[83],600,0],[__ART[84],1200,0]]},"subTurn":{"n":2,"w":3144,"h":612,"pieces":[[__ART[85],0,0],[__ART[86],1048,0],[__ART[87],2096,0]]}};
 async function loadBigArt() {
   for (const [key, B] of Object.entries(BIGART)) {
     const old = img[key];
@@ -8666,8 +8665,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 992;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 16:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 993;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 16:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -44350,7 +44349,7 @@ function islToggleUG() {
    tropical's rocks and sand) a segment in a country takes its own skin - its pieces' FOREST / DESERT / SEA / TROPICAL; AUTO:
    the ground's look there - whatever the ground in front is: land.iskin (0 AUTO, 1 F, 2 D, 3 S, 4 T) per column, its cells
    (islCellM), its rows painted in its look (islPaintLook / islSegEndRow, paintLandChunk), its stones (islandStones) and
-   what grows on it (islandProps). Out at sea an island's columns are the ground's own, its skin their look already */
+   what grows on it (tropPalms - 50-land-plants.js). Out at sea an island's columns are the ground's own, its skin their look already */
 const TROP_SAND = 22;                                         // (the tropical's sand, world units: under the ground strip - drawTropStrip, 50-land-plants.js)
 const ISK = { F: 1, D: 2, S: 3, T: 4, M: 5, I: 6, W: 7, V: 8 };
 function islSkinCols(c0 = 0, c1 = land.cols - 1) {
@@ -44461,30 +44460,6 @@ function islSlices(x0, x1) {
   // (and those holding an island's body under the water, its sides wholly under it - ltBody)
   if (land.bdK) for (let k = Math.max(0, Math.floor(ltCol(x0) / LT_CHUNK)), k1 = Math.min(land.bdK.length - 1, Math.floor(ltCol(x1) / LT_CHUNK)); k <= k1; k++) if (land.bdK[k] && !done.has(k)) { done.add(k); out.push(k); }
   return out;
-}
-// (user Oct 28) what grows on an island, by its look: the forest's trees on its gentle grass, the desert's scrub and cacti
-// (a palm now and then by the water) - each marked isl, drawn in the island's plane (drawIslands) and nowhere else; its own
-// seed, so nothing else moves
-function islandProps() {
-  if (!land.islRuns || !land.islRuns.length) return;
-  const R = seededRng(8127), AS = airTreeSpans();               // (no tree near any airport part - rules.md: everything that makes trees asks nearAirport; user Nov 3 09:22, a runway on an island)
-  // (Nov 11: one walk along the whole world, every random number drawn at each step - a plant the same whatever the other islands are, rules 7.9)
-  const runs = land.islRuns;
-  for (let x = 40 + R() * 80, j = 0; x < WORLD_W - 40; x += 110 + R() * 220) {
-    const pick = Math.floor(R() * 1000), s = 0.8 + R() * 0.35, flip = R() < 0.5, z = R(), roll = R();
-    while (j < runs.length && runs[j][1] - 40 <= x) j++;
-    if (j >= runs.length || x <= runs[j][0] + 40 || plOut(x)) continue;
-    const [a, b] = runs[j];
-    {
-      const t = landTop(x); if (Math.abs(landTop(x - 12) - landTop(x + 12)) > 12 || t > WATER_Y - 14) continue;   // (no steep bank, nothing at the water's edge)
-      if ((land.proud || []).some(([p, q]) => x > p - 10 && x < q + 10)) continue;   // (not on a boulder standing out of it)
-      if (nearAirport(x, AS)) continue;                         // (not on or near a runway, a hangar, a terminal...)
-      if (islTropAt(x) && !islDesert(x)) { if (RIG_T.off) land.props.push({ x, kind: 'tree', trop: true, pick, s, flip, z, alive: true, isl: true }); continue; }   // (the tropical's: palms - the decks' now, Nov 4 13:33: tropPalms, 50-land-plants.js)
-      { const bn = biomeAtX(x, true); if (bn && bn !== 'tropical' && biomePlanted(bn)) continue; }   // (a biome with plants of its own: theirs on its tops, not the old ones - Biome Editor)
-      if (islDesert(x)) { const nearW = Math.min(x - a, b - x) < 260; land.props.push({ x, kind: nearW && roll < 0.5 ? 'palm' : roll < 0.25 ? 'cactus' : 'scrub', pick, s, flip, z, alive: true, isl: true }); }
-      else if (ltCell(ltCol(x), ltRow(t + 1)) === M_GRASS || ltCell(ltCol(x), ltRow(t + 1)) === M_DIRT) land.props.push({ x, kind: 'tree', pick, s: s + 0.08, flip, z, alive: true, isl: true });
-    }
-  }
 }
 // (a column of slice k: the slice's canvas rows from its top down to here are the island's - moved into its canvas; 0: none)
 // (user Nov 9 08:20: an island's ground runs on under the water's line - its body, ltBody - down to the ground in front under it (land.iend): that
@@ -46486,14 +46461,9 @@ function stepTankSmoke(t, dt) {
 /* ---- (user Nov 3 14:00: "all fish should be global ... There should never be any custom fish for a custom location. We place them
    manually") no fish of a lake's own: a lake's fish are the sea's - schools, sharks and whales from the FISH / SHARK / WHALE AREAS
    placed in OBJECTS, kept to their box and the water it holds (waterRun), drawn in the lake's water (drawLakeRoots) ---- */
-/* ---- what stands on the ground (user Oct 27, 13:11, seeing Version 126 - the oasis's palms and the cacti and rocks
-   behind a hump "floating": on the field behind the ground they read as hanging over it) ---- every desert plant and
-   rock stands on the real ground, in front of it: its foot on the ground's top where it is (landTop), sunk into it a
-   little, the ground's line under it whatever the zoom. One plain list, land.props - { x, kind ('palm', 'cactus',
-   'scrub', 'rock'), pick (which picture), s (its size), flip, z (drawing order), alive } - made with the land from its
-   seed, the same on every machine; a crater under one lets it down with the ground. (The user, 13:05: "Both the forest
-   and desert should have 'foreground trees' and background trees" - these are the desert's foreground ones, ready to be
-   made things a blast or a fire can take: alive) ---- */
+/* ---- what stands on the ground: the desert kit's rocks where the field's boulders are, in front of the ground (its foot on the ground's top - landTop -
+   sunk a little), and every biome's plants from its decks (tropPalms). One plain list, land.props, made with the land from its seed, the same on every
+   machine; a crater under one lets it down with the ground ---- */
 /* (Nov 11, editing is live) X: only the plants standing in [X[0], X[1]) laid - each walk along the world still draws every random number it did, so
    a plant comes out the same whatever is laid round it (rules 7.9); returned, land.props left as it was (50-zzzz-live-edit.js puts them in) */
 let PL_X = null;
@@ -46508,32 +46478,14 @@ function buildLandProps(X) {
 function buildLandProps0() {
   if (!PL_X) RIGS_ST.clear();   // (the plants laid again: none keeps the state the last ones had - a torn leaf, a bend, a snapped trunk. Kept by place, a plant at the same spot took its
                      // old torn leaves back - user Nov 8 19:42, the Biome Editor's RESET)
-  const R = seededRng(8123), DL = (land.lakesL || []).filter(l => lookD((l[0] + l[1]) / 2)), L = DL[0];   // (the oases: every lake whose ground looks the desert's - lookD)
-  const ok = x => onLand(x) && !isleCol(x) && !onApron(x) && !nearAirport(x, AS) &&   // (every plant asks nearAirport - user Nov 3 09:22)
+  const AS = airTreeSpans(), ok = x => onLand(x) && !isleCol(x) && !onApron(x) && !nearAirport(x, AS) &&   // (every plant asks nearAirport - user Nov 3 09:22)
     !structNear(x, 260) && !(land.proud || []).some(([a, b]) => x > a - 6 && x < b + 6);
-  // palms round the oasis, on both its shores - on the dry bank, a little way up from the water (the kit's guide: "16
-  // palms around the oasis, on both shores... concentrate them by water")
-  // (user Oct 28: every oasis - the first as it was, any more with palms by their size: a pond two, a big one sixteen)
-  const AS = airTreeSpans();
-  DL.forEach((L, j) => { const n = j ? clamp(Math.round((L[1] - L[0]) / 230) * 2, 2, 16) : 16;
-    for (let i = 0; i < n; i++) {
-      const side = i & 1 ? 1 : -1, x = (side < 0 ? L[0] : L[1]) + side * (30 + R() * 230), z = R(), s = 0.85 + R() * 0.4, flip = R() < 0.5;
-      if (!plOut(x) && ok(x) && !lakeLaid(x) && !nearAirport(x, AS)) land.props.push({ x, kind: 'palm', pick: i, s, flip, z, alive: true });
-    } });
-  // about one scrub or cactus every 130 units on every piece with the desert's look, one in five a cactus (Nov 3: one rule over the
-  // whole world - no more the old desert country and the forest side's DESERT pieces apart)
-  // (Nov 11: its own random numbers, every one drawn at each step - the same scrub wherever the oases or the desert are - rules 7.9)
-  const RS = seededRng(8125);
-  for (let x = 60 + RS() * 100; x < WORLD_W - 60; x += 60 + RS() * 140) {
-    const kind = RS() < 0.22 ? 'cactus' : 'scrub', pick = Math.floor(RS() * 1000), z = RS(), s = 0.8 + RS() * 0.5, flip = RS() < 0.5;
-    if (plOut(x) || apronD(x) < 260 || !lookD(x) || DL.some(L => x > L[0] - 300 && x < L[1] + 300)) continue;
-    if (biomePlanted('desert') && biomeAtX(x) === 'desert') continue;   // (the DESERT biome has plants of its own: theirs, not these - Biome Editor)
-    if (ok(x)) land.props.push({ x, kind, pick, s, flip, z, alive: true });
-  }
+  // (user Nov 13 15:35: "mountains ... no longer have trees" - an old tree stood on his MOUNTAIN island: a biome with no plants on its decks got the old
+  // vegetation - the forest kit's trees on grass, the desert kit's oasis palms, scrub and cacti, island tops' trees. Gone: every plant is a deck's -
+  // tropPalms, 50-land-plants.js - and a biome whose decks hold none has none)
   // the kit's sandstone rocks, where the field's boulders were (a little smaller: they're near now, on the ground)
   for (const b of land.boulders) if (!plOut(b.x) && lookD(b.x) && ok(b.x)) land.props.push({ x: b.x, kind: 'rock', pick: Math.floor(b.seed * 7), s: b.w * 0.5, flip: b.seed * 10 % 1 < 0.5, z: 2 + b.back, alive: true });
-  buildForestTrees(seededRng(8124));                       // (the forest's foreground trees, user Oct 27 - 50-land-plants)
-  islandProps();                                           // (the island lines' own: drawn with them, behind the water - 50-land-islands)
+  tropPalms();                                             // (every biome's plants from its decks, on its ground and island tops - 50-land-plants.js)
   land.props.sort((a, b) => b.z - a.z);
 }
 // (drawn with their hits, fire and felling: drawLandProps, 50-land-plants)
@@ -47558,8 +47510,6 @@ function drawCivMagnets() {
 // its fire reaches, how hard it heats, how fast the water puts it out
 const PK = {
   tree:   { hp: 16, ign: 7, burn: 46, reach: 70, pow: 3, douse: 1.2, grow: 0.25 },
-  palm:   { hp: 12, ign: 5, burn: 34, reach: 60, pow: 2.5, douse: 1.5, grow: 0.3 },
-  cactus: { hp: 6, ign: 14, burn: 26, reach: 32, pow: 1, douse: 2, grow: 0.2 },
   scrub:  { hp: 2, ign: 1.4, burn: 8, reach: 44, pow: 2, douse: 5, grow: 1.2 },
   grass:  { hp: 1, ign: 0.7, burn: 4.5, reach: 40, pow: 1.5, douse: 8, grow: 2 },
 };
@@ -47607,44 +47557,27 @@ const plantUp = it => it.state === 'stand';
 const plantLive = it => it.state !== 'gone';
 // (user Nov 7 23:26: "I'm colliding against any tree, even if it's not on deck one" / "only stuff in Deck 1 gets on fire") the plants anything
 // meets - hits, crashes into, blasts, burns, drives over: deck 1's (it.deck 2) and the old vegetation with no deck; the other decks are scenery
-const plantHard = it => !it.deck || it.deck === 2;
+const plantHard = it => it.deck === 2;
 
-/* ---- the forest's trees, made with the land from its seed (buildLandProps) ---- */
-const FTI = {"trees": [[0, 130, 126, 174, 58.3, 128], [256, 100, 113, 204, 62.5, 371], [486, 70, 177, 234, 79.0, 665], [844, 38, 154, 266, 92.0, 1000], [1156, 0, 140, 304, 53.0, 1298], [1440, 112, 104, 192, 46.0, 1546], [1652, 54, 119, 250, 60.0, 1773], [1894, 20, 154, 284, 103.0, 2050]]};
-let forestTreeC = null;
-function forestTreeArt() {
-  if (forestTreeC !== null) return forestTreeC;
-  const im = img.forestTrees; if (!im || !im.width) return null;
-  const cut = (x, y, w, h, fx) => { const k = makeCanvas(w, h); k.getContext('2d').drawImage(im, x, y, w, h, 0, 0, w, h); k._fx = fx; return k; };
-  const whole = [], bare = [];
-  for (const [x, y, w, h, fx, bx] of FTI.trees) { const a = cut(x, y, w, h, fx), b = cut(bx, y, w, h, fx); a._bare = b; whole.push(a); bare.push(b); }
-  return (forestTreeC = { whole, bare });
-}
 // the Desert Art Kit's pictures (gen/open/desert.py: palms, cacti, scrub, rocks - one sheet, img.desertArt, its rects in desert_art.json), each cut once at its
 // own pixels (_fx: where its foot is across it): drawn from the art atlas (the family below) and met by the rounds that hit them (plantSolidAt)
-const DAI = {"palms": [[0, 57, 71, 144, 10.9], [73, 43, 86, 158, 60.9], [161, 28, 90, 173, 6.1], [253, 16, 84, 185, 26.1], [339, 9, 90, 192, 79.1], [431, 0, 99, 201, 25.1], [532, 32, 94, 169, 86.9], [628, 49, 87, 152, 6.1]], "cacti": [[0, 203, 17, 44, 13.0], [19, 219, 15, 28, 7.0], [36, 211, 14, 36, 10.5]], "scrub": [[0, 250, 24, 17, 12.2], [26, 251, 20, 16, 10.5], [48, 249, 16, 18, 9.6], [66, 253, 21, 14, 11.3], [89, 251, 22, 16, 13.3], [113, 252, 45, 15, 26.8], [160, 254, 18, 13, 8.4], [180, 255, 22, 12, 10.9]], "rocks": [[0, 269, 34, 26, 19.5], [36, 276, 26, 19, 13.1], [64, 278, 18, 17, 8.8], [84, 279, 51, 16, 25.2]]};
+const DAI = {"rocks": [[0, 269, 34, 26, 19.5], [36, 276, 26, 19, 13.1], [64, 278, 18, 17, 8.8], [84, 279, 51, 16, 25.2]]};
 // (user Oct 27, 14:39, the standing rule: "no asset is ever drawn bigger than its own pixel art allows" - at the default
 // zoom an art pixel no bigger than the vehicles' (the Cessna's 0.41 world units, the tank's 0.21), and everything sized
 // against them. Every desert picture from the kit - gen/open/desert.py - is made at this many world units a pixel and
 // drawn at it, never magnified)
 const DESERT_PK = 0.4;
-// (and the forest's - the same rule everywhere: its mountains, both tree rows and the trees in front, from the Nature
-// Art Kit at its own pixel - gen/open/forest.py, foretrees.py)
-const FOREST_PK = 0.4;
 let desertKitC = null;
 function desertKitArt() {
   if (desertKitC !== null) return desertKitC;
   const im = img.desertArt; if (!im || !im.width) return null;
   const cut = r => { const k = makeCanvas(r[2], r[3]); k.getContext('2d').drawImage(im, r[0], r[1], r[2], r[3], 0, 0, r[2], r[3]); k._fx = r[4]; return k; };
-  return (desertKitC = { rockC: DAI.rocks.map(cut), palms: DAI.palms.map(cut), cacti: DAI.cacti.map(cut), scrub: DAI.scrub.map(cut) });
+  return (desertKitC = { rockC: DAI.rocks.map(cut) });
 }
-/* (engine part 3) the kit trees' and the desert's pictures in the art atlas (04-zz-art-atlas.js), each once, at its own pixels - the forest's trees whole and bare
-   (forestTreeArt), the desert kit's palms, cacti, scrub and rocks (desertKitArt's cut canvases - not its whole sheet or its shaded copy). No flipped, tinted,
-   charred or bare copies: the plants' shader flips, tints and mixes them (a palm's bare picture is its green taken out there - bareOf's test). Drawn by the
-   plants' pass as picture rows (pgRows). A kit picture that's missing has no stand-in: it isn't drawn (and isn't met) until it's in (user Nov 10: the game's
-   painted palms, cacti and scrub gone - "we will do new ones anyway") - each kit its own family, so one missing never holds the other back */
-artFamily(() => { const A = forestTreeArt(); if (!A) return false; for (const L of [A.whole, A.bare]) for (const c of L) artPut(c); return true; });   // (false: the pictures not unpacked yet - start() sets them all at once)
-artFamily(() => { const D = desertKitArt(); if (!D) return false; for (const L of [D.palms, D.cacti, D.scrub, D.rockC]) for (const c of L) artPut(c); return true; });
+/* (engine part 3) the desert kit's rocks in the art atlas (04-zz-art-atlas.js), each once, at its own pixels (desertKitArt's cut canvases - not its whole sheet
+   or its shaded copy). Drawn by the plants' pass as picture rows (pgRows); one that's missing has no stand-in: it isn't drawn until it's in. (User Nov 13:
+   every plant is a deck's prefab - the forest kit's trees and the desert kit's palms, cacti and scrub, the old vegetation, are gone) */
+artFamily(() => { const D = desertKitArt(); if (!D) return false; for (const c of D.rockC) artPut(c); return true; });   // (false: the pictures not unpacked yet - start() sets them all at once)
 // (the forest: a tree every few hundred units of its dry land, now and then two together - never on the airfield or
 // near it, the launch pad, the lake, a rock face, a steep slope or the mountain's top by the tower)
 // NO TREES NEAR AN AIRPORT (user Nov 2 18:28: "Let's have a rule of not trees close to airports?"): no tree in front grows within
@@ -47661,25 +47594,6 @@ function airTreeSpans() {
   return out;
 }
 const nearAirport = (x, S) => apronD(x) < AIR_RUNWAY_GAP || S.some(([a, b]) => x > a && x < b);   // (an airport's concrete is its runway: the climb-out's clear way off both its ends)
-function buildForestTrees(R) {
-  // (Nov 3, user 08:57 "get rid of all this old stuff": one rule over the whole world - no more the old countries' halves, the
-  // forest country's trees and the other side's only where marked FOREST; land anywhere, the old middle too, gets its trees)
-  const AS = airTreeSpans();
-  const ok = x => onLand(x) && !isleCol(x) && !landTrop(x) && !landMtn(x) && !strsUsed().some(o => o.k === 'gunTower' && Math.abs(x - o.x) < 140) && !lookD(x) && !nearAirport(x, AS) && !structNear(x, 300) && !lakeLaid(x) && !lakeLaid(x - 30) && !lakeLaid(x + 30)
-    && !(land.proud || []).some(([a, b]) => x > a - 10 && x < b + 10) && Math.abs(frontTop(x - 12) - frontTop(x + 12)) < 10
-    && [M_GRASS, M_DIRT].includes(ltCell(ltCol(x), ltRow(frontTop(x) + 1)))   // (the ground in front's: under a segment over land too)
-    && vegFadeKeep(x, 3)   // (its piece's VEGETATION - the FADE CONCEPT)
-    && !((bnx => bnx && bnx !== 'tropical' && biomePlanted(bnx))(biomeAtX(x)));   // (a biome with plants of its own - FOREST, SWAMP, MOUNTAIN... - theirs there, not these)
-  tropPalms();                                                  // (the TROPICAL pieces: palms - their own seed)
-  for (let x = 120 + R() * 100; x < WORLD_W - 120; x += 150 + R() * 320) {
-    const n = R() < 0.3 ? 2 : 1;
-    for (let k = 0; k < n; k++) {
-      const xx = x + k * (34 + R() * 30), pick = Math.floor(R() * 1000), s = 0.88 + R() * 0.26, flip = R() < 0.5, z = R();
-      if (!plOut(xx) && ok(xx)) land.props.push({ x: xx, kind: 'tree', pick, s, flip, z, alive: true });
-    }
-  }
-}
-
 /* ---- the pictures: whole, and bare (a fire's leaves gone - the forest's from the kit, a palm's its trunk) ---- */
 // a palm without its fronds: the kit's palm with the green taken out (the trunk, the crown's stub and its dates stay)
 function bareOf(im) {
@@ -47718,21 +47632,7 @@ function plantGeo0(it) {
     PG.im = P; PG.bare = null; PG.k = P._m * UPM * rigSize(it);
     PG.w = P.width * PG.k; PG.h = P.height * PG.k; PG.fo = RIGS['facebush-' + it.bush].heart[0] * PG.k; PG.sink = 1; return PG;
   }
-  if (it.pk === 'tree') {
-    const A = forestTreeArt(); if (!A) return null;
-    const im = A.whole[it.pick % A.whole.length]; PG.im = im; PG.bare = im._bare; PG.k = FOREST_PK;   // (at the kit's own pixel, each tree its own size against the vehicles - 68-120 units: user Oct 27, 14:39)
-  } else {
-    const D = desertKitArt(); if (!D) return null;              // (the kit's sheet not in: no picture to draw or to meet - no stand-in)
-    const arr = D[it.kind === 'palm' ? 'palms' : it.kind === 'cactus' ? 'cacti' : 'scrub'];
-    if (!arr || !arr.length) return null;
-    const im = arr[it.pick % arr.length]; PG.im = im;
-    PG.bare = it.kind === 'palm' ? bareOf(im) : null;
-    // (every one at the kit art's own pixel, DESERT_PK - each picture already its size against the vehicles: a palm 60-82
-    // units, a saguaro 15-18, scrub 5-7; user Oct 27, 14:39)
-    PG.k = DESERT_PK;
-  }
-  PG.w = PG.im.width * PG.k; PG.h = PG.im.height * PG.k; PG.fo = (PG.im._fx != null ? PG.im._fx : PG.im.width / 2) * PG.k; PG.sink = 1.5;
-  return PG;
+  return null;   // (every plant is a deck's prefab - a palm, a bush, the jungle's: no other picture - user Nov 13, the old vegetation gone)
 }
 // is (wx, wy) on a standing plant's picture?
 function plantSolidAt(it, wx, wy) {
@@ -47782,14 +47682,14 @@ function plantPerches(L = land.props || []) {   // (L: these plants only - an ed
   if (!birds.n) return;
   const mine = [], P = perches.c;
   for (const it of L) {
-    if ((it.kind !== 'tree' && it.kind !== 'palm') || it.uw || it.cave) continue;   // (none on an underwater deck's)
+    if (it.kind !== 'tree' || it.uw || it.cave) continue;   // (none on an underwater deck's)
     const G = plantGeo(it); if (!G) continue;
     // (a palm with bones: its spots on its fronds - each on a frond's inner half, riding with it; rigPerchSpots, 50-land-zz-rig.js)
     { const sp = rigPerchSpots(it); if (sp) { for (const [f, u] of sp) { const j = bdPerch(it.x, 0, -1); P.plant[j] = it; P.col[j] = 0; P.rf[j] = f; P.ru[j] = u; P.rv[j] = 0; const w = rigPerchAt(j, 0); if (!w) { perches.length = j; continue; } P.x[j] = w[0]; P.y[j] = w[1]; mine.push(j); } continue; } }
     const T = crownTops(G.im), W = G.im.width;
     // (the crown's high points: a column near each of three places across it, where the outline is near its top)
     let tmin = 1e9; for (let x = 0; x < W; x++) tmin = Math.min(tmin, T[x]);
-    for (const f of it.kind === 'palm' ? [0.3, 0.7] : [0.25, 0.5, 0.75]) {
+    for (const f of [0.25, 0.5, 0.75]) {
       let best = -1, bt = 1e9;
       for (let x = Math.floor(W * (f - 0.12)); x <= Math.ceil(W * (f + 0.12)); x++) if (x >= 1 && x < W - 1 && T[x] < bt && Math.abs(T[x - 1] - T[x]) <= 1 && Math.abs(T[x + 1] - T[x]) <= 1) { bt = T[x]; best = x; }
       if (best < 0 || bt > tmin + G.im.height * 0.25) continue;
@@ -47853,7 +47753,7 @@ function plantPerchX(j) {
 function treeAt(x, y) {
   if (!PLT.grid.length) return null;
   let hit = null;
-  plantsNear(x, 70, it => { if (!hit && (it.pk === 'tree' || it.pk === 'palm') && plantHard(it) && plantUp(it) && plantSolidAt(it, x, y)) hit = it; });
+  plantsNear(x, 70, it => { if (!hit && (it.pk === 'tree') && plantHard(it) && plantUp(it) && plantSolidAt(it, x, y)) hit = it; });
   return hit;
 }
 // (user Nov 8 23:15: "anything in DECK 1 is collision. Either a tree, shrub or rock") under the water too: a plant on an UNDERWATER DECK 1 (plantHard, it.uw) is
@@ -47922,7 +47822,7 @@ function treeTopIn(x0, x1) {
   if (!PLT.grid.length) return Infinity;
   const a = Math.min(x0, x1), b = Math.max(x0, x1);
   let m = Infinity;
-  plantsNear((a + b) / 2, (b - a) / 2 + 60, it => { if ((it.pk === 'tree' || it.pk === 'palm') && plantHard(it) && plantUp(it)) m = Math.min(m, propTop(it) - plantH(it)); });
+  plantsNear((a + b) / 2, (b - a) / 2 + 60, it => { if ((it.pk === 'tree') && plantHard(it) && plantUp(it)) m = Math.min(m, propTop(it) - plantH(it)); });
   return m;
 }
 const clearTop = (x, r) => Math.min(landTop(x), treeTopIn(x - (r || 40), x + (r || 40)), hangarTopIn(x - (r || 40), x + (r || 40)));   // (and the hangars: user Oct 29)
@@ -47941,7 +47841,7 @@ function plantH(it) { const G = plantGeo(it); return G ? G.h : 20; }
 /* ---- what hits them ---- */
 // bits off it: leaves and splinters (chip), or its trunk and crown in pieces (blown apart)
 const PL_WOOD = ['#6b4a30', '#4f3624', '#8a6444', '#3a2a1e'], PL_CHAR = ['#2a2220', '#1a1614', '#3a302a', '#4a3e34'];
-const PL_LEAF = { tree: ['#54724e', '#8ba34f', '#2a474b', '#6f8c47'], palm: ['#6a8a3c', '#4e6e34', '#86a84a', '#3e5a2c'], cactus: ['#5c804a', '#46683a', '#7c9e5c', '#324a2c'], scrub: ['#8a7046', '#6e5638', '#a68c5a', '#5e6a3c'], grass: ['#a8d654', '#70a838', '#3a6828', '#cbe878'] };
+const PL_LEAF = { tree: ['#54724e', '#8ba34f', '#2a474b', '#6f8c47'], scrub: ['#8a7046', '#6e5638', '#a68c5a', '#5e6a3c'], grass: ['#a8d654', '#70a838', '#3a6828', '#cbe878'] };
 function plantBits(it, x, y, n, vx, big, wood) {
   if (SIM_ONLY) return;
   const lc = it.char > 0.5 ? PL_CHAR : PL_LEAF[it.pk], wc = it.char > 0.5 ? PL_CHAR : PL_WOOD;
@@ -48015,9 +47915,9 @@ function plantsBlast(x, y, r) {
     // breaks apart where it's hit hard enough, its pieces sinking (plantBits)
     if (it.uw && d < r * 0.95) { plantBits(it, it.x, top - hh * 0.5, 12, dir * 120, true); plantGone(it); UWH.n = 0; return; }
     if (d < r * 0.6) {                                            // (blown apart)
-      plantBits(it, it.x, top - hh * 0.5, it.pk === 'tree' || it.pk === 'palm' ? 18 : 10, dir * 200, true);
+      plantBits(it, it.x, top - hh * 0.5, it.pk === 'tree' ? 18 : 10, dir * 200, true);
       if (!SIM_ONLY) for (let i = 0; i < (it.pk === 'tree' ? 14 : 8); i++) leafFly(it.x + plRnd(-20, 20), top - hh * plRnd(0.4, 0.9), dir * plRnd(40, 120), -plRnd(40, 120));
-      if (it.pk === 'tree' || it.pk === 'palm') { plantStump(it); if (plR() < 0.6) plantIgnite(it, 0.5); }
+      if (it.pk === 'tree') { plantStump(it); if (plR() < 0.6) plantIgnite(it, 0.5); }
       else plantGone(it);
       return;
     }
@@ -48030,7 +47930,6 @@ function plantFell(it, dir) {
   if (it.state !== 'stand') return;
   if (typeof rigFell === 'function' && rigFell(it, dir)) return;   // (user Nov 4 09:01: a plant built from parts falls as its parts - no picture)
   if (it.pk === 'scrub') { plantGone(it); return; }
-  if (it.pk === 'cactus') { plantBits(it, it.x, propTop(it) - 12, 8, dir * 60, false, 0.2); }
   it.state = 'fall'; it.fdir = dir; it.fa = 0; it.fav = 0.4; it.hp = 0;
   emit('scare', { x: it.x, y: propTop(it) - plantH(it) * 0.6, r: 160, kind: 'birds' });
 }
@@ -48071,7 +47970,7 @@ function plantFirePoint(it) {
   if (it.state === 'stump') return [it.x + plRnd(-4, 4), top - plRnd(0, 6)];
   const hh = plantH(it);
   if (it.state === 'down' || it.state === 'fall') { const u = plRnd(0, 0.9), a = it.fa - Math.PI / 2; return [it.x + Math.cos(a) * hh * u, top - 3 + Math.sin(a) * hh * u]; }
-  const G = plantGeo(it), crownK = it.leaf > 0.25 && (it.pk === 'tree' || it.pk === 'palm');
+  const G = plantGeo(it), crownK = it.leaf > 0.25 && (it.pk === 'tree');
   const u = crownK ? plRnd(0.45, 0.95) : plRnd(0.05, 0.75);
   return [it.x + plRnd(-0.5, 0.5) * (crownK ? G.w * 0.7 : Math.min(G.w * 0.5, 14)) * (1 - 0.4 * (1 - u)), top - hh * u];
 }
@@ -48147,7 +48046,7 @@ function stepPlants(dt) {
       const tx = it.x + Math.cos(aim - Math.PI / 2) * hh * 0.6;
       kickLandDust(tx, landTop(tx), it.pk === 'tree' ? 6 : 3);
       if (it.leaf > 0.2) { plantBits(it, tx, landTop(tx) - 10, it.pk === 'tree' ? 14 : 8, it.fdir * 40, true, 0.25); it.leaf = 0; }
-      if (it.pk === 'tree' || it.pk === 'palm') { shakeAt(1, tx); sound('impact', tx); }
+      if (it.pk === 'tree') { shakeAt(1, tx); sound('impact', tx); }
     }
   }
   // the fires: each burns on, chars, and is put out by the rain
@@ -48160,12 +48059,12 @@ function stepPlants(dt) {
     if (rain > 0.15) it.fire -= dt * rain * (it.pk === 'tree' ? 0.05 : 0.12);    // (rain slows it, and a downpour puts it out)
     it.burnT += dt * (0.3 + 0.7 * it.fire);
     it.char = Math.min(1, Math.max(it.char, it.burnT / (it.burnMax * 0.7)));
-    if (it.pk === 'tree' || it.pk === 'palm') it.leaf = Math.min(it.leaf, 1 - smoothstep(0.08, 0.8, it.char));
+    if (it.pk === 'tree') it.leaf = Math.min(it.leaf, 1 - smoothstep(0.08, 0.8, it.char));
     if (it.burnT >= it.burnMax) { plantBurntOut(it); continue; }
     if (it.fire <= 0.02) { plantOut(it, rain > 0.15); continue; }
     if (!fxK) continue;
     // its flames and smoke (fewer each when many burn)
-    const big = it.pk === 'tree' || it.pk === 'palm' ? (it.state === 'stump' ? 0.5 : 1.6) : it.pk === 'cactus' ? 0.7 : it.pk === 'scrub' ? 0.8 : 0.5;
+    const big = it.pk === 'tree' ? (it.state === 'stump' ? 0.5 : 1.6) : it.pk === 'scrub' ? 0.8 : 0.5;
     for (let n = plPerSec(22 * big * it.fire * fxK, dt); n > 0; n--) { const [fx, fy] = plantFirePoint(it); spawnFlame(fx, fy, plRnd(-8, 8) + wnd * 0.15, -plRnd(15, 45) * Math.sqrt(big), plRnd(1.2, 1.55), plRnd(3, 5.5) * Math.sqrt(big) * (0.5 + 0.5 * it.fire), plRnd(0.9, 1.3)); }
     if (plR() < dt * 3 * big * fxK) { const [fx, fy] = plantFirePoint(it); spawnEmber(fx, fy, wnd * 0.3, 0.8); }
     for (let n = plPerSec(2.2 * big * fxK, dt); n > 0; n--) { const [fx, fy] = plantFirePoint(it); spawnSmoke(fx, fy - 6, { fire: 10 * big * it.fire, dark: 0.15 + 0.3 * (1 - it.fire), r: plRnd(3, 5) * Math.sqrt(big), grow: plRnd(3, 5), rmax: 22 + 10 * big, lift: 30, vx: plRnd(-6, 6), vy: -plRnd(25, 50), life: plRnd(7, 11), alpha: 0.6 + 0.2 * it.fire, rise: true }); }
@@ -48183,7 +48082,7 @@ function stepPlants(dt) {
     const cx = lying ? it.x + Math.cos(it.fa - Math.PI / 2) * plantH(it) * 0.45 : it.x;
     plantsNear(cx, K.reach + 40 + (lying ? plantH(it) * 0.45 : 0), q => {
       if (q === it || q.fire > 0 || !plantLive(q)) return;
-      const dx = q.x - cx, reach = K.reach + (q.pk === 'tree' ? 30 : q.pk === 'palm' ? 20 : 0) + (lying ? plantH(it) * 0.45 : 0), dy = Math.abs(landTop(q.x) - top);
+      const dx = q.x - cx, reach = K.reach + (q.pk === 'tree' ? 30 : 0) + (lying ? plantH(it) * 0.45 : 0), dy = Math.abs(landTop(q.x) - top);
       const d = Math.hypot(dx, dy * 1.5); if (d > reach) return;
       const wk = clamp(1 + Math.sign(dx) * wnd / 30, 0.3, 2.5);
       plantHeat(q, T * K.pow * it.fire * (1 - d / reach) * wk * rk); heated.add(q);
@@ -48265,7 +48164,7 @@ function drawLandProps(x0, x1, isl, part) {
     if (it.state === 'gone' || !it.pk) continue;
     if (it.deck && !rigShown(it)) continue;                 // (its deck hidden in the Biome Editor: nothing of it drawn)
     const G = plantGeo(it); if (!G) continue;
-    if (it.fire > 0.1 && lamps < 12) { lamps++; airLamp(PX(it.x), PY(propTop(it) + G.sink) - Math.min(G.h * SV, 60 * SV) * 0.5, 0.6 * it.fire, lampR((it.pk === 'tree' || it.pk === 'palm' ? 46 : 26) * SV)); }   // (a burning plant's lamp: the processor's)
+    if (it.fire > 0.1 && lamps < 12) { lamps++; airLamp(PX(it.x), PY(propTop(it) + G.sink) - Math.min(G.h * SV, 60 * SV) * 0.5, 0.6 * it.fire, lampR((it.pk === 'tree' ? 46 : 26) * SV)); }   // (a burning plant's lamp: the processor's)
     GL.push(it);
   }
   if (GL.length) { const t0 = performance.now(); pgLayer(GL); RIG_T.draw += performance.now() - t0; RIG_T.n += GL.length; GL.length = 0; }   // (the Biome Editor's cost line: the processor's time for the plants' rows, and the plants a frame)
@@ -48340,7 +48239,7 @@ function tropPalms() {
   const gapUnder = x => { const c = ltCol(x), G = land.gapC && c >= 0 && c < land.cols ? land.gapC[c] : null; return G ? G[G.length - 2] - G[G.length - 3] : 0; };
   const okLow = (x, w) => (VEG_MODE || biomeAtX(x) === B) && gapUnder(x) > 0 && !isleCol(x) && (t => t < WATER_Y - 4 && !(lakeOf(x) && t > lakeLv(lakeOf(x)) - 0.5) && Math.abs(groundNear(x - w, t) - groundNear(x + w, t)) <= w)(landFloor(x)) && !nearAir(x) && cliffKeep(x, VEG_MODE ? VEG_SET : B, w, true);
   // (user Nov 4 13:33, Story: "you only transfered the new palm trees" - its TROPICAL is segments and islands, where only the old palms grew) the decks
-  // on a TROPICAL segment's or island's top too: every plant of the set, wherever the ground is TROPICAL (islandProps lays no palms of its own there)
+  // on a TROPICAL segment's or island's top too: every plant of the set, wherever the ground is TROPICAL
   const runs = land.islRuns || [], inRun = x => runs.some(([a, b]) => x > a + 10 && x < b - 10);
   const okIsl = (x, w) => inRun(x) && (VEG_MODE ? true : biomeAtX(x, true) === B) && (B === 'desert' || !islDesert(x)) && landTop(x) < WATER_Y - 4 && !nearAir(x) && Math.abs(landTop(x - w) - landTop(x + w)) <= w && !(land.proud || []).some(([p, q]) => x > p - 10 && x < q + 10);
   // (user Nov 3 22:05: "a section per deck - Add Prefab (to add plants to that deck), Amount") the TROPICAL ground's DECKS (VEG_DECKS,
@@ -48420,8 +48319,6 @@ function biomeAtX(x, isl) {
   const sk = typeof landSkinAt === 'function' ? landSkinAt(x) : null;
   return sk ? BIOME_OF_SKIN[sk] || null : lookD(x) ? 'desert' : 'forest';
 }
-// (Nov 7) a biome with its own plants: the old vegetation stays off its ground (the forest's trees - buildForestTrees)
-const biomePlanted = n => !!(VEG_SETS[n] && VEG_SETS[n].some(L => L.some(e => e.p)));   // (prefabs on its decks - pictures and the meadow aren't plants)
 
 //@src 50-land-research.js:1
 /* ---- the deep ocean's secrets (OPEN WORLD, user Oct 25 late) ----
@@ -52641,7 +52538,7 @@ function buildLandBg() {
   land.bg = [
     // (user Oct 25: the mountains are landscape, like the town behind a harbour - the coasts' layer, q 0.9 - so they
     // grow and shrink with the zoom nearly as much as the ground does; the far trees between them and the field)
-    // (user Oct 27, 14:39: "no asset is ever drawn bigger than its own pixel art allows" - the kit's strips at FOREST_PK,
+    // (user Oct 27, 14:39: "no asset is ever drawn bigger than its own pixel art allows" - the kit's strips at its own pixel (0.4 world units),
     // as crisp as the vehicles at the default zoom; the peaks, at the kit's own size, stand on a foot band set higher up
     // the sky so they rise over the trees)
     // (user Oct 27, 15:59, "wtf with the mountains?": the range painted - gen/open/ranges.py - as tall as before, its feet
