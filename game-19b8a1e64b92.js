@@ -2619,7 +2619,7 @@ class FrameView {
   set globalCompositeOperation(v) { if (v in GLB) this.s.op = v; }
   get imageSmoothingEnabled() { return this.s.sm; }
   set imageSmoothingEnabled(v) { this.s.sm = !!v; }
-  save() { const s = this.s; this.stack.push({ ga: s.ga, op: s.op, sm: s.sm, m: s.m.slice(), sc: s.sc, clip: s.clip }); }
+  save() { const s = this.s; this.stack.push({ ga: s.ga, op: s.op, sm: s.sm, m: s.m.slice(), sc: s.sc, clip: s.clip, wsv: s.wsv }); }   // (wsv: a view's world scale while it's drawn - beginView; the things' art grid)
   restore() { const p = this.stack.pop(); if (p) this.s = p; }
   setTransform(a, b, c, d, e, f) {
     const m = this.s.m;
@@ -4276,6 +4276,13 @@ const REAL = {
   lighthouse: 4,           // 95 m (user Oct 29: "A lighthouse should be 80m at least" - the old drawing x4, whole pixels; was 1.2656, 30 m)
   crane: 3.2568,           // a ship-to-shore crane, 80 m to the top of its frame
 };
+// THE WORLD'S ART PIXEL (user Nov 13 15:51: "radically different levels of detail in our pixel art ... The car is incredibly detailed, while
+// the terrain ... is very low res ... the lighthouse should be our target resolution"): one pixel size for the whole world, in world units -
+// (16:09-16:27, the art measured: the lighthouse at 0.21 m is the coarsest; the buildings 0.09-0.14 m, the houses, hut, boats and cars about
+// 0.05-0.08 m - "Let's do 0.1m") a quarter of a ground cell (LT_CELL is four). The ground is painted in these (each cell in 4 x 4 -
+// 50-land-zz-grid-wgsl.js); every picture finer than it is drawn on a grid of them (45-zz-things-gpu.js); coarser art keeps its own
+// (the lighthouse, twice it: its picture redrawn at this size is open)
+const ART_PX = 0.625;                                        // (0.096 m)
 // the zoom's pixel grid stays the old battleship art's (zoom levels unchanged: 13-scope-minimap.js)
 const GRID_K = 225 / 1066;
 // a 40-foot container, 12.2 by 2.6 m (all boxes: the container ship's, the pier stacks, the crane's and loose ones)
@@ -8665,8 +8672,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 999;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 17:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1000;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 17:29';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -32797,6 +32804,7 @@ function beginView(c, v, camPx, sx, wpx, vi, camF = camPx) {
   VWW = wpx / SV; parRef = v.ref; viewIdx = vi; VSX = sx; VWP = wpx; ys = ysPer[vi];
   SHX = Math.round(shakeXY[vi][0] * S); SHY = Math.round(shakeXY[vi][1] * S);
   c.save();
+  if (c.s) c.s.wsv = SV;   // (the world drawn at SV screen pixels a unit until this view's restore - the things' art grid, 45-zz-things-gpu.js)
   c.setTransform(1, 0, 0, 1, 0, 0);
   frameClip(c, [sx, 0, wpx, bh]);   // (the view's columns: a scissor - src/gpu)
   c.setTransform(1, 0, 0, 1, sx + SHX, SHY);
@@ -35675,7 +35683,8 @@ function drawDebrisSel(x0, x1) {
    A call: thingsBegin(C), then thingsQuad(...) for each picture to draw (a body, its wheels...), then thingsEnd() - the draw.
    ================================================================ */
 const THINGS_WGSL = `
-struct I { m: vec4f, t: vec4f, q: vec4f, at: vec4f, mul: vec4f, mk: vec4f, lit: vec4f, clip: vec4f, cl2: vec4f, x: vec4f, tn: vec4f, ct: vec4f, pf: vec4f, sr: vec4f };
+const ART_PX: f32 = ${ART_PX.toFixed(4)};   // (the world's art pixel, world units - 01-zz-real-scale.js)
+struct I { m: vec4f, t: vec4f, q: vec4f, at: vec4f, mul: vec4f, mk: vec4f, lit: vec4f, clip: vec4f, cl2: vec4f, x: vec4f, tn: vec4f, ct: vec4f, pf: vec4f, sr: vec4f, wp: vec4f };
 @group(0) @binding(0) var<storage, read> inst: array<I>;
 @group(0) @binding(1) var art: texture_2d_array<f32>;
 @group(0) @binding(2) var masks: texture_2d<f32>;
@@ -36124,7 +36133,21 @@ fn shade(v: VO) -> vec4f {
   let sub = a.sr.z > 0.0; let so = select(vec2f(0.0), a.sr.xy, sub);
   let k = select(a.at.zw, a.sr.zw, sub) / a.q.xy;
   var c: vec4f;
-  if (a.x.x > 0.5) {
+  // THE WORLD'S ART PIXEL (user Nov 13 15:51: "radically different levels of detail in our pixel art ... the lighthouse should be our target
+  // resolution"): in a view, a picture finer than ART_PX world units a texel is drawn on a grid of ART_PX squares fixed to the picture (from its
+  // own corner - it moves and turns with it, never shimmers), each square its texels' average (up to 4 x 4 smooth taps), cut at the hard edge as
+  // scaled()'s; a picture as coarse or coarser keeps its own texels. Under a screen pixel a square, scaled()'s rule below as before
+  let gA = select(vec2f(0.0), max(vec2f(1.0), ART_PX * k / max(a.wp.xy, vec2f(1e-6))), a.wp.x > 0.0 && a.wp.y > 0.0);
+  if (gA.x * gA.y > 1.001 && a.wp.z >= 1.0) {
+    let O = ownAt(a).xy; let t0 = so + lp * k; let s0 = O + floor((t0 - O) / gA) * gA;
+    let n = vec2i(clamp(vec2f(ceil(gA - 0.05)), vec2f(1.0), vec2f(4.0)));
+    var acc = vec4f(0.0);
+    for (var j = 0; j < 4; j++) { if (j >= n.y) { break; } for (var i = 0; i < 4; i++) { if (i >= n.x) { break; }
+      acc += tap(a, s0 + gA * vec2f((f32(i) + 0.5) / f32(n.x), (f32(j) + 0.5) / f32(n.y)), true, body); } }
+    c = acc / f32(n.x * n.y);
+    if (c.a < 0.4314) { discard; }
+    c = vec4f(c.rgb / c.a, 1.0);
+  } else if (a.x.x > 0.5) {
     // (scaled()'s picture: drawn smaller, as many smooth taps a side as texels fall in a screen pixel, up to 4, averaged; then the
     // hard edge at 110 / 255 - crisp pixel art at any size; drawn bigger, the nearest texel, cut alike)
     let ddx = vec2f(a.m.w, -a.m.y) / det * k; let ddy = vec2f(-a.m.z, a.m.x) / det * k;
@@ -36169,10 +36192,10 @@ fn shade(v: VO) -> vec4f {
 }
 @fragment fn fs(v: VO) -> @location(0) vec4f { return shade(v); }
 @fragment fn fsW(v: VO) -> WO { let c = shade(v); var w: WO; w.c = c; w.o = ordPx(odOf(v.i).x, c); return w; }`;
-const THG = { stale: false, ep: -1, mod: null, bl: null, pl: null, pipes: new Map(), f: new Float32Array(56 * 64), L: new Uint32Array(4 * 64), cx: 0, cy: 0, n: 0, pv: new Float32Array(8 * 256), pn: 0, seg: [], ctx: null, m0: [1, 0, 0, 1, 0, 0], stats: { draws: 0, quads: 0, kept: 0, fresh: 0, made: 0 },
+const THG = { stale: false, ep: -1, mod: null, bl: null, pl: null, pipes: new Map(), f: new Float32Array(60 * 64), L: new Uint32Array(4 * 64), cx: 0, cy: 0, wsv: 0, n: 0, pv: new Float32Array(8 * 256), pn: 0, seg: [], ctx: null, m0: [1, 0, 0, 1, 0, 0], stats: { draws: 0, quads: 0, kept: 0, fresh: 0, made: 0 },
   ord: null, ordCtx: null, ordFrame: -1, ordNew: false, seq: 0, lord: [new Map(), new Map()], lfrom: [new Map(), new Map()],   // (the order layer - what's in front: its texture, the world's context while it's drawn, its frame, the last number
   cut: [0, 0, 0], cutS: false, behind: 0, ord1: null, none: null };   // (thingsCut's: the quads put now drawn only on these numbers / above the surface; the batch has a surface cut; thingsBehind's; the stand-ins)
-const THG_REC = 56;   // (floats an instance's row: fourteen vec4s - I in the shader; its order numbers in the draw's list, THG.L - four words an instance)
+const THG_REC = 60;   // (floats an instance's row: fifteen vec4s - I in the shader; its order numbers in the draw's list, THG.L - four words an instance)
 // the context's composite operations as blend factors, premultiplied (the GL front's own table, 40-gl.js GLB): [colour src, dst, alpha src, dst]
 const THG_OPS = {
   'source-over': ['one', 'one-minus-src-alpha', 'one', 'one-minus-src-alpha'], 'lighter': ['one', 'one', 'one', 'one'], 'multiply': ['dst', 'one-minus-src-alpha', 'zero', 'one'],
@@ -36226,7 +36249,8 @@ function thingsBegin(ctx) {
   if (THG.ctx && (THG.n || THG.pn)) { thgSay('a batch begun over an open one (its quads drawn first)'); thingsEnd(); }
   THG.n = 0; THG.pn = 0; THG.seg.length = 0; THG.ctx = ctx && ctx.target ? ctx : null; THG.cut[0] = THG.cut[1] = THG.cut[2] = 0; THG.cutS = false;
   const m = ctx && ctx.s && ctx.s.m; if (m) for (let i = 0; i < 6; i++) THG.m0[i] = m[i];
-  THG.cx = THG.m0[4] - CAMPX; THG.cy = THG.m0[5] - TOPPX;   // (the camera: left out of the rows' places - a still thing's row the same as the camera moves)
+  THG.cx = THG.m0[4] - CAMPX; THG.cy = THG.m0[5] - TOPPX;
+  THG.wsv = ctx && ctx.s && ctx.s.wsv > 0 ? ctx.s.wsv : 0;   // (drawing a view's world: its scale - beginView; the art grid on)   // (the camera: left out of the rows' places - a still thing's row the same as the camera moves)
   return !!THG.ctx;
 }
 // the light on a thing whose middle is at cx on the screen (civLitLook's numbers): [dark, sheen, moon rim, sun rim, sides (1: the moon's
@@ -36279,6 +36303,9 @@ function thingsQuad(m, x, y, w, h, e, kind, mul, cov, mk, cell, seed, lit, clip,
   if (prof) { f[o + 48] = prof[0]; f[o + 49] = prof[1]; f[o + 50] = prof[2]; } else f[o + 48] = f[o + 49] = f[o + 50] = 0;
   f[o + 51] = rules || 0;
   if (sr) { f[o + 52] = sr[0]; f[o + 53] = sr[1]; f[o + 54] = sr[2]; f[o + 55] = sr[3]; } else f[o + 52] = f[o + 53] = f[o + 54] = f[o + 55] = 0;
+  // (the world's art pixel - ART_PX, the shader's art grid: in a view, the world units one of the quad's own units is across and down - the transform's
+  // scale over the view's SV; 0 outside a view - the HUD, the editors' panels: drawn as before)
+  const wsv = THG.wsv; f[o + 56] = wsv > 0 ? Math.hypot(m[0], m[1]) / wsv : 0; f[o + 57] = wsv > 0 ? Math.hypot(m[2], m[3]) / wsv : 0; f[o + 58] = wsv > 0 ? ART_PX * wsv : 0; f[o + 59] = 0;
   const bh = THG.behind > 0 && !(THG.cut[1] > 0);   // (a thing's light after the dark - thingsBehind: any number up to its thing's)
   // (its entry in the draw's list: its number in the order layer - drawing the world; thingsCut's; its row's place - thingsEnd)
   L[lo] = THG.cut[2] ? 1 << 30 : 0; THG_OD[0] = THG.ctx === THG.ordCtx ? ++THG.seq : 0; THG_OD[1] = bh ? -1 : THG.cut[0]; THG_OD[2] = bh ? THG.behind : THG.cut[1];
@@ -51222,7 +51249,7 @@ function sheetHit(src, a, col) {
    valley in the middle, rock outcrops for cover, both sides' ground flat enough to stand vehicles on.
    The land stands above the sea's level everywhere, so nothing in the sea's code ever reaches the water.
    ================================================================ */
-const LT_CELL = 2.5;                                   // world units a cell
+const LT_CELL = 2.5;                                   // world units a cell (four of the world's art pixels across: ART_PX - 01-zz-real-scale.js)
 const LT_Y0 = WATER_Y - 420, LT_Y1 = WATER_Y + 300;    // today's grid's top and bottom (rows count from LT_Y0; below a slice's bottom: solid rock)
 const LT_ROWS = Math.round((LT_Y1 - LT_Y0) / LT_CELL);
 const LT_CHUNK = 64;                                   // columns a painted slice
@@ -53655,7 +53682,7 @@ function landTowersBuild() {
   for (let i = towers.length - 1; i >= 0; i--) if (towers.hAt(i).edge) towers.cut(i);
   // (Nov 1, structures-everywhere step 4: every gun tower is a GUN TOWER structure - its owner's; LAND_TOWERS only converted once)
   const L = strsUsed().filter(o => o.k === 'gunTower' && !HARB.tw.has(o.id));   // (a lighthouse that's a harbour's own: that harbour's tower - 50-zz-structh)
-  const add = (o, p) => { const x = o.x; const t = towers.handle(towers.addRowId({ player: p, edge: true, x, base: landTop(x), facing: o.flip ? -1 : 1, hp: VTUNE.tower.hp, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0, pg: null, def: o, restEl: p < 0 ? 20 : undefined })); if (o.lh) t.lh = true; return t; };
+  const add = (o, p) => { const x = o.x; const t = towers.handle(towers.addRowId({ player: p, edge: true, x, base: strGround(x, twFootW(o.lh)), facing: o.flip ? -1 : 1, hp: VTUNE.tower.hp, inUse: false, burn: 0, muzzleFlash: 0, fallen: 0, pg: null, def: o, restEl: p < 0 ? 20 : undefined })); if (o.lh) t.lh = true; return t; };
   // (STORY, user Oct 31 14:45: "The towers should stay. They just don't belong to any player ... Those towers belong to the
   // factions that own them": every tower stands, none a player's - its faction (fac) its owner)
   if (STORY) { for (const o of L) { add(o, -1).fac = twOwnerS(o) === 1 ? 'civ2' : twOwnerS(o) === 0 ? 'civ1' : null; } gunsApply(); return; }
@@ -56633,6 +56660,8 @@ const ggPick = (name, n) => 'fn ' + name + '_at(i: u32) -> vec3f { return ' + Ar
 function ggWgsl() {
   const H = `
 const CELL: f32 = ${LT_CELL.toFixed(4)};
+const ACELL: f32 = ${ART_PX.toFixed(4)};                      // (the world's art pixel - the ground painted in them, AN a cell across and down: 01-zz-real-scale.js)
+const AN: f32 = ${Math.round(LT_CELL / ART_PX).toFixed(1)};
 const LT_Y0: f32 = ${LT_Y0.toFixed(4)};
 const WATER_Y: f32 = ${WATER_Y.toFixed(4)};
 const PAGE: i32 = 64;
@@ -56876,8 +56905,23 @@ fn seaFloor(si: u32, c: i32, r: i32, d: f32, hs: f32, rb: u32) -> vec3f {
 }
 // the stone's look at a cell: its face's shade t (stoneFaceShade), e how far in from its rim, ux uy where in it, up its upward faces
 struct SR { t: f32, e: f32, ux: f32, uy: f32, up: f32 }
-fn stoneAt(b: u32, c: i32, r: i32, hs: f32) -> SR {
-  let o = stones[b]; return stoneLook(b, ((f32(c) + 0.5) * CELL - o.x) / o.z, (LT_Y0 + (f32(r) + 0.5) * CELL - o.y) / o.w, hs);
+fn stoneAt(b: u32, P: vec2f, hs: f32) -> SR {
+  let o = stones[b]; return stoneLook(b, (P.x - o.x) / o.z, (P.y - o.y) / o.w, hs);
+}
+// (P a world point) is it inside stone b
+fn stoneHas(b: u32, P: vec2f) -> bool { let o = stones[b]; let dx = (P.x - o.x) / o.z; let dy = (P.y - o.y) / o.w; return dx * dx + dy * dy <= 1.0 && stoneHit(b, dx, dy).ok; }
+// THE ART PIXEL'S STONE (user Nov 13 15:51 - the ground at the lighthouse's detail): a cell's art pixel at P (its quarter sp of the cell) lies in the
+// cell's own stone, or in the stone of the cell beside it, under it or across from it toward P, or in none (the earth between) - the stones'
+// outlines drawn at the art pixel, not the cell. Its place in the stones (0xffffffff: none)
+fn subStone(si: u32, c: i32, r: i32, w5: u32, P: vec2f, sp: vec2f) -> u32 {
+  let S = slots[si]; let sj = w5 & 0xffffu;
+  if (sj != 0xffffu) { let b = (S.sb + sj) * SW; if (stoneHas(b, P)) { return b; } }
+  let dx = select(1, -1, sp.x < 0.5); let dy = select(1, -1, sp.y < 0.5);
+  let cx = c + dx; let ry = r + dy; let inX = cx >= S.c0 && cx < S.c0 + S.w; let inY = ry >= S.rT && ry < S.rB;
+  if (inX) { let o = cellAt(si, cx, r); if (ok(o)) { let j = pages[o + 5u] & 0xffffu; if (j != 0xffffu) { let b = (S.sb + j) * SW; if (stoneHas(b, P)) { return b; } } } }
+  if (inY) { let o = cellAt(si, c, ry); if (ok(o)) { let j = pages[o + 5u] & 0xffffu; if (j != 0xffffu) { let b = (S.sb + j) * SW; if (stoneHas(b, P)) { return b; } } } }
+  if (inX && inY) { let o = cellAt(si, cx, ry); if (ok(o)) { let j = pages[o + 5u] & 0xffffu; if (j != 0xffffu) { let b = (S.sb + j) * SW; if (stoneHas(b, P)) { return b; } } } }
+  return 0xffffffffu;
 }
 // (dx, dy: where in the stone, in its own measure - a cell of the grid's (stoneAt) or of a loose stone's own (fsLoose))
 fn stoneLook(b: u32, dx: f32, dy: f32, hs: f32) -> SR {
@@ -56887,11 +56931,11 @@ fn stoneLook(b: u32, dx: f32, dy: f32, hs: f32) -> SR {
 }
 // (desertCell) the desert's earth; soft: the crust (lit softly from above)
 struct DC { c: vec3f, soft: bool }
-fn desertCell(si: u32, c: i32, r: i32, m: u32, depth: f32, hs: f32, jit0: f32, sb0: u32, hasS: bool, rb: u32) -> DC {
+fn desertCell(si: u32, c: i32, r: i32, m: u32, depth: f32, hs: f32, jit0: f32, sb0: u32, hasS: bool, rb: u32, P: vec2f, eK: f32) -> DC {
   if (hasS && (m == M_DIRT || m == M_ROCK)) {
-    let S = stoneAt(sb0, c, r, hs); let k0 = stones[sb0 + 2u].x;   // (DES_STONE read where it's used - not copied into a local array: Intel D3D12 scratch memory, Nov 11)
+    let S = stoneAt(sb0, P, hs); let k0 = stones[sb0 + 2u].x;   // (DES_STONE read where it's used - not copied into a local array: Intel D3D12 scratch memory, Nov 11)
     var cc = select(select(select(DES_STONE[4], select(DES_STONE[3], DES_STONE[2], k0 < 0.5), S.t > -0.25), DES_STONE[1], S.t > 0.22), DES_STONE[0], S.t > 0.6);
-    if (S.e < 0.9 && S.t < 0.2) { cc = DES_STONE[5]; }
+    if (S.e < 0.9 * eK && S.t < 0.2) { cc = DES_STONE[5]; }
     if ((rb & (1u << 17u)) != 0u) { cc = mix(cc, DES_STONE[4], 0.55); }   // (a bedding line across it - the processor's)
     return DC(stint(cc, sb0), false);
   }
@@ -56924,34 +56968,39 @@ fn desertCell(si: u32, c: i32, r: i32, m: u32, depth: f32, hs: f32, jit0: f32, s
 // (r: a segment's own rows over its end row SE - islPaintLook - are the segment's type)
 fn typeOf(si: u32, c: i32, r: i32, w0: u32) -> u32 { let C6 = col(si, c, 6u); if (f32(r) < C6.x) { return u32(C6.y); } let C1 = col(si, c, 1u); if (col(si, c, 0u).w < 0.0) { return u32(C1.x); } return select(u32(C1.y), u32(C1.z), (w0 & (1u << 21u)) != 0u); }
 // THE CELL'S COLOUR (paintLandChunk0): 0..255, before the hour's light
-fn cellCol(si: u32, c: i32, r: i32, o: u32) -> vec3f {
+// (sp: the art pixel's place in the cell - its middle, (k + 0.5) / AN across and down - or x < 0: the whole cell, as before - an art pixel under a screen pixel)
+fn cellCol(si: u32, c: i32, r: i32, o: u32, sp: vec2f) -> vec3f {
   let S = slots[si]; let w0 = pages[o]; let w1 = pages[o + 1u]; let d0 = pages[o + 2u]; let d1 = pages[o + 3u]; let w4 = pages[o + 4u]; let w5 = pages[o + 5u];
-  let m = w0 & 7u; let depth = f32(w1 & 0xffffu); let hs = (f32(w4 & 0xffffu) + 0.5) / 65536.0; let bk = (w5 >> 29u) & 3u; let jit = (f32(w4 >> 16u) + 0.5) / 65536.0;
+  let sub = sp.x >= 0.0; let spp = select(vec2f(0.5), sp, sub); let P = vec2f((f32(c) + spp.x) * CELL, LT_Y0 + (f32(r) + spp.y) * CELL); let eK = select(1.0, 1.0 / AN, sub);
+  let m = w0 & 7u; let depth = f32(w1 & 0xffffu); let jit = (f32(w4 >> 16u) + 0.5) / 65536.0; let bk = (w5 >> 29u) & 3u;
+  // (its noise: the processor's for the cell; an art pixel's its own - each of the four of a cell its own pick, as each cell had)
+  let hs = select((f32(w4 & 0xffffu) + 0.5) / 65536.0, gh(c * i32(AN) + i32(spp.x * AN), r * i32(AN) + i32(spp.y * AN), 0x51u), sub);
   let C0 = col(si, c, 0u); let C1 = col(si, c, 1u); let C2 = col(si, c, 2u); let own = u32(C1.x); let cfl = u32(C1.w);
   let SEG = f32(r) < col(si, c, 6u).x; let SEAB = (cfl & 1u) != 0u && !SEG;
   let up = select(M_AIR, matAt(si, c, r - 1), r > S.rT && f32(r) != col(si, c, 6u).x); let dn = select(M_ROCK, matAt(si, c, r + 1), r < S.rB - 1);
-  let tC = typeOf(si, c, r, w0); let sj = w5 & 0xffffu; let hasS = sj != 0xffffu; let sb0 = (S.sb + sj) * SW;
+  let tC = typeOf(si, c, r, w0); let sj = w5 & 0xffffu; let sbS = select(select(0xffffffffu, (S.sb + sj) * SW, sj != 0xffffu), subStone(si, c, r, w5, P, spp), sub);
+  let hasS = sbS != 0xffffffffu; let sb0 = select(0u, sbS, hasS);
   let tt = select(tC, u32(stones[select(0u, sb0 + 2u, hasS)].y), hasS && !SEG);   // (in a stone: its middle's type - stoneTC; a segment's rows: the segment's)
   let DSx = (tt & 1u) != 0u; let BIO = tt >> 3u; let BS = bv(tBiome(own), 0u); let BSx = select(bv(tBiome(tt), 0u), BS, SEG);
   let TRC = (tt & 2u) != 0u; let TRCc = (tC & 2u) != 0u && !SEG;
   var cc: vec3f; var SJ = false; var soft = false;
-  if (SEAB) { cc = seaFloor(si, c, r, max(0.0, LT_Y0 + (f32(r) + 0.5) * CELL - C0.y), hs, w5); }
-  else if (DSx && m != M_CONC) { let D = desertCell(si, c, r, m, depth, hs, jit, sb0, hasS, w5); cc = D.c; soft = D.soft; }
+  if (SEAB) { cc = seaFloor(si, c, r, max(0.0, P.y - C0.y), hs, w5); }
+  else if (DSx && m != M_CONC) { let D = desertCell(si, c, r, m, depth, hs, jit, sb0, hasS, w5, P, eK); cc = D.c; soft = D.soft; }
   else if (m == M_DIRT || m == M_ROCK || (m == M_SAND && (TRC || TRCc))) {
     SJ = !hasS;
     if (!hasS && (tt & 4u) != 0u) { cc = select(select(PAL_R[4] * 0.8, PAL_R[4], hs < 0.3), PAL_R[0], depth < 2.0); }
     else if (!hasS) { cc = select(select(pal(M_DIRT, DSx, 3u), pal(M_DIRT, DSx, 6u), hs < 0.14), select(select(pal(M_DIRT, DSx, 0u), pal(M_DIRT, DSx, 1u), hs < 0.75), pal(M_DIRT, DSx, 6u), hs < 0.35), depth < 3.0); }
     else {
-      let St = stoneAt(sb0, c, r, hs); let k0 = stones[sb0 + 2u].x; let grey = stones[sb0 + 1u].y > 0.5; let rx = stones[sb0].z;
+      let St = stoneAt(sb0, P, hs); let k0 = stones[sb0 + 2u].x; let grey = stones[sb0 + 1u].y > 0.5; let rx = stones[sb0].z;
       if (grey) {
         cc = select(select(select(pal(M_ROCK, DSx, 4u), select(pal(M_ROCK, DSx, 1u), pal(M_ROCK, DSx, 0u), k0 < 0.5), St.t > -0.25), pal(M_ROCK, DSx, 5u), St.t > 0.22), pal(M_ROCK, DSx, 2u), St.t > 0.6);
-        if (St.e < 0.9 && St.t < 0.2) { cc = pal(M_ROCK, DSx, 4u); }
+        if (St.e < 0.9 * eK && St.t < 0.2) { cc = pal(M_ROCK, DSx, 4u); }
         let cy = 0.25 * sin(St.ux * 4.2 + k0 * 9.0) - 0.15 + 0.3 * (k0 - 0.5); let cx = 0.3 * sin(St.uy * 3.7 + k0 * 5.0) + 0.2;
         if (k0 > 0.35 && rx > 9.0 && ((abs(St.uy - cy) < 0.06 && abs(St.ux) < 0.7) || (k0 > 0.7 && abs(St.ux - cx) < 0.06 && St.uy > cy && St.uy < 0.6))) { cc = pal(M_ROCK, DSx, 4u) * 0.82; }
         if ((w5 & (1u << 16u)) != 0u) { cc = mix(cc, vec3f(104.0, 128.0, 66.0), 0.45); }   // (moss on its upward faces - the processor's)
       } else {
         cc = select(select(select(pal(M_DIRT, DSx, 6u), select(select(pal(M_DIRT, DSx, 0u), pal(M_DIRT, DSx, 2u), k0 > 0.66), pal(M_DIRT, DSx, 1u), k0 < 0.33), St.t > -0.3), pal(M_DIRT, DSx, 4u), St.t > 0.25), pal(M_DIRT, DSx, 5u), St.t > 0.62 && rx > 6.0);
-        if (St.e < 0.8 && St.t < 0.25) { cc = pal(M_DIRT, DSx, 6u); }
+        if (St.e < 0.8 * eK && St.t < 0.25) { cc = pal(M_DIRT, DSx, 6u); }
       }
       cc = stint(cc, sb0);
     }
@@ -57042,14 +57091,14 @@ struct VO { @builtin(position) p: vec4f, @location(0) @interpolate(flat) ii: u32
 // the hour's light on a colour (the colour's bytes x E.fx's - the ground's sprites take the same, gsTint)
 fn lit(cc: vec3f) -> vec3f { return clamp(round(cc), vec3f(0.0), vec3f(255.0)) / 255.0 * FD[0].xyz; }
 // a pixel of slice si's tile picture (cell column c, cell row r): the cell's colour, or a blade's or a root's in the air over / under it; none: x < 0
-fn tilePx(si: u32, c: i32, r: i32) -> vec3f {
+fn tilePx(si: u32, c: i32, r: i32, sp: vec2f) -> vec3f {
   let S = slots[si];
   if (r < S.rT || r >= S.rB) { return vec3f(-1.0); }
   if (!mine(si, c, f32(r))) { return vec3f(-1.0); }              // (the other set's rows: the islands' over the split row - islSplitEnd - in their own tile)
   let o = cellAt(si, c, r);
   if (o == NONE || o == NONE - 2u) { return vec3f(-1.0); }       // (not there yet: it loads in)
   if (o == BLACK) { return UG; }
-  if ((pages[o] & 7u) != M_AIR) { return cellCol(si, c, r, o); }
+  if ((pages[o] & 7u) != M_AIR) { return cellCol(si, c, r, o, sp); }
   var outc = vec3f(-1.0);
   let down = i32(pages[o + 1u] & 0xffffu);
   // a root hanging under an overhang; a blade standing up out of a grass top under it (the blade painted after: blades a column cols v2.z, their colour v2.w)
@@ -57062,7 +57111,7 @@ fn tilePx(si: u32, c: i32, r: i32) -> vec3f {
 }
 // (gedgeTile) the smooth edge at quarter cell (i, r4) of column c (r4: a quarter row, global): the top cell's colour where it's under the line from the
 // left neighbour's top to the right's and over the run's top t (in the air over it), or none
-fn edgeAt(si: u32, c: i32, i: i32, r4: i32) -> vec3f {
+fn edgeAt(si: u32, c: i32, i: i32, r4: i32, sub: bool) -> vec3f {
   let S = slots[si]; let r = r4 >> 2u; if (r < S.rT || r >= S.rB) { return vec3f(-1.0); }
   let o = cellAt(si, c, r); if (!ok(o) || (pages[o] & 7u) != M_AIR) { return vec3f(-1.0); }
   let w0 = pages[o]; let down = i32(pages[o + 1u] & 0xffffu); if (down <= 0 || down >= 0xffff) { return vec3f(-1.0); }
@@ -57073,7 +57122,7 @@ fn edgeAt(si: u32, c: i32, i: i32, r4: i32) -> vec3f {
   let a = f32(t - aD); let bb = f32(t - bD);
   let yy = i32(floor((a + (bb - a) * (f32(i) + 0.5) / 4.0) * 4.0 + 0.5));
   if (r4 < yy || r4 >= t * 4) { return vec3f(-1.0); }
-  return cellCol(si, c, t, ot);
+  return cellCol(si, c, t, ot, select(vec2f(-1.0), vec2f((floor((f32(i) + 0.5) * AN / 4.0) + 0.5) / AN, 0.5 / AN), sub));   // (the art pixel over it: the top cell's top row's)
 }
 // (a cell's side lit as it faces the light: f its rim's strength (0 none, 1, 2 the full), w how much it faces the light) over cc
 fn rimOver(cc: vec4f, f: u32, w: f32) -> vec4f {
@@ -57094,16 +57143,20 @@ fn rimOver(cc: vec4f, f: u32, w: f32) -> vec4f {
   let w = S.w; let fx = (X - I.X0) / (I.X1 - I.X0) * f32(w); let q = clamp(i32(floor(fx)), 0, w - 1); let c = S.c0 + q;
   let rr = (Y - I.YT) / (I.YB - I.YT) * f32(S.rB - S.rT + 4) + f32(S.rT - 4); let r = i32(floor(rr));
   var cc = vec4f(0.0);
-  let tc = tilePx(si, c, r); if (tc.x >= 0.0) { cc = vec4f(lit(tc), 1.0); }
+  // (an art pixel a screen pixel or more: the cell painted in the world's art pixels, AN across and down - sp the one this pixel's in, its middle; else the cell whole)
+  let big = (I.X1 - I.X0) / f32(w) >= AN;
+  let sp = select(vec2f(-1.0), (floor(clamp(vec2f(fx - f32(q), rr - f32(r)), vec2f(0.0), vec2f(0.999)) * AN) + 0.5) / AN, big);
+  let tc = tilePx(si, c, r, sp); if (tc.x >= 0.0) { cc = vec4f(lit(tc), 1.0); }
   // the smooth edge over the cells' steps (a cell 2 pixels or more)
-  if ((I.X1 - I.X0) / f32(w) >= 2.0) { let ec = edgeAt(si, c, clamp(i32(floor((fx - f32(q)) * 4.0)), 0, 3), i32(floor(rr * 4.0))); if (ec.x >= 0.0) { cc = vec4f(lit(ec), 1.0); } }
+  if ((I.X1 - I.X0) / f32(w) >= 2.0) { let ec = edgeAt(si, c, clamp(i32(floor((fx - f32(q)) * 4.0)), 0, 3), i32(floor(rr * 4.0)), big); if (ec.x >= 0.0) { cc = vec4f(lit(ec), 1.0); } }
   // the rims in the sun and the moon (rimMake): a cell's sides with the air a cell or two off, each as it faces the light
   if (FD[1].w >= 0.02 && I.X1 - I.X0 >= 2.0 && r >= S.rT && r < S.rB && mine(si, c, f32(r))) {
     let o = cellAt(si, c, r);
     if (ok(o) && (pages[o] & 7u) != M_AIR) {
       let d0 = pages[o + 2u];
       // (its left, right and top sides in turn - not tables indexed by the loop: Intel D3D12 scratch memory, Nov 11)
-      cc = rimOver(cc, (d0 >> 18u) & 3u, -I.lx); cc = rimOver(cc, (d0 >> 20u) & 3u, I.lx); cc = rimOver(cc, (d0 >> 22u) & 3u, -I.ly * 0.7);
+      // (painted in art pixels: each side's rim on the art pixels along it only - an art pixel thick)
+      if (!big || sp.x < 1.0 / AN) { cc = rimOver(cc, (d0 >> 18u) & 3u, -I.lx); } if (!big || sp.x > 1.0 - 1.0 / AN) { cc = rimOver(cc, (d0 >> 20u) & 3u, I.lx); } if (!big || sp.y < 1.0 / AN) { cc = rimOver(cc, (d0 >> 22u) & 3u, -I.ly * 0.7); }
     }
   }
   // the grass burnt black along the ground's top (drawScar's rule - the plants' fire): from a ragged height over the top (2 to 5 units) to 2.5 under it
@@ -57229,17 +57282,17 @@ fn backCell(si: u32, c: i32, r: i32) -> vec3f {
   let I = instOf(fi.ii); let K = cam(); let b = I.si * SW; let o = stones[b];
   if (fi.p.x < K.vx0 || fi.p.x >= K.vx1) { discard; }
   let wx = (fi.p.x - K.ox + K.camPx) / K.sv; let wy = ((K.th - fi.p.y) - K.oy + K.topPx) / K.sv;   // (the pixel in the world)
-  let gx = o.x - o.z - CELL; let gy = o.y - o.w - CELL; let i = floor((wx - gx) / CELL); let j = floor((wy - gy) / CELL);
-  let dx = (gx + (i + 0.5) * CELL - o.x) / o.z; let dy = (gy + (j + 0.5) * CELL - o.y) / o.w;
+  let gx = o.x - o.z - CELL; let gy = o.y - o.w - CELL; let i = floor((wx - gx) / ACELL); let j = floor((wy - gy) / ACELL);   // (its own grid of the world's art pixels)
+  let dx = (gx + (i + 0.5) * ACELL - o.x) / o.z; let dy = (gy + (j + 0.5) * ACELL - o.y) / o.w;
   if (dx * dx + dy * dy > 1.0 || !stoneHit(b, dx, dy).ok) { discard; }
   let St = stoneLook(b, dx, dy, gh(i32(i), i32(j), u32(I.p1))); let k0 = stones[b + 2u].x; let des = I.p0 > 0.5;
   var cc: vec3f;
   if (stones[b + 1u].y > 0.5) {
     cc = select(select(select(pal(M_ROCK, des, 4u), select(pal(M_ROCK, des, 1u), pal(M_ROCK, des, 0u), k0 < 0.5), St.t > -0.25), pal(M_ROCK, des, 5u), St.t > 0.22), pal(M_ROCK, des, 2u), St.t > 0.6);
-    if (St.e < 0.85 && St.t < 0.25) { cc = pal(M_ROCK, des, 4u); }
+    if (St.e < 0.85 * ACELL / CELL && St.t < 0.25) { cc = pal(M_ROCK, des, 4u); }
   } else {
     cc = select(select(select(pal(M_DIRT, des, 6u), select(select(pal(M_DIRT, des, 0u), pal(M_DIRT, des, 2u), k0 > 0.66), pal(M_DIRT, des, 1u), k0 < 0.33), St.t > -0.3), pal(M_DIRT, des, 4u), St.t > 0.25), pal(M_DIRT, des, 5u), St.t > 0.62 && o.z > 6.0);
-    if (St.e < 0.85 && St.t < 0.25) { cc = pal(M_DIRT, des, 6u); }
+    if (St.e < 0.85 * ACELL / CELL && St.t < 0.25) { cc = pal(M_DIRT, des, 6u); }
   }
   return vec4f(lit(stint(cc, b)), 1.0);
 }
@@ -67046,11 +67099,22 @@ function strBox(o) {
 // hole. On ground as it was (a slope, flat), the middle's as before (terrain-shapes chat)
 // (user Nov 3 22:41, a house spawned in the Vegetation Lab: "The house should be rendered a bit lower so its touching the ground") the ground as
 // it's drawn - its surface on the ground's cells (frontTop: what the plants stand on), not the line inside the top cell
+// (user Nov 13 15:51, the Story lighthouse floating over its rock: "there's a gap between the lighthouse and the ground") it stands on its
+// foundation: never above the lowest ground as the world was built (land.surf, on its cells - frontTop's start) under its base, so no gap shows
+// over a dip or the lower side of a slope (higher ground under it is behind it); a crater since only takes it down when its ends are gone too
+function strBuiltLow(x, w) {
+  if (!land.surf || !land.idry) return -Infinity;
+  let lo = -Infinity; const c0 = ltCol(clamp(x - w * 0.4, 0, WORLD_W - 1)), c1 = ltCol(clamp(x + w * 0.4, 0, WORLD_W - 1));
+  for (let c = c0; c <= c1; c++) { if (c < 0 || c >= land.cols || !land.idry[c]) return -Infinity; lo = Math.max(lo, LT_Y0 + Math.ceil((land.surf[c] - LT_Y0) / LT_CELL) * LT_CELL); }   // (frontTop's own ground only - on a segment or island, its top as before)
+  return lo;
+}
 function strGround(x, w) {
   const g = X => frontTop(clamp(X, 0, WORLD_W - 1)), m = g(x);
   const e = Math.max(g(x - w * 0.4), g(x + w * 0.4));
-  return Math.min(m, e) + VTUNE.ground.str;   // (a little into it: OBJECTS SINK - 23:02)
+  return Math.max(strBuiltLow(x, w), Math.min(m, e)) + VTUNE.ground.str;   // (a little into it: OBJECTS SINK - 23:02)
 }
+// a gun tower's (or its lighthouse look's) width at its foot - what it stands on is strGround's, as every structure's (twOutline's picture)
+const twFootW = lh => lh && img.dockart ? LHI.w * LH_K : TW.FW * TW.K * 0.6;
 /* (user Nov 2 20:28: a lighthouse tower couldn't be picked - its box was a plain gun tower's, on the land under its quay, so the
    press went to the hangar behind it) a tower's outline is its drawing, one rule for the GUN TOWER structure and the tower it
    makes (the editor's pick of either): the lighthouse look's picture (lhGeo at LH_K, as drawLighthouseTower draws it) or the gun
@@ -67071,7 +67135,7 @@ function strBox0(o) {
   if (o.k === 'launchPad') { const w = SPI.pad[2] * PAD_K, h = SPI.pad[3] * PAD_K, gy = landTop(clamp(o.x, 0, WORLD_W - 1)); return { x0: o.x - w / 2, x1: o.x + w / 2, top: gy - h, foot: gy, P: null, m: 1 }; }
   if (o.k === 'hangarAir' && o.big) { const rw = strRunwayAt(o.x), gy = (rw ? strRunwayBox(rw).top : strGround(o.x, HGI.w)) + (o.dy || 0); return { x0: o.x - HGI.w / 2, x1: o.x + HGI.w / 2, top: gy - HGI.h, foot: gy, P: null, m: 1 }; }   // (LARGE: the built-in airports' hangar, on its runway's deck when over one)
   if (o.k === 'gunTower') {                              // (its drawing: the lighthouse look's picture or the gun tower's body - twOutline)
-    const tw = twOf(o), built = tw && Math.abs(tw.x - o.x) < 1, gy = built ? twBase(tw) : strGround(o.x, TW.FW * TW.K * 0.6);
+    const tw = twOf(o), built = tw && Math.abs(tw.x - o.x) < 1, gy = built ? twBase(tw) : strGround(o.x, twFootW(o.lh));
     return Object.assign(twOutline(o.x, gy, o.flip ? -1 : 1, !!o.lh, built ? tw : null), { P: null, m: 1 });
   }
   if (o.k === 'terminal') { const [w, h] = terminalSize(), gy = strGround(o.x, w) + (o.dy || 0); return { x0: o.x - w / 2, x1: o.x + w / 2, top: gy - h, foot: gy, P: null, m: 1 }; }
@@ -67707,7 +67771,7 @@ function docksPut(D) {
 // the harbour parts as they stand: changed since the harbours were made - they're made again (liveWorld, 50-zzzz-live-edit.js)
 const harbourSig = () => JSON.stringify(STRS.filter(o => isHarbourPart(o) || isWoodPierS(o)).map(o => [o.id, o.k, o.x, !!o.flip, strOwner(o), !!o.big, !!o.lh, o.spr || '', o.len || 0, o.fy ?? '', strVehs(o).map(e => e && e.v)]));
 // a harbour tower's ground: the quay (its deck) where it stands on its harbour's quay, else the ground under it
-function harbourTwBase(d, x) { const a = Math.min(d.F, d.root), b = Math.max(d.F, d.root); return x >= a - 2 && x <= b + 2 ? (d.oy ? DECK_Y + d.oy : undefined) : landTop(clamp(x, 0, WORLD_W - 1)); }   // (on its quay: its deck, at its own water's)
+function harbourTwBase(d, x) { const a = Math.min(d.F, d.root), b = Math.max(d.F, d.root); return x >= a - 2 && x <= b + 2 ? (d.oy ? DECK_Y + d.oy : undefined) : strGround(x, twFootW(true)); }   // (on its quay: its deck, at its own water's; off it, on the ground as every structure - strGround)
 // the crane standing on a harbour's pier (null: none)
 function harbourCraneS(d) {
   if (!HARB.on) return undefined;
