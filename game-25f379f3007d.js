@@ -8674,8 +8674,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1008;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 19:47';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1009;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 19:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -69139,6 +69139,15 @@ const BTN_SMALL = new Set(['as', 'of', 'to', 'in', 'on', 'at', 'the', 'a', 'an',
 function btnVar(s) {
   return String(s).split(' ').map((w, i) => /\d/.test(w) || BTN_KEEP.has(w.replace(/[^A-Z]/g, '')) ? w : BTN_SMALL.has(w.toLowerCase()) && i >= 0 ? w.toLowerCase() : w.toLowerCase().replace(/(^|[(\-/])(\w)/g, (m, a, c) => a + c.toUpperCase())).join(' ');
 }
+// (user Nov 13 18:51: the buttons named after the pick - DELETE, PLAY, DUPLICATE - were written four times a second whatever changed: every write
+// lays the top bar out again, and a drop-down open over it (the markers' GO TO list) could close by itself) a button's name and state set only
+// when they change - every button kept in step with the pick goes through it
+function btnSet(b, text, disabled, hidden) {
+  if (!b) return;
+  if (text != null && b.textContent !== text) b.textContent = text;
+  if (disabled != null && b.disabled !== !!disabled) b.disabled = !!disabled;
+  if (hidden != null && b.hidden !== !!hidden) b.hidden = !!hidden;
+}
 function edClaim(kind) { WED.claim = kind; if (typeof MQ !== 'undefined') MQ.on = false; }
 // ---- each kind: its tab, what it has picked ({ noun, del: can it be deleted }), letting go, deleting
 const vehNoun = e => e.army ? VEH_ARMY[e.k] : e.k === 'air' ? 'PLANE' : String(e.k).toUpperCase();
@@ -69345,14 +69354,13 @@ function wedSync() {
   if (!T.open) return;
   if (WED.sbtn) WED.sbtn.classList.toggle('on', sceneDirty());   // (SAVE CHANGES lit while there's something unsaved - 00-world-journal.js)
   if (typeof dupSync === 'function') dupSync();             // (DUPLICATE named as DELETE is - 50-zzzz-zdup.js)
-  if (WED.pbtn) { const K = edPlayKey(); WED.pbtn.disabled = !K; WED.pbtn.textContent = K ? 'PLAY ' + btnVar('as ' + edPlayName(K)) : 'PLAY'; }   // (user Nov 3 12:42: "e.g. Play as Spitfire")
+  if (WED.pbtn) { const K = edPlayKey(); btnSet(WED.pbtn, K ? 'PLAY ' + btnVar('as ' + edPlayName(K)) : 'PLAY', !K); }   // (user Nov 3 12:42: "e.g. Play as Spitfire")
   if (!b) return;
-  b.hidden = !T.world(); if (b.hidden) return;
+  btnSet(b, null, null, !T.world()); if (b.hidden) return;
   const D = wedPicked().filter(i => i.del);
   // (user Nov 1, 12:59: "Delete (Dock)" - what's picked in brackets, not in capitals, so it reads apart from the button's word)
   const nm = btnVar;
-  b.textContent = !D.length ? 'DELETE' : 'DELETE (' + (D.length === 1 ? nm(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + nm(D[0].noun) + 's' : D.length + ' Items') + ')';
-  b.disabled = !D.length;
+  btnSet(b, !D.length ? 'DELETE' : 'DELETE (' + (D.length === 1 ? nm(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + nm(D[0].noun) + 's' : D.length + ' Items') + ')', !D.length);
 }
 (function wedPlace() {
   const T = NSKY.editor.TUNE, bar = T.root && T.root.querySelector('.bar.top');
@@ -71316,8 +71324,7 @@ function wedDuplicate() {
 function dupSync() {
   const b = OBJ.ui && OBJ.ui.dup; if (!b) return;
   const ks = dupKinds(), D = ks.flatMap(k => WK[k].items());
-  b.disabled = !D.length;
-  b.textContent = !D.length ? 'DUPLICATE' : 'DUPLICATE (' + (D.length === 1 ? btnVar(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + btnVar(D[0].noun) + 's' : D.length + ' Items') + ')';
+  btnSet(b, !D.length ? 'DUPLICATE' : 'DUPLICATE (' + (D.length === 1 ? btnVar(D[0].noun) : D.every(i => i.noun === D[0].noun) ? D.length + ' ' + btnVar(D[0].noun) + 's' : D.length + ' Items') + ')', !D.length);   // (only when it changes - btnSet, 50-zzz-world-ed.js)
 }
 // (Ctrl+D / Cmd+D on WORLD EDITOR too, not while typing in a field)
 window.addEventListener('keydown', e => {
