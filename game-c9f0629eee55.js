@@ -5171,8 +5171,8 @@ class ColTable {
     for (const F of this.f) {
       if (inMsg[F.k]) continue;
       const a = c[F.k];
-      if (ColTable.side(F.kind)) {   // (a record table's values beside its rows kept by id - its 'val' ones then changed as sent: 36-zzzzz-sw-snap.js)
-        if (this.rec) { const b = new Array(Math.max(n, oldN)).fill(undefined); for (let i = 0, j = 0; i < n; i++) { const id = newId[i]; while (j < oldN && oldId[j] < id) j++; if (j < oldN && oldId[j] === id) b[i] = a[j]; } c[F.k] = b; continue; }
+      if (ColTable.side(F.kind)) {   // (a record table's values beside its rows kept by id - its 'val' ones then changed as sent: 36-zzzzz-sw-snap.js; a column table's that sends its saved values the same - keepVals, defTable's vals)
+        if (this.rec || this.keepVals) { const b = new Array(Math.max(n, oldN)).fill(undefined); for (let i = 0, j = 0; i < n; i++) { const id = newId[i]; while (j < oldN && oldId[j] < id) j++; if (j < oldN && oldId[j] === id) b[i] = a[j]; } c[F.k] = b; continue; }
         while (a.length < n) a.push(undefined); a.fill(undefined, 0, Math.max(n, oldN)); continue; }
       const T = ColTable.T(F.kind), own = arr => arr && arr.length >= n && arr.buffer !== was ? arr : new T(Math.max(16, Math.ceil(n * 1.5)));
       if (F.local) {
@@ -8674,8 +8674,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1006;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 19:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1007;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 19:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -19621,7 +19621,7 @@ const TABLES = {};
 const TBL_NO_ROWS = Object.freeze([]);
 function defTable(name, list, o = {}) {
   const keep = new Set(o.keep || []), skip = new Set([...TBL_SKIP, ...(o.skip || [])].filter(k => !keep.has(k)));
-  const ct = o.cols || null; if (ct) { ct.name = name; ColTable.named[name] = ct; if (o.handles || ct.rec) ct.handles = true; if (ct.rec) ct.uidBase = -(++TBL_REC.n) * 4294967296; }   // (a column table knows its name: a handle of its row is saved by it - tblPlain; a record table's rows their own uids)
+  const ct = o.cols || null; if (ct) { ct.name = name; ColTable.named[name] = ct; if (o.handles || ct.rec) ct.handles = true; if (o.vals) ct.keepVals = true; if (ct.rec) ct.uidBase = -(++TBL_REC.n) * 4294967296; }   // (a column table knows its name: a handle of its row is saved by it - tblPlain; a record table's rows their own uids)
   const depth = o.depth ?? 4;
   const ctLoad = ct && (ct.rec ? (d, byU) => recLoad(TABLES[name], d, byU)
     : (d, byU) => { const S = Array.isArray(d) && d.length === 1 && d[0] && d[0].soa && d[0].cols ? d[0] : o.rows && Array.isArray(d) ? colValsOfRows(o.vals, d, o.rows(d, byU)) : { n: 0 }; colLoad(TABLES[name], S); if (o.vals) TABLES[name].pendV = S.vals || null; });
@@ -20844,17 +20844,27 @@ function swColTable(t, full, drawn, bufs) {
   }
   const P = T.pack(drawn && t.drawn ? t.drawn : T.sent(), SWCB.spare[t.name], sel, m);
   SWCB.spare[t.name] = null; bufs.push(P.buf);
-  if (T.rec) P.vals = swRecVals(t, full, sel, m);
+  if (T.rec || (t.vals && swColVals(t).length)) P.vals = swRecVals(t, full, sel, m);   // (a table whose only saved values are smoke streams sends none)
   return P;
 }
 /* (Nov 10, part 8) a record table's 'val' fields (36-zz-tables.js recSave): each row's that changed since it was last sent (all of a
-   full snapshot's) as tblPlain's text - [id, field, text] (text null: undefined); the page folds each into its row's as a load does */
-const SWRV = {};
+   full snapshot's) as tblPlain's text - [id, field, text] (text null: undefined); the page folds each into its row's as a load does.
+   (Nov 13) A column table's saved values (defTable's vals - colSaveVals) go the same way, but its smoke streams (REC_OBJ_SAVED: never
+   the page's): the falling and resting chunks' pictures (img - a part of a picture as data since part 5) never reached the page, which
+   dropped every chunk as having none (chunksNoPic) - a toppled tower's courses, crane parts, torn wings, masts: never drawn with the
+   worker on. Such a value is put once and never changed in place (a new one is a new object): its text is worked out only when the
+   object is new (a record table's vals change in place - read every time) */
+const SWRV = {}, swColVals = t => t.vals.filter(k => !REC_OBJ_SAVED.has(k)).map(k => t.cols.byK[k]);
 function swRecVals(t, full, sel, m) {
-  const T = t.cols, F = recVals(t), was = SWRV[t.name] || new Map(), now = new Map(), out = [], n = sel ? m : T.n;
+  const T = t.cols, rec = !!T.rec, F = rec ? recVals(t) : swColVals(t), was = SWRV[t.name] || new Map(), now = new Map(), out = [], n = sel ? m : T.n;
   for (let j = 0; j < n; j++) {
     const i = sel ? sel[j] : j, id = T.c[T.id][i], last = was.get(id), cur = [];
-    F.forEach((G, q) => { const p = tblPlain(T.c[G.k][i], t.depth - 1, t.skip, false), s = p === undefined ? null : JSON.stringify(p); cur.push(s); if (full || !last || last[q] !== s) out.push(id, G.k, s); });
+    F.forEach((G, q) => {
+      const v = T.c[G.k][i], same = !rec && last && last[F.length + q] === v;
+      const s = same ? last[q] : (p => p === undefined ? null : JSON.stringify(p))(tblPlain(v, t.depth - 1, t.skip, false));
+      cur.push(s); if (full || !last || last[q] !== s) out.push(id, G.k, s);
+    });
+    if (!rec) for (const G of F) cur.push(T.c[G.k][i]);   // (the objects themselves, after their texts: a column table's unchanged one is known by itself)
     now.set(id, cur);
   }
   SWRV[t.name] = now;
@@ -49474,14 +49484,16 @@ function stepPadBoom(P, dt) {
 }
 
 /* ---- engine stage 3: the tables. The army's wrecks (their deck - a ship - and the crashes' deck and drawing wreck are
-   other systems' things: kept as they are, not saved); a crash's pieces without their picture (a crash made from a
-   save) dropped; a loose stone refers to its stone (the ground's land.stones: its 'stones' table here, the lookups'
+   other systems' things: kept as they are, not saved); a crash's pieces carry their picture as data (src: a part of its
+   sheet - partPic), saved and sent with them, so the page draws what the worker made (user's v1002 report: every piece came
+   to the page without it - the 'src' skip was left from when it was a canvas - and drawing the land threw); a piece whose
+   picture can't be found (a save from before) dropped; a loose stone refers to its stone (the ground's land.stones: its 'stones' table here, the lookups'
    cache and picture not saved); the two launch pads' rests (their ground's cells not saved) ---- */
 // (Nov 1) the stretches of ground changed lately: a column table (landWake), sent to the page by its columns (it was a list the
 // snapshot carried beside the tables) and now saved with them
 defTable('landWake', null, { cols: landWake, net: false });
 defTable('armyWrecks', () => landWrecks, { make: () => ({}), skip: ['deck'] });
-defTable('crashes', null, { cols: crashes, skip: ['src'], after: arr => { for (const W of arr) W.pieces = (W.pieces || []).filter(p => p && p.src); } });
+defTable('crashes', null, { cols: crashes, depth: 6, after: arr => { for (const W of arr) W.pieces = (W.pieces || []).filter(p => p && p.src && partPic(p.src)); } });   // (depth: a piece's picture's paint - pieces, piece, src, paint, red)
 // (the ground's stones aren't a table: the world build lays the same ~20,000 every time - 12 MB in a snapshot; the ones knocked
 // loose are, looseStones)
 defTable('looseStones', null, { cols: looseStones, rows: rows => looseStones.plainOfRows(rows),   // (a column table since Nov 10, part 8)
@@ -50623,7 +50635,7 @@ function groundCrash(v, pw, quiet) {   // (quiet: dropped by a magnet - no blast
   if (wet) { ditchFx(v.x, v.vx, 2.2, 75, v.vy); v.state = 'sink'; v.vy = 30; }
   else {
     // (user Oct 27: what's left of it stays on land - broken in two, burning, in a crater by its size - landCrash)
-    const g = landTop(v.x), A = spaceArt, face = v.facing || v.dr || 1, P = A && A.orbSheet ? A.orbSheet.plane[2][0] : A && A.orb, art = P ? { pic: P, r: [0, 0, P.width, P.height], mx: face > 0, width: P.width, height: P.height } : null;   // (its side view as data - mirrored facing right, as its flipped copy was)
+    const g = landTop(v.x), A = spaceArt, face = v.facing || v.dr || 1, { CW, CH } = SHUTTLEI, art = A && A.orbSheet ? { sh: 'shuttles', r: [0, 2 * CH, CW, CH], mx: face > 0, width: CW, height: CH } : null;   // (its side view as data - its sheet's cell, row 2 frame 0 (orbSheet.plane[2][0]), saved and sent with the wreck; mirrored facing right, as its flipped copy was)
     v.crash = landCrash(v.x, g, { size: 1.4, vx: v.vx, vy: v.vy, art, k: A && A.orbSheet ? SHUTTLEI.k : STACK_K, face, n: 2, quiet });
     if (!quiet) sound('explosion', v.x, 1.5); v.state = 'wreck'; v.y = g - 8; v.burn = 0; v.wait = 120;
   }
