@@ -92,7 +92,7 @@ const UPM=63.75/9.83,KN=.5144*UPM,KMH=UPM/3.6; // world units a metre; a second 
 const MU=10*UPM; // how many world units the drawing's sizes are made for (icons and land read the same at the starting zoom)
 const SHELL=`<div id="app">
   <div id="bar">
-    <span id="title">FAR AWAY<small id="ver">v53</small></span>
+    <span id="title">FAR AWAY<small id="ver">v54</small></span>
     <button id="tWorld" class="on" title="The world map">WORLD</button>
     <button id="tLists" title="Structures, vehicles, nature, owners, countries, goods, biomes">LISTS</button>
     <button id="tEditor" title="Draw the icons">EDITOR</button>
@@ -822,9 +822,15 @@ function removeSel(){
   const ids=sel.els;if(!ids.size&&!sel.links.size)return;
   for(const e of doc.elements)if(ids.has(e.parent)){let p=byId.get(e.parent);while(p&&ids.has(p.id))p=byId.get(p.parent);e.parent=p?p.id:null}
   doc.elements=doc.elements.filter(e=>!ids.has(e.id));
+  for(const id of sel.links){const c=linkOf(id);if(c)spliceOut(c)}
   doc.connections=doc.connections.filter(c=>!sel.links.has(c.id)&&!ids.has(c.from)&&!ids.has(c.to));
   reindex();sel={els:new Set(),links:new Set()};commit();panel();
 }
+/* (user Nov 13 19:33: delete a vehicle's steps in its panel) a step taken out of a route closes the gap, spliceIn the other way: what came after it
+   now comes after what came before it, and a trip that set off from where it went sets off from where it set off */
+function spliceOut(c){for(const n of doc.connections){if(n===c||n.after!==c.id)continue;
+  if(!isAct(c)&&!isXfer(c)&&!isAct(n)&&!isXfer(n)&&n.from===c.to&&n.from!==n.to)n.from=c.from;
+  if(c.after)n.after=c.after;else delete n.after}}
 function copySel(){
   const ids=new Set();for(const id of sel.els){ids.add(id);descendants(id,ids)}if(!ids.size)return false;
   clip={elements:doc.elements.filter(e=>ids.has(e.id)).map(e=>JSON.parse(JSON.stringify(e))),connections:doc.connections.filter(c=>ids.has(c.from)&&ids.has(c.to)).map(c=>({...c}))};
@@ -1068,7 +1074,7 @@ function routineHtml(V){const RT=routineTimes(V),R=V.routine,steps=R?R.steps.map
   <label>Departure</label><div class="chips">${SLOTS.map((n,i)=>`<button data-rslot="${i}" class="${R.slot===i?'on':''}">${n} ${SLOT_HOURS[i]}:00</button>`).join('')}</div>`:R.start==='cargo'?`<div class="sub" style="margin-top:6px">Departs when it has a full load (${capOf(V)}, its type's Capacity) with what waits at ${esc((heldBy(V)||{}).name||'home')}.</div>`:''}
   <label>Steps</label>${steps.map((s,i)=>`<div class="links"><div style="cursor:default"><b>${i+1}.</b> ${esc(s.task?.name||'?')} · ${esc(s.X.name||tn(s.X)||'?')}${RT&&RT.steps[i]&&(isAct(s.c)||isXfer(s.c))?`<div class="sub">${RT.steps[i].work?hrs(RT.steps[i].work):''}</div>`:RT&&RT.steps[i]?`<div class="sub">${RT.steps[i].km.toFixed(2)} km · ${hrs(RT.steps[i].go)} (${realT(RT.steps[i].secs)} real)${RT.steps[i].work?' · work '+hrs(RT.steps[i].work):''}</div>`:''}
     ${s.task?.act==='collect'?`<div class="row" style="align-items:center;margin-top:6px"><span class="sub" style="flex:none">Quantity</span><input data-until="${i}" type="number" inputmode="numeric" min="1" value="${s.st.until}" style="flex:1"></div>`:''}
-    <div class="row" style="margin-top:6px"><button data-rup="${i}" ${i?'':'disabled'}>↑</button><button data-rdown="${i}" ${i<steps.length-1?'':'disabled'}>↓</button></div></div></div>`).join('')}
+    <div class="row" style="margin-top:6px"><button data-rup="${i}" ${i?'':'disabled'}>↑</button><button data-rdown="${i}" ${i<steps.length-1?'':'disabled'}>↓</button><button data-rdel="${i}" title="Delete this step">DELETE</button></div></div></div>`).join('')}
   <div class="links"><div style="cursor:default;opacity:.7"><b>${steps.length+1}.</b> Return${heldBy(V)?' · '+esc(heldBy(V).name||''):''}${RT?`<div class="sub">${hrs(RT.back)} (${realT(RT.backSecs)} real)</div>`:''}</div></div>${RT?`<label>Cycle</label><div>${hrs(RT.total)}</div>`:''}`}
 function wireRoutine(V){const R=V.routine;if(!R)return;
   pnl.querySelectorAll('[data-rstart]').forEach(b=>b.onclick=()=>{R.start=b.dataset.rstart;commit();panel()});
@@ -1076,6 +1082,8 @@ function wireRoutine(V){const R=V.routine;if(!R)return;
   pnl.querySelectorAll('[data-r]').forEach(i=>i.addEventListener('change',()=>{const n=Math.round(+i.value);if(!isNaN(n))R[i.dataset.r]=i.dataset.r==='day'||i.dataset.r==='min'?Math.max(0,n):Math.max(1,n);commit();draw()}));
   pnl.querySelectorAll('[data-until]').forEach(i=>i.addEventListener('change',()=>{const n=Math.round(+i.value);if(n>0)R.steps[+i.dataset.until].until=n;commit();draw()}));
   const mv=(i,d)=>{const a=R.steps;[a[i],a[i+d]]=[a[i+d],a[i]];commit();panel()};
+  pnl.querySelectorAll('[data-rdel]').forEach(b=>b.onclick=()=>{const st=R.steps[+b.dataset.rdel],c=st&&linkOf(st.link);if(!c)return;spliceOut(c);  // (the step's link, as DELETE on a picked one)
+    doc.connections=doc.connections.filter(x=>x!==c);sel.links.delete(c.id);reindex();commit();panel();draw()});
   pnl.querySelectorAll('[data-rup]').forEach(b=>b.onclick=()=>mv(+b.dataset.rup,-1));pnl.querySelectorAll('[data-rdown]').forEach(b=>b.onclick=()=>mv(+b.dataset.rdown,1))}
 /* the timeline: T counts parts of days from day 0 morning; everything is worked out again from the start, so dragging back works too */
 let T=0,playing=false;const DAYS=60;
