@@ -8686,8 +8686,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1010;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 13 19:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1011;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 13 20:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -8704,10 +8704,16 @@ function linkCode() {
   (window.crypto || {}).getRandomValues ? crypto.getRandomValues(r) : r.forEach((_, i) => { r[i] = Date.now() * (i + 7); });   // (not Math.random: the world's own)
   return Array.from(r, v => A[v % A.length]).join('');
 }
+// (Nov 13) every message goes as JSON text: PeerJS's own packing loses the low 32 bits of a whole number below -2^31 (-4294967302
+// arrives as -4294967296), and every vehicle row's id is one (uidOf, a record table's uidBase - 36-zz-tables.js) - each side's ship,
+// sub and plane reached the guest under one id, so a hull the host had replaced was never seen to go: no sinking ship or falling plane
+// on the guest's screen. A string goes as it is (the tables' snapshots are text already - 36-zzzz-net-tables.js)
+const linkWire = m => typeof m === 'string' ? m : { j: JSON.stringify(m) };
+const linkUnwire = m => m && typeof m === 'object' && typeof m.j === 'string' ? JSON.parse(m.j) : m;
 // a guest to the host
-function linkSend(m) { try { if (LINK.conn && LINK.conn.open) LINK.conn.send(m); } catch (e) {} }
+function linkSend(m) { try { if (LINK.conn && LINK.conn.open) LINK.conn.send(linkWire(m)); } catch (e) {} }
 // the host to one guest
-function linkTo(g, m) { try { if (g.conn && g.conn.open) g.conn.send(m); } catch (e) {} }
+function linkTo(g, m) { try { if (g.conn && g.conn.open) g.conn.send(linkWire(m)); } catch (e) {} }
 const linkGuests = () => [...LINK.conns.values()].filter(g => g.id).sort((a, b) => a.id - b.id);
 // a round going on at this screen (being played, or paused under the menu) - as opposed to the menu's own scenery
 const roundLive = () => !ui.title || !!ui.resume;
@@ -8803,14 +8809,31 @@ const sidePeople = s => (LOCALC(ctlFor(s)) || (EXTRA && EXTRA.side === s)) || NE
 function seatJoin(g) {
   dropSeat(g, true);
   const s = g.side, team = teamOfSide(s);
-  if (PLAYERS === 2 && (ctlPick[s] === 'cpu' || ctlPick[s] === 'none' || isCpu(team))) {
-    ctlPick[s] = 'net';
-    if (brains[team]) { brains[team] = null; const c = crew[team]; if (c.mode !== 'dock' && c.mode !== 'gone') { c.mode = 'dock'; mgHold[team] = false; holding[team] = null; } }
+  // (a side nobody at this screen plays - the CPU's, nobody's, or the guests' already: its own crew here is nobody. Nov 13: out of whatever
+  // it was in too - the round's start had put it in its tower, and a guest playing that side found its tower TEAM, taken by no one)
+  if (PLAYERS === 2 && !LOCALC(ctlPick[s])) {
+    ctlPick[s] = 'net'; brains[team] = null;
+    const c = crew[team]; if (c.mode !== 'dock' && c.mode !== 'gone') { c.mode = 'dock'; mgHold[team] = false; holding[team] = null; }
   }
   g.seat = makeSeat(g.id, team); g.seat.side = s; NET.seats.push(g.seat); g.ntb = null;
+  // (every round opens with you in your tower - a guest too, when nobody on its side is in it yet: buildWorld's rule for the people here)
+  asSeat(g.seat, () => { if (crew[team].mode === 'dock' && towerUsable(myTw(team)) && canTake(team, 'tower')) takeOver(team, 'tower'); });
   NET.role = 'host';
   linkTo(g, { t: 'start', worldW: WORLD_Wb, world: netWorldPack(), flags: flagPick.slice(), lv: STORY_LV, mode: MODE, side: s });   // (world: the host's, as its screen has it - the guest plays in it, 00-world.js)
   LINK.acc = 1;
+}
+// (the host) a guest into a round in progress: the game must be this page's first. Nov 13: a round the simulation worker was running took
+// the guest's seat here, then the hold for online play (swWantLive) loaded the worker's copy over it - the CPU it had replaced still
+// playing that side beside the guest, its crew back in the tower. So the worker is held first and the seat made once the game is here
+function seatJoinLive(g) {
+  if (!SW.live && !SWB.taking) { seatJoin(g); return; }
+  if (g.joining) return;
+  g.joining = true;
+  swHold('seat').then(() => {
+    g.joining = false;
+    try { if (LINK.conns.has(g.conn) && (g.side === 0 || g.side === 1) && roomSideOk(g.side) && roundLive()) seatJoin(g); }
+    finally { swRelease('seat'); linkLobby(); }
+  });
 }
 // (the host) a guest's seat gone (it left the side, or the session): an emptied BATTLE side is the CPU's again
 function dropSeat(g, quiet) {
@@ -8828,8 +8851,11 @@ function dropSeat(g, quiet) {
 }
 // (the host) a new round for everyone: the people here as the menu has them, and every guest on a side
 function linkStartRound() {
+  // (Nov 13: each guest's seat of the last round taken out of NET.seats first - only forgotten (g.seat = null), it stayed there, still
+  // in what it drove: after PLAY AGAIN a guest found its own sub TEAM, and when it left, its side never showed as empty)
+  for (const g of linkGuests()) dropSeat(g, true);
   LINK.starting = true; try { restartGame(); } finally { LINK.starting = false; }
-  for (const g of linkGuests()) { g.seat = null; if (g.side === 0 || g.side === 1) { if (roomSideOk(g.side)) seatJoin(g); else { g.side = null; linkTo(g, { t: 'stop' }); } } }
+  for (const g of linkGuests()) { if (g.side === 0 || g.side === 1) { if (roomSideOk(g.side)) seatJoin(g); else { g.side = null; linkTo(g, { t: 'stop' }); } } }
   if (!NET.seats.some(st => !st.local)) NET.role = 'local';
   linkLobby();
 }
@@ -8841,6 +8867,7 @@ function roomSideOk(s) {
 }
 // (the host) what a guest sends
 function linkFromGuest(g, m) {
+  try { m = linkUnwire(m); } catch (e) { return; }
   if (!m || typeof m !== 'object') return;
   if (m.t === 'hello') {
     if (g.id) return;
@@ -8864,14 +8891,14 @@ function linkFromGuest(g, m) {
     if (!roomSideOk(s)) { g.msg = liveMode() === 'story' ? 'STORY CANNOT BE PLAYED ONLINE YET' : 'THAT SIDE IS NOT IN THIS GAME'; linkLobby(); return; }
     if (g.side !== s && sideCount(s) >= SIDE_MAX) { g.msg = 'THAT SIDE IS FULL'; linkLobby(); return; }
     g.side = s; menuSel.cpu[s] = false;                 // (the CPU makes way for a person)
-    if (roundLive()) seatJoin(g);
+    if (roundLive()) seatJoinLive(g);
     linkLobby();
     return;
   }
   // (a guest playing, sending its controls, that has no seat here - this screen started a new round, say: back in,
   // or back to the session's menu if its side isn't in this game; user Oct 24: a guest got no updates at all)
   if (!g.seat && (m.t === 'ctl' || m.t === 'act') && roundLive()) {
-    if ((g.side === 0 || g.side === 1) && roomSideOk(g.side)) seatJoin(g); else { g.side = null; linkTo(g, { t: 'stop' }); linkLobby(); }
+    if ((g.side === 0 || g.side === 1) && roomSideOk(g.side)) seatJoinLive(g); else { g.side = null; linkTo(g, { t: 'stop' }); linkLobby(); }
     return;
   }
   if (!g.seat || NET.role !== 'host') return;
@@ -8905,6 +8932,7 @@ function netPause(on, from) {
 const netWaiting = [];
 function linkReceive(m) {
   if (LOADING) { netWaiting.push(m); return; }
+  try { m = linkUnwire(m); } catch (e) { return; }
   if (NET_TABLES && typeof m === 'string') { if (NET.role === 'guest' && !LINK.hosting) ntbReceive(m); return; }   // (36-zzzz-net-tables: a snapshot from the tables)
   if (!m || typeof m !== 'object' || LINK.hosting) return;
   if (m.t === 'full') { linkClose(m.why || 'THAT SESSION IS FULL'); return; }
