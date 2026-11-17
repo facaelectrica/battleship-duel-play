@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1037;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 10:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1038;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 10:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -38780,13 +38780,15 @@ function renderFrame() {
    badly hurt. Its aim is worked out from how a shell really flies, then spoiled on purpose: easy aims
    roughly and slowly and never leads a moving target; hard aims tight, leads, and reacts quickly.
    ================================================================ */
+// (Nov 17, the tank's eyes - 50-land-cpu.js cpuTankLook: see - how long an enemy shot has flown before it's noticed, s; dodge - the
+// chance it drives clear of one coming down on it; shift - the chance it moves on when one lands close)
 const CPU_TUNE = [
   // easy
-  { think: 3.2, dwell: 18, react: 2.2, aimP: 0.13, aimE: 4, learn: 0, floor: 1, lead: 0, slew: 22, mg: 0.35, mgTol: 16, plane: 0.35, retreat: 0.2, bombTol: 28, kamikaze: false, gap: 3.2, subTol: 34, dc: 0.5 },
+  { think: 3.2, dwell: 18, react: 2.2, aimP: 0.13, aimE: 4, learn: 0, floor: 1, lead: 0, slew: 22, mg: 0.35, mgTol: 16, plane: 0.35, retreat: 0.2, bombTol: 28, kamikaze: false, gap: 3.2, subTol: 34, dc: 0.5, see: 0.9, dodge: 0.3, shift: 0.2 },
   // medium
-  { think: 1.8, dwell: 11, react: 1.0, aimP: 0.08, aimE: 2, learn: 0.1, floor: 0.45, lead: 0.6, slew: 45, mg: 0.7, mgTol: 11, plane: 0.85, retreat: 0.3, bombTol: 16, kamikaze: false, gap: 1.3, subTol: 24, dc: 0.8 },
+  { think: 1.8, dwell: 11, react: 1.0, aimP: 0.08, aimE: 2, learn: 0.1, floor: 0.45, lead: 0.6, slew: 45, mg: 0.7, mgTol: 11, plane: 0.85, retreat: 0.3, bombTol: 16, kamikaze: false, gap: 1.3, subTol: 24, dc: 0.8, see: 0.45, dodge: 0.65, shift: 0.5 },
   // hard
-  { think: 1.0, dwell: 7, react: 0.4, aimP: 0.05, aimE: 1.5, learn: 0.25, floor: 0.25, lead: 1, slew: 85, mg: 1, mgTol: 8, plane: 1, retreat: 0.36, bombTol: 9, kamikaze: true, gap: 0.25, subTol: 16, dc: 1 },
+  { think: 1.0, dwell: 7, react: 0.4, aimP: 0.05, aimE: 1.5, learn: 0.25, floor: 0.25, lead: 1, slew: 85, mg: 1, mgTol: 8, plane: 1, retreat: 0.36, bombTol: 9, kamikaze: true, gap: 0.25, subTol: 16, dc: 1, see: 0.25, dodge: 0.85, shift: 0.75 },
 ];
 const brains = [null, null];
 const cpuStats = [{}, {}];
@@ -38807,14 +38809,17 @@ function cpuReset() {
 }
 function cpuCount(p, k) { cpuStats[p][k] = (cpuStats[p][k] || 0) + 1; }
 const gauss = () => { let u = 0; for (let i = 0; i < 6; i++) u += vehCpuR(); return (u - 3) / 0.707; };
-// a shell's flight, step by step, the way stepShells moves it: where it comes down through height ty
-function simShot(x, y, vx, vy, ty, maxT, g = SHELL_G) {
+// a shell's flight, step by step, the way stepShells moves it: where it comes down through height ty. With `solid` it meets
+// what a shot meets on the land (landShellHit): the ground (landSolid) - hit 'ground' - or a lake's water - hit 'water' (it goes
+// under there, a dud) - and stops there
+function simShot(x, y, vx, vy, ty, maxT, g = SHELL_G, solid = false) {
   const dt = SUBSTEP;                                      // (shells move in the physics substeps)
   for (let t = 0; t < (maxT || 14); t += dt) {
     vx += (windAt(y) * 0.5 - vx) * 0.002; vy += g * dt; x += vx * dt; y += vy * dt;
-    if (vy > 0 && y >= ty) return { x, t };
+    if (solid) { if (lakeAt(x) && y >= surfaceY(x) - 1) return { x, y, t, hit: 'water' }; if (landSolid(x, y)) return { x, y, t, hit: 'ground' }; }
+    if (vy > 0 && y >= ty) return { x, y, t, hit: null };
   }
-  return { x, t: maxT || 14 };
+  return { x, y, t: maxT || 14, hit: null };
 }
 // the tower gun's reach with no wind (where its buoy goes)
 function towerReachCalm() {
@@ -38823,19 +38828,26 @@ function towerReachCalm() {
   for (let t = 0; t < 20; t += dt) { vx -= vx * 0.002; vy += SHELL_G * SHELL_K * dt; x += vx * dt; y += vy * dt; if (vy > 0 && y >= WATER_Y) break; }
   return x;
 }
-const shellSpeed = (power, tower) => (SHELL_V0 + power * SHELL_VPOW) * (tower ? Math.sqrt(1.5) : 1) * gunV('ship');   // (the ship's and the tower's: SHELL_K)
-const GUN_G = SHELL_G * SHELL_K;
-// the angle and power that put a shell from (x0, y0) down on (tx, ty): the lowest of a few elevations that
-// reaches, the power found by halving. null if it's out of reach
-function solveShot(x0, y0, baseVx, tx, ty, tower, elevs) {
-  const dir = Math.sign(tx - x0) || 1, dist = Math.abs(tx - x0);
+// a gun's shell as launch() makes it (33-guns-shells.js), by where it's fired from - 'ship', 'tower', 'tank': its speed at a power, and
+// the pull on it. (Before Nov 17 the CPU worked every gun out as the ship's: its tank aimed for a shell 4x as fast under 3x the pull -
+// every missile short. One rule now, the numbers launch uses)
+const shellSpeed = (power, from) => (SHELL_V0 + power * SHELL_VPOW) * (from === 'tower' ? Math.sqrt(1.5) : 1) * gunV(from);
+const shellG = from => SHELL_G * gunK(from);
+// the angle and power that put a shell from (x0, y0) down on (tx, ty): the lowest of a few elevations that reaches (and, with
+// `solid`, whose path clears the ground and water on the way - over a hill, a higher arc), the power found by halving. muzL: the
+// muzzle that far out from (x0, y0) along the barrel at each elevation (a tank's, from its turret's pivot). null if it's out of reach
+function solveShot(x0, y0, baseVx, tx, ty, from, elevs, muzL = 0, solid = false) {
+  const dir = Math.sign(tx - x0) || 1, dist = Math.abs(tx - x0), g = shellG(from);
   for (const e of elevs) {
-    const el = e * Math.PI / 180, land = pw => { const sp = shellSpeed(pw, tower); return (simShot(x0, y0, Math.cos(el) * dir * sp + baseVx, -Math.sin(el) * sp, ty, 0, GUN_G).x - x0) * dir; };
+    const el = e * Math.PI / 180, mx = x0 + Math.cos(el) * dir * muzL, my = y0 - Math.sin(el) * muzL;
+    const fly = (pw, sol) => { const sp = shellSpeed(pw, from); return simShot(mx, my, Math.cos(el) * dir * sp + baseVx, -Math.sin(el) * sp, ty, 0, g, sol); };
+    const land = pw => (fly(pw, false).x - x0) * dir;
     if (land(1) < dist || land(0) > dist) continue;
     let a = 0, b = 1;
     for (let i = 0; i < 16; i++) { const m = (a + b) / 2; if (land(m) < dist) a = m; else b = m; }
-    const pw = (a + b) / 2, sp = shellSpeed(pw, tower);
-    return { elev: e, power: pw, dir, t: simShot(x0, y0, Math.cos(el) * dir * sp + baseVx, -Math.sin(el) * sp, ty, 0, GUN_G).t };
+    const pw = (a + b) / 2, f = fly(pw, solid);
+    if (f.hit === 'water' || (f.hit === 'ground' && Math.abs(f.x - tx) > TANK_L * 0.5)) continue;   // (in the way: a hill, a lake - the next arc)
+    return { elev: e, power: pw, dir, t: f.t };
   }
   return null;
 }
@@ -38844,8 +38856,8 @@ const cpuReach = {};
 function gunReach(tower) {
   const k = tower ? 't' : 's';
   if (cpuReach[k]) return cpuReach[k];
-  const y0 = tower ? TW.BASE - 140 : WATER_Y - 22, sp = shellSpeed(1, tower), el = Math.PI / 4;
-  return (cpuReach[k] = simShot(0, y0, Math.cos(el) * sp, -Math.sin(el) * sp, WATER_Y - 8, 0, GUN_G).x);
+  const from = tower ? 'tower' : 'ship', y0 = tower ? TW.BASE - 140 : WATER_Y - 22, sp = shellSpeed(1, from), el = Math.PI / 4;
+  return (cpuReach[k] = simShot(0, y0, Math.cos(el) * sp, -Math.sin(el) * sp, WATER_Y - 8, 0, shellG(from)).x);
 }
 // the enemy as the computer sees it: what's out in the open
 function cpuEnemy(p) {
@@ -38956,12 +38968,16 @@ function cpuSlew(B, g, want, dt, lo, hi) {
   return Math.abs(g.elev - want) < 0.6;
 }
 // aim the cannon (ship or tower) at a target, leading it; fire when on and ready
-function cpuCannon(B, dt, gun, x0, y0, baseVx, facing, tower, target, ty, ready, fire) {
+// (from: 'ship', 'tower', 'tank' - its shell's own flight, shellSpeed / shellG. o: { muzL - the muzzle that far along the barrel from
+// (x0, y0); tilt - the hull's slope, degrees up at its front (the gun's angle is the hull's: a tank on a slope); solid - the path
+// checked against the ground and water on the way })
+function cpuCannon(B, dt, gun, x0, y0, baseVx, facing, from, target, ty, ready, fire, o = {}) {
   const T = B.T, p = B.p;
   let tx = target.x;
-  const elevs = tower ? [28, 40, 55, 68] : [32, 45, 58, 70];
-  let sol = solveShot(x0, y0, baseVx, tx, ty, tower, elevs);
-  if (sol && T.lead && target.vx) { tx = target.x + (target.vx || 0) * sol.t * T.lead; sol = solveShot(x0, y0, baseVx, tx, ty, tower, elevs) || sol; }
+  const elevs = from === 'tower' ? [28, 40, 55, 68] : from === 'tank' ? [14, 22, 32, 45, 58, 70] : [32, 45, 58, 70];
+  const solve = x => solveShot(x0, y0, baseVx, x, ty, from, elevs, o.muzL || 0, !!o.solid);
+  let sol = solve(tx);
+  if (sol && T.lead && target.vx) { tx = target.x + (target.vx || 0) * sol.t * T.lead; sol = solve(tx) || sol; }
   if (!sol) return false;
   // its aim is rough at first and (medium, hard) tightens shot by shot on the same target, the way a person
   // walks their shells in
@@ -38970,6 +38986,7 @@ function cpuCannon(B, dt, gun, x0, y0, baseVx, facing, tower, target, ty, ready,
   // the elevation in the gun's own terms: past the vertical means firing back over the stern
   let want = sol.elev + B.nE;
   if (sol.dir !== facing) want = 180 - want;
+  want += o.tilt || 0;
   gun.power = clamp(sol.power + B.nP, 0, 1);
   const on = cpuSlew(B, gun, want, dt, cpuElev(B, true), cpuElev(B, false));
   if (on && ready && B.fireT <= 0) { fire(); B.fireT = T.gap; B.shotsAt++; spoil(); cpuCount(p, 'shell'); return true; }
@@ -39020,7 +39037,7 @@ function cpuShip(B, dt) {
   if (!tgt) return;
   const k = shipGunReady(sh, g), [mx, my] = muzzlePoint(sh, k >= 0 ? k : 0);
   const ty = tgt === E.tower ? TW.BASE - 60 : tgt.y - 8;
-  cpuCannon(B, dt, g, mx, my, sh.vx, sh.facing, false, tgt, ty, k >= 0 && shipClear(sh) && g.ammo > 0, () => fireGun(sh));
+  cpuCannon(B, dt, g, mx, my, sh.vx, sh.facing, 'ship', tgt, ty, k >= 0 && shipClear(sh) && g.ammo > 0, () => fireGun(sh));
 }
 function cpuTower(B, dt) {
   const p = B.p, tw = towers.hAt(p), g = tguns[p], E = cpuEnemy(p);
@@ -39035,7 +39052,7 @@ function cpuTower(B, dt) {
   if (!cand.length) return;
   cand.sort((a, b) => Math.abs(a.x - tw.x) - Math.abs(b.x - tw.x));
   const tgt = cand[0], el = g.elev * Math.PI / 180, [mx, my] = towerMuzzle(tw, el);
-  cpuCannon(B, dt, g, mx, my, 0, tw.facing, true, tgt, tgt.y - 6, g.reload <= 0, () => fireTower(tw, false));
+  cpuCannon(B, dt, g, mx, my, 0, tw.facing, 'tower', tgt, tgt.y - 6, g.reload <= 0, () => fireTower(tw, false));
 }
 function cpuSub(B, dt) {
   cpuSub0(B, dt);
@@ -42649,14 +42666,56 @@ function cpuLandChoose(B) {
 }
 // toward its own side: -1 or 1
 const cpuHomeDir = (p, x, k = 'tank') => Math.sign(landHomeX(p, k) - x) || -homeOut(p, k);   // (toward its own hangar)
+// (Nov 17, user, TANK VS TANK: "Right now he's able to jump sometimes ... He doesn't seem to have any ability to understand where I am or to shoot at
+// me. He should also be able to move when he sees that my shots are getting close to him") - the tank's way ahead (dir -1 / 1) open to drive: inside
+// the play's ends (landIn), no step it can't climb (pushed into one, a tank hops - stepTank's wall: the CPU had driven into crater walls and hopped),
+// no water over its tracks there (it fords silent and drowns deeper - stepTank)
+function tankWayOpen(t, dir) {
+  if (!dir) return true;
+  const k = landSpanAt(t.x), nx = t.x + dir * 12;
+  const cx = k < 0 ? clamp(nx, PLAY_L() + TANK_X0, PLAY_R() - TANK_X0) : landIn(nx, k, TANK_W * 0.5, TANK_X0);
+  if (Math.abs(cx - nx) > 1) return false;
+  for (const d of [6, 14]) { const G = tankGround(t, t.x + dir * d); if ((dir > 0 ? G.front : G.back) < t.y - TANK_STEP - 1) return false; }
+  const fx = t.x + dir * (TANK_L * 0.5 + 10);
+  if (!dryLand(fx) && !t.deck && groundBelow(fx, t.y - TANK_STEP - 2) > surfaceY(fx) + 2) return false;
+  return true;
+}
+// the tank's eyes: every enemy shot in the air, once it has flown long enough to be noticed (T.see), worked out to where it comes down
+// (simShot - what the shot meets on the way). Coming down on it (inside its blast's reach - landBlastReach - and the tank's half), it drives
+// clear (T.dodge); landing close by, it moves on to a new spot (T.shift) - the player has to aim again. Each shot judged once (B.seen)
+const CPUSH = {};
+function cpuTankLook(B, t, tg, dt) {
+  if ((B.lookT = (B.lookT || 0) - dt) > 0) return;
+  B.lookT = 0.1;
+  const T = B.T, s = CPUSH.s || (CPUSH.s = shells.cursor()), R = landBlastReach('tank') + TANK_L * 0.8, seen = B.seen || (B.seen = []);
+  for (let i = 0; i < shells.n; i++) {
+    s.i = i;
+    if (s.click || s.under || s.burn > 0 || s.drop > 0 || s.age < T.see || !mayHit(s, t) || seen.includes(s.sq)) continue;
+    seen.push(s.sq); if (seen.length > 24) seen.shift();
+    const f = simShot(s.x, s.y, s.vx, s.vy, Infinity, 12, s.g || SHELL_G, true);
+    if (f.hit !== 'ground') continue;
+    // (away from where it lands - or, coming down right on it, back from the enemy rather than toward its gun)
+    const off = t.x - f.x, away = Math.abs(off) < TANK_L * 0.35 ? -(Math.sign(tg.x - t.x) || 1) : Math.sign(off);
+    if (Math.abs(off) < R) {
+      if (vehCpuR() >= T.dodge) continue;
+      // clear of it: the near way out if it's open, else the other side
+      let dir = away; if (!tankWayOpen(t, dir)) dir = -dir;
+      B.goX = f.x + dir * (R + TANK_L * 0.3); B.goT = Math.min(4, f.t + 1.5); cpuCount(B.p, 'dodge');
+    } else if (Math.abs(off) < R + TANK_L * 3 && !(B.goT > 0) && vehCpuR() < T.shift) {
+      // close: on to a new spot, further from it
+      const dir = tankWayOpen(t, away) ? away : -away;
+      B.goX = t.x + dir * vehCpuRnd(1.5, 3) * TANK_L; B.goT = 4; cpuCount(B.p, 'shift');
+    }
+  }
+}
 function cpuTank(B, dt) {
   const p = B.p, t = tankOf(p), E = cpuLandEnemy(p), g = guns[p];
-  if (!t || t.state !== 'alive') { cpuSetMG(B, false); return; }
+  if (!t || t.state !== 'alive') { cpuSetMG(B, false); B.goT = 0; return; }
   // hurt or empty: home, and wait there until mended and full
   if (t.hp <= 2 || t.ammo <= 0) B.mend = true;
   if (B.mend) {
     cpuSetMG(B, false);
-    if (!onOwnGround(p, t.x) || Math.abs(t.x - landHomeX(p, 'tank')) > 160) { cpuDrive(B, cpuHomeDir(p, t.x)); return; }
+    if (!onOwnGround(p, t.x) || Math.abs(t.x - landHomeX(p, 'tank')) > 160) { const d = cpuHomeDir(p, t.x); cpuDrive(B, tankWayOpen(t, d) ? d : 0); return; }
     cpuDrive(B, 0);
     if (t.hp >= VTUNE.tank.hp && t.ammo >= VTUNE.tank.ammo - 2) B.mend = false; else return;
   }
@@ -42667,13 +42726,20 @@ function cpuTank(B, dt) {
   cpuSetMG(B, false);
   const tg = E.tank || E.heliDown;
   if (!tg) { cpuDrive(B, 0); return; }
-  // close to a good range (nearer on hard), then stand and shoot
-  const dx = tg.x - t.x, want = 620 - 120 * B.level, go = Math.abs(dx) > want + 80 ? Math.sign(dx) : Math.abs(dx) < want - 260 ? -Math.sign(dx) : 0;
-  cpuDrive(B, go);
-  // (driving and not getting anywhere: stuck - a pit or a rock; it'll take the helicopter instead)
-  B.stuckT = go && Math.abs(t.vx) < 2 ? (B.stuckT || 0) + dt : 0;
-  const [ux, uy] = tankBarrel(t);
-  cpuCannon(B, dt, g, px + ux * 30, py + uy * 30, t.vx, t.facing, false, tg, tg.y - 8, t.rk <= 0 && t.ammo > 0, () => tankFire(t));
+  cpuTankLook(B, t, tg, dt);
+  // where to be: clear of a shot (cpuTankLook's spot, until it's there or the time's up), else a good range (nearer on hard)
+  const dx = tg.x - t.x, want = 620 - 120 * B.level;
+  let go;
+  if (B.goT > 0) { B.goT -= dt; const d = B.goX - t.x; go = Math.abs(d) > 6 ? Math.sign(d) : 0; if (!go) B.goT = 0; }
+  else go = Math.abs(dx) > want + 80 ? Math.sign(dx) : Math.abs(dx) < want - 260 ? -Math.sign(dx) : 0;
+  const open = tankWayOpen(t, go);
+  if (!open && B.goT > 0) B.goT = 0;                            // (its way out is shut: it stands, and its gun answers)
+  cpuDrive(B, open ? go : 0);
+  // (wanting to go and not getting anywhere: stuck - a pit or a rock; it'll take the helicopter instead)
+  B.stuckT = go && (!open || Math.abs(t.vx) < 2) ? (B.stuckT || 0) + dt : 0;
+  // the missile: aimed from the turret's pivot along the barrel, its own flight (launch's 'tank'), over the ground and water between
+  cpuCannon(B, dt, g, px, py, t.vx, t.facing, 'tank', tg, tg.y - 8, t.rk <= 0 && t.ammo > 0 && !t.wet, () => tankFire(t),
+    { muzL: TANK_GUN_L, tilt: t.a * t.facing * 180 / Math.PI, solid: true });
 }
 // the helicopter's stick (-1 up, 1 down) and lever (a drive order: -1, 0, 1, or half)
 function cpuHeliFly(B, h, tx, alt, dt) {
@@ -55461,8 +55527,10 @@ function landShellHit(s) {
   return false;
 }
 // a blast on land: the crater, the fireball, and everything near it hurt (what it hit hardest)
+// how far a shot's blast on the land reaches (a tank within it plus 0.3 of its length is hurt - landBlast): the CPU reads it to know a shot's danger
+const landBlastReach = from => (LAND_BLAST[from] || LAND_BLAST.tank)[1] * BLAST_K * tvtBlastK();
 function landBlast(s, x, y, hitV) {
-  const bk = tvtBlastK(), B = LAND_BLAST[s.from] || LAND_BLAST.tank, crater = B[0] * BLAST_K * bk, reach = B[1] * BLAST_K * bk, dmg = vtDmg(LAND_BLAST[s.from] ? s.from : 'tank', 'land');   // (BLAST_K: user Oct 29, 3x bigger)   // (bk: TANK VS TANK's half size - 50-zzzz-tvt.js)
+  const bk = tvtBlastK(), B = LAND_BLAST[s.from] || LAND_BLAST.tank, crater = B[0] * BLAST_K * bk, reach = landBlastReach(s.from), dmg = vtDmg(LAND_BLAST[s.from] ? s.from : 'tank', 'land');   // (BLAST_K: user Oct 29, 3x bigger)   // (bk: TANK VS TANK's half size - 50-zzzz-tvt.js)
   if (hitV && hitV.kind === 'tank') { }   // (on the tank: its own blast after the blow, below - tankHitBlast, or killTank's blow-up)
   else {
     const gy = landBelow(x, y - crater);
