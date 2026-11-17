@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1023;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1024;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -52045,11 +52045,13 @@ function landCarve(x, y, rad) {
   // clods of what was dug, thrown up and out
   if (!SIM_ONLY) {
     const cols = lookD(x) ? [null, '#5f9a3a', '#9a5a3a', '#d6a064', '#b8744e'] : [null, '#5f9a3a', '#6b4a2e', '#cdb27a', '#8a8a86'];   // (the desert's: red-brown earth, ochre sand, sandstone - user Oct 27, the Desert Art Kit)
-    const tot = Math.min(rad > 30 ? 110 : 40, Math.round(n / 3));
+    // (user Nov 16 21:22: "the little dirt that jumps off when you hit the ground should be 5 or 6 times more and should not jump as high and as big, so
+    // it feels heavier") five and a half times as many, half as fast (a quarter as high), smaller
+    const tot = Math.min(rad > 30 ? 600 : 220, Math.round(n * 1.8));
     for (let k = 0; k < tot; k++) {
       let m = 2; { let t = simR('land') * n; for (let q = 1; q < 5; q++) { t -= kinds[q]; if (t < 0) { m = q; break; } } }
-      const a = -Math.PI / 2 + simRnd('land', -1.2, 1.2), v = simRnd('land', 80, 260) * (rad > 30 ? 1.5 : 1);
-      debrisRow({ x: x + simRnd('land', -rad, rad) * 0.5, y: y - simRnd('land', 0, rad * 0.5), vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: simRnd('land', 0, 6), w: simRnd('land', -8, 8), sw: simRnd('land', 1.2, 2.6), sh: simRnd('land', 1, 2), col: cols[m], state: 0, bub: 0, seed: simR('land') * 6, age: 0, clod: true });
+      const a = -Math.PI / 2 + simRnd('land', -1.2, 1.2), v = simRnd('land', 40, 130) * (rad > 30 ? 1.5 : 1);
+      debrisRow({ x: x + simRnd('land', -rad, rad) * 0.5, y: y - simRnd('land', 0, rad * 0.5), vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: simRnd('land', 0, 6), w: simRnd('land', -8, 8), sw: simRnd('land', 0.7, 1.6), sh: simRnd('land', 0.6, 1.2), col: cols[m], state: 0, bub: 0, seed: simR('land') * 6, age: 0, clod: true });
     }
   }
   return n;
@@ -55460,9 +55462,9 @@ function spikeBurst(x, y, size, mat) {
     const S = spikeSpikes.c; S.life[si] = landBitsRnd(1.1, 1.6); S.seed[si] = landBitsR() * 100; S.dark[si] = landBitsR() < 0.35 ? 1 : 0; S.shed[si] = 0;
   }
   // the clods: dark lumps of earth thrown out with it (as in the user's picture)
-  for (let k = 0; k < 3 + 12 * size; k++) {
-    const a = -Math.PI / 2 + landBitsRnd(-1, 1), v = landBitsRnd(140, 380) * vk;
-    debrisRow({ x: x + landBitsRnd(-6, 6), y: y - 2, vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: landBitsRnd(0, 6), w: landBitsRnd(-8, 8), sw: landBitsRnd(2, 4.2), sh: landBitsRnd(2, 3.6), col: css3(P.foot.map(c => c * landBitsRnd(0.75, 1.1))), state: 0, bub: 0, seed: landBitsR() * 6, age: 0, clod: true });
+  for (let k = 0; k < 5.5 * (3 + 12 * size); k++) {   // (user Nov 16 21:22: five or six times as many, lower and smaller - heavier)
+    const a = -Math.PI / 2 + landBitsRnd(-1, 1), v = landBitsRnd(140, 380) * vk * 0.5;
+    debrisRow({ x: x + landBitsRnd(-6, 6), y: y - 2, vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: landBitsRnd(0, 6), w: landBitsRnd(-8, 8), sw: landBitsRnd(1.1, 2.4), sh: landBitsRnd(1.1, 2), col: css3(P.foot.map(c => c * landBitsRnd(0.75, 1.1))), state: 0, bub: 0, seed: landBitsR() * 6, age: 0, clod: true });
   }
 }
 function groundFlash(x, y, power) {
