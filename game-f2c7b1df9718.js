@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1063;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 17:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1064;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 17:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -42826,8 +42826,9 @@ function cpuTankLook(B, t, tg, dt) {
 function cpuTank(B, dt) {
   const p = B.p, t = tankOf(p), E = cpuLandEnemy(p), g = guns[p];
   if (!t || t.state !== 'alive') { cpuSetMG(B, false); B.goT = 0; return; }
-  // hurt or empty: home, and wait there until mended and full
-  if (t.hp <= 2 || t.ammo <= 0) B.mend = true;
+  // hurt or empty: home, and wait there until mended and full - only where it has a home that mends it (hasOwnGround). With none (TANK VS
+  // TANK) it fights on: before Nov 17 the first hit (3 of 3 down to 2) sent it to its own end to wait for good, its gun silent
+  B.mend = hasOwnGround(p) && (B.mend || t.hp <= 2 || t.ammo <= 0);
   if (B.mend) {
     cpuSetMG(B, false);
     if (!onOwnGround(p, t.x) || Math.abs(t.x - landHomeX(p, 'tank')) > 160) { const d = cpuHomeDir(p, t.x); cpuDrive(B, tankWayOpen(t, d) ? d : 0); return; }
@@ -42874,7 +42875,7 @@ function cpuHeliFly(B, h, tx, alt, dt) {
 function cpuHeli(B, dt) {
   const p = B.p, h = heliOf(p), T = B.T, E = cpuLandEnemy(p), g = hguns[p];
   if (!h || (h.state !== 'fly' && h.state !== 'landed')) { cpuSetMG(B, false); diveHold[p] = 0; return; }
-  if (h.hp <= 1 || h.rockets <= 0) B.mend = true;
+  B.mend = hasOwnGround(p) && (B.mend || h.hp <= 1 || h.rockets <= 0);   // (only with a home that mends it - the tank's rule)
   const homeX = landHomeX(p, 'heli');
   if (h.state === 'landed') {
     cpuSetMG(B, false);
@@ -54707,13 +54708,18 @@ const atHangarIn = (p, x, vx, k = 'tank') => { const hx = landHomeX(p, k), o = h
 // own ground (mended and rearmed there): on or by one of the side's own structures, or at the foot of its own tower on its
 // mountain (the towers: structures of their own next)
 const OWN_TOWER_R = 1065;                                         // (how far by its own tower a side is at home - as far as it always reached)
-function onOwnGround(p, x) {
+// (one list of a side's own ground: `hit(a, b)` asked of each stretch of it, true as soon as one answers)
+function ownGround(p, hit) {
   const s = SIDE(p) ? 1 : 0;
-  for (const tw of towers) if (tw && tw.edge && tw.player === p && Math.abs(x - tw.x) < OWN_TOWER_R) return true;   // (by one of its own towers - its GUN TOWER structures)
-  for (const o of structsUsed()) { if (ownerOf(o) !== s) continue; const [a, b] = structSpan(o); if (x > a + 40 && x < b - 40) return true; }
-  for (const o of strsUsed()) { if (o.k !== 'hangarAir' || strOwner(o) !== s) continue; const B = strBox(o); if (x > B.x0 - 40 && x < B.x1 + 40) return true; }   // (or by an AIRCRAFT HANGAR it owns - Nov 1)
+  for (const tw of towers) if (tw && tw.edge && tw.player === p && hit(tw.x - OWN_TOWER_R, tw.x + OWN_TOWER_R)) return true;   // (by one of its own towers - its GUN TOWER structures)
+  for (const o of structsUsed()) { if (ownerOf(o) !== s) continue; const [a, b] = structSpan(o); if (hit(a + 40, b - 40)) return true; }
+  for (const o of strsUsed()) { if (o.k !== 'hangarAir' || strOwner(o) !== s) continue; const B = strBox(o); if (hit(B.x0 - 40, B.x1 + 40)) return true; }   // (or by an AIRCRAFT HANGAR it owns - Nov 1)
   return false;
 }
+function onOwnGround(p, x) { return ownGround(p, (a, b) => x > a && x < b); }
+// (user Nov 17 16:28, TANK VS TANK: the CPU "after a few shots ... just retreat to the edge of the map and stay there") whether the side has any
+// ground of its own to be mended on - none in TANK VS TANK
+const hasOwnGround = p => ownGround(p, () => true);
 // the olive paint of a tank or a war helicopter toward side p's colour, amt of the way, each pixel keeping its own light and shade (the glass,
 // the crew, the white number and the dark metal as they are): the things' shader's paint (thingsRules - no painted copy a side); picture P whole.
 // No team colour: its own olive (0)
