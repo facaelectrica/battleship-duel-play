@@ -6851,29 +6851,13 @@ function buildWeed(keepLk) {
 // (the seas' life - its pieces in order: an edit's a step each on its drop, 50-zzzz-live-edit.js)
 function buildSea() { for (const _ of buildSeaGen()) ; }
 function* buildSeaGen() {
-  const types = Object.keys(FISH_DEFS);
+  // (user Nov 17: no school of the sea's own - fish only from the FISH AREAS placed in OBJECTS; rules 4, "Creatures only where placed")
   schools.length = 0; seaFish.length = 0;                   // (Nov 1: column tables - 05-game-state.js)
-  const nSchools = Math.round(19 * seaW() / (G_REF_VW * 3));          // 20% more than before
-  for (let i = 0; i < nSchools; i++) {
-    const type = types[i % types.length];
-    const n = type === 'sardine' ? 10 + Math.floor(hash(i * 3.7) * 10) : 3 + Math.floor(hash(i * 7.3) * 6);
-    const fish = [];
-    for (let k = 0; k < n; k++) fish.push({ dx: seaRnd(-1, 1) * (16 + n * 3), dy: seaRnd(-1, 1) * (8 + n), ph: seaR() * 6.28 });
-    const s = { type, x: seaXAt(seaRnd(0.05, 0.95)), y: 0, dir: seaR() < 0.5 ? 1 : -1, speed: seaRnd(8, 18), turnT: seaRnd(6, 20), flee: 0, vy: 0 };
-    s.y = seaRnd(WATER_Y + 60, Math.min(seabedY(s.x), SEABED_DEEP + 600) - 40);   // (in the lit water: not born down in the drawn floor's pit)
-    for (const f of fish) { f.x = s.x + f.dx * 0.6; f.y = s.y + f.dy * 0.6; f.vx = s.dir * s.speed; f.vy = 0; f.face = s.dir; }
-    schoolAdd(s, fish);
-    yield;                                                 // (a school a piece: its floor read where it swims - seabedY - the slice made whole there)
-  }
-  natureSchools();                                         // (and the fish areas' own - 50-zz-nature)
+  natureSchools();                                         // (the fish areas' schools - 50-zz-nature)
   yield;
   sharks = []; natureConvert(); bgConvert();               // (the far shores as placed BACKGROUNDS, once per world - 50-zz-backgrounds)                          // (their areas, once per world - 50-zz-nature)
-  if (!critAreas()) for (let i = 0; i < Math.round(5 * seaW() / (G_REF_VW * 3)); i++) sharks.push({ x: seaXAt(seaRnd(0.1, 0.9)), y: 0, dir: seaR() < 0.5 ? 1 : -1, speed: seaRnd(16, 26), turnT: seaRnd(8, 18), turn: 0, ph: seaR() * 6 });
   buildReef();                                            // (the floor's rocks, corals and the ridges behind)
-  for (const k of sharks) k.y = seaRnd(WATER_Y + 90, Math.min(seabedY(k.x), SEABED_DEEP + 600) - 50);
-  // (user Oct 27: "have 3 whales") three whales, each in its own third of the sea (spread apart), each on its own
-  // course, speed and depth (in the lit water, as the sharks - not down in the kraken's pit)
-  whales = critAreas() ? [] : [0, 1, 2].map(i => { const x = seaXAt((i + seaRnd(0.3, 0.7)) / 3); return { x, y: seaRnd(WATER_Y + 140, Math.max(WATER_Y + 150, Math.min(seabedY(x), SEABED_DEEP + 600) - 90)), dir: seaR() < 0.5 ? 1 : -1, speed: seaRnd(9, 14), turnT: seaRnd(25, 60), turn: 0, ph: seaR() * 6, dy: 0, flee: 0 }; });
+  whales = [];                                            // (the WHALE AREAS' own - natureCreatures)
   natureCreatures();                                      // (the sharks' and whales' areas - 50-zz-nature: each its MIN to MAX, kept to it)
   yield;
   buildWeed(false);
@@ -7502,6 +7486,10 @@ const biomeSides = n => Object.assign({}, BIOME_SIDES_DEF, BIOME_SIDES[n] || {})
 const BIOME_STONE_DEF = { mountain: 0.45, ice: 0.45, volcanic: 0.45 };
 const biomeStone = n => { const v = BIOME_SIDES[n] && BIOME_SIDES[n].stone; return Number.isFinite(v) ? v : BIOME_STONE_DEF[n] ?? 1; };
 const stoneSzAt = x => biomeStone(colBiome(clamp(Math.floor(x / LT_CELL), 0, land.cols - 1)));   // (a stone's size where it lies - buildStones)
+// (user Nov 17: "there is not any other item on any biome that is not editable, right?" - the stones had a size only) STONES, how many of the stones and
+// boulders in its ground show: 1 all (as before), 0 none; kept as BIOME_SIDES[bn].stoneN in bd_biome_surf
+const biomeStoneN = n => { const v = BIOME_SIDES[n] && BIOME_SIDES[n].stoneN; return Number.isFinite(v) ? clamp(v, 0, 1) : 1; };
+const stoneNAt = x => biomeStoneN(colBiome(clamp(Math.floor(x / LT_CELL), 0, land.cols - 1)));
 // a ground column's biome (as the Biome Editor names them)
 const colBiome = c => land.bio && land.bio[c] ? [null, 'ice', 'swamp', 'volcanic'][land.bio[c]] : land.mtn && land.mtn[c] ? 'mountain' : land.trop && land.trop[c] ? 'tropical' : land.look && land.look[c] === 1 ? 'desert' : 'forest';
 // (user Nov 7 13:49, his picture of the meadow behind the beach: "other background elements that are not under the Decks, but they're also Decks,
@@ -8698,8 +8686,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1046;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 12:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1047;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 12:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -52377,7 +52365,9 @@ function stoneFreeP(x, y, rx, ry, gap) {
 function addStone(x, y, rx, ry, grey, dh) {
   const o = stonePoly({ x, y, rx, ry, grey, id: stNextId() });
   land.stones[o.id] = o; land.stN[ST_K]++; o.st = ST_S;
-  // (the desert's packed earth stones: they shape the packing round them, then aren't there - not drawn, never dug up; dh)
+  // (the desert's packed earth stones: they shape the packing round them, then aren't there - not drawn, never dug up; dh. A biome's STONES under 1
+  // leaves out that share the same way - each by its own place, so the stones it keeps stay where they were - stoneNAt, 09-zz-biomes.js)
+  if (!dh) { const n = stoneNAt(x); if (n < 1 && hash(x * 0.0731 + y * 1.913) >= n) dh = true; }
   if (dh) o.dh = true;
   for (let gx = Math.floor((x - rx) / ST_G); gx <= Math.floor((x + rx) / ST_G); gx++) for (let gy = Math.floor((y - ry - LT_Y0) / ST_G); gy <= Math.floor((y + ry - LT_Y0) / ST_G); gy++) { const k = gx * 4096 + gy; let L = land.stoneG.get(k); if (!L) land.stoneG.set(k, L = []); L.push(o.id); }
   if (!dh) for (let k = Math.max(0, Math.floor(ltCol(x - rx) / LT_CHUNK)); k <= Math.min(land.stoneC.length - 1, Math.floor(ltCol(x + rx) / LT_CHUNK)); k++) land.stoneC[k].push(o.id);
@@ -65620,9 +65610,7 @@ function natureSchools(id) {
   }
 }
 // the areas' sharks and whales (buildSea, and after an edit): every area's own made again, born in its box, kept to it - or (id) that one's alone
-const critAreas = () => true;              // (their areas are where they live: else the game's scatter)
 function natureCreatures(id) {
-  if (!critAreas()) return;
   const mine = k => k.area != null && (id == null || k.area === id);
   sharks = sharks.filter(k => !mine(k)); whales = whales.filter(k => !mine(k));
   for (const a of natureUsed()) {
@@ -65659,7 +65647,6 @@ function* natureLayGen(id) {
 // once per world: the sharks and whales it had - scattered over its seas - as an area over each sea holding as many (the same
 // numbers: 5 sharks a 3-screen stretch of sea, 3 whales in all, by each sea's share), so nothing changes until it's edited
 function natureConvert() {
-  if (!critAreas()) return;
   try { if (localStorage.getItem('bd_crit_conv')) return; } catch (e) { return; }
   const W = seaW(); if (!(W > 0)) return;
   const nS = Math.round(5 * W / (G_REF_VW * 3)), id0 = NATURE.reduce((m, q) => Math.max(m, q.id), 0);
@@ -73636,6 +73623,7 @@ function vegUI(Z) {
         const sideCol = (name, tp, n) => { const col = document.createElement('div'); col.dataset.side = n; col.className = 'cat';
           const t = document.createElement('h4'); t.textContent = name; t.title = t.dataset.t = tp; col.appendChild(t); cols.appendChild(col); return col; };
         const st = sideCol('STONES', 'The stones and boulders in this biome\'s ground', 4);   // (user Nov 7 21:18 - biomeStone)
+        st.appendChild(slider('STONES', 'How many stones and boulders show in the ground (0: none)', 0, 1, 0.05, () => biomeStoneN(bn), v => { S.stoneN = v; surfRebuild(); }, 1));
         st.appendChild(slider('STONE SIZE', 'Size of the stones and boulders in the ground', 0.1, 2, 0.05, () => biomeStone(bn), v => { S.stone = v; surfRebuild(); }, BIOME_STONE_DEF[bn] ?? 1));
         const sc = sideCol('SIDE (STEEP FACES)', 'The ground\'s steep faces - press one in the view to come here', 2);
         sc.appendChild(toggle('GRASS ON CLIFFS', 'Grass grows down steep sides too', () => !!g('sg'), v => { S.sg = v ? 1 : 0; surfRebuild(); }));
