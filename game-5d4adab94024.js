@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1030;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1031;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:55';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10946,7 +10946,7 @@ function linkPanelClose() {
 // (user Oct 27: "PLAY AGAIN should reset the TIME of DAY and weather" - restartGame calls it too: every new round starts
 // on the same morning, its wind and sea calm again, no storm left over, the new sky's clouds at once as the weather is)
 function freshWeather() {
-  W.rain = null; W.fog = null; W.frozen = false; W.manual = {};
+  W.rain = null; W.fog = null; W.frozen = false; W.manual = {}; W.windAmp = W.windT = undefined;   // (the wind's own wander - TANK VS TANK sets a gusty one)
   const h0 = STORY ? STORY_CFG.startH : 9;                               // (Story's day 1 starts at its own hour - WORLD PROPERTIES > STORY)
   env.time = h0; W.lastHour = h0; env.rain = 0; env.fog = 0; env.sea = 0.18; env.wind = 0.15;
   env.weather = 0.2; W.t0 = W.t;                                          // (user Oct 27: a new game starts with clear skies, about 20%)
@@ -17938,13 +17938,21 @@ let BLAST = null;
 // sparks, the embers, the spray and the debris thrown (sqrt K); a table's new rows are those past the last id it had given at blastOpen
 const BLAST_COLS = () => [[smoke, false], [flames, false], [sparks, true], [embers, true], [spray, true], [debris, true], [dust, true]];
 function blastOpen() {
-  BLAST = { fx: FXK, top: BLAST_COLS().map(([T]) => T.top), fl: flashes.top, ri: rings.top, jet: jets.n ? jets.c.sq[jets.n - 1] : 0, spk: spikeSpikes.top, spg: spikeGrains.top };   // (each table's last id given: its rows made since are past it)
+  BLAST = { fx: FXK, top: BLAST_COLS().map(([T]) => T.top), fl: flashes.top, ri: rings.top, jet: jets.n ? jets.c.sq[jets.n - 1] : 0, spk: spikeSpikes.top, spg: spikeGrains.top, after: [] };   // (each table's last id given: its rows made since are past it)
   FXK = FXK * BLAST_K;
 }
+// (user Nov 16 21:46, TANK VS TANK: "the explosion is still happening in front of the tank. So the tank disappears") a thing's own blast - one
+// with its own size (a tank's blowing up: the tank's size, in every mode) - set off by a shell's isn't the shell's to magnify: it was spawned
+// at BLAST_K and spread BLAST_K times out from where the shell went off (the side it came from), three times the tank and in front of it.
+// Its effects wait for the shell's blast to close (blastClose runs them after, at the scale there was before); with no blast open, now
+function blastAfter(fn) { if (BLAST) BLAST.after.push(fn); else fn(); }
 function blastClose(x, y) {
   if (!BLAST) return;
   const B = BLAST, K = BLAST_K, R = Math.sqrt(K);
   BLAST = null; FXK = B.fx;
+  try { blastSpread(B, x, y, K, R); } finally { for (const fn of B.after) fn(); }
+}
+function blastSpread(B, x, y, K, R) {
   // (the column tables' rows made since blastOpen - past the last id given then)
   BLAST_COLS().forEach(([T, thrown], j) => {
     const c = T.c, v = thrown ? R : K;
@@ -19286,7 +19294,7 @@ function stepWeather(dt) {
   // low, so clear skies come often; the first minute and a half eases from the start's 20% into the wander)
   let clouds = 0.04 + 0.41 * Math.pow(wNoise(t / 70, 1), 1.8);
   clouds += (0.2 - clouds) * (1 - smoothstep(0, 90, t - (W.t0 || 0)));
-  let wind = 0.4 * (wNoise(t / 90, 2) * 2 - 1);
+  let wind = (W.windAmp ?? 0.4) * (wNoise(t / (W.windT ?? 90), 2) * 2 - 1);   // (its wander: how far, over how long - W.windAmp / W.windT; TANK VS TANK's gusty, user Nov 16 21:45)
   let sea = 0.12 + 0.14 * wNoise(t / 80, 3);
   let rain = 0, fog = 0;
   const R = W.rain;
@@ -52038,6 +52046,10 @@ function ltDirty(c0, c1, r0, r1) {
    up flies off as clods; any sand nearby wakes up and slides. Returns how many cells went. */
 // a cell at (c, y) a cave's lining: a cave (a carved shape) within 3 cells under, over or beside it
 const caveLining = (c, y) => { for (let k = 1; k <= 3; k++) { const u = k * LT_CELL; if (shpHoleAt(c, y + u) || shpHoleAt(c, y - u) || shpHoleAt(c - k, y) || shpHoleAt(c + k, y)) return true; } return false; };
+// (user Nov 16 21:45, TANK VS TANK: "It should be harder for a tank to pierce the ground as much as it does now. Right now you can dig a tunnel with 3
+// shots") the ground holds against a blast driving down into it: under where it went off the hole is a bowl this share as deep as it is wide - three
+// shots in one place a dip, not a shaft. Sideways and up (a cave's roof, a hillside) as round as before
+const LAND_DIG_DEEP = 0.45;
 function landCarve(x, y, rad) {
   if (!land.cell) return 0;
   const c0 = ltCol(x - rad - 4), c1 = ltCol(x + rad + 4), r0 = ltRow(y - rad - 4), r1 = ltRow(y + rad + 4);
@@ -52047,7 +52059,7 @@ function landCarve(x, y, rad) {
   stonesCrater(x, y, rad);                                     // (the stones it reaches: taken whole or knocked loose, never sliced - 50-land-rest)
   stalsBlast(x, y, rad);                                       // (the caves' stalactites it takes or brings down - 50-land-zz-stals.js)
   for (let c = Math.max(0, c0); c <= Math.min(land.cols - 1, c1); c++) for (let r = Math.max(ltR0(c), r0), rE = Math.min(ltR1(c) - 1, r1); r <= rE; r++) {
-    const dx = (c + 0.5) * LT_CELL - x, dy = LT_Y0 + (r + 0.5) * LT_CELL - y, d = Math.sqrt(dx * dx + dy * dy);
+    const dx = (c + 0.5) * LT_CELL - x, dy0 = LT_Y0 + (r + 0.5) * LT_CELL - y, dy = dy0 > 0 ? dy0 / LAND_DIG_DEEP : dy0, d = Math.sqrt(dx * dx + dy * dy);
     const i = ltIdx(c, r), m = land.cell[i];
     if (m === M_AIR) continue;
     if (onApronGround(c * LT_CELL)) continue;                            // (the airfield never breaks: anything can always land on it, user Oct 26)
@@ -54857,7 +54869,7 @@ function tankBlowUp(t) {
   const [px, py] = tankPivot(t), x = px, y = py + 4, [bx, by] = tankBlowDir(t), R = TANK_L * 0.5;
   sound('explosion', x, 1); shakeAt(6, x); gridExplosion(x, y, R, 300); guysNear(x, y, R);
   if (SIM_ONLY) return;
-  flashes.addRow({ x, y, r: R * 1.1, life: 0, max: 0.12 });
+  flashes.addRow({ x, y, r: R * 0.7, life: 0, max: 0.08 });   // (a quick flash inside the tank, not a white-out over it)
   for (let i = 0; i < 46; i++) {
     const a = luRnd(0, Math.PI * 2), out = luRnd(15, 70), push = luRnd(30, 130);
     spawnFlame(x + luRnd(-R, R) * 0.5, y + luRnd(-R, R) * 0.3, Math.cos(a) * out + bx * push + t.vx * 0.5, Math.sin(a) * out * 0.7 + by * push, luRnd(1.3, 1.6), luRnd(3, 5.5), luRnd(5, 8));
@@ -54898,8 +54910,7 @@ function tankHitBlast(t, power) {
 function killTank(t) {
   if (t.state !== 'alive') return;                     // (already lost: never twice - user Oct 27)
   t.state = 'dead';
-  tankBlowUp(t);
-  spawnDebris(t.x, t.y - 10, 16, t.vx * 0.3);
+  { const x = t.x, y = t.y, vx = t.vx; blastAfter(() => { tankBlowUp(t); spawnDebris(x, y - 10, 16, vx * 0.3); }); }   // (its own size - not the shell's blast's: blastAfter)
   // (user Oct 27, [18]: on a ship's deck its wreck rides her; over water it falls in and sinks; on the ground, or held on
   // a magnet over it, it lies (falls) there - stepArmyWreck)
   const dry = onLand(t.x) && !lakeAt(t.x);
@@ -54912,7 +54923,7 @@ function killTank(t) {
   // its own, higher and turning faster, to fall and lie as a wreck of its own
   if (thrown) { const ca = Math.cos(t.a), sa = Math.sin(t.a), lx = ((TANKA.turL + TANKA.turR) / 2 - TCX) * TANK_K * t.facing, ly = ((TANKA.turTop + TANKA.deck) / 2 - TANKA.foot) * TANK_K;
     landWrecks.push({ kind: 'turret', id: t.id, x: t.x + lx * ca - ly * sa, y: t.y + lx * sa + ly * ca, a: t.a, facing: t.facing, t: 0, burn: 0, air: true,
-      vx: t.vx * 0.5 + bx * 90 + luRnd(-30, 30), vy: -luRnd(260, 330), av: luRnd(-6, 6) }); }
+      vx: t.vx * 0.5 + bx * 70 + luRnd(-20, 20), vy: -luRnd(175, 205), av: (bx || 1) * (t.facing || 1) * luRnd(4.5, 7) }); }   // (user Nov 16 21:45: "it should rotate in the air ... it should not go that high because it should be heavy" - ~half a tank's length up, never under 4.5 turns of a radian a second, the way the blow throws it)
   if (dry && t.carry == null && !t.hook) landCarve(t.x, t.y, 10);
   emit('lost', { kind: 'tank', o: t });
   landWait[t.id].tank = LAND_RESPAWN;
@@ -55472,7 +55483,7 @@ function landBlast(s, x, y, hitV) {
     if (t && t.state === 'alive') { const d = Math.hypot(t.x - x, t.y - 10 - y); if (t === hitV) tankHurt(t, TVT ? t.hp : dmg, x, y); else if (d < reach + TANK_L * 0.3 && mayHit(s, t)) tankHurt(t, TVT ? t.hp : 0.25, x, y); }   // (TANK VS TANK: one hit, a lost tank - user Nov 16 20:52)
     if (h && (h.state === 'fly' || h.state === 'landed')) { const d = Math.hypot(h.x - x, h.y - y); if (h === hitV) heliHurt(h, VTUNE.heli.hp, x, y); else if (d < reach + 20 && mayHit(s, h)) heliHurt(h, 1, x, y); }
   }
-  if (hitV && hitV.kind === 'tank' && hitV.state === 'alive') tankHitBlast(hitV, (s.from === 'bomb' ? 1.3 : 1) * bk);   // (hit and still standing: the blast on top of it)
+  if (hitV && hitV.kind === 'tank' && hitV.state === 'alive') { const pw = (s.from === 'bomb' ? 1.3 : 1) * bk; blastAfter(() => tankHitBlast(hitV, pw)); }   // (hit and still standing: the blast on top of it)
 }
 /* ---- a hit in the ground (user Oct 25, their pictures): a burst of earth in spikes ----
    Each spike is a jet of earth thrown out of the hole: a chain of grains launched together along one line, the
@@ -71378,15 +71389,23 @@ function tvtRound() {
 // "the weather stays the same the whole time. It does not change dynamically" - 1014-1022 held it with W.manual)
 function tvtConditions() {
   const r = tvtRng(TV.seed ^ 0x9E3779B9), rnd = (a, b) => a + (b - a) * r();
-  const h = rnd(0, 24), k = r(), sgn = r() < 0.5 ? -1 : 1;
+  // (user Nov 16 21:45: "The probability of getting a nighttime map should be extremely low, like 1 out of 10. The same with dusk, because you want
+  // visibility") the hour: by day 8 rounds in 10 (the sun well up: 7:30-16:30), dawn or dusk 1 in 10 (the sun within ~40 minutes of the horizon), night 1 in 10
+  const hk = r(), h = hk < 0.8 ? rnd(7.5, 16.5) : hk < 0.9 ? (r() < 0.5 ? rnd(5.3, 6.7) : rnd(17.3, 18.7)) : rnd(19.5, 28.5) % 24;
+  const k = r(), sgn = r() < 0.5 ? -1 : 1;
   W.manual = { time: 1 }; W.frozen = false; W.rain = null; W.fog = null;   // (the hour stays for the round - the sun doesn't move, user Nov 16 21:36; the weather changes)
   W.t = rnd(0, 20000); W.t0 = W.t - 1000;                 // (somewhere along the weather's wander; not the new game's eased first minute)
+  // ("the wind should actually change a lot") its wander over the whole range, turning in ~15 s - from shot to shot, not over minutes
+  W.windAmp = 1; W.windT = 15;
   env.time = h; W.lastHour = h;
-  if (k >= 0.3 && k < 0.88) {                              // (cloud over and drizzle, a shower, or a storm - a spell already coming in)
-    const storm = k >= 0.75, rain = k >= 0.55;
-    W.rain = { t0: W.t - rnd(5, 25), dur: rnd(70, 160), peak: storm ? rnd(1.05, 1.2) : rain ? rnd(0.3, 0.8) : rnd(0.03, 0.12), wind: sgn * (storm ? rnd(0.45, 0.7) : rnd(0.1, 0.3)),
+  // ("rain should also happen sometimes, a bit more often. Like 1 out of 4") a round in four rains (one of those a storm), a spell of 3-7 minutes
+  // already under way; one in seven grey with a drizzle, one in ten fog; the rest fair - the weather wandering on its own from there
+  if (k < 0.25) {
+    const storm = k < 0.06;
+    W.rain = { t0: W.t - rnd(5, 25), dur: rnd(180, 420), peak: storm ? rnd(1.05, 1.2) : rnd(0.35, 0.85), wind: sgn * (storm ? rnd(0.45, 0.7) : rnd(0.1, 0.3)),
       sea: storm ? rnd(0.45, 0.7) : rnd(0.08, 0.25), k: r() * 50 };
-  } else if (k >= 0.88) W.fog = { t0: W.t - rnd(5, 20), dur: rnd(60, 120), peak: rnd(0.3, 0.75), k: r() * 50 };
+  } else if (k < 0.39) W.rain = { t0: W.t - rnd(5, 25), dur: rnd(120, 240), peak: rnd(0.03, 0.12), wind: sgn * rnd(0.1, 0.3), sea: rnd(0.08, 0.25), k: r() * 50 };
+  else if (k < 0.49) W.fog = { t0: W.t - rnd(5, 20), dur: rnd(60, 120), peak: rnd(0.3, 0.75), k: r() * 50 };
   stepWeather(3);                                           // (the sliders onto it at once - the round's first frame as it is)
   if (NSKY.snap) NSKY.snap();
   computeEnv();
