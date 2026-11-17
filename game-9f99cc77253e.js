@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1022;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1023;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36776,8 +36776,8 @@ let PUFF_PERIOD = 2;
    dw, dh, through the context's transform, blend, scissor and clip, as drawPixels laid it), each cell cut at FIRE_T into FIRE_PAL,
    the context's alpha on it. */
 const FIRE = { list: [], buf: null, cells: 0, ep: -1, col: new Map(), hb: new Map(), cb: new Map() };
-// behind: only the flames burning inside a ship (drawn before the ships, so the hull hides their foot); otherwise
-// all the rest
+// behind: the flames burning inside a ship (drawn before the ships, so the hull hides their foot) and a blast in the ground's (the earth and dust
+// it throws up in front - groundFlash); otherwise all the rest
 function drawFire(x0, x1, behind) { const F = fireImage(x0, x1, behind); if (F) firePut(F); }
 // the fire's picture this view: its flames (L: x, y in its cells, radius in cells, strength), its cells (W x H) and where it goes in
 // the view (dx, dy, dw, dh - a cell a FPX block) - null: none
@@ -54769,20 +54769,21 @@ function tankFire(t) {
   t.vx -= ux * 10;
   shakeAt(2, t.x);
 }
-// (user Oct 25, their photo of a tank firing) the shot leaves a round fireball standing in front of the muzzle, a
-// white jet of gas out of the barrel through it, and the blast kicks the dust up off the ground under it
+// (user Oct 25, their photo of a tank firing: a fireball in front of the muzzle; Nov 16 21:16: "The explosion from the shot should be a lot smaller
+// and really fast. It just appears the moment it's shot. It doesn't go up like if it was smoke, because it's an explosion") the shot: a small flash
+// at the muzzle and a burst of flame out along the barrel, gone in a moment (hot and quick to cool - no rising, no smoke); the blast kicks a little
+// dust up off the ground under it
 function tankMuzzleBall(mx, my, ux, uy, t) {
   if (SIM_ONLY) return;
-  const cx = mx + ux * 16, cy = my + uy * 16;
-  flashes.addRow({ x: cx, y: cy, r: 22, life: 0, max: 0.14 });
-  for (let i = 0; i < 60; i++) {
-    const a = luRnd(0, Math.PI * 2), sp = Math.pow(landUnitR(), 0.5) * luRnd(30, 80), r0 = luRnd(0, 9);
-    spawnFlame(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0, Math.cos(a) * sp + ux * 55 + t.vx, Math.sin(a) * sp * 0.85 + uy * 55 - luRnd(0, 14), luRnd(1.35, 1.65), luRnd(4.5, 8), luRnd(1.5, 2.1));
+  const cx = mx + ux * 6, cy = my + uy * 6;
+  flashes.addRow({ x: cx, y: cy, r: 9, life: 0, max: 0.06 });
+  for (let i = 0; i < 16; i++) {
+    const a = luRnd(-0.5, 0.5), sp = luRnd(40, 140), c = Math.cos(a), s = Math.sin(a), dx = ux * c - uy * s, dy = uy * c + ux * s;
+    spawnFlame(cx + luRnd(-2, 2), cy + luRnd(-2, 2), dx * sp + t.vx, dy * sp, luRnd(1.2, 1.5), luRnd(2, 3.5), luRnd(8, 12));
     flameLast().clean = true;
   }
-  for (let i = 0; i < 7; i++) spawnSmoke(mx + ux * luRnd(0, 26), my + uy * luRnd(0, 26), { kind: 'gun', mist: true, keep: true, r: luRnd(2, 4), grow: luRnd(2, 3.5), rmax: luRnd(9, 14), lift: 3, vx: ux * luRnd(60, 130), vy: uy * luRnd(60, 130), life: luRnd(1.6, 2.6), alpha: 0.75 });
   const gy = landBelow(cx, cy - 4);
-  if (gy - cy < 50) kickLandDust(cx, gy, 10);
+  if (gy - cy < 30) kickLandDust(cx, gy, 4);
 }
 function tankMG(t) {
   if (!t || t.state !== 'alive') return;
@@ -55387,9 +55388,8 @@ function landBlast(s, x, y, hitV) {
     const gy = landBelow(x, y - crater);
     landCarve(x, y, crater);
     groundFlash(x, y, (s.from === 'bomb' ? 1.2 : s.from === 'tank' ? 1 : 0.6) * bk);   // (a short fireball, no black smoke: the earth is the show)
-    if (TVT) tvtDust(x, Math.min(y, gy));                 // (TANK VS TANK: a puff of the smoke's dust, no burst of earth - 50-zzzz-tvt.js)
-    else { if (gy - y < crater + 10) spikeBurst(x, Math.min(y, gy), (s.from === 'bomb' ? 1.3 : s.from === 'tank' ? 1 : 0.55) * bk, groundAt(x, Math.min(y, gy)));
-      kickLandDust(x, y, 18); }
+    if (gy - y < crater + 10) spikeBurst(x, Math.min(y, gy), (s.from === 'bomb' ? 1.3 : s.from === 'tank' ? 1 : 0.55) * bk, groundAt(x, Math.min(y, gy)));
+    groundDust(x, Math.min(y, gy), crater);
   }
   for (let p = 0; p < landN(); p++) {
     const t = tanks.hAt(p), h = helis.hAt(p);
@@ -55440,14 +55440,16 @@ function spkRuns() {
 }
 function spikeBurst(x, y, size, mat) {
   if (SIM_ONLY) return;
-  const P = SPIKE_PAL[mat] || SPIKE_PAL.dirt, n = Math.round(18 + 16 * size);
+  // (user Nov 16 21:17: "We want dirt to explode from the ground and land, just not the giant amount we had") by the blast's size: a small one throws
+  // a few low streaks (their speed with the root of the size - their height with the size), a big one as many and as high as before less a third
+  const P = SPIKE_PAL[mat] || SPIKE_PAL.dirt, n = Math.round(4 + 14 * size), vk = Math.sqrt(Math.min(1, size)) * (0.55 + 0.3 * size);
   const bi = spikeBursts.add(), B = spikeBursts.c, bid = B.sq[bi];
   B.x[bi] = x; B.y[bi] = y; B.t[bi] = 0; B.mat[bi] = spikeBursts.intern(mat); B.size[bi] = size; B.dustDone[bi] = 0;
   for (let i = 0; i < n; i++) {
     const u = (i + 0.5) / n * 2 - 1 + landBitsRnd(-0.06, 0.06), a = -Math.PI / 2 + u * 0.95 + landBitsRnd(-0.08, 0.08);
     // (the upright ones go highest; a few stand out taller still)
-    const V = (230 + 240 * (1 - Math.abs(u)) * (landBitsR() < 0.2 ? 1.25 : 1) + landBitsRnd(-40, 40)) * (0.7 + 0.45 * size);
-    const m = 16, w = (6 + 6 * (1 - Math.abs(u))) * (0.6 + 0.45 * size) * landBitsRnd(0.75, 1.2);
+    const V = (230 + 240 * (1 - Math.abs(u)) * (landBitsR() < 0.2 ? 1.25 : 1) + landBitsRnd(-40, 40)) * vk;
+    const m = 16, w = (6 + 6 * (1 - Math.abs(u))) * (0.25 + 0.8 * Math.min(1, size)) * landBitsRnd(0.75, 1.2);
     const x0 = x + u * 10 * size + landBitsRnd(-3, 3);
     const si = spikeSpikes.add(), sid = spikeSpikes.c.sq[si];
     spikeSpikes.c.b[si] = bid; spikeSpikes.c.w[si] = w;
@@ -55458,8 +55460,8 @@ function spikeBurst(x, y, size, mat) {
     const S = spikeSpikes.c; S.life[si] = landBitsRnd(1.1, 1.6); S.seed[si] = landBitsR() * 100; S.dark[si] = landBitsR() < 0.35 ? 1 : 0; S.shed[si] = 0;
   }
   // the clods: dark lumps of earth thrown out with it (as in the user's picture)
-  for (let k = 0; k < 10 + 10 * size; k++) {
-    const a = -Math.PI / 2 + landBitsRnd(-1, 1), v = landBitsRnd(140, 380) * (0.7 + 0.4 * size);
+  for (let k = 0; k < 3 + 12 * size; k++) {
+    const a = -Math.PI / 2 + landBitsRnd(-1, 1), v = landBitsRnd(140, 380) * vk;
     debrisRow({ x: x + landBitsRnd(-6, 6), y: y - 2, vx: Math.cos(a) * v, vy: Math.sin(a) * v, a: landBitsRnd(0, 6), w: landBitsRnd(-8, 8), sw: landBitsRnd(2, 4.2), sh: landBitsRnd(2, 3.6), col: css3(P.foot.map(c => c * landBitsRnd(0.75, 1.1))), state: 0, bub: 0, seed: landBitsR() * 6, age: 0, clod: true });
   }
 }
@@ -55470,7 +55472,9 @@ function groundFlash(x, y, power) {
   guysNear(x, y, 40);
   if (SIM_ONLY) return;
   flashes.addRow({ x, y: y - 6, r: 22 * power, life: 0, max: 0.12 });
-  for (let i = 0; i < 26 * power; i++) { const a = -Math.PI / 2 + landBitsRnd(-1.3, 1.3), sp = Math.pow(landBitsR(), 0.6) * 120 * power; spawnFlame(x + landBitsRnd(-4, 4), y - landBitsRnd(0, 5), Math.cos(a) * sp, Math.sin(a) * sp - 20, landBitsRnd(1.2, 1.5), landBitsRnd(3, 5.5) * (0.7 + 0.3 * power), landBitsRnd(1.8, 2.6)); flameLast().clean = true; }
+  // (user Nov 16 21:16: "when it hits the ground, the dirt should be in front of the explosion") its flames drawn behind: before the land and what's thrown up
+  // (the earth, the dust - the land's pass and the smoke after it), as a blast inside a ship is drawn before her hull (drawFire's behind)
+  for (let i = 0; i < 26 * power; i++) { const a = -Math.PI / 2 + landBitsRnd(-1.3, 1.3), sp = Math.pow(landBitsR(), 0.6) * 120 * power; spawnFlame(x + landBitsRnd(-4, 4), y - landBitsRnd(0, 5), Math.cos(a) * sp, Math.sin(a) * sp - 20, landBitsRnd(1.2, 1.5), landBitsRnd(3, 5.5) * (0.7 + 0.3 * power), landBitsRnd(1.8, 2.6)); const f = flameLast(); f.clean = true; f.behind = true; }
   spawnSparks(x, y - 3, 10 * power, 240);
 }
 // a streak (si: its place) come apart into grains of earth, in its burst's palette P
@@ -55508,7 +55512,7 @@ function stepEarthGrains(dt) {
     if (q.vy > 0 && landSolid(nx, ny)) {
       // (it lands: a heavy one may hop once, then it lies on the ground)
       if (!q.light && q.vy > 140 && !q.hop) { q.hop = true; q.vy *= -0.22; q.vx *= 0.5; continue; }
-      q.y = landBelow(nx, ny - 6) - 0.6; q.x = nx; q.rest = 1; q.life = Math.max(q.life, q.t + (q.light ? 0.6 : landBitsRnd(5, 10)));
+      q.y = landBelow(nx, ny - 6) - 0.6; q.x = nx; q.rest = 1; q.life = Math.max(q.life, q.t + (q.light ? 0.4 : landBitsRnd(1.5, 3)));   // (user Nov 16 21:14: the dirt on the ground gone a lot sooner - was 5-10 s)
       continue;
     }
     q.x = nx; q.y = ny;
@@ -55558,10 +55562,10 @@ function stepSpikeBursts(dt) {
     // the dust: as the burst tops out and falls back, a low cloud rolls out both ways along the ground and settles
     if (!Bc.dustDone[i] && bt > 0.35) {
       Bc.dustDone[i] = 1;
-      const bx = Bc.x[i], by = Bc.y[i], size = Bc.size[i], n = Math.round(16 + 16 * size);
+      const bx = Bc.x[i], by = Bc.y[i], size = Bc.size[i], n = Math.round(4 + 20 * size), zk = 0.4 + 0.6 * Math.min(1, size);   // (by the blast's size - user Nov 16 21:14)
       for (let k = 0; k < n; k++) {
         const side = k & 1 ? 1 : -1, sp = landBitsRnd(10, 90) * (0.7 + 0.5 * size);
-        spawnSmoke(bx + side * landBitsRnd(0, 26) * size, by - landBitsRnd(2, 12), { kind: 'blast', mist: true, fam: k % 3 ? P.dust : P.dustD || P.dust, r: landBitsRnd(5, 8) * (0.8 + 0.3 * size), grow: landBitsRnd(2.5, 4.5), rmax: landBitsRnd(18, 28), lift: 0.5, ground: true, vx: side * sp, vy: 0, life: landBitsRnd(5, 8), alpha: landBitsRnd(0.55, 0.8) });
+        spawnSmoke(bx + side * landBitsRnd(0, 26) * size, by - landBitsRnd(2, 12), { kind: 'blast', mist: true, fam: k % 3 ? P.dust : P.dustD || P.dust, r: landBitsRnd(5, 8) * (0.8 + 0.3 * size) * zk, grow: landBitsRnd(2.5, 4.5), rmax: landBitsRnd(18, 28) * zk, lift: 0.5, ground: true, vx: side * sp, vy: 0, life: landBitsRnd(1.5, 2.5), alpha: landBitsRnd(0.55, 0.8) });
       }
     }
     if (bt > 2.2) { spikeBursts.drop(i); for (let s = s0; s < s1; s++) { spikeSpikes.drop(s); for (let q = SPKR.s0[s]; q < SPKR.s1[s]; q++) spikeGrains.drop(q); } }
@@ -55658,6 +55662,14 @@ function sweepHit(o, fn) {
   return fn(o.x, o.y) ? [o.x, o.y] : null;
 }
 // dust off the ground: tan puffs that drift and settle
+// (user Nov 16 21:14-21:17: "should just be dynamic dust, and it should be much smaller"; "The dust that we're tweaking now will be used everywhere") a
+// blast in the ground: a puff of the smoke's dust (the air stirs it) across the hole's width (w: its radius), gone in about a second
+function groundDust(x, y, w) {
+  if (SIM_ONLY) return;
+  const n = Math.round(clamp(4 + w / 5, 6, 30)), k = clamp(w / 30, 0.5, 3);
+  for (let i = 0; i < n; i++) spawnSmoke(x + landBitsRnd(-w, w), y - landBitsRnd(0, 4), { kind: 'dust', mist: true, r: landBitsRnd(1.5, 3) * k, grow: landBitsRnd(1.5, 2.5), lift: 4,
+    vx: landBitsRnd(-18, 18) * k, vy: landBitsRnd(-30, -8) * k, life: landBitsRnd(0.7, 1.3), alpha: landBitsRnd(0.3, 0.5), fam: 'dust' });
+}
 function kickLandDust(x, y, n) {
   if (SIM_ONLY) return;
   for (let i = 0; i < n; i++) spawnSmoke(x + simRnd('landUnits', -6, 6), y - simRnd('landUnits', 0, 4), { kind: 'dust', mist: true, r: simRnd('landUnits', 2, 4), grow: simRnd('landUnits', 2, 4), lift: 6, vx: simRnd('landUnits', -14, 14), vy: simRnd('landUnits', -12, -2), life: simRnd('landUnits', 1.4, 2.6), alpha: simRnd('landUnits', 0.3, 0.5), fam: 'dust' });
@@ -56709,6 +56721,11 @@ function cellsSlice(k) {
   // water over it isn't)
   for (let c = c0; c < c1; c++) {
     let ru = land.surf ? Math.ceil((land.surf[c] - LT_Y0) / LT_CELL) : 1 << 30;
+    // (user Nov 16 21:18, a shell's trail through a hill blown open, hidden "behind the hill. Even though the hill is destroyed, it should be in front" -
+    // his report v1020, at night: the open crater was still under the line as built, so the dark of the ground was laid over the trail in it) a
+    // column dug open from the top: its line is its first rock from the top now - the crater is open air, as the sky over it; a cave or a tunnel
+    // under rock still there stays under the line. Never above the line as built (sand fallen on it doesn't lift it)
+    if (ru < (1 << 30)) { let q = Math.max(ru, rT); while (q < rB && cell[ltIdx(c, q)] === M_AIR) q++; if (q > ru) ru = q; }
     if (land.onl && !land.onl[c]) { ru = rT; while (ru < rB && cell[ltIdx(c, ru)] === M_AIR) ru++; }
     else if (isleSeaCol(c)) { ru = Math.max(rT, isleSeaRow()); while (ru < rB && cell[ltIdx(c, ru)] === M_AIR) ru++; }   // (an island: the open sea under it too - its floor's the line)
     Q.ci[Q.ruO + c] = Math.min(ru, 1 << 30);
@@ -71260,19 +71277,21 @@ function tvtRound() {
   TV.seed = tvtNewSeed();
   tvtWorldIn();
 }
-// the conditions the round is played in, from its seed: the hour, the sky, the wind, the rain, the fog - held as they are (W.manual: the
-// WORLD panel's own way of setting them), the clock running on
+// the conditions the round starts in, from its seed: the hour, and the weather's own state (W - 36-sea-storm-weather.js) - where its day's
+// wander is (W.t), a spell of rain or a storm under way or a fog - so it goes on changing through the round by its own rules (user Nov 16 21:18:
+// "the weather stays the same the whole time. It does not change dynamically" - 1014-1022 held it with W.manual)
 function tvtConditions() {
   const r = tvtRng(TV.seed ^ 0x9E3779B9), rnd = (a, b) => a + (b - a) * r();
-  const h = rnd(0, 24), k = r();
-  const sky = k < 0.3 ? { weather: rnd(0.02, 0.3), rain: 0, fog: 0 } : k < 0.55 ? { weather: rnd(0.35, 0.65), rain: 0, fog: 0 }
-    : k < 0.75 ? { weather: rnd(0.65, 0.85), rain: rnd(0.25, 0.7), fog: 0 } : k < 0.88 ? { weather: rnd(0.8, 0.95), rain: rnd(0.8, RAIN_MAX), fog: 0 }
-    : { weather: rnd(0.25, 0.6), rain: 0, fog: rnd(0.3, 0.7) };
-  const wind = (r() < 0.5 ? -1 : 1) * (k >= 0.75 && k < 0.88 ? rnd(0.45, 0.8) : rnd(0.05, 0.6));
-  W.rain = null; W.fog = null; W.frozen = false;
+  const h = rnd(0, 24), k = r(), sgn = r() < 0.5 ? -1 : 1;
+  W.manual = {}; W.frozen = false; W.rain = null; W.fog = null;
+  W.t = rnd(0, 20000); W.t0 = W.t - 1000;                 // (somewhere along the weather's wander; not the new game's eased first minute)
   env.time = h; W.lastHour = h;
-  Object.assign(env, sky, { wind, sea: clamp(0.12 + Math.abs(wind) * 0.4, 0, 0.6) });
-  W.manual = { weather: 1, wind: 1, rain: 1, fog: 1, sea: 1 };
+  if (k >= 0.3 && k < 0.88) {                              // (cloud over and drizzle, a shower, or a storm - a spell already coming in)
+    const storm = k >= 0.75, rain = k >= 0.55;
+    W.rain = { t0: W.t - rnd(5, 25), dur: rnd(70, 160), peak: storm ? rnd(1.05, 1.2) : rain ? rnd(0.3, 0.8) : rnd(0.03, 0.12), wind: sgn * (storm ? rnd(0.45, 0.7) : rnd(0.1, 0.3)),
+      sea: storm ? rnd(0.45, 0.7) : rnd(0.08, 0.25), k: r() * 50 };
+  } else if (k >= 0.88) W.fog = { t0: W.t - rnd(5, 20), dur: rnd(60, 120), peak: rnd(0.3, 0.75), k: r() * 50 };
+  stepWeather(3);                                           // (the sliders onto it at once - the round's first frame as it is)
   if (NSKY.snap) NSKY.snap();
   computeEnv();
 }
@@ -71305,15 +71324,6 @@ function tvtStep(dt) {
 }
 // while the round is over, no new tank comes in (canTake)
 const tvtOver = () => TVT && TV.over != null;
-// (user Nov 16 21:14: "The explosion of dirt when a bullet hits the ground should just be dynamic dust, and it should be much smaller ... the dust
-// that we get on the ground should disappear a lot faster") a shot into the ground: a small puff of the smoke's dust (kickLandDust's kind - the air
-// stirs it), a hole's width, gone in about a second - no burst of earth, no clods
-function tvtDust(x, y) {
-  if (SIM_ONLY) return;
-  const r = (a, b) => simRnd('tvt', a, b);
-  for (let i = 0; i < 10; i++) spawnSmoke(x + r(-TANK_L * 0.4, TANK_L * 0.4), y - r(0, 4), { kind: 'dust', mist: true, r: r(1.5, 3), grow: r(1.5, 2.5), lift: 4,
-    vx: r(-18, 18), vy: r(-30, -8), life: r(0.7, 1.3), alpha: r(0.3, 0.5), fam: 'dust' });
-}
 // (user Nov 16 20:52: "the explosion it makes should be half the size"; 21:01: "maybe 3 times smaller ... The hole should not be bigger than the size of a
 // tank") a blast on the land and a tank's, its size in TANK VS TANK: the tank's own shot digs a hole as wide as a tank (LAND_BLAST's crater a radius)
 const tvtBlastK = () => TVT ? TANK_L / (2 * LAND_BLAST.tank[0] * BLAST_K) : 1;
