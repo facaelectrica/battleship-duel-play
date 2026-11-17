@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1069;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 18:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 18:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -36685,7 +36685,7 @@ function partQuad(M, P, s, W, cut, lit) {
   const own = thingsOwn(), e = artPut(partPic(P));   // (its rules go in with the batch's)
   if (e) {
     const [x, y, w, h] = W || [0, 0, P.r[2], P.r[3]], R = P.r, qw = Math.max(1, Math.round(w * s)), qh = Math.max(1, Math.round(h * s));
-    const rules = thingsRules({ rect: R, paint: P.paint || null, cell: cut ? { e: [cut.L ? 0 : null, cut.R ? 0 : null, null, null], p: [cut.L, cut.R, null, null], flip: !!P.mx, soot: cut.q } : null });
+    const rules = thingsRules({ rect: R, paint: P.paint || null, cell: P.cell ? { e: [0, 0, 0, 0], p: P.cell, flip: !!P.mx } : cut ? { e: [cut.L ? 0 : null, cut.R ? 0 : null, null, null], p: [cut.L, cut.R, null, null], flip: !!P.mx, soot: cut.q } : null });   // (P.cell: its own four cracks - a building's piece, strCrack: kept between them, scorched along them)
     const X = -Math.round(qw / 2), m = P.mx ? thgScale(M.slice(), -1, 1) : M;   // (mirrored: drawn where it was seen, its texels the other way)
     thingsQuad(m, P.mx ? -X - qw : X, -Math.round(qh / 2), qw, qh, e, THG_BODY, null, 0, null, 0, 0, lit || null, null, 1, THG_SCALED, null, null, null, [R[0] + (P.mx ? R[2] - x - w : x), R[1] + y, w, h], rules);
   }
@@ -67848,8 +67848,17 @@ const strPieceAt = (o, B, G, i, j) => { const P = B.P, tx = Math.min(P.width, (i
 function strPieceFall(o, B, G, i, j, vx, vy, delay) {
   if (!G.solid[j * G.nc + i]) return;
   const P = B.P, K = STR_KINDS[o.k], tx0 = i * G.cs, ty0 = j * G.cs, cw = Math.min(G.cs, P.width - tx0), ch = Math.min(G.cs, P.height - ty0), [x, y] = strPieceAt(o, B, G, i, j);
-  chunks.addRow({ img: { trop: o.art || K.art, r: [tx0, ty0, cw, ch], mx: !!o.flip, width: cw, height: ch }, k: B.m, x, y, vx, vy, a: 0, w: strDmgRnd(-2, 2), delay,
+  chunks.addRow({ img: { trop: o.art || K.art, r: [tx0, ty0, cw, ch], mx: !!o.flip, width: cw, height: ch, cell: strCrack(cw, ch) }, k: B.m, x, y, vx, vy, a: 0, w: strDmgRnd(-2, 2), delay,
     floor: landTop(clamp(x, 0, WORLD_W - 1)), water: false, kind: 'rubble', land: true, hh: ch / 2 * B.m, hw: cw / 2 * B.m });
+}
+// (user Nov 17 17:26, the fallen pieces "irregular too") a piece's four broken edges: each a crack wandering in from its side by up to a third of it,
+// a texel a step (the left / right ones by row, the top / bottom ones by column - the things' cell rule, partQuad's P.cell: kept between them,
+// scorched along them, as a toppled tower's pieces)
+function strCrack(w, h) {
+  const walk = (n, m, back) => { const a = []; let v = Math.floor(strDmgR() * (m + 1)); for (let i = 0; i < n; i++) { v = clamp(v + Math.round(strDmgRnd(-1.4, 1.4)), 0, m); a.push(back ? -v : v); } return a; };
+  const mx = Math.max(1, Math.floor(w / 3)), my = Math.max(1, Math.floor(h / 3));
+  const R = walk(h, mx, true).map(v => w + v), B = walk(w, my, true).map(v => h + v);
+  return [walk(h, mx, false), R, walk(w, my, false), B];
 }
 // the pieces still standing that nothing holds - no piece held under them (the bottom row on the ground), no neighbour on their row held within two
 // pieces (a roof's eaves) - fall
