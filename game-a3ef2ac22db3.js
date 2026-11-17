@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1038;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 10:24';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1039;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 10:59';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -72900,6 +72900,7 @@ async function start(data) {
   if (!SW_IN_WORKER) await loadBigArt();          // (the big sprites at their final size: 04-zz-big-art.js; only drawn, so not in the sim worker)
   await bootTick('Preparing art', 0);
   menuFromLive();                                   // (the menu starts from the saved settings)
+  if (!SW_IN_WORKER && VEG_MODE) vegSeat();         // (a page opened in the Biome Editor: its own mode before its world is built - 53-veg-editor.js; the menu's choice kept to go back to)
   // opened from an invite link: straight into the friend's room (once everything's ready)
   if (!SW_IN_WORKER) try { const j = new URLSearchParams(location.search).get('join'); if (j) setTimeout(() => linkJoin(j), 400); else setTimeout(roomOpen, 900); } catch (e) {}   // (every screen's game is a session: user Oct 24)
   computeEnv();
@@ -74995,11 +74996,7 @@ function vegUI(Z) {
     if (Z.dead) return;
     try {
     const g = __game;
-    VZ.keep = VZ.keep || { mode: g.menuSel.mode, roster: g.menuSel.roster.slice(), cpu: g.menuSel.cpu.slice(), muted: MUTED, env: { time: g.env.time, weather: g.env.weather, rain: g.env.rain, wind: g.env.wind } };   // (what the lab changes of the game's, put back as it goes - vegLeave)
-    // (user Nov 12: opened after a game of two at one screen, its view was split in two - the second person, a seat on player 0's side (EXTRA), was
-    // kept: one person, made the round's players the menu's way - rosterApply, 19-menu.js - not saved as the menu's choice)
-    g.menuSel.mode = 'land'; g.menuSel.roster = [{ dev: 'kb', side: 0 }]; g.menuSel.cpu = [false, false];   // (nobody on the other side, the CPU neither)
-    rosterApply(); builtViewW = 0; resize(); g.ui.title = false; g.ui.resume = false;
+    vegSeat(); builtViewW = 0; resize(); g.ui.title = false; g.ui.resume = false;
     Object.assign(g.env, { time: 12, weather: 0.1, rain: 0, wind: 0.35 });   // (a light breeze)
     Z.ph = 'sched'; setTimeout(() => { Z.ph = 'cb';
       g.fishnet.clear(null); g.fishnet.hudOnly([]);                 // (no game buttons till you're in a vehicle)
@@ -75056,6 +75053,17 @@ function vegStart() {
   const Z = VZ.z = vzNew();
   try { vegUI(Z); } catch (e) { console.error('Biome Editor', e); }
 }
+// THE EDITOR'S OWN MODE: OPEN WORLD, one person - set before its world is built, every way in (vegEnter, vegAgain; a page load in it: start, 52-main.js),
+// never after it. (User Nov 17: the Biome Editor froze Chrome and took Brave down - opened from the title with TANK VS
+// TANK picked, its world was built as TANK VS TANK on the open sea: tvtFocus walked its field from PLAY_L() to PLAY_R(), -Infinity to Infinity.)
+// What it changes of the game's is kept to be put back as it goes (VZ.keep - vegLeave). (User Nov 12: opened after a game of two at one screen,
+// its view was split in two - the second person, a seat on player 0's side (EXTRA), was kept: one person, made the round's players the menu's
+// way - rosterApply, 19-menu.js - not saved as the menu's choice)
+function vegSeat() {
+  VZ.keep = VZ.keep || { mode: menuSel.mode, roster: menuSel.roster.slice(), cpu: menuSel.cpu.slice(), muted: MUTED, env: { time: env.time, weather: env.weather, rain: env.rain, wind: env.wind } };
+  menuSel.mode = 'land'; menuSel.roster = [{ dev: 'kb', side: 0 }]; menuSel.cpu = [false, false];   // (nobody on the other side, the CPU neither)
+  rosterApply();
+}
 // IN: from the title or the GAME EDITOR (its own unsaved changes asked first - 00-world.js). The simulation worker held (the page runs the game while
 // in it), the test world swapped in (vegIn: the guard on), the editor's world built by its own start (vegUI's end: the land, its mode)
 function vegEnter(from) {
@@ -75066,7 +75074,7 @@ function vegEnter(from) {
   SWB.holds.add('biome');                                          // (the worker kept from taking the game from here on - swWantLive)
   if (from === 'editor' && typeof EDMODE !== 'undefined' && EDMODE.on) { EDMODE.game = null; EDMODE.restart = false; EDMODE.play = true; edModeClose(); }   // (the GAME EDITOR shut with nothing after it: no build, no title - this editor's build next)
   const go = () => {
-    VEG_MODE = true; window.__openSea = true;
+    VEG_MODE = true; window.__openSea = true; vegSeat();
     vegIn(); worldReload(); vegSetsMode();
     vegStart();
   };
@@ -75105,7 +75113,7 @@ function vegLeave(to) {
 function vegAgain() {
   if (!VEG_MODE || VZ.going) return;
   VZ.going = true; worldEditCover(true, 'Loading Biome Editor');
-  window.requestAnimationFrame(() => window.setTimeout(() => { vegLeave(null); VEG_MODE = true; window.__openSea = true; vegIn(); worldReload(); vegSetsMode(); vegStart(); }, 0));
+  window.requestAnimationFrame(() => window.setTimeout(() => { vegLeave(null); VEG_MODE = true; window.__openSea = true; vegSeat(); vegIn(); worldReload(); vegSetsMode(); vegStart(); }, 0));
 }
 if (VEG_MODE) vegStart();
 if (typeof window !== 'undefined') window.__veg = { enter: f => vegEnter(f || 'title'), leave: t => vegLeave(t || 'title'), again: () => vegAgain(), get on() { return VEG_MODE; }, get going() { return VZ.going; }, state: () => ({ veg: VEG_MODE, going: VZ.going, guard: GUARD.on, why: GUARD.why, tripped: GUARD.tripped, refused: GUARD.refused, nw: NET_WORLD.on, isl: ISLANDS.length, endless: ENDLESS, set: VEG_SET, title: !!ui.title, ready: WORLD_READY, loading: !!LOADING, holds: [...SWB.holds], swGoing: !!(typeof SW !== 'undefined' && SW.going), swLive: !!(typeof SW !== 'undefined' && SW.live), cover: !!worldEdCover, edOpen: !!NSKY.editor.TUNE.open, edOn: !!(typeof EDMODE !== 'undefined' && EDMODE.on), vgNodes: document.querySelectorAll('#vgBot,#vgLeft,#vgPause').length, mode: menuSel.mode, hud: !!HUD_ONLY, muted: MUTED }), get z() { return VZ.z ? { ph: VZ.z.ph, dead: VZ.z.dead, fires: VZ.z.fires, lastIv: VZ.z.lastIv, iv: VZ.z.iv.size, to: VZ.z.to.size, rf: VZ.z.rf.size, ls: VZ.z.ls.length, nodes: VZ.z.nodes.length } : null; } };   // (tools)
