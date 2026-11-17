@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1068;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 18:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1069;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 18:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -67909,21 +67909,49 @@ function strPieceGone(o, P, m, q, x, y) {
   return i >= 0 && j >= 0 && i < G.nc && j < G.nr && c[j * G.nc + i] === '1';
 }
 // a building with pieces gone: what's left, row by row in runs of pieces standing, each a part of its picture (mirrored with it), charred by the share
-// gone - and (user Nov 17 16:27: "the part/edges of the building that is destroyed more black/charred") a piece next to one gone charred nearly black.
-// o2: the quad's own options instead (its night's light - strLit: the same runs, no ghost of what's gone)
+// gone - and (user Nov 17 16:27: "the part/edges of the building that is destroyed more black/charred") a piece next to one gone charred nearly black;
+// (17:13: "the edges of a destroyed building ... less blocky and feel more like debris, more random") a piece next to one gone is drawn in small
+// blocks of a fifth of it, eaten away toward what's gone by a fixed noise of its own (strEdgeKeep - the same every frame, mirrored with it), the
+// blocks nearest the break blackest. o2: the quad's own options instead (its night's light - strLit: the same shape, no ghost of what's gone)
 const STR_EDGE_COV = 0.9;
+const strNoise = (x, y, k) => { const v = Math.sin(x * 12.9898 + y * 78.233 + k * 37.719) * 43758.5453; return v - Math.floor(v); };
+// how far a point (u, v in 0..1 across piece (i, j)) is from the pieces gone round it, in pieces (2: none near)
+function strEdgeDist(gone, i, j, u, v) {
+  let d = 2;
+  if (gone(i - 1, j)) d = Math.min(d, u); if (gone(i + 1, j)) d = Math.min(d, 1 - u); if (gone(i, j - 1)) d = Math.min(d, v); if (gone(i, j + 1)) d = Math.min(d, 1 - v);
+  if (gone(i - 1, j - 1)) d = Math.min(d, Math.hypot(u, v)); if (gone(i + 1, j - 1)) d = Math.min(d, Math.hypot(1 - u, v));
+  if (gone(i - 1, j + 1)) d = Math.min(d, Math.hypot(u, 1 - v)); if (gone(i + 1, j + 1)) d = Math.min(d, Math.hypot(1 - u, 1 - v));
+  return d;
+}
 function strDrawCut(o, B, c, cov, o2) {
-  const P = B.P, G = strPieces(P, B.m), seed = dmgSeed(P), cell = dmgCell(P), nc = G.nc, nr = G.nr;
+  const P = B.P, G = strPieces(P, B.m), seed = dmgSeed(P), cell = dmgCell(P), nc = G.nc, nr = G.nr, cs = G.cs, sb = Math.max(1, Math.round(cs / 5)), k = (o.id || 0) * 1.618;
   const gone = (i, j) => i >= 0 && j >= 0 && i < nc && j < nr && c[j * nc + i] === '1';
-  const edge = (i, j) => !o2 && (gone(i - 1, j) || gone(i + 1, j) || gone(i, j - 1) || gone(i, j + 1) || gone(i - 1, j - 1) || gone(i + 1, j - 1) || gone(i - 1, j + 1) || gone(i + 1, j + 1));
-  for (let j = 0; j < nr; j++) for (let i = 0; i < nc;) {
-    if (gone(i, j)) { i++; continue; }
-    const eg = edge(i, j); let e = i + 1; while (e < nc && !gone(e, j) && edge(e, j) === eg) e++;
-    const tx0 = i * G.cs, tx1 = Math.min(P.width, e * G.cs), ty0 = j * G.cs, ty1 = Math.min(P.height, (j + 1) * G.cs);
+  const edge = (i, j) => gone(i - 1, j) || gone(i + 1, j) || gone(i, j - 1) || gone(i, j + 1) || gone(i - 1, j - 1) || gone(i + 1, j - 1) || gone(i - 1, j + 1) || gone(i + 1, j + 1);
+  const quad = (tx0, ty0, tx1, ty1, cv) => {
+    tx1 = Math.min(P.width, tx1); ty1 = Math.min(P.height, ty1); if (tx1 <= tx0 || ty1 <= ty0) return;
     const a = o.flip ? B.x1 - tx1 * B.m : B.x0 + tx0 * B.m, b = o.flip ? B.x1 - tx0 * B.m : B.x0 + tx1 * B.m;
     strQuad(P, Math.round(PX(a)), Math.round(PY(B.top + ty0 * B.m)), Math.round(PX(b)), Math.round(PY(B.top + ty1 * B.m)), !!o.flip,
-      Object.assign({ sr: [tx0, ty0, tx1 - tx0, ty1 - ty0] }, o2 || { cov: eg ? Math.max(cov, STR_EDGE_COV) : cov, cell, seed }));
-    i = e;
+      Object.assign({ sr: [tx0, ty0, tx1 - tx0, ty1 - ty0] }, o2 || { cov: cv, cell, seed }));
+  };
+  for (let j = 0; j < nr; j++) for (let i = 0; i < nc;) {
+    if (gone(i, j)) { i++; continue; }
+    if (!edge(i, j)) { let e = i + 1; while (e < nc && !gone(e, j) && !edge(e, j)) e++; quad(i * cs, j * cs, e * cs, (j + 1) * cs, cov); i = e; continue; }
+    // an edge piece: its small blocks, kept by how far each is from the break against its noise (a coarse half and a fine half), in runs along each row
+    const n = Math.ceil(cs / sb);
+    for (let b = 0; b < n; b++) {
+      let run = -1, rc = 0;
+      for (let a = 0; a <= n; a++) {
+        let keep = false, cv = 0;
+        if (a < n) {
+          const tx = i * cs + a * sb, ty = j * cs + b * sb, d = strEdgeDist(gone, i, j, (a + 0.5) / n, (b + 0.5) / n);
+          const h = 0.55 * strNoise(Math.floor(tx / (2 * sb)), Math.floor(ty / (2 * sb)), k) + 0.45 * strNoise(tx, ty, k + 3.1);
+          keep = d > 0.08 + 0.7 * h; cv = Math.max(cov, d < 0.35 + 0.2 * h ? 0.97 : STR_EDGE_COV - 0.25);
+        }
+        if (run >= 0 && (!keep || cv !== rc)) { quad(i * cs + run * sb, j * cs + b * sb, Math.min((i + 1) * cs, i * cs + a * sb), Math.min((j + 1) * cs, j * cs + (b + 1) * sb), rc); run = -1; }
+        if (keep && run < 0) { run = a; rc = cv; }
+      }
+    }
+    i++;
   }
 }
 // (the land's pass, renderLandObjects0 - 50-land-units) each structure in view, in the hour's light. Each one's still picture
