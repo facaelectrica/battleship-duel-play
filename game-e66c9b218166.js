@@ -3474,7 +3474,7 @@ function swHostReady() {
    step); at most 8 a wake-up - behind that, the game runs slower, never different (nothing thinned or skipped: each tick is
    1/120 s of game time). The page grants one credit a frame with its inputs ('in'); after the next tick the worker spends
    it on a snapshot, so the page has one to fold in at each frame and never two. */
-const SWH = { on: false, hold: false, t0: 0, done: 0, credit: 0, q: [], tickMs: 0, behind: 0, sent: 0, timer: 0, ev: [] };
+const SWH = { storeSig: null, on: false, hold: false, t0: 0, done: 0, credit: 0, q: [], tickMs: 0, behind: 0, sent: 0, timer: 0, ev: [] };
 function swHostGo(m) {
   SWH.hold = !!m.hold;
   if (!SWH.on) { SWH.on = true; SWH.t0 = performance.now(); SWH.done = 0; swHostLoop(); }
@@ -3531,11 +3531,19 @@ function swHostLoop() {
 // (the page's menus: some of the game's steps look at them - a held trigger, the weather's clock under the settings)
 function swHostUi(u) { ui.title = u[0]; ui.menu = u[1]; ui.settings = u[2]; }
 // the page built a new world: the same mode, controls and saved world here, built the same, then the page's tables put in
+// a fingerprint of the page's saved keys as sent (swBootData's store): its keys in order and their text
+function swStoreSig(st) { let h = 0x811c9dc5; for (const k of Object.keys(st || {}).sort()) { const t = k + '\u0001' + st[k] + '\u0002'; for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 16777619); } return h >>> 0; }
 function swHostResync(m) {
   const story = !!(m.store && m.store.bd_world === 'story'), other = story !== STORY_WORLD;   // (the page took the other world in place - worldSwitch, 00-world.js: this worker too)
   if (other) STORY_WORLD = story;
   localStorage.clear(); for (const k in m.store) localStorage.setItem(k, m.store[k]);
-  if (other) worldReload();
+  // (user Nov 17 15:39: "Why arent all modes (including story) reading from the vehicle properties" / 15:41 "please check") the world read again
+  // whenever what was saved changed since it last read it - not only when the page took the other world: the GAME EDITOR's work (structures, the
+  // ground's shapes, lakes, nature areas, wrecks, prefabs, prices, launch zooms, the vehicles' numbers...) is saved on the page while it holds this
+  // worker, and this worker kept the world it read when it started (seen on the user's GTX: six edited, all six the old ones here after PLAY)
+  const sig = swStoreSig(m.store);
+  if (other || sig !== SWH.storeSig) worldReload();
+  SWH.storeSig = sig;
   ctlPick[0] = m.ctl[0]; ctlPick[1] = m.ctl[1]; MODE = m.mode; EXTRA = m.extra || null;   // (a second person on a side: their seat here too)
   if (m.ui) swHostUi(m.ui);
   applyMode(); builtViewW = 0; resize();
@@ -7499,7 +7507,7 @@ const BIOME_SURF_DEF = {
   sea: [{ m: 'sand', a: 18, b: 40, w: 1 }],   // (Nov 7: the sea's floor painted - the ground's seaFloor, 50-land-zz-grid-wgsl.js)
 };
 let BIOME_SURF = JSON.parse(JSON.stringify(BIOME_SURF_DEF));
-try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && typeof o === 'object') for (const k in BIOME_SURF_DEF) if (Array.isArray(o[k]) && !(['sea', 'desert', 'mountain', 'volcanic', 'swamp'].includes(k) && !(o.v >= 3))) BIOME_SURF[k] = o[k].filter(L => L && typeof L.m === 'string' && isFinite(L.a) && isFinite(L.b)); } catch (e) { }
+worldLoad(() => { BIOME_SURF = JSON.parse(JSON.stringify(BIOME_SURF_DEF)); try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && typeof o === 'object') for (const k in BIOME_SURF_DEF) if (Array.isArray(o[k]) && !(['sea', 'desert', 'mountain', 'volcanic', 'swamp'].includes(k) && !(o.v >= 3))) BIOME_SURF[k] = o[k].filter(L => L && typeof L.m === 'string' && isFinite(L.a) && isFinite(L.b)); } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 const biomeSurfSave = () => { try { localStorage.setItem('bd_biome_surf', JSON.stringify(Object.assign({}, BIOME_SURF, { v: 3, sides: typeof BIOME_SIDES !== 'undefined' ? BIOME_SIDES : {}, bg: typeof BIOME_BG !== 'undefined' ? BIOME_BG : {}, far: typeof BIOME_FAR !== 'undefined' ? BIOME_FAR : {}, cave: typeof BIOME_CAVE !== 'undefined' ? BIOME_CAVE : {}, lake: typeof BIOME_LAKE !== 'undefined' ? BIOME_LAKE : {} }))); } catch (e) { } };
 // a biome's layer of material m (its first): its thickness at x, world units (null: none) - between MIN and MAX on the ground's wobble
 function surfLayer(biome, m) { const L = BIOME_SURF[biome]; return L ? L.find(q => q.m === m) || null : null; }
@@ -7511,7 +7519,7 @@ function surfThick(L, x, k) { const u = 0.5 + 0.5 * (L.w != null ? L.w : 1) * su
 // (bd_biome_surf's 'sides'); the defaults are the look there is now
 const BIOME_SIDES_DEF = { sg: 0, roots: 0.22, shade: 1, fade: 56 };
 let BIOME_SIDES = {};
-try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.sides && typeof o.sides === 'object') BIOME_SIDES = o.sides; } catch (e) { }
+worldLoad(() => { BIOME_SIDES = {}; try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.sides && typeof o.sides === 'object') BIOME_SIDES = o.sides; } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 const biomeSides = n => Object.assign({}, BIOME_SIDES_DEF, BIOME_SIDES[n] || {});
 // (user Nov 7 21:18, his picture of a mountain's rock: "the rock size in the mountains should be a LOT smaller. I should have an option to edit that
 // in the Biome Editor Terrain Surface") STONE SIZE: every stone and boulder in a biome's ground times this (TERRAIN SURFACE > STONES; kept with the
@@ -7530,7 +7538,7 @@ const colBiome = c => land.bio && land.bio[c] ? [null, 'ice', 'swamp', 'volcanic
 // its flowers, DECK 5 the tree rows (the desert's dunes and city), DECK 6 the mountains (the desert's mesas): a biome's own values over the world's
 // FAR SCENERY ones (NSKY.P - GAME EDITOR > FAR SCENERY), none of its own: the world's. Kept with the layers (bd_biome_surf's 'bg')
 let BIOME_BG = {};
-try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.bg && typeof o.bg === 'object') BIOME_BG = o.bg; } catch (e) { }
+worldLoad(() => { BIOME_BG = {}; try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.bg && typeof o.bg === 'object') BIOME_BG = o.bg; } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 // (the Biome Editor's DECKS bar: each far deck's SHOW toggle - the view only, never saved; index 4..6, false hides it - drawLandBg0, drawLandTrees, fieldH, the flowers)
 const DECK_SHOW = [];
 const UW_SHOW = [], CAVE_SHOW = [];
@@ -7558,7 +7566,7 @@ const BIOME_CAVE_DEF = {
   volcanic: { hue: [70, 62, 64], bright: 0.42, rough: 1.6, stal: 0.6, smite: 1.0, sand: 0, weed: 0, coral: 0 },
 };
 let BIOME_CAVE = {};
-try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.cave && typeof o.cave === 'object') BIOME_CAVE = o.cave; } catch (e) { }
+worldLoad(() => { BIOME_CAVE = {}; try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.cave && typeof o.cave === 'object') BIOME_CAVE = o.cave; } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 // a biome's cave value k: its own, else its default, else the world's (the CAVE sliders)
 let CAVE_WORLD_P = null;                                  // (the world's cave settings - the caves' P, set by caveVal, 50-land-zz-cavelook.js)
 function biomeCave(bn, k) {
@@ -7620,7 +7628,7 @@ const BIOME_LAKE_DEF = {
   volcanic: { col: [120, 40, 16], k: 0.3, murk: 0.4 }, sea: { col: [20, 60, 110], k: 0, murk: 0 },
 };
 let BIOME_LAKE = {};
-try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.lake && typeof o.lake === 'object') BIOME_LAKE = o.lake; } catch (e) { }
+worldLoad(() => { BIOME_LAKE = {}; try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.lake && typeof o.lake === 'object') BIOME_LAKE = o.lake; } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 const biomeLake = (bn, k) => { const o = BIOME_LAKE[bn], d = BIOME_LAKE_DEF[bn] || BIOME_LAKE_DEF.forest; return o && o[k] != null ? o[k] : d[k]; };
 
 /* ---- (user Nov 7: "Decks 4-6 as plain decks, no names. Each can add prefabs, import a sprite from the game's art, or be a meadow surface with editable
@@ -7635,7 +7643,7 @@ const FAR_SPRITES = { fn: ['NEAR TREES', 4], ff: ['FAR TREES', 5], fm: ['MOUNTAI
 const farDef = bn => bn === 'sea' ? { 4: [], 5: [], 6: [] } : bn === 'desert' ? { 4: [{ k: 'meadow' }], 5: [{ k: 'sprite', s: 'dd' }, { k: 'sprite', s: 'dc' }], 6: [{ k: 'sprite', s: 'dm' }] }
   : bn === 'tropical' ? { 4: [{ k: 'meadow' }], 5: [], 6: [] } : { 4: [{ k: 'meadow' }, { k: 'sprite', s: 'fn' }], 5: [{ k: 'sprite', s: 'ff' }], 6: [{ k: 'sprite', s: 'fm' }] };
 let BIOME_FAR = {}, FAR_VER = 1;
-try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.far && typeof o.far === 'object') BIOME_FAR = o.far; } catch (e) { }
+worldLoad(() => { BIOME_FAR = {}; try { const o = JSON.parse(localStorage.getItem('bd_biome_surf') || 'null'); if (o && o.far && typeof o.far === 'object') BIOME_FAR = o.far; } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 const farValid = q => q && (q.k === 'meadow' || (q.k === 'sprite' && FAR_SPRITES[q.s]) || (q.k === 'sea' && SEA_ITEMS[q.s]) || (q.k === 'cave' && CAVE_ITEMS[q.s]) || (q.k === 'pf' && typeof q.p === 'string'));
 /* ---- (user Nov 8 22:05: "In the Biome Editor, when I open Deep Sea ... I should see the DECKS, with the rocks and algae that it has so I can edit how it
    should look") the ocean's own scenery as the DEEP SEA biome's deck entries { k: 'sea', s } - on its UNDERWATER DECKS (user 22:45): the near-black rocks and weed in front of everything (DECK 0),
@@ -8719,8 +8727,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1054;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 16:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1055;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 16:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -53946,7 +53954,7 @@ function landTowersBuild() {
   gunsApply();                                           // (the GUN structures: which towers are armed, their second guns)
 }
 let LAND_STRUCTS = STRUCT_DEF.map(o => Object.assign({}, o));
-try { const o = JSON.parse(localStorage.getItem('bd_land_structs') || 'null'); if (structsValid(o)) LAND_STRUCTS = structsFit(o); } catch (e) { }
+worldLoad(() => { LAND_STRUCTS = STRUCT_DEF.map(o => Object.assign({}, o)); try { const o = JSON.parse(localStorage.getItem('bd_land_structs') || 'null'); if (structsValid(o)) LAND_STRUCTS = structsFit(o); } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 /* (Nov 1, user 16:26: "I thought we would do everything structures?") the built-in pads' records (the airports' flat ground,
    the launch pads' ground) made part of structures once (bd_ground_conv - 50-zz-struct.js structsConvert): each record's
    host - an airport's RUNWAY, the pads' LAUNCH PAD - carries it (o.pad = { i: its record, a, b: its span from the host's x }),
@@ -59371,11 +59379,10 @@ const vegSetsLoad = o => { if (!o) return false; const v2 = (o.v | 0) >= 2;
   for (const n in VEG_UW) rocksToPrefabs(VEG_UW[n], n);   // (a built-in ROCK FORMATIONS on an underwater deck: the ROCK prefabs in its place - user Nov 9 09:09)
   VEG_DH = v2 && o.dh && typeof o.dh === 'object' ? JSON.parse(JSON.stringify(o.dh)) : vegDhOld();
   VEG_DECKS = VEG_SETS[VEG_SET]; FAR_VER++; FAR_C = {}; return true; };
-vegSetsLoad(JSON.parse(JSON.stringify(VEG_BAKED.sets)));   // (Nov 4: the lab's sets - 00-veg-baked.js - then this browser's own)
-try { vegSetsLoad(JSON.parse(localStorage.getItem('bd_vegdecks') || 'null')); } catch (e) { }
+worldLoad(() => { vegSetsLoad(JSON.parse(JSON.stringify(VEG_BAKED.sets))); try { vegSetsLoad(JSON.parse(localStorage.getItem('bd_vegdecks') || 'null')); } catch (e) { }
+  if (!VEG_MODE && VEG_SETS.tropical) { VEG_SET = 'tropical'; VEG_DECKS = VEG_SETS.tropical; } }); // (the game: the BEACH (tropical) ground always plants the BEACH biome - whichever biome the BIOME EDITOR was left on; the other biomes' grounds keep the old vegetation until theirs are planted)   // (Nov 4: the lab's sets - 00-veg-baked.js - then this browser's own)   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 // (Nov 8: the Biome Editor in and out in place - vegSetsMode as it goes in, the biome it was left on; and as it comes out, BEACH again)
 function vegSetsMode() { if (VEG_MODE) { try { vegSetsLoad(JSON.parse(localStorage.getItem('bd_vegdecks') || 'null')); } catch (e) { } } else if (VEG_SETS.tropical) { VEG_SETS[VEG_SET] = VEG_DECKS; VEG_SET = 'tropical'; VEG_DECKS = VEG_SETS.tropical; } }
-if (!VEG_MODE && VEG_SETS.tropical) { VEG_SET = 'tropical'; VEG_DECKS = VEG_SETS.tropical; }   // (the game: the BEACH (tropical) ground always plants the BEACH biome - whichever biome the BIOME EDITOR was left on; the other biomes' grounds keep the old vegetation until theirs are planted)
 // (the far pictures and the meadow made again - FAR_VER - only when what's on the decks of them changed, not at every AMOUNT or ATMOSPHERE moved)
 let vegFarSig = '';
 const vegFarMark = () => { const g = VEG_SET + JSON.stringify((VEG_UW.sea || []).map(L => L.map(e => e.s || e.p))) + JSON.stringify(VEG_CAVE[VEG_SET] || []) + JSON.stringify(VEG_DECKS.map(L => L.filter(e => e.k === 'sprite' || e.k === 'meadow' || e.k === 'sea').map(e => e.k + (e.s || '')))); if (g !== vegFarSig) { vegFarSig = g; FAR_VER++; FAR_C = {}; } };
@@ -59406,7 +59413,8 @@ const VEG_SHOW = DECK_SHOW;   // (every deck's SHOW in the Biome Editor - the vi
    bd_vegprefabs: { names: { id: name }, custom: [{ id: 'pf-n', base: prefab id, name }] } ---- */
 const VEG_BASE_KEY = { palm: 'palm-tropical', bush1: 'facebush-3', bush2: 'facebush-5', bush3: 'facebush-2', jungle1: 'fol-1', jungle2: 'fol-2' };
 const VEG_BASE_LAB = {}; for (const k in VEG_PREFABS) VEG_BASE_LAB[k] = VEG_PREFABS[k].lab;
-let VEG_PF = Object.assign({ names: {}, custom: [], comps: [], compNames: {}, hidden: [] }, JSON.parse(JSON.stringify(VEG_BAKED.pf)));   // (Nov 4: the lab's prefabs, then this browser's own)
+const VEG_PF_DEF = () => Object.assign({ names: {}, custom: [], comps: [], compNames: {}, hidden: [] }, JSON.parse(JSON.stringify(VEG_BAKED.pf)));
+let VEG_PF = VEG_PF_DEF();   // (Nov 4: the lab's prefabs, then this browser's own)
 const vegPfKey = id => VEG_BASE_KEY[id] || id;                                      // (a prefab's shapes key: its kind's, or its own pf-n)
 const vegPfOfKey = key => { for (const k in VEG_BASE_KEY) if (VEG_BASE_KEY[k] === key) return k; return VEG_PREFABS[key] ? key : null; };
 const folBase = key => { if (!key || !key.startsWith('pf-')) return key; const c = VEG_PF.custom.find(q => q.id === key); return c ? vegPfKey(c.base) : 'palm-tropical'; };   // (its rig and picture: its base kind's)
@@ -59415,10 +59423,9 @@ function vegPfApply() {
   for (const k in VEG_BASE_LAB) VEG_PREFABS[k].lab = VEG_PF.names[k] || VEG_BASE_LAB[k];
   for (const c of VEG_PF.custom) { const B = VEG_PREFABS[c.base]; if (!B) continue; VEG_PREFABS[c.id] = Object.assign({}, B, { lab: c.name, make: Object.assign({}, B.make, { pf: c.id }), seed: B.seed + 7 * (+c.id.slice(3) || 1) }); }
 }
-try { const o = JSON.parse(localStorage.getItem('bd_vegprefabs') || 'null'); if (o && o.custom) VEG_PF = { names: o.names || {}, custom: o.custom, comps: o.comps || [], compNames: o.compNames || {}, hidden: o.hidden || [] }; } catch (e) { }
+worldLoad(() => { VEG_PF = VEG_PF_DEF(); try { const o = JSON.parse(localStorage.getItem('bd_vegprefabs') || 'null'); if (o && o.custom) VEG_PF = { names: o.names || {}, custom: o.custom, comps: o.comps || [], compNames: o.compNames || {}, hidden: o.hidden || [] }; } catch (e) { } vegPfApply(); });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 // (user Nov 4 11:54: "How do I delete existing prefabs?") a starting prefab deleted is hidden - its rig and its components stay for the prefabs built on them
 const vegPfShown = id => !(VEG_PF.hidden && VEG_PF.hidden.includes(id));
-vegPfApply();
 const vegPfSave = () => { vegPfApply(); try { localStorage.setItem('bd_vegprefabs', JSON.stringify(VEG_PF)); } catch (e) { } };
 // the shapes a plant is drawn from: its prefab's own (made in the editors), or its kind's
 const folKeyOf = it => it.pf && FOL_SHAPES[it.pf] ? it.pf : (rigName(it) === 'fol' ? 'fol-' + it.fol : rigName(it));                           // (the editor's VISIBILITY: each deck shown or hidden - a view, not saved)
@@ -59943,8 +59950,8 @@ function rigPerchAt(j, dt) {
 let FOL_SHAPES = {};
 // (a shape set's caches - its mask pieces, masks, triangles: '_' keys - never kept: 08:40, a cache saved came back as a plain object)
 const FOL_NOCACHE = (k, v) => k && k[0] === '_' ? undefined : v;
-try { FOL_SHAPES = JSON.parse(localStorage.getItem('bd_foliage') || '{}', FOL_NOCACHE) || {}; } catch (e) { FOL_SHAPES = {}; }
-FOL_SHAPES = Object.assign(JSON.parse(JSON.stringify(VEG_BAKED.foliage)), FOL_SHAPES);   // (Nov 4: the lab's shapes - 00-veg-baked.js - under this browser's own)
+worldLoad(() => { try { FOL_SHAPES = JSON.parse(localStorage.getItem('bd_foliage') || '{}', FOL_NOCACHE) || {}; } catch (e) { FOL_SHAPES = {}; }
+  FOL_SHAPES = Object.assign(JSON.parse(JSON.stringify(VEG_BAKED.foliage)), FOL_SHAPES); });   // (Nov 4: the lab's shapes - 00-veg-baked.js - under this browser's own)   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 function folSave() { try { localStorage.setItem('bd_foliage', JSON.stringify(FOL_SHAPES, FOL_NOCACHE)); } catch (e) { } }
 const folRig = key => { key = folBase(key); return key.startsWith('fol-') ? rigLat(+key.slice(4)) : rigCut(key); };
 const folPic = key => { key = folBase(key); return key.startsWith('fol-') ? rigFolPic(+key.slice(4)) : tropPic(key); };
@@ -64349,7 +64356,7 @@ const STORY_ZOOM = { key: null, lv: null, manual: false, mv: 0, moving: false, s
    Vehicles section"): the view's width in metres, set in the GAME EDITOR's VEHICLES tab (its STORY ZOOM box), kept in this
    browser (bd_story_zoom: { type: [close, medium] }); unset, from the vehicle's length */
 let STORY_ZW = {};
-try { const o = JSON.parse(localStorage.getItem('bd_story_zoom') || 'null'); if (o && typeof o === 'object') STORY_ZW = o; } catch (e) { }
+worldLoad(() => { STORY_ZW = {}; try { const o = JSON.parse(localStorage.getItem('bd_story_zoom') || 'null'); if (o && typeof o === 'object') STORY_ZW = o; } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 function storyZoomDef(sv) { if (sv === 'cessna') return [70, 420]; const D = STR_VEHS[sv], L = D && D.fam === 'car' ? 5 : sv === 'jet' ? 3.5 : sv === 'motor' ? strTypeLenM('motor') : 11.3; return [Math.round(Math.max(45, 4 * L)), Math.round(Math.max(130, 12 * L))]; }
 const storyZoomOf = sv => STORY_ZW[sv] || storyZoomDef(sv);
 function storyZoomWidth() {
@@ -65229,7 +65236,7 @@ function colvDraw() {
 }
 // ---- BATTLE ZOOM LEVELS: LAUNCH_ZOOM, steps in (+) or out (-) from the harbour's view, as the code has them by default
 const LAUNCH_ZOOM_DEF = Object.assign({}, LAUNCH_ZOOM), LAUNCH_ZOOM_LAB = { ship: 'BATTLESHIP', sub: 'SUB', plane: 'PLANE' };
-try { const o = JSON.parse(localStorage.getItem('bd_launch_zoom') || 'null'); if (o) for (const k in LAUNCH_ZOOM) if (Number.isInteger(o[k])) LAUNCH_ZOOM[k] = o[k]; } catch (e) { }
+worldLoad(() => { Object.assign(LAUNCH_ZOOM, LAUNCH_ZOOM_DEF); try { const o = JSON.parse(localStorage.getItem('bd_launch_zoom') || 'null'); if (o) for (const k in LAUNCH_ZOOM) if (Number.isInteger(o[k])) LAUNCH_ZOOM[k] = o[k]; } catch (e) { } });   // (a world loader - read again with the world: the simulation worker's copy too, swHostResync)
 NSKY.editor.TUNE.pane('COLLISION', (pane, el) => {
   const T = NSKY.editor.TUNE, box = el('div', 'cat'); box.appendChild(el('h4', '', 'SHOW HIT AREAS'));
   const sets = [];                                                   // (each row's setter: SHOW ALL / HIDE ALL - user Nov 2 20:37)
