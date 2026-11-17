@@ -8689,8 +8689,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1015;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 21:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1016;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 21:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10020,7 +10020,8 @@ function topLayout() {
   // (user Oct 26: "It's important the world button stays in the same place, it's confusing if you move it like that
   // when it's open" - and the menu button beside it: open, the world and menu buttons stay where they were, play and
   // the eye come in to the world button's right, and the sliders start under the menu button, clear of the sun)
-  const stack = !ui.title && (!ONEVIEW() || TWOBAR()), corner = !ui.title && ONEVIEW() && !TWOBAR();
+  // (TANK VS TANK, user Nov 16 20:51: "the menu with the world and the buttons ... on the left side. Top" - the middle is the score's: 50-zzzz-tvt.js)
+  const corner = !ui.title && ((ONEVIEW() && !TWOBAR()) || TVT), stack = !ui.title && !corner && (!ONEVIEW() || TWOBAR());
   const row = !ui.title && !stack && !corner;
   return {
     gear: stack ? [cx - 21, y] : corner ? [8, y] : row ? [cx - 72, y] : [cx - 48, y], menu: stack ? [cx - 21, y + 48] : corner ? [56, y] : row ? [cx - 21, y] : [cx + 6, y],
@@ -71299,7 +71300,7 @@ function tvtFocus() {
 // the bar at the top of the screen: each side's flag and rounds won, the round, and the wind - its way and strength
 function tvtDraw() {
   if (!TVT || ui.title) return;
-  const L = topLayout(), cx = ubw >> 1, y = L.menu[1] + (uiArt.menuBtn ? uiArt.menuBtn.height : 40) + 6, fw = 30, fh = 22;   // (under the top's own buttons: the world's gear, the menu)
+  const cx = ubw >> 1, y = (ui.top || 12) + 4, fw = 30, fh = 22;   // (the top's own buttons - the world's gear, the menu - in the top left corner: topLayout)
   const sc = 3, txt = TV.wins[SIDE(0) ? 1 : 0] + ' - ' + TV.wins[SIDE(0) ? 0 : 1];   // (left side's score first)
   const tw = textWidth(txt) * sc, bw = tw + 2 * fw + 40;
   ug.fillStyle = 'rgba(4,7,15,0.55)'; ug.fillRect(cx - (bw >> 1) - 6, y - 4, bw + 12, fh + 30);
