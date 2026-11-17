@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1050, build: 'NOV 17 16:14', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1050, build: 'NOV 17 16:15', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -8918,7 +8918,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1050;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 16:14';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 17 16:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71611,12 +71611,13 @@ const TVT_WINS = 3;                                      // (best of five)
 const TVT_FIELD = 1300;                                  // (the field at least this wide, world units - about 200 m; the zoom the level that shows it whole - user Nov 16 20:48: "2x closer")
 const TVT_OVER_S = 3.5;                                  // (a round's end: the lost tank's blast and wreck watched this long, then the next round)
 // the match: each side's rounds won, the round it's on, the round's seed (its world and conditions), the field's width; a round over:
-// who lost it (-1: both) and how long ago
-const TV = { wins: [0, 0], round: 1, seed: 0, w: 0, over: null, overT: 0, keep: false, in: false };
+// who lost it (-1: both) and how long ago; wait: the shots still in the air when the first tank was lost (their ids - tvtStep)
+const TV = { wins: [0, 0], round: 1, seed: 0, w: 0, over: null, overT: 0, wait: null, keep: false, in: false };
 const TVT_ROW = worldRow({
   w0: [() => TV.wins[0], v => { TV.wins[0] = v | 0; }], w1: [() => TV.wins[1], v => { TV.wins[1] = v | 0; }],
   round: [() => TV.round, v => { TV.round = v | 0 || 1; }], seed: [() => TV.seed, v => { TV.seed = v >>> 0; }], fw: [() => TV.w, v => { TV.w = +v || 0; }],
   over: [() => TV.over, v => { TV.over = v == null ? null : v | 0; }], overT: [() => TV.overT, v => { TV.overT = +v || 0; }],
+  wait: [() => TV.wait ? TV.wait.join(',') : '', v => { TV.wait = v ? String(v).split(',').map(Number) : null; }],
 });
 defTable('tvt', () => [TVT_ROW], { make: () => TVT_ROW });
 // a seeded source of its own for one round (mulberry32 of the round's seed): the same seed, the same world and conditions
@@ -71690,7 +71691,7 @@ function tvtOut() {
 // a round's world: from the menu's PLAY or PLAY AGAIN a new match; the next round (tvtNext) keeps the score
 function tvtRound() {
   if (!TV.keep) { TV.wins = [0, 0]; TV.round = 1; }
-  TV.keep = false; TV.over = null; TV.overT = 0;
+  TV.keep = false; TV.over = null; TV.overT = 0; TV.wait = null;
   TV.seed = tvtNewSeed();
   tvtWorldIn();
 }
@@ -71735,7 +71736,13 @@ function tvtStep(dt) {
   if (!TVT || ui.winner != null || netGuestHold()) return;
   if (TV.over == null) {
     const gone = [0, 1].map(p => { const t = tankOf(p); return !t || t.state !== 'alive'; });
-    if (gone[0] || gone[1]) { TV.over = gone[0] && gone[1] ? -1 : gone[0] ? 0 : 1; TV.overT = 0; }
+    if (!gone[0] && !gone[1]) { TV.wait = null; return; }
+    // (user Nov 17 15:14: "after a player get hit, if there are still missiles in the air, we wait for them to hit. if they also hit and destroy the other
+    // tank, then its a draw") the shots in the air when the first tank is lost still count: the round is decided once each has come down (a new shot
+    // fired after isn't waited for); both lost by then - a draw, the round played again
+    if (TV.wait == null) { const c = shells.c; TV.wait = []; for (let i = 0; i < shells.n; i++) if (!c.under[i]) TV.wait.push(c.sq[i]); }
+    if (TV.wait.some(cpuShotFlying)) return;
+    TV.over = gone[0] && gone[1] ? -1 : gone[0] ? 0 : 1; TV.overT = 0; TV.wait = null;
     return;
   }
   TV.overT += dt;
@@ -71747,8 +71754,8 @@ function tvtStep(dt) {
   TV.keep = true;
   setTimeout(() => { if (TVT && ui.winner == null && !ui.title) restartGame(true); }, 0);   // (out of the step: LOADING..., the next round's world, built - restartGame)
 }
-// while the round is over, no new tank comes in (canTake)
-const tvtOver = () => TVT && TV.over != null;
+// while the round is over - or a tank is lost and the shots in the air are still to come down - no new tank comes in (canTake)
+const tvtOver = () => TVT && (TV.over != null || TV.wait != null);
 // (user Nov 16 20:52: "the explosion it makes should be half the size"; 21:01: "maybe 3 times smaller ... The hole should not be bigger than the size of a
 // tank") a blast on the land and a tank's, its size in TANK VS TANK: the tank's own shot digs a hole as wide as a tank (LAND_BLAST's crater a radius)
 const tvtBlastK = () => TVT ? TANK_L / (2 * LAND_BLAST.tank[0] * BLAST_K) : 1;
