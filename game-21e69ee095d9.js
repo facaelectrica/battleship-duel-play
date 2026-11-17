@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1066;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 18:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1067;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 18:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -38912,7 +38912,7 @@ function simShot(x, y, vx, vy, ty, maxT, g = SHELL_G, solid = false) {
   const dt = SUBSTEP;                                      // (shells move in the physics substeps)
   for (let t = 0; t < (maxT || 14); t += dt) {
     vx += (windAt(y) * 0.5 - vx) * 0.002; vy += g * dt; x += vx * dt; y += vy * dt;
-    if (solid) { if (lakeAt(x) && y >= surfaceY(x) - 1) return { x, y, t, hit: 'water' }; if (landSolid(x, y) || strShotHit(x, y)) return { x, y, t, hit: 'ground' }; }   // (a building in the way too - strShotHit)
+    if (solid) { if (lakeAt(x) && y >= surfaceY(x) - 1) return { x, y, t, hit: 'water' }; if (landSolid(x, y)) return { x, y, t, hit: 'ground' }; const so = strShotHit(x, y); if (so) return { x, y, t, hit: 'ground', str: so }; }   // (a building in the way too - strShotHit: which one, str)
     if (vy > 0 && y >= ty) return { x, y, t, hit: null };
   }
   return { x, y, t: maxT || 14, hit: null };
@@ -38931,8 +38931,13 @@ const shellSpeed = (power, from) => (SHELL_V0 + power * SHELL_VPOW) * (from === 
 const shellG = from => SHELL_G * gunK(from);
 // the angle and power that put a shell from (x0, y0) down on (tx, ty): the lowest of a few elevations that reaches (and, with
 // `solid`, whose path clears the ground and water on the way - over a hill, a higher arc), the power found by halving. muzL: the
-// muzzle that far out from (x0, y0) along the barrel at each elevation (a tank's, from its turret's pivot). null if it's out of reach
-function solveShot(x0, y0, baseVx, tx, ty, from, elevs, muzL = 0, solid = false) {
+// muzzle that far out from (x0, y0) along the barrel at each elevation (a tank's, from its turret's pivot). null if it's out of reach.
+// out.wall: with every arc shut, where the arc shut by the building nearest the target meets it ({ x, y, str } - the CPU can blast its way
+// through there; not its own cover in front of it)
+const strMid = o => { const q = strBox(o); return (q.x0 + q.x1) / 2; };
+const strNearer = (a, b, x) => a !== b && Math.abs(strMid(a) - x) < Math.abs(strMid(b) - x);
+function solveShot(x0, y0, baseVx, tx, ty, from, elevs, muzL = 0, solid = false, out = null) {
+  if (out) out.wall = null;
   const dir = Math.sign(tx - x0) || 1, dist = Math.abs(tx - x0), g = shellG(from);
   for (const e of elevs) {
     const el = e * Math.PI / 180, mx = x0 + Math.cos(el) * dir * muzL, my = y0 - Math.sin(el) * muzL;
@@ -38942,7 +38947,7 @@ function solveShot(x0, y0, baseVx, tx, ty, from, elevs, muzL = 0, solid = false)
     let a = 0, b = 1;
     for (let i = 0; i < 16; i++) { const m = (a + b) / 2; if (land(m) < dist) a = m; else b = m; }
     const pw = (a + b) / 2, f = fly(pw, solid);
-    if (f.hit === 'water' || (f.hit === 'ground' && Math.abs(f.x - tx) > TANK_L * 0.5)) continue;   // (in the way: a hill, a lake - the next arc)
+    if (f.hit === 'water' || (f.hit === 'ground' && Math.abs(f.x - tx) > TANK_L * 0.5)) { if (out && f.str && (!out.wall || strNearer(f.str, out.wall.str, tx))) out.wall = { x: f.x, y: f.y, str: f.str }; continue; }   // (in the way: a hill, a lake, a building - the next arc)
     return { elev: e, power: pw, dir, t: f.t };
   }
   return null;
@@ -39065,16 +39070,27 @@ function cpuSlew(B, g, want, dt, lo, hi) {
   g.aimShow = 1.2;
   return Math.abs(g.elev - want) < 0.6;
 }
+// the elevations a gun tries, lowest first
+const cpuElevs = from => from === 'tower' ? [28, 40, 55, 68] : from === 'tank' ? [14, 22, 32, 45, 58, 70] : [32, 45, 58, 70];
 // aim the cannon (ship or tower) at a target, leading it; fire when on and ready
 // (from: 'ship', 'tower', 'tank' - its shell's own flight, shellSpeed / shellG. o: { muzL - the muzzle that far along the barrel from
 // (x0, y0); solid - the path checked against the ground and water on the way })
 function cpuCannon(B, dt, gun, x0, y0, baseVx, facing, from, target, ty, ready, fire, o = {}) {
   const T = B.T, p = B.p;
   let tx = target.x;
-  const elevs = from === 'tower' ? [28, 40, 55, 68] : from === 'tank' ? [14, 22, 32, 45, 58, 70] : [32, 45, 58, 70];
-  const solve = x => solveShot(x0, y0, baseVx, x, ty, from, elevs, o.muzL || 0, !!o.solid);
+  const elevs = cpuElevs(from), out = o.solid ? {} : null;
+  const solve = (x, y = ty) => solveShot(x0, y0, baseVx, x, y, from, elevs, o.muzL || 0, !!o.solid, out);
   let sol = solve(tx);
   if (sol && T.lead && target.vx) { tx = target.x + (target.vx || 0) * sol.t * T.lead; sol = solve(tx) || sol; }
+  // (user Nov 17 16:57, TANK VS TANK: "it should try to destroy a building if you're hiding behind it") every arc shut by a building nearer the
+  // target than the gun - the target hiding behind it, not the gun's own cover: the shot at the building itself, where the lowest arc meets it,
+  // blasting a way through piece by piece (strHit). Still the same target (its first-shot wait and walking in kept - B.aimT)
+  B.breach = null;
+  if (!sol && out && out.wall) {
+    const w = out.wall, mid = strMid(w.str);
+    if (Math.abs(mid - target.x) < Math.abs(mid - x0)) { sol = solve(w.x, w.y); if (sol) B.breach = w.str; }
+  }
+  B.noSol = !sol;
   if (!sol) return false;
   // its aim is rough at first and (medium, hard) tightens shot by shot on the same target, the way a person
   // walks their shells in
@@ -39093,6 +39109,7 @@ function cpuCannon(B, dt, gun, x0, y0, baseVx, facing, from, target, ty, ready, 
     const n = shells.n; fire();
     B.fireT = T.gap; B.shotsAt++; spoil(); cpuCount(p, 'shell');
     if (shells.n > n) B.shotSq = shells.c.sq[shells.n - 1];
+    if (B.breach) cpuCount(p, 'breach');
     return true;
   }
   return false;
@@ -42823,6 +42840,23 @@ function cpuTankLook(B, t, tg, dt) {
     }
   }
 }
+// (user Nov 17 16:57, TANK VS TANK: "If a tank has a building close by, I think it could use it as cover") a building close by with the enemy
+// beyond it: the spot just behind its near wall (a little clear of it), if a shot from there still reaches the enemy over its roof - the
+// nearest such, within COVER_NEAR tank lengths of the tank. Looked for once a second; null none. B.coverT held off after it found it had no shot there
+const COVER_NEAR = 6;                                             // (tank lengths)
+function cpuCover(B, t, tg, dt) {
+  if ((B.coverT = (B.coverT || 0) - dt) > 0) return B.cover;
+  B.coverT = 1; B.cover = null;
+  const dir = Math.sign(tg.x - t.x) || 1, [px, py] = tankPivot(t), up = t.y - py;
+  let bd = COVER_NEAR * TANK_L;
+  for (const q of strShooting().L) {
+    const x = dir > 0 ? q.x0 - TANK_L * 0.6 : q.x1 + TANK_L * 0.6, d = Math.abs(x - t.x);
+    if (d > bd || (tg.x - (dir > 0 ? q.x1 : q.x0)) * dir < TANK_L || !dryLand(x) || x < PLAY_L() + TANK_X0 || x > PLAY_R() - TANK_X0) continue;   // (the enemy beyond its far wall; on dry ground in the play)
+    if (!solveShot(x, landTop(x) - up, 0, tg.x, tg.y - 8, 'tank', cpuElevs('tank'), TANK_GUN_L, true)) continue;   // (no shot from there)
+    B.cover = x; bd = d;
+  }
+  return B.cover;
+}
 function cpuTank(B, dt) {
   const p = B.p, t = tankOf(p), E = cpuLandEnemy(p), g = guns[p];
   if (!t || t.state !== 'alive') { cpuSetMG(B, false); B.goT = 0; return; }
@@ -42846,10 +42880,16 @@ function cpuTank(B, dt) {
   const tg = E.tank || E.heliDown;
   if (!tg) { cpuDrive(B, 0); return; }
   cpuTankLook(B, t, tg, dt);
-  // where to be: clear of a shot (cpuTankLook's spot, until it's there or the time's up), else a good range (nearer on hard)
+  // where to be: clear of a shot (cpuTankLook's spot, until it's there or the time's up), else behind a building close by (cpuCover), else a
+  // good range (nearer on hard)
   const dx = tg.x - t.x, want = 620 - 120 * B.level;
+  // (no shot from where it is for a while - a hill, a building it can't break in the way: on toward the enemy, its cover left for now)
+  B.noSolT = B.noSol && !(B.goT > 0) ? (B.noSolT || 0) + dt : 0;
+  if (B.noSolT > 2.5) { B.noSolT = 0; B.cover = null; B.coverT = 6; B.goX = t.x + (Math.sign(dx) || 1) * vehCpuRnd(1.5, 3) * TANK_L; B.goT = 4; cpuCount(p, 'reposition'); }
+  const cover = cpuCover(B, t, tg, dt);
   let go;
   if (B.goT > 0) { B.goT -= dt; const d = B.goX - t.x; go = Math.abs(d) > 6 ? Math.sign(d) : 0; if (!go) B.goT = 0; }
+  else if (cover != null) go = Math.abs(cover - t.x) > 6 ? Math.sign(cover - t.x) : 0;
   else go = Math.abs(dx) > want + 80 ? Math.sign(dx) : Math.abs(dx) < want - 260 ? -Math.sign(dx) : 0;
   const open = tankWayOpen(t, go);
   if (!open && B.goT > 0) B.goT = 0;                            // (its way out is shut: it stands, and its gun answers)
