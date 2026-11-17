@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1024;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1025;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -49175,6 +49175,13 @@ function stepLandRest(dt) {
 // in with a splash and sinks to the bottom (seabedY - in a lake, its bed); on land it settles into what's dug under it
 function stepArmyWreck(w, dt) {
   const half = w.kind === 'tank' ? TANK_L * 0.4 : 20;
+  // thrown by its own blast (killTank): up and over, turning, till it comes down on the ground (or into water: then it sinks as it would)
+  if (w.air) {
+    w.vy += 520 * dt; w.x = clamp(w.x + w.vx * dt, PLAY_L() + half, PLAY_R() - half); w.y += w.vy * dt; w.a = (w.a || 0) + (w.av || 0) * dt;
+    const g = onLand(w.x) && !lakeAt(w.x) ? landBelow(w.x, w.y - 12) : surfaceY(w.x);
+    if (w.vy > 0 && w.y >= g) { w.air = false; w.y = g; w.av = 0; if (onLand(w.x) && !lakeAt(w.x)) restLanded(w.x, w.y, w.vy, 1); w._rv = 1; w.vx = w.vy = 0; }   // (_rv: it settles onto the ground's slope from here)
+    else return;
+  }
   if (w.deck) {
     const c = w.deck; w.x += c.dx || 0;
     const d = shipTopAt(w.x, w.y - 10);
@@ -54815,13 +54822,17 @@ function tankHitBlast(t, power) {
   if (SIM_ONLY) return;
   flashes.addRow({ x, y: y - 6, r: 22 + 12 * power, life: 0, max: 0.16 });
   const n = Math.round(30 + 30 * power);
+  // (user Nov 16 21:23: "the explosion should be from the tank itself ... Now the explosion seems to behave like fire or smoke. It goes up in the air";
+  // "the explosion should render behind the tank") the blast bursts out of the tank every way at once and is gone in a moment - no rising column -
+  // drawn behind it (drawFire's behind: before the land's pass, where the tank is)
   for (let i = 0; i < n; i++) {
-    const a = -Math.PI / 2 + luRnd(-0.9, 0.9), sp = Math.pow(landUnitR(), 0.6) * (90 + 80 * power);
-    spawnFlame(x + luRnd(-10, 10), y + luRnd(-4, 3), Math.cos(a) * sp * 0.7 + t.vx * 0.5, Math.sin(a) * sp - luRnd(20, 70), luRnd(1.25, 1.55), luRnd(3, 6) * (0.75 + 0.35 * power), luRnd(1.1, 1.6));
+    const a = luRnd(0, Math.PI * 2), sp = Math.pow(landUnitR(), 0.6) * (90 + 80 * power);
+    spawnFlame(x + luRnd(-10, 10), y + luRnd(-4, 3), Math.cos(a) * sp + t.vx * 0.5, Math.sin(a) * sp * 0.8, luRnd(1.25, 1.55), luRnd(3, 6) * (0.75 + 0.35 * power), luRnd(5, 8));
+    flameLast().behind = true;
   }
   for (let i = 0; i < 10 * power + 4; i++) spawnEmber(x + luRnd(-8, 8), y - luRnd(0, 6), t.vx * 0.3, 1.6);
   spawnSparks(x, y, 16 + 10 * power, 300);
-  for (let i = 0; i < 6 + 6 * power; i++) spawnSmoke(x + luRnd(-6, 6), y - luRnd(14, 34), { kind: 'blast', dark: 0.1, r: luRnd(3.5, 6) * (0.7 + 0.4 * power), grow: luRnd(3, 5), lift: 40, vx: luRnd(-10, 10), vy: luRnd(-70, -35), life: luRnd(6, 9), alpha: luRnd(0.55, 0.75) });
+  for (let i = 0; i < 2 + 3 * power; i++) spawnSmoke(x + luRnd(-6, 6), y - luRnd(14, 34), { kind: 'blast', dark: 0.1, r: luRnd(3.5, 6) * (0.7 + 0.4 * power), grow: luRnd(3, 5), lift: 40, vx: luRnd(-10, 10), vy: luRnd(-70, -35), life: luRnd(6, 9), alpha: luRnd(0.55, 0.75) });
   // the debris: dark shards and a few in the tank's own paint, flung high
   const col = tankArtOf(t.id).col, own = css3(col.map(v => v * 0.8));
   const k0 = debris.n;
@@ -54838,7 +54849,11 @@ function killTank(t) {
   // (user Oct 27, [18]: on a ship's deck its wreck rides her; over water it falls in and sinks; on the ground, or held on
   // a magnet over it, it lies (falls) there - stepArmyWreck)
   const dry = onLand(t.x) && !lakeAt(t.x);
-  landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.carry != null || t.hook ? 0 : t.a, facing: t.facing, t: 0, burn: 8, deck: t.deck || null });
+  // (user Nov 16 21:23: "the tank getting charred and moving with the explosion") its wreck - burnt (drawLandTank's wreck) - thrown up by its own blast,
+  // turning, to come down where it lands (stepArmyWreck's air); on a deck or held by a magnet it stays where it was
+  const thrown = !t.deck && t.carry == null && !t.hook && onLand(t.x);
+  landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.carry != null || t.hook ? 0 : t.a, facing: t.facing, t: 0, burn: 8, deck: t.deck || null,
+    air: thrown, vx: thrown ? t.vx * 0.5 + luRnd(-45, 45) : 0, vy: thrown ? -luRnd(150, 210) : 0, av: thrown ? luRnd(-2.5, 2.5) : 0 });
   if (dry && t.carry == null && !t.hook) landCarve(t.x, t.y, 10);
   emit('lost', { kind: 'tank', o: t });
   landWait[t.id].tank = LAND_RESPAWN;
