@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1028;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1029;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -9274,7 +9274,7 @@ function weaponState(p, wk) {
     if (wk === 'mine') return { f: VTUNE.sub.mineReload > 0 ? (sb.mk || 0) / VTUNE.sub.mineReload : 0, off: (sb.mines || 0) <= 0 || sb.state !== 'out', n: sb.mines || 0 };
     return { f: sb.tk / VTUNE.sub.torpReload, off: sb.torps <= 0, n: wk === 'torp' ? sb.torps : -1 };
   }
-  if (m === 'tank') { const t = tankOf(p), out = !t || t.state !== 'alive'; if (wk === 'smoke') return smokeBtn(t, SMOKE_SHIP_S, out); return wk === 'mg' ? { f: 0, off: out, n: -1 } : { f: out ? 0 : t.rk / VTUNE.tank.reload, off: out, n: -1 }; }   // (the tank's missiles never run out: no count)
+  if (m === 'tank') { const t = tankOf(p), out = !t || t.state !== 'alive' || !!t.wet;   /* (in water: its weapons off - stepTank) */ if (wk === 'smoke') return smokeBtn(t, SMOKE_SHIP_S, out); return wk === 'mg' ? { f: 0, off: out, n: -1 } : { f: out ? 0 : t.rk / VTUNE.tank.reload, off: out, n: -1 }; }   // (the tank's missiles never run out: no count)
   if (m === 'heli') { const h = heliOf(p), up = h && h.state === 'fly'; return wk === 'mg' ? { f: 0, off: !up, n: -1 } : { f: up ? h.rk / VTUNE.heli.reload : 0, off: !up || h.rockets <= 0, n: h ? h.rockets : 0 }; }
   if (m === 'tower') return wk === 'mg' ? { f: 0, off: !towerUsable(myTw(p)), n: -1 } : { f: tguns[p].reload / VTUNE.tower.reload, off: !towerStands(myTw(p)), n: -1 };   // (on the pier gun of a fallen tower: no cannon)
   if (m === 'plane') {
@@ -54533,7 +54533,7 @@ const HELI_CEIL = WATER_Y - 95 - 1.5 * VIEW_H;
 const LAND_RESPAWN = 4;                                // seconds before a lost tank or helicopter is replaced
 // (Nov 11, tables) the tanks and the army helicopters: record tables, every hull a row - each side's own (tankOf(p), heliOf(p): none
 // till one comes in), the placed ones, the lost ones still going down (05-game-state.js THE ARMY'S HULLS)
-const tanks = new ColTable(vehRec(...VEH_REC, 'num: id fac x y a vx vy facing input hp ammo rk recoil mgT fall cap smokeT hitT fixT enter wsp way thr brk slipV stuckT track',
+const tanks = new ColTable(vehRec(...VEH_REC, 'num: id fac x y a vx vy facing input hp ammo rk recoil mgT fall cap smokeT hitT fixT enter wsp way thr brk slipV stuckT track hitX hitY wet',   // (hitX / hitY: where the last blow landed - tankBlowUp; wet: in water over its tracks)
   'txt: kind state', 'val: deck wd dropT hook carry cpuIn sandT smk cpuElev cpuPower bumpT kw grip speed reload aKick scorch', ...CIV_REC));
 const helis = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy facing tilt hp rockets rk mgT rotor spin cap smokeT input fixT roll lampPh enter col turb washT bitT',
   'txt: kind state', 'val: turn big flip rope cpu cpuIn cpuStick deck magBroken doorT sea edgeT _civT cpuElev spinV lostDone wrecked downT susY width reload mag scorch', ...CIV_REC));
@@ -54743,7 +54743,14 @@ function stepTank(t, dt) {
   if (!SIM_ONLY && Math.abs(t.slipV || 0) > 0.6 && t.vy === 0 && landUnitR() < dt * (4 + Math.abs(t.slipV) * 3)) { const bx = t.x - (t.way || way) * TANK_L * 0.4, s = carGrd(bx, t.y); if (s === 'sand' || s === 'paved') { const r0 = luRnd(3, 5); spawnSmoke(bx + luRnd(-6, 6), t.y - r0 - 1, { kind: 'gun', mist: true, fam: s === 'sand' ? 'sand' : 'gray', r: r0, grow: luRnd(5, 8), rmax: luRnd(20, 30), lift: 4, vx: -(t.way || way) * luRnd(10, 30), vy: -luRnd(8, 24), life: luRnd(2, 3.2), alpha: luRnd(0.35, 0.55), stream: smStream(t, 'sand') }); } else kickLandDust(bx, t.y, 3); }
   tankSettle(t, dt, false);
   tankWheels(t, dt);
-  if (tankUnder(t)) { tankSink(t); return; }                   // (into the lake or the sea - off a ship, dropped: over its tracks, it sinks)
+  // (user Nov 16 21:38: "when there's a lake and the [tank] goes underwater, there's no bubbles, there's no splash, there's nothing ... It should not be able
+  // to fire, it should do some bubbles because the tank is wet") into water over its tracks it fords: a splash as it goes in, bubbles off it while
+  // it's in, its gun silent (tankFire - its button off: 17-hud.js); in over its turret it's drowned - it sinks (tankSink) as one driven in always did
+  { const sy = !dryLand(t.x) && !t.deck ? surfaceY(t.x) : null, wet = sy != null && t.y > sy + 2;
+    if (wet && !t.wet && !SIM_ONLY) splash(t.x, t.vx, 40, { size: 0.7, wide: 1.2 });
+    t.wet = wet ? 1 : 0;
+    if (wet && tankPivot(t)[1] > sy + 4) { tankSink(t); return; }
+    if (wet && !SIM_ONLY && landUnitR() < dt * 18) addBubble(t.x + luRnd(-TANK_L * 0.4, TANK_L * 0.4), t.y - luRnd(2, 10), luRnd(-6, 6), -luRnd(15, 35), luRnd(0.8, 1.8)); }
   // repaired and rearmed on its own ground, standing still
   if (onOwnGround(p, t.x) && Math.abs(t.vx) < 3) { t.fixT += dt; if (t.fixT > 2.4) { t.fixT = 0; if (t.hp < VTUNE.tank.hp) t.hp = Math.min(VTUNE.tank.hp, t.hp + 1); else if (t.ammo < VTUNE.tank.ammo) t.ammo++; } } else t.fixT = 0;
   // (and its own smoke, user Oct 27: refilled where it's repaired - 15 s in three, once it's mended and rearmed)
@@ -54770,7 +54777,7 @@ function tankBarrel(t) {
   return [ux * ca - uy * sa, ux * sa + uy * ca];
 }
 function tankFire(t) {
-  if (!t || t.state !== 'alive') return;
+  if (!t || t.state !== 'alive' || t.wet) return;   // (in water: its gun silent - stepTank)
   if (t.rk > 0) return;
   // (user Oct 25: the tank's missiles never run out - only the reload)
   t.rk = VTUNE.tank.reload; t.recoil = 1;
@@ -71286,7 +71293,7 @@ function tvtNewSeed() { try { const a = new Uint32Array(1); crypto.getRandomValu
 function tvtZoom() { let z = ZOOM_LEVELS[0]; for (const l of ZOOM_LEVELS) if (VIEW_W / l >= TVT_FIELD && l > z) z = l; return z; }
 // the biomes a round picks from: every land biome (the skin letters - 09-sea-surface.js SKINS; not the sea)
 const TVT_BIOMES = ['F', 'D', 'T', 'M', 'I', 'W', 'V'];
-const TVT_TOP = -450, TVT_FOOT = 600;                      // (the shapes' own frame - from the sea's line, + down: the ground's mean height about 40 m over the sea; its bottom)
+const TVT_TOP = -150, TVT_FOOT = 600;                      // (the shapes' own frame - from the sea's line, + down: the ground about 23 m over the sea; its bottom. Kept inside the ground's grid (LT_Y0 -20, world y): v1018-1028's -450 put the hills over it - no dark under them, a lake's water never counted as water - user Nov 16 21:38)
 // the round's world, as world keys (the Biome Editor's test world's way - vegWorld, 00-world.js): one SOLID shape the field's width W, its top a
 // line of hills; a hill in the middle or a lake there (its pocket's level in LAKE_SET); nothing placed. Returns { map, lake }
 function tvtWorld(seed, W) {
