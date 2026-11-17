@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1035;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 09:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1036;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 10:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -22921,11 +22921,14 @@ void main() {
     // (THE BURN, 13:23 - the user: "It needs to actually affect and use the way we render and draw the balls for the clouds. Like we do the
     // thunder lighting. We want to feel the '3d' of it". A puff the light pass found burning (its code: 2 + the way to the disc in
     // sixteenths of a turn, 16 all round, + how much) is lit on its side toward the disc - a crescent of the burn's colour on the ball,
-    // its middle and far side left in the cloud's own tone - all round its rim when the disc is right behind it. In thirds: flat steps)
+    // its middle and far side left in the cloud's own tone. In thirds: flat steps)
+    // (user Nov 17 09:09, TANK VS TANK at sunset, a cloud low over the trees in front of the setting sun circled: "They look like cells" - with the
+    // disc right behind, every ball got a ring of the burn all round its own rim: a heap of bubbles. Now such a ball takes the burn whole, by
+    // how much its billow's side faces out and the cloud is thin there (burnB, the light pass) - the billows' outline glows, not each ball)
     if (v_r1.w > 1.5) {
       float w = v_r1.w - 2.0, ai = floor(w), bb = (w - ai) / 0.98;
       vec2 nn = vec2(dx, dy) / max(R, 1.0); float rr = length(nn);
-      float cres = R < 2.5 ? 1.0 : ai > 15.5 ? smoothstep(0.3, 0.95, rr) : clamp(dot(nn, vec2(cos(ai * 0.3927), sin(ai * 0.3927))) * 1.5 + 0.15 * rr - 0.1, 0.0, 1.0);   // (a puff too small for a crescent: the billow's own side carries it)
+      float cres = R < 2.5 || ai > 15.5 ? 1.0 : clamp(dot(nn, vec2(cos(ai * 0.3927), sin(ai * 0.3927))) * 1.5 + 0.15 * rr - 0.1, 0.0, 1.0);   // (a puff too small for a crescent: the billow's own side carries it)
       burnK = floor(bb * cres * 3.0 + 0.4) / 3.0;
     }
   } else {
@@ -31536,7 +31539,10 @@ fn cellY(py: f32) -> f32 { return floor(py + 0.5) / h.gb.z + h.gd.y; }
     if (u < 1.0) {
       let kh = hk(K, 1000u + 2u * li); let g = u01(hk(K, 1001u + 2u * li));
       let br = (4.0 + 15.0 * (1.0 - exp(-age / 1.6))) * (0.6 + 0.6 * g); let ang = u01(kh) * PI * 2.0; let d = br * (0.4 + 0.8 * g);
-      let ab = clamp(pow(1.0 - u, 1.2) * tLate(age) * 1.6, 0.0, 1.0);
+      // (user Nov 17 09:12: the puffs after a tank fires "just suddenly disappear. They should fade away instead" - they faded on the shell's clock,
+      // 16 s, but they go with the trail's first piece, and a missile's trail is gone three times as fast (ak, THIN_AGE): cut off at ~4.7 s still
+      // two-thirds there. They fade on their trail's own clock now - nothing left of them when their piece goes)
+      let ae = age * ak; let ab = clamp(pow(1.0 - min(1.0, ae / 16.0), 1.2) * tLate(ae) * 1.6, 0.0, 1.0);
       addSeed(cellX(x1 + cos(ang) * d * 1.2 * SV), cellY(y1 + min(sin(ang) * d * 0.7 - age * 0.6, it.c.z - br * 0.8) * SV), br * kx * sqrt(ab), (g - 0.5) * br * kx, ab, 3.0, kh, 0u);
     }
   }
@@ -49183,13 +49189,17 @@ function stepLandRest(dt) {
 }
 // an army wreck (a tank's, a helicopter's): on a ship's deck it rides her, and goes down with her; over water it falls
 // in with a splash and sinks to the bottom (seabedY - in a lake, its bed); on land it settles into what's dug under it
+// (user Nov 17 09:14: "the turret that blows up, it should fall in relation to the terrain ... right now the turret itself sometimes goes inside the
+// ground") a wreck held at its middle (oy: from its middle down to its foot - the turret's, killTank) lands and lies with its foot on the ground,
+// not its middle; and it comes to rest on a face - right way up or on its roof, whichever it's nearer - along the ground's slope
+const wreckLie = (a, slope) => Math.round((a - slope) / Math.PI) * Math.PI + slope;
 function stepArmyWreck(w, dt) {
-  const half = w.kind === 'tank' ? TANK_L * 0.4 : w.kind === 'turret' ? TANK_L * 0.15 : 20;
+  const half = w.kind === 'tank' ? TANK_L * 0.4 : w.kind === 'turret' ? TANK_L * 0.15 : 20, oy = w.oy || 0;
   // thrown by its own blast (killTank): up and over, turning, till it comes down on the ground (or into water: then it sinks as it would)
   if (w.air) {
     w.vy += 520 * dt; w.x = clamp(w.x + w.vx * dt, PLAY_L() + half, PLAY_R() - half); w.y += w.vy * dt; w.a = (w.a || 0) + (w.av || 0) * dt;
-    const g = onLand(w.x) && !lakeAt(w.x) ? landBelow(w.x, w.y - 12) : surfaceY(w.x);
-    if (w.vy > 0 && w.y >= g) { w.air = false; w.y = g; w.av = 0; if (onLand(w.x) && !lakeAt(w.x)) restLanded(w.x, w.y, w.vy, 1); w._rv = 1; w.vx = w.vy = 0; }   // (_rv: it settles onto the ground's slope from here)
+    const g = onLand(w.x) && !lakeAt(w.x) ? landBelow(w.x, w.y + oy - 12) : surfaceY(w.x);
+    if (w.vy > 0 && w.y + oy >= g) { w.air = false; w.y = g - oy; w.av = 0; if (oy) w.a = wreckLie(w.a, restGround(w.x, g, half)[1]); if (onLand(w.x) && !lakeAt(w.x)) restLanded(w.x, g, w.vy, 1); w._rv = 1; w.vx = w.vy = 0; }   // (_rv: it settles onto the ground's slope from here)
     else return;
   }
   if (w.deck) {
@@ -49198,7 +49208,7 @@ function stepArmyWreck(w, dt) {
     if (deckUp(c) && d && d.c === c && d.y < w.y + 8) { w.y = d.y; if (w.kind === 'tank') w.a = c.a + c.tilt; return; }
     w.deck = null; w._rv = 0;                                      // (she's gone from under it: it falls)
   }
-  if (onLand(w.x) && !lakeAt(w.x)) { if (w._rv || landWoke(w.x, half) || w.y < landBelow(w.x, w.y - 6) - 1) { if (restSettle(w, w.x, w.y, half, dt)) { w.y = RS.foot; if (w.kind === 'tank') w.a = RS.a; restLanded(w.x, w.y, RS.hit, 1); } } return; }
+  if (onLand(w.x) && !lakeAt(w.x)) { const ft = w.y + oy; if (w._rv || landWoke(w.x, half) || ft < landBelow(w.x, ft - 6) - 1) { if (restSettle(w, w.x, ft, half, dt)) { w.y = RS.foot - oy; if (w.kind === 'tank') w.a = RS.a; else if (oy) w.a = wreckLie(w.a, RS.a); restLanded(w.x, RS.foot, RS.hit, 1); } } return; }
   if (w.bed) return;
   // (on the harbour's deck: ground while it's there - the pier gone from under it, it falls in - user Oct 27)
   if (!onLand(w.x) && !w.wet) { const ht = harbourTop(w.x, w.y - 6); if (ht < Infinity) { w.onDeck = true; if (w.y < ht - 0.5 || w._rv) { w._rv = Math.min(600, (w._rv || 0) + 520 * dt); w.y = Math.min(ht, w.y + w._rv * dt); if (w.y >= ht - 0.01) { restLanded(w.x, w.y, w._rv, 1); w._rv = 0; } } return; } w.onDeck = false; }
@@ -54850,7 +54860,7 @@ function tankBlowDir(t) {
    wreck and turret thrown (killTank) and the smoke of its burning wreck (stepLandWorld). Its size is the tank's, in every mode */
 function tankBlowUp(t) {
   const [px, py] = tankPivot(t), x = px, y = py + 4, [bx, by] = tankBlowDir(t), R = TANK_L * 0.5;
-  sound('explosion', x, 1); shakeAt(6, x); gridExplosion(x, y, R, 300); guysNear(x, y, R);
+  sound('tankBlow', x); shakeAt(8, x); gridExplosion(x, y, R, 300); guysNear(x, y, R);   // (its own sound - the armour struck, the blast, the turret, the pieces: user Nov 17 09:14)
   if (SIM_ONLY) return;
   flashes.addRow({ x, y, r: R * 0.7, life: 0, max: 0.08 });   // (a quick flash inside the tank, not a white-out over it)
   for (let i = 0; i < 46; i++) {
@@ -54867,7 +54877,7 @@ function tankBlowUp(t) {
 // black smoke over it, and plates and bits of the tank thrown high
 function tankHitBlast(t, power) {
   const [px, py] = tankPivot(t), x = px, y = py - 2;
-  sound('explosion', x, 0.6 + 0.4 * power);
+  sound('explosion', x, 0.6 + 0.4 * power); sound('impact', x);   // (the blast and the shell on its steel)
   shakeAt(4 + 5 * power, x);
   if (SIM_ONLY) return;
   flashes.addRow({ x, y: y - 6, r: 22 + 12 * power, life: 0, max: 0.16 });
@@ -54905,7 +54915,7 @@ function killTank(t) {
   // (user Nov 16 21:32: the turret "separate and go high in the sky. Not too high, but separate from the body as it explodes") its turret thrown off on
   // its own, higher and turning faster, to fall and lie as a wreck of its own
   if (thrown) { const ca = Math.cos(t.a), sa = Math.sin(t.a), lx = ((TANKA.turL + TANKA.turR) / 2 - TCX) * TANK_K * t.facing, ly = ((TANKA.turTop + TANKA.deck) / 2 - TANKA.foot) * TANK_K;
-    landWrecks.push({ kind: 'turret', id: t.id, x: t.x + lx * ca - ly * sa, y: t.y + lx * sa + ly * ca, a: t.a, facing: t.facing, t: 0, burn: 0, air: true,
+    landWrecks.push({ kind: 'turret', id: t.id, x: t.x + lx * ca - ly * sa, y: t.y + lx * sa + ly * ca, a: t.a, facing: t.facing, t: 0, burn: 0, air: true, oy: (TANKA.deck - TANKA.turTop) / 2 * TANK_K,
       vx: t.vx * 0.5 + bx * 70 + luRnd(-20, 20), vy: -luRnd(175, 205), av: (bx || 1) * (t.facing || 1) * luRnd(4.5, 7) }); }   // (user Nov 16 21:45: "it should rotate in the air ... it should not go that high because it should be heavy" - ~half a tank's length up, never under 4.5 turns of a radian a second, the way the blow throws it)
   if (dry && t.carry == null && !t.hook) landCarve(t.x, t.y, 10);
   emit('lost', { kind: 'tank', o: t });
@@ -72166,6 +72176,37 @@ function sfxExplosion(x, power) {
   thump(out, t, 70, 24, 1.1, 1.0);
   noiseShot(out, t + 0.12, 2.0, 'lowpass', 300, 50, 1, 0.5, 0.2);   // the rumble
 }
+// (user Nov 17 09:14: "when a tank gets hit, the sound of the explosion and the tank being hit should be stronger than a normal hit. Right now,
+// it's all the same sound. You should hear the metal and the impact and the destruction of the tank") struck steel ringing: a few inharmonic
+// partials of a heavy plate, each dying on its own - f the lowest, dur how long it rings
+function metalRing(dest, t0, f, dur, peak) {
+  for (const [k, a, d] of [[1, 1, 1], [2.32, 0.7, 0.8], [3.87, 0.5, 0.55], [5.41, 0.32, 0.4], [7.13, 0.2, 0.3]]) {
+    const ctx = SFX.ctx, o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(f * k * (0.99 + 0.02 * seenR('audio')), t0);
+    envGain(g, t0, peak * a, 0.002, dur * d);
+    o.connect(g); g.connect(dest); o.onended = () => { o.disconnect(); g.disconnect(); }; o.start(t0); o.stop(t0 + dur * d + 0.05);
+  }
+}
+// a tank blown apart: the shell's crack on its armour (a clang ringing), the blast through it - heavier and longer than a shell on the ground -,
+// its turret torn off (a second, lower clang a moment after), and its pieces raining down rattling on the ground round it
+function sfxTankBlow(x) {
+  if (!SFX.ctx) return;
+  const out = sfxOut(x, 1.25); if (!out) return;
+  const t = SFX.ctx.currentTime;
+  noiseShot(out, t, 0.12, 'highpass', 3500, 2000, 0.7, 0.9, 0.001);          // the strike: a hard crack
+  metalRing(out, t, 310, 0.9, 0.32);                                        // the armour ringing
+  noiseShot(out, t + 0.02, 0.25, 'bandpass', 1500, 500, 1.2, 0.8);
+  noiseShot(out, t + 0.02, 2.8, 'lowpass', 1400, 50, 0.7, 1.0, 0.01);      // the blast
+  thump(out, t + 0.02, 62, 20, 1.4, 1.0);
+  noiseShot(out, t + 0.15, 2.6, 'lowpass', 260, 40, 1, 0.65, 0.25);         // the rumble
+  metalRing(out, t + 0.22, 170, 1.1, 0.22);                                 // the turret wrenched off
+  noiseShot(out, t + 0.22, 0.3, 'bandpass', 900, 400, 3, 0.35);
+  for (let i = 0; i < 9; i++) {                                             // the pieces coming down: clinks and clanks over a second and a half
+    const ti = t + 0.7 + seenR('audio') * 1.6, f = 500 + seenR('audio') * 1400;
+    metalRing(out, ti, f, 0.18 + 0.2 * seenR('audio'), 0.05 + 0.06 * seenR('audio'));
+    noiseShot(out, ti, 0.05, 'bandpass', f * 2, f * 1.5, 4, 0.12, 0.001);
+  }
+}
 // a shell on bare steel: a clang and a short bang
 function sfxImpact(x) {
   if (!SFX.ctx) return;
@@ -72195,7 +72236,7 @@ function sfxCrash(x, amt) {
 // (engine stage 3) the world's play requests: sound(id, x, a) -> 'sound' (36-zz-events.js), played here. x, a: the sound's
 // own two arguments, whatever they are (mostly where, and how loud; for the UI's, a player or a pad); the sounds made in
 // other files (the plane's, the fireworks', the research ship's...) are listed here too, so every request comes this way
-const SND = { fogHorn: sfxFogHorn, explosion: sfxExplosion, impact: sfxImpact, splash: sfxSplash, crash: sfxCrash,
+const SND = { fogHorn: sfxFogHorn, explosion: sfxExplosion, impact: sfxImpact, tankBlow: sfxTankBlow, splash: sfxSplash, crash: sfxCrash,
   anchorThunk: sfxAnchorThunk, anchorWinch: sfxAnchorWinch, bayDoors: sfxBayDoors, bombDrop: sfxBombDrop, cannon: sfxCannon,
   click: sfxClick, clink: sfxClink, crush: sfxCrush, door: sfxDoor, empty: sfxEmpty, engineDie: sfxEngineDie,
   fwBang: sfxFwBang, fwLaunch: sfxFwLaunch, iceCrack: sfxIceCrack, latch: sfxLatch, marker: sfxMarker, mg: sfxMG,
