@@ -6723,7 +6723,7 @@ function buildWorld0(restore) {
     buildLandUnits(); btMark('units'); buildLakeBoats(); btMark('lakeBoats'); storyBoats(); btMark('storyBoats'); placedBuild();   // (STORY: the boats at the docks - 50-story.js; the editor's placed vehicles - 50-zz-placed.js)
     // (user Nov 1 22:29: PLAY from the editor on the Story world brought the open world's cruise ships and boats) STORY's world is
     // what was placed, the editor's own rule: nothing the open world sends out on its own (edPlacedOnly, 18-zz-photo.js)
-    if (STORY) edPlacedOnly();
+    if (STORY || TVT) edPlacedOnly();                 // (TANK VS TANK too: the two tanks and the land, no airship or traffic of the open world's - user Nov 16 20:48)
     placeKraken(true); btMark('kraken');                // (OPEN WORLD: the kraken, whole, at the deepest point of the floor - 50-land-kraken)
     // (user Oct 25) and each side's second tower, on the mountain at its end of the world, where it sees far
     // (since Oct 28: as many as are placed, each its owner's - LAND_TOWERS, 50-land-tshape)
@@ -8689,8 +8689,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1014;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 21:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1015;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 21:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10903,6 +10903,7 @@ function menuPlay(load) {
   const someone = menuSel.roster.some(q => q.side === 0 || q.side === 1) || (LINK.hosting && linkGuests().some(g => g.side === 0 || g.side === 1)) || menuSel.cpu[0] || menuSel.cpu[1];
   if (VERSUS(menuSel.mode) && !someone) { showToast(menuSel.roster.length ? 'LEFT OR RIGHT TO PICK A SIDE' : 'PRESS A KEY OR BUTTON TO JOIN'); return; }
   const go = () => { menuApply(); ui.resume = false; freshWeather(); restartGame(); WED.played = false; };   // (a game from the menu: not the editor's PLAY)
+  if (menuSel.mode === 'tvt') { tvtEnter(() => { if (load) loadThen(go); else go(); }); return; }   // (the game taken from the worker first - 50-zzzz-tvt.js)
   if (load) loadThen(go); else go(); }
 /* (user Oct 31: "we need to pick 'battle, open world, etc' vs loading everything at the start. Then we get a 'loading....'
    and the game starts.") A game started with a press - NEW GAME, PLAY AGAIN, an online guest's round -
@@ -71164,7 +71165,7 @@ async function subFollow() {
    The page runs the game while the round's world is in (the simulation worker held, as for the Biome Editor and online). The match: a round
    ends when a tank is lost; first to three rounds wins (gameOver - the winner panel, PLAY AGAIN a new match). ---- */
 const TVT_WINS = 3;                                      // (best of five)
-const TVT_FIELD = 2600;                                  // (the field at least this wide, world units - about 400 m; the zoom the level that shows it whole)
+const TVT_FIELD = 1300;                                  // (the field at least this wide, world units - about 200 m; the zoom the level that shows it whole - user Nov 16 20:48: "2x closer")
 const TVT_OVER_S = 3.5;                                  // (a round's end: the lost tank's blast and wreck watched this long, then the next round)
 // the match: each side's rounds won, the round it's on, the round's seed (its world and conditions), the field's width; a round over:
 // who lost it (-1: both) and how long ago
@@ -71183,7 +71184,7 @@ function tvtNewSeed() { try { const a = new Uint32Array(1); crypto.getRandomValu
 function tvtZoom() { let z = ZOOM_LEVELS[0]; for (const l of ZOOM_LEVELS) if (VIEW_W / l >= TVT_FIELD && l > z) z = l; return z; }
 // the biomes a round picks from: every land biome (the skin letters - 09-sea-surface.js SKINS; not the sea)
 const TVT_BIOMES = ['F', 'D', 'T', 'M', 'I', 'W', 'V'];
-const TVT_TOP = -260, TVT_FOOT = 700;                    // (the shapes' own frame - from the sea's line, + down: the ground's mean height about 40 m over the sea; its bottom)
+const TVT_TOP = -200, TVT_FOOT = 600;                    // (the shapes' own frame - from the sea's line, + down: the ground's mean height about 40 m over the sea; its bottom)
 // the round's world, as world keys (the Biome Editor's test world's way - vegWorld, 00-world.js): one SOLID shape the field's width W, its top a
 // line of hills; a hill in the middle or a lake there (its pocket's level in LAKE_SET); nothing placed. Returns { map, lake }
 function tvtWorld(seed, W) {
@@ -71191,12 +71192,12 @@ function tvtWorld(seed, W) {
   const o = (WORLD_PACK && WORLD_PACK.open) || {}, w = {}; for (const k in o) if (/_conv$/.test(k) || k === 'bd_air_ungroup' || k === 'bd_sky_p') w[k] = o[k];   // (the conversions marked done, the sky's settings)
   const SK = TVT_BIOMES[Math.floor(r() * TVT_BIOMES.length) % TVT_BIOMES.length];
   // the hills: two long swells and a shorter one (their slopes the tank can drive - at most about 40 degrees together)
-  const waves = [[rnd(55, 120), rnd(1100, 1800)], [rnd(25, 60), rnd(550, 900)], [rnd(8, 22), rnd(220, 360)]].map(([a, l]) => [a, l, rnd(0, Math.PI * 2)]);
+  const waves = [[rnd(30, 70), rnd(0.55, 0.9) * W], [rnd(12, 32), rnd(0.25, 0.4) * W], [rnd(4, 11), rnd(110, 180)]].map(([a, l]) => [a, l, rnd(0, Math.PI * 2)]);   // (by the field's width: two or so swells across it)
   const mid = W / 2, kind = r() < 0.35 ? 'lake' : r() < 0.55 ? 'hill' : 'open';
-  const hw = kind === 'lake' ? rnd(260, 380) : rnd(320, 480), dep = kind === 'lake' ? rnd(130, 200) : -rnd(130, 240);   // (+ down: a dip; - up: a hill)
+  const hw = (kind === 'lake' ? rnd(0.1, 0.15) : rnd(0.12, 0.18)) * W, dep = kind === 'lake' ? rnd(70, 110) : -rnd(70, 130);   // (+ down: a dip; - up: a hill)
   const bump = x => { const u = (x - mid) / hw; return Math.abs(u) >= 1 ? 0 : 0.5 + 0.5 * Math.cos(Math.PI * u); };
   const yAt = x => TVT_TOP + waves.reduce((s, [a, l, ph]) => s + a * Math.sin(ph + x * Math.PI * 2 / l), 0) + (kind === 'open' ? 0 : dep * bump(x));
-  const STEP = 40, top = [];
+  const STEP = 20, top = [];
   for (let x = 0; x <= W + 0.5; x += STEP) top.push([Math.round(Math.min(W, x)), Math.round(yAt(Math.min(W, x))), SK]);
   if (top[top.length - 1][0] < W) top.push([Math.round(W), Math.round(yAt(W)), SK]);
   const GROUND = [{ k: 'S', gnd: true, p: [[Math.round(W), TVT_FOOT, SK], [0, TVT_FOOT, SK], ...top] }];
@@ -71216,9 +71217,17 @@ function tvtWorld(seed, W) {
 // screen shows at its zoom (TVT_FIELD at least). The page keeps the game while it's in (the worker held)
 function tvtWorldIn() {
   const z = tvtZoom(); TV.w = Math.round(VIEW_W / z);
-  if (!TV.in) { swHold('tvt'); NET_WORLD.pass = new Set(['bd_vtune']); guardOn('Tank vs Tank\'s world'); TV.in = true; }
+  if (!TV.in) { if (!SWB.holds.has('tvt')) swHold('tvt'); NET_WORLD.pass = new Set(['bd_vtune']); guardOn('Tank vs Tank\'s world'); TV.in = true; }
   NET_WORLD.map = tvtWorld(TV.seed, TV.w).map; NET_WORLD.on = true;
   worldReload();
+}
+// the menu's PLAY into it: the game taken from the simulation worker first (a hand-over under way finished, then swHold - as the Biome
+// Editor goes in, 53-veg-editor.js), then the round's world built on the page. (v1014 held it as the world went in: the worker's tables came
+// back after the build and took the tanks away - user Nov 16 20:48, "no tank icon at all")
+function tvtEnter(go) {
+  if (TV.in || SWB.holds.has('tvt')) { go(); return; }
+  const handed = () => new Promise(r => { const f = () => (typeof SW === 'undefined' || !SW.going) ? r() : setTimeout(f, 100); f(); });
+  handed().then(() => swHold('tvt')).then(go).catch(e => { console.error('Tank vs Tank', e); swRelease('tvt'); });
 }
 // out of it (another mode picked, an editor opened): this browser's own world back, checked against the guard's copy; the worker free again
 function tvtOut() {
@@ -71290,7 +71299,7 @@ function tvtFocus() {
 // the bar at the top of the screen: each side's flag and rounds won, the round, and the wind - its way and strength
 function tvtDraw() {
   if (!TVT || ui.title) return;
-  const cx = ubw >> 1, y = (ui.top || 12) + 4, fw = 30, fh = 22;
+  const L = topLayout(), cx = ubw >> 1, y = L.menu[1] + (uiArt.menuBtn ? uiArt.menuBtn.height : 40) + 6, fw = 30, fh = 22;   // (under the top's own buttons: the world's gear, the menu)
   const sc = 3, txt = TV.wins[SIDE(0) ? 1 : 0] + ' - ' + TV.wins[SIDE(0) ? 0 : 1];   // (left side's score first)
   const tw = textWidth(txt) * sc, bw = tw + 2 * fw + 40;
   ug.fillStyle = 'rgba(4,7,15,0.55)'; ug.fillRect(cx - (bw >> 1) - 6, y - 4, bw + 12, fh + 30);
