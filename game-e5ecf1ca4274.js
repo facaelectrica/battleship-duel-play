@@ -8693,8 +8693,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1042;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 11:46';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1043;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 11:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -73206,7 +73206,10 @@ function vzNew() {
 }
 function vegUI(Z) {
   const setInterval = Z.setInterval, setTimeout = Z.setTimeout, requestAnimationFrame = Z.raf, addEventListener = (t, f, o) => Z.on(window, t, f, o);   // (the scope's - above)
-  const wait = () => new Promise(r => { const ok = () => window.__game && __game.veglab && __game.flightlab && __game.fishnet; if (ok()) { r(); return; } const t = setInterval(() => { if (ok()) { clearInterval(t); r(); } }, 100); });   // (in place: the game's hooks are there already)
+  // (in place: the game's hooks are there already. Asked with `in`, never read: a read of __game with no world builds one and steps it 120 times
+  // to settle - worldNow, the tools' way (52-main.js) - which held the page ~1.5 s here; this editor builds its own once, below, and lets it settle
+  // while it's looked at - user Nov 17)
+  const wait = () => new Promise(r => { const ok = () => window.__game && ['veglab', 'flightlab', 'fishnet'].every(k => k in window.__game); if (ok()) { r(); return; } const t = setInterval(() => { if (ok()) { clearInterval(t); r(); } }, 100); });
   const VG = () => __game.veglab, FL = () => __game.flightlab;
   let viewX = 0, feArm = false, FE = null, pickKey = null, strPick = null, selIt = null, vehPick = null;
   const PARKED = new Set();   // (the vehicles spawned in the lab: parked, never driven - 23:02)
@@ -75011,8 +75014,8 @@ function vegUI(Z) {
     Z.ph = 'wait'; await wait(); Z.ph = 'waited';
     if (Z.dead) return;
     try {
-    const g = __game;
-    vegSeat(); builtViewW = 0; resize(); g.ui.title = false; g.ui.resume = false;
+    vegSeat(); builtViewW = 0; resize();                             // (its world built once, here - vegEnter's worldReload only read its keys)
+    const g = __game; g.ui.title = false; g.ui.resume = false;
     Object.assign(g.env, { time: 12, weather: 0.1, rain: 0, wind: 0.35 });   // (a light breeze)
     Z.ph = 'sched'; setTimeout(() => { Z.ph = 'cb';
       g.fishnet.clear(null); g.fishnet.hudOnly([]);                 // (no game buttons till you're in a vehicle)
@@ -75079,6 +75082,9 @@ function vegSeat() {
   VZ.keep = VZ.keep || { mode: menuSel.mode, roster: menuSel.roster.slice(), cpu: menuSel.cpu.slice(), muted: MUTED, env: { time: env.time, weather: env.weather, rain: env.rain, wind: env.wind } };
   menuSel.mode = 'land'; menuSel.roster = [{ dev: 'kb', side: 0 }]; menuSel.cpu = [false, false];   // (nobody on the other side, the CPU neither)
   rosterApply();
+  // (no game buttons till you're in a vehicle - from its first frame: user Nov 17, its first frame drew OPEN WORLD's vehicle tabs, and they made
+  // every land and civilian vehicle's button picture there and then - 17-hud.js makeLandIcons, ~10 s on his PC - for buttons never shown here)
+  HUD_ONLY = new Set();
 }
 // IN: from the title or the GAME EDITOR (its own unsaved changes asked first - 00-world.js). The simulation worker held (the page runs the game while
 // in it), the test world swapped in (vegIn: the guard on), the editor's world built by its own start (vegUI's end: the land, its mode)
