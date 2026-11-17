@@ -4201,7 +4201,7 @@ const VTUNE_DEF = {
   sub: { speedK: 3, torps: 15, torpReload: 1.6, mines: 10, mineReload: 0 },
   plane: { kmh: 300, hits: 3, rockets: 6, rocketReload: 0.8, bombs: 6, bombReload: 0.05, mgRate: 0.075 },
   spitfire: { kmh: 290 },                                              // (the Spitfire's cruise - its weapons and hits are the warplanes', plane above; 29-zzz-warplanes.js)
-  tank: { speed: 58, hp: 3, ammo: 12, reload: 1.4, kw: 1800, grip: 1.25 },   // (user Nov 16 22:25: "accelerate faster and drive a bit faster so they feel more fun to drive" - was 46, 900) (kw: its engine at the tracks; grip: its tracks' against tyres' - the one drive, 50-story-cars.js driveStep)
+  tank: { speed: 58, hp: 3, ammo: 12, reload: 1.4, kw: 3600, grip: 1.25 },   // (user Nov 16 22:25: "accelerate faster and drive a bit faster so they feel more fun to drive" - was 46, 900; Nov 17 17:11: "Tanks need to accelerate faster" - kw was 1800: 90% of top speed 1.2 -> 0.9 s at 58, 2.4 -> 1.5 s at 98) (kw: its engine at the tracks; grip: its tracks' against tyres' - the one drive, 50-story-cars.js driveStep)
   heli: { kmh: 120, hp: 3, rockets: 8, reload: 0.6 },
   minisub: { speed: 120, climb: 80 },                                  // (the research ship's explorer sub: across and up/down; user Oct 30 17:13 - 2x, was 60 and 40)
   tower: { hp: 10, reload: 1.5 },
@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1067;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 18:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1068;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 18:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
