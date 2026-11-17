@@ -8693,8 +8693,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1043;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 11:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1044;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 12:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54989,11 +54989,12 @@ function killTank(t) {
   // (user Oct 27, [18]: on a ship's deck its wreck rides her; over water it falls in and sinks; on the ground, or held on
   // a magnet over it, it lies (falls) there - stepArmyWreck)
   const dry = onLand(t.x) && !lakeAt(t.x);
-  // (user Nov 16 21:23: "the tank getting charred and moving with the explosion") its wreck - burnt (drawLandTank's wreck) - thrown up by its own blast,
-  // turning, to come down where it lands (stepArmyWreck's air); on a deck or held by a magnet it stays where it was
+  // its wreck - burnt (drawLandTank's wreck) - stays on its tracks where it was hit and settles into what's dug under it (stepArmyWreck; on a deck it
+  // rides her, held by a magnet it falls). (User Nov 17 11:04: "When a tank gets shot, it's like jumping. In real life, a tank does not jump when he
+  // gets hit" - since Nov 16 21:23 the hull had been thrown up by its own blast, turning; only the turret is thrown now)
   const thrown = !t.deck && t.carry == null && !t.hook && onLand(t.x), [bx, by] = tankBlowDir(t);
   landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.carry != null || t.hook ? 0 : t.a, facing: t.facing, t: 0, burn: 8, deck: t.deck || null, noTop: thrown,
-    air: thrown, vx: thrown ? t.vx * 0.5 + bx * 50 + luRnd(-15, 15) : 0, vy: thrown ? -luRnd(110, 160) : 0, av: thrown ? luRnd(-1.5, 1.5) : 0 });
+    air: false, vx: 0, vy: 0, av: 0, _rv: thrown ? 1 : 0 });
   // (user Nov 16 21:32: the turret "separate and go high in the sky. Not too high, but separate from the body as it explodes") its turret thrown off on
   // its own, higher and turning faster, to fall and lie as a wreck of its own
   if (thrown) { const ca = Math.cos(t.a), sa = Math.sin(t.a), lx = ((TANKA.turL + TANKA.turR) / 2 - TCX) * TANK_K * t.facing, ly = ((TANKA.turTop + TANKA.deck) / 2 - TANKA.foot) * TANK_K;
