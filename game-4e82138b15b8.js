@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1059;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 17:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1060;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 17:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -23091,6 +23091,7 @@ void main() {
   // (Oct 29: reach 2.6 - at 1.6 the slope still turned round each lobe. A billow's own disc (a fill: its a4 is its lobe's normal,
   // as a3) sits at the billow's middle, deep in the body: it is lit as the billow's front, or it showed as a dark round hole)
   vec3 Pb = P; if (a4.xyz == a3.xyz) Pb.z += 0.82 * a4.w;
+  vec3 nB = n;   // (the body's own normal alone at this place on the screen - THE BURN's: no lobe's or billow's share in it)
   // (Oct 29, user: the "mess" in a tower's lit lower half at sunset - speckled bright and dark bits. Each puff read the body's
   // soft shade at its own depth, and the puffs of one billow sit a billow's radius in front of or behind each other, so near
   // the shade's edge neighbours fell either side of it. Now the body is read on the cloud's front surface at the puff's place
@@ -23105,7 +23106,7 @@ void main() {
     vec3 g = vec3(0.0);
     for (int k = 0; k < nL; k++) { vec4 a = T(u_o.x + k * 2), b = T(u_o.x + k * 2 + 1); vec3 rr = vec3(a.w, b.x, b.y) * 2.6, o = (Pb - a.xyz) / rr; float qq = dot(o, o); if (qq < 1.0) g += -4.0 * (1.0 - qq) * o / rr; }
     float gLen = length(g);
-    if (gLen > 0.0) { n += (-g / gLen - n) * (u_body * u_bk.y); float l = length(n); n = l > 0.0 ? n / l : n; }
+    if (gLen > 0.0) { nB = -g / gLen; n += (nB - n) * (u_body * u_bk.y); float l = length(n); n = l > 0.0 ? n / l : n; }
   }
   float v = dot(n, L) * 0.5 + 0.5, openR = 1.0;
   // the shadow of the clouds that shade it (its casters' lobes, in the world)
@@ -23185,9 +23186,11 @@ void main() {
       float inD = 1.0 - smoothstep(0.6, 1.05, dD / max(1.0, u_ag2.x));
       // (by the cloud's body - its normal n, as its outline's glow (g) - never by a billow's own face: a billow's side burnt wherever it
       // faced out, deep in the body too, and the billows in front left the lit ones behind as rings round them - the user's "cells", Nov 17)
-      float bl = length(n.xy), bfc = bl > 1e-4 && dD > 1e-4 ? max(0.0, dot(n.xy / bl, toD / dD)) : 0.0;
+      // (16:30 - on the GTX the back deck near the disc was still dotted: n keeps its lobe's share, and balls of lobes lying over each other
+      // burnt a third apart. The body's normal alone (nB) is the same for every ball at one place: the burn in bands across the cloud)
+      float sdB = 1.0 - abs(nB.z), bl = length(nB.xy), bfc = bl > 1e-4 && dD > 1e-4 ? max(0.0, dot(nB.xy / bl, toD / dD)) : 0.0;
       // (and only where the disc's light gets through: the cloud's thin edge (Tk, the body behind it toward the disc))
-      burnB = nearP * open * clamp(side * mix(bfc, 1.0, inD) * 1.6, 0.0, 1.0) * smoothstep(0.04, 0.3, Tk) * (1.0 - shB) * u_ag.x;
+      burnB = nearP * clamp(sdB * mix(bfc, 1.0, inD) * 1.6, 0.0, 1.0) * smoothstep(0.04, 0.3, Tk) * (1.0 - shB) * u_ag.x;
     }
     vB = vB - g + gB - shB * 0.5 * max(0.0, vB - g - 0.15);
     v = mix(v, vB, AG); rimAdd += AG * gB; castK = max(castK, AG * SH * shadowed(odCB));
