@@ -4132,30 +4132,28 @@ const SRC = {
   forestMtn: __ART[47],     // (gen/open/forest.py: from the user's Nature Art Kit, Oct 26)
   forestFar: __ART[48],
   forestNear: __ART[49],
-  forestRocks: __ART[50],
-  desertMtn: __ART[51],     // (gen/open/desert.py: from the user's Desert Art Kit, Oct 27)
-  desertDunes: __ART[52],
-  desertCity: __ART[53],     // (the user's own city, Oct 27, 16:55)
-  desertArt: __ART[54],
-  hangar2: __ART[55],         // (gen/open/hangar2.py: the user's red hangar, Oct 26)
-  wrecks: __ART[56],           // (gen/open/wrecks.py: the user's four pirate wrecks, Oct 26)
-  linerBare: __ART[57],     // (gen/open/linerparts.py: the liner without her masts, funnels and rigging, Oct 26)
-  linerParts: __ART[58],   // (gen/open/lighthouse_dmg.py: the left harbour's lighthouse in five states of damage, Oct 26)   // (gen/open/containership.py: her deck emptied - the boxes are their own, Oct 26)       // (gen/open/dockart.py: the user's lighthouse and dockside crane, Oct 26)      // (gen/open/civicons.py: the user's civilian category symbols, Oct 26 - ships, planes, helicopters, subs, space)
-  shuttles: __ART[59],      // (gen/open/planesheet.py: the user's orbiter sheet, Oct 26 - three damage rows of the turn)        // (gen/open/cessna2.py: the user's Cessna sheet, Oct 26 - laid out as the fighter's)
-  cessna: __ART[60],          // (gen/open/cessna.py: the user's Civil Air Patrol 182, its navy and red recoloured per livery)
-  jet747: __ART[61],          // (its colour band red: each country's colour goes on it, as on the army's)
-  cruise2: __ART[62],
-  container: __ART[63],
-  tanker: __ART[64],
+  desertMtn: __ART[50],     // (gen/open/desert.py: from the user's Desert Art Kit, Oct 27)
+  desertDunes: __ART[51],
+  desertCity: __ART[52],     // (the user's own city, Oct 27, 16:55)
+  hangar2: __ART[53],         // (gen/open/hangar2.py: the user's red hangar, Oct 26)
+  wrecks: __ART[54],           // (gen/open/wrecks.py: the user's four pirate wrecks, Oct 26)
+  linerBare: __ART[55],     // (gen/open/linerparts.py: the liner without her masts, funnels and rigging, Oct 26)
+  linerParts: __ART[56],   // (gen/open/lighthouse_dmg.py: the left harbour's lighthouse in five states of damage, Oct 26)   // (gen/open/containership.py: her deck emptied - the boxes are their own, Oct 26)       // (gen/open/dockart.py: the user's lighthouse and dockside crane, Oct 26)      // (gen/open/civicons.py: the user's civilian category symbols, Oct 26 - ships, planes, helicopters, subs, space)
+  shuttles: __ART[57],      // (gen/open/planesheet.py: the user's orbiter sheet, Oct 26 - three damage rows of the turn)        // (gen/open/cessna2.py: the user's Cessna sheet, Oct 26 - laid out as the fighter's)
+  cessna: __ART[58],          // (gen/open/cessna.py: the user's Civil Air Patrol 182, its navy and red recoloured per livery)
+  jet747: __ART[59],          // (its colour band red: each country's colour goes on it, as on the army's)
+  cruise2: __ART[60],
+  container: __ART[61],
+  tanker: __ART[62],
   // (the user's sheets, Oct 25 late, cut by gen/open/sheets.py: rows of sprites - see the JSONs)
-  balloons: __ART[65],   // (14 balloons: whole, popped, falling)
-  civhelis: __ART[66],   // (12 helicopters: clean, hit, wrecked; nose left)
-  airport: __ART[67],     // (the user's airport: the hangar, the terminal and its tower; trim red, for the team tint)
-  research: __ART[68],   // (the user's research ship, bow right, its sub cut off: gen/open/research.py)
-  minisub: __ART[69],
-  caveBack: __ART[70],      // (OPEN WORLD's caves: the user's back-wall tiles and stalactites, Oct 28)
-  seaKit: __ART[71],        // (the user's sea kit: rocks, corals, sea fans, sponges - gen/sea_kit.py, SEA_KIT)
-  caveStal: __ART[72],     // (the exploration sub: side, three-quarter, front; nose left)
+  balloons: __ART[63],   // (14 balloons: whole, popped, falling)
+  civhelis: __ART[64],   // (12 helicopters: clean, hit, wrecked; nose left)
+  airport: __ART[65],     // (the user's airport: the hangar, the terminal and its tower; trim red, for the team tint)
+  research: __ART[66],   // (the user's research ship, bow right, its sub cut off: gen/open/research.py)
+  minisub: __ART[67],
+  caveBack: __ART[68],      // (OPEN WORLD's caves: the user's back-wall tiles and stalactites, Oct 28)
+  seaKit: __ART[69],        // (the user's sea kit: rocks, corals, sea fans, sponges - gen/sea_kit.py, SEA_KIT)
+  caveStal: __ART[70],     // (the exploration sub: side, three-quarter, front; nose left)
 };
 
 //@src 01-z-vehicle-tune.js:1
@@ -5020,7 +5018,7 @@ function artStep() {
    pixels); scaled() draws the big one in its place, and whatever is made from a picture (mirrored, team colours,
    charred, cut, darkened) makes the same from its big one (hiPass, 04-art-prep.js).
    ================================================================ */
-const BIGART = {"cruise2":{"n":7,"w":2520,"h":812,"pieces":[[__ART[73],0,0],[__ART[74],630,0],[__ART[75],1960,0]]},"tanker":{"n":6,"w":2040,"h":564,"pieces":[[__ART[76],0,0],[__ART[77],480,0],[__ART[78],1680,0]]},"containerEmpty":{"n":6,"w":2400,"h":750,"pieces":[[__ART[79],0,0],[__ART[80],840,0],[__ART[81],1920,0]]},"sub":{"n":2,"w":1560,"h":620,"pieces":[[__ART[82],0,0],[__ART[83],600,0],[__ART[84],1200,0]]},"subTurn":{"n":2,"w":3144,"h":612,"pieces":[[__ART[85],0,0],[__ART[86],1048,0],[__ART[87],2096,0]]}};
+const BIGART = {"cruise2":{"n":7,"w":2520,"h":812,"pieces":[[__ART[71],0,0],[__ART[72],630,0],[__ART[73],1960,0]]},"tanker":{"n":6,"w":2040,"h":564,"pieces":[[__ART[74],0,0],[__ART[75],480,0],[__ART[76],1680,0]]},"containerEmpty":{"n":6,"w":2400,"h":750,"pieces":[[__ART[77],0,0],[__ART[78],840,0],[__ART[79],1920,0]]},"sub":{"n":2,"w":1560,"h":620,"pieces":[[__ART[80],0,0],[__ART[81],600,0],[__ART[82],1200,0]]},"subTurn":{"n":2,"w":3144,"h":612,"pieces":[[__ART[83],0,0],[__ART[84],1048,0],[__ART[85],2096,0]]}};
 async function loadBigArt() {
   for (const [key, B] of Object.entries(BIGART)) {
     const old = img[key];
@@ -8700,8 +8698,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1045;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 12:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1046;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 12:42';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -44645,7 +44643,6 @@ function drawIslChunks(x0, x1, inLand) {
   // from the grid on the GPU (50-land-zz-grid.js), as the ground in front is: its skins, stones, smooth edge, rims in the sun, the hour's light
   ggDraw(islSlices(x0, x1).filter(k => !seaAtX((k + 0.5) * LT_CHUNK * LT_CELL) === inLand), 1);   // (a slice in a country: the land's pass)
   C.imageSmoothingEnabled = ga;
-  drawLandProps(x0, x1, inLand ? 'land' : 'sea', 'ground');   // (what lies on them, in their plane - a segment's in a country: its plants after the structures, drawLandPlants)
   if (!inLand) { drawLandProps(x0, x1, 'sea', 'plants'); VEG_PASS = 'front'; drawLandProps(x0, x1, 'sea', 'plants'); VEG_PASS = null; }   // (an island at sea: its plants here, behind the water - decks 1-2, then deck 0)
 }
 const drawIslandsLand = (x0, x1) => drawIslChunks(x0, x1, true);
@@ -46660,8 +46657,8 @@ function stepTankSmoke(t, dt) {
 /* ---- (user Nov 3 14:00: "all fish should be global ... There should never be any custom fish for a custom location. We place them
    manually") no fish of a lake's own: a lake's fish are the sea's - schools, sharks and whales from the FISH / SHARK / WHALE AREAS
    placed in OBJECTS, kept to their box and the water it holds (waterRun), drawn in the lake's water (drawLakeRoots) ---- */
-/* ---- what stands on the ground: the desert kit's rocks where the field's boulders are, in front of the ground (its foot on the ground's top - landTop -
-   sunk a little), and every biome's plants from its decks (tropPalms). One plain list, land.props, made with the land from its seed, the same on every
+/* ---- what stands on the ground: every biome's plants from its decks (tropPalms) - no generated rocks: a rock is a deck's or placed (user Nov 17, VOLCANIC's
+   grey boulders PEBBLES didn't remove: the field's generated boulders and the desert kit's rocks in their spots are gone). One plain list, land.props, made with the land from its seed, the same on every
    machine; a crater under one lets it down with the ground ---- */
 /* (Nov 11, editing is live) X: only the plants standing in [X[0], X[1]) laid - each walk along the world still draws every random number it did, so
    a plant comes out the same whatever is laid round it (rules 7.9); returned, land.props left as it was (50-zzzz-live-edit.js puts them in) */
@@ -46677,13 +46674,9 @@ function buildLandProps(X) {
 function buildLandProps0() {
   if (!PL_X) RIGS_ST.clear();   // (the plants laid again: none keeps the state the last ones had - a torn leaf, a bend, a snapped trunk. Kept by place, a plant at the same spot took its
                      // old torn leaves back - user Nov 8 19:42, the Biome Editor's RESET)
-  const AS = airTreeSpans(), ok = x => onLand(x) && !isleCol(x) && !onApron(x) && !nearAirport(x, AS) &&   // (every plant asks nearAirport - user Nov 3 09:22)
-    !structNear(x, 260);
   // (user Nov 13 15:35: "mountains ... no longer have trees" - an old tree stood on his MOUNTAIN island: a biome with no plants on its decks got the old
   // vegetation - the forest kit's trees on grass, the desert kit's oasis palms, scrub and cacti, island tops' trees. Gone: every plant is a deck's -
   // tropPalms, 50-land-plants.js - and a biome whose decks hold none has none)
-  // the kit's sandstone rocks, where the field's boulders were (a little smaller: they're near now, on the ground)
-  for (const b of land.boulders) if (!plOut(b.x) && lookD(b.x) && ok(b.x)) land.props.push({ x: b.x, kind: 'rock', pick: Math.floor(b.seed * 7), s: b.w * 0.5, flip: b.seed * 10 % 1 < 0.5, z: 2 + b.back, alive: true });
   tropPalms();                                             // (every biome's plants from its decks, on its ground and island tops - 50-land-plants.js)
   land.props.sort((a, b) => b.z - a.z);
 }
@@ -47721,7 +47714,7 @@ const plR = sysRng('plants'), plRnd = (a, b) => a + (b - a) * plR(), plPerSec = 
 function plantsRegrid() {
   PLT.grid = []; PLT.warm.clear();
   const add = it => { const c = Math.floor(it.x / PL_CELL); (PLT.grid[c] || (PLT.grid[c] = [])).push(it); };
-  for (const it of land.props || []) if (it.kind !== 'rock') add(it);
+  for (const it of land.props || []) add(it);
   for (const L of PLT.grid) if (L) for (const it of L) if (it.heat > 0 && !(it.fire > 0)) PLT.warm.add(it);
 }
 /* (veg-check chat, Nov 4 - "a frame costs only what is on the screen", the same frame rate anywhere in the world) THE PROPS BY PLACE: each prop's
@@ -47736,7 +47729,7 @@ function propIx() {
   if (X.L === L && X.n === L.length) return X;
   X.L = L; X.n = L.length; X.ver++; X.cells = []; X.spans.length = 0;
   let c0 = Infinity; for (const it of L) c0 = Math.min(c0, Math.floor(it.x / X.cell)); X.c0 = Number.isFinite(c0) ? c0 : 0;
-  for (let i = 0; i < L.length; i++) { const it = L[i], c = Math.floor(it.x / X.cell) - X.c0; (X.cells[c] || (X.cells[c] = [])).push(i); if (it.kind !== 'rock') X.r = Math.max(X.r, plantReach(it)); }
+  for (let i = 0; i < L.length; i++) { const it = L[i], c = Math.floor(it.x / X.cell) - X.c0; (X.cells[c] || (X.cells[c] = [])).push(i); X.r = Math.max(X.r, plantReach(it)); }
   return X;
 }
 function propsIn(x0, x1) {
@@ -47758,25 +47751,6 @@ const plantLive = it => it.state !== 'gone';
 // meets - hits, crashes into, blasts, burns, drives over: deck 1's (it.deck 2) and the old vegetation with no deck; the other decks are scenery
 const plantHard = it => it.deck === 2;
 
-// the Desert Art Kit's pictures (gen/open/desert.py: palms, cacti, scrub, rocks - one sheet, img.desertArt, its rects in desert_art.json), each cut once at its
-// own pixels (_fx: where its foot is across it): drawn from the art atlas (the family below) and met by the rounds that hit them (plantSolidAt)
-const DAI = {"rocks": [[0, 269, 34, 26, 19.5], [36, 276, 26, 19, 13.1], [64, 278, 18, 17, 8.8], [84, 279, 51, 16, 25.2]]};
-// (user Oct 27, 14:39, the standing rule: "no asset is ever drawn bigger than its own pixel art allows" - at the default
-// zoom an art pixel no bigger than the vehicles' (the Cessna's 0.41 world units, the tank's 0.21), and everything sized
-// against them. Every desert picture from the kit - gen/open/desert.py - is made at this many world units a pixel and
-// drawn at it, never magnified)
-const DESERT_PK = 0.4;
-let desertKitC = null;
-function desertKitArt() {
-  if (desertKitC !== null) return desertKitC;
-  const im = img.desertArt; if (!im || !im.width) return null;
-  const cut = r => { const k = makeCanvas(r[2], r[3]); k.getContext('2d').drawImage(im, r[0], r[1], r[2], r[3], 0, 0, r[2], r[3]); k._fx = r[4]; return k; };
-  return (desertKitC = { rockC: DAI.rocks.map(cut) });
-}
-/* (engine part 3) the desert kit's rocks in the art atlas (04-zz-art-atlas.js), each once, at its own pixels (desertKitArt's cut canvases - not its whole sheet
-   or its shaded copy). Drawn by the plants' pass as picture rows (pgRows); one that's missing has no stand-in: it isn't drawn until it's in. (User Nov 13:
-   every plant is a deck's prefab - the forest kit's trees and the desert kit's palms, cacti and scrub, the old vegetation, are gone) */
-artFamily(() => { const D = desertKitArt(); if (!D) return false; for (const c of D.rockC) artPut(c); return true; });   // (false: the pictures not unpacked yet - start() sets them all at once)
 // (the forest: a tree every few hundred units of its dry land, now and then two together - never on the airfield or
 // near it, the launch pad, the lake, a rock face, a steep slope or the mountain's top by the tower)
 // NO TREES NEAR AN AIRPORT (user Nov 2 18:28: "Let's have a rule of not trees close to airports?"): no tree in front grows within
@@ -47851,7 +47825,6 @@ function buildPlants() {
   PLT.grid = []; PLT.burning.length = 0; PLT.warm.clear(); PLT.acc = 0; PLT.spotT = 0; PLT.fronts.length = 0; PLT.scar = new Uint8Array(land.cols);
   const add = it => { const c = Math.floor(it.x / PL_CELL); (PLT.grid[c] || (PLT.grid[c] = [])).push(it); };
   for (const it of land.props || []) {
-    if (it.kind === 'rock') continue;
     Object.assign(it, { pk: it.kind, state: 'stand', hp: PK[it.kind].hp, heat: 0, fire: 0, burnT: 0, burnMax: PK[it.kind].burn * (0.8 + 0.4 * hash(it.x * 0.13)), char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0, ph: hash(it.x * 0.37) * 6, gy: propTop(it) });
     add(it);
   }
@@ -48332,12 +48305,12 @@ function drawUwPlants(x0, x1, lk) { if (RIG_T.off || edTiny(6 * UPM) || !land.pr
 // (is it in this pass - VEG_PASS, isl, part - and near [x0, x1]? one test for the old drawing and the plants' GPU layer)
 function vegInPass(it, x0, x1, isl, part) {
   if (!it.isl !== !isl) return false;
-  if ((it.kind === 'rock') !== (part !== 'plants') && part) return false;   // (rocks with the ground, plants after the structures)
+  if (part && part !== 'plants') return false;
   // (user Nov 8 10:59: "anything that is NOT Deck 1 or 0 should be rendering behind the terrain") the editor's DECK 2 and every deck behind it (it.deck 3+) in
   // the pass behind the ground; DECK 1 (it.deck 2) with the structures; DECK 0 (it.deck 1) in front of them
   if (part === 'plants' && !it.uw && !it.cave && (it.deck >= 3 ? 'back' : it.deck === 1 ? 'front' : null) !== VEG_PASS) return false;
   if (VEG_PASS === 'cave' ? !it.cave : VEG_PASS !== 'uw' && (it.uw || it.cave)) return false;
-  const rr = plantReach(it); if (rr > PROP_IX.r && it.kind !== 'rock') PROP_IX.r = rr;   // (a picture bigger than any met before: the next span takes it in)
+  const rr = plantReach(it); if (rr > PROP_IX.r) PROP_IX.r = rr;   // (a picture bigger than any met before: the next span takes it in)
   if (offViewR(it.x, rr, x0, x1)) return false;
   if (VEG_PASS === 'uw' ? !it.uw || !lakeAt(it.x) !== !UW_LK : VEG_PASS === 'cave' ? !it.cave : it.uw || it.cave || lakeAt(it.x)) return false;   // (in a cave: with the stalactites - drawCavePlants)   // (underwater: its water's own pass - drawUwPlants)
   if (isl && (isl === 'land') !== !seaAtX(it.x)) return false;   // (a segment's in a country: drawn in the land's pass - drawIslandsLand)   // (an island's: drawn with it, behind the water)
@@ -48356,7 +48329,6 @@ function drawLandProps(x0, x1, isl, part) {
   // picture and size was looked up before asking whether it belongs to this pass at all. The pass's own questions first, the cheapest first; the same plants drawn)
   for (const it of propsIn(x0, x1)) {
     if (!vegInPass(it, x0, x1, isl, part)) continue;
-    if (it.kind === 'rock') { if (it.alive) GL.push(it); continue; }
     if (it.state === 'gone' || !it.pk) continue;
     if (it.deck && !rigShown(it)) continue;                 // (its deck hidden in the Biome Editor: nothing of it drawn)
     const G = plantGeo(it); if (!G) continue;
@@ -51481,7 +51453,7 @@ const M_AIR = 0, M_GRASS = 1, M_DIRT = 2, M_SAND = 3, M_ROCK = 4, M_CONC = 5;   
 // (user Oct 28: the airport is a placed structure - 50-land-tshape: its concrete wherever it's put)
 const onApronGround = x => onLand(x) && apronD(x) < 0;        // (the countries' airfields' concrete in the ground itself - the cells)
 const onApron = x => onApronGround(x) || !!strRunwayAt(x);   // (or on a RUNWAY structure - 50-zz-struct.js: its own deck, not the ground's cells)
-const land = { cols: 0, cell: null, scorch: null, back: [], dirty: null, sand: [], sandT: 0, surf: null, seed: 1, outcrops: [], boulders: [], bg: null };
+const land = { cols: 0, cell: null, scorch: null, back: [], dirty: null, sand: [], sandT: 0, surf: null, seed: 1, outcrops: [], bg: null };
 // (the user's picture, gen/land/land-proposal.jpg: a field of grass seen from above runs back from the edge, with
 // boulders on it, 6-10% of the view tall; it is painted behind the ground, never dug, and below it a darker back wall
 // of earth shows through craters)
@@ -52067,7 +52039,6 @@ function buildLand0() {
   land.outcrops = [];
   land.reK = null; land.sHold = null; land.colOK = new Uint8Array(land.cols); land.top0 = new Float32Array(land.cols); land.bd = new Array(land.cols).fill(null); land.iend = new Int32Array(land.cols).fill(-1); land.bdK = null;   // (bd, iend: a body under the water's line - ltBody)   // (the cells: a column at a time when first asked - ltFillCol)
   btMark('land:fill'); stonesInit(); btMark('land:stones');   // (the stones: slice by slice when first needed - landEnsure)
-  landBouldersBuild();
   // (Nov 8, the world in pieces: the same world built again - CLOSE, PLAY, back to the editor - keeps every slice's pictures that nothing
   // dug since they were painted: land.same, land.dug)
   { const nk = Math.ceil(land.cols / LT_CHUNK), keep = k => land.same && land.dug && land.dug.length === nk && !land.dug[k] && land.dirty && land.dirty.length === nk && !land.dirty[k];
@@ -52084,20 +52055,6 @@ function buildLand0() {
   buildPlants(); btMark('land:plants');                    // (every plant in front: its hits and its fire - 50-land-plants)
   buildLakeSea();                                           // (the lake beds marked SEA: the sea's corals, boulders and weed - 50-land-lake)
   liveBuilt();                                              // (what this world is built from: an edit builds in place what it changes - 50-zzzz-live-edit.js)
-}
-// boulders lying out on the field behind (further back: higher up the field and smaller) - a try every BOULDER_STEP along the world, each from its
-// own random numbers (its place's: the same whatever the world's width or what lies round it - rules 7.9); the whole world each time (a few
-// hundred: cheap - an edit in place too, 50-zzzz-live-edit.js)
-const BOULDER_STEP = 240;
-function landBouldersBuild() {
-  const W = WORLD_W; land.boulders = [];
-  for (let i = 0; i * BOULDER_STEP < W; i++) {
-    const R = seededRng((((land.seed | 0) + 9001) * 2654435761 + i * 40503) >>> 0), x = (i + R()) * BOULDER_STEP, back = R(), w = (30 + R() * 50) * (1 - 0.4 * back), h = w * (0.5 + R() * 0.2), seed = R() * 99;
-    if (x >= W || !onLand(x) || isleCol(x) || apronD(x) < -40) continue;
-    land.boulders.push({ x, w, h, back, seed });
-  }
-  land.boulders = land.boulders.filter(b => lakeU(b.x) > 1.15 && !structNear(b.x, 380));   // (none in a lake's bowl, none on a pad's floor or its banks)
-  land.boulders.sort((a, b) => b.back - a.back);
 }
 // the field behind's own line (backS) and its smoothed back (surfS), from the ground's line and the lakes - the whole world (one pass)
 function landBackBuild() {
@@ -52674,35 +52631,8 @@ function landBackHue(bn) {
   const v = Array.isArray(h) ? (q => h.map(x => x / q * (Number.isFinite(b) ? b : 1)))(h[0] * 0.3 + h[1] * 0.45 + h[2] * 0.25) : null;
   LBACK_HUE[bn] = { key, v }; return v;
 }
-// the field's boulders: the forest's from the Nature Art Kit's boulders and rocks (gen/open/forest.py) in the field's cooler shade, a shadow at the
-// foot, standing on the field's line a little way back - drawn over the field behind, in its deck's atmosphere: each a rectangle of the kit's
-// picture (FRI) from the art atlas, the shade and the light its tint (the ground's sprites, 50-land-zz-sprites.js)
-const FR_SHADE = [20, 32, 48], FR_SHADE_A = 0.22;            // (the field's cooler shade: a 'source-atop' fill of this colour at this alpha)
-function drawFieldBoulders(x0, x1) {
-  const F = img.forestRocks ? gsPic(img.forestRocks) : null; if (!F || !artOk(F.pic._art) || !land.boulders) return;
-  const fx = E.fx || [1, 1, 1], mHz = mix3(E.skyHor || [180, 200, 220], E.skyTop || E.skyHor || [120, 170, 230], 0.3), TK = {};
-  // (user Nov 8 11:48: "Did you fix meadow to use atmosphere? (we now have per deck atmosphere)") the field behind is its deck's (4, or wherever the
-  // biome has its MEADOW - farInfo().md): its boulders fade toward the sky's colour as that deck's ATMOSPHERE says, in their slice's biome (deckHaze);
-  // the shade under the light: colour x (1 - s) + shade x s, then x mul + add
-  const tintOf = k => TK[k] || (TK[k] = (() => { const bn = colBiome(Math.min(land.cols - 1, k * LT_CHUNK + (LT_CHUNK >> 1))), a0 = deckHaze(farInfo(bn).md, bn), a = a0 > 0.001 ? a0 : 0, M = fx.map(v => v * (1 - a));
-    return [M.map(v => v * (1 - FR_SHADE_A)), M.map((v, j) => FR_SHADE[j] / 255 * FR_SHADE_A * v + mHz[j] * a / 255)]; })());
-  for (const b of land.boulders) {
-    if (b.x + b.w < x0 || b.x - b.w > x1 || lookD(b.x)) continue;   // (the desert's: on the ground now, in front - land.props, user Oct 27)
-    const cc = Math.min(land.cols - 1, Math.max(0, Math.round(b.x / LT_CELL))); if (fieldH(cc) < 0.5) continue;   // (the meadow's (deck 4): none where it isn't)
-    const i = Math.floor(b.seed * 7) % FRI.length, [sx, sw, sh, st] = FRI[i], k = (b.w / LT_CELL) / sw, W = Math.max(4, Math.round(sw * k)), H = Math.max(2, Math.round(sh * k));
-    const foot = (land.surf[cc] - LT_Y0) / LT_CELL - fieldH(cc) * b.back * 0.85 + 4, L = Math.round(b.x / LT_CELL - W / 2), T = Math.round(foot - H);
-    const X = Math.round(PX(L * LT_CELL)), Y = Math.round(PY(LT_Y0 + T * LT_CELL)), Xw = Math.round(PX((L + W) * LT_CELL)) - X, Yh = Math.round(PY(LT_Y0 + (T + H) * LT_CELL)) - Y;
-    const sX = Math.round(PX((L + 1) * LT_CELL)), sY = Math.round(PY(LT_Y0 + (T + H - 1) * LT_CELL));
-    gsTint(GS_ONE, GS_ZERO, 0.45); gsSolid(sX, sY, sX + Xw, sY + Math.max(1, Math.round(2 * LT_CELL * SV)), [24, 40, 26]);   // (its shadow on the grass)
-    const tt = tintOf((cc / LT_CHUNK) | 0); gsTint(tt[0], tt[1]);
-    gsSprite(F, sx, st, sw, sh, X, Y, X + Xw, Y + Yh, GS_NEAR);
-  }
-  gsFlush();
-}
 // (user Oct 27, 16:15, on the painted ranges: "You are breaking everything" - the far mountains, both forest tree rows and
 // the dunes are back to their pictures and scales of the morning (Version 134) until the user picks a new look from pictures)
-// the kit's boulders: [left, width, height, top] in img.forestRocks
-const FRI = [[0, 82, 22, 8], [84, 56, 30, 0], [142, 66, 29, 1], [210, 46, 20, 10], [258, 70, 29, 1], [330, 60, 30, 0]];
 // the slices a view [x0, x1] shows: [slice, its left world x] (past the world's ends is the open ocean in every mode - no land
 // there, never mirrored: user Nov 3, the editor's flipped mountain past Open World's end - 05-zzz-endless.js)
 function landSlices(x0, x1) {
@@ -52730,7 +52660,7 @@ function drawLandGround(x0, x1, onField, onWater) {
   const list = landSlices(x0, x1);                         // (the slices to draw)
   // (engine part 2, Nov 10) the field behind and the back wall - drawn by the grid's shader from each column's numbers (ggBackDraw, 50-land-zz-grid.js):
   // the wall in the ground's light, the field over the land's line in its deck's atmosphere; its boulders over it
-  ggBackDraw(list, false); drawFieldBoulders(x0, x1);   // (user Nov 4 09:06: the field behind kept - it's the set's composition, as the game shows it)
+  ggBackDraw(list, false);
   // (user Nov 8 12:43, his crater with rocks standing in the air: a plant on the field behind stands on the land's line as built, its foot below it in the
   // ground behind - the back wall laid again over what was drawn on the field, under that line only, the open air under an overhang left out)
   if (onField) { onField(); ggBackDraw(list, true); }
@@ -52788,8 +52718,8 @@ function buildLandBg() {
   for (const L of land.bgD) land.bgS[L.bg] = L;
   land.bgPart = land.bg.concat(land.bgD).some(L => !L.s);   // (made before its art was in: made again at the next build)
 }
-// the ground's pictures into the art atlas once they're made - the far scenery's, the field's boulders, the stalactites' sheet (each once - artPut), looked at again while some kit picture is still to come
-artFamily(() => { if (!land.bg) return false; for (const L of land.bg.concat(land.bgD || [])) if (L.s) artPut(L.s.pic); const P = [img.forestRocks, img.caveStal]; for (const p of P) if (p && p.width) artPut(p); return !land.bgPart && P.every(p => p && p._art); });
+// the ground's pictures into the art atlas once they're made - the far scenery's, the stalactites' sheet (each once - artPut), looked at again while some kit picture is still to come
+artFamily(() => { if (!land.bg) return false; for (const L of land.bg.concat(land.bgD || [])) if (L.s) artPut(L.s.pic); const P = [img.caveStal]; for (const p of P) if (p && p.width) artPut(p); return !land.bgPart && P.every(p => p && p._art); });
 // each strip drawn tiled across the view at its own depth, its foot standing on its base line (which hangs from
 // the ground's line on the screen, as the sea's far layers hang from the horizon), hazed toward the sky's colour
 // at the horizon and lit with the hour. near: the strip in front of the clouds; otherwise the ones behind them
@@ -56105,7 +56035,6 @@ function renderLandObjects0() {
     // (Nov 4 09:06: the field behind kept - deck 3 stands on it: drawn in front of the field, behind the ground in front)
     drawLandGround(x0, x1, () => { if (!edTiny(0.5 * UPM)) drawFieldFlowers(x0, x1); if (!RIG_T.off && !edTiny(6 * UPM)) { VEG_PASS = 'back'; drawLandProps(x0, x1, undefined, 'plants'); drawLandProps(x0, x1, 'land', 'plants'); VEG_PASS = null; lt('deck3'); } }, () => guardDraw('lakeOver', () => drawLakeRoots(x0, x1, 'over')));   // (the field's flowers: none while plants have bones - their field isn't drawn, user Nov 3 21:23)   // (the green country's flowers - on its field)
     lt('ground');
-    if (!edTiny(6 * UPM)) drawLandProps(x0, x1, undefined, 'ground'); lt('props');         // (the ground's scar, the tropical layers behind, the desert's rocks: on the ground itself, in front of it - user Oct 27)
     drawPads(x0, x1);                                     // (OPEN WORLD: the launch pads, past the hangars)
     // (user Nov 3 22:35, the Vegetation Lab: "All objects we spawn must be in FRONT of the vegetation of course") the plants with bones behind
     // the structures; the old pictures as Nov 2 had them, in front
@@ -60566,7 +60495,7 @@ seaKitInit();
 //@src 50-land-zz-sprites.js:1
 /* ================================================================
    THE GROUND'S SPRITES (engine part 2, Nov 10): the ground's pictures - the far strips behind the land (drawLandBg0), the tree row on the
-   meadow's back (drawLandRow), the field's boulders (drawFieldBoulders) - drawn from the art atlas (04-zz-art-atlas.js) by a pass of their
+   meadow's back (drawLandRow) - drawn from the art atlas (04-zz-art-atlas.js) by a pass of their
    own into the layer C draws into, after what C drew so far (no GL front). Each picture is in the atlas once, its own pixels; what the old
    code made copies for is done here as it draws:
      - the hour's light and a deck's haze: colour x mul + add (glTint's rule);
@@ -61359,10 +61288,7 @@ const PG_SUBS = new Float32Array(PGW.NSUB * 5);
 function pgPicRow(it, ID, o, vtx) {
   const fx = E.fx || [1, 1, 1];
   let im, bare = null, k, fo, footW, st = 0, tall = false, mul = fx, add = [0, 0, 0];
-  if (it.kind === 'rock') {                                   // (a rock at its own pixel too, sunk 0.28 of its height)
-    const D = desertKitArt(), arr = D && D.rockC; if (!it.alive || !arr || !arr.length) return false;
-    im = arr[it.pick % arr.length]; k = DESERT_PK; fo = im._fx != null ? im._fx : im.width / 2; footW = propTop(it) + im.height * k * 0.28;
-  } else {
+  {
     const G = plantGeo(it); if (!G) return false;
     im = G.im; bare = G.bare; k = G.k; fo = G.fo / G.k; footW = propTop(it) + G.sink;
     // its colour: the hour's light, darker as it chars; a little glow while it burns
@@ -70298,7 +70224,6 @@ function* liveRedo(D, B) {
   for (const L = lvChunks(C); L.length;) { liveSlices(lvNearest(L)); yield; }   // (LIVE_SLK slices a piece, nearest the views first)
   for (const r of D) landGapsCols(r[0], r[1]);
   yield;
-  landBouldersBuild();
   const bk0 = land.backS ? land.backS.slice() : null;
   landBackBuild();
   const Db = lvDiff(bk0, land.backS);                           // (the field's back where it changed - smoothed wider than the columns: the field's lines read it, flSmooth)
@@ -70356,7 +70281,7 @@ function livePlants(r) {
   LAND_RAW++; let L;
   try {
     L = buildLandProps([x0, x1]);
-    for (const it of L) if (it.kind !== 'rock') Object.assign(it, { pk: it.kind, state: 'stand', hp: PK[it.kind].hp, heat: 0, fire: 0, burnT: 0, burnMax: PK[it.kind].burn * (0.8 + 0.4 * hash(it.x * 0.13)), char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0, ph: hash(it.x * 0.37) * 6, gy: propTop(it) });   // (as buildPlants: on the ground as laid)
+    for (const it of L) Object.assign(it, { pk: it.kind, state: 'stand', hp: PK[it.kind].hp, heat: 0, fire: 0, burnT: 0, burnMax: PK[it.kind].burn * (0.8 + 0.4 * hash(it.x * 0.13)), char: 0, leaf: 1, wet: 0, fa: 0, fav: 0, shake: 0, ph: hash(it.x * 0.37) * 6, gy: propTop(it) });   // (as buildPlants: on the ground as laid)
   } finally { LAND_RAW--; }
   const keep = (land.props || []).filter(it => !(inX(it.x) && !it.cave && it.open == null));
   land.props = keep.concat(L).sort((a, b) => b.z - a.z);
@@ -73142,7 +73067,7 @@ async function start(data) {
   Object.assign(window.__game, { swT: { TABLES, RNGS, tablesSave, tablesLoad, tblPlain, uidOf, REG, planes, subs, ships, evStats, SW_DRAW, SW_COLS, ev: code => eval(code) } });   // (ev: a test line run in the game's own scope - tools, the GPU checks; T.ev('story.coins'))
   // (Oct 27: wrecks settling on the floor, the research sub and its PING - tools/shipwrecks.mjs)
   // (the LAND tab, user Oct 28 - 50-land-tshape: its points, a drag through the editor's own function, the rebuild)
-  Object.assign(window.__game, { airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landEdited: () => landEdited(), landReset: () => landEdited(), landUp: () => landEdited(), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x), buildTimes: () => BUILD_T.slice(), landHillsAt: x => landHillsAt(x), copyText: () => terrainCopyText(), terrainSel: s => { TERRAIN_ED.sel = s; terrainSyncSkin(); }, split: n => { ED_SPLIT.v = n; terrainSplit(); return TERRAIN_ED.sel; }, delSeg: () => { terrainDelSeg(); return TERRAIN_ED.sel; }, lakes: () => (land.lakes || []).map(L => [Math.round(L[0]), Math.round(L[1])]), krakenMoveTo: (x, y) => KR_SET[0] && krakenMoveTo(KR_SET[0].id, x, y), wreckMoveTo: (k, x, y) => wreckMoveTo(k, x, y), wrecks: () => pirateWrecks.map(w => ({ k: w.k, x: Math.round(w.x), y: w.y, by: Math.round(wreckBy(w)), flat: w.flat, chest: chestAt(w).map(Math.round) })),  krSeat: () => { const k = KRAKENS[0] || KR; return { x: Math.round(k.bx), y: Math.round(k.by), u: KR_SET[0] ? KR_SET[0].u : null }; }, landEvictNow: () => ggEvict(), landCounts: () => ({ stones: (land.stones || []).length, props: (land.props || []).length, boulders: (land.boulders || []).length, outcrops: (land.outcrops || []).length, cells: land.cell ? land.cell.length : 0 }), worldInfo: () => ({ W: WORLD_W, EXT_L, EXT_R, LAYOUT_L, LAYOUT_R, VIEW_W, BED_A, BED_B, cols: land.cols }), sandY: x => sandY(x), myTw: p => myTw(p), ownTowers: p => ownTowers(p), dockInfo: () => ({ owned: DOCKS_OWNED, docks: docks.map(d => ({ x: Math.round(d.quay), dir: d.dir, player: d.player, tw: towers.indexOf(d._tw) })), home: homeDock.map(d => ({ x: Math.round(d.quay), dir: d.dir, stand: !!d.stand, player: d.player })), towers: towers.map(t => ({ p: t.player, x: Math.round(t.x), hp: t.hp, edge: !!t.edge })), ships: ships.map(s => s.state), subs: subs.map(s => s.state), fleet: [0, 1].map(p => [fleet[p].ship, fleet[p].sub]) }) });
+  Object.assign(window.__game, { airfieldOf: R => airfieldOf(R), apronD: x => apronD(x), onApron: x => onApron(x), structAt: x => Object.assign({}, structAt(x)), landEdited: () => landEdited(), landReset: () => landEdited(), landUp: () => landEdited(), landEdOn: () => landEdOn(), lakeAt: x => lakeAt(x), lakeOf: x => lakeOf(x), landSurf: x => land.surf[ltCol(x)], islands: () => ISLANDS, onOwnGround: (p, x) => onOwnGround(p, x), landHomeX: p => landHomeX(p), hangarX: af => hangarX(af), islSet: L => { ISLANDS = L; islSave(); landEdited(); }, isleAt: x => ISLE === null ? 0 : ISLE[Math.floor(x / 2.5)] | 0, landTop: x => landTop(x), buildTimes: () => BUILD_T.slice(), landHillsAt: x => landHillsAt(x), copyText: () => terrainCopyText(), terrainSel: s => { TERRAIN_ED.sel = s; terrainSyncSkin(); }, split: n => { ED_SPLIT.v = n; terrainSplit(); return TERRAIN_ED.sel; }, delSeg: () => { terrainDelSeg(); return TERRAIN_ED.sel; }, lakes: () => (land.lakes || []).map(L => [Math.round(L[0]), Math.round(L[1])]), krakenMoveTo: (x, y) => KR_SET[0] && krakenMoveTo(KR_SET[0].id, x, y), wreckMoveTo: (k, x, y) => wreckMoveTo(k, x, y), wrecks: () => pirateWrecks.map(w => ({ k: w.k, x: Math.round(w.x), y: w.y, by: Math.round(wreckBy(w)), flat: w.flat, chest: chestAt(w).map(Math.round) })),  krSeat: () => { const k = KRAKENS[0] || KR; return { x: Math.round(k.bx), y: Math.round(k.by), u: KR_SET[0] ? KR_SET[0].u : null }; }, landEvictNow: () => ggEvict(), landCounts: () => ({ stones: (land.stones || []).length, props: (land.props || []).length, outcrops: (land.outcrops || []).length, cells: land.cell ? land.cell.length : 0 }), worldInfo: () => ({ W: WORLD_W, EXT_L, EXT_R, LAYOUT_L, LAYOUT_R, VIEW_W, BED_A, BED_B, cols: land.cols }), sandY: x => sandY(x), myTw: p => myTw(p), ownTowers: p => ownTowers(p), dockInfo: () => ({ owned: DOCKS_OWNED, docks: docks.map(d => ({ x: Math.round(d.quay), dir: d.dir, player: d.player, tw: towers.indexOf(d._tw) })), home: homeDock.map(d => ({ x: Math.round(d.quay), dir: d.dir, stand: !!d.stand, player: d.player })), towers: towers.map(t => ({ p: t.player, x: Math.round(t.x), hp: t.hp, edge: !!t.edge })), ships: ships.map(s => s.state), subs: subs.map(s => s.state), fleet: [0, 1].map(p => [fleet[p].ship, fleet[p].sub]) }) });
   Object.assign(window.__game, { ground: () => ({ gX: s => gX(s), gS: x => gS(x), sea: [LAYOUT_L, LAYOUT_R], seas: () => Array.from({ length: SEAS.n }, (_, i) => SEAS.plain(i)), seasTest: L => { SEAS_TEST = L; }, lands: () => Array.from({ length: LANDS.n }, (_, i) => LANDS.plain(i)), bed: [BED_A, BED_B], depth: x => groundDepthAt(x), sand: x => sandY(x), skin: x => groundSkinAt(x), hills: x => groundHillsAt(x), lsk: x => landSkinAt(x), flags: () => ({ marked: FLOOR_MARKED, hilly: FLOOR_HILLY, isles: land.isles, gm: GSH.marked }) }), terrainRefresh: () => liveEdit() });   // (the one ground line - 50-land-zz-ground)
   Object.assign(window.__game, { reach: () => ({ endless: ENDLESS, wx0: WX0, n: N, w: reachW(), sg: [SG.x0, SG.nx], stir: stirA.length, vis: [VIS_L, VIS_R] }) });   // (STORY's endless sea - 05-zzz-endless.js)
   Object.assign(window.__game, { camAt: (x, y, z) => { camOverride[0] = x == null ? null : [x, y]; if (z) setZoom(0, z); updateCamera(0, true); }, seaRows: () => Array.from({ length: SEAS.n }, (_, i) => [SEAS.c.lo[i], SEAS.c.hi[i], SEAS.c.bedA[i], SEAS.c.bedB[i], SEAS.c.trA[i], SEAS.c.trB[i]]), landRows: () => Array.from({ length: LANDS.n }, (_, i) => [LANDS.c.lo[i], LANDS.c.hi[i], landFace(i).dir]) });
