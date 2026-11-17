@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1029;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1030;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -13923,6 +13923,7 @@ function subLamps() {
   // universal rule for all lights. The same with the lighthouse lights.") every lamp that throws a beam is one of these: the cars'
   // headlamps (carLamps, 50-story-cars.js), the lighthouses' (lhLamps, 50-land-traffic.js) - each its own reach (world units)
   if (typeof carLamps === 'function') carLamps(out);
+  if (typeof tankLamps === 'function') tankLamps(out);   // (the tanks' headlamps - 50-land-civlife.js, user Nov 16)
   if (typeof lhLamps === 'function') lhLamps(out);
   return out;
 }
@@ -33778,6 +33779,9 @@ function lightLean(lx) { return lx > -1e8 ? clamp((lx + VSX - bw / 2) / (bw / 2)
 function deepFactor(x) {
   if (!WORLD_W) return 0;
   if (pastEnds(x)) return smoothstep(400, 2400, x < 0 ? -x : x - WORLD_W);   // (STORY, past the world's ends: the open ocean, deep a little way out)
+  // (user Nov 16 21:42, TANK VS TANK's lake: a trail cut off over it - a world with no sea had no sea to measure from: NaN, so a lake's surface
+  // was NaN, and the smoke, the trails, a shell's splash all lost it. No sea: no open ocean - a lake's never deep)
+  if (!SEAS.n) return 0;
   const M = seaMidHalf(seaSpanOf(x)), u = Math.abs(x - M.mid) / M.half;   // (its own sea's middle - SEAS)
   return 1 - smoothstep(0.2, 0.8, u);
 }
@@ -41674,11 +41678,26 @@ function armyWreckHits() {
 function tankLights(t) {
   const n = clamp(E.night * 1.2 + E.dusk * 0.7 + E.fog * 0.4, 0, 1);
   if (n < 0.05) return;
-  const f = t.facing, ca = Math.cos(t.a || 0), sa = Math.sin(t.a || 0), pt = (dx, dy) => [t.x + (dx * ca - dy * sa), t.y + (dx * sa + dy * ca)];
-  const [hx, hy] = pt(f * TANK_W * 0.46, -12), [rx, ry] = pt(-f * TANK_W * 0.47, -14);
+  const [hx, hy] = tankLampPt(t, 1), [rx, ry] = tankLampPt(t, -1);
   airLamp(PX(hx), PY(hy), n, 0); airLamp(PX(rx), PY(ry), n * 0.8, 1);
-  // (the headlamps' beam along the ground ahead)
-  airLamp(PX(hx + f * 26), PY(hy + 6), n * 0.5, lampR(24 * SV));
+}
+// its headlamp (s 1) or tail lamp (s -1) in the world, turned with the hull
+function tankLampPt(t, s) {
+  const f = t.facing, ca = Math.cos(t.a || 0), sa = Math.sin(t.a || 0), dx = s * f * TANK_W * (s > 0 ? 0.46 : 0.47), dy = s > 0 ? -12 : -14;
+  return [t.x + (dx * ca - dy * sa), t.y + (dx * sa + dy * ca)];
+}
+// (user Nov 16 21:40, TANK VS TANK at night: "the tanks have this glow light that is floating in front of them" - its beam was a round glow
+// hung in the air ahead of it) the headlamp's beam is a lamp as the cars' (carLamps): along the hull, a little down onto the ground ahead,
+// lighting what it falls on - into the lamps' list (subLamps, 27-sub-light.js)
+const TANK_BEAM = 1.6;                                    // (how far it reaches: tank lengths)
+function tankLamps(out) {
+  const n = clamp(E.night * 1.2 + E.dusk * 0.7 + E.fog * 0.4, 0, 1); if (n < 0.05 || !LAND) return out;
+  for (const t of tanks) {
+    if (!t || t.state !== 'alive' || t.wet) continue;
+    const [hx, hy] = tankLampPt(t, 1), r = t.a || 0;
+    out.push({ x: hx, y: hy, a: Math.atan2(Math.sin(r) * t.facing + 0.12, Math.cos(r) * t.facing), s: t, ms: false, k: 0.75 * n, air: true, reach: TANK_L * TANK_BEAM });
+  }
+  return out;
 }
 function shipNavLights(c, L) {
   const n = clamp(E.night * 1.2 + E.dusk * 0.7 + E.fog * 0.4, 0, 1);
