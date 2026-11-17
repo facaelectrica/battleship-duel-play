@@ -5653,6 +5653,7 @@ const CTLS = ['kb', 'kb2', 'pad1', 'pad2', 'touch', 'touch2', 'cpu', 'net', 'non
 const ctlPick = [0, 1].map(i => CTLS.includes((PREFS0.ctl || [])[i]) ? PREFS0.ctl[i] : i === 1 && PREFS0.vscpu ? 'cpu' : 'kb');   // per side: left, right
 const cpuLvSide = [0, 1].map(i => { const v = (PREFS0.cpuLv || [])[i]; return v === 0 || v === 2 ? v : v === 1 ? 1 : PREFS0.cpuLevel === 0 || PREFS0.cpuLevel === 2 ? PREFS0.cpuLevel : 1; });
 let STORY_LV = PREFS0.storyLv === 0 || PREFS0.storyLv === 2 ? PREFS0.storyLv : 1;
+const TVT_MARGIN = 900;                                 // (TANK VS TANK: its land runs on this far past each end of the field, off the screen - user Nov 16 20:54, no cut at the corners; PLAY_L / PLAY_R)
 let PLAYERS = 2, STORY = false, SWAP = false, LAND = false, TVT = false;   // (TVT: TANK VS TANK, user Nov 16 - 50-zzzz-tvt.js)   // (LAND: LAND TEST, user Oct 25)
 let ENDLESS = false;   // (STORY: no edge - the open ocean past the world's ends, 05-zzz-endless.js; set by applyMode)
 // (user Oct 29, 14:39) every mode plays the Open World's map - its ground, sea floor, islands, caves, sky and look. BATTLE plays on it by
@@ -6074,8 +6075,9 @@ function structNearX(kind, x) {
   return best;
 }
 function seaIn(x, m, at) { const i = seaSpanOf(at); return clamp(x, SEAS.c.lo[i] + m, SEAS.c.hi[i] - m); }
-function landIn(x, k, m, e) { const lo = LANDS.c.lo[k], hi = LANDS.c.hi[k]; return clamp(x, lo <= 0 ? e : lo + m, hi >= WORLD_W ? WORLD_W - e : hi - m); }
-function landRange(k, m, e) { const lo = LANDS.c.lo[k], hi = LANDS.c.hi[k]; return [lo <= 0 ? e : lo + m, hi >= WORLD_W ? WORLD_W - e : hi - m]; }
+// (and never past the play's ends - PLAY_L / PLAY_R: TANK VS TANK's field inside its land)
+function landIn(x, k, m, e) { const [a, b] = landRange(k, m, e); return clamp(x, a, b); }
+function landRange(k, m, e) { const lo = LANDS.c.lo[k], hi = LANDS.c.hi[k]; return [Math.max(lo <= 0 ? e : lo + m, PLAY_L() + e), Math.min(hi >= WORLD_W ? WORLD_W - e : hi - m, PLAY_R() - e)]; }
 // (step 7) the widest sea's middle: the old countries' split where the two countries' sea is the widest (every world so far)
 function LOOK_MID() { let w = -1, m = WORLD_W / 2; for (let i = 0; i < SEAS.n; i++) { const d = SEAS.c.hi[i] - SEAS.c.lo[i]; if (d > w) { w = d; m = (SEAS.c.lo[i] + SEAS.c.hi[i]) / 2; } } return m; }
 const landOwnD = x => x > LOOK_MID();
@@ -6102,7 +6104,7 @@ function seaDeepest() { const S = SEAS.c, v = i => S.tab[i] ? S.deepY[i] : -Infi
 // (ENDLESS: declared with the modes, 05-game-state.js - applyMode runs before this part)
 const pastEnds = x => x < 0 || x > WORLD_W;            // (every mode: the open ocean is what's past the ends - user Nov 3, the editor at Open World's ends; only how far the play goes differs)
 // how far the play goes each way: the world's ends, or none
-const PLAY_L = () => ENDLESS ? -Infinity : 0, PLAY_R = () => ENDLESS ? Infinity : WORLD_W;
+const PLAY_L = () => ENDLESS ? -Infinity : TVT ? TVT_MARGIN : 0, PLAY_R = () => ENDLESS ? Infinity : TVT ? WORLD_W - TVT_MARGIN : WORLD_W;   // (TANK VS TANK: its field - the land runs on past it, user Nov 16 20:54: 50-zzzz-tvt.js)
 let WX0 = 0;                                           // the world x of the water's first column (buildWorld: 0)
 const REACH_GROW = 8 * 1333;                           // (about eight screens at a time; a multiple of DX and of the air's cell)
 const wCol = x => (x - WX0) / DX;                      // a world x as a water column (fractional)
@@ -8689,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1016;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 21:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1017;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 21:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54816,8 +54818,8 @@ function tankHitBlast(t, power) {
 function killTank(t) {
   if (t.state !== 'alive') return;                     // (already lost: never twice - user Oct 27)
   t.state = 'dead';
-  tankHitBlast(t, 1.6);
-  sectionBlast(t.x, t.y - 10, 1.1, t.vx);
+  tankHitBlast(t, 1.6 * tvtBlastK());
+  sectionBlast(t.x, t.y - 10, 1.1 * tvtBlastK(), t.vx);
   spawnDebris(t.x, t.y - 10, 16, t.vx * 0.3);
   // (user Oct 27, [18]: on a ship's deck its wreck rides her; over water it falls in and sinks; on the ground, or held on
   // a magnet over it, it lies (falls) there - stepArmyWreck)
@@ -55368,18 +55370,18 @@ function landShellHit(s) {
 }
 // a blast on land: the crater, the fireball, and everything near it hurt (what it hit hardest)
 function landBlast(s, x, y, hitV) {
-  const B = LAND_BLAST[s.from] || LAND_BLAST.tank, crater = B[0] * BLAST_K, reach = B[1] * BLAST_K, dmg = vtDmg(LAND_BLAST[s.from] ? s.from : 'tank', 'land');   // (BLAST_K: user Oct 29, 3x bigger)
-  if (hitV && hitV.kind === 'tank') tankHitBlast(hitV, s.from === 'bomb' ? 1.3 : 1);   // (on top of the tank, going up)
+  const bk = tvtBlastK(), B = LAND_BLAST[s.from] || LAND_BLAST.tank, crater = B[0] * BLAST_K * bk, reach = B[1] * BLAST_K * bk, dmg = vtDmg(LAND_BLAST[s.from] ? s.from : 'tank', 'land');   // (BLAST_K: user Oct 29, 3x bigger)   // (bk: TANK VS TANK's half size - 50-zzzz-tvt.js)
+  if (hitV && hitV.kind === 'tank') tankHitBlast(hitV, (s.from === 'bomb' ? 1.3 : 1) * bk);   // (on top of the tank, going up)
   else {
     const gy = landBelow(x, y - crater);
     landCarve(x, y, crater);
-    groundFlash(x, y, s.from === 'bomb' ? 1.2 : s.from === 'tank' ? 1 : 0.6);   // (a short fireball, no black smoke: the earth is the show)
-    if (gy - y < crater + 10) spikeBurst(x, Math.min(y, gy), s.from === 'bomb' ? 1.3 : s.from === 'tank' ? 1 : 0.55, groundAt(x, Math.min(y, gy)));
+    groundFlash(x, y, (s.from === 'bomb' ? 1.2 : s.from === 'tank' ? 1 : 0.6) * bk);   // (a short fireball, no black smoke: the earth is the show)
+    if (gy - y < crater + 10) spikeBurst(x, Math.min(y, gy), (s.from === 'bomb' ? 1.3 : s.from === 'tank' ? 1 : 0.55) * bk, groundAt(x, Math.min(y, gy)));
     kickLandDust(x, y, 18);
   }
   for (let p = 0; p < landN(); p++) {
     const t = tanks.hAt(p), h = helis.hAt(p);
-    if (t && t.state === 'alive') { const d = Math.hypot(t.x - x, t.y - 10 - y); if (t === hitV) tankHurt(t, dmg, x, y); else if (d < reach + TANK_L * 0.3 && mayHit(s, t)) tankHurt(t, 0.25, x, y); }
+    if (t && t.state === 'alive') { const d = Math.hypot(t.x - x, t.y - 10 - y); if (t === hitV) tankHurt(t, TVT ? t.hp : dmg, x, y); else if (d < reach + TANK_L * 0.3 && mayHit(s, t)) tankHurt(t, TVT ? t.hp : 0.25, x, y); }   // (TANK VS TANK: one hit, a lost tank - user Nov 16 20:52)
     if (h && (h.state === 'fly' || h.state === 'landed')) { const d = Math.hypot(h.x - x, h.y - y); if (h === hitV) heliHurt(h, VTUNE.heli.hp, x, y); else if (d < reach + 20 && mayHit(s, h)) heliHurt(h, 1, x, y); }
   }
 }
@@ -71197,16 +71199,17 @@ function tvtWorld(seed, W) {
   const mid = W / 2, kind = r() < 0.35 ? 'lake' : r() < 0.55 ? 'hill' : 'open';
   const hw = (kind === 'lake' ? rnd(0.1, 0.15) : rnd(0.12, 0.18)) * W, dep = kind === 'lake' ? rnd(70, 110) : -rnd(70, 130);   // (+ down: a dip; - up: a hill)
   const bump = x => { const u = (x - mid) / hw; return Math.abs(u) >= 1 ? 0 : 0.5 + 0.5 * Math.cos(Math.PI * u); };
-  const yAt = x => TVT_TOP + waves.reduce((s, [a, l, ph]) => s + a * Math.sin(ph + x * Math.PI * 2 / l), 0) + (kind === 'open' ? 0 : dep * bump(x));
-  const STEP = 20, top = [];
-  for (let x = 0; x <= W + 0.5; x += STEP) top.push([Math.round(Math.min(W, x)), Math.round(yAt(Math.min(W, x))), SK]);
-  if (top[top.length - 1][0] < W) top.push([Math.round(W), Math.round(yAt(W)), SK]);
-  const GROUND = [{ k: 'S', gnd: true, p: [[Math.round(W), TVT_FOOT, SK], [0, TVT_FOOT, SK], ...top] }];
+  const yAt = x0 => { const x = x0 - TVT_MARGIN; return TVT_TOP + waves.reduce((s, [a, l, ph]) => s + a * Math.sin(ph + x * Math.PI * 2 / l), 0) + (kind === 'open' ? 0 : dep * bump(x)); };
+  const STEP = 20, top = [], WW = W + 2 * TVT_MARGIN;
+  for (let x = 0; x <= WW + 0.5; x += STEP) top.push([Math.round(Math.min(WW, x)), Math.round(yAt(Math.min(WW, x))), SK]);
+  if (top[top.length - 1][0] < WW) top.push([Math.round(WW), Math.round(yAt(WW)), SK]);
+  const GROUND = [{ k: 'S', gnd: true, p: [[Math.round(WW), TVT_FOOT, SK], [0, TVT_FOOT, SK], ...top] }];
   // the lake: the pocket's deepest point, its water a little under the lower of its two rims (never above it - lakeLevel)
   let lake = null;
   if (kind === 'lake') {
-    let deep = top[0]; for (const p of top) if (Math.abs(p[0] - mid) < hw && p[1] > deep[1]) deep = p;
-    let rl = Infinity, rr = Infinity; for (const p of top) { if (p[0] < deep[0] && p[0] > mid - 1.8 * hw) rl = Math.min(rl, p[1]); if (p[0] > deep[0] && p[0] < mid + 1.8 * hw) rr = Math.min(rr, p[1]); }
+    const M = mid + TVT_MARGIN;
+    let deep = top[0]; for (const p of top) if (Math.abs(p[0] - M) < hw && p[1] > deep[1]) deep = p;
+    let rl = Infinity, rr = Infinity; for (const p of top) { if (p[0] < deep[0] && p[0] > M - 1.8 * hw) rl = Math.min(rl, p[1]); if (p[0] > deep[0] && p[0] < M + 1.8 * hw) rr = Math.min(rr, p[1]); }
     const lv = Math.round(Math.max(rl, rr) + rnd(10, 30));
     if (lv < deep[1] - 20) lake = { x: deep[0], y: WATER_Y + lv };   // (LAKE_SET's level: the world's y)
   }
@@ -71264,7 +71267,7 @@ function tvtConditions() {
 // the round starts (buildWorld's end): a tank each at its end of the field, facing the other, each player in theirs; the round's conditions
 function tvtStart() {
   for (const p of [0, 1]) {
-    const x = SIDE(p) ? WORLD_W * 0.88 : WORLD_W * 0.12;
+    const x = PLAY_L() + (PLAY_R() - PLAY_L()) * (SIDE(p) ? 0.88 : 0.12);
     const t = ownPut('tank', p, hullRow(tanks, makeTank(p, x)));
     t.facing = SIDE(p) ? -1 : 1;
     if (crew[p].mode !== 'gone') takeOver(p, 'tank');
@@ -71290,10 +71293,12 @@ function tvtStep(dt) {
 }
 // while the round is over, no new tank comes in (canTake)
 const tvtOver = () => TVT && TV.over != null;
+// (user Nov 16 20:52: "the explosion it makes should be half the size") a blast on the land and a tank's, its size in TANK VS TANK
+const tvtBlastK = () => TVT ? 0.5 : 1;
 // the camera's one view: the field's middle, the lowest of its ground low in the view, over the buttons' height
 function tvtFocus() {
   let lo = -Infinity;
-  for (let x = 20; x < WORLD_W - 20; x += 40) { const y = landTop(x); if (Number.isFinite(y)) lo = Math.max(lo, y); }   // (a lake's floor too: its water above it)
+  for (let x = PLAY_L(); x < PLAY_R(); x += 40) { const y = landTop(x); if (Number.isFinite(y)) lo = Math.max(lo, y); }   // (a lake's floor too: its water above it)
   const vh = VIEW_H / (cam.zt[0] || 1);
   return [WORLD_W / 2, (Number.isFinite(lo) ? lo : WATER_Y) - 0.24 * vh, 0, 0, null];
 }
@@ -71318,6 +71323,16 @@ function tvtDraw() {
     const hx = dir > 0 ? x0 + L : x0 - 1;
     for (let i = 0; i < 4; i++) ug.fillRect(hx - dir * i, ay - 3 + i, 1, 8 - 2 * i);
   }
+  // (user Nov 16 20:54: "the missiles were disappearing halfway in the sky") a shot gone up past the top of the screen: a mark on the top edge
+  // where it is, its arrow up, as long as it's up there
+  { const v = cam.view[0], k = S * v.z * ubw / Math.max(1, bw), s = DRSH.s || (DRSH.s = shells.cursor());
+    ug.fillStyle = '#ffd23a';
+    for (let i = 0; i < shells.n; i++) { s.i = i; if (s.y >= v.top || s.click) continue;
+      const sx = Math.round((s.x - v.l) * k), up = Math.min(1, (v.top - s.y) / 400);
+      if (sx < 4 || sx > ubw - 4) continue;
+      const ty = (ui.top || 12) + 2 + Math.round(up * 2);
+      for (let r = 0; r < 4; r++) ug.fillRect(sx - r, ty + r, 2 * r + 1, 1);
+      ug.fillRect(sx - 1, ty + 4, 3, 3); } }
   // a round just ended: who took it
   if (TV.over != null && TV.overT > 1) {
     const m = TV.over < 0 ? 'NO WINNER - ROUND AGAIN' : 'PLAYER # WINS THE ROUND'.replace('#', SIDE(1 - TV.over) + 1);
