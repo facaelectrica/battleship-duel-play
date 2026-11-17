@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1026;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1027;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -49174,7 +49174,7 @@ function stepLandRest(dt) {
 // an army wreck (a tank's, a helicopter's): on a ship's deck it rides her, and goes down with her; over water it falls
 // in with a splash and sinks to the bottom (seabedY - in a lake, its bed); on land it settles into what's dug under it
 function stepArmyWreck(w, dt) {
-  const half = w.kind === 'tank' ? TANK_L * 0.4 : 20;
+  const half = w.kind === 'tank' ? TANK_L * 0.4 : w.kind === 'turret' ? TANK_L * 0.15 : 20;
   // thrown by its own blast (killTank): up and over, turning, till it comes down on the ground (or into water: then it sinks as it would)
   if (w.air) {
     w.vy += 520 * dt; w.x = clamp(w.x + w.vx * dt, PLAY_L() + half, PLAY_R() - half); w.y += w.vy * dt; w.a = (w.a || 0) + (w.av || 0) * dt;
@@ -54586,7 +54586,11 @@ function buildTankArt() {
   const WB = TANKA.wheelBox;
   tankArt = { lv: [0, 1, 2].map(i => {
     const y0 = i * TANKA.rowH;
-    return { body: cut(0, y0, TANKA.bodyW, TANKA.cut), gun: cut(TANKA.bodyW, y0, TANKA.gunW, TANKA.gunH), wheels: TANKA.wheels.map((w, k) => cut(TANKA.bodyW + TANKA.gunW + k * WB, y0, WB, WB)) };
+    // (user Nov 16 21:32: "the top of the tank where the turret is separate and go high in the sky ... separate from the body as it explodes") its turret
+    // (TANKA.turL..turR, turTop..deck - the art's own marks) cut as a picture of its own, and the body with it taken off (hull) - a blown-up tank's two parts
+    const body = cut(0, y0, TANKA.bodyW, TANKA.cut), top = cut(TANKA.turL, y0 + TANKA.turTop, TANKA.turR - TANKA.turL, TANKA.deck - TANKA.turTop), hull = cut(0, y0, TANKA.bodyW, TANKA.cut);
+    hull.getContext('2d').clearRect(TANKA.turL, TANKA.turTop, TANKA.turR - TANKA.turL, TANKA.deck - TANKA.turTop);
+    return { body, hull, top, gun: cut(TANKA.bodyW, y0, TANKA.gunW, TANKA.gunH), wheels: TANKA.wheels.map((w, k) => cut(TANKA.bodyW + TANKA.gunW + k * WB, y0, WB, WB)) };
   }) };
 }
 // the tanks' pictures - every level - into the art atlas as they're made (the frame's 'art' layer)
@@ -54807,11 +54811,36 @@ function tankMG(t) {
 function tankHurt(t, amt, x, y, by) {
   if (!t || t.state !== 'alive' || netGuestHold()) return;
   t.hp -= amt; t.hitT = time; harmed(t, x, y);   // (36-zz-factions.js)
+  if (x != null && y != null) { t.hitX = x; t.hitY = y; }   // (where the blow came from: killTank's blast goes away from it)
   if (t.carry != null && x != null) ropeKick(t, x, y, amt);            // (hanging from a magnet: the hit swings it, and the helicopter)
   noteHit(t.id, 'tank');
   if (amt >= 0.3) { spawnSparks(x, y, 14, 220); sound('impact', x); }
   if (by !== -1) unitScorch(t, x, y, amt >= 0.3 ? 4 + 3 * Math.min(1, amt) : landUnitR() < 0.5 ? 0.9 : 0);
   if (t.hp <= 1e-6) killTank(t);
+}
+// the way a tank's blow-up goes: away from where the blow landed on it (tankHurt's hitX / hitY), up when it came from right on it or below
+function tankBlowDir(t) {
+  const [px, py] = tankPivot(t); let dx = px - (t.hitX ?? px), dy = Math.min(0, py - (t.hitY ?? py + 1)) - 4; const d = Math.hypot(dx, dy) || 1;
+  return [dx / d, dy / d];
+}
+/* (user Nov 16 21:32, his iPad picture and the one he wants: "a centralized explosion in the tank itself, matching the direction of the hit" - not "gigantic
+   compared to the size of the tank", not going "up like if it was smoke") a tank blowing up: a fireball the tank's own size in its middle, its flames
+   thrown out of it the way the blow drove them and gone in a moment (drawn behind it - drawFire's behind), a flash, sparks, a few dark bits; then its
+   wreck and turret thrown (killTank) and the smoke of its burning wreck (stepLandWorld). Its size is the tank's, in every mode */
+function tankBlowUp(t) {
+  const [px, py] = tankPivot(t), x = px, y = py + 4, [bx, by] = tankBlowDir(t), R = TANK_L * 0.5;
+  sound('explosion', x, 1); shakeAt(6, x); gridExplosion(x, y, R, 300); guysNear(x, y, R);
+  if (SIM_ONLY) return;
+  flashes.addRow({ x, y, r: R * 1.1, life: 0, max: 0.12 });
+  for (let i = 0; i < 46; i++) {
+    const a = luRnd(0, Math.PI * 2), out = luRnd(15, 70), push = luRnd(30, 130);
+    spawnFlame(x + luRnd(-R, R) * 0.5, y + luRnd(-R, R) * 0.3, Math.cos(a) * out + bx * push + t.vx * 0.5, Math.sin(a) * out * 0.7 + by * push, luRnd(1.3, 1.6), luRnd(3, 5.5), luRnd(5, 8));
+    flameLast().behind = true;
+  }
+  spawnSparks(x, y, 22, 260);
+  for (let i = 0; i < 8; i++) spawnEmber(x + luRnd(-8, 8), y - luRnd(0, 6), bx * 40 + t.vx * 0.3, 1.4);
+  spawnDebris(x, y - 4, 12, bx * 60 + t.vx * 0.3);
+  for (let i = 0; i < 3; i++) spawnSmoke(x + luRnd(-6, 6), y - luRnd(4, 12), { kind: 'blast', dark: 0.2, r: luRnd(3, 5), grow: luRnd(2, 3), lift: 20, vx: bx * 20, vy: luRnd(-30, -15), life: luRnd(4, 6), alpha: luRnd(0.5, 0.7) });
 }
 // (user Oct 25, their photo) a hit on a tank goes off on top of it: a fireball that rolls upward out of the hull,
 // black smoke over it, and plates and bits of the tank thrown high
@@ -54843,17 +54872,21 @@ function tankHitBlast(t, power) {
 function killTank(t) {
   if (t.state !== 'alive') return;                     // (already lost: never twice - user Oct 27)
   t.state = 'dead';
-  tankHitBlast(t, 1.6 * tvtBlastK());
-  sectionBlast(t.x, t.y - 10, 1.1 * tvtBlastK(), t.vx);
+  tankBlowUp(t);
   spawnDebris(t.x, t.y - 10, 16, t.vx * 0.3);
   // (user Oct 27, [18]: on a ship's deck its wreck rides her; over water it falls in and sinks; on the ground, or held on
   // a magnet over it, it lies (falls) there - stepArmyWreck)
   const dry = onLand(t.x) && !lakeAt(t.x);
   // (user Nov 16 21:23: "the tank getting charred and moving with the explosion") its wreck - burnt (drawLandTank's wreck) - thrown up by its own blast,
   // turning, to come down where it lands (stepArmyWreck's air); on a deck or held by a magnet it stays where it was
-  const thrown = !t.deck && t.carry == null && !t.hook && onLand(t.x);
-  landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.carry != null || t.hook ? 0 : t.a, facing: t.facing, t: 0, burn: 8, deck: t.deck || null,
-    air: thrown, vx: thrown ? t.vx * 0.5 + luRnd(-45, 45) : 0, vy: thrown ? -luRnd(150, 210) : 0, av: thrown ? luRnd(-2.5, 2.5) : 0 });
+  const thrown = !t.deck && t.carry == null && !t.hook && onLand(t.x), [bx, by] = tankBlowDir(t);
+  landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.carry != null || t.hook ? 0 : t.a, facing: t.facing, t: 0, burn: 8, deck: t.deck || null, noTop: thrown,
+    air: thrown, vx: thrown ? t.vx * 0.5 + bx * 50 + luRnd(-15, 15) : 0, vy: thrown ? -luRnd(110, 160) : 0, av: thrown ? luRnd(-1.5, 1.5) : 0 });
+  // (user Nov 16 21:32: the turret "separate and go high in the sky. Not too high, but separate from the body as it explodes") its turret thrown off on
+  // its own, higher and turning faster, to fall and lie as a wreck of its own
+  if (thrown) { const ca = Math.cos(t.a), sa = Math.sin(t.a), lx = ((TANKA.turL + TANKA.turR) / 2 - TCX) * TANK_K * t.facing, ly = ((TANKA.turTop + TANKA.deck) / 2 - TANKA.foot) * TANK_K;
+    landWrecks.push({ kind: 'turret', id: t.id, x: t.x + lx * ca - ly * sa, y: t.y + lx * sa + ly * ca, a: t.a, facing: t.facing, t: 0, burn: 0, air: true,
+      vx: t.vx * 0.5 + bx * 90 + luRnd(-30, 30), vy: -luRnd(260, 330), av: luRnd(-6, 6) }); }
   if (dry && t.carry == null && !t.hook) landCarve(t.x, t.y, 10);
   emit('lost', { kind: 'tank', o: t });
   landWait[t.id].tank = LAND_RESPAWN;
@@ -55400,7 +55433,7 @@ function landShellHit(s) {
 // a blast on land: the crater, the fireball, and everything near it hurt (what it hit hardest)
 function landBlast(s, x, y, hitV) {
   const bk = tvtBlastK(), B = LAND_BLAST[s.from] || LAND_BLAST.tank, crater = B[0] * BLAST_K * bk, reach = B[1] * BLAST_K * bk, dmg = vtDmg(LAND_BLAST[s.from] ? s.from : 'tank', 'land');   // (BLAST_K: user Oct 29, 3x bigger)   // (bk: TANK VS TANK's half size - 50-zzzz-tvt.js)
-  if (hitV && hitV.kind === 'tank') tankHitBlast(hitV, (s.from === 'bomb' ? 1.3 : 1) * bk);   // (on top of the tank, going up)
+  if (hitV && hitV.kind === 'tank') { }   // (on the tank: its own blast after the blow, below - tankHitBlast, or killTank's blow-up)
   else {
     const gy = landBelow(x, y - crater);
     landCarve(x, y, crater);
@@ -55413,6 +55446,7 @@ function landBlast(s, x, y, hitV) {
     if (t && t.state === 'alive') { const d = Math.hypot(t.x - x, t.y - 10 - y); if (t === hitV) tankHurt(t, TVT ? t.hp : dmg, x, y); else if (d < reach + TANK_L * 0.3 && mayHit(s, t)) tankHurt(t, TVT ? t.hp : 0.25, x, y); }   // (TANK VS TANK: one hit, a lost tank - user Nov 16 20:52)
     if (h && (h.state === 'fly' || h.state === 'landed')) { const d = Math.hypot(h.x - x, h.y - y); if (h === hitV) heliHurt(h, VTUNE.heli.hp, x, y); else if (d < reach + 20 && mayHit(s, h)) heliHurt(h, 1, x, y); }
   }
+  if (hitV && hitV.kind === 'tank' && hitV.state === 'alive') tankHitBlast(hitV, (s.from === 'bomb' ? 1.3 : 1) * bk);   // (hit and still standing: the blast on top of it)
 }
 /* ---- a hit in the ground (user Oct 25, their pictures): a burst of earth in spikes ----
    Each spike is a jet of earth thrown out of the hole: a chain of grains launched together along one line, the
@@ -55724,7 +55758,7 @@ function drawLandTank(t, wreck) {
     C.restore();
   }
   drawTankGear(t, Lv, s, X, Y, wreck);
-  const B = Lv.body, L = THG_LIT; L[0] = wreck ? 0.8 : 0; L[1] = L[2] = L[3] = L[4] = 0;
+  const B = t.noTop ? Lv.hull : Lv.body, L = THG_LIT; L[0] = wreck ? 0.8 : 0; L[1] = L[2] = L[3] = L[4] = 0;   // (its turret blown off: the hull - killTank)
   const mk = dmgMask(t, B, TANK_K / UPM, 1, 1, { toArt: (lx, ly) => [TCX + lx / TANK_K, TANKA.foot + ly / TANK_K], k: TANK_K, flip: false });   // (its burn marks, in its own frame facing right)
   thingsQuad(thgCur(), Math.round(X(0)), Math.round(Y(0)), thgW(B, s), thgH(B, s), artPut(B), THG_BODY, null, 0, mk, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(B, t.id, 0.62));
   C.restore();
@@ -55835,7 +55869,8 @@ function drawLandHeli(h) {
 function drawLandUnits(x0, x1) {
   thingsBegin(C);
   for (const w of landWrecks) {
-    if (w.kind === 'tank') drawLandTank({ id: w.id, x: w.x, y: w.y, a: w.a, facing: w.facing, recoil: 0 }, true);
+    if (w.kind === 'tank') drawLandTank({ id: w.id, x: w.x, y: w.y, a: w.a, facing: w.facing, recoil: 0, noTop: !!w.noTop }, true);
+    else if (w.kind === 'turret') drawTankTurret(w);
     else drawLandHeliWreck(w);
   }
   drawLooseRopes();   // (blocks in the batch, in their place)
@@ -55846,6 +55881,19 @@ function drawLandUnits(x0, x1) {
     if (h && h.state !== 'dead' && h.state !== 'gone') drawLandHeli(h);
   }
   thingsEnd();
+}
+// a tank's turret blown off (killTank): its picture and its gun, burnt, turned about its middle (the things' pass)
+function drawTankTurret(w) {
+  if (w.x < CAMPX / SV - 100 || w.x > CAMPX / SV + VWW + 100) return;
+  const Lv = tankArtOf(w.id).lv[2], T = Lv.top, G = Lv.gun, s = TANK_K * SV, own = thingsOwn(), L = THG_LIT; L[0] = 0.8; L[1] = L[2] = L[3] = L[4] = 0;
+  const tw = TANKA.turR - TANKA.turL, th = TANKA.deck - TANKA.turTop, cx = TANKA.turL + tw / 2, cy = TANKA.turTop + th / 2;
+  C.save(); C.translate(PX(w.x), PY(w.y)); C.rotate(w.a || 0); if (w.facing < 0) C.scale(-1, 1);
+  C.save(); C.translate((TANKA.pivX - cx) * s, (TANKA.pivY - cy) * s); C.rotate(-0.3);
+  thingsQuad(thgCur(), 0, -Math.round(thgH(G, s) / 2), thgW(G, s), thgH(G, s), artPut(G), THG_PART, null, 0, null, 0, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(G, w.id, 0.62));
+  C.restore();
+  thingsQuad(thgCur(), -Math.round(tw / 2 * s), -Math.round(th / 2 * s), thgW(T, s), thgH(T, s), artPut(T), THG_BODY, null, 0, null, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(T, w.id, 0.62));
+  C.restore();
+  if (own) thingsEnd();
 }
 // a helicopter's wreck: its side view, badly shot up, burnt dark (the things' pass)
 function drawLandHeliWreck(w) {
