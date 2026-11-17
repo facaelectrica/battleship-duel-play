@@ -1296,6 +1296,8 @@ function gpuPipeDesc(d, label) {
   return d;
 }
 // how much of the book is made, 0-100 (the loading screen's line - coverSayWait, 00-world.js)
+// the book still on its way (made ahead, or still being read): a world isn't drawn under a loading screen meanwhile (48-render.js renderFrame)
+function gpuPipesBusy() { return GPU_PIPES.pend > 0; }
 function gpuPipesDone() { const P = GPU_PIPES; return P.qn ? 100 * (1 - P.pend / P.qn) : 0; }
 // (the frame's end - 30-frame.js gpuFrameEnd) the book still on its way: the frame isn't whole yet
 function gpuPipesWait() { if (GPU_PIPES.pend && typeof frameWait === 'function') frameWait('pipes'); }
@@ -4595,7 +4597,12 @@ function loadImage(src) {
   if (SW_IN_WORKER) return dataUrlBlob(src).then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })).then(bm => { const c = makeCanvas(bm.width, bm.height); c.getContext('2d').drawImage(bm, 0, 0); bm.close(); return c; });
   return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
 }
-function makeCanvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+// (user Nov 17: the Biome Editor opened soon after the page loaded froze the page ~9 s) every picture the game makes is a processor's canvas
+// (willReadFrequently: its first getContext sets it, any later one gets the same). Nothing on screen is a 2D canvas since the engine (WebGPU
+// draws everything): a canvas is made to be read - into the art atlas (artPixels), a hit mask, a tint. On the graphics card's canvas drawer
+// every one queued its drawing there at page load, and the first read of any of them waited for the whole queue (a 488 x 192 picture: 8.7 s
+// on his GTX, ~10 s after loading)
+function makeCanvas(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d', { willReadFrequently: true }); return c; }
 function flipCanvas(src) {
   const c = makeCanvas(src.width, src.height), x = c.getContext('2d');
   x.translate(src.width, 0); x.scale(-1, 1); x.drawImage(src, 0, 0);
@@ -8693,8 +8700,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1044;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 12:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1045;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 12:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -38709,7 +38716,12 @@ function renderFrame() {
   // (no world yet, or LOADING: the menu over black - user Oct 31, 19-menu.js; user Nov 13 17:56: "Main menu is always a flat color" - with a
   // world live behind it too (after the GAME EDITOR's CLOSE, MENU from a game): the world isn't drawn under the title; a REPORT's picture of
   // the game just left still takes its one frame - bugGrab, below - under the title's flat colour)
+  // (user Nov 17: the Biome Editor and TANK VS TANK froze the page ~10 s when opened soon after loading) nor while a loading screen is up and the
+  // pipelines' book is still being made (gpuPipesBusy, 25-pipes.js): a world drawn then used pipelines the driver was still compiling - 'things' takes
+  // 8-10 s on his GTX (D3D12) - the GPU couldn't finish those frames and the page stood still behind them; now the loading screen stays, its line
+  // saying how far the graphics card is (coverSayWait), until the book is made
   if (!worldLive() || (ui.title && !(typeof BUG !== 'undefined' && BUG.want))) { drawNoWorld(); return; }
+  if (gpuPipesBusy() && coverUp()) { frameWait('pipes'); drawNoWorld(); return; }   // (the screen stays up for it: the frame isn't whole)
   const T0 = performance.now();
   renderTick++; frameTick();
   SURF.on = true;
@@ -42277,7 +42289,7 @@ function civTearEdge(c, M, cut, bx, top, bot, A, ox, oy, s) {
 // they stood on her masts and her rigging)
 function civTops(A, K) {
   if (A._tops && A._tops.wl === K.wl) return A._tops;
-  const W = A.width, H = A.height, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const W = A.width, H = A.height, cv = makeCanvas(W, H);   // (a processor's canvas, as every picture made to be read - 04-art-prep.js makeCanvas)
   const x2 = cv.getContext('2d'); x2.drawImage(A, 0, 0);
   const d = x2.getImageData(0, 0, W, H).data, t = new Int16Array(W), w = Math.max(10, Math.round(W * 0.035)), wl = Math.min(K.wl, H);
   const row = new Int32Array(W + 1);                                   // (painted pixels in the row so far, left to right)
