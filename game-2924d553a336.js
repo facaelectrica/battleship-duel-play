@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1064;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 17:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1065;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 17:58';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54891,7 +54891,7 @@ function stepTank(t, dt) {
   const way = want ? Math.sign(want) : Math.sign(t.vx) || t.facing;
   if (t.vy === 0) t.vx = driveStep(t, dt, Math.abs(want), 0, way, tankMake(t, way));
   if (Math.abs(t.vx) > 0.5) {
-    const k = landSpanAt(t.x), nx = k < 0 ? clamp(t.x + t.vx * dt, PLAY_L() + TANK_X0, PLAY_R() - TANK_X0) : landIn(t.x + t.vx * dt, k, TANK_W * 0.5, TANK_X0), G = tankGround(t, nx);   // (on a ship at sea it drives her deck - off her end, into the water)   // (it stops at its country's edge, by the harbour)
+    const nx = clamp(t.x + t.vx * dt, PLAY_L() + TANK_X0, PLAY_R() - TANK_X0), G = tankGround(t, nx);   // (user Nov 17 16:55, TANK VS TANK's cliffs over the sea: "you can drive and sink yourself" - no stop at a land's edge any more: off it, into the sea, it sinks - stepTank's water)   // (on a ship at sea it drives her deck - off her end, into the water)
     const lead = t.vx > 0 ? G.front : G.back;
     if (lead < t.y - TANK_STEP - 1) {                           // a wall: it can't climb that - pushed on, it hops
       t.vx = 0; t.stuckT = (t.stuckT || 0) + dt;
