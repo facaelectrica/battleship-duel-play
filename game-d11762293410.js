@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1061;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 17:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1062;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 17:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -65811,8 +65811,11 @@ function strLit(o, B) {
   if (!B.P || o.k === 'dock' || (o.k === 'hangarAir' && o.big) || o.k === 'terminal') return;
   const X0 = Math.round(PX(B.x0)), X1 = Math.round(PX(B.x1)), Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot)), cx = (X0 + X1) / 2;
   const L = thingsLit(cx, 0);                               // (the rims only, as the trees: the ground they stand on has no night shape of its own)
-  if (L[0] + L[1] + L[2] + L[3] > 0) strQuad(B.P, X0, Y0, X1, Y1, !!o.flip, { kind: THG_LIGHT, lit: L });
-  if (!STR_NO_NIGHT[o.k] && strLightsOn(o)) objNight(B.P, o.art || STR_KINDS[o.k].art, X0, Y0, X1, Y1, !!o.flip);
+  // (user Nov 17 16:27, at night "a faint 'mask' of where the building was destroyed") pieces of it gone (strHit): its light on what's left only, and
+  // its windows dark - its power out
+  const c = typeof strCutOf === 'function' ? strCutOf(o, strPieces(B.P, B.m)) : null;
+  if (L[0] + L[1] + L[2] + L[3] > 0) { if (c) strDrawCut(o, B, c, 0, { kind: THG_LIGHT, lit: L }); else strQuad(B.P, X0, Y0, X1, Y1, !!o.flip, { kind: THG_LIGHT, lit: L }); }
+  if (!c && !STR_NO_NIGHT[o.k] && strLightsOn(o)) objNight(B.P, o.art || STR_KINDS[o.k].art, X0, Y0, X1, Y1, !!o.flip);
 }
 
 //@src 50-zz-nature.js:1
@@ -67848,15 +67851,21 @@ function strPieceGone(o, P, m, q, x, y) {
   const tx = (o.flip ? q.x1 - x : x - q.x0) / m, ty = (y - q.top) / m, i = Math.floor(tx / G.cs), j = Math.floor(ty / G.cs);
   return i >= 0 && j >= 0 && i < G.nc && j < G.nr && c[j * G.nc + i] === '1';
 }
-// a building with pieces gone: what's left, row by row in runs of pieces standing, each a part of its picture (mirrored with it), charred
-function strDrawCut(o, B, c, cov) {
-  const P = B.P, G = strPieces(P, B.m), seed = dmgSeed(P), cell = dmgCell(P);
-  for (let j = 0; j < G.nr; j++) for (let i = 0; i < G.nc;) {
-    if (c[j * G.nc + i] === '1') { i++; continue; }
-    let e = i; while (e < G.nc && c[j * G.nc + e] !== '1') e++;
+// a building with pieces gone: what's left, row by row in runs of pieces standing, each a part of its picture (mirrored with it), charred by the share
+// gone - and (user Nov 17 16:27: "the part/edges of the building that is destroyed more black/charred") a piece next to one gone charred nearly black.
+// o2: the quad's own options instead (its night's light - strLit: the same runs, no ghost of what's gone)
+const STR_EDGE_COV = 0.9;
+function strDrawCut(o, B, c, cov, o2) {
+  const P = B.P, G = strPieces(P, B.m), seed = dmgSeed(P), cell = dmgCell(P), nc = G.nc, nr = G.nr;
+  const gone = (i, j) => i >= 0 && j >= 0 && i < nc && j < nr && c[j * nc + i] === '1';
+  const edge = (i, j) => !o2 && (gone(i - 1, j) || gone(i + 1, j) || gone(i, j - 1) || gone(i, j + 1) || gone(i - 1, j - 1) || gone(i + 1, j - 1) || gone(i - 1, j + 1) || gone(i + 1, j + 1));
+  for (let j = 0; j < nr; j++) for (let i = 0; i < nc;) {
+    if (gone(i, j)) { i++; continue; }
+    const eg = edge(i, j); let e = i + 1; while (e < nc && !gone(e, j) && edge(e, j) === eg) e++;
     const tx0 = i * G.cs, tx1 = Math.min(P.width, e * G.cs), ty0 = j * G.cs, ty1 = Math.min(P.height, (j + 1) * G.cs);
     const a = o.flip ? B.x1 - tx1 * B.m : B.x0 + tx0 * B.m, b = o.flip ? B.x1 - tx0 * B.m : B.x0 + tx1 * B.m;
-    strQuad(P, Math.round(PX(a)), Math.round(PY(B.top + ty0 * B.m)), Math.round(PX(b)), Math.round(PY(B.top + ty1 * B.m)), !!o.flip, { sr: [tx0, ty0, tx1 - tx0, ty1 - ty0], cov, cell, seed });
+    strQuad(P, Math.round(PX(a)), Math.round(PY(B.top + ty0 * B.m)), Math.round(PX(b)), Math.round(PY(B.top + ty1 * B.m)), !!o.flip,
+      Object.assign({ sr: [tx0, ty0, tx1 - tx0, ty1 - ty0] }, o2 || { cov: eg ? Math.max(cov, STR_EDGE_COV) : cov, cell, seed }));
     i = e;
   }
 }
@@ -68039,8 +68048,8 @@ function strStillDraw(o, B) {
     return;
   }
   const X0 = Math.round(PX(B.x0)), X1 = Math.round(PX(B.x1)), Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot));
-  const [cov, D] = dmgLook(B.P, strDmgOf(o, B));
-  { const c = B.P && strCutOf(o, strPieces(B.P, B.m)); if (c) { strDrawCut(o, B, c, cov); return; } }   // (pieces of it gone: what's left, piece by piece - strHit)                  // (damaged: the one rule - 50-zz-damage.js: charred, its damaged picture destroyed)
+  const [cov, D] = dmgLook(B.P, strDmgOf(o, B));   // (damaged: the one rule - 50-zz-damage.js: charred, its damaged picture destroyed)
+  { const c = B.P && strCutOf(o, strPieces(B.P, B.m)); if (c) { strDrawCut(o, B, c, cov); return; } }   // (pieces of it gone: what's left, piece by piece - strHit)
   const P = B.P, kx = (X1 - X0) / P.width, ky = (Y1 - Y0) / P.height, at = (x, w) => o.flip ? X1 - Math.round((x + w) * kx) : X0 + Math.round(x * kx);   // (a box of its texels on the screen, mirrored with it)
   const U = P._under; if (U) { const a = at(U.x, U.P.width); strQuad(U.P, a, Y0 + Math.round(U.y * ky), a + Math.round(U.P.width * kx), Y0 + Math.round((U.y + U.P.height) * ky), !!o.flip); }   // (its chimney behind it)
   if (P._gate) { const [gx, gy, gw, gh] = P._gate, a = at(gx, gw); strBlock(thgCur(), a, Y0 + Math.round(gy * ky), Math.round(gw * kx), Math.round(gh * ky), ...STR_INSIDE); }   // (the dark inside, through its door)
