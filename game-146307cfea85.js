@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1027;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1028;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -19275,7 +19275,7 @@ function stepWeather(dt) {
   // the world settings panel stops the clock while it's open; the pause button stops it for good
   if (W.frozen || ui.settings) return;
   W.t += dt;
-  env.time = (env.time + dt * clockRate(env.time)) % 24;
+  if (!W.manual.time) env.time = (env.time + dt * clockRate(env.time)) % 24;   // (the hour held - W.manual.time: TANK VS TANK's round, user Nov 16 21:36)
   if (env.time < W.lastHour) weatherNewDay();                             // past midnight: a new day
   W.lastHour = env.time;
   const t = W.t;
@@ -30951,7 +30951,7 @@ function buildSmokeLUT() {
     let c;
     if (f === 3) c = E.pal[t];
     else if (f === 4) { const w = t / 5; c = [E.pal[t][0], E.pal[t][1] * (1 - 0.02 * w), E.pal[t][2] * (1 - 0.08 * w)]; }   // (cream: warm in its light only - its shade keeps the sky's blue)
-    else { const b = SMOKE_PAL[f][t]; c = b.map((v, i) => v * clamp(E.pal[t][i] / Math.max(1, day[t][i]), 0, 1.25)); if (t >= 4) c = mix3(c, E.pal[t], f >= 9 ? (t === 5 ? 0.3 : 0.12) : t === 5 ? 0.82 : 0.3); }   // (a coloured smoke's lit edge and highlight keep its colour: the sky's white took them)   // (its lit and backlit edges take some of the sky's light: the clouds' highlight)   // (its backlit edge a little of the clouds' highlight)
+    else { const b = SMOKE_PAL[f][t]; c = b.map((v, i) => v * clamp(E.pal[t][i] / Math.max(1, day[t][i]), 0, 1.25)); if (t >= 4) c = mix3(c, E.pal[t], f >= 9 || (f >= 5 && f <= 7) ? (t === 5 ? 0.3 : 0.12) : t === 5 ? 0.82 : 0.3); }   // (the earth's - sand, dust, heavier dust - as the coloured smokes: its lit side keeps its own colour; user Nov 16 21:36, at sunset the dust lit like a cloud, "it looks like the tanks are on fire")   // (a coloured smoke's lit edge and highlight keep its colour: the sky's white took them)   // (its lit and backlit edges take some of the sky's light: the clouds' highlight)   // (its backlit edge a little of the clouds' highlight)
     const w1 = mix3(c, WARM[t], 0.45 * Math.min(1, glow)), w2 = mix3(c, WARM[Math.min(5, t + 1)], 0.8 * Math.min(1, glow));
     lut[(f * 6 + t) * 3] = rgb(c.map(v => clamp(Math.round(v), 0, 255)));
     lut[(f * 6 + t) * 3 + 1] = rgb(w1.map(v => clamp(Math.round(v), 0, 255)));
@@ -55563,7 +55563,12 @@ function stepEarthGrains(dt) {
     if (q.vy > 0 && landSolid(nx, ny)) {
       // (it lands: a heavy one may hop once, then it lies on the ground)
       if (!q.light && q.vy > 140 && !q.hop) { q.hop = true; q.vy *= -0.22; q.vx *= 0.5; continue; }
-      q.y = landBelow(nx, ny - 6) - 0.6; q.x = nx; q.rest = 1; q.life = Math.max(q.life, q.t + (q.light ? 0.6 : landBitsRnd(5, 10)));   // (user Nov 16 21:28: the dirt stays - "What I meant was those balls of smoke": the burst's low dust cloud, now 1.5-2.5 s)
+      q.y = landBelow(nx, ny - 6) - 0.6; q.x = nx;
+      // (user Nov 16 21:28: "I don't want the dirt on the ground to disappear ... The dirt should actually stay") a grain of earth that comes to rest
+      // stays for good: a piece of debris of its colour and size, which the settled world keeps once it lies (36-zzzz-settled.js - drawn from its
+      // record, never stepped, saved: nothing piles up in a list that's stepped). The pale dust thins out as before
+      if (!q.light) { debrisRow({ x: q.x, y: q.y - 0.4, vx: 0, vy: 1, a: 0, w: 0, sw: q.big ? 1.3 : 0.8, sh: q.big ? 1 : 0.6, col: q.c, state: 0, bub: 0, seed: 0, age: 0 }); earthGrains.drop(i); continue; }
+      q.rest = 1; q.life = Math.max(q.life, q.t + 0.6);
       continue;
     }
     q.x = nx; q.y = ny;
@@ -71348,7 +71353,7 @@ function tvtRound() {
 function tvtConditions() {
   const r = tvtRng(TV.seed ^ 0x9E3779B9), rnd = (a, b) => a + (b - a) * r();
   const h = rnd(0, 24), k = r(), sgn = r() < 0.5 ? -1 : 1;
-  W.manual = {}; W.frozen = false; W.rain = null; W.fog = null;
+  W.manual = { time: 1 }; W.frozen = false; W.rain = null; W.fog = null;   // (the hour stays for the round - the sun doesn't move, user Nov 16 21:36; the weather changes)
   W.t = rnd(0, 20000); W.t0 = W.t - 1000;                 // (somewhere along the weather's wander; not the new game's eased first minute)
   env.time = h; W.lastHour = h;
   if (k >= 0.3 && k < 0.88) {                              // (cloud over and drizzle, a shower, or a storm - a spell already coming in)
