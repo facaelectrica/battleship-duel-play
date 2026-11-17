@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1017;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 21:57';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1018;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -9070,7 +9070,7 @@ const HUD_VEH = ['tower', 'ship', 'sub', 'plane'];             // (the tower fir
 // just iterates through them. We only see your 8 pilots if you go into the army mode. The turret is valid for both.")
 const civUI = [false, false];
 const ARMY_TABS = ['tower', 'ship', 'sub', 'plane', 'tank', 'heli', 'mode'], CIV_TABS = ['cv:fixed', 'cv:boat', 'cv:plane', 'cv:heli', 'cv:sub', 'cv:space', 'mode'];   // (the user's kinds: boats, planes, helicopters, underwater, space - the balloons with the rocket, the station, the satellites)
-const hudVeh = (p = 0) => STORY ? [] : TVT ? ['tank'] : LAND ?   // (TANK VS TANK: the tank, nothing else - 50-zzzz-tvt.js)
+const hudVeh = (p = 0) => STORY || TVT ? [] : LAND ?   // (TANK VS TANK: none - each player is in their tank from the start, user Nov 16 20:58: "We don't want the tank icons on the top" - 50-zzzz-tvt.js)
   (civUI[p] ? CIV_TABS : ARMY_TABS) :   // (STORY: none - you move between your base, the structures and your vehicles by their dots, user Oct 31 13:07)
   HUD_VEH;
 const HUD_TABICON = { ship: 'icShip', sub: 'icSub', tower: 'icTower', plane: 'icPlane', tank: 'icTank', heli: 'icHeli', civ: 'icCiv', 'cv:ship': 'icCvShip', 'cv:boat': 'icCvShip', 'cv:sub': 'icCvSub', 'cv:space': 'icCvSpace', 'cv:plane': 'icCvPlane', 'cv:heli': 'icCvHeli', 'cv:balloon': 'icCvBal', 'cv:fixed': 'icTower' };
@@ -71187,7 +71187,7 @@ function tvtNewSeed() { try { const a = new Uint32Array(1); crypto.getRandomValu
 function tvtZoom() { let z = ZOOM_LEVELS[0]; for (const l of ZOOM_LEVELS) if (VIEW_W / l >= TVT_FIELD && l > z) z = l; return z; }
 // the biomes a round picks from: every land biome (the skin letters - 09-sea-surface.js SKINS; not the sea)
 const TVT_BIOMES = ['F', 'D', 'T', 'M', 'I', 'W', 'V'];
-const TVT_TOP = -200, TVT_FOOT = 600;                    // (the shapes' own frame - from the sea's line, + down: the ground's mean height about 40 m over the sea; its bottom)
+const TVT_TOP = -450, TVT_FOOT = 600;                      // (the shapes' own frame - from the sea's line, + down: the ground's mean height about 40 m over the sea; its bottom)
 // the round's world, as world keys (the Biome Editor's test world's way - vegWorld, 00-world.js): one SOLID shape the field's width W, its top a
 // line of hills; a hill in the middle or a lake there (its pocket's level in LAKE_SET); nothing placed. Returns { map, lake }
 function tvtWorld(seed, W) {
