@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1062;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 17:31';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1063;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 17:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -28267,7 +28267,7 @@ fn sn(x: f32, y: f32) -> f32 { let xi = floor(x); let yi = floor(y); return kn(i
   let m = vec4i(u[4]);
   let T = select(select(select(0, 1, M < m.z), 2, M < m.y), 3, M < m.x);
   let inn = select(0, select(1, 2, j < r.z), n > 0);
-  rsw[o] = u32(T | (inn << 2) | 16);
+  rsw[o] = u32(T | (inn << 2) | 16) | (u32(min(M, 8388607)) << 8u);   // (and M itself, for the rays between two of them - fray)
 }
 // THE RAYS: each cell finds its wedge (atan) and its step (its distance) - the light left after the clouds it crossed (rs), its wedge's
 // tier and length (va), four steps of brightness along it. u[3].xy the sun (cells); u[4] (reach, steps, rays, step); u[5] the four
@@ -28275,16 +28275,26 @@ fn sn(x: f32, y: f32) -> f32 { let xi = floor(x); let yi = floor(y); return kn(i
 @fragment fn fray(i: VO) -> @location(0) vec4f {
   let c = floor(cellAt(i.p)); let sun = u[3].xy; let p = u[4]; let K4 = u[5]; let k2 = u[6];
   let dx = c.x - sun.x; let dy = c.y - sun.y; let RN = p.z;
-  let w = floor((atan2(dy, dx) + 3.14159265) * RN / 6.2831853);
+  let wf = (atan2(dy, dx) + 3.14159265) * RN / 6.2831853;
+  let w = floor(wf);
   let bi = u32(w - RN * floor(w / RN));
   let rb = va[bi].xy; let tier = i32(rb.x + 0.5);
   let d = sqrt(dx * dx + dy * dy); let uu = d / max(1e-6, p.x * rb.y);
   let sf = select(1.0, floor(clamp((d - k2.w) / max(1.0, k2.w * 0.6), 0.0, 1.0) * 4.0) / 4.0, k2.w > 0.0);
   let j = i32(floor(d / p.w));
-  let NS = u32(p.y);
-  let v = i32(rs[bi * NS + u32(clamp(j, 0, i32(NS) - 1))]);
-  let hit = (v >> 4) & 1; let T = select(3, v & 3, hit == 1); let inn = select(0, (v >> 2) & 3, hit == 1);
-  if (c.y >= k2.z || c.y < 0.0 || c.x < 0.0 || tier == 0 || uu >= 1.0 || d < k2.w || j >= i32(NS) || T == 0 || inn == 2) { discard; }
+  let NS = u32(p.y); let js = u32(clamp(j, 0, i32(NS) - 1));
+  let v = rs[bi * NS + js];
+  let hit = (v >> 4u) & 1u; let inn = select(0u, (v >> 2u) & 3u, hit == 1u);
+  // (user Nov 17 16:24, rain at sunset: "the whole screen is flickering ... sharp vertical / diagonal lines". A ray's light was its wedge's
+  // whole: as a cloud's edge drifted across a wedge, all of it past the cloud jumped a step at once - in a sky full of rain clouds some
+  // wedge every frame. Now the cloud crossed (M, in steps) is read from the two rays either side of this cell and taken between them by
+  // where it lies, then stepped: the four flat steps stay, their edges follow the clouds as they drift)
+  let wl = wf - 0.5; let w0 = floor(wl); let fr = wl - w0;
+  let b0 = u32(w0 - RN * floor(w0 / RN)); let w1 = w0 + 1.0; let b1 = u32(w1 - RN * floor(w1 / RN));
+  let v0 = rs[b0 * NS + js]; let v1 = rs[b1 * NS + js];
+  let M = mix(select(0.0, f32(v0 >> 8u), ((v0 >> 4u) & 1u) == 1u), select(0.0, f32(v1 >> 8u), ((v1 >> 4u) & 1u) == 1u), fr);
+  let T = select(select(select(0, 1, M < u[7].w), 2, M < u[3].w), 3, M < u[3].z);
+  if (c.y >= k2.z || c.y < 0.0 || c.x < 0.0 || tier == 0 || uu >= 1.0 || d < k2.w || j >= i32(NS) || T == 0 || inn == 2u) { discard; }
   let K = select(select(select(K4.w, K4.z, uu < 0.82), K4.y, uu < 0.6), K4.x, uu < 0.35);
   var k = min(0.85, K * select(0.5, 1.0, tier == 2) * k2.x * select(1.0, k2.y, inn != 0));
   k *= select(select(0.3, 0.6, T == 2), 1.0, T == 3) * sf;
@@ -30459,6 +30469,7 @@ function outRays(G) {
   if (n <= 0 || dx > V.w + 4 || dx + dw < -4 || dy > V.h + 4 || dy + dh < -4) return;
   const ex = skdMarch(G.gb, G.NS); if (!ex) return;
   const U = SKD_U(5); U.set(G.sun, 12); U.set(G.p, 16); U.set(G.K, 20); U.set(G.k2, 24); U.set(G.col, 28);
+  U[14] = G.gb.m[0]; U[15] = G.gb.m[1]; U[31] = G.gb.m[2];   // (the light's levels in steps of cloud, as the march's: fray steps the cloud crossed between two rays)
   skdQuad(ctx, 'fray', dx, dy, dw, dh, [0, G.y0, CW, G.y1 + 1], U, ex);
 }
 // a deck's clouds (straight into the view's target - 13-gpu-sky.js gskLayDeck: vi whose clouds, d the deck, its rows 0..n) - so the other half
