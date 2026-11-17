@@ -8078,7 +8078,7 @@ function holdsFor(p, dt) {
   {
     // the battleship's and the tower's machine guns: held, they fire on and on
     const m = controlling(p);
-    if (mgHold[p] && (m === 'ship' || m === 'tower' || m === 'tank') && (!ui.menu || NET.remote)) {
+    if (mgHold[p] && (m === 'ship' || m === 'tower' || m === 'tank') && kitHas(p, 'mg') && (!ui.menu || NET.remote)) {
       const g = m === 'ship' || m === 'tank' ? guns[p] : tguns[p];
       g.mgT = (g.mgT || 0) - dt;
       // (the tower's guns fire half as many rounds again, user Oct 25: they should feel powerful)
@@ -8366,7 +8366,7 @@ const ACTS = {
   torp: p => fireTorpedo(subOf(p), false),          // (the vertical torpedo is gone: user Oct 29)
   light: p => toggleLight(p),                      // (the army sub's light, user Oct 29; every helicopter's, user Oct 31)
   mine: p => layMine(subOf(p)),
-  smoke: p => crew[p].mode === 'tank' ? tankScreen(tankOf(p)) : dropSmoke(shipOf(p)),   // (the tank's too: user Oct 25)
+  smoke: p => !kitHas(p, 'smoke') ? undefined : crew[p].mode === 'tank' ? tankScreen(tankOf(p)) : dropSmoke(shipOf(p)),   // (only a vehicle with smoke - its kit, 17-hud.js)   // (the tank's too: user Oct 25)
   // the plane: -1 / 1 head left / right, 0 circle on the spot
   planeDir: (p, d) => {
     if (crew[p].mode === 'civ') { civDir(p, d); return; }   // (OPEN WORLD: a civilian vehicle)
@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1019;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:06';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1020;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -9159,6 +9159,8 @@ function prepHudArt() {
   img.hud.water = makeWaterArt(img.hud.home);       // (the fire helicopter's: its water cannon on / off)
   img.hud.ping = makePingArt(img.hud.home);         // (the minisub's PING, user Oct 27)
 }
+// a weapon the vehicle you're in has (its kit's): a key, a pad's button or a held trigger for one it hasn't does nothing
+const kitHas = (p, wk) => { const K = hudKit(p); return !!(K && K.weapons && K.weapons.includes(wk)); };
 // what the vehicle you're in has: the drive buttons, rise and dive, aim and power, and its weapons
 function hudKit(p) {
   const m = crew[p].mode;
@@ -9167,7 +9169,7 @@ function hudKit(p) {
   if (m === 'sub') return { drive: true, home, dive: true, aim: true, noPower: true, weapons: ['torp', 'light', 'mine'] };   // (the mine: user Oct 24 night; the light in the vertical torpedo's place, with the ANGLE tape for it - user Oct 29)
   if (m === 'tower') return { drive: false, home: false, dive: false, aim: true, weapons: ['mg', 'shell'] };
   if (m === 'plane') return { drive: true, stop: true, home, dive: true, aim: false, weapons: ['mg', 'rocket', 'bomb'] };   // (the bomb in the depth charge's slot: it is one, under water)
-  if (m === 'tank') return { drive: true, home: false, dive: false, aim: true, weapons: ['mg', 'shell', 'smoke'] };       // (LAND TEST)
+  if (m === 'tank') return { drive: true, home: false, dive: false, aim: true, weapons: TVT ? [null, 'shell', null] : ['mg', 'shell', 'smoke'] };       // (LAND TEST)   // (TANK VS TANK: its missile alone, in its slot - user Nov 16 21:07)
   if (m === 'heli') return { drive: true, home: false, dive: true, aim: true, weapons: ['mg', 'rocket', 'magnet', 'light'] };   // (its magnet green, after its guns - user Oct 27; its light, user Oct 31)
   // (user Oct 27, 13:49: every vehicle's own buttons green, on the right, in its weapon row - no red button: civWeapons)
   if (m === 'civ') { const v = crew[p].civ, k = v ? civClass(v) : null; return { drive: true, stop: civPlane(v), home: false, noPower: k === 'sub' || (k === 'heli' && !isFireHeli(v)), dive: k === 'air' || k === 'balloon' || k === 'heli' || k === 'sub' || (k === 'shuttle' && v.state !== 'pad' && v.state !== 'count' && v.state !== 'climb') || k === 'orb' || k === 'seaplane' || k === 'blimp', diveRight: k === 'boat' && v.kind === 'fish', aim: k === 'sub' || k === 'heli', weapons: civWeapons(v) }; }   // (the fire helicopter: ANGLE and POWER, its water on the green button; the minisub: the angle of its light)
