@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1025;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1026;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:28';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -55529,7 +55529,7 @@ function stepEarthGrains(dt) {
     if (q.vy > 0 && landSolid(nx, ny)) {
       // (it lands: a heavy one may hop once, then it lies on the ground)
       if (!q.light && q.vy > 140 && !q.hop) { q.hop = true; q.vy *= -0.22; q.vx *= 0.5; continue; }
-      q.y = landBelow(nx, ny - 6) - 0.6; q.x = nx; q.rest = 1; q.life = Math.max(q.life, q.t + (q.light ? 0.4 : landBitsRnd(1.5, 3)));   // (user Nov 16 21:14: the dirt on the ground gone a lot sooner - was 5-10 s)
+      q.y = landBelow(nx, ny - 6) - 0.6; q.x = nx; q.rest = 1; q.life = Math.max(q.life, q.t + (q.light ? 0.6 : landBitsRnd(5, 10)));   // (user Nov 16 21:28: the dirt stays - "What I meant was those balls of smoke": the burst's low dust cloud, now 1.5-2.5 s)
       continue;
     }
     q.x = nx; q.y = ny;
