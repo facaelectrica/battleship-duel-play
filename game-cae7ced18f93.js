@@ -8713,8 +8713,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1050;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 16:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1051;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 16:17';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -18613,6 +18613,13 @@ function stepParticles(dt) {
       L[i] += dt;
       VY[i] += 420 * dt; VX[i] += (W - VX[i]) * 0.5 * dt;
       LX[i] = X[i]; LY[i] = Y[i]; X[i] += VX[i] * dt; Y[i] += VY[i] * dt;
+      // (user Nov 17 15:13: the sparks "must collide with the terrain, not go through it") into the ground it bounces off it and skitters on: off a wall
+      // (solid ahead of it, open where it was at this height) back the other way, off the ground below or the roof above (a cave's) back up or down,
+      // losing most of its speed - each where it struck
+      if (landSolid(X[i], Y[i])) {
+        if (!landSolid(LX[i], Y[i])) { X[i] = LX[i]; VX[i] *= -0.4; VY[i] *= 0.8; }
+        else { Y[i] = LY[i]; VY[i] *= -0.35; VX[i] *= 0.6; if (landSolid(X[i], Y[i])) X[i] = LX[i]; }
+      }
       if (L[i] > c.max[i] || (Y[i] > wTop && Y[i] > surfaceY(X[i]))) sparks.drop(i);
     }
     sparks.sweep(); }
@@ -54917,7 +54924,8 @@ function tankHurt(t, amt, x, y, by) {
   if (x != null && y != null) { t.hitX = x; t.hitY = y; }   // (where the blow came from: killTank's blast goes away from it)
   if (t.carry != null && x != null) ropeKick(t, x, y, amt);            // (hanging from a magnet: the hit swings it, and the helicopter)
   noteHit(t.id, 'tank');
-  if (amt >= 0.3) { spawnSparks(x, y, 14, 220); if (t.hp > 1e-6) sound('impact', x); }   // (a blow that destroys it: its own blow-up's sound alone - killTank, sfxTankBlow)
+  if (amt >= 0.3) { spawnSparks(x, y, 40, 240);   // (user Nov 17 15:13: "there should be more" - was 14)
+    if (t.hp > 1e-6) sound('impact', x); }   // (a blow that destroys it: its own blow-up's sound alone - killTank, sfxTankBlow)
   if (by !== -1) unitScorch(t, x, y, amt >= 0.3 ? 4 + 3 * Math.min(1, amt) : landUnitR() < 0.5 ? 0.9 : 0);
   if (t.hp <= 1e-6) killTank(t);
 }
@@ -54940,7 +54948,7 @@ function tankBlowUp(t) {
     spawnFlame(x + luRnd(-R, R) * 0.5, y + luRnd(-R, R) * 0.3, Math.cos(a) * out + bx * push + t.vx * 0.5, Math.sin(a) * out * 0.7 + by * push, luRnd(1.3, 1.6), luRnd(3, 5.5), luRnd(5, 8));
     flameLast().behind = true;
   }
-  spawnSparks(x, y, 22, 260);
+  spawnSparks(x, y, 70, 300);   // (user Nov 17 15:13: more sparks off a tank - was 22)
   for (let i = 0; i < 8; i++) spawnEmber(x + luRnd(-8, 8), y - luRnd(0, 6), bx * 40 + t.vx * 0.3, 1.4);
   spawnDebris(x, y - 4, 12, bx * 60 + t.vx * 0.3);
   for (let i = 0; i < 3; i++) spawnSmoke(x + luRnd(-6, 6), y - luRnd(4, 12), { kind: 'blast', dark: 0.2, r: luRnd(3, 5), grow: luRnd(2, 3), lift: 20, vx: bx * 20, vy: luRnd(-30, -15), life: luRnd(4, 6), alpha: luRnd(0.5, 0.7) });
@@ -54963,7 +54971,7 @@ function tankHitBlast(t, power) {
     flameLast().behind = true;
   }
   for (let i = 0; i < 10 * power + 4; i++) spawnEmber(x + luRnd(-8, 8), y - luRnd(0, 6), t.vx * 0.3, 1.6);
-  spawnSparks(x, y, 16 + 10 * power, 300);
+  spawnSparks(x, y, 40 + 20 * power, 300);   // (user Nov 17 15:13: more sparks off a tank - was 16 + 10 power)
   for (let i = 0; i < 2 + 3 * power; i++) spawnSmoke(x + luRnd(-6, 6), y - luRnd(14, 34), { kind: 'blast', dark: 0.1, r: luRnd(3.5, 6) * (0.7 + 0.4 * power), grow: luRnd(3, 5), lift: 40, vx: luRnd(-10, 10), vy: luRnd(-70, -35), life: luRnd(6, 9), alpha: luRnd(0.55, 0.75) });
   // the debris: dark shards and a few in the tank's own paint, flung high
   const col = tankArtOf(t.id).col, own = css3(col.map(v => v * 0.8));
@@ -71399,12 +71407,13 @@ const TVT_WINS = 3;                                      // (best of five)
 const TVT_FIELD = 1300;                                  // (the field at least this wide, world units - about 200 m; the zoom the level that shows it whole - user Nov 16 20:48: "2x closer")
 const TVT_OVER_S = 3.5;                                  // (a round's end: the lost tank's blast and wreck watched this long, then the next round)
 // the match: each side's rounds won, the round it's on, the round's seed (its world and conditions), the field's width; a round over:
-// who lost it (-1: both) and how long ago
-const TV = { wins: [0, 0], round: 1, seed: 0, w: 0, over: null, overT: 0, keep: false, in: false };
+// who lost it (-1: both) and how long ago; wait: the shots still in the air when the first tank was lost (their ids - tvtStep)
+const TV = { wins: [0, 0], round: 1, seed: 0, w: 0, over: null, overT: 0, wait: null, keep: false, in: false };
 const TVT_ROW = worldRow({
   w0: [() => TV.wins[0], v => { TV.wins[0] = v | 0; }], w1: [() => TV.wins[1], v => { TV.wins[1] = v | 0; }],
   round: [() => TV.round, v => { TV.round = v | 0 || 1; }], seed: [() => TV.seed, v => { TV.seed = v >>> 0; }], fw: [() => TV.w, v => { TV.w = +v || 0; }],
   over: [() => TV.over, v => { TV.over = v == null ? null : v | 0; }], overT: [() => TV.overT, v => { TV.overT = +v || 0; }],
+  wait: [() => TV.wait ? TV.wait.join(',') : '', v => { TV.wait = v ? String(v).split(',').map(Number) : null; }],
 });
 defTable('tvt', () => [TVT_ROW], { make: () => TVT_ROW });
 // a seeded source of its own for one round (mulberry32 of the round's seed): the same seed, the same world and conditions
@@ -71478,7 +71487,7 @@ function tvtOut() {
 // a round's world: from the menu's PLAY or PLAY AGAIN a new match; the next round (tvtNext) keeps the score
 function tvtRound() {
   if (!TV.keep) { TV.wins = [0, 0]; TV.round = 1; }
-  TV.keep = false; TV.over = null; TV.overT = 0;
+  TV.keep = false; TV.over = null; TV.overT = 0; TV.wait = null;
   TV.seed = tvtNewSeed();
   tvtWorldIn();
 }
@@ -71523,7 +71532,13 @@ function tvtStep(dt) {
   if (!TVT || ui.winner != null || netGuestHold()) return;
   if (TV.over == null) {
     const gone = [0, 1].map(p => { const t = tankOf(p); return !t || t.state !== 'alive'; });
-    if (gone[0] || gone[1]) { TV.over = gone[0] && gone[1] ? -1 : gone[0] ? 0 : 1; TV.overT = 0; }
+    if (!gone[0] && !gone[1]) { TV.wait = null; return; }
+    // (user Nov 17 15:14: "after a player get hit, if there are still missiles in the air, we wait for them to hit. if they also hit and destroy the other
+    // tank, then its a draw") the shots in the air when the first tank is lost still count: the round is decided once each has come down (a new shot
+    // fired after isn't waited for); both lost by then - a draw, the round played again
+    if (TV.wait == null) { const c = shells.c; TV.wait = []; for (let i = 0; i < shells.n; i++) if (!c.under[i]) TV.wait.push(c.sq[i]); }
+    if (TV.wait.some(cpuShotFlying)) return;
+    TV.over = gone[0] && gone[1] ? -1 : gone[0] ? 0 : 1; TV.overT = 0; TV.wait = null;
     return;
   }
   TV.overT += dt;
@@ -71535,8 +71550,8 @@ function tvtStep(dt) {
   TV.keep = true;
   setTimeout(() => { if (TVT && ui.winner == null && !ui.title) restartGame(true); }, 0);   // (out of the step: LOADING..., the next round's world, built - restartGame)
 }
-// while the round is over, no new tank comes in (canTake)
-const tvtOver = () => TVT && TV.over != null;
+// while the round is over - or a tank is lost and the shots in the air are still to come down - no new tank comes in (canTake)
+const tvtOver = () => TVT && (TV.over != null || TV.wait != null);
 // (user Nov 16 20:52: "the explosion it makes should be half the size"; 21:01: "maybe 3 times smaller ... The hole should not be bigger than the size of a
 // tank") a blast on the land and a tank's, its size in TANK VS TANK: the tank's own shot digs a hole as wide as a tank (LAND_BLAST's crater a radius)
 const tvtBlastK = () => TVT ? TANK_L / (2 * LAND_BLAST.tank[0] * BLAST_K) : 1;
@@ -72047,6 +72062,16 @@ function audioInit() {
     osc.start();
     SFX.eng.push({ osc, lp, g, pan, lfo });
   }
+  // (user Nov 17 15:11, his recording of a tank's tracks - gen/ref/ref-tank-tracks.mp3: "The tank sounds like an airplane. We should hear the
+  // 'chack chack' of the tank tracks rolling over grass") each side's tank's tracks: a bus its links' clacks are struck into (sfxTrackClacks) and the
+  // low roll of the tracks on the ground under them (brown noise, low) - both by its tracks' speed
+  SFX.trk = [];
+  for (let i = 0; i < 2; i++) {
+    const g = ctx.createGain(), pan = makePan(), roll = loopNoise(SFX.brown), rLP = ctx.createBiquadFilter(), rG = ctx.createGain();
+    g.gain.value = 0; rLP.type = 'lowpass'; rLP.frequency.value = 160; rLP.Q.value = 0.8; rG.gain.value = 0;
+    roll.connect(rLP); rLP.connect(rG); rG.connect(g); g.connect(pan.node); pan.node.connect(SFX.world);
+    SFX.trk.push({ g, pan, rG, ph: 0 });
+  }
   // (LAND TEST) a helicopter's rotor for each side: a rush of air chopped by the blades
   SFX.rot = [];
   for (let i = 0; i < 2; i++) {
@@ -72185,7 +72210,7 @@ function audioState(ctx) {
 function audioDrop() {
   const ctx = SFX.ctx; if (ctx) ctx.onstatechange = null;
   if (ctx && ctx.state === 'closed') console.warn('audio: the context was closed - a new one is made');
-  Object.assign(SFX, { ctx: null, master: null, world: null, round: null, noise: null, brown: null, whoosh: [], amb: null, eng: [], rot: null, pl: null, jt: null, roar: null, under: null, life: null, refused: false, wasStopped: false });
+  Object.assign(SFX, { ctx: null, master: null, world: null, round: null, noise: null, brown: null, whoosh: [], amb: null, eng: [], trk: null, rot: null, pl: null, jt: null, roar: null, under: null, life: null, refused: false, wasStopped: false });
   if (typeof hornVoices !== 'undefined') hornVoices.clear();
 }
 ['pointerdown', 'keydown', 'touchstart', 'touchend', 'mousedown', 'click'].forEach(t => window.addEventListener(t, audioInit, { passive: true, capture: true }));
@@ -72312,6 +72337,26 @@ function sfxTankBlow(x) {
     const ti = t + 0.65 + r() * 1.4, k = 0.6 + 0.4 * r();
     thump(out, ti, 65 + r() * 55, 28, 0.22 + 0.12 * r(), 0.45 * k);
     noiseShot(rough, ti, 0.14 + 0.1 * r(), 'lowpass', 650 + r() * 450, 140, 0.9, 0.3 * k, 0.002);
+  }
+}
+// a tank's tracks rolling (SFX.trk, user Nov 17 15:11 and his recording): a clack each time a link of its track meets the ground - a dry knock low down and
+// the steel's short chack over it, each a little different, some harder - at its tracks' speed (TRK_PITCH of track a link: ~36 a second at its top speed,
+// the recording's ~26 at a run), over the low roll of the tracks on the ground. Its links' run through the ground in the water: quieter, duller
+const TRK_PITCH = 0.25;   // (metres of track a link)
+function sfxTrackClacks(i, tk, h, aboard, t, dt) {
+  const T = SFX.trk && SFX.trk[i]; if (!T) return;
+  const v = tk ? Math.abs(tk.wsp != null ? tk.wsp : tk.vx / UPM) : 0, on = Math.min(1, v * UPM / VTUNE.tank.speed), wet = tk && tk.wet ? 0.45 : 1;
+  aim(T.g.gain, tk ? 0.5 * wet * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard : 0, t, 0.08);
+  T.pan.set(aboard > 1 ? h.pan * 0.4 : h.pan);
+  aim(T.rG.gain, 0.25 * on, t, 0.12);
+  if (!tk || v < 0.15 || dt <= 0) { T.ph = 0; return; }
+  T.ph += v * Math.min(dt, 0.1) / TRK_PITCH;
+  let n = Math.floor(T.ph); T.ph -= n;
+  for (let k = 0; k < n; k++) {
+    const t0 = t + dt * (k + 0.3 * seenR('audio')) / n, a = (0.35 + 0.45 * on) * (seenR('audio') < 0.18 ? 1.5 : 0.7 + 0.3 * seenR('audio')), f = 1700 + 900 * seenR('audio');
+    noiseShot(T.g, t0, 0.028, 'bandpass', f * (wet < 1 ? 0.5 : 1), f * 0.7, 1.3, 0.45 * a, 0.001);   // the steel's chack
+    noiseShot(T.g, t0, 0.045, 'bandpass', 700 + 300 * seenR('audio'), 380, 1.1, 0.4 * a, 0.001);      // the link's body
+    thump(T.g, t0, 115 + 30 * seenR('audio'), 55, 0.05, 0.35 * a);                                  // the knock on the ground
   }
 }
 // a shell on bare steel: a clang and a short bang
@@ -72567,9 +72612,11 @@ function audioUpdate(dt) {
       const on = cv ? (cv.eng ? 0.25 + 0.55 * Math.min(1, Math.abs(cv.wsp || 0) * UPM / Math.max(20, cv.v || 60)) + 0.2 * (cv.thr || 0) : 0)
         : tk && tk.state === 'alive' ? 0.3 + 0.7 * Math.min(1, Math.abs(tk.wsp != null ? tk.wsp * UPM : tk.vx) / VTUNE.tank.speed) : 0, h = src ? hear(src.x) : { pan: 0, att: 0 };
       const aboard = (cv || crew[i].mode === 'tank') && L.includes(i) ? 2 / Math.sqrt(L.length) : 1;
-      aim(e.osc.frequency, 34 + 40 * on, t, 0.2); aim(e.lp.frequency, 130 + 300 * on, t, 0.2); aim(e.lfo.frequency, 5 + 10 * on, t, 0.2);
-      aim(e.g.gain, on ? (0.01 + 0.05 * on) * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard : 0, t, 0.2);
+      // (the tank's diesel lower and duller than a car's, under its tracks - user Nov 17 15:11: "The tank sounds like an airplane")
+      aim(e.osc.frequency, tk ? 26 + 20 * on : 34 + 40 * on, t, 0.2); aim(e.lp.frequency, tk ? 95 + 140 * on : 130 + 300 * on, t, 0.2); aim(e.lfo.frequency, tk ? 6 + 8 * on : 5 + 10 * on, t, 0.2);
+      aim(e.g.gain, on ? (tk ? 0.6 : 1) * (0.01 + 0.05 * on) * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard : 0, t, 0.2);
       e.pan.set(aboard > 1 ? h.pan * 0.4 : h.pan);
+      sfxTrackClacks(i, tk && tk.state === 'alive' && !tk.vy && !tk.hook && tk.carry == null ? tk : null, h, aboard, t, dt);
       // (the civilian helicopter you're flying has its rotor heard too, as the army one - user Oct 26)
       const ch = crew[i].mode === 'civ' && crew[i].civ && civHelis.includes(crew[i].civ) ? crew[i].civ : null;
       const r = SFX.rot[i], hl = ch || heliOf(i), sp = hl && (hl.state === 'fly' || hl.state === 'landed') ? clamp(hl.spin || 0, 0, 1) : 0, hh = hl ? hear(hl.x) : { pan: 0, att: 0 };
