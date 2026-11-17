@@ -6719,6 +6719,7 @@ function buildWorld0(restore) {
   N = Math.ceil(WORLD_W / DX) + 1; WX0 = 0; REACH_W = 0;   // (the water's columns over the world; STORY's endless sea grows them as you go - 05-zzz-endless.js)
   wh = new Float32Array(N); wv = new Float32Array(N); wf = new Float32Array(N); wtmp = new Float32Array(N);
 
+  strDmgReset();                                           // (the buildings whole again - their hits and falls are this world's: 50-zz-struct.js strHit)
   pirateWrecks.length = 0;                            // (the last world's: not levelling this one's floor while its rocks are laid out - buildDeep places them again)
   worldHarbours();
   if (!restore) { ui.winner = null; ui.winT = 0; }
@@ -8727,7 +8728,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1055;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const GAME_VERSION = 1056;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
 const BUILD = 'NOV 17 16:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
@@ -12971,6 +12972,8 @@ function stepChunks(dt) {
       else k.dead = true;
     } else {
       k.y = floor - k.hh * 0.45; k.rest = true; k.vx = k.vy = k.w = 0;
+      // (a building's piece - strCollapse: masonry, no fire - lands in a puff of its dust and quietly, the fall's crash already heard; user Nov 17 15:41: no smoke on buildings)
+      if (k.kind === 'rubble') { for (let i = 0; i < 3; i++) spawnSmoke(x + armChunkRnd(-10, 10), y - armChunkRnd(2, 8), { kind: 'dust', mist: true, fam: 'dust', r: armChunkRnd(5, 9), grow: armChunkRnd(4, 7), rmax: armChunkRnd(18, 28), lift: 2, ground: true, vx: armChunkRnd(-20, 20), vy: 0, life: armChunkRnd(2, 3.5), alpha: armChunkRnd(0.35, 0.5) }); spawnDebris(x, y - 3, 4, 0); return; }
       for (let i = 0; i < 7; i++) spawnSmoke(x + armChunkRnd(-12, 12), y - armChunkRnd(2, 10), { kind: 'trail', dark: 0.7, r: armChunkRnd(6, 11), lift: 14, vx: armChunkRnd(-20, 20), alpha: armChunkRnd(0.35, 0.5), life: armChunkRnd(4, 7) });
       spawnDebris(x, y - 3, 6, 0);
     }
@@ -17563,7 +17566,7 @@ function stepShells(dt) {
     if (!done && LAND && emit('hit', { kind: 'civ', shell: s, x: s.x, y: s.y, amt: s.from === 'bomb' ? 2 : 1, vx: s.vx }).took) done = true;   // (OPEN WORLD: the big ships, section by section)
     if (!done && s.age > 0.35) for (const sb of sailboats) if (sb.state === 'sail' && sailHit(sb, s.x, s.y)) { emit('hit', { kind: 'sailboat', o: sb, x: s.x, y: s.y, vx: s.vx }); done = true; break; }
     if (!done && s.age > 0.35) for (const sb of sailboats) if (sailWreckHit(sb, s.x, s.y)) { emit('hit', { kind: 'sailboat', o: sb, x: s.x, y: s.y, amt: 2, smash: true }); impact(s.x, s.y); done = true; break; }
-    if (!done && strShotHit(s.x, s.y)) { impact(s.x, s.y); done = true; }   // (a building stops it: it bursts on the wall - 50-zz-struct.js strShotHit)
+    if (!done) { const so = strShotHit(s.x, s.y); if (so) { impact(s.x, s.y); strHit(so, s.x, s.y); done = true; } }   // (a building stops it: it bursts on the wall - 50-zz-struct.js strShotHit)
     if (!done) for (const b of buoys) if (mayHit(s, b) && buoyHit(b, s.x, s.y)) { emit('hit', { kind: 'buoy', o: b, x: s.x, y: s.y }); done = true; break; }   // (your own buoy your shells pass)
     // a ship going down can still be hit: she's blown further apart (user Oct 24)
     if (!done && s.age > 0.35 && s.y > waterLv(s.x) - 60) { const w = wreckAt(s.x, s.y); if (w) { emit('hit', { kind: 'wreck', o: w[0], sb: w[1], x: s.x, y: s.y, amt: 1, vx: s.vx }); done = true; } }
@@ -36646,7 +36649,7 @@ function thingsFrameStart() {
    wreck's, not saved), r: [x, y, w, h] its texels there, mx: seen
    mirrored, paint: its paint (thingsRules' - a team's, a livery's), width / height (as a picture's: chunkOut, wingPiece read them), _ox / _oy
    (a wing's place on its plane - wingPiece) } */
-const partPic = P => P.sh ? P.sh.split('.').reduce((o, k) => o && o[k], img) : P.pic;
+const partPic = P => P.trop ? tropPic(P.trop) : P.sh ? P.sh.split('.').reduce((o, k) => o && o[k], img) : P.pic;   // (trop: a structure's picture by its name - a building's pieces, strCollapse)
 // its pixels as seen (RGBA, mirrored if it's seen so): read once, for what's worked out from them (its pieces, its trim)
 function partPx(P) {
   const [x, y, w, h] = P.r, S = partPic(P);
@@ -54833,7 +54836,9 @@ function stepTank(t, dt) {
   // (user Oct 27: "A tank held under water on a magnet stays alive and can still fire") held on any magnet and taken
   // under - in the sea or a lake, over its tracks - it's drowned as one driven in: it sinks and is lost (tankSink; the
   // magnet's then holding nothing it can keep - magHoldable / stepRope let it go)
-  if ((t.hook || t.carry != null) && tankUnder(t)) { t.hook = false; t.carry = null; t.carried = null; t.hookA = null; tankSink(t); return; }
+  // (user Nov 17 15:46: a tank in a lake "does not 'die' immediately. It stays functional and can drive on the lake bed, but when it fires, we only get
+  // bubbles") over ground - a lake's bed - it's only wet (its gun bubbles - tankFire); over the open sea, with no ground under it, it still goes down
+  if ((t.hook || t.carry != null) && tankUnder(t)) { if (!onLand(t.x)) { t.hook = false; t.carry = null; t.carried = null; t.hookA = null; tankSink(t); return; } t.wet = 1; }
   // (hanging from the helicopter's magnet: it goes where the magnet takes it - stepRope)
   if (t.hook) { if (time - (t.hookT || 0) > 0.5) magDrop(t); else { tankWheels(t, dt); return; } }   // (on a civilian helicopter's or the crane's magnet - magPlace moves it)
   if (t.carry != null) { const hc = heliOf(t.carry); if (hc && hc.rope && hc.rope.hold === t.id) { t.vx = 0; t.vy = 0; tankWheels(t, dt); return; } t.carry = null; }
@@ -54875,11 +54880,12 @@ function stepTank(t, dt) {
   tankWheels(t, dt);
   // (user Nov 16 21:38: "when there's a lake and the [tank] goes underwater, there's no bubbles, there's no splash, there's nothing ... It should not be able
   // to fire, it should do some bubbles because the tank is wet") into water over its tracks it fords: a splash as it goes in, bubbles off it while
-  // it's in, its gun silent (tankFire - its button off: 17-hud.js); in over its turret it's drowned - it sinks (tankSink) as one driven in always did
+  // it's in, its gun only bubbles (tankFire - its button off: 17-hud.js). (user Nov 17 15:46) Under altogether it drives on along the bed, as wet - out
+  // of the water its gun works again; only over the open sea, with no ground under it, it's drowned - it sinks (tankSink)
   { const sy = !dryLand(t.x) && !t.deck ? surfaceY(t.x) : null, wet = sy != null && t.y > sy + 2;
     if (wet && !t.wet && !SIM_ONLY) splash(t.x, t.vx, 40, { size: 0.7, wide: 1.2 });
     t.wet = wet ? 1 : 0;
-    if (wet && tankPivot(t)[1] > sy + 4) { tankSink(t); return; }
+    if (wet && !onLand(t.x) && tankPivot(t)[1] > sy + 4) { tankSink(t); return; }
     if (wet && !SIM_ONLY && landUnitR() < dt * 18) addBubble(t.x + luRnd(-TANK_L * 0.4, TANK_L * 0.4), t.y - luRnd(2, 10), luRnd(-6, 6), -luRnd(15, 35), luRnd(0.8, 1.8)); }
   // repaired and rearmed on its own ground, standing still
   if (onOwnGround(p, t.x) && Math.abs(t.vx) < 3) { t.fixT += dt; if (t.fixT > 2.4) { t.fixT = 0; if (t.hp < VTUNE.tank.hp) t.hp = Math.min(VTUNE.tank.hp, t.hp + 1); else if (t.ammo < VTUNE.tank.ammo) t.ammo++; } } else t.fixT = 0;
@@ -54888,6 +54894,8 @@ function stepTank(t, dt) {
   if (t.hp <= 2) tankSmoke(t, dt);
 }
 function tankSmoke(t, dt) {
+  // (user Nov 17 15:47: two hits in it "starts having a fire") its last third of health: flames off its engine deck, as a burning wreck's
+  if (t.hp <= 1 + 1e-6 && !t.wet && !SIM_ONLY && landUnitR() < dt * 10 * fwFlames()) spawnFlame(t.x - t.facing * luRnd(4, 14), t.y - luRnd(12, 17), luRnd(-8, 8) + t.vx * 0.5, -luRnd(25, 60), luRnd(1.1, 1.3), luRnd(2, 3.5), luRnd(1.6, 2.2));
   t.smokeT -= dt;
   if (t.smokeT > 0) return;
   t.smokeT = t.hp <= 1 ? 0.12 : 0.3;
@@ -54907,8 +54915,9 @@ function tankBarrel(t) {
   return [ux * ca - uy * sa, ux * sa + uy * ca];
 }
 function tankFire(t) {
-  if (!t || t.state !== 'alive' || t.wet) return;   // (in water: its gun silent - stepTank)
+  if (!t || t.state !== 'alive') return;
   if (t.rk > 0) return;
+  if (t.wet) { tankBubbles(t); return; }   // (in water: only bubbles - stepTank)
   // (user Oct 25: the tank's missiles never run out - only the reload)
   t.rk = VTUNE.tank.reload; t.recoil = 1;
   const [px, py] = tankPivot(t), [ux, uy] = tankBarrel(t), L = TANK_GUN_L;
@@ -54918,6 +54927,14 @@ function tankFire(t) {
   tankMuzzleBall(mx, my, ux, uy, t);
   t.vx -= ux * 10;
   shakeAt(2, t.x);
+}
+// (user Nov 17 15:46: in water "when it fires, we only get bubbles") a wet tank's shot: a burst of bubbles out of its barrel - under the water's surface
+// wherever its muzzle is - and a dry click; its reload as a shot's
+function tankBubbles(t) {
+  t.rk = VTUNE.tank.reload; sound('empty', t.x);
+  if (SIM_ONLY) return;
+  const [px, py] = tankPivot(t), [ux, uy] = tankBarrel(t), sy = surfaceY(t.x);
+  for (let i = 0; i < 18; i++) { const d = TANK_GUN_L * luRnd(0.6, 1.1); addBubble(px + ux * d + luRnd(-2, 2), Math.max(py + uy * d, sy + 3) + luRnd(-2, 2), ux * luRnd(20, 60) + luRnd(-8, 8), -luRnd(20, 50), luRnd(0.8, 2.2)); }
 }
 // (user Oct 25, their photo of a tank firing: a fireball in front of the muzzle; Nov 16 21:16: "The explosion from the shot should be a lot smaller
 // and really fast. It just appears the moment it's shot. It doesn't go up like if it was smoke, because it's an explosion") the shot: a small flash
@@ -55583,7 +55600,7 @@ function landBlast(s, x, y, hitV) {
   }
   for (let p = 0; p < landN(); p++) {
     const t = tanks.hAt(p), h = helis.hAt(p);
-    if (t && t.state === 'alive') { const d = Math.hypot(t.x - x, t.y - 10 - y); if (t === hitV) tankHurt(t, TVT ? t.hp : dmg, x, y); else if (d < reach + TANK_L * 0.3 && mayHit(s, t)) tankHurt(t, TVT ? t.hp : 0.25, x, y); }   // (TANK VS TANK: one hit, a lost tank - user Nov 16 20:52)
+    if (t && t.state === 'alive') { const d = Math.hypot(t.x - x, t.y - 10 - y); if (t === hitV) tankHurt(t, TVT ? 1 : dmg, x, y); else if (d < reach + TANK_L * 0.3 && mayHit(s, t)) tankHurt(t, TVT ? 1 : 0.25, x, y); }   // (TANK VS TANK: a hit takes one of its HEALTH - 3 hits, user Nov 17 15:47: "hit 1 - small smoke, hit 2 - starts having a fire and a bit more smoke, hit 3 - die"; Nov 16 20:52 it was one)
     if (h && (h.state === 'fly' || h.state === 'landed')) { const d = Math.hypot(h.x - x, h.y - y); if (h === hitV) heliHurt(h, VTUNE.heli.hp, x, y); else if (d < reach + 20 && mayHit(s, h)) heliHurt(h, 1, x, y); }
   }
   if (hitV && hitV.kind === 'tank' && hitV.state === 'alive') { const pw = (s.from === 'bomb' ? 1.3 : 1) * bk; blastAfter(() => tankHitBlast(hitV, pw)); }   // (hit and still standing: the blast on top of it)
@@ -55903,7 +55920,7 @@ function drawLandTank(t, wreck) {
     C.restore();
   }
   drawTankGear(t, Lv, s, X, Y, wreck);
-  const B = t.noTop ? Lv.hull : Lv.body, L = THG_LIT; L[0] = wreck ? 0.8 : 0; L[1] = L[2] = L[3] = L[4] = 0;   // (its turret blown off: the hull - killTank)
+  const B = t.noTop ? Lv.hull : Lv.body, L = THG_LIT; L[0] = wreck ? 0.8 : 0.45 * clamp(1 - t.hp / VTUNE.tank.hp, 0, 1); L[1] = L[2] = L[3] = L[4] = 0;   // (its turret blown off: the hull - killTank)   // (darker: user Nov 17 15:47: "Each hit makes the tank charred and more black" - by its damage, the wreck's 0.8 at the end)
   const mk = dmgMask(t, B, TANK_K / UPM, 1, 1, { toArt: (lx, ly) => [TCX + lx / TANK_K, TANKA.foot + ly / TANK_K], k: TANK_K, flip: false });   // (its burn marks, in its own frame facing right)
   thingsQuad(thgCur(), Math.round(X(0)), Math.round(Y(0)), thgW(B, s), thgH(B, s), artPut(B), THG_BODY, null, 0, mk, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(B, t.id, 0.62));
   C.restore();
@@ -67598,19 +67615,57 @@ function strShooting() {
   if (STR_SHOT.t >= 0 && time >= STR_SHOT.t && time - STR_SHOT.t < 0.25) return STR_SHOT;
   const L = [];
   for (const o of strsUsed()) {
-    const K = STR_KINDS[o.k]; if (!K || K.water || K.prop || !K.art || (o.k === 'hangarAir' && o.big)) continue;
+    const K = STR_KINDS[o.k]; if (!K || K.water || K.prop || !K.art || (o.k === 'hangarAir' && o.big) || strDown(o)) continue;   // (one brought down: no cover - strHit)
     const B = strBox(o); if (!B.P || !(B.x1 > B.x0)) continue;
-    L.push({ x0: B.x0, x1: B.x1, top: B.top, foot: B.foot, pose: { P: B.P, k: B.m, cx: (B.x0 + B.x1) / 2, cy: (B.top + B.foot) / 2, a: 0, flip: !!o.flip } });
+    L.push({ o, x0: B.x0, x1: B.x1, top: B.top, foot: B.foot, pose: { P: B.P, k: B.m, cx: (B.x0 + B.x1) / 2, cy: (B.top + B.foot) / 2, a: 0, flip: !!o.flip } });
   }
   L.sort((a, b) => a.x0 - b.x0);
   STR_SHOT.L = L; STR_SHOT.wmax = L.reduce((m, q) => Math.max(m, q.x1 - q.x0), 0); STR_SHOT.t = time;
   return STR_SHOT;
 }
+// (the building a shot at x, y meets - null none)
 function strShotHit(x, y) {
-  const { L, wmax } = strShooting(); if (!L.length) return false;
+  const { L, wmax } = strShooting(); if (!L.length) return null;
   let lo = 0, hi = L.length; while (lo < hi) { const m = (lo + hi) >> 1; if (L[m].x0 < x - wmax) lo = m + 1; else hi = m; }   // (the first that could reach x)
-  for (let i = lo; i < L.length && L[i].x0 <= x; i++) { const q = L[i]; if (x <= q.x1 && y >= q.top && y <= q.foot && poseHitAt(q.pose, x, y, 0)) return true; }
-  return false;
+  for (let i = lo; i < L.length && L[i].x0 <= x; i++) { const q = L[i]; if (x <= q.x1 && y >= q.top && y <= q.foot && poseHitAt(q.pose, x, y, 0)) return q.o; }
+  return null;
+}
+/* ---- (user Nov 17 15:40, TANK VS TANK: the buildings "should get destroyed as they get hit") a building a shot stops takes the blow (strHit, from
+   stepShells): its strength by its size (one hit for every 3 m of its face's side - the square root of its face - 2 to 8 hits), charred as it goes
+   by the damage rule (strDmgOf - dmgLook, its picture's charring), and on its last hit it comes down (strCollapse): its picture broken into pieces
+   (a grid of ~3 m, the chunks' rubble - partPic's trop) that drop from the bottom up and lie on the ground, dust and a crash - and it's gone: not
+   drawn, no cover, no chimney. Every mode, every building strShooting holds. Kept in the strDmg table by the structure's id (the world's own records -
+   bd_structs - never written), emptied with each world built (buildWorld) ---- */
+const STR_DMG = { hp: {}, down: {} }, strDmgR = sysRng('strDmg'), strDmgRnd = (a, b) => a + (b - a) * strDmgR();
+defTable('strDmg', () => [STR_DMG], { make: () => STR_DMG });
+const strDown = o => !!(o && STR_DMG.down[o.id]);
+const strHpMax = B => clamp(Math.round(Math.sqrt((B.x1 - B.x0) * (B.foot - B.top)) / UPM / 3), 2, 8);
+const strDmgOf = (o, B) => { const h = STR_DMG.hp[o.id]; return h == null ? 0 : clamp(1 - h / strHpMax(B), 0, 1); };
+function strDmgReset() { STR_DMG.hp = {}; STR_DMG.down = {}; STR_SHOT.t = -1; }
+function strHit(o, x, y) {
+  if (!o || strDown(o)) return;
+  const B = strBox(o), hp = (STR_DMG.hp[o.id] ?? strHpMax(B)) - 1;
+  STR_DMG.hp[o.id] = hp;
+  spawnDebris(x, y, 8, 0);
+  if (hp <= 0) strCollapse(o, B, x);
+}
+function strCollapse(o, B, hx) {
+  STR_DMG.down[o.id] = 1; STR_SHOT.t = -1;                  // (no cover from the next shot on)
+  const K = STR_KINDS[o.k], art = o.art || K.art, P = B.P, m = B.m, fl = !!o.flip;
+  if (P && P.width && P.height) {
+    const W = P.width, H = P.height, nc = clamp(Math.round(W * m / (3 * UPM)), 2, 6), nr = clamp(Math.round(H * m / (3 * UPM)), 2, 5), mid = (B.x0 + B.x1) / 2;
+    for (let r = 0; r < nr; r++) for (let q = 0; q < nc; q++) {
+      const tx0 = Math.floor(q * W / nc), tx1 = Math.floor((q + 1) * W / nc), ty0 = Math.floor(r * H / nr), ty1 = Math.floor((r + 1) * H / nr), cw = tx1 - tx0, ch = ty1 - ty0;
+      if (cw < 1 || ch < 1) continue;
+      const cx = (tx0 + tx1) / 2, x = fl ? B.x1 - cx * m : B.x0 + cx * m, y = B.top + (ty0 + ty1) / 2 * m, out = Math.sign(x - (hx ?? mid)) || 1, up = nr - 1 - r;   // (up: courses over it)
+      chunks.addRow({ img: { trop: art, r: [tx0, ty0, cw, ch], mx: fl, width: cw, height: ch }, k: m, x, y, vx: out * strDmgRnd(4, 18) + (x - mid) * strDmgRnd(0.2, 0.6), vy: -strDmgRnd(0, 20) * (up / nr),
+        a: 0, w: strDmgRnd(-1.2, 1.2), delay: (nr - 1 - up) * 0.06 + strDmgRnd(0, 0.12), floor: landTop(clamp(x, 0, WORLD_W - 1)), water: false, kind: 'rubble', land: true, hh: ch / 2 * m, hw: cw / 2 * m });
+    }
+  }
+  // the dust of its fall along its foot, and its pieces' grit
+  for (let i = 0; i < 12; i++) { const x = B.x0 + (B.x1 - B.x0) * strDmgRnd(0, 1), r0 = strDmgRnd(5, 9); spawnSmoke(x, B.foot - r0, { kind: 'dust', mist: true, fam: 'dust', r: r0, grow: strDmgRnd(5, 9), rmax: strDmgRnd(24, 36), lift: 2, ground: true, vx: strDmgRnd(-40, 40), vy: 0, life: strDmgRnd(3, 5), alpha: strDmgRnd(0.4, 0.6) }); }
+  spawnDebris((B.x0 + B.x1) / 2, B.foot - 10, 20, 0);
+  shakeAt(8, o.x); sound('crash', o.x, 1);
 }
 // (the land's pass, renderLandObjects0 - 50-land-units) each structure in view, in the hour's light. Each one's still picture
 // (strStillDraw) and what moves or changes on it (strLiveDraw), in its turn - one batch of the things' pass (45-zz-things-gpu.js)
@@ -67643,7 +67698,7 @@ function drawStructs(x0, x1, isl = false) {
   if (!L.length) { drawStoryCars(x0, x1, isl ? 'isl' : 'dry'); return; }
   const own = thingsOwn();                                  // (one batch: the old code's draws between - thingsGL)
   for (const o of L) {
-    const B = strBox(o); if (!strDrawn(o, B) || offView(B.x0, B.x1, x0, x1)) continue;
+    const B = strBox(o); if (!strDrawn(o, B) || strDown(o) || offView(B.x0, B.x1, x0, x1)) continue;   // (brought down: its pieces are the chunks' - strCollapse)
     strStillDraw(o, B);
     if (strHasLive(o)) strLiveDraw(o, B);
     strLit(o, B);                                          // (the hour's light over it - the night's shape, the moon's and a low sun's rims - and its windows lit at night: 50-zz-lights.js)
@@ -67757,7 +67812,7 @@ function nearViews(x, pad) {
 function strChimneys(dt) {
   if (SIM_ONLY) return;
   for (const o of strsUsed()) {
-    if (strUse(o) !== 'res' || !strSmokes(o)) continue;     // (Nov 7: every RESIDENTIAL, by its own rule - 50-zzzz-struct-act.js)
+    if (strUse(o) !== 'res' || strDown(o) || !strSmokes(o)) continue;     // (Nov 7: every RESIDENTIAL, by its own rule - 50-zzzz-struct-act.js)
     const B = strBox(o), P = B.P, M = P && P._chim; if (!M || !nearViews(o.x, 300)) continue;
     let t = STR_SMOKE.get(o.id); if (t === undefined) t = strSmkRnd(0, 1);
     t -= dt;
@@ -67791,7 +67846,7 @@ function strStillDraw(o, B) {
     return;
   }
   const X0 = Math.round(PX(B.x0)), X1 = Math.round(PX(B.x1)), Y0 = Math.round(PY(B.top)), Y1 = Math.round(PY(B.foot));
-  const [cov, D] = dmgLook(B.P, dmgOf(o));                  // (damaged: the one rule - 50-zz-damage.js: charred, its damaged picture destroyed)
+  const [cov, D] = dmgLook(B.P, strDmgOf(o, B));                  // (damaged: the one rule - 50-zz-damage.js: charred, its damaged picture destroyed)
   const P = B.P, kx = (X1 - X0) / P.width, ky = (Y1 - Y0) / P.height, at = (x, w) => o.flip ? X1 - Math.round((x + w) * kx) : X0 + Math.round(x * kx);   // (a box of its texels on the screen, mirrored with it)
   const U = P._under; if (U) { const a = at(U.x, U.P.width); strQuad(U.P, a, Y0 + Math.round(U.y * ky), a + Math.round(U.P.width * kx), Y0 + Math.round((U.y + U.P.height) * ky), !!o.flip); }   // (its chimney behind it)
   if (P._gate) { const [gx, gy, gw, gh] = P._gate, a = at(gx, gw); strBlock(thgCur(), a, Y0 + Math.round(gy * ky), Math.round(gw * kx), Math.round(gh * ky), ...STR_INSIDE); }   // (the dark inside, through its door)
@@ -71211,7 +71266,7 @@ const stHere = () => STORY && crew[0] && crew[0].mode === 'dock' ? storyAt() : n
 const stInHome = o => !!o && o === stHere() && storyEnterable(o);
 // a residential's smoke: the home you're in by its COOK; any other of yours empty; everyone else's by day till bedtime
 function strSmokes(o) {
-  if (strIsLh(o)) return false;                            // (a lighthouse lived in has no stove)
+  if (strIsLh(o) || o.empty) return false;                 // (empty: nobody lives there - TANK VS TANK's cover, 50-zzzz-tvt.js)                            // (a lighthouse lived in has no stove)
   if (stInHome(o)) return !!story.cook;
   if (STORY && o.own === 'player') return false;
   return hourIn(env.time, HOME_UP_H, HOME_BED_H);
@@ -71219,6 +71274,7 @@ function strSmokes(o) {
 // its lights at night (strLit): the home you're in by its LIGHT; any other of yours dark; the town's till bedtime; a market while open
 function strLightsOn(o) {
   const u = strUse(o);
+  if (o.empty) return false;                               // (nobody lives there: dark)
   if (strIsLh(o)) { const C = lhCtlId(o.id); return !(C && C.off); }   // (a lighthouse: its windows with its light - BEAM)
   if (u === 'res') { if (stInHome(o)) return !!story.light; if (STORY && o.own === 'player') return false; return hourIn(env.time, 17, HOME_BED_H) || env.time < 5; }
   if (u === 'market') return strOpen(o);
@@ -71518,8 +71574,17 @@ function tvtWorld(seed, W) {
       let x = TVT_MARGIN + W * (0.12 + 0.76 * (i + 1) / (n + 1));
       if (lake) { const lv = lake.y - WATER_Y, dir = x < mid + TVT_MARGIN ? -1 : 1; while (yAt(x) > lv - 4 && Math.abs(x - (mid + TVT_MARGIN)) < W * 0.4) x += dir * STEP; x += dir * 40; }   // (out of the water, a little past its edge)
       const k = kinds[Math.floor(r() * kinds.length) % kinds.length];
-      STRS0.push({ id: i + 1, k, pf: 'k:' + k, x: Math.round(x), dy: 0, hue: Math.floor(r() * 360), g: null, flip: r() < 0.5 });
+      STRS0.push({ id: i + 1, k, pf: 'k:' + k, x: Math.round(x), dy: 0, hue: Math.floor(r() * 360), g: null, flip: r() < 0.5, empty: true });   // (empty: nobody lives there - no chimney smoke, no lit windows; user Nov 17 15:41)
     } }
+  // (user Nov 17 15:44, a house's fence over the hill's slope: "when you place a building, you need to make sure the whole surface of the building is
+  // on flat ground, including fences and other details") under each building the hills' line is levelled: flat at the ground under its middle across
+  // its whole picture - fences, porches - and a line's step past each end (the line's points are STEP apart: its segments under it all flat), then
+  // eased back into the hills over a ramp of half its width (60 at least) on each side. The middle's height is ground that was there, out of the lake's
+  // water (moved out above), so no pond and no rim lowered under the water's level
+  for (const b of STRS0) {
+    const t = TROP[STR_KINDS[b.k].art], bw = t ? t.w * t.m * UPM : 80, half = bw / 2 + STEP, ramp = Math.max(60, bw / 2), y0 = yAt(b.x);
+    for (const p of top) { const d = Math.abs(p[0] - b.x); if (d >= half + ramp) continue; const u = d <= half ? 0 : (d - half) / ramp, e = u * u * (3 - 2 * u); p[1] = Math.round(y0 + (p[1] - y0) * e); }
+  }
   Object.assign(w, { bd_islands: JSON.stringify(GROUND), bd_lakes: JSON.stringify(lake ? [lake] : []),
     bd_structs: JSON.stringify(STRS0), bd_placed: '[]', bd_nature: '[]', bd_wrecks: '[]', bd_krakens: '[]', bd_backgrounds: '[]', bd_markers: '[]', bd_weather_areas: '[]', bd_caves: JSON.stringify({ v: 1, systems: [] }) });
   return { map: new Map(Object.entries(w)), lake, biome: SK, kind };
@@ -72406,21 +72471,23 @@ function sfxTankBlow(x) {
 // a tank's tracks rolling (SFX.trk, user Nov 17 15:11 and his recording): a clack each time a link of its track meets the ground - a dry knock low down and
 // the steel's short chack over it, each a little different, some harder - at its tracks' speed (TRK_PITCH of track a link: ~36 a second at its top speed,
 // the recording's ~26 at a run), over the low roll of the tracks on the ground. Its links' run through the ground in the water: quieter, duller
-const TRK_PITCH = 0.25;   // (metres of track a link)
+// (user Nov 17 15:40: "very irritating. it should be more mutted and more 'chack chack' now its too much click too close") a chack each 0.8 m of
+// track (~11 a second at its top speed, was ~36), each a rounder, lower burst (~1 kHz, 70 ms - no 2 kHz click), the whole quieter (0.3, was 0.5)
+const TRK_PITCH = 0.8;   // (metres of track a chack)
 function sfxTrackClacks(i, tk, h, aboard, t, dt) {
   const T = SFX.trk && SFX.trk[i]; if (!T) return;
   const v = tk ? Math.abs(tk.wsp != null ? tk.wsp : tk.vx / UPM) : 0, on = Math.min(1, v * UPM / VTUNE.tank.speed), wet = tk && tk.wet ? 0.45 : 1;
-  aim(T.g.gain, tk ? 0.5 * wet * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard : 0, t, 0.08);
+  aim(T.g.gain, tk ? 0.3 * wet * Math.max(h.att, aboard > 1 ? 1 : 0) * aboard : 0, t, 0.08);
   T.pan.set(aboard > 1 ? h.pan * 0.4 : h.pan);
   aim(T.rG.gain, 0.25 * on, t, 0.12);
   if (!tk || v < 0.15 || dt <= 0) { T.ph = 0; return; }
   T.ph += v * Math.min(dt, 0.1) / TRK_PITCH;
   let n = Math.floor(T.ph); T.ph -= n;
   for (let k = 0; k < n; k++) {
-    const t0 = t + dt * (k + 0.3 * seenR('audio')) / n, a = (0.35 + 0.45 * on) * (seenR('audio') < 0.18 ? 1.5 : 0.7 + 0.3 * seenR('audio')), f = 1700 + 900 * seenR('audio');
-    noiseShot(T.g, t0, 0.028, 'bandpass', f * (wet < 1 ? 0.5 : 1), f * 0.7, 1.3, 0.45 * a, 0.001);   // the steel's chack
-    noiseShot(T.g, t0, 0.045, 'bandpass', 700 + 300 * seenR('audio'), 380, 1.1, 0.4 * a, 0.001);      // the link's body
-    thump(T.g, t0, 115 + 30 * seenR('audio'), 55, 0.05, 0.35 * a);                                  // the knock on the ground
+    const t0 = t + dt * (k + 0.3 * seenR('audio')) / n, a = (0.35 + 0.45 * on) * (seenR('audio') < 0.18 ? 1.3 : 0.75 + 0.25 * seenR('audio')), f = 900 + 350 * seenR('audio');
+    noiseShot(T.g, t0, 0.07, 'bandpass', f * (wet < 1 ? 0.6 : 1), f * 0.55, 1.6, 0.5 * a, 0.006);    // the chack: steel on steel, muffled
+    noiseShot(T.g, t0, 0.06, 'lowpass', 520, 220, 0.8, 0.4 * a, 0.004);                             // the link's body
+    thump(T.g, t0, 95 + 20 * seenR('audio'), 48, 0.08, 0.4 * a);                                     // the knock on the ground
   }
 }
 // a shell on bare steel: a clang and a short bang
