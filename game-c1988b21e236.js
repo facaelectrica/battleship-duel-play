@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1020;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:09';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1021;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -40826,7 +40826,6 @@ function civWeapon(p, wk) {
   else if (wk === 'ping') ACTS.ping(p);
   else if (wk === 'launch') civLaunch(p);
   else if (wk === 'anchor') anchorToggle(v);
-  else if ((wk === 'horn' || wk === 'hornUp') && civClass(v) === 'car') { if (wk === 'horn') sound('carHorn', v.x); }   // (a car's: a beep each press - sfxCarHorn)
   else if (wk === 'horn' || wk === 'hornUp') shipHorn(v, wk === 'horn');
   else if (wk === 'fw') fireworkLaunch(v);
   else if (wk === 'csmoke') cessnaSmoke(v);
@@ -40839,7 +40838,6 @@ function civWeaponState(p, wk) {
   const v = cwBoat(p), no = { f: 0, off: true, n: -1 };
   if (!v) return no;
   if (wk === 'anchor') { const a = v.anc; return { f: 0, off: v.state !== 'sail' || !!(a && a.parted), n: -1, on: !!(a && (a.st === 'drop' || a.st === 'held')) }; }
-  if (wk === 'horn' && civClass(v) === 'car') return { f: 0, off: false, n: -1 };
   if (wk === 'horn') return { f: 0, off: v.state !== 'sail' && v.state !== 'run', n: -1, on: !!v.hornOn };   // (held in while it sounds)
   if (wk === 'fw') return { f: 0, off: v.state !== 'sail', n: -1 };   // (no reload: user Oct 27 14:56)
   if (wk === 'csmoke') { const b = smokeBtn(v, CESSNA_SMOKE_S, false); return { f: b.f, off: b.off, n: b.n, on: b.on }; }
@@ -40874,8 +40872,8 @@ function sfxAnchorWinch(x, size) {
    pressed it plays. It has no 'charge' concept."): it swells in on the press and dies away a moment after it's let go.
    v.hornOn is the state (the host's: a guest's press and release come as act 'cw'); the sound is kept off the ship */
 const HORN_HZ = { cruise: 73, container: 58, tanker: 55, liner: 66, research: 92, fish: 118 };
-// everything with a horn: the big ships and the fishing boats
-const hornBoats = () => civShips.concat(jetboats.filter(j => j.kind === 'fish'));
+// everything with a horn: the big ships, the fishing boats and the cars (user Nov 16 21:12: a car's too sounds as long as it's held, "like a real car does")
+const hornBoats = () => civShips.concat(jetboats.filter(j => j.kind === 'fish'), storyCars.filter(c => c.car));
 const hornVoices = new Map();                       // ship -> the horn sounding on her (see shipHornSound)
 function shipHorn(v, on) {
   if (!v) return;
@@ -40890,7 +40888,7 @@ function stepShipHorns() {
 // (the sound's side, every frame from audioUpdate: each horn starts, follows its ship and dies away)
 function shipHornSound() {
   const B = hornBoats();
-  for (const c of B) if (c.hornOn && !hornVoices.has(c)) { const vo = sfxShipHornStart(c.x, HORN_HZ[c.kind] || 70); if (vo) hornVoices.set(c, vo); }
+  for (const c of B) if (c.hornOn && !hornVoices.has(c)) { const vo = c.car ? sfxCarHornStart(c.x) : sfxShipHornStart(c.x, HORN_HZ[c.kind] || 70); if (vo) hornVoices.set(c, vo); }   // (each its own voice: a car's two-tone)
   for (const [c, vo] of hornVoices) {
     if (!c.hornOn || !B.includes(c)) { sfxShipHornStop(vo); hornVoices.delete(c); continue; }
     const h = hear(c.x); vo.pan.set(h.pan); aim(vo.out.gain, h.att * 0.75, SFX.ctx.currentTime, 0.08);
@@ -40906,6 +40904,17 @@ function sfxShipHornStart(x, hz) {
     const o = ctx.createOscillator(), og = ctx.createGain(); o.type = ty; o.frequency.setValueAtTime(f * 0.97, t0); o.frequency.linearRampToValueAtTime(f, t0 + 0.25); og.gain.value = a;
     o.connect(og); og.connect(lp); o.start(t0); return o;
   });
+  lp.connect(g); g.connect(out); out.connect(pan.node); pan.node.connect(sfxRound());
+  return { os, g, out, pan, lp };
+}
+// a car's horn held (its two notes, square, through a low-pass - the old one-beep sfxCarHorn's voice, now as long as it's held): stopped by sfxShipHornStop
+function sfxCarHornStart(x) {
+  if (!SFX.ctx) return null;
+  const ctx = SFX.ctx, t0 = ctx.currentTime, h = hear(x), pan = makePan(), out = ctx.createGain(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+  pan.set(h.pan); out.gain.value = h.att * 0.75;
+  lp.type = 'lowpass'; lp.frequency.value = 1800;
+  g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.05, t0 + 0.01);
+  const os = [415, 520].map(f => { const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = f; o.connect(lp); o.start(t0); return o; });
   lp.connect(g); g.connect(out); out.connect(pan.node); pan.node.connect(sfxRound());
   return { os, g, out, pan, lp };
 }
@@ -61998,7 +62007,7 @@ function storyInvAdd(k, n) { if (!story.inv) story.inv = {}; story.inv[k] = Math
 // quiet - settling unseen), her engine and her wreck's smoulder (eng burnT smT), turned at her spot (turn - the story's swap), lost
 // (dmgOf draws her wrecked); her picture (art), her day's routine (rt); the STORY's (STORY_REC) and every civilian vehicle's (CIV_REC). Put in
 // by addRow (her structure's spot, renewed the next morning) or the table's own put (placed); each made settled first - carSettle)
-const storyCars = new ColTable(ColTable.rec('num: x y dir v vDrive drv npcV hp ph vx vy a av pit pitV air wet sinkT eng set rest quiet roll rollD wsp way thr brk wslip slipV burnT smT turn lost',
+const storyCars = new ColTable(ColTable.rec('num: x y dir v vDrive drv npcV hp ph vx vy a av pit pitV air wet sinkT eng set rest quiet roll rollD wsp way thr brk wslip slipV burnT smT turn lost hornOn',   // (hornOn: her horn held - 50-land-civdrive.js)
 'txt: kind state art','val: rt fl', ...STORY_REC, ...CIV_REC));
 const CAR_V = 14;                                         // (top speed, metres a second: about 50 km/h)
 function newStoryCar(d) { return Object.assign({ story: true, car: true, kind: 'car', state: 'run', x: 0, y: LAND_Y, dir: -1, v: CAR_V * UPM, vDrive: 0, drv: 0, cin: 0, hp: 2, fuel: 1, ph: 0, vx: 0, vy: 0, a: 0, pit: 0, pitV: 0, air: 0, wet: 0, eng: 0, set: 0, roll: 0 }, d); }
@@ -72068,7 +72077,7 @@ function sfxCrash(x, amt) {
 // (engine stage 3) the world's play requests: sound(id, x, a) -> 'sound' (36-zz-events.js), played here. x, a: the sound's
 // own two arguments, whatever they are (mostly where, and how loud; for the UI's, a player or a pad); the sounds made in
 // other files (the plane's, the fireworks', the research ship's...) are listed here too, so every request comes this way
-const SND = { carHorn: sfxCarHorn, fogHorn: sfxFogHorn, explosion: sfxExplosion, impact: sfxImpact, splash: sfxSplash, crash: sfxCrash,
+const SND = { fogHorn: sfxFogHorn, explosion: sfxExplosion, impact: sfxImpact, splash: sfxSplash, crash: sfxCrash,
   anchorThunk: sfxAnchorThunk, anchorWinch: sfxAnchorWinch, bayDoors: sfxBayDoors, bombDrop: sfxBombDrop, cannon: sfxCannon,
   click: sfxClick, clink: sfxClink, crush: sfxCrush, door: sfxDoor, empty: sfxEmpty, engineDie: sfxEngineDie,
   fwBang: sfxFwBang, fwLaunch: sfxFwLaunch, iceCrack: sfxIceCrack, latch: sfxLatch, marker: sfxMarker, mg: sfxMG,
@@ -72216,16 +72225,6 @@ function sfxHorn(k) {
 }
 // (Nov 7, user: "CARS - Horn so you can honk"; "LIGHTHOUSE ... Toggle the fog horn") a car's horn at x: two square notes a third apart, a
 // short press's worth; a fog horn at x: the diaphone's low two-note groan, long, through the fog
-function sfxCarHorn(x) {
-  if (!SFX.ctx) return;
-  const out = sfxOut(x, 0.9); if (!out) return;
-  const ctx = SFX.ctx, t0 = ctx.currentTime, lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1800; lp.connect(out);
-  sfxLetGo(1200, lp);
-  for (const f of [415, 520]) {
-    const o = ctx.createOscillator(), og = ctx.createGain(); o.type = 'square'; o.frequency.value = f; envGain(og, t0, 0.05, 0.01, 0.45);
-    o.connect(og); og.connect(lp); o.onended = () => { o.disconnect(); og.disconnect(); }; o.start(t0); o.stop(t0 + 0.5);
-  }
-}
 function sfxFogHorn(x) {
   if (!SFX.ctx) return;
   const out = sfxOut(x, 1.2); if (!out) return;
