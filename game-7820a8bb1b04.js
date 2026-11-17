@@ -8713,8 +8713,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1049;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 15:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1050;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 16:00';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -9191,7 +9191,7 @@ function hudKit(p) {
   if (m === 'sub') return { drive: true, home, dive: true, aim: true, noPower: true, weapons: ['torp', 'light', 'mine'] };   // (the mine: user Oct 24 night; the light in the vertical torpedo's place, with the ANGLE tape for it - user Oct 29)
   if (m === 'tower') return { drive: false, home: false, dive: false, aim: true, weapons: ['mg', 'shell'] };
   if (m === 'plane') return { drive: true, stop: true, home, dive: true, aim: false, weapons: ['mg', 'rocket', 'bomb'] };   // (the bomb in the depth charge's slot: it is one, under water)
-  if (m === 'tank') return { drive: true, home: false, dive: false, aim: true, weapons: TVT ? [null, 'shell', null] : ['mg', 'shell', 'smoke'] };       // (LAND TEST)   // (TANK VS TANK: its missile alone, in its slot - user Nov 16 21:07)
+  if (m === 'tank') return { drive: true, home: false, dive: false, aim: true, weapons: TVT ? ['shell'] : ['mg', 'shell', 'smoke'] };       // (LAND TEST)   // (TANK VS TANK: its missile alone - user Nov 16 21:07 - its one button the first, A and the right trigger: user Nov 17 14:49)
   if (m === 'heli') return { drive: true, home: false, dive: true, aim: true, weapons: ['mg', 'rocket', 'magnet', 'light'] };   // (its magnet green, after its guns - user Oct 27; its light, user Oct 31)
   // (user Oct 27, 13:49: every vehicle's own buttons green, on the right, in its weapon row - no red button: civWeapons)
   if (m === 'civ') { const v = crew[p].civ, k = v ? civClass(v) : null; return { drive: true, stop: civPlane(v), home: false, noPower: k === 'sub' || (k === 'heli' && !isFireHeli(v)), dive: k === 'air' || k === 'balloon' || k === 'heli' || k === 'sub' || (k === 'shuttle' && v.state !== 'pad' && v.state !== 'count' && v.state !== 'climb') || k === 'orb' || k === 'seaplane' || k === 'blimp', diveRight: k === 'boat' && v.kind === 'fish', aim: k === 'sub' || k === 'heli', weapons: civWeapons(v) }; }   // (the fire helicopter: ANGLE and POWER, its water on the green button; the minisub: the angle of its light)
@@ -9226,7 +9226,7 @@ function hudLayout(p) {
     // fixed slots, the same order in everything: the machine gun (the sub's torpedo), the missile, the depth charge
     // (the battleship's four - with the smoke screen - sit half a slot further left, to fit)
     const s0 = kit.weapons.length > 3 ? 1.5 : 1;
-    kit.weapons.forEach((wk, i) => { if (wk) put('w:' + wk, 'gbtn', Rc + (i - s0) * 88.5 * u, B + (824 - 853) * u, { weapon: wk }); });   // (a gap: that slot's button left out, the others in their places)
+    kit.weapons.forEach((wk, i) => { if (wk) put('w:' + wk, 'gbtn', Rc + (i - s0) * 88.5 * u, B + (824 - 853) * u, { weapon: wk }); });   // (each in its slot: A's first, as the pad's buttons - padWeapon)
   }
   // the vehicle buttons along the top, centred in your half (one player: on the screen), clear of the menu
   // buttons (two players: stacked in the middle of the screen; one player: in the top left corner)
@@ -11863,9 +11863,10 @@ const runKeys = [0, 0];
 /* ---------------- Gamepads ----------------
    Each player's pad is the one picked under their flag (first pad player 1, second player 2 until then).
    Left stick: drive left / right, rise / dive (the sub and the plane). Right stick: left / right the angle, up / down
-   the power (user Oct 29). The weapons are always in the same order: A or the right trigger the first (the machine gun; the
-   sub's torpedo), B or the left trigger the second (the missile: the shell, the plane's missile, the sub's vertical
-   torpedo), X the third (the depth charge, and the plane's bomb, which is one under water). The shoulder buttons step through your vehicles (left goes left, right goes
+   the power (user Oct 29). The weapons are the vehicle's green buttons in order (its kit - padWeapon): A or the right trigger the
+   first (the machine gun; the sub's torpedo; a vehicle's one gun - the TANK VS TANK tank's missile), B or the left trigger the second
+   (the missile: the shell, the plane's missile, the sub's light), X the third (the depth charge, and the plane's bomb, which is one
+   under water), Y the fourth. The shoulder buttons step through your vehicles (left goes left, right goes
    right). The D-pad zooms: up or right in, down or left out. Start: the menu. */
 const padState = [{}, {}];
 function padKey(code, down) { try { window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code, key: code, bubbles: true })); } catch (e) {} }
@@ -11877,7 +11878,9 @@ function padOf(v) {
   if (!SLOTS.some(s => s.dev === 'pad1' || s.dev === 'pad2')) return v;   // (nobody picked a controller: pad 1 plays slot 1, pad 2 slot 2)
   return S.dev === 'pad1' ? 0 : S.dev === 'pad2' ? 1 : -1;
 }
-// the weapon slots: 1 the machine gun (the sub's torpedo), 2 the missile, 3 the depth charge
+// the weapon slots: A B X Y (and the triggers: right A, left B) are the vehicle's green buttons in order - its kit's weapons (17-hud.js hudKit),
+// each button what its weapon does wherever it sits (user Nov 17 14:49: the TANK VS TANK tank's one gun "should be on A (right trigger) since its
+// the main weapon" - it was B, its slot fixed by the mode; the slots now follow the kit, never a table of their own)
 function padWeapon(p, slot, down) {
   const m = crew[p].mode;
   if (down && slot === 1 && storyDotKeys(p, 'take')) return;   // (STORY at a structure: A takes the dot picked - 50-story.js)
@@ -11885,23 +11888,14 @@ function padWeapon(p, slot, down) {
   // (user Oct 27: a civilian's or a yacht's own green buttons, A B X Y in order - the fire helicopter's water held)
   if (m !== 'civ' && stRow(p).length) { civSlot(p, slot - 1, down); return; }   // (STORY in a structure of yours: its own green buttons, A B X Y - stRow; A buys / opens only with something picked, above)
   if (m === 'civ') { if (civSlot(p, slot - 1, down)) return; if (slot === 2 && down && m === 'civ') act(p, 'launch'); if (!down) mgHold[p] = false; return; }
-  if (slot === 1) {
-    if (m === 'plane') planeOf(p).mg = down;
-    else if (m === 'ship' || m === 'tower' || m === 'tank' || m === 'heli') mgHold[p] = down;
-    else if (m === 'sub' && down) act(p, 'torp', false);
-    if (!down) { mgHold[p] = false; if (planeOf(p)) planeOf(p).mg = false; }
-  } else if (slot === 2) {
-    if (!down) { act(p, 'release'); return; }
-    if (m === 'plane') act(p, 'rocket');
-    else if (m === 'sub') act(p, 'light');                 // (her light, where the vertical torpedo was - user Oct 29)
-    else if (m === 'ship' || m === 'tower' || m === 'tank' || m === 'heli') act(p, 'fire');
-  } else if (slot === 3 && down && m === 'ship') act(p, 'dc');
-  else if (slot === 3 && down && m === 'sub') act(p, 'mine');
-  else if (slot === 3 && down && m === 'plane') act(p, 'bomb');
-  else if (slot === 3 && down && m === 'heli') act(p, 'magnet');
-  else if (slot === 3 && down && m === 'tank') act(p, 'smoke');
-  else if (slot === 4 && down && m === 'ship') act(p, 'smoke');
-  else if (slot === 4 && down && m === 'heli') act(p, 'light');   // (its light, user Oct 31)
+  const K = hudKit(p), wk = K && K.weapons ? K.weapons[slot - 1] : null;
+  if (wk === 'mg') {                                                 // (held: it fires on and on)
+    if (m === 'plane') planeOf(p).mg = down; else mgHold[p] = down;
+  } else if (wk === 'shell' || wk === 'rocket') {                    // (the missile: the ship's, the tower's, the tank's cannon, the plane's and the helicopter's rockets)
+    if (!down) act(p, 'release');
+    else act(p, m === 'plane' ? 'rocket' : 'fire');
+  } else if (wk === 'torp') { if (down) act(p, 'torp', false); }
+  else if (wk && down) act(p, wk);                                   // (dc, mine, bomb, magnet, smoke, light)
 }
 // the shoulder buttons: the next vehicle you can take, left or right along the row of vehicle buttons
 // The shoulder buttons step along the row of vehicle buttons (user): one that's already out (the battleship at
@@ -37329,12 +37323,15 @@ function drawRainSplashes() {
       B.rect(Math.floor(x / PBV) * PBV, sy - PBV, PBV, PBV);
       if (hash(k + tick) > 0.6) { B.rect(Math.floor(x / PBV) * PBV - PBV, sy - PBV * 2, PBV, PBV); B.rect(Math.floor(x / PBV) * PBV + PBV, sy - PBV * 2, PBV, PBV); }
     }
-    // the far sea is pocked with rain too: tiny, fainter flecks between the horizon and the waterline
+    // the far sea is pocked with rain too: tiny, fainter flecks between the horizon and the waterline - only where the far sea is what's seen
+    // (user Nov 17 14:49, report v1048 - TANK VS TANK, no sea: "the rain below the terrain ... it should only hit the solid surface"): a column
+    // of open water (over land the ground and its own backdrop are in front - drawLandBg), above whatever the rain stops on there (rainRoof)
     const hz = PY(HZ_Y()), nf = Math.round(110 * R * VWP / 600);
     B.fill(rgbs([214 * fx[0], 226 * fx[1], 240 * fx[2]], 0.45));
     for (let k = 0; k < nf; k++) {
-      const x = hash(k * 3.71 + tick * 0.417 + 5.3) * VWP, u = hash(k * 1.37 + tick * 0.291 + 2.1);
-      const sy = PY(surfaceY((x + CAMPX) / SV));
+      const x = hash(k * 3.71 + tick * 0.417 + 5.3) * VWP, u = hash(k * 1.37 + tick * 0.291 + 2.1), wx = (x + CAMPX) / SV;
+      if (onLand(wx)) continue;
+      const sy = PY(rainRoof(wx));
       const y = hz + PBV + u * u * Math.max(0, sy - hz - PBV * 3);  // bunched toward the horizon, like the swell
       if (y >= sy - PBV) continue;
       B.rect(Math.floor(x / PBV) * PBV, Math.floor(y / PBV) * PBV, PBV, PBV);
@@ -47294,7 +47291,7 @@ function stepRope(h, dt) {
     const tx = e[0], ty = e[1] + MAG_H + tankTopH();
     t.x = tx; t.y = ty;                                            // (it swings out past the world's ends with the rope: user Oct 25)
     let a;
-    if (grounded) { const G2 = tankGround(t, t.x); a = Math.atan2(G2.front - G2.back, TANK_L * 0.84); }
+    if (grounded) { const G2 = tankGround(t, t.x); a = Math.atan2(G2.lineF - G2.lineB, TANK_L * 0.84); }   // (its tracks' line - wheelGround)
     else a = clamp((e[0] - P[N - 1][0]) / Math.max(1, seg) * -0.35 + (e[0] - e[2]) / R.dt * 0.002, -0.35, 0.35);
     t.aKick = (t.aKick || 0) * Math.exp(-2.5 * dt);
     t.a += (a + t.aKick - t.a) * Math.min(1, dt * 5);
@@ -54759,12 +54756,25 @@ function wheelGround(x, y, half, step, foot = 0.5) {
   for (let k = 0; k < 5; k++) { const u = k === 2 ? 0 : (k < 2 ? -1 : 1) * (k === 0 || k === 4 ? 1 : 1 - foot), gx = x + u * half, sy = y - step - 2 - Math.abs(u) * 6, g = groundBelow(gx, sy), d = onLand(gx) ? null : shipTopAt(gx, sy);   // (at sea: the harbour's deck or the sea's own floor - groundBelow)
     if (d && d.y < g && d.y < surfaceY(gx)) { ys.push(d.y); if (!ship || k === 2) ship = d.c; } else ys.push(g); }
   const back = Math.min(ys[0], ys[1]), front = Math.min(ys[3], ys[4]), mid = ys[2];
-  return { back, front, mid, top: Math.min(back, front, mid), ship };
+  // (user Nov 17 14:49, report v1048: going up a hill the tank's tracks "clearly floating") the line a rigid track rests on: the highest line no sample
+  // pokes through, touching the ground on both sides of its middle (the samples' upper hull, its edge over the middle). Each half's highest point
+  // (back / front above - what it climbs, the wall checks) set the tilt before: up a slope the back stood on the ground half its half up the slope,
+  // the hull leaning less than the hill and its back end in the air. lineB / lineF: that line's height at the two ends (-half, +half)
+  const us = [-1, -(1 - foot), 0, 1 - foot, 1]; let n = 0, lineB = 0, lineF = 0;
+  for (let i = 0; i <= 2; i++) for (let j = 2; j <= 4; j++) {
+    if (us[j] - us[i] < 1e-6) continue;
+    const k = (ys[j] - ys[i]) / (us[j] - us[i]);
+    let ok = isFinite(k);
+    for (let q = 0; q < 5 && ok; q++) if (ys[q] < ys[i] + k * (us[q] - us[i]) - 0.01) ok = false;
+    if (ok) { lineB += ys[i] + k * (-1 - us[i]); lineF += ys[i] + k * (1 - us[i]); n++; }
+  }
+  if (n) { lineB /= n; lineF /= n; } else { lineB = back; lineF = front; }
+  return { back, front, mid, top: Math.min(back, front, mid), ship, lineB, lineF };
 }
 function tankSettle(t, dt, snap) {
   const G = tankGround(t, t.x), half = TANK_L * 0.42;
-  const want = Math.min((G.back + G.front) / 2, G.mid + 2);
-  const a = Math.atan2(G.front - G.back, half * 2);
+  const want = (G.lineB + G.lineF) / 2;   // (its tracks' line: on the ground under both ends, over any bump - wheelGround)
+  const a = Math.atan2(G.lineF - G.lineB, half * 2);
   if (snap) { t.y = want; t.a = a; return; }
   t.deck = G.ship && t.y >= want - 3 ? G.ship : null;
   if (want > t.y + 1.5 || t.vy < 0) {
@@ -54907,7 +54917,7 @@ function tankHurt(t, amt, x, y, by) {
   if (x != null && y != null) { t.hitX = x; t.hitY = y; }   // (where the blow came from: killTank's blast goes away from it)
   if (t.carry != null && x != null) ropeKick(t, x, y, amt);            // (hanging from a magnet: the hit swings it, and the helicopter)
   noteHit(t.id, 'tank');
-  if (amt >= 0.3) { spawnSparks(x, y, 14, 220); sound('impact', x); }
+  if (amt >= 0.3) { spawnSparks(x, y, 14, 220); if (t.hp > 1e-6) sound('impact', x); }   // (a blow that destroys it: its own blow-up's sound alone - killTank, sfxTankBlow)
   if (by !== -1) unitScorch(t, x, y, amt >= 0.3 ? 4 + 3 * Math.min(1, amt) : landUnitR() < 0.5 ? 0.9 : 0);
   if (t.hp <= 1e-6) killTank(t);
 }
@@ -55829,7 +55839,7 @@ function kickLandDust(x, y, n) {
 function landPlaneCrash(pl, pts) {
   for (const [x, y] of pts) {
     for (let p = 0; p < landN(); p++) {
-      const t = tanks.hAt(p); if (t && t.state === 'alive' && tankHit(t, x, y)) { tankHitBlast(t, 1); tankHurt(t, 2, x, y); return [x, y]; }
+      const t = tanks.hAt(p); if (t && t.state === 'alive' && tankHit(t, x, y)) { tankHurt(t, 2, x, y); if (t.state === 'alive') tankHitBlast(t, 1); return [x, y]; }   // (hit and still standing: the blast on top of it - destroyed, its blow-up alone: killTank)
       const h = helis.hAt(p);
       if (h && (h.state === 'fly' || h.state === 'landed') && heliHit(h, x, y)) { if (!netGuestHold()) { h.hp = 0; noteHit(h.id, 'heli'); blowHeli(h); } return [x, y]; }
     }
@@ -55869,7 +55879,9 @@ function drawLandTank(t, wreck) {
    gets over the ground. The track is a loop: straight along the top from the drive sprocket (back) to the idler
    (front), round the idler, under every road wheel, round the sprocket; its links run round as it drives ---- */
 const TANK_SUS = [-7, 12];                                       // (a road wheel's travel, art pixels: up, down)
-const TRK = { top: 108, th: 5, rs: 17, ri: 13.5, rw: 19.3 };     // (the top run's outer edge; thickness; radii round the sprocket, idler, road wheels)
+// (user Nov 17 14:49: "they could also be a bit thicker so we see them move") 8 art pixels thick (was 5), the links bigger with it; under the road
+// wheels its outer edge is the tank's foot (TANKA.foot 151 - its line on the ground: wheelGround), not 3 pixels above it
+const TRK = { top: 105, th: 8, rs: 20, ri: 16.5, rw: 22.25 };    // (the top run's outer edge; thickness; radii round the sprocket, idler, road wheels)
 function tankWheels(t, dt) {
   const W = TANKA.wheels, ca = Math.cos(t.a), sa = Math.sin(t.a), air = t.carry != null || t.vy > 40;
   if (!t.wd) t.wd = [0, 0, 0, 0, 0, 0, 0];
@@ -55897,8 +55909,8 @@ function drawTankGear(t, Lv, s, X, Y, wreck) {
   poly(tankLoop(t, TRK.th), TANK_UNDER[w]);                       // the dark under the hull, behind the wheels
   // the links, running round: forward, the bottom run stays put on the ground and the top run goes forward twice as fast
   if (!wreck) {
-    const mid = tankLoop(t, TRK.th * 0.45), sp = 4.4, ph = (((t.track || 0) * t.facing / TANK_K) % sp + sp) % sp;
-    const lw = Math.max(1, Math.round(2.2 * s)), lh = Math.max(1, Math.round(1.6 * s)), link = (x, y) => thingsQuad(m, Math.round(X(x) - lw / 2), Math.round(Y(y) - lh / 2), lw, lh, null, THG_SOLID, TANK_LINK);
+    const mid = tankLoop(t, TRK.th * 0.5), sp = 6.5, ph = (((t.track || 0) * t.facing / TANK_K) % sp + sp) % sp;
+    const lw = Math.max(1, Math.round(3.2 * s)), lh = Math.max(1, Math.round(TRK.th * 0.55 * s)), link = (x, y) => thingsQuad(m, Math.round(X(x) - lw / 2), Math.round(Y(y) - lh / 2), lw, lh, null, THG_SOLID, TANK_LINK);
     let acc = ph;
     for (let i = 0; i < mid.length - 2; i += 2) {
       const ax = mid[i], ay = mid[i + 1], bx = mid[i + 2], by = mid[i + 3], L = Math.hypot(bx - ax, by - ay);
@@ -55907,7 +55919,7 @@ function drawTankGear(t, Lv, s, X, Y, wreck) {
       acc = u - L;
     }
     // (and the top run, back from the idler to the sprocket)
-    const ty = TRK.top + TRK.th * 0.45;
+    const ty = TRK.top + TRK.th * 0.5;
     for (let x = W[8][0] - ((sp - ph) % sp); x > W[0][0]; x -= sp) link(x, ty);
   }
   // the wheels, turning as it goes (a wreck's burnt dark)
@@ -72269,35 +72281,37 @@ function sfxExplosion(x, power) {
   thump(out, t, 70, 24, 1.1, 1.0);
   noiseShot(out, t + 0.12, 2.0, 'lowpass', 300, 50, 1, 0.5, 0.2);   // the rumble
 }
-// (user Nov 17 09:14: "when a tank gets hit, the sound of the explosion and the tank being hit should be stronger than a normal hit. Right now,
-// it's all the same sound. You should hear the metal and the impact and the destruction of the tank") struck steel ringing: a few inharmonic
-// partials of a heavy plate, each dying on its own - f the lowest, dur how long it rings
-function metalRing(dest, t0, f, dur, peak) {
-  for (const [k, a, d] of [[1, 1, 1], [2.32, 0.7, 0.8], [3.87, 0.5, 0.55], [5.41, 0.32, 0.4], [7.13, 0.2, 0.3]]) {
-    const ctx = SFX.ctx, o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = 'sine'; o.frequency.setValueAtTime(f * k * (0.99 + 0.02 * seenR('audio')), t0);
-    envGain(g, t0, peak * a, 0.002, dur * d);
-    o.connect(g); g.connect(dest); o.onended = () => { o.disconnect(); g.disconnect(); }; o.start(t0); o.stop(t0 + dur * d + 0.05);
-  }
+// (user Nov 17 09:14: "when a tank gets hit, the sound of the explosion and the tank being hit should be stronger than a normal hit ... You should hear
+// the metal and the impact and the destruction of the tank"; 14:52, report v1048: "sound like I'm playing the xylophone. It should be a heavy bang where you
+// hear the metal blowing up with sound of heavy metal parts hitting and breaking. This ting ting should not exist") a tank blown apart - nothing in it
+// rings (1036's struck-plate partials and its nine clinks were the xylophone): a hard crack, the hull's heavy bang broken up rough (sfxGrit), the blast and
+// its rumble, the steel tearing (low, rough noise falling), the turret wrenched off (a second, lower bang) and heavy pieces coming down - dull thuds and
+// crunches on the ground round it
+function sfxGrit(dest, drive) {
+  const ctx = SFX.ctx, g = ctx.createGain(), w = ctx.createWaveShaper();
+  if (!SFX.grit) { const n = 1024, c = new Float32Array(n); for (let i = 0; i < n; i++) { const v = i / (n - 1) * 2 - 1; c[i] = Math.tanh(v * 3) / Math.tanh(3); } SFX.grit = c; }
+  w.curve = SFX.grit; w.oversample = '4x'; g.gain.value = drive;
+  g.connect(w); w.connect(dest); sfxLetGo(4500, g, w);
+  return g;
 }
-// a tank blown apart: the shell's crack on its armour (a clang ringing), the blast through it - heavier and longer than a shell on the ground -,
-// its turret torn off (a second, lower clang a moment after), and its pieces raining down rattling on the ground round it
 function sfxTankBlow(x) {
   if (!SFX.ctx) return;
-  const out = sfxOut(x, 1.25); if (!out) return;
-  const t = SFX.ctx.currentTime;
-  noiseShot(out, t, 0.12, 'highpass', 3500, 2000, 0.7, 0.9, 0.001);          // the strike: a hard crack
-  metalRing(out, t, 310, 0.9, 0.32);                                        // the armour ringing
-  noiseShot(out, t + 0.02, 0.25, 'bandpass', 1500, 500, 1.2, 0.8);
-  noiseShot(out, t + 0.02, 2.8, 'lowpass', 1400, 50, 0.7, 1.0, 0.01);      // the blast
-  thump(out, t + 0.02, 62, 20, 1.4, 1.0);
-  noiseShot(out, t + 0.15, 2.6, 'lowpass', 260, 40, 1, 0.65, 0.25);         // the rumble
-  metalRing(out, t + 0.22, 170, 1.1, 0.22);                                 // the turret wrenched off
-  noiseShot(out, t + 0.22, 0.3, 'bandpass', 900, 400, 3, 0.35);
-  for (let i = 0; i < 9; i++) {                                             // the pieces coming down: clinks and clanks over a second and a half
-    const ti = t + 0.7 + seenR('audio') * 1.6, f = 500 + seenR('audio') * 1400;
-    metalRing(out, ti, f, 0.18 + 0.2 * seenR('audio'), 0.05 + 0.06 * seenR('audio'));
-    noiseShot(out, ti, 0.05, 'bandpass', f * 2, f * 1.5, 4, 0.12, 0.001);
+  const out = sfxOut(x, 1.3); if (!out) return;
+  const t = SFX.ctx.currentTime, rough = sfxGrit(out, 1.6), r = () => seenR('audio');
+  noiseShot(out, t, 0.07, 'highpass', 2600, 1200, 0.7, 0.8, 0.001);          // the strike: a hard crack
+  noiseShot(rough, t, 0.4, 'bandpass', 650, 220, 0.9, 0.9, 0.002);           // the hull's bang: a heavy, broken whack - broad, nothing ringing
+  thump(rough, t, 105, 30, 0.6, 0.8);
+  noiseShot(out, t + 0.02, 3.0, 'lowpass', 1200, 45, 0.7, 1.0, 0.01);       // the blast
+  thump(out, t + 0.02, 58, 18, 1.8, 1.0);
+  noiseShot(out, t + 0.15, 2.8, 'lowpass', 240, 35, 1, 0.7, 0.25);          // the rumble
+  noiseShot(rough, t + 0.08, 0.8, 'bandpass', 1000, 240, 1.6, 0.4, 0.04);    // the steel tearing
+  noiseShot(rough, t + 0.2, 0.6, 'bandpass', 520, 160, 1.8, 0.35, 0.05);
+  noiseShot(rough, t + 0.26, 0.35, 'bandpass', 420, 150, 1.1, 0.6, 0.003);   // the turret wrenched off: a second, lower bang
+  thump(out, t + 0.26, 78, 28, 0.55, 0.7);
+  for (let i = 0; i < 6; i++) {                                             // heavy pieces coming down: dull thuds and crunches over a second and a half
+    const ti = t + 0.65 + r() * 1.4, k = 0.6 + 0.4 * r();
+    thump(out, ti, 65 + r() * 55, 28, 0.22 + 0.12 * r(), 0.45 * k);
+    noiseShot(rough, ti, 0.14 + 0.1 * r(), 'lowpass', 650 + r() * 450, 140, 0.9, 0.3 * k, 0.002);
   }
 }
 // a shell on bare steel: a clang and a short bang
