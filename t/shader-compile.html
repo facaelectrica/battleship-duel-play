@@ -1,0 +1,50 @@
+<!doctype html><meta charset="utf-8"><title>shader compile bench</title><body style="background:#111;color:#ccc;font:12px monospace"><pre id="o">booting...</pre><script>
+const B = window.B = { R: [], busy: false, log: [], patch: {}, errs: [] };
+const say = t => { B.log.push(t); document.getElementById('o').textContent = B.log.slice(-60).join('\n'); };
+B.boot = (async () => {
+  const ad = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+  const want = ['float32-filterable', 'float32-blendable'].filter(f => ad.features.has(f)), L = {};
+  for (const k of ['maxTextureDimension2D', 'maxBufferSize', 'maxStorageBufferBindingSize', 'maxSampledTexturesPerShaderStage', 'maxSamplersPerShaderStage', 'maxStorageBuffersPerShaderStage', 'maxColorAttachmentBytesPerSample', 'maxBindingsPerBindGroup', 'maxVertexBuffers', 'maxVertexAttributes']) if (ad.limits[k] !== undefined) L[k] = ad.limits[k];
+  if (L.maxStorageBuffersPerShaderStage > 8) L.maxStorageBuffersPerShaderStage = 8;
+  const dev = B.dev = await ad.requestDevice({ requiredFeatures: want, requiredLimits: L });
+  B.info = ad.info ? { vendor: ad.info.vendor, arch: ad.info.architecture, device: ad.info.device, desc: ad.info.description } : null;
+  dev.addEventListener('uncapturederror', e => { B.errs.push(String(e.error.message).slice(0, 400)); say('ERR ' + String(e.error.message).slice(0, 200)); });
+  const S = B.S = await (await fetch('shc/seed.json')).json();
+  B.E = S.list.map((e, i) => { const d = JSON.parse(e[0]); return { i, k: e[1], l: e[e.length - 1], d, ep: (d.fragment || d.compute).entryPoint }; });
+  say('ready: ' + B.E.length + ' pipelines, ' + Object.keys(S.code).length + ' modules ' + JSON.stringify(B.info));
+  B.ready = true;
+})();
+let UQ = 0;
+// a code made new to every cache: a comment, and one helper function renamed (the HLSL's text differs); num: a pattern [from, to] with $U a number
+B.uniq = (code, mode, num) => {
+  const u = Date.now().toString(36) + (UQ++).toString(36) + Math.floor(Math.random() * 1e6).toString(36);
+  if (mode !== 'c') { const m = /\nfn ([A-Za-z_][A-Za-z0-9_]{2,})\s*\(/.exec(code); if (m && !/^(main|vs|fs)/.test(m[1])) code = code.replace(new RegExp('(?<![.\\w])' + m[1] + '(?![\\w])', 'g'), m[1] + '_' + u); }
+  if (num) code = code.replace(num[0], num[1].replace('$U', (1e-7 * (1 + Math.floor(Math.random() * 9e4))).toExponential(4)));
+  return '// ' + u + '\n' + code;
+};
+B.desc = (E, o = {}) => {
+  const dev = B.dev, d = JSON.parse(JSON.stringify(E.d)), mods = new Map();
+  const mod = r => { let m = mods.get(r.M); if (!m) { let c = B.S.code[r.M]; if (o.code) c = o.code; else if (B.patch[r.M]) c = B.patch[r.M](c); if (!o.same) c = B.uniq(c, o.mode, o.num); mods.set(r.M, m = dev.createShaderModule({ code: c, label: E.l })); } return m; };
+  const bgl = r => dev.createBindGroupLayout({ entries: r.B });
+  for (const st of ['vertex', 'fragment', 'compute']) if (d[st]) { d[st].module = mod(d[st].module); if (o[st]) d[st].entryPoint = o[st]; }
+  if (d.layout && typeof d.layout !== 'string') d.layout = o.auto ? 'auto' : dev.createPipelineLayout({ bindGroupLayouts: d.layout.P.map(bgl) });
+  d.label = E.l; return { d, mods: [...mods.values()] };
+};
+B.one = async (E, o = {}) => {
+  const { d, mods } = B.desc(E, o);
+  for (const m of mods) { const ci = await m.getCompilationInfo(); const er = ci.messages.filter(x => x.type === 'error'); if (er.length) return { err: er[0].message + ' line ' + er[0].lineNum }; }
+  const t0 = performance.now();
+  try { await (E.k === 'c' ? B.dev.createComputePipelineAsync(d) : B.dev.createRenderPipelineAsync(d)); } catch (e) { return { err: String(e.message || e).slice(0, 300) }; }
+  return { ms: Math.round(performance.now() - t0) };
+};
+// run a list of jobs one after another: [{ i (entry), tag, o }]
+B.run = async jobs => {
+  if (B.busy) return 'busy'; B.busy = true; B.vis = [];
+  for (const j of jobs) { const E = B.E[j.i], r = await B.one(E, j.o || {}); const row = { i: j.i, l: E.l, ep: (j.o && j.o.fragment) || E.ep, tag: j.tag || '', ms: r.ms, err: r.err, hid: document.hidden }; B.R.push(row); say(JSON.stringify(row)); }
+  B.busy = false; say('done'); return 'done';
+};
+// several at once (as the game's book: n in flight), the wall time of all
+B.par = async (idx, n = 8, o = {}) => { const q = idx.slice(), t0 = performance.now(), out = []; const w = async () => { while (q.length) { const i = q.shift(), t = performance.now(), r = await B.one(B.E[i], o); out.push([i, B.E[i].l, Math.round(performance.now() - t), r.err]); } }; await Promise.all(Array.from({ length: n }, w)); return { wall: Math.round(performance.now() - t0), out }; };
+// a function's body replaced in a code (name, new body with its braces)
+B.fn = (code, name, body) => { const m = new RegExp('(?:^|\\n)\\s*fn ' + name + '\\s*\\(').exec(code); if (!m) throw new Error('no fn ' + name); let i = code.indexOf('{', m.index), d = 0, j = i; for (; j < code.length; j++) { if (code[j] === '{') d++; else if (code[j] === '}') { d--; if (!d) break; } } return code.slice(0, i) + body + code.slice(j + 1); };
+</script>
