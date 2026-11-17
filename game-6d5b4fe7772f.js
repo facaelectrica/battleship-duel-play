@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1058;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 17:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1059;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 17:18';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -48368,7 +48368,9 @@ function plantSpots(add) {
 // (user Nov 8 12:42: "when I explode the terrain near a tree, they are falling down") a plant on DECK 2 or further back stands behind the ground in front:
 // a crater in that ground isn't under it - it keeps the ground's line as built (land.surf), never dropping into the hole in front of it
 const backTop = x => { const c = ltCol(x), S = land.surf; if (!S || c < 0 || c >= S.length) return frontTop(x); return Math.min(frontTop(x), gedgeOver(x, LT_Y0 + Math.ceil((S[c] - LT_Y0) / LT_CELL) * LT_CELL)); };   // (the smooth line over it - one ground)
-const propTop = it => it.open != null ? sandY(it.x) - deckRaise(it) : it.cave ? it.cy : (it.low ? landFloor(it.x) : it.isl ? landTop(it.x) : it.deck >= 3 && !it.uw ? backTop(it.x) : frontTop(it.x)) - deckRaise(it);   // (underwater: the floor itself - tropPalms' uw)   // (low: under an overhang, on the ground below it - tropPalms)
+const propTop = it => propTopAt(it, it.x);
+// (the ground a plant stands on, at any x - a felled top lies along it: rigTopFall)
+const propTopAt = (it, x) => it.open != null ? sandY(x) - deckRaise(it) : it.cave ? it.cy : (it.low ? landFloor(x) : it.isl ? landTop(x) : it.deck >= 3 && !it.uw ? backTop(x) : frontTop(x)) - deckRaise(it);   // (underwater: the floor itself - tropPalms' uw)   // (low: under an overhang, on the ground below it - tropPalms)
 // (user Nov 7 12:47, the Biome Editor sketch: "each deck was a bit raised compared to the previous one ... to give some depth to it, but only slightly")
 // a deck plant's foot that much higher for each deck behind deck 0 (DECK RAISE, ALL PLANTS)
 const deckRaise = it => it.deck > 1 ? (it.deck - 1) * ((VTUNE.tree && VTUNE.tree.deckRaise) || 0) : 0;
@@ -59782,6 +59784,8 @@ function stepRigs0(dt) {
     if (VEG_FREEZE && VEG_SOLO && VEG_SOLO.has(it)) { RIGS_ST.delete(it.x); continue; }
     RIG_SOFT = it.uw && it.ve && UW_SOFT.has(it.ve.p) ? 1 : 0;   // (kelp, seaweed, sea grass: the current sways it - rigAir)
     // (every plant with bones is the plants' GPU pass's: on the processor only while something happens to it - the rule above, rigWake / rigSettle)
+    // (a felled tree lying where the ground just changed - a blast, a crater: it falls again, as the ground now is - rigTopFall)
+    { const s0 = RIGS_ST.get(it.x); if (rigLying(s0) && !s0.cpu && landWoke(it.x, plantReach(it))) { s0.sdone = 0; s0.cpu = true; } }
     if (!rigCpu(it)) { const G0 = plantGeo(it); if (!G0 || !(it.fire > 0 || rigBird(it) || rigFlowerOff(it, rc, RIGS_ST.get(it.x), G0))) continue; rigWake(it, rc); }
     const s = rigState(it, rc);
     const G = plantGeo(it), T = rigK(it); if (!G) continue;
@@ -59837,7 +59841,7 @@ function stepRigs0(dt) {
       }
     }
     if (!(burnT > 0)) s.burnt.fill(0);                            // (a tree grown again)
-    rigTopFall(rc, s, dt);                              // (a snapped trunk: its top falling about the break, in its pieces, until they lie on the ground)
+    rigTopFall(it, rc, s, G, dt);                              // (a snapped trunk: its top falling about the break, in its pieces, until they lie on the ground)
     rigSettle(it, s);                                   // (settled: back to the GPU's springs)
   }
 }
@@ -59889,9 +59893,9 @@ function rigFell(it, dir) {
    - the stump is rooted: from the snap its trunk's bones hold where they were - no wind, blast or shake moves them (stepRigs0, the 'blast' handler, rigShake);
    - a top too long to come down whole breaks into pieces (rigTopCut): the first long enough to reach the ground from the break, the rest none longer
      than its kind's TRUNK PIECE (trunkPiece, metres), each hinged where the one before it ends. They
-     fall together about the break; a piece goes over until any of it - its trunk at its width, the leaves on it - would reach under its foot's
-     line, and stays there (rigTopFall): the first comes down from the break to the ground, the ones after lie along it. A top no longer than one piece
-     falls whole, as before;
+     fall together about the break; a piece goes over until any of it - its trunk at its width, the leaves on it - would reach under the ground it falls
+     on (the plant's own ground along the way - propTopAt: into a hole, onto a slope), and stays there (rigTopFall): the first comes down from the break to
+     the ground, the ones after lie along it. A top no longer than one piece falls whole, as before. The ground changed under it later: it falls again;
    - lying (s.sdone), nothing of it moves in the air: its parts' springs come to rest and stay (stepRigs0's still), and a blast or shake near it leaves it be.
    Each trunk point's turn is s.ta (rigTurn) - drawn by builtGeo and the plants' GPU pass (its look, pgLook); the page has it from RIG_BONES (f 14) ---- */
 const TRUNK_PIECE_DEF = 6;                                       // (metres: a kind with no TRUNK PIECE of its own)
@@ -59900,7 +59904,7 @@ const rigTurn = (s, i) => s.snap >= 0 && i >= s.snap ? (s.ta && s.ta[i] != null 
 // (the trunk snaps at spline point at, its top going over sd's way at v0 to start: cut into its pieces, each as long as the others, at the trunk's points)
 function rigTopCut(it, rc, s, at, sd, v0) {
   const B = rc.built, S = rc._S || (rc._S = splinePts(B.trunk.pts, splinePer(B.trunk.pts))), n = S.length, G = plantGeo(it);
-  s.snap = at; s.sdir = sd; s.sa = 0; s.sav = sd * v0; s.sdone = 0; s.av.fill(0);
+  s.snap = at; s.sdir = sd; s.sa = 0; s.sav = sd * v0; s.sdone = 0; s.pv = null; s.av.fill(0);
   const cum = [0]; for (let i = at; i < n - 1; i++) cum.push(cum[cum.length - 1] + Math.hypot(S[i + 1][0] - S[i][0], S[i + 1][1] - S[i][1]));
   // (the first piece long enough to reach the ground from the break - at least 1.25 x its height, so it comes down well before it would hang; the rest
   // of the top in pieces as long as each other, none longer than TRUNK PIECE)
@@ -59928,32 +59932,39 @@ function rigTopPts(rc) {
     for (const p of L.pts) q.push({ i: ai, dx: p[0] - S[ai][0], dy: p[1] - S[ai][1], r: 0 }); });
   return rc._tp = { B, hw, q };
 }
-// (each step while it falls: the fall's turn grows, faster as it leans; each piece in turn, from where the one before it ends, takes that turn - or, where
-// that would put any of it under the foot's line (or lower than it hung standing, a part already under it), the most it can (halved 14 times). Down when
-// every piece has stopped)
-const RTF_X = [], RTF_Y = [];
-function rigTopFall(rc, s, dt) {
+// (each step while it falls, each piece in turn from where the one before it ends: the most it can turn - up to RIG_TOP_MAX - with none of it under
+// the ground it falls on (propTopAt along the way: a hole, a slope, a crater beside it) or lower than it hung standing (halved 14 times); it falls
+// toward that, faster as it leans (pv), and stops there. Down when every piece is where it can go. The ground changed under a lying one (landWoke -
+// stepRigs0): it falls again, on into the hole)
+const RIG_TOP_MAX = 2.6, RTF_X = [], RTF_Y = [], RTF_G = new Map();
+function rigTopFall(it, rc, s, G, dt) {
   if (s.snap < 0 || s.sdone) return;
-  const S = rc._S, n = S.length, at = s.snap; if (!S) return;
+  const S = rc._S, n = S.length, at = s.snap; if (!S || !G) return;
   if (!s.pc) { s.pc = [at]; s.pa = [0]; s.ta = new Array(n - 1).fill(0); }
-  s.sav += s.sdir * (1.2 + 3 * Math.sin(Math.min(1.5, Math.abs(s.sa)))) * dt; s.sa += s.sav * dt;
-  const TP = rigTopPts(rc), HW = TP.hw, Q = TP.q, gy = rc.foot, X = RTF_X, Y = RTF_Y, pc = s.pc;
+  if (!s.pv || s.pv.length !== s.pc.length) s.pv = s.pc.map(() => s.sav || 0);
+  const TP = rigTopPts(rc), HW = TP.hw, Q = TP.q, X = RTF_X, Y = RTF_Y, pc = s.pc, k = G.k, foot = propTop(it) + G.sink, X0 = it.x - (it.flip ? G.w - G.fo : G.fo), Y0 = foot - G.h;
+  // (the ground under an art x, in art rows: the plant's own ground there, sunk as its foot is - each world unit asked once a step)
+  RTF_G.clear(); const gAt = ax => { const wx = Math.round(it.flip ? X0 + G.w - ax * k : X0 + ax * k); let g = RTF_G.get(wx); if (g === undefined) { g = (propTopAt(it, wx) + G.sink - Y0) / k; if (!isFinite(g)) g = rc.foot; RTF_G.set(wx, g); } return g; };
   X[0] = S[0][0]; Y[0] = S[0][1];   // (the trunk as it stands, nothing turned by the fall - its joints' bend: each piece turns from there about its root)
   for (let i = 0; i < n - 1; i++) { const th = Math.atan(rigSlope(rc, s, (S[i][1] + S[i + 1][1]) / 2)), c = Math.cos(th), sn = Math.sin(th), vx = S[i + 1][0] - S[i][0], vy = S[i + 1][1] - S[i][1]; X[i + 1] = X[i] + vx * c - vy * sn; Y[i + 1] = Y[i] + vx * sn + vy * c; }
   let rx = X[at], ry = Y[at], all = true;
   for (let j = 0; j < pc.length; j++) {
     const i0 = pc[j], i1 = j + 1 < pc.length ? pc[j + 1] : n - 1;
-    // (the trunk's half width under it no more than its root stands above the line: a trunk cut at its foot lies along the line)
-    const up = Math.max(0, gy - ry), ok = ph => { const c = Math.cos(ph), sn = Math.sin(ph);
-      for (let i = i0 + 1; i <= i1; i++) { const dx = X[i] - X[i0], dy = Y[i] - Y[i0], r = Math.min(HW[i], up); if (ry + dx * sn + dy * c + r > Math.max(gy, ry + dy + r)) return false; }
-      for (const p of Q) if (p.i > i0 && p.i <= i1) { const dx = X[p.i] + p.dx - X[i0], dy = Y[p.i] + p.dy - Y[i0]; if (ry + dx * sn + dy * c > Math.max(gy, ry + dy)) return false; }
+    // (the trunk's half width under it no more than its root stands above its ground: a trunk cut at its foot lies along the line)
+    const up = Math.max(0, gAt(rx) - ry), ok = ph => { const c = Math.cos(ph), sn = Math.sin(ph);
+      for (let i = i0 + 1; i <= i1; i++) { const dx = X[i] - X[i0], dy = Y[i] - Y[i0], r = Math.min(HW[i], up), px = rx + dx * c - dy * sn; if (ry + dx * sn + dy * c + r > Math.max(gAt(px), ry + dy + r)) return false; }
+      for (const p of Q) if (p.i > i0 && p.i <= i1) { const dx = X[p.i] + p.dx - X[i0], dy = Y[p.i] + p.dy - Y[i0], px = rx + dx * c - dy * sn; if (ry + dx * sn + dy * c > Math.max(gAt(px), ry + dy)) return false; }
       return true; };
-    let ph = s.sa;
-    if (ok(ph)) all = false; else { let lo = 0, hi = 1; for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (ok(s.sa * m)) lo = m; else hi = m; } ph = s.sa * lo; }
+    const hi = s.sdir * RIG_TOP_MAX; let tg = hi;
+    if (!ok(hi)) { let lo = 0, h1 = 1; for (let q = 0; q < 14; q++) { const m = (lo + h1) / 2; if (ok(hi * m)) lo = m; else h1 = m; } tg = hi * lo; }
+    let ph = s.pa[j];
+    if (Math.abs(tg) <= Math.abs(ph) + 1e-4) { ph = tg; s.pv[j] = 0; }   // (there, or the ground now higher: where it can be)
+    else { s.pv[j] += s.sdir * (1.2 + 3 * Math.sin(Math.min(1.5, Math.abs(ph)))) * dt; ph += s.pv[j] * dt; if (Math.abs(ph) >= Math.abs(tg)) { ph = tg; s.pv[j] = 0; } else all = false; }
     s.pa[j] = ph; for (let i = i0; i < i1; i++) s.ta[i] = ph;
     const c = Math.cos(ph), sn = Math.sin(ph), dx = X[i1] - X[i0], dy = Y[i1] - Y[i0]; rx += dx * c - dy * sn; ry += dx * sn + dy * c;
   }
-  if (all || Math.abs(s.sa) > 2.6) { s.sdone = 1; s.sav = 0; }
+  s.sa = s.pa[0];
+  if (all) { s.sdone = 1; s.sav = 0; }
 }
 // how far a frond has burnt (0 .. 1: gone): each catches in its turn over the first part of the fire, then burns through in LEAF BURN TIME
 const rigFrondBurn = (s, f, burnT, K) => clamp((burnT - s.lag[f] * K.leafBurn * 0.8) / K.leafBurn, 0, 1);
