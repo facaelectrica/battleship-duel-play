@@ -8691,8 +8691,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1021;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 16 22:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1022;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 16 22:15';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -55387,8 +55387,9 @@ function landBlast(s, x, y, hitV) {
     const gy = landBelow(x, y - crater);
     landCarve(x, y, crater);
     groundFlash(x, y, (s.from === 'bomb' ? 1.2 : s.from === 'tank' ? 1 : 0.6) * bk);   // (a short fireball, no black smoke: the earth is the show)
-    if (gy - y < crater + 10) spikeBurst(x, Math.min(y, gy), (s.from === 'bomb' ? 1.3 : s.from === 'tank' ? 1 : 0.55) * bk, groundAt(x, Math.min(y, gy)));
-    kickLandDust(x, y, 18);
+    if (TVT) tvtDust(x, Math.min(y, gy));                 // (TANK VS TANK: a puff of the smoke's dust, no burst of earth - 50-zzzz-tvt.js)
+    else { if (gy - y < crater + 10) spikeBurst(x, Math.min(y, gy), (s.from === 'bomb' ? 1.3 : s.from === 'tank' ? 1 : 0.55) * bk, groundAt(x, Math.min(y, gy)));
+      kickLandDust(x, y, 18); }
   }
   for (let p = 0; p < landN(); p++) {
     const t = tanks.hAt(p), h = helis.hAt(p);
@@ -71304,6 +71305,15 @@ function tvtStep(dt) {
 }
 // while the round is over, no new tank comes in (canTake)
 const tvtOver = () => TVT && TV.over != null;
+// (user Nov 16 21:14: "The explosion of dirt when a bullet hits the ground should just be dynamic dust, and it should be much smaller ... the dust
+// that we get on the ground should disappear a lot faster") a shot into the ground: a small puff of the smoke's dust (kickLandDust's kind - the air
+// stirs it), a hole's width, gone in about a second - no burst of earth, no clods
+function tvtDust(x, y) {
+  if (SIM_ONLY) return;
+  const r = (a, b) => simRnd('tvt', a, b);
+  for (let i = 0; i < 10; i++) spawnSmoke(x + r(-TANK_L * 0.4, TANK_L * 0.4), y - r(0, 4), { kind: 'dust', mist: true, r: r(1.5, 3), grow: r(1.5, 2.5), lift: 4,
+    vx: r(-18, 18), vy: r(-30, -8), life: r(0.7, 1.3), alpha: r(0.3, 0.5), fam: 'dust' });
+}
 // (user Nov 16 20:52: "the explosion it makes should be half the size"; 21:01: "maybe 3 times smaller ... The hole should not be bigger than the size of a
 // tank") a blast on the land and a tank's, its size in TANK VS TANK: the tank's own shot digs a hole as wide as a tank (LAND_BLAST's crater a radius)
 const tvtBlastK = () => TVT ? TANK_L / (2 * LAND_BLAST.tank[0] * BLAST_K) : 1;
