@@ -8728,8 +8728,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1060;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 17:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1061;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 17:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -12973,7 +12973,7 @@ function stepChunks(dt) {
     } else {
       k.y = floor - k.hh * 0.45; k.rest = true; k.vx = k.vy = k.w = 0;
       // (a building's piece - strHit, strCollapse: masonry, no fire - lands in a puff of its dust and quietly, the fall's crash already heard; user Nov 17 15:41: no smoke on buildings)
-      if (k.kind === 'rubble') { if (armChunkR() < 0.5) spawnSmoke(x + armChunkRnd(-6, 6), y - armChunkRnd(2, 6), { kind: 'dust', mist: true, fam: 'dust', r: armChunkRnd(5, 9), grow: armChunkRnd(4, 7), rmax: armChunkRnd(18, 28), lift: 2, ground: true, vx: armChunkRnd(-20, 20), vy: 0, life: armChunkRnd(2, 3.5), alpha: armChunkRnd(0.35, 0.5) }); return; }   // (a puff of dust, no bits thrown: it is the bit)
+      if (k.kind === 'rubble') { if (armChunkR() < 0.15) spawnSmoke(x + armChunkRnd(-6, 6), y - armChunkRnd(2, 6), { kind: 'dust', mist: true, fam: 'dust', r: armChunkRnd(5, 9), grow: armChunkRnd(4, 7), rmax: armChunkRnd(18, 28), lift: 2, ground: true, vx: armChunkRnd(-20, 20), vy: 0, life: armChunkRnd(2, 3.5), alpha: armChunkRnd(0.35, 0.5) }); return; }   // (a puff of dust, no bits thrown: it is the bit)
       for (let i = 0; i < 7; i++) spawnSmoke(x + armChunkRnd(-12, 12), y - armChunkRnd(2, 10), { kind: 'trail', dark: 0.7, r: armChunkRnd(6, 11), lift: 14, vx: armChunkRnd(-20, 20), alpha: armChunkRnd(0.35, 0.5), life: armChunkRnd(4, 7) });
       spawnDebris(x, y - 3, 6, 0);
     }
@@ -42772,6 +42772,8 @@ function tankWayOpen(t, dir) {
   for (const d of [6, 14]) { const G = tankGround(t, t.x + dir * d); if ((dir > 0 ? G.front : G.back) < t.y - TANK_STEP - 1) return false; }
   const fx = t.x + dir * (TANK_L * 0.5 + 10);
   if (!dryLand(fx) && !t.deck && groundBelow(fx, t.y - TANK_STEP - 2) > surfaceY(fx) + 2) return false;
+  // (user Nov 17 16:19, TANK VS TANK's chasm: a drop it would be lost in - the ground ahead further down than four of its steps, ~19 m - is no way)
+  if (!t.deck && groundBelow(fx, t.y - TANK_STEP - 2) > t.y + 4 * TANK_STEP) return false;
   return true;
 }
 // the way to the nearer ground clear of the water from a tank in it (0: none in the play)
@@ -67802,6 +67804,13 @@ function strSupport(o, B, G, c) {
   for (let j = 0; j < nr; j++) for (let i = 0; i < nc; i++) { const k = j * nc + i; if (up(k) && !held[k]) { strPieceFall(o, B, G, i, j, strDmgRnd(-6, 6), 0, strDmgRnd(0, 0.1)); out = out.slice(0, k) + '1' + out.slice(k + 1); } }
   return out;
 }
+// (user Nov 17 16:23: a building destroyed "should not generate so much smoke ... less smoke. more debris and other bits") n bits of its masonry - plaster,
+// brick, stone, timber - thrown low and short from round x, y (within r), heavy: they come down round it and lie there (the debris' own rest)
+const STR_BITS = ['#cfc0a4', '#b39a7a', '#8f7a62', '#9a4a2e', '#6e5a48', '#d8d0c0', '#5a4636'];
+function strBits(x, y, r, n) {
+  for (let i = 0; i < n; i++) debrisRow({ x: x + strDmgRnd(-r, r) * 0.7, y: y + strDmgRnd(-r, r) * 0.5, vx: strDmgRnd(-45, 45), vy: -strDmgRnd(10, 70), a: strDmgRnd(0, 6.28), w: strDmgRnd(-6, 6),
+    sw: strDmgRnd(1.8, 4.5), sh: strDmgRnd(1.4, 3.2), col: STR_BITS[Math.floor(strDmgR() * STR_BITS.length) % STR_BITS.length], state: 0, bub: 0, seed: strDmgR() * 6.28, age: 0 });
+}
 // a shot stopped at x, y: its burst on the wall, and every piece within r knocked out
 function strHit(o, x, y, r) {
   if (!o || strDown(o)) return;
@@ -67810,7 +67819,8 @@ function strHit(o, x, y, r) {
   // the burst: a flash and flames - no sparks or earth; the wall's dust
   flashes.addRow({ x, y, r: 18, life: 0, max: 0.12 });
   if (!SIM_ONLY) for (let i = 0; i < 10; i++) spawnFlame(x + strDmgRnd(-4, 4), y + strDmgRnd(-4, 4), strDmgRnd(-70, 70), strDmgRnd(-70, 20), 1.1, strDmgRnd(3, 6), strDmgRnd(3.5, 5));
-  for (let i = 0; i < 6; i++) { const r0 = strDmgRnd(5, 9); spawnSmoke(x + strDmgRnd(-r, r) * 0.6, y + strDmgRnd(-r, r) * 0.4, { kind: 'dust', mist: true, fam: 'dust', r: r0, grow: strDmgRnd(5, 9), rmax: strDmgRnd(20, 32), lift: 3, vx: strDmgRnd(-25, 25), vy: strDmgRnd(-15, 5), life: strDmgRnd(2.5, 4), alpha: strDmgRnd(0.4, 0.6) }); }
+  strBits(x, y, r, 14);
+  for (let i = 0; i < 2; i++) { const r0 = strDmgRnd(5, 9); spawnSmoke(x + strDmgRnd(-r, r) * 0.6, y + strDmgRnd(-r, r) * 0.4, { kind: 'dust', mist: true, fam: 'dust', r: r0, grow: strDmgRnd(5, 9), rmax: strDmgRnd(20, 32), lift: 3, vx: strDmgRnd(-25, 25), vy: strDmgRnd(-15, 5), life: strDmgRnd(2.5, 4), alpha: strDmgRnd(0.4, 0.6) }); }
   gridExplosion(x, y, 60, 300); shakeAt(6, x); sound('rubble', x, 0.6);
   // the pieces within its reach knocked out - thrown a little away from it, heavy
   for (let j = 0; j < G.nr; j++) for (let i = 0; i < G.nc; i++) {
@@ -67828,7 +67838,8 @@ function strHit(o, x, y, r) {
 function strCollapse(o, B, G, c) {
   STR_DMG.down[o.id] = 1; STR_SHOT.t = -1;                  // (no cover from the next shot on)
   for (let j = 0; j < G.nr; j++) for (let i = 0; i < G.nc; i++) if (c[j * G.nc + i] !== '1') strPieceFall(o, B, G, i, j, strDmgRnd(-10, 10), strDmgRnd(0, 10), (G.nr - 1 - j) * 0.04 + strDmgRnd(0, 0.1));
-  for (let i = 0; i < 12; i++) { const x = B.x0 + (B.x1 - B.x0) * strDmgRnd(0, 1), r0 = strDmgRnd(5, 9); spawnSmoke(x, B.foot - r0, { kind: 'dust', mist: true, fam: 'dust', r: r0, grow: strDmgRnd(5, 9), rmax: strDmgRnd(24, 36), lift: 2, ground: true, vx: strDmgRnd(-40, 40), vy: 0, life: strDmgRnd(3, 5), alpha: strDmgRnd(0.4, 0.6) }); }
+  for (let i = 0; i < 6; i++) strBits(B.x0 + (B.x1 - B.x0) * (i + 0.5) / 6, B.top + (B.foot - B.top) * strDmgRnd(0.3, 0.9), (B.x1 - B.x0) / 6, 8);
+  for (let i = 0; i < 4; i++) { const x = B.x0 + (B.x1 - B.x0) * strDmgRnd(0, 1), r0 = strDmgRnd(5, 9); spawnSmoke(x, B.foot - r0, { kind: 'dust', mist: true, fam: 'dust', r: r0, grow: strDmgRnd(5, 9), rmax: strDmgRnd(24, 36), lift: 2, ground: true, vx: strDmgRnd(-40, 40), vy: 0, life: strDmgRnd(3, 5), alpha: strDmgRnd(0.4, 0.6) }); }
   shakeAt(9, o.x); sound('rubble', o.x, 1.5);
 }
 // is the piece of building o (picture P, m world units a texel, its box q) at x, y knocked out
@@ -71725,14 +71736,23 @@ function tvtWorld(seed, W) {
   const SK = TVT_BIOMES[Math.floor(r() * TVT_BIOMES.length) % TVT_BIOMES.length];
   // the hills: two long swells and a shorter one (their slopes the tank can drive - at most about 40 degrees together)
   const waves = [[rnd(30, 70), rnd(0.55, 0.9) * W], [rnd(12, 32), rnd(0.25, 0.4) * W], [rnd(4, 11), rnd(110, 180)]].map(([a, l]) => [a, l, rnd(0, Math.PI * 2)]);   // (by the field's width: two or so swells across it)
-  const mid = W / 2, kind = r() < 0.35 ? 'lake' : r() < 0.55 ? 'hill' : 'open';
-  const hw = (kind === 'lake' ? rnd(0.1, 0.15) : rnd(0.12, 0.18)) * W, dep = kind === 'lake' ? rnd(70, 110) : -rnd(70, 130);   // (+ down: a dip; - up: a hill)
+  // (user Nov 17 16:19: "sometimes a variation of the level where there is a giant chasm in the middle, and none of the tanks can reach the other side";
+  // 16:20: "a version where its a 'deep ocean' in between with cliffs on each side, so you know you will die if you fall") the middle: a lake, a chasm
+  // (sheer walls down near the shape's foot - a fall from its edge is a tank lost, tankFall), the open sea between two cliffs (two shapes - no ground
+  // there is the sea, and a tank in the open sea sinks: tankSink), a hill or nothing
+  const mid = W / 2, k0 = r(), kind = k0 < 0.3 ? 'lake' : k0 < 0.42 ? 'chasm' : k0 < 0.54 ? 'ocean' : r() < 0.55 ? 'hill' : 'open';
+  const hw = (kind === 'lake' ? rnd(0.1, 0.15) : kind === 'chasm' ? rnd(0.045, 0.065) : kind === 'ocean' ? rnd(0.07, 0.1) : rnd(0.12, 0.18)) * W, dep = kind === 'lake' ? rnd(70, 110) : -rnd(70, 130);   // (+ down: a dip; - up: a hill)
   const bump = x => { const u = (x - mid) / hw; return Math.abs(u) >= 1 ? 0 : 0.5 + 0.5 * Math.cos(Math.PI * u); };
-  const yAt = x0 => { const x = x0 - TVT_MARGIN; return TVT_TOP + waves.reduce((s, [a, l, ph]) => s + a * Math.sin(ph + x * Math.PI * 2 / l), 0) + (kind === 'open' ? 0 : dep * bump(x)); };
+  const cliff = x => { const u = Math.abs((x - mid) / hw); return u >= 1 ? 0 : u <= 0.8 ? 1 : (1 - u) / 0.2; };   // (a chasm's: sheer over its last fifth)
+  const yAt = x0 => { const x = x0 - TVT_MARGIN, y = TVT_TOP + waves.reduce((s, [a, l, ph]) => s + a * Math.sin(ph + x * Math.PI * 2 / l), 0);
+    return kind === 'chasm' ? y + (TVT_FOOT - 30 - y) * cliff(x) : kind === 'open' || kind === 'ocean' ? y : y + dep * bump(x); };
   const STEP = 20, top = [], WW = W + 2 * TVT_MARGIN;
   for (let x = 0; x <= WW + 0.5; x += STEP) top.push([Math.round(Math.min(WW, x)), Math.round(yAt(Math.min(WW, x))), SK]);
   if (top[top.length - 1][0] < WW) top.push([Math.round(WW), Math.round(yAt(WW)), SK]);
-  const GROUND = [{ k: 'S', gnd: true, p: [[Math.round(WW), TVT_FOOT, SK], [0, TVT_FOOT, SK], ...top] }];
+  const M0 = mid + TVT_MARGIN, xL = Math.round(M0 - hw), xR = Math.round(M0 + hw);
+  const GROUND = kind !== 'ocean' ? [{ k: 'S', gnd: true, p: [[Math.round(WW), TVT_FOOT, SK], [0, TVT_FOOT, SK], ...top] }]
+    : [{ k: 'S', gnd: true, p: [[xL, TVT_FOOT, SK], [0, TVT_FOOT, SK], ...top.filter(p => p[0] < xL), [xL, Math.round(yAt(xL)), SK]] },   // (the ocean: two shapes, a cliff each side of it)
+      { k: 'S', gnd: true, p: [[Math.round(WW), TVT_FOOT, SK], [xR, TVT_FOOT, SK], [xR, Math.round(yAt(xR)), SK], ...top.filter(p => p[0] > xR)] }];
   // the lake: the pocket's deepest point, its water a little under the lower of its two rims (never above it - lakeLevel)
   let lake = null;
   if (kind === 'lake') {
@@ -71757,6 +71777,7 @@ function tvtWorld(seed, W) {
       let x = TVT_MARGIN + W * (0.12 + 0.76 * (i + 1) / (n + 1));
       if (lake) { const lv = lake.y - WATER_Y, dir = x < mid + TVT_MARGIN ? -1 : 1; while (yAt(x) > lv - 4 && Math.abs(x - (mid + TVT_MARGIN)) < W * 0.4) x += dir * STEP; x += dir * 40; }   // (out of the water, a little past its edge)
       const k = kinds[Math.floor(r() * kinds.length) % kinds.length];
+      if (kind === 'chasm' || kind === 'ocean') { const t = TROP[STR_KINDS[k].art], bw = t ? t.w * t.m * UPM : 80, gap = hw + bw / 2 + Math.max(60, bw / 2) + STEP; if (Math.abs(x - M0) < gap) x = M0 + (x < M0 ? -gap : gap); }   // (clear of the gap, its levelled ground too)
       STRS0.push({ id: i + 1, k, pf: 'k:' + k, x: Math.round(x), dy: 0, hue: Math.floor(r() * 360), g: null, flip: r() < 0.5, empty: true });   // (empty: nobody lives there - no chimney smoke, no lit windows; user Nov 17 15:41)
     } }
   // (user Nov 17 15:44, a house's fence over the hill's slope: "when you place a building, you need to make sure the whole surface of the building is
@@ -71869,8 +71890,12 @@ const tvtOver = () => TVT && (TV.over != null || TV.wait != null);
 const tvtBlastK = () => TVT ? TANK_L / (2 * LAND_BLAST.tank[0] * BLAST_K) : 1;
 // the camera's one view: the field's middle, the lowest of its ground low in the view, over the buttons' height
 function tvtFocus() {
-  let lo = -Infinity;
-  for (let x = PLAY_L(); x < PLAY_R(); x += 40) { const y = landTop(x); if (Number.isFinite(y)) lo = Math.max(lo, y); }   // (a lake's floor too: its water above it)
+  // (user Nov 17 16:19-16:20: a chasm, the open sea between cliffs) the field's ground - over the sea, its surface; the lowest of it within 300 below its
+  // middle height framed (a lake's floor too: its water above it), not a chasm's or the sea's floor
+  const Y = [];
+  for (let x = PLAY_L(); x < PLAY_R(); x += 40) { const y = landSpanAt(x) < 0 ? surfaceY(x) : landTop(x); if (Number.isFinite(y)) Y.push(y); }
+  Y.sort((a, b) => a - b);
+  let lo = -Infinity; const md = Y.length ? Y[Y.length >> 1] : 0; for (const y of Y) if (y <= md + 300) lo = Math.max(lo, y);
   const vh = VIEW_H / (cam.zt[0] || 1);
   return [WORLD_W / 2, (Number.isFinite(lo) ? lo : WATER_Y) - 0.24 * vh, 0, 0, null];
 }
