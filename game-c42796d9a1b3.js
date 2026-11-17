@@ -5945,9 +5945,13 @@ function loadPrefs() { try { return JSON.parse(localStorage.getItem(PREFS_KEY)) 
 // you bring her home by sailing her toward your harbour)
 let stopPref = false;     // (true brings back the HOME button and boats that stop when you leave them; the tools' setStop)
 // MUTE: every sound off (the volume slider keeps its place)
-let MUTED = loadPrefs().mute === true;
+// (user Nov 17: "im not getting any audio in the game. cant figure out why" - the Biome Editor silenced itself by setting the player's MUTE,
+// every 2 s for the rest of the page's life, and the next thing saved kept it for every later visit. Its silence is its own now - soundOff, never
+// the player's setting; a MUTE saved before then (pv under 1049) can't be told from the editor's, so it's read as off once)
+let MUTED = (p => p.mute === true && p.pv >= 1049)(loadPrefs());
+const soundOff = () => MUTED || VEG_MODE;   // (no sound at all: the player's MUTE, or the Biome Editor on - user Nov 3 23:29: "we dont need any audio in the Editor")
 let SHOW_STATS = loadPrefs().stats !== false;          // the frame counter and, online, the network numbers (OPTIONS)
-function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ flags: flagPick.slice(), mode: MODE, ctl: ctlPick.slice(), cpuLv: cpuLvSide.slice(), storyLv: STORY_LV, mute: MUTED, stats: SHOW_STATS, roster: typeof menuSel === 'object' ? menuSel.roster : PREFS0.roster })); } catch (e) { } }
+function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify({ flags: flagPick.slice(), mode: MODE, ctl: ctlPick.slice(), cpuLv: cpuLvSide.slice(), storyLv: STORY_LV, mute: MUTED, pv: 1049, stats: SHOW_STATS, roster: typeof menuSel === 'object' ? menuSel.roster : PREFS0.roster })); } catch (e) { } }
 { const pr = loadPrefs(); if (Array.isArray(pr.flags)) pr.flags.forEach((f, i) => { if (i < 2 && Number.isInteger(f) && f >= 0) flagPick[i] = f; }); }
 
 //@src 05-zz-seas.js:1
@@ -8709,8 +8713,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1048;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 13:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1049;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 15:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -71986,7 +71990,7 @@ function audioInit() {
   audioUnlock();
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -16; comp.knee.value = 12; comp.ratio.value = 5; comp.attack.value = 0.004; comp.release.value = 0.25;
-  SFX.master = ctx.createGain(); SFX.master.gain.value = MUTED ? 0 : env.volume * 0.9;
+  SFX.master = ctx.createGain(); SFX.master.gain.value = soundOff() ? 0 : env.volume * 0.9;
   SFX.master.connect(comp); comp.connect(ctx.destination);
   // every sound from the game world goes through one bus, so the menus can silence it all at once (silent as it's made: the frame opens it
   // when the world is to be heard - audioUpdate)
@@ -72503,7 +72507,7 @@ function sfxBell(k) {
 function audioUpdate(dt) {
   if (!SFX.ctx) return;
   const ctx = SFX.ctx, t = SFX.ctx.currentTime, k = 0.12;
-  aim(SFX.master.gain, MUTED ? 0 : env.volume * 0.9, t, 0.05);
+  aim(SFX.master.gain, soundOff() ? 0 : env.volume * 0.9, t, 0.05);
   // (user Nov 11 09:34, "you only get audio and the scene at the same time when it's ready": silent while a loading screen is up - its lift is
   // decided at this frame's end before this, so the world is heard from the frame the screen goes - 00-world.js coverStep)
   aim(SFX.world.gain, ui.menu || ui.title || ui.settings || PHOTO.on || paused || !worldLive() || coverUp() ? 0 : 1, t, 0.04);       // menus: the world goes quiet (the world menu and photo mode too, user Oct 26: "we don't want any volume in that menu")
@@ -73064,7 +73068,6 @@ async function start(data) {
     // saved shapes, saving / clearing them, which kind is under a tap
     // (user Nov 3 23:23) a plant's numbers' group (its kind's), a prefab's by its shapes key; one plant alone; a plant of a prefab put in the middle
     // of the view to test it (gone with the next replant), and taken away
-    mute: () => { MUTED = true; if (SFX.master) SFX.master.gain.value = 0; },   // (user Nov 3 23:29: "we dont need any audio in the Editor")
     vegPx: () => VEG_PX,
     kOf: it => it.trop ? 'veg_palm' : it.fol ? 'veg_back' + it.fol : 'veg_mid' + (RIG_BUSHES.indexOf(it.bush) + 1),
     kOfKey: key => { const b = folBase(key) || key; return b === 'palm-tropical' ? 'veg_palm' : b.startsWith('fol-') ? 'veg_back' + b.slice(4) : 'veg_mid' + (RIG_BUSHES.indexOf(+b.slice(9)) + 1); },
@@ -75021,7 +75024,6 @@ function vegUI(Z) {
       g.fishnet.clear(null); g.fishnet.hudOnly([]);                 // (no game buttons till you're in a vehicle)
       setInterval(() => g.fishnet.clear(new Set([FL().cur(), ...PARKED])), 250);   // (the parked ones kept - 23:02)           // (the world's traffic kept away)
       lookAtTrees();
-      VG().mute(); setInterval(() => VG().mute(), 2000);   // (no sound in the lab - 23:29)
       VG().off = false;   // (09:06: "Bones On/Off is not needed, it should always be ON")
       try { panel(); } catch (e) { console.error('lab panel', e); }
       folSync();
@@ -75079,7 +75081,7 @@ function vegStart() {
 // its view was split in two - the second person, a seat on player 0's side (EXTRA), was kept: one person, made the round's players the menu's
 // way - rosterApply, 19-menu.js - not saved as the menu's choice)
 function vegSeat() {
-  VZ.keep = VZ.keep || { mode: menuSel.mode, roster: menuSel.roster.slice(), cpu: menuSel.cpu.slice(), muted: MUTED, env: { time: env.time, weather: env.weather, rain: env.rain, wind: env.wind } };
+  VZ.keep = VZ.keep || { mode: menuSel.mode, roster: menuSel.roster.slice(), cpu: menuSel.cpu.slice(), env: { time: env.time, weather: env.weather, rain: env.rain, wind: env.wind } };
   menuSel.mode = 'land'; menuSel.roster = [{ dev: 'kb', side: 0 }]; menuSel.cpu = [false, false];   // (nobody on the other side, the CPU neither)
   rosterApply();
   // (no game buttons till you're in a vehicle - from its first frame: user Nov 17, its first frame drew OPEN WORLD's vehicle tabs, and they made
@@ -75121,7 +75123,7 @@ function vegLeave(to) {
   document.documentElement.classList.remove('vegOn');
   worldReload(); vegSetsMode();
   const K = VZ.keep; VZ.keep = null;
-  if (K) { menuSel.mode = K.mode; menuSel.roster = K.roster; if (K.cpu) menuSel.cpu = K.cpu; Object.assign(env, K.env); MUTED = K.muted; if (SFX.master) SFX.master.gain.value = MUTED ? 0 : env.volume * 0.9; }
+  if (K) { menuSel.mode = K.mode; menuSel.roster = K.roster; if (K.cpu) menuSel.cpu = K.cpu; Object.assign(env, K.env); }
   if (to === 'editor') {
     const T = NSKY.editor.TUNE; if (!T.built) NSKY.editor.build({ rescreen: () => { }, snapshot: gameSnapshot, load: gameLoad });   // (opened on a load in this editor: the GAME EDITOR not made yet)
     worldEdit(menuSel.mode);                                        // (its own world built and it opened on it - 00-world.js; its own hold on the worker)
