@@ -7590,12 +7590,70 @@ function dwCurve(P, O) {
   return m >> 1;
 }
 // a wave of kind k sent from x going dir (1 right, -1 left); k: its size, times the kind's
-function dwSend(kind, x, dir, k = 1) {
+function dwSend(kind, x, dir, k = 1, lk = 1, vk = 1) {   // (k: its height's scale, lk: its length's, vk: its speed's - dwAutoStep's wind and variation)
   const K = DW.kinds[kind]; if (!K) return null; if (!K.P) dwShape(K);
   const run = waterRun(x); if (!run) return null;
-  const w = { K, x, dir: dir < 0 ? -1 : 1, k, t: 0, ph: 0, run, H: 0, L: K.len * UPM, c: K.v * UPM, far: 0, lake: waterLv(x) !== WATER_Y, landed: false,
+  const w = { K, kn: kind, x, dir: dir < 0 ? -1 : 1, k, lk, vk, t: 0, ph: 0, run, H: 0, L: K.len * UPM, c: K.v * UPM, far: 0, lake: waterLv(x) !== WATER_Y, landed: false,
     C: new Float32Array(((DW_NP - 1) * DW_SUB + 1) * 2), n: 0, xa: x, xb: x, low: new Float32Array(8), top: new Float32Array(8), cnt: new Uint8Array(8), nc: 0, fa: 0, fb: -1, pose: null };
   DW.live.push(w); return w;
+}
+/* WAVES BY THE SEA STATE (user Nov 18 12:27: "the waves should be called based on the Sea state. So each wave has a % of appearing on a certain sea
+   state that we can define in the lab ... And the wind defines the direction and speed the wave takes to move"; 12:29 "lets do them all"): with
+   DW.auto on (the lab's AUTO WAVES; the game's own sea when it goes in), the sea sends its waves itself.
+   - THE SEA'S STATES, CALM ROUGH STORM, each a centre on the sea's 0..1 (DW_SEA_C): the sea between two is a mix of them (dwSeaMix) - no jump
+   - EACH STATE (DW.seaCfg): its waves a minute within a set (rate), how many to a set (set: [least, most]) and the lull between sets (lull, s);
+     the whole sea's variation (vary: each wave's height and length ±) and the most waves out at once (max)
+   - EACH KIND its weights in each state (K.odds: { calm, rough, storm }): which wave comes is drawn by them, as the lab shows them - each state's
+     weights as parts of 100
+   - THE WIND: a wave goes the way the wind blows, taller (and a touch faster) the stronger it is; with little wind it's the swell from far off -
+     from the open sea toward the shore
+   - WHERE: out on the sea upstream of what's being watched (DW.focus - the lab's boat; else the view's middle), off the view's edge so it comes in,
+     on the ocean (never a lake), where the water is deep enough for it - else nearer, else none
+   - ITS DRAWS its own seeded source (sysRng 'dwAuto') */
+const DW_SEA_C = [0.15, 0.5, 0.85], DW_SEA_K = ['calm', 'rough', 'storm'];
+const DW_SEA0 = { calm: { rate: 1.5, set: [1, 2], lull: 30 }, rough: { rate: 4, set: [3, 5], lull: 20 }, storm: { rate: 7, set: [4, 7], lull: 12 }, vary: 0.15, max: 6 };
+DW.seaCfg = DW_SEA0; DW.auto = false; DW.focus = null;
+let dwAR0 = null; const dwAR = () => (dwAR0 || (dwAR0 = sysRng('dwAuto')))();
+// the sea's mix of its states at s (0..1): their shares, summing to 1
+function dwSeaMix(s) {
+  const C = DW_SEA_C, m = { calm: 0, rough: 0, storm: 0 };
+  if (s <= C[0]) m.calm = 1; else if (s >= C[2]) m.storm = 1;
+  else { const i = s < C[1] ? 0 : 1, f = (s - C[i]) / (C[i + 1] - C[i]); m[DW_SEA_K[i]] = 1 - f; m[DW_SEA_K[i + 1]] = f; }
+  return m;
+}
+// its numbers now: the mixed state's rate, set and lull; each kind's share of what comes (parts of 1)
+function dwSeaNow(s = env.sea) {
+  const m = dwSeaMix(s), G = DW.seaCfg || DW_SEA0, mix = f => DW_SEA_K.reduce((a, k) => a + m[k] * f(G[k] || DW_SEA0[k]), 0);
+  const odds = {}; let tot = 0;
+  for (const n in DW.kinds) { const o = DW.kinds[n].odds || {}; const v = DW_SEA_K.reduce((a, k) => a + m[k] * Math.max(0, +o[k] || 0), 0); if (v > 0) { odds[n] = v; tot += v; } }
+  for (const n in odds) odds[n] /= tot;
+  return { m, rate: mix(g => +g.rate || 0), set: [mix(g => +g.set[0] || 1), mix(g => +g.set[1] || 1)], lull: mix(g => +g.lull || 0), odds };
+}
+// which way the waves go, at x: with the wind - or, the calmer it is, the swell from the open sea toward the nearer shore
+function dwSeaDir(x) {
+  const wd = env.wind || 0, q = clamp(1 - Math.abs(wd) / 0.3, 0, 1), run = waterRun(x);
+  const swell = run ? (x - run[0] < run[1] - x ? -1 : 1) : -1;
+  return dwAR() < q ? swell : (wd < 0 ? -1 : 1);
+}
+function dwAutoStep(dt) {
+  if (!DW.auto) { DW.au = null; return; }
+  const A = DW.au || (DW.au = { t: 1, left: -1 });   // (turned on: the first set comes at once, its lull after it)
+  A.t -= dt; if (A.t > 0) return;
+  const S = dwSeaNow(), jit = () => 0.7 + 0.6 * dwAR();
+  if (!(S.rate > 0.05)) { A.t = 3; A.left = 0; return; }   // (a sea without waves: looked at again in a while)
+  if (A.left < 0) A.left = Math.max(1, Math.round(S.set[0] + (S.set[1] - S.set[0]) * dwAR()));
+  else if (A.left === 0) { A.left = Math.max(1, Math.round(S.set[0] + (S.set[1] - S.set[0]) * dwAR())); A.t = S.lull * jit(); return; }   // (a lull, then a set)
+  A.t = 60 / S.rate * jit();
+  if (DW.live.length >= (DW.seaCfg.max || 6)) return;   // (as many out as there may be: this one's skipped)
+  let r = dwAR(), kind = null; for (const n in S.odds) { r -= S.odds[n]; if (r <= 0) { kind = n; break; } } if (!kind) { kind = Object.keys(S.odds).pop(); if (!kind) return; }
+  A.left--;
+  const K = DW.kinds[kind], wd = env.wind || 0, vary = DW.seaCfg.vary || 0, f = DW.focus != null ? DW.focus : cam.view[0].l + (typeof VWW === 'number' ? VWW : 1600) / 2;
+  const dir = dwSeaDir(f), k = (0.85 + 0.35 * Math.abs(wd)) * (1 + vary * (2 * dwAR() - 1)), lk = 1 + vary * (2 * dwAR() - 1), vk = 1 + 0.1 * Math.abs(wd) * (dir === Math.sign(wd) ? 1 : -1);
+  const H = K.h * UPM * k, L = K.len * UPM * lk, far = (typeof VWW === 'number' ? VWW : 1600) / 2 + L * 0.5;
+  for (let d = far; d > L * 0.3; d -= L * 0.25) {   // (off the view's edge upstream; nearer, if the water there won't take it)
+    const x = f - dir * d, run = waterRun(x);
+    if (run && waterLv(x) === WATER_Y && seabedY(x) - waterLv(x) >= H && x - L * 0.55 > run[0] && x + L * 0.55 < run[1]) { dwSend(kind, x, dir, k, lk, vk); return; }
+  }
 }
 // an outline point's place: its height of the wave's; along, of half the wave's length at its foot - but up its FRONT (the face, the hollow, the lip, the
 // crest) more and more of the wave's own height instead (DW_ASP of it), so the curl keeps its proportions on a long wave as on a short one
@@ -7608,7 +7666,7 @@ function dwStep(dt) {
     const w = L[i], K = w.K; w.t += dt;
     // the depth under it: shallower than half its length it begins to feel the floor (the user's picture: D = 1/2 L) - shorter, slower, taller, and on along its life
     const d = Math.max(0, seabedY(w.x) - waterLv(w.x)), L0 = K.len * UPM, s = clamp(1 - d / (0.5 * L0), 0, 1);
-    w.L = L0 * (1 - 0.4 * s); w.c = K.v * UPM * (1 - 0.45 * s); w.H = K.h * UPM * w.k * (1 + (K.grow || 0) * s);
+    w.L = L0 * (w.lk || 1) * (1 - 0.4 * s); w.c = K.v * UPM * (w.vk || 1) * (1 - 0.45 * s); w.H = K.h * UPM * w.k * (1 + (K.grow || 0) * s);
     // ITS LIFE: through its frames at their own times (w.ph: which change it's in, and how far); the floor rising under it hurries it; where the
     // water is too shallow for it, or its front is at a shore, or it has run its range, it goes to its crash (one that has none: to its last change)
     const nT = K.T.length, end = K.ci > 0 ? K.ci - 1 : nT - 1;
@@ -7743,11 +7801,15 @@ function dwDrawBack(x0, x1) {
     if (!(S > 8)) continue;
     const km = Math.round(kt * 0.35), tx = P[2 * km + 2] - P[2 * km - 2], ty = P[2 * km + 3] - P[2 * km - 1], sgn = ((-ty) * w.dir) > 0 ? 1 : -1;   // (n = sgn * (-ty, tx): toward the air - the front of a face that rises toward the back)
     const Wd = Math.min(0.11 * w.H * SV, 0.18 * S);
+    // (user Nov 18 12:34, ref-inside-sharp-nov18: "why is the inside shape sharp when the outside shape is rounder?" - a band wider than the outline's
+    // own bend there turns into a point. Its width is held under the bend's radius, and the inner curve is smoothed after)
     for (let k = k0; k <= kt; k++) {
       const a = Math.max(0, k - 1), b = Math.min(kt, k + 1), dx = P[2 * b] - P[2 * a], dy = P[2 * b + 1] - P[2 * a + 1], dl = Math.hypot(dx, dy) || 1, t = L[k] / S;
-      const wd = Wd * Math.pow(Math.sin(Math.PI * t), 0.7);
+      let rad = Infinity; if (k > k0 && k < kt) { const ax = P[2 * k] - P[2 * a], ay = P[2 * k + 1] - P[2 * a + 1], bx = P[2 * b] - P[2 * k], by = P[2 * b + 1] - P[2 * k + 1], turn = Math.abs(Math.atan2(ax * by - ay * bx, ax * bx + ay * by)); if (turn > 1e-4) rad = 0.5 * (Math.hypot(ax, ay) + Math.hypot(bx, by)) / turn; }
+      const wd = Math.min(Wd * Math.pow(Math.sin(Math.PI * t), 0.7), 0.7 * rad);
       Q[2 * k] = P[2 * k] + sgn * (-dy / dl) * wd; Q[2 * k + 1] = P[2 * k + 1] + sgn * (dx / dl) * wd;
     }
+    for (let it = 0; it < 4; it++) for (let k = k0 + 1; k < kt; k++) { Q[2 * k] = (Q[2 * k - 2] + 2 * Q[2 * k] + Q[2 * k + 2]) / 4; Q[2 * k + 1] = (Q[2 * k - 1] + 2 * Q[2 * k + 1] + Q[2 * k + 3]) / 4; }
     // (the band's strips: NB of them along its length, each a run of the outline's pieces - a quad each, filled a pixel row at a time)
     for (let k = k0; k < kt; k++) {
       const t = (L[k] + L[k + 1]) / (2 * S), q = Math.min(NB - 1, Math.floor(Math.max(0, (t - 0.55) / 0.45) * NB)), col = cols[q];   // (dark up the face; the strips lighten round under the lip)
@@ -7787,11 +7849,25 @@ function dwDisc(RL, cx, cy, r, col, a) { for (let y = -r; y <= r; y += PB) { con
    landing. Every bit of it is a thing of its own (DWF): a drop flies and falls (the wind drags it), lands as white water; mist rises a little,
    drifts with the wind, thins away; white water rides the surface - carried by the water's own speed there (dwFlow) and the wind - spreads and
    fades, and leaves the sea's own foam behind it (spawnFoam). k: 0 drop, 1 mist, 2 white water */
-const DWF = { n: 0, cap: 4000, x: new Float32Array(4000), y: new Float32Array(4000), vx: new Float32Array(4000), vy: new Float32Array(4000), age: new Float32Array(4000), life: new Float32Array(4000), r: new Float32Array(4000), k: new Uint8Array(4000) };
+const DWF = { n: 0, cap: 4000, w: new Array(4000), x: new Float32Array(4000), y: new Float32Array(4000), vx: new Float32Array(4000), vy: new Float32Array(4000), age: new Float32Array(4000), life: new Float32Array(4000), r: new Float32Array(4000), k: new Uint8Array(4000) };
 let dfR0 = null; const dfR = () => (dfR0 || (dfR0 = sysRng('dwFoam')))(), dfRnd = (a, b) => a + (b - a) * dfR(), dfN = m => Math.floor(m + dfR());   // (dfN: how many this step, m on average)
 function dwFoamAdd(k, x, y, vx, vy, r, life) {
   const F = DWF; if (SIM_ONLY || F.n >= F.cap) return; const i = F.n++;
-  F.k[i] = k; F.x[i] = x; F.y[i] = y; F.vx[i] = vx; F.vy[i] = vy; F.r[i] = r; F.age[i] = 0; F.life[i] = life;
+  F.k[i] = k; F.x[i] = x; F.y[i] = y; F.vx[i] = vx; F.vy[i] = vy; F.r[i] = r; F.age[i] = 0; F.life[i] = life; F.w[i] = null;
+}
+// (user Nov 18 12:33, ref-tip-no-foam-nov18: "blocky squares dropping vertically from a wave tip and ... the tip itself is still without foam": the
+// tip's foam was laid on the water's top at its x - ahead of a lip's front that's the sea far below, so it dropped there) foam STUCK ON A WAVE'S
+// OUTLINE (k 4): its place along the curve (u: a piece of w.C, with its fraction) and how far in from it (d) - drawn where that is each moment
+function dwFoamStick(w, u, d, r, life) {
+  const F = DWF; if (SIM_ONLY || F.n >= F.cap) return; const i = F.n++;
+  F.k[i] = 4; F.w[i] = w; F.vx[i] = u; F.vy[i] = d; F.r[i] = r; F.age[i] = 0; F.life[i] = life; dwStickAt(i);
+}
+function dwStickAt(i) {
+  const F = DWF, w = F.w[i], C = w.C, u = clamp(F.vx[i], 0, w.n - 1.001), k = Math.floor(u), f = u - k;
+  const x0 = C[2 * k], h0 = C[2 * k + 1], x1 = C[2 * k + 2], h1 = C[2 * k + 3], x = x0 + (x1 - x0) * f, h = h0 + (h1 - h0) * f;
+  let tx = x1 - x0, th = h1 - h0; const l = Math.hypot(tx, th) || 1; tx /= l; th /= l;
+  const nx = -w.dir * th, nh = w.dir * tx, X = x + nx * F.vy[i], Hh = h + nh * F.vy[i];   // (in: the water's side of its outline - the same turn all round it)
+  F.x[i] = X; F.y[i] = dwYAt(w, X, Hh);
 }
 // (the surface's height at x: the water's own, the designed waves' lowest crossing included - surfaceY0)
 function dwFoamFrom(w, dt) {
@@ -7807,7 +7883,9 @@ function dwFoamFrom(w, dt) {
     const fx = dwPt(w, fi)[0];
     // (user 12:07, ref-tip-foam-nov18: "the TIP must always have foam, its the one that is generating it") a cap of churned foam on the leading edge
     // itself, going on with the wave and made again all the time
-    for (let n = dfN(dt * H / U * 30); n > 0; n--) { const x = fx - w.dir * dfRnd(-0.01, 0.06) * H; dwFoamAdd(3, x, dwTopY(x), c, dfRnd(0, 0.05) * H, dfRnd(0.025, 0.055) * H, dfRnd(0.25, 0.6)); }
+    // (stuck on its outline from the lip's end round its front: points 8 to past its leading edge)
+    { const a = 8 * DW_SUB, b = (Math.max(fi, 8.5) + 1.2) * DW_SUB;
+      for (let n = dfN(dt * H / U * 30); n > 0; n--) dwFoamStick(w, a + (b - a) * dfR(), dfRnd(0, 0.03) * H, dfRnd(0.02, 0.05) * H, dfRnd(0.25, 0.6)); }
     // (user 11:30, ref-foam-on-top-nov18: "the foam should go on the top of the wave because of the movement ... there is no foam there [inside
     // the tube] because it gets pushed to the top of the wave"; 12:15, ref-no-drops-nov18: "these 'water drops' at the crisp of the wave ... should
     // not exist" - no drops off the lip: its foam stays on it)
@@ -7831,7 +7909,7 @@ function dwFoamFrom(w, dt) {
     let hm = 0; for (let i = 0; i < DW_NP; i++) hm = Math.max(hm, dwPt(w, i)[1]);
     let si = 11; for (let i = 5; i <= 11; i++) { const p = dwPt(w, i); if (p[1] >= 0.85 * hm && p[0] * w.dir > dwPt(w, si)[0] * w.dir) si = i; }
     const Sp = dwPt(w, si), sx = Sp[0], f = clamp((w.tilt - 0.12) / 0.5, 0, 1);
-    for (let n = dfN(dt * H / U * 14 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.01, 0.05) * H; dwFoamAdd(3, x, dwTopY(x), c, dfRnd(0, 0.02) * H, dfRnd(0.015, 0.035) * H, dfRnd(0.25, 0.6)); }
+    for (let n = dfN(dt * H / U * 14 * f); n > 0; n--) dwFoamStick(w, (si + dfRnd(-0.4, 0.8)) * DW_SUB, dfRnd(0, 0.015) * H, dfRnd(0.015, 0.035) * H, dfRnd(0.25, 0.6));
     for (let n = dfN(dt * H / U * 6 * f); n > 0; n--) { const p = at(si + dfR() * Math.max(0.5, 11.5 - si)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.5, 0.85), 0, dfRnd(0.012, 0.03) * H, dfRnd(1.5, 3)); }
   }
 }
@@ -7870,8 +7948,9 @@ function dwFoamStep(dt) {
   const F = DWF, G = 9.8 * UPM, wind = E.windU || 0;
   for (let i = F.n - 1; i >= 0; i--) {
     F.age[i] += dt; let x = F.x[i], y = F.y[i];
-    if (F.age[i] >= F.life[i] || !(x > -1e6 && x < 1e7)) { if (F.k[i] >= 2 && !DW.live.some(w => x >= w.xa && x <= w.xb) && waterRun(x)) spawnFoam(x, Math.min(4, F.r[i] / 2)); const j = --F.n; for (const a of [F.x, F.y, F.vx, F.vy, F.age, F.life, F.r, F.k]) a[i] = a[j]; continue; }
+    if (F.age[i] >= F.life[i] || !(x > -1e6 && x < 1e7)) { if (F.k[i] >= 2 && !DW.live.some(w => x >= w.xa && x <= w.xb) && waterRun(x)) spawnFoam(x, Math.min(4, F.r[i] / 2)); const j = --F.n; for (const a of [F.x, F.y, F.vx, F.vy, F.age, F.life, F.r, F.k, F.w]) a[i] = a[j]; F.w[j] = null; continue; }
     const k = F.k[i];
+    if (k === 4) { const w = F.w[i]; if (DW.live.includes(w) && w.n > 1) { dwStickAt(i); continue; } F.k[i] = 2; F.w[i] = null; F.vx[i] = 0; continue; }
     if (k === 0) {
       F.vy[i] += G * dt; F.vx[i] += (wind - F.vx[i]) * 0.4 * dt; x += F.vx[i] * dt; y += F.vy[i] * dt;
       const s = dwTopY(x); if (F.vy[i] > 0 && y >= s && waterRun(x)) { F.k[i] = 2; y = s; F.vy[i] = 0; F.vx[i] *= 0.6; F.r[i] *= 2.5; F.age[i] = 0; F.life[i] = dfRnd(1.5, 3); }
@@ -7898,7 +7977,7 @@ function dwDrawFoam(RL, x0, x1, WH, PALE) {
       if (l > 2 * pb) dwSeg(RL, X, Y, X - F.vx[i] / v * l, Y - F.vy[i] / v * l, s, WH, 0.9); else RL.rect(Math.round(X), Math.round(Y), s, s, WH, 0.95); }
     else if (k === 1) dwDisc(RL, X, Y, Math.max(pb, F.r[i] * SV), PALE, 0.32 * (1 - u) * Math.min(1, u * 6));
     else if (k === 2) { const r = Math.max(pb, F.r[i] * SV); dwBlob(RL, X, Y + r * 0.1, r, Math.max(pb, r * 0.45), WH, 0.9 * (1 - u * u)); }
-    else dwDisc(RL, X, Y, Math.max(pb, F.r[i] * SV * (1 - 0.4 * u)), WH, 0.95 * (1 - u * u * u));
+    else dwDisc(RL, X, Y, Math.max(pb, F.r[i] * SV * (1 - 0.4 * u)), WH, 0.95 * (1 - u * u * u));   // (churned, and stuck on a wave's outline)
   }
 }
 function dwBlob(RL, cx, cy, rx, ry, col, a) { for (let y = -ry; y <= ry; y += PB) { const h = Math.round(rx * Math.sqrt(Math.max(0, 1 - (y * y) / (ry * ry))) / PB) * PB; if (h > 0) RL.rect(Math.round(cx - h), Math.round(cy + y), 2 * h, PB, col, a); } }
@@ -9262,7 +9341,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 13:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 13:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -19922,6 +20001,7 @@ function physics(dt) {
   regionsTick();                                                       // (the regions' tiers this tick - 36-zz-regions)
   for (const sh of ships) if (sh.state === 'afloat') coupleShip(sh);
   for (let k = 0; k < WATER_SUBSTEPS; k++) stepWater(dt / WATER_SUBSTEPS, k === WATER_SUBSTEPS - 1);
+  dwAutoStep(dt);                                                      // (the sea sending its own waves, by its state and the wind - 09-zy-dwaves.js)
   if (DW.live.length) dwStep(dt);
   if (DWF.n) dwFoamStep(dt);                                            // (its foam and spray, on after the wave's gone)                                      // (the designed waves - 09-zy-dwaves.js)
   ut = uLap('uWater', ut);
@@ -74223,7 +74303,9 @@ async function start(data) {
     size: v => { const e = vehAll().find(q => q.v === v); if (!e) return null; const B = vehBox(e); return [(B[1] - B[0]) / UPM, (B[3] - B[2]) / UPM]; },
     submit: (text, done) => repoFileSubmit('lab/wavelab/waves.json', 'wave-lab', text, 'Wave Lab: the prefabs (SUBMIT CHANGES in the lab)', done),   // (the lab's prefabs kept on its branch - 50-zzzz-submit.js)
     noSmoke: () => { for (let i = 0; i < smoke.n; i++) smoke.drop(i); },
-    waves: { kinds: DW.kinds, set: (n, K) => { DW.kinds[n] = dwShape(K); for (const w of DW.live) if (w.K && DW.kinds[n] && w.kn === n) w.K = DW.kinds[n]; }, send: (n, x, dir, k) => { const w = dwSend(n, x, dir, k); if (w) w.kn = n; return !!w; }, live: () => DW.live.map(w => ({ x: w.x, H: w.H, L: w.L, c: w.c, dir: w.dir, ph: +w.ph.toFixed(2), stage: w.K.N[Math.min(w.K.N.length - 1, Math.floor(w.ph))], top: DW.max, fold: !!w.lip })), // (user Nov 18 07:19: "Are we able to see the spline of the wave in the editor? Can we have a toggle to see it live?") each live wave's outline
+    waves: { kinds: DW.kinds, set: (n, K) => { DW.kinds[n] = dwShape(K); for (const w of DW.live) if (w.K && DW.kinds[n] && w.kn === n) w.K = DW.kinds[n]; }, send: (n, x, dir, k) => !!dwSend(n, x, dir, k),
+        // (the sea's own waves - user Nov 18 12:27: by its state, its odds, the wind) on or off; its numbers; what's being watched; how it is now
+        auto: on => { DW.auto = !!on; }, sea: G => { DW.seaCfg = G; }, sea0: DW_SEA0, only: L => { for (const n in DW.kinds) if (!L.includes(n)) delete DW.kinds[n]; }, focus: x => { DW.focus = x; }, now: s => { const S = dwSeaNow(s); S.sea = s == null ? env.sea : s; S.wind = env.wind; return S; }, live: () => DW.live.map(w => ({ x: w.x, H: w.H, L: w.L, c: w.c, dir: w.dir, ph: +w.ph.toFixed(2), stage: w.K.N[Math.min(w.K.N.length - 1, Math.floor(w.ph))], top: DW.max, fold: !!w.lip })), // (user Nov 18 07:19: "Are we able to see the spline of the wave in the editor? Can we have a toggle to see it live?") each live wave's outline
         // as the game has it this moment - its curve (C) and its points (P) in the world (x, y), its kind, the frame it's in, whether it's folded
         lines: () => DW.live.filter(w => w.pose && w.n).map(w => {   // (a wave just sent, not stepped yet - the game paused - has no outline yet) const C = [], P = []; for (let k = 0; k < w.n; k++) { const x = w.C[2 * k]; C.push([x, dwYAt(w, x, w.C[2 * k + 1])]); }
           for (let i = 0; i < DW_NP; i++) { const p = dwPt(w, i); P.push([p[0], dwYAt(w, p[0], p[1])]); }
