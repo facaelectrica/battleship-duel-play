@@ -9566,7 +9566,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 17:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 17:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -73516,7 +73516,9 @@ function audioInit() {
   // every sound from the game world goes through one bus, so the menus can silence it all at once (silent as it's made: the frame opens it
   // when the world is to be heard - audioUpdate)
   SFX.world = ctx.createGain(); SFX.world.gain.value = 0; SFX.world.connect(SFX.master);
-  const len = ctx.sampleRate * 2;
+  // (user Nov 18 16:36: "When I change the weather to 'storm' there is this background repeating metal noise pattern" - the sea's surf, the rain's hiss
+  // and the wind looped one 2 s noise, heard over and over in a storm: SFX_NOISE_S of it, each loop from its own place in it - loopNoise)
+  const len = Math.round(ctx.sampleRate * SFX_NOISE_S);
   SFX.noise = ctx.createBuffer(1, len, ctx.sampleRate);
   SFX.brown = ctx.createBuffer(1, len, ctx.sampleRate);
   const w = SFX.noise.getChannelData(0), b = SFX.brown.getChannelData(0);
@@ -73656,9 +73658,10 @@ function audioInit() {
     SFX.under = { g, hum, k: 0, popAcc: 0, burstT: 2, creakT: 6, clankT: 9, echoIn: eIn, echoG: eG, washBP, washG };
   }
 }
+const SFX_NOISE_S = 12;   // (the noises' length, s: longer than any loop of it is heard as one)
 function loopNoise(buf) {
   const src = SFX.ctx.createBufferSource(); src.buffer = buf; src.loop = true;
-  src.loopStart = 0; src.start(0, seenR('audio') * 1.5); return src;
+  src.loopStart = 0; src.start(0, seenR('audio') * (buf.duration - 0.1)); return src;
 }
 // (Nov 8, the user: "that is unacceptable" - the sound's update sent ~70 levels to the audio every frame, 96% of them the very
 // level it was already easing to: each send is a call into the browser's audio, and on his PC the sound's part of a frame reached
@@ -74164,7 +74167,8 @@ function audioUpdate(dt) {
   while (SFX.amb.splashAcc >= 1) {
     SFX.amb.splashAcc -= 1;
     const t0 = t + seenR('audio') * 0.05;
-    noiseShot(SFX.amb.splashBus, t0, seenRnd('audio', 0.03, 0.09), 'bandpass', seenRnd('audio', 1400, 3200), seenRnd('audio', 500, 900), seenRnd('audio', 2, 5), 0.6 * (0.035 + 0.04 * seenR('audio')), 0.002);
+    // (user 16:36, the storm's "metal": narrow pings - tin, not water; a drop on water is a soft, broad tick)
+    noiseShot(SFX.amb.splashBus, t0, seenRnd('audio', 0.03, 0.07), 'bandpass', seenRnd('audio', 900, 1800), seenRnd('audio', 400, 700), seenRnd('audio', 0.7, 1.2), 0.6 * (0.03 + 0.03 * seenR('audio')), 0.004);
   }
   // engines: a low rumble that rises with the throttle, never loud
   for (let i = 0; i < 2; i++) {
