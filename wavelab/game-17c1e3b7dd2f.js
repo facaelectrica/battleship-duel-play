@@ -7737,7 +7737,7 @@ function dwCarryAll(dt) {
     const v = e.v; if (!v || !Number.isFinite(v.x) || e.k === 'tower' || e.k === 'crane' || v.state === 'gone' || v.moored && e.army || v.gate) continue;
     const run = waterRun(v.x); if (!run) continue;
     let H = 0; for (const w of DW.live) if (v.x >= w.xa && v.x <= w.xb) H = Math.max(H, dwTab(w, v.x, false)); if (!(H > 0)) continue;
-    const B = vehBox(e), len = Math.max(4, B[1] - B[0]), s = surfaceY0(v.x), y = v.y != null ? v.y : s;
+    const B = vehBox(e), len = Math.max(4, B[1] - B[0]), y0 = v.y != null ? v.y : surfaceY0(v.x), s = dwRideY(v.x, y0, Math.max(4, (B[3] - B[2]) * 0.5)), y = v.y != null ? v.y : s;   // (the water it's on - up on a lip, its top: dwRideY)
     if (y < s - Math.max(len * 0.6, 20)) continue;                 // (in the air over it)
     const k = clamp(H / (0.33 * len), 0, 1) * clamp(1 - (y - s) / (2 * H + 1), 0, 1), nx = v.x + dwFlow(v.x) * k * dt;
     if (nx > run[0] + len * 0.5 && nx < run[1] - len * 0.5) v.x = nx;   // (never up onto a shore)
@@ -8191,20 +8191,37 @@ function dwBoatLip(j, dt) {
   for (const w of DW.live) {
     if (!w.lip || j.x < w.xa - len || j.x > w.xb + len) continue;
     let over = 0;
-    for (const f of [-0.45, 0, 0.45]) { const F = dwFoldAt(w, j.x + f * len * Math.cos(j.a)); if (F) over = Math.max(over, hg * Math.max(0.3, Math.abs(Math.cos(j.a))) - (F[1] - F[0])); }
+    for (const f of [-0.45, 0, 0.45]) { const x = j.x + f * len * Math.cos(j.a), F = dwFoldAt(w, x); if (!F || j.y < dwYAt(w, x, F[0]) - hg) continue;   // (on the face under the lip - not up on it)
+      over = Math.max(over, hg * Math.max(0.3, Math.abs(Math.cos(j.a))) - (F[1] - F[0])); }
     if (!(over > 0)) continue;
     // (user 13:09: physics, not a rule) the lip's water strikes her above her middle: a turning push by the water's speed squared and how far it
     // has come down on her, against her own size (her inertia - length and height squared): her roll speeds up the way the wave goes, and she
     // goes over only if that carries her past her vanishing angle (jbRoll; capsized there - stepJetboat)
     const k = clamp(over / hg, 0, 1), c = w.dir * w.c, v = w.c / UPM, Lm = len / UPM, Hm = hg / UPM;
     j.av = (j.av || 0) + w.dir * DW_LIP_K * v * v * k / (Lm * Lm + Hm * Hm) * dt;
-    j.x += c * (0.5 + 0.5 * k) * dt; j.y += Math.min(over, hg * 0.6);
+    // (no shove or press of its own: the lip's water carries it as all water does - dwCarryAll - and the lip turns it)
     if (!SIM_ONLY) {
       for (let n = dfN(dt * 40 * (0.3 + k)); n > 0; n--) dwFoamAdd(0, j.x + dfRnd(-0.4, 0.4) * len, j.y - dfRnd(0, 0.5) * hg, c * dfRnd(0.6, 1.3), -dfRnd(0.2, 0.7) * w.c, dfRnd(0.2, 0.5) * UPM, dfRnd(0.8, 1.6));
       for (let n = dfN(dt * 8 * (0.3 + k)); n > 0; n--) dwFoamAdd(1, j.x + dfRnd(-0.3, 0.3) * len, j.y - dfRnd(0, 0.5) * hg, c * dfRnd(0.3, 0.8), -dfRnd(0.05, 0.2) * w.c, dfRnd(0.3, 0.6) * hg, dfRnd(1, 2));
     }
   }
   return false;
+}
+/* THE WATER A FLOATING THING RIDES (user Nov 18 13:45, bug-20261118-134430: a boat caught at the top of a wave - "a lot of obvious flickering when
+   its at the top and sometimes it gets 'stuck' for a few frames"): the sea's surface (surfaceY0) is a wave's LOWEST crossing - under a lip, the face
+   far below it - so a boat up on a lip had its ends on the lip and on the face by turns, frame to frame, and was pressed and shoved by the lip's
+   contact on top of it. A thing rides the first water under it: of the water's tops in each column (a wave's top, and the water under each of its
+   air gaps - dwSpans), the highest at or below where it is (yRef, give or take tol); none - the sea's surface */
+const DW_RS = dwSpanNew();
+function dwRideY(x, yRef, tol) {
+  let y = surfaceY0(x);
+  for (const w of DW.live) {
+    if (!(w.fb >= w.fa) || !dwSpans(w, x, DW_RS)) continue;
+    const S = DW_RS; let best = Infinity;
+    for (let k = -1; k < S.n; k++) { const yy = dwYAt(w, x, k < 0 ? S.top : S.g[2 * k + 1]); if (yy >= yRef - tol && yy < best) best = yy; }
+    if (best < y) y = best;
+  }
+  return y;
 }
 // foam thrown up where something went over in the water: churned foam about it, mist, a few drops - as big as it (s: its length)
 function dwFoamBurst(x, y, s) {
@@ -9476,7 +9493,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 14:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 14:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54524,8 +54541,8 @@ function stepJetboat(j, dt) {
       // capsizes, its ridiculously fast. Is it even taking into account any physics?"): it goes on rolling as a body (jbRoll) - over the way it was
       // thrown (capDir) to lie keel up on the water, at its own pace; it floats so, air trapped under its hull, settling lower, for JB_FLOAT
       // seconds, then goes down slowly (JB_SINK) and settles on the floor upside down - no blast, nothing broken
-      j.capT += dt; const B = storyBoatSize(j), hg = B[1], half = B[0] * JB_HULL, ws = surfaceY(j.x), up = j.capDir * Math.PI;
-      const slope = Math.atan2(surfaceY(j.x + j.dir * half) - surfaceY(j.x - j.dir * half), 2 * half) * j.dir;
+      j.capT += dt; const B = storyBoatSize(j), hg = B[1], half = B[0] * JB_HULL, sY = DW.live.length ? x => dwRideY(x, j.y - hg * 0.25, hg * 0.5) : surfaceY, ws = sY(j.x), up = j.capDir * Math.PI;
+      const slope = Math.atan2(sY(j.x + j.dir * half) - sY(j.x - j.dir * half), 2 * half) * j.dir;
       jbRoll(j, slope + up, dt, true);
       if (j.capT < JB_FLOAT) j.y = ws - 1 + hg * 0.25 * j.capT / JB_FLOAT; else j.y = Math.max(j.y + JB_SINK * dt, ws - 1 + hg * 0.25);   // (afloat: on the water as it moves - settling lower; then going down)
       if (!SIM_ONLY && jbR() < dt * (j.capT < JB_FLOAT ? 1.5 : 4)) addBubble(j.x + jbRnd(-6, 6), j.y + 3, jbRnd(-4, 4), -jbRnd(12, 26), jbRnd(0.6, 1.4));
@@ -54557,7 +54574,9 @@ function stepJetboat(j, dt) {
     // (user Nov 2: "the boat is wobbling weirdly" - the fishing boat on the jet ski's ride: the water read 10 units either side of
     // her middle under an 11 m hull, nose up and bouncing at rest, the tilt snapped to it each step) every boat of this family
     // reads the water at its own hull's ends (JB_HULL of its real length - storyBoatSize) and its middle
-    const half = storyBoatSize(j)[0] * JB_HULL, yb = surfaceY(j.x + j.dir * half), ys = surfaceY(j.x - j.dir * half), yS = (yb + ys + 2 * surfaceY(j.x)) / 4;
+    // (the Wave Lab: the water she rides is the first under her - up on a lip, its top; in its tube, the face - dwRideY, 09-zy-dwaves.js)
+    const half = storyBoatSize(j)[0] * JB_HULL, tolR = storyBoatSize(j)[1] * 0.5, sY = DW.live.length ? x => dwRideY(x, j.y, tolR) : surfaceY;
+    const yb = sY(j.x + j.dir * half), ys = sY(j.x - j.dir * half), yS = (yb + ys + 2 * sY(j.x)) / 4;
     // (user Oct 26: "They should be able to jump off it when they're going fast and the water is turbulent, so they
     // feel fun") riding the water it rises and falls with it; coming up a wave fast, where the water drops away under
     // it quicker than it can fall, it flies off - and comes down with a slap and spray
