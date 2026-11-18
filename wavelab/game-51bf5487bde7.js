@@ -7546,7 +7546,7 @@ function hitTest(sh, x, y, inside) {
    waterSurfGPU's compute -> WATER_WGSL gapAt / inGap / gapLine), so the body, the lip, the line and the band under it are one drawing.
    NOT YET (before any merge): tables and a seeded random source, the worker and online; the lake's water over its banks.
    ================================================================ */
-const DW = { kinds: {}, live: [], max: 0, cap: 1.05, lost: 0, sw: [], wet: new Map(), WC: 8 };
+const DW = { kinds: {}, live: [], max: 0, lost: 0, sw: [], wet: new Map(), WC: 8 };
 const DW_NP = 17, DW_SUB = 6;
 // the built-in poses (a kind may carry its own - K.poses: swell, peak, curl, crash). Their points, in order: 0 the front's foot, 1 the trough, 2-4 up
 // the face, 5 the hollow's back (under the lip's root), 6-7 the lip's underside, 8 its tip, 9-10 its top, 11 the crest, 12-15 down the back, 16 its foot
@@ -9544,7 +9544,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 16:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 16:53';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54608,6 +54608,11 @@ const JB_COLS = [[210, 50, 46], [40, 110, 200], [240, 190, 40], [40, 150, 90], [
 // JB_RIDE - each kind's nose-up under way (radians at full speed) and its bounce (radians a second); JB_EASE - how fast its lie
 // follows the water's (a second)
 const JB_HULL = 0.4, JB_RIDE = { jet: [0.12, 9], motor: [0.05, 4], fish: [0.03, 3] }, JB_EASE = 4;
+// (user Nov 18 15:46: "what is the capsize angle? Isnt that per vehicle and the actual wave shape? why would a wave define it?" - it was one number for
+// every boat, on the lab's wave page) each hull's own VANISHING ANGLE: the roll past which her buoyancy turns her over instead of back - a light jet boat
+// sooner, a deep, heavy fishing boat later (degrees; typical of small craft that kind). Whether a wave gets her there is the wave's shape and the water's
+// push on her - jbRoll, dwBoatLip
+const JB_AVS = { jet: 55, motor: 60, fish: 70 }, jbAvs = j => (JB_AVS[j.kind] || 60) * Math.PI / 180;
 // (a boat's turn takes its kind's time - user Nov 2 10:37: the fishing boat "has to turn slower, about half of the speed"; jbTurn(j))
 const JB_TURN_S = { fish: 1.4 }, jbTurn = j => JB_TURN_S[j.kind] || JB_TURN;
 const JB_TURN = 0.7, JB_G = 300;   // (JB_G: its fall, flying off a wave)
@@ -54680,7 +54685,7 @@ function stepJetboat(j, dt) {
     // flat out across a 45° face she was pushed into the water faster than it could take her and went in under it)
     if (!coastAhead(j.x, Math.sign(sp) * j.dir || j.dir, 25)) j.x += j.dir * sp * Math.cos(j.a) * dt;   // (never up onto a coast out at sea)
     // (the Wave Lab: a designed wave's face steeper than she can lie on rolls her over)
-    if (DW.live.length && !j.air && Math.abs(j.a) > DW.cap) { DW.lost++; jetboatCapsize(j, Math.sign(j.a) || 1); return; }
+    if (DW.live.length && !j.air && Math.abs(j.a) > jbAvs(j)) { DW.lost++; jetboatCapsize(j, Math.sign(j.a) || 1); return; }
     // (user Nov 2: "the boat is wobbling weirdly" - the fishing boat on the jet ski's ride: the water read 10 units either side of
     // her middle under an 11 m hull, nose up and bouncing at rest, the tilt snapped to it each step) every boat of this family
     // reads the water at its own hull's ends (JB_HULL of its real length - storyBoatSize) and its middle
@@ -54740,12 +54745,12 @@ function jetboatSink(j, atX = null) {
 }
 /* HER ROLL AS A BODY (the Wave Lab - user Nov 18 13:09: "Is it even taking into account any physics?"): her angle (a) and its speed (av, rad/s);
    her own roll period by her size (bigger, slower - JB_ROLL_T + its share a metre); buoyancy's righting lever (GZ) toward lying on the water's
-   slope (want) - strongest half way to her vanishing angle (DW.cap - CAPSIZE ANGLE), none there, and past it turning her the other way; the
+   slope (want) - strongest half way to her vanishing angle (jbAvs - her own), none there, and past it turning her the other way; the
    water damping it (JB_ROLL_Z of critical). Capsized (keel): the same body rolling to lie keel up - the inverted lie is the stable one then.
    Pushes from outside (a lip striking her - dwBoatLip) add to av */
 const JB_ROLL_T = 2, JB_ROLL_TM = 0.15, JB_ROLL_Z = 0.4, JB_ROLL_ZK = 0.9, JB_FLOAT = 25, JB_SINK = 1.5;   // (ZK: keel up, her deck and cabin dragged through the water - damped near critical)
 function jbRoll(j, want, dt, keel, held = 1) {
-  const L = storyBoatSize(j)[0] / UPM, w0 = 2 * Math.PI / (JB_ROLL_T + JB_ROLL_TM * L), vs = Math.max(0.3, DW.cap || 1);
+  const L = storyBoatSize(j)[0] / UPM, w0 = 2 * Math.PI / (JB_ROLL_T + JB_ROLL_TM * L), vs = jbAvs(j);
   let rel = j.a - want; rel -= 2 * Math.PI * Math.round(rel / (2 * Math.PI));
   const ar = Math.abs(rel), sg = rel < 0 ? -1 : 1;
   const gz = keel ? Math.sin(ar) : ar <= vs ? Math.sin(Math.PI * ar / vs) : -Math.sin(Math.PI * (ar - vs) / (Math.PI - vs));
@@ -74607,6 +74612,8 @@ async function start(data) {
       onHud: (cx, cy) => { const [ux, uy] = toUI(cx, cy); return !!hudAt(ux, uy); },
       pan: (cx0, cy0, cx1, cy1) => { const a = screenToWorld(cx0, cy0), b = screenToWorld(cx1, cy1); cam.pan[0] -= b[0] - a[0]; cam.panY[0] -= b[1] - a[1]; cam.panHeld[0] = true; },
       get panned() { return !!cam.panHeld[0]; }, unpan: () => { cam.panHeld[0] = false; },
+      // (user Nov 18 15:49: "When I click Ocean or Lake it should take the Camera to it") the view's middle put on (x, y) - the same hold as a drag's (cam.pan)
+      lookAt: (x, y) => { const a = screenToWorld(innerWidth / 2, innerHeight / 2); cam.pan[0] += x - a[0]; if (y != null) cam.panY[0] += y - a[1]; cam.panHeld[0] = true; },
       // the designed waves (09-zy-dwaves.js): the kinds (the lab's prefabs - set(name, K) lays a kind's tables again), one sent, the live ones
       // (the smoke there is let go - the lab's start, the world's own ships taken out of its test world: what they'd puffed goes with them)
     // (a vehicle's length and height in metres, as the game sizes it - vehBox; the frame preview's boat for scale, user Nov 18 09:36)
@@ -74622,7 +74629,7 @@ async function start(data) {
           for (let i = 0; i < DW_NP; i++) { const p = dwPt(w, i); P.push([p[0], dwYAt(w, p[0], p[1])]); }
           return { kn: w.kn, dir: w.dir, lip: !!w.lip, ph: w.ph, stage: w.K.N[Math.min(w.K.N.length - 1, Math.floor(w.ph))], C, P }; }),
         poses: DW_POSE, NP: DW_NP, frames: dwFrames, clear: () => { DW.live.length = 0; DW.max = 0; DWF.n = 0; },
-        get cap() { return DW.cap; }, set cap(v) { DW.cap = v; }, get lost() { return DW.lost; }, flow: x => dwFlow(x), at: x => dwAt(x) },
+        get lost() { return DW.lost; }, flow: x => dwFlow(x), at: x => dwAt(x) },
     } });
   }
   // (user Nov 3 20:02) the Vegetation Lab (lab/veglab): the trees with bones (50-land-zz-rig.js) - the trees, setting one alight, a blast
