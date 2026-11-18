@@ -8729,8 +8729,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1080;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 23:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1081;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 23:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -46779,18 +46779,33 @@ function drawLakeShadows(x0, x1) {
 // a tank in over its tracks: it goes down, bubbling, and is lost
 function tankSink(t) {
   if (t.state !== 'alive' || netGuestHold()) return;
-  t.state = 'sink'; t.vx = 0; t.vy = 0; t.sinkT = 0;
+  t.state = 'sink'; t.sinkT = 0;   // (it goes in with the speed it had: the water takes it - stepTankSink)
   lakeSplash(t.x, 1.2);
   emit('lost', { kind: 'tank', o: t });
   landWait[t.id].tank = LAND_RESPAWN;
   if (crew[t.id].mode === 'tank') lostUnit(t.id, t.x, 'tank');
 }
+/* (user Nov 17 22:00: "The tank when it sinks, it should go vertical slowly because of its weight") anything long and heavy going down in water turns
+   slowly end-down: the end already lower leads (level: way's end - a tank's nose), toward nearly on end, the water's drag holding the turn slow (on its
+   end in ~3 s; a spin it fell in with soaked up). o.a its angle (+: its right end lower), o.av its turn */
+const SINK_TURN = 1.6, SINK_DRAG = 2.2, SINK_END = Math.PI / 2 * 0.92;
+function sinkTurn(o, dt, way) {
+  const want = (Math.abs(o.a || 0) > 0.05 ? Math.sign(o.a) : way || 1) * SINK_END;
+  // (the water's drag on a turning hull grows with the turn: a spin it falls in with is soaked up in a moment, the slow turn of its weight is kept)
+  const av = (o.av || 0) + (want - (o.a || 0)) * SINK_TURN * dt;
+  o.av = av / (1 + (SINK_DRAG + 4 * Math.abs(av)) * dt);
+  o.a = (o.a || 0) + o.av * dt;
+}
+// how far a tank's lower end is under its middle, at its angle - what meets the bottom first
+const tankLow = a => Math.abs(Math.sin(a || 0)) * TANK_L * 0.42;
 function stepTankSink(t, dt) {
   t.sinkT += dt;
   const floor = onLand(t.x) ? landBelow(t.x, t.y - 10) : seabedY(t.x);
-  t.y = Math.min(floor, t.y + 26 * dt); t.a *= 1 - dt;
+  // the water takes the speed it came in with: down to its sinking pace (26), its drift gone in a second or so
+  t.vx *= Math.max(0, 1 - 1.5 * dt); t.vy += (26 - t.vy) * Math.min(1, 2 * dt);
+  t.x += t.vx * dt; t.y = Math.min(floor - tankLow(t.a), t.y + t.vy * dt); sinkTurn(t, dt, t.facing);
   if (lakeSinkR() < dt * 12) spawnSmoke(t.x + lkRnd(-20, 20), lakeLevelAt(t.x) - 2, { kind: 'dust', mist: true, r: lkRnd(2, 4), grow: 2, lift: 4, vx: lkRnd(-6, 6), vy: -lkRnd(4, 12), life: lkRnd(0.8, 1.4), alpha: 0.5 });
-  if (t.y >= floor - 0.5 || t.sinkT > 8) { t.state = 'dead'; landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: 0, facing: t.facing, t: 0, burn: 0, wet: true }); }   // (wet: it goes on down to the bottom - stepArmyWreck)
+  if (t.y >= floor - tankLow(t.a) - 0.5 || t.sinkT > 8) { t.state = 'dead'; landWrecks.push({ kind: 'tank', id: t.id, x: t.x, y: t.y, a: t.a, av: t.av, facing: t.facing, t: 0, burn: 0, wet: true }); }   // (wet: it goes on down to the bottom, turning as it was - stepArmyWreck)
 }
 // a helicopter that touches the water: it goes in and sinks
 function heliSink(h) {
@@ -49450,7 +49465,8 @@ function stepArmyWreck(w, dt) {
     w.deck = null; w._rv = 0;                                      // (she's gone from under it: it falls)
   }
   if (onLand(w.x) && !lakeAt(w.x)) { const ft = w.y + oy; if (w._rv || landWoke(w.x, half) || ft < landBelow(w.x, ft - 6) - 1) { if (restSettle(w, w.x, ft, half, dt)) { w.y = RS.foot - oy; if (w.kind === 'tank') w.a = RS.a; else if (oy) w.a = wreckLie(w.a, RS.a); restLanded(w.x, RS.foot, RS.hit, 1); } } return; }
-  if (w.bed) return;
+  // on the bottom: a tank down on its end falls over onto the nearer face - its tracks or its roof - its lower end on the bed
+  if (w.bed) { if (w.lie != null && Math.abs(w.lie - w.a) > 0.005) { w.a += (w.lie - w.a) * Math.min(1, dt * 2.5); w.y = w.bedY - tankLow(w.a); } return; }
   // (on the harbour's deck: ground while it's there - the pier gone from under it, it falls in - user Oct 27)
   if (!onLand(w.x) && !w.wet) { const ht = harbourTop(w.x, w.y - 6); if (ht < Infinity) { w.onDeck = true; if (w.y < ht - 0.5 || w._rv) { w._rv = Math.min(600, (w._rv || 0) + 520 * dt); w.y = Math.min(ht, w.y + w._rv * dt); if (w.y >= ht - 0.01) { restLanded(w.x, w.y, w._rv, 1); w._rv = 0; } } return; } w.onDeck = false; }
   const sy = surfaceY(w.x), bed = seabedY(w.x);   // (its own water's surface and bed - a lake's as the sea's: user Nov 3)
@@ -49462,9 +49478,12 @@ function stepArmyWreck(w, dt) {
     if (w.y >= sy) { w.wet = true; ditchFx(w.x, 0, 1.1); w._rv = 0; }
     return;
   }
-  w.y = Math.min(bed, w.y + 26 * dt); w.a = (w.a || 0) * (1 - dt * 0.3);
+  // (a tank going down end-first as it sank - sinkTurn, 50-land-lake.js; the rest level out as they go)
+  const low = w.kind === 'tank' ? tankLow(w.a) : 0;
+  if (w.kind === 'tank') sinkTurn(w, dt, w.facing); else w.a = (w.a || 0) * (1 - dt * 0.3);
+  w.y = Math.min(bed - low, w.y + 26 * dt);
   if (!SIM_ONLY && awR() < dt * 8) addBubble(w.x + awRnd(-12, 12), w.y - 8, awRnd(-5, 5), -awRnd(15, 30), awRnd(0.8, 1.8));
-  if (w.y >= bed - 0.5) { w.bed = true; kickDust(w.x, 18, 0.6); scatterBed(w.x, 30, 0.5); }   // (the bed's dust in a lake too - one water)
+  if (w.y >= bed - low - 0.5) { w.bed = true; w.bedY = bed; if (w.kind === 'tank') w.lie = wreckLie(w.a, 0); kickDust(w.x, 18, 0.6); scatterBed(w.x, 30, 0.5); }   // (the bed's dust in a lake too - one water)
 }
 
 /* ---- the stones (ground-stones-rule.md): whole, never sliced ---- */
@@ -54758,7 +54777,7 @@ const HELI_CEIL = WATER_Y - 95 - 1.5 * VIEW_H;
 const LAND_RESPAWN = 4;                                // seconds before a lost tank or helicopter is replaced
 // (Nov 11, tables) the tanks and the army helicopters: record tables, every hull a row - each side's own (tankOf(p), heliOf(p): none
 // till one comes in), the placed ones, the lost ones still going down (05-game-state.js THE ARMY'S HULLS)
-const tanks = new ColTable(vehRec(...VEH_REC, 'num: id fac x y a vx vy facing input hp ammo rk recoil mgT fall cap smokeT hitT fixT enter wsp way thr brk slipV stuckT track hitX hitY wet',   // (hitX / hitY: where the last blow landed - tankBlowUp; wet: in water over its tracks)
+const tanks = new ColTable(vehRec(...VEH_REC, 'num: id fac x y a vx vy facing input hp ammo rk recoil mgT fall cap smokeT hitT fixT enter wsp way thr brk slipV stuckT track hitX hitY wet av sinkT',   // (av: its body's turn, rad/s - off the ground (tankSettle) and in water (sinkTurn); hitX / hitY: where the last blow landed - tankBlowUp; wet: in water over its tracks)
   'txt: kind state', 'val: deck wd dropT hook carry cpuIn sandT smk cpuElev cpuPower bumpT kw grip speed reload aKick scorch', ...CIV_REC));
 const helis = new ColTable(vehRec(...VEH_REC, 'num: id fac x y vx vy facing tilt hp rockets rk mgT rotor spin cap smokeT input fixT roll lampPh enter col turb washT bitT',
   'txt: kind state', 'val: turn big flip rope cpu cpuIn cpuStick deck magBroken doorT sea edgeT _civT cpuElev spinV lostDone wrecked downT susY width reload mag scorch', ...CIV_REC));
@@ -54928,10 +54947,20 @@ function tankSettle(t, dt, snap) {
   t.deck = G.ship && t.y >= want - 3 ? G.ship : null;
   if (want > t.y + 1.5 || t.vy < 0) {
     // the ground's gone from under it (or it hopped): it falls
-    t.vy = Math.min(600, t.vy + 520 * dt); t.y = Math.min(want, t.y + t.vy * dt);
-    if (t.y >= want - 0.5) { if (t.vy > 280) tankHurt(t, t.vy >= TANK_FALL_KILL ? VTUNE.tank.hp : (t.vy - 280) / 120, t.x, t.y, -1); /* (user Oct 25: dropped from high up it's hurt; from ten times its own height it's destroyed) */ if (t.vy > 120) { kickLandDust(t.x, t.y, 10); shakeAt(2, t.x); } t.vy = 0; }
-  } else { t.y += (want - t.y) * Math.min(1, dt * 14); t.vy = 0; }
-  t.a += (a - t.a) * Math.min(1, dt * 8);
+    // (user Nov 17 22:00: "it stays perfectly horizontal, even if falling vertically from a cliff") off the ground its body keeps the turn it had (av); one end
+    // still on its ground with the other over nothing - the edge of a cliff, a crater's lip - it tips over that end, its middle past it (a bar on a pivot:
+    // 1.5 g / its length, by how level it is); its lower end touching down first, the same turns it down onto its tracks
+    const sa = Math.sin(t.a), onB = G.back <= t.y - sa * half + 2, onF = G.front <= t.y + sa * half + 2;
+    if (onB !== onF) t.av = (t.av || 0) + (onB ? 1 : -1) * 0.75 * 520 / half * Math.cos(t.a) * dt;
+    t.a += (t.av || 0) * dt;
+    const low = Math.abs(Math.sin(t.a)) * half;                    // (its lower end under its middle: that end meets the ground)
+    t.vy = Math.min(600, t.vy + 520 * dt); t.y = Math.min(want - low, t.y + t.vy * dt);
+    if (t.y >= want - low - 0.5) { if (t.vy > 280) tankHurt(t, t.vy >= TANK_FALL_KILL ? VTUNE.tank.hp : (t.vy - 280) / 120, t.x, t.y, -1); /* (user Oct 25: dropped from high up it's hurt; from ten times its own height it's destroyed) */ if (t.vy > 120) { kickLandDust(t.x, t.y, 10); shakeAt(2, t.x); } t.vy = 0; }
+    return;
+  }
+  t.y += (want - t.y) * Math.min(1, dt * 14); t.vy = 0;
+  const na = t.a + (a - t.a) * Math.min(1, dt * 8);
+  t.av = dt > 0 ? clamp((na - t.a) / dt, -3, 3) : 0; t.a = na;   // (on the ground it follows the ground; the turn it's making goes with it over an edge)
 }
 // the tank's make for the one drive (driveStep): 30 t, its middle between its road wheels, low; its tracks all driven, gripping
 // TANK grip times what tyres do; the ground under its back end (VTUNE.tank: kw, grip - the GAME EDITOR)
