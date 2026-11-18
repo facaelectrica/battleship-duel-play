@@ -5912,7 +5912,7 @@ const rings = new ColTable({ sq: 'id', x: 'f64', y: 'f64', r: 'f64', max: 'f64',
 // off the bottom; floatT: when a floating piece waterlogs; c0: the settled world's clock when it came to rest; rs: filed at rest
 // this very step (still in the list till the loop ends). A piece that was thrown without seed or age keeps them NaN, as it
 // always had them undefined
-const DEBRIS_FIELDS = { n: 'id', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', a: 'f64', w: 'f64', sw: 'f64', sh: 'f64', col: 'str', state: 'u8', bub: 'f64',
+const DEBRIS_FIELDS = { n: 'id', bod: 'u8', x: 'f64', y: 'f64', vx: 'f64', vy: 'f64', a: 'f64', w: 'f64', sw: 'f64', sh: 'f64', col: 'str', state: 'u8', bub: 'f64',
   seed: 'f64 NaN', age: 'f64 NaN', light: 'u8', big: 'u8', deck: 'u8', hopped: 'u8', floatT: 'f64 NaN', c0: 'f64', rs: 'u8' };
 const debris = new ColTable(DEBRIS_FIELDS), restDeb = new ColTable(DEBRIS_FIELDS);
 // (Nov 1) the sparks and the embers: column tables (04-zz-coltable.js), a row each in the order spawned - 35-particles.js makes
@@ -7751,7 +7751,7 @@ function dwCarryAll(dt) {
   if (!DW.live.length) return;
   for (const e of vehAll()) {
     const v = e.v; if (!v || !Number.isFinite(v.x) || e.k === 'tower' || e.k === 'crane' || v.state === 'gone' || v.moored && e.army || v.gate) continue;
-    if (jetboats.includes(v)) continue;                           // (a boat: dragged by the water as a body - dwWaterAt, stepJetboat)
+    if (jetboats.includes(v) || sailboats.includes(v) || civShips.includes(v) || seaplanes.includes(v)) continue;   // (afloat as bodies: dragged by the water themselves - dwFloat)
     const run = waterRun(v.x); if (!run) continue;
     let H = 0; for (const w of DW.live) if (v.x >= w.xa && v.x <= w.xb) H = Math.max(H, dwTab(w, v.x, false)); if (!(H > 0)) continue;
     const B = vehBox(e), len = Math.max(4, B[1] - B[0]), y0 = v.y != null ? v.y : surfaceY0(v.x), s = dwSurfAt(v.x, y0), y = v.y != null ? v.y : s;   // (the water it's in or on - dwSurfAt)
@@ -8260,16 +8260,16 @@ function dwWaterAt(x, s, len, out) {
    in it, at a damping DW_ZW of its bob. Out of the water nothing holds it; under it, it comes up as its buoyancy takes it. o: anything with y and vy
    (world, down +) and a drift along the sea (o[dk] - moved by it in its own step); len, hg its hull's length and height; the water read at its
    middle and half either way along it facing dir (dwSurfAt - the water it's in, or over). Returns DW_FL: [sub, the water at its bow, at its
-   stern, the three's mean]. off: how far under the water its y sits at rest (half of it under); yk: its height's own name */
+   stern, the three's mean]. off: how far under the water its y sits at rest (half of it under); yk, vyk: its height's and its rise's own names */
 const DW_G = 300, DW_ZW = 0.6, DW_FL = [0, 0, 0, 0], DW_WV = [0, 0];
 const dwDrag = (hg, g, sub) => 4 * DW_ZW * Math.sqrt(2 * g / hg) * sub;   // (2·ζ·ω half in: its bob's ω² - buoyancy's stiffness, 2·g per its height)
-function dwFloat(o, dk, len, hg, half, dir, g, bco, dt, off = 0, yk = 'y') {
+function dwFloat(o, dk, len, hg, half, dir, g, bco, dt, off = 0, yk = 'y', vyk = 'vy') {
   const y = o[yk], sAt = DW.live.length ? x => dwSurfAt(x, y) : surfaceY;
   const yb = sAt(o.x + dir * half), ys = sAt(o.x - dir * half), yS = (yb + ys + 2 * sAt(o.x)) / 4, sub = clamp(0.5 + (y - off - yS) / hg, 0, 1);
   if (DW.live.length) dwWaterAt(o.x, yS, len, DW_WV); else DW_WV[0] = DW_WV[1] = 0;
   const e = Math.exp(-dwDrag(hg, g, sub) * dt);
-  o.vy = (o.vy || 0) + (g - bco * sub) * dt; o.vy = DW_WV[1] + (o.vy - DW_WV[1]) * e; o[yk] = y + o.vy * dt;
-  o[dk] = DW_WV[0] + ((o[dk] || 0) - DW_WV[0]) * e;
+  let vy = (o[vyk] || 0) + (g - bco * sub) * dt; vy = DW_WV[1] + (vy - DW_WV[1]) * e; o[vyk] = vy; o[yk] = y + vy * dt;
+  if (dk) o[dk] = DW_WV[0] + ((o[dk] || 0) - DW_WV[0]) * e;   // (dk null: held where it is - a moored buoy)
   DW_FL[0] = sub; DW_FL[1] = yb; DW_FL[2] = ys; DW_FL[3] = yS; return DW_FL;
 }
 // foam thrown up where something went over in the water: churned foam about it, mist, a few drops - as big as it (s: its length)
@@ -9542,7 +9542,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 15:50';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 16:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14961,7 +14961,7 @@ function stepTorps(dt) {
     // buoy, user Oct 24)
     const wide = tp.up ? 7 : 0;
     if (!hit) for (const b of sailboats) if ((b.state === 'sail' || b.state === 'sinking') && Math.abs(tp.x - b.x) < sailHalf(b) + wide && tp.y < b.y + b.sink + 12 && tp.y > b.y - 40) { hit = ['sail', b]; break; }
-    if (!hit) for (const b of buoys) if (b.state === 'float' && mayHit(tp, b) && Math.abs(tp.x - b.x) < 8 + wide && tp.y < surfaceY(b.x) + 12) { hit = ['buoy', b]; break; }
+    if (!hit) for (const b of buoys) if (b.state === 'float' && mayHit(tp, b) && Math.abs(tp.x - b.x) < 8 + wide && tp.y < buoyY(b) + 12) { hit = ['buoy', b]; break; }
     if (!hit) for (const d of pierHosts()) if (mayHit(tp, d)) { const pi = pillarAt(d, tp.x, tp.y); if (pi >= 0) { hit = ['pillar', d, pi]; break; } }
     if (!hit && tp.t > 0.25) { const w = wreckAt(tp.x, tp.y); if (w) hit = ['wreck', w]; }
     if (!hit && LAND && civAt(tp.x, tp.y)) hit = ['civ'];
@@ -17807,7 +17807,7 @@ function stepSailboat(b, dt, SB) {
 // (Nov 11, tables) a record table (04-zz-coltable.js), a row a buoy, held and walked as its handle: where (x), its colour (col), its
 // team (player), the prop it was placed as (sid); afloat, sinking or at rest (state) - going down, its depth, fall, roll and turn (y,
 // vy, rot, w); its rocking (ph)
-const buoys = new ColTable(ColTable.rec('num: x ph player sid y vy rot w', 'txt: col state'));
+const buoys = new ColTable(ColTable.rec('num: x ph player sid y vy rot w bod', 'txt: col state'));
 // (user Nov 3 16:53 / 17:35: "a buoy should be an object I place manually"; "we still want the battle and open world ones. For story
 // they are manually placed") the BUOY / RED BUOY props placed in the world (50-zz-struct.js STR_KINDS buoy), each where it's placed, its
 // colour its kind's - and, in BATTLE and OPEN WORLD (not STORY nor its world), the harbours' own as before: an orange one off each
@@ -17870,7 +17870,7 @@ function buoyCanvas(O, D, M, L, E) {
 const BUOY_K = 0.78;
 function buoyHit(b, x, y) {
   if (!b || b.state !== 'float' || Math.abs(x - b.x) >= 7) return false;   // (opt-fight: off to the side - the wave's height not asked)
-  const sy = surfaceY(b.x);
+  const sy = buoyY(b);
   return Math.abs(x - b.x) < 7 && y > sy - 24 && y < sy + 4;
 }
 // (engine stage 3) 'hit' {kind: 'buoy', o, x, y}: a shell, a round, a torpedo, a depth charge or a plane on a buoy (36-zz-events.js)
@@ -17878,14 +17878,23 @@ on('hit', e => { if (e.kind === 'buoy') destroyBuoy(e.o, e.x, e.y); }, 'buoys');
 function destroyBuoy(b, x, y) {
   if (netGuestHold()) return;                              // (online guest: only when the host says so)
   // the top is blown off; what's left fills and sinks to the bottom
-  b.state = 'sink'; b.y = surfaceY(b.x) + 2.5; b.vy = 6; b.rot = 0; b.w = buRnd(-0.6, 0.6);
+  b.state = 'sink'; b.y = buoyY(b) + 2.5; b.vy = 6; b.rot = 0; b.w = buRnd(-0.6, 0.6);
   impact(x, y);
   spawnDebris(b.x, surfaceY(b.x) - 8, 14, 0);
   for (let i = 0; i < 10; i++) debrisRow({ x: b.x + buRnd(-5, 5), y: surfaceY(b.x) - buRnd(2, 14), vx: buRnd(-90, 90), vy: -buRnd(80, 200), a: buRnd(0, 6.28), w: buRnd(-12, 12), sw: buRnd(1.5, 3.5), sh: buRnd(1, 2), col: ['#e8802c', '#be5a1a', '#60280c'][i % 3], state: 0, bub: 0, seed: buR() * 6.28, age: 0, light: i % 2 === 0 });
   splash(b.x, 0, 300);
 }
+// (the Wave Lab - user Nov 18 15:13, buoys "Will they react correctly to waves?": afloat, a floating body held where it's moored - dwFloat, no drift;
+// its height y (on its foot's waterline), drawn there; the sea's surface again once the waves are gone and it has settled)
+const buoyY = b => b.bod ? b.y : surfaceY(b.x);
 function stepBuoys(dt) {
   for (const b of buoys) {
+    if (b.state === 'float' && (DW.live.length || b.bod)) {
+      if (!b.bod) { b.y = surfaceY(b.x); b.vy = 0; }
+      const F = dwFloat(b, null, 12 * BUOY_K, 10 * BUOY_K, 4 * BUOY_K, 1, DW_G, 2 * DW_G, dt);
+      b.bod = DW.live.length || Math.abs(b.y - F[3]) > 0.3 || Math.abs(b.vy || 0) > 2 ? 1 : 0;
+      continue;
+    }
     if (b.state !== 'sink') continue;
     b.vy += (34 - b.vy) * 0.8 * dt; b.y += b.vy * dt; b.rot += b.w * dt; b.w *= 1 - 0.3 * dt;
     if (buR() < 0.5) addBubble(b.x + buRnd(-3, 3), b.y - 10, buRnd(-4, 4), -buRnd(15, 30), buRnd(0.8, 1.8));
@@ -17906,7 +17915,7 @@ function drawBuoy(b, x0, x1) {
     thgRotate(thgTranslate(m, PX(b.x), PY(b.y)), b.rot);
     const fog = fogFor(b.y - 10, b.x); if (fog > 0.02) { BUOY_FOG[0] = SEA_FOG01[0]; BUOY_FOG[1] = SEA_FOG01[1]; BUOY_FOG[2] = SEA_FOG01[2]; BUOY_FOG[3] = fog; tint = BUOY_FOG; }
   } else {
-    const y = surfaceY(b.x), slope = (surfaceY(b.x + 5) - surfaceY(b.x - 5)) / 10;
+    const y = buoyY(b), sAt = b.bod && DW.live.length ? x => dwSurfAt(x, y) : surfaceY, slope = (sAt(b.x + 5) - sAt(b.x - 5)) / 10;
     thgRotate(thgTranslate(m, PX(b.x), PY(y + 2.5 + Math.sin(time * 1.7 + b.ph) * 0.6)), Math.atan(slope) * 1.4 + Math.sin(time * 1.3 + b.ph) * 0.05);
     const nightK = clamp(E.night * 1.1 + E.sunset * 0.3, 0, 0.92); if (nightK > 0.02) { BUOY_BLACK[3] = nightK; tint = BUOY_BLACK; }
   }
@@ -18029,7 +18038,16 @@ function stepCrew(dt) {
       if (Math.abs(c.bv) > 2) { c.face = Math.sign(c.bv); c.anim += dt * 5; }
       // riding the swell: she follows the surface until it falls away faster than she can drop, then
       // flies off the crest and slaps back down
-      {
+      if (DW.live.length || c.bod) {
+        // (the Wave Lab - user Nov 18 15:13, the lifeboat "Will they react correctly to waves?": a floating body - dwFloat, 09-zy-dwaves.js - her
+        // height by, her rise bvy, her drift dvx; off the water when it drops away, swamped when it comes over her, carried by it)
+        if (c.by == null) { c.by = surfaceY(c.x); c.bvy = 0; }
+        const air0 = !!c.air, v0 = c.bvy, F = dwFloat(c, 'dvx', 14, 4, 6, c.face || 1, BOAT_G, 2 * BOAT_G, dt, 0, 'by', 'bvy'); c.air = F[0] === 0;
+        c.x = clamp(c.x + (c.dvx || 0) * dt, PLAY_L() + 20, PLAY_R() - 20);
+        if (air0 && !c.air) { const hit = v0 - DW_WV[1]; if (hit > 30) { for (let i = 0; i < 8 + hit * 0.1; i++) spawnSpray(c.x + vehCrewRnd(-8, 8), F[3] - 1, vehCrewRnd(-50, 50), clamp(hit / 160, 0.4, 1)); spawnFoam(c.x, vehCrewRnd(2, 3.4)); } }
+        c.bod = DW.live.length || Math.abs(c.by - F[3]) > 0.3 || Math.abs(c.bvy || 0) > 2 || Math.abs(c.dvx || 0) > 0.5 ? 1 : 0;
+        if (!c.bod) { c.sF = c.sPrev = F[3]; c.svPrev = 0; c.saF = 0; }   // (settled: her plain ride from here, from where she is)
+      } else {
         // the water under her hull (averaged over its length, and smoothed so ripples don't count)
         const raw = (surfaceY(c.x - 6) + surfaceY(c.x) + surfaceY(c.x + 6)) / 3;
         if (c.by === undefined || c.by === null) { c.by = raw; c.bvy = 0; c.air = false; c.sF = raw; c.sPrev = raw; c.svPrev = 0; c.saF = 0; }
@@ -19428,6 +19446,8 @@ function spawnDebris(x, y, n, baseVx) {
   }
 }
 
+// (the water a piece of debris is in or over: the Wave Lab's waves' - dwSurfAt - or the sea's)
+const debSurf = d => DW.live.length ? dwSurfAt(d.x, d.y) : surfaceY(d.x);
 const DCUR = {};   // (Nov 1: the accessors the step walks its column tables with)
 function stepParticles(dt) {
   const W = E.windU, sb = surfBand(), wTop = WATER_Y - sb, wBot = WATER_Y + sb;   // (outside wTop..wBot nothing is at the water: the exact surface not asked for - perf pass, Oct 29)
@@ -19508,19 +19528,23 @@ function stepParticles(dt) {
       if (d.vy > 0 && landSolid(d.x, d.y)) { d.y = landBelow(d.x, d.y - 8) - 0.5; d.state = 2; d.vx = d.vy = 0; d.w = 0; return; }
       // (and on the harbour's deck, the block, the hangar roof - user Oct 27: solid for everything but ships)
       if (d.vy > 0 && docks.length) { const ht = harbourTop(d.x, y0 - 1); if (d.y >= ht) { d.y = ht - 0.5; d.state = 2; d.deck = true; d.vx = d.vy = 0; d.w = 0; return; } }
-      if (d.vy > 0 && d.y > wTop && d.y > surfaceY(d.x)) {
+      if (d.vy > 0 && d.y > wTop && d.y > debSurf(d)) {
         d.state = 1; d.vy *= 0.25; d.vx *= 0.35; d.w *= 0.3;     // the water swallows most of the tumble
         water.push(d.x, -260 * d.sw); spawnFoam(d.x, ptRnd(1, 2.2));
         if (ptR() < 0.5) spawnSpray(d.x, d.y - 1, 0, 0.5);
       }
     } else if (d.state === 4) {
       // floating: rides the surface and drifts with the wind, then slowly waterlogs
-      d.x += (W * 0.15 + Math.sin(d.age * 1.3 + d.seed) * 2) * dt; d.y = surfaceY(d.x) - 0.5; d.a += Math.sin(d.age + d.seed) * 0.3 * dt;
+      d.x += (W * 0.15 + Math.sin(d.age * 1.3 + d.seed) * 2) * dt;
+      // (the Wave Lab - user Nov 18 15:13, debris "Will they react correctly to waves?": a floating body - dwFloat, its drift vx - not put on the water)
+      if (DW.live.length || d.bod) { const s = Math.max(1.5, d.sw || 2), F = dwFloat(d, 'vx', s, s, 0, 1, DW_G, 2 * DW_G, dt, -0.5); d.x += (d.vx || 0) * dt; d.bod = DW.live.length || Math.abs(d.y + 0.5 - F[3]) > 0.3 || Math.abs(d.vy || 0) > 2 || Math.abs(d.vx || 0) > 0.5 ? 1 : 0; }
+      else d.y = surfaceY(d.x) - 0.5;
+      d.a += Math.sin(d.age + d.seed) * 0.3 * dt;
       if (d.age > d.floatT) { d.light = false; d.state = 1; d.vy = 2; d.y += 2; }
     } else if (d.state === 1 && d.light) {
       d.vy += (-14 - d.vy) * 1.2 * dt; d.vx *= 1 - 1.4 * dt;
       d.x += (d.vx + Math.sin(d.age * 3 + d.seed) * 6) * dt; d.y += d.vy * dt; d.a += d.w * 0.25 * dt;
-      if (d.y <= wBot && d.y <= surfaceY(d.x)) { d.state = 4; d.floatT = d.age + ptRnd(25, 50); spawnFoam(d.x, ptRnd(0.8, 1.4)); }
+      if (d.y <= wBot && d.y <= debSurf(d)) { d.state = 4; d.floatT = d.age + ptRnd(25, 50); spawnFoam(d.x, ptRnd(0.8, 1.4)); }
     } else if (d.state === 1) {
       // heavy steel: it gathers speed slowly to a steady fall, the water kills any spin and it
       // settles flat side down, swaying only a little (the big chunks hardly at all)
@@ -36047,7 +36071,7 @@ function drawGuns(sh) {
 // ~15.6 world units long (20% smaller than the old rowboat), riding the waves
 const LB_K = 0.325 * REAL.life;
 function boatPose(p) {
-  const c = crew[p], x = c.x, y = c.by == null ? surfaceY(x) : Math.min(c.by, surfaceY(x));
+  const c = crew[p], x = c.x, y = c.by == null ? surfaceY(x) : c.bod ? c.by : Math.min(c.by, surfaceY(x));   // (c.bod: afloat as a body in the Wave Lab - where she is)
   const slope = c.air ? clamp(c.bvy / 400, -0.5, 0.5) * -c.face * 0 + (c.tilt || 0) : (surfaceY(x + 5) - surfaceY(x - 5)) / 10;
   if (!c.air) c.tilt = Math.atan(slope); else c.tilt = (c.tilt || 0) * 0.98 + c.face * 0.004;
   const sp = Math.abs(c.bv || 0) / BOAT_SPEED, bob = Math.sin(time * 3 + p) * 0.4 - sp * 0.6;   // bow lifts when she's under way
@@ -49740,9 +49764,13 @@ function stepMinisub(s, dt) {
   msAimStep(s, dt);
   if (s.vx) { const ax = s.x + Math.sign(s.vx) * 14; if (floorUnder(ax, s.y) - 10 < s.y - 6 || ((solidBlock(ax, s.y) || solidBlock(ax, s.y - 8)))) { s.x = xp; s.vx = 0; } }   // (rising ground ahead - a cave's floor, a SOLID's top - or rock at its middle or top: it stops against it, the one collision)
   // (nobody's, with no ship to go back to: it floats on the surface, its top out of the water - user Oct 27)
-  const ws = waterSurfNear(s.x, s.y), top = Math.max((ws != null ? ws : surfaceY(s.x)) + (!mine && !s.ai && !rsAfloat(c) ? -1 : 6), solidAbove(s.x, s.y - 8) + 9), bot = floorUnder(s.x, s.y - 8) - 10;   // (rock over or under it - a cave's roof and floor, a floating SOLID's: the one collision)
+  const ws = DW.live.length ? dwSurfAt(s.x, s.y) : waterSurfNear(s.x, s.y), wt = (ws != null ? ws : surfaceY(s.x)) + (!mine && !s.ai && !rsAfloat(c) ? -1 : 6), top = Math.max(wt, solidAbove(s.x, s.y - 8) + 9), bot = floorUnder(s.x, s.y - 8) - 10;   // (rock over or under it - a cave's roof and floor, a floating SOLID's: the one collision)
   if (s.splashed === false) { if (s.y > surfaceY(s.x)) { s.splashed = true; msSplash(s); } }    // (dropping in off the hook)
-  else if (s.y < top) { s.y = top; s.vy = Math.max(0, s.vy); }
+  else if (s.y < top) {
+    // (the Wave Lab - user Nov 18 15:13, surfaced subs: a face coming over it or the water dropping away moves its top at once - not put on it: its buoyancy
+    // and the water's drag take it there, as the attack sub's float - 24-submarine.js)
+    if (DW.live.length && top === wt) s.vy += ((top - s.y) * 16 - s.vy * 4.5) * dt; else { s.y = top; s.vy = Math.max(0, s.vy); }   // (rock over it: that stops it)
+  }
   // (the floor stops it)
   if (s.y > bot) { s.y = bot; s.vy = Math.min(0, s.vy); }
   if (vehMsubR() < dt * (2 + Math.abs(s.vx) / 15)) addBubble(s.x - s.facing * 7, s.y - 1, -s.facing * vehMsubRnd(5, 15), -vehMsubRnd(10, 25), vehMsubRnd(0.6, 1.4));
@@ -50868,7 +50896,8 @@ function spWater(s, dt, lever, stick, mine) {
   if (s.tilt) s.tilt *= Math.exp(-dt * 2.5); s.pitch = -0.04 * Math.min(1, s.run / SP_RUN) + (s.dig || 0) + (s.tilt || 0) + (s.wsl || 0); s.ang = s.pitch * s.dir + Math.sin(time * 3 + s.home) * 0.02;   // (dig: its nose in after the touch - spTouch)
   if (s.spd > 30) spFoam(s, dt, smoothstep(30, 120, s.spd) * (s.touchT > 0 ? 1.6 : 1));   // (the floats ploughing: thick white foam behind them)
   if (s.touchT > 0) s.touchT -= dt;
-  if (s.run >= SP_RUN && (stick <= 0 || !mine)) { s.state = 'fly'; if (!DW.live.length) s.y = surfaceY(s.x) - 1; s.bod = 0; s.wsl = 0; s.dvx = 0; s.spd = Math.max(s.spd, 110 * AIR_SK.seaplane); s.tilt = 0; flyFrom(s, -0.03, 0, s.pitch); s.climbT = 1.5; }   // (into the air: its path just up - flyStep)
+  // (lifting off it keeps the water's way it had on, in its speed - the Wave Lab, user Nov 18 15:13)
+  if (s.run >= SP_RUN && (stick <= 0 || !mine)) { s.state = 'fly'; if (!DW.live.length) s.y = surfaceY(s.x) - 1; s.spd = Math.max(s.spd + s.dir * (s.dvx || 0), 110 * AIR_SK.seaplane); s.bod = 0; s.wsl = 0; s.dvx = 0; s.tilt = 0; flyFrom(s, -0.03, 0, s.pitch); s.climbT = 1.5; }   // (into the air: its path just up - flyStep)
   s.vx = s.dir * s.spd;
 }
 // in the air: the planes' way, light. (user Oct 26: "You should be able to fly very close to the water, and it doesn't
