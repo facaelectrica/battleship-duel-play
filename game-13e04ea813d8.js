@@ -3038,6 +3038,9 @@ const VEG_TERR = { on: false };
 // (user Nov 8 14:24: "a toggle in the biome editor ... to turn on and off the lights in the caves") CAVE LIGHT: on, the Biome Editor shows caves and craters
 // lit to judge their look; off, dark as in the game - the day through an opening and the lamps only (landAllLit - 50-land-zz-light.js, the caves' dayLitWin). A view, not saved
 let VEG_CAVELIT = true;
+// (user Nov 17 22:51-22:56: "this would be a third editor. We have the game editor, biome editor, and this would be the vehicle editor") the VEHICLE EDITOR
+// open (54-vehicle-editor.js): a panel over the page, no world of its own - the game's keys, pads and pointer are its while it is
+let VEH_MODE = false;
 
 //@src 00-sw-boot.js:1
 /* THE SIMULATION WORKER (sim-worker branch, user Oct 30 18:22: "the whole game simulation moves to a worker"; design:
@@ -3567,8 +3570,9 @@ const VEG_BAKED = {"at":"2026-11-04T17:54:22.841Z","vt":{"veg_palm":{"leafWeight
    every noted key back (sceneRestore). A page that opens with a journal left over - closed or reloaded without saving - puts it back
    before anything is read: unsaved changes are gone. Below the world shim (installed first), so it sees the stored names - the
    Story world's bd_sw_ ones too. Asked before leaving: 50-zzzz-scene-ask.js. ---- */
-const SCENE = { get key() { return VEG_MODE ? 'bd_veg_j' : 'bd_scene_j'; }, raw: null };   // (each editor its own journal - the Biome Editor goes in and out in place now)
+const SCENE = { get key() { return VEH_MODE ? 'bd_vehed_j' : VEG_MODE ? 'bd_veg_j' : 'bd_scene_j'; }, raw: null };   // (the Vehicle Editor's too - Nov 17)   // (each editor its own journal - the Biome Editor goes in and out in place now)
 // the Biome Editor's own saved keys - what its SAVE CHANGES keeps and DISCARD puts back (not its bookkeeping: bd_biome_snapsig, bd_vgbot_h)
+const VEH_JKEYS = ['bd_vmarks', 'bd_vtune'];   // (the Vehicle Editor's: the vehicles' marks and numbers - 50-zzzzz-vehicle-editor-marks.js, 01-z-vehicle-tune.js)
 const VEG_JKEYS = ['bd_vegdecks', 'bd_foliage', 'bd_vegprefabs', 'bd_vtune', 'bd_biome_surf', 'bd_biome_grounds', 'bd_biome_ground', 'bd_biome_ground_sea', 'bd_plants', 'bd_seashapes'];
 function sceneJ() { try { return JSON.parse(SCENE.raw.g(SCENE.key) || 'null') || null; } catch (e) { return null; } }
 // what the editor writes that isn't the world's: this browser's bookkeeping (LOCAL_KEYS, either world's name) and the journal itself
@@ -3614,14 +3618,15 @@ function sceneRestore() {
     const P = Storage.prototype, g = P.getItem, s = P.setItem, r = P.removeItem;
     SCENE.raw = { g: k => g.call(LS, k), s: (k, v) => s.call(LS, k, v), r: k => r.call(LS, k) };
     if (!VEG) { const n = sceneRestore(); if (n) console.log('EDITOR: ' + n + ' unsaved change(s) from the last visit discarded'); }
+    { VEH_MODE = true; try { sceneRestore(); } finally { VEH_MODE = false; } }   // (the Vehicle Editor's journal left over: its unsaved changes gone too)
     const trackV = k => VEG_JKEYS.includes(k);
     const track = k => typeof k === 'string' && k.startsWith('bd_') && !sceneSkip(k) && sceneEdOpen();
-    const tr = k => VEG_MODE ? trackV(k) : track(k);
+    const tr = k => VEH_MODE ? VEH_JKEYS.includes(k) : VEG_MODE ? trackV(k) : track(k);
     P.setItem = function (k, v) { if (this === LS && tr(k)) sceneNote(k); return s.call(this, k, v); };
     P.removeItem = function (k) { if (this === LS && tr(k)) sceneNote(k); return r.call(this, k); };
     // (closing the tab or reloading with changes not saved: the browser's own "leave the page?" - they'd be gone. Not in the Biome Editor: it reloads
     // within itself with its journal kept, still unsaved)
-    window.addEventListener('beforeunload', e => { if (!VEG_MODE && sceneDirty()) { e.preventDefault(); e.returnValue = ''; } });
+    window.addEventListener('beforeunload', e => { if ((VEH_MODE || !VEG_MODE) && sceneDirty()) { e.preventDefault(); e.returnValue = ''; } });
   } catch (e) { }
 })();
 
@@ -3651,7 +3656,7 @@ const swKey = k => 'bd_sw_' + k.slice(3);
    the SNAPSHOT carries is built in: each world's (WORLD_KEYS) in its world, every other one (the vehicles' tuning, the zoom
    levels, the editor's settings...) in WORLD_PACK.game, read by both worlds - all but LOCAL_KEYS, this browser's own
    bookkeeping (which world is loaded, the stamp its edits were made over, the Story copy's start, its save slots). */
-const LOCAL_KEYS = ['bd_lang', 'bd_world', 'bd_wbase', 'bd_sw_init', 'bd_story_slots', 'bd_story_slots_gpu', 'bd_colv', 'bd_colv2', 'bd_scene_j', 'bd_veg_j'];   // (bd_lang: the language this player picked in OPTIONS - never built in, or a SNAPSHOT would hand it to every new player - 11-pixel-text.js)   // (bd_veg_j: the Biome Editor's unsaved changes - 00-world-journal.js)   // (bd_scene_j: the editor's unsaved changes - 00-world-journal.js)   // (bd_colv: the DISPLAY tab's switches, this browser's own - 50-zz-editor-tabs.js)
+const LOCAL_KEYS = ['bd_lang', 'bd_world', 'bd_wbase', 'bd_sw_init', 'bd_story_slots', 'bd_story_slots_gpu', 'bd_colv', 'bd_colv2', 'bd_scene_j', 'bd_veg_j', 'bd_vehed_j'];   // (bd_lang: the language this player picked in OPTIONS - never built in, or a SNAPSHOT would hand it to every new player - 11-pixel-text.js)   // (bd_veg_j: the Biome Editor's unsaved changes - 00-world-journal.js)   // (bd_scene_j: the editor's unsaved changes - 00-world-journal.js)   // (bd_colv: the DISPLAY tab's switches, this browser's own - 50-zz-editor-tabs.js)
 const isGameKey = k => typeof k === 'string' && k.startsWith('bd_') && !k.startsWith('bd_sw_') && !WORLD_KEYS.includes(k) && !LOCAL_KEYS.includes(k);
 /* (user Oct 31 21:38: "can we have a way that the snapshot has a timestamp? So if I get a build that has a snapshot that is more
    recent than my machine... if I change machines, then I'm always with the out-of-date version") THE BUILT-IN WORLDS: a
@@ -3698,7 +3703,7 @@ function tabSaveBack() {                                          // (this tab's
    guest's world, the host's as its screen keeps it (netWorldOut, sent with the round's start), held in memory for the round
    (netWorldIn): every world key and every key the play depends on (NET_GAME_KEYS) read from it and written to it - never this
    browser's own save, which is just as it was when the guest leaves (netWorldOut of the round: worldReload). */
-const NET_GAME_KEYS = ['bd_prefabs', 'bd_vtune'];
+const NET_GAME_KEYS = ['bd_prefabs', 'bd_vtune', 'bd_vmarks'];   // (bd_vmarks: the vehicles' marks - 50-zzzzz-vehicle-editor-marks.js)
 const netKey = k => typeof k === 'string' && (WORLD_KEYS.includes(k) || NET_GAME_KEYS.includes(k));
 const NET_WORLD = { on: false, map: new Map(), pass: null };
 // (Nov 4, the VEGETATION EDITOR - 00-a-veg-mode.js) its world held in memory as an online guest's is: the open world's conversions marked done, one flat
@@ -3734,7 +3739,7 @@ function vegWorld() {
 // (user Nov 8 09:15: the Biome Editor in and out in place) its test world in: held in memory as an online host's is (NET_WORLD - the plants' numbers,
 // bd_vtune, passed through to this browser's own) and this browser's saved world under THE WORLD GUARD (below) till vegOut. On a load in it: before
 // the world shim, so nothing is ever read from this browser's world first (the guard's lock taken just after the shim - guardOn needs it)
-function vegIn(lock = true) { NET_WORLD.pass = new Set(['bd_vtune']); if (lock) guardOn('the Biome Editor\'s test world'); NET_WORLD.map = vegWorld(); NET_WORLD.on = true; }
+function vegIn(lock = true) { NET_WORLD.pass = new Set(['bd_vtune', 'bd_vmarks']); if (lock) guardOn('the Biome Editor\'s test world'); NET_WORLD.map = vegWorld(); NET_WORLD.on = true; }
 function vegOut() { NET_WORLD.on = false; NET_WORLD.map = new Map(); NET_WORLD.pass = null; return guardOff(); }
 if (VEG_MODE) { vegIn(false); SWB.holds.add('biome'); }                // (the game stays on this page while in it: the simulation worker held - swHold, 00-sw-boot.js)
 /* ---- THE WORLD GUARD (user Nov 8 09:12, of the Biome Editor and this browser's saved world: "This is SUPER important"). While another world
@@ -4098,6 +4103,10 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) {
     const vb = document.createElement('button'); vb.textContent = 'BIOME EDITOR'; vb.title = 'Open the biome editor (the biomes\' plants and decks)';
     vb.onclick = () => sceneAsk(() => vegEnter('editor'), () => { });   // (in place, no reload - 53-veg-editor.js)
     wsel.after(vb);
+    // (user Nov 17 22:56: the third editor) VEHICLE EDITOR after it: its panel over this one, its own unsaved changes its own (54-vehicle-editor.js)
+    const ve = document.createElement('button'); ve.textContent = 'VEHICLE EDITOR'; ve.title = 'Open the vehicle editor (wheels, lamps, smoke, weight)';
+    ve.onclick = () => window.__vehEd.open('editor');
+    vb.after(ve);
   }, 700);
   // (the vegetation editor's GAME EDITOR button: this load opens the GAME EDITOR on the title's mode once the title is up)
   let gameEd = false; try { gameEd = sessionStorage.getItem('gameed') === '1'; if (gameEd) sessionStorage.removeItem('gameed'); } catch (e) { }
@@ -8729,8 +8738,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1082;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 23:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1083;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 18 00:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11541,7 +11550,7 @@ function fpsPress(e) {
   if (!ui.perfPanel) ui.perfPanel = true; else if (!probe.on) probeStart(); else { ui.perfPanel = false; probe.on = false; }
   return true;
 }
-const onEdUI = e => !!(e && e.target && e.target.closest && e.target.closest('#skyEd, #skyExp, #skyEdBtn, #wSub, #vgBot, #vgLab, #vgLeft, #feRoot'));   // (and the Biome Editor's panels)
+const onEdUI = e => !!(e && e.target && e.target.closest && e.target.closest('#skyEd, #skyExp, #skyEdBtn, #wSub, #vgBot, #vgLab, #vgLeft, #feRoot, #vehEd, #vehEdBtn'));   // (and the Biome Editor's panels)
 window.addEventListener('pointerdown', e => {
   if (onEdUI(e)) return;
   e.preventDefault();
@@ -11807,6 +11816,7 @@ function kbSlot(set) {
 // a key's action for the slot its set plays: f(p) with p the team index to use
 function keyDo(set, f) { const v = kbSlot(set); if (v >= 0) return asSlot(v, f); }
 window.addEventListener('keydown', e => {
+  if (VEH_MODE) return;   // (the Vehicle Editor open: every key its own - 54-vehicle-editor.js)
   // (typing in a field - the editor's, the SNAPSHOT box, any text box on the page: its keys are the field's, Ctrl+V too - user Nov 1 22:08)
   if (e.target && (/^(TEXTAREA|SELECT)$/.test(e.target.tagName) || (e.target.tagName === 'INPUT' && e.target.type !== 'range') || e.target.isContentEditable)) return;
   const code = keyCode(e);
@@ -12090,6 +12100,7 @@ function pollPads(dt) {
   let pads;
   try { pads = Array.from(navigator.getGamepads() || []).filter(Boolean); } catch (e) { return; }
   PADS_SEEN = pads.length;
+  if (VEH_MODE) return;   // (the Vehicle Editor open: the title under it takes nothing)
   if (padMenuOn()) padMenuPoll(pads, dt); else padMenu.on = false;
   for (let v = 0; v < 2; v++) {
     const gi = padOf(v), gp = gi >= 0 ? pads[gi] : null, st = padState[v];
@@ -62797,7 +62808,7 @@ function exhPuff(x, y, vx, px, k, o) {
   exhaust.addRow({ x, y, vx, vy: o ? o.vy : -carRnd(3, 7) * px, r: px * (0.8 + 0.6 * carFxR()) * Math.min(1.5, k), grow: px * carRnd(0.9, 1.6), age: 0, life: o ? o.life : carRnd(0.8, 1.5) * (k > 1.2 ? 1.4 : 1), px, g: o ? o.g : k > 1.2 ? 0.8 : 1 });
 }
 function carPuff(c, L, k) {
-  const P = storyCarSize(c)[2], [px, py] = carPt(c, -L * 0.48, 0.45 * UPM);
+  const P = storyCarSize(c)[2], X = CAR_EXH[c.art] || CAR_EXH_DEF, [px, py] = carPt(c, L * X[0], X[1] * UPM);
   exhPuff(px, py, -c.dir * (8 + Math.abs(c.vx) * 0.3), P ? P._m * UPM : 0.06 * UPM, k);
 }
 defTable('exhaust', null, { cols: exhaust, drawn: ['x', 'y', 'r', 'age', 'life', 'px', 'g'], rows: rows => exhaust.plainOfRows(rows), net: false });   // (Nov 2: vehicles' exhaust in their own pixels - 50-story-cars.js)
@@ -63093,11 +63104,20 @@ function carPass(c) {
 // the back") one rule for every vehicle on wheels: as the lamps come on (E.lampsOn - the airport's, the subs' lamps), her
 // headlamp at her nose throws a beam ahead along her way and her tail lamp glows red - drawn after the world's tint, as every
 // lamp is (airLamps, lateLit - 50-land-airport.js)
-const CAR_LAMP = [0.47, 0.36, -0.48, 0.42];               // (where they are on her: the headlamp along her from her middle, up from her wheels' foot, as shares of her length / height; the tail lamp's)
+// each car's lamps: [along her from her middle toward her nose, up from her wheels' foot (shares of her length / height), type]. type: 'beam' a white
+// lamp that throws a beam ahead (her headlamp - carLamps), 'white' / 'red' a small glow, 'side' a sidelight (green going right, red going left).
+// (user Nov 17 22:51: "decide where the lights go, what type of lights") a row a car, the VEHICLE EDITOR's to move, add to and take from (50-zzzzz-vehicle-editor-marks.js)
+const CAR_LAMP_DEF = [[0.47, 0.36, 'beam'], [-0.48, 0.42, 'red']];
+const CAR_LAMPS = {};
+// her exhaust pipe's mouth: [along her from her middle (a share of her length), up from her wheels' foot (metres)]
+const CAR_EXH_DEF = [-0.48, 0.45], CAR_EXH = {};
+for (const art in CAR_WHEELS) { CAR_LAMPS[art] = CAR_LAMP_DEF.map(q => q.slice()); CAR_EXH[art] = CAR_EXH_DEF.slice(); }
+const carLampsOf = art => CAR_LAMPS[art] || CAR_LAMP_DEF;
+// a small lamp's glow by its type (airLamps' kinds: 0 white, 1 red, 3 green - 50-land-airport.js): dir the way its vehicle goes
+const lampKind = (t, dir) => t === 'red' ? 1 : t === 'side' ? (dir > 0 ? 3 : 1) : 0;
 function carLights(c, L, H) {
   const k = E.lampsOn || 0; if (k < 0.05 || !vehManned(c)) return;   // (only with someone at the wheel - vehManned, 50-zz-lights.js)
-  const [hx, hy] = carPt(c, L * CAR_LAMP[0], H * CAR_LAMP[1]), [tx, ty] = carPt(c, L * CAR_LAMP[2], H * CAR_LAMP[3]);
-  airLamp(PX(hx), PY(hy), k, 0); airLamp(PX(tx), PY(ty), k * 0.9, 1);
+  for (const [a, u, t] of carLampsOf(c.art)) { const [x, y] = carPt(c, L * a, H * u); airLamp(PX(x), PY(y), t === 'red' ? k * 0.9 : k, lampKind(t, c.dir)); }
 }
 // (user Nov 2, the beam: "should have a smoother falloff and a slightly bigger radius. It should also illuminate the things it
 // touches, just like the torch for the research submarine does. This is a universal rule for all lights") her headlamp's beam is a
@@ -63107,8 +63127,12 @@ function carLamps(out) {
   const k = E.lampsOn || 0; if (k < 0.05 || !storyCars.length) return out;
   for (const c of storyCars) {
     if (c.state !== 'run' || !vehManned(c)) continue;
-    const [L, H] = storyCarSize(c), [hx, hy] = carPt(c, L * CAR_LAMP[0], H * CAR_LAMP[1]), r = c.a - c.dir * (c.pit || 0);
-    out.push({ x: hx, y: hy, a: Math.atan2(Math.sin(r) * c.dir + 0.12, Math.cos(r) * c.dir), s: c, ms: false, k: 0.75 * k, air: true, reach: L * CAR_BEAM });   // (a little down, onto the road ahead)
+    const [L, H] = storyCarSize(c), r = c.a - c.dir * (c.pit || 0);
+    for (const [a, u, t] of carLampsOf(c.art)) {
+      if (t !== 'beam') continue;
+      const [hx, hy] = carPt(c, L * a, H * u);
+      out.push({ x: hx, y: hy, a: Math.atan2(Math.sin(r) * c.dir + 0.12, Math.cos(r) * c.dir), s: c, ms: false, k: 0.75 * k, air: true, reach: L * CAR_BEAM });   // (a little down, onto the road ahead)
+    }
   }
   return out;
 }
@@ -63290,7 +63314,7 @@ const netOf = j => { if (j.hold > 0) { cargoAdd(j, 'fish', j.hold); j.hold = und
 function netHook(j) {
   const [w, h] = storyBoatSize(j), u = j.turn > 0 ? j.turn / jbTurn(j) : 0, sq = j.turn > 0 ? Math.abs(Math.cos(Math.PI * u)) : 1;
   const lx = -0.077 * w * sq * j.dir, ly = -0.59 * h, a = j.a || 0, ca = Math.cos(a), sa = Math.sin(a);   // (the hook under the crane's block: 58% along the art from its bow, 41% down)
-  return [j.x + lx * ca - ly * sa, j.y + h * FISH_DRAFT + lx * sa + ly * ca];
+  return [j.x + lx * ca - ly * sa, j.y + h * PIC_BOATS.fish.draft + lx * sa + ly * ca];
 }
 // the net gathered up at the block: a small bundle, the bag's own shape shrunk (so it opens as itself when let go)
 // (ax, ay: where its float is; the rope's points at the block, hx / hy)
@@ -63305,7 +63329,7 @@ function netFold(N, j, ax, ay, hx = ax, hy = ay) {
 function netDeck(j) {
   const [w, h] = storyBoatSize(j), u = j.turn > 0 ? j.turn / jbTurn(j) : 0, sq = j.turn > 0 ? Math.abs(Math.cos(Math.PI * u)) : 1;
   const lx = 0.05 * w * sq * j.dir, ly = -0.34 * h - 0.45 * UPM, a = j.a || 0, ca = Math.cos(a), sa = Math.sin(a);   // (the open deck between the mast and the wheelhouse)
-  return [j.x + lx * ca - ly * sa, j.y + h * FISH_DRAFT + lx * sa + ly * ca];
+  return [j.x + lx * ca - ly * sa, j.y + h * PIC_BOATS.fish.draft + lx * sa + ly * ca];
 }
 // the bag hanging ready under the hook (m), how full a bag looks (fish), the rail it goes down behind
 // (user 12:12: "Once the Float has hit the water line THEN the sinker is the only one going up like 'closing' the bag with the fish.
@@ -63326,7 +63350,7 @@ function netBagPlace(N, cx, top, hx, hy) {
   for (let r = 0; r < G.RN; r++) { const q = 4 * (G.NN + r); P[q] = P[q + 2] = hx; P[q + 1] = P[q + 3] = hy; }
   N.na = 0; N.L = Math.max(0, top - hy);
 }
-function netDeckY(j) { const h = storyBoatSize(j)[1]; return j.y + h * FISH_DRAFT - h + 0.64 * h; }
+function netDeckY(j) { const h = storyBoatSize(j)[1]; return j.y + h * PIC_BOATS.fish.draft - h + 0.64 * h; }
 // the net breaking the surface: a burst of foam and spray round it
 function netBreakOut(j, N, x, y) {
   if (SIM_ONLY) return;
@@ -63721,7 +63745,7 @@ function netCam(p, v) {
     return [v.x + Z.ox, FOCUS_Y + Z.oy];
   };
   if (!out) { if (Z.set != null && scopes[p].level !== Z.own) { zoomSlow(p); setScope(p, Z.own); } Z.set = null; Z.own = null; return ease(v.x, FOCUS_Y); }
-  const h = storyBoatSize(v)[1], top = v.y + h * FISH_DRAFT - h, bot = Math.max(v.y, waterLv(v.x) + N.d), lo = Math.min(N.lo, v.x - storyBoatSize(v)[0] / 2), hi = Math.max(N.hi, v.x + storyBoatSize(v)[0] / 2);
+  const h = storyBoatSize(v)[1], top = v.y + h * PIC_BOATS.fish.draft - h, bot = Math.max(v.y, waterLv(v.x) + N.d), lo = Math.min(N.lo, v.x - storyBoatSize(v)[0] / 2), hi = Math.max(N.hi, v.x + storyBoatSize(v)[0] / 2);
   const needH = (bot - top) * 1.25, needW = (hi - lo) * 1.2;
   let lv = Z.own; while (lv > 1 && (VIEW_H / ZOOM_LEVELS[lv - 1] < needH || VIEW_W / ZOOM_LEVELS[lv - 1] < needW)) lv--;
   if (scopes[p].level !== lv) { zoomSlow(p); setScope(p, lv); }
@@ -63919,7 +63943,7 @@ function drawStoryNet(j, h) {
       const cx = j.x + Math.cos(a) * L * (0.45 + 0.5 * r), cy = j.y - h * (1.2 + 0.6 * ((k * 7) % 5) / 5) + Math.sin(a * 1.7) * h * 0.18;
       // where it sits: the bow, the wheelhouse roof, the stern rail, then along her rail
       const [ax, ay] = k === 0 ? [0.06, 0.58] : k === 1 ? [0.62, 0.46] : k === 2 ? [0.92, 0.62] : k < 6 ? [0.57 + (k - 3) * 0.06, 0.46] : [0.1 + (k - 6) / 14 * 0.8, 0.6];
-      const px = j.x - j.dir * (ax - 0.5) * L, py = j.y + h * FISH_DRAFT - h + ay * h;   // (the art faces left: its bow at ax 0)
+      const px = j.x - j.dir * (ax - 0.5) * L, py = j.y + h * PIC_BOATS.fish.draft - h + ay * h;   // (the art faces left: its bow at ax 0)
       const gx = cx + (px - cx) * e, gy = cy + (py - cy) * e, sits = e > 0.97;
       const sp = sits ? (mini ? img.birds.gullMiniPerch : img.birds.gullPerch) : (mini ? img.birds.gullMini : img.birds.gull)[[0, 1, 2, 1][Math.floor(time * 8 + k * 1.3) % 4]];
       const face = sits ? (k % 3 ? -j.dir : j.dir) : -Math.sin(a) > 0 ? 1 : -1;
@@ -64441,16 +64465,15 @@ ACTS.storyPark = (p, id) => storyPark(p, id);
 const PIC_BOATS = {
   fish: { art: ['fishing-boat-0', 'fishing-boat-1', 'fishing-boat-2', 'fishing-boat-3'], draft: 0.2, turn: [0.82, 0.5, 0.2],   // (her draft - user 10:34: a little higher than 0.24)
     // (11:16, his photo: "A couple of lights on top") the masthead's and the crane's head lamps, white; the sidelight; the stern light
-    lamps: [[0.34, 0.015, 1], [0.577, 0.03, 1], [0.56, 0.47, 0.9, 'side'], [0.97, 0.6, 0.8]],
+    lamps: [[0.34, 0.015, 1], [0.577, 0.03, 1], [0.56, 0.47, 0.9, 'side'], [0.97, 0.6, 0.8]], dp: { lamp2: 'n' },   // (dp: where a mark sits across her - her sidelight on her near side; the rest on her middle line)
     funnel: [0.79, 0.41], screw: [0.88, 0.87], wl: [0.1, 0.86], creak: true, fb: [11, 7] },
   // (a 25-ft hardtop cruiser, her hull 7.5 m - prep.py) her all-round white light on the hardtop's after end, her sidelight where
   // the user painted it on the cabin; her outboard's propeller under the water; no funnel (an outboard breathes out through its
   // propeller: the bubbles)
   motor: { art: ['motorboat-0', 'motorboat-1', 'motorboat-2', 'motorboat-3', 'motorboat-4'], draft: 0.19, turn: [0.86, 0.64, 0.42, 0.2],
-    lamps: [[0.735, 0.06, 1], [0.63, 0.32, 0.9, 'side']], funnel: null, screw: [0.94, 0.93], wl: [0.12, 0.89], creak: false, fb: [8.4, 3.4] },
+    lamps: [[0.735, 0.06, 1], [0.63, 0.32, 0.9, 'side']], dp: { lamp1: 'n' }, funnel: null, screw: [0.94, 0.93], wl: [0.12, 0.89], creak: false, fb: [8.4, 3.4] },
 };
 const picBoat = j => (j && PIC_BOATS[j.kind]) || null;
-const FISH_DRAFT = PIC_BOATS.fish.draft;   // (the fishing net's own reckoning - 50-story-net.js)
 // which of its views shows now: the side view, through the ones between as it swings toward us, bow on at the turn's middle
 function picBoatView(B, j) {
   if (!(j.turn > 0)) return 0;
@@ -64499,8 +64522,14 @@ function drawPicBoat(j) {
   if (lit && F === P && j.state !== 'sink') { const Y1 = PY(j.y + dr), X0 = PX(j.x) - W / 2; objNight(P, B.art[0], X0, Y1 - H, X0 + W, Y1, j.dir > 0, false); }   // (a vehicle's windows: lit, no glow round them)
   if (lit && j.state === 'run') {
     const n = clamp(E.night * 1.2 + E.dusk * 0.7 + E.fog * 0.4, 0, 1);
-    if (n > 0.05) for (const [ax, ay, s, side] of B.lamps)   // (its lamps on the view showing: their places along the side view, narrowed with it)
-      airLamp(PX(j.x - j.dir * (ax - 0.5) * fw), PY(j.y + dr - fh + ay * fh), n * s, side ? (j.dir > 0 ? 3 : 1) : 0);   // (the sidelight on our side: green going right, red going left)
+    // (Nov 17, the Vehicle Editor: a lamp is marked once, on the side view, with where it sits across her - vmTurnX, 50-zzzzz-vehicle-editor-marks.js)
+    // its lamps on the view showing: each along her as far as she's turned, her near side's out toward her stern as her bow swings to us
+    if (n > 0.05) {
+      const tt = j.turn > 0 ? Math.acos(Math.min(1, Math.abs(Math.cos(Math.PI * j.turn / jbTurn(j))))) / (Math.PI / 2) : 0, hb = VM_FAMS.boat.width(j.kind) * UPM / 2;
+      B.lamps.forEach(([ax, ay, s, ty], i) => {
+        for (const off of vmTurnX((ax - 0.5) * w, 0, hb, vmDp(B, 'lamp' + i, 'm'), tt)) airLamp(PX(j.x - j.dir * off), PY(j.y + dr - fh + ay * fh), n * s, lampKind(ty, j.dir));   // (the sidelight on our side: green going right, red going left)
+      });
+    }
   }
   drawStoryNet(j, h);   // (a boat with a net out - 50-story-net.js)
 }
@@ -66756,7 +66785,7 @@ VEH_LOOKS.boat = (sv, D) => {
   if (!jbArt) buildJetboatArt();
   return lookPic(jbArt[D.col || 0].r);
 };
-// a car: her picture, at night her headlamp and red tail lamp (CAR_LAMP - carLights) and a little of her beam ahead
+// a car: her picture, at night her lamps (CAR_LAMPS - carLights) and a little of her beam ahead
 VEH_LOOKS.car = (sv, D) => {
   const P = tropPic(D.art); if (!P) return null;
   const w = P.width, h = P.height, ext = Math.round(w * 0.6);
@@ -66764,11 +66793,16 @@ VEH_LOOKS.car = (sv, D) => {
     P, w: w + ext, h,
     draw: g => { g.save(); g.translate(w, 0); g.scale(-1, 1); g.drawImage(P, 0, 0); g.restore(); },   // (the art faces left)
     lights: g => {
-      const hx = w / 2 + w * CAR_LAMP[0], hy = h - h * CAR_LAMP[1], tx = w / 2 + w * CAR_LAMP[2], ty = h - h * CAR_LAMP[3];
-      g.save(); g.globalCompositeOperation = 'lighter';
-      const q = g.createLinearGradient(hx, 0, hx + ext, 0); q.addColorStop(0, 'rgba(255,240,200,0.45)'); q.addColorStop(1, 'rgba(255,240,200,0)');
-      g.fillStyle = q; g.beginPath(); g.moveTo(hx, hy - 1); g.lineTo(hx + ext, hy - h * 0.15); g.lineTo(hx + ext, hy + h * 0.35); g.closePath(); g.fill(); g.restore();
-      lookGlow(g, hx, hy, Math.max(4, h * 0.2), '255,240,200', 0.9); lookGlow(g, tx, ty, Math.max(3, h * 0.15), '255,40,30', 0.9);
+      for (const [a, u, t] of carLampsOf(D.art)) {             // (her lamps where she has them, by their types - CAR_LAMPS)
+        const hx = w / 2 + w * a, hy = h - h * u;
+        if (t === 'beam') {
+          g.save(); g.globalCompositeOperation = 'lighter';
+          const q = g.createLinearGradient(hx, 0, hx + ext, 0); q.addColorStop(0, 'rgba(255,240,200,0.45)'); q.addColorStop(1, 'rgba(255,240,200,0)');
+          g.fillStyle = q; g.beginPath(); g.moveTo(hx, hy - 1); g.lineTo(hx + ext, hy - h * 0.15); g.lineTo(hx + ext, hy + h * 0.35); g.closePath(); g.fill(); g.restore();
+        }
+        if (t === 'red') lookGlow(g, hx, hy, Math.max(3, h * 0.15), '255,40,30', 0.9);
+        else lookGlow(g, hx, hy, Math.max(4, h * 0.2), t === 'side' ? '80,255,120' : '255,240,200', 0.9);
+      }
     },
   };
 };
@@ -69096,6 +69130,7 @@ const UNDO_KEPT = {
   bd_prices: () => { STORY_PRICES = lsJ('bd_prices', {}); pfSync(); },
   bd_story_zoom: () => { STORY_ZW = lsJ('bd_story_zoom', {}); pfSync(); },
   bd_vtune: () => { vtuneApply(lsJ('bd_vtune', {})); vtunePush(); },
+  bd_vmarks: () => { vmApply(lsJ('bd_vmarks', null)); vmPush(); },
   bd_launch_zoom: () => { const o = lsJ('bd_launch_zoom', {}); for (const k in LAUNCH_ZOOM) LAUNCH_ZOOM[k] = Number.isInteger(o[k]) ? o[k] : LAUNCH_ZOOM_DEF[k]; },
   bd_sky_p: () => {
     const o = lsJ('bd_sky_p', {}), P = NSKY.P, D = NSKY.P_DEF, scene = ['time', 'cover', 'sky', 'fog', 'rain', 'wind', 'sea'];   // (the scene's: the weather's, not settings - sky/00-base.js SCENE_KEYS)
@@ -69188,7 +69223,7 @@ window.addEventListener('keydown', e => {
    its DELETE takes that step and every one after it away (each step is made on the ones before it, as in Photoshop), the world back to
    the one before it if it was past it. The history is this page's (up to UNDO.max); SAVE / DISCARD are the scene's (00-world-journal). */
 const UNDO_PART = { I: 'SHAPE', ST: 'STRUCTURE', S: 'PADS', N: 'CREATURE AREAS', W: 'WORLD SIZE', LK: 'LAKE LEVELS', D: 'DOCKS', DO: 'DOCKS', DX: 'DOCKS', X: 'STRETCH', K: 'KRAKEN', KO: 'KRAKEN', P: 'WRECKS', BG: 'BACKGROUNDS',
-  bd_placed: 'VEHICLE', bd_weather_areas: 'WEATHER AREAS', bd_prefabs: 'PREFABS', bd_prices: 'PRICES', bd_story_zoom: 'STORY ZOOM', bd_vtune: 'VEHICLE TUNING', bd_launch_zoom: 'BATTLE ZOOM',
+  bd_placed: 'VEHICLE', bd_weather_areas: 'WEATHER AREAS', bd_prefabs: 'PREFABS', bd_prices: 'PRICES', bd_story_zoom: 'STORY ZOOM', bd_vtune: 'VEHICLE TUNING', bd_vmarks: 'VEHICLE MARKS', bd_launch_zoom: 'BATTLE ZOOM',
   bd_sky_p: 'SKY', bd_sky_colours: 'SKY COLOURS', bd_cave_params: 'CAVE SETTINGS', bd_markers: 'MARKERS' };
 // what one list of things (shapes, structures, placed vehicles) did: one added, deleted, moved or changed - named; several - counted
 function undoListName(A, B, noun, idOf, nameOf, moved) {
@@ -72157,7 +72192,7 @@ function tvtWorld(seed, W) {
 // screen shows at its zoom (TVT_FIELD at least). The page keeps the game while it's in (the worker held)
 function tvtWorldIn() {
   const z = tvtZoom(); TV.w = Math.round(VIEW_W / z);
-  if (!TV.in) { if (!SWB.holds.has('tvt')) swHold('tvt'); NET_WORLD.pass = new Set(['bd_vtune']); guardOn('Tank vs Tank\'s world'); TV.in = true; }
+  if (!TV.in) { if (!SWB.holds.has('tvt')) swHold('tvt'); NET_WORLD.pass = new Set(['bd_vtune', 'bd_vmarks']); guardOn('Tank vs Tank\'s world'); TV.in = true; }
   NET_WORLD.map = tvtWorld(TV.seed, TV.w).map; NET_WORLD.on = true;
   worldReload();
 }
@@ -72559,6 +72594,219 @@ window.addEventListener('keydown', e => {
   const t = e.target; if (t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) && t.type !== 'range' || t.isContentEditable)) return;
   e.preventDefault(); e.stopImmediatePropagation(); wedDuplicate();
 }, { capture: true });
+
+//@src 50-zzzzz-vehicle-editor-marks.js:1
+/* ================================================================
+   THE VEHICLES' MARKS IN ONE TABLE (user Nov 17 22:51: "when you import a car or a plane, you have to define its shape, decide where the
+   lights go, what type of lights, if they have wheels, where they go, the weight of the vehicle. So would it be unreasonable to have a
+   vehicle editor where for now you just expose the things you've been doing to the vehicles?")
+   What was marked by eye on each vehicle's picture - its wheels, its lamps and their types, where its smoke comes out, its screw, its
+   waterline, its weight and where its weight sits - lives in each family's own table, as before (CAR_WHEELS, CAR_SPEC, CAR_LAMPS, CAR_EXH,
+   PIC_BOATS, CIV): the game reads those and nothing else. This file is the one way in to all of them:
+   - VM_FAMS: a family's adapter - its vehicles (keys), each one's row as plain data in the family's own numbers (get / put), and the
+     same as marks on its side picture for the VEHICLE EDITOR (marks / fromMarks - 54-vehicle-editor.js).
+   - bd_vmarks: what differs from the built-in rows ({ key: row }), the game's own as bd_vtune is (both worlds, online, the SNAPSHOT);
+     read through worldLoad, sent to the simulation worker as it changes ('vmarks' - its table and its action).
+   - a mark's DEPTH (user 22:56: cars and boats "will eventually have rotation like the submarine"): each mark is placed once, on the
+     side view, with where it sits across the vehicle - 'n' the near side, 'f' the far side, 'b' both (a pair), 'm' its middle line -
+     so a view turned toward us can place it (vmTurnX). Kept with the row (dp).
+   A new family joins with an adapter here; a new vehicle of a family is a row in that family's table.
+   ================================================================ */
+const VM_FAMS = {};
+const VM = { def: {}, got: false };
+const vmClone = o => JSON.parse(JSON.stringify(o));
+const vmFamOf = key => VM_FAMS[String(key).split(':')[0]] || null;
+const vmArt = key => String(key).split(':').slice(1).join(':');
+function vmKeys() { const L = []; for (const f in VM_FAMS) for (const k of VM_FAMS[f].keys()) L.push(f + ':' + k); return L; }
+// each row as the game was built with it: taken once, before anything stored is laid over it
+function vmDefaults() { if (VM.got) return; VM.got = true; for (const key of vmKeys()) VM.def[key] = vmClone(vmFamOf(key).get(vmArt(key))); }
+const vmGet = key => vmClone(vmFamOf(key).get(vmArt(key)));
+function vmPut(key, row) { const F = vmFamOf(key); if (F && row) F.put(vmArt(key), vmClone(row)); }
+// what differs from the built-in rows, and those put in (every other row its built-in one)
+function vmDiff() { vmDefaults(); const ch = {}; for (const key in VM.def) { const r = vmGet(key); if (JSON.stringify(r) !== JSON.stringify(VM.def[key])) ch[key] = r; } return ch; }
+function vmApply(ch) { vmDefaults(); for (const key in VM.def) vmPut(key, ch && ch[key] && typeof ch[key] === 'object' ? vmMerge(VM.def[key], ch[key]) : VM.def[key]); }
+// a stored row over its built-in one: only the fields the built-in row has, each of the kind it is there (a row kept by an older version stays sound)
+function vmMerge(d, r) { const o = vmClone(d); for (const k in d) if (k in r && r[k] != null && Array.isArray(r[k]) === Array.isArray(d[k]) && typeof r[k] === typeof d[k]) o[k] = vmClone(r[k]); return o; }
+function vmPush() { if (typeof SW !== 'undefined' && SW.live && typeof act === 'function') act(0, 'vmarks', vmDiff()); }
+function vmSave() {
+  vmPush();
+  try {
+    const ch = vmDiff(), v = Object.keys(ch).length ? JSON.stringify(ch) : null, now = localStorage.getItem('bd_vmarks');
+    if (v === now || (v === null && now === '{}')) return;
+    if (v) localStorage.setItem('bd_vmarks', v); else localStorage.removeItem('bd_vmarks');
+  } catch (e) { }
+}
+
+// ---- A MARK ACROSS THE VEHICLE: where a mark placed on the side view shows in a view turned toward us. x, mid: along the side picture
+// (pixels; mid the picture's middle), half: half the vehicle's width in those pixels, t: the turn - 0 side on, 1 end on, its nose toward us.
+// Every side picture faces left: as its nose swings toward us its near side goes to the right (where its tail was), its far side to the
+// left. 'b' (a pair): [near, far]
+const VM_DEPTH = { n: 1, f: -1, m: 0 };
+function vmTurnX(x, mid, half, dp, t) {
+  const a = t * Math.PI / 2, c = Math.cos(a), s = Math.sin(a), at = z => mid + (x - mid) * c + z * half * s;
+  return dp === 'b' ? [at(1), at(-1)] : [at(VM_DEPTH[dp] || 0)];
+}
+const vmDp = (row, id, d) => (row.dp && row.dp[id]) || d;
+
+// ---- THE CARS (50-story-cars.js): wheels [x, y, radius] in her picture's pixels (it faces left); her make [mass kg, her weight's middle forward
+// of her axles' middle as a share of her wheelbase, its height as a share of her height]; her lamps and exhaust (shares along from her middle
+// toward her nose / up from her wheels' foot; the exhaust's height in metres)
+VM_FAMS.car = {
+  lab: 'CARS', views: () => 1,
+  keys: () => Object.keys(CAR_WHEELS),
+  name: art => (Object.values(STR_VEHS).find(D => D.fam === 'car' && D.art === art) || {}).lab || art.replace(/_/g, ' ').toUpperCase(),
+  pic: art => { const P = tropPic(art); return P ? { img: P, w: P.width, h: P.height, m: P._m } : null; },
+  width: art => (CAR_SPEC[art] && CAR_SPEC[art][0] > 3000 ? 2.5 : art === 'motorcycle' ? 0.8 : 1.8),
+  get: art => ({ wheels: CAR_WHEELS[art], spec: CAR_SPEC[art] || [1500, 0, 0.4], lamps: CAR_LAMPS[art], exh: CAR_EXH[art], dp: CAR_DP[art] || {} }),
+  put(art, r) {
+    CAR_WHEELS[art] = r.wheels; CAR_SPEC[art] = r.spec; CAR_LAMPS[art] = r.lamps; CAR_EXH[art] = r.exh; CAR_DP[art] = r.dp || {};
+    const P = tropPic(art); if (P) { delete P._cw; delete P._cdw; }   // (her wheels' cuts and driven wheels, worked out once a picture - carParts, carWheelsOf)
+  },
+  kinds: {
+    wheel: { lab: 'WHEEL', add: true, r: true, min: 2, depth: 'b', help: 'A wheel: its place and size on the picture' },
+    lamp: { lab: 'LAMP', add: true, types: ['beam', 'white', 'red', 'side'], depth: 'b', help: 'A lamp that comes on at night' },
+    smoke: { lab: 'EXHAUST', depth: 'n', help: 'Where the exhaust smoke comes out' },
+    cg: { lab: 'CENTRE OF WEIGHT', depth: 'm', help: 'Where the weight sits: tips her on hills and when braking' },
+  },
+  // her own numbers of the vehicles' table (VTUNE.car - 01-z-vehicle-tune.js): which wheels are driven, her engine's power at the wheels
+  tune: art => [{ f: 'car', k: art + 'Drive', lab: 'DRIVEN WHEELS', min: 0, max: 2, step: 1, opts: ['REAR', 'FRONT', 'ALL'], help: 'Which wheels the engine turns' },
+    { f: 'car', k: art + 'Kw', lab: 'ENGINE POWER (KW)', min: 20, max: 800, step: 10, help: 'Her engine\'s power at the wheels' }].filter(n => n.k in VTUNE.car),
+  nums: [{ k: 'mass', lab: 'WEIGHT (KG)', min: 100, max: 40000, step: 50, help: 'Her weight: heavier grips more and speeds up slower' }],
+  marks(art, r, P) {
+    const M = [], xs = r.wheels.map(q => q[0]), ax = (Math.min(...xs) + Math.max(...xs)) / 2, wb = Math.max(1, Math.max(...xs) - Math.min(...xs));
+    r.wheels.forEach((q, i) => M.push({ id: 'wheel' + i, k: 'wheel', x: q[0], y: q[1], r: q[2] }));
+    r.lamps.forEach((q, i) => M.push({ id: 'lamp' + i, k: 'lamp', x: (0.5 - q[0]) * P.w, y: P.h - q[1] * P.h, t: q[2] }));
+    M.push({ id: 'smoke0', k: 'smoke', x: (0.5 - r.exh[0]) * P.w, y: P.h - r.exh[1] / P.m });
+    M.push({ id: 'cg0', k: 'cg', x: ax - r.spec[1] * wb, y: P.h - r.spec[2] * P.h });
+    return { marks: M, nums: { mass: r.spec[0] } };
+  },
+  fromMarks(art, M, nums, P, r) {
+    const W = M.filter(q => q.k === 'wheel'), xs = W.map(q => q.x), ax = (Math.min(...xs) + Math.max(...xs)) / 2, wb = Math.max(1, Math.max(...xs) - Math.min(...xs));
+    const cg = M.find(q => q.k === 'cg'), ex = M.find(q => q.k === 'smoke'), r3 = v => Math.round(v * 1000) / 1000;
+    // (her weight's middle is kept from her axles: moved only when its own mark is - a wheel moved takes it along)
+    const was = this.marks(art, r, P).marks.find(q => q.k === 'cg'), same = Math.abs(was.x - cg.x) < 0.01 && Math.abs(was.y - cg.y) < 0.01;
+    return {
+      wheels: W.map(q => [Math.round(q.x * 2) / 2, Math.round(q.y * 2) / 2, Math.round(q.r * 2) / 2]),
+      spec: same ? [nums.mass, r.spec[1], r.spec[2]] : [nums.mass, r3((ax - cg.x) / wb), r3((P.h - cg.y) / P.h)],
+      lamps: M.filter(q => q.k === 'lamp').map(q => [r3(0.5 - q.x / P.w), r3((P.h - q.y) / P.h), q.t || 'white']),
+      exh: [r3(0.5 - ex.x / P.w), r3((P.h - ex.y) * P.m)],
+      dp: r.dp || {},
+    };
+  },
+};
+const CAR_DP = {};   // (each car's marks across her - art: { mark id: 'n' / 'f' / 'b' / 'm' }; none kept: the kind's own, VM_FAMS.car.kinds)
+
+// ---- THE PICTURE BOATS (50-story.js PIC_BOATS): shares of the side picture, its bow at 0 along. lamps [along, down, strength, type]; her funnel's
+// mouth; her screw; her waterline's stem and stern along her; her draft (a share of her height under the water)
+VM_FAMS.boat = {
+  lab: 'BOATS', views: k => PIC_BOATS[k].art.length,
+  viewAt: (k, t) => { const B = PIC_BOATS[k], c = Math.cos(t * Math.PI / 2); let i = 0; while (i < B.turn.length && c <= B.turn[i]) i++; return i; },   // (the view the game shows at this turn - picBoatView)
+  keys: () => Object.keys(PIC_BOATS),
+  name: k => (Object.values(STR_VEHS).find(D => D.fam === 'boat' && D.kind === k) || {}).lab || (k === 'fish' ? 'FISHING BOAT' : k === 'motor' ? 'MOTOR BOAT' : k.toUpperCase()),
+  pic: (k, v = 0) => { const B = PIC_BOATS[k], P = tropPic(B.art[clamp(v, 0, B.art.length - 1)]); return P ? { img: P, w: P.width, h: P.height, m: P._m } : null; },
+  width: k => { const B = PIC_BOATS[k], P = tropPic(B.art[B.art.length - 1]); return P ? P.width * P._m : 3; },   // (her bow-on view's width)
+  get: k => { const B = PIC_BOATS[k]; return { lamps: B.lamps, funnel: B.funnel || [], screw: B.screw, wl: B.wl, draft: B.draft, dp: B.dp || {} }; },
+  put(k, r) { const B = PIC_BOATS[k]; B.lamps = r.lamps; B.funnel = r.funnel && r.funnel.length ? r.funnel : null; B.screw = r.screw; B.wl = r.wl; B.draft = r.draft; B.dp = r.dp || {}; },
+  kinds: {
+    lamp: { lab: 'LAMP', add: true, types: ['white', 'red', 'side'], s: true, depth: 'm', help: 'A lamp that comes on at night' },
+    smoke: { lab: 'FUNNEL', add: true, max: 1, depth: 'm', help: 'Where the funnel smoke comes out' },
+    screw: { lab: 'PROPELLER', depth: 'm', help: 'Where the propeller\'s bubbles come from' },
+    stem: { lab: 'WATERLINE BOW', depth: 'm', ax: 'x', help: 'Where her bow meets the water: the bow wave starts here' },
+    stern: { lab: 'WATERLINE STERN', depth: 'm', ax: 'x', help: 'Where her stern meets the water: the wake starts here' },
+  },
+  nums: [{ k: 'draft', lab: 'DRAFT', min: 0, max: 0.6, step: 0.01, help: 'How much of her height sits under the water' }],
+  marks(k, r, P) {
+    const M = [], wy = P.h * (1 - r.draft);
+    r.lamps.forEach((q, i) => M.push({ id: 'lamp' + i, k: 'lamp', x: q[0] * P.w, y: q[1] * P.h, s: q[2], t: q[3] || 'white' }));
+    if (r.funnel.length) M.push({ id: 'smoke0', k: 'smoke', x: r.funnel[0] * P.w, y: r.funnel[1] * P.h });
+    M.push({ id: 'screw0', k: 'screw', x: r.screw[0] * P.w, y: r.screw[1] * P.h });
+    M.push({ id: 'stem0', k: 'stem', x: r.wl[0] * P.w, y: wy }, { id: 'stern0', k: 'stern', x: r.wl[1] * P.w, y: wy });
+    return { marks: M, nums: { draft: r.draft }, water: wy };
+  },
+  fromMarks(k, M, nums, P, r) {
+    const r3 = v => Math.round(v * 1000) / 1000, pt = q => [r3(q.x / P.w), r3(q.y / P.h)], one = id => M.find(q => q.k === id), f = one('smoke');
+    return {
+      lamps: M.filter(q => q.k === 'lamp').map(q => { const a = [...pt(q), q.s == null ? 1 : q.s]; if (q.t && q.t !== 'white') a.push(q.t); return a; }),
+      funnel: f ? pt(f) : [], screw: pt(one('screw')), wl: [r3(one('stem').x / P.w), r3(one('stern').x / P.w)], draft: nums.draft, dp: r.dp || {},
+    };
+  },
+};
+
+// ---- THE BIG SHIPS (50-land-civships.js CIV): her picture's pixels. funnels [x, top, mouth - the funnel's width at its top]; her waterline's
+// row; the top of her solid hull (above it rigging and sky: nothing lands or hits there)
+VM_FAMS.ship = {
+  lab: 'SHIPS', views: () => 1,
+  keys: () => Object.keys(CIV),
+  name: k => (STR_VEHS['ship:' + k] || {}).lab || k.toUpperCase(),
+  // (her whole picture, as her LOOK shows her: the liner with her masts and funnels on, the container ship with her boxes - 50-zz-prefab-look.js)
+  pic: k => { const K = CIV[k], B = K.art(), A = (k === 'liner' && img.liner) || (k === 'container' && img.container) || B; return A && A.width && B && B.width === A.width ? { img: A, w: A.width, h: A.height, m: K.k / UPM } : B && B.width ? { img: B, w: B.width, h: B.height, m: K.k / UPM } : null; },
+  width: k => { const K = CIV[k], A = K.art(); return A && A.width ? A.width * K.k / UPM * 0.13 : 20; },   // (a ship's beam: about an eighth of her length)
+  get: k => ({ funnels: CIV[k].funnels, wl: [CIV[k].wl], top: [CIV[k].top], dp: CIV[k].dp || {} }),
+  put(k, r) { const K = CIV[k]; K.funnels = r.funnels; K.wl = r.wl[0]; K.top = r.top[0]; K.dp = r.dp || {}; },
+  kinds: {
+    smoke: { lab: 'FUNNEL', add: true, r: true, depth: 'm', help: 'A funnel that smokes: its top and its width' },
+    water: { lab: 'WATERLINE', depth: 'm', ax: 'y', help: 'The row of her picture that sits at the water' },
+    top: { lab: 'DECK TOP', depth: 'm', ax: 'y', help: 'The top of her solid hull: things land on it' },
+  },
+  nums: [],
+  marks(k, r, P) {
+    const M = r.funnels.map((q, i) => ({ id: 'smoke' + i, k: 'smoke', x: q[0], y: q[1], r: q[2] / 2 }));
+    M.push({ id: 'water0', k: 'water', x: P.w * 0.5, y: r.wl[0] }, { id: 'top0', k: 'top', x: P.w * 0.5, y: r.top[0] });
+    return { marks: M, nums: {}, water: r.wl[0] };
+  },
+  fromMarks(k, M, nums, P, r) {
+    const one = id => M.find(q => q.k === id);
+    return { funnels: M.filter(q => q.k === 'smoke').map(q => [Math.round(q.x), Math.round(q.y), Math.round(q.r * 2)]), wl: [Math.round(one('water').y)], top: [Math.round(one('top').y)], dp: r.dp || {} };
+  },
+};
+
+// ---- THE PLANES drawn from the render layout (29-zzz-warplanes.js rlArt): spots on the side view, from its pivot (the frame's middle), nose left -
+// the fin's red lamp, the canopy's glint, the near wingtip's navigation light, its tail's smoke, a warplane's wheels [along, its leg's top, the tyre's
+// width]. The warplanes' in the old sheet's units (planeSpot: u of them a pixel), the others' in pixels
+const VM_PLANES = {
+  warplane: { lab: 'WARPLANE (P-51)', K: () => WP_KINDS.warplane, S: () => WP_KINDS.warplane, wp: true, span: 11.3 },
+  spitfire: { lab: 'SPITFIRE', K: () => WP_KINDS.spitfire, S: () => WP_KINDS.spitfire, wp: true, span: 11.2 },
+  cessna: { lab: 'CESSNA', K: () => CES_KIND, S: () => CES_SPOT, span: 11 },
+  jet: { lab: 'BOEING 747', K: () => JET_KIND, S: () => JET_SPOT, span: 68.4 },
+  seaplane: { lab: 'SEAPLANE', K: () => SEA_KIND, S: () => SEA_SPOT, span: 11 },
+};
+const vmPlaneU = D => D.wp ? PLANE_SC() * D.K().seq.len / (D.K().len * UPM) * (D.K().len / WP_KINDS.warplane.len) : 1;   // (pixels a unit of its spots)
+VM_FAMS.plane = {
+  lab: 'PLANES', views: k => VM_PLANES[k].K().seq.n / 2,
+  viewAt: (k, t) => { const n = VM_PLANES[k].K().seq.n / 2; return Math.min(n - 1, Math.floor(t * n)); },   // (its turn frames, side on to nose on)
+  keys: () => Object.keys(VM_PLANES),
+  name: k => VM_PLANES[k].lab,
+  pic(k, v = 0) { const D = VM_PLANES[k], K = D.K(), A = rlArt(K, 'vm:' + k, null); if (!A || !A.sheet || !A.sheet.width) return null; const f = wpFrame(A, 'turn_front', v); return { img: A.sheet, sx: f.sx, sy: f.sy, w: f.w, h: f.h, m: K.len / K.seq.len }; },
+  width: k => VM_PLANES[k].span,
+  get(k) { const S = VM_PLANES[k].S(); return { tail: S.lamp || S.tail, glint: S.glint, nav: S.nav, smoke: S.smoke || [], wheels: Array.isArray(S.wheels) ? S.wheels : [], dp: S.dp || {} }; },
+  put(k, r) { const D = VM_PLANES[k], S = D.S(); if (D.wp) { S.lamp = r.tail; S.wheels = r.wheels; } else { S.tail = r.tail; if (r.smoke.length) S.smoke = r.smoke; } S.glint = r.glint; S.nav = r.nav; S.dp = r.dp || {}; },
+  kinds: {
+    tail: { lab: 'TAIL LAMP', depth: 'm', help: 'The blinking red lamp on its fin' },
+    nav: { lab: 'WINGTIP LIGHT', depth: 'n', help: 'The navigation light: green going right, red going left' },
+    glint: { lab: 'CANOPY GLINT', depth: 'm', help: 'Where the sun glints off its glass' },
+    smoke: { lab: 'TAIL SMOKE', depth: 'm', help: 'Where its smoke comes out' },
+    wheel: { lab: 'WHEEL', r: true, depth: 'b', help: 'A wheel\'s leg: where it leaves the body, and the tyre\'s size' },
+  },
+  nums: [],
+  marks(k, r, P) {
+    const u = vmPlaneU(VM_PLANES[k]), at = (id, kd, q) => ({ id, k: kd, x: P.w / 2 + q[0] * u, y: P.h / 2 + q[1] * u });
+    const M = [at('tail0', 'tail', r.tail), at('nav0', 'nav', r.nav), at('glint0', 'glint', r.glint)];
+    if (r.smoke.length) M.push(at('smoke0', 'smoke', r.smoke));
+    r.wheels.forEach((q, i) => M.push(Object.assign(at('wheel' + i, 'wheel', q), { r: q[2] * u / 2 })));
+    return { marks: M, nums: {} };
+  },
+  fromMarks(k, M, nums, P, r) {
+    const u = vmPlaneU(VM_PLANES[k]), r1 = v => Math.round(v * 10) / 10, pt = q => [r1((q.x - P.w / 2) / u), r1((q.y - P.h / 2) / u)], one = id => M.find(q => q.k === id), s = one('smoke');
+    return { tail: pt(one('tail')), glint: pt(one('glint')), nav: pt(one('nav')), smoke: s ? pt(s) : [], wheels: M.filter(q => q.k === 'wheel').map(q => [...pt(q), r1(q.r * 2 / u)]), dp: r.dp || {} };
+  },
+};
+
+// ---- every family in: the built-in rows taken, what's kept laid over them (read again with the world - worldLoad), the table and the action
+worldLoad(() => { let o = null; try { o = JSON.parse(localStorage.getItem('bd_vmarks') || 'null'); } catch (e) { } vmApply(o); });
+// (the game handed to the simulation worker, a save and online carry them - as the vehicles' numbers: 36-zz-world.js VT_ROW)
+const VM_ROW = worldRow({ ch: [() => wjson(vmDiff()), v => vmApply(wunjson(v))] });
+defTable('vmarks', () => [VM_ROW], { make: () => VM_ROW });
+ACTS.vmarks = (p, ch) => vmApply(ch);
 
 //@src 51-audio-kraken.js:1
 /* ---- OPEN WORLD: the kraken's sounds (50-land-kraken.js) ----
@@ -76152,4 +76400,308 @@ function sseDraw() {
     g.clearRect(0, by + 18, W, B - 18); gpuCanvasShow(V); gpuSubmit(); SSE.gv.style.display = '';
   } else if (SSE.gv) SSE.gv.style.display = 'none';
 }
+
+//@src 54-vehicle-editor.js:1
+/* ================================================================
+   THE VEHICLE EDITOR (user Nov 17 22:51-22:57: "a vehicle editor where for now you just expose the things you've been doing to the vehicles
+   ... The UI would be similar to the game editor, but it's just for vehicles"; "this would be a third editor. We have the game editor,
+   biome editor, and this would be the vehicle editor"). Part 1: every vehicle that has marks (50-zzzzz-vehicle-editor-marks.js VM_FAMS) on its side
+   picture - its wheels, lamps and their types, smoke, propeller, waterline, centre of weight - picked, dragged, added and removed; each
+   mark's place across the vehicle (NEAR / FAR / BOTH / MIDDLE) for the views turned toward us, seen with the TURN slider; its weight and
+   its own numbers of the vehicles' table (VTUNE). Every change is the game's at once (the family's own tables, the simulation worker
+   told) and kept as a working copy: SAVE CHANGES keeps it, leaving unsaved asks (the editors' one journal - 00-world-journal.js,
+   bd_vehed_j over bd_vmarks and bd_vtune). A panel over the page: no world of its own. Opened from the title (by BIOME EDITOR) and from
+   the GAME EDITOR's top bar. The page's alone - never the simulation worker's.
+   ================================================================ */
+const VED = { root: null, key: null, row: null, P: null, M: [], nums: {}, sel: null, turn: 0, z: 1, ox: 0, oy: 0, undo: [], redo: [], drag: null, from: 'title' };
+const VED_DEPTHS = [['n', 'NEAR SIDE'], ['f', 'FAR SIDE'], ['b', 'BOTH SIDES'], ['m', 'MIDDLE']];
+const VED_TYPES = { beam: 'HEADLAMP (BEAM)', white: 'WHITE', red: 'RED', side: 'SIDELIGHT' };
+const VED_COL = { wheel: '#58d8ff', lamp: '#ffe9a8', smoke: '#b8bcc8', screw: '#6aa8ff', cg: '#ffb347', stem: '#7fd6ff', stern: '#7fd6ff', water: '#7fd6ff', top: '#c9a0ff', tail: '#ff4a3c', nav: '#50ff78', glint: '#fff6c0' };
+const VED_LAMP_COL = { beam: '#fff0c8', white: '#ffffff', red: '#ff4a3c', side: '#50ff78' };
+if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
+  const $ = (tag, css, html) => { const e = document.createElement(tag); if (css) e.style.cssText = css; if (html !== undefined) e.innerHTML = html; return e; };
+  const fam = () => vmFamOf(VED.key), art = () => vmArt(VED.key), kindOf = m => fam().kinds[m.k];
+  const dirty = () => { try { return VEH_MODE && sceneDirty(); } catch (e) { return false; } };
+
+  // ---- its panels: the top bar, the picture, the marks' list and numbers, the help line at the foot (the editors' one look - sky/90-editor.js)
+  function build() {
+    const st = $('style'); st.textContent = `
+#vehEd { position: fixed; inset: 0; z-index: 55; background: #0b0f18; color: #d8dce8; font: 12px/1.3 ui-monospace, Menlo, Consolas, monospace; display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; }
+#vehEd[hidden] { display: none !important; }
+#vehEd button, #vehEd select, #vehEd input[type=number] { font: inherit; background: #1a2234; color: #d8dce8; border: 1px solid #2c3850; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
+#vehEd input[type=number] { width: 5.4em; padding: 3px 4px; cursor: text; }
+#vehEd button:disabled { opacity: 0.4; cursor: default; }
+#vehEd button.on { background: #ffb347; border-color: #ffb347; color: #000; }
+#vehEd .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #2c3850; background: #0f1420; flex: 0 0 auto; }
+#vehEd .bar .mode { letter-spacing: .08em; font-weight: bold; color: #ffb347; margin-right: 6px; }
+#vehEd .bar .gap { flex: 1 1 0; }
+#vehEd .main { flex: 1 1 auto; min-height: 0; display: flex; }
+#vehEd .view { flex: 1 1 auto; min-width: 0; position: relative; }
+#vehEd canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+#vehEd .side { flex: 0 0 min(32em, 46vw); overflow-y: auto; border-left: 1px solid #2c3850; background: #0f1420; padding: 8px 10px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+#vehEd h4 { margin: 10px 0 6px; font: inherit; color: #7a8294; letter-spacing: .08em; border-bottom: 1px solid #2c3850; padding-bottom: 4px; }
+#vehEd h4:first-child { margin-top: 0; }
+#vehEd .mk { display: grid; grid-template-columns: 1.2em 1fr auto; gap: 4px 6px; align-items: center; padding: 4px 6px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
+#vehEd .mk.on { border-color: #ffffff; background: #1a2234; }
+#vehEd .mk .dot { width: 0.8em; height: 0.8em; border-radius: 50%; }
+#vehEd .mk .f { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; color: #9aa2b4; }
+#vehEd .row { display: grid; grid-template-columns: 1fr 10em 4.6em; gap: 6px; align-items: center; margin: 4px 0; }
+#vehEd .row input[type=range] { width: 100%; }
+#vehEd .foot { flex: 0 0 auto; padding: 6px 12px; border-top: 1px solid #2c3850; background: #0f1420; color: #9aa2b4; min-height: 1.3em; }
+#vehEd .foot b { color: #d8dce8; font-weight: normal; margin-right: 8px; }
+#vehEd .ask { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; background: rgba(4,7,15,0.55); }
+#vehEd .ask > div { background: #0f1420; border: 2px solid #ffd23a; border-radius: 6px; padding: 14px 18px; text-align: center; min-width: 280px; }`;
+    document.head.appendChild(st);
+    const root = VED.root = $('div'); root.id = 'vehEd'; root.hidden = true;
+    root.innerHTML = `<div class="bar"><span class="mode">VEHICLE EDITOR</span>
+<select data-a="veh" title="The vehicle you are editing"></select>
+<button data-a="undo" title="Undo the last change">UNDO</button><button data-a="redo" title="Redo the change undone">REDO</button>
+<button data-a="save" title="Save the vehicles as edited">SAVE CHANGES</button>
+<span class="gap"></span>
+<label title="Turn the vehicle toward you to check its marks">TURN <input type="range" data-a="turn" min="0" max="1" step="0.01" value="0" style="vertical-align:middle;width:10em"></label>
+<button data-a="reset" title="Put this vehicle back as the game was built with it">RESET vehicle</button>
+<button data-a="close" title="Close the vehicle editor">CLOSE</button></div>
+<div class="main"><div class="view"><canvas></canvas></div><div class="side"></div></div>
+<div class="foot"></div>`;
+    document.body.appendChild(root);
+    VED.cv = root.querySelector('canvas'); VED.side = root.querySelector('.side'); VED.foot = root.querySelector('.foot');
+    VED.sel_ = root.querySelector('[data-a=veh]'); VED.turnEl = root.querySelector('[data-a=turn]');
+    for (const f in VM_FAMS) { const g = $('optgroup'); g.label = VM_FAMS[f].lab; for (const k of VM_FAMS[f].keys()) { const o = $('option'); o.value = f + ':' + k; o.textContent = VM_FAMS[f].name(k); g.appendChild(o); } VED.sel_.appendChild(g); }
+    VED.sel_.addEventListener('change', () => load(VED.sel_.value));
+    VED.turnEl.addEventListener('input', () => { VED.turn = +VED.turnEl.value; draw(); });
+    root.querySelector('.bar').addEventListener('click', e => { const a = e.target && e.target.dataset ? e.target.dataset.a : null; if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'save') { sceneSave(); sync(); } else if (a === 'close') close(); else if (a === 'reset') reset(); });
+    // the help line: what's under the pointer, as the other editors' (a tooltip's text, one short line)
+    const help = e => { const t = e.target && e.target.closest ? e.target.closest('[title],[data-help]') : null; if (t && root.contains(t)) say(t.dataset.name || (t.tagName === 'BUTTON' ? t.textContent : ''), t.dataset.help || t.title); };
+    root.addEventListener('pointerover', help); root.addEventListener('pointerdown', help);
+    VED.side.addEventListener('click', sideClick); VED.side.addEventListener('change', sideChange); VED.side.addEventListener('input', sideInput);
+    const cv = VED.cv;
+    cv.addEventListener('pointerdown', down); cv.addEventListener('pointermove', move); cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    // the wheel zooms about the pointer; with Shift it sizes the picked wheel or funnel
+    cv.addEventListener('wheel', e => {
+      e.preventDefault(); const m = sel();
+      if (e.shiftKey) { if (m && kindOf(m).r && !VED.turn) { m.r = clamp(m.r + ((e.deltaY || e.deltaX) < 0 ? 0.5 : -0.5), 1, 400); commit(); } return; }
+      if (!VED.P) return;
+      const r = cv.getBoundingClientRect(), d = cv.width / r.width, px = (e.clientX - r.left) * d, py = (e.clientY - r.top) * d, z0 = VED.z, z = clamp(z0 * (e.deltaY < 0 ? 1.25 : 0.8), VED.zFit * 0.5, 64);
+      VED.ox = px - (px - VED.ox) * z / z0; VED.oy = py - (py - VED.oy) * z / z0; VED.z = z; draw();
+    }, { passive: false });
+    window.addEventListener('resize', () => { if (VEH_MODE) { fit(); draw(); } });
+    new ResizeObserver(() => { if (VEH_MODE && VED.P) { const r = VED.cv.getBoundingClientRect(), d = window.devicePixelRatio || 1; if (Math.abs(r.width * d - VED.cv.width) > 2 || Math.abs(r.height * d - VED.cv.height) > 2) { fit(); draw(); } } }).observe(VED.cv);
+    window.addEventListener('keydown', key, true);
+    setInterval(() => { if (VEH_MODE) { if (!VED.P) load(VED.key); else if (!VED.drag) draw(); sync(); } }, 400);
+  }
+  const say = (name, text) => { VED.foot.innerHTML = (name ? '<b>' + name + '</b>' : '') + (text || ''); };
+  function sync() {
+    const R = VED.root; if (!R) return;
+    R.querySelector('[data-a=save]').classList.toggle('on', dirty());
+    R.querySelector('[data-a=undo]').disabled = !VED.undo.length; R.querySelector('[data-a=redo]').disabled = !VED.redo.length;
+    const n = VED.key ? fam().views(art()) : 1; VED.turnEl.disabled = n < 2; VED.turnEl.parentNode.title = n < 2 ? 'This vehicle has no views turned toward you yet' : 'Turn the vehicle toward you to check its marks';
+    R.querySelector('[data-a=reset]').disabled = !VED.key || JSON.stringify(vmGet(VED.key)) === JSON.stringify(VM.def[VED.key]);
+  }
+
+  // ---- a vehicle in: its row as marks on its side picture
+  function load(key, keepSel) {
+    if (!key) return;
+    VED.key = key; VED.sel_.value = key; if (!keepSel) { VED.sel = null; VED.turn = 0; VED.turnEl.value = 0; }
+    const F = fam(); VED.row = vmGet(key); VED.P = F.pic(art(), 0);
+    if (!VED.P) { VED.M = []; VED.side.innerHTML = '<h4>LOADING PICTURE</h4>'; draw(); return; }
+    remark();
+    if (!keepSel || !VED.zFit) fit();                          // (the same vehicle read again: its zoom and place kept)
+    side(); draw(); sync();
+  }
+  // its row as marks (and its numbers, its waterline)
+  function remark() {
+    const F = fam(), o = F.marks(art(), VED.row, VED.P); VED.M = o.marks; VED.nums = o.nums; VED.water = o.water;
+    for (const m of VED.M) m.d = vmDp(VED.row, m.id, F.kinds[m.k].depth);
+    if (VED.sel && !VED.M.some(m => m.id === VED.sel)) VED.sel = null;
+  }
+  const sel = () => VED.M.find(m => m.id === VED.sel) || null;
+  // the marks back into its row, the game's at once; kept (the working copy). An undo step a finished change
+  function commit(step = true, quiet = false) {
+    const F = fam(), by = {}; for (const m of VED.M) { by[m.k] = by[m.k] || 0; const id = m.k + by[m.k]++; if (VED.sel === m.id) VED.sel = id; m.id = id; }
+    const r = F.fromMarks(art(), VED.M, VED.nums, VED.P, VED.row); r.dp = {};
+    for (const m of VED.M) if (m.d && m.d !== F.kinds[m.k].depth) r.dp[m.id] = m.d;
+    if (JSON.stringify(r) === JSON.stringify(VED.row)) { draw(); return; }
+    if (step) { VED.undo.push({ key: VED.key, row: VED.row }); if (VED.undo.length > 200) VED.undo.shift(); VED.redo.length = 0; }
+    VED.row = r; vmPut(VED.key, r); vmSave();
+    // (its marks from its row again: what follows another mark - her weight's middle her wheels, the waterline her draft - moved with it. Not the
+    // mark being dragged: it stays under the pointer; quiet - a slider being moved: its list left as it is)
+    const held = VED.drag && VED.drag.m;
+    remark(); if (held) { const i = VED.M.findIndex(m => m.id === held.id); if (i >= 0) VED.M[i] = held; } else if (!quiet) side();
+    draw(); sync();
+  }
+  function setRow(key, row) { vmPut(key, row); vmSave(); load(key, key === VED.key); }
+  function undo() { const u = VED.undo.pop(); if (!u) return; VED.redo.push({ key: u.key, row: vmGet(u.key) }); setRow(u.key, u.row); }
+  function redo() { const u = VED.redo.pop(); if (!u) return; VED.undo.push({ key: u.key, row: vmGet(u.key) }); setRow(u.key, u.row); }
+  function reset() { if (!VED.key) return; VED.undo.push({ key: VED.key, row: VED.row }); VED.redo.length = 0; setRow(VED.key, VM.def[VED.key]); }
+
+  // ---- the list beside the picture: each mark's row (its type, its side, its place), ADD per kind, the vehicle's numbers
+  const num = (v, d = 1) => Math.round(v * 10 ** d) / 10 ** d;
+  function side() {
+    const F = fam(), K = F.kinds; let h = '<h4>MARKS</h4>';
+    for (const m of VED.M) {
+      const k = K[m.k], n = VED.M.filter(q => q.k === m.k).length, i = +m.id.slice(m.k.length) + 1, on = m.id === VED.sel;
+      h += `<div class="mk${on ? ' on' : ''}" data-id="${m.id}" data-name="${k.lab}" data-help="${k.help}"><span class="dot" style="background:${m.k === 'lamp' ? VED_LAMP_COL[m.t] || '#fff' : VED_COL[m.k]}"></span><span>${k.lab}${n > 1 || (k.add && (k.max || 9) > 1) ? ' ' + i : ''}</span>`
+        + (k.add && n > (k.min || 0) ? `<button data-del="${m.id}" title="Remove this mark">DELETE</button>` : '<span></span>');
+      if (on) {
+        h += '<div class="f">';
+        if (k.types) h += `<select data-f="t" title="What kind of light it is">${k.types.map(t => `<option value="${t}"${t === m.t ? ' selected' : ''}>${VED_TYPES[t]}</option>`).join('')}</select>`;
+        h += `<select data-f="d" title="Where it sits across the vehicle, for views turned toward you">${VED_DEPTHS.map(([v, t]) => `<option value="${v}"${v === m.d ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
+        if (k.ax !== 'y') h += `<label title="Its place along the picture, in pixels">X <input type="number" data-f="x" step="0.5" value="${num(m.x)}"></label>`;
+        if (k.ax !== 'x') h += `<label title="Its place down the picture, in pixels">Y <input type="number" data-f="y" step="0.5" value="${num(m.y)}"></label>`;
+        if (k.r) h += `<label title="Its radius, in pixels (Shift and the mouse wheel change it too)">SIZE <input type="number" data-f="r" step="0.5" min="1" value="${num(m.r)}"></label>`;
+        if (k.s) h += `<label title="How bright it is, 0 to 1">BRIGHT <input type="number" data-f="s" step="0.05" min="0.1" max="1" value="${num(m.s == null ? 1 : m.s, 2)}"></label>`;
+        h += '</div>';
+      }
+      h += '</div>';
+    }
+    const adds = Object.keys(K).filter(k => K[k].add && VED.M.filter(q => q.k === k).length < (K[k].max || 99));
+    if (adds.length) h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">' + adds.map(k => `<button data-add="${k}" title="Add one to this vehicle">ADD ${K[k].lab[0] + K[k].lab.slice(1).toLowerCase()}</button>`).join('') + '</div>';
+    const rows = [...F.nums.map(n => ({ n, v: VED.nums[n.k], a: 'num' })), ...(F.tune ? F.tune(art()).map(n => ({ n, v: VTUNE[n.f][n.k], a: 'tune' })) : [])];
+    if (rows.length) h += '<h4>NUMBERS</h4>' + rows.map(({ n, v, a }) => `<div class="row" data-name="${n.lab}" data-help="${n.help}"><label>${n.lab}</label><input type="range" data-${a}="${n.k}" data-f2="${n.f || ''}" min="${n.min}" max="${n.max}" step="${n.step}" value="${v}"><span>${n.opts ? n.opts[v] : num(v, 2)}</span></div>`).join('');
+    const P = VED.P; h += `<h4>PICTURE</h4><div style="color:#9aa2b4">${P.w} x ${P.h} pixels, ${num(P.w * P.m)} m long, ${num(P.h * P.m)} m high<br>${num(P.m * 100, 1)} cm a pixel</div>`;
+    VED.side.innerHTML = h;
+  }
+  function sideClick(e) {
+    const t = e.target; if (!t || !t.closest) return;
+    if (t.dataset.del) { VED.M = VED.M.filter(m => m.id !== t.dataset.del); if (VED.sel === t.dataset.del) VED.sel = null; commit(); return; }
+    if (t.dataset.add) { add(t.dataset.add); return; }
+    const r = t.closest('.mk'); if (r && !t.closest('.f') && VED.sel !== r.dataset.id) { VED.sel = r.dataset.id; side(); draw(); }
+  }
+  function add(k) {
+    const K = fam().kinds[k], P = VED.P, like = VED.M.filter(m => m.k === k).pop();
+    const m = { id: k + 'new', k, x: P.w / 2, y: like ? like.y : P.h / 2, d: K.depth };
+    if (K.r) m.r = like ? like.r : Math.max(3, P.h * 0.12); if (K.types) m.t = K.types.includes('white') ? 'white' : K.types[0]; if (K.s) m.s = 1;
+    const at = VED.M.map(q => q.k).lastIndexOf(k); VED.M.splice(at < 0 ? VED.M.length : at + 1, 0, m); VED.sel = m.id; commit(); side(); draw();
+  }
+  function sideChange(e) {
+    const t = e.target, f = t.dataset.f, m = sel();
+    if (f && m) { if (f === 't' || f === 'd') m[f] = t.value; else if (isFinite(+t.value)) m[f] = +t.value; commit(); side(); return; }
+    if (t.dataset.num || t.dataset.tune) { side(); VED.numStep = false; }
+  }
+  // a number's slider: live as it moves, one undo step a drag (its family's row, or the vehicles' table - VTUNE)
+  function sideInput(e) {
+    const t = e.target; if (!t.dataset.num && !t.dataset.tune) return;
+    const v = +t.value, F = fam();
+    if (t.dataset.num) { VED.nums[t.dataset.num] = v; commit(!VED.numStep, true); VED.numStep = true; t.nextElementSibling.textContent = num(v, 2); }
+    else { const n = F.tune(art()).find(q => q.k === t.dataset.tune); VTUNE[n.f][n.k] = v; vtuneSave(); t.nextElementSibling.textContent = n.opts ? n.opts[v] : num(v, 2); sync(); }
+  }
+
+  // ---- the picture: as big as fits, whole pixels; the marks over it
+  function fit() {
+    const cv = VED.cv, r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1; cv.width = Math.max(2, Math.round(r.width * d)); cv.height = Math.max(2, Math.round(r.height * d));
+    const P = VED.P; if (!P) return;
+    const z = Math.min(cv.width * 0.86 / P.w, cv.height * 0.8 / P.h); VED.z = VED.zFit = z >= 2 ? Math.floor(z) : z;
+    VED.ox = Math.round((cv.width - P.w * VED.z) / 2); VED.oy = Math.round((cv.height - P.h * VED.z) / 2);
+  }
+  // the view showing at this turn, and each mark's place on it
+  function viewNow() {
+    const F = fam(), n = F.views(art()), i = n > 1 && VED.turn > 0 ? (F.viewAt ? F.viewAt(art(), VED.turn) : Math.round(VED.turn * (n - 1))) : 0;
+    return { i, P: i ? F.pic(art(), i) || VED.P : VED.P };
+  }
+  function markXs(m, V) {
+    const P = VED.P; if (!VED.turn) return [m.x];
+    const half = fam().width(art()) / P.m / 2;
+    return vmTurnX(m.x, P.w / 2, half, m.d, VED.turn).map(x => V.P.w / 2 + (x - P.w / 2));
+  }
+  function draw() {
+    // (a canvas kept in memory, not on the GPU: a lost graphics device - the laptop's hangs, rules 1b - leaves it whole; drawn again on the editor's tick besides)
+    const cv = VED.cv, g = cv.getContext('2d', { willReadFrequently: true }), z = VED.z, P = VED.P; if (!cv.width) return;
+    g.fillStyle = '#0b0f18'; g.fillRect(0, 0, cv.width, cv.height);
+    if (!P) { g.fillStyle = '#7a8294'; g.font = '14px ui-monospace, monospace'; g.textAlign = 'center'; g.fillText('LOADING PICTURE', cv.width / 2, cv.height / 2); return; }
+    const V = viewNow(), ox = Math.round(VED.ox + (P.w - V.P.w) * z / 2), oy = VED.oy, sy = V.P.h / P.h, lw = Math.max(1, Math.round(parseFloat(getComputedStyle(VED.root).fontSize) * (window.devicePixelRatio || 1) / 8));   // (the marks' line: by the editor's words' size on this screen)
+    // the water (what floats) or the ground under it
+    if (VED.water != null) { g.fillStyle = '#12304a'; g.fillRect(0, oy + VED.water * z, cv.width, cv.height); }
+    else { g.fillStyle = '#1c2a1c'; g.fillRect(0, oy + P.h * z, cv.width, cv.height); }
+    g.imageSmoothingEnabled = false;
+    try { if (V.P.sx != null) g.drawImage(pic2d(V.P.img), V.P.sx, V.P.sy, V.P.w, V.P.h, ox, oy, V.P.w * z, V.P.h * z); else g.drawImage(pic2d(V.P.img), ox, oy, V.P.w * z, V.P.h * z); } catch (e) { }   // (sx: a frame of a sheet - the planes')
+    g.lineWidth = lw; { const cs = getComputedStyle(VED.root); g.font = Math.round(parseFloat(cs.fontSize) * 0.92 * (window.devicePixelRatio || 1)) + 'px ' + cs.fontFamily; } g.textAlign = 'center';
+    const X = x => ox + x * z, Y = y => oy + y * sy * z;
+    for (const m of VED.M) {
+      const k = kindOf(m), on = m.id === VED.sel, col = on ? '#ffffff' : m.k === 'lamp' ? VED_LAMP_COL[m.t] || '#fff' : VED_COL[m.k];
+      markXs(m, V).forEach((mx, j) => {
+        const x = X(mx), y = Y(m.y); g.globalAlpha = j ? 0.45 : 1; g.strokeStyle = col; g.fillStyle = col;
+        const ring = (r, c) => { g.strokeStyle = '#04070f'; g.lineWidth = lw + 2; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.stroke(); g.strokeStyle = c; g.lineWidth = lw; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.stroke(); };
+        if (k.ax === 'y') { g.setLineDash([lw * 4, lw * 3]); g.beginPath(); g.moveTo(ox - 20, y); g.lineTo(ox + V.P.w * z + 20, y); g.stroke(); g.setLineDash([]); g.fillText(k.lab, ox + V.P.w * z + 24 + g.measureText(k.lab).width / 2, y + 4); }
+        else if (k.ax === 'x') { g.beginPath(); g.moveTo(x, y - 14 * lw); g.lineTo(x, y + 6 * lw); g.stroke(); g.beginPath(); g.moveTo(x - 4 * lw, y); g.lineTo(x + 4 * lw, y); g.stroke(); }
+        else if (m.k === 'wheel' || (m.k === 'smoke' && k.r)) { ring(Math.max(3, m.r * z), col); g.fillRect(x - lw, y - lw, lw * 2, lw * 2); }
+        else if (m.k === 'cg') { ring(5 * lw, col); g.beginPath(); g.moveTo(x - 9 * lw, y); g.lineTo(x + 9 * lw, y); g.moveTo(x, y - 9 * lw); g.lineTo(x, y + 9 * lw); g.stroke(); }
+        else if (m.k === 'lamp') {
+          if (m.t === 'beam' && !VED.turn) { g.globalAlpha *= 0.25; g.beginPath(); g.moveTo(x, y); g.lineTo(x - 60 * lw, y - 10 * lw); g.lineTo(x - 60 * lw, y + 18 * lw); g.closePath(); g.fill(); g.globalAlpha = j ? 0.45 : 1; }
+          g.beginPath(); g.arc(x, y, 3 * lw, 0, 6.2832); g.fill(); ring(5 * lw, col);
+        }
+        else { ring(4 * lw, col); if (m.k === 'smoke') for (let q = 1; q < 4; q++) { g.globalAlpha = (j ? 0.45 : 1) * (0.5 - q * 0.1); g.beginPath(); g.arc(x + q * 3 * lw, y - q * 7 * lw, (2 + q) * lw, 0, 6.2832); g.fill(); } }
+        if (on && !j && k.ax !== 'y') { g.globalAlpha = 1; g.fillStyle = '#ffffff'; g.fillText(k.lab, x, y - (k.r ? m.r * z : 6 * lw) - 6 * lw); }
+      });
+    }
+    g.globalAlpha = 1;
+    if (VED.turn > 0) { g.fillStyle = '#7a8294'; g.fillText('TURNED: LOOK ONLY. SET TURN TO 0 TO MOVE MARKS', cv.width / 2, cv.height - 10 * lw); }
+  }
+
+  // ---- the pointer on the picture: a press picks the nearest mark and drags it; the keys nudge it
+  const at = e => { const r = VED.cv.getBoundingClientRect(), d = VED.cv.width / r.width; return [((e.clientX - r.left) * d - VED.ox) / VED.z, ((e.clientY - r.top) * d - VED.oy) / VED.z, (e.pointerType === 'touch' ? 26 : 12) * d / VED.z]; };
+  function down(e) {
+    if (!VED.P) return;
+    if (VED.turn) { VED.pan = { id: e.pointerId, x: e.clientX, y: e.clientY, ox: VED.ox, oy: VED.oy }; return; }
+    const [x, y, rr] = at(e); let best = null, bd = 1e9;
+    for (const m of VED.M) { const k = kindOf(m), d = k.ax === 'y' ? Math.abs(y - m.y) : k.ax === 'x' ? Math.abs(x - m.x) + (Math.abs(y - m.y) > rr * 2 ? 1e6 : 0) : Math.max(0, Math.hypot(x - m.x, y - m.y) - (k.r ? m.r * 0.6 : 0)); if (d < bd && d <= rr) { bd = d; best = m; } }
+    VED.sel = best ? best.id : null; side(); draw();
+    if (!best) { VED.pan = { id: e.pointerId, x: e.clientX, y: e.clientY, ox: VED.ox, oy: VED.oy }; try { VED.cv.setPointerCapture(e.pointerId); } catch (err) { } }   // (empty space: the picture dragged about)
+    if (best) { VED.drag = { id: e.pointerId, m: best, dx: best.x - x, dy: best.y - y, row: VED.row, moved: false }; try { VED.cv.setPointerCapture(e.pointerId); } catch (err) { } const k = kindOf(best); say(k.lab, k.help); }
+    e.preventDefault();
+  }
+  function move(e) {
+    const Pn = VED.pan; if (Pn && Pn.id === e.pointerId) { const d = VED.cv.width / VED.cv.getBoundingClientRect().width; VED.ox = Pn.ox + (e.clientX - Pn.x) * d; VED.oy = Pn.oy + (e.clientY - Pn.y) * d; draw(); return; }
+    const D = VED.drag; if (!D || D.id !== e.pointerId) return;
+    const [x, y] = at(e), k = kindOf(D.m), P = VED.P, h = v => Math.round(v * 2) / 2;
+    if (k.ax !== 'y') D.m.x = clamp(h(x + D.dx), 0, P.w); if (k.ax !== 'x') D.m.y = clamp(h(y + D.dy), 0, P.h);
+    D.moved = true; commit(false);
+  }
+  function up(e) {
+    if (VED.pan && VED.pan.id === e.pointerId) { VED.pan = null; return; }
+    const D = VED.drag; if (!D || D.id !== e.pointerId) return; VED.drag = null;
+    if (D.moved && JSON.stringify(D.row) !== JSON.stringify(VED.row)) { VED.undo.push({ key: VED.key, row: D.row }); VED.redo.length = 0; remark(); side(); draw(); sync(); }
+  }
+  function key(e) {
+    if (!VEH_MODE) return;
+    const typing = e.target && (/^(TEXTAREA|SELECT)$/.test(e.target.tagName) || (e.target.tagName === 'INPUT' && e.target.type !== 'range'));
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if (e.code === 'Escape') { e.preventDefault(); if (VED.askEl) return; close(); return; }
+    if (typing) return;
+    const m = sel(), A = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.code];
+    if (m && A && !VED.turn) { const k = kindOf(m), s = e.shiftKey ? 5 : 0.5; if (k.ax !== 'y') m.x = clamp(m.x + A[0] * s, 0, VED.P.w); if (k.ax !== 'x') m.y = clamp(m.y + A[1] * s, 0, VED.P.h); commit(); side(); e.preventDefault(); return; }
+    if (m && (e.code === 'Delete' || e.code === 'Backspace')) { const k = kindOf(m); if (k.add && VED.M.filter(q => q.k === m.k).length > (k.min || 0)) { VED.M = VED.M.filter(q => q !== m); VED.sel = null; commit(); side(); } e.preventDefault(); }
+  }
+
+  // ---- in and out. Leaving with changes not saved asks (SAVE / DISCARD / CANCEL - the editors' one question)
+  function open(from) {
+    if (VEH_MODE) return;
+    if (!VED.root) build();
+    // (its words the size of the other editors' on this screen: the GAME EDITOR's own button's)
+    { const g = document.getElementById('skyEdBtn'), f = g && getComputedStyle(g); if (f && parseFloat(f.fontSize) > 0) { VED.root.style.fontSize = f.fontSize; VED.root.style.fontFamily = f.fontFamily; } }
+    vmDefaults(); VED.from = from || 'title'; VEH_MODE = true; VED.root.hidden = false; VED.undo.length = 0; VED.redo.length = 0;
+    try { held.clear(); } catch (e) { }
+    load(VED.key || vmKeys()[0]); say('', 'Press a mark to pick it, drag to move it; the arrow keys nudge it. The wheel zooms, a drag on empty space moves the picture.');
+  }
+  function shut() { VED.root.hidden = true; VEH_MODE = false; }
+  function close() {
+    if (!dirty()) { shut(); return; }
+    const d = VED.askEl = $('div'); d.className = 'ask';
+    d.innerHTML = '<div><div style="margin-bottom:4px">UNSAVED CHANGES</div><div style="color:#7a8294;margin-bottom:12px">SAVE THEM TO THE VEHICLES?</div><div style="display:flex;gap:6px;justify-content:center"><button data-q="save" class="on">SAVE</button><button data-q="discard">DISCARD</button><button data-q="cancel">CANCEL</button></div></div>';
+    VED.root.appendChild(d);
+    d.onclick = e => {
+      const a = e.target && e.target.dataset ? e.target.dataset.q : null; if (!a) return;
+      d.remove(); VED.askEl = null; if (a === 'cancel') return;
+      if (a === 'save') sceneSave();
+      else { sceneRestore(); vmApply(lsJ('bd_vmarks', null)); vmPush(); vtuneApply(lsJ('bd_vtune', {})); vtunePush(); }   // (as last saved: the game's tables and the worker's)
+      shut();
+    };
+  }
+  // the title's button, by BIOME EDITOR (shown as it is); the GAME EDITOR's is in its top bar (00-world.js)
+  const b = $('button', 'position:fixed;bottom:8px;z-index:49;opacity:0.92;font:inherit;background:#1a2234;color:#d8dce8;border:1px solid #2c3850;border-radius:4px;padding:4px 8px;cursor:pointer'); b.id = 'vehEdBtn'; b.textContent = 'VEHICLE EDITOR'; b.hidden = true; b.title = 'Open the vehicle editor (wheels, lamps, smoke, weight)';
+  b.onclick = () => open('title');
+  const place = () => { const g = document.getElementById('vegEdBtn'); if (!g) return; const r = g.getBoundingClientRect(); b.hidden = VEH_MODE || g.hidden || !r.width; if (!b.hidden) { b.style.left = (r.right + 8) + 'px'; b.style.font = getComputedStyle(g).font; } };
+  const go = () => { if (!document.body) return setTimeout(go, 200); const st = $('style'); st.textContent = '#vehEdBtn[hidden] { display: none !important; }'; document.head.appendChild(st); document.body.appendChild(b); setInterval(place, 300); };
+  go();
+  window.__vehEd = { open: f => open(f), close: () => close(), get on() { return VEH_MODE; }, state: () => ({ key: VED.key, marks: VED.M.map(m => Object.assign({}, m)), nums: Object.assign({}, VED.nums), dirty: dirty(), row: VED.row }), load: k => load(k), draw: () => draw(), get: k => vmGet(k), diff: () => vmDiff(), keys: () => vmKeys(), V: VED };   // (tools)
+})();
 })(typeof document !== 'undefined' ? document.currentScript : null);
