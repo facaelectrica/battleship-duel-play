@@ -180,7 +180,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1070, build: 'NOV 17 23:52', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1070, build: 'NOV 18 00:12', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -7823,7 +7823,13 @@ function dwStep(dt) {
     w.fa = Infinity; w.fb = -Infinity; w.fold = 0;                  // (fold: how far its top stands over its face where it's folded - a real lip, not a wrinkle of the curve)
     for (let q = 0; q < nc; q++) { if (!cn[q]) { lo[q] = tp[q] = 0; } else if (cn[q] > 2) { const x = xa + q * DX; if (x < w.fa) w.fa = x; if (x > w.fb) w.fb = x; if (tp[q] - lo[q] > w.fold) w.fold = tp[q] - lo[q]; } }
     w.lip = w.fold > 0.15 * w.H;
-    w.fo = Math.max(w.H > 0 ? clamp(w.fold / (0.6 * w.H), 0, 1) : 0, (w.fo || 0) - dt * 0.4);   // (its crest's foam: as much as it's folded, and dying away after it has come down)
+// (its face's tilt - the steepest of it, foot to crest: 0 a gentle swell .. 1 a wall. user 23:11: "all wave peaks should have foam, every wave tilt
+    // must have foam forming")
+    { const Cc = w.C; let sl = 0; for (let k = 0; k < 11 * DW_SUB; k++) { const dx = Math.abs(Cc[2 * k + 2] - Cc[2 * k]), dh = Math.abs(Cc[2 * k + 3] - Cc[2 * k + 1]); if (dh > 0.02 * w.H) sl = Math.max(sl, dh / Math.max(dx, 0.3 * dh)); }
+      w.tilt = w.H > 2 ? clamp((sl - 0.18) / 0.6, 0, 1) : 0; }
+    // (its crest's foam: forming as its face tilts, all of it once it's folded, and dying away after it has come down)
+    w.fo = Math.max(w.H > 0 ? clamp(w.fold / (0.6 * w.H), 0, 1) : 0, 0.5 * w.tilt, (w.fo || 0) - dt * 0.4);
+    if (w.bt != null) w.bt += dt;                                    // (its breaking's burst of foam - dwCrash, dwDrawBurst)
     // the crest comes down: half-way into its crash frame
     if (!w.crashed && K.ci > 0 && w.ph >= K.ci - 0.5) { w.crashed = true; dwCrash(w); }
     if (!SIM_ONLY && w.lip) {                    // (spray off its tip as it curls, a shove on the water under it as it lands)
@@ -7939,11 +7945,29 @@ function dwDrawBack(x0, x1) {
 // and a way down its back - discs laid along the outline, bigger toward the tip and the more it has come over, shifting with the clock - and loose
 // bits about it
 function dwDisc(RL, cx, cy, r, col, a) { for (let y = -r; y <= r; y += PB) { const h = Math.round(Math.sqrt(Math.max(0, r * r - y * y)) / PB) * PB; if (h > 0) RL.rect(Math.round(cx - h), Math.round(cy + y), 2 * h, PB, col, a); } }
+// THE BREAKING'S FOAM (user 23:11: "The breaking should generate big foam"): where the lip lands, a pile of white water thrown up at once - half the
+// wave's height - going on with the wave, spreading along the sea and sinking away over DW_BURST seconds; billows as the crest's, bits flung off it
+const DW_BURST = 3;
+function dwDrawBurst(RL, w) {
+  const t = w.bt, H = w.bH * SV, g = t < 0.3 ? t / 0.3 : Math.pow(Math.max(0, 1 - (t - 0.3) / (DW_BURST - 0.3)), 1.3), hgt = 0.5 * H * g, half = H * (0.35 + 1.1 * Math.min(1, t / 1.6));
+  if (!(hgt > PB)) return;
+  const cx = (w.x + w.bo) * SV - CAMPX - w.dir * half * 0.3, n = Math.max(6, Math.ceil(2 * half / Math.max(PB, hgt * 0.3))), PALE = [214, 238, 255], tq = Math.floor(time * 8);
+  for (let pass = 0; pass < 2; pass++) for (let i = 0; i <= n; i++) {
+    const f = 2 * i / n - 1, X = cx + f * half, xw = (X + CAMPX) / SV; if (!waterRun(xw)) continue;
+    const bil = 0.5 + 0.3 * Math.sin(f * 7 + time * 2.5) + 0.2 * Math.sin(f * 17 - time * 3.7 + 1), r = Math.max(PB, hgt * (0.2 + 0.8 * (1 - f * f)) * (0.5 + 0.8 * bil)), Y = surfaceY0(xw) * SV - TOPPX;
+    if (!pass) { dwDisc(RL, X, Y - r * 0.25, r, PALE, 1); continue; }
+    dwDisc(RL, X, Y - r * 0.6, r, DW_WHITE, 1);
+    const h1 = hash(i * 5.13 + tq * 1.7), h2 = hash(i * 2.71 + tq * 2.3 + 5);
+    if (t < 1.6 && h1 > 0.45) dwDisc(RL, X + (h2 - 0.5) * 2 * r, Y - r * (1.5 + 1.6 * h1) * (1 - t / 3), r * (0.2 + 0.25 * h2), h2 > 0.4 ? DW_WHITE : PALE, 0.95);
+  }
+}
 function dwDrawWaves(x0, x1, lake) {
   const RL = dwRL(), lw = waterLineW(), PALE = [214, 238, 255], tq = Math.floor(time * 6);
   for (const w of DW.live) {
-    if (!!w.lake !== !!lake || !(w.fo > 0.04) || offView(w.xa, w.xb, x0, x1)) continue;   // (while its outline is folded, and a while after)
-    const A = w.C, k0 = 8 * DW_SUB, k1 = 13 * DW_SUB, amt = w.fo, sz = Math.max(PB, lw + 1), R = 0.11 * w.H * SV * (w.lip ? 0.4 + 0.6 * amt : amt);
+    if (!!w.lake !== !!lake || offView(w.xa - w.H, w.xb + w.H, x0, x1)) continue;
+    if (w.bt != null && w.bt < DW_BURST) dwDrawBurst(RL, w);
+    if (!(w.fo > 0.04)) continue;                                  // (as its face tilts, while it's folded, and a while after)
+    const A = w.C, kc = 11 * DW_SUB, k0 = (w.lip ? 8 : 9) * DW_SUB, k1 = 13 * DW_SUB, amt = w.fo, sz = Math.max(PB, lw + 1), R = 0.11 * w.H * SV * (w.lip ? 0.4 + 0.6 * amt : amt);
     // (along the outline, standing off it on its outer side: billows - discs whose size swells and falls along it and with the clock - a pale one
     // under each for its shade, the white over; smaller down the back, till it's the line's own white; and bits of it thrown off the tip's side)
     for (let pass = 0; pass < 2; pass++) {
@@ -7951,7 +7975,7 @@ function dwDrawWaves(x0, x1, lake) {
       for (let k = k0; k < k1; k++) {
         const xa = A[2 * k], ha = A[2 * k + 1], xb = A[2 * k + 2], hb = A[2 * k + 3], Xa = xa * SV - CAMPX, Ya = dwYAt(w, xa, ha) * SV - TOPPX, Xb = xb * SV - CAMPX, Yb = dwYAt(w, xb, hb) * SV - TOPPX;
         const len = Math.hypot(Xb - Xa, Yb - Ya) || 1, nx = -w.dir * (Yb - Ya) / len, ny = w.dir * (Xb - Xa) / len;   // (its outer side)
-        const u = 1 - (k - k0) / (k1 - k0), r0 = Math.max(PB, R * (0.1 + 0.9 * u * u)), st = Math.max(1, Math.ceil(len / (r0 * 0.5)));   // (u: 1 at the tip .. 0 down the back)
+        const u = w.lip ? 1 - (k - k0) / (k1 - k0) : clamp(1 - Math.abs(k - kc) / (2 * DW_SUB), 0, 1), r0 = Math.max(PB, R * (0.1 + 0.9 * u * u)), st = Math.max(1, Math.ceil(len / (r0 * 0.5)));   // (u: 1 at the tip .. 0 down the back)
         for (let q = 0; q < st; q++, i++) {
           const X = Xa + (Xb - Xa) * q / st, Y = Ya + (Yb - Ya) * q / st, sd = (sa + len * q / st) / R;
           const bil = 0.5 + 0.3 * Math.sin(sd * 2.1 - time * 2.2) + 0.2 * Math.sin(sd * 5.3 + time * 3.1 + 1.7), r = r0 * (0.45 + 0.9 * bil);
@@ -8013,6 +8037,7 @@ function dwDrawShore(x0, x1) {
 // boat is under the lip as it falls - between its tip and its crest - is lost; over the crest already, or still out in front of its reach, it lives.
 // (The small boats today - jetboatSink; the other families ride it out: not decided yet)
 function dwCrash(w) {
+  w.bt = 0; w.bH = w.H; w.bo = dwPt(w, 8)[0] - w.x;                  // (the burst of foam where its lip lands: its clock, the wave's height then, where from the wave's middle)
   const T = dwPt(w, 8)[0], Cx = dwPt(w, 11)[0], a = Math.min(T, Cx) - 0.05 * w.H, b = Math.max(T, Cx) + 0.05 * w.H;
   for (const j of jetboats.list ? jetboats.list() : jetboats) if (j.state === 'run' && j.x > a && j.x < b && w.H > 0.25 * storyBoatSize(j)[0]) { DW.lost++; jetboatSink(j); }
   if (!SIM_ONLY) { sound('splash', T, clamp(w.H / 80, 0.3, 1)); for (let k = 0; k < Math.min(60, 10 + w.H * 0.5); k++) { const x = a + Math.random() * (b - a); if (waterRun(x)) { spawnSpray(x, surfaceY0(x) - Math.random() * 0.4 * w.H, w.dir * w.c * (0.2 + Math.random() * 0.6), 0.8 + Math.random() * 1.4); spawnFoam(x, 2 + Math.random() * 3); } } }
@@ -9280,7 +9305,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 23:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 00:12';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
