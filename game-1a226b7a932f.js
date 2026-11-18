@@ -4871,7 +4871,7 @@ function prepareArt() {
     // the masthead: the first solid pixel from the top (in the bow-right orientation - read from a copy let go after)
     const T0 = artTops(copyCanvas(src)), T = sd.bow > 0 ? T0 : T0.slice().reverse();   // (its tops bow right: a drawing bow left's read the other way)
     let mc = 0; for (let x = 1; x < T.length; x++) if (T[x] < T[mc]) mc = x;
-    sd.mast = [mc, T[mc]];
+    sd.mastAuto = mc; sd.mast = [sd.mastX != null && sd.mastX >= 0 ? sd.mastX : mc, T[mc]];   // (mastX: set by hand - the Vehicle Editor, 50-zzzzz-vehicle-editor-marks.js)
     // (P her drawing and PD her wreck's, the user's own pictures - bow sd.bow; the other way round the things' pass draws them mirrored - sailMx)
     return { ...sd, P: src, PD: img[sd.dmg], w: src.width, h: src.height };
   });
@@ -8738,8 +8738,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1083;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 00:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1084;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 18 00:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -42512,7 +42512,7 @@ function drawCivShip(c, x0, x1) {
   C.restore();
   thgOrderMark(c, o0);
   if (own) thingsEnd();
-  drawLinerRigging(c, x0, x1); if (c.state === 'sail') shipNavLights(c, L);   // (her ropes - the things' pass, after her; her navigation lights)
+  drawLinerRigging(c, x0, x1); civRopesDraw(c, x0, x1); if (c.state === 'sail') shipNavLights(c, L);   // (her ropes - the things' pass, after her; her navigation lights)
 }
 // the big ships' pictures into the art atlas (the frame's 'art' layer): each one's own (her windows worked out with it - data), the liner's pieces
 artFamily(() => {
@@ -47205,10 +47205,13 @@ function linerPoint(c, name, ax, ay) {
   const p = LP_PART[name], dx = (ax - (p.x + p.w / 2)) * K.k * L.face, dy = (ay - (p.y + p.h / 2)) * K.k, ca = Math.cos(L.a), sa = Math.sin(L.a);
   return [L.x + dx * ca - dy * sa, L.y + dx * sa + dy * ca];
 }
+// (Nov 17, the Vehicle Editor: her ropes are a table it edits - LPI.ropes, 50-zzzzz-vehicle-editor-marks.js; changed, RIG_VER moves on and each
+// liner's ropes are made again from it, her torn-off pieces kept)
+let RIG_VER = 0;
 function linerState(c) {
-  if (c.lp) return c.lp;
-  const K = CIV[c.kind];
-  c.lp = { loose: {}, ropes: LPI.ropes.map(rp => {
+  if (c.lp && (c.lp.ver || 0) === RIG_VER) return c.lp;
+  const K = CIV[c.kind], loose = c.lp ? c.lp.loose : {};
+  c.lp = { ver: RIG_VER, loose, ropes: LPI.ropes.map(rp => {
     const n = clamp(Math.round(rp.len / 9), 3, 24), [ax, ay] = linerPoint(c, rp.pa, ...rp.a), [bx, by] = linerPoint(c, rp.pb, ...rp.b), N = [];
     for (let i = 0; i < n; i++) { const u = i / (n - 1), x = ax + (bx - ax) * u, y = ay + (by - ay) * u + Math.sin(u * Math.PI) * 2; N.push([x, y, x, y]); }
     return { rp, N, seg: rp.len * K.k / (n - 1), holdA: true, holdB: true };
@@ -64531,6 +64534,11 @@ function drawPicBoat(j) {
       });
     }
   }
+  // her ropes (PIC_BOATS' ropes - the Vehicle Editor's, Nov 17): on her side view, made fast where they're marked, swinging with her (vehRopesDraw)
+  if (B.ropes && B.ropes.length && F === P && j.state !== 'sink') {
+    const ca = Math.cos(j.a || 0), sa = Math.sin(j.a || 0), y0 = j.y + dr + (j.susY || 0);
+    vehRopesDraw(j, B.ropes, (ax, ay) => { const lx = -j.dir * (ax - 0.5) * w, ly = -h + ay * h; return [j.x + lx * ca - ly * sa, y0 + lx * sa + ly * ca]; }, q => Math.hypot((q[2] - q[0]) * w, (q[3] - q[1]) * h) * (q[4] || 1.05));
+  }
   drawStoryNet(j, h);   // (a boat with a net out - 50-story-net.js)
 }
 // fishing: the net, all physics (user Nov 2) - 50-story-net.js
@@ -72801,6 +72809,108 @@ VM_FAMS.plane = {
   },
 };
 
+/* ---- ROPES ON ANY VEHICLE (user Nov 17 22:51: "sections that are wires dynamic with physics that connect like we have in the Titanic ... where
+   the rope is supposed to be to attach"). A rope is a row of its vehicle: its two ends on the side picture and its slack (its length over the
+   straight line between them). Every rope is the one rope (ropeStep, drawRopeLine - 50-land-linerparts.js, 50-land-magnet.js): the liner's are
+   hers as before (her simulation's, parting when what they're fast to goes); any other vehicle's swing where they're drawn (vehRopesDraw: knots
+   kept a vehicle on this page, stepped once a frame - nothing of play depends on them). rows: [ax, ay, bx, by, slack] in the family's own
+   numbers; pt: a row's end in the world; len: a row's length in the world. ---- */
+const VROPES = new Map();
+function vehRopesDraw(v, rows, pt, len, x0 = -1e9, x1 = 1e9) {
+  const id = v._uid != null ? 'u' + v._uid : v.id != null ? 'i' + v.id : v.sid != null ? 's' + v.sid : null;
+  let S = id && VROPES.get(id);
+  if (id && (!S || S.rows !== rows)) { S = { rows, R: [] }; VROPES.set(id, S); if (VROPES.size > 300) for (const [k, q] of VROPES) if (time - q.t > 5) VROPES.delete(k); }
+  if (S) S.t = time;
+  rows.forEach((q, i) => {
+    const [ax, ay] = pt(q[0], q[1]), [bx, by] = pt(q[2], q[3]), L = len(q);
+    if (offView(Math.min(ax, bx), Math.max(ax, bx), x0, x1)) return;
+    let R = S && S.R[i];
+    // (none yet, or it's been left far behind - the vehicle put somewhere else: made hanging between its ends)
+    if (!R || Math.hypot(R.N[0][0] - ax, R.N[0][1] - ay) > L) {
+      const n = clamp(Math.round(L / (0.6 * UPM)), 4, 20), N = [];
+      for (let k = 0; k < n; k++) { const u = k / (n - 1), x = ax + (bx - ax) * u, y = ay + (by - ay) * u + Math.sin(u * Math.PI) * (L - Math.hypot(bx - ax, by - ay)) * 0.6; N.push([x, y, x, y]); }
+      R = { N, seg: L / (n - 1), holdA: true, holdB: true, t: time }; if (S) S.R[i] = R;
+    }
+    if (R.t !== time) { ropeStep(R, ax, ay, bx, by, clamp(time - R.t, 0, 1 / 20)); R.t = time; }   // (once a frame: one screen is two views)
+    else { R.N[0][0] = ax; R.N[0][1] = ay; const e = R.N[R.N.length - 1]; e[0] = bx; e[1] = by; }
+    drawRopeLine(R.N, LINER_ROPE, 0.55);
+  });
+}
+// a big ship's ropes (CIV's ropes - her picture's pixels), after her; the liner's are her own (drawLinerRigging)
+function civRopesDraw(c, x0, x1) {
+  const K = CIV[c.kind]; if (c.kind === 'liner' || !K.ropes || !K.ropes.length || c.state === 'gone' || c.state === 'wreck') return;
+  const A = civArt(c); if (!A || !A.width) return;
+  vehRopesDraw(c, K.ropes, (x, y) => civHalfPoint(c, x, y, A, K), q => Math.hypot(q[2] - q[0], q[3] - q[1]) * K.k * (q[4] || 1.05), x0, x1);
+}
+// the rope kind, for every family that has ropes: a mark with two ends and its slack
+const VM_ROPE = { lab: 'ROPE', add: true, two: true, depth: 'm', help: 'A rope between two points: it hangs and swings' };
+const vmR3 = v => Math.round(v * 1000) / 1000;
+// rows [ax, ay, bx, by, slack] <-> rope marks: kx, ky the picture's pixels a unit of the rows (1 for pixels, the picture's size for shares)
+const vmRopesOut = (rows, kx, ky) => (rows || []).map((q, i) => ({ id: 'rope' + i, k: 'rope', x: q[0] * kx, y: q[1] * ky, x2: q[2] * kx, y2: q[3] * ky, s: q[4] || 1.05 }));
+const vmRopesIn = (M, kx, ky, r = vmR3) => M.filter(q => q.k === 'rope').map(q => [r(q.x / kx), r(q.y / ky), r(q.x2 / kx), r(q.y2 / ky), vmR3(q.s || 1.05)]);
+// (the picture boats' and the big ships' ropes: one more field of their rows - none built in)
+{
+  const B = VM_FAMS.boat, g0 = B.get, p0 = B.put, m0 = B.marks, f0 = B.fromMarks;
+  B.kinds.rope = VM_ROPE;
+  B.get = k => Object.assign(g0(k), { ropes: PIC_BOATS[k].ropes || [] });
+  B.put = (k, r) => { p0(k, r); PIC_BOATS[k].ropes = r.ropes || []; };
+  B.marks = (k, r, P) => { const o = m0(k, r, P); o.marks.push(...vmRopesOut(r.ropes, P.w, P.h)); return o; };
+  B.fromMarks = (k, M, nums, P, r) => Object.assign(f0(k, M, nums, P, r), { ropes: vmRopesIn(M, P.w, P.h) });
+  const S = VM_FAMS.ship, g1 = S.get, p1 = S.put, m1 = S.marks, f1 = S.fromMarks, r1 = v => Math.round(v * 2) / 2;
+  S.kinds.rope = VM_ROPE; S.kinds.part = { lab: 'SECTION', ro: true, depth: 'm', help: 'A piece cut from her picture: it comes off when hit or as she sinks' };
+  // the liner's ropes are hers (LPI.ropes: each end with the piece it's made fast to - the mast or funnel it's on, else her hull; its length in pixels)
+  const lpAt = (x, y) => { for (const p of LPI.parts) if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) return p.name; return 'hull'; };
+  const lpRows = () => LPI.ropes.map(q => [q.a[0], q.a[1], q.b[0], q.b[1], vmR3(Math.max(1, q.len / Math.max(1, Math.hypot(q.b[0] - q.a[0], q.b[1] - q.a[1]))))]);
+  S.get = k => Object.assign(g1(k), { ropes: k === 'liner' ? lpRows() : CIV[k].ropes || [] });
+  S.put = (k, r) => {
+    p1(k, r);
+    if (k !== 'liner') { CIV[k].ropes = r.ropes || []; return; }
+    if (JSON.stringify(r.ropes) === JSON.stringify(lpRows())) return;
+    // (a rope left as it was keeps what the art's own tracing made it fast to and its length; a new or moved one: the piece under each end)
+    const old = LPI.ropes, rows0 = lpRows(), same = (a, b) => a.every((v, i) => Math.abs(v - b[i]) < 0.011);
+    LPI.ropes = (r.ropes || []).map(q => { const i = rows0.findIndex(o => same(o, q)); return i >= 0 ? old[i] : { pa: lpAt(q[0], q[1]), a: [q[0], q[1]], pb: lpAt(q[2], q[3]), b: [q[2], q[3]], len: Math.hypot(q[2] - q[0], q[3] - q[1]) * (q[4] || 1.05) }; });
+    RIG_VER++;                                               // (each liner's ropes made again - linerState)
+  };
+  S.marks = (k, r, P) => {
+    const o = m1(k, r, P); o.marks.push(...vmRopesOut(r.ropes, 1, 1));
+    if (k === 'liner') LPI.parts.forEach((p, i) => o.marks.push({ id: 'part' + i, k: 'part', x: p.x, y: p.y, w: p.w, h: p.h, name: String(p.name).toUpperCase() }));   // (her masts and funnels, as cut from her picture: shown, not moved)
+    return o;
+  };
+  S.fromMarks = (k, M, nums, P, r) => Object.assign(f1(k, M, nums, P, r), { ropes: vmRopesIn(M, 1, 1, k === 'liner' ? vmR3 : r1) });
+}
+
+// ---- THE YACHTS (10-tower-sub-constants.js SAILS, 45-draw-vehicles.js drawSailboat): her waterline's row, her rig line (above it her sails fill,
+// belly, lean and furl about her mast - the SAILS button; below it her hull), her mast along her picture (-1: where the art's highest point is)
+VM_FAMS.yacht = {
+  lab: 'YACHTS', views: () => 1,
+  keys: () => SAILS.map((s, i) => String(i)),
+  name: i => 'YACHT ' + (+i + 1),
+  pic: i => { const A = img.sails && img.sails[+i]; return A && A.P && A.P.width ? { img: A.P, w: A.P.width, h: A.P.height, m: SAIL_K / UPM } : null; },
+  width: () => 4,
+  get: i => ({ split: SAILS[+i].split, wl: SAILS[+i].wl, mast: SAILS[+i].mastX != null ? SAILS[+i].mastX : -1, dp: SAILS[+i].dp || {} }),
+  put(i, r) {
+    const S = SAILS[+i], A = img.sails && img.sails[+i];
+    S.split = r.split; S.wl = r.wl; S.dp = r.dp || {}; if (A) { A.split = r.split; A.wl = r.wl; }
+    if (r.mast >= 0) S.mastX = r.mast; else delete S.mastX;
+    if (S.mast && S.mastAuto != null) S.mast[0] = r.mast >= 0 ? r.mast : S.mastAuto;
+  },
+  kinds: {
+    water: { lab: 'WATERLINE', depth: 'm', ax: 'y', help: 'The row of her picture that sits at the water' },
+    rig: { lab: 'SAILS FROM HERE UP', depth: 'm', ax: 'y', help: 'Above this line her sails fill, lean and furl; below is hull' },
+    mast: { lab: 'MAST', depth: 'm', ax: 'x', help: 'Her mast: the sails belly out from it and roll up round it' },
+  },
+  nums: [],
+  // (her mast is kept counted from her bow's end - sd.mast, bow right; on a picture drawn bow left it's the other way along)
+  marks(i, r, P) {
+    const S = SAILS[+i], mc = r.mast >= 0 ? r.mast : S.mastAuto != null ? S.mastAuto : P.w / 2, mx = S.bow > 0 ? mc : P.w - 1 - mc;
+    return { marks: [{ id: 'water0', k: 'water', x: P.w / 2, y: r.wl }, { id: 'rig0', k: 'rig', x: P.w / 2, y: r.split }, { id: 'mast0', k: 'mast', x: mx, y: S.mast ? S.mast[1] + 12 : 12 }], nums: {}, water: r.wl };
+  },
+  fromMarks(i, M, nums, P, r) {
+    const S = SAILS[+i], one = id => M.find(q => q.k === id), was = this.marks(i, r, P).marks.find(q => q.k === 'mast'), mx = Math.round(one('mast').x);
+    return { split: Math.round(one('rig').y), wl: Math.round(one('water').y), mast: Math.abs(was.x - one('mast').x) < 0.01 ? r.mast : (S.bow > 0 ? mx : P.w - 1 - mx), dp: r.dp || {} };
+  },
+};
+
 // ---- every family in: the built-in rows taken, what's kept laid over them (read again with the world - worldLoad), the table and the action
 worldLoad(() => { let o = null; try { o = JSON.parse(localStorage.getItem('bd_vmarks') || 'null'); } catch (e) { } vmApply(o); });
 // (the game handed to the simulation worker, a save and online carry them - as the vehicles' numbers: 36-zz-world.js VT_ROW)
@@ -76416,7 +76526,7 @@ function sseDraw() {
 const VED = { root: null, key: null, row: null, P: null, M: [], nums: {}, sel: null, turn: 0, z: 1, ox: 0, oy: 0, undo: [], redo: [], drag: null, from: 'title' };
 const VED_DEPTHS = [['n', 'NEAR SIDE'], ['f', 'FAR SIDE'], ['b', 'BOTH SIDES'], ['m', 'MIDDLE']];
 const VED_TYPES = { beam: 'HEADLAMP (BEAM)', white: 'WHITE', red: 'RED', side: 'SIDELIGHT' };
-const VED_COL = { wheel: '#58d8ff', lamp: '#ffe9a8', smoke: '#b8bcc8', screw: '#6aa8ff', cg: '#ffb347', stem: '#7fd6ff', stern: '#7fd6ff', water: '#7fd6ff', top: '#c9a0ff', tail: '#ff4a3c', nav: '#50ff78', glint: '#fff6c0' };
+const VED_COL = { wheel: '#58d8ff', lamp: '#ffe9a8', smoke: '#b8bcc8', screw: '#6aa8ff', cg: '#ffb347', stem: '#7fd6ff', stern: '#7fd6ff', water: '#7fd6ff', top: '#c9a0ff', tail: '#ff4a3c', nav: '#50ff78', glint: '#fff6c0', rope: '#d8be90', part: '#8a93a8', rig: '#ffb347', mast: '#c9a0ff' };
 const VED_LAMP_COL = { beam: '#fff0c8', white: '#ffffff', red: '#ff4a3c', side: '#50ff78' };
 if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
   const $ = (tag, css, html) => { const e = document.createElement(tag); if (css) e.style.cssText = css; if (html !== undefined) e.innerHTML = html; return e; };
@@ -76540,14 +76650,16 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     const F = fam(), K = F.kinds; let h = '<h4>MARKS</h4>';
     for (const m of VED.M) {
       const k = K[m.k], n = VED.M.filter(q => q.k === m.k).length, i = +m.id.slice(m.k.length) + 1, on = m.id === VED.sel;
-      h += `<div class="mk${on ? ' on' : ''}" data-id="${m.id}" data-name="${k.lab}" data-help="${k.help}"><span class="dot" style="background:${m.k === 'lamp' ? VED_LAMP_COL[m.t] || '#fff' : VED_COL[m.k]}"></span><span>${k.lab}${n > 1 || (k.add && (k.max || 9) > 1) ? ' ' + i : ''}</span>`
+      h += `<div class="mk${on ? ' on' : ''}" data-id="${m.id}" data-name="${k.lab}" data-help="${k.help}"><span class="dot" style="background:${m.k === 'lamp' ? VED_LAMP_COL[m.t] || '#fff' : VED_COL[m.k]}"></span><span>${m.name || k.lab + (n > 1 || (k.add && (k.max || 9) > 1) ? ' ' + i : '')}</span>`
         + (k.add && n > (k.min || 0) ? `<button data-del="${m.id}" title="Remove this mark">DELETE</button>` : '<span></span>');
       if (on) {
         h += '<div class="f">';
         if (k.types) h += `<select data-f="t" title="What kind of light it is">${k.types.map(t => `<option value="${t}"${t === m.t ? ' selected' : ''}>${VED_TYPES[t]}</option>`).join('')}</select>`;
-        h += `<select data-f="d" title="Where it sits across the vehicle, for views turned toward you">${VED_DEPTHS.map(([v, t]) => `<option value="${v}"${v === m.d ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
-        if (k.ax !== 'y') h += `<label title="Its place along the picture, in pixels">X <input type="number" data-f="x" step="0.5" value="${num(m.x)}"></label>`;
-        if (k.ax !== 'x') h += `<label title="Its place down the picture, in pixels">Y <input type="number" data-f="y" step="0.5" value="${num(m.y)}"></label>`;
+        if (!k.ro && !k.two) h += `<select data-f="d" title="Where it sits across the vehicle, for views turned toward you">${VED_DEPTHS.map(([v, t]) => `<option value="${v}"${v === m.d ? ' selected' : ''}>${t}</option>`).join('')}</select>`;
+        if (k.ro) h += `<span>${num(m.w)} x ${num(m.h)} pixels, cut from the art</span>`;
+        if (k.ax !== 'y') h += `<label title="Its place along the picture, in pixels">X <input type="number" data-f="x" step="0.5" value="${num(m.x)}"${k.ro ? ' disabled' : ''}></label>`;
+        if (k.ax !== 'x') h += `<label title="Its place down the picture, in pixels">Y <input type="number" data-f="y" step="0.5" value="${num(m.y)}"${k.ro ? ' disabled' : ''}></label>`;
+        if (k.two) h += `<label title="Its other end along the picture, in pixels">X2 <input type="number" data-f="x2" step="0.5" value="${num(m.x2)}"></label><label title="Its other end down the picture, in pixels">Y2 <input type="number" data-f="y2" step="0.5" value="${num(m.y2)}"></label><label title="How much longer it is than the straight line between its ends: 1 is taut">SLACK <input type="number" data-f="s" step="0.01" min="1" max="2" value="${num(m.s || 1.05, 2)}"></label>`;
         if (k.r) h += `<label title="Its radius, in pixels (Shift and the mouse wheel change it too)">SIZE <input type="number" data-f="r" step="0.5" min="1" value="${num(m.r)}"></label>`;
         if (k.s) h += `<label title="How bright it is, 0 to 1">BRIGHT <input type="number" data-f="s" step="0.05" min="0.1" max="1" value="${num(m.s == null ? 1 : m.s, 2)}"></label>`;
         h += '</div>';
@@ -76570,6 +76682,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
   function add(k) {
     const K = fam().kinds[k], P = VED.P, like = VED.M.filter(m => m.k === k).pop();
     const m = { id: k + 'new', k, x: P.w / 2, y: like ? like.y : P.h / 2, d: K.depth };
+    if (K.two) { m.x = P.w * 0.3; m.y = m.y2 = like ? like.y : P.h * 0.3; m.x2 = P.w * 0.7; m.s = 1.05; }   // (a rope: across her middle, to be dragged by its ends)
     if (K.r) m.r = like ? like.r : Math.max(3, P.h * 0.12); if (K.types) m.t = K.types.includes('white') ? 'white' : K.types[0]; if (K.s) m.s = 1;
     const at = VED.M.map(q => q.k).lastIndexOf(k); VED.M.splice(at < 0 ? VED.M.length : at + 1, 0, m); VED.sel = m.id; commit(); side(); draw();
   }
@@ -76618,6 +76731,16 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     const X = x => ox + x * z, Y = y => oy + y * sy * z;
     for (const m of VED.M) {
       const k = kindOf(m), on = m.id === VED.sel, col = on ? '#ffffff' : m.k === 'lamp' ? VED_LAMP_COL[m.t] || '#fff' : VED_COL[m.k];
+      if (k.ro || k.two) {                                   // (a section's outline; a rope hanging between its two ends - on the side view only)
+        if (VED.turn) continue;
+        g.strokeStyle = col; g.fillStyle = col; g.lineWidth = lw;
+        if (k.ro) { g.setLineDash([lw * 3, lw * 2]); g.strokeRect(X(m.x), Y(m.y), m.w * z, m.h * z); g.setLineDash([]); if (on) g.fillText(m.name || k.lab, X(m.x + m.w / 2), Y(m.y) - 4 * lw); continue; }
+        const ax = X(m.x), ay = Y(m.y), bx = X(m.x2), by = Y(m.y2), L = Math.hypot(bx - ax, by - ay), sag = L * Math.sqrt(Math.max(0, (m.s || 1.05) - 1) * 0.375);
+        g.strokeStyle = '#04070f'; g.lineWidth = lw + 2; g.beginPath(); g.moveTo(ax, ay); g.quadraticCurveTo((ax + bx) / 2, (ay + by) / 2 + 2 * sag, bx, by); g.stroke();
+        g.strokeStyle = col; g.lineWidth = lw; g.beginPath(); g.moveTo(ax, ay); g.quadraticCurveTo((ax + bx) / 2, (ay + by) / 2 + 2 * sag, bx, by); g.stroke();
+        for (const [x, y] of [[ax, ay], [bx, by]]) { g.beginPath(); g.arc(x, y, 3 * lw, 0, 6.2832); g.fill(); }
+        continue;
+      }
       markXs(m, V).forEach((mx, j) => {
         const x = X(mx), y = Y(m.y); g.globalAlpha = j ? 0.45 : 1; g.strokeStyle = col; g.fillStyle = col;
         const ring = (r, c) => { g.strokeStyle = '#04070f'; g.lineWidth = lw + 2; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.stroke(); g.strokeStyle = c; g.lineWidth = lw; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.stroke(); };
@@ -76643,17 +76766,21 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     if (!VED.P) return;
     if (VED.turn) { VED.pan = { id: e.pointerId, x: e.clientX, y: e.clientY, ox: VED.ox, oy: VED.oy }; return; }
     const [x, y, rr] = at(e); let best = null, bd = 1e9;
-    for (const m of VED.M) { const k = kindOf(m), d = k.ax === 'y' ? Math.abs(y - m.y) : k.ax === 'x' ? Math.abs(x - m.x) + (Math.abs(y - m.y) > rr * 2 ? 1e6 : 0) : Math.max(0, Math.hypot(x - m.x, y - m.y) - (k.r ? m.r * 0.6 : 0)); if (d < bd && d <= rr) { bd = d; best = m; } }
+    let end = 1;
+    for (const m of VED.M) { const k = kindOf(m); if (k.ro) continue;
+      if (k.two) { const d1 = Math.hypot(x - m.x, y - m.y), d2 = Math.hypot(x - m.x2, y - m.y2), d = Math.min(d1, d2); if (d < bd && d <= rr) { bd = d; best = m; end = d2 < d1 ? 2 : 1; } continue; }
+      const d = k.ax === 'y' ? Math.abs(y - m.y) : k.ax === 'x' ? Math.abs(x - m.x) + (Math.abs(y - m.y) > rr * 2 ? 1e6 : 0) : Math.max(0, Math.hypot(x - m.x, y - m.y) - (k.r ? m.r * 0.6 : 0)); if (d < bd && d <= rr) { bd = d; best = m; end = 1; } }
     VED.sel = best ? best.id : null; side(); draw();
     if (!best) { VED.pan = { id: e.pointerId, x: e.clientX, y: e.clientY, ox: VED.ox, oy: VED.oy }; try { VED.cv.setPointerCapture(e.pointerId); } catch (err) { } }   // (empty space: the picture dragged about)
-    if (best) { VED.drag = { id: e.pointerId, m: best, dx: best.x - x, dy: best.y - y, row: VED.row, moved: false }; try { VED.cv.setPointerCapture(e.pointerId); } catch (err) { } const k = kindOf(best); say(k.lab, k.help); }
+    if (best) { VED.drag = { id: e.pointerId, m: best, end, dx: (end === 2 ? best.x2 : best.x) - x, dy: (end === 2 ? best.y2 : best.y) - y, row: VED.row, moved: false }; try { VED.cv.setPointerCapture(e.pointerId); } catch (err) { } const k = kindOf(best); say(k.lab, k.help); }
     e.preventDefault();
   }
   function move(e) {
     const Pn = VED.pan; if (Pn && Pn.id === e.pointerId) { const d = VED.cv.width / VED.cv.getBoundingClientRect().width; VED.ox = Pn.ox + (e.clientX - Pn.x) * d; VED.oy = Pn.oy + (e.clientY - Pn.y) * d; draw(); return; }
     const D = VED.drag; if (!D || D.id !== e.pointerId) return;
     const [x, y] = at(e), k = kindOf(D.m), P = VED.P, h = v => Math.round(v * 2) / 2;
-    if (k.ax !== 'y') D.m.x = clamp(h(x + D.dx), 0, P.w); if (k.ax !== 'x') D.m.y = clamp(h(y + D.dy), 0, P.h);
+    if (D.end === 2) { D.m.x2 = clamp(h(x + D.dx), 0, P.w); D.m.y2 = clamp(h(y + D.dy), 0, P.h); }   // (a rope's other end)
+    else { if (k.ax !== 'y') D.m.x = clamp(h(x + D.dx), 0, P.w); if (k.ax !== 'x') D.m.y = clamp(h(y + D.dy), 0, P.h); }
     D.moved = true; commit(false);
   }
   function up(e) {
@@ -76668,7 +76795,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     if (e.code === 'Escape') { e.preventDefault(); if (VED.askEl) return; close(); return; }
     if (typing) return;
     const m = sel(), A = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.code];
-    if (m && A && !VED.turn) { const k = kindOf(m), s = e.shiftKey ? 5 : 0.5; if (k.ax !== 'y') m.x = clamp(m.x + A[0] * s, 0, VED.P.w); if (k.ax !== 'x') m.y = clamp(m.y + A[1] * s, 0, VED.P.h); commit(); side(); e.preventDefault(); return; }
+    if (m && A && !VED.turn) { const k = kindOf(m), s = e.shiftKey ? 5 : 0.5; if (k.ro) return; if (k.ax !== 'y') m.x = clamp(m.x + A[0] * s, 0, VED.P.w); if (k.ax !== 'x') m.y = clamp(m.y + A[1] * s, 0, VED.P.h); if (k.two) { m.x2 = clamp(m.x2 + A[0] * s, 0, VED.P.w); m.y2 = clamp(m.y2 + A[1] * s, 0, VED.P.h); } commit(); side(); e.preventDefault(); return; }
     if (m && (e.code === 'Delete' || e.code === 'Backspace')) { const k = kindOf(m); if (k.add && VED.M.filter(q => q.k === m.k).length > (k.min || 0)) { VED.M = VED.M.filter(q => q !== m); VED.sel = null; commit(); side(); } e.preventDefault(); }
   }
 
