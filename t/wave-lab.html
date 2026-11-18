@@ -3400,7 +3400,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1070, build: 'NOV 18 13:44', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1070, build: 'NOV 18 13:52', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -11133,7 +11133,7 @@ function dwStep(dt) {
     // (its face's tilt - the steepest of it, foot to crest: 0 a gentle swell .. 1 a wall - user Nov 17 23:11: "every wave tilt must have foam forming")
     { const Cc = w.C; let sl = 0; for (let k = 0; k < 11 * DW_SUB; k++) { const dx = Math.abs(Cc[2 * k + 2] - Cc[2 * k]), dh = Math.abs(Cc[2 * k + 3] - Cc[2 * k + 1]); if (dh > 0.02 * w.H) sl = Math.max(sl, dh / Math.max(dx, 0.3 * dh)); }
       w.tilt = w.H > 2 ? clamp((sl - 0.18) / 0.6, 0, 1) : 0; }
-    dwFoamFrom(w, dt);                                             // (the tip's landing loses boats in the sim too; its foam's bits only where drawn)
+    dwFoamFrom(w, dt); dwTrapFoam(w, dt);                          // (the tip's landing loses boats in the sim too; its foam's bits only where drawn)
     for (let q = 0; q < nc; q++) if (tp[q] > mx) mx = tp[q];
   }
   DW.max = mx * 1.1;
@@ -11178,32 +11178,79 @@ const DW_WHITE = [255, 255, 255];
    its air gap begins (the lip's underside) and where the water begins again (the face) - go to the water shader with the surface (waterSurfGPU's
    compute pass: gapIn), and the water's one drawing fills the body with the gap left out and carries its line and band round it (WATER_WGSL: gapAt,
    inGap, gapLine). F: four numbers a column of the view (o = the column + 3) */
-const DW_YS = new Float64Array(16);
+/* A WAVE AS A FILLED SHAPE (user Nov 18 12:48, ref-cut-nov18: "look at that vertical cut, while the shape itself is curved. I feel there is some
+   'cheating' going on in your solutions, more patching than actual solid system" - a column knew one top and one air gap, and each shape that didn't
+   fit got a rule of its own, the last a straight cut at the tip's x). A column through a wave's outline crosses it any number of times; the water
+   there is wherever the outline winds round the point (the sea closing it underneath: under all of it is water, over all of it air), so every
+   overhang and air gap comes out exact, and a lip passing into the water merges with it - the standard non-zero winding rule.
+   dwSpans(w, x, S): the column's highest water (S.top) and its air gaps top down (S.g: [high, low] heights - DW_GAPS at most; S.n of them).
+   TRAPPED AIR: a gap with no way out to the open air - no neighbouring column's air beside it reaching up to the sky, step by step (dwTrapMark) - is
+   air the wave has closed in: it fills with churned foam (dwTrapFoam, the sim) and is drawn as the wave's body (dwGapCols, the view) */
+const DW_GAPS = 3, DW_XS = new Float64Array(32), DW_XD = new Int8Array(32);
+const dwSpanNew = () => ({ top: -Infinity, n: 0, g: new Float64Array(2 * DW_GAPS), open: new Uint8Array(DW_GAPS) });
+function dwSpans(w, x, S) {
+  const C = w.C; let m = 0; S.n = 0; S.top = -Infinity;
+  if (!(x >= w.xa && x <= w.xb) || !w.n) return false;
+  for (let k = 0; k < w.n - 1 && m < 32; k++) {
+    const xA = C[2 * k], xB = C[2 * k + 2]; if ((xA <= x) === (xB <= x)) continue;
+    const h = C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA), d = xB > xA ? 1 : -1;
+    let j = m++; while (j > 0 && DW_XS[j - 1] < h) { DW_XS[j] = DW_XS[j - 1]; DW_XD[j] = DW_XD[j - 1]; j--; } DW_XS[j] = h; DW_XD[j] = d;   // (top first)
+  }
+  let wd = 0, hi = 0;
+  for (let i = 0; i < m; i++) {
+    const was = wd !== 0; wd += DW_XD[i]; const now = wd !== 0;
+    if (!was && now) { if (S.top === -Infinity) S.top = DW_XS[i]; else if (S.n < DW_GAPS) { S.g[2 * S.n] = hi; S.g[2 * S.n + 1] = DW_XS[i]; S.open[S.n] = 0; S.n++; } }
+    else if (was && !now) hi = DW_XS[i];
+  }
+  return S.top > -Infinity;
+}
+// which gaps of a run of columns (L[0..n), side by side) reach the open air: a gap beside a column's sky (above its top), or beside a gap that does,
+// within tol (a gap's edge a step from its neighbour's still touches it); the run's ends are open (the sea beyond them)
+function dwTrapMark(L, n, tol) {
+  for (let i = 0; i < n; i++) { const S = L[i]; for (let k = 0; k < S.n; k++) S.open[k] = i === 0 || i === n - 1 ? 1 : 0; }
+  const touch = (S, k, T) => { const hi = S.g[2 * k] + tol, lo = S.g[2 * k + 1] - tol; if (T.top === -Infinity || hi > T.top) return true;
+    for (let q = 0; q < T.n; q++) if (T.open[q] && lo < T.g[2 * q] && hi > T.g[2 * q + 1]) return true; return false; };
+  for (let pass = 0, ch = true; ch && pass < 24; pass++) {
+    ch = false;
+    for (let s = 0; s < 2; s++) for (let j = 0; j < n; j++) { const i = s ? n - 1 - j : j, S = L[i];
+      for (let k = 0; k < S.n; k++) if (!S.open[k] && ((i > 0 && touch(S, k, L[i - 1])) || (i < n - 1 && touch(S, k, L[i + 1])))) { S.open[k] = 1; ch = true; } }
+  }
+}
+// THE VIEW'S COLUMNS for the water's drawing (waterSurfGPU's compute pass: gapIn - WATER_WGSL gapK / inGap / gapLine): each its top's row and up to
+// DW_GAPS air gaps' rows - the open ones; trapped air is drawn as the body. Where waves overlap a column keeps the highest top of the waves over it
+// and that wave's gaps (user Nov 18 12:16, ref-many-waves-nov18). F: eight numbers a column of the view (o = the column + 3): the top's row, then
+// each gap's first and last rows; none: -1e9, 1e9 ...
+const DW_COLS = [];
 function dwGapCols(F, nOut) {
-  for (let o = 0; o < nOut; o++) { F[4 * o] = -1e9; F[4 * o + 1] = F[4 * o + 2] = 1e9; F[4 * o + 3] = 0; }
+  for (let o = 0; o < nOut; o++) { F[8 * o] = -1e9; for (let q = 1; q < 8; q++) F[8 * o + q] = 1e9; }
   for (const w of DW.live) {
     if (!(w.fb >= w.fa)) continue;                                  // (not folded: its surface is the stepped columns' own)
-    // (every column of a folded wave gets its top's exact row - not only the folded ones: no step in the line where the fold begins)
-    // (once its tip has come down on the water - w.landed - the tube is closed: no gap, the body whole and the break's foam over it - user Nov 18
-    // 11:31: "just foam, the overlap of the two spline parts is not visually discernible to the player")
-    const C = w.C, n = w.n, o0 = Math.max(0, Math.floor(w.xa * SV - CAMPX) + 3), o1 = Math.min(nOut - 1, Math.ceil(w.xb * SV - CAMPX) + 3);
+    const o0 = Math.max(0, Math.floor(w.xa * SV - CAMPX) + 3), o1 = Math.min(nOut - 1, Math.ceil(w.xb * SV - CAMPX) + 3), n = o1 - o0 + 1; if (n < 1) continue;
+    while (DW_COLS.length < n) DW_COLS.push(dwSpanNew());
+    for (let o = o0; o <= o1; o++) dwSpans(w, (o - 3 + CAMPX + 0.5) / SV, DW_COLS[o - o0]);
+    dwTrapMark(DW_COLS, n, 1.5 / SV);
     for (let o = o0; o <= o1; o++) {
-      const x = (o - 3 + CAMPX + 0.5) / SV; let m = 0;
-      for (let k = 0; k < n - 1 && m < 16; k++) { const xA = C[2 * k], xB = C[2 * k + 2]; if ((xA <= x) !== (xB <= x)) DW_YS[m++] = C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA); }
-      if (m < 1) continue;
-      let top = -Infinity, low = Infinity; for (let k = 0; k < m; k++) { if (DW_YS[k] > top) top = DW_YS[k]; if (DW_YS[k] < low) low = DW_YS[k]; }
-      let und = low; for (let k = 0; k < m; k++) if (DW_YS[k] < top && DW_YS[k] > und) und = DW_YS[k];   // (the next under its top: the lip's underside)
-      const base = surfaceY0(x) + dwTab(w, x, true), row = h => Math.floor((base - h) * SV - TOPPX + 0.5), rt = row(top);
-      // (user Nov 18 12:16, ref-many-waves-nov18: several waves over one another - "some of them stop rendering correctly": each wave wrote its
-      // whole span, the last over the others, a curl's gap lost under its neighbour's) a column keeps the highest top of the waves over it,
-      // and the gap of the wave whose top that is - or the first gap found, where its own top is the highest
-      const had = F[4 * o] !== -1e9, hi = !had || rt <= F[4 * o];
-      if (hi) F[4 * o] = rt;
-      // (user 12:40, ref-wall-no-foam-nov18: "a vertical line that has no foam and just stops" - closing every gap filled the air under a lip's front
-      // too, down to the sea: a cliff) once landed, only the tube behind where its tip came down (w.tx) is closed; the air ahead stays open
-      if (m >= 3 && !(w.landed && (x - w.tx) * w.dir <= 0) && (hi || F[4 * o + 1] === 1e9)) { const ru = Math.max(rt + 1, row(und)), rf = row(low); if (rf - ru >= 2) { F[4 * o + 1] = ru; F[4 * o + 2] = rf; } }   // (a gap under two rows: none)
+      const S = DW_COLS[o - o0]; if (S.top === -Infinity) continue;
+      const x = (o - 3 + CAMPX + 0.5) / SV, base = surfaceY0(x) + dwTab(w, x, true), row = h => Math.floor((base - h) * SV - TOPPX + 0.5), rt = row(S.top);
+      const hi = F[8 * o] === -1e9 || rt <= F[8 * o]; if (!hi) continue;
+      F[8 * o] = rt; for (let q = 1; q < 8; q++) F[8 * o + q] = 1e9;
+      let g = 0;
+      for (let k = 0; k < S.n; k++) { if (!S.open[k]) continue; const ru = Math.max(rt + 1, row(S.g[2 * k])), rf = row(S.g[2 * k + 1]); if (rf - ru < 2) continue; F[8 * o + 1 + 2 * g] = ru; F[8 * o + 2 + 2 * g] = rf; g++; }
     }
   }
+}
+// (the sim) the air a wave has closed in, as churned foam: its columns a step apart, each trapped gap given foam for its share of the area
+const DW_TC = [];
+function dwTrapFoam(w, dt) {
+  if (!(w.fb >= w.fa) || SIM_ONLY) return;
+  const st = Math.max(DX, w.H * 0.02), n = Math.min(400, Math.floor((w.xb - w.xa) / st) + 1), c = w.c * w.dir;
+  while (DW_TC.length < n) DW_TC.push(dwSpanNew());
+  for (let i = 0; i < n; i++) dwSpans(w, w.xa + i * st, DW_TC[i]);
+  dwTrapMark(DW_TC, n, st);
+  for (let i = 0; i < n; i++) { const S = DW_TC[i];
+    for (let k = 0; k < S.n; k++) { if (S.open[k]) continue; const a = S.g[2 * k], b = S.g[2 * k + 1], area = (a - b) * st;
+      for (let q = dfN(dt * area / (w.H * w.H) * 400); q > 0; q--) { const x = w.xa + (i + dfR() - 0.5) * st, h = b + (a - b) * dfR();
+        dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.6, 0.95), Math.max(0, S.top - h), dfRnd(0.03, 0.08) * w.H, dfRnd(0.6, 1.4)); } } }
 }
 /* THE WAVE'S INSIDE, IN SHADOW (user Nov 17 22:23-22:25, lab/wavelab/ref/ref-wave-final-layers / ref-wave-composition-A-B-C / ref-tube-shadow:
    "We want this darkness that feels like shadow"; "having this brighter effect would be cream on top"): A is the designed outline, lip and
@@ -11219,7 +11266,7 @@ function dwDrawBack(x0, x1) {
   const top = seaDeepStops(E.sunset, 1)[0][1], shade = top.map((v, j) => v * 0.22 + [8, 22, 60][j] * 0.78), glow = top.map((v, j) => v + ([150, 222, 255][j] - v) * 0.6);
   const NB = 9, cols = Array.from({ length: NB }, (_, q) => shade.map((v, j) => v + (glow[j] - v) * q / (NB - 1))), lineC = E.sunset > 0.3 ? mix3([196, 228, 255], [255, 220, 170], E.sunset) : [214, 238, 255];
   for (const w of DW.live) {
-    if (w.lake || !w.lip || w.landed || offView(w.xa, w.xb, x0, x1)) continue;
+    if (w.lake || !w.lip || offView(w.xa, w.xb, x0, x1)) continue;
     const C = w.C;
     for (let k = 0; k <= kt; k++) { const x = C[2 * k]; P[2 * k] = x * SV - CAMPX; P[2 * k + 1] = dwYAt(w, x, C[2 * k + 1]) * SV - TOPPX; }
     // (user 12:07, ref-shade-wanted-nov18: "that part should have the same color as the background water. Its facing the same direction. The shadow
@@ -11231,15 +11278,24 @@ function dwDrawBack(x0, x1) {
     if (!(S > 8)) continue;
     const km = Math.round(kt * 0.35), tx = P[2 * km + 2] - P[2 * km - 2], ty = P[2 * km + 3] - P[2 * km - 1], sgn = ((-ty) * w.dir) > 0 ? 1 : -1;   // (n = sgn * (-ty, tx): toward the air - the front of a face that rises toward the back)
     const Wd = Math.min(0.11 * w.H * SV, 0.18 * S);
-    // (user Nov 18 12:34, ref-inside-sharp-nov18: "why is the inside shape sharp when the outside shape is rounder?" - a band wider than the outline's
-    // own bend there turns into a point. Its width is held under the bend's radius, and the inner curve is smoothed after)
+    // (user Nov 18 12:34 / 12:46, ref-inside-sharp-nov18 / ref-inside-still-sharp-nov18: "I still see a VERY SHARP edge") THE INNER WALL'S DEPTH
+    // IS A SHARE OF THE HOLLOW'S OWN WIDTH: a band of one width pushed in from a tight curve folds into a point where the curve turns tighter than that
+    // width. So at each point the wall is no deeper than a third of the way across the hollow there (to the outline's far side - its nearest point
+    // more than a few band-widths along it), the depths eased along the outline, and laid off a rounded copy of the outline (it smoothed over about
+    // the band's width) - the open hollow left inside is the hollow itself drawn in, round wherever it's round. At the band's two ends it's the
+    // outline itself
+    const ns = Math.max(1, S / Math.max(1, kt - k0)), M = Math.round(clamp(2 * Math.pow(Wd / ns, 2), 4, 200)), R = DW_RX, Wk = DW_WX;
+    for (let k = k0; k <= kt; k++) { R[2 * k] = P[2 * k]; R[2 * k + 1] = P[2 * k + 1]; }
+    for (let it = 0; it < M; it++) for (let k = k0 + 1; k < kt; k++) { R[2 * k] = (R[2 * k - 2] + 2 * R[2 * k] + R[2 * k + 2]) / 4; R[2 * k + 1] = (R[2 * k - 1] + 2 * R[2 * k + 1] + R[2 * k + 3]) / 4; }
     for (let k = k0; k <= kt; k++) {
-      const a = Math.max(0, k - 1), b = Math.min(kt, k + 1), dx = P[2 * b] - P[2 * a], dy = P[2 * b + 1] - P[2 * a + 1], dl = Math.hypot(dx, dy) || 1, t = L[k] / S;
-      let rad = Infinity; if (k > k0 && k < kt) { const ax = P[2 * k] - P[2 * a], ay = P[2 * k + 1] - P[2 * a + 1], bx = P[2 * b] - P[2 * k], by = P[2 * b + 1] - P[2 * k + 1], turn = Math.abs(Math.atan2(ax * by - ay * bx, ax * bx + ay * by)); if (turn > 1e-4) rad = 0.5 * (Math.hypot(ax, ay) + Math.hypot(bx, by)) / turn; }
-      const wd = Math.min(Wd * Math.pow(Math.sin(Math.PI * t), 0.7), 0.7 * rad);
-      Q[2 * k] = P[2 * k] + sgn * (-dy / dl) * wd; Q[2 * k + 1] = P[2 * k + 1] + sgn * (dx / dl) * wd;
+      let across = Infinity; for (let j = k0; j <= kt; j++) if (Math.abs(L[j] - L[k]) > 3 * Wd) across = Math.min(across, Math.hypot(P[2 * j] - P[2 * k], P[2 * j + 1] - P[2 * k + 1]));
+      Wk[k] = Math.min(Wd * Math.pow(Math.sin(Math.PI * L[k] / S), 0.7), across / 3);
     }
-    for (let it = 0; it < 4; it++) for (let k = k0 + 1; k < kt; k++) { Q[2 * k] = (Q[2 * k - 2] + 2 * Q[2 * k] + Q[2 * k + 2]) / 4; Q[2 * k + 1] = (Q[2 * k - 1] + 2 * Q[2 * k + 1] + Q[2 * k + 3]) / 4; }
+    for (let it = 0; it < M; it++) for (let k = k0 + 1; k < kt; k++) Wk[k] = Math.min(Wk[k], (Wk[k - 1] + 2 * Wk[k] + Wk[k + 1]) / 4);
+    for (let k = k0; k <= kt; k++) {
+      const a = Math.max(k0, k - 1), b = Math.min(kt, k + 1), dx = R[2 * b] - R[2 * a], dy = R[2 * b + 1] - R[2 * a + 1], dl = Math.hypot(dx, dy) || 1, f = Wd > 0 ? Wk[k] / Wd : 0;
+      Q[2 * k] = R[2 * k] + sgn * (-dy / dl) * Wk[k] + (P[2 * k] - R[2 * k]) * (1 - f); Q[2 * k + 1] = R[2 * k + 1] + sgn * (dx / dl) * Wk[k] + (P[2 * k + 1] - R[2 * k + 1]) * (1 - f);
+    }
     // (the band's strips: NB of them along its length, each a run of the outline's pieces - a quad each, filled a pixel row at a time)
     for (let k = k0; k < kt; k++) {
       const t = (L[k] + L[k + 1]) / (2 * S), q = Math.min(NB - 1, Math.floor(Math.max(0, (t - 0.55) / 0.45) * NB)), col = cols[q];   // (dark up the face; the strips lighten round under the lip)
@@ -11250,6 +11306,7 @@ function dwDrawBack(x0, x1) {
   if (RL.n) frameRects(C, RL, { key: 'dwaves' });
 }
 const DW_QX = new Float64Array(((DW_NP - 1) * DW_SUB + 1) * 2), DW_LX = new Float64Array((DW_NP - 1) * DW_SUB + 1);
+const DW_RX = new Float64Array(((DW_NP - 1) * DW_SUB + 1) * 2), DW_WX = new Float64Array((DW_NP - 1) * DW_SUB + 1);   // (the band's rounded outline, its depths)
 // a four-sided shape filled a row at a time (its corners in order round it)
 function dwQuad(RL, ax, ay, bx, by, cx, cy, dx, dy, col) {
   const X = [ax, bx, cx, dx], Y = [ay, by, cy, dy], y0 = Math.floor(Math.min(ay, by, cy, dy)), y1 = Math.ceil(Math.max(ay, by, cy, dy));
@@ -11302,7 +11359,7 @@ function dwStickAt(i) {
 // (the surface's height at x: the water's own, the designed waves' lowest crossing included - surfaceY0)
 function dwFoamFrom(w, dt) {
   const H = w.H; if (!(H > 2)) return;
-  const T = dwPt(w, 8), tx = T[0], c = w.c * w.dir, U = UPM, wind = E.windU || 0; w.tx = tx;   // (its tip's place: where a landed tube ends - dwGapCols)
+  const T = dwPt(w, 8), tx = T[0], c = w.c * w.dir, U = UPM, wind = E.windU || 0;
   // (the tip over the water under it - its FACE, points 0 to 7, or the sea before its foot: how high above it the tip stands, of its height)
   const under = dwFace(w, tx), gap = (T[1] - under) / H;
   // (a point along its outline, k a point's number with its fraction: world x, height)
@@ -11327,11 +11384,8 @@ function dwFoamFrom(w, dt) {
     // THE TIP LANDS (red on yellow): the splash once - the tube closed, foam over all of it - then churned foam where it keeps coming down
     if (gap < 0.06) {
       if (!w.landed) { w.landed = true; w.lt = 0; dwCrash(w); dwSplash(w, tx, under); }
-      // (user 12:40, ref-wall-no-foam-nov18: "when the wave breaks ... we see a vertical line that has no foam and just stops") the closed tube's
-      // front - from under where the lip came down up round its front - all foam, stuck on it; and the white water it drives ahead of it at its foot
-      { const a = 6.5 * DW_SUB, b = (fi + 1) * DW_SUB;
-        for (let n = dfN(dt * H / U * 40); n > 0; n--) dwFoamStick(w, a + (b - a) * dfR(), dfRnd(0, 0.05) * H, dfRnd(0.03, 0.07) * H, dfRnd(0.4, 0.9));
-        for (let n = dfN(dt * H / U * 10); n > 0; n--) { const x = tx - w.dir * dfRnd(-0.08, 0.02) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.9, 1.15), 0, dfRnd(0.03, 0.06) * H, dfRnd(3, 6)); } }
+      // (the white water the break drives ahead of it at its foot)
+      { for (let n = dfN(dt * H / U * 10); n > 0; n--) { const x = tx - w.dir * dfRnd(-0.08, 0.02) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.9, 1.15), 0, dfRnd(0.03, 0.06) * H, dfRnd(3, 6)); } }
       // (user 12:07, ref-break-jet-nov18: "the MOMENT the wave breaks and hits the water surface that is when the foam 'shoots' in the opposite
       // direction ... to represent the water hitting the surface") for a moment after it lands, clumps shot up and out ahead of where it hit
       w.lt += dt; if (w.lt < 0.6) { const y = dwYAt(w, tx, under), v = Math.sqrt(9.8 * UPM * H);
@@ -12786,7 +12840,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 13:44';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 13:52';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -28263,8 +28317,9 @@ struct DP {
 @group(0) @binding(1) var<storage, read> still: array<f32>;
 @group(0) @binding(2) var<storage, read> wh: array<f32>;
 @group(0) @binding(3) var<storage, read_write> surfOut: array<vec2f>;
-// (a designed wave's outline folded over a column - 09-zy-dwaves.js: [its top's row, the row its air gap begins (the lip's underside), the row the water
-// begins again (the face), -]; none: -1e9, 1e9, 1e9. Out: the column's surface row its top's, and the gap's two rows in the entry nOut after it)
+// (a designed wave over a column - 09-zy-dwaves.js dwGapCols, its outline as a filled shape: two vec4 a column - its top's row, then its open air
+// gaps' first and last rows, up to three, top down; none: -1e9, then 1e9s. Out: the column's surface row its top's, and gap k's two rows in the
+// entry (k + 1) nOut after it)
 @group(0) @binding(4) var<storage, read> gapIn: array<vec4f>;
 
 const TAU = 6.2831853071795864;
@@ -28326,9 +28381,9 @@ fn exact(i: i32) -> f32 {
   let i = o - 3 + P.pad;                              // (the view's column c is the table's index c + PAD)
   var y = 0.0;
   if ((i & 3) == 0) { y = exact(i); } else { let a = i - (i & 3); let ya = exact(a); let yb = exact(a + 4); y = ya + (yb - ya) / 4.0 * f32(i - a); }
-  let gi = gapIn[o];
-  surfOut[o] = vec2f(select(floor((y - P.waterY) * P.sv + P.kpy + 0.5), gi.x, gi.x > -1.0e8), y);
-  surfOut[o + P.nOut] = gi.yz;
+  let ga = gapIn[2 * o]; let gb = gapIn[2 * o + 1];
+  surfOut[o] = vec2f(select(floor((y - P.waterY) * P.sv + P.kpy + 0.5), ga.x, ga.x > -1.0e8), y);
+  surfOut[o + P.nOut] = ga.yz; surfOut[o + 2 * P.nOut] = vec2f(ga.w, gb.x); surfOut[o + 3 * P.nOut] = gb.yz;
 }
 
 @group(0) @binding(0) var<storage, read> D: DP;
@@ -28343,9 +28398,16 @@ fn exact(i: i32) -> f32 {
 // past the sixth as the sixth (no corner table indexed by the vertex: Intel D3D12 scratch memory, Nov 11)
 fn qd(v: u32) -> vec2f { let k = min(v, 5u); return vec2f(f32((0x32u >> k) & 1u), f32((0x2cu >> k) & 1u)); }
 fn surfRow(c: f32) -> f32 { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1)].x; }
-// a column's air gap under a folded outline: the rows it begins and ends (the lip's underside, the face); none: both 1e9
-fn gapAt(c: f32) -> vec2f { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1) + i32(D.tgt.w)]; }
-fn inGap(c: f32, y: f32) -> bool { let g = gapAt(c); return y >= g.x && y < g.y; }
+// a column's open air gap k (0..2, top down) inside a designed wave's shape: the rows it begins and ends (an underside over it, water under it);
+// none: both 1e9
+fn gapK(c: f32, k: i32) -> vec2f { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1) + (k + 1) * i32(D.tgt.w)]; }
+fn inGap(c: f32, y: f32) -> bool { for (var k = 0; k < 3; k++) { let g = gapK(c, k); if (y >= g.x && y < g.y) { return true; } } return false; }
+// the gap of column c that lies beside g (the most rows in common); none: 1e9
+fn gapNb(c: f32, g: vec2f) -> vec2f {
+  var b = vec2f(1.0e9); var bo = 0.0;
+  for (var k = 0; k < 3; k++) { let h = gapK(c, k); if (h.x > 1.0e8) { continue; } let o = min(g.y, h.y) - max(g.x, h.x); if (o > bo) { bo = o; b = h; } }
+  return b;
+}
 fn surfW(c: f32) -> f32 { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1)].y; }
 fn gradAt(y: f32, y0: f32, y1: f32) -> vec4f {
   let t = clamp((y + 0.5 - y0) / (y1 - y0), 0.0, 1.0);
@@ -28409,8 +28471,11 @@ fn lineCol(y: f32, yc: f32, yl: f32, yr: f32, jl: bool, jr: bool) -> vec4f {
 // the surface's line round an air gap (a folded outline's): along the face under it (lineCol's own rule, with the pale band), and along the lip's
 // underside - joined to its neighbours'; where the gap ends at the lip's tip (the next column's water far below) the line closes the lip's end
 fn gapLine(x: f32, y: f32) -> vec4f {
-  let g = gapAt(x); if (g.x > 1.0e8) { return vec4f(-1.0); }
-  let lw = D.lp.x; let gl = gapAt(x - 1.0); let gr = gapAt(x + 1.0); let s = surfRow(x); let sl = surfRow(x - 1.0); let sr = surfRow(x + 1.0);
+  for (var k = 0; k < 3; k++) { let g = gapK(x, k); if (g.x > 1.0e8) { continue; } let c = gapLine1(x, y, g); if (c.a >= 0.0) { return c; } }
+  return vec4f(-1.0);
+}
+fn gapLine1(x: f32, y: f32, g: vec2f) -> vec4f {
+  let lw = D.lp.x; let gl = gapNb(x - 1.0, g); let gr = gapNb(x + 1.0, g); let s = surfRow(x); let sl = surfRow(x - 1.0); let sr = surfRow(x + 1.0);
   let c = lineCol(y, g.y, select(sl, gl.y, gl.x < 1.0e8), select(sr, gr.y, gr.x < 1.0e8), true, true);
   if (c.a >= 0.0) { return c; }
   let ul = select(select(g.x, s, sl >= g.x), gl.x, gl.x < 1.0e8);
@@ -29574,7 +29639,7 @@ function waterSurfGPU() {
   frameFlush();
   const still = wgpuStill();
   let B = W.surf[vi];
-  if (!B || B.size < nOut * 16) { if (B) gpuBufFree(B); B = W.surf[vi] = gpuBuf(Math.ceil((nOut * 16 + 1) / 8192) * 8192, 'water'); }   // (each column's surface, then each column's air gap - the designed waves')
+  if (!B || B.size < nOut * 32) { if (B) gpuBufFree(B); B = W.surf[vi] = gpuBuf(Math.ceil((nOut * 32 + 1) / 8192) * 8192, 'water'); }   // (each column's surface, then each column's air gap - the designed waves')
   // (the table surfTab keeps: index i at world x (i - PAD + CAMPX + 0.5) / SV; the view's column c is index c + PAD)
   const PAD = SURF.PAD, n = VWP + 2 * PAD + 1, x0 = (-PAD + CAMPX + 0.5) / SV, xl = (n - 1 - PAD + CAMPX + 0.5) / SV;
   const cw0 = wCol(x0), c0 = Math.floor(cw0), lo = clamp(c0, 0, N - 1), hi = clamp(Math.floor(wCol(xl)) + 2, 0, N - 1), winN = hi - lo + 1;
@@ -29595,7 +29660,7 @@ function waterSurfGPU() {
   f[44] = T.h1; f[45] = T.h2; f[46] = T.h3; f[47] = T.hr; f[48] = T.hs; f[49] = T.deep; f[50] = T.ks; f[51] = 0; f[52] = T.k1; f[53] = T.k2; f[54] = T.k3; f[55] = T.kr;
   const pB = wgpuArena(224, (u8, o) => u8.set(new Uint8Array(WSP), o));
   // (the designed waves' folds over this view's columns - 09-zy-dwaves.js dwGapCols: none, the same numbers every frame)
-  const gapB = wgpuArena(nOut * 16, (u8, o) => dwGapCols(new Float32Array(u8.buffer, o, nOut * 4), nOut));
+  const gapB = wgpuArena(nOut * 32, (u8, o) => dwGapCols(new Float32Array(u8.buffer, o, nOut * 8), nOut));
   const bg = gpuBindGroup(W.cbl, [{ binding: 0, resource: pB.res }, { binding: 1, resource: { buffer: still.gb } }, { binding: 2, resource: whB.res }, { binding: 3, resource: { buffer: B.gb } }, { binding: 4, resource: gapB.res }], 'water surface');
   const cp = gpuComputeBegin([still, B], 'water');
   cp.setPipeline(W.cpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(nOut / 64)); cp.end();   // (nOut = the view's columns + 6: bounded by the screen)
