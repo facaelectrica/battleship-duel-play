@@ -180,7 +180,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1070, build: 'NOV 17 21:37', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1070, build: 'NOV 17 21:49', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -7731,7 +7731,7 @@ function hitTest(sh, x, y, inside) {
    NOT YET (before any merge): a table of its own, a seeded random source, the worker and online; every family carried (today the small boats, the
    battleship); the lake's water over its banks.
    ================================================================ */
-const DW = { kinds: {}, live: [], max: 0, N: 128, cap: 1.05, lost: 0 };
+const DW = { kinds: {}, live: [], max: 0, N: 128, cap: 1.05, lost: 0, sw: [], wet: new Map(), WC: 8 };
 // a kind's tables from its points: its height and its carry every 1/N of its length (a smooth curve through the points, flat at both ends)
 function dwShape(K) {
   const P = K.pts.map(p => [clamp(+p[0] || 0, 0, 1), +p[1] || 0, +p[2] || 0]).sort((a, b) => a[0] - b[0]);
@@ -7746,6 +7746,7 @@ function dwShape(K) {
     T[i] = h(1); Q[i] = clamp(h(2), -1, 1);
   }
   T[0] = T[n] = 0; Q[0] = Q[n] = 0;
+  K.uc = 0.5; K.hc = 0; for (let i = 0; i <= n; i++) if (T[i] > K.hc) { K.hc = T[i]; K.uc = i / n; }   // (its crest: where, how high)
   return K;
 }
 const dwTab = (T, u) => { if (!(u > 0 && u < 1)) return 0; const f = u * DW.N, i = f | 0; return T[i] + (T[i + 1] - T[i]) * (f - i); };
@@ -7753,7 +7754,7 @@ const dwTab = (T, u) => { if (!(u > 0 && u < 1)) return 0; const f = u * DW.N, i
 function dwSend(kind, x, dir, k = 1) {
   const K = DW.kinds[kind]; if (!K) return null; if (!K.tab) dwShape(K);
   const run = waterRun(x); if (!run) return null;
-  const w = { K, x, dir: dir < 0 ? -1 : 1, k, t: 0, env: 0, die: 0, run, H: 0, L: K.len * UPM, c: K.v * UPM, lean: K.lean || 0, far: 0, brk: 0 };
+  const w = { K, x, dir: dir < 0 ? -1 : 1, k, t: 0, env: 0, die: 0, run, H: 0, L: K.len * UPM, c: K.v * UPM, lean: K.lean || 0, far: 0, brk: 0, lake: waterLv(x) !== WATER_Y };
   DW.live.push(w); return w;
 }
 function dwStep(dt) {
@@ -7762,9 +7763,17 @@ function dwStep(dt) {
     const w = L[i], K = w.K; w.t += dt;
     // the depth under its crest: shallower than half its length it begins to feel the floor (the picture's D = 1/2 L)
     const d = Math.max(0, seabedY(w.x) - waterLv(w.x)), L0 = K.len * UPM, s = clamp(1 - d / (0.5 * L0), 0, 1);
-    w.L = L0 * (1 - 0.4 * s); w.c = K.v * UPM * (1 - 0.45 * s); w.lean = clamp((K.lean || 0) + 0.9 * s * s, 0, 1.6);
-    const rise = smoothstep(0, K.rise || 3, w.t), full = K.h * UPM * w.k * (1 + (K.grow || 0) * s);
+    // ITS LIFE (user 20:45: "having the wave rise, the crest build, and you gotta pass just before that" / "waves that build ... but don't break, they
+    // reduce. And others that grow, curl, and break"): it rises (rise s), stands at its full height while its crest builds (hold s - w.cq 0..1, the
+    // floor rising under it builds it too), then ENDS - 0: it sinks back as it rose; 1: its crest comes over and it breaks on whatever is under it
+    const R = K.rise || 3, hold = K.hold || 20, tb = clamp((w.t - R) / hold, 0, 1);
+    w.cq = Math.max(K.ends ? tb : 0, s * s);
+    w.L = L0 * (1 - 0.4 * s); w.c = K.v * UPM * (1 - 0.45 * s); w.lean = clamp((K.lean || 0) * (0.35 + 0.65 * w.cq) + 0.9 * s * s, 0, 1.6);
+    const rise = smoothstep(0, R, w.t) * (K.ends ? 1 : 1 - smoothstep(R + hold, R + hold + R, w.t)), full = K.h * UPM * w.k * (1 + (K.grow || 0) * s);
+    if (!K.ends && w.t > R + hold + R) { L.splice(i, 1); continue; }   // (sunk back: gone)
+    if (K.ends && tb >= 1 && !w.die) { w.die = 1e-6; w.brk = 1; dwCrash(w); }
     // breaking: the water shallower than it is tall - it falls away over a second and a half, throwing spray and shoving the water
+    if (!w.die && d < full * 0.9) dwCrash(w);
     if (!w.die && (d < full * 0.9 || !waterRun(w.x + w.dir * w.L * 0.5) || w.far > (K.range || 6000) * UPM)) { w.die = 1e-6; w.brk = d < full * 0.9 ? 1 : 0; }
     if (w.die) w.die += dt / 1.5;
     w.env = rise * (1 - smoothstep(0, 1, w.die)); w.H = full * w.env;
@@ -7774,10 +7783,14 @@ function dwStep(dt) {
       for (let q = 0; q < n; q++) { const x = cx + (Math.random() * 2 - 1) * w.L * 0.2; if (waterRun(x)) { spawnSpray(x, surfaceY0(x) - 1, w.dir * w.c * (0.3 + Math.random() * 0.5), 0.6 + Math.random() * 0.8); if (Math.random() < 0.4) spawnFoam(x, 1.5 + Math.random() * 2.5); } }
       for (let k = -30; k <= 30; k += DX) water.push(cx + k, -w.H * 6 * (1 - Math.abs(k) / 32));
     }
+    if (w.die && !w.swashed && w.far <= (K.range || 6000) * UPM) { w.swashed = true; dwSwash(w); }
+    // (the lip's spray: thrown off the curl's tip)
+    if (!SIM_ONLY && dwCurl(w) > 0.45 && Math.random() < dt * 14) { const xc = dwCrestX(w) + w.dir * 0.3 * w.H; spawnSpray(xc, surfaceY0(xc) - 0.5 * w.H, w.dir * w.c * 0.6, 0.5); }
     if (w.die >= 1) { L.splice(i, 1); continue; }
     mx += Math.abs(w.H) * 1.3;
   }
   DW.max = mx;
+  dwCarryAll(dt); dwShoreStep(dt);
 }
 // the designed waves' height at x (world units, up positive) and the water's own speed along there (world units a second)
 function dwAt(x) {
@@ -7796,6 +7809,95 @@ function dwFlow(x) {
     v += w.dir * w.c * (w.K.push || 0) * dwTab(w.K.ptab, u) * w.env * w.k;
   }
   return v;
+}
+
+// ONE RULE FOR WHAT FLOATS (user 20:41: "all boats should be carried away, of course, depending on the size of the wave and the size of the boat"):
+// everything in the water near its surface is carried by the water's own speed there (dwFlow), by how tall the wave is against its own length -
+// a wave a third of its length carries it whole, a ripple against a liner hardly; what's dived under it less the deeper
+function dwCarryAll(dt) {
+  if (!DW.live.length) return;
+  for (const e of vehAll()) {
+    const v = e.v; if (!v || !Number.isFinite(v.x) || e.k === 'tower' || e.k === 'crane' || v.state === 'gone' || v.moored && e.army || v.gate) continue;
+    const run = waterRun(v.x); if (!run) continue;
+    let H = 0; for (const w of DW.live) { const u = (v.x - w.x) * w.dir / w.L + 0.5; if (u > 0 && u < 1) H = Math.max(H, w.H); } if (!H) continue;
+    const B = vehBox(e), len = Math.max(4, B[1] - B[0]), s = surfaceY0(v.x), y = v.y != null ? v.y : s;
+    if (y < s - Math.max(len * 0.6, 20)) continue;                 // (in the air over it)
+    const k = clamp(H / (0.33 * len), 0, 1) * clamp(1 - (y - s) / (2 * H + 1), 0, 1), nx = v.x + dwFlow(v.x) * k * dt;
+    if (nx > run[0] + len * 0.5 && nx < run[1] - len * 0.5) v.x = nx;   // (never up onto a shore)
+  }
+}
+// THE BREAKER'S LIP (user 20:41: "We definitely need breaker lips ... We want to see the crest curl over itself"): the surface is a height at each
+// place, so the curl is its own shape on the crest - a tongue of water thrown forward from it, curling down and thinning to its tip, as far as
+// the kind's CURL and the wave's lean (out deep, a little; as the floor rises, all the way over)
+const dwCurl = w => clamp((w.K.curl || 0) * (w.cq || 0) * Math.min(1, w.env * 1.5), 0, 1);
+const dwCrestX = w => w.x + w.dir * (w.K.uc + 0.16 * w.lean * w.K.hc - 0.5) * w.L;
+function dwDrawLips(x0, x1, lake) {
+  for (const w of DW.live) {
+    if (!!w.lake !== !!lake) continue;
+    const q = dwCurl(w), H = w.H; if (q < 0.05 || H < 3) continue;
+    const xc = dwCrestX(w); if (offViewR(xc, 2 * H, x0, x1)) continue;
+    // (drawn in blocks, as the water's own crests: a square of its thickness stamped along the curl - the engine's rectangles)
+    const n = 56, R0 = 0.42 * H, T0 = 0.24 * H, arc = q * 4.2, col = seaDeepStops(E.sunset, 1)[0][1].map(v => v + (255 - v) * 0.16), body = rgbs(col, 0.95);
+    const snap = v => Math.round(v / PB) * PB;
+    let px = xc - w.dir * 0.1 * H, py = surfaceY0(xc) + T0 * 0.5;
+    for (let i = 0; i <= n; i++) {
+      const s = i / n, a = -0.35 + arc * s, t = T0 * Math.pow(1 - s, 1.1) + 0.6, nx = w.dir * Math.sin(a), ny = -Math.cos(a);
+      const sz = Math.max(PB, snap(t * SV)), X = snap(PX(px) - sz / 2), Y = snap(PY(py) - sz / 2);
+      C.fillStyle = body; C.fillRect(X, Y, sz, sz);
+      C.fillStyle = 'rgba(255,255,255,0.92)'; C.fillRect(snap(PX(px + nx * t / 2)), snap(PY(py + ny * t / 2)) - PB, PB * 2, PB);   // (its bright back)
+      if (s > 0.6 && (i & 1)) { C.fillStyle = 'rgba(255,255,255,0.8)'; C.fillRect(snap(PX(px - nx * t / 2)), snap(PY(py - ny * t / 2)), PB, PB); }   // (foam under its falling tip)
+      const ds = R0 * (1 - 0.55 * s) * arc / n; px += w.dir * Math.cos(a) * ds; py += Math.sin(a) * ds;
+    }
+  }
+}
+// WATER ON THE LAND (user 20:41: "when the water hits land, it wets the land, but it does not lose volume. So it's more about the effect of the water
+// hitting the surfaces and getting them more wet, more shiny"): a wave that reaches a shore runs up it as a thin sheet and back (a swash - no
+// water is moved), throwing spray where the shore is a wall; the ground it touched stays wet a while - darker, with a shine (DW.wet: a column of
+// DW.WC world units -> how wet, 0..1)
+function dwSwash(w) {
+  let xs = w.x, n = 0; while (waterRun(xs) && n++ < 600) xs += w.dir * 4; if (n >= 600) return;
+  const H = Math.max(w.H, w.K.h * UPM * w.k * 0.6), lv = waterLv(xs - w.dir * 8);
+  DW.sw.push({ x: xs, dir: w.dir, R: clamp(H * 7, 30, 1400), H, lv, t: 0, T: 3 + H / 40, f: 0, hit: false });
+}
+function dwShoreStep(dt) {
+  for (let i = DW.sw.length - 1; i >= 0; i--) {
+    const s = DW.sw[i]; s.t += dt; if (s.t >= s.T) { DW.sw.splice(i, 1); continue; }
+    const want = s.R * Math.sin(Math.PI * s.t / s.T), up = Math.max(1.6 * s.H, 16); let f = 0;
+    for (; f < want; f += DW.WC) { const x = s.x + s.dir * f, gy = landTop(x); if (!(gy > s.lv - up)) break; DW.wet.set(Math.floor(x / DW.WC), 1); }   // (as far as the ground lets it climb)
+    s.f = f;
+    if (f < want - DW.WC && !s.hit && s.t < s.T * 0.5) {           // (a wall: it goes up in spray, and the wall is wet as high as it threw)
+      s.hit = true; const x = s.x + s.dir * f;
+      if (!SIM_ONLY) { for (let k = 0; k < Math.min(40, 6 + s.H * 0.4); k++) spawnSpray(x - s.dir * 4, s.lv - Math.random() * s.H * 0.5, -s.dir * (20 + Math.random() * 60), 0.8 + Math.random() * 1.2); sound('splash', x, clamp(s.H / 60, 0.2, 1)); }
+    }
+  }
+  if (DW.wet.size) { const d = dt / 22; for (const [c, v] of DW.wet) { if (v <= d) DW.wet.delete(c); else DW.wet.set(c, v - d); } }
+}
+function dwDrawShore(x0, x1) {
+  const W = DW.WC, col = seaDeepStops(E.sunset, 1)[0][1];
+  if (DW.wet.size) for (let c = Math.floor(x0 / W); c <= Math.ceil(x1 / W); c++) {
+    const v = DW.wet.get(c); if (!v) continue; const x = c * W, gy = landTop(x + W / 2); if (!Number.isFinite(gy)) continue;
+    const px = PX(x), pw = PX(x + W) - px, py = PY(gy);
+    C.fillStyle = `rgba(6,14,30,${(0.42 * Math.min(1, v * 1.5)).toFixed(3)})`; C.fillRect(px, py, pw, Math.max(2, Math.round(7 * SV)));
+    C.fillStyle = `rgba(215,238,255,${(0.34 * v).toFixed(3)})`; C.fillRect(px, py, pw, Math.max(1, PB >> 1));
+  }
+  for (const s of DW.sw) {
+    if (s.f < DW.WC) continue;
+    for (let f = 0; f < s.f; f += 4) {
+      const x = s.x + s.dir * f; if (offViewR(x, 8, x0, x1)) continue;
+      const gy = landTop(x), th = Math.max(1, 0.1 * s.H * (1 - f / s.f) + 1), px = PX(Math.min(x, x + s.dir * 4)), pw = Math.abs(PX(x + s.dir * 4) - PX(x)) || 1;
+      C.fillStyle = rgbs(col, 0.8); C.fillRect(px, PY(gy - th), pw, Math.max(1, PY(gy) - PY(gy - th)));
+      if (f > s.f - 14) { C.fillStyle = 'rgba(255,255,255,0.9)'; C.fillRect(px, PY(gy - th) - PB, pw, PB + 1); }   // (its foaming edge)
+    }
+  }
+}
+
+// THE CREST COMES DOWN (user 20:45: "the ability to go past the wave before the crest breaks on you. That's when you're gone"): whatever small
+// boat is under the lip as it falls - from the crest to a wave's height ahead of it - is lost; over the crest already, or still out in front of
+// its reach, it lives. (The small boats today - jetboatSink; the other families ride it out: not decided yet)
+function dwCrash(w) {
+  const xc = dwCrestX(w), a = Math.min(xc, xc + w.dir * 1.3 * w.H) - 0.1 * w.H, b = Math.max(xc, xc + w.dir * 1.3 * w.H) + 0.1 * w.H;
+  if (typeof jetboats !== 'undefined') for (const j of jetboats.list ? jetboats.list() : jetboats) if (j.state === 'run' && j.x > a && j.x < b && w.H > 0.25 * storyBoatSize(j)[0]) { DW.lost++; jetboatSink(j); }
+  if (!SIM_ONLY) { sound('splash', xc, clamp(w.H / 80, 0.3, 1)); for (let k = 0; k < Math.min(60, 10 + w.H * 0.5); k++) { const x = a + Math.random() * (b - a); if (waterRun(x)) { spawnSpray(x, surfaceY0(x) - Math.random() * 0.4 * w.H, w.dir * w.c * (0.2 + Math.random() * 0.6), 0.8 + Math.random() * 1.4); spawnFoam(x, 2 + Math.random() * 3); } } }
 }
 
 //@src 09-zz-biomes.js:1
@@ -9060,7 +9162,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 21:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 17 21:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10703,7 +10805,8 @@ function photoEnter() {
   PHOTO.z = cam.merge >= 1 ? cam.zsa || v.z : v.z;
   PHOTO.x = cam.merge >= 1 ? cam.cs : v.l + hw; PHOTO.y = v.top + 0.5 * VIEW_H / v.z;
 }
-function photoExit() { if (PHOTO.ed) { edModeClose(); return; } PHOTO.on = false; PHOTO.ptr.clear(); PHOTO.pinch = null; ui.settings = true; }
+function photoExit() { if (PHOTO.live) { PHOTO.on = PHOTO.live = false; PHOTO.ptr.clear(); PHOTO.pinch = null; return; }   // (a lab's look round, the world going on: back on what you're in - the Wave Lab)
+  if (PHOTO.ed) { edModeClose(); return; } PHOTO.on = false; PHOTO.ptr.clear(); PHOTO.pinch = null; ui.settings = true; }
 /* ---- the GAME EDITOR's mode (user Oct 28: "Anytime we go into Editor mode, the game should pause, the UI disappear and I
    can drag the camera around (like in the Eye mode) so I can edit around as needed. Once I press Close it returns to the
    game as normal.") - while its panel is open the eye is shut, as photo mode: the world held, no HUD, no sliders, one view;
@@ -12676,7 +12779,6 @@ function stepShip(sh, dt) {
       if (vToward > vmax) { vToward += (vmax - vToward) * Math.min(1, 5 * dt); sh.vx = vToward * d.dir; }
     }
     sh.x += sh.vx * dt;
-    if (DW.live.length) sh.x += 0.5 * dwFlow(sh.x) * dt;   // (the Wave Lab: a designed wave carries her, half as much as a small boat - 09-zy-dwaves.js)
     seaLimit(sh, SHIP_L / 2);                          // (every harbour not hers is closed: the bow can't go past the end of its pier - 23-harbour-gates)
     // (OPEN WORLD, user Oct 28: the ground's own line raised out of the water at sea is a coast - she stops at it; an
     // island line's island she goes past, in front of it - isleCol)
@@ -34055,6 +34157,7 @@ function renderObjects() {
   // foam lying on the surface behind each hull, breaking up as it ages
   const lw = waterLineW();
   waterSurfaceGPU(x0, x1, lw, true);
+  if (DW.live.length) guardDraw('dwLips', () => dwDrawLips(x0, x1, false));   // (the designed waves' curling lips - 09-zy-dwaves.js)
   drawShipWash(x0, x1);
   drawFoamBits(x0, x1);
   drawOil(x0, x1);                                        // (OPEN WORLD: a tanker's spill)
@@ -54078,8 +54181,8 @@ function stepJetboat(j, dt) {
     }
     const sp = (j.driven != null ? j.vDrive || 0 : j.story ? j.npcV || 0 : j.v * (j.nk == null ? 1 : j.nk)) * (j.turn > 0 ? 0.25 : 1) * (j.hp < 2 ? 0.6 : 1);
     if (!coastAhead(j.x, Math.sign(sp) * j.dir || j.dir, 25)) j.x += j.dir * sp * dt;   // (never up onto a coast out at sea)
-    // (the Wave Lab: a designed wave carries her - 09-zy-dwaves.js dwFlow - and a face steeper than she can lie on rolls her over)
-    if (DW.live.length) { const fl = dwFlow(j.x); if (fl && !coastAhead(j.x, Math.sign(fl), 25)) j.x += fl * dt; if (!j.air && Math.abs(j.a) > DW.cap) { DW.lost++; jetboatSink(j); return; } }
+    // (the Wave Lab: a designed wave's face steeper than she can lie on rolls her over)
+    if (DW.live.length && !j.air && Math.abs(j.a) > DW.cap) { DW.lost++; jetboatSink(j); return; }
     // (user Nov 2: "the boat is wobbling weirdly" - the fishing boat on the jet ski's ride: the water read 10 units either side of
     // her middle under an 11 m hull, nose up and bouncing at rest, the tilt snapped to it each step) every boat of this family
     // reads the water at its own hull's ends (JB_HULL of its real length - storyBoatSize) and its middle
@@ -56534,7 +56637,10 @@ function hangarLandCut(x0, x1) {
 }
 function renderLandObjects() {
   C.save();
-  try { hangarLandCut(CAMPX / SV, CAMPX / SV + VWW); renderLandObjects0(); } finally { C.restore(); }
+  try { hangarLandCut(CAMPX / SV, CAMPX / SV + VWW); renderLandObjects0();
+    // (the Wave Lab: a lake's waves' lips, the water run up the shore and the wet ground - 09-zy-dwaves.js)
+    if (DW.live.length || DW.sw.length || DW.wet.size) guardDraw('dwShore', () => { const a = CAMPX / SV, b = a + VWW; dwDrawLips(a, b, true); dwDrawShore(a, b); });
+  } finally { C.restore(); }
 }
 // the land in [x0, x1]: every land's (LANDS) and any island's out in the sea (one line, user Oct 28)
 function landSpansIn(x0, x1) {
@@ -73248,7 +73354,7 @@ function sfxWhoosh(s) {
    all fades. */
 function ambLife(dt, L, seaK, underK) {
   const A = SFX.life;
-  if (!A || ui.title || ui.menu || ui.settings || PHOTO.on) return;
+  if (!A || ui.title || ui.menu || ui.settings || (PHOTO.on && !PHOTO.live)) return;
   const t = SFX.ctx.currentTime;
   // how near a harbour the view is (0 out in the open sea, 1 at the pier), and how high up it is
   let harb = 0, high = 0;
@@ -73368,7 +73474,7 @@ function audioUpdate(dt) {
   aim(SFX.master.gain, soundOff() ? 0 : env.volume * 0.9, t, 0.05);
   // (user Nov 11 09:34, "you only get audio and the scene at the same time when it's ready": silent while a loading screen is up - its lift is
   // decided at this frame's end before this, so the world is heard from the frame the screen goes - 00-world.js coverStep)
-  aim(SFX.world.gain, ui.menu || ui.title || ui.settings || PHOTO.on || paused || !worldLive() || coverUp() ? 0 : 1, t, 0.04);       // menus: the world goes quiet (the world menu and photo mode too, user Oct 26: "we don't want any volume in that menu")
+  aim(SFX.world.gain, ui.menu || ui.title || ui.settings || (PHOTO.on && !PHOTO.live) || paused || !worldLive() || coverUp() ? 0 : 1, t, 0.04);       // menus: the world goes quiet (the world menu and photo mode too, user Oct 26: "we don't want any volume in that menu")
   if (!worldLive()) return;                                           // (no world yet, or LOADING: only the menu's volume - user Oct 31)
   // the sea: always there, louder and more surf-filled when it's rough or windy
   const sea = env.sea, wind = Math.abs(env.wind);
@@ -73720,7 +73826,7 @@ function frameBody(now) {
   // is shut - photo mode, 18-zz-photo)
   edModeSync();                                                      // (the GAME EDITOR open: held, as photo mode - 18-zz-photo)
   atmoSync();                                                        // (the air's layers from the SKY EDITOR - 50-land-space.js)
-  const held_ = paused || !rotateEl.hidden || PHOTO.on || photoWorldFreeze() || !!SWB.taking || SW.handing;   // (SW.handing: the game being handed to the worker - swResync)   // (SWB.taking: the game on its way back from the worker - 00-sw-boot.js swHold)
+  const held_ = paused || !rotateEl.hidden || (PHOTO.on && !PHOTO.live) || photoWorldFreeze() || !!SWB.taking || SW.handing;   // (SW.handing: the game being handed to the worker - swResync)   // (SWB.taking: the game on its way back from the worker - 00-sw-boot.js swHold)
   schedFrame(!held_ && !SW.live);                                   // (the scheduler's frame count moves with the simulation only: a held page frame, or a guest's, isn't a frame of the game - Oct 30 gate)
   if (PHOTO.on) photoInput(dt); else pollPads(dt);
   swWantLive(); swWaitFrame();
@@ -73908,6 +74014,9 @@ async function start(data) {
       bomb: (x, up) => { shells.addRowId({ x, y: surfaceY0(x) - up, vx: 0, vy: 0, owner: 0, ...shotWho(null), from: 'bomb', age: 0, trail: 0, under: false, ut: 0, face: 1, a: Math.PI / 2 }); sound('bombDrop', x); },
       blast: (x, down) => { underwaterBlast(x, Math.min(surfaceY0(x) + down, seabedY(x) - 4), 1); sound('explosion', x, 0.6); },
       splash: x => splash(x, 0, 900, { size: 2, wide: 2 }),
+      // (user 20:42: "I should be able to pan with my finger, like all the other editors") the view let go of the boat: a finger drags it, a pinch or the wheel
+      // zooms (photo mode's own - 18-zz-photo.js), the world going on (PHOTO.live); off: back on what you're in
+      get looking() { return PHOTO.on && !!PHOTO.live; }, look: on => { if (on && !PHOTO.on) { photoEnter(); PHOTO.live = true; PHOTO.hint = 0; } else if (!on && PHOTO.live) photoExit(); },
       // the designed waves (09-zy-dwaves.js): the kinds (the lab's prefabs - set(name, K) lays a kind's tables again), one sent, the live ones
       waves: { kinds: DW.kinds, set: (n, K) => { DW.kinds[n] = dwShape(K); }, send: (n, x, dir, k) => !!dwSend(n, x, dir, k), live: () => DW.live.map(w => ({ x: w.x, H: w.H, L: w.L, c: w.c, dir: w.dir, die: w.die })), clear: () => { DW.live.length = 0; DW.max = 0; },
         get cap() { return DW.cap; }, set cap(v) { DW.cap = v; }, get lost() { return DW.lost; }, flow: x => dwFlow(x), at: x => dwAt(x) },
@@ -76281,17 +76390,17 @@ function sseDraw() {
   // length (m), v speed (m/s), push its carry (x), grow taller in the shallows (x), lean its crest forward (0..1), rise (s). Kept in this browser
   // (wl_waves) as they're edited; RESET puts these back
   const WAVES0 = {
-    'OCEAN ROLLER': { h: 3, len: 140, v: 12, push: 0.25, grow: 0.6, lean: 0, rise: 3, pts: [[0, 0, 0], [0.18, -0.12, -0.2], [0.5, 1, 0.3], [0.82, -0.12, 0.6], [1, 0, 0]] },
-    'PEAKING WAVE': { h: 4.5, len: 80, v: 10, push: 0.45, grow: 0.8, lean: 0.25, rise: 3, pts: [[0, 0, 0], [0.25, 0.05, -0.2], [0.44, 0.45, 0.1], [0.55, 1, 0.6], [0.66, 0.4, 1], [0.82, -0.18, 0.5], [1, 0, 0]] },
-    'BREAKER': { h: 6, len: 70, v: 9, push: 0.85, grow: 0.5, lean: 0.9, rise: 2.5, pts: [[0, 0, 0], [0.3, 0.12, -0.3], [0.52, 0.6, 0.2], [0.64, 1, 0.9], [0.72, 0.35, 1], [0.82, -0.25, 0.6], [1, 0, 0]] },
-    'ROGUE WAVE': { h: 14, len: 130, v: 15, push: 0.7, grow: 0.2, lean: 0.4, rise: 4, pts: [[0, 0, 0], [0.22, -0.1, -0.4], [0.42, 0.5, 0.1], [0.55, 1, 0.7], [0.66, 0.3, 1], [0.8, -0.35, 0.4], [1, 0, 0]] },
-    'THE WALL': { h: 45, len: 520, v: 26, push: 1, grow: 0, lean: 0.5, rise: 6, pts: [[0, 0, 0], [0.2, 0.25, -0.5], [0.45, 0.8, 0], [0.58, 1, 0.6], [0.72, 0.5, 1], [0.9, 0.05, 0.7], [1, 0, 0]] },
-    'TSUNAMI': { h: 1.5, len: 600, v: 32, push: 0.9, grow: 6, lean: 0.1, rise: 5, pts: [[0, 0, 0], [0.3, 0.6, 0.6], [0.6, 1, 1], [0.85, -0.3, -0.8], [1, 0, 0]] },
+    'OCEAN ROLLER': { curl: 0, hold: 60, ends: 0, h: 3, len: 140, v: 12, push: 0.25, grow: 0.6, lean: 0, rise: 3, pts: [[0, 0, 0], [0.18, -0.12, -0.2], [0.5, 1, 0.3], [0.82, -0.12, 0.6], [1, 0, 0]] },
+    'PEAKING WAVE': { curl: 0.35, hold: 40, ends: 0, h: 4.5, len: 80, v: 10, push: 0.45, grow: 0.8, lean: 0.25, rise: 3, pts: [[0, 0, 0], [0.25, 0.05, -0.2], [0.44, 0.45, 0.1], [0.55, 1, 0.6], [0.66, 0.4, 1], [0.82, -0.18, 0.5], [1, 0, 0]] },
+    'BREAKER': { curl: 1, hold: 9, ends: 1, h: 6, len: 70, v: 9, push: 0.85, grow: 0.5, lean: 0.9, rise: 2.5, pts: [[0, 0, 0], [0.3, 0.12, -0.3], [0.52, 0.6, 0.2], [0.64, 1, 0.9], [0.72, 0.35, 1], [0.82, -0.25, 0.6], [1, 0, 0]] },
+    'ROGUE WAVE': { curl: 0.6, hold: 8, ends: 1, h: 14, len: 130, v: 15, push: 0.7, grow: 0.2, lean: 0.4, rise: 4, pts: [[0, 0, 0], [0.22, -0.1, -0.4], [0.42, 0.5, 0.1], [0.55, 1, 0.7], [0.66, 0.3, 1], [0.8, -0.35, 0.4], [1, 0, 0]] },
+    'THE WALL': { curl: 0.8, hold: 25, ends: 0, h: 45, len: 520, v: 26, push: 1, grow: 0, lean: 0.5, rise: 6, pts: [[0, 0, 0], [0.2, 0.25, -0.5], [0.45, 0.8, 0], [0.58, 1, 0.6], [0.72, 0.5, 1], [0.9, 0.05, 0.7], [1, 0, 0]] },
+    'TSUNAMI': { curl: 0.2, hold: 80, ends: 0, h: 1.5, len: 600, v: 32, push: 0.9, grow: 6, lean: 0.1, rise: 5, pts: [[0, 0, 0], [0.3, 0.6, 0.6], [0.6, 1, 1], [0.85, -0.3, -0.8], [1, 0, 0]] },
   };
   const WPROPS = [['HEIGHT m', 'h', 0, 80, 0.5, 'How tall it stands out at sea'], ['LENGTH m', 'len', 20, 900, 5, 'From its back to its front'], ['SPEED m/s', 'v', 1, 50, 0.5, 'How fast it travels'],
-    ['CARRY x', 'push', 0, 2, 0.05, 'How hard it carries what floats'], ['GROW IN SHALLOWS x', 'grow', 0, 8, 0.1, 'How much taller it gets as the floor rises'], ['LEAN', 'lean', 0, 1.5, 0.05, 'How far its crest leans forward'], ['RISE s', 'rise', 0.5, 12, 0.5, 'Seconds it takes to rise from flat']];
+    ['CARRY x', 'push', 0, 2, 0.05, 'How hard it carries what floats'], ['GROW IN SHALLOWS x', 'grow', 0, 8, 0.1, 'How much taller it gets as the floor rises'], ['LEAN', 'lean', 0, 1.5, 0.05, 'How far its crest leans forward'], ['CURL', 'curl', 0, 1, 0.05, 'How far its lip curls over as it leans'], ['RISE s', 'rise', 0.5, 12, 0.5, 'Seconds it takes to rise from flat'], ['CREST BUILDS s', 'hold', 1, 120, 1, 'Seconds at full height before it ends'], ['ENDS: 0 FADES 1 BREAKS', 'ends', 0, 1, 1, '0: it sinks back. 1: its crest curls over and breaks']];
   let WAVES = JSON.parse(JSON.stringify(WAVES0)), wsel = 'BREAKER', wfrom = 1, wauto = false, wnext = 0, psel = 3;
-  try { const o = JSON.parse(localStorage.getItem('wl_waves') || 'null'); if (o && typeof o === 'object') for (const k in WAVES) if (o[k] && Array.isArray(o[k].pts)) WAVES[k] = o[k]; } catch (e) { }
+  try { const o = JSON.parse(localStorage.getItem('wl_waves') || 'null'); if (o && typeof o === 'object') for (const k in WAVES) if (o[k] && Array.isArray(o[k].pts)) WAVES[k] = Object.assign({}, WAVES0[k], o[k]); } catch (e) { }
   const wSave = () => { try { localStorage.setItem('wl_waves', JSON.stringify(WAVES)); } catch (e) { } };
   const wPut = n => __game.wavelab.waves.set(n, JSON.parse(JSON.stringify(WAVES[n])));
   // one sent: from out at sea toward the land (or from the land's side), far enough off to see it rise - in the lake, from its far end
@@ -76304,6 +76413,7 @@ function sseDraw() {
   const alive = v => v && v.state !== 'gone' && isFinite(v.x);
   const here = () => alive(last) ? last.x : X[where];
   function spawn(sv, isLand) {
+    __game.wavelab.look(false);                                  // (back on the boat: you're aboard the new one)
     const p = __game.wavelab.spawn(sv, isLand ? X.land : X[where] + (mine.size % 5) * 90 - 180, 1);
     if (p) { last = p; mine.add(p); }
     return p;
@@ -76343,7 +76453,7 @@ function sseDraw() {
 <div class="w3"><button data-a="padd" data-t="A new point after the picked one">+ POINT</button><button data-a="pdel" data-t="Take the picked point out">- POINT</button><button data-a="wreset" data-t="This wave back to its built-in design">RESET</button></div>
 <div id="wlWs"></div>
 <label data-t="A small boat rolls over when it tilts past this">CAPSIZE AT deg<input type="range" min="20" max="90" step="1" id="wlCap"><output></output></label></div></details>
-<div class="w"><button data-a="clear" data-t="Take every vehicle out">CLEAR</button><button data-a="pause" class="pz" data-t="Freeze everything where it is - the same as Esc">PAUSE</button></div>
+<div class="w"><button data-a="look" id="wlLook" data-t="Drag the view with a finger, pinch to zoom; press again for the boat">LOOK AROUND</button><button data-a="clear" data-t="Take every vehicle out">CLEAR</button></div><div class="w"><button data-a="pause" class="pz" data-t="Freeze everything where it is - the same as Esc">PAUSE</button><span></span></div>
 <div id="wlRead"></div>
 <details><summary>OPTIONS</summary><div>
 <label data-t="How deep the ocean is (default ${Math.round(WL.SEA / U)} m)">OCEAN DEPTH m<input type="range" min="5" max="400" step="1" data-d="sea"><output></output></label>
@@ -76402,6 +76512,7 @@ function sseDraw() {
     wSync();
     const act = {
       send: () => sendWave(wsel),
+      look: () => W.look(!W.looking),
       from: () => { wfrom = -wfrom; d.querySelector('#wlFrom').textContent = wfrom > 0 ? 'FROM SEA' : 'FROM LAND'; },
       auto: () => { wauto = !wauto; wnext = 0; const b = d.querySelector('#wlAuto'); b.textContent = wauto ? 'AUTO ON' : 'AUTO OFF'; b.classList.toggle('on', wauto); },
       calm: () => W.waves.clear(),
@@ -76422,6 +76533,11 @@ function sseDraw() {
     d.addEventListener('pointerup', e => { if (e.target.blur && e.target.tagName !== 'SELECT') setTimeout(() => e.target.blur(), 0); });
     d.querySelector('#wlSv').addEventListener('change', e => e.target.blur());
     for (const ev of ['pointerdown', 'pointerup', 'pointermove', 'touchstart', 'touchend', 'wheel', 'click']) d.addEventListener(ev, e => e.stopPropagation());
+    // (user 20:42: "I should be able to pan with my finger, like all the other editors") a press on the open view - clear of the boat's buttons along
+    // the bottom and the gear at the top - lets the view go: that same drag pans it (the game's own look-round takes the press next); the wheel too
+    const free = e => e.clientY > 70 && e.clientY < window.innerHeight * 0.72;
+    window.addEventListener('pointerdown', e => { if (!W.looking && !d.contains(e.target) && free(e) && !__game.flightlab.paused) W.look(true); }, true);
+    window.addEventListener('wheel', e => { if (!W.looking && !d.contains(e.target)) W.look(true); }, true);
   }
   // each water's own numbers now, the weather's, and the ride of the one you're in
   let py = null, pt = null, pa = null, peak = 0;
@@ -76443,6 +76559,7 @@ function sseDraw() {
     el.innerHTML = s;
     // AUTO: the picked wave sent again and again - every 25 s in a calm sea down to every 8 s in a storm
     if (wauto && !__game.flightlab.paused && now >= wnext) { if (wnext) sendWave(wsel); wnext = now + (25 - 17 * Math.min(1, E.sea)) * (0.7 + 0.6 * Math.random()); }
+    { const lb = document.getElementById('wlLook'); if (lb) { lb.textContent = W.looking ? 'BACK TO THE BOAT' : 'LOOK AROUND'; lb.classList.toggle('on', W.looking); } }
     const F = __game.flightlab; document.getElementById('wlPause').hidden = !F.paused; const pb = document.querySelector('#wlLab .pz'); if (pb) { pb.classList.toggle('on', F.paused); pb.textContent = F.paused ? 'RESUME' : 'PAUSE'; }
   }
   (async () => {
