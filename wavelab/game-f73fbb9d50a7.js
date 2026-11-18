@@ -7697,7 +7697,7 @@ function dwStep(dt) {
     if (w.ph < end && w.ph >= 1 && !w.rush && (d < w.H * 0.9 || !waterRun(w.x + w.dir * w.L * 0.5) || w.far > (K.range || 6000) * UPM)) { w.rush = 1; w.shore = d < w.H * 0.9 || !waterRun(w.x + w.dir * w.L * 0.5); }
     w.ph += dt / K.T[Math.min(nT - 1, Math.floor(w.ph))] * (w.ph < end ? (w.rush ? DW_RUSH : 1 + 3 * Math.max(0, s - s0) ** 2)   /* (the floor rising under it from where it was sent hurries its life - not the sea it was sent in: frames at their own times there) */ : 1);
     if (w.ph >= nT || !waterRun(w.x)) { if (w.shore) dwSwash(w); L.splice(i, 1); continue; }
-    w.x += w.dir * w.c * dt; w.far += w.c * dt;
+    w.x0 = w.x; w.x += w.dir * w.c * dt; w.far += w.c * dt;
     // its outline now: between two poses - each point on a straight line from where it stands in the one to where it stands in the next,
     // in metres (user Nov 18 11:10, ROGUE WAVE 02 frames 4 to 5: "Its not doing a linear interpolation but some weird other thing ... the crisp is
     // getting all thinned out": a pose's x is stretched by its own height (dwX), so going between two poses in pose numbers bent the paths)
@@ -7713,6 +7713,8 @@ function dwStep(dt) {
     let xa = Infinity, xb = -Infinity; const C = w.C;
     for (let k = 0; k < w.n; k++) { const x = C[2 * k]; if (x < xa) xa = x; if (x > xb) xb = x; }
     // each water column of it: the lowest and the highest the outline stands there, how many times it crosses (more than one: folded over it)
+    // (its table a step before kept - dwRise: how fast its water rises and falls where it is, its frames' own change with its going along)
+    { const l0 = w.low, t0 = w.top; w.low = w.low0 || new Float32Array(l0.length); w.top = w.top0 || new Float32Array(t0.length); w.low0 = l0; w.top0 = t0; w.xa0 = w.xa; w.xb0 = w.xb; w.nc0 = w.nc; w.dt0 = dt; w.mv = w.x - w.x0; }
     w.xa = xa; w.xb = xb; const nc = w.nc = Math.ceil((xb - xa) / DX) + 1;
     if (w.low.length < nc) { w.low = new Float32Array(nc + 64); w.top = new Float32Array(nc + 64); w.cnt = new Uint8Array(nc + 64); }
     const lo = w.low, tp = w.top, cn = w.cnt; lo.fill(Infinity, 0, nc); tp.fill(-Infinity, 0, nc); cn.fill(0, 0, nc);
@@ -7736,11 +7738,21 @@ function dwStep(dt) {
   DW.max = mx * 1.1;
   dwCarryAll(dt); dwShoreStep(dt);
 }
-// a wave's table at x (lo: the lowest - the surface; else the highest)
-function dwTab(w, x, lo) {
-  if (!(x >= w.xa && x <= w.xb) || !w.nc || x < w.run[0] || x > w.run[1]) return 0;
-  const f = (x - w.xa) / DX, i = Math.min(w.nc - 1, f | 0), j = Math.min(w.nc - 1, i + 1), T = lo ? w.low : w.top;
+// a wave's table at x (lo: the lowest - the surface; else the highest); was: as it stood a step before
+function dwTab(w, x, lo, was) {
+  const xa = was ? w.xa0 : w.xa, nc = was ? w.nc0 : w.nc;
+  if (!(x >= xa && x <= (was ? w.xb0 : w.xb)) || !nc || x < w.run[0] || x > w.run[1]) return 0;
+  const f = (x - xa) / DX, i = Math.min(nc - 1, f | 0), j = Math.min(nc - 1, i + 1), T = was ? (lo ? w.low0 : w.top0) : (lo ? w.low : w.top);
   return T[i] + (T[j] - T[i]) * (f - i);
+}
+// how fast wave w's water rises at x from its outline's own change, frame to frame - growing, curling, sinking back (world units a second, up +; lo: its
+// surface - else its highest, a lip's top): its table now against a step before at the same place on the wave (where it was before it went on: its
+// going along is dwWaterAt's (u - c) times the slope). The outline moves along its normal; the water's rise is that motion's upward part - all of it
+// where the outline lies flat, none where it stands as a wall (a lip reaching out over a place isn't its water rising there): by 1 / (1 + slopeÂ²)
+function dwRise(w, x, lo) {
+  if (!w.nc0 || !w.dt0) return 0;
+  const sl = (dwTab(w, x + DX, lo) - dwTab(w, x - DX, lo)) / (2 * DX);
+  return (dwTab(w, x, lo) - dwTab(w, x - w.mv, lo, true)) / w.dt0 / (1 + sl * sl);
 }
 // the designed waves' height at x (world units, up positive): the water's surface there - under a lip, the face
 function dwAt(x) { const L = DW.live; let y = 0; for (let i = 0; i < L.length; i++) y += dwTab(L[i], x, true); return y; }
@@ -8314,14 +8326,20 @@ function dwSurfAt(x, y) {
 function waterTopAt(x, y) { return DW.live.length ? dwSurfAt(x, y) : surfaceY(x); }
 /* THE WATER'S OWN VELOCITY AT ITS SURFACE, where a thing of length len floats (s: that surface - dwSurfAt): out[0] its way along the sea (dwFlowAt, the
    less for a thing long against the wave - a third of its length carries it whole), out[1] its rise and fall (world y, down +): a surface moving by
-   at the wave's speed c lifts its water at (u - c) times its slope - never more than c (dwFlowAt's 1:1 rule). A floating thing is dragged toward
-   it (stepJetboat): it rides a face as the face's own water does, with no rate of its own to follow at a spot the face sweeps past */
-function dwWaterAt(x, s, len, out) {
-  out[0] = out[1] = 0; let H = 0, w0 = null;
-  for (const w of DW.live) if (x >= w.xa && x <= w.xb) { const h = dwTab(w, x, false); if (h > H) { H = h; w0 = w; } }
+   at the wave's speed c lifts its water at (u - c) times its slope - never more than c (dwFlowAt's 1:1 rule) - and the outline's own change from
+   frame to frame lifts or lowers it more (dwRise). A floating thing
+   is dragged toward it (stepJetboat): it rides a face as the face's own water does, with no rate of its own to follow at a spot the face sweeps past.
+   (user Nov 18 16:42, bug-20261118-164143: "the wave got high and suddenly the boat was inside the water ... when the wave goes down ... the boat can
+   be in the air a lot" - the rise was (u - c) times the slope alone, as if a wave only slid along, never grew or sank back: a wave growing in place rose 45 units a second
+   where the boat was dragged toward 15-35 - held down into it; sinking back it fell 80 where she was dragged toward 16 UP - held up out of it) */
+function dwWaterAt(x, s, len, out, y = s) {
+  // (lip: it floats in a lip's water, nearer its top than the face under it - it rises and falls with the lip's top; deep under a lip come down over
+  // it, at the face, it goes with the face's water)
+  out[0] = out[1] = 0; let H = 0, w0 = null, r = 0; const f = surfaceY0(x), lip = s < f - 1 && Math.abs(y - s) < Math.abs(y - f);
+  for (const w of DW.live) if (x >= w.xa && x <= w.xb) { const h = dwTab(w, x, false); if (h > H) { H = h; w0 = w; } r += dwRise(w, x, !(lip && x >= w.fa && x <= w.fb)); }
   if (!w0) return out;
   const u = dwFlowAt(x, s), sl = (dwSurfAt(x + DW_FDX, s) - dwSurfAt(x - DW_FDX, s)) / (2 * DW_FDX);
-  out[0] = u * clamp(H / (0.33 * len), 0, 1); out[1] = (u - w0.dir * w0.c) * sl;
+  out[0] = u * clamp(H / (0.33 * len), 0, 1); out[1] = (u - w0.dir * w0.c) * sl - r;
   return out;
 }
 /* A FLOATING BODY (user Nov 18 14:33: "make sure there's no teleporting. It should all be physics based" - before it a boat's, a yacht's or a seaplane's
@@ -8337,7 +8355,7 @@ const dwDrag = (hg, g, sub) => 4 * DW_ZW * Math.sqrt(2 * g / hg) * sub;   // (2Â
 function dwFloat(o, dk, len, hg, half, dir, g, bco, dt, off = 0, yk = 'y', vyk = 'vy') {
   const y = o[yk], sAt = x => waterTopAt(x, y);
   const yb = sAt(o.x + dir * half), ys = sAt(o.x - dir * half), yS = (yb + ys + 2 * sAt(o.x)) / 4, sub = clamp(0.5 + (y - off - yS) / hg, 0, 1);
-  if (DW.live.length) dwWaterAt(o.x, yS, len, DW_WV); else DW_WV[0] = DW_WV[1] = 0;
+  if (DW.live.length) dwWaterAt(o.x, yS, len, DW_WV, y - off); else DW_WV[0] = DW_WV[1] = 0;
   const e = Math.exp(-dwDrag(hg, g, sub) * dt);
   let vy = (o[vyk] || 0) + (g - bco * sub) * dt; vy = DW_WV[1] + (vy - DW_WV[1]) * e; o[vyk] = vy; o[yk] = y + vy * dt;
   if (dk) o[dk] = DW_WV[0] + ((o[dk] || 0) - DW_WV[0]) * e;   // (dk null: held where it is - a moored buoy)
@@ -9613,7 +9631,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 17:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 18:04';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
