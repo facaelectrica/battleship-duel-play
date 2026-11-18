@@ -7777,7 +7777,7 @@ const DW_WHITE = [255, 255, 255];
    overhang and air gap comes out exact, and a lip passing into the water merges with it - the standard non-zero winding rule.
    dwSpans(w, x, S): the column's highest water (S.top) and its air gaps top down (S.g: [high, low] heights - DW_GAPS at most; S.n of them).
    TRAPPED AIR: a gap with no way out to the open air - no neighbouring column's air beside it reaching up to the sky, step by step (dwTrapMark) - is
-   air the wave has closed in: it fills with churned foam (dwTrapFoam, the sim) and is drawn as the wave's body (dwGapCols, the view) */
+   air the wave has closed in - a tunnel: drawn as the air it is (dwGapCols), it fills with churned foam as it's shut (dwTrapFoam), bursting out at the tip */
 const DW_GAPS = 3, DW_XS = new Float64Array(32), DW_XD = new Int8Array(32), DW_XK = new Int16Array(32);   // (each crossing: its height, its way, which piece of the curve)
 const dwSpanNew = () => ({ top: -Infinity, n: 0, g: new Float64Array(2 * DW_GAPS), gk: new Int16Array(2 * DW_GAPS), open: new Uint8Array(DW_GAPS) });   // (gk: the curve's pieces over and under each gap)
 function dwSpans(w, x, S) {
@@ -7811,7 +7811,8 @@ function dwTrapMark(L, n, tol) {
   }
 }
 // THE VIEW'S COLUMNS for the water's drawing (waterSurfGPU's compute pass: gapIn - WATER_WGSL gapK / inGap / gapLine): each its top's row and up to
-// DW_GAPS air gaps' rows - the open ones; trapped air is drawn as the body. Where waves overlap a column keeps the highest top of the waves over it
+// DW_GAPS air gaps' rows - every one: air the outline closes in too, a tunnel, is air till the frames close it (user Nov 18 16:00, bug-20261118-155926:
+// "the wave is supposed to have a tunnel, but then it dissapears from a moment to the next" - closed air was drawn as the body). Where waves overlap a column keeps the highest top of the waves over it
 // and that wave's gaps (user Nov 18 12:16, ref-many-waves-nov18). F: eight numbers a column of the view (o = the column + 3): the top's row, then
 // each gap's first and last rows; none: -1e9, 1e9 ...
 const DW_COLS = [];
@@ -7822,14 +7823,13 @@ function dwGapCols(F, nOut) {
     const o0 = Math.max(0, Math.floor(w.xa * SV - CAMPX) + 3), o1 = Math.min(nOut - 1, Math.ceil(w.xb * SV - CAMPX) + 3), n = o1 - o0 + 1; if (n < 1) continue;
     while (DW_COLS.length < n) DW_COLS.push(dwSpanNew());
     for (let o = o0; o <= o1; o++) dwSpans(w, (o - 3 + CAMPX + 0.5) / SV, DW_COLS[o - o0]);
-    dwTrapMark(DW_COLS, n, 1.5 / SV);
     for (let o = o0; o <= o1; o++) {
       const S = DW_COLS[o - o0]; if (S.top === -Infinity) continue;
       const x = (o - 3 + CAMPX + 0.5) / SV, base = surfaceY0(x) + dwTab(w, x, true), row = h => Math.floor((base - h) * SV - TOPPX + 0.5), rt = row(S.top);
       const hi = F[8 * o] === -1e9 || rt <= F[8 * o]; if (!hi) continue;
       F[8 * o] = rt; for (let q = 1; q < 8; q++) F[8 * o + q] = 1e9;
       let g = 0;
-      for (let k = 0; k < S.n; k++) { if (!S.open[k]) continue; const ru = Math.max(rt + 1, row(S.g[2 * k])), rf = row(S.g[2 * k + 1]); if (rf - ru < 2) continue; F[8 * o + 1 + 2 * g] = ru; F[8 * o + 2 + 2 * g] = rf; g++; }
+      for (let k = 0; k < S.n; k++) { const ru = Math.max(rt + 1, row(S.g[2 * k])), rf = row(S.g[2 * k + 1]); if (rf - ru < 2) continue; F[8 * o + 1 + 2 * g] = ru; F[8 * o + 2 + 2 * g] = rf; g++; }
     }
   }
 }
@@ -9544,7 +9544,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 16:59';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 17:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
