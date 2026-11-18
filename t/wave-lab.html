@@ -3178,7 +3178,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1070, build: 'NOV 18 13:08', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1070, build: 'NOV 18 13:13', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -11158,7 +11158,48 @@ function dwDrawShore(x0, x1, lit = null) {   // (lit: again in the waterline's l
 // (The small boats today - jetboatSink; the other families ride it out: not decided yet)
 function dwCrash(w) {
   const T = dwPt(w, 8)[0], Cx = dwPt(w, 11)[0], a = Math.min(T, Cx) - 0.05 * w.H, b = Math.max(T, Cx) + 0.05 * w.H;
-  for (const j of jetboats.list ? jetboats.list() : jetboats) if (j.state === 'run' && j.x > a && j.x < b && w.H > 0.25 * storyBoatSize(j)[0]) { DW.lost++; jetboatSink(j); }
+  for (const j of jetboats.list ? jetboats.list() : jetboats) if (j.state === 'run' && j.x > a && j.x < b && w.H > 0.25 * storyBoatSize(j)[0]) { DW.lost++; jetboatCapsize(j, w.dir); }   // (rolled over the way the wave goes - not blown up)
+}
+// a folded wave's rows at x, as heights: its face (the lowest), its lip's underside (the next under its top), its top; null where it isn't folded
+const DW_YF = new Float64Array(16);
+function dwFoldAt(w, x) {
+  if (!w.lip || !(x >= w.xa && x <= w.xb)) return null;
+  const C = w.C; let m = 0;
+  for (let k = 0; k < w.n - 1 && m < 16; k++) { const xA = C[2 * k], xB = C[2 * k + 2]; if ((xA <= x) !== (xB <= x)) DW_YF[m++] = C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA); }
+  if (m < 3) return null;
+  let top = -Infinity, low = Infinity; for (let k = 0; k < m; k++) { if (DW_YF[k] > top) top = DW_YF[k]; if (DW_YF[k] < low) low = DW_YF[k]; }
+  let und = low; for (let k = 0; k < m; k++) if (DW_YF[k] < top && DW_YF[k] > und) und = DW_YF[k];
+  return [low, und, top];
+}
+/* A BOAT UNDER THE LIP (user Nov 18 12:09, lab/wavelab/ref/ref-boat-in-tube / ref-boat-through-lip-nov18: "a boat that is caught here should not be
+   able to just go 'through' the wave ... It would be pushed and likely flipped, depending on the angle that its in and its size. And it would
+   generate foam too. If it gets flipped, then it would be capsized and then slowly sink"): a small boat (the jet boat family) riding a face
+   whose lip has come down lower over it than it stands is struck by it - pressed down under it, taken on the way the wave goes and turned with
+   it, spray and mist thrown off it; and rolled right over (jetboatCapsize) when the wave is big against it and it lies steep: the wave's height
+   to its length, times how steeply it lies, times how far the lip has come down on it. True: it's capsized */
+function dwBoatLip(j, dt) {
+  const B = storyBoatSize(j), len = B[0], hg = B[1];
+  for (const w of DW.live) {
+    if (!w.lip || j.x < w.xa - len || j.x > w.xb + len) continue;
+    let over = 0;
+    for (const f of [-0.45, 0, 0.45]) { const F = dwFoldAt(w, j.x + f * len * Math.cos(j.a)); if (F) over = Math.max(over, hg * Math.max(0.3, Math.abs(Math.cos(j.a))) - (F[1] - F[0])); }
+    if (!(over > 0)) continue;
+    const k = clamp(over / hg, 0, 1), H = w.H, c = w.dir * w.c;
+    if ((H / len) * (0.5 + Math.abs(j.a) / 0.5) * (0.5 + k) >= 1) { DW.lost++; jetboatCapsize(j, w.dir); return true; }
+    j.x += c * (0.5 + 0.5 * k) * dt; j.y += Math.min(over, hg * 0.6); j.a += (w.dir * 0.5 - j.a) * (1 - Math.exp(-dt * 3));
+    if (!SIM_ONLY) {
+      for (let n = dfN(dt * 40 * (0.3 + k)); n > 0; n--) dwFoamAdd(0, j.x + dfRnd(-0.4, 0.4) * len, j.y - dfRnd(0, 0.5) * hg, c * dfRnd(0.6, 1.3), -dfRnd(0.2, 0.7) * w.c, dfRnd(0.2, 0.5) * UPM, dfRnd(0.8, 1.6));
+      for (let n = dfN(dt * 8 * (0.3 + k)); n > 0; n--) dwFoamAdd(1, j.x + dfRnd(-0.3, 0.3) * len, j.y - dfRnd(0, 0.5) * hg, c * dfRnd(0.3, 0.8), -dfRnd(0.05, 0.2) * w.c, dfRnd(0.3, 0.6) * hg, dfRnd(1, 2));
+    }
+  }
+  return false;
+}
+// foam thrown up where something went over in the water: churned foam about it, mist, a few drops - as big as it (s: its length)
+function dwFoamBurst(x, y, s) {
+  const n = Math.round(clamp(s / UPM, 2, 30) * 3);
+  for (let i = 0; i < n; i++) { const xx = x + dfRnd(-0.6, 0.6) * s; dwFoamAdd(3, xx, dwTopY(xx), dfRnd(-0.2, 0.2) * s, dfRnd(0, 0.15) * s, dfRnd(0.08, 0.2) * s, dfRnd(1.5, 3)); }
+  for (let i = 0; i < n * 0.4; i++) dwFoamAdd(1, x + dfRnd(-0.4, 0.4) * s, y - dfRnd(0, 0.3) * s, dfRnd(-0.3, 0.3) * s, -dfRnd(0.1, 0.4) * s, dfRnd(0.15, 0.3) * s, dfRnd(1.5, 3));
+  for (let i = 0; i < n; i++) dwFoamAdd(0, x + dfRnd(-0.4, 0.4) * s, y - dfRnd(0, 0.2) * s, dfRnd(-1, 1) * s, -dfRnd(0.5, 1.5) * s, dfRnd(0.15, 0.4) * UPM, dfRnd(0.8, 1.6));
 }
 
 //@src 09-zz-biomes.js:1
@@ -12423,7 +12464,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 13:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 13:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -57454,6 +57495,17 @@ function stepJetboats(dt) {
 function stepJetboat(j, dt) {
     j.ph += dt;
     if (j.state === 'gone' || j.state === 'wreck') return;
+    if (j.state === 'sink' && j.capsized) {
+      // CAPSIZED (the Wave Lab - user Nov 18 12:09: "If it gets flipped, then it would be capsized and then slowly sink"): rolled over the way it
+      // was thrown (capDir), it floats keel up a while, then goes down slowly and settles on the floor upside down - no blast, nothing broken
+      j.capT += dt; const up = j.capDir * Math.PI, hg = storyBoatSize(j)[1], ws = surfaceY(j.x);
+      j.a += (up - j.a) * (1 - Math.exp(-dt * 4));
+      if (j.capT < 5) j.y += (ws - 1 - j.y) * (1 - Math.exp(-dt * 4)); else j.y += 5 * dt;
+      if (!SIM_ONLY && jbR() < dt * (j.capT < 5 ? 2 : 4)) addBubble(j.x + jbRnd(-6, 6), j.y + 3, jbRnd(-4, 4), -jbRnd(12, 26), jbRnd(0.6, 1.4));
+      const K = jbKeel(j).map(p => [-p[0], hg + 2]);                  // (keel up: what lies lowest is its top)
+      if (j.capT > 5 && floorPen(K, j.x, j.y, j.a - up) >= 0) { const r = floorRest(K, j.x, null, 0.5, j.a - up); j.y = r.y; j.a = up + r.a; j.state = 'wreck'; kickDust(j.x, 14, 0.5); }
+      return;
+    }
     if (j.state === 'sink') {
       // down to the bottom (the sea's or the lake's), settling there on its keel along the floor - its wreck stays
       j.y += 18 * dt; j.a += ((j.brk != null ? 0 : 0.35 * j.dir) - j.a) * dt * 0.6; if (j.brk != null) j.brkT = (j.brkT || 0) + dt;   // (broken: each half tips its own way - fishHalves)
@@ -57474,7 +57526,7 @@ function stepJetboat(j, dt) {
     const sp = (j.driven != null ? j.vDrive || 0 : j.story ? j.npcV || 0 : j.v * (j.nk == null ? 1 : j.nk)) * (j.turn > 0 ? 0.25 : 1) * (j.hp < 2 ? 0.6 : 1);
     if (!coastAhead(j.x, Math.sign(sp) * j.dir || j.dir, 25)) j.x += j.dir * sp * dt;   // (never up onto a coast out at sea)
     // (the Wave Lab: a designed wave's face steeper than she can lie on rolls her over)
-    if (DW.live.length && !j.air && Math.abs(j.a) > DW.cap) { DW.lost++; jetboatSink(j); return; }
+    if (DW.live.length && !j.air && Math.abs(j.a) > DW.cap) { DW.lost++; jetboatCapsize(j, Math.sign(j.a) || 1); return; }
     // (user Nov 2: "the boat is wobbling weirdly" - the fishing boat on the jet ski's ride: the water read 10 units either side of
     // her middle under an 11 m hull, nose up and bouncing at rest, the tilt snapped to it each step) every boat of this family
     // reads the water at its own hull's ends (JB_HULL of its real length - storyBoatSize) and its middle
@@ -57501,6 +57553,7 @@ function stepJetboat(j, dt) {
       const want = Math.atan2(yb - ys, 2 * half) * j.dir - f[0] * go * j.dir + Math.sin(j.ph * f[1]) * 0.03 * go * Math.min(1, 25 / L) * j.dir;
       j.a += (want - j.a) * (1 - Math.exp(-dt * JB_EASE));
     }
+    if (DW.live.length && !j.air && dwBoatLip(j, dt)) return;      // (the Wave Lab: a lip come down on her - pushed, or rolled over: 09-zy-dwaves.js)
     if (picBoat(j)) { if (j.state === 'run') picBoatFx(j, dt); }   // (a picture boat: its foam, bow wave, wake and screw by its picture - 50-story-net.js)
     else if (!SIM_ONLY && j.turn === 0 && !j.air && sp > 4) { j.spr = (j.spr || 0) + dt * 30; while (j.spr >= 1) { j.spr -= 1; spawnSpray(j.x - j.dir * 13, j.y - 1, -j.dir * jbRnd(30, 70), 0.5); } }
     if (j.hp < 2) { j.smokeT = (j.smokeT || 0) - dt; if (j.smokeT <= 0 && !SIM_ONLY) { j.smokeT = 0.15; spawnSmoke(j.x - j.dir * 4, j.y - 8, { kind: 'trail', dark: 0.2, r: jbRnd(2, 3.5), grow: 3, lift: 20, vx: -j.dir * 10, life: jbRnd(2, 3), alpha: 0.5, chain: smStream(j) }); } }
@@ -57516,6 +57569,12 @@ function jetboatSink(j, atX = null) {
   j.state = 'sink'; j.hp = 0;
   if (atX != null && picBoat(j)) { const w = storyBoatSize(j)[0]; if (w >= VEH_BREAK_M * UPM) { j.brk = clamp(0.5 + (atX - j.x) / w * (j.dir > 0 ? -1 : 1), 0.3, 0.7); j.brkT = 0; } }
   sectionBlast(j.x, j.y - 4, 0.5, 0); spawnDebris(j.x, j.y - 4, 8, j.dir * j.v * 0.2); sound('impact', j.x);
+}
+// rolled right over by a wave (s: the way it goes over) - capsized: floating keel up, then going down slowly (stepJetboat), foam where it went over
+function jetboatCapsize(j, s) {
+  if (j.state !== 'run' || netGuestHold()) return;
+  j.state = 'sink'; j.hp = 0; j.capsized = true; j.capT = 0; j.capDir = s < 0 ? -1 : 1; j.air = false;
+  if (!SIM_ONLY) { dwFoamBurst(j.x, j.y, storyBoatSize(j)[0]); sound('splash', j.x, 0.6); }
 }
 let jbArt = null;
 function buildJetboatArt() {
