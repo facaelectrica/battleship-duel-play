@@ -9566,7 +9566,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 17:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 17:33';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54622,7 +54622,7 @@ const JET_STRUT = [0x50, 0x52, 0x58];
    (user Oct 27: "The rest, when destroyed, is never spawned again") ---- */
 // (Nov 10, part 8: a record table - 04-zz-coltable.js; a row a boat, held and walked as its handle, its fields as they were: its wake and
 // foam's (fpx ...), driven (drv, vDrive), a fishing boat's horn (hornOn - 50-land-civdrive.js), moored (anc, _moorX - 50-land-anchors.js), a fishing boat's net (50-story-net.js), the STORY's)
-const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn capsized capT capDir av bod',
+const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn capsized capT capDir av bod flood',
 'txt: kind state','val: lake net anc rt ai home', ...STORY_REC, ...CIV_REC));
 // (engine stage 3: the jet and motor boats' own table and random source - 36-zz-tables.js)
 const jbR = sysRng('jetboats'), jbRnd = (a, b) => a + (b - a) * jbR();
@@ -54637,6 +54637,8 @@ const JB_HULL = 0.4, JB_RIDE = { jet: [0.12, 9], motor: [0.05, 4], fish: [0.03, 
 // sooner, a deep, heavy fishing boat later (degrees; typical of small craft that kind). Whether a wave gets her there is the wave's shape and the water's
 // push on her - jbRoll, dwBoatLip
 const JB_AVS = { jet: 55, motor: 60, fish: 70 }, jbAvs = j => (JB_AVS[j.kind] || 60) * Math.PI / 180;
+// (how heavy she is, for her sounds - 0 a jet ski .. 1 a fishing boat: sfxHullSlap, 51-audio.js)
+const JB_MASS = { jet: 0, motor: 0.45, fish: 1 }, jbMass = j => JB_MASS[j.kind] != null ? JB_MASS[j.kind] : 0.5;
 // (a boat's turn takes its kind's time - user Nov 2 10:37: the fishing boat "has to turn slower, about half of the speed"; jbTurn(j))
 const JB_TURN_S = { fish: 1.4 }, jbTurn = j => JB_TURN_S[j.kind] || JB_TURN;
 const JB_TURN = 0.7, JB_G = 300;   // (JB_G: its fall, flying off a wave)
@@ -54679,12 +54681,14 @@ function stepJetboat(j, dt) {
       // seconds, then goes down slowly (JB_SINK) and settles on the floor upside down - no blast, nothing broken
       // (a body - jbFloat: the air trapped under her lets go of her slowly, floating three quarters under at JB_FLOAT; then the water's in her and
       // she's heavier than it holds - down at JB_SINK against its drag)
-      j.capT += dt; const B = storyBoatSize(j), hg = B[1], half = B[0] * JB_HULL, up = j.capDir * Math.PI;
-      const F = jbFloat(j, dt, j.capT < JB_FLOAT ? JB_G / (0.5 + 0.25 * j.capT / JB_FLOAT) : JB_G - jbDrag(j, 1) * JB_SINK);
-      jbRoll(j, Math.atan2(F[1] - F[2], 2 * half) * j.dir + up, dt, true, Math.min(1, 2 * F[0]));
+      // (FOUNDERED - capDir 0: swamped, full of water, keel down - user Nov 18 16:29, bug-20261118-162754: "a boat that ends up sinking this much should
+      // go to the bottom of the ocean. It should not be able to recover": heavier than the water it's in from the moment it's full, down at JB_FOUNDER)
+      j.capT += dt; const B = storyBoatSize(j), hg = B[1], half = B[0] * JB_HULL, up = j.capDir * Math.PI, sunk = !j.capDir;
+      const F = jbFloat(j, dt, sunk ? JB_G - jbDrag(j, 1) * JB_FOUNDER : j.capT < JB_FLOAT ? JB_G / (0.5 + 0.25 * j.capT / JB_FLOAT) : JB_G - jbDrag(j, 1) * JB_SINK);
+      jbRoll(j, Math.atan2(F[1] - F[2], 2 * half) * j.dir + up, dt, !sunk, Math.min(1, 2 * F[0]));
       if (!SIM_ONLY && jbR() < dt * (j.capT < JB_FLOAT ? 1.5 : 4)) addBubble(j.x + jbRnd(-6, 6), j.y + 3, jbRnd(-4, 4), -jbRnd(12, 26), jbRnd(0.6, 1.4));
-      const K = jbKeel(j).map(p => [-p[0], hg + 2]);                  // (keel up: what lies lowest is its top)
-      if (j.capT > JB_FLOAT && floorPen(K, j.x, j.y, j.a - up) >= 0) { const r = floorRest(K, j.x, null, 0.5, j.a - up); j.y = r.y; j.a = up + r.a; j.av = 0; j.state = 'wreck'; kickDust(j.x, 14, 0.5); }
+      const K = sunk ? jbKeel(j) : jbKeel(j).map(p => [-p[0], hg + 2]);   // (keel up: what lies lowest is its top; foundered: its keel)
+      if ((sunk || j.capT > JB_FLOAT) && floorPen(K, j.x, j.y, j.a - up) >= 0) { const r = floorRest(K, j.x, null, 0.5, j.a - up); j.y = r.y; j.a = up + r.a; j.av = 0; j.state = 'wreck'; kickDust(j.x, 14, 0.5); }
       return;
     }
     if (j.state === 'sink') {
@@ -54716,8 +54720,13 @@ function stepJetboat(j, dt) {
     const half = storyBoatSize(j)[0] * JB_HULL;
     if (DW.live.length || j.bod) {
       // (the Wave Lab: a floating body - jbFloat. In the air, landing, swamped by a face, thrown off a lip or carried over the falls: one rule)
-      const air0 = !!j.air, vy0 = j.vy || 0, F = jbFloat(j, dt, 2 * JB_G); j.air = F[0] === 0;
-      if (air0 && !j.air && !SIM_ONLY) { const hard = clamp((vy0 - DW_WV[1]) / 220, 0, 1.5); for (let k = 0; k < 6 + 10 * hard; k++) spawnSpray(j.x + jbRnd(-10, 10), F[3] - 1, jbRnd(-80, 80) + j.dir * sp * 0.3, 0.5 + 0.5 * hard); if (hard > 0.4) sound('splash', j.x, 0.3 * hard); }
+      const air0 = !!j.air, vy0 = j.vy || 0, F = jbFloat(j, dt, 2 * JB_G * (1 - (j.flood || 0))); j.air = F[0] === 0;
+      // (user Nov 18 16:29: "a boat that ends up sinking this much should go to the bottom of the ocean": SWAMPED - the water over her deck pours in, the
+      // faster the deeper she's under (JB_FLOODR); what's in her stays, her buoyancy the less for it - lower in the water - and full enough that she's
+      // heavier than the water she's in (half: 2·JB_G·(1 - flood) at all of her under), she founders: jetboatFounder)
+      { const hg = storyBoatSize(j)[1], deep = (j.y - F[3]) / hg - 0.5;
+        if (deep > 0) { j.flood = Math.min(1, (j.flood || 0) + dt * JB_FLOODR * Math.min(1, 0.3 + deep)); if (j.flood >= 0.5) { jetboatFounder(j); return; } } }
+      if (air0 && !j.air && !SIM_ONLY) { const hard = clamp((vy0 - DW_WV[1]) / 220, 0, 1.5); for (let k = 0; k < 6 + 10 * hard; k++) spawnSpray(j.x + jbRnd(-10, 10), F[3] - 1, jbRnd(-80, 80) + j.dir * sp * 0.3, 0.5 + 0.5 * hard); if (hard > 0.15) sound('hullSlap', j.x, { a: hard, m: jbMass(j) }); }
       const go = clamp(Math.abs(sp) / (j.v || 60), 0, 1), L = half / JB_HULL, f = JB_RIDE[j.kind] || JB_RIDE.jet;
       jbRoll(j, Math.atan2(F[1] - F[2], 2 * half) * j.dir - f[0] * go * j.dir + Math.sin(j.ph * f[1]) * 0.03 * go * Math.min(1, 25 / L) * j.dir, dt, false, Math.min(1, 2 * F[0]));
       j.prevS = F[3];
@@ -54733,7 +54742,7 @@ function stepJetboat(j, dt) {
       j.a += (((j.vy / 520) - 0.12) * j.dir - j.a) * Math.min(1, dt * 3);   // (nose up as it leaves, dipping as it falls)
       if (j.y >= yS) {
         const hard = clamp((j.vy - w) / 220, 0, 1.5); j.air = false; j.y = yS; j.vy = w;
-        if (!SIM_ONLY) { for (let k = 0; k < 6 + 10 * hard; k++) spawnSpray(j.x + jbRnd(-10, 10), yS - 1, jbRnd(-80, 80) + j.dir * sp * 0.3, 0.5 + 0.5 * hard); if (hard > 0.4) sound('splash', j.x, 0.3 * hard); }
+        if (!SIM_ONLY) { for (let k = 0; k < 6 + 10 * hard; k++) spawnSpray(j.x + jbRnd(-10, 10), yS - 1, jbRnd(-80, 80) + j.dir * sp * 0.3, 0.5 + 0.5 * hard); if (hard > 0.15) sound('hullSlap', j.x, { a: hard, m: jbMass(j) }); }
       }
     } else if (sp > 70 && j.turn === 0 && (j.vy || 0) < -28 && w - (j.vy || 0) > JB_G * dt) {
       // (off the crest. user Nov 18 13:32, bug-20261118-133151: "My boat just flew into the sky when going towards a wave" - on a designed wave's steep
@@ -54772,7 +54781,7 @@ function jetboatSink(j, atX = null) {
    slope (want) - strongest half way to her vanishing angle (jbAvs - her own), none there, and past it turning her the other way; the
    water damping it (JB_ROLL_Z of critical). Capsized (keel): the same body rolling to lie keel up - the inverted lie is the stable one then.
    Pushes from outside (a lip striking her - dwBoatLip) add to av */
-const JB_ROLL_T = 2, JB_ROLL_TM = 0.15, JB_ROLL_Z = 0.4, JB_ROLL_ZK = 0.9, JB_FLOAT = 25, JB_SINK = 1.5;   // (ZK: keel up, her deck and cabin dragged through the water - damped near critical)
+const JB_ROLL_T = 2, JB_ROLL_TM = 0.15, JB_ROLL_Z = 0.4, JB_ROLL_ZK = 0.9, JB_FLOAT = 25, JB_SINK = UPM;   // (ZK: keel up, her deck and cabin dragged through the water - damped near critical)
 function jbRoll(j, want, dt, keel, held = 1) {
   const L = storyBoatSize(j)[0] / UPM, w0 = 2 * Math.PI / (JB_ROLL_T + JB_ROLL_TM * L), vs = jbAvs(j);
   let rel = j.a - want; rel -= 2 * Math.PI * Math.round(rel / (2 * Math.PI));
@@ -54788,11 +54797,18 @@ const jbDrag = (j, sub) => dwDrag(storyBoatSize(j)[1], JB_G, sub);
 function jbFloat(j, dt, bco) { const B = storyBoatSize(j); return dwFloat(j, 'vx', B[0], B[1], B[0] * JB_HULL, j.dir, JB_G, bco, dt); }
 // rolled right over by a wave (s: the way it goes over) - capsized: floating keel up, then going down slowly (stepJetboat), foam where it went over;
 // not hurt (its hp kept): not burnt, only upside down
+// swamped past saving (stepJetboat): full of water, keel down, going to the bottom - the capsized step's sinking with her the right way up (capDir 0)
+const JB_FLOODR = 0.25, JB_FOUNDER = 1 * UPM;   // (her filling: of her floodable volume a second, fully under; her sinking when full: 1 m/s)
+function jetboatFounder(j) {
+  if (j.state !== 'run' || netGuestHold()) return;
+  DW.lost++; j.state = 'sink'; j.capsized = 1; j.capT = 0; j.capDir = 0; j.air = false;
+  if (!SIM_ONLY) for (let k = 0; k < 12; k++) addBubble(j.x + jbRnd(-8, 8), j.y - jbRnd(0, 6), jbRnd(-6, 6), -jbRnd(20, 40), jbRnd(0.8, 1.8));
+}
 function jetboatCapsize(j, s) {
   if (j.state !== 'run' || netGuestHold()) return;
   j.state = 'sink'; j.capsized = 1; j.capT = 0; j.capDir = s < 0 ? -1 : 1; j.air = false;
   if ((j.av || 0) * j.capDir < 1.2) j.av = j.capDir * 1.2;        // (going over: past her vanishing angle she keeps turning that way)
-  if (!SIM_ONLY) { dwFoamBurst(j.x, j.y, storyBoatSize(j)[0]); sound('splash', j.x, 0.6); }
+  if (!SIM_ONLY) { dwFoamBurst(j.x, j.y, storyBoatSize(j)[0]); sound('hullSlap', j.x, { a: 1.1, m: jbMass(j) }); }
 }
 let jbArt = null;
 function buildJetboatArt() {
@@ -73857,6 +73873,35 @@ function sfxSplash(x, amt) {
   noiseShot(out, t, 0.5, 'bandpass', 900, 300, 1.2, 0.6, 0.01);
   noiseShot(out, t + 0.15, 1.4, 'highpass', 3000, 1200, 0.6, 0.35, 0.15);   // the column falling back
 }
+/* A HULL COMING DOWN ON THE WATER (user Nov 18 16:29: "we need a different sound for boats splashing in the water. Right now, it's a very short sound.
+   You don't actually feel that it's hitting the water and being affected by the waves. It's very cartoonish" - it was the shell's splash): the weight
+   of her meeting it - a deep, hollow whump, the lower and longer the heavier she is (m: 0 a jet ski .. 1 a fishing boat); the flat of her hull's slap
+   on it, sharp; the water she throws up, a hiss, and its fall back in drops; and the wash - water pushed aside rushing back in round her hull and
+   slopping along it, a second or two, swelling then dying away. o.a: how hard she came down (0..1.5). Its own out, kept as long as it sounds */
+function sfxHullSlap(x, o) {
+  if (!SFX.ctx) return;
+  const amt = o && typeof o === 'object' ? +o.a || 0 : +o || 0, m = o && typeof o === 'object' && o.m != null ? +o.m : 0.5;   // (o: { a: how hard, m: how heavy } - or how hard alone)
+  const ctx = SFX.ctx, h = hear(x), a = clamp(amt, 0, 1.5), L = 0.35 + 0.45 * a; if (h.att * L < 0.01) return;
+  const p = makePan(), out = ctx.createGain(); p.set(h.pan); out.gain.value = h.att * L; out.connect(p.node); p.node.connect(sfxRound());
+  const t = ctx.currentTime, T = 1.4 + 1.2 * a + 0.8 * m, r = () => seenR('audio');
+  setTimeout(() => { try { out.disconnect(); p.node.disconnect(); } catch (e) {} }, (T + 1) * 1000);
+  const run = (buf, type, f0, f1, q, pts, t1 = t) => {
+    const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain(), end = pts[pts.length - 1][0];
+    src.buffer = buf; src.loop = true; f.type = type; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t1); f.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t1 + end);
+    g.gain.setValueAtTime(0.0001, t1); for (const [b, v] of pts) g.gain.exponentialRampToValueAtTime(Math.max(0.0001, v), t1 + b);
+    src.connect(f); f.connect(g); g.connect(out); src.start(t1, r() * 1.5); src.stop(t1 + end + 0.05);
+    src.onended = () => { src.disconnect(); f.disconnect(); g.disconnect(); };
+  };
+  thump(out, t, 95 - 35 * m, 34 - 10 * m, 0.35 + 0.35 * m + 0.2 * a, 0.95);                                         // her weight on it: the whump
+  thump(out, t + 0.012, 180 - 50 * m, 80, 0.12, 0.45);
+  noiseShot(out, t, 0.09 + 0.05 * a, 'lowpass', 2400 - 900 * m, 500, 0.9, 0.85, 0.002);                             // the flat of the hull's slap
+  run(SFX.noise, 'bandpass', 2200, 1100, 0.7, [[0.04, 0.3 + 0.2 * a], [0.35 + 0.3 * a, 0.12], [0.9 + 0.6 * a, 0.0001]]);   // the water thrown up
+  run(SFX.brown, 'lowpass', 700, 240, 0.7, [[0.15, 0.25], [0.45 + 0.3 * a, 0.75 + 0.25 * a], [T * 0.6, 0.3], [T, 0.0001]]);   // the wash round her hull
+  run(SFX.noise, 'bandpass', 520, 330, 0.9, [[0.2, 0.08], [0.6 + 0.3 * a, 0.28], [T * 0.75, 0.0001]]);               // its slop along her
+  for (let i = 0, n = Math.round(6 + 10 * a); i < n; i++) { const b = 0.25 + (0.6 + 0.6 * a) * Math.pow(i / n, 0.8) + r() * 0.06;   // its drops falling back
+    noiseShot(out, t + b, 0.03 + 0.04 * r(), 'bandpass', 1400 + 2200 * r(), 900, 2.5, 0.07 * (1 - i / n) + 0.02, 0.002); }
+}
 /* A WAVE BREAKING (user Nov 18 12:13, his sample lab/wavelab/ref/sfx/ref-wave-crash-nov18.mp3: "It should represent the big wosh when it splashes
    and the foam that continues"), built as the sample is shaped - measured: a rush rising (most of it 200-1500 Hz), the crash a deep roar at its
    loudest (200-600 Hz over a heavy low end) held about a second, falling away over two more, and the foam's fizz going on under it (1.5-11 kHz)
@@ -73909,7 +73954,7 @@ function sfxCrash(x, amt) {
 // (engine stage 3) the world's play requests: sound(id, x, a) -> 'sound' (36-zz-events.js), played here. x, a: the sound's
 // own two arguments, whatever they are (mostly where, and how loud; for the UI's, a player or a pad); the sounds made in
 // other files (the plane's, the fireworks', the research ship's...) are listed here too, so every request comes this way
-const SND = { fogHorn: sfxFogHorn, explosion: sfxExplosion, impact: sfxImpact, tankBlow: sfxTankBlow, splash: sfxSplash, waveBreak: sfxWaveBreak, crash: sfxCrash, rubble: sfxRubble,
+const SND = { fogHorn: sfxFogHorn, explosion: sfxExplosion, impact: sfxImpact, tankBlow: sfxTankBlow, splash: sfxSplash, hullSlap: sfxHullSlap, waveBreak: sfxWaveBreak, crash: sfxCrash, rubble: sfxRubble,
   anchorThunk: sfxAnchorThunk, anchorWinch: sfxAnchorWinch, bayDoors: sfxBayDoors, bombDrop: sfxBombDrop, cannon: sfxCannon,
   click: sfxClick, clink: sfxClink, crush: sfxCrush, door: sfxDoor, empty: sfxEmpty, engineDie: sfxEngineDie,
   fwBang: sfxFwBang, fwLaunch: sfxFwLaunch, iceCrack: sfxIceCrack, latch: sfxLatch, marker: sfxMarker, mg: sfxMG,
