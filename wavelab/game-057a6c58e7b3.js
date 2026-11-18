@@ -7729,22 +7729,26 @@ function dwDrawBack(x0, x1) {
     if (w.lake || !w.lip || w.landed || offView(w.xa, w.xb, x0, x1)) continue;
     const C = w.C;
     for (let k = 0; k <= kt; k++) { const x = C[2 * k]; P[2 * k] = x * SV - CAMPX; P[2 * k + 1] = dwYAt(w, x, C[2 * k + 1]) * SV - TOPPX; }
-    // (its length along, and the side the air is on: the front's at the face's middle, the same turn all along)
-    let S = 0; const L = DW_LX; L[0] = 0; for (let k = 1; k <= kt; k++) { S += Math.hypot(P[2 * k] - P[2 * k - 2], P[2 * k + 1] - P[2 * k - 1]); L[k] = S; }
+    // (user 12:07, ref-shade-wanted-nov18: "that part should have the same color as the background water. Its facing the same direction. The shadow
+    // is on the inside of the wave") only the face UNDER the lip is its inside: the band begins where the face passes under the lip's leading edge
+    const fx = dwPt(w, dwLead(w))[0]; let k0 = 0; while (k0 < kt && C[2 * k0] * w.dir > fx * w.dir) k0++;
+    if (k0 > kt - 3) continue;
+    // (its length along from there, and the side the air is on: the front's at the face's middle, the same turn all along)
+    let S = 0; const L = DW_LX; L[k0] = 0; for (let k = k0 + 1; k <= kt; k++) { S += Math.hypot(P[2 * k] - P[2 * k - 2], P[2 * k + 1] - P[2 * k - 1]); L[k] = S; }
     if (!(S > 8)) continue;
     const km = Math.round(kt * 0.35), tx = P[2 * km + 2] - P[2 * km - 2], ty = P[2 * km + 3] - P[2 * km - 1], sgn = ((-ty) * w.dir) > 0 ? 1 : -1;   // (n = sgn * (-ty, tx): toward the air - the front of a face that rises toward the back)
     const Wd = Math.min(0.11 * w.H * SV, 0.18 * S);
-    for (let k = 0; k <= kt; k++) {
+    for (let k = k0; k <= kt; k++) {
       const a = Math.max(0, k - 1), b = Math.min(kt, k + 1), dx = P[2 * b] - P[2 * a], dy = P[2 * b + 1] - P[2 * a + 1], dl = Math.hypot(dx, dy) || 1, t = L[k] / S;
       const wd = Wd * Math.pow(Math.sin(Math.PI * t), 0.7);
       Q[2 * k] = P[2 * k] + sgn * (-dy / dl) * wd; Q[2 * k + 1] = P[2 * k + 1] + sgn * (dx / dl) * wd;
     }
     // (the band's strips: NB of them along its length, each a run of the outline's pieces - a quad each, filled a pixel row at a time)
-    for (let k = 0; k < kt; k++) {
+    for (let k = k0; k < kt; k++) {
       const t = (L[k] + L[k + 1]) / (2 * S), q = Math.min(NB - 1, Math.floor(Math.max(0, (t - 0.55) / 0.45) * NB)), col = cols[q];   // (dark up the face; the strips lighten round under the lip)
       dwQuad(RL, P[2 * k], P[2 * k + 1], P[2 * k + 2], P[2 * k + 3], Q[2 * k + 2], Q[2 * k + 3], Q[2 * k], Q[2 * k + 1], col);
     }
-    for (let k = 0; k < kt; k++) dwSeg(RL, Q[2 * k], Q[2 * k + 1], Q[2 * k + 2], Q[2 * k + 3], lw, lineC, 0.9);   // (the inner curve's own thin line)
+    for (let k = k0; k < kt; k++) dwSeg(RL, Q[2 * k], Q[2 * k + 1], Q[2 * k + 2], Q[2 * k + 3], lw, lineC, 0.9);   // (the inner curve's own thin line)
   }
   if (RL.n) frameRects(C, RL, { key: 'dwaves' });
 }
@@ -7794,8 +7798,11 @@ function dwFoamFrom(w, dt) {
   const at = k => { const i = Math.min(15, Math.floor(k)), P0 = dwPt(w, i), P1 = dwPt(w, i + 1), f = k - i; return [P0[0] + (P1[0] - P0[0]) * f, P0[1] + (P1[1] - P0[1]) * f]; };
   if (w.lip) {
     // (its leading edge - the lip's foremost point, 7 to 10: where a lip that hooks back under itself throws its water from, not its end inside the tube)
-    let fi = 8; for (let i = 7; i <= 10; i++) if (dwPt(w, i)[0] * w.dir > dwPt(w, fi)[0] * w.dir) fi = i;
+    const fi = dwLead(w);
     const Fp = dwPt(w, fi), fx = Fp[0], fy = dwYAt(w, fx, Fp[1]);
+    // (user 12:07, ref-tip-foam-nov18: "the TIP must always have foam, its the one that is generating it") a cap of churned foam on the leading edge
+    // itself, going on with the wave and made again all the time
+    for (let n = dfN(dt * H / U * 30); n > 0; n--) { const x = fx - w.dir * dfRnd(-0.01, 0.06) * H; dwFoamAdd(3, x, dwTopY(x), c, dfRnd(0, 0.05) * H, dfRnd(0.025, 0.055) * H, dfRnd(0.25, 0.6)); }
     // (user 11:30, ref-foam-on-top-nov18: "the foam should go on the top of the wave because of the movement ... there is no foam there [inside
     // the tube] because it gets pushed to the top of the wave") drops spat off the tip, out ahead of it and up - none fall back into the tube
     for (let n = dfN(dt * H / U * 6); n > 0; n--)
@@ -7807,12 +7814,22 @@ function dwFoamFrom(w, dt) {
       dwFoamAdd(1, p[0], dwYAt(w, p[0], p[1]) - dfRnd(0, 0.04) * H, c * dfRnd(0.2, 0.6) + wind * 0.4 - w.dir * dfRnd(0, 0.25) * w.c, -dfRnd(0.05, 0.25) * w.c, dfRnd(0.02, 0.05) * H, dfRnd(1.5, 3.5)); }
     // THE TIP LANDS (red on yellow): the splash once - the tube closed, foam over all of it - then churned foam where it keeps coming down
     if (gap < 0.06) {
-      if (!w.landed) { w.landed = true; dwCrash(w); dwSplash(w, tx, under); }
+      if (!w.landed) { w.landed = true; w.lt = 0; dwCrash(w); dwSplash(w, tx, under); }
+      // (user 12:07, ref-break-jet-nov18: "the MOMENT the wave breaks and hits the water surface that is when the foam 'shoots' in the opposite
+      // direction ... to represent the water hitting the surface") for a moment after it lands, clumps shot up and out ahead of where it hit
+      w.lt += dt; if (w.lt < 0.6) { const y = dwYAt(w, tx, under), v = Math.sqrt(9.8 * UPM * H);
+        for (let n = dfN(dt * H / U * 40 * (1 - w.lt / 0.6)); n > 0; n--) dwFoamAdd(0, tx + dfRnd(-0.04, 0.04) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * v, dfRnd(0.008, 0.025) * H, dfRnd(1.2, 2.5)); }
       for (let n = dfN(dt * H / U * 12); n > 0; n--) { const x = tx + dfRnd(-0.06, 0.12) * H * -w.dir; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.5, 0.9), dfRnd(0, 0.15) * H, dfRnd(0.03, 0.07) * H, dfRnd(1.2, 2.5)); }
     }
-  } else if (w.tilt > 0.25) {
-    // a crest only tilting: flecks at the top, riding its back (green), the wind taking them
-    for (let n = dfN(dt * H / U * 3 * w.tilt); n > 0; n--) { const p = at(10.5 + dfR()); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.5, 0.85), 0, dfRnd(0.012, 0.03) * H, dfRnd(1.5, 3)); }
+  } else if (w.tilt > 0.12) {
+    // (user 12:07, ref-forming-foam-nov18: "the moment the wave is forming, we should already have foam at the top") a wave steepening, no lip
+    // yet: foam where its face meets its top (the foremost point up there - its shoulder), riding back over its crest, a few drops spat ahead
+    let hm = 0; for (let i = 0; i < DW_NP; i++) hm = Math.max(hm, dwPt(w, i)[1]);
+    let si = 11; for (let i = 5; i <= 11; i++) { const p = dwPt(w, i); if (p[1] >= 0.85 * hm && p[0] * w.dir > dwPt(w, si)[0] * w.dir) si = i; }
+    const Sp = dwPt(w, si), sx = Sp[0], f = clamp((w.tilt - 0.12) / 0.5, 0, 1);
+    for (let n = dfN(dt * H / U * 14 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.01, 0.05) * H; dwFoamAdd(3, x, dwTopY(x), c, dfRnd(0, 0.02) * H, dfRnd(0.015, 0.035) * H, dfRnd(0.25, 0.6)); }
+    for (let n = dfN(dt * H / U * 6 * f); n > 0; n--) { const p = at(si + dfR() * Math.max(0.5, 11.5 - si)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.5, 0.85), 0, dfRnd(0.012, 0.03) * H, dfRnd(1.5, 3)); }
+    for (let n = dfN(dt * H / U * 1.5 * f); n > 0; n--) dwFoamAdd(0, sx, dwTopY(sx) - 0.01 * H, c * dfRnd(1, 1.3), -dfRnd(0.1, 0.4) * w.c, dfRnd(0.2, 0.5) * UPM, dfRnd(1, 2));
   }
 }
 // the top of the water at x: the highest any wave's outline stands there (a lip's top over its tube), else the surface
@@ -7821,6 +7838,8 @@ function dwTopY(x) {
   for (const w of DW.live) if (x >= w.xa && x <= w.xb) { const v = dwYAt(w, x, dwTab(w, x, false)); if (v < y) y = v; }
   return y;
 }
+// a lip's leading edge: its foremost point, 7 to 10 (a lip that hooks back under itself throws its water from its front, not its end in the tube)
+function dwLead(w) { let fi = 8; for (let i = 7; i <= 10; i++) if (dwPt(w, i)[0] * w.dir > dwPt(w, fi)[0] * w.dir) fi = i; return fi; }
 // the face's height under x (the curve from its front foot to point 7 - yellow); the sea's (0) where the face isn't under it
 function dwFace(w, x) {
   const Cc = w.C; let h = Infinity;
@@ -7835,6 +7854,7 @@ function dwSplash(w, x, h) {
   for (let i = 0; i < n * 1.2; i++) { const k = 5 + 5 * Math.sqrt(dfR()), j = Math.floor(k), P0 = dwPt(w, j), P1 = dwPt(w, j + 1), xx = P0[0] + (P1[0] - P0[0]) * (k - j) + dfRnd(-0.06, 0.06) * H, d = dwTab(w, xx, false) - dwTab(w, xx, true);
     dwFoamAdd(3, xx, dwTopY(xx), c * dfRnd(0.6, 1), Math.max(0, d) * Math.pow(dfR(), 0.8), dfRnd(0.025, 0.1) * H, dfRnd(1.2, 3.5)); }
   for (let i = 0; i < n; i++) dwFoamAdd(0, x + dfRnd(-0.1, 0.1) * H, y - dfRnd(0, 0.05) * H, c * dfRnd(0.4, 1.3), -dfRnd(0.3, 1) * Math.sqrt(2 * 9.8 * UPM * H * 0.5), dfRnd(0.25, 0.7) * UPM, dfRnd(1.5, 3.5));
+  for (let i = 0; i < n * 0.6; i++) dwFoamAdd(0, x + dfRnd(-0.05, 0.05) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * Math.sqrt(9.8 * UPM * H), dfRnd(0.008, 0.025) * H, dfRnd(1.2, 2.5));   // (the jet's first clumps)
   for (let i = 0; i < n * 0.4; i++) dwFoamAdd(1, x + dfRnd(-0.15, 0.15) * H, y - dfRnd(0, 0.3) * H, c * dfRnd(0, 0.6), -dfRnd(0.1, 0.5) * w.c, dfRnd(0.04, 0.09) * H, dfRnd(2, 4.5));
   for (let i = 0; i < n * 0.4; i++) { const xx = x + dfRnd(-0.25, 0.25) * H; dwFoamAdd(2, xx, dwTopY(xx), c * dfRnd(0.4, 1), 0, dfRnd(0.03, 0.07) * H, dfRnd(3, 7)); }
   if (!SIM_ONLY) sound('splash', x, clamp(H / 80, 0.3, 1));
@@ -7870,7 +7890,8 @@ function dwDrawFoam(RL, x0, x1, WH, PALE) {
   for (let i = 0; i < F.n; i++) {
     const x = F.x[i]; if (offViewR(x, F.r[i], x0, x1)) continue;
     const X = x * SV - CAMPX, Y = F.y[i] * SV - TOPPX, u = F.age[i] / F.life[i], k = F.k[i];
-    if (k === 0) { const s = Math.max(pb, Math.round(F.r[i] * SV / pb) * pb), v = Math.hypot(F.vx[i], F.vy[i]) || 1, l = Math.min(6 * pb, v * 0.03 * SV);
+    if (k === 0 && F.r[i] * SV >= 1.5 * pb) dwDisc(RL, X, Y, F.r[i] * SV, WH, 0.95);   // (a clump - the break's jet)
+    else if (k === 0) { const s = Math.max(pb, Math.round(F.r[i] * SV / pb) * pb), v = Math.hypot(F.vx[i], F.vy[i]) || 1, l = Math.min(6 * pb, v * 0.03 * SV);
       if (l > 2 * pb) dwSeg(RL, X, Y, X - F.vx[i] / v * l, Y - F.vy[i] / v * l, s, WH, 0.9); else RL.rect(Math.round(X), Math.round(Y), s, s, WH, 0.95); }
     else if (k === 1) dwDisc(RL, X, Y, Math.max(pb, F.r[i] * SV), PALE, 0.32 * (1 - u) * Math.min(1, u * 6));
     else if (k === 2) { const r = Math.max(pb, F.r[i] * SV); dwBlob(RL, X, Y + r * 0.1, r, Math.max(pb, r * 0.45), WH, 0.9 * (1 - u * u)); }
@@ -9197,7 +9218,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 12:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 13:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
