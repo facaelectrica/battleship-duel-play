@@ -7662,18 +7662,28 @@ function dwAutoStep(dt) {
 const DW_ASP = 1.9;
 const dwX = (w, px, py) => px * (px <= 0 ? (w.L / 2) + (Math.min(w.L / 2, DW_ASP * w.H) - w.L / 2) * clamp(py / 0.6, 0, 1) : w.L / 2);
 const dwPt = (w, i) => [w.wp[i][0], w.wp[i][1]];                   // (its outline's point i now: world x, height)
+const DW_DN = 17, DW_RUSH = 6;   // (the floor read under a wave: at its middle and evenly along its length - dwStep)
 function dwStep(dt) {
   const L = DW.live; let mx = 0;
   for (let i = L.length - 1; i >= 0; i--) {
     const w = L[i], K = w.K; w.t += dt;
-    // the depth under it: shallower than half its length it begins to feel the floor (the user's picture: D = 1/2 L) - shorter, slower, taller, and on along its life
-    const d = Math.max(0, seabedY(w.x) - waterLv(w.x)), L0 = K.len * UPM, s = clamp(1 - d / (0.5 * L0), 0, 1);
+    // the depth under it: shallower than half its length it begins to feel the floor (the user's picture: D = 1/2 L) - shorter, slower, taller, and on along its life.
+    // What it feels is the floor under the whole of it, its mean over its length (user Nov 18 16:02, bug-20261118-160205: "The tsunami has a bug, it
+    // explodes halfway" - read at its middle alone, the lab's sea floor stepping up to its shelf took a 600 m wave from deep to shallow from one step to
+    // the next, and its SHOALING x6 made it five times as tall at once); d at its middle still says where it's too shallow to stand
+    const d = Math.max(0, seabedY(w.x) - waterLv(w.x)), L0 = K.len * UPM;
+    let dm = 0; for (let q = 0; q < DW_DN; q++) { const x = w.x + (q / (DW_DN - 1) - 0.5) * L0; dm += waterRun(x) ? Math.max(0, seabedY(x) - waterLv(x)) : 0; } dm /= DW_DN;
+    // (and from the water it was sent in: a wave is designed as it is where it's sent - the lab's whole sea is 123 m deep, shallow for a 600 m tsunami,
+    // which stood 4.5 times its designed height from its start - and grows, shortens and slows only as the floor comes up under it from there: s0)
+    const sa = clamp(1 - dm / (0.5 * L0), 0, 1); if (w.s0 == null) w.s0 = sa; const s = clamp((sa - w.s0) / Math.max(0.05, 1 - w.s0), 0, 1);
     w.L = L0 * (w.lk || 1) * (1 - 0.4 * s); w.c = K.v * UPM * (w.vk || 1) * (1 - 0.45 * s); w.H = K.h * UPM * w.k * (1 + (K.grow || 0) * s);
     // ITS LIFE: through its frames at their own times (w.ph: which change it's in, and how far); the floor rising under it hurries it; where the
     // water is too shallow for it, or its front is at a shore, or it has run its range, it goes to its crash (one that has none: to its last change)
     const nT = K.T.length, end = K.ci > 0 ? K.ci - 1 : nT - 1;
-    if (w.ph < end && w.ph >= 1 && (d < w.H * 0.9 || !waterRun(w.x + w.dir * w.L * 0.5) || w.far > (K.range || 6000) * UPM)) { w.ph = end; w.shore = d < w.H * 0.9 || !waterRun(w.x + w.dir * w.L * 0.5); }
-    w.ph += dt / K.T[Math.min(nT - 1, Math.floor(w.ph))] * (w.ph < end ? 1 + 3 * s * s : 1);
+    // (user Nov 18 14:33, "no teleporting": it went there at once - its whole shape jumping to its crash's from one step to the next. It hurries there:
+    // its frames on to it at DW_RUSH times their pace)
+    if (w.ph < end && w.ph >= 1 && !w.rush && (d < w.H * 0.9 || !waterRun(w.x + w.dir * w.L * 0.5) || w.far > (K.range || 6000) * UPM)) { w.rush = 1; w.shore = d < w.H * 0.9 || !waterRun(w.x + w.dir * w.L * 0.5); }
+    w.ph += dt / K.T[Math.min(nT - 1, Math.floor(w.ph))] * (w.ph < end ? (w.rush ? DW_RUSH : 1 + 3 * s * s) : 1);
     if (w.ph >= nT || !waterRun(w.x)) { if (w.shore) dwSwash(w); L.splice(i, 1); continue; }
     w.x += w.dir * w.c * dt; w.far += w.c * dt;
     // its outline now: between two poses - each point on a straight line from where it stands in the one to where it stands in the next,
@@ -9544,7 +9554,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 17:01';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 17:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
