@@ -7648,7 +7648,8 @@ function dwAutoStep(dt) {
   let r = dwAR(), kind = null; for (const n in S.odds) { r -= S.odds[n]; if (r <= 0) { kind = n; break; } } if (!kind) { kind = Object.keys(S.odds).pop(); if (!kind) return; }
   A.left--;
   const K = DW.kinds[kind], wd = env.wind || 0, vary = DW.seaCfg.vary || 0, f = DW.focus != null ? DW.focus : cam.view[0].l + (typeof VWW === 'number' ? VWW : 1600) / 2;
-  const dir = dwSeaDir(f), k = (0.85 + 0.35 * Math.abs(wd)) * (1 + vary * (2 * dwAR() - 1)), lk = 1 + vary * (2 * dwAR() - 1), vk = 1 + 0.1 * Math.abs(wd) * (dir === Math.sign(wd) ? 1 : -1);
+  // (user Nov 18 15:46: "same wave, bigger" - "the game should do that small variation too": its length with its height, k both, its shape kept)
+  const dir = dwSeaDir(f), k = (0.85 + 0.35 * Math.abs(wd)) * (1 + vary * (2 * dwAR() - 1)), lk = k, vk = 1 + 0.1 * Math.abs(wd) * (dir === Math.sign(wd) ? 1 : -1);
   const H = K.h * UPM * k, L = K.len * UPM * lk, far = (typeof VWW === 'number' ? VWW : 1600) / 2 + L * 0.5;
   for (let d = far; d > L * 0.3; d -= L * 0.25) {   // (off the view's edge upstream; nearer, if the water there won't take it)
     const x = f - dir * d, run = waterRun(x);
@@ -7675,15 +7676,18 @@ function dwStep(dt) {
     let dm = 0; for (let q = 0; q < DW_DN; q++) { const x = w.x + (q / (DW_DN - 1) - 0.5) * L0; dm += waterRun(x) ? Math.max(0, seabedY(x) - waterLv(x)) : 0; } dm /= DW_DN;
     // (and from the water it was sent in: a wave is designed as it is where it's sent - the lab's whole sea is 123 m deep, shallow for a 600 m tsunami,
     // which stood 4.5 times its designed height from its start - and grows, shortens and slows only as the floor comes up under it from there: s0)
-    const sa = clamp(1 - dm / (0.5 * L0), 0, 1); if (w.s0 == null) w.s0 = sa; const s = clamp((sa - w.s0) / Math.max(0.05, 1 - w.s0), 0, 1);
-    w.L = L0 * (w.lk || 1) * (1 - 0.4 * s); w.c = K.v * UPM * (w.vk || 1) * (1 - 0.45 * s); w.H = K.h * UPM * w.k * (1 + (K.grow || 0) * s);
+    // (user Nov 18 16:14: "The tsunami doesnt seem to 'scale' properly but rather jumps in size" - the floor's whole effect was squeezed into what was
+    // left of it from where it was sent, all of it in the last of its run: as the floor's effect is (shorter, slower, taller by its SHOALING), over
+    // what it was where it was sent - a ratio, the same curve)
+    const s = clamp(1 - dm / (0.5 * L0), 0, 1); if (w.s0 == null) w.s0 = s; const s0 = w.s0, g = K.grow || 0;
+    w.L = L0 * (w.lk || 1) * (1 - 0.4 * s) / (1 - 0.4 * s0); w.c = K.v * UPM * (w.vk || 1) * (1 - 0.45 * s) / (1 - 0.45 * s0); w.H = K.h * UPM * w.k * (1 + g * s) / (1 + g * s0);
     // ITS LIFE: through its frames at their own times (w.ph: which change it's in, and how far); the floor rising under it hurries it; where the
     // water is too shallow for it, or its front is at a shore, or it has run its range, it goes to its crash (one that has none: to its last change)
     const nT = K.T.length, end = K.ci > 0 ? K.ci - 1 : nT - 1;
     // (user Nov 18 14:33, "no teleporting": it went there at once - its whole shape jumping to its crash's from one step to the next. It hurries there:
     // its frames on to it at DW_RUSH times their pace)
     if (w.ph < end && w.ph >= 1 && !w.rush && (d < w.H * 0.9 || !waterRun(w.x + w.dir * w.L * 0.5) || w.far > (K.range || 6000) * UPM)) { w.rush = 1; w.shore = d < w.H * 0.9 || !waterRun(w.x + w.dir * w.L * 0.5); }
-    w.ph += dt / K.T[Math.min(nT - 1, Math.floor(w.ph))] * (w.ph < end ? (w.rush ? DW_RUSH : 1 + 3 * s * s) : 1);
+    w.ph += dt / K.T[Math.min(nT - 1, Math.floor(w.ph))] * (w.ph < end ? (w.rush ? DW_RUSH : 1 + 3 * Math.max(0, s - s0) ** 2)   /* (the floor rising under it from where it was sent hurries its life - not the sea it was sent in: frames at their own times there) */ : 1);
     if (w.ph >= nT || !waterRun(w.x)) { if (w.shore) dwSwash(w); L.splice(i, 1); continue; }
     w.x += w.dir * w.c * dt; w.far += w.c * dt;
     // its outline now: between two poses - each point on a straight line from where it stands in the one to where it stands in the next,
@@ -7857,10 +7861,10 @@ function dwTrapFoam(w, dt) {
   if (!(A > 0)) return;
   // (the trapped air itself, through the water closed over it: churned, aerated water - drawn pale under the top, not white on it - dwDrawFoam)
   for (let i = 0; i < n; i++) { const S = DW_TC[i]; for (let k = 0; k < S.n; k++) { if (S.open[k]) continue; const a = S.g[2 * k], b = S.g[2 * k + 1];
-    for (let m = dfN(dt * (a - b) * st / (H * H) * 120); m > 0; m--) { const x = w.xa + (i + dfR() - 0.5) * st, h = b + (a - b) * dfR(); dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.7, 0.95), Math.max(0, S.top - h), dfRnd(0.04, 0.08) * H, dfRnd(0.8, 1.6)); } } }
+    for (let m = dfN(dt * (a - b) * st / (H * H) * 120); m > 0; m--) { const x = w.xa + (i + dfR() - 0.5) * st, h = b + (a - b) * dfR(); dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.7, 0.95), Math.max(0, S.top - h), dfRnd(0.04, 0.08) * dwFoamH(w), dfRnd(0.8, 1.6)); } } }
   const [tx, ty] = dwImpact(w), q = A / (H * H);
-  for (let k = dfN(dt * q * 260); k > 0; k--) { const x = tx - w.dir * dfRnd(-0.12, 0.05) * H; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.85, 1.25), dfRnd(0, 0.08) * H, dfRnd(0.04, 0.09) * H, dfRnd(0.8, 1.8)); }
-  for (let k = dfN(dt * q * 90); k > 0; k--) dwFoamAdd(0, tx + dfRnd(-0.03, 0.03) * H, ty - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.7), -dfRnd(0.3, 0.9) * Math.sqrt(9.8 * UPM * H), dfRnd(0.008, 0.022) * H, dfRnd(1, 2));
+  for (let k = dfN(dt * q * 260); k > 0; k--) { const x = tx - w.dir * dfRnd(-0.12, 0.05) * H; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.85, 1.25), dfRnd(0, 0.08) * H, dfRnd(0.04, 0.09) * dwFoamH(w), dfRnd(0.8, 1.8)); }
+  for (let k = dfN(dt * q * 90); k > 0; k--) dwFoamAdd(0, tx + dfRnd(-0.03, 0.03) * H, ty - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.7), -dfRnd(0.3, 0.9) * Math.sqrt(9.8 * UPM * H), dfRnd(0.008, 0.022) * dwFoamH(w), dfRnd(1, 2));
 }
 /* THE WAVE'S INSIDE, IN SHADOW (user Nov 17 22:23-22:25, lab/wavelab/ref/ref-wave-final-layers / ref-wave-composition-A-B-C / ref-tube-shadow:
    "We want this darkness that feels like shadow"; "having this brighter effect would be cream on top"): A is the designed outline, lip and
@@ -7955,6 +7959,9 @@ function dwDisc(RL, cx, cy, r, col, a) { for (let y = -r; y <= r; y += PB) { con
    fades, and leaves the sea's own foam behind it (spawnFoam). k: 0 drop, 1 mist, 2 white water */
 const DWF = { n: 0, cap: 4000, w: new Array(4000), x: new Float32Array(4000), y: new Float32Array(4000), vx: new Float32Array(4000), vy: new Float32Array(4000), age: new Float32Array(4000), life: new Float32Array(4000), r: new Float32Array(4000), k: new Uint8Array(4000) };
 let dfR0 = null; const dfR = () => (dfR0 || (dfR0 = sysRng('dwFoam')))(), dfRnd = (a, b) => a + (b - a) * dfR(), dfN = m => Math.floor(m + dfR());   // (dfN: how many this step, m on average)
+// (user Nov 18 16:14: "the amount of foam it gets should not get 'bigger' that doesn make sense") foam is the water's, not the wave's: its pieces sized
+// by the wave's own designed height - not as it stands taller in the shallows - and never past THE WALL BREAKS' 45 m it was tuned on (DW_FOAM_H)
+const DW_FOAM_H = 45 * UPM, dwFoamH = w => Math.min(w.K.h * UPM * (w.k || 1), DW_FOAM_H);
 function dwFoamAdd(k, x, y, vx, vy, r, life) {
   const F = DWF; if (SIM_ONLY || F.n >= F.cap) return; const i = F.n++;
   F.k[i] = k; F.x[i] = x; F.y[i] = y; F.vx[i] = vx; F.vy[i] = vy; F.r[i] = r; F.age[i] = 0; F.life[i] = life; F.w[i] = null;
@@ -7990,46 +7997,46 @@ function dwFoamFrom(w, dt) {
     // its front and over its top to past the crest (point 13): made where the water pours - the most, the biggest and the deepest at the tip, fewer,
     // smaller and closer to the surface the further back along it (f: 0 at the tip .. 1 at its end)
     { const a = 8 * DW_SUB, b = 13 * DW_SUB;
-      for (let n = dfN(dt * H / U * 45); n > 0; n--) { const f = Math.pow(dfR(), 1.7), q = Math.pow(1 - f, 1.5), r = (0.012 + 0.06 * q) * H;
+      for (let n = dfN(dt * H / U * 45); n > 0; n--) { const f = Math.pow(dfR(), 1.7), q = Math.pow(1 - f, 1.5), r = (0.012 + 0.06 * q) * dwFoamH(w);
         dwFoamStick(w, a + (b - a) * f, dfRnd(-0.45, 0.7) * r, r, dfRnd(0.25, 0.6)); } }   // (some a little out past the surface: a broken, lumpy edge)
     // (user 13:35, ref-foam-taper-nov18 A B C: "we want foam that comes off due to the movement and wind") bits of it torn off the lip's top by its
     // going and the wind: thrown up a little, carried back over the crest, falling back onto it (drops - k 0 - landing as white water)
     for (let n = dfN(dt * H / U * 16); n > 0; n--) { const f = Math.pow(dfR(), 1.4), p = at(8.5 + f * 2.5), y = dwTopY(p[0]);
-      dwFoamAdd(0, p[0], y - dfRnd(0.02, 0.05) * H, c * dfRnd(0.3, 0.75) + wind * 0.5, -dfRnd(0.3, 0.8) * w.c * (1 - 0.5 * f), dfRnd(0.015, 0.04) * H * (1 - 0.5 * f), dfRnd(1, 2)); }
+      dwFoamAdd(0, p[0], y - dfRnd(0.02, 0.05) * H, c * dfRnd(0.3, 0.75) + wind * 0.5, -dfRnd(0.3, 0.8) * w.c * (1 - 0.5 * f), dfRnd(0.015, 0.04) * dwFoamH(w) * (1 - 0.5 * f), dfRnd(1, 2)); }
     // (user 11:30, ref-foam-on-top-nov18: "the foam should go on the top of the wave because of the movement ... there is no foam there [inside
     // the tube] because it gets pushed to the top of the wave"; 12:15, ref-no-drops-nov18: "these 'water drops' at the crisp of the wave ... should
     // not exist" - no drops off the lip: its foam stays on it)
     // white water made at the tip riding the lip's top back over the crest (green): slower than the wave, so it slides back along it
-    for (let n = dfN(dt * H / U * 8); n > 0; n--) { const p = at(fi + dfR() * Math.max(1, 10.5 - fi)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.35, 0.7), 0, dfRnd(0.012, 0.03) * H, dfRnd(1.2, 2.4)); }
+    for (let n = dfN(dt * H / U * 8); n > 0; n--) { const p = at(fi + dfR() * Math.max(1, 10.5 - fi)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.35, 0.7), 0, dfRnd(0.012, 0.03) * dwFoamH(w), dfRnd(1.2, 2.4)); }
     // mist off the lip's back, the wind lifting it back over the crest
     for (let n = dfN(dt * H / U * 4); n > 0; n--) { const p = at(fi + dfR() * (11 - fi));
-      dwFoamAdd(1, p[0], dwYAt(w, p[0], p[1]) - dfRnd(0, 0.04) * H, c * dfRnd(0.2, 0.6) + wind * 0.4 - w.dir * dfRnd(0, 0.25) * w.c, -dfRnd(0.05, 0.25) * w.c, dfRnd(0.02, 0.05) * H, dfRnd(1.5, 3.5)); }
+      dwFoamAdd(1, p[0], dwYAt(w, p[0], p[1]) - dfRnd(0, 0.04) * H, c * dfRnd(0.2, 0.6) + wind * 0.4 - w.dir * dfRnd(0, 0.25) * w.c, -dfRnd(0.05, 0.25) * w.c, dfRnd(0.02, 0.05) * dwFoamH(w), dfRnd(1.5, 3.5)); }
     // THE TIP LANDS (red on yellow): the splash once; the white water it drives ahead; the jet (the trapped air's foam: dwTrapFoam)
     if (gap < 0.06) {
       const [ix, iy] = dwImpact(w);
       if (!w.landed) { w.landed = true; w.lt = 0; dwCrash(w); dwSplash(w, ix, iy); }
       // (the white water the break drives ahead of it at its foot)
-      { for (let n = dfN(dt * H / U * 10); n > 0; n--) { const x = ix - w.dir * dfRnd(-0.08, 0.02) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.9, 1.15), 0, dfRnd(0.03, 0.06) * H, dfRnd(3, 6)); } }
+      { for (let n = dfN(dt * H / U * 10); n > 0; n--) { const x = ix - w.dir * dfRnd(-0.08, 0.02) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.9, 1.15), 0, dfRnd(0.03, 0.06) * dwFoamH(w), dfRnd(3, 6)); } }
       // (user 12:07, ref-break-jet-nov18: "the MOMENT the wave breaks and hits the water surface that is when the foam 'shoots' in the opposite
       // direction ... to represent the water hitting the surface") for a moment after it lands, clumps shot up and out ahead of where it hit
       w.lt += dt; if (w.lt < 0.6) { const y = iy, v = Math.sqrt(9.8 * UPM * H);
-        for (let n = dfN(dt * H / U * 40 * (1 - w.lt / 0.6)); n > 0; n--) dwFoamAdd(0, ix + dfRnd(-0.04, 0.04) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * v, dfRnd(0.008, 0.025) * H, dfRnd(1.2, 2.5)); }
+        for (let n = dfN(dt * H / U * 40 * (1 - w.lt / 0.6)); n > 0; n--) dwFoamAdd(0, ix + dfRnd(-0.04, 0.04) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * v, dfRnd(0.008, 0.025) * dwFoamH(w), dfRnd(1.2, 2.5)); }
     }
   } else if (w.landed) {
     // (user 12:40: "It should keep rolling as it stabilizes") broken and settling: its front a rolling line of white water going on with it, as
     // much as it still stands up
     let fi = 5; for (let i = 5; i <= 11; i++) if (dwPt(w, i)[1] > 0.3 * w.H && dwPt(w, i)[0] * w.dir > dwPt(w, fi)[0] * w.dir) fi = i;
     const f = clamp(dwPt(w, 11)[1] / H, 0, 1), sx = dwPt(w, fi)[0];
-    for (let n = dfN(dt * H / U * 20 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.05, 0.1) * H; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.85, 1), dfRnd(0, 0.04) * H, dfRnd(0.03, 0.06) * H * (0.4 + 0.6 * f), dfRnd(1, 2.5)); }
-    for (let n = dfN(dt * H / U * 8 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.05, 0.2) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.8, 1.05), 0, dfRnd(0.02, 0.05) * H, dfRnd(3, 6)); }
+    for (let n = dfN(dt * H / U * 20 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.05, 0.1) * H; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.85, 1), dfRnd(0, 0.04) * H, dfRnd(0.03, 0.06) * dwFoamH(w) * (0.4 + 0.6 * f), dfRnd(1, 2.5)); }
+    for (let n = dfN(dt * H / U * 8 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.05, 0.2) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.8, 1.05), 0, dfRnd(0.02, 0.05) * dwFoamH(w), dfRnd(3, 6)); }
   } else if (w.tilt > 0.12) {
     // (user 12:07, ref-forming-foam-nov18: "the moment the wave is forming, we should already have foam at the top") a wave steepening, no lip
     // yet: foam where its face meets its top (the foremost point up there - its shoulder), riding back over its crest
     let hm = 0; for (let i = 0; i < DW_NP; i++) hm = Math.max(hm, dwPt(w, i)[1]);
     let si = 11; for (let i = 5; i <= 11; i++) { const p = dwPt(w, i); if (p[1] >= 0.85 * hm && p[0] * w.dir > dwPt(w, si)[0] * w.dir) si = i; }
     const Sp = dwPt(w, si), sx = Sp[0], f = clamp((w.tilt - 0.12) / 0.5, 0, 1);
-    for (let n = dfN(dt * H / U * 14 * f); n > 0; n--) dwFoamStick(w, (si + dfRnd(-0.4, 0.8)) * DW_SUB, dfRnd(0, 0.015) * H, dfRnd(0.015, 0.035) * H, dfRnd(0.25, 0.6));
-    for (let n = dfN(dt * H / U * 6 * f); n > 0; n--) { const p = at(si + dfR() * Math.max(0.5, 11.5 - si)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.5, 0.85), 0, dfRnd(0.012, 0.03) * H, dfRnd(1.5, 3)); }
+    for (let n = dfN(dt * H / U * 14 * f); n > 0; n--) dwFoamStick(w, (si + dfRnd(-0.4, 0.8)) * DW_SUB, dfRnd(0, 0.015) * dwFoamH(w), dfRnd(0.015, 0.035) * dwFoamH(w), dfRnd(0.25, 0.6));
+    for (let n = dfN(dt * H / U * 6 * f); n > 0; n--) { const p = at(si + dfR() * Math.max(0.5, 11.5 - si)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.5, 0.85), 0, dfRnd(0.012, 0.03) * dwFoamH(w), dfRnd(1.5, 3)); }
   }
 }
 // the top of the water at x: the highest any wave's outline stands there (a lip's top over its tube), else the surface
@@ -8059,11 +8066,11 @@ function dwFace(w, x) {
 function dwSplash(w, x, y) {   // (x, its world y)
   const H = w.H, c = w.c * w.dir, n = Math.min(500, Math.round(30 + H / UPM * 8));
   // (churned water where it hit: air the impact drove in, about the tip, a little way down - user 13:09: not the whole curl)
-  for (let i = 0; i < n * 0.8; i++) { const xx = x + dfRnd(-0.15, 0.1) * H * -w.dir; dwFoamAdd(3, xx, dwTopY(xx), c * dfRnd(0.6, 1), dfRnd(0, 0.2) * H, dfRnd(0.03, 0.08) * H, dfRnd(1, 2.5)); }
+  for (let i = 0; i < n * 0.8; i++) { const xx = x + dfRnd(-0.15, 0.1) * H * -w.dir; dwFoamAdd(3, xx, dwTopY(xx), c * dfRnd(0.6, 1), dfRnd(0, 0.2) * H, dfRnd(0.03, 0.08) * dwFoamH(w), dfRnd(1, 2.5)); }
   for (let i = 0; i < n; i++) dwFoamAdd(0, x + dfRnd(-0.1, 0.1) * H, y - dfRnd(0, 0.05) * H, c * dfRnd(0.4, 1.3), -dfRnd(0.3, 1) * Math.sqrt(2 * 9.8 * UPM * H * 0.5), dfRnd(0.25, 0.7) * UPM, dfRnd(1.5, 3.5));
-  for (let i = 0; i < n * 0.6; i++) dwFoamAdd(0, x + dfRnd(-0.05, 0.05) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * Math.sqrt(9.8 * UPM * H), dfRnd(0.008, 0.025) * H, dfRnd(1.2, 2.5));   // (the jet's first clumps)
-  for (let i = 0; i < n * 0.4; i++) dwFoamAdd(1, x + dfRnd(-0.15, 0.15) * H, y - dfRnd(0, 0.3) * H, c * dfRnd(0, 0.6), -dfRnd(0.1, 0.5) * w.c, dfRnd(0.04, 0.09) * H, dfRnd(2, 4.5));
-  for (let i = 0; i < n * 0.4; i++) { const xx = x + dfRnd(-0.25, 0.25) * H; dwFoamAdd(2, xx, dwTopY(xx), c * dfRnd(0.4, 1), 0, dfRnd(0.03, 0.07) * H, dfRnd(3, 7)); }
+  for (let i = 0; i < n * 0.6; i++) dwFoamAdd(0, x + dfRnd(-0.05, 0.05) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * Math.sqrt(9.8 * UPM * H), dfRnd(0.008, 0.025) * dwFoamH(w), dfRnd(1.2, 2.5));   // (the jet's first clumps)
+  for (let i = 0; i < n * 0.4; i++) dwFoamAdd(1, x + dfRnd(-0.15, 0.15) * H, y - dfRnd(0, 0.3) * H, c * dfRnd(0, 0.6), -dfRnd(0.1, 0.5) * w.c, dfRnd(0.04, 0.09) * dwFoamH(w), dfRnd(2, 4.5));
+  for (let i = 0; i < n * 0.4; i++) { const xx = x + dfRnd(-0.25, 0.25) * H; dwFoamAdd(2, xx, dwTopY(xx), c * dfRnd(0.4, 1), 0, dfRnd(0.03, 0.07) * dwFoamH(w), dfRnd(3, 7)); }
   if (!SIM_ONLY) sound('waveBreak', x, clamp(H / 80, 0.3, 1));   // (the rush, the crash, the roar and the foam's fizz - 51-audio.js)
 }
 // each bit a step: a drop flies (gravity, the wind's drag) and lands as white water; mist drifts with the wind, rising a little; white water rides
@@ -9554,7 +9561,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 17:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 17:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
