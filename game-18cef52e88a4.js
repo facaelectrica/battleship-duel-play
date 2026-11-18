@@ -2561,7 +2561,26 @@ function frameTargetOf(t) {
 }
 // a part's own bind group (engine-design 1: only src/gpu talks to WebGPU; its modules, layouts and pipelines: 25-pipes.js), made on the
 // current device - a part keeps the device's epoch (GPU.ep) with it and makes it again when the epoch changes (a lost device rebuilt - gpuLost)
-function gpuBindGroup(layout, entries, label) { return GPU.dev.createBindGroup({ layout, entries, label }); }
+/* A BIND GROUP, KEPT (user Nov 18 10:39, the GPU lost - "CreateDescriptorHeap failed with E_OUTOFMEMORY" - after a while in the Wave Lab: "we have to
+   fix this"). Every native draw asked for a new bind group - about 7,000 a second on his GTX 1660 Super - and each holds descriptors on the
+   GPU's side until the page's garbage collector lets it go; under that churn D3D12's descriptor heaps ran out and the device was lost. A bind
+   group is now made once for a layout and the exact resources it's given (each buffer with its offset and size, each view, each sampler - by
+   the object, never its contents) and handed back the next time the same ones are asked for: the arena's pieces come round at the same offsets
+   frame after frame, so after the first frames almost none is made. Up to 1024 kept a layout, the oldest let go first. */
+const GBG = { ids: new WeakMap(), n: 0, by: new WeakMap(), made: 0 };
+const gbgId = o => { if (!o || typeof o !== 'object') return String(o); let v = GBG.ids.get(o); if (!v) { v = ++GBG.n; GBG.ids.set(o, v); } return v; };
+function gpuBindGroup(layout, entries, label) {
+  let M = GBG.by.get(layout); if (!M) GBG.by.set(layout, M = new Map());
+  let k = '';
+  for (const e of entries) { const r = e.resource; k += e.binding + (r && r.buffer ? 'b' + gbgId(r.buffer) + '@' + (r.offset || 0) + '+' + (r.size === undefined ? -1 : r.size) : 'o' + gbgId(r)) + ','; }
+  let g = M.get(k); if (g) return g;
+  g = GPU.dev.createBindGroup({ layout, entries, label }); GBG.made++;
+  if (M.size >= 1024) M.delete(M.keys().next().value);
+  M.set(k, g); return g;
+}
+// a pipeline's bind group layout, asked for once (getBindGroupLayout hands back a new object each call - a layout kept is what lets its bind
+// groups be kept)
+const gpuBGL = (p, i = 0) => (p._bgl || (p._bgl = []))[i] || (p._bgl[i] = p.getBindGroupLayout(i));
 const GPU_HUD_WGSL = `
 @group(0) @binding(0) var t: texture_2d<f32>;
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f { let x = f32((i << 1u) & 2u); let y = f32(i & 2u); return vec4f(x * 2.0 - 1.0, 1.0 - y * 2.0, 0.0, 1.0); }
@@ -8741,8 +8760,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1088;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 11:32';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1089;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 18 12:23';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -28434,7 +28453,7 @@ function skdRun(X, vs, fs, U, ex, blend, n, first) {
   U[0] = X.T.w; U[1] = X.T.h;
   const E = [{ binding: 0, resource: skdData(U) }];
   if (ex) for (const b in ex) E.push({ binding: +b, resource: ex[b] });
-  X.pass.setPipeline(p); X.pass.setBindGroup(0, gpuBindGroup(p.getBindGroupLayout(0), E, 'sky draw'));
+  X.pass.setPipeline(p); X.pass.setBindGroup(0, gpuBindGroup(gpuBGL(p), E, 'sky draw'));
   X.pass.draw(4, n || 1, 0, first || 0); GPUX.stats.draws++;
 }
 // a quad of fs at the context's (x, y, w, h), its cells x0..x1, y0..y1 across it
@@ -28460,7 +28479,7 @@ function skdMarch(gb, NS) {
   if (SKD.rseq !== gb.seq) {
     if (!SKD.march) SKD.march = gpuComputePipe({ label: 'sky rays march', layout: 'auto', compute: { module: SKD.mod, entryPoint: 'march' } });
     const U = SKD_U(2); U[12] = NS; U[16] = gb.m[0]; U[17] = gb.m[1]; U[18] = gb.m[2];
-    const bg = gpuBindGroup(SKD.march.getBindGroupLayout(0), [{ binding: 0, resource: skdData(U) }, { binding: 5, resource: { buffer: SKD.rays.gb, offset: 0, size: need } },
+    const bg = gpuBindGroup(gpuBGL(SKD.march), [{ binding: 0, resource: skdData(U) }, { binding: 5, resource: { buffer: SKD.rays.gb, offset: 0, size: need } },
       { binding: 6, resource: skdData(gb.ray.subarray(0, RAY_N * 4)) }, { binding: 7, resource: skdData(gb.iv.subarray(0, Math.max(4, gb.n * 2))) }], 'sky rays march');
     const cp = gpuComputeBegin([SKD.rays], 'gsky:rays');
     cp.setPipeline(SKD.march); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(NS / 64), RAY_N); cp.end();
