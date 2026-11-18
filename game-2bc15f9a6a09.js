@@ -5727,6 +5727,7 @@ function applyMode() {
   // player 0 is a person when there is one: their harbour's side is SIDE(0) (online, a guest's is the side it picked)
   SWAP = NET.role === 'guest' ? NET.side === 1 : PLAYERS === 2 && !LOCALC(ctlFor(0)) && LOCALC(ctlFor(1));
   slotsMake();
+  buildTeamArt();                                     // (the sides' colours: TANK VS TANK's own red and blue - 29-plane.js)
   ENDLESS = STORY || !!window.__openSea;              // (STORY's world has no edge: open sea past its ends - 05-zzz-endless.js; a lab out on the open sea too - lab/flightlab)
 }
 // the people at this screen, a slot each (the split screen's halves), from who plays each side - the round's harbours (SWAP)
@@ -8728,8 +8729,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 18:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1071;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 21:16';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14895,7 +14896,11 @@ function flagColours0(k) {
     return c.map(v => Math.round(clamp(v, 0, 255)));
   });
 }
+// (user Nov 17 20:08: "One is clearly red, the other one is clearly blue, so they stand out more" - TANK VS TANK only; the other modes
+// keep each side's flag colour) TANK VS TANK's two sides: a strong red and a strong blue, whatever the flags
+const TVT_COLS = [[214, 28, 22], [28, 78, 232]];
 function teamColour(p) {
+  if (TVT) return TVT_COLS[p].slice();
   const mine = flagColours(flagOf(p)), def = p ? [60, 110, 200] : [200, 46, 40];
   let c = mine[0] || def;
   if (p === 1) {
@@ -14951,7 +14956,7 @@ function tintGlass(src, col) {
 let teamKey = '';
 function buildTeamArt() {
   if (!img.base) return;
-  const key = flagPick.join(',');
+  const key = flagPick.join(',') + (TVT ? ',tvt' : '');
   if (key === teamKey) return;
   teamKey = key;
   // (each team's colour - the things' shader paints it on the drawings' red: the battleship's, the sub's, the warplanes', the 747s')
@@ -54762,7 +54767,9 @@ function onOwnGround(p, x) { return ownGround(p, (a, b) => x > a && x < b); }
 const hasOwnGround = p => ownGround(p, () => true);
 // the olive paint of a tank or a war helicopter toward side p's colour, amt of the way, each pixel keeping its own light and shade (the glass,
 // the crew, the white number and the dark metal as they are): the things' shader's paint (thingsRules - no painted copy a side); picture P whole.
-// No team colour: its own olive (0)
+// No team colour: its own olive (0). OLIVE_PAINT: how far the paint goes (user Nov 17 20:08: the sides' colours "more saturated" - was 0.62,
+// a washed-out brown-red and slate; now nearly the whole way, the side's colour at each texel's own light)
+const OLIVE_PAINT = 0.9;
 function teamRules(P, p, amt) { const tc = img.teamCol && img.teamCol[p]; return tc ? thingsRules({ rect: [0, 0, P.width, P.height], paint: { olive: tc, amt } }) : 0; }
 // the helicopters' pictures - every level and view - into the art atlas as soon as they're made (the frame's 'art' layer)
 artFamily(() => {
@@ -54794,7 +54801,7 @@ const tankLevel = t => t.hp > VTUNE.tank.hp * 2 / 3 + 1e-6 ? 0 : t.hp > VTUNE.ta
 function tankArtOf(p) {
   if (!tankArt) buildTankArt();
   const tc = img.teamCol && img.teamCol[p];
-  return { lv: tankArt.lv, col: tc ? mix3([96, 100, 60], tc, 0.62).map(v => Math.round(v)) : [96, 100, 60] };
+  return { lv: tankArt.lv, col: tc ? mix3([96, 100, 60], tc, OLIVE_PAINT).map(v => Math.round(v)) : [96, 100, 60] };
 }
 
 /* ---- making them ---- */
@@ -55998,13 +56005,13 @@ function drawLandTank(t, wreck) {
   if (!wreck) {
     const el = tankGunA(t), G = Lv.gun, gw = thgW(G, s), gh = thgH(G, s);   // (stabilized: its angle in the hull - tankBarrel)
     C.save(); C.translate(X(TANKA.pivX), Y(TANKA.pivY)); C.rotate(-el);
-    thingsQuad(thgCur(), -Math.round(t.recoil * 3 * SV), -Math.round(gh / 2), gw, gh, artPut(G), THG_PART, null, 0, null, 0, 0, null, null, 1, THG_SCALED, null, null, null, null, teamRules(G, t.id, 0.62));
+    thingsQuad(thgCur(), -Math.round(t.recoil * 3 * SV), -Math.round(gh / 2), gw, gh, artPut(G), THG_PART, null, 0, null, 0, 0, null, null, 1, THG_SCALED, null, null, null, null, teamRules(G, t.id, OLIVE_PAINT));
     C.restore();
   }
   drawTankGear(t, Lv, s, X, Y, wreck);
   const B = t.noTop ? Lv.hull : Lv.body, L = THG_LIT; L[0] = wreck ? 0.8 : 0.45 * clamp(1 - t.hp / VTUNE.tank.hp, 0, 1); L[1] = L[2] = L[3] = L[4] = 0;   // (its turret blown off: the hull - killTank)   // (darker: user Nov 17 15:47: "Each hit makes the tank charred and more black" - by its damage, the wreck's 0.8 at the end)
   const mk = dmgMask(t, B, TANK_K / UPM, 1, 1, { toArt: (lx, ly) => [TCX + lx / TANK_K, TANKA.foot + ly / TANK_K], k: TANK_K, flip: false });   // (its burn marks, in its own frame facing right)
-  thingsQuad(thgCur(), Math.round(X(0)), Math.round(Y(0)), thgW(B, s), thgH(B, s), artPut(B), THG_BODY, null, 0, mk, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(B, t.id, 0.62));
+  thingsQuad(thgCur(), Math.round(X(0)), Math.round(Y(0)), thgW(B, s), thgH(B, s), artPut(B), THG_BODY, null, 0, mk, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(B, t.id, OLIVE_PAINT));
   C.restore();
   if (own) thingsEnd();
 }
@@ -56094,7 +56101,7 @@ function drawLandHeli(h) {
     // sinking - burnt dark, as its wreck and every destroyed vehicle
     const mk = vi === 0 ? dmgMask(h, A.body, HELI_K / UPM, 1, 1, { toArt: (lx, ly) => [A.body.width / 2 + lx / HELI_K, mid + ly / HELI_K], k: HELI_K, flip: false }) : null;   // (in its own frame, facing right - mirrored with it)
     const L = THG_LIT; L[0] = h.state === 'down' || h.state === 'sink' ? 0.8 : 0; L[1] = L[2] = L[3] = L[4] = 0;
-    thingsQuad(Mb, X, Y, w, Math.round(A.body.height * s), eb, THG_BODY, null, 0, mk, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(A.body, h.id, 0.62));
+    thingsQuad(Mb, X, Y, w, Math.round(A.body.height * s), eb, THG_BODY, null, 0, mk, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(A.body, h.id, OLIVE_PAINT));
     // the rotor: squeezed about the hub, as the blades sweep round toward and away from us, a blur at speed
     const hubX = (face > 0 ? V.hub : V.w - V.hub) * s, sq = Math.abs(Math.cos(h.rotor * 3.1)) * 0.82 + 0.18, rw = Math.round(A.rotor.width * s), rh = Math.round(A.rotor.height * s);
     thingsQuad(inPlace(thgScale(thgTranslate(M.slice(), X + hubX, 0), h.spin > 0.2 ? sq : 1, 1), -hubX, rw), -hubX, Y, rw, rh, er, THG_PART, null, 0, null, 0, 0, null, null, h.spin > 0.6 ? 0.55 + 0.25 * sq : 1, THG_SCALED);
@@ -56135,9 +56142,9 @@ function drawTankTurret(w) {
   const tw = TANKA.turR - TANKA.turL, th = TANKA.deck - TANKA.turTop, cx = TANKA.turL + tw / 2, cy = TANKA.turTop + th / 2;
   C.save(); C.translate(PX(w.x), PY(w.y)); C.rotate(w.a || 0); if (w.facing < 0) C.scale(-1, 1);
   C.save(); C.translate((TANKA.pivX - cx) * s, (TANKA.pivY - cy) * s); C.rotate(-0.3);
-  thingsQuad(thgCur(), 0, -Math.round(thgH(G, s) / 2), thgW(G, s), thgH(G, s), artPut(G), THG_PART, null, 0, null, 0, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(G, w.id, 0.62));
+  thingsQuad(thgCur(), 0, -Math.round(thgH(G, s) / 2), thgW(G, s), thgH(G, s), artPut(G), THG_PART, null, 0, null, 0, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(G, w.id, OLIVE_PAINT));
   C.restore();
-  thingsQuad(thgCur(), -Math.round(tw / 2 * s), -Math.round(th / 2 * s), thgW(T, s), thgH(T, s), artPut(T), THG_BODY, null, 0, null, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(T, w.id, 0.62));
+  thingsQuad(thgCur(), -Math.round(tw / 2 * s), -Math.round(th / 2 * s), thgW(T, s), thgH(T, s), artPut(T), THG_BODY, null, 0, null, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(T, w.id, OLIVE_PAINT));
   C.restore();
   if (own) thingsEnd();
 }
@@ -56148,7 +56155,7 @@ function drawLandHeliWreck(w) {
   if (!e.ok) return;
   const own = thingsOwn(), bw = Math.round(A.body.width * s), X = -Math.round(bw / 2), L = THG_LIT; L[0] = 0.8; L[1] = L[2] = L[3] = L[4] = 0;
   const M = thgRotate(thgTranslate(thgMat(), PX(w.x), PY(w.y - heliSkid() * 0.6)), w.a + 0.25 * w.facing); if (w.facing < 0) thgScale(thgTranslate(M, 2 * X + bw, 0), -1, 1);   // (facing left: mirrored in its place)
-  thingsQuad(M, X, -Math.round(mid * s), bw, Math.round(A.body.height * s), e, THG_BODY, null, 0, null, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(A.body, w.id, 0.62));
+  thingsQuad(M, X, -Math.round(mid * s), bw, Math.round(A.body.height * s), e, THG_BODY, null, 0, null, 4, 0, L, null, 1, THG_SCALED, null, null, null, null, teamRules(A.body, w.id, OLIVE_PAINT));
   if (own) thingsEnd();
 }
 
