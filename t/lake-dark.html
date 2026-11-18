@@ -177,7 +177,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1071, build: 'NOV 17 21:35', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1071, build: 'NOV 17 21:39', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -8934,7 +8934,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1071;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 21:35';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 17 21:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -59244,6 +59244,8 @@ struct LU {
   cel: vec4f,    // the world's cells (celAt's n): its columns and rows (LT_ROWS), where the columns' rows under the line and the rock's bits start
   wat: vec4f,    // the water (lightWater): how fast the day fades with depth (a cell), -, -, -
   wdk: vec4f,    // the deep water's own colour in the dark (premultiplied by the day), -
+  eye0: vec4f,   // the eye under the water (lightEye): where it's on (cells), how far round it it sees (cells), how much (0..1)
+  eye1: vec4f,
 };
 @group(0) @binding(0) var<storage, read> U: LU;
 @group(0) @binding(1) var<storage, read> cel: array<u32>;   // (the world's cells: the ground's - each slice's rows, each column's line, the rock's bits)
@@ -59256,6 +59258,7 @@ const CELL = ${LT_CELL.toFixed(4)};
 // any water, then fading with the depth under the surface (lightWater) - the light comes in at the surface and the water takes it
 fn wTop(p: vec2f) -> f32 { let i = i32(floor((p.x - U.box.x) / U.box.z)); if (i < 0 || i >= i32(U.tgt.z)) { return 1e9; } return wrow[i]; }
 fn wLit(p: vec2f) -> f32 { let t = wTop(p); if (p.y < t) { return 1.0; } return exp(-(p.y - t) * U.wat.x); }
+fn eyeAt(p: vec2f, e: vec4f) -> f32 { if (e.w <= 0.0) { return 0.0; } return e.w * (1.0 - smoothstep(0.55 * e.z, e.z, length(p - e.xy))); }
 
 fn inWin(p: vec2f) -> bool { return p.x >= U.win.x && p.x < U.win.y && p.y >= U.win.z && p.y < U.win.w; }
 ${cel}
@@ -59276,7 +59279,7 @@ fn beam(d: vec2f, u: vec2f, L: f32) -> f32 {   // (lampBeamAt, its reach L)
   if (m.y < 0.5 && wl >= 1.0) { return vec4f(1.0, m.x, 0.0, 1.0); }   // (over the built line, out of the water: the open day)
   if (m.x > 0.5) { return vec4f(0.0, 1.0, 1.0, 1.0); }   // (rock: lit by the open cell it faces - the jump flood)
   var L = 0.0;
-  if (m.y < 0.5) { L = wl; }   // (open water over the line: the day its depth leaves it - then the lamps)
+  if (m.y < 0.5) { L = max(wl, max(eyeAt(cell, U.eye0), eyeAt(cell, U.eye1))); }   // (open water over the line: the day its depth leaves it, all of it round the eye under it - then the lamps)
   else {
   // (the day: the sun's rays toward it, a few spread a little, and the open sky's from all round overhead - each lit where it gets out over the
   // line, less the further it came under it; rock stops it)
@@ -59404,12 +59407,12 @@ function lightPipe(vs, fs, fmt, blend) {
   }
   return p;
 }
-const LIGHT_U = new Float32Array(72);
+const LIGHT_U = new Float32Array(80);
 // one pass: its numbers (LIGHT_U as it is now) and textures, drawn into target T (a gpuTex) - cleared, then in each of rects ([x, y, w, h], its px:
 // a view's picture's strips - lightStrips), or (lay) laid over what's there in each of rects (the screen's scissors); cb: the world's cells (the ground's buffer - 'ground.cells')
 function lightRun(T, fs, a, s, lampB, rects, lay, cb, wB) {
-  const Q = LIGHT, [uc, uo] = arenaAlloc(288, 256); uc.cpu.set(new Uint8Array(LIGHT_U.buffer), uo);
-  const w = Q.white, bg = gpuBindGroup(Q.bl, [{ binding: 0, resource: { buffer: uc.gb, offset: uo, size: 288 } }, { binding: 1, resource: { buffer: cb.gb } }, { binding: 2, resource: (a || w).view }, { binding: 3, resource: (s || w).view }, { binding: 4, resource: lampB }, { binding: 5, resource: wB }], 'cave light');
+  const Q = LIGHT, [uc, uo] = arenaAlloc(320, 256); uc.cpu.set(new Uint8Array(LIGHT_U.buffer), uo);
+  const w = Q.white, bg = gpuBindGroup(Q.bl, [{ binding: 0, resource: { buffer: uc.gb, offset: uo, size: 320 } }, { binding: 1, resource: { buffer: cb.gb } }, { binding: 2, resource: (a || w).view }, { binding: 3, resource: (s || w).view }, { binding: 4, resource: lampB }, { binding: 5, resource: wB }], 'cave light');
   const pass = gpuPassBegin({ colorAttachments: [{ view: T.view, loadOp: lay ? 'load' : 'clear', clearValue: [0, 0, 0, 0], storeOp: 'store' }] }, 'light cave ' + (lay ? 'fsLay' : fs), [T, a, s]);   // (keyed 'light...': ?gpuoff=light, each pass by name in ?gputrace)
   pass.setBindGroup(0, bg);
   pass.setPipeline(lay ? lightPipe('vsLay', 'fsLay', T.fmt, true) : lightPipe('vsFull', fs, T.fmt, false));
@@ -59477,6 +59480,27 @@ function lightWater(c0, r0, LS, lw) {
     R[i] = (waterLv(x) - LT_Y0) / LT_CELL; h = (h * 31 + i * 7 + Math.round(R[i] * 4)) | 0; }
   R.h = h; return R;
 }
+/* THE EYE UNDER THE WATER (user Nov 17 20:37-20:38: "when you are in an underwater vehicle, or when you have a vehicle that uses stuff underwater, like
+   the fishing boat, then you see the bottom of the ocean because you're focused on it ... you start seeing it around you. And you still need a flashlight to
+   see even better ... this darkness is covering what we currently have"): what a view is on, when it works under the water - a sub dived (yours or one
+   you drive), a net let down - takes the water's dark away round it (EYE_R), as the water looks with no dark; the eye takes EYE_S to get used to it,
+   and as long to lose it. The lamps light on past it as before. Each view: up to two points [x, y] (world), its strength eased */
+const EYE_R = 300, EYE_S = 1.2, EYE_V = [{ k: 0, P: [], t: null }, { k: 0, P: [], t: null }];
+function lightEyeAt(i) {
+  const c = typeof crew !== 'undefined' && crew[i], P = [], deep = (x, y) => y > waterLv(x) + 6;
+  if (!c) return P;
+  if (c.mode === 'sub') { const sb = subOf(i); if (sb && deep(sb.x, sb.y)) P.push([sb.x, sb.y]); }
+  if (c.mode === 'civ' && c.civ) { const v = c.civ, N = v.net;
+    if (deep(v.x, v.y)) P.push([v.x, v.y]);
+    if (N && (N.ph === 0 || N.ph >= 5) && N.lo != null && N.d > 6) P.push([(N.lo + N.hi) / 2, waterLv(v.x) + N.d]); }   // (the net down: round it - netCam's frame)
+  return P;
+}
+function lightEye(vi) {
+  const E_ = EYE_V[vi] || EYE_V[0], P = lightEyeAt(vi), now = typeof time === 'number' ? time : 0, dt = E_.t == null ? 0 : clamp(now - E_.t, 0, 0.25);
+  E_.t = now; if (P.length) E_.P = P;
+  E_.k = clamp(E_.k + (P.length ? 1 : -1) * dt / EYE_S, 0, 1);
+  return E_.k > 0 ? E_.P.slice(0, 2).map(([x, y]) => [x / LT_CELL, (y - LT_Y0) / LT_CELL, EYE_R / LT_CELL, E_.k * E_.k * (3 - 2 * E_.k)]) : [];
+}
 // the dark laid over what the view drew (after the overlays): its picture worked out for the view, then laid on the screen
 function lightDraw() {
   if (!land.cell || landAllLit() || !lightReady()) return;
@@ -59516,11 +59540,11 @@ function lightDraw() {
   const WR = lightWater(c0, r0, LS, lw), [wc, wo] = arenaAlloc(WR.byteLength, 256), WB = { buffer: wc.gb, offset: wo, size: WR.byteLength };
   wc.cpu.set(new Uint8Array(WR.buffer), wo);
   const sinT = Math.abs(sun[0]) / 1.333, wk = 3.5 * LT_CELL / Math.max(1, waterLight()) / Math.sqrt(1 - sinT * sinT);   // (a cell's fade: 3.5 over WATER LIGHT down, the way longer by 1 / cos t)
-  const wdk = [10, 26, 58].map(v => v / 255 * (0.25 + 0.75 * (E.day ?? 1)));
+  const wdk = [10, 26, 58].map(v => v / 255 * (0.25 + 0.75 * (E.day ?? 1))), eye = lightEye(vi);
   const V = LIGHT.V[vi] || (LIGHT.V[vi] = { a: null, s0: null, s1: null, f: null, key: '' });
-  const key = [c0, r0, LS, lw, lh, G.ver, LIGHT.sky, LIGHT.reach, LIGHT.bounce, LIGHT.bounceK, dkAll.map(v => v.toFixed(3)).join(','), (dkAll.some((v, j) => Math.abs(v - dk[j % 3]) > 0.004) ? band.map(v => Math.round(v / 2)).join(',') : ''), sun.map(v => v.toFixed(3)).join(','), lamps.map(l => [l.cx, l.cy, l.ux, l.uy, l.k].map(v => v.toFixed(2)).join(',')).join(';'), WR.h || 0, wk.toFixed(5), wdk[2].toFixed(3)].join('|');
+  const key = [c0, r0, LS, lw, lh, G.ver, LIGHT.sky, LIGHT.reach, LIGHT.bounce, LIGHT.bounceK, dkAll.map(v => v.toFixed(3)).join(','), (dkAll.some((v, j) => Math.abs(v - dk[j % 3]) > 0.004) ? band.map(v => Math.round(v / 2)).join(',') : ''), sun.map(v => v.toFixed(3)).join(','), lamps.map(l => [l.cx, l.cy, l.ux, l.uy, l.k].map(v => v.toFixed(2)).join(',')).join(';'), WR.h || 0, wk.toFixed(5), wdk[2].toFixed(3), eye.map(e => e.map(v => v.toFixed(2)).join(',')).join(';')].join('|');
   const U = LIGHT_U; U.fill(0);
-  U.set([c0, r0, LS, lh], 0); U.set([lw, lh], 58); U.set([wk, 0, 0, 0], 64); U.set(wdk, 68);
+  U.set([c0, r0, LS, lh], 0); U.set([lw, lh], 58); U.set([wk, 0, 0, 0], 64); U.set(wdk, 68); eye.forEach((e, j) => U.set(e, 72 + j * 4));
   const [lc, lo] = arenaAlloc(512, 256), LB = { buffer: lc.gb, offset: lo, size: 512 };
   if (V.key !== key || !V.f || V.f.w !== lw || V.f.h !== lh) {
     V.key = key; V.strips = lightStrips(G, c0, r0, LS, lw, lh, WR); const SR = V.strips;   // (where the dark can fall: each pass drawn only there)
