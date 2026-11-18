@@ -9106,7 +9106,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 10:13';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 10:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -73999,6 +73999,8 @@ async function start(data) {
       get panned() { return !!cam.panHeld[0]; }, unpan: () => { cam.panHeld[0] = false; },
       // the designed waves (09-zy-dwaves.js): the kinds (the lab's prefabs - set(name, K) lays a kind's tables again), one sent, the live ones
       // (the smoke there is let go - the lab's start, the world's own ships taken out of its test world: what they'd puffed goes with them)
+    // (a vehicle's length and height in metres, as the game sizes it - vehBox; the frame preview's boat for scale, user Nov 18 09:36)
+    size: v => { const e = vehAll().find(q => q.v === v); if (!e) return null; const B = vehBox(e); return [(B[1] - B[0]) / UPM, (B[3] - B[2]) / UPM]; },
     noSmoke: () => { for (let i = 0; i < smoke.n; i++) smoke.drop(i); },
     waves: { kinds: DW.kinds, set: (n, K) => { DW.kinds[n] = dwShape(K); for (const w of DW.live) if (w.K && DW.kinds[n] && w.kn === n) w.K = DW.kinds[n]; }, send: (n, x, dir, k) => { const w = dwSend(n, x, dir, k); if (w) w.kn = n; return !!w; }, live: () => DW.live.map(w => ({ x: w.x, H: w.H, L: w.L, c: w.c, dir: w.dir, ph: +w.ph.toFixed(2), stage: w.K.N[Math.min(w.K.N.length - 1, Math.floor(w.ph))], top: DW.max, fold: !!w.lip })), // (user Nov 18 07:19: "Are we able to see the spline of the wave in the editor? Can we have a toggle to see it live?") each live wave's outline
         // as the game has it this moment - its curve (C) and its points (P) in the world (x, y), its kind, the frame it's in, whether it's folded
