@@ -180,7 +180,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1070, build: 'NOV 17 22:43', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1070, build: 'NOV 17 22:56', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -7715,102 +7715,134 @@ function hitTest(sh, x, y, inside) {
 
 //@src 09-zy-dwaves.js:1
 /* ================================================================
-   DESIGNED WAVES - IN THE WAVE LAB ONLY SO FAR (branch wave-lab; user Nov 17 20:16: "waves that are formed in the shape we want, that it looks like a
-   wave from the side. And then they move across the ocean ... I would design the shape of a wave as a spline, and we control how that spline moves
-   through time, and we define which area of that spline pulls and pushes ... and then the game generates those waves" / "we still have the physics on
-   top of that"; 20:18, his picture lab/wavelab/ref: swell out deep, peaking, a breaker as the floor rises - "more about the fun of the wave"; 20:19
-   "a couple of them based on the most common types of waves ... prefabs"; 20:34: easy first - "we don't know what shape it's going to take").
-   A KIND (DW.kinds - the lab's prefabs): its side-on shape, points [u, h, p] - u 0 its back .. 1 its front, h its height there (1: its full height;
-   below 0: a trough), p how the water there carries what floats (1: along with the wave at its speed; below 0: back toward it) - joined by a smooth
-   curve; h its height (m), len its length (m), v its speed (m/s), push how hard it carries (x), grow how much taller it stands in the shallows (x),
-   lean how far its crest leans forward (0..1), more in the shallows.
-   A LIVE WAVE (DW.live): a kind at x going dir, rising over its first seconds, changing with the depth under it (shallower than half its length:
-   taller, shorter, slower, leaning - the picture), breaking where the water is shallower than it is tall (spray, foam, a shove on the water), gone at
-   the shore. The surface is the level less (the swell + the stepped waves + THESE) x the shelter: surfaceY0 here, and the GPU's the same - they ride
-   in with the stepped columns it's sent (40-zz-water-gpu.js), no shader of their own. What floats is carried by dwFlow.
-   NOT YET (before any merge): a table of its own, a seeded random source, the worker and online; every family carried (today the small boats, the
-   battleship); the lake's water over its banks.
+   DESIGNED WAVES - IN THE WAVE LAB ONLY SO FAR (branch wave-lab). The user, Nov 17: 20:16 "waves that are formed in the shape we want, that it looks like
+   a wave from the side ... I would design the shape of a wave as a spline, and we control how that spline moves through time ... we still have the
+   physics on top of that"; 20:45 "the wave rise, the crest build, and you gotta pass just before that" / "waves that build ... but don't break, they
+   reduce. And others that grow, curl, and break"; 21:32, of the first lips (a shape laid on the crest): "looks like a texture attached to the tip of
+   the wave ... the white line is a single shape that changes and creates the wave shape"; 21:47 "the technical approach you're taking won't work";
+   21:52, of the morphing outline shown him: "this is what I imagined but better shape".
+   A WAVE IS ONE OUTLINE THAT MORPHS. A KIND has POSES - each the wave's whole side-on outline, DW_NP points [x, y] from its front's foot to its back's
+   (x -1 its front .. 1 its back, of half its length; y of its height), a smooth curve through them, and free to fold back over itself (the curl) - and
+   its life is that outline going from pose to pose: FLAT, SWELL, PEAK, CURL, CRASH, FOAM (w.ph 0..5), or, for one that doesn't break, back down from
+   PEAK. Its numbers: h (m), len (m), v (m/s), push (its carry), grow (taller in the shallows), curl (0..1: how far over its CURL pose goes), rise (s),
+   hold (s: the crest's building), ends (0 fades, 1 breaks). The floor rising under it moves it along its life too (shallower than half its length),
+   and where the water is shallower than it is tall it crashes, whatever its kind.
+   HOW IT'S DRAWN AND RIDDEN, FROM THE ONE OUTLINE: a place under a folded outline has three heights - the lip's top, its underside, the face. The
+   LOWEST (w.low, a table a water column) is the water's surface there: it goes into surfaceY0 with the swell and the stepped waves (so everything rides
+   the face, under the lip), and to the GPU with the stepped columns (40-zz-water-gpu.js) - the water's own drawing lays the body and its bright line.
+   The water ABOVE an air gap (the lip) is filled here, a pixel column at a time between the outline's own crossings, in the water's own colour
+   (dwSeaCol), and the bright line carried on round it (dwDrawWaves) - the same outline, so one shape.
+   NOT YET (before any merge): tables and a seeded random source, the worker and online; the lake's water over its banks.
    ================================================================ */
-const DW = { kinds: {}, live: [], max: 0, N: 128, cap: 1.05, lost: 0, sw: [], wet: new Map(), WC: 8 };
-// a kind's tables from its points: its height and its carry every 1/N of its length (a smooth curve through the points, flat at both ends)
+const DW = { kinds: {}, live: [], max: 0, cap: 1.05, lost: 0, sw: [], wet: new Map(), WC: 8 };
+const DW_NP = 17, DW_SUB = 6;
+// the built-in poses (a kind may carry its own - K.poses: swell, peak, curl, crash). Their points, in order: 0 the front's foot, 1 the trough, 2-4 up
+// the face, 5 the hollow's back (under the lip's root), 6-7 the lip's underside, 8 its tip, 9-10 its top, 11 the crest, 12-15 down the back, 16 its foot
+const DW_X0 = [-1, -0.72, -0.5, -0.36, -0.26, -0.2, -0.15, -0.11, -0.08, -0.05, -0.02, 0.04, 0.2, 0.4, 0.6, 0.8, 1];
+const DW_POSE = {
+  flat: DW_X0.map(x => [x, 0]),
+  swell: DW_X0.map((x, i) => [x, [0, 0, 0.06, 0.16, 0.26, 0.32, 0.37, 0.41, 0.44, 0.46, 0.48, 0.5, 0.44, 0.3, 0.15, 0.04, 0][i]]),
+  peak: [[-1, 0], [-0.66, -0.07], [-0.44, 0], [-0.3, 0.22], [-0.21, 0.5], [-0.17, 0.64], [-0.14, 0.74], [-0.12, 0.82], [-0.1, 0.88], [-0.08, 0.93], [-0.05, 0.98], [0, 1], [0.16, 0.86], [0.36, 0.58], [0.58, 0.3], [0.8, 0.1], [1, 0]],
+  curl: [[-1, 0], [-0.68, -0.1], [-0.44, -0.04], [-0.27, 0.2], [-0.17, 0.5], [-0.14, 0.76], [-0.22, 0.9], [-0.36, 0.9], [-0.47, 0.78], [-0.44, 0.96], [-0.28, 1.07], [-0.06, 1.08], [0.14, 0.92], [0.36, 0.6], [0.58, 0.3], [0.8, 0.1], [1, 0]],
+  crash: [[-1, 0], [-0.7, -0.04], [-0.5, 0.02], [-0.36, 0.14], [-0.28, 0.3], [-0.26, 0.42], [-0.34, 0.46], [-0.46, 0.4], [-0.55, 0.2], [-0.5, 0.46], [-0.34, 0.62], [-0.1, 0.7], [0.12, 0.6], [0.36, 0.4], [0.58, 0.2], [0.8, 0.06], [1, 0]],
+  foam: DW_X0.map((x, i) => [x, [0, 0, 0.02, 0.04, 0.05, 0.06, 0.06, 0.07, 0.07, 0.07, 0.07, 0.07, 0.06, 0.04, 0.02, 0, 0][i]]),
+};
+const dwPoseOk = P => Array.isArray(P) && P.length === DW_NP && P.every(p => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]));
+// a kind made ready: its six poses in order (its own where it carries them; its CURL as far over from its PEAK as its curl says)
 function dwShape(K) {
-  const P = K.pts.map(p => [clamp(+p[0] || 0, 0, 1), +p[1] || 0, +p[2] || 0]).sort((a, b) => a[0] - b[0]);
-  if (!P.length || P[0][0] > 0.001) P.unshift([0, 0, 0]); if (P[P.length - 1][0] < 0.999) P.push([1, 0, 0]);
-  const n = DW.N, T = K.tab = new Float32Array(n + 1), Q = K.ptab = new Float32Array(n + 1);
-  const tan = (i, k) => i === 0 || i === P.length - 1 ? 0 : (P[i + 1][k] - P[i - 1][k]) / Math.max(1e-4, P[i + 1][0] - P[i - 1][0]);
-  let s = 0;
-  for (let i = 0; i <= n; i++) {
-    const u = i / n; while (s < P.length - 2 && u > P[s + 1][0]) s++;
-    const a = P[s], b = P[s + 1], w = Math.max(1e-4, b[0] - a[0]), t = clamp((u - a[0]) / w, 0, 1), t2 = t * t, t3 = t2 * t;
-    const h = k => (2 * t3 - 3 * t2 + 1) * a[k] + (t3 - 2 * t2 + t) * w * tan(s, k) + (-2 * t3 + 3 * t2) * b[k] + (t3 - t2) * w * tan(s + 1, k);
-    T[i] = h(1); Q[i] = clamp(h(2), -1, 1);
-  }
-  T[0] = T[n] = 0; Q[0] = Q[n] = 0;
-  K.uc = 0.5; K.hc = 0; for (let i = 0; i <= n; i++) if (T[i] > K.hc) { K.hc = T[i]; K.uc = i / n; }   // (its crest: where, how high)
+  const O = K.poses || {}, g = n => dwPoseOk(O[n]) ? O[n] : DW_POSE[n], pk = g('peak'), cu = g('curl'), c = clamp(K.curl == null ? 1 : K.curl, 0, 1);
+  K.P = [DW_POSE.flat, g('swell'), pk, pk.map((p, i) => [p[0] + (cu[i][0] - p[0]) * c, p[1] + (cu[i][1] - p[1]) * c]), g('crash'), DW_POSE.foam];
   return K;
 }
-const dwTab = (T, u) => { if (!(u > 0 && u < 1)) return 0; const f = u * DW.N, i = f | 0; return T[i] + (T[i + 1] - T[i]) * (f - i); };
+// a smooth curve through an outline's points (Catmull-Rom, DW_SUB pieces between two): into O, [x, y] pairs flat; how many points
+function dwCurve(P, O) {
+  const n = P.length; let m = 0;
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = P[Math.max(0, i - 1)], p1 = P[i], p2 = P[i + 1], p3 = P[Math.min(n - 1, i + 2)];
+    for (let s = 0; s < DW_SUB; s++) { const u = s / DW_SUB, u2 = u * u, u3 = u2 * u;
+      O[m++] = 0.5 * (2 * p1[0] + (p2[0] - p0[0]) * u + (2 * p0[0] - 5 * p1[0] + 4 * p2[0] - p3[0]) * u2 + (3 * p1[0] - p0[0] - 3 * p2[0] + p3[0]) * u3);
+      O[m++] = 0.5 * (2 * p1[1] + (p2[1] - p0[1]) * u + (2 * p0[1] - 5 * p1[1] + 4 * p2[1] - p3[1]) * u2 + (3 * p1[1] - p0[1] - 3 * p2[1] + p3[1]) * u3); }
+  }
+  O[m++] = P[n - 1][0]; O[m++] = P[n - 1][1];
+  return m >> 1;
+}
 // a wave of kind k sent from x going dir (1 right, -1 left); k: its size, times the kind's
 function dwSend(kind, x, dir, k = 1) {
-  const K = DW.kinds[kind]; if (!K) return null; if (!K.tab) dwShape(K);
+  const K = DW.kinds[kind]; if (!K) return null; if (!K.P) dwShape(K);
   const run = waterRun(x); if (!run) return null;
-  const w = { K, x, dir: dir < 0 ? -1 : 1, k, t: 0, env: 0, die: 0, run, H: 0, L: K.len * UPM, c: K.v * UPM, lean: K.lean || 0, far: 0, brk: 0, lake: waterLv(x) !== WATER_Y };
+  const w = { K, x, dir: dir < 0 ? -1 : 1, k, t: 0, ph: 0, at2: 0, fade: false, run, H: 0, L: K.len * UPM, c: K.v * UPM, far: 0, lake: waterLv(x) !== WATER_Y, crashed: false,
+    C: new Float32Array(((DW_NP - 1) * DW_SUB + 1) * 2), n: 0, xa: x, xb: x, low: new Float32Array(8), top: new Float32Array(8), cnt: new Uint8Array(8), nc: 0, fa: 0, fb: -1, pose: null };
   DW.live.push(w); return w;
 }
+const dwPt = (w, i) => [w.x - w.dir * w.pose[i][0] * w.L / 2, w.pose[i][1] * w.H];   // (its pose's point i now: world x, height)
 function dwStep(dt) {
   const L = DW.live; let mx = 0;
   for (let i = L.length - 1; i >= 0; i--) {
     const w = L[i], K = w.K; w.t += dt;
-    // the depth under its crest: shallower than half its length it begins to feel the floor (the picture's D = 1/2 L)
-    const d = Math.max(0, seabedY(w.x) - waterLv(w.x)), L0 = K.len * UPM, s = clamp(1 - d / (0.5 * L0), 0, 1);
-    // ITS LIFE (user 20:45: "having the wave rise, the crest build, and you gotta pass just before that" / "waves that build ... but don't break, they
-    // reduce. And others that grow, curl, and break"): it rises (rise s), stands at its full height while its crest builds (hold s - w.cq 0..1, the
-    // floor rising under it builds it too), then ENDS - 0: it sinks back as it rose; 1: its crest comes over and it breaks on whatever is under it
-    const R = K.rise || 3, hold = K.hold || 20, tb = clamp((w.t - R) / hold, 0, 1);
-    w.cq = Math.max(K.ends ? tb : 0, s * s);
-    w.L = L0 * (1 - 0.4 * s); w.c = K.v * UPM * (1 - 0.45 * s); w.lean = clamp((K.lean || 0) * (0.35 + 0.65 * w.cq) + 0.9 * s * s, 0, 1.6);
-    const rise = smoothstep(0, R, w.t) * (K.ends ? 1 : 1 - smoothstep(R + hold, R + hold + R, w.t)), full = K.h * UPM * w.k * (1 + (K.grow || 0) * s);
-    if (!K.ends && w.t > R + hold + R) { L.splice(i, 1); continue; }   // (sunk back: gone)
-    if (K.ends && tb >= 1 && !w.die) { w.die = 1e-6; w.brk = 1; dwCrash(w); }
-    // breaking: the water shallower than it is tall - it falls away over a second and a half, throwing spray and shoving the water
-    if (!w.die && d < full * 0.9) dwCrash(w);
-    if (!w.die && (d < full * 0.9 || !waterRun(w.x + w.dir * w.L * 0.5) || w.far > (K.range || 6000) * UPM)) { w.die = 1e-6; w.brk = d < full * 0.9 ? 1 : 0; }
-    if (w.die) w.die += dt / 1.5;
-    w.env = rise * (1 - smoothstep(0, 1, w.die)); w.H = full * w.env;
+    // the depth under it: shallower than half its length it begins to feel the floor (the user's picture: D = 1/2 L) - shorter, slower, taller, and on along its life
+    const d = Math.max(0, seabedY(w.x) - waterLv(w.x)), L0 = K.len * UPM, s = clamp(1 - d / (0.5 * L0), 0, 1), R = K.rise || 3, hold = K.hold || 20;
+    w.L = L0 * (1 - 0.4 * s); w.c = K.v * UPM * (1 - 0.45 * s); w.H = K.h * UPM * w.k * (1 + (K.grow || 0) * s);
+    // ITS LIFE: up to SWELL (rise), to PEAK (most of hold), then - one that breaks - over to CURL, down in a CRASH and out as FOAM; one that doesn't
+    // stands at PEAK the rest of its hold and sinks back the way it came
+    if (w.fade) w.ph -= dt / (0.6 * R);
+    else if (w.ph < 1) w.ph += dt / R;
+    else if (w.ph < 2) w.ph = Math.min(2, w.ph + dt / (0.6 * hold));
+    else if (w.ph < 3) { if (K.ends) w.ph += dt / (0.4 * hold); else { w.at2 += dt; if (w.at2 > 0.4 * hold) w.fade = true; } }
+    else if (w.ph < 4) w.ph += dt / 0.9;
+    else w.ph += dt / 1.6;
+    if (!w.fade && w.ph < 3) { w.ph = Math.max(w.ph, Math.min(K.ends ? 3 : 2, 1 + 2 * s * s)); if (w.ph >= 1 && d < w.H * 0.9) w.ph = 3; }   // (too shallow for it: it comes down)
+    if (!w.fade && w.far > (K.range || 6000) * UPM) w.fade = true;
+    if (w.ph <= 0 && w.fade || w.ph >= 5 || !waterRun(w.x)) { if (!w.fade && w.far <= (K.range || 6000) * UPM) dwSwash(w); L.splice(i, 1); continue; }
+    if (w.ph >= 1 && w.ph < 3 && !w.fade && !waterRun(w.x + w.dir * w.L * 0.5)) w.ph = 3;   // (its front at a shore: it comes down)
     w.x += w.dir * w.c * dt; w.far += w.c * dt;
-    if (w.die && w.brk && !SIM_ONLY && w.env > 0.05) {
-      const cx = w.x + w.dir * w.L * 0.18, n = Math.min(12, 1 + w.H * 0.05);
-      for (let q = 0; q < n; q++) { const x = cx + (Math.random() * 2 - 1) * w.L * 0.2; if (waterRun(x)) { spawnSpray(x, surfaceY0(x) - 1, w.dir * w.c * (0.3 + Math.random() * 0.5), 0.6 + Math.random() * 0.8); if (Math.random() < 0.4) spawnFoam(x, 1.5 + Math.random() * 2.5); } }
-      for (let k = -30; k <= 30; k += DX) water.push(cx + k, -w.H * 6 * (1 - Math.abs(k) / 32));
+    // its outline now: between two poses, eased
+    const pi = Math.min(4, Math.floor(w.ph)), u = smoothstep(0, 1, w.ph - pi), A = K.P[pi], B = K.P[pi + 1];
+    const Q = w.pose || (w.pose = A.map(p => [p[0], p[1]])); for (let k = 0; k < DW_NP; k++) { Q[k][0] = A[k][0] + (B[k][0] - A[k][0]) * u; Q[k][1] = A[k][1] + (B[k][1] - A[k][1]) * u; }
+    w.n = dwCurve(Q, w.C);
+    let xa = Infinity, xb = -Infinity; const C = w.C, hx = w.L / 2;
+    for (let k = 0; k < w.n; k++) { const x = w.x - w.dir * C[2 * k] * hx; C[2 * k] = x; C[2 * k + 1] *= w.H; if (x < xa) xa = x; if (x > xb) xb = x; }
+    // each water column of it: the lowest and the highest the outline stands there, how many times it crosses (more than one: folded over it)
+    w.xa = xa; w.xb = xb; const nc = w.nc = Math.ceil((xb - xa) / DX) + 1;
+    if (w.low.length < nc) { w.low = new Float32Array(nc + 64); w.top = new Float32Array(nc + 64); w.cnt = new Uint8Array(nc + 64); }
+    const lo = w.low, tp = w.top, cn = w.cnt; lo.fill(Infinity, 0, nc); tp.fill(-Infinity, 0, nc); cn.fill(0, 0, nc);
+    for (let k = 0; k < w.n - 1; k++) {
+      const x0 = C[2 * k], y0 = C[2 * k + 1], x1 = C[2 * k + 2], y1 = C[2 * k + 3]; if (x0 === x1) continue;
+      const a = Math.min(x0, x1), b = Math.max(x0, x1);
+      for (let q = Math.ceil((a - xa) / DX), qe = Math.min(nc - 1, Math.floor((b - xa) / DX)); q <= qe; q++) {
+        const x = xa + q * DX; if (x === b && b !== xb) continue;       // (a joint counted once)
+        const h = y0 + (y1 - y0) * (x - x0) / (x1 - x0); if (h < lo[q]) lo[q] = h; if (h > tp[q]) tp[q] = h; if (cn[q] < 250) cn[q]++;
+      }
     }
-    if (w.die && !w.swashed && w.far <= (K.range || 6000) * UPM) { w.swashed = true; dwSwash(w); }
-    // (the lip's spray: thrown off the curl's tip)
-    if (!SIM_ONLY && dwCurl(w) > 0.45 && Math.random() < dt * 14) { const xc = dwCrestX(w) + w.dir * 0.3 * w.H; spawnSpray(xc, surfaceY0(xc) - 0.5 * w.H, w.dir * w.c * 0.6, 0.5); }
-    if (w.die >= 1) { L.splice(i, 1); continue; }
-    mx += Math.abs(w.H) * 1.3;
+    w.fa = Infinity; w.fb = -Infinity;
+    for (let q = 0; q < nc; q++) { if (!cn[q]) { lo[q] = tp[q] = 0; } else if (cn[q] > 1) { const x = xa + q * DX; if (x < w.fa) w.fa = x; if (x > w.fb) w.fb = x; } }
+    // the crest comes down: half-way from CURL to CRASH (or, with no curl to it, as it crashes)
+    if (!w.crashed && w.ph >= 3.5) { w.crashed = true; dwCrash(w); }
+    if (!SIM_ONLY && w.ph > 2.5 && w.ph < 4.7) {                    // (spray off its tip as it curls, a shove on the water under it as it lands)
+      const T = dwPt(w, 8);
+      if (Math.random() < dt * 22) spawnSpray(T[0], dwYAt(w, T[0], T[1]), w.dir * w.c * (0.3 + Math.random() * 0.5), 0.4 + Math.random() * 0.6);
+      if (w.ph > 3.5) { for (let k = -24; k <= 24; k += DX) water.push(T[0] + k, -w.H * 5 * (1 - Math.abs(k) / 26)); if (Math.random() < dt * 30) spawnFoam(T[0] + (Math.random() * 2 - 1) * 0.3 * w.H, 1.5 + Math.random() * 2.5); }
+    }
+    for (let q = 0; q < nc; q++) if (tp[q] > mx) mx = tp[q];
   }
-  DW.max = mx;
+  DW.max = mx * 1.1;
   dwCarryAll(dt); dwShoreStep(dt);
 }
-// the designed waves' height at x (world units, up positive) and the water's own speed along there (world units a second)
-function dwAt(x) {
-  const L = DW.live; let y = 0;
-  for (let i = 0; i < L.length; i++) {
-    const w = L[i], u = (x - w.x) * w.dir / w.L + 0.5; if (!(u > -0.3 && u < 1.3) || x < w.run[0] || x > w.run[1]) continue;
-    const T = w.K.tab, u1 = u - w.lean * 0.16 * dwTab(T, u);        // (the lean: the crest carried forward of its foot)
-    y += w.H * dwTab(T, u - w.lean * 0.16 * dwTab(T, u1));
-  }
-  return y;
+// a wave's table at x (lo: the lowest - the surface; else the highest)
+function dwTab(w, x, lo) {
+  if (!(x >= w.xa && x <= w.xb) || !w.nc || x < w.run[0] || x > w.run[1]) return 0;
+  const f = (x - w.xa) / DX, i = Math.min(w.nc - 1, f | 0), j = Math.min(w.nc - 1, i + 1), T = lo ? w.low : w.top;
+  return T[i] + (T[j] - T[i]) * (f - i);
 }
+// the designed waves' height at x (world units, up positive): the water's surface there - under a lip, the face
+function dwAt(x) { const L = DW.live; let y = 0; for (let i = 0; i < L.length; i++) y += dwTab(L[i], x, true); return y; }
+// the world y of a height h of wave w's outline at x (the surface there, less how far h stands over the wave's own lowest)
+const dwYAt = (w, x, h) => surfaceY0(x) - (h - dwTab(w, x, true));
+// the water's own speed along at x (world units a second): with the wave, by how high its surface stands there
 function dwFlow(x) {
   const L = DW.live; let v = 0;
-  for (let i = 0; i < L.length; i++) {
-    const w = L[i], u = (x - w.x) * w.dir / w.L + 0.5; if (!(u > 0 && u < 1) || x < w.run[0] || x > w.run[1]) continue;
-    v += w.dir * w.c * (w.K.push || 0) * dwTab(w.K.ptab, u) * w.env * w.k;
-  }
+  for (let i = 0; i < L.length; i++) { const w = L[i]; if (w.H > 0) v += w.dir * w.c * (w.K.push || 0) * clamp(dwTab(w, x, true) / w.H, -0.3, 1); }
   return v;
 }
-
 // ONE RULE FOR WHAT FLOATS (user 20:41: "all boats should be carried away, of course, depending on the size of the wave and the size of the boat"):
 // everything in the water near its surface is carried by the water's own speed there (dwFlow), by how tall the wave is against its own length -
 // a wave a third of its length carries it whole, a ripple against a liner hardly; what's dived under it less the deeper
@@ -7819,65 +7851,45 @@ function dwCarryAll(dt) {
   for (const e of vehAll()) {
     const v = e.v; if (!v || !Number.isFinite(v.x) || e.k === 'tower' || e.k === 'crane' || v.state === 'gone' || v.moored && e.army || v.gate) continue;
     const run = waterRun(v.x); if (!run) continue;
-    let H = 0; for (const w of DW.live) { const u = (v.x - w.x) * w.dir / w.L + 0.5; if (u > 0 && u < 1) H = Math.max(H, w.H); } if (!H) continue;
+    let H = 0; for (const w of DW.live) if (v.x >= w.xa && v.x <= w.xb) H = Math.max(H, dwTab(w, v.x, false)); if (!(H > 0)) continue;
     const B = vehBox(e), len = Math.max(4, B[1] - B[0]), s = surfaceY0(v.x), y = v.y != null ? v.y : s;
     if (y < s - Math.max(len * 0.6, 20)) continue;                 // (in the air over it)
     const k = clamp(H / (0.33 * len), 0, 1) * clamp(1 - (y - s) / (2 * H + 1), 0, 1), nx = v.x + dwFlow(v.x) * k * dt;
     if (nx > run[0] + len * 0.5 && nx < run[1] - len * 0.5) v.x = nx;   // (never up onto a shore)
   }
 }
-// THE BREAKER'S LIP (user 20:41: "We definitely need breaker lips ... We want to see the crest curl over itself"): the surface is a height at each
-// place, so the curl is its own shape on the crest - a tongue of water thrown forward from it, curling down and thinning to its tip, as far as
-// the kind's CURL and the wave's lean (out deep, a little; as the floor rises, all the way over)
-const dwCurl = w => clamp((w.K.curl || 0) * (w.cq || 0) * Math.min(1, w.env * 1.5), 0, 1);
-const dwCrestX = w => w.x + w.dir * (w.K.uc + 0.16 * w.lean * w.K.hc - 0.5) * w.L;
 // (the engine's rectangles - src/gpu/61-rects.js: one list of this part's own, laid in one draw)
 const dwRL = () => DW.rl || (DW.rl = frameRectList());
 const DW_WHITE = [255, 255, 255];
 // the water's own colour above its still level at x, as the water's drawing lays it there: its deep (the clouds' shade in it) under its tint (seaAt -
 // 44-shadows-seafloor.js), under the open ocean's dark (the water shader's strips: (0, 4, 18) at 0.3 of deepFactor - 40-zz-water-gpu.js)
 const dwSeaCol = x => { const A = seaAt(WATER_Y - 14), k = 0.3 * deepFactor(x), D = [0, 4, 18]; return A.deep.map((v, j) => (v * (1 - A.a) + A.T[j] * A.a) * (1 - k) + D[j] * k); };
-/* (user 21:32, his two pictures - lab/wavelab/ref/ref-lip-*.jpg: the first try "looks like a texture attached to the tip of the wave. Doesn't match in
-   color, doesn't even connect in shape ... the white line is a single shape that changes and creates the wave shape. It's still dynamic, and the
-   crest has some foam coming out of it") THE CREST PITCHED OVER, ONE SHAPE WITH THE WAVE: the wave's top thrown forward as one body of water - thick
-   where it leaves the crest (its top edge leaving along the back slope's own line, its underside coming up off the face), thinning as it curls
-   over and down to its tip. Filled in the water's own colour (dwSeaCol), a column of blocks at a time, so it joins the body without a seam; then
-   the surface's own bright line (the water's - its width, its colour) drawn on round it wherever it stands clear of the wave, and foam at its tip */
-function dwDrawLips(x0, x1, lake) {
+// THE WATER OVER AN AIR GAP, AND THE LINE ROUND IT: where a wave's outline is folded (w.fa .. w.fb), each pixel column's crossings of the outline, highest
+// first - water from the first down to the second (the lip), air to the third (the face: the water's own surface, drawn by the water's drawing); the
+// surface's bright line along every part of the outline there; foam at its tip while it curls and comes down
+const DW_YS = new Float64Array(16);
+function dwDrawWaves(x0, x1, lake) {
   const RL = dwRL(), lw = waterLineW(), lineC = E.sunset > 0.2 ? mix3([238, 249, 255], [255, 200, 170], E.sunset) : [238, 249, 255];
   for (const w of DW.live) {
-    if (!!w.lake !== !!lake) continue;
-    const q = dwCurl(w), H = w.H; if (q < 0.04 || H < 3) continue;
-    const xc = dwCrestX(w); if (offViewR(xc, 3 * H, x0, x1)) continue;
-    // its middle line: from inside the crest, up and forward along the back slope's line, then over and down - further the more it has built
-    const n = 40, T0 = 0.42 * H, arc = 0.35 + q * 3.5, len = H * (0.25 + 1.25 * q), a0 = -0.5, d = w.dir;
-    const top = [], bot = []; let px = xc + d * Math.sin(a0) * -T0 / 2, py = surfaceY0(xc) + Math.cos(a0) * T0 / 2;
-    for (let i = 0; i <= n; i++) {
-      const u = i / n, a = a0 + arc * Math.pow(u, 1.25), t = T0 * Math.pow(1 - u, 1.15) * (0.55 + 0.45 * q) + 0.5 / SV, nx = d * Math.sin(a), ny = -Math.cos(a);
-      top.push([px + nx * t / 2, py + ny * t / 2]); bot.push([px - nx * t / 2, py - ny * t / 2]);
-      const ds = len * (1 - 0.35 * u) / n; px += d * Math.cos(a) * ds; py += Math.sin(a) * ds;
+    if (!!w.lake !== !!lake || !(w.fb >= w.fa) || offView(w.fa, w.fb, x0, x1)) continue;
+    const C = w.C, n = w.n, col = dwSeaCol(w.x), Xa = Math.floor(w.fa * SV - CAMPX) - 1, Xb = Math.ceil(w.fb * SV - CAMPX) + 1;
+    for (let X = Math.max(-2, Xa); X <= Math.min(VWP + 2, Xb); X++) {
+      const x = (X + 0.5 + CAMPX) / SV; let m = 0;
+      for (let k = 0; k < n - 1 && m < 16; k++) { const xA = C[2 * k], xB = C[2 * k + 2]; if ((xA <= x) !== (xB <= x)) DW_YS[m++] = C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA); }
+      if (m < 3) continue;
+      const S = Array.prototype.slice.call(DW_YS, 0, m).sort((p, q) => q - p), base = surfaceY0(x) + S[m - 1];   // (the world y of height 0 of this wave here)
+      for (let k = 0; k + 1 < m - 1; k += 2) { const ya = Math.round((base - S[k]) * SV - TOPPX), yb = Math.round((base - S[k + 1]) * SV - TOPPX); if (yb > ya) RL.rect(X, ya, 1, yb - ya, col, 1); }
     }
-    const poly = top.concat(bot.reverse()).map(p => [p[0] * SV - CAMPX, p[1] * SV - TOPPX]);   // (its outline, the view's pixels)
-    // filled a column of the view's blocks at a time: where the column cuts its outline, in pairs
-    let xa = Infinity, xb = -Infinity; for (const p of poly) { if (p[0] < xa) xa = p[0]; if (p[0] > xb) xb = p[0]; }
-    const col = dwSeaCol(xc), m = poly.length;
-    for (let X = Math.floor(xa); X <= Math.ceil(xb); X++) {
-      const cx = X + 0.5, ys = [];
-      for (let k = 0; k < m; k++) { const A = poly[k], B = poly[(k + 1) % m]; if ((A[0] <= cx) !== (B[0] <= cx)) ys.push(A[1] + (B[1] - A[1]) * (cx - A[0]) / (B[0] - A[0])); }
-      ys.sort((p, r) => p - r);
-      for (let k = 0; k + 1 < ys.length; k += 2) { const y0 = Math.round(ys[k]), y1 = Math.round(ys[k + 1]); if (y1 > y0) RL.rect(X, y0, 1, y1 - y0, col, 1); }
+    const pad = 3 * DX;
+    for (let k = 0; k < n - 1; k++) {
+      const xA = C[2 * k], yA = C[2 * k + 1], xB = C[2 * k + 2], yB = C[2 * k + 3]; if (Math.max(xA, xB) < w.fa - pad || Math.min(xA, xB) > w.fb + pad) continue;
+      const st = Math.max(1, Math.ceil(Math.max(Math.abs(xB - xA), Math.abs(yB - yA)) * SV));
+      for (let q = 0; q < st; q++) { const x = xA + (xB - xA) * q / st, h = yA + (yB - yA) * q / st; if (x < w.fa - pad || x > w.fb + pad) continue;
+        RL.rect(Math.round(x * SV - CAMPX - lw / 2), Math.round(dwYAt(w, x, h) * SV - TOPPX - lw / 2), lw, lw, lineC, 1); }
     }
-    // the surface's line round it, where it's out of the wave's own body (over the surface there, or under the lip in the open air)
-    const edge = (x, y) => y < surfaceY0(x) - 0.6 / SV;
-    const line = (P, Q) => { const sx = (Q[0] - P[0]) * SV, sy = (Q[1] - P[1]) * SV, st = Math.max(1, Math.ceil(Math.max(Math.abs(sx), Math.abs(sy))));
-      for (let k = 0; k < st; k++) { const x = P[0] + (Q[0] - P[0]) * k / st, y = P[1] + (Q[1] - P[1]) * k / st; if (edge(x, y)) RL.rect(Math.round(x * SV - CAMPX - lw / 2), Math.round(y * SV - TOPPX - lw / 2), lw, lw, lineC, 1); } };
-    const B2 = bot.reverse();                                       // (bot back in its own order: root to tip)
-    for (let i = 0; i < n; i++) { line(top[i], top[i + 1]); line(B2[i], B2[i + 1]); }
-    line(top[n], B2[n]);
-    // foam breaking out of its tip, more as it comes over: a few blocks about it, changing with the clock
-    if (q > 0.3) { const tx = top[n][0], ty = top[n][1], k = Math.round((q - 0.3) * 14), sz = Math.max(PB, lw + 1);
-      for (let j = 0; j < k; j++) { const h1 = hash(j * 7.31 + Math.floor(time * 9) * 1.7), h2 = hash(j * 3.17 + Math.floor(time * 9) * 2.3 + 5);
-        RL.rect(Math.round((tx + d * (h1 - 0.35) * 0.22 * H) * SV - CAMPX), Math.round((ty + (h2 - 0.6) * 0.22 * H) * SV - TOPPX), sz, sz, DW_WHITE, 0.95); } }
+    if (w.ph > 2.4 && w.ph < 4.7) { const T = dwPt(w, 8), ty = dwYAt(w, T[0], T[1]), k = Math.round(4 + 10 * clamp(w.ph - 2.4, 0, 1)), sz = Math.max(PB, lw + 1);
+      for (let j = 0; j < k; j++) { const h1 = hash(j * 7.31 + Math.floor(time * 10) * 1.7), h2 = hash(j * 3.17 + Math.floor(time * 10) * 2.3 + 5);
+        RL.rect(Math.round((T[0] - w.dir * (h1 - 0.4) * 0.16 * w.H) * SV - CAMPX), Math.round((ty + (h2 - 0.45) * 0.2 * w.H) * SV - TOPPX), sz, sz, DW_WHITE, 0.95); } }
   }
   if (RL.n) frameRects(C, RL, { key: 'dwaves' });
 }
@@ -7887,7 +7899,7 @@ function dwDrawLips(x0, x1, lake) {
 // DW.WC world units -> how wet, 0..1)
 function dwSwash(w) {
   let xs = w.x, n = 0; while (waterRun(xs) && n++ < 600) xs += w.dir * 4; if (n >= 600) return;
-  const H = Math.max(w.H, w.K.h * UPM * w.k * 0.6), lv = waterLv(xs - w.dir * 8);
+  const H = w.H, lv = waterLv(xs - w.dir * 8);
   DW.sw.push({ x: xs, dir: w.dir, R: clamp(H * 7, 30, 1400), H, lv, t: 0, T: 3 + H / 40, f: 0, hit: false });
 }
 function dwShoreStep(dt) {
@@ -7924,12 +7936,12 @@ function dwDrawShore(x0, x1) {
 }
 
 // THE CREST COMES DOWN (user 20:45: "the ability to go past the wave before the crest breaks on you. That's when you're gone"): whatever small
-// boat is under the lip as it falls - from the crest to a wave's height ahead of it - is lost; over the crest already, or still out in front of
-// its reach, it lives. (The small boats today - jetboatSink; the other families ride it out: not decided yet)
+// boat is under the lip as it falls - between its tip and its crest - is lost; over the crest already, or still out in front of its reach, it lives.
+// (The small boats today - jetboatSink; the other families ride it out: not decided yet)
 function dwCrash(w) {
-  const xc = dwCrestX(w), a = Math.min(xc, xc + w.dir * 1.3 * w.H) - 0.1 * w.H, b = Math.max(xc, xc + w.dir * 1.3 * w.H) + 0.1 * w.H;
-  if (typeof jetboats !== 'undefined') for (const j of jetboats.list ? jetboats.list() : jetboats) if (j.state === 'run' && j.x > a && j.x < b && w.H > 0.25 * storyBoatSize(j)[0]) { DW.lost++; jetboatSink(j); }
-  if (!SIM_ONLY) { sound('splash', xc, clamp(w.H / 80, 0.3, 1)); for (let k = 0; k < Math.min(60, 10 + w.H * 0.5); k++) { const x = a + Math.random() * (b - a); if (waterRun(x)) { spawnSpray(x, surfaceY0(x) - Math.random() * 0.4 * w.H, w.dir * w.c * (0.2 + Math.random() * 0.6), 0.8 + Math.random() * 1.4); spawnFoam(x, 2 + Math.random() * 3); } } }
+  const T = dwPt(w, 8)[0], Cx = dwPt(w, 11)[0], a = Math.min(T, Cx) - 0.05 * w.H, b = Math.max(T, Cx) + 0.05 * w.H;
+  for (const j of jetboats.list ? jetboats.list() : jetboats) if (j.state === 'run' && j.x > a && j.x < b && w.H > 0.25 * storyBoatSize(j)[0]) { DW.lost++; jetboatSink(j); }
+  if (!SIM_ONLY) { sound('splash', T, clamp(w.H / 80, 0.3, 1)); for (let k = 0; k < Math.min(60, 10 + w.H * 0.5); k++) { const x = a + Math.random() * (b - a); if (waterRun(x)) { spawnSpray(x, surfaceY0(x) - Math.random() * 0.4 * w.H, w.dir * w.c * (0.2 + Math.random() * 0.6), 0.8 + Math.random() * 1.4); spawnFoam(x, 2 + Math.random() * 3); } } }
 }
 
 //@src 09-zz-biomes.js:1
@@ -9194,7 +9206,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 22:43';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 17 22:56';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -34188,7 +34200,7 @@ function renderObjects() {
   // foam lying on the surface behind each hull, breaking up as it ages
   const lw = waterLineW();
   waterSurfaceGPU(x0, x1, lw, true);
-  if (DW.live.length) guardDraw('dwLips', () => dwDrawLips(x0, x1, false));   // (the designed waves' curling lips - 09-zy-dwaves.js)
+  if (DW.live.length) guardDraw('dwLips', () => dwDrawWaves(x0, x1, false));   // (the designed waves' curling lips - 09-zy-dwaves.js)
   drawShipWash(x0, x1);
   drawFoamBits(x0, x1);
   drawOil(x0, x1);                                        // (OPEN WORLD: a tanker's spill)
@@ -56670,7 +56682,7 @@ function renderLandObjects() {
   C.save();
   try { hangarLandCut(CAMPX / SV, CAMPX / SV + VWW); renderLandObjects0();
     // (the Wave Lab: a lake's waves' lips, the water run up the shore and the wet ground - 09-zy-dwaves.js)
-    if (DW.live.length || DW.sw.length || DW.wet.size) guardDraw('dwShore', () => { const a = CAMPX / SV, b = a + VWW; dwDrawLips(a, b, true); dwDrawShore(a, b); });
+    if (DW.live.length || DW.sw.length || DW.wet.size) guardDraw('dwShore', () => { const a = CAMPX / SV, b = a + VWW; dwDrawWaves(a, b, true); dwDrawShore(a, b); });
   } finally { C.restore(); }
 }
 // the land in [x0, x1]: every land's (LANDS) and any island's out in the sea (one line, user Oct 28)
@@ -74055,7 +74067,7 @@ async function start(data) {
       pan: (cx0, cy0, cx1, cy1) => { const a = screenToWorld(cx0, cy0), b = screenToWorld(cx1, cy1); cam.pan[0] -= b[0] - a[0]; cam.panY[0] -= b[1] - a[1]; cam.panHeld[0] = true; },
       get panned() { return !!cam.panHeld[0]; }, unpan: () => { cam.panHeld[0] = false; },
       // the designed waves (09-zy-dwaves.js): the kinds (the lab's prefabs - set(name, K) lays a kind's tables again), one sent, the live ones
-      waves: { kinds: DW.kinds, set: (n, K) => { DW.kinds[n] = dwShape(K); }, send: (n, x, dir, k) => !!dwSend(n, x, dir, k), live: () => DW.live.map(w => ({ x: w.x, H: w.H, L: w.L, c: w.c, dir: w.dir, die: w.die })), clear: () => { DW.live.length = 0; DW.max = 0; },
+      waves: { kinds: DW.kinds, set: (n, K) => { DW.kinds[n] = dwShape(K); for (const w of DW.live) if (w.K && DW.kinds[n] && w.kn === n) w.K = DW.kinds[n]; }, send: (n, x, dir, k) => { const w = dwSend(n, x, dir, k); if (w) w.kn = n; return !!w; }, live: () => DW.live.map(w => ({ x: w.x, H: w.H, L: w.L, c: w.c, dir: w.dir, ph: +w.ph.toFixed(2), top: DW.max, fold: w.fb >= w.fa })), poses: DW_POSE, NP: DW_NP, clear: () => { DW.live.length = 0; DW.max = 0; },
         get cap() { return DW.cap; }, set cap(v) { DW.cap = v; }, get lost() { return DW.lost; }, flow: x => dwFlow(x), at: x => dwAt(x) },
     } });
   }
@@ -76422,28 +76434,32 @@ function sseDraw() {
     return [{ k: 'S', gnd: true, p: [[x1, foot, 'S'], [0, foot, 'T'], [0, T, 'T'], [WL.LK0, T, 'T'], [WL.LK0 + WL.BANK, lake, 'T'], [WL.LK1 - WL.BANK, lake, 'T'], [WL.LK1, T, 'T'], [WL.SHORE, T, 'T'], [x1, sea, 'S']] },
       { k: 'S', gnd: true, p: [[WL.W, foot, 'S'], [x1, foot, 'S'], [x1, sea, 'S'], [WL.W, sea, 'S']] }];
   }
-  // THE DESIGNED WAVES' PREFABS (user 20:19: "a couple of them based on the most common types of waves"): each its shape's points [u, h, p] - u 0 its
-  // back .. 1 its front, h its height there, p how it carries what floats (+ with the wave, - back toward it) - and its numbers: h height (m), len
-  // length (m), v speed (m/s), push its carry (x), grow taller in the shallows (x), lean its crest forward (0..1), rise (s). Kept in this browser
-  // (wl_waves) as they're edited; RESET puts these back
+  // THE DESIGNED WAVES' PREFABS (user 20:19: "a couple of them based on the most common types of waves"; 20:45: some "build ... but don't break, they
+  // reduce. And others that grow, curl, and break"): each kind's numbers - h height (m), len length (m), v speed (m/s), push its carry (x), grow taller
+  // in the shallows (x), curl how far over its crest goes (0..1), rise (s), hold the crest's building (s), ends 0 fades / 1 breaks - and, once its
+  // shape is edited, its own poses (swell, peak, curl, crash: the outline's points - 09-zy-dwaves.js). Kept in this browser (wl_waves2); RESET puts
+  // these back
   const WAVES0 = {
-    'OCEAN ROLLER': { curl: 0, hold: 60, ends: 0, h: 3, len: 140, v: 12, push: 0.25, grow: 0.6, lean: 0, rise: 3, pts: [[0, 0, 0], [0.18, -0.12, -0.2], [0.5, 1, 0.3], [0.82, -0.12, 0.6], [1, 0, 0]] },
-    'PEAKING WAVE': { curl: 0.35, hold: 40, ends: 0, h: 4.5, len: 80, v: 10, push: 0.45, grow: 0.8, lean: 0.25, rise: 3, pts: [[0, 0, 0], [0.25, 0.05, -0.2], [0.44, 0.45, 0.1], [0.55, 1, 0.6], [0.66, 0.4, 1], [0.82, -0.18, 0.5], [1, 0, 0]] },
-    'BREAKER': { curl: 1, hold: 9, ends: 1, h: 6, len: 70, v: 9, push: 0.85, grow: 0.5, lean: 0.9, rise: 2.5, pts: [[0, 0, 0], [0.3, 0.12, -0.3], [0.52, 0.6, 0.2], [0.64, 1, 0.9], [0.72, 0.35, 1], [0.82, -0.25, 0.6], [1, 0, 0]] },
-    'ROGUE WAVE': { curl: 0.6, hold: 8, ends: 1, h: 14, len: 130, v: 15, push: 0.7, grow: 0.2, lean: 0.4, rise: 4, pts: [[0, 0, 0], [0.22, -0.1, -0.4], [0.42, 0.5, 0.1], [0.55, 1, 0.7], [0.66, 0.3, 1], [0.8, -0.35, 0.4], [1, 0, 0]] },
-    'THE WALL': { curl: 0.8, hold: 25, ends: 0, h: 45, len: 520, v: 26, push: 1, grow: 0, lean: 0.5, rise: 6, pts: [[0, 0, 0], [0.2, 0.25, -0.5], [0.45, 0.8, 0], [0.58, 1, 0.6], [0.72, 0.5, 1], [0.9, 0.05, 0.7], [1, 0, 0]] },
-    'TSUNAMI': { curl: 0.2, hold: 80, ends: 0, h: 1.5, len: 600, v: 32, push: 0.9, grow: 6, lean: 0.1, rise: 5, pts: [[0, 0, 0], [0.3, 0.6, 0.6], [0.6, 1, 1], [0.85, -0.3, -0.8], [1, 0, 0]] },
+    'OCEAN ROLLER': { h: 3, len: 140, v: 12, push: 0.25, grow: 0.6, curl: 0, rise: 3, hold: 50, ends: 0 },
+    'PEAKING WAVE': { h: 4.5, len: 90, v: 10, push: 0.45, grow: 0.8, curl: 0.4, rise: 3, hold: 35, ends: 0 },
+    'BREAKER': { h: 6, len: 80, v: 9, push: 0.85, grow: 0.5, curl: 1, rise: 2.5, hold: 9, ends: 1 },
+    'ROGUE WAVE': { h: 14, len: 150, v: 15, push: 0.7, grow: 0.2, curl: 1, rise: 4, hold: 9, ends: 1 },
+    'THE WALL': { h: 45, len: 520, v: 26, push: 1, grow: 0, curl: 0.5, rise: 6, hold: 30, ends: 0 },
+    'THE WALL BREAKS': { h: 45, len: 520, v: 26, push: 1, grow: 0, curl: 1, rise: 6, hold: 14, ends: 1 },
+    'TSUNAMI': { h: 1.5, len: 600, v: 32, push: 0.9, grow: 6, curl: 0.6, rise: 5, hold: 90, ends: 0 },
   };
-  const WPROPS = [['HEIGHT m', 'h', 0, 80, 0.5, 'How tall it stands out at sea'], ['LENGTH m', 'len', 20, 900, 5, 'From its back to its front'], ['SPEED m/s', 'v', 1, 50, 0.5, 'How fast it travels'],
-    ['CARRY x', 'push', 0, 2, 0.05, 'How hard it carries what floats'], ['GROW IN SHALLOWS x', 'grow', 0, 8, 0.1, 'How much taller it gets as the floor rises'], ['LEAN', 'lean', 0, 1.5, 0.05, 'How far its crest leans forward'], ['CURL', 'curl', 0, 1, 0.05, 'How far its lip curls over as it leans'], ['RISE s', 'rise', 0.5, 12, 0.5, 'Seconds it takes to rise from flat'], ['CREST BUILDS s', 'hold', 1, 120, 1, 'Seconds at full height before it ends'], ['ENDS: 0 FADES 1 BREAKS', 'ends', 0, 1, 1, '0: it sinks back. 1: its crest curls over and breaks']];
-  let WAVES = JSON.parse(JSON.stringify(WAVES0)), wsel = 'BREAKER', wfrom = 1, wauto = false, wnext = 0, psel = 3;
-  try { const o = JSON.parse(localStorage.getItem('wl_waves') || 'null'); if (o && typeof o === 'object') for (const k in WAVES) if (o[k] && Array.isArray(o[k].pts)) WAVES[k] = Object.assign({}, WAVES0[k], o[k]); } catch (e) { }
-  const wSave = () => { try { localStorage.setItem('wl_waves', JSON.stringify(WAVES)); } catch (e) { } };
+  const WPROPS = [['HEIGHT m', 'h', 0, 80, 0.5, 'How tall it stands at its peak'], ['LENGTH m', 'len', 20, 900, 5, 'From its front foot to its back foot'], ['SPEED m/s', 'v', 1, 50, 0.5, 'How fast it travels'],
+    ['CARRY x', 'push', 0, 2, 0.05, 'How hard it carries what floats'], ['GROW IN SHALLOWS x', 'grow', 0, 8, 0.1, 'How much taller it gets as the floor rises'], ['CURL', 'curl', 0, 1, 0.05, 'How far over its crest curls (0: a peak only)'],
+    ['RISE s', 'rise', 0.5, 12, 0.5, 'Seconds from flat to a swell'], ['CREST BUILDS s', 'hold', 1, 120, 1, 'Seconds from swell to its end'], ['ENDS: 0 FADES 1 BREAKS', 'ends', 0, 1, 1, '0: it sinks back. 1: its crest curls over and breaks']];
+  const POSES = ['swell', 'peak', 'curl', 'crash'];
+  let WAVES = JSON.parse(JSON.stringify(WAVES0)), wsel = 'BREAKER', wfrom = 1, wauto = false, wnext = 0, psel = 8, pose = 'curl';
+  try { const o = JSON.parse(localStorage.getItem('wl_waves2') || 'null'); if (o && typeof o === 'object') for (const k in WAVES) if (o[k] && typeof o[k] === 'object') WAVES[k] = Object.assign({}, WAVES0[k], o[k]); } catch (e) { }
+  const wSave = () => { try { localStorage.setItem('wl_waves2', JSON.stringify(WAVES)); } catch (e) { } };
   const wPut = n => __game.wavelab.waves.set(n, JSON.parse(JSON.stringify(WAVES[n])));
   // one sent: from out at sea toward the land (or from the land's side), far enough off to see it rise - in the lake, from its far end
   function sendWave(n) {
     const W = __game.wavelab, U = W.UPM, K = WAVES[n], x0 = here(), a = W.at(x0), run = a.run || W.at(X[where]).run; if (!run) return;
-    const off = Math.max(260, K.len * 0.9 + K.v * (K.rise || 3) * 1.2) * U, x = Math.min(Math.max(x0 + wfrom * off, run[0] + K.len * U * 0.55), run[1] - K.len * U * 0.55);
+    const off = Math.max(260, K.len * 0.9 + K.v * ((K.rise || 3) + 0.5 * (K.hold || 20)) ) * U, x = Math.min(Math.max(x0 + wfrom * off, run[0] + K.len * U * 0.55), run[1] - K.len * U * 0.55);
     W.waves.send(n, x, -wfrom, 1);
   }
   const X = { sea: WL.SHORE + WL.BEACH + 2200, lake: (WL.LK0 + WL.LK1) / 2, land: WL.SHORE - 250 };
@@ -76485,9 +76501,8 @@ function sseDraw() {
 <div class="sp"><select id="wlWv" data-t="The wave to send and to edit">${Object.keys(WAVES).map(n => `<option>${n}</option>`).join('')}</select><button data-a="send" data-t="Send this wave toward you">SEND</button></div>
 <div class="w3"><button data-a="from" id="wlFrom" data-t="Which side the waves come from">FROM SEA</button><button data-a="auto" id="wlAuto" data-t="Keep sending waves, more often in a rough sea">AUTO OFF</button><button data-a="calm" data-t="Take every designed wave away">CALM</button></div>
 <details><summary>THIS WAVE'S SHAPE</summary><div>
-<canvas id="wlCv" width="560" height="200" style="width:100%;height:100px;background:#0a0f1a;border:1px solid #2c3850;border-radius:4px;touch-action:none" data-t="Drag a point. The wave travels to the right here"></canvas>
-<label data-t="How the water at the picked point carries a boat: + with the wave, - back">POINT CARRY<input type="range" min="-1" max="1" step="0.05" id="wlPc"><output></output></label>
-<div class="w3"><button data-a="padd" data-t="A new point after the picked one">+ POINT</button><button data-a="pdel" data-t="Take the picked point out">- POINT</button><button data-a="wreset" data-t="This wave back to its built-in design">RESET</button></div>
+<div class="sp"><select id="wlPose" data-t="Which moment of its life to shape">${POSES.map(n => `<option value="${n}">${n.toUpperCase()}</option>`).join('')}</select><button data-a="wreset" data-t="This wave back to its built-in design">RESET</button></div>
+<canvas id="wlCv" width="560" height="300" style="width:100%;height:150px;background:#0a0f1a;border:1px solid #2c3850;border-radius:4px;touch-action:none" data-t="Drag a point: the wave's outline. Its front is on the left"></canvas>
 <div id="wlWs"></div>
 <label data-t="A small boat rolls over when it tilts past this">CAPSIZE AT deg<input type="range" min="20" max="90" step="1" id="wlCap"><output></output></label></div></details>
 <div class="w"><button data-a="look" id="wlLook" data-t="The view back on your boat after you dragged it away">BACK TO THE BOAT</button><button data-a="clear" data-t="Take every vehicle out">CLEAR</button></div><div class="w"><button data-a="pause" class="pz" data-t="Freeze everything where it is - the same as Esc">PAUSE</button><span></span></div>
@@ -76515,34 +76530,37 @@ function sseDraw() {
       s.oninput = () => { o.textContent = s.value; };
       s.onchange = () => { depth[k] = Math.round(+s.value * U); try { localStorage.setItem('wl_depth', JSON.stringify(depth)); } catch (e) { } __game.veglab.setGround(wlGround(depth.sea, depth.lake)); };
     }
-    // the designed waves: the picked one's numbers, its shape's points on the canvas (the height's curve white, each point's carry its colour:
-    // green with the wave, red back toward it)
-    const cv = d.querySelector('#wlCv'), cx = cv.getContext('2d'), ws = d.querySelector('#wlWs'), pc = d.querySelector('#wlPc'), cap = d.querySelector('#wlCap');
-    const P2 = p => [p[0] * cv.width, cv.height * 0.72 - p[1] * cv.height * 0.6];
+    // the designed waves: the picked one's numbers, and the picked pose's outline on the canvas - its points dragged anywhere (its two feet stay on
+    // the water's level); the curve through them is the game's own (the same Catmull-Rom, 09-zy-dwaves.js dwCurve)
+    const cv = d.querySelector('#wlCv'), cx = cv.getContext('2d'), ws = d.querySelector('#wlWs'), cap = d.querySelector('#wlCap');
+    const poseOf = () => (WAVES[wsel].poses && WAVES[wsel].poses[pose]) || W.waves.poses[pose];
+    const P2 = p => [cv.width * (0.5 + p[0] * 0.46), cv.height * 0.8 - p[1] * cv.height * 0.6];
+    const curve = P => { const o = [], n = P.length; for (let i = 0; i < n - 1; i++) { const a = P[Math.max(0, i - 1)], b = P[i], c = P[i + 1], e = P[Math.min(n - 1, i + 2)];
+      for (let q = 0; q < 8; q++) { const u = q / 8, u2 = u * u, u3 = u2 * u; o.push([0, 1].map(k => 0.5 * (2 * b[k] + (c[k] - a[k]) * u + (2 * a[k] - 5 * b[k] + 4 * c[k] - e[k]) * u2 + (3 * b[k] - a[k] - 3 * c[k] + e[k]) * u3))); } } o.push(P[n - 1]); return o; };
     function wDraw() {
-      const K = WAVES[wsel], T = W.waves.kinds[wsel] && W.waves.kinds[wsel].tab; cx.clearRect(0, 0, cv.width, cv.height);
-      cx.strokeStyle = '#2c3850'; cx.beginPath(); cx.moveTo(0, cv.height * 0.72); cx.lineTo(cv.width, cv.height * 0.72); cx.stroke();
-      if (T) { cx.strokeStyle = '#d8dce8'; cx.lineWidth = 3; cx.beginPath(); for (let i = 0; i < T.length; i++) { const x = i / (T.length - 1) * cv.width, y = cv.height * 0.72 - T[i] * cv.height * 0.6; i ? cx.lineTo(x, y) : cx.moveTo(x, y); } cx.stroke(); }
-      K.pts.forEach((p, i) => { const [x, y] = P2(p), c = p[2] || 0; cx.fillStyle = c >= 0 ? `rgb(${Math.round(90 - 60 * c)},${Math.round(120 + 120 * c)},90)` : `rgb(${Math.round(120 - 120 * c)},90,90)`; cx.beginPath(); cx.arc(x, y, i === psel ? 13 : 9, 0, 7); cx.fill(); if (i === psel) { cx.strokeStyle = '#fff'; cx.lineWidth = 3; cx.stroke(); } });
-      cx.fillStyle = '#7a8294'; cx.font = '20px monospace'; cx.fillText('back', 6, 22); cx.fillText('front >', cv.width - 96, 22);
+      const P = poseOf(), C = curve(P).map(P2); cx.clearRect(0, 0, cv.width, cv.height);
+      cx.fillStyle = '#1d4f96'; cx.beginPath(); cx.moveTo(0, cv.height); cx.lineTo(0, cv.height * 0.8); for (const p of C) cx.lineTo(p[0], p[1]); cx.lineTo(cv.width, cv.height * 0.8); cx.lineTo(cv.width, cv.height); cx.fill();
+      cx.strokeStyle = '#eef9ff'; cx.lineWidth = 3; cx.beginPath(); cx.moveTo(0, cv.height * 0.8); for (const p of C) cx.lineTo(p[0], p[1]); cx.lineTo(cv.width, cv.height * 0.8); cx.stroke();
+      P.forEach((p, i) => { const [x, y] = P2(p); cx.fillStyle = i >= 5 && i <= 10 ? '#ffb347' : '#d8dce8'; cx.beginPath(); cx.arc(x, y, i === psel ? 12 : 8, 0, 7); cx.fill(); if (i === psel) { cx.strokeStyle = '#fff'; cx.lineWidth = 3; cx.stroke(); } });
+      cx.fillStyle = '#7a8294'; cx.font = '20px monospace'; cx.fillText('< front', 6, 22); cx.fillText('back', cv.width - 60, 22);
     }
     function wSync() {
-      const K = WAVES[wsel]; psel = Math.min(psel, K.pts.length - 1);
+      const K = WAVES[wsel];
       ws.innerHTML = WPROPS.map(([lab, k, a, b, st, t]) => `<label data-t="${t}" title="${t}">${lab}<input type="range" min="${a}" max="${b}" step="${st}" data-wk="${k}" value="${K[k]}"><output>${K[k]}</output></label>`).join('');
       for (const i of ws.querySelectorAll('input')) i.oninput = () => { K[i.dataset.wk] = +i.value; i.nextElementSibling.textContent = i.value; wPut(wsel); wSave(); };
       for (const L of ws.querySelectorAll('label')) for (const ev of ['pointerdown', 'mouseenter']) L.addEventListener(ev, () => { tip.textContent = L.dataset.t; });
-      pc.value = K.pts[psel][2] || 0; pc.nextElementSibling.textContent = (+pc.value).toFixed(2); wDraw();
+      wDraw();
     }
     const wChanged = () => { wPut(wsel); wSave(); wDraw(); };
-    pc.oninput = () => { WAVES[wsel].pts[psel][2] = +pc.value; pc.nextElementSibling.textContent = (+pc.value).toFixed(2); wChanged(); };
     cap.value = Math.round(W.waves.cap * 180 / Math.PI); cap.nextElementSibling.textContent = cap.value; cap.oninput = () => { W.waves.cap = +cap.value * Math.PI / 180; cap.nextElementSibling.textContent = cap.value; };
-    d.querySelector('#wlWv').value = wsel; d.querySelector('#wlWv').onchange = e => { wsel = e.target.value; psel = Math.min(3, WAVES[wsel].pts.length - 1); wSync(); e.target.blur(); };
+    d.querySelector('#wlWv').value = wsel; d.querySelector('#wlWv').onchange = e => { wsel = e.target.value; wSync(); e.target.blur(); };
+    d.querySelector('#wlPose').value = pose; d.querySelector('#wlPose').onchange = e => { pose = e.target.value; wDraw(); e.target.blur(); };
     let drag = false;
     const cvAt = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * cv.width, (e.clientY - r.top) / r.height * cv.height]; };
-    cv.addEventListener('pointerdown', e => { const [x, y] = cvAt(e), K = WAVES[wsel]; let b = -1, bd = 40 * 40; K.pts.forEach((p, i) => { const [px, py] = P2(p), q = (px - x) ** 2 + (py - y) ** 2; if (q < bd) { bd = q; b = i; } }); if (b >= 0) { psel = b; drag = true; cv.setPointerCapture(e.pointerId); pc.value = K.pts[b][2] || 0; pc.nextElementSibling.textContent = (+pc.value).toFixed(2); wDraw(); } });
-    cv.addEventListener('pointermove', e => { if (!drag) return; const [x, y] = cvAt(e), K = WAVES[wsel], p = K.pts[psel], n = K.pts.length;
-      const lo = psel ? K.pts[psel - 1][0] + 0.02 : 0, hi = psel < n - 1 ? K.pts[psel + 1][0] - 0.02 : 1;
-      if (psel > 0 && psel < n - 1) { p[0] = Math.min(hi, Math.max(lo, x / cv.width)); p[1] = Math.max(-0.6, Math.min(1.15, (cv.height * 0.72 - y) / (cv.height * 0.6))); }   // (its two ends stay at the water's level)
+    cv.addEventListener('pointerdown', e => { const [x, y] = cvAt(e), P = poseOf(); let b = -1, bd = 44 * 44; P.forEach((p, i) => { const [px, py] = P2(p), q = (px - x) ** 2 + (py - y) ** 2; if (q < bd) { bd = q; b = i; } }); if (b >= 0) { psel = b; drag = true; cv.setPointerCapture(e.pointerId); wDraw(); } });
+    cv.addEventListener('pointermove', e => { if (!drag) return; const [x, y] = cvAt(e), K = WAVES[wsel];
+      if (!K.poses) K.poses = {}; if (!K.poses[pose]) K.poses[pose] = W.waves.poses[pose].map(p => [p[0], p[1]]);   // (its own copy of the pose, once it's shaped)
+      const P = K.poses[pose]; if (psel > 0 && psel < P.length - 1) { P[psel][0] = Math.max(-1, Math.min(1, (x / cv.width - 0.5) / 0.46)); P[psel][1] = Math.max(-0.3, Math.min(1.3, (cv.height * 0.8 - y) / (cv.height * 0.6))); }
       wChanged(); });
     for (const ev of ['pointerup', 'pointercancel']) cv.addEventListener(ev, () => { drag = false; });
     for (const n in WAVES) wPut(n);
@@ -76553,8 +76571,6 @@ function sseDraw() {
       from: () => { wfrom = -wfrom; d.querySelector('#wlFrom').textContent = wfrom > 0 ? 'FROM SEA' : 'FROM LAND'; },
       auto: () => { wauto = !wauto; wnext = 0; const b = d.querySelector('#wlAuto'); b.textContent = wauto ? 'AUTO ON' : 'AUTO OFF'; b.classList.toggle('on', wauto); },
       calm: () => W.waves.clear(),
-      padd: () => { const K = WAVES[wsel], i = Math.min(psel, K.pts.length - 2), a = K.pts[i], b = K.pts[i + 1]; K.pts.splice(i + 1, 0, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, ((a[2] || 0) + (b[2] || 0)) / 2]); psel = i + 1; wChanged(); wSync(); },
-      pdel: () => { const K = WAVES[wsel]; if (K.pts.length > 3 && psel > 0 && psel < K.pts.length - 1) { K.pts.splice(psel, 1); psel = Math.max(1, psel - 1); wChanged(); wSync(); } },
       wreset: () => { WAVES[wsel] = JSON.parse(JSON.stringify(WAVES0[wsel])); wPut(wsel); wSave(); wSync(); },
       spawn: () => { const o = d.querySelector('#wlSv').selectedOptions[0]; spawn(o.value, !!o.dataset.land); },
       bomb: () => W.bomb(here() + 20 * U, 60 * U), blast: () => W.blast(here() + 20 * U, 15 * U), splash: () => W.splash(here() + 20 * U),
@@ -76601,7 +76617,7 @@ function sseDraw() {
       s += `\nBOAT   lean <b>${deg.toFixed(0)}°</b> (most ${peak.toFixed(0)}°)  rise <b>${(vy / U).toFixed(1)} m/s</b>\n       speed ${(Math.abs(v.vx ?? v.vDrive ?? 0) / U).toFixed(1)} m/s  over water ${m(W.at(v.x).y - v.y)} m`;
       py = v.y; pt = now; pa = ang;
     } else { py = null; peak = 0; }
-    { const L = W.waves.live(); s += `\nWAVES  live <b>${L.length}</b>` + (L.length ? `  tallest <b>${m(Math.max(...L.map(q => q.H)))} m</b>` : '') + `  boats rolled ${W.waves.lost}`; }
+    { const L = W.waves.live(), N = ['rising', 'swell', 'peak', 'curling', 'crashing', 'foam']; s += `\nWAVES  live <b>${L.length}</b>` + (L.length ? `  <b>${m(L[0].top)} m</b>  ${N[Math.min(5, Math.floor(L[0].ph))]}` : '') + `  boats lost ${W.waves.lost}`; }
     el.innerHTML = s;
     // AUTO: the picked wave sent again and again - every 25 s in a calm sea down to every 8 s in a storm
     if (wauto && !__game.flightlab.paused && now >= wnext) { if (wnext) sendWave(wsel); wnext = now + (25 - 17 * Math.min(1, E.sea)) * (0.7 + 0.6 * Math.random()); }
