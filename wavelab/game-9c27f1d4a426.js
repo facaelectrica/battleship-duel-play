@@ -7674,10 +7674,11 @@ function dwStep(dt) {
     w.ph += dt / K.T[Math.min(nT - 1, Math.floor(w.ph))] * (w.ph < end ? 1 + 3 * s * s : 1);
     if (w.ph >= nT || !waterRun(w.x)) { if (w.shore) dwSwash(w); L.splice(i, 1); continue; }
     w.x += w.dir * w.c * dt; w.far += w.c * dt;
-    // its outline now: between two poses, eased - each point on a straight line from where it stands in the one to where it stands in the next,
+    // its outline now: between two poses - each point on a straight line from where it stands in the one to where it stands in the next,
     // in metres (user Nov 18 11:10, ROGUE WAVE 02 frames 4 to 5: "Its not doing a linear interpolation but some weird other thing ... the crisp is
     // getting all thinned out": a pose's x is stretched by its own height (dwX), so going between two poses in pose numbers bent the paths)
-    const pi = Math.floor(w.ph), u = smoothstep(0, 1, w.ph - pi), A = K.P[pi], B = K.P[pi + 1];
+    // (user Nov 18 12:40: "we are seeing a ease in and out between poses vs a liner interpolation" - straight, at an even pace, frame to frame)
+    const pi = Math.floor(w.ph), u = w.ph - pi, A = K.P[pi], B = K.P[pi + 1];
     const Q = w.pose || (w.pose = A.map(p => [p[0], p[1]])), W2 = w.wp || (w.wp = A.map(() => [0, 0]));
     for (let k = 0; k < DW_NP; k++) {
       const xa = dwX(w, A[k][0], A[k][1]), xb = dwX(w, B[k][0], B[k][1]);
@@ -7771,7 +7772,9 @@ function dwGapCols(F, nOut) {
       // and the gap of the wave whose top that is - or the first gap found, where its own top is the highest
       const had = F[4 * o] !== -1e9, hi = !had || rt <= F[4 * o];
       if (hi) F[4 * o] = rt;
-      if (m >= 3 && !w.landed && (hi || F[4 * o + 1] === 1e9)) { const ru = Math.max(rt + 1, row(und)), rf = row(low); if (rf - ru >= 2) { F[4 * o + 1] = ru; F[4 * o + 2] = rf; } }   // (a gap under two rows: none)
+      // (user 12:40, ref-wall-no-foam-nov18: "a vertical line that has no foam and just stops" - closing every gap filled the air under a lip's front
+      // too, down to the sea: a cliff) once landed, only the tube behind where its tip came down (w.tx) is closed; the air ahead stays open
+      if (m >= 3 && !(w.landed && (x - w.tx) * w.dir <= 0) && (hi || F[4 * o + 1] === 1e9)) { const ru = Math.max(rt + 1, row(und)), rf = row(low); if (rf - ru >= 2) { F[4 * o + 1] = ru; F[4 * o + 2] = rf; } }   // (a gap under two rows: none)
     }
   }
 }
@@ -7872,7 +7875,7 @@ function dwStickAt(i) {
 // (the surface's height at x: the water's own, the designed waves' lowest crossing included - surfaceY0)
 function dwFoamFrom(w, dt) {
   const H = w.H; if (!(H > 2)) return;
-  const T = dwPt(w, 8), tx = T[0], c = w.c * w.dir, U = UPM, wind = E.windU || 0;
+  const T = dwPt(w, 8), tx = T[0], c = w.c * w.dir, U = UPM, wind = E.windU || 0; w.tx = tx;   // (its tip's place: where a landed tube ends - dwGapCols)
   // (the tip over the water under it - its FACE, points 0 to 7, or the sea before its foot: how high above it the tip stands, of its height)
   const under = dwFace(w, tx), gap = (T[1] - under) / H;
   // (a point along its outline, k a point's number with its fraction: world x, height)
@@ -7897,12 +7900,24 @@ function dwFoamFrom(w, dt) {
     // THE TIP LANDS (red on yellow): the splash once - the tube closed, foam over all of it - then churned foam where it keeps coming down
     if (gap < 0.06) {
       if (!w.landed) { w.landed = true; w.lt = 0; dwCrash(w); dwSplash(w, tx, under); }
+      // (user 12:40, ref-wall-no-foam-nov18: "when the wave breaks ... we see a vertical line that has no foam and just stops") the closed tube's
+      // front - from under where the lip came down up round its front - all foam, stuck on it; and the white water it drives ahead of it at its foot
+      { const a = 6.5 * DW_SUB, b = (fi + 1) * DW_SUB;
+        for (let n = dfN(dt * H / U * 40); n > 0; n--) dwFoamStick(w, a + (b - a) * dfR(), dfRnd(0, 0.05) * H, dfRnd(0.03, 0.07) * H, dfRnd(0.4, 0.9));
+        for (let n = dfN(dt * H / U * 10); n > 0; n--) { const x = tx - w.dir * dfRnd(-0.08, 0.02) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.9, 1.15), 0, dfRnd(0.03, 0.06) * H, dfRnd(3, 6)); } }
       // (user 12:07, ref-break-jet-nov18: "the MOMENT the wave breaks and hits the water surface that is when the foam 'shoots' in the opposite
       // direction ... to represent the water hitting the surface") for a moment after it lands, clumps shot up and out ahead of where it hit
       w.lt += dt; if (w.lt < 0.6) { const y = dwYAt(w, tx, under), v = Math.sqrt(9.8 * UPM * H);
         for (let n = dfN(dt * H / U * 40 * (1 - w.lt / 0.6)); n > 0; n--) dwFoamAdd(0, tx + dfRnd(-0.04, 0.04) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * v, dfRnd(0.008, 0.025) * H, dfRnd(1.2, 2.5)); }
       for (let n = dfN(dt * H / U * 12); n > 0; n--) { const x = tx + dfRnd(-0.06, 0.12) * H * -w.dir; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.5, 0.9), dfRnd(0, 0.15) * H, dfRnd(0.03, 0.07) * H, dfRnd(1.2, 2.5)); }
     }
+  } else if (w.landed) {
+    // (user 12:40: "It should keep rolling as it stabilizes") broken and settling: its front a rolling line of white water going on with it, as
+    // much as it still stands up
+    let fi = 5; for (let i = 5; i <= 11; i++) if (dwPt(w, i)[1] > 0.3 * w.H && dwPt(w, i)[0] * w.dir > dwPt(w, fi)[0] * w.dir) fi = i;
+    const f = clamp(dwPt(w, 11)[1] / H, 0, 1), sx = dwPt(w, fi)[0];
+    for (let n = dfN(dt * H / U * 20 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.05, 0.1) * H; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.85, 1), dfRnd(0, 0.04) * H, dfRnd(0.03, 0.06) * H * (0.4 + 0.6 * f), dfRnd(1, 2.5)); }
+    for (let n = dfN(dt * H / U * 8 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.05, 0.2) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.8, 1.05), 0, dfRnd(0.02, 0.05) * H, dfRnd(3, 6)); }
   } else if (w.tilt > 0.12) {
     // (user 12:07, ref-forming-foam-nov18: "the moment the wave is forming, we should already have foam at the top") a wave steepening, no lip
     // yet: foam where its face meets its top (the foremost point up there - its shoulder), riding back over its crest
@@ -7957,8 +7972,11 @@ function dwFoamStep(dt) {
     } else if (k === 1) {
       F.vy[i] += (-0.04 * G - F.vy[i]) * 1.2 * dt; F.vx[i] += (wind - F.vx[i]) * 1.5 * dt; x += F.vx[i] * dt; y += F.vy[i] * dt; F.r[i] *= 1 + 0.25 * dt;
     } else {
-      F.vx[i] += (dwFlow(x) * 0.9 + wind * 0.08 - F.vx[i]) * (k === 2 ? 0.8 : 0.5) * dt; x += F.vx[i] * dt;
-      if (k === 3) { F.vy[i] *= 1 - 0.7 * dt; y = dwTopY(x) + F.vy[i]; } else y = dwTopY(x);
+      // (user 12:40, ref-settle-nov18: "it stops moving along the water ... like it suddenly has no momentum. It should keep rolling as it
+      // stabilizes") white water keeps its way on, giving it up slowly to the water's own speed there and the wind's
+      F.vx[i] += (dwFlow(x) * 0.9 + wind * 0.08 - F.vx[i]) * (k === 2 ? 0.3 : 0.25) * dt; x += F.vx[i] * dt;
+      // (churned foam no deeper than the wave's body over its face there - none left hanging under the sea as the wave goes down)
+      if (k === 3) { F.vy[i] *= 1 - 0.7 * dt; const t = dwTopY(x); F.vy[i] = Math.min(F.vy[i], Math.max(0, surfaceY0(x) - t) + 4); y = t + F.vy[i]; } else y = dwTopY(x);
       F.r[i] *= 1 + 0.12 * dt;
       if (!waterRun(x)) F.age[i] = F.life[i];
     }
@@ -9341,7 +9359,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 13:40';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 13:45';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
