@@ -7708,7 +7708,12 @@ function dwGapCols(F, nOut) {
       let top = -Infinity, low = Infinity; for (let k = 0; k < m; k++) { if (DW_YS[k] > top) top = DW_YS[k]; if (DW_YS[k] < low) low = DW_YS[k]; }
       let und = low; for (let k = 0; k < m; k++) if (DW_YS[k] < top && DW_YS[k] > und) und = DW_YS[k];   // (the next under its top: the lip's underside)
       const base = surfaceY0(x) + dwTab(w, x, true), row = h => Math.floor((base - h) * SV - TOPPX + 0.5), rt = row(top);
-      F[4 * o] = rt; if (m >= 3 && !w.landed) { const ru = Math.max(rt + 1, row(und)), rf = row(low); if (rf - ru >= 2) { F[4 * o + 1] = ru; F[4 * o + 2] = rf; } }   // (a gap under two rows: none)
+      // (user Nov 18 12:16, ref-many-waves-nov18: several waves over one another - "some of them stop rendering correctly": each wave wrote its
+      // whole span, the last over the others, a curl's gap lost under its neighbour's) a column keeps the highest top of the waves over it,
+      // and the gap of the wave whose top that is - or the first gap found, where its own top is the highest
+      const had = F[4 * o] !== -1e9, hi = !had || rt <= F[4 * o];
+      if (hi) F[4 * o] = rt;
+      if (m >= 3 && !w.landed && (hi || F[4 * o + 1] === 1e9)) { const ru = Math.max(rt + 1, row(und)), rf = row(low); if (rf - ru >= 2) { F[4 * o + 1] = ru; F[4 * o + 2] = rf; } }   // (a gap under two rows: none)
     }
   }
 }
@@ -7799,14 +7804,13 @@ function dwFoamFrom(w, dt) {
   if (w.lip) {
     // (its leading edge - the lip's foremost point, 7 to 10: where a lip that hooks back under itself throws its water from, not its end inside the tube)
     const fi = dwLead(w);
-    const Fp = dwPt(w, fi), fx = Fp[0], fy = dwYAt(w, fx, Fp[1]);
+    const fx = dwPt(w, fi)[0];
     // (user 12:07, ref-tip-foam-nov18: "the TIP must always have foam, its the one that is generating it") a cap of churned foam on the leading edge
     // itself, going on with the wave and made again all the time
     for (let n = dfN(dt * H / U * 30); n > 0; n--) { const x = fx - w.dir * dfRnd(-0.01, 0.06) * H; dwFoamAdd(3, x, dwTopY(x), c, dfRnd(0, 0.05) * H, dfRnd(0.025, 0.055) * H, dfRnd(0.25, 0.6)); }
     // (user 11:30, ref-foam-on-top-nov18: "the foam should go on the top of the wave because of the movement ... there is no foam there [inside
-    // the tube] because it gets pushed to the top of the wave") drops spat off the tip, out ahead of it and up - none fall back into the tube
-    for (let n = dfN(dt * H / U * 6); n > 0; n--)
-      dwFoamAdd(0, fx + dfRnd(-0.02, 0.02) * H, fy - dfRnd(0, 0.03) * H, c * dfRnd(1, 1.35), -dfRnd(0.1, 0.55) * w.c, dfRnd(0.2, 0.5) * UPM, dfRnd(1.5, 3));
+    // the tube] because it gets pushed to the top of the wave"; 12:15, ref-no-drops-nov18: "these 'water drops' at the crisp of the wave ... should
+    // not exist" - no drops off the lip: its foam stays on it)
     // white water made at the tip riding the lip's top back over the crest (green): slower than the wave, so it slides back along it
     for (let n = dfN(dt * H / U * 14); n > 0; n--) { const p = at(fi + dfR() * Math.max(1, 10.5 - fi)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.35, 0.7), 0, dfRnd(0.02, 0.045) * H, dfRnd(1.5, 3)); }
     // mist off the lip's back, the wind lifting it back over the crest
@@ -7823,13 +7827,12 @@ function dwFoamFrom(w, dt) {
     }
   } else if (w.tilt > 0.12) {
     // (user 12:07, ref-forming-foam-nov18: "the moment the wave is forming, we should already have foam at the top") a wave steepening, no lip
-    // yet: foam where its face meets its top (the foremost point up there - its shoulder), riding back over its crest, a few drops spat ahead
+    // yet: foam where its face meets its top (the foremost point up there - its shoulder), riding back over its crest
     let hm = 0; for (let i = 0; i < DW_NP; i++) hm = Math.max(hm, dwPt(w, i)[1]);
     let si = 11; for (let i = 5; i <= 11; i++) { const p = dwPt(w, i); if (p[1] >= 0.85 * hm && p[0] * w.dir > dwPt(w, si)[0] * w.dir) si = i; }
     const Sp = dwPt(w, si), sx = Sp[0], f = clamp((w.tilt - 0.12) / 0.5, 0, 1);
     for (let n = dfN(dt * H / U * 14 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.01, 0.05) * H; dwFoamAdd(3, x, dwTopY(x), c, dfRnd(0, 0.02) * H, dfRnd(0.015, 0.035) * H, dfRnd(0.25, 0.6)); }
     for (let n = dfN(dt * H / U * 6 * f); n > 0; n--) { const p = at(si + dfR() * Math.max(0.5, 11.5 - si)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.5, 0.85), 0, dfRnd(0.012, 0.03) * H, dfRnd(1.5, 3)); }
-    for (let n = dfN(dt * H / U * 1.5 * f); n > 0; n--) dwFoamAdd(0, sx, dwTopY(sx) - 0.01 * H, c * dfRnd(1, 1.3), -dfRnd(0.1, 0.4) * w.c, dfRnd(0.2, 0.5) * UPM, dfRnd(1, 2));
   }
 }
 // the top of the water at x: the highest any wave's outline stands there (a lip's top over its tube), else the surface
@@ -7857,7 +7860,7 @@ function dwSplash(w, x, h) {
   for (let i = 0; i < n * 0.6; i++) dwFoamAdd(0, x + dfRnd(-0.05, 0.05) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * Math.sqrt(9.8 * UPM * H), dfRnd(0.008, 0.025) * H, dfRnd(1.2, 2.5));   // (the jet's first clumps)
   for (let i = 0; i < n * 0.4; i++) dwFoamAdd(1, x + dfRnd(-0.15, 0.15) * H, y - dfRnd(0, 0.3) * H, c * dfRnd(0, 0.6), -dfRnd(0.1, 0.5) * w.c, dfRnd(0.04, 0.09) * H, dfRnd(2, 4.5));
   for (let i = 0; i < n * 0.4; i++) { const xx = x + dfRnd(-0.25, 0.25) * H; dwFoamAdd(2, xx, dwTopY(xx), c * dfRnd(0.4, 1), 0, dfRnd(0.03, 0.07) * H, dfRnd(3, 7)); }
-  if (!SIM_ONLY) sound('splash', x, clamp(H / 80, 0.3, 1));
+  if (!SIM_ONLY) sound('waveBreak', x, clamp(H / 80, 0.3, 1));   // (the rush, the crash, the roar and the foam's fizz - 51-audio.js)
 }
 // each bit a step: a drop flies (gravity, the wind's drag) and lands as white water; mist drifts with the wind, rising a little; white water rides
 // the top of the water (a lip's top over its tube - never inside it) at its own speed, eased to the water's there (dwFlow) and the wind's; churned
@@ -7953,7 +7956,48 @@ function dwDrawShore(x0, x1, lit = null) {   // (lit: again in the waterline's l
 // (The small boats today - jetboatSink; the other families ride it out: not decided yet)
 function dwCrash(w) {
   const T = dwPt(w, 8)[0], Cx = dwPt(w, 11)[0], a = Math.min(T, Cx) - 0.05 * w.H, b = Math.max(T, Cx) + 0.05 * w.H;
-  for (const j of jetboats.list ? jetboats.list() : jetboats) if (j.state === 'run' && j.x > a && j.x < b && w.H > 0.25 * storyBoatSize(j)[0]) { DW.lost++; jetboatSink(j); }
+  for (const j of jetboats.list ? jetboats.list() : jetboats) if (j.state === 'run' && j.x > a && j.x < b && w.H > 0.25 * storyBoatSize(j)[0]) { DW.lost++; jetboatCapsize(j, w.dir); }   // (rolled over the way the wave goes - not blown up)
+}
+// a folded wave's rows at x, as heights: its face (the lowest), its lip's underside (the next under its top), its top; null where it isn't folded
+const DW_YF = new Float64Array(16);
+function dwFoldAt(w, x) {
+  if (!w.lip || !(x >= w.xa && x <= w.xb)) return null;
+  const C = w.C; let m = 0;
+  for (let k = 0; k < w.n - 1 && m < 16; k++) { const xA = C[2 * k], xB = C[2 * k + 2]; if ((xA <= x) !== (xB <= x)) DW_YF[m++] = C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA); }
+  if (m < 3) return null;
+  let top = -Infinity, low = Infinity; for (let k = 0; k < m; k++) { if (DW_YF[k] > top) top = DW_YF[k]; if (DW_YF[k] < low) low = DW_YF[k]; }
+  let und = low; for (let k = 0; k < m; k++) if (DW_YF[k] < top && DW_YF[k] > und) und = DW_YF[k];
+  return [low, und, top];
+}
+/* A BOAT UNDER THE LIP (user Nov 18 12:09, lab/wavelab/ref/ref-boat-in-tube / ref-boat-through-lip-nov18: "a boat that is caught here should not be
+   able to just go 'through' the wave ... It would be pushed and likely flipped, depending on the angle that its in and its size. And it would
+   generate foam too. If it gets flipped, then it would be capsized and then slowly sink"): a small boat (the jet boat family) riding a face
+   whose lip has come down lower over it than it stands is struck by it - pressed down under it, taken on the way the wave goes and turned with
+   it, spray and mist thrown off it; and rolled right over (jetboatCapsize) when the wave is big against it and it lies steep: the wave's height
+   to its length, times how steeply it lies, times how far the lip has come down on it. True: it's capsized */
+function dwBoatLip(j, dt) {
+  const B = storyBoatSize(j), len = B[0], hg = B[1];
+  for (const w of DW.live) {
+    if (!w.lip || j.x < w.xa - len || j.x > w.xb + len) continue;
+    let over = 0;
+    for (const f of [-0.45, 0, 0.45]) { const F = dwFoldAt(w, j.x + f * len * Math.cos(j.a)); if (F) over = Math.max(over, hg * Math.max(0.3, Math.abs(Math.cos(j.a))) - (F[1] - F[0])); }
+    if (!(over > 0)) continue;
+    const k = clamp(over / hg, 0, 1), H = w.H, c = w.dir * w.c;
+    if ((H / len) * (0.5 + Math.abs(j.a) / 0.5) * (0.5 + k) >= 1) { DW.lost++; jetboatCapsize(j, w.dir); return true; }
+    j.x += c * (0.5 + 0.5 * k) * dt; j.y += Math.min(over, hg * 0.6); j.a += (w.dir * 0.5 - j.a) * (1 - Math.exp(-dt * 3));
+    if (!SIM_ONLY) {
+      for (let n = dfN(dt * 40 * (0.3 + k)); n > 0; n--) dwFoamAdd(0, j.x + dfRnd(-0.4, 0.4) * len, j.y - dfRnd(0, 0.5) * hg, c * dfRnd(0.6, 1.3), -dfRnd(0.2, 0.7) * w.c, dfRnd(0.2, 0.5) * UPM, dfRnd(0.8, 1.6));
+      for (let n = dfN(dt * 8 * (0.3 + k)); n > 0; n--) dwFoamAdd(1, j.x + dfRnd(-0.3, 0.3) * len, j.y - dfRnd(0, 0.5) * hg, c * dfRnd(0.3, 0.8), -dfRnd(0.05, 0.2) * w.c, dfRnd(0.3, 0.6) * hg, dfRnd(1, 2));
+    }
+  }
+  return false;
+}
+// foam thrown up where something went over in the water: churned foam about it, mist, a few drops - as big as it (s: its length)
+function dwFoamBurst(x, y, s) {
+  const n = Math.round(clamp(s / UPM, 2, 30) * 3);
+  for (let i = 0; i < n; i++) { const xx = x + dfRnd(-0.6, 0.6) * s; dwFoamAdd(3, xx, dwTopY(xx), dfRnd(-0.2, 0.2) * s, dfRnd(0, 0.15) * s, dfRnd(0.08, 0.2) * s, dfRnd(1.5, 3)); }
+  for (let i = 0; i < n * 0.4; i++) dwFoamAdd(1, x + dfRnd(-0.4, 0.4) * s, y - dfRnd(0, 0.3) * s, dfRnd(-0.3, 0.3) * s, -dfRnd(0.1, 0.4) * s, dfRnd(0.15, 0.3) * s, dfRnd(1.5, 3));
+  for (let i = 0; i < n; i++) dwFoamAdd(0, x + dfRnd(-0.4, 0.4) * s, y - dfRnd(0, 0.2) * s, dfRnd(-1, 1) * s, -dfRnd(0.5, 1.5) * s, dfRnd(0.15, 0.4) * UPM, dfRnd(0.8, 1.6));
 }
 
 //@src 09-zz-biomes.js:1
@@ -9218,7 +9262,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 13:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 13:19';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54208,7 +54252,7 @@ const JET_STRUT = [0x50, 0x52, 0x58];
    (user Oct 27: "The rest, when destroyed, is never spawned again") ---- */
 // (Nov 10, part 8: a record table - 04-zz-coltable.js; a row a boat, held and walked as its handle, its fields as they were: its wake and
 // foam's (fpx ...), driven (drv, vDrive), a fishing boat's horn (hornOn - 50-land-civdrive.js), moored (anc, _moorX - 50-land-anchors.js), a fishing boat's net (50-story-net.js), the STORY's)
-const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn',
+const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn capsized capT capDir',
 'txt: kind state','val: lake net anc rt ai home', ...STORY_REC, ...CIV_REC));
 // (engine stage 3: the jet and motor boats' own table and random source - 36-zz-tables.js)
 const jbR = sysRng('jetboats'), jbRnd = (a, b) => a + (b - a) * jbR();
@@ -54249,6 +54293,17 @@ function stepJetboats(dt) {
 function stepJetboat(j, dt) {
     j.ph += dt;
     if (j.state === 'gone' || j.state === 'wreck') return;
+    if (j.state === 'sink' && j.capsized) {
+      // CAPSIZED (the Wave Lab - user Nov 18 12:09: "If it gets flipped, then it would be capsized and then slowly sink"): rolled over the way it
+      // was thrown (capDir), it floats keel up a while, then goes down slowly and settles on the floor upside down - no blast, nothing broken
+      j.capT += dt; const up = j.capDir * Math.PI, hg = storyBoatSize(j)[1], ws = surfaceY(j.x);
+      j.a += (up - j.a) * (1 - Math.exp(-dt * 4));
+      if (j.capT < 5) j.y += (ws - 1 - j.y) * (1 - Math.exp(-dt * 4)); else j.y += 5 * dt;
+      if (!SIM_ONLY && jbR() < dt * (j.capT < 5 ? 2 : 4)) addBubble(j.x + jbRnd(-6, 6), j.y + 3, jbRnd(-4, 4), -jbRnd(12, 26), jbRnd(0.6, 1.4));
+      const K = jbKeel(j).map(p => [-p[0], hg + 2]);                  // (keel up: what lies lowest is its top)
+      if (j.capT > 5 && floorPen(K, j.x, j.y, j.a - up) >= 0) { const r = floorRest(K, j.x, null, 0.5, j.a - up); j.y = r.y; j.a = up + r.a; j.state = 'wreck'; kickDust(j.x, 14, 0.5); }
+      return;
+    }
     if (j.state === 'sink') {
       // down to the bottom (the sea's or the lake's), settling there on its keel along the floor - its wreck stays
       j.y += 18 * dt; j.a += ((j.brk != null ? 0 : 0.35 * j.dir) - j.a) * dt * 0.6; if (j.brk != null) j.brkT = (j.brkT || 0) + dt;   // (broken: each half tips its own way - fishHalves)
@@ -54269,7 +54324,7 @@ function stepJetboat(j, dt) {
     const sp = (j.driven != null ? j.vDrive || 0 : j.story ? j.npcV || 0 : j.v * (j.nk == null ? 1 : j.nk)) * (j.turn > 0 ? 0.25 : 1) * (j.hp < 2 ? 0.6 : 1);
     if (!coastAhead(j.x, Math.sign(sp) * j.dir || j.dir, 25)) j.x += j.dir * sp * dt;   // (never up onto a coast out at sea)
     // (the Wave Lab: a designed wave's face steeper than she can lie on rolls her over)
-    if (DW.live.length && !j.air && Math.abs(j.a) > DW.cap) { DW.lost++; jetboatSink(j); return; }
+    if (DW.live.length && !j.air && Math.abs(j.a) > DW.cap) { DW.lost++; jetboatCapsize(j, Math.sign(j.a) || 1); return; }
     // (user Nov 2: "the boat is wobbling weirdly" - the fishing boat on the jet ski's ride: the water read 10 units either side of
     // her middle under an 11 m hull, nose up and bouncing at rest, the tilt snapped to it each step) every boat of this family
     // reads the water at its own hull's ends (JB_HULL of its real length - storyBoatSize) and its middle
@@ -54296,6 +54351,7 @@ function stepJetboat(j, dt) {
       const want = Math.atan2(yb - ys, 2 * half) * j.dir - f[0] * go * j.dir + Math.sin(j.ph * f[1]) * 0.03 * go * Math.min(1, 25 / L) * j.dir;
       j.a += (want - j.a) * (1 - Math.exp(-dt * JB_EASE));
     }
+    if (DW.live.length && !j.air && dwBoatLip(j, dt)) return;      // (the Wave Lab: a lip come down on her - pushed, or rolled over: 09-zy-dwaves.js)
     if (picBoat(j)) { if (j.state === 'run') picBoatFx(j, dt); }   // (a picture boat: its foam, bow wave, wake and screw by its picture - 50-story-net.js)
     else if (!SIM_ONLY && j.turn === 0 && !j.air && sp > 4) { j.spr = (j.spr || 0) + dt * 30; while (j.spr >= 1) { j.spr -= 1; spawnSpray(j.x - j.dir * 13, j.y - 1, -j.dir * jbRnd(30, 70), 0.5); } }
     if (j.hp < 2) { j.smokeT = (j.smokeT || 0) - dt; if (j.smokeT <= 0 && !SIM_ONLY) { j.smokeT = 0.15; spawnSmoke(j.x - j.dir * 4, j.y - 8, { kind: 'trail', dark: 0.2, r: jbRnd(2, 3.5), grow: 3, lift: 20, vx: -j.dir * 10, life: jbRnd(2, 3), alpha: 0.5, chain: smStream(j) }); } }
@@ -54311,6 +54367,13 @@ function jetboatSink(j, atX = null) {
   j.state = 'sink'; j.hp = 0;
   if (atX != null && picBoat(j)) { const w = storyBoatSize(j)[0]; if (w >= VEH_BREAK_M * UPM) { j.brk = clamp(0.5 + (atX - j.x) / w * (j.dir > 0 ? -1 : 1), 0.3, 0.7); j.brkT = 0; } }
   sectionBlast(j.x, j.y - 4, 0.5, 0); spawnDebris(j.x, j.y - 4, 8, j.dir * j.v * 0.2); sound('impact', j.x);
+}
+// rolled right over by a wave (s: the way it goes over) - capsized: floating keel up, then going down slowly (stepJetboat), foam where it went over;
+// not hurt (its hp kept): not burnt, only upside down
+function jetboatCapsize(j, s) {
+  if (j.state !== 'run' || netGuestHold()) return;
+  j.state = 'sink'; j.capsized = 1; j.capT = 0; j.capDir = s < 0 ? -1 : 1; j.air = false;
+  if (!SIM_ONLY) { dwFoamBurst(j.x, j.y, storyBoatSize(j)[0]); sound('splash', j.x, 0.6); }
 }
 let jbArt = null;
 function buildJetboatArt() {
@@ -73375,6 +73438,35 @@ function sfxSplash(x, amt) {
   noiseShot(out, t, 0.5, 'bandpass', 900, 300, 1.2, 0.6, 0.01);
   noiseShot(out, t + 0.15, 1.4, 'highpass', 3000, 1200, 0.6, 0.35, 0.15);   // the column falling back
 }
+/* A WAVE BREAKING (user Nov 18 12:13, his sample lab/wavelab/ref/sfx/ref-wave-crash-nov18.mp3: "It should represent the big wosh when it splashes
+   and the foam that continues"), built as the sample is shaped - measured: a rush rising (most of it 200-1500 Hz), the crash a deep roar at its
+   loudest (200-600 Hz over a heavy low end) held about a second, falling away over two more, and the foam's fizz going on under it (1.5-11 kHz)
+   for the last of it: the rush (band noise rising) into the crash (a deep thump, low noise), the roar (low noise held, closing down), the fizz
+   (high noise, crackling: many little bursts thinning out) - amt the wave's size (0.3 small .. 1 big: louder, longer, deeper). Its own out, kept
+   as long as it sounds */
+function sfxWaveBreak(x, amt) {
+  if (!SFX.ctx) return;
+  const ctx = SFX.ctx, h = hear(x), L = 0.6 + 0.4 * amt; if (h.att * L < 0.01) return;
+  const p = makePan(), out = ctx.createGain(); p.set(h.pan); out.gain.value = h.att * L; out.connect(p.node); p.node.connect(sfxRound());
+  const t = ctx.currentTime, k = 0.7 + 0.6 * amt, T = 4.5 * k;
+  setTimeout(() => { try { out.disconnect(); p.node.disconnect(); } catch (e) {} }, (T + 1) * 1000);
+  // (a noise run through a filter whose level follows the points [seconds, level] - looped, as long as it's needed)
+  const run = (buf, type, f0, f1, q, pts) => {
+    const src = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain(), end = pts[pts.length - 1][0];
+    src.buffer = buf; src.loop = true; f.type = type; f.Q.value = q;
+    f.frequency.setValueAtTime(f0, t); f.frequency.exponentialRampToValueAtTime(Math.max(20, f1), t + end);
+    g.gain.setValueAtTime(0.0001, t); for (const [a, v] of pts) g.gain.exponentialRampToValueAtTime(Math.max(0.0001, v), t + a);
+    src.connect(f); f.connect(g); g.connect(out); src.start(t, seenR('audio') * 1.5); src.stop(t + end + 0.05);
+    src.onended = () => { src.disconnect(); f.disconnect(); g.disconnect(); };
+  };
+  run(SFX.noise, 'bandpass', 500, 1100, 0.7, [[0.3, 0.35], [0.45, 0.5], [0.9, 0.2], [1.4, 0.0001]]);                                   // the rush
+  thump(out, t + 0.35, 70, 32, 0.9 * k, 0.9);                                                                                          // the crash
+  run(SFX.brown, 'lowpass', 900, 260, 0.6, [[0.4, 1.1], [1.4 * k, 0.9], [2.6 * k, 0.35], [T, 0.0001]]);                                // the roar
+  run(SFX.noise, 'bandpass', 420, 300, 0.8, [[0.4, 0.6], [1.2 * k, 0.45], [2.4 * k, 0.12], [T * 0.8, 0.0001]]);
+  run(SFX.noise, 'highpass', 2600, 4200, 0.5, [[0.5, 0.04], [1.2, 0.09], [2.5 * k, 0.07], [T, 0.0001]]);                              // the fizz under it
+  for (let i = 0, n = Math.round(30 * k); i < n; i++) { const a = 0.6 + (T - 0.8) * Math.pow(i / n, 1.4);                             // its crackle
+    noiseShot(out, t + a + seenR('audio') * 0.08, 0.05 + 0.08 * seenR('audio'), 'highpass', 3000 + 4000 * seenR('audio'), 2500, 0.7, 0.1 * (1 - i / n) + 0.02, 0.003); }
+}
 // (user Nov 17 16:02: hitting a building "the sound of destruction ... should be much stronger") masonry giving way: a heavy boom, the wall breaking
 // up, a long crumbling roar, and its heavy pieces thudding down after - amt the blow (a hit 0.6, the whole building coming down 1.5)
 function sfxRubble(x, amt) {
@@ -73398,7 +73490,7 @@ function sfxCrash(x, amt) {
 // (engine stage 3) the world's play requests: sound(id, x, a) -> 'sound' (36-zz-events.js), played here. x, a: the sound's
 // own two arguments, whatever they are (mostly where, and how loud; for the UI's, a player or a pad); the sounds made in
 // other files (the plane's, the fireworks', the research ship's...) are listed here too, so every request comes this way
-const SND = { fogHorn: sfxFogHorn, explosion: sfxExplosion, impact: sfxImpact, tankBlow: sfxTankBlow, splash: sfxSplash, crash: sfxCrash, rubble: sfxRubble,
+const SND = { fogHorn: sfxFogHorn, explosion: sfxExplosion, impact: sfxImpact, tankBlow: sfxTankBlow, splash: sfxSplash, waveBreak: sfxWaveBreak, crash: sfxCrash, rubble: sfxRubble,
   anchorThunk: sfxAnchorThunk, anchorWinch: sfxAnchorWinch, bayDoors: sfxBayDoors, bombDrop: sfxBombDrop, cannon: sfxCannon,
   click: sfxClick, clink: sfxClink, crush: sfxCrush, door: sfxDoor, empty: sfxEmpty, engineDie: sfxEngineDie,
   fwBang: sfxFwBang, fwLaunch: sfxFwLaunch, iceCrack: sfxIceCrack, latch: sfxLatch, marker: sfxMarker, mg: sfxMG,
