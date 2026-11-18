@@ -7728,7 +7728,7 @@ function dwFlow(x) {
   for (let i = 0; i < L.length; i++) { const w = L[i]; if (w.H > 0) v += w.dir * w.c * (w.K.push || 0) * clamp(dwTab(w, x, true) / w.H, -0.3, 1); }
   return v;
 }
-// THE WATER'S SPEED WHERE A THING RIDES (world y on a wave's water - dwRideY): a wave's water moves on with it the more the higher up it is (its push of
+// THE WATER'S SPEED WHERE A THING RIDES (world y on a wave's water - dwSurfAt): a wave's water moves on with it the more the higher up it is (its push of
 // its speed, by its height there), and a LIP - water with air under it, thrown out ahead - moves at the wave's own speed (user Nov 18 13:51: a boat
 // up at the crest as it pitches over is taken with it, over the falls - not left behind on a slower surface). And on any face steeper than 1:1 at
 // least c(1 - 1/slope): the water at a surface moving by at c rises at (c - u) times its slope at a fixed spot, and it can't rise faster than the
@@ -7739,7 +7739,7 @@ function dwFlowAt(x, y) {
   for (let i = 0; i < L.length; i++) { const w = L[i]; if (!(w.H > 0) || !(x >= w.xa && x <= w.xb)) continue;
     const h = dwTab(w, x, true) + surfaceY0(x) - y;   // (the height on the wave it rides at)
     let lip = false; if (w.fb >= w.fa && dwSpans(w, x, DW_FS)) for (let k = 0; k < DW_FS.n; k++) if (DW_FS.g[2 * k] < h - 0.02 * w.H) lip = true;
-    if (sl < 0) sl = Math.abs(dwRideY(x + DW_FDX, y, DW_FDX) - dwRideY(x - DW_FDX, y, DW_FDX)) / (2 * DW_FDX);   // (the slope of the water it's on)
+    if (sl < 0) sl = Math.abs(dwSurfAt(x + DW_FDX, y) - dwSurfAt(x - DW_FDX, y)) / (2 * DW_FDX);   // (the slope of the water it's on)
     v += w.dir * w.c * Math.max(lip ? 1 : (w.K.push || 0) * clamp(h / w.H, -0.3, 1), sl > 1 ? 1 - 1 / sl : 0); }
   return v;
 }
@@ -7751,12 +7751,12 @@ function dwCarryAll(dt) {
   if (!DW.live.length) return;
   for (const e of vehAll()) {
     const v = e.v; if (!v || !Number.isFinite(v.x) || e.k === 'tower' || e.k === 'crane' || v.state === 'gone' || v.moored && e.army || v.gate) continue;
+    if (jetboats.includes(v)) continue;                           // (a boat: dragged by the water as a body - dwWaterAt, stepJetboat)
     const run = waterRun(v.x); if (!run) continue;
     let H = 0; for (const w of DW.live) if (v.x >= w.xa && v.x <= w.xb) H = Math.max(H, dwTab(w, v.x, false)); if (!(H > 0)) continue;
-    const B = vehBox(e), len = Math.max(4, B[1] - B[0]), y0 = v.y != null ? v.y : surfaceY0(v.x), s = dwRideY(v.x, y0, Math.max(4, (B[3] - B[2]) * 0.5)), y = v.y != null ? v.y : s;   // (the water it's on - up on a lip, its top: dwRideY)
+    const B = vehBox(e), len = Math.max(4, B[1] - B[0]), y0 = v.y != null ? v.y : surfaceY0(v.x), s = dwSurfAt(v.x, y0), y = v.y != null ? v.y : s;   // (the water it's in or on - dwSurfAt)
     if (y < s - Math.max(len * 0.6, 20)) continue;                 // (in the air over it)
     const k = clamp(H / (0.33 * len), 0, 1) * clamp(1 - (y - s) / (2 * H + 1), 0, 1), u = dwFlowAt(v.x, s) * k;
-    if (jetboats.includes(v)) { v.vx = u; continue; }               // (a boat: the water's way is her drift, kept when she's thrown off it - stepJetboat)
     const nx = v.x + u * dt; if (nx > run[0] + len * 0.5 && nx < run[1] - len * 0.5) v.x = nx;   // (never up onto a shore)
   }
 }
@@ -8216,7 +8216,7 @@ function dwBoatLip(j, dt) {
     // goes over only if that carries her past her vanishing angle (jbRoll; capsized there - stepJetboat)
     const k = clamp(over / hg, 0, 1), c = w.dir * w.c, v = w.c / UPM, Lm = len / UPM, Hm = hg / UPM;
     j.av = (j.av || 0) + w.dir * DW_LIP_K * v * v * k / (Lm * Lm + Hm * Hm) * dt;
-    // (no shove or press of its own: the lip's water carries it as all water does - dwCarryAll - and the lip turns it)
+    // (no shove or press of its own: the lip's water drags it as all water does - dwWaterAt, jbFloat - and the lip turns it)
     if (!SIM_ONLY) {
       for (let n = dfN(dt * 40 * (0.3 + k)); n > 0; n--) dwFoamAdd(0, j.x + dfRnd(-0.4, 0.4) * len, j.y - dfRnd(0, 0.5) * hg, c * dfRnd(0.6, 1.3), -dfRnd(0.2, 0.7) * w.c, dfRnd(0.2, 0.5) * UPM, dfRnd(0.8, 1.6));
       for (let n = dfN(dt * 8 * (0.3 + k)); n > 0; n--) dwFoamAdd(1, j.x + dfRnd(-0.3, 0.3) * len, j.y - dfRnd(0, 0.5) * hg, c * dfRnd(0.3, 0.8), -dfRnd(0.05, 0.2) * w.c, dfRnd(0.3, 0.6) * hg, dfRnd(1, 2));
@@ -8224,22 +8224,34 @@ function dwBoatLip(j, dt) {
   }
   return false;
 }
-/* THE WATER A FLOATING THING RIDES (user Nov 18 13:45, bug-20261118-134430: a boat caught at the top of a wave - "a lot of obvious flickering when
-   its at the top and sometimes it gets 'stuck' for a few frames"): the sea's surface (surfaceY0) is a wave's LOWEST crossing - under a lip, the face
-   far below it - so a boat up on a lip had its ends on the lip and on the face by turns, frame to frame, and was pressed and shoved by the lip's
-   contact on top of it. A thing rides the first water under it: of the water's tops in each column (a wave's top, and the water under each of its
-   air gaps - dwSpans), the highest at or below where it is (yRef, give or take tol); none - the sea's surface */
+/* THE WATER A THING IS IN, OR OVER (user Nov 18 13:45, bug-20261118-134430: flicker at the top of a wave; 14:33: "make sure there's no teleporting.
+   It should all be physics based"): a wave's column is water and air gaps by turns (dwSpans) - its top's water down to its first gap, the water
+   under that gap down to the next, and so on, the sea under all of it. dwSurfAt(x, y): the surface of the water that holds y - or, where y is in
+   the air (over the wave, or in a gap), of the first water under it. So a boat in a lip's water is in it under the lip's top (not over the tube's
+   floor, as the first water under her said before), and a boat in the tube floats on its floor */
 const DW_RS = dwSpanNew();
 const DW_FS = dwSpanNew();
-function dwRideY(x, yRef, tol) {
-  let y = surfaceY0(x);
+function dwSurfAt(x, y) {
+  let r = surfaceY0(x);
   for (const w of DW.live) {
     if (!(w.fb >= w.fa) || !dwSpans(w, x, DW_RS)) continue;
-    const S = DW_RS; let best = Infinity;
-    for (let k = -1; k < S.n; k++) { const yy = dwYAt(w, x, k < 0 ? S.top : S.g[2 * k + 1]); if (yy >= yRef - tol && yy < best) best = yy; }
-    if (best < y) y = best;
+    const S = DW_RS; let t = dwYAt(w, x, S.top);
+    for (let k = 0; k < S.n; k++) { if (y < dwYAt(w, x, S.g[2 * k])) break; t = dwYAt(w, x, S.g[2 * k + 1]); }   // (at or under this gap's top: the water under it)
+    if (t < r) r = t;
   }
-  return y;
+  return r;
+}
+/* THE WATER'S OWN VELOCITY AT ITS SURFACE, where a thing of length len floats (s: that surface - dwSurfAt): out[0] its way along the sea (dwFlowAt, the
+   less for a thing long against the wave - a third of its length carries it whole), out[1] its rise and fall (world y, down +): a surface moving by
+   at the wave's speed c lifts its water at (u - c) times its slope - never more than c (dwFlowAt's 1:1 rule). A floating thing is dragged toward
+   it (stepJetboat): it rides a face as the face's own water does, with no rate of its own to follow at a spot the face sweeps past */
+function dwWaterAt(x, s, len, out) {
+  out[0] = out[1] = 0; let H = 0, w0 = null;
+  for (const w of DW.live) if (x >= w.xa && x <= w.xb) { const h = dwTab(w, x, false); if (h > H) { H = h; w0 = w; } }
+  if (!w0) return out;
+  const u = dwFlowAt(x, s), sl = (dwSurfAt(x + DW_FDX, s) - dwSurfAt(x - DW_FDX, s)) / (2 * DW_FDX);
+  out[0] = u * clamp(H / (0.33 * len), 0, 1); out[1] = (u - w0.dir * w0.c) * sl;
+  return out;
 }
 // foam thrown up where something went over in the water: churned foam about it, mist, a few drops - as big as it (s: its length)
 function dwFoamBurst(x, y, s) {
@@ -9511,7 +9523,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 15:25';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 15:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54513,7 +54525,7 @@ const JET_STRUT = [0x50, 0x52, 0x58];
    (user Oct 27: "The rest, when destroyed, is never spawned again") ---- */
 // (Nov 10, part 8: a record table - 04-zz-coltable.js; a row a boat, held and walked as its handle, its fields as they were: its wake and
 // foam's (fpx ...), driven (drv, vDrive), a fishing boat's horn (hornOn - 50-land-civdrive.js), moored (anc, _moorX - 50-land-anchors.js), a fishing boat's net (50-story-net.js), the STORY's)
-const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn capsized capT capDir av dunk',
+const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn capsized capT capDir av bod',
 'txt: kind state','val: lake net anc rt ai home', ...STORY_REC, ...CIV_REC));
 // (engine stage 3: the jet and motor boats' own table and random source - 36-zz-tables.js)
 const jbR = sysRng('jetboats'), jbRnd = (a, b) => a + (b - a) * jbR();
@@ -54556,18 +54568,18 @@ function stepJetboat(j, dt) {
     if (j.state === 'gone' || j.state === 'wreck') return;
     // (the Wave Lab - user Nov 18 13:51: a boat caught at a breaking wave's top should go over with it, "I would expect it to capsize": she went up the
     // face at the wave's speed, and the moment she left the water she stopped dead in the air and fell behind it) her drift (vx): the way the water
-    // gives her (dwCarryAll) - kept in the air, slowed by the water's drag on it once she's in it and nothing carries her
-    if (j.vx) { if (!coastAhead(j.x, Math.sign(j.vx), 25)) j.x += j.vx * dt; if (!j.air) j.vx *= Math.exp(-JB_DRAG * dt); if (Math.abs(j.vx) < 0.5) j.vx = 0; }
+    // gives her - the water drags her toward its own way (jbFloat), and in the air she keeps it (a boat going down, blown up: slowed by the water)
+    if (j.vx) { if (!coastAhead(j.x, Math.sign(j.vx), 25)) j.x += j.vx * dt; if (j.state === 'sink' && !j.capsized) { j.vx *= Math.exp(-JB_DRAG * dt); if (Math.abs(j.vx) < 0.5) j.vx = 0; } }
     if (j.state === 'sink' && j.capsized) {
       // CAPSIZED (the Wave Lab - user Nov 18 12:09: "If it gets flipped, then it would be capsized and then slowly sink"; 13:09: "when a boat
       // capsizes, its ridiculously fast. Is it even taking into account any physics?"): it goes on rolling as a body (jbRoll) - over the way it was
       // thrown (capDir) to lie keel up on the water, at its own pace; it floats so, air trapped under its hull, settling lower, for JB_FLOAT
       // seconds, then goes down slowly (JB_SINK) and settles on the floor upside down - no blast, nothing broken
-      j.capT += dt; const B = storyBoatSize(j), hg = B[1], half = B[0] * JB_HULL, sY = DW.live.length ? x => dwRideY(x, j.y - hg * 0.25, hg * 0.5) : surfaceY, ws = sY(j.x), up = j.capDir * Math.PI;
-      const slope = Math.atan2(sY(j.x + j.dir * half) - sY(j.x - j.dir * half), 2 * half) * j.dir;
-      jbRoll(j, slope + up, dt, true);
-      const yF = j.capT < JB_FLOAT ? ws - 1 + hg * 0.25 * j.capT / JB_FLOAT : Math.max(j.y + JB_SINK * dt, ws - 1 + hg * 0.25);   // (afloat: on the water as it moves - settling lower; then going down)
-      if (!jbUnder(j, yF, dt)) { j.vy = dt ? (yF - j.y) / dt : 0; j.y = yF; }               // (a face come over her: up through it by her own lift - jbUnder)
+      // (a body - jbFloat: the air trapped under her lets go of her slowly, floating three quarters under at JB_FLOAT; then the water's in her and
+      // she's heavier than it holds - down at JB_SINK against its drag)
+      j.capT += dt; const B = storyBoatSize(j), hg = B[1], half = B[0] * JB_HULL, up = j.capDir * Math.PI;
+      const F = jbFloat(j, dt, j.capT < JB_FLOAT ? JB_G / (0.5 + 0.25 * j.capT / JB_FLOAT) : JB_G - jbDrag(j, 1) * JB_SINK);
+      jbRoll(j, Math.atan2(F[1] - F[2], 2 * half) * j.dir + up, dt, true, Math.min(1, 2 * F[0]));
       if (!SIM_ONLY && jbR() < dt * (j.capT < JB_FLOAT ? 1.5 : 4)) addBubble(j.x + jbRnd(-6, 6), j.y + 3, jbRnd(-4, 4), -jbRnd(12, 26), jbRnd(0.6, 1.4));
       const K = jbKeel(j).map(p => [-p[0], hg + 2]);                  // (keel up: what lies lowest is its top)
       if (j.capT > JB_FLOAT && floorPen(K, j.x, j.y, j.a - up) >= 0) { const r = floorRest(K, j.x, null, 0.5, j.a - up); j.y = r.y; j.a = up + r.a; j.av = 0; j.state = 'wreck'; kickDust(j.x, 14, 0.5); }
@@ -54599,28 +54611,28 @@ function stepJetboat(j, dt) {
     // (user Nov 2: "the boat is wobbling weirdly" - the fishing boat on the jet ski's ride: the water read 10 units either side of
     // her middle under an 11 m hull, nose up and bouncing at rest, the tilt snapped to it each step) every boat of this family
     // reads the water at its own hull's ends (JB_HULL of its real length - storyBoatSize) and its middle
-    // (the Wave Lab: the water she rides is the first under her - up on a lip, its top; in its tube, the face - dwRideY, 09-zy-dwaves.js)
-    const half = storyBoatSize(j)[0] * JB_HULL, tolR = storyBoatSize(j)[1] * 0.5, sY = DW.live.length ? x => dwRideY(x, j.y, tolR) : surfaceY;
-    const yb = sY(j.x + j.dir * half), ys = sY(j.x - j.dir * half), yS = (yb + ys + 2 * sY(j.x)) / 4;
+    const half = storyBoatSize(j)[0] * JB_HULL;
+    if (DW.live.length || j.bod) {
+      // (the Wave Lab: a floating body - jbFloat. In the air, landing, swamped by a face, thrown off a lip or carried over the falls: one rule)
+      const air0 = !!j.air, vy0 = j.vy || 0, F = jbFloat(j, dt, 2 * JB_G); j.air = F[0] === 0;
+      if (air0 && !j.air && !SIM_ONLY) { const hard = clamp((vy0 - JB_WV[1]) / 220, 0, 1.5); for (let k = 0; k < 6 + 10 * hard; k++) spawnSpray(j.x + jbRnd(-10, 10), F[3] - 1, jbRnd(-80, 80) + j.dir * sp * 0.3, 0.5 + 0.5 * hard); if (hard > 0.4) sound('splash', j.x, 0.3 * hard); }
+      const go = clamp(Math.abs(sp) / (j.v || 60), 0, 1), L = half / JB_HULL, f = JB_RIDE[j.kind] || JB_RIDE.jet;
+      jbRoll(j, Math.atan2(F[1] - F[2], 2 * half) * j.dir - f[0] * go * j.dir + Math.sin(j.ph * f[1]) * 0.03 * go * Math.min(1, 25 / L) * j.dir, dt, false, Math.min(1, 2 * F[0]));
+      j.prevS = F[3];
+      j.bod = DW.live.length || Math.abs(j.y - F[3]) > 0.3 || Math.abs(j.vy || 0) > 2 || Math.abs(j.vx || 0) > 0.5 ? 1 : 0;   // (settled on a still sea: the plain ride from here)
+    } else {
+    const sY = surfaceY, yb = sY(j.x + j.dir * half), ys = sY(j.x - j.dir * half), yS = (yb + ys + 2 * sY(j.x)) / 4;
     // (user Oct 26: "They should be able to jump off it when they're going fast and the water is turbulent, so they
     // feel fun") riding the water it rises and falls with it; coming up a wave fast, where the water drops away under
     // it quicker than it can fall, it flies off - and comes down with a slap and spray
     const w = j.prevS == null || !dt ? 0 : (yS - j.prevS) / dt; j.prevS = yS;
     if (j.air) {
       j.vy += JB_G * dt; j.y += j.vy * dt;
-      if (DW.live.length || j.av) j.a += (j.av || 0) * dt;            // (the Wave Lab: out of the water nothing rights her - she turns on as she was turning)
-      else j.a += (((j.vy / 520) - 0.12) * j.dir - j.a) * Math.min(1, dt * 3);   // (nose up as it leaves, dipping as it falls)
+      j.a += (((j.vy / 520) - 0.12) * j.dir - j.a) * Math.min(1, dt * 3);   // (nose up as it leaves, dipping as it falls)
       if (j.y >= yS) {
         const hard = clamp((j.vy - w) / 220, 0, 1.5); j.air = false; j.y = yS; j.vy = w;
         if (!SIM_ONLY) { for (let k = 0; k < 6 + 10 * hard; k++) spawnSpray(j.x + jbRnd(-10, 10), yS - 1, jbRnd(-80, 80) + j.dir * sp * 0.3, 0.5 + 0.5 * hard); if (hard > 0.4) sound('splash', j.x, 0.3 * hard); }
       }
-    } else if ((DW.live.length || j.dunk) && jbUnder(j, yS, dt)) {
-      j.av = (j.av || 0) * Math.exp(-JB_DRAG * dt); j.a += j.av * dt;   // (under: turning on as she was, the water slowing it)
-    } else if (DW.live.length && yS - j.y > Math.max(0, j.vy || 0) * dt + 0.5 * JB_G * dt * dt + 1) {
-      // (the Wave Lab - user Nov 18 13:51, bug-20261118-135108: "Still snapping": the water under her fell away - a lip running on out from under her,
-      // the crest going over the falls - further than she could fall in the step, and she was put straight down onto it. Now she's off the water:
-      // falling, turning on as she was, till she comes down on it)
-      j.air = true; j.y += (j.vy || 0) * dt;
     } else if (sp > 70 && j.turn === 0 && (j.vy || 0) < -28 && w - (j.vy || 0) > JB_G * dt) {
       // (off the crest. user Nov 18 13:32, bug-20261118-133151: "My boat just flew into the sky when going towards a wave" - on a designed wave's steep
       // face the water under her rose at her speed plus the wave's, times the slope - some 35 m/s - and she left with it. A boat's lift off a crest is
@@ -54633,8 +54645,8 @@ function stepJetboat(j, dt) {
       // its own on top of the waves')
       const go = clamp(Math.abs(sp) / (j.v || 60), 0, 1), L = half / JB_HULL, f = JB_RIDE[j.kind] || JB_RIDE.jet;
       const want = Math.atan2(yb - ys, 2 * half) * j.dir - f[0] * go * j.dir + Math.sin(j.ph * f[1]) * 0.03 * go * Math.min(1, 25 / L) * j.dir;
-      if (DW.live.length || j.av) jbRoll(j, want, dt, false);        // (the Wave Lab: her roll as a body - jbRoll)
-      else j.a += (want - j.a) * (1 - Math.exp(-dt * JB_EASE));
+      j.a += (want - j.a) * (1 - Math.exp(-dt * JB_EASE));
+    }
     }
     if (DW.live.length && !j.air && dwBoatLip(j, dt)) return;      // (the Wave Lab: a lip come down on her - pushed, or rolled over: 09-zy-dwaves.js)
     if (picBoat(j)) { if (j.state === 'run') picBoatFx(j, dt); }   // (a picture boat: its foam, bow wave, wake and screw by its picture - 50-story-net.js)
@@ -54659,24 +54671,30 @@ function jetboatSink(j, atX = null) {
    water damping it (JB_ROLL_Z of critical). Capsized (keel): the same body rolling to lie keel up - the inverted lie is the stable one then.
    Pushes from outside (a lip striking her - dwBoatLip) add to av */
 const JB_ROLL_T = 2, JB_ROLL_TM = 0.15, JB_ROLL_Z = 0.4, JB_ROLL_ZK = 0.9, JB_FLOAT = 25, JB_SINK = 1.5;   // (ZK: keel up, her deck and cabin dragged through the water - damped near critical)
-function jbRoll(j, want, dt, keel) {
+function jbRoll(j, want, dt, keel, held = 1) {
   const L = storyBoatSize(j)[0] / UPM, w0 = 2 * Math.PI / (JB_ROLL_T + JB_ROLL_TM * L), vs = Math.max(0.3, DW.cap || 1);
   let rel = j.a - want; rel -= 2 * Math.PI * Math.round(rel / (2 * Math.PI));
   const ar = Math.abs(rel), sg = rel < 0 ? -1 : 1;
   const gz = keel ? Math.sin(ar) : ar <= vs ? Math.sin(Math.PI * ar / vs) : -Math.sin(Math.PI * (ar - vs) / (Math.PI - vs));
   const acc = -sg * 0.5 * w0 * w0 * gz - 2 * (keel ? JB_ROLL_ZK : JB_ROLL_Z) * w0 * (j.av || 0);
-  j.av = (j.av || 0) + acc * dt; j.a += j.av * dt;
+  j.av = (j.av || 0) + acc * held * dt; j.a += j.av * dt;   // (held: how much of her is in the water - none, nothing turns her but her own turning)
 }
-// UNDER THE WATER (user Nov 18 13:51, bug-20261118-135108: "Still snapping on my side" - a steep face swept over a boat at its foot, the water at
-// her x some 100 units higher from one step to the next, and she was put straight up onto its top). The mirror of her falling when the water drops
-// away (stepJetboat): where the water rises over her further than she can rise in the step, she's in it - lifted by her buoyancy (JB_BUOY) against
-// the water's drag (JB_DRAG) till she comes up through its surface (y: that surface, world y - down positive). true while she's under (dunk)
-const JB_BUOY = 2 * JB_G, JB_DRAG = 3;
-function jbUnder(j, y, dt) {
-  if (!j.dunk && !(j.y - y > Math.max(0, -(j.vy || 0)) * dt + 0.5 * JB_BUOY * dt * dt + 1)) return false;
-  j.vy = ((j.vy || 0) - JB_BUOY * dt) * Math.exp(-JB_DRAG * dt); j.y += j.vy * dt;
-  if (j.y > y) { j.dunk = 1; return true; }
-  j.dunk = 0; return false;                                         // (up: on the water again - its ride takes her from here)
+/* A BOAT AS A FLOATING BODY (the Wave Lab - user Nov 18 14:33: "make sure there's no teleporting. It should all be physics based"; before it her height
+   was put on the water's each step, and a face sweeping over her, a lip running out from under her or the curl coming down put her somewhere else at
+   once). Her weight (JB_G); her buoyancy by how much of her is under (sub: 0 clear of the water .. 1 all of her - bco of it, per her weight: 2·JB_G
+   floats her half in); and the water's drag toward its own velocity there (dwWaterAt - its way and its rise along a face) by as much of her as is
+   in it, at a damping JB_ZW of her bob. Out of the water nothing holds her; under it she comes up as her buoyancy takes her. The water she's in or
+   over at her ends and middle: dwSurfAt. Returns [sub, the water at her bow, at her stern, the three's mean] (world y) */
+const JB_ZW = 0.6, JB_DRAG = 3, JB_F = [0, 0, 0, 0], JB_WV = [0, 0];   // (JB_DRAG: the water slowing a boat going down, blown up)
+function jbDrag(j, sub) { const hg = storyBoatSize(j)[1]; return 4 * JB_ZW * Math.sqrt(2 * JB_G / hg) * sub; }   // (2·ζ·ω half in: her bob's ω² - buoyancy's stiffness, 2·JB_G per her height)
+function jbFloat(j, dt, bco) {
+  const B = storyBoatSize(j), hg = B[1], half = B[0] * JB_HULL, sAt = DW.live.length ? x => dwSurfAt(x, j.y) : surfaceY;
+  const yb = sAt(j.x + j.dir * half), ys = sAt(j.x - j.dir * half), yS = (yb + ys + 2 * sAt(j.x)) / 4, sub = clamp(0.5 + (j.y - yS) / hg, 0, 1);
+  if (DW.live.length) dwWaterAt(j.x, yS, B[0], JB_WV); else JB_WV[0] = JB_WV[1] = 0;
+  const e = Math.exp(-jbDrag(j, sub) * dt);
+  j.vy = (j.vy || 0) + (JB_G - bco * sub) * dt; j.vy = JB_WV[1] + (j.vy - JB_WV[1]) * e; j.y += j.vy * dt;
+  j.vx = JB_WV[0] + ((j.vx || 0) - JB_WV[0]) * e;                    // (her drift: moved by at the top of her step - stepJetboat)
+  JB_F[0] = sub; JB_F[1] = yb; JB_F[2] = ys; JB_F[3] = yS; return JB_F;
 }
 // rolled right over by a wave (s: the way it goes over) - capsized: floating keel up, then going down slowly (stepJetboat), foam where it went over;
 // not hurt (its hp kept): not burnt, only upside down
