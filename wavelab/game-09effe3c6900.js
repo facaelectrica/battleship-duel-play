@@ -7656,9 +7656,11 @@ function dwAutoStep(dt) {
   }
 }
 // an outline point's place: its height of the wave's; along, of half the wave's length at its foot - but up its FRONT (the face, the hollow, the lip, the
-// crest) more and more of the wave's own height instead (DW_ASP of it), so the curl keeps its proportions on a long wave as on a short one
+// crest) more and more of the wave's own height instead (DW_ASP of it), so the curl keeps its proportions on a long wave as on a short one. From the
+// crest (0) on: the front's measure ahead of it, half the length behind it - one unbroken line (user Nov 18 15:25: the measure changed at 0.05, past
+// the crest, and a stretch behind it - on a 600 m tsunami 0.14 m to 15 m - was nowhere a point could be: the lab's frames moved over to it, wlXm)
 const DW_ASP = 1.9;
-const dwX = (w, px, py) => px * (px <= 0.05 ? (w.L / 2) + (Math.min(w.L / 2, DW_ASP * w.H) - w.L / 2) * clamp(py / 0.6, 0, 1) : w.L / 2);
+const dwX = (w, px, py) => px * (px <= 0 ? (w.L / 2) + (Math.min(w.L / 2, DW_ASP * w.H) - w.L / 2) * clamp(py / 0.6, 0, 1) : w.L / 2);
 const dwPt = (w, i) => [w.wp[i][0], w.wp[i][1]];                   // (its outline's point i now: world x, height)
 function dwStep(dt) {
   const L = DW.live; let mx = 0;
@@ -9542,7 +9544,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 16:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 16:36';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
