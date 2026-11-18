@@ -9544,7 +9544,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 16:54';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 16:59';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -10926,6 +10926,8 @@ const fpsMeter = { n: 0, t0: 0, v: 0 };
 // (user Oct 29: "Can we have the version number and fps display ALWAYS on screen?" - on every screen (the title, the game, the
 // menus, World / photo mode) whatever STATS says; STATS: OFF only hides the network numbers under it. y: where it sits)
 const CORNER = { bug: null, fps: null };   // (where REPORT and the FPS were drawn last frame: their presses - fpsPress, 50-zzzz-bug.js)
+// the version up top: the game's - in the Wave Lab, the lab's own (its build's __WL_VER - lab/wavelab/build.py; user Nov 18 15:57: the lab's page said V1070)
+const verText = () => typeof globalThis !== 'undefined' && globalThis.__WL_VER ? 'LAB V' + globalThis.__WL_VER : 'V' + GAME_VERSION;
 function drawFps(y0) {
   const now = performance.now();
   if (!fpsMeter.t0) fpsMeter.t0 = now;
@@ -10938,7 +10940,7 @@ function drawFps(y0) {
   const txt = fpsMeter.v + ' FPS', x = uvw - 16, yT = (y0 ?? (ui.title ? ui.top + 26 : hudTop() + 12)) - 8;
   CORNER.bug = [x - 120, yT, 120, 26];
   if (typeof modeButton === 'function') modeButton(...CORNER.bug, typeof BUG !== 'undefined' && BUG.busy ? 'SAVING...' : 'REPORT', false);
-  { const vt = 'V' + GAME_VERSION, vy = yT + 34; drawText(ug, vt, x + 1, vy + 1, '#04070f', 2, 'right'); drawText(ug, vt, x, vy, '#d8dde8', 2, 'right'); }   // (user Oct 29: "lets have the version number next to the FPS always")
+  { const vt = verText(), vy = yT + 34; drawText(ug, vt, x + 1, vy + 1, '#04070f', 2, 'right'); drawText(ug, vt, x, vy, '#d8dde8', 2, 'right'); }   // (user Oct 29: "lets have the version number next to the FPS always")
   const y = yT + 52, col = fpsMeter.v >= 55 ? '#9dff8a' : fpsMeter.v >= 40 ? '#ffd36b' : '#ff7a6a';
   CORNER.fps = [ubw - 120, y - 6, 120, 24];
   drawText(ug, txt, x + 1, y + 1, '#04070f', 2, 'right');
@@ -11033,7 +11035,7 @@ function perfLines() {
   const P = (probe.on || probe.done) ? probe.parts : (perf.parts || {}), f = v => (v || 0).toFixed(1);
   const script = perf.phys + perf.smoke + perf.render;
   const lines = [
-    'V' + GAME_VERSION + '  FRAME ' + f(fpsMeter.gap) + ' MS  WORST ' + Math.round(fpsMeter.worst || 0),   // (user Oct 28: the version up top, to be sure it's the latest)
+    verText() + '  FRAME ' + f(fpsMeter.gap) + ' MS  WORST ' + Math.round(fpsMeter.worst || 0),   // (user Oct 28: the version up top, to be sure it's the latest)
     frameErrN ? 'ERRORS ' + frameErrN + ': ' + frameErr.slice(0, 70).toUpperCase() : '',   // (frames that threw: the first of each message is in the console)
     'SCRIPT ' + f(script) + '  DRAW+GPU ' + f(Math.max(0, (fpsMeter.gap || 0) - script)),
     (probe.on ? 'PROBING ' + Math.ceil(probe.left) + 'S: ' : probe.done ? 'PROBED: ' : '') + 'PHYS ' + f(perf.phys) + '  SMOKE ' + f(perf.smoke),
