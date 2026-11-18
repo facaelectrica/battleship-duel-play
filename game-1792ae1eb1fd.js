@@ -8738,8 +8738,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1085;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 00:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1086;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 18 09:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -72747,15 +72747,16 @@ VM_FAMS.ship = {
   lab: 'SHIPS', views: () => 1,
   keys: () => Object.keys(CIV),
   name: k => (STR_VEHS['ship:' + k] || {}).lab || k.toUpperCase(),
-  // (her whole picture, as her LOOK shows her: the liner with her masts and funnels on, the container ship with her boxes - 50-zz-prefab-look.js)
-  pic: k => { const K = CIV[k], B = K.art(), A = (k === 'liner' && img.liner) || (k === 'container' && img.container) || B; return A && A.width && B && B.width === A.width ? { img: A, w: A.width, h: A.height, m: K.k / UPM } : B && B.width ? { img: B, w: B.width, h: B.height, m: K.k / UPM } : null; },
+  // (as the game draws her: the liner with her masts and funnels on - they are pieces of her; the container ship empty - her boxes are things of
+  // their own, stacked on her; user Nov 18 08:43: "the Container ship should be without containers no? We should see it as close as in-game as possible")
+  pic: k => { const K = CIV[k], B = K.art(), A = (k === 'liner' && img.liner && B && img.liner.width === B.width) ? img.liner : B; return A && A.width ? { img: A, w: A.width, h: A.height, m: K.k / UPM } : null; },
   width: k => { const K = CIV[k], A = K.art(); return A && A.width ? A.width * K.k / UPM * 0.13 : 20; },   // (a ship's beam: about an eighth of her length)
   get: k => ({ funnels: CIV[k].funnels, wl: [CIV[k].wl], top: [CIV[k].top], dp: CIV[k].dp || {} }),
   put(k, r) { const K = CIV[k]; K.funnels = r.funnels; K.wl = r.wl[0]; K.top = r.top[0]; K.dp = r.dp || {}; },
   kinds: {
     smoke: { lab: 'FUNNEL', add: true, r: true, depth: 'm', help: 'A funnel that smokes: its top and its width' },
     water: { lab: 'WATERLINE', depth: 'm', ax: 'y', help: 'The row of her picture that sits at the water' },
-    top: { lab: 'DECK TOP', depth: 'm', ax: 'y', help: 'The top of her solid hull: things land on it' },
+    top: { lab: 'DECK TOP', depth: 'm', ax: 'y', help: 'Helicopters, boxes and tanks land on this line; above it is rigging, not solid' },
   },
   nums: [],
   marks(k, r, P) {
@@ -76623,6 +76624,8 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
 <button data-a="undo" title="Undo the last change">UNDO</button><button data-a="redo" title="Redo the change undone">REDO</button>
 <button data-a="save" title="Save the vehicles as edited">SAVE CHANGES</button>
 <span class="gap"></span>
+<label title="The hour of the day: see it at noon, at sunset, at night with its lamps on">HOUR <input type="range" data-a="hour" min="0" max="24" step="0.25" value="12" style="vertical-align:middle;width:10em"></label>
+<button data-a="marks" class="on" title="Show or hide the marks, to see the vehicle as the game draws it">MARKS</button>
 <label title="Turn the vehicle toward you to check its marks">TURN <input type="range" data-a="turn" min="0" max="1" step="0.01" value="0" style="vertical-align:middle;width:10em"></label>
 <button data-a="new" title="Make a new vehicle from a picture of its side">NEW vehicle</button>
 <button data-a="del" title="Remove this vehicle (only one made here)">DELETE vehicle</button>
@@ -76636,7 +76639,8 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     list();
     VED.sel_.addEventListener('change', () => load(VED.sel_.value));
     VED.turnEl.addEventListener('input', () => { VED.turn = +VED.turnEl.value; draw(); });
-    root.querySelector('.bar').addEventListener('click', e => { const a = e.target && e.target.dataset ? e.target.dataset.a : null; if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'save') { sceneSave(); sync(); } else if (a === 'close') close(); else if (a === 'reset') reset(); else if (a === 'new') newAsk(); else if (a === 'del') delAsk(); });
+    root.querySelector('[data-a=hour]').addEventListener('input', e => { VED.hour = +e.target.value; draw(); });
+    root.querySelector('.bar').addEventListener('click', e => { const a = e.target && e.target.dataset ? e.target.dataset.a : null; if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'save') { sceneSave(); sync(); } else if (a === 'close') close(); else if (a === 'reset') reset(); else if (a === 'new') newAsk(); else if (a === 'del') delAsk(); else if (a === 'marks') { VED.hide = !VED.hide; e.target.classList.toggle('on', !VED.hide); draw(); } });
     // the help line: what's under the pointer, as the other editors' (a tooltip's text, one short line)
     const help = e => { const t = e.target && e.target.closest ? e.target.closest('[title],[data-help]') : null; if (t && root.contains(t)) say(t.dataset.name || (t.tagName === 'BUTTON' ? t.textContent : ''), t.dataset.help || t.title); };
     root.addEventListener('pointerover', help); root.addEventListener('pointerdown', help);
@@ -76730,7 +76734,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     VED.key = key; VED.sel_.value = key; if (!keepSel) { VED.sel = null; VED.turn = 0; VED.turnEl.value = 0; }
     const F = fam(); VED.row = vmGet(key); VED.P = F.pic(art(), 0);
     if (!VED.P) { VED.M = []; VED.side.innerHTML = '<h4>LOADING PICTURE</h4>'; draw(); return; }
-    remark();
+    remark(); maskFor();
     if (!keepSel || !VED.zFit) fit();                          // (the same vehicle read again: its zoom and place kept)
     side(); draw(); sync();
   }
@@ -76741,6 +76745,31 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     if (VED.sel && !VED.M.some(m => m.id === VED.sel)) VED.sel = null;
   }
   const sel = () => VED.M.find(m => m.id === VED.sel) || null;
+  /* ---- THE MASK (user Nov 18 08:43: "be able to 'mask' some parts of the imported mesh? Since it already has a mask, to be able to change it
+     in the editor"): a vehicle made here keeps its picture as it came (src) beside the one the game draws (png). ERASE rubs parts of it out -
+     clear, gone from the game: its look, its hits -, RESTORE paints them back from the picture as it came. Kept when the brush is let go. ---- */
+  function maskFor() {
+    const r = made(), P = VED.P; if (!r || !P) { VED.mk = null; VED.mode = null; return; }
+    if (VED.mk && VED.mk.id === r.id && VED.mk.png === r.png) return;
+    const cv = document.createElement('canvas'); cv.width = P.w; cv.height = P.h; cv.getContext('2d', { willReadFrequently: true }).drawImage(pic2d(P.img), 0, 0);
+    const src = document.createElement('canvas'); src.width = P.w; src.height = P.h;
+    const im = new Image(); im.onload = () => { src.getContext('2d').drawImage(im, 0, 0, P.w, P.h); }; im.src = r.src || r.png;
+    VED.mk = { id: r.id, png: r.png, cv, src };
+  }
+  function dab(x0, y0, x1, y1) {
+    const K = VED.mk, g = K.cv.getContext('2d'), R = VED.brushR || 4, n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0)));
+    for (let i = 0; i <= n; i++) {
+      const x = Math.round(x0 + (x1 - x0) * i / n), y = Math.round(y0 + (y1 - y0) * i / n);
+      // (whole pixels, a round brush: no soft edge - the picture's edge stays hard)
+      for (let dy = -R; dy <= R; dy++) { const w = Math.floor(Math.sqrt(R * R - dy * dy)); if (VED.mode === 'erase') g.clearRect(x - w, y + dy, 2 * w + 1, 1); else { g.clearRect(x - w, y + dy, 2 * w + 1, 1); g.drawImage(K.src, x - w, y + dy, 2 * w + 1, 1, x - w, y + dy, 2 * w + 1, 1); } }
+    }
+    K.dirty = true; draw();
+  }
+  function maskKeep() {
+    const K = VED.mk, r = made(); if (!K || !K.dirty || !r) return; K.dirty = false;
+    const png = K.cv.toDataURL('image/png'); K.png = png;
+    vnewSave(VNEW.list.map(q => q.id === r.id ? Object.assign({}, q, { png, src: q.src || q.png }) : q)); sync();
+  }
   // the marks back into its row, the game's at once; kept (the working copy). An undo step a finished change
   function commit(step = true, quiet = false) {
     const F = fam(), by = {}; for (const m of VED.M) { by[m.k] = by[m.k] || 0; const id = m.k + by[m.k]++; if (VED.sel === m.id) VED.sel = id; m.id = id; }
@@ -76786,6 +76815,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     if (adds.length) h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">' + adds.map(k => `<button data-add="${k}" title="Add one to this vehicle">ADD ${K[k].lab[0] + K[k].lab.slice(1).toLowerCase()}</button>`).join('') + '</div>';
     const rows = [...F.nums.map(n => ({ n, v: VED.nums[n.k], a: 'num' })), ...(F.tune ? F.tune(art()).map(n => ({ n, v: VTUNE[n.f][n.k], a: 'tune' })) : [])];
     if (rows.length) h += '<h4>NUMBERS</h4>' + rows.map(({ n, v, a }) => `<div class="row" data-name="${n.lab}" data-help="${n.help}"><label>${n.lab}</label><input type="range" data-${a}="${n.k}" data-f2="${n.f || ''}" min="${n.min}" max="${n.max}" step="${n.step}" value="${v}"><span>${n.opts ? n.opts[v] : num(v, 2)}</span></div>`).join('');
+    if (made()) h += `<h4>MASK</h4><div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center"><button data-mode="erase" class="${VED.mode === 'erase' ? 'on' : ''}" title="Rub parts of the picture out: they are gone from the game">ERASE</button><button data-mode="restore" class="${VED.mode === 'restore' ? 'on' : ''}" title="Paint parts back from the picture as it came in">RESTORE</button><label title="The brush's size, in the picture's pixels">BRUSH <input type="number" data-brush="1" min="1" max="40" step="1" value="${VED.brushR || 4}"></label></div>`;
     const P = VED.P; h += `<h4>PICTURE</h4><div style="color:#9aa2b4">${P.w} x ${P.h} pixels, ${num(P.w * P.m)} m long, ${num(P.h * P.m)} m high<br>${num(P.m * 100, 1)} cm a pixel</div>`;
     VED.side.innerHTML = h;
   }
@@ -76793,6 +76823,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     const t = e.target; if (!t || !t.closest) return;
     if (t.dataset.del) { VED.M = VED.M.filter(m => m.id !== t.dataset.del); if (VED.sel === t.dataset.del) VED.sel = null; commit(); return; }
     if (t.dataset.add) { add(t.dataset.add); return; }
+    if (t.dataset.mode) { VED.mode = VED.mode === t.dataset.mode ? null : t.dataset.mode; side(); draw(); say('MASK', VED.mode ? 'Drag on the picture to ' + (VED.mode === 'erase' ? 'rub parts out' : 'paint parts back') + '. Press the button again to go back to the marks.' : ''); return; }
     const r = t.closest('.mk'); if (r && !t.closest('.f') && VED.sel !== r.dataset.id) { VED.sel = r.dataset.id; side(); draw(); }
   }
   function add(k) {
@@ -76804,6 +76835,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
   }
   function sideChange(e) {
     const t = e.target, f = t.dataset.f, m = sel();
+    if (t.dataset.brush) { VED.brushR = clamp(Math.round(+t.value) || 4, 1, 40); return; }
     if (f && m) { if (f === 't' || f === 'd') m[f] = t.value; else if (isFinite(+t.value)) m[f] = +t.value; commit(); side(); return; }
     if (t.dataset.num || t.dataset.tune) { side(); VED.numStep = false; }
   }
@@ -76822,6 +76854,40 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     const z = Math.min(cv.width * 0.86 / P.w, cv.height * 0.8 / P.h); VED.z = VED.zFit = z >= 2 ? Math.floor(z) : z;
     VED.ox = Math.round((cv.width - P.w * VED.z) / 2); VED.oy = Math.round((cv.height - P.h * VED.z) / 2);
   }
+  // the game's own light at an hour, in a clear sky (computeEnv - as the LOOK's lookLight, any hour): the picture's tint, the world's tint over
+  // what's drawn, the sunset's warmth, the sky's colours, how far the lamps are on. The game's own hour and light put back
+  const LIGHTS = {};
+  function light(h) {
+    const k = Math.round(h * 4) / 4; if (LIGHTS[k]) return LIGHTS[k];
+    const keepE = Object.assign({}, E), keepEnv = { time: env.time, weather: env.weather, rain: env.rain, fog: env.fog, sea: env.sea, wind: env.wind };
+    try { Object.assign(env, { time: k % 24, weather: 0.1, rain: 0, fog: 0, sea: 0.2, wind: 0.2 }); computeEnv(); return (LIGHTS[k] = { fx: E.fx.slice(), tint: E.tint.slice(), tintA: E.tintA, warm: E.warm, top: E.skyTop.slice(), hor: E.skyHor.slice(), lamps: E.lampsOn || 0 }); }
+    catch (e) { return { fx: [1, 1, 1], tint: [0, 0, 0], tintA: 0, warm: 0, top: [11, 15, 24], hor: [11, 15, 24], lamps: 0 }; }
+    finally { Object.assign(env, keepEnv); Object.assign(E, keepE); }
+  }
+  // the vehicle as the game draws it, on a canvas its picture's size: its picture (the one being masked, while it is), a car's wheels - each taken
+  // out of its body as a disc and the wheel set's own picture stood in its place (carParts, drawWheel) -, then all of it in the hour's light: the
+  // hour's tint, the world's tint over it, the sunset's warmth
+  function scene(V, L) {
+    const P = V.P, c = VED.off || (VED.off = document.createElement('canvas')), c2 = VED.off2 || (VED.off2 = document.createElement('canvas'));
+    c.width = c2.width = P.w; c.height = c2.height = P.h;
+    const g = c.getContext('2d', { willReadFrequently: true }); g.imageSmoothingEnabled = false;
+    const src = VED.mk && V.P === VED.P ? VED.mk.cv : pic2d(P.img);
+    if (P.sx != null) g.drawImage(src, P.sx, P.sy, P.w, P.h, 0, 0, P.w, P.h); else g.drawImage(src, 0, 0, P.w, P.h);   // (sx: a frame of a sheet - the planes')
+    if (VED.key.startsWith('car:') && !VED.turn) for (const m of VED.M) {
+      if (m.k !== 'wheel') continue;
+      const W = wheelPic(m.r * P.m, false, WHEEL_OFFROAD[art()]); if (!W) continue;
+      g.save(); g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(m.x, m.y, m.r + 1.5, 0, 6.2832); g.fill(); g.restore();
+      g.drawImage(W, m.x - m.r, m.y - m.r, m.r * 2, m.r * 2);
+    }
+    c2.getContext('2d').drawImage(c, 0, 0);
+    g.globalCompositeOperation = 'multiply'; g.fillStyle = lookRGB(L.fx.map(v => v * 255)); g.fillRect(0, 0, P.w, P.h);
+    g.globalCompositeOperation = 'destination-in'; g.drawImage(c2, 0, 0);
+    g.globalCompositeOperation = 'source-atop';
+    if (L.tintA > 0.01) { g.fillStyle = lookRGB(L.tint, L.tintA); g.fillRect(0, 0, P.w, P.h); }
+    if (L.warm > 0.01) { g.fillStyle = `rgba(255,120,140,${L.warm})`; g.fillRect(0, 0, P.w, P.h); }
+    g.globalCompositeOperation = 'source-over';
+    return c;
+  }
   // the view showing at this turn, and each mark's place on it
   function viewNow() {
     const F = fam(), n = F.views(art()), i = n > 1 && VED.turn > 0 ? (F.viewAt ? F.viewAt(art(), VED.turn) : Math.round(VED.turn * (n - 1))) : 0;
@@ -76838,11 +76904,26 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     g.fillStyle = '#0b0f18'; g.fillRect(0, 0, cv.width, cv.height);
     if (!P) { g.fillStyle = '#7a8294'; g.font = '14px ui-monospace, monospace'; g.textAlign = 'center'; g.fillText('LOADING PICTURE', cv.width / 2, cv.height / 2); return; }
     const V = viewNow(), ox = Math.round(VED.ox + (P.w - V.P.w) * z / 2), oy = VED.oy, sy = V.P.h / P.h, lw = Math.max(1, Math.round(parseFloat(getComputedStyle(VED.root).fontSize) * (window.devicePixelRatio || 1) / 8));   // (the marks' line: by the editor's words' size on this screen)
-    // the water (what floats) or the ground under it
-    if (VED.water != null) { g.fillStyle = '#12304a'; g.fillRect(0, oy + VED.water * z, cv.width, cv.height); }
-    else { g.fillStyle = '#1c2a1c'; g.fillRect(0, oy + P.h * z, cv.width, cv.height); }
+    // the hour's sky; the water (what floats) or the ground under it, in the hour's light
+    const L = light(VED.hour == null ? 12 : VED.hour), sky = g.createLinearGradient(0, 0, 0, cv.height); sky.addColorStop(0, lookRGB(L.top)); sky.addColorStop(1, lookRGB(L.hor)); g.fillStyle = sky; g.fillRect(0, 0, cv.width, cv.height);
+    { const gy = Math.round(oy + (VED.water != null ? VED.water : P.h) * z), k = (L.fx[0] + L.fx[1] + L.fx[2]) / 3, base = VED.water != null ? [22, 62, 96] : [58, 84, 52];
+      g.fillStyle = lookRGB(base.map((v, i) => v * L.fx[i] * (1 - L.tintA) + L.tint[i] * L.tintA)); g.fillRect(0, gy, cv.width, cv.height - gy); }
     g.imageSmoothingEnabled = false;
-    try { if (V.P.sx != null) g.drawImage(pic2d(V.P.img), V.P.sx, V.P.sy, V.P.w, V.P.h, ox, oy, V.P.w * z, V.P.h * z); else g.drawImage(pic2d(V.P.img), ox, oy, V.P.w * z, V.P.h * z); } catch (e) { }   // (sx: a frame of a sheet - the planes')
+    try { g.drawImage(scene(V, L), ox, oy, V.P.w * z, V.P.h * z); } catch (e) { }
+    // its lamps as far on as the hour has them: each a glow in its colour, a headlamp's beam ahead of it
+    if (L.lamps > 0.05) {
+      g.save(); g.globalCompositeOperation = 'lighter';
+      for (const m of VED.M) {
+        const col = m.k === 'lamp' ? (m.t === 'red' ? '255,60,40' : m.t === 'side' ? '80,255,120' : '255,240,200') : m.k === 'tail' ? '255,60,40' : m.k === 'nav' ? '80,255,120' : null; if (!col) continue;
+        for (const mx of markXs(m, V)) {
+          const x = ox + mx * z, y = oy + m.y * sy * z, r = Math.max(6, P.h * z * 0.09) * (m.s == null ? 1 : m.s);
+          if (m.t === 'beam' && !VED.turn) { const e = P.w * z * 0.7, q = g.createLinearGradient(x, 0, x - e, 0); q.addColorStop(0, `rgba(255,240,200,${0.45 * L.lamps})`); q.addColorStop(1, 'rgba(255,240,200,0)'); g.fillStyle = q; g.beginPath(); g.moveTo(x, y - 1); g.lineTo(x - e, y - P.h * z * 0.15); g.lineTo(x - e, y + P.h * z * 0.35); g.closePath(); g.fill(); }
+          const q = g.createRadialGradient(x, y, 0, x, y, r); q.addColorStop(0, `rgba(${col},${0.9 * L.lamps})`); q.addColorStop(1, `rgba(${col},0)`); g.fillStyle = q; g.fillRect(x - r, y - r, r * 2, r * 2);
+        }
+      }
+      g.restore();
+    }
+    if (VED.hide && !VED.mode) return;
     g.lineWidth = lw; { const cs = getComputedStyle(VED.root); g.font = Math.round(parseFloat(cs.fontSize) * 0.92 * (window.devicePixelRatio || 1)) + 'px ' + cs.fontFamily; } g.textAlign = 'center';
     const X = x => ox + x * z, Y = y => oy + y * sy * z;
     for (const m of VED.M) {
@@ -76862,10 +76943,9 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
         const ring = (r, c) => { g.strokeStyle = '#04070f'; g.lineWidth = lw + 2; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.stroke(); g.strokeStyle = c; g.lineWidth = lw; g.beginPath(); g.arc(x, y, r, 0, 6.2832); g.stroke(); };
         if (k.ax === 'y') { g.setLineDash([lw * 4, lw * 3]); g.beginPath(); g.moveTo(ox - 20, y); g.lineTo(ox + V.P.w * z + 20, y); g.stroke(); g.setLineDash([]); g.fillText(k.lab, ox + V.P.w * z + 24 + g.measureText(k.lab).width / 2, y + 4); }
         else if (k.ax === 'x') { g.beginPath(); g.moveTo(x, y - 14 * lw); g.lineTo(x, y + 6 * lw); g.stroke(); g.beginPath(); g.moveTo(x - 4 * lw, y); g.lineTo(x + 4 * lw, y); g.stroke(); }
-        else if (m.k === 'wheel' || (m.k === 'smoke' && k.r)) { ring(Math.max(3, m.r * z), col); g.fillRect(x - lw, y - lw, lw * 2, lw * 2); }
+        else if (m.k === 'wheel' || (m.k === 'smoke' && k.r)) { ring(Math.max(3, m.r * z), col); g.fillRect(x - lw, y - lw, lw * 2, lw * 2); if (!VED.turn) { g.fillStyle = '#04070f'; g.fillRect(x + m.r * z - 3 * lw, y - 3 * lw, 6 * lw, 6 * lw); g.fillStyle = col; g.fillRect(x + m.r * z - 2 * lw, y - 2 * lw, 4 * lw, 4 * lw); } }   // (the square on its rim: dragged, it sizes it)
         else if (m.k === 'cg') { ring(5 * lw, col); g.beginPath(); g.moveTo(x - 9 * lw, y); g.lineTo(x + 9 * lw, y); g.moveTo(x, y - 9 * lw); g.lineTo(x, y + 9 * lw); g.stroke(); }
         else if (m.k === 'lamp') {
-          if (m.t === 'beam' && !VED.turn) { g.globalAlpha *= 0.25; g.beginPath(); g.moveTo(x, y); g.lineTo(x - 60 * lw, y - 10 * lw); g.lineTo(x - 60 * lw, y + 18 * lw); g.closePath(); g.fill(); g.globalAlpha = j ? 0.45 : 1; }
           g.beginPath(); g.arc(x, y, 3 * lw, 0, 6.2832); g.fill(); ring(5 * lw, col);
         }
         else { ring(4 * lw, col); if (m.k === 'smoke') for (let q = 1; q < 4; q++) { g.globalAlpha = (j ? 0.45 : 1) * (0.5 - q * 0.1); g.beginPath(); g.arc(x + q * 3 * lw, y - q * 7 * lw, (2 + q) * lw, 0, 6.2832); g.fill(); } }
@@ -76880,10 +76960,13 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
   const at = e => { const r = VED.cv.getBoundingClientRect(), d = VED.cv.width / r.width; return [((e.clientX - r.left) * d - VED.ox) / VED.z, ((e.clientY - r.top) * d - VED.oy) / VED.z, (e.pointerType === 'touch' ? 26 : 12) * d / VED.z]; };
   function down(e) {
     if (!VED.P) return;
+    if (VED.mode && VED.mk && !VED.turn) { const [x, y] = at(e); VED.brush = { id: e.pointerId, x, y }; try { VED.cv.setPointerCapture(e.pointerId); } catch (err) { } dab(x, y, x, y); e.preventDefault(); return; }   // (the mask's brush)
     if (VED.turn) { VED.pan = { id: e.pointerId, x: e.clientX, y: e.clientY, ox: VED.ox, oy: VED.oy }; return; }
     const [x, y, rr] = at(e); let best = null, bd = 1e9;
     let end = 1;
-    for (const m of VED.M) { const k = kindOf(m); if (k.ro) continue;
+    // (a wheel's or a funnel's rim, its square handle first: dragged, it sizes it)
+    for (const m of VED.M) { const k = kindOf(m); if (!k.r) continue; const d = Math.abs(Math.hypot(x - m.x, y - m.y) - m.r), h = Math.hypot(x - (m.x + m.r), y - m.y); if ((h <= rr || (d <= rr * 0.5 && m.id === VED.sel)) && d < bd) { bd = d; best = m; end = 3; } }
+    if (!best) for (const m of VED.M) { const k = kindOf(m); if (k.ro) continue;
       if (k.two) { const d1 = Math.hypot(x - m.x, y - m.y), d2 = Math.hypot(x - m.x2, y - m.y2), d = Math.min(d1, d2); if (d < bd && d <= rr) { bd = d; best = m; end = d2 < d1 ? 2 : 1; } continue; }
       const d = k.ax === 'y' ? Math.abs(y - m.y) : k.ax === 'x' ? Math.abs(x - m.x) + (Math.abs(y - m.y) > rr * 2 ? 1e6 : 0) : Math.max(0, Math.hypot(x - m.x, y - m.y) - (k.r ? m.r * 0.6 : 0)); if (d < bd && d <= rr) { bd = d; best = m; end = 1; } }
     VED.sel = best ? best.id : null; side(); draw();
@@ -76892,14 +76975,17 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     e.preventDefault();
   }
   function move(e) {
+    const Bq = VED.brush; if (Bq && Bq.id === e.pointerId) { const [x, y] = at(e); dab(Bq.x, Bq.y, x, y); Bq.x = x; Bq.y = y; return; }
     const Pn = VED.pan; if (Pn && Pn.id === e.pointerId) { const d = VED.cv.width / VED.cv.getBoundingClientRect().width; VED.ox = Pn.ox + (e.clientX - Pn.x) * d; VED.oy = Pn.oy + (e.clientY - Pn.y) * d; draw(); return; }
     const D = VED.drag; if (!D || D.id !== e.pointerId) return;
     const [x, y] = at(e), k = kindOf(D.m), P = VED.P, h = v => Math.round(v * 2) / 2;
+    if (D.end === 3) { D.m.r = clamp(h(Math.hypot(x - D.m.x, y - D.m.y)), 1, 400); D.moved = true; commit(false); return; }   // (its rim: its size)
     if (D.end === 2) { D.m.x2 = clamp(h(x + D.dx), 0, P.w); D.m.y2 = clamp(h(y + D.dy), 0, P.h); }   // (a rope's other end)
     else { if (k.ax !== 'y') D.m.x = clamp(h(x + D.dx), 0, P.w); if (k.ax !== 'x') D.m.y = clamp(h(y + D.dy), 0, P.h); }
     D.moved = true; commit(false);
   }
   function up(e) {
+    if (VED.brush && VED.brush.id === e.pointerId) { VED.brush = null; maskKeep(); return; }
     if (VED.pan && VED.pan.id === e.pointerId) { VED.pan = null; return; }
     const D = VED.drag; if (!D || D.id !== e.pointerId) return; VED.drag = null;
     if (D.moved && JSON.stringify(D.row) !== JSON.stringify(VED.row)) { VED.undo.push({ key: VED.key, row: D.row }); VED.redo.length = 0; remark(); side(); draw(); sync(); }
