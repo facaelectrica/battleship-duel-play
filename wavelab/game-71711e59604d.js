@@ -7787,20 +7787,23 @@ function dwFoamAdd(k, x, y, vx, vy, r, life) {
 // (the surface's height at x: the water's own, the designed waves' lowest crossing included - surfaceY0)
 function dwFoamFrom(w, dt) {
   const H = w.H; if (!(H > 2)) return;
-  const T = dwPt(w, 8), tx = T[0], ty = dwYAt(w, tx, T[1]), c = w.c * w.dir, U = UPM, wind = E.windU || 0;
+  const T = dwPt(w, 8), tx = T[0], c = w.c * w.dir, U = UPM, wind = E.windU || 0;
   // (the tip over the water under it - its FACE, points 0 to 7, or the sea before its foot: how high above it the tip stands, of its height)
   const under = dwFace(w, tx), gap = (T[1] - under) / H;
   // (a point along its outline, k a point's number with its fraction: world x, height)
   const at = k => { const i = Math.min(15, Math.floor(k)), P0 = dwPt(w, i), P1 = dwPt(w, i + 1), f = k - i; return [P0[0] + (P1[0] - P0[0]) * f, P0[1] + (P1[1] - P0[1]) * f]; };
   if (w.lip) {
+    // (its leading edge - the lip's foremost point, 7 to 10: where a lip that hooks back under itself throws its water from, not its end inside the tube)
+    let fi = 8; for (let i = 7; i <= 10; i++) if (dwPt(w, i)[0] * w.dir > dwPt(w, fi)[0] * w.dir) fi = i;
+    const Fp = dwPt(w, fi), fx = Fp[0], fy = dwYAt(w, fx, Fp[1]);
     // (user 11:30, ref-foam-on-top-nov18: "the foam should go on the top of the wave because of the movement ... there is no foam there [inside
     // the tube] because it gets pushed to the top of the wave") drops spat off the tip, out ahead of it and up - none fall back into the tube
     for (let n = dfN(dt * H / U * 6); n > 0; n--)
-      dwFoamAdd(0, tx + dfRnd(-0.02, 0.02) * H, ty + dfRnd(-0.02, 0.02) * H, c * dfRnd(1, 1.35), -dfRnd(0.1, 0.55) * w.c, dfRnd(0.2, 0.5) * UPM, dfRnd(1.5, 3));
+      dwFoamAdd(0, fx + dfRnd(-0.02, 0.02) * H, fy - dfRnd(0, 0.03) * H, c * dfRnd(1, 1.35), -dfRnd(0.1, 0.55) * w.c, dfRnd(0.2, 0.5) * UPM, dfRnd(1.5, 3));
     // white water made at the tip riding the lip's top back over the crest (green): slower than the wave, so it slides back along it
-    for (let n = dfN(dt * H / U * 14); n > 0; n--) { const p = at(8 + dfR() * 2.5); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.35, 0.7), 0, dfRnd(0.02, 0.045) * H, dfRnd(1.5, 3)); }
+    for (let n = dfN(dt * H / U * 14); n > 0; n--) { const p = at(fi + dfR() * Math.max(1, 10.5 - fi)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.35, 0.7), 0, dfRnd(0.02, 0.045) * H, dfRnd(1.5, 3)); }
     // mist off the lip's back, the wind lifting it back over the crest
-    for (let n = dfN(dt * H / U * 4); n > 0; n--) { const p = at(8 + dfR() * 3);
+    for (let n = dfN(dt * H / U * 4); n > 0; n--) { const p = at(fi + dfR() * (11 - fi));
       dwFoamAdd(1, p[0], dwYAt(w, p[0], p[1]) - dfRnd(0, 0.04) * H, c * dfRnd(0.2, 0.6) + wind * 0.4 - w.dir * dfRnd(0, 0.25) * w.c, -dfRnd(0.05, 0.25) * w.c, dfRnd(0.02, 0.05) * H, dfRnd(1.5, 3.5)); }
     // THE TIP LANDS (red on yellow): the splash once - the tube closed, foam over all of it - then churned foam where it keeps coming down
     if (gap < 0.06) {
@@ -9194,7 +9197,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 12:37';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 12:41';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
