@@ -3041,6 +3041,9 @@ let VEG_CAVELIT = true;
 // (user Nov 17 22:51-22:56: "this would be a third editor. We have the game editor, biome editor, and this would be the vehicle editor") the VEHICLE EDITOR
 // open (54-vehicle-editor.js): a panel over the page, no world of its own - the game's keys, pads and pointer are its while it is
 let VEH_MODE = false;
+// (user Nov 18 09:13-09:39: the editor "much closer to the game so we can actually judge the result") its vehicle stands in a test world the game draws;
+// VEH_PLAY: you're driving it there (PLAY vehicle) - the game's keys, pads and pointer the game's again till BACK TO EDITOR
+let VEH_PLAY = false;
 
 //@src 00-sw-boot.js:1
 /* THE SIMULATION WORKER (sim-worker branch, user Oct 30 18:22: "the whole game simulation moves to a worker"; design:
@@ -8738,8 +8741,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1086;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 09:48';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1087;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 18 11:03';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -11550,9 +11553,10 @@ function fpsPress(e) {
   if (!ui.perfPanel) ui.perfPanel = true; else if (!probe.on) probeStart(); else { ui.perfPanel = false; probe.on = false; }
   return true;
 }
-const onEdUI = e => !!(e && e.target && e.target.closest && e.target.closest('#skyEd, #skyExp, #skyEdBtn, #wSub, #vgBot, #vgLab, #vgLeft, #feRoot, #vehEd, #vehEdBtn'));   // (and the Biome Editor's panels)
+const onEdUI = e => !!(e && e.target && e.target.closest && e.target.closest('#skyEd, #skyExp, #skyEdBtn, #wSub, #vgBot, #vgLab, #vgLeft, #feRoot, #vehEd .bar, #vehEd .main, #vehEd .foot, #vehEd .ask, #vehEdBtn, #vehEdBack'));   // (and the Biome Editor's panels)
 window.addEventListener('pointerdown', e => {
   if (onEdUI(e)) return;
+  if (VEH_MODE && !VEH_PLAY && (e.pointerType !== 'mouse' || e.button === 0)) return;   // (the Vehicle Editor's test world: looked at, not played - a press on it is nothing; the right button and the wheel still move and zoom the view)
   e.preventDefault();
   // (user Nov 1 20:51: "Why cant I see the FPS details in Editor mode?") the FPS text and its panel take their press on every
   // screen - the GAME EDITOR's and photo mode's too - before the view's drag (one rule: fpsPress)
@@ -11816,7 +11820,7 @@ function kbSlot(set) {
 // a key's action for the slot its set plays: f(p) with p the team index to use
 function keyDo(set, f) { const v = kbSlot(set); if (v >= 0) return asSlot(v, f); }
 window.addEventListener('keydown', e => {
-  if (VEH_MODE) return;   // (the Vehicle Editor open: every key its own - 54-vehicle-editor.js)
+  if (VEH_MODE && !VEH_PLAY) return;   // (the Vehicle Editor open: every key its own - 54-vehicle-editor.js; driving its vehicle: the game's)
   // (typing in a field - the editor's, the SNAPSHOT box, any text box on the page: its keys are the field's, Ctrl+V too - user Nov 1 22:08)
   if (e.target && (/^(TEXTAREA|SELECT)$/.test(e.target.tagName) || (e.target.tagName === 'INPUT' && e.target.type !== 'range') || e.target.isContentEditable)) return;
   const code = keyCode(e);
@@ -12100,7 +12104,7 @@ function pollPads(dt) {
   let pads;
   try { pads = Array.from(navigator.getGamepads() || []).filter(Boolean); } catch (e) { return; }
   PADS_SEEN = pads.length;
-  if (VEH_MODE) return;   // (the Vehicle Editor open: the title under it takes nothing)
+  if (VEH_MODE && !VEH_PLAY) return;   // (the Vehicle Editor open: the world under it takes nothing till its vehicle is PLAYed)
   if (padMenuOn()) padMenuPoll(pads, dt); else padMenu.on = false;
   for (let v = 0; v < 2; v++) {
     const gi = padOf(v), gp = gi >= 0 ? pads[gi] : null, st = padState[v];
@@ -76592,19 +76596,26 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
   // ---- its panels: the top bar, the picture, the marks' list and numbers, the help line at the foot (the editors' one look - sky/90-editor.js)
   function build() {
     const st = $('style'); st.textContent = `
-#vehEd { position: fixed; inset: 0; z-index: 55; background: #0b0f18; color: #d8dce8; font: 12px/1.3 ui-monospace, Menlo, Consolas, monospace; display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; }
+#vehEd { position: fixed; inset: 0; z-index: 55; pointer-events: none; color: #d8dce8; font: 12px/1.3 ui-monospace, Menlo, Consolas, monospace; display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; }
 #vehEd[hidden] { display: none !important; }
 #vehEd button, #vehEd select, #vehEd input[type=number] { font: inherit; background: #1a2234; color: #d8dce8; border: 1px solid #2c3850; border-radius: 4px; padding: 4px 8px; cursor: pointer; }
 #vehEd input[type=number] { width: 5.4em; padding: 3px 4px; cursor: text; }
 #vehEd button:disabled { opacity: 0.4; cursor: default; }
 #vehEd button.on { background: #ffb347; border-color: #ffb347; color: #000; }
+#vehEd .bar, #vehEd .main, #vehEd .foot, #vehEd .ask { pointer-events: auto; }
+#vehEd.flat { background: #0b0f18; }
 #vehEd .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #2c3850; background: #0f1420; flex: 0 0 auto; }
 #vehEd .bar .mode { letter-spacing: .08em; font-weight: bold; color: #ffb347; margin-right: 6px; }
 #vehEd .bar .gap { flex: 1 1 0; }
-#vehEd .main { flex: 1 1 auto; min-height: 0; display: flex; }
-#vehEd .view { flex: 1 1 auto; min-width: 0; position: relative; }
+#vehEd .main { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; align-self: flex-end; width: min(50vw, 64em); background: #0b0f18; border-left: 1px solid #2c3850; }
+#vehEd.flat .main { width: 100%; flex-direction: row; border-left: 0; }
+#vehEd .main[hidden] { display: none; }
+#vehEd .view { flex: 1 1 56%; min-width: 0; min-height: 0; position: relative; }
 #vehEd canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
-#vehEd .side { flex: 0 0 min(32em, 46vw); overflow-y: auto; border-left: 1px solid #2c3850; background: #0f1420; padding: 8px 10px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+#vehEd .side { flex: 0 0 44%; overflow-y: auto; border-top: 1px solid #2c3850; background: #0f1420; padding: 8px 10px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+#vehEd.flat .side { flex: 0 0 min(32em, 46vw); border-top: 0; border-left: 1px solid #2c3850; }
+#vehEdBack { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 56; background: #ffb347; color: #000; border: 1px solid #ffb347; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+#vehEdBack[hidden] { display: none !important; }
 #vehEd h4 { margin: 10px 0 6px; font: inherit; color: #7a8294; letter-spacing: .08em; border-bottom: 1px solid #2c3850; padding-bottom: 4px; }
 #vehEd h4:first-child { margin-top: 0; }
 #vehEd .mk { display: grid; grid-template-columns: 1.2em 1fr auto; gap: 4px 6px; align-items: center; padding: 4px 6px; border: 1px solid transparent; border-radius: 4px; cursor: pointer; }
@@ -76625,7 +76636,9 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
 <button data-a="save" title="Save the vehicles as edited">SAVE CHANGES</button>
 <span class="gap"></span>
 <label title="The hour of the day: see it at noon, at sunset, at night with its lamps on">HOUR <input type="range" data-a="hour" min="0" max="24" step="0.25" value="12" style="vertical-align:middle;width:10em"></label>
-<button data-a="marks" class="on" title="Show or hide the marks, to see the vehicle as the game draws it">MARKS</button>
+<button data-a="marks" class="on" title="Show or hide the marks on the picture">MARKS</button>
+<button data-a="win" class="on" title="Show or hide the marks window, to see the vehicle in the world alone">MARKS window</button>
+<button data-a="play" title="Drive this vehicle in the test world, then come back">PLAY vehicle</button>
 <label title="Turn the vehicle toward you to check its marks">TURN <input type="range" data-a="turn" min="0" max="1" step="0.01" value="0" style="vertical-align:middle;width:10em"></label>
 <button data-a="new" title="Make a new vehicle from a picture of its side">NEW vehicle</button>
 <button data-a="del" title="Remove this vehicle (only one made here)">DELETE vehicle</button>
@@ -76639,8 +76652,11 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     list();
     VED.sel_.addEventListener('change', () => load(VED.sel_.value));
     VED.turnEl.addEventListener('input', () => { VED.turn = +VED.turnEl.value; draw(); });
-    root.querySelector('[data-a=hour]').addEventListener('input', e => { VED.hour = +e.target.value; draw(); });
-    root.querySelector('.bar').addEventListener('click', e => { const a = e.target && e.target.dataset ? e.target.dataset.a : null; if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'save') { sceneSave(); sync(); } else if (a === 'close') close(); else if (a === 'reset') reset(); else if (a === 'new') newAsk(); else if (a === 'del') delAsk(); else if (a === 'marks') { VED.hide = !VED.hide; e.target.classList.toggle('on', !VED.hide); draw(); } });
+    root.querySelector('[data-a=hour]').addEventListener('input', e => { VED.hour = +e.target.value; draw(); hourSet(); });
+    root.querySelector('.bar').addEventListener('click', e => { const a = e.target && e.target.dataset ? e.target.dataset.a : null; if (a === 'undo') undo(); else if (a === 'redo') redo(); else if (a === 'save') { sceneSave(); sync(); } else if (a === 'close') close(); else if (a === 'reset') reset(); else if (a === 'new') newAsk(); else if (a === 'del') delAsk(); else if (a === 'marks') { VED.hide = !VED.hide; e.target.classList.toggle('on', !VED.hide); draw(); }
+      else if (a === 'win') { const M = root.querySelector('.main'); M.hidden = !M.hidden; e.target.classList.toggle('on', !M.hidden); if (!M.hidden) { fit(); draw(); } lookAt(); }
+      else if (a === 'play') play(); });
+    const bk = VED.back = $('button'); bk.id = 'vehEdBack'; bk.hidden = true; bk.textContent = 'BACK TO EDITOR'; bk.title = 'Stop driving and go back to the vehicle editor'; bk.onclick = () => unplay(); document.body.appendChild(bk);
     // the help line: what's under the pointer, as the other editors' (a tooltip's text, one short line)
     const help = e => { const t = e.target && e.target.closest ? e.target.closest('[title],[data-help]') : null; if (t && root.contains(t)) say(t.dataset.name || (t.tagName === 'BUTTON' ? t.textContent : ''), t.dataset.help || t.title); };
     root.addEventListener('pointerover', help); root.addEventListener('pointerdown', help);
@@ -76658,7 +76674,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     window.addEventListener('resize', () => { if (VEH_MODE) { fit(); draw(); } });
     new ResizeObserver(() => { if (VEH_MODE && VED.P) { const r = VED.cv.getBoundingClientRect(), d = window.devicePixelRatio || 1; if (Math.abs(r.width * d - VED.cv.width) > 2 || Math.abs(r.height * d - VED.cv.height) > 2) { fit(); draw(); } } }).observe(VED.cv);
     window.addEventListener('keydown', key, true);
-    setInterval(() => { if (VEH_MODE) { if (!VED.P) load(VED.key); else if (!VED.drag) draw(); sync(); } }, 400);
+    setInterval(() => { if (VEH_MODE) { if (!VED.P) load(VED.key); else if (!VED.drag && !VEH_PLAY) draw(); sync(); if (VW.in) try { edPlacedOnly(); } catch (e) { } } }, 400);   // (its test world kept clear of what the world sends out on its own - boats, planes, yachts: the editors' one way, 18-zz-photo.js)
   }
   // the vehicles' list, by family (made again when one is made or removed)
   function list() {
@@ -76725,6 +76741,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     R.querySelector('[data-a=undo]').disabled = !VED.undo.length; R.querySelector('[data-a=redo]').disabled = !VED.redo.length;
     const n = VED.key ? fam().views(art()) : 1; VED.turnEl.disabled = n < 2; VED.turnEl.parentNode.title = n < 2 ? 'This vehicle has no views turned toward you yet' : 'Turn the vehicle toward you to check its marks';
     R.querySelector('[data-a=del]').disabled = !made();
+    R.querySelector('[data-a=play]').disabled = !(VW.in && VW.v); R.querySelector('[data-a=win]').hidden = !VW.in; R.classList.toggle('flat', !VW.in);
     R.querySelector('[data-a=reset]').disabled = !VED.key || JSON.stringify(vmGet(VED.key)) === JSON.stringify(VM.def[VED.key]);
   }
 
@@ -76736,6 +76753,7 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     if (!VED.P) { VED.M = []; VED.side.innerHTML = '<h4>LOADING PICTURE</h4>'; draw(); return; }
     remark(); maskFor();
     if (!keepSel || !VED.zFit) fit();                          // (the same vehicle read again: its zoom and place kept)
+    if (!keepSel) stand();
     side(); draw(); sync();
   }
   // its row as marks (and its numbers, its waterline)
@@ -77001,6 +77019,100 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     if (m && (e.code === 'Delete' || e.code === 'Backspace')) { const k = kindOf(m); if (k.add && VED.M.filter(q => q.k === m.k).length > (k.min || 0)) { VED.M = VED.M.filter(q => q !== m); VED.sel = null; commit(); side(); } e.preventDefault(); }
   }
 
+  /* ---- THE WORLD VIEW (user Nov 18 09:13-09:39: "have the editor much closer to the game so we can actually judge the result"; "a second window
+     similar to what we do with the biome editor ... editing the splines and everything is separate from seeing the vehicle in a terrain"). The
+     vehicle stands in a test world the game itself builds and draws - a stretch of land with a runway on it, the sea beside it - as the Biome
+     Editor's and TANK VS TANK's worlds are: held in memory (NET_WORLD), this browser's saved world under THE WORLD GUARD, the simulation worker held
+     (the page runs the game), in and out in place. The vehicle is one placed there by the editors' own SPAWN (placedAdd); PLAY vehicle is the
+     editors' own PLAY (vehBoard). The marks' window beside it is the flat picture, as before. ---- */
+  const VW = { in: false, going: false, v: null, keep: null };
+  const VW_LAND = 2600, VW_SEA = 6500, VW_L = 12000, VW_GAP = 8200;   // (the sea wide enough for the view on the longest ship to sit beside the marks' window - the camera stops at the world's ends)
+  function testWorld() {
+    const o = (WORLD_PACK && WORLD_PACK.open) || {}, w = {}; for (const k in o) if (/_conv$/.test(k) || k === 'bd_air_ungroup' || k === 'bd_sky_p') w[k] = o[k];   // (the conversions marked done, the sky's settings)
+    const L = VW_L, TOP = -30, GAP = VW_GAP, BED = 200, FOOT = 260, SK = 'T';
+    const G = [{ k: 'S', gnd: true, p: [[L - GAP, FOOT, SK], [0, FOOT, SK], [0, TOP, SK], [L - GAP, TOP, SK]] }, { k: 'S', gnd: true, p: [[L, FOOT, 'S'], [L - GAP, FOOT, 'S'], [L - GAP, BED, 'S'], [L, BED, 'S']] }];
+    Object.assign(w, { bd_islands: JSON.stringify(G), bd_structs: JSON.stringify([{ id: 1, k: 'runway', pf: 'k:runway', x: VW_LAND, dy: 0, hue: 152, g: null, len: 260, hgt: 0, home: false }]),
+      bd_placed: '[]', bd_nature: '[]', bd_wrecks: '[]', bd_krakens: '[]', bd_lakes: '[]', bd_backgrounds: '[]', bd_markers: '[]', bd_weather_areas: '[]', bd_caves: JSON.stringify({ v: 1, systems: [] }) });
+    return new Map(Object.entries(w));
+  }
+  // its type in the editors' SPAWN list, and where it stands: on the runway, or out on the sea
+  function svOf(key) {
+    const [f, k] = [key.split(':')[0], vmArt(key)];
+    if (f === 'car') return [Object.keys(STR_VEHS).find(sv => STR_VEHS[sv].fam === 'car' && STR_VEHS[sv].art === k && !STR_VEHS[sv].pf), VW_LAND];
+    if (f === 'boat') return [Object.keys(STR_VEHS).find(sv => STR_VEHS[sv].fam === 'boat' && STR_VEHS[sv].kind === k && !STR_VEHS[sv].pf), VW_SEA];
+    if (f === 'ship') return ['ship:' + k, VW_SEA];
+    if (f === 'yacht') return ['yacht:' + k, VW_SEA];
+    if (f === 'plane') return [k === 'cessna' || k === 'jet' ? 'plane:' + k : k, VW_LAND];
+    return [null, VW_LAND];
+  }
+  // it as the editors list it (vehAll: what it is - its box, its way in)
+  const entry = v => vehAll().find(q => q.v === v) || { v, k: civClass(v), fam: '', own: false, army: false };
+  function gone() { const v = VW.v; VW.v = null; if (!v) return; try { const t = tableOf(v); placedGone(v); if (t) emit('tableRemove', { t, o: v }); } catch (e) { console.warn('Vehicle Editor', e); } }
+  // the picked vehicle standing in the world (the last one taken out), the view on it
+  function stand() {
+    if (!VW.in || VEH_PLAY) return;
+    gone();
+    try { const [sv, x] = svOf(VED.key); if (sv && (STR_VEHS[sv] || PLACE_TYPES[sv])) VW.v = placedAdd(sv, x, undefined); } catch (e) { console.warn('Vehicle Editor', e); }
+    VW.t = performance.now(); lookAt(); sync();
+  }
+  // the view on it: as big as fits beside the marks' window (the window open: the vehicle in what's left of the screen)
+  function lookAt() {
+    const v = VW.v; if (!VW.in || !v || VEH_PLAY) return;
+    try {
+      const B = vehBox(entry(v)), M = VED.root.querySelector('.main'), f = M.hidden ? 0 : M.getBoundingClientRect().width / Math.max(1, window.innerWidth);
+      if (!B.every(Number.isFinite)) return;
+      const w = Math.max(4 * UPM, B[1] - B[0]), h = Math.max(2 * UPM, B[3] - B[2]), z = clamp(Math.min((1 - f) * VIEW_W * 0.62 / w, VIEW_W * 0.3 / h), 0.2, 6);
+      setZoom(0, z); const zz = cam.zt[0] || z;               // (the zoom goes in steps: the level it took)
+      camOverride[0] = [(B[0] + B[1]) / 2 + f / 2 * VIEW_W / zz, (B[2] + B[3]) / 2 - 0.08 * VIEW_W / zz]; updateCamera(0, true); camFreeT = performance.now() + 800;
+    } catch (e) { }
+  }
+  // the hour, the game's own (the WORLD panel's action: the sky holds still at it)
+  function hourSet() { if (VW.in) try { act(0, 'envSet', 'time', (VED.hour == null ? 12 : VED.hour) % 24); } catch (e) { } }
+  function worldIn(done) {
+    if (VW.in || VW.going) return;
+    VW.going = true; worldEditCover(true, 'Loading Vehicle Editor');
+    try { tvtOut(); } catch (e) { }
+    SWB.holds.add('vehed');
+    if (VED.from === 'editor' && typeof EDMODE !== 'undefined' && EDMODE.on) { EDMODE.game = null; EDMODE.restart = false; EDMODE.play = true; edModeClose(); }   // (the GAME EDITOR shut with nothing after it - as the Biome Editor goes in)
+    const go = () => {
+      VW.keep = { mode: menuSel.mode, roster: menuSel.roster.slice(), cpu: menuSel.cpu.slice(), env: { time: env.time, weather: env.weather, rain: env.rain, wind: env.wind } };
+      menuSel.mode = 'land'; menuSel.roster = [{ dev: 'kb', side: 0 }]; menuSel.cpu = [false, false]; rosterApply();   // (OPEN WORLD, one person, before its world is built - vegSeat's notes)
+      HUD_ONLY = new Set();                                   // (no game buttons till the vehicle is PLAYed)
+      NET_WORLD.pass = new Set(VEH_JKEYS); guardOn('the Vehicle Editor\'s test world'); NET_WORLD.map = testWorld(); NET_WORLD.on = true;
+      worldReload();
+      Object.assign(env, { weather: 0.1, rain: 0, wind: 0.2 });
+      builtViewW = 0; resize(); ui.title = false; ui.resume = false; ui.menu = null;
+      VW.in = true; VW.going = false; try { edPlacedOnly(); } catch (e) { } hourSet(); done(); worldEditCover(false);
+    };
+    const handed = () => new Promise(r => { const f = () => (typeof SW === 'undefined' || !SW.going) ? r() : window.setTimeout(f, 100); f(); });
+    window.requestAnimationFrame(() => window.setTimeout(() => handed().then(() => swHold('vehed')).then(go).catch(e => { console.error('Vehicle Editor', e); VW.going = false; SWB.holds.delete('vehed'); worldEditCover(false); done(); }), 0));
+  }
+  function worldOut() {
+    if (!VW.in) return;
+    if (VEH_PLAY) unplay();
+    gone(); VW.in = false; camOverride[0] = null; HUD_ONLY = null; paused = false; try { held.clear(); } catch (e) { }
+    try { act(0, 'envPlay', true); } catch (e) { }
+    NET_WORLD.on = false; NET_WORLD.map = new Map(); NET_WORLD.pass = null; guardOff();
+    worldReload();
+    const K = VW.keep; VW.keep = null; if (K) { menuSel.mode = K.mode; menuSel.roster = K.roster; menuSel.cpu = K.cpu; Object.assign(env, K.env); }
+    if (VED.from === 'editor') { const T = NSKY.editor.TUNE; if (!T.built) NSKY.editor.build({ rescreen: () => { }, snapshot: gameSnapshot, load: gameLoad }); worldEdit(menuSel.mode); }
+    else { menuApply(); worldDrop(); openMainMenu(); ui.resume = false; worldEditCover(false); }
+    swRelease('vehed');
+  }
+  // PLAY vehicle: you in it, the game's own buttons and keys; BACK TO EDITOR: it stands where it stood again, as its maker makes it
+  function play() {
+    const v = VW.v; if (!VW.in || !v || VEH_PLAY) return;
+    const e = entry(v);
+    VEH_PLAY = true; HUD_ONLY = null; camOverride[0] = null; VED.root.hidden = true; VED.back.hidden = false;
+    try { vehBoard(e); } catch (err) { console.warn('Vehicle Editor', err); unplay(); }
+  }
+  function unplay() {
+    if (!VEH_PLAY) return;
+    VEH_PLAY = false; HUD_ONLY = new Set(); VED.root.hidden = false; VED.back.hidden = true; try { held.clear(); } catch (e) { }
+    try { const c = crew[0]; if (c.mode === 'civ' && c.civ) civRelease(0); c.mode = 'dock'; c.watch = null; c.look = null; } catch (e) { }
+    stand();
+  }
+
   // ---- in and out. Leaving with changes not saved asks (SAVE / DISCARD / CANCEL - the editors' one question)
   function open(from) {
     if (VEH_MODE) return;
@@ -77009,9 +77121,11 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
     { const g = document.getElementById('skyEdBtn'), f = g && getComputedStyle(g); if (f && parseFloat(f.fontSize) > 0) { VED.root.style.fontSize = f.fontSize; VED.root.style.fontFamily = f.fontFamily; } }
     vmDefaults(); VED.from = from || 'title'; VEH_MODE = true; VED.root.hidden = false; VED.undo.length = 0; VED.redo.length = 0;
     try { held.clear(); } catch (e) { }
+    VED.root.classList.add('flat');
+    worldIn(() => { sync(); fit(); draw(); stand(); });         // (its test world, then the vehicle stood in it; should it fail: the marks' window alone, as before)
     list(); load(VED.key && vmFamOf(VED.key) && vmFamOf(VED.key).keys().includes(vmArt(VED.key)) ? VED.key : vmKeys()[0]); say('', 'Press a mark to pick it, drag to move it; the arrow keys nudge it. The wheel zooms, a drag on empty space moves the picture.');
   }
-  function shut() { VED.root.hidden = true; VEH_MODE = false; }
+  function shut() { VED.root.hidden = true; worldOut(); VEH_MODE = false; }
   function close() {
     if (!dirty()) { shut(); return; }
     const d = VED.askEl = $('div'); d.className = 'ask';
@@ -77031,6 +77145,6 @@ if (typeof window !== 'undefined' && !SW_IN_WORKER) (() => {
   const place = () => { const g = document.getElementById('vegEdBtn'); if (!g) return; const r = g.getBoundingClientRect(); b.hidden = VEH_MODE || g.hidden || !r.width; if (!b.hidden) { b.style.left = (r.right + 8) + 'px'; b.style.font = getComputedStyle(g).font; } };
   const go = () => { if (!document.body) return setTimeout(go, 200); const st = $('style'); st.textContent = '#vehEdBtn[hidden] { display: none !important; }'; document.head.appendChild(st); document.body.appendChild(b); setInterval(place, 300); };
   go();
-  window.__vehEd = { open: f => open(f), close: () => close(), get on() { return VEH_MODE; }, state: () => ({ key: VED.key, marks: VED.M.map(m => Object.assign({}, m)), nums: Object.assign({}, VED.nums), dirty: dirty(), row: VED.row }), load: k => load(k), draw: () => draw(), get: k => vmGet(k), diff: () => vmDiff(), keys: () => vmKeys(), made: () => VNEW.list.map(r => [r.id, r.lab, r.w, r.h, r.len]), newFrom: (f, lab, len) => newFrom(f, lab, len).then(r => { list(); load('car:' + r.id); return r.id; }), V: VED };   // (tools)
+  window.__vehEd = { open: f => open(f), close: () => close(), get on() { return VEH_MODE; }, state: () => ({ key: VED.key, marks: VED.M.map(m => Object.assign({}, m)), nums: Object.assign({}, VED.nums), dirty: dirty(), row: VED.row }), load: k => load(k), draw: () => draw(), get: k => vmGet(k), diff: () => vmDiff(), world: () => ({ in: VW.in, going: VW.going, v: VW.v && { x: Math.round(VW.v.x), y: Math.round(VW.v.y || 0), sv: VW.v.sv, state: VW.v.state }, play: VEH_PLAY, guard: GUARD.on, nw: NET_WORLD.on, mode: MODE, crew: crew[0] && crew[0].mode, title: !!ui.title, ready: WORLD_READY, cam: camOverride[0], holds: [...SWB.holds] }), play: () => play(), unplay: () => unplay(), keys: () => vmKeys(), made: () => VNEW.list.map(r => [r.id, r.lab, r.w, r.h, r.len]), newFrom: (f, lab, len) => newFrom(f, lab, len).then(r => { list(); load('car:' + r.id); return r.id; }), V: VED };   // (tools)
 })();
 })(typeof document !== 'undefined' ? document.currentScript : null);
