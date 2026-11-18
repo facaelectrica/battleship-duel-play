@@ -7800,7 +7800,9 @@ const DW_GAPS = 3, DW_XS = new Float64Array(32), DW_XD = new Int8Array(32), DW_X
 const dwSpanNew = () => ({ top: -Infinity, n: 0, g: new Float64Array(2 * DW_GAPS), gk: new Int16Array(2 * DW_GAPS), open: new Uint8Array(DW_GAPS) });   // (gk: the curve's pieces over and under each gap)
 function dwSpans(w, x, S) {
   const C = w.C; let m = 0; S.n = 0; S.top = -Infinity;
-  if (!(x >= w.xa && x <= w.xb) || !w.n) return false;
+  // (user Nov 18 16:25, bug-20261118-162454: "land gets a giant triangle of water" - a wave is water only over its own water, as its table is
+  // (dwTab): past the shore its outline is nothing, drawn or felt)
+  if (!(x >= w.xa && x <= w.xb) || !w.n || x < w.run[0] || x > w.run[1]) return false;
   for (let k = 0; k < w.n - 1 && m < 32; k++) {
     const xA = C[2 * k], xB = C[2 * k + 2]; if ((xA <= x) === (xB <= x)) continue;
     const h = C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA), d = xB > xA ? 1 : -1;
@@ -7884,7 +7886,11 @@ function dwDrawBack(x0, x1) {
   const top = seaDeepStops(E.sunset, 1)[0][1], shade = top.map((v, j) => v * 0.22 + [8, 22, 60][j] * 0.78), glow = top.map((v, j) => v + ([150, 222, 255][j] - v) * 0.6);
   const NB = 32, cols = Array.from({ length: NB }, (_, q) => shade.map((v, j) => v + (glow[j] - v) * q / (NB - 1))), lineC = E.sunset > 0.3 ? mix3([196, 228, 255], [255, 220, 170], E.sunset) : [214, 238, 255];
   for (const w of DW.live) {
-    if (w.lake || !w.lip || offView(w.xa, w.xb, x0, x1)) continue;
+    // (user Nov 18 16:23, bug-20261118-162303: "sometimes it flickers or disappears ... sometimes the inner part flickers and parts dissapear,
+    // sometimes all of it dissapears") drawn wherever the outline is folded - where the water's own drawing leaves its hollow (dwGapCols' rule) -
+    // not only past a fold of 0.15 of its height (w.lip): a fold shrinking under that in the crash, or about it, put the hollow's inside out at once
+    // while the hollow was still there. A small hollow has a thin wall of its own (its depth a share of its width, below)
+    if (w.lake || !(w.fb >= w.fa) || offView(w.xa, w.xb, x0, x1)) continue;
     const C = w.C;
     for (let k = 0; k <= kt; k++) { const x = C[2 * k]; P[2 * k] = x * SV - CAMPX; P[2 * k + 1] = dwYAt(w, x, C[2 * k + 1]) * SV - TOPPX; }
     // (user 12:07, ref-shade-wanted-nov18: "that part should have the same color as the background water. Its facing the same direction. The shadow
@@ -7900,7 +7906,10 @@ function dwDrawBack(x0, x1) {
     // (its length along from there, and the side the air is on: the front's at the face's middle, the same turn all along)
     let S = 0; const L = DW_LX; L[k0] = 0; for (let k = k0 + 1; k <= kt; k++) { S += Math.hypot(P[2 * k] - P[2 * k - 2], P[2 * k + 1] - P[2 * k - 1]); L[k] = S; }
     if (!(S > 8)) continue;
-    const km = Math.round(kt * 0.35), tx = P[2 * km + 2] - P[2 * km - 2], ty = P[2 * km + 3] - P[2 * km - 1], sgn = ((-ty) * w.dir) > 0 ? 1 : -1;   // (n = sgn * (-ty, tx): toward the air - the front of a face that rises toward the back)
+    // (n = sgn * (-ty, tx) along it: toward the air. The outline is the edge of the water, gone along from its front's foot - the water always on the
+    // one side of it, the air on the other, all the way round under the lip: which side is the way the wave faces, w.dir - not read off one point's
+    // slope, which a face dipping there in a rough sea turned the other way, the whole wall laid inside the water and hidden)
+    const sgn = w.dir;
     const Wd = Math.min(0.11 * w.H * SV, 0.18 * S);
     // (user Nov 18 12:34 / 12:46, ref-inside-sharp-nov18 / ref-inside-still-sharp-nov18: "I still see a VERY SHARP edge") THE INNER WALL'S DEPTH
     // IS A SHARE OF THE HOLLOW'S OWN WIDTH: a band of one width pushed in from a tight curve folds into a point where the curve turns tighter than that
@@ -7912,7 +7921,10 @@ function dwDrawBack(x0, x1) {
     for (let k = k0; k <= kt; k++) { R[2 * k] = P[2 * k]; R[2 * k + 1] = P[2 * k + 1]; }
     for (let it = 0; it < M; it++) for (let k = k0 + 1; k < kt; k++) { R[2 * k] = (R[2 * k - 2] + 2 * R[2 * k] + R[2 * k + 2]) / 4; R[2 * k + 1] = (R[2 * k - 1] + 2 * R[2 * k + 1] + R[2 * k + 3]) / 4; }
     for (let k = k0; k <= kt; k++) {
-      let across = Infinity; for (let j = k0; j <= kt; j++) if (Math.abs(L[j] - L[k]) > 3 * Wd) across = Math.min(across, Math.hypot(P[2 * j] - P[2 * k], P[2 * j + 1] - P[2 * k + 1]));
+      // (bug-20261118-162303, "parts dissapear": a point of the far side counted only from 3 band-widths along on - one coming in or going out of
+      // that at a tight turn of the hollow took its depth there from one distance to another from one frame to the next. Now it's let in by
+      // degrees - from 2 to 4 band-widths along, its distance counted the more the further: the same wall, never a jump)
+      let across = Infinity; for (let j = k0; j <= kt; j++) { const r = clamp((Math.abs(L[j] - L[k]) - 2 * Wd) / (2 * Wd), 0, 1); if (r > 0) across = Math.min(across, Math.hypot(P[2 * j] - P[2 * k], P[2 * j + 1] - P[2 * k + 1]) / r); }
       Wk[k] = Math.min(Wd * Math.pow(Math.sin(Math.PI * L[k] / S), 0.7), across / 3);
     }
     for (let it = 0; it < M; it++) for (let k = k0 + 1; k < kt; k++) Wk[k] = Math.min(Wk[k], (Wk[k - 1] + 2 * Wk[k] + Wk[k + 1]) / 4);
@@ -7983,7 +7995,7 @@ function dwStickAt(i) {
   const x0 = C[2 * k], h0 = C[2 * k + 1], x1 = C[2 * k + 2], h1 = C[2 * k + 3], x = x0 + (x1 - x0) * f, h = h0 + (h1 - h0) * f;
   let tx = x1 - x0, th = h1 - h0; const l = Math.hypot(tx, th) || 1; tx /= l; th /= l;
   const nx = -w.dir * th, nh = w.dir * tx, X = x + nx * F.vy[i], Hh = h + nh * F.vy[i];   // (in: the water's side of its outline - the same turn all round it)
-  F.x[i] = X; F.y[i] = dwYAt(w, X, Hh);
+  F.x[i] = X; F.y[i] = dwSurf(X) - (Hh - dwTab(w, X, true));      // (dwYAt, its surface the foam's - dwSurf)
 }
 // (the surface's height at x: the water's own, the designed waves' lowest crossing included - surfaceY0)
 function dwFoamFrom(w, dt) {
@@ -8044,10 +8056,23 @@ function dwFoamFrom(w, dt) {
     for (let n = dfN(dt * H / U * 6 * f); n > 0; n--) { const p = at(si + dfR() * Math.max(0.5, 11.5 - si)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.5, 0.85), 0, dfRnd(0.012, 0.03) * dwFoamH(w), dfRnd(1.5, 3)); }
   }
 }
-// the top of the water at x: the highest any wave's outline stands there (a lip's top over its tube), else the surface
+/* THE SURFACE THE FOAM RIDES, A COLUMN AT A TIME (bug-20261118-161226, user Nov 18 16:12: "Why is the framerate so slow in the water lab?" - 22 fps,
+   the sea's step ~6 ms: every bit of foam - up to 4000 in a storm's breaking - asked the water's exact surface, some twenty sines, two or three times
+   a step, mostly for the same few hundred columns). While the foam steps (dwFoamStep), each water column's surface (surfaceY0) is worked out once,
+   the first time a bit asks for it, and read between two columns along a straight line - as the water's own columns (simAt) and a wave's tables
+   (dwTab) are read. The foam is only drawn (the simulation worker never runs it - SIM_ONLY): the physics still gets the exact surface */
+const DWS = { on: false, st: 0, y: new Float64Array(0), s: new Int32Array(0) };
+function dwSurfCol(i) { const S = DWS; if (S.s[i] !== S.st) { S.s[i] = S.st; S.y[i] = surfaceY0(WX0 + i * DX); } return S.y[i]; }
+function dwSurf(x) {
+  if (!DWS.on) return surfaceY0(x);
+  const f = wCol(x), i = Math.floor(f); if (!(i >= 0 && i < N - 1)) return surfaceY0(x);
+  const a = dwSurfCol(i), u = f - i; return u ? a + (dwSurfCol(i + 1) - a) * u : a;
+}
+// the top of the water at x: the highest any wave's outline stands there (a lip's top over its tube), else the surface (dwYAt, with the surface
+// asked once)
 function dwTopY(x) {
-  let y = surfaceY0(x);
-  for (const w of DW.live) if (x >= w.xa && x <= w.xb) { const v = dwYAt(w, x, dwTab(w, x, false)); if (v < y) y = v; }
+  const s = dwSurf(x); let y = s;
+  for (const w of DW.live) if (x >= w.xa && x <= w.xb) { const v = s - (dwTab(w, x, false) - dwTab(w, x, true)); if (v < y) y = v; }
   return y;
 }
 // a lip's leading edge: its foremost point, 7 to 10 (a lip that hooks back under itself throws its water from its front, not its end in the tube)
@@ -8083,6 +8108,11 @@ function dwSplash(w, x, y) {   // (x, its world y)
 // foam (k 3) stays in the water's body under its top (vy: how deep), carried on, rising as it thins; what ends on the open water leaves the sea's
 // own foam (spawnFoam)
 function dwFoamStep(dt) {
+  const S = DWS; if (S.s.length !== N) { S.y = new Float64Array(N); S.s = new Int32Array(N); S.st = 0; }   // (the water's reach grown: its columns again)
+  S.st = (S.st + 1) | 0 || 1; S.on = true;                            // (a new step: every column's surface asked afresh)
+  try { dwFoamRun(dt); } finally { S.on = false; }
+}
+function dwFoamRun(dt) {
   const F = DWF, G = 9.8 * UPM, wind = E.windU || 0;
   for (let i = F.n - 1; i >= 0; i--) {
     F.age[i] += dt; let x = F.x[i], y = F.y[i];
@@ -8103,7 +8133,7 @@ function dwFoamStep(dt) {
       // stabilizes") white water keeps its way on, giving it up slowly to the water's own speed there and the wind's
       F.vx[i] += (dwFlow(x) * 0.9 + wind * 0.08 - F.vx[i]) * (k === 2 ? 0.3 : 0.25) * dt; x += F.vx[i] * dt;
       // (churned foam no deeper than the wave's body over its face there - none left hanging under the sea as the wave goes down)
-      if (k === 3) { F.vy[i] *= 1 - 0.7 * dt; const t = dwTopY(x); F.vy[i] = Math.min(F.vy[i], Math.max(0, surfaceY0(x) - t) + 4); y = t + F.vy[i]; } else y = dwTopY(x);
+      if (k === 3) { F.vy[i] *= 1 - 0.7 * dt; const t = dwTopY(x); F.vy[i] = Math.min(F.vy[i], Math.max(0, dwSurf(x) - t) + 4); y = t + F.vy[i]; } else y = dwTopY(x);
       F.r[i] *= 1 + 0.12 * dt;
       if (!waterRun(x)) F.age[i] = F.life[i];
     }
@@ -8188,13 +8218,18 @@ function dwDrawShore(x0, x1, lit = null) {   // (lit: again in the waterline's l
     if (!lit) RL.rect(px, py, pw, Math.max(2, Math.round(7 * SV)), DARK, 0.42 * Math.min(1, v * 1.5), DARK, 0);   // (darker, fading down into the ground)
     RL.rect(px, py, pw, Math.max(1, PB >> 1), SHINE, 0.34 * v);
   }
+  // (user Nov 18 16:44, bug-20261118-164306: "a little layer of water inland, but it's cut off in the connection between land and water ... There should
+  // be a smooth transition between the two" - the sheet stood a tenth of the wave's height over the ground at the waterline, whatever the sea beside
+  // it) THE SHEET IS THE SEA RUNNING ON UP THE SHORE: its top one line from the sea's own surface at the waterline to the ground at its front - a
+  // film on the ground wherever the ground stands over that line
   for (const s of DW.sw) {
     if (s.f < DW.WC) continue;
+    const ys = surfaceY(s.x - s.dir * 4), yf = landTop(s.x + s.dir * s.f);
     for (let f = 0; f < s.f; f += 4) {
       const x = s.x + s.dir * f; if (offViewR(x, 8, x0, x1)) continue;
-      const gy = landTop(x), th = Math.max(1, 0.1 * s.H * (1 - f / s.f) + 1), px = PX(Math.min(x, x + s.dir * 4)), pw = Math.abs(PX(x + s.dir * 4) - PX(x)) || 1;
-      if (!lit) RL.rect(px, PY(gy - th), pw, Math.max(1, PY(gy) - PY(gy - th)), col, 0.8);
-      if (f > s.f - 14) RL.rect(px, PY(gy - th) - PB, pw, PB + 1, WH, 0.9);   // (its foaming edge)
+      const gy = landTop(x), top = Math.min(gy - 1, ys + (yf - ys) * f / s.f), px = PX(Math.min(x, x + s.dir * 4)), pw = Math.abs(PX(x + s.dir * 4) - PX(x)) || 1;
+      if (!lit) RL.rect(px, PY(top), pw, Math.max(1, PY(gy) - PY(top)), col, 0.8);
+      if (f > s.f - 14) RL.rect(px, PY(top) - PB, pw, PB + 1, WH, 0.9);   // (its foaming edge)
     }
   }
   if (RL.n) frameRects(C, RL, { key: 'dwaves' });
@@ -8265,6 +8300,12 @@ function dwSurfAt(x, y) {
   }
   return r;
 }
+/* IN THE WATER OR OUT OF IT - ONE RULE FOR EVERYTHING THAT GOES IN AND COMES OUT (user Nov 18 16:34, bug-20261118-163359: "When I fire a missile
+   that 'crosses' the wave, when it comes out on the other side, its floating like if it was still in water. the projectile (in fact all of them) must
+   detect being in and then out of the water"): the top of the water over or under the point (x, y) - the water it's in, or the first under it (a
+   lip's own water over its tube, the tube's floor under it - dwSurfAt). A point is in the water when y >= it. Asked each step by whatever is in
+   the water as by whatever goes into it: the water moves away from what's in it (a wave going by), and it's in the air again */
+function waterTopAt(x, y) { return DW.live.length ? dwSurfAt(x, y) : surfaceY(x); }
 /* THE WATER'S OWN VELOCITY AT ITS SURFACE, where a thing of length len floats (s: that surface - dwSurfAt): out[0] its way along the sea (dwFlowAt, the
    less for a thing long against the wave - a third of its length carries it whole), out[1] its rise and fall (world y, down +): a surface moving by
    at the wave's speed c lifts its water at (u - c) times its slope - never more than c (dwFlowAt's 1:1 rule). A floating thing is dragged toward
@@ -8288,7 +8329,7 @@ function dwWaterAt(x, s, len, out) {
 const DW_G = 300, DW_ZW = 0.6, DW_FL = [0, 0, 0, 0], DW_WV = [0, 0];
 const dwDrag = (hg, g, sub) => 4 * DW_ZW * Math.sqrt(2 * g / hg) * sub;   // (2·ζ·ω half in: its bob's ω² - buoyancy's stiffness, 2·g per its height)
 function dwFloat(o, dk, len, hg, half, dir, g, bco, dt, off = 0, yk = 'y', vyk = 'vy') {
-  const y = o[yk], sAt = DW.live.length ? x => dwSurfAt(x, y) : surfaceY;
+  const y = o[yk], sAt = x => waterTopAt(x, y);
   const yb = sAt(o.x + dir * half), ys = sAt(o.x - dir * half), yS = (yb + ys + 2 * sAt(o.x)) / 4, sub = clamp(0.5 + (y - off - yS) / hg, 0, 1);
   if (DW.live.length) dwWaterAt(o.x, yS, len, DW_WV); else DW_WV[0] = DW_WV[1] = 0;
   const e = Math.exp(-dwDrag(hg, g, sub) * dt);
@@ -9566,7 +9607,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 17:38';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 17:49';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -14947,10 +14988,13 @@ function stepTorps(dt) {
     if (!tp.spent && schools.length && !tp.air) killFishNear(tp.x, tp.y, 7);   // (it runs through the fish in its way)
     if (tp.spent) {
       // motor dead: it coasts to a stop and sinks, slowly tipping nose down, trailing the odd bubble
-      tp.vx *= 1 - 0.8 * dt; tp.vy += (34 - tp.vy) * 0.6 * dt;
+      // (user Nov 18 16:34, bug-20261118-163359: whatever is in the water knows when it's out of it - a wave gone by) in the air it falls, back
+      // in the water it sinks again (waterTopAt)
+      const wet = tp.y >= waterTopAt(tp.x, tp.y);
+      if (wet) { tp.vx *= 1 - 0.8 * dt; tp.vy += (34 - tp.vy) * 0.6 * dt; } else tp.vy += SHELL_G * dt;
       tp.x += tp.vx * dt; tp.y += tp.vy * dt;
       tp.ang += (0.45 - tp.ang) * 0.5 * dt;                    // settles nose-down, whichever way it was running
-      if (armTorpR() < 3 * dt) addBubble(tp.x, tp.y - 1, armTorpRnd(-3, 3), -armTorpRnd(6, 14), armTorpRnd(0.6, 1.1));
+      if (wet && armTorpR() < 3 * dt) addBubble(tp.x, tp.y - 1, armTorpRnd(-3, 3), -armTorpRnd(6, 14), armTorpRnd(0.6, 1.1));
       // its warhead hasn't gone off: sinking onto an enemy sub or a wreck, it does (user Oct 24)
       {
         let gone = false;
@@ -15300,7 +15344,7 @@ function stepDcharges(dt) {
     c.t += dt;
     if (!c.under) {
       c.vy += 300 * dt; c.x += c.vx * dt; c.y += c.vy * dt; c.a += c.w * dt;
-      const sy = surfaceY(c.x);
+      const sy = waterTopAt(c.x, c.y);   // (the water it's over - a lip's own over its tube: waterTopAt)
       if (c.y >= sy) {
         c.under = true; c.vy = Math.min(c.vy, 60) * 0.4; c.vx *= 0.4;
         for (let k = 0; k < 10; k++) spawnSpray(c.x + armDchRnd(-4, 4), sy - 1, armDchRnd(-30, 30), 0.6);
@@ -15321,6 +15365,8 @@ function stepDcharges(dt) {
       c.vy += (46 - c.vy) * 2 * dt; c.vx *= 1 - 2 * dt; c.w += (Math.sin(c.t * 3) * 2 - c.w) * dt;
       c.x += c.vx * dt + Math.sin(c.t * 2.3) * 4 * dt; c.y += c.vy * dt; c.a += c.w * dt;
     }
+    // (user Nov 18 16:34, bug-20261118-163359) out of the water again - a wave gone by: in the air, falling, till it goes in again (waterTopAt)
+    if (c.y < waterTopAt(c.x, c.y)) { c.under = false; continue; }
     if (armDchR() < dt * 8) addBubble(c.x, c.y - 2, armDchRnd(-4, 4), -armDchRnd(15, 30), armDchRnd(0.6, 1.4));
     let boom = c.y >= c.fuse || c.y >= floorUnder(c.x, c.y - 4) - 2;
     // a proximity fuse too: it goes off right beside a submarine
@@ -18320,6 +18366,9 @@ function stepShells(dt) {
       s.vx *= 1 - 2.6 * dt; s.vy += (42 - s.vy) * 2.2 * dt;
       const ox = s.x, oy = s.y;
       s.x += s.vx * dt; s.y += s.vy * dt;
+      // (user Nov 18 16:34, bug-20261118-163359: a wave's water gone on from round it, it was left sinking in the air) out of the water again - a wave
+      // gone by, a lip it went through: in the air, falling as any shell (its motor drowned as it went in) - the one rule, waterTopAt
+      if (s.y < waterTopAt(s.x, s.y)) { s.under = false; continue; }
       // still carrying its speed, it rips a white trail of foam through the water
       if (s.ut < 0.6 && Math.hypot(s.vx, s.vy) > 60) streakRow(ox, oy, s.x, s.y, armShellRnd(0.9, 1.4) * (1 - s.ut) + 0.3);
       if (armShellR() < 0.7 * Math.exp(-s.ut * 0.5)) addBubble(s.x, s.y, armShellRnd(-6, 6), -armShellRnd(20, 40), armShellRnd(0.8, 1.8));
@@ -18393,7 +18442,9 @@ function stepShells(dt) {
     // (a missile's white trail starts half a second out, user Oct 24: the launch puff stays by the plane, the flame
     // alone leads it away; and it ends when the motor burns out)
     // (a bomb leaves no trail at all, user Oct 24 night: it only falls, carried by the plane's speed)
-    if (s.from === 'bomb' || (s.from === 'rocket' && (!powered || s.age - (s.ia || 0) < 0.5))) { /* no trail (yet, or any more) */ }
+    // (user Nov 18 16:39: "if it is strong enough to exit the water, it would just fall down with gravity. We could not make any smoke again either
+    // because it got turned off by the water") one that's been in the water (ut: its time under) lays none again
+    if (s.from === 'bomb' || s.ut > 0 || (s.from === 'rocket' && (!powered || s.age - (s.ia || 0) < 0.5))) { /* no trail (yet, or any more) */ }
     else if (k >= 0 && Math.hypot(s.x - tc.x1[k], s.y - tc.y1[k]) < 34) { tc.x2[k] = s.x; tc.y2[k] = s.y; }
     else {
       // (user Oct 30: "Smoke from trails must ALWAYS disappear smoothly" - many missiles' old trails "suddenly faded out
@@ -18440,9 +18491,9 @@ function stepShells(dt) {
     // a hit?") a bomb always goes off where it hits, whatever it hit: if what it hit made no blast of its own, the bomb's own
     if (done && s.from === 'bomb' && BLAST && flashes.top === BLAST.fl) sectionBlast(s.x, s.y, 1, (s.vx || 0) * 0.2);
     if (done) { guysNear(s.x, s.y, 30); blastClose(s.x, s.y); shells.cut(i); continue; }
-    const sy = surfaceY(s.x);
+    const sy = waterTopAt(s.x, s.y);   // (the water it's over - a lip's own over its tube: waterTopAt)
     if (s.y >= sy) {
-      splash(s.x, s.vx, s.vy, SHOT_SPLASH[s.from]); guysNear(s.x, sy, 22); s.under = true; s.y = sy + 2; mapMark(s.x, s.owner); blastClose(s.x, sy);
+      splash(s.x, s.vx, s.vy, SHOT_SPLASH[s.from]); guysNear(s.x, sy, 22); s.under = true; s.burn = 0; s.seg = null; s.y = sy + 2; mapMark(s.x, s.owner); blastClose(s.x, sy);
       // a plane's bomb that missed is a depth charge from here on (user Oct 24): it sinks on and goes off beside a
       // submarine, on a wreck or on the bottom
       if (s.from === 'bomb') { bombToCharge(s); shells.cut(i); }   // (its depth charge made from it, then it's gone)
@@ -18493,7 +18544,7 @@ function stepShells(dt) {
     if (b.spent) {
       b.spent -= dt; b.vx *= Math.exp(-1.6 * dt); b.vy += 520 * dt;
       b.px = b.x; b.py = b.y; b.x += b.vx * dt; b.y += b.vy * dt;
-      if (b.spent <= 0 || b.y >= surfaceY(b.x) || (landSolid(b.x, b.y))) bullets.cut(i);
+      if (b.spent <= 0 || b.y >= waterTopAt(b.x, b.y) || (landSolid(b.x, b.y))) bullets.cut(i);
       continue;
     }
     b.px = b.x; b.py = b.y;
@@ -18501,6 +18552,7 @@ function stepShells(dt) {
     if (b.uw) {
       // into the water: it goes in a little way, slowing hard, trailing bubbles; a sub just under it still takes it
       b.vx *= Math.exp(-7 * dt); b.vy = b.vy * Math.exp(-7 * dt) + 20 * dt;
+      if (b.y < waterTopAt(b.x, b.y)) { b.uw = false; continue; }   // (out of the water again - a wave gone by, a lip gone through: waterTopAt)
       if (armShellR() < 0.5) addBubble(b.x, b.y, armShellRnd(-3, 3), -armShellRnd(8, 20), armShellRnd(0.5, 1));
       let hitU = false;
       for (const sb of subs) { if (!mayHit(b, sb)) continue; const sec = subHitTest(sb, b.x, b.y); if (sec >= 0) { emit('hit', { kind: 'sub', o: sb, sec, x: b.x, y: b.y, chip: 0.05 }); hitU = true; break; } }
@@ -18551,9 +18603,9 @@ function stepShells(dt) {
       const c = crew[p];
       if (p !== b.owner && c.mode === 'boat' && !(c.safeT > 0) && Math.abs(c.x - b.x) < 6 && Math.abs(b.y - surfaceY(c.x) + 3) < 5) { killGuy(p); done = true; }
     }
-    if (!done && b.y > surfaceY(b.x)) {
+    if (!done && b.y > waterTopAt(b.x, b.y)) {
       // a round into the sea: a thin spike of water straight up, and on into the water a little way
-      const sy = surfaceY(b.x);
+      const sy = waterTopAt(b.x, b.y);
       water.push(b.x, -500); for (let k = 0; k < 4; k++) spawnSpray(b.x, sy - 1, armShellRnd(-20, 20), 0.6);
       let small = 0, k = -1; for (let i = 0; i < jets.n; i++) if (jets.c.small[i]) { small++; if (k < 0) k = i; }
       if (small > 40) { jets.drop(k); jets.sweep(); }   // (the oldest small one)
@@ -18951,10 +19003,15 @@ function stepJets(dt) {
 // as the line of the sea it comes out of (user Oct 24: they read gray at night, the waterline doesn't)
 const SPLASH_DAY = ['#ffffff', 'rgba(206,234,252,0.9)', 'rgba(236,247,255,0.95)', '#cfe9fb', '#b6cdef'];   // (the last: a mine splash's shade - 34-zz-mine-splash.js)
 // (the waterline's light: null while nothing has tinted the world - the designed waves' foam is lit by it too, 09-zy-dwaves.js)
+// (user Nov 18 16:32, bug-20261118-163139: "the foam is not getting tinted like everything else so it looks like its glowing in relation to the sea
+// water" - it was lit by the sun's or the moon's whole colour, under clouds as under a clear sky) the light the waterline is seen in: its own colour
+// (waterLineRGB) laid in the hour's tint and the dusk's warm as everything of the world's is (the light pass's darkOf - under the clouds' deck:
+// E.tintA), and the moon's light on the line (lpassSurface's, along it away from the moon)
 function splashLight() {
   if (E.tintA <= 0.03) return null;
-  const moon = mix3([200, 238, 255], [255, 214, 160], E.moonWarm), sun = mix3([238, 249, 255], [255, 200, 170], clamp(E.sunset, 0, 1));
-  return mix3(sun, moon, clamp(E.night * 1.2, 0, 1));
+  const a = E.tintA, t = E.tint || [0, 0, 0], w = E.warm > 0.01 ? E.warm : 0, nt = E.night * (1 - E.fog) * (1 - E.overcast * 0.8);
+  const moon = moonXs[viewIdx] > -1e8 && nt > 0.05 ? mix3([200, 238, 255], [255, 214, 160], E.moonWarm) : null;
+  return waterLineRGB().map((v, i) => { let c = v * (1 - a) + t[i] * a; c = c * (1 - w) + [255, 120, 140][i] * w; if (moon) c += moon[i] * nt * 0.55; return Math.min(255, Math.round(c)); });
 }
 function splashPal() {
   const L = splashLight(); if (!L) return null;
@@ -26513,7 +26570,8 @@ function waterTintGPU(Bt) {
 }
 // the surface's line's width and colour (every water's)
 const waterLineW = () => SV > 1.6 ? 3 : SV > 0.9 ? 2 : 1;
-const waterLineCss = () => E.sunset > 0.2 ? rgbs(mix3([238, 249, 255], [255, 200, 170], E.sunset)) : '#eef9ff';
+const waterLineRGB = () => E.sunset > 0.2 ? mix3([238, 249, 255], [255, 200, 170], E.sunset) : [238, 249, 255];   // (the waterline's colour - its light: splashLight)
+const waterLineCss = () => E.sunset > 0.2 ? rgbs(waterLineRGB()) : '#eef9ff';
 function waterLineSet(f, lw, lineCss = waterLineCss()) {
   const ga = C.s.ga;
   f.set(wgpuPmB(lineCss, ga), 28); f.set(wgpuPmB('rgba(165,225,255,0.4)', ga), 32);
