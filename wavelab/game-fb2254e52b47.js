@@ -7637,24 +7637,28 @@ function dwSeaDir(x) {
 }
 function dwAutoStep(dt) {
   if (!DW.auto) { DW.au = null; return; }
-  const A = DW.au || (DW.au = { t: 1, left: -1 });   // (turned on: the first set comes at once, its lull after it)
+  const A = DW.au || (DW.au = { t: 1, left: -1, base: 0, lull: false });   // (turned on: the first set comes at once, its lull after it)
+  // (user Nov 18 16:20: "im changing the weather but I dont see the waves spawning with the new defined parameters" - the wait to the next wave, or
+  // through a lull, was set by the sea as it was then, up to two minutes. Now what's left of it follows the sea as it is: the same part of the new wait)
+  const S = dwSeaNow(), jit = () => 0.7 + 0.6 * dwAR(), base = A.lull ? S.lull : S.rate > 0.05 ? 60 / S.rate : 3;
+  if (A.base > 0 && Math.abs(base - A.base) > 1e-6) A.t *= base / A.base;
+  A.base = base;
   A.t -= dt; if (A.t > 0) return;
-  const S = dwSeaNow(), jit = () => 0.7 + 0.6 * dwAR();
-  if (!(S.rate > 0.05)) { A.t = 3; A.left = 0; return; }   // (a sea without waves: looked at again in a while)
+  if (!(S.rate > 0.05)) { A.t = 3; A.base = 3; A.lull = false; A.left = 0; return; }   // (a sea without waves: looked at again in a while)
   if (A.left < 0) A.left = Math.max(1, Math.round(S.set[0] + (S.set[1] - S.set[0]) * dwAR()));
-  else if (A.left === 0) { A.left = Math.max(1, Math.round(S.set[0] + (S.set[1] - S.set[0]) * dwAR())); A.t = S.lull * jit(); return; }   // (a lull, then a set)
-  A.t = 60 / S.rate * jit();
+  else if (A.left === 0) { A.left = Math.max(1, Math.round(S.set[0] + (S.set[1] - S.set[0]) * dwAR())); A.lull = true; A.base = S.lull; A.t = S.lull * jit(); return; }   // (a lull, then a set)
+  A.lull = false; A.base = 60 / S.rate; A.t = A.base * jit();
   if (DW.live.length >= (DW.seaCfg.max || 6)) return;   // (as many out as there may be: this one's skipped)
   let r = dwAR(), kind = null; for (const n in S.odds) { r -= S.odds[n]; if (r <= 0) { kind = n; break; } } if (!kind) { kind = Object.keys(S.odds).pop(); if (!kind) return; }
-  A.left--;
   const K = DW.kinds[kind], wd = env.wind || 0, vary = DW.seaCfg.vary || 0, f = DW.focus != null ? DW.focus : cam.view[0].l + (typeof VWW === 'number' ? VWW : 1600) / 2;
   // (user Nov 18 15:46: "same wave, bigger" - "the game should do that small variation too": its length with its height, k both, its shape kept)
   const dir = dwSeaDir(f), k = (0.85 + 0.35 * Math.abs(wd)) * (1 + vary * (2 * dwAR() - 1)), lk = k, vk = 1 + 0.1 * Math.abs(wd) * (dir === Math.sign(wd) ? 1 : -1);
   const H = K.h * UPM * k, L = K.len * UPM * lk, far = (typeof VWW === 'number' ? VWW : 1600) / 2 + L * 0.5;
   for (let d = far; d > L * 0.3; d -= L * 0.25) {   // (off the view's edge upstream; nearer, if the water there won't take it)
     const x = f - dir * d, run = waterRun(x);
-    if (run && waterLv(x) === WATER_Y && seabedY(x) - waterLv(x) >= H && x - L * 0.55 > run[0] && x + L * 0.55 < run[1]) { dwSend(kind, x, dir, k, lk, vk); return; }
+    if (run && waterLv(x) === WATER_Y && seabedY(x) - waterLv(x) >= H && x - L * 0.55 > run[0] && x + L * 0.55 < run[1]) { dwSend(kind, x, dir, k, lk, vk); A.left--; return; }
   }
+  A.t = Math.min(A.t, 1);   // (no water here to take it - the view over land, a lake, too shallow: tried again shortly, the set's count kept)
 }
 // an outline point's place: its height of the wave's; along, of half the wave's length at its foot - but up its FRONT (the face, the hollow, the lip, the
 // crest) more and more of the wave's own height instead (DW_ASP of it), so the curl keeps its proportions on a long wave as on a short one. From the
@@ -7863,7 +7867,7 @@ function dwTrapFoam(w, dt) {
   for (let i = 0; i < n; i++) { const S = DW_TC[i]; for (let k = 0; k < S.n; k++) { if (S.open[k]) continue; const a = S.g[2 * k], b = S.g[2 * k + 1];
     for (let m = dfN(dt * (a - b) * st / (H * H) * 120); m > 0; m--) { const x = w.xa + (i + dfR() - 0.5) * st, h = b + (a - b) * dfR(); dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.7, 0.95), Math.max(0, S.top - h), dfRnd(0.04, 0.08) * dwFoamH(w), dfRnd(0.8, 1.6)); } } }
   const [tx, ty] = dwImpact(w), q = A / (H * H);
-  for (let k = dfN(dt * q * 260); k > 0; k--) { const x = tx - w.dir * dfRnd(-0.12, 0.05) * H; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.85, 1.25), dfRnd(0, 0.08) * H, dfRnd(0.04, 0.09) * dwFoamH(w), dfRnd(0.8, 1.8)); }
+  for (let k = dfN(dt * q * 260); k > 0; k--) { const x = tx - w.dir * dfRnd(-0.12, 0.05) * H; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.85, 1.25), dfRnd(0, 0.08) * dwFoamH(w), dfRnd(0.04, 0.09) * dwFoamH(w), dfRnd(0.8, 1.8)); }
   for (let k = dfN(dt * q * 90); k > 0; k--) dwFoamAdd(0, tx + dfRnd(-0.03, 0.03) * H, ty - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.7), -dfRnd(0.3, 0.9) * Math.sqrt(9.8 * UPM * H), dfRnd(0.008, 0.022) * dwFoamH(w), dfRnd(1, 2));
 }
 /* THE WAVE'S INSIDE, IN SHADOW (user Nov 17 22:23-22:25, lab/wavelab/ref/ref-wave-final-layers / ref-wave-composition-A-B-C / ref-tube-shadow:
@@ -7961,6 +7965,7 @@ const DWF = { n: 0, cap: 4000, w: new Array(4000), x: new Float32Array(4000), y:
 let dfR0 = null; const dfR = () => (dfR0 || (dfR0 = sysRng('dwFoam')))(), dfRnd = (a, b) => a + (b - a) * dfR(), dfN = m => Math.floor(m + dfR());   // (dfN: how many this step, m on average)
 // (user Nov 18 16:14: "the amount of foam it gets should not get 'bigger' that doesn make sense") foam is the water's, not the wave's: its pieces sized
 // by the wave's own designed height - not as it stands taller in the shallows - and never past THE WALL BREAKS' 45 m it was tuned on (DW_FOAM_H)
+// (and the churned layer's depth under the surface the same: foam's, not as deep as the wave is tall - user 16:22, ref-tsunami-foam-nov18: "its ridiculous")
 const DW_FOAM_H = 45 * UPM, dwFoamH = w => Math.min(w.K.h * UPM * (w.k || 1), DW_FOAM_H);
 function dwFoamAdd(k, x, y, vx, vy, r, life) {
   const F = DWF; if (SIM_ONLY || F.n >= F.cap) return; const i = F.n++;
@@ -8027,7 +8032,7 @@ function dwFoamFrom(w, dt) {
     // much as it still stands up
     let fi = 5; for (let i = 5; i <= 11; i++) if (dwPt(w, i)[1] > 0.3 * w.H && dwPt(w, i)[0] * w.dir > dwPt(w, fi)[0] * w.dir) fi = i;
     const f = clamp(dwPt(w, 11)[1] / H, 0, 1), sx = dwPt(w, fi)[0];
-    for (let n = dfN(dt * H / U * 20 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.05, 0.1) * H; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.85, 1), dfRnd(0, 0.04) * H, dfRnd(0.03, 0.06) * dwFoamH(w) * (0.4 + 0.6 * f), dfRnd(1, 2.5)); }
+    for (let n = dfN(dt * H / U * 20 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.05, 0.1) * H; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.85, 1), dfRnd(0, 0.04) * dwFoamH(w), dfRnd(0.03, 0.06) * dwFoamH(w) * (0.4 + 0.6 * f), dfRnd(1, 2.5)); }
     for (let n = dfN(dt * H / U * 8 * f); n > 0; n--) { const x = sx - w.dir * dfRnd(-0.05, 0.2) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.8, 1.05), 0, dfRnd(0.02, 0.05) * dwFoamH(w), dfRnd(3, 6)); }
   } else if (w.tilt > 0.12) {
     // (user 12:07, ref-forming-foam-nov18: "the moment the wave is forming, we should already have foam at the top") a wave steepening, no lip
@@ -8066,7 +8071,7 @@ function dwFace(w, x) {
 function dwSplash(w, x, y) {   // (x, its world y)
   const H = w.H, c = w.c * w.dir, n = Math.min(500, Math.round(30 + H / UPM * 8));
   // (churned water where it hit: air the impact drove in, about the tip, a little way down - user 13:09: not the whole curl)
-  for (let i = 0; i < n * 0.8; i++) { const xx = x + dfRnd(-0.15, 0.1) * H * -w.dir; dwFoamAdd(3, xx, dwTopY(xx), c * dfRnd(0.6, 1), dfRnd(0, 0.2) * H, dfRnd(0.03, 0.08) * dwFoamH(w), dfRnd(1, 2.5)); }
+  for (let i = 0; i < n * 0.8; i++) { const xx = x + dfRnd(-0.15, 0.1) * H * -w.dir; dwFoamAdd(3, xx, dwTopY(xx), c * dfRnd(0.6, 1), dfRnd(0, 0.2) * dwFoamH(w), dfRnd(0.03, 0.08) * dwFoamH(w), dfRnd(1, 2.5)); }
   for (let i = 0; i < n; i++) dwFoamAdd(0, x + dfRnd(-0.1, 0.1) * H, y - dfRnd(0, 0.05) * H, c * dfRnd(0.4, 1.3), -dfRnd(0.3, 1) * Math.sqrt(2 * 9.8 * UPM * H * 0.5), dfRnd(0.25, 0.7) * UPM, dfRnd(1.5, 3.5));
   for (let i = 0; i < n * 0.6; i++) dwFoamAdd(0, x + dfRnd(-0.05, 0.05) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * Math.sqrt(9.8 * UPM * H), dfRnd(0.008, 0.025) * dwFoamH(w), dfRnd(1.2, 2.5));   // (the jet's first clumps)
   for (let i = 0; i < n * 0.4; i++) dwFoamAdd(1, x + dfRnd(-0.15, 0.15) * H, y - dfRnd(0, 0.3) * H, c * dfRnd(0, 0.6), -dfRnd(0.1, 0.5) * w.c, dfRnd(0.04, 0.09) * dwFoamH(w), dfRnd(2, 4.5));
@@ -9561,7 +9566,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 17:20';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 17:26';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
