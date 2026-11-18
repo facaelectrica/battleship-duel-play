@@ -180,7 +180,7 @@ addEventListener('unhandledrejection', function (e) { if (__bootErr.length < 40)
     try {
       var keys = {}; for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && k.indexOf('bd_') === 0) keys[k] = localStorage.getItem(k); }
       var nc = navigator.connection, line = cv && cv.querySelector('.cv-line');
-      var R = { v: 1070, build: 'NOV 17 23:02', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
+      var R = { v: 1070, build: 'NOV 17 23:07', loading: true, when: new Date().toISOString(), at: Math.round(performance.now()), url: location.href, ua: navigator.userAgent,
         screen: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, touch: 'ontouchstart' in window }, line: line ? line.dataset.t : null, boot: window.__bootLog || null, errors: __bootErr.slice(),
         net: nc ? { type: nc.effectiveType, down: nc.downlink, rtt: nc.rtt } : null,
         loads: performance.getEntriesByType('navigation').concat(performance.getEntriesByType('resource')).map(function (r) { return [String(r.name).slice(-60), Math.round(r.startTime), Math.round(r.responseEnd), r.transferSize || 0]; }),
@@ -7866,35 +7866,36 @@ function dwCarryAll(dt) {
 // (the engine's rectangles - src/gpu/61-rects.js: one list of this part's own, laid in one draw)
 const dwRL = () => DW.rl || (DW.rl = frameRectList());
 const DW_WHITE = [255, 255, 255];
-// the water's own colour above its still level at x, as the water's drawing lays it there: its deep (the clouds' shade in it) under its tint (seaAt -
-// 44-shadows-seafloor.js), under the open ocean's dark (the water shader's strips: (0, 4, 18) at 0.3 of deepFactor - 40-zz-water-gpu.js)
-const dwSeaCol = x => { const A = seaAt(WATER_Y - 14), k = 0.3 * deepFactor(x), D = [0, 4, 18]; return A.deep.map((v, j) => (v * (1 - A.a) + A.T[j] * A.a) * (1 - k) + D[j] * k); };
-// THE WATER OVER AN AIR GAP, AND THE LINE ROUND IT: where a wave's outline is folded (w.fa .. w.fb), each pixel column's crossings of the outline, highest
-// first - water from the first down to the second (the lip), air to the third (the face: the water's own surface, drawn by the water's drawing); the
-// surface's bright line along every part of the outline there; foam at its tip while it curls and comes down
+/* THE FOLD, FOR THE WATER'S OWN DRAWING (user 22:05, of the lip filled by its own code over the water's: "still doing some sort of shortcut?" - the
+   join showed at the lip's root): where a wave's outline is folded over a column of the view, that column's three rows - its top (the lip's), where
+   its air gap begins (the lip's underside) and where the water begins again (the face) - go to the water shader with the surface (waterSurfGPU's
+   compute pass: gapIn), and the water's one drawing fills the body with the gap left out and carries its line and band round it (WATER_WGSL: gapAt,
+   inGap, gapLine). F: four numbers a column of the view (o = the column + 3) */
 const DW_YS = new Float64Array(16);
-function dwDrawWaves(x0, x1, lake) {
-  const RL = dwRL(), lw = waterLineW(), lineC = E.sunset > 0.2 ? mix3([238, 249, 255], [255, 200, 170], E.sunset) : [238, 249, 255];
+function dwGapCols(F, nOut) {
+  for (let o = 0; o < nOut; o++) { F[4 * o] = -1e9; F[4 * o + 1] = F[4 * o + 2] = 1e9; F[4 * o + 3] = 0; }
   for (const w of DW.live) {
-    if (!!w.lake !== !!lake || !(w.fb >= w.fa) || offView(w.fa, w.fb, x0, x1)) continue;
-    const C = w.C, n = w.n, col = dwSeaCol(w.x), Xa = Math.floor(w.fa * SV - CAMPX) - 1, Xb = Math.ceil(w.fb * SV - CAMPX) + 1;
-    for (let X = Math.max(-2, Xa); X <= Math.min(VWP + 2, Xb); X++) {
-      const x = (X + 0.5 + CAMPX) / SV; let m = 0;
+    if (!(w.fb >= w.fa)) continue;
+    const C = w.C, n = w.n, o0 = Math.max(0, Math.floor(w.fa * SV - CAMPX) + 2), o1 = Math.min(nOut - 1, Math.ceil(w.fb * SV - CAMPX) + 4);
+    for (let o = o0; o <= o1; o++) {
+      const x = (o - 3 + CAMPX + 0.5) / SV; let m = 0;
       for (let k = 0; k < n - 1 && m < 16; k++) { const xA = C[2 * k], xB = C[2 * k + 2]; if ((xA <= x) !== (xB <= x)) DW_YS[m++] = C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA); }
       if (m < 3) continue;
-      const S = Array.prototype.slice.call(DW_YS, 0, m).sort((p, q) => q - p), base = surfaceY0(x) + S[m - 1];   // (the world y of height 0 of this wave here)
-      for (let k = 0; k + 1 < m - 1; k += 2) { const ya = Math.round((base - S[k]) * SV - TOPPX), yb = Math.round((base - S[k + 1]) * SV - TOPPX); if (yb > ya) RL.rect(X, ya, 1, yb - ya, col, 1); }
+      let top = -Infinity, low = Infinity; for (let k = 0; k < m; k++) { if (DW_YS[k] > top) top = DW_YS[k]; if (DW_YS[k] < low) low = DW_YS[k]; }
+      let und = low; for (let k = 0; k < m; k++) if (DW_YS[k] < top && DW_YS[k] > und) und = DW_YS[k];   // (the next under its top: the lip's underside)
+      const base = surfaceY0(x) + low, row = h => Math.floor((base - h) * SV - TOPPX + 0.5), rt = row(top), ru = Math.max(rt + 1, row(und)), rf = Math.max(ru, row(low));
+      F[4 * o] = rt; F[4 * o + 1] = ru; F[4 * o + 2] = rf;
     }
-    const pad = 3 * DX;
-    for (let k = 0; k < n - 1; k++) {
-      const xA = C[2 * k], yA = C[2 * k + 1], xB = C[2 * k + 2], yB = C[2 * k + 3]; if (Math.max(xA, xB) < w.fa - pad || Math.min(xA, xB) > w.fb + pad) continue;
-      const st = Math.max(1, Math.ceil(Math.max(Math.abs(xB - xA), Math.abs(yB - yA)) * SV));
-      for (let q = 0; q < st; q++) { const x = xA + (xB - xA) * q / st, h = yA + (yB - yA) * q / st; if (x < w.fa - pad || x > w.fb + pad) continue;
-        RL.rect(Math.round(x * SV - CAMPX - lw / 2), Math.round(dwYAt(w, x, h) * SV - TOPPX - lw / 2), lw, lw, lineC, 1); }
-    }
-    if (w.ph > 2.4 && w.ph < 4.7) { const T = dwPt(w, 8), ty = dwYAt(w, T[0], T[1]), k = Math.round(4 + 10 * clamp(w.ph - 2.4, 0, 1)), sz = Math.max(PB, lw + 1);
-      for (let j = 0; j < k; j++) { const h1 = hash(j * 7.31 + Math.floor(time * 10) * 1.7), h2 = hash(j * 3.17 + Math.floor(time * 10) * 2.3 + 5);
-        RL.rect(Math.round((T[0] - w.dir * (h1 - 0.4) * 0.16 * w.H) * SV - CAMPX), Math.round((ty + (h2 - 0.45) * 0.2 * w.H) * SV - TOPPX), sz, sz, DW_WHITE, 0.95); } }
+  }
+}
+// foam breaking out of the lip's tip while it curls and comes down: a few blocks about it, changing with the clock
+function dwDrawWaves(x0, x1, lake) {
+  const RL = dwRL(), lw = waterLineW();
+  for (const w of DW.live) {
+    if (!!w.lake !== !!lake || !(w.ph > 2.4 && w.ph < 4.7) || offView(w.xa, w.xb, x0, x1)) continue;
+    const T = dwPt(w, 8), ty = dwYAt(w, T[0], T[1]), k = Math.round(4 + 10 * clamp(w.ph - 2.4, 0, 1)), sz = Math.max(PB, lw + 1);
+    for (let j = 0; j < k; j++) { const h1 = hash(j * 7.31 + Math.floor(time * 10) * 1.7), h2 = hash(j * 3.17 + Math.floor(time * 10) * 2.3 + 5);
+      RL.rect(Math.round((T[0] - w.dir * (h1 - 0.4) * 0.16 * w.H) * SV - CAMPX), Math.round((ty + (h2 - 0.45) * 0.2 * w.H) * SV - TOPPX), sz, sz, DW_WHITE, 0.95); }
   }
   if (RL.n) frameRects(C, RL, { key: 'dwaves' });
 }
@@ -9211,7 +9212,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 23:02';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 17 23:07';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -24682,6 +24683,9 @@ struct DP {
 @group(0) @binding(1) var<storage, read> still: array<f32>;
 @group(0) @binding(2) var<storage, read> wh: array<f32>;
 @group(0) @binding(3) var<storage, read_write> surfOut: array<vec2f>;
+// (a designed wave's outline folded over a column - 09-zy-dwaves.js: [its top's row, the row its air gap begins (the lip's underside), the row the water
+// begins again (the face), -]; none: -1e9, 1e9, 1e9. Out: the column's surface row its top's, and the gap's two rows in the entry nOut after it)
+@group(0) @binding(4) var<storage, read> gapIn: array<vec4f>;
 
 const TAU = 6.2831853071795864;
 fn wrapP(p: f32) -> f32 { return p - TAU * floor(p / TAU); }
@@ -24742,7 +24746,9 @@ fn exact(i: i32) -> f32 {
   let i = o - 3 + P.pad;                              // (the view's column c is the table's index c + PAD)
   var y = 0.0;
   if ((i & 3) == 0) { y = exact(i); } else { let a = i - (i & 3); let ya = exact(a); let yb = exact(a + 4); y = ya + (yb - ya) / 4.0 * f32(i - a); }
-  surfOut[o] = vec2f(floor((y - P.waterY) * P.sv + P.kpy + 0.5), y);
+  let gi = gapIn[o];
+  surfOut[o] = vec2f(select(floor((y - P.waterY) * P.sv + P.kpy + 0.5), gi.x, gi.x > -1.0e8), y);
+  surfOut[o + P.nOut] = gi.yz;
 }
 
 @group(0) @binding(0) var<storage, read> D: DP;
@@ -24757,6 +24763,9 @@ fn exact(i: i32) -> f32 {
 // past the sixth as the sixth (no corner table indexed by the vertex: Intel D3D12 scratch memory, Nov 11)
 fn qd(v: u32) -> vec2f { let k = min(v, 5u); return vec2f(f32((0x32u >> k) & 1u), f32((0x2cu >> k) & 1u)); }
 fn surfRow(c: f32) -> f32 { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1)].x; }
+// a column's air gap under a folded outline: the rows it begins and ends (the lip's underside, the face); none: both 1e9
+fn gapAt(c: f32) -> vec2f { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1) + i32(D.tgt.w)]; }
+fn inGap(c: f32, y: f32) -> bool { let g = gapAt(c); return y >= g.x && y < g.y; }
 fn surfW(c: f32) -> f32 { return surfIn[clamp(i32(c) + 3, 0, i32(D.tgt.w) - 1)].y; }
 fn gradAt(y: f32, y0: f32, y1: f32) -> vec4f {
   let t = clamp((y + 0.5 - y0) / (y1 - y0), 0.0, 1.0);
@@ -24773,7 +24782,7 @@ fn strips(x: f32, y: f32) -> vec4f {
   let st = D.xr.z;
   let cs = floor(x / st) * st;
   if (cs < D.xr.w || cs >= D.ds.x || y >= D.yo.z) { return vec4f(0.0); }
-  if (y < surfRow(cs)) { return vec4f(0.0); }
+  if (y < surfRow(cs) || inGap(x, y)) { return vec4f(0.0); }
   let wx = (cs + D.ds.y + st * 0.5) / D.ds.z;
   var sk = 0; var sd = 1e30;
   for (var i = 0; i < 8; i++) { if (f32(i) >= D.lk.y) { break; } let m = dseaAt(i); let d = max(abs(wx - m.x) - m.y, 0.0); if (d < sd) { sd = d; sk = i; } }
@@ -24788,7 +24797,7 @@ fn strips(x: f32, y: f32) -> vec4f {
   return vec4f(0.0, 4.0 / 255.0, 18.0 / 255.0, 1.0) * a;
 }
 fn fill(k: i32, x: f32, y: f32) -> vec4f {
-  if (y >= D.yo.z || x < D.xr.x || x >= D.xr.y || y < surfRow(x) + select(D.yo.x, D.yo.y, k == 1)) { return vec4f(0.0); }
+  if (y >= D.yo.z || x < D.xr.x || x >= D.xr.y || y < surfRow(x) + select(D.yo.x, D.yo.y, k == 1) || inGap(x, y)) { return vec4f(0.0); }
   if (k == 0) { return grad(y); }
   return D.c1;
 }
@@ -24815,6 +24824,19 @@ fn lineCol(y: f32, yc: f32, yl: f32, yr: f32, jl: bool, jr: bool) -> vec4f {
   let b = max(yc, max(ml, mr)) + lw;
   if (y >= t && y < b) { return D.lc; }
   if (y >= yc + lw && y < yc + 2.0 * lw + 2.0) { return D.uc; }
+  return vec4f(-1.0);
+}
+// the surface's line round an air gap (a folded outline's): along the face under it (lineCol's own rule, with the pale band), and along the lip's
+// underside - joined to its neighbours'; where the gap ends at the lip's tip (the next column's water far below) the line closes the lip's end
+fn gapLine(x: f32, y: f32) -> vec4f {
+  let g = gapAt(x); if (g.x > 1.0e8) { return vec4f(-1.0); }
+  let lw = D.lp.x; let gl = gapAt(x - 1.0); let gr = gapAt(x + 1.0); let s = surfRow(x); let sl = surfRow(x - 1.0); let sr = surfRow(x + 1.0);
+  let c = lineCol(y, g.y, select(sl, gl.y, gl.x < 1.0e8), select(sr, gr.y, gr.x < 1.0e8), true, true);
+  if (c.a >= 0.0) { return c; }
+  let ul = select(select(g.x, s, sl >= g.x), gl.x, gl.x < 1.0e8);
+  let ur = select(select(g.x, s, sr >= g.x), gr.x, gr.x < 1.0e8);
+  let ml = floor((g.x + ul) * 0.5 + 0.5); let mr = floor((g.x + ur) * 0.5 + 0.5);
+  if (y >= min(g.x, min(ml, mr)) - lw && y < max(g.x, max(ml, mr))) { return D.lc; }
   return vec4f(-1.0);
 }
 @fragment fn fs(@builtin(position) p: vec4f) -> @location(0) vec4f {
@@ -25233,7 +25255,9 @@ fn crestAt(x: f32, y: f32) -> vec4f {
   var acc = w.under;
   if ((M & 2u) != 0u && x >= D.lp.y && x < D.lp.z) {
     let c = lineCol(y, surfRow(x), surfRow(x - 1.0), surfRow(x + 1.0), true, true);
-    if (c.a >= 0.0) { acc = c + acc * (1.0 - c.a); }
+    if (c.a >= 0.0) { if (!inGap(x, y)) { acc = c + acc * (1.0 - c.a); } }
+    let c2 = gapLine(x, y);
+    if (c2.a >= 0.0) { acc = c2 + acc * (1.0 - c2.a); }
   }
   if ((M & 4u) != 0u) { let c = crestAt(x, y); acc = c + acc * (1.0 - c.a); }
   acc = w.top + acc * (1.0 - w.top.a);
@@ -25895,7 +25919,7 @@ function wgpuReady() {
   const GF = frameShared('ground.floor'); W.floor = !!(GF && GF.wgsl);
   W.mod = gpuModule(WATER_WGSL + (W.floor ? GF.wgsl(1) + WATER_FLOOR_WGSL : ''), 'water');
   const C_ = GPUShaderStage.COMPUTE, VF = GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, F_ = GPUShaderStage.FRAGMENT, ro = { type: 'read-only-storage' };
-  W.cbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: ro }, { binding: 1, visibility: C_, buffer: ro }, { binding: 2, visibility: C_, buffer: ro }, { binding: 3, visibility: C_, buffer: { type: 'storage' } }], 'water surface');
+  W.cbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: ro }, { binding: 1, visibility: C_, buffer: ro }, { binding: 2, visibility: C_, buffer: ro }, { binding: 3, visibility: C_, buffer: { type: 'storage' } }, { binding: 4, visibility: C_, buffer: ro }], 'water surface');
   W.cpipe = gpuComputePipe({ layout: gpuPipeLayout([W.cbl], 'water surface'), label: 'water surface', compute: { module: W.mod, entryPoint: 'surf' } });
   W.wbl = gpuBindLayout([{ binding: 0, visibility: C_, buffer: ro }, { binding: 1, visibility: C_, buffer: ro }, { binding: 2, visibility: C_, buffer: { type: 'storage' } }], 'water wake field');
   W.wpipe = gpuComputePipe({ layout: gpuPipeLayout([W.wbl], 'water wake field'), label: 'water wake field', compute: { module: W.mod, entryPoint: 'wakeField' } });
@@ -25970,7 +25994,7 @@ function waterSurfGPU() {
   frameFlush();
   const still = wgpuStill();
   let B = W.surf[vi];
-  if (!B || B.size < nOut * 8) { if (B) gpuBufFree(B); B = W.surf[vi] = gpuBuf(Math.ceil((nOut * 8 + 1) / 8192) * 8192, 'water'); }
+  if (!B || B.size < nOut * 16) { if (B) gpuBufFree(B); B = W.surf[vi] = gpuBuf(Math.ceil((nOut * 16 + 1) / 8192) * 8192, 'water'); }   // (each column's surface, then each column's air gap - the designed waves')
   // (the table surfTab keeps: index i at world x (i - PAD + CAMPX + 0.5) / SV; the view's column c is index c + PAD)
   const PAD = SURF.PAD, n = VWP + 2 * PAD + 1, x0 = (-PAD + CAMPX + 0.5) / SV, xl = (n - 1 - PAD + CAMPX + 0.5) / SV;
   const cw0 = wCol(x0), c0 = Math.floor(cw0), lo = clamp(c0, 0, N - 1), hi = clamp(Math.floor(wCol(xl)) + 2, 0, N - 1), winN = hi - lo + 1;
@@ -25990,7 +26014,9 @@ function waterSurfGPU() {
   f[40] = WATER_Y; I[41] = PAD; f[42] = f[43] = 0;
   f[44] = T.h1; f[45] = T.h2; f[46] = T.h3; f[47] = T.hr; f[48] = T.hs; f[49] = T.deep; f[50] = T.ks; f[51] = 0; f[52] = T.k1; f[53] = T.k2; f[54] = T.k3; f[55] = T.kr;
   const pB = wgpuArena(224, (u8, o) => u8.set(new Uint8Array(WSP), o));
-  const bg = gpuBindGroup(W.cbl, [{ binding: 0, resource: pB.res }, { binding: 1, resource: { buffer: still.gb } }, { binding: 2, resource: whB.res }, { binding: 3, resource: { buffer: B.gb } }], 'water surface');
+  // (the designed waves' folds over this view's columns - 09-zy-dwaves.js dwGapCols: none, the same numbers every frame)
+  const gapB = wgpuArena(nOut * 16, (u8, o) => dwGapCols(new Float32Array(u8.buffer, o, nOut * 4), nOut));
+  const bg = gpuBindGroup(W.cbl, [{ binding: 0, resource: pB.res }, { binding: 1, resource: { buffer: still.gb } }, { binding: 2, resource: whB.res }, { binding: 3, resource: { buffer: B.gb } }, { binding: 4, resource: gapB.res }], 'water surface');
   const cp = gpuComputeBegin([still, B], 'water');
   cp.setPipeline(W.cpipe); cp.setBindGroup(0, bg); cp.dispatchWorkgroups(Math.ceil(nOut / 64)); cp.end();   // (nOut = the view's columns + 6: bounded by the screen)
   W.surfKey[vi] = key;
