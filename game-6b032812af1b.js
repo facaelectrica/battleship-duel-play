@@ -8729,8 +8729,8 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    its screen, with what the guest itself is in (you) and what its teammates are in (taken); each guest sends its
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
-const GAME_VERSION = 1081;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 17 23:05';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const GAME_VERSION = 1082;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
+const BUILD = 'NOV 17 23:22';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -46669,11 +46669,11 @@ function lakeWet(L) {
    shows in every lake; no lake water, tint, depth or bed pictures of its own (drawLakeIn, drawLakeBack). An island standing in
    one: its rock under the water drawn first in the land's pass, so the ground in front covers it (user: "A should be rendered
    behind the main land") - drawLakeRoots, before the ground (renderLandObjects0) */
-// (user Nov 8 12:50: "the background layer of a water body is tinted by the water itself, not the texture") in two parts: 'under' - the sea's deep, decks
-// and rays, what shows where nothing of the land stood behind the water - before the land's back wall; 'over' - its life, bed and tint - after it, so
-// where the land's line ran (a crater filled, a lake's bed) the back wall shows through the water, tinted by it
+// (user Nov 8 12:50: "the background layer of a water body is tinted by the water itself, not the texture"; Nov 17: not see-through) in parts: 'under'
+// (before the land's back wall) only the water as the worker has it; 'fill' (after the back wall and the field behind, before the islands standing in it)
+// its deep; 'over' (after them) its rays, life, bed and tint
 function drawLakeRoots(x0, x1, part) {
-  if (!SIM_ONLY && part !== 'over') waterPageSync();               // (the water as the simulation worker's snapshot has it - 50-land-water)
+  if (part === 'under') { if (!SIM_ONLY) waterPageSync(); return; }   // (the water as the simulation worker's snapshot has it - 50-land-water)
   const step = Math.max(1, 2 / SV);
   // (user Nov 8 16:20-17:18, stacked water) every body of the land's water as the cells hold it (wcBodies - 50-land-water): a lake, a cave's pool under a
   // crust or under a crater's puddle - each one shape, drawn as the sea is from its own level; the ground in front covers its rock
@@ -46725,28 +46725,32 @@ function wcBodyOutline(P, sv) {
   return { sv, a: a.slice(0, na), aw: aw.slice(0, na >> 1), b: b.slice(0, nb) };
 }
 // outlines as the canvas' clip path (what's drawn in the water that isn't the water's shader yet: its life, bed, plants, rays, rocks)
-// one water's look in its outlines (polys - wcBodyPoly), from its own level ('over' - nothing 'under'): the sea's deep colours (user Nov 17: not see-through -
-// was its own bowl seen through its tint, Nov 8 20:17), its rays, life, bed and tint; a sea cave's is its tint alone. Its depth's dark: the light's (lightWater)
+// one water's look in its outlines (polys - wcBodyPoly), from its own level: 'fill' the sea's deep colours (user Nov 17: not see-through - was its own bowl
+// seen through its tint, Nov 8 20:17); 'over' its rays, life, bed and tint (nothing 'under'); a sea cave's is its tint alone. Its depth's dark: the light's
+// (lightWater)
 function lakeWaterIn(a, b, lv, polys, part, mx, shallow, bare = !shallow) {   // (bare: water under the ground - a sea cave, a pool under a crust: its tint and nothing of the open floor's)   // (shallow: the ocean's tint at a lake's share - a sea cave's is the ocean's own at its depth, user Nov 8 21:53: "deep blue water")
     // (user Nov 3 13:28: "All the bodies of water should have the exact same rendering like the main ocean has, independent of their
     // height") the ocean's own water - its deep colours, depth decks, light rays and tint (renderObjects, 43-render-objects) - drawn
     // in this water, lifted (or lowered) by how far its surface is from the ocean's: the same drawing, from its own surface
     const dl = lv - WATER_Y, dy = Math.round(dl * SV), cave = bare;   // (cave: a sea cave's - under the floor, none of the open floor's things can be in it: Nov 8, battle-caves chat)
+    const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12)), B = bh + SHY + 50 + Math.abs(dy);
+    // (the water itself - its deep and its tint - keeps to its outlines by its own test (fsBody's windTile): not drawn through the outlines' clip, which
+    // stops short of the bed - user Nov 17 22:08, his lake's bed under a bright strip once the water was solid; the same strip was the back wall seen
+    // through every lake before. What the clip still holds: the rays, life, plants and rocks drawn in it)
+    // (user Nov 17 20:24: "a lake should not be transparent the way it is" - the ocean's own water from its own surface, the back wall and field behind
+    // no longer seen through it; its depth's dark is the light's - lightWater, 50-land-zz-light.js. Its own part, 'fill': drawn before the islands
+    // standing in it - drawLandGround)
+    if (part === 'fill') { if (!cave) waterBodyFillGPU(polys, dy, X0, X1, Y, B); return; }
     C.save(); waterClipPolys(polys);                     // (its outlines as the clip: the water shader's coverage - frameClipBy)
     try {
-      const X0 = Math.floor(PX(a)), X1 = Math.ceil(PX(b)), Y = Math.round(PY(WATER_Y - 12)), B = bh + SHY + 50 + Math.abs(dy);
-      if (part === 'under') return;
-      // (user Nov 17 20:24: "a lake should not be transparent the way it is" - the ocean's own water from its own surface, the back wall and field behind
-      // no longer seen through it; its depth's dark is the light's - lightWater, 50-land-zz-light.js)
-      if (!cave) waterBodyFillGPU(polys, dy, X0, X1, Y, B);
       C.save(); C.translate(0, dy); UW_LIFT = dl;
       if (!cave) drawRays(false, true, polys, dy);           // (the sea's rays, their fade as the sea's pass left it this frame - kept in this water's outlines by the shader)
       C.restore(); UW_LIFT = 0;
       if (!cave) drawSeaLife();                           // (a pool or cave under the ground: none - zoomed out every one of them drew all the fish, 48 times a frame)
       if (!cave) { drawReefItems(reef, a, b, true); drawAlgae(a, b, true); drawUwPlants(a, b, true); }   // (and the UNDERWATER DECKS' plants on its bed - drawUwPlants)
-      waterBodyTintGPU(polys, dy, X0, X1, Y, B, colBiome(clamp(ltCol(mx), 0, land.cols - 1)), !!shallow);   // (the sea's own tint, and its biome's own water over it - the water shader, inside the outlines, lifted to this water's level: 40-zz-water-gpu.js)
-      if (!cave && land.lkRocks) drawRockForms(a, b, true);           // (its rock formations: over the water's tint, behind the ground in front - as the sea's, renderObjects)
     } finally { C.restore(); }
+    waterBodyTintGPU(polys, dy, X0, X1, Y, B, colBiome(clamp(ltCol(mx), 0, land.cols - 1)), !!shallow);   // (the sea's own tint, and its biome's own water over it - the water shader, inside the outlines, lifted to this water's level: 40-zz-water-gpu.js)
+    if (!cave && land.lkRocks) { C.save(); waterClipPolys(polys); try { drawRockForms(a, b, true); } finally { C.restore(); } }   // (its rock formations: over the water's tint, behind the ground in front - as the sea's, renderObjects)
 }
 // THE HARBOURS ON A LAKE (user Nov 3 15:11: piers and the marine hangar on lakes - "Yes, unified system, always"): the sea's own
 // drawing of them (drawPierPosts, drawHarbourFront, drawFreePiers) at their water's level (dkY, 50-zz-structh), in the land's pass
@@ -52866,6 +52870,9 @@ function drawLandGround(x0, x1, onField, onWater) {
   // tint turned the caves' air pockets blue; here a pocket shows its rock, the water its water, the ground in front over both)
   guardDraw('seaCaveWater', () => drawSeaCaveWater(x0, x1));
                                        // (the caves' stalactites, with the back wall - under its dark)
+  // (the lakes' own water first - the ocean's deep from each one's level, not see-through: user Nov 17 - so what stands in a lake (an island's or a
+  // segment's body under its line) is drawn over it and seen through the water's tint as at sea; drawn after them it hid them)
+  if (onWater) onWater('fill');
   drawIslandsLand(x0, x1);                                // (the segments in a country: behind the ground in front, in front of what's behind - 50-land-islands; before a lake's water - user Nov 9: an island's body under its line is seen through the water in front, as at sea)
   if (onWater) onWater();                                 // (a lake's water over its back wall: its tint, what lives in it - drawLakeRoots 'over')   // (what stands on the field behind: in front of it, behind the ground - its foot under the land's line covered again)
   // (engine part 2, Nov 9) the ground in front - its cells, skins, stones, smooth edge, rims in the sun, the hour's light, and the dark under every slice -
@@ -56292,7 +56299,7 @@ function renderLandObjects0() {
     guardDraw('lakeRoots', () => drawLakeRoots(x0, x1, 'under'));   // (an island in a country's water: its rock under the water, behind the ground - 50-land-lake)
     lt('roots');
     // (Nov 4 09:06: the field behind kept - deck 3 stands on it: drawn in front of the field, behind the ground in front)
-    drawLandGround(x0, x1, () => { if (!edTiny(0.5 * UPM)) drawFieldFlowers(x0, x1); if (!RIG_T.off && !edTiny(6 * UPM)) { VEG_PASS = 'back'; drawLandProps(x0, x1, undefined, 'plants'); drawLandProps(x0, x1, 'land', 'plants'); VEG_PASS = null; lt('deck3'); } }, () => guardDraw('lakeOver', () => drawLakeRoots(x0, x1, 'over')));   // (the field's flowers: none while plants have bones - their field isn't drawn, user Nov 3 21:23)   // (the green country's flowers - on its field)
+    drawLandGround(x0, x1, () => { if (!edTiny(0.5 * UPM)) drawFieldFlowers(x0, x1); if (!RIG_T.off && !edTiny(6 * UPM)) { VEG_PASS = 'back'; drawLandProps(x0, x1, undefined, 'plants'); drawLandProps(x0, x1, 'land', 'plants'); VEG_PASS = null; lt('deck3'); } }, part => guardDraw(part === 'fill' ? 'lakeFill' : 'lakeOver', () => drawLakeRoots(x0, x1, part || 'over')));   // (the field's flowers: none while plants have bones - their field isn't drawn, user Nov 3 21:23)   // (the green country's flowers - on its field)
     lt('ground');
     drawPads(x0, x1);                                     // (OPEN WORLD: the launch pads, past the hangars)
     // (user Nov 3 22:35, the Vegetation Lab: "All objects we spawn must be in FRONT of the vegetation of course") the plants with bones behind
