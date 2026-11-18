@@ -7759,30 +7759,32 @@ const DW_WHITE = [255, 255, 255];
    dwSpans(w, x, S): the column's highest water (S.top) and its air gaps top down (S.g: [high, low] heights - DW_GAPS at most; S.n of them).
    TRAPPED AIR: a gap with no way out to the open air - no neighbouring column's air beside it reaching up to the sky, step by step (dwTrapMark) - is
    air the wave has closed in: it fills with churned foam (dwTrapFoam, the sim) and is drawn as the wave's body (dwGapCols, the view) */
-const DW_GAPS = 3, DW_XS = new Float64Array(32), DW_XD = new Int8Array(32);
-const dwSpanNew = () => ({ top: -Infinity, n: 0, g: new Float64Array(2 * DW_GAPS), open: new Uint8Array(DW_GAPS) });
+const DW_GAPS = 3, DW_XS = new Float64Array(32), DW_XD = new Int8Array(32), DW_XK = new Int16Array(32);   // (each crossing: its height, its way, which piece of the curve)
+const dwSpanNew = () => ({ top: -Infinity, n: 0, g: new Float64Array(2 * DW_GAPS), gk: new Int16Array(2 * DW_GAPS), open: new Uint8Array(DW_GAPS) });   // (gk: the curve's pieces over and under each gap)
 function dwSpans(w, x, S) {
   const C = w.C; let m = 0; S.n = 0; S.top = -Infinity;
   if (!(x >= w.xa && x <= w.xb) || !w.n) return false;
   for (let k = 0; k < w.n - 1 && m < 32; k++) {
     const xA = C[2 * k], xB = C[2 * k + 2]; if ((xA <= x) === (xB <= x)) continue;
     const h = C[2 * k + 1] + (C[2 * k + 3] - C[2 * k + 1]) * (x - xA) / (xB - xA), d = xB > xA ? 1 : -1;
-    let j = m++; while (j > 0 && DW_XS[j - 1] < h) { DW_XS[j] = DW_XS[j - 1]; DW_XD[j] = DW_XD[j - 1]; j--; } DW_XS[j] = h; DW_XD[j] = d;   // (top first)
+    let j = m++; while (j > 0 && DW_XS[j - 1] < h) { DW_XS[j] = DW_XS[j - 1]; DW_XD[j] = DW_XD[j - 1]; DW_XK[j] = DW_XK[j - 1]; j--; } DW_XS[j] = h; DW_XD[j] = d; DW_XK[j] = k;   // (top first)
   }
-  let wd = 0, hi = 0;
+  let wd = 0, hi = 0, hk = 0;
   for (let i = 0; i < m; i++) {
     const was = wd !== 0; wd += DW_XD[i]; const now = wd !== 0;
-    if (!was && now) { if (S.top === -Infinity) S.top = DW_XS[i]; else if (S.n < DW_GAPS) { S.g[2 * S.n] = hi; S.g[2 * S.n + 1] = DW_XS[i]; S.open[S.n] = 0; S.n++; } }
-    else if (was && !now) hi = DW_XS[i];
+    if (!was && now) { if (S.top === -Infinity) S.top = DW_XS[i]; else if (S.n < DW_GAPS) { S.g[2 * S.n] = hi; S.g[2 * S.n + 1] = DW_XS[i]; S.gk[2 * S.n] = hk; S.gk[2 * S.n + 1] = DW_XK[i]; S.open[S.n] = 0; S.n++; } }
+    else if (was && !now) { hi = DW_XS[i]; hk = DW_XK[i]; }
   }
   return S.top > -Infinity;
 }
-// which gaps of a run of columns (L[0..n), side by side) reach the open air: a gap beside a column's sky (above its top), or beside a gap that does,
-// within tol (a gap's edge a step from its neighbour's still touches it); the run's ends are open (the sea beyond them)
+// which gaps of a run of columns (L[0..n), side by side) reach the open air: a gap beside a column's sky (above its top), or beside a gap that does;
+// the run's ends are open (the sea beyond them). Two gaps side by side are one air - (user Nov 18 13:28, ref-hollow-gone-nov18: a narrow hollow
+// slanting steeply had gaps that didn't overlap column to column, read as shut in and filled) - when the same pieces of the curve are over and under
+// both (a channel however steep), or their heights overlap (within tol)
 function dwTrapMark(L, n, tol) {
   for (let i = 0; i < n; i++) { const S = L[i]; for (let k = 0; k < S.n; k++) S.open[k] = i === 0 || i === n - 1 ? 1 : 0; }
   const touch = (S, k, T) => { const hi = S.g[2 * k] + tol, lo = S.g[2 * k + 1] - tol; if (T.top === -Infinity || hi > T.top) return true;
-    for (let q = 0; q < T.n; q++) if (T.open[q] && lo < T.g[2 * q] && hi > T.g[2 * q + 1]) return true; return false; };
+    for (let q = 0; q < T.n; q++) if (T.open[q] && ((lo < T.g[2 * q] && hi > T.g[2 * q + 1]) || (Math.abs(S.gk[2 * k] - T.gk[2 * q]) <= 1 && Math.abs(S.gk[2 * k + 1] - T.gk[2 * q + 1]) <= 1))) return true; return false; };
   for (let pass = 0, ch = true; ch && pass < 24; pass++) {
     ch = false;
     for (let s = 0; s < 2; s++) for (let j = 0; j < n; j++) { const i = s ? n - 1 - j : j, S = L[i];
@@ -7843,7 +7845,7 @@ function dwDrawBack(x0, x1) {
      face, lighter round under the lip where the light comes through. Inside the inner curve the hollow is open: the sea behind shows */
   const RL = dwRL(), lw = waterLineW(), P = DW_PX, kt = 8 * DW_SUB, Q = DW_QX;
   const top = seaDeepStops(E.sunset, 1)[0][1], shade = top.map((v, j) => v * 0.22 + [8, 22, 60][j] * 0.78), glow = top.map((v, j) => v + ([150, 222, 255][j] - v) * 0.6);
-  const NB = 9, cols = Array.from({ length: NB }, (_, q) => shade.map((v, j) => v + (glow[j] - v) * q / (NB - 1))), lineC = E.sunset > 0.3 ? mix3([196, 228, 255], [255, 220, 170], E.sunset) : [214, 238, 255];
+  const NB = 32, cols = Array.from({ length: NB }, (_, q) => shade.map((v, j) => v + (glow[j] - v) * q / (NB - 1))), lineC = E.sunset > 0.3 ? mix3([196, 228, 255], [255, 220, 170], E.sunset) : [214, 238, 255];
   for (const w of DW.live) {
     if (w.lake || !w.lip || offView(w.xa, w.xb, x0, x1)) continue;
     const C = w.C;
@@ -7883,7 +7885,8 @@ function dwDrawBack(x0, x1) {
     }
     // (the band's strips: NB of them along its length, each a run of the outline's pieces - a quad each, filled a pixel row at a time)
     for (let k = k0; k < kt; k++) {
-      const t = (L[k] + L[k + 1]) / (2 * S), q = Math.min(NB - 1, Math.floor(Math.max(0, (t - 0.55) / 0.45) * NB)), col = cols[q];   // (dark up the face; the strips lighten round under the lip)
+      // (user 13:28: "can the interior shading be smoothed out pixel art vs those sharp bands" - NB shades, one a piece of the curve, eased along it)
+      const t = (L[k] + L[k + 1]) / (2 * S), e = clamp((t - 0.45) / 0.55, 0, 1), q = Math.round(e * e * (3 - 2 * e) * (NB - 1)), col = cols[q];   // (dark up the face; the strips lighten round under the lip)
       dwQuad(RL, P[2 * k], P[2 * k + 1], P[2 * k + 2], P[2 * k + 3], Q[2 * k + 2], Q[2 * k + 3], Q[2 * k], Q[2 * k + 1], col);
     }
     for (let k = k0; k < kt; k++) dwSeg(RL, Q[2 * k], Q[2 * k + 1], Q[2 * k + 2], Q[2 * k + 3], lw, lineC, 0.9);   // (the inner curve's own thin line)
@@ -8062,13 +8065,13 @@ function dwFoamStep(dt) {
 }
 /* THE FOAM DRAWN BY HOW MUCH THERE IS (user Nov 18 13:09, ref-foam-mess-nov18: "what is the logic here? This seems just like messy" - every bit of foam
    was its own solid white disc, stacked: one opaque blob with hard edges and stray holes). Every bit of foam (white water, churned, stuck on an
-   outline) adds its share to a density field over the screen - cells of 2 x PB, each bit a soft round kernel as wide as it is, its share fading
+   outline) adds its share to a density field over the screen - cells of the game's pixel (PB), each bit a soft round kernel as wide as it is, its share fading
    with its age - and the field is drawn as one shape: solid white where the foam is thick, thin and see-through at its edges, so foam that
    overlaps merges into one mass. Foam deeper than a little under the water's top goes to a second field drawn as aerated water - pale, half
    see-through - under it. Drops (streaks) and mist (puffs) are drawn as themselves */
 const DWG = { s: new Float32Array(0), d: new Float32Array(0) };
 function dwDrawFoam(RL, x0, x1, WH, PALE, AER) {
-  const F = DWF, pb = Math.max(1, PBV), g = Math.max(2, 2 * PB);
+  const F = DWF, pb = Math.max(1, PBV), g = Math.max(1, PB);   // (user 13:28: "very low res and blocky in relation to the rest" - the field at the game's own pixel)
   let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
   for (let i = 0; i < F.n; i++) {
     const x = F.x[i]; if (offViewR(x, F.r[i], x0, x1)) continue;
@@ -8082,14 +8085,14 @@ function dwDrawFoam(RL, x0, x1, WH, PALE, AER) {
   if (!(bx1 > bx0)) return;
   bx0 = Math.max(bx0, -g); bx1 = Math.min(bx1, VWP + g);
   const gx0 = Math.floor(bx0 / g), gy0 = Math.floor(by0 / g), nx = Math.max(1, Math.ceil(bx1 / g) - gx0 + 1), ny = Math.max(1, Math.ceil(by1 / g) - gy0 + 1);
-  if (nx * ny > 400000) return;
+  if (nx * ny > 1600000) return;
   if (DWG.s.length < nx * ny) { DWG.s = new Float32Array(nx * ny * 2); DWG.d = new Float32Array(nx * ny * 2); }
   const Ds = DWG.s, Dd = DWG.d; Ds.fill(0, 0, nx * ny); Dd.fill(0, 0, nx * ny);
   for (let i = 0; i < F.n; i++) {
     const k = F.k[i]; if (k < 2) continue;
     const x = F.x[i]; if (offViewR(x, F.r[i], x0, x1)) continue;
     const X = x * SV - CAMPX, Y = F.y[i] * SV - TOPPX, u = F.age[i] / F.life[i], R = Math.max(g, F.r[i] * SV * 1.3), m = 1 - u * u;
-    const D = k === 3 && F.vy[i] * SV > 3 * g ? Dd : Ds;   // (well under the water's top: aerated water)
+    const D = k === 3 && F.vy[i] * SV > 6 * g ? Dd : Ds;   // (well under the water's top: aerated water)
     const c0 = Math.max(0, Math.floor((X - R) / g) - gx0), c1 = Math.min(nx - 1, Math.ceil((X + R) / g) - gx0), r0 = Math.max(0, Math.floor((Y - R) / g) - gy0), r1 = Math.min(ny - 1, Math.ceil((Y + R) / g) - gy0);
     for (let ry = r0; ry <= r1; ry++) { const dy = (gy0 + ry + 0.5) * g - Y; for (let cx = c0; cx <= c1; cx++) { const dx = (gx0 + cx + 0.5) * g - X, q = 1 - (dx * dx + dy * dy) / (R * R); if (q > 0) D[ry * nx + cx] += m * q * q; } }
   }
@@ -9467,7 +9470,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 14:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 14:30';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
