@@ -7824,7 +7824,10 @@ function dwTrapFoam(w, dt) {
   dwTrapMark(DW_TC, n, st);
   let A = 0; for (let i = 0; i < n; i++) { const S = DW_TC[i]; for (let k = 0; k < S.n; k++) if (!S.open[k]) A += (S.g[2 * k] - S.g[2 * k + 1]) * st; }
   if (!(A > 0)) return;
-  const T = dwPt(w, 8), tx = T[0], ty = dwYAt(w, tx, dwFace(w, tx)), q = A / (H * H);
+  // (the trapped air itself, through the water closed over it: churned, aerated water - drawn pale under the top, not white on it - dwDrawFoam)
+  for (let i = 0; i < n; i++) { const S = DW_TC[i]; for (let k = 0; k < S.n; k++) { if (S.open[k]) continue; const a = S.g[2 * k], b = S.g[2 * k + 1];
+    for (let m = dfN(dt * (a - b) * st / (H * H) * 120); m > 0; m--) { const x = w.xa + (i + dfR() - 0.5) * st, h = b + (a - b) * dfR(); dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.7, 0.95), Math.max(0, S.top - h), dfRnd(0.04, 0.08) * H, dfRnd(0.8, 1.6)); } } }
+  const [tx, ty] = dwImpact(w), q = A / (H * H);
   for (let k = dfN(dt * q * 260); k > 0; k--) { const x = tx - w.dir * dfRnd(-0.12, 0.05) * H; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.85, 1.25), dfRnd(0, 0.08) * H, dfRnd(0.04, 0.09) * H, dfRnd(0.8, 1.8)); }
   for (let k = dfN(dt * q * 90); k > 0; k--) dwFoamAdd(0, tx + dfRnd(-0.03, 0.03) * H, ty - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.7), -dfRnd(0.3, 0.9) * Math.sqrt(9.8 * UPM * H), dfRnd(0.008, 0.022) * H, dfRnd(1, 2));
 }
@@ -7963,16 +7966,16 @@ function dwFoamFrom(w, dt) {
     // mist off the lip's back, the wind lifting it back over the crest
     for (let n = dfN(dt * H / U * 4); n > 0; n--) { const p = at(fi + dfR() * (11 - fi));
       dwFoamAdd(1, p[0], dwYAt(w, p[0], p[1]) - dfRnd(0, 0.04) * H, c * dfRnd(0.2, 0.6) + wind * 0.4 - w.dir * dfRnd(0, 0.25) * w.c, -dfRnd(0.05, 0.25) * w.c, dfRnd(0.02, 0.05) * H, dfRnd(1.5, 3.5)); }
-    // THE TIP LANDS (red on yellow): the splash once - the tube closed, foam over all of it - then churned foam where it keeps coming down
+    // THE TIP LANDS (red on yellow): the splash once; the white water it drives ahead; the jet (the trapped air's foam: dwTrapFoam)
     if (gap < 0.06) {
-      if (!w.landed) { w.landed = true; w.lt = 0; dwCrash(w); dwSplash(w, tx, under); }
+      const [ix, iy] = dwImpact(w);
+      if (!w.landed) { w.landed = true; w.lt = 0; dwCrash(w); dwSplash(w, ix, iy); }
       // (the white water the break drives ahead of it at its foot)
-      { for (let n = dfN(dt * H / U * 10); n > 0; n--) { const x = tx - w.dir * dfRnd(-0.08, 0.02) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.9, 1.15), 0, dfRnd(0.03, 0.06) * H, dfRnd(3, 6)); } }
+      { for (let n = dfN(dt * H / U * 10); n > 0; n--) { const x = ix - w.dir * dfRnd(-0.08, 0.02) * H; dwFoamAdd(2, x, dwTopY(x), c * dfRnd(0.9, 1.15), 0, dfRnd(0.03, 0.06) * H, dfRnd(3, 6)); } }
       // (user 12:07, ref-break-jet-nov18: "the MOMENT the wave breaks and hits the water surface that is when the foam 'shoots' in the opposite
       // direction ... to represent the water hitting the surface") for a moment after it lands, clumps shot up and out ahead of where it hit
-      w.lt += dt; if (w.lt < 0.6) { const y = dwYAt(w, tx, under), v = Math.sqrt(9.8 * UPM * H);
-        for (let n = dfN(dt * H / U * 40 * (1 - w.lt / 0.6)); n > 0; n--) dwFoamAdd(0, tx + dfRnd(-0.04, 0.04) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * v, dfRnd(0.008, 0.025) * H, dfRnd(1.2, 2.5)); }
-      for (let n = dfN(dt * H / U * 12); n > 0; n--) { const x = tx + dfRnd(-0.06, 0.12) * H * -w.dir; dwFoamAdd(3, x, dwTopY(x), c * dfRnd(0.5, 0.9), dfRnd(0, 0.15) * H, dfRnd(0.03, 0.07) * H, dfRnd(1.2, 2.5)); }
+      w.lt += dt; if (w.lt < 0.6) { const y = iy, v = Math.sqrt(9.8 * UPM * H);
+        for (let n = dfN(dt * H / U * 40 * (1 - w.lt / 0.6)); n > 0; n--) dwFoamAdd(0, ix + dfRnd(-0.04, 0.04) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * v, dfRnd(0.008, 0.025) * H, dfRnd(1.2, 2.5)); }
     }
   } else if (w.landed) {
     // (user 12:40: "It should keep rolling as it stabilizes") broken and settling: its front a rolling line of white water going on with it, as
@@ -7999,6 +8002,14 @@ function dwTopY(x) {
 }
 // a lip's leading edge: its foremost point, 7 to 10 (a lip that hooks back under itself throws its water from its front, not its end in the tube)
 function dwLead(w) { let fi = 8; for (let i = 7; i <= 10; i++) if (dwPt(w, i)[0] * w.dir > dwPt(w, fi)[0] * w.dir) fi = i; return fi; }
+// WHERE A LIP COMES DOWN ON THE WATER: the foremost point of its front low on the wave (under a quarter of its height, points 7 to 11 - the curtain
+// falling), else its tip - the break's splash, jet, white water and the trapped air's foam all start there (user 13:03: "the foam should be at the
+// TIP where the crisp hits the water surface")
+function dwImpact(w) {   // ([x, its world y] - where on the curve it is, not the water's top over it)
+  const T = dwPt(w, 8); let x = T[0], h = T[1], best = -Infinity; const C = w.C;
+  for (let k = 7 * DW_SUB; k <= 11 * DW_SUB; k++) if (C[2 * k + 1] < 0.25 * w.H && C[2 * k] * w.dir > best) { best = C[2 * k] * w.dir; x = C[2 * k]; h = C[2 * k + 1]; }
+  return [x, dwYAt(w, x, h)];
+}
 // the face's height under x (the curve from its front foot to point 7 - yellow); the sea's (0) where the face isn't under it
 function dwFace(w, x) {
   const Cc = w.C; let h = Infinity;
@@ -8007,11 +8018,10 @@ function dwFace(w, x) {
 }
 // THE BREAK'S SPLASH where the tip landed (user 11:31, ref-overlap-foam-nov18: "just foam"): the tube closes, and where it was - between the tip
 // and its root, from the lip's top down to the face - a mass of churned foam; drops thrown up and forward; a burst of mist; white water spreading
-function dwSplash(w, x, h) {
-  const H = w.H, c = w.c * w.dir, y = dwYAt(w, x, h), n = Math.min(500, Math.round(30 + H / UPM * 8));
-  // (the churn laid along the lip itself - its root to its tip, points 5 to 10 - not a box of columns: no straight edge to it)
-  for (let i = 0; i < n * 1.2; i++) { const k = 5 + 5 * Math.sqrt(dfR()), j = Math.floor(k), P0 = dwPt(w, j), P1 = dwPt(w, j + 1), xx = P0[0] + (P1[0] - P0[0]) * (k - j) + dfRnd(-0.06, 0.06) * H, d = dwTab(w, xx, false) - dwTab(w, xx, true);
-    dwFoamAdd(3, xx, dwTopY(xx), c * dfRnd(0.6, 1), Math.max(0, d) * Math.pow(dfR(), 0.8), dfRnd(0.025, 0.1) * H, dfRnd(1.2, 3.5)); }
+function dwSplash(w, x, y) {   // (x, its world y)
+  const H = w.H, c = w.c * w.dir, n = Math.min(500, Math.round(30 + H / UPM * 8));
+  // (churned water where it hit: air the impact drove in, about the tip, a little way down - user 13:09: not the whole curl)
+  for (let i = 0; i < n * 0.8; i++) { const xx = x + dfRnd(-0.15, 0.1) * H * -w.dir; dwFoamAdd(3, xx, dwTopY(xx), c * dfRnd(0.6, 1), dfRnd(0, 0.2) * H, dfRnd(0.03, 0.08) * H, dfRnd(1, 2.5)); }
   for (let i = 0; i < n; i++) dwFoamAdd(0, x + dfRnd(-0.1, 0.1) * H, y - dfRnd(0, 0.05) * H, c * dfRnd(0.4, 1.3), -dfRnd(0.3, 1) * Math.sqrt(2 * 9.8 * UPM * H * 0.5), dfRnd(0.25, 0.7) * UPM, dfRnd(1.5, 3.5));
   for (let i = 0; i < n * 0.6; i++) dwFoamAdd(0, x + dfRnd(-0.05, 0.05) * H, y - dfRnd(0, 0.04) * H, c * dfRnd(1, 1.8), -dfRnd(0.45, 1) * Math.sqrt(9.8 * UPM * H), dfRnd(0.008, 0.025) * H, dfRnd(1.2, 2.5));   // (the jet's first clumps)
   for (let i = 0; i < n * 0.4; i++) dwFoamAdd(1, x + dfRnd(-0.15, 0.15) * H, y - dfRnd(0, 0.3) * H, c * dfRnd(0, 0.6), -dfRnd(0.1, 0.5) * w.c, dfRnd(0.04, 0.09) * H, dfRnd(2, 4.5));
@@ -8031,9 +8041,13 @@ function dwFoamStep(dt) {
     if (k === 4) { const w = F.w[i]; if (DW.live.includes(w) && w.n > 1) { dwStickAt(i); continue; } F.k[i] = 2; F.w[i] = null; F.vx[i] = 0; continue; }
     if (k === 0) {
       F.vy[i] += G * dt; F.vx[i] += (wind - F.vx[i]) * 0.4 * dt; x += F.vx[i] * dt; y += F.vy[i] * dt;
-      const s = dwTopY(x); if (F.vy[i] > 0 && y >= s && waterRun(x)) { F.k[i] = 2; y = s; F.vy[i] = 0; F.vx[i] *= 0.6; F.r[i] *= 2.5; F.age[i] = 0; F.life[i] = dfRnd(1.5, 3); }
+      const s = dwTopY(x);
+      if (y >= s && waterRun(x)) {   // (in the water: falling onto its top - white water there; inside it - a wave closed over it - churned water where it is)
+        if (F.vy[i] > 0 && y - s < 2 * F.r[i] + 0.02 * UPM * 10) { F.k[i] = 2; y = s; F.vy[i] = 0; F.vx[i] *= 0.6; F.r[i] *= 2.5; F.age[i] = 0; F.life[i] = dfRnd(1.5, 3); }
+        else { F.k[i] = 3; F.vy[i] = y - s; F.r[i] *= 3; F.age[i] = 0; F.life[i] = dfRnd(0.6, 1.2); y = s + F.vy[i]; } }
     } else if (k === 1) {
       F.vy[i] += (-0.04 * G - F.vy[i]) * 1.2 * dt; F.vx[i] += (wind - F.vx[i]) * 1.5 * dt; x += F.vx[i] * dt; y += F.vy[i] * dt; F.r[i] *= 1 + 0.25 * dt;
+      if (y > dwTopY(x) + F.r[i]) F.age[i] = F.life[i];   // (mist is spray in the air: shut under the water's top - a wave closing over it - it's gone)
     } else {
       // (user 12:40, ref-settle-nov18: "it stops moving along the water ... like it suddenly has no momentum. It should keep rolling as it
       // stabilizes") white water keeps its way on, giving it up slowly to the water's own speed there and the wind's
@@ -8046,27 +8060,52 @@ function dwFoamStep(dt) {
     F.x[i] = x; F.y[i] = y;
   }
 }
-// drawn over the water (and again in the waterline's light at night - renderOverlays): drops as short streaks along their flight, mist as pale puffs
-// thinning away, white water as flattened white blobs on the top of the water, churned foam as round blobs
-function dwDrawFoam(RL, x0, x1, WH, PALE) {
-  const F = DWF, pb = Math.max(1, PBV);
+/* THE FOAM DRAWN BY HOW MUCH THERE IS (user Nov 18 13:09, ref-foam-mess-nov18: "what is the logic here? This seems just like messy" - every bit of foam
+   was its own solid white disc, stacked: one opaque blob with hard edges and stray holes). Every bit of foam (white water, churned, stuck on an
+   outline) adds its share to a density field over the screen - cells of 2 x PB, each bit a soft round kernel as wide as it is, its share fading
+   with its age - and the field is drawn as one shape: solid white where the foam is thick, thin and see-through at its edges, so foam that
+   overlaps merges into one mass. Foam deeper than a little under the water's top goes to a second field drawn as aerated water - pale, half
+   see-through - under it. Drops (streaks) and mist (puffs) are drawn as themselves */
+const DWG = { s: new Float32Array(0), d: new Float32Array(0) };
+function dwDrawFoam(RL, x0, x1, WH, PALE, AER) {
+  const F = DWF, pb = Math.max(1, PBV), g = Math.max(2, 2 * PB);
+  let bx0 = Infinity, bx1 = -Infinity, by0 = Infinity, by1 = -Infinity;
   for (let i = 0; i < F.n; i++) {
     const x = F.x[i]; if (offViewR(x, F.r[i], x0, x1)) continue;
     const X = x * SV - CAMPX, Y = F.y[i] * SV - TOPPX, u = F.age[i] / F.life[i], k = F.k[i];
-    if (k === 0 && F.r[i] * SV >= 1.5 * pb) dwDisc(RL, X, Y, F.r[i] * SV, WH, 0.95);   // (a clump - the break's jet)
-    else if (k === 0) { const s = Math.max(pb, Math.round(F.r[i] * SV / pb) * pb), v = Math.hypot(F.vx[i], F.vy[i]) || 1, l = Math.min(6 * pb, v * 0.03 * SV);
-      if (l > 2 * pb) dwSeg(RL, X, Y, X - F.vx[i] / v * l, Y - F.vy[i] / v * l, s, WH, 0.9); else RL.rect(Math.round(X), Math.round(Y), s, s, WH, 0.95); }
-    else if (k === 1) dwDisc(RL, X, Y, Math.max(pb, F.r[i] * SV), PALE, 0.32 * (1 - u) * Math.min(1, u * 6));
-    else if (k === 2) { const r = Math.max(pb, F.r[i] * SV); dwBlob(RL, X, Y + r * 0.1, r, Math.max(pb, r * 0.45), WH, 0.9 * (1 - u * u)); }
-    else dwDisc(RL, X, Y, Math.max(pb, F.r[i] * SV * (1 - 0.4 * u)), WH, 0.95 * (1 - u * u * u));   // (churned, and stuck on a wave's outline)
+    if (k === 0) { if (F.r[i] * SV >= 1.5 * pb) dwDisc(RL, X, Y, F.r[i] * SV, WH, 0.95);   // (a clump - the break's jet)
+      else { const s = Math.max(pb, Math.round(F.r[i] * SV / pb) * pb), v = Math.hypot(F.vx[i], F.vy[i]) || 1, l = Math.min(6 * pb, v * 0.03 * SV);
+        if (l > 2 * pb) dwSeg(RL, X, Y, X - F.vx[i] / v * l, Y - F.vy[i] / v * l, s, WH, 0.9); else RL.rect(Math.round(X), Math.round(Y), s, s, WH, 0.95); } continue; }
+    if (k === 1) { dwDisc(RL, X, Y, Math.max(pb, F.r[i] * SV), PALE, 0.32 * (1 - u) * Math.min(1, u * 6)); continue; }
+    const R = Math.max(g, F.r[i] * SV * 1.3); bx0 = Math.min(bx0, X - R); bx1 = Math.max(bx1, X + R); by0 = Math.min(by0, Y - R); by1 = Math.max(by1, Y + R);
   }
+  if (!(bx1 > bx0)) return;
+  bx0 = Math.max(bx0, -g); bx1 = Math.min(bx1, VWP + g);
+  const gx0 = Math.floor(bx0 / g), gy0 = Math.floor(by0 / g), nx = Math.max(1, Math.ceil(bx1 / g) - gx0 + 1), ny = Math.max(1, Math.ceil(by1 / g) - gy0 + 1);
+  if (nx * ny > 400000) return;
+  if (DWG.s.length < nx * ny) { DWG.s = new Float32Array(nx * ny * 2); DWG.d = new Float32Array(nx * ny * 2); }
+  const Ds = DWG.s, Dd = DWG.d; Ds.fill(0, 0, nx * ny); Dd.fill(0, 0, nx * ny);
+  for (let i = 0; i < F.n; i++) {
+    const k = F.k[i]; if (k < 2) continue;
+    const x = F.x[i]; if (offViewR(x, F.r[i], x0, x1)) continue;
+    const X = x * SV - CAMPX, Y = F.y[i] * SV - TOPPX, u = F.age[i] / F.life[i], R = Math.max(g, F.r[i] * SV * 1.3), m = 1 - u * u;
+    const D = k === 3 && F.vy[i] * SV > 3 * g ? Dd : Ds;   // (well under the water's top: aerated water)
+    const c0 = Math.max(0, Math.floor((X - R) / g) - gx0), c1 = Math.min(nx - 1, Math.ceil((X + R) / g) - gx0), r0 = Math.max(0, Math.floor((Y - R) / g) - gy0), r1 = Math.min(ny - 1, Math.ceil((Y + R) / g) - gy0);
+    for (let ry = r0; ry <= r1; ry++) { const dy = (gy0 + ry + 0.5) * g - Y; for (let cx = c0; cx <= c1; cx++) { const dx = (gx0 + cx + 0.5) * g - X, q = 1 - (dx * dx + dy * dy) / (R * R); if (q > 0) D[ry * nx + cx] += m * q * q; } }
+  }
+  // (each row in runs of one look: thick (white), thin (see-through white); aerated: thick, thin - pale)
+  const runs = (D, cA, aA, cB, aB) => { for (let ry = 0; ry < ny; ry++) { let c = 0; while (c < nx) { const v = D[ry * nx + c], L = v > 0.55 ? 2 : v > 0.2 ? 1 : 0; let e = c + 1;
+    while (e < nx) { const w = D[ry * nx + e]; if ((w > 0.55 ? 2 : w > 0.2 ? 1 : 0) !== L) break; e++; }
+    if (L) RL.rect((gx0 + c) * g, (gy0 + ry) * g, (e - c) * g, g, L === 2 ? cA : cB, L === 2 ? aA : aB); c = e; } } };
+  runs(Dd, AER, 0.5, AER, 0.28);
+  runs(Ds, WH, 0.95, WH, 0.5);
 }
 function dwBlob(RL, cx, cy, rx, ry, col, a) { for (let y = -ry; y <= ry; y += PB) { const h = Math.round(rx * Math.sqrt(Math.max(0, 1 - (y * y) / (ry * ry))) / PB) * PB; if (h > 0) RL.rect(Math.round(cx - h), Math.round(cy + y), 2 * h, PB, col, a); } }
 const DW_LIT0 = c => c;                                           // (colours as they are - by day; renderOverlays passes the waterline's light at night)
 function dwDrawWaves(x0, x1, lake, lit = DW_LIT0) {
   if (lake) return;                                              // (the foam's bits are the world's, drawn once - over the sea's pass)
   const RL = dwRL();
-  dwDrawFoam(RL, x0, x1, lit(DW_WHITE), lit([214, 238, 255]));
+  dwDrawFoam(RL, x0, x1, lit(DW_WHITE), lit([214, 238, 255]), lit([176, 214, 240]));
   if (RL.n) frameRects(C, RL, { key: 'dwaves' });
 }
 // WATER ON THE LAND (user 20:41: "when the water hits land, it wets the land, but it does not lose volume. So it's more about the effect of the water
@@ -8116,7 +8155,10 @@ function dwDrawShore(x0, x1, lit = null) {   // (lit: again in the waterline's l
 // (The small boats today - jetboatSink; the other families ride it out: not decided yet)
 function dwCrash(w) {
   const T = dwPt(w, 8)[0], Cx = dwPt(w, 11)[0], a = Math.min(T, Cx) - 0.05 * w.H, b = Math.max(T, Cx) + 0.05 * w.H;
-  for (const j of jetboats.list ? jetboats.list() : jetboats) if (j.state === 'run' && j.x > a && j.x < b && w.H > 0.25 * storyBoatSize(j)[0]) { DW.lost++; jetboatCapsize(j, w.dir); }   // (rolled over the way the wave goes - not blown up)
+  // (the lip coming down on a boat between its tip and its crest: the blow of the falling water - its speed falling the wave's height, squared -
+  // a turning push against her size as in dwBoatLip, given at once; whether she goes over is her roll's - jbRoll)
+  const v2 = 2 * 9.8 * w.H / UPM;
+  for (const j of jetboats.list ? jetboats.list() : jetboats) if (j.state === 'run' && j.x > a && j.x < b) { const B = storyBoatSize(j), Lm = B[0] / UPM, Hm = B[1] / UPM; j.av = (j.av || 0) + w.dir * DW_LIP_K * v2 / (Lm * Lm + Hm * Hm) * 0.15; }
 }
 // a folded wave's rows at x, as heights: its face (the lowest), its lip's underside (the next under its top), its top; null where it isn't folded
 const DW_YF = new Float64Array(16);
@@ -8133,8 +8175,8 @@ function dwFoldAt(w, x) {
    able to just go 'through' the wave ... It would be pushed and likely flipped, depending on the angle that its in and its size. And it would
    generate foam too. If it gets flipped, then it would be capsized and then slowly sink"): a small boat (the jet boat family) riding a face
    whose lip has come down lower over it than it stands is struck by it - pressed down under it, taken on the way the wave goes and turned with
-   it, spray and mist thrown off it; and rolled right over (jetboatCapsize) when the wave is big against it and it lies steep: the wave's height
-   to its length, times how steeply it lies, times how far the lip has come down on it. True: it's capsized */
+   it, spray and mist thrown off it, its roll pushed (jbRoll does the rest). False: it carries on */
+const DW_LIP_K = 2;   // (the lip's turning push on a boat: rad/s² per (m/s)² per m² of her - dwBoatLip)
 function dwBoatLip(j, dt) {
   const B = storyBoatSize(j), len = B[0], hg = B[1];
   for (const w of DW.live) {
@@ -8142,9 +8184,12 @@ function dwBoatLip(j, dt) {
     let over = 0;
     for (const f of [-0.45, 0, 0.45]) { const F = dwFoldAt(w, j.x + f * len * Math.cos(j.a)); if (F) over = Math.max(over, hg * Math.max(0.3, Math.abs(Math.cos(j.a))) - (F[1] - F[0])); }
     if (!(over > 0)) continue;
-    const k = clamp(over / hg, 0, 1), H = w.H, c = w.dir * w.c;
-    if ((H / len) * (0.5 + Math.abs(j.a) / 0.5) * (0.5 + k) >= 1) { DW.lost++; jetboatCapsize(j, w.dir); return true; }
-    j.x += c * (0.5 + 0.5 * k) * dt; j.y += Math.min(over, hg * 0.6); j.a += (w.dir * 0.5 - j.a) * (1 - Math.exp(-dt * 3));
+    // (user 13:09: physics, not a rule) the lip's water strikes her above her middle: a turning push by the water's speed squared and how far it
+    // has come down on her, against her own size (her inertia - length and height squared): her roll speeds up the way the wave goes, and she
+    // goes over only if that carries her past her vanishing angle (jbRoll; capsized there - stepJetboat)
+    const k = clamp(over / hg, 0, 1), c = w.dir * w.c, v = w.c / UPM, Lm = len / UPM, Hm = hg / UPM;
+    j.av = (j.av || 0) + w.dir * DW_LIP_K * v * v * k / (Lm * Lm + Hm * Hm) * dt;
+    j.x += c * (0.5 + 0.5 * k) * dt; j.y += Math.min(over, hg * 0.6);
     if (!SIM_ONLY) {
       for (let n = dfN(dt * 40 * (0.3 + k)); n > 0; n--) dwFoamAdd(0, j.x + dfRnd(-0.4, 0.4) * len, j.y - dfRnd(0, 0.5) * hg, c * dfRnd(0.6, 1.3), -dfRnd(0.2, 0.7) * w.c, dfRnd(0.2, 0.5) * UPM, dfRnd(0.8, 1.6));
       for (let n = dfN(dt * 8 * (0.3 + k)); n > 0; n--) dwFoamAdd(1, j.x + dfRnd(-0.3, 0.3) * len, j.y - dfRnd(0, 0.5) * hg, c * dfRnd(0.3, 0.8), -dfRnd(0.05, 0.2) * w.c, dfRnd(0.3, 0.6) * hg, dfRnd(1, 2));
@@ -9422,7 +9467,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 14:08';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 14:21';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
@@ -54424,7 +54469,7 @@ const JET_STRUT = [0x50, 0x52, 0x58];
    (user Oct 27: "The rest, when destroyed, is never spawned again") ---- */
 // (Nov 10, part 8: a record table - 04-zz-coltable.js; a row a boat, held and walked as its handle, its fields as they were: its wake and
 // foam's (fpx ...), driven (drv, vDrive), a fishing boat's horn (hornOn - 50-land-civdrive.js), moored (anc, _moorX - 50-land-anchors.js), a fishing boat's net (50-story-net.js), the STORY's)
-const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn capsized capT capDir',
+const jetboats = new ColTable(ColTable.rec('num: lo hi x y dir v col turn hp a ph wait nextTurn nk prevS vx vy spr fpx fts ffo fbo fwk ftf fbb fcr fgc fsm flipped brk brkT drv vDrive hi2 lo2 npcV ntv smokeT air hold _moorX _moorD _far ancHold avoid foam sinkT hornOn capsized capT capDir av',
 'txt: kind state','val: lake net anc rt ai home', ...STORY_REC, ...CIV_REC));
 // (engine stage 3: the jet and motor boats' own table and random source - 36-zz-tables.js)
 const jbR = sysRng('jetboats'), jbRnd = (a, b) => a + (b - a) * jbR();
@@ -54466,14 +54511,17 @@ function stepJetboat(j, dt) {
     j.ph += dt;
     if (j.state === 'gone' || j.state === 'wreck') return;
     if (j.state === 'sink' && j.capsized) {
-      // CAPSIZED (the Wave Lab - user Nov 18 12:09: "If it gets flipped, then it would be capsized and then slowly sink"): rolled over the way it
-      // was thrown (capDir), it floats keel up a while, then goes down slowly and settles on the floor upside down - no blast, nothing broken
-      j.capT += dt; const up = j.capDir * Math.PI, hg = storyBoatSize(j)[1], ws = surfaceY(j.x);
-      j.a += (up - j.a) * (1 - Math.exp(-dt * 4));
-      if (j.capT < 5) j.y += (ws - 1 - j.y) * (1 - Math.exp(-dt * 4)); else j.y += 5 * dt;
-      if (!SIM_ONLY && jbR() < dt * (j.capT < 5 ? 2 : 4)) addBubble(j.x + jbRnd(-6, 6), j.y + 3, jbRnd(-4, 4), -jbRnd(12, 26), jbRnd(0.6, 1.4));
+      // CAPSIZED (the Wave Lab - user Nov 18 12:09: "If it gets flipped, then it would be capsized and then slowly sink"; 13:09: "when a boat
+      // capsizes, its ridiculously fast. Is it even taking into account any physics?"): it goes on rolling as a body (jbRoll) - over the way it was
+      // thrown (capDir) to lie keel up on the water, at its own pace; it floats so, air trapped under its hull, settling lower, for JB_FLOAT
+      // seconds, then goes down slowly (JB_SINK) and settles on the floor upside down - no blast, nothing broken
+      j.capT += dt; const B = storyBoatSize(j), hg = B[1], half = B[0] * JB_HULL, ws = surfaceY(j.x), up = j.capDir * Math.PI;
+      const slope = Math.atan2(surfaceY(j.x + j.dir * half) - surfaceY(j.x - j.dir * half), 2 * half) * j.dir;
+      jbRoll(j, slope + up, dt, true);
+      if (j.capT < JB_FLOAT) j.y = ws - 1 + hg * 0.25 * j.capT / JB_FLOAT; else j.y = Math.max(j.y + JB_SINK * dt, ws - 1 + hg * 0.25);   // (afloat: on the water as it moves - settling lower; then going down)
+      if (!SIM_ONLY && jbR() < dt * (j.capT < JB_FLOAT ? 1.5 : 4)) addBubble(j.x + jbRnd(-6, 6), j.y + 3, jbRnd(-4, 4), -jbRnd(12, 26), jbRnd(0.6, 1.4));
       const K = jbKeel(j).map(p => [-p[0], hg + 2]);                  // (keel up: what lies lowest is its top)
-      if (j.capT > 5 && floorPen(K, j.x, j.y, j.a - up) >= 0) { const r = floorRest(K, j.x, null, 0.5, j.a - up); j.y = r.y; j.a = up + r.a; j.state = 'wreck'; kickDust(j.x, 14, 0.5); }
+      if (j.capT > JB_FLOAT && floorPen(K, j.x, j.y, j.a - up) >= 0) { const r = floorRest(K, j.x, null, 0.5, j.a - up); j.y = r.y; j.a = up + r.a; j.av = 0; j.state = 'wreck'; kickDust(j.x, 14, 0.5); }
       return;
     }
     if (j.state === 'sink') {
@@ -54521,7 +54569,8 @@ function stepJetboat(j, dt) {
       // its own on top of the waves')
       const go = clamp(Math.abs(sp) / (j.v || 60), 0, 1), L = half / JB_HULL, f = JB_RIDE[j.kind] || JB_RIDE.jet;
       const want = Math.atan2(yb - ys, 2 * half) * j.dir - f[0] * go * j.dir + Math.sin(j.ph * f[1]) * 0.03 * go * Math.min(1, 25 / L) * j.dir;
-      j.a += (want - j.a) * (1 - Math.exp(-dt * JB_EASE));
+      if (DW.live.length || j.av) jbRoll(j, want, dt, false);        // (the Wave Lab: her roll as a body - jbRoll)
+      else j.a += (want - j.a) * (1 - Math.exp(-dt * JB_EASE));
     }
     if (DW.live.length && !j.air && dwBoatLip(j, dt)) return;      // (the Wave Lab: a lip come down on her - pushed, or rolled over: 09-zy-dwaves.js)
     if (picBoat(j)) { if (j.state === 'run') picBoatFx(j, dt); }   // (a picture boat: its foam, bow wave, wake and screw by its picture - 50-story-net.js)
@@ -54540,11 +54589,26 @@ function jetboatSink(j, atX = null) {
   if (atX != null && picBoat(j)) { const w = storyBoatSize(j)[0]; if (w >= VEH_BREAK_M * UPM) { j.brk = clamp(0.5 + (atX - j.x) / w * (j.dir > 0 ? -1 : 1), 0.3, 0.7); j.brkT = 0; } }
   sectionBlast(j.x, j.y - 4, 0.5, 0); spawnDebris(j.x, j.y - 4, 8, j.dir * j.v * 0.2); sound('impact', j.x);
 }
+/* HER ROLL AS A BODY (the Wave Lab - user Nov 18 13:09: "Is it even taking into account any physics?"): her angle (a) and its speed (av, rad/s);
+   her own roll period by her size (bigger, slower - JB_ROLL_T + its share a metre); buoyancy's righting lever (GZ) toward lying on the water's
+   slope (want) - strongest half way to her vanishing angle (DW.cap - CAPSIZE ANGLE), none there, and past it turning her the other way; the
+   water damping it (JB_ROLL_Z of critical). Capsized (keel): the same body rolling to lie keel up - the inverted lie is the stable one then.
+   Pushes from outside (a lip striking her - dwBoatLip) add to av */
+const JB_ROLL_T = 2, JB_ROLL_TM = 0.15, JB_ROLL_Z = 0.4, JB_ROLL_ZK = 0.9, JB_FLOAT = 25, JB_SINK = 1.5;   // (ZK: keel up, her deck and cabin dragged through the water - damped near critical)
+function jbRoll(j, want, dt, keel) {
+  const L = storyBoatSize(j)[0] / UPM, w0 = 2 * Math.PI / (JB_ROLL_T + JB_ROLL_TM * L), vs = Math.max(0.3, DW.cap || 1);
+  let rel = j.a - want; rel -= 2 * Math.PI * Math.round(rel / (2 * Math.PI));
+  const ar = Math.abs(rel), sg = rel < 0 ? -1 : 1;
+  const gz = keel ? Math.sin(ar) : ar <= vs ? Math.sin(Math.PI * ar / vs) : -Math.sin(Math.PI * (ar - vs) / (Math.PI - vs));
+  const acc = -sg * 0.5 * w0 * w0 * gz - 2 * (keel ? JB_ROLL_ZK : JB_ROLL_Z) * w0 * (j.av || 0);
+  j.av = (j.av || 0) + acc * dt; j.a += j.av * dt;
+}
 // rolled right over by a wave (s: the way it goes over) - capsized: floating keel up, then going down slowly (stepJetboat), foam where it went over;
 // not hurt (its hp kept): not burnt, only upside down
 function jetboatCapsize(j, s) {
   if (j.state !== 'run' || netGuestHold()) return;
   j.state = 'sink'; j.capsized = 1; j.capT = 0; j.capDir = s < 0 ? -1 : 1; j.air = false;
+  if ((j.av || 0) * j.capDir < 1.2) j.av = j.capDir * 1.2;        // (going over: past her vanishing angle she keeps turning that way)
   if (!SIM_ONLY) { dwFoamBurst(j.x, j.y, storyBoatSize(j)[0]); sound('splash', j.x, 0.6); }
 }
 let jbArt = null;
