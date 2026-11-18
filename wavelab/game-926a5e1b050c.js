@@ -7956,16 +7956,22 @@ function dwFoamFrom(w, dt) {
     // (its leading edge - the lip's foremost point, 7 to 10: where a lip that hooks back under itself throws its water from, not its end inside the tube)
     const fi = dwLead(w);
     const fx = dwPt(w, fi)[0];
-    // (user 12:07, ref-tip-foam-nov18: "the TIP must always have foam, its the one that is generating it") a cap of churned foam on the leading edge
-    // itself, going on with the wave and made again all the time
-    // (stuck on its outline from the lip's end round its front: points 8 to past its leading edge)
-    { const a = 8 * DW_SUB, b = (Math.max(fi, 8.5) + 1.2) * DW_SUB;
-      for (let n = dfN(dt * H / U * 30); n > 0; n--) dwFoamStick(w, a + (b - a) * dfR(), dfRnd(0, 0.03) * H, dfRnd(0.02, 0.05) * H, dfRnd(0.25, 0.6)); }
+    // (user 12:07, ref-tip-foam-nov18: "the TIP must always have foam, its the one that is generating it"; 13:35, ref-foam-taper-nov18: "it should
+    // be bigger at the tip and thinner at the end on the 'back' of the wave") THE LIP'S FOAM, stuck on its outline from the lip's end (point 8) round
+    // its front and over its top to past the crest (point 13): made where the water pours - the most, the biggest and the deepest at the tip, fewer,
+    // smaller and closer to the surface the further back along it (f: 0 at the tip .. 1 at its end)
+    { const a = 8 * DW_SUB, b = 13 * DW_SUB;
+      for (let n = dfN(dt * H / U * 45); n > 0; n--) { const f = Math.pow(dfR(), 1.7), q = Math.pow(1 - f, 1.5), r = (0.012 + 0.06 * q) * H;
+        dwFoamStick(w, a + (b - a) * f, dfRnd(-0.45, 0.7) * r, r, dfRnd(0.25, 0.6)); } }   // (some a little out past the surface: a broken, lumpy edge)
+    // (user 13:35, ref-foam-taper-nov18 A B C: "we want foam that comes off due to the movement and wind") bits of it torn off the lip's top by its
+    // going and the wind: thrown up a little, carried back over the crest, falling back onto it (drops - k 0 - landing as white water)
+    for (let n = dfN(dt * H / U * 16); n > 0; n--) { const f = Math.pow(dfR(), 1.4), p = at(8.5 + f * 2.5), y = dwTopY(p[0]);
+      dwFoamAdd(0, p[0], y - dfRnd(0.02, 0.05) * H, c * dfRnd(0.3, 0.75) + wind * 0.5, -dfRnd(0.3, 0.8) * w.c * (1 - 0.5 * f), dfRnd(0.015, 0.04) * H * (1 - 0.5 * f), dfRnd(1, 2)); }
     // (user 11:30, ref-foam-on-top-nov18: "the foam should go on the top of the wave because of the movement ... there is no foam there [inside
     // the tube] because it gets pushed to the top of the wave"; 12:15, ref-no-drops-nov18: "these 'water drops' at the crisp of the wave ... should
     // not exist" - no drops off the lip: its foam stays on it)
     // white water made at the tip riding the lip's top back over the crest (green): slower than the wave, so it slides back along it
-    for (let n = dfN(dt * H / U * 14); n > 0; n--) { const p = at(fi + dfR() * Math.max(1, 10.5 - fi)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.35, 0.7), 0, dfRnd(0.02, 0.045) * H, dfRnd(1.5, 3)); }
+    for (let n = dfN(dt * H / U * 8); n > 0; n--) { const p = at(fi + dfR() * Math.max(1, 10.5 - fi)); dwFoamAdd(2, p[0], dwTopY(p[0]), c * dfRnd(0.35, 0.7), 0, dfRnd(0.012, 0.03) * H, dfRnd(1.2, 2.4)); }
     // mist off the lip's back, the wind lifting it back over the crest
     for (let n = dfN(dt * H / U * 4); n > 0; n--) { const p = at(fi + dfR() * (11 - fi));
       dwFoamAdd(1, p[0], dwYAt(w, p[0], p[1]) - dfRnd(0, 0.04) * H, c * dfRnd(0.2, 0.6) + wind * 0.4 - w.dir * dfRnd(0, 0.25) * w.c, -dfRnd(0.05, 0.25) * w.c, dfRnd(0.02, 0.05) * H, dfRnd(1.5, 3.5)); }
@@ -9470,7 +9476,7 @@ const netGuestHold = () => NET.role === 'guest' && !NET.applying;
    commands as they happen and its control state 15 times a second. The host closing ends it for everyone. */
 const LINK = { peer: null, conn: null, conns: new Map(), code: '', state: 'off', msg: '', acc: 0, link: '', hosting: false, nextId: 1, players: [], myId: 0, flags: null, mode: 'duel', live: false, cpu: [false, false], tries: 0 };
 const GAME_VERSION = 1070;                  // (the "Built: Version N" of the commit: on the perf panel, so a device's copy can be told from the latest - user Oct 27)
-const BUILD = 'NOV 18 14:34';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
+const BUILD = 'NOV 18 14:39';                 // (when this copy was made: on the menu, to tell an old saved copy from the new one)
 const PEER_PREFIX = 'battleship-duel-v1-';
 // how two screens find a way to each other through home routers and phone networks: several public STUN servers
 // (most links need only these) and PeerJS's own relays for when no direct way is found (Oct 24: an iPad and a phone
